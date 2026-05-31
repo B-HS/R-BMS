@@ -1,0 +1,31 @@
+[package]
+name = "rbms-player"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "rbms-player"
+path = "src/main.rs"
+
+[dependencies]
+rbms-model = { workspace = true }
+rbms-parser = { workspace = true }
+rbms-chart = { workspace = true }
+rbms-render = { workspace = true }
+rbms-judge = { workspace = true }
+rbms-ir = { workspace = true }
+rbms-play = { workspace = true }
+rbms-audio = { workspace = true }
+rbms-table = { workspace = true }
+winit = "0.30.13"
+pollster = "0.4.0"
+wgpu = "29.0.3"
+bytemuck = { version = "1.25.0", features = ["derive"] }
+image = { version = "0.25.10", default-features = false, features = ["png", "bmp", "jpeg"] }
+serde = { version = "1.0.228", features = ["derive"] }
+ron = "0.12.1"
+rfd = "0.15"
+memory-stats = "1.2.0"
+sha2 = { workspace = true }

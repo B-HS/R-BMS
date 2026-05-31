@@ -1,0 +1,149 @@
+name: release
+
+# 배포(prod) 브랜치 중심. 세 가지 경로:
+#  1) prod 머지     — `prod`에 push되면 patch 자동 bump → 빌드 → 릴리스.
+#  2) 수동 bump     — Actions → "release" → Run workflow, bump(patch/minor/major) 선택.
+#  3) 수동 태그     — `v1.2.3` 태그 push → 그 태그로 빌드 → 릴리스.
+on:
+  push:
+    branches: [prod]
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Semver bump'
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+permissions:
+  contents: write
+
+jobs:
+  # --- Auto version: prod push 또는 수동 dispatch. 태그 push 시엔 skip(이미 버전 확정). ---
+  version:
+    if: github.ref_type != 'tag'
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.bump.outputs.tag }}
+      version: ${{ steps.bump.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: bump
+        env:
+          BUMP: ${{ github.event.inputs.bump || 'patch' }}
+        run: |
+          set -euo pipefail
+          latest=$(git tag -l 'v*.*.*' --sort=-v:refname | head -n1)
+          [ -z "$latest" ] && latest="v0.0.0"
+          ver="${latest#v}"
+          IFS=. read -r MA MI PA <<< "$ver"
+          case "$BUMP" in
+            major) MA=$((MA+1)); MI=0; PA=0 ;;
+            minor) MI=$((MI+1)); PA=0 ;;
+            patch|*) PA=$((PA+1)) ;;
+          esac
+          new="$MA.$MI.$PA"; tag="v$new"
+          echo "next: $tag (from $latest)"
+          # Update only the first `version = "x.y.z"` (the [workspace.package] one) in root Cargo.toml.
+          # perl is portable (works the same on the runner and locally), unlike GNU-only `sed 0,/re/`.
+          perl -i -pe 'if(!$d && /^version = "\d+\.\d+\.\d+"/){ s//version = "'"$new"'"/; $d=1 }' Cargo.toml
+          grep -nE '^version = ' Cargo.toml | head -1
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Cargo.toml
+          git commit -m "release: $tag"
+          git tag "$tag"
+          git push origin "HEAD:${GITHUB_REF_NAME}" --follow-tags
+          echo "version=$new" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag"     >> "$GITHUB_OUTPUT"
+
+  build-macos:
+    needs: [version]
+    if: always() && needs.version.result != 'failure'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.tag || github.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: Build universal binary
+        run: |
+          set -euo pipefail
+          cargo build --release -p rbms-player --target aarch64-apple-darwin
+          cargo build --release -p rbms-player --target x86_64-apple-darwin
+          mkdir -p dist
+          lipo -create -output dist/rbms-player \
+            target/aarch64-apple-darwin/release/rbms-player \
+            target/x86_64-apple-darwin/release/rbms-player
+          chmod +x dist/rbms-player
+          # lipo invalidates the per-arch ad-hoc signatures; re-sign ad-hoc so the universal
+          # binary RUNS on Apple Silicon (arm64 refuses unsigned code). NOT notarized — users
+          # still clear Gatekeeper quarantine on first run (see docs/ci-release.md §5).
+          codesign --force --sign - --timestamp=none dist/rbms-player
+          codesign --verify --verbose dist/rbms-player || true
+          cp LICENSE dist/ 2>/dev/null || true
+          cp README.md dist/ 2>/dev/null || true
+          cd dist && tar -czf rbms-macos-universal.tar.gz rbms-player $(ls LICENSE README.md 2>/dev/null || true)
+          shasum -a 256 rbms-macos-universal.tar.gz rbms-player > rbms-macos-universal.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: |
+            dist/rbms-macos-universal.tar.gz
+            dist/rbms-macos-universal.sha256
+
+  build-windows:
+    needs: [version]
+    if: always() && needs.version.result != 'failure'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.tag || github.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --release -p rbms-player
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item target/release/rbms-player.exe dist/
+          if (Test-Path LICENSE)  { Copy-Item LICENSE  dist/ }
+          if (Test-Path README.md){ Copy-Item README.md dist/ }
+          Compress-Archive -Path dist/* -DestinationPath rbms-windows-x64.zip -Force
+          # SHA-256 of the artifacts (would feed the backend client_build allowlist; see docs/backend).
+          (Get-FileHash rbms-windows-x64.zip -Algorithm SHA256).Hash | Out-File -Encoding ascii rbms-windows-x64.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            rbms-windows-x64.zip
+            rbms-windows-x64.sha256
+
+  release:
+    needs: [version, build-macos, build-windows]
+    if: always() && needs.build-macos.result == 'success' && needs.build-windows.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag || github.ref_name }}
+          name: ${{ needs.version.outputs.tag || github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            artifacts/macos/rbms-macos-universal.tar.gz
+            artifacts/macos/rbms-macos-universal.sha256
+            artifacts/windows/rbms-windows-x64.zip
+            artifacts/windows/rbms-windows-x64.sha256

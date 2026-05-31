@@ -1,0 +1,15 @@
+[package]
+name = "rbms-cli"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "rbms-cli"
+path = "src/main.rs"
+
+[dependencies]
+rbms-model = { workspace = true }
+rbms-parser = { workspace = true }
+rbms-chart = { workspace = true }

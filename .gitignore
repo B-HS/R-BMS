@@ -1,0 +1,12 @@
+/target
+**/*.rs.bk
+Cargo.lock
+.DS_Store
+/assets/songs
+*.log
+
+# Internal working docs / AI process — kept local, not part of the public repo
+/docs/
+/CLAUDE.md
+/ROADMAP.md
+start.sh

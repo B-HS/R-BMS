@@ -1,0 +1,12 @@
+[package]
+name = "rbms-parser"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rbms-model = { workspace = true }
+md-5 = { workspace = true }
+sha2 = { workspace = true }
+encoding_rs = { workspace = true }

@@ -1,0 +1,14 @@
+[package]
+name = "rbms-play"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rbms-model = { workspace = true }
+rbms-chart = { workspace = true }
+rbms-judge = { workspace = true }
+
+[dev-dependencies]
+rbms-parser.workspace = true

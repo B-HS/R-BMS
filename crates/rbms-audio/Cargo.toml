@@ -1,0 +1,11 @@
+[package]
+name = "rbms-audio"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+cpal = "0.17.3"
+rtrb = "0.3.4"
+symphonia = { version = "0.5", features = ["wav", "pcm", "ogg", "vorbis", "flac", "mp3", "isomp4"] }

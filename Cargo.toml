@@ -1,0 +1,39 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/rbms-model",
+    "crates/rbms-parser",
+    "crates/rbms-chart",
+    "crates/rbms-judge",
+    "crates/rbms-audio",
+    "crates/rbms-render",
+    "crates/rbms-play",
+    "crates/rbms-ir",
+    "crates/rbms-table",
+    "apps/rbms-cli",
+    "apps/rbms-player",
+]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+license = "GPL-3.0-or-later"
+rust-version = "1.95"
+
+[workspace.dependencies]
+rbms-model = { path = "crates/rbms-model" }
+rbms-parser = { path = "crates/rbms-parser" }
+rbms-chart = { path = "crates/rbms-chart" }
+rbms-judge = { path = "crates/rbms-judge" }
+rbms-audio = { path = "crates/rbms-audio" }
+rbms-render = { path = "crates/rbms-render" }
+rbms-play = { path = "crates/rbms-play" }
+rbms-ir = { path = "crates/rbms-ir" }
+rbms-table = { path = "crates/rbms-table" }
+md-5 = "0.10"
+sha2 = "0.10"
+encoding_rs = "0.8"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
