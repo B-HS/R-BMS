@@ -111,6 +111,8 @@ fn main() {
         detail: SelectDetail::Song(Box::new(detail)),
         modal,
         score_graph: true,
+        search: None,
+        sort: "DEFAULT",
     };
 
     let (w, h) = (1280u32, 720u32);

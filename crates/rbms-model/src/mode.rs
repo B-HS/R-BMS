@@ -55,4 +55,354 @@ mod tests {
         assert_eq!(Mode::BEAT_14K.lane_of_raw(9), Some(8));
         assert_eq!(Mode::BEAT_14K.lane_of_raw(17), Some(14));
     }
+
+    // ---- exhaustive lane_of_raw maps for every mode, raw 0..18 ----
+
+    #[test]
+    fn beat_7k_lane_of_raw_full_map() {
+        let expected: [Option<usize>; 18] = [
+            Some(0),
+            Some(1),
+            Some(2),
+            Some(3),
+            Some(4),
+            Some(7),
+            None,
+            Some(5),
+            Some(6),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ];
+        for raw in 0..18 {
+            assert_eq!(Mode::BEAT_7K.lane_of_raw(raw), expected[raw], "raw={raw}");
+        }
+    }
+
+    #[test]
+    fn beat_5k_lane_of_raw_full_map() {
+        let expected: [Option<usize>; 18] = [
+            Some(0),
+            Some(1),
+            Some(2),
+            Some(3),
+            Some(4),
+            Some(5),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ];
+        for raw in 0..18 {
+            assert_eq!(Mode::BEAT_5K.lane_of_raw(raw), expected[raw], "raw={raw}");
+        }
+    }
+
+    #[test]
+    fn beat_10k_lane_of_raw_full_map() {
+        let expected: [Option<usize>; 18] = [
+            Some(0),
+            Some(1),
+            Some(2),
+            Some(3),
+            Some(4),
+            Some(5),
+            None,
+            None,
+            None,
+            Some(6),
+            Some(7),
+            Some(8),
+            Some(9),
+            Some(10),
+            Some(11),
+            None,
+            None,
+            None,
+        ];
+        for raw in 0..18 {
+            assert_eq!(Mode::BEAT_10K.lane_of_raw(raw), expected[raw], "raw={raw}");
+        }
+    }
+
+    #[test]
+    fn beat_14k_lane_of_raw_full_map() {
+        let expected: [Option<usize>; 18] = [
+            Some(0),
+            Some(1),
+            Some(2),
+            Some(3),
+            Some(4),
+            Some(7),
+            None,
+            Some(5),
+            Some(6),
+            Some(8),
+            Some(9),
+            Some(10),
+            Some(11),
+            Some(12),
+            Some(15),
+            None,
+            Some(13),
+            Some(14),
+        ];
+        for raw in 0..18 {
+            assert_eq!(Mode::BEAT_14K.lane_of_raw(raw), expected[raw], "raw={raw}");
+        }
+    }
+
+    #[test]
+    fn popn_9k_lane_of_raw_full_map() {
+        let expected: [Option<usize>; 18] = [
+            Some(0),
+            Some(1),
+            Some(2),
+            Some(3),
+            Some(4),
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(5),
+            Some(6),
+            Some(7),
+            Some(8),
+            None,
+            None,
+            None,
+            None,
+        ];
+        for raw in 0..18 {
+            assert_eq!(Mode::POPN_9K.lane_of_raw(raw), expected[raw], "raw={raw}");
+        }
+    }
+
+    // ---- out-of-range raw indices ----
+
+    #[test]
+    fn lane_of_raw_out_of_range_is_none_for_all_modes() {
+        for mode in Mode::ALL {
+            assert_eq!(mode.lane_of_raw(18), None, "{}", mode.name);
+            assert_eq!(mode.lane_of_raw(19), None, "{}", mode.name);
+            assert_eq!(mode.lane_of_raw(100), None, "{}", mode.name);
+            assert_eq!(mode.lane_of_raw(usize::MAX), None, "{}", mode.name);
+        }
+    }
+
+    // ---- lane_of_raw invariants ----
+
+    #[test]
+    fn lane_of_raw_never_exceeds_key() {
+        for mode in Mode::ALL {
+            for raw in 0..18 {
+                if let Some(lane) = mode.lane_of_raw(raw) {
+                    assert!(lane < mode.key, "{} raw={raw} lane={lane} key={}", mode.name, mode.key);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn lane_of_raw_matches_table_within_key() {
+        // lane_of_raw is exactly: table value if 0 <= v < key, else None.
+        for mode in Mode::ALL {
+            for raw in 0..18 {
+                let v = mode.channel_assign[raw];
+                let want = if v >= 0 && (v as usize) < mode.key { Some(v as usize) } else { None };
+                assert_eq!(mode.lane_of_raw(raw), want, "{} raw={raw}", mode.name);
+            }
+        }
+    }
+
+    #[test]
+    fn lane_of_raw_logical_lanes_cover_full_key_range_once() {
+        // Every logical lane 0..key must be produced by exactly one raw index.
+        for mode in Mode::ALL {
+            let mut produced: Vec<usize> = (0..18).filter_map(|raw| mode.lane_of_raw(raw)).collect();
+            produced.sort_unstable();
+            let expected: Vec<usize> = (0..mode.key).collect();
+            assert_eq!(produced, expected, "{}", mode.name);
+        }
+    }
+
+    // ---- is_scratch ----
+
+    #[test]
+    fn is_scratch_matches_scratch_slice_for_all_modes() {
+        for mode in Mode::ALL {
+            for lane in 0..(mode.key + 4) {
+                assert_eq!(mode.is_scratch(lane), mode.scratch.contains(&lane), "{} lane={lane}", mode.name);
+            }
+        }
+    }
+
+    #[test]
+    fn is_scratch_known_values() {
+        assert!(Mode::BEAT_7K.is_scratch(7));
+        assert!(!Mode::BEAT_7K.is_scratch(0));
+        assert!(!Mode::BEAT_7K.is_scratch(6));
+        assert!(Mode::BEAT_5K.is_scratch(5));
+        assert!(!Mode::BEAT_5K.is_scratch(0));
+        assert!(Mode::BEAT_10K.is_scratch(5));
+        assert!(Mode::BEAT_10K.is_scratch(11));
+        assert!(!Mode::BEAT_10K.is_scratch(0));
+        assert!(Mode::BEAT_14K.is_scratch(7));
+        assert!(Mode::BEAT_14K.is_scratch(15));
+        assert!(!Mode::BEAT_14K.is_scratch(0));
+    }
+
+    #[test]
+    fn popn_has_no_scratch_lanes() {
+        assert!(Mode::POPN_9K.scratch.is_empty());
+        for lane in 0..20 {
+            assert!(!Mode::POPN_9K.is_scratch(lane), "lane={lane}");
+        }
+    }
+
+    #[test]
+    fn is_scratch_out_of_range_lane_is_false() {
+        for mode in Mode::ALL {
+            assert!(!mode.is_scratch(usize::MAX), "{}", mode.name);
+            assert!(!mode.is_scratch(1000), "{}", mode.name);
+        }
+    }
+
+    #[test]
+    fn scratch_lanes_are_within_key_bounds() {
+        for mode in Mode::ALL {
+            for &s in mode.scratch {
+                assert!(s < mode.key, "{} scratch lane {s} >= key {}", mode.name, mode.key);
+            }
+        }
+    }
+
+    #[test]
+    fn scratch_lanes_are_reachable_via_lane_of_raw() {
+        // A scratch lane is a real logical lane, so some raw must map onto it.
+        for mode in Mode::ALL {
+            for &s in mode.scratch {
+                let reachable = (0..18).any(|raw| mode.lane_of_raw(raw) == Some(s));
+                assert!(reachable, "{} scratch lane {s} unreachable", mode.name);
+            }
+        }
+    }
+
+    // ---- channel_assign self-consistency ----
+
+    #[test]
+    fn channel_assign_p1_group_values_below_key() {
+        // Per the doc contract: every non -1 value in the P1 group (raw 0..9)
+        // must be a valid lane (< key) for that mode.
+        for mode in Mode::ALL {
+            for raw in 0..9 {
+                let v = mode.channel_assign[raw];
+                if v != -1 {
+                    assert!(v >= 0, "{} raw={raw} negative-but-not-(-1) value {v}", mode.name);
+                    assert!((v as usize) < mode.key, "{} P1 raw={raw} value {v} >= key {}", mode.name, mode.key);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn channel_assign_no_duplicate_logical_lanes() {
+        // Within the lanes a mode actually owns (value < key), no logical lane repeats.
+        for mode in Mode::ALL {
+            let mut seen: Vec<i8> = Vec::new();
+            for &v in mode.channel_assign.iter() {
+                if v >= 0 && (v as usize) < mode.key {
+                    assert!(!seen.contains(&v), "{} duplicate logical lane {v}", mode.name);
+                    seen.push(v);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn channel_assign_negative_values_are_exactly_minus_one() {
+        // The contract uses -1 (and only -1) as the "ignored" sentinel.
+        for mode in Mode::ALL {
+            for &v in mode.channel_assign.iter() {
+                assert!(v == -1 || v >= 0, "{} unexpected negative sentinel {v}", mode.name);
+            }
+        }
+    }
+
+    // ---- Mode constant invariants ----
+
+    #[test]
+    fn all_modes_have_distinct_names() {
+        let mut names: Vec<&str> = Mode::ALL.iter().map(|m| m.name).collect();
+        let total = names.len();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), total);
+    }
+
+    #[test]
+    fn all_constant_has_expected_membership() {
+        assert_eq!(Mode::ALL.len(), 5);
+        assert!(Mode::ALL.contains(&Mode::BEAT_7K));
+        assert!(Mode::ALL.contains(&Mode::BEAT_5K));
+        assert!(Mode::ALL.contains(&Mode::BEAT_10K));
+        assert!(Mode::ALL.contains(&Mode::BEAT_14K));
+        assert!(Mode::ALL.contains(&Mode::POPN_9K));
+    }
+
+    #[test]
+    fn player_count_is_one_or_two() {
+        for mode in Mode::ALL {
+            assert!(mode.player == 1 || mode.player == 2, "{} player={}", mode.name, mode.player);
+        }
+    }
+
+    #[test]
+    fn two_player_modes_have_two_scratch_lanes() {
+        for mode in Mode::ALL {
+            if mode.player == 2 && !mode.scratch.is_empty() {
+                assert_eq!(mode.scratch.len(), 2, "{}", mode.name);
+            }
+        }
+    }
+
+    #[test]
+    fn mode_equality_is_value_based() {
+        assert_eq!(Mode::BEAT_7K, Mode::BEAT_7K);
+        assert_ne!(Mode::BEAT_7K, Mode::BEAT_5K);
+        assert_ne!(Mode::BEAT_10K, Mode::BEAT_14K);
+    }
+
+    #[test]
+    fn key_counts_match_mode_names() {
+        assert_eq!(Mode::BEAT_7K.key, 8);
+        assert_eq!(Mode::BEAT_5K.key, 6);
+        assert_eq!(Mode::BEAT_10K.key, 12);
+        assert_eq!(Mode::BEAT_14K.key, 16);
+        assert_eq!(Mode::POPN_9K.key, 9);
+    }
+
+    #[test]
+    fn lane_of_raw_is_deterministic() {
+        for mode in Mode::ALL {
+            for raw in 0..20 {
+                assert_eq!(mode.lane_of_raw(raw), mode.lane_of_raw(raw), "{} raw={raw}", mode.name);
+            }
+        }
+    }
 }

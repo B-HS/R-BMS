@@ -2,10 +2,9 @@ use rbms_model::{Model, NoteKind};
 
 use crate::Judge;
 use crate::gauge::{ClearType, Gauge, GaugeKind, clear_lamp};
-use crate::windows::JudgeWindows;
+use crate::windows::{JudgeWindows, rank_to_judgerank};
 
 const LN_MARGIN: i64 = 200_000;
-const LN_END: JudgeWindows = JudgeWindows::SEVENKEY_LN_END;
 
 struct JNote {
     head_us: i64,
@@ -40,6 +39,10 @@ fn worse(a: Judge, b: Judge) -> Judge {
 pub struct JudgeEngine {
     lanes: Vec<Lane>,
     windows: JudgeWindows,
+    /// LN/CN release window. Derived from the chart's mode + `#RANK` (and scaled by JUDGE WIDTH)
+    /// alongside `windows`, so long-note releases respect rank/width just like note heads — not a
+    /// fixed constant. Defaults to `SEVENKEY_LN_END` for the mode-less constructors.
+    ln_end: JudgeWindows,
     pub combo: u32,
     pub max_combo: u32,
     pub counts: [u32; 6],
@@ -87,6 +90,7 @@ impl JudgeEngine {
         JudgeEngine {
             lanes,
             windows,
+            ln_end: JudgeWindows::SEVENKEY_LN_END,
             combo: 0,
             max_combo: 0,
             counts: [0; 6],
@@ -125,6 +129,10 @@ impl JudgeEngine {
             }
         }
         let mut engine = Self::from_pairs(per_lane, windows);
+        // LN release window follows the same mode + #RANK policy as the note window (the caller
+        // passes the already-scaled note window in); previously this was a hardcoded 100% constant,
+        // so long-note releases ignored both #RANK and JUDGE WIDTH.
+        engine.ln_end = JudgeWindows::ln_end_for_mode(&model.mode).scaled(rank_to_judgerank(model.meta.rank));
         engine.set_gauge(GaugeKind::Normal, model.meta.total);
         engine
     }
@@ -137,6 +145,12 @@ impl JudgeEngine {
     /// Call before play begins.
     pub fn set_windows(&mut self, windows: JudgeWindows) {
         self.windows = windows;
+    }
+
+    /// Replace the LN/CN release window (kept in step with [`set_windows`](Self::set_windows) when
+    /// the user changes JUDGE WIDTH, so note and LN leniency scale together).
+    pub fn set_ln_end(&mut self, ln_end: JudgeWindows) {
+        self.ln_end = ln_end;
     }
 
     pub fn total_notes(&self) -> u32 {
@@ -214,7 +228,7 @@ impl JudgeEngine {
         let end = note.end_us.unwrap();
         let head_judge = note.head_judge.unwrap_or(Judge::Poor);
         let dm = end - release_us;
-        let end_judge = LN_END.judge(dm).unwrap_or(Judge::Poor);
+        let end_judge = self.ln_end.judge(dm).unwrap_or(Judge::Poor);
         let final_judge = worse(head_judge, end_judge);
         let note = &mut self.lanes[lane].notes[idx];
         note.judged = true;
@@ -228,6 +242,7 @@ impl JudgeEngine {
     /// MISS, and finalise held LNs not released within the margin.
     pub fn update(&mut self, now_us: i64) {
         let miss_bound = self.windows.bd.0;
+        let ln_end = self.ln_end;
         let mut events: Vec<Judge> = Vec::new();
         for l in &mut self.lanes {
             while l.cursor < l.notes.len() {
@@ -239,7 +254,7 @@ impl JudgeEngine {
                 if n.holding {
                     let end = n.end_us.unwrap();
                     if now_us > end + LN_MARGIN {
-                        let end_judge = LN_END.judge(end - now_us).unwrap_or(Judge::Poor);
+                        let end_judge = ln_end.judge(end - now_us).unwrap_or(Judge::Poor);
                         let final_judge = worse(n.head_judge.unwrap_or(Judge::Poor), end_judge);
                         n.judged = true;
                         n.holding = false;

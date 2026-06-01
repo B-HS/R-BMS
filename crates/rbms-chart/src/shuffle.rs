@@ -488,4 +488,403 @@ mod tests {
         }
         assert_eq!(head_lane, tail_lane, "LN head and tail end up in the same lane");
     }
+
+    // -----------------------------------------------------------------------
+    // shared helpers
+    // -----------------------------------------------------------------------
+
+    fn dp_model(bms: &[u8]) -> Model {
+        to_model(&parse(bms), Mode::BEAT_14K)
+    }
+
+    /// (total LongStart count, total LongEnd count) across the whole chart.
+    fn ln_kind_counts(m: &Model) -> (usize, usize) {
+        let mut starts = 0;
+        let mut ends = 0;
+        for tl in &m.timelines {
+            for slot in tl.notes.iter().flatten() {
+                match slot.kind {
+                    NoteKind::LongStart { .. } => starts += 1,
+                    NoteKind::LongEnd { .. } => ends += 1,
+                    _ => {}
+                }
+            }
+        }
+        (starts, ends)
+    }
+
+    /// For single-LN charts: returns true if the ordered head lanes equal the ordered tail lanes.
+    fn ln_pairs_aligned(m: &Model) -> bool {
+        let mut heads = Vec::new();
+        let mut tails = Vec::new();
+        for tl in &m.timelines {
+            for (lane, slot) in tl.notes.iter().enumerate() {
+                match slot.as_ref().map(|n| &n.kind) {
+                    Some(NoteKind::LongStart { .. }) => heads.push(lane),
+                    Some(NoteKind::LongEnd { .. }) => tails.push(lane),
+                    _ => {}
+                }
+            }
+        }
+        heads == tails
+    }
+
+    /// Number of timelines whose scratch lane (7 in 7K) holds a note.
+    fn scratch_rows(m: &Model) -> usize {
+        m.timelines.iter().filter(|tl| tl.notes.get(7).map(|s| s.is_some()).unwrap_or(false)).count()
+    }
+
+    // -----------------------------------------------------------------------
+    // NoteOption::from_str / label round trips
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn from_str_round_trips_every_label() {
+        for opt in NoteOption::ALL {
+            assert_eq!(NoteOption::from_str(opt.label()), opt, "label {} should parse back", opt.label());
+        }
+    }
+
+    #[test]
+    fn from_str_is_case_insensitive_and_accepts_aliases() {
+        assert_eq!(NoteOption::from_str("mirror"), NoteOption::Mirror);
+        assert_eq!(NoteOption::from_str("S-RANDOM"), NoteOption::SRandom);
+        assert_eq!(NoteOption::from_str("srandom"), NoteOption::SRandom);
+        assert_eq!(NoteOption::from_str("rrandom"), NoteOption::RRandom);
+        assert_eq!(NoteOption::from_str("hrandom"), NoteOption::HRandom);
+        assert_eq!(NoteOption::from_str("allscratch"), NoteOption::AllScratch);
+        assert_eq!(NoteOption::from_str("ALL-SCR"), NoteOption::AllScratch);
+    }
+
+    #[test]
+    fn from_str_unknown_is_off() {
+        assert_eq!(NoteOption::from_str("nonsense"), NoteOption::Off);
+        assert_eq!(NoteOption::from_str(""), NoteOption::Off);
+        assert_eq!(NoteOption::from_str("OFF"), NoteOption::Off);
+    }
+
+    #[test]
+    fn all_array_lists_every_variant_once() {
+        assert_eq!(NoteOption::ALL.len(), 8);
+        let mut seen = NoteOption::ALL.to_vec();
+        seen.dedup();
+        assert_eq!(seen.len(), 8, "ALL has no duplicates");
+    }
+
+    // -----------------------------------------------------------------------
+    // lane_permutation: per-mode structural guarantees
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn mirror_fully_reverses_popn_lanes() {
+        // POPN has no scratch lane, so MIRROR reverses every one of the 9 lanes.
+        let perm = lane_permutation(NoteOption::Mirror, Mode::POPN_9K, 0);
+        assert_eq!(perm, vec![8, 7, 6, 5, 4, 3, 2, 1, 0]);
+    }
+
+    #[test]
+    fn mirror_reverses_5k_keeping_scratch_fixed() {
+        let perm = lane_permutation(NoteOption::Mirror, Mode::BEAT_5K, 0);
+        assert_eq!(perm, vec![4, 3, 2, 1, 0, 5], "lane 5 (scratch) is fixed");
+    }
+
+    #[test]
+    fn mirror_is_an_involution_on_key_lanes() {
+        // Applying MIRROR's permutation twice returns identity (it is its own inverse).
+        let perm = lane_permutation(NoteOption::Mirror, Mode::BEAT_7K, 0);
+        for l in 0..8 {
+            assert_eq!(perm[perm[l]], l, "mirror twice is identity on lane {l}");
+        }
+    }
+
+    #[test]
+    fn rotate_is_a_derangement_on_key_lanes() {
+        // ROTATE shifts every key lane by one, so no key lane maps to itself; only scratch is fixed.
+        let perm = lane_permutation(NoteOption::Rotate, Mode::BEAT_7K, 0);
+        for l in 0..7 {
+            assert_ne!(perm[l], l, "key lane {l} must move under ROTATE");
+        }
+        assert_eq!(perm[7], 7, "scratch fixed");
+    }
+
+    #[test]
+    fn every_perm_option_is_a_bijection_leaving_scratch_fixed() {
+        for opt in [NoteOption::Mirror, NoteOption::Random, NoteOption::RRandom, NoteOption::Rotate] {
+            for &mode in &[Mode::BEAT_7K, Mode::BEAT_5K, Mode::POPN_9K, Mode::BEAT_14K, Mode::BEAT_10K] {
+                let perm = lane_permutation(opt, mode, 31337);
+                let mut sorted = perm.clone();
+                sorted.sort_unstable();
+                assert_eq!(sorted, (0..mode.key).collect::<Vec<_>>(), "{:?}/{} is a bijection", opt, mode.name);
+                for &s in mode.scratch {
+                    assert_eq!(perm[s], s, "{:?}/{}: scratch lane {s} fixed", opt, mode.name);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn dp_mirror_mirrors_each_side_independently() {
+        // 14K MIRROR reverses lanes 0..6 within P1 and 8..14 within P2, scratch 7 and 15 fixed.
+        let perm = lane_permutation(NoteOption::Mirror, Mode::BEAT_14K, 0);
+        assert_eq!(perm, vec![6, 5, 4, 3, 2, 1, 0, 7, 14, 13, 12, 11, 10, 9, 8, 15]);
+    }
+
+    #[test]
+    fn dp_perm_never_crosses_player_boundary() {
+        for opt in [NoteOption::Mirror, NoteOption::Random, NoteOption::RRandom, NoteOption::Rotate] {
+            let perm = lane_permutation(opt, Mode::BEAT_14K, 4242);
+            for lane in 0..16 {
+                assert_eq!(lane < 8, perm[lane] < 8, "{:?}: lane {lane} crossed sides to {}", opt, perm[lane]);
+            }
+        }
+    }
+
+    #[test]
+    fn off_is_identity_permutation() {
+        let perm = lane_permutation(NoteOption::Off, Mode::BEAT_7K, 12345);
+        assert_eq!(perm, (0..8).collect::<Vec<_>>(), "OFF leaves every lane in place");
+    }
+
+    #[test]
+    fn srandom_hrandom_allscratch_yield_identity_in_lane_permutation() {
+        // These are per-row options; lane_permutation returns identity for them (the real work is in apply).
+        for opt in [NoteOption::SRandom, NoteOption::HRandom, NoteOption::AllScratch] {
+            assert_eq!(lane_permutation(opt, Mode::BEAT_7K, 1), (0..8).collect::<Vec<_>>(), "{:?} is identity at the perm level", opt);
+        }
+    }
+
+    #[test]
+    fn lane_permutation_is_deterministic_for_every_random_option() {
+        for opt in [NoteOption::Random, NoteOption::RRandom] {
+            for seed in [0u64, 1, 7, 9999, u64::MAX] {
+                assert_eq!(lane_permutation(opt, Mode::BEAT_7K, seed), lane_permutation(opt, Mode::BEAT_7K, seed), "{:?}/{seed}", opt);
+            }
+        }
+    }
+
+    #[test]
+    fn rng_seed_zero_does_not_collapse() {
+        // The PRNG remaps a 0 seed to a nonzero constant, so RANDOM at seed 0 is still a real shuffle.
+        let perm = lane_permutation(NoteOption::Random, Mode::BEAT_7K, 0);
+        let mut sorted = perm.clone();
+        sorted.sort_unstable();
+        assert_eq!(sorted, (0..8).collect::<Vec<_>>(), "still a bijection at seed 0");
+    }
+
+    // -----------------------------------------------------------------------
+    // apply: count preservation across EVERY option and several modes
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn apply_off_is_a_noop() {
+        let base = model(b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:0101\r\n#00113:0011\r\n");
+        let lanes_before: Vec<_> = base.timelines.iter().map(|tl| tl.notes.iter().map(|s| s.is_some()).collect::<Vec<_>>()).collect();
+        let mut m = base.clone();
+        apply(&mut m, NoteOption::Off, 77);
+        let lanes_after: Vec<_> = m.timelines.iter().map(|tl| tl.notes.iter().map(|s| s.is_some()).collect::<Vec<_>>()).collect();
+        assert_eq!(lanes_before, lanes_after, "OFF must not move any note");
+    }
+
+    #[test]
+    fn apply_preserves_count_for_every_option_7k() {
+        let base = model(b"#BPM 130\r\n#WAV01 a.wav\r\n#00111:01010101\r\n#00113:00110011\r\n#00116:01000010\r\n#00118:00010001\r\n");
+        let before = note_count(&base);
+        assert!(before > 0);
+        for opt in NoteOption::ALL {
+            let mut m = base.clone();
+            apply(&mut m, opt, 123);
+            assert_eq!(note_count(&m), before, "{:?} preserves note count (7K)", opt);
+        }
+    }
+
+    #[test]
+    fn apply_preserves_count_for_every_option_5k() {
+        let base = to_model(
+            &parse(b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:01010101\r\n#00113:00110011\r\n#00116:01000010\r\n"),
+            Mode::BEAT_5K,
+        );
+        let before = note_count(&base);
+        for opt in NoteOption::ALL {
+            let mut m = base.clone();
+            apply(&mut m, opt, 88);
+            assert_eq!(note_count(&m), before, "{:?} preserves note count (5K)", opt);
+        }
+    }
+
+    #[test]
+    fn apply_preserves_count_for_every_option_popn() {
+        // POPN has no scratch; ALL-SCRATCH and H-RANDOM must still preserve the note count.
+        // POPN lanes 0-4 come from channels 11-15 (raw 0-4); lanes 5-8 from channels 21-24 (raw 10-13).
+        let base = to_model(
+            &parse(b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:0101\r\n#00112:0011\r\n#00113:0110\r\n#00114:1001\r\n#00115:0101\r\n#00121:1010\r\n#00122:0100\r\n"),
+            Mode::POPN_9K,
+        );
+        let before = note_count(&base);
+        assert!(before > 0);
+        for opt in NoteOption::ALL {
+            let mut m = base.clone();
+            apply(&mut m, opt, 55);
+            assert_eq!(note_count(&m), before, "{:?} preserves note count (POPN)", opt);
+        }
+    }
+
+    #[test]
+    fn apply_preserves_count_for_every_option_14k() {
+        let base = dp_model(b"#PLAYER 3\r\n#WAV01 a.wav\r\n#00111:01010101\r\n#00116:01000100\r\n#00121:00110011\r\n#00126:00010001\r\n#00128:01000010\r\n");
+        let before = note_count(&base);
+        for opt in NoteOption::ALL {
+            let mut m = base.clone();
+            apply(&mut m, opt, 2024);
+            assert_eq!(note_count(&m), before, "{:?} preserves note count (14K DP)", opt);
+        }
+    }
+
+    #[test]
+    fn apply_preserves_count_for_every_option_10k() {
+        let base = to_model(
+            &parse(b"#PLAYER 2\r\n#WAV01 a.wav\r\n#00111:01010101\r\n#00116:01000100\r\n#00121:00110011\r\n#00126:00010001\r\n"),
+            Mode::BEAT_10K,
+        );
+        let before = note_count(&base);
+        for opt in NoteOption::ALL {
+            let mut m = base.clone();
+            apply(&mut m, opt, 71);
+            assert_eq!(note_count(&m), before, "{:?} preserves note count (10K DP)", opt);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // apply: scratch lane is never moved by key shuffles
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn key_shuffles_keep_scratch_notes_on_scratch_lane() {
+        // Chart with scratch notes (ch16 -> lane 7) and key notes. MIRROR/RANDOM/ROTATE/RRANDOM keep
+        // the scratch column untouched: every original scratch row still has its scratch note.
+        let chart = b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:01010101\r\n#00116:01010101\r\n#00113:00110011\r\n";
+        let base = model(chart);
+        let scratch_before = scratch_rows(&base);
+        assert!(scratch_before > 0);
+        for opt in [NoteOption::Mirror, NoteOption::Random, NoteOption::Rotate, NoteOption::RRandom] {
+            let mut m = base.clone();
+            apply(&mut m, opt, 9);
+            assert_eq!(scratch_rows(&m), scratch_before, "{:?} must not move scratch notes", opt);
+        }
+    }
+
+    #[test]
+    fn hrandom_keeps_scratch_notes_on_scratch_lane() {
+        // H-RANDOM shuffles only key lanes; the scratch column count is invariant.
+        let chart = b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:01010101\r\n#00116:01010101\r\n#00113:00110011\r\n";
+        let base = model(chart);
+        let scratch_before = scratch_rows(&base);
+        let mut m = base.clone();
+        apply(&mut m, NoteOption::HRandom, 17);
+        assert_eq!(scratch_rows(&m), scratch_before, "H-RANDOM leaves scratch notes in place");
+    }
+
+    // -----------------------------------------------------------------------
+    // LN integrity under every shuffle
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn every_option_keeps_single_ln_head_and_tail_aligned() {
+        // One LN spanning a few rows mixed with normal notes; head and tail must remain co-lane.
+        let chart = b"#BPM 120\r\n#WAV01 a.wav\r\n#00151:01000001\r\n#00113:00100100\r\n#00112:01000010\r\n";
+        for opt in NoteOption::ALL {
+            let mut m = model(chart);
+            apply(&mut m, opt, 333);
+            assert!(ln_pairs_aligned(&m), "{:?} must keep the LN head/tail in one lane", opt);
+            assert_eq!(ln_kind_counts(&m), (1, 1), "{:?} preserves the LN head/tail pair", opt);
+        }
+    }
+
+    #[test]
+    fn srandom_preserves_count_with_open_ln_across_dense_rows() {
+        // An LN stays open across rows that also carry shuffling normal notes: count is preserved and
+        // the pin keeps the head/tail aligned.
+        let chart = b"#BPM 120\r\n#WAV01 a.wav\r\n#00151:01000001\r\n#00111:01010101\r\n#00113:01010101\r\n";
+        let base = model(chart);
+        let mut m = base.clone();
+        apply(&mut m, NoteOption::SRandom, 808);
+        assert_eq!(note_count(&m), note_count(&base));
+        assert!(ln_pairs_aligned(&m), "S-RANDOM keeps the open LN pinned");
+    }
+
+    // -----------------------------------------------------------------------
+    // determinism for the per-row options
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn all_options_are_deterministic_for_a_seed() {
+        let chart = b"#BPM 180\r\n#WAV01 a.wav\r\n#00111:01010101\r\n#00114:00010100\r\n#00116:01000010\r\n#00151:01000001\r\n";
+        for opt in NoteOption::ALL {
+            let mut a = model(chart);
+            let mut b = model(chart);
+            apply(&mut a, opt, 4321);
+            apply(&mut b, opt, 4321);
+            let pos = |m: &Model| -> Vec<Vec<bool>> {
+                m.timelines.iter().map(|tl| tl.notes.iter().map(|s| s.is_some()).collect()).collect()
+            };
+            assert_eq!(pos(&a), pos(&b), "{:?} must be deterministic for a fixed seed", opt);
+        }
+    }
+
+    #[test]
+    fn different_seeds_can_produce_different_random_layouts() {
+        // Sanity: RANDOM is seed-sensitive (not a constant permutation). At least one of a few seeds
+        // differs from seed 0 (5040 permutations make an all-collision essentially impossible).
+        let p0 = lane_permutation(NoteOption::Random, Mode::BEAT_7K, 0);
+        let differs = [1u64, 2, 3, 4, 5].iter().any(|&s| lane_permutation(NoteOption::Random, Mode::BEAT_7K, s) != p0);
+        assert!(differs, "RANDOM should vary across seeds");
+    }
+
+    // -----------------------------------------------------------------------
+    // robustness: dense / degenerate inputs do not panic
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn time_based_options_survive_fully_dense_rows() {
+        // Every key + scratch lane filled on every subdivision: more notes than fresh lanes after the
+        // anti-jack gate. Must not panic and must preserve the count.
+        let dense = b"#BPM 300\r\n#WAV01 a.wav\r\n#00111:01010101\r\n#00112:01010101\r\n#00113:01010101\r\n#00114:01010101\r\n#00115:01010101\r\n#00118:01010101\r\n#00119:01010101\r\n#00116:01010101\r\n";
+        let base = model(dense);
+        for opt in [NoteOption::HRandom, NoteOption::AllScratch, NoteOption::SRandom] {
+            let mut m = base.clone();
+            apply(&mut m, opt, 13);
+            assert_eq!(note_count(&m), note_count(&base), "{:?} on fully dense rows", opt);
+        }
+    }
+
+    #[test]
+    fn apply_on_empty_chart_does_not_panic() {
+        // No notes at all: every option is a no-op that leaves the (note-free) timelines intact.
+        let base = model(b"#BPM 120\r\n#WAV01 a.wav\r\n");
+        for opt in NoteOption::ALL {
+            let mut m = base.clone();
+            apply(&mut m, opt, 1);
+            assert_eq!(note_count(&m), 0, "{:?} on an empty chart stays empty", opt);
+        }
+    }
+
+    #[test]
+    fn all_scratch_raises_scratch_population_above_off() {
+        // A key-only chart with well-spaced rows: ALL-SCRATCH concentrates notes onto the scratch lane,
+        // so its scratch-row count exceeds OFF's zero. (A preference, not a guarantee, hence >= a few.)
+        let chart = b"#BPM 240\r\n#WAV01 a.wav\r\n#00111:01010101\r\n#00113:01010101\r\n#00115:01010101\r\n";
+        let off = model(chart);
+        assert_eq!(scratch_rows(&off), 0);
+        let mut m = off.clone();
+        apply(&mut m, NoteOption::AllScratch, 3);
+        assert!(scratch_rows(&m) >= 3, "ALL-SCRATCH should pile notes onto scratch, got {}", scratch_rows(&m));
+        assert_eq!(note_count(&m), note_count(&off));
+    }
+
+    #[test]
+    fn srandom_preserves_count_on_dp() {
+        let base = dp_model(b"#PLAYER 3\r\n#WAV01 a.wav\r\n#00111:01010101\r\n#00116:00010100\r\n#00121:01000010\r\n#00126:00100100\r\n");
+        let mut m = base.clone();
+        apply(&mut m, NoteOption::SRandom, 909);
+        assert_eq!(note_count(&m), note_count(&base), "S-RANDOM preserves count on 14K DP");
+    }
 }

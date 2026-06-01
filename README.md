@@ -8,18 +8,18 @@ beatoraja(Java/libGDX)의 **코어 PLAY 모듈**을 Rust로 새로 포팅한 BMS
 
 - **파서** — BMS lexical(base36/62 · Shift-JIS · `#RANDOM`/`#IF` · `#mmmCC`), 차트 해시 MD5/SHA-256(byte-exact).
 - **타이밍/차트** — 마디→µs 적분 · 채널→레인 · LN/지뢰 · 변속(BPM/STOP/SCROLL) · 모드 자동감지(7K/5K/9K/10K/14K).
-- **오디오** — symphonia 디코드 + cpal RT 믹서, **마스터 클럭 = 재생 샘플 수**(vsync 비의존, 샘플정확 키음).
-- **판정/게이지** — beatoraja 윈도우 byte-단위 일치 · 콤보 · EX · 게이지 6종 + 모디파이어 · 클리어램프(beatoraja 색) · LN 풀판정 · **空POOR 정확 처리**.
-- **렌더** — 1280×720 wgpu 인스턴스 · 노트 상단 클리핑 · 키 빔 · 레인 외곽선/구분선 · 가로 게이지(IIDX식) · BGA(이미지, on/off) · **KEY BOMB**(노트 히트 폭발, 데이터주도) · **다국어 폰트**(cosmic-text+Inter+시스템폴백 → 일/한/중/태/아랍 등, 교체 가능).
+- **오디오** — symphonia 디코드 + cpal RT 믹서, **마스터 클럭 = 재생 샘플 수**(vsync 비의존, 샘플정확 키음) · **키음 병렬 디코드**(코어 수만큼, 로딩 진행바).
+- **판정/게이지** — beatoraja 윈도우 byte-단위 일치(**모드별**) · 콤보 · EX · 게이지 6종 + 모디파이어 · 클리어램프(beatoraja 색) · LN 풀판정(릴리스 윈도우 #RANK/JUDGE WIDTH 스케일) · **空POOR 정확 처리**.
+- **렌더** — 1280×720 wgpu 인스턴스 · 노트 상단 클리핑 · **롱노트 몸통 막대** · 키 빔 · 레인 외곽선/구분선 · 가로 게이지(IIDX식) · BGA(이미지, on/off) · **KEY BOMB**(데이터주도) · **다국어 폰트**(cosmic-text+Inter+시스템폴백, 글리프 런 캐시) · **UI 테마**(`theme.ron`, → [docs/theme.md](docs/theme.md)).
 - **게임 옵션** — 노트옵션(MIRROR/RANDOM/S-RANDOM/R-RANDOM/ROTATE/ALL-SCRATCH/H-RANDOM) · 하이스피드 고정(FLOATING/CONSTANT 그린넘버) · 판정 오프셋 + **오토 캘리브레이션** · JUDGE WIDTH · TOTAL · lift · lane cover · 스크래치 side/auto.
-- **곡선택(GUI)** — 폴더·난이도표 네비(키보드+마우스) · 커버(`#STAGEFILE`/`#BANNER`) · KEY/레벨 배지 · 클리어램프 LED · **노트 밀도 그래프**(PEAK/AVG/END) · 로컬 기록 인라인 + 상세 모달.
-- **데이터 주도** — 모드/스킨(RON)/키맵(RON)/플레이옵션(RON)/스킨 HUD·KEY BOMB. 설정 탭 UI · 통합 키 설정(파일+인앱 에디터) · 설정/기록/리플레이 영속(`~/.config/rbms/`).
+- **곡선택(GUI)** — **검색(`/` 제목·아티스트 부분일치) · 정렬(`F3` 제목/아티스트/레벨/클리어) · 클릭 가능한 하단 네비 버튼** · 다중 폴더 라이브러리(여러 폴더 병합) · 난이도표 네비(키보드+마우스) · 커버(`#STAGEFILE`/`#BANNER`) · KEY/레벨 배지 · 클리어램프 LED · **노트 밀도 그래프**(PEAK/AVG/END) · 로컬 기록 인라인 + 상세 모달.
+- **데이터 주도** — 모드/스킨(RON)/키맵(RON)/플레이옵션(RON)/**UI 테마(RON)**/**라이브러리 폴더(RON)**/난이도표(RON). 설정 탭 UI · 통합 키 설정(파일+인앱 에디터) · 영속(`~/.config/rbms/`, 파싱 실패 시 `.ron.bak` 백업).
 - **그 외** — autoplay · 리플레이 저장/재생(시드·옵션 복원) · 스코어 랭크 그래프(IIDX 9분법) · 리플레이 분석 모드 · 난이도표 인앱 관리(다중) · DEBUG 오버레이 · IR 슈퍼셋 스코어 인터페이스(클라).
 
 ## 남은 일
 
 - [ ] **`#PREVIEW` 프리뷰 재생** — 배선·토글까지 구현했으나 **실제 재생 미동작(TODO·디버깅 필요)**.
-- [ ] **스킨 데이터화 확장** — 결과/메뉴 패널 위치·색까지 `SkinConfig`로(헤드리스 스킨 완성).
+- [ ] **데이터화 마무리** — 메뉴/결과 **색은 `theme.ron`으로 완료**, **패널 위치/레이아웃**의 데이터화는 남음. 설정 화면 NETWORK 탭(서버/플레이어 ID)·마우스 스테퍼 UX → [docs/roadmap.md](docs/roadmap.md).
 - [ ] **백엔드 서버**(Bun + Hono + Drizzle, IR-슈퍼셋) → 라이벌 · 리더보드(타인 리플레이) · 설정 동기화 · ranked 무결성.
 - [ ] **웹 FE** — 검색 · 리더보드 · 플레이어 페이지 · 리플레이 뷰어.
 - [ ] **배포** — GitHub 원격/Actions · LICENSE 파일 동봉 · 코드 서명/공증(선택) · `.app`/`.dmg`/인스톨러(선택).
@@ -31,14 +31,15 @@ beatoraja(Java/libGDX)의 **코어 PLAY 모듈**을 Rust로 새로 포팅한 BMS
 cargo build --release -p rbms-player
 BIN=./target/release/rbms-player
 
-$BIN "<곡 폴더>"                  # GUI 곡선택 (↑↓ 이동, Enter 열기, O 폴더, T 난이도표, Tab 설정, Esc 뒤로)
+$BIN "<곡 폴더>"                  # GUI 곡선택 (↑↓ 이동, Enter 열기, / 검색, F3 정렬, O 폴더관리, T 난이도표, Tab 설정, Esc 뒤로 — 하단 버튼 클릭도 가능)
 $BIN "<차트.bme>" [--interactive] # 단일 차트 (기본 autoplay)
 $BIN --replay <file.ron>          # 리플레이 재생
 ```
 
 - **레인 키**(기본 beatoraja Z열): 7K = `Z S X D C F V` + LShift(스크), 5K/9K/14K는 모드별 프리셋(차트 자동감지). 조작: ↑↓ 속도 · →← 커버 · `]` `[` lift. 모든 키는 **설정 → KEY CONFIG**에서 재바인딩.
 - **CLI 옵션**: `--interactive|--auto --sc-left --sc-auto --lift F --hispeed F --gauge X --keys ... --skin file.ron --font file.ttf --table URL --keyconfig path.ron --replay file.ron --server URL --player ID`.
-- 테스트: `cargo test --workspace`.
+- **테마**: `~/.config/rbms/theme.ron`(첫 실행 시 자동 생성, 편집 가능) — UI 색 커스터마이즈. → [docs/theme.md](docs/theme.md).
+- **테스트**: `cargo test --workspace` (~880개, 엣지케이스 중심). 설계 문서는 [docs/](docs/) (architecture · theme · roadmap).
 
 ## 아키텍처 (의존 위→아래)
 

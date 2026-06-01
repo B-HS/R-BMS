@@ -102,3 +102,222 @@ pub struct Model {
     pub md5: String,
     pub sha256: String,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ---- measure_us / US_PER_MEASURE_NUM invariant ----
+
+    #[test]
+    fn us_per_measure_num_is_240_million() {
+        assert_eq!(US_PER_MEASURE_NUM, 240_000_000.0);
+    }
+
+    #[test]
+    fn measure_us_matches_invariant_formula() {
+        for &bpm in &[60.0, 120.0, 130.0, 174.0, 200.0, 0.5, 999.0] {
+            assert_eq!(measure_us(bpm), US_PER_MEASURE_NUM / bpm, "bpm={bpm}");
+        }
+    }
+
+    #[test]
+    fn measure_us_known_values() {
+        // 240_000_000 / bpm
+        assert_eq!(measure_us(120.0), 2_000_000.0);
+        assert_eq!(measure_us(60.0), 4_000_000.0);
+        assert_eq!(measure_us(240.0), 1_000_000.0);
+        assert_eq!(measure_us(1.0), 240_000_000.0);
+    }
+
+    #[test]
+    fn measure_us_is_monotonically_decreasing_in_bpm() {
+        // Higher BPM => shorter measure.
+        let bpms = [30.0, 60.0, 90.0, 120.0, 180.0, 240.0, 480.0];
+        for w in bpms.windows(2) {
+            assert!(measure_us(w[0]) > measure_us(w[1]), "{} vs {}", w[0], w[1]);
+        }
+    }
+
+    #[test]
+    fn measure_us_inverse_proportionality() {
+        // Doubling BPM halves the measure length.
+        assert_eq!(measure_us(120.0), measure_us(240.0) * 2.0);
+        assert_eq!(measure_us(100.0) / 2.0, measure_us(200.0));
+    }
+
+    #[test]
+    fn measure_us_zero_bpm_is_infinite() {
+        // NOTE: suspect - division by zero yields +inf rather than an error/guard.
+        assert!(measure_us(0.0).is_infinite());
+        assert!(measure_us(0.0).is_sign_positive());
+    }
+
+    #[test]
+    fn measure_us_negative_bpm_is_negative() {
+        // NOTE: suspect - negative BPM produces a negative measure length, not guarded.
+        assert!(measure_us(-120.0) < 0.0);
+        assert_eq!(measure_us(-120.0), -2_000_000.0);
+    }
+
+    #[test]
+    fn measure_us_is_deterministic() {
+        assert_eq!(measure_us(174.0), measure_us(174.0));
+    }
+
+    // ---- TimeLine::empty defaults ----
+
+    #[test]
+    fn timeline_empty_default_fields() {
+        let tl = TimeLine::empty(8, 1_234, 0.5, 130.0);
+        assert_eq!(tl.time_us, 1_234);
+        assert_eq!(tl.section, 0.5);
+        assert_eq!(tl.bpm, 130.0);
+        assert_eq!(tl.stop_us, 0);
+        assert_eq!(tl.scroll, 1.0);
+        assert_eq!(tl.bga, -1);
+        assert_eq!(tl.layer, -1);
+        assert!(!tl.section_line);
+        assert!(tl.bgnotes.is_empty());
+    }
+
+    #[test]
+    fn timeline_empty_allocates_lanes_with_none() {
+        let tl = TimeLine::empty(8, 0, 0.0, 120.0);
+        assert_eq!(tl.notes.len(), 8);
+        assert_eq!(tl.hidden.len(), 8);
+        assert!(tl.notes.iter().all(|n| n.is_none()));
+        assert!(tl.hidden.iter().all(|n| n.is_none()));
+    }
+
+    #[test]
+    fn timeline_empty_zero_lanes() {
+        let tl = TimeLine::empty(0, 0, 0.0, 120.0);
+        assert!(tl.notes.is_empty());
+        assert!(tl.hidden.is_empty());
+    }
+
+    #[test]
+    fn timeline_empty_lane_count_matches_argument() {
+        for lanes in [0usize, 1, 6, 8, 9, 12, 16] {
+            let tl = TimeLine::empty(lanes, 0, 0.0, 120.0);
+            assert_eq!(tl.notes.len(), lanes, "lanes={lanes}");
+            assert_eq!(tl.hidden.len(), lanes, "lanes={lanes}");
+        }
+    }
+
+    #[test]
+    fn timeline_empty_notes_and_hidden_are_independent() {
+        let mut tl = TimeLine::empty(2, 0, 0.0, 120.0);
+        tl.notes[0] = Some(Note::normal(1, 0, 0.0));
+        // Mutating notes must not affect hidden.
+        assert!(tl.notes[0].is_some());
+        assert!(tl.hidden[0].is_none());
+    }
+
+    #[test]
+    fn timeline_empty_preserves_negative_time() {
+        let tl = TimeLine::empty(4, -500, -1.0, 120.0);
+        assert_eq!(tl.time_us, -500);
+        assert_eq!(tl.section, -1.0);
+    }
+
+    // ---- Note::normal zeroing ----
+
+    #[test]
+    fn note_normal_zeroes_long_note_fields() {
+        let n = Note::normal(42, 9_999, 1.25);
+        assert_eq!(n.kind, NoteKind::Normal);
+        assert_eq!(n.wav, 42);
+        assert_eq!(n.time_us, 9_999);
+        assert_eq!(n.section, 1.25);
+        assert_eq!(n.start_us, 0);
+        assert_eq!(n.duration_us, 0);
+        assert!(n.layered.is_empty());
+    }
+
+    #[test]
+    fn note_normal_preserves_negative_wav_and_time() {
+        let n = Note::normal(-1, -42, -0.5);
+        assert_eq!(n.wav, -1);
+        assert_eq!(n.time_us, -42);
+        assert_eq!(n.section, -0.5);
+        assert_eq!(n.start_us, 0);
+        assert_eq!(n.duration_us, 0);
+    }
+
+    #[test]
+    fn note_normal_kind_is_not_long_or_mine() {
+        let n = Note::normal(0, 0, 0.0);
+        assert!(matches!(n.kind, NoteKind::Normal));
+        assert!(!matches!(n.kind, NoteKind::LongStart { .. }));
+        assert!(!matches!(n.kind, NoteKind::LongEnd { .. }));
+        assert!(!matches!(n.kind, NoteKind::Mine { .. }));
+    }
+
+    #[test]
+    fn note_normal_is_deterministic() {
+        let a = Note::normal(7, 100, 2.0);
+        let b = Note::normal(7, 100, 2.0);
+        assert_eq!(a.wav, b.wav);
+        assert_eq!(a.time_us, b.time_us);
+        assert_eq!(a.section, b.section);
+        assert_eq!(a.start_us, b.start_us);
+        assert_eq!(a.duration_us, b.duration_us);
+        assert_eq!(a.kind, b.kind);
+    }
+
+    // ---- enum value equality ----
+
+    #[test]
+    fn long_kind_distinguishes_variants() {
+        assert_eq!(LnKind::Ln, LnKind::Ln);
+        assert_ne!(LnKind::Ln, LnKind::Cn);
+        assert_ne!(LnKind::Cn, LnKind::Hcn);
+    }
+
+    #[test]
+    fn note_kind_long_start_carries_ln_kind() {
+        let s = NoteKind::LongStart { ln: LnKind::Hcn };
+        assert_eq!(s, NoteKind::LongStart { ln: LnKind::Hcn });
+        assert_ne!(s, NoteKind::LongStart { ln: LnKind::Ln });
+        assert_ne!(s, NoteKind::LongEnd { ln: LnKind::Hcn });
+    }
+
+    #[test]
+    fn note_kind_mine_carries_damage() {
+        assert_eq!(NoteKind::Mine { damage: 1.0 }, NoteKind::Mine { damage: 1.0 });
+        assert_ne!(NoteKind::Mine { damage: 1.0 }, NoteKind::Mine { damage: 2.0 });
+    }
+
+    // ---- ModelMeta default ----
+
+    #[test]
+    fn model_meta_default_is_empty_and_zeroed() {
+        let m = ModelMeta::default();
+        assert!(m.title.is_empty());
+        assert!(m.subtitle.is_empty());
+        assert!(m.artist.is_empty());
+        assert!(m.subartist.is_empty());
+        assert!(m.genre.is_empty());
+        assert!(m.play_level.is_empty());
+        assert_eq!(m.difficulty, 0);
+        assert_eq!(m.rank, 0);
+        assert_eq!(m.total, 0.0);
+        assert!(m.stagefile.is_empty());
+    }
+
+    // ---- Note clone round-trip ----
+
+    #[test]
+    fn note_clone_round_trip_preserves_fields() {
+        let mut n = Note::normal(5, 123, 0.75);
+        n.layered.push(Note::normal(6, 124, 0.76));
+        let c = n.clone();
+        assert_eq!(c.wav, n.wav);
+        assert_eq!(c.time_us, n.time_us);
+        assert_eq!(c.section, n.section);
+        assert_eq!(c.layered.len(), 1);
+        assert_eq!(c.layered[0].wav, 6);
+    }
+}

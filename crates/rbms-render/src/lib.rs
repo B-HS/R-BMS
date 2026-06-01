@@ -5,6 +5,7 @@ pub mod playfield;
 pub mod result;
 pub mod select;
 pub mod skin;
+pub mod theme;
 
 pub use cpu::CpuCanvas;
 pub use font::{draw_text, draw_text_centered, draw_text_right, fit_text, load_font, reset_ui_family, set_ui_family, text_width};
@@ -15,6 +16,7 @@ pub use select::{
     CoverState, DensityView, DetailView, RecordRowView, RecordsView, SelectDetail, SelectHot, SelectModal, SelectRow, SelectView, StatCell, cover_rect, render_select,
 };
 pub use skin::{Skin, SkinConfig};
+pub use theme::{Theme, ThemeConfig, set_theme, theme};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Color {

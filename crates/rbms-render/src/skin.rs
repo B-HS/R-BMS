@@ -362,4 +362,180 @@ mod tests {
         let skin = Skin::build(&cfg, Mode::BEAT_14K, 1280.0, 720.0);
         assert_eq!(skin.fields.len(), 1, "single-field 14K when dual_field is off");
     }
+
+    #[test]
+    fn lane_count_equals_mode_key() {
+        assert_eq!(Skin::default_for(Mode::BEAT_7K, 1280.0, 720.0).lane_count(), 8);
+        assert_eq!(Skin::default_for(Mode::BEAT_5K, 1280.0, 720.0).lane_count(), 6);
+        assert_eq!(Skin::default_for(Mode::BEAT_14K, 1280.0, 720.0).lane_count(), 16);
+        assert_eq!(Skin::default_for(Mode::POPN_9K, 1280.0, 720.0).lane_count(), 9);
+    }
+
+    #[test]
+    fn lift_zero_keeps_judge_line_at_configured_y() {
+        let skin = Skin::default_for(Mode::BEAT_7K, 1280.0, 720.0);
+        assert_eq!(skin.judge_y, 620.0, "lift 0 leaves judge_y unchanged");
+        assert_eq!(skin.top_y, 60.0);
+    }
+
+    #[test]
+    fn lift_raises_judge_line_toward_top() {
+        let mut cfg = SkinConfig::default();
+        cfg.lift = 0.5;
+        let skin = Skin::build(&cfg, Mode::BEAT_7K, 1280.0, 720.0);
+        // judge_y = 620 - (620-60)*0.5 = 620 - 280 = 340
+        assert_eq!(skin.judge_y, 340.0);
+        assert!(skin.judge_y < 620.0, "lift moves the judge line up");
+    }
+
+    #[test]
+    fn lift_clamps_above_point_nine() {
+        // lift > 0.9 clamps to 0.9: judge_y = 620 - 560*0.9 = 116.
+        let mut cfg = SkinConfig::default();
+        cfg.lift = 5.0;
+        let skin = Skin::build(&cfg, Mode::BEAT_7K, 1280.0, 720.0);
+        assert!((skin.judge_y - 116.0).abs() < 1e-3, "lift clamps to 0.9 (got {})", skin.judge_y);
+        assert!(skin.judge_y > skin.top_y, "judge line never crosses above the top edge");
+    }
+
+    #[test]
+    fn lift_clamps_negative_to_zero() {
+        let mut cfg = SkinConfig::default();
+        cfg.lift = -3.0;
+        let skin = Skin::build(&cfg, Mode::BEAT_7K, 1280.0, 720.0);
+        assert_eq!(skin.judge_y, 620.0, "negative lift clamps to 0 (no change)");
+    }
+
+    #[test]
+    fn lane_height_is_absolute_distance_judge_to_top() {
+        let skin = Skin::default_for(Mode::BEAT_7K, 1280.0, 720.0);
+        assert_eq!(skin.lane_height(), 560.0);
+        assert_eq!(skin.lane_height(), (skin.judge_y - skin.top_y).abs());
+    }
+
+    #[test]
+    fn note_color_scratch_keys_alternate() {
+        let skin = Skin::default_for(Mode::BEAT_7K, 1280.0, 720.0);
+        // lane 7 is the scratch in 7K
+        assert_eq!(skin.note_color(7), skin.scratch_color, "scratch lane uses scratch colour");
+        assert_eq!(skin.note_color(0), skin.key_color, "even key lane uses key colour");
+        assert_eq!(skin.note_color(2), skin.key_color, "even key lane uses key colour");
+        assert_eq!(skin.note_color(1), skin.key_color_alt, "odd key lane uses alt colour");
+        assert_eq!(skin.note_color(3), skin.key_color_alt, "odd key lane uses alt colour");
+    }
+
+    #[test]
+    fn lane_center_is_x_plus_half_width() {
+        let skin = Skin::default_for(Mode::BEAT_7K, 1280.0, 720.0);
+        for lane in 0..skin.lane_count() {
+            assert_eq!(skin.lane_center(lane), skin.x[lane] + skin.w[lane] * 0.5);
+        }
+    }
+
+    #[test]
+    fn all_lanes_have_uniform_width() {
+        let skin = Skin::default_for(Mode::BEAT_14K, 1280.0, 720.0);
+        let w0 = skin.w[0];
+        assert!(skin.w.iter().all(|&w| (w - w0).abs() < 1e-4), "all lanes are equal width");
+        assert!(w0 > 0.0, "lane width is positive");
+    }
+
+    #[test]
+    fn beam_height_is_field_height_when_full_fraction() {
+        // default beam_height_frac = 1.0 -> beam_height == judge_y - top_y
+        let skin = Skin::default_for(Mode::BEAT_7K, 1280.0, 720.0);
+        assert!((skin.beam_height - (skin.judge_y - skin.top_y)).abs() < 1e-3);
+    }
+
+    #[test]
+    fn beam_height_frac_clamps_to_unit_range() {
+        let mut cfg = SkinConfig::default();
+        cfg.beam_height_frac = 4.0;
+        let skin = Skin::build(&cfg, Mode::BEAT_7K, 1280.0, 720.0);
+        // clamped to 1.0 -> full field height, not 4x
+        assert!((skin.beam_height - (skin.judge_y - skin.top_y)).abs() < 1e-3);
+
+        cfg.beam_height_frac = -1.0;
+        let skin2 = Skin::build(&cfg, Mode::BEAT_7K, 1280.0, 720.0);
+        assert_eq!(skin2.beam_height, 0.0, "negative frac clamps to 0");
+    }
+
+    #[test]
+    fn lane_bg_carries_config_alpha() {
+        let skin = Skin::default_for(Mode::BEAT_7K, 1280.0, 720.0);
+        assert_eq!(skin.lane_bg.a, 160, "lane_bg keeps its configured alpha (not forced opaque)");
+        assert_eq!(skin.outline.a, 200);
+        assert_eq!(skin.divider.a, 150);
+    }
+
+    #[test]
+    fn sp_lanes_left_to_right_in_visual_order_no_scratch_left() {
+        // Default scratch_left=false -> keys first then scratch on the right; x increases by lane_w.
+        let skin = Skin::default_for(Mode::BEAT_7K, 1280.0, 720.0);
+        // The 7 key lanes 0..7 are placed left-to-right in lane order, scratch (7) goes rightmost.
+        for lane in 0..6 {
+            assert!(skin.x[lane] < skin.x[lane + 1], "key lane {lane} left of {}", lane + 1);
+        }
+        let max_x = skin.x.iter().copied().fold(f32::MIN, f32::max);
+        assert_eq!(skin.x[7], max_x, "scratch lane 7 is rightmost when scratch_left=false");
+    }
+
+    #[test]
+    fn dual_field_10k_splits_two_fields_with_outer_scratches() {
+        // 10K: key=12, player=2, scratch [5,11]; per-side = 6 lanes.
+        let skin = Skin::build(&SkinConfig::default(), Mode::BEAT_10K, 1280.0, 720.0);
+        assert_eq!(skin.fields.len(), 2, "10K DP renders two fields");
+        let p1_right = (0..6).map(|l| skin.x[l] + skin.w[l]).fold(f32::MIN, f32::max);
+        let p2_left = (6..12).map(|l| skin.x[l]).fold(f32::MAX, f32::min);
+        assert!(p1_right <= p2_left, "P1 field entirely left of P2");
+        let p1_min = (0..6).map(|l| skin.x[l]).fold(f32::MAX, f32::min);
+        assert_eq!(skin.x[5], p1_min, "P1 scratch (lane 5) is on the outer-left edge");
+        let all_max = (0..12).map(|l| skin.x[l]).fold(f32::MIN, f32::max);
+        assert_eq!(skin.x[11], all_max, "P2 scratch (lane 11) is on the outer-right edge");
+    }
+
+    #[test]
+    fn popn_single_player_is_never_dual() {
+        // POPN_9K has player=1, so dual is impossible regardless of dual_field flag.
+        let skin = Skin::build(&SkinConfig::default(), Mode::POPN_9K, 1280.0, 720.0);
+        assert_eq!(skin.fields.len(), 1, "single-player POPN is one field");
+        assert!(skin.scratch.iter().all(|&s| !s), "POPN has no scratch lanes");
+    }
+
+    #[test]
+    fn scratch_flags_match_mode() {
+        let skin = Skin::default_for(Mode::BEAT_14K, 1280.0, 720.0);
+        for lane in 0..16 {
+            assert_eq!(skin.scratch[lane], lane == 7 || lane == 15, "scratch flag for lane {lane}");
+        }
+    }
+
+    #[test]
+    fn bomb_us_is_duration_ms_times_1000() {
+        let skin = Skin::default_for(Mode::BEAT_7K, 1280.0, 720.0);
+        assert_eq!(skin.bomb_us, 140_000, "bomb_duration_ms 140 -> 140000 us");
+        assert!(skin.bomb_enabled);
+        assert_eq!(skin.bomb_size, 56.0);
+    }
+
+    #[test]
+    fn bga_rect_mirrors_config_tuple() {
+        let skin = Skin::default_for(Mode::BEAT_7K, 1280.0, 720.0);
+        let bga = skin.bga.expect("default config has a BGA rect");
+        assert_eq!((bga.x, bga.y, bga.w, bga.h), (905.0, 360.0, 350.0, 255.0));
+    }
+
+    #[test]
+    fn bga_none_when_config_omits_it() {
+        let cfg: SkinConfig = ron::from_str("(bga: None)").unwrap();
+        let skin = Skin::build(&cfg, Mode::BEAT_7K, 1280.0, 720.0);
+        assert!(skin.bga.is_none(), "no BGA rect when config says None");
+    }
+
+    #[test]
+    fn field_width_scales_with_screen_width_in_sp() {
+        let wide = Skin::default_for(Mode::BEAT_7K, 2560.0, 720.0);
+        let narrow = Skin::default_for(Mode::BEAT_7K, 1280.0, 720.0);
+        assert!(wide.w[0] > narrow.w[0], "wider screen yields wider SP lanes");
+    }
 }

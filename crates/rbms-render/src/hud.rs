@@ -27,12 +27,13 @@ pub struct HudView {
 /// (cyan) EX bar that grows toward the top, and a BEST (green) bar, plus a "vs BEST" delta. Drawn in
 /// the gap between the field and the BGA.
 fn draw_score_graph<R: Renderer>(r: &mut R, x: f32, y: f32, w: f32, h: f32, ex: u32, max_ex: u32, best: Option<u32>) {
-    r.fill_rect(Rect::new(x, y, w, h), Color::rgb(16, 16, 22));
+    let th = crate::theme::theme();
+    r.fill_rect(Rect::new(x, y, w, h), th.panel);
     let ratio = |v: u32| if max_ex > 0 { (v as f32 / max_ex as f32).clamp(0.0, 1.0) } else { 0.0 };
     for (band, label) in [(6.0f32 / 9.0, "A"), (7.0 / 9.0, "AA"), (8.0 / 9.0, "AAA")] {
         let ly = y + h * (1.0 - band);
         r.fill_rect(Rect::new(x, ly, w, 1.0), Color::rgb(74, 74, 92));
-        draw_text(r, x + 4.0, ly + 2.0, 1.0, Color::GRAY, label);
+        draw_text(r, x + 4.0, ly + 2.0, 1.0, th.text_muted, label);
     }
     let (bar_w, gap) = (26.0, 12.0);
     let bx = x + (w - (bar_w * 2.0 + gap)) * 0.5;
@@ -52,6 +53,7 @@ fn draw_score_graph<R: Renderer>(r: &mut R, x: f32, y: f32, w: f32, h: f32, ex: 
 }
 
 pub fn render_hud<R: Renderer>(r: &mut R, skin: &Skin, hud: &HudView) {
+    let th = crate::theme::theme();
     // Span the HUD across the full note area (both fields in DP), so the single gauge/combo sit over
     // the whole layout rather than one sub-field. `field_right` is the rightmost lane edge.
     let field_x0 = skin.x.iter().copied().fold(f32::MAX, f32::min);
@@ -77,7 +79,7 @@ pub fn render_hud<R: Renderer>(r: &mut R, skin: &Skin, hud: &HudView) {
     r.fill_rect(Rect::new(field_x0, gy, field_w * v, gh), gcol);
     r.fill_rect(Rect::new(field_x0 + field_w * (skin.gauge_clear_threshold / 100.0).clamp(0.0, 1.0), gy - 2.0, 2.0, gh + 4.0), Color::WHITE);
     draw_text_right(r, field_x0 + field_w - 4.0, gy + gh + 4.0, 1.6, gcol, &format!("{}", hud.gauge.round() as i32));
-    draw_text(r, field_x0, gy + gh + 4.0, 1.2, Color::GRAY, "0");
+    draw_text(r, field_x0, gy + gh + 4.0, 1.2, th.text_muted, "0");
 
     // Left info column (score + best + green number), in the left margin clear of the field.
     draw_text(r, 14.0, 14.0, 2.4, Color::WHITE, &format!("EX {}", hud.ex_score));

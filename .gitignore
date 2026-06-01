@@ -5,8 +5,9 @@ Cargo.lock
 /assets/songs
 *.log
 
-# Internal working docs / AI process — kept local, not part of the public repo
-/docs/
+# Internal working files / AI process — kept local, not part of the public repo
 /CLAUDE.md
 /ROADMAP.md
 start.sh
+
+# `docs/` (architecture · theme · roadmap) IS part of the repo — it's the project + FE reference.

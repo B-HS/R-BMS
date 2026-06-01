@@ -182,4 +182,174 @@ mod tests {
         let s = NullScoreServer;
         assert!(matches!(s.health(), Err(IrError::NotConfigured)));
     }
+
+    // ---------- API_VERSION constant ----------
+
+    #[test]
+    fn api_version_is_one() {
+        assert_eq!(API_VERSION, 1);
+    }
+
+    #[test]
+    fn api_version_round_trips_in_submission() {
+        // The submission carries the same constant the client compiled against.
+        let json = serde_json::to_string(&minimal_submission()).unwrap();
+        let back: ScoreSubmission = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.api_version, API_VERSION);
+    }
+
+    // ---------- IrError Display ----------
+
+    #[test]
+    fn ir_error_display_not_configured() {
+        assert_eq!(IrError::NotConfigured.to_string(), "score server not configured");
+    }
+
+    #[test]
+    fn ir_error_display_unsupported() {
+        assert_eq!(IrError::Unsupported.to_string(), "operation not supported by server");
+    }
+
+    #[test]
+    fn ir_error_display_network_includes_detail() {
+        assert_eq!(IrError::Network("timed out".into()).to_string(), "network error: timed out");
+    }
+
+    #[test]
+    fn ir_error_display_server_includes_code_and_body() {
+        assert_eq!(IrError::Server(503, "down".into()).to_string(), "server error 503: down");
+    }
+
+    #[test]
+    fn ir_error_display_decode_includes_detail() {
+        assert_eq!(IrError::Decode("eof".into()).to_string(), "decode error: eof");
+    }
+
+    #[test]
+    fn ir_error_is_std_error() {
+        // IrError implements std::error::Error (source defaults to None).
+        fn assert_error<E: std::error::Error>(_: &E) {}
+        let e = IrError::Unsupported;
+        assert_error(&e);
+        assert!(std::error::Error::source(&e).is_none());
+    }
+
+    // ---------- full ScoreSubmission invariants ----------
+
+    fn minimal_submission() -> ScoreSubmission {
+        ScoreSubmission {
+            api_version: API_VERSION,
+            chart: ChartId { md5: "m".into(), sha256: "s".into() },
+            player: PlayerId { id: "p".into() },
+            mode: "BEAT_7K".into(),
+            clear: ClearLamp::Normal,
+            ex_score: 0,
+            max_ex_score: 0,
+            judge: JudgeBreakdown::default(),
+            max_combo: 0,
+            total_notes: 0,
+            minbp: 0,
+            gauge_value: 0.0,
+            options: PlayOptions {
+                gauge: GaugeType::Normal,
+                random: RandomOption::Off,
+                random_p2: None,
+                scratch_auto: false,
+                lntype: 0,
+                input_device: "kb".into(),
+                assist: vec![],
+                option: 0,
+                judge_rate: 0,
+                offset_ms: 0,
+                constant: false,
+                hispeed: 0.0,
+                lift: 0.0,
+                lane_cover: 0.0,
+                total_override: 0.0,
+                autoplay: false,
+                auto_offset: false,
+                scratch_left: false,
+                green_number: 0.0,
+            },
+            played_at: 0,
+            client: "c".into(),
+            replay_id: None,
+            seed: 0,
+            judge_algorithm: String::new(),
+            rule: String::new(),
+            skin: String::new(),
+            client_build_sha256: None,
+            client_platform: None,
+            extra: Default::default(),
+        }
+    }
+
+    #[test]
+    fn submission_full_round_trip_preserves_all_superset_fields() {
+        let mut sub = minimal_submission();
+        sub.seed = u64::MAX;
+        sub.judge_algorithm = "Duration".into();
+        sub.rule = "LR2".into();
+        sub.skin = "FANCY".into();
+        sub.client_build_sha256 = Some("abc123".into());
+        sub.client_platform = Some("linux-x86_64".into());
+        sub.options.random_p2 = Some(RandomOption::Mirror);
+        let back: ScoreSubmission = serde_json::from_str(&serde_json::to_string(&sub).unwrap()).unwrap();
+        assert_eq!(back.seed, u64::MAX);
+        assert_eq!(back.judge_algorithm, "Duration");
+        assert_eq!(back.rule, "LR2");
+        assert_eq!(back.skin, "FANCY");
+        assert_eq!(back.client_build_sha256.as_deref(), Some("abc123"));
+        assert_eq!(back.client_platform.as_deref(), Some("linux-x86_64"));
+        assert_eq!(back.options.random_p2, Some(RandomOption::Mirror));
+    }
+
+    #[test]
+    fn submission_negative_played_at_round_trips() {
+        // played_at is i64; pre-epoch timestamps must survive.
+        let mut sub = minimal_submission();
+        sub.played_at = -1;
+        let back: ScoreSubmission = serde_json::from_str(&serde_json::to_string(&sub).unwrap()).unwrap();
+        assert_eq!(back.played_at, -1);
+    }
+
+    #[test]
+    fn submission_gauge_value_f32_nan_serializes_to_null_and_decodes_back_nan() {
+        // serde_json maps f32 NaN to JSON `null`; on the way back, an Option-less f32 field
+        // would normally fail — but gauge_value is a bare f32, so decoding `null` errors.
+        // NOTE: suspect — NaN gauge_value is silently lossy (serializes to `null`, then fails to
+        // deserialize). Asserting the actual current behavior, not endorsing it.
+        let mut sub = minimal_submission();
+        sub.gauge_value = f32::NAN;
+        let json = serde_json::to_string(&sub).unwrap();
+        assert!(json.contains("\"gauge_value\":null"), "NaN serializes to null");
+        assert!(serde_json::from_str::<ScoreSubmission>(&json).is_err(), "null fails to decode into f32");
+    }
+
+    #[test]
+    fn submission_extra_map_preserved() {
+        let mut sub = minimal_submission();
+        sub.extra.insert("k".into(), serde_json::json!({"v": 1}));
+        let back: ScoreSubmission = serde_json::from_str(&serde_json::to_string(&sub).unwrap()).unwrap();
+        assert_eq!(back.extra.get("k").unwrap(), &serde_json::json!({"v": 1}));
+    }
+
+    #[test]
+    fn submission_replay_id_some_round_trips() {
+        let mut sub = minimal_submission();
+        sub.replay_id = Some("replay-99".into());
+        let back: ScoreSubmission = serde_json::from_str(&serde_json::to_string(&sub).unwrap()).unwrap();
+        assert_eq!(back.replay_id.as_deref(), Some("replay-99"));
+    }
+
+    #[test]
+    fn ex_score_at_or_below_max_is_a_consistent_invariant() {
+        // Construct a maxed score; ex_score must not exceed max_ex_score by construction.
+        let mut sub = minimal_submission();
+        sub.max_ex_score = 1624;
+        sub.ex_score = 1624;
+        assert!(sub.ex_score <= sub.max_ex_score);
+        let back: ScoreSubmission = serde_json::from_str(&serde_json::to_string(&sub).unwrap()).unwrap();
+        assert_eq!(back.ex_score, back.max_ex_score);
+    }
 }

@@ -22,6 +22,21 @@ struct Laid {
     glyphs: Vec<(i32, i32, CacheKey)>,
 }
 
+/// One horizontal run of identical-coverage pixels inside a rasterized glyph, relative to the
+/// glyph pen origin: `w` contiguous pixels on row `dy` starting at `dx`, all sharing colour
+/// `(r,g,b)` and coverage alpha `ca`. Replacing N adjacent 1×1 fills with one `w`×1 fill is
+/// pixel-identical (each covered pixel still source-over-blends the same colour at the same alpha),
+/// so it just trims the quad count the glyph emits.
+struct GlyphRun {
+    dx: i32,
+    dy: i32,
+    w: u16,
+    r: u8,
+    g: u8,
+    b: u8,
+    ca: u8,
+}
+
 /// One text context for the (single-threaded) UI: a font database with fallback, a glyph
 /// rasterization cache, the resolved default family, and the per-string layout cache.
 ///
@@ -33,6 +48,10 @@ struct TextEngine {
     family: String,
     default_family: String,
     cache: HashMap<u32, HashMap<String, Laid>>,
+    /// Rasterized, run-length-merged glyph pixels keyed by `(glyph cache key, packed RGB)`. Built
+    /// once per glyph+colour and replayed every frame, so the hot draw path neither re-runs
+    /// `swash.with_pixels` nor emits one quad per pixel. Cleared with `cache` on a family change.
+    runs: HashMap<(CacheKey, u32), Vec<GlyphRun>>,
 }
 
 impl TextEngine {
@@ -45,7 +64,7 @@ impl TextEngine {
             .last()
             .and_then(|f| f.families.first().map(|(n, _)| n.clone()))
             .unwrap_or_else(|| "sans-serif".to_string());
-        TextEngine { fs, swash: SwashCache::new(), default_family: family.clone(), family, cache: HashMap::new() }
+        TextEngine { fs, swash: SwashCache::new(), default_family: family.clone(), family, cache: HashMap::new(), runs: HashMap::new() }
     }
 
     fn ensure(&mut self, text: &str, px: f32) {
@@ -83,22 +102,58 @@ impl TextEngine {
         self.ensure(text, px);
         let Some(laid) = self.cache.get(&(px as u32)).and_then(|m| m.get(text)) else { return };
         let base = CtColor::rgb(color.r, color.g, color.b);
+        let rgb = ((color.r as u32) << 16) | ((color.g as u32) << 8) | color.b as u32;
         let (ox, oy) = (x.round() as i32, y.round() as i32);
-        // `laid` borrows self.cache; the loop borrows self.swash/self.fs — disjoint fields. (A
-        // horizontal run-length merge here was profiled at only ~11% fewer quads — anti-aliased
-        // glyphs have per-pixel varying coverage so same-alpha runs are mostly length 1 — so it is
-        // deferred; the real win is a glyph texture atlas, out of P3 scope. See docs/font-cjk-support.)
+        // Disjoint-field reborrows so `laid` (borrowing self.cache) coexists with building the run
+        // cache (self.fs/self.swash/self.runs). Each glyph is rasterized + horizontally run-merged
+        // once per (glyph, colour); later frames just replay the cached runs into `fill_rect`.
+        let (fs, swash, runs_cache) = (&mut self.fs, &mut self.swash, &mut self.runs);
         for &(gx, gy, ck) in &laid.glyphs {
-            self.swash.with_pixels(&mut self.fs, ck, base, |dx, dy, col| {
-                let ca = col.a();
-                if ca == 0 {
-                    return;
+            let key = (ck, rgb);
+            if let std::collections::hash_map::Entry::Vacant(slot) = runs_cache.entry(key) {
+                let mut pixels: Vec<(i32, i32, u8, u8, u8, u8)> = Vec::new();
+                swash.with_pixels(fs, ck, base, |dx, dy, col| {
+                    let ca = col.a();
+                    if ca != 0 {
+                        pixels.push((dx, dy, col.r(), col.g(), col.b(), ca));
+                    }
+                });
+                slot.insert(merge_runs(pixels));
+            }
+            for run in &runs_cache[&key] {
+                let a = ((run.ca as u16 * color.a as u16) / 255) as u8;
+                if a == 0 {
+                    continue;
                 }
-                let a = ((ca as u16 * color.a as u16) / 255) as u8;
-                r.fill_rect(Rect::new((ox + gx + dx) as f32, (oy + gy + dy) as f32, 1.0, 1.0), Color { r: col.r(), g: col.g(), b: col.b(), a });
-            });
+                r.fill_rect(Rect::new((ox + gx + run.dx) as f32, (oy + gy + run.dy) as f32, run.w as f32, 1.0), Color { r: run.r, g: run.g, b: run.b, a });
+            }
         }
     }
+}
+
+/// Merge a glyph's lit pixels `(dx, dy, r, g, b, ca)` into horizontal runs of identical colour and
+/// coverage. Pixels are row-major sorted first, then adjacent cells (same row, contiguous `dx`,
+/// identical `(r,g,b,ca)`) coalesce. A gap, a colour change, or a coverage change starts a new run,
+/// so the union of runs covers exactly the input pixels once each — the merge is pixel-identical to
+/// emitting every pixel on its own.
+fn merge_runs(mut pixels: Vec<(i32, i32, u8, u8, u8, u8)>) -> Vec<GlyphRun> {
+    pixels.sort_unstable_by_key(|p| (p.1, p.0));
+    let mut runs: Vec<GlyphRun> = Vec::new();
+    for (dx, dy, r, g, b, ca) in pixels {
+        if let Some(last) = runs.last_mut()
+            && last.dy == dy
+            && last.dx + last.w as i32 == dx
+            && last.r == r
+            && last.g == g
+            && last.b == b
+            && last.ca == ca
+        {
+            last.w += 1;
+            continue;
+        }
+        runs.push(GlyphRun { dx, dy, w: 1, r, g, b, ca });
+    }
+    runs
 }
 
 thread_local! {
@@ -168,6 +223,7 @@ pub fn set_ui_family(name: &str) {
         if e.family != name {
             e.family = name.to_string();
             e.cache.clear();
+            e.runs.clear();
         }
     });
 }
@@ -179,6 +235,7 @@ pub fn reset_ui_family() {
         if e.family != e.default_family {
             e.family = e.default_family.clone();
             e.cache.clear();
+            e.runs.clear();
         }
     });
 }
@@ -200,6 +257,196 @@ mod tests {
         // A single glyph wider than the whole budget collapses to just the ellipsis (no overflow, no loop).
         assert_eq!(fit_text("東", 1.4, 1.0), "…");
         assert_eq!(fit_text("anything", 1.4, 0.0), "anything", "non-positive width is a no-op");
+    }
+
+    #[test]
+    fn merge_runs_coalesces_only_identical_contiguous_pixels() {
+        let c = (200u8, 100u8, 50u8); // a fixed glyph colour
+        // Row 0: three contiguous pixels at one coverage, then a gap, then a different coverage.
+        let pixels = vec![
+            (0, 0, c.0, c.1, c.2, 180),
+            (2, 0, c.0, c.1, c.2, 180),
+            (1, 0, c.0, c.1, c.2, 180), // out of order on purpose — merge sorts first
+            (3, 0, c.0, c.1, c.2, 90),  // coverage change -> new run
+            (5, 0, c.0, c.1, c.2, 90),  // gap at x=4 -> new run
+            (0, 1, c.0, c.1, c.2, 180), // next row -> new run even though same x-start/colour
+        ];
+        let total: usize = pixels.len();
+        let runs = merge_runs(pixels);
+        // 0..=2 merge (w=3); x=3 alone (w=1); x=5 alone (w=1); row 1 x=0 alone (w=1) => 4 runs.
+        assert_eq!(runs.len(), 4, "runs split on gap, coverage change and row change");
+        let merged = runs.iter().find(|r| r.dy == 0 && r.dx == 0).unwrap();
+        assert_eq!(merged.w, 3, "the three contiguous equal pixels coalesce into one width-3 run");
+        // Every original lit pixel is still covered exactly once (no loss, no double-count).
+        assert_eq!(runs.iter().map(|r| r.w as usize).sum::<usize>(), total);
+    }
+
+    #[test]
+    fn merge_runs_empty_input_yields_no_runs() {
+        let runs = merge_runs(Vec::new());
+        assert!(runs.is_empty(), "no pixels -> no runs");
+    }
+
+    #[test]
+    fn merge_runs_full_contiguous_row_coalesces_to_one_run() {
+        // A whole row of identical contiguous pixels merges into a single width-N run.
+        let c = (10u8, 20u8, 30u8);
+        let pixels: Vec<_> = (0..8).map(|x| (x, 0i32, c.0, c.1, c.2, 255u8)).collect();
+        let runs = merge_runs(pixels);
+        assert_eq!(runs.len(), 1, "one contiguous run for a full row");
+        assert_eq!(runs[0].w, 8);
+        assert_eq!((runs[0].dx, runs[0].dy), (0, 0));
+        assert_eq!(runs[0].ca, 255);
+    }
+
+    #[test]
+    fn merge_runs_all_different_colors_never_coalesce() {
+        // Adjacent pixels with distinct colours each become their own run despite contiguity.
+        let pixels = vec![
+            (0, 0, 1u8, 0u8, 0u8, 255u8),
+            (1, 0, 2u8, 0u8, 0u8, 255u8),
+            (2, 0, 3u8, 0u8, 0u8, 255u8),
+        ];
+        let n = pixels.len();
+        let runs = merge_runs(pixels);
+        assert_eq!(runs.len(), n, "no merging when colour changes every pixel");
+        assert!(runs.iter().all(|r| r.w == 1));
+    }
+
+    #[test]
+    fn merge_runs_preserves_total_pixel_count() {
+        // Whatever the gaps/colours, the runs must cover exactly the input pixel count.
+        let pixels = vec![
+            (5, 2, 9u8, 9u8, 9u8, 200u8),
+            (6, 2, 9u8, 9u8, 9u8, 200u8),
+            (8, 2, 9u8, 9u8, 9u8, 200u8), // gap at x=7
+            (0, 0, 9u8, 9u8, 9u8, 200u8),
+            (1, 0, 9u8, 9u8, 9u8, 100u8), // coverage change
+        ];
+        let n = pixels.len();
+        let runs = merge_runs(pixels);
+        assert_eq!(runs.iter().map(|r| r.w as usize).sum::<usize>(), n, "count preserved");
+    }
+
+    #[test]
+    fn merge_runs_sorts_rows_then_columns() {
+        // Out-of-order input is row-major sorted; verify runs come out ordered and contiguous merge.
+        let pixels = vec![
+            (1, 1, 7u8, 7u8, 7u8, 50u8),
+            (0, 0, 7u8, 7u8, 7u8, 50u8),
+            (1, 0, 7u8, 7u8, 7u8, 50u8),
+            (0, 1, 7u8, 7u8, 7u8, 50u8),
+        ];
+        let runs = merge_runs(pixels);
+        // Row 0 (0,1) merges to one width-2 run, row 1 (0,1) merges to one width-2 run.
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0].dy, 0);
+        assert_eq!(runs[0].w, 2);
+        assert_eq!(runs[1].dy, 1);
+        assert_eq!(runs[1].w, 2);
+    }
+
+    #[test]
+    fn text_width_empty_is_zero_nonempty_is_positive() {
+        assert_eq!(text_width("", 2.0), 0.0);
+        assert!(text_width("X", 2.0) > 0.0);
+        assert!(text_width(" ", 2.0) > 0.0, "a space still advances the pen");
+    }
+
+    #[test]
+    fn text_width_grows_with_scale() {
+        let small = text_width("HELLO", 1.0);
+        let large = text_width("HELLO", 3.0);
+        assert!(large > small, "larger scale -> wider ({small} vs {large})");
+    }
+
+    #[test]
+    fn text_width_longer_string_is_at_least_as_wide() {
+        // Appending characters never narrows the line (proportional but monotone in this font).
+        let base = text_width("AB", 2.0);
+        let more = text_width("ABCDEF", 2.0);
+        assert!(more >= base, "longer string is at least as wide ({base} vs {more})");
+        // Repeating the same glyph scales roughly linearly upward.
+        let one = text_width("M", 2.0);
+        let four = text_width("MMMM", 2.0);
+        assert!(four > one, "four glyphs wider than one ({one} vs {four})");
+    }
+
+    #[test]
+    fn text_width_is_deterministic_across_calls() {
+        let a = text_width("DETERMINISM", 2.2);
+        let b = text_width("DETERMINISM", 2.2);
+        assert_eq!(a, b, "same input -> same width (cache + pure shaping)");
+    }
+
+    #[test]
+    fn fit_text_returns_original_when_it_fits_exactly() {
+        let s = "FITS";
+        let w = text_width(s, 1.5);
+        assert_eq!(fit_text(s, 1.5, w), s, "width exactly equal to budget keeps the string (<=)");
+        assert_eq!(fit_text(s, 1.5, w + 0.5), s, "slack budget keeps the string");
+    }
+
+    #[test]
+    fn fit_text_zero_and_negative_width_is_noop() {
+        assert_eq!(fit_text("abc", 1.4, 0.0), "abc", "zero width returns original unchanged");
+        assert_eq!(fit_text("abc", 1.4, -10.0), "abc", "negative width returns original unchanged");
+    }
+
+    #[test]
+    fn fit_text_single_overwide_glyph_collapses_to_ellipsis() {
+        // One glyph wider than the whole tiny budget -> just the ellipsis, no overflow, no infinite loop.
+        let out = fit_text("W", 2.0, 0.5);
+        assert_eq!(out, "…");
+    }
+
+    #[test]
+    fn fit_text_clipped_result_fits_budget_and_ends_with_ellipsis() {
+        let full = "THE QUICK BROWN FOX JUMPS OVER";
+        let w = text_width(full, 1.4);
+        let budget = w * 0.5;
+        let clipped = fit_text(full, 1.4, budget);
+        assert!(clipped.ends_with('…'), "clipped ends with ellipsis");
+        assert!(clipped.chars().count() < full.chars().count(), "clipped is shorter");
+        assert!(text_width(&clipped, 1.4) <= budget, "clipped fits within budget");
+    }
+
+    #[test]
+    fn fit_text_tiny_positive_budget_yields_at_least_an_ellipsis() {
+        // Positive but smaller than any glyph: loop breaks immediately, output is the lone ellipsis.
+        let out = fit_text("LONG STRING HERE", 1.4, 0.01);
+        assert_eq!(out, "…");
+        assert!(out.ends_with('…'));
+    }
+
+    #[test]
+    fn draw_text_centered_and_right_position_relative_to_width() {
+        // Centered/right helpers reduce to draw_text at a shifted origin; check they paint within bounds.
+        let mut c = CpuCanvas::new(300, 40);
+        c.clear(Color::rgb(0, 0, 0));
+        draw_text_centered(&mut c, 150.0, 12.0, 2.0, Color::WHITE, "MID");
+        let any_left = (0..150).any(|x| (0..40).any(|y| c.pixel_at(x, y).r > 30));
+        let any_right = (150..300).any(|x| (0..40).any(|y| c.pixel_at(x, y).r > 30));
+        assert!(any_left && any_right, "centered text straddles the center x");
+
+        let mut c2 = CpuCanvas::new(300, 40);
+        c2.clear(Color::rgb(0, 0, 0));
+        draw_text_right(&mut c2, 299.0, 12.0, 2.0, Color::WHITE, "END");
+        let w = text_width("END", 2.0);
+        let leftmost = (0..300).find(|&x| (0..40).any(|y| c2.pixel_at(x, y).r > 30));
+        if let Some(lx) = leftmost {
+            // Text should sit in the right region: its left edge is near right_x - width.
+            assert!((lx as f32) > 299.0 - w - 6.0, "right-aligned text hugs the right edge (lx={lx})");
+        }
+    }
+
+    #[test]
+    fn draw_text_empty_string_paints_nothing() {
+        let mut c = CpuCanvas::new(60, 20);
+        c.clear(Color::rgb(0, 0, 0));
+        draw_text(&mut c, 5.0, 5.0, 2.0, Color::WHITE, "");
+        let lit = (0..60 * 20).any(|i| c.pixel_at((i % 60) as u32, (i / 60) as u32).r > 5);
+        assert!(!lit, "empty string emits no glyph pixels");
     }
 
     #[test]

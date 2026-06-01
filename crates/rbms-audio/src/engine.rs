@@ -6,7 +6,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SampleFormat, SizedSample, StreamConfig};
 
 use crate::AudioError;
-use crate::decode::decode_bytes;
+use crate::decode::{DecodedAudio, decode_bytes};
 use crate::mixer::{Command, Mixer, SampleData};
 
 /// Owns the cpal output stream, the RT-safe command queue, the sample-derived master
@@ -63,9 +63,16 @@ impl AudioEngine {
 
     pub fn load(&mut self, id: u32, bytes: Vec<u8>, ext: Option<&str>) -> Result<(), AudioError> {
         let dec = decode_bytes(bytes, ext)?;
-        let sd = SampleData { pcm: dec.samples.into(), channels: dec.channels, rate: dec.rate };
-        self.bank.insert(id, Arc::new(sd));
+        self.insert_decoded(id, dec);
         Ok(())
+    }
+
+    /// Insert an already-decoded sample into the keysound bank. Same effect as [`load`](Self::load)
+    /// but skips the (CPU-heavy) symphonia decode, which the caller has already done — lets a host
+    /// decode many keysounds in parallel off-thread, then insert the results here on one thread.
+    pub fn insert_decoded(&mut self, id: u32, audio: DecodedAudio) {
+        let sd = SampleData { pcm: audio.samples.into(), channels: audio.channels, rate: audio.rate };
+        self.bank.insert(id, Arc::new(sd));
     }
 
     pub fn loaded(&self) -> usize {
