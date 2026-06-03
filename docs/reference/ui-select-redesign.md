@@ -9,7 +9,7 @@
 2. **레이아웃은 list-left / detail-right 유지**(ROADMAP "우측 상세"·"현재 골격 유지 가능"). 06의 좌우는 미러지만 목표는 **정보밀도·비주얼 품질**이지 픽셀 미러가 아니다.
 3. **커버 이미지**는 단일 BGA 슬롯 사용: `set_bga(cover_rgba, cover_rect)`는 모든 쿼드 **뒤**에 그려지므로, `render_select`는 커버 영역에 **불투명 패널을 깔지 않고** 테두리+placeholder만 그린다(텍스처가 비쳐 보이게). 커버 없으면 `clear_bga` + "NO IMAGE".
 4. **밀도 그래프**는 beatoraja `SongInformation` 알고리즘을 정밀 포팅(§3).
-5. **`#PREVIEW` 재생은 본 라운드 분리**(select 중 `audio=None` → 엔진 라이프사이클 별도). 파서/데이터는 준비, 재생은 후속.
+5. **`#PREVIEW` 재생은 본 라운드 분리**(select 중 `audio=None` → 엔진 라이프사이클 별도). 파서/데이터는 준비, 재생은 후속. → **갱신(2026-06-03)**: select 전용 `AudioEngine`로 재생 배선·`config.debug` 계측·`samples/preview-demo` 픽스처 완료(가청 확인만 수동 잔여, `docs/bug/2026-06-03-preview-playback.md`).
 
 ## 1. 영역 좌표 (1280×720)
 
