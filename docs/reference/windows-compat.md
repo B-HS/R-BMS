@@ -3,7 +3,7 @@
 > rbms는 크로스플랫폼 크레이트(winit/wgpu·cpal·rfd·cosmic-text)로 작성돼 **플랫폼별 분기 코드가 없다**(`cfg(windows)` 0건). 따라서 호환성은 "코드"보다 "**실제 런타임 검증**"이 관건이다. 이 문서가 그 단일 출처.
 
 ## CI가 보장하는 것
-- `.github/workflows/ci.yml`이 **ubuntu·macos·windows 매트릭스**로 `cargo build --workspace` + `cargo test --workspace`(886) 수행 → **Windows에서 컴파일·단위테스트(로직)는 green**.
+- `.github/workflows/ci.yml`이 **ubuntu·macos·windows 매트릭스**로 `cargo build --workspace` + `cargo test --workspace`(887) 수행 → **Windows에서 컴파일·단위테스트(로직)는 green**.
 - `release.yml`이 `x86_64-pc-windows-msvc`로 `rbms-player.exe` 빌드 → zip + sha256.
 - **한계:** CI 러너는 디스플레이·오디오 장치가 없어 **GUI/오디오/입력 런타임은 실행하지 않는다**. 즉 "빌드되고 로직 테스트는 통과"까지만 보장.
 

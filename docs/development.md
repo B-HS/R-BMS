@@ -11,7 +11,7 @@ generic "frontend" assumptions do not apply. Cargo workspace, edition 2024, rust
 
 ```bash
 cargo build --release -p rbms-player          # build the player
-cargo test  --workspace                        # ~880 unit tests, all green
+cargo test  --workspace                        # ~887 unit tests, all green
 cargo build --workspace --examples             # build crate examples too
 cargo clippy --workspace                        # informational only (CI is NOT gated on clippy/fmt)
 
@@ -20,13 +20,15 @@ cargo clippy --workspace                        # informational only (CI is NOT 
 ```
 
 - `./start.sh` with no args opens the GUI on `./assets/songs` (created empty if missing).
-- The app reads/writes config under `~/.config/rbms/`.
+- The app reads/writes config under `~/.config/rbms/`. `config_dir()` resolves `HOME` then
+  `USERPROFILE` (then `.`), so on Windows (where `HOME` is unset) config lands in
+  `%USERPROFILE%\.config\rbms`.
 
 ## Persistence (`~/.config/rbms/`, all RON, all `#[serde(default)]`)
 
 | File | What |
 |---|---|
-| `settings.ron` | play options (`PlaySettings`) |
+| `settings.ron` | play options (`PlaySettings`), incl. `server_url` / `player_id` (IR/NETWORK) |
 | `keyconfig.ron` | lane/control key bindings |
 | `scores.ron` | local score history (`ScoreBook`) |
 | `tables.ron` | difficulty-table sources |
@@ -63,6 +65,10 @@ The split modules use `use crate::*;` so they see all the crate-root items; move
 - **Note-field skin**: `assets/skins/*.ron` (`SkinConfig`), or `--skin file.ron`.
 - **UI theme**: `~/.config/rbms/theme.ron` (`ThemeConfig`); add a field to `rbms_render::theme::Theme`
   + route one `Color::rgb(..)` through `theme()`. See `theme.md`.
+- **Settings screen**: tabs are `SETTING_TABS` in `main.rs` (`(name, &[row ids])`) — e.g. the
+  **NETWORK** tab (rows 22 SERVER URL / 23 PLAYER ID). Free-text rows edit in place via the shared
+  `App.text_input` buffer (`settings_text_input`: Enter commits, Esc cancels, live buffer rendered);
+  the NETWORK commit persists `settings.ron` and rebuilds the score server (`rebuild_server`).
 
 ## Conventions
 

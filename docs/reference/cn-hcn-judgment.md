@@ -52,7 +52,7 @@
 ## rbms 구현 (✅ 적용됨 — `Cn`/`Hcn` 게이트, 2026-06-03)
 1. **플럼빙:** `matcher.rs`의 `JNote`에 `ln: Option<LnKind>` 추가, `from_model`이 `LongStart{ln}`에서 운반. 공개 `from_pairs`/`new` 시그니처 유지(내부 `from_triples` 도입, pair-빌드는 `LnKind::Ln` 기본). `is_charge(ln)`로 CN/HCN 게이트.
 2. **2-판정 모델:** CN/HCN은 **head(press 시 즉시 카운트) + end(release 시 별도 카운트)** = 2 판정/노트. `total_notes`·`count_playable_notes`가 CN/HCN을 2로 카운트(분모 일관). `press`: CN/HCN head면 `apply(judge)` 즉시. `release`: CN/HCN은 `final = end_judge`(ln_end 윈도우, head로 capping 안 함), LN은 `worse(head,end)` 유지. `update`: CN/HCN over-hold면 end 1판정, 미히트면 head+end 2 Miss; LN은 1.
-3. **검증:** 합성 픽스처 5종(`cn_head_and_end_are_two_judgments`·`cn_early_release_judges_end_without_capping_head`·`cn_never_hit_misses_head_and_end`·`hcn_end_is_also_two_judgments`·`ln_remains_single_judgment_worse_of_head_end`). 전체 886 통과·무경고. LN/Normal byte 불변(회귀 0).
+3. **검증:** 합성 픽스처 5종(`cn_head_and_end_are_two_judgments`·`cn_early_release_judges_end_without_capping_head`·`cn_never_hit_misses_head_and_end`·`hcn_end_is_also_two_judgments`·`ln_remains_single_judgment_worse_of_head_end`). 전체 887 통과·무경고. LN/Normal byte 불변(회귀 0).
 
 ## 잔여 (후속)
 - **HCN 연속 게이지(Phase 7):** 홀드 동안 `hcnmduration` 주기로 게이지 ±0.5. `gauge.rs`에 연속 증감 API + 엔진에 passing/홀드 시간 누적 상태. (현재 HCN은 종단 판정만 CN과 동일, 연속 게이지 없음.)

@@ -5,7 +5,7 @@
 
 ## 1. ci.yml — 검증 (push/PR)
 - 트리거: `dev`·`prod` push, 그 둘로의 PR.
-- `test` 잡: **ubuntu·macos·windows 매트릭스**로 `cargo build --workspace` + `cargo test --workspace`(현재 880). Linux는 cpal(ALSA)·winit(X11/Wayland)·rfd(GTK3) 링크용 dev 라이브러리 설치.
+- `test` 잡: **ubuntu·macos·windows 매트릭스**로 `cargo build --workspace` + `cargo test --workspace`(현재 887). Linux는 cpal(ALSA)·winit(X11/Wayland)·rfd(GTK3) 링크용 dev 라이브러리 설치.
 - `lint` 잡: `cargo fmt --check` + `cargo clippy`(둘 다 **informational**, `continue-on-error` — 프로젝트가 fmt/clippy 게이트가 아니므로 CI 실패 안 시킴).
 - 캐시: `Swatinem/rust-cache@v2`.
 

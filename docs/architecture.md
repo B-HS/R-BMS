@@ -59,15 +59,15 @@ Everything drawn — notes, beams, text (cosmic-text), BGA frame — lowers to `
 - **Modes** are data (`Mode` + an `[i8;18]` channel map) — a new key mode is a constant, never an engine branch.
 - **Skins** (`SkinConfig`, RON): note-field geometry, palettes, gauge thresholds, key-bomb, DP layout.
 - **UI theme** (`ThemeConfig`, RON): menu/chrome colours — see `docs/theme.md`.
-- **Keymaps** (`KeyConfig`, RON), **note options**, **difficulty tables**, **song folders** (multi-folder), all persisted under `~/.config/rbms/` (every file `#[serde(default)]`, parse-fail → `.ron.bak` + defaults).
+- **Keymaps** (`KeyConfig`, RON), **note options**, **difficulty tables**, **song folders** (multi-folder), **IR network settings** (`server_url`/`player_id`), all persisted under the config dir (every file `#[serde(default)]`, parse-fail → `.ron.bak` + defaults). The config dir resolves `HOME` → `USERPROFILE` → `.` for cross-platform parity (Windows lands in `%USERPROFILE%\.config\rbms`); `config_dir_from` is unit-tested.
 
 ## App UI state machine (`Stage`)
 
-`Select` (song list: search `/`, sort `F3`, clickable bottom nav buttons) · `Settings` · `KeyConfig` · `Tables` (difficulty-table manager) · `Folders` (multi-folder library manager) · `Loading` (determinate keysound-decode progress bar) · `Play` · `Result`.
+`Select` (song list: search `/`, sort `F3`, clickable bottom nav buttons) · `Settings` (tabs incl. a **NETWORK** tab editing SERVER URL / PLAYER ID in-place — Enter commits + rebuilds the `ScoreServer`, Esc cancels) · `KeyConfig` · `Tables` (difficulty-table manager) · `Folders` (multi-folder library manager) · `Loading` (determinate keysound-decode progress bar) · `Play` · `Result`.
 
 ## Testing
 
-~880 unit tests across the workspace, edge-case heavy (boundaries, malformed input, invariants,
+~887 unit tests across the workspace, edge-case heavy (boundaries, malformed input, invariants,
 round-trips, determinism). Run `cargo test --workspace`. The deterministic render backend `CpuCanvas`
 makes pixel-level rendering testable without a GPU.
 

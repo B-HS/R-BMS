@@ -2,7 +2,7 @@
 
 > 새 세션은 **이 문서부터** 읽는다. 현재 상태·아키텍처·실행법·할 일의 SSOT. (ai-process.md 원칙 1·14)
 > 베이스 룰: `~/.claude/CLAUDE.md` + convention. Rust 프로젝트 → TS 전용 규칙(arrow 등) 비적용, **공통 원칙**(주석 금지·설명은 docs/·정확 네이밍·근본 해결·공식문서 우선·검증 후 진행)은 그대로.
-> 위치: `/Users/hyunseokbyun/rbms`. 빌드 `cargo build`, 테스트 `cargo test --workspace`(현재 **886 통과·0 실패·0 경고**). 실행은 §5(`./start.sh`).
+> 위치: `/Users/hyunseokbyun/rbms`. 빌드 `cargo build`, 테스트 `cargo test --workspace`(현재 **887 통과·0 실패·0 경고**). 실행은 §5(`./start.sh`).
 > git: **dev(작업)/prod(배포) 브랜치 모델**(CI는 dev, 릴리스는 prod → `docs/ci-release.md`). **커밋 메시지에 co-author(Claude) 넣지 않음**(사용자 명시 지시), 작성자 `Hyunseok Byun <gumyoincirno@gmail.com>`. `target`·`Cargo.lock`·라이브러리 차트 커밋 금지(.gitignore).
 > 다음 할 일(로드맵)은 **`ROADMAP.md`**, 백엔드 설계는 **`docs/backend/`**, 배포/CI는 **`docs/ci-release.md`**.
 
@@ -24,7 +24,7 @@
 **Phase 1 — 클라 정확성(핵심 패리티) + 마무리**
 - [x] `PlayOptions.lntype`를 헤더에서 유도 (app_play.rs 하드코딩 제거 → `ir_map::ir_lntype`, 0=LN/1=CN/2=HCN, 테스트)
 - [x] #PREVIEW: `config.debug` 6분기 계측 + `samples/preview-demo` 픽스처 + dead_code 제거 (가청 확인은 수동 1회 — `docs/bug/2026-06-03-preview-playback.md`)
-- [x] ⭐ `LnKind` 판정 전파 + CN/HCN 2-판정 모델(head@press + end@release, 이른릴리스=end 판정·미히트=2 Miss, 분모 CN=2) + 합성 픽스처 5종. `Cn`/`Hcn` 게이트 → LN/Normal byte 불변. 886 통과. (HCN 연속 게이지·CN deferral·BSS = Phase 7; → `docs/reference/cn-hcn-judgment.md`)
+- [x] ⭐ `LnKind` 판정 전파 + CN/HCN 2-판정 모델(head@press + end@release, 이른릴리스=end 판정·미히트=2 Miss, 분모 CN=2) + 합성 픽스처 5종. `Cn`/`Hcn` 게이트 → LN/Normal byte 불변. (HCN 연속 게이지·CN deferral·BSS = Phase 7; → `docs/reference/cn-hcn-judgment.md`)
 
 **Phase 2 — 첫 릴리스(인프라)**
 - [ ] prod 브랜치 생성·푸시 + 브랜치 보호 전략 결정(필수, `docs/acknowledge` 기록)
@@ -118,7 +118,9 @@ crates/
 **곡선택 후속(2026-05-31): 스탯그리드 잘림 수정·#PREVIEW·KEY BOMB.** (1) 상세 스탯그리드 **2열×3행→3열×2행** 압축(하단 LENGTH/TOTAL이 DENSITY 구분선에 잘리던 것 해결). (2) **`#PREVIEW` 프리뷰 재생 (TODO — 실재생 미동작)** — 포커스 settle(디바운스 20프레임) 시 `#PREVIEW` 디코드+루프(경계 재트리거, mixer `play(key)`가 동일키 먼저 stop하므로 선스케줄 대신 자연종료 후 재발화) 로직·select 전용 `AudioEngine`(플레이 엔진과 분리, `load()` 진입부·select 이탈 시 정지)·`AudioEngine::sample_duration_us`·**DISPLAY 탭 PREVIEW 토글**(`PlaySettings.preview`)까지 배선했으나 **포커스해도 소리 안 남**(추후 디버깅, 코드 유지). (3) **KEY BOMB** — 노트 히트(judge≤3, 空POOR/miss 제외) 시 판정선 판정색 확장+소멸 버스트. `Player.bomb`(press/release/autoplay 전 경로 기록)·`rbms_render::render_key_bomb`·**`SkinConfig` bomb_enabled/height/duration_ms 데이터주도**(기존 RON serde default 호환). 적대적 리뷰 1건(LOW: 리플레이 직접실행 시 cpal 스트림 1프레임 공존) 근본수정. → `docs/history/2026-05-31-select-redesign.md`.
 **CI/배포:** GitHub Actions(`.github/workflows/ci.yml`·`release.yml`) — 자동 버전·macOS 유니버설·Windows 빌드·릴리스(→`docs/ci-release.md`). 실제 동작은 GitHub 원격 push 시.
 
-상세 이력 → `docs/history/2026-05-31-*.md` (§8 docs맵). 다음 할 일 → `ROADMAP.md`.
+**2026-06-03 세션:** IR `lntype` 차트 유도(`ir_map::ir_lntype`, 0=LN/1=CN/2=HCN; 기존 하드코딩 제거) · **`#PREVIEW` 계측**(6 silent 분기 `config.debug` 로그)+`samples/preview-demo` 픽스처+dead_code 제거(가청 확인만 수동 잔여) · **CN/HCN 2-판정**(head@press + end@release, `Cn`/`Hcn` 게이트, 분모 2, 픽스처 5종; LN/Normal byte 불변) · **NETWORK 설정 탭**(SERVER URL/PLAYER ID 인앱 편집·`PlaySettings` 영속·`build_server` 재구성) · **Windows 설정 경로**(`config_dir` HOME→USERPROFILE). + Phase 0 위생(LICENSE·테스트수 정정·docs 커밋·dev 푸시) · 릴리스/백엔드 결정 기록(보류). → `docs/history/2026-06-03-session.md`.
+
+상세 이력 → `docs/history/2026-05-31-*.md`·`2026-06-03-session.md` (§8 docs맵). 다음 할 일 → `ROADMAP.md`.
 
 ## 5. 실행
 
@@ -153,8 +155,8 @@ $BIN --replay ~/.config/rbms/replays/<f>.ron  # 리플레이 재생
 - ~~ALL-SCRATCH/H-RANDOM 미구현~~ **해결**(시간임계 40/125ms). ~~green-number 미반영~~ **표시·반영**(HUD). ~~CN/HCN 미구분~~ **`#LNMODE`→`LnKind` 구분**(판정 차별화는 후속). 스크래치 회전(2키 교대) 단순화는 잔존.
 - 윈도우 리사이즈 UI 리플로우 없음(논리 1280×720 고정). BGA 비디오(mpg) 미지원. 게이지 5K/PMS 변종·judgerank 커스텀 일부 미반영. 난이도표 추가 fetch는 동기(1개씩).
 - **IR 백엔드 = 전체 설계 완료(`docs/backend/`, 문서 단계)·구현 후속**. ~~클라 슈퍼셋 확장 필요~~ **클라 DTO 슈퍼셋 확장 완료**(§4 IR). 서버 미구현이라 신규 메서드(settings/replay-dl/auth/course)는 호출 시 `Unsupported`. `PlayOptions.lntype`에 실제 LN모드 전파는 후속(모델에 lnmode 미보유).
-- ~~UI 곡선택 재설계~~·~~KEY BOMB~~ **완료**(§4). **#PREVIEW = TODO**(배선·토글·로직 구현했으나 포커스 시 실제 재생 미동작 — 차트 대부분 `#PREVIEW` 미정의 가능성/두 번째 cpal 스트림/디바운스 미도달. 코드 유지, 추후 디버깅 → `ROADMAP.md`). 남은 UI 후속: **스킨 데이터화**(결과/메뉴 패널까지 — 곡선택 추출·KEY BOMB 데이터화로 진척).
-- **F5 결과/메뉴 패널 위치 RON화**(현재 HUD 표면만 데이터화), **P3a 글리프 아틀라스·P4 웹폰트**, **CN/HCN 판정 차별화**, **FE 프로젝트**(별 저장소·MIT) 후속 → `ROADMAP.md`. 적대적 리뷰 보류 차이 → `docs/acknowledge/beatoraja-divergences.md`.
+- ~~UI 곡선택 재설계~~·~~KEY BOMB~~ **완료**(§4). **#PREVIEW = 계측+픽스처 완료**(6 silent 분기 `config.debug` 계측·`samples/preview-demo` 픽스처·dead_code 제거; **가청 확인만 수동 1회 잔여** → `docs/bug/2026-06-03-preview-playback.md`). 남은 UI 후속: **스킨 데이터화**(결과/메뉴 패널까지 — 곡선택 추출·KEY BOMB 데이터화로 진척).
+- ~~Windows 설정 경로~~ **해결**(`config_dir` HOME→USERPROFILE, → `docs/reference/windows-compat.md`). ~~CN/HCN 판정 차별화~~ **종단 2-판정 적용**(HCN 연속게이지·CN deferral·BSS는 Phase 7). 남은: **F5 결과/메뉴 패널 위치 RON화**(현재 HUD 표면만 데이터화), **P3a 글리프 아틀라스·P4 웹폰트**, **FE 프로젝트**(별 저장소·MIT) → `ROADMAP.md`. 적대적 리뷰 보류 차이 → `docs/acknowledge/beatoraja-divergences.md`.
 
 > **세션 이력(완료)**: 입력판정 근본수정(空POOR)·폴더 ←→ 네비·마우스·로컬기록 모달·beatoraja 램프색·AUTO REPLAY·Play-Esc-즉시결과·DEBUG MODE → `docs/history/2026-05-31-input-judge-nav-mouse-records.md`. 다국어 폰트(cosmic-text) → `…-multilingual-font.md`. 백엔드 IR-슈퍼셋 설계 + CI/CD → `…-backend-ir-ci.md`. (모두 §4 완료기능·§8 docs맵에 반영됨)
 
@@ -179,6 +181,7 @@ $BIN --replay ~/.config/rbms/replays/<f>.ron  # 리플레이 재생
   - `roadmap-client-features` — ROADMAP 클라이언트 9종: 폴더 SCANNING 로딩·스코어 랭크 그래프(IIDX 9분법)·점수 ΔEX 비교·리플레이 분석모드·데이터 주도 HUD 스킨·폰트 P3(캐시·말줄임)·IR 슈퍼셋 DTO·자기-빌드 SHA-256·노트옵션(ALL-SCR/H-RAN·green-number·CN/HCN·듀얼필드14K). 웨이브별 적대적 멀티에이전트 리뷰.
   - `ui-redesign-iidx` — IIDX/LR2 지향 UI 재설계: 폴더 영속·백그라운드 스캔(애니 로딩)·노트 상단 클리핑(근본 수정, 베젤 hack 제거)·플레이 IIDX 레이아웃+라이브 스코어 그래프·결과 IIDX 레이아웃·곡선택 클리어램프 LED+상세 메타 고도화(bms-rs 참조, `#MAKER`). DP 레이아웃 BGA 비킴. 적대적 리뷰로 DP충돌·stale폴더·perf 수정. 레퍼런스 수집·디자인 스펙.
   - `select-redesign` — 곡선택 전면 재설계(beatoraja modern chic): `rbms-render::render_select` 추출(헤드리스 검증)·`note_density`(SongInformation 포팅)·커버(단일 BGA슬롯)·KEY/레벨 배지·밀도 히스토그램·타이틀 2줄·`build_select_view` 캐시·파서 `#BANNER`/`#PREVIEW`. 2라운드 적대적 리뷰(16건→0건).
+  - `2026-06-03-session` — 위생(LICENSE·테스트수 정정·docs 커밋·dev 푸시)·IR lntype 차트 유도·#PREVIEW 계측+픽스처·CN/HCN 2-판정·NETWORK 설정 탭·Windows 설정 경로(HOME→USERPROFILE). 릴리스/백엔드 결정 기록(보류).
 - **새 세션 진입점 = 이 PROCESS.md**(CLAUDE.md가 지정). 별도 글로벌 하네스 메모리는 사용 안 함 — SSOT는 docs/.
 
 ## 9. 작업 규칙(요약)
