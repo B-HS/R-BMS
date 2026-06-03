@@ -58,6 +58,17 @@ pub(crate) fn ir_random(n: NoteOption) -> RandomOption {
     }
 }
 
+/// Map the chart's `#LNMODE` (0=undefined→LN, 1=LN, 2=CN, 3=HCN) to the IR `lntype` encoding
+/// (0=LN, 1=CN, 2=HCN — the rbms backend `data-model.md`/`compatibility.md` contract, which mirrors
+/// `LnKind` ordering). beatoraja folds undefined to plain LN, so 0 and 1 both yield 0.
+pub(crate) fn ir_lntype(lnmode: i32) -> i32 {
+    match lnmode {
+        2 => 1,
+        3 => 2,
+        _ => 0,
+    }
+}
+
 /// Canonical gauge token for settings storage (matches `gauge_from_name`'s vocabulary, so it
 /// round-trips — unlike the display name `gauge_name` which has spaces/hyphens).
 pub(crate) fn gauge_token(g: GaugeKind) -> &'static str {
@@ -243,5 +254,14 @@ mod tests {
             assert_eq!(parsed, n, "{:?} label round-trips through from_str", n);
             assert_eq!(ir_random(parsed), ir_random(n));
         }
+    }
+
+    #[test]
+    fn ir_lntype_maps_lnmode_to_backend_encoding() {
+        assert_eq!(ir_lntype(0), 0, "undefined -> LN");
+        assert_eq!(ir_lntype(1), 0, "explicit LN");
+        assert_eq!(ir_lntype(2), 1, "CN");
+        assert_eq!(ir_lntype(3), 2, "HCN");
+        assert_eq!(ir_lntype(99), 0, "unknown -> LN fallback");
     }
 }

@@ -13,19 +13,18 @@
 > 사용자 지시: "계획을 docs에 반영 후 Phase 0→7까지 멈추지 말고 진행." 확정 순서(9-에이전트 적대적 분석·비평으로 도출, 비평 정정 반영). 상세 forward plan은 로컬 `ROADMAP.md`, 결정 대기 항목은 `docs/acknowledge/`.
 > 효력: S<1일 · M=1~3일 · L≈1주 · XL=수주. `(선택)`/`(BLOCKED)` 표기.
 
-**Phase 0 — 위생 & 사실 정정 (전부 S, 즉시)**
-- [ ] 문서 사실 정정 1패스 — 테스트 수 `132/92/100 → 880`(PROCESS·CLAUDE·ci-release), CN/HCN 판정 미차별 명확화(`divergences.md` 추가)
-- [ ] `ci-release.md` stale 정정 — "원격 미설정/master 리네임" → 리모트·dev 존재, prod 브랜치+첫 태그만 잔여
-- [ ] 루트 `LICENSE`(GPL-3.0 전문) 추가
-- [ ] `ROADMAP.md`·README 배포 섹션·`docs/roadmap.md` dev/prod·Actions 상태 정정
-- [ ] 미커밋 `docs/` + `LICENSE`를 dev 커밋(작성자 Hyunseok Byun, co-author 없음; `ROADMAP.md`·`CLAUDE.md`·`start.sh`은 .gitignore=로컬 전용 제외)
-- [ ] dev → origin 푸시 (첫 3-OS CI 실검증)
+**Phase 0 — 위생 & 사실 정정 (전부 S, 즉시) ✅ 완료(2026-06-03)**
+- [x] 문서 사실 정정 1패스 — 테스트 수 `132/92/100 → 880`(PROCESS·CLAUDE·ci-release), CN/HCN 판정 미차별 명확화(`divergences.md` 추가)
+- [x] `ci-release.md` stale 정정 — 리모트·dev 존재 반영, prod 브랜치+첫 태그만 잔여
+- [x] 루트 `LICENSE`(GPL-3.0 전문) 추가
+- [x] `ROADMAP.md`·README 배포 섹션 dev/prod·Actions 상태 정정 (역할: ROADMAP=로컬 워킹, docs/roadmap=공개 ledger)
+- [x] 미커밋 `docs/` + `LICENSE`를 dev 커밋(`1d3fb13`, 작성자 Hyunseok Byun, co-author 없음; gitignore 항목 제외)
+- [x] dev → origin 푸시 (CI 3-OS 트리거됨)
 
 **Phase 1 — 클라 정확성(핵심 패리티) + 마무리**
-- [ ] ⭐ `LnKind`를 판정 엔진에 전파 (matcher.rs `from_model`이 `LongStart{ln}` 폐기 → CN/HCN을 LN으로 판정 중; 최고 ROI·무의존)
-- [ ] `PlayOptions.lntype`를 헤더에서 유도 (app_play.rs:304 하드코딩 제거)
-- [ ] #PREVIEW: 계측(config.debug) + 실제 `#PREVIEW` 테스트 차트 + 실패경로 근본수정 + 회귀테스트 + dead_code 제거
-- [ ] CN 종료 판정(릴리스 시간 판정, LN 구제 없음) + CN/HCN 회귀 테스트
+- [x] `PlayOptions.lntype`를 헤더에서 유도 (app_play.rs 하드코딩 제거 → `ir_map::ir_lntype`, 0=LN/1=CN/2=HCN, 테스트)
+- [x] #PREVIEW: `config.debug` 6분기 계측 + `samples/preview-demo` 픽스처 + dead_code 제거 (가청 확인은 수동 1회 — `docs/bug/2026-06-03-preview-playback.md`)
+- [~] ⭐ `LnKind` 판정 전파 + CN 종료 판정(릴리스 시간 판정, LN 구제 없음) + CN/HCN 회귀 테스트 — **스펙 완료**(`docs/reference/cn-hcn-judgment.md`, beatoraja 라인 대조), **동작 변경은 검증 코퍼스 greenlight 후속**(베이스라인 회귀 위험)
 
 **Phase 2 — 첫 릴리스(인프라)**
 - [ ] prod 브랜치 생성·푸시 + 브랜치 보호 전략 결정(필수, `docs/acknowledge` 기록)
@@ -161,11 +160,12 @@ $BIN --replay ~/.config/rbms/replays/<f>.ron  # 리플레이 재생
 
 ## 8. docs 맵
 
-- `docs/reference/` — mechanics(beatoraja 메커닉)·rust-stack·architecture·wgpu29-winit030-api·ir-api(서버계약)·_appendix-raw·**ui-design**(IIDX/LR2/beatoraja UI 레이아웃 스펙)·**ui-select-redesign**(곡선택 정밀 스펙: render_select 추출·밀도 포팅·레이아웃)·**ui/**(레퍼런스 스크린샷: provided 6 + fetched 18 + README).
+- `docs/reference/` — mechanics(beatoraja 메커닉)·rust-stack·architecture·wgpu29-winit030-api·ir-api(서버계약)·_appendix-raw·**cn-hcn-judgment**(CN/HCN 판정 beatoraja 대조 구현 스펙·후속)·**ui-design**(IIDX/LR2/beatoraja UI 레이아웃 스펙)·**ui-select-redesign**(곡선택 정밀 스펙: render_select 추출·밀도 포팅·레이아웃)·**ui/**(레퍼런스 스크린샷: provided 6 + fetched 18 + README).
 - `docs/acknowledge/` — decisions(확정결정)·beatoraja-divergences(보류차이)·empty-poor-local-scores(空POOR처리·로컬기록 스키마).
 - `docs/font-cjk-support.md` — 다국어 폰트 지원(cosmic-text 결정·beatoraja 폰트 파악·P1/P2 완료·P3/P4 후속).
 - `docs/backend/` — **백엔드 IR-슈퍼셋 서버** 설계: README·PRD·api-spec(전 엔드포인트)·data-model(Drizzle)·endpoint-tasks·compatibility(LR2IR/beatoraja 매핑+출처). (Hono/Bun/Drizzle)
 - `docs/ci-release.md` — GitHub Actions(ci/release): 자동 버전·macOS 유니버설·Windows 빌드·릴리스. 주의(원격/브랜치보호/LICENSE/서명).
+- `docs/bug/` — 버그/진단 기록(예: `2026-06-03-preview-playback` #PREVIEW 계측·검증절차).
 - `docs/memory/` — test-library(라이브러리 실측).
 - `docs/history/` (시간순):
   - `m0-m1-parser-chart` · `m2-audio` · `m3-render-scroll` · `m6-judge-m4-autoplay` · `m7-live-window` — 코어 마일스톤.

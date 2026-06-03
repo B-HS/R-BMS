@@ -26,6 +26,8 @@
 
 ## 진행 중 — CN/HCN 판정 차별화 (2026-06-03 로드맵 Phase 1)
 
+> 충실 포팅 스펙(beatoraja `JudgeManager` 라인 대조) = `docs/reference/cn-hcn-judgment.md`. 동작 변경은 검증 코퍼스 동반 후속.
+
 현재 `judge/matcher.rs`의 `from_model`이 `LongStart{ln}`에서 `LnKind`(LN/CN/HCN)를 폐기한다. 그 결과 `#LNMODE`로 파싱·구분된 CN(charge note)·HCN(hell charge note)이 **일반 LN과 동일하게 판정**된다(릴리스 미스가 LN처럼 구제됨). beatoraja는 CN 릴리스를 실제 시간 판정으로 보고(이른 릴리스 = BAD/POOR, 헤드 미스 시 헤드·페어 양쪽 +POOR), HCN은 홀딩 동안 연속 게이지 증감(`hcnmduration`)을 둔다. → 로드맵 **Phase 1: `LnKind` 판정 전파 + CN 종료 판정**, **Phase 7: HCN 연속 게이지**로 수정 예정. 차트 해시·기존 LN 판정 결과에는 영향 없음(파싱 단계 `LnKind` 구분은 이미 정확).
 
 ## 기각 (not-a-bug)

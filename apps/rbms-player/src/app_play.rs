@@ -20,6 +20,7 @@ impl App {
         };
         let src = rbms_parser::parse_with(&bytes, Default::default());
         let mode = rbms_chart::detect_mode(&src, &self.chart_path);
+        self.chart_lntype = ir_lntype(src.headers.lnmode);
         let mut model = to_model(&src, mode);
         self.recording.clear();
         self.replay_cursor = 0;
@@ -301,7 +302,7 @@ impl App {
                 random: ir_random(self.config.random),
                 random_p2: None,
                 scratch_auto: self.config.scratch_auto,
-                lntype: 1,
+                lntype: self.chart_lntype,
                 input_device: "keyboard".into(),
                 assist: vec![],
                 option: 0,

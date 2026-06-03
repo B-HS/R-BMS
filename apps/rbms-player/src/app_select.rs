@@ -312,21 +312,60 @@ impl App {
     /// Decode the focused song's `#PREVIEW` clip and start it looping. Marks the song as settled even
     /// when there is no preview file, so the debounce doesn't retry every frame.
     pub(crate) fn start_preview(&mut self, si: usize) {
+        let dbg = self.config.debug;
         self.preview_si = Some(si);
         self.preview_loop_us = 0;
-        let Some(e) = self.songs.get(si) else { return };
+        let Some(e) = self.songs.get(si) else {
+            if dbg {
+                eprintln!("[preview] song index {si} out of range");
+            }
+            return;
+        };
         if e.preview.trim().is_empty() {
+            if dbg {
+                eprintln!("[preview] '{}' defines no #PREVIEW — nothing to play", e.title);
+            }
             return;
         }
-        let Some(dir) = e.path.parent() else { return };
-        let Some((path, _)) = resolve_file(dir, &e.preview, &["wav", "ogg", "flac", "mp3"]) else { return };
-        let Ok(bytes) = std::fs::read(&path) else { return };
+        let Some(dir) = e.path.parent() else {
+            if dbg {
+                eprintln!("[preview] no parent dir for {}", e.path.display());
+            }
+            return;
+        };
+        let Some((path, _)) = resolve_file(dir, &e.preview, &["wav", "ogg", "flac", "mp3"]) else {
+            if dbg {
+                eprintln!("[preview] #PREVIEW '{}' not found under {}", e.preview, dir.display());
+            }
+            return;
+        };
+        let title = e.title.clone();
+        let bytes = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(err) => {
+                if dbg {
+                    eprintln!("[preview] read failed {}: {err}", path.display());
+                }
+                return;
+            }
+        };
         let ext = path.extension().and_then(|x| x.to_str()).map(str::to_owned);
         if self.preview_audio.is_none() {
-            self.preview_audio = AudioEngine::new().ok();
+            match AudioEngine::new() {
+                Ok(eng) => self.preview_audio = Some(eng),
+                Err(err) => {
+                    if dbg {
+                        eprintln!("[preview] AudioEngine::new failed (no preview output stream): {err}");
+                    }
+                    return;
+                }
+            }
         }
         let Some(eng) = self.preview_audio.as_mut() else { return };
-        if eng.load(PREVIEW_ID, bytes, ext.as_deref()).is_err() {
+        if let Err(err) = eng.load(PREVIEW_ID, bytes, ext.as_deref()) {
+            if dbg {
+                eprintln!("[preview] decode failed {}: {err}", path.display());
+            }
             return;
         }
         let dur = eng.sample_duration_us(PREVIEW_ID).unwrap_or(0);
@@ -334,6 +373,9 @@ impl App {
         eng.play(PREVIEW_ID, PREVIEW_GAIN, 0.0, 1.0, now);
         self.preview_loop_us = dur;
         self.preview_next_us = now + dur.max(1);
+        if dbg {
+            eprintln!("[preview] playing '{title}' ({}) dur_us={dur} clock_us={now}", path.display());
+        }
     }
 
     /// Tear down the preview (drops the engine to release its cpal stream); recreated next time a

@@ -41,7 +41,7 @@ use format::{
     clear_label_color, clear_type_from_id, clear_type_id, difficulty_color, difficulty_name, fmt_datetime, fmt_duration, gauge_name, mode_color, mode_short, rank_label,
 };
 use gpu::Gpu;
-use ir_map::{gauge_from_name, gauge_token, ir_clear, ir_gauge, ir_random};
+use ir_map::{gauge_from_name, gauge_token, ir_clear, ir_gauge, ir_lntype, ir_random};
 use keyconfig::{ControlAction, KeyConfig, key_from_name, key_name};
 use replay::{Replay, ReplayEvent};
 use scores::{ScoreBook, ScoreRecord};
@@ -286,9 +286,7 @@ struct SongEntry {
     md5: String,
     stagefile: String,
     banner: String,
-    /// `#PREVIEW` audio path. Parsed and carried now; focus-preview playback is a follow-up
-    /// (the audio engine is only alive during Play — see ROADMAP "UI 고도화").
-    #[allow(dead_code)]
+    /// `#PREVIEW` audio path, played on a settled focus by `start_preview` (select-only audio engine).
     preview: String,
 }
 
@@ -561,6 +559,9 @@ struct App {
     keyconfig_path: PathBuf,
     settings_path: PathBuf,
     seed: u64,
+    /// IR `lntype` of the loaded chart (0=LN, 1=CN, 2=HCN), derived from `#LNMODE` at load time so
+    /// score submissions report the actual LN mode instead of a hardcoded value.
+    chart_lntype: i32,
     recording: Vec<ReplayEvent>,
     replay: Option<Replay>,
     replay_cursor: usize,
@@ -740,6 +741,7 @@ impl App {
             keyconfig_path,
             settings_path,
             seed: 1,
+            chart_lntype: 0,
             recording: Vec::new(),
             replay,
             replay_cursor: 0,
