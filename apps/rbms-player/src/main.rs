@@ -713,10 +713,7 @@ impl App {
 
         let (server, server_connected) = build_server(&config);
 
-        let keyconfig_path = config.keyconfig_path.clone().map(PathBuf::from).unwrap_or_else(|| {
-            let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
-            home.join(".config/rbms/keyconfig.ron")
-        });
+        let keyconfig_path = config.keyconfig_path.clone().map(PathBuf::from).unwrap_or_else(|| config_dir().join("keyconfig.ron"));
         let keyconfig = KeyConfig::load(&keyconfig_path);
 
         let mut app = App {
@@ -1070,8 +1067,21 @@ impl ApplicationHandler for App {
     }
 }
 
+/// Resolve `~/.config/rbms`, the per-user config dir holding settings/keyconfig/scores/tables/
+/// folders/theme/replays.
+fn config_dir() -> PathBuf {
+    config_dir_from(std::env::var_os("HOME"), std::env::var_os("USERPROFILE"))
+}
+
+/// Pure config-dir resolution (testable without touching process env): prefer `HOME` (Unix/macOS),
+/// then `USERPROFILE` (Windows, where `HOME` is usually unset), then the current dir. Without the
+/// `USERPROFILE` fallback all config landed in the cwd on Windows instead of the user profile.
+fn config_dir_from(home: Option<std::ffi::OsString>, userprofile: Option<std::ffi::OsString>) -> PathBuf {
+    home.or(userprofile).map(PathBuf::from).unwrap_or_else(|| PathBuf::from(".")).join(".config/rbms")
+}
+
 fn main() {
-    let settings_path = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(".")).join(".config/rbms/settings.ron");
+    let settings_path = config_dir().join("settings.ron");
     let saved = PlaySettings::load(&settings_path);
     let mut cfg = PlayerConfig::default();
     apply_settings(&mut cfg, &saved);
@@ -1164,8 +1174,21 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{SortMode, THEME_TEMPLATE, bundled_skin, calibrated_offset, clear_type_from_id, clear_type_id, client_platform, compute_build_hash, default_total, fmt_datetime};
+    use super::{
+        SortMode, THEME_TEMPLATE, bundled_skin, calibrated_offset, clear_type_from_id, clear_type_id, client_platform, compute_build_hash, config_dir_from, default_total, fmt_datetime,
+    };
     use rbms_judge::ClearType;
+
+    #[test]
+    fn config_dir_prefers_home_then_userprofile() {
+        use std::ffi::OsString;
+        use std::path::PathBuf;
+        let cd = |h: Option<&str>, u: Option<&str>| config_dir_from(h.map(OsString::from), u.map(OsString::from));
+        assert_eq!(cd(Some("/home/u"), None), PathBuf::from("/home/u").join(".config/rbms"));
+        assert_eq!(cd(None, Some("C:/Users/u")), PathBuf::from("C:/Users/u").join(".config/rbms"), "USERPROFILE used when HOME unset (Windows)");
+        assert_eq!(cd(Some("/h"), Some("C:/x")), PathBuf::from("/h").join(".config/rbms"), "HOME wins over USERPROFILE");
+        assert_eq!(cd(None, None), PathBuf::from(".").join(".config/rbms"));
+    }
 
     #[test]
     fn theme_template_is_valid_ron_and_matches_defaults() {

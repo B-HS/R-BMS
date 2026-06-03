@@ -160,7 +160,7 @@ $BIN --replay ~/.config/rbms/replays/<f>.ron  # 리플레이 재생
 
 ## 8. docs 맵
 
-- `docs/reference/` — mechanics(beatoraja 메커닉)·rust-stack·architecture·wgpu29-winit030-api·ir-api(서버계약)·_appendix-raw·**cn-hcn-judgment**(CN/HCN 판정 beatoraja 대조 구현 스펙·후속)·**ui-design**(IIDX/LR2/beatoraja UI 레이아웃 스펙)·**ui-select-redesign**(곡선택 정밀 스펙: render_select 추출·밀도 포팅·레이아웃)·**ui/**(레퍼런스 스크린샷: provided 6 + fetched 18 + README).
+- `docs/reference/` — mechanics(beatoraja 메커닉)·rust-stack·architecture·wgpu29-winit030-api·ir-api(서버계약)·_appendix-raw·**cn-hcn-judgment**(CN/HCN 판정 beatoraja 대조 구현 스펙·후속)·**windows-compat**(Windows/크로스플랫폼 현황: CI 보장·USERPROFILE 수정·런타임 검증 잔여)·**ui-design**(IIDX/LR2/beatoraja UI 레이아웃 스펙)·**ui-select-redesign**(곡선택 정밀 스펙: render_select 추출·밀도 포팅·레이아웃)·**ui/**(레퍼런스 스크린샷: provided 6 + fetched 18 + README).
 - `docs/acknowledge/` — decisions(확정결정)·beatoraja-divergences(보류차이)·empty-poor-local-scores(空POOR처리·로컬기록 스키마).
 - `docs/font-cjk-support.md` — 다국어 폰트 지원(cosmic-text 결정·beatoraja 폰트 파악·P1/P2 완료·P3/P4 후속).
 - `docs/backend/` — **백엔드 IR-슈퍼셋 서버** 설계: README·PRD·api-spec(전 엔드포인트)·data-model(Drizzle)·endpoint-tasks·compatibility(LR2IR/beatoraja 매핑+출처)·**contract-freeze**(Phase 4 게이트: 클라 경로 대조·계약 동결·M0 단계). (Hono/Bun/Drizzle)
