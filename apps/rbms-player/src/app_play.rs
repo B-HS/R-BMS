@@ -640,7 +640,9 @@ impl App {
                         let sel = i == set_sel;
                         gpu.fill_rect(Rect::new(x0, y, PANEL_W, 42.0), if sel { th.button } else { th.panel });
                         draw_text(gpu, x0 + 20.0, y + 13.0, 1.8, if sel { th.text } else { th.text_dim }, label);
-                        draw_text_right(gpu, x0 + PANEL_W - 20.0, y + 13.0, 2.0, if sel { Color::YELLOW } else { th.text }, val);
+                        let editing = sel && self.text_input.is_some();
+                        let shown = if editing { format!("{}_", self.text_input.as_deref().unwrap_or("")) } else { val.clone() };
+                        draw_text_right(gpu, x0 + PANEL_W - 20.0, y + 13.0, 2.0, if editing { Color::rgb(120, 230, 255) } else if sel { Color::YELLOW } else { th.text }, &shown);
                         self.hot.push((Rect::new(x0, y, PANEL_W, 42.0), Hot::SettingRow(i)));
                     }
                 }

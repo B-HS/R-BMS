@@ -128,6 +128,8 @@ impl App {
             replay_analysis: self.config.replay_analysis,
             preview: self.config.preview,
             songs_folder: self.config.songs_folder.clone(),
+            server_url: self.config.server_url.clone(),
+            player_id: self.config.player_id.clone(),
         }
     }
 
@@ -159,6 +161,56 @@ impl App {
         rbms_render::reset_ui_family();
         self.config.font_path = None;
         self.save_settings();
+    }
+
+    /// Open the text editor for a NETWORK row (SERVER URL / PLAYER ID), pre-filled with the current
+    /// value so it can be edited in place. Commit/cancel is handled by `settings_text_input`.
+    pub(crate) fn begin_net_edit(&mut self, focused: usize) {
+        let cur = if focused == SETTING_PLAYER_ID {
+            self.config.player_id.clone()
+        } else {
+            self.config.server_url.clone().unwrap_or_default()
+        };
+        self.text_input = Some(cur);
+    }
+
+    /// Edit the active NETWORK text field. Enter commits (persists settings; empty SERVER URL =
+    /// offline, empty PLAYER ID = `guest`; rebuilds the score server on URL change), Esc cancels.
+    /// The focused settings row decides which field is written.
+    pub(crate) fn settings_text_input(&mut self, code: KeyCode, typed: Option<&str>) {
+        match code {
+            KeyCode::Enter | KeyCode::NumpadEnter => {
+                let value = self.text_input.take().unwrap_or_default().trim().to_string();
+                let focused = SETTING_TABS[self.set_tab].1.get(self.set_sel).copied().unwrap_or(0);
+                if focused == SETTING_PLAYER_ID {
+                    self.config.player_id = if value.is_empty() { "guest".to_string() } else { value };
+                } else {
+                    self.config.server_url = if value.is_empty() { None } else { Some(value) };
+                    self.rebuild_server();
+                }
+                self.save_settings();
+            }
+            KeyCode::Escape => self.text_input = None,
+            KeyCode::Backspace => {
+                if let Some(b) = self.text_input.as_mut() {
+                    b.pop();
+                }
+            }
+            _ => {
+                if let (Some(b), Some(t)) = (self.text_input.as_mut(), typed) {
+                    b.extend(t.chars().filter(|c| !c.is_control()));
+                }
+            }
+        }
+    }
+
+    /// Rebuild the score server after the NETWORK server URL changes, so score submission and the
+    /// connection indicator use the new endpoint immediately (the previous probe thread, if any,
+    /// keeps polling the old endpoint into its now-orphaned flag — harmless on a rare manual change).
+    pub(crate) fn rebuild_server(&mut self) {
+        let (server, connected) = build_server(&self.config);
+        self.server = server;
+        self.server_connected = connected;
     }
 
     pub(crate) fn offset_us(&self) -> i64 {

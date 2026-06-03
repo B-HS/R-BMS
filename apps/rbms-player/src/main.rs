@@ -147,9 +147,36 @@ fn apply_settings(cfg: &mut PlayerConfig, s: &PlaySettings) {
     cfg.replay_analysis = s.replay_analysis;
     cfg.preview = s.preview;
     cfg.songs_folder = s.songs_folder.clone();
+    cfg.server_url = s.server_url.clone();
+    cfg.player_id = s.player_id.clone();
     if !s.skin.trim().is_empty() {
         cfg.skin_name = s.skin.to_ascii_uppercase();
     }
+}
+
+/// Build the score server from config (`HttpScoreServer` if a URL is set, else offline
+/// `NullScoreServer`) plus a connection flag a background thread keeps fresh via `health()`.
+/// Used at startup and when the NETWORK settings tab changes the server URL.
+fn build_server(config: &PlayerConfig) -> (Arc<dyn ScoreServer>, Arc<AtomicBool>) {
+    let server: Arc<dyn ScoreServer> = match &config.server_url {
+        Some(url) => {
+            println!("score server: {url}");
+            Arc::new(rbms_ir::HttpScoreServer::new(url.clone(), None))
+        }
+        None => Arc::new(NullScoreServer),
+    };
+    let connected = Arc::new(AtomicBool::new(false));
+    if config.server_url.is_some() {
+        let server = server.clone();
+        let connected = connected.clone();
+        std::thread::spawn(move || {
+            loop {
+                connected.store(server.health().is_ok(), Ordering::Relaxed);
+                std::thread::sleep(Duration::from_secs(5));
+            }
+        });
+    }
+    (server, connected)
 }
 
 /// SHA-256 of the running client binary, submitted as `client_build_sha256` for build-integrity /
@@ -505,6 +532,8 @@ enum Hot {
 const GAUGE_CYCLE: [GaugeKind; 6] = [GaugeKind::AssistEasy, GaugeKind::Easy, GaugeKind::Normal, GaugeKind::Hard, GaugeKind::ExHard, GaugeKind::Hazard];
 const SETTING_KEYCONFIG: usize = 11;
 const SETTING_FONT: usize = 18;
+const SETTING_SERVER_URL: usize = 22;
+const SETTING_PLAYER_ID: usize = 23;
 
 /// Settings grouped into tabs by category. Each entry is `(tab name, [global setting indices])`
 /// where the indices map to `setting_line`/`adjust_setting`.
@@ -514,6 +543,7 @@ const SETTING_TABS: &[(&str, &[usize])] = &[
     ("JUDGE", &[9, 12, 15]),
     ("DISPLAY", &[14, 18, 19, 20, 21, 5, 6, 10, 17]),
     ("INPUT", &[7, 8, 11]),
+    ("NETWORK", &[22, 23]),
 ];
 
 
@@ -681,24 +711,7 @@ impl App {
         }
         let (table_names, table_levels) = if songs.is_empty() { (Vec::new(), Vec::new()) } else { fetch_and_match(&table_sources, &songs) };
 
-        let server: Arc<dyn ScoreServer> = match &config.server_url {
-            Some(url) => {
-                println!("score server: {url}");
-                Arc::new(rbms_ir::HttpScoreServer::new(url.clone(), None))
-            }
-            None => Arc::new(NullScoreServer),
-        };
-        let server_connected = Arc::new(AtomicBool::new(false));
-        if config.server_url.is_some() {
-            let server = server.clone();
-            let connected = server_connected.clone();
-            std::thread::spawn(move || {
-                loop {
-                    connected.store(server.health().is_ok(), Ordering::Relaxed);
-                    std::thread::sleep(Duration::from_secs(5));
-                }
-            });
-        }
+        let (server, server_connected) = build_server(&config);
 
         let keyconfig_path = config.keyconfig_path.clone().map(PathBuf::from).unwrap_or_else(|| {
             let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
@@ -913,41 +926,50 @@ impl ApplicationHandler for App {
                     }
                     Stage::Settings => {
                         if pressed {
-                            let items = SETTING_TABS[self.set_tab].1;
-                            self.set_sel = self.set_sel.min(items.len().saturating_sub(1));
-                            let focused = items.get(self.set_sel).copied().unwrap_or(0);
-                            let on_keyconfig = focused == SETTING_KEYCONFIG;
-                            let on_font = focused == SETTING_FONT;
-                            match code {
-                                KeyCode::Escape => {
-                                    self.save_settings();
-                                    self.stage = Stage::Select;
-                                }
-                                KeyCode::Tab => {
-                                    self.set_tab = (self.set_tab + 1) % SETTING_TABS.len();
-                                    self.set_sel = 0;
-                                }
-                                KeyCode::Enter | KeyCode::NumpadEnter => {
-                                    if on_keyconfig {
-                                        self.enter_keyconfig();
-                                    } else if on_font {
-                                        self.pick_font();
-                                    } else {
+                            if self.text_input.is_some() {
+                                self.settings_text_input(code, event.text.as_deref());
+                            } else {
+                                let items = SETTING_TABS[self.set_tab].1;
+                                self.set_sel = self.set_sel.min(items.len().saturating_sub(1));
+                                let focused = items.get(self.set_sel).copied().unwrap_or(0);
+                                let on_keyconfig = focused == SETTING_KEYCONFIG;
+                                let on_font = focused == SETTING_FONT;
+                                let on_net = focused == SETTING_SERVER_URL || focused == SETTING_PLAYER_ID;
+                                match code {
+                                    KeyCode::Escape => {
                                         self.save_settings();
                                         self.stage = Stage::Select;
                                     }
-                                }
-                                KeyCode::ArrowUp => self.set_sel = self.set_sel.saturating_sub(1),
-                                KeyCode::ArrowDown => self.set_sel = (self.set_sel + 1).min(items.len().saturating_sub(1)),
-                                KeyCode::ArrowLeft => self.adjust_setting(focused, -1),
-                                KeyCode::ArrowRight => {
-                                    if on_keyconfig {
-                                        self.enter_keyconfig();
-                                    } else {
-                                        self.adjust_setting(focused, 1);
+                                    KeyCode::Tab => {
+                                        self.set_tab = (self.set_tab + 1) % SETTING_TABS.len();
+                                        self.set_sel = 0;
                                     }
+                                    KeyCode::Enter | KeyCode::NumpadEnter => {
+                                        if on_keyconfig {
+                                            self.enter_keyconfig();
+                                        } else if on_font {
+                                            self.pick_font();
+                                        } else if on_net {
+                                            self.begin_net_edit(focused);
+                                        } else {
+                                            self.save_settings();
+                                            self.stage = Stage::Select;
+                                        }
+                                    }
+                                    KeyCode::ArrowUp => self.set_sel = self.set_sel.saturating_sub(1),
+                                    KeyCode::ArrowDown => self.set_sel = (self.set_sel + 1).min(items.len().saturating_sub(1)),
+                                    KeyCode::ArrowLeft => self.adjust_setting(focused, -1),
+                                    KeyCode::ArrowRight => {
+                                        if on_keyconfig {
+                                            self.enter_keyconfig();
+                                        } else if on_net {
+                                            self.begin_net_edit(focused);
+                                        } else {
+                                            self.adjust_setting(focused, 1);
+                                        }
+                                    }
+                                    _ => {}
                                 }
-                                _ => {}
                             }
                         }
                     }

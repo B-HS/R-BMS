@@ -757,6 +757,8 @@ impl App {
             19 => ("SCORE GRAPH", on(self.config.score_graph)),
             20 => ("REPLAY ANALYSIS", on(self.config.replay_analysis)),
             21 => ("PREVIEW", on(self.config.preview)),
+            22 => ("SERVER URL", self.config.server_url.clone().unwrap_or_else(|| "(none)".to_string())),
+            23 => ("PLAYER ID", self.config.player_id.clone()),
             _ => ("", String::new()),
         }
     }

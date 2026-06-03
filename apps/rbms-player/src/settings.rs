@@ -32,6 +32,10 @@ pub struct PlaySettings {
     pub preview: bool,
     /// Last song folder opened (via launch arg or the in-app picker), restored on the next launch.
     pub songs_folder: Option<String>,
+    /// IR score server base URL (NETWORK tab / `--server`). `None` = offline (NullScoreServer).
+    pub server_url: Option<String>,
+    /// Player id submitted to the score server (NETWORK tab / `--player`). Defaults to `guest`.
+    pub player_id: String,
 }
 
 impl Default for PlaySettings {
@@ -59,6 +63,8 @@ impl Default for PlaySettings {
             replay_analysis: true,
             preview: true,
             songs_folder: None,
+            server_url: None,
+            player_id: "guest".into(),
         }
     }
 }
@@ -115,6 +121,8 @@ mod tests {
         assert!(s.preview);
         assert_eq!(s.songs_folder, None);
         assert_eq!(s.font_path, None);
+        assert_eq!(s.server_url, None);
+        assert_eq!(s.player_id, "guest");
     }
 
     #[test]
@@ -142,6 +150,8 @@ mod tests {
         s.replay_analysis = false;
         s.preview = false;
         s.songs_folder = Some("/songs".into());
+        s.server_url = Some("https://ir.example/api".into());
+        s.player_id = "dj".into();
         let txt = ron::ser::to_string_pretty(&s, ron::ser::PrettyConfig::default()).unwrap();
         let back: PlaySettings = ron::from_str(&txt).unwrap();
         assert!((back.hispeed - 3.25).abs() < 1e-9);
@@ -163,6 +173,8 @@ mod tests {
         assert_eq!(back.font_path.as_deref(), Some("/tmp/f.ttf"));
         assert!(!back.score_graph && !back.replay_analysis && !back.preview);
         assert_eq!(back.songs_folder.as_deref(), Some("/songs"));
+        assert_eq!(back.server_url.as_deref(), Some("https://ir.example/api"));
+        assert_eq!(back.player_id, "dj");
     }
 
     #[test]

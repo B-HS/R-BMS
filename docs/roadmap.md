@@ -4,10 +4,8 @@ Tracked items the team chose to defer. Ordered roughly by priority.
 
 ## Deferred features (do later)
 
-### 1. NETWORK settings tab  *(deferred — document only)*
-The IR/online values are still **CLI-only** (`--server <URL>`, `--player <ID>`); they are the only user-facing config not in the settings screen. Adding them needs a **text-input row** in the settings UI (the difficulty-tables screen already has a text input to copy the pattern from). Plan:
-- New `SETTING_TABS` tab `"NETWORK"` with rows: SERVER URL, PLAYER ID.
-- Reuse the `text_input: Option<String>` field for editing; on commit, set `config.server_url` / `config.player_id`, persist to `settings.ron`, and rebuild the `ScoreServer`.
+### 1. NETWORK settings tab  *(done — 2026-06-03)*
+~~The IR/online values are CLI-only~~. **Implemented**: `SETTING_TABS` tab `"NETWORK"` with rows SERVER URL / PLAYER ID (indices 22/23), editing via the shared `text_input` field (Enter commits, Esc cancels, in-place pre-fill, buffer shown live). On commit: set `config.server_url`/`config.player_id`, persist to `settings.ron` (new `PlaySettings` fields, round-trip tested), rebuild the `ScoreServer` via the extracted `build_server` helper. Empty URL = offline (Null), empty ID = `guest`.
 
 ### 3. Settings screen mouse/button UX  *(deferred — document only)*
 The settings rows/tabs are already click-hittable (`Hot::SettingTab` / `Hot::SettingRow`), but value changes are keyboard-only (←/→). Plan: render explicit ◀ ▶ stepper buttons and an inline toggle switch per row, and a "DONE/BACK" button — mirroring the new bottom-bar buttons on the select screen.

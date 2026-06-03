@@ -31,7 +31,7 @@
 - [ ] 첫 GitHub Release (v0.1.0 수동 태그, macOS 유니버설+Windows+sha256)
 
 **Phase 3 — 클라 마지막 기능**
-- [ ] NETWORK 설정 탭 (SERVER URL/PLAYER ID + PlaySettings 영속 + ScoreServer 재구성)
+- [x] NETWORK 설정 탭 — SERVER URL/PLAYER ID 행(22/23), text_input 인플레이스 편집(Enter 커밋·Esc 취소·버퍼 표시), `PlaySettings` 영속(라운드트립 테스트), `build_server` 추출로 ScoreServer 재구성. 빈 URL=오프라인·빈 ID=guest.
 
 **Phase 4 — 백엔드 MVP + 클라 연동 (별 MIT 레포, 서버 임계경로)**
 - [ ] IR 계약 동결(게이트): /api 프리픽스·settings 경로·필드명 reconcile → `docs/acknowledge`
