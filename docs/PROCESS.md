@@ -163,7 +163,7 @@ $BIN --replay ~/.config/rbms/replays/<f>.ron  # 리플레이 재생
 - `docs/reference/` — mechanics(beatoraja 메커닉)·rust-stack·architecture·wgpu29-winit030-api·ir-api(서버계약)·_appendix-raw·**cn-hcn-judgment**(CN/HCN 판정 beatoraja 대조 구현 스펙·후속)·**ui-design**(IIDX/LR2/beatoraja UI 레이아웃 스펙)·**ui-select-redesign**(곡선택 정밀 스펙: render_select 추출·밀도 포팅·레이아웃)·**ui/**(레퍼런스 스크린샷: provided 6 + fetched 18 + README).
 - `docs/acknowledge/` — decisions(확정결정)·beatoraja-divergences(보류차이)·empty-poor-local-scores(空POOR처리·로컬기록 스키마).
 - `docs/font-cjk-support.md` — 다국어 폰트 지원(cosmic-text 결정·beatoraja 폰트 파악·P1/P2 완료·P3/P4 후속).
-- `docs/backend/` — **백엔드 IR-슈퍼셋 서버** 설계: README·PRD·api-spec(전 엔드포인트)·data-model(Drizzle)·endpoint-tasks·compatibility(LR2IR/beatoraja 매핑+출처). (Hono/Bun/Drizzle)
+- `docs/backend/` — **백엔드 IR-슈퍼셋 서버** 설계: README·PRD·api-spec(전 엔드포인트)·data-model(Drizzle)·endpoint-tasks·compatibility(LR2IR/beatoraja 매핑+출처)·**contract-freeze**(Phase 4 게이트: 클라 경로 대조·계약 동결·M0 단계). (Hono/Bun/Drizzle)
 - `docs/ci-release.md` — GitHub Actions(ci/release): 자동 버전·macOS 유니버설·Windows 빌드·릴리스. 주의(원격/브랜치보호/LICENSE/서명).
 - `docs/bug/` — 버그/진단 기록(예: `2026-06-03-preview-playback` #PREVIEW 계측·검증절차).
 - `docs/memory/` — test-library(라이브러리 실측).

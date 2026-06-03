@@ -13,6 +13,7 @@
 | [data-model.md](./data-model.md) | DB 스키마(Drizzle/MySQL) — user·session·chart·score(early/late)·course·table·rival·setting·replay·인덱스 |
 | [endpoint-tasks.md](./endpoint-tasks.md) | **구현 태스크 체크리스트** — 도메인·엔드포인트별 Route→Service→ServiceDb→Drizzle 분해 |
 | [compatibility.md](./compatibility.md) | LR2IR / beatoraja IR ↔ rbms 슈퍼셋 필드 매핑 + 출처(원본 소스/프로토콜) |
+| [contract-freeze.md](./contract-freeze.md) | **Phase 4 게이트** — 클라 실제 호출 경로 대조, 와이어 계약 3건·envelope·부트스트랩 결정(D·E) + M0 단계. 코딩 전 동결. |
 
 ## 한눈 요약 (도메인)
 
