@@ -2,7 +2,7 @@
 
 > 새 세션은 **이 문서부터** 읽는다. 현재 상태·아키텍처·실행법·할 일의 SSOT. (ai-process.md 원칙 1·14)
 > 베이스 룰: `~/.claude/CLAUDE.md` + convention. Rust 프로젝트 → TS 전용 규칙(arrow 등) 비적용, **공통 원칙**(주석 금지·설명은 docs/·정확 네이밍·근본 해결·공식문서 우선·검증 후 진행)은 그대로.
-> 위치: `/Users/hyunseokbyun/rbms`. 빌드 `cargo build`, 테스트 `cargo test --workspace`(현재 **880 통과·0 실패·0 경고**). 실행은 §5(`./start.sh`).
+> 위치: `/Users/hyunseokbyun/rbms`. 빌드 `cargo build`, 테스트 `cargo test --workspace`(현재 **886 통과·0 실패·0 경고**). 실행은 §5(`./start.sh`).
 > git: **dev(작업)/prod(배포) 브랜치 모델**(CI는 dev, 릴리스는 prod → `docs/ci-release.md`). **커밋 메시지에 co-author(Claude) 넣지 않음**(사용자 명시 지시), 작성자 `Hyunseok Byun <gumyoincirno@gmail.com>`. `target`·`Cargo.lock`·라이브러리 차트 커밋 금지(.gitignore).
 > 다음 할 일(로드맵)은 **`ROADMAP.md`**, 백엔드 설계는 **`docs/backend/`**, 배포/CI는 **`docs/ci-release.md`**.
 
@@ -24,7 +24,7 @@
 **Phase 1 — 클라 정확성(핵심 패리티) + 마무리**
 - [x] `PlayOptions.lntype`를 헤더에서 유도 (app_play.rs 하드코딩 제거 → `ir_map::ir_lntype`, 0=LN/1=CN/2=HCN, 테스트)
 - [x] #PREVIEW: `config.debug` 6분기 계측 + `samples/preview-demo` 픽스처 + dead_code 제거 (가청 확인은 수동 1회 — `docs/bug/2026-06-03-preview-playback.md`)
-- [~] ⭐ `LnKind` 판정 전파 + CN 종료 판정(릴리스 시간 판정, LN 구제 없음) + CN/HCN 회귀 테스트 — **스펙 완료**(`docs/reference/cn-hcn-judgment.md`, beatoraja 라인 대조), **동작 변경은 검증 코퍼스 greenlight 후속**(베이스라인 회귀 위험)
+- [x] ⭐ `LnKind` 판정 전파 + CN/HCN 2-판정 모델(head@press + end@release, 이른릴리스=end 판정·미히트=2 Miss, 분모 CN=2) + 합성 픽스처 5종. `Cn`/`Hcn` 게이트 → LN/Normal byte 불변. 886 통과. (HCN 연속 게이지·CN deferral·BSS = Phase 7; → `docs/reference/cn-hcn-judgment.md`)
 
 **Phase 2 — 첫 릴리스(인프라)**
 - [ ] prod 브랜치 생성·푸시 + 브랜치 보호 전략 결정(필수, `docs/acknowledge` 기록)

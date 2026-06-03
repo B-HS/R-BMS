@@ -327,7 +327,13 @@ pub fn count_playable_notes(model: &Model) -> usize {
         .iter()
         .flat_map(|tl| tl.notes.iter())
         .flatten()
-        .filter(|n| !matches!(n.kind, NoteKind::Mine { .. } | NoteKind::LongEnd { .. }))
+        .filter(|n| match &n.kind {
+            NoteKind::Mine { .. } => false,
+            // CN/HCN ends are judged (counted) separately at release, so a charge note counts twice;
+            // a plain LN end is not a separate judgment. Keeps the count in step with the judge engine.
+            NoteKind::LongEnd { ln } => matches!(ln, LnKind::Cn | LnKind::Hcn),
+            _ => true,
+        })
         .count()
 }
 

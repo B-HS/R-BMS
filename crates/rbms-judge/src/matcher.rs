@@ -1,4 +1,4 @@
-use rbms_model::{Model, NoteKind};
+use rbms_model::{LnKind, Model, NoteKind};
 
 use crate::Judge;
 use crate::gauge::{ClearType, Gauge, GaugeKind, clear_lamp};
@@ -9,9 +9,19 @@ const LN_MARGIN: i64 = 200_000;
 struct JNote {
     head_us: i64,
     end_us: Option<i64>,
+    ln: Option<LnKind>,
     judged: bool,
     holding: bool,
     head_judge: Option<Judge>,
+}
+
+/// CN/HCN ("charge"/"hell-charge") long notes are judged twice — the head at press and the release
+/// end at key-up — each a counted judgment (beatoraja `JudgeManager` calls `updateMicro` at both),
+/// whereas a plain LN is a single judgment (the worse of head/end). This predicate gates the
+/// charge-note behaviour so the verified LN/Normal paths are byte-identical to before. See
+/// `docs/reference/cn-hcn-judgment.md`.
+fn is_charge(ln: Option<LnKind>) -> bool {
+    matches!(ln, Some(LnKind::Cn) | Some(LnKind::Hcn))
 }
 
 struct Lane {
@@ -75,17 +85,32 @@ impl JudgeEngine {
     }
 
     pub fn from_pairs(per_lane: Vec<Vec<(i64, Option<i64>)>>, windows: JudgeWindows) -> Self {
+        // Pair-built notes (tests, `new`) treat any long note as a plain LN; `from_model` carries the
+        // real `LnKind` through `from_triples`.
+        let triples: Vec<Vec<(i64, Option<i64>, Option<LnKind>)>> =
+            per_lane.into_iter().map(|lane| lane.into_iter().map(|(h, e)| (h, e, e.map(|_| LnKind::Ln))).collect()).collect();
+        Self::from_triples(triples, windows)
+    }
+
+    fn from_triples(per_lane: Vec<Vec<(i64, Option<i64>, Option<LnKind>)>>, windows: JudgeWindows) -> Self {
         let lanes: Vec<Lane> = per_lane
             .into_iter()
             .map(|mut notes| {
                 notes.sort_by_key(|n| n.0);
                 Lane {
-                    notes: notes.into_iter().map(|(h, e)| JNote { head_us: h, end_us: e, judged: false, holding: false, head_judge: None }).collect(),
+                    notes: notes.into_iter().map(|(h, e, ln)| JNote { head_us: h, end_us: e, ln, judged: false, holding: false, head_judge: None }).collect(),
                     cursor: 0,
                 }
             })
             .collect();
-        let total_notes = lanes.iter().map(|l| l.notes.len() as u32).sum();
+        // A CN/HCN long note is judged twice (head + release end) so it counts as two toward the
+        // total; a plain LN or normal note counts once. Keeps the EX/gauge denominators in step with
+        // the per-note judgments and with `rbms_chart::count_playable_notes`.
+        let total_notes = lanes
+            .iter()
+            .flat_map(|l| l.notes.iter())
+            .map(|n| if is_charge(n.ln) && n.end_us.is_some() { 2 } else { 1 })
+            .sum();
         let gauge = Gauge::new(GaugeKind::Normal, 200.0, total_notes as usize);
         JudgeEngine {
             lanes,
@@ -111,24 +136,24 @@ impl JudgeEngine {
 
     pub fn from_model(model: &Model, windows: JudgeWindows) -> Self {
         let n = model.mode.key;
-        let mut per_lane: Vec<Vec<(i64, Option<i64>)>> = vec![Vec::new(); n];
+        let mut per_lane: Vec<Vec<(i64, Option<i64>, Option<LnKind>)>> = vec![Vec::new(); n];
         for lane in 0..n {
-            let mut pending_start: Option<i64> = None;
+            let mut pending_start: Option<(i64, LnKind)> = None;
             for tl in &model.timelines {
                 let Some(note) = &tl.notes[lane] else { continue };
                 match note.kind {
                     NoteKind::Mine { .. } => {}
-                    NoteKind::Normal => per_lane[lane].push((note.time_us, None)),
-                    NoteKind::LongStart { .. } => pending_start = Some(note.time_us),
+                    NoteKind::Normal => per_lane[lane].push((note.time_us, None, None)),
+                    NoteKind::LongStart { ln } => pending_start = Some((note.time_us, ln)),
                     NoteKind::LongEnd { .. } => {
-                        if let Some(s) = pending_start.take() {
-                            per_lane[lane].push((s, Some(note.time_us)));
+                        if let Some((s, ln)) = pending_start.take() {
+                            per_lane[lane].push((s, Some(note.time_us), Some(ln)));
                         }
                     }
                 }
             }
         }
-        let mut engine = Self::from_pairs(per_lane, windows);
+        let mut engine = Self::from_triples(per_lane, windows);
         // LN release window follows the same mode + #RANK policy as the note window (the caller
         // passes the already-scaled note window in); previously this was a hardcoded 100% constant,
         // so long-note releases ignored both #RANK and JUDGE WIDTH.
@@ -209,12 +234,23 @@ impl JudgeEngine {
             self.last_judge = Some(Judge::Poor);
             return Some(JudgeResult { judge: Judge::Poor, lane, note_index: idx, fast: dm > 0, delta_us: dm });
         }
-        let note = &mut self.lanes[lane].notes[idx];
-        if note.end_us.is_some() {
-            note.holding = true;
-            note.head_judge = Some(judge);
+        let is_cn = is_charge(self.lanes[lane].notes[idx].ln);
+        if self.lanes[lane].notes[idx].end_us.is_some() {
+            {
+                let note = &mut self.lanes[lane].notes[idx];
+                note.holding = true;
+                note.head_judge = Some(judge);
+            }
+            if is_cn {
+                // CN/HCN: the head is a counted judgment committed at press; the release end is judged
+                // separately at key-up (beatoraja's two-`updateMicro` model). Plain LN stays a single
+                // judgment resolved at release.
+                self.apply(judge);
+                self.record_timing(judge, dm);
+            }
             return Some(JudgeResult { judge, lane, note_index: idx, fast: dm > 0, delta_us: dm });
         }
+        let note = &mut self.lanes[lane].notes[idx];
         note.judged = true;
         self.apply(judge);
         self.record_timing(judge, dm);
@@ -229,7 +265,9 @@ impl JudgeEngine {
         let head_judge = note.head_judge.unwrap_or(Judge::Poor);
         let dm = end - release_us;
         let end_judge = self.ln_end.judge(dm).unwrap_or(Judge::Poor);
-        let final_judge = worse(head_judge, end_judge);
+        // CN/HCN: the release end is its own counted judgment (the head was already counted at press),
+        // so it is not capped by the head. Plain LN resolves to the worse of head/end (single count).
+        let final_judge = if is_charge(note.ln) { end_judge } else { worse(head_judge, end_judge) };
         let note = &mut self.lanes[lane].notes[idx];
         note.judged = true;
         note.holding = false;
@@ -255,7 +293,9 @@ impl JudgeEngine {
                     let end = n.end_us.unwrap();
                     if now_us > end + LN_MARGIN {
                         let end_judge = ln_end.judge(end - now_us).unwrap_or(Judge::Poor);
-                        let final_judge = worse(n.head_judge.unwrap_or(Judge::Poor), end_judge);
+                        // CN/HCN: head already counted at press, so the over-held end is its own
+                        // judgment; plain LN resolves to worse(head, end).
+                        let final_judge = if is_charge(n.ln) { end_judge } else { worse(n.head_judge.unwrap_or(Judge::Poor), end_judge) };
                         n.judged = true;
                         n.holding = false;
                         events.push(final_judge);
@@ -264,8 +304,13 @@ impl JudgeEngine {
                         break;
                     }
                 } else if n.head_us - now_us < miss_bound {
+                    let charge_pair = is_charge(n.ln) && n.end_us.is_some();
                     n.judged = true;
                     events.push(Judge::Miss);
+                    // A never-hit CN/HCN misses both of its judged objects (head + end).
+                    if charge_pair {
+                        events.push(Judge::Miss);
+                    }
                     l.cursor += 1;
                 } else {
                     break;

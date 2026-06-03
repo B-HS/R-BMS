@@ -688,4 +688,100 @@ mod tests {
         let r = e.release(0, 1_730_000).unwrap(); // dm +130_000 -> POPN_LN_END GR
         assert_eq!(r.judge, Judge::Great, "POPN ln_end classifies 130ms-early release as GR");
     }
+
+    // --- CN/HCN charge notes: head + release end are two counted judgments ---------------------
+    // (beatoraja JudgeManager calls updateMicro at both press and key-up; see
+    // docs/reference/cn-hcn-judgment.md). Plain LN stays one judgment — the regression guard below.
+
+    fn cn_model(start_ln: rbms_model::LnKind, head_t: i64, end_t: i64) -> rbms_model::Model {
+        use rbms_model::{Mode, Model, ModelMeta, Note, NoteKind, TimeLine};
+        let mode = Mode::BEAT_7K;
+        let lanes = mode.key;
+        let mk = |t: i64, kind: NoteKind| {
+            let mut tl = TimeLine::empty(lanes, t, 0.0, 130.0);
+            tl.notes[0] = Some(Note { kind, wav: 0, start_us: 0, duration_us: 0, time_us: t, section: 0.0, layered: Vec::new() });
+            tl
+        };
+        Model {
+            mode,
+            meta: ModelMeta { total: 300.0, rank: 2, ..Default::default() },
+            wavmap: Vec::new(),
+            bgamap: Vec::new(),
+            init_bpm: 130.0,
+            timelines: vec![mk(head_t, NoteKind::LongStart { ln: start_ln }), mk(end_t, NoteKind::LongEnd { ln: start_ln })],
+            md5: String::new(),
+            sha256: String::new(),
+        }
+    }
+
+    #[test]
+    fn cn_head_and_end_are_two_judgments() {
+        use rbms_model::LnKind;
+        let model = cn_model(LnKind::Cn, 1_000_000, 1_600_000);
+        let mut e = JudgeEngine::from_model(&model, JudgeWindows::SEVENKEY_NOTE);
+        assert_eq!(e.total_notes(), 2, "a CN counts as two judged objects (head + end)");
+        let h = e.press(0, 1_000_000).unwrap();
+        assert_eq!(h.judge, Judge::PerfectGreat);
+        assert_eq!(e.counts[0], 1, "the CN head is counted immediately at press");
+        assert_eq!(e.ex_score, 2, "head PG = 2 EX");
+        let r = e.release(0, 1_600_000).unwrap();
+        assert_eq!(r.judge, Judge::PerfectGreat, "exact release = PG end");
+        assert_eq!(e.counts[0], 2, "head + end = two PGreat");
+        assert_eq!(e.ex_score, 4);
+        assert_eq!(e.total_judged(), 2);
+    }
+
+    #[test]
+    fn cn_early_release_judges_end_without_capping_head() {
+        use rbms_model::LnKind;
+        // Head PG counted at press; releasing 500ms early is outside the (75%-scaled) LN-end window,
+        // so the end is POOR on its own — not the worse-of-head-and-end a plain LN would yield.
+        let model = cn_model(LnKind::Cn, 1_000_000, 2_000_000);
+        let mut e = JudgeEngine::from_model(&model, JudgeWindows::SEVENKEY_NOTE);
+        assert_eq!(e.press(0, 1_000_000).unwrap().judge, Judge::PerfectGreat);
+        assert_eq!(e.counts[0], 1, "head PG counted at press");
+        let r = e.release(0, 1_500_000).unwrap();
+        assert_eq!(r.judge, Judge::Poor, "early CN release = POOR end");
+        assert_eq!(e.counts[0], 1, "still one PGreat (the head)");
+        assert_eq!(e.counts[4], 1, "plus one POOR (the end)");
+        assert_eq!(e.total_judged(), 2);
+    }
+
+    #[test]
+    fn cn_never_hit_misses_head_and_end() {
+        use rbms_model::LnKind;
+        let model = cn_model(LnKind::Cn, 1_000_000, 1_600_000);
+        let mut e = JudgeEngine::from_model(&model, JudgeWindows::SEVENKEY_NOTE);
+        e.update(5_000_000); // sweep far past the head — never hit
+        assert_eq!(e.counts[5], 2, "a never-hit CN misses both head and end");
+        assert_eq!(e.total_judged(), 2);
+    }
+
+    #[test]
+    fn hcn_end_is_also_two_judgments() {
+        use rbms_model::LnKind;
+        // HCN shares the CN end-judgment model (its continuous gauge is a separate, deferred concern).
+        let model = cn_model(LnKind::Hcn, 1_000_000, 1_600_000);
+        let mut e = JudgeEngine::from_model(&model, JudgeWindows::SEVENKEY_NOTE);
+        assert_eq!(e.total_notes(), 2);
+        e.press(0, 1_000_000).unwrap();
+        assert_eq!(e.counts[0], 1, "HCN head counted at press");
+        e.release(0, 1_600_000).unwrap();
+        assert_eq!(e.counts[0], 2, "HCN head + end");
+    }
+
+    #[test]
+    fn ln_remains_single_judgment_worse_of_head_end() {
+        use rbms_model::LnKind;
+        // Regression guard: a plain LN is unchanged — one judged object, resolved at release as the
+        // worse of head/end, with nothing counted at press.
+        let model = cn_model(LnKind::Ln, 1_000_000, 2_000_000);
+        let mut e = JudgeEngine::from_model(&model, JudgeWindows::SEVENKEY_NOTE);
+        assert_eq!(e.total_notes(), 1, "a plain LN is a single judged object");
+        assert_eq!(e.press(0, 1_000_000).unwrap().judge, Judge::PerfectGreat);
+        assert_eq!(e.counts[0], 0, "LN head is not counted until release");
+        let r = e.release(0, 1_500_000).unwrap(); // early -> POOR end -> worse(PG, POOR) = POOR
+        assert_eq!(r.judge, Judge::Poor);
+        assert_eq!(e.total_judged(), 1, "still one judgment for the LN");
+    }
 }

@@ -2,7 +2,7 @@
 
 > 로드맵 Phase 1(`LnKind` 판정 전파 + CN 종료 판정) / Phase 7(HCN 연속 게이지)의 **충실 포팅 스펙**.
 > 현재 rbms는 모든 롱노트를 단일 경로(`judge/matcher.rs::release` = `worse(head, end)`, 단일 `ln_end` 윈도우)로 처리해 LN/CN/HCN을 구분하지 않는다. 차이는 `docs/acknowledge/beatoraja-divergences.md` "진행 중" 참조.
-> **결정(2026-06-03):** 판정 엔진 동작 변경은 **검증된 880-테스트 베이스라인·byte 단위 패리티**를 건드리는 위험 작업이라, **CN/HCN 검증 코퍼스를 갖춘 후속**으로 분리한다. 본 문서는 그 충실 구현의 단일 출처. (lntype IR 보고 = `ir_map::ir_lntype`로 이미 정확화 — 별개)
+> **상태(2026-06-03):** ✅ **구현됨** — 2-판정 모델(아래 §구현)을 `LnKind::Cn`/`Hcn`에만 게이트해 적용. 검증된 LN/Normal 경로는 byte 불변(회귀 0), CN/HCN 합성 픽스처 5종으로 고정(`crates/rbms-judge/src/lib.rs` `cn_*`/`hcn_*`/`ln_remains_*`). **HCN 연속 게이지(§HCN)는 Phase 7로 잔여.** (lntype IR 보고 = `ir_map::ir_lntype`는 별개로 완료.)
 
 ## 원본 위치
 `/Users/hyunseokbyun/beatoraja/src/bms/player/beatoraja/play/JudgeManager.java` (903줄). 윈도우 정의는 `bms/model` rule, 게이지는 `GrooveGauge`.
@@ -49,12 +49,15 @@
 - 안 눌림: `mpassingcount -= dt`; `< -hcnmduration`마다 `gauge.update(3, 0.5)` (게이지 -0.5, BAD 취급).
 - ⇒ HCN은 홀드 중 **연속적으로** 게이지가 오르내린다. rbms `gauge.rs`에 등가물 없음 → Phase 7에서 추가.
 
-## rbms 구현 계획 (후속, 검증 코퍼스 동반)
-1. **플럼빙(구 Task #7):** `matcher.rs`의 `JNote`에 `ln: Option<LnKind>` 추가, `from_model`이 `LongStart{ln}`에서 운반(공개 `from_pairs`/`new` 시그니처는 유지 — 내부 `from_triples` 도입, pair-빌드는 `LnKind::Ln` 기본).
-2. **CN 종단(구 Task #10):** `release`/`update`에서 `ln`이 `Cn`/`Hcn`이면 release 윈도우 `judge`로 확정(이른 릴리스 deferral·재홀드), `Ln`이면 현 `worse(head,end)`+releasemargin 유지. 윈도우는 `cnendmjudge`(LONGNOTE_END) 사용.
-3. **HCN 게이지(Phase 7):** 홀드 동안 `hcnmduration` 주기로 게이지 ±0.5. `gauge.rs`에 연속 증감 API + 엔진에 passing/홀드 시간 누적 상태.
-4. **BSS(Phase 7 스크래치):** `scnendmjudge`·중간 떼기 무시·같은 스크키 종단. → `docs`의 스크래치 회전 단순화 항목과 함께.
+## rbms 구현 (✅ 적용됨 — `Cn`/`Hcn` 게이트, 2026-06-03)
+1. **플럼빙:** `matcher.rs`의 `JNote`에 `ln: Option<LnKind>` 추가, `from_model`이 `LongStart{ln}`에서 운반. 공개 `from_pairs`/`new` 시그니처 유지(내부 `from_triples` 도입, pair-빌드는 `LnKind::Ln` 기본). `is_charge(ln)`로 CN/HCN 게이트.
+2. **2-판정 모델:** CN/HCN은 **head(press 시 즉시 카운트) + end(release 시 별도 카운트)** = 2 판정/노트. `total_notes`·`count_playable_notes`가 CN/HCN을 2로 카운트(분모 일관). `press`: CN/HCN head면 `apply(judge)` 즉시. `release`: CN/HCN은 `final = end_judge`(ln_end 윈도우, head로 capping 안 함), LN은 `worse(head,end)` 유지. `update`: CN/HCN over-hold면 end 1판정, 미히트면 head+end 2 Miss; LN은 1.
+3. **검증:** 합성 픽스처 5종(`cn_head_and_end_are_two_judgments`·`cn_early_release_judges_end_without_capping_head`·`cn_never_hit_misses_head_and_end`·`hcn_end_is_also_two_judgments`·`ln_remains_single_judgment_worse_of_head_end`). 전체 886 통과·무경고. LN/Normal byte 불변(회귀 0).
 
-## 검증 코퍼스 (ai-process §7 — 사용자 확인 필요)
-- 손수 만든 최소 픽스처: `#LNMODE 2` 1-노트 CN, `#LNMODE 3` HCN, 각 (이른 릴리스 / 정확 릴리스 / 미릴리스 / 늦은 릴리스)에 대한 기대 판정·게이지를 beatoraja 동작에서 도출해 단위 테스트로 고정.
-- 실차트 corpus(727곡)에 CN/HCN가 거의 없을 가능성 → 합성 픽스처가 1차. 추후 실제 CN/HCN 차트 확보 시 회귀 추가.
+## 잔여 (후속)
+- **HCN 연속 게이지(Phase 7):** 홀드 동안 `hcnmduration` 주기로 게이지 ±0.5. `gauge.rs`에 연속 증감 API + 엔진에 passing/홀드 시간 누적 상태. (현재 HCN은 종단 판정만 CN과 동일, 연속 게이지 없음.)
+- **CN deferral/재홀드(이른 릴리스 후 재누름 회복):** 현 구현은 release 시 즉시 end 판정 확정(beatoraja의 `judge>=3 && dmtime>0` deferral 미구현). 대부분 케이스 동등, 재홀드 회복은 후속.
+- **BSS(스크래치 LN):** `scnendmjudge`·중간 떼기 무시·같은 스크키 종단. 스크래치 회전 단순화 항목과 함께 후속.
+
+## 미검증 경계 (정직)
+- beatoraja의 **노트 카운트 분모**(CN을 passnote 2로 세는지)는 BMS 모델이 **외부 라이브러리**(beatoraja 소스 트리 밖)라 원본 대조 불가. rbms는 `JudgeManager`의 **2× `updateMicro`(head+end) 증거**에 근거해 CN=2로 카운트하고, `count_playable_notes`↔judge `total_notes`↔gauge 분모를 **내부 일관**되게 맞췄다. 실제 CN/HCN 차트가 corpus에 거의 없어 today 영향은 미미. 실차트 확보 시 회귀 추가 권장.
