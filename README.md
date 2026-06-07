@@ -18,7 +18,9 @@ beatoraja(Java/libGDX)의 **코어 PLAY 모듈**을 Rust로 새로 포팅한 BMS
 
 ## 남은 일
 
-- [ ] **`#PREVIEW` 프리뷰 재생** — 배선·토글·디버그 계측까지 완료(`config.debug` eprintln · `samples/preview-demo/` 픽스처). 남은 것은 **실기 가청 검증 1회**뿐 → [docs/bug/2026-06-03-preview-playback.md](docs/bug/2026-06-03-preview-playback.md).
+- [x] **곡선택 미리듣기(하이브리드)** — 곡 포커스 시 `#PREVIEW` 있으면 그 파일, 없으면 곡을 **autoplay로 미리듣기**(백그라운드 코디네이터 스레드: 파싱→키음 스케줄→전체 키음 병렬 디코드, 취소가능·위상연속 루프). 실기 가청 1회만 사용자 몫 → [docs/history/2026-06-07-select-autoplay-preview.md](docs/history/2026-06-07-select-autoplay-preview.md).
+- [x] **첫 실행/온보딩 UI** — 무인자 GUI 진입(usage+exit 제거)·**초기 스캔 백그라운드화**(창 즉시 표시, SCANNING+곡수 카운트)·첫 실행 빈 곡선택 온보딩 CTA·Esc-중-스캔 취소. → [docs/history/2026-06-07-first-launch-onboarding.md](docs/history/2026-06-07-first-launch-onboarding.md).
+- [ ] **`.app`/`.dmg` 패키징 + macOS 공증(notarize)** — 터미널 없는 배포 패키징(`release.yml` 측, 무인자 진입+서명) → 후속.
 - [ ] **데이터화 마무리** — 메뉴/결과 **색은 `theme.ron`으로 완료**, **패널 위치/레이아웃**의 데이터화는 남음. 마우스 스테퍼 UX → [docs/roadmap.md](docs/roadmap.md).
 - [ ] **백엔드 서버**(Bun + Hono + Drizzle, IR-슈퍼셋) → 라이벌 · 리더보드(타인 리플레이) · 설정 동기화 · ranked 무결성.
 - [ ] **웹 FE** — 검색 · 리더보드 · 플레이어 페이지 · 리플레이 뷰어.

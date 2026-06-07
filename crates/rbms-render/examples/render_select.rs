@@ -113,6 +113,7 @@ fn main() {
         score_graph: true,
         search: None,
         sort: "DEFAULT",
+        empty_hint: None,
     };
 
     let (w, h) = (1280u32, 720u32);

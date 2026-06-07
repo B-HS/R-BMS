@@ -66,16 +66,9 @@ impl App {
         match AudioEngine::new() {
             Ok(audio) => {
                 // Decode keysounds on BACKGROUND threads (qualia has 650+; serial decode was ~6s and
-                // froze the UI). Resolve the (id,path,ext) jobs, fan read+decode out over a thread
-                // pool that streams results back over a channel + a progress counter; `frame()` drains
-                // them and draws a bar, and `start_play()` captures the song clock once they're all in.
-                let jobs: Vec<(u32, std::path::PathBuf, String)> = model
-                    .wavmap
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, name)| !name.is_empty())
-                    .filter_map(|(id, name)| resolve_keysound(&dir, name).map(|(p, e)| (id as u32, p, e)))
-                    .collect();
+                // froze the UI). `frame()` drains them and draws a progress bar, and `start_play()`
+                // captures the song clock once they're all in. (Shared with the autoplay preview.)
+                let jobs = keysound_jobs(&model.wavmap, &dir);
                 let total = jobs.len();
                 println!("device {} Hz — decoding {total} keysounds...", audio.out_rate());
                 self.audio = Some(audio);
@@ -83,25 +76,7 @@ impl App {
                     self.ks_rx = None;
                     self.ks_total = 0;
                 } else {
-                    let (tx, rx) = std::sync::mpsc::channel::<(u32, rbms_audio::DecodedAudio)>();
-                    let progress = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-                    let nthreads = std::thread::available_parallelism().map(|c| c.get().min(8)).unwrap_or(4).max(1);
-                    let chunk = total.div_ceil(nthreads).max(1);
-                    for jc in jobs.chunks(chunk).map(|c| c.to_vec()) {
-                        let tx = tx.clone();
-                        let progress = progress.clone();
-                        std::thread::spawn(move || {
-                            for (id, path, ext) in jc {
-                                if let Ok(data) = std::fs::read(&path) {
-                                    if let Ok(dec) = rbms_audio::decode_bytes(data, Some(ext.as_str())) {
-                                        let _ = tx.send((id, dec));
-                                    }
-                                }
-                                progress.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                            }
-                        });
-                    }
-                    drop(tx); // so the channel disconnects once every worker is done
+                    let (rx, progress, _) = spawn_keysound_decode(jobs, std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)));
                     self.ks_rx = Some(rx);
                     self.ks_progress = progress;
                     self.ks_total = total;
@@ -516,12 +491,15 @@ impl App {
                         draw_text_centered(gpu, cx, by + 16.0, 1.2, th.text_dim, &format!("{done} / {} keysounds", self.ks_total));
                     } else if scanning {
                         // Indeterminate sweeping bar (ping-pong) so a long background scan reads as
-                        // working, not frozen (a folder scan has no total to count toward).
+                        // working, not frozen (a folder scan has no total to count toward), plus a live
+                        // count of charts found so far.
                         let seg = 96.0;
                         gpu.fill_rect(Rect::new(bx, by, bw, bh), Color::rgb(28, 28, 40));
                         let phase = (self.frame_count % 120) as f32 / 60.0;
                         let t = if phase <= 1.0 { phase } else { 2.0 - phase };
                         gpu.fill_rect(Rect::new(bx + t * (bw - seg), by, seg, bh), th.good);
+                        let found = self.scan_count.load(std::sync::atomic::Ordering::Relaxed);
+                        draw_text_centered(gpu, cx, by + 16.0, 1.2, th.text_dim, &format!("{found} charts found"));
                     }
                     self.loading_drawn = true;
                 }

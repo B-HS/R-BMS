@@ -135,6 +135,9 @@ pub struct SelectView {
     pub search: Option<String>,
     /// Current sort-order label (e.g. `"DEFAULT"`, `"TITLE"`), shown top-right.
     pub sort: &'static str,
+    /// Shown centered when the list is empty: `(title, body)` onboarding/empty hint (e.g. a first-run
+    /// "add a music folder" call to action). Ignored when rows exist.
+    pub empty_hint: Option<(&'static str, &'static str)>,
 }
 
 const LIST_X: f32 = 32.0;
@@ -268,7 +271,14 @@ fn render_list<R: Renderer>(r: &mut R, v: &SelectView, hot: &mut Vec<(Rect, Sele
     let th = crate::theme::theme();
     let m = v.rows.len();
     if m == 0 {
-        draw_text(r, LIST_X + 12.0, TOP + 40.0, 1.5, th.text_dim, "NO CHARTS");
+        let cx = LIST_X + LIST_W * 0.5;
+        match v.empty_hint {
+            Some((title, body)) => {
+                draw_text_centered(r, cx, TOP + 80.0, 2.2, th.text, title);
+                draw_text_centered(r, cx, TOP + 124.0, 1.3, th.text_dim, body);
+            }
+            None => draw_text(r, LIST_X + 12.0, TOP + 40.0, 1.5, th.text_dim, "NO CHARTS"),
+        }
         return;
     }
     let visible = ((BOTTOM - TOP) / (ROW_H + ROW_GAP)).floor() as usize;

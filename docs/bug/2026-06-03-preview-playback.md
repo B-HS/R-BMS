@@ -32,4 +32,6 @@
 `song index 범위 → #PREVIEW 빈 문자열 → 부모 디렉토리 → resolve_file → fs::read → AudioEngine::new → load(decode) → sample_duration_us/clock_us/play`. 각 실패 지점에 debug 로그. 성공 시 `preview_loop_us=dur`, `preview_next_us=now+dur`로 `update_preview`가 클립 경계마다 재생(갭리스 루프).
 
 ## 상태
-계측·픽스처·dead_code 정리 완료(코드 무경고·디코드 테스트 그린). **최종 가청 확인은 위 수동 절차로 사용자 환경에서 1회 필요** — 그 결과(어느 분기/소리 여부)에 따라 후속 수정 여부 결정. 코드 경로는 보존.
+계측·픽스처·dead_code 정리 완료(코드 무경고·디코드 테스트 그린).
+
+**해소(2026-06-07).** 적대 분석대로 `#PREVIEW` 파일 경로는 버그가 아니었다(코드 정상 — `crates/rbms-audio/src/decode.rs::preview_demo_fixture_decodes_and_mixes_to_nonzero_audio`로 decode→mix 비-제로 PCM 확인). 사용자가 실제로 원한 것은 **`#PREVIEW` 없는 곡도 들리는 미리듣기**였고(라이브러리 대부분 `#PREVIEW` 미정의 → 무음이 정상 동작이었음), 이는 **하이브리드 곡선택 미리듣기**(`#PREVIEW` 있으면 파일, 없으면 곡 autoplay)로 신규 구현했다. → `docs/history/2026-06-07-select-autoplay-preview.md`. 실기 가청 1회만 사용자 몫.

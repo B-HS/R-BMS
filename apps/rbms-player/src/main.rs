@@ -53,11 +53,20 @@ const CW: u32 = 1280;
 const CH: u32 = 720;
 const MODE: Mode = Mode::BEAT_7K;
 
-/// `#PREVIEW` hover-preview tuning: the reserved sample id, focus-settle debounce (frames), and
-/// playback gain.
+/// `#PREVIEW` hover-preview tuning: the reserved sample id, focus-settle debounce (frames), playback
+/// gain, and the silent tail held after the last autoplay event before the loop restarts.
 const PREVIEW_ID: u32 = 0;
 const PREVIEW_DEBOUNCE_FRAMES: u64 = 20;
 const PREVIEW_GAIN: f32 = 0.85;
+const PREVIEW_LOOP_TAIL_US: i64 = 2_000_000;
+
+/// Background → main-thread messages for an autoplay preview (a chart with no `#PREVIEW` file): the
+/// extracted keysound timeline, then each decoded keysound. The channel disconnecting signals the
+/// load is complete, at which point [`App::update_preview`] anchors the clock and begins playback.
+enum PreviewMsg {
+    Schedule { sched: Vec<(i64, u32)>, start_us: i64, end_us: i64 },
+    Keysound(u32, rbms_audio::DecodedAudio),
+}
 
 struct PlayerConfig {
     keys_override: Option<Vec<(KeyCode, usize)>>,
@@ -290,6 +299,55 @@ fn resolve_keysound(dir: &Path, name: &str) -> Option<(PathBuf, String)> {
     resolve_file(dir, name, &["ogg", "wav", "flac", "mp3"])
 }
 
+/// Resolve every referenced keysound in a chart's `wavmap` to `(id, path, ext)` decode jobs (empty
+/// names skipped, unresolvable files dropped). Shared by the Play loader and the autoplay preview.
+fn keysound_jobs(wavmap: &[String], dir: &Path) -> Vec<(u32, PathBuf, String)> {
+    wavmap
+        .iter()
+        .enumerate()
+        .filter(|(_, name)| !name.is_empty())
+        .filter_map(|(id, name)| resolve_keysound(dir, name).map(|(p, x)| (id as u32, p, x)))
+        .collect()
+}
+
+/// Fan keysound decode out over a thread pool, streaming `(id, decoded)` back over a channel with a
+/// progress counter. Workers check `cancel` between jobs so an abandoned load (e.g. the preview
+/// focus moved on) stops promptly instead of decoding to the end. Shared by the Play loader (which
+/// passes a never-set flag) and the autoplay preview.
+fn spawn_keysound_decode(
+    jobs: Vec<(u32, PathBuf, String)>,
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> (std::sync::mpsc::Receiver<(u32, rbms_audio::DecodedAudio)>, std::sync::Arc<std::sync::atomic::AtomicUsize>, usize) {
+    use std::sync::atomic::Ordering;
+    let total = jobs.len();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let progress = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    if total == 0 {
+        return (rx, progress, 0);
+    }
+    let nthreads = std::thread::available_parallelism().map(|c| c.get().min(8)).unwrap_or(4).max(1);
+    let chunk = total.div_ceil(nthreads).max(1);
+    for jc in jobs.chunks(chunk).map(<[_]>::to_vec) {
+        let tx = tx.clone();
+        let progress = progress.clone();
+        let cancel = cancel.clone();
+        std::thread::spawn(move || {
+            for (id, path, ext) in jc {
+                if cancel.load(Ordering::Relaxed) {
+                    break;
+                }
+                if let Ok(data) = std::fs::read(&path) {
+                    if let Ok(dec) = rbms_audio::decode_bytes(data, Some(ext.as_str())) {
+                        let _ = tx.send((id, dec));
+                    }
+                }
+                progress.fetch_add(1, Ordering::Relaxed);
+            }
+        });
+    }
+    (rx, progress, total)
+}
+
 fn decode_bga_256(dir: &Path, name: &str) -> Option<Vec<u8>> {
     let (path, _) = resolve_file(dir, name, &["png", "bmp", "jpg", "jpeg"])?;
     let bytes = std::fs::read(&path).ok()?;
@@ -337,15 +395,15 @@ fn is_chart(p: &Path) -> bool {
 
 /// Scan every configured library folder and merge the results into one song list (the library is
 /// the union of all folders). Missing/unreadable folders contribute nothing.
-fn scan_folders(folders: &[String]) -> Vec<SongEntry> {
+fn scan_folders(folders: &[String], count: &std::sync::atomic::AtomicUsize) -> Vec<SongEntry> {
     let mut out = Vec::new();
     for f in folders {
-        out.extend(scan_folder(Path::new(f)));
+        out.extend(scan_folder(Path::new(f), count));
     }
     out
 }
 
-fn scan_folder(root: &Path) -> Vec<SongEntry> {
+fn scan_folder(root: &Path, count: &std::sync::atomic::AtomicUsize) -> Vec<SongEntry> {
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
@@ -378,6 +436,7 @@ fn scan_folder(root: &Path) -> Vec<SongEntry> {
                         banner: h.banner.clone(),
                         preview: h.preview.clone(),
                     });
+                    count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
             }
         }
@@ -579,6 +638,8 @@ struct App {
     pending: Option<Loading>,
     /// When set, a background folder scan is running; the LOADING screen polls it each frame.
     scan_rx: Option<std::sync::mpsc::Receiver<ScanOutcome>>,
+    /// Live count of charts found by the in-flight scan, shown on the SCANNING screen.
+    scan_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     loading_drawn: bool,
     /// When set, keysounds are decoding on background threads: `frame()` drains decoded samples into
     /// the audio bank and draws a progress bar, then `start_play()` once `ks_progress == ks_total`.
@@ -634,6 +695,20 @@ struct App {
     preview_target_frame: u64,
     preview_loop_us: i64,
     preview_next_us: i64,
+    /// Autoplay-preview keysound timeline `(at_us, wav)` for the focused chart when it defines no
+    /// `#PREVIEW` file — extracted once from a throwaway autoplay `Player`, then replayed against the
+    /// preview engine clock and looped. Empty in file-preview mode.
+    preview_sched: Vec<(i64, u32)>,
+    preview_cursor: usize,
+    preview_anchor: i64,
+    preview_start_us: i64,
+    preview_end_us: i64,
+    /// Background autoplay-preview load channel: the throwaway-`Player` schedule, then decoded
+    /// keysounds; `None` once the load finishes (channel disconnected) and playback has begun.
+    preview_prep_rx: Option<std::sync::mpsc::Receiver<PreviewMsg>>,
+    /// Cooperative cancel for the in-flight autoplay-preview load (parse + decode workers), flipped
+    /// when the focus moves on so abandoned work stops instead of running to completion.
+    preview_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     cursor: (f32, f32),
     hot: Vec<(Rect, Hot)>,
     last_frame: Instant,
@@ -688,17 +763,6 @@ impl App {
             folders.push(input.clone());
             FolderList { folders: folders.clone() }.save(&folders_path);
         }
-        let (songs, stage, chart_path) = if let Some(rp) = &replay {
-            (Vec::new(), Stage::Play, rp.chart_path.clone())
-        } else if p.is_file() {
-            (Vec::new(), Stage::Play, input)
-        } else {
-            // A directory launch, a bare launch, or a bad path: the library is the UNION of every
-            // configured folder (press O to manage them, T for difficulty tables).
-            let songs = scan_folders(&folders);
-            println!("scanned {} charts across {} folder(s) — ↑/↓ select, Enter open, O folders, T tables, Esc back", songs.len(), folders.len());
-            (songs, Stage::Select, String::new())
-        };
 
         let tables_path = settings_path.parent().map(|d| d.join("tables.ron")).unwrap_or_else(|| PathBuf::from("tables.ron"));
         let scores_path = settings_path.parent().map(|d| d.join("scores.ron")).unwrap_or_else(|| PathBuf::from("scores.ron"));
@@ -709,7 +773,33 @@ impl App {
                 table_sources.push(TableSource { name: String::new(), location: url.clone() });
             }
         }
-        let (table_names, table_levels) = if songs.is_empty() { (Vec::new(), Vec::new()) } else { fetch_and_match(&table_sources, &songs) };
+
+        // Library load: a chart/replay launch goes straight to Play; an empty library (first run / a
+        // bare .dmg double-click) lands on the Select onboarding screen; otherwise the scan runs on a
+        // BACKGROUND thread so the window appears immediately (a big library took seconds and froze
+        // startup before any UI). `frame()` polls `scan_rx` and `apply_scan` swaps in the result.
+        let scan_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let songs: Vec<SongEntry> = Vec::new();
+        let table_names: Vec<String> = Vec::new();
+        let table_levels: Vec<Vec<(String, Vec<usize>)>> = Vec::new();
+        let (stage, chart_path, scan_rx, pending) = if let Some(rp) = &replay {
+            (Stage::Play, rp.chart_path.clone(), None, None)
+        } else if p.is_file() {
+            (Stage::Play, input, None, None)
+        } else if folders.is_empty() {
+            (Stage::Select, String::new(), None, None)
+        } else {
+            let dirs = folders.clone();
+            let sources = table_sources.clone();
+            let count = scan_count.clone();
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let songs = scan_folders(&dirs, &count);
+                let (names, levels) = fetch_and_match(&sources, &songs);
+                let _ = tx.send(ScanOutcome { songs, names, levels });
+            });
+            (Stage::Loading, String::new(), Some(rx), Some(Loading::Scan))
+        };
 
         let (server, server_connected) = build_server(&config);
 
@@ -741,8 +831,9 @@ impl App {
             sel: 0,
             set_tab: 0,
             set_sel: 0,
-            pending: None,
-            scan_rx: None,
+            pending,
+            scan_rx,
+            scan_count,
             loading_drawn: false,
             ks_rx: None,
             ks_progress: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
@@ -790,6 +881,13 @@ impl App {
             preview_target_frame: 0,
             preview_loop_us: 0,
             preview_next_us: 0,
+            preview_sched: Vec::new(),
+            preview_cursor: 0,
+            preview_anchor: 0,
+            preview_start_us: 0,
+            preview_end_us: 0,
+            preview_prep_rx: None,
+            preview_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             cursor: (0.0, 0.0),
             hot: Vec::new(),
             last_frame: Instant::now(),
@@ -995,7 +1093,15 @@ impl ApplicationHandler for App {
                             self.pending = None;
                             self.scan_rx = None;
                             self.ks_rx = None; // abandon any in-flight keysound decode
-                            self.to_select_or_exit(event_loop);
+                            // Cancel back to Select rather than exit: during the initial background scan
+                            // `songs` is still empty, and routing through `to_select_or_exit` would quit
+                            // on the empty library — surprising mid-load. Drop any half-loaded play state.
+                            self.audio = None;
+                            self.player = None;
+                            self.select_view = SelectView::Root;
+                            self.sel = 0;
+                            self.rebuild_select_items();
+                            self.stage = Stage::Select;
                         }
                     }
                     Stage::Play => {
@@ -1138,15 +1244,10 @@ fn main() {
     let chart = match chart {
         Some(c) => c,
         None if cfg.replay_path.is_some() => String::new(),
-        None => match remembered {
-            Some(folder) => folder,
-            None => {
-                eprintln!(
-                    "usage: rbms-player <chart|folder> [--interactive|--auto] [--sc-left] [--sc-auto] [--lift F] [--hispeed F] [--gauge ...] [--keys ...] [--table URL] [--keyconfig path.ron] [--replay file.ron]"
-                );
-                std::process::exit(1);
-            }
-        },
+        // A bare launch (no chart/folder arg, nothing remembered) is the first-run / .dmg double-click
+        // case: open the GUI on an empty library with an onboarding CTA instead of exiting to a
+        // terminal that isn't there. `App::new` treats an empty path as a bare launch.
+        None => remembered.unwrap_or_default(),
     };
 
     // Apply a user-chosen UI font (settings or --font) before any text is drawn.

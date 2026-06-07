@@ -2,7 +2,7 @@
 
 > 새 세션은 **이 문서부터** 읽는다. 현재 상태·아키텍처·실행법·할 일의 SSOT. (ai-process.md 원칙 1·14)
 > 베이스 룰: `~/.claude/CLAUDE.md` + convention. Rust 프로젝트 → TS 전용 규칙(arrow 등) 비적용, **공통 원칙**(주석 금지·설명은 docs/·정확 네이밍·근본 해결·공식문서 우선·검증 후 진행)은 그대로.
-> 위치: `/Users/hyunseokbyun/rbms`. 빌드 `cargo build`, 테스트 `cargo test --workspace`(현재 **887 통과·0 실패·0 경고**). 실행은 §5(`./start.sh`).
+> 위치: `/Users/hyunseokbyun/rbms`. 빌드 `cargo build`, 테스트 `cargo test --workspace`(현재 **889 통과·0 실패·0 경고**). 실행은 §5(`./start.sh`).
 > git: **dev(작업)/prod(배포) 브랜치 모델**(CI는 dev, 릴리스는 prod → `docs/ci-release.md`). **커밋 메시지에 co-author(Claude) 넣지 않음**(사용자 명시 지시), 작성자 `Hyunseok Byun <gumyoincirno@gmail.com>`. `target`·`Cargo.lock`·라이브러리 차트 커밋 금지(.gitignore).
 > 다음 할 일(로드맵)은 **`ROADMAP.md`**, 백엔드 설계는 **`docs/backend/`**, 배포/CI는 **`docs/ci-release.md`**.
 
@@ -24,6 +24,7 @@
 **Phase 1 — 클라 정확성(핵심 패리티) + 마무리**
 - [x] `PlayOptions.lntype`를 헤더에서 유도 (app_play.rs 하드코딩 제거 → `ir_map::ir_lntype`, 0=LN/1=CN/2=HCN, 테스트)
 - [x] #PREVIEW: `config.debug` 6분기 계측 + `samples/preview-demo` 픽스처 + dead_code 제거 (가청 확인은 수동 1회 — `docs/bug/2026-06-03-preview-playback.md`)
+- [x] (2026-06-07) **곡선택 하이브리드 미리듣기** — `#PREVIEW` 있으면 파일, 없으면 곡 **autoplay 미리듣기**(백그라운드 코디네이터 스레드: 파싱→스케줄→키음 디코드, 취소가능, 위상연속 루프). `load()`와 디코드 헬퍼 공통화. 2R 적대적 리뷰 반영. → `docs/history/2026-06-07-select-autoplay-preview.md` (가청 1회는 사용자 몫)
 - [x] ⭐ `LnKind` 판정 전파 + CN/HCN 2-판정 모델(head@press + end@release, 이른릴리스=end 판정·미히트=2 Miss, 분모 CN=2) + 합성 픽스처 5종. `Cn`/`Hcn` 게이트 → LN/Normal byte 불변. (HCN 연속 게이지·CN deferral·BSS = Phase 7; → `docs/reference/cn-hcn-judgment.md`)
 
 **Phase 2 — 첫 릴리스(인프라)**
@@ -120,6 +121,10 @@ crates/
 
 **2026-06-03 세션:** IR `lntype` 차트 유도(`ir_map::ir_lntype`, 0=LN/1=CN/2=HCN; 기존 하드코딩 제거) · **`#PREVIEW` 계측**(6 silent 분기 `config.debug` 로그)+`samples/preview-demo` 픽스처+dead_code 제거(가청 확인만 수동 잔여) · **CN/HCN 2-판정**(head@press + end@release, `Cn`/`Hcn` 게이트, 분모 2, 픽스처 5종; LN/Normal byte 불변) · **NETWORK 설정 탭**(SERVER URL/PLAYER ID 인앱 편집·`PlaySettings` 영속·`build_server` 재구성) · **Windows 설정 경로**(`config_dir` HOME→USERPROFILE). + Phase 0 위생(LICENSE·테스트수 정정·docs 커밋·dev 푸시) · 릴리스/백엔드 결정 기록(보류). → `docs/history/2026-06-03-session.md`.
 
+**2026-06-07 세션:** **곡선택 하이브리드 미리듣기**. 사용자 의도 정정 — 원하던 건 `#PREVIEW` 파일만이 아니라 "포커스한 곡이 들리는 미리듣기". 원본 beatoraja도 곡 autoplay 미리듣기는 없음(=#PREVIEW 파일 or 메뉴 BGM)이라, **하이브리드 신규 구현**: `#PREVIEW` 있으면 파일, 없으면 **백그라운드 코디네이터 스레드**가 차트 파싱→throwaway `Player`로 autoplay 키음 스케줄 추출→전체 키음 병렬 디코드(취소가능)→메인 스레드가 `PreviewMsg` 채널 드레인 후 클럭 앵커·dispatch-먼저-루프(+2초 tail, 위상연속 재-앵커). 키음 디코드 fan-out/job빌드는 `load()`와 공통 헬퍼(`keysound_jobs`/`spawn_keysound_decode`)로 통합. 헤드리스 통합테스트(`tests/autoplay_preview.rs`)+디코드→믹스 테스트 추가(889통과). **2라운드 적대적 리뷰**(1R 8건·2R 1건 전부 반영). → `docs/history/2026-06-07-select-autoplay-preview.md`. (실기 가청 1회는 사용자 몫)
+
+**2026-06-07 세션 (2) — 첫 실행/온보딩(.dmg 대비):** `.dmg` 더블클릭(터미널 없음) 대비. (1) **무인자 진입** — 인자·기억폴더 없을 때 `usage`+`exit` 대신 GUI 진입. (2) **초기 스캔 백그라운드화** — `App::new` 동기 블로킹(창도 안 뜸) → 백그라운드 스레드+`scan_rx`/`apply_scan`, SCANNING 화면에 **곡 수 카운트** 표시. (3) **첫 실행 빈 곡선택 + 온보딩 CTA**(`SelectView.empty_hint`: WELCOME/add-folder, 헤드리스 렌더 시각확인). (4) **Esc-중-스캔** 종료 회귀 수정(취소 복귀). 집중 적대 리뷰 1건 반영. → `docs/history/2026-06-07-first-launch-onboarding.md`. (`.app`/`.dmg` 패키징·공증은 release.yml 측 후속)
+
 상세 이력 → `docs/history/2026-05-31-*.md`·`2026-06-03-session.md` (§8 docs맵). 다음 할 일 → `ROADMAP.md`.
 
 ## 5. 실행
@@ -155,7 +160,7 @@ $BIN --replay ~/.config/rbms/replays/<f>.ron  # 리플레이 재생
 - ~~ALL-SCRATCH/H-RANDOM 미구현~~ **해결**(시간임계 40/125ms). ~~green-number 미반영~~ **표시·반영**(HUD). ~~CN/HCN 미구분~~ **`#LNMODE`→`LnKind` 구분 + 종단 2-판정 차별화 적용**(HCN 연속게이지·CN deferral·스크래치 BSS는 Phase 7). 스크래치 회전(2키 교대) 단순화는 잔존.
 - 윈도우 리사이즈 UI 리플로우 없음(논리 1280×720 고정). BGA 비디오(mpg) 미지원. 게이지 5K/PMS 변종·judgerank 커스텀 일부 미반영. 난이도표 추가 fetch는 동기(1개씩).
 - **IR 백엔드 = 전체 설계 완료(`docs/backend/`, 문서 단계)·구현 후속**. ~~클라 슈퍼셋 확장 필요~~ **클라 DTO 슈퍼셋 확장 완료**(§4 IR). 서버 미구현이라 신규 메서드(settings/replay-dl/auth/course)는 호출 시 `Unsupported`. `PlayOptions.lntype`에 실제 LN모드 전파는 후속(모델에 lnmode 미보유).
-- ~~UI 곡선택 재설계~~·~~KEY BOMB~~ **완료**(§4). **#PREVIEW = 계측+픽스처 완료**(6 silent 분기 `config.debug` 계측·`samples/preview-demo` 픽스처·dead_code 제거; **가청 확인만 수동 1회 잔여** → `docs/bug/2026-06-03-preview-playback.md`). 남은 UI 후속: **스킨 데이터화**(결과/메뉴 패널까지 — 곡선택 추출·KEY BOMB 데이터화로 진척).
+- ~~UI 곡선택 재설계~~·~~KEY BOMB~~ **완료**(§4). ~~#PREVIEW 파일만~~ **곡선택 하이브리드 미리듣기 완료**(2026-06-07): `#PREVIEW` 있으면 파일, 없으면 곡 **autoplay 미리듣기**(백그라운드 코디네이터·취소가능·위상연속 루프). 실기 가청 1회만 사용자 몫 → `docs/history/2026-06-07-select-autoplay-preview.md`. 남은 UI 후속: **스킨 데이터화**(결과/메뉴 패널까지 — 곡선택 추출·KEY BOMB 데이터화로 진척). ~~`.dmg` 첫 실행 UI~~ **첫 실행/온보딩 런타임 UI 완료**(2026-06-07: 무인자 진입·백그라운드 스캔+곡수·온보딩 CTA·Esc 취소 → `docs/history/2026-06-07-first-launch-onboarding.md`); 남은 건 **`.app`/`.dmg` 패키징·무인자 진입·macOS 공증**(release.yml 측).
 - ~~Windows 설정 경로~~ **해결**(`config_dir` HOME→USERPROFILE, → `docs/reference/windows-compat.md`). ~~CN/HCN 판정 차별화~~ **종단 2-판정 적용**(HCN 연속게이지·CN deferral·BSS는 Phase 7). 남은: **F5 결과/메뉴 패널 위치 RON화**(현재 HUD 표면만 데이터화), **P3a 글리프 아틀라스·P4 웹폰트**, **FE 프로젝트**(별 저장소·MIT) → `ROADMAP.md`. 적대적 리뷰 보류 차이 → `docs/acknowledge/beatoraja-divergences.md`.
 
 > **세션 이력(완료)**: 입력판정 근본수정(空POOR)·폴더 ←→ 네비·마우스·로컬기록 모달·beatoraja 램프색·AUTO REPLAY·Play-Esc-즉시결과·DEBUG MODE → `docs/history/2026-05-31-input-judge-nav-mouse-records.md`. 다국어 폰트(cosmic-text) → `…-multilingual-font.md`. 백엔드 IR-슈퍼셋 설계 + CI/CD → `…-backend-ir-ci.md`. (모두 §4 완료기능·§8 docs맵에 반영됨)
@@ -182,6 +187,8 @@ $BIN --replay ~/.config/rbms/replays/<f>.ron  # 리플레이 재생
   - `ui-redesign-iidx` — IIDX/LR2 지향 UI 재설계: 폴더 영속·백그라운드 스캔(애니 로딩)·노트 상단 클리핑(근본 수정, 베젤 hack 제거)·플레이 IIDX 레이아웃+라이브 스코어 그래프·결과 IIDX 레이아웃·곡선택 클리어램프 LED+상세 메타 고도화(bms-rs 참조, `#MAKER`). DP 레이아웃 BGA 비킴. 적대적 리뷰로 DP충돌·stale폴더·perf 수정. 레퍼런스 수집·디자인 스펙.
   - `select-redesign` — 곡선택 전면 재설계(beatoraja modern chic): `rbms-render::render_select` 추출(헤드리스 검증)·`note_density`(SongInformation 포팅)·커버(단일 BGA슬롯)·KEY/레벨 배지·밀도 히스토그램·타이틀 2줄·`build_select_view` 캐시·파서 `#BANNER`/`#PREVIEW`. 2라운드 적대적 리뷰(16건→0건).
   - `2026-06-03-session` — 위생(LICENSE·테스트수 정정·docs 커밋·dev 푸시)·IR lntype 차트 유도·#PREVIEW 계측+픽스처·CN/HCN 2-판정·NETWORK 설정 탭·Windows 설정 경로(HOME→USERPROFILE). 릴리스/백엔드 결정 기록(보류).
+  - `2026-06-07-select-autoplay-preview` — 곡선택 **하이브리드 미리듣기**(#PREVIEW 파일 or 곡 autoplay): 백그라운드 코디네이터 스레드(파싱→autoplay 키음 스케줄→전체 키음 병렬 디코드, 취소가능)·위상연속 루프(+2초 tail)·`load()`와 디코드 헬퍼 공통화. 2R 적대적 리뷰(1R 8건·2R 1건 반영). 헤드리스 통합테스트 추가(889통과).
+  - `2026-06-07-first-launch-onboarding` — `.dmg` 대비 **첫 실행/온보딩**: 무인자 GUI 진입(usage+exit 제거)·초기 스캔 백그라운드화(SCANNING+곡수 카운트, 창 즉시 표시)·첫 실행 빈 곡선택 온보딩 CTA(`empty_hint`)·Esc-중-스캔 종료 회귀 수정. 집중 적대 리뷰 1건 반영.
 - **새 세션 진입점 = 이 PROCESS.md**(CLAUDE.md가 지정). 별도 글로벌 하네스 메모리는 사용 안 함 — SSOT는 docs/.
 
 ## 9. 작업 규칙(요약)

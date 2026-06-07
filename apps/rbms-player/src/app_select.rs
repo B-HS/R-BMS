@@ -96,7 +96,7 @@ impl App {
     /// GPU borrow so the render pass can stay a pure data → pixels call (the cover texture is uploaded
     /// separately into [`cover_rect`]).
     pub(crate) fn build_select_view(&self) -> SelectScene {
-        let rows = self
+        let rows: Vec<SelectRow> = self
             .select_items
             .iter()
             .map(|item| match item {
@@ -236,6 +236,17 @@ impl App {
         } else {
             "\u{2191}\u{2193} MOVE   ENTER OPEN   ESC BACK"
         };
+        // Onboarding/empty hint shown when the list has no rows: a first-run "add a folder" CTA, an
+        // empty-search note, or a generic "no charts" message.
+        let empty_hint = if !rows.is_empty() {
+            None
+        } else if self.searching {
+            Some(("NO RESULTS", "Try a different search  \u{00B7}  Esc to clear"))
+        } else if self.folders.is_empty() {
+            Some(("WELCOME TO rbms", "Add your music folder \u{2014} press O or click FOLDERS below"))
+        } else {
+            Some(("NO CHARTS", "Press O to manage folders  \u{00B7}  T for difficulty tables"))
+        };
         SelectScene {
             rows,
             sel: self.sel,
@@ -246,6 +257,7 @@ impl App {
             score_graph: self.config.score_graph,
             search: self.searching.then(|| self.search.clone()),
             sort: self.sort.label(),
+            empty_hint,
         }
     }
 
@@ -266,10 +278,11 @@ impl App {
         });
     }
 
-    /// Drive the `#PREVIEW` hover preview: once the focus settles on a song (debounced so fast
-    /// scrolling doesn't decode every row), decode + loop its preview clip; gapless loop is kept by
-    /// scheduling the next iteration ahead of the play clock. The preview audio engine is separate
-    /// from the play engine (which only exists during Play) and lazily created on first need.
+    /// Drive the song-select hover preview once the focus settles (debounced so fast scrolling
+    /// doesn't load every row): if the chart defines a `#PREVIEW` clip, decode + loop that file;
+    /// otherwise build an autoplay preview of the chart itself (background-decode its keysounds, then
+    /// replay the autoplay timeline, looped). The preview audio engine is separate from the play
+    /// engine (which only exists during Play) and recreated per settled chart so its bank is clean.
     pub(crate) fn update_preview(&mut self) {
         if !self.config.preview {
             if self.preview_audio.is_some() {
@@ -282,11 +295,7 @@ impl App {
             self.preview_target = cur;
             self.preview_target_frame = self.frame_count;
             if self.preview_si.is_some() {
-                if let Some(eng) = self.preview_audio.as_mut() {
-                    eng.stop(PREVIEW_ID);
-                }
-                self.preview_si = None;
-                self.preview_loop_us = 0;
+                self.reset_preview_playback();
             }
         }
         if self.preview_si != cur {
@@ -297,8 +306,66 @@ impl App {
             }
             return;
         }
-        // Loop by re-triggering at each clip boundary. (The mixer stops the same key on a new play, so
-        // scheduling ahead would cut the current clip; re-triggering after it naturally ends is clean.)
+        // Autoplay preview load: drain the background channel (the schedule, then decoded keysounds);
+        // the channel disconnecting means the load is done, so anchor the clock to begin playback at
+        // the first event.
+        if self.preview_prep_rx.is_some() {
+            let mut done = false;
+            loop {
+                match self.preview_prep_rx.as_ref().unwrap().try_recv() {
+                    Ok(PreviewMsg::Schedule { sched, start_us, end_us }) => {
+                        self.preview_sched = sched;
+                        self.preview_start_us = start_us;
+                        self.preview_end_us = end_us;
+                        self.preview_cursor = 0;
+                    }
+                    Ok(PreviewMsg::Keysound(id, dec)) => {
+                        if let Some(eng) = self.preview_audio.as_mut() {
+                            eng.insert_decoded(id, dec);
+                        }
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        done = true;
+                        break;
+                    }
+                }
+            }
+            if done {
+                self.preview_prep_rx = None;
+                if self.preview_sched.is_empty() {
+                    // Nothing to play (no autoplay events) — drop the idle engine instead of leaving
+                    // its cpal stream open until the next focus. The song stays settled (no retry).
+                    self.preview_audio = None;
+                } else {
+                    if let Some(eng) = self.preview_audio.as_ref() {
+                        self.preview_anchor = eng.clock_us() - self.preview_start_us;
+                    }
+                    self.preview_cursor = 0;
+                }
+            }
+            return;
+        }
+        // Autoplay preview playback: fire every scheduled keysound whose time has passed FIRST (so the
+        // final event is never skipped), then loop once the silent tail elapses by re-anchoring the clock.
+        if !self.preview_sched.is_empty() {
+            if let Some(eng) = self.preview_audio.as_mut() {
+                let song = eng.clock_us() - self.preview_anchor;
+                while self.preview_cursor < self.preview_sched.len() && self.preview_sched[self.preview_cursor].0 <= song {
+                    let (at, wav) = self.preview_sched[self.preview_cursor];
+                    eng.play(wav, PREVIEW_GAIN, 0.0, 1.0, at + self.preview_anchor);
+                    self.preview_cursor += 1;
+                }
+                if song >= self.preview_end_us {
+                    self.preview_anchor += self.preview_end_us - self.preview_start_us;
+                    self.preview_cursor = 0;
+                }
+            }
+            return;
+        }
+        // File preview (#PREVIEW): loop by re-triggering at each clip boundary. (The mixer stops the
+        // same key on a new play, so scheduling ahead would cut the current clip; re-triggering after
+        // it naturally ends is clean.)
         if self.preview_loop_us > 0 {
             if let Some(eng) = self.preview_audio.as_mut() {
                 while eng.clock_us() >= self.preview_next_us {
@@ -309,24 +376,27 @@ impl App {
         }
     }
 
-    /// Decode the focused song's `#PREVIEW` clip and start it looping. Marks the song as settled even
-    /// when there is no preview file, so the debounce doesn't retry every frame.
+    /// Begin the preview for the focused chart: its `#PREVIEW` clip if defined, otherwise an autoplay
+    /// preview of the chart. Marks the song as settled even when nothing can be played, so the
+    /// debounce doesn't retry every frame.
     pub(crate) fn start_preview(&mut self, si: usize) {
         let dbg = self.config.debug;
         self.preview_si = Some(si);
         self.preview_loop_us = 0;
-        let Some(e) = self.songs.get(si) else {
+        self.preview_sched.clear();
+        self.preview_cursor = 0;
+        let Some(has_file) = self.songs.get(si).map(|e| !e.preview.trim().is_empty()) else {
             if dbg {
                 eprintln!("[preview] song index {si} out of range");
             }
             return;
         };
-        if e.preview.trim().is_empty() {
-            if dbg {
-                eprintln!("[preview] '{}' defines no #PREVIEW — nothing to play", e.title);
-            }
+        if !has_file {
+            self.start_autoplay_preview(si, dbg);
             return;
         }
+        let e = &self.songs[si];
+        let title = e.title.clone();
         let Some(dir) = e.path.parent() else {
             if dbg {
                 eprintln!("[preview] no parent dir for {}", e.path.display());
@@ -339,7 +409,6 @@ impl App {
             }
             return;
         };
-        let title = e.title.clone();
         let bytes = match std::fs::read(&path) {
             Ok(b) => b,
             Err(err) => {
@@ -350,17 +419,16 @@ impl App {
             }
         };
         let ext = path.extension().and_then(|x| x.to_str()).map(str::to_owned);
-        if self.preview_audio.is_none() {
-            match AudioEngine::new() {
-                Ok(eng) => self.preview_audio = Some(eng),
-                Err(err) => {
-                    if dbg {
-                        eprintln!("[preview] AudioEngine::new failed (no preview output stream): {err}");
-                    }
-                    return;
+        let engine = match AudioEngine::new() {
+            Ok(eng) => eng,
+            Err(err) => {
+                if dbg {
+                    eprintln!("[preview] AudioEngine::new failed (no preview output stream): {err}");
                 }
+                return;
             }
-        }
+        };
+        self.preview_audio = Some(engine);
         let Some(eng) = self.preview_audio.as_mut() else { return };
         if let Err(err) = eng.load(PREVIEW_ID, bytes, ext.as_deref()) {
             if dbg {
@@ -378,13 +446,96 @@ impl App {
         }
     }
 
-    /// Tear down the preview (drops the engine to release its cpal stream); recreated next time a
-    /// preview is needed in select.
-    pub(crate) fn stop_preview(&mut self) {
+    /// Start an autoplay preview for a chart with no `#PREVIEW` file. All heavy work — parse, autoplay
+    /// schedule extraction, and keysound decode — runs on a background coordinator thread so the
+    /// select screen never stutters on focus-settle; [`update_preview`] drains the results and begins
+    /// playback once the load finishes. A fresh cancel flag lets a later focus abandon this load.
+    pub(crate) fn start_autoplay_preview(&mut self, si: usize, dbg: bool) {
+        let Some(e) = self.songs.get(si) else { return };
+        let path = e.path.clone();
+        let title = e.title.clone();
+        let engine = match AudioEngine::new() {
+            Ok(eng) => eng,
+            Err(err) => {
+                if dbg {
+                    eprintln!("[preview] AudioEngine::new failed (no preview output stream): {err}");
+                }
+                return;
+            }
+        };
+        self.preview_audio = Some(engine);
+        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        self.preview_cancel = cancel.clone();
+        let (tx, rx) = std::sync::mpsc::channel::<PreviewMsg>();
+        self.preview_prep_rx = Some(rx);
+        if dbg {
+            eprintln!("[preview] '{title}' autoplay: loading in background");
+        }
+        std::thread::spawn(move || {
+            use std::sync::atomic::Ordering;
+            if cancel.load(Ordering::Relaxed) {
+                return;
+            }
+            let Ok(bytes) = std::fs::read(&path) else { return };
+            let Some(dir) = path.parent().map(Path::to_path_buf) else { return };
+            let src = rbms_parser::parse_with(&bytes, Default::default());
+            let chart_name = path.to_string_lossy();
+            let mode = rbms_chart::detect_mode(&src, &chart_name);
+            let model = to_model(&src, mode);
+            let jobs = keysound_jobs(&model.wavmap, &dir);
+            // The autoplay keysound timeline, from a one-shot autoplay pass (judging discarded).
+            let mut sched: Vec<(i64, u32)> = Vec::new();
+            {
+                let mut p = Player::new(model, true);
+                let end = p.last_time_us() + 1_000_000;
+                p.update(end, |ev| {
+                    if ev.wav >= 0 {
+                        sched.push((ev.at_us, ev.wav as u32));
+                    }
+                });
+            }
+            sched.sort_by_key(|s| s.0);
+            if sched.is_empty() || cancel.load(Ordering::Relaxed) {
+                return;
+            }
+            let start_us = sched.first().map(|s| s.0).unwrap_or(0);
+            let end_us = sched.last().map(|s| s.0).unwrap_or(0) + PREVIEW_LOOP_TAIL_US;
+            if tx.send(PreviewMsg::Schedule { sched, start_us, end_us }).is_err() {
+                return;
+            }
+            // Reuse the shared decode pool, forwarding each decoded keysound to the preview channel.
+            let (kx, _progress, _total) = spawn_keysound_decode(jobs, cancel);
+            for (id, dec) in kx {
+                if tx.send(PreviewMsg::Keysound(id, dec)).is_err() {
+                    break;
+                }
+            }
+        });
+    }
+
+    /// Stop and clear the active preview playback: signal any in-flight autoplay-preview load to stop
+    /// (parse + decode workers check this cancel flag), drop the engine to release its cpal stream and
+    /// ringing voices, and clear all playback state. Leaves `preview_target` so the debounce state
+    /// stays owned by the caller.
+    pub(crate) fn reset_preview_playback(&mut self) {
+        self.preview_cancel.store(true, std::sync::atomic::Ordering::Relaxed);
         self.preview_audio = None;
         self.preview_si = None;
-        self.preview_target = None;
         self.preview_loop_us = 0;
+        self.preview_next_us = 0;
+        self.preview_sched.clear();
+        self.preview_cursor = 0;
+        self.preview_anchor = 0;
+        self.preview_start_us = 0;
+        self.preview_end_us = 0;
+        self.preview_prep_rx = None;
+    }
+
+    /// Tear down the preview entirely (used when leaving Select / entering Play); recreated next time
+    /// a preview is needed in select.
+    pub(crate) fn stop_preview(&mut self) {
+        self.reset_preview_playback();
+        self.preview_target = None;
     }
 
     /// Open the record-detail modal for the focused chart (newest record first), if it has any.
@@ -544,9 +695,11 @@ impl App {
     pub(crate) fn rescan_all_folders(&mut self) {
         let dirs = self.folders.clone();
         let sources = self.table_sources.clone();
+        self.scan_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = self.scan_count.clone();
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            let songs = scan_folders(&dirs);
+            let songs = scan_folders(&dirs, &count);
             let (names, levels) = fetch_and_match(&sources, &songs);
             let _ = tx.send(ScanOutcome { songs, names, levels });
         });
