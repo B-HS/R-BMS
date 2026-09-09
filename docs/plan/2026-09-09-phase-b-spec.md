@@ -273,8 +273,13 @@ song_us_last: std::cell::Cell<i64>,  // 보간 클럭 단조 보장
 ```
 audible_us(now)
   = (snap.frames_at_callback_start as i128 * 1_000_000 / out_rate)
-  + (now.saturating_duration_since(snap.callback_at + snap.playback_ahead)).as_micros()
+  + signed_micros_between(snap.callback_at + snap.playback_ahead, min(now, snap.callback_at + MAX_EXTRAPOLATION))
 ```
+
+> **정정 (2026-09-09 적대 리뷰 반영).** 원안은 두 번째 항을 `saturating_duration_since` 로 적었다. 그것으로는 이 절이 없애려던 계단이 그대로 남는다: 모든 백엔드가 `playback_ahead` 를 **최소 버퍼 1주기**로 보고하므로(CoreAudio `host/coreaudio/macos/device.rs:899-908` 는 정확히 1주기, ALSA·WASAPI 는 그 이상, 폴백 경로도 정확히 1주기) 콜백 구간 `[t_N, t_N + 주기)` 전체에서 `now - (callback_at + ahead) <= 0` 이 되어 값이 `frames_at_callback_start` 에 고정된다. 실측 잔차 표준편차 3,080µs = 이론 양자화값 `10667/sqrt(12)`, 즉 구 클럭을 1버퍼 평행이동한 것에 불과했다.
+> **부호 있는 차분**을 쓰면 음수 구간(이번 버퍼가 아직 DAC 에 안 나간 구간)이 살아나고, 콜백 경계에서 `F_N - ahead == F_{N-1} + 주기 - ahead` 로 값이 정확히 연속이므로 단조 클램프도 그대로 성립한다. 외삽 상한의 기준점도 §3.1 본문대로 `callback_at` 으로 맞췄다(원 구현은 `callback_at + ahead` 기준이었다).
+> 회귀: `engine.rs` `the_interpolated_clock_stays_on_its_line_across_a_device_timeline`(잔차 sd < 1ms, 계단형이면 3.08ms 로 실패), `audible_position_advances_inside_one_callback_period`, `audible_position_is_continuous_across_a_callback_boundary`, 실기 `the_interpolated_clock_is_smooth_on_a_real_device`(`#[ignore]`).
+> **실기 실측(MacBook Pro Speakers, 48kHz, 버퍼 512 = 10,666µs): 잔차 sd 12.5µs** — 같은 장비에서 계단형이면 3,079µs. §2.1 합격선(1ms) 통과.
 
 - `frames_at_callback_start` 를 쓰는 이유: `playback` 은 "**이번에 쓰는** 데이터가 나갈 시각"이므로, 그 시각에 DAC 가 재생하는 프레임은 이번 콜백의 **첫 프레임**이다. `frames_rendered`(콜백 종료 후)를 쓰면 버퍼 1개분(실측 10.667ms) 앞서게 되어 A4 스큐가 그대로 남는다.
 - `now < callback_at + playback_ahead` 인 구간(= 이번 버퍼가 아직 안 나감)에서는 `saturating_duration_since` 가 0 을 주어 값이 잠깐 평평해진다. 이는 정상이며, 이전 스냅샷과의 연속성은 아래 단조 클램프가 보장한다.
@@ -316,7 +321,12 @@ move |data: &mut [T], info: &cpal::OutputCallbackInfo| {
 ```rust
 const UNDERRUN_GAP_RATIO: f64 = 1.5;   // 직전 콜백의 buffer_frames 기준 주기 대비
 ```
-언더런은 cpal 이 직접 알려주지 않으므로 이것은 **추정치**다. 오버레이/로그에 "EST" 로 표기한다.
+
+> **정정 (2026-09-09 적대 리뷰 반영).** §8-3 "cpal 이 언더런을 노출하는지 미확인" 은 **노출한다**로 확정됐다: `cpal::StreamError::BufferUnderrun` 을 ALSA(`host/alsa/mod.rs:807`·`:853`·`:1045`)와 JACK(`host/jack/stream.rs:468`)이 xrun 복구 후 올린다. CoreAudio 는 올리지 않는다.
+> 따라서 ① **에러 콜백은 변형을 분기해야 한다** — `BufferUnderrun` 은 복구 가능하므로 카운트만 하고 `alive` 를 유지하고, `DeviceNotAvailable`/`StreamInvalidated`/`BackendSpecific` 만 스트림 사망으로 본다(`stream_error_is_fatal`). 분기 없이 전부 사망 처리하면 리눅스/JACK 에서 xrun 1회로 판정 축이 남은 세션 내내 벽시계로 넘어가고 룩어헤드가 0 이 되어 A2 가 재발한다.
+> ② 간격 기반 추정은 신호를 주지 않는 백엔드(CoreAudio)를 위한 **보조 수단**으로 격하한다. 두 경로가 같은 카운터를 올리므로 오버레이는 계속 `UNDERRUN~` 로 표기한다.
+> ③ 에러 콜백은 오디오 스레드에서 실행되므로 `eprintln!` 을 두지 않는다(stderr 락 + write 시스템콜). 원자 카운터/플래그만 갱신하고, 문구는 게임 스레드가 `is_alive()` 변화를 관측했을 때 1회 출력한다(`app_play.rs::audio_clocks`).
+> 회귀: `engine.rs` `a_recoverable_underrun_does_not_kill_the_stream`(4변형 전부).
 
 ### 3.2 룩어헤드 (계획 §2 Phase B-2)
 
@@ -328,12 +338,18 @@ const UNDERRUN_GAP_RATIO: f64 = 1.5;   // 직전 콜백의 buffer_frames 기준 
 
 ```rust
 // engine.rs
-const LOOKAHEAD_EXTRA_FRAMES: u32 = 1;
-// lookahead_frames = snapshot().buffer_frames + LOOKAHEAD_EXTRA_FRAMES
-// lookahead_us     = lookahead_frames * 1_000_000 / out_rate
+const LOOKAHEAD_EXTRA_FRAMES: u32 = 2;
+// lookahead_us = snapshot().playback_ahead
+//              + (snapshot().buffer_frames + LOOKAHEAD_EXTRA_FRAMES) * 1_000_000 / out_rate
+// 호스트는 여기에 자기 폴링 간격(프레임 주기)을 더한다 — apps/rbms-player `schedule_position_us`.
 ```
-실측 기준(CoreAudio, `BufferSize::Default`, 512프레임 @ 48000Hz): `513 / 48000 = 10.6875 ms`.
 버퍼 크기는 **런타임 실측값**(콜백이 발행한 `buffer_frames`)을 쓴다. 고정 상수로 박지 않는다.
+
+> **정정 (2026-09-09 적대 리뷰 반영).** 원안의 유도(위 1~4)는 `at_frame` 이 **audible 축**이 아니라 **mixer clock 축**과 비교된다는 점을 놓쳤다. 소비 시점의 mixer clock 은 audible 위치보다 `playback_ahead + 1버퍼` 앞서 있고, 게임 스레드는 프레임당 1회만 예약하므로 필요한 리드타임은 **`playback_ahead` + 1버퍼 + 프레임 주기**다. 원안의 `1버퍼 + 1프레임`으로는 60Hz 프레임 시뮬레이션에서 예약의 32%(두 결함이 함께 있으면 100%)가 `delay == 0` 으로 붕괴했다.
+> `LOOKAHEAD_EXTRA_FRAMES` 를 2 로 올린 것은 µs↔프레임 절삭이 엔진에서 한 번, 믹서에서 한 번 일어나 1프레임 여유를 그대로 먹기 때문이다.
+> 프레임 주기 항은 앱이 소유한다(`schedule_poll_interval_us`, 최근 프레임 시간의 피크 홀드 + 감쇠, 1~50ms 클램프). 엔진은 장치 축만 안다.
+> 회귀: `engine.rs` `a_frame_paced_host_never_books_an_onset_the_mixer_has_already_passed`(60/120Hz 시뮬레이션에서 `late_schedules == 0`; 구 공식으로 되돌리면 223건 실패), `app_play.rs` `scheduling_leads_the_audible_axis_by_the_device_lead_and_the_frame_period`.
+> **알려진 하한:** 곡 시작 직후 `playback_ahead + 1버퍼`(실측 약 21ms) 구간의 온셋은 물리적으로 예약 불가다 — 그 프레임들은 첫 명령이 큐잉되기 전에 이미 DAC 로 넘어갔다. 시뮬레이션은 그 창을 지나서 시작한다.
 
 **적용 지점.**
 
@@ -408,10 +424,22 @@ sample * voice_gain * env * pan_gain          (보이스)
   - `Mixer::stop(key)` / `stop_id` / `stop_range` 는 즉시 컷 대신 `phase = Release` 로 바꾼다. `Mixer::play` 의 같은 키 재트리거(`mixer.rs:145` `self.stop(key)`)도 Release 로 바뀌므로 **꼬리가 겹친 채 새 보이스가 시작**된다 → 슬롯 1개를 더 쓴다(폴리포니 여유 512 로 충분).
   - `Release` 중인 보이스는 `stop_*` 재호출 시 무시(이미 감쇠 중).
 - **보이스 스틸 정책** (`alloc_slot` 교체)
-  1. 비활성 슬롯 → 사용.
-  2. `Release` 단계 중 `env` 가 가장 작은 슬롯 → 사용(`steals += 1`).
-  3. 전부 `Attack`/`Sustain` → **현재 진폭 `gain * env` 가 가장 작은** 보이스, 동률이면 `start_frame` 이 가장 오래된 보이스(`hard_steals += 1`). 이 경로만 클릭 가능성이 있으며, 512 보이스에서는 사실상 도달하지 않는다.
+  1. 비활성 슬롯 → 즉시 시작.
+  2. `Release` 단계 중 `env` 가 가장 작은 슬롯 → **그 슬롯에 예약**(`steals += 1`).
+  3. 전부 `Attack`/`Sustain` → **현재 진폭 `gain * env` 가 가장 작은** 보이스, 동률이면 `start_frame` 이 가장 오래된 보이스에 **예약**(`hard_steals += 1`).
+  4. 남은 슬롯이 전부 이미 예약을 물고 있으면 이번 Play 를 버린다(무음이 클릭보다 낫다).
   - 라운드로빈 커서(`alloc_cursor`)는 제거한다. 순회 비용은 O(voices)=512 로, 콜백당 명령 수는 수십 개 수준이라 무시 가능(소크에서 콜백 시간으로 검증, §6.3).
+
+> **정정 (2026-09-09 적대 리뷰 반영).** 원안의 2·3 단은 슬롯을 **제자리 덮어쓰기**로 가져가므로 두 경우 모두 한 프레임 만에 다른 파형으로 튄다 — 실측 경계 스텝 **0.3248 풀스케일**(2단·3단 동일). §2 완료정의 5("보이스 스틸/정지에 클릭이 없다")와 §3.4 램프 도입 취지에 정면으로 어긋난다. 원안 주석의 "마지막 단만 클릭 가능"도 사실이 아니다: 2단은 `env` 가 가장 작은 것을 고를 뿐이고, 페이드 중인 보이스가 하나뿐이면 `env≈1.0` 이다.
+> **해결: 스틸을 "즉시 교체"가 아니라 "피해 보이스의 페이드 뒤에 예약"으로 바꿨다.** `Voice.pending: Option<PlayRequest>` 에 새 요청을 얹고, 릴리스가 무음에 닿는 **그 프레임에 같은 슬롯에서 제자리 시작**한다(`start_in_place`, 샘플 정확). 아직 발음 전인 보이스를 스틸하면 슬롯이 즉시 비므로 지연 없이 시작한다. 예약을 물고 있는 슬롯은 다시 스틸 대상이 되지 않아 예약된 소리가 밀려나지 않는다. `stop`/`stop_id`/`stop_range` 는 같은 키 범위의 예약도 함께 취소한다(`clear_namespace` 의미 유지).
+> 대가는 풀이 꽉 찬 경우에 한해 새 소리가 최대 `RELEASE_MS`(3ms) 늦게 시작한다는 것뿐이다.
+> 회귀: `taking_a_slot_from_an_audible_voice_does_not_step_the_output`, `taking_a_slot_from_a_fading_voice_does_not_step_the_output`(둘 다 경계 스텝 < 0.01; 구 구현으로 되돌리면 0.3248 로 실패), `a_queued_start_still_sounds_after_the_victim_has_faded`, `a_slot_that_already_has_a_queued_start_is_not_taken_again`, `stopping_a_key_cancels_a_start_queued_on_it`.
+
+- **오디오 콜백의 메모리 해제 금지 (신규, 적대 리뷰).** `Mixer` 는 보이스가 끝날 때 `Arc<SampleData>` 를 **드롭하지 않고** rtrb 링(`Mixer::set_retire`)으로 게임 스레드에 돌려보내고, 게임 스레드가 `AudioEngine::collect_retired`(모든 명령 push·`insert_decoded` 경로)에서 드롭한다. 링이 가득 찬 경우에만 콜백이 직접 드롭하고 `retire_overflows` 를 올린다(유계·희소).
+  이유: `clear_namespace` 는 게임 스레드에서 `bank.retain(...)` 으로 뱅크 참조를 먼저 버리고 `StopRange` 만 큐잉하므로, 아직 울리고 있는 보이스가 **마지막 소유자**가 되고 `RELEASE_MS` 뒤 콜백 안에서 수 MB PCM 이 free 된다. 실측: 전역 계수 할당자로 콜백 경로 8회에 `deallocations 2, freed 192,056 bytes`. 트리거 지점은 Play 진입(`released_namespaces(true)`), Play 이탈, 프리뷰 교체(커서 이동마다)로 전부 상시 경로다.
+  회귀: `crates/rbms-audio/tests/rt_safety.rs`(전역 계수 할당자로 `mix`/`apply` 경로 alloc·dealloc 0 고정 + 은퇴한 샘플 전량이 링으로 돌아오는지 확인; 링을 빼면 54건 dealloc 으로 실패).
+
+- **게인 슬루 (신규, 적대 리뷰).** `MasterGain`/`BusGain`/`ChartGain` 은 즉시 대입이 아니라 `GAIN_SLEW_MS`(3ms) 동안 선형으로 이동한다. 이동 시간은 변화량과 무관하게 일정하다(변경 시점에 프레임당 증분을 계산). 정상상태 값은 그대로이므로 §3.4 진폭 등가성 회귀는 유지된다. 회귀: `a_gain_change_ramps_instead_of_stepping`, `a_gain_change_reaches_its_target_within_one_slew`.
 - **리미터**: 기존 `soft_limit`(`SOFT_LIMIT_THRESHOLD = 0.8`, tanh 니) 유지. 변경 없음. 다만 `master_gain` 이 1.0 으로 오르므로 **리미터 진입 빈도가 실제로 늘어나는지**를 소크에서 관측한다(피크 홀드 카운터 `limiter_engaged_frames`).
 
 ### 3.5 오디오 설정 + 오픈 폴백 사다리 (계획 §2 Phase B-5)
@@ -459,6 +487,13 @@ sample * voice_gain * env * pan_gain          (보이스)
 - 요청 검증은 `supported_output_configs()` 를 순회해 `min_sample_rate()..=max_sample_rate()` 와 `buffer_size()` 를 확인한 뒤 `try_with_sample_rate()` 로 확정한다(§1.2 시그니처).
 - 재오픈 실패 시 **직전에 성공한 설정으로 되돌려 다시 연다.** 그것마저 실패하면 step 3 부터 다시 내려간다. 어떤 경우에도 `App` 이 오디오 없이 패닉하지 않는다.
 - 폴백이 일어났으면 AUDIO 탭 하단에 `notes` 를 표시한다(예: `requested 96000 Hz -> device max 48000 Hz`).
+
+> **정정 (2026-09-09 적대 리뷰 반영).**
+> - **`fallback_step` 하한**: 요청 디바이스명을 `output_devices()` 에서 못 찾아 시스템 기본으로 내려갔는데도 그 뒤 포맷이 요청대로 열리면 step 이 0~2 로 보고돼 위 표의 step 3 과 어긋났다. 디바이스 폴백이 실제로 일어났으면 보고 step 을 `STEP_DEFAULT_DEVICE` 이상으로 승격한다(`reported_step_floor`). 회귀: `losing_the_requested_device_is_reported_as_a_device_fallback`.
+> - **AUDIO 탭 상태 줄**: `notes` 는 stdout 으로만 나가고 화면 어디에도 없었다. 설정 화면의 status 줄을 AUDIO 탭이 소유하게 해서 ① 실제로 열린 디바이스·레이트·채널, ② 강등 사유(`notes`), ③ 차트가 스트림을 쥐고 있어 재오픈이 보류 중이라는 안내를 표시한다(`settings_ui::audio_status_text`). 회귀 4건.
+> - **재오픈 디바운스**: 원 구현은 첫 변경에만 데드라인을 걸고 갱신하지 않아 "마지막 변경 후 400ms" 가 아니라 "첫 변경 후 400ms" 에 발화했고, 한 행을 여러 번 밟으면 스트림이 그 횟수만큼 닫혔다 열렸다. 대기 중에는 매 프레임 데드라인을 밀어낸다(`audio_reopen_deadline`).
+> - **재오픈 보류 범위**: `Stage::Play` 만 막으면 Loading 중 재오픈이 디코드된 키음 뱅크와 `#VOLWAV` 게인을 통째로 버린다. 차트가 스트림을 쥐고 있는 모든 구간(Play/Loading/`player` 보유/키음 디코드 중)에서 보류한다(`audio_reopen_blocked`). 재오픈 성공 후에는 로드된 차트의 `chart_gain` 을 다시 밀어 준다.
+> - **AUDIO DEVICE 행 열거**: 좌우 스텝마다 호스트를 열거하던 것을 설정 화면 진입 시 1회 캐시로 바꿨다(`App::open_settings`). 동명 장치 구분(cpal `Device::id()`)은 Phase C 로 남긴다.
 
 ### 3.6 `rbms-play` 축 분리 (신규 — 룩어헤드가 판정을 오염시키지 않게)
 
@@ -543,7 +578,12 @@ pub struct TimingStats {
 
 - 수집 지점: `main.rs` press 경로(스냅샷 1264-1272)에서 `raw`(보간) + `audio.clock_us() - anchor`(계단형) + `hit.delta_us` 를 함께 push. **Phase I 이후 재확인.**
 - 결과 화면 진입 시 `--timing-csv <path>` 인자(또는 `debug` 모드)로 CSV 를 덤프한다.
-- **합격 기준**: 계단형 대비 보간의 잔차 표준편차가 이론값(균등분포 `buffer_us / sqrt(12)` = 512@48k 기준 3.08ms)에 근접하고, 보간 자체의 프레임 대비 오차 σ < 1ms. `judge_delta` 평균이 0 근처로 수렴(AUTO CAL 꺼짐, 동일 입력 패턴 기준).
+- **합격 기준**: 보간 클럭이 벽시계에 대한 **최소자승 직선에서 벗어나는 잔차의 표준편차 < 1ms.**
+
+> **정정 (2026-09-09 적대 리뷰 반영).** 원안의 "계단형 대비 보간의 잔차"는 지표가 될 수 없다. `input_at_us`(= `audible_us`)와 `quantized_us`(= `clock_us`)는 **같은 레코드**의 `frames_at_callback_start` 와 `frames_end` 에서 나오므로 둘의 차이는 보간 품질과 무관하게 항상 정확히 −1버퍼이고, 그 표준편차는 구조적으로 0 이다. 즉 §4.3 의 `interp_sd < 1000µs` 게이트는 실패 상태에서도 무조건 통과했다.
+> **`interp_sd_us` 를 "벽시계 대비 보간 클럭의 선형 잔차 sd" 로 재정의한다**(`timing::ClockFit`, Welford 온라인 공분산이라 소크 전 구간을 메모리 없이 요약한다). 기울기가 장치 클럭과 시스템 클럭의 상수 배율 차를 흡수하므로 드리프트는 오차로 세지 않는다. 계단형 클럭이면 이 값이 `buffer_us / sqrt(12)` ≈ 3.08ms 로 나와 게이트에 걸린다.
+> 표본은 **입력이 아니라 Play 프레임마다** 넣는다 — §4.3 의 소크는 autoplay 무인 실행이라 키 입력이 0건이다. `input_at_us − quantized_us` 는 진단용 `quantised gap` 으로 CSV·오버레이에 남긴다.
+> 회귀: `timing.rs` `the_clock_fit_separates_an_interpolated_clock_from_a_quantised_one`, `the_clock_fit_absorbs_a_constant_rate_difference_between_the_two_clocks`.
 
 ### 4.2 언더런/드롭 카운터 오버레이
 
@@ -551,9 +591,10 @@ pub struct TimingStats {
 
 ```
 AUDIO   {audible_us} US  ANCHOR {anchor}  LOOKAHEAD {lookahead_ms:.2} MS
-STREAM  {ALIVE|DEAD}  DROP {dropped}  REALLOC {realloc}  UNDERRUN~{underruns}
+STREAM  {ALIVE|DEAD}  DROP {dropped}  REALLOC {realloc}  UNDERRUN~{underruns}  RETIRE-OF {retire_overflows}
 VOICES  {active}/{max}  STEAL {steals}/{hard}  LATE {late}  TS-FB {timestamp_fallbacks}
 JUDGE   n={n}  d(mean) {mean:+.2}MS  sd {sd:.2}MS  p95 {p95:.2}MS
+CLOCK   n={clock_n}  fit sd {sd:.3}MS  quantised gap {gap:+.2}MS
 ```
 
 - `Stage::Select` 에서도 프리뷰가 같은 엔진을 쓰므로 `VOICES`/`UNDERRUN` 줄은 항상 표시한다.
@@ -571,9 +612,11 @@ JUDGE   n={n}  d(mean) {mean:+.2}MS  sd {sd:.2}MS  p95 {p95:.2}MS
 4. 앱이 60초 간격으로 아래 CSV 1행을 append 한다(신규, `timing.rs` 옆 `soak_log` 함수 또는 오버레이와 동일 소스).
 
 ```
-ts_iso,stage,uptime_s,rss_mb,fps_avg,frame_ms_p95,active_voices,underruns,drops,steals,hard_steals,late,ts_fallbacks,interp_sd_us,judge_sd_us
-2026-09-09T12:00:00Z,Play,60,182.4,119.6,9.1,37,0,0,4,0,0,0,0.41,8.9
+ts_iso,stage,uptime_s,rss_mb,fps_avg,frame_ms_p95,active_voices,underruns,drops,steals,hard_steals,late,ts_fallbacks,retire_overflows,interp_sd_us,judge_sd_us
+2026-09-09T12:00:00Z,Play,60,182.4,119.6,9.1,37,0,0,4,0,0,0,0,0.41,8.9
 ```
+
+> `retire_overflows` 는 적대 리뷰에서 추가된 컬럼이다(§3.4 정정 — 오디오 콜백의 메모리 해제 금지). 오버레이 STREAM 줄의 `RETIRE-OF` 와 같은 값이다.
 
 > **위 데이터 행은 컬럼 형식 예시이며 값은 전부 임의다.** 실측 baseline 이 아니다. (§1.2 의 512프레임/10.667ms 만 실측값이다.)
 
@@ -586,7 +629,8 @@ ts_iso,stage,uptime_s,rss_mb,fps_avg,frame_ms_p95,active_voices,underruns,drops,
 | dropped_commands | 0 |
 | scratch_reallocations | 첫 콜백 이후 0 |
 | hard_steals | 0 |
-| interp_sd | < 1000 µs |
+| interp_sd | < 1000 µs (벽시계 대비 선형 잔차 sd — §4.1 정정 참조. 계단형이면 약 3,080µs) |
+| retire_overflows | 0 (오디오 콜백이 샘플 PCM 을 직접 free 한 횟수) |
 
 - 실패 시 **리뷰로 넘어가지 않고** 원인 수정 → 소크 재실행.
 - 감시 스크립트를 쓸 경우 PID 는 `timeout`/래퍼가 아닌 실제 프로세스를 잡는다(guidelines §20).
@@ -620,7 +664,8 @@ ts_iso,stage,uptime_s,rss_mb,fps_avg,frame_ms_p95,active_voices,underruns,drops,
 
 `crates/rbms-audio/src/engine.rs`, `crates/rbms-audio/src/lib.rs`, `crates/rbms-audio/src/mixer.rs`, `crates/rbms-play/src/lib.rs`, `crates/rbms-parser/src/lib.rs`, `crates/rbms-model/src/lib.rs`, `crates/rbms-chart/src/lib.rs`, `apps/rbms-player/src/main.rs`, `apps/rbms-player/src/app_play.rs`, `apps/rbms-player/src/app_select.rs`, `apps/rbms-player/src/app_input.rs`, `apps/rbms-player/src/settings.rs`, `apps/rbms-player/src/settings_ui.rs`(신규), `apps/rbms-player/src/timing.rs`(신규) + Wave 3 문서 3종.
 
-**미변경 명시:** `crates/rbms-audio/src/decode.rs` 는 Phase B 범위 밖이다(디코딩 경로 무변경). 어느 브랜치도 열지 않는다.
+**`decode.rs` 정정 (2026-09-09 적대 리뷰 반영):** 원안은 `crates/rbms-audio/src/decode.rs` 를 "어느 브랜치도 열지 않는다" 로 적었으나, §3.0 동결 계약이 `Command::Play` 에 `bus` 필드를 추가한 이상 이 파일의 테스트는 그것 없이 컴파일되지 않는다. 실제 변경은 2줄(`use` 1줄 + `Command::Play { .., bus: Bus::Bg }` 1줄)이다.
+→ **정정: `decode.rs` 는 디코딩 경로 무변경. `Command` 시그니처 변경에 따른 테스트 적응만 허용하며, 소유는 B-audio-mixer.**
 
 ### Wave 1 (동시 착수 4갈래)
 
@@ -701,6 +746,10 @@ Wave 2 의 두 갈래가 `app_select.rs`/`main.rs` 를 공유하지 않도록, *
 
 **소유권 검증 (Wave 3):** 소스 파일 소유 없음(문서 3종 단독). 다른 Wave 와 시간적으로 겹치지 않는다.
 
+### 파일 길이 (Phase C 로 이월)
+
+적대 리뷰 시점 실측: `main.rs` 1,562 · `app_play.rs` 1,236 · `app_select.rs` 847 · `keyconfig.rs` 829 로 800줄 기준을 넘는 파일이 4개다(신규 `timing.rs` 634 · `settings_ui.rs` 448 은 기준 이하). Wave 1.5 는 설정 UI 만 분리하도록 정의했고 `main.rs`/`app_play.rs` 분해는 Phase C 범위다. **Phase C 분리 목록에 `app_play.rs` 의 오디오 수명·재오픈·소크/오버레이 블록**(`ensure_audio`/`open_audio_with`/`reopen_audio`/`poll_audio_reopen`/`release_play_audio`/`debug_audio_lines`/`write_soak_row`/`push_clock_sample`)을 명시해 둔다 — 성격상 `timing.rs` 쪽이다.
+
 ---
 
 ## 7. 리스크
@@ -729,7 +778,7 @@ Wave 2 의 두 갈래가 `app_select.rs`/`main.rs` 를 공유하지 않도록, *
 
 1. **레퍼런스 구현의 `PCM`/`AudioDriver` 세부** — `AudioDriver.java`·`PCM.java`·`FloatPCM.java`·`ShortPCM.java`·`GdxSoundDriver.java`·`PortAudioDriver.java` 는 **열지 않았다**(시간 상한). 확인한 것은 `AudioConfig.java`(볼륨 3분리·버퍼 384·동시발음 256·샘플레이트 0)와 `AbstractAudioDriver.java`(`#VOLWAV` 355-358, `play(Note,volume,pitch)` 486-491, 판정음 493-505·볼륨 곱 502, `channel()` 507-509)뿐이다. **보이스 스틸 정책·페이드 유무·리샘플 방식은 미대조** — §3.4 의 스틸/램프는 rbms 독자 설계이며 레퍼런스 패리티 주장이 아니다.
 2. **`deviceSimultaneousSources = 256`(`AudioConfig.java:28`) 이 OpenAL 소스 수인지 rbms 의 소프트 보이스와 1:1 대응하는지** 미확인. §3.5 의 `POLYPHONY` 기본 512 는 현행 `DEFAULT_MAX_VOICES` 유지 결정이지 패리티가 아니다.
-3. **언더런의 정확한 측정 수단** — cpal 0.17.3 은 언더런(xrun) 콜백을 노출하지 않는 것으로 보이나, 백엔드별 `error_callback` 이 xrun 을 `StreamError` 로 올리는지 **확인하지 않았다**. §3.1 의 간격 기반 추정은 대체 수단이며, 실제 xrun 과 다를 수 있다(오버레이 `UNDERRUN~` 표기 이유).
+3. ~~**언더런의 정확한 측정 수단**~~ — **해소(2026-09-09 적대 리뷰).** cpal 0.17.3 은 `StreamError::BufferUnderrun` 을 노출한다(ALSA `host/alsa/mod.rs:807`·`:853`·`:1045`, JACK `host/jack/stream.rs:468`). CoreAudio 는 올리지 않는다. §3.1 정정 참조 — 에러 콜백이 변형을 분기하고, 간격 추정은 신호를 주지 않는 백엔드용 보조로 격하됐다.
 4. **디스플레이 지연** — 계획 §5 한계에 이미 "미실측"으로 남아 있다. 시청각 스큐 총합은 Phase B 로도 확정되지 않는다(오디오 축만 정확해진다).
 5. **`SETTING_TABS` 최종 인덱스** — Phase I 가 NETWORK 탭에 몇 개를 추가하는지 미확정. §3.5 표의 24~31 은 **잠정값**이며, 착수 시 "가장 큰 기존 인덱스 + 1" 부터 재할당한다. **Phase I 이후 재확인.** (현행 최대는 `SETTING_PLAYER_ID = 23`, `main.rs` 스냅샷 703.)
 6. **`master_gain` 1.0 상향 후 리미터 진입 빈도** — 이론상 동일 진폭이지만, `bus_gain` 이 보이스 단에 곱해지므로 리미터 이전 합산 지점이 달라진다. 실제로 다른지 소크 `limiter_engaged_frames` 로 **측정 후 판단**한다(현재 미측정).

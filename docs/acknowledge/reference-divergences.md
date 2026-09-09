@@ -78,3 +78,17 @@
 
 ## 설계 입장
 **#RANDOM 계열 제어흐름은 레퍼런스 구현과 bug-for-bug 호환하지 않는다.** 차트 해시는 raw 바이트 기준이라 점수·IR·리플레이 키는 영향 없고, #RANDOM 분기는 본래 플레이 시 무작위다. 우리 구현은 #ELSE/#ELSEIF/중첩을 spec에 맞게 더 완전히 처리한다 — 이는 의도된 개선이다.
+
+## Phase B — 오디오 클럭 재설계 (2026-09-09)
+
+> 근거: `docs/plan/2026-09-09-phase-b-spec.md`, 구현 요약 `docs/history/2026-09-09-phase-b-audio-clock.md`. 아래 항목은 **레퍼런스 패리티 주장이 아니라 rbms 독자 설계**다 — 레퍼런스 구현의 `AudioDriver`/`PCM` 계열 소스는 이번에도 열지 않았다(spec §8-1, 미확인 사항으로 유지).
+
+| # | 항목 | rbms | 레퍼런스 구현 | 근거/사유 |
+|---|---|---|---|---|
+| B-D1 | 어택/릴리스 램프 | `ATTACK_MS=1.0`/`RELEASE_MS=3.0` 선형 엔벨로프를 모든 보이스 시작·정지·재트리거·스틸에 적용 | 미대조(패리티 확인 안 함, `PCM.java` 등 미열람) | 클릭 제거(§2 완료정의 5)가 목적. 레퍼런스가 페이드를 쓰는지 여부와 무관하게 rbms가 독자 도입 |
+| B-D2 | 마스터 게인 재배치 | `master_gain` 기본 1.0 + `bus_gain[System/Key/Bg]` 기본 0.5(신설) + `chart_gain`(=`#VOLWAV`) — 3단 곱셈 | 레퍼런스는 per-voice `keyvolume`/`bgvolume` 0.5 를 직접 곱함(버스 개념 없음) | 기존 rbms `DEFAULT_MASTER_GAIN=0.5`는 이를 마스터 1회로 근사한 값이었음(Phase A 주석). Phase B가 버스로 정확히 분리하며 마스터를 1.0으로 되돌림. 최종 진폭은 불변(0.5×1.0 = 1.0×0.5, 회귀 테스트로 고정) |
+| B-D3 | 룩어헤드 | `playback_ahead + (buffer_frames + LOOKAHEAD_EXTRA_FRAMES) / rate` — 스케줄러가 버퍼 경계보다 미리 예약하는 시간창. 프레임 폴링 간격은 앱이 별도 소유(`schedule_poll_interval_us`) | 레퍼런스의 스케줄링 룩어헤드 방식은 미대조 | rbms 고유 문제(A2: `delay<=0`이면 즉시 발음으로 붕괴)를 해소하기 위한 신설 메커니즘. 레퍼런스와 대응 개념이 있는지 여부와 무관 |
+| B-D4 | 오디오 클럭 축 분리 | `audible_us`(보간, 사람이 듣는 위치) vs `scheduled_us`(=audible+lookahead, 예약 전용) 를 엔진이 분리 노출. `rbms-play::Player`도 `update_schedule`(scheduled 축)/`update_judge`(audible 축)로 분리 | 미대조 | 레퍼런스 아키텍처(단일 스레드 폴링 모델)와 직접 비교하지 않았다. rbms는 cpal 콜백 기반 보간 클럭이 필요해 신설한 구조 |
+| B-D5 | 보이스 스틸 정책 | 비활성 → Release 중 env 최소 → gain×env 최소(동률 시 최고령) 3단계, 스틸 대상은 "즉시 교체"가 아니라 "피해 보이스 페이드 완료 후 같은 슬롯에 예약 시작"(`Voice.pending`) | 레퍼런스 소스(`AudioDriver.java` 등) 미열람 — 정책 자체를 대조하지 않음(spec §8-1 명시) | rbms 독자 설계. 클릭 없는 스틸(경계 스텝 < 0.01)을 목표로 리뷰에서 재설계됨(초판은 제자리 덮어쓰기로 0.3248 풀스케일 클릭 발생) |
+
+**공통 근거**: `docs/plan/2026-09-09-phase-b-spec.md` §8-1 "보이스 스틸 정책·페이드 유무·리샘플 방식은 미대조 — §3.4의 스틸/램프는 rbms 독자 설계이며 레퍼런스 패리티 주장이 아니다"를 그대로 따른다. 위 5항목 모두 향후 레퍼런스 `AudioDriver`/`PCM` 계열을 직접 열어 대조하기 전까지는 "일치/불일치" 판정 없이 **rbms 설계**로만 기록한다.

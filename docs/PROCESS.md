@@ -59,7 +59,12 @@
 - [x] 서버 측 계약 결함 수정(커밋 `7fa8106` web · `beb2210` ir · `a1edc71` player · `f98899b` docs): submit 응답에 ranked/flags/is_new_best/score_id, 리플레이 다운로드에 gauge·chart.md5, settings PUT 200 `{updated_at}`(204 하위호환), guest 상수 확인. 로컬 dev 서버 e2e(`crates/rbms-ir/tests/e2e_local.rs`, 계정 `e2e-phase-i-18d391944f88`) 통과. `vercel --prod` 재배포 후 `https://bms.hyuns.uk` health/version/guide/홈 200, Chrome 실렌더 `/guide` 라이트·다크 양쪽 확인(2026-09-09). history: `docs/history/2026-09-09-phase-i-client-ir-integration.md`
 
 ### Phase B~G + 릴리스 (계획 `docs/plan/2026-09-09-enhancement-plan.md` §2)
-- [ ] B 오디오 클럭 재설계 — 보간 클럭·룩어헤드 스케줄·단일 AudioEngine·볼륨 3분리/#VOLWAV/보이스 스틸/램프·오디오 설정 노출·판정 오차 하네스/언더런 카운터/소크
+- [x] B 오디오 클럭 재설계(2026-09-09, 가청 확인만 사용자 몫) — 보간 클럭·룩어헤드 스케줄·단일 AudioEngine·볼륨 3분리/#VOLWAV/보이스 스틸/램프·오디오 설정 노출·판정 오차 하네스/언더런 카운터/소크
+  - [x] 구현 (명세 `docs/plan/2026-09-09-phase-b-spec.md`)
+  - [x] 적대 리뷰 23건 반영 — 보간 클럭 계단형 붕괴·룩어헤드 부족·콜백 내 PCM free·xrun 오탐 사망·스틸 클릭·검증 지표 상수화 등. → `docs/history/2026-09-09-phase-b-audio-review-fixes.md`, 명세에 항목별 정정 블록
+  - [x] §4.3 소크 13분(6세그먼트, HOME 격리, 수정 반영 후): underruns/drops/steals/hard_steals/late/ts_fallbacks 0, interp_sd 최대 9.17µs(계단형이면 3,079µs), RSS 기울기 −1.99MB/분, 로그 panic/error 0. 실기 보간 잔차 sd 3,073µs → 12.5µs
+  - [x] 게이트(Fable 실측): fmt 통과, `cargo test --workspace` 1,475 통과·0 실패·3 ignored(착수 전 1,284), clippy 신규 경고 0. 커밋 `ec4d9d2` audio · `b53f99b` play · `b70fc56` parser/#VOLWAV · `b683e88` player
+  - [ ] 실기 가청 확인 1회(키음 즉시성·BGM 온셋·클릭 없음·프리뷰 전환) — 사용자 몫
 - [ ] C 구조 개편 — Stage enum·PlaySession→rbms-play·rbms-config·설정 descriptor 테이블·판정/게이지 데이터화·rbms-store/rbms-library 이관·CI lint 게이트/thiserror/forbid(unsafe)
 - [ ] D 판정 패리티 완성 + JUDGE 탭 노출 — J17 알고리즘 4종·J20 9게이지+J26·J21~J23·J9/A10 스크래치·J24 CN/HCN·J25·J12 2단계·J6 24K·어시스트 램프 강등
 - [ ] E1~E6 스킨 완전 커스터마이징 — 프리미티브(PNG 골든·textured quad·클립·아틀라스)·타이머/키프레임·프로퍼티 바인딩·JSON+Lua 로더·화면 이식·스킨 선택 UI
