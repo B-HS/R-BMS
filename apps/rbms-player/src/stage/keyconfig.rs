@@ -54,6 +54,7 @@ impl KeyConfigState {
             match row {
                 KcRow::Control(a) => shared.keyconfig.set_control(*a, code),
                 KcRow::Lane(lane) => shared.keyconfig.set_lane(shared.kc_edit_mode, *lane, code),
+                KcRow::ScratchReverse(lane) => shared.keyconfig.set_scratch_reverse(shared.kc_edit_mode, *lane, code),
                 KcRow::ModeSelect => {}
             }
         }
@@ -90,7 +91,7 @@ impl StageHandler for KeyConfigState {
             KeyCode::ArrowLeft if matches!(rows.get(self.sel), Some(KcRow::ModeSelect)) => self.cycle_edit_mode(ctx.shared, -1),
             KeyCode::ArrowRight if matches!(rows.get(self.sel), Some(KcRow::ModeSelect)) => self.cycle_edit_mode(ctx.shared, 1),
             KeyCode::Enter | KeyCode::NumpadEnter => {
-                if matches!(rows.get(self.sel), Some(KcRow::Control(_)) | Some(KcRow::Lane(_))) {
+                if matches!(rows.get(self.sel), Some(KcRow::Control(_) | KcRow::Lane(_) | KcRow::ScratchReverse(_))) {
                     self.capturing = true;
                 }
             }
@@ -127,6 +128,7 @@ impl StageHandler for KeyConfigState {
                     let name = if edit_mode.is_scratch(*lane) { format!("SCRATCH {}", lane + 1) } else { format!("LANE {}", lane + 1) };
                     (name, ctx.shared.keyconfig.lane_token(edit_mode, *lane))
                 }
+                KcRow::ScratchReverse(lane) => (format!("SCRATCH {} REVERSE", lane + 1), ctx.shared.keyconfig.scratch_reverse_token(edit_mode, *lane)),
             };
             let is_dup = !matches!(&rows[ridx], KcRow::ModeSelect) && key_from_name(&raw).is_some_and(|k| dups.contains(&k));
             canvas.fill_rect(Rect::new(x0, y, PANEL_W, ROW_H), if on { th.button } else { th.panel });

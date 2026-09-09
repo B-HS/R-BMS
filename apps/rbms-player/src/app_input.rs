@@ -87,6 +87,16 @@ impl AppShared {
         self.active_keys.iter().find(|(k, _)| *k == code).map(|(_, l)| *l)
     }
 
+    /// Which lane a key plays and which way it spins it. A scratch lane has one key per direction
+    /// and the judge engine needs to know which one arrived, because spinning the other way is what
+    /// ends a charge note (`JudgeManager.java:358-372`). Every other binding spins forward.
+    pub(crate) fn lane_input_for(&self, code: KeyCode) -> Option<(usize, ScratchDir)> {
+        match self.lane_for(code) {
+            Some(lane) => Some((lane, ScratchDir::Forward)),
+            None => self.active_reverse_keys.iter().find(|(k, _)| *k == code).map(|(_, lane)| (*lane, ScratchDir::Backward)),
+        }
+    }
+
     /// Which configured in-play control (if any) a key triggers.
     pub(crate) fn control_for(&self, code: KeyCode) -> Option<ControlAction> {
         ControlAction::ALL.into_iter().find(|a| self.keyconfig.control_key(*a) == Some(code))
@@ -164,10 +174,14 @@ impl AppShared {
     /// silently break it (controls are resolved before lanes in play, so a shared key would
     /// shadow the lane). Rebinding a row to its own current key is not a collision.
     pub(crate) fn binding_collides(&self, mode: Mode, row: &KcRow, code: KeyCode) -> bool {
+        let taken_by_a_lane = |except: Option<usize>| self.keyconfig.lane_keys(mode).iter().any(|(k, l)| *k == code && Some(*l) != except);
+        let taken_by_a_reverse = |except: Option<usize>| self.keyconfig.scratch_reverse_keys(mode).iter().any(|(k, l)| *k == code && Some(*l) != except);
         match row {
-            KcRow::Lane(lane) => self.control_for(code).is_some() || self.keyconfig.lane_keys(mode).iter().any(|(k, l)| *k == code && l != lane),
+            KcRow::Lane(lane) => self.control_for(code).is_some() || taken_by_a_lane(Some(*lane)) || taken_by_a_reverse(None),
+            KcRow::ScratchReverse(lane) => self.control_for(code).is_some() || taken_by_a_lane(None) || taken_by_a_reverse(Some(*lane)),
             KcRow::Control(action) => {
-                self.keyconfig.lane_keys(mode).iter().any(|(k, _)| *k == code)
+                taken_by_a_lane(None)
+                    || taken_by_a_reverse(None)
                     || ControlAction::ALL.into_iter().any(|a| a != *action && self.keyconfig.control_key(a) == Some(code))
             }
             KcRow::ModeSelect => false,

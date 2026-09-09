@@ -22,6 +22,22 @@ const RESULT_TITLE_CHARS: usize = 48;
 /// Leading md5 characters a saved replay's filename is stemmed to.
 const REPLAY_STEM_MD5_CHARS: usize = 8;
 
+/// Which of the three JUDGE WIDTH tiers the score submission reports, the score server's `judge_rate`
+/// being one number rather than six. PGREAT is the tier the setting is read by.
+const SUBMITTED_JUDGE_WIDTH_TIER: usize = 0;
+
+/// The gauge a finished run is recorded and submitted under: the one it actually finished on, which
+/// GAUGE AUTO SHIFT may have moved away from the gauge the player chose
+/// (`BMSPlayer.java:639-650`).
+///
+/// The reference stores `-1` for a run whose gauge moved (`BMSPlayer.java:884`); neither the score
+/// record nor the submission here has such a token, so the run reports the gauge that decided its
+/// clear rather than one its own lamp would contradict. `configured` stands in for a course gauge,
+/// which no setting selects.
+fn reported_gauge(summary: &rbms_play::PlaySummary, configured: rbms_judge::GaugeKind) -> rbms_judge::GaugeKind {
+    summary.finished_gauge.unwrap_or(configured)
+}
+
 /// What the result screen needs about the chart that was just played, copied out of the session so
 /// the score record, the submission and the saved replay can all be built without holding it.
 struct ChartRun {
@@ -37,16 +53,20 @@ struct ChartRun {
 pub(crate) struct PlayState {
     session: PlaySession,
     bga: std::collections::HashMap<i32, Vec<u8>>,
-    /// IR `lntype` of the loaded chart (0=LN, 1=CN, 2=HCN), derived from `#LNMODE` at load time so
-    /// score submissions report the actual LN mode instead of a hardcoded value.
+    /// IR `lntype` of this run (0=LN, 1=CN, 2=HCN): the chart's own `#LNMODE` when it states one,
+    /// and the LN MODE the run was judged under when it does not.
     lntype: i32,
+    /// The long-note key this run's record is compared within, so a chart forced to charge notes —
+    /// twice the judged objects, twice the EX ceiling — does not overwrite the best of the same
+    /// chart played as plain long notes.
+    ln_mode_key: String,
     /// Song position this frame, taken once in `update` and reused by `draw`.
     song_us: i64,
 }
 
 impl PlayState {
-    pub(crate) fn new(session: PlaySession, bga: std::collections::HashMap<i32, Vec<u8>>, lntype: i32) -> PlayState {
-        PlayState { session, bga, lntype, song_us: 0 }
+    pub(crate) fn new(session: PlaySession, bga: std::collections::HashMap<i32, Vec<u8>>, lntype: i32, ln_mode_key: String) -> PlayState {
+        PlayState { session, bga, lntype, ln_mode_key, song_us: 0 }
     }
 
     /// Hand the running session the judge settings as they stand right now, so a JUDGE OFFSET or
@@ -54,6 +74,16 @@ impl PlayState {
     fn sync_judge_settings(&mut self, shared: &AppShared) {
         self.session.set_judge_offset_us(shared.offset_us());
         self.session.set_auto_calibration(shared.config.judge.auto_offset);
+    }
+
+    /// Whether the run is over and the result is due: the song ended, or the gauge emptied under a
+    /// shift mode that does not rescue it — the reference moves to `STATE_FAILED` and stops judging
+    /// there (`BMSPlayer.java:653-661, 694`) rather than tallying a dead run to the end of the song.
+    ///
+    /// A replay being scrubbed never ends on its own, failed or not: the player is driving the
+    /// clock and can scrub back out of it.
+    fn run_is_over(&self, song_us: i64) -> bool {
+        self.session.is_finished(song_us) || (!self.session.analysis_enabled() && self.session.is_failed())
     }
 
     /// Handle an analysis-mode playback key (only while a replay analysis is active): pause/resume,
@@ -92,12 +122,19 @@ impl PlayState {
             init_bpm: play.model().init_bpm,
             seed: play.seed(),
         };
-        let save_replay = shared.config.play.auto_replay && shared.replay.is_none() && !shared.config.play.autoplay && !play.recorded_events().is_empty();
+        let judge_setup = play.judge_setup();
+        let custom_judge = is_custom_judge(&judge_setup);
+        let assist = assist_level(shared.config.play.scratch_auto, custom_judge);
+        let save_replay = shared.config.play.auto_replay
+            && shared.replay.is_none()
+            && !shared.config.play.autoplay
+            && saves_replay(assist)
+            && !play.recorded_events().is_empty();
         let recorded_events = save_replay.then(|| play.recorded_events().to_vec());
         let calibration_mean_us = play.calibration_mean_us();
         let calibration_samples = play.calibration_samples();
 
-        let lamp = summary.clear_lamp;
+        let lamp = assisted_lamp(summary.clear_lamp, assist);
         let (label, color) = clear_label_color(lamp);
         println!(
             "RESULT [{label}]  EX {}/{}  combo {}/{}  gauge {:.1}%  PG/GR/GD/BD/POOR/MISS {:?}  empty-poor {}",
@@ -123,7 +160,8 @@ impl PlayState {
             show_graph: shared.config.display.score_graph,
         };
 
-        let assist = assist_flags(shared.config.play.scratch_auto, shared.config.judge.judge_rate);
+        let assist_tags = assist_flags(shared.config.play.scratch_auto, custom_judge);
+        let finished_gauge = reported_gauge(&summary, shared.config.play.gauge);
         let c = summary.counts;
         let played_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
         let sub = ScoreSubmission {
@@ -165,15 +203,15 @@ impl PlayState {
             minbp: summary.min_bp,
             gauge_value: summary.gauge_value,
             options: PlayOptions {
-                gauge: ir_gauge(shared.config.play.gauge),
+                gauge: ir_gauge(finished_gauge),
                 random: ir_random(shared.config.play.random),
                 random_p2: None,
                 scratch_auto: shared.config.play.scratch_auto,
                 lntype: self.lntype,
                 input_device: "keyboard".into(),
-                assist,
+                assist: assist_tags,
                 option: 0,
-                judge_rate: shared.config.judge.judge_rate,
+                judge_rate: judge_setup.judge_rate_key[SUBMITTED_JUDGE_WIDTH_TIER],
                 offset_ms: shared.config.judge.offset_ms,
                 constant: shared.config.play.constant_speed,
                 hispeed: shared.config.play.hispeed,
@@ -196,9 +234,8 @@ impl PlayState {
             client_platform: Some(client_platform()),
             extra: Default::default(),
         };
-        let scores_count = updates_score(shared.config.play.autoplay, shared.replay.is_some(), shared.config.judge.judge_rate, shared.config.play.scratch_auto);
-        let block_reason =
-            ir_submission_block_reason(shared.config.play.autoplay, shared.replay.is_some(), shared.config.judge.judge_rate, shared.config.play.scratch_auto);
+        let scores_count = updates_score(shared.config.play.autoplay, shared.replay.is_some(), custom_judge, shared.config.play.scratch_auto);
+        let block_reason = ir_submission_block_reason(shared.config.play.autoplay, shared.replay.is_some(), custom_judge, shared.config.play.scratch_auto);
 
         let played_ms = played_at;
         let mut replay_file: Option<String> = None;
@@ -216,6 +253,16 @@ impl PlayState {
                 offset_ms: shared.config.judge.offset_ms,
                 scratch_auto: shared.config.play.scratch_auto,
                 gauge: gauge_token(shared.config.play.gauge).to_string(),
+                judge: ReplayJudge {
+                    algorithm: algorithm_token(judge_setup.algorithm).to_string(),
+                    judge_rate_key: judge_setup.judge_rate_key,
+                    judge_rate_scratch: judge_setup.judge_rate_scratch,
+                    longnote_margin_rate: judge_setup.longnote_margin_rate,
+                    ln_mode: ln_mode_token(judge_setup.ln_mode).to_string(),
+                    gauge_set: gauge_set_token(judge_setup.gauge_set).to_string(),
+                    gauge_auto_shift: gauge_auto_shift_token(judge_setup.gauge_auto_shift).to_string(),
+                    bottom_shiftable_gauge: gauge_token(judge_setup.bottom_shiftable_gauge).to_string(),
+                },
                 events,
             };
             rp.save(&dir.join(&name));
@@ -235,12 +282,13 @@ impl PlayState {
                 empty_poor: summary.empty_poor,
                 max_combo: summary.max_combo,
                 total_notes: summary.total_notes,
-                gauge: gauge_token(shared.config.play.gauge).to_string(),
+                gauge: gauge_token(finished_gauge).to_string(),
                 gauge_value: summary.gauge_value,
                 random: shared.config.play.random.label().to_string(),
                 played_at: played_ms,
                 replay_file,
                 rule_version: SCORE_RULE_VERSION,
+                ln_mode: self.ln_mode_key.clone(),
                 assisted: !scores_count,
             };
             shared.scores.push(record);
@@ -292,7 +340,7 @@ impl PlayState {
         if shared.config.play.autoplay || shared.replay.is_some() {
             return;
         }
-        let Some(lane) = shared.lane_for(key.code) else {
+        let Some((lane, dir)) = shared.lane_input_for(key.code) else {
             return;
         };
         let raw = shared.song_us();
@@ -300,12 +348,12 @@ impl PlayState {
         if key.pressed {
             let anchor = shared.anchor_us;
             let hit = match shared.audio.as_mut() {
-                Some(audio) => self.session.press(lane, raw, &mut PlayAudioSink::new(audio, anchor)),
-                None => self.session.press(lane, raw, &mut NullSink),
+                Some(audio) => self.session.press_dir(lane, dir, raw, &mut PlayAudioSink::new(audio, anchor)),
+                None => self.session.press_dir(lane, dir, raw, &mut NullSink),
             };
             shared.push_timing_sample(raw, hit.map(|r| r.delta_us));
         } else if key.released {
-            self.session.release(lane, raw);
+            self.session.release_dir(lane, dir, raw);
         }
     }
 
@@ -364,7 +412,7 @@ impl StageHandler for PlayState {
             (false, Some(audio)) => self.session.tick(clock, &mut PlayAudioSink::new(audio, anchor)),
             _ => self.session.tick(clock, &mut NullSink),
         }
-        if self.session.is_finished(song) {
+        if self.run_is_over(song) {
             return self.enter_result(ctx.shared);
         }
         Transition::Stay
@@ -422,7 +470,7 @@ impl StageHandler for PlayState {
         let seg = tls.binary_search_by(|t| t.time_us.cmp(&song)).unwrap_or_else(|i| i.saturating_sub(1));
         let (bpm, scroll) = tls.get(seg).map(|t| (t.bpm, t.scroll)).unwrap_or((play.model().init_bpm, 1.0));
         let green = green_number_for(ctx.shared.config.play.constant_speed, bpm, ctx.shared.config.play.hispeed, scroll, ctx.shared.config.play.cover);
-        let best_ex = ctx.shared.scores.best_ex_for_md5(&play.model().md5);
+        let best_ex = ctx.shared.scores.best_ex_for_md5_in_ln_mode(&play.model().md5, &self.ln_mode_key);
         let hud = HudView {
             combo: j.combo,
             last_judge: j.last_judge.map(|x| x as u8),
@@ -480,7 +528,7 @@ mod tests {
         let src = rbms_parser::parse_with(CHART.as_bytes(), Default::default());
         let mode = rbms_chart::detect_mode(&src, "t.bms");
         let model = rbms_chart::to_model(&src, mode);
-        PlayState::new(PlaySession::new(model, SessionOptions::default()), std::collections::HashMap::new(), 0)
+        PlayState::new(PlaySession::new(model, SessionOptions::default()), std::collections::HashMap::new(), 0, SCORE_LN_MODE_FROM_CHART.to_string())
     }
 
     fn key(code: KeyCode, pressed: bool) -> KeyInput<'static> {
@@ -504,11 +552,88 @@ mod tests {
         assert!(!events[1].press, "and the release after it — never a release on its own");
     }
 
+    /// A run whose gauge is empty under GAUGE AUTO SHIFT = NONE is over: the reference moves to
+    /// `STATE_FAILED` and stops judging (`BMSPlayer.java:653-661, 694`), so the frame loop has to
+    /// leave the play screen rather than keep tallying a dead run to the end of the song.
+    #[test]
+    fn an_emptied_gauge_under_no_auto_shift_leaves_the_play_screen() {
+        let mut app = app();
+        let src = rbms_parser::parse_with(CHART.as_bytes(), Default::default());
+        let model = rbms_chart::to_model(&src, rbms_chart::detect_mode(&src, "t.bms"));
+        let last_us = model.timelines.last().map(|t| t.time_us).unwrap_or(0);
+        let session = PlaySession::new(model, SessionOptions { gauge: rbms_judge::GaugeKind::Hazard, ..SessionOptions::default() });
+        let mut state = PlayState::new(session, std::collections::HashMap::new(), 0, SCORE_LN_MODE_FROM_CHART.to_string());
+
+        let sweep_us = last_us + 1_000_000;
+        state.session.tick(SessionClock::at(sweep_us), &mut NullSink);
+        assert!(state.session.is_failed(), "a HAZARD gauge is empty after the first missed note");
+        assert!(!state.session.is_finished(sweep_us), "and the song itself is not over yet, so only the failure can end the run");
+        assert!(state.run_is_over(sweep_us));
+
+        let now = std::time::Instant::now();
+        let moved = state.update(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 });
+        assert!(matches!(moved, Transition::To(Stage::Result(_))), "the failed run has to reach the result screen");
+    }
+
+    /// A run the gauge auto-shift moved is recorded under the gauge that decided its clear, not
+    /// under the one the settings still hold, or the record would pair a NORMAL gauge with a HARD
+    /// lamp.
+    /// Scrubbing a replay is the player driving the clock, so a gauge that empties along the way
+    /// must not throw the screen to the result — the same reason `is_finished` stands down.
+    #[test]
+    fn a_replay_being_scrubbed_does_not_end_on_a_failed_gauge() {
+        let src = rbms_parser::parse_with(CHART.as_bytes(), Default::default());
+        let model = rbms_chart::to_model(&src, rbms_chart::detect_mode(&src, "t.bms"));
+        let last_us = model.timelines.last().map(|t| t.time_us).unwrap_or(0);
+        let replay = rbms_store::Replay {
+            chart_path: String::new(),
+            md5: String::new(),
+            mode: String::new(),
+            random: String::new(),
+            seed: 0,
+            offset_ms: 0,
+            scratch_auto: false,
+            gauge: String::new(),
+            judge: Default::default(),
+            events: Vec::new(),
+        };
+        let options = SessionOptions { gauge: rbms_judge::GaugeKind::Hazard, analysis: true, replay: Some(replay), ..SessionOptions::default() };
+        let mut state = PlayState::new(PlaySession::new(model, options), std::collections::HashMap::new(), 0, SCORE_LN_MODE_FROM_CHART.to_string());
+
+        let sweep_us = last_us + 1_000_000;
+        state.session.tick(SessionClock::at(sweep_us), &mut NullSink);
+        assert!(state.session.is_failed(), "the gauge really did empty");
+        assert!(!state.run_is_over(sweep_us), "an analysis run is scrubbed, not ended");
+    }
+
+    #[test]
+    fn a_shifted_run_is_recorded_under_the_gauge_it_finished_on() {
+        let src = rbms_parser::parse_with(CHART.as_bytes(), Default::default());
+        let model = rbms_chart::to_model(&src, rbms_chart::detect_mode(&src, "t.bms"));
+        let mut session = PlaySession::new(model, SessionOptions { gauge: rbms_judge::GaugeKind::Normal, ..SessionOptions::default() });
+        session.set_judge_setup(rbms_play::JudgeSetup { gauge_auto_shift: rbms_judge::gauge::GaugeAutoShift::BestClear, ..Default::default() });
+        session.tick(SessionClock::at(0), &mut NullSink);
+
+        let summary = session.summary();
+        assert!(summary.gauge_shifted, "BEST CLEAR re-picks every frame and climbs off NORMAL at once");
+        assert_ne!(reported_gauge(&summary, rbms_judge::GaugeKind::Normal), rbms_judge::GaugeKind::Normal, "the record follows the shift");
+        assert_eq!(reported_gauge(&summary, rbms_judge::GaugeKind::Normal), summary.finished_gauge.expect("a selectable gauge decided the clear"));
+    }
+
+    /// A run nothing shifted still reports the gauge it was played on.
+    #[test]
+    fn an_unshifted_run_is_recorded_under_the_gauge_that_was_chosen() {
+        let state = play_state();
+        let summary = state.session.summary();
+        assert!(!summary.gauge_shifted);
+        assert_eq!(reported_gauge(&summary, rbms_judge::GaugeKind::Normal), rbms_judge::GaugeKind::Normal);
+    }
+
     #[test]
     fn a_submission_reports_the_candidate_policy_the_run_actually_used() {
         let state = play_state();
         let reported = state.session.judge().algorithm();
         assert_eq!(reported.name(), rbms_judge::JudgeAlgorithm::default().name(), "a fresh run uses the engine default");
-        assert_eq!(reported.name(), "Duration", "and the default is the |dt|-nearest candidate rule this engine judges with");
+        assert_eq!(reported.name(), "Combo", "and the default is the reference's own (JudgeAlgorithm.java:42 lists Combo first)");
     }
 }

@@ -45,8 +45,13 @@ pub(crate) struct SettingsState {
 
 impl SettingsState {
     pub(crate) fn new() -> SettingsState {
+        SettingsState::on_tab(SettingTab::ALL[0])
+    }
+
+    /// A settings screen opened straight onto one tab.
+    pub(crate) fn on_tab(tab: SettingTab) -> SettingsState {
         SettingsState {
-            tab: 0,
+            tab: SettingTab::ALL.iter().position(|entry| *entry == tab).unwrap_or_default(),
             sel: 0,
             text_input: None,
             text_secret: false,

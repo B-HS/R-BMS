@@ -11,12 +11,15 @@ use std::collections::HashSet;
 
 use rbms_play::{PlaySession, SessionOptions};
 use rbms_render::ResultView;
+use rbms_store::SCORE_LN_MODE_FROM_CHART;
 
+use crate::settings_view::visible_rows;
 use crate::stage::{
     Canvas, FoldersState, FrameCtx, HeadlessCanvas, KeyConfigState, LoadingState, PlayState, ResultState, SelectState, SettingsState, Stage, TablesState,
 };
-use crate::stage::{StageId, Transition};
-use crate::{App, CH, CW, Color, Config, LaunchOptions};
+use crate::stage::{KeyInput, StageId, Transition};
+use crate::{App, CH, CW, Color, Config, KeyCode, LaunchOptions};
+use rbms_config::{AdjustOutcome, SettingTab, adjust, tab_rows};
 
 /// A one-measure 7-key chart: every lane plus the scratch, so the model has the same lane count as
 /// the skin the app builds for [`crate::MODE`].
@@ -37,7 +40,7 @@ fn play_state() -> PlayState {
     let src = rbms_parser::parse_with(CHART.as_bytes(), Default::default());
     let mode = rbms_chart::detect_mode(&src, "snapshot.bms");
     let model = rbms_chart::to_model(&src, mode);
-    PlayState::new(PlaySession::new(model, SessionOptions::default()), std::collections::HashMap::new(), 0)
+    PlayState::new(PlaySession::new(model, SessionOptions::default()), std::collections::HashMap::new(), 0, SCORE_LN_MODE_FROM_CHART.to_string())
 }
 
 fn result_state() -> ResultState {
@@ -134,6 +137,58 @@ fn the_background_image_slot_is_cleared_by_the_screens_that_do_not_use_it() {
     for (name, stage) in every_stage() {
         let pixels = render(&mut app, stage);
         assert!(pixels.bga().is_none(), "{name} left a background image behind");
+    }
+}
+
+/// The JUDGE tab draws every row it declares, and draws a different frame from the tab next to it —
+/// which is what a tab wired to the wrong row list would not do.
+#[test]
+fn the_judge_tab_paints_its_own_rows() {
+    let mut app = app();
+    let rows = tab_rows(SettingTab::Judge, &app.shared.config);
+    let visible = visible_rows();
+    assert!(rows.len() > 1, "the JUDGE tab has rows to draw");
+
+    let judge = render(&mut app, Stage::Settings(SettingsState::on_tab(SettingTab::Judge)));
+    assert!(judge.painted_pixels() > 0, "the JUDGE tab drew nothing");
+    assert_eq!(app.shared.hot.len(), rows.len().min(visible) + SettingTab::ALL.len(), "every visible JUDGE row and every tab is clickable");
+
+    let play = render(&mut app, Stage::Settings(SettingsState::on_tab(SettingTab::Play)));
+    assert_ne!(judge.signature(), play.signature(), "the JUDGE tab renders the same frame as the PLAY tab");
+    let judge_again = render(&mut app, Stage::Settings(SettingsState::on_tab(SettingTab::Judge)));
+    assert_eq!(judge.signature(), judge_again.signature(), "the JUDGE tab is not deterministic");
+}
+
+/// Draw the JUDGE tab with the cursor `down` rows from the top, which is also how far the row list
+/// has scrolled. Driven through the screen's own key handler rather than its private state, so the
+/// scroll under test is the one a user gets.
+fn render_judge_tab(app: &mut App, down: usize) -> HeadlessCanvas {
+    app.stage = Stage::Settings(SettingsState::on_tab(SettingTab::Judge));
+    let now = std::time::Instant::now();
+    for _ in 0..down {
+        let mut ctx = FrameCtx { shared: &mut app.shared, now, dt: 1.0 / 60.0 };
+        app.stage.handle_key(&mut ctx, KeyInput { code: KeyCode::ArrowDown, pressed: true, released: false, text: None });
+    }
+    let mut pixels = HeadlessCanvas::new(CW, CH);
+    let mut canvas = Canvas::Headless(&mut pixels);
+    app.shared.hot.clear();
+    let mut ctx = FrameCtx { shared: &mut app.shared, now, dt: 1.0 / 60.0 };
+    app.stage.draw(&mut ctx, &mut canvas);
+    pixels
+}
+
+/// Every value on the JUDGE tab reaches the frame: stepping one row changes what is painted, so a
+/// row whose descriptor is wired to nothing cannot pass unnoticed. The cursor is walked down to the
+/// row under test first, because the tab is longer than the list can show at once.
+#[test]
+fn every_judge_row_changes_the_frame_when_it_is_stepped() {
+    let mut app = app();
+    for (at, id) in tab_rows(SettingTab::Judge, &Config::default()).into_iter().enumerate() {
+        app.shared.config = Config::default();
+        let before = render_judge_tab(&mut app, at).pixel_checksum();
+        assert_eq!(adjust(&mut app.shared.config, id, 1), AdjustOutcome::Changed, "{id:?} does not step");
+        let after = render_judge_tab(&mut app, at).pixel_checksum();
+        assert_ne!(before, after, "{id:?} steps without changing the frame");
     }
 }
 

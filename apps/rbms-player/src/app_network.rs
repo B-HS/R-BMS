@@ -224,6 +224,7 @@ impl AppShared {
         self.keyconfig = payload.keyconfig;
         self.keyconfig.save(&self.keyconfig_path);
         self.active_keys = self.keyconfig.lane_keys(self.mode);
+        self.active_reverse_keys = self.keyconfig.scratch_reverse_keys(self.mode);
         self.rebuild_skin();
         self.sync_lock.apply(SyncOutcome::Read(blob.updated_at));
         self.save_settings();

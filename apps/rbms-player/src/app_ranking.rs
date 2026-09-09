@@ -56,7 +56,7 @@ impl AppShared {
         if !self.config.network.auto_upload_replay || !self.session.is_logged_in() || replay.events.is_empty() {
             return None;
         }
-        Some(to_ir_replay(replay, chart, self.config.judge.judge_rate, self.config.play.constant_speed, lntype, self.build_sha256.clone()))
+        Some(to_ir_replay(replay, chart, self.config.play.constant_speed, lntype, self.build_sha256.clone()))
     }
 
     /// Drain the ranking and submission workers, and drop a replay download the player has walked

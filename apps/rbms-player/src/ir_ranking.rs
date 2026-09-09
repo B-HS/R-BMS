@@ -140,14 +140,14 @@ pub(crate) fn accept_fetch(cache: &mut RankingCache, current_generation: u64, fe
     true
 }
 
-/// The engine lamp behind an IR lamp, for the panel's label and colour. The IR's
-/// `LightAssistEasy` has no engine equivalent and folds onto `AssistEasy`, matching how the local
-/// score book reads a stored id 3.
+/// The engine lamp behind an IR lamp, for the panel's label and colour. This is the inverse of
+/// `rbms_ir::mapping::ir_clear`, so a lamp survives a round trip through the IR.
 pub(crate) fn clear_type_from_lamp(lamp: ClearLamp) -> ClearType {
     match lamp {
         ClearLamp::NoPlay => ClearType::NoPlay,
         ClearLamp::Failed => ClearType::Failed,
-        ClearLamp::AssistEasy | ClearLamp::LightAssistEasy => ClearType::AssistEasy,
+        ClearLamp::AssistEasy => ClearType::AssistEasy,
+        ClearLamp::LightAssistEasy => ClearType::LightAssistEasy,
         ClearLamp::Easy => ClearType::Easy,
         ClearLamp::Normal => ClearType::Normal,
         ClearLamp::Hard => ClearType::Hard,
@@ -483,7 +483,7 @@ pub(crate) mod tests {
             let label = clear_label_color(clear_type_from_lamp(lamp)).0;
             assert!(!label.is_empty(), "{lamp:?} has a label");
         }
-        assert_eq!(clear_type_from_lamp(ClearLamp::LightAssistEasy), ClearType::AssistEasy);
+        assert_eq!(clear_type_from_lamp(ClearLamp::LightAssistEasy), ClearType::LightAssistEasy);
         assert_eq!(clear_type_from_lamp(ClearLamp::Normal), ClearType::Normal);
     }
 }

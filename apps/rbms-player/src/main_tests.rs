@@ -4,11 +4,18 @@
 //! private to the root, and a child module still sees them through `super`.
 
 use super::assets::THEME_TEMPLATE;
+use super::judge_setup::{is_custom_judge, judge_setup_of};
 use super::{
-    ROOT_ESC_CONFIRM, SortMode, bundled_skin, calibrated_offset, clear_type_from_id, clear_type_id, client_platform, compute_build_hash, config_dir_from,
-    default_total, esc_confirms_quit, exit_code, fmt_datetime, green_number_for, ir_submission_block_reason, resumed_clock_us, updates_score, write_atomic,
+    ROOT_ESC_CONFIRM, SortMode, assisted_lamp, bundled_skin, calibrated_offset, clear_type_from_id, clear_type_id, client_platform, compute_build_hash,
+    config_dir_from, default_total_for_mode, esc_confirms_quit, exit_code, fmt_datetime, green_number_for, ir_submission_block_reason, resumed_clock_us,
+    saves_replay, updates_score, write_atomic,
 };
+use rbms_chart::{default_total, default_total_keyboard};
+use rbms_config::{Config, JUDGE_RATE_MAX_PERCENT, LN_MARGIN_DEFAULT_PERCENT, LN_MARGIN_MAX_PERCENT, LN_MARGIN_MIN_PERCENT, UNMODIFIED_JUDGE_RATES};
+use rbms_ir::mapping::{CUSTOM_JUDGE_ASSIST, LIGHT_ASSIST, NO_ASSIST, assist_level};
+use rbms_judge::algorithm::JudgeAlgorithm;
 use rbms_judge::{ClearType, GaugeKind};
+use rbms_model::Mode;
 use std::time::{Duration, Instant};
 
 #[test]
@@ -126,6 +133,20 @@ fn default_total_is_non_decreasing_in_note_count() {
 }
 
 #[test]
+fn the_keyboard_modes_take_their_own_default_total_formula() {
+    for notes in [0, 1, 500, 2000] {
+        assert_eq!(default_total_for_mode(&Mode::BEAT_7K, notes), default_total(notes), "a beat mode keeps the BMSPlayerRule.java:84-89 beat curve");
+        assert_eq!(default_total_for_mode(&Mode::POPN_9K, notes), default_total(notes));
+        assert_eq!(
+            default_total_for_mode(&Mode::KEYBOARD_24K, notes),
+            default_total_keyboard(notes),
+            "the 24-key rule has a floor of 300 and a notes+100 numerator"
+        );
+    }
+    assert!(default_total_for_mode(&Mode::KEYBOARD_24K, 500) > default_total(500), "the two curves really do differ, or this proves nothing");
+}
+
+#[test]
 fn default_total_large_charts_exceed_floor() {
     assert!(default_total(2000) > 260.0, "dense chart rises above the floor");
 }
@@ -198,29 +219,28 @@ fn green_number_floating_tracks_bpm_scroll_and_cover() {
 
 #[test]
 fn ir_submission_allowed_only_for_an_unassisted_interactive_play() {
-    assert_eq!(ir_submission_block_reason(false, false, 100, false), None);
-    assert_eq!(ir_submission_block_reason(false, false, 50, false), None, "a NARROWED judge window is not an assist");
+    assert_eq!(ir_submission_block_reason(false, false, false, false), None);
 }
 
 #[test]
 fn ir_submission_blocked_for_autoplay_replay_and_assists() {
-    assert_eq!(ir_submission_block_reason(true, false, 100, false), Some("autoplay"));
-    assert_eq!(ir_submission_block_reason(false, true, 100, false), Some("replay playback"));
-    assert_eq!(ir_submission_block_reason(false, false, 105, false), Some("judge window widened"));
-    assert_eq!(ir_submission_block_reason(false, false, 100, true), Some("scratch assist"));
+    assert_eq!(ir_submission_block_reason(true, false, false, false), Some("autoplay"));
+    assert_eq!(ir_submission_block_reason(false, true, false, false), Some("replay playback"));
+    assert_eq!(ir_submission_block_reason(false, false, true, false), Some("judge window widened"));
+    assert_eq!(ir_submission_block_reason(false, false, false, true), Some("scratch assist"));
 }
 
 #[test]
 fn updates_score_is_the_exact_complement_of_the_ir_block_reason() {
     for &autoplay in &[false, true] {
         for &replay in &[false, true] {
-            for &judge_rate in &[50, 100, 105, 200] {
+            for &custom_judge in &[false, true] {
                 for &scratch_auto in &[false, true] {
-                    let blocked = ir_submission_block_reason(autoplay, replay, judge_rate, scratch_auto).is_some();
+                    let blocked = ir_submission_block_reason(autoplay, replay, custom_judge, scratch_auto).is_some();
                     assert_eq!(
-                        updates_score(autoplay, replay, judge_rate, scratch_auto),
+                        updates_score(autoplay, replay, custom_judge, scratch_auto),
                         !blocked,
-                        "autoplay={autoplay} replay={replay} judge_rate={judge_rate} scratch_auto={scratch_auto}"
+                        "autoplay={autoplay} replay={replay} custom_judge={custom_judge} scratch_auto={scratch_auto}"
                     );
                 }
             }
@@ -230,12 +250,104 @@ fn updates_score_is_the_exact_complement_of_the_ir_block_reason() {
 
 #[test]
 fn updates_score_only_for_an_unassisted_interactive_play() {
-    assert!(updates_score(false, false, 100, false));
-    assert!(updates_score(false, false, 50, false), "a narrowed judge window still scores");
-    assert!(!updates_score(false, false, 101, false), "a widened judge window does not");
-    assert!(!updates_score(false, false, 100, true), "auto scratch does not");
-    assert!(!updates_score(true, false, 100, false));
-    assert!(!updates_score(false, true, 100, false));
+    assert!(updates_score(false, false, false, false));
+    assert!(!updates_score(false, false, true, false), "a widened judge window does not");
+    assert!(!updates_score(false, false, false, true), "auto scratch does not");
+    assert!(!updates_score(true, false, false, false));
+    assert!(!updates_score(false, true, false, false));
+}
+
+/// The exact table decision 12 states, over every judge width and long-note margin the rows can
+/// hold: widening any one of the seven is a custom judge, narrowing any of them is not.
+#[test]
+fn assist_level_is_two_for_any_widened_width_or_margin_and_one_for_auto_scratch() {
+    let widths = [
+        (UNMODIFIED_JUDGE_RATES, UNMODIFIED_JUDGE_RATES, LN_MARGIN_DEFAULT_PERCENT, false),
+        ([50, 50, 50], [50, 50, 50], LN_MARGIN_MIN_PERCENT, false),
+        ([JUDGE_RATE_MAX_PERCENT, 100, 100], UNMODIFIED_JUDGE_RATES, LN_MARGIN_DEFAULT_PERCENT, true),
+        ([100, 105, 100], UNMODIFIED_JUDGE_RATES, LN_MARGIN_DEFAULT_PERCENT, true),
+        ([100, 100, 105], UNMODIFIED_JUDGE_RATES, LN_MARGIN_DEFAULT_PERCENT, true),
+        (UNMODIFIED_JUDGE_RATES, [105, 100, 100], LN_MARGIN_DEFAULT_PERCENT, true),
+        (UNMODIFIED_JUDGE_RATES, [100, 105, 100], LN_MARGIN_DEFAULT_PERCENT, true),
+        (UNMODIFIED_JUDGE_RATES, [100, 100, 105], LN_MARGIN_DEFAULT_PERCENT, true),
+        (UNMODIFIED_JUDGE_RATES, UNMODIFIED_JUDGE_RATES, LN_MARGIN_MAX_PERCENT, true),
+    ];
+    for (key, scratch, margin, custom) in widths {
+        let mut config = Config::default();
+        config.judge.judge_rate_key = key;
+        config.judge.judge_rate_scratch = scratch;
+        config.judge.longnote_margin_rate = margin;
+        assert_eq!(is_custom_judge(&judge_setup_of(&config)), custom, "key={key:?} scratch={scratch:?} margin={margin}");
+        for &scratch_auto in &[false, true] {
+            let expected = match (custom, scratch_auto) {
+                (true, _) => CUSTOM_JUDGE_ASSIST,
+                (false, true) => LIGHT_ASSIST,
+                (false, false) => NO_ASSIST,
+            };
+            assert_eq!(assist_level(scratch_auto, custom), expected, "key={key:?} scratch_auto={scratch_auto}");
+        }
+    }
+}
+
+/// `BMSPlayer.java:866` reads `assist == 1 ? LightAssistEasy : AssistEasy`, so only the single light
+/// assist takes the higher lamp: anything stronger has to take the lower one, however much stronger
+/// it gets.
+#[test]
+fn only_the_single_light_assist_keeps_the_higher_demoted_lamp() {
+    assert_eq!(assisted_lamp(ClearType::Hard, LIGHT_ASSIST), ClearType::LightAssistEasy);
+    for stronger in [CUSTOM_JUDGE_ASSIST, CUSTOM_JUDGE_ASSIST + 1, u8::MAX] {
+        assert_eq!(assisted_lamp(ClearType::Hard, stronger), ClearType::AssistEasy, "assist {stronger} must not read as a lighter one");
+    }
+    assert!(
+        clear_type_id(ClearType::AssistEasy) < clear_type_id(ClearType::LightAssistEasy),
+        "the demotion really does order the two lamps, or this proves nothing"
+    );
+}
+
+/// Decision 12's split: a custom judge blocks the replay, an auto-played lane does not.
+#[test]
+fn only_a_custom_judge_blocks_the_replay_recording() {
+    assert!(saves_replay(NO_ASSIST));
+    assert!(saves_replay(LIGHT_ASSIST), "an auto-played lane keeps its replay");
+    assert!(!saves_replay(CUSTOM_JUDGE_ASSIST));
+}
+
+/// Any assist puts the full-combo lamps out of reach and demotes the clear
+/// (`BMSPlayer.java:864-874`): one light assist to `LightAssistEasy`, anything stronger to
+/// `AssistEasy`. A failed run keeps its lamp either way.
+#[test]
+fn an_assisted_run_is_demoted_and_cannot_reach_a_full_combo_lamp() {
+    let clears = [
+        ClearType::LightAssistEasy,
+        ClearType::Easy,
+        ClearType::Normal,
+        ClearType::Hard,
+        ClearType::ExHard,
+        ClearType::FullCombo,
+        ClearType::Perfect,
+        ClearType::Max,
+    ];
+    for lamp in clears {
+        assert_eq!(assisted_lamp(lamp, NO_ASSIST), lamp, "{lamp:?} is untouched without assist");
+        assert_eq!(assisted_lamp(lamp, LIGHT_ASSIST), ClearType::LightAssistEasy, "{lamp:?} under one light assist");
+        assert_eq!(assisted_lamp(lamp, CUSTOM_JUDGE_ASSIST), ClearType::AssistEasy, "{lamp:?} under a custom judge");
+    }
+    for assist in [NO_ASSIST, LIGHT_ASSIST, CUSTOM_JUDGE_ASSIST] {
+        assert_eq!(assisted_lamp(ClearType::Failed, assist), ClearType::Failed);
+        assert_eq!(assisted_lamp(ClearType::NoPlay, assist), ClearType::NoPlay);
+    }
+}
+
+/// The judge-width vocabulary is written down in three crates that do not depend on one another;
+/// the player is the one place that sees all three, so it pins them together.
+#[test]
+fn the_judge_width_tier_count_and_unmodified_rate_agree_across_the_crates() {
+    assert_eq!(rbms_config::JUDGE_WIDTH_TIER_COUNT, rbms_play::JUDGE_WIDTH_TIER_COUNT);
+    assert_eq!(rbms_store::REPLAY_JUDGE_WIDTH_TIER_COUNT, rbms_play::JUDGE_WIDTH_TIER_COUNT);
+    assert_eq!(rbms_config::UNMODIFIED_JUDGE_RATES.to_vec(), rbms_play::UNMODIFIED_JUDGE_RATES.to_vec());
+    assert_eq!(rbms_config::JUDGE_RATE_DEFAULT_PERCENT, rbms_ir::mapping::JUDGE_RATE_UNMODIFIED);
+    assert_eq!(rbms_store::REPLAY_UNMODIFIED_RATE_PERCENT, rbms_ir::mapping::JUDGE_RATE_UNMODIFIED);
+    assert_eq!(rbms_config::algorithm_from_token(rbms_store::REPLAY_LEGACY_ALGORITHM), JudgeAlgorithm::Duration);
 }
 
 #[test]

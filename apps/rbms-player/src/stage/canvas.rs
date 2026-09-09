@@ -17,6 +17,14 @@ const SIGNATURE_COLS: u32 = 16;
 #[cfg(test)]
 const SIGNATURE_ROWS: u32 = 9;
 
+/// FNV-1a 64-bit offset basis, for the exact per-pixel frame checksum.
+#[cfg(test)]
+const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+
+/// FNV-1a 64-bit prime.
+#[cfg(test)]
+const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+
 /// A headless draw target: the renderer's CPU canvas plus the background-image slot and quad count
 /// the window target also provides. Built only by the render snapshot tests.
 #[cfg(test)]
@@ -53,6 +61,12 @@ impl HeadlessCanvas {
     /// from a drawn one.
     pub(crate) fn painted_pixels(&self) -> usize {
         self.pixels.pixels().chunks_exact(4).filter(|p| p[3] != 0).count()
+    }
+
+    /// An FNV-1a checksum over every rendered byte. Finer than [`HeadlessCanvas::signature`], which
+    /// averages the frame into blocks: two frames that differ only in a digit are told apart here.
+    pub(crate) fn pixel_checksum(&self) -> u64 {
+        self.pixels.pixels().iter().fold(FNV_OFFSET_BASIS, |hash, byte| (hash ^ u64::from(*byte)).wrapping_mul(FNV_PRIME))
     }
 }
 

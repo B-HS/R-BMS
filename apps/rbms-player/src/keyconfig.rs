@@ -274,12 +274,18 @@ impl ControlBinds {
     }
 }
 
-/// The full user key configuration: per-mode lane bindings plus the in-play control keys.
-/// Persisted as RON; absent fields fall back to the built-in defaults.
+/// The full user key configuration: per-mode lane bindings, the second key each scratch lane may
+/// be spun backwards with, and the in-play control keys. Persisted as RON; absent fields fall back
+/// to the built-in defaults.
+///
+/// `scratch_reverse` is a second map rather than a second token inside `lanes` so a key config
+/// written before reverse spins existed keeps parsing byte for byte. It ships empty: a scratch lane
+/// with no reverse key behaves exactly as it did with one key.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct KeyConfig {
     pub lanes: BTreeMap<String, Vec<String>>,
+    pub scratch_reverse: BTreeMap<String, Vec<String>>,
     pub controls: ControlBinds,
 }
 
@@ -295,7 +301,7 @@ impl Default for KeyConfig {
             }
             lanes.insert(mode_config_key(mode).to_string(), row);
         }
-        KeyConfig { lanes, controls: ControlBinds::default() }
+        KeyConfig { lanes, scratch_reverse: BTreeMap::new(), controls: ControlBinds::default() }
     }
 }
 
@@ -325,6 +331,40 @@ impl KeyConfig {
         by_lane.into_iter().enumerate().filter_map(|(lane, code)| code.map(|c| (c, lane))).collect()
     }
 
+    /// The key each scratch lane of `mode` is spun backwards with, as `(key, lane)`. Only lanes the
+    /// user has actually bound appear: a scratch lane with no reverse key is spun one way only,
+    /// which is what every key config written before this existed asks for.
+    pub fn scratch_reverse_keys(&self, mode: Mode) -> Vec<(KeyCode, usize)> {
+        let Some(row) = self.scratch_reverse.get(mode_config_key(mode)) else {
+            return Vec::new();
+        };
+        row.iter()
+            .enumerate()
+            .filter(|(lane, token)| *lane < mode.key && mode.is_scratch(*lane) && !token.is_empty())
+            .filter_map(|(lane, token)| match key_from_name(token) {
+                Some(code) => Some((code, lane)),
+                None => {
+                    eprintln!("keyconfig: mode {} scratch lane {lane} has unknown reverse key {token:?}; leaving it unbound", mode.name);
+                    None
+                }
+            })
+            .collect()
+    }
+
+    /// Rebind the reverse spin of one scratch lane; grows the mode's row to fit if needed.
+    pub fn set_scratch_reverse(&mut self, mode: Mode, lane: usize, code: KeyCode) {
+        let row = self.scratch_reverse.entry(mode_config_key(mode).to_string()).or_insert_with(|| vec![String::new(); mode.key]);
+        if row.len() <= lane {
+            row.resize(lane + 1, String::new());
+        }
+        row[lane] = key_name(code).to_string();
+    }
+
+    /// Current reverse-spin key token shown for a mode's scratch lane (empty string if unbound).
+    pub fn scratch_reverse_token(&self, mode: Mode, lane: usize) -> String {
+        self.scratch_reverse.get(mode_config_key(mode)).and_then(|row| row.get(lane)).cloned().unwrap_or_default()
+    }
+
     pub fn control_key(&self, action: ControlAction) -> Option<KeyCode> {
         key_from_name(self.controls.token(action))
     }
@@ -335,7 +375,11 @@ impl KeyConfig {
     pub fn collisions(&self, mode: Mode) -> std::collections::HashSet<KeyCode> {
         let mut seen = std::collections::HashSet::new();
         let mut dup = std::collections::HashSet::new();
-        let all = ControlAction::ALL.into_iter().filter_map(|a| self.control_key(a)).chain(self.lane_keys(mode).into_iter().map(|(k, _)| k));
+        let all = ControlAction::ALL
+            .into_iter()
+            .filter_map(|a| self.control_key(a))
+            .chain(self.lane_keys(mode).into_iter().map(|(k, _)| k))
+            .chain(self.scratch_reverse_keys(mode).into_iter().map(|(k, _)| k));
         for code in all {
             if !seen.insert(code) {
                 dup.insert(code);

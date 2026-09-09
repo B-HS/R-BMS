@@ -8,7 +8,7 @@ use rbms_ir::{ChartId, GaugeType, RandomOption, ReplayData};
 use rbms_judge::GaugeKind;
 
 use crate::ir_map::{gauge_from_name, gauge_token, ir_gauge, ir_random};
-use crate::replay::{Replay, ReplayEvent};
+use crate::replay::{REPLAY_JUDGE_WIDTH_TIER_COUNT, Replay, ReplayEvent, ReplayJudge};
 use crate::stage::StageId;
 
 /// Whether a finished replay download may still take over the app.
@@ -24,10 +24,15 @@ pub(crate) fn replay_download_is_applicable(stage: StageId) -> bool {
 /// opaquely and hands the tag back, so a future format can be told apart on download.
 pub(crate) const REPLAY_FORMAT: &str = "rbms-us-v1";
 
-/// Package a saved replay for upload. Everything the local file does not carry (judge window,
-/// scroll mode, LN mode, build hash) is supplied by the run that produced it, so the server can
-/// reproduce the run exactly.
-pub(crate) fn to_ir_replay(replay: &Replay, chart: &ChartId, judge_rate: i32, constant: bool, lntype: i32, client_build_sha256: Option<String>) -> ReplayData {
+/// Which of the three JUDGE WIDTH tiers the upload reports, the contract's `judge_rate` being one
+/// number rather than six.
+const UPLOADED_JUDGE_WIDTH_TIER: usize = 0;
+
+/// Package a saved replay for upload. Everything the local file does not carry (scroll mode, LN
+/// mode, build hash) is supplied by the run that produced it, so the server can reproduce the run
+/// exactly; the judge widths come from the replay itself, which recorded the ones it was played
+/// under.
+pub(crate) fn to_ir_replay(replay: &Replay, chart: &ChartId, constant: bool, lntype: i32, client_build_sha256: Option<String>) -> ReplayData {
     let events: Vec<rbms_ir::ReplayEvent> = replay.events.iter().map(|e| rbms_ir::ReplayEvent { t_us: e.t, lane: e.lane as u32, press: e.press }).collect();
     let duration_us = match (events.first(), events.last()) {
         (Some(first), Some(last)) => last.t_us - first.t_us,
@@ -44,7 +49,7 @@ pub(crate) fn to_ir_replay(replay: &Replay, chart: &ChartId, judge_rate: i32, co
         random: Some(ir_random(NoteOption::from_str(&replay.random))),
         lntype,
         offset_ms: replay.offset_ms,
-        judge_rate,
+        judge_rate: replay.judge.judge_rate_key[UPLOADED_JUDGE_WIDTH_TIER],
         scratch_auto: replay.scratch_auto,
         constant,
         gauge: Some(ir_gauge(gauge_from_name(&replay.gauge))),
@@ -55,6 +60,9 @@ pub(crate) fn to_ir_replay(replay: &Replay, chart: &ChartId, judge_rate: i32, co
 
 /// Rebuild a locally playable replay from a downloaded one. `chart_path` and `md5` come from the
 /// chart the ranking row was showing, since the payload only identifies the chart by hash.
+///
+/// The wire event carries no scratch direction, so a downloaded run reproduces as forward spins
+/// only; a back-spin scratch it contained will play back as a re-grab of the same direction.
 pub(crate) fn from_ir_replay(data: &ReplayData, chart_path: &str, md5: &str) -> Replay {
     Replay {
         chart_path: chart_path.to_string(),
@@ -65,7 +73,12 @@ pub(crate) fn from_ir_replay(data: &ReplayData, chart_path: &str, md5: &str) -> 
         offset_ms: data.offset_ms,
         scratch_auto: data.scratch_auto,
         gauge: gauge_token(gauge_kind_from_ir(data.gauge.unwrap_or(GaugeType::Normal))).to_string(),
-        events: data.events.iter().map(|e| ReplayEvent { t: e.t_us, lane: e.lane as usize, press: e.press }).collect(),
+        judge: ReplayJudge {
+            judge_rate_key: [data.judge_rate; REPLAY_JUDGE_WIDTH_TIER_COUNT],
+            judge_rate_scratch: [data.judge_rate; REPLAY_JUDGE_WIDTH_TIER_COUNT],
+            ..ReplayJudge::default()
+        },
+        events: data.events.iter().map(|e| ReplayEvent { t: e.t_us, lane: e.lane as usize, press: e.press, backward: false }).collect(),
     }
 }
 
@@ -135,10 +148,11 @@ mod tests {
             offset_ms: -12,
             scratch_auto: true,
             gauge: "hard".into(),
+            judge: ReplayJudge { judge_rate_key: [95; REPLAY_JUDGE_WIDTH_TIER_COUNT], ..ReplayJudge::default() },
             events: vec![
-                ReplayEvent { t: 0, lane: 0, press: true },
-                ReplayEvent { t: 1_500, lane: 0, press: false },
-                ReplayEvent { t: 2_000_000, lane: 7, press: true },
+                ReplayEvent { t: 0, lane: 0, press: true, backward: false },
+                ReplayEvent { t: 1_500, lane: 0, press: false, backward: false },
+                ReplayEvent { t: 2_000_000, lane: 7, press: true, backward: false },
             ],
         }
     }
@@ -150,7 +164,7 @@ mod tests {
     #[test]
     fn upload_conversion_carries_the_run_and_its_context() {
         let local = sample();
-        let data = to_ir_replay(&local, &chart(), 100, true, 2, Some("build-sha".into()));
+        let data = to_ir_replay(&local, &chart(), true, 2, Some("build-sha".into()));
         assert_eq!(data.format, REPLAY_FORMAT);
         assert_eq!(data.api_version, rbms_ir::API_VERSION);
         assert_eq!(data.event_count, Some(3));
@@ -158,7 +172,7 @@ mod tests {
         assert_eq!(data.seed, Some(local.seed));
         assert_eq!(data.chart.as_ref().map(|c| c.md5.as_str()), Some("DEADBEEF"));
         assert_eq!(data.lntype, 2);
-        assert_eq!(data.judge_rate, 100);
+        assert_eq!(data.judge_rate, 95, "the upload reports the widths the replay was recorded under, not the ones set now");
         assert!(data.constant);
         assert!(data.scratch_auto);
         assert_eq!(data.random, Some(RandomOption::SRandom));
@@ -171,7 +185,7 @@ mod tests {
     fn an_empty_run_reports_a_zero_duration_instead_of_panicking() {
         let mut local = sample();
         local.events.clear();
-        let data = to_ir_replay(&local, &chart(), 100, false, 0, None);
+        let data = to_ir_replay(&local, &chart(), false, 0, None);
         assert_eq!(data.event_count, Some(0));
         assert_eq!(data.duration_us, Some(0));
         assert!(data.events.is_empty());
@@ -180,7 +194,7 @@ mod tests {
     #[test]
     fn round_trip_preserves_every_shared_field() {
         let local = sample();
-        let data = to_ir_replay(&local, &chart(), 125, false, 1, None);
+        let data = to_ir_replay(&local, &chart(), false, 1, None);
         let back = from_ir_replay(&data, &local.chart_path, &local.md5);
         assert_eq!(back.chart_path, local.chart_path);
         assert_eq!(back.md5, local.md5);
@@ -190,6 +204,8 @@ mod tests {
         assert_eq!(back.offset_ms, local.offset_ms);
         assert_eq!(back.scratch_auto, local.scratch_auto);
         assert_eq!(back.gauge, local.gauge);
+        assert_eq!(back.judge.judge_rate_key, local.judge.judge_rate_key, "the one judge width the contract carries comes back on every tier");
+        assert_eq!(back.judge.algorithm, ReplayJudge::default().algorithm, "the contract carries no algorithm, so playback falls back to the engine's own");
         assert_eq!(back.events.len(), local.events.len());
         for (a, b) in local.events.iter().zip(&back.events) {
             assert_eq!((a.t, a.lane, a.press), (b.t, b.lane, b.press), "events survive the µs round trip");
@@ -238,7 +254,7 @@ mod tests {
         for option in NoteOption::ALL {
             let mut local = sample();
             local.random = option.label().to_string();
-            let data = to_ir_replay(&local, &chart(), 100, false, 0, None);
+            let data = to_ir_replay(&local, &chart(), false, 0, None);
             let back = from_ir_replay(&data, &local.chart_path, &local.md5);
             assert_eq!(back.random, option.label(), "{option:?} survives the wire form");
         }

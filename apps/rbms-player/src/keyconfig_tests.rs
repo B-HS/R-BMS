@@ -1,7 +1,47 @@
-use crate::keyconfig::{ControlAction, ControlBinds, KeyConfig, default_keys_for_mode, key_from_name, key_name, mode_config_key};
+use crate::keyconfig::{ControlAction, KeyConfig, default_keys_for_mode, key_from_name, key_name, mode_config_key};
 use rbms_model::Mode;
+use rbms_play::ScratchDir;
 use std::collections::BTreeMap;
 use winit::keyboard::KeyCode;
+
+/// An app whose key config is the one this test wrote, so the reverse binding it sets really is the
+/// one the input path resolves against.
+fn shared_with(keyconfig: &KeyConfig) -> crate::AppShared {
+    let dir = std::env::temp_dir().join(format!("rbms-keyconfig-tests-{}-{:?}", std::process::id(), std::thread::current().id()));
+    std::fs::create_dir_all(&dir).expect("a temp directory for the key config");
+    let path = dir.join("keyconfig.ron");
+    keyconfig.save(&path);
+    let launch = crate::LaunchOptions { keyconfig_path: Some(path.to_string_lossy().to_string()), ..crate::LaunchOptions::default() };
+    let shared = crate::App::new(String::new(), crate::Config::default(), launch, dir.join("settings.ron")).shared;
+    let _ = std::fs::remove_dir_all(&dir);
+    shared
+}
+
+/// The reverse binding is not just stored: the input path has to resolve it to its lane and report
+/// the backward direction, or the key would be dead in play while still blocking every other use.
+#[test]
+fn a_reverse_key_dispatches_as_a_backward_spin_on_its_scratch_lane() {
+    let mode = Mode::BEAT_7K;
+    let scratch = (0..mode.key).find(|&lane| mode.is_scratch(lane)).expect("7K has a scratch lane");
+    let mut kc = KeyConfig::default();
+    kc.set_scratch_reverse(mode, scratch, KeyCode::KeyQ);
+    let forward = kc.lane_keys(mode).iter().find(|(_, lane)| *lane == scratch).map(|(code, _)| *code).expect("the scratch lane is bound");
+
+    let shared = shared_with(&kc);
+    assert_eq!(shared.lane_input_for(KeyCode::KeyQ), Some((scratch, ScratchDir::Backward)), "the reverse key spins its lane the other way");
+    assert_eq!(shared.lane_input_for(forward), Some((scratch, ScratchDir::Forward)));
+    assert_eq!(shared.lane_input_for(KeyCode::F13), None, "an unbound key still plays no lane");
+}
+
+/// Without a reverse binding nothing changes: every bound key is a forward spin, which is what a
+/// key config written before the row existed asks for.
+#[test]
+fn every_key_is_a_forward_spin_until_a_reverse_key_is_bound() {
+    let shared = shared_with(&KeyConfig::default());
+    for (code, lane) in KeyConfig::default().lane_keys(Mode::BEAT_7K) {
+        assert_eq!(shared.lane_input_for(code), Some((lane, ScratchDir::Forward)), "{code:?}");
+    }
+}
 
 #[test]
 fn key_name_round_trips_through_key_from_name() {
@@ -53,7 +93,7 @@ fn partial_control_block_keeps_edits_and_fills_rest() {
 fn lane_keys_backfills_short_and_invalid_rows() {
     let mut lanes = BTreeMap::new();
     lanes.insert("7K".to_string(), vec!["Z".into(), "BOGUS".into(), "X".into()]);
-    let kc = KeyConfig { lanes, controls: ControlBinds::default() };
+    let kc = KeyConfig { lanes, ..KeyConfig::default() };
     let keys = kc.lane_keys(Mode::BEAT_7K);
     assert_eq!(keys.len(), Mode::BEAT_7K.key, "every lane bound despite a short row with a bad token");
     let mut got: Vec<usize> = keys.iter().map(|(_, l)| *l).collect();
@@ -216,7 +256,7 @@ fn mode_config_keys_are_unique_across_all_modes() {
 fn lane_keys_empty_row_falls_fully_back_to_default() {
     let mut lanes = BTreeMap::new();
     lanes.insert("7K".to_string(), Vec::<String>::new());
-    let kc = KeyConfig { lanes, controls: ControlBinds::default() };
+    let kc = KeyConfig { lanes, ..KeyConfig::default() };
     let keys = kc.lane_keys(Mode::BEAT_7K);
     assert_eq!(keys, default_keys_for_mode(Mode::BEAT_7K), "empty row == pure default");
 }
@@ -228,7 +268,7 @@ fn lane_keys_ignores_extra_trailing_entries_beyond_mode_key() {
     row.push("B".into());
     let mut lanes = BTreeMap::new();
     lanes.insert("5K".to_string(), row);
-    let kc = KeyConfig { lanes, controls: ControlBinds::default() };
+    let kc = KeyConfig { lanes, ..KeyConfig::default() };
     let keys = kc.lane_keys(Mode::BEAT_5K);
     assert_eq!(keys.len(), Mode::BEAT_5K.key, "trailing out-of-range entries are dropped");
     assert!(keys.iter().all(|(_, l)| *l < Mode::BEAT_5K.key), "no lane index exceeds mode.key");
@@ -392,4 +432,80 @@ fn load_malformed_file_backs_up_and_returns_defaults() {
     assert_eq!(kc.control_key(ControlAction::HiSpeedUp), Some(KeyCode::ArrowUp), "a malformed file falls back to the defaults");
     assert!(path.with_extension("ron.bak").exists(), "and the original is renamed to .bak rather than lost");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A key config ships with no reverse-spin bindings, so a scratch lane is spun one way only —
+/// exactly what every config written before the row existed asks for.
+#[test]
+fn no_scratch_lane_is_bound_to_a_reverse_key_until_one_is_set() {
+    let kc = KeyConfig::default();
+    for &mode in Mode::ALL {
+        assert!(kc.scratch_reverse_keys(mode).is_empty(), "{} ships with no reverse spin", mode.name);
+        for lane in 0..mode.key {
+            assert!(kc.scratch_reverse_token(mode, lane).is_empty(), "{} lane {lane}", mode.name);
+        }
+    }
+}
+
+/// A reverse binding is remembered per mode and per lane, and reads back as the key it was set to.
+#[test]
+fn a_reverse_binding_is_kept_for_the_scratch_lane_it_was_set_on() {
+    let mut kc = KeyConfig::default();
+    let mode = Mode::BEAT_7K;
+    let scratch = (0..mode.key).find(|&lane| mode.is_scratch(lane)).expect("7K has a scratch lane");
+    kc.set_scratch_reverse(mode, scratch, KeyCode::KeyQ);
+    assert_eq!(kc.scratch_reverse_token(mode, scratch), "Q");
+    assert_eq!(kc.scratch_reverse_keys(mode), vec![(KeyCode::KeyQ, scratch)]);
+    assert!(kc.scratch_reverse_keys(Mode::BEAT_5K).is_empty(), "a binding on one mode does not leak into another");
+}
+
+/// A reverse key is a binding like any other: sharing it with a lane or a control is a collision the
+/// editor must flag, because the input path would silently shadow one of them.
+#[test]
+fn a_reverse_key_collides_with_the_lane_and_control_keys() {
+    let mut kc = KeyConfig::default();
+    let mode = Mode::BEAT_7K;
+    let scratch = (0..mode.key).find(|&lane| mode.is_scratch(lane)).expect("7K has a scratch lane");
+    let lane_key = kc.lane_keys(mode)[0].0;
+    kc.set_scratch_reverse(mode, scratch, lane_key);
+    assert!(kc.collisions(mode).contains(&lane_key), "a reverse key that shadows a lane is flagged");
+
+    let mut kc = KeyConfig::default();
+    kc.set_scratch_reverse(mode, scratch, KeyCode::KeyQ);
+    assert!(!kc.collisions(mode).contains(&KeyCode::KeyQ), "a reverse key of its own is not a collision");
+}
+
+/// The reverse map is a second field, so a config written before it existed still parses and a
+/// config carrying one round-trips through the file.
+#[test]
+fn the_reverse_map_survives_the_file_and_an_older_file_still_loads() {
+    let mut kc = KeyConfig::default();
+    let mode = Mode::BEAT_7K;
+    let scratch = (0..mode.key).find(|&lane| mode.is_scratch(lane)).expect("7K has a scratch lane");
+    kc.set_scratch_reverse(mode, scratch, KeyCode::KeyQ);
+    let text = ron::ser::to_string_pretty(&kc, ron::ser::PrettyConfig::default()).expect("a key config serialises");
+    let back: KeyConfig = ron::from_str(&text).expect("a key config parses");
+    assert_eq!(back.scratch_reverse_keys(mode), vec![(KeyCode::KeyQ, scratch)]);
+
+    let older: KeyConfig = ron::from_str(r#"(lanes: {"7K": ["Z"]}, controls: (hispeed_up: "UP"))"#).expect("a pre-reverse config parses");
+    assert!(older.scratch_reverse_keys(mode).is_empty());
+    assert_eq!(older.control_key(ControlAction::HiSpeedUp), Some(KeyCode::ArrowUp));
+}
+
+/// A reverse token naming a key that does not exist, or naming a lane that is not a scratch, is
+/// dropped rather than bound: a bad file must not make a lane unhittable.
+#[test]
+fn a_reverse_binding_on_a_non_scratch_lane_or_an_unknown_key_is_dropped() {
+    let mut lanes = BTreeMap::new();
+    lanes.insert(mode_config_key(Mode::BEAT_7K).to_string(), vec!["Z".to_string()]);
+    let mut scratch_reverse = BTreeMap::new();
+    scratch_reverse.insert(mode_config_key(Mode::BEAT_7K).to_string(), vec!["Q".to_string(); Mode::BEAT_7K.key]);
+    let kc = KeyConfig { lanes, scratch_reverse, ..KeyConfig::default() };
+    let bound = kc.scratch_reverse_keys(Mode::BEAT_7K);
+    assert!(bound.iter().all(|(_, lane)| Mode::BEAT_7K.is_scratch(*lane)), "only scratch lanes take a reverse key");
+
+    let mut scratch_reverse = BTreeMap::new();
+    scratch_reverse.insert(mode_config_key(Mode::BEAT_7K).to_string(), vec!["NOSUCHKEY".to_string(); Mode::BEAT_7K.key]);
+    let kc = KeyConfig { scratch_reverse, ..KeyConfig::default() };
+    assert!(kc.scratch_reverse_keys(Mode::BEAT_7K).is_empty(), "an unknown token leaves the lane unbound");
 }

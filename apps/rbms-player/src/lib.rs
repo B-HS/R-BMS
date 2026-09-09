@@ -14,26 +14,30 @@ use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use rbms_audio::{AudioEngine, AudioOpenReport, AudioOptions, Bus, IdNamespace};
-use rbms_chart::default_total;
+use rbms_chart::default_total_for_mode;
 use rbms_chart::shuffle::NoteOption;
 use rbms_chart::to_model;
-use rbms_config::{Config, HISPEED_MAX, HISPEED_MIN, HISPEED_STEP, LANE_SHADE_MAX, LANE_SHADE_MIN, LANE_SHADE_STEP, TableSource, gauge_from_name, gauge_token};
-use rbms_ir::mapping::{JUDGE_RATE_UNMODIFIED, assist_flags, combo_breaks, ir_clear, ir_gauge, ir_lntype, ir_random};
+use rbms_config::{
+    Config, HISPEED_MAX, HISPEED_MIN, HISPEED_STEP, LANE_SHADE_MAX, LANE_SHADE_MIN, LANE_SHADE_STEP, TableSource, algorithm_token, gauge_auto_shift_token,
+    gauge_from_name, gauge_set_token, gauge_token, ln_mode_token,
+};
+use rbms_ir::mapping::{CUSTOM_JUDGE_ASSIST, LIGHT_ASSIST, NO_ASSIST, assist_flags, assist_level, combo_breaks, ir_clear, ir_gauge, ir_random};
 use rbms_ir::{
     API_VERSION, AuthResponse, ChartId, IrError, JudgeBreakdown, PlayOptions, PlayerId, PlayerProfile, ReplayData, ScoreServer, ScoreSubmission, SettingsBlob,
     SettingsPutResult, SubmitOutcome,
 };
-use rbms_judge::{clear_type_from_id, clear_type_id};
+use rbms_judge::gauge::{AssistLevel, assist_downgrade};
+use rbms_judge::{ClearType, clear_type_from_id, clear_type_id};
 use rbms_library::{ChartDetail, Library, compute_chart_detail};
 use rbms_model::Mode;
-use rbms_play::{ANALYSIS_SEEK_STEP_US, NullSink, PlaySession, Player, SessionClock, SessionOptions};
+use rbms_play::{ANALYSIS_SEEK_STEP_US, NullSink, PlaySession, Player, ScratchDir, SessionClock, SessionOptions};
 use rbms_render::{
     Color, CoverState, DensityView, DetailView, HudView, PlayfieldView, RANK_BANDS, RecordRowView, RecordsView, Rect, Renderer, ResultPalette, ResultView,
     SelectDetail, SelectHot, SelectModal, SelectRow, SelectView as SelectScene, Skin, SkinConfig, StatCell, cover_rect, dj_rank, draw_text, draw_text_centered,
     draw_text_right, ex_delta_label, render_hud, render_key_bomb, render_lane_cover, render_playfield_view, render_result_with_palette, render_select,
     text_width,
 };
-use rbms_store::{Replay, SCORE_RULE_VERSION, ScoreBook, ScoreRecord};
+use rbms_store::{Replay, ReplayJudge, SCORE_LN_MODE_FROM_CHART, SCORE_RULE_VERSION, ScoreBook, ScoreRecord};
 
 use sha2::{Digest, Sha256};
 use winit::application::ApplicationHandler;
@@ -57,6 +61,7 @@ mod ir_ranking_view;
 mod ir_replay;
 mod ir_session;
 mod ir_sync;
+mod judge_setup;
 mod keyconfig;
 #[cfg(test)]
 mod keyconfig_tests;
@@ -81,6 +86,7 @@ use ir_ranking::{RANKING_CACHE_CAPACITY, RankingCache, RankingFetch};
 use ir_ranking_view::render_ranking_panel;
 use ir_session::{AccountSession, AuthAction};
 use ir_sync::SyncLock;
+use judge_setup::{is_custom_judge, run_judge_setup, run_lntype};
 use keyconfig::{ControlAction, KeyConfig, key_from_name, key_name};
 use play_sink::PlayAudioSink;
 use settings_view::{SettingsHot, render_settings};
@@ -169,16 +175,16 @@ fn green_number_for(constant: bool, bpm: f64, hispeed: f64, scroll: f64, cover: 
 
 /// Why this run's score must not be sent to the IR, or `None` when it may be submitted. Mirrors
 /// the reference implementation: only a real interactive PLAY reaches the IR (`MusicResult.java:82`), and any assist —
-/// a judge window widened past 100% (`BMSPlayer.java:207-213`) or an auto-played lane
-/// (`AutoplayModifier` sets `AssistLevel.ASSIST`, `BMSPlayer.java:233-234`) — clears the score flag.
-fn ir_submission_block_reason(autoplay: bool, replay: bool, judge_rate: i32, scratch_auto: bool) -> Option<&'static str> {
+/// a judge width or long-note margin widened past 100% (`BMSPlayer.java:208-214`) or an auto-played
+/// lane (`BMSPlayer.java:248-252`) — clears the score flag.
+fn ir_submission_block_reason(autoplay: bool, replay: bool, custom_judge: bool, scratch_auto: bool) -> Option<&'static str> {
     if autoplay {
         return Some("autoplay");
     }
     if replay {
         return Some("replay playback");
     }
-    if judge_rate > JUDGE_RATE_UNMODIFIED {
+    if custom_judge {
         return Some("judge window widened");
     }
     if scratch_auto {
@@ -190,11 +196,35 @@ fn ir_submission_block_reason(autoplay: bool, replay: bool, judge_rate: i32, scr
 /// Whether this run may update the stored bests (EX / lamp / BP), i.e. it was an unassisted
 /// interactive play. Same predicate as [`ir_submission_block_reason`], so the IR gate and the local
 /// score book never disagree — the reference implementation derives both from the one `score` flag
-/// (`BMSPlayer.java:207-213` clears it, `:363` `resource.setUpdateScore(score)`,
-/// `MusicResult.java:444-446` passes it to `PlayDataAccessor.writeScoreData`, and
-/// `ScoreData.java:548,566,572,578` gate exscore/avgjudge/minbp/combo on it).
-fn updates_score(autoplay: bool, replay: bool, judge_rate: i32, scratch_auto: bool) -> bool {
-    ir_submission_block_reason(autoplay, replay, judge_rate, scratch_auto).is_none()
+/// (`BMSPlayer.java:203-252` clears it wherever it raises `assist`, `:363`
+/// `resource.setUpdateScore(score)`, `MusicResult.java:444-446` passes it to
+/// `PlayDataAccessor.writeScoreData`, and `ScoreData.java:548,566,572,578` gate
+/// exscore/avgjudge/minbp/combo on it).
+fn updates_score(autoplay: bool, replay: bool, custom_judge: bool, scratch_auto: bool) -> bool {
+    ir_submission_block_reason(autoplay, replay, custom_judge, scratch_auto).is_none()
+}
+
+/// Whether a run at this assist level may still leave a replay behind. A custom judge is the level
+/// decision 12 blocks the recording at; an auto-played lane keeps its replay.
+///
+/// Keeping it is a deliberate divergence: the reference gates the save on the score flag
+/// (`MusicResult.java:317-321`), which every assist clears, so it saves no replay at
+/// [`LIGHT_ASSIST`] either. Recorded in `docs/acknowledge/reference-divergences.md`.
+fn saves_replay(assist: u8) -> bool {
+    assist < CUSTOM_JUDGE_ASSIST
+}
+
+/// The lamp a run at this assist level is awarded: the reference demotes any assisted clear to
+/// `LightAssistEasy` or `AssistEasy` and so puts the full-combo lamps out of reach
+/// (`BMSPlayer.java:866` reads `assist == 1 ? LightAssistEasy : AssistEasy`, so only the single
+/// light assist takes the higher lamp and anything stronger takes the lower one).
+fn assisted_lamp(lamp: ClearType, assist: u8) -> ClearType {
+    let level = match assist {
+        NO_ASSIST => AssistLevel::None,
+        LIGHT_ASSIST => AssistLevel::Light,
+        _ => AssistLevel::Full,
+    };
+    assist_downgrade(lamp, level)
 }
 
 /// Whether an Esc at the select root confirms quitting: only when the previous Esc (`first`) landed
@@ -239,12 +269,15 @@ enum KcRow {
     ModeSelect,
     Control(ControlAction),
     Lane(usize),
+    /// The second key a scratch lane may be spun backwards with.
+    ScratchReverse(usize),
 }
 
 fn kc_rows(edit_mode: Mode) -> Vec<KcRow> {
     let mut rows = vec![KcRow::ModeSelect];
     rows.extend(ControlAction::ALL.into_iter().map(KcRow::Control));
     rows.extend((0..edit_mode.key).map(KcRow::Lane));
+    rows.extend((0..edit_mode.key).filter(|&lane| edit_mode.is_scratch(lane)).map(KcRow::ScratchReverse));
     rows
 }
 
@@ -353,6 +386,10 @@ struct AppShared {
     /// tables, IR rankings) is a hash lookup rather than a scan of the whole library.
     library: Library,
     active_keys: Vec<(KeyCode, usize)>,
+    /// The second key each scratch lane may be spun with, which ends a charge note the forward key
+    /// is holding (`JudgeManager.java:358-372`). Empty for a mode with no scratch lane, and for a
+    /// run whose lane bindings came from the command line.
+    active_reverse_keys: Vec<(KeyCode, usize)>,
     table_names: Vec<String>,
     table_levels: Vec<TableLevels>,
     select_view: SelectView,
@@ -535,6 +572,7 @@ impl App {
                 mode: MODE,
                 library,
                 active_keys: keyconfig.lane_keys(MODE),
+                active_reverse_keys: keyconfig.scratch_reverse_keys(MODE),
                 table_names,
                 table_levels,
                 select_view: SelectView::Root,

@@ -118,6 +118,7 @@ pub(crate) fn clear_label_color(c: ClearType) -> (&'static str, Color) {
         ClearType::NoPlay => ("NO PLAY", Color::rgb(64, 64, 64)),
         ClearType::Failed => ("FAILED", Color::rgb(0, 0, 128)),
         ClearType::AssistEasy => ("ASSIST EASY", Color::rgb(128, 0, 128)),
+        ClearType::LightAssistEasy => ("LIGHT ASSIST", Color::rgb(255, 0, 255)),
         ClearType::Easy => ("EASY", Color::rgb(64, 255, 64)),
         ClearType::Normal => ("CLEAR", Color::rgb(0, 192, 240)),
         ClearType::Hard => ("HARD", Color::rgb(255, 255, 255)),
@@ -132,10 +133,11 @@ pub(crate) fn clear_label_color(c: ClearType) -> (&'static str, Color) {
 mod tests {
     use super::*;
 
-    const ALL_CLEARS: [ClearType; 10] = [
+    const ALL_CLEARS: [ClearType; 11] = [
         ClearType::NoPlay,
         ClearType::Failed,
         ClearType::AssistEasy,
+        ClearType::LightAssistEasy,
         ClearType::Easy,
         ClearType::Normal,
         ClearType::Hard,

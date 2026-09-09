@@ -111,8 +111,6 @@ impl AppShared {
         };
         let src = rbms_parser::parse_with(&bytes, Default::default());
         let mode = rbms_chart::detect_mode(&src, &self.chart_path);
-        let lntype = ir_lntype(src.headers.lnmode);
-        let mut model = to_model(&src, mode);
         let (random, seed) = match &self.replay {
             Some(rp) => {
                 if !rp.md5.is_empty() && rp.md5 != src.md5 {
@@ -127,9 +125,14 @@ impl AppShared {
             }
             None => (self.config.play.random, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1)),
         };
+        let judge_setup = run_judge_setup(&self.config, self.replay.as_ref());
+        let mut model = to_model(&src, mode);
+        let ln_mode_decides_flavour = rbms_chart::contains_undefined_long_note(&model);
+        rbms_chart::resolve_long_note_flavour(&mut model, judge_setup.ln_mode.resolve());
+        let lntype = run_lntype(src.headers.lnmode, judge_setup.ln_mode);
         rbms_chart::shuffle::apply(&mut model, random, seed);
         if model.meta.total <= 0.0 {
-            model.meta.total = default_total(rbms_chart::count_playable_notes(&model));
+            model.meta.total = default_total_for_mode(&mode, rbms_chart::count_playable_notes(&model));
         }
         let cancel = Arc::new(AtomicBool::new(false));
         self.audio_dead_at.set(None);
@@ -138,6 +141,10 @@ impl AppShared {
         }
         self.mode = mode;
         self.active_keys = self.launch.keys_override.clone().unwrap_or_else(|| self.keyconfig.lane_keys(mode));
+        self.active_reverse_keys = match self.launch.keys_override {
+            Some(_) => Vec::new(),
+            None => self.keyconfig.scratch_reverse_keys(mode),
+        };
         self.skin_cfg = match &self.launch.skin_path {
             Some(p) => SkinConfig::load(p).unwrap_or_else(|e| {
                 eprintln!("skin load failed ({e}), using bundled");
@@ -203,14 +210,20 @@ impl AppShared {
             autoplay: self.config.play.autoplay && self.replay.is_none(),
             gauge: self.config.play.gauge,
             judge_offset_us: self.offset_us(),
-            judge_rate_percent: self.config.judge.judge_rate,
             auto_lanes,
             seed,
             analysis: self.replay.is_some() && self.config.display.replay_analysis,
             auto_calibration: self.config.judge.auto_offset,
             replay: self.replay.clone(),
+            ..SessionOptions::default()
         };
-        Some(LoadedChart { play: PlayState::new(PlaySession::new(model, options), bga_images, lntype), keysounds })
+        let mut session = PlaySession::new(model, options);
+        session.set_judge_setup(judge_setup);
+        let ln_mode_key = match ln_mode_decides_flavour {
+            true => ln_mode_token(judge_setup.ln_mode).to_string(),
+            false => SCORE_LN_MODE_FROM_CHART.to_string(),
+        };
+        Some(LoadedChart { play: PlayState::new(session, bga_images, lntype, ln_mode_key), keysounds })
     }
 
     /// Enter a chart that has just been parsed: keep the LOADING screen up while its keysounds

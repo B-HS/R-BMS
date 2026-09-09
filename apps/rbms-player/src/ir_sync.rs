@@ -7,7 +7,7 @@
 use rbms_ir::{IrError, SettingsBlob, SettingsPutResult};
 use serde::{Deserialize, Serialize};
 
-use rbms_config::{CURRENT_SCHEMA_VERSION, Config, LEGACY_SCHEMA_VERSION, LegacyV0};
+use rbms_config::{CURRENT_SCHEMA_VERSION, Config, LEGACY_SCHEMA_VERSION, LegacyV0, SINGLE_JUDGE_WIDTH_SCHEMA_VERSION};
 
 use crate::keyconfig::KeyConfig;
 
@@ -89,6 +89,33 @@ struct SettingsSchemaProbe {
     schema_version: u32,
 }
 
+/// Reads the one JUDGE WIDTH percentage a schema-1 blob held out of the settings half, so the same
+/// migration the file loader runs can be applied to a blob. Without it serde would drop the field it
+/// no longer knows and the download would silently reset the width to 100%.
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct SingleJudgeWidthBlobProbe {
+    settings: SingleJudgeWidthSettings,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct SingleJudgeWidthSettings {
+    judge: SingleJudgeWidthGroup,
+}
+
+#[derive(Deserialize)]
+#[serde(default)]
+struct SingleJudgeWidthGroup {
+    judge_rate: i32,
+}
+
+impl Default for SingleJudgeWidthGroup {
+    fn default() -> Self {
+        SingleJudgeWidthGroup { judge_rate: rbms_config::JUDGE_RATE_DEFAULT_PERCENT }
+    }
+}
+
 impl Default for SettingsSchemaProbe {
     fn default() -> Self {
         SettingsSchemaProbe { schema_version: LEGACY_SCHEMA_VERSION }
@@ -111,7 +138,13 @@ pub(crate) fn parse_blob(blob: &SettingsBlob) -> Result<SyncPayload, String> {
         return Err(format!("{SETTINGS_BLOB_TOO_NEW} (schema version {})", probe.settings.schema_version));
     }
     if probe.settings.schema_version != LEGACY_SCHEMA_VERSION {
-        return ron::from_str(&blob.content).map_err(|e| e.to_string());
+        let mut payload: SyncPayload = ron::from_str(&blob.content).map_err(|e| e.to_string())?;
+        if probe.settings.schema_version == SINGLE_JUDGE_WIDTH_SCHEMA_VERSION {
+            let single: SingleJudgeWidthBlobProbe = ron::from_str(&blob.content).map_err(|e| e.to_string())?;
+            payload.settings.judge.spread_uniform_judge_rate(single.settings.judge.judge_rate);
+        }
+        payload.settings.sanitise();
+        return Ok(payload);
     }
     let legacy: LegacySyncPayload = ron::from_str(&blob.content).map_err(|e| e.to_string())?;
     let mut settings = Config::from(legacy.settings);
@@ -192,7 +225,7 @@ pub(crate) fn sync_error_message(error: &IrError) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rbms_config::TableSource;
+    use rbms_config::{JUDGE_WIDTH_TIER_COUNT, TableSource};
     use rbms_ir::SettingsConflict;
     use rbms_judge::GaugeKind;
 
@@ -200,7 +233,7 @@ mod tests {
         let mut c = Config::default();
         c.play.hispeed = 4.5;
         c.play.gauge = GaugeKind::Hard;
-        c.judge.judge_rate = 90;
+        c.judge.judge_rate_key = [90; JUDGE_WIDTH_TIER_COUNT];
         c.network.ir_token = Some("secret-token".into());
         c.network.ir_login_id = Some("dj".into());
         c.network.ir_email = Some("dj@example.test".into());
@@ -228,7 +261,7 @@ mod tests {
 
         let back = parse_blob(&blob).unwrap();
         assert!((back.settings.play.hispeed - 4.5).abs() < 1e-9);
-        assert_eq!(back.settings.judge.judge_rate, 90);
+        assert_eq!(back.settings.judge.judge_rate_key, [90; JUDGE_WIDTH_TIER_COUNT]);
         assert_eq!(back.keyconfig.lanes.len(), KeyConfig::default().lanes.len(), "the key config rides along");
     }
 
@@ -245,7 +278,7 @@ mod tests {
         assert_eq!(sanitised.display.font_path, None);
         assert_eq!(sanitised.network.player_id, Config::default().network.player_id);
         assert!((sanitised.play.hispeed - 4.5).abs() < 1e-9, "the play preferences do go up");
-        assert_eq!(sanitised.judge.judge_rate, 90);
+        assert_eq!(sanitised.judge.judge_rate_key, [90; JUDGE_WIDTH_TIER_COUNT]);
 
         let blob = build_blob(&payload_of(sanitised), 1, None).unwrap();
         assert!(!blob.content.contains("secret-token"), "the serialised blob cannot leak the token");
@@ -270,7 +303,7 @@ mod tests {
         let merged = merge_downloaded(&local, remote);
         assert!((merged.play.hispeed - 1.25).abs() < 1e-9, "preferences come from the server");
         assert_eq!(merged.play.gauge, GaugeKind::Easy);
-        assert_eq!(merged.judge.judge_rate, Config::default().judge.judge_rate);
+        assert_eq!(merged.judge.judge_rate_key, Config::default().judge.judge_rate_key);
         assert_eq!(merged.network.ir_token.as_deref(), Some("secret-token"), "a downloaded token is discarded");
         assert_eq!(merged.network.player_id, "dj");
         assert_eq!(merged.network.server_url.as_deref(), Some("https://ir.example/api"));
@@ -336,11 +369,29 @@ mod tests {
         let payload = parse_blob(&blob).expect("a pre-schema blob is migrated, not discarded");
         assert!((payload.settings.play.hispeed - 3.0).abs() < 1e-9);
         assert_eq!(payload.settings.play.gauge, GaugeKind::Hard);
-        assert_eq!(payload.settings.judge.judge_rate, 120);
+        assert_eq!(payload.settings.judge.judge_rate_key, [120; JUDGE_WIDTH_TIER_COUNT], "the one width the flat blob held covers every tier");
         assert!(!payload.settings.library.preview);
         assert_eq!(payload.settings.network.rivals, vec!["friend".to_string()]);
         assert_eq!(payload.settings.schema_version, rbms_config::CURRENT_SCHEMA_VERSION);
         assert_eq!(payload.keyconfig.lanes.len(), KeyConfig::default().lanes.len(), "the key config half still defaults");
+    }
+
+    #[test]
+    fn a_blob_with_the_one_old_judge_width_spreads_it_over_every_tier() {
+        let single = format!("(settings: (schema_version: {SINGLE_JUDGE_WIDTH_SCHEMA_VERSION}, play: (hispeed: 3.0), judge: (judge_rate: 80)))");
+        let blob = SettingsBlob { name: SETTINGS_BLOB_NAME.into(), content: single, ..Default::default() };
+        let payload = parse_blob(&blob).expect("a schema-1 blob is migrated, not read as the current schema");
+        assert_eq!(payload.settings.judge.judge_rate_key, [80; JUDGE_WIDTH_TIER_COUNT], "downloading must not reset the width the account holds");
+        assert_eq!(payload.settings.judge.judge_rate_scratch, [80; JUDGE_WIDTH_TIER_COUNT]);
+        assert!((payload.settings.play.hispeed - 3.0).abs() < 1e-9, "the rest of the blob still loads");
+    }
+
+    #[test]
+    fn a_blob_at_the_current_schema_keeps_its_own_per_tier_widths() {
+        let current = format!("(settings: (schema_version: {CURRENT_SCHEMA_VERSION}, judge: (judge_rate_key: (95, 90, 85))))");
+        let blob = SettingsBlob { name: SETTINGS_BLOB_NAME.into(), content: current, ..Default::default() };
+        let payload = parse_blob(&blob).expect("a current blob needs no migration");
+        assert_eq!(payload.settings.judge.judge_rate_key, [95, 90, 85]);
     }
 
     #[test]
