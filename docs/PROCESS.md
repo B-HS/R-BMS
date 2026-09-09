@@ -42,7 +42,10 @@
 - [x] W1 API 코어 + 웹 UI(MSW) — 리뷰·수정 완료, typecheck/lint 0·테스트 155 통과·빌드 19 라우트. `drizzle-kit migrate` 로 사용자 DB에 21테이블 적용(2026-09-09). **실 DB 스모크(Fable)**: `/api/health`·`/api/version` 200, register 201+토큰, guest 제출 201(unranked: guest), 토큰 제출 rank 1, 더 나쁜 재제출 시 베스트 유지, autoplay 제출 unranked, ranking raw 배열·best raw 객체·chart 메타 정상, `/api/auth/me` Bearer 정상. 계약 보정 4건 도출 → W2a: 미등록 차트 ranking `[]`/best `null`(404 대신), played_at ±7일 → 미래 5분만 거부, `.env.example` 키 보강; 후속: 빈 sha256 허용(md5 단독 클라 지원)
 - [x] W2 API 확장 ∥ UI part1 → UI part2 → 리뷰 3·수정 완료. Fable 최종 게이트: typecheck 0·lint 0·테스트 196 통과(2 skip)·빌드 35 페이지. 실 DB 스모크 전 항목 정상(→ `docs/history/2026-09-09-web-nextjs-ir-server.md`)
 - [x] 커밋(web 갈래별) + push origin dev (2026-09-09)
-- [ ] Vercel: 프로젝트 링크 완료 후 환경변수 등록(사용자) → `vercel --prod` → 도메인 `bms.hyuns.uk` 연결. 후속: md5 단독 제출(LR2IR 어댑터), Vercel Blob, 라이트/다크 스크린샷 확인
+- [x] Vercel 배포(2026-09-09): 프로젝트 `rbms-web`(b-hs) 링크, Production env 6종(DATABASE_URL·BETTER_AUTH_SECRET·BETTER_AUTH_URL·NEXT_PUBLIC_APP_URL·ALLOW_GUEST·REPLAY_MAX_BYTES) 등록, `vercel --prod` 성공. 프로덕션 별칭 `https://rbms-web.vercel.app` 에서 health/version/랭킹/FE 통계/페이지 7종 200 확인(실 DB). 배포 해시 URL은 배포 보호(SSO)로 302 — 정상
+- [ ] 도메인 `bms.hyuns.uk`: Vercel 프로젝트에 추가됨, DNS(Cloudflare)에 `A 76.76.21.21`(DNS only) 필요 — 사용자 작업 후 자동 검증
+- [ ] CI(dev) 실패 1건 수정 중: `crates/rbms-render/tests/golden.rs` 곡선택 골든이 OS별 시스템 폰트 폴백으로 해시가 달라짐(macOS 통과·Windows/Ubuntu 실패, result/hud 골든은 3-OS 통과) → 골든 테스트를 임베드 폰트 전용 결정적 렌더로 수정(Workflow `rbms-ci-golden-fix`)
+- 후속: md5 단독 제출(LR2IR 어댑터), Vercel Blob, 라이트/다크 스크린샷 확인, 슈퍼셋 서버의 누락 필드 `.default()`
 
 ---
 
