@@ -53,6 +53,21 @@ Options: `--interactive` `--auto` `--hispeed F` `--gauge NAME` `--lift F` `--sc-
 
 Default lanes follow the reference keyboard layout: 7K `Z S X D C F V` + `LShift` (scratch), 9K `Z S X D C F V G B`, 14K adds `M K , L . ; /` + `RShift`. Everything is remappable in Settings → KEY CONFIG or `~/.config/rbms/keyconfig.ron`.
 
+## Web (IR server + site)
+
+`web/` is a Next.js app that serves both the IR API the player talks to and the public site (leaderboards, charts, players, replays, settings). It runs on Vercel at `https://bms.hyuns.uk`; point the player at it with `--server https://bms.hyuns.uk/api` or the NETWORK tab.
+
+```sh
+cd web
+bun install
+cp .env.example .env.local        # fill DB_*, BETTER_AUTH_SECRET, URLs
+bun run db:migrate                # Drizzle migrations (never push)
+bun run dev                       # http://localhost:3000
+bun run verify                    # typecheck · lint · test
+```
+
+Stack: Next.js 16 (App Router, Route Handlers, Cache Components), React 19, Tailwind v4 + shadcn, TanStack Query v5, Drizzle + MySQL, better-auth. Native endpoints under `/api/*` answer raw JSON exactly as `rbms-ir` expects; site-only endpoints live under `/api/fe/*`. Design tokens, component list and the route/cache matrix are in [docs/web/](docs/web/architecture.md).
+
 ## Development
 
 ```sh

@@ -40,9 +40,9 @@
 
 - [x] W0 설계 문서(`docs/web/{architecture,components,tasks}.md`) + 스캐폴드(`web/`, Next 16.3.4·React 19.2.8·Tailwind 4.3.3·shadcn 4.21·Drizzle 0.45·better-auth 1.7.3·TanStack 5.102, typecheck/lint/test/build 통과). 미결 6건 결정 → decisions 문서
 - [x] W1 API 코어 + 웹 UI(MSW) — 리뷰·수정 완료, typecheck/lint 0·테스트 155 통과·빌드 19 라우트. `drizzle-kit migrate` 로 사용자 DB에 21테이블 적용(2026-09-09). **실 DB 스모크(Fable)**: `/api/health`·`/api/version` 200, register 201+토큰, guest 제출 201(unranked: guest), 토큰 제출 rank 1, 더 나쁜 재제출 시 베스트 유지, autoplay 제출 unranked, ranking raw 배열·best raw 객체·chart 메타 정상, `/api/auth/me` Bearer 정상. 계약 보정 4건 도출 → W2a: 미등록 차트 ranking `[]`/best `null`(404 대신), played_at ±7일 → 미래 5분만 거부, `.env.example` 키 보강; 후속: 빈 sha256 허용(md5 단독 클라 지원)
-- [ ] W2 API 확장(replays·settings·courses·tables·FE envelope + 계약 보정 3건) ∥ UI part1(인증 흐름·확장 화면 MSW) → UI part2(실 API 연결·MSW 제거) → 리뷰 3·수정 (Workflow `rbms-web-w2` 진행 중)
-- [ ] 리뷰·수정 → 검증(typecheck·lint·test·build) → rbms-player `--server` 왕복 확인
-- [ ] 문서(`docs/web/*`, backend 문서 Next.js 로 정정) + Vercel 배포 설정(.env 는 사용자 제공 후)
+- [x] W2 API 확장 ∥ UI part1 → UI part2 → 리뷰 3·수정 완료. Fable 최종 게이트: typecheck 0·lint 0·테스트 196 통과(2 skip)·빌드 35 페이지. 실 DB 스모크 전 항목 정상(→ `docs/history/2026-09-09-web-nextjs-ir-server.md`)
+- [x] 커밋(web 갈래별) + push origin dev (2026-09-09)
+- [ ] Vercel: 프로젝트 링크 완료 후 환경변수 등록(사용자) → `vercel --prod` → 도메인 `bms.hyuns.uk` 연결. 후속: md5 단독 제출(LR2IR 어댑터), Vercel Blob, 라이트/다크 스크린샷 확인
 
 ---
 
