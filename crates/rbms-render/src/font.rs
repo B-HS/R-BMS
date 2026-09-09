@@ -1,13 +1,21 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use cosmic_text::{Attrs, Buffer, CacheKey, Color as CtColor, Family, FontSystem, Metrics, Shaping, SwashCache};
+use cosmic_text::{Attrs, Buffer, CacheKey, Color as CtColor, Family, FontSystem, Metrics, Shaping, SwashCache, fontdb};
 
 use crate::{Color, Rect, Renderer};
 
 /// Bundled default UI font (Inter, SIL OFL 1.1). cosmic-text falls back to installed system
 /// fonts for scripts Inter lacks (CJK, Thai, Arabic, …), so any language renders.
 const BUNDLED_FONT: &[u8] = include_bytes!("../../../assets/fonts/Inter-Regular.ttf");
+
+/// Family requested when a font database somehow exposes no face at all; the generic name lets
+/// cosmic-text pick whatever it has rather than panicking.
+const FALLBACK_FAMILY: &str = "sans-serif";
+
+/// Locale pinned by [`use_embedded_fonts_only`]. cosmic-text derives font matching and per-script
+/// fallback order from the locale, so a fixed one removes the last host-dependent input.
+const DETERMINISTIC_LOCALE: &str = "en-US";
 
 /// Legacy `scale` argument (originally one 5×7 glyph cell = `7*scale` px tall) → font pixel
 /// size, picked so the existing call sites keep a comparable visual size.
@@ -79,16 +87,31 @@ struct TextEngine {
 }
 
 impl TextEngine {
-    fn new() -> Self {
-        let mut fs = FontSystem::new();
-        fs.db_mut().load_font_data(BUNDLED_FONT.to_vec());
+    /// Adopt a font system whose database already ends with the family this engine should treat as
+    /// its default (the last-loaded face wins, matching how [`load_font`] reports a family).
+    fn with_font_system(fs: FontSystem) -> Self {
         let family = fs
             .db()
             .faces()
             .last()
             .and_then(|f| f.families.first().map(|(n, _)| n.clone()))
-            .unwrap_or_else(|| "sans-serif".to_string());
+            .unwrap_or_else(|| FALLBACK_FAMILY.to_string());
         TextEngine { fs, swash: SwashCache::new(), default_family: family.clone(), family, cache: HashMap::new(), runs: HashMap::new(), tick: 0 }
+    }
+
+    fn new() -> Self {
+        let mut fs = FontSystem::new();
+        fs.db_mut().load_font_data(BUNDLED_FONT.to_vec());
+        Self::with_font_system(fs)
+    }
+
+    /// Build an engine whose database holds nothing but the bundled font, on a pinned locale, so
+    /// shaping, font matching and fallback have no host-specific input left. See
+    /// [`use_embedded_fonts_only`].
+    fn embedded_only() -> Self {
+        let mut db = fontdb::Database::new();
+        db.load_font_data(BUNDLED_FONT.to_vec());
+        Self::with_font_system(FontSystem::new_with_locale_and_db(DETERMINISTIC_LOCALE.to_string(), db))
     }
 
     fn layout_len(&self) -> usize {
@@ -307,6 +330,22 @@ pub fn set_ui_family(name: &str) {
             e.runs.clear();
         }
     });
+}
+
+/// Rebuild the UI text engine so it can only ever use the bundled font: a fresh, empty font
+/// database with just that face and a pinned locale, instead of [`FontSystem::new`]'s system-font
+/// scan.
+///
+/// The app keeps the default engine, where cosmic-text falls back to installed fonts for scripts
+/// the bundled face lacks. Pixel-comparison tests call this instead, because that fallback resolves
+/// to whichever fonts the host happens to have: the same string then rasterizes differently on
+/// different machines. With only the bundled face present, an uncovered codepoint resolves to the
+/// same notdef box everywhere, which is what determinism needs.
+///
+/// Affects the calling thread's engine only (the engine is thread-local) and drops every cached
+/// layout and glyph run with the old font system.
+pub fn use_embedded_fonts_only() {
+    ENGINE.with(|c| *c.borrow_mut() = TextEngine::embedded_only());
 }
 
 /// Restore the bundled default UI family.
@@ -613,6 +652,35 @@ mod tests {
         draw_text(&mut c, 5.0, 5.0, 2.0, Color::WHITE, "");
         let lit = (0..60 * 20).any(|i| c.pixel_at((i % 60) as u32, (i / 60) as u32).r > 5);
         assert!(!lit, "empty string emits no glyph pixels");
+    }
+
+    /// The whole point of the deterministic mode: nothing but the bundled face is reachable, so no
+    /// host-installed font can influence shaping or rasterization.
+    #[test]
+    fn the_embedded_only_engine_exposes_a_single_face() {
+        use_embedded_fonts_only();
+        let (faces, family, locale) = ENGINE.with(|c| {
+            let e = c.borrow();
+            (e.fs.db().len(), e.family.clone(), e.fs.locale().to_string())
+        });
+        assert_eq!(faces, 1, "only the bundled font is loaded");
+        assert_eq!(family, ENGINE.with(|c| c.borrow().default_family.clone()), "the bundled family is the default");
+        assert_eq!(locale, DETERMINISTIC_LOCALE, "the locale is pinned, not read from the host");
+    }
+
+    /// A codepoint the bundled font lacks (the song-select folder marker) has nowhere to fall back
+    /// to in this mode, so it must still paint — as the font's own notdef box, identically on every
+    /// host — rather than silently vanish.
+    #[test]
+    fn embedded_only_paints_a_codepoint_the_bundled_font_lacks() {
+        use_embedded_fonts_only();
+        let marker = "\u{25B8}";
+        assert!(text_width(marker, 2.0) > 0.0, "the missing glyph still advances the pen");
+        let mut c = CpuCanvas::new(48, 40);
+        c.clear(Color::rgb(0, 0, 0));
+        draw_text(&mut c, 4.0, 4.0, 2.4, Color::WHITE, marker);
+        let lit = (0..48 * 40).any(|i| c.pixel_at((i % 48) as u32, (i / 48) as u32).r > 30);
+        assert!(lit, "an uncovered codepoint rasterizes as a visible notdef");
     }
 
     #[test]

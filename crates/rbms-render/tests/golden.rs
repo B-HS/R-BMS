@@ -5,9 +5,15 @@
 //! baked literal. That catches a moved panel, a dropped element or a recoloured row while tolerating
 //! sub-pixel antialiasing differences.
 //!
-//! Regenerating a golden after an intentional visual change: run
-//! `cargo test -p rbms-render --test golden -- --nocapture`; each failing assertion prints the
-//! screen name and the hash it computed, and that value is pasted back into the constant below.
+//! Every screen here is rendered through [`rbms_render::font::use_embedded_fonts_only`]. The default
+//! text engine scans installed system fonts and falls back to them for codepoints the bundled font
+//! lacks, so the same string rasterizes differently on each operating system and the signature is
+//! host-specific. With only the bundled face loaded the render depends on nothing outside this
+//! repository, so one literal holds on every host.
+//!
+//! Regenerating the goldens after an intentional visual change: run `cargo test -p rbms-render
+//! --test golden`; any failing assertion prints the current value of all four constants as a block
+//! ready to paste over the ones below, so a change touching several screens needs one run.
 
 use rbms_model::Mode;
 use rbms_render::{
@@ -25,12 +31,45 @@ const SCREEN_H: u32 = 720;
 
 const GOLDEN_RESULT: u64 = 0x3989_b4eb_039b_a998;
 const GOLDEN_RESULT_SKIN: u64 = 0x6dbb_65c3_2707_304b;
-const GOLDEN_SELECT: u64 = 0xf1c7_263e_0dc1_61d8;
+const GOLDEN_SELECT: u64 = 0x1615_42fd_055a_fe80;
 const GOLDEN_HUD: u64 = 0x3e77_31ab_195e_dba9;
+
+/// The constant behind each golden, in the order [`current_signatures`] returns them, so a failure
+/// can name the line to edit.
+const GOLDEN_NAMES: [&str; 4] = ["GOLDEN_RESULT", "GOLDEN_RESULT_SKIN", "GOLDEN_SELECT", "GOLDEN_HUD"];
+
+/// Render every golden screen and return its signature, in [`GOLDEN_NAMES`] order.
+fn current_signatures() -> [u64; 4] {
+    [
+        signature_of(|c| render_result(c, &result_view())),
+        signature_of(|c| render_result_with_palette(c, &result_view(), &ResultPalette::from_skin(&SkinConfig::default()))),
+        signature_of(|c| {
+            render_select(c, &select_view());
+        }),
+        signature_of(hud_screen),
+    ]
+}
+
+/// The four `const` lines as they should read right now, so one failing run regenerates them all.
+fn regenerated_constants() -> String {
+    let mut out = String::new();
+    for (name, hash) in GOLDEN_NAMES.iter().zip(current_signatures()) {
+        let (hi, lo) = ((hash >> 32) as u32, hash as u32);
+        out.push_str(&format!("const {name}: u64 = 0x{:04x}_{:04x}_{:04x}_{:04x};\n", hi >> 16, hi & 0xffff, lo >> 16, lo & 0xffff));
+    }
+    out
+}
 
 fn check(canvas: &CpuCanvas, screen: &str, expected: u64) {
     let actual = canvas.signature_hash(GOLDEN_COLS, GOLDEN_ROWS);
-    assert_eq!(actual, expected, "{screen} golden signature changed; regenerate with 0x{actual:016x}");
+    assert_eq!(actual, expected, "{screen} golden signature changed; replace all four constants with:\n{}", regenerated_constants());
+}
+
+/// A blank screen-sized canvas whose text is rendered from the bundled font alone, so the result is
+/// identical on every host. See the module docs.
+fn golden_canvas() -> CpuCanvas {
+    rbms_render::font::use_embedded_fonts_only();
+    CpuCanvas::new(SCREEN_W, SCREEN_H)
 }
 
 fn result_view() -> ResultView {
@@ -53,14 +92,14 @@ fn result_view() -> ResultView {
 }
 
 fn signature_of(draw: impl FnOnce(&mut CpuCanvas)) -> u64 {
-    let mut canvas = CpuCanvas::new(SCREEN_W, SCREEN_H);
+    let mut canvas = golden_canvas();
     draw(&mut canvas);
     canvas.signature_hash(GOLDEN_COLS, GOLDEN_ROWS)
 }
 
 #[test]
 fn result_screen_matches_its_golden_signature() {
-    let mut canvas = CpuCanvas::new(SCREEN_W, SCREEN_H);
+    let mut canvas = golden_canvas();
     render_result(&mut canvas, &result_view());
     check(&canvas, "result", GOLDEN_RESULT);
 }
@@ -72,7 +111,7 @@ fn result_screen_matches_its_golden_signature() {
 #[test]
 fn result_screen_with_the_default_skin_palette_matches_its_golden_signature() {
     let palette = ResultPalette::from_skin(&SkinConfig::default());
-    let mut canvas = CpuCanvas::new(SCREEN_W, SCREEN_H);
+    let mut canvas = golden_canvas();
     render_result_with_palette(&mut canvas, &result_view(), &palette);
     check(&canvas, "result (skin palette)", GOLDEN_RESULT_SKIN);
 }
@@ -185,14 +224,14 @@ fn select_view() -> SelectView {
 
 #[test]
 fn select_screen_matches_its_golden_signature() {
-    let mut canvas = CpuCanvas::new(SCREEN_W, SCREEN_H);
+    let mut canvas = golden_canvas();
     let hot = render_select(&mut canvas, &select_view());
     assert!(!hot.is_empty(), "select reports clickable regions");
     check(&canvas, "select", GOLDEN_SELECT);
 }
 
-#[test]
-fn hud_matches_its_golden_signature() {
+/// The play HUD over its cleared background, drawn on the 7K default skin.
+fn hud_screen(canvas: &mut CpuCanvas) {
     let skin = Skin::default_for(Mode::BEAT_7K, SCREEN_W as f32, SCREEN_H as f32);
     let hud = HudView {
         combo: 123,
@@ -207,8 +246,13 @@ fn hud_matches_its_golden_signature() {
         max_ex: 1624,
         best_ex: Some(1502),
     };
-    let mut canvas = CpuCanvas::new(SCREEN_W, SCREEN_H);
     canvas.clear(Color::BLACK);
-    render_hud(&mut canvas, &skin, &hud);
+    render_hud(canvas, &skin, &hud);
+}
+
+#[test]
+fn hud_matches_its_golden_signature() {
+    let mut canvas = golden_canvas();
+    hud_screen(&mut canvas);
     check(&canvas, "hud", GOLDEN_HUD);
 }
