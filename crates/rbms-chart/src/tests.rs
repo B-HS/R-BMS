@@ -78,9 +78,57 @@ fn ln_channel_pairs_start_end() {
 }
 
 #[test]
-fn lnmode_defaults_to_ln() {
+fn lnmode_absent_leaves_the_flavour_unstated() {
     let m = model(b"#WAV01 a.wav\r\n#00151:01000001\r\n");
-    assert_eq!(first_ln_kind(&m, 0), LnKind::Ln, "no #LNMODE -> plain LN");
+    assert_eq!(first_ln_kind(&m, 0), LnKind::Undefined, "no #LNMODE -> the player's LN MODE decides");
+}
+
+#[test]
+fn lnmode_0_leaves_the_flavour_unstated() {
+    let m = model(b"#LNMODE 0\r\n#WAV01 a.wav\r\n#00151:01000001\r\n");
+    assert_eq!(first_ln_kind(&m, 0), LnKind::Undefined, "#LNMODE 0 is the header's own unspecified value");
+}
+
+#[test]
+fn lnmode_outside_the_header_scale_leaves_the_flavour_unstated() {
+    for lnmode in ["4", "-1", "99"] {
+        let src = format!("#LNMODE {lnmode}\r\n#WAV01 a.wav\r\n#00151:01000001\r\n");
+        let m = model(src.as_bytes());
+        assert_eq!(first_ln_kind(&m, 0), LnKind::Undefined, "#LNMODE {lnmode}");
+    }
+}
+
+#[test]
+fn player_ln_mode_resolves_only_the_unstated_charts() {
+    for default_ln in [LnKind::Ln, LnKind::Cn, LnKind::Hcn] {
+        let m = to_model_with_ln_mode(&parse(b"#WAV01 a.wav\r\n#00151:01000001\r\n"), Mode::BEAT_7K, default_ln);
+        assert_eq!(first_ln_kind(&m, 0), default_ln, "an unstated chart takes the player's LN MODE");
+    }
+}
+
+#[test]
+fn player_ln_mode_never_overrides_an_explicit_chart_type() {
+    for (header, stated) in [("#LNMODE 1\r\n", LnKind::Ln), ("#LNMODE 2\r\n", LnKind::Cn), ("#LNMODE 3\r\n", LnKind::Hcn)] {
+        for default_ln in [LnKind::Ln, LnKind::Cn, LnKind::Hcn] {
+            let src = format!("{header}#WAV01 a.wav\r\n#00151:01000001\r\n");
+            let m = to_model_with_ln_mode(&parse(src.as_bytes()), Mode::BEAT_7K, default_ln);
+            assert_eq!(first_ln_kind(&m, 0), stated, "{header} must win over {default_ln:?}");
+        }
+    }
+}
+
+#[test]
+fn player_ln_mode_undefined_resolves_nothing() {
+    let m = to_model_with_ln_mode(&parse(b"#WAV01 a.wav\r\n#00151:01000001\r\n"), Mode::BEAT_7K, LnKind::Undefined);
+    assert_eq!(first_ln_kind(&m, 0), LnKind::Undefined);
+}
+
+#[test]
+fn a_charge_note_default_makes_an_unstated_long_note_count_twice() {
+    let src = parse(b"#WAV01 a.wav\r\n#00151:01000001\r\n");
+    assert_eq!(count_playable_notes(&to_model(&src, Mode::BEAT_7K)), 1, "unstated long notes count once");
+    assert_eq!(count_playable_notes(&to_model_with_ln_mode(&src, Mode::BEAT_7K, LnKind::Cn)), 2, "a charge note is judged at both ends");
+    assert_eq!(count_playable_notes(&to_model_with_ln_mode(&src, Mode::BEAT_7K, LnKind::Hcn)), 2);
 }
 
 #[test]

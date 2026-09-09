@@ -2,7 +2,7 @@
 
 use rbms_model::{LnKind, Micros, Mode, Model, ModelMeta, Note, NoteKind, TimeLine};
 
-pub use rbms_model::{VOLWAV_DEFAULT_PERCENT, chart_gain, default_total, default_total_keyboard};
+pub use rbms_model::{VOLWAV_DEFAULT_PERCENT, chart_gain, default_total, default_total_for_mode, default_total_keyboard};
 use rbms_parser::BmsSource;
 
 pub mod scroll;
@@ -95,13 +95,38 @@ struct Ev {
     kind: EvKind,
 }
 
-pub fn to_model(src: &BmsSource, mode: Mode) -> Model {
-    let base = src.base;
-    let lnobj = src.headers.lnobj;
-    let ln_kind = match src.headers.lnmode {
+/// The long-note flavour a chart declares with `#LNMODE`: 1 LN, 2 CN, 3 HCN. `0` (and any value the
+/// header scale does not define) leaves the flavour unstated, which the reference implementation
+/// carries as `TYPE_UNDEFINED` for the player's own LN MODE setting to resolve.
+fn chart_ln_kind(lnmode: i32) -> LnKind {
+    match lnmode {
+        1 => LnKind::Ln,
         2 => LnKind::Cn,
         3 => LnKind::Hcn,
-        _ => LnKind::Ln,
+        _ => LnKind::Undefined,
+    }
+}
+
+/// Build the play model of `src` under `mode`, leaving long notes the chart gave no `#LNMODE` for
+/// as [`LnKind::Undefined`]. Use [`to_model_with_ln_mode`] to resolve those to the player's LN MODE
+/// setting; an engine that never resolves them judges them as plain long notes.
+pub fn to_model(src: &BmsSource, mode: Mode) -> Model {
+    to_model_with_ln_mode(src, mode, LnKind::Undefined)
+}
+
+/// Build the play model of `src` under `mode`, resolving long notes the chart left unstated to
+/// `default_ln`.
+///
+/// This is where the reference implementation applies its player LN MODE setting: it hands the
+/// setting to the decoder and the judge engine then consults it only for a note whose chart type is
+/// undefined, so a chart that does declare `#LNMODE` always wins. Passing [`LnKind::Undefined`]
+/// resolves nothing.
+pub fn to_model_with_ln_mode(src: &BmsSource, mode: Mode, default_ln: LnKind) -> Model {
+    let base = src.base;
+    let lnobj = src.headers.lnobj;
+    let ln_kind = match chart_ln_kind(src.headers.lnmode) {
+        LnKind::Undefined => default_ln,
+        stated => stated,
     };
 
     let max_measure = src.measures.keys().copied().max().unwrap_or(0);
@@ -334,6 +359,39 @@ fn build_resource_map(defs: &std::collections::BTreeMap<u32, String>) -> Vec<Str
     v
 }
 
+/// Whether `model`'s long notes still take their flavour from the player's LN MODE setting: it has
+/// at least one long note and the chart stated no `#LNMODE` for it. The reference implementation's
+/// `BMSModel.containsUndefinedLongNote`, which is what decides whether a stored score is keyed by
+/// the LN MODE it was played under (`PlayDataAccessor.java:200-205`).
+pub fn contains_undefined_long_note(model: &Model) -> bool {
+    model
+        .timelines
+        .iter()
+        .flat_map(|tl| tl.notes.iter())
+        .flatten()
+        .any(|n| matches!(n.kind, NoteKind::LongStart { ln: LnKind::Undefined } | NoteKind::LongEnd { ln: LnKind::Undefined }))
+}
+
+/// Resolve every long note the chart left unstated to `flavour`, in place; [`LnKind::Undefined`]
+/// resolves nothing.
+///
+/// This is the resolution [`to_model_with_ln_mode`] performs while decoding, split out for the
+/// caller that has to read the unresolved model first — to see whether LN MODE applies to this
+/// chart at all — before applying the setting.
+pub fn resolve_long_note_flavour(model: &mut Model, flavour: LnKind) {
+    if flavour == LnKind::Undefined {
+        return;
+    }
+    for tl in model.timelines.iter_mut() {
+        for note in tl.notes.iter_mut().flatten() {
+            match &mut note.kind {
+                NoteKind::LongStart { ln } | NoteKind::LongEnd { ln } if *ln == LnKind::Undefined => *ln = flavour,
+                _ => {}
+            }
+        }
+    }
+}
+
 pub fn count_playable_notes(model: &Model) -> usize {
     model
         .timelines
@@ -411,7 +469,7 @@ pub fn note_density(model: &Model, total_value: f64) -> NoteDensity {
     let bd = total_notes / bins.max(1) as i32 / 4;
     let (sum, count) = bins_v.iter().fold((0u64, 0u64), |(s, c), &n| if n as i32 >= bd { (s + n as u64, c + 1) } else { (s, c) });
     let avg = if count > 0 { sum as f64 / count as f64 } else { 0.0 };
-    let total_value = if total_value > 0.0 { total_value } else { default_total(total_notes.max(0) as usize) };
+    let total_value = if total_value > 0.0 { total_value } else { default_total_for_mode(&model.mode, total_notes.max(0) as usize) };
     let border = (total_notes as f64 * (1.0 - 100.0 / total_value)) as i32;
     let mut cum = 0i32;
     let mut borderpos = 0usize;
