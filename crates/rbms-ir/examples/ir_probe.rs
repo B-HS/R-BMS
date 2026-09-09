@@ -22,6 +22,7 @@ fn main() {
         judge: JudgeBreakdown { pgreat: 712, great: 64, good: 21, bad: 8, poor: 5, miss: 2, fast: 30, slow: 40, combobreak: 15, ..Default::default() },
         max_combo: 540,
         total_notes: 812,
+        passnotes: 812,
         minbp: 15,
         gauge_value: 86.0,
         options: PlayOptions {

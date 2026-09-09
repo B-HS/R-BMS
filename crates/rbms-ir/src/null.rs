@@ -85,6 +85,7 @@ mod tests {
             judge: judge(),
             max_combo: 0,
             total_notes: 0,
+            passnotes: 0,
             minbp: 0,
             gauge_value: 0.0,
             options: options(),
@@ -113,23 +114,25 @@ mod tests {
             gauge_value: 0.0,
             charts: vec![chart()],
             played_at: 0,
+            lntype: 0,
+            max_ex_score: 0,
+            minbp: 0,
+            trophy: None,
             extra: HashMap::new(),
         }
     }
 
     fn replay() -> ReplayData {
-        ReplayData { format: "rbms-us-v1".into(), events: vec![], seed: None }
+        ReplayData { format: "rbms-us-v1".into(), ..Default::default() }
     }
 
     fn settings() -> SettingsBlob {
-        SettingsBlob { name: "settings".into(), content: "{}".into(), updated_at: 0 }
+        SettingsBlob { name: "settings".into(), content: "{}".into(), ..Default::default() }
     }
 
     fn auth() -> AuthRequest {
-        AuthRequest { id: "i".into(), password: "pw".into(), email: None, name: None }
+        AuthRequest::login("i", "pw")
     }
-
-    // --- the 8 required methods all report NotConfigured ---
 
     #[test]
     fn null_health_not_configured() {
@@ -171,8 +174,6 @@ mod tests {
         assert!(matches!(NullScoreServer.upload_replay(&chart(), &replay()), Err(IrError::NotConfigured)));
     }
 
-    // --- the 6 superset default methods report Unsupported (NOT NotConfigured) ---
-
     #[test]
     fn null_course_ranking_unsupported() {
         assert!(matches!(NullScoreServer.course_ranking("h", 10), Err(IrError::Unsupported)));
@@ -203,18 +204,48 @@ mod tests {
         assert!(matches!(NullScoreServer.login(&auth()), Err(IrError::Unsupported)));
     }
 
-    // --- required vs default-superset are distinct error variants ---
+    #[test]
+    fn null_whoami_unsupported() {
+        assert!(matches!(NullScoreServer.whoami(), Err(IrError::Unsupported)));
+    }
+
+    #[test]
+    fn null_put_rivals_unsupported() {
+        assert!(matches!(NullScoreServer.put_rivals(&player(), &["r".to_string()]), Err(IrError::Unsupported)));
+    }
+
+    #[test]
+    fn null_chart_ranking_page_unsupported() {
+        assert!(matches!(NullScoreServer.chart_ranking_page(&chart(), &ChartRankingQuery::default()), Err(IrError::Unsupported)));
+    }
+
+    #[test]
+    fn null_course_ranking_page_unsupported() {
+        assert!(matches!(NullScoreServer.course_ranking_page("h", &ChartRankingQuery::default()), Err(IrError::Unsupported)));
+    }
+
+    #[test]
+    fn null_player_scores_unsupported() {
+        assert!(matches!(NullScoreServer.player_scores(&player(), &PlayerScoresQuery::default()), Err(IrError::Unsupported)));
+    }
+
+    #[test]
+    fn null_chart_replays_unsupported() {
+        assert!(matches!(NullScoreServer.chart_replays(&chart(), &ChartReplayQuery::default()), Err(IrError::Unsupported)));
+    }
+
+    #[test]
+    fn null_version_unsupported() {
+        assert!(matches!(NullScoreServer.version(), Err(IrError::Unsupported)));
+    }
 
     #[test]
     fn null_required_and_superset_errors_differ() {
-        // health() (required) is NotConfigured; register() (superset default) is Unsupported.
         let required = NullScoreServer.health();
         let superset = NullScoreServer.register(&auth());
         assert!(matches!(required, Err(IrError::NotConfigured)));
         assert!(matches!(superset, Err(IrError::Unsupported)));
     }
-
-    // --- NullScoreServer is usable as a trait object (dyn-safe) and is Send + Sync ---
 
     #[test]
     fn null_is_object_safe_send_sync() {

@@ -1,9 +1,11 @@
 use std::time::Duration;
 
+use reqwest::blocking::{RequestBuilder, Response};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use crate::dto::*;
+use crate::error::STATUS_CONFLICT;
 use crate::{IrError, ScoreServer};
 
 /// Wall-clock budget for a single IR request. Every call (health poll, submission, ranking
@@ -49,6 +51,23 @@ impl HttpScoreServer {
         HttpScoreServer { client: Self::build_client(REQUEST_TIMEOUT), base: Self::normalise_base(base_url), token }
     }
 
+    /// Same connection, different credentials — how the app swaps in the token it just got from
+    /// `login`/`register`, or drops it on sign-out, without rebuilding the HTTP client.
+    pub fn with_token(mut self, token: Option<String>) -> Self {
+        self.token = token;
+        self
+    }
+
+    /// The bearer token every authenticated call sends, when one is configured.
+    pub fn token(&self) -> Option<&str> {
+        self.token.as_deref()
+    }
+
+    /// The normalised base URL every path is appended to.
+    pub fn base_url(&self) -> &str {
+        &self.base
+    }
+
     /// The one place a client is built, so no constructor can end up without a request timeout.
     fn build_client(timeout: Duration) -> Result<reqwest::blocking::Client, String> {
         reqwest::blocking::Client::builder().timeout(timeout).build().map_err(|e| e.to_string())
@@ -71,44 +90,42 @@ impl HttpScoreServer {
         format!("{}{path}", self.base)
     }
 
-    fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T, IrError> {
-        let mut req = self.client()?.get(self.url(path));
-        if let Some(t) = &self.token {
-            req = req.bearer_auth(t);
+    fn authorized(&self, req: RequestBuilder) -> RequestBuilder {
+        match &self.token {
+            Some(token) => req.bearer_auth(token),
+            None => req,
         }
-        let resp = req.send().map_err(|e| IrError::Network(e.to_string()))?;
+    }
+
+    fn send(&self, req: RequestBuilder) -> Result<Response, IrError> {
+        self.authorized(req).send().map_err(|e| IrError::Network(e.to_string()))
+    }
+
+    fn succeeding(resp: Response) -> Result<Response, IrError> {
         let status = resp.status();
-        if !status.is_success() {
-            return Err(IrError::Server(status.as_u16(), resp.text().unwrap_or_default()));
+        if status.is_success() {
+            return Ok(resp);
         }
+        Err(IrError::from_status(status.as_u16(), resp.text().unwrap_or_default()))
+    }
+
+    fn decode<T: DeserializeOwned>(resp: Response) -> Result<T, IrError> {
         resp.json::<T>().map_err(|e| IrError::Decode(e.to_string()))
+    }
+
+    fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T, IrError> {
+        let resp = self.send(self.client()?.get(self.url(path)))?;
+        Self::decode(Self::succeeding(resp)?)
     }
 
     fn post<B: Serialize, T: DeserializeOwned>(&self, path: &str, body: &B) -> Result<T, IrError> {
-        let mut req = self.client()?.post(self.url(path)).json(body);
-        if let Some(t) = &self.token {
-            req = req.bearer_auth(t);
-        }
-        let resp = req.send().map_err(|e| IrError::Network(e.to_string()))?;
-        let status = resp.status();
-        if !status.is_success() {
-            return Err(IrError::Server(status.as_u16(), resp.text().unwrap_or_default()));
-        }
-        resp.json::<T>().map_err(|e| IrError::Decode(e.to_string()))
+        let resp = self.send(self.client()?.post(self.url(path)).json(body))?;
+        Self::decode(Self::succeeding(resp)?)
     }
 
-    /// PUT a body and treat any 2xx as success (the endpoint may return 204 No Content).
-    fn put_no_content<B: Serialize>(&self, path: &str, body: &B) -> Result<(), IrError> {
-        let mut req = self.client()?.put(self.url(path)).json(body);
-        if let Some(t) = &self.token {
-            req = req.bearer_auth(t);
-        }
-        let resp = req.send().map_err(|e| IrError::Network(e.to_string()))?;
-        let status = resp.status();
-        if !status.is_success() {
-            return Err(IrError::Server(status.as_u16(), resp.text().unwrap_or_default()));
-        }
-        Ok(())
+    fn put<B: Serialize, T: DeserializeOwned>(&self, path: &str, body: &B) -> Result<T, IrError> {
+        let resp = self.send(self.client()?.put(self.url(path)).json(body))?;
+        Self::decode(Self::succeeding(resp)?)
     }
 }
 
@@ -142,12 +159,8 @@ impl ScoreServer for HttpScoreServer {
     }
 
     fn upload_replay(&self, chart: &ChartId, replay: &ReplayData) -> Result<String, IrError> {
-        #[derive(serde::Deserialize)]
-        struct ReplayId {
-            id: String,
-        }
-        let r: ReplayId = self.post(&format!("/charts/{}/replays", chart.md5), replay)?;
-        Ok(r.id)
+        let uploaded: ReplayUploadResponse = self.post(&format!("/charts/{}/replays", chart.md5), replay)?;
+        Ok(uploaded.id)
     }
 
     fn course_ranking(&self, course_hash: &str, limit: u32) -> Result<Vec<ScoreRecord>, IrError> {
@@ -162,8 +175,23 @@ impl ScoreServer for HttpScoreServer {
         self.get(&format!("/players/{}/settings/{name}", player.id))
     }
 
+    /// Stores `blob` under `(player, blob.name)`. A 204 is the success path. When
+    /// `blob.base_updated_at` is set and the server's copy has moved on, the 409 body is decoded
+    /// into [`IrError::SettingsConflict`] so the caller can merge without re-fetching.
     fn put_settings(&self, player: &PlayerId, blob: &SettingsBlob) -> Result<(), IrError> {
-        self.put_no_content(&format!("/players/{}/settings/{}", player.id, blob.name), blob)
+        let path = format!("/players/{}/settings/{}", player.id, blob.name);
+        let body = SettingsPutRequest::from_blob(blob);
+        let resp = self.send(self.client()?.put(self.url(&path)).json(&body))?;
+        let status = resp.status().as_u16();
+        if status == STATUS_CONFLICT {
+            let text = resp.text().unwrap_or_default();
+            return Err(match serde_json::from_str::<SettingsConflict>(&text) {
+                Ok(conflict) => IrError::SettingsConflict(Box::new(conflict)),
+                Err(_) => IrError::Conflict(text),
+            });
+        }
+        Self::succeeding(resp)?;
+        Ok(())
     }
 
     fn register(&self, req: &AuthRequest) -> Result<AuthResponse, IrError> {
@@ -173,107 +201,49 @@ impl ScoreServer for HttpScoreServer {
     fn login(&self, req: &AuthRequest) -> Result<AuthResponse, IrError> {
         self.post("/auth/login", req)
     }
+
+    fn whoami(&self) -> Result<PlayerProfile, IrError> {
+        self.get("/auth/me")
+    }
+
+    fn put_rivals(&self, player: &PlayerId, rivals: &[String]) -> Result<Vec<PlayerProfile>, IrError> {
+        let body = RivalPutRequest { rivals: rivals.to_vec() };
+        self.put(&format!("/players/{}/rivals", player.id), &body)
+    }
+
+    fn chart_ranking_page(&self, chart: &ChartId, query: &ChartRankingQuery) -> Result<Vec<ScoreRecord>, IrError> {
+        self.get(&format!("/charts/{}/ranking?{}", chart.md5, query.to_query_string()))
+    }
+
+    fn course_ranking_page(&self, course_hash: &str, query: &ChartRankingQuery) -> Result<Vec<ScoreRecord>, IrError> {
+        self.get(&format!("/courses/{course_hash}/ranking?{}", query.to_query_string()))
+    }
+
+    fn player_scores(&self, player: &PlayerId, query: &PlayerScoresQuery) -> Result<Vec<ScoreRecord>, IrError> {
+        self.get(&format!("/players/{}/scores?{}", player.id, query.to_query_string()))
+    }
+
+    fn chart_replays(&self, chart: &ChartId, query: &ChartReplayQuery) -> Result<Vec<ReplayMeta>, IrError> {
+        self.get(&format!("/charts/{}/replays?{}", chart.md5, query.to_query_string()))
+    }
+
+    fn version(&self) -> Result<VersionInfo, IrError> {
+        self.get("/version")
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{BufRead, BufReader, Read, Write};
-    use std::net::{TcpListener, TcpStream};
-    use std::sync::mpsc;
-    use std::thread;
+    use crate::mock_http::{TEST_TIMEOUT, TestServer, no_content, ok, response};
+    use std::net::TcpListener;
 
-    /// Per-request budget used by the tests; short enough that the timeout case stays fast.
-    const TEST_TIMEOUT: Duration = Duration::from_millis(300);
-    /// How long a test waits for the server thread to hand over a captured request.
-    const CAPTURE_WAIT: Duration = Duration::from_secs(10);
     /// Delay the "slow server" case uses; must exceed `TEST_TIMEOUT`.
     const SLOW_SERVER_DELAY: Duration = Duration::from_millis(1500);
     /// Delay the ignored default-constructor case uses; must exceed `REQUEST_TIMEOUT`.
     const UNREACHABLE_DELAY: Duration = Duration::from_secs(30);
     /// Stand-in reason for a `reqwest` builder failure (no TLS backend, for instance).
     const BUILDER_FAILURE: &str = "no tls backend";
-
-    /// Minimal single-shot HTTP/1.1 server on loopback: serves the canned responses in order,
-    /// one per connection, and reports each raw request (head + body) back over a channel.
-    ///
-    /// The server thread is deliberately detached. Joining it from `Drop` would block forever on
-    /// `accept()` whenever a test unwinds before connecting, and the test harness has no
-    /// per-test timeout to break that out.
-    struct TestServer {
-        base: String,
-        requests: mpsc::Receiver<String>,
-    }
-
-    impl TestServer {
-        fn spawn(responses: Vec<String>) -> TestServer {
-            TestServer::spawn_with_delay(responses, Duration::from_millis(0))
-        }
-
-        fn spawn_with_delay(responses: Vec<String>, delay: Duration) -> TestServer {
-            let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
-            let addr = listener.local_addr().expect("local addr");
-            let (tx, requests) = mpsc::channel();
-            thread::spawn(move || {
-                for response in responses {
-                    let Ok((mut stream, _)) = listener.accept() else { return };
-                    if let Some(req) = read_request(&stream) {
-                        let _ = tx.send(req);
-                    }
-                    thread::sleep(delay);
-                    let _ = stream.write_all(response.as_bytes());
-                    let _ = stream.flush();
-                }
-            });
-            TestServer { base: format!("http://{addr}"), requests }
-        }
-
-        fn client(&self) -> HttpScoreServer {
-            HttpScoreServer::try_with_timeout(&self.base, None, TEST_TIMEOUT).expect("client builds")
-        }
-
-        fn next_request(&self) -> String {
-            self.requests.recv_timeout(CAPTURE_WAIT).expect("server captured a request")
-        }
-    }
-
-    fn read_request(stream: &TcpStream) -> Option<String> {
-        let mut reader = BufReader::new(stream);
-        let mut head = String::new();
-        loop {
-            let mut line = String::new();
-            if reader.read_line(&mut line).ok()? == 0 {
-                return None;
-            }
-            let end_of_head = line == "\r\n" || line == "\n";
-            head.push_str(&line);
-            if end_of_head {
-                break;
-            }
-        }
-        let mut content_length = 0usize;
-        for line in head.lines() {
-            if let Some((name, value)) = line.split_once(':')
-                && name.eq_ignore_ascii_case("content-length")
-            {
-                content_length = value.trim().parse().unwrap_or(0);
-            }
-        }
-        let mut body = vec![0u8; content_length];
-        if content_length > 0 {
-            reader.read_exact(&mut body).ok()?;
-        }
-        head.push_str(&String::from_utf8_lossy(&body));
-        Some(head)
-    }
-
-    fn response(status: &str, body: &str) -> String {
-        format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len())
-    }
-
-    fn ok(body: &str) -> String {
-        response("200 OK", body)
-    }
 
     fn chart() -> ChartId {
         ChartId { md5: "abc123".into(), sha256: "def456".into() }
@@ -291,12 +261,16 @@ mod tests {
             gauge_value: 51.0,
             charts: vec![chart()],
             played_at: 1_700_000_000_000,
+            lntype: 1,
+            max_ex_score: 6000,
+            minbp: 12,
+            trophy: Some("bronzemedal".into()),
             extra: Default::default(),
         }
     }
 
     fn auth_request() -> AuthRequest {
-        AuthRequest { id: "p1".into(), password: "pw".into(), email: None, name: Some("P1".into()) }
+        AuthRequest { name: Some("P1".into()), ..AuthRequest::login("p1", "pw") }
     }
 
     fn submission() -> ScoreSubmission {
@@ -311,6 +285,7 @@ mod tests {
             judge: JudgeBreakdown::default(),
             max_combo: 540,
             total_notes: 812,
+            passnotes: 812,
             minbp: 7,
             gauge_value: 86.0,
             options: PlayOptions {
@@ -391,7 +366,7 @@ mod tests {
     #[test]
     fn a_degraded_client_fails_every_request_without_touching_the_network() {
         let server = degraded_server();
-        let blob = SettingsBlob { name: "keyconfig".into(), content: "()".into(), updated_at: 0 };
+        let blob = SettingsBlob { name: "keyconfig".into(), content: "()".into(), ..Default::default() };
         let errors = [
             server.health().expect_err("health cannot run without a client"),
             server.submit_score(&submission()).expect_err("submit cannot run without a client"),
@@ -481,7 +456,8 @@ mod tests {
     #[test]
     fn upload_replay_returns_the_server_side_id() {
         let server = TestServer::spawn(vec![ok(r#"{"id":"replay-99"}"#)]);
-        let replay = ReplayData { format: "rbms-us-v1".into(), events: vec![ReplayEvent { t_us: 1, lane: 0, press: true }], seed: Some(7) };
+        let events = vec![ReplayEvent { t_us: 1, lane: 0, press: true }];
+        let replay = ReplayData { format: "rbms-us-v1".into(), events, seed: Some(7), ..Default::default() };
         let id = server.client().upload_replay(&chart(), &replay).expect("upload succeeds");
         assert!(server.next_request().starts_with("POST /charts/abc123/replays HTTP/1.1"));
         assert_eq!(id, "replay-99");
@@ -489,8 +465,8 @@ mod tests {
 
     #[test]
     fn put_settings_accepts_a_204_no_content_reply() {
-        let server = TestServer::spawn(vec!["HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_string()]);
-        let blob = SettingsBlob { name: "keyconfig".into(), content: "()".into(), updated_at: 0 };
+        let server = TestServer::spawn(vec![no_content()]);
+        let blob = SettingsBlob { name: "keyconfig".into(), content: "()".into(), ..Default::default() };
         server.client().put_settings(&PlayerId { id: "p1".into() }, &blob).expect("put succeeds");
         assert!(server.next_request().starts_with("PUT /players/p1/settings/keyconfig HTTP/1.1"));
     }
@@ -588,16 +564,13 @@ mod tests {
     }
 
     #[test]
-    fn not_found_maps_to_server_error_with_status_and_body() {
+    fn not_found_maps_to_the_not_found_variant_with_the_body() {
         let server = TestServer::spawn(vec![response("404 Not Found", r#"{"error":"no such chart"}"#)]);
         let err = server.client().chart_ranking(&chart(), 10).expect_err("404 is an error");
         let _ = server.next_request();
         match err {
-            IrError::Server(code, body) => {
-                assert_eq!(code, 404);
-                assert!(body.contains("no such chart"), "the server body is preserved");
-            }
-            other => panic!("expected Server(404, _), got {other:?}"),
+            IrError::NotFound(body) => assert!(body.contains("no such chart"), "the server body is preserved"),
+            other => panic!("expected NotFound(_), got {other:?}"),
         }
     }
 
@@ -610,11 +583,12 @@ mod tests {
     }
 
     #[test]
-    fn unauthorized_maps_to_server_error_401() {
+    fn unauthorized_maps_to_the_unauthorized_variant() {
         let server = TestServer::spawn(vec![response("401 Unauthorized", "token required")]);
         let err = server.client().player_profile(&PlayerId { id: "p1".into() }).expect_err("401 is an error");
         let _ = server.next_request();
-        assert!(matches!(err, IrError::Server(401, _)), "got {err:?}");
+        assert!(matches!(err, IrError::Unauthorized(ref body) if body == "token required"), "got {err:?}");
+        assert!(err.is_auth_failure());
     }
 
     #[test]

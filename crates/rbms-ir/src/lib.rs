@@ -1,40 +1,28 @@
-use std::fmt;
-
 pub mod dto;
+pub mod error;
 pub mod http;
 pub mod null;
 pub mod worker;
 
+#[cfg(test)]
+mod contract_tests;
+#[cfg(test)]
+mod mock_http;
+
 pub use dto::*;
+pub use error::{ErrorBody, ErrorEnvelope, IrError};
 pub use http::HttpScoreServer;
 pub use null::NullScoreServer;
+pub use worker::{SubmitJob, SubmitOutcome, is_replay_upload_warranted, spawn_query, spawn_submit};
 
 /// Current rbms IR-superset API version. Sent in every submission so the backend can
 /// evolve the contract without breaking older clients.
 pub const API_VERSION: u32 = 1;
 
-#[derive(Debug)]
-pub enum IrError {
-    NotConfigured,
-    Network(String),
-    Server(u16, String),
-    Decode(String),
-    Unsupported,
-}
-
-impl fmt::Display for IrError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            IrError::NotConfigured => write!(f, "score server not configured"),
-            IrError::Network(s) => write!(f, "network error: {s}"),
-            IrError::Server(c, s) => write!(f, "server error {c}: {s}"),
-            IrError::Decode(s) => write!(f, "decode error: {s}"),
-            IrError::Unsupported => write!(f, "operation not supported by server"),
-        }
-    }
-}
-
-impl std::error::Error for IrError {}
+/// The one player id an unauthenticated submission may use. `POST /scores` without a bearer token
+/// is rejected 401 for every other id, so a client that is not signed in must submit under this
+/// exact string; the server then flags the score `GUEST` and leaves it out of the ranking.
+pub const GUEST_PLAYER_ID: &str = "guest";
 
 /// The rbms IR-superset score-server contract.
 ///
@@ -54,8 +42,6 @@ pub trait ScoreServer: Send + Sync {
     fn rivals(&self, player: &PlayerId) -> Result<Vec<PlayerProfile>, IrError>;
     fn submit_course(&self, sub: &CourseSubmission) -> Result<SubmitResponse, IrError>;
     fn upload_replay(&self, chart: &ChartId, replay: &ReplayData) -> Result<String, IrError>;
-
-    // --- superset extensions (default to Unsupported so existing/offline servers need no change) ---
 
     /// Ranking for a course (concatenated charts), keyed by `course_hash`.
     fn course_ranking(&self, _course_hash: &str, _limit: u32) -> Result<Vec<ScoreRecord>, IrError> {
@@ -81,6 +67,37 @@ pub trait ScoreServer: Send + Sync {
     fn login(&self, _req: &AuthRequest) -> Result<AuthResponse, IrError> {
         Err(IrError::Unsupported)
     }
+    /// Resolve the account behind the configured bearer token. Fails with
+    /// [`IrError::Unauthorized`] when the token is missing or stale, which is how the app tells a
+    /// live session from a saved-but-revoked one.
+    fn whoami(&self) -> Result<PlayerProfile, IrError> {
+        Err(IrError::Unsupported)
+    }
+    /// Replace the whole rival list; returns the resolved profiles the server kept.
+    fn put_rivals(&self, _player: &PlayerId, _rivals: &[String]) -> Result<Vec<PlayerProfile>, IrError> {
+        Err(IrError::Unsupported)
+    }
+    /// Ranking page with the server's paging and filters, for a rival row or a second page.
+    fn chart_ranking_page(&self, _chart: &ChartId, _query: &ChartRankingQuery) -> Result<Vec<ScoreRecord>, IrError> {
+        Err(IrError::Unsupported)
+    }
+    /// Course ranking page with the same paging and filters.
+    fn course_ranking_page(&self, _course_hash: &str, _query: &ChartRankingQuery) -> Result<Vec<ScoreRecord>, IrError> {
+        Err(IrError::Unsupported)
+    }
+    /// One player's submission history, newest first.
+    fn player_scores(&self, _player: &PlayerId, _query: &PlayerScoresQuery) -> Result<Vec<ScoreRecord>, IrError> {
+        Err(IrError::Unsupported)
+    }
+    /// Replays stored for a chart, without their events; download one with
+    /// [`ScoreServer::download_replay`].
+    fn chart_replays(&self, _chart: &ChartId, _query: &ChartReplayQuery) -> Result<Vec<ReplayMeta>, IrError> {
+        Err(IrError::Unsupported)
+    }
+    /// Contract version and build of the deployment.
+    fn version(&self) -> Result<VersionInfo, IrError> {
+        Err(IrError::Unsupported)
+    }
 }
 
 #[cfg(test)]
@@ -100,6 +117,7 @@ mod tests {
             judge: JudgeBreakdown { pgreat: 712, great: 64, epg: 400, lpg: 312, avgjudge: -1500, empty_poor: 3, ..Default::default() },
             max_combo: 540,
             total_notes: 812,
+            passnotes: 812,
             minbp: 7,
             gauge_value: 86.0,
             options: PlayOptions {
@@ -147,8 +165,6 @@ mod tests {
 
     #[test]
     fn old_submission_without_superset_fields_still_decodes() {
-        // A minimal pre-superset payload (no early/late, no seed/build hash, no extended options)
-        // must still deserialize, with the new fields taking their serde defaults.
         let json = r#"{
             "api_version":1,"chart":{"md5":"a","sha256":"b"},"player":{"id":"p"},"mode":"BEAT_7K",
             "clear":"Normal","ex_score":10,"max_ex_score":20,
@@ -170,12 +186,14 @@ mod tests {
             format: "rbms-us-v1".into(),
             events: vec![ReplayEvent { t_us: 1_000_000, lane: 0, press: true }, ReplayEvent { t_us: 1_120_000, lane: 0, press: false }],
             seed: Some(7),
+            ..Default::default()
         };
         let json = serde_json::to_string(&rd).unwrap();
         let back: ReplayData = serde_json::from_str(&json).unwrap();
         assert_eq!(back.events.len(), 2);
         assert_eq!(back.events[0], ReplayEvent { t_us: 1_000_000, lane: 0, press: true });
         assert_eq!(back.seed, Some(7));
+        assert_eq!(back.api_version, API_VERSION, "the default constructor stamps the contract version");
     }
 
     #[test]
@@ -184,8 +202,6 @@ mod tests {
         assert!(matches!(s.health(), Err(IrError::NotConfigured)));
     }
 
-    // ---------- API_VERSION constant ----------
-
     #[test]
     fn api_version_is_one() {
         assert_eq!(API_VERSION, 1);
@@ -193,49 +209,10 @@ mod tests {
 
     #[test]
     fn api_version_round_trips_in_submission() {
-        // The submission carries the same constant the client compiled against.
         let json = serde_json::to_string(&minimal_submission()).unwrap();
         let back: ScoreSubmission = serde_json::from_str(&json).unwrap();
         assert_eq!(back.api_version, API_VERSION);
     }
-
-    // ---------- IrError Display ----------
-
-    #[test]
-    fn ir_error_display_not_configured() {
-        assert_eq!(IrError::NotConfigured.to_string(), "score server not configured");
-    }
-
-    #[test]
-    fn ir_error_display_unsupported() {
-        assert_eq!(IrError::Unsupported.to_string(), "operation not supported by server");
-    }
-
-    #[test]
-    fn ir_error_display_network_includes_detail() {
-        assert_eq!(IrError::Network("timed out".into()).to_string(), "network error: timed out");
-    }
-
-    #[test]
-    fn ir_error_display_server_includes_code_and_body() {
-        assert_eq!(IrError::Server(503, "down".into()).to_string(), "server error 503: down");
-    }
-
-    #[test]
-    fn ir_error_display_decode_includes_detail() {
-        assert_eq!(IrError::Decode("eof".into()).to_string(), "decode error: eof");
-    }
-
-    #[test]
-    fn ir_error_is_std_error() {
-        // IrError implements std::error::Error (source defaults to None).
-        fn assert_error<E: std::error::Error>(_: &E) {}
-        let e = IrError::Unsupported;
-        assert_error(&e);
-        assert!(std::error::Error::source(&e).is_none());
-    }
-
-    // ---------- full ScoreSubmission invariants ----------
 
     fn minimal_submission() -> ScoreSubmission {
         ScoreSubmission {
@@ -249,6 +226,7 @@ mod tests {
             judge: JudgeBreakdown::default(),
             max_combo: 0,
             total_notes: 0,
+            passnotes: 0,
             minbp: 0,
             gauge_value: 0.0,
             options: PlayOptions {
@@ -306,8 +284,7 @@ mod tests {
     }
 
     #[test]
-    fn submission_negative_played_at_round_trips() {
-        // played_at is i64; pre-epoch timestamps must survive.
+    fn submission_negative_played_at_round_trips_but_is_rejected_by_the_server_schema() {
         let mut sub = minimal_submission();
         sub.played_at = -1;
         let back: ScoreSubmission = serde_json::from_str(&serde_json::to_string(&sub).unwrap()).unwrap();
@@ -315,11 +292,7 @@ mod tests {
     }
 
     #[test]
-    fn submission_gauge_value_f32_nan_serializes_to_null_and_decodes_back_nan() {
-        // serde_json maps f32 NaN to JSON `null`; on the way back, an Option-less f32 field
-        // would normally fail — but gauge_value is a bare f32, so decoding `null` errors.
-        // NOTE: suspect — NaN gauge_value is silently lossy (serializes to `null`, then fails to
-        // deserialize). Asserting the actual current behavior, not endorsing it.
+    fn submission_nan_gauge_value_serialises_to_null_which_then_fails_to_decode() {
         let mut sub = minimal_submission();
         sub.gauge_value = f32::NAN;
         let json = serde_json::to_string(&sub).unwrap();
@@ -345,7 +318,6 @@ mod tests {
 
     #[test]
     fn ex_score_at_or_below_max_is_a_consistent_invariant() {
-        // Construct a maxed score; ex_score must not exceed max_ex_score by construction.
         let mut sub = minimal_submission();
         sub.max_ex_score = 1624;
         sub.ex_score = 1624;
