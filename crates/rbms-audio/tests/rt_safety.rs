@@ -7,6 +7,8 @@
 //! namespace does exactly that while voices are still sounding — so the fixture reproduces it by
 //! dropping every owner reference before the voices end.
 
+#![allow(unsafe_code)]
+
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};

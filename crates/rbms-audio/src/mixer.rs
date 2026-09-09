@@ -738,8 +738,6 @@ mod tests {
         assert_eq!(m.voices.iter().filter(|v| v.active).count(), 0);
     }
 
-    // ---- helpers ----
-
     /// A sample whose every PCM value is `val`, so interpolation is exact and easy to reason about.
     fn flat(frames: usize, channels: u16, rate: u32, val: f32) -> Arc<SampleData> {
         let pcm: Vec<f32> = vec![val; frames * channels as usize];
@@ -792,8 +790,6 @@ mod tests {
         out[(STEADY_STATE_FRAMES - 1) * out_channels..].to_vec()
     }
 
-    // ---- clock / frame accounting ----
-
     #[test]
     fn clock_starts_at_zero() {
         let m = Mixer::new(48000, 2, 16);
@@ -802,7 +798,6 @@ mod tests {
 
     #[test]
     fn clock_advances_by_frames_not_samples_stereo() {
-        // stereo: 8 samples => 4 frames per mix
         let mut m = Mixer::new(48000, 2, 16);
         let mut out = vec![0.0f32; 8];
         m.mix(&mut out);
@@ -813,7 +808,6 @@ mod tests {
 
     #[test]
     fn clock_advances_by_frames_mono() {
-        // mono: 8 samples => 8 frames per mix
         let mut m = Mixer::new(48000, 1, 16);
         let mut out = vec![0.0f32; 8];
         m.mix(&mut out);
@@ -830,7 +824,6 @@ mod tests {
 
     #[test]
     fn out_channels_zero_treated_as_one_frame_per_sample() {
-        // out_channels 0 -> oc = max(1) = 1, so frames == out.len()
         let mut m = Mixer::new(48000, 0, 16);
         let mut out = vec![0.0f32; 6];
         m.mix(&mut out);
@@ -858,15 +851,12 @@ mod tests {
         assert_eq!(oa, ob);
     }
 
-    // ---- delay / at_frame ----
-
     #[test]
     fn delay_silence_before_then_audio_at_frame() {
         let mut m = Mixer::new(48000, 1, 16);
         m.play(flat(10, 1, 48000, 0.5), 1.0, 0.0, 1.0, 1, 4);
         let mut out = vec![0.0f32; 8];
         m.mix(&mut out);
-        // frames 0..3 silent, audio starts at frame 4
         assert_eq!(out[0], 0.0);
         assert_eq!(out[1], 0.0);
         assert_eq!(out[2], 0.0);
@@ -886,10 +876,9 @@ mod tests {
 
     #[test]
     fn delay_in_the_past_clamps_to_zero() {
-        // at_frame < clock => saturating_sub yields 0, play immediately
         let mut m = Mixer::new(48000, 1, 16);
         let mut out = vec![0.0f32; 10];
-        m.mix(&mut out); // advance clock to 10
+        m.mix(&mut out);
         assert_eq!(m.clock_frames(), 10);
         m.play(flat(10, 1, 48000, 0.5), 1.0, 0.0, 1.0, 1, 3);
         assert_eq!(m.voices[0].delay, 0);
@@ -897,7 +886,6 @@ mod tests {
 
     #[test]
     fn delay_relative_to_clock_offset() {
-        // clock advanced to 10, schedule at frame 13 => delay 3
         let mut m = Mixer::new(48000, 1, 16);
         let mut out = vec![0.0f32; 10];
         m.mix(&mut out);
@@ -907,20 +895,17 @@ mod tests {
 
     #[test]
     fn delay_spanning_multiple_mix_calls() {
-        // delay larger than one buffer's frames must carry over to next mix
         let mut m = Mixer::new(48000, 1, 16);
         m.play(flat(20, 1, 48000, 0.5), 1.0, 0.0, 1.0, 1, 6);
         let mut out = vec![0.0f32; 4];
-        m.mix(&mut out); // consumes 4 of delay -> remaining 2
+        m.mix(&mut out);
         assert!(out.iter().all(|&s| s == 0.0));
         let mut out2 = vec![0.0f32; 4];
-        m.mix(&mut out2); // frames 4,5 silent; frame 6,7 audio
+        m.mix(&mut out2);
         assert_eq!(out2[0], 0.0);
         assert_eq!(out2[1], 0.0);
         assert!(out2[2] != 0.0);
     }
-
-    // ---- stride / resampling / pitch ----
 
     #[test]
     fn stride_upsample_when_source_higher_rate() {
@@ -947,7 +932,6 @@ mod tests {
     fn stride_combines_rate_ratio_and_pitch() {
         let mut m = Mixer::new(48000, 2, 16);
         m.play(ramp(100, 24000, 1), 1.0, 0.0, 3.0, 1, 0);
-        // (24000/48000)*3 = 1.5
         assert!((m.voices[0].stride - 1.5).abs() < 1e-9);
     }
 
@@ -955,8 +939,6 @@ mod tests {
     fn pitch_floor_prevents_zero_stride() {
         let mut m = Mixer::new(48000, 2, 16);
         m.play(ramp(100, 48000, 1), 1.0, 0.0, 0.0, 1, 0);
-        // pitch.max(0.0001) => stride == 0.0001f32 (not zero). The f32 literal widens to
-        // ~9.9999997e-5 as f64, so compare with a tolerance.
         assert!(m.voices[0].stride > 0.0);
         assert!((m.voices[0].stride - 0.0001).abs() < 1e-9);
     }
@@ -970,13 +952,10 @@ mod tests {
 
     #[test]
     fn out_rate_zero_treated_as_one() {
-        // out_rate.max(1) guards against divide-by-zero
         let mut m = Mixer::new(0, 2, 16);
         m.play(ramp(100, 48000, 1), 1.0, 0.0, 1.0, 1, 0);
         assert!((m.voices[0].stride - 48000.0).abs() < 1e-6);
     }
-
-    // ---- panning (equal power) ----
 
     #[test]
     fn pan_center_equal_power() {
@@ -1019,7 +998,6 @@ mod tests {
 
     #[test]
     fn pan_gains_constant_power_invariant() {
-        // lgain^2 + rgain^2 == 1 for equal-power panning across the range
         for pan in [-1.0f32, -0.5, 0.0, 0.5, 1.0] {
             let mut m = Mixer::new(48000, 2, 16);
             m.play(ramp(10, 48000, 1), 1.0, pan, 1.0, 1, 0);
@@ -1029,16 +1007,12 @@ mod tests {
         }
     }
 
-    // ---- channel routing ----
-
     #[test]
     fn mono_source_duplicated_to_lr_full_left_isolates_left() {
-        // mono sample, pan full-left -> rgain 0, so right output channel stays silent
         let mut m = Mixer::new(48000, 2, 16);
         m.play(flat(10, 1, 48000, 0.5), 1.0, -1.0, 1.0, 1, 0);
-        let mut out = vec![0.0f32; 8]; // 4 frames stereo
+        let mut out = vec![0.0f32; 8];
         m.mix(&mut out);
-        // left (even indices) non-zero, right (odd indices) zero
         assert!(out[0] != 0.0);
         assert_eq!(out[1], 0.0);
         assert!(out[2] != 0.0);
@@ -1064,8 +1038,6 @@ mod tests {
         let g = std::f32::consts::FRAC_1_SQRT_2;
         assert!((frame[0] - (1.0 * g) * 0.5 * DEFAULT_CHAIN_GAIN).abs() < 1e-5);
     }
-
-    // ---- gain ----
 
     #[test]
     fn voice_gain_scales_amplitude() {
@@ -1146,8 +1118,6 @@ mod tests {
         assert!((frame[0] + 0.5 * DEFAULT_BUS_GAIN).abs() < 1e-6, "got {}", frame[0]);
     }
 
-    // ---- voice lifecycle / stealing / retrigger ----
-
     #[test]
     fn retrigger_keeps_only_one_active_and_uses_new_sample() {
         let mut m = Mixer::new(48000, 2, 16);
@@ -1155,7 +1125,6 @@ mod tests {
         let first_slot = m.voices.iter().position(|v| v.active).unwrap();
         m.play(ramp(1000, 48000, 1), 0.3, 0.0, 1.0, 7, 0);
         assert_eq!(active_count(&m), 1);
-        // the active voice should carry the new gain
         let active = m.voices.iter().find(|v| v.active).unwrap();
         assert!((active.gain - 0.3).abs() < 1e-6);
         let _ = first_slot;
@@ -1172,7 +1141,6 @@ mod tests {
 
     #[test]
     fn voice_stealing_when_pool_full() {
-        // pool of 2 voices, schedule 3 distinct keys: never exceeds capacity
         let mut m = Mixer::new(48000, 2, 2);
         m.play(ramp(1000, 48000, 1), 1.0, 0.0, 1.0, 1, 0);
         m.play(ramp(1000, 48000, 1), 1.0, 0.0, 1.0, 2, 0);
@@ -1228,12 +1196,8 @@ mod tests {
         assert_eq!(m.voices.iter().find(|v| v.active).unwrap().key, 9);
     }
 
-    // ---- end-of-sample truncation ----
-
     #[test]
     fn all_frames_play_with_no_tail_truncation() {
-        // Every source frame is emitted, including the last (the tail clamps interpolation to the
-        // final sample). An nframes-frame mono sample at unity stride produces nframes audio frames.
         let mut m = Mixer::new(48000, 1, 16);
         m.play(flat(5, 1, 48000, 0.5), 1.0, 0.0, 1.0, 1, 0);
         let mut out = vec![0.0f32; 16];
@@ -1245,7 +1209,6 @@ mod tests {
 
     #[test]
     fn single_frame_sample_emits_one_frame() {
-        // nframes == 1: the lone frame plays (tail clamps to itself), then the voice deactivates.
         let mut m = Mixer::new(48000, 1, 16);
         m.play(flat(1, 1, 48000, 0.5), 1.0, 0.0, 1.0, 1, 0);
         let mut out = vec![0.0f32; 16];
@@ -1257,7 +1220,6 @@ mod tests {
 
     #[test]
     fn voice_position_persists_across_mix_calls() {
-        // A long sample at unity stride continues from where it left off.
         let mut m = Mixer::new(48000, 1, 16);
         m.play(flat(100, 1, 48000, 0.5), 1.0, 0.0, 1.0, 1, 0);
         let mut out = vec![0.0f32; 10];
@@ -1271,18 +1233,13 @@ mod tests {
 
     #[test]
     fn higher_stride_consumes_sample_faster() {
-        // pitch 2.0 doubles stride -> sample exhausted in roughly half the frames.
         let mut m = Mixer::new(48000, 1, 16);
         m.play(flat(20, 1, 48000, 0.5), 1.0, 0.0, 2.0, 1, 0);
         let mut out = vec![0.0f32; 64];
         m.mix(&mut out);
         let nonzero = out.iter().filter(|&&s| s != 0.0).count();
-        // stride 2.0 over 20 frames: positions 0,2,4,...; breaks when i+1>=20 i.e. i>=19 -> pos>=18
-        // frames emitted: pos 0,2,...,18 = 10 frames
         assert_eq!(nonzero, 10);
     }
-
-    // ---- channel-count edge cases ----
 
     #[test]
     fn sampledata_frames_zero_channels_is_zero() {
@@ -1480,7 +1437,6 @@ mod tests {
 
     #[test]
     fn multiple_voices_sum_additively() {
-        // two identical mono full-left voices on different keys should sum to 2x one voice
         let mut one = Mixer::new(48000, 2, 16);
         one.play(flat(10, 1, 48000, 0.3), 1.0, -1.0, 1.0, 1, 0);
         let mut o1 = vec![0.0f32; 2];

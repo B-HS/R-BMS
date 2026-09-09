@@ -148,14 +148,12 @@ mod tests {
 
     #[test]
     fn truncated_header_returns_error() {
-        // Only the RIFF magic, nothing else.
         let err = decode_bytes(b"RIFF".to_vec(), Some("wav"));
         assert!(err.is_err());
     }
 
     #[test]
     fn decodes_stereo_wav_channel_count_and_sample_count() {
-        // 240 frames * 2 channels = 480 interleaved samples
         let frames = 240usize;
         let interleaved: Vec<i16> = (0..frames * 2).map(|i| ((i as f32 * 0.05).sin() * 8000.0) as i16).collect();
         let wav = wav_16le(48000, 2, &interleaved);
@@ -175,12 +173,10 @@ mod tests {
 
     #[test]
     fn decoded_samples_are_normalized_to_unit_range() {
-        // i16 max 32767 -> ~1.0; all decoded f32 should stay within [-1, 1].
         let samples: Vec<i16> = vec![i16::MAX, i16::MIN, 0, i16::MAX / 2];
         let wav = wav_16le(44100, 1, &samples);
         let dec = decode_bytes(wav, Some("wav")).unwrap();
         assert!(dec.samples.iter().all(|&s| (-1.0..=1.0).contains(&s)), "{:?}", dec.samples);
-        // first decoded sample (i16::MAX) close to +1.0
         assert!(dec.samples[0] > 0.99);
     }
 
@@ -206,7 +202,6 @@ mod tests {
 
     #[test]
     fn decode_without_extension_hint_still_works() {
-        // symphonia should probe the container even without an extension hint.
         let samples: Vec<i16> = (0..120).map(|i| (i * 50) as i16).collect();
         let wav = wav_16le_mono(44100, &samples);
         let dec = decode_bytes(wav, None).unwrap();
@@ -216,7 +211,6 @@ mod tests {
 
     #[test]
     fn zero_length_data_chunk_returns_empty_error() {
-        // valid header but no PCM frames -> "empty audio" error
         let wav = wav_16le_mono(44100, &[]);
         let err = decode_bytes(wav, Some("wav"));
         assert!(err.is_err());
