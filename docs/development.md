@@ -41,34 +41,42 @@ clobber it). This applies to keyconfig / settings / scores / **tables / folders*
 
 ## App module layout (`apps/rbms-player/src/`)
 
-`main.rs` was split (it was a 3300-line monolith). The `App` struct + its enums/consts/free-fns +
-`impl ApplicationHandler` + `fn main` live in `main.rs`; the `impl App` methods are split by theme:
+The crate is a library plus a three-line binary: `main.rs` is `fn main() -> ExitCode { rbms_player::run(std::env::args()) }`,
+and `lib.rs` is the module root — the crate's consts and free helpers, `App` / `AppShared`, `App::new`,
+the frame loop, `ApplicationHandler` and `run`. Everything else hangs off it:
 
 | File | Holds |
 |---|---|
-| `main.rs` | `App` struct, consts, free helpers, `App::new`, `ApplicationHandler`, `fn main`, theme loading |
-| `gpu.rs` | the wgpu instanced-quad renderer (`Gpu`) |
-| `app_input.rs` | input mapping, settings round-trip, replay/analysis, key-config editor methods |
-| `app_select.rs` | song-select, library, **folders**, **search/sort**, difficulty tables, loading transitions, click hit-test |
-| `app_play.rs` | chart `load`, the per-frame play loop, song clock, result + score submission, **all menu-screen rendering** |
-| `format.rs` / `ir_map.rs` / `tablesrc.rs` | pure formatting / enum-mapping / table-loading helpers |
-| `keyconfig.rs` / `scores.rs` / `settings.rs` / `replay.rs` / `tables.rs` / `folders.rs` | RON-persisted support types |
+| `lib.rs` | `App` / `AppShared`, consts, free helpers, the frame loop, `ApplicationHandler`, `run() -> ExitCode` |
+| `assets.rs` | bundled skins, the `theme.ron` template, chart-relative file resolution, the keysound decode pool, BGA decode, the library scan |
+| `gpu.rs` | the wgpu instanced-quad renderer (`Gpu`), fallible so a machine with no adapter gets a message |
+| `stage/mod.rs` | `Stage`, `StageId`, `Transition`, `FrameCtx`, `KeyInput`, the `StageHandler` trait and its dispatch |
+| `stage/{select/,settings,keyconfig,tables,folders,loading,play,result}.rs` | one screen each, owning that screen's own state. `select/` is split again into `mod.rs` (list, record modal, ranking panel), `preview.rs` (hover preview) and `scene.rs` (what the renderer is handed) |
+| `app_input.rs` / `app_library.rs` / `app_network.rs` / `app_play.rs` / `app_ranking.rs` | `AppShared` methods by theme: input mapping, library and tables, the NETWORK tab and sync, chart load / shared stream / song clock, IR ranking |
+| `format.rs` / `tablesrc.rs` / `settings_ui.rs` / `settings_view.rs` / `ir_*.rs` / `play_sink.rs` / `timing.rs` | display formatting, table loading, the settings rows the program owns, the settings renderer, the IR panels and sync, the `SoundSink` adapter, the timing probe |
+| `keyconfig.rs` | the winit `KeyCode` ↔ token map and the `keyconfig.ron` shape (the one persisted type still in the app, because it is the one that needs winit) |
 
-The split modules use `use crate::*;` so they see all the crate-root items; moved methods are
-`pub(crate)`.
+The screen and `app_*` modules use `use crate::*;` so they see the crate-root items, and they are
+*descendants* of the crate root — which is what lets them read `AppShared`'s private fields without
+`App` / `AppShared` having to expose them. Everything persisted other than the key config lives in
+`rbms-config` (settings, folders, tables) or `rbms-store` (scores, replays).
 
 ## How to extend
 
 - **New play mode**: add a `Mode` constant + its `[i8;18]` channel map in `rbms-model` — engine code
-  does not branch on mode (it is data). Judge windows: add a row in `JudgeWindows::note_for_mode` /
-  `ln_end_for_mode` if the mode needs different timing.
+  does not branch on mode (it is data). Judge windows: add a row to `crates/rbms-judge/data/judge.ron`
+  keyed by the mode name if it needs different timing; `JudgeProperty::for_mode` reads that file and
+  only falls back to the compiled-in table for a mode the file does not name.
 - **Note-field skin**: `assets/skins/*.ron` (`SkinConfig`), or `--skin file.ron`.
 - **UI theme**: `~/.config/rbms/theme.ron` (`ThemeConfig`); add a field to `rbms_render::theme::Theme`
   + route one `Color::rgb(..)` through `theme()`. See `theme.md`.
-- **Settings screen**: tabs are `SETTING_TABS` in `main.rs` (`(name, &[row ids])`) — e.g. the
-  **NETWORK** tab (rows 22 SERVER URL / 23 PLAYER ID). Free-text rows edit in place via the shared
-  `App.text_input` buffer (`settings_text_input`: Enter commits, Esc cancels, live buffer rendered);
-  the NETWORK commit persists `settings.ron` and rebuilds the score server (`rebuild_server`).
+- **Settings screen**: add a `SettingId` variant and a `SETTINGS` row in `rbms_config::settings`
+  (tab, label, `SettingKind`, help, visibility) — the screen calls `tab_rows` → `display_value` and
+  reacts to `AdjustOutcome::Action(id)`, so there is no index space to keep in step. A row whose
+  value only the running program knows (the live account, the password held in memory, a skin forced
+  on the command line) is marked `host_value` and rendered by `settings_ui` / `app_network`.
+  Free-text rows edit in place through `SettingsState.text_input`, and the row the editor was
+  *opened on* decides which field the commit writes.
 
 ## Conventions
 

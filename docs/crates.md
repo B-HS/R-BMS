@@ -3,7 +3,10 @@
 Per-crate API + invariants reference, accurate to the current code. Generated from a full read of each
 crate; see `architecture.md` for the big picture and `development.md` for build/test/conventions.
 
-Dependency order: `apps/rbms-player → rbms-play → {rbms-render, rbms-audio, rbms-ir, rbms-judge, rbms-chart, rbms-table} → rbms-parser → rbms-model`.
+Dependency order: `apps/rbms-player → {rbms-config, rbms-library, rbms-play} → {rbms-render, rbms-audio, rbms-ir, rbms-judge, rbms-chart, rbms-table, rbms-store} → rbms-parser → rbms-model`. `rbms-config` also depends on `rbms-store`, for the one durable-write helper (`write_atomic`) both persistence paths share.
+
+Every crate opts into the workspace lint set (`[lints] workspace = true`) and every crate root carries `#![forbid(unsafe_code)]`; the one
+exception is documented in `architecture.md`.
 
 ---
 
@@ -124,6 +127,22 @@ Dependency order: `apps/rbms-player → rbms-play → {rbms-render, rbms-audio, 
   - `JudgeEngine` (struct) — the stateful matcher. Key fns: `new(per_lane_times, windows)`, `from_pairs(per_lane (head,Option<end>), windows)`, `from_model(&Model, windows)`, `set_gauge(kind,total)`, `set_windows(w)`, `set_ln_end(w)`, `press(lane,us)`, `release(lane,us)`, `update(now_us)`, `total_notes()`, `total_judged()`, `avg_judge_us()`, `clear_lamp()`. Public fields: `combo`, `max_combo`, `counts[6]`, `ex_score`, `gauge`, `last_judge`, `last_fast`, `fast`, `slow`, `early[6]`, `late[6]`, `empty_poor`.
   - `JudgeResult` (struct) — `{ judge, lane, note_index, fast, delta_us }`.
   - `Gauge` (struct) + `GaugeKind` (AssistEasy/Easy/Normal/Hard/ExHard/Hazard), `ClearType` (NoPlay/Failed/AssistEasy/Easy/Normal/Hard/ExHard/FullCombo/Perfect/Max), `clear_lamp(gauge, counts, max_combo, total_notes)`.
+  - `clear_type_id(ClearType) -> u8` / `clear_type_from_id(u8) -> ClearType` — the reference implementation's lamp ids, the shape score records and
+    IR submissions share. Id `3` (LightAssistEasy) has no rbms variant, so `clear_type_from_id(3)` folds to `AssistEasy` and the round-trip is
+    deliberately asymmetric; ids are strictly monotonic so "best clear" is a max over ids. Moved here from the app so persistence and the engine
+    read the same table.
+  - `data` (module) — the judge/gauge tables as data: `JudgeWindowsData`, `JudgePropertyData`, `JudgeTables`, `GaugeModifier`, `GaugeParams`,
+    `GaugeSet`, `GaugeTables`, `JudgeDataError`, `builtin_judge_tables()` / `builtin_gauge_tables()` (RON embedded with `include_str!`),
+    `load_judge_tables(path)` / `load_gauge_tables(path)` for a user override. `data/judge.ron` carries all six modes; `data/gauge.ron` carries
+    `BEAT_7K` only. **The data files are what the engine actually reads**: `JudgeProperty::for_mode` and `gauge::params` look the row up in the
+    bundled tables and fall back to the compiled-in `JudgeProperty::defaults_for_mode` / `gauge::default_params` only when there is no row for the
+    mode. **Parity guard tests assert the parsed tables equal those compiled-in consts field by field**, which is what keeps the values Phase A
+    matched to the reference from drifting; a second pair of tests asserts the lookups really go through the data file, so the data path cannot
+    quietly become dead code.
+  - `algorithm` (module) — `JudgeAlgorithm` (`Combo` / `Duration` / `Lowest` / `Score`, `#[default] Duration`), `NoteType`, `NoteRef`, and
+    `JudgeAlgorithm::prefer(best, cand, ptime_us, windows, note_type) -> bool`, the reference's pairwise candidate-selection predicate.
+    `JudgeEngine::set_algorithm` swaps the policy; the default reproduces the nearest-`|Δt|` loop this engine always had
+    (see `acknowledge/reference-divergences.md` C-D1).
 
 - **Key invariants & algorithms**:
   - **Delta convention**: `dm = note_time - press_time`. `dm > 0` = pressed EARLY/FAST; `dm <= 0` = LATE/SLOW. `dm == 0` (exact) is counted as LATE, not early, and is neither fast nor slow.
@@ -202,7 +221,7 @@ Dependency order: `apps/rbms-player → rbms-play → {rbms-render, rbms-audio, 
   - `CpuCanvas`: deterministic software RGBA8 backend; `new`, `pixel_at`, `pixels`.
   - `Skin` / `SkinConfig`: resolved per-lane geometry+colours vs. its RON config. `Skin::build(cfg, mode, screen_w, screen_h)`, `default_for`, `lane_count`/`lane_height`/`lane_center`/`note_color`.
   - `Theme` / `ThemeConfig` + `set_theme(t)` / `theme()`: UI chrome palette (non-skin screens); RON-loaded, thread-local active theme.
-  - `render_playfield`, `render_lane_cover`, `render_key_bomb`: in-play field draw, sudden+ cover, hit explosions.
+  - `render_playfield_view` + `PlayfieldView`, `render_lane_cover`, `render_key_bomb`: in-play field draw, sudden+ cover, hit explosions. The field's inputs travel as one struct, so the entry point has three parameters rather than eight and needs no `too_many_arguments` allowance.
   - `render_hud` + `HudView`: live gauge/combo/judge/score-graph overlay.
   - `render_select` + `SelectView`/`SelectRow`/`SelectDetail`/`DetailView`/`DensityView`/`RecordsView`/`RecordRowView`/`SelectModal`/`StatCell`/`SelectHot`/`CoverState`; `cover_rect()`. Returns clickable `(Rect, SelectHot)` hot-regions.
   - `render_result` + `ResultView`; `dj_rank`, `draw_rank_bar`, `ex_delta_label`, `RANK_BANDS`.
@@ -232,7 +251,7 @@ Dependency order: `apps/rbms-player → rbms-play → {rbms-render, rbms-audio, 
   - `NullScoreServer` — offline stub; every required method returns `NotConfigured`.
   - `IrError` (enum): `NotConfigured | Network(String) | Server(u16,String) | Decode(String) | Unsupported`; impls `Display` + `std::error::Error`.
   - `API_VERSION: u32 = 1` — contract version stamped into every submission.
-  - DTOs (re-exported via `pub use dto::*`): `ChartId{md5,sha256}`, `PlayerId{id}`, `ScoreSubmission`, `ScoreRecord`, `SubmitResponse`, `CourseSubmission`, `PlayerProfile`, `ServerInfo`/`ServerCapabilities`, `JudgeBreakdown`, `PlayOptions`, `ReplayData`/`ReplayEvent`, `SettingsBlob`, `AuthRequest`/`AuthResponse`.
+  - DTOs (re-exported by name, not by glob, so the crate's surface is a list rather than whatever `dto` happens to hold): `ChartId{md5,sha256}`, `PlayerId{id}`, `ScoreSubmission`, `ScoreRecord`, `SubmitResponse`, `CourseSubmission`, `PlayerProfile`, `ServerInfo`/`ServerCapabilities`, `JudgeBreakdown`, `PlayOptions`, `ReplayData`/`ReplayEvent`, `SettingsBlob`, `AuthRequest`/`AuthResponse`.
   - Enums: `ClearLamp` (11 variants `NoPlay..Max`), `GaugeType` (9 variants), `RandomOption` (9 variants) — all externally-tagged (serialize to the bare variant-name string).
 - **Key invariants & algorithms**:
   - **Superset, not subset**: charts carry both `md5` and `sha256` (BMS IRs key only on MD5); the HTTP client routes ranking/best/replay endpoints by `chart.md5` only (`/charts/{md5}/...`), while `sha256` rides along in the body.
@@ -259,10 +278,15 @@ Dependency order: `apps/rbms-player → rbms-play → {rbms-render, rbms-audio, 
 - **Public API**:
   - `DifficultyTable` (struct) — resolved table: `name`, `symbol`, `level_order: Vec<String>`, `entries: Vec<TableEntry>`.
   - `DifficultyTable::from_parts(header: Option<TableHeader>, entries) -> DifficultyTable` — merge header metadata + body; derives `level_order` when missing/empty.
-  - `DifficultyTable::from_body_bytes(bytes, header) -> Result<_, String>` — parse a JSON-array body with optional header.
-  - `DifficultyTable::fetch(url) -> Result<_, String>` — HTTP fetch; auto-detects whether `url` is a header object or a body array; for a bare body, best-effort fetches sibling `header.json`.
-  - `DifficultyTable::fetch_or_cache(url, cache_path) -> Result<_, String>` — fetch + persist resolved body to cache; on fetch failure, reload from cache for offline use.
+  - `DifficultyTable::fetch(url) -> Result<_, TableError>` — HTTP fetch; auto-detects whether `url` is a header object or a body array; for a bare body, best-effort fetches sibling `header.json`.
+  - `DifficultyTable::fetch_cached(url, cache_path) -> Result<_, TableError>` — fetch + persist resolved body to cache; on fetch failure, reload from cache for offline use.
   - `DifficultyTable::by_level() -> Vec<(String, Vec<usize>)>` — entries grouped by level (values are indices into `entries`), in `level_order`, empties dropped, unknown levels appended first-seen.
+  - `DifficultyTable::parse_body(bytes, header) -> Result<_, TableError>` — parse a JSON-array body with optional header.
+    `TableError` (thiserror) is the only error form; the `Result<_, String>` shims are gone now that the app threads the type (its
+    `tablesrc::TableSourceError` wraps `TableError` alongside the local-file read error), and the `Display` text is what the tests pin.
+  - `DifficultyTable::match_levels(library_md5s: impl Iterator<Item = &str>) -> Vec<(String, Vec<usize>)>` — join the table against the local
+    library and group the **library** indices by level. It takes md5s rather than `SongEntry`s precisely so `rbms-table` does not depend on
+    `rbms-library` (the app calls `table.match_levels(library.md5s())`); matching is case-insensitive and each library index appears once per level.
   - `TableEntry` (re-export from `dto`) — one chart; only `md5` is required, all other string fields `#[serde(default)]`.
   - `TableHeader` (re-export from `dto`) — header metadata: all four fields `Option`, all `#[serde(default)]`.
   - Internal (not exported): `CachedTable` (on-disk envelope), `derive_level_order`, `level_key`, `join_url`, `build_client`, `get_bytes`, `sibling_header`.
@@ -272,7 +296,7 @@ Dependency order: `apps/rbms-player → rbms-play → {rbms-render, rbms-audio, 
   - **Defaults** — missing `symbol` → `"*"`; an *explicit empty string* symbol is preserved (not replaced). Missing `name` → `""`. `level_order` that is `None` **or** an explicit empty `Vec` triggers derivation; a non-empty explicit `level_order` is used **verbatim, not re-sorted**.
   - **Grouping** (`by_level`) — builds a `pos` HashMap from `level_order`; if `level_order` contains duplicate keys, `pos` collapses to the **last** index, but listed-yet-empty groups are dropped so only one survives. Total entry count is preserved (each entry appears exactly once); indices are valid and unique.
   - **URL joining** — `join_url` uses reqwest's re-exported `url::Url` (RFC 3986): handles relative, root-relative `/abs`, protocol-relative `//host`, absolute, `..` (clamped at host), query-only `?v=2`, empty rel (returns base sans fragment). Unparseable base → returns raw `rel`.
-  - **Caching** — `fetch_or_cache` only writes the cache when `entries` is non-empty. Cache envelope stores resolved name/symbol/level_order so offline reload preserves them; on reload, an empty cached `level_order` is re-derived.
+  - **Caching** — `fetch_cached` only writes the cache when `entries` is non-empty. Cache envelope stores resolved name/symbol/level_order so offline reload preserves them; on reload, an empty cached `level_order` is re-derived.
   - **HTTP client** — `build_client`: 15-second timeout, `user_agent("rbms-table")`, blocking reqwest. Non-2xx → `Err("HTTP {status} for {url}")`.
 - **Gotchas / edge cases**:
   - `TableEntry` derives `Serialize` + `Deserialize`; `TableHeader` derives **only `Deserialize`** (no `Serialize`). `DifficultyTable` has **no `Debug` impl** — tests can't `unwrap_err()`, they `match` on the Result instead (`body_err` helper).
@@ -280,7 +304,73 @@ Dependency order: `apps/rbms-player → rbms-play → {rbms-render, rbms-audio, 
   - Body must be a JSON **array**; an object, malformed JSON, empty input, or an entry missing `md5` all → `Err` prefixed `"body parse:"`. Unknown fields (`sha256`, `extra`) are ignored.
   - An entry with only `md5` gets empty defaults for every other field; an empty `level` still groups under the `""` level.
   - Error strings are load-bearing and tested: `"body parse:"`, `"header parse:"`, `"header.json has no data_url"`, and the combined cache-fallback message.
-- **Tests**: All in `crates/rbms-table/src/lib.rs` under `#[cfg(test)] mod tests` (no test in `dto.rs`). They cover `level_key` (numeric/non-numeric/overflow/negatives/leading-zero/whitespace/case ordering), `derive_level_order` (dedup, first-seen textual form, numeric-before-alpha, length bound), `by_level` (count preservation, unique/in-range indices, index-to-level match, level_order ordering + first-seen extras, dropping empty listed levels, duplicate-key behavior), `from_parts`/`from_body_bytes` (defaults, empty-symbol preservation, verbatim level_order, serde defaults/unknown-field tolerance, malformed/empty/missing-md5 errors, serde roundtrip + determinism), header serde, and `join_url` (relative/root-relative/absolute/dotdot/protocol-relative/query-only/empty-rel/unparseable-base). Network paths (`fetch`, `fetch_or_cache`, `build_client`, `get_bytes`, `sibling_header`) are **not** covered by tests.
+- **Tests**: All in `crates/rbms-table/src/lib.rs` under `#[cfg(test)] mod tests` (no test in `dto.rs`). They cover `level_key` (numeric/non-numeric/overflow/negatives/leading-zero/whitespace/case ordering), `derive_level_order` (dedup, first-seen textual form, numeric-before-alpha, length bound), `by_level` (count preservation, unique/in-range indices, index-to-level match, level_order ordering + first-seen extras, dropping empty listed levels, duplicate-key behavior), `from_parts`/`parse_body` (defaults, empty-symbol preservation, verbatim level_order, serde defaults/unknown-field tolerance, malformed/empty/missing-md5 errors, serde roundtrip + determinism), header serde, and `join_url` (relative/root-relative/absolute/dotdot/protocol-relative/query-only/empty-rel/unparseable-base). Network paths (`fetch`, `fetch_cached`, `build_client`, `get_bytes`, `sibling_header`) are **not** covered by tests.
+
+---
+
+### rbms-store
+- **Role**: Persistence for the player's local play history and replays. Owns the on-disk shape of `scores.ron` and `replays/*.ron`, the durable-write helper every other store file goes through, and the judging-rule generation stamped on each record. Depends on serde/RON only.
+- **Public API**:
+  - `write_atomic(path, contents) -> std::io::Result<()>` — temp file (pid-suffixed) + rename, so a crash mid-write cannot truncate a good file. Every persisted file in the app (config, keyconfig, scores, replays) goes through it.
+  - `SCORE_RULE_VERSION: u32` — the generation of the judging rules a record was produced under. `is_stale_rule_version(v)` answers whether a record predates it; how that is *shown* ("`  *`", "`   OLD RULE`") belongs to the app's `format.rs`, so no layout string lives in a persistence crate.
+  - `ScoreRecord` — one finished run: `md5`/`title`/`mode`, `clear` (lamp id), `ex_score`/`max_ex`, `counts[6]`, `empty_poor`, `max_combo`, `total_notes`, `gauge`/`gauge_value`, `random`, `played_at`, `replay_file`, `rule_version`, `assisted`. Every field added since the format existed is `#[serde(default)]`, so an old `scores.ron` still parses.
+  - `ScoreBook` — the history: `load(path)` (a malformed file is renamed to `.ron.bak` and the book starts empty rather than failing the launch), `try_save` / `save`, `from_records`, `push`, `rebuild_index`, `records()` (read-only slice), `for_md5` (newest first), `best_ex_for_md5`, `best_clear_for_md5`. The record list is private, so the only way to grow the book is `push`, which keeps the md5 index in step by construction.
+  - `Replay` / `ReplayEvent` + `Replay::load(path) -> Result<_, StoreError>`, `save` / `try_save`.
+  - `StoreError` (thiserror) — read / parse / write, replacing the old `Result<_, String>`.
+- **Key invariants & algorithms**:
+  - **Lamps and judgments travel as numeric ids, not engine enums.** That is what keeps `rbms-judge` out of the persistence layer; the app converts with `rbms_judge::clear_type_id`.
+  - **`index: HashMap<md5, Vec<usize>>` is `#[serde(skip)]`** and rebuilt on load / maintained by `push`. Lookups were a linear scan over every record per query, which the select screen does once per visible row; they are now a hash lookup. The file format is unchanged — the index is derived state.
+  - md5 keys are compared lowercased, so a record written with an uppercase hash still matches.
+  - **Assisted runs are history only.** Both `best_ex_for_md5` and `best_clear_for_md5` filter out `assisted` records: the reference implementation keeps an assisted lamp after demoting it, and rbms cannot demote yet, so an assisted run must not raise the LED at all.
+- **Gotchas / edge cases**:
+  - `load` is infallible by design (returns an empty book); `try_save` is the fallible form and `save` swallows the error for call sites that must not abort a run.
+  - Records are append-only in file order, but `for_md5` returns them newest first (`played_at` descending). The result screen's "previous best" is computed *before* the new record is pushed.
+- **Tests**: `src/tests.rs` (36) covers record/book round-trips, index rebuild and push maintenance, the md5 case rules, best-EX / best-clear selection incl. the assist exclusion, replay round-trip, and `write_atomic` (fresh file, overwrite, no partial file left behind). `tests/legacy_scores.rs` (4) loads `tests/fixtures/scores-legacy.ron` — a `scores.ron` written before the crate existed — and asserts the queries return exactly what they returned in the app.
+
+---
+
+### rbms-library
+- **Role**: The local song library: walking the configured folders, the per-chart summary the select screen browses, and the heavier per-chart detail computed for the focused row only. Headless — no app state, no rendering — so the same code backs the player's background scan and `rbms-cli scan`.
+- **Public API**:
+  - `SongEntry` — one chart as read from its header block alone: `path`, title/subtitle/artist/genre/maker, `level`, `difficulty`, `init_bpm`, `rank`, `total`, `mode`, `md5`, `stagefile`, `banner`, `preview` (`#PREVIEW`). An empty `#TITLE` falls back to the file name.
+  - `ChartDetail` — the expensive per-chart summary (full timing integration): `notes`, `long_notes`, `duration_us`, `bpm_min`/`bpm_max`, and the density series (`density`, `peak_density`, `avg_density`, `end_density`).
+  - `is_chart(path) -> bool` — extension test (`.bms`/`.bme`/`.bml`/`.pms`).
+  - `scan_folder(root, &AtomicUsize, &AtomicBool) -> Vec<SongEntry>` / `scan_folders(&[String], …)` — recursive walk, results sorted by lowercased title; the counter feeds the loading bar and the flag cancels mid-walk. `scan_folders` is the union of every configured folder.
+  - `compute_chart_detail(path, Mode) -> Option<ChartDetail>` — parse + `to_model` for one chart.
+  - `Library` — the scanned set plus an md5 index: `from_songs`, `songs`, `len`, `is_empty`, `indices_for_md5`, `md5s`.
+- **Key invariants & algorithms**:
+  - **Scanning is cancellable.** Both scan functions take `&AtomicBool`, checked once per directory popped off the walk stack, and return what they have so far. This is what lets the loading screen abort a rescan of a large library instead of holding the window hostage.
+  - **The cheap path never integrates timing.** `SongEntry` comes from the header block, so a folder of thousands of charts scans without building a `Model`; `compute_chart_detail` is called for the focused row only.
+  - `Library::md5s()` yields md5s in library order, which is exactly the contract `DifficultyTable::match_levels` consumes — the indices it returns index back into `songs()`.
+  - Duplicate md5s (the same chart in two folders) are kept: `indices_for_md5` returns every match.
+- **Gotchas / edge cases**:
+  - Unreadable files and unparseable charts are skipped silently — a broken chart in a folder must not stop the scan.
+  - The progress counter counts *charts read*, so it stays still while the walk crosses a folder of audio files — an indeterminate bar is the honest presentation until a total is known.
+- **Tests**: `src/tests.rs` (13) covers `is_chart` extensions, scanning a temporary tree (nested folders, non-chart files, cancellation mid-walk, the progress counter), `compute_chart_detail` on a synthetic chart, and the `Library` index (order, duplicate md5s, unknown md5 → empty slice).
+
+---
+
+### rbms-config
+- **Role**: The player's persisted configuration — one versioned document for everything the settings screen edits, plus the migration that folds the pre-version `settings.ron` / `folders.ron` / `tables.ron` trio into it, plus the descriptor table the settings screen is built from. Deliberately free of the window, audio and network stacks: it depends on the engine crates that own the two enums it stores, and on `rbms-store` for the durable write.
+- **Public API**:
+  - `Config` — the single runtime *and* persisted type: `schema_version` + `play` / `judge` / `display` / `audio` / `network` / `library` option groups (`PlayOptions`, `JudgeOptions`, `DisplayOptions`, `AudioOptions`, `NetworkOptions`, `LibraryOptions`), `Config::sanitise()` clamping every range in one place. `TableSource` is the difficulty-table row.
+  - `load(path) -> Result<LoadOutcome, ConfigError>`, `save(&Config, path)`, `migrate(raw) -> Result<(Config, Option<u32>), ConfigError>`, `write_atomic` (re-exported from `rbms-store`). `LoadOutcome` reports `migrated_from` and the copy of the original the load kept.
+  - `CURRENT_SCHEMA_VERSION` / `LEGACY_SCHEMA_VERSION`, `ConfigError` (read / write / parse / serialize / migrate).
+  - `LegacyV0`, `LEGACY_FOLDERS_FILE`, `LEGACY_TABLES_FILE`, `merge_legacy_lists` — the v0 shape and the folder/table absorption.
+  - `settings` (module, re-exported): `SettingId` (43 rows), `SettingTab` (PLAY / GAUGE / JUDGE / DISPLAY / INPUT / NETWORK / AUDIO, `SettingTab::ALL` left to right), `SettingKind` (Toggle, IntRange, FloatRange, Percent, Cycle, Text, Action, FilePick), `SettingDescriptor`, `SETTINGS`, `descriptor(id)`, `tab_rows(tab, cfg)`, `display_value(cfg, id)`, `adjust(cfg, id, delta) -> AdjustOutcome`, `cycle_values(id)`, `step_skin`, and the range/limit consts the UI and the tests share.
+  - `gauge_from_name` / `gauge_token` — the gauge's persisted vocabulary; `AudioOptions` helpers (`clamp_volume`, `volume_percent`, `step_volume`, `cycle_optional_u32`, `cycle_device`, `step_polyphony`).
+- **Key invariants & algorithms**:
+  - **One type, not two.** The app used to keep a runtime `PlayerConfig` and a persisted `PlaySettings` in step by hand through `apply_settings` / `current_settings`; adding one option meant editing nine places. Values that are stored as free text (the gauge, the note option) now travel through serde adapters, so the file keeps the vocabulary it always had while the program works with the engine's own enums.
+  - **The settings screen is a table, not an index space.** Each row is a `SettingDescriptor` with its tab, label, kind, help text and a `visible: fn(&Config) -> bool` predicate; the screen calls `tab_rows` → `display_value` and reacts to `AdjustOutcome::Action(id)` for the rows that open a dialog (key config, font, skin). The old positional `SETTING_KEYCONFIG = 11` style constants and the `SETTING_TABS` index arrays are gone, so inserting a row can no longer silently misalign the screen.
+  - **Migration is non-destructive.** No `schema_version` (or `0`) parses as `LegacyV0` and converts; `folders.ron` / `tables.ron` are absorbed into `Config.library` but **left on disk** so a downgrade still finds them. The migrated `settings.ron` itself is copied to `settings.ron.v{from}.bak` *before* the caller writes the new schema over it, and `LoadOutcome.backup` names that copy — the old flat file is `#[serde(default)]`-shaped, so an older build reading a v1 document would silently default every field, and the copy is what makes rolling back a rename. An unknown *higher* version returns `ConfigError::Migrate` and the app starts on defaults **without saving**, so a newer machine's settings survive being opened by an older build.
+  - `#[serde(default)]` throughout: an unknown key is ignored and a missing key takes the default, so a partially written file still loads.
+- **Gotchas / edge cases**:
+  - Load outcomes differ by failure mode: a **missing** file writes the defaults out (so the first run leaves a file to edit), a **migrated** file is copied to `*.ron.v{from}.bak` and handed back for the caller to rewrite, an **unparseable** file is moved to `*.ron.bak` and the defaults are used *without* being written, a file that **cannot be read** at all (permissions, a directory) is reported as `ConfigError::Read` and left alone, and a **newer-schema** file is left completely untouched behind `ConfigError::Migrate`.
+  - The same version ceiling guards the account sync blob: `apps/rbms-player/src/ir_sync.rs` refuses a blob whose `schema_version` is past this build's rather than reading it as the current schema, which would strip every field a newer build added and then upload the stripped copy back over the account's settings.
+  - `migrate` always `sanitise`s, so no caller has to re-check the ranges of a value that arrived from a file, a hand edit or a synced account.
+  - `AudioOptions` carries a `reopen_pending` flag rather than reopening the stream itself — the app debounces and owns the device. The flag is `#[serde(skip)]` **and** excluded from `PartialEq` (hand-written), so comparing two `Config`s compares the documents they would be written as rather than a transient UI state that `sanitise` clears.
+  - `SETTING_COUNT` is asserted against `SETTINGS.len()`, and every `SettingId` must appear exactly once, so a new row cannot be half-added.
+- **Tests**: `src/tests.rs` (39) covers the schema defaults and `sanitise` clamps, the serde adapters for the gauge / note option, the descriptor table (every id present exactly once, no empty tab, `adjust` never leaves a declared range under ±1000 repetitions, `display_value` never empty, label snapshots equal the old screen's strings), and the audio helpers. `tests/migration.rs` (7) drives the fixture files in `tests/fixtures/`: `settings-v0-default` → `Config::default()`, `settings-v0-full` (all 24 legacy fields non-default) field by field, `settings-v0-partial`, `settings-v0-unknown-key`, `folders-v0` + `tables-v0` merged into `Config.library`, `settings-v99` (error, file untouched), and a `save` → `load` round-trip.
 
 ---
 
@@ -289,15 +379,32 @@ Dependency order: `apps/rbms-player → rbms-play → {rbms-render, rbms-audio, 
 
 - **Public API**:
   - `struct PlayEvent { wav: i32, at_us: i64 }` — a keysound (BGM or a hit note's wav) that should fire at `at_us`.
-  - `struct Player` — the real-time play driver; field `pub judge: JudgeEngine` is exposed directly.
+  - `struct Player` — the real-time play driver. The judge state is reached through `judge()` / `into_judge()`; it is no longer a public field.
   - `Player::new(model: Model, autoplay: bool)` — build a player; precomputes time-sorted BGM, note-head, and autoplay-action lists.
   - `Player::update(now_us, play: FnMut(PlayEvent))` — advance to `now_us`: flush due BGM/autoplay keysounds, feed autoplay/auto-lane judgments, age out tap beams, then call `judge.update(now_us)` (the MISS/LN-finalisation sweep).
   - `Player::press(lane, now_us, play) -> Option<JudgeResult>` / `release(lane, now_us) -> Option<JudgeResult>` — interactive input; updates beam/bomb and emits the nearest head's keysound on press.
   - `Player::set_judge_rate(rate_percent)` — user JUDGE WIDTH multiplier; rescales both note and LN-end windows.
   - `Player::set_auto_lanes(Vec<bool>)` — mark lanes (e.g. auto-scratch) as chart-driven even in interactive mode.
-  - `Player::set_gauge(GaugeKind)`, `into_judge() -> JudgeEngine`, `model() -> &Model`, `last_time_us() -> i64`.
+  - `Player::set_gauge(GaugeKind)`, `judge() -> &JudgeEngine`, `into_judge() -> JudgeEngine`, `model() -> &Model`, `last_time_us() -> i64`.
+  - `Player::update_schedule(sched_us, play)` / `update_judge(audible_us)` — the two clock axes Phase B split apart: keysounds are booked ahead on
+    the scheduling axis, judging sweeps on the audible one. `update(now_us, play)` runs both against a single clock for callers that do not care.
   - `Player::beam_on() -> &[i64]`, `beam_off() -> &[i64]`, `bomb() -> &[(i64, u8)]` — per-lane render state for the skin.
   - `fn simulate_autoplay(model: &Model) -> JudgeEngine` — full autoplay pass; verification helper (should yield all-PGREAT, LNs once).
+  - `struct PlaySession` — **one run of a chart**, the layer above `Player`: it owns the judge state, the replay being reproduced or recorded, the
+    auto-calibration accumulator, the analysis clock, the timing-mark ring and the BGA timeline. `new(model, SessionOptions)`,
+    `tick(SessionClock, &mut dyn SoundSink)`, `press(lane, raw_us, sink) -> Option<JudgeResult>`, `release(lane, raw_us)`, `seek(target_us)`,
+    `is_finished(song_us)`, `all_notes_resolved()`, `summary() -> PlaySummary`, `judge()`, `model()`, `bga_frame()`, plus the analysis controls
+    (`set_analysis_enabled`, `toggle_analysis_pause`, `adjust_analysis_rate`, `advance_analysis`, `sync_analysis_position`) and the calibration
+    readouts (`calibration_mean_us`, `calibration_samples`).
+  - `trait SoundSink { fn play(&mut self, SoundRequest); fn stop_all(&mut self); }` + `SoundRequest` (`wav`, bus, gain, pan, pitch, `SoundTime`) and
+    `NullSink` — how a session emits sound without depending on `rbms-audio`. The app implements it over its `AudioEngine`; tests use `NullSink`,
+    which is what makes a whole run reproducible headlessly.
+  - `SessionOptions` — `autoplay`, `gauge`, `judge_offset_us`, `judge_rate_percent`, `auto_lanes`, `seed`, `analysis`, `auto_calibration`, `replay`.
+  - `SessionClock` — the pair of clock axes a tick is given (`SessionClock::at(song_us)` collapses them for callers with one clock).
+  - `PlaySummary` — everything the result screen and an IR submission need as plain values: `counts[6]`, `ex_score`, `max_ex_score`, `max_combo`,
+    `total_notes`, `total_judged`, `fast`/`slow`, `early[6]`/`late[6]`, `avg_judge_us`, `empty_poor`, `gauge_value`, `clear_lamp`, `min_bp`.
+    Computing it is pure: writing the record, saving the replay and submitting to the IR stay in the app.
+  - `TimingMark` — one judged input's timing error, newest last, for the analysis overlay (`recent_marks(count)`).
 
 - **Key invariants & algorithms**:
   - `AUTO_BEAM_US = 80_000` (80 ms): in autoplay/auto-lane, a tapped (non-LN) note lights its lane beam for 80 ms then auto-releases, mirroring the reference implementation's `auto_minduration`. LN-held beams stay lit (gated by `ln_active[lane]`) until the LN release.
@@ -320,44 +427,35 @@ Dependency order: `apps/rbms-player → rbms-play → {rbms-render, rbms-audio, 
 ---
 
 ### apps/rbms-player
-- **Role**: The native winit + wgpu front-end binary for the rbms BMS player: a stage-machine app (Select / Settings / KeyConfig / Tables / Folders / Loading / Play / Result) wiring the parser/chart/judge/play/audio/render crates together. `main.rs` owns the `App` struct and event loop; the heavy method bodies live in three `app_*` sibling modules.
-- **Public API** (crate-internal; the binary exports nothing for downstream crates):
-  - `App` — the single `ApplicationHandler`; holds all stage/play/select/config state. Methods are split across `app_play.rs`, `app_select.rs`, `app_input.rs`.
-  - `Gpu` (`gpu.rs`) — instanced-quad wgpu backend implementing `rbms_render::Renderer`; `fill_rect` = one GPU instance, the whole frame is one instanced draw, plus a separate single-texture BGA/cover pipeline (`set_bga`/`clear_bga`).
-  - `FolderList` (`folders.rs`) — RON-persisted song-library folder list (`folders.ron`); the library is the union of all folders.
-  - `PlaySettings` (`settings.rs`) — RON-persisted play options (`settings.ron`), enums stored as strings, `#[serde(default)]` for forward-compat.
-  - `KeyConfig` / `ControlBinds` / `ControlAction` + `key_from_name`/`key_name`/`default_keys_for_mode`/`mode_config_key` (`keyconfig.rs`) — per-mode lane bindings + in-play control keys (`keyconfig.ron`).
-  - `format.rs` helpers — `clear_type_id`/`clear_type_from_id`, `clear_label_color`, `difficulty_name`/`difficulty_color`, `rank_label`, `mode_short`/`mode_color`, `gauge_name`, `fmt_datetime`, `fmt_duration`.
-  - Free fns in `main.rs`: `default_total`, `calibrated_offset`, `compute_build_hash`, `client_platform`, `bundled_skin`, `load_theme`, `scan_folder`/`scan_folders`, `compute_chart_detail`, `resolve_keysound`/`resolve_file`, `decode_bga_256`, `build_server` (builds the `ScoreServer` from `config` — `HttpScoreServer` for a non-empty URL, else `NullScoreServer`), `config_dir`/`config_dir_from`.
-  - `ir_map.rs` mapping fns (`gauge_from_name`/`gauge_token`, `ir_clear`, `ir_gauge`, `ir_random`, `ir_lntype`) — translate engine enums to IR DTOs. `ir_lntype(lnmode)` maps the chart's `#LNMODE` to the backend `PlayOptions.lntype` encoding (0=LN, 1=CN, 2=HCN).
-  - Enums/types: `Stage`, `Loading` (Song/Scan), `SelectView` (Root/AllSongs/TableLevels/TableLevel), `SelectItem`, `SortMode`, `Hot`, `KcRow`, `SongEntry`, `ChartDetail`, `ScanOutcome`, `SelectKey`.
+- **Role**: The native winit + wgpu front-end for the rbms player: a stage machine (Select / Settings / KeyConfig / Tables / Folders / Loading / Play / Result) wiring the parser, chart, judge, play, audio, render, config, library, store and IR crates together. The crate is built as a **library** (`rbms_player`) with a three-line binary, so the integration tests can reach its types.
+- **Public API**:
+  - `pub fn run(args: impl Iterator<Item = String>) -> ExitCode` — the entry point. `src/main.rs` is `fn main() -> ExitCode { rbms_player::run(std::env::args()) }` and nothing else; every startup failure surfaces as a readable message plus `ExitCode::FAILURE` rather than a panic.
+  - Everything else is crate-internal (`pub(crate)`); the binary exports nothing downstream.
+- **Structure**:
+  - `lib.rs` — the wiring file: `App`, `AppShared`, `LaunchOptions`, the `ApplicationHandler` impl (`resumed` / `window_event` / `frame`), the config-dir and startup helpers, and the constants the screens share.
+  - `stage/` — one module per screen (`select`, `settings`, `keyconfig`, `tables`, `folders`, `loading`, `play`, `result`) plus `mod.rs` (the `Stage` enum, `StageId`, `Transition`, `FrameCtx`, `KeyInput`, `StageHandler`) and `canvas.rs` (`Canvas`, and `HeadlessCanvas` for tests).
+  - `app_input.rs` / `app_library.rs` / `app_network.rs` / `app_play.rs` / `app_ranking.rs` — `AppShared` methods grouped by concern (input mapping, library sources, IR account/network, chart load and the play/result path, ranking panel data).
+  - `ir_*.rs` — the IR surface the NETWORK tab and the ranking panel are built on (`ir_session`, `ir_panel`, `ir_ranking`, `ir_ranking_view`, `ir_replay`, `ir_sync`, `ir_outcome`).
+  - `settings_ui.rs` / `settings_view.rs` — what the settings screen needs from the running program (live account, device list, forced skin) and the screen's layout/draw; the rows themselves are `rbms_config::SETTINGS`.
+  - `play_sink.rs` (`PlayAudioSink`), `keyconfig.rs` (+ `keyconfig_tests.rs`), `gpu.rs`, `format.rs`, `tablesrc.rs`, `timing.rs`.
 - **Key invariants & algorithms**:
-  - **main.rs module split**: `main.rs` defines `App` + the winit `window_event` dispatcher; `app_play.rs` = chart load / per-frame loop / song clock / result+submission; `app_select.rs` = library, focused detail, preview, record modal, tables, folders, loading transitions; `app_input.rs` = lane/control mapping, settings/skin/font round-trip, replay playback+analysis, key-config editor. Each `app_*.rs` does `use crate::*;` with `#![allow(clippy::wildcard_imports)]`.
-  - **Fixed logical space**: UI is laid out in 1280×720 (`CW`/`CH`); the surface stretches it; cursor coords are mapped back into that space. Default `MODE = BEAT_7K`.
-  - **Audio sample clock**: song time = `audio.clock_us() - anchor_us` (sample-accurate), falling back to wall-clock `Instant` only when audio is unavailable. `anchor_us` is captured in `start_play()` *after* keysounds finish decoding, so load time doesn't count against song position. Keysound events are scheduled at `e.at_us + anchor`.
-  - **Keysound loading is multithreaded**: decode jobs fan out over `min(cores,8)` threads, stream back via mpsc + an `AtomicUsize` progress counter; `frame()` drains into the bank and draws a determinate bar; `start_play()` fires only once `ks_progress == ks_total` (with a final drain after the channel disconnects). Qualia-scale (650+) charts motivated this.
-  - **Mode-aware judging**: judge windows/rate come from the `rbms_judge`/`Player`; `judge_rate` clamped 50–200%, `offset_ms` clamped ±200. Press judging happens at `raw + offset_us`; raw (un-offset) times are what gets recorded into replays.
-  - **Auto-calibration** (`calibrated_offset`): offset held constant within a run (consistent judging + reproducible replays); accumulates mean timing error of accurate hits (judge ≤ GD, |delta| ≤ 150 ms) and recenters for the *next* run, requiring `cal_count >= 20`. `mean_us > 0` = early/FAST ⇒ offset increases. Converges in ~one run.
-  - **default_total**: the reference implementation-style gauge TOTAL fallback when `#TOTAL` absent: `(7.605·n / (0.01·n + 6.5)).max(260.0)`, floor 260, `notes.max(1)`, non-decreasing in note count.
-  - **Theme is a render-crate thread-local/global**: `load_theme()` writes a commented `theme.ron` template on first run, parses → `rbms_render::set_theme(...)`. The template values equal the built-in defaults (pinned by a test). Note `theme.ron` is the UI chrome; the in-play note field is themed by the *skin*, not the theme.
-  - **Multi-folder library**: `scan_folders` unions every folder in `FolderList`; a directory launch arg auto-joins the persisted list. Rescans run off-thread (`rescan_all_folders` → `scan_rx`) with an indeterminate ping-pong loading bar (no total to count); a chart-load `Loading::Song` blocks but presents a LOADING frame first.
-  - **Search/sort**: `/` opens search (forces `SelectView::AllSongs`, flat list); filter is case-insensitive substring over title/artist/subtitle; F3 cycles `SortMode` (Default/Title/Artist/Level/Clear, Level parses as i64 with `i64::MAX` fallback, Clear sorts best-clear-first). Both are applied only in `arrange_songs`.
-  - **Select scene caching**: `SelectKey = (select_gen, sel, record_modal, scores.len(), score_graph)`; the `SelectScene` is rebuilt only on key change (continuous redraw loop would otherwise re-walk the whole list). `select_gen` bumps on every `rebuild_select_items` to catch same-length swaps.
-  - **Focused detail / cover / preview are lazy + debounced**: heavy `compute_chart_detail` (full `to_model`) + cover decode run only when focus moves to a different song; `#PREVIEW` playback waits `PREVIEW_DEBOUNCE_FRAMES` (20) of settling, uses reserved sample id `PREVIEW_ID = 0`, gain `PREVIEW_GAIN = 0.85`, and loops by re-triggering at clip boundaries on a *separate* `AudioEngine` (torn down before Play so two cpal streams never coexist).
-  - **Tables-as-folders**: difficulty tables browse like the reference implementation custom folders (Root → table → level → charts), indices into `table_levels`.
-  - **Replay analysis (F4 feature)**: starts following the real audio clock at 1× with sound; once the user pauses/seeks/changes rate (`analysis_manual`) it switches to the virtual `analysis_us` clock and mutes keysounds. Seek re-simulates inputs from the start (`seek_replay`) so judging stays exact; rate clamped 0.25–4.0, seek is ±2 s.
-  - **Score id mapping**: `clear_type_id` uses the reference implementation `ClearType.java` values and deliberately **skips id 3** (LightAssistEasy) — `clear_type_from_id(3)` folds to `AssistEasy`, so the round-trip is asymmetric. IDs are strictly monotonic so "best clear" = max-over-ids.
-  - **Build integrity**: `compute_build_hash()` SHA-256s the running exe once at startup, submitted as `client_build_sha256` (None if unreadable); `client_platform()` = `OS-ARCH`.
-  - **IR lntype is derived, not hardcoded**: `ir_lntype(src.headers.lnmode)` is computed at chart `load()` and stored in `App.chart_lntype`, then submitted as `PlayOptions.lntype`. Previously hardcoded to `1`; now correctly carries 0=LN / 1=CN / 2=HCN matching the backend data-model.
-  - **NETWORK settings tab**: `SETTING_TABS` has a `NETWORK` tab (rows 22 `SERVER URL`, 23 `PLAYER ID`) with in-place text editing via the shared `text_input` field (Enter commits, Esc cancels, live buffer shown). `PlaySettings` persists `server_url: Option<String>` + `player_id: String` to `settings.ron`. On commit it saves and rebuilds the `ScoreServer` via `rebuild_server()` (which calls `build_server(&config)`): empty URL = offline (`NullScoreServer`), empty id = `"guest"`. These IR values were previously CLI-only (`--server`/`--player`); now reachable from the GUI.
-  - **Windows config path**: `config_dir()` resolves `HOME` → `USERPROFILE` → `"."` (`config_dir_from`, unit-tested). `HOME` is unset on Windows, so the old `var_os("HOME")`-only logic dropped config into the cwd; now it lands in `%USERPROFILE%\.config\rbms`. `settings_path` + keyconfig use it; scores/tables/folders/theme/replays derive from `settings_path.parent()`. Status: `docs/reference/windows-compat.md`.
+  - **`App` is `{ shared: AppShared, stage: Stage, suspended: Vec<Stage>, launch_chart: bool }`.** Splitting the state that outlives a screen change (`AppShared`) from the state a screen owns (`Stage`) is what makes `self.stage.update(&mut FrameCtx { shared: &mut self.shared, .. })` pass the borrow checker — and it is why a screen can be a plain `match` arm instead of a field of one large struct.
+  - **Screens are a trait, dispatch is a `match`.** Each state struct implements `StageHandler` (`update` / `draw` / `handle_key` / `handle_mouse` / `on_enter` / `on_exit` / `debug_lines`); `Stage` dispatches by matching its own variants, so a new screen cannot be forgotten in one of the paths. `Play` and `Select` are boxed — a session with its decoded BGA, and the browser with its cached scene, would otherwise set the size of every variant and make each change a large memcpy.
+  - **One transition rule, one place.** A screen returns `Transition::{Stay, Open, To, Back, Quit}`; `App::apply` runs the leaving screen's `on_exit`, swaps, and runs the arriving screen's `on_enter`. `Open` suspends the current screen onto `suspended` and `Back` resumes it, which is how the settings screens return to the browser exactly as it was. Assignments of the form `self.stage = Stage::X` scattered through the app (22 of them) no longer exist — `grep -rn '\.stage = Stage::' apps/rbms-player/src/` is 0.
+  - **The frame loop is a dispatch.** `frame()` measures fps/RAM, polls the network, IR jobs and the audio reopen debounce, calls `stage.update`, applies the transition, then draws `stage.draw` plus the two app-wide overlays (connection dot, debug panel) and presents. `window_event` translates the six winit events into `handle_key` / `handle_mouse` / `frame` and does nothing else — the per-stage key matrix lives in the stages.
+  - **Fixed logical space**: the UI is laid out in 1280×720 (`CW`/`CH`); the surface stretches it and cursor coordinates are mapped back into it. Default `MODE = BEAT_7K`.
+  - **Audio sample clock**: song time = the engine's interpolated clock minus `anchor_us`, captured in the play stage *after* keysounds finish decoding so load time does not count against position, and falling back to the wall clock (continuing from the last audio position) when the stream dies. One `AudioEngine` lives for the whole session; a stage change clears the affected id namespace instead of tearing the stream down, so the preview and the chart can never open two cpal streams.
+  - **Keysound loading is multithreaded**: decode jobs fan out over `min(cores, 8)` threads and stream back through mpsc plus an `AtomicUsize` progress counter; the loading screen draws a determinate bar and play starts only once every job has landed.
+  - **A run is a `PlaySession`**: the app owns the clock, the sound device and the files; `rbms-play` owns the judging, the replay and the analysis. `PlayAudioSink` is the only place that maps `SoundRequest` onto the engine (source → bus, `#WAVxx` → play id namespace, session clock → engine axis). The result screen turns `PlaySummary` into a `ScoreRecord`, the replay file and the IR submission.
+  - **Configuration is one document**: `rbms_config::Config`, loaded once and saved whole through `save_config`. The settings screen renders `tab_rows` → `display_value` and feeds keys back through `adjust`, reacting to `AdjustOutcome::Action(id)` for the rows that open a dialog. The positional index constants and tab index arrays are gone.
+  - **Auto-calibration** (`calibrated_offset`): the offset is held constant within a run (consistent judging, reproducible replays); the session accumulates the mean timing error of accurate hits and the result screen recenters the offset for the *next* run.
+  - **Build integrity**: `compute_build_hash()` SHA-256s the running executable once at startup and submits it as `client_build_sha256`; `client_platform()` is `OS-ARCH`.
+  - **Config path**: `config_dir()` resolves `HOME` → `USERPROFILE` → `"."` (`config_dir_from`, unit-tested), so Windows lands in `%USERPROFILE%\.config\rbms`. Scores, tables, folders, theme and replays derive from the settings file's parent.
 - **Gotchas / edge cases**:
-  - Config files (settings/keyconfig/folders) back up a corrupt file to `*.ron.bak` (renamed aside) before falling back to defaults, so a later save can't silently clobber a recoverable file. `settings`/`keyconfig` *write defaults out* on a missing file; `folders` does **not** create a file on load.
-  - `lane_keys()` guarantees every lane `0..mode.key` is bound: empty/missing/bad tokens backfill from the default (bad ones warn). Out-of-range trailing row entries are dropped. Control keys are resolved **before** lanes in play, so a shared key silently shadows the lane — the key-config editor flags collisions (`collisions`/`binding_collides`) and refuses a colliding rebind.
-  - `gauge_token`/`gauge_from_name` round-trip gauges by *token* for persistence; `GAUGE_CYCLE` (6 kinds) is the settings cycle order.
-  - Pressing Esc in Play goes to Result if every note is already resolved, otherwise quits; a non-analysis run also auto-advances to Result 2 s after the last note. `SongEntry.preview` is read by `start_preview` (the stale `#[allow(dead_code)]` is gone); focus preview is wired (not a follow-up), with `config.debug`-gated `eprintln` instrumentation on all six early-return branches of `start_preview`. `samples/preview-demo/` is a manual fixture; a one-time audible device check is still pending (`docs/bug/2026-06-03-preview-playback.md`).
-  - Settings indices are positional: `SETTING_TABS` maps tab → global indices into `setting_line`/`adjust_setting`; `SETTING_KEYCONFIG = 11`, `SETTING_FONT = 18` are special-cased. Editing those constants without updating the tab table breaks the screen.
-  - Replay launch forces `autoplay = false` (the recorded stream drives judging; autoplaying too would double-hit). MD5 mismatch between replay and chart only warns. Autoplay/replay runs do **not** persist a local `ScoreRecord` or auto-save a replay.
-  - `handle_click` hit-tests `hot` regions topmost-first (last-drawn wins); a click that misses everything dismisses an open modal. `hot` is rebuilt every frame (immediate-mode).
-  - Result deltas (`prev_ex`, `prev_best_ex`) are computed from history *before* this run's record is pushed.
-- **Tests**: Unit tests are inline `#[cfg(test)]` modules per file. `main.rs` tests: theme template == defaults + valid RON, `fmt_datetime`, clear-lamp id round-trip, build-hash shape, `client_platform`, `calibrated_offset` (recentre/clamp/round/one-run convergence), `default_total` (floor/monotonic), `SortMode` cycle/labels, bundled skins parse, `config_dir_from` (HOME → USERPROFILE → cwd precedence). `ir_map.rs`: `ir_lntype` lnmode→backend encoding (0=LN/1=CN/2=HCN, unknown→LN), gauge token round-trip. `format.rs`: extensive `fmt_datetime` (epoch/negative/leap/boundary/16-char), clear-type id round-trip + the reference implementation values + monotonicity + legacy-id-3 fold, difficulty/rank/duration/mode helpers. `keyconfig.rs`: key token round-trip + aliases, per-mode lane completeness/backfill/short-row/override/ascending-order, collisions, `set_lane` growth, full RON round-trip, load missing/malformed. `settings.rs` & `folders.rs`: default sanity, full + partial RON round-trip (incl. `server_url`/`player_id`), load missing (writes defaults for settings; no-write for folders) / malformed (backs up to `.bak`). `gpu.rs` has no tests (GPU-bound).
+  - A corrupt config or key-config file is moved aside to `*.ron.bak` before defaults are used, so a later save cannot clobber a recoverable file. The rules for which failure writes a file are `rbms-config`'s, not the app's.
+  - `lane_keys()` guarantees every lane `0..mode.key` is bound: empty, missing or bad tokens backfill from the default. Control keys resolve **before** lanes in play, so a shared key shadows the lane; the key-config editor flags collisions and refuses a colliding rebind.
+  - Replay launch forces `autoplay = false` for the whole session (the recorded stream drives judging). An md5 mismatch between replay and chart only warns. Autoplay and replay runs do not persist a `ScoreRecord`, do not auto-save a replay, and are not submitted.
+  - Click hit-testing walks `hot` topmost-first (last drawn wins); a click that misses everything dismisses an open modal. `hot` is rebuilt every frame.
+  - Result deltas (`prev_ex`, `prev_best_ex`) are read from history *before* this run's record is pushed.
+  - `#![forbid(unsafe_code)]` holds even though `gpu.rs` derives `bytemuck::Pod`/`Zeroable` — the derive's generated `unsafe impl` does not trip the lint, so the app needs no `deny` escape hatch.
+- **Tests**: `main_tests.rs` (theme template equals the defaults, `config_dir_from` precedence, `client_platform`, `calibrated_offset`, `resumed_clock_us`, bundled skins parse), `keyconfig_tests.rs` (token round-trip and aliases, per-mode lane completeness/backfill/ordering, collisions, RON round-trip, missing/malformed load), `stage/render_tests.rs` (every screen rendered onto a `HeadlessCanvas`, so a stage that draws nothing or panics is caught without a GPU), per-module inline tests for the IR, timing and settings-view code, and `tests/autoplay_preview.rs`. `gpu.rs` has no tests (GPU-bound).

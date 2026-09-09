@@ -245,7 +245,7 @@ pub struct SessionOptions {
 의존 방향(추가분만):
 
 ```
-rbms-config  → rbms-model, rbms-chart(NoteOption), rbms-judge(GaugeKind), serde, ron
+rbms-config  → rbms-model, rbms-chart(NoteOption), rbms-judge(GaugeKind), rbms-store(write_atomic 재사용), serde, ron
 rbms-store   → serde, ron            (숫자 id 로만 판정/램프 표현 — rbms-judge 비의존)
 rbms-library → rbms-model, rbms-parser, rbms-chart, serde, ron
 rbms-play    → (기존) + rbms-store
@@ -284,13 +284,16 @@ pub struct LoadOutcome { pub config: Config, pub migrated_from: Option<u32>, pub
 pub fn load(path: &Path) -> Result<LoadOutcome, ConfigError>;
 pub fn save(config: &Config, path: &Path) -> Result<(), ConfigError>;
 pub fn migrate(raw: &str) -> Result<(Config, Option<u32>), ConfigError>;
-pub fn write_atomic(path: &Path, contents: &str) -> std::io::Result<()>;  // main.rs 에서 이관
+pub use rbms_store::write_atomic;   // main.rs 에서 rbms-store 로 이관, rbms-config 는 재노출만
 ```
 
 마이그레이션 규칙:
 - `schema_version` 이 없거나 `0` → `LegacyV0`(현 `PlaySettings` 24필드 + `folders.ron`/`tables.ron` 병합) 으로 파싱 후 `From<LegacyV0> for Config`.
 - 알 수 없는 상위 버전 → `ConfigError::Migrate` 를 반환하고 **앱은 파일을 덮어쓰지 않고** 기본값으로 기동(다운그레이드 시 사용자 설정 파괴 방지). 현행 `.bak` 백업 동작은 유지.
 - `folders.ron`/`tables.ron` 은 v0 로 남기고, 마이그레이션이 `Config.library` 로 흡수한 뒤 **원본 파일은 삭제하지 않고 남긴다**(롤백 가능). `scores.ron`·`replay/*.ron` 은 `rbms-store` 소관이라 이 마이그레이션 범위 밖(레코드 단위 `rule_version` 유지).
+- **`settings.ron` 자신도 롤백 가능해야 한다**: 마이그레이션한 원본을 `settings.ron.v{from}.bak` 으로 먼저 복사한 뒤에만 현 스키마로 덮어쓰고, `LoadOutcome.backup` 이 그 사본을 가리킨다. 구 `PlaySettings` 는 `#[serde(default)]` 플랫 구조라 v1 문서를 읽으면 전 필드가 조용히 기본값이 되므로, 사본이 없으면 이전 릴리스로 되돌리는 순간 설정이 전멸한다.
+- 읽기 자체가 실패한 경우(권한·디렉터리 등 `NotFound` 아닌 I/O 오류)는 "파일 없음" 과 구분해 `ConfigError::Read` 로 반환하고 **파일을 건드리지 않는다**. 기본값으로 덮어쓰면 읽지 못했을 뿐인 설정을 잃는다.
+- 같은 상한 검사는 **계정 동기화 blob** 에도 적용한다(`apps/rbms-player/src/ir_sync.rs::parse_blob`): `schema_version` 이 현 스키마보다 높은 blob 을 현 스키마로 강등 파싱하면 신설·이동 필드가 전부 기본값으로 떨어지고, 그 강등본이 로컬에 영속화된 뒤 다음 업로드에서 서버 blob 을 덮어쓴다.
 
 테스트(구파일 필수):
 1. `tests/fixtures/settings-v0-default.ron` — 현행 `PlaySettings::default()` 를 그대로 직렬화한 파일. 로드 결과가 `Config::default()` 와 동치.
@@ -407,7 +410,7 @@ path = "src/main.rs"
 | 서브커맨드 | 소비 크레이트 | 검증 대상 |
 |---|---|---|
 | `rbms-cli scan <dir>` | rbms-library | 스캔 결과 곡 수·md5·모드 |
-| `rbms-cli config <path>` | rbms-config | 마이그레이션 결과 + `migrated_from` 출력 |
+| `rbms-cli config <path>` | rbms-config | 마이그레이션 결과 + `migrated_from` + 보존된 원본 사본, 이어서 탭별 전 설정 행(`tab_rows` → `descriptor` → `display_value`) |
 | `rbms-cli scores <path> --md5 <md5>` | rbms-store | 기록 조회·베스트 |
 
 ---
@@ -532,6 +535,7 @@ pub fn load_judge_tables(path: &Path) -> Result<JudgeTables, JudgeDataError>;   
 - **패리티 가드 테스트(필수)**: `builtin_judge_tables()` 를 파싱한 결과가 현행 `windows.rs` 의 const `JudgeProperty` 4행과 필드 단위로 완전히 동일함을 단언한다. Phase A 에서 레퍼런스 값으로 맞춰 놓은 표가 데이터화 과정에서 흔들리지 않게 하는 유일한 방어선이다(`JudgeProperty.java` 대조는 Phase D 에서 5K/PMS/24K 행을 추가할 때 다시 수행).
 - **`gauge.ron` 의 Phase C 내용**: 키 `"BEAT_7K"` 한 행뿐이며, 값은 현행 `gauge.rs:45-51 fn spec()` 의 6개 `Spec` 리터럴을 그대로 옮긴 것이다(레퍼런스 `GaugeProperty.SEVENKEYS` 와 이미 일치 — 계획 §0). `builtin_gauge_tables()` 파싱 결과가 `spec(kind)` 6종과 필드 단위로 동일한지 단언하는 **게이지 패리티 가드 테스트**를 judge 쪽과 동일하게 둔다. 5K/PMS/KEYBOARD/LR2 행 추가는 Phase D.
 - const 4행은 즉시 삭제하지 않고, 데이터 로드 실패 시 fallback 겸 위 테스트의 기준값으로 **한 릴리스 동안 유지**한 뒤 Phase D 에서 제거한다.
+- **소비 전환은 Phase C 안에서 완료한다**(R4 의 "패리티 가드 먼저, 그 다음 소비 전환"). `JudgeProperty::for_mode` 와 `gauge::params` 가 데이터 표를 조회하고, 행이 없을 때만 내장 const 표(`JudgeProperty::defaults_for_mode` / `gauge::default_params`)로 폴백한다. 패리티 가드는 데이터 vs 내장 const 를 비교하므로 전환 후에도 실질 검증이며, 별도로 "조회 결과 == 데이터 파일" 을 단언하는 테스트가 전환 자체를 고정한다. 전환하지 않으면 `builtin_*_tables`/`load_*_tables` 가 도달 불가능한 공개 API 로 남아 C-4 의 데이터화가 무효가 된다.
 
 ### 6.2 `JudgeAlgorithm`
 

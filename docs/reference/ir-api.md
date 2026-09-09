@@ -102,7 +102,7 @@
                "autoplay": false, "auto_offset": false, "scratch_left": false, "green_number": 310.0 },
   "played_at": 1700000000000,      // unix ms. 음수면 400, 현재보다 5분 이상 미래면 400
   "client": "rbms/0.1.0", "replay_id": null, "seed": 42,
-  "judge_algorithm": "Combo", "rule": "", "skin": "NORMAL",
+  "judge_algorithm": "Duration", "rule": "", "skin": "NORMAL",
   "client_build_sha256": null, "client_platform": "macos-aarch64",
   "extra": {} }
 

@@ -55,7 +55,7 @@
 | J14 | `#DEFEXRANK` 미파싱 | 미파싱 | judgerank×75/100, `<=0`은 NORMAL 75 폴백 | S | **Phase A 수정 완료**(리뷰에서 `<=0` 분기 추가 정정) |
 | J15 | 기본 TOTAL이 헤더 없으면 200 고정 | 200 고정 | `max(260, 7.605n/(0.01n+6.5))`, KB는 별도 floor | S | **Phase A 수정 완료** |
 | J16 | 지뢰가 판정 대상 제외, 데미지 없음 | 데미지 없음 | 눌린 채 통과 시 `gauge.addValue(-damage)` | S | **Phase A 수정 완료**(데미지 스케일 자체는 아래 보류 참조) |
-| J17 | JudgeAlgorithm이 Duration 고정 | Duration 고정 | Combo(기본)/Duration/Lowest/Score 선택 | M | 보류 — Phase D 예정 |
+| J17 | JudgeAlgorithm이 Duration 고정 | Duration 고정 | Combo(기본)/Duration/Lowest/Score 선택 | M | **Phase C 부분 해소** — 4종 술어를 전부 구현하고 `set_algorithm` 으로 교체 가능해졌다. 남은 차이는 **기본값**(rbms `Duration` vs 레퍼런스 `Combo`) 과 설정 UI 노출 → 아래 C-D1, Phase D |
 | J18 | 판정 완료 노트 재타격이 후보 제외(무판정) | 무판정 | MS 범위면 空POOR | S | **Phase A 수정 완료**(리뷰에서 커서 전진 후 재타격 경로 사망 결함 추가 발견·수정) |
 | J19 | fast/slow `dm==0`이 LATE로 집계 누락 | 누락 | EARLY | S | **Phase A 수정 완료** |
 | J20 | 게이지가 단일 `Gauge`만 갱신(9종 병렬 아님) | 단일 | 9종 전부 갱신, 선택만 표시 | M | 보류 — Phase D 예정 |
@@ -92,3 +92,30 @@
 | B-D5 | 보이스 스틸 정책 | 비활성 → Release 중 env 최소 → gain×env 최소(동률 시 최고령) 3단계, 스틸 대상은 "즉시 교체"가 아니라 "피해 보이스 페이드 완료 후 같은 슬롯에 예약 시작"(`Voice.pending`) | 레퍼런스 소스(`AudioDriver.java` 등) 미열람 — 정책 자체를 대조하지 않음(spec §8-1 명시) | rbms 독자 설계. 클릭 없는 스틸(경계 스텝 < 0.01)을 목표로 리뷰에서 재설계됨(초판은 제자리 덮어쓰기로 0.3248 풀스케일 클릭 발생) |
 
 **공통 근거**: `docs/plan/2026-09-09-phase-b-spec.md` §8-1 "보이스 스틸 정책·페이드 유무·리샘플 방식은 미대조 — §3.4의 스틸/램프는 rbms 독자 설계이며 레퍼런스 패리티 주장이 아니다"를 그대로 따른다. 위 5항목 모두 향후 레퍼런스 `AudioDriver`/`PCM` 계열을 직접 열어 대조하기 전까지는 "일치/불일치" 판정 없이 **rbms 설계**로만 기록한다.
+
+## Phase C — 구조 개편 (2026-09-09)
+
+> 근거: `docs/plan/2026-09-09-phase-c-spec.md` §6.1·§6.2 + §9 step 14. 아래 3항목은 Phase C 가 데이터화·enum 화를 하면서 **명시적으로 남긴 차이**다. 어느 것도 판정 결과를 바꾸지 않았다(Phase C 는 동작 보존 리팩터링).
+
+| # | 항목 | rbms | 레퍼런스 구현 | 상태 |
+|---|---|---|---|---|
+| C-D1 | **후보 선택 기본값** — `JudgeAlgorithm` 의 기본값이 `Duration`(누른 시각과의 `|Δt|` 최소 후보) | `#[default] Duration`(`crates/rbms-judge/src/algorithm.rs`) | `JudgeAlgorithm.Combo` 가 기본, `defaultAlgorithm = {Combo, Duration, Lowest}` | **기존 divergence**(J17). Phase C 는 4종 술어를 전부 구현했을 뿐 기본값을 바꾸지 않았다 — 바꾸면 후보 선택이 달라져 현행 판정 테스트 기대값이 전부 흔들린다. 기본값 전환은 **Phase D 결정 사항** |
+| C-D2 | **`JudgeAlgorithm` 을 trait 이 아니라 enum 으로** | `pub enum JudgeAlgorithm { Combo, Duration, Lowest, Score }` + `prefer(...) -> bool` | 레퍼런스도 enum(`JudgeAlgorithm.java`) | 계획 §2 C-4 는 trait 을 적었으나 스펙 §6.2 말미에서 enum 으로 확정. 사유: ① 설정 파일(`rbms-config::JudgeOptions.algorithm`)에 직렬화돼야 하고 ② 레퍼런스가 enum 이며 ③ 동적 확장 요구가 없다. 사용자 정의 알고리즘이 필요해지면 `trait JudgeSelector` 를 추가하고 enum 이 구현하는 형태로 확장한다(Phase C 범위 밖) |
+| C-D3 | **게이지가 모드당 6종** — `gauge.ron` 의 `GaugeSet` 은 ASSIST EASY/EASY/NORMAL/HARD/EX-HARD/HAZARD | 6종(`crates/rbms-judge/data/gauge.ron`, 키 `"BEAT_7K"` 1행) | `GaugeProperty` 는 모드당 9종(+ CLASS/EXCLASS/EXHARDCLASS) | rbms 에 코스(단위인정) 모드가 없어 코스 게이지 3종을 담을 곳이 없다. 5K/PMS/KEYBOARD/LR2 행 추가와 함께 **Phase D** 에서 검토(J20·J21 과 같은 묶음) |
+
+**참고**: `judge.ron` 은 `BEAT_5K`/`BEAT_7K`/`BEAT_10K`/`BEAT_14K`/`POPN_9K`/`KEYBOARD_24K` 6행으로 이미 전 모드를 담고, 내장 const 표와의 **패리티 가드 테스트**가 파싱 결과 == const 를 필드 단위로 단언한다. 반면 `gauge.ron` 은 `BEAT_7K` 1행뿐이다(다른 모드의 게이지 수치는 아직 1차 출처 대조 전).
+
+**데이터 소비 경로(리뷰 반영)**: 엔진이 실제로 읽는 표는 이제 데이터 파일이다. `JudgeProperty::for_mode` 는 `builtin_judge_tables()` 를, `gauge::params` 는 `builtin_gauge_tables()` 를 조회하고, 행이 없을 때만 컴파일 내장 표(`JudgeProperty::defaults_for_mode` / `gauge::default_params`)로 폴백한다. 패리티 가드는 그 내장 표를 기준값으로 삼으므로 여전히 실질 검증이며, 별도로 "조회 결과 == 데이터 파일" 을 단언하는 테스트가 소비 경로 자체를 고정한다(스펙 §6.1 의 "데이터 로드 실패 시 fallback 겸" 이 실제 폴백이 되었다).
+
+## Phase C — 스펙 대비 의도적 이탈 (2026-09-09, 리뷰 반영)
+
+> 아래는 레퍼런스 구현과의 차이가 아니라 **`docs/plan/2026-09-09-phase-c-spec.md` 대비 이탈**이다. 어느 것도 동작을 바꾸지 않으며, 전부 이 문서에 남기는 조건으로 유지한다.
+
+| # | 스펙 | 구현 | 사유 |
+|---|---|---|---|
+| C-S1 | §2.2 — 곡목록 상태(`select_view`/`select_items`/`search`/`searching`/`sort`/`sel`/`select_gen`)는 `SelectState` 로, `kc_edit_mode` 는 `KeyConfigState` 로 | 둘 다 `AppShared` 유지 | 목록은 화면보다 오래 산다: 다른 화면이 브라우저로 복귀하고, `Tables`/`Folders` 가 목록을 재구성하며, `Loading` 이 루트로 되돌리고, 디버그 오버레이가 어느 화면에서든 커서를 보고한다. `kc_edit_mode` 는 키컨피그 화면이 방문마다 새로 만들어지므로 화면에 두면 "편집하던 모드 기억" 동작이 사라진다. 이 때문에 `AppShared` 는 스펙이 추정한 ~40 이 아니라 실측 ~69 필드다 |
+| C-S2 | §2.3 — 디스패치는 트레이트 오브젝트가 아니라 `impl Stage` 의 메서드별 `match` | `Stage::handler()`/`view()` 단 두 곳에서 전 variant `match` 로 `&mut dyn StageHandler` 를 뽑고, 각 메서드는 그 위임 1줄 | 스펙이 `match` 를 요구한 근거("변형 누락을 컴파일러가 잡는다")는 그대로 보존된다 — `match` 는 여전히 전수이고 여전히 exhaustive 검사를 받는다. 8-arm match 를 메서드마다 7번 반복하지 않을 뿐이다 |
+| C-S3 | §4 의존 그래프 — `rbms-config → rbms-model, rbms-chart, rbms-judge, serde, ron` | `rbms-config → rbms-store` 추가 | `write_atomic` 은 설정·점수·리플레이가 모두 쓰는 단일 원자적 쓰기 헬퍼다. 스펙은 이를 `rbms-config` 안에 두라고 적었으나 그러면 `rbms-store` 가 같은 것을 두 번 갖거나 역방향으로 의존해야 한다. 순환은 없고(`rbms-store` 는 serde/ron 만 의존) 중복 구현을 피한다. **스펙 §4·§4.1 을 이 방향으로 정정했다** |
+| C-S4 | §1.1 표 — `App`/`AppShared` 해체 | 두 구조체는 크레이트 루트(`lib.rs`)에 유지, 대신 `assets.rs` 와 `stage/select/{preview,scene}.rs` 분리 | 모든 화면·`app_*` 모듈이 크레이트 루트의 **자손**이라 `AppShared` 의 비공개 필드를 볼 수 있다. 두 구조체를 형제 모듈로 옮기면 필드 69개를 전부 `pub(crate)` 로 열어야 하며, 얻는 것은 짧은 파일 하나뿐이다 |
+
+**와이어 변경 1건(리뷰 반영)**: IR 제출의 `judge_algorithm` 이 하드코딩 `"Combo"` → 실제 정책 `session.judge().algorithm().name()`(기본값에서 `"Duration"`) 으로 바뀌었다. 서버는 이 필드를 검증 없는 `varchar(16)` 로 그대로 저장하므로(`web/src/server/dto/score.ts`, `schema.ts`) 계약 영향은 없고, 바뀐 것은 "메타데이터가 클라이언트의 실제 후보 선택 정책과 일치한다" 는 점뿐이다. C-D1 대로 기본값 자체(`Duration`)는 그대로다 — 즉 이제 제출값이 C-D1 을 정직하게 보고한다. `docs/reference/ir-api.md` 의 예시도 함께 정정했다.
