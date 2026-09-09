@@ -76,7 +76,7 @@
   - [x] 리뷰 후 게이트(Fable 실측): fmt 통과, `cargo test --workspace` **1,656 통과 · 0 실패 · 3 ignored**(리뷰 전 1,634), `cargo clippy --workspace --all-targets --all-features -- -D warnings` 0 경고, `cargo run -p rbms-cli -- config <v0 settings.ron>` 스모크 통과
   - [x] 스펙·문서 정정: 스펙 §4(`rbms-config → rbms-store`)·§4.1(백업/`ConfigError::Read`/blob 상한)·§4.7·§6.1(소비 전환), `docs/acknowledge/reference-divergences.md` §Phase C 스펙 대비 의도적 이탈 C-S1~C-S4(목록 상태 `AppShared` 유지 · `dyn StageHandler` 단일 match · `rbms-config → rbms-store` · `App`/`AppShared` 크레이트 루트 유지)
   - 미실시: 실기 GUI 확인(H1 은 게이트·문서 변경이라 렌더 경로 무변경)
-- [ ] D 판정 패리티 완성 + JUDGE 탭 노출 — J17 알고리즘 4종·J20 9게이지+J26·J21~J23·J9/A10 스크래치·J24 CN/HCN·J25·J12 2단계·J6 24K·어시스트 램프 강등
+- [x] D 판정 패리티 완성 + JUDGE 탭 노출(2026-09-10, 명세 `docs/plan/2026-09-09-phase-d-spec.md`; D0~D5 순차 구현 + 적대 리뷰 23건 반영, history `docs/history/2026-09-09-phase-d-judge-parity.md`, 발산 `docs/acknowledge/reference-divergences.md` §Phase D) — J17 알고리즘 4종(기본값 `Combo` 전환)·J20 9게이지+J26 GAS·J21~J23(5세트×9원소 게이지+PMS fixjudge)·J9/A10 정역 2키(BSS/MSS 앱 배선)·J24 CN/HCN 2단계 폴드·J25 LN MODE(모델+리플레이+스코어 키 전부 동일 축)·J6 24K Mode 신설·어시스트 램프 강등(`rule_version` 게이팅). 게이트(Fable 실측): fmt 통과, `cargo test --workspace` **1876 통과 · 0 실패 · 3 ignored**(D 착수 전 1,656), `cargo clippy --workspace --all-targets -- -D warnings` 0 경고, 금지어 grep 0, 신규 `//` 주석 0. HEAD `0c20fa9` 위 워킹트리 변경(미커밋)
 - [ ] E1~E6 스킨 완전 커스터마이징 — 프리미티브(PNG 골든·textured quad·클립·아틀라스)·타이머/키프레임·프로퍼티 바인딩·JSON+Lua 로더·화면 이식·스킨 선택 UI
 - [ ] F UX·기능 고도화 — 옵션 오버레이·토스트·백그라운드 로딩·리트라이/다음곡·타깃/PACEMAKER·그래프·정렬/필터/즐겨찾기·HID/SUD·floating hi-speed·FLIP/BATTLE·리사이즈 레터박스 등
 - [ ] G 데이터 스케일·롱테일 — 곡DB(rusqlite)·스코어DB·코스·연습 모드·gilrs/MIDI·시스템 사운드·복수 IR
