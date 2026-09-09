@@ -43,8 +43,8 @@
 - [x] W2 API 확장 ∥ UI part1 → UI part2 → 리뷰 3·수정 완료. Fable 최종 게이트: typecheck 0·lint 0·테스트 196 통과(2 skip)·빌드 35 페이지. 실 DB 스모크 전 항목 정상(→ `docs/history/2026-09-09-web-nextjs-ir-server.md`)
 - [x] 커밋(web 갈래별) + push origin dev (2026-09-09)
 - [x] Vercel 배포(2026-09-09): 프로젝트 `rbms-web`(b-hs) 링크, Production env 6종(DATABASE_URL·BETTER_AUTH_SECRET·BETTER_AUTH_URL·NEXT_PUBLIC_APP_URL·ALLOW_GUEST·REPLAY_MAX_BYTES) 등록, `vercel --prod` 성공. 프로덕션 별칭 `https://rbms-web.vercel.app` 에서 health/version/랭킹/FE 통계/페이지 7종 200 확인(실 DB). 배포 해시 URL은 배포 보호(SSO)로 302 — 정상
-- [ ] 도메인 `bms.hyuns.uk`: Vercel 프로젝트에 추가됨, DNS(Cloudflare)에 `A 76.76.21.21`(DNS only) 필요 — 사용자 작업 후 자동 검증
-- [ ] CI(dev) 실패 1건 수정 중: `crates/rbms-render/tests/golden.rs` 곡선택 골든이 OS별 시스템 폰트 폴백으로 해시가 달라짐(macOS 통과·Windows/Ubuntu 실패, result/hud 골든은 3-OS 통과) → 골든 테스트를 임베드 폰트 전용 결정적 렌더로 수정(Workflow `rbms-ci-golden-fix`)
+- [ ] 도메인 `bms.hyuns.uk`: Vercel 프로젝트에 추가됨. 2026-09-09 점검 결과 현재 레코드는 Cloudflare Tunnel CNAME(프록시 ON, 응답 error 1033, `vercel domains inspect` 미구성) → Cloudflare DNS 에서 그 레코드를 지우고 `A bms 76.76.21.21`(프록시 OFF, DNS only) 로 교체 필요. 교체 후 `https://bms.hyuns.uk/api/health` 200 확인
+- [x] CI(dev) 골든 실패 수정 완료: 원인은 곡선택 폴더 행 마커 U+25B8 가 임베드 Inter 에 없어 OS 시스템 폰트로 폴백된 것. 골든 테스트를 임베드 폰트 전용 결정적 렌더(`TextEngine::embedded_only`, `use_embedded_fonts_only`)로 수정 — 커밋 `61b9a97`, CI run 34307010505 에서 ubuntu/macos/windows + fmt/clippy 전부 통과
 - 후속: md5 단독 제출(LR2IR 어댑터), Vercel Blob, 라이트/다크 스크린샷 확인, 슈퍼셋 서버의 누락 필드 `.default()`
 
 ---
