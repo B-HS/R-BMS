@@ -5,7 +5,7 @@
 > **상태(2026-06-03):** ✅ **구현됨** — 2-판정 모델(아래 §구현)을 `LnKind::Cn`/`Hcn`에만 게이트해 적용. 검증된 LN/Normal 경로는 byte 불변(회귀 0), CN/HCN 합성 픽스처 5종으로 고정(`crates/rbms-judge/src/lib.rs` `cn_*`/`hcn_*`/`ln_remains_*`). **HCN 연속 게이지(§HCN)는 Phase 7로 잔여.** (lntype IR 보고 = `ir_map::ir_lntype`는 별개로 완료.)
 
 ## 원본 위치
-`/Users/hyunseokbyun/beatoraja/src/bms/player/beatoraja/play/JudgeManager.java` (903줄). 윈도우 정의는 `bms/model` rule, 게이지는 `GrooveGauge`.
+`/Users/gkn/beatoraja/src/bms/player/beatoraja/play/JudgeManager.java` (903줄). 윈도우 정의는 `bms/model` rule, 게이지는 `GrooveGauge`.
 
 ## LN 종류 (BMSModel)
 - `#LNTYPE 1` = TYPE_LONGNOTE(레거시), `#LNTYPE 2` = MGQ(미사용).

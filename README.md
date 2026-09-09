@@ -1,67 +1,70 @@
-# rbms 🚧 (WIP)
+<div align="center">
 
-beatoraja(Java/libGDX)의 **코어 PLAY 모듈**을 Rust로 새로 포팅한 BMS 플레이어. macOS/Windows 크로스플랫폼(wgpu/Metal, cpal/CoreAudio).
+# R-BMS
 
-> **Work in Progress** — 완전 플레이는 가능하나 계속 개발 중.
+**A BMS rhythm-game player in Rust — beatoraja-accurate judgment, sample-clocked audio, wgpu rendering.**
 
-## 구현된 기능
+[Features](#features) · [Build](#build) · [Controls](#controls) · [Development](#development)
 
-- **파서** — BMS lexical(base36/62 · Shift-JIS · `#RANDOM`/`#IF` · `#mmmCC`), 차트 해시 MD5/SHA-256(byte-exact).
-- **타이밍/차트** — 마디→µs 적분 · 채널→레인 · LN/지뢰 · 변속(BPM/STOP/SCROLL) · 모드 자동감지(7K/5K/9K/10K/14K).
-- **오디오** — symphonia 디코드 + cpal RT 믹서, **마스터 클럭 = 재생 샘플 수**(vsync 비의존, 샘플정확 키음) · **키음 병렬 디코드**(코어 수만큼, 로딩 진행바).
-- **판정/게이지** — beatoraja 윈도우 byte-단위 일치(**모드별**) · 콤보 · EX · 게이지 6종 + 모디파이어 · 클리어램프(beatoraja 색) · LN 풀판정(릴리스 윈도우 #RANK/JUDGE WIDTH 스케일) · **CN/HCN 차징노트 판정 차별화**(헤드+릴리스 2판정, 일반 LN은 worse(head,end) 1판정 · `#LNMODE` 유도) · **空POOR 정확 처리**.
-- **렌더** — 1280×720 wgpu 인스턴스 · 노트 상단 클리핑 · **롱노트 몸통 막대** · 키 빔 · 레인 외곽선/구분선 · 가로 게이지(IIDX식) · BGA(이미지, on/off) · **KEY BOMB**(데이터주도) · **다국어 폰트**(cosmic-text+Inter+시스템폴백, 글리프 런 캐시) · **UI 테마**(`theme.ron`, → [docs/theme.md](docs/theme.md)).
-- **게임 옵션** — 노트옵션(MIRROR/RANDOM/S-RANDOM/R-RANDOM/ROTATE/ALL-SCRATCH/H-RANDOM) · 하이스피드 고정(FLOATING/CONSTANT 그린넘버) · 판정 오프셋 + **오토 캘리브레이션** · JUDGE WIDTH · TOTAL · lift · lane cover · 스크래치 side/auto.
-- **곡선택(GUI)** — **검색(`/` 제목·아티스트 부분일치) · 정렬(`F3` 제목/아티스트/레벨/클리어) · 클릭 가능한 하단 네비 버튼** · 다중 폴더 라이브러리(여러 폴더 병합) · 난이도표 네비(키보드+마우스) · 커버(`#STAGEFILE`/`#BANNER`) · KEY/레벨 배지 · 클리어램프 LED · **노트 밀도 그래프**(PEAK/AVG/END) · 로컬 기록 인라인 + 상세 모달.
-- **데이터 주도** — 모드/스킨(RON)/키맵(RON)/플레이옵션(RON)/**UI 테마(RON)**/**라이브러리 폴더(RON)**/난이도표(RON). 설정 탭 UI(**NETWORK 탭**: 서버 URL/플레이어 ID 인앱 텍스트 편집·영속·커밋 시 ScoreServer 재구성) · 통합 키 설정(파일+인앱 에디터) · 영속(`~/.config/rbms/`, Windows는 `%USERPROFILE%\.config\rbms`, 파싱 실패 시 `.ron.bak` 백업).
-- **그 외** — autoplay · 리플레이 저장/재생(시드·옵션 복원) · 스코어 랭크 그래프(IIDX 9분법) · 리플레이 분석 모드 · 난이도표 인앱 관리(다중) · DEBUG 오버레이 · IR 슈퍼셋 스코어 인터페이스(클라, **lntype은 차트 `#LNMODE`에서 유도**).
+</div>
 
-## 남은 일
+R-BMS reimplements the core PLAY loop of [beatoraja](https://github.com/exch-bms2/beatoraja) in Rust. Judgment windows, gauges and TOTAL scaling are cross-checked against the beatoraja source, the play clock is the number of audio samples actually played, and every mode, skin, key map and setting is data, not code. It is a single native binary with no JVM and no runtime dependencies.
 
-- [x] **곡선택 미리듣기(하이브리드)** — 곡 포커스 시 `#PREVIEW` 있으면 그 파일, 없으면 곡을 **autoplay로 미리듣기**(백그라운드 코디네이터 스레드: 파싱→키음 스케줄→전체 키음 병렬 디코드, 취소가능·위상연속 루프). 실기 가청 1회만 사용자 몫 → [docs/history/2026-06-07-select-autoplay-preview.md](docs/history/2026-06-07-select-autoplay-preview.md).
-- [x] **첫 실행/온보딩 UI** — 무인자 GUI 진입(usage+exit 제거)·**초기 스캔 백그라운드화**(창 즉시 표시, SCANNING+곡수 카운트)·첫 실행 빈 곡선택 온보딩 CTA·Esc-중-스캔 취소. → [docs/history/2026-06-07-first-launch-onboarding.md](docs/history/2026-06-07-first-launch-onboarding.md).
-- [ ] **`.app`/`.dmg` 패키징 + macOS 공증(notarize)** — 터미널 없는 배포 패키징(`release.yml` 측, 무인자 진입+서명) → 후속.
-- [ ] **데이터화 마무리** — 메뉴/결과 **색은 `theme.ron`으로 완료**, **패널 위치/레이아웃**의 데이터화는 남음. 마우스 스테퍼 UX → [docs/roadmap.md](docs/roadmap.md).
-- [ ] **백엔드 서버**(Bun + Hono + Drizzle, IR-슈퍼셋) → 라이벌 · 리더보드(타인 리플레이) · 설정 동기화 · ranked 무결성.
-- [ ] **웹 FE** — 검색 · 리더보드 · 플레이어 페이지 · 리플레이 뷰어.
-- [ ] **배포** — 원격(`B-HS/R-BMS`)·`dev` 푸시·`LICENSE`(루트 GPL-3.0 verbatim)·CI(3-OS 매트릭스 그린) 완료. 남은 것: `prod` 브랜치 + 첫 릴리스(`v0.1.0` 태그, 사용자 결정 대기 → [docs/acknowledge/release-branch-strategy.md](docs/acknowledge/release-branch-strategy.md)) · 코드 서명/공증(선택) · `.app`/`.dmg`/인스톨러(선택).
-- [ ] **잔여 한계** — 윈도우 리사이즈 리플로우 없음 · BGA 비디오(mpg) 미지원 · HCN 연속 게이지/CN 조기 릴리스·스크래치 BSS(Phase 7) · 게이지 5K/PMS 변종 · 폰트 글리프 아틀라스(P3a)/웹폰트(P4) · 스크래치 회전 단순화.
+## Features
 
-## 빌드 & 실행
+- **Play** — 5K / 7K / 9K (pop'n) / 10K / 14K auto-detected from the chart, normal and long notes with LN / CN / HCN, mines, BGA images, key beams and hit bombs
+- **Judgment** — beatoraja `JudgeProperty` windows per mode, `#RANK` / `#DEFEXRANK`, judge offset with one-play auto-calibration, judge width, FAST / SLOW, empty POOR handled like beatoraja
+- **Gauges** — ASSISTED EASY / EASY / NORMAL / HARD / EX-HARD / HAZARD with TOTAL scaling, clear lamps, DJ LEVEL and EX score
+- **Options** — MIRROR / RANDOM / S-RANDOM / R-RANDOM / H-RANDOM / ALL-SCRATCH / ROTATE (seeded, DP sides independent), hi-speed with constant-speed mode and green number, lift, lane cover, scratch side and auto-scratch
+- **Song select** — recursive library scan, folders and difficulty tables (`data.json`), search and sort, `#PREVIEW` or autoplay preview, cover art, note density graph, local records with replay playback
+- **Result** — judge counts, FAST / SLOW, max combo, gauge, clear lamp, rank graph and delta against your best
+- **Replays** — saved per play, replayable with the same seed and options, analysis mode with seek, speed and per-note timing
+- **Skins and themes** — play field and HUD from a RON skin, UI chrome colours from a RON theme, any TTF/OTF font with full Unicode fallback
+- **Input** — every lane and control key rebindable in-app, conflict detection
+- **IR** — optional score submission to a custom server (`--server`, `--player`)
+- **Debug** — on-screen overlay with FPS, memory, audio clock and judge state
 
-```bash
+## Build
+
+Requires Rust 1.95 or newer. Binaries are not published yet.
+
+```sh
 cargo build --release -p rbms-player
-BIN=./target/release/rbms-player
-
-$BIN "<곡 폴더>"                  # GUI 곡선택 (↑↓ 이동, Enter 열기, / 검색, F3 정렬, O 폴더관리, T 난이도표, Tab 설정, Esc 뒤로 — 하단 버튼 클릭도 가능)
-$BIN "<차트.bme>" [--interactive] # 단일 차트 (기본 autoplay)
-$BIN --replay <file.ron>          # 리플레이 재생
+./target/release/rbms-player <songs folder>      # song select
+./target/release/rbms-player <chart.bme>         # play one chart (autoplay)
+./target/release/rbms-player <chart.bme> --interactive
 ```
 
-- **레인 키**(기본 beatoraja Z열): 7K = `Z S X D C F V` + LShift(스크), 5K/9K/14K는 모드별 프리셋(차트 자동감지). 조작: ↑↓ 속도 · →← 커버 · `]` `[` lift. 모든 키는 **설정 → KEY CONFIG**에서 재바인딩.
-- **CLI 옵션**: `--interactive|--auto --sc-left --sc-auto --lift F --hispeed F --gauge X --keys ... --skin file.ron --font file.ttf --table URL --keyconfig path.ron --replay file.ron --server URL --player ID`.
-- **테마**: `~/.config/rbms/theme.ron`(첫 실행 시 자동 생성, 편집 가능) — UI 색 커스터마이즈. → [docs/theme.md](docs/theme.md).
-- **테스트**: `cargo test --workspace` (~887개, 엣지케이스 중심). 설계 문서는 [docs/](docs/) (architecture · theme · roadmap).
+Settings, key config, difficulty tables, local scores and replays live in `~/.config/rbms/` (`%USERPROFILE%\.config\rbms\` on Windows) and are created on first run. Run without arguments to open the last library.
 
-## 아키텍처 (의존 위→아래)
+Options: `--interactive` `--auto` `--hispeed F` `--gauge NAME` `--lift F` `--sc-left` `--sc-auto` `--keys Z,S,X,...` `--skin file.ron` `--font file.ttf` `--table URL` `--keyconfig path.ron` `--replay file.ron` `--server URL` `--player ID`.
 
+## Controls
+
+| Key | Song select | Play |
+| --- | --- | --- |
+| ↑ ↓ | Move | Hi-speed |
+| → / Enter | Open / play | — |
+| ← / Esc | Back / quit | Leave (result if no notes remain) |
+| Tab | Settings | — |
+| ← → (play) | — | Lane cover |
+| [ ] | — | Lift |
+| O / T / R / `/` / F3 | Folders / tables / records / search / sort | — |
+
+Default lanes follow the beatoraja keyboard layout: 7K `Z S X D C F V` + `LShift` (scratch), 9K `Z S X D C F V G B`, 14K adds `M K , L . ; /` + `RShift`. Everything is remappable in Settings → KEY CONFIG or `~/.config/rbms/keyconfig.ron`.
+
+## Development
+
+```sh
+cargo test --workspace
+cargo clippy --workspace --all-targets
+cargo run -p rbms-render --example render_select   # headless render to PPM
 ```
-apps/rbms-player → rbms-play → {rbms-render, rbms-audio, rbms-ir, rbms-judge, rbms-chart, rbms-table} → rbms-parser → rbms-model
-```
 
-| 크레이트 | 역할 |
-|---|---|
-| rbms-model | 순수 타입(Mode·Note·TimeLine·Model) |
-| rbms-parser | BMS lexical(base36/62·Shift-JIS·`#RANDOM`·MD5/SHA-256) |
-| rbms-chart | detect_mode·타이밍 적분·scroll·shuffle(노트옵션)·note_density |
-| rbms-judge | 판정 윈도우·매칭·콤보·EX·게이지·클리어램프·LN |
-| rbms-audio | symphonia 디코드 + cpal RT 믹서(샘플 클럭) |
-| rbms-render | Renderer trait + CPU 백엔드 + skin·playfield·hud·result·select·key-bomb·다국어 font(cosmic-text) |
-| rbms-ir | IR 슈퍼셋 DTO·ScoreServer trait·HTTP/Null 클라 |
-| rbms-table | 난이도표(BMS table) fetch·md5 매칭·level 그룹핑 |
-| rbms-play | 통합 드라이버(스케줄러·autoplay·입력·판정·키빔·키봄 와이어링) |
+Workspace crates, bottom up: `rbms-model` (chart types) → `rbms-parser` (BMS lexer, `#RANDOM` / `#SWITCH`, MD5 + SHA-256) → `rbms-chart` (timing, lanes, shuffle, scroll) → `rbms-judge` (windows, matcher, gauges) → `rbms-audio` (cpal + symphonia, real-time mixer) / `rbms-render` (`Renderer` trait, CPU reference canvas, skins, fonts) / `rbms-ir` / `rbms-table` → `rbms-play` (session driver) → `apps/rbms-player` (winit + wgpu). CI builds a macOS universal binary and Windows on every push to `dev`.
 
-## 라이선스
+Architecture, the beatoraja parity ledger, decisions and the improvement plan live in [docs/](docs/README.md) (Korean). Start with [docs/PROCESS.md](docs/PROCESS.md).
 
-**GPL-3.0-or-later** (beatoraja 포팅 파생물 — copyleft). 번들 폰트 Inter는 SIL OFL 1.1.
-</content>
+## License
+
+[GPL-3.0-or-later](LICENSE). beatoraja is GPL-3.0; this project is a clean-room port of its play logic to Rust.

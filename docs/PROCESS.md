@@ -2,9 +2,46 @@
 
 > 새 세션은 **이 문서부터** 읽는다. 현재 상태·아키텍처·실행법·할 일의 SSOT. (ai-process.md 원칙 1·14)
 > 베이스 룰: `~/.claude/CLAUDE.md` + convention. Rust 프로젝트 → TS 전용 규칙(arrow 등) 비적용, **공통 원칙**(주석 금지·설명은 docs/·정확 네이밍·근본 해결·공식문서 우선·검증 후 진행)은 그대로.
-> 위치: `/Users/hyunseokbyun/rbms`. 빌드 `cargo build`, 테스트 `cargo test --workspace`(현재 **889 통과·0 실패·0 경고**). 실행은 §5(`./start.sh`).
+> 위치: `/Users/gkn/R-BMS`. 빌드 `cargo build`, 테스트 `cargo test --workspace`(현재 **889 통과·0 실패·0 경고**, Phase A 반영 전 기준 — Phase A 갈래별 최종 수치는 `docs/history/2026-09-09-phase-a-accuracy-hotfix.md` 참조). 실행은 §5(`./start.sh`).
 > git: **dev(작업)/prod(배포) 브랜치 모델**(CI는 dev, 릴리스는 prod → `docs/ci-release.md`). **커밋 메시지에 co-author(Claude) 넣지 않음**(사용자 명시 지시), 작성자 `Hyunseok Byun <gumyoincirno@gmail.com>`. `target`·`Cargo.lock`·라이브러리 차트 커밋 금지(.gitignore).
 > 다음 할 일(로드맵)은 **`ROADMAP.md`**, 백엔드 설계는 **`docs/backend/`**, 배포/CI는 **`docs/ci-release.md`**.
+
+---
+
+## 현재 작업 — 전면 고도화 감사·계획 수립 (2026-09-09~)
+
+> 사용자 지시: 프로젝트를 정확히 읽고 고도화 계획 수립. 관점 = (1) 스킨 완전 커스터마이징 (2) IIDX(~34) 기능 전수 확인 (3) beatoraja 판정 동일성 + 설정 노출 (4) crate 분리·역할 (5) 파일 길이·Rust 관용성 (6) 메모리 누수 (7) UI/UX(프리징·미리듣기·디버그·시작 전 옵션·target 그래프) (8) 성능 (9) 시작 전 설정 vs 인게임 옵션.
+> 운용: 위임은 **Workflow만**(Agent 단독 호출 금지, 사용자 지시 2026-09-09). 리서치·구현·적대 검증 = Opus, 기계적 수정(clippy/문서 경로/테스트 분리) = Sonnet, 검토·종합·핵심 판단 = Fable 직접. 병렬 가능한 것은 항상 병렬. 산출 = 계획 문서 `docs/plan/2026-09-09-enhancement-plan.md`.
+
+- [x] a. 인라인 정찰 — PROCESS.md·크레이트 맵·LOC 핫스팟·beatoraja 소스 배치(play/skin/json·lr2·lua 로더)·현 SkinConfig 스키마 확인
+- [x] b. 리서치 워크플로 실행(`wf_1911d201-312`) — 9관점 보고서 + 관점별 검증 9편 완료(반박 2건: 디버그 오버레이 부재·LN unwrap 패닉), IIDX 30~34 웹 조사 완료. 완전성 비평 대기
+- [x] c. Fable 검토 — 전 보고서·검증 통독, 직접 코드 확인 6건(見逃し POOR 슬롯·윈도우 표·오디오 클럭·FLOATING·그린넘버 LIFT·assist 플래그). 검토 노트 `scratchpad/review-notes.md`
+- [x] d. 계획 문서 확정 — `docs/plan/2026-09-09-enhancement-plan.md`(관점별 갭 표·Phase A~G·결정 12건·비평 반영·문서 정정 목록·한계). 근거 보고서 24편 `docs/plan/research-2026-09-09/`. 후속 조사 4건(IR·커스텀 판정 정책·Renderer diff·cpal 실측) 병합, `cargo test` baseline 889/0
+- [x] e. 사용자 결정 12건 전부 추천안 채택 → `docs/acknowledge/2026-09-09-enhancement-decisions.md`
+
+### Phase A — 정확성 핫픽스 (2026-09-09 착수, Workflow `rbms-phase-a`)
+
+> 파일 소유권 분리로 병렬: 1차 core(model/parser/chart/judge/play)·audio·ir·render 4갈래 동시 → 2차 app 통합 → 갈래별 적대 리뷰 5개 병렬 → 수정 → 문서 정정(Sonnet) → Fable 최종 검증(`cargo test --workspace` + clippy). 항목 정의는 계획 §2 Phase A.
+
+- [x] A-core: J1+J2+J3, J4·J5·J7·J8, J10·J11, J12-1, J13·J15·J16·J18·J19, J14 `#DEFEXRANK`, C7 NaN 소절 거부, `#SWITCH/#CASE/#SKIP/#DEF`(결정 10) — 리뷰 반영까지 전부 완료. 보류 2건: J17/J20/J21/J23 상세·J24(계획대로 Phase D 범위), 지뢰 damage 스케일(1차 출처 미확인, 현 값 유지)
+- [x] A-audio: A5 기본 gain 하향(0.5, beatoraja 정확 일치), A7 스트림 사망 감지, P7 카운터·scratch 선할당, A13 채널 키 피치, 클럭 페어 seqlock화 — 전부 완료. 보류 1건: A6 start/stop 램프는 계획대로 Phase B 범위
+- [x] A-ir: `http.rs` 타임아웃 강등 제거, HTTP mock 테스트, degraded 경로·8엔드포인트 URL 검증 — 완료. 보류 1건: URL percent-encoding은 `url` 크레이트 신규 의존 필요해 문서화만(코드 미변경)
+- [x] A-render: P1 폰트 캐시 상한, K9 결과 팔레트 스킨화(후방호환 API), 골든 하네스 격자·감도 강화 — 완료. 보류 1건: RSS 상한 계측 하네스는 계획 문서(소유 밖) 반영만 남음
+- [x] A-app: A3 키음/판정 시각 분리, IR 제출 게이트(autoplay/replay/judge rate>100), assist 플래그, U3 Root Esc, U4 조작 저장, P6 cancel, 원자적 저장 + `rule_version`, U6 URL 중복, P3 디바운스, 스트림 사망 폴백, 그린넘버 매직상수 통합 — 완료. 보류 1건: 어시스트 램프 강등(`LightAssistEasy`)은 `rbms_judge::ClearType` 변형 신설이 필요해 Phase D 이월(대신 `best_clear_for_md5`가 어시스트 기록을 보수적으로 제외)
+- [x] 적대 리뷰 5갈래 → 수정 (core/audio/ir/render/app 전 갈래 반영 완료, `scratchpad/phase-a/review-*.md`·`fix-*.md`)
+- [x] 문서 정정(계획 §4) + divergences.md J1~J26 섹션
+- [x] Fable 최종 검증(2026-09-09 실측): `cargo test --workspace` **1,060 통과 · 0 실패 · 2 ignored**(착수 전 889), `cargo clippy --workspace` 경고 51(기준 동일), `--all-targets` 94(기준 101). 에이전트가 추가한 `//` 주석 약 210줄은 Sonnet 워크플로로 제거·history 문서로 이동. 실기 가청 1회(사용자)는 미실시 — history §5 절차 참조
+
+### Phase W — web/ Next.js 단독 서버 + 웹 FE (2026-09-09 착수, Phase A 와 병렬)
+
+> 사용자 지시: 백엔드를 Next.js 단독 서버로 이 레포 `web/` 에, Vercel `bms.hyuns.uk`. better-auth + MySQL(.env 추후) + Drizzle, 전부 최신, TanStack prefetch + Next 캐시/revalidate, design.md 토큰 + shadcn 목록화. 결정 → `docs/acknowledge/2026-09-09-enhancement-decisions.md` §웹.
+> 워크플로: W0 설계(`docs/web/architecture.md`·`tasks.md`·`components.md`) ∥ 스캐폴드(web/ 생성·토큰·providers·drizzle·better-auth·health) → Fable 검토 → W1 api-core ∥ web-ui(mock) → W2 api-ext ∥ ui 통합 → 리뷰·수정 → 검증(typecheck·lint·test·build) → 문서.
+
+- [x] W0 설계 문서(`docs/web/{architecture,components,tasks}.md`) + 스캐폴드(`web/`, Next 16.3.4·React 19.2.8·Tailwind 4.3.3·shadcn 4.21·Drizzle 0.45·better-auth 1.7.3·TanStack 5.102, typecheck/lint/test/build 통과). 미결 6건 결정 → decisions 문서
+- [ ] W1 API 코어(M1: health/version·auth·charts·scores·ranking/best·players·rivals) + 웹 UI 셸/페이지(mock)
+- [ ] W2 API 확장(replays·settings·courses·tables·FE envelope) + UI 통합(prefetch/hydration/revalidate)
+- [ ] 리뷰·수정 → 검증(typecheck·lint·test·build) → rbms-player `--server` 왕복 확인
+- [ ] 문서(`docs/web/*`, backend 문서 Next.js 로 정정) + Vercel 배포 설정(.env 는 사용자 제공 후)
 
 ---
 
@@ -75,7 +112,7 @@ beatoraja(Java/libGDX) **코어 PLAY**를 Rust로 재구현. **완전 플레이 
 ## 1. 확정 결정
 
 - **그래픽**: `wgpu 29 + winit 0.30`, 네이티브 인스턴스드 쿼드(`fill_rect`=1인스턴스). 렌더는 `Renderer` trait 추상화(CPU 백엔드 `CpuCanvas`도 존재 → 테스트/예제). 레퍼런스 좌표공간 **1280×720(16:9)** 고정, GPU 유니폼이 NDC로 매핑.
-- **오디오**: `cpal 0.17 + symphonia 0.5 + 커스텀 RT 믹서`. **마스터 클럭 = 재생된 샘플 수**(vsync 아님) — beatoraja 판정 vsync 양자화를 구조적 해결.
+- **오디오**: `cpal 0.17 + symphonia 0.5 + 커스텀 RT 믹서`. **마스터 클럭 = 재생된 샘플 수**(vsync 아님) — beatoraja의 vsync 양자화 자체는 피했으나, 클럭이 **오디오 콜백 주기(실측 512프레임/10.667ms 고정)로 양자화**되는 점은 남아 있다(판정 타임스탬프 오차 평균 5.33ms·최대 10.67ms). 근본 해결은 Phase B에서 마지막 콜백 시각 기준 연속 보간으로 처리 예정 — `docs/plan/2026-09-09-enhancement-plan.md` §1.2 A1.
 - **시간 전역 µs(i64)**. 차트 해시 = raw 바이트 MD5+SHA-256(byte-exact).
 - **모드/스킨/키맵/설정은 데이터 주도**. 모드=`Mode` 구조체, 스킨=`SkinConfig`(RON), 키=`KeyConfig`(RON), 플레이옵션=`PlaySettings`(RON).
 - **키맵 기본 = beatoraja Z열**(사용자 결정). 차트 모드 자동감지로 프리셋 선택, CLI/인앱 오버라이드.
@@ -116,7 +153,7 @@ crates/
 **ROADMAP 클라이언트 9종(2026-05-31 완료):** 폴더 SCANNING 로딩·**스코어 랭크 그래프(IIDX 9분법 `dj_rank`+랭크바, 결과+셀렉트)**·**점수 ΔEX 비교(직전/베스트)**·**리플레이 분석모드(재생바·일시정지·배속·재시뮬 시크·노트별 ms-off)**·**데이터 주도 HUD 스킨**(판정 팔레트/라벨/게이지 임계·색/요소위치 RON화)·**폰트 P3**(무할당 중첩 캐시·말줄임)·**노트옵션 ALL-SCRATCH/H-RANDOM**(시간임계 40/125ms)·**그린넘버 표시**·**CN/HCN(`#LNMODE`)**·**듀얼필드 14K(P1좌·P2우)**. SCORE GRAPH·REPLAY ANALYSIS 설정 토글. → `docs/history/2026-05-31-roadmap-client-features.md`.
 **UI(IIDX/LR2 지향 재설계, 2026-05-31):** 폴더 영속(`songs_folder`)·폴더 스캔 백그라운드 스레드+애니메이션 LOADING·노트 상단 클리핑(`[top_y,judge_y]`, 프레임 상단서 흘러나옴)·플레이 IIDX 레이아웃(좌 정보, 중앙 **라이브 스코어 그래프**, 우 판정카운트/BGA)·결과 IIDX 레이아웃(거대 DJ LEVEL+스코어 리포트, PGREAT 핫핑크)·곡선택 행별 클리어램프 LED·**곡선택 상세 메타 고도화**(부제/아티스트/장르·제작자 + 2열 스탯그리드: BPM범위·DIFFICULTY명·NOTES(+LN)·JUDGE(#RANK명+%)·LENGTH·TOTAL; 포커스 곡만 lazy `to_model`로 노트수/길이/BPM범위 산출, `#MAKER` 파싱, bms-rs 메타 모델 참조). DP(14K)는 BGA 비키도록 좌측 앵커. 레퍼런스 `docs/reference/ui/`·스펙 `docs/reference/ui-design.md`. → `docs/history/2026-05-31-ui-redesign-iidx.md`.
 **곡선택 전면 재설계(beatoraja modern chic, 2026-05-31):** 렌더링을 **`rbms-render::render_select`로 추출**(`SelectView`/`SelectHot`, `CpuCanvas` 헤드리스 PNG 검증 가능, `main.rs` 인라인 제거) — 행 KEY/레벨 배지·클리어램프 LED(좌바+우세로바)·포커스 연출(시안테두리+노랑타이틀)·중앙포커스 스크롤, 상세 **커버(`#STAGEFILE`→`#BANNER`, 단일 BGA슬롯 쿼드뒤·포커스당1회 디코드)**+제목블록(2줄 래핑)+2열 스탯그리드+**노트 밀도 히스토그램**(`note_density`, 서브픽셀·긴곡 오버플로없음·PEAK/AVG/END notes/sec)+기록(베스트바·DJ랭크바·최근행 EX+랭크+추세)+기록모달. `main.rs` `build_select_view` 조립 + `SelectKey` 캐시(매프레임 재할당 방지)+hot 매핑. 파서 `#BANNER`/`#PREVIEW` 추가(`#PREVIEW`는 데이터만, 재생 후속). **2라운드 적대적 멀티에이전트 리뷰**(1R 16건 반영·2R 0건). → `docs/history/2026-05-31-select-redesign.md`, 스펙 `docs/reference/ui-select-redesign.md`, 타깃 `…/ui/provided/06-beatoraja-select-target.png`.
-**곡선택 후속(2026-05-31): 스탯그리드 잘림 수정·#PREVIEW·KEY BOMB.** (1) 상세 스탯그리드 **2열×3행→3열×2행** 압축(하단 LENGTH/TOTAL이 DENSITY 구분선에 잘리던 것 해결). (2) **`#PREVIEW` 프리뷰 재생 (TODO — 실재생 미동작)** — 포커스 settle(디바운스 20프레임) 시 `#PREVIEW` 디코드+루프(경계 재트리거, mixer `play(key)`가 동일키 먼저 stop하므로 선스케줄 대신 자연종료 후 재발화) 로직·select 전용 `AudioEngine`(플레이 엔진과 분리, `load()` 진입부·select 이탈 시 정지)·`AudioEngine::sample_duration_us`·**DISPLAY 탭 PREVIEW 토글**(`PlaySettings.preview`)까지 배선했으나 **포커스해도 소리 안 남**(추후 디버깅, 코드 유지). (3) **KEY BOMB** — 노트 히트(judge≤3, 空POOR/miss 제외) 시 판정선 판정색 확장+소멸 버스트. `Player.bomb`(press/release/autoplay 전 경로 기록)·`rbms_render::render_key_bomb`·**`SkinConfig` bomb_enabled/height/duration_ms 데이터주도**(기존 RON serde default 호환). 적대적 리뷰 1건(LOW: 리플레이 직접실행 시 cpal 스트림 1프레임 공존) 근본수정. → `docs/history/2026-05-31-select-redesign.md`.
+**곡선택 후속(2026-05-31): 스탯그리드 잘림 수정·#PREVIEW·KEY BOMB.** (1) 상세 스탯그리드 **2열×3행→3열×2행** 압축(하단 LENGTH/TOTAL이 DENSITY 구분선에 잘리던 것 해결). (2) **`#PREVIEW` 프리뷰 재생 (TODO — 실재생 미동작, 2026-06-07 해소)** — 포커스 settle(디바운스 20프레임) 시 `#PREVIEW` 디코드+루프(경계 재트리거, mixer `play(key)`가 동일키 먼저 stop하므로 선스케줄 대신 자연종료 후 재발화) 로직·select 전용 `AudioEngine`(플레이 엔진과 분리, `load()` 진입부·select 이탈 시 정지)·`AudioEngine::sample_duration_us`·**DISPLAY 탭 PREVIEW 토글**(`PlaySettings.preview`)까지 배선했으나 **포커스해도 소리 안 남**(추후 디버깅, 코드 유지). (3) **KEY BOMB** — 노트 히트(judge≤3, 空POOR/miss 제외) 시 판정선 판정색 확장+소멸 버스트. `Player.bomb`(press/release/autoplay 전 경로 기록)·`rbms_render::render_key_bomb`·**`SkinConfig` bomb_enabled/height/duration_ms 데이터주도**(기존 RON serde default 호환). 적대적 리뷰 1건(LOW: 리플레이 직접실행 시 cpal 스트림 1프레임 공존) 근본수정. → `docs/history/2026-05-31-select-redesign.md`.
 **CI/배포:** GitHub Actions(`.github/workflows/ci.yml`·`release.yml`) — 자동 버전·macOS 유니버설·Windows 빌드·릴리스(→`docs/ci-release.md`). 실제 동작은 GitHub 원격 push 시.
 
 **2026-06-03 세션:** IR `lntype` 차트 유도(`ir_map::ir_lntype`, 0=LN/1=CN/2=HCN; 기존 하드코딩 제거) · **`#PREVIEW` 계측**(6 silent 분기 `config.debug` 로그)+`samples/preview-demo` 픽스처+dead_code 제거(가청 확인만 수동 잔여) · **CN/HCN 2-판정**(head@press + end@release, `Cn`/`Hcn` 게이트, 분모 2, 픽스처 5종; LN/Normal byte 불변) · **NETWORK 설정 탭**(SERVER URL/PLAYER ID 인앱 편집·`PlaySettings` 영속·`build_server` 재구성) · **Windows 설정 경로**(`config_dir` HOME→USERPROFILE). + Phase 0 위생(LICENSE·테스트수 정정·docs 커밋·dev 푸시) · 릴리스/백엔드 결정 기록(보류). → `docs/history/2026-06-03-session.md`.
@@ -150,7 +187,7 @@ $BIN --replay ~/.config/rbms/replays/<f>.ron  # 리플레이 재생
 
 - 판정 윈도우 = beatoraja `JudgeProperty.SEVENKEYS`(PG±20/GR±60/GD±150/BD-280~220/MS-150~500 µs @judgerank100) **정확 일치**.
 - `#RANK 0~4 → judgerank [25,50,75,100,125]%` = `JudgeWindowRule.NORMAL`과 일치. **#RANK 2(NORMAL)=75%=PGREAT ±15ms**는 beatoraja와 동일.
-- 게이지/TOTAL = `deltas * total/notes`(그루브) 일치. 자동미스는 BAD 늦은경계 이후.
+- 게이지/TOTAL = `deltas * total/notes`(그루브) 일치. 자동미스는 BAD 늦은경계 이후. **예외(2026-09-09 감사, Phase A에서 수정 완료)**: 見逃し POOR(스윕 미스)가 게이지 MS 슬롯(idx5)으로 잘못 들어가던 결함(J1)이 있었다 — 코드 4(PR)가 아니라 코드 5(MS)로 처리돼 게이지 페널티가 실제보다 컸다. `crates/rbms-judge/src/matcher.rs`에서 슬롯을 정정했다 → `docs/acknowledge/beatoraja-divergences.md` "판정 윈도우·게이지 발산" 섹션.
 - 결론: "빡센" 건 NORMAL 윈도우가 원래 타이트 + 입력/표시 지연 미보정. → **JUDGE OFFSET** 수동 또는 **AUTO CAL**(한 곡 플레이로 자동 보정).
 
 ## 7. 알려진 한계 / 다음 후보
@@ -159,6 +196,7 @@ $BIN --replay ~/.config/rbms/replays/<f>.ron  # 리플레이 재생
 - ~~14K 단일필드~~ **듀얼필드 해결**(`dual_field`, P1좌·P2우·바깥 스크래치, 필드별 judge라인/구분선/게이지 1개). 비활성화(`dual_field:false`) 시 레거시 단일필드.
 - ~~ALL-SCRATCH/H-RANDOM 미구현~~ **해결**(시간임계 40/125ms). ~~green-number 미반영~~ **표시·반영**(HUD). ~~CN/HCN 미구분~~ **`#LNMODE`→`LnKind` 구분 + 종단 2-판정 차별화 적용**(HCN 연속게이지·CN deferral·스크래치 BSS는 Phase 7). 스크래치 회전(2키 교대) 단순화는 잔존.
 - 윈도우 리사이즈 UI 리플로우 없음(논리 1280×720 고정). BGA 비디오(mpg) 미지원. 게이지 5K/PMS 변종·judgerank 커스텀 일부 미반영. 난이도표 추가 fetch는 동기(1개씩).
+- **미구현(2026-09-09 감사, `docs/plan/2026-09-09-enhancement-plan.md` 참조)**: 곡DB(매 실행 전량 스캔·증분 없음) · 컨트롤러/MIDI/마우스 스크래치(의존성 0) · 코스/단위 · 연습 모드 · 곡선택 난이도·모드 필터/즐겨찾기/랜덤 선택 · 볼륨 3분리(system/key/bg, `#VOLWAV` 미반영, 현재 마스터 게인 1계통뿐).
 - **IR 백엔드 = 전체 설계 완료(`docs/backend/`, 문서 단계)·구현 후속**. ~~클라 슈퍼셋 확장 필요~~ **클라 DTO 슈퍼셋 확장 완료**(§4 IR). 서버 미구현이라 신규 메서드(settings/replay-dl/auth/course)는 호출 시 `Unsupported`. `PlayOptions.lntype`에 실제 LN모드 전파는 후속(모델에 lnmode 미보유).
 - ~~UI 곡선택 재설계~~·~~KEY BOMB~~ **완료**(§4). ~~#PREVIEW 파일만~~ **곡선택 하이브리드 미리듣기 완료**(2026-06-07): `#PREVIEW` 있으면 파일, 없으면 곡 **autoplay 미리듣기**(백그라운드 코디네이터·취소가능·위상연속 루프). 실기 가청 1회만 사용자 몫 → `docs/history/2026-06-07-select-autoplay-preview.md`. 남은 UI 후속: **스킨 데이터화**(결과/메뉴 패널까지 — 곡선택 추출·KEY BOMB 데이터화로 진척). ~~`.dmg` 첫 실행 UI~~ **첫 실행/온보딩 런타임 UI 완료**(2026-06-07: 무인자 진입·백그라운드 스캔+곡수·온보딩 CTA·Esc 취소 → `docs/history/2026-06-07-first-launch-onboarding.md`); 남은 건 **`.app`/`.dmg` 패키징·무인자 진입·macOS 공증**(release.yml 측).
 - ~~Windows 설정 경로~~ **해결**(`config_dir` HOME→USERPROFILE, → `docs/reference/windows-compat.md`). ~~CN/HCN 판정 차별화~~ **종단 2-판정 적용**(HCN 연속게이지·CN deferral·BSS는 Phase 7). 남은: **F5 결과/메뉴 패널 위치 RON화**(현재 HUD 표면만 데이터화), **P3a 글리프 아틀라스·P4 웹폰트**, **FE 프로젝트**(별 저장소·MIT) → `ROADMAP.md`. 적대적 리뷰 보류 차이 → `docs/acknowledge/beatoraja-divergences.md`.
@@ -168,6 +206,7 @@ $BIN --replay ~/.config/rbms/replays/<f>.ron  # 리플레이 재생
 ## 8. docs 맵
 
 - `docs/reference/` — mechanics(beatoraja 메커닉)·rust-stack·architecture·wgpu29-winit030-api·ir-api(서버계약)·_appendix-raw·**cn-hcn-judgment**(CN/HCN 판정 beatoraja 대조 구현 스펙·후속)·**windows-compat**(Windows/크로스플랫폼 현황: CI 보장·USERPROFILE 수정·런타임 검증 잔여)·**ui-design**(IIDX/LR2/beatoraja UI 레이아웃 스펙)·**ui-select-redesign**(곡선택 정밀 스펙: render_select 추출·밀도 포팅·레이아웃)·**ui/**(레퍼런스 스크린샷: provided 6 + fetched 18 + README).
+- `docs/plan/` — **2026-09-09 전면 고도화 계획**: `2026-09-09-enhancement-plan.md`(관점별 갭 표·판정 발산 J1~J26·Phase A~G 실행계획·결정 12건·문서 정정 목록, 이 문서의 정본) + `research-2026-09-09/`(근거 보고서·검증·후속조사·비평 24편, 원 리서치 산출물 보존용).
 - `docs/acknowledge/` — decisions(확정결정)·beatoraja-divergences(보류차이)·empty-poor-local-scores(空POOR처리·로컬기록 스키마).
 - `docs/font-cjk-support.md` — 다국어 폰트 지원(cosmic-text 결정·beatoraja 폰트 파악·P1/P2 완료·P3/P4 후속).
 - `docs/backend/` — **백엔드 IR-슈퍼셋 서버** 설계: README·PRD·api-spec(전 엔드포인트)·data-model(Drizzle)·endpoint-tasks·compatibility(LR2IR/beatoraja 매핑+출처)·**contract-freeze**(Phase 4 게이트: 클라 경로 대조·계약 동결·M0 단계). (Hono/Bun/Drizzle)
@@ -189,6 +228,7 @@ $BIN --replay ~/.config/rbms/replays/<f>.ron  # 리플레이 재생
   - `2026-06-03-session` — 위생(LICENSE·테스트수 정정·docs 커밋·dev 푸시)·IR lntype 차트 유도·#PREVIEW 계측+픽스처·CN/HCN 2-판정·NETWORK 설정 탭·Windows 설정 경로(HOME→USERPROFILE). 릴리스/백엔드 결정 기록(보류).
   - `2026-06-07-select-autoplay-preview` — 곡선택 **하이브리드 미리듣기**(#PREVIEW 파일 or 곡 autoplay): 백그라운드 코디네이터 스레드(파싱→autoplay 키음 스케줄→전체 키음 병렬 디코드, 취소가능)·위상연속 루프(+2초 tail)·`load()`와 디코드 헬퍼 공통화. 2R 적대적 리뷰(1R 8건·2R 1건 반영). 헤드리스 통합테스트 추가(889통과).
   - `2026-06-07-first-launch-onboarding` — `.dmg` 대비 **첫 실행/온보딩**: 무인자 GUI 진입(usage+exit 제거)·초기 스캔 백그라운드화(SCANNING+곡수 카운트, 창 즉시 표시)·첫 실행 빈 곡선택 온보딩 CTA(`empty_hint`)·Esc-중-스캔 종료 회귀 수정. 집중 적대 리뷰 1건 반영.
+  - `2026-09-09-phase-a-accuracy-hotfix` — Phase A 정확성 핫픽스: 판정 윈도우·게이지 발산 J1~J19+J14(見逃し POOR 슬롯·5K/PMS 윈도우·LN 마진 등, 상세는 `beatoraja-divergences.md`)·오디오 마스터 게인 재조정+seqlock 클럭·IR 타임아웃 강등 제거·폰트 캐시 LRU+골든 하네스 강화·`#SWITCH`계열 결함·앱 통합(IR 제출 게이트·assist 플래그·원자적 저장 등). 갈래별 병렬 구현→적대적 리뷰 1라운드→반영.
 - **새 세션 진입점 = 이 PROCESS.md**(CLAUDE.md가 지정). 별도 글로벌 하네스 메모리는 사용 안 함 — SSOT는 docs/.
 
 ## 9. 작업 규칙(요약)
