@@ -132,7 +132,7 @@ tests/{service,route}/{replay,setting,course,table,fe}.test.ts
 ### 작업
 
 - [x] replays: `POST /api/charts/[hash]/replays`(µs 무손실 · `REPLAY_MAX_BYTES` 초과 413 · score 연결) · `GET /api/replays/[replayId]` · `GET /api/charts/[hash]/replays`. `storageService`(db blob | Vercel Blob 추상화).
-- [x] settings: `GET/PUT /api/players/[playerId]/settings/[name]`(본인 검증 · PUT 은 **204 No Content** — `http.rs:92` 가 그렇게 기대) · 낙관적 잠금(`base_updated_at`) · `GET /api/fe/me/settings`.
+- [x] settings: `GET/PUT /api/players/[playerId]/settings/[name]`(본인 검증 · PUT 은 **200 `{ updated_at }`**(저장된 잠금 스탬프, epoch ms — 2026-09-09 계약 수정, 이전 204 계약은 클라가 하위호환 처리)) · 낙관적 잠금(`base_updated_at`) · `GET /api/fe/me/settings`.
 - [x] rivals: `GET/PUT /api/players/[playerId]/rivals`. scores: `GET /api/players/[playerId]/scores`.
 - [x] courses: `POST /api/courses`(= **결과 제출**, architecture §1-2 주의 1) · `POST /api/courses/meta` · `GET /api/courses/[courseHash]` · `POST /api/courses/[courseHash]/scores` · `GET .../ranking` · `GET .../best`.
 - [x] tables: `GET /api/tables` · `GET /api/tables/[tableId]` · `POST /api/tables`(admin).
@@ -144,7 +144,7 @@ tests/{service,route}/{replay,setting,course,table,fe}.test.ts
 
 - `bun test` 전체 통과. Route Handler 통합 테스트는 `new Request(...)` 직접 호출.
 - 리플레이 왕복: 업로드 → `GET /api/replays/{id}` 의 `events[].t_us` 가 **입력과 바이트 동일**(µs 라운딩 0).
-- settings PUT 이 **204** 이고 본문이 비어 있다(클라 `put_no_content` 계약).
+- settings PUT 이 **200** 이고 본문이 `{ updated_at }` 이다(클라 `put_settings` → `SettingsPutResult`; 204 도 하위호환 허용).
 - `GET /api/courses/{hash}/ranking?limit=` 이 raw 배열, `/api/fe/*` 는 전부 `{success,data,pagination?}`.
 - 낙관적 잠금: 어긋난 `base_updated_at` → 409 + `{conflict:true, server:{...}}`.
 
