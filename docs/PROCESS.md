@@ -52,10 +52,11 @@
 > 실행 순서(파일 충돌 회피): Phase I(클라 GUI 연동) → B(오디오) → C(구조) → D ∥ E1~E2 ∥ F → E3~E6 ∥ G → R(릴리스). 각 Phase = Workflow 1개(구현 Opus max, 파일 소유권 분할 → 적대 리뷰 Opus → 수정 → Fable 게이트 `cargo fmt/test/clippy` + web `bun run verify`) → 갈래별 Conventional Commit → push → CI 확인 → PROCESS/history 갱신.
 
 ### Phase I — 클라 ↔ IR 서버 GUI 연동 (Workflow `rbms-phase-i`)
-- [ ] I-ir: `rbms-ir` DTO 확장(`SubmitResponse` ranked/flags/is_new_best/score_id) + `HttpScoreServer` register/login/me/replay download/settings get·put(낙관적 잠금)/rivals put/course ranking + 에러 변형(401/409/413/429) + mock HTTP 테스트 + `docs/reference/ir-api.md`
-- [ ] I-app: NETWORK 탭 GUI — 계정 상태·EMAIL·PASSWORD(마스킹, 비영속)·LOGIN/REGISTER/LOGOUT(백그라운드, 토큰 영속) · `build_server` 토큰 전달 · 결과 화면 IR 결과(rank/new best/unranked 사유) · 곡선택 IR 랭킹 패널(비동기 캐시·라이벌 행) · 리플레이 자동 업로드 + 랭킹 행에서 다운로드 재생 · 설정 동기화(업로드/다운로드/충돌) · 라이벌 관리
-- [ ] I-web: `/guide` 를 GUI 절차 기준으로 재작성(CLI 제거) + README Web 절 정정
-- [ ] 적대 리뷰(계약 e2e·앱 UX/스레드·컨벤션) → 수정 → 검증 → 커밋·푸시·CI → history 문서
+- [x] I-ir(커밋 `a1987ba`): `rbms-ir` DTO 확장(`SubmitResponse` ranked/flags/is_new_best/score_id) + `HttpScoreServer` register/login/me/replay download/settings get·put(낙관적 잠금)/rivals put/course ranking + 에러 변형(401/409/413/429) + mock HTTP 테스트 + `docs/reference/ir-api.md`
+- [x] I-app(커밋 `6226f0c`): NETWORK 탭 GUI — 계정 상태·EMAIL·PASSWORD(마스킹, 비영속)·LOGIN/REGISTER/LOGOUT(백그라운드, 토큰 영속) · `build_server` 토큰 전달 · 결과 화면 IR 결과(rank/new best/unranked 사유) · 곡선택 IR 랭킹 패널(비동기 캐시·라이벌 행) · 리플레이 자동 업로드 + 랭킹 행에서 다운로드 재생 · 설정 동기화(업로드/다운로드/충돌) · 라이벌 관리
+- [x] I-web(커밋 `a91f73f`): `/guide` 를 GUI 절차 기준으로 재작성(CLI 제거) + README Web 절 정정. 워크스페이스 `rustfmt.toml`(max_width 160) 추가 + 포맷 커밋 `0f12ae8`, CI 3-OS 통과
+- [x] 적대 리뷰 28건(critical 2: 비밀번호가 SERVER URL 로 유출·랭킹 패널 LOADING 고착) → Rust 측 전건 수정 → 검증(테스트 1,277 통과). **GUI 실기 검증(2026-09-09, TAIDE 접근성 권한 후 키 자동화)**: 곡선택 → SETTINGS/NETWORK 13행 렌더 → SERVER URL 입력 → REGISTER 로 일회용 계정 `gui-e2e-871795` 생성(ACCOUNT "logged in as", PASSWORD 소거, rivals 갱신) → 서버 `/api/players/{id}` 조회 확인 → IR RANKING 패널 상태 표시 확인. 사용자 settings.ron 은 백업 후 복원
+- [ ] 서버 측 계약 결함 4건(submit 응답 슈퍼셋 필드 미전송·리플레이 다운로드 gauge/md5 누락·settings PUT 204 로 잠금 기준 미회신·guest 상수) 수정 워크플로 `rbms-phase-i-contract-fix` 진행 중 → 커밋·푸시·`vercel --prod`·Chrome 라이트/다크 확인 → history 문서
 
 ### Phase B~G + 릴리스 (계획 `docs/plan/2026-09-09-enhancement-plan.md` §2)
 - [ ] B 오디오 클럭 재설계 — 보간 클럭·룩어헤드 스케줄·단일 AudioEngine·볼륨 3분리/#VOLWAV/보이스 스틸/램프·오디오 설정 노출·판정 오차 하네스/언더런 카운터/소크
