@@ -17,5 +17,8 @@ mod tests;
 
 pub use atomic::write_atomic;
 pub use error::StoreError;
-pub use replay::{Replay, ReplayEvent};
-pub use score::{SCORE_RULE_VERSION, ScoreBook, ScoreRecord, is_stale_rule_version};
+pub use replay::{
+    REPLAY_JUDGE_WIDTH_TIER_COUNT, REPLAY_LEGACY_ALGORITHM, REPLAY_LEGACY_BOTTOM_SHIFTABLE_GAUGE, REPLAY_LEGACY_GAUGE_AUTO_SHIFT, REPLAY_LEGACY_GAUGE_SET,
+    REPLAY_LEGACY_LN_MODE, REPLAY_UNMODIFIED_RATE_PERCENT, Replay, ReplayEvent, ReplayJudge,
+};
+pub use score::{SCORE_LN_MODE_FROM_CHART, SCORE_RULE_VERSION, ScoreBook, ScoreRecord, is_stale_rule_version};

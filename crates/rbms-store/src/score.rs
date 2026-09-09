@@ -6,9 +6,23 @@ use serde::{Deserialize, Serialize};
 use crate::atomic::write_atomic;
 use crate::error::StoreError;
 
+/// The long-note key of a record whose chart states its own long-note flavour, so the player's LN
+/// MODE setting could not have changed how it was judged. Records written before the key existed
+/// default to it and so all compare against each other, which is what they used to do.
+///
+/// The reference keys a stored score by LN MODE only when the chart leaves the flavour undefined
+/// (`PlayDataAccessor.java:200-205` passes `containsUndefinedLongNote() ? lnmode : 0`), because that
+/// is the only case where the setting changes the note count and therefore the EX denominator.
+pub const SCORE_LN_MODE_FROM_CHART: &str = "CHART";
+
 /// Version of the judging rules a record was produced under. Bumped whenever a rule change makes
 /// older records not directly comparable; records written before the field existed default to 0.
-pub const SCORE_RULE_VERSION: u32 = 1;
+///
+/// Version 2 is the judge-parity pass: nine parallel gauges off the reference gauge tables, the
+/// `LightAssistEasy` lamp and the reference gauge-to-lamp mapping, charge-note deferral and the
+/// hell-charge gauge tick. A version 1 record was judged by rules this build no longer produces, so
+/// it keeps loading and reads as stale.
+pub const SCORE_RULE_VERSION: u32 = 2;
 
 /// Whether a record was judged under a rule version this build no longer produces, so what is shown
 /// next to it is the presenting layer's decision rather than this crate's.
@@ -41,12 +55,22 @@ pub struct ScoreRecord {
     /// Judging-rule version this record was produced under (see [`SCORE_RULE_VERSION`]).
     #[serde(default)]
     pub rule_version: u32,
+    /// The long-note flavour this run has to be compared within: the LN MODE it was played under
+    /// when the chart left its long notes unstated, and [`SCORE_LN_MODE_FROM_CHART`] otherwise.
+    /// Charge notes are judged at both ends, so a run forced to CN has twice the notes and twice the
+    /// EX ceiling of the same chart played as plain long notes.
+    #[serde(default = "chart_ln_mode_key")]
+    pub ln_mode: String,
     /// The run used an assist (widened judge window or an auto-played lane), so it is kept as
     /// history but excluded from the stored bests — the reference implementation clears the same `score` flag and
     /// gates exscore/minbp/combo on it (`ScoreData.java:548,566,572,578`). Records written before
     /// the field existed default to `false`.
     #[serde(default)]
     pub assisted: bool,
+}
+
+fn chart_ln_mode_key() -> String {
+    SCORE_LN_MODE_FROM_CHART.to_string()
 }
 
 /// Wire shape of `scores.ron`: the record list and nothing else, so the lookup index below never
@@ -148,18 +172,49 @@ impl ScoreBook {
         self.positions(md5).iter().map(|&i| &self.records[i]).filter(|r| !r.assisted)
     }
 
+    /// Whether a record may be compared against a run played under `ln_mode`. Two runs of the same
+    /// chart under different LN MODEs are not the same chart: charge notes are judged twice, so
+    /// their note counts and EX ceilings differ.
+    fn comparable_ln_mode(record: &ScoreRecord, ln_mode: &str) -> bool {
+        record.ln_mode == ln_mode
+    }
+
     /// Best EX on a chart, folded without the allocate-and-sort of `for_md5` (called every frame for
     /// the live score graph). `None` if the chart has no unassisted records.
+    ///
+    /// Every record counts, whatever LN MODE it was played under; use
+    /// [`best_ex_for_md5_in_ln_mode`](Self::best_ex_for_md5_in_ln_mode) to compare within one.
     pub fn best_ex_for_md5(&self, md5: &str) -> Option<u32> {
         self.scoring_records(md5).map(|r| r.ex_score).max()
     }
 
+    /// Best EX among the records of a chart that were played under `ln_mode`, the key described on
+    /// [`ScoreRecord::ln_mode`].
+    pub fn best_ex_for_md5_in_ln_mode(&self, md5: &str, ln_mode: &str) -> Option<u32> {
+        self.scoring_records(md5).filter(|r| Self::comparable_ln_mode(r, ln_mode)).map(|r| r.ex_score).max()
+    }
+
     /// Best clear-lamp id on a chart (highest `ClearType` id), folded without allocation — used for
-    /// the per-row clear-lamp LED in the select list. `None` if the chart has no unassisted records.
-    /// The reference implementation updates the lamp for assisted runs too, but only after demoting it to
-    /// `AssistEasy`/`LightAssistEasy` (`BMSPlayer.java:866`); rbms cannot demote the lamp yet, so an
-    /// assisted run must not raise the LED at all.
+    /// the per-row clear-lamp LED in the select list. `None` if the chart has no records.
+    ///
+    /// Assisted runs count here, unlike [`ScoreBook::best_ex_for_md5`]: the reference implementation
+    /// records the lamp of an assisted run too, having first demoted it to
+    /// `AssistEasy`/`LightAssistEasy` (`BMSPlayer.java:864-874`), which is what the player writes
+    /// into the record. A demoted lamp can only raise the LED as far as the assist allows — but only
+    /// a record this build wrote carries a demoted lamp at all, so an assisted record from an older
+    /// rule version is left out rather than allowed to raise the LED with a lamp nothing demoted.
     pub fn best_clear_for_md5(&self, md5: &str) -> Option<u8> {
-        self.scoring_records(md5).map(|r| r.clear).max()
+        self.positions(md5).iter().map(|&i| &self.records[i]).filter(|r| !r.assisted || !is_stale_rule_version(r.rule_version)).map(|r| r.clear).max()
+    }
+
+    /// Best clear-lamp id among the records of a chart that were played under `ln_mode`.
+    pub fn best_clear_for_md5_in_ln_mode(&self, md5: &str, ln_mode: &str) -> Option<u8> {
+        self.positions(md5)
+            .iter()
+            .map(|&i| &self.records[i])
+            .filter(|r| !r.assisted || !is_stale_rule_version(r.rule_version))
+            .filter(|r| Self::comparable_ln_mode(r, ln_mode))
+            .map(|r| r.clear)
+            .max()
     }
 }

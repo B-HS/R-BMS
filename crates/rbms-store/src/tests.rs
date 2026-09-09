@@ -18,6 +18,7 @@ fn rec(md5: &str, played_at: i64, ex: u32) -> ScoreRecord {
         played_at,
         replay_file: None,
         rule_version: SCORE_RULE_VERSION,
+        ln_mode: SCORE_LN_MODE_FROM_CHART.into(),
         assisted: false,
     }
 }
@@ -127,27 +128,39 @@ fn best_clear_picks_highest_lamp_id() {
     assert_eq!(book.best_clear_for_md5("aa"), Some(7), "max lamp id, case-insensitive");
 }
 
+/// An assisted run is history rather than a score, but its lamp still counts: the reference records
+/// the lamp of an assisted play after demoting it, so a record written with a demoted lamp is what
+/// the LED shows (`BMSPlayer.java:864-874`).
 #[test]
-fn assisted_runs_are_kept_as_history_but_never_become_the_best() {
+fn an_assisted_run_never_becomes_the_best_ex_but_its_lamp_still_counts() {
     let mut book = ScoreBook::default();
     book.push(rec("AA", 1, 40));
     let mut assisted = rec("AA", 2, 900);
-    assisted.clear = 9;
+    assisted.clear = 3;
     assisted.assisted = true;
     book.push(assisted);
     assert_eq!(book.for_md5("AA").len(), 2, "the assisted play is still in the history list");
-    assert_eq!(book.best_ex_for_md5("AA"), Some(40));
-    assert_eq!(book.best_clear_for_md5("AA"), Some(5));
+    assert_eq!(book.best_ex_for_md5("AA"), Some(40), "the assisted EX is not a best");
+    assert_eq!(book.best_clear_for_md5("AA"), Some(5), "the unassisted lamp is still the higher one");
+
+    let mut book = ScoreBook::default();
+    book.push(rec_clear("AA", 1));
+    let mut assisted = rec("AA", 2, 900);
+    assisted.clear = 3;
+    assisted.assisted = true;
+    book.push(assisted);
+    assert_eq!(book.best_clear_for_md5("AA"), Some(3), "a demoted assist lamp raises the LED as far as the assist allows");
 }
 
 #[test]
-fn a_chart_with_only_assisted_records_has_no_best() {
+fn a_chart_with_only_assisted_records_has_no_best_ex_but_keeps_its_lamp() {
     let mut book = ScoreBook::default();
     let mut assisted = rec("AA", 1, 500);
+    assisted.clear = 2;
     assisted.assisted = true;
     book.push(assisted);
     assert_eq!(book.best_ex_for_md5("AA"), None);
-    assert_eq!(book.best_clear_for_md5("AA"), None);
+    assert_eq!(book.best_clear_for_md5("AA"), Some(2));
 }
 
 #[test]
@@ -207,9 +220,50 @@ fn rule_version_defaults_to_zero_for_a_pre_versioning_record() {
 
 #[test]
 fn current_rule_version_records_are_not_marked() {
-    assert_eq!(SCORE_RULE_VERSION, 1, "the current judging-rule generation");
+    assert_eq!(SCORE_RULE_VERSION, 2, "the current judging-rule generation");
     assert!(!is_stale_rule_version(SCORE_RULE_VERSION));
     assert!(!is_stale_rule_version(SCORE_RULE_VERSION + 1), "a newer record is not marked as old");
+}
+
+/// A record written by the build before the judge-parity pass keeps loading and reads as stale, so
+/// the screens can mark it rather than dropping it.
+#[test]
+fn a_record_from_the_previous_rule_generation_still_loads_and_reads_as_stale() {
+    let s = r#"(records: [(
+        md5: "AA", title: "t", mode: "BEAT-7K", clear: 5, ex_score: 10, max_ex: 100,
+        counts: (0, 0, 0, 0, 0, 0), max_combo: 0, total_notes: 50,
+        gauge: "NORMAL", gauge_value: 80.0, random: "OFF", played_at: 1, rule_version: 1
+    )])"#;
+    let book: ScoreBook = ron::from_str(s).expect("a previous-generation record parses");
+    assert_eq!(book.records()[0].rule_version, 1);
+    assert_eq!(book.records()[0].ex_score, 10, "the record keeps every value it was written with");
+    assert!(is_stale_rule_version(book.records()[0].rule_version));
+    assert_eq!(book.best_ex_for_md5("AA"), Some(10), "a stale record still counts towards the bests");
+}
+
+/// A replay written before the JUDGE settings were recorded plays back the way the engine judged
+/// when it was made, rather than picking up whatever the settings hold now.
+#[test]
+fn a_replay_without_a_judge_block_reads_as_the_pre_parity_defaults() {
+    let s = r#"(
+        chart_path: "/songs/a.bms", md5: "AA", mode: "BEAT_7K", random: "OFF", seed: 1, offset_ms: 0,
+        events: []
+    )"#;
+    let replay: Replay = ron::from_str(s).expect("a pre-parity replay parses");
+    assert_eq!(replay.judge, ReplayJudge::default());
+    assert_eq!(replay.judge.algorithm, REPLAY_LEGACY_ALGORITHM);
+    assert_eq!(replay.judge.judge_rate_key, [REPLAY_UNMODIFIED_RATE_PERCENT; REPLAY_JUDGE_WIDTH_TIER_COUNT]);
+    assert_eq!(replay.judge.judge_rate_scratch, [REPLAY_UNMODIFIED_RATE_PERCENT; REPLAY_JUDGE_WIDTH_TIER_COUNT]);
+    assert_eq!(replay.judge.longnote_margin_rate, REPLAY_UNMODIFIED_RATE_PERCENT);
+}
+
+/// The recorded JUDGE settings survive the file, which is what makes a replay reproduce its run.
+#[test]
+fn the_recorded_judge_settings_round_trip_through_ron() {
+    let replay = sample_replay();
+    let text = ron::ser::to_string_pretty(&replay, ron::ser::PrettyConfig::default()).unwrap();
+    let back: Replay = ron::from_str(&text).unwrap();
+    assert_eq!(back.judge, replay.judge);
 }
 
 #[test]
@@ -336,7 +390,21 @@ fn sample_replay() -> Replay {
         offset_ms: -12,
         scratch_auto: true,
         gauge: "HARD".into(),
-        events: vec![ReplayEvent { t: 0, lane: 0, press: true }, ReplayEvent { t: 1500, lane: 0, press: false }, ReplayEvent { t: 2000, lane: 7, press: true }],
+        judge: ReplayJudge {
+            algorithm: "Combo".into(),
+            judge_rate_key: [95, 90, 85],
+            judge_rate_scratch: [110, 105, 100],
+            longnote_margin_rate: 120,
+            ln_mode: "CN".into(),
+            gauge_set: "LR2".into(),
+            gauge_auto_shift: "BESTCLEAR".into(),
+            bottom_shiftable_gauge: "normal".into(),
+        },
+        events: vec![
+            ReplayEvent { t: 0, lane: 0, press: true, backward: false },
+            ReplayEvent { t: 1500, lane: 0, press: false, backward: false },
+            ReplayEvent { t: 2000, lane: 7, press: true, backward: true },
+        ],
     }
 }
 
@@ -353,8 +421,67 @@ fn ron_round_trip_preserves_events_and_meta() {
     assert_eq!(back.gauge, "HARD");
     assert_eq!(back.events.len(), r.events.len(), "event count preserved");
     for (a, b) in r.events.iter().zip(&back.events) {
-        assert_eq!((a.t, a.lane, a.press), (b.t, b.lane, b.press));
+        assert_eq!(a, b);
     }
+    assert_eq!(back.judge, r.judge, "every JUDGE row the run was played under survives the round trip");
+}
+
+#[test]
+fn a_replay_written_before_the_judge_rows_existed_reads_as_the_engines_old_behaviour() {
+    let judge: ReplayJudge = ron::from_str("()").expect("an empty judge block is the pre-parity shape");
+    assert_eq!(judge.algorithm, REPLAY_LEGACY_ALGORITHM);
+    assert_eq!(judge.judge_rate_key, [REPLAY_UNMODIFIED_RATE_PERCENT; REPLAY_JUDGE_WIDTH_TIER_COUNT]);
+    assert_eq!(judge.ln_mode, REPLAY_LEGACY_LN_MODE);
+    assert_eq!(judge.gauge_set, REPLAY_LEGACY_GAUGE_SET);
+    assert_eq!(judge.gauge_auto_shift, REPLAY_LEGACY_GAUGE_AUTO_SHIFT);
+    assert_eq!(judge.bottom_shiftable_gauge, REPLAY_LEGACY_BOTTOM_SHIFTABLE_GAUGE);
+}
+
+#[test]
+fn an_event_written_before_the_scratch_direction_existed_reads_as_forward() {
+    let event: ReplayEvent = ron::from_str("(t: 42, lane: 7, press: true)").expect("the pre-parity event shape still parses");
+    assert_eq!(event, ReplayEvent { t: 42, lane: 7, press: true, backward: false });
+}
+
+#[test]
+fn a_record_written_before_the_ln_mode_key_existed_compares_as_a_chart_stated_one() {
+    let text = ron::ser::to_string(&rec("AA", 1, 5)).unwrap().replace(&format!("ln_mode:\"{SCORE_LN_MODE_FROM_CHART}\","), "");
+    let back: ScoreRecord = ron::from_str(&text).expect("a record with no ln_mode still parses");
+    assert_eq!(back.ln_mode, SCORE_LN_MODE_FROM_CHART);
+}
+
+#[test]
+fn the_ln_mode_key_splits_the_bests_of_one_chart() {
+    let mut book = ScoreBook::default();
+    let mut plain = rec("AA", 100, 40);
+    plain.ln_mode = "LN".into();
+    let mut charge = rec("AA", 200, 90);
+    charge.ln_mode = "CN".into();
+    charge.clear = 7;
+    book.push(plain);
+    book.push(charge);
+    assert_eq!(book.best_ex_for_md5_in_ln_mode("AA", "LN"), Some(40), "the CN run has twice the notes, so it is not a better LN run");
+    assert_eq!(book.best_ex_for_md5_in_ln_mode("AA", "CN"), Some(90));
+    assert_eq!(book.best_clear_for_md5_in_ln_mode("AA", "LN"), Some(5));
+    assert_eq!(book.best_clear_for_md5_in_ln_mode("AA", "CN"), Some(7));
+    assert_eq!(book.best_ex_for_md5("AA"), Some(90), "the unkeyed fold still spans every mode");
+}
+
+#[test]
+fn an_assisted_record_from_an_older_rule_version_cannot_raise_the_clear_lamp() {
+    let mut book = ScoreBook::default();
+    let mut stale = rec("AA", 100, 10);
+    stale.assisted = true;
+    stale.rule_version = SCORE_RULE_VERSION - 1;
+    stale.clear = 8;
+    book.push(stale);
+    assert_eq!(book.best_clear_for_md5("AA"), None, "nothing demoted that lamp, so it is not an assisted clear this build would have written");
+
+    let mut current = rec("AA", 200, 10);
+    current.assisted = true;
+    current.clear = 3;
+    book.push(current);
+    assert_eq!(book.best_clear_for_md5("AA"), Some(3), "a demoted lamp this build wrote still lights the LED");
 }
 
 #[test]
