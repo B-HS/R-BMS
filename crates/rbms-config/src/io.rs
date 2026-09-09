@@ -4,7 +4,7 @@ use rbms_store::write_atomic;
 
 use crate::error::ConfigError;
 use crate::legacy::{LEGACY_FOLDERS_FILE, LEGACY_TABLES_FILE, LegacyV0, merge_legacy_lists};
-use crate::schema::{CURRENT_SCHEMA_VERSION, Config, LEGACY_SCHEMA_VERSION};
+use crate::schema::{CURRENT_SCHEMA_VERSION, Config, LEGACY_SCHEMA_VERSION, SINGLE_JUDGE_WIDTH_SCHEMA_VERSION};
 
 /// Extension a configuration file that could not be parsed is moved aside under, so the next save
 /// cannot silently clobber a recoverable file.
@@ -82,6 +82,11 @@ pub fn migrate(raw: &str) -> Result<(Config, Option<u32>), ConfigError> {
     let probe: SchemaProbe = ron::from_str(raw)?;
     let mut config = match probe.schema_version {
         LEGACY_SCHEMA_VERSION => Config::from(ron::from_str::<LegacyV0>(raw)?),
+        SINGLE_JUDGE_WIDTH_SCHEMA_VERSION => {
+            let mut config = ron::from_str::<Config>(raw)?;
+            config.judge.spread_uniform_judge_rate(ron::from_str::<SingleJudgeWidthProbe>(raw)?.judge.judge_rate);
+            config
+        }
         CURRENT_SCHEMA_VERSION => ron::from_str::<Config>(raw)?,
         from => {
             return Err(ConfigError::Migrate { from, reason: format!("this build reads up to schema version {CURRENT_SCHEMA_VERSION}") });
@@ -122,5 +127,26 @@ struct SchemaProbe {
 impl Default for SchemaProbe {
     fn default() -> Self {
         SchemaProbe { schema_version: LEGACY_SCHEMA_VERSION }
+    }
+}
+
+/// Reads only the one JUDGE WIDTH percentage a schema-1 document held, so the six per-tier rows it
+/// became can all start from the width that file asked for. The rest of the document parses as the
+/// current schema: nothing else moved between the two.
+#[derive(Default, serde::Deserialize)]
+#[serde(default)]
+struct SingleJudgeWidthProbe {
+    judge: SingleJudgeWidthGroup,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(default)]
+struct SingleJudgeWidthGroup {
+    judge_rate: i32,
+}
+
+impl Default for SingleJudgeWidthGroup {
+    fn default() -> Self {
+        SingleJudgeWidthGroup { judge_rate: crate::schema::JUDGE_RATE_DEFAULT_PERCENT }
     }
 }

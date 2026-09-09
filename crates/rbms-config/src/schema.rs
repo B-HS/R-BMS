@@ -1,12 +1,21 @@
 use rbms_chart::shuffle::NoteOption;
 use rbms_judge::GaugeKind;
+use rbms_judge::algorithm::JudgeAlgorithm;
+use rbms_judge::gauge::{GaugeAutoShift, clamp_bottom_shiftable};
+use rbms_judge::gauge_tables::GaugeSetId;
+use rbms_judge::ln::LnMode;
 use serde::{Deserialize, Serialize};
 
 use crate::audio::AudioOptions;
+use crate::judge::ScoreTarget;
 
 /// Schema version this build writes. A file without a `schema_version` field is
 /// [`LEGACY_SCHEMA_VERSION`] and is migrated on load.
-pub const CURRENT_SCHEMA_VERSION: u32 = 1;
+pub const CURRENT_SCHEMA_VERSION: u32 = 2;
+
+/// Schema that carried one JUDGE WIDTH percentage for every judge tier of both key and scratch
+/// lanes, before the per-tier rows split it into six.
+pub const SINGLE_JUDGE_WIDTH_SCHEMA_VERSION: u32 = 1;
 
 /// Version of the flat pre-migration file (`settings.ron` plus its `folders.ron` / `tables.ron`
 /// siblings), which carried no version field at all.
@@ -50,6 +59,26 @@ pub const JUDGE_RATE_STEP_PERCENT: i32 = 5;
 
 /// Judge width that leaves the chart's own windows untouched, and the value a fresh install holds.
 pub const JUDGE_RATE_DEFAULT_PERCENT: i32 = 100;
+
+/// How many judge tiers a JUDGE WIDTH percentage covers: PGREAT, GREAT and GOOD. BAD and the empty
+/// POOR band never widen, so they have no row. Pinned against `rbms_play::JUDGE_WIDTH_TIER_COUNT`
+/// by the player rather than depending on the play crate from here.
+pub const JUDGE_WIDTH_TIER_COUNT: usize = 3;
+
+/// JUDGE WIDTH percentages that leave every widenable tier at the width the chart states.
+pub const UNMODIFIED_JUDGE_RATES: [i32; JUDGE_WIDTH_TIER_COUNT] = [JUDGE_RATE_DEFAULT_PERCENT; JUDGE_WIDTH_TIER_COUNT];
+
+/// Shortest long-note release margin the LN MARGIN row can ask for, as a percentage of the mode's.
+pub const LN_MARGIN_MIN_PERCENT: i32 = 50;
+
+/// Longest long-note release margin the LN MARGIN row can ask for.
+pub const LN_MARGIN_MAX_PERCENT: i32 = 200;
+
+/// One left/right step on the LN MARGIN row.
+pub const LN_MARGIN_STEP_PERCENT: i32 = 5;
+
+/// Long-note margin that leaves the mode's own release window untouched.
+pub const LN_MARGIN_DEFAULT_PERCENT: i32 = 100;
 
 /// TOTAL value that means "use the chart's own", and the floor of the TOTAL row.
 pub const TOTAL_FROM_CHART: f64 = 0.0;
@@ -116,8 +145,7 @@ impl Config {
         self.play.lift = self.play.lift.clamp(LANE_SHADE_MIN, LANE_SHADE_MAX);
         self.play.cover = self.play.cover.clamp(LANE_SHADE_MIN, LANE_SHADE_MAX);
         self.play.total_override = self.play.total_override.max(TOTAL_FROM_CHART);
-        self.judge.offset_ms = self.judge.offset_ms.clamp(JUDGE_OFFSET_MIN_MS, JUDGE_OFFSET_MAX_MS);
-        self.judge.judge_rate = self.judge.judge_rate.clamp(JUDGE_RATE_MIN_PERCENT, JUDGE_RATE_MAX_PERCENT);
+        self.judge.sanitise();
         self.display.skin = if self.display.skin.trim().is_empty() { DEFAULT_SKIN.to_string() } else { self.display.skin.to_ascii_uppercase() };
         self.audio.sanitise();
     }
@@ -160,18 +188,73 @@ impl Default for PlayOptions {
     }
 }
 
-/// The JUDGE tab: when an input counts as on time.
+/// The JUDGE tab: when an input counts as on time, which note a press takes, and how the gauge
+/// behind it is built and allowed to move.
+///
+/// The three judge widths and the long-note margin are stored per tier and per lane kind exactly as
+/// the reference implementation configures them, because widening any one of them is what makes a
+/// run a custom-judge run (`BMSPlayer.java:208-214`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct JudgeOptions {
     pub offset_ms: i32,
     pub auto_offset: bool,
-    pub judge_rate: i32,
+    /// `[PGREAT, GREAT, GOOD]` JUDGE WIDTH percentages for key lanes.
+    pub judge_rate_key: [i32; JUDGE_WIDTH_TIER_COUNT],
+    /// The same three percentages for scratch lanes.
+    pub judge_rate_scratch: [i32; JUDGE_WIDTH_TIER_COUNT],
+    /// LN MARGIN as a percentage of the mode's own long-note release window.
+    pub longnote_margin_rate: i32,
+    #[serde(with = "judge_algorithm_token")]
+    pub judge_algorithm: JudgeAlgorithm,
+    #[serde(with = "ln_mode_token")]
+    pub ln_mode: LnMode,
+    /// Gauge table to play on, or `None` to take the one the chart's mode selects.
+    #[serde(with = "gauge_set_token")]
+    pub gauge_set: Option<GaugeSetId>,
+    #[serde(with = "gauge_auto_shift_token")]
+    pub gauge_auto_shift: GaugeAutoShift,
+    /// The floor a per-frame auto-shift may drop the gauge selection to.
+    #[serde(with = "gauge_kind_token")]
+    pub bottom_shiftable_gauge: GaugeKind,
+    #[serde(with = "target_token")]
+    pub target: ScoreTarget,
 }
 
 impl Default for JudgeOptions {
     fn default() -> Self {
-        JudgeOptions { offset_ms: 0, auto_offset: false, judge_rate: JUDGE_RATE_DEFAULT_PERCENT }
+        JudgeOptions {
+            offset_ms: 0,
+            auto_offset: false,
+            judge_rate_key: UNMODIFIED_JUDGE_RATES,
+            judge_rate_scratch: UNMODIFIED_JUDGE_RATES,
+            longnote_margin_rate: LN_MARGIN_DEFAULT_PERCENT,
+            judge_algorithm: JudgeAlgorithm::default(),
+            ln_mode: LnMode::default(),
+            gauge_set: None,
+            gauge_auto_shift: GaugeAutoShift::default(),
+            bottom_shiftable_gauge: GaugeKind::AssistEasy,
+            target: ScoreTarget::default(),
+        }
+    }
+}
+
+impl JudgeOptions {
+    /// Pull every value back into the range its row can produce.
+    pub fn sanitise(&mut self) {
+        self.offset_ms = self.offset_ms.clamp(JUDGE_OFFSET_MIN_MS, JUDGE_OFFSET_MAX_MS);
+        for rate in self.judge_rate_key.iter_mut().chain(self.judge_rate_scratch.iter_mut()) {
+            *rate = (*rate).clamp(JUDGE_RATE_MIN_PERCENT, JUDGE_RATE_MAX_PERCENT);
+        }
+        self.longnote_margin_rate = self.longnote_margin_rate.clamp(LN_MARGIN_MIN_PERCENT, LN_MARGIN_MAX_PERCENT);
+        self.bottom_shiftable_gauge = clamp_bottom_shiftable(self.bottom_shiftable_gauge);
+    }
+
+    /// Spread the one JUDGE WIDTH percentage an older file held over every tier of both lane kinds,
+    /// which is what that single row meant.
+    pub fn spread_uniform_judge_rate(&mut self, rate: i32) {
+        self.judge_rate_key = [rate; JUDGE_WIDTH_TIER_COUNT];
+        self.judge_rate_scratch = [rate; JUDGE_WIDTH_TIER_COUNT];
     }
 }
 
@@ -283,5 +366,82 @@ mod note_option_token {
     pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<NoteOption, D::Error> {
         let label = String::deserialize(deserializer)?;
         Ok(NoteOption::from_str(&label))
+    }
+}
+
+/// Stores the judge algorithm under the reference implementation's own constant name.
+mod judge_algorithm_token {
+    use rbms_judge::algorithm::JudgeAlgorithm;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(value: &JudgeAlgorithm, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(crate::judge::algorithm_token(*value))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<JudgeAlgorithm, D::Error> {
+        let token = String::deserialize(deserializer)?;
+        Ok(crate::judge::algorithm_from_token(&token))
+    }
+}
+
+/// Stores the long-note flavour as the token the LN MODE row shows.
+mod ln_mode_token {
+    use rbms_judge::ln::LnMode;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(value: &LnMode, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(crate::judge::ln_mode_token(*value))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<LnMode, D::Error> {
+        let token = String::deserialize(deserializer)?;
+        Ok(crate::judge::ln_mode_from_token(&token))
+    }
+}
+
+/// Stores the gauge table as its data-file key, or `AUTO` for the one the chart's mode selects.
+mod gauge_set_token {
+    use rbms_judge::gauge_tables::GaugeSetId;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(value: &Option<GaugeSetId>, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(crate::judge::gauge_set_token(*value))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<GaugeSetId>, D::Error> {
+        let token = String::deserialize(deserializer)?;
+        Ok(crate::judge::gauge_set_from_token(&token))
+    }
+}
+
+/// Stores the gauge auto-shift mode as a separator-free token.
+mod gauge_auto_shift_token {
+    use rbms_judge::gauge::GaugeAutoShift;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(value: &GaugeAutoShift, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(crate::judge::gauge_auto_shift_token(*value))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<GaugeAutoShift, D::Error> {
+        let token = String::deserialize(deserializer)?;
+        Ok(crate::judge::gauge_auto_shift_from_token(&token))
+    }
+}
+
+/// Stores the score target as a separator-free token, so the label may be reworded without moving
+/// what is on disk.
+mod target_token {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    use crate::judge::ScoreTarget;
+
+    pub fn serialize<S: Serializer>(value: &ScoreTarget, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(value.token())
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<ScoreTarget, D::Error> {
+        let token = String::deserialize(deserializer)?;
+        Ok(crate::judge::target_from_token(&token))
     }
 }

@@ -10,15 +10,22 @@
 
 use rbms_chart::shuffle::NoteOption;
 use rbms_judge::GaugeKind;
+use rbms_judge::algorithm::JudgeAlgorithm;
+use rbms_judge::gauge::{BOTTOM_SHIFTABLE_GAUGES, GaugeAutoShift};
+use rbms_judge::ln::LnMode;
 
 use crate::audio::{
     AUDIO_BUFFER_FRAMES_CHOICES, AUDIO_POLYPHONY_MAX_VOICES, AUDIO_POLYPHONY_MIN_VOICES, AUDIO_POLYPHONY_STEP_VOICES, AUDIO_SAMPLE_RATE_HZ_CHOICES,
     AUDIO_VOLUME_MAX_GAIN, AUDIO_VOLUME_MAX_PERCENT, AUDIO_VOLUME_MIN_GAIN, AUDIO_VOLUME_STEP_PERCENT, cycle_optional_u32, step_polyphony, step_volume,
     volume_percent,
 };
+use crate::judge::{
+    GAUGE_AUTO_SHIFT_LABELS, GAUGE_SET_CYCLE, GAUGE_SET_LABELS, JUDGE_ALGORITHM_LABELS, LN_MODE_LABELS, ScoreTarget, TARGET_LABELS, gauge_set_token,
+};
 use crate::schema::{
     Config, DEFAULT_PLAYER_ID, HISPEED_MAX, HISPEED_MIN, HISPEED_STEP, JUDGE_OFFSET_MAX_MS, JUDGE_OFFSET_MIN_MS, JUDGE_OFFSET_STEP_MS, JUDGE_RATE_MAX_PERCENT,
-    JUDGE_RATE_MIN_PERCENT, JUDGE_RATE_STEP_PERCENT, LANE_SHADE_MAX, LANE_SHADE_MIN, LANE_SHADE_STEP, TOTAL_FROM_CHART, TOTAL_STEP,
+    JUDGE_RATE_MIN_PERCENT, JUDGE_RATE_STEP_PERCENT, LANE_SHADE_MAX, LANE_SHADE_MIN, LANE_SHADE_STEP, LN_MARGIN_MAX_PERCENT, LN_MARGIN_MIN_PERCENT,
+    LN_MARGIN_STEP_PERCENT, TOTAL_FROM_CHART, TOTAL_STEP,
 };
 
 /// Value of a row that is on.
@@ -81,11 +88,23 @@ pub const EMAIL_MAX_LEN: usize = 254;
 /// Longest password the row is meant to hold.
 pub const PASSWORD_MAX_LEN: usize = 128;
 
+/// Position of the PGREAT tier in a JUDGE WIDTH array.
+const PGREAT_TIER: usize = 0;
+
+/// Position of the GREAT tier in a JUDGE WIDTH array.
+const GREAT_TIER: usize = 1;
+
+/// Position of the GOOD tier in a JUDGE WIDTH array.
+const GOOD_TIER: usize = 2;
+
 /// The gauges the GAUGE row steps through, in the order it shows them.
 pub const GAUGE_CYCLE: [GaugeKind; 6] = [GaugeKind::AssistEasy, GaugeKind::Easy, GaugeKind::Normal, GaugeKind::Hard, GaugeKind::ExHard, GaugeKind::Hazard];
 
 /// Names the GAUGE row shows, one per entry of [`GAUGE_CYCLE`].
 pub const GAUGE_LABELS: &[&str] = &["ASSIST EASY", "EASY", "NORMAL", "HARD", "EX-HARD", "HAZARD"];
+
+/// Names the BOTTOM SHIFTABLE row shows, one per entry of [`rbms_judge::gauge::BOTTOM_SHIFTABLE_GAUGES`].
+const BOTTOM_SHIFTABLE_LABELS: &[&str] = &["ASSIST EASY", "EASY", "NORMAL"];
 
 const SPEED_FIX_LABELS: &[&str] = &["FLOATING", "CONSTANT"];
 const SCRATCH_SIDE_LABELS: &[&str] = &["RIGHT", "LEFT"];
@@ -119,7 +138,19 @@ pub enum SettingId {
     JudgeOffset,
     Bga,
     KeyConfig,
-    JudgeWidth,
+    JudgeAlgorithm,
+    JudgeWidthKeyPGreat,
+    JudgeWidthKeyGreat,
+    JudgeWidthKeyGood,
+    JudgeWidthScratchPGreat,
+    JudgeWidthScratchGreat,
+    JudgeWidthScratchGood,
+    LongNoteMargin,
+    LnMode,
+    GaugeSet,
+    GaugeAutoShift,
+    BottomShiftableGauge,
+    Target,
     Total,
     Skin,
     AutoCal,
@@ -153,7 +184,7 @@ pub enum SettingId {
 }
 
 /// Rows the settings screen has.
-pub const SETTING_COUNT: usize = 43;
+pub const SETTING_COUNT: usize = 55;
 
 impl SettingId {
     /// Every row, in declaration order.
@@ -170,7 +201,19 @@ impl SettingId {
         SettingId::JudgeOffset,
         SettingId::Bga,
         SettingId::KeyConfig,
-        SettingId::JudgeWidth,
+        SettingId::JudgeAlgorithm,
+        SettingId::JudgeWidthKeyPGreat,
+        SettingId::JudgeWidthKeyGreat,
+        SettingId::JudgeWidthKeyGood,
+        SettingId::JudgeWidthScratchPGreat,
+        SettingId::JudgeWidthScratchGreat,
+        SettingId::JudgeWidthScratchGood,
+        SettingId::LongNoteMargin,
+        SettingId::LnMode,
+        SettingId::GaugeSet,
+        SettingId::GaugeAutoShift,
+        SettingId::BottomShiftableGauge,
+        SettingId::Target,
         SettingId::Total,
         SettingId::Skin,
         SettingId::AutoCal,
@@ -333,14 +376,50 @@ pub const SETTINGS: &[SettingDescriptor] = &[
         SettingKind::IntRange { min: JUDGE_OFFSET_MIN_MS, max: JUDGE_OFFSET_MAX_MS, step: JUDGE_OFFSET_STEP_MS, unit: MILLISECOND_UNIT },
         "Shift every judgement earlier or later",
     ),
-    row(
-        SettingId::JudgeWidth,
-        SettingTab::Judge,
-        "JUDGE WIDTH",
-        SettingKind::IntRange { min: JUDGE_RATE_MIN_PERCENT, max: JUDGE_RATE_MAX_PERCENT, step: JUDGE_RATE_STEP_PERCENT, unit: PERCENT_UNIT },
-        "Widen or narrow the chart's own judge windows",
-    ),
     row(SettingId::AutoCal, SettingTab::Judge, "AUTO CAL", SettingKind::Toggle, "Learn the judge offset from how you play"),
+    row(
+        SettingId::JudgeAlgorithm,
+        SettingTab::Judge,
+        "JUDGE ALGORITHM",
+        SettingKind::Cycle { values: JUDGE_ALGORITHM_LABELS },
+        "Which note a press takes when several are in range",
+    ),
+    judge_width_row(SettingId::JudgeWidthKeyPGreat, "JUDGE WIDTH KEY PG"),
+    judge_width_row(SettingId::JudgeWidthKeyGreat, "JUDGE WIDTH KEY GR"),
+    judge_width_row(SettingId::JudgeWidthKeyGood, "JUDGE WIDTH KEY GD"),
+    judge_width_row(SettingId::JudgeWidthScratchPGreat, "JUDGE WIDTH SCR PG"),
+    judge_width_row(SettingId::JudgeWidthScratchGreat, "JUDGE WIDTH SCR GR"),
+    judge_width_row(SettingId::JudgeWidthScratchGood, "JUDGE WIDTH SCR GD"),
+    row(
+        SettingId::LongNoteMargin,
+        SettingTab::Judge,
+        "LN MARGIN",
+        SettingKind::IntRange { min: LN_MARGIN_MIN_PERCENT, max: LN_MARGIN_MAX_PERCENT, step: LN_MARGIN_STEP_PERCENT, unit: PERCENT_UNIT },
+        "Widen or narrow the long-note release window",
+    ),
+    row(SettingId::LnMode, SettingTab::Judge, "LN MODE", SettingKind::Cycle { values: LN_MODE_LABELS }, "What long notes the chart left unstated play as"),
+    row(
+        SettingId::GaugeSet,
+        SettingTab::Judge,
+        "GAUGE SET",
+        SettingKind::Cycle { values: GAUGE_SET_LABELS },
+        "Which gauge table the nine gauges are built from",
+    ),
+    row(
+        SettingId::GaugeAutoShift,
+        SettingTab::Judge,
+        "GAUGE AUTO SHIFT",
+        SettingKind::Cycle { values: GAUGE_AUTO_SHIFT_LABELS },
+        "How the selected gauge may move during play",
+    ),
+    row(
+        SettingId::BottomShiftableGauge,
+        SettingTab::Judge,
+        "BOTTOM SHIFTABLE",
+        SettingKind::Cycle { values: BOTTOM_SHIFTABLE_LABELS },
+        "The floor an auto-shift may drop the gauge to",
+    ),
+    row(SettingId::Target, SettingTab::Judge, "TARGET", SettingKind::Cycle { values: TARGET_LABELS }, "What the run is paced against"),
     host_row(SettingId::Skin, SettingTab::Display, "SKIN", SettingKind::Cycle { values: SKIN_LABELS }, "Which bundled skin the play screen uses"),
     row(SettingId::Font, SettingTab::Display, "FONT", SettingKind::FilePick, "Font the screens are drawn with"),
     row(SettingId::ScoreGraph, SettingTab::Display, "SCORE GRAPH", SettingKind::Toggle, "Draw the score graph on the result screen"),
@@ -447,6 +526,17 @@ pub const SETTINGS: &[SettingDescriptor] = &[
     ),
 ];
 
+/// One of the six JUDGE WIDTH rows: same range, same help, one judge tier of one lane kind.
+const fn judge_width_row(id: SettingId, label: &'static str) -> SettingDescriptor {
+    row(
+        id,
+        SettingTab::Judge,
+        label,
+        SettingKind::IntRange { min: JUDGE_RATE_MIN_PERCENT, max: JUDGE_RATE_MAX_PERCENT, step: JUDGE_RATE_STEP_PERCENT, unit: PERCENT_UNIT },
+        "Widen or narrow this judge tier's own window",
+    )
+}
+
 const fn row(id: SettingId, tab: SettingTab, label: &'static str, kind: SettingKind, help: &'static str) -> SettingDescriptor {
     SettingDescriptor { id, tab, label, kind, help, host_value: false, visible: always }
 }
@@ -512,6 +602,36 @@ fn gauge_at(gauge: GaugeKind) -> usize {
     GAUGE_CYCLE.iter().position(|entry| *entry == gauge).unwrap_or_default()
 }
 
+/// Which of the six JUDGE WIDTH percentages a row edits: the scratch array rather than the key one,
+/// and the tier within it. Every other row answers `None`.
+fn judge_width_slot(id: SettingId) -> Option<(bool, usize)> {
+    match id {
+        SettingId::JudgeWidthKeyPGreat => Some((false, PGREAT_TIER)),
+        SettingId::JudgeWidthKeyGreat => Some((false, GREAT_TIER)),
+        SettingId::JudgeWidthKeyGood => Some((false, GOOD_TIER)),
+        SettingId::JudgeWidthScratchPGreat => Some((true, PGREAT_TIER)),
+        SettingId::JudgeWidthScratchGreat => Some((true, GREAT_TIER)),
+        SettingId::JudgeWidthScratchGood => Some((true, GOOD_TIER)),
+        _ => None,
+    }
+}
+
+fn judge_width(config: &Config, id: SettingId) -> Option<i32> {
+    let (scratch, tier) = judge_width_slot(id)?;
+    let rates = if scratch { config.judge.judge_rate_scratch } else { config.judge.judge_rate_key };
+    rates.get(tier).copied()
+}
+
+fn judge_width_mut(config: &mut Config, id: SettingId) -> Option<&mut i32> {
+    let (scratch, tier) = judge_width_slot(id)?;
+    let rates = if scratch { &mut config.judge.judge_rate_scratch } else { &mut config.judge.judge_rate_key };
+    rates.get_mut(tier)
+}
+
+fn cycle_at<T: PartialEq, const N: usize>(values: [T; N], current: T) -> usize {
+    values.iter().position(|entry| *entry == current).unwrap_or_default()
+}
+
 /// What the settings screen shows for one row, as the document alone sees it.
 pub fn display_value(config: &Config, id: SettingId) -> String {
     match id {
@@ -529,7 +649,19 @@ pub fn display_value(config: &Config, id: SettingId) -> String {
         SettingId::KeyConfig | SettingId::Login | SettingId::Register | SettingId::Logout | SettingId::UploadSettings | SettingId::DownloadSettings => {
             ACTION_VALUE.to_string()
         }
-        SettingId::JudgeWidth => format!("{}{}", config.judge.judge_rate, unit_of(id)),
+        SettingId::JudgeAlgorithm => cycle_label(id, cycle_at(JudgeAlgorithm::ALL, config.judge.judge_algorithm)),
+        SettingId::JudgeWidthKeyPGreat
+        | SettingId::JudgeWidthKeyGreat
+        | SettingId::JudgeWidthKeyGood
+        | SettingId::JudgeWidthScratchPGreat
+        | SettingId::JudgeWidthScratchGreat
+        | SettingId::JudgeWidthScratchGood => format!("{}{}", judge_width(config, id).unwrap_or_default(), unit_of(id)),
+        SettingId::LongNoteMargin => format!("{}{}", config.judge.longnote_margin_rate, unit_of(id)),
+        SettingId::LnMode => cycle_label(id, cycle_at(LnMode::ALL, config.judge.ln_mode)),
+        SettingId::GaugeSet => gauge_set_token(config.judge.gauge_set).to_string(),
+        SettingId::GaugeAutoShift => cycle_label(id, cycle_at(GaugeAutoShift::ALL, config.judge.gauge_auto_shift)),
+        SettingId::BottomShiftableGauge => cycle_label(id, cycle_at(BOTTOM_SHIFTABLE_GAUGES, config.judge.bottom_shiftable_gauge)),
+        SettingId::Target => config.judge.target.label().to_string(),
         SettingId::Total => {
             if config.play.total_override > TOTAL_FROM_CHART {
                 format!("{}", config.play.total_override.round() as i32)
@@ -631,9 +763,45 @@ pub fn adjust(config: &mut Config, id: SettingId, delta: i32) -> AdjustOutcome {
             store(&mut config.judge.offset_ms, next)
         }
         SettingId::Bga => toggle(&mut config.display.bga),
-        SettingId::JudgeWidth => {
-            let next = (config.judge.judge_rate + delta * JUDGE_RATE_STEP_PERCENT).clamp(JUDGE_RATE_MIN_PERCENT, JUDGE_RATE_MAX_PERCENT);
-            store(&mut config.judge.judge_rate, next)
+        SettingId::JudgeWidthKeyPGreat
+        | SettingId::JudgeWidthKeyGreat
+        | SettingId::JudgeWidthKeyGood
+        | SettingId::JudgeWidthScratchPGreat
+        | SettingId::JudgeWidthScratchGreat
+        | SettingId::JudgeWidthScratchGood => match judge_width_mut(config, id) {
+            Some(rate) => {
+                let next = (*rate + delta * JUDGE_RATE_STEP_PERCENT).clamp(JUDGE_RATE_MIN_PERCENT, JUDGE_RATE_MAX_PERCENT);
+                store(rate, next)
+            }
+            None => AdjustOutcome::Unchanged,
+        },
+        SettingId::JudgeAlgorithm => {
+            let at = stepped(cycle_at(JudgeAlgorithm::ALL, config.judge.judge_algorithm), JudgeAlgorithm::ALL.len(), delta);
+            store(&mut config.judge.judge_algorithm, JudgeAlgorithm::ALL[at])
+        }
+        SettingId::LongNoteMargin => {
+            let next = (config.judge.longnote_margin_rate + delta * LN_MARGIN_STEP_PERCENT).clamp(LN_MARGIN_MIN_PERCENT, LN_MARGIN_MAX_PERCENT);
+            store(&mut config.judge.longnote_margin_rate, next)
+        }
+        SettingId::LnMode => {
+            let at = stepped(cycle_at(LnMode::ALL, config.judge.ln_mode), LnMode::ALL.len(), delta);
+            store(&mut config.judge.ln_mode, LnMode::ALL[at])
+        }
+        SettingId::GaugeSet => {
+            let at = stepped(cycle_at(GAUGE_SET_CYCLE, config.judge.gauge_set), GAUGE_SET_CYCLE.len(), delta);
+            store(&mut config.judge.gauge_set, GAUGE_SET_CYCLE[at])
+        }
+        SettingId::GaugeAutoShift => {
+            let at = stepped(cycle_at(GaugeAutoShift::ALL, config.judge.gauge_auto_shift), GaugeAutoShift::ALL.len(), delta);
+            store(&mut config.judge.gauge_auto_shift, GaugeAutoShift::ALL[at])
+        }
+        SettingId::BottomShiftableGauge => {
+            let at = stepped(cycle_at(BOTTOM_SHIFTABLE_GAUGES, config.judge.bottom_shiftable_gauge), BOTTOM_SHIFTABLE_GAUGES.len(), delta);
+            store(&mut config.judge.bottom_shiftable_gauge, BOTTOM_SHIFTABLE_GAUGES[at])
+        }
+        SettingId::Target => {
+            let at = stepped(cycle_at(ScoreTarget::ALL, config.judge.target), ScoreTarget::ALL.len(), delta);
+            store(&mut config.judge.target, ScoreTarget::ALL[at])
         }
         SettingId::Total => {
             let next = (config.play.total_override + f64::from(delta) * TOTAL_STEP).clamp(TOTAL_FROM_CHART, TOTAL_MAX);
@@ -777,7 +945,8 @@ mod tests {
             SettingId::HiSpeed => config.play.hispeed,
             SettingId::Total => config.play.total_override,
             SettingId::JudgeOffset => f64::from(config.judge.offset_ms),
-            SettingId::JudgeWidth => f64::from(config.judge.judge_rate),
+            SettingId::LongNoteMargin => f64::from(config.judge.longnote_margin_rate),
+            _ if judge_width_slot(id).is_some() => f64::from(judge_width(config, id).unwrap_or_default()),
             SettingId::AudioPolyphony => config.audio.polyphony as f64,
             SettingId::Lift => f64::from(config.play.lift),
             SettingId::LaneCover => f64::from(config.play.cover),
@@ -983,7 +1152,15 @@ mod tests {
         assert_eq!(display_value(&config, SettingId::Lift), "0%");
         assert_eq!(display_value(&config, SettingId::ScratchSide), "RIGHT");
         assert_eq!(display_value(&config, SettingId::JudgeOffset), "+0 MS");
-        assert_eq!(display_value(&config, SettingId::JudgeWidth), "100%");
+        assert_eq!(display_value(&config, SettingId::JudgeWidthKeyPGreat), "100%");
+        assert_eq!(display_value(&config, SettingId::JudgeWidthScratchGood), "100%");
+        assert_eq!(display_value(&config, SettingId::LongNoteMargin), "100%");
+        assert_eq!(display_value(&config, SettingId::JudgeAlgorithm), "COMBO", "JudgeAlgorithm.java:42 lists Combo first, so it is the shipped default");
+        assert_eq!(display_value(&config, SettingId::LnMode), "LN");
+        assert_eq!(display_value(&config, SettingId::GaugeSet), AUTO_VALUE);
+        assert_eq!(display_value(&config, SettingId::GaugeAutoShift), "NONE");
+        assert_eq!(display_value(&config, SettingId::BottomShiftableGauge), "ASSIST EASY");
+        assert_eq!(display_value(&config, SettingId::Target), "LOCAL BEST");
         assert_eq!(display_value(&config, SettingId::Total), AUTO_VALUE);
         assert_eq!(display_value(&config, SettingId::Font), DEFAULT_VALUE);
         assert_eq!(display_value(&config, SettingId::KeyConfig), ACTION_VALUE);
@@ -1026,7 +1203,26 @@ mod tests {
             vec![SettingId::Autoplay, SettingId::HiSpeed, SettingId::SpeedFix, SettingId::Random, SettingId::AutoReplay]
         );
         assert_eq!(tab_rows(SettingTab::Gauge, &config), vec![SettingId::Gauge, SettingId::Total]);
-        assert_eq!(tab_rows(SettingTab::Judge, &config), vec![SettingId::JudgeOffset, SettingId::JudgeWidth, SettingId::AutoCal]);
+        assert_eq!(
+            tab_rows(SettingTab::Judge, &config),
+            vec![
+                SettingId::JudgeOffset,
+                SettingId::AutoCal,
+                SettingId::JudgeAlgorithm,
+                SettingId::JudgeWidthKeyPGreat,
+                SettingId::JudgeWidthKeyGreat,
+                SettingId::JudgeWidthKeyGood,
+                SettingId::JudgeWidthScratchPGreat,
+                SettingId::JudgeWidthScratchGreat,
+                SettingId::JudgeWidthScratchGood,
+                SettingId::LongNoteMargin,
+                SettingId::LnMode,
+                SettingId::GaugeSet,
+                SettingId::GaugeAutoShift,
+                SettingId::BottomShiftableGauge,
+                SettingId::Target,
+            ]
+        );
         assert_eq!(
             tab_rows(SettingTab::Display, &config),
             vec![

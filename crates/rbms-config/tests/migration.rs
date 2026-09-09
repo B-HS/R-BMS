@@ -8,7 +8,8 @@ use std::path::{Path, PathBuf};
 
 use rbms_chart::shuffle::NoteOption;
 use rbms_config::{
-    AudioOptions, CURRENT_SCHEMA_VERSION, Config, ConfigError, DEFAULT_PLAYER_ID, LEGACY_FOLDERS_FILE, LEGACY_SCHEMA_VERSION, LEGACY_TABLES_FILE, load, save,
+    AudioOptions, CURRENT_SCHEMA_VERSION, Config, ConfigError, DEFAULT_PLAYER_ID, JUDGE_WIDTH_TIER_COUNT, LEGACY_FOLDERS_FILE, LEGACY_SCHEMA_VERSION,
+    LEGACY_TABLES_FILE, load, save,
 };
 use rbms_judge::GaugeKind;
 
@@ -60,7 +61,8 @@ fn every_flat_field_lands_in_its_group() {
 
     assert_eq!(c.judge.offset_ms, -33);
     assert!(c.judge.auto_offset);
-    assert_eq!(c.judge.judge_rate, 150);
+    assert_eq!(c.judge.judge_rate_key, [150; JUDGE_WIDTH_TIER_COUNT]);
+    assert_eq!(c.judge.judge_rate_scratch, [150; JUDGE_WIDTH_TIER_COUNT]);
 
     assert!(!c.display.bga);
     assert_eq!(c.display.skin, "WIDE", "the skin name is uppercased on the way in");
@@ -98,7 +100,7 @@ fn a_partial_flat_file_defaults_everything_it_omits() {
     let c = load(&dir.join("settings.ron")).expect("the fixture loads").config;
     assert!((c.play.hispeed - 7.5).abs() < 1e-9);
     assert_eq!(c.play.gauge, GaugeKind::Easy);
-    assert_eq!(c.judge.judge_rate, 120);
+    assert_eq!(c.judge.judge_rate_key, [120; JUDGE_WIDTH_TIER_COUNT]);
     assert_eq!(c.network.rivals, vec!["friend".to_string()]);
 
     let defaults = Config::default();

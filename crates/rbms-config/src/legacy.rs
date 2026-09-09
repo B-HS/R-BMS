@@ -125,7 +125,11 @@ impl From<LegacyV0> for Config {
                 total_override: old.total_override,
                 auto_replay: old.auto_replay,
             },
-            judge: JudgeOptions { offset_ms: old.offset_ms, auto_offset: old.auto_offset, judge_rate: old.judge_rate },
+            judge: {
+                let mut judge = JudgeOptions { offset_ms: old.offset_ms, auto_offset: old.auto_offset, ..JudgeOptions::default() };
+                judge.spread_uniform_judge_rate(old.judge_rate);
+                judge
+            },
             display: DisplayOptions {
                 bga: old.bga,
                 skin: old.skin,

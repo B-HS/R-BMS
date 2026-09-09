@@ -1,5 +1,9 @@
 use rbms_chart::shuffle::NoteOption;
 use rbms_judge::GaugeKind;
+use rbms_judge::algorithm::JudgeAlgorithm;
+use rbms_judge::gauge::GaugeAutoShift;
+use rbms_judge::gauge_tables::GaugeSetId;
+use rbms_judge::ln::LnMode;
 
 use super::*;
 
@@ -25,7 +29,15 @@ fn default_values_are_sane() {
     assert!(c.play.autoplay);
     assert!(c.display.bga);
     assert!(c.play.auto_replay);
-    assert_eq!(c.judge.judge_rate, JUDGE_RATE_DEFAULT_PERCENT);
+    assert_eq!(c.judge.judge_rate_key, UNMODIFIED_JUDGE_RATES);
+    assert_eq!(c.judge.judge_rate_scratch, UNMODIFIED_JUDGE_RATES);
+    assert_eq!(c.judge.longnote_margin_rate, LN_MARGIN_DEFAULT_PERCENT);
+    assert_eq!(c.judge.judge_algorithm, JudgeAlgorithm::default(), "the shipped algorithm is the one the engine judges with by default");
+    assert_eq!(c.judge.ln_mode, LnMode::LongNote);
+    assert_eq!(c.judge.gauge_set, None);
+    assert_eq!(c.judge.gauge_auto_shift, GaugeAutoShift::None);
+    assert_eq!(c.judge.bottom_shiftable_gauge, GaugeKind::AssistEasy);
+    assert_eq!(c.judge.target, ScoreTarget::LocalBest);
     assert_eq!(c.judge.offset_ms, 0);
     assert!(c.library.preview);
     assert_eq!(c.library.songs_folder, None);
@@ -51,6 +63,68 @@ fn default_values_are_sane() {
     assert!((c.audio.system - DEFAULT_BUS_VOLUME).abs() < 1e-6);
 }
 
+/// The JUDGE tab is stored as tokens rather than Rust variant names, so the file stays readable and
+/// the account blob keeps a vocabulary the score server can speak. Every token must come back as the
+/// value it was written from.
+#[test]
+fn every_judge_token_round_trips_through_its_own_vocabulary() {
+    for algorithm in JudgeAlgorithm::ALL {
+        assert_eq!(algorithm_from_token(algorithm_token(algorithm)), algorithm);
+    }
+    for mode in LnMode::ALL {
+        assert_eq!(ln_mode_from_token(ln_mode_token(mode)), mode);
+    }
+    for shift in GaugeAutoShift::ALL {
+        assert_eq!(gauge_auto_shift_from_token(gauge_auto_shift_token(shift)), shift);
+    }
+    for set in GAUGE_SET_CYCLE {
+        assert_eq!(gauge_set_from_token(gauge_set_token(set)), set);
+    }
+    for target in ScoreTarget::ALL {
+        assert_eq!(target_from_token(target.token()), target);
+    }
+}
+
+/// A token no vocabulary knows falls back to the shipped value rather than failing the whole load,
+/// which is what keeps a hand-edited or foreign file usable.
+#[test]
+fn an_unknown_judge_token_falls_back_to_the_shipped_value() {
+    assert_eq!(algorithm_from_token("nonsense"), JudgeAlgorithm::default());
+    assert_eq!(ln_mode_from_token(""), LnMode::LongNote);
+    assert_eq!(gauge_auto_shift_from_token("SIDEWAYS"), GaugeAutoShift::None);
+    assert_eq!(gauge_set_from_token("BEAT_7K"), None, "a mode key is not a choice this row offers");
+    assert_eq!(target_from_token("nonsense"), ScoreTarget::LocalBest);
+    let c: Config = ron::from_str(r#"(schema_version: 2, judge: (judge_algorithm: "nonsense", ln_mode: "?", gauge_set: "?"))"#).expect("a fragment parses");
+    assert_eq!(c.judge.judge_algorithm, JudgeAlgorithm::default());
+    assert_eq!(c.judge.ln_mode, LnMode::LongNote);
+    assert_eq!(c.judge.gauge_set, None);
+}
+
+/// A document written by the build that had one JUDGE WIDTH row spreads that one percentage over
+/// the six the rows became, so an upgrade keeps judging the way the user set it.
+#[test]
+fn a_single_judge_width_document_spreads_over_every_tier() {
+    let (config, from) = migrate(r#"(schema_version: 1, judge: (offset_ms: -20, auto_offset: true, judge_rate: 80))"#).expect("a schema 1 file migrates");
+    assert_eq!(from, Some(SINGLE_JUDGE_WIDTH_SCHEMA_VERSION));
+    assert_eq!(config.judge.judge_rate_key, [80; JUDGE_WIDTH_TIER_COUNT]);
+    assert_eq!(config.judge.judge_rate_scratch, [80; JUDGE_WIDTH_TIER_COUNT]);
+    assert_eq!(config.judge.offset_ms, -20, "the rest of the group comes across untouched");
+    assert!(config.judge.auto_offset);
+    assert_eq!(config.judge.longnote_margin_rate, LN_MARGIN_DEFAULT_PERCENT, "a row that did not exist takes its shipped value");
+    assert_eq!(config.schema_version, CURRENT_SCHEMA_VERSION);
+}
+
+/// A schema 1 document that never moved the JUDGE WIDTH row migrates to the shipped widths rather
+/// than to whatever a missing field would otherwise leave behind.
+#[test]
+fn a_single_judge_width_document_without_the_row_migrates_to_the_shipped_widths() {
+    let (config, from) = migrate(r#"(schema_version: 1, play: (hispeed: 3.0))"#).expect("a schema 1 file migrates");
+    assert_eq!(from, Some(SINGLE_JUDGE_WIDTH_SCHEMA_VERSION));
+    assert_eq!(config.judge.judge_rate_key, UNMODIFIED_JUDGE_RATES);
+    assert_eq!(config.judge.judge_rate_scratch, UNMODIFIED_JUDGE_RATES);
+    assert!((config.play.hispeed - 3.0).abs() < 1e-9);
+}
+
 #[test]
 fn ron_round_trip_preserves_every_field() {
     let mut c = Config::default();
@@ -67,7 +141,15 @@ fn ron_round_trip_preserves_every_field() {
     c.play.auto_replay = false;
     c.judge.offset_ms = -33;
     c.judge.auto_offset = true;
-    c.judge.judge_rate = 150;
+    c.judge.judge_rate_key = [150, 145, 140];
+    c.judge.judge_rate_scratch = [90, 95, 105];
+    c.judge.longnote_margin_rate = 120;
+    c.judge.judge_algorithm = JudgeAlgorithm::Combo;
+    c.judge.ln_mode = LnMode::HellChargeNote;
+    c.judge.gauge_set = Some(GaugeSetId::Lr2);
+    c.judge.gauge_auto_shift = GaugeAutoShift::BestClear;
+    c.judge.bottom_shiftable_gauge = GaugeKind::Normal;
+    c.judge.target = ScoreTarget::IrBest;
     c.display.bga = false;
     c.display.skin = "WIDE".into();
     c.display.debug = true;
@@ -106,7 +188,7 @@ fn a_partial_document_keeps_given_fields_and_defaults_the_rest() {
     assert_eq!(c.play.gauge, GaugeKind::Easy);
     assert_eq!(c.play.random, NoteOption::Off, "missing field defaulted");
     assert!(c.library.preview);
-    assert_eq!(c.judge.judge_rate, JUDGE_RATE_DEFAULT_PERCENT, "an absent group falls back whole");
+    assert_eq!(c.judge.judge_rate_key, UNMODIFIED_JUDGE_RATES, "an absent group falls back whole");
     assert_eq!(c.audio.polyphony, DEFAULT_POLYPHONY_VOICES);
 }
 
@@ -154,7 +236,10 @@ fn sanitise_pulls_a_hand_edited_document_back_into_range() {
     c.play.cover = -1.0;
     c.play.total_override = -50.0;
     c.judge.offset_ms = -9_000;
-    c.judge.judge_rate = 4_000;
+    c.judge.judge_rate_key = [4_000, 4_000, 4_000];
+    c.judge.judge_rate_scratch = [-100, -100, -100];
+    c.judge.longnote_margin_rate = 9_000;
+    c.judge.bottom_shiftable_gauge = GaugeKind::ExHard;
     c.display.skin = "  ".into();
     c.sanitise();
     assert!((c.play.hispeed - HISPEED_MAX).abs() < 1e-9);
@@ -162,7 +247,10 @@ fn sanitise_pulls_a_hand_edited_document_back_into_range() {
     assert!((c.play.cover - LANE_SHADE_MIN).abs() < 1e-6);
     assert!((c.play.total_override - TOTAL_FROM_CHART).abs() < 1e-9);
     assert_eq!(c.judge.offset_ms, JUDGE_OFFSET_MIN_MS);
-    assert_eq!(c.judge.judge_rate, JUDGE_RATE_MAX_PERCENT);
+    assert_eq!(c.judge.judge_rate_key, [JUDGE_RATE_MAX_PERCENT; JUDGE_WIDTH_TIER_COUNT]);
+    assert_eq!(c.judge.judge_rate_scratch, [JUDGE_RATE_MIN_PERCENT; JUDGE_WIDTH_TIER_COUNT]);
+    assert_eq!(c.judge.longnote_margin_rate, LN_MARGIN_MAX_PERCENT);
+    assert_eq!(c.judge.bottom_shiftable_gauge, GaugeKind::Normal, "a gauge the auto-shift floor cannot hold clamps into range");
     assert_eq!(c.display.skin, DEFAULT_SKIN, "a blank skin name falls back instead of resolving to nothing");
 }
 
@@ -396,7 +484,8 @@ fn a_versionless_document_migrates_from_the_flat_schema() {
     assert!((config.play.hispeed - 3.0).abs() < 1e-9);
     assert_eq!(config.play.gauge, GaugeKind::Hard);
     assert_eq!(config.play.random, NoteOption::Mirror);
-    assert_eq!(config.judge.judge_rate, 120);
+    assert_eq!(config.judge.judge_rate_key, [120; JUDGE_WIDTH_TIER_COUNT], "the one JUDGE WIDTH the flat file held covers every tier");
+    assert_eq!(config.judge.judge_rate_scratch, [120; JUDGE_WIDTH_TIER_COUNT]);
     assert_eq!(config.network.rivals, vec!["friend".to_string()]);
     assert_eq!(config.schema_version, CURRENT_SCHEMA_VERSION, "the migrated document is stamped with the current schema");
 }
@@ -421,7 +510,7 @@ fn a_current_document_needs_no_migration() {
 fn migration_clamps_what_the_old_file_held() {
     let (config, _) = migrate("(hispeed: 99.0, judge_rate: 4000, vol_master: 9.0, audio_polyphony: 100000)").expect("a v0 file migrates");
     assert!((config.play.hispeed - HISPEED_MAX).abs() < 1e-9);
-    assert_eq!(config.judge.judge_rate, JUDGE_RATE_MAX_PERCENT);
+    assert_eq!(config.judge.judge_rate_key, [JUDGE_RATE_MAX_PERCENT; JUDGE_WIDTH_TIER_COUNT]);
     assert!((config.audio.master - AUDIO_VOLUME_MAX_GAIN).abs() < 1e-6);
     assert_eq!(config.audio.polyphony, AUDIO_POLYPHONY_MAX_VOICES);
 }
@@ -492,10 +581,13 @@ fn save_then_load_round_trips_on_disk() {
     c.play.hispeed = 5.5;
     c.library.folders = vec!["/songs".into()];
     c.library.tables = vec![TableSource { name: "Insane".into(), location: "https://example.com/insane.json".into() }];
+    for id in tab_rows(SettingTab::Judge, &c) {
+        assert_eq!(adjust(&mut c, id, 1), AdjustOutcome::Changed, "{id:?} steps");
+    }
     save(&c, &path).expect("save creates the parent directory");
     assert!(path.exists());
     let outcome = load(&path).expect("the saved file loads");
-    assert_eq!(outcome.config, c);
+    assert_eq!(outcome.config, c, "every JUDGE row survives a save and a restart");
     assert_eq!(outcome.config.schema_version, CURRENT_SCHEMA_VERSION);
     assert_eq!(outcome.migrated_from, None);
     let _ = std::fs::remove_dir_all(&dir);
