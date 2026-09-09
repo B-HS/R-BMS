@@ -39,6 +39,9 @@ impl NoteOption {
         }
     }
 
+    /// Parses a label or alias, case-insensitively. Unknown input maps to `Off`, so this never fails.
+    /// Prefer the `FromStr` implementation in new code; this inherent form is kept for existing callers.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> NoteOption {
         match s.to_ascii_uppercase().as_str() {
             "MIRROR" => NoteOption::Mirror,
@@ -50,6 +53,14 @@ impl NoteOption {
             "ALL-SCRATCH" | "ALLSCRATCH" | "ALL-SCR" => NoteOption::AllScratch,
             _ => NoteOption::Off,
         }
+    }
+}
+
+impl std::str::FromStr for NoteOption {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(NoteOption::from_str(s))
     }
 }
 
@@ -123,7 +134,6 @@ pub fn lane_permutation(option: NoteOption, mode: Mode, seed: u64) -> Vec<usize>
                 fisher_yates(&mut t, &mut rng);
                 t
             }
-            // S-RANDOM/H-RANDOM/ALL-SCRATCH are per-row (handled in `apply`), not whole-chart perms.
             NoteOption::Off | NoteOption::SRandom | NoteOption::HRandom | NoteOption::AllScratch => lanes.clone(),
         };
         for (i, &old_lane) in lanes.iter().enumerate() {
@@ -260,7 +270,6 @@ fn apply_time_based(model: &mut Model, seed: u64, all_scratch: bool, threshold_u
                     None => free_srcs.push(s),
                 }
             }
-            // H-RANDOM keeps scratch notes on their own lane; only key lanes shuffle.
             if !all_scratch {
                 free_srcs.retain(|&s| {
                     if mode.is_scratch(s) {
@@ -275,12 +284,8 @@ fn apply_time_based(model: &mut Model, seed: u64, all_scratch: bool, threshold_u
                 });
             }
 
-            // Target pool: ALL-SCRATCH includes the scratch lane(s) (filled first); H-RANDOM is key
-            // lanes only. Fresh lanes (idle >= threshold) come first, randomised within each group.
             let mut pool: Vec<usize> = (lo..hi).filter(|&l| (all_scratch || !mode.is_scratch(l)) && !used[l]).collect();
             fisher_yates(&mut pool, &mut rng);
-            // Preference order (lower = picked first): a scratch lane idle past its tight window wins
-            // under ALL-SCRATCH, then any lane idle past the key window, then recently-used lanes.
             let rank = |l: usize| -> u8 {
                 let scr = all_scratch && mode.is_scratch(l);
                 let window = if mode.is_scratch(l) { SCRATCH_THRESHOLD_US } else { threshold_us };
@@ -385,9 +390,6 @@ mod tests {
 
     #[test]
     fn all_scratch_concentrates_notes_on_scratch() {
-        // Key-only chart (channels 11/13/15 -> lanes 0/2/4, no scratch). ALL-SCRATCH prefers the
-        // scratch lane each spaced-out row, so its scratch count rises well above OFF's zero (it is
-        // a preference, not a guarantee: scratch jacks closer than the threshold spill to key lanes).
         let chart = b"#BPM 240\r\n#WAV01 a.wav\r\n#00111:01010101\r\n#00113:01010101\r\n#00115:01010101\r\n";
         let off = model(chart);
         assert_eq!(scratch_note_count(&off), 0, "the key-only chart has no scratch notes");
@@ -399,8 +401,6 @@ mod tests {
 
     #[test]
     fn time_based_options_handle_dense_full_rows_without_panic() {
-        // Every lane filled on every subdivision (more notes per row than spare lanes after the
-        // threshold gate): the shuffle must not panic and must preserve the note count.
         let dense = b"#BPM 300\r\n#WAV01 a.wav\r\n#00111:01010101\r\n#00112:01010101\r\n#00113:01010101\r\n#00114:01010101\r\n#00115:01010101\r\n#00118:01010101\r\n#00119:01010101\r\n#00116:01010101\r\n";
         let base = model(dense);
         for opt in [NoteOption::HRandom, NoteOption::AllScratch] {
@@ -456,8 +456,8 @@ mod tests {
     fn dp_shuffle_stays_within_player_side() {
         for opt in [NoteOption::Mirror, NoteOption::Random, NoteOption::RRandom, NoteOption::Rotate] {
             let perm = lane_permutation(opt, Mode::BEAT_14K, 777);
-            for lane in 0..16 {
-                assert_eq!(lane < 8, perm[lane] < 8, "{:?}: lane {lane} crossed the P1/P2 boundary to {}", opt, perm[lane]);
+            for (lane, mapped) in perm.iter().enumerate() {
+                assert_eq!(lane < 8, *mapped < 8, "{:?}: lane {lane} crossed the P1/P2 boundary to {}", opt, mapped);
             }
         }
     }
@@ -479,10 +479,6 @@ mod tests {
         }
         assert_eq!(head_lane, tail_lane, "LN head and tail end up in the same lane");
     }
-
-    // -----------------------------------------------------------------------
-    // shared helpers
-    // -----------------------------------------------------------------------
 
     fn dp_model(bms: &[u8]) -> Model {
         to_model(&parse(bms), Mode::BEAT_14K)
@@ -525,10 +521,6 @@ mod tests {
         m.timelines.iter().filter(|tl| tl.notes.get(7).map(|s| s.is_some()).unwrap_or(false)).count()
     }
 
-    // -----------------------------------------------------------------------
-    // NoteOption::from_str / label round trips
-    // -----------------------------------------------------------------------
-
     #[test]
     fn from_str_round_trips_every_label() {
         for opt in NoteOption::ALL {
@@ -548,6 +540,14 @@ mod tests {
     }
 
     #[test]
+    fn from_str_trait_matches_inherent_parse() {
+        for label in ["mirror", "S-RANDOM", "ALL-SCR", "nonsense", ""] {
+            let via_trait: NoteOption = label.parse().unwrap();
+            assert_eq!(via_trait, NoteOption::from_str(label), "FromStr must agree with the inherent parser for {label:?}");
+        }
+    }
+
+    #[test]
     fn from_str_unknown_is_off() {
         assert_eq!(NoteOption::from_str("nonsense"), NoteOption::Off);
         assert_eq!(NoteOption::from_str(""), NoteOption::Off);
@@ -562,13 +562,8 @@ mod tests {
         assert_eq!(seen.len(), 8, "ALL has no duplicates");
     }
 
-    // -----------------------------------------------------------------------
-    // lane_permutation: per-mode structural guarantees
-    // -----------------------------------------------------------------------
-
     #[test]
     fn mirror_fully_reverses_popn_lanes() {
-        // POPN has no scratch lane, so MIRROR reverses every one of the 9 lanes.
         let perm = lane_permutation(NoteOption::Mirror, Mode::POPN_9K, 0);
         assert_eq!(perm, vec![8, 7, 6, 5, 4, 3, 2, 1, 0]);
     }
@@ -581,7 +576,6 @@ mod tests {
 
     #[test]
     fn mirror_is_an_involution_on_key_lanes() {
-        // Applying MIRROR's permutation twice returns identity (it is its own inverse).
         let perm = lane_permutation(NoteOption::Mirror, Mode::BEAT_7K, 0);
         for l in 0..8 {
             assert_eq!(perm[perm[l]], l, "mirror twice is identity on lane {l}");
@@ -590,10 +584,9 @@ mod tests {
 
     #[test]
     fn rotate_is_a_derangement_on_key_lanes() {
-        // ROTATE shifts every key lane by one, so no key lane maps to itself; only scratch is fixed.
         let perm = lane_permutation(NoteOption::Rotate, Mode::BEAT_7K, 0);
-        for l in 0..7 {
-            assert_ne!(perm[l], l, "key lane {l} must move under ROTATE");
+        for (l, mapped) in perm.iter().enumerate().take(7) {
+            assert_ne!(*mapped, l, "key lane {l} must move under ROTATE");
         }
         assert_eq!(perm[7], 7, "scratch fixed");
     }
@@ -615,7 +608,6 @@ mod tests {
 
     #[test]
     fn dp_mirror_mirrors_each_side_independently() {
-        // 14K MIRROR reverses lanes 0..6 within P1 and 8..14 within P2, scratch 7 and 15 fixed.
         let perm = lane_permutation(NoteOption::Mirror, Mode::BEAT_14K, 0);
         assert_eq!(perm, vec![6, 5, 4, 3, 2, 1, 0, 7, 14, 13, 12, 11, 10, 9, 8, 15]);
     }
@@ -624,8 +616,8 @@ mod tests {
     fn dp_perm_never_crosses_player_boundary() {
         for opt in [NoteOption::Mirror, NoteOption::Random, NoteOption::RRandom, NoteOption::Rotate] {
             let perm = lane_permutation(opt, Mode::BEAT_14K, 4242);
-            for lane in 0..16 {
-                assert_eq!(lane < 8, perm[lane] < 8, "{:?}: lane {lane} crossed sides to {}", opt, perm[lane]);
+            for (lane, mapped) in perm.iter().enumerate() {
+                assert_eq!(lane < 8, *mapped < 8, "{:?}: lane {lane} crossed sides to {}", opt, mapped);
             }
         }
     }
@@ -638,7 +630,6 @@ mod tests {
 
     #[test]
     fn srandom_hrandom_allscratch_yield_identity_in_lane_permutation() {
-        // These are per-row options; lane_permutation returns identity for them (the real work is in apply).
         for opt in [NoteOption::SRandom, NoteOption::HRandom, NoteOption::AllScratch] {
             assert_eq!(lane_permutation(opt, Mode::BEAT_7K, 1), (0..8).collect::<Vec<_>>(), "{:?} is identity at the perm level", opt);
         }
@@ -655,16 +646,11 @@ mod tests {
 
     #[test]
     fn rng_seed_zero_does_not_collapse() {
-        // The PRNG remaps a 0 seed to a nonzero constant, so RANDOM at seed 0 is still a real shuffle.
         let perm = lane_permutation(NoteOption::Random, Mode::BEAT_7K, 0);
         let mut sorted = perm.clone();
         sorted.sort_unstable();
         assert_eq!(sorted, (0..8).collect::<Vec<_>>(), "still a bijection at seed 0");
     }
-
-    // -----------------------------------------------------------------------
-    // apply: count preservation across EVERY option and several modes
-    // -----------------------------------------------------------------------
 
     #[test]
     fn apply_off_is_a_noop() {
@@ -701,8 +687,6 @@ mod tests {
 
     #[test]
     fn apply_preserves_count_for_every_option_popn() {
-        // POPN has no scratch; ALL-SCRATCH and H-RANDOM must still preserve the note count.
-        // POPN lanes 0-4 come from channels 11-15 (raw 0-4); lanes 5-8 from channels 21-24 (raw 10-13).
         let base = to_model(
             &parse(b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:0101\r\n#00112:0011\r\n#00113:0110\r\n#00114:1001\r\n#00115:0101\r\n#00121:1010\r\n#00122:0100\r\n"),
             Mode::POPN_9K,
@@ -739,14 +723,8 @@ mod tests {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // apply: scratch lane is never moved by key shuffles
-    // -----------------------------------------------------------------------
-
     #[test]
     fn key_shuffles_keep_scratch_notes_on_scratch_lane() {
-        // Chart with scratch notes (ch16 -> lane 7) and key notes. MIRROR/RANDOM/ROTATE/RRANDOM keep
-        // the scratch column untouched: every original scratch row still has its scratch note.
         let chart = b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:01010101\r\n#00116:01010101\r\n#00113:00110011\r\n";
         let base = model(chart);
         let scratch_before = scratch_rows(&base);
@@ -760,7 +738,6 @@ mod tests {
 
     #[test]
     fn hrandom_keeps_scratch_notes_on_scratch_lane() {
-        // H-RANDOM shuffles only key lanes; the scratch column count is invariant.
         let chart = b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:01010101\r\n#00116:01010101\r\n#00113:00110011\r\n";
         let base = model(chart);
         let scratch_before = scratch_rows(&base);
@@ -769,13 +746,8 @@ mod tests {
         assert_eq!(scratch_rows(&m), scratch_before, "H-RANDOM leaves scratch notes in place");
     }
 
-    // -----------------------------------------------------------------------
-    // LN integrity under every shuffle
-    // -----------------------------------------------------------------------
-
     #[test]
     fn every_option_keeps_single_ln_head_and_tail_aligned() {
-        // One LN spanning a few rows mixed with normal notes; head and tail must remain co-lane.
         let chart = b"#BPM 120\r\n#WAV01 a.wav\r\n#00151:01000001\r\n#00113:00100100\r\n#00112:01000010\r\n";
         for opt in NoteOption::ALL {
             let mut m = model(chart);
@@ -787,8 +759,6 @@ mod tests {
 
     #[test]
     fn srandom_preserves_count_with_open_ln_across_dense_rows() {
-        // An LN stays open across rows that also carry shuffling normal notes: count is preserved and
-        // the pin keeps the head/tail aligned.
         let chart = b"#BPM 120\r\n#WAV01 a.wav\r\n#00151:01000001\r\n#00111:01010101\r\n#00113:01010101\r\n";
         let base = model(chart);
         let mut m = base.clone();
@@ -796,10 +766,6 @@ mod tests {
         assert_eq!(note_count(&m), note_count(&base));
         assert!(ln_pairs_aligned(&m), "S-RANDOM keeps the open LN pinned");
     }
-
-    // -----------------------------------------------------------------------
-    // determinism for the per-row options
-    // -----------------------------------------------------------------------
 
     #[test]
     fn all_options_are_deterministic_for_a_seed() {
@@ -816,21 +782,13 @@ mod tests {
 
     #[test]
     fn different_seeds_can_produce_different_random_layouts() {
-        // Sanity: RANDOM is seed-sensitive (not a constant permutation). At least one of a few seeds
-        // differs from seed 0 (5040 permutations make an all-collision essentially impossible).
         let p0 = lane_permutation(NoteOption::Random, Mode::BEAT_7K, 0);
         let differs = [1u64, 2, 3, 4, 5].iter().any(|&s| lane_permutation(NoteOption::Random, Mode::BEAT_7K, s) != p0);
         assert!(differs, "RANDOM should vary across seeds");
     }
 
-    // -----------------------------------------------------------------------
-    // robustness: dense / degenerate inputs do not panic
-    // -----------------------------------------------------------------------
-
     #[test]
     fn time_based_options_survive_fully_dense_rows() {
-        // Every key + scratch lane filled on every subdivision: more notes than fresh lanes after the
-        // anti-jack gate. Must not panic and must preserve the count.
         let dense = b"#BPM 300\r\n#WAV01 a.wav\r\n#00111:01010101\r\n#00112:01010101\r\n#00113:01010101\r\n#00114:01010101\r\n#00115:01010101\r\n#00118:01010101\r\n#00119:01010101\r\n#00116:01010101\r\n";
         let base = model(dense);
         for opt in [NoteOption::HRandom, NoteOption::AllScratch, NoteOption::SRandom] {
@@ -842,7 +800,6 @@ mod tests {
 
     #[test]
     fn apply_on_empty_chart_does_not_panic() {
-        // No notes at all: every option is a no-op that leaves the (note-free) timelines intact.
         let base = model(b"#BPM 120\r\n#WAV01 a.wav\r\n");
         for opt in NoteOption::ALL {
             let mut m = base.clone();
@@ -853,8 +810,6 @@ mod tests {
 
     #[test]
     fn all_scratch_raises_scratch_population_above_off() {
-        // A key-only chart with well-spaced rows: ALL-SCRATCH concentrates notes onto the scratch lane,
-        // so its scratch-row count exceeds OFF's zero. (A preference, not a guarantee, hence >= a few.)
         let chart = b"#BPM 240\r\n#WAV01 a.wav\r\n#00111:01010101\r\n#00113:01010101\r\n#00115:01010101\r\n";
         let off = model(chart);
         assert_eq!(scratch_rows(&off), 0);

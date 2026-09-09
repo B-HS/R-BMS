@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use std::collections::BTreeMap;
 
 use md5::{Digest, Md5};
@@ -116,15 +118,9 @@ pub struct BmsSource {
     pub sha256: String,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct ParseOptions {
     pub random_seed: u64,
-}
-
-impl Default for ParseOptions {
-    fn default() -> Self {
-        ParseOptions { random_seed: 0 }
-    }
 }
 
 pub fn parse(bytes: &[u8]) -> BmsSource {
@@ -151,10 +147,11 @@ pub fn parse_with(bytes: &[u8], opts: ParseOptions) -> BmsSource {
 
     for raw in text.lines() {
         let l = raw.trim();
-        if let Some(p) = l.get(..5) {
-            if p.eq_ignore_ascii_case("#BASE") && l.get(5..).map(str::trim) == Some("62") {
-                src.base = 62;
-            }
+        if let Some(p) = l.get(..5)
+            && p.eq_ignore_ascii_case("#BASE")
+            && l.get(5..).map(str::trim) == Some("62")
+        {
+            src.base = 62;
         }
     }
 

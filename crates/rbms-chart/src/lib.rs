@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use rbms_model::{LnKind, Micros, Mode, Model, ModelMeta, Note, NoteKind, TimeLine};
 
 pub use rbms_model::{VOLWAV_DEFAULT_PERCENT, chart_gain, default_total, default_total_keyboard};
@@ -96,9 +98,6 @@ struct Ev {
 pub fn to_model(src: &BmsSource, mode: Mode) -> Model {
     let base = src.base;
     let lnobj = src.headers.lnobj;
-    // Reference `#LNMODE`: 0=undefined(→LN), 1=LN, 2=CN, 3=HCN. The kind applies to every long note
-    // in the chart; judging is identical across kinds for now (the model records the kind so the
-    // distinction is preserved for rendering/scoring).
     let ln_kind = match src.headers.lnmode {
         2 => LnKind::Cn,
         3 => LnKind::Hcn,
@@ -178,7 +177,15 @@ pub fn to_model(src: &BmsSource, mode: Mode) -> Model {
                 timelines.len() - 1
             }
         };
-        apply_event(&ev.kind, idx, ln_kind, &mut timelines, &mut exp_bpm, &mut exp_scroll, &mut exp_stop, &mut ln_open, &mut last_normal_tl);
+        let mut targets = EventTargets {
+            timelines: &mut timelines,
+            exp_bpm: &mut exp_bpm,
+            exp_scroll: &mut exp_scroll,
+            exp_stop: &mut exp_stop,
+            ln_open: &mut ln_open,
+            last_normal: &mut last_normal_tl,
+        };
+        apply_event(&ev.kind, idx, ln_kind, &mut targets);
     }
 
     assign_times(&mut timelines, &exp_bpm, &exp_scroll, &exp_stop, src.headers.init_bpm);
@@ -211,17 +218,17 @@ pub fn to_model(src: &BmsSource, mode: Mode) -> Model {
     }
 }
 
-fn apply_event(
-    kind: &EvKind,
-    idx: usize,
-    ln_kind: LnKind,
-    timelines: &mut [TimeLine],
-    exp_bpm: &mut [Option<f64>],
-    exp_scroll: &mut [Option<f64>],
-    exp_stop: &mut [Option<f64>],
-    ln_open: &mut [bool],
-    last_normal: &mut [Option<usize>],
-) {
+struct EventTargets<'a> {
+    timelines: &'a mut [TimeLine],
+    exp_bpm: &'a mut [Option<f64>],
+    exp_scroll: &'a mut [Option<f64>],
+    exp_stop: &'a mut [Option<f64>],
+    ln_open: &'a mut [bool],
+    last_normal: &'a mut [Option<usize>],
+}
+
+fn apply_event(kind: &EvKind, idx: usize, ln_kind: LnKind, targets: &mut EventTargets<'_>) {
+    let EventTargets { timelines, exp_bpm, exp_scroll, exp_stop, ln_open, last_normal } = targets;
     let section = timelines[idx].section;
     match kind {
         EvKind::SectionLine => timelines[idx].section_line = true,
@@ -335,8 +342,6 @@ pub fn count_playable_notes(model: &Model) -> usize {
         .flatten()
         .filter(|n| match &n.kind {
             NoteKind::Mine { .. } => false,
-            // CN/HCN ends are judged (counted) separately at release, so a charge note counts twice;
-            // a plain LN end is not a separate judgment. Keeps the count in step with the judge engine.
             NoteKind::LongEnd { ln } => matches!(ln, LnKind::Cn | LnKind::Hcn),
             _ => true,
         })
@@ -361,12 +366,8 @@ pub struct NoteDensity {
 /// (≤0 ⇒ the standard BMS default total derived from the note count, mirroring the reference implementation which never
 /// sees a zero total).
 pub fn note_density(model: &Model, total_value: f64) -> NoteDensity {
-    // Size the bins from the last NOTE-bearing timeline, mirroring the reference implementation's `BMSModel.getLastMilliTime`:
-    // `to_model` emits a bar-line timeline per measure, so the unconditional last timeline can sit many
-    // empty seconds past the final note and would pad the histogram with phantom bins.
     let last_us = model.timelines.iter().rev().find(|t| t.notes.iter().any(Option::is_some)).map(|t| t.time_us).unwrap_or(0);
     let bins = (last_us / 1_000_000) as usize + 2;
-    // [0]=scr LN-head, [1]=scr LN-body, [2]=scr normal, [3]=key LN-head, [4]=key LN-body, [5]=key normal, [6]=mine.
     let mut data = vec![[0i32; 7]; bins];
     let scr = |lane: usize| model.mode.scratch.contains(&lane);
     let mut open_head = vec![None::<usize>; model.mode.key];
@@ -388,8 +389,6 @@ pub fn note_density(model: &Model, total_value: f64) -> NoteDensity {
                     data[sec][6] += 1;
                     counted[sec] += 1;
                 }
-                // Count the head at head-time (independent of seeing the tail, so dangling heads still
-                // register); the body then fills head+1..=end. Net per-second sums equal the reference implementation's.
                 NoteKind::LongStart { .. } => {
                     data[sec][if scr(lane) { 0 } else { 3 }] += 1;
                     total_notes += 1;
@@ -398,8 +397,9 @@ pub fn note_density(model: &Model, total_value: f64) -> NoteDensity {
                 }
                 NoteKind::LongEnd { .. } => {
                     if let Some(head) = open_head[lane].take() {
-                        for b in (head + 1)..=sec {
-                            data[b][if scr(lane) { 1 } else { 4 }] += 1;
+                        let col = if scr(lane) { 1 } else { 4 };
+                        for row in data.iter_mut().take(sec + 1).skip(head + 1) {
+                            row[col] += 1;
                         }
                     }
                 }

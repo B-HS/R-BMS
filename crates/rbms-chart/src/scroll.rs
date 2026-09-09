@@ -111,8 +111,8 @@ pub fn constant_offsets(timelines: &[TimeLine], microtime: i64, hispeed: f64, la
         Ok(i) => i,
         Err(i) => i.saturating_sub(1),
     };
-    for i in (cur + 1)..timelines.len() {
-        let y = (timelines[i].time_us - microtime) as f64 * pps;
+    for (i, tl) in timelines.iter().enumerate().skip(cur + 1) {
+        let y = (tl.time_us - microtime) as f64 * pps;
         out.push((i, y as f32));
         if y > lane_height as f64 {
             break;
@@ -196,26 +196,19 @@ mod tests {
         assert!((o_at_stop - o_mid_stop).abs() < 0.5, "stop should freeze: {o_at_stop} vs {o_mid_stop}");
     }
 
-    // -----------------------------------------------------------------------
-    // closed_form_offset boundary behavior
-    // -----------------------------------------------------------------------
-
     #[test]
     fn closed_form_offset_is_zero_at_note_time() {
-        // A note exactly at microtime sits on the judgment line (offset 0).
         assert_eq!(closed_form_offset(1_000_000, 1_000_000, 180.0, 1.0, 1.0, 600.0), 0.0);
     }
 
     #[test]
     fn closed_form_offset_is_positive_before_arrival() {
-        // Before the note arrives (microtime < note_time) the offset is above the line (positive).
         let off = closed_form_offset(1_000_000, 999_000, 120.0, 1.0, 1.0, 600.0);
         assert!(off > 0.0, "approaching note is above the line, got {off}");
     }
 
     #[test]
     fn closed_form_offset_is_negative_after_passing() {
-        // A note whose time is in the past (microtime > note_time) has scrolled below the line.
         let off = closed_form_offset(1_000_000, 1_001_000, 120.0, 1.0, 1.0, 600.0);
         assert!(off < 0.0, "passed note is below the line, got {off}");
     }
@@ -242,10 +235,6 @@ mod tests {
         assert!((pos + neg).abs() < 1e-3, "magnitudes match");
     }
 
-    // -----------------------------------------------------------------------
-    // green_number guards
-    // -----------------------------------------------------------------------
-
     #[test]
     fn green_number_zero_for_nonpositive_bpm() {
         assert_eq!(green_number(0.0, 1.0, 1.0, 0.0), 0.0);
@@ -265,7 +254,6 @@ mod tests {
 
     #[test]
     fn green_number_lanecover_reduces_travel_time() {
-        // lanecover removes a fraction of the lane; green = (240000/bpm/hs)/scroll * (1 - cover).
         let full = green_number(120.0, 1.0, 1.0, 0.0);
         let half = green_number(120.0, 1.0, 1.0, 0.5);
         assert_eq!(full, 2000.0, "240000/120 = 2000 ms");
@@ -281,10 +269,6 @@ mod tests {
         assert!((c - a / 2.0).abs() < 1e-6, "double hispeed halves green");
     }
 
-    // -----------------------------------------------------------------------
-    // visible_offsets / constant_offsets structural guards
-    // -----------------------------------------------------------------------
-
     #[test]
     fn visible_offsets_empty_for_too_few_timelines() {
         assert!(visible_offsets(&[], 0, 1.0, 600.0).is_empty());
@@ -294,8 +278,6 @@ mod tests {
 
     #[test]
     fn visible_offsets_are_monotonically_increasing_under_positive_scroll() {
-        // With all-positive scroll, offsets above the line grow strictly with timeline index (notes
-        // farther in the future are higher up). Verifies the walk accumulates correctly.
         let tls = timelines(b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:01\r\n#00211:01\r\n#00311:01\r\n#00411:01\r\n");
         let offs = visible_offsets(&tls, 0, 1.0, 100_000.0);
         let ys: Vec<f32> = offs.iter().map(|(_, y)| *y).collect();
@@ -305,7 +287,6 @@ mod tests {
 
     #[test]
     fn visible_offsets_walk_agrees_with_closed_form_under_constant_bpm() {
-        // The exact segment walk must match the closed-form fast path when BPM/SCROLL/STOP are constant.
         let tls = timelines(b"#BPM 150\r\n#WAV01 a.wav\r\n#00111:01\r\n#00211:01\r\n#00311:01\r\n");
         for &note_t in &[tls[1].time_us, tls.last().unwrap().time_us] {
             let micro = note_t - 300_000;
@@ -317,13 +298,10 @@ mod tests {
 
     #[test]
     fn visible_offsets_breaks_once_past_lane_height() {
-        // The walk stops collecting beyond the visible window (once y exceeds lane_height) — the last
-        // emitted offset is the first one over the height, and nothing further is added.
         let tls = timelines(b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:01\r\n#00211:01\r\n#00311:01\r\n#00411:01\r\n#00511:01\r\n");
-        let h = 50.0f32; // small height so the window closes quickly
+        let h = 50.0f32;
         let offs = visible_offsets(&tls, 0, 1.0, h);
         assert!(!offs.is_empty());
-        // Every emitted offset except possibly the final one is within the lane height.
         for (_, y) in &offs[..offs.len() - 1] {
             assert!(*y <= h, "intermediate offset {y} should be within lane height {h}");
         }
@@ -331,9 +309,6 @@ mod tests {
 
     #[test]
     fn constant_offsets_zero_for_note_at_microtime() {
-        // A note exactly at microtime would be at offset 0 — but constant_offsets only emits FUTURE
-        // timelines (i > cur). The note at index 0 with microtime 0 is `cur`, so the first emitted is
-        // a strictly-later note with positive offset.
         let tls = timelines(b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:01\r\n#00211:01\r\n");
         let offs = constant_offsets(&tls, 0, 1.0, 1200.0);
         assert!(offs.iter().all(|(_, y)| *y >= 0.0), "future offsets are non-negative: {offs:?}");
@@ -341,7 +316,6 @@ mod tests {
 
     #[test]
     fn constant_offsets_independent_of_bpm_for_equal_time_to_arrival() {
-        // CONSTANT scroll: offset depends only on (time_us - microtime), not BPM. Same dt -> same y.
         let a = timelines(b"#BPM 100\r\n#WAV01 a.wav\r\n#00111:01\r\n");
         let b = timelines(b"#BPM 200\r\n#WAV01 a.wav\r\n#00111:01\r\n");
         let na = a.iter().rev().find_map(|t| t.notes[0].as_ref().map(|n| n.time_us)).unwrap();
@@ -363,8 +337,6 @@ mod tests {
 
     #[test]
     fn green_number_matches_closed_form_traversal() {
-        // The green number (ms across the lane) must equal the closed-form time for a note to cross the
-        // full lane height. Cross-check the two scroll primitives.
         let h = 800.0f32;
         let gn = green_number(150.0, 1.0, 1.0, 0.0);
         let dt_us = (gn * 1000.0) as i64;

@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 pub mod mode;
 
 pub use mode::Mode;
@@ -149,8 +151,6 @@ pub struct Model {
 mod tests {
     use super::*;
 
-    // ---- measure_us / US_PER_MEASURE_NUM invariant ----
-
     #[test]
     fn us_per_measure_num_is_240_million() {
         assert_eq!(US_PER_MEASURE_NUM, 240_000_000.0);
@@ -165,7 +165,6 @@ mod tests {
 
     #[test]
     fn measure_us_known_values() {
-        // 240_000_000 / bpm
         assert_eq!(measure_us(120.0), 2_000_000.0);
         assert_eq!(measure_us(60.0), 4_000_000.0);
         assert_eq!(measure_us(240.0), 1_000_000.0);
@@ -174,7 +173,6 @@ mod tests {
 
     #[test]
     fn measure_us_is_monotonically_decreasing_in_bpm() {
-        // Higher BPM => shorter measure.
         let bpms = [30.0, 60.0, 90.0, 120.0, 180.0, 240.0, 480.0];
         for w in bpms.windows(2) {
             assert!(measure_us(w[0]) > measure_us(w[1]), "{} vs {}", w[0], w[1]);
@@ -183,21 +181,18 @@ mod tests {
 
     #[test]
     fn measure_us_inverse_proportionality() {
-        // Doubling BPM halves the measure length.
         assert_eq!(measure_us(120.0), measure_us(240.0) * 2.0);
         assert_eq!(measure_us(100.0) / 2.0, measure_us(200.0));
     }
 
     #[test]
     fn measure_us_zero_bpm_is_infinite() {
-        // NOTE: suspect - division by zero yields +inf rather than an error/guard.
         assert!(measure_us(0.0).is_infinite());
         assert!(measure_us(0.0).is_sign_positive());
     }
 
     #[test]
     fn measure_us_negative_bpm_is_negative() {
-        // NOTE: suspect - negative BPM produces a negative measure length, not guarded.
         assert!(measure_us(-120.0) < 0.0);
         assert_eq!(measure_us(-120.0), -2_000_000.0);
     }
@@ -206,8 +201,6 @@ mod tests {
     fn measure_us_is_deterministic() {
         assert_eq!(measure_us(174.0), measure_us(174.0));
     }
-
-    // ---- TimeLine::empty defaults ----
 
     #[test]
     fn timeline_empty_default_fields() {
@@ -252,7 +245,6 @@ mod tests {
     fn timeline_empty_notes_and_hidden_are_independent() {
         let mut tl = TimeLine::empty(2, 0, 0.0, 120.0);
         tl.notes[0] = Some(Note::normal(1, 0, 0.0));
-        // Mutating notes must not affect hidden.
         assert!(tl.notes[0].is_some());
         assert!(tl.hidden[0].is_none());
     }
@@ -263,8 +255,6 @@ mod tests {
         assert_eq!(tl.time_us, -500);
         assert_eq!(tl.section, -1.0);
     }
-
-    // ---- Note::normal zeroing ----
 
     #[test]
     fn note_normal_zeroes_long_note_fields() {
@@ -309,8 +299,6 @@ mod tests {
         assert_eq!(a.kind, b.kind);
     }
 
-    // ---- enum value equality ----
-
     #[test]
     fn long_kind_distinguishes_variants() {
         assert_eq!(LnKind::Ln, LnKind::Ln);
@@ -331,8 +319,6 @@ mod tests {
         assert_eq!(NoteKind::Mine { damage: 1.0 }, NoteKind::Mine { damage: 1.0 });
         assert_ne!(NoteKind::Mine { damage: 1.0 }, NoteKind::Mine { damage: 2.0 });
     }
-
-    // ---- ModelMeta default ----
 
     #[test]
     fn model_meta_default_is_empty_and_zeroed() {
@@ -401,8 +387,6 @@ mod tests {
             prev = g;
         }
     }
-
-    // ---- Note clone round-trip ----
 
     #[test]
     fn note_clone_round_trip_preserves_fields() {

@@ -56,14 +56,12 @@ mod tests {
         assert_eq!(Mode::BEAT_14K.lane_of_raw(17), Some(14));
     }
 
-    // ---- exhaustive lane_of_raw maps for every mode, raw 0..18 ----
-
     #[test]
     fn beat_7k_lane_of_raw_full_map() {
         let expected: [Option<usize>; 18] =
             [Some(0), Some(1), Some(2), Some(3), Some(4), Some(7), None, Some(5), Some(6), None, None, None, None, None, None, None, None, None];
-        for raw in 0..18 {
-            assert_eq!(Mode::BEAT_7K.lane_of_raw(raw), expected[raw], "raw={raw}");
+        for (raw, want) in expected.iter().enumerate() {
+            assert_eq!(Mode::BEAT_7K.lane_of_raw(raw), *want, "raw={raw}");
         }
     }
 
@@ -71,8 +69,8 @@ mod tests {
     fn beat_5k_lane_of_raw_full_map() {
         let expected: [Option<usize>; 18] =
             [Some(0), Some(1), Some(2), Some(3), Some(4), Some(5), None, None, None, None, None, None, None, None, None, None, None, None];
-        for raw in 0..18 {
-            assert_eq!(Mode::BEAT_5K.lane_of_raw(raw), expected[raw], "raw={raw}");
+        for (raw, want) in expected.iter().enumerate() {
+            assert_eq!(Mode::BEAT_5K.lane_of_raw(raw), *want, "raw={raw}");
         }
     }
 
@@ -80,8 +78,8 @@ mod tests {
     fn beat_10k_lane_of_raw_full_map() {
         let expected: [Option<usize>; 18] =
             [Some(0), Some(1), Some(2), Some(3), Some(4), Some(5), None, None, None, Some(6), Some(7), Some(8), Some(9), Some(10), Some(11), None, None, None];
-        for raw in 0..18 {
-            assert_eq!(Mode::BEAT_10K.lane_of_raw(raw), expected[raw], "raw={raw}");
+        for (raw, want) in expected.iter().enumerate() {
+            assert_eq!(Mode::BEAT_10K.lane_of_raw(raw), *want, "raw={raw}");
         }
     }
 
@@ -107,8 +105,8 @@ mod tests {
             Some(13),
             Some(14),
         ];
-        for raw in 0..18 {
-            assert_eq!(Mode::BEAT_14K.lane_of_raw(raw), expected[raw], "raw={raw}");
+        for (raw, want) in expected.iter().enumerate() {
+            assert_eq!(Mode::BEAT_14K.lane_of_raw(raw), *want, "raw={raw}");
         }
     }
 
@@ -116,12 +114,10 @@ mod tests {
     fn popn_9k_lane_of_raw_full_map() {
         let expected: [Option<usize>; 18] =
             [Some(0), Some(1), Some(2), Some(3), Some(4), None, None, None, None, None, Some(5), Some(6), Some(7), Some(8), None, None, None, None];
-        for raw in 0..18 {
-            assert_eq!(Mode::POPN_9K.lane_of_raw(raw), expected[raw], "raw={raw}");
+        for (raw, want) in expected.iter().enumerate() {
+            assert_eq!(Mode::POPN_9K.lane_of_raw(raw), *want, "raw={raw}");
         }
     }
-
-    // ---- out-of-range raw indices ----
 
     #[test]
     fn lane_of_raw_out_of_range_is_none_for_all_modes() {
@@ -132,8 +128,6 @@ mod tests {
             assert_eq!(mode.lane_of_raw(usize::MAX), None, "{}", mode.name);
         }
     }
-
-    // ---- lane_of_raw invariants ----
 
     #[test]
     fn lane_of_raw_never_exceeds_key() {
@@ -148,7 +142,6 @@ mod tests {
 
     #[test]
     fn lane_of_raw_matches_table_within_key() {
-        // lane_of_raw is exactly: table value if 0 <= v < key, else None.
         for mode in Mode::ALL {
             for raw in 0..18 {
                 let v = mode.channel_assign[raw];
@@ -160,7 +153,6 @@ mod tests {
 
     #[test]
     fn lane_of_raw_logical_lanes_cover_full_key_range_once() {
-        // Every logical lane 0..key must be produced by exactly one raw index.
         for mode in Mode::ALL {
             let mut produced: Vec<usize> = (0..18).filter_map(|raw| mode.lane_of_raw(raw)).collect();
             produced.sort_unstable();
@@ -168,8 +160,6 @@ mod tests {
             assert_eq!(produced, expected, "{}", mode.name);
         }
     }
-
-    // ---- is_scratch ----
 
     #[test]
     fn is_scratch_matches_scratch_slice_for_all_modes() {
@@ -222,7 +212,6 @@ mod tests {
 
     #[test]
     fn scratch_lanes_are_reachable_via_lane_of_raw() {
-        // A scratch lane is a real logical lane, so some raw must map onto it.
         for mode in Mode::ALL {
             for &s in mode.scratch {
                 let reachable = (0..18).any(|raw| mode.lane_of_raw(raw) == Some(s));
@@ -231,12 +220,8 @@ mod tests {
         }
     }
 
-    // ---- channel_assign self-consistency ----
-
     #[test]
     fn channel_assign_p1_group_values_below_key() {
-        // Per the doc contract: every non -1 value in the P1 group (raw 0..9)
-        // must be a valid lane (< key) for that mode.
         for mode in Mode::ALL {
             for raw in 0..9 {
                 let v = mode.channel_assign[raw];
@@ -250,7 +235,6 @@ mod tests {
 
     #[test]
     fn channel_assign_no_duplicate_logical_lanes() {
-        // Within the lanes a mode actually owns (value < key), no logical lane repeats.
         for mode in Mode::ALL {
             let mut seen: Vec<i8> = Vec::new();
             for &v in mode.channel_assign.iter() {
@@ -264,15 +248,12 @@ mod tests {
 
     #[test]
     fn channel_assign_negative_values_are_exactly_minus_one() {
-        // The contract uses -1 (and only -1) as the "ignored" sentinel.
         for mode in Mode::ALL {
             for &v in mode.channel_assign.iter() {
                 assert!(v == -1 || v >= 0, "{} unexpected negative sentinel {v}", mode.name);
             }
         }
     }
-
-    // ---- Mode constant invariants ----
 
     #[test]
     fn all_modes_have_distinct_names() {
