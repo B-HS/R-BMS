@@ -3,6 +3,7 @@
 //! Split out of `main.rs` (see `app_input` for the import note); the folder/table *sources* the
 //! library is built from live in `app_library`.
 #![allow(clippy::wildcard_imports)]
+use crate::app_play::schedule_position_us;
 use crate::*;
 
 impl App {
@@ -302,14 +303,28 @@ impl App {
         });
     }
 
+    /// Whether a select preview is loading or sounding. The shared output stream is not evidence of
+    /// that any more, since it stays open for the whole app lifetime.
+    pub(crate) fn preview_active(&self) -> bool {
+        self.preview_si.is_some() || self.preview_prep_rx.is_some()
+    }
+
+    /// Sample id of preview keysound `wav` inside the preview namespace, clamped so a chart with an
+    /// absurd `#WAV` index cannot spill into a neighbouring namespace.
+    pub(crate) fn preview_sample_id(wav: u32) -> u32 {
+        IdNamespace::PREVIEW.base + wav.min(IdNamespace::PREVIEW.len - 1)
+    }
+
     /// Drive the song-select hover preview once the focus settles (debounced so fast scrolling
     /// doesn't load every row): if the chart defines a `#PREVIEW` clip, decode + loop that file;
     /// otherwise build an autoplay preview of the chart itself (background-decode its keysounds, then
-    /// replay the autoplay timeline, looped). The preview audio engine is separate from the play
-    /// engine (which only exists during Play) and recreated per settled chart so its bank is clean.
+    /// replay the autoplay timeline, looped). Preview sounds live in their own id namespace inside
+    /// the shared engine, which is cleared per settled chart so the bank stays clean. Autoplay
+    /// events are booked before the end-of-loop check, so the final one is never skipped; the loop
+    /// then restarts by re-anchoring once the silent tail has elapsed.
     pub(crate) fn update_preview(&mut self) {
         if !self.config.preview {
-            if self.preview_audio.is_some() {
+            if self.preview_active() {
                 self.stop_preview();
             }
             return;
@@ -344,8 +359,8 @@ impl App {
                         self.preview_cursor = 0;
                     }
                     Ok(PreviewMsg::Keysound(id, dec)) => {
-                        if let Some(eng) = self.preview_audio.as_mut() {
-                            eng.insert_decoded(id, dec);
+                        if let Some(eng) = self.audio.as_mut() {
+                            eng.insert_decoded(Self::preview_sample_id(id), dec);
                         }
                     }
                     Err(std::sync::mpsc::TryRecvError::Empty) => break,
@@ -358,32 +373,26 @@ impl App {
             if done {
                 self.preview_prep_rx = None;
                 if self.preview_sched.is_empty() {
-                    // Nothing to play (no autoplay events) — drop the idle engine instead of leaving
-                    // its cpal stream open until the next focus. The song stays settled (no retry).
-                    self.preview_audio = None;
+                    self.clear_preview_audio();
                 } else {
-                    if let Some(eng) = self.preview_audio.as_ref() {
-                        self.preview_anchor = eng.clock_us() - self.preview_start_us;
-                    }
+                    self.preview_anchor = self.preview_sched_us() - self.preview_start_us;
                     self.preview_cursor = 0;
                 }
             }
             return;
         }
-        // Autoplay preview playback: fire every scheduled keysound whose time has passed FIRST (so the
-        // final event is never skipped), then loop once the silent tail elapses by re-anchoring the clock.
         if !self.preview_sched.is_empty() {
-            if let Some(eng) = self.preview_audio.as_mut() {
-                let song = eng.clock_us() - self.preview_anchor;
+            let song = self.preview_sched_us() - self.preview_anchor;
+            if let Some(eng) = self.audio.as_mut() {
                 while self.preview_cursor < self.preview_sched.len() && self.preview_sched[self.preview_cursor].0 <= song {
                     let (at, wav) = self.preview_sched[self.preview_cursor];
-                    eng.play(wav, PREVIEW_GAIN, 0.0, 1.0, at + self.preview_anchor);
+                    eng.play_on(Bus::Bg, Self::preview_sample_id(wav), PREVIEW_GAIN, KEYSOUND_PAN, KEYSOUND_PITCH, at + self.preview_anchor);
                     self.preview_cursor += 1;
                 }
-                if song >= self.preview_end_us {
-                    self.preview_anchor += self.preview_end_us - self.preview_start_us;
-                    self.preview_cursor = 0;
-                }
+            }
+            if song >= self.preview_end_us {
+                self.preview_anchor += self.preview_end_us - self.preview_start_us;
+                self.preview_cursor = 0;
             }
             return;
         }
@@ -391,12 +400,29 @@ impl App {
         // same key on a new play, so scheduling ahead would cut the current clip; re-triggering after
         // it naturally ends is clean.)
         if self.preview_loop_us > 0 {
-            if let Some(eng) = self.preview_audio.as_mut() {
-                while eng.clock_us() >= self.preview_next_us {
-                    eng.play(PREVIEW_ID, PREVIEW_GAIN, 0.0, 1.0, self.preview_next_us);
+            let sched = self.preview_sched_us();
+            if let Some(eng) = self.audio.as_mut() {
+                while sched >= self.preview_next_us {
+                    eng.play_on(Bus::Bg, PREVIEW_ID, PREVIEW_GAIN, KEYSOUND_PAN, KEYSOUND_PITCH, self.preview_next_us);
                     self.preview_next_us += self.preview_loop_us;
                 }
             }
+        }
+    }
+
+    /// The clock the preview books sounds against: the audible position plus the engine's device
+    /// lead and this loop's polling interval, on the shared engine's absolute axis. Shares the
+    /// dead-stream wall-clock fallback with play, so a device that disappears stops the preview
+    /// freezing instead of leaving it silent forever.
+    pub(crate) fn preview_sched_us(&self) -> i64 {
+        let (audible, lookahead) = self.audio_clocks();
+        schedule_position_us(audible, lookahead, self.schedule_poll_us, false)
+    }
+
+    /// Drop the preview's samples and silence its voices, leaving the shared stream open.
+    pub(crate) fn clear_preview_audio(&mut self) {
+        if let Some(audio) = self.audio.as_mut() {
+            audio.clear_namespace(IdNamespace::PREVIEW);
         }
     }
 
@@ -443,17 +469,13 @@ impl App {
             }
         };
         let ext = path.extension().and_then(|x| x.to_str()).map(str::to_owned);
-        let engine = match AudioEngine::new() {
-            Ok(eng) => eng,
-            Err(err) => {
-                if dbg {
-                    eprintln!("[preview] AudioEngine::new failed (no preview output stream): {err}");
-                }
-                return;
+        self.ensure_audio();
+        self.clear_preview_audio();
+        let start_at = self.preview_sched_us();
+        let Some(eng) = self.audio.as_mut() else {
+            if dbg {
+                eprintln!("[preview] no output stream — preview skipped");
             }
-        };
-        self.preview_audio = Some(engine);
-        let Some(eng) = self.preview_audio.as_mut() else {
             return;
         };
         if let Err(err) = eng.load(PREVIEW_ID, bytes, ext.as_deref()) {
@@ -463,12 +485,11 @@ impl App {
             return;
         }
         let dur = eng.sample_duration_us(PREVIEW_ID).unwrap_or(0);
-        let now = eng.clock_us();
-        eng.play(PREVIEW_ID, PREVIEW_GAIN, 0.0, 1.0, now);
+        eng.play_on(Bus::Bg, PREVIEW_ID, PREVIEW_GAIN, KEYSOUND_PAN, KEYSOUND_PITCH, start_at);
         self.preview_loop_us = dur;
-        self.preview_next_us = now + dur.max(1);
+        self.preview_next_us = start_at + dur.max(PREVIEW_MIN_LOOP_US);
         if dbg {
-            eprintln!("[preview] playing '{title}' ({}) dur_us={dur} clock_us={now}", path.display());
+            eprintln!("[preview] playing '{title}' ({}) dur_us={dur} start_us={start_at}", path.display());
         }
     }
 
@@ -480,16 +501,14 @@ impl App {
         let Some(e) = self.songs.get(si) else { return };
         let path = e.path.clone();
         let title = e.title.clone();
-        let engine = match AudioEngine::new() {
-            Ok(eng) => eng,
-            Err(err) => {
-                if dbg {
-                    eprintln!("[preview] AudioEngine::new failed (no preview output stream): {err}");
-                }
-                return;
+        self.ensure_audio();
+        if self.audio.is_none() {
+            if dbg {
+                eprintln!("[preview] no output stream — preview skipped");
             }
-        };
-        self.preview_audio = Some(engine);
+            return;
+        }
+        self.clear_preview_audio();
         let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         self.preview_cancel = cancel.clone();
         let (tx, rx) = std::sync::mpsc::channel::<PreviewMsg>();
@@ -550,12 +569,12 @@ impl App {
     }
 
     /// Stop and clear the active preview playback: signal any in-flight autoplay-preview load to stop
-    /// (parse + decode workers check this cancel flag), drop the engine to release its cpal stream and
-    /// ringing voices, and clear all playback state. Leaves `preview_target` so the debounce state
-    /// stays owned by the caller.
+    /// (parse + decode workers check this cancel flag), release the preview namespace so its samples
+    /// and ringing voices go away, and clear all playback state. Leaves `preview_target` so the
+    /// debounce state stays owned by the caller.
     pub(crate) fn reset_preview_playback(&mut self) {
         self.preview_cancel.store(true, std::sync::atomic::Ordering::Relaxed);
-        self.preview_audio = None;
+        self.clear_preview_audio();
         self.preview_si = None;
         self.preview_loop_us = 0;
         self.preview_next_us = 0;
@@ -677,7 +696,7 @@ impl App {
             Some(Hot::NavFolders) => self.open_folders(),
             Some(Hot::NavTables) => self.open_tables(),
             Some(Hot::NavRecords) => self.open_record_modal(),
-            Some(Hot::NavSettings) => self.stage = Stage::Settings,
+            Some(Hot::NavSettings) => self.open_settings(),
             // A click that misses every region closes an open modal (click-outside-to-dismiss).
             None => self.record_modal = None,
         }
@@ -773,7 +792,7 @@ impl App {
         if self.songs.is_empty() {
             event_loop.exit();
         } else {
-            self.audio = None;
+            self.release_play_audio();
             self.player = None;
             self.result = None;
             self.replay = None;
@@ -791,83 +810,41 @@ impl App {
             self.print_selection();
         }
     }
+}
 
-    pub(crate) fn setting_line(&self, i: usize) -> (&'static str, String) {
-        let on = |b: bool| {
-            if b { "ON".to_string() } else { "OFF".to_string() }
-        };
-        match i {
-            0 => ("AUTOPLAY", on(self.autoplay)),
-            1 => ("HI-SPEED", format!("{:.2}", self.config.hispeed)),
-            2 => ("SPEED FIX", if self.config.constant_speed { "CONSTANT".to_string() } else { "FLOATING".to_string() }),
-            3 => ("RANDOM", self.config.random.label().to_string()),
-            4 => ("GAUGE", gauge_name(self.config.gauge).to_string()),
-            5 => ("LIFT", format!("{}%", (self.config.lift * 100.0).round() as i32)),
-            6 => ("LANE COVER", format!("{}%", (self.config.cover * 100.0).round() as i32)),
-            7 => ("SCRATCH SIDE", if self.config.scratch_left { "LEFT".to_string() } else { "RIGHT".to_string() }),
-            8 => ("SCRATCH AUTO", on(self.config.scratch_auto)),
-            9 => ("JUDGE OFFSET", format!("{:+} MS", self.config.offset_ms)),
-            10 => ("BGA", on(self.config.bga)),
-            11 => ("KEY CONFIG", ">".to_string()),
-            12 => ("JUDGE WIDTH", format!("{}%", self.config.judge_rate)),
-            13 => ("TOTAL", if self.config.total_override > 0.0 { format!("{}", self.config.total_override.round() as i32) } else { "AUTO".to_string() }),
-            14 => ("SKIN", if self.config.skin_path.is_some() { "CUSTOM".to_string() } else { self.config.skin_name.clone() }),
-            15 => ("AUTO CAL", on(self.config.auto_offset)),
-            16 => ("AUTO REPLAY", on(self.config.auto_replay)),
-            17 => ("DEBUG MODE", on(self.config.debug)),
-            18 => ("FONT", if self.config.font_path.is_some() { "CUSTOM".to_string() } else { "DEFAULT".to_string() }),
-            19 => ("SCORE GRAPH", on(self.config.score_graph)),
-            20 => ("REPLAY ANALYSIS", on(self.config.replay_analysis)),
-            21 => ("PREVIEW", on(self.config.preview)),
-            _ => self.network_setting_line(i).unwrap_or(("", String::new())),
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_file_preview_clip_sits_at_the_base_of_the_preview_namespace() {
+        assert_eq!(PREVIEW_ID, IdNamespace::PREVIEW.base);
+        assert!(IdNamespace::PREVIEW.contains(PREVIEW_ID));
+        assert!(!IdNamespace::PLAY.contains(PREVIEW_ID));
+    }
+
+    #[test]
+    fn preview_keysounds_land_inside_the_preview_namespace() {
+        for wav in [0, 1, 1_295, IdNamespace::PREVIEW.len - 1] {
+            let id = App::preview_sample_id(wav);
+            assert!(IdNamespace::PREVIEW.contains(id), "wav {wav} escaped the preview namespace");
+            assert!(!IdNamespace::PLAY.contains(id));
+            assert_eq!(id, IdNamespace::PREVIEW.base + wav);
         }
     }
 
-    pub(crate) fn adjust_setting(&mut self, global: usize, d: i32) {
-        match global {
-            0 => self.autoplay = !self.autoplay,
-            1 => self.config.hispeed = (self.config.hispeed + d as f64 * 0.25).clamp(0.5, 10.0),
-            2 => self.config.constant_speed = !self.config.constant_speed,
-            3 => {
-                let idx = NoteOption::ALL.iter().position(|o| *o == self.config.random).unwrap_or(0);
-                self.config.random = NoteOption::ALL[((idx as i32 + d).rem_euclid(NoteOption::ALL.len() as i32)) as usize];
-            }
-            4 => {
-                let idx = GAUGE_CYCLE.iter().position(|g| *g == self.config.gauge).unwrap_or(2);
-                self.config.gauge = GAUGE_CYCLE[((idx as i32 + d).rem_euclid(GAUGE_CYCLE.len() as i32)) as usize];
-            }
-            5 => self.config.lift = (self.config.lift + d as f32 * 0.05).clamp(0.0, 0.9),
-            6 => self.config.cover = (self.config.cover + d as f32 * 0.05).clamp(0.0, 0.9),
-            7 => self.config.scratch_left = !self.config.scratch_left,
-            8 => self.config.scratch_auto = !self.config.scratch_auto,
-            9 => self.config.offset_ms = (self.config.offset_ms + d * 5).clamp(-200, 200),
-            10 => self.config.bga = !self.config.bga,
-            12 => self.config.judge_rate = (self.config.judge_rate + d * 5).clamp(50, 200),
-            13 => self.config.total_override = (self.config.total_override + d as f64 * 10.0).max(0.0),
-            15 => self.config.auto_offset = !self.config.auto_offset,
-            16 => self.config.auto_replay = !self.config.auto_replay,
-            17 => self.config.debug = !self.config.debug,
-            19 => self.config.score_graph = !self.config.score_graph,
-            20 => {
-                self.config.replay_analysis = !self.config.replay_analysis;
-                // Re-evaluate an in-progress replay so toggling the setting takes effect immediately.
-                if self.stage == Stage::Play {
-                    self.analysis = self.replay.is_some() && self.config.replay_analysis;
-                }
-            }
-            21 => self.config.preview = !self.config.preview,
-            18 => {
-                if d < 0 {
-                    self.reset_font();
-                } else {
-                    self.pick_font();
-                }
-            }
-            14 => {
-                self.config.skin_path = None;
-                self.config.skin_name = if self.config.skin_name.eq_ignore_ascii_case("WIDE") { "NORMAL".into() } else { "WIDE".into() };
-            }
-            _ => {}
+    #[test]
+    fn an_out_of_range_wav_index_is_clamped_into_the_preview_namespace() {
+        let clamped = App::preview_sample_id(u32::MAX);
+        assert!(IdNamespace::PREVIEW.contains(clamped));
+        assert_eq!(clamped, IdNamespace::PREVIEW.base + IdNamespace::PREVIEW.len - 1);
+    }
+
+    #[test]
+    fn a_chart_keysound_and_the_preview_copy_of_it_never_share_an_id() {
+        for wav in [1u32, 36, 1_295] {
+            assert_ne!(wav, App::preview_sample_id(wav));
+            assert!(IdNamespace::PLAY.contains(wav));
         }
     }
 }

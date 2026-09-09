@@ -393,7 +393,9 @@ impl App {
         }
     }
 
-    /// Everything the settings screen draws this frame.
+    /// Everything the settings screen draws this frame. The AUDIO tab owns the status line while it
+    /// is open: it is the only place the engine's open report, and a reopen held back by a running
+    /// chart, are visible.
     pub(crate) fn settings_scene(&self) -> SettingsScene {
         let tab = self.set_tab.min(SETTING_TABS.len() - 1);
         let items = SETTING_TABS[tab].1;
@@ -413,7 +415,7 @@ impl App {
             rows: items.iter().map(|&index| self.setting_line(index)).collect(),
             sel,
             editor,
-            status: self.net_status.clone(),
+            status: self.audio_status_line().unwrap_or_else(|| self.net_status.clone()),
             rivals,
         }
     }

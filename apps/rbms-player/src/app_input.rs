@@ -2,7 +2,13 @@
 //! playback & analysis, and the key-config editor. Split out of `main.rs`; `use crate::*`
 //! pulls in the crate-root types/consts/helpers these methods reference.
 #![allow(clippy::wildcard_imports)]
+use rbms_audio::Bus;
+
 use crate::*;
+
+/// Per-voice gain a replayed keysound is played at. A replay reproduces a run, so it sounds at the
+/// same level as the live press it stands in for; the loudness the player set lives on the key bus.
+const REPLAY_KEYSOUND_GAIN: f32 = 1.0;
 
 impl App {
     /// Recompute the visible select list for the current `select_view`.
@@ -139,6 +145,14 @@ impl App {
             sync_settings: self.config.sync_settings,
             auto_upload_replay: self.config.auto_upload_replay,
             rivals: self.config.rivals.clone(),
+            audio_device: self.config.audio.device.clone(),
+            audio_buffer_frames: self.config.audio.buffer_frames,
+            audio_sample_rate: self.config.audio.sample_rate,
+            audio_polyphony: self.config.audio.polyphony,
+            vol_master: self.config.audio.master,
+            vol_key: self.config.audio.key,
+            vol_bg: self.config.audio.bg,
+            vol_system: self.config.audio.system,
         }
     }
 
@@ -209,7 +223,11 @@ impl App {
     /// time plus the (replay's) offset — reproducing the original run. `mute` skips keysounds (used
     /// during analysis scrubbing/slow-mo, where the virtual clock would desync audio). Each judged
     /// input's timing delta is captured for the analysis ms-off overlay.
-    pub(crate) fn feed_replay(&mut self, song: i64, anchor: i64, mute: bool) {
+    ///
+    /// Keysounds follow the same immediate rule as a live press: the sound is wanted now, not at the
+    /// recorded instant, which is already in the mixer's past and would only be counted as a
+    /// schedule that collapsed onto the current frame.
+    pub(crate) fn feed_replay(&mut self, song: i64, mute: bool) {
         let off = self.offset_us();
         loop {
             let ev = match self.replay.as_ref() {
@@ -221,9 +239,10 @@ impl App {
             }
             self.replay_cursor += 1;
             let res = if ev.press {
-                let sound_t = keysound_time_us(ev.t, anchor);
                 if let (false, Some(audio)) = (mute, self.audio.as_mut()) {
-                    let play = |e: PlayEvent| audio.play(e.wav.max(0) as u32, 1.0, 0.0, 1.0, sound_t);
+                    let play = |e: PlayEvent| {
+                        audio.play_on(Bus::Key, e.wav.max(0) as u32, REPLAY_KEYSOUND_GAIN, KEYSOUND_PAN, KEYSOUND_PITCH, IMMEDIATE_KEYSOUND_AT_US)
+                    };
                     self.player.as_mut().and_then(|p| p.press(ev.lane, ev.t + off, play))
                 } else {
                     self.player.as_mut().and_then(|p| p.press(ev.lane, ev.t + off, |_| {}))
@@ -374,7 +393,7 @@ impl App {
         match code {
             KeyCode::Escape => {
                 self.keyconfig.save(&self.keyconfig_path);
-                self.stage = Stage::Settings;
+                self.open_settings();
             }
             KeyCode::ArrowUp => self.kc_sel = self.kc_sel.saturating_sub(1),
             KeyCode::ArrowDown => self.kc_sel = (self.kc_sel + 1).min(rows.len().saturating_sub(1)),

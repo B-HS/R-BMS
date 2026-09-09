@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
-use rbms_audio::AudioEngine;
+use rbms_audio::{AudioEngine, AudioOpenReport, AudioOptions, Bus, IdNamespace};
 use rbms_chart::default_total;
 use rbms_chart::shuffle::NoteOption;
 use rbms_chart::to_model;
@@ -14,7 +14,7 @@ use rbms_ir::{
 };
 use rbms_judge::GaugeKind;
 use rbms_model::Mode;
-use rbms_play::{PlayEvent, Player};
+use rbms_play::{PlayEvent, PlaySource, Player};
 use rbms_render::{
     Color, CoverState, DensityView, DetailView, HudView, RANK_BANDS, RecordRowView, RecordsView, Rect, Renderer, ResultPalette, ResultView, SelectDetail,
     SelectHot, SelectModal, SelectRow, SelectView as SelectScene, Skin, SkinConfig, StatCell, cover_rect, dj_rank, draw_text, draw_text_centered,
@@ -51,9 +51,11 @@ mod main_tests;
 mod replay;
 mod scores;
 mod settings;
+mod settings_ui;
 mod settings_view;
 mod tables;
 mod tablesrc;
+mod timing;
 use app_network::build_server;
 use folders::FolderList;
 use format::{
@@ -63,7 +65,6 @@ use format::{
 use gpu::Gpu;
 use ir_map::{assist_flags, combo_breaks, gauge_from_name, gauge_token, ir_clear, ir_gauge, ir_lntype, ir_random};
 use ir_outcome::{IR_RESULT_LINE_H, IR_RESULT_SCALE, IR_RESULT_X, IR_RESULT_Y, IrStatus, ir_line_color};
-use ir_panel::NETWORK_SETTING_ROWS;
 use ir_ranking::{RANKING_CACHE_CAPACITY, RankingCache, RankingFetch};
 use ir_ranking_view::render_ranking_panel;
 use ir_session::{AccountSession, AuthAction};
@@ -71,21 +72,41 @@ use ir_sync::SyncLock;
 use keyconfig::{ControlAction, KeyConfig, key_from_name, key_name};
 use replay::{Replay, ReplayEvent};
 use scores::{SCORE_RULE_VERSION, ScoreBook, ScoreRecord, rule_version_mark, rule_version_note};
-use settings::PlaySettings;
+use settings::{AudioSettings, PlaySettings};
+use settings_ui::{SETTING_FONT, SETTING_KEYCONFIG, SETTING_TABS};
 use settings_view::{SettingsHot, render_settings};
 use tables::{TableList, TableSource};
 use tablesrc::{fetch_and_match, load_and_match};
+use timing::{SoakLogger, SoakSnapshot, TIMING_CSV_ENV, TimingProbe, TimingSample, env_path, us_to_millis};
 
 const CW: u32 = 1280;
 const CH: u32 = 720;
 const MODE: Mode = Mode::BEAT_7K;
 
-/// `#PREVIEW` hover-preview tuning: the reserved sample id, focus-settle debounce (frames), playback
+/// `#PREVIEW` hover-preview tuning: the reserved sample id (the base of the preview namespace, so
+/// preview sounds never collide with the loaded chart's keysounds), focus-settle debounce, playback
 /// gain, and the silent tail held after the last autoplay event before the loop restarts.
-const PREVIEW_ID: u32 = 0;
+const PREVIEW_ID: u32 = IdNamespace::PREVIEW.base;
 const PREVIEW_DEBOUNCE: Duration = Duration::from_millis(333);
 const PREVIEW_GAIN: f32 = 0.85;
 const PREVIEW_LOOP_TAIL_US: i64 = 2_000_000;
+
+/// Shortest loop period the file preview will re-trigger on, so a zero-length clip cannot spin.
+const PREVIEW_MIN_LOOP_US: i64 = 1;
+
+/// `at_us` that marks a keysound as "sound it now": the mixer collapses a schedule at frame zero to
+/// the next callback boundary without counting it as a late schedule. Interactive presses and
+/// anything else that must not wait for the lookahead use this.
+const IMMEDIATE_KEYSOUND_AT_US: i64 = 0;
+
+/// How long an audio setting must rest before the shared output stream is reopened for it.
+const AUDIO_REOPEN_DEBOUNCE: Duration = Duration::from_millis(400);
+
+/// Neutral per-voice parameters for a chart keysound: reference level, centred, unpitched. The
+/// balance between keysounds and BGM is set on the output buses, not here.
+const KEYSOUND_GAIN: f32 = 1.0;
+const KEYSOUND_PAN: f32 = 0.0;
+const KEYSOUND_PITCH: f32 = 1.0;
 
 /// How long the select focus must rest on a row before its heavy detail (full chart parse + timing
 /// integration + cover decode) is computed. Frame-count debouncing tied the delay to the frame rate;
@@ -147,6 +168,11 @@ struct PlayerConfig {
     replay_analysis: bool,
     preview: bool,
     songs_folder: Option<String>,
+    /// Live AUDIO tab values: the four gains plus the four output parameters the stream opens with.
+    audio: AudioSettings,
+    /// `--timing-csv <path>`: where the per-input timing ring is dumped when the result screen is
+    /// entered. `None` falls back to the `RBMS_TIMING_CSV` environment variable.
+    timing_csv: Option<String>,
 }
 
 impl Default for PlayerConfig {
@@ -186,6 +212,8 @@ impl Default for PlayerConfig {
             replay_analysis: true,
             preview: true,
             songs_folder: None,
+            audio: AudioSettings::default(),
+            timing_csv: None,
         }
     }
 }
@@ -217,16 +245,11 @@ pub(crate) fn write_atomic(path: &Path, contents: &str) -> std::io::Result<()> {
 }
 
 /// Judgment time for an input taken at raw song time `raw_us`: the user's judge offset shifts when
-/// the hit is *judged*. Keysound playback must NOT use this (see [`keysound_time_us`]) — the reference
-/// implementation plays the sound at the input instant and only offsets the judgment.
+/// the hit is *judged*. Keysound playback must NOT use this — the reference implementation plays the
+/// sound at the input instant and only offsets the judgment, which is why every input keysound is
+/// scheduled at [`IMMEDIATE_KEYSOUND_AT_US`] instead of at a time derived from this.
 fn judge_time_us(raw_us: i64, offset_ms: i32) -> i64 {
     raw_us + offset_ms as i64 * 1000
-}
-
-/// Audio-clock time at which an input's keysound is scheduled: the raw input instant rebased onto the
-/// output-stream clock. Independent of the judge offset, so a non-zero offset never delays the sound.
-fn keysound_time_us(raw_us: i64, anchor_us: i64) -> i64 {
-    raw_us + anchor_us
 }
 
 /// Green number (note travel time in ms) for the active scroll mode: CONSTANT is fixed by hi-speed
@@ -304,6 +327,7 @@ fn apply_settings(cfg: &mut PlayerConfig, s: &PlaySettings) {
     cfg.replay_analysis = s.replay_analysis;
     cfg.preview = s.preview;
     cfg.songs_folder = s.songs_folder.clone();
+    cfg.audio = AudioSettings::from_settings(s);
     cfg.server_url = s.server_url.clone();
     cfg.player_id = s.player_id.clone();
     cfg.ir_token = s.ir_token.clone();
@@ -719,21 +743,6 @@ enum Hot {
     NavSettings,
 }
 
-const GAUGE_CYCLE: [GaugeKind; 6] = [GaugeKind::AssistEasy, GaugeKind::Easy, GaugeKind::Normal, GaugeKind::Hard, GaugeKind::ExHard, GaugeKind::Hazard];
-const SETTING_KEYCONFIG: usize = 11;
-const SETTING_FONT: usize = 18;
-
-/// Settings grouped into tabs by category. Each entry is `(tab name, [global setting indices])`
-/// where the indices map to `setting_line`/`adjust_setting`.
-const SETTING_TABS: &[(&str, &[usize])] = &[
-    ("PLAY", &[0, 1, 2, 3, 16]),
-    ("GAUGE", &[4, 13]),
-    ("JUDGE", &[9, 12, 15]),
-    ("DISPLAY", &[14, 18, 19, 20, 21, 5, 6, 10, 17]),
-    ("INPUT", &[7, 8, 11]),
-    ("NETWORK", NETWORK_SETTING_ROWS),
-];
-
 struct App {
     chart_path: String,
     autoplay: bool,
@@ -795,7 +804,29 @@ struct App {
     kc_warn: bool,
     result: Option<ResultView>,
     gpu: Option<Gpu>,
+    /// The one output stream for the whole app lifetime. Opened lazily on the first frame (or the
+    /// first chart/preview load) and kept across Play, Result and Select; stage changes clear the
+    /// affected id namespace instead of tearing the stream down.
     audio: Option<AudioEngine>,
+    /// What the shared stream actually opened as, plus any downgrades taken to get there.
+    audio_report: Option<AudioOpenReport>,
+    /// Voice budget the shared stream was opened with, shown next to the live voice count.
+    audio_max_voices: usize,
+    /// The options the current stream actually opened with, retried first when a reopen fails.
+    audio_opened_with: Option<AudioOptions>,
+    /// Set once an open attempt failed, so the device is not probed again every chart and every
+    /// preview. Cleared when a settings change asks for a reopen.
+    audio_failed: bool,
+    /// When the pending audio-setting change is due to be applied, armed by the settings screen and
+    /// debounced by [`AUDIO_REOPEN_DEBOUNCE`].
+    audio_reopen_at: Option<Instant>,
+    /// `#VOLWAV` of the loaded chart as a gain. Kept so a stream reopened mid-session is handed the
+    /// chart's own level again instead of the neutral default.
+    chart_gain: f32,
+    /// Peak-held frame period the sound scheduler books ahead by, in µs.
+    schedule_poll_us: i64,
+    /// Output device names the AUDIO DEVICE row cycles through, read once per settings visit.
+    audio_devices: Vec<String>,
     player: Option<Player>,
     skin: Skin,
     skin_cfg: SkinConfig,
@@ -855,6 +886,15 @@ struct App {
     /// Set once the audio output stream is found dead: the song position the audio clock last
     /// reported and the instant that was noticed, so `song_us` continues on the wall clock.
     audio_dead_at: std::cell::Cell<Option<(i64, Instant)>>,
+    /// Last value [`App::song_us`] returned, so the interpolated clock can never step backwards
+    /// between two readings inside one frame.
+    song_us_last: std::cell::Cell<i64>,
+    /// Ring of recent input timings (interpolated vs quantised clock, judgement error).
+    timing: TimingProbe,
+    /// Periodic stability log, active only when `RBMS_SOAK_LOG` names a path.
+    soak: SoakLogger,
+    /// Set once a soak row failed to write, so the failure is reported once rather than per row.
+    soak_failed: bool,
     scores: ScoreBook,
     scores_path: PathBuf,
     /// When the records modal is open, the index into the focused chart's record list (newest
@@ -872,7 +912,6 @@ struct App {
     cached_select: Option<SelectScene>,
     cached_select_key: Option<SelectKey>,
     select_gen: u64,
-    preview_audio: Option<AudioEngine>,
     preview_si: Option<usize>,
     preview_target: Option<usize>,
     preview_target_at: Instant,
@@ -1044,6 +1083,14 @@ impl App {
             result: None,
             gpu: None,
             audio: None,
+            audio_report: None,
+            audio_max_voices: rbms_audio::DEFAULT_MAX_VOICES,
+            audio_opened_with: None,
+            audio_failed: false,
+            audio_reopen_at: None,
+            chart_gain: rbms_chart::chart_gain(rbms_chart::VOLWAV_DEFAULT_PERCENT),
+            schedule_poll_us: 0,
+            audio_devices: Vec::new(),
             player: None,
             skin: Skin::default_for(MODE, CW as f32, CH as f32),
             skin_cfg: SkinConfig::default(),
@@ -1083,6 +1130,10 @@ impl App {
             clock: Instant::now(),
             anchor_us: 0,
             audio_dead_at: std::cell::Cell::new(None),
+            song_us_last: std::cell::Cell::new(0),
+            timing: TimingProbe::default(),
+            soak: SoakLogger::from_env(),
+            soak_failed: false,
             scores,
             scores_path,
             record_modal: None,
@@ -1094,7 +1145,6 @@ impl App {
             cached_select: None,
             cached_select_key: None,
             select_gen: 0,
-            preview_audio: None,
             preview_si: None,
             preview_target: None,
             preview_target_at: Instant::now(),
@@ -1135,6 +1185,7 @@ impl ApplicationHandler for App {
         let attrs = Window::default_attributes().with_title("rbms").with_inner_size(winit::dpi::LogicalSize::new(CW, CH));
         let window = Arc::new(event_loop.create_window(attrs).unwrap());
         self.gpu = Some(Gpu::new(window.clone()));
+        self.ensure_audio();
         if self.stage == Stage::Play {
             // Direct chart/replay launch: load, then show the keysound-loading bar (or start play if
             // there is nothing to decode). A failed load exits.
@@ -1227,7 +1278,7 @@ impl ApplicationHandler for App {
                                 KeyCode::Escape | KeyCode::ArrowLeft => self.select_escape(event_loop),
                                 KeyCode::Slash => self.start_search(),
                                 KeyCode::F3 => self.cycle_sort(),
-                                KeyCode::Tab => self.stage = Stage::Settings,
+                                KeyCode::Tab => self.open_settings(),
                                 KeyCode::KeyO => self.open_folders(),
                                 KeyCode::KeyT => self.open_tables(),
                                 KeyCode::KeyR => self.open_record_modal(),
@@ -1328,7 +1379,7 @@ impl ApplicationHandler for App {
                             // Cancel back to Select rather than exit: during the initial background scan
                             // `songs` is still empty, and routing through `to_select_or_exit` would quit
                             // on the empty library — surprising mid-load. Drop any half-loaded play state.
-                            self.audio = None;
+                            self.release_play_audio();
                             self.player = None;
                             self.select_view = SelectView::Root;
                             self.sel = 0;
@@ -1361,14 +1412,23 @@ impl ApplicationHandler for App {
                             if let Some(lane) = self.lane_for(code) {
                                 let raw = self.song_us();
                                 let judge_t = judge_time_us(raw, self.config.offset_ms);
-                                let sound_t = keysound_time_us(raw, self.anchor_us);
                                 match event.state {
                                     ElementState::Pressed if !event.repeat => {
                                         self.recording.push(ReplayEvent { t: raw, lane, press: true });
                                         let mut hit: Option<rbms_judge::JudgeResult> = None;
                                         if let (Some(player), Some(audio)) = (self.player.as_mut(), self.audio.as_mut()) {
-                                            hit = player.press(lane, judge_t, |e: PlayEvent| audio.play(e.wav.max(0) as u32, 1.0, 0.0, 1.0, sound_t));
+                                            hit = player.press(lane, judge_t, |e: PlayEvent| {
+                                                audio.play_on(
+                                                    Bus::Key,
+                                                    e.wav.max(0) as u32,
+                                                    KEYSOUND_GAIN,
+                                                    KEYSOUND_PAN,
+                                                    KEYSOUND_PITCH,
+                                                    IMMEDIATE_KEYSOUND_AT_US,
+                                                )
+                                            });
                                         }
+                                        self.push_timing_sample(raw, hit.map(|r| r.delta_us));
                                         // auto-calibration: accumulate the timing error of accurate hits
                                         // (PG/GR/GD, ±150ms) — offset is recentred for the next run at
                                         // enter_result, so within-run judging stays consistent.
@@ -1454,6 +1514,7 @@ fn main() {
             "--table" => cfg.table_url = args.next(),
             "--keyconfig" => cfg.keyconfig_path = args.next(),
             "--replay" => cfg.replay_path = args.next(),
+            "--timing-csv" => cfg.timing_csv = args.next(),
             "--player" => {
                 if let Some(id) = args.next() {
                     cfg.player_id = id;

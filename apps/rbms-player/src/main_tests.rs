@@ -4,8 +4,8 @@
 //! private to the root, and a child module still sees them through `super`.
 
 use super::{
-    ROOT_ESC_CONFIRM, SortMode, THEME_TEMPLATE, bundled_skin, calibrated_offset, clear_type_from_id, clear_type_id, client_platform, compute_build_hash,
-    config_dir_from, default_total, esc_confirms_quit, fmt_datetime, green_number_for, ir_submission_block_reason, judge_time_us, keysound_time_us,
+    IMMEDIATE_KEYSOUND_AT_US, ROOT_ESC_CONFIRM, SortMode, THEME_TEMPLATE, bundled_skin, calibrated_offset, clear_type_from_id, clear_type_id, client_platform,
+    compute_build_hash, config_dir_from, default_total, esc_confirms_quit, fmt_datetime, green_number_for, ir_submission_block_reason, judge_time_us,
     resumed_clock_us, updates_score, write_atomic,
 };
 use rbms_judge::ClearType;
@@ -181,41 +181,32 @@ fn judge_time_shifts_by_the_offset_in_milliseconds() {
     assert_eq!(judge_time_us(1_000_000, -45), 955_000, "-45ms offset judges 45ms earlier");
 }
 
-#[test]
-fn keysound_schedule_uses_raw_input_time_not_the_judge_offset() {
-    assert_eq!(keysound_time_us(1_000_000, 7_500_000), 8_500_000);
-    assert_eq!(keysound_time_us(1_000_000, 0), 1_000_000, "no anchor => the raw instant");
-    assert_eq!(keysound_time_us(0, -250_000), -250_000, "a negative anchor shifts it back");
-}
-
-/// Reproduce the press path of `main.rs`'s key handler: judge at `judge_time_us(raw, offset)`,
-/// schedule the keysound at `keysound_time_us(raw, anchor)`. Returns the times the keysound
-/// callback was scheduled at.
-fn press_schedule_times(offset_ms: i32, raw_us: i64, anchor_us: i64) -> Vec<i64> {
+/// Reproduce the press path of `main.rs`'s key handler: judge at `judge_time_us(raw, offset)` and
+/// schedule the keysound at [`IMMEDIATE_KEYSOUND_AT_US`], which is the rule both the live press and
+/// the replay path follow. Returns the times the keysound callback was scheduled at.
+fn press_schedule_times(offset_ms: i32, raw_us: i64) -> Vec<i64> {
     let model = rbms_chart::to_model(&rbms_parser::parse(b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:01\r\n"), rbms_model::Mode::BEAT_7K);
     let mut player = rbms_play::Player::new(model, false);
     let judge_t = judge_time_us(raw_us, offset_ms);
-    let sound_t = keysound_time_us(raw_us, anchor_us);
     let mut scheduled = Vec::new();
-    player.press(0, judge_t, |_e: rbms_play::PlayEvent| scheduled.push(sound_t));
+    player.press(0, judge_t, |_e: rbms_play::PlayEvent| scheduled.push(IMMEDIATE_KEYSOUND_AT_US));
     scheduled
 }
 
 #[test]
-fn press_path_schedules_the_keysound_at_raw_plus_anchor_for_every_offset() {
-    let (raw, anchor) = (1_000_000_i64, 7_500_000_i64);
+fn press_path_schedules_the_keysound_immediately_for_every_offset() {
     for offset_ms in [-200, -30, 0, 30, 200] {
-        let scheduled = press_schedule_times(offset_ms, raw, anchor);
-        assert_eq!(scheduled, vec![8_500_000], "offset {offset_ms}ms must not move the sound");
+        let scheduled = press_schedule_times(offset_ms, 1_000_000);
+        assert_eq!(scheduled, vec![IMMEDIATE_KEYSOUND_AT_US], "offset {offset_ms}ms must not move the sound");
     }
 }
 
 #[test]
 fn press_path_moves_the_judgment_with_the_offset_while_the_sound_stays() {
-    let (raw, anchor) = (1_000_000_i64, 7_500_000_i64);
+    let raw = 1_000_000_i64;
     assert_eq!(judge_time_us(raw, 30), 1_030_000);
-    assert_eq!(press_schedule_times(30, raw, anchor), vec![8_500_000]);
-    assert_eq!(press_schedule_times(0, raw, anchor), vec![8_500_000]);
+    assert_eq!(press_schedule_times(30, raw), vec![IMMEDIATE_KEYSOUND_AT_US]);
+    assert_eq!(press_schedule_times(0, raw), vec![IMMEDIATE_KEYSOUND_AT_US]);
 }
 
 #[test]
