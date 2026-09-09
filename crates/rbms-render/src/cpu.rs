@@ -1,5 +1,16 @@
 use crate::{Color, Rect, Renderer};
 
+/// Bits dropped from each averaged channel in [`CpuCanvas::block_signature`]. Quantizing to
+/// `256 >> SIGNATURE_QUANT_SHIFT` levels keeps a golden signature stable against sub-pixel
+/// antialiasing differences while still catching layout, colour and content regressions. Three
+/// bits (32 levels per channel) is fine enough that a single relabelled text run moves the block
+/// mean past a step, which four bits was measured not to do.
+const SIGNATURE_QUANT_SHIFT: u32 = 3;
+
+/// FNV-1a 64-bit parameters, used to fold a block signature into one comparable number.
+const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+
 /// Software RGBA8 canvas. Deterministic reference backend for tests and headless checks.
 pub struct CpuCanvas {
     width: u32,
@@ -19,6 +30,48 @@ impl CpuCanvas {
     pub fn pixel_at(&self, x: u32, y: u32) -> Color {
         let i = ((y * self.width + x) * 4) as usize;
         Color { r: self.pixels[i], g: self.pixels[i + 1], b: self.pixels[i + 2], a: self.pixels[i + 3] }
+    }
+
+    /// Coarse content signature: the canvas is split into a `cols`×`rows` grid, each block's mean
+    /// RGB is quantized (see [`SIGNATURE_QUANT_SHIFT`]) and emitted as three bytes in row-major
+    /// order. Golden tests compare this instead of raw pixels so a one-pixel antialiasing shift
+    /// does not fail the test while a moved panel or a recoloured row does.
+    pub fn block_signature(&self, cols: u32, rows: u32) -> Vec<u8> {
+        let mut out = Vec::with_capacity((cols * rows * 3) as usize);
+        if cols == 0 || rows == 0 {
+            return out;
+        }
+        for row in 0..rows {
+            let y0 = (row as u64 * self.height as u64 / rows as u64) as u32;
+            let y1 = ((row as u64 + 1) * self.height as u64 / rows as u64) as u32;
+            for col in 0..cols {
+                let x0 = (col as u64 * self.width as u64 / cols as u64) as u32;
+                let x1 = ((col as u64 + 1) * self.width as u64 / cols as u64) as u32;
+                let (mut sr, mut sg, mut sb, mut n) = (0u64, 0u64, 0u64, 0u64);
+                for y in y0..y1 {
+                    for x in x0..x1 {
+                        let i = ((y * self.width + x) * 4) as usize;
+                        sr += self.pixels[i] as u64;
+                        sg += self.pixels[i + 1] as u64;
+                        sb += self.pixels[i + 2] as u64;
+                        n += 1;
+                    }
+                }
+                let mean = |sum: u64| (sum.checked_div(n).unwrap_or(0) as u8) >> SIGNATURE_QUANT_SHIFT;
+                out.extend_from_slice(&[mean(sr), mean(sg), mean(sb)]);
+            }
+        }
+        out
+    }
+
+    /// FNV-1a 64-bit hash of [`CpuCanvas::block_signature`], so a golden expectation is one literal.
+    pub fn signature_hash(&self, cols: u32, rows: u32) -> u64 {
+        let mut h = FNV_OFFSET_BASIS;
+        for b in self.block_signature(cols, rows) {
+            h ^= b as u64;
+            h = h.wrapping_mul(FNV_PRIME);
+        }
+        h
     }
 }
 
@@ -64,6 +117,52 @@ impl Renderer for CpuCanvas {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn block_signature_has_three_quantized_bytes_per_block() {
+        let mut c = CpuCanvas::new(8, 4);
+        c.clear(Color::rgb(255, 16, 0));
+        let sig = c.block_signature(4, 2);
+        assert_eq!(sig.len(), 4 * 2 * 3, "one RGB triple per block");
+        assert!(sig.chunks_exact(3).all(|b| b == [31, 2, 0]), "a flat canvas quantizes to one repeated triple (255>>3, 16>>3, 0>>3)");
+        assert!(c.block_signature(0, 2).is_empty(), "a zero-sized grid yields no signature");
+    }
+
+    #[test]
+    fn block_signature_averages_each_block_separately() {
+        let mut c = CpuCanvas::new(4, 2);
+        c.fill_rect(Rect::new(0.0, 0.0, 2.0, 2.0), Color::rgb(255, 255, 255));
+        c.fill_rect(Rect::new(2.0, 0.0, 2.0, 2.0), Color::rgb(0, 0, 0));
+        let sig = c.block_signature(2, 1);
+        assert_eq!(sig, vec![31, 31, 31, 0, 0, 0], "left block is full white, right block is full black");
+    }
+
+    #[test]
+    fn signature_hash_is_stable_and_content_sensitive() {
+        let mut a = CpuCanvas::new(16, 16);
+        a.clear(Color::rgb(10, 20, 30));
+        let h1 = a.signature_hash(4, 4);
+        assert_eq!(h1, a.signature_hash(4, 4), "hashing the same canvas twice matches");
+        let mut b = CpuCanvas::new(16, 16);
+        b.clear(Color::rgb(10, 20, 30));
+        assert_eq!(h1, b.signature_hash(4, 4), "identical content hashes identically");
+        b.fill_rect(Rect::new(0.0, 0.0, 8.0, 8.0), Color::rgb(240, 0, 0));
+        assert_ne!(h1, b.signature_hash(4, 4), "a repainted quadrant changes the hash");
+    }
+
+    /// The quantum is `1 << SIGNATURE_QUANT_SHIFT` == 8 raw levels. `100 >> 3 == 12` and
+    /// `103 >> 3 == 12`, so a uniform +3 (the scale of antialiasing jitter) is absorbed, while
+    /// `108 >> 3 == 13` is not.
+    #[test]
+    fn signature_absorbs_a_sub_quantum_brightness_shift_but_not_a_full_step() {
+        let shade = |v: u8| {
+            let mut c = CpuCanvas::new(64, 64);
+            c.clear(Color::rgb(v, v, v));
+            c.signature_hash(8, 8)
+        };
+        assert_eq!(shade(100), shade(103), "a uniform shift below one quantization step keeps the signature");
+        assert_ne!(shade(100), shade(108), "a uniform shift of one full step changes the signature");
+    }
 
     #[test]
     fn new_canvas_is_zeroed_and_sized() {

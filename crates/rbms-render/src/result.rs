@@ -1,4 +1,7 @@
+use std::sync::LazyLock;
+
 use crate::font::{draw_text, draw_text_centered, draw_text_right};
+use crate::skin::{Skin, SkinConfig};
 use crate::{Color, Rect, Renderer};
 
 /// Backend-agnostic result snapshot.
@@ -22,8 +25,53 @@ pub struct ResultView {
     pub show_graph: bool,
 }
 
-const JUDGE_COLORS: [Color; 6] = [Color::GREEN, Color::BLUE, Color::YELLOW, Color::ORANGE, Color::RED, Color::rgb(120, 30, 30)];
-const JUDGE_NAMES: [&str; 6] = ["PGREAT", "GREAT", "GOOD", "BAD", "POOR", "MISS"];
+/// PGREAT's signature hot pink on the IIDX result screen.
+const PGREAT_PINK: Color = Color::rgb(255, 40, 150);
+
+/// Built-in judge row colours (PG, GR, GD, BD, PR, MS) used when no skin palette is supplied.
+const BUILTIN_JUDGE_COLORS: [Color; 6] = [PGREAT_PINK, Color::BLUE, Color::YELLOW, Color::ORANGE, Color::RED, Color::rgb(120, 30, 30)];
+
+/// Built-in judge row labels used when no skin palette is supplied.
+const BUILTIN_JUDGE_NAMES: [&str; 6] = ["PGREAT", "GREAT", "GOOD", "BAD", "POOR", "MISS"];
+
+/// Judge colours and labels the result screen paints its per-judge rows with. [`Default`] keeps the
+/// built-in IIDX-style palette (PGREAT in hot pink); [`ResultPalette::from_skin`] takes them from a
+/// [`SkinConfig`] so a skin restyles the result screen the same way it restyles the play HUD.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResultPalette {
+    pub judge_colors: [Color; 6],
+    pub judge_labels: [String; 6],
+}
+
+impl Default for ResultPalette {
+    fn default() -> Self {
+        ResultPalette { judge_colors: BUILTIN_JUDGE_COLORS, judge_labels: BUILTIN_JUDGE_NAMES.map(String::from) }
+    }
+}
+
+impl ResultPalette {
+    /// Take the judge colours and full judge labels from a skin definition.
+    pub fn from_skin(cfg: &SkinConfig) -> ResultPalette {
+        ResultPalette { judge_colors: cfg.judge_colors.map(|c| Color::rgb(c[0], c[1], c[2])), judge_labels: cfg.judge_labels.clone() }
+    }
+}
+
+/// Reuse the colours a [`Skin`] already resolved instead of re-parsing its [`SkinConfig`], so a
+/// caller that holds a live skin does not have to keep the raw config around just for this screen.
+impl From<&Skin> for ResultPalette {
+    fn from(skin: &Skin) -> ResultPalette {
+        ResultPalette { judge_colors: skin.judge_colors, judge_labels: skin.judge_labels.clone() }
+    }
+}
+
+/// Process-wide built-in palette, so [`render_result`] does not allocate six label strings on every
+/// frame it draws.
+static DEFAULT_PALETTE: LazyLock<ResultPalette> = LazyLock::new(ResultPalette::default);
+
+/// The shared built-in palette backing [`render_result`].
+fn default_palette() -> &'static ResultPalette {
+    &DEFAULT_PALETTE
+}
 
 /// IIDX DJ-LEVEL bands (`F`..`AAA`) with their display colours, low rank first. The band index
 /// is the return of `dj_rank`. Rank boundaries are ninths of the maximum EX (the BMS/IIDX standard).
@@ -79,11 +127,15 @@ pub fn ex_delta_label(delta: i64) -> (String, Color) {
     }
 }
 
-const PGREAT_PINK: Color = Color::rgb(255, 40, 150);
-
 /// IIDX music-result layout: a big DJ-LEVEL rank + clear lamp + rank bar on the left, a full score
 /// report (EX / combo / per-judge counts with PGREAT in hot pink / FAST-SLOW / gauge) on the right.
 pub fn render_result<R: Renderer>(r: &mut R, view: &ResultView) {
+    render_result_with_palette(r, view, default_palette());
+}
+
+/// [`render_result`] with the per-judge colours and labels supplied by the caller (e.g. built from
+/// the active skin via [`ResultPalette::from_skin`]) instead of the built-in palette.
+pub fn render_result_with_palette<R: Renderer>(r: &mut R, view: &ResultView, palette: &ResultPalette) {
     let th = crate::theme::theme();
     let w = r.size().0 as f32;
     r.clear(th.bg);
@@ -137,8 +189,8 @@ pub fn render_result<R: Renderer>(r: &mut R, view: &ResultView) {
 
     let denom = view.total_notes.max(1) as f32;
     for i in 0..6 {
-        let col = if i == 0 { PGREAT_PINK } else { JUDGE_COLORS[i] };
-        draw_text(r, rx, y, 2.0, col, JUDGE_NAMES[i]);
+        let col = palette.judge_colors[i];
+        draw_text(r, rx, y, 2.0, col, &palette.judge_labels[i]);
         draw_text_right(r, rr, y, 2.0, th.text, &view.counts[i].to_string());
         let frac = (view.counts[i] as f32 / denom).min(1.0);
         r.fill_rect(Rect::new(rx, y + 23.0, (rr - rx) * frac, 4.0), col);
@@ -155,6 +207,115 @@ pub fn render_result<R: Renderer>(r: &mut R, view: &ResultView) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn sample_view() -> ResultView {
+        ResultView {
+            title: "PALETTE TEST".into(),
+            counts: [100, 20, 5, 2, 1, 3],
+            ex_score: 220,
+            max_score: 262,
+            max_combo: 120,
+            total_notes: 131,
+            fast: 7,
+            slow: 9,
+            gauge: 88.4,
+            clear_label: "CLEAR",
+            clear_color: Color::GREEN,
+            prev_best_ex: None,
+            prev_ex: None,
+            show_graph: true,
+        }
+    }
+
+    fn count_exact(c: &crate::CpuCanvas, want: Color) -> usize {
+        (0..1280 * 720).filter(|i| { let p = c.pixel_at((i % 1280) as u32, (i / 1280) as u32); p.r == want.r && p.g == want.g && p.b == want.b }).count()
+    }
+
+    #[test]
+    fn default_palette_keeps_the_builtin_hot_pink_pgreat_row() {
+        assert_eq!(ResultPalette::default().judge_colors[0], Color::rgb(255, 40, 150), "PGREAT stays hot pink by default");
+        assert_eq!(ResultPalette::default().judge_colors[4], Color::RED);
+        assert_eq!(ResultPalette::default().judge_labels[0], "PGREAT");
+        assert_eq!(ResultPalette::default().judge_labels[5], "MISS");
+    }
+
+    #[test]
+    fn render_result_equals_render_result_with_default_palette() {
+        use crate::CpuCanvas;
+        let view = sample_view();
+        let mut a = CpuCanvas::new(1280, 720);
+        let mut b = CpuCanvas::new(1280, 720);
+        render_result(&mut a, &view);
+        render_result_with_palette(&mut b, &view, &ResultPalette::default());
+        assert_eq!(a.pixels(), b.pixels(), "the legacy entry point delegates to the built-in palette unchanged");
+    }
+
+    #[test]
+    fn custom_palette_color_reaches_the_rendered_pixels() {
+        use crate::CpuCanvas;
+        let view = sample_view();
+        let marker = Color::rgb(1, 254, 3);
+        let mut palette = ResultPalette::default();
+        palette.judge_colors[0] = marker;
+
+        let mut painted = CpuCanvas::new(1280, 720);
+        render_result_with_palette(&mut painted, &view, &palette);
+        assert!(count_exact(&painted, marker) > 0, "the PGREAT row bar is filled with the palette colour");
+
+        let mut plain = CpuCanvas::new(1280, 720);
+        render_result_with_palette(&mut plain, &view, &ResultPalette::default());
+        assert_eq!(count_exact(&plain, marker), 0, "the default palette never paints that colour");
+        assert!(count_exact(&plain, Color::rgb(255, 40, 150)) > 0, "the default palette paints the hot pink PGREAT row");
+    }
+
+    #[test]
+    fn custom_palette_labels_change_the_rendered_text() {
+        use crate::CpuCanvas;
+        let view = sample_view();
+        let mut palette = ResultPalette::default();
+        palette.judge_labels[0] = "JUST".into();
+        let mut a = CpuCanvas::new(1280, 720);
+        let mut b = CpuCanvas::new(1280, 720);
+        render_result_with_palette(&mut a, &view, &palette);
+        render_result_with_palette(&mut b, &view, &ResultPalette::default());
+        assert_ne!(a.pixels(), b.pixels(), "a renamed judge row renders different pixels");
+    }
+
+    #[test]
+    fn palette_from_skin_takes_the_skin_judge_colors_and_labels() {
+        use crate::SkinConfig;
+        let mut cfg = SkinConfig::default();
+        let from_default = ResultPalette::from_skin(&cfg);
+        assert_eq!(from_default.judge_colors[0], Color::rgb(70, 220, 120), "skin PG colour, not the built-in pink");
+        assert_eq!(from_default.judge_labels[0], "PERFECT", "skin labels, not the built-in PGREAT");
+        cfg.judge_colors[2] = [9, 8, 7];
+        cfg.judge_labels[2] = "OK".into();
+        let custom = ResultPalette::from_skin(&cfg);
+        assert_eq!(custom.judge_colors[2], Color::rgb(9, 8, 7));
+        assert_eq!(custom.judge_labels[2], "OK");
+    }
+
+    #[test]
+    fn palette_from_a_resolved_skin_matches_the_one_built_from_its_config() {
+        use crate::SkinConfig;
+        use rbms_model::Mode;
+        let mut cfg = SkinConfig::default();
+        cfg.judge_colors[1] = [3, 4, 5];
+        cfg.judge_labels[1] = "NICE".into();
+        let skin = Skin::build(&cfg, Mode::BEAT_7K, 1280.0, 720.0);
+        let from_skin = ResultPalette::from(&skin);
+        assert_eq!(from_skin.judge_colors[1], Color::rgb(3, 4, 5), "the resolved skin colour is reused as-is");
+        assert_eq!(from_skin.judge_labels[1], "NICE");
+        assert_eq!(from_skin, ResultPalette::from_skin(&cfg), "both constructors agree on the same skin");
+    }
+
+    #[test]
+    fn the_builtin_palette_is_shared_instead_of_rebuilt_per_frame() {
+        let a = default_palette();
+        let b = default_palette();
+        assert!(std::ptr::eq(a, b), "render_result reuses one static palette rather than allocating labels per call");
+        assert_eq!(*a, ResultPalette::default(), "the shared palette is the built-in one");
+    }
 
     #[test]
     fn dj_rank_bands_match_ninths() {

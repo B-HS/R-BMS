@@ -20,6 +20,7 @@ fn px_for(scale: f32) -> f32 {
 struct Laid {
     width: f32,
     glyphs: Vec<(i32, i32, CacheKey)>,
+    used: u64,
 }
 
 /// One horizontal run of identical-coverage pixels inside a rasterized glyph, relative to the
@@ -37,6 +38,26 @@ struct GlyphRun {
     ca: u8,
 }
 
+/// A cached glyph rasterization plus the access stamp used to evict the least recently used entry.
+struct RunEntry {
+    runs: Vec<GlyphRun>,
+    used: u64,
+}
+
+/// Maximum number of shaped lines (`(text, px)` pairs) kept in the layout cache. The play HUD and
+/// the select screen build fresh strings every frame (score, combo, timers), so without a bound the
+/// cache grows for the whole session; a few hundred entries covers a frame's live strings many times
+/// over while keeping the cache flat.
+pub const LAYOUT_CACHE_LIMIT: usize = 512;
+
+/// Maximum number of rasterized `(glyph, colour)` entries kept in the glyph-run cache. Larger than
+/// the layout bound because one line contributes one layout entry but many glyph entries.
+pub const RUN_CACHE_LIMIT: usize = 4096;
+
+/// Percentage of a cache that survives an eviction sweep. Evicting in one batch down to this share
+/// (instead of a single entry per insert) keeps the O(n) sweep amortized to O(1) per insert.
+const CACHE_RETAIN_PERCENT: usize = 75;
+
 /// One text context for the (single-threaded) UI: a font database with fallback, a glyph
 /// rasterization cache, the resolved default family, and the per-string layout cache.
 ///
@@ -51,7 +72,10 @@ struct TextEngine {
     /// Rasterized, run-length-merged glyph pixels keyed by `(glyph cache key, packed RGB)`. Built
     /// once per glyph+colour and replayed every frame, so the hot draw path neither re-runs
     /// `swash.with_pixels` nor emits one quad per pixel. Cleared with `cache` on a family change.
-    runs: HashMap<(CacheKey, u32), Vec<GlyphRun>>,
+    runs: HashMap<(CacheKey, u32), RunEntry>,
+    /// Monotonic access counter stamped onto every cache entry on use; the eviction sweep keeps the
+    /// entries with the highest stamps.
+    tick: u64,
 }
 
 impl TextEngine {
@@ -64,12 +88,33 @@ impl TextEngine {
             .last()
             .and_then(|f| f.families.first().map(|(n, _)| n.clone()))
             .unwrap_or_else(|| "sans-serif".to_string());
-        TextEngine { fs, swash: SwashCache::new(), default_family: family.clone(), family, cache: HashMap::new(), runs: HashMap::new() }
+        TextEngine { fs, swash: SwashCache::new(), default_family: family.clone(), family, cache: HashMap::new(), runs: HashMap::new(), tick: 0 }
+    }
+
+    fn layout_len(&self) -> usize {
+        self.cache.values().map(|m| m.len()).sum()
+    }
+
+    /// Drop the least recently used layout entries until only `CACHE_RETAIN_PERCENT` of the bound
+    /// remains, so the next inserts are free again.
+    fn evict_layouts(&mut self) {
+        let retain = LAYOUT_CACHE_LIMIT * CACHE_RETAIN_PERCENT / 100;
+        let mut ages: Vec<(u64, u32, String)> = self.cache.iter().flat_map(|(px, m)| m.iter().map(move |(t, l)| (l.used, *px, t.clone()))).collect();
+        ages.sort_unstable_by_key(|e| std::cmp::Reverse(e.0));
+        for (_, px, text) in ages.into_iter().skip(retain) {
+            if let Some(m) = self.cache.get_mut(&px) {
+                m.remove(&text);
+            }
+        }
+        self.cache.retain(|_, m| !m.is_empty());
     }
 
     fn ensure(&mut self, text: &str, px: f32) {
         let pxu = px as u32;
-        if self.cache.get(&pxu).is_some_and(|m| m.contains_key(text)) {
+        self.tick += 1;
+        let tick = self.tick;
+        if let Some(entry) = self.cache.get_mut(&pxu).and_then(|m| m.get_mut(text)) {
+            entry.used = tick;
             return;
         }
         let mut buf = Buffer::new(&mut self.fs, Metrics::new(px, px * 1.2));
@@ -86,7 +131,10 @@ impl TextEngine {
                 glyphs.push((p.x, p.y, p.cache_key));
             }
         }
-        self.cache.entry(pxu).or_default().insert(text.to_string(), Laid { width, glyphs });
+        self.cache.entry(pxu).or_default().insert(text.to_string(), Laid { width, glyphs, used: tick });
+        if self.layout_len() > LAYOUT_CACHE_LIMIT {
+            self.evict_layouts();
+        }
     }
 
     fn laid(&self, text: &str, px: f32) -> Option<&Laid> {
@@ -100,6 +148,7 @@ impl TextEngine {
 
     fn draw<R: Renderer>(&mut self, r: &mut R, x: f32, y: f32, color: Color, text: &str, px: f32) {
         self.ensure(text, px);
+        let tick = self.tick;
         let Some(laid) = self.cache.get(&(px as u32)).and_then(|m| m.get(text)) else { return };
         let base = CtColor::rgb(color.r, color.g, color.b);
         let rgb = ((color.r as u32) << 16) | ((color.g as u32) << 8) | color.b as u32;
@@ -110,17 +159,21 @@ impl TextEngine {
         let (fs, swash, runs_cache) = (&mut self.fs, &mut self.swash, &mut self.runs);
         for &(gx, gy, ck) in &laid.glyphs {
             let key = (ck, rgb);
-            if let std::collections::hash_map::Entry::Vacant(slot) = runs_cache.entry(key) {
-                let mut pixels: Vec<(i32, i32, u8, u8, u8, u8)> = Vec::new();
-                swash.with_pixels(fs, ck, base, |dx, dy, col| {
-                    let ca = col.a();
-                    if ca != 0 {
-                        pixels.push((dx, dy, col.r(), col.g(), col.b(), ca));
-                    }
-                });
-                slot.insert(merge_runs(pixels));
+            match runs_cache.entry(key) {
+                std::collections::hash_map::Entry::Occupied(mut slot) => slot.get_mut().used = tick,
+                std::collections::hash_map::Entry::Vacant(slot) => {
+                    let mut pixels: Vec<(i32, i32, u8, u8, u8, u8)> = Vec::new();
+                    swash.with_pixels(fs, ck, base, |dx, dy, col| {
+                        let ca = col.a();
+                        if ca != 0 {
+                            pixels.push((dx, dy, col.r(), col.g(), col.b(), ca));
+                        }
+                    });
+                    slot.insert(RunEntry { runs: merge_runs(pixels), used: tick });
+                }
             }
-            for run in &runs_cache[&key] {
+            let Some(entry) = runs_cache.get(&key) else { continue };
+            for run in &entry.runs {
                 let a = ((run.ca as u16 * color.a as u16) / 255) as u8;
                 if a == 0 {
                     continue;
@@ -128,6 +181,24 @@ impl TextEngine {
                 r.fill_rect(Rect::new((ox + gx + run.dx) as f32, (oy + gy + run.dy) as f32, run.w as f32, 1.0), Color { r: run.r, g: run.g, b: run.b, a });
             }
         }
+        if runs_cache.len() > RUN_CACHE_LIMIT {
+            evict_runs(runs_cache);
+        }
+    }
+}
+
+/// Drop the least recently used glyph-run entries until only `CACHE_RETAIN_PERCENT` of the bound
+/// remains. Free function so it can run while `self.cache` is immutably borrowed by the draw loop.
+///
+/// Callers sweep once a whole line is drawn, never between its glyphs: every glyph inserted by one
+/// [`Engine::draw`] shares a single `used` stamp and this sort is unstable, so a mid-line sweep
+/// could drop an entry the same call was still about to replay, silently leaving a hole in the text.
+fn evict_runs(runs: &mut HashMap<(CacheKey, u32), RunEntry>) {
+    let retain = RUN_CACHE_LIMIT * CACHE_RETAIN_PERCENT / 100;
+    let mut ages: Vec<(u64, (CacheKey, u32))> = runs.iter().map(|(k, v)| (v.used, *k)).collect();
+    ages.sort_unstable_by_key(|e| std::cmp::Reverse(e.0));
+    for (_, k) in ages.into_iter().skip(retain) {
+        runs.remove(&k);
     }
 }
 
@@ -164,6 +235,16 @@ thread_local! {
 pub fn text_width(text: &str, scale: f32) -> f32 {
     let px = px_for(scale);
     ENGINE.with(|c| c.borrow_mut().width(text, px))
+}
+
+/// Live occupancy of the two text caches as `(layout entries, glyph-run entries)`, bounded by
+/// [`LAYOUT_CACHE_LIMIT`] and [`RUN_CACHE_LIMIT`]. Always available (not test-only) so an app debug
+/// overlay can show cache pressure next to its frame stats.
+pub fn cache_stats() -> (usize, usize) {
+    ENGINE.with(|c| {
+        let e = c.borrow();
+        (e.layout_len(), e.runs.len())
+    })
 }
 
 /// Draw a left-aligned string with its top-left near `(x, y)`. `scale` keeps its legacy meaning
@@ -244,6 +325,91 @@ pub fn reset_ui_family() {
 mod tests {
     use super::*;
     use crate::{CpuCanvas, Renderer};
+
+    /// Empty both thread-local caches. Tests share an engine per test thread, so a test that asserts
+    /// absolute entry counts starts from a known state instead of whatever ran before it.
+    fn clear_caches() {
+        set_ui_family("a family that is definitely not loaded");
+        reset_ui_family();
+        assert_eq!(cache_stats(), (0, 0), "both caches are empty after a family round-trip");
+    }
+
+    #[test]
+    fn layout_cache_stays_under_limit_and_keeps_recently_used_entries() {
+        clear_caches();
+        let overflow = LAYOUT_CACHE_LIMIT + 1000;
+        let mut c = CpuCanvas::new(64, 16);
+        let name = |i: usize| format!("S{i}");
+        for i in 0..overflow {
+            draw_text(&mut c, 0.0, 0.0, 1.0, Color::WHITE, &name(i));
+        }
+        let after_flood = cache_stats().0;
+        assert!(after_flood <= LAYOUT_CACHE_LIMIT, "{overflow} distinct strings leave at most {LAYOUT_CACHE_LIMIT} entries (got {after_flood})");
+
+        draw_text(&mut c, 0.0, 0.0, 1.0, Color::WHITE, &name(overflow - 1));
+        assert_eq!(cache_stats().0, after_flood, "the newest string is still cached (hit adds no entry)");
+
+        draw_text(&mut c, 0.0, 0.0, 1.0, Color::WHITE, &name(0));
+        assert_eq!(cache_stats().0, after_flood + 1, "the oldest string was evicted (miss adds one entry)");
+    }
+
+    /// Draw one glyph once per colour until the run cache has overflowed its bound, and report the
+    /// colour index used last. The run cache is keyed by (glyph, colour), so every call is a miss.
+    fn flood_run_cache(c: &mut CpuCanvas) -> usize {
+        let overflow = RUN_CACHE_LIMIT + 200;
+        let shade = |i: usize| Color::rgb((i & 0xff) as u8, ((i >> 8) & 0xff) as u8, 7);
+        for i in 0..overflow {
+            draw_text(c, 0.0, 0.0, 1.0, shade(i), "M");
+        }
+        overflow - 1
+    }
+
+    /// The sweep keeps `CACHE_RETAIN_PERCENT` of the bound and drops the least recently used
+    /// entries, the same contract the layout cache test pins.
+    #[test]
+    fn glyph_run_cache_evicts_down_to_the_retained_share_and_keeps_the_newest_colour() {
+        clear_caches();
+        let mut c = CpuCanvas::new(32, 24);
+        let newest = flood_run_cache(&mut c);
+        let entries = cache_stats().1;
+        let floor = RUN_CACHE_LIMIT * CACHE_RETAIN_PERCENT / 100;
+        assert!(entries <= RUN_CACHE_LIMIT, "an overflowing flood leaves at most {RUN_CACHE_LIMIT} run entries (got {entries})");
+        assert!(entries >= floor, "a sweep retains {CACHE_RETAIN_PERCENT}% of the bound, so at least {floor} entries survive (got {entries})");
+
+        let shade = |i: usize| Color::rgb((i & 0xff) as u8, ((i >> 8) & 0xff) as u8, 7);
+        draw_text(&mut c, 0.0, 0.0, 1.0, shade(newest), "M");
+        assert_eq!(cache_stats().1, entries, "the most recently drawn colour is still cached (hit adds no entry)");
+        draw_text(&mut c, 0.0, 0.0, 1.0, shade(0), "M");
+        assert_eq!(cache_stats().1, entries + 1, "the oldest colour was evicted (miss adds one entry)");
+    }
+
+    /// Eviction runs once the line is finished, so a sweep can never drop a glyph the same call is
+    /// still about to paint: text drawn against a full cache is pixel-identical to text drawn cold.
+    #[test]
+    fn a_draw_under_run_cache_pressure_still_paints_every_glyph() {
+        let text = "GOLDEN 0123";
+        let mut cold = CpuCanvas::new(160, 24);
+        draw_text(&mut cold, 2.0, 2.0, 1.4, Color::WHITE, text);
+
+        let mut scratch = CpuCanvas::new(32, 24);
+        flood_run_cache(&mut scratch);
+
+        let mut hot = CpuCanvas::new(160, 24);
+        draw_text(&mut hot, 2.0, 2.0, 1.4, Color::WHITE, text);
+        assert_eq!(cold.pixels(), hot.pixels(), "a full run cache does not silently drop glyphs from the line");
+    }
+
+    #[test]
+    fn changing_the_ui_family_empties_both_caches() {
+        clear_caches();
+        let mut c = CpuCanvas::new(64, 16);
+        draw_text(&mut c, 0.0, 0.0, 1.0, Color::WHITE, "CACHED");
+        let (layouts, runs) = cache_stats();
+        assert!(layouts > 0 && runs > 0, "drawing populates both caches ({layouts}, {runs})");
+        set_ui_family("a family that is definitely not loaded");
+        assert_eq!(cache_stats(), (0, 0), "a family switch drops every cached layout and glyph run");
+        reset_ui_family();
+    }
 
     #[test]
     fn fit_text_truncates_with_ellipsis_when_too_wide() {
