@@ -85,14 +85,7 @@ impl AudioEngine {
         let mixer = Mixer::new(out_rate, out_channels, max_voices);
         let scratch_samples = scratch_prealloc_samples(&config);
 
-        let ctx = StreamContext {
-            mixer,
-            consumer,
-            clock: clock.clone(),
-            telemetry: telemetry.clone(),
-            clock_epoch,
-            scratch_samples,
-        };
+        let ctx = StreamContext { mixer, consumer, clock: clock.clone(), telemetry: telemetry.clone(), clock_epoch, scratch_samples };
         let stream = match sample_format {
             SampleFormat::F32 => build_stream::<f32>(&device, &config, ctx)?,
             SampleFormat::I16 => build_stream::<i16>(&device, &config, ctx)?,
@@ -292,13 +285,7 @@ where
                 for (o, s) in data.iter_mut().zip(buf.iter()) {
                     *o = T::from_sample(*s);
                 }
-                write_clock_pair(
-                    &clock,
-                    &telemetry.callback_nanos,
-                    &telemetry.clock_seq,
-                    mixer.clock_frames(),
-                    clock_epoch.elapsed().as_nanos() as u64,
-                );
+                write_clock_pair(&clock, &telemetry.callback_nanos, &telemetry.clock_seq, mixer.clock_frames(), clock_epoch.elapsed().as_nanos() as u64);
             },
             move |e| {
                 error_telemetry.alive.store(false, Ordering::Release);

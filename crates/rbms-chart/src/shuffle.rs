@@ -370,15 +370,9 @@ mod tests {
     fn apply_preserves_note_count() {
         let base = model(b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:0101\r\n#00113:0011\r\n#00116:0100\r\n");
         let before = note_count(&base);
-        for opt in [
-            NoteOption::Mirror,
-            NoteOption::Random,
-            NoteOption::SRandom,
-            NoteOption::RRandom,
-            NoteOption::Rotate,
-            NoteOption::HRandom,
-            NoteOption::AllScratch,
-        ] {
+        for opt in
+            [NoteOption::Mirror, NoteOption::Random, NoteOption::SRandom, NoteOption::RRandom, NoteOption::Rotate, NoteOption::HRandom, NoteOption::AllScratch]
+        {
             let mut m = base.clone();
             apply(&mut m, opt, 7);
             assert_eq!(note_count(&m), before, "{:?} preserves note count", opt);
@@ -418,10 +412,7 @@ mod tests {
 
     #[test]
     fn time_based_options_preserve_count_on_dp() {
-        let dp = to_model(
-            &parse(b"#PLAYER 3\r\n#WAV01 a.wav\r\n#00111:01010101\r\n#00116:01000100\r\n#00121:00110011\r\n#00126:00010001\r\n"),
-            Mode::BEAT_14K,
-        );
+        let dp = to_model(&parse(b"#PLAYER 3\r\n#WAV01 a.wav\r\n#00111:01010101\r\n#00116:01000100\r\n#00121:00110011\r\n#00126:00010001\r\n"), Mode::BEAT_14K);
         for opt in [NoteOption::HRandom, NoteOption::AllScratch] {
             let mut m = dp.clone();
             apply(&mut m, opt, 21);
@@ -699,10 +690,7 @@ mod tests {
 
     #[test]
     fn apply_preserves_count_for_every_option_5k() {
-        let base = to_model(
-            &parse(b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:01010101\r\n#00113:00110011\r\n#00116:01000010\r\n"),
-            Mode::BEAT_5K,
-        );
+        let base = to_model(&parse(b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:01010101\r\n#00113:00110011\r\n#00116:01000010\r\n"), Mode::BEAT_5K);
         let before = note_count(&base);
         for opt in NoteOption::ALL {
             let mut m = base.clone();
@@ -741,10 +729,8 @@ mod tests {
 
     #[test]
     fn apply_preserves_count_for_every_option_10k() {
-        let base = to_model(
-            &parse(b"#PLAYER 2\r\n#WAV01 a.wav\r\n#00111:01010101\r\n#00116:01000100\r\n#00121:00110011\r\n#00126:00010001\r\n"),
-            Mode::BEAT_10K,
-        );
+        let base =
+            to_model(&parse(b"#PLAYER 2\r\n#WAV01 a.wav\r\n#00111:01010101\r\n#00116:01000100\r\n#00121:00110011\r\n#00126:00010001\r\n"), Mode::BEAT_10K);
         let before = note_count(&base);
         for opt in NoteOption::ALL {
             let mut m = base.clone();
@@ -823,9 +809,7 @@ mod tests {
             let mut b = model(chart);
             apply(&mut a, opt, 4321);
             apply(&mut b, opt, 4321);
-            let pos = |m: &Model| -> Vec<Vec<bool>> {
-                m.timelines.iter().map(|tl| tl.notes.iter().map(|s| s.is_some()).collect()).collect()
-            };
+            let pos = |m: &Model| -> Vec<Vec<bool>> { m.timelines.iter().map(|tl| tl.notes.iter().map(|s| s.is_some()).collect()).collect() };
             assert_eq!(pos(&a), pos(&b), "{:?} must be deterministic for a fixed seed", opt);
         }
     }

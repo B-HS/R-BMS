@@ -25,7 +25,14 @@ fn main() {
         draw_text(&mut c, 40.0, y, *scale, *col, s);
         y += scale * 8.5 * 1.7 + 14.0;
     }
-    draw_text_centered(&mut c, w as f32 * 0.5, h as f32 - 40.0, 1.4, Color::rgb(120, 240, 140), &format!("text_width('東方')={:.0}px  cosmic-text + Inter + system fallback", text_width("東方", 2.4)));
+    draw_text_centered(
+        &mut c,
+        w as f32 * 0.5,
+        h as f32 - 40.0,
+        1.4,
+        Color::rgb(120, 240, 140),
+        &format!("text_width('東方')={:.0}px  cosmic-text + Inter + system fallback", text_width("東方", 2.4)),
+    );
 
     let mut f = std::fs::File::create(&out).expect("create");
     write!(f, "P6\n{w} {h}\n255\n").unwrap();

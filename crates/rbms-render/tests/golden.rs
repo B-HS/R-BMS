@@ -168,15 +168,7 @@ fn select_view() -> SelectView {
         lamp,
         folder_count: folder.then_some(86),
     };
-    let rec = |when: &str, ex: u32| RecordRowView {
-        when: when.into(),
-        lamp: Color::WHITE,
-        lamp_label: "HARD",
-        ex,
-        max_ex: 1848,
-        bp: 12,
-        trend: None,
-    };
+    let rec = |when: &str, ex: u32| RecordRowView { when: when.into(), lamp: Color::WHITE, lamp_label: "HARD", ex, max_ex: 1848, bp: 12, trend: None };
     let detail = DetailView {
         accent: Color::BLUE,
         title: "Legend of Eastern Rabbit -SKY DEFENDER- [7K ANOTHER]".into(),

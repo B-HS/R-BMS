@@ -60,26 +60,8 @@ mod tests {
 
     #[test]
     fn beat_7k_lane_of_raw_full_map() {
-        let expected: [Option<usize>; 18] = [
-            Some(0),
-            Some(1),
-            Some(2),
-            Some(3),
-            Some(4),
-            Some(7),
-            None,
-            Some(5),
-            Some(6),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        ];
+        let expected: [Option<usize>; 18] =
+            [Some(0), Some(1), Some(2), Some(3), Some(4), Some(7), None, Some(5), Some(6), None, None, None, None, None, None, None, None, None];
         for raw in 0..18 {
             assert_eq!(Mode::BEAT_7K.lane_of_raw(raw), expected[raw], "raw={raw}");
         }
@@ -87,26 +69,8 @@ mod tests {
 
     #[test]
     fn beat_5k_lane_of_raw_full_map() {
-        let expected: [Option<usize>; 18] = [
-            Some(0),
-            Some(1),
-            Some(2),
-            Some(3),
-            Some(4),
-            Some(5),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        ];
+        let expected: [Option<usize>; 18] =
+            [Some(0), Some(1), Some(2), Some(3), Some(4), Some(5), None, None, None, None, None, None, None, None, None, None, None, None];
         for raw in 0..18 {
             assert_eq!(Mode::BEAT_5K.lane_of_raw(raw), expected[raw], "raw={raw}");
         }
@@ -114,26 +78,8 @@ mod tests {
 
     #[test]
     fn beat_10k_lane_of_raw_full_map() {
-        let expected: [Option<usize>; 18] = [
-            Some(0),
-            Some(1),
-            Some(2),
-            Some(3),
-            Some(4),
-            Some(5),
-            None,
-            None,
-            None,
-            Some(6),
-            Some(7),
-            Some(8),
-            Some(9),
-            Some(10),
-            Some(11),
-            None,
-            None,
-            None,
-        ];
+        let expected: [Option<usize>; 18] =
+            [Some(0), Some(1), Some(2), Some(3), Some(4), Some(5), None, None, None, Some(6), Some(7), Some(8), Some(9), Some(10), Some(11), None, None, None];
         for raw in 0..18 {
             assert_eq!(Mode::BEAT_10K.lane_of_raw(raw), expected[raw], "raw={raw}");
         }
@@ -168,26 +114,8 @@ mod tests {
 
     #[test]
     fn popn_9k_lane_of_raw_full_map() {
-        let expected: [Option<usize>; 18] = [
-            Some(0),
-            Some(1),
-            Some(2),
-            Some(3),
-            Some(4),
-            None,
-            None,
-            None,
-            None,
-            None,
-            Some(5),
-            Some(6),
-            Some(7),
-            Some(8),
-            None,
-            None,
-            None,
-            None,
-        ];
+        let expected: [Option<usize>; 18] =
+            [Some(0), Some(1), Some(2), Some(3), Some(4), None, None, None, None, None, Some(5), Some(6), Some(7), Some(8), None, None, None, None];
         for raw in 0..18 {
             assert_eq!(Mode::POPN_9K.lane_of_raw(raw), expected[raw], "raw={raw}");
         }

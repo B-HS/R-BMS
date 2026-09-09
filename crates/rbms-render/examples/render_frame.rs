@@ -16,12 +16,8 @@ fn main() {
     let mode = detect_mode(&src, &path);
     let model = to_model(&src, mode);
 
-    let mut note_times: Vec<i64> = model
-        .timelines
-        .iter()
-        .filter(|tl| tl.notes.iter().flatten().any(|n| !matches!(n.kind, NoteKind::LongEnd { .. })))
-        .map(|tl| tl.time_us)
-        .collect();
+    let mut note_times: Vec<i64> =
+        model.timelines.iter().filter(|tl| tl.notes.iter().flatten().any(|n| !matches!(n.kind, NoteKind::LongEnd { .. }))).map(|tl| tl.time_us).collect();
     note_times.sort_unstable();
     let pick = note_times.get(note_times.len() / 3).copied().unwrap_or(0);
     let microtime = pick - 350_000;
@@ -47,7 +43,19 @@ fn main() {
         }
     }
     render_key_bomb(&mut canvas, &skin, &bomb, microtime);
-    let hud = HudView { combo: 123, last_judge: Some(0), last_fast: false, fast: 30, slow: 40, counts: [712, 64, 21, 8, 5, 2], ex_score: 1488, gauge: 78.0, green_number: 310.0, max_ex: 1624, best_ex: Some(1502) };
+    let hud = HudView {
+        combo: 123,
+        last_judge: Some(0),
+        last_fast: false,
+        fast: 30,
+        slow: 40,
+        counts: [712, 64, 21, 8, 5, 2],
+        ex_score: 1488,
+        gauge: 78.0,
+        green_number: 310.0,
+        max_ex: 1624,
+        best_ex: Some(1502),
+    };
     render_hud(&mut canvas, &skin, &hud);
 
     let mut f = std::fs::File::create(&out).expect("create");

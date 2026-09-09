@@ -49,9 +49,13 @@ fn spec(kind: GaugeKind) -> Spec {
         AssistEasy => Spec { modifier: Total, min: 2.0, max: 100.0, init: 20.0, border: 60.0, deltas: [1.0, 1.0, 0.5, -1.5, -3.0, -0.5], guts: &[] },
         Easy => Spec { modifier: Total, min: 2.0, max: 100.0, init: 20.0, border: 80.0, deltas: [1.0, 1.0, 0.5, -1.5, -4.5, -1.0], guts: &[] },
         Normal => Spec { modifier: Total, min: 2.0, max: 100.0, init: 20.0, border: 80.0, deltas: [1.0, 1.0, 0.5, -3.0, -6.0, -2.0], guts: &[] },
-        Hard => Spec { modifier: LimitIncrement, min: 0.0, max: 100.0, init: 100.0, border: 0.0, deltas: [0.15, 0.12, 0.03, -5.0, -10.0, -5.0], guts: HARD_GUTS },
+        Hard => {
+            Spec { modifier: LimitIncrement, min: 0.0, max: 100.0, init: 100.0, border: 0.0, deltas: [0.15, 0.12, 0.03, -5.0, -10.0, -5.0], guts: HARD_GUTS }
+        }
         ExHard => Spec { modifier: LimitIncrement, min: 0.0, max: 100.0, init: 100.0, border: 0.0, deltas: [0.15, 0.06, 0.0, -8.0, -16.0, -8.0], guts: &[] },
-        Hazard => Spec { modifier: Modifier::None, min: 0.0, max: 100.0, init: 100.0, border: 0.0, deltas: [0.15, 0.06, 0.0, -100.0, -100.0, -10.0], guts: &[] },
+        Hazard => {
+            Spec { modifier: Modifier::None, min: 0.0, max: 100.0, init: 100.0, border: 0.0, deltas: [0.15, 0.06, 0.0, -100.0, -100.0, -10.0], guts: &[] }
+        }
     }
 }
 
@@ -166,8 +170,7 @@ pub fn clear_lamp(gauge: &Gauge, counts: &[u32; 6], max_combo: u32, total_notes:
 mod gauge_tests {
     use super::*;
 
-    const ALL_KINDS: [GaugeKind; 6] =
-        [GaugeKind::AssistEasy, GaugeKind::Easy, GaugeKind::Normal, GaugeKind::Hard, GaugeKind::ExHard, GaugeKind::Hazard];
+    const ALL_KINDS: [GaugeKind; 6] = [GaugeKind::AssistEasy, GaugeKind::Easy, GaugeKind::Normal, GaugeKind::Hard, GaugeKind::ExHard, GaugeKind::Hazard];
 
     // --- init / spec wiring -------------------------------------------------
 

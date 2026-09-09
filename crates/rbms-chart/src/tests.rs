@@ -179,7 +179,6 @@ fn probe_unterminated_ln_dangling_start() {
     eprintln!("PROBE kinds={:?} playable={}", kinds, count_playable_notes(&m));
 }
 
-
 #[test]
 fn note_density_bins_normal_notes_per_second() {
     // BPM 120 ⇒ measure 0 spans [0,2)s; four lane-0 notes at 0/0.5/1.0/1.5s ⇒ two per second.
@@ -661,8 +660,6 @@ fn bgm_notes_get_their_timeline_time() {
     let bg = m.timelines.iter().flat_map(|t| t.bgnotes.iter()).next().unwrap();
     assert_eq!(bg.time_us, 2_000_000);
 }
-
-
 
 #[test]
 fn default_total_matches_bmsplayerrule_formula() {

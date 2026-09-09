@@ -8,12 +8,16 @@ pub mod skin;
 pub mod theme;
 
 pub use cpu::CpuCanvas;
-pub use font::{LAYOUT_CACHE_LIMIT, RUN_CACHE_LIMIT, cache_stats, draw_text, draw_text_centered, draw_text_right, fit_text, load_font, reset_ui_family, set_ui_family, text_width};
+pub use font::{
+    LAYOUT_CACHE_LIMIT, RUN_CACHE_LIMIT, cache_stats, draw_text, draw_text_centered, draw_text_right, fit_text, load_font, reset_ui_family, set_ui_family,
+    text_width,
+};
 pub use hud::{HudView, render_hud};
 pub use playfield::{render_key_bomb, render_lane_cover, render_playfield};
 pub use result::{RANK_BANDS, ResultPalette, ResultView, dj_rank, draw_rank_bar, ex_delta_label, render_result, render_result_with_palette};
 pub use select::{
-    CoverState, DensityView, DetailView, RecordRowView, RecordsView, SelectDetail, SelectHot, SelectModal, SelectRow, SelectView, StatCell, cover_rect, render_select,
+    CoverState, DensityView, DetailView, RecordRowView, RecordsView, SelectDetail, SelectHot, SelectModal, SelectRow, SelectView, StatCell, cover_rect,
+    render_select,
 };
 pub use skin::{Skin, SkinConfig};
 pub use theme::{Theme, ThemeConfig, set_theme, theme};

@@ -49,7 +49,9 @@ fn collect_actions(model: &Model) -> Vec<(i64, usize, AutoAction)> {
     for lane in 0..n {
         let mut pending_head: Option<(i64, i32)> = None;
         for tl in &model.timelines {
-            let Some(note) = &tl.notes[lane] else { continue };
+            let Some(note) = &tl.notes[lane] else {
+                continue;
+            };
             match note.kind {
                 NoteKind::Normal => v.push((note.time_us, lane, AutoAction::Press { wav: note.wav, ln: false })),
                 NoteKind::LongStart { .. } => pending_head = Some((note.time_us, note.wav)),
@@ -266,11 +268,7 @@ impl Player {
     }
 
     fn nearest_head_wav(&self, lane: usize, now_us: i64) -> Option<i32> {
-        self.heads
-            .iter()
-            .filter(|(_, l, _)| *l == lane)
-            .min_by_key(|(t, _, _)| (t - now_us).abs())
-            .map(|(_, _, wav)| *wav)
+        self.heads.iter().filter(|(_, l, _)| *l == lane).min_by_key(|(t, _, _)| (t - now_us).abs()).map(|(_, _, wav)| *wav)
     }
 
     pub fn last_time_us(&self) -> i64 {

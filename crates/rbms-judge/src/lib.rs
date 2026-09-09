@@ -496,13 +496,8 @@ mod tests {
         // Default ln_end gd is +-200_000; a 230ms-early release is BD. After widening to a huge
         // window, the same release lands inside PG.
         let mut e = ln(100_000, 600_000);
-        let wide = JudgeWindows {
-            pg: (-400_000, 400_000),
-            gr: (-450_000, 450_000),
-            gd: (-500_000, 500_000),
-            bd: (-550_000, 550_000),
-            ms: Some((-550_000, 600_000)),
-        };
+        let wide =
+            JudgeWindows { pg: (-400_000, 400_000), gr: (-450_000, 450_000), gd: (-500_000, 500_000), bd: (-550_000, 550_000), ms: Some((-550_000, 600_000)) };
         e.set_ln_end(wide);
         e.press(0, 100_000).unwrap(); // head PG
         let r = e.release(0, 370_000).unwrap(); // dm +230_000, now inside widened PG
@@ -574,10 +569,7 @@ mod tests {
 
     #[test]
     fn early_plus_late_equals_counts_invariant_mixed_run() {
-        let mut e = Eng::new(
-            vec![vec![1_000_000, 2_000_000, 3_000_000, 4_000_000, 5_000_000]],
-            JudgeWindows::SEVENKEY_NOTE,
-        );
+        let mut e = Eng::new(vec![vec![1_000_000, 2_000_000, 3_000_000, 4_000_000, 5_000_000]], JudgeWindows::SEVENKEY_NOTE);
         e.press(0, 990_000); // early PG
         e.press(0, 2_010_000); // late PG
         e.press(0, 2_950_000); // dm +50_000 early GR
@@ -728,10 +720,7 @@ mod tests {
             wavmap: Vec::new(),
             bgamap: Vec::new(),
             init_bpm: 130.0,
-            timelines: vec![
-                mk_tl(1_000_000, NoteKind::LongStart { ln: LnKind::Ln }),
-                mk_tl(1_600_000, NoteKind::LongEnd { ln: LnKind::Ln }),
-            ],
+            timelines: vec![mk_tl(1_000_000, NoteKind::LongStart { ln: LnKind::Ln }), mk_tl(1_600_000, NoteKind::LongEnd { ln: LnKind::Ln })],
             md5: String::new(),
             sha256: String::new(),
         };

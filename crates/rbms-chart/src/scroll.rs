@@ -346,13 +346,8 @@ mod tests {
         let b = timelines(b"#BPM 200\r\n#WAV01 a.wav\r\n#00111:01\r\n");
         let na = a.iter().rev().find_map(|t| t.notes[0].as_ref().map(|n| n.time_us)).unwrap();
         let nb = b.iter().rev().find_map(|t| t.notes[0].as_ref().map(|n| n.time_us)).unwrap();
-        let off = |tls: &[TimeLine], nt: i64| {
-            constant_offsets(tls, nt - 500_000, 1.0, 1200.0)
-                .iter()
-                .find(|(i, _)| tls[*i].time_us == nt)
-                .map(|(_, y)| *y)
-                .unwrap()
-        };
+        let off =
+            |tls: &[TimeLine], nt: i64| constant_offsets(tls, nt - 500_000, 1.0, 1200.0).iter().find(|(i, _)| tls[*i].time_us == nt).map(|(_, y)| *y).unwrap();
         assert!((off(&a, na) - off(&b, nb)).abs() < 1.0, "constant speed is BPM-independent");
     }
 
@@ -360,13 +355,7 @@ mod tests {
     fn constant_offsets_scale_linearly_with_hispeed() {
         let tls = timelines(b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:01\r\n#00211:01\r\n");
         let nt = tls.last().unwrap().time_us;
-        let pick = |hs: f64| {
-            constant_offsets(&tls, nt - 500_000, hs, 1200.0)
-                .iter()
-                .find(|(i, _)| tls[*i].time_us == nt)
-                .map(|(_, y)| *y)
-                .unwrap()
-        };
+        let pick = |hs: f64| constant_offsets(&tls, nt - 500_000, hs, 1200.0).iter().find(|(i, _)| tls[*i].time_us == nt).map(|(_, y)| *y).unwrap();
         let o1 = pick(1.0);
         let o2 = pick(2.0);
         assert!(o1 > 0.0 && (o2 - 2.0 * o1).abs() < 1.0, "constant offset doubles with hispeed: {o1} {o2}");

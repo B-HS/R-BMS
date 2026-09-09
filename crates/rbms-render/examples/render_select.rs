@@ -1,7 +1,8 @@
 use std::io::Write;
 
 use rbms_render::{
-    Color, CoverState, CpuCanvas, DensityView, DetailView, RecordRowView, RecordsView, SelectDetail, SelectModal, SelectRow, SelectView, StatCell, render_select,
+    Color, CoverState, CpuCanvas, DensityView, DetailView, RecordRowView, RecordsView, SelectDetail, SelectModal, SelectRow, SelectView, StatCell,
+    render_select,
 };
 
 fn row(folder: bool, title: &str, mode: &'static str, mc: Color, level: &str, dc: Color, lamp: Color, count: Option<usize>) -> SelectRow {

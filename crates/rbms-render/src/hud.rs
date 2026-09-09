@@ -29,7 +29,9 @@ pub struct HudView {
 fn draw_score_graph<R: Renderer>(r: &mut R, x: f32, y: f32, w: f32, h: f32, ex: u32, max_ex: u32, best: Option<u32>) {
     let th = crate::theme::theme();
     r.fill_rect(Rect::new(x, y, w, h), th.panel);
-    let ratio = |v: u32| if max_ex > 0 { (v as f32 / max_ex as f32).clamp(0.0, 1.0) } else { 0.0 };
+    let ratio = |v: u32| {
+        if max_ex > 0 { (v as f32 / max_ex as f32).clamp(0.0, 1.0) } else { 0.0 }
+    };
     for (band, label) in [(6.0f32 / 9.0, "A"), (7.0 / 9.0, "AA"), (8.0 / 9.0, "AAA")] {
         let ly = y + h * (1.0 - band);
         r.fill_rect(Rect::new(x, ly, w, 1.0), Color::rgb(74, 74, 92));

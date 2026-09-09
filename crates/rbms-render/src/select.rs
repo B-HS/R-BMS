@@ -463,7 +463,8 @@ fn render_records<R: Renderer>(r: &mut R, v: &SelectView, rec: &RecordsView, hot
         r.fill_rect(Rect::new(inner_x, y, 6.0, rh - 4.0), rec_row.lamp);
         draw_text(r, inner_x + 14.0, y + 3.0, 1.1, th.text_dim, &rec_row.when);
         draw_text(r, inner_x + 14.0, y + 16.0, 1.2, rec_row.lamp, rec_row.lamp_label);
-        let ex_txt = if v.score_graph { format!("{}  EX {}", RANK_BANDS[dj_rank(rec_row.ex, rec_row.max_ex)].0, rec_row.ex) } else { format!("EX {}", rec_row.ex) };
+        let ex_txt =
+            if v.score_graph { format!("{}  EX {}", RANK_BANDS[dj_rank(rec_row.ex, rec_row.max_ex)].0, rec_row.ex) } else { format!("EX {}", rec_row.ex) };
         draw_text_right(r, inner_x + inner_w - 12.0, y + 3.0, 1.2, th.text, &ex_txt);
         match &rec_row.trend {
             Some((t, c)) => {

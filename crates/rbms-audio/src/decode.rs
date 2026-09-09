@@ -28,17 +28,11 @@ pub fn decode_bytes(bytes: Vec<u8>, ext: Option<&str>) -> Result<DecodedAudio, A
         .map_err(|e| AudioError::Decode(e.to_string()))?;
     let mut format = probed.format;
 
-    let track = format
-        .tracks()
-        .iter()
-        .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
-        .ok_or_else(|| AudioError::Decode("no audio track".into()))?;
+    let track = format.tracks().iter().find(|t| t.codec_params.codec != CODEC_TYPE_NULL).ok_or_else(|| AudioError::Decode("no audio track".into()))?;
     let track_id = track.id;
     let codec_params = track.codec_params.clone();
 
-    let mut decoder = symphonia::default::get_codecs()
-        .make(&codec_params, &DecoderOptions::default())
-        .map_err(|e| AudioError::Decode(e.to_string()))?;
+    let mut decoder = symphonia::default::get_codecs().make(&codec_params, &DecoderOptions::default()).map_err(|e| AudioError::Decode(e.to_string()))?;
 
     let mut samples: Vec<f32> = Vec::new();
     let mut channels = 0u16;
@@ -163,9 +157,7 @@ mod tests {
     fn decodes_stereo_wav_channel_count_and_sample_count() {
         // 240 frames * 2 channels = 480 interleaved samples
         let frames = 240usize;
-        let interleaved: Vec<i16> = (0..frames * 2)
-            .map(|i| ((i as f32 * 0.05).sin() * 8000.0) as i16)
-            .collect();
+        let interleaved: Vec<i16> = (0..frames * 2).map(|i| ((i as f32 * 0.05).sin() * 8000.0) as i16).collect();
         let wav = wav_16le(48000, 2, &interleaved);
         let dec = decode_bytes(wav, Some("wav")).unwrap();
         assert_eq!(dec.channels, 2);

@@ -72,11 +72,7 @@ pub struct SampleData {
 
 impl SampleData {
     pub fn frames(&self) -> usize {
-        if self.channels == 0 {
-            0
-        } else {
-            self.pcm.len() / self.channels as usize
-        }
+        if self.channels == 0 { 0 } else { self.pcm.len() / self.channels as usize }
     }
 }
 
@@ -118,14 +114,7 @@ pub struct Mixer {
 
 impl Mixer {
     pub fn new(out_rate: u32, out_channels: u16, max_voices: usize) -> Self {
-        Mixer {
-            voices: (0..max_voices).map(|_| Voice::idle()).collect(),
-            master_gain: DEFAULT_MASTER_GAIN,
-            out_rate,
-            out_channels,
-            clock: 0,
-            alloc_cursor: 0,
-        }
+        Mixer { voices: (0..max_voices).map(|_| Voice::idle()).collect(), master_gain: DEFAULT_MASTER_GAIN, out_rate, out_channels, clock: 0, alloc_cursor: 0 }
     }
 
     pub fn clock_frames(&self) -> u64 {

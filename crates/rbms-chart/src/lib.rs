@@ -119,7 +119,9 @@ pub fn to_model(src: &BmsSource, mode: Mode) -> Model {
         let rate = src.measures.get(&m).map(|x| x.rate).unwrap_or(1.0);
         events.push(Ev { section: s0, kind: EvKind::SectionLine });
 
-        let Some(measure) = src.measures.get(&m) else { continue };
+        let Some(measure) = src.measures.get(&m) else {
+            continue;
+        };
         for ch in &measure.channels {
             let r = role(ch.channel, mode);
             for obj in &ch.objects {
@@ -372,7 +374,9 @@ pub fn note_density(model: &Model, total_value: f64) -> NoteDensity {
     for tl in &model.timelines {
         let sec = ((tl.time_us / 1_000_000) as usize).min(bins - 1);
         for lane in 0..model.mode.key.min(tl.notes.len()) {
-            let Some(note) = &tl.notes[lane] else { continue };
+            let Some(note) = &tl.notes[lane] else {
+                continue;
+            };
             match note.kind {
                 NoteKind::Normal => {
                     data[sec][if scr(lane) { 2 } else { 5 }] += 1;

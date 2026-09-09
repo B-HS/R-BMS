@@ -138,11 +138,7 @@ fn join_url(base: &str, rel: &str) -> String {
 }
 
 fn build_client() -> Result<reqwest::blocking::Client, String> {
-    reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(15))
-        .user_agent("rbms-table")
-        .build()
-        .map_err(|e| e.to_string())
+    reqwest::blocking::Client::builder().timeout(Duration::from_secs(15)).user_agent("rbms-table").build().map_err(|e| e.to_string())
 }
 
 fn get_bytes(client: &reqwest::blocking::Client, url: &str) -> Result<Vec<u8>, String> {
@@ -361,12 +357,7 @@ mod tests {
     #[test]
     fn by_level_groups_follow_level_order_then_extras_first_seen() {
         // level_order lists "1","2" only; entries also have "3" then "x" (unlisted).
-        let header = TableHeader {
-            name: None,
-            symbol: None,
-            data_url: None,
-            level_order: Some(vec!["1".into(), "2".into()]),
-        };
+        let header = TableHeader { name: None, symbol: None, data_url: None, level_order: Some(vec!["1".into(), "2".into()]) };
         let entries = vec![entry("a", "3"), entry("b", "x"), entry("c", "1"), entry("d", "3")];
         let t = DifficultyTable::from_parts(Some(header), entries);
         let g = t.by_level();
@@ -377,12 +368,7 @@ mod tests {
 
     #[test]
     fn by_level_drops_listed_levels_with_no_entries() {
-        let header = TableHeader {
-            name: None,
-            symbol: None,
-            data_url: None,
-            level_order: Some(vec!["1".into(), "2".into(), "3".into()]),
-        };
+        let header = TableHeader { name: None, symbol: None, data_url: None, level_order: Some(vec!["1".into(), "2".into(), "3".into()]) };
         let entries = vec![entry("a", "2")];
         let t = DifficultyTable::from_parts(Some(header), entries);
         assert_eq!(levels_of(&t.by_level()), vec!["2"], "only the non-empty listed level remains");

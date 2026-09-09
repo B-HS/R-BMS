@@ -74,8 +74,12 @@ impl Control {
     /// the matching `#CASE` wins because nothing has matched yet at that line. A `#CASE`
     /// whose label does not parse as a number is treated as a label that never matches.
     fn select_case(&mut self, wanted: Option<u32>) {
-        let Some(pos) = self.last_switch_pos() else { return };
-        let Frame::Switch { value, active, matched, skipped } = self.stack[pos] else { return };
+        let Some(pos) = self.last_switch_pos() else {
+            return;
+        };
+        let Frame::Switch { value, active, matched, skipped } = self.stack[pos] else {
+            return;
+        };
         if skipped || active {
             return;
         }

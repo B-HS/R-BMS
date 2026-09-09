@@ -90,12 +90,7 @@ impl TextEngine {
     /// Adopt a font system whose database already ends with the family this engine should treat as
     /// its default (the last-loaded face wins, matching how [`load_font`] reports a family).
     fn with_font_system(fs: FontSystem) -> Self {
-        let family = fs
-            .db()
-            .faces()
-            .last()
-            .and_then(|f| f.families.first().map(|(n, _)| n.clone()))
-            .unwrap_or_else(|| FALLBACK_FAMILY.to_string());
+        let family = fs.db().faces().last().and_then(|f| f.families.first().map(|(n, _)| n.clone())).unwrap_or_else(|| FALLBACK_FAMILY.to_string());
         TextEngine { fs, swash: SwashCache::new(), default_family: family.clone(), family, cache: HashMap::new(), runs: HashMap::new(), tick: 0 }
     }
 
@@ -172,7 +167,9 @@ impl TextEngine {
     fn draw<R: Renderer>(&mut self, r: &mut R, x: f32, y: f32, color: Color, text: &str, px: f32) {
         self.ensure(text, px);
         let tick = self.tick;
-        let Some(laid) = self.cache.get(&(px as u32)).and_then(|m| m.get(text)) else { return };
+        let Some(laid) = self.cache.get(&(px as u32)).and_then(|m| m.get(text)) else {
+            return;
+        };
         let base = CtColor::rgb(color.r, color.g, color.b);
         let rgb = ((color.r as u32) << 16) | ((color.g as u32) << 8) | color.b as u32;
         let (ox, oy) = (x.round() as i32, y.round() as i32);
@@ -195,7 +192,9 @@ impl TextEngine {
                     slot.insert(RunEntry { runs: merge_runs(pixels), used: tick });
                 }
             }
-            let Some(entry) = runs_cache.get(&key) else { continue };
+            let Some(entry) = runs_cache.get(&key) else {
+                continue;
+            };
             for run in &entry.runs {
                 let a = ((run.ca as u16 * color.a as u16) / 255) as u8;
                 if a == 0 {
@@ -507,11 +506,7 @@ mod tests {
     #[test]
     fn merge_runs_all_different_colors_never_coalesce() {
         // Adjacent pixels with distinct colours each become their own run despite contiguity.
-        let pixels = vec![
-            (0, 0, 1u8, 0u8, 0u8, 255u8),
-            (1, 0, 2u8, 0u8, 0u8, 255u8),
-            (2, 0, 3u8, 0u8, 0u8, 255u8),
-        ];
+        let pixels = vec![(0, 0, 1u8, 0u8, 0u8, 255u8), (1, 0, 2u8, 0u8, 0u8, 255u8), (2, 0, 3u8, 0u8, 0u8, 255u8)];
         let n = pixels.len();
         let runs = merge_runs(pixels);
         assert_eq!(runs.len(), n, "no merging when colour changes every pixel");
@@ -536,12 +531,7 @@ mod tests {
     #[test]
     fn merge_runs_sorts_rows_then_columns() {
         // Out-of-order input is row-major sorted; verify runs come out ordered and contiguous merge.
-        let pixels = vec![
-            (1, 1, 7u8, 7u8, 7u8, 50u8),
-            (0, 0, 7u8, 7u8, 7u8, 50u8),
-            (1, 0, 7u8, 7u8, 7u8, 50u8),
-            (0, 1, 7u8, 7u8, 7u8, 50u8),
-        ];
+        let pixels = vec![(1, 1, 7u8, 7u8, 7u8, 50u8), (0, 0, 7u8, 7u8, 7u8, 50u8), (1, 0, 7u8, 7u8, 7u8, 50u8), (0, 1, 7u8, 7u8, 7u8, 50u8)];
         let runs = merge_runs(pixels);
         // Row 0 (0,1) merges to one width-2 run, row 1 (0,1) merges to one width-2 run.
         assert_eq!(runs.len(), 2);

@@ -604,10 +604,7 @@ fn empty_input_yields_defaults() {
     assert_eq!(s.base, 36);
     // MD5/SHA-256 of empty input are well-known.
     assert_eq!(s.md5, "d41d8cd98f00b204e9800998ecf8427e");
-    assert_eq!(
-        s.sha256,
-        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-    );
+    assert_eq!(s.sha256, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
 }
 
 // ----------------------------------------------------------------------------
@@ -1080,7 +1077,8 @@ fn switch_resolution_does_not_change_md5_or_sha256() {
 
 #[test]
 fn skip_inside_an_inactive_nested_branch_keeps_the_rest_of_the_case() {
-    let chart = b"#SETSWITCH 1\r\n#CASE 1\r\n#SETRANDOM 2\r\n#IF 1\r\n#WAV01 dead.wav\r\n#SKIP\r\n#ENDIF\r\n#ENDRANDOM\r\n#WAV02 must_stay.wav\r\n#SKIP\r\n#ENDSW\r\n";
+    let chart =
+        b"#SETSWITCH 1\r\n#CASE 1\r\n#SETRANDOM 2\r\n#IF 1\r\n#WAV01 dead.wav\r\n#SKIP\r\n#ENDIF\r\n#ENDRANDOM\r\n#WAV02 must_stay.wav\r\n#SKIP\r\n#ENDSW\r\n";
     let s = parse_with(chart, ParseOptions { random_seed: 0 });
     assert_eq!(s.wav.len(), 1);
     assert_eq!(s.wav.get(&2).map(String::as_str), Some("must_stay.wav"));

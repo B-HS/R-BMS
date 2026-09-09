@@ -228,7 +228,12 @@ mod tests {
     }
 
     fn count_exact(c: &crate::CpuCanvas, want: Color) -> usize {
-        (0..1280 * 720).filter(|i| { let p = c.pixel_at((i % 1280) as u32, (i / 1280) as u32); p.r == want.r && p.g == want.g && p.b == want.b }).count()
+        (0..1280 * 720)
+            .filter(|i| {
+                let p = c.pixel_at((i % 1280) as u32, (i / 1280) as u32);
+                p.r == want.r && p.g == want.g && p.b == want.b
+            })
+            .count()
     }
 
     #[test]
@@ -386,13 +391,13 @@ mod tests {
         let max = 1800u32;
         let expect = [
             (0, "F"),
-            (400, "E"),   // 2/9
-            (600, "D"),   // 3/9
-            (800, "C"),   // 4/9
-            (1000, "B"),  // 5/9
-            (1200, "A"),  // 6/9
-            (1400, "AA"), // 7/9
-            (1600, "AAA"),// 8/9
+            (400, "E"),    // 2/9
+            (600, "D"),    // 3/9
+            (800, "C"),    // 4/9
+            (1000, "B"),   // 5/9
+            (1200, "A"),   // 6/9
+            (1400, "AA"),  // 7/9
+            (1600, "AAA"), // 8/9
         ];
         for (ex, name) in expect {
             assert_eq!(RANK_BANDS[dj_rank(ex, max)].0, name, "ex {ex}/{max} -> {name}");

@@ -142,11 +142,7 @@ impl JudgeEngine {
         // A CN/HCN long note is judged twice (head + release end) so it counts as two toward the
         // total; a plain LN or normal note counts once. Keeps the EX/gauge denominators in step with
         // the per-note judgments and with `rbms_chart::count_playable_notes`.
-        let total_notes = lanes
-            .iter()
-            .flat_map(|l| l.notes.iter())
-            .map(|n| if is_charge(n.ln) && n.end_us.is_some() { 2 } else { 1 })
-            .sum();
+        let total_notes = lanes.iter().flat_map(|l| l.notes.iter()).map(|n| if is_charge(n.ln) && n.end_us.is_some() { 2 } else { 1 }).sum();
         let gauge = Gauge::new(GaugeKind::Normal, 200.0, total_notes as usize);
         let n = lanes.len();
         let prop = JudgeProperty::SEVENKEYS;
@@ -203,7 +199,9 @@ impl JudgeEngine {
         for lane in 0..n {
             let mut pending_start: Option<(i64, LnKind)> = None;
             for tl in &model.timelines {
-                let Some(note) = &tl.notes[lane] else { continue };
+                let Some(note) = &tl.notes[lane] else {
+                    continue;
+                };
                 match note.kind {
                     NoteKind::Mine { damage } => mines[lane].push(Mine { time_us: note.time_us, damage }),
                     NoteKind::Normal => per_lane[lane].push((note.time_us, None, None)),
@@ -259,11 +257,7 @@ impl JudgeEngine {
     /// long-note margin rate; the scratch table's margin is not user-scalable in the reference implementation,
     /// `JudgeManager.java:186-188`).
     fn ln_margin(&self, lane: usize) -> i64 {
-        if self.is_scratch(lane) {
-            self.prop.longscratch_margin
-        } else {
-            self.prop.longnote_margin * self.longnote_margin_rate.max(0) as i64 / 100
-        }
+        if self.is_scratch(lane) { self.prop.longscratch_margin } else { self.prop.longnote_margin * self.longnote_margin_rate.max(0) as i64 / 100 }
     }
 
     pub fn set_gauge(&mut self, kind: GaugeKind, total: f64) {

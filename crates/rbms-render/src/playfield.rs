@@ -15,7 +15,16 @@ const BEAM_SLICES: usize = 6;
 /// for held/just-pressed lanes, the judgment line, and every visible note at its scroll
 /// offset. `beam_on`/`beam_off` are the per-lane press/release timestamps (µs, `i64::MIN`
 /// when inactive); pass `&[]` to omit beams. Backend-agnostic.
-pub fn render_playfield<R: Renderer>(r: &mut R, timelines: &[TimeLine], microtime: i64, hispeed: f64, skin: &Skin, beam_on: &[i64], beam_off: &[i64], constant: bool) {
+pub fn render_playfield<R: Renderer>(
+    r: &mut R,
+    timelines: &[TimeLine],
+    microtime: i64,
+    hispeed: f64,
+    skin: &Skin,
+    beam_on: &[i64],
+    beam_off: &[i64],
+    constant: bool,
+) {
     r.clear(skin.bg);
 
     let n = skin.lane_count();
@@ -48,18 +57,22 @@ pub fn render_playfield<R: Renderer>(r: &mut R, timelines: &[TimeLine], microtim
     let mut ln_open: Vec<Option<usize>> = vec![None; n];
     for (idx, tl) in timelines.iter().enumerate() {
         for lane in 0..n {
-            let Some(note) = &tl.notes[lane] else { continue };
+            let Some(note) = &tl.notes[lane] else {
+                continue;
+            };
             match note.kind {
                 NoteKind::LongStart { .. } => ln_open[lane] = Some(idx),
                 NoteKind::LongEnd { .. } => {
-                    let Some(head_idx) = ln_open[lane].take() else { continue };
+                    let Some(head_idx) = ln_open[lane].take() else {
+                        continue;
+                    };
                     if tl.time_us < microtime {
                         continue; // whole LN already past the line
                     }
                     let off_head = match pos.get(&head_idx) {
-                        Some(&o) => o,                                            // head on-screen
+                        Some(&o) => o,                                           // head on-screen
                         None if timelines[head_idx].time_us <= microtime => 0.0, // head past the line → bottom at line
-                        None => continue,                                         // head above the window → LN off-screen, skip
+                        None => continue,                                        // head above the window → LN off-screen, skip
                     };
                     let body_bottom = (skin.judge_y - off_head).min(skin.judge_y);
                     let body_top = pos.get(&idx).map(|o| skin.judge_y - o).unwrap_or(skin.top_y).max(skin.top_y);
@@ -80,7 +93,9 @@ pub fn render_playfield<R: Renderer>(r: &mut R, timelines: &[TimeLine], microtim
     for (i, off) in offsets {
         let tl = &timelines[i];
         for lane in 0..n {
-            let Some(note) = &tl.notes[lane] else { continue };
+            let Some(note) = &tl.notes[lane] else {
+                continue;
+            };
             if matches!(note.kind, NoteKind::LongEnd { .. }) {
                 continue;
             }
@@ -403,7 +418,11 @@ mod tests {
         render_playfield(&mut c, &timelines, micro, 1.0, &skin, &[], &[], false);
         let cx = skin.lane_center(0) as u32;
         // A drawn body pixel sits just above the line (body bottom == judge_y).
-        assert_ne!(c.pixel_at(cx, skin.judge_y as u32 - 2), c.pixel_at(skin.lane_center(3) as u32, skin.judge_y as u32 - 2), "LN body reaches the line while head is past it");
+        assert_ne!(
+            c.pixel_at(cx, skin.judge_y as u32 - 2),
+            c.pixel_at(skin.lane_center(3) as u32, skin.judge_y as u32 - 2),
+            "LN body reaches the line while head is past it"
+        );
         let filled = lane_drawn_rows(&c, &skin, 0, 3);
         assert!(filled > skin.note_height as usize * 3, "straddling LN still draws a tall body (got {filled}px)");
     }
@@ -421,7 +440,11 @@ mod tests {
         render_playfield(&mut c, &timelines, micro, 4.0, &skin, &[], &[], false);
         let cx = skin.lane_center(0) as u32;
         // A body pixel exists right at the top edge of the field.
-        assert_ne!(c.pixel_at(cx, skin.top_y as u32 + 1), c.pixel_at(skin.lane_center(3) as u32, skin.top_y as u32 + 1), "LN body fills up to the top edge when the end is above the window");
+        assert_ne!(
+            c.pixel_at(cx, skin.top_y as u32 + 1),
+            c.pixel_at(skin.lane_center(3) as u32, skin.top_y as u32 + 1),
+            "LN body fills up to the top edge when the end is above the window"
+        );
     }
 
     #[test]
@@ -646,4 +669,3 @@ pub fn render_key_bomb<R: Renderer>(r: &mut R, skin: &Skin, bomb: &[(i64, u8)], 
         }
     }
 }
-
