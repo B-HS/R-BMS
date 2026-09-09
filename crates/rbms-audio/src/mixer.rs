@@ -1,6 +1,66 @@
 use std::f32::consts::FRAC_PI_2;
 use std::sync::Arc;
 
+/// Default output headroom, matching beatoraja's amplitude scale. There every keysound is played
+/// at `keyvolume`/`bgvolume` = 0.5 (`AudioConfig.java:46-54`, via `JudgeManager.java:248` and
+/// `KeySoundProcessor.java:81`) and the driver multiplies that by `#VOLWAV/100`
+/// (`AbstractAudioDriver.java:356,487`), so a chart without `#VOLWAV` renders at 0.5. rbms keeps
+/// per-voice gain at the caller's value and applies the same 0.5 once on the master bus instead;
+/// the `#VOLWAV` factor is not applied yet (parser/host boundary).
+pub(crate) const DEFAULT_MASTER_GAIN: f32 = 0.5;
+
+/// Amplitude below which the master bus is perfectly linear. Above it the soft limiter
+/// (see [`soft_limit`]) compresses toward 1.0 instead of hard-clipping.
+pub(crate) const SOFT_LIMIT_THRESHOLD: f32 = 0.8;
+
+/// Channel keys per sample id, matching beatoraja's `channel(id, pitch) = id * 256 + pitch + 128`
+/// (`AbstractAudioDriver.java:507-509`).
+pub(crate) const CHANNELS_PER_SAMPLE_ID: u32 = 256;
+
+/// Bias added to the semitone offset so the whole semitone range maps into `0..256`.
+pub(crate) const PITCH_CHANNEL_BIAS: i32 = 128;
+
+const MIN_SEMITONE_OFFSET: i32 = -128;
+const MAX_SEMITONE_OFFSET: i32 = 127;
+const SEMITONES_PER_OCTAVE: f32 = 12.0;
+
+/// Semitone offset of a pitch ratio, quantized the way beatoraja stores it: it keeps the integer
+/// `pitchShift` and derives the ratio as `2^(pitchShift/12)`, so the inverse is
+/// `round(12 * log2(ratio))`. Non-positive ratios have no defined offset and map to 0.
+pub(crate) fn semitone_offset(pitch: f32) -> i32 {
+    if pitch <= 0.0 || !pitch.is_finite() {
+        return 0;
+    }
+    (SEMITONES_PER_OCTAVE * pitch.log2()).round().clamp(MIN_SEMITONE_OFFSET as f32, MAX_SEMITONE_OFFSET as f32) as i32
+}
+
+/// Voice channel key for a sample id played at a pitch ratio. Two plays of the same id at
+/// different semitones get different keys, so they layer instead of cutting each other; the same
+/// id at the same semitone re-triggers (cuts) as before.
+pub(crate) fn channel_key(id: u32, pitch: f32) -> u32 {
+    let biased = (semitone_offset(pitch) + PITCH_CHANNEL_BIAS) as u32;
+    id.wrapping_mul(CHANNELS_PER_SAMPLE_ID).wrapping_add(biased)
+}
+
+/// Sample id a channel key belongs to (inverse of [`channel_key`]).
+pub(crate) fn channel_sample_id(key: u32) -> u32 {
+    key / CHANNELS_PER_SAMPLE_ID
+}
+
+/// Master-bus soft limiter. Linear up to [`SOFT_LIMIT_THRESHOLD`], then a tanh knee that is
+/// continuous in value and slope at the threshold, strictly increasing, and bounded by 1.0 — so a
+/// growing sum of simultaneous voices keeps getting louder instead of flattening into clipping
+/// distortion.
+pub(crate) fn soft_limit(x: f32) -> f32 {
+    let mag = x.abs();
+    if mag <= SOFT_LIMIT_THRESHOLD {
+        return x;
+    }
+    let knee = 1.0 - SOFT_LIMIT_THRESHOLD;
+    let limited = SOFT_LIMIT_THRESHOLD + knee * ((mag - SOFT_LIMIT_THRESHOLD) / knee).tanh();
+    if x < 0.0 { -limited } else { limited }
+}
+
 /// Decoded keysound at its native sample rate, interleaved f32. Resampling to the
 /// device rate happens per-voice via a fractional read stride (see `Voice::stride`),
 /// which also yields pitch shifting for free.
@@ -38,9 +98,11 @@ impl Voice {
     }
 }
 
+#[non_exhaustive]
 pub enum Command {
     Play { sample: Arc<SampleData>, gain: f32, pan: f32, pitch: f32, key: u32, at_frame: u64 },
     Stop { key: u32 },
+    StopId { id: u32 },
     MasterGain(f32),
 }
 
@@ -58,7 +120,7 @@ impl Mixer {
     pub fn new(out_rate: u32, out_channels: u16, max_voices: usize) -> Self {
         Mixer {
             voices: (0..max_voices).map(|_| Voice::idle()).collect(),
-            master_gain: 1.0,
+            master_gain: DEFAULT_MASTER_GAIN,
             out_rate,
             out_channels,
             clock: 0,
@@ -74,6 +136,7 @@ impl Mixer {
         match cmd {
             Command::Play { sample, gain, pan, pitch, key, at_frame } => self.play(sample, gain, pan, pitch, key, at_frame),
             Command::Stop { key } => self.stop(key),
+            Command::StopId { id } => self.stop_id(id),
             Command::MasterGain(g) => self.master_gain = g,
         }
     }
@@ -99,6 +162,15 @@ impl Mixer {
     fn stop(&mut self, key: u32) {
         for v in &mut self.voices {
             if v.active && v.key == key {
+                v.active = false;
+                v.sample = None;
+            }
+        }
+    }
+
+    fn stop_id(&mut self, id: u32) {
+        for v in &mut self.voices {
+            if v.active && channel_sample_id(v.key) == id {
                 v.active = false;
                 v.sample = None;
             }
@@ -178,7 +250,7 @@ impl Mixer {
 
         let g = self.master_gain;
         for s in out.iter_mut() {
-            *s = (*s * g).clamp(-1.0, 1.0);
+            *s = soft_limit(*s * g);
         }
         self.clock += frames as u64;
     }
@@ -517,12 +589,11 @@ mod tests {
 
     #[test]
     fn stereo_source_routes_channels_independently() {
-        // L=0.5, R=0.25, center pan, unity gains scaled by 0.7071
         let mut m = Mixer::new(48000, 2, 16);
         m.play(flat_lr(10, 48000, 0.5, 0.25), 1.0, 0.0, 1.0, 1, 0);
         let mut out = vec![0.0f32; 8];
         m.mix(&mut out);
-        let g = std::f32::consts::FRAC_1_SQRT_2;
+        let g = std::f32::consts::FRAC_1_SQRT_2 * DEFAULT_MASTER_GAIN;
         assert!((out[0] - 0.5 * g).abs() < 1e-5);
         assert!((out[1] - 0.25 * g).abs() < 1e-5);
         // left channel louder than right since L value larger
@@ -536,9 +607,8 @@ mod tests {
         m.play(flat_lr(10, 48000, 1.0, 0.0), 1.0, 0.0, 1.0, 1, 0);
         let mut out = vec![0.0f32; 4];
         m.mix(&mut out);
-        // l = 1.0*g, r = 0.0; mono out = (l + 0)*0.5
         let g = std::f32::consts::FRAC_1_SQRT_2;
-        assert!((out[0] - (1.0 * g) * 0.5).abs() < 1e-5);
+        assert!((out[0] - (1.0 * g) * 0.5 * DEFAULT_MASTER_GAIN).abs() < 1e-5);
     }
 
     // ---- gain ----
@@ -558,12 +628,13 @@ mod tests {
     }
 
     #[test]
-    fn master_gain_default_is_unity() {
+    fn master_gain_defaults_to_headroom_not_unity() {
         let mut m = Mixer::new(48000, 2, 16);
+        assert_eq!(DEFAULT_MASTER_GAIN, 0.5);
         m.play(flat(10, 1, 48000, 0.5), 1.0, -1.0, 1.0, 1, 0);
         let mut out = vec![0.0f32; 2];
         m.mix(&mut out);
-        assert!((out[0] - 0.5).abs() < 1e-6);
+        assert!((out[0] - 0.25).abs() < 1e-6, "got {}", out[0]);
     }
 
     #[test]
@@ -577,8 +648,7 @@ mod tests {
     }
 
     #[test]
-    fn master_gain_clamps_output_to_one() {
-        // value 0.9 * master 4.0 = 3.6 -> clamped to 1.0
+    fn heavy_overdrive_saturates_at_exactly_full_scale() {
         let mut m = Mixer::new(48000, 2, 16);
         m.apply(Command::MasterGain(4.0));
         m.play(flat(10, 1, 48000, 0.9), 1.0, -1.0, 1.0, 1, 0);
@@ -588,13 +658,33 @@ mod tests {
     }
 
     #[test]
-    fn master_gain_clamps_output_to_negative_one() {
+    fn heavy_overdrive_saturates_at_exactly_negative_full_scale() {
         let mut m = Mixer::new(48000, 2, 16);
         m.apply(Command::MasterGain(4.0));
         m.play(flat(10, 1, 48000, -0.9), 1.0, -1.0, 1.0, 1, 0);
         let mut out = vec![0.0f32; 2];
         m.mix(&mut out);
         assert_eq!(out[0], -1.0);
+    }
+
+    #[test]
+    fn mild_overdrive_takes_the_soft_knee_instead_of_hard_clipping() {
+        let mut m = Mixer::new(48000, 2, 16);
+        m.apply(Command::MasterGain(2.0));
+        m.play(flat(10, 1, 48000, 0.5), 1.0, -1.0, 1.0, 1, 0);
+        let mut out = vec![0.0f32; 2];
+        m.mix(&mut out);
+        assert!((out[0] - 0.952_318_8).abs() < 1e-6, "got {}", out[0]);
+    }
+
+    #[test]
+    fn mild_negative_overdrive_takes_the_soft_knee_instead_of_hard_clipping() {
+        let mut m = Mixer::new(48000, 2, 16);
+        m.apply(Command::MasterGain(2.0));
+        m.play(flat(10, 1, 48000, -0.5), 1.0, -1.0, 1.0, 1, 0);
+        let mut out = vec![0.0f32; 2];
+        m.mix(&mut out);
+        assert!((out[0] + 0.952_318_8).abs() < 1e-6, "got {}", out[0]);
     }
 
     #[test]
@@ -765,6 +855,182 @@ mod tests {
         let mut out = vec![0.0f32; 32];
         m.mix(&mut out);
         assert!(out.iter().all(|&s| s == 0.0));
+    }
+
+    #[test]
+    fn soft_limit_is_identity_below_threshold() {
+        assert_eq!(soft_limit(0.0), 0.0);
+        assert_eq!(soft_limit(0.25), 0.25);
+        assert_eq!(soft_limit(-0.25), -0.25);
+        assert_eq!(soft_limit(SOFT_LIMIT_THRESHOLD), SOFT_LIMIT_THRESHOLD);
+    }
+
+    #[test]
+    fn soft_limit_knee_matches_hand_computed_tanh() {
+        assert!((soft_limit(1.0) - 0.952_318_8).abs() < 1e-6, "got {}", soft_limit(1.0));
+        assert!((soft_limit(1.2) - 0.992_805_5).abs() < 1e-6, "got {}", soft_limit(1.2));
+    }
+
+    #[test]
+    fn soft_limit_is_odd_symmetric() {
+        assert!((soft_limit(-1.0) + 0.952_318_8).abs() < 1e-6, "got {}", soft_limit(-1.0));
+        for x in [0.3f32, 0.8, 1.0, 2.5, 40.0] {
+            assert!((soft_limit(-x) + soft_limit(x)).abs() < 1e-6, "x {x}");
+        }
+    }
+
+    #[test]
+    fn soft_limit_never_exceeds_full_scale() {
+        for x in [0.9f32, 1.0, 2.0, 10.0, 1000.0] {
+            assert!(soft_limit(x) <= 1.0, "x {x} -> {}", soft_limit(x));
+            assert!(soft_limit(-x) >= -1.0, "x {x} -> {}", soft_limit(-x));
+        }
+    }
+
+    #[test]
+    fn simultaneous_voices_increase_monotonically_without_clipping() {
+        let mut previous = 0.0f32;
+        for n in 1..=8u32 {
+            let mut m = Mixer::new(48000, 2, 16);
+            for key in 0..n {
+                m.play(flat(10, 1, 48000, 0.5), 1.0, -1.0, 1.0, key, 0);
+            }
+            let mut out = vec![0.0f32; 2];
+            m.mix(&mut out);
+            assert!(out[0] <= 1.0, "n {n} clipped at {}", out[0]);
+            assert!(out[0] > previous, "n {n} did not increase: {} <= {}", out[0], previous);
+            previous = out[0];
+        }
+    }
+
+    #[test]
+    fn extreme_simultaneous_voice_count_saturates_at_exactly_full_scale() {
+        let mut m = Mixer::new(48000, 2, 64);
+        for key in 0..64 {
+            m.play(flat(10, 1, 48000, 0.5), 1.0, -1.0, 1.0, key, 0);
+        }
+        let mut out = vec![0.0f32; 2];
+        m.mix(&mut out);
+        assert_eq!(out[0], 1.0);
+    }
+
+    #[test]
+    fn four_simultaneous_voices_hit_hand_computed_knee_value() {
+        let mut m = Mixer::new(48000, 2, 16);
+        for key in 0..4 {
+            m.play(flat(10, 1, 48000, 0.5), 1.0, -1.0, 1.0, key, 0);
+        }
+        let mut out = vec![0.0f32; 2];
+        m.mix(&mut out);
+        assert!((out[0] - 0.952_318_8).abs() < 1e-6, "got {}", out[0]);
+    }
+
+    #[test]
+    fn three_simultaneous_voices_stay_in_linear_region() {
+        let mut m = Mixer::new(48000, 2, 16);
+        for key in 0..3 {
+            m.play(flat(10, 1, 48000, 0.5), 1.0, -1.0, 1.0, key, 0);
+        }
+        let mut out = vec![0.0f32; 2];
+        m.mix(&mut out);
+        assert!((out[0] - 0.75).abs() < 1e-6, "got {}", out[0]);
+    }
+
+    #[test]
+    fn semitone_offset_quantizes_pitch_ratio() {
+        assert_eq!(semitone_offset(1.0), 0);
+        assert_eq!(semitone_offset(2.0), 12);
+        assert_eq!(semitone_offset(0.5), -12);
+        assert_eq!(semitone_offset(4.0), 24);
+        assert_eq!(semitone_offset(1.059_463_1), 1);
+        assert_eq!(semitone_offset(0.840_896_4), -3);
+    }
+
+    #[test]
+    fn semitone_offset_of_non_positive_pitch_is_zero() {
+        assert_eq!(semitone_offset(0.0), 0);
+        assert_eq!(semitone_offset(-2.0), 0);
+        assert_eq!(semitone_offset(f32::NAN), 0);
+        assert_eq!(semitone_offset(f32::INFINITY), 0);
+    }
+
+    #[test]
+    fn semitone_offset_clamps_to_channel_range() {
+        assert_eq!(semitone_offset(1e30), 127);
+        assert_eq!(semitone_offset(1e-30), -128);
+    }
+
+    #[test]
+    fn channel_key_matches_beatoraja_id_times_256_plus_pitch_plus_128() {
+        assert_eq!(channel_key(0, 1.0), 128);
+        assert_eq!(channel_key(3, 1.0), 3 * 256 + 128);
+        assert_eq!(channel_key(3, 2.0), 3 * 256 + 12 + 128);
+        assert_eq!(channel_key(3, 0.5), 3 * 256 - 12 + 128);
+        assert_eq!(channel_key(1, 1e30), 256 + 127 + 128);
+        assert_eq!(channel_key(1, 1e-30), 256 - 128 + 128);
+    }
+
+    #[test]
+    fn channel_sample_id_inverts_channel_key() {
+        for id in [0u32, 1, 3, 1295, 65536] {
+            for pitch in [0.5f32, 1.0, 2.0] {
+                assert_eq!(channel_sample_id(channel_key(id, pitch)), id, "id {id} pitch {pitch}");
+            }
+        }
+    }
+
+    #[test]
+    fn same_id_different_pitch_layers_instead_of_cutting() {
+        let mut m = Mixer::new(48000, 2, 16);
+        m.play(flat(1000, 1, 48000, 0.2), 1.0, 0.0, 1.0, channel_key(5, 1.0), 0);
+        m.play(flat(1000, 1, 48000, 0.2), 1.0, 0.0, 2.0, channel_key(5, 2.0), 0);
+        assert_eq!(active_count(&m), 2);
+    }
+
+    #[test]
+    fn same_id_same_pitch_still_retriggers() {
+        let mut m = Mixer::new(48000, 2, 16);
+        m.play(flat(1000, 1, 48000, 0.2), 1.0, 0.0, 1.0, channel_key(5, 1.0), 0);
+        m.play(flat(1000, 1, 48000, 0.2), 1.0, 0.0, 1.0, channel_key(5, 1.0), 0);
+        assert_eq!(active_count(&m), 1);
+    }
+
+    #[test]
+    fn near_identical_pitches_share_one_channel() {
+        let mut m = Mixer::new(48000, 2, 16);
+        m.play(flat(1000, 1, 48000, 0.2), 1.0, 0.0, 1.0, channel_key(5, 1.0), 0);
+        m.play(flat(1000, 1, 48000, 0.2), 1.0, 0.0, 1.01, channel_key(5, 1.01), 0);
+        assert_eq!(active_count(&m), 1);
+    }
+
+    #[test]
+    fn stop_id_stops_every_pitch_variant() {
+        let mut m = Mixer::new(48000, 2, 16);
+        m.play(flat(1000, 1, 48000, 0.2), 1.0, 0.0, 1.0, channel_key(5, 1.0), 0);
+        m.play(flat(1000, 1, 48000, 0.2), 1.0, 0.0, 2.0, channel_key(5, 2.0), 0);
+        m.play(flat(1000, 1, 48000, 0.2), 1.0, 0.0, 1.0, channel_key(6, 1.0), 0);
+        assert_eq!(active_count(&m), 3);
+        m.apply(Command::StopId { id: 5 });
+        assert_eq!(active_count(&m), 1);
+        assert_eq!(channel_sample_id(m.voices.iter().find(|v| v.active).unwrap().key), 6);
+    }
+
+    #[test]
+    fn stop_channel_leaves_other_pitch_variants_playing() {
+        let mut m = Mixer::new(48000, 2, 16);
+        m.play(flat(1000, 1, 48000, 0.2), 1.0, 0.0, 1.0, channel_key(5, 1.0), 0);
+        m.play(flat(1000, 1, 48000, 0.2), 1.0, 0.0, 2.0, channel_key(5, 2.0), 0);
+        m.apply(Command::Stop { key: channel_key(5, 1.0) });
+        assert_eq!(active_count(&m), 1);
+        assert_eq!(m.voices.iter().find(|v| v.active).unwrap().key, channel_key(5, 2.0));
+    }
+
+    #[test]
+    fn stop_id_of_unrelated_id_is_noop() {
+        let mut m = Mixer::new(48000, 2, 16);
+        m.play(flat(1000, 1, 48000, 0.2), 1.0, 0.0, 1.0, channel_key(5, 1.0), 0);
+        m.apply(Command::StopId { id: 9 });
+        assert_eq!(active_count(&m), 1);
     }
 
     #[test]
