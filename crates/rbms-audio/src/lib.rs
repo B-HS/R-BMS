@@ -4,9 +4,15 @@ mod decode;
 mod engine;
 mod mixer;
 
+/// Re-exported so callers can name the stream types that appear in [`AudioOpenReport`] without
+/// depending on cpal themselves.
+pub use cpal;
 pub use decode::{DecodedAudio, decode_bytes};
-pub use engine::AudioEngine;
-pub use mixer::{Command, Mixer, SampleData};
+pub use engine::{AudioClocks, AudioEngine, AudioOpenReport, AudioOptions, ClockSnapshot, DEFAULT_MAX_VOICES, IdNamespace, monotonic_us};
+pub use mixer::{Bus, Command, MixStats, Mixer, SampleData};
+/// Re-exported so callers can build the retirement ring [`Mixer::set_retire`] expects without
+/// pinning the same rtrb version themselves.
+pub use rtrb;
 
 #[derive(Debug)]
 pub enum AudioError {

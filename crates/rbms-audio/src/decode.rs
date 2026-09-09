@@ -224,7 +224,7 @@ mod tests {
 
     #[test]
     fn preview_demo_fixture_decodes_and_mixes_to_nonzero_audio() {
-        use crate::mixer::{Command, Mixer, SampleData};
+        use crate::mixer::{Bus, Command, Mixer, SampleData};
         use std::sync::Arc;
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../samples/preview-demo/preview.wav");
         let bytes = std::fs::read(path).expect("preview-demo fixture is committed");
@@ -234,7 +234,7 @@ mod tests {
         assert!(!dec.samples.is_empty());
         let sample = Arc::new(SampleData { pcm: dec.samples.into(), channels: dec.channels, rate: dec.rate });
         let mut mixer = Mixer::new(48000, 2, 16);
-        mixer.apply(Command::Play { sample, gain: 0.85, pan: 0.0, pitch: 1.0, key: 0, at_frame: 0 });
+        mixer.apply(Command::Play { sample, gain: 0.85, pan: 0.0, pitch: 1.0, key: 0, at_frame: 0, bus: Bus::Bg });
         let mut out = vec![0.0f32; 4096];
         mixer.mix(&mut out);
         assert!(out.iter().any(|&s| s != 0.0), "the #PREVIEW fixture must produce audible PCM through the decode->mix path");
