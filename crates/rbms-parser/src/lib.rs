@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use md5::{Digest, Md5};
+use rbms_model::VOLWAV_DEFAULT_PERCENT;
 use sha2::Sha256;
 
 mod base;
@@ -63,6 +64,9 @@ pub struct Headers {
     pub rank: i32,
     pub defexrank: Option<f64>,
     pub total: Option<f64>,
+    /// `#VOLWAV` as authored, in percent. Absent or unparsable headers keep
+    /// [`VOLWAV_DEFAULT_PERCENT`], which converts to unity gain.
+    pub volwav: i32,
     pub init_bpm: f64,
     pub lnobj: Option<u32>,
     pub lntype: i32,
@@ -87,6 +91,7 @@ impl Default for Headers {
             rank: 3,
             defexrank: None,
             total: None,
+            volwav: VOLWAV_DEFAULT_PERCENT,
             init_bpm: 130.0,
             lnobj: None,
             lntype: 1,
@@ -250,6 +255,7 @@ fn parse_header_line(src: &mut BmsSource, body: &str) {
         "RANK" => h.rank = rest.parse().unwrap_or(3),
         "DEFEXRANK" => h.defexrank = rest.parse::<f64>().ok().filter(|v| v.is_finite()),
         "TOTAL" => h.total = rest.parse().ok(),
+        "VOLWAV" => h.volwav = rest.parse().unwrap_or(VOLWAV_DEFAULT_PERCENT),
         "DIFFICULTY" => h.difficulty = rest.parse().unwrap_or(0),
         "BPM" => h.init_bpm = rest.parse().unwrap_or(130.0),
         "LNTYPE" => h.lntype = rest.parse().unwrap_or(1),
@@ -314,3 +320,84 @@ fn hex(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod volwav_tests {
+    use super::*;
+
+    fn volwav_of(line: &[u8]) -> i32 {
+        parse(line).headers.volwav
+    }
+
+    #[test]
+    fn absent_header_keeps_the_default_percent() {
+        assert_eq!(Headers::default().volwav, VOLWAV_DEFAULT_PERCENT);
+        assert_eq!(volwav_of(b"#TITLE no volume header\r\n"), VOLWAV_DEFAULT_PERCENT);
+    }
+
+    #[test]
+    fn reference_boundary_values_parse_verbatim() {
+        assert_eq!(volwav_of(b"#VOLWAV 0\r\n"), 0);
+        assert_eq!(volwav_of(b"#VOLWAV 1\r\n"), 1);
+        assert_eq!(volwav_of(b"#VOLWAV 99\r\n"), 99);
+        assert_eq!(volwav_of(b"#VOLWAV 100\r\n"), 100);
+        assert_eq!(volwav_of(b"#VOLWAV 199\r\n"), 199);
+        assert_eq!(volwav_of(b"#VOLWAV 200\r\n"), 200);
+        assert_eq!(volwav_of(b"#VOLWAV 201\r\n"), 201);
+        assert_eq!(volwav_of(b"#VOLWAV -5\r\n"), -5);
+    }
+
+    #[test]
+    fn non_numeric_value_falls_back_to_the_default_percent() {
+        assert_eq!(volwav_of(b"#VOLWAV abc\r\n"), VOLWAV_DEFAULT_PERCENT);
+    }
+
+    #[test]
+    fn decimal_value_falls_back_like_an_integer_parse() {
+        assert_eq!(volwav_of(b"#VOLWAV 100.0\r\n"), VOLWAV_DEFAULT_PERCENT);
+        assert_eq!(volwav_of(b"#VOLWAV 80.5\r\n"), VOLWAV_DEFAULT_PERCENT);
+    }
+
+    #[test]
+    fn missing_value_falls_back_to_the_default_percent() {
+        assert_eq!(volwav_of(b"#VOLWAV\r\n"), VOLWAV_DEFAULT_PERCENT);
+        assert_eq!(volwav_of(b"#VOLWAV   \r\n"), VOLWAV_DEFAULT_PERCENT);
+    }
+
+    #[test]
+    fn value_outside_i32_falls_back_to_the_default_percent() {
+        assert_eq!(volwav_of(b"#VOLWAV 99999999999\r\n"), VOLWAV_DEFAULT_PERCENT);
+        assert_eq!(volwav_of(b"#VOLWAV -99999999999\r\n"), VOLWAV_DEFAULT_PERCENT);
+    }
+
+    #[test]
+    fn header_name_is_case_insensitive() {
+        assert_eq!(volwav_of(b"#volwav 80\r\n"), 80);
+        assert_eq!(volwav_of(b"#VolWav 80\r\n"), 80);
+    }
+
+    #[test]
+    fn leading_plus_and_surrounding_whitespace_are_accepted() {
+        assert_eq!(volwav_of(b"#VOLWAV +50\r\n"), 50);
+        assert_eq!(volwav_of(b"#VOLWAV   75  \r\n"), 75);
+    }
+
+    #[test]
+    fn last_definition_wins() {
+        assert_eq!(volwav_of(b"#VOLWAV 40\r\n#VOLWAV 60\r\n"), 60);
+    }
+
+    #[test]
+    fn header_does_not_collide_with_wav_definitions() {
+        let s = parse(b"#WAV01 kick.wav\r\n#VOLWAV 50\r\n");
+        assert_eq!(s.headers.volwav, 50);
+        assert_eq!(s.wav.len(), 1);
+        assert_eq!(s.wav.get(&1).map(String::as_str), Some("kick.wav"));
+    }
+
+    #[test]
+    fn inactive_control_branch_does_not_apply_the_value() {
+        let chart = b"#SETRANDOM 2\r\n#IF 1\r\n#VOLWAV 30\r\n#ENDIF\r\n#IF 2\r\n#VOLWAV 70\r\n#ENDIF\r\n#ENDRANDOM\r\n";
+        assert_eq!(parse(chart).headers.volwav, 70);
+    }
+}

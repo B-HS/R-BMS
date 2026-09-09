@@ -27,6 +27,27 @@ pub fn default_total_keyboard(notes: usize) -> f64 {
     (7.605 * (n + 100.0) / (0.01 * n + 6.5)).max(300.0)
 }
 
+/// `#VOLWAV` value assumed when the header is absent or does not parse as an integer. It is the
+/// percentage that maps to unity gain, so an unspecified chart plays at its authored level.
+pub const VOLWAV_DEFAULT_PERCENT: i32 = 100;
+
+const VOLWAV_MIN_PERCENT_EXCLUSIVE: i32 = 0;
+const VOLWAV_MAX_PERCENT_EXCLUSIVE: i32 = 200;
+const VOLWAV_PERCENT_PER_UNIT_GAIN: f32 = 100.0;
+const VOLWAV_FALLBACK_GAIN: f32 = 1.0;
+
+/// Chart-wide linear playback gain derived from `#VOLWAV`, applied once per chart on top of the
+/// per-bus gains. Only values strictly inside `(0, 200)` scale the output; everything else -
+/// including `0`, `200` and negatives - plays at unity, matching the reference implementation
+/// (`AbstractAudioDriver.java:355-358`).
+pub fn chart_gain(volwav_percent: i32) -> f32 {
+    if volwav_percent > VOLWAV_MIN_PERCENT_EXCLUSIVE && volwav_percent < VOLWAV_MAX_PERCENT_EXCLUSIVE {
+        volwav_percent as f32 / VOLWAV_PERCENT_PER_UNIT_GAIN
+    } else {
+        VOLWAV_FALLBACK_GAIN
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LnKind {
     Ln,
@@ -106,6 +127,9 @@ pub struct ModelMeta {
     /// (reference implementation `BMSPlayerRule.java:63`).
     pub defexrank: Option<f64>,
     pub total: f64,
+    /// `#VOLWAV` as authored, in percent. Convert with [`chart_gain`] before use; `Default` yields
+    /// `0`, which that conversion maps to unity gain.
+    pub volwav: i32,
     pub stagefile: String,
 }
 
@@ -322,7 +346,60 @@ mod tests {
         assert_eq!(m.difficulty, 0);
         assert_eq!(m.rank, 0);
         assert_eq!(m.total, 0.0);
+        assert_eq!(m.volwav, 0);
         assert!(m.stagefile.is_empty());
+    }
+
+    #[test]
+    fn chart_gain_default_percent_is_unity() {
+        assert_eq!(chart_gain(VOLWAV_DEFAULT_PERCENT), 1.0);
+    }
+
+    #[test]
+    fn chart_gain_default_model_meta_is_unity() {
+        assert_eq!(chart_gain(ModelMeta::default().volwav), 1.0);
+    }
+
+    #[test]
+    fn chart_gain_scales_inside_the_open_range() {
+        assert_eq!(chart_gain(1), 0.01);
+        assert_eq!(chart_gain(50), 0.5);
+        assert_eq!(chart_gain(99), 0.99);
+        assert_eq!(chart_gain(150), 1.5);
+        assert_eq!(chart_gain(199), 1.99);
+    }
+
+    #[test]
+    fn chart_gain_excludes_both_bounds() {
+        assert_eq!(chart_gain(0), 1.0);
+        assert_eq!(chart_gain(200), 1.0);
+    }
+
+    #[test]
+    fn chart_gain_out_of_range_values_are_unity() {
+        assert_eq!(chart_gain(201), 1.0);
+        assert_eq!(chart_gain(-5), 1.0);
+        assert_eq!(chart_gain(i32::MIN), 1.0);
+        assert_eq!(chart_gain(i32::MAX), 1.0);
+    }
+
+    #[test]
+    fn chart_gain_is_never_negative_or_above_two() {
+        for v in -300..=500 {
+            let g = chart_gain(v);
+            assert!(g > 0.0, "volwav {v} produced a non-positive gain");
+            assert!(g < 2.0, "volwav {v} produced a gain at or above 2.0");
+        }
+    }
+
+    #[test]
+    fn chart_gain_is_monotonic_inside_the_open_range() {
+        let mut prev = chart_gain(1);
+        for v in 2..VOLWAV_MAX_PERCENT_EXCLUSIVE {
+            let g = chart_gain(v);
+            assert!(g > prev, "volwav {v} did not increase the gain");
+            prev = g;
+        }
     }
 
     // ---- Note clone round-trip ----

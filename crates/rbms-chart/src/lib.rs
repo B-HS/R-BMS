@@ -1,6 +1,6 @@
 use rbms_model::{LnKind, Micros, Mode, Model, ModelMeta, Note, NoteKind, TimeLine};
 
-pub use rbms_model::{default_total, default_total_keyboard};
+pub use rbms_model::{VOLWAV_DEFAULT_PERCENT, chart_gain, default_total, default_total_keyboard};
 use rbms_parser::BmsSource;
 
 pub mod scroll;
@@ -199,6 +199,7 @@ pub fn to_model(src: &BmsSource, mode: Mode) -> Model {
             rank: src.headers.rank,
             defexrank: src.headers.defexrank,
             total: src.headers.total.unwrap_or(0.0),
+            volwav: src.headers.volwav,
             stagefile: src.headers.stagefile.clone(),
         },
         wavmap,
@@ -436,3 +437,52 @@ pub fn note_density(model: &Model, total_value: f64) -> NoteDensity {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod volwav_tests {
+    use super::*;
+    use rbms_parser::parse;
+
+    fn meta_volwav(bms: &[u8]) -> i32 {
+        to_model(&parse(bms), Mode::BEAT_7K).meta.volwav
+    }
+
+    #[test]
+    fn absent_header_propagates_the_default_percent() {
+        assert_eq!(meta_volwav(b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:01\r\n"), VOLWAV_DEFAULT_PERCENT);
+    }
+
+    #[test]
+    fn header_value_reaches_model_meta_verbatim() {
+        assert_eq!(meta_volwav(b"#VOLWAV 0\r\n"), 0);
+        assert_eq!(meta_volwav(b"#VOLWAV 1\r\n"), 1);
+        assert_eq!(meta_volwav(b"#VOLWAV 99\r\n"), 99);
+        assert_eq!(meta_volwav(b"#VOLWAV 100\r\n"), 100);
+        assert_eq!(meta_volwav(b"#VOLWAV 199\r\n"), 199);
+        assert_eq!(meta_volwav(b"#VOLWAV 200\r\n"), 200);
+        assert_eq!(meta_volwav(b"#VOLWAV 201\r\n"), 201);
+        assert_eq!(meta_volwav(b"#VOLWAV -5\r\n"), -5);
+    }
+
+    #[test]
+    fn unparsable_header_propagates_the_default_percent() {
+        assert_eq!(meta_volwav(b"#VOLWAV abc\r\n"), VOLWAV_DEFAULT_PERCENT);
+    }
+
+    #[test]
+    fn model_meta_volwav_converts_through_the_re_exported_chart_gain() {
+        assert_eq!(chart_gain(meta_volwav(b"#VOLWAV 50\r\n")), 0.5);
+        assert_eq!(chart_gain(meta_volwav(b"#VOLWAV 0\r\n")), 1.0);
+        assert_eq!(chart_gain(meta_volwav(b"#VOLWAV 200\r\n")), 1.0);
+        assert_eq!(chart_gain(meta_volwav(b"#BPM 120\r\n")), 1.0);
+    }
+
+    #[test]
+    fn volwav_does_not_disturb_other_meta_fields() {
+        let m = to_model(&parse(b"#TITLE T\r\n#TOTAL 200\r\n#VOLWAV 60\r\n#RANK 2\r\n"), Mode::BEAT_7K);
+        assert_eq!(m.meta.volwav, 60);
+        assert_eq!(m.meta.title, "T");
+        assert_eq!(m.meta.total, 200.0);
+        assert_eq!(m.meta.rank, 2);
+    }
+}
