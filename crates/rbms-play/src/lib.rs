@@ -1,11 +1,22 @@
 use rbms_judge::{GaugeKind, JudgeEngine, JudgeProperty, JudgeResult, judgerank_for};
 use rbms_model::{Model, NoteKind};
 
+/// Which output bus a keysound belongs to. `rbms-play` does not depend on `rbms-audio`, so it
+/// carries its own discriminant and the caller maps it one-to-one onto `rbms_audio::Bus`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlaySource {
+    /// BGM channel (automatic accompaniment); maps to the audio `Bg` bus.
+    Bgm,
+    /// Note keysound (an autoplay note press, or an interactive hit); maps to the audio `Key` bus.
+    Key,
+}
+
 /// A keysound that should fire at `at_us` (autoplay BGM, or a hit note's sound).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PlayEvent {
     pub wav: i32,
     pub at_us: i64,
+    pub source: PlaySource,
 }
 
 enum AutoAction {
@@ -88,6 +99,7 @@ pub struct Player {
     heads: Vec<(i64, usize, i32)>,
     actions: Vec<(i64, usize, AutoAction)>,
     action_cursor: usize,
+    judge_cursor: usize,
     autoplay: bool,
     auto_lanes: Vec<bool>,
     beam_on: Vec<i64>,
@@ -112,6 +124,7 @@ impl Player {
             heads,
             actions,
             action_cursor: 0,
+            judge_cursor: 0,
             autoplay,
             auto_lanes,
             beam_on: vec![i64::MIN; lanes],
@@ -183,18 +196,35 @@ impl Player {
         self.judge
     }
 
-    pub fn update<F: FnMut(PlayEvent)>(&mut self, now_us: i64, mut play: F) {
-        while self.bg_cursor < self.bg.len() && self.bg[self.bg_cursor].0 <= now_us {
+    /// Schedule axis (the audio engine's `scheduled_us`, i.e. lookahead included). Advances the BGM
+    /// and autoplay keysound cursors and emits the sounds to reserve. Performs no judging, no beam
+    /// bookkeeping and no miss sweep, so running it ahead of the judge axis cannot shift judgments.
+    pub fn update_schedule<F: FnMut(PlayEvent)>(&mut self, sched_us: i64, mut play: F) {
+        while self.bg_cursor < self.bg.len() && self.bg[self.bg_cursor].0 <= sched_us {
             let (at, wav) = self.bg[self.bg_cursor];
-            play(PlayEvent { wav, at_us: at });
+            play(PlayEvent { wav, at_us: at, source: PlaySource::Bgm });
             self.bg_cursor += 1;
         }
-        while self.action_cursor < self.actions.len() && self.actions[self.action_cursor].0 <= now_us {
+        while self.action_cursor < self.actions.len() && self.actions[self.action_cursor].0 <= sched_us {
             let (at, lane, ref kind) = self.actions[self.action_cursor];
+            if (self.autoplay || self.auto_lanes.get(lane).copied().unwrap_or(false))
+                && let AutoAction::Press { wav, .. } = kind
+            {
+                play(PlayEvent { wav: *wav, at_us: at, source: PlaySource::Key });
+            }
+            self.action_cursor += 1;
+        }
+    }
+
+    /// Judge axis (the audio engine's `audible_us`, i.e. what the player is hearing right now).
+    /// Runs the autoplay press/release judgments over its own `judge_cursor`, the key-beam timer and
+    /// the miss sweep. Emits no sound: [`update_schedule`](Self::update_schedule) already reserved it.
+    pub fn update_judge(&mut self, audible_us: i64) {
+        while self.judge_cursor < self.actions.len() && self.actions[self.judge_cursor].0 <= audible_us {
+            let (at, lane, ref kind) = self.actions[self.judge_cursor];
             if self.autoplay || self.auto_lanes.get(lane).copied().unwrap_or(false) {
                 match kind {
-                    AutoAction::Press { wav, ln } => {
-                        play(PlayEvent { wav: *wav, at_us: at });
+                    AutoAction::Press { ln, .. } => {
                         if let Some(jr) = self.judge.press(lane, at) {
                             if (jr.judge as usize) <= 3 {
                                 self.bomb[lane] = (at, jr.judge as u8);
@@ -218,16 +248,25 @@ impl Player {
                     }
                 }
             }
-            self.action_cursor += 1;
+            self.judge_cursor += 1;
         }
         for lane in 0..self.beam_on.len() {
             let auto = self.autoplay || self.auto_lanes[lane];
-            if auto && self.beam_on[lane] != i64::MIN && !self.ln_active[lane] && now_us - self.beam_on[lane] >= AUTO_BEAM_US {
+            if auto && self.beam_on[lane] != i64::MIN && !self.ln_active[lane] && audible_us - self.beam_on[lane] >= AUTO_BEAM_US {
                 self.beam_off[lane] = self.beam_on[lane] + AUTO_BEAM_US;
                 self.beam_on[lane] = i64::MIN;
             }
         }
-        self.judge.update(now_us);
+        self.judge.update(audible_us);
+    }
+
+    /// Both axes at one clock: [`update_schedule`](Self::update_schedule) then
+    /// [`update_judge`](Self::update_judge). Kept for the virtual-clock paths (offline analysis,
+    /// autoplay simulation, tests); the real-time path drives the two axes separately so that the
+    /// scheduler's lookahead never reaches judging.
+    pub fn update<F: FnMut(PlayEvent)>(&mut self, now_us: i64, play: F) {
+        self.update_schedule(now_us, play);
+        self.update_judge(now_us);
     }
 
     pub fn press<F: FnMut(PlayEvent)>(&mut self, lane: usize, now_us: i64, mut play: F) -> Option<JudgeResult> {
@@ -239,7 +278,7 @@ impl Player {
             self.beam_off[lane] = i64::MIN;
         }
         if let Some(wav) = self.nearest_head_wav(lane, now_us) {
-            play(PlayEvent { wav, at_us: now_us });
+            play(PlayEvent { wav, at_us: now_us, source: PlaySource::Key });
         }
         let res = self.judge.press(lane, now_us);
         if let Some(jr) = &res {
@@ -909,5 +948,162 @@ mod tests {
         p.update(nt + 1_000_000, |_| {});
         assert_eq!(p.judge.counts[4], 1, "the note was swept to 見逃し POOR");
         assert_eq!(p.bomb()[0].0, i64::MIN, "a swept POOR lights no bomb");
+    }
+
+    const LOOKAHEAD_SKEW_US: i64 = 10_000;
+    const AXIS_STEP_US: i64 = 1_000;
+
+    #[test]
+    fn update_schedule_emits_sounds_without_touching_judgment() {
+        let m = model(b"#BPM 120\r\n#RANK 3\r\n#WAV01 a.wav\r\n#00101:01\r\n#00111:01\r\n");
+        let mut p = Player::new(m, true);
+        let end = p.last_time_us() + 1_000_000;
+        let mut events = Vec::new();
+        p.update_schedule(end, |e| events.push(e));
+        assert_eq!(events.len(), 2, "the BGM channel and the autoplay note were both scheduled");
+        assert_eq!(p.judge.total_judged(), 0, "update_schedule judges nothing");
+        assert!(p.beam_on().iter().all(|&v| v == i64::MIN), "update_schedule lights no beam");
+        assert!(p.beam_off().iter().all(|&v| v == i64::MIN), "update_schedule leaves no beam fade");
+        assert!(p.bomb().iter().all(|&(t, _)| t == i64::MIN), "update_schedule lights no bomb");
+    }
+
+    #[test]
+    fn update_judge_advances_judgment_and_leaves_the_schedule_cursors_alone() {
+        let m = model(b"#BPM 120\r\n#RANK 3\r\n#WAV01 a.wav\r\n#00101:01\r\n#00111:01\r\n");
+        let n = rbms_chart::count_playable_notes(&m);
+        let mut p = Player::new(m, true);
+        let end = p.last_time_us() + 1_000_000;
+        p.update_judge(end);
+        assert_eq!(p.judge.counts[0], n as u32, "the judge axis alone judges the autoplay note");
+        assert_ne!(p.beam_off()[0], i64::MIN, "the judge axis alone runs the auto beam timer");
+        let mut events = Vec::new();
+        p.update_schedule(end, |e| events.push(e));
+        assert_eq!(events.len(), 2, "update_judge emitted no sound, so every keysound was still pending");
+    }
+
+    #[test]
+    fn judge_cursor_never_passes_the_schedule_cursor() {
+        let m = model(b"#BPM 120\r\n#RANK 3\r\n#WAV01 a.wav\r\n#00101:01\r\n#00151:01000001\r\n#00112:01010101\r\n");
+        let mut p = Player::new(m, true);
+        let end = p.last_time_us() + 1_000_000;
+        let mut t = 0i64;
+        while t <= end {
+            p.update_schedule(t + LOOKAHEAD_SKEW_US, |_| {});
+            p.update_judge(t);
+            assert!(p.judge_cursor <= p.action_cursor, "judge_cursor trails action_cursor at t={t}");
+            t += AXIS_STEP_US;
+        }
+        assert_eq!(p.action_cursor, p.actions.len(), "the schedule cursor consumed every action");
+        assert_eq!(p.judge_cursor, p.action_cursor, "the judge cursor caught up once the song ended");
+    }
+
+    #[test]
+    fn judge_axis_is_independent_of_how_far_the_schedule_axis_ran() {
+        let m = model(b"#BPM 120\r\n#RANK 3\r\n#WAV01 a.wav\r\n#00111:01010101\r\n");
+        let mut split = Player::new(m.clone(), false);
+        let mut single = Player::new(m.clone(), false);
+        let mut leaked = Player::new(m, false);
+        let end = single.last_time_us() + 1_000_000;
+        let mut leak_diverged = false;
+        let mut t = 0i64;
+        while t <= end {
+            split.update_schedule(t + LOOKAHEAD_SKEW_US, |_| {});
+            split.update_judge(t);
+            single.update(t, |_| {});
+            leaked.update(t + LOOKAHEAD_SKEW_US, |_| {});
+            assert_eq!(split.judge.counts, single.judge.counts, "the miss sweep follows the judge axis at t={t}");
+            assert_eq!(split.judge.combo, single.judge.combo, "combo follows the judge axis at t={t}");
+            leak_diverged |= leaked.judge.counts != single.judge.counts;
+            t += AXIS_STEP_US;
+        }
+        assert!(leak_diverged, "shifting the judge axis by the skew does change the sweep, so the equality above is not vacuous");
+    }
+
+    #[test]
+    fn autoplay_beams_and_bombs_follow_the_judge_axis_not_the_schedule_axis() {
+        let m = model(b"#BPM 120\r\n#RANK 3\r\n#WAV01 a.wav\r\n#00151:01000001\r\n#00112:01010101\r\n");
+        let mut split = Player::new(m.clone(), true);
+        let mut single = Player::new(m.clone(), true);
+        let mut leaked = Player::new(m, true);
+        let end = single.last_time_us() + 1_000_000;
+        let mut leak_diverged = false;
+        let mut t = 0i64;
+        while t <= end {
+            split.update_schedule(t + LOOKAHEAD_SKEW_US, |_| {});
+            split.update_judge(t);
+            single.update(t, |_| {});
+            leaked.update(t + LOOKAHEAD_SKEW_US, |_| {});
+            assert_eq!(split.beam_on(), single.beam_on(), "auto beam-on follows the judge axis at t={t}");
+            assert_eq!(split.beam_off(), single.beam_off(), "auto beam-off follows the judge axis at t={t}");
+            assert_eq!(split.bomb(), single.bomb(), "auto bombs follow the judge axis at t={t}");
+            assert_eq!(split.judge.counts, single.judge.counts, "auto judgments follow the judge axis at t={t}");
+            leak_diverged |= leaked.beam_on() != single.beam_on();
+            t += AXIS_STEP_US;
+        }
+        assert!(leak_diverged, "shifting the judge axis by the skew does move the beams, so the equalities above are not vacuous");
+    }
+
+    #[test]
+    fn schedule_ahead_does_not_light_beams_or_sweep_misses() {
+        let m = model(b"#BPM 120\r\n#RANK 3\r\n#WAV01 a.wav\r\n#00111:01\r\n");
+        let nt = m.timelines.iter().find_map(|t| t.notes[0].as_ref()).map(|n| n.time_us).unwrap();
+
+        let mut auto = Player::new(m.clone(), true);
+        auto.update_schedule(nt + 1_000_000, |_| {});
+        assert_eq!(auto.beam_on()[0], i64::MIN, "the reserved autoplay press has not lit its beam yet");
+        assert_eq!(auto.judge.total_judged(), 0, "and has not been judged yet");
+        auto.update_judge(nt);
+        assert_eq!(auto.beam_on()[0], nt, "the judge axis lights the beam at the charted note time");
+        assert_eq!(auto.judge.counts[0], 1, "and judges it PGREAT");
+
+        let mut manual = Player::new(m, false);
+        manual.update_schedule(nt + 1_000_000, |_| {});
+        assert_eq!(manual.judge.counts[4], 0, "the schedule axis never sweeps an unpressed note to POOR");
+        manual.update_judge(nt + 1_000_000);
+        assert_eq!(manual.judge.counts[4], 1, "the judge axis does");
+    }
+
+    #[test]
+    fn play_events_carry_their_output_bus() {
+        let m = model(b"#BPM 120\r\n#WAV01 a.wav\r\n#WAV02 b.wav\r\n#00101:02\r\n#00111:01\r\n");
+        let (_engine, events) = autoplay_collect(m);
+        let bgm: Vec<i32> = events.iter().filter(|e| e.source == PlaySource::Bgm).map(|e| e.wav).collect();
+        let key: Vec<i32> = events.iter().filter(|e| e.source == PlaySource::Key).map(|e| e.wav).collect();
+        assert_eq!(bgm, vec![2], "the BGM channel keysound is tagged Bgm");
+        assert_eq!(key, vec![1], "the autoplay note keysound is tagged Key");
+    }
+
+    #[test]
+    fn press_keysound_is_tagged_key() {
+        let m = model(b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:01\r\n");
+        let head = m.timelines.iter().find_map(|t| t.notes[0].as_ref()).map(|n| n.time_us).unwrap();
+        let mut p = Player::new(m, false);
+        let mut events = Vec::new();
+        p.press(0, head, |e| events.push(e));
+        assert_eq!(events.len(), 1, "an interactive hit emits one keysound");
+        assert_eq!(events[0].source, PlaySource::Key, "an interactive hit sound goes to the key bus");
+    }
+
+    #[test]
+    fn update_is_exactly_schedule_then_judge_at_one_clock() {
+        let m = model(b"#BPM 120\r\n#RANK 3\r\n#WAV01 a.wav\r\n#00101:01\r\n#00151:01000001\r\n#00112:01010101\r\n");
+        let mut composed = Player::new(m.clone(), true);
+        let mut manual = Player::new(m, true);
+        let end = composed.last_time_us() + 1_000_000;
+        let mut composed_events = Vec::new();
+        let mut manual_events = Vec::new();
+        let mut t = 0i64;
+        while t <= end {
+            composed.update(t, |e| composed_events.push(e));
+            manual.update_schedule(t, |e| manual_events.push(e));
+            manual.update_judge(t);
+            t += AXIS_STEP_US;
+        }
+        assert_eq!(composed_events, manual_events, "the backward-compatible update emits the same events in the same order");
+        assert_eq!(composed.judge.counts, manual.judge.counts, "and reaches the same judgment state");
+        assert_eq!(composed.judge.ex_score, manual.judge.ex_score);
+        assert_eq!(composed.beam_on(), manual.beam_on());
+        assert_eq!(composed.beam_off(), manual.beam_off());
+        assert_eq!(composed.bomb(), manual.bomb());
     }
 }
