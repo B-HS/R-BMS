@@ -112,14 +112,18 @@ pub(crate) fn gauge_token(g: GaugeKind) -> &'static str {
 mod tests {
     use super::*;
 
-    const ALL_GAUGES: [GaugeKind; 6] = [
-        GaugeKind::AssistEasy, GaugeKind::Easy, GaugeKind::Normal,
-        GaugeKind::Hard, GaugeKind::ExHard, GaugeKind::Hazard,
-    ];
+    const ALL_GAUGES: [GaugeKind; 6] = [GaugeKind::AssistEasy, GaugeKind::Easy, GaugeKind::Normal, GaugeKind::Hard, GaugeKind::ExHard, GaugeKind::Hazard];
     const ALL_CLEARS: [ClearType; 10] = [
-        ClearType::NoPlay, ClearType::Failed, ClearType::AssistEasy, ClearType::Easy,
-        ClearType::Normal, ClearType::Hard, ClearType::ExHard, ClearType::FullCombo,
-        ClearType::Perfect, ClearType::Max,
+        ClearType::NoPlay,
+        ClearType::Failed,
+        ClearType::AssistEasy,
+        ClearType::Easy,
+        ClearType::Normal,
+        ClearType::Hard,
+        ClearType::ExHard,
+        ClearType::FullCombo,
+        ClearType::Perfect,
+        ClearType::Max,
     ];
 
     #[test]
@@ -261,7 +265,7 @@ mod tests {
             (NoteOption::Random, R::Random),
             (NoteOption::SRandom, R::SRandom),
             (NoteOption::RRandom, R::RRandom),
-            (NoteOption::Rotate, R::Spiral),   // engine "Rotate" == IR "Spiral"
+            (NoteOption::Rotate, R::Spiral), // engine "Rotate" == IR "Spiral"
             (NoteOption::HRandom, R::HRandom),
             (NoteOption::AllScratch, R::AllScratch),
         ];

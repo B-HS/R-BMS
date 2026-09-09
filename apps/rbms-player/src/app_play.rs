@@ -1,6 +1,7 @@
 //! `App` methods for PLAY: chart load, the per-frame play loop, the song clock, and the
 //! result screen + score submission. Split out of `main.rs` (see `app_input` for the import note).
 #![allow(clippy::wildcard_imports)]
+use crate::ir_session::submission_player_id;
 use crate::*;
 
 impl App {
@@ -38,10 +39,7 @@ impl App {
                 self.config.random = random;
                 (random, rp.seed)
             }
-            None => (
-                self.config.random,
-                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1),
-            ),
+            None => (self.config.random, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1)),
         };
         self.seed = seed;
         rbms_chart::shuffle::apply(&mut model, random, seed);
@@ -195,7 +193,9 @@ impl App {
     /// died (device unplugged / driver error) it stops advancing, so fall back to the wall clock,
     /// resuming from the last position the audio clock reported instead of freezing the chart.
     pub(crate) fn song_us(&self) -> i64 {
-        let Some(audio) = self.audio.as_ref() else { return self.clock.elapsed().as_micros() as i64 };
+        let Some(audio) = self.audio.as_ref() else {
+            return self.clock.elapsed().as_micros() as i64;
+        };
         if audio.is_alive() {
             self.audio_dead_at.set(None);
             return audio.clock_us() - self.anchor_us;
@@ -213,7 +213,9 @@ impl App {
     }
 
     pub(crate) fn enter_result(&mut self) {
-        let Some(player) = self.player.as_ref() else { return };
+        let Some(player) = self.player.as_ref() else {
+            return;
+        };
         let j = &player.judge;
         let lamp = j.clear_lamp();
         let (label, color) = clear_label_color(lamp);
@@ -256,7 +258,7 @@ impl App {
         let sub = ScoreSubmission {
             api_version: API_VERSION,
             chart: ChartId { md5: model.md5.clone(), sha256: model.sha256.clone() },
-            player: PlayerId { id: self.config.player_id.clone() },
+            player: PlayerId { id: submission_player_id(&self.session, &self.config.player_id) },
             mode: self.mode.name.to_string(),
             clear: ir_clear(lamp),
             ex_score: j.ex_score,
@@ -288,6 +290,7 @@ impl App {
             },
             max_combo: j.max_combo,
             total_notes: j.total_notes(),
+            passnotes: j.total_judged(),
             minbp: c[3] + c[4] + c[5],
             gauge_value: j.gauge.value(),
             options: PlayOptions {
@@ -323,19 +326,11 @@ impl App {
             extra: Default::default(),
         };
         let scores_count = updates_score(self.autoplay, self.replay.is_some(), self.config.judge_rate, self.config.scratch_auto);
-        match ir_submission_block_reason(self.autoplay, self.replay.is_some(), self.config.judge_rate, self.config.scratch_auto) {
-            Some(reason) => println!("score not submitted: {reason}"),
-            None => {
-                let server = self.server.clone();
-                std::thread::spawn(move || match server.submit_score(&sub) {
-                    Ok(r) => println!("score submitted: accepted={} rank={:?}", r.accepted, r.rank),
-                    Err(e) => eprintln!("score submit: {e}"),
-                });
-            }
-        }
+        let block_reason = ir_submission_block_reason(self.autoplay, self.replay.is_some(), self.config.judge_rate, self.config.scratch_auto);
 
         let played_ms = played_at;
         let mut replay_file: Option<String> = None;
+        let mut recorded_replay: Option<Replay> = None;
         if self.config.auto_replay && self.replay.is_none() && !self.autoplay && !self.recording.is_empty() {
             let stem: String = model.md5.chars().take(8).collect();
             let dir = self.settings_path.parent().map(|d| d.join("replays")).unwrap_or_else(|| PathBuf::from("replays"));
@@ -353,6 +348,7 @@ impl App {
             };
             rp.save(&dir.join(&name));
             replay_file = Some(name);
+            recorded_replay = Some(rp);
         }
 
         // Persist a local play record (independent of the score server) for every real
@@ -388,6 +384,23 @@ impl App {
             self.config.offset_ms = new_offset;
         }
 
+        match block_reason {
+            Some(reason) => {
+                println!("score not submitted: {reason}");
+                self.submit_rx = None;
+                self.ir_status = IrStatus::Skipped(reason);
+            }
+            None if self.config.server_url.is_none() => {
+                self.submit_rx = None;
+                self.ir_status = IrStatus::Off;
+            }
+            None => {
+                let chart = sub.chart.clone();
+                let replay = recorded_replay.as_ref().and_then(|rp| self.replay_upload_payload(rp, &chart));
+                self.spawn_score_submit(sub, replay);
+            }
+        }
+
         self.save_settings();
         self.stage = Stage::Result;
     }
@@ -401,6 +414,8 @@ impl App {
             self.fps = if self.fps <= 0.0 { inst } else { self.fps * 0.9 + inst * 0.1 };
         }
         self.frame_count = self.frame_count.wrapping_add(1);
+        self.poll_network();
+        self.poll_ir_jobs();
         if self.config.debug && self.frame_count % 15 == 0 {
             if let Some(u) = memory_stats::memory_stats() {
                 self.ram_mb = u.physical_mem as f32 / (1024.0 * 1024.0);
@@ -429,6 +444,7 @@ impl App {
         if self.stage == Stage::Select {
             self.refresh_focused_detail();
             self.update_preview();
+            self.update_ranking();
         } else if self.preview_audio.is_some() {
             self.stop_preview();
         }
@@ -471,9 +487,9 @@ impl App {
             }
         }
 
-        let (set_tab, set_sel) = (self.set_tab.min(SETTING_TABS.len() - 1), self.set_sel);
-        let settings_lines: Vec<(&'static str, String)> =
-            if self.stage == Stage::Settings { SETTING_TABS[set_tab].1.iter().map(|&i| self.setting_line(i)).collect() } else { Vec::new() };
+        let settings_scene = (self.stage == Stage::Settings).then(|| self.settings_scene());
+        let ranking_lines = if self.stage == Stage::Select && self.ranking_open { self.ranking_lines() } else { Vec::new() };
+        let ir_lines = if self.stage == Stage::Result { self.ir_status.lines() } else { Vec::new() };
         // Refresh the (cached) select scene before the GPU borrow, then read it as a disjoint immutable
         // field so it coexists with the mutable `self.gpu` borrow during render.
         if self.stage == Stage::Select {
@@ -549,6 +565,10 @@ impl App {
                         };
                         (rect, mapped)
                     }));
+                    if self.ranking_open {
+                        let hot = render_ranking_panel(gpu, &ranking_lines, self.ranking_sel, true);
+                        self.hot.extend(hot.into_iter().map(|(rect, index)| (rect, Hot::RankingRow(index))));
+                    }
                 }
                 Stage::Play => {
                     while self.bga_cursor < self.bga_events.len() && self.bga_events[self.bga_cursor].0 <= song {
@@ -560,7 +580,16 @@ impl App {
                         _ => gpu.clear_bga(),
                     }
                     if let Some(player) = self.player.as_ref() {
-                        render_playfield(gpu, &player.model().timelines, song, self.config.hispeed, &self.skin, player.beam_on(), player.beam_off(), self.config.constant_speed);
+                        render_playfield(
+                            gpu,
+                            &player.model().timelines,
+                            song,
+                            self.config.hispeed,
+                            &self.skin,
+                            player.beam_on(),
+                            player.beam_off(),
+                            self.config.constant_speed,
+                        );
                         render_lane_cover(gpu, &self.skin, self.config.cover);
                         render_key_bomb(gpu, &self.skin, player.bomb(), song);
                         let j = &player.judge;
@@ -600,12 +629,25 @@ impl App {
                             gpu.fill_rect(Rect::new(bx, by, bw * prog, 6.0), Color::rgb(90, 200, 230));
                             gpu.fill_rect(Rect::new((bx + bw * prog - 1.5).max(bx), by - 3.0, 3.0, 12.0), Color::WHITE);
                             let state = if self.analysis_paused { "PAUSED".to_string() } else { format!("{:.2}x", self.analysis_rate) };
-                            draw_text(gpu, bx, CH as f32 - 66.0, 1.4, Color::YELLOW, &format!("ANALYSIS  {state}   {:.1} / {:.1} S", song as f32 / 1e6, total as f32 / 1e6));
+                            draw_text(
+                                gpu,
+                                bx,
+                                CH as f32 - 66.0,
+                                1.4,
+                                Color::YELLOW,
+                                &format!("ANALYSIS  {state}   {:.1} / {:.1} S", song as f32 / 1e6, total as f32 / 1e6),
+                            );
                             draw_text_right(gpu, bx + bw, CH as f32 - 66.0, 1.1, Color::GRAY, "SPACE PAUSE  -/+ SPEED  PGUP/PGDN SEEK  ESC EXIT");
                             let start = self.msoff.len().saturating_sub(14);
                             let mut mx = bx;
                             for &(_, delta_us, _) in &self.msoff[start..] {
-                                let col = if delta_us > 0 { Color::rgb(90, 210, 230) } else if delta_us < 0 { Color::ORANGE } else { Color::WHITE };
+                                let col = if delta_us > 0 {
+                                    Color::rgb(90, 210, 230)
+                                } else if delta_us < 0 {
+                                    Color::ORANGE
+                                } else {
+                                    Color::WHITE
+                                };
                                 let txt = format!("{:+}", delta_us / 1000);
                                 draw_text(gpu, mx, CH as f32 - 44.0, 1.3, col, &txt);
                                 mx += text_width(&txt, 1.3) + 12.0;
@@ -614,31 +656,17 @@ impl App {
                     }
                 }
                 Stage::Settings => {
-                    let th = rbms_render::theme();
                     gpu.clear_bga();
-                    gpu.clear(th.bg);
-                    const PANEL_W: f32 = 720.0;
-                    let x0 = (CW as f32 - PANEL_W) * 0.5;
-                    draw_text(gpu, x0, 36.0, 3.0, th.text, "SETTINGS");
-                    draw_text(gpu, x0, 78.0, 1.2, th.text_muted, "TAB SWITCH   UP DOWN MOVE   LEFT RIGHT CHANGE   ENTER OPEN   ESC SAVE/BACK");
-                    let mut tx = x0;
-                    for (ti, (name, _)) in SETTING_TABS.iter().enumerate() {
-                        let on = ti == set_tab;
-                        let w = text_width(name, 1.6) + 28.0;
-                        gpu.fill_rect(Rect::new(tx, 104.0, w, 34.0), if on { th.button } else { th.panel });
-                        draw_text(gpu, tx + 14.0, 112.0, 1.6, if on { Color::YELLOW } else { Color::rgb(150, 150, 165) }, name);
-                        self.hot.push((Rect::new(tx, 104.0, w, 34.0), Hot::SettingTab(ti)));
-                        tx += w + 8.0;
-                    }
-                    for (i, (label, val)) in settings_lines.iter().enumerate() {
-                        let y = 160.0 + i as f32 * 50.0;
-                        let sel = i == set_sel;
-                        gpu.fill_rect(Rect::new(x0, y, PANEL_W, 42.0), if sel { th.button } else { th.panel });
-                        draw_text(gpu, x0 + 20.0, y + 13.0, 1.8, if sel { th.text } else { th.text_dim }, label);
-                        let editing = sel && self.text_input.is_some();
-                        let shown = if editing { format!("{}_", self.text_input.as_deref().unwrap_or("")) } else { val.clone() };
-                        draw_text_right(gpu, x0 + PANEL_W - 20.0, y + 13.0, 2.0, if editing { Color::rgb(120, 230, 255) } else if sel { Color::YELLOW } else { th.text }, &shown);
-                        self.hot.push((Rect::new(x0, y, PANEL_W, 42.0), Hot::SettingRow(i)));
+                    if let Some(scene) = settings_scene.as_ref() {
+                        let hot = render_settings(gpu, scene);
+                        self.hot.extend(hot.into_iter().map(|(rect, h)| {
+                            let mapped = match h {
+                                SettingsHot::Tab(i) => Hot::SettingTab(i),
+                                SettingsHot::Row(i) => Hot::SettingRow(i),
+                                SettingsHot::RivalRow(i) => Hot::RivalRow(i),
+                            };
+                            (rect, mapped)
+                        }));
                     }
                 }
                 Stage::KeyConfig => {
@@ -675,7 +703,13 @@ impl App {
                         let is_dup = !matches!(&rows[ridx], KcRow::ModeSelect) && key_from_name(&raw).is_some_and(|k| dups.contains(&k));
                         gpu.fill_rect(Rect::new(x0, y, PANEL_W, row_h), if on { th.button } else { th.panel });
                         draw_text(gpu, x0 + 16.0, y + 8.0, 1.6, if on { th.text } else { th.text_dim }, &label);
-                        let value = if on && self.kc_capturing { "?".to_string() } else if raw.is_empty() { "-".to_string() } else { raw };
+                        let value = if on && self.kc_capturing {
+                            "?".to_string()
+                        } else if raw.is_empty() {
+                            "-".to_string()
+                        } else {
+                            raw
+                        };
                         let vcol = if on && self.kc_capturing {
                             Color::YELLOW
                         } else if is_dup {
@@ -718,7 +752,13 @@ impl App {
                                 "+ ADD TABLE (FILE)".to_string()
                             };
                             gpu.fill_rect(Rect::new(x0, y, PANEL_W, 36.0), if on { th.button } else { th.panel });
-                            let col = if i >= self.table_sources.len() { Color::GREEN } else if on { th.text } else { th.text_dim };
+                            let col = if i >= self.table_sources.len() {
+                                Color::GREEN
+                            } else if on {
+                                th.text
+                            } else {
+                                th.text_dim
+                            };
                             draw_text(gpu, x0 + 16.0, y + 10.0, 1.5, col, &label);
                         }
                     }
@@ -738,12 +778,22 @@ impl App {
                         let label = if i < self.folders.len() {
                             let f = &self.folders[i];
                             // Show the tail of long paths so the folder name stays visible.
-                            if f.chars().count() > 78 { format!("…{}", f.chars().rev().take(76).collect::<Vec<_>>().into_iter().rev().collect::<String>()) } else { f.clone() }
+                            if f.chars().count() > 78 {
+                                format!("…{}", f.chars().rev().take(76).collect::<Vec<_>>().into_iter().rev().collect::<String>())
+                            } else {
+                                f.clone()
+                            }
                         } else {
                             "+ ADD FOLDER".to_string()
                         };
                         gpu.fill_rect(Rect::new(x0, y, PANEL_W, 36.0), if on { th.button } else { th.panel });
-                        let col = if i == add_row { Color::GREEN } else if on { th.text } else { th.text_dim };
+                        let col = if i == add_row {
+                            Color::GREEN
+                        } else if on {
+                            th.text
+                        } else {
+                            th.text_dim
+                        };
                         draw_text(gpu, x0 + 16.0, y + 10.0, 1.4, col, &label);
                     }
                     if self.folders.is_empty() {
@@ -754,6 +804,9 @@ impl App {
                     gpu.clear_bga();
                     if let Some(view) = self.result.as_ref() {
                         render_result_with_palette(gpu, view, &self.result_palette);
+                    }
+                    for (i, (text, kind)) in ir_lines.iter().enumerate() {
+                        draw_text(gpu, IR_RESULT_X, IR_RESULT_Y + i as f32 * IR_RESULT_LINE_H, IR_RESULT_SCALE, ir_line_color(*kind), text);
                     }
                 }
             }
@@ -782,7 +835,12 @@ impl App {
                     let clk = self.audio.as_ref().map(|a| a.clock_us()).unwrap_or(0);
                     lines.push(format!("AUDIO {} US  ANCHOR {}", clk, anchor));
                     if let Some(a) = self.audio.as_ref() {
-                        lines.push(format!("STREAM {}  DROP {}  REALLOC {}", if a.is_alive() { "ALIVE" } else { "DEAD" }, a.dropped_commands(), a.scratch_reallocations()));
+                        lines.push(format!(
+                            "STREAM {}  DROP {}  REALLOC {}",
+                            if a.is_alive() { "ALIVE" } else { "DEAD" },
+                            a.dropped_commands(),
+                            a.scratch_reallocations()
+                        ));
                     }
                 } else {
                     lines.push(format!("SEL {} / {}", self.sel + 1, self.select_items.len()));
@@ -811,7 +869,9 @@ impl App {
                     println!("[{}/{}] {} [{}]", self.sel + 1, total, e.title, e.mode.name);
                 }
             }
-            Some(SelectItem::Folder { label, .. }) => println!("[{}/{}] {label}/", self.sel + 1, total),
+            Some(SelectItem::Folder { label, .. }) => {
+                println!("[{}/{}] {label}/", self.sel + 1, total)
+            }
             None => {}
         }
     }

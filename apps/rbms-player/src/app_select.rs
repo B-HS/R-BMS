@@ -1,6 +1,7 @@
-//! `App` methods for the SELECT screen: the song library, focused-chart detail, hover
-//! preview, record modal, difficulty tables, folder scanning, and loading transitions.
-//! Split out of `main.rs` (see `app_input` for the import note).
+//! `App` methods for the SELECT screen: browsing the song library, focused-chart detail, hover
+//! preview, the record modal, clicks, and the loading transitions.
+//! Split out of `main.rs` (see `app_input` for the import note); the folder/table *sources* the
+//! library is built from live in `app_library`.
 #![allow(clippy::wildcard_imports)]
 use crate::*;
 
@@ -136,7 +137,9 @@ impl App {
             .collect();
 
         let header = match self.select_view {
-            SelectView::Root => self.config.songs_folder.as_deref().and_then(|p| Path::new(p).file_name()).and_then(|n| n.to_str()).unwrap_or("ROOT").to_string(),
+            SelectView::Root => {
+                self.config.songs_folder.as_deref().and_then(|p| Path::new(p).file_name()).and_then(|n| n.to_str()).unwrap_or("ROOT").to_string()
+            }
             SelectView::AllSongs => "ALL SONGS".into(),
             SelectView::TableLevels(ti) => self.table_names.get(ti).cloned().unwrap_or_default(),
             SelectView::TableLevel(ti, li) => {
@@ -155,7 +158,9 @@ impl App {
                     Some(d) => format!("{}", d.bpm_min.round() as i32),
                     None => format!("{}", e.init_bpm.round() as i32),
                 };
-                let notes = d.map(|d| if d.long_notes > 0 { format!("{} ({}LN)", d.notes, d.long_notes) } else { d.notes.to_string() }).unwrap_or_else(|| "\u{2026}".into());
+                let notes = d
+                    .map(|d| if d.long_notes > 0 { format!("{} ({}LN)", d.notes, d.long_notes) } else { d.notes.to_string() })
+                    .unwrap_or_else(|| "\u{2026}".into());
                 let length = d.map(|d| fmt_duration(d.duration_us)).unwrap_or_else(|| "\u{2026}".into());
                 let total = if e.total > 0.0 { format!("{}", e.total.round() as i32) } else { "AUTO".into() };
                 let genre_maker = match (e.genre.trim(), e.maker.trim()) {
@@ -164,7 +169,12 @@ impl App {
                     (g, "") => g.to_string(),
                     (g, m) => format!("{g}  \u{00B7}  {m}"),
                 };
-                let density = d.filter(|d| !d.density.is_empty()).map(|d| DensityView { bins: d.density.clone(), peak: d.peak_density, avg: d.avg_density, end: d.end_density });
+                let density = d.filter(|d| !d.density.is_empty()).map(|d| DensityView {
+                    bins: d.density.clone(),
+                    peak: d.peak_density,
+                    avg: d.avg_density,
+                    end: d.end_density,
+                });
 
                 let recs = self.scores.for_md5(&e.md5);
                 let plays = recs.len();
@@ -443,7 +453,9 @@ impl App {
             }
         };
         self.preview_audio = Some(engine);
-        let Some(eng) = self.preview_audio.as_mut() else { return };
+        let Some(eng) = self.preview_audio.as_mut() else {
+            return;
+        };
         if let Err(err) = eng.load(PREVIEW_ID, bytes, ext.as_deref()) {
             if dbg {
                 eprintln!("[preview] decode failed {}: {err}", path.display());
@@ -490,8 +502,12 @@ impl App {
             if cancel.load(Ordering::Relaxed) {
                 return;
             }
-            let Ok(bytes) = std::fs::read(&path) else { return };
-            let Some(dir) = path.parent().map(Path::to_path_buf) else { return };
+            let Ok(bytes) = std::fs::read(&path) else {
+                return;
+            };
+            let Some(dir) = path.parent().map(Path::to_path_buf) else {
+                return;
+            };
             let src = rbms_parser::parse_with(&bytes, Default::default());
             if cancel.load(Ordering::Relaxed) {
                 return;
@@ -581,7 +597,9 @@ impl App {
     /// Load and start the replay attached to the record currently shown in the modal.
     pub(crate) fn play_record_replay(&mut self) {
         let Some(ri) = self.record_modal else { return };
-        let Some(md5) = self.focused_md5() else { return };
+        let Some(md5) = self.focused_md5() else {
+            return;
+        };
         let file = self.scores.for_md5(&md5).get(ri).and_then(|r| r.replay_file.clone());
         let Some(file) = file else { return };
         let dir = self.settings_path.parent().map(|d| d.join("replays")).unwrap_or_else(|| PathBuf::from("replays"));
@@ -594,7 +612,11 @@ impl App {
                 self.result = None;
                 self.loading_drawn = false;
                 self.pending = None;
-                if self.load() { self.after_load(); } else { self.stage = Stage::Select; }
+                if self.load() {
+                    self.after_load();
+                } else {
+                    self.stage = Stage::Select;
+                }
             }
             Err(e) => {
                 eprintln!("replay load failed: {e}");
@@ -607,12 +629,7 @@ impl App {
     /// Regions are tested topmost-first (later pushes draw on top).
     pub(crate) fn handle_click(&mut self) {
         let (cx, cy) = self.cursor;
-        let hit = self
-            .hot
-            .iter()
-            .rev()
-            .find(|(r, _)| cx >= r.x && cx <= r.x + r.w && cy >= r.y && cy <= r.y + r.h)
-            .map(|(_, h)| *h);
+        let hit = self.hot.iter().rev().find(|(r, _)| cx >= r.x && cx <= r.x + r.w && cy >= r.y && cy <= r.y + r.h).map(|(_, h)| *h);
         match hit {
             Some(Hot::SelectRow(idx)) => {
                 if self.sel == idx {
@@ -624,21 +641,28 @@ impl App {
                 }
             }
             Some(Hot::RecordRow(ri)) => self.record_modal = Some(ri),
+            Some(Hot::SettingTab(_) | Hot::SettingRow(_)) if self.rivals_open => {}
             Some(Hot::SettingTab(ti)) => {
+                self.cancel_text_edit();
                 self.set_tab = ti.min(SETTING_TABS.len() - 1);
                 self.set_sel = 0;
             }
             Some(Hot::SettingRow(i)) => {
                 let items = SETTING_TABS[self.set_tab].1;
                 if let Some(&g) = items.get(i) {
+                    self.cancel_text_edit();
                     self.set_sel = i;
                     if g == SETTING_KEYCONFIG {
                         self.enter_keyconfig();
-                    } else {
+                    } else if g == SETTING_FONT {
+                        self.pick_font();
+                    } else if !self.network_setting_enter(g) {
                         self.adjust_setting(g, 1);
                     }
                 }
             }
+            Some(Hot::RivalRow(i)) => self.rivals_click(i),
+            Some(Hot::RankingRow(i)) => self.ranking_click(i),
             Some(Hot::ModalReplay) => self.play_record_replay(),
             Some(Hot::ModalClose) => self.record_modal = None,
             // Bottom navigation buttons — clickable equivalents of the keyboard shortcuts.
@@ -673,179 +697,6 @@ impl App {
         self.stage = Stage::Select;
         println!("scanned {} charts", self.songs.len());
         self.print_selection();
-    }
-
-    pub(crate) fn open_tables(&mut self) {
-        self.tables_sel = 0;
-        self.text_input = None;
-        self.stage = Stage::Tables;
-    }
-
-    pub(crate) fn open_folders(&mut self) {
-        self.folders_sel = 0;
-        self.stage = Stage::Folders;
-    }
-
-    pub(crate) fn folders_row_count(&self) -> usize {
-        self.folders.len() + 1 // the folders + a trailing "+ ADD FOLDER" row
-    }
-
-    /// Pick a folder and add it to the library list (deduped, persisted). The merged rescan happens
-    /// when the user leaves the Folders screen, so several folders can be added in one visit.
-    pub(crate) fn add_folder_dialog(&mut self) {
-        if let Some(dir) = rfd::FileDialog::new().set_title("Add song folder").pick_folder() {
-            let path = dir.to_string_lossy().to_string();
-            if !self.folders.iter().any(|f| f == &path) {
-                self.folders.push(path);
-                FolderList { folders: self.folders.clone() }.save(&self.folders_path);
-            }
-        }
-    }
-
-    pub(crate) fn remove_folder(&mut self, idx: usize) {
-        if idx < self.folders.len() {
-            self.folders.remove(idx);
-            FolderList { folders: self.folders.clone() }.save(&self.folders_path);
-            self.folders_sel = self.folders_sel.min(self.folders_row_count().saturating_sub(1));
-        }
-    }
-
-    /// Rescan every library folder off-thread and merge into one song list (then re-match tables),
-    /// landing back on Select. Used after the folder list changes.
-    pub(crate) fn rescan_all_folders(&mut self) {
-        let dirs = self.folders.clone();
-        let sources = self.table_sources.clone();
-        self.scan_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let count = self.scan_count.clone();
-        let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let songs = scan_folders(&dirs, &count);
-            let (names, levels) = fetch_and_match(&sources, &songs);
-            let _ = tx.send(ScanOutcome { songs, names, levels });
-        });
-        self.scan_rx = Some(rx);
-        self.pending = Some(Loading::Scan);
-        self.loading_drawn = false;
-        self.stage = Stage::Loading;
-    }
-
-    pub(crate) fn folders_input(&mut self, code: KeyCode) {
-        let n = self.folders_row_count();
-        let add_row = self.folders.len();
-        match code {
-            // Re-merge the (possibly changed) library on the way out.
-            KeyCode::Escape => self.rescan_all_folders(),
-            KeyCode::ArrowUp => self.folders_sel = self.folders_sel.saturating_sub(1),
-            KeyCode::ArrowDown => self.folders_sel = (self.folders_sel + 1).min(n.saturating_sub(1)),
-            KeyCode::KeyD | KeyCode::Delete => {
-                if self.folders_sel < self.folders.len() {
-                    self.remove_folder(self.folders_sel);
-                }
-            }
-            KeyCode::Enter | KeyCode::NumpadEnter => {
-                if self.folders_sel == add_row {
-                    self.add_folder_dialog();
-                }
-            }
-            _ => {}
-        }
-    }
-
-    /// Rows in the table-manager: each source, then the two add actions.
-    pub(crate) fn tables_row_count(&self) -> usize {
-        self.table_sources.len() + 2
-    }
-
-    pub(crate) fn add_table_source(&mut self, src: TableSource) {
-        let (name, levels) = load_and_match(&src, &self.songs);
-        self.table_sources.push(src);
-        self.table_names.push(name);
-        self.table_levels.push(levels);
-        TableList { tables: self.table_sources.clone() }.save(&self.tables_path);
-    }
-
-    pub(crate) fn add_table_file(&mut self) {
-        if let Some(path) = rfd::FileDialog::new().set_title("Select table json").add_filter("json", &["json"]).pick_file() {
-            let location = path.to_string_lossy().to_string();
-            if self.table_sources.iter().any(|t| t.location == location) {
-                eprintln!("table already added: {location}");
-                return;
-            }
-            let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("table").to_string();
-            self.add_table_source(TableSource { name, location });
-        }
-    }
-
-    pub(crate) fn remove_table_source(&mut self, idx: usize) {
-        if idx < self.table_sources.len() {
-            self.table_sources.remove(idx);
-            if idx < self.table_names.len() {
-                self.table_names.remove(idx);
-            }
-            if idx < self.table_levels.len() {
-                self.table_levels.remove(idx);
-            }
-            TableList { tables: self.table_sources.clone() }.save(&self.tables_path);
-            self.tables_sel = self.tables_sel.min((self.table_sources.len() + 2).saturating_sub(1));
-        }
-    }
-
-    /// Table-manager input. In URL-text mode, type the URL (Enter adds, Esc cancels); otherwise
-    /// navigate, add (URL/file), remove (D), or leave (Esc — rebuilds the browse list).
-    pub(crate) fn tables_input(&mut self, event_loop: &ActiveEventLoop, code: KeyCode, typed: Option<&str>) {
-        if self.text_input.is_some() {
-            match code {
-                KeyCode::Enter | KeyCode::NumpadEnter => {
-                    let url = self.text_input.take().unwrap_or_default().trim().to_string();
-                    if !url.is_empty() {
-                        if self.table_sources.iter().any(|t| t.location == url) {
-                            eprintln!("table already added: {url}");
-                        } else {
-                            self.add_table_source(TableSource { name: String::new(), location: url });
-                        }
-                    }
-                }
-                KeyCode::Escape => self.text_input = None,
-                KeyCode::Backspace => {
-                    if let Some(b) = self.text_input.as_mut() {
-                        b.pop();
-                    }
-                }
-                _ => {
-                    if let (Some(b), Some(t)) = (self.text_input.as_mut(), typed) {
-                        b.extend(t.chars().filter(|c| !c.is_control()));
-                    }
-                }
-            }
-            return;
-        }
-        let n = self.tables_row_count();
-        let add_url = self.table_sources.len();
-        let add_file = self.table_sources.len() + 1;
-        match code {
-            KeyCode::Escape => {
-                self.select_view = SelectView::Root;
-                self.sel = 0;
-                self.rebuild_select_items();
-                self.stage = Stage::Select;
-                let _ = event_loop;
-            }
-            KeyCode::ArrowUp => self.tables_sel = self.tables_sel.saturating_sub(1),
-            KeyCode::ArrowDown => self.tables_sel = (self.tables_sel + 1).min(n.saturating_sub(1)),
-            KeyCode::KeyD | KeyCode::Delete => {
-                if self.tables_sel < self.table_sources.len() {
-                    self.remove_table_source(self.tables_sel);
-                }
-            }
-            KeyCode::Enter | KeyCode::NumpadEnter => {
-                if self.tables_sel == add_url {
-                    self.text_input = Some(String::new());
-                } else if self.tables_sel == add_file {
-                    self.add_table_file();
-                }
-            }
-            _ => {}
-        }
     }
 
     /// Esc in the select screen: one level up, or — at the root — arm the quit confirmation and only
@@ -883,7 +734,12 @@ impl App {
 
     /// Queue a loading task and switch to the loading screen; the actual (blocking) work happens
     /// one frame later in `finish_loading`, so a LOADING frame is presented first.
+    ///
+    /// Any replay download still in flight is abandoned here: its result would otherwise land
+    /// mid-load and swap the chart out from under the run that is starting.
     pub(crate) fn begin_loading(&mut self, task: Loading) {
+        self.replay_download_rx = None;
+        self.replay_download_target = None;
         self.pending = Some(task);
         self.loading_drawn = false;
         self.stage = Stage::Loading;
@@ -898,7 +754,11 @@ impl App {
                 Some(entry) => {
                     self.chart_path = entry.path.to_string_lossy().to_string();
                     self.result = None;
-                    if self.load() { self.after_load(); } else { self.stage = Stage::Select; }
+                    if self.load() {
+                        self.after_load();
+                    } else {
+                        self.stage = Stage::Select;
+                    }
                 }
                 None => self.stage = Stage::Select,
             },
@@ -933,7 +793,9 @@ impl App {
     }
 
     pub(crate) fn setting_line(&self, i: usize) -> (&'static str, String) {
-        let on = |b: bool| if b { "ON".to_string() } else { "OFF".to_string() };
+        let on = |b: bool| {
+            if b { "ON".to_string() } else { "OFF".to_string() }
+        };
         match i {
             0 => ("AUTOPLAY", on(self.autoplay)),
             1 => ("HI-SPEED", format!("{:.2}", self.config.hispeed)),
@@ -957,9 +819,7 @@ impl App {
             19 => ("SCORE GRAPH", on(self.config.score_graph)),
             20 => ("REPLAY ANALYSIS", on(self.config.replay_analysis)),
             21 => ("PREVIEW", on(self.config.preview)),
-            22 => ("SERVER URL", self.config.server_url.clone().unwrap_or_else(|| "(none)".to_string())),
-            23 => ("PLAYER ID", self.config.player_id.clone()),
-            _ => ("", String::new()),
+            _ => self.network_setting_line(i).unwrap_or(("", String::new())),
         }
     }
 
@@ -1010,5 +870,4 @@ impl App {
             _ => {}
         }
     }
-
 }

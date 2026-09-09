@@ -29,7 +29,10 @@ impl App {
                     levels
                         .iter()
                         .enumerate()
-                        .map(|(li, (level, songs))| SelectItem::Folder { label: format!("LV {level} ({})", songs.len()), target: SelectView::TableLevel(ti, li) })
+                        .map(|(li, (level, songs))| SelectItem::Folder {
+                            label: format!("LV {level} ({})", songs.len()),
+                            target: SelectView::TableLevel(ti, li),
+                        })
                         .collect()
                 })
                 .unwrap_or_default(),
@@ -130,6 +133,12 @@ impl App {
             songs_folder: self.config.songs_folder.clone(),
             server_url: self.config.server_url.clone(),
             player_id: self.config.player_id.clone(),
+            ir_token: self.session.token().map(str::to_string),
+            ir_login_id: self.session.login_id().map(str::to_string),
+            ir_email: self.config.ir_email.clone(),
+            sync_settings: self.config.sync_settings,
+            auto_upload_replay: self.config.auto_upload_replay,
+            rivals: self.config.rivals.clone(),
         }
     }
 
@@ -163,34 +172,22 @@ impl App {
         self.save_settings();
     }
 
-    /// Open the text editor for a NETWORK row (SERVER URL / PLAYER ID), pre-filled with the current
-    /// value so it can be edited in place. Commit/cancel is handled by `settings_text_input`.
-    pub(crate) fn begin_net_edit(&mut self, focused: usize) {
-        let cur = if focused == SETTING_PLAYER_ID {
-            self.config.player_id.clone()
-        } else {
-            self.config.server_url.clone().unwrap_or_default()
-        };
-        self.text_input = Some(cur);
-    }
-
-    /// Edit the active NETWORK text field. Enter commits (persists settings; empty SERVER URL =
-    /// offline, empty PLAYER ID = `guest`; rebuilds the score server on URL change), Esc cancels.
-    /// The focused settings row decides which field is written.
+    /// Edit the active NETWORK text field. Enter commits through `commit_network_edit`, Esc
+    /// cancels. Everything but a secret row is trimmed; a password keeps the exact characters
+    /// typed. The row the editor was **opened on** decides which field is written, not the row
+    /// that happens to be focused at commit time.
     pub(crate) fn settings_text_input(&mut self, code: KeyCode, typed: Option<&str>) {
         match code {
             KeyCode::Enter | KeyCode::NumpadEnter => {
-                let value = self.text_input.take().unwrap_or_default().trim().to_string();
-                let focused = SETTING_TABS[self.set_tab].1.get(self.set_sel).copied().unwrap_or(0);
-                if focused == SETTING_PLAYER_ID {
-                    self.config.player_id = if value.is_empty() { "guest".to_string() } else { value };
-                } else {
-                    self.config.server_url = if value.is_empty() { None } else { Some(value) };
-                    self.rebuild_server();
+                let raw = self.text_input.take().unwrap_or_default();
+                let value = if self.text_secret { raw } else { raw.trim().to_string() };
+                let edited = self.text_edit_row.take();
+                self.text_secret = false;
+                if let Some(row) = edited {
+                    self.commit_network_edit(row, value);
                 }
-                self.save_settings();
             }
-            KeyCode::Escape => self.text_input = None,
+            KeyCode::Escape => self.cancel_text_edit(),
             KeyCode::Backspace => {
                 if let Some(b) = self.text_input.as_mut() {
                     b.pop();
@@ -202,15 +199,6 @@ impl App {
                 }
             }
         }
-    }
-
-    /// Rebuild the score server after the NETWORK server URL changes, so score submission and the
-    /// connection indicator use the new endpoint immediately (the previous probe thread, if any,
-    /// keeps polling the old endpoint into its now-orphaned flag — harmless on a rare manual change).
-    pub(crate) fn rebuild_server(&mut self) {
-        let (server, connected) = build_server(&self.config);
-        self.server = server;
-        self.server_connected = connected;
     }
 
     pub(crate) fn offset_us(&self) -> i64 {
@@ -260,7 +248,9 @@ impl App {
             return;
         }
         let target = target_us.max(0);
-        let Some(model) = self.player.as_ref().map(|p| p.model().clone()) else { return };
+        let Some(model) = self.player.as_ref().map(|p| p.model().clone()) else {
+            return;
+        };
         let off = self.offset_us();
         let mut p = Player::new(model, false);
         p.set_gauge(self.config.gauge);
@@ -347,9 +337,7 @@ impl App {
     /// shadow the lane). Rebinding a row to its own current key is not a collision.
     pub(crate) fn binding_collides(&self, mode: Mode, row: &KcRow, code: KeyCode) -> bool {
         match row {
-            KcRow::Lane(lane) => {
-                self.control_for(code).is_some() || self.keyconfig.lane_keys(mode).iter().any(|(k, l)| *k == code && l != lane)
-            }
+            KcRow::Lane(lane) => self.control_for(code).is_some() || self.keyconfig.lane_keys(mode).iter().any(|(k, l)| *k == code && l != lane),
             KcRow::Control(action) => {
                 self.keyconfig.lane_keys(mode).iter().any(|(k, _)| *k == code)
                     || ControlAction::ALL.into_iter().any(|a| a != *action && self.keyconfig.control_key(a) == Some(code))
@@ -400,5 +388,4 @@ impl App {
             _ => {}
         }
     }
-
 }

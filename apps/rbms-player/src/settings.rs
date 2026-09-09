@@ -36,6 +36,19 @@ pub struct PlaySettings {
     pub server_url: Option<String>,
     /// Player id submitted to the score server (NETWORK tab / `--player`). Defaults to `guest`.
     pub player_id: String,
+    /// Bearer token from the last successful IR login/register. `None` = signed out (guest).
+    /// Cleared by LOGOUT. The password that produced it is never stored.
+    pub ir_token: Option<String>,
+    /// Login id the stored token belongs to, shown in the ACCOUNT row.
+    pub ir_login_id: Option<String>,
+    /// Address kept only to prefill the REGISTER form; display-only, never used to authenticate.
+    pub ir_email: Option<String>,
+    /// Mirror the local settings + key config to the account with the SYNC SETTINGS actions.
+    pub sync_settings: bool,
+    /// Upload the saved replay of a ranked submission right after the score lands.
+    pub auto_upload_replay: bool,
+    /// Cached rival player ids, refreshed from the server on login and after a rival edit.
+    pub rivals: Vec<String>,
 }
 
 impl Default for PlaySettings {
@@ -64,7 +77,13 @@ impl Default for PlaySettings {
             preview: true,
             songs_folder: None,
             server_url: None,
-            player_id: "guest".into(),
+            player_id: rbms_ir::GUEST_PLAYER_ID.into(),
+            ir_token: None,
+            ir_login_id: None,
+            ir_email: None,
+            sync_settings: false,
+            auto_upload_replay: true,
+            rivals: Vec::new(),
         }
     }
 }
@@ -117,7 +136,13 @@ mod tests {
         assert_eq!(s.songs_folder, None);
         assert_eq!(s.font_path, None);
         assert_eq!(s.server_url, None);
-        assert_eq!(s.player_id, "guest");
+        assert_eq!(s.player_id, rbms_ir::GUEST_PLAYER_ID, "an unconfigured client submits under the only id the server accepts without a token");
+        assert_eq!(s.ir_token, None);
+        assert_eq!(s.ir_login_id, None);
+        assert_eq!(s.ir_email, None);
+        assert!(!s.sync_settings, "settings sync is opt-in");
+        assert!(s.auto_upload_replay, "replay upload rides along with a ranked submit by default");
+        assert!(s.rivals.is_empty());
     }
 
     #[test]
@@ -147,6 +172,12 @@ mod tests {
         s.songs_folder = Some("/songs".into());
         s.server_url = Some("https://ir.example/api".into());
         s.player_id = "dj".into();
+        s.ir_token = Some("tok-123".into());
+        s.ir_login_id = Some("dj".into());
+        s.ir_email = Some("dj@example.test".into());
+        s.sync_settings = true;
+        s.auto_upload_replay = false;
+        s.rivals = vec!["rivalone".into(), "rivaltwo".into()];
         let txt = ron::ser::to_string_pretty(&s, ron::ser::PrettyConfig::default()).unwrap();
         let back: PlaySettings = ron::from_str(&txt).unwrap();
         assert!((back.hispeed - 3.25).abs() < 1e-9);
@@ -170,6 +201,12 @@ mod tests {
         assert_eq!(back.songs_folder.as_deref(), Some("/songs"));
         assert_eq!(back.server_url.as_deref(), Some("https://ir.example/api"));
         assert_eq!(back.player_id, "dj");
+        assert_eq!(back.ir_token.as_deref(), Some("tok-123"));
+        assert_eq!(back.ir_login_id.as_deref(), Some("dj"));
+        assert_eq!(back.ir_email.as_deref(), Some("dj@example.test"));
+        assert!(back.sync_settings);
+        assert!(!back.auto_upload_replay);
+        assert_eq!(back.rivals, vec!["rivalone".to_string(), "rivaltwo".to_string()]);
     }
 
     #[test]
@@ -182,6 +219,9 @@ mod tests {
         assert_eq!(s.random, "OFF", "missing field defaulted");
         assert!(s.preview, "field added later defaults to true");
         assert_eq!(s.judge_rate, 100);
+        assert_eq!(s.ir_token, None, "IR fields added later default without breaking old files");
+        assert!(s.auto_upload_replay);
+        assert!(s.rivals.is_empty());
     }
 
     #[test]
@@ -191,6 +231,8 @@ mod tests {
         assert_eq!(s.gauge, d.gauge);
         assert_eq!(s.judge_rate, d.judge_rate);
         assert_eq!(s.preview, d.preview);
+        assert_eq!(s.sync_settings, d.sync_settings);
+        assert_eq!(s.auto_upload_replay, d.auto_upload_replay);
     }
 
     #[test]
