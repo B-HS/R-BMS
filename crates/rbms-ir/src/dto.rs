@@ -183,6 +183,11 @@ pub struct ScoreSubmission {
     pub extra: HashMap<String, serde_json::Value>,
 }
 
+/// One leaderboard row. The first block is the basic IR ranking payload; the trailing fields are
+/// the superset extras a client needs to render beatoraja-style ranking panels (`RankingData`
+/// lamp histogram, per-row judge detail, option/LN-type badges). They mirror
+/// beatoraja `IRScoreData`'s `lntype` / `notes` / `option` / `epg..lms` and all carry a serde
+/// default, so a server that only speaks the basic payload still decodes unchanged.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScoreRecord {
     pub player: PlayerId,
@@ -193,6 +198,18 @@ pub struct ScoreRecord {
     pub minbp: u32,
     pub rank: Option<u32>,
     pub played_at: i64,
+    /// LN handling the run used (beatoraja `IRScoreData.lntype`: 0 = LN, 1 = CN, 2 = HCN).
+    #[serde(default)]
+    pub lntype: i32,
+    /// Raw beatoraja option bitmask the run used (`IRScoreData.option`); 0 = unknown/none.
+    #[serde(default)]
+    pub option: i64,
+    /// Chart note count the row was scored against (beatoraja `IRScoreData.notes`); 0 = unknown.
+    #[serde(default)]
+    pub total_notes: u32,
+    /// Full judge tally for the row when the server exposes it; `None` = ranking-only payload.
+    #[serde(default)]
+    pub judge: Option<JudgeBreakdown>,
     #[serde(default)]
     pub extra: HashMap<String, serde_json::Value>,
 }
@@ -579,6 +596,10 @@ mod tests {
             minbp: 0,
             rank: Some(1),
             played_at: 42,
+            lntype: 0,
+            option: 0,
+            total_notes: 0,
+            judge: None,
             extra,
         };
         let back: ScoreRecord = serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
@@ -929,10 +950,70 @@ mod tests {
             minbp: 0,
             rank: None,
             played_at: 0,
+            lntype: 0,
+            option: 0,
+            total_notes: 0,
+            judge: None,
             extra: extra.clone(),
         };
         let back: ScoreRecord = serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
         assert_eq!(back.extra.get("nested").unwrap(), &json!({"x": [1, 2, 3], "y": null}));
         assert_eq!(back.extra.get("flag").unwrap(), &json!(true));
+    }
+
+    #[test]
+    fn score_record_basic_payload_defaults_superset_fields_to_zero_and_none() {
+        let j = json!({
+            "player": {"id": "p"}, "player_name": "Bob", "clear": "Easy",
+            "ex_score": 10, "max_combo": 5, "minbp": 2, "rank": null, "played_at": 7
+        });
+        let r: ScoreRecord = serde_json::from_value(j).unwrap();
+        assert_eq!(r.lntype, 0);
+        assert_eq!(r.option, 0);
+        assert_eq!(r.total_notes, 0);
+        assert!(r.judge.is_none());
+    }
+
+    #[test]
+    fn score_record_superset_fields_round_trip_hcn_and_judge_split() {
+        let mut r = ScoreRecord {
+            player: PlayerId { id: "p".into() },
+            player_name: "Alice".into(),
+            clear: ClearLamp::Hard,
+            ex_score: 1488,
+            max_combo: 540,
+            minbp: 7,
+            rank: Some(3),
+            played_at: 42,
+            lntype: 2,
+            option: 1_048_576,
+            total_notes: 812,
+            judge: Some(JudgeBreakdown { pgreat: 712, epg: 400, lpg: 312, great: 64, avgjudge: -1500, ..Default::default() }),
+            extra: HashMap::new(),
+        };
+        r.extra.insert("dan".into(), json!("kaiden"));
+        let back: ScoreRecord = serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
+        assert_eq!(back.lntype, 2, "HCN survives the round trip");
+        assert_eq!(back.option, 1_048_576);
+        assert_eq!(back.total_notes, 812);
+        let judge = back.judge.expect("judge preserved");
+        assert_eq!(judge.epg + judge.lpg, 712);
+        assert_eq!(judge.avgjudge, -1500);
+    }
+
+    #[test]
+    fn score_record_judge_decodes_from_partial_object() {
+        let j = json!({
+            "player": {"id": "p"}, "player_name": "X", "clear": "Normal",
+            "ex_score": 1, "max_combo": 1, "minbp": 0, "rank": null, "played_at": 0,
+            "lntype": 1,
+            "judge": {"pgreat": 3, "great": 2, "good": 0, "bad": 0, "poor": 0, "miss": 0, "fast": 0, "slow": 0, "combobreak": 0}
+        });
+        let r: ScoreRecord = serde_json::from_value(j).unwrap();
+        assert_eq!(r.lntype, 1);
+        let judge = r.judge.expect("judge present");
+        assert_eq!(judge.pgreat, 3);
+        assert_eq!(judge.great, 2);
+        assert_eq!(judge.epg, 0, "missing early/late split defaults to 0");
     }
 }

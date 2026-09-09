@@ -3,6 +3,7 @@ use std::fmt;
 pub mod dto;
 pub mod http;
 pub mod null;
+pub mod worker;
 
 pub use dto::*;
 pub use http::HttpScoreServer;
