@@ -1,0 +1,6 @@
+(
+    hispeed: 7.5,
+    gauge: "EASY",
+    judge_rate: 120,
+    rivals: ["friend"],
+)

@@ -1,0 +1,7 @@
+(
+    schema_version: 99,
+    play: (
+        hispeed: 6.0,
+    ),
+    invented_in_the_future: true,
+)

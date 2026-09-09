@@ -1,0 +1,12 @@
+(
+    tables: [
+        (
+            name: "Insane",
+            location: "https://example.com/insane.json",
+        ),
+        (
+            name: "",
+            location: "/local/table.json",
+        ),
+    ],
+)

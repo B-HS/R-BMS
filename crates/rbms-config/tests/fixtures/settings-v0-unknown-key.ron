@@ -1,0 +1,6 @@
+(
+    hispeed: 4.5,
+    gauge: "exhard",
+    retired_in_an_older_build: 3,
+    invented_by_a_newer_build: "who knows",
+)
