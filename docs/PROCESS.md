@@ -75,25 +75,14 @@
 **Phase 3 — 클라 마지막 기능**
 - [x] NETWORK 설정 탭 — SERVER URL/PLAYER ID 행(22/23), text_input 인플레이스 편집(Enter 커밋·Esc 취소·버퍼 표시), `PlaySettings` 영속(라운드트립 테스트), `build_server` 추출로 ScoreServer 재구성. 빈 URL=오프라인·빈 ID=guest.
 
-**Phase 4 — 백엔드 MVP + 클라 연동 (별 MIT 레포, 서버 임계경로)**
-- [ ] IR 계약 동결(게이트): /api 프리픽스·settings 경로·필드명 reconcile → `docs/acknowledge`
-- [ ] 백엔드 부트스트랩 + compose 스켈레톤 (P0/M0) — MySQL·better-auth/Drizzle 소유권 결정 필요
-- [ ] 백엔드 M1: health+auth+chart upsert+score submit+ranking/best (네이티브 RAW JSON)
-- [ ] 백엔드 M1.5: ranked 정책 + build allowlist + audit
-- [ ] 클라 `SubmitResponse` DTO 확장 (ranked/flags/is_new_best/score_id)
-- [ ] 클라 M2a: /api 정합·로그인 UI/토큰(token=None 제거)·랭킹 패널 → MVP 루프 완성
-
-**Phase 5 — 서버 P1 + FE 토대 (병렬)**
-- [ ] FE 별 MIT 레포 스캐폴드 (Next.js App Router + FSD + TanStack Query v5 + shadcn)
-- [ ] FE entities 데이터 레이어 + api-spec envelope 타입 클라 + QUERY_KEY
-- [ ] FE mock/stub 백엔드(MSW, envelope)
-- [ ] 백엔드 M2: replays(µs)+settings sync+rivals+players/scores
-- [ ] 클라 M2-client: 동기화 토글·리플레이 업/다운로드·로그인 영속·rival UI (ir-api.md 갱신)
+**Phase 4~6 — 백엔드 + 웹 FE (2026-09-09 Phase W 로 대체·완료, 별 레포 대신 이 레포 `web/`)**
+- [x] IR 계약 동결(/api 프리픽스·settings 경로·필드명) → decisions W7
+- [x] 백엔드 M1·M1.5·M2·M3 전부 `web/` Next.js 단독 서버로 구현(38 라우트: health/version/auth/scores/charts/players/replays/settings/rivals/courses/tables/admin/fe) + ranked 정책·build allowlist·audit + Vercel 프로덕션 배포
+- [x] 웹 FE: 검색·차트·리더보드·플레이어·인증(로그인/가입)·홈·tables·courses·리플레이 뷰어·settings(토큰/동기화/라이벌)·admin/builds
+- [ ] 클라 `SubmitResponse` DTO 확장 — 현 `rbms-ir` DTO 는 accepted/rank/previous_best/message 뿐, 서버가 주는 ranked/flags/is_new_best/score_id 미수신
+- [ ] 클라 로그인 UI/토큰 — `apps/rbms-player/src/main.rs` `build_server` 가 `HttpScoreServer::try_new(url, None)` 으로 token=None → 플레이어 제출은 전부 guest(unranked). NETWORK 탭에 로그인(register/login → 토큰 저장) 필요. `rbms-ir` 는 Bearer 지원 완료
+- [ ] 클라 랭킹 패널·리플레이 업/다운로드·설정 동기화 토글·rival UI — 서버 엔드포인트는 전부 준비됨, 클라 호출부 없음
 - [ ] (선택) 설정 화면 마우스 스테퍼 UX
-
-**Phase 6 — 웹 FE 읽기 기능 + FE 엔드포인트**
-- [ ] 백엔드 M3: courses+tables+FE 쿼리 엔드포인트+envelope/CORS (FE-전용 4 엔드포인트 응답 스키마 먼저)
-- [ ] FE 검색 → 리더보드 → 플레이어 페이지 → better-auth 세션/OAuth → 홈/대시보드
 
 **Phase 7 — 롱테일 / 선택 폴리시 & 하드닝**
 - [ ] HCN 연속 게이지(L, 정확성·HCN 희소) · (선택) 스크래치 BSS · (선택) 게이지 5K/PMS
@@ -102,7 +91,7 @@
 - [ ] (선택) macOS 서명/공증·Windows Authenticode · (선택) .app/.dmg+무인자 picker
 - [ ] (선택) 코스메틱: 리사이즈 리플로우·BGA 비디오(mpg)·글리프 아틀라스(P3a)·웹폰트(P4) — 판정/점수 영향 0
 
-> 결정 대기(요약): CN/HCN 테스트 코퍼스 범위 · IR 계약 3종+envelope 정책 · 백엔드 MySQL/인증 소유권 · prod 보호+첫 버전 · 서명 비용 · 리플레이 뷰어 전략. 하드 블로커(외부 리소스/권한)는 기본값 문서화 후 우회·계속.
+> 결정 대기(요약): CN/HCN 테스트 코퍼스 범위 · prod 보호+첫 버전 · 서명 비용. (IR 계약·백엔드 소유권·리플레이 뷰어는 Phase W 로 해소.) 다음 착수 후보: ① 클라 로그인/토큰 + DTO 확장(MVP 루프 완성) ② 고도화 계획 Phase B~G(`docs/plan/2026-09-09-enhancement-plan.md` §2) ③ prod 브랜치·첫 릴리스.
 
 ---
 
