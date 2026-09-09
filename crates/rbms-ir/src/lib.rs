@@ -1,6 +1,10 @@
+#![forbid(unsafe_code)]
+
 pub mod dto;
 pub mod error;
 pub mod http;
+#[cfg(feature = "mapping")]
+pub mod mapping;
 pub mod null;
 pub mod worker;
 
@@ -9,7 +13,13 @@ mod contract_tests;
 #[cfg(test)]
 mod mock_http;
 
-pub use dto::*;
+pub use dto::{
+    AuthRequest, AuthResponse, ChartId, ChartRankingQuery, ChartReplayQuery, ClearLamp, CourseSubmission, DEFAULT_PAGE, DEFAULT_PAGE_LIMIT,
+    FALLBACK_GAUGE_VALUE, GaugeType, JudgeBreakdown, MAX_PLAYER_SCORES_LIMIT, MAX_RANKING_LIMIT, MAX_REPLAY_LIST_LIMIT, MIN_PLAYED_AT_MS, PlayOptions,
+    PlayerId, PlayerProfile, PlayerScoresQuery, RandomOption, ReplayData, ReplayEvent, ReplayMeta, ReplayUploadResponse, RivalPutRequest, ScoreFlag,
+    ScoreRecord, ScoreSubmission, ServerCapabilities, ServerInfo, SettingsBlob, SettingsConflict, SettingsPutRequest, SettingsPutResponse, SettingsPutResult,
+    SubmitResponse, VersionInfo,
+};
 pub use error::{ErrorBody, ErrorEnvelope, IrError};
 pub use http::HttpScoreServer;
 pub use null::NullScoreServer;
