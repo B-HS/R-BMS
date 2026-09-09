@@ -7,7 +7,7 @@
 - 검증: 5a→5K, 7a→7K, 14keys→14K(1222노트), .pms→POPN_9K.
 
 ## 2. 게이지/클리어 (rbms-judge::gauge)
-- beatoraja GrooveGauge 포팅: 6종(ASSIST_EASY/EASY/NORMAL/HARD/EXHARD/HAZARD), init/border/min/max, TOTAL·LIMIT_INCREMENT 모디파이어, HARD guts. 델타[6]=판정 인덱스. `clear_lamp`(Failed/Easy/Normal/Hard/ExHard/FullCombo/Perfect/Max).
+- 레퍼런스 구현 GrooveGauge 포팅: 6종(ASSIST_EASY/EASY/NORMAL/HARD/EXHARD/HAZARD), init/border/min/max, TOTAL·LIMIT_INCREMENT 모디파이어, HARD guts. 델타[6]=판정 인덱스. `clear_lamp`(Failed/Easy/Normal/Hard/ExHard/FullCombo/Perfect/Max).
 - JudgeEngine에 gauge 통합(apply/miss마다 update). 검증: autoplay→100% NORMAL→Max, hard 미스 드레인, 미클리어 Failed.
 
 ## 3. LN 풀 판정 (rbms-judge::matcher)

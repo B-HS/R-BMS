@@ -1,6 +1,6 @@
 # IIDX(최신작 기준) 플레이/UI 기능 카탈로그 vs rbms 현 상태
 
-조사일 2026-09-09. 코드 기준: /Users/gkn/R-BMS (dev, c6f0885), /Users/gkn/beatoraja.
+조사일 2026-09-09. 코드 기준: /Users/gkn/R-BMS (dev, c6f0885), <reference>/.
 읽기 전용 조사. 모든 상태 판정은 코드 근거(파일:라인)로만 기재했고, 코드로 확인 못 한 것은 "미확인"으로 표기했다.
 
 ## 0. 웹 조사 결과와 한계
@@ -14,7 +14,7 @@ https://en.wikipedia.org/wiki/Beatmania_IIDX). 판정 표시 세분화·스킨 �
 
 ## 1. 플레이 옵션 — 노트 배치(RANDOM 계열)
 
-| IIDX 항목 | rbms 상태 | rbms 근거 | beatoraja 참조 |
+| IIDX 항목 | rbms 상태 | rbms 근거 | 레퍼런스 구현 참조 |
 |---|---|---|---|
 | OFF | 구현 | crates/rbms-chart/src/shuffle.rs:7,31 | pattern/PatternModifier.java |
 | MIRROR | 구현 | shuffle.rs:8,115 | LaneShuffleModifier.java:112 LaneMirrorShuffleModifier |
@@ -23,8 +23,8 @@ https://en.wikipedia.org/wiki/Beatmania_IIDX). 판정 표시 세분화·스킨 �
 | S-RANDOM | 구현(행 단위) | shuffle.rs:10,141 apply_srandom | pattern/NoteShuffleModifier.java |
 | H-RANDOM | 구현(125ms anti-jack) | shuffle.rs:13,58-60,142 | NoteShuffleModifier.java |
 | ALL-SCRATCH | 구현(40ms 스크래치 window) | shuffle.rs:14,62-65,143 | NoteShuffleModifier.java |
-| ROTATE(=beatoraja 고유) | 구현 | shuffle.rs:12,116 | LaneRotateShuffleModifier |
-| **FLIP (DP 좌우 교체)** | **미구현** — 코드 주석이 명시적으로 미구현이라 적음 | shuffle.rs:95-97 "that crossing is a separate FLIP option in beatoraja, not implemented here" | LaneShuffleModifier.java:168 PlayerFlipModifier |
+| ROTATE(=레퍼런스 구현 고유) | 구현 | shuffle.rs:12,116 | LaneRotateShuffleModifier |
+| **FLIP (DP 좌우 교체)** | **미구현** — 코드 주석이 명시적으로 미구현이라 적음 | shuffle.rs:95-97 "that crossing is a separate FLIP option in 레퍼런스 구현, not implemented here" | LaneShuffleModifier.java:168 PlayerFlipModifier |
 | **BATTLE (SP 보면을 DP 양쪽에)** | **미구현** | shuffle.rs 전체에 Battle 없음(grep 0건) | LaneShuffleModifier.java:186 PlayerBattleModifier |
 | **SYNC/SYMMETRY-RANDOM (DP 양측 연동 랜덤)** | **미구현** — 셔플은 항상 side 단위 독립 시드 | shuffle.rs:106-112 (side 별 `Rng::new(seed+side)`) | LaneShuffleModifier.java:206 LaneCrossShuffleModifier, :225 LanePlayableRandomShuffleModifier |
 | SP 옵션을 DP 각 side 에 적용 | 구현(side 별로 독립 적용) | shuffle.rs:89-94 side_key_lanes | — |
@@ -34,7 +34,7 @@ DP 자체(BEAT_10K/14K 모드)는 모델 레벨에 존재한다(crates/rbms-mode
 
 ## 2. ASSIST 옵션
 
-| IIDX 항목 | rbms 상태 | rbms 근거 | beatoraja 참조 |
+| IIDX 항목 | rbms 상태 | rbms 근거 | 레퍼런스 구현 참조 |
 |---|---|---|---|
 | AUTO SCRATCH | 구현 | apps/rbms-player/src/app_select.rs:896 (`SCRATCH AUTO`), settings.rs:19 `scratch_auto` | pattern/AutoplayModifier.java:19 |
 | **LEGACY NOTE (CN/HCN → 일반 노트)** | **미구현** | LongNote 변환 modifier 없음(shuffle.rs 는 lane 재배치만) | pattern/LongNoteModifier.java:25,73 enum Mode |
@@ -93,7 +93,7 @@ DP 자체(BEAT_10K/14K 모드)는 모델 레벨에 존재한다(crates/rbms-mode
 | PACEMAKER 그래프 유형 선택 | 미구현 | 동상 |
 | 스코어 그래프 on/off | 구현 | app_select.rs:907 `SCORE GRAPH` |
 
-beatoraja 는 target 을 이미 완비: play/TargetProperty.java:119-137 (RANK A- ~ MAX-), :167-184 (RIVAL 1~n),
+레퍼런스 구현 는 target 을 이미 완비: play/TargetProperty.java:119-137 (RANK A- ~ MAX-), :167-184 (RIVAL 1~n),
 :69 (RANK_NEXT). rbms 는 이 개념 자체가 설정에 없다.
 
 ## 7. 모드 (EXPERT / DAN / STEP UP / ARENA / PREMIUM FREE)
@@ -104,7 +104,7 @@ beatoraja 는 target 을 이미 완비: play/TargetProperty.java:119-137 (RANK A
 | STEP UP | 미구현 | — |
 | ARENA / BPL BATTLE (온라인 대전) | 미구현 | — |
 | PREMIUM FREE (세션 제한 없음) | 해당 없음(가정용 클라이언트라 항시 프리) | — |
-| 연습 모드(beatoraja PRACTICE) | 미구현 | beatoraja play/PracticeConfiguration.java:23,52,242 |
+| 연습 모드(레퍼런스 구현 PRACTICE) | 미구현 | 레퍼런스 구현 play/PracticeConfiguration.java:23,52,242 |
 
 ## 8. 곡 선택 화면
 
@@ -115,10 +115,10 @@ beatoraja 는 target 을 이미 완비: play/TargetProperty.java:119-137 (RANK A
 | 폴더 탐색 | 구현(루트/난이도표/레벨) | main.rs:523-531 SelectView |
 | 난이도표(커스텀 폴더) | 구현 | main.rs:527-531, apps/rbms-player/src/tables.rs |
 | **즐겨찾기 / 마킹** | **미구현** | 설정·선곡 코드에 favorite 개념 없음(grep 0건) |
-| **난이도 필터(레벨 범위/클리어 상태 필터)** | **미구현** — 정렬만 있고 필터 없음 | main.rs:543-566 (SortMode 뿐) vs beatoraja select/DifficultyFilter.java, select/ModeFilter.java |
+| **난이도 필터(레벨 범위/클리어 상태 필터)** | **미구현** — 정렬만 있고 필터 없음 | main.rs:543-566 (SortMode 뿐) vs 레퍼런스 구현 select/DifficultyFilter.java, select/ModeFilter.java |
 | 노트수·BPM 범위·CN/BSS 표기 | 부분 — stats 셀에 값 노출 | crates/rbms-render/src/select.rs:91 `stats: Vec<StatCell>` (구체 항목은 미확인) |
 | 클리어램프 표시 | 구현(10단계) | select.rs:31 `lamp`, format.rs:139-148 |
-| 밀도 그래프 | 구현(IIDX 에는 없는 beatoraja 계열 기능) | select.rs:37-41 DensityView |
+| 밀도 그래프 | 구현(IIDX 에는 없는 레퍼런스 구현 계열 기능) | select.rs:37-41 DensityView |
 | 미리듣기(#PREVIEW) | 구현 + 토글 | app_select.rs:909 `PREVIEW`, settings.rs:31 |
 | **시작 전 옵션 패널(START 홀드)** | **미구현** — 옵션은 SETTINGS 탭에서만 | main.rs:599-606 SETTING_TABS, 선곡 화면에 옵션 오버레이 없음 |
 
@@ -134,9 +134,9 @@ beatoraja 는 target 을 이미 완비: play/TargetProperty.java:119-137 (RANK A
 | FAST/SLOW | 구현 | result.rs:84-86 |
 | MISS COUNT(BP) | 구현(선곡 상세엔 명시) | select.rs:56 `bp` |
 | **MAX- 표기(만점 대비 델타)** | **미구현** — 밴드는 AAA 가 상한 | result.rs:38 RANK_BANDS 최상단이 "AAA" |
-| **게이지 추이 그래프** | **미구현** | result.rs 에 시계열 그래프 없음 | beatoraja result/SkinGaugeGraphObject.java |
-| **판정 분포 그래프** | **미구현** | §5 참조 | beatoraja select/SkinDistributionGraph.java |
-| **라이벌/타깃 비교** | **미구현** | target 개념 부재(§6) | beatoraja play/TargetProperty.java |
+| **게이지 추이 그래프** | **미구현** | result.rs 에 시계열 그래프 없음 | 레퍼런스 구현 result/SkinGaugeGraphObject.java |
+| **판정 분포 그래프** | **미구현** | §5 참조 | 레퍼런스 구현 select/SkinDistributionGraph.java |
+| **라이벌/타깃 비교** | **미구현** | target 개념 부재(§6) | 레퍼런스 구현 play/TargetProperty.java |
 
 ## 10. 문서 vs 코드
 
@@ -150,4 +150,4 @@ COURSE/DAN/BATTLE/FLIP/PRACTICE 키워드 자체가 없다 — grep 0건). 즉 �
 - 키빔 렌더 유무, select stats 셀의 구체 항목(노트수/BPM/CN·BSS 표기) 세부.
 - rbms-render/src/skin.rs, theme.rs 의 커스터마이즈 범위.
 - apps/rbms-player/src/replay.rs, scores.rs, ir_map.rs 전체.
-- beatoraja select/bar/*, skin/* 상세.
+- 레퍼런스 구현 select/bar/*, skin/* 상세.

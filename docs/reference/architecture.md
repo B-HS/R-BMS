@@ -1,6 +1,6 @@
 ## rbms — Proposed Architecture & First-Milestone Plan
 
-> beatoraja PLAY 코어의 from-scratch Rust 포팅. **스킨 제외**(추후 Rust-native 추상화). 렌더러는 trait 뒤에 숨겨 wgpu/macroquad 교체 가능. 시간 단위 전역 µs(`i64`). 마스터 클럭 = 오디오 디바이스 샘플(stackRef §2).
+> 레퍼런스 구현 PLAY 코어의 from-scratch Rust 포팅. **스킨 제외**(추후 Rust-native 추상화). 렌더러는 trait 뒤에 숨겨 wgpu/macroquad 교체 가능. 시간 단위 전역 µs(`i64`). 마스터 클럭 = 오디오 디바이스 샘플(stackRef §2).
 
 ---
 
@@ -101,7 +101,7 @@ scroll 계산(`rbms-play::scroll`)은 `LaneGeometry`만 받아 백엔드 무관.
 - BMS 디코더: 라인 파싱, `parseInt36`(base-36 대소문자 동일), 헤더 last-wins, RANDOM/IF 단일패스, 채널 split.
 - **해시**: raw 파일 바이트로 MD5(32 lowercase hex)+SHA-256(64) — 디코드 전, 바이트 그대로.
 - bmson: serde_json 구조체 + `resolution`.
-- *검증*: 알려진 차트의 MD5/SHA-256가 beatoraja DB값과 일치(byte-exact). 헤더/노트 수 단위테스트. `parseInt36('A','a')`등 경계 테스트.
+- *검증*: 알려진 차트의 MD5/SHA-256가 레퍼런스 구현 DB값과 일치(byte-exact). 헤더/노트 수 단위테스트. `parseInt36('A','a')`등 경계 테스트.
 
 **M1 — 타이밍 적분 (rbms-chart)**
 - section → 절대 µs (`prev.time_us + prev.stop_us + 240_000_000*(section-prev.section)/bpm`). measure-rate, BPM(03/08), STOP(09), SCROLL(SC) 병합. 채널→레인 매핑. LN 페어링(LNTYPE 1/2, LNOBJ).
@@ -132,4 +132,4 @@ scroll 계산(`rbms-play::scroll`)은 `LaneGeometry`만 받아 백엔드 무관.
 3. **judge는 순수 함수** `judge(note_us, press_us)` — GUI/오디오 의존 0, 테이블 verbatim 포팅.
 4. **렌더러는 trait 뒤에** — scroll 계산은 `LaneGeometry`만 의존, 백엔드 swap 가능.
 5. **RT 콜백 무할당·무락** — 모든 통신 lock-free SPSC, 버퍼 사전할당, 해제는 basedrop.
-6. **byte-exact 호환** — 해시·parseInt36·타이밍 상수(240_000_000)·판정 윈도우는 beatoraja와 1:1, 점수/리플레이 호환 위해.
+6. **byte-exact 호환** — 해시·parseInt36·타이밍 상수(240_000_000)·판정 윈도우는 레퍼런스 구현과 1:1, 점수/리플레이 호환 위해.

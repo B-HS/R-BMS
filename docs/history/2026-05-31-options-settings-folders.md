@@ -15,7 +15,7 @@
 
 ## 적대적 리뷰 — 확정 5결함 (전부 수정)
 1. (HIGH) 선택한 RANDOM이 스코어 제출 시 항상 Off로 보고 → `ir_random(NoteOption)→rbms_ir::RandomOption` 매핑(Rotate→Spiral).
-2. (MED) DP(10K/14K) 셔플이 P1↔P2 교차 → `side_key_lanes`로 사이드별 퍼뮤테이션(beatoraja getKeys 모델). 회귀 테스트.
+2. (MED) DP(10K/14K) 셔플이 P1↔P2 교차 → `side_key_lanes`로 사이드별 퍼뮤테이션(레퍼런스 구현 getKeys 모델). 회귀 테스트.
 3·5. (MED/LOW) 잘못된/누락 `--hispeed`·`--lift`가 저장값을 하드코딩 기본으로 덮고 `--hispeed` 미클램프 → 파싱 성공 시에만 적용 + clamp(0.5~10.0 / 0~0.9).
 4. (LOW) hidden 레이어(채널 3x)가 셔플에 미반영 → `remap_lanes`로 notes와 동일 매핑(현재 잠재적, play가 hidden 미사용).
 

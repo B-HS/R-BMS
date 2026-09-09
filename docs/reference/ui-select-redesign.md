@@ -1,6 +1,6 @@
-# SONG SELECT 전면 재설계 스펙 (beatoraja modern chic 지향)
+# SONG SELECT 전면 재설계 스펙 (레퍼런스 구현 modern chic 지향)
 
-> 1차 타깃: `docs/reference/ui/provided/06-beatoraja-select-target.png`. 전체 UI 스펙은 `ui-design.md`(이 문서는 곡선택만 정밀화).
+> 1차 타깃: `docs/reference/ui/provided/06-reference-select-target.png`. 전체 UI 스펙은 `ui-design.md`(이 문서는 곡선택만 정밀화).
 > 렌더 프리미티브: `clear` / `fill_rect(Rect)` / `draw_text(_centered/_right)` (scale 1.0≈14px) + **단일 BGA 텍스처 1장**(커버 전용). 좌표공간 1280×720 고정.
 
 ## 0. 핵심 결정
@@ -8,7 +8,7 @@
 1. **렌더링을 `rbms-render::render_select`로 추출**한다. `playfield/hud/result`와 동일하게 `pub fn render_select<R: Renderer>(r: &mut R, v: &SelectView) -> Vec<(Rect, SelectHot)>`. 이유: (a) `CpuCanvas`로 헤드리스 PNG 검증 가능, (b) 데이터주도 스킨화 정렬, (c) main.rs 비대화 해소. main.rs는 `SelectView` 조립 + 반환 hot→`Hot` 매핑 + 커버 BGA 텍스처 set만 담당.
 2. **레이아웃은 list-left / detail-right 유지**(ROADMAP "우측 상세"·"현재 골격 유지 가능"). 06의 좌우는 미러지만 목표는 **정보밀도·비주얼 품질**이지 픽셀 미러가 아니다.
 3. **커버 이미지**는 단일 BGA 슬롯 사용: `set_bga(cover_rgba, cover_rect)`는 모든 쿼드 **뒤**에 그려지므로, `render_select`는 커버 영역에 **불투명 패널을 깔지 않고** 테두리+placeholder만 그린다(텍스처가 비쳐 보이게). 커버 없으면 `clear_bga` + "NO IMAGE".
-4. **밀도 그래프**는 beatoraja `SongInformation` 알고리즘을 정밀 포팅(§3).
+4. **밀도 그래프**는 레퍼런스 구현 `SongInformation` 알고리즘을 정밀 포팅(§3).
 5. **`#PREVIEW` 재생은 본 라운드 분리**(select 중 `audio=None` → 엔진 라이프사이클 별도). 파서/데이터는 준비, 재생은 후속. → **갱신(2026-06-03)**: select 전용 `AudioEngine`로 재생 배선·`config.debug` 계측·`samples/preview-demo` 픽스처 완료(가청 확인만 수동 잔여, `docs/bug/2026-06-03-preview-playback.md`).
 
 ## 1. 영역 좌표 (1280×720)
@@ -38,12 +38,12 @@
 
 난이도 색(`difficulty_name` 슬롯): BEGINNER `(80,220,120)` / NORMAL `(90,180,240)` / HYPER `(240,200,70)` / ANOTHER `(240,90,90)` / INSANE `(200,120,230)` / 미지정 `GRAY`.
 
-## 3. 밀도 데이터 (`ChartDetail` 확장 — beatoraja 포팅)
+## 3. 밀도 데이터 (`ChartDetail` 확장 — 레퍼런스 구현 포팅)
 
-beatoraja `SongInformation(BMSModel)` 정밀 포팅. 모델 타임라인에서:
+레퍼런스 구현 `SongInformation(BMSModel)` 정밀 포팅. 모델 타임라인에서:
 
 - `bins = last_time_ms/1000 + 2` 개의 1초 빈. 각 빈 7카테고리 `[s_lnhead,s_lnbody,s_normal,k_lnhead,k_lnbody,k_normal,mine]`.
-  - LN head(스타트): head초 `[s_lnhead/k_lnhead]++`, 그리고 head초..pair초 모든 빈 `[s_lnbody/k_lnbody]++` 후 head초만 body `--`(이중카운트 보정). (beatoraja와 동일 순서)
+  - LN head(스타트): head초 `[s_lnhead/k_lnhead]++`, 그리고 head초..pair초 모든 빈 `[s_lnbody/k_lnbody]++` 후 head초만 body `--`(이중카운트 보정). (레퍼런스 구현과 동일 순서)
   - normal: `[s_normal/k_normal]++`. mine: `[6]++`.
   - `#LNMODE==1` 또는 (LNMODE==0 & LNTYPE==LN)면 LN end는 카운트 제외.
 - **per-sec total** `bin_sum = sum(cat0..5)`(mine 제외) → 히스토그램 막대값.

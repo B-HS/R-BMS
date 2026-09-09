@@ -3,7 +3,7 @@
 - 대상 커밋: `c6f0885` (dev, clean)
 - 조사 시간: 약 15분 (상한 준수)
 - 방법: 코드 통독 + `cargo build --release -p rbms-audio --example decode_probe` 실측 1건
-- **beatoraja 대조 미수행**: 이번 관점(누수/핫패스)은 Rust 소유권·cpal/wgpu 런타임 고유 문제라 Java 원본과 1:1 대응되는 지점이 거의 없어, 시간 상한 안에서 rbms 쪽 코드만 근거로 판정했다. beatoraja 측 인용이 필요한 항목은 아래 "미조사 범위"에 남긴다.
+- **레퍼런스 구현 대조 미수행**: 이번 관점(누수/핫패스)은 Rust 소유권·cpal/wgpu 런타임 고유 문제라 Java 원본과 1:1 대응되는 지점이 거의 없어, 시간 상한 안에서 rbms 쪽 코드만 근거로 판정했다. 레퍼런스 구현 측 인용이 필요한 항목은 아래 "미조사 범위"에 남긴다.
 
 ---
 
@@ -151,4 +151,4 @@ autoplay 폴백 경로(`app_select.rs:474`)는 올바르게 백그라운드로 �
 - `crates/rbms-render/src/cpu.rs` — 헤드리스 CPU 캔버스 경로
 - `crates/rbms-parser`, `rbms-chart` — 스캔 시 파싱 비용(곡당 파싱 시간, `scan_folders` 병렬성)
 - 실제 GUI 실행 기반 프레임타임/RSS 추세, 곡 전환 100회 루프 후 RSS 실측
-- beatoraja Java 원본과의 대조 (본 관점에서는 대응 지점이 희박하나, 키음 뱅크 수명·프리뷰 정책은 `select/`·`play/` 원본과 비교 가치가 있음)
+- 레퍼런스 구현 Java 원본과의 대조 (본 관점에서는 대응 지점이 희박하나, 키음 뱅크 수명·프리뷰 정책은 `select/`·`play/` 원본과 비교 가치가 있음)

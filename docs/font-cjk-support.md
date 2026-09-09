@@ -39,9 +39,9 @@
 2. 현재 5×7 비트맵이 **딱딱함** → 폰트 교체로 더 나은 룩.
 3. **라이선스 상업적 사용 가능**(프로젝트가 MIT → MIT/OFL 폰트·MIT/Apache 크레이트).
 4. **폰트 교체 가능** + 향후 **웹폰트**(URL) 지원.
-5. beatoraja 참고.
+5. 레퍼런스 구현 참고.
 
-## beatoraja 폰트 시스템 (정밀 파악)
+## 레퍼런스 구현 폰트 시스템 (정밀 파악)
 - `Config.systemfontpath`/`messagefontpath`(기본 `font/VL-Gothic-Regular.ttf`, **4MB JP폰트**) — **설정으로 교체 가능**.
 - libGDX **FreeType 런타임 래스터**(`FreeTypeFontGenerator.generateFont`), **표시 문자열 단위 지연 글리프 생성**(`parameter.characters=text`, 텍스트 바뀌면 atlas 재생성).
 - `GlyphLayout`로 정렬/줄바꿈/overflow(shrink·truncate)·그림자.
@@ -55,7 +55,7 @@
 | 모든 언어 | `Shaping::Advanced`(rustybuzz 셰이핑·bidi) + `fontdb` **폰트 폴백/시스템폰트** → 라틴·CJK·한글·태국·아랍·이모지 |
 | 더 나은 룩 | swash AA 래스터·힌팅·커닝 → 딱딱함 해소 |
 | 라이선스 | cosmic-text/fontdb/rustybuzz/swash/ttf-parser 전부 MIT/Apache |
-| 교체 가능 | `FontSystem` + `db_mut().load_font_data(bytes)` / 선호 family 지정 → 설정 `font_path`(=beatoraja systemfontpath) |
+| 교체 가능 | `FontSystem` + `db_mut().load_font_data(bytes)` / 선호 family 지정 → 설정 `font_path`(=레퍼런스 구현 systemfontpath) |
 | 웹폰트(향후) | URL→bytes→`load_font_data(bytes)`(테이블 fetch와 동형). 아키텍처상 자명, 실제 fetch는 후속 |
 
 **통합 = ①-A(알파 사각형)**: `SwashCache::with_pixels(.., |dx,dy,color|…)` 픽셀 콜백을 기존 `Renderer::fill_rect`로 흘림 → **GPU 파이프라인/Renderer trait/CpuCanvas 무변경, 78 호출처 시그니처 유지**. (후속 최적화로 글리프 아틀라스 텍스처화 가능, 호출처 불변.)
@@ -64,7 +64,7 @@
 
 ## 우선순위(단계)
 - **P1 핵심 엔진 교체(기반)**: rbms-render에 cosmic-text 도입, `font.rs` 내부를 알파-사각형 경로로 교체(같은 `draw_text`/`text_width` 시그니처). thread_local `TextEngine`(FontSystem+SwashCache+(text,px)→글리프 캐시), `scale→px` 매핑으로 현 크기감 유지, 시스템 폰트 폴백 on. 번들 Inter. **검증: CpuCanvas로 다국어 문자열 PNG 렌더해 육안 확인(권한 불필요!).**
-- **P2 폰트 교체(설정)**: `PlaySettings.font_path`(+`--font`), 사용자 TTF 로드·선호 family. 설정 UI 항목. beatoraja systemfontpath 대응.
+- **P2 폰트 교체(설정)**: `PlaySettings.font_path`(+`--font`), 사용자 TTF 로드·선호 family. 설정 UI 항목. 레퍼런스 구현 systemfontpath 대응.
 - **P3 폴리시**: 픽셀당 quad→행 run-length 병합으로 quad 절감, (text,px) 레이아웃 캐시(프레임 비용↓), overflow 말줄임(패널 맞춤, cosmic 폭제한 레이아웃), 그림자/아웃라인 옵션.
 - **P4(향후) 웹폰트**: URL fetch→캐시→`load_font_data`. 후속.
 

@@ -1,10 +1,10 @@
-# G-07 커스텀 판정·어시스트 스코어 취급 정책 (beatoraja 소스 확정 → rbms 대응 현황)
+# G-07 커스텀 판정·어시스트 스코어 취급 정책 (레퍼런스 구현 소스 확정 → rbms 대응 현황)
 
-조사 범위: /Users/gkn/beatoraja/src (읽기 전용), /Users/gkn/R-BMS (읽기 전용). 모든 근거는 파일:라인.
+조사 범위: <reference>/src (읽기 전용), /Users/gkn/R-BMS (읽기 전용). 모든 근거는 파일:라인.
 
 ## 0. 핵심 메커니즘 요약
 
-beatoraja 는 **단일 boolean `score`(→ `PlayerResource.updateScore`)** 와 **정수 `assist`(0/1/2)** 두 값으로 전부를 제어한다.
+레퍼런스 구현 는 **단일 boolean `score`(→ `PlayerResource.updateScore`)** 와 **정수 `assist`(0/1/2)** 두 값으로 전부를 제어한다.
 
 - `BMSPlayer.java:50` `private int assist = 0;`, 같은 파일 `score` 플래그
 - 최종 확정: `BMSPlayer.java:361-364`
@@ -139,7 +139,7 @@ IR 송신의 추가 게이트 (`MusicResult.java:81-97`): IR 등록 존재 + `mo
 
 ## 3. (Q3) rbms 대응 현황
 
-| 항목 | beatoraja 규칙 | rbms 현재 동작 | 근거 (rbms) | 판정 |
+| 항목 | 레퍼런스 구현 규칙 | rbms 현재 동작 | 근거 (rbms) | 판정 |
 |---|---|---|---|---|
 | 판정폭 커스텀 | rate>100 → assist=2, score=false | `judge_rate` 50~200% 자유 설정, **제한 로직 없음** | app_play.rs:131 `player.set_judge_rate(self.config.judge_rate)`; app_select.rs:938 `clamp(50,200)`; main.rs:149 | **미대응** |
 | customJudge 세분화(PG/GR/GD, key/scratch 분리, longnoteMarginRate) | 6+1 파라미터 | 단일 `judge_rate` 하나뿐 | settings.rs:22 | **미대응(단순화)** |
@@ -159,7 +159,7 @@ IR 송신의 추가 게이트 (`MusicResult.java:81-97`): IR 등록 존재 + `mo
 1. `PlaySettings` 로부터 `update_score: bool` 과 `assist_level: u8` 을 플레이 시작 시 1회 산출한다. 규칙: `judge_rate > 100` → assist=2, `scratch_auto` → assist=1, (향후 LN 제거/노트 옵션 추가 시 동일 표 적용).
 2. `enter_result`: `assist > 0` 이면 `lamp` 를 `AssistEasy`(2) / `LightAssistEasy`(1) 로 강등한 뒤 결과·기록·제출에 사용. 현재 `ir_map.rs` 가 LightAssistEasy 를 못 만들므로 매핑 확장 필요.
 3. `ScoreSubmission` 전송(app_play.rs:306-311)을 `!autoplay && replay.is_none() && update_score` 로 게이트.
-4. 로컬 `ScoreRecord`(app_play.rs:340)는 beatoraja 처럼 "램프·플레이카운트는 남기고 EX 는 갱신 안 함" 으로 나눌지, 현행 all-or-nothing 을 유지할지 결정 필요 (**미확정 정책**).
+4. 로컬 `ScoreRecord`(app_play.rs:340)는 레퍼런스 구현 처럼 "램프·플레이카운트는 남기고 EX 는 갱신 안 함" 으로 나눌지, 현행 all-or-nothing 을 유지할지 결정 필요 (**미확정 정책**).
 
 ---
 

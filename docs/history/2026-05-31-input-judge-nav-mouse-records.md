@@ -1,6 +1,6 @@
 # 2026-05-31 (세션 B) — 입력판정 근본수정·폴더 네비·마우스·로컬 기록
 
-사용자 요청 4건 + 추가 2건. 모두 beatoraja 원본 대조 후 구현, `cargo test --workspace` 99 통과.
+사용자 요청 4건 + 추가 2건. 모두 레퍼런스 구현 원본 대조 후 구현, `cargo test --workspace` 99 통과.
 
 ## 1. 입력 판정 버그 근본수정 — 空POOR(empty poor)
 
@@ -12,12 +12,12 @@
 - `note.judged = true` 로 **노트를 소실**시키고,
 - `apply(Poor)` 로 **콤보를 끊었다**.
 
-beatoraja `play/JudgeManager.java` + `play/JudgeProperty.java`(`SEVENKEYS`):
+the reference implementation `play/JudgeManager.java` + `play/JudgeProperty.java`(`SEVENKEYS`):
 - `judgeVanish = {PG,GR,GD,BD,PR,MS} = {t,t,t,t,t,false}` → 空POOR(judge 5 = MS)는 **노트 미소실**.
 - `combo = {t,t,t,f,f,true}` → 空POOR는 **콤보 미차단**.
 - score MS 카운트 +1, 게이지 MS 페널티만 적용.
 
-즉 잭/약간 빠른 누름에서 beatoraja는 빈 POOR 플래시만 띄우고 노트는 살아있어 재타 가능 → 우리 포팅은 노트를 먹고 콤보를 끊어 "씹힘/억울한 POOR"이 발생.
+즉 잭/약간 빠른 누름에서 레퍼런스 구현는 빈 POOR 플래시만 띄우고 노트는 살아있어 재타 가능 → 우리 포팅은 노트를 먹고 콤보를 끊어 "씹힘/억울한 POOR"이 발생.
 
 ### 수정
 `press()`에서 분류 결과가 `Judge::Poor`(=空POOR)일 때:
@@ -43,12 +43,12 @@ Select: `ArrowLeft = select_back`(상위 폴더), `ArrowRight = select_enter`(�
 ## 4. 로컬 기록(scores) 영속 + 우측 인라인 리스트 + 상세 모달
 - `apps/rbms-player/src/scores.rs`: `ScoreRecord`/`ScoreBook`(RON, `~/.config/rbms/scores.ron`). `for_md5`(최신순). counts는 `[u32;6]`라 **RON 직렬화 시 튜플 `(...)`**(주의: 손으로 픽스처 작성 시 `[...]` 불가).
 - `enter_result`: 실인터랙티브 플레이마다 기록 저장(**서버 유무 무관**, autoplay/replay 제외). 리플레이 저장 시 파일명 연결.
-- 우측 패널(곡 포커스): best 램프 요약(램프색=beatoraja) + EX + 최근 기록 리스트(날짜/램프/EX/BP, 클릭 가능).
+- 우측 패널(곡 포커스): best 램프 요약(램프색=레퍼런스 구현) + EX + 최근 기록 리스트(날짜/램프/EX/BP, 클릭 가능).
 - 상세 모달(`record_modal`): 기록 클릭 또는 `R`. 판정내역·EX·콤보·BP·EMPTY POOR·게이지·날짜·옵션. ↑↓ 이전/다음, Enter/PLAY REPLAY 버튼으로 해당 리플레이 재생, Esc/CLOSE/바깥클릭 닫기.
 - 리플레이 재생 안전: `load()`의 player autoplay 플래그를 `self.autoplay && self.replay.is_none()`로 바꿔 리플레이 중 이중 입력(autoplay+feed_replay) 방지.
 
 ## 5. 추가
-- **클리어 램프 색상 = beatoraja 공식**(`select/SkinDistributionGraph.LAMP`, ARGB→RGB). `clear_label_color` 교체 + `clear_type_id`/`clear_type_from_id`.
+- **클리어 램프 색상 = 레퍼런스 구현 공식**(`select/SkinDistributionGraph.LAMP`, ARGB→RGB). `clear_label_color` 교체 + `clear_type_id`/`clear_type_from_id`.
 - **AUTO REPLAY 토글**(설정 PLAY 탭, 기본 ON). `PlaySettings.auto_replay`. 리플레이 자동저장 게이트.
 
 ## 6. 편의기능 (후속 요청)

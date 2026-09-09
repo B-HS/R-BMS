@@ -1,7 +1,7 @@
 # 사용자 확정 결정 (rbms 포팅)
 
 ## 대상
-beatoraja core PLAY 모듈의 Rust 재구현(rbms). 스킨/IR/셀렉트는 범위 밖.
+레퍼런스 구현 core PLAY 모듈의 Rust 재구현(rbms). 스킨/IR/셀렉트는 범위 밖.
 
 ## 결정 (2026-05-31 합의)
 1. **그래픽 스택**: wgpu + winit. 렌더러는 trait 추상화로 교체 가능.

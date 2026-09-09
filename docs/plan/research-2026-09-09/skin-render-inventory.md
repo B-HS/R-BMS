@@ -1,6 +1,6 @@
 # rbms 스킨/렌더 데이터주도 vs 하드코딩 전수 인벤토리
 
-조사 일자: 2026-09-09. 대상: `/Users/gkn/R-BMS` (읽기 전용), 레퍼런스 `/Users/gkn/beatoraja`.
+조사 일자: 2026-09-09. 대상: `/Users/gkn/R-BMS` (읽기 전용), 레퍼런스 `<reference>/`.
 조사 범위: `crates/rbms-render/src/{lib,skin,theme,playfield,hud,result,select,cpu,font}.rs` 전량 통독,
 `apps/rbms-player/src/{gpu.rs, app_play.rs(렌더 블록 440~782), main.rs(상수·스킨·테마·BGA 로딩), app_select.rs(함수 목록)}`,
 `assets/skins/{default,normal,wide}.ron` 전량. 시간 상한으로 미조사 범위는 §6.
@@ -12,7 +12,7 @@
 - 데이터화되어 있는 것은 **플레이 화면의 노트필드 + HUD 일부(SkinConfig 40필드)** 와 **UI chrome 색상(ThemeConfig 21색)** 뿐이다.
 - **곡선택 / 결과 / 설정 / 키설정 / 폴더 / 난이도표 / 로딩 / 모달 / 디버그 오버레이의 좌표·크기·폰트스케일·문자열은 전부 Rust 코드 상수**다. RON으로 옮길 경로가 없다.
 - `Renderer` trait 프리미티브는 `size / clear / fill_rect` **3개뿐**(`crates/rbms-render/src/lib.rs:61-65`). 텍스처 그리기 프리미티브가 없어서 이미지는 GPU 백엔드의 **BGA 슬롯 1개**(256x256 고정)로만 그려진다(`apps/rbms-player/src/gpu.rs:32,178-187,247-259`).
-- 결과적으로 "사용자가 스킨 파일만으로 임의 이미지·위치·애니메이션을 정의"하는 beatoraja/LR2급 커스터마이징은 **현 아키텍처에서 불가능**하며, 프리미티브·리소스·바인딩·타이머 4개 층을 모두 신설해야 한다(§5).
+- 결과적으로 "사용자가 스킨 파일만으로 임의 이미지·위치·애니메이션을 정의"하는 레퍼런스 구현/LR2급 커스터마이징은 **현 아키텍처에서 불가능**하며, 프리미티브·리소스·바인딩·타이머 4개 층을 모두 신설해야 한다(§5).
 
 ---
 
@@ -152,11 +152,11 @@ fill_rect(&mut self, Rect, Color)
 
 ---
 
-## 4. beatoraja 레퍼런스와의 격차 (근거)
+## 4. 레퍼런스 구현 레퍼런스와의 격차 (근거)
 
-| beatoraja | rbms |
+| the reference implementation | rbms |
 |---|---|
-| `SkinObject.setDestination(time, x,y,w,h, acc, a,r,g,b, blend, filter, angle, center, loop, timer, op1,op2,op3, offset)` — **키프레임 애니메이션 + 가감속 + 블렌드 + 필터 + 회전 + 앵커 + 루프 + 타이머 + 조건(op) 3개**가 오브젝트 목적지 1개의 스펙 (`/Users/gkn/beatoraja/src/bms/player/beatoraja/skin/SkinObject.java:124-168`) | `Rect + Color`만 (`lib.rs:45-57,64`) |
+| `SkinObject.setDestination(time, x,y,w,h, acc, a,r,g,b, blend, filter, angle, center, loop, timer, op1,op2,op3, offset)` — **키프레임 애니메이션 + 가감속 + 블렌드 + 필터 + 회전 + 앵커 + 루프 + 타이머 + 조건(op) 3개**가 오브젝트 목적지 1개의 스펙 (`<reference>/skin/SkinObject.java:124-168`) | `Rect + Color`만 (`lib.rs:45-57,64`) |
 | 타이머 체계: `TIMER_STARTINPUT/FADEOUT/FAILED/SONGBAR_MOVE/PANEL1_ON…` 등 (`SkinProperty.java:11-27`), `TimerProperty`/`TimerPropertyFactory` | 타이머 개념 없음. 애니메이션은 각 렌더 함수가 `microtime`/`frame_count`로 직접 계산 (`playfield.rs:179-193`, `app_play.rs:477,498`) |
 | 프로퍼티 바인딩: `SkinProperty` 상수 968개(`grep "public static final int" SkinProperty.java` = 968줄), `BooleanPropertyFactory`(758줄)/`IntegerPropertyFactory`(1509줄)/`FloatPropertyFactory`(596줄)/`StringPropertyFactory`(421줄)/`EventFactory`(925줄) | 게임상태→스킨 프로퍼티 바인딩 레이어 없음. 각 화면이 전용 View 구조체(`HudView`,`ResultView`,`SelectView`)로 필드를 손으로 나열 (`hud.rs:8-24`, `result.rs:5-23`, `select.rs:126-141`) |
 | 오브젝트 타입: `SkinImage/SkinNumber/SkinText/SkinSlider/SkinGraph/SkinBPMGraph/SkinNoteDistributionGraph/SkinTimingVisualizer/SkinHitErrorVisualizer/SkinTextInput/…` | 오브젝트 타입 개념 없음. 전부 Rust 함수 호출 |
@@ -171,16 +171,16 @@ fill_rect(&mut self, Rect, Color)
 |---|---|---|---|
 | A | Renderer 프리미티브가 `fill_rect` 뿐 | 텍스처 그리기·UV 서브영역·회전·스케일·블렌드모드·클립이 전무. 스킨 이미지·스프라이트시트 숫자·9-patch 모두 불가 | L (trait 확장 + wgpu 파이프라인 2~3개 + CpuCanvas 대응 + 기존 900여 테스트 영향 검토) |
 | B | 텍스처 자원 관리 부재 | 텍스처 1장(256x256) 고정, 아틀라스/핸들/수명관리 없음. BGA와 커버가 같은 슬롯을 공유 | L (TextureId 핸들 + 아틀라스/배열텍스처 + 로드·eviction 정책) |
-| C | 타이머/이벤트 개념 부재 | beatoraja의 `TIMER_*` + `loop`/`acc` 키프레임에 대응하는 것이 없음. 애니메이션이 각 함수에 인라인 상수로 박혀 있음(`BEAM_RELEASE_US`, `bomb` 곡선, 로딩 점) | M (타이머 레지스트리 + 키프레임 보간기) |
+| C | 타이머/이벤트 개념 부재 | 레퍼런스 구현의 `TIMER_*` + `loop`/`acc` 키프레임에 대응하는 것이 없음. 애니메이션이 각 함수에 인라인 상수로 박혀 있음(`BEAM_RELEASE_US`, `bomb` 곡선, 로딩 점) | M (타이머 레지스트리 + 키프레임 보간기) |
 | D | 게임상태→스킨 프로퍼티 바인딩 부재 | 조건부 표시(op)·숫자/문자열 소스 지정이 불가. 현재는 View 구조체 필드를 코드가 직접 읽어 그림 | L (프로퍼티 ID 열거 + 상태 수집기 + Boolean/Int/Float/String 4종 팩토리) |
 | E | 화면별 렌더 함수 시그니처가 고정 레이아웃 전제 | `render_select(r,&SelectView)`/`render_result(r,&ResultView)`/`render_hud(r,&Skin,&HudView)`가 "레이아웃 코드 + 데이터"를 한 함수에 묶음. 오브젝트 리스트 순회 구조가 아님 | L (화면당 오브젝트 그래프 인터프리터로 재작성) |
 | F | 스킨 스키마가 플레이필드 전용 | select/result/menu 좌표를 표현할 필드가 SkinConfig에 아예 없음. 3종 RON도 스칼라 6개만 다름 | M (스키마 확장) — 단 A~E 없이 좌표만 데이터화하면 반쪽짜리 |
 | G | 논리 해상도 1280x720 컴파일 고정 | `Renderer::size()`가 항상 CW/CH 반환, 리사이즈는 스트레치. 스킨이 해상도/종횡비를 선언할 수 없음 | M |
-| H | 폰트가 `fill_rect` 방출 방식 | 텍스트 1글자가 여러 쿼드. 비트맵 폰트/글리프 아틀라스(beatoraja `SkinTextBitmap`) 대응 불가 | M (A 완료 후 아틀라스 전환) |
+| H | 폰트가 `fill_rect` 방출 방식 | 텍스트 1글자가 여러 쿼드. 비트맵 폰트/글리프 아틀라스(레퍼런스 구현 `SkinTextBitmap`) 대응 불가 | M (A 완료 후 아틀라스 전환) |
 | I | 테마 전역이 `thread_local` 단일 값 | 화면별/스킨별 팔레트 분리·핫리로드가 구조적으로 어려움 | S |
 | J | 팔레트 이원화 | result가 skin의 `judge_colors`/`judge_labels`를 무시하고 자체 상수 사용 → 같은 스킨인데 화면 간 색이 다름 | S |
 
-전체 "LR2/beatoraja급 완전 커스터마이징"은 A+B+C+D+E 동시 필요 → **XL(수주)**. 단계적 접근이면 A(프리미티브) → B(텍스처) → C(타이머) → D(바인딩) → E(오브젝트 인터프리터) 순.
+전체 "LR2/레퍼런스 구현급 완전 커스터마이징"은 A+B+C+D+E 동시 필요 → **XL(수주)**. 단계적 접근이면 A(프리미티브) → B(텍스처) → C(타이머) → D(바인딩) → E(오브젝트 인터프리터) 순.
 
 ---
 
@@ -189,5 +189,5 @@ fill_rect(&mut self, Rect, Color)
 - `apps/rbms-player/src/app_select.rs` 전문(967줄) — 함수 시그니처 목록만 확인. `build_select_view`(98~265)의 View 조립부에 추가 하드코딩(라벨 문자열·색 매핑)이 있을 가능성 높음. **미확인**.
 - `apps/rbms-player/src/format.rs`(434줄), `app_input.rs`, `scores.rs`, `folders.rs` — 미조사.
 - `crates/rbms-render/src/font.rs` 120줄 이후(draw_text/fit_text/text_width 세부), `playfield.rs` 200~620(테스트 위주로 추정) — 미조사.
-- beatoraja `JsonSkin.java`/`JsonSkinObjectLoader.java` 상세 스키마, LR2 CSV 명령어 집합 — 파일 크기·존재만 확인, 내용 미통독.
+- 레퍼런스 구현 `JsonSkin.java`/`JsonSkinObjectLoader.java` 상세 스키마, LR2 CSV 명령어 집합 — 파일 크기·존재만 확인, 내용 미통독.
 - 문서(`docs/PROCESS.md`)는 "데이터 주도 HUD 스킨", "(선택/BLOCKED) 결과·메뉴 레이아웃 RON화", "(선택) 테마 chrome 색 완성"으로 현 상태를 정확히 기술하고 있어 **stale 아님**(PROCESS.md Phase 7 항목과 §2 실측 일치).

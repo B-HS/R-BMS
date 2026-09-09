@@ -1,6 +1,6 @@
 # UI 재설계 (IIDX/LR2 지향) + 폴더 영속·백그라운드 스캔 (2026-05-31)
 
-> 사용자 피드백(플레이/결과 화면이 MVP 같음, 노트 팝인, 그래프 없음, 폴더 미저장/프리즈) 대응. 레퍼런스는 `docs/reference/ui/`(제공 4장 + 수집 18장), 디자인 스펙은 `docs/reference/ui-design.md`(IIDX/LR2/beatoraja 레이아웃 리서치).
+> 사용자 피드백(플레이/결과 화면이 MVP 같음, 노트 팝인, 그래프 없음, 폴더 미저장/프리즈) 대응. 레퍼런스는 `docs/reference/ui/`(제공 4장 + 수집 18장), 디자인 스펙은 `docs/reference/ui-design.md`(IIDX/LR2/레퍼런스 구현 레이아웃 리서치).
 
 ## 버그 수정
 - **#1 선택 폴더 영속** — `PlaySettings.songs_folder` 추가. `App::new`의 폴더 시작·`O` picker가 폴더를 저장하고, `main()`이 **인자 > 저장폴더 > `$RBMS_SONGS`** 순으로 복원. `start.sh` 무인자 시 positional 제거(저장폴더 사용, RBMS_SONGS는 첫 실행 폴백). 검증: 폴더 실행→settings.ron 저장→무인자 재실행 복원.

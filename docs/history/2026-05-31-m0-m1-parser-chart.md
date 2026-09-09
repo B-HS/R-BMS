@@ -20,7 +20,7 @@
   - 해시: MD5/SHA-256 known-answer("abc").
 - **실제 라이브러리(발광 ★1, `/Documents/personally/1/`) 727곡(.bms/.bme/.bml/.pms)**:
   - 파싱 **panic 0 / 727**.
-  - **MD5 byte-exact 일치 727 / 727** → beatoraja 점수·IR·리플레이 키 호환의 근거 확보.
+  - **MD5 byte-exact 일치 727 / 727** → 레퍼런스 구현 점수·IR·리플레이 키 호환의 근거 확보.
   - Shift-JIS 타이틀 정확("約束 -HappyHyperStarmiX-", "Parousia[α]", 전각공백 보존).
 
 ## 발견·수정한 버그

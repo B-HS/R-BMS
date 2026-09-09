@@ -3,7 +3,7 @@
 ## 배경 / 의도 정정
 사용자 보고: "곡선택에서 곡 소리 안 나온다". 직전까지 구현/검증한 것은 **`#PREVIEW` 파일 재생**(헤더에 `#PREVIEW xxx.ogg`가 있을 때만)뿐이었다. 사용자가 원한 것은 **곡을 포커스하면 그 곡이 들리는 미리듣기**였고, 사용자 라이브러리(`/Volumes/SSD/bms`) 대부분 차트엔 `#PREVIEW`가 없어 무음이었던 것.
 
-원본 beatoraja 대조(`select/PreviewMusicProcessor.java`·`select/MusicSelector.java`): 곡선택 미리듣기 = 400ms 디바운스 후 **`#PREVIEW` 파일**(`SongPreview` NONE/ONCE/LOOP) 재생, 없으면 **곡선택 BGM(메뉴 음악)**으로 복귀. **차트 자체를 autoplay로 틀어주는 기능은 원본에 없음**(프리뷰 자동생성 코드도 없음).
+원본 레퍼런스 구현 대조(`select/PreviewMusicProcessor.java`·`select/MusicSelector.java`): 곡선택 미리듣기 = 400ms 디바운스 후 **`#PREVIEW` 파일**(`SongPreview` NONE/ONCE/LOOP) 재생, 없으면 **곡선택 BGM(메뉴 음악)**으로 복귀. **차트 자체를 autoplay로 틀어주는 기능은 원본에 없음**(프리뷰 자동생성 코드도 없음).
 
 사용자 결정(AskUserQuestion): **하이브리드 — `#PREVIEW` 있으면 그 파일, 없으면 곡을 autoplay로 미리듣기** + **전체 키음 로드 후 재생**.
 

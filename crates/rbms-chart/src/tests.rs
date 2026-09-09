@@ -167,7 +167,7 @@ fn mine_damage_is_the_raw_object_value_in_the_chart_base() {
             })
             .unwrap()
     };
-    assert_eq!(damage(b"#001D1:0A\r\n"), 10.0, "base36 0A = 10, beatoraja's stock mine damage");
+    assert_eq!(damage(b"#001D1:0A\r\n"), 10.0, "base36 0A = 10, the reference implementation's stock mine damage");
     assert_eq!(damage(b"#001D1:ZZ\r\n"), 1295.0, "base36 ZZ = 35*36+35");
     assert_eq!(damage(b"#BASE 62\r\n#001D1:zz\r\n"), 3843.0, "base62 zz = 61*62+61");
 }
@@ -217,8 +217,8 @@ fn note_density_bins_stop_at_last_note_not_trailing_bar_lines() {
 
 #[test]
 fn note_density_dangling_long_note_head_still_counts() {
-    // An unterminated LN head must register at head-time (rbms keeps dangling heads, unlike beatoraja's
-    // auto-terminating parser), matching count_playable_notes which counts the head.
+    // An unterminated LN head must register at head-time (rbms keeps dangling heads, unlike the reference
+    // implementation's auto-terminating parser), matching count_playable_notes which counts the head.
     let m = model(b"#BPM 120\r\n#WAV01 a.wav\r\n#00051:01\r\n");
     let d = note_density(&m, 0.0);
     assert_eq!(d.bins[0], 1, "dangling LN head should contribute one note at its second");
@@ -339,7 +339,7 @@ fn negative_inline_bpm_does_not_corrupt_timing() {
 
 #[test]
 fn stop_accumulates_when_two_stops_share_a_position() {
-    // STOP01=192 (one 1/192-measure unit per beatoraja => 1 whole measure) + STOP02=96 (half measure)
+    // STOP01=192 (one 1/192-measure unit per the reference implementation => 1 whole measure) + STOP02=96 (half measure)
     // at the SAME position accumulate: at BPM 120 that is 2_000_000 + 1_000_000 = 3_000_000 us of hold.
     // The measure-2 note would sit at 4_000_000 without the hold, so it lands at 7_000_000.
     let m = model(b"#BPM 120\r\n#STOP01 192\r\n#STOP02 96\r\n#WAV01 a.wav\r\n#00109:0102\r\n#00211:01\r\n");

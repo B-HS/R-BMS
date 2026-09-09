@@ -6,67 +6,67 @@
 
 ```json
 {
-  "positionFormula": "SCREEN Y POSITION OF A NOTE (beatoraja, LaneRenderer.drawLane, src/bms/player/beatoraja/play/LaneRenderer.java:240-484)\n\n--- 0. Time normalization (LaneRenderer.java:252-258) ---\n  // `time` arg is the raw absolute clock (ms). Subtract the play-start timer, add user judge-timing offset.\n  time      = (timerOn(TIMER_PLAY) ? time - timer(TIMER_PLAY)\n              : timerOn(141)       ? time - timer(141) : 0) + config.getJudgetiming()   // ms\n  microtime = time * 1000                                                                // µs  (current play time)\n  // microtime is the player's current position; every note/timeline has tl.getMicroTime() in µs.\n\n--- 1. Constants for this frame ---\n  hispeed = playconfig.getHispeed()                         // float multiplier (1.0 = \"equal speed\")  (LaneRenderer.java:261)\n  nbpm    = BPM of the LAST timeline with microTime <= microtime   (the BPM currently under the judge line)  (LaneRenderer.java:266-270)\n  nscroll = SCROLL value of that same timeline                                                              (LaneRenderer.java:266-269)\n\n  // region = on-screen \"length\" (in pixel-equivalent ms units) of ONE 4/4 measure at the head BPM/scroll:\n  region  = nscroll > 0 ? (240000 / nbpm / hispeed) / nscroll : 0     // ms; 240000/nbpm = ms per measure at hispeed 1  (LaneRenderer.java:271)\n\n  // Lane geometry (lanes[0].region is the GDX rect of the play lane; y is bottom, +y is up):\n  hu  = lanes[0].region.y + lanes[0].region.height                                   // top of lane (far end)   (LaneRenderer.java:274)\n  hl  = enablelift ? lanes[0].region.y + lanes[0].region.height * lift               // judge line (note arrival)\n                   : lanes[0].region.y                                               // (LaneRenderer.java:275)\n  rxhs = (hu - hl) * hispeed     // PIXEL length of one full measure on screen at this hispeed  (LaneRenderer.java:276)\n  // NOTE: rxhs already includes hispeed; region (ms) is only used for the green-number/duration readout, NOT for y.\n\n--- 2. Accumulated Y by integrating timeline segments (LaneRenderer.java:277, 472-483) ---\n  // Walk timelines[] forward from `pos` (a cached cursor). Start at the judge line:\n  y = hl\n  for each timeline tl = timelines[i], i from pos upward, while y <= hu:\n     if (tl.getMicroTime() >= microtime):                 // this segment endpoint is in the future\n        if (i > 0):\n           prevtl = timelines[i-1]\n           dSection = tl.getSection() - prevtl.getSection()        // measures between the two timelines (double; 1.0 = one 4/4 measure)\n           if (prevtl.getMicroTime() + prevtl.getMicroStop() > microtime):\n                // current time is still inside prevtl's STOP region -> full segment height, frozen\n                y += dSection * prevtl.getScroll() * rxhs                                   // (LaneRenderer.java:475-476)\n           else:\n                // partial first segment: scale by the not-yet-elapsed fraction of this segment's real time\n                y += dSection * prevtl.getScroll()\n                     * (tl.getMicroTime() - microtime)\n                     / (tl.getMicroTime() - prevtl.getMicroTime() - prevtl.getMicroStop())\n                     * rxhs                                                                  // (LaneRenderer.java:477-479)\n        else:  // i == 0, first timeline\n           y += tl.getSection() * (tl.getMicroTime() - microtime) / tl.getMicroTime() * rxhs   // (LaneRenderer.java:481-482)\n     // the note(s) on timeline tl are then drawn at this accumulated y:\n     dsty = y + offsetY - offsetH/2     // final pixel Y of the note quad  (LaneRenderer.java:492)\n     // (note is only drawn if tl.getMicroTime() >= microtime, i.e. still above/at judge line)  (LaneRenderer.java:511,516,522,557)\n\n--- 3. Equivalent closed form (no BPM/SCROLL/STOP changes between now and the note) ---\n  // For a single uniform segment the partial-segment branch collapses to a clean linear law.\n  // Let Δt_us = note.getMicroTime() - microtime  (>=0, µs until the note reaches the judge line),\n  //     scroll = the scroll speed in effect, bpm = head bpm. Then:\n  //\n  //   y_note = hl  +  (Δt_us / (240000000 / bpm))  * scroll * hispeed * (hu - hl)\n  //          = hl  +  Δt_us * bpm * scroll * hispeed * (hu - hl) / 240000000\n  //\n  // i.e. note travels at  pixels_per_microsecond = bpm * scroll * hispeed * (hu-hl) / 240000000,\n  // reaching y = hl (judge line) exactly when Δt_us = 0, and is culled once y > hu.\n  // (Derivation matches LaneRenderer.java:481-482 with section = bpm*t/240000 measures; the PMS-miss-poor\n  //  fallback in LaneRenderer.java:600-614 spells out \"pixels/sec = rxhs2 * BPM / 240\" explicitly.)\n\nDEFINITIONS: hl = judge/arrival line (bottom, or lifted); hu = top of visible lane; rxhs = (hu-hl)*hispeed = pixels per measure; section = cumulative measure count (double); microtime = current play time (µs); tl.getMicroTime() = note/segment absolute time (µs); microStop = STOP freeze duration (µs); scroll = per-segment scroll-speed multiplier.",
+  "positionFormula": "SCREEN Y POSITION OF A NOTE (the reference implementation, LaneRenderer.drawLane, <reference>/play/LaneRenderer.java:240-484)\n\n--- 0. Time normalization (LaneRenderer.java:252-258) ---\n  // `time` arg is the raw absolute clock (ms). Subtract the play-start timer, add user judge-timing offset.\n  time      = (timerOn(TIMER_PLAY) ? time - timer(TIMER_PLAY)\n              : timerOn(141)       ? time - timer(141) : 0) + config.getJudgetiming()   // ms\n  microtime = time * 1000                                                                // µs  (current play time)\n  // microtime is the player's current position; every note/timeline has tl.getMicroTime() in µs.\n\n--- 1. Constants for this frame ---\n  hispeed = playconfig.getHispeed()                         // float multiplier (1.0 = \"equal speed\")  (LaneRenderer.java:261)\n  nbpm    = BPM of the LAST timeline with microTime <= microtime   (the BPM currently under the judge line)  (LaneRenderer.java:266-270)\n  nscroll = SCROLL value of that same timeline                                                              (LaneRenderer.java:266-269)\n\n  // region = on-screen \"length\" (in pixel-equivalent ms units) of ONE 4/4 measure at the head BPM/scroll:\n  region  = nscroll > 0 ? (240000 / nbpm / hispeed) / nscroll : 0     // ms; 240000/nbpm = ms per measure at hispeed 1  (LaneRenderer.java:271)\n\n  // Lane geometry (lanes[0].region is the GDX rect of the play lane; y is bottom, +y is up):\n  hu  = lanes[0].region.y + lanes[0].region.height                                   // top of lane (far end)   (LaneRenderer.java:274)\n  hl  = enablelift ? lanes[0].region.y + lanes[0].region.height * lift               // judge line (note arrival)\n                   : lanes[0].region.y                                               // (LaneRenderer.java:275)\n  rxhs = (hu - hl) * hispeed     // PIXEL length of one full measure on screen at this hispeed  (LaneRenderer.java:276)\n  // NOTE: rxhs already includes hispeed; region (ms) is only used for the green-number/duration readout, NOT for y.\n\n--- 2. Accumulated Y by integrating timeline segments (LaneRenderer.java:277, 472-483) ---\n  // Walk timelines[] forward from `pos` (a cached cursor). Start at the judge line:\n  y = hl\n  for each timeline tl = timelines[i], i from pos upward, while y <= hu:\n     if (tl.getMicroTime() >= microtime):                 // this segment endpoint is in the future\n        if (i > 0):\n           prevtl = timelines[i-1]\n           dSection = tl.getSection() - prevtl.getSection()        // measures between the two timelines (double; 1.0 = one 4/4 measure)\n           if (prevtl.getMicroTime() + prevtl.getMicroStop() > microtime):\n                // current time is still inside prevtl's STOP region -> full segment height, frozen\n                y += dSection * prevtl.getScroll() * rxhs                                   // (LaneRenderer.java:475-476)\n           else:\n                // partial first segment: scale by the not-yet-elapsed fraction of this segment's real time\n                y += dSection * prevtl.getScroll()\n                     * (tl.getMicroTime() - microtime)\n                     / (tl.getMicroTime() - prevtl.getMicroTime() - prevtl.getMicroStop())\n                     * rxhs                                                                  // (LaneRenderer.java:477-479)\n        else:  // i == 0, first timeline\n           y += tl.getSection() * (tl.getMicroTime() - microtime) / tl.getMicroTime() * rxhs   // (LaneRenderer.java:481-482)\n     // the note(s) on timeline tl are then drawn at this accumulated y:\n     dsty = y + offsetY - offsetH/2     // final pixel Y of the note quad  (LaneRenderer.java:492)\n     // (note is only drawn if tl.getMicroTime() >= microtime, i.e. still above/at judge line)  (LaneRenderer.java:511,516,522,557)\n\n--- 3. Equivalent closed form (no BPM/SCROLL/STOP changes between now and the note) ---\n  // For a single uniform segment the partial-segment branch collapses to a clean linear law.\n  // Let Δt_us = note.getMicroTime() - microtime  (>=0, µs until the note reaches the judge line),\n  //     scroll = the scroll speed in effect, bpm = head bpm. Then:\n  //\n  //   y_note = hl  +  (Δt_us / (240000000 / bpm))  * scroll * hispeed * (hu - hl)\n  //          = hl  +  Δt_us * bpm * scroll * hispeed * (hu - hl) / 240000000\n  //\n  // i.e. note travels at  pixels_per_microsecond = bpm * scroll * hispeed * (hu-hl) / 240000000,\n  // reaching y = hl (judge line) exactly when Δt_us = 0, and is culled once y > hu.\n  // (Derivation matches LaneRenderer.java:481-482 with section = bpm*t/240000 measures; the PMS-miss-poor\n  //  fallback in LaneRenderer.java:600-614 spells out \"pixels/sec = rxhs2 * BPM / 240\" explicitly.)\n\nDEFINITIONS: hl = judge/arrival line (bottom, or lifted); hu = top of visible lane; rxhs = (hu-hl)*hispeed = pixels per measure; section = cumulative measure count (double); microtime = current play time (µs); tl.getMicroTime() = note/segment absolute time (µs); microStop = STOP freeze duration (µs); scroll = per-segment scroll-speed multiplier.",
   "variables": [
     {
       "name": "time",
       "meaning": "Current play time in ms after subtracting TIMER_PLAY start and adding config.getJudgetiming() offset",
-      "sourceRef": "src/bms/player/beatoraja/play/LaneRenderer.java:252"
+      "sourceRef": "<reference>/play/LaneRenderer.java:252"
     },
     {
       "name": "microtime",
       "meaning": "Current play position in microseconds = time*1000; compared against each timeline's getMicroTime()",
-      "sourceRef": "src/bms/player/beatoraja/play/LaneRenderer.java:258"
+      "sourceRef": "<reference>/play/LaneRenderer.java:258"
     },
     {
       "name": "hispeed",
       "meaning": "Hi-speed multiplier (PlayConfig.hispeed, 0.01..20, default 1.0). 1.0 = equal speed. Directly scales pixel travel.",
-      "sourceRef": "src/bms/player/beatoraja/play/LaneRenderer.java:261"
+      "sourceRef": "<reference>/play/LaneRenderer.java:261"
     },
     {
       "name": "nbpm / nowbpm",
       "meaning": "BPM of the last timeline at or before current time (BPM under the judge line)",
-      "sourceRef": "src/bms/player/beatoraja/play/LaneRenderer.java:266"
+      "sourceRef": "<reference>/play/LaneRenderer.java:266"
     },
     {
       "name": "nscroll",
       "meaning": "SCROLL value of the head timeline; divides region for the duration readout",
-      "sourceRef": "src/bms/player/beatoraja/play/LaneRenderer.java:268"
+      "sourceRef": "<reference>/play/LaneRenderer.java:268"
     },
     {
       "name": "region",
       "meaning": "On-screen length of one 4/4 measure in ms-units = (240000/nbpm/hispeed)/nscroll; basis of the green number / currentduration",
-      "sourceRef": "src/bms/player/beatoraja/play/LaneRenderer.java:271"
+      "sourceRef": "<reference>/play/LaneRenderer.java:271"
     },
     {
       "name": "hu",
       "meaning": "Top (far) edge of the lane in pixels = lane.region.y + lane.region.height; notes are culled past here",
-      "sourceRef": "src/bms/player/beatoraja/play/LaneRenderer.java:274"
+      "sourceRef": "<reference>/play/LaneRenderer.java:274"
     },
     {
       "name": "hl",
       "meaning": "Judge line (note arrival) Y in pixels; lifted by lift fraction when enablelift",
-      "sourceRef": "src/bms/player/beatoraja/play/LaneRenderer.java:275"
+      "sourceRef": "<reference>/play/LaneRenderer.java:275"
     },
     {
       "name": "rxhs",
       "meaning": "(hu-hl)*hispeed = pixel length of one full measure on screen at current hispeed; the y-integrator multiplier",
-      "sourceRef": "src/bms/player/beatoraja/play/LaneRenderer.java:276"
+      "sourceRef": "<reference>/play/LaneRenderer.java:276"
     },
     {
       "name": "y",
       "meaning": "Accumulated vertical pixel position of the note, integrated segment by segment from hl upward",
-      "sourceRef": "src/bms/player/beatoraja/play/LaneRenderer.java:277"
+      "sourceRef": "<reference>/play/LaneRenderer.java:277"
     },
     {
       "name": "tl.getSection()",
       "meaning": "Cumulative measure index of a timeline (double); delta of 1.0 == one 4/4 measure",
-      "sourceRef": "src/bms/player/beatoraja/play/LaneRenderer.java:363"
+      "sourceRef": "<reference>/play/LaneRenderer.java:363"
     },
     {
       "name": "tl.getMicroTime()",
       "meaning": "Absolute time of a timeline/note in microseconds",
-      "sourceRef": "src/bms/player/beatoraja/play/LaneRenderer.java:329"
+      "sourceRef": "<reference>/play/LaneRenderer.java:329"
     },
     {
       "name": "prevtl.getMicroStop()",
@@ -153,7 +153,7 @@
 {
   "noteModel": "A chart is bms.model.BMSModel holding metadata + `TimeLine[] timelines` (sorted ascending by time), plus `String[] wavmap` (#WAVxx) and `String[] bgamap` (#BMPxx), `Mode mode`, `int lnobj`, `int lnmode`, `double bpm` (initial #BPM). Decoded: BMSDecoder.decode -> Section.makeTimeLines builds the TimeLine[] (BMSModel.setAllTimeLine).\n\nbms.model.TimeLine fields: `long time` (ABSOLUTE microseconds — getMicroTime() returns it raw, getTime()=time/1000 ms, getMilliTime()=time/1000), `double section` (cumulative measure position, 1.0 per 4/4 measure), `Note[] notes` (one slot per lane, length=mode.key), `Note[] hiddennotes` (invisible-channel notes, same indexing), `Note[] bgnotes` (BGM/autoplay, channel 01), `boolean sectionLine` (true on a measure barline timeline), `double bpm` (effective BPM at this line), `long stop` (STOP duration in microseconds, getMicroStop() raw / getMilliStop()=stop/1000), `double scroll` (#SCROLL factor, default 1.0), `int bga` (#BGA layer index, channel 04), `int layer` (channel 07), `Layer[] eventlayer` (POOR/MISS bga sequences, channel 06). ctor TimeLine(double section, long microtime, int lanecount).\n\nbms.model.Note (abstract) fields: `double section`, `long time` (absolute microseconds, copied from owning TimeLine in setNote), `int wav` (index into wavmap, -1 = no sound, -2 = LN-tail with no sound), `long start` (getMicroStarttime — keysound slice start us, 0 for plain BMS), `long duration` (getMicroDuration — slice length us, 0 for plain BMS), `int state` (judge result, runtime), `long playtime` (getMicroPlayTime, runtime judge delta), `Note[] layerednotes` (extra simultaneous keysounds via addLayeredNote/getLayeredNotes). Subclasses: NormalNote(int wav) / NormalNote(int wav,long start,long duration); LongNote(int type) with fields `boolean end`, `LongNote pair`, `int type` (TYPE_UNDEFINED=0, TYPE_LONGNOTE=1, TYPE_CHARGENOTE=2, TYPE_HELLCHARGENOTE=3); MineNote(int wav,double damage) field `double damage`.\n\nRust mirror: Model{ mode, wavmap:Vec<String>, bgamap, lnobj, lnmode, init_bpm, timelines:Vec<TimeLine> }; TimeLine{ time_us:i64, section:f64, notes:Vec<Option<Note>>(len=mode.key), hidden:Vec<Option<Note>>, bgnotes:Vec<Note>, section_line:bool, bpm:f64, stop_us:i64, scroll:f64, bga:i32, layer:i32 }; Note{ kind: Normal|Long{type,is_end,pair_idx}|Mine{damage}, wav:i32, start_us:i64, duration_us:i64, time_us:i64, section:f64, layered:Vec<Note> }.",
   "channelLaneMapping": "BMS channels are read as the 2 chars after \"#xxxCC:\" parsed base-36 (ChartDecoder.parseInt36(charAt(4),charAt(5))). Section static constants (base-36 values): channel 01 (autoplay/BGM)=1 -> bgnotes (TimeLine.addBackGroundNote); 02=2 SECTION_RATE (measure length, see bpmStopScroll); 03=3 BPM_CHANGE (hex); 04=4 BGA_PLAY; 06=6 POOR_PLAY (MISS layer); 07=7 LAYER_PLAY; 08=8 BPM_CHANGE_EXTEND (#BPMxx); 09=9 STOP. P1_KEY_BASE=37 (channel '11'), P2_KEY_BASE=73 ('21'), P1_INVISIBLE_KEY_BASE=109 ('31'), P2_INVISIBLE_KEY_BASE=145 ('41'), P1_LONG_KEY_BASE=181 ('51'), P2_LONG_KEY_BASE=217 ('61'), P1_MINE_KEY_BASE=469 ('D1'), P2_MINE_KEY_BASE=505 ('E1'), SCROLL=1020 ('SC').\n\nWithin a group the raw channel index = (parsedChannel - base): for visible P1 ch '11'..'19' -> index 0..8, P2 '21'..'29' -> index 0..8 (added to a +9 offset for the 18-wide assign array: P2 uses index = (ch-73)+9). This 0..17 raw lane index is remapped to the actual play lane via per-mode arrays:\nCHANNELASSIGN_BEAT7 (used for BEAT_7K & BEAT_14K)= [0,1,2,3,4,7,-1,5,6,8,9,10,11,12,15,-1,13,14] meaning raw 0..4 = keys1-5, raw5 -> lane7 (P1 scratch is lane7? -> it maps key6('16')->scratch idx7, '17'? ) i.e. lane index where 7 is P1 scratch; raw '18'(idx7)->5, '19'(idx8)->6 are keys 6&7; P2 block (idx9..17) similarly -> 8..15.\nCHANNELASSIGN_BEAT5 (BEAT_5K/10K)= [0,1,2,3,4,5,-1,-1,-1,6,7,8,9,10,11,-1,-1,-1] (key1-5 + scratch=5, '18'/'19' unused).\nCHANNELASSIGN_POPN (POPN_9K)= [0,1,2,3,4,-1,-1,-1,-1,-1,5,6,7,8,-1,-1,-1,-1] (channels 11-15 ->0-4, 22-25 ->5-8). A value of -1 means the channel is ignored for that mode. Mode selection: POPN_9K->POPN, BEAT_7K/BEAT_14K->BEAT7, else BEAT5.\n\nMode definitions (from Mode enum): BEAT_5K(key=6,player=1,scratch={5}), BEAT_7K(key=8,player=1,scratch={7}), BEAT_10K(key=12,player=2,scratch={5,11}), BEAT_14K(key=16,player=2,scratch={7,15}), POPN_5K(key=5,player=1,scratch={}), POPN_9K(key=9,player=1,scratch={}), KEYBOARD_24K(key=26,player=1,scratch={24,25}), KEYBOARD_24K_DOUBLE(key=52,player=2,scratch={24,25,50,51}). The scratch lane indices are exactly mode.scratchKey; isScratchKey(i) checks membership. So in 7K lane7 is scratch (channel '16'), lanes0-6 the 7 keys. NOTE_CHANNELS[]= {37,73,109,145,181,217,469,505} are the 8 group bases iterated during decoding. Invisible channels (31-39/41-49) -> hiddennotes[lane]; mine channels (D1.. / E1..) -> MineNote in notes[lane].",
-  "timingAssignment": "Section positions accumulate: each measure's base `sectionnum` is the running sum of previous measure lengths; a note token at fraction f in a channel sits at section = sectionnum + rate*f where `rate` is the measure's length (#xxx02, default 1.0) and f = (slotIndex / slotCount). Section.getTimeLine(double section) lazily creates/caches a TimeLine in a TreeMap keyed by section and computes its absolute micro time from the nearest lower cached entry (prev):\n\nscroll = prev.timeline.getScroll(); bpm = prev.timeline.getBPM();\ntime_us = prev.time + prev.timeline.getMicroStop() + 240000000.0 * (section - prev.key) / bpm;\nnew TimeLine(section, (long)time_us, mode.key); setBPM(bpm); setScroll(scroll).\n\nSo 240000000 microsec = duration of one full section (a 4/4 measure) at the segment's BPM; multiplying by the section delta and dividing by BPM gives elapsed us, and any STOP held at the prior line is added. The first/zero section seeds bpm = model initial #BPM, scroll=1.0. This matches beatoraja's own RhythmTimerProcessor: `timelines[i].getMicroTime() + getMicroStop() + (deltaSection)*240000000/getBPM()`.\n\nIntegration order in makeTimeLines per measure: (1) ensure a sectionLine TimeLine at the measure start (setSectionLine(true)); (2) merge BPM-change, STOP, SCROLL TreeMaps (keyed by in-measure fraction 0..1, ascending) — walking them in position order so each event's TimeLine is built on top of preceding ones (events strictly ordered so cumulative time/stop chain stays monotonic); (3) then place notes per channel via getTimeLine(sectionnum + rate*f). Because every TimeLine is created through getTimeLine, all share the same prev-based chain, guaranteeing monotonic absolute times. TimeLine.setNote(lane,note) copies the line's section and microtime into the Note (Note.time = TimeLine.time), so a note's absolute us == its TimeLine's us. The final TimeLine[] is sorted by time and stored via BMSModel.setAllTimeLine; BMSModel.getAllTimes()/getLastTime derive from it.",
+  "timingAssignment": "Section positions accumulate: each measure's base `sectionnum` is the running sum of previous measure lengths; a note token at fraction f in a channel sits at section = sectionnum + rate*f where `rate` is the measure's length (#xxx02, default 1.0) and f = (slotIndex / slotCount). Section.getTimeLine(double section) lazily creates/caches a TimeLine in a TreeMap keyed by section and computes its absolute micro time from the nearest lower cached entry (prev):\n\nscroll = prev.timeline.getScroll(); bpm = prev.timeline.getBPM();\ntime_us = prev.time + prev.timeline.getMicroStop() + 240000000.0 * (section - prev.key) / bpm;\nnew TimeLine(section, (long)time_us, mode.key); setBPM(bpm); setScroll(scroll).\n\nSo 240000000 microsec = duration of one full section (a 4/4 measure) at the segment's BPM; multiplying by the section delta and dividing by BPM gives elapsed us, and any STOP held at the prior line is added. The first/zero section seeds bpm = model initial #BPM, scroll=1.0. This matches the reference implementation's own RhythmTimerProcessor: `timelines[i].getMicroTime() + getMicroStop() + (deltaSection)*240000000/getBPM()`.\n\nIntegration order in makeTimeLines per measure: (1) ensure a sectionLine TimeLine at the measure start (setSectionLine(true)); (2) merge BPM-change, STOP, SCROLL TreeMaps (keyed by in-measure fraction 0..1, ascending) — walking them in position order so each event's TimeLine is built on top of preceding ones (events strictly ordered so cumulative time/stop chain stays monotonic); (3) then place notes per channel via getTimeLine(sectionnum + rate*f). Because every TimeLine is created through getTimeLine, all share the same prev-based chain, guaranteeing monotonic absolute times. TimeLine.setNote(lane,note) copies the line's section and microtime into the Note (Note.time = TimeLine.time), so a note's absolute us == its TimeLine's us. The final TimeLine[] is sorted by time and stored via BMSModel.setAllTimeLine; BMSModel.getAllTimes()/getLastTime derive from it.",
   "bpmStopScroll": "All three are per-TimeLine doubles/longs resolved during decode into TreeMaps then applied in section order.\nBPM: initial from #BPM header (BMSModel.bpm, double). Channel 03 (BPM_CHANGE) values are 2 hex digits: lambda$new$0 stores value = (token/36)*16 + (token%36) i.e. reinterpret the base-36-parsed pair as base-16 (so '03' line tokens are hex BPM). Channel 08 (BPM_CHANGE_EXTEND) token is an index into the #BPMxx table (bpmtable map); resolved to a double (warns 'undefined BPM' if missing). The resolved bpm is set on the TimeLine at that fraction via setBPM and becomes the `prev.bpm` used by getTimeLine for all later lines until the next change.\n\nSTOP: channel 09 token indexes the #STOPxx table (stoptable). The stored stop value S (in units where 192 = one 4/4 measure, per BMS spec; tables hold S directly). Applied: timeline.setStop((long)(240000000.0 * S / timeline.getBPM())). getMicroStop() returns this microsecond value; getTimeLine adds prev.getMicroStop() to the next line's time, so the playhead freezes for that many us. (Units: 240000000 us is one whole measure;
 ```
 
@@ -164,13 +164,13 @@ I now have the complete timing architecture. I have all the information needed f
 
 ---
 
-# beatoraja INPUT + TIMING-SOURCE design (for Rust port)
+# the reference implementation INPUT + TIMING-SOURCE design (for Rust port)
 
 ## 1. The master clock: `System.nanoTime()`, microsecond-quantized, anchored at state entry
 
 The single master clock is `System.nanoTime()` (monotonic). Everything derives from it; `System.currentTimeMillis()` is used only for wall-clock/boot/throttle housekeeping, never for judge.
 
-- `TimerManager` (`src/bms/player/beatoraja/TimerManager.java`) is the clock owner:
+- `TimerManager` (`<reference>/TimerManager.java`) is the clock owner:
   - `setMainState()` (L101-107) anchors `starttime = System.nanoTime()`.
   - `update()` (L109-111): `nowmicrotime = (System.nanoTime() - starttime) / 1000` — **microsecond** resolution, computed by integer-dividing ns by 1000.
   - All timers are stored in microseconds (`long[] timer`, `getMicroTimer`, `setMicroTimer`); `Long.MIN_VALUE` = "off". Millisecond getters (`getNowTime`, L33) just divide the micro value by 1000.
@@ -233,7 +233,7 @@ if (mtime != prevtime) {
 
 ## 5. The jitter problem to FIX in the Rust port
 
-Despite µs timestamps, beatoraja has **two residual quantization sources**, and they are the thing to fix:
+Despite µs timestamps, the reference implementation has **two residual quantization sources**, and they are the thing to fix:
 
 1. **Input poll quantization (~1 ms).** Key state is sampled only when the polling thread ticks (1 ms granularity, gated further by `Thread.sleep(0, 500000)` whose real resolution on Windows/JVM is often 1-15 ms). A press landing between ticks is stamped with the *poll tick's* `nanoTime`, not the true press instant. So judge timestamps carry up to ~1 ms (often worse on Windows timer-resolution) of input-sampling jitter. This is inherent to polling `isKeyPressed` rather than consuming OS event timestamps.
 2. **No vsync quantization in the judge itself** — this part is already correct: judging uses `note.getMicroTime() - pmtime`, both µs, independent of the render frame. The classic "judge clock = vsync" bug is **already avoided** here by (a) the separate judge thread and (b) `getNowMicroTime()` recomputing from `nanoTime` live. The earlier inline `input.poll()` in render (now commented out, L412) is exactly the vsync-coupled design they moved away from.
@@ -249,7 +249,7 @@ Despite µs timestamps, beatoraja has **two residual quantization sources**, and
 
 ### BMS
 
-I now have comprehensive, authoritative information confirmed from both the hitkey BMS command memo and beatoraja's actual parser bytecode (`jbms-parser.jar`). I have enough to compile the precise, implementable spec. Let me compile the final answer.
+I now have comprehensive, authoritative information confirmed from both the hitkey BMS command memo and the reference implementation's actual parser bytecode (`jbms-parser.jar`). I have enough to compile the precise, implementable spec. Let me compile the final answer.
 
 ---
 
@@ -257,9 +257,9 @@ I now have comprehensive, authoritative information confirmed from both the hitk
 
 Every claim is cited inline. Two source classes:
 - **Format spec** — *BMS command memo* (hitkey wiki) `https://hitkey.nekokan.dyndns.info/cmds.htm` and its sub-pages, plus Wikipedia "Be-Music Source".
-- **beatoraja's actual behavior** — decompiled from `lib/jbms-parser.jar` in this repo (`bms.model.BMSDecoder`, `bms.model.ChartDecoder`), since that's the parser that produces the MD5/SHA-256 keys used for scores/IR/replays. Cited as `[jbms-parser]`.
+- **the reference implementation's actual behavior** — decompiled from `lib/jbms-parser.jar` in this repo (`bms.model.BMSDecoder`, `bms.model.ChartDecoder`), since that's the parser that produces the MD5/SHA-256 keys used for scores/IR/replays. Cited as `[jbms-parser]`.
 
-> CRITICAL implementation note up front: beatoraja keys everything on a hash computed over the **raw, undecoded file bytes**, and its object-id parser is **strict base-36 (case-insensitive), NOT base-62**. Both verified from bytecode below.
+> CRITICAL implementation note up front: the reference implementation keys everything on a hash computed over the **raw, undecoded file bytes**, and its object-id parser is **strict base-36 (case-insensitive), NOT base-62**. Both verified from bytecode below.
 
 ---
 
@@ -270,18 +270,18 @@ Every claim is cited inline. Two source classes:
   - **Header**: `#NAME value` — delimiter is **one half-width space** between name and value.
   - **Channel (main data)**: `#xxxCC:value` — delimiter is **one half-width colon** `:`. Source: `https://hitkey.nekokan.dyndns.info/cmds.htm`.
 - When the **same header appears twice, the one nearer EOF wins**. Source: `https://hitkey.nekokan.dyndns.info/cmds.htm`.
-- **Encoding**: files are historically Shift_JIS; beatoraja decodes text as **`MS932`** (Microsoft's Shift_JIS superset) for parsing. Verified `[jbms-parser]`: `new InputStreamReader(.., "MS932")`. (It also probes for UTF-8/UTF-16 BOM in the broader codebase, but MS932 is the default code path.) The only universally safe charset is ASCII. Source: `https://hitkey.nekokan.dyndns.info/cmds.htm`.
-- File extensions: `.bms` (5-key original), `.bme` (adds 7-key channels 18/19/28/29), `.bml` (long-note variant), `.pms` (pop'n / 9-button). beatoraja decides POPN_9K vs BEAT_5K mode partly by the `.pms` extension. Verified `[jbms-parser]`: `decode(Path)` checks `path.toLowerCase().endsWith(".pms")` and sets `Mode.POPN_9K` else `Mode.BEAT_5K`.
+- **Encoding**: files are historically Shift_JIS; the reference implementation decodes text as **`MS932`** (Microsoft's Shift_JIS superset) for parsing. Verified `[jbms-parser]`: `new InputStreamReader(.., "MS932")`. (It also probes for UTF-8/UTF-16 BOM in the broader codebase, but MS932 is the default code path.) The only universally safe charset is ASCII. Source: `https://hitkey.nekokan.dyndns.info/cmds.htm`.
+- File extensions: `.bms` (5-key original), `.bme` (adds 7-key channels 18/19/28/29), `.bml` (long-note variant), `.pms` (pop'n / 9-button). the reference implementation decides POPN_9K vs BEAT_5K mode partly by the `.pms` extension. Verified `[jbms-parser]`: `decode(Path)` checks `path.toLowerCase().endsWith(".pms")` and sets `Mode.POPN_9K` else `Mode.BEAT_5K`.
 
 ---
 
 ## 2. Header commands
 
-Syntax `#NAME value` (space delimiter). All confirmed present in beatoraja's parser via constant-pool strings unless noted `[hitkey only]`. Source for semantics: `https://hitkey.nekokan.dyndns.info/cmds.htm`.
+Syntax `#NAME value` (space delimiter). All confirmed present in the reference implementation's parser via constant-pool strings unless noted `[hitkey only]`. Source for semantics: `https://hitkey.nekokan.dyndns.info/cmds.htm`.
 
 | Command | Value | Meaning |
 |---|---|---|
-| `#PLAYER` | `1`-`4` | Play mode: 1=SP, 2=Couple(obsolete), 3=DP, 4=Battle. beatoraja validates P2 notes vs this value. `[jbms-parser]` |
+| `#PLAYER` | `1`-`4` | Play mode: 1=SP, 2=Couple(obsolete), 3=DP, 4=Battle. the reference implementation validates P2 notes vs this value. `[jbms-parser]` |
 | `#GENRE` | string | Genre text. |
 | `#TITLE` | string | Song title. |
 | `#SUBTITLE` | string | Subtitle (appended/shown under title). |
@@ -290,16 +290,16 @@ Syntax `#NAME value` (space delimiter). All confirmed present in beatoraja's par
 | `#BPM` | number (float ok) | **Initial/base BPM** of the chart. |
 | `#BPMxx` | number (float ok) | Defines an indexed BPM (`xx` = base-36 id) referenced by channel `08`. `[jbms-parser]` parses it; "#BPMxxに数字が定義されていません" error string present. |
 | `#PLAYLEVEL` | integer | Displayed difficulty level (cosmetic). |
-| `#RANK` | `0`-`3` (sometimes 4) | Judge window strictness: **0=VERY HARD, 1=HARD, 2=NORMAL, 3=EASY**. Source: `https://hitkey.nekokan.dyndns.info/cmds.htm`. beatoraja stores it as `JudgeRankType.BMS_RANK`. `[jbms-parser]` |
-| `#DEFEXRANK` | integer (percent) | Finer judge difficulty; `100` ≈ `#RANK 2 (NORMAL)`. beatoraja: `JudgeRankType.BMS_DEFEXRANK`. Source: hitkey; `[jbms-parser]`. |
-| `#TOTAL` | number | **Total groove-gauge recovery (%) for a perfect play.** On Normal gauge, recovery per note = `TOTAL / noteCount`; `TOTAL=500` ⇒ a perfect play recovers 500% of gauge. Low TOTAL (<~240) reduces recovery. Source: `https://github.com/wcko87/beatoraja-english-guide/wiki/Scores-and-Clears`. beatoraja warns "TOTALが未定義です"/"TOTAL値が少なすぎます". `[jbms-parser]` |
+| `#RANK` | `0`-`3` (sometimes 4) | Judge window strictness: **0=VERY HARD, 1=HARD, 2=NORMAL, 3=EASY**. Source: `https://hitkey.nekokan.dyndns.info/cmds.htm`. the reference implementation stores it as `JudgeRankType.BMS_RANK`. `[jbms-parser]` |
+| `#DEFEXRANK` | integer (percent) | Finer judge difficulty; `100` ≈ `#RANK 2 (NORMAL)`. the reference implementation: `JudgeRankType.BMS_DEFEXRANK`. Source: hitkey; `[jbms-parser]`. |
+| `#TOTAL` | number | **Total groove-gauge recovery (%) for a perfect play.** On Normal gauge, recovery per note = `TOTAL / noteCount`; `TOTAL=500` ⇒ a perfect play recovers 500% of gauge. Low TOTAL (<~240) reduces recovery. Source: `https://github.com/wcko87/the reference implementation-english-guide/wiki/Scores-and-Clears`. the reference implementation warns "TOTALが未定義です"/"TOTAL値が少なすぎます". `[jbms-parser]` |
 | `#STAGEFILE` | filename | Loading/jacket splash image. |
 | `#BANNER` / `#BACKBMP` | filename | Banner / play-background images `[hitkey]`. |
-| `#WAVxx` | filename | Keysound sample; `xx` = base-36 id (1–1295). beatoraja: `wavlist[1296]`. `[jbms-parser]` |
-| `#BMPxx` | filename | BGA image/video; `xx` = base-36 id. beatoraja: `bgalist[1296]`. `[jbms-parser]` |
-| `#STOPxx` | integer | STOP-sequence definition referenced by channel `09`. **Unit = 1/192 of a 4/4 measure**, so `192` = one whole 4/4 measure of stop. Negative STOP unsupported in beatoraja ("negative STOPはサポートされていません"). Source: `https://hitkey.nekokan.dyndns.info/cmds.htm`; `[jbms-parser]`. |
-| `#SCROLLxx` | number (float) | Scroll-speed multiplier definition, referenced by the `SC` channel (beatoraja/bemuse extension). beatoraja keeps a `scrolltable`; warns "#SCROLLxxは不十分な定義です". `[jbms-parser]` |
-| `#LNTYPE` | `1` or `2` | Long-note notation mode (see §6). beatoraja field `lntype`. `[jbms-parser]` |
+| `#WAVxx` | filename | Keysound sample; `xx` = base-36 id (1–1295). the reference implementation: `wavlist[1296]`. `[jbms-parser]` |
+| `#BMPxx` | filename | BGA image/video; `xx` = base-36 id. the reference implementation: `bgalist[1296]`. `[jbms-parser]` |
+| `#STOPxx` | integer | STOP-sequence definition referenced by channel `09`. **Unit = 1/192 of a 4/4 measure**, so `192` = one whole 4/4 measure of stop. Negative STOP unsupported in the reference implementation ("negative STOPはサポートされていません"). Source: `https://hitkey.nekokan.dyndns.info/cmds.htm`; `[jbms-parser]`. |
+| `#SCROLLxx` | number (float) | Scroll-speed multiplier definition, referenced by the `SC` channel (레퍼런스 구현/bemuse extension). the reference implementation keeps a `scrolltable`; warns "#SCROLLxxは不十分な定義です". `[jbms-parser]` |
+| `#LNTYPE` | `1` or `2` | Long-note notation mode (see §6). the reference implementation field `lntype`. `[jbms-parser]` |
 | `#LNOBJ` | `xx` | Base-36 object id that marks an LN **end** on visible channels (see §6). Source: hitkey + Wikipedia. |
 | `#DIFFICULTY` | `1`-`5` | Difficulty slot/label (1=BEGINNER … 5=INSANE) `[hitkey]`. |
 | `#VOLWAV` | integer | Master keysound volume % `[hitkey]`. |
@@ -316,23 +316,23 @@ Base BPM/initial-BPM: the `#BPM` header sets the chart's starting tempo; mid-son
 - `00` = **empty / rest** (no object at that slot). Source: `https://hitkey.nekokan.dyndns.info/cmds.htm`.
 - **Merging**: multiple lines for the same `measure+channel` are **compounded (overlaid)** — EXCEPT channels `01` (BGM stacks as separate layers anyway), `02` (measure length — last wins), and `A6` (options). Source: `https://hitkey.nekokan.dyndns.info/cmds.htm`.
 
-### Object-id radix — base-36 vs base-62 (decisive for beatoraja)
+### Object-id radix — base-36 vs base-62 (decisive for the reference implementation)
 
 - The spec **historically** allowed three radices for the 2-char id: hexadecimal (256), "limited base-36" first-char-hex (576), and full **base-36** `[0-9A-Za-z]` ⇒ 1296 slots (`00`=empty, `01`–`ZZ` = 1–1295). Some modern tools use **base-62** to reach 3843 slots. Source: `https://hitkey.nekokan.dyndns.info/cmds.htm`.
-- **beatoraja is strictly base-36 and case-insensitive — it does NOT support base-62.** Verified from `ChartDecoder.parseInt36(char, char)` bytecode `[jbms-parser]`:
+- **the reference implementation is strictly base-36 and case-insensitive — it does NOT support base-62.** Verified from `ChartDecoder.parseInt36(char, char)` bytecode `[jbms-parser]`:
   - `'0'..'9'` → 0–9
   - `'a'..'z'` → 10–35
   - `'A'..'Z'` → 10–35 (same as lowercase!)
   - any other char → returns `-1` (NumberFormatException upstream)
   - value = `first*36 + second`.
   
-  Because `'A'` and `'a'` both map to 10, a base-62 file is silently mis-parsed by beatoraja. A Rust parser targeting beatoraja-compatible hashes/IDs must replicate this exact base-36, case-insensitive mapping.
+  Because `'A'` and `'a'` both map to 10, a base-62 file is silently mis-parsed by the reference implementation. A Rust parser targeting the reference implementation-compatible hashes/IDs must replicate this exact base-36, case-insensitive mapping.
 
 ---
 
 ## 4. Channel list
 
-Channel codes are 2 chars. The numeric channels below are conventionally read as if hex/base-36; beatoraja runs the channel string through `parseInt36` too. Source for meanings: `https://hitkey.nekokan.dyndns.info/cmds.htm` and Wikipedia.
+Channel codes are 2 chars. The numeric channels below are conventionally read as if hex/base-36; the reference implementation runs the channel string through `parseInt36` too. Source for meanings: `https://hitkey.nekokan.dyndns.info/cmds.htm` and Wikipedia.
 
 | Channel | Meaning |
 |---|---|
@@ -345,7 +345,7 @@ Channel codes are 2 chars. The numeric channels below are conventionally read as
 | `07` | **BGA-LAYER** (overlay on top of BASE, transparent-keyed) |
 | `08` | **Extended BPM** — object id references a `#BPMxx` definition (float BPM). Must be base-36. Source: `https://hitkey.nekokan.dyndns.info/exbpm-object.htm` |
 | `09` | **STOP** — object id references a `#STOPxx` definition. Source: hitkey |
-| `SC` | **SCROLL** — object id references `#SCROLLxx` (scroll-speed multiplier). beatoraja/bemuse extension. Source: search result + `[jbms-parser]` scrolltable |
+| `SC` | **SCROLL** — object id references `#SCROLLxx` (scroll-speed multiplier). 레퍼런스 구현/bemuse extension. Source: search result + `[jbms-parser]` scrolltable |
 | `11`–`15` | **P1 visible** keys 1–5 |
 | `16` | **P1 visible SCRATCH** (turntable) |
 | `17` | **P1 FREE-ZONE / foot pedal** (5-key era) |
@@ -393,13 +393,13 @@ Three coexisting LN mechanisms. Source for all quotes: `https://hitkey.nekokan.d
 3. **`#LNOBJ` on visible channels `11–29`:**
    - "The object of the index specified as `#LNOBJ` is defined as an end point symbol of LN. The object which is just before that … is interpreted as a LN start point." — a normal note placed before an `#LNOBJ`-valued object on the same visible lane becomes the LN head; the `#LNOBJ` object is the tail. This lets `.bms`/`.bme` express LNs without the 51–69 channels.
 
-beatoraja honors `#LNTYPE` (field `lntype`, default settable via constructor) and `#LNOBJ`. `[jbms-parser]`
+the reference implementation honors `#LNTYPE` (field `lntype`, default settable via constructor) and `#LNOBJ`. `[jbms-parser]`
 
 ---
 
 ## 7. Control flow — `#RANDOM` / `#IF` blocks
 
-Confirmed parsed by beatoraja (constant-pool strings `RANDOM`, `ENDIF`, `ENDRANDOM`, plus mismatch warnings). `[jbms-parser]` Semantics from `https://hitkey.nekokan.dyndns.info/cmds.htm`.
+Confirmed parsed by the reference implementation (constant-pool strings `RANDOM`, `ENDIF`, `ENDRANDOM`, plus mismatch warnings). `[jbms-parser]` Semantics from `https://hitkey.nekokan.dyndns.info/cmds.htm`.
 
 **RANDOM block:**
 ```
@@ -411,9 +411,9 @@ Confirmed parsed by beatoraja (constant-pool strings `RANDOM`, `ENDIF`, `ENDRAND
    #ENDIF        ; closes the IF
 #ENDRANDOM       ; closes the RANDOM scope (optional in many parsers)
 ```
-- `#RANDOM n` draws once; nested `#IF/#ELSEIF/#ELSE/#ENDIF` gate which commands (headers AND channel lines) are active. RANDOM blocks may be **nested**. Source: `https://hitkey.nekokan.dyndns.info/cmds.htm`. beatoraja keeps stacks `randoms`/`crandom`/`skip` to implement nesting. `[jbms-parser]`
+- `#RANDOM n` draws once; nested `#IF/#ELSEIF/#ELSE/#ENDIF` gate which commands (headers AND channel lines) are active. RANDOM blocks may be **nested**. Source: `https://hitkey.nekokan.dyndns.info/cmds.htm`. the reference implementation keeps stacks `randoms`/`crandom`/`skip` to implement nesting. `[jbms-parser]`
 
-**SWITCH block** (less common; supported by some clients incl. beatoraja-adjacent tooling):
+**SWITCH block** (less common; supported by some clients incl. the reference implementation-adjacent tooling):
 ```
 #SWITCH n        ; (or #SETSWITCH n)
    #CASE m
@@ -424,15 +424,15 @@ Confirmed parsed by beatoraja (constant-pool strings `RANDOM`, `ENDIF`, `ENDRAND
 ```
 Source: `https://hitkey.nekokan.dyndns.info/cmds.htm`.
 
-Implementation order for a parser: resolve RANDOM/SWITCH **while reading lines** (a line is processed only if its enclosing IF/CASE branch is active), exactly as beatoraja does — it evaluates control flow inline during the same single pass that feeds the digest. `[jbms-parser]`
+Implementation order for a parser: resolve RANDOM/SWITCH **while reading lines** (a line is processed only if its enclosing IF/CASE branch is active), exactly as the reference implementation does — it evaluates control flow inline during the same single pass that feeds the digest. `[jbms-parser]`
 
 ---
 
-## 8. Hash computation (MD5 + SHA-256) — what beatoraja actually keys on
+## 8. Hash computation (MD5 + SHA-256) — what the reference implementation actually keys on
 
-This is the load-bearing part for scores/IR/replays, so it's taken straight from beatoraja's parser bytecode, not from prose specs.
+This is the load-bearing part for scores/IR/replays, so it's taken straight from the reference implementation's parser bytecode, not from prose specs.
 
-**beatoraja hashes the ENTIRE RAW FILE BYTES, before any decoding/parsing.** Verified from `bms.model.BMSDecoder` `[jbms-parser]`:
+**the reference implementation hashes the ENTIRE RAW FILE BYTES, before any decoding/parsing.** Verified from `bms.model.BMSDecoder` `[jbms-parser]`:
 
 1. `decode(Path)` calls `Files.readAllBytes(path)` → a `byte[]` of the **complete, untouched file** (no normalization, no charset conversion, no whitespace trimming).
 2. Inside `decode(Path, byte[], boolean, int[])`:
@@ -455,11 +455,11 @@ This is the load-bearing part for scores/IR/replays, so it's taken straight from
    - **MD5 = 32-char lowercase hex** of the raw file bytes.
    - **SHA-256 = 64-char lowercase hex** of the raw file bytes.
 
-beatoraja then reads these via `model.getMD5()`/`model.getSHA256()` in `SongData.java` (this repo, lines 145–146) and stores them as the song's `md5`/`sha256` keys.
+the reference implementation then reads these via `model.getMD5()`/`model.getSHA256()` in `SongData.java` (this repo, lines 145–146) and stores them as the song's `md5`/`sha256` keys.
 
-**Rust implementation:** read the file as raw bytes (`std::fs::read`), feed those exact bytes to `md5` and `sha2::Sha256`, and `format!("{:x}")` (lowercase hex). Do **not** trim BOM, re-encode, normalize line endings, or strip whitespace before hashing — beatoraja does none of that. The MD5 and SHA-256 are computed over **identical** input (the whole file). Source: `[jbms-parser]` `bms.model.BMSDecoder`; consumer `/Users/hyunseokbyun/beatoraja/src/bms/player/beatoraja/song/SongData.java`.
+**Rust implementation:** read the file as raw bytes (`std::fs::read`), feed those exact bytes to `md5` and `sha2::Sha256`, and `format!("{:x}")` (lowercase hex). Do **not** trim BOM, re-encode, normalize line endings, or strip whitespace before hashing — the reference implementation does none of that. The MD5 and SHA-256 are computed over **identical** input (the whole file). Source: `[jbms-parser]` `bms.model.BMSDecoder`; consumer `/Users/hyunseokbyun/<reference>/song/SongData.java`.
 
-> Note: beatoraja keys scores/IR/replays on **both** hashes — MD5 is the legacy/LR2-compatible key, SHA-256 is the modern primary key. (LR2 also uses MD5-over-raw-bytes, so MD5 matches across clients.) Both come from the same raw-byte stream above.
+> Note: the reference implementation keys scores/IR/replays on **both** hashes — MD5 is the legacy/LR2-compatible key, SHA-256 is the modern primary key. (LR2 also uses MD5-over-raw-bytes, so MD5 matches across clients.) Both come from the same raw-byte stream above.
 
 ---
 
@@ -480,29 +480,29 @@ beatoraja then reads these via `model.getMD5()`/`model.getSHA256()` in `SongData
 - Extended BPM (channels 03/08, `#BPMxx`): [`https://hitkey.nekokan.dyndns.info/exbpm-object.htm`](https://hitkey.nekokan.dyndns.info/exbpm-object.htm)
 - STOP sequence (`#STOPxx`, channel 09): [`https://hitkey.nekokan.dyndns.info/exstop.htm`](https://hitkey.nekokan.dyndns.info/exstop.htm)
 - Wikipedia "Be-Music Source" (`#xxxYY:ZZ` form, base-36, header list): [`https://en.wikipedia.org/wiki/Be-Music_Source`](https://en.wikipedia.org/wiki/Be-Music_Source)
-- `#TOTAL` gauge semantics: [`https://github.com/wcko87/beatoraja-english-guide/wiki/Scores-and-Clears`](https://github.com/wcko87/beatoraja-english-guide/wiki/Scores-and-Clears)
-- beatoraja parser behavior (base-36 `parseInt36`, raw-byte MD5+SHA-256 via DigestInputStream, MS932, lowercase hex, control-flow strings) — decompiled `bms.model.BMSDecoder` / `bms.model.ChartDecoder` from `/Users/hyunseokbyun/beatoraja/lib/jbms-parser.jar` (jbms-parser upstream: [`https://github.com/exch-bms2/beatoraja`](https://github.com/exch-bms2/beatoraja))
-- Hash consumer in this repo: `/Users/hyunseokbyun/beatoraja/src/bms/player/beatoraja/song/SongData.java` (lines 145–146, 209)
+- `#TOTAL` gauge semantics: [`https://github.com/wcko87/the reference implementation-english-guide/wiki/Scores-and-Clears`](https://github.com/wcko87/the reference implementation-english-guide/wiki/Scores-and-Clears)
+- the reference implementation parser behavior (base-36 `parseInt36`, raw-byte MD5+SHA-256 via DigestInputStream, MS932, lowercase hex, control-flow strings) — decompiled `bms.model.BMSDecoder` / `bms.model.ChartDecoder` from `/Users/hyunseokbyun/<reference>/lib/jbms-parser.jar` (jbms-parser upstream: [`https://github.com/exch-bms2/the reference implementation`](https://github.com/exch-bms2/the reference implementation))
+- Hash consumer in this repo: `/Users/hyunseokbyun/<reference>/song/SongData.java` (lines 145–146, 209)
 
-**Two findings a generic-spec-only implementer would get wrong, both verified against beatoraja's bytecode:** (1) object ids are **strict base-36, case-insensitive** in beatoraja — `A`==`a`, no base-62; (2) the MD5/SHA-256 are over the **entire raw file bytes** (lowercase hex), with charset decoding applied only *downstream* of the digest, so hashing must be byte-exact and charset-independent.
+**Two findings a generic-spec-only implementer would get wrong, both verified against the reference implementation's bytecode:** (1) object ids are **strict base-36, case-insensitive** in the reference implementation — `A`==`a`, no base-62; (2) the MD5/SHA-256 are over the **entire raw file bytes** (lowercase hex), with charset decoding applied only *downstream* of the digest, so hashing must be byte-exact and charset-independent.
 
 ### bmson
 
-I now have everything needed, including beatoraja's exact timing formulas. I have authoritative data from both the official bmson-spec (1.0.0) and the actual beatoraja/jbms-parser implementation (which is what the user's parser must be compatible with). Here is the complete spec.
+I now have everything needed, including the reference implementation's exact timing formulas. I have authoritative data from both the official bmson-spec (1.0.0) and the actual 레퍼런스 구현/jbms-parser implementation (which is what the user's parser must be compatible with). Here is the complete spec.
 
 ---
 
 # bmson Format — Implementable Spec for a Rust Parser
 
-This covers the **official bmson 1.0.0** spec and the **legacy 0.21** lineage, plus the **beatoraja extensions** (`scroll_events`, `mine_channels`, `key_channels`) that are *not* in the official spec but are required if you want beatoraja-compatible parsing. I separate "official" from "beatoraja-extension" throughout so you know what's portable.
+This covers the **official bmson 1.0.0** spec and the **legacy 0.21** lineage, plus the **the reference implementation extensions** (`scroll_events`, `mine_channels`, `key_channels`) that are *not* in the official spec but are required if you want the reference implementation-compatible parsing. I separate "official" from "the reference implementation-extension" throughout so you know what's portable.
 
 ## 1. File format & versioning
 
 - bmson is a single **UTF-8 JSON** document. Recommended extension `.bmson`.
 - `version` (string) selects schema. Compare with **Semantic Versioning 2.0.0**.
   - `1.0.0` — current official (released 2015-12-26).
-  - `0.21` and earlier — **legacy: the `version` field is absent**. A robust parser must treat a missing `version` as pre-1.0 and apply legacy fallbacks. The structural difference that matters most: pre-1.0 files (BMSON 0.21, from early BmsONE) may use the field name **`info`** the same way, but BGA event handling and some defaults differed; the safest behavior (what beatoraja does) is to parse leniently with defaults and not hard-fail on a missing `version`.
-- A player decides support via **`version` + `info.mode_hint`**. Unknown `mode_hint` → fall back (beatoraja falls back to `beat-7k` with a warning).
+  - `0.21` and earlier — **legacy: the `version` field is absent**. A robust parser must treat a missing `version` as pre-1.0 and apply legacy fallbacks. The structural difference that matters most: pre-1.0 files (BMSON 0.21, from early BmsONE) may use the field name **`info`** the same way, but BGA event handling and some defaults differed; the safest behavior (what the reference implementation does) is to parse leniently with defaults and not hard-fail on a missing `version`.
+- A player decides support via **`version` + `info.mode_hint`**. Unknown `mode_hint` → fall back (the reference implementation falls back to `beat-7k` with a warning).
 
 ## 2. The pulse / y / resolution timing model
 
@@ -529,7 +529,7 @@ Add each `stop_event`'s pause to the running time at its `y`. A stop of `duratio
 stop_seconds = duration * 60 / (bpm * resolution)
 ```
 
-**beatoraja-specific note (important for byte-exact compatibility):** beatoraja internally uses `RESOLUTION = info.resolution * 4` (pulses per **whole note / measure**, default 960), and computes (microseconds):
+**the reference implementation-specific note (important for byte-exact compatibility):** the reference implementation internally uses `RESOLUTION = info.resolution * 4` (pulses per **whole note / measure**, default 960), and computes (microseconds):
 
 ```
 time(y) = time(y₀) + 240000 * 1000 * (y - y₀) / (bpm * RESOLUTION)      // 240000 = 60s * 4 quarters * 1000ms
@@ -537,9 +537,9 @@ stop_us = 1000 * 1000 * 60 * 4 * duration / (bpm * RESOLUTION)
 section(y) = y / RESOLUTION                                              // measure index, fractional
 ```
 
-Both formulations are algebraically identical (`RESOLUTION = resolution*4`, so `60*4/RESOLUTION = 60/resolution`). Use the first form with `resolution = pulses-per-quarter` in your own engine; mirror the `*4` only if you must match beatoraja's measure/section numbers exactly.
+Both formulations are algebraically identical (`RESOLUTION = resolution*4`, so `60*4/RESOLUTION = 60/resolution`). Use the first form with `resolution = pulses-per-quarter` in your own engine; mirror the `*4` only if you must match the reference implementation's measure/section numbers exactly.
 
-beatoraja **rejects negative BPM and negative STOP** with a warning (does not apply them). Stop time uses the **BPM in effect at that timeline** (`tl.getBPM()`), so order BPM-then-STOP per pulse.
+the reference implementation **rejects negative BPM and negative STOP** with a warning (does not apply them). Stop time uses the **BPM in effect at that timeline** (`tl.getBPM()`), so order BPM-then-STOP per pulse.
 
 ## 3. Top-level object
 
@@ -552,15 +552,15 @@ beatoraja **rejects negative BPM and negative STOP** with a warning (does not ap
 | `stop_events` | StopEvent[] | no | null/[] | pauses |
 | `sound_channels` | SoundChannel[] | yes | — | keysounded notes |
 | `bga` | BGA | yes (official) | — | background |
-| **`scroll_events`** | ScrollEvent[] | no | [] | **beatoraja ext** (Hi-Speed scroll-rate changes) |
-| **`mine_channels`** | MineChannel[] | no | [] | **beatoraja ext** (damage/mine notes) |
-| **`key_channels`** | MineChannel[] | no | [] | **beatoraja ext** (invisible keysound-only notes; same shape as mine_channels in jbms-parser) |
+| **`scroll_events`** | ScrollEvent[] | no | [] | **the reference implementation ext** (Hi-Speed scroll-rate changes) |
+| **`mine_channels`** | MineChannel[] | no | [] | **the reference implementation ext** (damage/mine notes) |
+| **`key_channels`** | MineChannel[] | no | [] | **the reference implementation ext** (invisible keysound-only notes; same shape as mine_channels in jbms-parser) |
 
-Treat `null` arrays as empty. In beatoraja's model `key_channels` reuses the **`MineChannel`** Java type (`name` + `MineNote[]`), but its notes are invisible keysound triggers, not damage.
+Treat `null` arrays as empty. In the reference implementation's model `key_channels` reuses the **`MineChannel`** Java type (`name` + `MineNote[]`), but its notes are invisible keysound triggers, not damage.
 
 ## 4. Info object
 
-Official names; beatoraja's class is `BMSInfo` with one extra field `ln_type`.
+Official names; the reference implementation's class is `BMSInfo` with one extra field `ln_type`.
 
 | Field | Type | Req | Default | Notes |
 |---|---|---|---|---|
@@ -580,16 +580,16 @@ Official names; beatoraja's class is `BMSInfo` with one extra field `ln_type`.
 | `banner_image` | string | no | null/"" | banner (≈15:4) |
 | `preview_music` | string | no | null/"" | preview audio |
 | `resolution` | unsigned long | no | 240 | pulses per quarter note, > 0 |
-| **`ln_type`** | int | no | 0 | **beatoraja ext**: LN mode (used only when 1–3) |
+| **`ln_type`** | int | no | 0 | **the reference implementation ext**: LN mode (used only when 1–3) |
 
-beatoraja interpretation quirks worth replicating: `judge_rank < 0` → warn; `0 ≤ judge_rank < 5` → used verbatim but warned ("not spec-conformant" — i.e. it accepts both the BMS-style small rank and the bmson percentage). `total > 0` → used with `TotalType.BMSON`; `total ≤ 0` → warn and ignore.
+the reference implementation interpretation quirks worth replicating: `judge_rank < 0` → warn; `0 ≤ judge_rank < 5` → used verbatim but warned ("not spec-conformant" — i.e. it accepts both the BMS-style small rank and the bmson percentage). `total > 0` → used with `TotalType.BMSON`; `total ≤ 0` → warn and ignore.
 
 ## 5. BarLine / lines
 
 | Field | Type | Req | Notes |
 |---|---|---|---|
 | `y` | unsigned long | yes | pulse of the bar line |
-| `k` | int | no | **beatoraja ext** "kind" (line type) |
+| `k` | int | no | **the reference implementation ext** "kind" (line type) |
 
 The first bar line at `y: 0` may be omitted. If `lines` is empty, assume 4/4 with a bar line every `4*resolution` (960) pulses.
 
@@ -599,13 +599,13 @@ All three extend a base carrying **`y`** (the pulse position).
 
 **BpmEvent**
 | `y` | unsigned long | pulse |
-| `bpm` | number | new tempo (must be > 0; beatoraja rejects ≤ 0) |
+| `bpm` | number | new tempo (must be > 0; the reference implementation rejects ≤ 0) |
 
 **StopEvent**
 | `y` | unsigned long | pulse where pause starts |
-| `duration` | unsigned long | pause length **in pulses** (beatoraja rejects < 0) |
+| `duration` | unsigned long | pause length **in pulses** (the reference implementation rejects < 0) |
 
-**ScrollEvent** (beatoraja extension — visual scroll-rate / Hi-Speed multiplier, does **not** affect judging time)
+**ScrollEvent** (the reference implementation extension — visual scroll-rate / Hi-Speed multiplier, does **not** affect judging time)
 | `y` | unsigned long | pulse |
 | `rate` | number | scroll multiplier, default `1.0` |
 
@@ -626,11 +626,11 @@ Note { x, y, l?, c? }
 
 The `c` flag enables "sound slicing": one audio file (`name`) is cut into pieces by successive notes; `c:true` means this note is the seam of an already-playing slice and the audio should keep flowing rather than retrigger.
 
-beatoraja's `Note` also carries internal fields `t` (type) and `up` used during LN reconstruction — not part of the JSON you parse; ignore on input.
+the reference implementation's `Note` also carries internal fields `t` (type) and `up` used during LN reconstruction — not part of the JSON you parse; ignore on input.
 
-**Long-note duration handling (beatoraja):** the audible duration of an LN's keysound is bounded either by `l` (to `y+l`) or by the next note in the same channel, whichever the engine computes; the playable end timeline is at `y + l`.
+**Long-note duration handling (the reference implementation):** the audible duration of an LN's keysound is bounded either by `l` (to `y+l`) or by the next note in the same channel, whichever the engine computes; the playable end timeline is at `y + l`.
 
-## 8. MineChannel / MineNote (beatoraja ext) and key_channels
+## 8. MineChannel / MineNote (the reference implementation ext) and key_channels
 
 ```
 MineChannel { name: string, notes: MineNote[] }
@@ -644,7 +644,7 @@ MineNote { x, y, damage }
 | `y` | unsigned long | pulse |
 | `damage` | number (double) | life damage dealt on hit |
 
-`key_channels` uses the **same `MineChannel`/`MineNote` shape** in jbms-parser, but represents **invisible notes** that only trigger a keysound (no judgement, no damage). When parsing for beatoraja compatibility, model both arrays with one struct and distinguish by which array they came from. Neither is in the official 1.0.0 spec — emit them only as an extension.
+`key_channels` uses the **same `MineChannel`/`MineNote` shape** in jbms-parser, but represents **invisible notes** that only trigger a keysound (no judgement, no damage). When parsing for the reference implementation compatibility, model both arrays with one struct and distinguish by which array they came from. Neither is in the official 1.0.0 spec — emit them only as an extension.
 
 ## 9. BGA
 
@@ -660,7 +660,7 @@ BGAEvent (a.k.a. BNote) { y: unsigned long, id: int, ... }
 
 - `BGAHeader`: `id` (picture handle) + `name` (image/video path). PNG for stills, WebM for video; recommended/typical frame 1280×720.
 - Each `*_events` entry has `y` (pulse to show) + `id` (references a `BGAHeader.id`).
-- **beatoraja extensions on the event (`BNote`)**: `id_set: int[]`, `condition: string`, `interval: int`, plus a `bga_sequence: BGASequence[]` (animation sequences, `BGASequence { id, sequence: Sequence[] }`). These are not in official 1.0.0; gate behind the extension flag. (Known beatoraja quirk: `layer_events` historically had playback bugs — issue #616.)
+- **the reference implementation extensions on the event (`BNote`)**: `id_set: int[]`, `condition: string`, `interval: int`, plus a `bga_sequence: BGASequence[]` (animation sequences, `BGASequence { id, sequence: Sequence[] }`). These are not in official 1.0.0; gate behind the extension flag. (Known the reference implementation quirk: `layer_events` historically had playback bugs — issue #616.)
 
 ## 10. mode_hint → lane (x) mapping
 
@@ -675,7 +675,7 @@ BGAEvent (a.k.a. BNote) { y: unsigned long, id: int, ... }
 | `popn-5k` | 1–5 | none |
 | `popn-9k` | 1–9 | none |
 
-Note the **gap**: scratch lives at `x=8` (and `x=16` for P2), so `x=6,7` are unused in 5K and `x=14,15` unused in 10K. This is exactly how beatoraja builds its `keyassign` arrays (`-1` = unmapped lane):
+Note the **gap**: scratch lives at `x=8` (and `x=16` for P2), so `x=6,7` are unused in 5K and `x=14,15` unused in 10K. This is exactly how the reference implementation builds its `keyassign` arrays (`-1` = unmapped lane):
 
 ```
 BEAT_5K  : keyassign = [0,1,2,3,4,-1,-1,5]                       // x1..x5 → 0..4, x8 → 5(SC)
@@ -683,7 +683,7 @@ BEAT_10K : keyassign = [0,1,2,3,4,-1,-1,5, 6,7,8,9,10,-1,-1,11]  // P2 x9..x13 �
 default  : keyassign[i] = i                                       // beat-7k, beat-14k, popn-*: x_n → lane n-1
 ```
 
-In code: `lane = (x>0 && x<=keyassign.length) ? keyassign[x-1] : -1` (i.e. convert the 1-based `x` to 0-based, look it up; `-1` = drop/auto). For the `default` branch beatoraja just maps `x_n → n-1` over the mode's `key` count, so beat-7k/14k/popn are identity-mapped with `x=8`/`x=16` naturally landing on the scratch lane index. Custom/extension modes should use a **distinct `mode_hint`** so players can route or reject them.
+In code: `lane = (x>0 && x<=keyassign.length) ? keyassign[x-1] : -1` (i.e. convert the 1-based `x` to 0-based, look it up; `-1` = drop/auto). For the `default` branch the reference implementation just maps `x_n → n-1` over the mode's `key` count, so beat-7k/14k/popn are identity-mapped with `x=8`/`x=16` naturally landing on the scratch lane index. Custom/extension modes should use a **distinct `mode_hint`** so players can route or reject them.
 
 ## 11. Minimal Rust struct sketch
 
@@ -732,7 +732,7 @@ struct BgaHeader { id: i32, name: String }
 struct BgaEvent  { y: u64, id: i32 }
 ```
 
-Use `pulses_per_quarter = resolution`; one 4/4 measure = `4*resolution` pulses; integrate time piecewise across `bpm_events` and add `stop_events`. For beatoraja byte-compat, multiply `resolution` by 4 and use the microsecond formulas in §2.
+Use `pulses_per_quarter = resolution`; one 4/4 measure = `4*resolution` pulses; integrate time piecewise across `bpm_events` and add `stop_events`. For the reference implementation byte-compat, multiply `resolution` by 4 and use the microsecond formulas in §2.
 
 ## Sources
 
@@ -741,8 +741,8 @@ Use `pulses_per_quarter = resolution`; one 4/4 measure = `4*resolution` pulses; 
 - [bemusic/bmson-spec repository](https://github.com/bemusic/bmson-spec)
 - [How to play bmson — bmson-spec Wiki](https://github.com/bemusic/bmson-spec/wiki/How-to-play-bmson)
 - [bmson-spec-fork 2.0.0-rc1 (later/forked spec, for contrast)](https://bmson-spec-fork.readthedocs.io/en/latest/doc/index.html)
-- beatoraja/jbms-parser implementation (extension fields + exact timing/lane logic): `exch-bms2/jbms-parser` — `src/bms/model/bmson/Bmson.java`, `BMSInfo.java`, `Note.java`, `MineChannel.java`, `MineNote.java`, `ScrollEvent.java`, `BMSONObject.java`, `BGA.java`, and `src/bms/model/BMSONDecoder.java` (keyassign arrays + `resolution*4`, time/stop formulas).
-- [exch-bms2/beatoraja repository](https://github.com/exch-bms2/beatoraja)
+- 레퍼런스 구현/jbms-parser implementation (extension fields + exact timing/lane logic): `exch-bms2/jbms-parser` — `src/bms/model/bmson/Bmson.java`, `BMSInfo.java`, `Note.java`, `MineChannel.java`, `MineNote.java`, `ScrollEvent.java`, `BMSONObject.java`, `BGA.java`, and `src/bms/model/BMSONDecoder.java` (keyassign arrays + `resolution*4`, time/stop formulas).
+- [exch-bms2/the reference implementation repository](https://github.com/exch-bms2/the reference implementation)
 
 ## Rust 스택
 

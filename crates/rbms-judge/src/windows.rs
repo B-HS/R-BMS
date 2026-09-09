@@ -6,9 +6,9 @@ use crate::Judge;
 /// the matched delta `dmtime = note_time - press_time` (>0 = pressed early/FAST, <0 =
 /// late/SLOW) must satisfy `late <= dmtime <= early`.
 ///
-/// `ms` is beatoraja's fifth pair (index 4 of `JudgeProperty`), the 空POOR band: a press that
+/// `ms` is the reference implementation's fifth pair (index 4 of `JudgeProperty`), the 空POOR band: a press that
 /// reaches only this window neither consumes the note nor (on 7K) breaks combo. Long-note end
-/// tables have no fifth pair in beatoraja (`JudgeProperty.longnote` is 8 longs, not 10), so `ms`
+/// tables have no fifth pair in the reference implementation (`JudgeProperty.longnote` is 8 longs, not 10), so `ms`
 /// is `None` there and anything outside BAD is judge code 4 (見逃し POOR) at the call site.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct JudgeWindows {
@@ -19,7 +19,7 @@ pub struct JudgeWindows {
     pub ms: Option<(i64, i64)>,
 }
 
-/// beatoraja `JudgeProperty.MissCondition`. `Always` counts every 見逃し POOR; `One` (PMS) counts
+/// Reference implementation `JudgeProperty.MissCondition`. `Always` counts every 見逃し POOR; `One` (PMS) counts
 /// only the first one per note.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MissCondition {
@@ -27,7 +27,7 @@ pub enum MissCondition {
     One,
 }
 
-/// One row of beatoraja's `JudgeProperty` enum: the four timing tables, their release margins and
+/// One row of the reference implementation's `JudgeProperty` enum: the four timing tables, their release margins and
 /// the per-judge combo/vanish policy. Adding a play mode is a new row here, never a branch in the
 /// judge engine.
 #[derive(Debug, Clone, Copy)]
@@ -58,7 +58,7 @@ const fn w4(pg: (i64, i64), gr: (i64, i64), gd: (i64, i64), bd: (i64, i64)) -> J
 }
 
 impl JudgeProperty {
-    /// beatoraja `JudgeProperty.FIVEKEYS` (`JudgeProperty.java:12-22`).
+    /// Reference implementation `JudgeProperty.FIVEKEYS` (`JudgeProperty.java:12-22`).
     pub const FIVEKEYS: JudgeProperty = JudgeProperty {
         note: w5((-20_000, 20_000), (-50_000, 50_000), (-100_000, 100_000), (-150_000, 150_000), (-150_000, 500_000)),
         scratch: w5((-30_000, 30_000), (-60_000, 60_000), (-110_000, 110_000), (-160_000, 160_000), (-160_000, 500_000)),
@@ -71,7 +71,7 @@ impl JudgeProperty {
         miss_condition: MissCondition::Always,
     };
 
-    /// beatoraja `JudgeProperty.SEVENKEYS` (`JudgeProperty.java:23-33`).
+    /// Reference implementation `JudgeProperty.SEVENKEYS` (`JudgeProperty.java:23-33`).
     pub const SEVENKEYS: JudgeProperty = JudgeProperty {
         note: w5((-20_000, 20_000), (-60_000, 60_000), (-150_000, 150_000), (-280_000, 220_000), (-150_000, 500_000)),
         scratch: w5((-30_000, 30_000), (-70_000, 70_000), (-160_000, 160_000), (-290_000, 230_000), (-160_000, 500_000)),
@@ -84,8 +84,8 @@ impl JudgeProperty {
         miss_condition: MissCondition::Always,
     };
 
-    /// beatoraja `JudgeProperty.PMS` (`JudgeProperty.java:34-44`). pop'n has no scratch lane, so
-    /// beatoraja leaves both scratch tables empty; the note/LN tables stand in here so a stray
+    /// Reference implementation `JudgeProperty.PMS` (`JudgeProperty.java:34-44`). pop'n has no scratch lane, so
+    /// the reference implementation leaves both scratch tables empty; the note/LN tables stand in here so a stray
     /// scratch lookup can never hit a zero-length window.
     pub const PMS: JudgeProperty = JudgeProperty {
         note: w5((-20_000, 20_000), (-50_000, 50_000), (-117_000, 117_000), (-183_000, 183_000), (-175_000, 500_000)),
@@ -99,7 +99,7 @@ impl JudgeProperty {
         miss_condition: MissCondition::One,
     };
 
-    /// beatoraja `JudgeProperty.KEYBOARD` (`JudgeProperty.java:45-55`). Data only — the 24K mode is
+    /// Reference implementation `JudgeProperty.KEYBOARD` (`JudgeProperty.java:45-55`). Data only — the 24K mode is
     /// not wired into `rbms_model::Mode` yet, so nothing selects this row.
     pub const KEYBOARD: JudgeProperty = JudgeProperty {
         note: w5((-30_000, 30_000), (-90_000, 90_000), (-200_000, 200_000), (-320_000, 240_000), (-200_000, 650_000)),
@@ -122,7 +122,7 @@ impl JudgeProperty {
         }
     }
 
-    /// Widest candidate window across the NOTE and SCRATCH tables, as `(late, early)`. beatoraja
+    /// Widest candidate window across the NOTE and SCRATCH tables, as `(late, early)`. The reference implementation
     /// seeds `mjudgestart`/`mjudgeend` at 0 and folds both tables' bounds in
     /// (`JudgeManager.java:189-197`), so the gate is chart-global, not per-lane.
     pub fn candidate_gate(&self) -> (i64, i64) {
@@ -139,20 +139,20 @@ impl JudgeProperty {
 }
 
 impl JudgeWindows {
-    /// beatoraja `JudgeProperty.SEVENKEYS` NOTE row, kept as a standalone constant because it is
+    /// Reference implementation `JudgeProperty.SEVENKEYS` NOTE row, kept as a standalone constant because it is
     /// the default window for the mode-less constructors and most tests.
     pub const SEVENKEY_NOTE: JudgeWindows = JudgeProperty::SEVENKEYS.note;
 
-    /// beatoraja `JudgeProperty.SEVENKEYS` LONGNOTE_END row.
+    /// Reference implementation `JudgeProperty.SEVENKEYS` LONGNOTE_END row.
     pub const SEVENKEY_LN_END: JudgeWindows = JudgeProperty::SEVENKEYS.ln_end;
 
-    /// beatoraja `JudgeProperty.PMS` NOTE row.
+    /// Reference implementation `JudgeProperty.PMS` NOTE row.
     pub const POPN_NOTE: JudgeWindows = JudgeProperty::PMS.note;
 
-    /// beatoraja `JudgeProperty.PMS` LONGNOTE_END row.
+    /// Reference implementation `JudgeProperty.PMS` LONGNOTE_END row.
     pub const POPN_LN_END: JudgeWindows = JudgeProperty::PMS.ln_end;
 
-    /// The window pairs in beatoraja order (PG, GR, GD, BD, and MS when present).
+    /// The window pairs in reference implementation order (PG, GR, GD, BD, and MS when present).
     pub fn pairs(&self) -> Vec<(i64, i64)> {
         let mut v = vec![self.pg, self.gr, self.gd, self.bd];
         if let Some(ms) = self.ms {
@@ -172,7 +172,7 @@ impl JudgeWindows {
     }
 
     /// Apply a `judgerank` percentage (100 = default). PG/GR/GD/BD scale; the MS window is
-    /// fixed (beatoraja `JudgeWindowRule.NORMAL.fixjudge` fixes only index 4). beatoraja
+    /// fixed (reference implementation `JudgeWindowRule.NORMAL.fixjudge` fixes only index 4). It
     /// (`JudgeProperty.java:234`) applies the percentage with no lower clamp, so a judgerank of 0
     /// collapses PG/GR/GD/BD to `(0, 0)` here too.
     pub fn scaled(&self, judgerank_percent: i32) -> JudgeWindows {
@@ -181,7 +181,7 @@ impl JudgeWindows {
         JudgeWindows { pg: s(self.pg), gr: s(self.gr), gd: s(self.gd), bd: s(self.bd), ms: self.ms }
     }
 
-    /// Apply the user JUDGE WIDTH rates (percent, `[PG, GR, GD]`), beatoraja
+    /// Apply the user JUDGE WIDTH rates (percent, `[PG, GR, GD]`), reference implementation
     /// `JudgeWindowRule.create` lines 262-273. Only the first three tiers scale; each bound is then
     /// clamped so it never exceeds the BAD bound (`judge[6 + j]` in the Java, i.e. index 3) and
     /// never shrinks below the tier before it. BAD and MS are untouched.
@@ -211,14 +211,14 @@ impl JudgeWindows {
         JudgeWindows { pg: tiers[0], gr: tiers[1], gd: tiers[2], bd: self.bd, ms: self.ms }
     }
 
-    /// Whether `dmtime` sits inside the MS (空POOR) band. beatoraja tests window index 4 on its own
+    /// Whether `dmtime` sits inside the MS (空POOR) band. The reference implementation tests window index 4 on its own
     /// for an already-judged note (`JudgeManager.java:400-401`), rather than walking the
     /// PG/GR/GD/BD ladder first. Tables without an MS pair (long-note ends) never match.
     pub fn in_ms_band(&self, dmtime: i64) -> bool {
         self.ms.is_some_and(|w| dmtime >= w.0 && dmtime <= w.1)
     }
 
-    /// Classify a timing delta. The MS band yields [`Judge::Miss`] — beatoraja's judge code 5
+    /// Classify a timing delta. The MS band yields [`Judge::Miss`] — the reference implementation's judge code 5
     /// (空POOR, `JudgeManager.java:404` maps window index 4 to code 5) — and `None` means the press
     /// reached no window at all. Tables without an MS pair (long-note ends) never yield `Miss`.
     pub fn judge(&self, dmtime: i64) -> Option<Judge> {
@@ -244,11 +244,11 @@ impl JudgeWindows {
 const RANK_TABLE: [i32; 5] = [25, 50, 75, 100, 125];
 
 /// judgerank percent used when `#RANK` is missing or out of range, and the base that
-/// `#DEFEXRANK` scales (beatoraja `JudgeWindowRule.NORMAL.judgerank[2][1]`).
+/// `#DEFEXRANK` scales (reference implementation `JudgeWindowRule.NORMAL.judgerank[2][1]`).
 const NORMAL_JUDGERANK: i32 = 75;
 
 /// `#RANK` index → judgerank percent (`BMSPlayerRule.java:62`). Out-of-range falls back to
-/// NORMAL (75) — beatoraja does not clamp to the table ends.
+/// NORMAL (75) — the reference implementation does not clamp to the table ends.
 pub fn rank_to_judgerank(rank: i32) -> i32 {
     if rank < 0 { NORMAL_JUDGERANK } else { RANK_TABLE.get(rank as usize).copied().unwrap_or(NORMAL_JUDGERANK) }
 }
@@ -326,7 +326,7 @@ mod windows_tests {
         assert_eq!(l.gr, (-160_000, 160_000));
         assert_eq!(l.gd, (-200_000, 200_000));
         assert_eq!(l.bd, (-280_000, 220_000));
-        assert_eq!(l.ms, None, "beatoraja's longnote table has only four pairs");
+        assert_eq!(l.ms, None, "the reference implementation's longnote table has only four pairs");
     }
 
     #[test]
@@ -407,7 +407,7 @@ mod windows_tests {
         assert_eq!(s.gr, (-30_000, 30_000));
         assert_eq!(s.gd, (-75_000, 75_000));
         assert_eq!(s.bd, (-140_000, 110_000));
-        assert_eq!(s.ms, W.ms, "beatoraja fixjudge[4] keeps the MS band at 100%");
+        assert_eq!(s.ms, W.ms, "reference implementation fixjudge[4] keeps the MS band at 100%");
     }
 
     #[test]

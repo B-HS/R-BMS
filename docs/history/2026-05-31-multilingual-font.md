@@ -1,9 +1,9 @@
 # 2026-05-31 (세션 B) — 다국어 폰트 지원 (cosmic-text)
 
 기존 5×7 ASCII 비트맵(`font.rs`)이라 일본어/한국어/★ 등 비ASCII가 전부 공백이던 문제. 사용자 요구:
-모든 언어·더 나은 룩·MIT 라이선스·폰트 교체 가능·향후 웹폰트. beatoraja 참고.
+모든 언어·더 나은 룩·MIT 라이선스·폰트 교체 가능·향후 웹폰트. 레퍼런스 구현 참고.
 
-## beatoraja 폰트 시스템 (대조)
+## 레퍼런스 구현 폰트 시스템 (대조)
 `Config.systemfontpath`(기본 VL-Gothic-Regular.ttf 4MB) **설정형 단일 폰트** + libGDX FreeType 런타임 래스터(`SkinTextFont`, `parameter.characters=text` 문자열 단위 지연 글리프) + `GlyphLayout`(정렬/줄바꿈/overflow/그림자). **자동 다중폰트 폴백 없음** → 단일 폰트 커버 언어만. 우리는 폴백/시스템폰트로 한 단계 개선.
 
 ## 결정

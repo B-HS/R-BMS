@@ -1,6 +1,6 @@
 # ux-flow 감사 보고서 검증 (회의적 재검토)
 
-대상: `scratchpad/research/ux-flow.md` findings 21건. 각 항목을 rbms/beatoraja 코드로 직접 반박 시도.
+대상: `scratchpad/research/ux-flow.md` findings 21건. 각 항목을 rbms/레퍼런스 구현 코드로 직접 반박 시도.
 검증 시각 기준 브랜치: dev (c6f0885).
 
 ## 요약
@@ -46,7 +46,7 @@
 
 ### ux-flow-05 — confirmed
 
-beatoraja `play/TargetProperty.java:116-140` 고정레이트 11종(RATE_A- … MAX), `:142-151` 임의 RATE_<n>, 라이벌/랭크 계열도 같은 파일에 존재 — 인용 정확. rbms: `crates/rbms-render/src/hud.rs:22` `best_ex: Option<u32>` (주석 "Local best EX on this chart"), `:28` `draw_score_graph(..., best: Option<u32>)` 단일 타깃, `app_play.rs:232`(ResultView `show_graph`) — HUD 쪽 전달은 별도지만 단일 best 인 점은 맞다. 타깃 선택 UI 없음 확인.
+레퍼런스 구현 `play/TargetProperty.java:116-140` 고정레이트 11종(RATE_A- … MAX), `:142-151` 임의 RATE_<n>, 라이벌/랭크 계열도 같은 파일에 존재 — 인용 정확. rbms: `crates/rbms-render/src/hud.rs:22` `best_ex: Option<u32>` (주석 "Local best EX on this chart"), `:28` `draw_score_graph(..., best: Option<u32>)` 단일 타깃, `app_play.rs:232`(ResultView `show_graph`) — HUD 쪽 전달은 별도지만 단일 best 인 점은 맞다. 타깃 선택 UI 없음 확인.
 
 ### ux-flow-06 — confirmed
 
@@ -55,19 +55,19 @@ beatoraja `play/TargetProperty.java:116-140` 고정레이트 11종(RATE_A- … M
 ### ux-flow-07 — confirmed
 
 `app_input.rs:89-105` `apply_control` 6분기 전부 save 없음(Lift 만 `rebuild_skin()`). 저장 지점은 `app_input.rs:136-138`(`save_settings`) 를 부르는 `main.rs`(Settings Esc/Enter), `app_input.rs:150`(폰트), `:191`(NETWORK), `app_play.rs:367`(auto-cal). 재실행 시 유실 성립.
-정정: beatoraja 대조로 든 `ControlInputProcessor.java:130-166` 은 레인커버/START-홀드 처리 구간이며 "PlayerConfig 에 반영"하는 코드는 이 범위에 없다(`setCoverValue` 는 렌더러 상태). 대조 근거로는 약하나 결론은 무관하게 성립.
+정정: 레퍼런스 구현 대조로 든 `ControlInputProcessor.java:130-166` 은 레인커버/START-홀드 처리 구간이며 "PlayerConfig 에 반영"하는 코드는 이 범위에 없다(`setCoverValue` 는 렌더러 상태). 대조 근거로는 약하나 결론은 무관하게 성립.
 
 ### ux-flow-08 — confirmed
 
-rbms `main.rs:1003` `KeyCode::Tab => self.stage = Stage::Settings` — 전체화면 전환 확인. beatoraja `select/MusicSelectInputProcessor.java:114-151` `input.startPressed()` 홀드 중 `setPanelState(1)` + OPTION1/GAUGE/OPTIONDP/OPTION2/HSFIX, `:99-107` 릴리스 시 `OPTION_CLOSE` — 인용 정확.
+rbms `main.rs:1003` `KeyCode::Tab => self.stage = Stage::Settings` — 전체화면 전환 확인. 레퍼런스 구현 `select/MusicSelectInputProcessor.java:114-151` `input.startPressed()` 홀드 중 `setPanelState(1)` + OPTION1/GAUGE/OPTIONDP/OPTION2/HSFIX, `:99-107` 릴리스 시 `OPTION_CLOSE` — 인용 정확.
 
 ### ux-flow-09 — partially
 
-rbms 쪽(ControlAction 6종, Play Esc = 결과 직행 또는 이탈: `main.rs:1107-1118`)은 정확. 그러나 **beatoraja 대조가 틀렸다**:
+rbms 쪽(ControlAction 6종, Play Esc = 결과 직행 또는 이탈: `main.rs:1107-1118`)은 정확. 그러나 **레퍼런스 구현 대조가 틀렸다**:
 - `play/ControlInputProcessor.java:205-216` 의 `ControlKeys.NUM1~NUM4` 는 pause/retry 가 아니라 **autoplay/replay 전용 재생속도 변경**(`player.setPlaySpeed(25/50/200/300)`)이다. 바로 위 `if (autoplay.mode == AUTOPLAY || REPLAY)` 가드가 그 증거.
 - 같은 파일 `:203-205` `ESCAPE → player.stopPlay()` 는 rbms 의 Esc 와 동일 동작(즉시 이탈). START+SELECT 장압 종료(`:194-200`)도 종료지 일시정지가 아니다.
-- beatoraja 에 인터랙티브 플레이 중 **일시정지는 없다**. `PracticeConfiguration.java` 는 별도 PRACTICE 모드의 사전 설정이고, "QuickRetry" 는 `BMSPlayer.java:184` 주석에만 등장한다(입력 경로 미확인).
-→ "beatoraja 가 제공하는 일시정지·리트라이가 rbms 에 없다"는 **원본 대비 결손이 아니라 신규 기능 제안**이다. severity medium → low, 그리고 근거를 "원본 divergence"가 아닌 "UX 개선"으로 재분류해야 한다.
+- 레퍼런스 구현 에 인터랙티브 플레이 중 **일시정지는 없다**. `PracticeConfiguration.java` 는 별도 PRACTICE 모드의 사전 설정이고, "QuickRetry" 는 `BMSPlayer.java:184` 주석에만 등장한다(입력 경로 미확인).
+→ "레퍼런스 구현 가 제공하는 일시정지·리트라이가 rbms 에 없다"는 **원본 대비 결손이 아니라 신규 기능 제안**이다. severity medium → low, 그리고 근거를 "원본 divergence"가 아닌 "UX 개선"으로 재분류해야 한다.
 
 ### ux-flow-10 — partially
 
@@ -76,7 +76,7 @@ rbms 쪽(ControlAction 6종, Play Esc = 결과 직행 또는 이탈: `main.rs:11
 ### ux-flow-11 — partially
 
 `app_select.rs:439` `eng.play(PREVIEW_ID, PREVIEW_GAIN, 0.0, 1.0, now)` 페이드 인자 없음, `main.rs:60 PREVIEW_GAIN: f32 = 0.85` 상수 고정 — 사실. 설정에 볼륨 행 없음도 사실.
-정정: 보고서 스스로 "beatoraja `PreviewMusicProcessor.java` 미확인"이라 적어 원본 대비 결손인지 근거가 없다. 또한 이 항목은 `config.preview` 토글(`app_input.rs`, DISPLAY 탭)로 전체 on/off 는 되므로 "설정 항목이 없다"는 볼륨 한정으로 좁혀야 한다.
+정정: 보고서 스스로 "레퍼런스 구현 `PreviewMusicProcessor.java` 미확인"이라 적어 원본 대비 결손인지 근거가 없다. 또한 이 항목은 `config.preview` 토글(`app_input.rs`, DISPLAY 탭)로 전체 on/off 는 되므로 "설정 항목이 없다"는 볼륨 한정으로 좁혀야 한다.
 
 ### ux-flow-12 — partially (기전 정정, 문제는 오히려 확대)
 
@@ -136,7 +136,7 @@ rbms 쪽(ControlAction 6종, Play Esc = 결과 직행 또는 이탈: `main.rs:11
 | id | 내용 | 근거 |
 |---|---|---|
 | M1 | **Root 에서 Esc 가 확인 없이 앱을 종료한다 — 라이브러리가 가득 차 있어도** | `app_select.rs:824-827` `SelectView::Root => event_loop.exit()`, 호출 `main.rs:999`. ux-flow-12 가 빈 라이브러리 한정으로 오인한 더 큰 문제 |
-| M2 | **Play 중 Esc 가 즉시·무확인으로 런을 폐기한다** | `main.rs:1108-1117`: 미완주 상태면 `to_select_or_exit` 로 곧장 이탈, 진행 중 기록 전부 소실. 확인 다이얼로그 없음. beatoraja 는 START+SELECT 장압(`ControlInputProcessor.java:194-200`, `exitPressDuration`)으로 오조작을 막는다 |
+| M2 | **Play 중 Esc 가 즉시·무확인으로 런을 폐기한다** | `main.rs:1108-1117`: 미완주 상태면 `to_select_or_exit` 로 곧장 이탈, 진행 중 기록 전부 소실. 확인 다이얼로그 없음. 레퍼런스 구현 는 START+SELECT 장압(`ControlInputProcessor.java:194-200`, `exitPressDuration`)으로 오조작을 막는다 |
 | M3 | **표 로드 실패가 조용히 빈 레벨로 흡수된다** | `tablesrc.rs:84-87`: 실패 시 `fallback_source_name` + `Vec::new()` 반환 → UI 에는 이름만 있고 항목 0개인 표가 정상처럼 보인다. 실패/미로드 구분이 UI 에 없음 |
 | M4 | **`replay load failed` 는 debug 게이트조차 없는 무성 실패** | `app_select.rs:580` `eprintln!("replay load failed: {e}")` 후 진행 — 기록 모달에서 리플레이를 골라도 아무 일도 안 일어난 것처럼 보인다 |
 | M5 | **검색 중 Esc 가 쿼리를 지우는 동시에 뷰(AllSongs)는 복원하지 않는다** | `app_select.rs:33-39` `exit_search` 가 `select_view` 를 되돌리지 않음 + `start_search`(`:25-31`)가 원래 뷰를 저장하지 않음 → 표/레벨 폴더에서 검색하면 그 폴더로 못 돌아온다 |
@@ -150,6 +150,6 @@ rbms 쪽(ControlAction 6종, Play Esc = 결과 직행 또는 이탈: `main.rs:11
 
 - `gpu.rs` present mode / vsync 설정 (ux-flow-10 의 실제 프레임레이트 전제)
 - `Cargo.toml` 의존성 목록 (클립보드 크레이트 부재는 grep 기반)
-- beatoraja `select/PreviewMusicProcessor.java` (ux-flow-11 원본 대조)
+- 레퍼런스 구현 `select/PreviewMusicProcessor.java` (ux-flow-11 원본 대조)
 - rbms 설정 화면 렌더(`crates/rbms-render/src/select.rs` 의 Settings 경로) 및 `SETTING_TABS` 전 항목
 - 실제 실행 계측(프리징 체감 시간, 표 fetch 실측)

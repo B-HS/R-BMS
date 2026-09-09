@@ -2,18 +2,18 @@
 
 # R-BMS
 
-**A BMS rhythm-game player in Rust — beatoraja-accurate judgment, sample-clocked audio, wgpu rendering.**
+**A BMS rhythm-game player in Rust — reference-accurate judgment, sample-clocked audio, wgpu rendering.**
 
 [Features](#features) · [Build](#build) · [Controls](#controls) · [Development](#development)
 
 </div>
 
-R-BMS reimplements the core PLAY loop of [beatoraja](https://github.com/exch-bms2/beatoraja) in Rust. Judgment windows, gauges and TOTAL scaling are cross-checked against the beatoraja source, the play clock is the number of audio samples actually played, and every mode, skin, key map and setting is data, not code. It is a single native binary with no JVM and no runtime dependencies.
+R-BMS reimplements the core PLAY loop of a GPL-3.0 reference implementation in Rust. Judgment windows, gauges and TOTAL scaling are cross-checked against the reference implementation's source, the play clock is the number of audio samples actually played, and every mode, skin, key map and setting is data, not code. It is a single native binary with no JVM and no runtime dependencies.
 
 ## Features
 
 - **Play** — 5K / 7K / 9K (pop'n) / 10K / 14K auto-detected from the chart, normal and long notes with LN / CN / HCN, mines, BGA images, key beams and hit bombs
-- **Judgment** — beatoraja `JudgeProperty` windows per mode, `#RANK` / `#DEFEXRANK`, judge offset with one-play auto-calibration, judge width, FAST / SLOW, empty POOR handled like beatoraja
+- **Judgment** — reference implementation `JudgeProperty` windows per mode, `#RANK` / `#DEFEXRANK`, judge offset with one-play auto-calibration, judge width, FAST / SLOW, empty POOR handled like the reference implementation
 - **Gauges** — ASSISTED EASY / EASY / NORMAL / HARD / EX-HARD / HAZARD with TOTAL scaling, clear lamps, DJ LEVEL and EX score
 - **Options** — MIRROR / RANDOM / S-RANDOM / R-RANDOM / H-RANDOM / ALL-SCRATCH / ROTATE (seeded, DP sides independent), hi-speed with constant-speed mode and green number, lift, lane cover, scratch side and auto-scratch
 - **Song select** — recursive library scan, folders and difficulty tables (`data.json`), search and sort, `#PREVIEW` or autoplay preview, cover art, note density graph, local records with replay playback
@@ -51,7 +51,7 @@ Options: `--interactive` `--auto` `--hispeed F` `--gauge NAME` `--lift F` `--sc-
 | [ ] | — | Lift |
 | O / T / R / `/` / F3 | Folders / tables / records / search / sort | — |
 
-Default lanes follow the beatoraja keyboard layout: 7K `Z S X D C F V` + `LShift` (scratch), 9K `Z S X D C F V G B`, 14K adds `M K , L . ; /` + `RShift`. Everything is remappable in Settings → KEY CONFIG or `~/.config/rbms/keyconfig.ron`.
+Default lanes follow the reference keyboard layout: 7K `Z S X D C F V` + `LShift` (scratch), 9K `Z S X D C F V G B`, 14K adds `M K , L . ; /` + `RShift`. Everything is remappable in Settings → KEY CONFIG or `~/.config/rbms/keyconfig.ron`.
 
 ## Development
 
@@ -63,8 +63,8 @@ cargo run -p rbms-render --example render_select   # headless render to PPM
 
 Workspace crates, bottom up: `rbms-model` (chart types) → `rbms-parser` (BMS lexer, `#RANDOM` / `#SWITCH`, MD5 + SHA-256) → `rbms-chart` (timing, lanes, shuffle, scroll) → `rbms-judge` (windows, matcher, gauges) → `rbms-audio` (cpal + symphonia, real-time mixer) / `rbms-render` (`Renderer` trait, CPU reference canvas, skins, fonts) / `rbms-ir` / `rbms-table` → `rbms-play` (session driver) → `apps/rbms-player` (winit + wgpu). CI builds a macOS universal binary and Windows on every push to `dev`.
 
-Architecture, the beatoraja parity ledger, decisions and the improvement plan live in [docs/](docs/README.md) (Korean). Start with [docs/PROCESS.md](docs/PROCESS.md).
+Architecture, the reference parity ledger, decisions and the improvement plan live in [docs/](docs/README.md) (Korean). Start with [docs/PROCESS.md](docs/PROCESS.md).
 
 ## License
 
-[GPL-3.0-or-later](LICENSE). beatoraja is GPL-3.0; this project is a clean-room port of its play logic to Rust.
+[GPL-3.0-or-later](LICENSE). The play logic is a clean-room Rust port of a GPL-3.0 reference implementation.

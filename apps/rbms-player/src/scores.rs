@@ -17,7 +17,7 @@ pub fn rule_version_note(rule_version: u32) -> &'static str {
 }
 
 /// One persisted play result, kept locally so play history and replays survive without a score
-/// server. `clear` is the beatoraja `ClearType` id (0..10) so lamps round-trip; `replay_file` is
+/// server. `clear` is the reference implementation's `ClearType` id (0..10) so lamps round-trip; `replay_file` is
 /// the basename (under `replays/`) of the saved replay, when one was recorded.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ScoreRecord {
@@ -42,7 +42,7 @@ pub struct ScoreRecord {
     #[serde(default)]
     pub rule_version: u32,
     /// The run used an assist (widened judge window or an auto-played lane), so it is kept as
-    /// history but excluded from the stored bests — beatoraja clears the same `score` flag and
+    /// history but excluded from the stored bests — the reference implementation clears the same `score` flag and
     /// gates exscore/minbp/combo on it (`ScoreData.java:548,566,572,578`). Records written before
     /// the field existed default to `false`.
     #[serde(default)]
@@ -104,7 +104,7 @@ impl ScoreBook {
 
     /// Best clear-lamp id on a chart (highest `ClearType` id), folded without allocation — used for
     /// the per-row clear-lamp LED in the select list. `None` if the chart has no unassisted records.
-    /// beatoraja updates the lamp for assisted runs too, but only after demoting it to
+    /// The reference implementation updates the lamp for assisted runs too, but only after demoting it to
     /// `AssistEasy`/`LightAssistEasy` (`BMSPlayer.java:866`); rbms cannot demote the lamp yet, so an
     /// assisted run must not raise the LED at all.
     pub fn best_clear_for_md5(&self, md5: &str) -> Option<u8> {

@@ -1,10 +1,10 @@
-# beatoraja 판정 외 기능 인벤토리 vs rbms (2026-09-09)
+# 레퍼런스 구현 판정 외 기능 인벤토리 vs rbms (2026-09-09)
 
 조사 시간 상한 15분. 판정/게이지 수치 대조는 범위 밖(다른 에이전트).
 근거는 `파일:라인` 으로 양쪽 인용. 코드로 확인 못 한 것은 `[미확인]`.
 
 - rbms: `/Users/gkn/R-BMS` (총 20,879 LOC Rust)
-- beatoraja: `/Users/gkn/beatoraja/src/bms/player/beatoraja` (조사 대상 패키지 합계 33,377 LOC Java)
+- 레퍼런스 구현: `<reference>/src/bms/player/레퍼런스 구현` (조사 대상 패키지 합계 33,377 LOC Java)
 
 ---
 
@@ -12,7 +12,7 @@
 
 ### 1.1 select/ (MusicSelector)
 
-| beatoraja 기능 | 근거 | rbms 상태 | 근거 |
+| 레퍼런스 구현 기능 | 근거 | rbms 상태 | 근거 |
 |---|---|---|---|
 | Bar 타입 13종 (SongBar/FolderBar/DirectoryBar/TableBar/GradeBar/HashBar/CommandBar/ContainerBar/RandomCourseBar/SameFolderBar/SearchWordBar/ExecutableBar/SelectableBar) | `select/bar/` 디렉토리 목록 | **부분** — 4종만 (`Root`/`AllSongs`/`TableLevels`/`TableLevel`) | main.rs:527-541 `enum SelectView`, `enum SelectItem` |
 | 정렬 12종 (TITLE/ARTIST/BPM/LENGTH/LEVEL/CLEAR/SCORE/MISSCOUNT/DURATION/LASTUPDATE/RIVALCOMPARE_CLEAR/RIVALCOMPARE_SCORE) | select/BarSorter.java:14-236, 260 `defaultSorter` 8종 | **부분** — 5종 (DEFAULT/TITLE/ARTIST/LEVEL/CLEAR) | main.rs:543-573 `SortMode` |
@@ -47,7 +47,7 @@
 | 커스텀 타이머(RhythmTimerProcessor / TimerManager) | play/RhythmTimerProcessor.java, TimerManager.java | **미구현** | 없음 |
 | 리플레이 저장/자동재생 | ReplayData.java, PlayDataAccessor.java, PlayerConfig.java:169 `autosavereplay[]`(슬롯 배열) | **구현(1슬롯 자동)** — AUTO REPLAY 저장 + 재생, 슬롯 개념 없음 | app_play.rs:318-338, replay.rs:17-37 |
 | 일시정지/빠른 리트라이/exitPressDuration | PlayerConfig.java:184 `exitPressDuration`, BMSPlayer.java `[미확인 — 시간상 본문 미독]` | **미구현** — Esc 는 즉시 이탈(전 노트 판정 완료면 결과로) | main.rs:1107-1117 |
-| 리플레이 분석(재생속도·시크·일시정지) | beatoraja 대응 기능 `[미확인]` | **rbms 고유 확장** — Space/+/-/PageUp·Down | app_input.rs:294-317 |
+| 리플레이 분석(재생속도·시크·일시정지) | 레퍼런스 구현 대응 기능 `[미확인]` | **rbms 고유 확장** — Space/+/-/PageUp·Down | app_input.rs:294-317 |
 | autoplay | pattern/AutoplayModifier.java | **구현** | main.rs:1127 `if !self.autoplay` |
 
 ### 1.4 result/
@@ -61,7 +61,7 @@
 
 ### 1.5 pattern/ (노트 옵션)
 
-| beatoraja Random 옵션 | 근거 | rbms |
+| 레퍼런스 구현 Random 옵션 | 근거 | rbms |
 |---|---|---|
 | IDENTITY/MIRROR/RANDOM/ROTATE/S_RANDOM/SPIRAL/H_RANDOM/ALL_SCR + *_EX 4종 (총 12) | pattern/Random.java:6-17 | rbms `NoteOption` — PROCESS.md §7 에 "ALL-SCRATCH/H-RANDOM 해결" 기재. 정확한 세트는 rbms-chart/src/shuffle.rs `NoteOption::ALL` (main.rs:918-921 에서 순회) `[전수 대조 미실시]` |
 | FLIP / BATTLE (2P 필드) | pattern/PatternModifier.java:118-121 | **미구현 추정** — 14K 듀얼필드는 있으나 FLIP/BATTLE 옵션 없음 `[미확인]` |
@@ -70,7 +70,7 @@
 
 ### 1.6 input/
 
-| 장치 | 근거(beatoraja) | rbms |
+| 장치 | 근거(레퍼런스 구현) | rbms |
 |---|---|---|
 | 키보드 | input/KeyBoardInputProcesseor.java | **구현** | app_input.rs (winit KeyCode) |
 | 컨트롤러/게임패드 | input/BMControllerInputProcessor.java, launcher/ControllerConfigViewModel.java | **미구현** — 워크스페이스에 gilrs/gamepad 의존성 0건 | `grep -rn "gilrs\|gamepad\|joystick" crates apps Cargo.toml` → 히트 0 |
@@ -89,7 +89,7 @@
 
 ### 1.8 ir/
 
-| beatoraja IRConnection 메서드 | 근거 | rbms ScoreServer |
+| 레퍼런스 구현 IRConnection 메서드 | 근거 | rbms ScoreServer |
 |---|---|---|
 | register/login/getRivals/getTableDatas/getPlayData/getCoursePlayData/sendPlayData/sendCoursePlayData/getSongURL/getCourseURL/getPlayerURL/getVersionInfo/getIllegalSongs | ir/IRConnection.java:17-128 | **DTO·trait 은 슈퍼셋으로 존재하나 서버 미구현** → `register/login/get_settings/put_settings/download_replay/course_ranking` 은 기본 `Unsupported` | rbms-ir/src/lib.rs:46-84 |
 | RankingDataCache(곡선택 랭킹 캐시) | ir/RankingDataCache.java | **미구현** | — |
@@ -107,11 +107,11 @@
 
 ### 1.10 launcher/ (설정 GUI)
 
-beatoraja 는 JavaFX 런처에 9개 탭(Audio/Input/IR/MusicSelect/Play/Resource/Skin/Video/Stream) + 3개 에디터(Course/Folder/Table) + SongDataView 를 갖는다 (launcher/*.java 파일 목록).
+레퍼런스 구현 는 JavaFX 런처에 9개 탭(Audio/Input/IR/MusicSelect/Play/Resource/Skin/Video/Stream) + 3개 에디터(Course/Folder/Table) + SongDataView 를 갖는다 (launcher/*.java 파일 목록).
 
 rbms 는 인게임 설정 6탭(PLAY/GAUGE/JUDGE/DISPLAY/INPUT/NETWORK), 총 24행 (main.rs:598-606 `SETTING_TABS`, app_select.rs:888-916 `setting_line`).
 
-| beatoraja 탭 | rbms 대응 |
+| 레퍼런스 구현 탭 | rbms 대응 |
 |---|---|
 | AudioConfiguration | **없음** (드라이버·버퍼·볼륨 3분리·freq 전부 미노출) |
 | InputConfiguration + ControllerConfig | **부분** — KEY CONFIG 화면(키보드 전용), 컨트롤러 없음 (keyconfig.rs) |
@@ -139,7 +139,7 @@ rbms 는 인게임 설정 6탭(PLAY/GAUGE/JUDGE/DISPLAY/INPUT/NETWORK), 총 24�
 
 ### 2.1 곡 스캔
 
-beatoraja: SQLite `songdata`/`folder` 테이블 + 폴더 `lastModifiedTime` 비교 증분 갱신(`updateSongDatas(path, bmsroot, updateAll, info)`, song/SQLiteSongDatabaseAccessor.java:461; `BMSFolder(Path, String[], long lastModifiedTime)` :1056). 검색은 SQL(`getSongDatasByText` :385).
+레퍼런스 구현: SQLite `songdata`/`folder` 테이블 + 폴더 `lastModifiedTime` 비교 증분 갱신(`updateSongDatas(path, bmsroot, updateAll, info)`, song/SQLiteSongDatabaseAccessor.java:461; `BMSFolder(Path, String[], long lastModifiedTime)` :1056). 검색은 SQL(`getSongDatasByText` :385).
 
 rbms: 캐시 없음. 매 실행 시(그리고 폴더 목록 변경마다) 전 라이브러리를 재귀 스캔하며 **모든 차트 파일을 read + 전체 파싱**한다.
 
@@ -148,7 +148,7 @@ rbms: 캐시 없음. 매 실행 시(그리고 폴더 목록 변경마다) 전 �
 - 실행 지점: 최초 부팅 main.rs:797, 폴더 변경 시 app_select.rs:695-707.
 - `rbms_parser::parse` 는 원시 바이트 MD5 + SHA-256 을 계산한다(PROCESS.md §1 "차트 해시 = raw 바이트 MD5+SHA-256"), 즉 곡당 해시 2회 + 렉싱 1회.
 
-추정(코드 구조 기반, 실측 아님 `[미확인]`): 곡당 read+parse+2해시가 1~5 ms 라면 **10,000 차트 = 10~50 초 단일 스레드**, 30,000 차트면 30~150 초. beatoraja 는 2회차부터 증분이므로 사실상 0초. 이것이 대규모 라이브러리에서의 가장 큰 체감 격차다.
+추정(코드 구조 기반, 실측 아님 `[미확인]`): 곡당 read+parse+2해시가 1~5 ms 라면 **10,000 차트 = 10~50 초 단일 스레드**, 30,000 차트면 30~150 초. 레퍼런스 구현 는 2회차부터 증분이므로 사실상 0초. 이것이 대규모 라이브러리에서의 가장 큰 체감 격차다.
 
 메모리: `SongEntry`(main.rs:358-379)는 곡당 String 9개 + PathBuf. 10k 곡이면 수 MB~십수 MB 수준으로 문제 없음. 문제는 시간과 I/O.
 
@@ -158,7 +158,7 @@ rbms: 캐시 없음. 매 실행 시(그리고 폴더 목록 변경마다) 전 �
 - `build_select_view` 는 **현재 목록의 모든 행**에 대해 `title.clone()` + `level.clone()` + `self.scores.best_clear_for_md5(&e.md5)` 를 수행한다. app_select.rs:99-127.
 - `best_clear_for_md5` 는 전체 레코드 선형 스캔 + `eq_ignore_ascii_case`. scores.rs:82-84.
 
-→ ALL SONGS(또는 검색 결과)가 N 곡이고 로컬 기록이 M 건이면 **커서 이동 1회당 O(N×M) 문자열 비교 + N개 String 할당**. N=10,000 / M=10,000 이면 1억 회 비교가 키 반복 입력마다 발생 → 곡선택 프리징. beatoraja 는 `ScoreDataCache`(select/ScoreDataCache.java)로 해시→스코어 맵을 캐싱한다.
+→ ALL SONGS(또는 검색 결과)가 N 곡이고 로컬 기록이 M 건이면 **커서 이동 1회당 O(N×M) 문자열 비교 + N개 String 할당**. N=10,000 / M=10,000 이면 1억 회 비교가 키 반복 입력마다 발생 → 곡선택 프리징. 레퍼런스 구현 는 `ScoreDataCache`(select/ScoreDataCache.java)로 해시→스코어 맵을 캐싱한다.
 
 ### 2.3 스코어 저장 (`scores.ron`)
 
@@ -170,7 +170,7 @@ scores.rs:29-63.
 | **원자성 없음** | `std::fs::write` 직접 호출(temp+rename 아님) — 저장 중 크래시/전원차단 시 파일 절단 → 전체 기록 손실 (`.bak` 는 *다음 파싱 실패 시*에만 만들어지므로 이미 손상된 파일을 백업) scores.rs:56-63 |
 | 동시성 없음 | 파일 락 없음. 인스턴스 2개 동시 실행 시 나중 저장이 앞 기록을 덮어씀 |
 | 조회 선형 | `for_md5`/`best_ex_for_md5`/`best_clear_for_md5` 전부 O(M) 전수 스캔 (scores.rs:70-84) |
-| ScoreLog 없음 | beatoraja 는 별도 `ScoreDataLogDatabaseAccessor` 로 시계열 로그를 둔다 |
+| ScoreLog 없음 | 레퍼런스 구현 는 별도 `ScoreDataLogDatabaseAccessor` 로 시계열 로그를 둔다 |
 
 `folders.ron`/`tables.ron`/`settings.ron` 도 같은 비원자 write 패턴(folders.rs:28-42).
 
@@ -203,7 +203,7 @@ scores.rs:29-63.
 
 - PROCESS.md 머리말 위치가 `/Users/hyunseokbyun/rbms` — 실제는 `/Users/gkn/R-BMS`. (PROCESS.md 이미 §e 체크리스트에 정정 예정으로 기재)
 - PROCESS.md §7 "난이도표 추가 fetch는 동기(1개씩)" — 코드와 일치(rbms-table/src/lib.rs:50 reqwest blocking).
-- PROCESS.md §4/§7 은 "완전 플레이 가능"으로 기술하나, **select/result 의 beatoraja 기능 커버리지는 위 표대로 절반 이하**다. 문서에 인벤토리 격차가 명시돼 있지 않다.
+- PROCESS.md §4/§7 은 "완전 플레이 가능"으로 기술하나, **select/result 의 레퍼런스 구현 기능 커버리지는 위 표대로 절반 이하**다. 문서에 인벤토리 격차가 명시돼 있지 않다.
 
 ---
 

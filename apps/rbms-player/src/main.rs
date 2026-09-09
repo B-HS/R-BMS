@@ -178,8 +178,8 @@ pub(crate) fn write_atomic(path: &Path, contents: &str) -> std::io::Result<()> {
 }
 
 /// Judgment time for an input taken at raw song time `raw_us`: the user's judge offset shifts when
-/// the hit is *judged*. Keysound playback must NOT use this (see [`keysound_time_us`]) — beatoraja
-/// plays the sound at the input instant and only offsets the judgment.
+/// the hit is *judged*. Keysound playback must NOT use this (see [`keysound_time_us`]) — the reference
+/// implementation plays the sound at the input instant and only offsets the judgment.
 fn judge_time_us(raw_us: i64, offset_ms: i32) -> i64 {
     raw_us + offset_ms as i64 * 1000
 }
@@ -202,7 +202,7 @@ fn green_number_for(constant: bool, bpm: f64, hispeed: f64, scroll: f64, cover: 
 }
 
 /// Why this run's score must not be sent to the IR, or `None` when it may be submitted. Mirrors
-/// beatoraja: only a real interactive PLAY reaches the IR (`MusicResult.java:82`), and any assist —
+/// the reference implementation: only a real interactive PLAY reaches the IR (`MusicResult.java:82`), and any assist —
 /// a judge window widened past 100% (`BMSPlayer.java:207-213`) or an auto-played lane
 /// (`AutoplayModifier` sets `AssistLevel.ASSIST`, `BMSPlayer.java:233-234`) — clears the score flag.
 fn ir_submission_block_reason(autoplay: bool, replay: bool, judge_rate: i32, scratch_auto: bool) -> Option<&'static str> {
@@ -223,7 +223,7 @@ fn ir_submission_block_reason(autoplay: bool, replay: bool, judge_rate: i32, scr
 
 /// Whether this run may update the stored bests (EX / lamp / BP), i.e. it was an unassisted
 /// interactive play. Same predicate as [`ir_submission_block_reason`], so the IR gate and the local
-/// score book never disagree — beatoraja derives both from the one `score` flag
+/// score book never disagree — the reference implementation derives both from the one `score` flag
 /// (`BMSPlayer.java:207-213` clears it, `:363` `resource.setUpdateScore(score)`,
 /// `MusicResult.java:444-446` passes it to `PlayDataAccessor.writeScoreData`, and
 /// `ScoreData.java:548,566,572,578` gate exscore/avgjudge/minbp/combo on it).
@@ -629,7 +629,7 @@ fn kc_rows(edit_mode: Mode) -> Vec<KcRow> {
 }
 
 /// Where the song-select browser currently is. Navigation is Root → (ALL SONGS | each table →
-/// per-level folder) → charts, modelling beatoraja's table-as-custom-folder browsing. The
+/// per-level folder) → charts, modelling the reference implementation's table-as-custom-folder browsing. The
 /// indices select a table and a level within `App::table_levels`.
 #[derive(Clone, Copy, PartialEq)]
 enum SelectView {

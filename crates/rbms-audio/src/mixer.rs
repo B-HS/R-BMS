@@ -1,7 +1,7 @@
 use std::f32::consts::FRAC_PI_2;
 use std::sync::Arc;
 
-/// Default output headroom, matching beatoraja's amplitude scale. There every keysound is played
+/// Default output headroom, matching the reference implementation's amplitude scale. There every keysound is played
 /// at `keyvolume`/`bgvolume` = 0.5 (`AudioConfig.java:46-54`, via `JudgeManager.java:248` and
 /// `KeySoundProcessor.java:81`) and the driver multiplies that by `#VOLWAV/100`
 /// (`AbstractAudioDriver.java:356,487`), so a chart without `#VOLWAV` renders at 0.5. rbms keeps
@@ -13,7 +13,7 @@ pub(crate) const DEFAULT_MASTER_GAIN: f32 = 0.5;
 /// (see [`soft_limit`]) compresses toward 1.0 instead of hard-clipping.
 pub(crate) const SOFT_LIMIT_THRESHOLD: f32 = 0.8;
 
-/// Channel keys per sample id, matching beatoraja's `channel(id, pitch) = id * 256 + pitch + 128`
+/// Channel keys per sample id, matching the reference implementation's `channel(id, pitch) = id * 256 + pitch + 128`
 /// (`AbstractAudioDriver.java:507-509`).
 pub(crate) const CHANNELS_PER_SAMPLE_ID: u32 = 256;
 
@@ -24,7 +24,7 @@ const MIN_SEMITONE_OFFSET: i32 = -128;
 const MAX_SEMITONE_OFFSET: i32 = 127;
 const SEMITONES_PER_OCTAVE: f32 = 12.0;
 
-/// Semitone offset of a pitch ratio, quantized the way beatoraja stores it: it keeps the integer
+/// Semitone offset of a pitch ratio, quantized the way the reference implementation stores it: it keeps the integer
 /// `pitchShift` and derives the ratio as `2^(pitchShift/12)`, so the inverse is
 /// `round(12 * log2(ratio))`. Non-positive ratios have no defined offset and map to 0.
 pub(crate) fn semitone_offset(pitch: f32) -> i32 {
@@ -961,7 +961,7 @@ mod tests {
     }
 
     #[test]
-    fn channel_key_matches_beatoraja_id_times_256_plus_pitch_plus_128() {
+    fn channel_key_matches_reference_id_times_256_plus_pitch_plus_128() {
         assert_eq!(channel_key(0, 1.0), 128);
         assert_eq!(channel_key(3, 1.0), 3 * 256 + 128);
         assert_eq!(channel_key(3, 2.0), 3 * 256 + 12 + 128);

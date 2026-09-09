@@ -8,11 +8,11 @@ use crate::{IrError, ScoreServer};
 ///
 /// Every method on the trait blocks, so a UI frame loop must never call one directly. This is the
 /// smallest useful wrapper: the caller polls the returned [`Receiver`] with `try_recv` once per
-/// frame and keeps ownership of any caching or retry policy. It mirrors beatoraja's
+/// frame and keeps ownership of any caching or retry policy. It mirrors the reference implementation's
 /// `RankingData.load()` (`ir/RankingData.java:71-96`), which also spawns one thread per request
 /// instead of holding a pool.
 ///
-/// Everything around that thread stays with the caller, exactly as in beatoraja: the re-entrancy
+/// Everything around that thread stays with the caller, exactly as in the reference implementation: the re-entrancy
 /// guard (`RankingData.java:75` sets `state = ACCESS` and consumers read the result only at
 /// `state == FINISH`, `skin/property/IntegerPropertyFactory.java:242`) and the per-`(sha256,
 /// lnmode)` cache that stops a moving selection cursor from firing one request per frame

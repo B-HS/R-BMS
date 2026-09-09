@@ -6,7 +6,7 @@ pub use gauge::{ClearType, Gauge, GaugeKind, clear_lamp};
 pub use matcher::{JudgeEngine, JudgeResult};
 pub use windows::{JudgeProperty, JudgeWindows, MissCondition, judgerank_for, rank_to_judgerank};
 
-/// A single judgment outcome, in beatoraja's judge-code order. `Poor` is index 4 (見逃し POOR — a
+/// A single judgment outcome, in the reference implementation's judge-code order. `Poor` is index 4 (見逃し POOR — a
 /// note that went by unhit) and `Miss` is index 5 (空POOR — a press that reached only the MS band
 /// and consumed no note). Combo behaviour per index comes from the mode's
 /// [`JudgeProperty::combo`](windows::JudgeProperty::combo) table. EX score = 2·PG + 1·GR.
@@ -33,7 +33,7 @@ mod tests {
         assert_eq!(w.judge(-60_000), Some(Judge::Great));
         assert_eq!(w.judge(120_000), Some(Judge::Good));
         assert_eq!(w.judge(-260_000), Some(Judge::Bad));
-        assert_eq!(w.judge(300_000), Some(Judge::Miss), "the MS band is beatoraja judge code 5 (empty poor)");
+        assert_eq!(w.judge(300_000), Some(Judge::Miss), "the MS band is reference judge code 5 (empty poor)");
         assert_eq!(w.judge(-300_000), None);
         assert_eq!(w.judge(450_000), Some(Judge::Miss));
     }
@@ -158,7 +158,7 @@ mod tests {
 
     #[test]
     fn early_empty_poor_keeps_note_hittable_and_combo() {
-        // beatoraja SEVENKEYS: a press 300ms early lands only in the MS window (beyond BAD), an
+        // Reference SEVENKEYS: a press 300ms early lands only in the MS window (beyond BAD), an
         // empty poor (judge 5). It must NOT consume the note nor break combo — the note stays
         // hittable and a later well-timed press scores it.
         let mut e = JudgeEngine::new(vec![vec![1_000_000]], JudgeWindows::SEVENKEY_NOTE);
@@ -166,7 +166,7 @@ mod tests {
         let r = e.press(0, 700_000).unwrap();
         assert_eq!(r.judge, Judge::Miss, "300ms-early press is an empty poor (judge code 5)");
         assert_eq!(e.empty_poor, 1);
-        assert_eq!(e.counts[5], 1, "beatoraja tallies it via addJudgeCount(5) -> ems/lms");
+        assert_eq!(e.counts[5], 1, "the reference implementation tallies it via addJudgeCount(5) -> ems/lms");
         assert_eq!(e.combo, 7, "SEVENKEYS combo[5] = true, so an empty poor must not break combo");
         assert_eq!(e.counts[..5], [0; 5], "empty poor does not consume a note");
         let r2 = e.press(0, 1_000_000).unwrap();
@@ -333,7 +333,7 @@ mod tests {
         assert_eq!(e.empty_poor, 1);
         assert_eq!(e.early[5], 1, "an early empty poor feeds the IR `ems` field");
         assert_eq!(e.late[5], 0);
-        assert_eq!(e.fast, 0, "empty poor excluded from fast/slow (beatoraja records only judge < 4)");
+        assert_eq!(e.fast, 0, "empty poor excluded from fast/slow (reference implementation records only judge < 4)");
         assert_eq!(e.slow, 0);
         assert_eq!(e.avg_judge_us(), 0, "no timed hit yet");
         assert_eq!(e.last_judge, Some(Judge::Miss));
@@ -742,7 +742,7 @@ mod tests {
     }
 
     // --- CN/HCN charge notes: head + release end are two counted judgments ---------------------
-    // (beatoraja JudgeManager calls updateMicro at both press and key-up; see
+    // (the reference implementation's JudgeManager calls updateMicro at both press and key-up; see
     // docs/reference/cn-hcn-judgment.md). Plain LN stays one judgment — the regression guard below.
 
     fn cn_model(start_ln: rbms_model::LnKind, head_t: i64, end_t: i64) -> rbms_model::Model {

@@ -1,6 +1,6 @@
 # rbms 백엔드 — HTTP API 규격 (IR 슈퍼셋)
 
-> REST + JSON. 모든 시각은 **unix epoch ms**(beatoraja IR은 초 단위 — [compatibility.md](./compatibility.md) 변환표). 차트 키는 **md5(32hex) 또는 sha256(64hex)** 둘 다 허용(`{hash}` 길이로 판별).
+> REST + JSON. 모든 시각은 **unix epoch ms**(레퍼런스 구현 IR은 초 단위 — [compatibility.md](./compatibility.md) 변환표). 차트 키는 **md5(32hex) 또는 sha256(64hex)** 둘 다 허용(`{hash}` 길이로 판별).
 > 인증: `Authorization: Bearer <token>`(선택). 미인증 제출은 서버 설정상 `guest` 허용 가능.
 > 버전: 모든 제출 본문에 `api_version`(현재 **1**). 모든 DTO는 `extra?: object`(free-form) 보존.
 > URL 접두사: `/api`(코어). 레거시 LR2IR 어댑터는 `/lr2ir/*`(§11).
@@ -37,7 +37,7 @@
 > 에러는 `lib/error-code.ts`·`error-message.ts`·`error.ts` 3파일 중앙화(컨벤션 §6). 도메인 접두사 `IR_*`.
 
 ### 0.3 enum 표기 (variant 이름 그대로 JSON 문자열)
-- `ClearLamp`: `NoPlay|Failed|AssistEasy|LightAssistEasy|Easy|Normal|Hard|ExHard|FullCombo|Perfect|Max` (beatoraja `ClearType` id 0-10).
+- `ClearLamp`: `NoPlay|Failed|AssistEasy|LightAssistEasy|Easy|Normal|Hard|ExHard|FullCombo|Perfect|Max` (the reference implementation `ClearType` id 0-10).
 - `GaugeType`: `AssistEasy|Easy|Normal|Hard|ExHard|Hazard|Class|ExClass|ExHardClass`.
 - `RandomOption`: `Off|Mirror|Random|RRandom|SRandom|Spiral|HRandom|AllScratch|Converge`.
 - `Mode`(차트): `BEAT_5K|BEAT_7K|BEAT_10K|BEAT_14K|POPN_9K|...`(rbms `Mode.name`).
@@ -61,7 +61,7 @@
 
 ---
 
-## 2. auth — 계정 (beatoraja IRAccount 슈퍼셋)
+## 2. auth — 계정 (레퍼런스 구현 IRAccount 슈퍼셋)
 
 ### `POST /api/auth/register`
 ```jsonc
@@ -82,7 +82,7 @@
 { "id":"alice", "name":"Alice", "rank":"", "total_plays":1234, "rank_points":56.7, "email":null, "extra":{} }
 ```
 ### `POST /api/auth/token`  (Bearer) — API 토큰 발급/회전 → `{ "token":"…", "created_at":1700000000000 }`
-> better-auth 기반(컨벤션 §11). beatoraja `register`/`login`(IRConnection)에 1:1 대응. `guest` 제출은 토큰 없이 `player.id="guest"`(서버 설정 `allow_guest`).
+> better-auth 기반(컨벤션 §11). 레퍼런스 구현 `register`/`login`(IRConnection)에 1:1 대응. `guest` 제출은 토큰 없이 `player.id="guest"`(서버 설정 `allow_guest`).
 
 ---
 
@@ -93,7 +93,7 @@
 { "id":"alice", "name":"Alice", "rank":"", "total_plays":1234, "rank_points":56.7, "extra":{} }
 // 404 IR_PLAYER_NOT_FOUND
 ```
-### `GET /api/players/{id}/rivals` → `PlayerProfile[]`  (beatoraja `getRivals`)
+### `GET /api/players/{id}/rivals` → `PlayerProfile[]`  (the reference implementation `getRivals`)
 ### `PUT /api/players/{id}/rivals` (Bearer, 본인) — 라이벌 목록 설정
 ```jsonc
 { "rivals": ["bob","carol"] }   // → 200 PlayerProfile[]
@@ -129,16 +129,16 @@
     "gauge_value":86.0, "options": PlayOptions, "seed":12345, "replay_id":"rp_…",
     "played_at":1700000000000, "extra":{} } ]
 ```
-- `rival_of={id}`: 그 플레이어의 라이벌만(+본인). `lnmode`: 0=LN,1=CN,2=HCN(beatoraja `lntype`).
+- `rival_of={id}`: 그 플레이어의 라이벌만(+본인). `lnmode`: 0=LN,1=CN,2=HCN(레퍼런스 구현 `lntype`).
 - LR2IR 호환 필드(`pg=epg+lpg`, `gr=egr+lgr`, `notes`, `combo`, `minbp`)는 `judge`+상위 필드로 유도 가능.
 
-### `GET /api/charts/{hash}/best?player={id}&lnmode=1` → `ScoreRecord | null`  (beatoraja getPlayData 본인분)
+### `GET /api/charts/{hash}/best?player={id}&lnmode=1` → `ScoreRecord | null`  (레퍼런스 구현 getPlayData 본인분)
 
 ---
 
-## 5. scores — 제출 / 조회 (beatoraja IRScoreData 슈퍼셋)
+## 5. scores — 제출 / 조회 (레퍼런스 구현 IRScoreData 슈퍼셋)
 
-### `POST /api/scores` (Bearer 또는 guest)  — beatoraja `sendPlayData`
+### `POST /api/scores` (Bearer 또는 guest)  — 레퍼런스 구현 `sendPlayData`
 > **원칙**: 제출은 *플레이에 사용된 모든 정보*를 담는다(공평 평가). 채점·난이도에 영향을 주는 **모든 플레이 옵션 + 클라이언트 빌드 해시 + (선택)리플레이**를 함께 보내고 서버가 보존한다. 서버가 `ranked` 적격성과 무결성(빌드해시)을 직접 판정한다(§11).
 ```jsonc
 // req ScoreSubmission (rbms-ir 슈퍼셋 — early/late + full play context + integrity)
@@ -151,7 +151,7 @@
   "judge": {
      "epg":700,"lpg":12, "egr":50,"lgr":14, "egd":5,"lgd":16,
      "ebd":1,"lbd":7,   "epr":2,"lpr":3,   "ems":0,"lms":2,
-     "avgjudge":-1200,                       // µs, 평균 판정오차(beatoraja avgjudge)
+     "avgjudge":-1200,                       // µs, 평균 판정오차(레퍼런스 구현 avgjudge)
      "empty_poor":9,                         // rbms 空POOR(노트 미소실 빈 POOR)
      // 합계 미러(호환·검증용, 서버가 재계산 가능):
      "pgreat":712,"great":64,"good":21,"bad":8,"poor":5,"miss":2,
@@ -160,7 +160,7 @@
 
   // ── 플레이에 사용된 전체 옵션(공평 평가의 단일 출처). rbms PlaySettings/PlayerConfig 전수. ──
   "options": {
-     "gauge":"Hard", "random":"Random", "random_p2":null, "option":1,   // option=beatoraja 노트옵션 비트필드
+     "gauge":"Hard", "random":"Random", "random_p2":null, "option":1,   // option=레퍼런스 구현 노트옵션 비트필드
      "lntype":1, "seed":12345, "scratch_left":false, "scratch_auto":false,
      "hispeed":2.0, "constant":false, "green_number":300,               // 스크롤
      "lift":0.0, "lane_cover":0.0,                                      // 시야
@@ -186,11 +186,11 @@
 규칙:
 - **멱등**: 동일 `(player, sha256||md5, played_at)` 재전송은 기존 score_id 반환(중복 생성 X).
 - **best 갱신**: 램프(우선) → EX → BP 순 비교, 더 좋을 때만 best 갱신. 모든 제출은 history로 누적(랭킹은 best 기준). **ranked=false는 best/랭킹 비반영**(기록·리플레이는 보존).
-- EX/BP가 누락되면 `judge`에서 유도: `ex = (epg+lpg)*2 + egr+lgr`, `bp = ebd+lbd+epr+lpr+ems+lms`(beatoraja minbp 정의는 BAD+POOR+MISS).
+- EX/BP가 누락되면 `judge`에서 유도: `ex = (epg+lpg)*2 + egr+lgr`, `bp = ebd+lbd+epr+lpr+ems+lms`(레퍼런스 구현 minbp 정의는 BAD+POOR+MISS).
 - **`ranked` 적격성**(§11): autoplay·scratch_auto·assist≠∅·judge_rate≠100·total_override≠0·미인증 빌드해시 등 → `ranked=false` + `flags`. guest 제출도 unranked(설정) 또는 별도 게스트 보드.
 
 ### `GET /api/scores/{score_id}` → `ScoreRecord`(상세, judge·options·replay_id 포함)
-### `GET /api/players/{id}/scores?since=&limit=&mode=` → `ScoreRecord[]` (beatoraja getPlayData(player, null) — 플레이어 전체)
+### `GET /api/players/{id}/scores?since=&limit=&mode=` → `ScoreRecord[]` (레퍼런스 구현 getPlayData(player, null) — 플레이어 전체)
 
 ---
 
@@ -204,10 +204,10 @@
   "trophy":[ {"name":"bronze","scorerate":0.7,"smissrate":0.05}, … ], // IRTrophyData
   "extra":{} }
 ```
-> `course_hash` = 코스 차트들의 sha256(또는 md5) 결합 해시(beatoraja/LR2 관행). [compatibility.md] 참조.
+> `course_hash` = 코스 차트들의 sha256(또는 md5) 결합 해시(레퍼런스 구현/LR2 관행). [compatibility.md] 참조.
 
 ### `POST /api/courses` (Bearer) — 코스 메타 업서트
-### `POST /api/courses/{course_hash}/scores` (Bearer) — beatoraja `sendCoursePlayData`
+### `POST /api/courses/{course_hash}/scores` (Bearer) — the reference implementation `sendCoursePlayData`
 ```jsonc
 // CourseSubmission (judge는 §5와 동일 구조)
 { "api_version":1, "course_hash":"…", "player":{"id":"alice"}, "lntype":1,
@@ -218,11 +218,11 @@
 // 201 SubmitResponse
 ```
 ### `GET /api/courses/{course_hash}/ranking?limit=&page=&rival_of=` → `ScoreRecord[]`
-### `GET /api/courses/{course_hash}/best?player={id}` → `ScoreRecord | null` (beatoraja getCoursePlayData 본인분)
+### `GET /api/courses/{course_hash}/best?player={id}` → `ScoreRecord | null` (레퍼런스 구현 getCoursePlayData 본인분)
 
 ---
 
-## 7. tables — IR 표 (IRTableData)  beatoraja `getTableDatas`
+## 7. tables — IR 표 (IRTableData)  레퍼런스 구현 `getTableDatas`
 
 ### `GET /api/tables` → `TableData[]`
 ```jsonc

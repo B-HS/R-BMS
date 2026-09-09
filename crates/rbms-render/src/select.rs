@@ -33,7 +33,7 @@ pub struct SelectRow {
 }
 
 /// Per-second note-density readout for the detail panel histogram (`bins`) plus the three scalar
-/// densities (notes/sec) shown beatoraja-style.
+/// densities (notes/sec) shown reference-style.
 pub struct DensityView {
     pub bins: Vec<u32>,
     pub peak: f64,
@@ -305,7 +305,7 @@ fn render_list<R: Renderer>(r: &mut R, v: &SelectView, hot: &mut Vec<(Rect, Sele
             r.fill_rect(Rect::new(LIST_X, y, 2.0, h), th.focus);
             r.fill_rect(Rect::new(LIST_X + LIST_W - 2.0, y, 2.0, h), th.focus);
         }
-        // Clear-lamp accent bar (left) + LED bar (right edge), beatoraja song-bar style.
+        // Clear-lamp accent bar (left) + LED bar (right edge), reference song-bar style.
         r.fill_rect(Rect::new(LIST_X, y, 6.0, h), row.lamp);
         r.fill_rect(Rect::new(LIST_X + LIST_W - 10.0, y, 8.0, h), row.lamp);
         let cy = y + h * 0.5;

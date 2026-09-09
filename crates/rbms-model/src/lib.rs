@@ -13,7 +13,7 @@ pub fn measure_us(bpm: f64) -> f64 {
 }
 
 /// Default `#TOTAL` for a chart with `notes` playable notes when the header is missing or
-/// non-positive — beatoraja `BMSPlayerRule.calculateDefaultTotal` (`BMSPlayerRule.java:84-89`) for
+/// non-positive — reference implementation `BMSPlayerRule.calculateDefaultTotal` (`BMSPlayerRule.java:84-89`) for
 /// the BEAT and POPN modes. Single source for the gauge, the note-density report and the app.
 pub fn default_total(notes: usize) -> f64 {
     let n = notes as f64;
@@ -103,7 +103,7 @@ pub struct ModelMeta {
     pub difficulty: i32,
     pub rank: i32,
     /// `#DEFEXRANK`: when positive it replaces the `#RANK` table and scales the NORMAL judgerank
-    /// (beatoraja `BMSPlayerRule.java:63`).
+    /// (reference implementation `BMSPlayerRule.java:63`).
     pub defexrank: Option<f64>,
     pub total: f64,
     pub stagefile: String,

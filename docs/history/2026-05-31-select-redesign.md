@@ -1,4 +1,4 @@
-# 2026-05-31 — 곡선택(SONG SELECT) 전면 재설계 (beatoraja modern chic)
+# 2026-05-31 — 곡선택(SONG SELECT) 전면 재설계 (레퍼런스 구현 modern chic)
 
 ## 대상
 - `crates/rbms-parser/src/lib.rs` — `#BANNER`/`#PREVIEW` 헤더.
@@ -6,16 +6,16 @@
 - `crates/rbms-render/src/select.rs` (신규) — `SelectView`/`SelectHot`/`render_select`(재설계 렌더).
 - `crates/rbms-render/examples/render_select.rs` (신규) — 헤드리스 PNG 검증.
 - `apps/rbms-player/src/main.rs` — `SongEntry`(커버/배너/프리뷰), `ChartDetail`(밀도), `compute_chart_detail`, `refresh_focused_detail`(커버 디코드), `build_select_view`+캐시, Select 렌더 arm 교체, `difficulty_color`.
-- 스펙: `docs/reference/ui-select-redesign.md`. 타깃: `docs/reference/ui/provided/06-beatoraja-select-target.png`.
+- 스펙: `docs/reference/ui-select-redesign.md`. 타깃: `docs/reference/ui/provided/06-reference-select-target.png`.
 
 ## 리포트
-곡선택을 06 레퍼런스(beatoraja modern chic) 수준으로 끌어올렸다. 1차 재설계(플레이/결과 IIDX)에서 곡선택은 내용만 고도화·비주얼은 MVP였다.
+곡선택을 06 레퍼런스(레퍼런스 구현 modern chic) 수준으로 끌어올렸다. 1차 재설계(플레이/결과 IIDX)에서 곡선택은 내용만 고도화·비주얼은 MVP였다.
 
 **근본 결정 — 렌더링을 `rbms-render`로 추출.** 기존 곡선택은 `main.rs`에 인라인이라 `CpuCanvas` 헤드리스 검증이 불가능했다. `playfield/hud/result`처럼 `render_select<R: Renderer>(r, &SelectView) -> Vec<(Rect, SelectHot)>`로 추출 → (1) 헤드리스 PNG로 레이아웃 시각검증, (2) 데이터주도 스킨화 정렬, (3) `main.rs` 비대화 해소. `main.rs`는 `SelectView` 조립 + hot 매핑 + 커버 BGA 업로드만 담당.
 
 **핵심 제약 — 단일 BGA 텍스처 슬롯.** GPU 백엔드는 256² 텍스처 1장을 모든 쿼드 **뒤**에 그린다. 커버(`#STAGEFILE`→`#BANNER`)는 `set_bga(rgba, cover_rect())`로 업로드하고, `render_select`는 커버 영역에 불투명 패널을 깔지 않아(테두리/placeholder만) 텍스처가 비친다. 디코드는 기존 `decode_bga_256` 재사용, 포커스 이동당 1회.
 
-**밀도 그래프 — beatoraja `SongInformation` 정밀 포팅.** 1초 빈, LN 바디는 점유 초마다 카운트, `peak`=최대 빈, `avg`=`total/bins/4` 임계 초과 빈 평균, `end`=게이지 border 이후 5초창 최대평균. 상세 패널 우하에 히스토그램+PEAK/AVG/END notes/sec.
+**밀도 그래프 — 레퍼런스 구현 `SongInformation` 정밀 포팅.** 1초 빈, LN 바디는 점유 초마다 카운트, `peak`=최대 빈, `avg`=`total/bins/4` 임계 초과 빈 평균, `end`=게이지 border 이후 5초창 최대평균. 상세 패널 우하에 히스토그램+PEAK/AVG/END notes/sec.
 
 **시각.** 행: KEY/레벨 배지·클리어램프 LED(좌바+우측 세로바)·포커스(시안 테두리+노랑 타이틀)·중앙 포커스 스크롤. 상세: 커버+제목블록(2줄 래핑)·배지행·2열 스탯그리드·밀도 히스토그램·기록(베스트바·DJ랭크바·최근행 EX+랭크+추세)·기록 모달. `#PREVIEW`는 데이터만 준비(재생은 후속 — select 중 `audio=None`).
 

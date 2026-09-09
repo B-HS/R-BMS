@@ -96,7 +96,7 @@ struct Ev {
 pub fn to_model(src: &BmsSource, mode: Mode) -> Model {
     let base = src.base;
     let lnobj = src.headers.lnobj;
-    // beatoraja `#LNMODE`: 0=undefined(→LN), 1=LN, 2=CN, 3=HCN. The kind applies to every long note
+    // Reference `#LNMODE`: 0=undefined(→LN), 1=LN, 2=CN, 3=HCN. The kind applies to every long note
     // in the chart; judging is identical across kinds for now (the model records the kind so the
     // distinction is preserved for rendering/scoring).
     let ln_kind = match src.headers.lnmode {
@@ -340,9 +340,9 @@ pub fn count_playable_notes(model: &Model) -> usize {
         .count()
 }
 
-/// Per-second note-distribution density, ported from beatoraja `SongInformation`
+/// Per-second note-distribution density, ported from the reference implementation's `SongInformation`
 /// (`song/SongInformation.java`). `bins` holds per-second note totals (categories excluding mines)
-/// for the histogram; `peak`/`avg`/`end` are notes-per-second scalars matching beatoraja's
+/// for the histogram; `peak`/`avg`/`end` are notes-per-second scalars matching the reference implementation's
 /// MusicSelect density readout.
 pub struct NoteDensity {
     pub bins: Vec<u32>,
@@ -355,10 +355,10 @@ pub struct NoteDensity {
 /// the three densities: `peak` = busiest second, `avg` = mean over seconds at or above the
 /// `total_notes/bins/4` activity threshold, `end` = max 5-second-window density after the gauge
 /// "border" point (`total_notes*(1-100/total_value)` cumulative notes). `total_value` is `#TOTAL`
-/// (≤0 ⇒ the standard BMS default total derived from the note count, mirroring beatoraja which never
+/// (≤0 ⇒ the standard BMS default total derived from the note count, mirroring the reference implementation which never
 /// sees a zero total).
 pub fn note_density(model: &Model, total_value: f64) -> NoteDensity {
-    // Size the bins from the last NOTE-bearing timeline, mirroring beatoraja `BMSModel.getLastMilliTime`:
+    // Size the bins from the last NOTE-bearing timeline, mirroring the reference implementation's `BMSModel.getLastMilliTime`:
     // `to_model` emits a bar-line timeline per measure, so the unconditional last timeline can sit many
     // empty seconds past the final note and would pad the histogram with phantom bins.
     let last_us = model.timelines.iter().rev().find(|t| t.notes.iter().any(Option::is_some)).map(|t| t.time_us).unwrap_or(0);
@@ -384,7 +384,7 @@ pub fn note_density(model: &Model, total_value: f64) -> NoteDensity {
                     counted[sec] += 1;
                 }
                 // Count the head at head-time (independent of seeing the tail, so dangling heads still
-                // register); the body then fills head+1..=end. Net per-second sums equal beatoraja's.
+                // register); the body then fills head+1..=end. Net per-second sums equal the reference implementation's.
                 NoteKind::LongStart { .. } => {
                     data[sec][if scr(lane) { 0 } else { 3 }] += 1;
                     total_notes += 1;

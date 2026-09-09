@@ -55,7 +55,7 @@ fn spec(kind: GaugeKind) -> Spec {
     }
 }
 
-/// One groove gauge (beatoraja `GrooveGauge`). Deltas are pre-modified at construction
+/// One groove gauge (reference implementation `GrooveGauge`). Deltas are pre-modified at construction
 /// by the gauge's modifier (TOTAL scales gains by chart total/notes; LIMIT_INCREMENT
 /// caps the gain). A note's judge adds `deltas[judge]`, with HARD "guts" softening damage
 /// at low values. Cleared when `value >= border` and `> 0` at the end.
@@ -113,7 +113,7 @@ impl Gauge {
         self.value = (self.value + inc).clamp(self.min, self.max);
     }
 
-    /// Add `delta` directly (mine damage). beatoraja `GrooveGauge.addValue` -> `Gauge.setValue`:
+    /// Add `delta` directly (mine damage). Reference implementation `GrooveGauge.addValue` -> `Gauge.setValue`:
     /// a dead gauge (<= 0) stays frozen, otherwise the result is clamped into `[min, max]`.
     pub fn add_value(&mut self, delta: f32) {
         if self.value <= 0.0 {

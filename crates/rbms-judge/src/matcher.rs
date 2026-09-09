@@ -11,13 +11,13 @@ struct JNote {
     judged: bool,
     holding: bool,
     head_judge: Option<Judge>,
-    /// Signed head timing delta (µs) recorded when the head was hit, beatoraja
+    /// Signed head timing delta (µs) recorded when the head was hit, reference implementation
     /// `LaneState.lnstartDuration`. `None` until the head is judged.
     head_delta_us: Option<i64>,
 }
 
 /// CN/HCN ("charge"/"hell-charge") long notes are judged twice — the head at press and the release
-/// end at key-up — each a counted judgment (beatoraja `JudgeManager` calls `updateMicro` at both),
+/// end at key-up — each a counted judgment (the reference implementation's `JudgeManager` calls `updateMicro` at both),
 /// whereas a plain LN is a single judgment (the worse of head/end). This predicate gates the
 /// charge-note behaviour so the verified LN/Normal paths are byte-identical to before. See
 /// `docs/reference/cn-hcn-judgment.md`.
@@ -31,7 +31,7 @@ struct Lane {
 }
 
 /// A mine note: passing it with the lane key held costs `damage` gauge points
-/// (beatoraja `JudgeManager.java:244-247`).
+/// (reference implementation `JudgeManager.java:244-247`).
 struct Mine {
     time_us: i64,
     damage: f64,
@@ -50,7 +50,7 @@ fn worse(a: Judge, b: Judge) -> Judge {
     if a as usize >= b as usize { a } else { b }
 }
 
-/// Widest candidate window across a key and a scratch table, seeded at 0 like beatoraja's
+/// Widest candidate window across a key and a scratch table, seeded at 0 like the reference implementation's
 /// `mjudgestart`/`mjudgeend` (`JudgeManager.java:189-197`).
 fn gate_of(note: &JudgeWindows, scratch: &JudgeWindows) -> (i64, i64) {
     let mut start = 0;
@@ -69,7 +69,7 @@ fn gate_of(note: &JudgeWindows, scratch: &JudgeWindows) -> (i64, i64) {
 /// nearest unjudged note (LN heads start a hold); `release` finalises a held LN against
 /// the LN-end window; `update` sweeps unhittable notes into 見逃し POOR and applies mine damage.
 ///
-/// Judge slots follow beatoraja exactly: index 4 ([`Judge::Poor`]) is 見逃し POOR — a note that
+/// Judge slots follow the reference implementation exactly: index 4 ([`Judge::Poor`]) is 見逃し POOR — a note that
 /// went by unhit — and index 5 ([`Judge::Miss`]) is 空POOR, a press that reached only the MS band
 /// and consumed nothing.
 pub struct JudgeEngine {
@@ -98,14 +98,14 @@ pub struct JudgeEngine {
     pub fast: u32,
     pub slow: u32,
     /// Per-judge early/late split (index = judge: 0=PG..4=PR, 5=MS), so `early[i] + late[i] ==
-    /// counts[i]`. EARLY = pressed at or before the note (`dm >= 0`, beatoraja
+    /// counts[i]`. EARLY = pressed at or before the note (`dm >= 0`, reference implementation
     /// `JudgeManager.java:652` passes `mfast >= 0`); LATE = after.
     pub early: [u32; 6],
     pub late: [u32; 6],
     /// Empty-poor (空POOR) tally, kept as a mirror of `counts[5]` for callers that read it by name.
     pub empty_poor: u32,
     /// Running sum and count of signed hit deltas (µs) for actual hits (press/release, not sweeps),
-    /// so `avg_judge_us()` yields beatoraja `IRScoreData.avgjudge` — the mean timing error.
+    /// so `avg_judge_us()` yields the reference implementation's `IRScoreData.avgjudge` — the mean timing error.
     sum_delta_us: i64,
     timing_count: u32,
     total_notes: u32,
@@ -256,7 +256,7 @@ impl JudgeEngine {
     }
 
     /// Release grace for a held long note (`JudgeProperty.longnoteMargin` scaled by the user's
-    /// long-note margin rate; the scratch table's margin is not user-scalable in beatoraja,
+    /// long-note margin rate; the scratch table's margin is not user-scalable in the reference implementation,
     /// `JudgeManager.java:186-188`).
     fn ln_margin(&self, lane: usize) -> i64 {
         if self.is_scratch(lane) {
@@ -294,7 +294,7 @@ impl JudgeEngine {
         self.ln_scratch_end = ln_end;
     }
 
-    /// User LONGNOTE MARGIN rate in percent (100 = the mode's stock margin), beatoraja
+    /// User LONGNOTE MARGIN rate in percent (100 = the mode's stock margin), reference implementation
     /// `PlayerConfig.longnoteMarginRate`.
     pub fn set_longnote_margin_rate(&mut self, rate_percent: i32) {
         self.longnote_margin_rate = rate_percent;
@@ -375,7 +375,7 @@ impl JudgeEngine {
             }
             if is_cn {
                 // CN/HCN: the head is a counted judgment committed at press; the release end is judged
-                // separately at key-up (beatoraja's two-`updateMicro` model). Plain LN stays a single
+                // separately at key-up (the reference implementation's two-`updateMicro` model). Plain LN stays a single
                 // judgment resolved at release.
                 self.apply(judge);
                 self.record_timing(judge, dm);
@@ -523,7 +523,7 @@ impl JudgeEngine {
     }
 
     /// Tally a judgment as EARLY (`dm >= 0`, pressed at or before the note) or LATE, keeping
-    /// `early[i] + late[i] == counts[i]` (beatoraja `score.addJudgeCount(judge, mfast >= 0, 1)`).
+    /// `early[i] + late[i] == counts[i]` (reference implementation `score.addJudgeCount(judge, mfast >= 0, 1)`).
     fn record_direction(&mut self, judge: Judge, dm: i64) {
         let i = judge as usize;
         if dm >= 0 {
@@ -533,16 +533,16 @@ impl JudgeEngine {
         }
     }
 
-    /// Mean signed hit timing (µs) over actual hits — beatoraja `IRScoreData.avgjudge`. Positive =
+    /// Mean signed hit timing (µs) over actual hits — reference implementation `IRScoreData.avgjudge`. Positive =
     /// early on average. Zero when nothing was timed.
     pub fn avg_judge_us(&self) -> i64 {
         if self.timing_count == 0 { 0 } else { self.sum_delta_us / self.timing_count as i64 }
     }
 }
 
-/// Extra slack beatoraja subtracts when re-marking a lane's scan start each frame
+/// Extra slack the reference implementation subtracts when re-marking a lane's scan start each frame
 /// (`JudgeManager.java:220`: `prevmtime + mjudgestart - 100000`).
 const REMARK_SLACK_US: i64 = 100_000;
 
-/// Stock long-note margin rate (percent) — beatoraja `PlayerConfig.longnoteMarginRate` default.
+/// Stock long-note margin rate (percent) — reference implementation `PlayerConfig.longnoteMarginRate` default.
 const DEFAULT_LONGNOTE_MARGIN_RATE: i32 = 100;

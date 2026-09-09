@@ -1,6 +1,6 @@
-## rbms — Mechanics Reference (beatoraja PLAY core, verbatim spec)
+## rbms — Mechanics Reference (the reference implementation PLAY core, verbatim spec)
 
-> "rbms가 반드시 재현해야 하는 것"의 단일 출처. 모든 수식·윈도우는 실제 beatoraja 소스(`jbms-parser.jar`, `src/bms/player/beatoraja/play/*`)에서 추출·검증되었다. 라인 참조는 `LR=LaneRenderer.java`, `JP=JudgeProperty.java`, `JM=JudgeManager.java`, `RT=RhythmTimerProcessor.java`. **시간 단위는 전부 마이크로초(µs, `i64`)로 고정한다.** 스킨은 범위 밖이지만 lane 사각형(`hu`/`hl`)은 렌더 추상화가 제공해야 한다.
+> "rbms가 반드시 재현해야 하는 것"의 단일 출처. 모든 수식·윈도우는 실제 레퍼런스 구현 소스(`jbms-parser.jar`, `<reference>/play/*`)에서 추출·검증되었다. 라인 참조는 `LR=LaneRenderer.java`, `JP=JudgeProperty.java`, `JM=JudgeManager.java`, `RT=RhythmTimerProcessor.java`. **시간 단위는 전부 마이크로초(µs, `i64`)로 고정한다.** 스킨은 범위 밖이지만 lane 사각형(`hu`/`hl`)은 렌더 추상화가 제공해야 한다.
 
 ---
 
@@ -221,4 +221,4 @@ KEYBOARD NOTE: `PG±30000 GR±90000 GD±200000 BD[-320000,+240000] MS[-200000,+6
 
 ### 10. 입력/판정 클럭 (포팅 시 고치는 부분 — 상세는 stackRef)
 
-beatoraja는 `System.nanoTime()/1000`(µs) 단일 단조 클럭에서 3 스레드: render(vsync, `timer.update`로 `TIMER_PLAY` 전진), input poll(~1kHz, `Gdx.input.isKeyPressed` 샘플링 → ~1ms 양자화 지터), judge(µs 변화마다 spin, `dmtime=note.time−press` 순수 µs). 판정은 프레임 시간과 무관(이미 올바름). **남은 결함**: ① 입력 poll ~1ms 양자화, ② 재생 위치가 nanoTime 기반(하드웨어 오디오 클럭 없음) → A/V vs judge 드리프트. rbms는 (1) 오디오 디바이스 클럭을 마스터로, (2) OS 타임스탬프 이벤트 입력으로 교체한다(stackRef 참조).
+레퍼런스 구현는 `System.nanoTime()/1000`(µs) 단일 단조 클럭에서 3 스레드: render(vsync, `timer.update`로 `TIMER_PLAY` 전진), input poll(~1kHz, `Gdx.input.isKeyPressed` 샘플링 → ~1ms 양자화 지터), judge(µs 변화마다 spin, `dmtime=note.time−press` 순수 µs). 판정은 프레임 시간과 무관(이미 올바름). **남은 결함**: ① 입력 poll ~1ms 양자화, ② 재생 위치가 nanoTime 기반(하드웨어 오디오 클럭 없음) → A/V vs judge 드리프트. rbms는 (1) 오디오 디바이스 클럭을 마스터로, (2) OS 타임스탬프 이벤트 입력으로 교체한다(stackRef 참조).

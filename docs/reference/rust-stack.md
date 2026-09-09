@@ -1,6 +1,6 @@
 ## rbms — Rust Stack Cheat-Sheet (2026-05 기준 검증 버전)
 
-> macOS(CoreAudio) + Windows(WASAPI), Apple Silicon 개발기, Rust 1.95. **핵심 설계 결정: 재생 위치(=판정 시간축)는 vsync 프레임 클럭이 아니라 오디오 디바이스가 실제 재생한 샘플 수에서 유도한다.** 이것이 beatoraja 대비 가장 중요한 수정이다.
+> macOS(CoreAudio) + Windows(WASAPI), Apple Silicon 개발기, Rust 1.95. **핵심 설계 결정: 재생 위치(=판정 시간축)는 vsync 프레임 클럭이 아니라 오디오 디바이스가 실제 재생한 샘플 수에서 유도한다.** 이것이 레퍼런스 구현 대비 가장 중요한 수정이다.
 
 ---
 
@@ -35,7 +35,7 @@ pollster = "0.4"; bytemuck = { version = "1", features = ["derive"] }
 
 ---
 
-### 2. 마스터 클럭 설계 (= beatoraja 대비 핵심 수정)
+### 2. 마스터 클럭 설계 (= 레퍼런스 구현 대비 핵심 수정)
 
 3 역할을 깔끔히 분리하되 **클럭만 고친다**:
 
@@ -141,7 +141,7 @@ fn main() {
 
 ---
 
-### 6. beatoraja에서 유지 vs 수정 요약
+### 6. 레퍼런스 구현에서 유지 vs 수정 요약
 
 - **유지**: µs(`i64`) 타임스탬프 전역; per-key debounce 게이트; `setStartTime` 리베이스(입력 타임스탬프와 노트 시각 동일 축); keylog `(press_us−margin, keycode, pressed)`(리플레이); 리플레이 주입 = 키 엣지 타임스탬프 덮어쓰기.
 - **수정**: ① poll-tick 타임스탬프 → OS 이벤트 타임스탬프; ② nanoTime 재생 클럭 → 오디오 재생 클럭(judge·BGM·화면 동일 디바이스 타임라인) → A/V/judge 드리프트 제거.

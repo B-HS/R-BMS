@@ -53,12 +53,12 @@ impl NoteOption {
     }
 }
 
-/// H-RANDOM anti-jack window (µs). beatoraja uses `ceil(15000 / hranThresholdBPM)` ms; at its
+/// H-RANDOM anti-jack window (µs). The reference implementation uses `ceil(15000 / hranThresholdBPM)` ms; at its
 /// default 120 BPM that is 125 ms. A lane that fired within this window is avoided for the next
 /// note when alternatives remain, so the per-row shuffle stops producing unplayable jacks.
 const HRAN_THRESHOLD_US: i64 = 125_000;
 
-/// Scratch-lane anti-jack window (µs) for ALL-SCRATCH — beatoraja's `SRAN_THRESHOLD` (40 ms). The
+/// Scratch-lane anti-jack window (µs) for ALL-SCRATCH — the reference implementation's `SRAN_THRESHOLD` (40 ms). The
 /// scratch lane tolerates faster repeats than key lanes, so it uses this tighter window: only when
 /// scratch was hit more recently than 40 ms does ALL-SCRATCH spill a note to a key lane instead.
 const SCRATCH_THRESHOLD_US: i64 = 40_000;
@@ -85,7 +85,7 @@ impl Rng {
 
 /// Non-scratch lanes belonging to one player side. For SP (player==1) side 0 covers every key
 /// lane; for DP each side covers only its own half, so a shuffle never crosses the P1<->P2
-/// boundary (that crossing is a separate FLIP option in beatoraja, not implemented here).
+/// boundary (that crossing is a separate FLIP option in the reference implementation, not implemented here).
 fn side_key_lanes(mode: Mode, side: usize) -> Vec<usize> {
     let players = (mode.player as usize).max(1);
     let per_side = mode.key / players;

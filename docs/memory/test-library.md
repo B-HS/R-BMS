@@ -18,7 +18,7 @@
 - **OGG Vorbis**(16,631개, 압도적): stereo 44100Hz. symphonia Vorbis 디코드.
 - **WAV**(6,954개): **8-bit unsigned PCM이 다수**, 샘플레이트 **22050 / 24000 / 44100Hz 혼재**, mono/stereo 혼재.
   - 표본 200개: `8bit stereo 22050Hz` 130, `8bit stereo 44100Hz` 70.
-- 결론: **로드 시 (a) 8/16/24/32-bit → f32 변환, (b) 디바이스 출력 레이트로 리샘플(rubato)** 을 일괄 수행해 믹서는 단일 포맷(f32, 디바이스 레이트)만 다루게 한다. (beatoraja PCM.java가 같은 변환·trailing-silence 트림을 한 이유.)
+- 결론: **로드 시 (a) 8/16/24/32-bit → f32 변환, (b) 디바이스 출력 레이트로 리샘플(rubato)** 을 일괄 수행해 믹서는 단일 포맷(f32, 디바이스 레이트)만 다루게 한다. (레퍼런스 구현 PCM.java가 같은 변환·trailing-silence 트림을 한 이유.)
 
 ## 데이터필드 관찰
 - `#mmmCC:....` 형식. 예 `#00616:002B0000` = 마디 006, 채널 16(P1 스크래치), 2자리 base-36 오브젝트 ID × 4 = 4분할.

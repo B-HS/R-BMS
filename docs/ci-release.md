@@ -44,12 +44,12 @@
 - [x] **GitHub 원격**: `origin = github.com/B-HS/R-BMS` 설정됨. `dev`(작업) 푸시됨(`origin/dev`), `refactor/entire-base`도 원격 존재. 태그 없음.
 - [ ] **`prod` 배포 브랜치 생성**: 아직 없음. `git branch prod && git push -u origin prod` → `prod` push가 release.yml(자동 버전·빌드·릴리스)을 트리거. 단 첫 버전은 v0.0.1 자동 bump 대신 **수동 태그 `v0.1.0`**(Cargo.toml 일치) 권장(§2-3).
 - [ ] **브랜치 보호**: `prod` 보호 시 `version` 잡의 자동 커밋/태그 push가 막힐 수 있음 → bot 예외 허용하거나 자동버전 대신 수동 태그(§2-3) 사용.
-- [ ] **LICENSE 파일**: `Cargo.toml`·README는 `GPL-3.0-or-later`(beatoraja 포팅)이나 루트 `LICENSE` 파일 없음 → **GPL-3.0 전문 추가 권장**(릴리스 동봉). 폰트 Inter는 OFL(`assets/fonts/Inter-OFL.txt`).
+- [ ] **LICENSE 파일**: `Cargo.toml`·README는 `GPL-3.0-or-later`(레퍼런스 구현 포팅)이나 루트 `LICENSE` 파일 없음 → **GPL-3.0 전문 추가 권장**(릴리스 동봉). 폰트 Inter는 OFL(`assets/fonts/Inter-OFL.txt`).
 - [ ] **코드 서명/공증**(P3): §3 참조. 현재 macOS ad-hoc(실행 OK)·미공증, Windows 미서명.
 - [ ] **.app/.dmg / 인스톨러**(P3): 현재 바이너리 아카이브. 더블클릭 `.app`은 무인자 실행 시 폴더 picker 진입하도록 클라 보강 필요(현재 무인자=usage 종료).
 
 ## 5.1 라이선스 (클라이언트 vs 백엔드/FE)
-- **클라이언트(rbms) = GPL-3.0-or-later 고정**: beatoraja(GPL-3.0)의 코어 PLAY를 포팅한 **파생 저작물** → copyleft로 MIT 불가. (판정 윈도우 등 원본 byte 대조 — 클린룸 아님.)
+- **클라이언트(rbms) = GPL-3.0-or-later 고정**: 레퍼런스 구현(GPL-3.0)의 코어 PLAY를 포팅한 **파생 저작물** → copyleft로 MIT 불가. (판정 윈도우 등 원본 byte 대조 — 클린룸 아님.)
 - **백엔드 서버 / 향후 FE = MIT 등 자유**: HTTP로만 통신하는 **별 프로그램**(파생 아님, mere aggregation) → 별 저장소·MIT 가능. (법적 조언 아님 — 핵심: 클라 GPL, 서버/FE 분리작품.)
 - 폰트 Inter(OFL)·cosmic-text 등 deps는 GPL/MIT 양쪽 호환.
 

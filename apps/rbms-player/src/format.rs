@@ -1,5 +1,5 @@
 //! Pure formatting / palette helpers for the UI (no app state). Extracted from `main.rs`: label
-//! strings, IIDX/beatoraja colour palettes, timestamp/duration formatting, and `ClearType` id
+//! strings, IIDX/reference colour palettes, timestamp/duration formatting, and `ClearType` id
 //! round-tripping for score persistence.
 
 use rbms_judge::{ClearType, GaugeKind};
@@ -70,7 +70,7 @@ pub(crate) fn difficulty_color(d: i32) -> Color {
     }
 }
 
-/// `#RANK` as a name + judge-width percent (beatoraja: 0 VERY HARD … 4 VERY EASY; `#RANK 2` = NORMAL = 75%).
+/// `#RANK` as a name + judge-width percent (reference: 0 VERY HARD … 4 VERY EASY; `#RANK 2` = NORMAL = 75%).
 pub(crate) fn rank_label(rank: i32) -> String {
     let name = match rank {
         0 => "VERY HARD",
@@ -100,7 +100,7 @@ pub(crate) fn mode_short(mode: Mode) -> &'static str {
     }
 }
 
-/// beatoraja `ClearType` id (`ClearType.java`) for a lamp — persisted in score records so the
+/// Reference implementation `ClearType` id (`ClearType.java`) for a lamp — persisted in score records so the
 /// lamp round-trips. (LightAssistEasy=3 is unused; rbms has no separate light-assist lamp.)
 pub(crate) fn clear_type_id(c: ClearType) -> u8 {
     match c {
@@ -132,7 +132,7 @@ pub(crate) fn clear_type_from_id(id: u8) -> ClearType {
     }
 }
 
-/// Clear-lamp label + colour. Colours are beatoraja's official lamp palette
+/// Clear-lamp label + colour. Colours are the reference implementation's official lamp palette
 /// (`select/SkinDistributionGraph.LAMP`, ARGB → RGB).
 pub(crate) fn clear_label_color(c: ClearType) -> (&'static str, Color) {
     match c {
@@ -227,7 +227,7 @@ mod tests {
     }
 
     #[test]
-    fn clear_type_ids_are_the_beatoraja_values() {
+    fn clear_type_ids_are_the_reference_values() {
         assert_eq!(clear_type_id(ClearType::NoPlay), 0);
         assert_eq!(clear_type_id(ClearType::Failed), 1);
         assert_eq!(clear_type_id(ClearType::AssistEasy), 2);
@@ -251,7 +251,7 @@ mod tests {
 
     #[test]
     fn clear_type_from_id_legacy_light_assist_maps_to_assist_easy() {
-        // beatoraja id 3 == LightAssistEasy, which rbms has no separate lamp for; it folds into
+        // Reference id 3 == LightAssistEasy, which rbms has no separate lamp for; it folds into
         // AssistEasy. (Asymmetric: clear_type_id(AssistEasy) == 2, never 3.)
         assert_eq!(clear_type_from_id(3), ClearType::AssistEasy);
         assert_eq!(clear_type_id(clear_type_from_id(3)), 2, "3 folds down to the 2 lamp on re-encode");
@@ -426,7 +426,7 @@ mod tests {
 
     #[test]
     fn clear_label_color_normal_lamp_is_named_clear() {
-        // The "Normal" ClearType is shown as "CLEAR" (beatoraja naming), a surprising-but-correct
+        // The "Normal" ClearType is shown as "CLEAR" (reference naming), a surprising-but-correct
         // mapping worth pinning.
         assert_eq!(clear_label_color(ClearType::Normal).0, "CLEAR");
     }

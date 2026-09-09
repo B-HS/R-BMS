@@ -45,7 +45,7 @@ pub fn key_name(code: KeyCode) -> &'static str {
     }
 }
 
-/// beatoraja-style default lane bindings (Z-row) for a mode, as `(key, lane)`. Lanes are rbms
+/// Reference-style default lane bindings (Z-row) for a mode, as `(key, lane)`. Lanes are rbms
 /// `Mode` lane indices: 7K keys 0..6 + scratch 7; 14K P1 keys 0..6 scratch 7, P2 keys 8..14
 /// scratch 15; PMS/9K all 9 lanes, no scratch.
 pub fn default_keys_for_mode(mode: Mode) -> Vec<(KeyCode, usize)> {

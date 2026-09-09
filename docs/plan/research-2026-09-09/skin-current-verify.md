@@ -1,7 +1,7 @@
 # skin-render-inventory 반박 검증 (skeptic pass)
 
 검증자: 회의적 검증자 에이전트. 대상 보고서: `research/skin-render-inventory.md` (findings 01~14).
-검증 방식: 각 finding 이 인용한 rbms/beatoraja 파일을 직접 열어 (a) 인용 line 이 주장을 뒷받침하는지, (b) 수치가 맞는지, (c) 이미 구현된 것을 미구현이라 했는지, (d) severity/effort 과장 여부를 확인.
+검증 방식: 각 finding 이 인용한 rbms/레퍼런스 구현 파일을 직접 열어 (a) 인용 line 이 주장을 뒷받침하는지, (b) 수치가 맞는지, (c) 이미 구현된 것을 미구현이라 했는지, (d) severity/effort 과장 여부를 확인.
 읽기 전용 준수(수정·생성 없음, cargo 미실행).
 
 ## 요약
@@ -47,7 +47,7 @@
 
 ### 05 — confirmed
 
-`playfield.rs:9`(BEAM_RELEASE_US=120_000), `:12`(BEAM_SLICES=6), `beam_intensity` 선형 페이드, `:634-645`(0.45+0.75p, 코어 0.55, 알파 200/235) 전부 일치. `app_play.rs:477`(`frame_count/12%4`), `:498-500`(seg 96, `frame_count%120`) 확인. 스킨 제어 가능한 애니메이션 파라미터가 bomb 3개뿐인 것도 `skin.rs:62-64` 로 확인. beatoraja `SkinObject.java:124-168` setDestination 이 acc/loop/timer/op 를 받는 것도 원문 확인.
+`playfield.rs:9`(BEAM_RELEASE_US=120_000), `:12`(BEAM_SLICES=6), `beam_intensity` 선형 페이드, `:634-645`(0.45+0.75p, 코어 0.55, 알파 200/235) 전부 일치. `app_play.rs:477`(`frame_count/12%4`), `:498-500`(seg 96, `frame_count%120`) 확인. 스킨 제어 가능한 애니메이션 파라미터가 bomb 3개뿐인 것도 `skin.rs:62-64` 로 확인. 레퍼런스 구현 `SkinObject.java:124-168` setDestination 이 acc/loop/timer/op 를 받는 것도 원문 확인.
 
 ### 06 — confirmed
 
@@ -70,7 +70,7 @@
 
 ### 10 — confirmed
 
-`font.rs:25-38`(GlyphRun 정의+주석), `:101-120`(swash 래스터→runs 캐시→fill_rect 재생), `:45-55`(px→text 중첩 캐시, 무제한), `:10`(Inter 임베드) 확인. beatoraja 대조 파일(SkinNumber/SkinTextBitmap/SkinTextImage/BitmapFontCache)도 실재.
+`font.rs:25-38`(GlyphRun 정의+주석), `:101-120`(swash 래스터→runs 캐시→fill_rect 재생), `:45-55`(px→text 중첩 캐시, 무제한), `:10`(Inter 임베드) 확인. 레퍼런스 구현 대조 파일(SkinNumber/SkinTextBitmap/SkinTextImage/BitmapFontCache)도 실재.
 
 ### 11 — partially
 
@@ -95,4 +95,4 @@
 
 - `render_list`/`render_song_detail`/`render_records`(select.rs 270~470) 는 인용된 라인만 확인하고 전체 통독은 하지 않음.
 - CPU/GPU 픽셀 동등성은 코드 독해만 했고 cargo test 미실행(시간 상한).
-- beatoraja 측은 SkinObject/SkinProperty/SkinType/로더 디렉터리 구조까지만 확인, JSON 스키마 세부는 미확인.
+- 레퍼런스 구현 측은 SkinObject/SkinProperty/SkinType/로더 디렉터리 구조까지만 확인, JSON 스키마 세부는 미확인.

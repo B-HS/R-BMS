@@ -4,23 +4,23 @@
 
 | # | 결정 | 채택안 |
 |---|---|---|
-| 1 | 스킨 포맷 전략 | beatoraja JSON 스킨 호환(json5 관대 파서) + Lua 식 평가(`mlua`, 스킨 루트 샌드박스, 노출 API 화이트리스트). LR2 CSV는 후순위 선택 |
+| 1 | 스킨 포맷 전략 | 레퍼런스 구현 JSON 스킨 호환(json5 관대 파서) + Lua 식 평가(`mlua`, 스킨 루트 샌드박스, 노출 API 화이트리스트). LR2 CSV는 후순위 선택 |
 | 2 | 판정 규칙 변경 시 기존 기록 | `scores.ron`에 `rule_version` 필드 추가, 구버전 기록 유지 + 램프 비교에서 별도 표시 |
 | 3 | 시작 전 옵션 UX | 곡선택 오버레이 옵션 패널(홀드형) 주경로 + 전체화면 설정은 환경설정으로 축소. decide 화면 미도입 |
-| 4 | IIDX 31 폐지 옵션 | H-RANDOM·JUDGE WIDTH 유지(beatoraja 패리티 우선) |
-| 5 | 곡DB | `rusqlite`(bundled), beatoraja `songdata.db` 유사 스키마 |
+| 4 | IIDX 31 폐지 옵션 | H-RANDOM·JUDGE WIDTH 유지(레퍼런스 구현 패리티 우선) |
+| 5 | 곡DB | `rusqlite`(bundled), 레퍼런스 구현 `songdata.db` 유사 스키마 |
 | 6 | Play 중 Esc 즉시 이탈 | 유지 + "길게 누르기/2회 누르기" 옵션 추가 |
 | 7 | 입력 장치 범위 | 게임패드(gilrs) + 스크래치 2키/아날로그 먼저, MIDI 후순위 |
 | 8 | git 운용 | 수동(요청 시에만 커밋·푸시). `llm-rules.auto-commit` 미설정 유지 |
 | 9 | 라이브러리 규모 | 사용자 값 미회신 → 계획 §2 Phase G 순서를 기본값(수천 곡 가정)으로 진행. 값 회신 시 재조정 |
 | 10 | bmson·`#SWITCH` | `#SWITCH/#CASE/#SKIP/#DEF`는 Phase A-core에 포함, bmson은 Phase G 별도 항목 |
 | 11 | 별도 런처 | 신설하지 않음. 인게임 환경설정으로 통합 |
-| 12 | 커스텀 판정·어시스트 기록 정책 | beatoraja 정책 그대로 이식: 판정폭 rate>100 또는 LN 마진 rate>100 → assist=2·score=false(IR 제출·리플레이 저장·EX/BP/콤보 갱신 차단, 램프·플레이카운트는 갱신); assist>0 → FC/PERFECT/MAX 생략 + LightAssistEasy(id 3)/AssistEasy(id 2) 강등; AUTO SCRATCH=assist 1; autoplay/replay/practice는 기록·제출 제외 |
+| 12 | 커스텀 판정·어시스트 기록 정책 | 레퍼런스 구현 정책 그대로 이식: 판정폭 rate>100 또는 LN 마진 rate>100 → assist=2·score=false(IR 제출·리플레이 저장·EX/BP/콤보 갱신 차단, 램프·플레이카운트는 갱신); assist>0 → FC/PERFECT/MAX 생략 + LightAssistEasy(id 3)/AssistEasy(id 2) 강등; AUTO SCRATCH=assist 1; autoplay/replay/practice는 기록·제출 제외 |
 
 ## Phase A 중 확정된 세부 (2026-09-09)
 
 - `#SWITCH` 계열 `#DEF` 의미: 단일 패스 해석기라 파일 순서로 판정 → 일치 `#CASE` 앞에 `#DEF` 가 있으면 `#DEF` 가 이긴다(C `default:` 와의 알려진 이탈, `control.rs` `select_case` 문서 주석에 명시). BMS 관례상 `#DEF` 는 마지막이라 실영향 희박. C 의미로 통일하려면 2패스 전환 필요 — 필요 시 사용자 판단.
-- 그린넘버와 LIFT: beatoraja(`LaneRenderer.java:321-330`)와 rbms 모두 lift 는 duration 에 개입하지 않음 → 계획 §1.7 의 "LIFT 미반영" 항목 철회.
+- 그린넘버와 LIFT: 레퍼런스 구현(`LaneRenderer.java:321-330`)와 rbms 모두 lift 는 duration 에 개입하지 않음 → 계획 §1.7 의 "LIFT 미반영" 항목 철회.
 - JUDGE WIDTH 클램프 대상은 MS 가 아니라 BAD(`JudgeProperty.java:266-268` 인덱스 6,7 = BD). 원본대로 구현.
 
 ## 운용 규칙(사용자 지시, 2026-09-09)

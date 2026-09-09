@@ -57,7 +57,7 @@ pub enum RandomOption {
 }
 
 /// Per-judge tally. The `pgreat`..`miss` totals are the basic IR fields; `fast`/`slow`/`combobreak`
-/// and the `e*`/`l*` early/late split (beatoraja `IRScoreData`'s 12 fields, `epg`..`lms`), plus
+/// and the `e*`/`l*` early/late split (the reference implementation's `IRScoreData` 12 fields, `epg`..`lms`), plus
 /// `avgjudge` (mean signed timing, µs) and rbms-only `empty_poor`, are the superset extras. The
 /// split is additive: `epg + lpg == pgreat`, etc. Every superset field has a serde default so older
 /// (split-less) submissions still decode.
@@ -104,7 +104,7 @@ pub struct JudgeBreakdown {
 
 /// How a chart was played. The first block is basic IR; the rest is the rbms superset that lets a
 /// server evaluate fairness exactly (every modifier that affects difficulty is preserved). `option`
-/// keeps beatoraja's raw option bitmask for round-tripping. All superset fields carry a serde
+/// keeps the reference implementation's raw option bitmask for round-tripping. All superset fields carry a serde
 /// default so older submissions still decode.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayOptions {
@@ -163,10 +163,10 @@ pub struct ScoreSubmission {
     /// RNG seed the shuffle used (lets a server reproduce the exact lane layout for verification).
     #[serde(default)]
     pub seed: u64,
-    /// beatoraja `JudgeAlgorithm` ("Combo"/"Duration"/"Lowest"/"Score"); empty = client default.
+    /// Reference implementation `JudgeAlgorithm` ("Combo"/"Duration"/"Lowest"/"Score"); empty = client default.
     #[serde(default)]
     pub judge_algorithm: String,
-    /// beatoraja `BMSPlayerRule` the run used; empty = client default.
+    /// Reference implementation `BMSPlayerRule` the run used; empty = client default.
     #[serde(default)]
     pub rule: String,
     /// Skin identifier the run used (presentation only; recorded for completeness).
@@ -184,9 +184,9 @@ pub struct ScoreSubmission {
 }
 
 /// One leaderboard row. The first block is the basic IR ranking payload; the trailing fields are
-/// the superset extras a client needs to render beatoraja-style ranking panels (`RankingData`
+/// the superset extras a client needs to render reference-style ranking panels (`RankingData`
 /// lamp histogram, per-row judge detail, option/LN-type badges). They mirror
-/// beatoraja `IRScoreData`'s `lntype` / `notes` / `option` / `epg..lms` and all carry a serde
+/// the reference implementation's `IRScoreData` `lntype` / `notes` / `option` / `epg..lms` and all carry a serde
 /// default, so a server that only speaks the basic payload still decodes unchanged.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScoreRecord {
@@ -198,13 +198,13 @@ pub struct ScoreRecord {
     pub minbp: u32,
     pub rank: Option<u32>,
     pub played_at: i64,
-    /// LN handling the run used (beatoraja `IRScoreData.lntype`: 0 = LN, 1 = CN, 2 = HCN).
+    /// LN handling the run used (reference implementation `IRScoreData.lntype`: 0 = LN, 1 = CN, 2 = HCN).
     #[serde(default)]
     pub lntype: i32,
-    /// Raw beatoraja option bitmask the run used (`IRScoreData.option`); 0 = unknown/none.
+    /// Raw reference implementation option bitmask the run used (`IRScoreData.option`); 0 = unknown/none.
     #[serde(default)]
     pub option: i64,
-    /// Chart note count the row was scored against (beatoraja `IRScoreData.notes`); 0 = unknown.
+    /// Chart note count the row was scored against (reference implementation `IRScoreData.notes`); 0 = unknown.
     #[serde(default)]
     pub total_notes: u32,
     /// Full judge tally for the row when the server exposes it; `None` = ranking-only payload.
@@ -294,7 +294,7 @@ pub struct SettingsBlob {
     pub updated_at: i64,
 }
 
-/// Register/login request. Superset of beatoraja `IRAccount{id,password,name}` with an optional
+/// Register/login request. Superset of the reference implementation's `IRAccount{id,password,name}` with an optional
 /// `email`. `name` is used on register; ignored on login.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthRequest {

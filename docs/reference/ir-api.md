@@ -1,6 +1,6 @@
 # rbms IR-superset API 계약 (백엔드 구현용)
 
-> ⚠️ **이 문서는 `rbms-ir` 클라이언트가 현재 호출하는 최소 계약(요약)**이다. 백엔드 **전체 설계(PRD·전 엔드포인트·early/late 스코어·설정 동기화·µs 리플레이·빌드해시 무결성·FE·Drizzle 스키마·LR2IR/beatoraja 매핑)**는 **[`docs/backend/`](../backend/README.md)** 가 정본이다. 신규 구현은 그쪽을 따른다.
+> ⚠️ **이 문서는 `rbms-ir` 클라이언트가 현재 호출하는 최소 계약(요약)**이다. 백엔드 **전체 설계(PRD·전 엔드포인트·early/late 스코어·설정 동기화·µs 리플레이·빌드해시 무결성·FE·Drizzle 스키마·LR2IR/레퍼런스 구현 매핑)**는 **[`docs/backend/`](../backend/README.md)** 가 정본이다. 신규 구현은 그쪽을 따른다.
 >
 > 클라이언트(`rbms-ir`)는 완성돼 있다. 이 문서는 **나중에 만들 독자 서버**가 구현해야 할 HTTP 엔드포인트 계약이다.
 > 설계 원칙: **BMS IR(LR2IR/Mocha/Cinnamon 등)의 슈퍼셋**. MD5+SHA-256 양쪽 차트 id, fast/slow 집계, 리플레이, 코스, capability 탐색, 그리고 모든 DTO의 `extra`(free-form) 필드로 전방호환.

@@ -1,7 +1,7 @@
 # skin-system 감사 보고서 반박 검증
 
 검증자: 회의적 검증자. 대상: `scratchpad/research/skin-system.md` findings 17건.
-검증 방법: 인용된 file:line 을 rbms / beatoraja 양쪽에서 직접 열어 주장·수치 대조.
+검증 방법: 인용된 file:line 을 rbms / 레퍼런스 구현 양쪽에서 직접 열어 주장·수치 대조.
 
 ## 종합
 
@@ -53,7 +53,7 @@
 - "rbms 에 hcnreactive 등 상태가 있는지 미확인" → 확인 결과: **없다.** rbms 는 `LnKind::{Ln,Cn,Hcn}`(crates/rbms-model/src/lib.rs:16) 로 종류만 구분하고, 판정은 head/release 2-판정 모델(crates/rbms-judge/src/matcher.rs:18-24, :245, :268)뿐이다. HCN 의 프레임 단위 active/damage/reactive 런타임 상태는 문서상 Phase 7 미구현(docs/PROCESS.md:176 "HCN 연속게이지·CN deferral·BSS는 Phase 7"). 따라서 매핑 표 작성 권고는 유효하되, 18슬롯 중 최소 6슬롯(hcnactive/hcnbodyActive/hcndamage/hcnbodyMiss/hcnreactive/hcnbodyReactive)은 **rbms 판정 엔진 확장이 선행되어야** 채워진다.
 
 ### skin-17 (partially — 결론은 유지, 근거·권고를 정정)
-- beatoraja 측 근거는 실측 일치: Skin.java:504-530(SkinObjectRenderer 의 `ShaderProgram[6] shaders`, blend, type(TYPE_NORMAL~TYPE_DISTANCE_FIELD 6종), clipBounds/scissors), SkinObject.java:36-44(dstblend "2:加算 9:反転", dstfilter "0 Nearest / 1 Linear"), :81-82(CENTERX/CENTERY 10종 룩업), StretchType.java 159 LOC.
+- 레퍼런스 구현 측 근거는 실측 일치: Skin.java:504-530(SkinObjectRenderer 의 `ShaderProgram[6] shaders`, blend, type(TYPE_NORMAL~TYPE_DISTANCE_FIELD 6종), clipBounds/scissors), SkinObject.java:36-44(dstblend "2:加算 9:反転", dstfilter "0 Nearest / 1 Linear"), :81-82(CENTERX/CENTERY 10종 룩업), StretchType.java 159 LOC.
 - **정정 1**: "rbms 는 CPU 캔버스 기반"은 사실과 다르다. `apps/rbms-player/src/gpu.rs` 에 wgpu 백엔드가 이미 있고 WGSL 프래그먼트 셰이더(`textureSample`, gpu.rs:36-51)·BGA 텍스처 업로드(`write_texture`, gpu.rs:251)·인스턴스드 드로우(gpu.rs:64 주석)까지 동작한다. cpu.rs(223 LOC)는 **참조/테스트 백엔드**다(lib.rs:59-60 주석 "wgpu 백엔드와 CPU 참조 백엔드 둘 다 구현").
 - **정정 2**: 따라서 권고의 "GPU 백엔드(wgpu) 도입 여부를 이 시점에 결정"은 이미 지난 결정이다. 실제 병목은 **`Renderer` trait 의 표면적**이다 — lib.rs:61-65 에 `size()`, `clear()`, `fill_rect()` **3개뿐**이며 임의 텍스처를 그리는 프리미티브가 아예 없다. 즉 blend/filter/center/stretch 이전에 `draw_textured_quad` 급 프리미티브부터 없다.
 - 결과적으로 severity 는 high 가 아니라 **critical 에 가깝고**, effort 는 L 보다 크다(트레이트 확장이 rbms-render 전 호출부 3,158 LOC 에 파급). 권고는 "GPU 도입 결정"이 아니라 "Renderer trait 을 텍스처·블렌드·클립·회전중심을 받는 인터페이스로 확장하고 cpu.rs 참조 구현을 그에 맞춰 갱신" 이어야 한다.
@@ -62,7 +62,7 @@
 
 | # | 항목 | 근거 |
 |---|---|---|
-| M1 | 기본 스킨 JSON 이 **엄격 JSON 이 아니다**(libgdx Json 의 관대 파싱). serde_json 은 `play7.json` 을 파싱 실패한다 — 실측: `json.loads` 가 line 16 col 3 에서 JSONDecodeError. 원인은 배열 끝 trailing comma. | /Users/gkn/beatoraja/skin/default/play7.json:10-16 (`{"name":"2P","op":921},` 뒤 `]}`). 대응: json5/serde-hjson 계열 또는 관대 파서 필요 — 보고서 skin-02 의 "serde 구조체 1:1 미러링" 만으로는 로드 불가. |
+| M1 | 기본 스킨 JSON 이 **엄격 JSON 이 아니다**(libgdx Json 의 관대 파싱). serde_json 은 `play7.json` 을 파싱 실패한다 — 실측: `json.loads` 가 line 16 col 3 에서 JSONDecodeError. 원인은 배열 끝 trailing comma. | <reference>/skin/default/play7.json:10-16 (`{"name":"2P","op":921},` 뒤 `]}`). 대응: json5/serde-hjson 계열 또는 관대 파서 필요 — 보고서 skin-02 의 "serde 구조체 1:1 미러링" 만으로는 로드 불가. |
 | M2 | 스킨의 **Lua 실행이 샌드박스 대상**이다. `LuaSkinLoader.sandboxed(skinPath)` 가 스킨 디렉터리를 루트로 잡아 파일 접근을 제한한다 — mlua 채택 시 동일한 샌드박스 경계를 설계해야 한다(임의 스킨 = 임의 코드 실행). | skin/lua/LuaSkinLoader.java:36-43 (`sandboxed`, `new LuaSkinLoader(skinRoot)`), :30-38 (`SkinLuaAccessor(false, sandboxRoot)`). 보고서 skin-03/skin-04 는 보안 축을 전혀 다루지 않는다. |
 | M3 | `Renderer` trait 이 **텍스처 프리미티브 자체를 갖지 않는다**(size/clear/fill_rect 3개). 스킨의 image/note/gauge 전부가 텍스처 드로우인데, 이 3-메서드 표면이 skin-01~17 전체의 실질 선행 조건이다. | /Users/gkn/R-BMS/crates/rbms-render/src/lib.rs:61-65. |
 | M4 | rbms 에 **이미 wgpu 백엔드가 있다**(WGSL 셰이더·샘플러·텍스처 업로드). 보고서가 이를 놓쳐 skin-17 권고를 잘못된 결정 지점으로 유도한다. | apps/rbms-player/src/gpu.rs:36-51(shader), :178-209(bga_tex/bind group), :251(write_texture). |

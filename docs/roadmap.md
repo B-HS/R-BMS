@@ -22,7 +22,7 @@ These were surfaced while hardening the test suite. They are intentional or harm
 - **`CpuCanvas::fill_rect` with `a == 0`** leaves RGB unchanged but still forces the stored alpha to 255 (the canvas is always opaque). No visible effect.
 - **A note exactly at `microtime`** is not in `visible_offsets`/`constant_offsets` (they iterate from the *next* timeline) — the note disappears the instant it reaches the judgment line, which is also when it is hit. By design.
 - **IR `gauge_value: f32` NaN** serializes to JSON `null` and won't decode back. The gauge value is always finite in practice (clamped), so this can't occur from real play.
-- **`clear_type_id`/`clear_type_from_id` are asymmetric at id 3** (beatoraja `LightAssistEasy` folds to `AssistEasy`) — intentional; rbms has no separate light-assist lamp.
+- **`clear_type_id`/`clear_type_from_id` are asymmetric at id 3** (the reference implementation `LightAssistEasy` folds to `AssistEasy`) — intentional; rbms has no separate light-assist lamp.
 
 ## Fixed while hardening tests (done)
 

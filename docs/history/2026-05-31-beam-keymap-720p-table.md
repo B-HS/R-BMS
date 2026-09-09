@@ -1,6 +1,6 @@
 # 2026-05-31 — 키 빔 · 모드별 키맵 · 720p 랜드스케이프 · 재귀 곡선택 · 난이도표 · 로딩/속도조절
 
-사용자 요청 7건을 한 세션에서 구현·검증. beatoraja 원본 메커닉 리서치(병렬 워크플로) + 적대적 멀티에이전트 리뷰(7결함 확정·전부 수정).
+사용자 요청 7건을 한 세션에서 구현·검증. 레퍼런스 구현 원본 메커닉 리서치(병렬 워크플로) + 적대적 멀티에이전트 리뷰(7결함 확정·전부 수정).
 
 ## 대상 파일
 - `crates/rbms-play/src/lib.rs` — 키 빔 상태머신, 짝없는 LN 처리.
@@ -12,10 +12,10 @@
 ## 리포트 (무엇을·왜)
 
 ### a. 키 빔
-beatoraja는 키 빔을 스킨 객체로 두고 엔진은 per-lane keyon/keyoff timer(µs 타임스탬프)만 토글한다(KeyInputProccessor/SkinObject). autoplay는 탭=80ms 플래시(`auto_minduration`), LN=hold. 이를 그대로 포팅: `Player`에 `beam_on/beam_off/ln_active`(`i64::MIN`=off). press=on·release=fade, autoplay 액션 루프에서 set, 탭은 80ms 후 auto-clear(`!ln_active` 게이트, interactive 레인은 미적용). 렌더는 `render_playfield`가 레인배경↔노트 사이에 판정선→위로 6슬라이스 그라데이션 빔(데이터주도: `SkinConfig.beam_color/alpha/height_frac`). 프레임레이트 독립(µs 기반).
+레퍼런스 구현는 키 빔을 스킨 객체로 두고 엔진은 per-lane keyon/keyoff timer(µs 타임스탬프)만 토글한다(KeyInputProccessor/SkinObject). autoplay는 탭=80ms 플래시(`auto_minduration`), LN=hold. 이를 그대로 포팅: `Player`에 `beam_on/beam_off/ln_active`(`i64::MIN`=off). press=on·release=fade, autoplay 액션 루프에서 set, 탭은 80ms 후 auto-clear(`!ln_active` 게이트, interactive 레인은 미적용). 렌더는 `render_playfield`가 레인배경↔노트 사이에 판정선→위로 6슬라이스 그라데이션 빔(데이터주도: `SkinConfig.beam_color/alpha/height_frac`). 프레임레이트 독립(µs 기반).
 
 ### b. 모드별 키맵
-기존 7K 단일 하드코딩 → `default_keys_for_mode(Mode)`로 5K/7K/9K(PMS)/10K/14K 프리셋(사용자 결정: **beatoraja Z열**). 차트 mode 자동감지로 `App.active_keys` 선택, `--keys` 오버라이드 유지. 14K는 rbms 실제 모델(BEAT7 table) 기준 P1 키=lane0-6/스크7, **P2 키=lane8-14/스크15**(좌손/우손). `key_from_name`에 QUOTE/CONTROL 추가.
+기존 7K 단일 하드코딩 → `default_keys_for_mode(Mode)`로 5K/7K/9K(PMS)/10K/14K 프리셋(사용자 결정: **레퍼런스 구현 Z열**). 차트 mode 자동감지로 `App.active_keys` 선택, `--keys` 오버라이드 유지. 14K는 rbms 실제 모델(BEAT7 table) 기준 P1 키=lane0-6/스크7, **P2 키=lane8-14/스크15**(좌손/우손). `key_from_name`에 QUOTE/CONTROL 추가.
 
 ### c. 1280×720 16:9 랜드스케이프
 레퍼런스 공간을 480×640 포트레이트 → 1280×720으로(GPU 유니폼이 `(CW,CH)`를 NDC로 매핑하므로 상수+좌표만 변경). `SkinConfig`/`default.ron` 랜드스케이프 기본값: 필드 center-left(`field_x` 0.05/`field_width` 0.28 = 폭 비율), `judge_y` 672(하단), BGA 우측 512² 정사각(텍스처 정사각이라 비정사각 시 스트레치). HUD 카운트패널을 BGA 우측으로, Select(리스트+우측 정보패널)/Settings(중앙 컬럼)/Result(중앙 컬럼) 재배치.
@@ -48,7 +48,7 @@ Play 중 ↑/↓로 `config.hispeed` ±0.25(clamp 0.5~10.0). `render_playfield`�
 - 실측: 발광1 표 fetch(1035개, header 자동발견 symbol=★) → 로컬 727곡 중 **86곡/18레벨 매칭**. 단곡 autoplay 라이브 구동 패닉 없음.
 
 ### i. 통합 키 설정(파일 + 인앱 에디터) + 풍부한 조작 키
-사용자 요청: "속도조절 등 모든 (레인 외) 조작 키가 사용자 지정이어야 한다", 방식=파일+에디터 둘 다, 조작=beatoraja식 풍부하게. 신규 `apps/rbms-player/src/keyconfig.rs`: `KeyConfig{lanes(모드별 Vec<String>), controls: ControlBinds}` RON 직렬화 + `key_from_name`/`key_name`(라운드트립, 화살표·브래킷 추가) + `default_keys_for_mode`/`mode_config_key`(모드 **name** 기준 디스패치) + `lane_keys`(누락/오타 레인을 기본값으로 백필) + `control_key`/`set_*`/`collisions`. 
+사용자 요청: "속도조절 등 모든 (레인 외) 조작 키가 사용자 지정이어야 한다", 방식=파일+에디터 둘 다, 조작=레퍼런스 구현식 풍부하게. 신규 `apps/rbms-player/src/keyconfig.rs`: `KeyConfig{lanes(모드별 Vec<String>), controls: ControlBinds}` RON 직렬화 + `key_from_name`/`key_name`(라운드트립, 화살표·브래킷 추가) + `default_keys_for_mode`/`mode_config_key`(모드 **name** 기준 디스패치) + `lane_keys`(누락/오타 레인을 기본값으로 백필) + `control_key`/`set_*`/`collisions`. 
 - **파일**: `~/.config/rbms/keyconfig.ron` (없으면 자동생성, `--keyconfig`로 경로 지정). CLI `--keys`는 레인 오버라이드.
 - **인앱 에디터**: `Stage::KeyConfig`(설정 Tab→`KEY CONFIG`). EDIT MODE 전환(←/→) + 컨트롤/레인 행, Enter=키 캡처 재바인딩, 충돌 시 거부+빨강 DUP 표시, Esc=저장 후 복귀.
 - **조작 액션**(설정키, 기본): hi-speed ±(↑/↓), lane cover/sudden ±(→/←, `render_lane_cover` 상단 차폐), lift ±(]/[, skin 재빌드). `control_for`→`apply_control`, control이 lane보다 우선(early-return).

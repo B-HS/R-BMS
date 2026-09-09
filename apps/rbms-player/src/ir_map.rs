@@ -63,7 +63,7 @@ pub(crate) fn ir_random(n: NoteOption) -> RandomOption {
 
 /// Map the chart's `#LNMODE` (0=undefined→LN, 1=LN, 2=CN, 3=HCN) to the IR `lntype` encoding
 /// (0=LN, 1=CN, 2=HCN — the rbms backend `data-model.md`/`compatibility.md` contract, which mirrors
-/// `LnKind` ordering). beatoraja folds undefined to plain LN, so 0 and 1 both yield 0.
+/// `LnKind` ordering). The reference implementation folds undefined to plain LN, so 0 and 1 both yield 0.
 pub(crate) fn ir_lntype(lnmode: i32) -> i32 {
     match lnmode {
         2 => 1,
@@ -72,7 +72,7 @@ pub(crate) fn ir_lntype(lnmode: i32) -> i32 {
     }
 }
 
-/// Assist tags reported with a submission, one per active assist. Mirrors beatoraja's assist level
+/// Assist tags reported with a submission, one per active assist. Mirrors the reference implementation's assist level
 /// sources for the options this client exposes: an auto-played lane (`AutoplayModifier` raises
 /// `AssistLevel.ASSIST`, `BMSPlayer.java:233-234`) and a judge window widened past 100%
 /// (`BMSPlayer.java:207-213`). Empty when the run used no assist.

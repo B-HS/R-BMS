@@ -1,7 +1,7 @@
 # 검증 보고서 — workspace-quality (크레이트 구조·Rust 관용성) findings 반증 시도
 
 대상 보고서: `scratchpad/research/workspace-quality.md` (findings 01~20)
-검증 방식: 인용된 file:line 을 직접 열람, 수치 재계산, clippy 실측(`cargo clippy --workspace --all-targets`), beatoraja 원본 파일 존재 확인.
+검증 방식: 인용된 file:line 을 직접 열람, 수치 재계산, clippy 실측(`cargo clippy --workspace --all-targets`), 레퍼런스 구현 원본 파일 존재 확인.
 검증 시각 기준 커밋: `c6f0885` (branch dev, clean)
 
 ## 1. 요약 판정표
@@ -94,5 +94,5 @@ crates/rbms-render/src/playfield.rs:1  use rbms_chart::scroll::{constant_offsets
 
 - `crates/rbms-render/src/playfield.rs` 본문 전체(스크롤 계산이 chart 에 얼마나 깊게 결합돼 있는지 정량화 못 함).
 - `apps/rbms-player/src/app_input.rs`, `app_select.rs` 전문 통독(라인 인용 지점만 확인).
-- beatoraja 측은 파일 존재·이름만 확인했고 내부 구현(SkinLoader 의 실제 오브젝트 스키마, JudgeAlgorithm 4종의 알고리즘)은 통독하지 않음.
+- 레퍼런스 구현 측은 파일 존재·이름만 확인했고 내부 구현(SkinLoader 의 실제 오브젝트 스키마, JudgeAlgorithm 4종의 알고리즘)은 통독하지 않음.
 - finding 09 의 NaN 패닉은 코드 경로 추적으로 확정했고 실제 크래시 재현 실행은 하지 않음(레포 수정 금지 제약).

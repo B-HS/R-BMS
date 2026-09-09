@@ -3,12 +3,12 @@
 **문서 단계**(백엔드/FE 구현 X — 설계·CI 설정만). 원본/인터넷 대조 후 `docs/backend/`·`.github/workflows/`·`docs/ci-release.md` 작성.
 
 ## 1. 조사 (정본 대조)
-- **beatoraja IR**(`src/bms/player/beatoraja/ir/`): `IRConnection`(register/login/rivals/tables/getPlayData·sendPlayData/course/URL) · `IRScoreData`(**판정 early/late 분리** epg/lpg…ems/lms·option비트필드·seed·gauge·assist·deviceType·judgeAlgorithm·rule·skin·avgjudge, EX=(epg+lpg)*2+egr+lgr) · `IRChartData/IRCourseData/IRTableData/IRAccount/ClearType(0-10)`. IR은 플러그인(리플렉션) — 실 HTTP 프로토콜은 외부.
+- **레퍼런스 구현 IR**(`<reference>/ir/`): `IRConnection`(register/login/rivals/tables/getPlayData·sendPlayData/course/URL) · `IRScoreData`(**판정 early/late 분리** epg/lpg…ems/lms·option비트필드·seed·gauge·assist·deviceType·judgeAlgorithm·rule·skin·avgjudge, EX=(epg+lpg)*2+egr+lgr) · `IRChartData/IRCourseData/IRTableData/IRAccount/ClearType(0-10)`. IR은 플러그인(리플렉션) — 실 HTTP 프로토콜은 외부.
 - **LR2IR**(naktazdim/lr2irscraper 등): `getrankingxml.cgi?id=&songmd5=`(md5·XML·clear 1-5·name/id/notes/combo/pg/gr/minbp) · `search.cgi?mode=ranking&bmsmd5=` · 코스=차트해시 결합.
 - 기존 `docs/reference/ir-api.md` + `crates/rbms-ir`. 백엔드 컨벤션 `~/.claude/convention/backend.md`(Bun/Hono/Drizzle/Zod/better-auth).
 
 ## 2. docs/backend (6문서)
-- `README`(인덱스·스택·결정) · `PRD`(목표/FR-18까지·호환매트릭스·로드맵) · `api-spec`(전 엔드포인트) · `data-model`(Drizzle/MySQL) · `endpoint-tasks`(Route→Service→ServiceDb 체크) · `compatibility`(LR2IR/beatoraja 필드매핑+출처).
+- `README`(인덱스·스택·결정) · `PRD`(목표/FR-18까지·호환매트릭스·로드맵) · `api-spec`(전 엔드포인트) · `data-model`(Drizzle/MySQL) · `endpoint-tasks`(Route→Service→ServiceDb 체크) · `compatibility`(LR2IR/레퍼런스 구현 필드매핑+출처).
 - 도메인: auth·players·charts(ranking md5·sha256)·scores(early/late)·courses·tables·**replays(µs)**·**settings 동기화**·**integrity**·**FE(web)**·system·LR2IR 어댑터.
 
 ## 3. 사용자 추가 요구 반영 (문서)
@@ -23,7 +23,7 @@
 - 검증: YAML 파싱 OK(ruby)·버전 bump perl이 워크스페이스 version만 교체 확인.
 
 ## 5. 라이선스 / 서명 (사용자 질의)
-- **클라(rbms)=GPL-3.0 고정**(beatoraja GPL 포팅·파생, 클린룸 아님 → MIT 불가). **백엔드/FE=HTTP 별 작품이라 MIT 가능**(별 저장소). 폰트 Inter(OFL)·deps 호환.
+- **클라(rbms)=GPL-3.0 고정**(레퍼런스 구현 GPL 포팅·파생, 클린룸 아님 → MIT 불가). **백엔드/FE=HTTP 별 작품이라 MIT 가능**(별 저장소). 폰트 Inter(OFL)·deps 호환.
 - **서명**: 무서명 하드차단 아님(경고+우회). **macOS arm64는 ad-hoc 서명 없으면 실행 불가** → 워크플로 `codesign -s -` 추가(lipo 후). 공증(Apple)·Authenticode(Win)는 무경고용 P3.
 
 ## 6. 후속

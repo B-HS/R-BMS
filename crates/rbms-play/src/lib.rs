@@ -13,7 +13,7 @@ enum AutoAction {
     Release,
 }
 
-/// Autoplay key-beam flash for a tapped (non-LN) note, mirroring beatoraja's
+/// Autoplay key-beam flash for a tapped (non-LN) note, mirroring the reference implementation's
 /// `auto_minduration` (80 ms): a tap lights its lane beam for this long, then releases.
 const AUTO_BEAM_US: i64 = 80_000;
 
@@ -121,12 +121,12 @@ impl Player {
 
     /// Apply a single user JUDGE WIDTH rate (percent; 100 = chart default) to PGREAT/GREAT/GOOD on
     /// both key and scratch lanes. Kept for callers that expose one slider; see
-    /// [`set_judge_window_rates`](Self::set_judge_window_rates) for beatoraja's six-value form.
+    /// [`set_judge_window_rates`](Self::set_judge_window_rates) for the reference implementation's six-value form.
     pub fn set_judge_rate(&mut self, rate_percent: i32) {
         self.set_judge_window_rates([rate_percent; 3], [rate_percent; 3]);
     }
 
-    /// beatoraja JUDGE WIDTH: per-tier `[PGREAT, GREAT, GOOD]` percentages for key lanes and for
+    /// Reference implementation JUDGE WIDTH: per-tier `[PGREAT, GREAT, GOOD]` percentages for key lanes and for
     /// scratch lanes (`JudgeManager.java:169-174`). The chart's own judgerank (`#RANK`/`#DEFEXRANK`)
     /// is applied first, then these rates — BAD and the 空POOR band never widen, and each tier is
     /// clamped to BAD and to the tier before it.
@@ -139,7 +139,7 @@ impl Player {
         self.judge.set_ln_scratch_end(prop.ln_scratch_end.scaled(judgerank).with_window_rate(scratch));
     }
 
-    /// beatoraja LONGNOTE MARGIN rate (percent of the mode's stock margin).
+    /// Reference implementation LONGNOTE MARGIN rate (percent of the mode's stock margin).
     pub fn set_longnote_margin_rate(&mut self, rate_percent: i32) {
         self.judge.set_longnote_margin_rate(rate_percent);
     }
@@ -817,7 +817,7 @@ mod tests {
         let nt = m.timelines.iter().find_map(|t| t.notes[0].as_ref()).map(|n| n.time_us).unwrap();
         let mut p = Player::new(m, false);
         p.update(nt + 1_000_000, |_| {});
-        assert_eq!(p.judge.counts[4], 1, "unpressed note swept to 見逃し POOR (beatoraja judge code 4)");
+        assert_eq!(p.judge.counts[4], 1, "unpressed note swept to 見逃し POOR (reference judge code 4)");
         assert_eq!(p.judge.counts[5], 0, "nothing lands in the 空POOR slot");
         assert_eq!(p.judge.max_combo, 0, "a swept POOR keeps combo at zero");
     }

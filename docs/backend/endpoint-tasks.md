@@ -17,7 +17,7 @@
 - [ ] `GET /api/health` → ServerInfo(capabilities 계산: 구성된 서비스 기준). route만, 인증X.
 - [ ] `GET /api/version` → 빌드 버전/커밋(env).
 
-## 2. auth (P0) — beatoraja IRAccount
+## 2. auth (P0) — reference IRAccount
 - [ ] dto: `accountSchema`(id·password·name·email?)·`loginSchema`.
 - [ ] `POST /api/auth/register` → better-auth signUp + user row + 토큰. 중복 시 `IR_ACCOUNT_EXISTS`.
 - [ ] `POST /api/auth/login` → 검증 → AuthResult(token+player). 실패 `UNAUTHORIZED`. rate-limit.
@@ -29,7 +29,7 @@
 - [ ] `GET /api/players/{id}` → PlayerProfile. 없으면 `IR_PLAYER_NOT_FOUND`.
 - [ ] `GET /api/players/{id}/rivals` → PlayerProfile[].
 - [ ] `PUT /api/players/{id}/rivals`(withAuth 본인) → rival 테이블 치환.
-- [ ] `GET /api/players/{id}/scores`(query: since·limit·mode) → ScoreRecord[](beatoraja getPlayData(player,null)).
+- [ ] `GET /api/players/{id}/scores`(query: since·limit·mode) → ScoreRecord[](the reference implementation getPlayData(player,null)).
 
 ## 4. charts (P0 ranking/best, P2 meta)
 - [ ] dto: `rankingQuerySchema`(limit·page·rival_of?·lnmode?)·`chartUpsertSchema`(ChartMeta).

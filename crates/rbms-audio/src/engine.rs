@@ -10,7 +10,7 @@ use crate::AudioError;
 use crate::decode::{DecodedAudio, decode_bytes};
 use crate::mixer::{Command, Mixer, SampleData, channel_key};
 
-/// Default polyphony. beatoraja's `deviceSimultaneousSources` default is 256
+/// Default polyphony. The reference implementation's `deviceSimultaneousSources` default is 256
 /// (`AudioConfig.java:28`); rbms doubles that for slack, since a full pool still steals the voice
 /// under the allocation cursor whether or not it is audible (`Mixer::alloc_slot`). Fading a stolen
 /// voice out instead of cutting it is a separate, later change.
@@ -21,7 +21,7 @@ const COMMAND_QUEUE_CAPACITY: usize = 8192;
 
 /// Frames the callback scratch buffer is pre-sized for, so the steady state performs no
 /// allocation inside the real-time callback. Device buffers are typically 128-2048 frames
-/// (beatoraja's `deviceBufferSize` default is 384, `AudioConfig.java:23`).
+/// (the reference implementation's `deviceBufferSize` default is 384, `AudioConfig.java:23`).
 const SCRATCH_PREALLOC_FRAMES: usize = 4096;
 
 /// Reader retries when sampling the (frames, wall clock) pair written by the audio callback.
@@ -53,7 +53,7 @@ impl Telemetry {
 
 /// Owns the cpal output stream, the RT-safe command queue, the sample-derived master
 /// clock, and the loaded keysound bank. The play-position clock is `samples_played /
-/// rate`, NOT the frame/vsync clock — this is the timing-source fix vs beatoraja.
+/// rate`, NOT the frame/vsync clock — this is the timing-source fix vs the reference implementation.
 pub struct AudioEngine {
     _stream: cpal::Stream,
     producer: rtrb::Producer<Command>,
@@ -185,7 +185,7 @@ impl AudioEngine {
     }
 
     /// Stop only the voice of `id` started at `pitch`, leaving other pitch-shifted copies of the
-    /// same sample playing — beatoraja's per-channel `stop` (`AbstractAudioDriver.java:507-527`).
+    /// same sample playing — the reference implementation's per-channel `stop` (`AbstractAudioDriver.java:507-527`).
     pub fn stop_pitched(&mut self, id: u32, pitch: f32) {
         self.push(Command::Stop { key: channel_key(id, pitch) });
     }

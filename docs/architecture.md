@@ -1,6 +1,6 @@
 # Architecture
 
-rbms is a Rust port of beatoraja's PLAY core: a BMS rhythm-game player. Cargo workspace, 9 library
+rbms is a Rust port of the reference implementation's PLAY core: a BMS rhythm-game player. Cargo workspace, 9 library
 crates + 2 apps. The single source of truth for *behaviour* is the code + its tests; this document is
 the map.
 
@@ -17,8 +17,8 @@ apps/rbms-cli (debug inspector) ─► rbms-parser, rbms-chart
 | **rbms-model** | Dependency-free core types: `Micros = i64` (the global time unit), `Note`/`TimeLine`/`Model`, `Mode` (channel→lane map as data). |
 | **rbms-parser** | BMS lexical: UTF-8/BOM/Shift-JIS decode, `#RANDOM`/`#IF` resolved deterministically from a seed, MD5+SHA-256 of raw bytes, base36/62, `#mmmCC` data lines → `BmsSource`. |
 | **rbms-chart** | `BmsSource` → fully-timed `Model`: `detect_mode`, measure→µs integration (BPM/STOP/SCROLL), LN/LNOBJ/mines, `note_density`, `scroll` (render offsets), `shuffle` (note options). |
-| **rbms-judge** | Stateful judge: beatoraja windows (mode-aware), PG/GR/GD/BD/POOR/MISS, combo/EX/early-late, gauges (6 kinds), 空POOR, clear lamp. |
-| **rbms-audio** | RT-safe output: symphonia decode + cpal lock-free mixer. **Master clock = mixed sample count** (the timing-source fix vs beatoraja). |
+| **rbms-judge** | Stateful judge: reference windows (mode-aware), PG/GR/GD/BD/POOR/MISS, combo/EX/early-late, gauges (6 kinds), 空POOR, clear lamp. |
+| **rbms-audio** | RT-safe output: symphonia decode + cpal lock-free mixer. **Master clock = mixed sample count** (the timing-source fix vs the reference implementation). |
 | **rbms-render** | Backend-agnostic 2D: `Renderer` trait (`fill_rect`) → wgpu/CpuCanvas. Skin (RON), playfield, HUD, result, select, key-bomb, multilingual font (cosmic-text), **UI theme** (`docs/theme.md`). |
 | **rbms-ir** | "IR-superset" score-server contract: `ScoreServer` trait + serde DTOs + HTTP/Null clients. |
 | **rbms-table** | BMS difficulty tables (header.json/data.json): fetch, md5-match, level grouping, disk cache. |

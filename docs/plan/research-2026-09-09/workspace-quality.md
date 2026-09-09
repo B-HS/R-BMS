@@ -50,11 +50,11 @@ apps/rbms-player ← 전부 + winit, wgpu, pollster, bytemuck, image, serde, ron
 | 현재 위치 | 내용 | 내려야 할 곳 | 근거 |
 |---|---|---|---|
 | `apps/rbms-player/src/ir_map.rs` (267줄) | `GaugeKind`↔`GaugeType`, `NoteOption`↔`RandomOption`, `ClearType`→`ClearLamp`, `lnmode`→`lntype` 매핑 + 테스트 | `rbms-ir` (또는 신설 `rbms-session`) | 순수 타입 매핑에 winit 의존 없음. IR 와이어 포맷 지식이 앱에 새 있음. `apps/rbms-player/src/main.rs:44` 에서 import |
-| `apps/rbms-player/src/format.rs:105-135` (`clear_type_id`/`clear_type_from_id`) | beatoraja 램프 ID 인코딩 | `rbms-judge` 또는 `rbms-ir` | 테스트가 `clear_type_ids_are_the_beatoraja_values`(`format.rs:230`)라고 명시 — 표현이 아니라 **프로토콜 값**이다 |
-| `apps/rbms-player/src/scores.rs` (`ScoreBook`, 327줄 중 코드 91줄) | 로컬 기록 영속·베스트 조회 | 신설 `rbms-store` | beatoraja 는 `ScoreDatabaseAccessor.java`/`PlayDataAccessor.java` 로 분리 |
-| `apps/rbms-player/src/replay.rs` | 리플레이 포맷 · load/save | `rbms-play` 또는 `rbms-store` | beatoraja `ReplayData.java` 는 core 패키지 |
+| `apps/rbms-player/src/format.rs:105-135` (`clear_type_id`/`clear_type_from_id`) | 레퍼런스 구현 램프 ID 인코딩 | `rbms-judge` 또는 `rbms-ir` | 테스트가 `clear_type_ids_are_the_레퍼런스 구현_values`(`format.rs:230`)라고 명시 — 표현이 아니라 **프로토콜 값**이다 |
+| `apps/rbms-player/src/scores.rs` (`ScoreBook`, 327줄 중 코드 91줄) | 로컬 기록 영속·베스트 조회 | 신설 `rbms-store` | 레퍼런스 구현 는 `ScoreDatabaseAccessor.java`/`PlayDataAccessor.java` 로 분리 |
+| `apps/rbms-player/src/replay.rs` | 리플레이 포맷 · load/save | `rbms-play` 또는 `rbms-store` | 레퍼런스 구현 `ReplayData.java` 는 core 패키지 |
 | `apps/rbms-player/src/settings.rs` + `main.rs:71-137`(`PlayerConfig`) | 플레이 옵션 스키마 | 신설 `rbms-config` | 아래 1.3 |
-| `apps/rbms-player/src/main.rs:392-477` (`is_chart`/`scan_folders`/`scan_folder`/`compute_chart_detail`) | 라이브러리 폴더 스캔 | 신설 `rbms-library` | beatoraja `song/` 패키지 대응 |
+| `apps/rbms-player/src/main.rs:392-477` (`is_chart`/`scan_folders`/`scan_folder`/`compute_chart_detail`) | 라이브러리 폴더 스캔 | 신설 `rbms-library` | 레퍼런스 구현 `song/` 패키지 대응 |
 | `apps/rbms-player/src/tablesrc.rs:9-33` (`compute_table_levels`) | 난이도표 ↔ 라이브러리 md5 매칭 | `rbms-table` | 이미 `rbms-table` 이 `by_level` 을 제공하므로 자연스러운 자리 |
 
 반대(크레이트에 있으나 앱 전용)는 **발견되지 않았다.** `rbms-render::select`/`result` 가 앱 UI 전용처럼 보이지만 헤드리스 예제(`crates/rbms-render/examples/render_select.rs`)로 테스트되고 CPU 백엔드와 공유하므로 현 위치가 맞다.
@@ -141,7 +141,7 @@ const SETTING_TABS: &[(&str, &[usize])] = &[("PLAY", &[0,1,2,3,16]), ("GAUGE", &
 enum Stage { Loading(LoadingState), Select(SelectState), Settings(SettingsState),
              KeyConfig(KeyConfigState), Tables(..), Folders(..), Play(PlaySession), Result(ResultState) }
 ```
-`PlaySession`(player+audio+bga+replay+analysis+calibration)은 `rbms-play` 로 올린다 — beatoraja 의 `PlayerResource.java`/`BMSPlayer.java` 대응. 각 state 에 `handle_key`/`draw` 를 붙이면 `window_event` 의 220줄 중첩 match 와 `frame()` 의 410줄이 자연히 해체된다.
+`PlaySession`(player+audio+bga+replay+analysis+calibration)은 `rbms-play` 로 올린다 — 레퍼런스 구현 의 `PlayerResource.java`/`BMSPlayer.java` 대응. 각 state 에 `handle_key`/`draw` 를 붙이면 `window_event` 의 220줄 중첩 match 와 `frame()` 의 410줄이 자연히 해체된다.
 
 ---
 
@@ -197,17 +197,17 @@ lint 종류별 건수(중복 포함 전체 출력 기준):
 ### 3.5 trait 추상화
 
 - **`Renderer`(`crates/rbms-render/src/lib.rs:61-65`)가 3 메서드뿐이다: `size`/`clear`/`fill_rect`.** 즉 전 UI가 **축정렬 단색 사각형**으로만 그려진다. `Gpu` 는 텍스처를 그릴 수 있지만(`apps/rbms-player/src/gpu.rs` 의 `set_bga`/`clear_bga`) 이건 **trait 밖 고유 메서드**라 `playfield`/`select`/`result` 렌더러가 못 쓴다 — BGA/커버 한 장을 위한 단일 슬롯이다.
-  - beatoraja 스킨은 `SkinImage`/`SkinNumber`/`SkinText`/`SkinSlider`/`SkinGraph`/`SkinNoteDistributionGraph` 등 20+ 오브젝트 타입에 타이머·프로퍼티 바인딩(`/Users/gkn/beatoraja/src/bms/player/beatoraja/skin/SkinObject.java`, `SkinProperty.java`, `SkinPropertyMapper.java`, `SkinLoader.java`)을 쓴다. LR2/json/lua 3종 로더도 있다(`skin/lr2`, `skin/json`, `skin/lua`).
+  - 레퍼런스 구현 스킨은 `SkinImage`/`SkinNumber`/`SkinText`/`SkinSlider`/`SkinGraph`/`SkinNoteDistributionGraph` 등 20+ 오브젝트 타입에 타이머·프로퍼티 바인딩(`<reference>/skin/SkinObject.java`, `SkinProperty.java`, `SkinPropertyMapper.java`, `SkinLoader.java`)을 쓴다. LR2/json/lua 3종 로더도 있다(`skin/lr2`, `skin/json`, `skin/lua`).
   - **결론: 현 `Renderer` 로는 "스킨 완전 커스터마이징"이 원리적으로 불가능하다.** 최소 `draw_textured_quad(dst, tex, src_uv, tint, alpha)` + `push_clip/pop_clip` + z-order 가 필요하다.
-- `SkinConfig`(`crates/rbms-render/src/skin.rs:12-64`)는 **약 40개 스칼라 필드의 평면 구조체**다. 위치 몇 개와 색만 바꿀 수 있고 "오브젝트를 추가/삭제/조건부 표시"할 수 없다. beatoraja 의 `Vec<SkinObject>` 씬그래프 모델과 표현력 차이가 크다.
+- `SkinConfig`(`crates/rbms-render/src/skin.rs:12-64`)는 **약 40개 스칼라 필드의 평면 구조체**다. 위치 몇 개와 색만 바꿀 수 있고 "오브젝트를 추가/삭제/조건부 표시"할 수 없다. 레퍼런스 구현 의 `Vec<SkinObject>` 씬그래프 모델과 표현력 차이가 크다.
 - `ScoreServer`(`crates/rbms-ir/src/lib.rs:44-91`)는 잘 설계돼 있다: 필수 8 + 기본 `Unsupported` 확장 8. `Send + Sync` 이고 `Arc<dyn ScoreServer>` 로 런타임 교체(`main.rs:169-193 build_server`) 가능.
   - 다만 **전부 blocking**이라 호출부가 스레드를 직접 띄워야 한다. 판정 직후 제출이 프레임을 막을 수 있는지는 `enter_result` 통독 범위 밖 — **미확인**.
 
 ### 3.6 판정 설정 노출 (후속 고도화 관점)
 
 - `JudgeWindows`(`crates/rbms-judge/src/windows.rs:9-72`)는 **`const` 연관 상수 4개**로 하드코딩돼 있고(`SEVENKEY_NOTE`, `SEVENKEY_LN_END`, `POPN_NOTE`, `POPN_LN_END`), 노출된 조절 손잡이는 `scaled(judgerank_percent)`(`:77`) 하나뿐이다. 앱은 이걸 `judge_rate`(50~200 클램프, `main.rs:150`) 로만 노출한다.
-- beatoraja 는 `play/JudgeProperty.java` 에 모드별 판정 테이블 + `PlayConfig.java` 의 `judgewindowrate` 등을 둔다. rbms 가 "판정 설정 노출"을 하려면 `JudgeWindows` 를 **`Deserialize` 가능한 데이터**로 만들고 모드별 테이블을 RON 으로 빼야 한다. 현재는 `Deserialize` 도 없다(`windows.rs` 에 serde 없음, `rbms-judge/Cargo.toml` 에 serde 의존 없음).
-- 판정 알고리즘 선택(beatoraja `JudgeAlgorithm.java`: Combo/Duration/LowestNote/SlowestNote)에 해당하는 추상화도 없다 — `matcher.rs` 단일 구현.
+- 레퍼런스 구현 는 `play/JudgeProperty.java` 에 모드별 판정 테이블 + `PlayConfig.java` 의 `judgewindowrate` 등을 둔다. rbms 가 "판정 설정 노출"을 하려면 `JudgeWindows` 를 **`Deserialize` 가능한 데이터**로 만들고 모드별 테이블을 RON 으로 빼야 한다. 현재는 `Deserialize` 도 없다(`windows.rs` 에 serde 없음, `rbms-judge/Cargo.toml` 에 serde 의존 없음).
+- 판정 알고리즘 선택(레퍼런스 구현 `JudgeAlgorithm.java`: Combo/Duration/LowestNote/SlowestNote)에 해당하는 추상화도 없다 — `matcher.rs` 단일 구현.
 
 ### 3.7 가시성 · 캡슐화 · 기타
 
@@ -226,7 +226,7 @@ lint 종류별 건수(중복 포함 전체 출력 기준):
 |---|---|---|---|---|
 | 1 | `Renderer` 프리미티브 확장(텍스처 쿼드·클립·z) + `SkinConfig` → 오브젝트 리스트 모델 | 스킨 커스터마이징의 **전제조건**. 없으면 이후 스킨 작업 전부 막힘 | 중(렌더 전면) | L~XL |
 | 2 | `Stage` 를 데이터 보유 enum 으로 + `PlaySession` 을 `rbms-play` 로 이관 | `App` 100필드 해체, `frame()`/`window_event` 자연 분해, 이후 모든 기능 추가 비용 하락 | 중 | L |
-| 3 | `JudgeWindows` 를 데이터화(serde + 모드별 RON 테이블) + `JudgeAlgorithm` trait | "판정 설정 노출" 전제조건. beatoraja 패리티 | 낮 | M |
+| 3 | `JudgeWindows` 를 데이터화(serde + 모드별 RON 테이블) + `JudgeAlgorithm` trait | "판정 설정 노출" 전제조건. 레퍼런스 구현 패리티 | 낮 | M |
 | 4 | `PlayerConfig`/`PlaySettings` 통합 → `rbms-config` 크레이트 | 설정 추가 비용 5곳→1곳, 드리프트 제거 | 낮 | M |
 | 5 | 설정 UI 를 인덱스 상수 → descriptor 테이블(enum + 메타)로 | 3·4 를 UI 에 노출하는 실질 통로 | 낮 | M |
 | 6 | `main.rs`/`app_select.rs`/`app_play.rs` 모듈 분할(2.1~2.3 안) | 가독성·리뷰 가능성. 2 의 준비 단계로 먼저 해도 됨 | 낮 | M |
@@ -249,5 +249,5 @@ lint 종류별 건수(중복 포함 전체 출력 기준):
 - `crates/rbms-chart/src/shuffle.rs`, `scroll.rs`, `crates/rbms-judge/src/gauge.rs`, `matcher.rs` 본문 — panic 지점만 grep.
 - `crates/rbms-render/src/playfield.rs`, `select.rs`, `result.rs`, `hud.rs` 본문 — `Renderer` trait 표면과 clippy 위치만 확인.
 - `apps/rbms-player/src/main.rs:949-1176`(window_event 본문) 은 구조만 grep, 줄단위 미통독.
-- beatoraja 측은 **패키지/파일 배치만** 확인했고 `SkinLoader.java`·`JudgeProperty.java`·`PlayerResource.java` 본문은 읽지 않았다 — 4장 1·3번 항목의 상세 스키마 설계는 그 통독 후에 확정해야 한다.
+- 레퍼런스 구현 측은 **패키지/파일 배치만** 확인했고 `SkinLoader.java`·`JudgeProperty.java`·`PlayerResource.java` 본문은 읽지 않았다 — 4장 1·3번 항목의 상세 스키마 설계는 그 통독 후에 확정해야 한다.
 - 성능·메모리 누수 관점은 이 감사 범위 밖(별도 관점).

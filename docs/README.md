@@ -1,6 +1,6 @@
 # rbms docs
 
-Project documentation for [rbms](../README.md) — a Rust port of beatoraja's BMS-player PLAY core.
+Project documentation for [rbms](../README.md) — a Rust port of the reference implementation's BMS-player PLAY core.
 
 | Doc | What |
 |---|---|

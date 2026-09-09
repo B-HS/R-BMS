@@ -1,11 +1,11 @@
-# CN / HCN 판정 — beatoraja 대조 구현 스펙 (후속 작업용)
+# CN / HCN 판정 — 레퍼런스 구현 대조 구현 스펙 (후속 작업용)
 
 > 로드맵 Phase 1(`LnKind` 판정 전파 + CN 종료 판정) / Phase 7(HCN 연속 게이지)의 **충실 포팅 스펙**.
-> 현재 rbms는 모든 롱노트를 단일 경로(`judge/matcher.rs::release` = `worse(head, end)`, 단일 `ln_end` 윈도우)로 처리해 LN/CN/HCN을 구분하지 않는다. 차이는 `docs/acknowledge/beatoraja-divergences.md` "진행 중" 참조.
+> 현재 rbms는 모든 롱노트를 단일 경로(`judge/matcher.rs::release` = `worse(head, end)`, 단일 `ln_end` 윈도우)로 처리해 LN/CN/HCN을 구분하지 않는다. 차이는 `docs/acknowledge/reference-divergences.md` "진행 중" 참조.
 > **상태(2026-06-03):** ✅ **구현됨** — 2-판정 모델(아래 §구현)을 `LnKind::Cn`/`Hcn`에만 게이트해 적용. 검증된 LN/Normal 경로는 byte 불변(회귀 0), CN/HCN 합성 픽스처 5종으로 고정(`crates/rbms-judge/src/lib.rs` `cn_*`/`hcn_*`/`ln_remains_*`). **HCN 연속 게이지(§HCN)는 Phase 7로 잔여.** (lntype IR 보고 = `ir_map::ir_lntype`는 별개로 완료.)
 
 ## 원본 위치
-`/Users/gkn/beatoraja/src/bms/player/beatoraja/play/JudgeManager.java` (903줄). 윈도우 정의는 `bms/model` rule, 게이지는 `GrooveGauge`.
+`<reference>/play/JudgeManager.java` (903줄). 윈도우 정의는 `bms/model` rule, 게이지는 `GrooveGauge`.
 
 ## LN 종류 (BMSModel)
 - `#LNTYPE 1` = TYPE_LONGNOTE(레거시), `#LNTYPE 2` = MGQ(미사용).
@@ -23,7 +23,7 @@
 - 공통: 대상 노트 추출 후 `nmjudge`로 `judge` 산출. `judgeVanish[judge]`(PG/GR/GD/BD는 true, POOR=false)면 "소실"로 처리.
 - **LN(443-459):** `judgeVanish[judge]`면 `lnstartJudge=judge`, `lnstartDuration=dmtime`, `processing=pair`로 홀드 시작(레이저색=8). 아니면 즉시 확정.
 - **CN/HCN(460-471):** `judgeVanish[judge]`면 `processing=pair`로 홀드 시작. 그 다음 **항상 `updateMicro(ln, judge, judgeVanish[judge])` 호출** — 즉 머리 판정을 즉시 기록.
-- rbms 현황(matcher `press`): LN 머리는 `holding=true`+`head_judge=Some(judge)`만, 확정은 release까지 보류. **CN은 머리 판정을 즉시 카운트해야** 함(beatoraja와 차이).
+- rbms 현황(matcher `press`): LN 머리는 `holding=true`+`head_judge=Some(judge)`만, 확정은 release까지 보류. **CN은 머리 판정을 즉시 카운트해야** 함(레퍼런스 구현과 차이).
 
 ## 종단(key-up) 판정 — JudgeManager 508-572
 키가 떨어질 때 `processing != null`이면:
@@ -56,8 +56,8 @@
 
 ## 잔여 (후속)
 - **HCN 연속 게이지(Phase 7):** 홀드 동안 `hcnmduration` 주기로 게이지 ±0.5. `gauge.rs`에 연속 증감 API + 엔진에 passing/홀드 시간 누적 상태. (현재 HCN은 종단 판정만 CN과 동일, 연속 게이지 없음.)
-- **CN deferral/재홀드(이른 릴리스 후 재누름 회복):** 현 구현은 release 시 즉시 end 판정 확정(beatoraja의 `judge>=3 && dmtime>0` deferral 미구현). 대부분 케이스 동등, 재홀드 회복은 후속.
+- **CN deferral/재홀드(이른 릴리스 후 재누름 회복):** 현 구현은 release 시 즉시 end 판정 확정(레퍼런스 구현의 `judge>=3 && dmtime>0` deferral 미구현). 대부분 케이스 동등, 재홀드 회복은 후속.
 - **BSS(스크래치 LN):** `scnendmjudge`·중간 떼기 무시·같은 스크키 종단. 스크래치 회전 단순화 항목과 함께 후속.
 
 ## 미검증 경계 (정직)
-- beatoraja의 **노트 카운트 분모**(CN을 passnote 2로 세는지)는 BMS 모델이 **외부 라이브러리**(beatoraja 소스 트리 밖)라 원본 대조 불가. rbms는 `JudgeManager`의 **2× `updateMicro`(head+end) 증거**에 근거해 CN=2로 카운트하고, `count_playable_notes`↔judge `total_notes`↔gauge 분모를 **내부 일관**되게 맞췄다. 실제 CN/HCN 차트가 corpus에 거의 없어 today 영향은 미미. 실차트 확보 시 회귀 추가 권장.
+- 레퍼런스 구현의 **노트 카운트 분모**(CN을 passnote 2로 세는지)는 BMS 모델이 **외부 라이브러리**(레퍼런스 구현 소스 트리 밖)라 원본 대조 불가. rbms는 `JudgeManager`의 **2× `updateMicro`(head+end) 증거**에 근거해 CN=2로 카운트하고, `count_playable_notes`↔judge `total_notes`↔gauge 분모를 **내부 일관**되게 맞췄다. 실제 CN/HCN 차트가 corpus에 거의 없어 today 영향은 미미. 실차트 확보 시 회귀 추가 권장.

@@ -18,7 +18,7 @@ impl LaneGeometry {
 /// scroll: the 120 BPM point ([`green_number`] at `bpm = 120`, `scroll = 1`) that
 /// [`constant_offsets`] is calibrated to (`pps = hispeed * lane_height / 2_000_000`).
 ///
-/// This calibration is rbms's own, with no beatoraja counterpart: beatoraja's
+/// This calibration is rbms's own, with no counterpart in the reference implementation: its
 /// `playconfig.isEnableConstant()` only pins the `#SPEED` interpolation to 1.0
 /// (`LaneRenderer.java:319-320`), while its `region` at `:321` still divides by the live
 /// `nbpm`/`nscroll`. rbms's CONSTANT drops the BPM dependency entirely.
@@ -27,14 +27,14 @@ pub const CONSTANT_GREEN_BASE_MS: f64 = 2_000.0;
 /// IIDX-style green number: the note travel time (ms) across the full lane. Stays
 /// constant under BPM changes only if hi-speed is fixed per `bpm` (caller's choice).
 ///
-/// This is beatoraja's `currentduration` (`LaneRenderer.java:321,330`:
+/// This is the reference implementation's `currentduration` (`LaneRenderer.java:321,330`:
 /// `region = (240000 / nbpm / hispeed / speed) / nscroll`, then `region * (1 - lanecover)`), not the
 /// number its skins label GREEN — the skin property multiplies the same expression by a further
 /// `0.6` (`IntegerPropertyFactory.java:555-556`:
 /// `(240000 / bpm / hispeed) * (cover ? 1 - lanecover : 1) * (green ? 0.6 : 1)`).
 ///
 /// LIFT does not enter this: raising the judgment line shrinks the lane but the scroll speed is
-/// normalised to the (lifted) lane height, so the travel time is unchanged — beatoraja computes the
+/// normalised to the (lifted) lane height, so the travel time is unchanged — the reference implementation computes the
 /// same way (`LaneRenderer.java:321-326` derives `region` from bpm/hispeed/scroll only and scales
 /// `rxhs` by the lifted `hu - hl`; `currentduration` at `:330` multiplies by `1 - lanecover` alone).
 pub fn green_number(bpm: f64, hispeed: f64, scroll: f64, lanecover: f64) -> f64 {
@@ -64,7 +64,7 @@ pub fn closed_form_offset(note_time_us: i64, microtime: i64, bpm: f64, scroll: f
 
 /// Walk the timeline segments from `microtime` forward, returning `(timeline_index,
 /// pixel_offset_above_judgment_line)` for every timeline within the visible window.
-/// Integrates BPM/SCROLL/STOP exactly as beatoraja's `LaneRenderer` does: a STOP holds
+/// Integrates BPM/SCROLL/STOP exactly as the reference implementation's `LaneRenderer` does: a STOP holds
 /// notes frozen (full segment height), other segments scale by elapsed fraction.
 pub fn visible_offsets(timelines: &[TimeLine], microtime: i64, hispeed: f64, lane_height: f32) -> Vec<(usize, f32)> {
     let mut out = Vec::new();

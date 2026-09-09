@@ -1,14 +1,14 @@
 # judge-gauge 감사 보고서 검증 (회의적 검증자)
 
 대상: `scratchpad/research/judge-gauge.md` findings 18건.
-방법: 각 finding 의 근거 file:line 을 beatoraja Java 원본과 rbms Rust 코드 양쪽에서 직접 열어 대조.
+방법: 각 finding 의 근거 file:line 을 레퍼런스 구현 Java 원본과 rbms Rust 코드 양쪽에서 직접 열어 대조.
 검증 시각: 2026-09-09. 코드는 읽기만 했다(수정·빌드 없음).
 
 ## 총평
 
 - 18건 중 **16건 confirmed, 2건 partially**. 반박(refuted)에 성공한 항목은 없다.
-- 수치는 대체로 정확하나 **beatoraja 측 라인 번호가 1~2줄씩 밀린 인용이 다수**다(아래 §라인 드리프트). 주장 자체는 해당 구문을 정확히 가리킨다.
-- 다만 보고서는 **"게이지가 전반적으로 어긋난다"는 인상**을 준다. 실제로 7K 게이지 6종의 수치·modifier(TOTAL/LIMIT_INCREMENT)·guts·클램프 게이트는 beatoraja와 **완전히 일치**한다(§놓친 항목 M7). 발산은 판정 슬롯 오배정(01) 하나에 집중돼 있다 — 01 의 critical 등급은 타당하다.
+- 수치는 대체로 정확하나 **레퍼런스 구현 측 라인 번호가 1~2줄씩 밀린 인용이 다수**다(아래 §라인 드리프트). 주장 자체는 해당 구문을 정확히 가리킨다.
+- 다만 보고서는 **"게이지가 전반적으로 어긋난다"는 인상**을 준다. 실제로 7K 게이지 6종의 수치·modifier(TOTAL/LIMIT_INCREMENT)·guts·클램프 게이트는 레퍼런스 구현과 **완전히 일치**한다(§놓친 항목 M7). 발산은 판정 슬롯 오배정(01) 하나에 집중돼 있다 — 01 의 critical 등급은 타당하다.
 
 ## 항목별 판정
 
@@ -37,7 +37,7 @@
 
 ### 01 — 見逃しPOOR 슬롯 오배정 (confirmed)
 
-- beatoraja `JudgeManager.java:592-598` 見逃し 루프가 `:598` `updateMicro(..., 4, ...)` 로 코드 4 를 넘긴다. NOTE 경로만 `JudgeManager.java:394` 에서 `judge = (judge >= 4 ? judge + 1 : judge)` 로 시프트하므로 **MS 윈도우 히트 = 코드 5(空POOR), 見逃し = 코드 4(PR)** 가 확정된다.
+- 레퍼런스 구현 `JudgeManager.java:592-598` 見逃し 루프가 `:598` `updateMicro(..., 4, ...)` 로 코드 4 를 넘긴다. NOTE 경로만 `JudgeManager.java:394` 에서 `judge = (judge >= 4 ? judge + 1 : judge)` 로 시프트하므로 **MS 윈도우 히트 = 코드 5(空POOR), 見逃し = 코드 4(PR)** 가 확정된다.
 - 게이지 배열 순서 주석은 `GaugeProperty.java:133` ("PG, GR, GD, BD, PR, MSの順"), NORMAL 은 `GaugeProperty.java:89` `{1,1,0.5,-3,-6,-2}` → PR(-6) / MS(-2). 보고서가 인용한 `:152`/`:90` 은 각각 `:133`/`:89` 다(드리프트).
 - rbms: `crates/rbms-judge/src/matcher.rs:309` 및 `:312` 가 스윕 미스에 `Judge::Miss`(enum 인덱스 5) 를 push → `gauge.rs:104` `deltas[judge as usize]` → `gauge.rs:51` Normal `deltas[5] = -2.0`. **NORMAL 미스가 -6 대신 -2** 로 실측 확인.
 - 空POOR 경로(`matcher.rs:233` `gauge.update(Judge::Miss)`)는 MS(-2)가 맞다 — 즉 두 경로가 같은 슬롯을 공유해 하나가 틀렸다.
@@ -45,12 +45,12 @@
 
 ### 02 — 모드별 NOTE 윈도우 부재 (confirmed)
 
-- beatoraja 실측: `JudgeProperty.java:12` FIVEKEYS `{±20k, ±50k, ±100k, ±150k, (-150k,500k)}`, `:34` PMS `{±20k, ±50k, ±117k, ±183k, (-175k,500k)}`, `:45` KEYBOARD `{±30k, ±90k, ±200k, (-320k,240k), (-200k,650k)}`. 보고서 수치 전부 일치(PMS/KEYBOARD 라인만 1줄 드리프트).
-- rbms: `windows.rs:20-26` SEVENKEY_NOTE 는 beatoraja `:23` SEVENKEYS 와 정확히 동일 → 7K 는 정상. `windows.rs:36-44` POPN_NOTE 가 7K 값 복제(주석에 "pending verified" 명시), `windows.rs:60-64` `note_for_mode` 가 `"POPN_9K"` 외 전부 SEVENKEY_NOTE. 확인.
+- 레퍼런스 구현 실측: `JudgeProperty.java:12` FIVEKEYS `{±20k, ±50k, ±100k, ±150k, (-150k,500k)}`, `:34` PMS `{±20k, ±50k, ±117k, ±183k, (-175k,500k)}`, `:45` KEYBOARD `{±30k, ±90k, ±200k, (-320k,240k), (-200k,650k)}`. 보고서 수치 전부 일치(PMS/KEYBOARD 라인만 1줄 드리프트).
+- rbms: `windows.rs:20-26` SEVENKEY_NOTE 는 레퍼런스 구현 `:23` SEVENKEYS 와 정확히 동일 → 7K 는 정상. `windows.rs:36-44` POPN_NOTE 가 7K 값 복제(주석에 "pending verified" 명시), `windows.rs:60-64` `note_for_mode` 가 `"POPN_9K"` 외 전부 SEVENKEY_NOTE. 확인.
 
 ### 03 — SEVENKEY_LN_END 값 오류 (partially)
 
-- 핵심 주장은 **사실**: beatoraja `JudgeProperty.java:25` SEVENKEYS longnote = `{-120k,120k, -160k,160k, -200k,200k, -280k,220k}` (4쌍, MS 없음). rbms `windows.rs:29-35` 는 `gr ±150k, bd ±250k` 로 **`JudgeProperty.java:14` FIVEKEYS longnote 와 일치**. 독스트링이 "7K longnote end" 라고 잘못 표기한 것도 사실.
+- 핵심 주장은 **사실**: 레퍼런스 구현 `JudgeProperty.java:25` SEVENKEYS longnote = `{-120k,120k, -160k,160k, -200k,200k, -280k,220k}` (4쌍, MS 없음). rbms `windows.rs:29-35` 는 `gr ±150k, bd ±250k` 로 **`JudgeProperty.java:14` FIVEKEYS longnote 와 일치**. 독스트링이 "7K longnote end" 라고 잘못 표기한 것도 사실.
 - **권고 중 오류**: "윈도우 밖 = 코드 5(空POOR)" 는 틀렸다. `JudgeProperty.java:184-188` `getJudge` 는 매칭 실패 시 `mjudge.length/2` (= longnote 는 4) 를 반환하고, LN 종단 경로(`JudgeManager.java:363`, `:487`)는 **`+1` 시프트를 하지 않는다** → 윈도우 밖 = **코드 4(見逃しPOOR)**. 즉 rbms `matcher.rs:279`/`:296` 의 `unwrap_or(Judge::Poor)`(인덱스 4)는 우연히 **정확**하다. 정정 후 SEVENKEY_LN_END 의 `ms` 필드는 제거하고 "밖 = Poor" 폴백만 남기는 것이 맞다.
 
 ### 04 — LN 릴리스 마진 (confirmed)
@@ -129,8 +129,8 @@
 
 ### 18 — 문서 stale (confirmed)
 
-- `docs/acknowledge/beatoraja-divergences.md` 에는 파서/BGA/LNTYPE2/CN·HCN 항목만 있고 판정 윈도우·게이지 섹션이 없다(전문 확인).
-- `docs/reference/cn-hcn-judgment.md:8` 원본 경로가 `/Users/hyunseokbyun/beatoraja/...` 로 실제 경로(`/Users/gkn/beatoraja`)와 불일치. `windows.rs:28` 독스트링이 FIVEKEYS 값을 "7K longnote end" 로 표기. 전부 확인.
+- `docs/acknowledge/reference-divergences.md` 에는 파서/BGA/LNTYPE2/CN·HCN 항목만 있고 판정 윈도우·게이지 섹션이 없다(전문 확인).
+- `docs/reference/cn-hcn-judgment.md:8` 원본 경로가 `/Users/hyunseokbyun/<reference>/...` 로 실제 경로(`<reference>/`)와 불일치. `windows.rs:28` 독스트링이 FIVEKEYS 값을 "7K longnote end" 로 표기. 전부 확인.
 
 ---
 
@@ -154,11 +154,11 @@
 
 | # | 항목 | 근거 |
 |---|---|---|
-| M1 | **空POOR 가 판정 카운트에 안 들어간다.** beatoraja 는 코드 5 도 `addJudgeCount(5)` 로 `ems/lms` 에 집계(`ScoreData.java:262`, `JudgeManager.java:648`)하지만 rbms 는 `matcher.rs:231-236` 에서 `empty_poor` 전용 카운터만 올리고 `counts[]` 를 건드리지 않아 `app_play.rs:266` 의 `ems` 에 0 이 나간다. 01 과 합치면 IR 의 pr/ms 4필드가 전부 어긋난다 | ScoreData.java:262 / matcher.rs:231-236 / app_play.rs:264-266 |
+| M1 | **空POOR 가 판정 카운트에 안 들어간다.** 레퍼런스 구현 는 코드 5 도 `addJudgeCount(5)` 로 `ems/lms` 에 집계(`ScoreData.java:262`, `JudgeManager.java:648`)하지만 rbms 는 `matcher.rs:231-236` 에서 `empty_poor` 전용 카운터만 올리고 `counts[]` 를 건드리지 않아 `app_play.rs:266` 의 `ems` 에 0 이 나간다. 01 과 합치면 IR 의 pr/ms 4필드가 전부 어긋난다 | ScoreData.java:262 / matcher.rs:231-236 / app_play.rs:264-266 |
 | M2 | **`combocond` 테이블 미구현.** 7K 는 `combo[5]=true`(空POOR 는 콤보 유지), `combo[4]=false`(見逃し만 끊음)인데 rbms `apply()` 는 Poor·Miss 둘 다 `combo = 0`. 현재는 空POOR 가 `apply()` 를 안 타서 마스킹되지만, 01 을 슬롯 교체만으로 고치면 **空POOR 가 콤보를 끊는 회귀**가 즉시 표면화한다 | JudgeProperty.java:29 / matcher.rs:229-236, :355-362 |
 | M3 | **모드별 게이지 세트 부재(09 와 별개).** PMS 게이지는 종류 수뿐 아니라 스펙이 다르다: `NORMAL_PMS(min 2, max 120, init 30, border 85, {1,1,0.5,-2,-6,-6})`. KB/LR2/5K 도 각각 다르다. rbms `gauge.rs:44-52` 는 7K 표 하나뿐이라 POPN 차트도 7K 게이지로 돈다 | GaugeProperty.java:97-105, 107-115, 117-125 / gauge.rs:44-52 |
 | M4 | **`fixjudge` 가 per-index 인데 rbms `scaled()` 는 표현 불가.** `JudgeWindowRule.PMS` 는 `judgerank {100,33,33,100,100}` + `fixjudge {T,F,F,T,T}` 로 PG/BD/MS 고정·GR/GD 만 스케일, 게다가 `create()` 는 fixmin/fixmax 단조 클램프까지 돈다. `windows.rs:74-81` 의 "pg~bd 일괄 × rank, ms 고정" 구조로는 PMS 를 표현할 수 없어 02·12 수정 시 시그니처 변경이 필요하다 | JudgeProperty.java:211, :224-260 / windows.rs:74-81 |
-| M5 | **키/스크래치 JUDGE WIDTH 분리 설정 부재.** beatoraja 는 `keyJudgeWindowRate*` 3개와 `scratchJudgeWindowRate*` 3개를 따로 받는다. rbms `set_judge_rate` 는 단일 스칼라 | JudgeManager.java:168-173 / rbms-play/src/lib.rs:128-134 |
+| M5 | **키/스크래치 JUDGE WIDTH 분리 설정 부재.** 레퍼런스 구현 는 `keyJudgeWindowRate*` 3개와 `scratchJudgeWindowRate*` 3개를 따로 받는다. rbms `set_judge_rate` 는 단일 스칼라 | JudgeManager.java:168-173 / rbms-play/src/lib.rs:128-134 |
 | M6 | **bmson `#TOTAL` 퍼센트 정규화 미확인.** `validate` 의 `case BMSON -> total > 0 ? total/100*defaultTotal : defaultTotal` 이 05 의 권고 문장에만 있고 finding 본문/근거에 없다. rbms bmson 경로의 total 취급은 이번 검증에서 **미확인** | BMSPlayerRule.java:74-78 |
 | M7 | **(과대평가 방지) 7K 게이지 수치는 완전 일치.** ASSIST_EASY/EASY/NORMAL/HARD/EXHARD/HAZARD 6종의 min/max/init/border/deltas/guts 가 `GaugeProperty.java:87-92`(ASSIST_EASY :87 ~ HAZARD :92) 와 정확히 같고, `TOTAL`·`LIMIT_INCREMENT` 공식(`GrooveGauge.java:260,264-271`)과 guts 적용 순서, `value <= 0` 이면 갱신 중단(`GrooveGauge.java:218-222` `setValue` vs `gauge.rs:103`)까지 동일하다. 게이지 발산은 01 의 슬롯 오배정 1건에 집중된다 | GaugeProperty.java:87-92 / gauge.rs:44-52, :77-97 |
 | M8 | **(검증 완료, 발산 아님) 후보 게이트·見逃し 경계·miss 방향.** `mjudgestart/mjudgeend`(`JudgeManager.java:189-196`)는 note 윈도우의 min/max = `(bd.late, ms.early)` 로 rbms `matcher.rs:203-204` 의 `gate_late/gate_early` 와 동일. 見逃し 스윕 경계(`JudgeManager.java:592` `note.time < mtime + getTime(type,3,false)`)도 `matcher.rs:305` 와 동일하고, 見逃し 는 양쪽 모두 항상 LATE 로 집계된다 | JudgeManager.java:189-196, :592, :648 / matcher.rs:203-204, :305, :318-321 |

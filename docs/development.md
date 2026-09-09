@@ -4,7 +4,7 @@ For picking the project up in a fresh session.
 
 ## What this is
 
-A **Rust** BMS rhythm-game player — a port of beatoraja's PLAY core. **Not** a web/TS project; any
+A **Rust** BMS rhythm-game player — a port of the reference implementation's PLAY core. **Not** a web/TS project; any
 generic "frontend" assumptions do not apply. Cargo workspace, edition 2024, rust ≥ 1.95, GPL-3.0.
 
 ## Build / run / test

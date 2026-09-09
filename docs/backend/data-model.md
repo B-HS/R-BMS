@@ -55,14 +55,14 @@ session/account (better-auth)    difficulty_table 1─* table_course *─1 cours
 | chart_md5 | char(32) null idx | 호환 |
 | mode varchar(16) · lntype int(0=LN,1=CN,2=HCN) |
 | clear | tinyint | ClearType id 0-10 |
-| **epg lpg egr lgr egd lgd ebd lbd epr lpr ems lms** | int | **판정 early/late 분리(beatoraja)** |
+| **epg lpg egr lgr egd lgd ebd lbd epr lpr ems lms** | int | **판정 early/late 분리(레퍼런스 구현)** |
 | empty_poor | int default 0 | rbms 空POOR |
 | avgjudge | bigint | µs 평균 판정오차 |
 | ex_score int · max_ex_score int · max_combo int · notes int · passnotes int · minbp int |
 | gauge_value | float | 종료 게이지 |
 | **── 플레이 전체 옵션(공평 평가 단일 출처) ──** | | |
 | gauge | tinyint | GaugeType(플레이 게이지 종류) |
-| option | int | 노트옵션 비트필드(beatoraja) |
+| option | int | 노트옵션 비트필드(레퍼런스 구현) |
 | random | varchar(16) · random_p2 varchar(16) null · scratch_left bool · scratch_auto bool |
 | seed | bigint | 셔플 시드(리플레이 재현) |
 | hispeed | double · constant bool · green_number int null |
@@ -133,6 +133,6 @@ type ChartKey = Pick<typeof chart.$inferSelect, 'md5'|'sha256'>
 
 ## 설계 노트 (왜)
 - **best 분리 테이블**: 랭킹은 차트당 수천 history를 매번 정렬하지 않고 `chart_best`만 정렬 → P95<150ms(NFR).
-- **early/late 인라인**: beatoraja IRScoreData를 무손실 보존(EX·BP·avgjudge·FAST/SLOW 전부 유도). 별도 judge 테이블은 조인비용↑이라 인라인.
-- **md5 null 허용**: sha256만 있는 beatoraja-only 차트 수용. md5만 있는 LR2 차트는 sha256 backfill 전까지 md5 키로 동작(보조 인덱스).
+- **early/late 인라인**: 레퍼런스 구현 IRScoreData를 무손실 보존(EX·BP·avgjudge·FAST/SLOW 전부 유도). 별도 judge 테이블은 조인비용↑이라 인라인.
+- **md5 null 허용**: sha256만 있는 레퍼런스 구현-only 차트 수용. md5만 있는 LR2 차트는 sha256 backfill 전까지 md5 키로 동작(보조 인덱스).
 - **replay blob 외부화**: DB 비대화 방지, CDN/스토리지로 다운로드 스케일.

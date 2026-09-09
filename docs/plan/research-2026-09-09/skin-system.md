@@ -1,16 +1,16 @@
-# beatoraja 스킨 시스템 — Rust 재구현 스펙 추출
+# 레퍼런스 구현 스킨 시스템 — Rust 재구현 스펙 추출
 
-조사일 2026-09-09. 대상: `/Users/gkn/beatoraja/src/bms/player/beatoraja/skin/**`, `play/Skin*.java`, `/Users/gkn/beatoraja/skin/default`.
+조사일 2026-09-09. 대상: `<reference>/skin/**`, `play/Skin*.java`, `<reference>/skin/default`.
 비교 대상: `/Users/gkn/R-BMS/crates/rbms-render/src/skin.rs` (541 LOC).
 
 ---
 
 ## 0. 요약 (한 문단)
 
-beatoraja 스킨은 **"SkinObject 배열 + destination 키프레임 애니메이션 + 정수 프로퍼티 ID"** 3요소로 구성된다.
+레퍼런스 구현 스킨은 **"SkinObject 배열 + destination 키프레임 애니메이션 + 정수 프로퍼티 ID"** 3요소로 구성된다.
 객체 타입 약 20종, 프로퍼티 ID 968개(`SkinProperty.java` 전수 카운트: OPTION 287 / NUMBER 273 / TIMER 151 / BUTTON 74 / STRING 43 / FLOAT 40 / RATE 30 / BARGRAPH 22 / VALUE 16 / OFFSET 16 / SLIDER 9 / IMAGE 5 / EVENT 2).
 로더는 3종(JSON / LR2 CSV / Lua)이며 **Lua 로더는 JSON 로더의 서브클래스**(`LuaSkinLoader extends JSONSkinLoader`, lua/LuaSkinLoader.java:30)라 실질적으로 **모델은 하나(`JsonSkin.Skin`)**다.
-현 rbms `SkinConfig`는 "플레이 필드 색/좌표 상수 묶음"으로, beatoraja 스킨 모델과 **개념적으로 겹치는 부분이 사실상 없다**(임의 객체 배치·타이머·애니메이션·프로퍼티 참조 전무).
+현 rbms `SkinConfig`는 "플레이 필드 색/좌표 상수 묶음"으로, 레퍼런스 구현 스킨 모델과 **개념적으로 겹치는 부분이 사실상 없다**(임의 객체 배치·타이머·애니메이션·프로퍼티 참조 전무).
 
 ---
 
@@ -176,7 +176,7 @@ LR2 CSV 명령 전수(grep `new CommandWord("...")`, 6파일): SRC_IMAGE/IMAGESE
 
 ### 2.3 default 스킨 실제 구성 — 포맷 판정 근거
 
-`ls /Users/gkn/beatoraja/skin/default`: JSON 12개(총 430KB), Lua 4쌍(`.luaskin` + `*main.lua`), 이미지 다수.
+`ls <reference>/skin/default`: JSON 12개(총 430KB), Lua 4쌍(`.luaskin` + `*main.lua`), 이미지 다수.
 
 `SkinConfig.java:169-181` (기본 스킨 경로 상수):
 
@@ -246,7 +246,7 @@ default `play7.json`의 `"source":[{"id":1,"path":"play/background/*.png"}, ...]
 
 ### 3.4 현 rbms와의 격차
 
-`crates/rbms-render/src/skin.rs:12-64` `SkinConfig`는 `field_x/field_width/top_y/judge_y/note_height/key_color/.../bomb_duration_ms` 등 **약 40개의 스칼라 상수**다. beatoraja 스킨의 핵심(임의 개수 객체 배치, dst 키프레임 보간, 타이머 참조, 968개 프로퍼티 ID, 이미지 소스 분할/애니메이션, 조건부 표시)은 **하나도 구현되어 있지 않다**. `docs/PROCESS.md:176`도 "남은 UI 후속: 스킨 데이터화"로 미완을 인정하고 있어 문서-코드 불일치는 없다.
+`crates/rbms-render/src/skin.rs:12-64` `SkinConfig`는 `field_x/field_width/top_y/judge_y/note_height/key_color/.../bomb_duration_ms` 등 **약 40개의 스칼라 상수**다. 레퍼런스 구현 스킨의 핵심(임의 개수 객체 배치, dst 키프레임 보간, 타이머 참조, 968개 프로퍼티 ID, 이미지 소스 분할/애니메이션, 조건부 표시)은 **하나도 구현되어 있지 않다**. `docs/PROCESS.md:176`도 "남은 UI 후속: 스킨 데이터화"로 미완을 인정하고 있어 문서-코드 불일치는 없다.
 
 ---
 

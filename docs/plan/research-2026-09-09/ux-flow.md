@@ -1,6 +1,6 @@
 # rbms 화면 흐름 전수 UX 감사 + 게임 시작 전 옵션 설계 + 타깃/그래프
 
-조사일 2026-09-09. 읽기 전용 조사(파일 수정 없음). 근거는 rbms / beatoraja 양쪽 file:line.
+조사일 2026-09-09. 읽기 전용 조사(파일 수정 없음). 근거는 rbms / 레퍼런스 구현 양쪽 file:line.
 시간 상한 15분 기준으로 코드 근거 확보에 집중했고, 못 본 범위는 §5에 명시.
 
 ---
@@ -72,7 +72,7 @@ winit 이벤트 루프(단일 스레드)에서 직접 실행되는 무거운 작
 
 ### 현황 근거
 - rbms: Select에서 Tab → **전체 화면 설정(Stage::Settings)** 으로 전환(`main.rs:1003`). 곡 정보/상세 패널이 통째로 사라진다. 탭 5+1종(PLAY/GAUGE/JUDGE/DISPLAY/INPUT/NETWORK), 값 조정은 ←→(`main.rs:1057-1066`). 플레이 중 조작은 hispeed/cover/lift 3종뿐(`app_input.rs:88-106`, `ControlAction::ALL`).
-- beatoraja: 곡선택 리스트를 **떠나지 않고** START 홀드 중에만 옵션 패널이 뜬다 — `select/MusicSelectInputProcessor.java:114-151`(`input.startPressed()` → `select.setPanelState(1)` + OPTION_OPEN 사운드, 이후 OPTION1_UP/DOWN·GAUGE_UP/DOWN·OPTIONDP·OPTION2·HSFIX 를 홀드 중에만 해석). SELECT 홀드는 어시스트 패널(`:206-241`), 다른 홀드는 상세 패널(`:243-290`). 손을 떼면 패널 닫힘(`:100-107`). 플레이 중에는 `play/ControlInputProcessor.java:130-166`(START+↑↓ 하이스피드, 휠 레인커버, START 더블프레스로 커버 on/off), `:205-216`(ESCAPE, NUM1~4 = 리트라이/연습 등 분기).
+- 레퍼런스 구현: 곡선택 리스트를 **떠나지 않고** START 홀드 중에만 옵션 패널이 뜬다 — `select/MusicSelectInputProcessor.java:114-151`(`input.startPressed()` → `select.setPanelState(1)` + OPTION_OPEN 사운드, 이후 OPTION1_UP/DOWN·GAUGE_UP/DOWN·OPTIONDP·OPTION2·HSFIX 를 홀드 중에만 해석). SELECT 홀드는 어시스트 패널(`:206-241`), 다른 홀드는 상세 패널(`:243-290`). 손을 떼면 패널 닫힘(`:100-107`). 플레이 중에는 `play/ControlInputProcessor.java:130-166`(START+↑↓ 하이스피드, 휠 레인커버, START 더블프레스로 커버 on/off), `:205-216`(ESCAPE, NUM1~4 = 리트라이/연습 등 분기).
 - IIDX: 곡선택에서 START 홀드 옵션 패널, 플레이 중 START+턴테이블/키로 하이스피드·SUD+ 조정. (외부 지식, 코드 근거 없음 — **미확인** 표기)
 
 ### 비교
@@ -80,7 +80,7 @@ winit 이벤트 루프(단일 스레드)에서 직접 실행되는 무거운 작
 | 방식 | 장점 | 단점 | rbms 적용 비용 |
 |---|---|---|---|
 | A. 전체화면 설정(현행) | 항목이 많아도 다 보인다. 탭으로 분류 가능. 키설정·폰트·네트워크 같은 "환경설정"과 같은 자리 | 곡 컨텍스트 상실(이 곡에 무슨 램프/베스트가 있는지 안 보임). 곡마다 옵션을 바꾸는 리듬게임 루프와 상충. 왕복이 잦다 | 0 (이미 있음) |
-| B. 곡선택 오버레이 패널(beatoraja) | 곡 리스트·상세·기록을 보면서 랜덤/게이지/하이스피드를 바꾼다. 홀드-조작-릴리스가 1동작. 플레이 직전 옵션이 곧 제출 옵션 | 홀드 키 개념을 키설정에 추가해야 함. 항목 수 제한(패널 크기). 키보드 홀드+방향키 동시 입력 처리 필요 | M — 오버레이 렌더 1종 + 홀드 상태 머신. `SelectScene`에 패널 필드 추가로 흡수 가능 |
+| B. 곡선택 오버레이 패널(레퍼런스 구현) | 곡 리스트·상세·기록을 보면서 랜덤/게이지/하이스피드를 바꾼다. 홀드-조작-릴리스가 1동작. 플레이 직전 옵션이 곧 제출 옵션 | 홀드 키 개념을 키설정에 추가해야 함. 항목 수 제한(패널 크기). 키보드 홀드+방향키 동시 입력 처리 필요 | M — 오버레이 렌더 1종 + 홀드 상태 머신. `SelectScene`에 패널 필드 추가로 흡수 가능 |
 | C. decide/플레이 중 전환 | 로딩 대기시간을 옵션 조정에 활용. 실제 노트가 흐르는 걸 보며 하이스피드 확정 | 옵션이 판정/제출에 영향 → 확정 시점이 모호. 랜덤/게이지는 로드 후 변경 불가(셔플이 `load()`에서 적용 `app_play.rs:51`) | S(hispeed/cover/lift는 이미 있음) / 랜덤·게이지는 불가 |
 
 ### 권고안 (순서대로)
@@ -88,12 +88,12 @@ winit 이벤트 루프(단일 스레드)에서 직접 실행되는 무거운 작
 1. **B를 주 경로로 도입, A는 "환경설정"으로 축소.** 곡선택에서 옵션 홀드 키(기본 Shift 또는 키설정의 새 `ControlAction::OptionPanel`)를 누르는 동안 우측 상세 패널 위에 오버레이: RANDOM / GAUGE / HI-SPEED(+SPEED FIX) / LANE COVER / LIFT / SCRATCH SIDE·AUTO / AUTOPLAY. ↑↓로 항목, ←→로 값. 릴리스 시 닫고 **즉시 `save_settings()`**.
    - 이유: 이 7개가 "곡마다 바꾸는" 값이고, 나머지(키설정·폰트·서버·스킨·PREVIEW·SCORE GRAPH)는 세션당 한 번 바꾸는 값이다. 현재 `SETTING_TABS`는 둘을 섞어 놓았다.
 2. **플레이 중 조작에 저장을 붙인다** — `apply_control`(`app_input.rs:88-106`) 끝에 `save_settings()` 또는 결과 진입 시 1회 저장. 지금은 유실된다.
-3. **플레이 중 PAUSE / RETRY 추가** — beatoraja `ControlInputProcessor.java:205-216` 대응. 현재 Esc는 즉시 이탈(`main.rs:1107-1118`)뿐이라 오조작 복구 수단이 없다. `ControlAction`에 `Pause`/`Retry` 2종 추가가 최소 구현.
+3. **플레이 중 PAUSE / RETRY 추가** — 레퍼런스 구현 `ControlInputProcessor.java:205-216` 대응. 현재 Esc는 즉시 이탈(`main.rs:1107-1118`)뿐이라 오조작 복구 수단이 없다. `ControlAction`에 `Pause`/`Retry` 2종 추가가 최소 구현.
 4. decide 화면(C)은 **도입하지 않는 것을 권고.** rbms는 이미 LOADING 단계에서 키음 진행바를 보여주고 있고, 옵션 확정 시점이 두 곳으로 갈라지면 제출 payload(`ScoreSubmission.options`, `app_play.rs:280-300`)의 진실 출처가 흐려진다.
 
 ## 6. 타깃 / 그래프
 
-### beatoraja 타깃 전수 (`play/TargetProperty.java`)
+### 레퍼런스 구현 타깃 전수 (`play/TargetProperty.java`)
 
 | 종류 | id 형식 | 근거 |
 |---|---|---|
@@ -128,7 +128,7 @@ winit 이벤트 루프(단일 스레드)에서 직접 실행되는 무거운 작
 | 내 서버 베스트 타깃 | `player_best(&ChartId, &PlayerId)` `lib.rs:51` | trait 존재, 호출부 0 | 로컬 베스트와 별도 표시(기기 이동 시 유용) |
 | 라이벌 타깃 | `rivals(&PlayerId)` `lib.rs:52` + 라이벌별 `player_best` | trait 존재, 호출부 0 | 라이벌 목록 저장소·UI 필요(설정 탭 신설) |
 | NEXT RANK 타깃 | 서버 불필요 — `dj_rank`/`RANK_BANDS`(`result.rs:29-58`)로 로컬 계산 | **즉시 가능** | 다음 랭크 경계 EX를 목표선으로. 비용 S |
-| 고정 레이트 타깃(A~MAX) | 서버 불필요 — `max_ex * i/27` | **즉시 가능** | beatoraja `TargetProperty.java:113-141` 그대로 이식. 비용 S |
+| 고정 레이트 타깃(A~MAX) | 서버 불필요 — `max_ex * i/27` | **즉시 가능** | 레퍼런스 구현 `TargetProperty.java:113-141` 그대로 이식. 비용 S |
 | 그래프 다중 타깃선 | `hud.rs:29`의 `best: Option<u32>` → `targets: &[(label, ex, color)]` 로 일반화 | 시그니처 변경 1곳 | 3바(NOW/BEST/TARGET) 또는 목표선 오버레이 |
 | 시간축 추이 | `Player` 판정 이벤트 스트림에서 (t, ex) 샘플링 버퍼 | 신규 | 결과 화면 게이지/스코어 추이 그래프의 전제 |
 
@@ -144,7 +144,7 @@ winit 이벤트 루프(단일 스레드)에서 직접 실행되는 무거운 작
 - 마우스 조작 전수(어느 화면이 클릭을 받고 어느 화면이 안 받는지) — Select 행·Settings 값은 확인, Folders/Tables/KeyConfig/Result는 **미확인**.
 - `keyconfig.rs`(660줄) 에디터 UX 전체.
 - `crates/rbms-render/src/select.rs` 렌더 세부(밀도 그래프·모달 레이아웃).
-- beatoraja `select/PreviewMusicProcessor.java`(미리듣기 페이드/볼륨 정책) 대조 — rbms 미리듣기 페이드 부재의 레퍼런스 근거를 확보하지 못함.
-- beatoraja `select/MusicSelectSkin.java` 옵션 패널 표시 요소 목록.
+- 레퍼런스 구현 `select/PreviewMusicProcessor.java`(미리듣기 페이드/볼륨 정책) 대조 — rbms 미리듣기 페이드 부재의 레퍼런스 근거를 확보하지 못함.
+- 레퍼런스 구현 `select/MusicSelectSkin.java` 옵션 패널 표시 요소 목록.
 - IIDX 조작 체계는 외부 지식이며 코드 근거 없음(**미확인**).
 - 실제 실행/렌더 확인은 하지 않음(읽기 전용 조사, 헤드리스 예제 미실행).

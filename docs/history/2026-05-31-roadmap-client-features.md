@@ -4,8 +4,8 @@
 
 ## 진행 방식 (사용자 확정)
 - 웨이브 순서대로 끝까지 자동 진행, 각 웨이브 후 `cargo test --workspace` 검증.
-- 랭크 밴드 = **beatoraja/IIDX 9분법**. 그래프/점수비교는 결과+곡선택 **둘 다 + 설정 토글**.
-- Wave 3 큰 결정 확인: F5=패널 위치까지 RON(실 구현은 HUD 표면), F4=비주얼 일시정지+시크(확장성), F6=P3만(의존성無), F9=둘 다 beatoraja 패리티.
+- 랭크 밴드 = **레퍼런스 구현/IIDX 9분법**. 그래프/점수비교는 결과+곡선택 **둘 다 + 설정 토글**.
+- Wave 3 큰 결정 확인: F5=패널 위치까지 RON(실 구현은 HUD 표면), F4=비주얼 일시정지+시크(확장성), F6=P3만(의존성無), F9=둘 다 레퍼런스 구현 패리티.
 
 ## Wave 1 — 무결정·저위험
 - **F1 폴더 로딩화면** — `apps/rbms-player/src/main.rs`. `pending_song:Option<usize>` → `enum Loading{Song(usize),Folder(PathBuf)}`. `open_folder_dialog`는 picker 후 `begin_loading(Loading::Folder)`만 하고, 실제 스캔+테이블 fetch(블로킹)는 한 프레임 뒤 `finish_loading`에서 → SCANNING 프레임 선노출. 폴더 descent(in-memory)·뒤로가기는 제외.
@@ -21,7 +21,7 @@
 - **F7-pre early/late** — `crates/rbms-judge/src/matcher.rs`: `early/late:[u32;6]`(`early[i]+late[i]==counts[i]`), `avg_judge_us`. press/release는 dm 부호로 분류, update sweep은 late. 空POOR 제외.
 - **F7 IR 슈퍼셋** — `crates/rbms-ir/src/dto.rs`: JudgeBreakdown +epg…lms·avgjudge·empty_poor, PlayOptions +전체옵션, ScoreSubmission +seed/judge_algorithm/rule/skin/client_build_sha256/client_platform, ReplayData→`ReplayEvent{t_us,lane,press}`, 신규 SettingsBlob/AuthRequest/AuthResponse. `lib.rs` trait에 course_ranking/download_replay/get·put_settings/register/login(default=Unsupported), `http.rs` 구현(PUT 헬퍼). 전부 serde default 후방호환(미충족 payload 디코드 테스트 포함).
 - **F8 빌드해시** — main.rs `compute_build_hash`(`current_exe`→sha2, 1회 캐시)·`client_platform`(OS-ARCH). `enter_result`가 제출에 채움. `sha2` 의존성 추가.
-- **F9-a ALL-SCRATCH/H-RANDOM** — `crates/rbms-chart/src/shuffle.rs`: `NoteOption` +HRandom/AllScratch, `apply_time_based`(per-row 시간기반, anti-jack: 스크래치 40ms·키 125ms 임계, LN 핀). beatoraja `Randomizer.java` 대조(`SRandomizer`/`AllScratchRandomizer`).
+- **F9-a ALL-SCRATCH/H-RANDOM** — `crates/rbms-chart/src/shuffle.rs`: `NoteOption` +HRandom/AllScratch, `apply_time_based`(per-row 시간기반, anti-jack: 스크래치 40ms·키 125ms 임계, LN 핀). 레퍼런스 구현 `Randomizer.java` 대조(`SRandomizer`/`AllScratchRandomizer`).
 - **F9-d 듀얼필드 14K** — `crates/rbms-render/src/skin.rs`: `Skin.fields:Vec<(x0,w)>`, `dual_field`/`dual_gap`(serde default). `player>=2`면 P1좌·P2우 분리, 스크래치 바깥 가장자리(IIDX DP). `playfield.rs` judge라인/구분선/외곽선/lane-cover 필드별, `hud.rs` 게이지는 전체 extent(`max(x+w)`) 1개.
 - **F5 데이터 주도 HUD 스킨** — `skin.rs` SkinConfig+Skin에 judge_colors/labels/labels_short·gauge 임계·색·height·combo/judge/fastslow 오프셋(serde default=기존값). `hud.rs`가 const 대신 skin 필드 사용. 기본 스킨 HUD 렌더 동일(회귀 PNG 확인). *(결과/메뉴 위치 RON화는 후속)*
 - **F6 폰트** — `font.rs`: P3b 캐시를 `HashMap<u32,HashMap<String,Laid>>`(hit 시 `&str` 무할당), P3c `fit_text`(말줄임, 셀렉트 곡제목 적용). **P3a run-length 병합은 프로파일 결과 ~11%(AA 텍스트 픽셀별 alpha 상이)로 보류** — 본 해법은 글리프 텍스처 아틀라스(P3 범위 밖). P4 웹폰트 스킵.
