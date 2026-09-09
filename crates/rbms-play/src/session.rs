@@ -6,11 +6,17 @@
 //! leaves through the [`SoundSink`] trait, so this crate stays free of any audio backend and the
 //! whole run can be reproduced against [`NullSink`] with no device present.
 
+use rbms_judge::algorithm::JudgeAlgorithm;
+use rbms_judge::gauge::GaugeAutoShift;
+use rbms_judge::gauge_tables::GaugeSetId;
+use rbms_judge::ln::LnMode;
+use rbms_judge::matcher::ScratchDir;
+use rbms_judge::windows::JudgeWindowRule;
 use rbms_judge::{ClearType, GaugeKind, JudgeEngine, JudgeResult};
 use rbms_model::Model;
 use rbms_store::{Replay, ReplayEvent};
 
-use crate::{PlayEvent, PlaySource, Player};
+use crate::{JUDGE_WIDTH_TIER_COUNT, PlayEvent, PlaySource, Player, UNMODIFIED_JUDGE_RATES, UNMODIFIED_RATE_PERCENT};
 
 /// Neutral per-voice parameters for a chart keysound: reference level, centred, unpitched. The
 /// balance between keysounds and accompaniment belongs on the output buses, not on the voice.
@@ -34,6 +40,13 @@ pub const ANALYSIS_RATE_MAX: f64 = 4.0;
 pub const ANALYSIS_RATE_STEP: f64 = 0.25;
 /// How far one analysis seek moves the virtual clock.
 pub const ANALYSIS_SEEK_STEP_US: i64 = 2_000_000;
+
+/// How finely a seek steps the engine clock while it replays the recorded inputs. A seek has no
+/// frames of its own, and everything the judge engine drives from time rather than from input —
+/// the miss sweep, mine damage, deferred long-note releases and the hell-charge gauge ticks — only
+/// advances when the clock does, so replaying the inputs against one jump to the target would
+/// rebuild a different run from the one being scrubbed.
+const SEEK_STEP_US: i64 = 5_000;
 
 /// Worst judgement an input may earn and still count towards auto-calibration (GOOD), and the
 /// widest timing error accepted, so a wild miss cannot drag the mean.
@@ -115,7 +128,9 @@ pub struct SessionOptions {
     pub gauge: GaugeKind,
     /// How far the judgement of an input is shifted from the instant it arrived.
     pub judge_offset_us: i64,
-    /// JUDGE WIDTH as a percentage of the chart's own windows.
+    /// JUDGE WIDTH as a percentage of the chart's own windows, applied to every widenable tier of
+    /// both key and scratch lanes. The per-tier form lives in [`JudgeSetup`], which
+    /// [`PlaySession::set_judge_setup`] takes and which overrides this once given.
     pub judge_rate_percent: i32,
     /// Lanes played from the chart even in an interactive run, empty when there are none.
     pub auto_lanes: Vec<bool>,
@@ -135,7 +150,7 @@ impl Default for SessionOptions {
             autoplay: false,
             gauge: GaugeKind::Normal,
             judge_offset_us: 0,
-            judge_rate_percent: 100,
+            judge_rate_percent: UNMODIFIED_RATE_PERCENT,
             auto_lanes: Vec::new(),
             seed: 0,
             analysis: false,
@@ -145,12 +160,67 @@ impl Default for SessionOptions {
     }
 }
 
-/// The part of [`SessionOptions`] an analysis seek has to rebuild the judge state from.
+/// Everything on the JUDGE settings screen that changes how a run is judged, in one value so a
+/// caller can hand the whole screen over in a single call.
+///
+/// [`PlaySession::new`] starts a run on the defaults — the widths the chart's mode states, plain
+/// long notes, the gauge table the mode selects and no auto-shift — and
+/// [`PlaySession::set_judge_setup`] replaces them before play begins.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct JudgeSetup {
+    /// Per-tier `[PGREAT, GREAT, GOOD]` JUDGE WIDTH percentages for key lanes.
+    pub judge_rate_key: [i32; JUDGE_WIDTH_TIER_COUNT],
+    /// Per-tier JUDGE WIDTH percentages for scratch lanes.
+    pub judge_rate_scratch: [i32; JUDGE_WIDTH_TIER_COUNT],
+    /// LONGNOTE MARGIN as a percentage of the mode's stock release margin.
+    pub longnote_margin_rate: i32,
+    /// Which note a press takes when several are in range.
+    pub algorithm: JudgeAlgorithm,
+    /// The flavour long notes the chart left unstated play as.
+    pub ln_mode: LnMode,
+    /// Gauge table to play on, or `None` to take the one the chart's mode selects.
+    pub gauge_set: Option<GaugeSetId>,
+    /// How the selected gauge may move during play.
+    pub gauge_auto_shift: GaugeAutoShift,
+    /// The floor the per-frame auto-shift may drop the selection to.
+    pub bottom_shiftable_gauge: GaugeKind,
+}
+
+impl Default for JudgeSetup {
+    fn default() -> Self {
+        JudgeSetup {
+            judge_rate_key: UNMODIFIED_JUDGE_RATES,
+            judge_rate_scratch: UNMODIFIED_JUDGE_RATES,
+            longnote_margin_rate: UNMODIFIED_RATE_PERCENT,
+            algorithm: JudgeAlgorithm::default(),
+            ln_mode: LnMode::default(),
+            gauge_set: None,
+            gauge_auto_shift: GaugeAutoShift::default(),
+            bottom_shiftable_gauge: GaugeKind::AssistEasy,
+        }
+    }
+}
+
+impl JudgeSetup {
+    /// The setup a single JUDGE WIDTH slider describes: one percentage on every widenable tier of
+    /// both key and scratch lanes, everything else left at its default.
+    fn uniform_rate(rate_percent: i32) -> Self {
+        JudgeSetup {
+            judge_rate_key: [rate_percent; JUDGE_WIDTH_TIER_COUNT],
+            judge_rate_scratch: [rate_percent; JUDGE_WIDTH_TIER_COUNT],
+            ..JudgeSetup::default()
+        }
+    }
+}
+
+/// The part of [`SessionOptions`] an analysis seek has to rebuild the judge state from. Everything
+/// that decides a judgement lives here, so a seek reproduces the run it is scrubbing rather than a
+/// default-configured one.
 #[derive(Debug, Clone)]
 struct Setup {
     autoplay: bool,
     gauge: GaugeKind,
-    judge_rate_percent: i32,
+    judge: JudgeSetup,
     auto_lanes: Vec<bool>,
     seed: u64,
 }
@@ -290,6 +360,14 @@ pub struct PlaySummary {
     pub clear_lamp: ClearType,
     /// Bad + poor + miss, the reference implementation's minimum bad-poor count.
     pub min_bp: u32,
+    /// Whether the gauge emptied under a shift mode that does not rescue the play.
+    pub failed: bool,
+    /// The gauge that decided the clear, which auto-shift may have moved away from the one the
+    /// player chose (`BMSPlayer.java:639-650`). `None` for a course gauge, which no setting selects.
+    pub finished_gauge: Option<GaugeKind>,
+    /// Whether auto-shift moved the selection (`GrooveGauge.java:99-101`). The reference reports the
+    /// gauge of such a run as `-1` rather than as the one that was chosen (`BMSPlayer.java:884`).
+    pub gauge_shifted: bool,
 }
 
 /// One run of a chart: the judge state, the replay being reproduced or recorded, and the
@@ -316,7 +394,7 @@ impl PlaySession {
         let setup = Setup {
             autoplay: options.autoplay,
             gauge: options.gauge,
-            judge_rate_percent: options.judge_rate_percent,
+            judge: JudgeSetup::uniform_rate(options.judge_rate_percent),
             auto_lanes: options.auto_lanes,
             seed: options.seed,
         };
@@ -347,9 +425,15 @@ impl PlaySession {
     /// Take one lane press at the instant it arrived, recording it for the replay and judging it at
     /// the configured offset. The keysound sounds now, not at the note's time.
     pub fn press(&mut self, lane: usize, raw_us: i64, sink: &mut dyn SoundSink) -> Option<JudgeResult> {
-        self.recording.push(ReplayEvent { t: raw_us, lane, press: true });
+        self.press_dir(lane, ScratchDir::Forward, raw_us, sink)
+    }
+
+    /// Take one lane press from one physical direction. A scratch lane has a key for each direction
+    /// and the direction is recorded with the input, so a back-spin reproduces as one.
+    pub fn press_dir(&mut self, lane: usize, dir: ScratchDir, raw_us: i64, sink: &mut dyn SoundSink) -> Option<JudgeResult> {
+        self.recording.push(ReplayEvent { t: raw_us, lane, press: true, backward: is_backward(dir) });
         let judge_us = raw_us + self.judge_offset_us;
-        let result = self.player.press(lane, judge_us, |event| sink.play(immediate_sound(event)));
+        let result = self.player.press_dir(lane, dir, judge_us, |event| sink.play(immediate_sound(event)));
         if let (true, Some(result)) = (self.auto_calibration, result.as_ref()) {
             self.calibration.record(result);
         }
@@ -358,13 +442,25 @@ impl PlaySession {
 
     /// Take one lane release at the instant it arrived, recording it for the replay.
     pub fn release(&mut self, lane: usize, raw_us: i64) -> Option<JudgeResult> {
-        self.recording.push(ReplayEvent { t: raw_us, lane, press: false });
-        self.player.release(lane, raw_us + self.judge_offset_us)
+        self.release_dir(lane, ScratchDir::Forward, raw_us)
+    }
+
+    /// Take one lane release from one physical direction.
+    pub fn release_dir(&mut self, lane: usize, dir: ScratchDir, raw_us: i64) -> Option<JudgeResult> {
+        self.recording.push(ReplayEvent { t: raw_us, lane, press: false, backward: is_backward(dir) });
+        self.player.release_dir(lane, dir, raw_us + self.judge_offset_us)
     }
 
     /// Rebuild the judge state at an arbitrary song time by re-running the recorded inputs from the
     /// start, so scrubbing backwards is exactly as correct as scrubbing forwards. Only a replay run
     /// can be scrubbed.
+    ///
+    /// The rebuild walks the clock forward in [`SEEK_STEP_US`] frames and feeds each input at the
+    /// frame that would have reached it, which is what [`tick`](Self::tick) does live: the inputs
+    /// due at a frame are judged before the frame's own sweep. Jumping straight to the target
+    /// instead would leave every time-driven judgement — the miss sweep, mine damage, a deferred
+    /// long-note release, the hell-charge ticks — to be settled in one step against whatever the
+    /// last recorded input left behind.
     pub fn seek(&mut self, target_us: i64) {
         if self.replay.is_none() {
             return;
@@ -372,21 +468,25 @@ impl PlaySession {
         let target_us = target_us.max(0);
         let offset_us = self.judge_offset_us;
         let mut player = build_player(self.player.model().clone(), &self.setup);
+        let events = self.replay.as_ref().map(|track| track.events.clone()).unwrap_or_default();
         let mut cursor = 0;
-        if let Some(track) = self.replay.as_ref() {
-            for event in &track.events {
-                if event.t > target_us {
-                    break;
-                }
+        let mut frame_us = 0;
+        loop {
+            while let Some(event) = events.get(cursor).filter(|event| event.t <= frame_us) {
+                let dir = scratch_dir(event.backward);
                 if event.press {
-                    player.press(event.lane, event.t + offset_us, |_| {});
+                    player.press_dir(event.lane, dir, event.t + offset_us, |_| {});
                 } else {
-                    player.release(event.lane, event.t + offset_us);
+                    player.release_dir(event.lane, dir, event.t + offset_us);
                 }
                 cursor += 1;
             }
+            player.update(frame_us, |_| {});
+            if frame_us >= target_us {
+                break;
+            }
+            frame_us = (frame_us + SEEK_STEP_US).min(target_us);
         }
-        player.update(target_us, |_| {});
         self.player = player;
         if let Some(track) = self.replay.as_mut() {
             track.cursor = cursor;
@@ -429,12 +529,72 @@ impl PlaySession {
             gauge_value: judge.gauge.value(),
             clear_lamp: judge.clear_lamp(),
             min_bp: counts[3] + counts[4] + counts[5],
+            failed: self.player.failed(),
+            finished_gauge: judge.gauge.selected_index().kind(),
+            gauge_shifted: judge.gauge.is_type_changed(),
         }
+    }
+
+    /// Replace everything the JUDGE settings screen controls, before the run starts.
+    ///
+    /// Resolving the long-note flavour re-counts the chart and every gauge is rebuilt from the new
+    /// table, so this discards whatever the gauges hold: call it between [`new`](Self::new) and the
+    /// first [`tick`](Self::tick), not mid-run. The setup is remembered, so an analysis
+    /// [`seek`](Self::seek) rebuilds against it too.
+    pub fn set_judge_setup(&mut self, judge: JudgeSetup) {
+        self.setup.judge = judge;
+        apply_setup(&mut self.player, &self.setup);
+    }
+
+    /// How this run is judged.
+    pub fn judge_setup(&self) -> JudgeSetup {
+        self.setup.judge
     }
 
     /// Live judge state, for the play HUD.
     pub fn judge(&self) -> &JudgeEngine {
         self.player.judge()
+    }
+
+    /// Which note a press takes when several are in range.
+    pub fn algorithm(&self) -> JudgeAlgorithm {
+        self.player.algorithm()
+    }
+
+    /// The judgerank rule the chart's mode is judged under.
+    pub fn judge_window_rule(&self) -> JudgeWindowRule {
+        self.player.judge_window_rule()
+    }
+
+    /// The gauge table the nine gauges are built from.
+    pub fn gauge_set(&self) -> GaugeSetId {
+        self.player.gauge_set()
+    }
+
+    /// How the selected gauge may move during play.
+    pub fn gauge_auto_shift(&self) -> GaugeAutoShift {
+        self.player.gauge_auto_shift()
+    }
+
+    /// The floor the per-frame auto-shift may drop the selection to.
+    pub fn bottom_shiftable_gauge(&self) -> GaugeKind {
+        self.player.bottom_shiftable_gauge()
+    }
+
+    /// The gauge the player chose, which auto-shift may have moved the selection away from.
+    pub fn configured_gauge(&self) -> GaugeKind {
+        self.player.configured_gauge()
+    }
+
+    /// The flavour long notes the chart left unstated play as.
+    pub fn ln_mode(&self) -> LnMode {
+        self.player.ln_mode()
+    }
+
+    /// Whether the gauge emptied under a shift mode that does not rescue the play
+    /// (`BMSPlayer.java:653-661`). The session keeps judging; ending the run is the caller's.
+    pub fn is_failed(&self) -> bool {
+        self.player.failed()
     }
 
     /// The chart being played, laid out as this run sees it.
@@ -570,10 +730,11 @@ impl PlaySession {
     fn feed_replay(&mut self, audible_us: i64, sink: &mut dyn SoundSink) {
         let offset_us = self.judge_offset_us;
         while let Some(event) = self.replay.as_mut().and_then(|track| track.next_due(audible_us)) {
+            let dir = scratch_dir(event.backward);
             let result = if event.press {
-                self.player.press(event.lane, event.t + offset_us, |emitted| sink.play(immediate_sound(emitted)))
+                self.player.press_dir(event.lane, dir, event.t + offset_us, |emitted| sink.play(immediate_sound(emitted)))
             } else {
-                self.player.release(event.lane, event.t + offset_us)
+                self.player.release_dir(event.lane, dir, event.t + offset_us)
             };
             if let Some(result) = result {
                 self.marks.push(TimingMark { lane: result.lane, delta_us: result.delta_us, judge: result.judge as u8 });
@@ -582,16 +743,43 @@ impl PlaySession {
     }
 }
 
+/// The direction a recorded input spun its lane.
+fn scratch_dir(backward: bool) -> ScratchDir {
+    if backward { ScratchDir::Backward } else { ScratchDir::Forward }
+}
+
+/// How a direction is recorded in a replay.
+fn is_backward(dir: ScratchDir) -> bool {
+    dir == ScratchDir::Backward
+}
+
 /// A judge player set up the way this run was configured, used both to start the run and to rebuild
 /// it at a seek target.
 fn build_player(model: Model, setup: &Setup) -> Player {
     let mut player = Player::new(model, setup.autoplay);
+    apply_setup(&mut player, setup);
+    player
+}
+
+/// Configure a freshly built player exactly the way this run is set up.
+///
+/// The order matters: resolving the long-note flavour re-counts the chart because charge notes are
+/// judged twice, and both that and the gauge table decide how the nine gauges are built, so the
+/// gauge selection has to come after them.
+fn apply_setup(player: &mut Player, setup: &Setup) {
+    player.set_ln_mode(setup.judge.ln_mode);
+    if let Some(set) = setup.judge.gauge_set {
+        player.set_gauge_set(set);
+    }
     player.set_gauge(setup.gauge);
-    player.set_judge_rate(setup.judge_rate_percent);
+    player.set_judge_window_rates(setup.judge.judge_rate_key, setup.judge.judge_rate_scratch);
+    player.set_longnote_margin_rate(setup.judge.longnote_margin_rate);
+    player.set_algorithm(setup.judge.algorithm);
+    player.set_gauge_auto_shift(setup.judge.gauge_auto_shift);
+    player.set_bottom_shiftable_gauge(setup.judge.bottom_shiftable_gauge);
     if !setup.auto_lanes.is_empty() {
         player.set_auto_lanes(setup.auto_lanes.clone());
     }
-    player
 }
 
 /// A keysound booked ahead on the song clock: autoplay accompaniment and autoplay note sounds.
@@ -654,8 +842,194 @@ mod tests {
             offset_ms: 0,
             scratch_auto: false,
             gauge: String::new(),
+            judge: Default::default(),
             events,
         }
+    }
+
+    /// A long note the chart states no flavour for, so LN MODE decides how many judged objects it is.
+    fn undefined_long_note() -> Model {
+        model(b"#BPM 120\r\n#WAV01 a.wav\r\n#00151:01000001\r\n")
+    }
+
+    /// The session builds its player once at [`PlaySession::new`] and again at every
+    /// [`PlaySession::seek`], so LN MODE has to survive being applied twice — the run would
+    /// otherwise judge a different number of notes after a scrub than before it.
+    #[test]
+    fn setting_the_long_note_mode_after_the_session_is_built_still_reaches_the_engine() {
+        let mut session = PlaySession::new(undefined_long_note(), SessionOptions::default());
+        assert_eq!(session.judge().total_notes(), 1, "the shipped LN MODE judges it as one plain long note");
+        session.set_judge_setup(JudgeSetup { ln_mode: LnMode::ChargeNote, ..JudgeSetup::default() });
+        assert_eq!(session.judge().total_notes(), 2, "a charge note is judged at its head and at its end");
+        assert_eq!(session.ln_mode(), LnMode::ChargeNote);
+    }
+
+    #[test]
+    fn a_scrub_rebuilds_the_run_with_the_same_note_count_it_was_judging() {
+        let mut session = PlaySession::new(undefined_long_note(), SessionOptions { replay: Some(replay_of(Vec::new())), ..Default::default() });
+        session.set_judge_setup(JudgeSetup { ln_mode: LnMode::ChargeNote, ..JudgeSetup::default() });
+        let before = session.judge().total_notes();
+        session.seek(1_000_000);
+        assert_eq!(session.judge().total_notes(), before, "the live run and the scrubbed one must share an EX denominator");
+    }
+
+    /// A charge note on the scratch lane, so the second scratch key has something to end.
+    fn scratch_charge_note() -> Model {
+        model(b"#BPM 120\r\n#RANK 3\r\n#LNMODE 2\r\n#WAV01 a.wav\r\n#00156:01000001\r\n")
+    }
+
+    fn scratch_note_times(m: &Model) -> (i64, i64) {
+        let times: Vec<i64> = m.timelines.iter().flat_map(|t| t.notes[7].as_ref()).map(|n| n.time_us).collect();
+        (times[0], times[1])
+    }
+
+    /// Spinning the other way is what ends a charge note the forward key grabbed
+    /// (`JudgeManager.java:358-372`), so the direction has to survive the whole path from the input
+    /// down to the judge engine — and be recorded, or the replay would not reproduce the run.
+    #[test]
+    fn a_back_spin_ends_the_charge_note_the_forward_spin_grabbed() {
+        let m = scratch_charge_note();
+        let (head_us, end_us) = scratch_note_times(&m);
+        let mut session = PlaySession::new(m, SessionOptions::default());
+        assert_eq!(session.press_dir(7, ScratchDir::Forward, head_us, &mut NullSink).map(|r| r.judge), Some(rbms_judge::Judge::PerfectGreat));
+        let ended = session.press_dir(7, ScratchDir::Backward, end_us, &mut NullSink);
+        assert_eq!(ended.map(|r| r.judge), Some(rbms_judge::Judge::PerfectGreat), "the opposite direction takes the charge-note end");
+        assert_eq!(session.summary().counts[0], 2, "a charge note is judged at both ends");
+
+        let recorded = session.recorded_events();
+        assert!(!recorded[0].backward, "the forward spin is recorded as one");
+        assert!(recorded[1].backward, "and the back spin as one, or a replay would re-grab instead of ending");
+    }
+
+    /// The same run reproduced from its own recording has to end the charge note the same way, which
+    /// it can only do if playback reads the recorded direction back.
+    #[test]
+    fn a_replayed_back_spin_ends_the_charge_note_again() {
+        let m = scratch_charge_note();
+        let (head_us, end_us) = scratch_note_times(&m);
+        let events = vec![ReplayEvent { t: head_us, lane: 7, press: true, backward: false }, ReplayEvent { t: end_us, lane: 7, press: true, backward: true }];
+        let mut session = PlaySession::new(m, SessionOptions { replay: Some(replay_of(events)), ..Default::default() });
+        session.tick(SessionClock::at(end_us + PLAY_TAIL_US), &mut NullSink);
+        assert_eq!(session.summary().counts[0], 2, "the reproduction took both ends, so the direction came back off the recording");
+    }
+
+    /// The result has to name the gauge that decided the clear: GAUGE AUTO SHIFT re-picks every
+    /// frame (`BMSPlayer.java:639-650`), and a run recorded under the gauge that was merely chosen
+    /// would pair a NORMAL gauge with a HARD lamp.
+    #[test]
+    fn a_summary_reports_the_gauge_the_run_finished_on() {
+        let mut unshifted = PlaySession::new(one_note(), SessionOptions::default());
+        unshifted.tick(SessionClock::at(0), &mut NullSink);
+        assert!(!unshifted.summary().gauge_shifted, "nothing shifts under the shipped GAUGE AUTO SHIFT");
+        assert_eq!(unshifted.summary().finished_gauge, Some(GaugeKind::Normal));
+
+        let mut shifted = PlaySession::new(one_note(), SessionOptions::default());
+        shifted.set_judge_setup(JudgeSetup { gauge_auto_shift: GaugeAutoShift::BestClear, ..JudgeSetup::default() });
+        shifted.tick(SessionClock::at(0), &mut NullSink);
+        let summary = shifted.summary();
+        assert!(summary.gauge_shifted, "BEST CLEAR climbs off the chosen gauge on the first frame");
+        assert_ne!(summary.finished_gauge, Some(GaugeKind::Normal));
+        assert_eq!(summary.finished_gauge, shifted.judge().gauge.selected_index().kind());
+    }
+
+    #[test]
+    fn a_fresh_session_is_set_up_the_way_the_chart_asks() {
+        let session = PlaySession::new(one_note(), SessionOptions::default());
+        assert_eq!(session.judge_setup(), JudgeSetup::default());
+        assert_eq!(session.algorithm(), JudgeAlgorithm::default());
+        assert_eq!(session.judge_window_rule(), JudgeWindowRule::Normal);
+        assert_eq!(session.gauge_set(), GaugeSetId::SevenKeys);
+        assert_eq!(session.gauge_auto_shift(), GaugeAutoShift::None);
+        assert_eq!(session.bottom_shiftable_gauge(), GaugeKind::AssistEasy);
+        assert_eq!(session.ln_mode(), LnMode::LongNote);
+        assert!(!session.is_failed());
+        assert!(!session.summary().failed);
+    }
+
+    #[test]
+    fn the_single_judge_width_slider_fills_every_tier() {
+        let session = PlaySession::new(one_note(), SessionOptions { judge_rate_percent: 150, ..Default::default() });
+        assert_eq!(session.judge_setup().judge_rate_key, [150; JUDGE_WIDTH_TIER_COUNT]);
+        assert_eq!(session.judge_setup().judge_rate_scratch, [150; JUDGE_WIDTH_TIER_COUNT]);
+    }
+
+    #[test]
+    fn the_judge_setup_reaches_the_engine() {
+        let mut session = PlaySession::new(one_note(), SessionOptions::default());
+        let setup = JudgeSetup {
+            judge_rate_key: [120, 110, 105],
+            judge_rate_scratch: [90, 95, 100],
+            longnote_margin_rate: 150,
+            algorithm: JudgeAlgorithm::Lowest,
+            ln_mode: LnMode::HellChargeNote,
+            gauge_set: Some(GaugeSetId::Lr2),
+            gauge_auto_shift: GaugeAutoShift::BestClear,
+            bottom_shiftable_gauge: GaugeKind::Normal,
+        };
+        session.set_judge_setup(setup);
+        assert_eq!(session.judge_setup(), setup);
+        assert_eq!(session.algorithm(), JudgeAlgorithm::Lowest);
+        assert_eq!(session.ln_mode(), LnMode::HellChargeNote);
+        assert_eq!(session.gauge_set(), GaugeSetId::Lr2);
+        assert_eq!(session.gauge_auto_shift(), GaugeAutoShift::BestClear);
+        assert_eq!(session.bottom_shiftable_gauge(), GaugeKind::Normal);
+    }
+
+    #[test]
+    fn an_out_of_range_auto_shift_floor_is_clamped_before_it_reaches_the_engine() {
+        let mut session = PlaySession::new(one_note(), SessionOptions::default());
+        session.set_judge_setup(JudgeSetup { bottom_shiftable_gauge: GaugeKind::ExHard, ..JudgeSetup::default() });
+        assert_eq!(session.bottom_shiftable_gauge(), GaugeKind::Normal);
+    }
+
+    #[test]
+    fn the_judge_setup_still_selects_the_gauge_the_run_was_started_with() {
+        let mut session = PlaySession::new(one_note(), SessionOptions { gauge: GaugeKind::Hard, ..Default::default() });
+        session.set_judge_setup(JudgeSetup { ln_mode: LnMode::ChargeNote, ..JudgeSetup::default() });
+        assert_eq!(session.configured_gauge(), GaugeKind::Hard, "rebuilding the gauges must not lose the chosen one");
+    }
+
+    #[test]
+    fn an_emptied_gauge_fails_the_run_and_shows_in_the_summary() {
+        let mut session = PlaySession::new(one_note(), SessionOptions { gauge: GaugeKind::Hazard, ..Default::default() });
+        session.tick(SessionClock::at(4_000_000), &mut NullSink);
+        assert!(session.is_failed());
+        assert!(session.summary().failed);
+    }
+
+    #[test]
+    fn a_seek_rebuilds_the_judge_setup_the_run_was_scrubbed_with() {
+        let mut session = PlaySession::new(one_note(), SessionOptions { replay: Some(replay_of(Vec::new())), ..Default::default() });
+        let setup = JudgeSetup {
+            judge_rate_key: [130, 120, 110],
+            algorithm: JudgeAlgorithm::Score,
+            ln_mode: LnMode::ChargeNote,
+            gauge_set: Some(GaugeSetId::Lr2),
+            gauge_auto_shift: GaugeAutoShift::Continue,
+            bottom_shiftable_gauge: GaugeKind::Easy,
+            ..JudgeSetup::default()
+        };
+        session.set_judge_setup(setup);
+        session.seek(1_000_000);
+        assert_eq!(session.judge_setup(), setup);
+        assert_eq!(session.algorithm(), JudgeAlgorithm::Score);
+        assert_eq!(session.ln_mode(), LnMode::ChargeNote);
+        assert_eq!(session.gauge_set(), GaugeSetId::Lr2);
+        assert_eq!(session.gauge_auto_shift(), GaugeAutoShift::Continue);
+        assert_eq!(session.bottom_shiftable_gauge(), GaugeKind::Easy);
+    }
+
+    #[test]
+    fn a_widened_judge_width_reaches_a_press_through_the_session() {
+        let late_us = 2_000_000 + 25_000;
+        let mut stock = PlaySession::new(one_note(), SessionOptions::default());
+        stock.press(0, late_us, &mut NullSink);
+        assert_eq!(stock.summary().counts[0], 0);
+
+        let mut widened = PlaySession::new(one_note(), SessionOptions::default());
+        widened.set_judge_setup(JudgeSetup { judge_rate_key: [200, 100, 100], ..JudgeSetup::default() });
+        widened.press(0, late_us, &mut NullSink);
+        assert_eq!(widened.summary().counts[0], 1);
     }
 
     #[test]
@@ -868,7 +1242,7 @@ mod tests {
 
     #[test]
     fn an_analysis_run_never_finishes_on_its_own() {
-        let events = vec![ReplayEvent { t: 2_000_000, lane: 0, press: true }];
+        let events = vec![ReplayEvent { t: 2_000_000, lane: 0, press: true, ..Default::default() }];
         let mut session = PlaySession::new(one_note(), SessionOptions { analysis: true, replay: Some(replay_of(events)), ..Default::default() });
         let past_the_end = session.last_time_us() + PLAY_TAIL_US * 4;
         session.tick(SessionClock::at(past_the_end), &mut NullSink);

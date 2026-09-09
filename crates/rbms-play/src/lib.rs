@@ -1,13 +1,19 @@
 #![forbid(unsafe_code)]
 
-use rbms_judge::{GaugeKind, JudgeEngine, JudgeProperty, JudgeResult, judgerank_for};
+use rbms_judge::algorithm::JudgeAlgorithm;
+use rbms_judge::gauge::{GaugeAutoShift, GaugeShiftOutcome, clamp_bottom_shiftable};
+use rbms_judge::gauge_tables::GaugeSetId;
+use rbms_judge::ln::LnMode;
+pub use rbms_judge::matcher::ScratchDir;
+use rbms_judge::windows::{JudgeWindowRule, JudgeWindowSet};
+use rbms_judge::{GaugeKind, JudgeEngine, JudgeResult};
 use rbms_model::{Model, NoteKind};
 
 mod session;
 
 pub use session::{
-    ANALYSIS_RATE_MAX, ANALYSIS_RATE_MIN, ANALYSIS_RATE_STEP, ANALYSIS_SEEK_STEP_US, KEYSOUND_GAIN, KEYSOUND_PAN, KEYSOUND_PITCH, NullSink, PlaySession,
-    PlaySummary, SessionClock, SessionOptions, SoundRequest, SoundSink, SoundTime, TimingMark,
+    ANALYSIS_RATE_MAX, ANALYSIS_RATE_MIN, ANALYSIS_RATE_STEP, ANALYSIS_SEEK_STEP_US, JudgeSetup, KEYSOUND_GAIN, KEYSOUND_PAN, KEYSOUND_PITCH, NullSink,
+    PlaySession, PlaySummary, SessionClock, SessionOptions, SoundRequest, SoundSink, SoundTime, TimingMark,
 };
 
 /// Which output bus a keysound belongs to. `rbms-play` does not depend on `rbms-audio`, so it
@@ -36,6 +42,16 @@ enum AutoAction {
 /// Autoplay key-beam flash for a tapped (non-LN) note, mirroring the reference implementation's
 /// `auto_minduration` (80 ms): a tap lights its lane beam for this long, then releases.
 const AUTO_BEAM_US: i64 = 80_000;
+
+/// JUDGE WIDTH percentage that leaves a mode's own timing windows alone.
+pub(crate) const UNMODIFIED_RATE_PERCENT: i32 = 100;
+
+/// How many judge tiers a JUDGE WIDTH rate covers: PGREAT, GREAT and GOOD. BAD and the 空POOR band
+/// never widen (`JudgeProperty.java:262`).
+pub const JUDGE_WIDTH_TIER_COUNT: usize = 3;
+
+/// JUDGE WIDTH rates leaving all three widenable tiers at their stock width.
+pub const UNMODIFIED_JUDGE_RATES: [i32; JUDGE_WIDTH_TIER_COUNT] = [UNMODIFIED_RATE_PERCENT; JUDGE_WIDTH_TIER_COUNT];
 
 fn collect_bg(model: &Model) -> Vec<(i64, i32)> {
     let mut v: Vec<(i64, i32)> = model.timelines.iter().flat_map(|tl| tl.bgnotes.iter().map(|n| (n.time_us, n.wav))).collect();
@@ -89,6 +105,17 @@ fn collect_actions(model: &Model) -> Vec<(i64, usize, AutoAction)> {
     v
 }
 
+/// Give `judge` all four timing tables of `model`'s mode, scaled by the chart's judgerank under the
+/// mode's [`JudgeWindowRule`] and then by the user's JUDGE WIDTH rates.
+///
+/// The rule decides both the judgerank a `#RANK`/`#DEFEXRANK` resolves to and which judge indices
+/// hold their tabulated width, so it has to be picked from the mode rather than assumed.
+fn apply_window_set(judge: &mut JudgeEngine, model: &Model, key: [i32; JUDGE_WIDTH_TIER_COUNT], scratch: [i32; JUDGE_WIDTH_TIER_COUNT]) {
+    let rule = JudgeWindowRule::for_mode(&model.mode);
+    let judgerank = rule.judgerank_for(model.meta.rank, model.meta.defexrank);
+    judge.apply_window_set(&JudgeWindowSet::for_mode(&model.mode, judgerank, key, scratch));
+}
+
 /// Run a full autoplay pass and return the resulting judge engine. Verification helper
 /// (autoplay = all PGREAT, LNs counted once).
 pub fn simulate_autoplay(model: &Model) -> JudgeEngine {
@@ -115,11 +142,16 @@ pub struct Player {
     beam_off: Vec<i64>,
     ln_active: Vec<bool>,
     bomb: Vec<(i64, u8)>,
+    gauge_auto_shift: GaugeAutoShift,
+    configured_gauge: GaugeKind,
+    bottom_shiftable_gauge: GaugeKind,
+    failed: bool,
 }
 
 impl Player {
     pub fn new(model: Model, autoplay: bool) -> Self {
-        let judge = JudgeEngine::from_model_for_mode(&model);
+        let mut judge = JudgeEngine::from_model_for_mode(&model);
+        apply_window_set(&mut judge, &model, UNMODIFIED_JUDGE_RATES, UNMODIFIED_JUDGE_RATES);
         let bg = collect_bg(&model);
         let heads = collect_note_heads(&model);
         let actions = collect_actions(&model);
@@ -140,6 +172,10 @@ impl Player {
             beam_off: vec![i64::MIN; lanes],
             ln_active: vec![false; lanes],
             bomb: vec![(i64::MIN, 0); lanes],
+            gauge_auto_shift: GaugeAutoShift::default(),
+            configured_gauge: GaugeKind::Normal,
+            bottom_shiftable_gauge: GaugeKind::AssistEasy,
+            failed: false,
         }
     }
 
@@ -147,25 +183,88 @@ impl Player {
     /// both key and scratch lanes. Kept for callers that expose one slider; see
     /// [`set_judge_window_rates`](Self::set_judge_window_rates) for the reference implementation's six-value form.
     pub fn set_judge_rate(&mut self, rate_percent: i32) {
-        self.set_judge_window_rates([rate_percent; 3], [rate_percent; 3]);
+        self.set_judge_window_rates([rate_percent; JUDGE_WIDTH_TIER_COUNT], [rate_percent; JUDGE_WIDTH_TIER_COUNT]);
     }
 
     /// Reference implementation JUDGE WIDTH: per-tier `[PGREAT, GREAT, GOOD]` percentages for key lanes and for
     /// scratch lanes (`JudgeManager.java:169-174`). The chart's own judgerank (`#RANK`/`#DEFEXRANK`)
     /// is applied first, then these rates — BAD and the 空POOR band never widen, and each tier is
     /// clamped to BAD and to the tier before it.
-    pub fn set_judge_window_rates(&mut self, key: [i32; 3], scratch: [i32; 3]) {
-        let judgerank = judgerank_for(self.model.meta.rank, self.model.meta.defexrank);
-        let prop = JudgeProperty::for_mode(&self.model.mode);
-        self.judge.set_windows(prop.note.scaled(judgerank).with_window_rate(key));
-        self.judge.set_scratch_windows(prop.scratch.scaled(judgerank).with_window_rate(scratch));
-        self.judge.set_ln_end(prop.ln_end.scaled(judgerank).with_window_rate(key));
-        self.judge.set_ln_scratch_end(prop.ln_scratch_end.scaled(judgerank).with_window_rate(scratch));
+    ///
+    /// Both passes run under the mode's [`JudgeWindowRule`], so a pop'n chart takes the PMS
+    /// judgerank column and its per-index fixjudge rather than the beat-mode one.
+    pub fn set_judge_window_rates(&mut self, key: [i32; JUDGE_WIDTH_TIER_COUNT], scratch: [i32; JUDGE_WIDTH_TIER_COUNT]) {
+        apply_window_set(&mut self.judge, &self.model, key, scratch);
+    }
+
+    /// The judgerank rule this chart's mode is judged under (`JudgeProperty.java:21, 32, 43, 54`).
+    pub fn judge_window_rule(&self) -> JudgeWindowRule {
+        JudgeWindowRule::for_mode(&self.model.mode)
     }
 
     /// Reference implementation LONGNOTE MARGIN rate (percent of the mode's stock margin).
     pub fn set_longnote_margin_rate(&mut self, rate_percent: i32) {
         self.judge.set_longnote_margin_rate(rate_percent);
+    }
+
+    /// Which note a press takes when several are in range (`JudgeAlgorithm.java:17-37`).
+    pub fn set_algorithm(&mut self, algorithm: JudgeAlgorithm) {
+        self.judge.set_algorithm(algorithm);
+    }
+
+    /// The candidate-selection policy in force.
+    pub fn algorithm(&self) -> JudgeAlgorithm {
+        self.judge.algorithm()
+    }
+
+    /// Resolve long notes the chart left unstated to `mode`. Charge notes are judged at both ends,
+    /// so this re-counts the chart; call it before the gauge is set.
+    pub fn set_ln_mode(&mut self, mode: LnMode) {
+        self.judge.set_ln_mode(mode);
+    }
+
+    /// The long-note flavour unstated chart notes play as.
+    pub fn ln_mode(&self) -> LnMode {
+        self.judge.ln_mode()
+    }
+
+    /// Play on a gauge table other than the one the mode selects — the LR2 set, which no mode
+    /// reaches (`GaugeProperty.java:117-125`).
+    pub fn set_gauge_set(&mut self, set: GaugeSetId) {
+        self.judge.set_gauge_set(set);
+    }
+
+    /// The gauge table the nine gauges are built from. Derived from the chart's mode unless
+    /// [`set_gauge_set`](Self::set_gauge_set) overrode it.
+    pub fn gauge_set(&self) -> GaugeSetId {
+        self.judge.gauge_set()
+    }
+
+    /// How the selected gauge may move during play (`PlayerConfig.java:163-167`).
+    pub fn set_gauge_auto_shift(&mut self, mode: GaugeAutoShift) {
+        self.gauge_auto_shift = mode;
+    }
+
+    /// The gauge auto-shift mode in force.
+    pub fn gauge_auto_shift(&self) -> GaugeAutoShift {
+        self.gauge_auto_shift
+    }
+
+    /// The floor the per-frame auto-shift may drop the selection to, clamped to the range the
+    /// reference allows (`PlayerConfig.java:908`).
+    pub fn set_bottom_shiftable_gauge(&mut self, kind: GaugeKind) {
+        self.bottom_shiftable_gauge = clamp_bottom_shiftable(kind);
+    }
+
+    /// The auto-shift floor.
+    pub fn bottom_shiftable_gauge(&self) -> GaugeKind {
+        self.bottom_shiftable_gauge
+    }
+
+    /// Whether the selected gauge emptied under a shift mode that does not rescue it
+    /// (`BMSPlayer.java:653-661`). The run keeps judging; ending it is the caller's decision.
+    pub fn failed(&self) -> bool {
+        self.failed
     }
 
     /// Per-lane key-beam press timestamps (µs); `i64::MIN` means the beam is not held. Paired
@@ -197,8 +296,16 @@ impl Player {
         }
     }
 
+    /// Select the gauge the player chose. It is also the ceiling the SELECT TO UNDER auto-shift
+    /// re-picks under, so the choice is remembered rather than only handed to the engine.
     pub fn set_gauge(&mut self, kind: GaugeKind) {
+        self.configured_gauge = kind;
         self.judge.set_gauge(kind, self.model.meta.total);
+    }
+
+    /// The gauge the player chose, which auto-shift may have moved the selection away from.
+    pub fn configured_gauge(&self) -> GaugeKind {
+        self.configured_gauge
     }
 
     /// Read-only access to the judge engine. The field itself is private, so the engine can only be
@@ -273,6 +380,18 @@ impl Player {
             }
         }
         self.judge.update(audible_us);
+        self.run_gauge_auto_shift();
+    }
+
+    /// One frame of gauge auto-shift, run after the frame's judgments exactly like the reference's
+    /// play loop (`BMSPlayer.java:638-672`). BEST CLEAR and SELECT TO UNDER re-pick every frame; the
+    /// other three only act once the selected gauge is empty, and only NONE ends the play there.
+    fn run_gauge_auto_shift(&mut self) {
+        if self.failed {
+            return;
+        }
+        let outcome = self.judge.gauge.auto_shift(self.gauge_auto_shift, self.configured_gauge, self.bottom_shiftable_gauge);
+        self.failed = outcome == GaugeShiftOutcome::Failed;
     }
 
     /// Both axes at one clock: [`update_schedule`](Self::update_schedule) then
@@ -284,7 +403,14 @@ impl Player {
         self.update_judge(now_us);
     }
 
-    pub fn press<F: FnMut(PlayEvent)>(&mut self, lane: usize, now_us: i64, mut play: F) -> Option<JudgeResult> {
+    pub fn press<F: FnMut(PlayEvent)>(&mut self, lane: usize, now_us: i64, play: F) -> Option<JudgeResult> {
+        self.press_dir(lane, ScratchDir::Forward, now_us, play)
+    }
+
+    /// Press a lane from one physical direction. On a scratch lane the two directions are two keys,
+    /// and spinning the other way ends a charge note the lane is holding
+    /// (`JudgeManager.java:358-372`); a key lane only ever presses forwards.
+    pub fn press_dir<F: FnMut(PlayEvent)>(&mut self, lane: usize, dir: ScratchDir, now_us: i64, mut play: F) -> Option<JudgeResult> {
         if self.auto_lanes.get(lane).copied().unwrap_or(false) {
             return None;
         }
@@ -295,7 +421,7 @@ impl Player {
         if let Some(wav) = self.nearest_head_wav(lane, now_us) {
             play(PlayEvent { wav, at_us: now_us, source: PlaySource::Key });
         }
-        let res = self.judge.press(lane, now_us);
+        let res = self.judge.press_dir(lane, dir, now_us);
         if let Some(jr) = &res
             && (jr.judge as usize) <= 3
             && jr.lane < self.bomb.len()
@@ -306,14 +432,24 @@ impl Player {
     }
 
     pub fn release(&mut self, lane: usize, now_us: i64) -> Option<JudgeResult> {
-        if lane < self.beam_on.len() && !self.auto_lanes[lane] {
+        self.release_dir(lane, ScratchDir::Forward, now_us)
+    }
+
+    /// Release a lane from one physical direction. An auto-played lane drops the input exactly as
+    /// [`press_dir`](Self::press_dir) does: the chart is holding its long notes, and letting a stray
+    /// key-up through would break one the player never grabbed.
+    pub fn release_dir(&mut self, lane: usize, dir: ScratchDir, now_us: i64) -> Option<JudgeResult> {
+        if self.auto_lanes.get(lane).copied().unwrap_or(false) {
+            return None;
+        }
+        if lane < self.beam_on.len() {
             if self.beam_on[lane] != i64::MIN {
                 self.beam_off[lane] = now_us;
             }
             self.beam_on[lane] = i64::MIN;
             self.ln_active[lane] = false;
         }
-        let res = self.judge.release(lane, now_us);
+        let res = self.judge.release_dir(lane, dir, now_us);
         if let Some(jr) = &res
             && (jr.judge as usize) <= 3
             && jr.lane < self.bomb.len()
@@ -453,18 +589,39 @@ mod tests {
     }
 
     #[test]
-    fn judge_width_rates_reach_key_and_scratch_lanes_separately() {
+    fn the_key_judge_width_rate_drives_the_scratch_lane_too() {
         let m = model(b"#BPM 120\r\n#RANK 3\r\n#WAV01 a.wav\r\n#00111:01\r\n#00116:01\r\n");
         let key_t = m.timelines.iter().find_map(|t| t.notes[0].as_ref()).map(|n| n.time_us).unwrap();
         let scr_t = m.timelines.iter().find_map(|t| t.notes[7].as_ref()).map(|n| n.time_us).unwrap();
 
         let mut stock = Player::new(m.clone(), false);
         assert_eq!(stock.press(0, key_t - 15_000, |_| {}).unwrap().judge, rbms_judge::Judge::PerfectGreat, "15ms off is inside the stock key PGREAT");
+        assert_eq!(stock.press(7, scr_t - 25_000, |_| {}).unwrap().judge, rbms_judge::Judge::PerfectGreat, "and 25ms off is inside the stock scratch PGREAT");
 
         let mut p = Player::new(m, false);
         p.set_judge_window_rates([50, 100, 100], [100, 100, 100]);
         assert_eq!(p.press(0, key_t - 15_000, |_| {}).unwrap().judge, rbms_judge::Judge::Great, "50% key rate pulls the key PGREAT in to +-10ms");
-        assert_eq!(p.press(7, scr_t - 25_000, |_| {}).unwrap().judge, rbms_judge::Judge::PerfectGreat, "the scratch lane kept its own 100% rate");
+        assert_eq!(
+            p.press(7, scr_t - 25_000, |_| {}).unwrap().judge,
+            rbms_judge::Judge::Great,
+            "JudgeManager.java:198 builds every judged table from the key rate, so the scratch PGREAT comes in to +-15ms as well"
+        );
+    }
+
+    #[test]
+    fn the_scratch_judge_width_rate_never_moves_a_judgement() {
+        let m = model(b"#BPM 120\r\n#RANK 3\r\n#WAV01 a.wav\r\n#00111:01\r\n#00116:01\r\n");
+        let key_t = m.timelines.iter().find_map(|t| t.notes[0].as_ref()).map(|n| n.time_us).unwrap();
+        let scr_t = m.timelines.iter().find_map(|t| t.notes[7].as_ref()).map(|n| n.time_us).unwrap();
+
+        let mut p = Player::new(m, false);
+        p.set_judge_window_rates(UNMODIFIED_JUDGE_RATES, [50, 50, 50]);
+        assert_eq!(p.press(0, key_t - 15_000, |_| {}).unwrap().judge, rbms_judge::Judge::PerfectGreat, "the key table is untouched");
+        assert_eq!(
+            p.press(7, scr_t - 25_000, |_| {}).unwrap().judge,
+            rbms_judge::Judge::PerfectGreat,
+            "the scratch rate only ever fed the candidate gate (JudgeManager.java:185-197)"
+        );
     }
 
     #[test]
@@ -618,6 +775,52 @@ mod tests {
         assert_eq!(p.judge().counts[0], 0, "input did not score it early");
         p.update(nt + 1_000_000, |_| {});
         assert_eq!(p.judge().counts[0], 1, "the chart auto-judged it as PGREAT");
+    }
+
+    /// Resolving LN MODE in the model rather than in the engine is what keeps the chart's own note
+    /// count in step with the one the engine judges against: a charge note is two judged objects, so
+    /// a chart left unresolved reports one note where the engine counts two, and `#TOTAL`, the gauge
+    /// denominator and the song list all disagree with the run.
+    #[test]
+    fn resolving_the_long_note_flavour_in_the_model_keeps_the_chart_and_the_engine_in_step() {
+        let src = rbms_parser::parse(b"#BPM 120\r\n#WAV01 a.wav\r\n#00151:01000001\r\n");
+        let unresolved = to_model(&src, Mode::BEAT_7K);
+        assert!(rbms_chart::contains_undefined_long_note(&unresolved), "the chart states no #LNMODE, so the setting decides");
+
+        let mut engine_only = Player::new(unresolved.clone(), false);
+        engine_only.set_ln_mode(LnMode::ChargeNote);
+        assert_ne!(
+            engine_only.judge().total_notes() as usize,
+            rbms_chart::count_playable_notes(&unresolved),
+            "resolving in the engine alone leaves the chart counting one note where the run judges two"
+        );
+
+        let mut resolved = unresolved;
+        rbms_chart::resolve_long_note_flavour(&mut resolved, LnMode::ChargeNote.resolve());
+        let mut player = Player::new(resolved.clone(), false);
+        player.set_ln_mode(LnMode::ChargeNote);
+        assert_eq!(player.judge().total_notes() as usize, rbms_chart::count_playable_notes(&resolved));
+        assert_eq!(rbms_chart::count_playable_notes(&resolved), 2, "a charge note is judged at its head and at its end");
+    }
+
+    #[test]
+    fn a_stray_release_on_an_auto_lane_cannot_break_the_long_note_it_is_holding() {
+        let chart = b"#BPM 120\r\n#WAV01 a.wav\r\n#00156:01000001\r\n";
+        let run = |stray_release: bool| {
+            let m = model(chart);
+            let times: Vec<i64> = m.timelines.iter().flat_map(|t| t.notes[7].as_ref()).map(|n| n.time_us).collect();
+            let (head, end) = (times[0], times[1]);
+            let mut p = Player::new(m, false);
+            p.set_auto_lanes((0..8).map(|l| l == 7).collect());
+            p.update(head, |_| {});
+            if stray_release {
+                p.release(7, (head + end) / 2);
+            }
+            p.update(end + 1_000_000, |_| {});
+            (p.judge().counts, p.judge().ex_score)
+        };
+        assert_eq!(run(true), run(false), "an auto-played lane holds its own long note, so a key-up on it is not the player's");
+        assert_eq!(run(false).0[0], 1, "the chart took the long note as a PGREAT");
     }
 
     #[test]
@@ -1054,5 +1257,271 @@ mod tests {
         assert_eq!(composed.beam_on(), manual.beam_on());
         assert_eq!(composed.beam_off(), manual.beam_off());
         assert_eq!(composed.bomb(), manual.bomb());
+    }
+}
+
+#[cfg(test)]
+mod judge_wiring_tests {
+    use super::*;
+    use rbms_chart::{count_playable_notes, to_model, to_model_with_ln_mode};
+    use rbms_judge::JudgeProperty;
+    use rbms_judge::gauge::GaugeIndex;
+    use rbms_model::{LnKind, Mode};
+    use rbms_parser::parse;
+
+    /// One note on lane 0 at 2.0 s, with nothing after it, so a single update past the BAD window
+    /// sweeps it to a 見逃し POOR.
+    const ONE_NOTE: &[u8] = b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:01\r\n";
+
+    /// The same note on a chart that states no `#LNMODE`, as a long note.
+    const ONE_UNSTATED_LONG_NOTE: &[u8] = b"#BPM 120\r\n#WAV01 a.wav\r\n#00151:01000001\r\n";
+
+    /// Far enough past the note that the miss sweep has run.
+    const SWEEP_US: i64 = 4_000_000;
+
+    fn player(bms: &[u8], mode: Mode) -> Player {
+        Player::new(to_model(&parse(bms), mode), false)
+    }
+
+    #[test]
+    fn the_keyboard_mode_reaches_the_keyboard_judge_row() {
+        let prop = JudgeProperty::for_mode(&Mode::KEYBOARD_24K);
+        assert_eq!(prop.note, JudgeProperty::KEYBOARD.note);
+        assert_eq!(prop.scratch, JudgeProperty::KEYBOARD.scratch);
+        assert_eq!(prop.ln_end, JudgeProperty::KEYBOARD.ln_end);
+        assert_eq!(prop.ln_scratch_end, JudgeProperty::KEYBOARD.ln_scratch_end);
+    }
+
+    #[test]
+    fn a_keyboard_chart_plays_on_the_keyboard_gauge_table() {
+        let p = player(ONE_NOTE, Mode::KEYBOARD_24K);
+        assert_eq!(p.gauge_set(), GaugeSetId::Keyboard);
+        assert_eq!(p.judge_window_rule(), JudgeWindowRule::Normal);
+    }
+
+    #[test]
+    fn every_mode_takes_the_gauge_table_the_reference_gives_it() {
+        for (mode, set) in [
+            (Mode::BEAT_5K, GaugeSetId::FiveKeys),
+            (Mode::BEAT_10K, GaugeSetId::FiveKeys),
+            (Mode::BEAT_7K, GaugeSetId::SevenKeys),
+            (Mode::BEAT_14K, GaugeSetId::SevenKeys),
+            (Mode::POPN_9K, GaugeSetId::Pms),
+            (Mode::KEYBOARD_24K, GaugeSetId::Keyboard),
+        ] {
+            assert_eq!(player(ONE_NOTE, mode).gauge_set(), set, "{}", mode.name);
+        }
+    }
+
+    #[test]
+    fn the_lr2_gauge_table_is_reached_only_by_asking_for_it() {
+        let mut p = player(ONE_NOTE, Mode::BEAT_7K);
+        assert_eq!(p.gauge_set(), GaugeSetId::SevenKeys);
+        p.set_gauge_set(GaugeSetId::Lr2);
+        assert_eq!(p.gauge_set(), GaugeSetId::Lr2);
+    }
+
+    #[test]
+    fn a_popn_chart_is_judged_under_the_pms_judgerank_rule() {
+        assert_eq!(player(ONE_NOTE, Mode::POPN_9K).judge_window_rule(), JudgeWindowRule::Pms);
+        for mode in [Mode::BEAT_5K, Mode::BEAT_7K, Mode::BEAT_10K, Mode::BEAT_14K, Mode::KEYBOARD_24K] {
+            assert_eq!(player(ONE_NOTE, mode).judge_window_rule(), JudgeWindowRule::Normal, "{}", mode.name);
+        }
+    }
+
+    #[test]
+    fn the_pms_rule_holds_pgreat_open_where_the_beat_rule_narrows_it() {
+        let hardest = b"#BPM 120\r\n#RANK 0\r\n#WAV01 a.wav\r\n#00111:01\r\n";
+        let late_us = 2_000_000 + 10_000;
+
+        let mut popn = Player::new(to_model(&parse(hardest), Mode::POPN_9K), false);
+        popn.press(0, late_us, |_| {});
+        assert_eq!(popn.judge().counts[0], 1, "PMS fixes PGREAT at its tabulated width whatever the judgerank");
+
+        let mut beat = Player::new(to_model(&parse(hardest), Mode::BEAT_7K), false);
+        beat.press(0, late_us, |_| {});
+        assert_eq!(beat.judge().counts[0], 0, "the beat rule scales PGREAT down at #RANK 0");
+        assert_eq!(beat.judge().counts[1], 1);
+    }
+
+    #[test]
+    fn judge_width_still_widens_the_windows_under_the_mode_rule() {
+        let outside_us = 2_000_000 + 25_000;
+        let mut stock = player(ONE_NOTE, Mode::BEAT_7K);
+        stock.press(0, outside_us, |_| {});
+        assert_eq!(stock.judge().counts[0], 0, "25 ms late is outside the stock 20 ms PGREAT window");
+
+        let mut widened = player(ONE_NOTE, Mode::BEAT_7K);
+        widened.set_judge_window_rates([200, 100, 100], UNMODIFIED_JUDGE_RATES);
+        widened.press(0, outside_us, |_| {});
+        assert_eq!(widened.judge().counts[0], 1, "a 200 % key PGREAT rate reaches 40 ms");
+    }
+
+    #[test]
+    fn the_single_rate_slider_sets_every_tier_of_both_lane_kinds() {
+        let outside_us = 2_000_000 + 25_000;
+        let mut one_slider = player(ONE_NOTE, Mode::BEAT_7K);
+        one_slider.set_judge_rate(200);
+        one_slider.press(0, outside_us, |_| {});
+
+        let mut six_values = player(ONE_NOTE, Mode::BEAT_7K);
+        six_values.set_judge_window_rates([200; JUDGE_WIDTH_TIER_COUNT], [200; JUDGE_WIDTH_TIER_COUNT]);
+        six_values.press(0, outside_us, |_| {});
+
+        assert_eq!(one_slider.judge().counts, six_values.judge().counts);
+        assert_eq!(one_slider.judge().counts[0], 1);
+    }
+
+    #[test]
+    fn a_keyboard_chart_drives_all_twenty_six_lanes() {
+        let p = player(ONE_NOTE, Mode::KEYBOARD_24K);
+        assert_eq!(p.beam_on().len(), Mode::KEYBOARD_24K.key);
+        assert_eq!(p.bomb().len(), Mode::KEYBOARD_24K.key);
+    }
+
+    #[test]
+    fn a_fresh_player_starts_on_the_stock_widths() {
+        let p = player(ONE_NOTE, Mode::BEAT_7K);
+        assert_eq!(p.algorithm(), rbms_judge::algorithm::JudgeAlgorithm::default());
+        assert_eq!(p.gauge_auto_shift(), GaugeAutoShift::None);
+        assert_eq!(p.bottom_shiftable_gauge(), GaugeKind::AssistEasy);
+        assert_eq!(p.configured_gauge(), GaugeKind::Normal);
+        assert!(!p.failed());
+    }
+
+    #[test]
+    fn the_configured_gauge_is_remembered_for_auto_shift() {
+        let mut p = player(ONE_NOTE, Mode::BEAT_7K);
+        p.set_gauge(GaugeKind::Hard);
+        assert_eq!(p.configured_gauge(), GaugeKind::Hard);
+        assert_eq!(p.judge().gauge.selected_index(), GaugeIndex::Hard);
+    }
+
+    #[test]
+    fn the_auto_shift_floor_is_clamped_to_the_reference_range() {
+        let mut p = player(ONE_NOTE, Mode::BEAT_7K);
+        for (asked, clamped) in [
+            (GaugeKind::AssistEasy, GaugeKind::AssistEasy),
+            (GaugeKind::Easy, GaugeKind::Easy),
+            (GaugeKind::Normal, GaugeKind::Normal),
+            (GaugeKind::Hard, GaugeKind::Normal),
+            (GaugeKind::ExHard, GaugeKind::Normal),
+            (GaugeKind::Hazard, GaugeKind::Normal),
+        ] {
+            p.set_bottom_shiftable_gauge(asked);
+            assert_eq!(p.bottom_shiftable_gauge(), clamped, "{asked:?}");
+        }
+    }
+
+    #[test]
+    fn gauge_auto_shift_none_fails_the_run_when_the_gauge_empties() {
+        let mut p = player(ONE_NOTE, Mode::BEAT_7K);
+        p.set_gauge(GaugeKind::Hazard);
+        p.update(SWEEP_US, |_| {});
+        assert_eq!(p.judge().counts[4], 1, "the unhit note is swept to a POOR");
+        assert_eq!(p.judge().gauge.value(), 0.0, "one POOR empties the hazard gauge");
+        assert!(p.failed(), "NONE ends the play the moment the gauge empties");
+    }
+
+    #[test]
+    fn gauge_auto_shift_continue_keeps_playing_on_an_empty_gauge() {
+        let mut p = player(ONE_NOTE, Mode::BEAT_7K);
+        p.set_gauge(GaugeKind::Hazard);
+        p.set_gauge_auto_shift(GaugeAutoShift::Continue);
+        p.update(SWEEP_US, |_| {});
+        assert_eq!(p.judge().gauge.value(), 0.0);
+        assert!(!p.failed());
+    }
+
+    #[test]
+    fn gauge_auto_shift_survival_to_groove_drops_to_normal_instead_of_failing() {
+        let mut p = player(ONE_NOTE, Mode::BEAT_7K);
+        p.set_gauge(GaugeKind::Hazard);
+        p.set_gauge_auto_shift(GaugeAutoShift::SurvivalToGroove);
+        p.update(SWEEP_US, |_| {});
+        assert!(!p.failed());
+        assert_eq!(p.judge().gauge.selected_index(), GaugeIndex::Normal);
+    }
+
+    #[test]
+    fn gauge_auto_shift_does_not_move_the_selection_while_the_gauge_holds() {
+        let mut p = player(ONE_NOTE, Mode::BEAT_7K);
+        p.set_gauge(GaugeKind::Normal);
+        p.set_gauge_auto_shift(GaugeAutoShift::SurvivalToGroove);
+        p.update(SWEEP_US, |_| {});
+        assert!(p.judge().gauge.value() > 0.0);
+        assert_eq!(p.judge().gauge.selected_index(), GaugeIndex::Normal);
+        assert!(!p.failed());
+    }
+
+    #[test]
+    fn gauge_auto_shift_best_clear_re_picks_every_frame() {
+        let mut p = player(ONE_NOTE, Mode::BEAT_7K);
+        p.set_gauge(GaugeKind::AssistEasy);
+        p.set_gauge_auto_shift(GaugeAutoShift::BestClear);
+        assert_eq!(p.judge().gauge.selected_index(), GaugeIndex::AssistEasy, "no shift before the first frame");
+        p.update(0, |_| {});
+        assert_eq!(p.judge().gauge.selected_index(), GaugeIndex::Hazard, "BEST CLEAR takes the strongest gauge still clearing");
+        assert!(!p.failed());
+    }
+
+    #[test]
+    fn gauge_auto_shift_select_to_under_never_rises_above_the_chosen_gauge() {
+        let mut p = player(ONE_NOTE, Mode::BEAT_7K);
+        p.set_gauge(GaugeKind::Easy);
+        p.set_gauge_auto_shift(GaugeAutoShift::SelectToUnder);
+        p.update(0, |_| {});
+        let selected = p.judge().gauge.selected_index();
+        assert!(selected.index() <= GaugeIndex::Easy.index(), "the chosen gauge is the ceiling, got {selected:?}");
+        assert_eq!(selected, GaugeIndex::AssistEasy, "with no gauge above the floor still clearing, the scan leaves the floor selected");
+    }
+
+    #[test]
+    fn gauge_auto_shift_select_to_under_holds_the_floor_it_is_given() {
+        let mut p = player(ONE_NOTE, Mode::BEAT_7K);
+        p.set_gauge(GaugeKind::Normal);
+        p.set_gauge_auto_shift(GaugeAutoShift::SelectToUnder);
+        p.set_bottom_shiftable_gauge(GaugeKind::Normal);
+        p.update(0, |_| {});
+        assert_eq!(p.judge().gauge.selected_index(), GaugeIndex::Normal, "the floor stops the drop");
+    }
+
+    #[test]
+    fn an_unstated_long_note_takes_the_players_ln_mode() {
+        let src = parse(ONE_UNSTATED_LONG_NOTE);
+        let model = to_model(&src, Mode::BEAT_7K);
+        assert_eq!(count_playable_notes(&model), 1);
+
+        let mut plain = Player::new(model.clone(), true);
+        assert_eq!(plain.ln_mode(), LnMode::LongNote);
+        assert_eq!(plain.judge().total_notes(), 1, "a plain long note is judged once");
+
+        let mut charge = Player::new(model, true);
+        charge.set_ln_mode(LnMode::ChargeNote);
+        assert_eq!(charge.ln_mode(), LnMode::ChargeNote);
+        assert_eq!(charge.judge().total_notes(), 2, "a charge note is judged at both ends");
+
+        let end = plain.last_time_us() + 1_000_000;
+        plain.update(end, |_| {});
+        charge.update(end, |_| {});
+        assert_eq!(plain.judge().counts[0], 1);
+        assert_eq!(charge.judge().counts[0], 2);
+    }
+
+    #[test]
+    fn a_chart_that_states_its_long_note_type_ignores_the_players_ln_mode() {
+        let model = to_model(&parse(b"#BPM 120\r\n#LNMODE 1\r\n#WAV01 a.wav\r\n#00151:01000001\r\n"), Mode::BEAT_7K);
+        let mut p = Player::new(model, true);
+        p.set_ln_mode(LnMode::HellChargeNote);
+        assert_eq!(p.judge().total_notes(), 1, "#LNMODE 1 keeps the note a plain long note");
+    }
+
+    #[test]
+    fn resolving_the_ln_mode_in_the_chart_matches_resolving_it_in_the_engine() {
+        let src = parse(ONE_UNSTATED_LONG_NOTE);
+        let in_chart = Player::new(to_model_with_ln_mode(&src, Mode::BEAT_7K, LnKind::Cn), true);
+        let mut in_engine = Player::new(to_model(&src, Mode::BEAT_7K), true);
+        in_engine.set_ln_mode(LnMode::ChargeNote);
+        assert_eq!(in_chart.judge().total_notes(), in_engine.judge().total_notes());
     }
 }
