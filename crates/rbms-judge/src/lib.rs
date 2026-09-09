@@ -1,8 +1,17 @@
+#![forbid(unsafe_code)]
+
+pub mod algorithm;
+pub mod data;
 pub mod gauge;
 pub mod matcher;
 pub mod windows;
 
-pub use gauge::{ClearType, Gauge, GaugeKind, clear_lamp};
+pub use algorithm::{JudgeAlgorithm, NoteRef, NoteType};
+pub use data::{
+    GaugeModifier, GaugeParams, GaugeSet, GaugeTables, JudgeDataError, JudgePropertyData, JudgeTables, JudgeWindowsData, builtin_gauge_tables,
+    builtin_judge_tables, load_gauge_tables, load_judge_tables,
+};
+pub use gauge::{ClearType, Gauge, GaugeKind, clear_lamp, clear_type_from_id, clear_type_id};
 pub use matcher::{JudgeEngine, JudgeResult};
 pub use windows::{JudgeProperty, JudgeWindows, MissCondition, judgerank_for, rank_to_judgerank};
 
@@ -158,9 +167,6 @@ mod tests {
 
     #[test]
     fn early_empty_poor_keeps_note_hittable_and_combo() {
-        // Reference SEVENKEYS: a press 300ms early lands only in the MS window (beyond BAD), an
-        // empty poor (judge 5). It must NOT consume the note nor break combo — the note stays
-        // hittable and a later well-timed press scores it.
         let mut e = JudgeEngine::new(vec![vec![1_000_000]], JudgeWindows::SEVENKEY_NOTE);
         e.combo = 7;
         let r = e.press(0, 700_000).unwrap();
@@ -177,11 +183,9 @@ mod tests {
 
     #[test]
     fn empty_poor_does_not_block_full_combo() {
-        // An early mash before the note (empty poor) then a clean hit on every note must still
-        // be a full combo: max_combo == total_notes and no consumed BD/PR/MS.
         let mut e = JudgeEngine::new(vec![vec![1_000_000, 1_300_000]], JudgeWindows::SEVENKEY_NOTE);
         e.set_gauge(GaugeKind::Normal, 200.0);
-        e.press(0, 650_000); // 350ms early -> empty poor on note 1
+        e.press(0, 650_000);
         e.press(0, 1_000_000);
         e.press(0, 1_300_000);
         assert_eq!(e.counts[0], 2, "both notes PGREAT");
@@ -202,9 +206,9 @@ mod tests {
     #[test]
     fn early_late_split_tracks_direction_and_sums_to_counts() {
         let mut e = JudgeEngine::new(vec![vec![1_000_000, 2_000_000, 3_000_000]], JudgeWindows::SEVENKEY_NOTE);
-        e.press(0, 990_000); // 10ms early -> early PGREAT
-        e.press(0, 2_050_000); // 50ms late -> late GREAT
-        e.update(4_000_000); // note 3 swept -> late MISS
+        e.press(0, 990_000);
+        e.press(0, 2_050_000);
+        e.update(4_000_000);
         assert_eq!(e.early[0], 1, "early PGREAT");
         assert_eq!(e.late[1], 1, "late GREAT");
         assert_eq!(e.late[4], 1, "a swept poor counts as late");
@@ -219,22 +223,16 @@ mod tests {
     #[test]
     fn avg_judge_is_mean_signed_delta_of_hits() {
         let mut e = JudgeEngine::new(vec![vec![1_000_000, 2_000_000]], JudgeWindows::SEVENKEY_NOTE);
-        e.press(0, 990_000); // dm +10_000
-        e.press(0, 1_994_000); // dm +6_000
+        e.press(0, 990_000);
+        e.press(0, 1_994_000);
         assert_eq!(e.avg_judge_us(), 8_000, "mean of +10ms and +6ms");
     }
-
-    // =====================================================================
-    // Additional edge-case coverage
-    // =====================================================================
 
     use matcher::JudgeEngine as Eng;
 
     fn note(t: i64) -> JudgeEngine {
         Eng::new(vec![vec![t]], JudgeWindows::SEVENKEY_NOTE)
     }
-
-    // --- press matching / gating -------------------------------------------
 
     #[test]
     fn press_on_invalid_lane_returns_none() {
@@ -251,16 +249,14 @@ mod tests {
 
     #[test]
     fn press_matches_nearest_even_when_earlier_note_in_range() {
-        // Two notes both reachable; press lands closer to the second -> matches index 1.
         let mut e = Eng::new(vec![vec![100_000, 180_000]], JudgeWindows::SEVENKEY_NOTE);
-        let r = e.press(0, 170_000).unwrap(); // dm to n0 = -70_000, to n1 = +10_000
+        let r = e.press(0, 170_000).unwrap();
         assert_eq!(r.note_index, 1, "nearest by |dm| wins");
         assert_eq!(r.judge, Judge::PerfectGreat);
     }
 
     #[test]
     fn press_too_early_beyond_ms_returns_none() {
-        // Gate early bound is ms.1 = +500_000. A press 600ms before the note finds no candidate.
         let mut e = note(1_000_000);
         assert!(e.press(0, 400_000).is_none(), "dm +600_000 > gate_early");
         assert_eq!(e.empty_poor, 0);
@@ -269,7 +265,6 @@ mod tests {
 
     #[test]
     fn press_too_late_beyond_bd_returns_none() {
-        // Gate late bound is bd.0 = -280_000. A press 300ms after the note finds no candidate.
         let mut e = note(100_000);
         assert!(e.press(0, 400_000).is_none(), "dm -300_000 < gate_late");
     }
@@ -284,11 +279,8 @@ mod tests {
         assert_eq!(e.counts[5], 1);
     }
 
-    // --- BD / late edges via press -----------------------------------------
-
     #[test]
     fn press_late_bad_lower_edge_is_consumed() {
-        // dm exactly -280_000 (late BD edge) is a real BAD: consumes the note, breaks combo.
         let mut e = note(100_000);
         e.combo = 4;
         let r = e.press(0, 380_000).unwrap();
@@ -302,7 +294,6 @@ mod tests {
 
     #[test]
     fn press_early_bad_upper_edge_is_consumed() {
-        // dm exactly +220_000 (early BD edge) is a real BAD that consumes the note.
         let mut e = note(1_000_000);
         let r = e.press(0, 780_000).unwrap();
         assert_eq!(r.judge, Judge::Bad);
@@ -312,11 +303,8 @@ mod tests {
         assert_eq!(e.fast, 1, "BAD is not a Miss so it counts as fast");
     }
 
-    // --- empty poor invariants ---------------------------------------------
-
     #[test]
     fn empty_poor_at_exact_ms_early_edge() {
-        // dm exactly +500_000 is the far edge of the MS window -> empty poor.
         let mut e = note(1_000_000);
         let r = e.press(0, 500_000).unwrap();
         assert_eq!(r.judge, Judge::Miss);
@@ -329,7 +317,7 @@ mod tests {
     #[test]
     fn empty_poor_does_not_touch_timing_or_direction_tallies() {
         let mut e = note(1_000_000);
-        e.press(0, 700_000); // empty poor, dm +300_000
+        e.press(0, 700_000);
         assert_eq!(e.empty_poor, 1);
         assert_eq!(e.early[5], 1, "an early empty poor feeds the IR `ems` field");
         assert_eq!(e.late[5], 0);
@@ -341,10 +329,9 @@ mod tests {
 
     #[test]
     fn empty_poor_does_not_advance_cursor_or_block_later_sweep() {
-        // After an empty poor, sweeping past the note must still produce exactly one MISS.
         let mut e = note(1_000_000);
-        e.press(0, 700_000); // empty poor
-        e.update(2_000_000); // sweep the still-unjudged note
+        e.press(0, 700_000);
+        e.update(2_000_000);
         assert_eq!(e.counts[4], 1, "the note is still there to be swept into POOR");
         assert_eq!(e.empty_poor, 1);
         assert_eq!(e.total_judged(), 1, "only the miss is in counts");
@@ -353,14 +340,12 @@ mod tests {
     #[test]
     fn empty_poor_consecutive_presses_accumulate() {
         let mut e = note(1_000_000);
-        e.press(0, 600_000); // dm +400_000 empty poor
-        e.press(0, 650_000); // dm +350_000 empty poor
+        e.press(0, 600_000);
+        e.press(0, 650_000);
         assert_eq!(e.empty_poor, 2, "each far-early mash adds an empty poor");
         assert_eq!(e.counts[5], 2);
         assert_eq!(e.counts[..5], [0; 5]);
     }
-
-    // --- LN: head / release / final = worse(head, end) ---------------------
 
     fn ln(head: i64, end: i64) -> JudgeEngine {
         Eng::from_pairs(vec![vec![(head, Some(end))]], JudgeWindows::SEVENKEY_NOTE)
@@ -379,8 +364,8 @@ mod tests {
     #[test]
     fn ln_release_finalizes_as_worse_of_head_and_end_pg_pg() {
         let mut e = ln(100_000, 600_000);
-        e.press(0, 100_000).unwrap(); // head PG
-        let r = e.release(0, 600_000).unwrap(); // release at end -> end PG
+        e.press(0, 100_000).unwrap();
+        let r = e.release(0, 600_000).unwrap();
         assert_eq!(r.judge, Judge::PerfectGreat, "worse(PG, PG) = PG");
         assert_eq!(e.counts[0], 1);
         assert_eq!(e.combo, 1);
@@ -389,9 +374,8 @@ mod tests {
 
     #[test]
     fn ln_release_takes_worse_when_end_is_bad() {
-        // Head PG, but release far from end so end window classifies worse.
         let mut e = ln(100_000, 600_000);
-        e.press(0, 100_000).unwrap(); // head PG
+        e.press(0, 100_000).unwrap();
         let r = e.release(0, 390_000).unwrap();
         assert_eq!(r.judge, Judge::Bad, "worse(PG, BD) = BD");
         assert_eq!(e.counts[3], 1);
@@ -400,11 +384,10 @@ mod tests {
 
     #[test]
     fn ln_release_keeps_worse_head_when_end_is_perfect() {
-        // Head only GOOD (pressed 130ms early on a 7K head: gd window), end released perfectly.
         let mut e = ln(1_000_000, 1_600_000);
-        let hr = e.press(0, 870_000).unwrap(); // dm +130_000 -> head GOOD
+        let hr = e.press(0, 870_000).unwrap();
         assert_eq!(hr.judge, Judge::Good);
-        let r = e.release(0, 1_600_000).unwrap(); // end PG
+        let r = e.release(0, 1_600_000).unwrap();
         assert_eq!(r.judge, Judge::Good, "worse(GOOD, PG) = GOOD");
         assert_eq!(e.counts[2], 1);
         assert_eq!(e.combo, 1, "GOOD keeps combo");
@@ -414,7 +397,7 @@ mod tests {
     fn ln_release_delta_is_end_minus_release_and_records_timing() {
         let mut e = ln(100_000, 600_000);
         e.press(0, 100_000).unwrap();
-        let r = e.release(0, 590_000).unwrap(); // dm = 600_000 - 590_000 = +10_000
+        let r = e.release(0, 590_000).unwrap();
         assert_eq!(r.delta_us, 10_000);
         assert!(r.fast, "released early");
         assert_eq!(e.fast, 1, "release timing counted");
@@ -424,7 +407,6 @@ mod tests {
     #[test]
     fn ln_release_without_hold_returns_none() {
         let mut e = ln(100_000, 600_000);
-        // never pressed the head -> nothing is holding.
         assert!(e.release(0, 600_000).is_none());
     }
 
@@ -438,7 +420,7 @@ mod tests {
     #[test]
     fn over_held_plain_ln_takes_the_head_judgment() {
         let mut e = ln(100_000, 600_000);
-        e.press(0, 100_000).unwrap(); // head PG, holding
+        e.press(0, 100_000).unwrap();
         e.update(600_000);
         assert_eq!(e.total_judged(), 0, "at exactly the end the LN is still held");
         e.update(600_001);
@@ -483,7 +465,6 @@ mod tests {
 
     #[test]
     fn ln_held_note_blocks_cursor_until_finalized() {
-        // While an LN is held, update must not sweep it early as a miss.
         let mut e = ln(100_000, 600_000);
         e.press(0, 100_000).unwrap();
         e.update(500_000);
@@ -493,39 +474,30 @@ mod tests {
 
     #[test]
     fn set_ln_end_widens_release_leniency() {
-        // Default ln_end gd is +-200_000; a 230ms-early release is BD. After widening to a huge
-        // window, the same release lands inside PG.
         let mut e = ln(100_000, 600_000);
         let wide =
             JudgeWindows { pg: (-400_000, 400_000), gr: (-450_000, 450_000), gd: (-500_000, 500_000), bd: (-550_000, 550_000), ms: Some((-550_000, 600_000)) };
         e.set_ln_end(wide);
-        e.press(0, 100_000).unwrap(); // head PG
-        let r = e.release(0, 370_000).unwrap(); // dm +230_000, now inside widened PG
+        e.press(0, 100_000).unwrap();
+        let r = e.release(0, 370_000).unwrap();
         assert_eq!(r.judge, Judge::PerfectGreat, "wide ln_end keeps release PG");
         assert_eq!(e.counts[0], 1);
     }
 
     #[test]
     fn ln_head_empty_poor_does_not_start_hold() {
-        // A far-early press on an LN head is an empty poor: it must NOT start a hold.
         let mut e = ln(1_000_000, 1_600_000);
-        let r = e.press(0, 700_000).unwrap(); // dm +300_000 -> empty poor
+        let r = e.press(0, 700_000).unwrap();
         assert_eq!(r.judge, Judge::Miss);
         assert_eq!(e.empty_poor, 1);
-        // nothing is holding, so a release finds nothing.
         assert!(e.release(0, 1_600_000).is_none(), "empty poor must not arm a hold");
-        // the head is still hittable.
         let r2 = e.press(0, 1_000_000).unwrap();
         assert_eq!(r2.judge, Judge::PerfectGreat);
     }
 
-    // --- sweeps / update edges ---------------------------------------------
-
     #[test]
     fn update_miss_bound_is_exclusive_strict_less() {
-        // A note is swept only when head - now < miss_bound (bd.0 = -280_000), i.e. strictly past.
         let mut e = note(1_000_000);
-        // now such that head - now == miss_bound exactly: now = head - bd.0 = 1_000_000 + 280_000.
         e.update(1_280_000);
         assert_eq!(e.total_judged(), 0, "at exactly the bound the note is not yet swept (strict <)");
         e.update(1_280_001);
@@ -565,16 +537,14 @@ mod tests {
         assert_eq!(e.avg_judge_us(), 0, "miss excluded from timing average");
     }
 
-    // --- count/early/late invariants over a mixed run ----------------------
-
     #[test]
     fn early_plus_late_equals_counts_invariant_mixed_run() {
         let mut e = Eng::new(vec![vec![1_000_000, 2_000_000, 3_000_000, 4_000_000, 5_000_000]], JudgeWindows::SEVENKEY_NOTE);
-        e.press(0, 990_000); // early PG
-        e.press(0, 2_010_000); // late PG
-        e.press(0, 2_950_000); // dm +50_000 early GR
-        e.press(0, 4_100_000); // dm -100_000 late GD
-        e.update(9_000_000); // note 5 swept -> late MISS
+        e.press(0, 990_000);
+        e.press(0, 2_010_000);
+        e.press(0, 2_950_000);
+        e.press(0, 4_100_000);
+        e.update(9_000_000);
         let total: u32 = e.counts.iter().sum();
         assert_eq!(total, 5, "five notes resolved");
         for i in 0..6 {
@@ -596,8 +566,6 @@ mod tests {
         assert_eq!(e.slow, 0);
     }
 
-    // --- determinism --------------------------------------------------------
-
     #[test]
     fn replaying_same_inputs_is_deterministic() {
         let run = || {
@@ -610,15 +578,13 @@ mod tests {
         assert_eq!(run(), run(), "identical inputs yield identical state");
     }
 
-    // --- ex_score accumulation ---------------------------------------------
-
     #[test]
     fn ex_score_is_2pg_plus_1gr_only() {
         let mut e = Eng::new(vec![vec![1_000_000, 2_000_000, 3_000_000, 4_000_000]], JudgeWindows::SEVENKEY_NOTE);
-        e.press(0, 1_000_000); // PG +2
-        e.press(0, 2_050_000); // dm +50_000 GR +1
-        e.press(0, 3_100_000); // dm -100_000 GD +0
-        e.press(0, 4_250_000); // dm -250_000 BD +0
+        e.press(0, 1_000_000);
+        e.press(0, 2_050_000);
+        e.press(0, 3_100_000);
+        e.press(0, 4_250_000);
         assert_eq!(e.counts[0], 1);
         assert_eq!(e.counts[1], 1);
         assert_eq!(e.counts[2], 1);
@@ -629,14 +595,12 @@ mod tests {
     #[test]
     fn max_combo_persists_after_break() {
         let mut e = Eng::new(vec![vec![1_000_000, 2_000_000, 3_000_000]], JudgeWindows::SEVENKEY_NOTE);
-        e.press(0, 1_000_000); // PG combo 1
-        e.press(0, 2_000_000); // PG combo 2
-        e.press(0, 3_250_000); // dm -250_000 BD -> combo 0
+        e.press(0, 1_000_000);
+        e.press(0, 2_000_000);
+        e.press(0, 3_250_000);
         assert_eq!(e.combo, 0);
         assert_eq!(e.max_combo, 2, "max_combo remembers the best streak");
     }
-
-    // --- from_model wiring (mode-driven ln_end) -----------------------------
 
     #[test]
     fn from_model_builds_notes_and_lns_and_skips_mines() {
@@ -666,10 +630,8 @@ mod tests {
         };
         let mut e = JudgeEngine::from_model(&model, JudgeWindows::SEVENKEY_NOTE);
         assert_eq!(e.total_notes(), 2, "one normal + one LN; the Mine is not a playable note");
-        // The normal note is hittable.
         let r = e.press(0, 100_000).unwrap();
         assert_eq!(r.judge, Judge::PerfectGreat);
-        // The LN head is hittable and starts a hold.
         let h = e.press(0, 200_000).unwrap();
         assert_eq!(h.judge, Judge::PerfectGreat);
         let rel = e.release(0, 400_000).unwrap();
@@ -687,7 +649,6 @@ mod tests {
             tl.notes[0] = Some(Note { kind, wav: 0, start_us: 0, duration_us: 0, time_us: t, section: 0.0, layered: Vec::new() });
             tl
         };
-        // A LongStart with no matching LongEnd produces no note (pending_start never flushed).
         let model = Model {
             mode,
             meta: ModelMeta { total: 200.0, ..Default::default() },
@@ -704,8 +665,6 @@ mod tests {
 
     #[test]
     fn from_model_popn_uses_popn_ln_end_window() {
-        // POPN_9K with rank 3 (judgerank 100): ln_end == POPN_LN_END at 100%, so a 130ms-early
-        // release on a POPN LN is GR (POPN_LN_END pg is +-120_000, gr +-150_000).
         use rbms_model::{LnKind, Mode, Model, ModelMeta, Note, NoteKind, TimeLine};
         let mode = Mode::POPN_9K;
         let lanes = mode.key;
@@ -725,14 +684,10 @@ mod tests {
             sha256: String::new(),
         };
         let mut e = JudgeEngine::from_model(&model, JudgeWindows::POPN_NOTE);
-        e.press(0, 1_000_000).unwrap(); // head PG
-        let r = e.release(0, 1_730_000).unwrap(); // dm +130_000 -> POPN_LN_END GR
+        e.press(0, 1_000_000).unwrap();
+        let r = e.release(0, 1_730_000).unwrap();
         assert_eq!(r.judge, Judge::Great, "POPN ln_end classifies 130ms-early release as GR");
     }
-
-    // --- CN/HCN charge notes: head + release end are two counted judgments ---------------------
-    // (the reference implementation's JudgeManager calls updateMicro at both press and key-up; see
-    // docs/reference/cn-hcn-judgment.md). Plain LN stays one judgment — the regression guard below.
 
     fn cn_model(start_ln: rbms_model::LnKind, head_t: i64, end_t: i64) -> rbms_model::Model {
         use rbms_model::{Mode, Model, ModelMeta, Note, NoteKind, TimeLine};
@@ -775,8 +730,6 @@ mod tests {
     #[test]
     fn cn_early_release_judges_end_without_capping_head() {
         use rbms_model::LnKind;
-        // Head PG counted at press; releasing 500ms early is outside the (75%-scaled) LN-end window,
-        // so the end is POOR on its own — not the worse-of-head-and-end a plain LN would yield.
         let model = cn_model(LnKind::Cn, 1_000_000, 2_000_000);
         let mut e = JudgeEngine::from_model(&model, JudgeWindows::SEVENKEY_NOTE);
         assert_eq!(e.press(0, 1_000_000).unwrap().judge, Judge::PerfectGreat);
@@ -793,7 +746,7 @@ mod tests {
         use rbms_model::LnKind;
         let model = cn_model(LnKind::Cn, 1_000_000, 1_600_000);
         let mut e = JudgeEngine::from_model(&model, JudgeWindows::SEVENKEY_NOTE);
-        e.update(5_000_000); // sweep far past the head — never hit
+        e.update(5_000_000);
         assert_eq!(e.counts[4], 2, "a never-hit CN poors both head and end");
         assert_eq!(e.total_judged(), 2);
     }
@@ -801,7 +754,6 @@ mod tests {
     #[test]
     fn hcn_end_is_also_two_judgments() {
         use rbms_model::LnKind;
-        // HCN shares the CN end-judgment model (its continuous gauge is a separate, deferred concern).
         let model = cn_model(LnKind::Hcn, 1_000_000, 1_600_000);
         let mut e = JudgeEngine::from_model(&model, JudgeWindows::SEVENKEY_NOTE);
         assert_eq!(e.total_notes(), 2);
@@ -814,14 +766,12 @@ mod tests {
     #[test]
     fn ln_remains_single_judgment_worse_of_head_end() {
         use rbms_model::LnKind;
-        // Regression guard: a plain LN is unchanged — one judged object, resolved at release as the
-        // worse of head/end, with nothing counted at press.
         let model = cn_model(LnKind::Ln, 1_000_000, 2_000_000);
         let mut e = JudgeEngine::from_model(&model, JudgeWindows::SEVENKEY_NOTE);
         assert_eq!(e.total_notes(), 1, "a plain LN is a single judged object");
         assert_eq!(e.press(0, 1_000_000).unwrap().judge, Judge::PerfectGreat);
         assert_eq!(e.counts[0], 0, "LN head is not counted until release");
-        let r = e.release(0, 1_500_000).unwrap(); // early -> POOR end -> worse(PG, POOR) = POOR
+        let r = e.release(0, 1_500_000).unwrap();
         assert_eq!(r.judge, Judge::Poor);
         assert_eq!(e.total_judged(), 1, "still one judgment for the LN");
     }

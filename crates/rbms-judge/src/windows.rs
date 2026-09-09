@@ -1,6 +1,8 @@
 use rbms_model::Mode;
+use serde::{Deserialize, Serialize};
 
 use crate::Judge;
+use crate::algorithm::NoteType;
 
 /// Judge timing windows in microseconds. Each pair is `(late_bound, early_bound)` where
 /// the matched delta `dmtime = note_time - press_time` (>0 = pressed early/FAST, <0 =
@@ -21,7 +23,7 @@ pub struct JudgeWindows {
 
 /// Reference implementation `JudgeProperty.MissCondition`. `Always` counts every 見逃し POOR; `One` (PMS) counts
 /// only the first one per note.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MissCondition {
     Always,
     One,
@@ -113,8 +115,22 @@ impl JudgeProperty {
         miss_condition: MissCondition::Always,
     };
 
-    /// Table for `mode`: BEAT_5K/10K use FIVEKEYS, BEAT_7K/14K use SEVENKEYS, POPN_9K uses PMS.
+    /// Table for `mode`, read from the bundled `data/judge.ron`.
+    ///
+    /// The data file is the source the engine judges against; [`JudgeProperty::defaults_for_mode`]
+    /// is the compiled-in fallback for a mode the file has no row for, and the parity guard in
+    /// [`crate::data`] asserts the two agree field for field.
     pub fn for_mode(mode: &Mode) -> JudgeProperty {
+        match crate::data::builtin_judge_tables().for_mode(mode) {
+            Some(row) => JudgeProperty::from(*row),
+            None => Self::defaults_for_mode(mode),
+        }
+    }
+
+    /// Compiled-in table for `mode`: BEAT_5K/10K use FIVEKEYS, BEAT_7K/14K use SEVENKEYS, POPN_9K
+    /// uses PMS. Used when the data file has no row for the mode, and as the baseline the data
+    /// file's parity guard compares against.
+    pub fn defaults_for_mode(mode: &Mode) -> JudgeProperty {
         match mode.name {
             "BEAT_5K" | "BEAT_10K" => Self::FIVEKEYS,
             "POPN_9K" => Self::PMS,
@@ -209,6 +225,27 @@ impl JudgeWindows {
             tiers[i] = (out[0], out[1]);
         }
         JudgeWindows { pg: tiers[0], gr: tiers[1], gd: tiers[2], bd: self.bd, ms: self.ms }
+    }
+
+    /// One window bound, mirroring the reference implementation's
+    /// `JudgeWindow.getTime(type, judge, early)`: `judge` is the judge index (0 = PG .. 4 = MS) and
+    /// `early` picks the EARLY upper bound instead of the LATE lower bound. An index the table does
+    /// not carry yields 0, exactly like the reference's array bounds check — which is why
+    /// `note_type` matters: the long-note end tables have no fifth (空POOR) pair.
+    pub fn get_time(&self, note_type: NoteType, judge: usize, early: bool) -> i64 {
+        let pair = match judge {
+            0 => Some(self.pg),
+            1 => Some(self.gr),
+            2 => Some(self.gd),
+            3 => Some(self.bd),
+            4 => self.ms.filter(|_| note_type.has_empty_poor_window()),
+            _ => None,
+        };
+        match pair {
+            Some(p) if early => p.1,
+            Some(p) => p.0,
+            None => 0,
+        }
     }
 
     /// Whether `dmtime` sits inside the MS (空POOR) band. The reference implementation tests window index 4 on its own

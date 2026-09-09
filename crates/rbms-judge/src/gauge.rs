@@ -1,4 +1,5 @@
 use crate::Judge;
+use crate::data::{GaugeModifier, GaugeParams};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GaugeKind {
@@ -24,38 +25,33 @@ pub enum ClearType {
     Max,
 }
 
-enum Modifier {
-    Total,
-    LimitIncrement,
-    None,
-}
-
-struct Spec {
-    modifier: Modifier,
-    min: f32,
-    max: f32,
-    init: f32,
-    border: f32,
-    deltas: [f32; 6],
-    guts: &'static [(f32, f32)],
-}
-
 const HARD_GUTS: &[(f32, f32)] = &[(10.0, 0.4), (20.0, 0.5), (30.0, 0.6), (40.0, 0.7), (50.0, 0.8)];
 
-fn spec(kind: GaugeKind) -> Spec {
-    use GaugeKind::*;
-    use Modifier::*;
+/// The parameters a gauge is built from, read from the bundled `data/gauge.ron`.
+///
+/// The data file is the source the engine builds gauges from; [`default_params`] is the
+/// compiled-in fallback for a file with no row to answer with, and the parity guard in
+/// [`crate::data`] asserts the two agree field for field.
+pub fn params(kind: GaugeKind) -> GaugeParams {
+    match crate::data::builtin_gauge_tables().get(crate::data::DEFAULT_GAUGE_KEY) {
+        Some(set) => set.get(kind).clone(),
+        None => default_params(kind),
+    }
+}
+
+/// The program-default parameters for `kind`, mirroring the reference implementation's
+/// `GaugeProperty.SEVENKEYS` row of `GaugeElementProperty` values. The bundled `data/gauge.ron`
+/// must reproduce these values exactly; the parity guard in [`crate::data`] asserts that against
+/// this function.
+pub fn default_params(kind: GaugeKind) -> GaugeParams {
+    let p = |modifier, min, max, init, border, deltas, guts: &[(f32, f32)]| GaugeParams { modifier, min, max, init, border, deltas, guts: guts.to_vec() };
     match kind {
-        AssistEasy => Spec { modifier: Total, min: 2.0, max: 100.0, init: 20.0, border: 60.0, deltas: [1.0, 1.0, 0.5, -1.5, -3.0, -0.5], guts: &[] },
-        Easy => Spec { modifier: Total, min: 2.0, max: 100.0, init: 20.0, border: 80.0, deltas: [1.0, 1.0, 0.5, -1.5, -4.5, -1.0], guts: &[] },
-        Normal => Spec { modifier: Total, min: 2.0, max: 100.0, init: 20.0, border: 80.0, deltas: [1.0, 1.0, 0.5, -3.0, -6.0, -2.0], guts: &[] },
-        Hard => {
-            Spec { modifier: LimitIncrement, min: 0.0, max: 100.0, init: 100.0, border: 0.0, deltas: [0.15, 0.12, 0.03, -5.0, -10.0, -5.0], guts: HARD_GUTS }
-        }
-        ExHard => Spec { modifier: LimitIncrement, min: 0.0, max: 100.0, init: 100.0, border: 0.0, deltas: [0.15, 0.06, 0.0, -8.0, -16.0, -8.0], guts: &[] },
-        Hazard => {
-            Spec { modifier: Modifier::None, min: 0.0, max: 100.0, init: 100.0, border: 0.0, deltas: [0.15, 0.06, 0.0, -100.0, -100.0, -10.0], guts: &[] }
-        }
+        GaugeKind::AssistEasy => p(GaugeModifier::Total, 2.0, 100.0, 20.0, 60.0, [1.0, 1.0, 0.5, -1.5, -3.0, -0.5], &[]),
+        GaugeKind::Easy => p(GaugeModifier::Total, 2.0, 100.0, 20.0, 80.0, [1.0, 1.0, 0.5, -1.5, -4.5, -1.0], &[]),
+        GaugeKind::Normal => p(GaugeModifier::Total, 2.0, 100.0, 20.0, 80.0, [1.0, 1.0, 0.5, -3.0, -6.0, -2.0], &[]),
+        GaugeKind::Hard => p(GaugeModifier::LimitIncrement, 0.0, 100.0, 100.0, 0.0, [0.15, 0.12, 0.03, -5.0, -10.0, -5.0], HARD_GUTS),
+        GaugeKind::ExHard => p(GaugeModifier::LimitIncrement, 0.0, 100.0, 100.0, 0.0, [0.15, 0.06, 0.0, -8.0, -16.0, -8.0], &[]),
+        GaugeKind::Hazard => p(GaugeModifier::None, 0.0, 100.0, 100.0, 0.0, [0.15, 0.06, 0.0, -100.0, -100.0, -10.0], &[]),
     }
 }
 
@@ -71,34 +67,46 @@ pub struct Gauge {
     max: f32,
     border: f32,
     deltas: [f32; 6],
-    guts: &'static [(f32, f32)],
+    guts: Vec<(f32, f32)>,
 }
+
+/// Upper bound on the LIMIT_INCREMENT PGREAT gain and the divisor its scaling is expressed
+/// against (reference implementation `GrooveGauge.GaugeModifier.LIMIT_INCREMENT`).
+const LIMIT_INCREMENT_PGREAT_CAP: f64 = 0.15;
+
+/// Constant term of the LIMIT_INCREMENT gain formula `(2 * total - 320) / notes`.
+const LIMIT_INCREMENT_TOTAL_OFFSET: f64 = 320.0;
 
 impl Gauge {
     pub fn new(kind: GaugeKind, total: f64, notes: usize) -> Self {
-        let s = spec(kind);
+        Self::from_params(kind, &params(kind), total, notes)
+    }
+
+    /// Build a gauge from explicit parameters instead of the program defaults, so a data-driven
+    /// gauge table (see [`crate::data::GaugeTables`]) can feed the same construction path.
+    pub fn from_params(kind: GaugeKind, params: &GaugeParams, total: f64, notes: usize) -> Self {
         let notes = notes.max(1) as f64;
         let total = if total > 0.0 { total } else { rbms_model::default_total(notes as usize) };
-        let mut deltas = s.deltas;
-        match s.modifier {
-            Modifier::Total => {
+        let mut deltas = params.deltas;
+        match params.modifier {
+            GaugeModifier::Total => {
                 for d in deltas.iter_mut() {
                     if *d > 0.0 {
                         *d = (*d as f64 * total / notes) as f32;
                     }
                 }
             }
-            Modifier::LimitIncrement => {
-                let pg = (((2.0 * total - 320.0) / notes).min(0.15)).max(0.0) as f32;
+            GaugeModifier::LimitIncrement => {
+                let pg = ((2.0 * total - LIMIT_INCREMENT_TOTAL_OFFSET) / notes).clamp(0.0, LIMIT_INCREMENT_PGREAT_CAP) as f32;
                 for d in deltas.iter_mut() {
                     if *d > 0.0 {
-                        *d *= pg / 0.15;
+                        *d *= pg / LIMIT_INCREMENT_PGREAT_CAP as f32;
                     }
                 }
             }
-            Modifier::None => {}
+            GaugeModifier::None => {}
         }
-        Gauge { kind, value: s.init, min: s.min, max: s.max, border: s.border, deltas, guts: s.guts }
+        Gauge { kind, value: params.init, min: params.min, max: params.max, border: params.border, deltas, guts: params.guts.clone() }
     }
 
     pub fn update(&mut self, judge: Judge) {
@@ -107,7 +115,7 @@ impl Gauge {
         }
         let mut inc = self.deltas[judge as usize];
         if inc < 0.0 {
-            for g in self.guts {
+            for g in &self.guts {
                 if self.value < g.0 {
                     inc *= g.1;
                     break;
@@ -166,13 +174,106 @@ pub fn clear_lamp(gauge: &Gauge, counts: &[u32; 6], max_combo: u32, total_notes:
     }
 }
 
+/// Reference implementation `ClearType` id (`ClearType.java`) for a lamp — persisted in score
+/// records and sent to the IR so the lamp round-trips. Id 3 (LightAssistEasy) is never produced
+/// because this engine has no separate light-assist lamp.
+pub fn clear_type_id(c: ClearType) -> u8 {
+    match c {
+        ClearType::NoPlay => 0,
+        ClearType::Failed => 1,
+        ClearType::AssistEasy => 2,
+        ClearType::Easy => 4,
+        ClearType::Normal => 5,
+        ClearType::Hard => 6,
+        ClearType::ExHard => 7,
+        ClearType::FullCombo => 8,
+        ClearType::Perfect => 9,
+        ClearType::Max => 10,
+    }
+}
+
+/// Inverse of [`clear_type_id`]. Legacy id 3 (LightAssistEasy) folds down to
+/// [`ClearType::AssistEasy`]; anything unknown reads back as [`ClearType::NoPlay`].
+pub fn clear_type_from_id(id: u8) -> ClearType {
+    match id {
+        1 => ClearType::Failed,
+        2 | 3 => ClearType::AssistEasy,
+        4 => ClearType::Easy,
+        5 => ClearType::Normal,
+        6 => ClearType::Hard,
+        7 => ClearType::ExHard,
+        8 => ClearType::FullCombo,
+        9 => ClearType::Perfect,
+        10 => ClearType::Max,
+        _ => ClearType::NoPlay,
+    }
+}
+
+#[cfg(test)]
+mod clear_type_id_tests {
+    use super::*;
+
+    const ALL_CLEARS: [ClearType; 10] = [
+        ClearType::NoPlay,
+        ClearType::Failed,
+        ClearType::AssistEasy,
+        ClearType::Easy,
+        ClearType::Normal,
+        ClearType::Hard,
+        ClearType::ExHard,
+        ClearType::FullCombo,
+        ClearType::Perfect,
+        ClearType::Max,
+    ];
+
+    #[test]
+    fn clear_type_id_round_trips_for_every_lamp() {
+        for c in ALL_CLEARS {
+            assert_eq!(clear_type_from_id(clear_type_id(c)), c, "{c:?} round-trips");
+        }
+    }
+
+    #[test]
+    fn clear_type_ids_are_the_reference_values() {
+        assert_eq!(clear_type_id(ClearType::NoPlay), 0);
+        assert_eq!(clear_type_id(ClearType::Failed), 1);
+        assert_eq!(clear_type_id(ClearType::AssistEasy), 2);
+        assert_eq!(clear_type_id(ClearType::Easy), 4, "id 3 (LightAssistEasy) is skipped");
+        assert_eq!(clear_type_id(ClearType::Normal), 5);
+        assert_eq!(clear_type_id(ClearType::Hard), 6);
+        assert_eq!(clear_type_id(ClearType::ExHard), 7);
+        assert_eq!(clear_type_id(ClearType::FullCombo), 8);
+        assert_eq!(clear_type_id(ClearType::Perfect), 9);
+        assert_eq!(clear_type_id(ClearType::Max), 10);
+    }
+
+    #[test]
+    fn clear_type_ids_are_strictly_monotonic() {
+        let ids: Vec<u8> = ALL_CLEARS.iter().map(|&c| clear_type_id(c)).collect();
+        for w in ids.windows(2) {
+            assert!(w[0] < w[1], "lamp ids must increase with lamp strength: {w:?}");
+        }
+    }
+
+    #[test]
+    fn clear_type_from_id_legacy_light_assist_maps_to_assist_easy() {
+        assert_eq!(clear_type_from_id(3), ClearType::AssistEasy);
+        assert_eq!(clear_type_id(clear_type_from_id(3)), 2, "3 folds down to the 2 lamp on re-encode");
+    }
+
+    #[test]
+    fn clear_type_from_id_unknown_ids_are_no_play() {
+        for id in [11u8, 12, 200, u8::MAX] {
+            assert_eq!(clear_type_from_id(id), ClearType::NoPlay, "unknown id {id} => NoPlay");
+        }
+    }
+}
+
 #[cfg(test)]
 mod gauge_tests {
     use super::*;
 
     const ALL_KINDS: [GaugeKind; 6] = [GaugeKind::AssistEasy, GaugeKind::Easy, GaugeKind::Normal, GaugeKind::Hard, GaugeKind::ExHard, GaugeKind::Hazard];
-
-    // --- init / spec wiring -------------------------------------------------
 
     #[test]
     fn total_gauges_init_at_20() {
@@ -199,8 +300,6 @@ mod gauge_tests {
 
     #[test]
     fn borders_match_spec() {
-        // is_cleared() is `value >= border && value > 0`. The init values let us probe the border:
-        // AssistEasy init 20 < border 60 (not cleared at start); survival init 100 >= border 0.
         assert!(!Gauge::new(GaugeKind::AssistEasy, 200.0, 10).is_cleared(), "AE border 60 > init 20");
         assert!(!Gauge::new(GaugeKind::Easy, 200.0, 10).is_cleared(), "Easy border 80 > init 20");
         assert!(!Gauge::new(GaugeKind::Normal, 200.0, 10).is_cleared(), "Normal border 80 > init 20");
@@ -209,11 +308,8 @@ mod gauge_tests {
         assert!(Gauge::new(GaugeKind::Hazard, 200.0, 10).is_cleared());
     }
 
-    // --- TOTAL modifier -----------------------------------------------------
-
     #[test]
     fn total_modifier_scales_positive_deltas_by_total_over_notes() {
-        // Normal PG delta is 1.0, scaled by total/notes. total=200 notes=4 -> 50.0 per PG.
         let mut g = Gauge::new(GaugeKind::Normal, 200.0, 4);
         let before = g.value();
         g.update(Judge::PerfectGreat);
@@ -222,10 +318,7 @@ mod gauge_tests {
 
     #[test]
     fn total_modifier_does_not_scale_negative_deltas() {
-        // Normal BAD delta is a fixed -3.0 regardless of total/notes (only positives are scaled).
-        // Use a high value so guts (Normal has none) and clamping are irrelevant.
         let mut g = Gauge::new(GaugeKind::Normal, 1000.0, 1);
-        // raise to ~90 first via one PG (1.0*1000/1=1000, clamped to max 100)
         g.update(Judge::PerfectGreat);
         assert_eq!(g.value(), 100.0, "PG overshoots, clamps to max 100");
         g.update(Judge::Bad);
@@ -234,11 +327,9 @@ mod gauge_tests {
 
     #[test]
     fn total_zero_falls_back_to_200() {
-        // total <= 0 defaults to 200. Normal PG: 1.0 * 200/2 = 100 -> clamps to max.
         let mut g = Gauge::new(GaugeKind::Normal, 0.0, 2);
         g.update(Judge::PerfectGreat);
         assert_eq!(g.value(), 100.0);
-        // negative total also defaults to 200.
         let mut g2 = Gauge::new(GaugeKind::Normal, -5.0, 2);
         g2.update(Judge::PerfectGreat);
         assert_eq!(g2.value(), 100.0);
@@ -246,20 +337,15 @@ mod gauge_tests {
 
     #[test]
     fn notes_zero_is_clamped_to_one() {
-        // notes.max(1): 0 notes must not divide by zero; PG gain = 1.0 * 200/1 = 200 -> max.
         let mut g = Gauge::new(GaugeKind::Normal, 200.0, 0);
         g.update(Judge::PerfectGreat);
         assert_eq!(g.value(), 100.0);
     }
 
-    // --- LIMIT_INCREMENT modifier ------------------------------------------
-
     #[test]
     fn limit_increment_caps_pg_gain_at_015() {
-        // Hard pg gain capped at 0.15 when (2*total-320)/notes >= 0.15. total=300 notes=1 -> 280/1.
         let mut g = Gauge::new(GaugeKind::Hard, 300.0, 1);
-        // start at 100 (max). Drain via a BAD to leave room, then PG.
-        g.update(Judge::Bad); // -5.0 -> 95 (no guts above 50)
+        g.update(Judge::Bad);
         assert_eq!(g.value(), 95.0);
         let before = g.value();
         g.update(Judge::PerfectGreat);
@@ -268,10 +354,8 @@ mod gauge_tests {
 
     #[test]
     fn limit_increment_shrinks_gain_below_cap() {
-        // (2*total-320)/notes below 0.15: total=162.5 notes=100 -> (325-320)/100 = 5/100 = 0.05.
-        // PG scaled by pg/0.15: 0.15 * (0.05/0.15) = 0.05.
         let mut g = Gauge::new(GaugeKind::Hard, 162.5, 100);
-        g.update(Judge::Bad); // make room: 100 -> 95
+        g.update(Judge::Bad);
         let before = g.value();
         g.update(Judge::PerfectGreat);
         let gained = g.value() - before;
@@ -280,19 +364,15 @@ mod gauge_tests {
 
     #[test]
     fn limit_increment_clamps_negative_pg_to_zero_gain() {
-        // (2*total-320) negative -> pg capped to 0.0, so positive deltas become 0: PG gives nothing.
-        let mut g = Gauge::new(GaugeKind::Hard, 100.0, 1); // 2*100-320 = -120 -> pg 0
-        g.update(Judge::Bad); // 100 -> 95
+        let mut g = Gauge::new(GaugeKind::Hard, 100.0, 1);
+        g.update(Judge::Bad);
         let before = g.value();
         g.update(Judge::PerfectGreat);
         assert_eq!(g.value(), before, "PG yields no gain when pg-cap is 0");
     }
 
-    // --- HARD guts softening -----------------------------------------------
-
     #[test]
     fn hard_guts_soften_damage_at_low_values() {
-        // HARD_GUTS: value<10 -> 0.4. A BAD (-5.0) at value 5 becomes -2.0 -> 3.0.
         let mut g = Gauge::new(GaugeKind::Hard, 1000.0, 1);
         drain_to(&mut g, 5.0);
         let v = g.value();
@@ -304,7 +384,6 @@ mod gauge_tests {
 
     #[test]
     fn hard_guts_band_boundaries_pick_first_match() {
-        // The loop breaks on the FIRST band where value < g.0. value 45 is < 50 (mul 0.8) but not <40.
         let mut g = Gauge::new(GaugeKind::Hard, 1000.0, 1);
         drain_to(&mut g, 45.0);
         let v = g.value();
@@ -315,8 +394,7 @@ mod gauge_tests {
 
     #[test]
     fn no_guts_above_top_band_full_damage() {
-        // value >= 50 -> no band matches, full -5.0 damage.
-        let mut g = Gauge::new(GaugeKind::Hard, 1000.0, 1); // init 100
+        let mut g = Gauge::new(GaugeKind::Hard, 1000.0, 1);
         let before = g.value();
         g.update(Judge::Bad);
         assert_eq!(before - g.value(), 5.0, "full BAD damage above guts bands");
@@ -324,16 +402,13 @@ mod gauge_tests {
 
     #[test]
     fn exhard_has_no_guts() {
-        // ExHard guts is empty: BAD is a flat -8.0 even at very low value.
         let mut g = Gauge::new(GaugeKind::ExHard, 1000.0, 1);
-        drain_to(&mut g, 5.0); // ExHard miss/bad -8 each
+        drain_to(&mut g, 5.0);
         let v = g.value();
         let expected = (v - 8.0).clamp(0.0, 100.0);
         g.update(Judge::Bad);
         assert!((g.value() - expected).abs() < 1e-4, "no guts softening for ExHard: got {}, want {expected}", g.value());
     }
-
-    // --- clamping & dead gauge ---------------------------------------------
 
     #[test]
     fn value_clamps_to_max() {
@@ -346,20 +421,17 @@ mod gauge_tests {
 
     #[test]
     fn total_gauge_clamps_to_min_2_and_stays_alive() {
-        // Normal min is 2.0; draining never reaches 0, so update() keeps applying (value>0).
         let mut g = Gauge::new(GaugeKind::Normal, 200.0, 1);
         for _ in 0..100 {
-            g.update(Judge::Poor); // -6.0 each
+            g.update(Judge::Poor);
         }
         assert_eq!(g.value(), 2.0, "Total gauge floors at min 2.0");
-        // still alive: a PG can lift it back up.
         g.update(Judge::PerfectGreat);
         assert!(g.value() > 2.0, "Total gauge at min is not permanently dead");
     }
 
     #[test]
     fn survival_gauge_dies_at_zero_and_stays_dead() {
-        // Hazard BAD is -100 -> value 0 (min 0). update() then returns early forever, even on PG.
         let mut g = Gauge::new(GaugeKind::Hazard, 200.0, 1);
         g.update(Judge::Bad);
         assert_eq!(g.value(), 0.0, "Hazard min is 0");
@@ -374,26 +446,23 @@ mod gauge_tests {
     fn hard_gauge_dead_at_zero_is_permanent() {
         let mut g = Gauge::new(GaugeKind::Hard, 200.0, 1);
         for _ in 0..200 {
-            g.update(Judge::Miss); // -10 softened by guts at low values, eventually reaches 0
+            g.update(Judge::Miss);
         }
         assert_eq!(g.value(), 0.0);
         g.update(Judge::PerfectGreat);
         assert_eq!(g.value(), 0.0, "once 0, survival gauge never recovers");
     }
 
-    // --- per-judge deltas: GD / GR signs -----------------------------------
-
     #[test]
     fn good_is_positive_for_total_zero_for_exhard() {
-        // Normal GD delta 0.5 (positive, scaled). ExHard GD delta 0.0 (no change).
         let mut n = Gauge::new(GaugeKind::Normal, 200.0, 1);
-        n.update(Judge::Bad); // make headroom: 20 -> 17
+        n.update(Judge::Bad);
         let before = n.value();
         n.update(Judge::Good);
         assert!(n.value() > before, "Normal GOOD raises gauge");
 
         let mut x = Gauge::new(GaugeKind::ExHard, 200.0, 1);
-        x.update(Judge::Bad); // 100 -> 92
+        x.update(Judge::Bad);
         let before = x.value();
         x.update(Judge::Good);
         assert_eq!(x.value(), before, "ExHard GOOD delta is 0.0");
@@ -401,7 +470,6 @@ mod gauge_tests {
 
     #[test]
     fn is_cleared_requires_strictly_positive_value() {
-        // Hard border is 0.0. A gauge sitting exactly at 0 must report NOT cleared.
         let mut g = Gauge::new(GaugeKind::Hard, 200.0, 1);
         for _ in 0..200 {
             g.update(Judge::Miss);
@@ -410,10 +478,8 @@ mod gauge_tests {
         assert!(!g.is_cleared(), "value==border==0 is not cleared because value must be > 0");
     }
 
-    // --- clear_lamp tiers ---------------------------------------------------
-
     fn cleared_normal_gauge() -> Gauge {
-        Gauge::new(GaugeKind::Normal, 200.0, 1) // init 20 >= border 80? no. lift it.
+        Gauge::new(GaugeKind::Normal, 200.0, 1)
     }
 
     #[test]
@@ -424,14 +490,14 @@ mod gauge_tests {
 
     #[test]
     fn lamp_failed_when_not_cleared() {
-        let g = cleared_normal_gauge(); // value 20 < border 80 -> not cleared
+        let g = cleared_normal_gauge();
         assert_eq!(clear_lamp(&g, &[1, 0, 0, 0, 0, 0], 1, 1), ClearType::Failed);
     }
 
     fn high_normal() -> Gauge {
         let mut g = Gauge::new(GaugeKind::Normal, 200.0, 1);
         for _ in 0..10 {
-            g.update(Judge::PerfectGreat); // -> max 100 >= border 80
+            g.update(Judge::PerfectGreat);
         }
         g
     }
@@ -439,41 +505,35 @@ mod gauge_tests {
     #[test]
     fn lamp_max_all_pg() {
         let g = high_normal();
-        // counts all PG (index 0), no GR/GD, no break, max_combo == total.
         assert_eq!(clear_lamp(&g, &[5, 0, 0, 0, 0, 0], 5, 5), ClearType::Max);
     }
 
     #[test]
     fn lamp_perfect_when_only_great_no_good() {
         let g = high_normal();
-        // GR present (index 1), no GD (index 2), no break -> Perfect.
         assert_eq!(clear_lamp(&g, &[4, 1, 0, 0, 0, 0], 5, 5), ClearType::Perfect);
     }
 
     #[test]
     fn lamp_fullcombo_when_good_present_no_break() {
         let g = high_normal();
-        // GD present (index 2), no break, full combo -> FullCombo.
         assert_eq!(clear_lamp(&g, &[3, 1, 1, 0, 0, 0], 5, 5), ClearType::FullCombo);
     }
 
     #[test]
     fn lamp_drops_to_gauge_kind_when_combo_broken() {
         let g = high_normal();
-        // A single BAD breaks the combo -> falls through to gauge-kind lamp (Normal).
         assert_eq!(clear_lamp(&g, &[4, 0, 0, 1, 0, 0], 4, 5), ClearType::Normal);
     }
 
     #[test]
     fn lamp_drops_to_gauge_kind_when_combo_short() {
         let g = high_normal();
-        // No break, but max_combo < total (e.g. a swept MISS that was re-counted) -> kind lamp.
         assert_eq!(clear_lamp(&g, &[4, 0, 0, 0, 0, 0], 4, 5), ClearType::Normal);
     }
 
     #[test]
     fn lamp_kind_mapping_for_each_gauge() {
-        // With a broken combo and a cleared gauge, the lamp equals the gauge family.
         let pairs = [
             (GaugeKind::AssistEasy, ClearType::AssistEasy),
             (GaugeKind::Easy, ClearType::Easy),
@@ -483,13 +543,11 @@ mod gauge_tests {
             (GaugeKind::Hazard, ClearType::ExHard),
         ];
         for (kind, lamp) in pairs {
-            // Build a cleared gauge of this kind: survival start cleared; total gauges need lifting.
             let mut g = Gauge::new(kind, 200.0, 1);
             for _ in 0..200 {
                 g.update(Judge::PerfectGreat);
             }
             assert!(g.is_cleared(), "{kind:?} should be cleared after many PG");
-            // broken combo via a BAD count.
             assert_eq!(clear_lamp(&g, &[3, 0, 0, 1, 0, 0], 3, 4), lamp, "{kind:?}");
         }
     }
@@ -497,7 +555,6 @@ mod gauge_tests {
     #[test]
     fn lamp_break_detected_via_bd_or_poor_but_not_empty_poor() {
         let g = high_normal();
-        // BAD only.
         assert_eq!(clear_lamp(&g, &[3, 0, 0, 1, 0, 0], 4, 4), ClearType::Normal);
         assert_eq!(clear_lamp(&g, &[3, 0, 0, 0, 1, 0], 4, 4), ClearType::Normal);
         assert_eq!(clear_lamp(&g, &[4, 0, 0, 0, 0, 1], 4, 4), ClearType::Max);
@@ -505,12 +562,9 @@ mod gauge_tests {
 
     #[test]
     fn lamp_max_requires_full_combo_count() {
-        // Even all-PG, if max_combo != total_notes it is NOT Max (falls to kind lamp).
         let g = high_normal();
         assert_eq!(clear_lamp(&g, &[4, 0, 0, 0, 0, 0], 3, 4), ClearType::Normal);
     }
-
-    // helpers ---------------------------------------------------------------
 
     /// Drain a survival gauge toward `target` (approximately, stopping at or below it) using MISS.
     fn drain_to(g: &mut Gauge, target: f32) {

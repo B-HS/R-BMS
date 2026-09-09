@@ -1,8 +1,13 @@
 use rbms_model::{LnKind, Mode, Model, NoteKind};
 
 use crate::Judge;
+use crate::algorithm::{JudgeAlgorithm, NoteRef, NoteType, UNJUDGED_STATE};
 use crate::gauge::{ClearType, Gauge, GaugeKind, clear_lamp};
 use crate::windows::{JudgeProperty, JudgeWindows, judgerank_for};
+
+/// Per-lane note seeds as `(head_us, end_us, long-note kind)`, the shape the constructors build
+/// lanes from.
+type LaneSeeds = Vec<Vec<(i64, Option<i64>, Option<LnKind>)>>;
 
 struct JNote {
     head_us: i64,
@@ -88,6 +93,7 @@ pub struct JudgeEngine {
     ln_scratch_end: JudgeWindows,
     gate: (i64, i64),
     longnote_margin_rate: i32,
+    algorithm: JudgeAlgorithm,
     pub combo: u32,
     pub max_combo: u32,
     pub counts: [u32; 6],
@@ -118,14 +124,11 @@ impl JudgeEngine {
     }
 
     pub fn from_pairs(per_lane: Vec<Vec<(i64, Option<i64>)>>, windows: JudgeWindows) -> Self {
-        // Pair-built notes (tests, `new`) treat any long note as a plain LN; `from_model` carries the
-        // real `LnKind` through `from_triples`.
-        let triples: Vec<Vec<(i64, Option<i64>, Option<LnKind>)>> =
-            per_lane.into_iter().map(|lane| lane.into_iter().map(|(h, e)| (h, e, e.map(|_| LnKind::Ln))).collect()).collect();
+        let triples: LaneSeeds = per_lane.into_iter().map(|lane| lane.into_iter().map(|(h, e)| (h, e, e.map(|_| LnKind::Ln))).collect()).collect();
         Self::from_triples(triples, windows)
     }
 
-    fn from_triples(per_lane: Vec<Vec<(i64, Option<i64>, Option<LnKind>)>>, windows: JudgeWindows) -> Self {
+    fn from_triples(per_lane: LaneSeeds, windows: JudgeWindows) -> Self {
         let lanes: Vec<Lane> = per_lane
             .into_iter()
             .map(|mut notes| {
@@ -139,9 +142,6 @@ impl JudgeEngine {
                 }
             })
             .collect();
-        // A CN/HCN long note is judged twice (head + release end) so it counts as two toward the
-        // total; a plain LN or normal note counts once. Keeps the EX/gauge denominators in step with
-        // the per-note judgments and with `rbms_chart::count_playable_notes`.
         let total_notes = lanes.iter().flat_map(|l| l.notes.iter()).map(|n| if is_charge(n.ln) && n.end_us.is_some() { 2 } else { 1 }).sum();
         let gauge = Gauge::new(GaugeKind::Normal, 200.0, total_notes as usize);
         let n = lanes.len();
@@ -159,6 +159,7 @@ impl JudgeEngine {
             ln_scratch_end: prop.ln_scratch_end,
             gate: gate_of(&windows, &prop.scratch),
             longnote_margin_rate: DEFAULT_LONGNOTE_MARGIN_RATE,
+            algorithm: JudgeAlgorithm::default(),
             combo: 0,
             max_combo: 0,
             counts: [0; 6],
@@ -194,7 +195,7 @@ impl JudgeEngine {
     /// (Self::from_model_for_mode) derives it for you.
     pub fn from_model(model: &Model, windows: JudgeWindows) -> Self {
         let n = model.mode.key;
-        let mut per_lane: Vec<Vec<(i64, Option<i64>, Option<LnKind>)>> = vec![Vec::new(); n];
+        let mut per_lane: LaneSeeds = vec![Vec::new(); n];
         let mut mines: Vec<Vec<Mine>> = (0..n).map(|_| Vec::new()).collect();
         for lane in 0..n {
             let mut pending_start: Option<(i64, LnKind)> = None;
@@ -288,6 +289,17 @@ impl JudgeEngine {
         self.ln_scratch_end = ln_end;
     }
 
+    /// Candidate-selection policy for [`press`](Self::press). Defaults to
+    /// [`JudgeAlgorithm::Duration`], which is what this engine has always done.
+    pub fn set_algorithm(&mut self, algorithm: JudgeAlgorithm) {
+        self.algorithm = algorithm;
+    }
+
+    /// The candidate-selection policy currently in force.
+    pub fn algorithm(&self) -> JudgeAlgorithm {
+        self.algorithm
+    }
+
     /// User LONGNOTE MARGIN rate in percent (100 = the mode's stock margin), reference implementation
     /// `PlayerConfig.longnoteMarginRate`.
     pub fn set_longnote_margin_rate(&mut self, rate_percent: i32) {
@@ -313,12 +325,14 @@ impl JudgeEngine {
             *h = true;
         }
         let w = self.note_window(lane);
+        let note_type = if self.is_scratch(lane) { NoteType::Scratch } else { NoteType::Note };
+        let algorithm = self.algorithm;
         let l = self.lanes.get(lane)?;
 
         let (gate_late, gate_early) = self.gate;
 
         let mut best: Option<usize> = None;
-        let mut best_abs = i64::MAX;
+        let mut best_note: Option<NoteRef> = None;
         let mut rehit: Option<(usize, i64)> = None;
         let mut rehit_abs = i64::MAX;
         let floor_us = press_us + gate_late - REMARK_SLACK_US;
@@ -335,8 +349,13 @@ impl JudgeEngine {
             if dm >= gate_late {
                 let a = dm.abs();
                 if !n.judged && !n.holding {
-                    if a < best_abs {
-                        best_abs = a;
+                    let cand = NoteRef { time_us: n.head_us, state: UNJUDGED_STATE, is_long: n.end_us.is_some() };
+                    let take = match &best_note {
+                        None => true,
+                        Some(current) => algorithm.prefer(current, &cand, press_us, &w, note_type),
+                    };
+                    if take {
+                        best_note = Some(cand);
                         best = Some(i);
                     }
                 } else if n.judged && a < rehit_abs && w.in_ms_band(dm) {
@@ -368,9 +387,6 @@ impl JudgeEngine {
                 note.head_delta_us = Some(dm);
             }
             if is_cn {
-                // CN/HCN: the head is a counted judgment committed at press; the release end is judged
-                // separately at key-up (the reference implementation's two-`updateMicro` model). Plain LN stays a single
-                // judgment resolved at release.
                 self.apply(judge);
                 self.record_timing(judge, dm);
             }
@@ -402,8 +418,6 @@ impl JudgeEngine {
         let head_judge = note.head_judge.unwrap_or(Judge::Poor);
         let dm = end - release_us;
         let end_judge = w.judge(dm).unwrap_or(Judge::Poor);
-        // CN/HCN: the release end is its own counted judgment (the head was already counted at press),
-        // so it is not capped by the head. Plain LN resolves to the worse of head/end (single count).
         let final_judge = if is_charge(note.ln) { end_judge } else { worse(head_judge, end_judge) };
         let note = &mut self.lanes[lane].notes[idx];
         note.judged = true;
@@ -466,7 +480,6 @@ impl JudgeEngine {
                     let dm = n.head_us - now_us;
                     n.judged = true;
                     events.push((Judge::Poor, dm));
-                    // A never-hit CN/HCN misses both of its judged objects (head + end).
                     if charge_pair {
                         events.push((Judge::Poor, dm));
                     }
@@ -540,3 +553,70 @@ const REMARK_SLACK_US: i64 = 100_000;
 
 /// Stock long-note margin rate (percent) — reference implementation `PlayerConfig.longnoteMarginRate` default.
 const DEFAULT_LONGNOTE_MARGIN_RATE: i32 = 100;
+
+#[cfg(test)]
+mod algorithm_selection_tests {
+    use super::*;
+    use crate::algorithm::JudgeAlgorithm;
+
+    const EARLY_NOTE_US: i64 = 100_000;
+    const LATE_NOTE_US: i64 = 200_000;
+
+    fn engine(algorithm: JudgeAlgorithm) -> JudgeEngine {
+        let mut e = JudgeEngine::new(vec![vec![EARLY_NOTE_US, LATE_NOTE_US]], JudgeWindows::SEVENKEY_NOTE);
+        e.set_algorithm(algorithm);
+        e
+    }
+
+    #[test]
+    fn the_default_algorithm_is_duration() {
+        assert_eq!(JudgeEngine::new(vec![vec![0]], JudgeWindows::SEVENKEY_NOTE).algorithm(), JudgeAlgorithm::Duration);
+    }
+
+    #[test]
+    fn duration_takes_the_nearer_note_even_when_the_earlier_one_is_still_reachable() {
+        let press_us = 160_000;
+        assert_eq!(engine(JudgeAlgorithm::Duration).press(0, press_us).unwrap().note_index, 1);
+    }
+
+    #[test]
+    fn combo_and_lowest_keep_the_earlier_note_that_duration_would_abandon() {
+        let press_us = 160_000;
+        for algorithm in [JudgeAlgorithm::Combo, JudgeAlgorithm::Lowest] {
+            assert_eq!(engine(algorithm).press(0, press_us).unwrap().note_index, 0, "{algorithm:?}");
+        }
+    }
+
+    #[test]
+    fn score_abandons_a_note_that_can_no_longer_be_a_great_while_combo_keeps_it() {
+        let press_us = 170_000;
+        assert_eq!(engine(JudgeAlgorithm::Score).press(0, press_us).unwrap().note_index, 1);
+        assert_eq!(engine(JudgeAlgorithm::Combo).press(0, press_us).unwrap().note_index, 0);
+    }
+
+    #[test]
+    fn score_keeps_a_note_that_is_still_a_great() {
+        let press_us = 160_000;
+        assert_eq!(engine(JudgeAlgorithm::Score).press(0, press_us).unwrap().note_index, 0);
+    }
+
+    #[test]
+    fn every_algorithm_still_takes_the_only_candidate() {
+        for algorithm in JudgeAlgorithm::ALL {
+            let mut e = JudgeEngine::new(vec![vec![EARLY_NOTE_US]], JudgeWindows::SEVENKEY_NOTE);
+            e.set_algorithm(algorithm);
+            let r = e.press(0, EARLY_NOTE_US).unwrap();
+            assert_eq!(r.judge, Judge::PerfectGreat, "{algorithm:?}");
+            assert_eq!(r.note_index, 0, "{algorithm:?}");
+        }
+    }
+
+    #[test]
+    fn scratch_lanes_are_judged_against_the_scratch_table() {
+        let model_mode = rbms_model::Mode::BEAT_7K;
+        let mut e = JudgeEngine::new(vec![Vec::new(); model_mode.key], JudgeWindows::SEVENKEY_NOTE);
+        e.apply_mode(&model_mode, 100);
+        assert!(e.is_scratch(model_mode.key - 1), "lane 7 is the 7K scratch");
+        assert_eq!(e.note_window(model_mode.key - 1), JudgeProperty::SEVENKEYS.scratch);
+    }
+}
