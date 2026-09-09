@@ -1,4 +1,6 @@
 use rbms_model::{LnKind, Micros, Mode, Model, ModelMeta, Note, NoteKind, TimeLine};
+
+pub use rbms_model::{default_total, default_total_keyboard};
 use rbms_parser::BmsSource;
 
 pub mod scroll;
@@ -153,7 +155,7 @@ pub fn to_model(src: &BmsSource, mode: Mode) -> Model {
         }
     }
 
-    events.sort_by(|a, b| a.section.partial_cmp(&b.section).unwrap());
+    events.sort_by(|a, b| a.section.total_cmp(&b.section));
 
     let lanes = mode.key;
     let mut timelines: Vec<TimeLine> = Vec::new();
@@ -193,6 +195,7 @@ pub fn to_model(src: &BmsSource, mode: Mode) -> Model {
             play_level: src.headers.play_level.clone(),
             difficulty: src.headers.difficulty,
             rank: src.headers.rank,
+            defexrank: src.headers.defexrank,
             total: src.headers.total.unwrap_or(0.0),
             stagefile: src.headers.stagefile.clone(),
         },
@@ -403,7 +406,7 @@ pub fn note_density(model: &Model, total_value: f64) -> NoteDensity {
     let bd = total_notes / bins.max(1) as i32 / 4;
     let (sum, count) = bins_v.iter().fold((0u64, 0u64), |(s, c), &n| if n as i32 >= bd { (s + n as u64, c + 1) } else { (s, c) });
     let avg = if count > 0 { sum as f64 / count as f64 } else { 0.0 };
-    let total_value = if total_value > 0.0 { total_value } else { (7.605 * total_notes as f64 / (0.01 * total_notes as f64 + 6.5)).max(260.0) };
+    let total_value = if total_value > 0.0 { total_value } else { default_total(total_notes.max(0) as usize) };
     let border = (total_notes as f64 * (1.0 - 100.0 / total_value)) as i32;
     let mut cum = 0i32;
     let mut borderpos = 0usize;

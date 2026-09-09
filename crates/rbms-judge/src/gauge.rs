@@ -74,7 +74,7 @@ impl Gauge {
     pub fn new(kind: GaugeKind, total: f64, notes: usize) -> Self {
         let s = spec(kind);
         let notes = notes.max(1) as f64;
-        let total = if total > 0.0 { total } else { 200.0 };
+        let total = if total > 0.0 { total } else { rbms_model::default_total(notes as usize) };
         let mut deltas = s.deltas;
         match s.modifier {
             Modifier::Total => {
@@ -113,6 +113,15 @@ impl Gauge {
         self.value = (self.value + inc).clamp(self.min, self.max);
     }
 
+    /// Add `delta` directly (mine damage). beatoraja `GrooveGauge.addValue` -> `Gauge.setValue`:
+    /// a dead gauge (<= 0) stays frozen, otherwise the result is clamped into `[min, max]`.
+    pub fn add_value(&mut self, delta: f32) {
+        if self.value <= 0.0 {
+            return;
+        }
+        self.value = (self.value + delta).clamp(self.min, self.max);
+    }
+
     pub fn value(&self) -> f32 {
         self.value
     }
@@ -134,7 +143,7 @@ pub fn clear_lamp(gauge: &Gauge, counts: &[u32; 6], max_combo: u32, total_notes:
     if !gauge.is_cleared() {
         return ClearType::Failed;
     }
-    let broke = counts[3] + counts[4] + counts[5] > 0;
+    let broke = counts[3] + counts[4] > 0;
     if !broke && max_combo == total_notes {
         if counts[1] == 0 && counts[2] == 0 {
             return ClearType::Max;
@@ -483,14 +492,12 @@ mod gauge_tests {
     }
 
     #[test]
-    fn lamp_break_detected_via_any_of_bd_pr_ms() {
+    fn lamp_break_detected_via_bd_or_poor_but_not_empty_poor() {
         let g = high_normal();
         // BAD only.
         assert_eq!(clear_lamp(&g, &[3, 0, 0, 1, 0, 0], 4, 4), ClearType::Normal);
-        // POOR only.
         assert_eq!(clear_lamp(&g, &[3, 0, 0, 0, 1, 0], 4, 4), ClearType::Normal);
-        // MISS only.
-        assert_eq!(clear_lamp(&g, &[3, 0, 0, 0, 0, 1], 4, 4), ClearType::Normal);
+        assert_eq!(clear_lamp(&g, &[4, 0, 0, 0, 0, 1], 4, 4), ClearType::Max);
     }
 
     #[test]
@@ -509,5 +516,44 @@ mod gauge_tests {
             g.update(Judge::Miss);
             guard += 1;
         }
+    }
+}
+
+#[cfg(test)]
+mod total_modifier_tests {
+    use super::*;
+
+    #[test]
+    fn normal_total_300_over_1000_notes_gains_0_3_per_pgreat() {
+        let mut g = Gauge::new(GaugeKind::Normal, 300.0, 1000);
+        g.update(Judge::PerfectGreat);
+        assert!((g.value() - 20.3).abs() < 1e-4, "20.0 + 0.3, got {}", g.value());
+        g.update(Judge::Good);
+        assert!((g.value() - 20.45).abs() < 1e-4, "GOOD delta 0.5 * 0.3 = 0.15, got {}", g.value());
+    }
+
+    #[test]
+    fn hard_limit_increment_clamps_the_pgreat_gain_at_0_15() {
+        let mut g = Gauge::new(GaugeKind::Hard, 300.0, 1000);
+        g.update(Judge::Bad);
+        let after_bad = g.value();
+        g.update(Judge::PerfectGreat);
+        assert!((g.value() - (after_bad + 0.15)).abs() < 1e-4, "full 0.15 gain, got {}", g.value());
+    }
+
+    #[test]
+    fn hard_limit_increment_scales_down_on_a_low_total_chart() {
+        let mut g = Gauge::new(GaugeKind::Hard, 200.0, 1000);
+        g.update(Judge::Bad);
+        let after_bad = g.value();
+        g.update(Judge::PerfectGreat);
+        assert!((g.value() - (after_bad + 0.08)).abs() < 1e-4, "reduced 0.08 gain, got {}", g.value());
+    }
+
+    #[test]
+    fn missing_total_falls_back_to_the_standard_default_formula() {
+        let mut g = Gauge::new(GaugeKind::Normal, 0.0, 1000);
+        g.update(Judge::PerfectGreat);
+        assert!((g.value() - 20.460_909).abs() < 1e-3, "got {}", g.value());
     }
 }

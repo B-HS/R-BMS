@@ -155,6 +155,24 @@ fn mine_channel_is_mine_note() {
 }
 
 #[test]
+fn mine_damage_is_the_raw_object_value_in_the_chart_base() {
+    let damage = |bms: &[u8]| {
+        model(bms)
+            .timelines
+            .iter()
+            .flat_map(|tl| tl.notes[0].as_ref())
+            .find_map(|n| match n.kind {
+                NoteKind::Mine { damage } => Some(damage),
+                _ => None,
+            })
+            .unwrap()
+    };
+    assert_eq!(damage(b"#001D1:0A\r\n"), 10.0, "base36 0A = 10, beatoraja's stock mine damage");
+    assert_eq!(damage(b"#001D1:ZZ\r\n"), 1295.0, "base36 ZZ = 35*36+35");
+    assert_eq!(damage(b"#BASE 62\r\n#001D1:zz\r\n"), 3843.0, "base62 zz = 61*62+61");
+}
+
+#[test]
 fn probe_unterminated_ln_dangling_start() {
     let m = model(b"#WAV01 a.wav\r\n#00151:01\r\n");
     let kinds: Vec<NoteKind> = m.timelines.iter().flat_map(|tl| tl.notes[0].as_ref()).map(|n| n.kind.clone()).collect();
@@ -645,3 +663,22 @@ fn bgm_notes_get_their_timeline_time() {
 }
 
 
+
+#[test]
+fn default_total_matches_bmsplayerrule_formula() {
+    assert!((default_total(1000) - 460.909_090_909_090_9).abs() < 1e-9);
+    assert_eq!(default_total(100), 260.0);
+    assert_eq!(default_total(0), 260.0);
+}
+
+#[test]
+fn default_total_keyboard_uses_the_higher_floor_and_shifted_numerator() {
+    assert!((default_total_keyboard(1000) - 507.0).abs() < 1e-9);
+    assert_eq!(default_total_keyboard(0), 300.0);
+}
+
+#[test]
+fn defexrank_header_reaches_model_meta() {
+    let m = model(b"#DEFEXRANK 130\r\n#BPM 120\r\n#WAV01 a.wav\r\n#00111:01\r\n");
+    assert_eq!(m.meta.defexrank, Some(130.0));
+}

@@ -1,4 +1,4 @@
-use rbms_judge::{GaugeKind, JudgeEngine, JudgeResult, JudgeWindows, rank_to_judgerank};
+use rbms_judge::{GaugeKind, JudgeEngine, JudgeProperty, JudgeResult, judgerank_for};
 use rbms_model::{Model, NoteKind};
 
 /// A keysound that should fire at `at_us` (autoplay BGM, or a hit note's sound).
@@ -16,10 +16,6 @@ enum AutoAction {
 /// Autoplay key-beam flash for a tapped (non-LN) note, mirroring beatoraja's
 /// `auto_minduration` (80 ms): a tap lights its lane beam for this long, then releases.
 const AUTO_BEAM_US: i64 = 80_000;
-
-fn windows_for(model: &Model) -> JudgeWindows {
-    JudgeWindows::note_for_mode(&model.mode).scaled(rank_to_judgerank(model.meta.rank))
-}
 
 fn collect_bg(model: &Model) -> Vec<(i64, i32)> {
     let mut v: Vec<(i64, i32)> = model.timelines.iter().flat_map(|tl| tl.bgnotes.iter().map(|n| (n.time_us, n.wav))).collect();
@@ -100,7 +96,7 @@ pub struct Player {
 
 impl Player {
     pub fn new(model: Model, autoplay: bool) -> Self {
-        let judge = JudgeEngine::from_model(&model, windows_for(&model));
+        let judge = JudgeEngine::from_model_for_mode(&model);
         let bg = collect_bg(&model);
         let heads = collect_note_heads(&model);
         let actions = collect_actions(&model);
@@ -123,14 +119,29 @@ impl Player {
         }
     }
 
-    /// Apply a user judge-width multiplier (percent; 100 = chart default). The effective
-    /// window is the chart's rank judgerank scaled by this rate — wider = more lenient.
+    /// Apply a single user JUDGE WIDTH rate (percent; 100 = chart default) to PGREAT/GREAT/GOOD on
+    /// both key and scratch lanes. Kept for callers that expose one slider; see
+    /// [`set_judge_window_rates`](Self::set_judge_window_rates) for beatoraja's six-value form.
     pub fn set_judge_rate(&mut self, rate_percent: i32) {
-        let base = rank_to_judgerank(self.model.meta.rank);
-        let eff = (base * rate_percent.max(1) / 100).max(1);
-        let mode = &self.model.mode;
-        self.judge.set_windows(JudgeWindows::note_for_mode(mode).scaled(eff));
-        self.judge.set_ln_end(JudgeWindows::ln_end_for_mode(mode).scaled(eff));
+        self.set_judge_window_rates([rate_percent; 3], [rate_percent; 3]);
+    }
+
+    /// beatoraja JUDGE WIDTH: per-tier `[PGREAT, GREAT, GOOD]` percentages for key lanes and for
+    /// scratch lanes (`JudgeManager.java:169-174`). The chart's own judgerank (`#RANK`/`#DEFEXRANK`)
+    /// is applied first, then these rates — BAD and the 空POOR band never widen, and each tier is
+    /// clamped to BAD and to the tier before it.
+    pub fn set_judge_window_rates(&mut self, key: [i32; 3], scratch: [i32; 3]) {
+        let judgerank = judgerank_for(self.model.meta.rank, self.model.meta.defexrank);
+        let prop = JudgeProperty::for_mode(&self.model.mode);
+        self.judge.set_windows(prop.note.scaled(judgerank).with_window_rate(key));
+        self.judge.set_scratch_windows(prop.scratch.scaled(judgerank).with_window_rate(scratch));
+        self.judge.set_ln_end(prop.ln_end.scaled(judgerank).with_window_rate(key));
+        self.judge.set_ln_scratch_end(prop.ln_scratch_end.scaled(judgerank).with_window_rate(scratch));
+    }
+
+    /// beatoraja LONGNOTE MARGIN rate (percent of the mode's stock margin).
+    pub fn set_longnote_margin_rate(&mut self, rate_percent: i32) {
+        self.judge.set_longnote_margin_rate(rate_percent);
     }
 
     /// Per-lane key-beam press timestamps (µs); `i64::MIN` means the beam is not held. Paired
@@ -377,14 +388,29 @@ mod tests {
     }
 
     #[test]
-    fn widened_late_bad_is_reachable_not_dead() {
-        // #RANK 2 (75%) at 200% -> eff 150% -> BAD late edge = -280ms*1.5 = -420ms.
-        // A press ~350ms late must be a BAD (not silently dropped by a fixed candidate gate).
+    fn judge_width_does_not_widen_bad() {
         let m = model(b"#BPM 120\r\n#RANK 2\r\n#WAV01 a.wav\r\n#00111:01\r\n");
         let nt = m.timelines.iter().find_map(|t| t.notes[0].as_ref()).map(|n| n.time_us).unwrap();
-        let mut p = Player::new(m, false);
+        let mut p = Player::new(m.clone(), false);
         p.set_judge_rate(200);
-        assert_eq!(p.press(0, nt + 350_000, |_| {}).unwrap().judge, rbms_judge::Judge::Bad, "350ms-late press is reachable as BAD at widened width");
+        assert!(p.press(0, nt + 250_000, |_| {}).is_none(), "250ms late is past the BAD edge, width cannot reach it");
+        let mut q = Player::new(m, false);
+        assert_eq!(q.press(0, nt + 200_000, |_| {}).unwrap().judge, rbms_judge::Judge::Bad, "200ms late is inside the fixed BAD window at stock width");
+    }
+
+    #[test]
+    fn judge_width_rates_reach_key_and_scratch_lanes_separately() {
+        let m = model(b"#BPM 120\r\n#RANK 3\r\n#WAV01 a.wav\r\n#00111:01\r\n#00116:01\r\n");
+        let key_t = m.timelines.iter().find_map(|t| t.notes[0].as_ref()).map(|n| n.time_us).unwrap();
+        let scr_t = m.timelines.iter().find_map(|t| t.notes[7].as_ref()).map(|n| n.time_us).unwrap();
+
+        let mut stock = Player::new(m.clone(), false);
+        assert_eq!(stock.press(0, key_t - 15_000, |_| {}).unwrap().judge, rbms_judge::Judge::PerfectGreat, "15ms off is inside the stock key PGREAT");
+
+        let mut p = Player::new(m, false);
+        p.set_judge_window_rates([50, 100, 100], [100, 100, 100]);
+        assert_eq!(p.press(0, key_t - 15_000, |_| {}).unwrap().judge, rbms_judge::Judge::Great, "50% key rate pulls the key PGREAT in to +-10ms");
+        assert_eq!(p.press(7, scr_t - 25_000, |_| {}).unwrap().judge, rbms_judge::Judge::PerfectGreat, "the scratch lane kept its own 100% rate");
     }
 
     #[test]
@@ -582,7 +608,7 @@ mod tests {
         p.update(last + 1_000_000, |_| {});
         // Lane 7 (auto) was hit as PGREAT; lane 0's note was never pressed, so it was swept to MISS.
         assert_eq!(p.judge.counts[0], 1, "only the auto lane scored");
-        assert_eq!(p.judge.counts[5], 1, "the interactive lane's unpressed note became a MISS");
+        assert_eq!(p.judge.counts[4], 1, "the interactive lane's unpressed note became a 見逃し POOR");
     }
 
     #[test]
@@ -634,11 +660,10 @@ mod tests {
         assert_eq!(r.judge, rbms_judge::Judge::Bad);
         assert_eq!(bad.bomb()[0].0, nt + 250_000, "a BAD (index 3) lights a bomb");
         assert_eq!(bad.bomb()[0].1, 3, "bomb judge index is BAD");
-        // Empty POOR: a 300ms-early press lands only in the MS window (index 4) -> no bomb.
         let mut poor = Player::new(m, false);
         let rp = poor.press(0, nt - 300_000, |_| {}).unwrap();
-        assert_eq!(rp.judge, rbms_judge::Judge::Poor, "300ms-early is an empty poor");
-        assert_eq!(poor.bomb()[0].0, i64::MIN, "an empty POOR (index 4) lights no bomb");
+        assert_eq!(rp.judge, rbms_judge::Judge::Miss, "300ms-early is an empty poor (judge code 5)");
+        assert_eq!(poor.bomb()[0].0, i64::MIN, "an empty POOR (index 5) lights no bomb");
     }
 
     #[test]
@@ -761,21 +786,14 @@ mod tests {
     }
 
     #[test]
-    fn judge_rate_widening_reaches_bad_edge() {
-        // #RANK 3 (100%) BAD late edge is -280ms; a 300ms-late press is beyond it (empty MS POOR).
-        // Widening to 200% (BAD late edge -560ms) makes the SAME late press a BAD.
+    fn judge_width_cannot_reach_past_the_rank_bad_edge() {
         let m = model(b"#BPM 120\r\n#RANK 3\r\n#WAV01 a.wav\r\n#00111:01\r\n");
         let nt = m.timelines.iter().find_map(|t| t.notes[0].as_ref()).map(|n| n.time_us).unwrap();
         let mut narrow = Player::new(m.clone(), false);
-        // 300ms late at 100%: in MS (ms.0 = -150_000 fixed... late side is bd.0=-280k) -> beyond BAD.
-        // bd late edge -280ms, ms late edge -150ms (fixed). A 300ms-late press: dm = -300_000.
-        // -300_000 < bd.0(-280_000) AND < ms.0(-150_000) -> outside MS too -> press returns None.
         assert!(narrow.press(0, nt + 300_000, |_| {}).is_none(), "300ms late at 100% is beyond every window");
         let mut wide = Player::new(m, false);
         wide.set_judge_rate(200);
-        // At 200%: gd late edge = -300ms, bd late edge = -560ms. A 400ms-late press (dm = -400ms)
-        // is past GOOD but inside BAD.
-        assert_eq!(wide.press(0, nt + 400_000, |_| {}).unwrap().judge, rbms_judge::Judge::Bad, "200% width makes the 400ms-late press a BAD");
+        assert!(wide.press(0, nt + 300_000, |_| {}).is_none(), "200% width still cannot reach past the BAD edge");
     }
 
     #[test]
@@ -799,28 +817,23 @@ mod tests {
         let nt = m.timelines.iter().find_map(|t| t.notes[0].as_ref()).map(|n| n.time_us).unwrap();
         let mut p = Player::new(m, false);
         p.update(nt + 1_000_000, |_| {});
-        assert_eq!(p.judge.counts[5], 1, "unpressed note swept to MISS");
-        assert_eq!(p.judge.max_combo, 0, "a swept MISS keeps combo at zero");
+        assert_eq!(p.judge.counts[4], 1, "unpressed note swept to 見逃し POOR (beatoraja judge code 4)");
+        assert_eq!(p.judge.counts[5], 0, "nothing lands in the 空POOR slot");
+        assert_eq!(p.judge.max_combo, 0, "a swept POOR keeps combo at zero");
     }
 
     #[test]
     fn held_ln_never_released_finalises_via_update_sweep() {
-        // Press the LN head (CLEAR-ish hold) but never release: update() past end+LN_MARGIN
-        // finalises the LN. The head was PGREAT but the (missed) end drags it to a worse judge.
         let m = model(b"#BPM 120\r\n#WAV01 a.wav\r\n#00151:01000001\r\n");
         let t: Vec<i64> = m.timelines.iter().flat_map(|tl| tl.notes[0].as_ref()).map(|n| n.time_us).collect();
         let (head, end) = (t[0], t[1]);
         let mut p = Player::new(m, false);
         assert_eq!(p.press(0, head, |_| {}).unwrap().judge, rbms_judge::Judge::PerfectGreat, "LN head PGREAT");
-        // Before the sweep window, the LN is still held and not yet finalized.
-        p.update(end + 100_000, |_| {});
-        assert_eq!(p.judge.total_judged(), 0, "still held just after end (within LN_MARGIN), not finalized");
-        // Past end + LN_MARGIN (200ms) the held LN is finalized.
+        p.update(end - 1, |_| {});
+        assert_eq!(p.judge.total_judged(), 0, "before the end the LN is still held");
         p.update(end + 1_000_000, |_| {});
         assert_eq!(p.judge.total_judged(), 1, "the over-held LN is finalized exactly once");
-        // The end was far missed -> the final judge is worse than the head's PGREAT (counts[0] not bumped).
-        // NOTE: a very-late finalisation resolves through ln_end.judge(end-now) which is far negative.
-        assert_eq!(p.judge.counts[0], 0, "an LN held far past its end does not stay a PGREAT");
+        assert_eq!(p.judge.counts[0], 1, "finalized with the head PGREAT (lnstartJudge)");
     }
 
     #[test]
@@ -896,7 +909,7 @@ mod tests {
         let mut p = Player::new(m, false);
         let nt = p.last_time_us();
         p.update(nt + 1_000_000, |_| {});
-        assert_eq!(p.judge.counts[5], 1, "the note was swept to MISS");
-        assert_eq!(p.bomb()[0].0, i64::MIN, "a swept MISS lights no bomb");
+        assert_eq!(p.judge.counts[4], 1, "the note was swept to 見逃し POOR");
+        assert_eq!(p.bomb()[0].0, i64::MIN, "a swept POOR lights no bomb");
     }
 }

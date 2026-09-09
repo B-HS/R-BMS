@@ -4,10 +4,12 @@ pub mod windows;
 
 pub use gauge::{ClearType, Gauge, GaugeKind, clear_lamp};
 pub use matcher::{JudgeEngine, JudgeResult};
-pub use windows::{JudgeWindows, rank_to_judgerank};
+pub use windows::{JudgeProperty, JudgeWindows, MissCondition, judgerank_for, rank_to_judgerank};
 
-/// A single judgment outcome. PG/GR/GD keep combo; BD/POOR/MISS break it. EX score =
-/// 2·PG + 1·GR.
+/// A single judgment outcome, in beatoraja's judge-code order. `Poor` is index 4 (見逃し POOR — a
+/// note that went by unhit) and `Miss` is index 5 (空POOR — a press that reached only the MS band
+/// and consumed no note). Combo behaviour per index comes from the mode's
+/// [`JudgeProperty::combo`](windows::JudgeProperty::combo) table. EX score = 2·PG + 1·GR.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Judge {
     PerfectGreat,
@@ -31,9 +33,9 @@ mod tests {
         assert_eq!(w.judge(-60_000), Some(Judge::Great));
         assert_eq!(w.judge(120_000), Some(Judge::Good));
         assert_eq!(w.judge(-260_000), Some(Judge::Bad));
-        assert_eq!(w.judge(300_000), Some(Judge::Poor));
+        assert_eq!(w.judge(300_000), Some(Judge::Miss), "the MS band is beatoraja judge code 5 (empty poor)");
         assert_eq!(w.judge(-300_000), None);
-        assert_eq!(w.judge(450_000), Some(Judge::Poor));
+        assert_eq!(w.judge(450_000), Some(Judge::Miss));
     }
 
     #[test]
@@ -83,12 +85,29 @@ mod tests {
     }
 
     #[test]
-    fn passed_note_becomes_miss_and_breaks_combo() {
+    fn swept_miss_uses_poor_slot_index_4() {
         let mut e = JudgeEngine::new(vec![vec![100_000]], JudgeWindows::SEVENKEY_NOTE);
         e.combo = 5;
         e.update(500_000);
-        assert_eq!(e.counts[5], 1);
+        assert_eq!(e.counts[4], 1);
+        assert_eq!(e.counts[5], 0, "nothing lands in the empty-poor slot");
         assert_eq!(e.combo, 0);
+    }
+
+    #[test]
+    fn swept_miss_costs_the_poor_gauge_delta_normal_minus_6() {
+        let mut e = JudgeEngine::new(vec![vec![100_000]], JudgeWindows::SEVENKEY_NOTE);
+        e.set_gauge(GaugeKind::Normal, 200.0);
+        e.update(500_000);
+        assert_eq!(e.gauge.value(), 14.0, "20.0 - 6.0");
+    }
+
+    #[test]
+    fn empty_poor_costs_the_ms_gauge_delta_normal_minus_2() {
+        let mut e = JudgeEngine::new(vec![vec![1_000_000]], JudgeWindows::SEVENKEY_NOTE);
+        e.set_gauge(GaugeKind::Normal, 200.0);
+        e.press(0, 700_000);
+        assert_eq!(e.gauge.value(), 18.0, "20.0 - 2.0");
     }
 
     #[test]
@@ -117,7 +136,7 @@ mod tests {
         let before = e.gauge.value();
         e.update(1_000_000);
         assert!(e.gauge.value() < before, "hard gauge must drop on miss");
-        assert_eq!(e.counts[5], 1);
+        assert_eq!(e.counts[4], 1);
     }
 
     #[test]
@@ -145,10 +164,11 @@ mod tests {
         let mut e = JudgeEngine::new(vec![vec![1_000_000]], JudgeWindows::SEVENKEY_NOTE);
         e.combo = 7;
         let r = e.press(0, 700_000).unwrap();
-        assert_eq!(r.judge, Judge::Poor, "300ms-early press is an empty poor");
+        assert_eq!(r.judge, Judge::Miss, "300ms-early press is an empty poor (judge code 5)");
         assert_eq!(e.empty_poor, 1);
-        assert_eq!(e.combo, 7, "empty poor must not break combo");
-        assert_eq!(e.counts, [0; 6], "empty poor does not consume a note");
+        assert_eq!(e.counts[5], 1, "beatoraja tallies it via addJudgeCount(5) -> ems/lms");
+        assert_eq!(e.combo, 7, "SEVENKEYS combo[5] = true, so an empty poor must not break combo");
+        assert_eq!(e.counts[..5], [0; 5], "empty poor does not consume a note");
         let r2 = e.press(0, 1_000_000).unwrap();
         assert_eq!(r2.judge, Judge::PerfectGreat, "the un-consumed note is still hittable");
         assert_eq!(e.counts[0], 1);
@@ -187,8 +207,8 @@ mod tests {
         e.update(4_000_000); // note 3 swept -> late MISS
         assert_eq!(e.early[0], 1, "early PGREAT");
         assert_eq!(e.late[1], 1, "late GREAT");
-        assert_eq!(e.late[5], 1, "a swept miss counts as late");
-        assert_eq!(e.early[5], 0, "there is no early miss in normal play");
+        assert_eq!(e.late[4], 1, "a swept poor counts as late");
+        assert_eq!(e.early[4], 0, "there is no early swept poor in normal play");
         for i in 0..6 {
             assert_eq!(e.counts[i], e.early[i] + e.late[i], "counts[{i}] must equal early+late");
         }
@@ -255,11 +275,13 @@ mod tests {
     }
 
     #[test]
-    fn already_judged_note_is_not_rematched() {
+    fn already_judged_note_is_not_rematched_but_yields_an_empty_poor() {
         let mut e = note(100_000);
         e.press(0, 100_000).unwrap();
-        assert!(e.press(0, 100_000).is_none(), "a consumed note cannot be hit twice");
-        assert_eq!(e.counts[0], 1);
+        let again = e.press(0, 100_000).unwrap();
+        assert_eq!(again.judge, Judge::Miss, "a consumed note cannot be hit twice, the press is an empty poor");
+        assert_eq!(e.counts[0], 1, "the original PGREAT stands");
+        assert_eq!(e.counts[5], 1);
     }
 
     // --- BD / late edges via press -----------------------------------------
@@ -297,11 +319,11 @@ mod tests {
         // dm exactly +500_000 is the far edge of the MS window -> empty poor.
         let mut e = note(1_000_000);
         let r = e.press(0, 500_000).unwrap();
-        assert_eq!(r.judge, Judge::Poor);
+        assert_eq!(r.judge, Judge::Miss);
         assert_eq!(r.delta_us, 500_000);
         assert!(r.fast);
         assert_eq!(e.empty_poor, 1);
-        assert_eq!(e.counts, [0; 6], "empty poor never touches counts");
+        assert_eq!(e.counts[..5], [0; 5], "empty poor never consumes a note");
     }
 
     #[test]
@@ -309,12 +331,12 @@ mod tests {
         let mut e = note(1_000_000);
         e.press(0, 700_000); // empty poor, dm +300_000
         assert_eq!(e.empty_poor, 1);
-        assert_eq!(e.early, [0; 6], "empty poor not split early/late");
-        assert_eq!(e.late, [0; 6]);
-        assert_eq!(e.fast, 0, "empty poor excluded from fast/slow");
+        assert_eq!(e.early[5], 1, "an early empty poor feeds the IR `ems` field");
+        assert_eq!(e.late[5], 0);
+        assert_eq!(e.fast, 0, "empty poor excluded from fast/slow (beatoraja records only judge < 4)");
         assert_eq!(e.slow, 0);
         assert_eq!(e.avg_judge_us(), 0, "no timed hit yet");
-        assert_eq!(e.last_judge, Some(Judge::Poor));
+        assert_eq!(e.last_judge, Some(Judge::Miss));
     }
 
     #[test]
@@ -323,7 +345,7 @@ mod tests {
         let mut e = note(1_000_000);
         e.press(0, 700_000); // empty poor
         e.update(2_000_000); // sweep the still-unjudged note
-        assert_eq!(e.counts[5], 1, "the note is still there to be missed");
+        assert_eq!(e.counts[4], 1, "the note is still there to be swept into POOR");
         assert_eq!(e.empty_poor, 1);
         assert_eq!(e.total_judged(), 1, "only the miss is in counts");
     }
@@ -334,7 +356,8 @@ mod tests {
         e.press(0, 600_000); // dm +400_000 empty poor
         e.press(0, 650_000); // dm +350_000 empty poor
         assert_eq!(e.empty_poor, 2, "each far-early mash adds an empty poor");
-        assert_eq!(e.counts, [0; 6]);
+        assert_eq!(e.counts[5], 2);
+        assert_eq!(e.counts[..5], [0; 5]);
     }
 
     // --- LN: head / release / final = worse(head, end) ---------------------
@@ -369,8 +392,7 @@ mod tests {
         // Head PG, but release far from end so end window classifies worse.
         let mut e = ln(100_000, 600_000);
         e.press(0, 100_000).unwrap(); // head PG
-        // ln_end gd is +-200_000; release 230ms early -> dm +230_000 -> BD on the end.
-        let r = e.release(0, 370_000).unwrap();
+        let r = e.release(0, 390_000).unwrap();
         assert_eq!(r.judge, Judge::Bad, "worse(PG, BD) = BD");
         assert_eq!(e.counts[3], 1);
         assert_eq!(e.combo, 0, "a BAD release breaks combo");
@@ -414,18 +436,49 @@ mod tests {
     }
 
     #[test]
-    fn ln_update_force_finalizes_over_held_ln() {
-        // Held LN never released; update past end + LN_MARGIN must finalize it.
+    fn over_held_plain_ln_takes_the_head_judgment() {
         let mut e = ln(100_000, 600_000);
         e.press(0, 100_000).unwrap(); // head PG, holding
-        e.update(600_000 + 200_000); // exactly end + LN_MARGIN: NOT yet finalized (strict >)
-        assert_eq!(e.total_judged(), 0, "at exactly end+margin the LN is still held");
-        e.update(600_000 + 200_001); // 1us past margin -> finalized
-        assert_eq!(e.total_judged(), 1, "over-held LN finalized");
-        // dm = end - now = 600_000 - 800_001 = -200_001 -> ln_end BD; worse(PG, BD) = BD.
-        assert_eq!(e.counts[3], 1, "force-finalized as BAD");
-        assert_eq!(e.late[3], 1, "sweep/force-finalize is always late");
-        assert_eq!(e.combo, 0);
+        e.update(600_000);
+        assert_eq!(e.total_judged(), 0, "at exactly the end the LN is still held");
+        e.update(600_001);
+        assert_eq!(e.total_judged(), 1, "over-held LN finalized once");
+        assert_eq!(e.counts[0], 1, "finalized with the head PGREAT, not a re-judged end");
+        assert_eq!(e.early[0], 1, "the commit takes the head delta's direction, not the sweep's");
+        assert_eq!(e.late[0], 0);
+        assert_eq!(e.combo, 1);
+    }
+
+    #[test]
+    fn longnote_margin_rate_moves_the_pms_over_hold_commit() {
+        use rbms_model::Mode;
+        let build = |rate: i32| {
+            let mut e = JudgeEngine::from_pairs(vec![vec![(100_000, Some(600_000))]], JudgeWindows::SEVENKEY_NOTE);
+            e.apply_mode(&Mode::POPN_9K, 100);
+            e.set_longnote_margin_rate(rate);
+            e.press(0, 100_000).unwrap();
+            e
+        };
+
+        let mut stock = build(100);
+        stock.update(700_000);
+        assert_eq!(stock.total_judged(), 0, "at end + 200ms the stock PMS margin has not elapsed");
+        stock.update(800_001);
+        assert_eq!(stock.total_judged(), 1, "committed once past end + 200ms");
+
+        let mut none = build(0);
+        none.update(600_001);
+        assert_eq!(none.total_judged(), 1, "a 0% rate commits as soon as the end passes");
+    }
+
+    #[test]
+    fn over_held_plain_ln_commit_is_late_when_the_head_was_hit_late() {
+        let mut e = ln(100_000, 600_000);
+        assert_eq!(e.press(0, 130_000).unwrap().judge, Judge::Great, "30ms late head is GREAT at 100%");
+        e.update(600_001);
+        assert_eq!(e.counts[1], 1, "committed with the head GREAT");
+        assert_eq!(e.late[1], 1, "a late head makes the over-hold commit LATE");
+        assert_eq!(e.early[1], 0);
     }
 
     #[test]
@@ -433,7 +486,7 @@ mod tests {
         // While an LN is held, update must not sweep it early as a miss.
         let mut e = ln(100_000, 600_000);
         e.press(0, 100_000).unwrap();
-        e.update(650_000); // past end but within margin
+        e.update(500_000);
         assert_eq!(e.total_judged(), 0, "still holding, not missed");
         assert_eq!(e.combo, 0);
     }
@@ -448,7 +501,7 @@ mod tests {
             gr: (-450_000, 450_000),
             gd: (-500_000, 500_000),
             bd: (-550_000, 550_000),
-            ms: (-550_000, 600_000),
+            ms: Some((-550_000, 600_000)),
         };
         e.set_ln_end(wide);
         e.press(0, 100_000).unwrap(); // head PG
@@ -462,7 +515,7 @@ mod tests {
         // A far-early press on an LN head is an empty poor: it must NOT start a hold.
         let mut e = ln(1_000_000, 1_600_000);
         let r = e.press(0, 700_000).unwrap(); // dm +300_000 -> empty poor
-        assert_eq!(r.judge, Judge::Poor);
+        assert_eq!(r.judge, Judge::Miss);
         assert_eq!(e.empty_poor, 1);
         // nothing is holding, so a release finds nothing.
         assert!(e.release(0, 1_600_000).is_none(), "empty poor must not arm a hold");
@@ -481,7 +534,7 @@ mod tests {
         e.update(1_280_000);
         assert_eq!(e.total_judged(), 0, "at exactly the bound the note is not yet swept (strict <)");
         e.update(1_280_001);
-        assert_eq!(e.counts[5], 1, "1us further sweeps it to MISS");
+        assert_eq!(e.counts[4], 1, "1us further sweeps it into the 見逃し POOR slot");
     }
 
     #[test]
@@ -491,27 +544,27 @@ mod tests {
         let counts = e.counts;
         e.update(9_000_000);
         assert_eq!(e.counts, counts, "re-running update does not double-count");
-        assert_eq!(e.counts[5], 1);
+        assert_eq!(e.counts[4], 1);
     }
 
     #[test]
     fn update_sweeps_multiple_lanes_and_notes() {
         let mut e = Eng::new(vec![vec![100_000, 200_000], vec![300_000]], JudgeWindows::SEVENKEY_NOTE);
         e.update(10_000_000);
-        assert_eq!(e.counts[5], 3, "all three notes swept to MISS");
+        assert_eq!(e.counts[4], 3, "all three notes swept into 見逃し POOR");
         assert_eq!(e.combo, 0);
         for i in 0..6 {
             assert_eq!(e.counts[i], e.early[i] + e.late[i], "counts[{i}] == early+late");
         }
-        assert_eq!(e.late[5], 3, "every swept miss is late");
-        assert_eq!(e.early[5], 0);
+        assert_eq!(e.late[4], 3, "every swept poor is late");
+        assert_eq!(e.early[4], 0);
     }
 
     #[test]
     fn swept_miss_is_excluded_from_avg_and_fast_slow() {
         let mut e = note(100_000);
         e.update(5_000_000);
-        assert_eq!(e.counts[5], 1);
+        assert_eq!(e.counts[4], 1);
         assert_eq!(e.fast, 0, "miss not fast");
         assert_eq!(e.slow, 0, "miss not slow");
         assert_eq!(e.avg_judge_us(), 0, "miss excluded from timing average");
@@ -541,14 +594,13 @@ mod tests {
     }
 
     #[test]
-    fn dm_zero_is_classified_as_late_not_early() {
-        // dm == 0 (perfect timing) is recorded as LATE (record_direction uses dm > 0 for early).
+    fn dm_zero_is_classified_as_early() {
         let mut e = note(1_000_000);
-        e.press(0, 1_000_000).unwrap(); // dm 0 -> PG, late
+        e.press(0, 1_000_000).unwrap();
         assert_eq!(e.counts[0], 1);
-        assert_eq!(e.late[0], 1, "dm==0 counts as late");
-        assert_eq!(e.early[0], 0);
-        assert_eq!(e.fast, 0, "dm==0 is neither fast nor slow");
+        assert_eq!(e.early[0], 1, "dm==0 counts as early");
+        assert_eq!(e.late[0], 0);
+        assert_eq!(e.fast, 1, "dm==0 is fast");
         assert_eq!(e.slow, 0);
     }
 
@@ -753,7 +805,7 @@ mod tests {
         let model = cn_model(LnKind::Cn, 1_000_000, 1_600_000);
         let mut e = JudgeEngine::from_model(&model, JudgeWindows::SEVENKEY_NOTE);
         e.update(5_000_000); // sweep far past the head — never hit
-        assert_eq!(e.counts[5], 2, "a never-hit CN misses both head and end");
+        assert_eq!(e.counts[4], 2, "a never-hit CN poors both head and end");
         assert_eq!(e.total_judged(), 2);
     }
 
@@ -783,5 +835,153 @@ mod tests {
         let r = e.release(0, 1_500_000).unwrap(); // early -> POOR end -> worse(PG, POOR) = POOR
         assert_eq!(r.judge, Judge::Poor);
         assert_eq!(e.total_judged(), 1, "still one judgment for the LN");
+    }
+
+    fn lane_model(mode: rbms_model::Mode, notes: Vec<(usize, i64, rbms_model::NoteKind)>) -> rbms_model::Model {
+        use rbms_model::{Model, ModelMeta, Note, TimeLine};
+        let lanes = mode.key;
+        let timelines = notes
+            .into_iter()
+            .map(|(lane, t, kind)| {
+                let mut tl = TimeLine::empty(lanes, t, 0.0, 130.0);
+                tl.notes[lane] = Some(Note { kind, wav: 0, start_us: 0, duration_us: 0, time_us: t, section: 0.0, layered: Vec::new() });
+                tl
+            })
+            .collect();
+        Model {
+            mode,
+            meta: ModelMeta { total: 300.0, rank: 3, ..Default::default() },
+            wavmap: Vec::new(),
+            bgamap: Vec::new(),
+            init_bpm: 130.0,
+            timelines,
+            md5: String::new(),
+            sha256: String::new(),
+        }
+    }
+
+    #[test]
+    fn empty_poor_keeps_combo_on_seven_keys_but_breaks_it_on_five() {
+        use rbms_model::{Mode, NoteKind};
+        let seven = lane_model(Mode::BEAT_7K, vec![(0, 1_000_000, NoteKind::Normal)]);
+        let mut e7 = JudgeEngine::from_model(&seven, JudgeWindows::SEVENKEY_NOTE);
+        e7.combo = 5;
+        e7.press(0, 700_000);
+        assert_eq!(e7.counts[5], 1, "7K empty poor tallied");
+        assert_eq!(e7.combo, 5, "7K keeps the combo through an empty poor");
+
+        let five = lane_model(Mode::BEAT_5K, vec![(0, 1_000_000, NoteKind::Normal)]);
+        let mut e5 = JudgeEngine::from_model_for_mode(&five);
+        e5.combo = 5;
+        e5.press(0, 700_000);
+        assert_eq!(e5.counts[5], 1, "5K empty poor tallied");
+        assert_eq!(e5.combo, 0, "5K combo[5] is false, so the combo breaks");
+    }
+
+    #[test]
+    fn from_model_for_mode_uses_the_five_key_note_table_not_the_seven_key_one() {
+        use rbms_model::{Mode, NoteKind};
+        let five = lane_model(Mode::BEAT_5K, vec![(0, 1_000_000, NoteKind::Normal)]);
+        let mut e5 = JudgeEngine::from_model_for_mode(&five);
+        assert_eq!(e5.press(0, 880_000).unwrap().judge, Judge::Bad, "120ms early is past the 5K GOOD edge");
+
+        let seven = lane_model(Mode::BEAT_7K, vec![(0, 1_000_000, NoteKind::Normal)]);
+        let mut e7 = JudgeEngine::from_model_for_mode(&seven);
+        assert_eq!(e7.press(0, 880_000).unwrap().judge, Judge::Good, "the same press is GOOD on 7K");
+    }
+
+    #[test]
+    fn scratch_lane_uses_the_wider_scratch_window() {
+        use rbms_model::{Mode, NoteKind};
+        let m = lane_model(Mode::BEAT_7K, vec![(0, 1_000_000, NoteKind::Normal), (7, 2_000_000, NoteKind::Normal)]);
+        let mut e = JudgeEngine::from_model(&m, JudgeWindows::SEVENKEY_NOTE);
+        assert_eq!(e.press(0, 975_000).unwrap().judge, Judge::Great, "25ms off on a key lane is GREAT");
+        assert_eq!(e.press(7, 1_975_000).unwrap().judge, Judge::PerfectGreat, "25ms off on the scratch lane is still PGREAT");
+    }
+
+    #[test]
+    fn mine_damages_the_gauge_only_while_the_lane_is_held() {
+        use rbms_model::{Mode, NoteKind};
+        let m = lane_model(Mode::BEAT_7K, vec![(0, 1_000_000, NoteKind::Mine { damage: 5.0 })]);
+        let mut held = JudgeEngine::from_model(&m, JudgeWindows::SEVENKEY_NOTE);
+        held.set_gauge(GaugeKind::Normal, 300.0);
+        held.press(0, 900_000);
+        held.update(1_000_000);
+        assert_eq!(held.gauge.value(), 15.0, "20.0 - 5.0 mine damage");
+        assert_eq!(held.counts, [0; 6], "a mine is never a judgment");
+
+        let mut idle = JudgeEngine::from_model(&m, JudgeWindows::SEVENKEY_NOTE);
+        idle.set_gauge(GaugeKind::Normal, 300.0);
+        idle.update(1_000_000);
+        assert_eq!(idle.gauge.value(), 20.0, "an un-held lane takes no mine damage");
+    }
+
+    #[test]
+    fn mine_damage_stops_once_the_key_is_released() {
+        use rbms_model::{Mode, NoteKind};
+        let m = lane_model(Mode::BEAT_7K, vec![(0, 1_000_000, NoteKind::Mine { damage: 5.0 })]);
+        let mut e = JudgeEngine::from_model(&m, JudgeWindows::SEVENKEY_NOTE);
+        e.set_gauge(GaugeKind::Normal, 300.0);
+        e.press(0, 800_000);
+        e.release(0, 900_000);
+        e.update(1_000_000);
+        assert_eq!(e.gauge.value(), 20.0, "released before the mine, so no damage");
+    }
+
+    #[test]
+    fn mine_damage_is_frozen_on_a_dead_gauge() {
+        use rbms_model::{Mode, NoteKind};
+        let m = lane_model(Mode::BEAT_7K, vec![(0, 1_000_000, NoteKind::Mine { damage: 500.0 })]);
+        let mut e = JudgeEngine::from_model(&m, JudgeWindows::SEVENKEY_NOTE);
+        e.set_gauge(GaugeKind::Hard, 300.0);
+        e.press(0, 900_000);
+        e.update(1_000_000);
+        assert_eq!(e.gauge.value(), 0.0, "damage beyond the floor clamps to min 0");
+        e.gauge.add_value(-10.0);
+        assert_eq!(e.gauge.value(), 0.0, "a dead gauge does not move again");
+    }
+
+    #[test]
+    fn rehitting_a_resolved_note_inside_the_ms_band_is_an_empty_poor() {
+        let mut e = JudgeEngine::new(vec![vec![1_000_000]], JudgeWindows::SEVENKEY_NOTE);
+        assert_eq!(e.press(0, 1_000_000).unwrap().judge, Judge::PerfectGreat);
+        let r = e.press(0, 700_000).unwrap();
+        assert_eq!(r.judge, Judge::Miss, "re-hit inside the MS band is an empty poor");
+        assert_eq!(e.counts[5], 1);
+        assert_eq!(e.counts[0], 1, "the original PGREAT is untouched");
+    }
+
+    #[test]
+    fn rehitting_a_resolved_note_is_an_empty_poor_even_after_update_moved_the_cursor() {
+        let mut e = JudgeEngine::new(vec![vec![1_000_000]], JudgeWindows::SEVENKEY_NOTE);
+        assert_eq!(e.press(0, 1_000_000).unwrap().judge, Judge::PerfectGreat);
+        e.update(1_000_000);
+        let r = e.press(0, 1_150_000).unwrap();
+        assert_eq!(r.judge, Judge::Miss, "150ms late is the MS lower bound, still an empty poor");
+        assert_eq!(e.counts[5], 1);
+        assert_eq!(e.counts[0], 1, "the original PGREAT is untouched");
+        assert_eq!(e.late[5], 1, "dm = -150000 is LATE");
+    }
+
+    #[test]
+    fn a_resolved_note_stops_being_a_rehit_candidate_once_it_leaves_the_gate() {
+        let mut e = JudgeEngine::new(vec![vec![1_000_000]], JudgeWindows::SEVENKEY_NOTE);
+        assert_eq!(e.press(0, 1_000_000).unwrap().judge, Judge::PerfectGreat);
+        e.update(2_000_000);
+        assert!(e.press(0, 1_400_000).is_none(), "400ms late is outside the MS band, so no empty poor");
+        assert_eq!(e.counts[5], 0);
+    }
+
+    #[test]
+    fn held_cn_whose_end_passes_the_bad_bound_becomes_poor() {
+        use rbms_model::LnKind;
+        let model = cn_model(LnKind::Cn, 1_000_000, 1_600_000);
+        let mut e = JudgeEngine::from_model(&model, JudgeWindows::SEVENKEY_NOTE);
+        assert_eq!(e.press(0, 1_000_000).unwrap().judge, Judge::PerfectGreat, "head counted at press");
+        e.update(1_700_000);
+        assert_eq!(e.total_judged(), 1, "100ms past the end the CN is still releasable");
+        e.update(5_000_000);
+        assert_eq!(e.counts[4], 1, "the unreleased CN end became a 見逃し POOR");
+        assert_eq!(e.total_judged(), 2);
     }
 }
