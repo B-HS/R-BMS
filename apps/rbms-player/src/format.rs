@@ -1,10 +1,21 @@
-//! Pure formatting / palette helpers for the UI (no app state). Extracted from `main.rs`: label
-//! strings, IIDX/reference colour palettes, timestamp/duration formatting, and `ClearType` id
-//! round-tripping for score persistence.
+//! Pure formatting / palette helpers for the UI (no app state): label strings, IIDX/reference
+//! colour palettes and timestamp/duration formatting. Lamp id round-tripping lives in
+//! `rbms_judge::clear_type_id`, next to the `ClearType` it encodes.
 
 use rbms_judge::{ClearType, GaugeKind};
 use rbms_model::Mode;
 use rbms_render::Color;
+
+/// Short marker appended to a record's timestamp when it was judged under a rule version this
+/// build no longer produces.
+pub(crate) fn rule_version_mark(rule_version: u32) -> &'static str {
+    if rbms_store::is_stale_rule_version(rule_version) { " *" } else { "" }
+}
+
+/// Spelled-out counterpart of [`rule_version_mark`] for the record-detail modal.
+pub(crate) fn rule_version_note(rule_version: u32) -> &'static str {
+    if rbms_store::is_stale_rule_version(rule_version) { "   OLD RULE" } else { "" }
+}
 
 pub(crate) fn gauge_name(g: GaugeKind) -> &'static str {
     match g {
@@ -100,38 +111,6 @@ pub(crate) fn mode_short(mode: Mode) -> &'static str {
     }
 }
 
-/// Reference implementation `ClearType` id (`ClearType.java`) for a lamp — persisted in score records so the
-/// lamp round-trips. (LightAssistEasy=3 is unused; rbms has no separate light-assist lamp.)
-pub(crate) fn clear_type_id(c: ClearType) -> u8 {
-    match c {
-        ClearType::NoPlay => 0,
-        ClearType::Failed => 1,
-        ClearType::AssistEasy => 2,
-        ClearType::Easy => 4,
-        ClearType::Normal => 5,
-        ClearType::Hard => 6,
-        ClearType::ExHard => 7,
-        ClearType::FullCombo => 8,
-        ClearType::Perfect => 9,
-        ClearType::Max => 10,
-    }
-}
-
-pub(crate) fn clear_type_from_id(id: u8) -> ClearType {
-    match id {
-        1 => ClearType::Failed,
-        2 | 3 => ClearType::AssistEasy,
-        4 => ClearType::Easy,
-        5 => ClearType::Normal,
-        6 => ClearType::Hard,
-        7 => ClearType::ExHard,
-        8 => ClearType::FullCombo,
-        9 => ClearType::Perfect,
-        10 => ClearType::Max,
-        _ => ClearType::NoPlay,
-    }
-}
-
 /// Clear-lamp label + colour. Colours are the reference implementation's official lamp palette
 /// (`select/SkinDistributionGraph.LAMP`, ARGB → RGB).
 pub(crate) fn clear_label_color(c: ClearType) -> (&'static str, Color) {
@@ -167,44 +146,35 @@ mod tests {
     ];
     const ALL_GAUGES: [GaugeKind; 6] = [GaugeKind::AssistEasy, GaugeKind::Easy, GaugeKind::Normal, GaugeKind::Hard, GaugeKind::ExHard, GaugeKind::Hazard];
 
-    // --- fmt_datetime ---
-
     #[test]
     fn fmt_datetime_epoch_and_known_points() {
         assert_eq!(fmt_datetime(0), "1970-01-01 00:00");
         assert_eq!(fmt_datetime(86_400_000), "1970-01-02 00:00");
-        // exactly one hour and one minute past epoch
         assert_eq!(fmt_datetime(3_660_000), "1970-01-01 01:01");
         assert_eq!(fmt_datetime(1_700_000_000_000), "2023-11-14 22:13");
     }
 
     #[test]
     fn fmt_datetime_truncates_within_a_minute() {
-        // sub-minute ms are floored, not rounded.
         assert_eq!(fmt_datetime(59_999), "1970-01-01 00:00");
         assert_eq!(fmt_datetime(60_000), "1970-01-01 00:01");
     }
 
     #[test]
     fn fmt_datetime_uses_floored_division_for_negative_times() {
-        // 1ms before epoch: div_euclid floors toward -inf, so this is 23:59 on 1969-12-31, not a
-        // wrapped/garbage value.
         assert_eq!(fmt_datetime(-1), "1969-12-31 23:59");
         assert_eq!(fmt_datetime(-86_400_000), "1969-12-31 00:00");
     }
 
     #[test]
     fn fmt_datetime_leap_day_2000() {
-        // 2000-02-29 is a valid leap day (year divisible by 400). Epoch ms for 2000-02-29 12:00 UTC.
-        // days from epoch to 2000-02-29 = 11016; +0.5 day for noon.
         let ms = (11016_i64 * 86400 + 12 * 3600) * 1000;
         assert_eq!(fmt_datetime(ms), "2000-02-29 12:00");
     }
 
     #[test]
     fn fmt_datetime_year_boundary_rollover() {
-        // 1999-12-31 23:59 then the next minute is 2000-01-01 00:00.
-        let new_year_2000 = 946_684_800_000_i64; // 2000-01-01 00:00:00 UTC
+        let new_year_2000 = 946_684_800_000_i64;
         assert_eq!(fmt_datetime(new_year_2000), "2000-01-01 00:00");
         assert_eq!(fmt_datetime(new_year_2000 - 60_000), "1999-12-31 23:59");
     }
@@ -220,55 +190,6 @@ mod tests {
             assert_eq!(&s[13..14], ":");
         }
     }
-
-    // --- clear_type id round-trip ---
-
-    #[test]
-    fn clear_type_id_round_trips_for_every_lamp() {
-        for c in ALL_CLEARS {
-            assert_eq!(clear_type_from_id(clear_type_id(c)), c, "{c:?} round-trips");
-        }
-    }
-
-    #[test]
-    fn clear_type_ids_are_the_reference_values() {
-        assert_eq!(clear_type_id(ClearType::NoPlay), 0);
-        assert_eq!(clear_type_id(ClearType::Failed), 1);
-        assert_eq!(clear_type_id(ClearType::AssistEasy), 2);
-        assert_eq!(clear_type_id(ClearType::Easy), 4, "id 3 (LightAssistEasy) is skipped");
-        assert_eq!(clear_type_id(ClearType::Normal), 5);
-        assert_eq!(clear_type_id(ClearType::Hard), 6);
-        assert_eq!(clear_type_id(ClearType::ExHard), 7);
-        assert_eq!(clear_type_id(ClearType::FullCombo), 8);
-        assert_eq!(clear_type_id(ClearType::Perfect), 9);
-        assert_eq!(clear_type_id(ClearType::Max), 10);
-    }
-
-    #[test]
-    fn clear_type_ids_are_strictly_monotonic() {
-        // The lamp id must increase with lamp strength so best_clear (a max over ids) is meaningful.
-        let ids: Vec<u8> = ALL_CLEARS.iter().map(|&c| clear_type_id(c)).collect();
-        for w in ids.windows(2) {
-            assert!(w[0] < w[1], "lamp ids strictly increasing: {ids:?}");
-        }
-    }
-
-    #[test]
-    fn clear_type_from_id_legacy_light_assist_maps_to_assist_easy() {
-        // Reference id 3 == LightAssistEasy, which rbms has no separate lamp for; it folds into
-        // AssistEasy. (Asymmetric: clear_type_id(AssistEasy) == 2, never 3.)
-        assert_eq!(clear_type_from_id(3), ClearType::AssistEasy);
-        assert_eq!(clear_type_id(clear_type_from_id(3)), 2, "3 folds down to the 2 lamp on re-encode");
-    }
-
-    #[test]
-    fn clear_type_from_id_unknown_ids_are_no_play() {
-        for id in [11_u8, 12, 50, 200, 255] {
-            assert_eq!(clear_type_from_id(id), ClearType::NoPlay, "unknown id {id} => NoPlay");
-        }
-    }
-
-    // --- difficulty helpers ---
 
     #[test]
     fn difficulty_name_covers_slots_and_falls_back() {
@@ -296,15 +217,12 @@ mod tests {
 
     #[test]
     fn difficulty_name_and_color_agree_on_valid_range() {
-        // Both helpers treat exactly 1..=5 as valid; outside that both use their fallback.
         for d in -2..=8 {
             let named = difficulty_name(d) != "—";
             let colored = difficulty_color(d) != Color::GRAY;
             assert_eq!(named, colored, "name/color validity agree at d={d}");
         }
     }
-
-    // --- rank_label ---
 
     #[test]
     fn rank_label_names_and_percent() {
@@ -320,8 +238,6 @@ mod tests {
         assert_eq!(rank_label(-1), "? 75%", "negative rank: ? name, NORMAL 75% fallback");
         assert_eq!(rank_label(5), "? 75%", "rank 5: ? name, NORMAL 75% fallback");
     }
-
-    // --- fmt_duration ---
 
     #[test]
     fn fmt_duration_minutes_and_seconds() {
@@ -347,8 +263,6 @@ mod tests {
         }
     }
 
-    // --- mode_short / mode_color ---
-
     #[test]
     fn mode_short_per_key_count() {
         assert_eq!(mode_short(Mode::BEAT_5K), "5K");
@@ -360,7 +274,6 @@ mod tests {
 
     #[test]
     fn every_default_mode_has_a_known_short_label() {
-        // mode_short covers all five default key counts (6/8/9/12/16).
         for &m in Mode::ALL {
             assert_ne!(mode_short(m), "?", "{} has a short label", m.name);
         }
@@ -368,8 +281,6 @@ mod tests {
 
     #[test]
     fn mode_color_covers_every_default_mode() {
-        // Every built-in mode gets a dedicated colour (incl. BEAT_10K, key=12), matching mode_short —
-        // the two helpers agree on which modes are "known".
         for &m in Mode::ALL {
             assert_ne!(mode_color(m), Color::GRAY, "{} has a dedicated colour", m.name);
             assert_ne!(mode_short(m), "?", "{} has a short label", m.name);
@@ -395,8 +306,6 @@ mod tests {
         assert_eq!(mode_short(weird), "?");
     }
 
-    // --- gauge_name / clear_label_color ---
-
     #[test]
     fn gauge_name_distinct_nonempty_per_kind() {
         let mut names: Vec<&str> = ALL_GAUGES.iter().map(|&g| gauge_name(g)).collect();
@@ -420,7 +329,6 @@ mod tests {
         labels.sort_unstable();
         labels.dedup();
         assert_eq!(labels.len(), len, "every lamp has a distinct label");
-        // colours: each lamp's colour should also be distinct (lamp LED palette)
         for i in 0..pairs.len() {
             for j in (i + 1)..pairs.len() {
                 assert_ne!(pairs[i].1, pairs[j].1, "lamp colours distinct: {:?} vs {:?}", pairs[i].0, pairs[j].0);
@@ -430,8 +338,6 @@ mod tests {
 
     #[test]
     fn clear_label_color_normal_lamp_is_named_clear() {
-        // The "Normal" ClearType is shown as "CLEAR" (reference naming), a surprising-but-correct
-        // mapping worth pinning.
         assert_eq!(clear_label_color(ClearType::Normal).0, "CLEAR");
     }
 }

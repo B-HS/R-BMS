@@ -83,8 +83,21 @@ pub(crate) struct Gpu {
     bga_active: bool,
 }
 
+/// Why the GPU backend could not be brought up. Every variant means the player cannot draw, so the
+/// caller reports it and exits rather than panicking on a machine that simply has no usable
+/// adapter — a headless CI box or an old GPU, both of which do happen.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum GpuError {
+    #[error("cannot draw on this window: {0}")]
+    Surface(#[from] wgpu::CreateSurfaceError),
+    #[error("no graphics adapter this build can use")]
+    NoAdapter,
+    #[error("the graphics adapter refused a device: {0}")]
+    NoDevice(#[from] wgpu::RequestDeviceError),
+}
+
 impl Gpu {
-    pub(crate) fn new(window: Arc<Window>) -> Gpu {
+    pub(crate) fn new(window: Arc<Window>) -> Result<Gpu, GpuError> {
         let size = window.inner_size();
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
@@ -93,14 +106,14 @@ impl Gpu {
             backend_options: Default::default(),
             display: None,
         });
-        let surface = instance.create_surface(window.clone()).unwrap();
+        let surface = instance.create_surface(window.clone())?;
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::default(),
             compatible_surface: Some(&surface),
             force_fallback_adapter: false,
         }))
-        .expect("no graphics adapter");
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).expect("no device");
+        .map_err(|_| GpuError::NoAdapter)?;
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))?;
 
         let caps = surface.get_capabilities(&adapter);
         let format = caps.formats.iter().copied().find(|f| f.is_srgb()).unwrap_or(caps.formats[0]);
@@ -248,7 +261,7 @@ impl Gpu {
             cache: None,
         });
 
-        Gpu {
+        Ok(Gpu {
             window,
             surface,
             device,
@@ -265,7 +278,7 @@ impl Gpu {
             bga_tex,
             bga_bind_group,
             bga_active: false,
-        }
+        })
     }
 
     pub(crate) fn set_bga(&mut self, rgba: &[u8], rect: Rect) {

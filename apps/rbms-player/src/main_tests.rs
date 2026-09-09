@@ -3,12 +3,12 @@
 //! They live in their own module so the crate root stays a wiring file: the items under test are
 //! private to the root, and a child module still sees them through `super`.
 
+use super::assets::THEME_TEMPLATE;
 use super::{
-    IMMEDIATE_KEYSOUND_AT_US, ROOT_ESC_CONFIRM, SortMode, THEME_TEMPLATE, bundled_skin, calibrated_offset, clear_type_from_id, clear_type_id, client_platform,
-    compute_build_hash, config_dir_from, default_total, esc_confirms_quit, fmt_datetime, green_number_for, ir_submission_block_reason, judge_time_us,
-    resumed_clock_us, updates_score, write_atomic,
+    ROOT_ESC_CONFIRM, SortMode, bundled_skin, calibrated_offset, clear_type_from_id, clear_type_id, client_platform, compute_build_hash, config_dir_from,
+    default_total, esc_confirms_quit, exit_code, fmt_datetime, green_number_for, ir_submission_block_reason, resumed_clock_us, updates_score, write_atomic,
 };
-use rbms_judge::ClearType;
+use rbms_judge::{ClearType, GaugeKind};
 use std::time::{Duration, Instant};
 
 #[test]
@@ -175,41 +175,6 @@ fn bundled_skins_parse_for_both_names_and_match_wide_case_insensitively() {
 }
 
 #[test]
-fn judge_time_shifts_by_the_offset_in_milliseconds() {
-    assert_eq!(judge_time_us(1_000_000, 0), 1_000_000);
-    assert_eq!(judge_time_us(1_000_000, 30), 1_030_000, "+30ms offset judges 30ms later");
-    assert_eq!(judge_time_us(1_000_000, -45), 955_000, "-45ms offset judges 45ms earlier");
-}
-
-/// Reproduce the press path of `main.rs`'s key handler: judge at `judge_time_us(raw, offset)` and
-/// schedule the keysound at [`IMMEDIATE_KEYSOUND_AT_US`], which is the rule both the live press and
-/// the replay path follow. Returns the times the keysound callback was scheduled at.
-fn press_schedule_times(offset_ms: i32, raw_us: i64) -> Vec<i64> {
-    let model = rbms_chart::to_model(&rbms_parser::parse(b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:01\r\n"), rbms_model::Mode::BEAT_7K);
-    let mut player = rbms_play::Player::new(model, false);
-    let judge_t = judge_time_us(raw_us, offset_ms);
-    let mut scheduled = Vec::new();
-    player.press(0, judge_t, |_e: rbms_play::PlayEvent| scheduled.push(IMMEDIATE_KEYSOUND_AT_US));
-    scheduled
-}
-
-#[test]
-fn press_path_schedules_the_keysound_immediately_for_every_offset() {
-    for offset_ms in [-200, -30, 0, 30, 200] {
-        let scheduled = press_schedule_times(offset_ms, 1_000_000);
-        assert_eq!(scheduled, vec![IMMEDIATE_KEYSOUND_AT_US], "offset {offset_ms}ms must not move the sound");
-    }
-}
-
-#[test]
-fn press_path_moves_the_judgment_with_the_offset_while_the_sound_stays() {
-    let raw = 1_000_000_i64;
-    assert_eq!(judge_time_us(raw, 30), 1_030_000);
-    assert_eq!(press_schedule_times(30, raw), vec![IMMEDIATE_KEYSOUND_AT_US]);
-    assert_eq!(press_schedule_times(0, raw), vec![IMMEDIATE_KEYSOUND_AT_US]);
-}
-
-#[test]
 fn resumed_clock_continues_from_the_last_audio_position() {
     assert_eq!(resumed_clock_us(12_000_000, 2_500_000), 14_500_000);
     assert_eq!(resumed_clock_us(12_000_000, 0), 12_000_000, "no wall time yet => no movement");
@@ -311,4 +276,50 @@ fn write_atomic_replaces_an_existing_file_wholesale() {
 #[test]
 fn write_atomic_rejects_a_path_without_a_file_name() {
     assert!(write_atomic(std::path::Path::new("/"), "x").is_err(), "a directory path is not a writable target");
+}
+
+#[test]
+fn the_shipped_polyphony_is_the_one_the_audio_engine_defaults_to() {
+    assert_eq!(
+        rbms_config::DEFAULT_POLYPHONY_VOICES,
+        rbms_audio::DEFAULT_MAX_VOICES,
+        "the configuration crate mirrors the engine's voice budget instead of depending on it"
+    );
+    assert_eq!(
+        crate::settings_ui::engine_options(&rbms_config::AudioOptions::default()),
+        rbms_audio::AudioOptions::default(),
+        "untouched audio settings open the engine exactly as its own default does"
+    );
+}
+
+#[test]
+fn the_shipped_player_id_is_the_one_the_score_server_accepts_without_a_token() {
+    assert_eq!(rbms_config::DEFAULT_PLAYER_ID, rbms_ir::GUEST_PLAYER_ID);
+}
+
+#[test]
+fn the_settings_gauge_vocabulary_matches_the_one_the_ir_replay_speaks() {
+    for g in [GaugeKind::AssistEasy, GaugeKind::Easy, GaugeKind::Normal, GaugeKind::Hard, GaugeKind::ExHard, GaugeKind::Hazard] {
+        assert_eq!(rbms_config::gauge_token(g), rbms_ir::mapping::gauge_token(g), "{g:?} is written the same way in both");
+        assert_eq!(rbms_config::gauge_from_name(rbms_config::gauge_token(g)), rbms_ir::mapping::gauge_from_name(rbms_config::gauge_token(g)));
+    }
+    for name in ["assist", "assisteasy", "EASY", "hard", "exhard", "hazard", "", "nonsense"] {
+        assert_eq!(rbms_config::gauge_from_name(name), rbms_ir::mapping::gauge_from_name(name), "{name:?} parses the same way in both");
+    }
+}
+
+#[test]
+fn a_run_that_never_started_fails_the_process_instead_of_panicking() {
+    use std::process::ExitCode;
+    assert_eq!(format!("{:?}", exit_code(None)), format!("{:?}", ExitCode::SUCCESS));
+    assert_eq!(format!("{:?}", exit_code(Some("no graphics adapter this build can use"))), format!("{:?}", ExitCode::FAILURE));
+}
+
+#[test]
+fn every_startup_failure_reads_as_a_sentence_rather_than_a_panic_payload() {
+    use crate::gpu::GpuError;
+    let no_adapter = GpuError::NoAdapter.to_string();
+    assert!(no_adapter.contains("graphics adapter"), "{no_adapter}");
+    assert!(!no_adapter.is_empty());
+    assert!(!no_adapter.starts_with(char::is_uppercase), "messages are lower case like the rest of the app: {no_adapter}");
 }

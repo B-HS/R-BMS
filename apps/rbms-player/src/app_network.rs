@@ -10,15 +10,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::TryRecvError;
 use std::time::Duration;
 
+use rbms_config::{OFF_VALUE, ON_VALUE, SettingId};
 use rbms_ir::{IrError, NullScoreServer, PlayerId, ScoreServer, spawn_query};
-use winit::keyboard::KeyCode;
 
 use crate::ir_panel::*;
 use crate::ir_session::{AuthAction, GUEST_PLAYER_ID, auth_request, run_auth};
 use crate::ir_sync::{
     SETTINGS_BLOB_NAME, SyncOutcome, SyncPayload, build_blob, merge_downloaded, parse_blob, sanitise_for_upload, sync_error_message, upload_outcome,
 };
-use crate::settings_view::{RivalsScene, SettingsScene};
 use crate::*;
 
 /// Gap between connection probes of the configured server.
@@ -35,8 +34,8 @@ pub(crate) struct BuiltServer {
 /// Build the score server from config (`HttpScoreServer` when a URL is set, else the offline
 /// `NullScoreServer`), authenticated with `token` when one is stored, plus the probe thread that
 /// keeps the connection flag fresh. Used at startup and after every credential or URL change.
-pub(crate) fn build_server(config: &PlayerConfig, token: Option<String>) -> BuiltServer {
-    let server: Arc<dyn ScoreServer> = match &config.server_url {
+pub(crate) fn build_server(config: &Config, token: Option<String>) -> BuiltServer {
+    let server: Arc<dyn ScoreServer> = match &config.network.server_url {
         Some(url) => match rbms_ir::HttpScoreServer::try_new(url.clone(), token) {
             Ok(s) => {
                 println!("score server: {url}");
@@ -51,7 +50,7 @@ pub(crate) fn build_server(config: &PlayerConfig, token: Option<String>) -> Buil
     };
     let connected = Arc::new(AtomicBool::new(false));
     let probe_stop = Arc::new(AtomicBool::new(false));
-    if config.server_url.is_some() {
+    if config.network.server_url.is_some() {
         let server = server.clone();
         let connected = connected.clone();
         let stop = probe_stop.clone();
@@ -70,7 +69,7 @@ fn now_ms() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or_default()
 }
 
-impl App {
+impl AppShared {
     /// Swap in a server built from the current URL and the live session token, stopping the probe
     /// thread of the previous one.
     pub(crate) fn rebuild_server(&mut self) {
@@ -81,111 +80,29 @@ impl App {
         self.server_probe_stop = built.probe_stop;
     }
 
-    /// Label and value of a NETWORK row, or `None` when the index belongs to another tab.
-    pub(crate) fn network_setting_line(&self, index: usize) -> Option<(&'static str, String)> {
-        let label = network_row_label(index)?;
+    /// Label and value of a NETWORK row, or `None` when the row belongs to another tab.
+    pub(crate) fn network_setting_line(&self, id: SettingId) -> Option<(&'static str, String)> {
+        let label = network_row_label(id)?;
         let on_off = |on: bool| {
-            if on { "ON".to_string() } else { "OFF".to_string() }
+            if on { ON_VALUE.to_string() } else { OFF_VALUE.to_string() }
         };
-        let value = match index {
-            SETTING_SERVER_URL => optional_value(self.config.server_url.as_deref()),
-            SETTING_PLAYER_ID => self.config.player_id.clone(),
-            SETTING_ACCOUNT => self.session.status_text(),
-            SETTING_EMAIL => optional_value(self.config.ir_email.as_deref()),
-            SETTING_PASSWORD => password_value(self.password.chars().count()),
-            SETTING_SYNC_SETTINGS => on_off(self.config.sync_settings),
-            SETTING_AUTO_UPLOAD_REPLAY => on_off(self.config.auto_upload_replay),
-            SETTING_RIVALS => self.config.rivals.len().to_string(),
+        let value = match id {
+            SettingId::ServerUrl => optional_value(self.config.network.server_url.as_deref()),
+            SettingId::PlayerId => self.config.network.player_id.clone(),
+            SettingId::Account => self.session.status_text(),
+            SettingId::Email => optional_value(self.config.network.ir_email.as_deref()),
+            SettingId::Password => password_value(self.password.chars().count()),
+            SettingId::SyncSettings => on_off(self.config.network.sync_settings),
+            SettingId::AutoUploadReplay => on_off(self.config.network.auto_upload_replay),
+            SettingId::Rivals => self.config.network.rivals.len().to_string(),
             _ => ACTION_VALUE.to_string(),
         };
         Some((label, value))
     }
 
-    /// Left/right on a NETWORK row. Only the two toggles respond; everything else is left to
-    /// [`App::network_setting_enter`].
-    pub(crate) fn network_setting_adjust(&mut self, index: usize) -> bool {
-        match index {
-            SETTING_SYNC_SETTINGS => self.config.sync_settings = !self.config.sync_settings,
-            SETTING_AUTO_UPLOAD_REPLAY => self.config.auto_upload_replay = !self.config.auto_upload_replay,
-            _ => return false,
-        }
-        self.save_settings();
-        true
-    }
-
-    /// Enter (or a click) on a NETWORK row. Returns whether the row handled it.
-    pub(crate) fn network_setting_enter(&mut self, index: usize) -> bool {
-        if is_text_row(index) {
-            self.begin_network_edit(index);
-            return true;
-        }
-        match index {
-            SETTING_LOGIN => self.start_auth(AuthAction::Login),
-            SETTING_REGISTER => self.start_auth(AuthAction::Register),
-            SETTING_LOGOUT => self.finish_logout(),
-            SETTING_UPLOAD_SETTINGS => self.start_settings_upload(),
-            SETTING_DOWNLOAD_SETTINGS => self.start_settings_download(),
-            SETTING_RIVALS => {
-                self.rivals_open = true;
-                self.rivals_sel = 0;
-                self.cancel_text_edit();
-            }
-            SETTING_ACCOUNT => self.net_status = self.session.status_text(),
-            _ => return self.network_setting_adjust(index),
-        }
-        true
-    }
-
-    /// Open the in-place editor for a NETWORK text row, pre-filled with the current value. The
-    /// password row starts empty and never shows what is already held.
-    ///
-    /// The row is remembered in `text_edit_row` so the commit writes the field the editor was
-    /// opened on even if the selection has since moved (a mouse click can move it while an editor
-    /// is open); committing a typed password into another row's field would persist it in clear.
-    pub(crate) fn begin_network_edit(&mut self, index: usize) {
-        self.text_secret = is_secret_row(index);
-        self.text_edit_row = Some(index);
-        self.text_input = Some(match index {
-            SETTING_PLAYER_ID => self.config.player_id.clone(),
-            SETTING_SERVER_URL => self.config.server_url.clone().unwrap_or_default(),
-            SETTING_EMAIL => self.config.ir_email.clone().unwrap_or_default(),
-            _ => String::new(),
-        });
-    }
-
-    /// Close any open in-place editor, dropping what was typed. Called whenever the focus leaves
-    /// the row the editor belongs to, so a half-typed secret never outlives its row.
-    pub(crate) fn cancel_text_edit(&mut self) {
-        self.text_input = None;
-        self.text_secret = false;
-        self.text_edit_row = None;
-    }
-
-    /// Commit an edited NETWORK text row. A blank SERVER URL means offline, a blank PLAYER ID means
-    /// guest, and the password is held in memory only until the next LOGIN/REGISTER consumes it.
-    /// An index that is not a text row writes nothing — there is no catch-all field.
-    pub(crate) fn commit_network_edit(&mut self, index: usize, value: String) {
-        let Some(field) = network_text_field(index) else {
-            return;
-        };
-        match field {
-            NetworkTextField::ServerUrl => {
-                self.config.server_url = (!value.is_empty()).then_some(value);
-                self.rebuild_server();
-            }
-            NetworkTextField::PlayerId => self.config.player_id = if value.is_empty() { GUEST_PLAYER_ID.to_string() } else { value },
-            NetworkTextField::Email => self.config.ir_email = (!value.is_empty()).then_some(value),
-            NetworkTextField::Password => {
-                self.password = value;
-                return;
-            }
-        }
-        self.save_settings();
-    }
-
     /// Whether a request needs a configured server, reporting why it cannot run when it does not.
     fn require_server(&mut self) -> bool {
-        if self.config.server_url.is_none() {
+        if self.config.network.server_url.is_none() {
             self.net_status = "set SERVER URL first".to_string();
             return false;
         }
@@ -209,7 +126,7 @@ impl App {
         if self.session.is_busy() || self.auth_rx.is_some() || !self.require_server() {
             return;
         }
-        let login_id = self.config.player_id.trim().to_string();
+        let login_id = self.config.network.player_id.trim().to_string();
         if login_id.is_empty() || login_id == GUEST_PLAYER_ID {
             self.net_status = "set PLAYER ID to your account id first".to_string();
             return;
@@ -218,7 +135,7 @@ impl App {
             self.net_status = "set PASSWORD first".to_string();
             return;
         }
-        let email = self.config.ir_email.clone().unwrap_or_default();
+        let email = self.config.network.ir_email.clone().unwrap_or_default();
         if action == AuthAction::Register && email.trim().is_empty() {
             self.net_status = "set EMAIL first".to_string();
             return;
@@ -238,7 +155,7 @@ impl App {
     pub(crate) fn finish_logout(&mut self) {
         let had_session = self.session.logout();
         self.password.clear();
-        self.config.player_id = GUEST_PLAYER_ID.to_string();
+        self.config.network.player_id = GUEST_PLAYER_ID.to_string();
         self.sync_lock.apply(SyncOutcome::SignedOut);
         if had_session {
             self.rebuild_server();
@@ -253,7 +170,7 @@ impl App {
         if self.sync_upload_rx.is_some() || self.sync_base_rx.is_some() || !self.require_account() {
             return;
         }
-        let payload = SyncPayload { settings: sanitise_for_upload(&self.current_settings()), keyconfig: self.keyconfig.clone() };
+        let payload = SyncPayload { settings: sanitise_for_upload(&self.config), keyconfig: self.keyconfig.clone() };
         let updated_at = now_ms();
         let blob = match build_blob(&payload, updated_at, self.sync_lock.base()) {
             Ok(blob) => blob,
@@ -262,7 +179,7 @@ impl App {
                 return;
             }
         };
-        let player = PlayerId { id: self.config.player_id.clone() };
+        let player = PlayerId { id: self.config.network.player_id.clone() };
         self.net_status = "uploading settings...".to_string();
         self.sync_upload_rx = Some(spawn_query(self.server.clone(), move |server| server.put_settings(&player, &blob)));
     }
@@ -274,10 +191,10 @@ impl App {
     /// this read-back the second save of a session would always lose the lock. A current server
     /// reports the stored stamp in the `PUT` body and the lock moves without a second round trip.
     fn refresh_sync_base(&mut self) {
-        if self.sync_base_rx.is_some() || !self.session.is_logged_in() || self.config.server_url.is_none() {
+        if self.sync_base_rx.is_some() || !self.session.is_logged_in() || self.config.network.server_url.is_none() {
             return;
         }
-        let player = PlayerId { id: self.config.player_id.clone() };
+        let player = PlayerId { id: self.config.network.player_id.clone() };
         self.sync_base_rx = Some(spawn_query(self.server.clone(), move |server| server.get_settings(&player, SETTINGS_BLOB_NAME)));
     }
 
@@ -286,7 +203,7 @@ impl App {
         if self.sync_download_rx.is_some() || !self.require_account() {
             return;
         }
-        let player = PlayerId { id: self.config.player_id.clone() };
+        let player = PlayerId { id: self.config.network.player_id.clone() };
         self.net_status = "downloading settings...".to_string();
         self.sync_download_rx = Some(spawn_query(self.server.clone(), move |server| server.get_settings(&player, SETTINGS_BLOB_NAME)));
     }
@@ -301,9 +218,9 @@ impl App {
                 return;
             }
         };
-        let merged = merge_downloaded(&self.current_settings(), payload.settings);
-        self.autoplay = merged.autoplay;
-        apply_settings(&mut self.config, &merged);
+        let mut merged = merge_downloaded(&self.config, payload.settings);
+        merged.sanitise();
+        self.config = merged;
         self.keyconfig = payload.keyconfig;
         self.keyconfig.save(&self.keyconfig_path);
         self.active_keys = self.keyconfig.lane_keys(self.mode);
@@ -316,115 +233,29 @@ impl App {
     /// Send the current rival list to the server (and keep the local cache either way).
     pub(crate) fn push_rivals(&mut self) {
         self.save_settings();
-        if self.rivals_rx.is_some() || !self.session.is_logged_in() || self.config.server_url.is_none() {
+        if self.rivals_rx.is_some() || !self.session.is_logged_in() || self.config.network.server_url.is_none() {
             return;
         }
-        let player = PlayerId { id: self.config.player_id.clone() };
-        let rivals = self.config.rivals.clone();
+        let player = PlayerId { id: self.config.network.player_id.clone() };
+        let rivals = self.config.network.rivals.clone();
         self.net_status = "saving rivals...".to_string();
         self.rivals_rx = Some(spawn_query(self.server.clone(), move |server| server.put_rivals(&player, &rivals)));
     }
 
     /// Pull the rival list the server holds, replacing the local cache.
     pub(crate) fn refresh_rivals(&mut self) {
-        if self.rivals_rx.is_some() || !self.session.is_logged_in() || self.config.server_url.is_none() {
+        if self.rivals_rx.is_some() || !self.session.is_logged_in() || self.config.network.server_url.is_none() {
             return;
         }
-        let player = PlayerId { id: self.config.player_id.clone() };
+        let player = PlayerId { id: self.config.network.player_id.clone() };
         self.rivals_rx = Some(spawn_query(self.server.clone(), move |server| server.rivals(&player)));
-    }
-
-    /// Keys inside the inline rival list. Typing an id runs through the same buffer as the settings
-    /// rows, so only one editor is ever open.
-    pub(crate) fn rivals_input(&mut self, code: KeyCode, typed: Option<&str>) {
-        if self.text_input.is_some() {
-            match code {
-                KeyCode::Enter | KeyCode::NumpadEnter => {
-                    let value = self.text_input.take().unwrap_or_default();
-                    if let Some(id) = normalise_rival(&value, &self.config.rivals) {
-                        self.config.rivals.push(id);
-                        self.rivals_sel = self.config.rivals.len().saturating_sub(1);
-                    }
-                }
-                KeyCode::Escape => self.text_input = None,
-                KeyCode::Backspace => {
-                    if let Some(buffer) = self.text_input.as_mut() {
-                        buffer.pop();
-                    }
-                }
-                _ => {
-                    if let (Some(buffer), Some(text)) = (self.text_input.as_mut(), typed) {
-                        buffer.extend(text.chars().filter(|c| !c.is_control()));
-                    }
-                }
-            }
-            return;
-        }
-        let rows = rival_rows(&self.config.rivals).len();
-        let on_add = self.rivals_sel + 1 >= rows;
-        match code {
-            KeyCode::Escape => {
-                self.rivals_open = false;
-                self.push_rivals();
-            }
-            KeyCode::ArrowUp => self.rivals_sel = self.rivals_sel.saturating_sub(1),
-            KeyCode::ArrowDown => self.rivals_sel = (self.rivals_sel + 1).min(rows.saturating_sub(1)),
-            KeyCode::Enter | KeyCode::NumpadEnter if on_add => {
-                self.text_input = Some(String::new());
-                self.text_secret = false;
-                self.text_edit_row = None;
-            }
-            KeyCode::KeyD if !on_add && self.rivals_sel < self.config.rivals.len() => {
-                self.config.rivals.remove(self.rivals_sel);
-                self.rivals_sel = self.rivals_sel.min(rival_rows(&self.config.rivals).len().saturating_sub(1));
-            }
-            _ => {}
-        }
-    }
-
-    /// Click inside the inline rival list: focus a row, or open the editor on the add row.
-    pub(crate) fn rivals_click(&mut self, index: usize) {
-        let rows = rival_rows(&self.config.rivals).len();
-        self.rivals_sel = index.min(rows.saturating_sub(1));
-        if self.rivals_sel + 1 >= rows {
-            self.text_input = Some(String::new());
-            self.text_secret = false;
-            self.text_edit_row = None;
-        }
-    }
-
-    /// Everything the settings screen draws this frame. The AUDIO tab owns the status line while it
-    /// is open: it is the only place the engine's open report, and a reopen held back by a running
-    /// chart, are visible.
-    pub(crate) fn settings_scene(&self) -> SettingsScene {
-        let tab = self.set_tab.min(SETTING_TABS.len() - 1);
-        let items = SETTING_TABS[tab].1;
-        let sel = self.set_sel.min(items.len().saturating_sub(1));
-        let editor = match (&self.text_input, self.rivals_open) {
-            (Some(buffer), false) => Some(editor_display(buffer, self.text_secret)),
-            _ => None,
-        };
-        let rivals = self.rivals_open.then(|| RivalsScene {
-            rows: rival_rows(&self.config.rivals),
-            sel: self.rivals_sel,
-            editor: self.text_input.as_ref().map(|buffer| editor_display(buffer, false)),
-        });
-        SettingsScene {
-            tabs: SETTING_TABS.iter().map(|(name, _)| *name).collect(),
-            tab,
-            rows: items.iter().map(|&index| self.setting_line(index)).collect(),
-            sel,
-            editor,
-            status: self.audio_status_line().unwrap_or_else(|| self.net_status.clone()),
-            rivals,
-        }
     }
 
     /// Drain every background network reply. Called once per frame, before rendering.
     pub(crate) fn poll_network(&mut self) {
         if self.startup_whoami {
             self.startup_whoami = false;
-            if self.session.is_logged_in() && self.config.server_url.is_some() {
+            if self.session.is_logged_in() && self.config.network.server_url.is_some() {
                 self.whoami_rx = Some(spawn_query(self.server.clone(), |server| server.whoami().map(|profile| profile.id)));
                 self.refresh_rivals();
             }
@@ -445,7 +276,7 @@ impl App {
                 let token_changed = self.session.finish(action, result);
                 if succeeded {
                     if let Some(id) = self.session.login_id() {
-                        self.config.player_id = id.to_string();
+                        self.config.network.player_id = id.to_string();
                     }
                     if token_changed {
                         self.rebuild_server();
@@ -526,9 +357,8 @@ impl App {
         };
         match rx.try_recv() {
             Ok(Ok(profiles)) => {
-                self.config.rivals = profiles.into_iter().map(|profile| profile.id).collect();
-                self.rivals_sel = self.rivals_sel.min(rival_rows(&self.config.rivals).len().saturating_sub(1));
-                self.net_status = format!("rivals: {}", self.config.rivals.len());
+                self.config.network.rivals = profiles.into_iter().map(|profile| profile.id).collect();
+                self.net_status = format!("rivals: {}", self.config.network.rivals.len());
                 self.save_settings();
             }
             Ok(Err(error)) => self.net_status = format!("rivals: {}", crate::ir_outcome::short_error(&error)),

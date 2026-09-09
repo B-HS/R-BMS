@@ -194,14 +194,21 @@ fn render_rivals<R: Renderer>(r: &mut R, scene: &RivalsScene) -> Vec<(Rect, Sett
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir_panel::{NETWORK_SETTING_ROWS, RIVAL_ADD_ROW, network_row_label};
+    use crate::ir_panel::{RIVAL_ADD_ROW, network_row_label};
+    use rbms_config::{Config, SettingTab, tab_rows};
     use rbms_render::CpuCanvas;
+
+    /// Rows the NETWORK tab shows, taken from the settings table so the scene the tests render is
+    /// the one the screen builds.
+    fn network_rows() -> Vec<(&'static str, String)> {
+        tab_rows(SettingTab::Network, &Config::default()).into_iter().map(|id| (network_row_label(id).unwrap(), "value".to_string())).collect()
+    }
 
     fn network_scene(sel: usize) -> SettingsScene {
         SettingsScene {
             tabs: vec!["PLAY", "GAUGE", "JUDGE", "DISPLAY", "INPUT", "NETWORK"],
             tab: 5,
-            rows: NETWORK_SETTING_ROWS.iter().map(|&i| (network_row_label(i).unwrap(), "value".to_string())).collect(),
+            rows: network_rows(),
             sel,
             editor: None,
             status: "logged in as dj".to_string(),
@@ -238,7 +245,7 @@ mod tests {
 
     #[test]
     fn the_selected_row_is_always_drawn_even_at_the_end_of_a_long_tab() {
-        let last = NETWORK_SETTING_ROWS.len() - 1;
+        let last = network_rows().len() - 1;
         let scene = network_scene(last);
         let mut canvas = CpuCanvas::new(1280, 720);
         let hot = render_settings(&mut canvas, &scene);
@@ -247,7 +254,7 @@ mod tests {
 
     #[test]
     fn the_inline_rival_list_renders_over_the_rows_and_is_clickable() {
-        let mut scene = network_scene(NETWORK_SETTING_ROWS.len() - 1);
+        let mut scene = network_scene(network_rows().len() - 1);
         scene.rivals = Some(RivalsScene { rows: vec!["friend".into(), RIVAL_ADD_ROW.into()], sel: 1, editor: Some("typing_".into()) });
         let mut canvas = CpuCanvas::new(1280, 720);
         let hot = render_settings(&mut canvas, &scene);

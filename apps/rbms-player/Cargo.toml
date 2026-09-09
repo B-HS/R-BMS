@@ -5,6 +5,10 @@ version.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[lib]
+name = "rbms_player"
+path = "src/lib.rs"
+
 [[bin]]
 name = "rbms-player"
 path = "src/main.rs"
@@ -13,12 +17,15 @@ path = "src/main.rs"
 rbms-model = { workspace = true }
 rbms-parser = { workspace = true }
 rbms-chart = { workspace = true }
+rbms-config = { workspace = true }
 rbms-render = { workspace = true }
 rbms-judge = { workspace = true }
-rbms-ir = { workspace = true }
+rbms-ir = { workspace = true, features = ["mapping"] }
 rbms-play = { workspace = true }
 rbms-audio = { workspace = true }
 rbms-table = { workspace = true }
+rbms-store = { workspace = true }
+rbms-library = { workspace = true }
 winit = "0.30.13"
 pollster = "0.4.0"
 wgpu = "29.0.3"
@@ -29,3 +36,7 @@ ron = "0.12.1"
 rfd = "0.15"
 memory-stats = "1.2.0"
 sha2 = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

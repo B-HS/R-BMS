@@ -2,18 +2,14 @@
 //! playback & analysis, and the key-config editor. Split out of `main.rs`; `use crate::*`
 //! pulls in the crate-root types/consts/helpers these methods reference.
 #![allow(clippy::wildcard_imports)]
-use rbms_audio::Bus;
 
 use crate::*;
 
-/// Per-voice gain a replayed keysound is played at. A replay reproduces a run, so it sounds at the
-/// same level as the live press it stands in for; the loudness the player set lives on the key bus.
-const REPLAY_KEYSOUND_GAIN: f32 = 1.0;
-
-impl App {
+impl AppShared {
     /// Recompute the visible select list for the current `select_view`.
     pub(crate) fn rebuild_select_items(&mut self) {
-        let n = self.songs.len();
+        let songs = self.library.songs();
+        let n = songs.len();
         self.select_items = match self.select_view {
             SelectView::Root => {
                 let mut items = vec![SelectItem::Folder { label: format!("ALL SONGS ({n})"), target: SelectView::AllSongs }];
@@ -58,6 +54,7 @@ impl App {
     /// Filter song indices by the search query (title/artist/subtitle substring, case-insensitive)
     /// and order them by the active `SortMode`. The single place search + sort are applied.
     pub(crate) fn arrange_songs(&self, indices: Vec<usize>) -> Vec<usize> {
+        let songs = self.library.songs();
         let q = self.search.trim().to_lowercase();
         let mut v: Vec<usize> = indices
             .into_iter()
@@ -65,22 +62,22 @@ impl App {
                 if q.is_empty() {
                     return true;
                 }
-                let e = &self.songs[i];
+                let e = &songs[i];
                 e.title.to_lowercase().contains(&q) || e.artist.to_lowercase().contains(&q) || e.subtitle.to_lowercase().contains(&q)
             })
             .collect();
-        let title = |i: usize| self.songs[i].title.to_lowercase();
+        let title = |i: usize| songs[i].title.to_lowercase();
         match self.sort {
             SortMode::Default => {}
-            SortMode::Title => v.sort_by(|&a, &b| title(a).cmp(&title(b))),
-            SortMode::Artist => v.sort_by(|&a, &b| self.songs[a].artist.to_lowercase().cmp(&self.songs[b].artist.to_lowercase()).then(title(a).cmp(&title(b)))),
+            SortMode::Title => v.sort_by_key(|&a| title(a)),
+            SortMode::Artist => v.sort_by(|&a, &b| songs[a].artist.to_lowercase().cmp(&songs[b].artist.to_lowercase()).then(title(a).cmp(&title(b)))),
             SortMode::Level => v.sort_by(|&a, &b| {
-                let lvl = |i: usize| self.songs[i].level.trim().parse::<i64>().unwrap_or(i64::MAX);
+                let lvl = |i: usize| songs[i].level.trim().parse::<i64>().unwrap_or(i64::MAX);
                 lvl(a).cmp(&lvl(b)).then(title(a).cmp(&title(b)))
             }),
             SortMode::Clear => v.sort_by(|&a, &b| {
-                let clr = |i: usize| self.scores.best_clear_for_md5(&self.songs[i].md5).unwrap_or(0);
-                clr(b).cmp(&clr(a)).then(title(a).cmp(&title(b))) // best clear first
+                let clr = |i: usize| self.scores.best_clear_for_md5(&songs[i].md5).unwrap_or(0);
+                clr(b).cmp(&clr(a)).then(title(a).cmp(&title(b)))
             }),
         }
         v
@@ -98,66 +95,30 @@ impl App {
     /// Apply an in-play control: hi-speed, lane cover (sudden) and lift, clamped to sane ranges.
     pub(crate) fn apply_control(&mut self, action: ControlAction) {
         match action {
-            ControlAction::HiSpeedUp => self.config.hispeed = (self.config.hispeed + 0.25).clamp(0.5, 10.0),
-            ControlAction::HiSpeedDown => self.config.hispeed = (self.config.hispeed - 0.25).clamp(0.5, 10.0),
-            ControlAction::CoverUp => self.config.cover = (self.config.cover + 0.05).clamp(0.0, 0.9),
-            ControlAction::CoverDown => self.config.cover = (self.config.cover - 0.05).clamp(0.0, 0.9),
+            ControlAction::HiSpeedUp => self.config.play.hispeed = (self.config.play.hispeed + HISPEED_STEP).clamp(HISPEED_MIN, HISPEED_MAX),
+            ControlAction::HiSpeedDown => self.config.play.hispeed = (self.config.play.hispeed - HISPEED_STEP).clamp(HISPEED_MIN, HISPEED_MAX),
+            ControlAction::CoverUp => self.config.play.cover = (self.config.play.cover + LANE_SHADE_STEP).clamp(LANE_SHADE_MIN, LANE_SHADE_MAX),
+            ControlAction::CoverDown => self.config.play.cover = (self.config.play.cover - LANE_SHADE_STEP).clamp(LANE_SHADE_MIN, LANE_SHADE_MAX),
             ControlAction::LiftUp => {
-                self.config.lift = (self.config.lift + 0.05).clamp(0.0, 0.9);
+                self.config.play.lift = (self.config.play.lift + LANE_SHADE_STEP).clamp(LANE_SHADE_MIN, LANE_SHADE_MAX);
                 self.rebuild_skin();
             }
             ControlAction::LiftDown => {
-                self.config.lift = (self.config.lift - 0.05).clamp(0.0, 0.9);
+                self.config.play.lift = (self.config.play.lift - LANE_SHADE_STEP).clamp(LANE_SHADE_MIN, LANE_SHADE_MAX);
                 self.rebuild_skin();
             }
         }
     }
 
-    pub(crate) fn current_settings(&self) -> PlaySettings {
-        PlaySettings {
-            hispeed: self.config.hispeed,
-            gauge: gauge_token(self.config.gauge).to_string(),
-            lift: self.config.lift,
-            cover: self.config.cover,
-            scratch_left: self.config.scratch_left,
-            scratch_auto: self.config.scratch_auto,
-            autoplay: self.autoplay,
-            random: self.config.random.label().to_string(),
-            constant_speed: self.config.constant_speed,
-            offset_ms: self.config.offset_ms,
-            auto_offset: self.config.auto_offset,
-            judge_rate: self.config.judge_rate,
-            total_override: self.config.total_override,
-            bga: self.config.bga,
-            skin: self.config.skin_name.clone(),
-            auto_replay: self.config.auto_replay,
-            debug: self.config.debug,
-            font_path: self.config.font_path.clone(),
-            score_graph: self.config.score_graph,
-            replay_analysis: self.config.replay_analysis,
-            preview: self.config.preview,
-            songs_folder: self.config.songs_folder.clone(),
-            server_url: self.config.server_url.clone(),
-            player_id: self.config.player_id.clone(),
-            ir_token: self.session.token().map(str::to_string),
-            ir_login_id: self.session.login_id().map(str::to_string),
-            ir_email: self.config.ir_email.clone(),
-            sync_settings: self.config.sync_settings,
-            auto_upload_replay: self.config.auto_upload_replay,
-            rivals: self.config.rivals.clone(),
-            audio_device: self.config.audio.device.clone(),
-            audio_buffer_frames: self.config.audio.buffer_frames,
-            audio_sample_rate: self.config.audio.sample_rate,
-            audio_polyphony: self.config.audio.polyphony,
-            vol_master: self.config.audio.master,
-            vol_key: self.config.audio.key,
-            vol_bg: self.config.audio.bg,
-            vol_system: self.config.audio.system,
-        }
-    }
-
-    pub(crate) fn save_settings(&self) {
-        self.current_settings().save(&self.settings_path);
+    /// Write the whole configuration out.
+    ///
+    /// The live [`AccountSession`] — not the configuration — owns the credential while the app
+    /// runs, so it is folded back in here on the way to disk. Every other value the settings
+    /// screen edits is already in `config`.
+    pub(crate) fn save_settings(&mut self) {
+        self.config.network.ir_token = self.session.token().map(str::to_string);
+        self.config.network.ir_login_id = self.session.login_id().map(str::to_string);
+        save_config(&self.config, &self.settings_path);
     }
 
     /// Open a native picker for a UI font (TTF/OTF/TTC), load it live as the preferred family,
@@ -168,7 +129,7 @@ impl App {
                 Ok(bytes) => match rbms_render::load_font(bytes) {
                     Some(family) => {
                         rbms_render::set_ui_family(&family);
-                        self.config.font_path = Some(path.to_string_lossy().to_string());
+                        self.config.display.font_path = Some(path.to_string_lossy().to_string());
                         self.save_settings();
                         println!("font: {} ({family})", path.display());
                     }
@@ -182,173 +143,21 @@ impl App {
     /// Revert the UI font to the bundled default.
     pub(crate) fn reset_font(&mut self) {
         rbms_render::reset_ui_family();
-        self.config.font_path = None;
+        self.config.display.font_path = None;
         self.save_settings();
     }
 
-    /// Edit the active NETWORK text field. Enter commits through `commit_network_edit`, Esc
-    /// cancels. Everything but a secret row is trimmed; a password keeps the exact characters
-    /// typed. The row the editor was **opened on** decides which field is written, not the row
-    /// that happens to be focused at commit time.
-    pub(crate) fn settings_text_input(&mut self, code: KeyCode, typed: Option<&str>) {
-        match code {
-            KeyCode::Enter | KeyCode::NumpadEnter => {
-                let raw = self.text_input.take().unwrap_or_default();
-                let value = if self.text_secret { raw } else { raw.trim().to_string() };
-                let edited = self.text_edit_row.take();
-                self.text_secret = false;
-                if let Some(row) = edited {
-                    self.commit_network_edit(row, value);
-                }
-            }
-            KeyCode::Escape => self.cancel_text_edit(),
-            KeyCode::Backspace => {
-                if let Some(b) = self.text_input.as_mut() {
-                    b.pop();
-                }
-            }
-            _ => {
-                if let (Some(b), Some(t)) = (self.text_input.as_mut(), typed) {
-                    b.extend(t.chars().filter(|c| !c.is_control()));
-                }
-            }
-        }
-    }
-
     pub(crate) fn offset_us(&self) -> i64 {
-        self.config.offset_ms as i64 * 1000
-    }
-
-    /// Feed all recorded inputs whose raw time has been reached, judging them at the recorded
-    /// time plus the (replay's) offset — reproducing the original run. `mute` skips keysounds (used
-    /// during analysis scrubbing/slow-mo, where the virtual clock would desync audio). Each judged
-    /// input's timing delta is captured for the analysis ms-off overlay.
-    ///
-    /// Keysounds follow the same immediate rule as a live press: the sound is wanted now, not at the
-    /// recorded instant, which is already in the mixer's past and would only be counted as a
-    /// schedule that collapsed onto the current frame.
-    pub(crate) fn feed_replay(&mut self, song: i64, mute: bool) {
-        let off = self.offset_us();
-        loop {
-            let ev = match self.replay.as_ref() {
-                Some(rp) if self.replay_cursor < rp.events.len() => rp.events[self.replay_cursor],
-                _ => break,
-            };
-            if ev.t > song {
-                break;
-            }
-            self.replay_cursor += 1;
-            let res = if ev.press {
-                if let (false, Some(audio)) = (mute, self.audio.as_mut()) {
-                    let play = |e: PlayEvent| {
-                        audio.play_on(Bus::Key, e.wav.max(0) as u32, REPLAY_KEYSOUND_GAIN, KEYSOUND_PAN, KEYSOUND_PITCH, IMMEDIATE_KEYSOUND_AT_US)
-                    };
-                    self.player.as_mut().and_then(|p| p.press(ev.lane, ev.t + off, play))
-                } else {
-                    self.player.as_mut().and_then(|p| p.press(ev.lane, ev.t + off, |_| {}))
-                }
-            } else {
-                self.player.as_mut().and_then(|p| p.release(ev.lane, ev.t + off))
-            };
-            if let Some(r) = res {
-                self.msoff.push((r.lane, r.delta_us, r.judge as u8));
-                if self.msoff.len() > 16 {
-                    self.msoff.remove(0);
-                }
-            }
-        }
-    }
-
-    /// Rebuild the replay's judge state at an arbitrary song time by re-simulating the recorded
-    /// inputs from the start up to `target_us`. Used by analysis seek so judging stays exactly
-    /// correct (no forward-sweep corruption) when jumping forwards or backwards.
-    pub(crate) fn seek_replay(&mut self, target_us: i64) {
-        if self.replay.is_none() {
-            return;
-        }
-        let target = target_us.max(0);
-        let Some(model) = self.player.as_ref().map(|p| p.model().clone()) else {
-            return;
-        };
-        let off = self.offset_us();
-        let mut p = Player::new(model, false);
-        p.set_gauge(self.config.gauge);
-        p.set_judge_rate(self.config.judge_rate);
-        if self.config.scratch_auto {
-            let auto: Vec<bool> = (0..self.mode.key).map(|l| self.mode.is_scratch(l)).collect();
-            p.set_auto_lanes(auto);
-        }
-        let mut cursor = 0;
-        if let Some(rp) = &self.replay {
-            for ev in &rp.events {
-                if ev.t > target {
-                    break;
-                }
-                if ev.press {
-                    p.press(ev.lane, ev.t + off, |_| {});
-                } else {
-                    p.release(ev.lane, ev.t + off);
-                }
-                cursor += 1;
-            }
-        }
-        p.update(target, |_| {});
-        self.player = Some(p);
-        self.replay_cursor = cursor;
-        self.analysis_us = target;
-        self.analysis_manual = true;
-        self.msoff.clear();
-    }
-
-    /// Handle an analysis-mode playback key (only while a replay analysis is active): pause/resume,
-    /// playback rate, and ±2 s seek. Returns whether the key was an analysis control.
-    pub(crate) fn analysis_key(&mut self, code: KeyCode) -> bool {
-        if !self.analysis {
-            return false;
-        }
-        match code {
-            KeyCode::Space => {
-                self.analysis_manual = true;
-                self.analysis_paused = !self.analysis_paused;
-            }
-            KeyCode::Equal => {
-                self.analysis_manual = true;
-                self.analysis_rate = (self.analysis_rate + 0.25).min(4.0);
-            }
-            KeyCode::Minus => {
-                self.analysis_manual = true;
-                self.analysis_rate = (self.analysis_rate - 0.25).max(0.25);
-            }
-            KeyCode::PageUp => self.seek_replay(self.analysis_us + 2_000_000),
-            KeyCode::PageDown => self.seek_replay(self.analysis_us - 2_000_000),
-            _ => return false,
-        }
-        true
+        self.config.judge.offset_ms as i64 * 1000
     }
 
     /// Rebuild the resolved skin from the loaded base config plus the live scratch-side/lift.
     pub(crate) fn rebuild_skin(&mut self) {
         let mut cfg = self.skin_cfg.clone();
-        cfg.scratch_left = self.config.scratch_left;
-        cfg.lift = self.config.lift;
+        cfg.scratch_left = self.config.play.scratch_left;
+        cfg.lift = self.config.play.lift;
         self.result_palette = ResultPalette::from_skin(&cfg);
         self.skin = Skin::build(&cfg, self.mode, CW as f32, CH as f32);
-    }
-
-    pub(crate) fn enter_keyconfig(&mut self) {
-        self.kc_sel = 0;
-        self.kc_capturing = false;
-        self.stage = Stage::KeyConfig;
-    }
-
-    pub(crate) fn cycle_edit_mode(&mut self, d: i32) {
-        let all = Mode::ALL;
-        let cur = all.iter().position(|m| m.key == self.kc_edit_mode.key).unwrap_or(0);
-        self.kc_edit_mode = all[((cur as i32 + d).rem_euclid(all.len() as i32)) as usize];
-        let len = kc_rows(self.kc_edit_mode).len();
-        if self.kc_sel >= len {
-            self.kc_sel = len - 1;
-        }
     }
 
     /// Whether binding `code` to `row` (for `mode`) would collide with another action and so
@@ -365,46 +174,28 @@ impl App {
         }
     }
 
-    /// Key-config editor input. In capture mode the next key (except Esc) is bound to the
-    /// focused row unless it collides with another action; otherwise navigate, switch
-    /// edit-mode, start a rebind, or save+exit.
-    pub(crate) fn keyconfig_input(&mut self, code: KeyCode) {
-        let rows = kc_rows(self.kc_edit_mode);
-        if self.kc_capturing {
-            if code != KeyCode::Escape {
-                if let Some(row) = rows.get(self.kc_sel) {
-                    if self.binding_collides(self.kc_edit_mode, row, code) {
-                        self.kc_warn = true;
-                        self.kc_capturing = false;
-                        return;
-                    }
-                    match row {
-                        KcRow::Control(a) => self.keyconfig.set_control(*a, code),
-                        KcRow::Lane(lane) => self.keyconfig.set_lane(self.kc_edit_mode, *lane, code),
-                        KcRow::ModeSelect => {}
-                    }
-                }
-            }
-            self.kc_warn = false;
-            self.kc_capturing = false;
-            return;
+    /// md5 of the currently focused chart, if a song (not a folder) is focused.
+    pub(crate) fn focused_md5(&self) -> Option<String> {
+        match self.select_items.get(self.sel) {
+            Some(SelectItem::Song(si)) => self.library.songs().get(*si).map(|e| e.md5.clone()),
+            _ => None,
         }
-        self.kc_warn = false;
-        match code {
-            KeyCode::Escape => {
-                self.keyconfig.save(&self.keyconfig_path);
-                self.open_settings();
-            }
-            KeyCode::ArrowUp => self.kc_sel = self.kc_sel.saturating_sub(1),
-            KeyCode::ArrowDown => self.kc_sel = (self.kc_sel + 1).min(rows.len().saturating_sub(1)),
-            KeyCode::ArrowLeft if matches!(rows.get(self.kc_sel), Some(KcRow::ModeSelect)) => self.cycle_edit_mode(-1),
-            KeyCode::ArrowRight if matches!(rows.get(self.kc_sel), Some(KcRow::ModeSelect)) => self.cycle_edit_mode(1),
-            KeyCode::Enter | KeyCode::NumpadEnter => {
-                if matches!(rows.get(self.kc_sel), Some(KcRow::Control(_)) | Some(KcRow::Lane(_))) {
-                    self.kc_capturing = true;
-                }
-            }
-            _ => {}
+    }
+
+    /// Index into `songs` of the focused select row, if it is a chart (not a folder).
+    pub(crate) fn focused_song_index(&self) -> Option<usize> {
+        match self.select_items.get(self.sel) {
+            Some(SelectItem::Song(si)) => Some(*si),
+            _ => None,
         }
+    }
+
+    /// Map a local score record into the renderer's record-row view (owned data, no borrow escapes).
+    /// `trend` carries the EX delta versus the next-older play when the score graph is enabled.
+    pub(crate) fn record_row_view(&self, r: &ScoreRecord, older: Option<&ScoreRecord>) -> RecordRowView {
+        let (label, color) = clear_label_color(clear_type_from_id(r.clear));
+        let trend = older.filter(|_| self.config.display.score_graph).map(|o| ex_delta_label(r.ex_score as i64 - o.ex_score as i64));
+        let when = format!("{}{}", fmt_datetime(r.played_at), rule_version_mark(r.rule_version));
+        RecordRowView { when, lamp: color, lamp_label: label, ex: r.ex_score, max_ex: r.max_ex, bp: r.counts[3] + r.counts[4] + r.counts[5], trend }
     }
 }

@@ -13,3 +13,9 @@ path = "src/main.rs"
 rbms-model = { workspace = true }
 rbms-parser = { workspace = true }
 rbms-chart = { workspace = true }
+rbms-config = { workspace = true }
+rbms-library = { workspace = true }
+rbms-store = { workspace = true }
+
+[lints]
+workspace = true

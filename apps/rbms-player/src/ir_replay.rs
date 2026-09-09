@@ -7,17 +7,17 @@ use rbms_chart::shuffle::NoteOption;
 use rbms_ir::{ChartId, GaugeType, RandomOption, ReplayData};
 use rbms_judge::GaugeKind;
 
-use crate::Stage;
 use crate::ir_map::{gauge_from_name, gauge_token, ir_gauge, ir_random};
 use crate::replay::{Replay, ReplayEvent};
+use crate::stage::StageId;
 
 /// Whether a finished replay download may still take over the app.
 ///
 /// The download is polled in every stage, but applying it reloads the chart, so it may only land
 /// while the user is still in song select. Landing during a load or a running play would swap the
 /// chart out from under the run that is already going.
-pub(crate) fn replay_download_is_applicable(stage: &Stage) -> bool {
-    *stage == Stage::Select
+pub(crate) fn replay_download_is_applicable(stage: StageId) -> bool {
+    stage == StageId::Select
 }
 
 /// Wire tag for the µs-resolution event stream this client writes. The server stores replays
@@ -246,9 +246,9 @@ mod tests {
 
     #[test]
     fn a_downloaded_replay_is_applied_only_from_song_select() {
-        assert!(replay_download_is_applicable(&Stage::Select));
-        for stage in [Stage::Loading, Stage::Play, Stage::Result, Stage::Settings, Stage::KeyConfig, Stage::Tables, Stage::Folders] {
-            assert!(!replay_download_is_applicable(&stage), "{stage:?} would have the download reload the chart under it");
+        assert!(replay_download_is_applicable(StageId::Select));
+        for stage in StageId::ALL.into_iter().filter(|s| *s != StageId::Select) {
+            assert!(!replay_download_is_applicable(stage), "{stage:?} would have the download reload the chart under it");
         }
     }
 }
