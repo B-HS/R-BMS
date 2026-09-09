@@ -426,7 +426,7 @@ fn write_atomic_writes_the_contents_and_leaves_no_temp_file() {
 fn the_serialized_book_carries_only_the_record_list() {
     let mut book = ScoreBook::default();
     book.push(rec("AA", 1, 5));
-    let s = ron::ser::to_string_pretty(&book, ron::ser::PrettyConfig::default()).unwrap();
+    let s = ron::ser::to_string_pretty(&book, ron::ser::PrettyConfig::default()).unwrap().replace("\r\n", "\n");
     assert!(s.trim_start().starts_with("(\n    records: ["), "the file shape is unchanged: {s}");
     assert!(!s.contains("index"), "the md5 lookup index never reaches the file: {s}");
 }
