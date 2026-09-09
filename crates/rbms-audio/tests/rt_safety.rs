@@ -89,7 +89,6 @@ fn the_callback_path_never_reaches_the_allocator() {
         .map(|(i, s)| Command::Play { sample: Arc::clone(s), gain: 1.0, pan: 0.0, pitch: 1.0, key: i as u32, at_frame: 0, bus: Bus::ALL[i % Bus::ALL.len()] })
         .collect();
 
-    // Warm up outside the measurement so the fixtures' own allocations are not counted.
     mixer.mix(&mut out);
 
     let steady = measure(|| {
@@ -112,7 +111,6 @@ fn the_callback_path_never_reaches_the_allocator() {
     assert_eq!(steady.allocations, 0, "the callback path allocated");
     assert_eq!(steady.deallocations, 0, "the callback path freed memory");
 
-    // Now the mixer holds the only references, the way it does after `clear_namespace`.
     drop(owned);
     let retiring = measure(|| {
         for _ in 0..DRAIN_BUFFERS {
