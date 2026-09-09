@@ -56,7 +56,7 @@
 - [x] I-app(커밋 `6226f0c`): NETWORK 탭 GUI — 계정 상태·EMAIL·PASSWORD(마스킹, 비영속)·LOGIN/REGISTER/LOGOUT(백그라운드, 토큰 영속) · `build_server` 토큰 전달 · 결과 화면 IR 결과(rank/new best/unranked 사유) · 곡선택 IR 랭킹 패널(비동기 캐시·라이벌 행) · 리플레이 자동 업로드 + 랭킹 행에서 다운로드 재생 · 설정 동기화(업로드/다운로드/충돌) · 라이벌 관리
 - [x] I-web(커밋 `a91f73f`): `/guide` 를 GUI 절차 기준으로 재작성(CLI 제거) + README Web 절 정정. 워크스페이스 `rustfmt.toml`(max_width 160) 추가 + 포맷 커밋 `0f12ae8`, CI 3-OS 통과
 - [x] 적대 리뷰 28건(critical 2: 비밀번호가 SERVER URL 로 유출·랭킹 패널 LOADING 고착) → Rust 측 전건 수정 → 검증(테스트 1,277 통과). **GUI 실기 검증(2026-09-09, TAIDE 접근성 권한 후 키 자동화)**: 곡선택 → SETTINGS/NETWORK 13행 렌더 → SERVER URL 입력 → REGISTER 로 일회용 계정 `gui-e2e-871795` 생성(ACCOUNT "logged in as", PASSWORD 소거, rivals 갱신) → 서버 `/api/players/{id}` 조회 확인 → IR RANKING 패널 상태 표시 확인. 사용자 settings.ron 은 백업 후 복원
-- [ ] 서버 측 계약 결함 4건(submit 응답 슈퍼셋 필드 미전송·리플레이 다운로드 gauge/md5 누락·settings PUT 204 로 잠금 기준 미회신·guest 상수) 수정 워크플로 `rbms-phase-i-contract-fix` 진행 중 → 커밋·푸시·`vercel --prod`·Chrome 라이트/다크 확인 → history 문서
+- [x] 서버 측 계약 결함 수정(커밋 `7fa8106` web · `beb2210` ir · `a1edc71` player · `f98899b` docs): submit 응답에 ranked/flags/is_new_best/score_id, 리플레이 다운로드에 gauge·chart.md5, settings PUT 200 `{updated_at}`(204 하위호환), guest 상수 확인. 로컬 dev 서버 e2e(`crates/rbms-ir/tests/e2e_local.rs`, 계정 `e2e-phase-i-18d391944f88`) 통과. `vercel --prod` 재배포 후 `https://bms.hyuns.uk` health/version/guide/홈 200, Chrome 실렌더 `/guide` 라이트·다크 양쪽 확인(2026-09-09). history: `docs/history/2026-09-09-phase-i-client-ir-integration.md`
 
 ### Phase B~G + 릴리스 (계획 `docs/plan/2026-09-09-enhancement-plan.md` §2)
 - [ ] B 오디오 클럭 재설계 — 보간 클럭·룩어헤드 스케줄·단일 AudioEngine·볼륨 3분리/#VOLWAV/보이스 스틸/램프·오디오 설정 노출·판정 오차 하네스/언더런 카운터/소크
