@@ -32,6 +32,7 @@ pub fn ir_clear(c: ClearType) -> crate::ClearLamp {
         ClearType::NoPlay => L::NoPlay,
         ClearType::Failed => L::Failed,
         ClearType::AssistEasy => L::AssistEasy,
+        ClearType::LightAssistEasy => L::LightAssistEasy,
         ClearType::Easy => L::Easy,
         ClearType::Normal => L::Normal,
         ClearType::Hard => L::Hard,
@@ -80,17 +81,49 @@ pub fn ir_lntype(lnmode: i32) -> i32 {
     }
 }
 
+/// Assist level of a run that used no assist at all, the only level that keeps the score.
+pub const NO_ASSIST: u8 = 0;
+
+/// Assist level of an auto-played lane: the reference raises `assist` to 1 for the battle option
+/// that auto-plays the scratch (`BMSPlayer.java:248-252`), which demotes the lamp to
+/// `LightAssistEasy` (`BMSPlayer.java:866`).
+pub const LIGHT_ASSIST: u8 = 1;
+
+/// Assist level of a custom judge — any judge width or long-note margin widened past 100%
+/// (`BMSPlayer.java:208-214`). Demotes the lamp to `AssistEasy`.
+pub const CUSTOM_JUDGE_ASSIST: u8 = 2;
+
+/// Tag reported for a run with an auto-played scratch lane.
+pub const AUTO_SCRATCH_FLAG: &str = "AUTO_SCRATCH";
+
+/// Tag reported for a run judged more leniently than the chart asks.
+pub const CUSTOM_JUDGE_FLAG: &str = "CUSTOM_JUDGE";
+
+/// How much assist a run used, on the reference implementation's own 0/1/2 scale
+/// (`BMSPlayer.java:200-252`). Every branch that raises it also clears the `score` flag, so any
+/// level above [`NO_ASSIST`] means the run neither scores nor submits; the level itself only
+/// decides which lamp the run is demoted to.
+pub fn assist_level(scratch_auto: bool, custom_judge: bool) -> u8 {
+    if custom_judge {
+        return CUSTOM_JUDGE_ASSIST;
+    }
+    if scratch_auto {
+        return LIGHT_ASSIST;
+    }
+    NO_ASSIST
+}
+
 /// Assist tags reported with a submission, one per active assist. Mirrors the reference implementation's assist level
 /// sources for the options this client exposes: an auto-played lane (`AutoplayModifier` raises
-/// `AssistLevel.ASSIST`, `BMSPlayer.java:233-234`) and a judge window widened past 100%
-/// (`BMSPlayer.java:207-213`). Empty when the run used no assist.
-pub fn assist_flags(scratch_auto: bool, judge_rate: i32) -> Vec<String> {
+/// `AssistLevel.ASSIST`, `BMSPlayer.java:233-234`) and a judge window or long-note margin widened
+/// past 100% (`BMSPlayer.java:208-214`). Empty when the run used no assist.
+pub fn assist_flags(scratch_auto: bool, custom_judge: bool) -> Vec<String> {
     let mut out = Vec::new();
     if scratch_auto {
-        out.push("AUTO_SCRATCH".to_string());
+        out.push(AUTO_SCRATCH_FLAG.to_string());
     }
-    if judge_rate > JUDGE_RATE_UNMODIFIED {
-        out.push("CUSTOM_JUDGE".to_string());
+    if custom_judge {
+        out.push(CUSTOM_JUDGE_FLAG.to_string());
     }
     out
 }
@@ -121,10 +154,11 @@ mod tests {
     use super::*;
 
     const ALL_GAUGES: [GaugeKind; 6] = [GaugeKind::AssistEasy, GaugeKind::Easy, GaugeKind::Normal, GaugeKind::Hard, GaugeKind::ExHard, GaugeKind::Hazard];
-    const ALL_CLEARS: [ClearType; 10] = [
+    const ALL_CLEARS: [ClearType; 11] = [
         ClearType::NoPlay,
         ClearType::Failed,
         ClearType::AssistEasy,
+        ClearType::LightAssistEasy,
         ClearType::Easy,
         ClearType::Normal,
         ClearType::Hard,
@@ -136,15 +170,15 @@ mod tests {
 
     #[test]
     fn assist_flags_empty_for_an_unassisted_run() {
-        assert!(assist_flags(false, 100).is_empty());
-        assert!(assist_flags(false, 50).is_empty(), "a narrowed judge window is not an assist");
+        assert!(assist_flags(false, false).is_empty());
+        assert_eq!(assist_level(false, false), NO_ASSIST);
     }
 
     #[test]
     fn assist_flags_report_auto_scratch_and_custom_judge() {
-        assert_eq!(assist_flags(true, 100), vec!["AUTO_SCRATCH".to_string()]);
-        assert_eq!(assist_flags(false, 105), vec!["CUSTOM_JUDGE".to_string()]);
-        assert_eq!(assist_flags(true, 200), vec!["AUTO_SCRATCH".to_string(), "CUSTOM_JUDGE".to_string()]);
+        assert_eq!(assist_flags(true, false), vec![AUTO_SCRATCH_FLAG.to_string()]);
+        assert_eq!(assist_flags(false, true), vec![CUSTOM_JUDGE_FLAG.to_string()]);
+        assert_eq!(assist_flags(true, true), vec![AUTO_SCRATCH_FLAG.to_string(), CUSTOM_JUDGE_FLAG.to_string()]);
     }
 
     #[test]
@@ -196,6 +230,7 @@ mod tests {
             (ClearType::NoPlay, L::NoPlay),
             (ClearType::Failed, L::Failed),
             (ClearType::AssistEasy, L::AssistEasy),
+            (ClearType::LightAssistEasy, L::LightAssistEasy),
             (ClearType::Easy, L::Easy),
             (ClearType::Normal, L::Normal),
             (ClearType::Hard, L::Hard),
@@ -216,9 +251,10 @@ mod tests {
     }
 
     #[test]
-    fn ir_clear_never_emits_light_assist_easy() {
+    fn ir_clear_emits_light_assist_easy_only_for_the_engine_lamp_of_that_name() {
         use crate::ClearLamp as L;
-        assert!(ALL_CLEARS.iter().all(|&c| ir_clear(c) != L::LightAssistEasy));
+        let emitting: Vec<ClearType> = ALL_CLEARS.into_iter().filter(|&c| ir_clear(c) == L::LightAssistEasy).collect();
+        assert_eq!(emitting, [ClearType::LightAssistEasy]);
     }
 
     #[test]

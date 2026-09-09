@@ -343,6 +343,47 @@ mod tests {
         assert_eq!(RANK_BANDS[dj_rank(0, max)].0, "F", "0% is F");
     }
 
+    /// How many twenty-sevenths the reference implementation splits an EX rate into
+    /// (`BooleanPropertyFactory.java:280-288`: `rank[i] = rate >= 1f * i / 27` over `i` in `0..27`).
+    const REFERENCE_RANK_STEPS: u32 = 27;
+
+    /// The `i` of `i / 27` each DJ band starts at (`ScoreDataProperty.java:101-102`), with the
+    /// trailing 28 closing the top band.
+    const REFERENCE_BAND_STEPS: [u32; 9] = [0, 6, 9, 12, 15, 18, 21, 24, 28];
+
+    /// The band a rate of `exscore / max_ex` falls in, worked out the way the reference does it:
+    /// count the twenty-sevenths the rate has reached, then find the band that step belongs to.
+    fn reference_band(exscore: u32, max_ex: u32) -> usize {
+        let reached = (0..REFERENCE_RANK_STEPS).filter(|i| f64::from(exscore) * f64::from(REFERENCE_RANK_STEPS) >= f64::from(*i) * f64::from(max_ex)).count();
+        REFERENCE_BAND_STEPS.iter().rposition(|start| reached as u32 > *start).unwrap_or(0)
+    }
+
+    /// Every band boundary, on the EX either side of it, against the reference's own arithmetic.
+    /// The two engines compute the rate in different float widths, so the boundaries are where they
+    /// could drift apart; this pins that they do not.
+    #[test]
+    fn dj_rank_boundaries_match_reference() {
+        let total_notes = 1000;
+        let max = total_notes * 2;
+        for step in REFERENCE_BAND_STEPS.into_iter().filter(|step| *step < REFERENCE_RANK_STEPS) {
+            let boundary = (u64::from(step) * u64::from(max)).div_ceil(u64::from(REFERENCE_RANK_STEPS)) as u32;
+            for ex in [boundary.saturating_sub(1), boundary, boundary + 1] {
+                assert_eq!(dj_rank(ex, max), reference_band(ex, max), "ex {ex}/{max} at the {step}/27 boundary");
+            }
+        }
+        for ex in [0, 1, max / 3, max / 2, max - 1, max] {
+            assert_eq!(dj_rank(ex, max), reference_band(ex, max), "ex {ex}/{max}");
+        }
+    }
+
+    /// The eight band names, in the order the reference lists them
+    /// (`ScoreDataProperty.java:101-102`).
+    #[test]
+    fn dj_rank_band_names_match_reference() {
+        assert_eq!(RANK_BANDS.map(|(name, _)| name).to_vec(), vec!["F", "E", "D", "C", "B", "A", "AA", "AAA"]);
+        assert_eq!(REFERENCE_BAND_STEPS.len(), RANK_BANDS.len() + 1, "one more boundary than bands");
+    }
+
     #[test]
     fn dj_rank_zero_max_is_lowest() {
         assert_eq!(dj_rank(0, 0), 0, "no notes -> F, no divide-by-zero");
