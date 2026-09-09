@@ -902,3 +902,227 @@ fn data_lines_inside_active_branch_kept() {
     let s = parse(chart);
     assert_eq!(s.measures.get(&1).unwrap().channels[0].objects.len(), 2);
 }
+
+#[test]
+fn measure_rate_nan_is_rejected_and_keeps_default_one() {
+    let s = parse(b"#00102:nan\r\n#00111:01\r\n");
+    assert_eq!(s.measures.get(&1).unwrap().rate, 1.0);
+}
+
+#[test]
+fn measure_rate_inf_and_non_positive_are_rejected() {
+    for body in [&b"#00102:inf\r\n"[..], b"#00102:-inf\r\n", b"#00102:0\r\n", b"#00102:-0.5\r\n"] {
+        let s = parse(body);
+        assert_eq!(s.measures.get(&1).unwrap().rate, 1.0, "rejected: {}", String::from_utf8_lossy(body));
+    }
+}
+
+#[test]
+fn measure_rate_valid_positive_is_kept() {
+    let s = parse(b"#00102:0.75\r\n");
+    assert_eq!(s.measures.get(&1).unwrap().rate, 0.75);
+}
+
+#[test]
+fn defexrank_is_parsed_and_absent_by_default() {
+    assert_eq!(parse(b"#DEFEXRANK 130\r\n").headers.defexrank, Some(130.0));
+    assert_eq!(parse(b"#TITLE t\r\n").headers.defexrank, None);
+    assert_eq!(parse(b"#DEFEXRANK nan\r\n").headers.defexrank, None, "non-finite is ignored");
+}
+
+#[test]
+fn switch_keeps_only_the_case_matching_the_value() {
+    let chart = b"#SETSWITCH 2\r\n#CASE 1\r\n#WAV01 one.wav\r\n#SKIP\r\n#CASE 2\r\n#WAV02 two.wav\r\n#SKIP\r\n#ENDSW\r\n";
+    let s = parse(chart);
+    assert_eq!(s.wav.len(), 1);
+    assert_eq!(s.wav.get(&2).map(String::as_str), Some("two.wav"));
+}
+
+#[test]
+fn matched_case_falls_through_two_following_cases_until_skip() {
+    let chart = b"#SETSWITCH 1\r\n#CASE 1\r\n#WAV01 a.wav\r\n#CASE 2\r\n#WAV02 b.wav\r\n#CASE 3\r\n#WAV03 c.wav\r\n#SKIP\r\n#ENDSW\r\n";
+    let s = parse(chart);
+    assert_eq!(s.wav.len(), 3);
+    assert_eq!(s.wav.get(&1).map(String::as_str), Some("a.wav"));
+    assert_eq!(s.wav.get(&2).map(String::as_str), Some("b.wav"));
+    assert_eq!(s.wav.get(&3).map(String::as_str), Some("c.wav"));
+}
+
+#[test]
+fn skip_deactivates_the_rest_of_the_switch_until_endsw() {
+    let chart = b"#SETSWITCH 1\r\n#CASE 1\r\n#WAV01 a.wav\r\n#SKIP\r\n#WAV02 dead.wav\r\n#CASE 2\r\n#WAV03 dead.wav\r\n#SKIP\r\n#DEF\r\n#WAV04 dead.wav\r\n#ENDSW\r\n#WAV05 after.wav\r\n";
+    let s = parse(chart);
+    assert_eq!(s.wav.len(), 2);
+    assert_eq!(s.wav.get(&1).map(String::as_str), Some("a.wav"));
+    assert_eq!(s.wav.get(&5).map(String::as_str), Some("after.wav"));
+}
+
+#[test]
+fn def_runs_when_no_case_matched() {
+    let chart = b"#SETSWITCH 9\r\n#CASE 1\r\n#WAV01 a.wav\r\n#SKIP\r\n#CASE 2\r\n#WAV02 b.wav\r\n#SKIP\r\n#DEF\r\n#WAV03 fallback.wav\r\n#ENDSW\r\n";
+    let s = parse(chart);
+    assert_eq!(s.wav.len(), 1);
+    assert_eq!(s.wav.get(&3).map(String::as_str), Some("fallback.wav"));
+}
+
+#[test]
+fn def_in_the_middle_activates_and_falls_through_to_a_later_case() {
+    let chart = b"#SETSWITCH 3\r\n#CASE 1\r\n#WAV01 a.wav\r\n#SKIP\r\n#DEF\r\n#WAV02 fallback.wav\r\n#CASE 3\r\n#WAV03 c.wav\r\n#SKIP\r\n#ENDSW\r\n";
+    let s = parse(chart);
+    assert_eq!(s.wav.len(), 2);
+    assert_eq!(s.wav.get(&2).map(String::as_str), Some("fallback.wav"));
+    assert_eq!(s.wav.get(&3).map(String::as_str), Some("c.wav"));
+}
+
+#[test]
+fn def_in_the_middle_followed_by_skip_hides_a_later_matching_case() {
+    let chart = b"#SETSWITCH 2\r\n#CASE 1\r\n#WAV01 a.wav\r\n#SKIP\r\n#DEF\r\n#WAV02 fallback.wav\r\n#SKIP\r\n#CASE 2\r\n#WAV03 b.wav\r\n#SKIP\r\n#ENDSW\r\n";
+    let s = parse(chart);
+    assert_eq!(s.wav.len(), 1);
+    assert_eq!(s.wav.get(&2).map(String::as_str), Some("fallback.wav"));
+}
+
+#[test]
+fn random_nested_inside_a_case_selects_its_own_branch() {
+    let chart = b"#SETSWITCH 2\r\n#CASE 1\r\n#WAV01 a.wav\r\n#SKIP\r\n#CASE 2\r\n#SETRANDOM 2\r\n#IF 1\r\n#WAV02 r1.wav\r\n#ENDIF\r\n#IF 2\r\n#WAV03 r2.wav\r\n#ENDIF\r\n#ENDRANDOM\r\n#SKIP\r\n#ENDSW\r\n";
+    let s = parse(chart);
+    assert_eq!(s.wav.len(), 1);
+    assert_eq!(s.wav.get(&3).map(String::as_str), Some("r2.wav"));
+}
+
+#[test]
+fn switch_nested_inside_an_if_branch_is_resolved() {
+    let chart = b"#SETRANDOM 2\r\n#IF 1\r\n#SETSWITCH 1\r\n#CASE 1\r\n#WAV01 a.wav\r\n#SKIP\r\n#ENDSW\r\n#ENDIF\r\n#IF 2\r\n#SETSWITCH 1\r\n#CASE 1\r\n#WAV02 b.wav\r\n#SKIP\r\n#ENDSW\r\n#ENDIF\r\n#ENDRANDOM\r\n";
+    let s = parse(chart);
+    assert_eq!(s.wav.len(), 1);
+    assert_eq!(s.wav.get(&2).map(String::as_str), Some("b.wav"));
+}
+
+#[test]
+fn switch_inside_an_inactive_if_emits_nothing_not_even_def() {
+    let chart = b"#SETRANDOM 2\r\n#IF 1\r\n#SETSWITCH 1\r\n#CASE 1\r\n#WAV01 a.wav\r\n#SKIP\r\n#DEF\r\n#WAV02 fallback.wav\r\n#ENDSW\r\n#ENDIF\r\n#ENDRANDOM\r\n#WAV03 outside.wav\r\n";
+    let s = parse(chart);
+    assert_eq!(s.wav.len(), 1);
+    assert_eq!(s.wav.get(&3).map(String::as_str), Some("outside.wav"));
+}
+
+#[test]
+fn endsw_closes_only_the_innermost_switch() {
+    let chart = b"#SETSWITCH 1\r\n#CASE 1\r\n#SETSWITCH 2\r\n#CASE 1\r\n#WAV01 inner1.wav\r\n#SKIP\r\n#CASE 2\r\n#WAV02 inner2.wav\r\n#SKIP\r\n#ENDSW\r\n#WAV03 outer.wav\r\n#SKIP\r\n#ENDSW\r\n#WAV04 after.wav\r\n";
+    let s = parse(chart);
+    assert_eq!(s.wav.len(), 3);
+    assert_eq!(s.wav.get(&2).map(String::as_str), Some("inner2.wav"));
+    assert_eq!(s.wav.get(&3).map(String::as_str), Some("outer.wav"));
+    assert_eq!(s.wav.get(&4).map(String::as_str), Some("after.wav"));
+}
+
+#[test]
+fn setswitch_pins_the_value_for_every_seed() {
+    let chart = b"#SETSWITCH 2\r\n#CASE 1\r\n#WAV01 one.wav\r\n#SKIP\r\n#CASE 2\r\n#WAV02 two.wav\r\n#SKIP\r\n#ENDSW\r\n";
+    for seed in [0u64, 1, 2, 7, 12345] {
+        let s = parse_with(chart, ParseOptions { random_seed: seed });
+        assert_eq!(s.wav.get(&2).map(String::as_str), Some("two.wav"), "seed {seed}");
+        assert_eq!(s.wav.len(), 1, "seed {seed}");
+    }
+}
+
+const SWITCH_FOUR: &[u8] = b"#SWITCH 4\r\n#CASE 1\r\n#WAV01 a.wav\r\n#SKIP\r\n#CASE 2\r\n#WAV02 b.wav\r\n#SKIP\r\n#CASE 3\r\n#WAV03 c.wav\r\n#SKIP\r\n#CASE 4\r\n#WAV04 d.wav\r\n#SKIP\r\n#ENDSW\r\n";
+
+#[test]
+fn switch_draw_is_deterministic_per_seed_and_seeds_can_differ() {
+    let first = parse_with(SWITCH_FOUR, ParseOptions { random_seed: 0 });
+    let again = parse_with(SWITCH_FOUR, ParseOptions { random_seed: 0 });
+    assert_eq!(first.wav.get(&1).map(String::as_str), Some("a.wav"));
+    assert_eq!(first.wav.len(), 1);
+    assert_eq!(again.wav.get(&1).map(String::as_str), Some("a.wav"));
+
+    let other = parse_with(SWITCH_FOUR, ParseOptions { random_seed: 1 });
+    assert_eq!(other.wav.get(&4).map(String::as_str), Some("d.wav"));
+    assert_eq!(other.wav.len(), 1);
+}
+
+#[test]
+fn orphan_case_def_skip_endsw_are_ignored() {
+    let s = parse(b"#ENDSW\r\n#CASE 1\r\n#DEF\r\n#SKIP\r\n#WAV01 a.wav\r\n");
+    assert_eq!(s.wav.len(), 1);
+    assert_eq!(s.wav.get(&1).map(String::as_str), Some("a.wav"));
+}
+
+#[test]
+fn switch_left_unclosed_keeps_gating_until_end_of_file() {
+    let s = parse(b"#WAV01 before.wav\r\n#SETSWITCH 2\r\n#WAV02 dead.wav\r\n#CASE 1\r\n#WAV03 dead.wav\r\n#CASE 2\r\n#WAV04 b.wav\r\n");
+    assert_eq!(s.wav.len(), 2);
+    assert_eq!(s.wav.get(&1).map(String::as_str), Some("before.wav"));
+    assert_eq!(s.wav.get(&4).map(String::as_str), Some("b.wav"));
+}
+
+#[test]
+fn switch_gates_data_lines_and_header_lines_alike() {
+    let chart = b"#SETSWITCH 2\r\n#CASE 1\r\n#TITLE one\r\n#00111:0101\r\n#SKIP\r\n#CASE 2\r\n#TITLE two\r\n#00111:0202\r\n#SKIP\r\n#ENDSW\r\n";
+    let s = parse(chart);
+    assert_eq!(s.headers.title, "two");
+    let m = s.measures.get(&1).unwrap();
+    let ch = m.channels.iter().find(|c| c.channel == 37).unwrap();
+    assert_eq!(ch.objects.len(), 2);
+    assert_eq!(ch.objects[0].value(36), 2);
+    assert_eq!(ch.objects[1].value(36), 2);
+}
+
+#[test]
+fn switch_resolution_does_not_change_md5_or_sha256() {
+    let chart = b"#SETSWITCH 2\r\n#CASE 1\r\n#WAV01 a.wav\r\n#SKIP\r\n#CASE 2\r\n#WAV01 b.wav\r\n#SKIP\r\n#ENDSW\r\n";
+    for seed in [0u64, 1, 99] {
+        let s = parse_with(chart, ParseOptions { random_seed: seed });
+        assert_eq!(s.md5, "afe8e024f296b30631044310918f0a57", "seed {seed}");
+        assert_eq!(s.sha256, "697fd9c7ae1ee8ae0301164464186adcefbf56a338aad4624b716f67c7b60f9a", "seed {seed}");
+    }
+}
+
+#[test]
+fn skip_inside_an_inactive_nested_branch_keeps_the_rest_of_the_case() {
+    let chart = b"#SETSWITCH 1\r\n#CASE 1\r\n#SETRANDOM 2\r\n#IF 1\r\n#WAV01 dead.wav\r\n#SKIP\r\n#ENDIF\r\n#ENDRANDOM\r\n#WAV02 must_stay.wav\r\n#SKIP\r\n#ENDSW\r\n";
+    let s = parse_with(chart, ParseOptions { random_seed: 0 });
+    assert_eq!(s.wav.len(), 1);
+    assert_eq!(s.wav.get(&2).map(String::as_str), Some("must_stay.wav"));
+}
+
+#[test]
+fn skip_inside_an_active_nested_branch_ends_the_case() {
+    let chart = b"#SETSWITCH 1\r\n#CASE 1\r\n#SETRANDOM 2\r\n#IF 2\r\n#WAV01 live.wav\r\n#SKIP\r\n#ENDIF\r\n#ENDRANDOM\r\n#WAV02 dead.wav\r\n#ENDSW\r\n#WAV03 after.wav\r\n";
+    let s = parse_with(chart, ParseOptions { random_seed: 0 });
+    assert_eq!(s.wav.len(), 2);
+    assert_eq!(s.wav.get(&1).map(String::as_str), Some("live.wav"));
+    assert_eq!(s.wav.get(&3).map(String::as_str), Some("after.wav"));
+}
+
+#[test]
+fn case_label_ignores_trailing_tokens() {
+    let chart = b"#SETSWITCH 2\r\n#CASE 1 first\r\n#WAV01 one.wav\r\n#SKIP\r\n#CASE 2 second\r\n#WAV02 two.wav\r\n#SKIP\r\n#ENDSW\r\n";
+    let s = parse(chart);
+    assert_eq!(s.wav.len(), 1);
+    assert_eq!(s.wav.get(&2).map(String::as_str), Some("two.wav"));
+}
+
+#[test]
+fn case_with_an_unparsable_label_never_matches_and_leaves_def_to_run() {
+    let chart = b"#SETSWITCH 0\r\n#CASE junk\r\n#WAV01 dead.wav\r\n#SKIP\r\n#DEF\r\n#WAV02 fallback.wav\r\n#ENDSW\r\n";
+    let s = parse(chart);
+    assert_eq!(s.wav.len(), 1);
+    assert_eq!(s.wav.get(&2).map(String::as_str), Some("fallback.wav"));
+}
+
+const RANDOM_FOUR: &[u8] = b"#RANDOM 4\r\n#IF 1\r\n#WAV01 a.wav\r\n#ENDIF\r\n#IF 2\r\n#WAV02 b.wav\r\n#ENDIF\r\n#IF 3\r\n#WAV03 c.wav\r\n#ENDIF\r\n#IF 4\r\n#WAV04 d.wav\r\n#ENDIF\r\n#ENDRANDOM\r\n";
+
+#[test]
+fn switch_draw_follows_the_same_seed_rule_as_random_draw() {
+    for seed in [0u64, 1, 2, 3, 7, 42] {
+        let by_switch = parse_with(SWITCH_FOUR, ParseOptions { random_seed: seed });
+        let by_random = parse_with(RANDOM_FOUR, ParseOptions { random_seed: seed });
+        let switch_keys: Vec<u32> = by_switch.wav.keys().copied().collect();
+        let random_keys: Vec<u32> = by_random.wav.keys().copied().collect();
+        assert_eq!(switch_keys.len(), 1, "seed {seed}");
+        assert_eq!(switch_keys, random_keys, "seed {seed}");
+    }
+    assert_eq!(parse_with(RANDOM_FOUR, ParseOptions { random_seed: 0 }).wav.get(&1).map(String::as_str), Some("a.wav"));
+    assert_eq!(parse_with(RANDOM_FOUR, ParseOptions { random_seed: 1 }).wav.get(&4).map(String::as_str), Some("d.wav"));
+}

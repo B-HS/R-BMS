@@ -61,6 +61,7 @@ pub struct Headers {
     pub preview: String,
     pub play_level: String,
     pub rank: i32,
+    pub defexrank: Option<f64>,
     pub total: Option<f64>,
     pub init_bpm: f64,
     pub lnobj: Option<u32>,
@@ -84,6 +85,7 @@ impl Default for Headers {
             preview: String::new(),
             play_level: String::new(),
             rank: 3,
+            defexrank: None,
             total: None,
             init_bpm: 130.0,
             lnobj: None,
@@ -189,7 +191,10 @@ fn parse_data_line(src: &mut BmsSource, body: &str) {
     let measure = src.measures.entry(measure_idx).or_default();
 
     if channel == 2 {
-        if let Ok(rate) = data.trim().parse::<f64>() {
+        if let Ok(rate) = data.trim().parse::<f64>()
+            && rate.is_finite()
+            && rate > 0.0
+        {
             measure.rate = rate;
         }
         return;
@@ -243,6 +248,7 @@ fn parse_header_line(src: &mut BmsSource, body: &str) {
         "PLAYLEVEL" => h.play_level = rest.to_owned(),
         "PLAYER" => h.player = rest.parse().unwrap_or(1),
         "RANK" => h.rank = rest.parse().unwrap_or(3),
+        "DEFEXRANK" => h.defexrank = rest.parse::<f64>().ok().filter(|v| v.is_finite()),
         "TOTAL" => h.total = rest.parse().ok(),
         "DIFFICULTY" => h.difficulty = rest.parse().unwrap_or(0),
         "BPM" => h.init_bpm = rest.parse().unwrap_or(130.0),

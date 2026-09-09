@@ -2,11 +2,21 @@
 enum Frame {
     Random { value: u32 },
     If { active: bool, matched: bool },
+    Switch { value: u32, active: bool, matched: bool, skipped: bool },
 }
 
-/// `#RANDOM`/`#IF` control-flow resolver. A single chart is materialised by drawing
-/// a value per `#RANDOM n` (deterministic from the seed) and emitting only the lines
-/// inside matching `#IF` branches.
+/// Whether a frame lets the lines nested inside it through. `#RANDOM` is a value
+/// container only, so it never gates on its own.
+fn frame_gate(frame: &Frame) -> bool {
+    match frame {
+        Frame::Random { .. } => true,
+        Frame::If { active, .. } | Frame::Switch { active, .. } => *active,
+    }
+}
+
+/// `#RANDOM`/`#IF` and `#SWITCH`/`#CASE` control-flow resolver. A single chart is
+/// materialised by drawing a value per `#RANDOM n`/`#SWITCH n` (deterministic from the
+/// seed) and emitting only the lines inside matching `#IF` branches and `#CASE` blocks.
 pub struct Control {
     stack: Vec<Frame>,
     rng: u64,
@@ -42,20 +52,45 @@ impl Control {
         self.stack.iter().rposition(|f| matches!(f, Frame::If { .. }))
     }
 
+    fn last_switch_pos(&self) -> Option<usize> {
+        self.stack.iter().rposition(|f| matches!(f, Frame::Switch { .. }))
+    }
+
     fn active_excluding(&self, pos: usize) -> bool {
-        self.stack.iter().enumerate().all(|(i, f)| match f {
-            Frame::If { active, .. } => i == pos || *active,
-            _ => true,
-        })
+        self.stack.iter().enumerate().all(|(i, f)| i == pos || frame_gate(f))
     }
 
     pub fn active(&self) -> bool {
-        self.stack.iter().all(|f| match f {
-            Frame::If { active, .. } => *active,
-            _ => true,
-        })
+        self.stack.iter().all(frame_gate)
     }
 
+    /// Applies `#CASE k` (`wanted = Some(k)`) or `#DEF` (`wanted = None`) to the innermost
+    /// `#SWITCH` frame. A block that is already active falls through unchanged, and a block
+    /// closed by `#SKIP` stays inactive until `#ENDSW`. An orphan label is ignored.
+    ///
+    /// Labels are resolved in file order, one line at a time. This differs from C `switch`
+    /// on one point: C picks the jump target when the block is entered, so a `default:`
+    /// placed before a matching `case` never runs, while here a `#DEF` that appears before
+    /// the matching `#CASE` wins because nothing has matched yet at that line. A `#CASE`
+    /// whose label does not parse as a number is treated as a label that never matches.
+    fn select_case(&mut self, wanted: Option<u32>) {
+        let Some(pos) = self.last_switch_pos() else { return };
+        let Frame::Switch { value, active, matched, skipped } = self.stack[pos] else { return };
+        if skipped || active {
+            return;
+        }
+        let selected = match wanted {
+            Some(k) => value == k,
+            None => !matched,
+        };
+        let now = selected && self.active_excluding(pos);
+        self.stack[pos] = Frame::Switch { value, active: now, matched: matched || now, skipped };
+    }
+
+    /// Consumes one `#`-line body as a control command, returning whether it was one. Control
+    /// commands are seen even inside branches that emit nothing, so `#SKIP` checks the whole
+    /// frame stack: a `#SKIP` sitting in a dead nested branch must not close the live `#CASE`
+    /// that encloses it.
     pub fn handle(&mut self, body: &str) -> bool {
         let (head, rest) = match body.find(char::is_whitespace) {
             Some(i) => (&body[..i], body[i..].trim()),
@@ -106,6 +141,42 @@ impl Control {
             }
             "ENDIF" => {
                 if let Some(pos) = self.last_if_pos() {
+                    self.stack.truncate(pos);
+                }
+                true
+            }
+            "SWITCH" => {
+                let n = rest.split_whitespace().next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(1);
+                let v = self.rand_range(n);
+                self.stack.push(Frame::Switch { value: v, active: false, matched: false, skipped: false });
+                true
+            }
+            "SETSWITCH" => {
+                let v = rest.split_whitespace().next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(1);
+                self.stack.push(Frame::Switch { value: v, active: false, matched: false, skipped: false });
+                true
+            }
+            "CASE" => {
+                if let Some(k) = rest.split_whitespace().next().and_then(|s| s.parse::<u32>().ok()) {
+                    self.select_case(Some(k));
+                }
+                true
+            }
+            "DEF" => {
+                self.select_case(None);
+                true
+            }
+            "SKIP" => {
+                if self.active()
+                    && let Some(pos) = self.last_switch_pos()
+                    && let Frame::Switch { value, active: true, matched, .. } = self.stack[pos]
+                {
+                    self.stack[pos] = Frame::Switch { value, active: false, matched, skipped: true };
+                }
+                true
+            }
+            "ENDSW" => {
+                if let Some(pos) = self.last_switch_pos() {
                     self.stack.truncate(pos);
                 }
                 true
