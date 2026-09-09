@@ -43,9 +43,28 @@
 - [x] W2 API 확장 ∥ UI part1 → UI part2 → 리뷰 3·수정 완료. Fable 최종 게이트: typecheck 0·lint 0·테스트 196 통과(2 skip)·빌드 35 페이지. 실 DB 스모크 전 항목 정상(→ `docs/history/2026-09-09-web-nextjs-ir-server.md`)
 - [x] 커밋(web 갈래별) + push origin dev (2026-09-09)
 - [x] Vercel 배포(2026-09-09): 프로젝트 `rbms-web`(b-hs) 링크, Production env 6종(DATABASE_URL·BETTER_AUTH_SECRET·BETTER_AUTH_URL·NEXT_PUBLIC_APP_URL·ALLOW_GUEST·REPLAY_MAX_BYTES) 등록, `vercel --prod` 성공. 프로덕션 별칭 `https://rbms-web.vercel.app` 에서 health/version/랭킹/FE 통계/페이지 7종 200 확인(실 DB). 배포 해시 URL은 배포 보호(SSO)로 302 — 정상
-- [ ] 도메인 `bms.hyuns.uk`: Vercel 프로젝트에 추가됨. 2026-09-09 점검 결과 현재 레코드는 Cloudflare Tunnel CNAME(프록시 ON, 응답 error 1033, `vercel domains inspect` 미구성) → Cloudflare DNS 에서 그 레코드를 지우고 `A bms 76.76.21.21`(프록시 OFF, DNS only) 로 교체 필요. 교체 후 `https://bms.hyuns.uk/api/health` 200 확인
+- [x] 도메인 `bms.hyuns.uk`: 사용자가 Cloudflare 레코드를 Vercel CNAME(`*.vercel-dns-016.com`, DNS only)으로 교체(2026-09-09). `https://bms.hyuns.uk/api/health` 200 확인(Vercel IP 216.150.1.65 경유)
 - [x] CI(dev) 골든 실패 수정 완료: 원인은 곡선택 폴더 행 마커 U+25B8 가 임베드 Inter 에 없어 OS 시스템 폰트로 폴백된 것. 골든 테스트를 임베드 폰트 전용 결정적 렌더(`TextEngine::embedded_only`, `use_embedded_fonts_only`)로 수정 — 커밋 `61b9a97`, CI run 34307010505 에서 ubuntu/macos/windows + fmt/clippy 전부 통과
 - 후속: md5 단독 제출(LR2IR 어댑터), Vercel Blob, 라이트/다크 스크린샷 확인, 슈퍼셋 서버의 누락 필드 `.default()`
+
+### 사용자 지시 (2026-09-09): "멈추라 할 때까지 멈추지 말고 계획대로 전부 구현" — 클라 GUI 로그인 등 IR 연동은 CLI 가 아니라 GUI 에서 전부 가능해야 함
+
+> 실행 순서(파일 충돌 회피): Phase I(클라 GUI 연동) → B(오디오) → C(구조) → D ∥ E1~E2 ∥ F → E3~E6 ∥ G → R(릴리스). 각 Phase = Workflow 1개(구현 Opus max, 파일 소유권 분할 → 적대 리뷰 Opus → 수정 → Fable 게이트 `cargo fmt/test/clippy` + web `bun run verify`) → 갈래별 Conventional Commit → push → CI 확인 → PROCESS/history 갱신.
+
+### Phase I — 클라 ↔ IR 서버 GUI 연동 (Workflow `rbms-phase-i`)
+- [ ] I-ir: `rbms-ir` DTO 확장(`SubmitResponse` ranked/flags/is_new_best/score_id) + `HttpScoreServer` register/login/me/replay download/settings get·put(낙관적 잠금)/rivals put/course ranking + 에러 변형(401/409/413/429) + mock HTTP 테스트 + `docs/reference/ir-api.md`
+- [ ] I-app: NETWORK 탭 GUI — 계정 상태·EMAIL·PASSWORD(마스킹, 비영속)·LOGIN/REGISTER/LOGOUT(백그라운드, 토큰 영속) · `build_server` 토큰 전달 · 결과 화면 IR 결과(rank/new best/unranked 사유) · 곡선택 IR 랭킹 패널(비동기 캐시·라이벌 행) · 리플레이 자동 업로드 + 랭킹 행에서 다운로드 재생 · 설정 동기화(업로드/다운로드/충돌) · 라이벌 관리
+- [ ] I-web: `/guide` 를 GUI 절차 기준으로 재작성(CLI 제거) + README Web 절 정정
+- [ ] 적대 리뷰(계약 e2e·앱 UX/스레드·컨벤션) → 수정 → 검증 → 커밋·푸시·CI → history 문서
+
+### Phase B~G + 릴리스 (계획 `docs/plan/2026-09-09-enhancement-plan.md` §2)
+- [ ] B 오디오 클럭 재설계 — 보간 클럭·룩어헤드 스케줄·단일 AudioEngine·볼륨 3분리/#VOLWAV/보이스 스틸/램프·오디오 설정 노출·판정 오차 하네스/언더런 카운터/소크
+- [ ] C 구조 개편 — Stage enum·PlaySession→rbms-play·rbms-config·설정 descriptor 테이블·판정/게이지 데이터화·rbms-store/rbms-library 이관·CI lint 게이트/thiserror/forbid(unsafe)
+- [ ] D 판정 패리티 완성 + JUDGE 탭 노출 — J17 알고리즘 4종·J20 9게이지+J26·J21~J23·J9/A10 스크래치·J24 CN/HCN·J25·J12 2단계·J6 24K·어시스트 램프 강등
+- [ ] E1~E6 스킨 완전 커스터마이징 — 프리미티브(PNG 골든·textured quad·클립·아틀라스)·타이머/키프레임·프로퍼티 바인딩·JSON+Lua 로더·화면 이식·스킨 선택 UI
+- [ ] F UX·기능 고도화 — 옵션 오버레이·토스트·백그라운드 로딩·리트라이/다음곡·타깃/PACEMAKER·그래프·정렬/필터/즐겨찾기·HID/SUD·floating hi-speed·FLIP/BATTLE·리사이즈 레터박스 등
+- [ ] G 데이터 스케일·롱테일 — 곡DB(rusqlite)·스코어DB·코스·연습 모드·gilrs/MIDI·시스템 사운드·복수 IR
+- [ ] R prod 브랜치·브랜치 보호·첫 릴리스 v0.1.0
 
 ---
 
