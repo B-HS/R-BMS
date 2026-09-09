@@ -48,6 +48,29 @@ impl SettingsPutRequest {
     }
 }
 
+/// The body a successful settings `PUT` answers with: the `updated_at` the server actually stored.
+/// A deployment that predates the field answers `204 No Content` instead, which is why the stamp is
+/// optional here and [`SettingsPutResult::from_server`] records which of the two happened.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SettingsPutResponse {
+    #[serde(default)]
+    pub updated_at: Option<i64>,
+}
+
+/// What one settings `PUT` taught the client about the stored row.
+///
+/// The server stamps its own `updated_at` and ignores the one the client sent, so this value — not
+/// the sent one — is the base the next conditional write must carry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SettingsPutResult {
+    /// The stamp the stored row now carries: the server's own value when it sent one, and the
+    /// client's echo of what it wrote when an older server answered `204 No Content`.
+    pub updated_at: i64,
+    /// Whether `updated_at` came from the server. `false` means it is the client's own echo and a
+    /// read-back is still needed to learn the real stamp.
+    pub from_server: bool,
+}
+
 /// The 409 body of a settings write that lost the optimistic lock: the server's current copy, so
 /// the client can merge or overwrite without a second round trip.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -115,6 +138,18 @@ mod tests {
         let req = SettingsPutRequest::from_blob(&SettingsBlob { name: "settings".into(), ..Default::default() });
         assert!(req.base_updated_at.is_none());
         assert!(serde_json::to_string(&req).unwrap().contains(r#""base_updated_at":null"#));
+    }
+
+    #[test]
+    fn settings_put_response_decodes_the_stored_stamp() {
+        let r: SettingsPutResponse = serde_json::from_value(json!({"updated_at": 1_700_000_000_000_i64})).unwrap();
+        assert_eq!(r.updated_at, Some(1_700_000_000_000));
+    }
+
+    #[test]
+    fn settings_put_response_without_a_stamp_decodes_as_unknown() {
+        let r: SettingsPutResponse = serde_json::from_value(json!({})).unwrap();
+        assert_eq!(r.updated_at, None, "an older server's empty body leaves the stamp to the caller's fallback");
     }
 
     #[test]

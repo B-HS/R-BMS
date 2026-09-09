@@ -175,10 +175,14 @@ impl ScoreServer for HttpScoreServer {
         self.get(&format!("/players/{}/settings/{name}", player.id))
     }
 
-    /// Stores `blob` under `(player, blob.name)`. A 204 is the success path. When
+    /// Stores `blob` under `(player, blob.name)` and reports the stamp the row now carries.
+    ///
+    /// The success body is `{ "updated_at": … }`; a deployment that predates it answers
+    /// `204 No Content`, and the sent stamp is echoed back with
+    /// [`SettingsPutResult::from_server`] false so the caller knows to read the row back. When
     /// `blob.base_updated_at` is set and the server's copy has moved on, the 409 body is decoded
     /// into [`IrError::SettingsConflict`] so the caller can merge without re-fetching.
-    fn put_settings(&self, player: &PlayerId, blob: &SettingsBlob) -> Result<(), IrError> {
+    fn put_settings(&self, player: &PlayerId, blob: &SettingsBlob) -> Result<SettingsPutResult, IrError> {
         let path = format!("/players/{}/settings/{}", player.id, blob.name);
         let body = SettingsPutRequest::from_blob(blob);
         let resp = self.send(self.client()?.put(self.url(&path)).json(&body))?;
@@ -190,8 +194,12 @@ impl ScoreServer for HttpScoreServer {
                 Err(_) => IrError::Conflict(text),
             });
         }
-        Self::succeeding(resp)?;
-        Ok(())
+        let text = Self::succeeding(resp)?.text().unwrap_or_default();
+        let stored = serde_json::from_str::<SettingsPutResponse>(&text).ok().and_then(|response| response.updated_at);
+        Ok(match stored {
+            Some(updated_at) => SettingsPutResult { updated_at, from_server: true },
+            None => SettingsPutResult { updated_at: blob.updated_at, from_server: false },
+        })
     }
 
     fn register(&self, req: &AuthRequest) -> Result<AuthResponse, IrError> {
@@ -464,11 +472,23 @@ mod tests {
     }
 
     #[test]
-    fn put_settings_accepts_a_204_no_content_reply() {
-        let server = TestServer::spawn(vec![no_content()]);
-        let blob = SettingsBlob { name: "keyconfig".into(), content: "()".into(), ..Default::default() };
-        server.client().put_settings(&PlayerId { id: "p1".into() }, &blob).expect("put succeeds");
+    fn put_settings_reads_back_the_stamp_the_server_stored() {
+        let server = TestServer::spawn(vec![ok(r#"{"updated_at":1700000000042}"#)]);
+        let blob = SettingsBlob { name: "keyconfig".into(), content: "()".into(), updated_at: 1, ..Default::default() };
+        let stored = server.client().put_settings(&PlayerId { id: "p1".into() }, &blob).expect("put succeeds");
         assert!(server.next_request().starts_with("PUT /players/p1/settings/keyconfig HTTP/1.1"));
+        assert_eq!(stored.updated_at, 1_700_000_000_042, "the lock base is the server's stamp, not the one the client sent");
+        assert!(stored.from_server);
+    }
+
+    #[test]
+    fn put_settings_accepts_a_204_no_content_reply_from_an_older_server() {
+        let server = TestServer::spawn(vec![no_content()]);
+        let blob = SettingsBlob { name: "keyconfig".into(), content: "()".into(), updated_at: 1_700_000_000_000, ..Default::default() };
+        let stored = server.client().put_settings(&PlayerId { id: "p1".into() }, &blob).expect("put succeeds");
+        assert!(server.next_request().starts_with("PUT /players/p1/settings/keyconfig HTTP/1.1"));
+        assert_eq!(stored.updated_at, 1_700_000_000_000, "an empty body falls back to the stamp the client sent");
+        assert!(!stored.from_server, "the caller has to read the row back to learn the real stamp");
     }
 
     #[test]

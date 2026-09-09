@@ -370,8 +370,8 @@ fn get_settings_for_an_unset_blob_maps_to_not_found() {
 }
 
 #[test]
-fn put_settings_sends_the_full_put_body_and_accepts_204() {
-    let server = TestServer::spawn(vec![no_content()]);
+fn put_settings_sends_the_full_put_body_and_returns_the_stored_stamp() {
+    let server = TestServer::spawn(vec![ok(r#"{"updated_at":1700000000500}"#)]);
     let blob = SettingsBlob {
         name: "keyconfig".into(),
         content: "(keys:[1,2,3])".into(),
@@ -379,7 +379,7 @@ fn put_settings_sends_the_full_put_body_and_accepts_204() {
         format: "ron".into(),
         base_updated_at: Some(1_699_000_000_000),
     };
-    server.client_with_token(TOKEN).put_settings(&player(), &blob).expect("put settings succeeds");
+    let stored = server.client_with_token(TOKEN).put_settings(&player(), &blob).expect("put settings succeeds");
     let captured = server.next_request();
     assert_eq!(request_line(&captured), "PUT /players/gkn/settings/keyconfig HTTP/1.1");
     assert_authorized(&captured);
@@ -387,6 +387,18 @@ fn put_settings_sends_the_full_put_body_and_accepts_204() {
     assert!(captured.contains(r#""name":"keyconfig""#));
     assert!(captured.contains(r#""format":"ron""#));
     assert!(captured.contains(r#""base_updated_at":1699000000000"#));
+    assert_eq!(stored.updated_at, 1_700_000_000_500, "the server stamps its own time and reports it back");
+    assert!(stored.from_server);
+}
+
+#[test]
+fn put_settings_falls_back_to_the_sent_stamp_when_a_server_answers_204() {
+    let server = TestServer::spawn(vec![no_content()]);
+    let blob = SettingsBlob { name: "keyconfig".into(), content: "()".into(), updated_at: 1_700_000_000_000, ..Default::default() };
+    let stored = server.client_with_token(TOKEN).put_settings(&player(), &blob).expect("put settings succeeds");
+    let _ = server.next_request();
+    assert_eq!(stored.updated_at, 1_700_000_000_000);
+    assert!(!stored.from_server, "a body-less success teaches nothing, so the caller must read the row back");
 }
 
 #[test]

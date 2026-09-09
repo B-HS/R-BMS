@@ -55,8 +55,9 @@ pub trait ScoreServer: Send + Sync {
     fn get_settings(&self, _player: &PlayerId, _name: &str) -> Result<SettingsBlob, IrError> {
         Err(IrError::Unsupported)
     }
-    /// Store an account-synced settings blob.
-    fn put_settings(&self, _player: &PlayerId, _blob: &SettingsBlob) -> Result<(), IrError> {
+    /// Store an account-synced settings blob, reporting the `updated_at` the server stored so the
+    /// next conditional write can carry it as its optimistic-lock base.
+    fn put_settings(&self, _player: &PlayerId, _blob: &SettingsBlob) -> Result<SettingsPutResult, IrError> {
         Err(IrError::Unsupported)
     }
     /// Create an account; returns a bearer token + identity.

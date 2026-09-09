@@ -3,7 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rbms_ir::{
     API_VERSION, AuthRequest, ChartId, ChartRankingQuery, ChartReplayQuery, ClearLamp, GaugeType, HttpScoreServer, IrError, JudgeBreakdown, PlayOptions,
-    PlayerId, PlayerScoresQuery, RandomOption, ReplayData, ReplayEvent, ScoreServer, ScoreSubmission, SettingsBlob,
+    PlayerId, PlayerScoresQuery, RandomOption, ReplayData, ReplayEvent, ScoreFlag, ScoreServer, ScoreSubmission, SettingsBlob,
 };
 
 const E2E_URL_ENV: &str = "RBMS_IR_E2E_URL";
@@ -20,6 +20,7 @@ const EX_SCORE: u32 = PGREAT * 2 + GREAT;
 const MAX_EX_SCORE: u32 = TOTAL_NOTES * 2;
 const MD5_HEX_LEN: usize = 32;
 const SHA256_HEX_LEN: usize = 64;
+const REPLAY_SIZE: u64 = 128;
 
 fn nanos_seed() -> u128 {
     SystemTime::now().duration_since(UNIX_EPOCH).expect("clock after epoch").as_nanos()
@@ -97,21 +98,32 @@ fn submission(chart: &ChartId, player: &PlayerId, played_at: i64) -> ScoreSubmis
     }
 }
 
-fn replay(chart: &ChartId) -> ReplayData {
+/// A replay with every optional field pinned, so the download can be compared to it field for
+/// field: an unset `event_count`/`duration_us`/`size` would be derived server-side instead.
+fn replay(chart: &ChartId, score_id: Option<String>) -> ReplayData {
+    let events = vec![
+        ReplayEvent { t_us: 0, lane: 1, press: true },
+        ReplayEvent { t_us: 120_000, lane: 1, press: false },
+        ReplayEvent { t_us: 250_000, lane: 7, press: true },
+        ReplayEvent { t_us: -1_000, lane: 0, press: true },
+    ];
     ReplayData {
         format: "rbms-us-v1".into(),
-        events: vec![
-            ReplayEvent { t_us: 0, lane: 1, press: true },
-            ReplayEvent { t_us: 120_000, lane: 1, press: false },
-            ReplayEvent { t_us: 250_000, lane: 7, press: true },
-            ReplayEvent { t_us: -1_000, lane: 0, press: true },
-        ],
+        event_count: Some(events.len() as u32),
+        duration_us: Some(251_000),
+        size: Some(REPLAY_SIZE),
+        events,
         seed: Some(42),
         chart: Some(chart.clone()),
+        score_id,
         mode: "BEAT_7K".into(),
-        random: Some(RandomOption::Off),
+        random: Some(RandomOption::SRandom),
+        random_p2: Some(RandomOption::Mirror),
         lntype: 1,
+        offset_ms: -3,
         judge_rate: 100,
+        scratch_auto: true,
+        constant: true,
         gauge: Some(GaugeType::Normal),
         ..Default::default()
     }
@@ -155,6 +167,23 @@ fn phase_i_round_trip_against_a_live_server() {
         submitted.accepted, submitted.rank, submitted.ranked, submitted.flags, submitted.is_new_best, submitted.score_id
     );
 
+    let score_id = submitted.score_id.clone().expect("the response carries the stored score id, which links a replay to the run");
+    assert!(!score_id.is_empty());
+    assert!(submitted.ranked, "an unhashed build still ranks unless the deployment requires a trusted one");
+    assert!(submitted.has_flag(ScoreFlag::UnknownBuild), "a submission without a build hash is flagged, got {:?}", submitted.flags);
+    assert_eq!(submitted.unranked_reasons(), Vec::new(), "UNKNOWN_BUILD alone does not block the ranking");
+    assert!(submitted.is_new_best, "the first ranked score on a fresh chart is the player's new best");
+    assert_eq!(submitted.previous_best, None, "there was no earlier best to report");
+
+    let mut worse = submission(&chart, &player, played_at + 1);
+    worse.clear = ClearLamp::Failed;
+    worse.ex_score = EX_SCORE - 4;
+    worse.judge = JudgeBreakdown { pgreat: PGREAT - 2, great: GREAT, epg: PGREAT - 2, egr: GREAT, ..Default::default() };
+    let resubmitted = authed.submit_score(&worse).expect("the second submit succeeds");
+    assert!(!resubmitted.is_new_best, "a worse run is recorded but never becomes the best");
+    assert_ne!(resubmitted.score_id, submitted.score_id, "each run is stored under its own id");
+    assert_eq!(resubmitted.previous_best, Some(EX_SCORE), "the response reports the best it was measured against");
+
     let ranking = authed.chart_ranking(&chart, RANKING_LIMIT).expect("ranking succeeds");
     assert_eq!(ranking.len(), 1, "the fresh chart holds exactly the one score");
     assert_eq!(ranking[0].player.id, login_id);
@@ -171,7 +200,7 @@ fn phase_i_round_trip_against_a_live_server() {
     let history = authed.player_scores(&player, &PlayerScoresQuery::default()).expect("player scores succeed");
     assert!(history.iter().any(|row| row.ex_score == EX_SCORE), "the submission shows in the history");
 
-    let uploaded = replay(&chart);
+    let uploaded = replay(&chart, Some(score_id.clone()));
     let replay_id = authed.upload_replay(&chart, &uploaded).expect("replay upload succeeds");
     let downloaded = authed.download_replay(&replay_id).expect("replay download succeeds");
     assert_eq!(
@@ -179,8 +208,19 @@ fn phase_i_round_trip_against_a_live_server() {
         serde_json::to_string(&uploaded.events).expect("events serialise"),
         "the replay events survive the round trip byte for byte"
     );
-    assert_eq!(downloaded.format, uploaded.format);
     assert_eq!(downloaded.id.as_deref(), Some(replay_id.as_str()));
+    assert_eq!(downloaded.gauge, uploaded.gauge, "the gauge the run used has to come back or the ghost cannot be reproduced");
+    let downloaded_chart = downloaded.chart.clone().expect("the chart travels with the replay");
+    assert_eq!(downloaded_chart.sha256, chart.sha256);
+    assert_eq!(downloaded_chart.md5, chart.md5, "both digests come back so the chart resolves either way");
+
+    let mut expected = serde_json::to_value(&uploaded).expect("the uploaded replay serialises");
+    expected["id"] = serde_json::json!(replay_id);
+    assert_eq!(
+        serde_json::to_value(&downloaded).expect("the downloaded replay serialises"),
+        expected,
+        "every field of the uploaded replay survives the round trip; only the server-assigned id is new"
+    );
 
     let listed = authed.chart_replays(&chart, &ChartReplayQuery::default()).expect("replay list succeeds");
     assert_eq!(listed.len(), 1);
@@ -189,11 +229,14 @@ fn phase_i_round_trip_against_a_live_server() {
 
     let blob =
         SettingsBlob { name: SETTINGS_NAME.into(), content: SETTINGS_CONTENT.into(), format: "ron".into(), updated_at: played_at, base_updated_at: None };
-    authed.put_settings(&player, &blob).expect("unconditional put succeeds");
+    let put = authed.put_settings(&player, &blob).expect("unconditional put succeeds");
+    assert!(put.from_server, "a successful PUT answers with the stamp it stored, so no read-back is needed");
     let stored = authed.get_settings(&player, SETTINGS_NAME).expect("get settings succeeds");
     assert_eq!(stored.content, SETTINGS_CONTENT);
     assert_eq!(stored.format, "ron");
     assert!(stored.base_updated_at.is_none(), "the response never carries the lock base");
+    assert_eq!(put.updated_at, stored.updated_at, "the stamp the PUT reported is the one the stored row carries");
+    assert_ne!(put.updated_at, blob.updated_at, "the server stamps its own clock and ignores the one the client sent");
 
     let stale = SettingsBlob { base_updated_at: Some(STALE_LOCK_BASE), content: "(keys:[9])".into(), ..blob.clone() };
     match authed.put_settings(&player, &stale).expect_err("a stale lock base must lose") {
@@ -206,9 +249,19 @@ fn phase_i_round_trip_against_a_live_server() {
         other => panic!("expected SettingsConflict, got {other:?}"),
     }
 
-    let fresh = SettingsBlob { base_updated_at: Some(stored.updated_at), content: "(keys:[4,5,6])".into(), ..blob.clone() };
-    authed.put_settings(&player, &fresh).expect("a matching lock base wins");
-    assert_eq!(authed.get_settings(&player, SETTINGS_NAME).expect("get succeeds").content, "(keys:[4,5,6])");
+    match authed.put_settings(&player, &stale).expect_err("the conflict did not hand the client a usable base") {
+        IrError::SettingsConflict(conflict) => {
+            assert_eq!(conflict.server.expect("the 409 carries the server copy").content, SETTINGS_CONTENT, "the losing write never landed");
+        }
+        other => panic!("expected SettingsConflict, got {other:?}"),
+    }
+
+    let fresh = SettingsBlob { base_updated_at: Some(put.updated_at), content: "(keys:[4,5,6])".into(), ..blob.clone() };
+    let second = authed.put_settings(&player, &fresh).expect("the base the PUT reported is what the next write must carry");
+    assert!(second.from_server);
+    let after = authed.get_settings(&player, SETTINGS_NAME).expect("get succeeds");
+    assert_eq!(after.content, "(keys:[4,5,6])");
+    assert_eq!(second.updated_at, after.updated_at, "the second PUT reports the stamp it stored too");
 
     let cleared = authed.put_rivals(&player, &[]).expect("clearing rivals succeeds");
     assert!(cleared.is_empty());

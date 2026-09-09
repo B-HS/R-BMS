@@ -30,7 +30,7 @@
 | PUT | `/players/{id}/rivals` | Bearer, 본인 | `RivalPutRequest` | 200 `[PlayerProfile]` | `put_rivals` |
 | GET | `/players/{id}/scores?limit=&page=&since=&mode=` | — | — | 200 `[ScoreRecord]`(`rank` 은 항상 `null`) | `player_scores` |
 | GET | `/players/{id}/settings/{name}` | Bearer, 본인 | — | 200 `SettingsBlob` | `get_settings` |
-| PUT | `/players/{id}/settings/{name}` | Bearer, 본인 | `SettingsPutRequest` | **204 No Content** | `put_settings` |
+| PUT | `/players/{id}/settings/{name}` | Bearer, 본인 | `SettingsPutRequest` | 200 `SettingsPutResponse`(`{ updated_at }`) | `put_settings` |
 | POST | `/courses` | Bearer | `CourseSubmission` | 201 `SubmitResponse`(중복 200) | `submit_course` |
 | GET | `/courses/{hash}/ranking?limit=&page=&lnmode=&rival_of=` | — | — | 200 `[ScoreRecord]` | `course_ranking`, `course_ranking_page` |
 
@@ -117,7 +117,10 @@
 // SubmitResponse — POST /scores, POST /courses
 { "accepted": true, "rank": 3, "previous_best": 1400, "message": "saved",
   "ranked": true, "flags": [], "is_new_best": true, "score_id": "sc_123", "extra": {} }
-// 앞 4개만 보장. 뒤 5개는 클라가 serde default 로 받으므로 구버전 서버도 그대로 디코드된다.
+// 서버(`submitResponseSchema`)는 `extra` 를 뺀 8개를 항상 보낸다. 클라는 뒤 5개를 serde default 로
+// 받으므로 이 필드들을 모르는 구버전 서버 응답도 그대로 디코드된다.
+// `score_id` 는 리플레이 업로드를 스코어에 연결하는 키이고(`ReplayData.score_id`),
+// `flags`/`ranked` 는 `unranked_summary()` 와 `is_replay_upload_warranted` 가 읽는다.
 
 // ScoreRecord — ranking / best / player scores
 { "player": {"id":"gkn"}, "player_name": "gkn", "clear": "ExHard",
@@ -133,7 +136,9 @@
 
 // ReplayData — POST /charts/{md5}/replays 본문 이자 GET /replays/{id} 응답
 { "api_version": 1, "id": null, "format": "rbms-us-v1",
-  "chart": {"md5":"…","sha256":"…"},   // 경로 해시가 서버에 없을 때의 보조 해석 키
+  "chart": {"md5":"…","sha256":"…"},   // 경로 해시가 서버에 없을 때의 보조 해석 키.
+                                        // 다운로드는 저장된 차트 행을 조인해 양쪽 해시를 채운다
+                                        // (등록된 md5 가 없으면 "")
   "score_id": "sc_123",                 // SubmitResponse.score_id — 스코어↔리플레이 연결
   "mode": "BEAT_7K", "random": "Random", "random_p2": null, "seed": 42,
   "lntype": 1, "offset_ms": 0, "judge_rate": 100, "scratch_auto": false, "constant": false,
@@ -157,11 +162,17 @@
 // SettingsBlob — GET /players/{id}/settings/{name}
 { "name": "keyconfig", "format": "ron", "content": "(keys:[1,2,3])", "updated_at": 1700000000000 }
 
-// SettingsPutRequest — PUT /players/{id}/settings/{name} (204 No Content)
+// SettingsPutRequest — PUT /players/{id}/settings/{name}
 { "api_version": 1, "name": "keyconfig", "format": "ron", "content": "…",
   "updated_at": 1700000000000,
   "base_updated_at": 1699000000000,   // 낙관적 잠금. null 이면 무조건 덮어쓴다
   "extra": {} }
+
+// SettingsPutResponse — 성공한 PUT 의 200 본문. 서버가 실제로 저장한 stamp(unix ms)다.
+// 클라가 보낸 updated_at 은 무시되므로, 다음 조건부 쓰기의 base 는 이 값이어야 한다.
+{ "updated_at": 1700000000042 }
+// 이 필드를 모르는 구버전 서버는 여전히 204 No Content 로 답한다 →
+// `SettingsPutResult { updated_at: 보낸 값, from_server: false }` 로 떨어지고 클라가 GET 으로 재조회한다.
 
 // SettingsConflict — PUT 이 잠금에서 밀렸을 때의 409 본문
 { "conflict": true, "server": { "name": "keyconfig", "format": "ron",
@@ -222,15 +233,16 @@
   2. 성공이고 랭킹을 막는 flag 가 없으면(`is_replay_upload_warranted`) `SubmitResponse.score_id` 를 `ReplayData.score_id` 에 넣고, 비어 있던 `ReplayData.chart` 를 제출 차트로 채운 뒤 `/charts/{md5}/replays` 로 업로드.
   3. `SubmitOutcome { submit, replay }` 를 채널로 전달 — 제출 결과와 업로드 결과를 각각 그대로 볼 수 있다(`replay_id()`, `is_accepted()`).
 - 설정 동기화 절차: `get_settings` → 편집 → `base_updated_at = 서버 updated_at` 으로 `put_settings`. 409 `SettingsConflict` 는 서버 사본을 함께 실어 오므로 재조회 없이 병합/덮어쓰기를 결정할 수 있다.
-- **성공한 PUT 은 204 라 본문이 없고, 서버는 클라가 보낸 `updated_at` 을 무시하고 자기 시각을 찍는다.** 따라서 새 잠금 값은 서버에만 존재한다 → **조건부 PUT 마다 그 앞에 GET 이 필요**하다. 클라(`App::refresh_sync_base`)는 업로드가 204 로 성공하면 곧바로 `get_settings` 를 한 번 더 돌려 `updated_at` 만 읽어 잠금을 갱신한다. 이 재조회가 없으면 한 세션의 **두 번째 저장부터 항상 409** 다.
-- **409 는 잠금을 전진시키지 않는다.** 409 본문의 `server.updated_at` 을 그대로 다음 base 로 삼으면 바로 다음 업로드가 성공해 "먼저 다운로드하라"던 그 새 서버 사본을 덮어쓴다. 잠금 전이는 `ir_sync::SyncLock`/`SyncOutcome` 한 곳에 모여 있다: `Read(updated_at)` 만 잠금을 설정하고, `Uploaded`·`Conflict` 는 그대로 두며, `SignedOut` 은 지운다.
+- **성공한 PUT 은 저장한 `updated_at` 을 200 본문으로 돌려준다.** 서버는 클라가 보낸 `updated_at` 을 무시하고 자기 시각을 찍으므로, 새 잠금 값은 이 응답으로만 알 수 있다. `put_settings` 는 이를 `SettingsPutResult { updated_at, from_server: true }` 로 돌려주고 클라가 곧바로 잠금을 갱신한다 — 조건부 PUT 앞의 추가 GET 은 필요 없다.
+- **204 로 답하는 구버전 서버**는 `from_server: false` + 보낸 stamp 로 떨어진다. 이 stamp 는 추측이라 잠금에 넣지 않고(`ir_sync::upload_outcome` 이 `None`), 클라(`App::refresh_sync_base`)가 `get_settings` 를 한 번 더 돌려 진짜 값을 읽는다. 이 재조회가 없으면 그런 서버에서는 한 세션의 **두 번째 저장부터 항상 409** 다.
+- **409 는 잠금을 전진시키지 않는다.** 409 본문의 `server.updated_at` 을 그대로 다음 base 로 삼으면 바로 다음 업로드가 성공해 "먼저 다운로드하라"던 그 새 서버 사본을 덮어쓴다. 잠금 전이는 `ir_sync::SyncLock`/`SyncOutcome` 한 곳에 모여 있다: `Read(updated_at)` 와 `Uploaded(updated_at)`(= 서버가 알려준 stamp) 만 잠금을 설정하고, `Conflict` 는 그대로 두며, `SignedOut` 은 지운다.
 - 미설정 기본값 `NullScoreServer` 는 8개 필수 메서드에 `NotConfigured`, 슈퍼셋 확장 메서드에 `Unsupported` 를 돌려준다(플레이 무영향, 연결 표시 빨강).
 
 ---
 
 ## 5. 알려진 갭 (서버 쪽 후속)
 
-- **`SubmitResponse` 슈퍼셋 4필드가 실제로는 오지 않는다.** `submitResponseSchema` 는 `accepted`/`rank`/`previous_best`/`message` 만 직렬화한다. `ranked`·`flags`·`is_new_best`·`score_id` 는 `score.service.ts` 의 `submit` 이 이미 계산하지만 라우트(`route/score.ts`)가 응답에 싣지 않는다. 클라는 전부 serde default 로 받으므로 서버가 추가되는 즉시 동작하지만, 그 전까지 **다음 3가지가 실질적으로 죽어 있다**: ① `score_id` 가 항상 `None` → 업로드된 리플레이가 스코어에 연결되지 않는다(`linkScoreReplay` 미호출, 조회 시 `score_id: null`), ② `unranked_summary()` 가 항상 `None` → 결과 화면이 서버가 `message` 에 적어 보낸 랭킹 제외 사유를 못 보여준다, ③ `is_replay_upload_warranted` 가 무력 → assist/autoplay 런의 리플레이도 그대로 업로드된다. **서버 조치 필요**(`web/`): `submit` 반환 객체와 `submitResponseSchema` 에 4필드 추가. `rbms-ir` 은 변경 불필요.
-- **리플레이 다운로드가 `gauge` 를 버리고 `chart.md5` 를 빈 문자열로 돌려준다.** 업로드는 `gauge` 를 받아 `gaugeTypeToId` 로 저장하지만(`replay.service.ts`) `toReplayData` 가 다시 읽지 않고, `md5` 는 하드코딩 `''` 다. `ReplayData.gauge` 는 `#[serde(default)]` 라 조용히 `None` 으로 디코드된다 → 다운로드한 고스트가 원래 런의 게이지를 재현하지 못한다. **서버 조치 필요**(`web/`): `toReplayData` 에 `gauge: gaugeTypeFromId(row.gauge)` 추가, 차트 행을 조인해 `md5: row.chartMd5 ?? ''` 반환. 클라 쪽 계약은 `contract_tests::download_replay_reads_back_the_stored_run` 이 이미 두 값을 요구한다.
+- **리플레이의 `extra` 는 저장되지 않는다.** `replay` 테이블에 해당 컬럼이 없어 업로드 본문의 `extra` 가 버려지고 다운로드는 항상 `{}` 다. 나머지 필드는 전부 왕복한다(`tests/service/replay.test.ts` 가 업로드 본문 전체와 다운로드를 deep-equal 로 비교). 채우려면 컬럼 추가 + 마이그레이션이 필요하다.
+- **`gauge` 를 생략한 업로드는 `AssistEasy` 로 되돌아온다.** 컬럼이 `NOT NULL DEFAULT 0` 이라 "미지정"과 0번 게이지를 구분하지 못한다. 클라(`ir_replay::to_ir_replay`)는 항상 게이지를 보내므로 정상 경로에는 영향이 없다.
 - 경로·쿼리 percent-encoding 은 `url` 크레이트 신규 의존이 필요해 보류 중이다(현재는 URL-safe 식별자 전제).
 - 차트 메타 업서트(`POST /charts`), 난이도표(`/tables`), 코스 메타 업서트(`POST /courses/meta`), 스코어 단건 조회(`GET /scores/{id}`) 는 서버에 있으나 `rbms-ir` 클라이언트에는 아직 없다.
