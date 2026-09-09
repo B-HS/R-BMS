@@ -4,7 +4,7 @@
 //! One blob carries both the play settings and the key config, so a fresh install restores the
 //! whole configuration in a single round trip.
 
-use rbms_ir::{IrError, SettingsBlob};
+use rbms_ir::{IrError, SettingsBlob, SettingsPutResult};
 use serde::{Deserialize, Serialize};
 
 use crate::keyconfig::KeyConfig;
@@ -69,12 +69,13 @@ pub(crate) fn parse_blob(blob: &SettingsBlob) -> Result<SyncPayload, String> {
 /// One finished settings-sync call, as far as the optimistic lock is concerned.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum SyncOutcome {
-    /// A copy with this `updated_at` was read from the server (a download, or the read-back that
-    /// follows an upload). This is the only thing that may set the lock.
+    /// A copy with this `updated_at` was read from the server (a download, or the read-back an
+    /// older server still forces after an upload).
     Read(i64),
-    /// `PUT` returned 204. It carries no body and the server ignores the stamp the client sent, so
-    /// nothing is learned here: the lock only moves once the read-back lands.
-    Uploaded,
+    /// `PUT` succeeded and reported the `updated_at` it stored. Only a stamp that came from the
+    /// server may be carried here; a body-less 204 teaches nothing and must go through
+    /// [`SyncOutcome::Read`] once the read-back lands.
+    Uploaded(i64),
     /// `PUT` lost the lock (409).
     Conflict,
     /// The account this lock belonged to is gone.
@@ -102,11 +103,19 @@ impl SyncLock {
     /// conflict again until a real download resolves it.
     pub(crate) fn apply(&mut self, outcome: SyncOutcome) {
         match outcome {
-            SyncOutcome::Read(updated_at) => self.base_updated_at = Some(updated_at),
-            SyncOutcome::Uploaded | SyncOutcome::Conflict => {}
+            SyncOutcome::Read(updated_at) | SyncOutcome::Uploaded(updated_at) => self.base_updated_at = Some(updated_at),
+            SyncOutcome::Conflict => {}
             SyncOutcome::SignedOut => self.base_updated_at = None,
         }
     }
+}
+
+/// How one finished `put_settings` moves the lock: `Some(outcome)` when the server reported the
+/// stamp it stored, `None` when it answered `204 No Content` and the caller must read the row back
+/// instead. The echo the client would otherwise adopt is a guess — the server writes its own clock
+/// — and adopting a guess would let the next upload overwrite a copy it never saw.
+pub(crate) fn upload_outcome(stored: SettingsPutResult) -> Option<SyncOutcome> {
+    stored.from_server.then_some(SyncOutcome::Uploaded(stored.updated_at))
 }
 
 /// The server's copy carried by a lost optimistic lock, so the client can show or apply it without
@@ -280,7 +289,7 @@ mod tests {
     }
 
     #[test]
-    fn only_a_read_copy_sets_the_lock() {
+    fn a_read_copy_sets_the_lock_and_a_later_read_replaces_it() {
         let mut lock = SyncLock::default();
         lock.apply(SyncOutcome::Read(1_000));
         assert_eq!(lock.base(), Some(1_000));
@@ -289,11 +298,36 @@ mod tests {
     }
 
     #[test]
+    fn an_upload_that_learned_the_server_stamp_moves_the_lock_without_a_read_back() {
+        let outcome = upload_outcome(SettingsPutResult { updated_at: 2_200, from_server: true });
+        assert_eq!(outcome, Some(SyncOutcome::Uploaded(2_200)));
+    }
+
+    #[test]
+    fn a_body_less_upload_leaves_the_lock_to_the_read_back() {
+        let outcome = upload_outcome(SettingsPutResult { updated_at: 2_200, from_server: false });
+        assert_eq!(outcome, None, "the echoed stamp is a guess; adopting it could clobber the server copy");
+    }
+
+    #[test]
+    fn an_upload_adopts_the_stamp_the_server_reported() {
+        let mut lock = SyncLock::default();
+        lock.apply(SyncOutcome::Read(1_000));
+        lock.apply(SyncOutcome::Uploaded(1_200));
+        assert_eq!(lock.base(), Some(1_200), "the PUT body carries the stored stamp, so no read-back is needed");
+
+        let next = build_blob(&payload_of(PlaySettings::default()), 1_300, lock.base()).unwrap();
+        assert_eq!(next.base_updated_at, Some(1_200), "the second save of a session no longer conflicts");
+    }
+
+    #[test]
     fn a_204_upload_teaches_the_lock_nothing_until_the_read_back_lands() {
         let mut lock = SyncLock::default();
         lock.apply(SyncOutcome::Read(1_000));
-        lock.apply(SyncOutcome::Uploaded);
-        assert_eq!(lock.base(), Some(1_000), "the server ignored the client stamp, so the old base is all we know");
+        if let Some(outcome) = upload_outcome(SettingsPutResult { updated_at: 1_400, from_server: false }) {
+            lock.apply(outcome);
+        }
+        assert_eq!(lock.base(), Some(1_000), "an older server ignored the client stamp, so the old base is all we know");
         lock.apply(SyncOutcome::Read(1_500));
         assert_eq!(lock.base(), Some(1_500), "the read-back is what refreshes it");
     }

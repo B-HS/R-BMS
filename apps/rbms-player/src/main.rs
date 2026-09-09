@@ -10,7 +10,7 @@ use rbms_chart::shuffle::NoteOption;
 use rbms_chart::to_model;
 use rbms_ir::{
     API_VERSION, AuthResponse, ChartId, IrError, JudgeBreakdown, PlayOptions, PlayerId, PlayerProfile, ReplayData, ScoreServer, ScoreSubmission, SettingsBlob,
-    SubmitOutcome,
+    SettingsPutResult, SubmitOutcome,
 };
 use rbms_judge::GaugeKind;
 use rbms_model::Mode;
@@ -826,9 +826,9 @@ struct App {
     startup_whoami: bool,
     auth_rx: Option<(AuthAction, Receiver<Result<AuthResponse, IrError>>)>,
     whoami_rx: Option<Receiver<Result<String, IrError>>>,
-    sync_upload_rx: Option<Receiver<Result<(), IrError>>>,
+    sync_upload_rx: Option<Receiver<Result<SettingsPutResult, IrError>>>,
     sync_download_rx: Option<Receiver<Result<SettingsBlob, IrError>>>,
-    /// Read-back that follows a successful upload, purely to refresh `sync_base_updated_at`.
+    /// Read-back a `204` upload still forces, purely to learn the stamp such a server stored.
     sync_base_rx: Option<Receiver<Result<SettingsBlob, IrError>>>,
     /// The optimistic lock the next settings upload sends.
     sync_lock: SyncLock,

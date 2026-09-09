@@ -15,7 +15,9 @@ use winit::keyboard::KeyCode;
 
 use crate::ir_panel::*;
 use crate::ir_session::{AuthAction, GUEST_PLAYER_ID, auth_request, run_auth};
-use crate::ir_sync::{SETTINGS_BLOB_NAME, SyncOutcome, SyncPayload, build_blob, merge_downloaded, parse_blob, sanitise_for_upload, sync_error_message};
+use crate::ir_sync::{
+    SETTINGS_BLOB_NAME, SyncOutcome, SyncPayload, build_blob, merge_downloaded, parse_blob, sanitise_for_upload, sync_error_message, upload_outcome,
+};
 use crate::settings_view::{RivalsScene, SettingsScene};
 use crate::*;
 
@@ -267,9 +269,10 @@ impl App {
 
     /// Re-read the stored blob purely to learn the `updated_at` the server stamped on it.
     ///
-    /// A successful `PUT` answers `204 No Content` and the server ignores the `updated_at` the
-    /// client sent, so the new optimistic lock exists only server-side. Without this read-back the
-    /// second save of a session would always lose the lock and report a conflict.
+    /// Only needed against a deployment that still answers `204 No Content`: it ignores the
+    /// `updated_at` the client sent, so the new optimistic lock exists only server-side and without
+    /// this read-back the second save of a session would always lose the lock. A current server
+    /// reports the stored stamp in the `PUT` body and the lock moves without a second round trip.
     fn refresh_sync_base(&mut self) {
         if self.sync_base_rx.is_some() || !self.session.is_logged_in() || self.config.server_url.is_none() {
             return;
@@ -487,10 +490,12 @@ impl App {
         }
         if let Some(rx) = self.sync_upload_rx.take() {
             match rx.try_recv() {
-                Ok(Ok(())) => {
-                    self.sync_lock.apply(SyncOutcome::Uploaded);
+                Ok(Ok(stored)) => {
                     self.net_status = "settings uploaded".to_string();
-                    self.refresh_sync_base();
+                    match upload_outcome(stored) {
+                        Some(outcome) => self.sync_lock.apply(outcome),
+                        None => self.refresh_sync_base(),
+                    }
                 }
                 Ok(Err(error)) => {
                     self.sync_lock.apply(SyncOutcome::Conflict);
