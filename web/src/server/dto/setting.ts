@@ -21,5 +21,10 @@ export const settingBlobResponseSchema = z.object({
     updated_at: z.number().int(),
 })
 
+export const settingPutResponseSchema = z.object({
+    updated_at: z.number().int(),
+})
+
 export type SettingPutInput = z.infer<typeof settingPutSchema>
+export type SettingPutOutput = z.infer<typeof settingPutResponseSchema>
 export type SettingBlobOutput = z.infer<typeof settingBlobResponseSchema>

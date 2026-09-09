@@ -242,10 +242,30 @@ describe('scoreRecordSchema (랭킹 raw 배열 행)', () => {
 })
 
 describe('submitResponseSchema / authResponseSchema / playerProfileSchema', () => {
-    test('SubmitResponse 는 전부 null 이어도 파싱한다', () => {
-        const parsed = submitResponseSchema.parse({ accepted: false, rank: null, previous_best: null, message: null })
+    test('SubmitResponse 는 nullable 필드가 전부 null 이어도 파싱한다', () => {
+        const parsed = submitResponseSchema.parse({
+            accepted: false,
+            rank: null,
+            previous_best: null,
+            message: null,
+            ranked: false,
+            flags: [],
+            is_new_best: false,
+            score_id: null,
+        })
         expect(parsed.accepted).toBe(false)
         expect(parsed.rank).toBeNull()
+        expect(parsed.score_id).toBeNull()
+    })
+
+    test('SubmitResponse 는 클라가 디코드하는 슈퍼셋 4필드를 요구한다', () => {
+        const base = { accepted: true, rank: 3, previous_best: 1400, message: 'saved' }
+        expect(submitResponseSchema.safeParse(base).success).toBe(false)
+        const parsed = submitResponseSchema.parse({ ...base, ranked: true, flags: ['GUEST'], is_new_best: true, score_id: 'sc_123' })
+        expect(parsed.ranked).toBe(true)
+        expect(parsed.flags).toEqual(['GUEST'])
+        expect(parsed.is_new_best).toBe(true)
+        expect(parsed.score_id).toBe('sc_123')
     })
 
     test('AuthResponse 는 token/player/name 3개를 요구한다', () => {

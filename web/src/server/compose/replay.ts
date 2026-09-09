@@ -1,7 +1,7 @@
 import { and, desc, eq } from 'drizzle-orm'
 import type { Database } from '@server/db'
 import { user } from '@server/db/auth-schema'
-import { replay, score } from '@server/db/schema'
+import { chart, replay, score } from '@server/db/schema'
 import { getEnv } from '@server/lib/env'
 import { newId } from '@server/lib/token'
 import { createReplayService, type ReplayRow } from '@server/service/domain/replay/replay.service'
@@ -13,6 +13,7 @@ const replaySelection = {
     loginId: user.loginId,
     playerName: user.name,
     chartSha256: replay.chartSha256,
+    chartMd5: chart.md5,
     scoreId: replay.scoreId,
     format: replay.format,
     mode: replay.mode,
@@ -60,6 +61,7 @@ export const composeReplay = (db: Database) => {
                     .select({ ...replaySelection, data: replay.data })
                     .from(replay)
                     .leftJoin(user, eq(user.id, replay.userId))
+                    .leftJoin(chart, eq(chart.sha256, replay.chartSha256))
                     .where(eq(replay.id, id))
                     .limit(1)
                 if (!row) return null
@@ -71,6 +73,7 @@ export const composeReplay = (db: Database) => {
                     .select(replaySelection)
                     .from(replay)
                     .leftJoin(user, eq(user.id, replay.userId))
+                    .leftJoin(chart, eq(chart.sha256, replay.chartSha256))
                     .where(and(eq(replay.chartSha256, chartSha256), userId ? eq(replay.userId, userId) : undefined))
                     .orderBy(desc(replay.createdAt))
                     .limit(limit)

@@ -44,6 +44,7 @@ export type ReplayData = {
     judge_rate: number
     scratch_auto: boolean
     constant: boolean
+    gauge: string
     client_build_sha256: string | null
     events: ReplayEvent[]
     event_count: number

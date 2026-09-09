@@ -1,6 +1,6 @@
 import { compose } from '@server/compose'
-import { SETTING_MAX_BYTES, settingPutSchema } from '@server/dto/setting'
-import { irNoContent, irRaw, successResponse } from '@server/lib/api-response'
+import { SETTING_MAX_BYTES, settingPutSchema, type SettingPutOutput } from '@server/dto/setting'
+import { irRaw, successResponse } from '@server/lib/api-response'
 import { createAppError } from '@server/lib/error'
 import { ERROR_CODE } from '@server/lib/error-code'
 import { parseLimitedJsonBody } from '@server/lib/parse-request'
@@ -44,7 +44,8 @@ export const createSettingPutRoute = () =>
             const input = await parseLimitedJsonBody(authedRequest, settingPutSchema, SETTING_MAX_BYTES)
             const result = await compose().settingService.put({ userId: user.id, name, input })
             if (result.conflict) return irRaw({ conflict: true, server: result.server }, CONFLICT_STATUS)
-            return irNoContent()
+            const stored: SettingPutOutput = { updated_at: result.updated_at }
+            return irRaw(stored)
         })(request, context),
     )
 

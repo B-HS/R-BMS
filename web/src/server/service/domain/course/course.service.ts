@@ -1,5 +1,6 @@
 import { clearLampToId } from '@server/dto/common'
 import type { CourseMetaInput, CourseSubmissionInput } from '@server/dto/course'
+import type { SubmitResponseOutput } from '@server/dto/score'
 import { deriveExScore, deriveMinbp, isBetterBest } from '@server/service/domain/score/best-policy'
 import { toScoreRecord, type ScoreRankingRow } from '@server/service/domain/score/score.service'
 
@@ -166,11 +167,17 @@ export const createCourseService = (deps: CourseServiceDeps) => ({
             playedAt: input.played_at,
         })
         if (existingId) {
-            return {
-                courseScoreId: existingId,
-                duplicated: true,
-                response: { accepted: true, rank: null, previous_best: null, message: 'duplicate submission ignored' },
+            const response: SubmitResponseOutput = {
+                accepted: true,
+                rank: null,
+                previous_best: null,
+                message: 'duplicate submission ignored',
+                ranked: RANKED_COURSE_SUBMISSION,
+                flags: [],
+                is_new_best: false,
+                score_id: existingId,
             }
+            return { courseScoreId: existingId, duplicated: true, response }
         }
 
         const courseScoreId = deps.newId('cs_')
@@ -179,7 +186,8 @@ export const createCourseService = (deps: CourseServiceDeps) => ({
             buildCourseScoreRow({ id: courseScoreId, userId: user.id, input, exScore, minbp, ranked: RANKED_COURSE_SUBMISSION }),
         )
 
-        if (isBetterBest({ clear, exScore, minbp }, previous)) {
+        const isNewBest = isBetterBest({ clear, exScore, minbp }, previous)
+        if (isNewBest) {
             await deps.db.upsertCourseBest({
                 courseHash: input.course_hash,
                 userId: user.id,
@@ -193,11 +201,18 @@ export const createCourseService = (deps: CourseServiceDeps) => ({
 
         const rank = (await deps.db.countBetterCourseBests({ courseHash: input.course_hash, clear, exScore })) + 1
 
-        return {
-            courseScoreId,
-            duplicated: false,
-            response: { accepted: true, rank, previous_best: previous?.exScore ?? null, message: 'saved' },
+        const response: SubmitResponseOutput = {
+            accepted: true,
+            rank,
+            previous_best: previous?.exScore ?? null,
+            message: 'saved',
+            ranked: RANKED_COURSE_SUBMISSION,
+            flags: [],
+            is_new_best: isNewBest,
+            score_id: courseScoreId,
         }
+
+        return { courseScoreId, duplicated: false, response }
     },
 
     getRanking: async (params: { courseHash: string; limit: number; page: number; rivalOf?: string }) => {

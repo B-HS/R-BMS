@@ -22,5 +22,3 @@ export const errorResponse = (code: ErrorCode, message: string, details?: Record
 })
 
 export const irRaw = <T>(data: T, status = 200) => NextResponse.json(data, { status })
-
-export const irNoContent = () => new NextResponse(null, { status: 204 })

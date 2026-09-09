@@ -1,4 +1,4 @@
-import { gaugeTypeToId } from '@server/dto/common'
+import { gaugeTypeFromId, gaugeTypeToId } from '@server/dto/common'
 import type { ReplayEventInput, ReplayUploadInput } from '@server/dto/replay'
 import type { ReplayStorage } from '@server/service/shared/storage/replay-storage'
 
@@ -29,6 +29,7 @@ export type ReplayInsertRow = {
 export type ReplayRow = ReplayInsertRow & {
     loginId: string | null
     playerName: string | null
+    chartMd5: string | null
     createdAt: number
 }
 
@@ -80,7 +81,7 @@ export const toReplayData = (row: ReplayRow, events: ReplayEventInput[]) => ({
     api_version: 1,
     id: row.id,
     format: row.format,
-    chart: { md5: '', sha256: row.chartSha256 },
+    chart: { md5: row.chartMd5 ?? '', sha256: row.chartSha256 },
     score_id: row.scoreId,
     mode: row.mode,
     random: row.random,
@@ -91,6 +92,7 @@ export const toReplayData = (row: ReplayRow, events: ReplayEventInput[]) => ({
     judge_rate: row.judgeRate,
     scratch_auto: row.scratchAuto,
     constant: row.constant,
+    gauge: gaugeTypeFromId(row.gauge),
     client_build_sha256: row.clientBuildSha256,
     events,
     event_count: row.eventCount,

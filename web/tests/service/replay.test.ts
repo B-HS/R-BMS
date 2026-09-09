@@ -4,7 +4,9 @@ import { createReplayService, measureDurationUs, type ReplayInsertRow, type Repl
 import { createMysqlReplayStorage } from '@server/service/shared/storage/replay-storage'
 
 const CHART_SHA256 = 'a'.repeat(64)
+const CHART_MD5 = 'b'.repeat(32)
 const USER_ID = 'user-1'
+const CREATED_AT = 1
 
 const MICROSECOND_EVENTS = [
     { t_us: 1_234_567, lane: 0, press: true },
@@ -24,10 +26,10 @@ const createStubDb = () => {
             },
             findReplayById: async (id: string): Promise<ReplayRow | null> => {
                 const row = stored.find((entry) => entry.id === id)
-                return row ? { ...row, loginId: 'alice', playerName: 'Alice', createdAt: 1 } : null
+                return row ? { ...row, loginId: 'alice', playerName: 'Alice', chartMd5: CHART_MD5, createdAt: CREATED_AT } : null
             },
             listReplaysByChart: async ({ limit }: { chartSha256: string; userId?: string; limit: number }): Promise<ReplayRow[]> =>
-                stored.slice(0, limit).map((row) => ({ ...row, loginId: 'alice', playerName: 'Alice', createdAt: 1 })),
+                stored.slice(0, limit).map((row) => ({ ...row, loginId: 'alice', playerName: 'Alice', chartMd5: CHART_MD5, createdAt: CREATED_AT })),
             linkScoreReplay: async (params: { scoreId: string; userId: string; replayId: string }) => {
                 links.push(params)
             },
@@ -69,6 +71,64 @@ describe('replay 업로드/다운로드 왕복', () => {
         const input = replayUploadSchema.parse({ format: 'f', events: [], score_id: 'sc_9' })
         const uploaded = await service.upload({ input, chartSha256: CHART_SHA256, userId: USER_ID })
         expect(stub.links).toEqual([{ scoreId: 'sc_9', userId: USER_ID, replayId: uploaded.id }])
+    })
+
+    test('업로드한 ReplayData 의 모든 필드가 다운로드로 그대로 돌아온다', async () => {
+        const { service } = createService()
+        const uploadedBody = {
+            api_version: 1,
+            format: 'rbms-us-v1',
+            chart: { md5: CHART_MD5, sha256: CHART_SHA256 },
+            score_id: 'sc_1',
+            mode: 'BEAT_7K',
+            random: 'SRandom',
+            random_p2: 'Mirror',
+            seed: 987654321,
+            lntype: 2,
+            offset_ms: -7,
+            judge_rate: 100,
+            scratch_auto: true,
+            constant: true,
+            gauge: 'ExHard',
+            client_build_sha256: 'c'.repeat(64),
+            events: MICROSECOND_EVENTS,
+            event_count: MICROSECOND_EVENTS.length,
+            duration_us: MICROSECOND_EVENTS[2].t_us - MICROSECOND_EVENTS[0].t_us,
+            size: 128,
+            extra: {},
+        } as const
+        const input = replayUploadSchema.parse(uploadedBody)
+        const uploaded = await service.upload({ input, chartSha256: CHART_SHA256, userId: USER_ID })
+        const downloaded = await service.getById(uploaded.id)
+        expect(downloaded).toEqual({ ...uploadedBody, id: uploaded.id })
+    })
+
+    test('게이지를 버리지 않고 차트의 md5 와 sha256 을 함께 돌려준다', async () => {
+        const { service } = createService()
+        const input = replayUploadSchema.parse({ format: 'rbms-us-v1', events: MICROSECOND_EVENTS, gauge: 'Hard' })
+        const uploaded = await service.upload({ input, chartSha256: CHART_SHA256, userId: USER_ID })
+        const downloaded = await service.getById(uploaded.id)
+        expect(downloaded?.gauge).toBe('Hard')
+        expect(downloaded?.chart).toEqual({ md5: CHART_MD5, sha256: CHART_SHA256 })
+    })
+
+    test('차트가 md5 없이 등록돼 있으면 md5 는 빈 문자열이다', async () => {
+        const stub = createStubDb()
+        let counter = 0
+        const service = createReplayService({
+            db: {
+                ...stub.db,
+                findReplayById: async (id: string): Promise<ReplayRow | null> => {
+                    const row = stub.stored.find((entry) => entry.id === id)
+                    return row ? { ...row, loginId: null, playerName: null, chartMd5: null, createdAt: CREATED_AT } : null
+                },
+            },
+            storage: createMysqlReplayStorage(),
+            newId: (prefix) => `${prefix}${(counter += 1)}`,
+        })
+        const input = replayUploadSchema.parse({ format: 'f', events: [] })
+        const uploaded = await service.upload({ input, chartSha256: CHART_SHA256, userId: USER_ID })
+        expect((await service.getById(uploaded.id))?.chart).toEqual({ md5: '', sha256: CHART_SHA256 })
     })
 
     test('없는 리플레이 id 는 null 이다', async () => {

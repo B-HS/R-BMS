@@ -51,6 +51,10 @@ export const submitResponseSchema = z.object({
     rank: z.number().int().nullable(),
     previous_best: z.number().int().nullable(),
     message: z.string().nullable(),
+    ranked: z.boolean(),
+    flags: z.array(z.string()),
+    is_new_best: z.boolean(),
+    score_id: z.string().nullable(),
 })
 
 export const rankingQuerySchema = z.object({

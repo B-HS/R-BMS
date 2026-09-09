@@ -1,5 +1,5 @@
 import { clearLampFromId, clearLampToId, gaugeTypeToId, type JudgeBreakdownInput } from '@server/dto/common'
-import type { ScoreRecordOutput, ScoreSubmissionInput } from '@server/dto/score'
+import type { ScoreRecordOutput, ScoreSubmissionInput, SubmitResponseOutput } from '@server/dto/score'
 import { deriveExScore, deriveMinbp, isBetterBest } from '@server/service/domain/score/best-policy'
 import { BUILD_TRUST, rankedPolicy, type BuildTrust, type ScoreFlag } from '@server/service/domain/score/ranked-policy'
 
@@ -202,13 +202,17 @@ export const createScoreService = (deps: ScoreServiceDeps) => ({
             : null
         if (existingId) {
             const rank = user && ranked ? (await deps.db.countBetterBests({ chartSha256: params.chartSha256, clear, exScore })) + 1 : null
-            return {
-                scoreId: existingId,
-                duplicated: true,
+            const response: SubmitResponseOutput = {
+                accepted: true,
+                rank,
+                previous_best: null,
+                message: 'duplicate submission ignored',
                 ranked,
                 flags,
-                response: { accepted: true, rank, previous_best: null, message: 'duplicate submission ignored' },
+                is_new_best: false,
+                score_id: existingId,
             }
+            return { scoreId: existingId, duplicated: true, ranked, flags, response }
         }
 
         const scoreId = deps.newId('sc_')
@@ -258,18 +262,18 @@ export const createScoreService = (deps: ScoreServiceDeps) => ({
             })
             .catch(() => undefined)
 
-        return {
-            scoreId,
-            duplicated: false,
+        const response: SubmitResponseOutput = {
+            accepted: true,
+            rank,
+            previous_best: previous?.exScore ?? null,
+            message: ranked ? 'saved' : `recorded (unranked: ${flags.join(',').toLowerCase()})`,
             ranked,
             flags,
-            response: {
-                accepted: true,
-                rank,
-                previous_best: previous?.exScore ?? null,
-                message: ranked ? 'saved' : `recorded (unranked: ${flags.join(',').toLowerCase()})`,
-            },
+            is_new_best: isNewBest,
+            score_id: scoreId,
         }
+
+        return { scoreId, duplicated: false, ranked, flags, response }
     },
 
     recordRejection: async (params: {

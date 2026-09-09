@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { judgeBreakdownSchema } from '@server/dto/common'
-import { scoreSubmissionSchema, type ScoreSubmissionInput } from '@server/dto/score'
+import { scoreSubmissionSchema, submitResponseSchema, type ScoreSubmissionInput } from '@server/dto/score'
 import { BUILD_TRUST } from '@server/service/domain/score/ranked-policy'
 import {
     createScoreService,
@@ -108,6 +108,10 @@ describe('scoreService.submit', () => {
         expect(result.response.rank).toBe(3)
         expect(result.response.previous_best).toBeNull()
         expect(result.response.message).toBe('saved')
+        expect(result.response.ranked).toBe(true)
+        expect(result.response.flags).toEqual([])
+        expect(result.response.is_new_best).toBe(true)
+        expect(result.response.score_id).toBe(result.scoreId)
         expect(recorder.inserted).toHaveLength(1)
         expect(recorder.inserted[0].exScore).toBe(1488)
         expect(recorder.inserted[0].clear).toBe(6)
@@ -131,6 +135,8 @@ describe('scoreService.submit', () => {
         expect(recorder.inserted).toHaveLength(0)
         expect(recorder.bests).toHaveLength(0)
         expect(result.response.message).toBe('duplicate submission ignored')
+        expect(result.response.score_id).toBe('sc_existing')
+        expect(result.response.is_new_best).toBe(false)
     })
 
     test('기존 베스트보다 램프가 높으면 chart_best 를 갱신한다', async () => {
@@ -164,6 +170,8 @@ describe('scoreService.submit', () => {
         expect(recorder.bests).toHaveLength(0)
         expect(recorder.inserted).toHaveLength(1)
         expect(result.response.previous_best).toBe(1000)
+        expect(result.response.is_new_best).toBe(false)
+        expect(result.response.ranked).toBe(true)
     })
 
     test('autoplay 제출은 unranked 이고 베스트를 갱신하지 않으며 순위가 없다', async () => {
@@ -182,6 +190,10 @@ describe('scoreService.submit', () => {
         expect(result.flags).toEqual(['AUTOPLAY'])
         expect(result.response.rank).toBeNull()
         expect(result.response.message).toBe('recorded (unranked: autoplay)')
+        expect(result.response.ranked).toBe(false)
+        expect(result.response.flags).toEqual(['AUTOPLAY'])
+        expect(result.response.is_new_best).toBe(false)
+        expect(result.response.score_id).toBe(result.scoreId)
         expect(recorder.bests).toHaveLength(0)
         expect(recorder.inserted[0].ranked).toBe(false)
     })
@@ -200,6 +212,9 @@ describe('scoreService.submit', () => {
         })
         expect(result.ranked).toBe(false)
         expect(result.flags).toEqual(['GUEST'])
+        expect(result.response.ranked).toBe(false)
+        expect(result.response.flags).toEqual(['GUEST'])
+        expect(result.response.score_id).toBe(result.scoreId)
         expect(recorder.inserted[0].userId).toBeNull()
         expect(recorder.inserted[0].guestName).toBe('guest')
         expect(recorder.bests).toHaveLength(0)
@@ -252,7 +267,34 @@ describe('scoreService.submit', () => {
         expect(result.ranked).toBe(true)
         expect(result.flags).toEqual(['UNKNOWN_BUILD'])
         expect(result.response.rank).toBe(3)
+        expect(result.response.ranked).toBe(true)
+        expect(result.response.flags).toEqual(['UNKNOWN_BUILD'])
+        expect(result.response.is_new_best).toBe(true)
         expect(recorder.bests).toHaveLength(1)
+    })
+
+    test('응답 본문은 SubmitResponse 슈퍼셋 스키마를 그대로 만족한다', async () => {
+        const { service } = createStub()
+        const cases = await Promise.all(
+            [submission(), submission({ options: { assist: ['AUTO_SCRATCH'] } })].map((input) =>
+                service.submit({
+                    input,
+                    chartSha256: CHART_SHA,
+                    chartMd5: null,
+                    user: alice,
+                    buildTrust: BUILD_TRUST.TRUSTED,
+                    requireTrustedBuild: false,
+                    ip: null,
+                    userAgent: null,
+                }),
+            ),
+        )
+        for (const result of cases) {
+            const parsed = submitResponseSchema.parse(result.response)
+            expect(Object.keys(parsed).sort()).toEqual(['accepted', 'flags', 'is_new_best', 'message', 'previous_best', 'rank', 'ranked', 'score_id'])
+        }
+        expect(cases[1].response.flags).toEqual(['ASSIST'])
+        expect(cases[1].response.ranked).toBe(false)
     })
 
     test('ex_score 가 0 이면 judge 에서 EX 를 유도한다', async () => {
