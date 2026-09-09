@@ -29,6 +29,198 @@ pub enum MissCondition {
     One,
 }
 
+/// Number of judge indices a [`JudgeWindowRule`] covers: PG, GR, GD, BD and the 空POOR band.
+const WINDOW_RULE_INDEX_COUNT: usize = 5;
+
+/// Number of `#RANK` levels a [`JudgeWindowRule`] tabulates: VERYHARD, HARD, NORMAL, EASY, VERYEASY.
+const RANK_COUNT: usize = 5;
+
+/// The two bounds of one window pair: index 0 is the LATE lower bound, index 1 the EARLY upper one.
+const BOUNDS_PER_PAIR: usize = 2;
+
+/// How many judge indices `JudgeWindowRule.create` clamps between its fixed neighbours
+/// (`JudgeProperty.java:239`, `Math.min(org.length, 4)`): PG, GR, GD and BD. Both rules fix the
+/// 空POOR band, so it is never clamped.
+const CLAMPED_INDEX_COUNT: usize = 4;
+
+/// Number of JUDGE WIDTH tiers the user can widen or narrow (`JudgeProperty.java:263`): PG, GR, GD.
+const JUDGE_WIDTH_TIER_COUNT: usize = 3;
+
+/// The judgerank percentage that leaves a window at its tabulated width.
+const FIXED_JUDGERANK_PERCENT: i32 = 100;
+
+/// JUDGE WIDTH percentage that leaves a tier at the width its table states, the rates the reference
+/// builds a window set with when the player set no custom judge (`JudgeManager.java:168-174`).
+pub const UNMODIFIED_JUDGE_WIDTH_RATES: [i32; JUDGE_WIDTH_TIER_COUNT] = [100; JUDGE_WIDTH_TIER_COUNT];
+
+/// Denominator of every percentage in this module.
+const PERCENT_DENOMINATOR: i64 = 100;
+
+/// Column of `JudgeWindowRule.judgerank` that carries a `#RANK`'s scalar judgerank
+/// (`BMSPlayerRule.java:62`). It is the GREAT column, the one neither rule fixes.
+const JUDGERANK_SCALAR_COLUMN: usize = 1;
+
+/// Row of `JudgeWindowRule.judgerank` for NORMAL `#RANK`: the fallback for an out-of-range rank and
+/// the base `#DEFEXRANK` scales (`BMSPlayerRule.java:62-63`).
+const NORMAL_RANK_ROW: usize = 2;
+
+/// Judge index of PERFECT GREAT inside a timing table.
+pub(crate) const PGREAT_JUDGE_INDEX: usize = 0;
+
+/// Judge index of GREAT inside a timing table, the pair `JudgeAlgorithm::Score` compares against.
+pub(crate) const GREAT_JUDGE_INDEX: usize = 1;
+
+/// Judge index of GOOD inside a timing table, the pair `JudgeAlgorithm::Combo` and the
+/// `MissCondition::ONE` candidate filter compare against.
+pub(crate) const GOOD_JUDGE_INDEX: usize = 2;
+
+/// Judge index of BAD inside a timing table, the ceiling every JUDGE WIDTH tier is clamped to.
+pub(crate) const BAD_JUDGE_INDEX: usize = 3;
+
+/// Judge index of the 空POOR band, present only in the note and scratch tables.
+pub(crate) const EMPTY_POOR_JUDGE_INDEX: usize = 4;
+
+/// The judgment each window index yields, in the reference implementation's judge-code order.
+const BAND_JUDGE: [Judge; WINDOW_RULE_INDEX_COUNT] = [Judge::PerfectGreat, Judge::Great, Judge::Good, Judge::Bad, Judge::Miss];
+
+/// Reference implementation `JudgeProperty.JudgeWindowRule` (`JudgeProperty.java:209-211`): how one
+/// mode turns a judgerank into per-judge window percentages, and which windows it refuses to move.
+///
+/// `Normal` scales PG/GR/GD/BD together and fixes only the 空POOR band. `Pms` fixes PG, BD and
+/// 空POOR, scales GR and GD alone, and then clamps the scaled pair so it can neither be narrower
+/// than PG nor wider than BAD.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum JudgeWindowRule {
+    Normal,
+    Pms,
+}
+
+impl JudgeWindowRule {
+    /// Both rules, in the reference implementation's declaration order.
+    pub const ALL: [JudgeWindowRule; 2] = [JudgeWindowRule::Normal, JudgeWindowRule::Pms];
+
+    /// `JudgeProperty.java:210` NORMAL judgerank table. Rows are `#RANK`
+    /// (VERYHARD, HARD, NORMAL, EASY, VERYEASY), columns are judge index (PG, GR, GD, BD, MS).
+    pub const NORMAL_JUDGERANK: [[i32; WINDOW_RULE_INDEX_COUNT]; RANK_COUNT] =
+        [[25, 25, 25, 25, 100], [50, 50, 50, 50, 100], [75, 75, 75, 75, 100], [100, 100, 100, 100, 100], [125, 125, 125, 125, 100]];
+
+    /// `JudgeProperty.java:210` NORMAL fixjudge: only the 空POOR band ignores judgerank.
+    pub const NORMAL_FIXJUDGE: [bool; WINDOW_RULE_INDEX_COUNT] = [false, false, false, false, true];
+
+    /// `JudgeProperty.java:211` PMS judgerank table, laid out like [`NORMAL_JUDGERANK`](Self::NORMAL_JUDGERANK).
+    pub const PMS_JUDGERANK: [[i32; WINDOW_RULE_INDEX_COUNT]; RANK_COUNT] =
+        [[100, 33, 33, 100, 100], [100, 50, 50, 100, 100], [100, 70, 70, 100, 100], [100, 100, 100, 100, 100], [100, 133, 133, 100, 100]];
+
+    /// `JudgeProperty.java:211` PMS fixjudge: PG, BAD and the 空POOR band ignore judgerank.
+    pub const PMS_FIXJUDGE: [bool; WINDOW_RULE_INDEX_COUNT] = [true, false, false, true, true];
+
+    /// This rule's judgerank table.
+    pub fn judgerank_table(self) -> [[i32; WINDOW_RULE_INDEX_COUNT]; RANK_COUNT] {
+        match self {
+            JudgeWindowRule::Normal => Self::NORMAL_JUDGERANK,
+            JudgeWindowRule::Pms => Self::PMS_JUDGERANK,
+        }
+    }
+
+    /// Which judge indices this rule holds at their tabulated width whatever the judgerank.
+    pub fn fixjudge(self) -> [bool; WINDOW_RULE_INDEX_COUNT] {
+        match self {
+            JudgeWindowRule::Normal => Self::NORMAL_FIXJUDGE,
+            JudgeWindowRule::Pms => Self::PMS_FIXJUDGE,
+        }
+    }
+
+    /// Spread one scalar judgerank over the five judge indices, mirroring
+    /// `JudgeWindowRule.getJudgeRank` (`JudgeProperty.java:222-224`): a fixed index takes 100.
+    pub fn judgerank_per_index(self, judgerank: i32) -> [i32; WINDOW_RULE_INDEX_COUNT] {
+        self.fixjudge().map(|fixed| if fixed { FIXED_JUDGERANK_PERCENT } else { judgerank })
+    }
+
+    /// The rule `mode` is judged with (`JudgeProperty.java:21, 32, 43, 54`): every reference row but
+    /// PMS uses [`JudgeWindowRule::Normal`].
+    pub fn for_mode(mode: &Mode) -> JudgeWindowRule {
+        match mode.name {
+            "POPN_9K" => JudgeWindowRule::Pms,
+            _ => JudgeWindowRule::Normal,
+        }
+    }
+
+    /// The judgerank a chart falls back to when it carries no usable `#RANK`, and the base a
+    /// positive `#DEFEXRANK` scales (`BMSPlayerRule.java:62-63`). 75 under `Normal`, 70 under `Pms`.
+    pub fn normal_judgerank(self) -> i32 {
+        self.judgerank_table()[NORMAL_RANK_ROW][JUDGERANK_SCALAR_COLUMN]
+    }
+
+    /// Scalar judgerank percent for a chart `#RANK` (`BMSPlayerRule.java:62`). A rank outside 0..5
+    /// falls back to NORMAL. PMS reads its own column, so `#RANK 0` is 33 there and 25 under
+    /// [`Normal`](JudgeWindowRule::Normal).
+    pub fn judgerank_for_rank(self, rank: i32) -> i32 {
+        let row = usize::try_from(rank).ok().filter(|r| *r < RANK_COUNT).unwrap_or(NORMAL_RANK_ROW);
+        self.judgerank_table()[row][JUDGERANK_SCALAR_COLUMN]
+    }
+
+    /// Effective judgerank percent for a chart under this rule (`BMSPlayerRule.java:62-63`). A chart
+    /// carrying `#DEFEXRANK` never consults the `#RANK` table: a positive value scales this rule's
+    /// NORMAL judgerank, anything else falls straight back to it.
+    pub fn judgerank_for(self, rank: i32, defexrank: Option<f64>) -> i32 {
+        match defexrank {
+            Some(d) if d > 0.0 => ((d * self.normal_judgerank() as f64) / PERCENT_DENOMINATOR as f64) as i32,
+            Some(_) => self.normal_judgerank(),
+            None => self.judgerank_for_rank(rank),
+        }
+    }
+
+    /// Build a timing table at `judgerank`, mirroring `JudgeWindowRule.create`
+    /// (`JudgeProperty.java:230-260`) up to but excluding the JUDGE WIDTH pass, which stays in
+    /// [`JudgeWindows::with_window_rate`].
+    ///
+    /// Two steps. First every non-fixed band is scaled by its own judgerank percentage. Then each of
+    /// the four scalable indices is clamped between its fixed neighbours: it can be no narrower than
+    /// the nearest fixed index below it and no wider than the nearest fixed index above it, which is
+    /// what keeps PMS GREAT/GOOD inside PG and BAD. `Normal` fixes nothing below index 4, so the
+    /// clamp is a no-op there and this reproduces [`JudgeWindows::scaled`].
+    ///
+    /// A negative judgerank is clamped to 0, the guard this engine has always had; the reference
+    /// does not clamp because none of its judgerank sources go below zero.
+    pub fn create(self, org: &JudgeWindows, judgerank: [i32; WINDOW_RULE_INDEX_COUNT]) -> JudgeWindows {
+        let fixjudge = self.fixjudge();
+        let src = [org.pg, org.gr, org.gd, org.bd, org.ms.unwrap_or((0, 0))];
+        let mut judge = [0i64; WINDOW_RULE_INDEX_COUNT * BOUNDS_PER_PAIR];
+        for i in 0..org.band_count() {
+            let rank = judgerank[i].max(0) as i64;
+            let bounds = [src[i].0, src[i].1];
+            for j in 0..BOUNDS_PER_PAIR {
+                judge[i * BOUNDS_PER_PAIR + j] = if fixjudge[i] { bounds[j] } else { bounds[j] * rank / PERCENT_DENOMINATOR };
+            }
+        }
+
+        let mut fixmin: Option<usize> = None;
+        for i in 0..CLAMPED_INDEX_COUNT {
+            if fixjudge[i] {
+                fixmin = Some(i);
+                continue;
+            }
+            let fixmax = (i + 1..CLAMPED_INDEX_COUNT).find(|&j| fixjudge[j]);
+            for j in 0..BOUNDS_PER_PAIR {
+                let at = i * BOUNDS_PER_PAIR + j;
+                if let Some(floor) = fixmin
+                    && judge[at].abs() < judge[floor * BOUNDS_PER_PAIR + j].abs()
+                {
+                    judge[at] = judge[floor * BOUNDS_PER_PAIR + j];
+                }
+                if let Some(ceiling) = fixmax
+                    && judge[at].abs() > judge[ceiling * BOUNDS_PER_PAIR + j].abs()
+                {
+                    judge[at] = judge[ceiling * BOUNDS_PER_PAIR + j];
+                }
+            }
+        }
+
+        let pair = |i: usize| (judge[i * BOUNDS_PER_PAIR], judge[i * BOUNDS_PER_PAIR + 1]);
+        JudgeWindows { pg: pair(0), gr: pair(1), gd: pair(2), bd: pair(3), ms: org.ms.map(|_| pair(4)) }
+    }
+}
+
 /// One row of the reference implementation's `JudgeProperty` enum: the four timing tables, their release margins and
 /// the per-judge combo/vanish policy. Adding a play mode is a new row here, never a branch in the
 /// judge engine.
@@ -88,7 +280,9 @@ impl JudgeProperty {
 
     /// Reference implementation `JudgeProperty.PMS` (`JudgeProperty.java:34-44`). pop'n has no scratch lane, so
     /// the reference implementation leaves both scratch tables empty; the note/LN tables stand in here so a stray
-    /// scratch lookup can never hit a zero-length window.
+    /// scratch lookup can never hit a zero-length window. An empty reference table judges everything
+    /// as PERFECT GREAT, so this is a deliberate divergence rather than a copy — see
+    /// `docs/acknowledge/reference-divergences.md`.
     pub const PMS: JudgeProperty = JudgeProperty {
         note: w5((-20_000, 20_000), (-50_000, 50_000), (-117_000, 117_000), (-183_000, 183_000), (-175_000, 500_000)),
         scratch: w5((-20_000, 20_000), (-50_000, 50_000), (-117_000, 117_000), (-183_000, 183_000), (-175_000, 500_000)),
@@ -101,8 +295,8 @@ impl JudgeProperty {
         miss_condition: MissCondition::One,
     };
 
-    /// Reference implementation `JudgeProperty.KEYBOARD` (`JudgeProperty.java:45-55`). Data only — the 24K mode is
-    /// not wired into `rbms_model::Mode` yet, so nothing selects this row.
+    /// Reference implementation `JudgeProperty.KEYBOARD` (`JudgeProperty.java:45-55`). Its two scratch
+    /// tables stand in for the reference's empty ones, exactly as [`JudgeProperty::PMS`] does.
     pub const KEYBOARD: JudgeProperty = JudgeProperty {
         note: w5((-30_000, 30_000), (-90_000, 90_000), (-200_000, 200_000), (-320_000, 240_000), (-200_000, 650_000)),
         scratch: w5((-30_000, 30_000), (-90_000, 90_000), (-200_000, 200_000), (-320_000, 240_000), (-200_000, 650_000)),
@@ -128,12 +322,13 @@ impl JudgeProperty {
     }
 
     /// Compiled-in table for `mode`: BEAT_5K/10K use FIVEKEYS, BEAT_7K/14K use SEVENKEYS, POPN_9K
-    /// uses PMS. Used when the data file has no row for the mode, and as the baseline the data
-    /// file's parity guard compares against.
+    /// uses PMS and KEYBOARD_24K uses KEYBOARD. Used when the data file has no row for the mode, and
+    /// as the baseline the data file's parity guard compares against.
     pub fn defaults_for_mode(mode: &Mode) -> JudgeProperty {
         match mode.name {
             "BEAT_5K" | "BEAT_10K" => Self::FIVEKEYS,
             "POPN_9K" => Self::PMS,
+            crate::data::KEYBOARD_24K_KEY => Self::KEYBOARD,
             _ => Self::SEVENKEYS,
         }
     }
@@ -142,15 +337,71 @@ impl JudgeProperty {
     /// seeds `mjudgestart`/`mjudgeend` at 0 and folds both tables' bounds in
     /// (`JudgeManager.java:189-197`), so the gate is chart-global, not per-lane.
     pub fn candidate_gate(&self) -> (i64, i64) {
-        let mut start = 0;
-        let mut end = 0;
-        for w in [self.note, self.scratch] {
-            for pair in w.pairs() {
-                start = start.min(pair.0);
-                end = end.max(pair.1);
-            }
+        candidate_gate_across(&self.note, &self.scratch)
+    }
+
+    /// All four timing tables this row judges against, mirroring the reference implementation's
+    /// `JudgeWindow` constructor (`JudgeProperty.java:168-173`): every table is built from the same
+    /// `judgerank` under the same `rule` and from the **key** JUDGE WIDTH rates, because
+    /// `JudgeManager.java:198` builds the one window set the whole engine judges against with
+    /// `keyJudgeWindowRate` alone.
+    ///
+    /// `scratch_rates` never reach a judgment. The reference spends them on `smjudge`
+    /// (`JudgeManager.java:185-197`), the scratch half of the chart-global candidate gate, which is
+    /// what [`JudgeWindowSet::candidate_gate`] carries.
+    pub fn window_set(
+        &self,
+        rule: JudgeWindowRule,
+        judgerank: i32,
+        key_rates: [i32; JUDGE_WIDTH_TIER_COUNT],
+        scratch_rates: [i32; JUDGE_WIDTH_TIER_COUNT],
+    ) -> JudgeWindowSet {
+        let per_index = rule.judgerank_per_index(judgerank);
+        let build = |org: &JudgeWindows, rates: [i32; JUDGE_WIDTH_TIER_COUNT]| rule.create(org, per_index).with_window_rate(rates);
+        let note = build(&self.note, key_rates);
+        JudgeWindowSet {
+            candidate_gate: candidate_gate_across(&note, &build(&self.scratch, scratch_rates)),
+            note,
+            scratch: build(&self.scratch, key_rates),
+            ln_end: build(&self.ln_end, key_rates),
+            ln_scratch_end: build(&self.ln_scratch_end, key_rates),
         }
-        (start, end)
+    }
+}
+
+/// Widest candidate window across a key and a scratch table, as `(late, early)`. Seeded at 0 like
+/// the reference implementation's `mjudgestart`/`mjudgeend` (`JudgeManager.java:185-197`), so the
+/// gate is chart-global rather than per-lane.
+pub fn candidate_gate_across(note: &JudgeWindows, scratch: &JudgeWindows) -> (i64, i64) {
+    let mut start = 0;
+    let mut end = 0;
+    for w in [note, scratch] {
+        for pair in w.pairs() {
+            start = start.min(pair.0);
+            end = end.max(pair.1);
+        }
+    }
+    (start, end)
+}
+
+/// The four timing tables one play session judges against, already scaled by the chart's judgerank
+/// and the user's JUDGE WIDTH rates, plus the candidate gate the scratch rates feed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct JudgeWindowSet {
+    pub note: JudgeWindows,
+    pub scratch: JudgeWindows,
+    pub ln_end: JudgeWindows,
+    pub ln_scratch_end: JudgeWindows,
+    /// How far either side of a press the engine looks for a candidate note. The only place the
+    /// scratch JUDGE WIDTH rates reach.
+    pub candidate_gate: (i64, i64),
+}
+
+impl JudgeWindowSet {
+    /// The tables `mode` judges against, taking both its [`JudgeProperty`] row and its
+    /// [`JudgeWindowRule`] from the mode.
+    pub fn for_mode(mode: &Mode, judgerank: i32, key_rates: [i32; JUDGE_WIDTH_TIER_COUNT], scratch_rates: [i32; JUDGE_WIDTH_TIER_COUNT]) -> JudgeWindowSet {
+        JudgeProperty::for_mode(mode).window_set(JudgeWindowRule::for_mode(mode), judgerank, key_rates, scratch_rates)
     }
 }
 
@@ -187,31 +438,36 @@ impl JudgeWindows {
         JudgeProperty::for_mode(mode).ln_end
     }
 
-    /// Apply a `judgerank` percentage (100 = default). PG/GR/GD/BD scale; the MS window is
-    /// fixed (reference implementation `JudgeWindowRule.NORMAL.fixjudge` fixes only index 4). It
-    /// (`JudgeProperty.java:234`) applies the percentage with no lower clamp, so a judgerank of 0
-    /// collapses PG/GR/GD/BD to `(0, 0)` here too.
+    /// How many timing bands this table carries: five for the note and scratch rows, four for the
+    /// long-note end rows, which have no 空POOR pair. [`judge_code`](Self::judge_code) returns this
+    /// value when a delta lands in none of them, mirroring `mjudge.length / 2` in
+    /// `JudgeWindow.getJudge` (`JudgeProperty.java:187-188`).
+    pub fn band_count(&self) -> usize {
+        CLAMPED_INDEX_COUNT + usize::from(self.ms.is_some())
+    }
+
+    /// Apply a `judgerank` percentage (100 = default) under [`JudgeWindowRule::Normal`], the rule
+    /// every mode but PMS uses. Kept as the compatibility entry point for callers that have no mode
+    /// to hand; [`JudgeWindowRule::create`] is the general form.
     pub fn scaled(&self, judgerank_percent: i32) -> JudgeWindows {
-        let p = judgerank_percent.max(0) as i64;
-        let s = |w: (i64, i64)| (w.0 * p / 100, w.1 * p / 100);
-        JudgeWindows { pg: s(self.pg), gr: s(self.gr), gd: s(self.gd), bd: s(self.bd), ms: self.ms }
+        JudgeWindowRule::Normal.create(self, JudgeWindowRule::Normal.judgerank_per_index(judgerank_percent))
     }
 
     /// Apply the user JUDGE WIDTH rates (percent, `[PG, GR, GD]`), reference implementation
     /// `JudgeWindowRule.create` lines 262-273. Only the first three tiers scale; each bound is then
     /// clamped so it never exceeds the BAD bound (`judge[6 + j]` in the Java, i.e. index 3) and
     /// never shrinks below the tier before it. BAD and MS are untouched.
-    pub fn with_window_rate(&self, rates: [i32; 3]) -> JudgeWindows {
+    pub fn with_window_rate(&self, rates: [i32; JUDGE_WIDTH_TIER_COUNT]) -> JudgeWindows {
         let mut tiers = [self.pg, self.gr, self.gd];
         let limit = self.bd;
-        for i in 0..3 {
+        for i in 0..JUDGE_WIDTH_TIER_COUNT {
             let rate = rates[i].max(0) as i64;
             let bounds = [tiers[i].0, tiers[i].1];
             let limits = [limit.0, limit.1];
             let prev = if i > 0 { Some([tiers[i - 1].0, tiers[i - 1].1]) } else { None };
-            let mut out = [0i64; 2];
-            for j in 0..2 {
-                let mut v = bounds[j] * rate / 100;
+            let mut out = [0i64; BOUNDS_PER_PAIR];
+            for j in 0..BOUNDS_PER_PAIR {
+                let mut v = bounds[j] * rate / PERCENT_DENOMINATOR;
                 if v.abs() > limits[j].abs() {
                     v = limits[j];
                 }
@@ -234,11 +490,11 @@ impl JudgeWindows {
     /// `note_type` matters: the long-note end tables have no fifth (空POOR) pair.
     pub fn get_time(&self, note_type: NoteType, judge: usize, early: bool) -> i64 {
         let pair = match judge {
-            0 => Some(self.pg),
-            1 => Some(self.gr),
-            2 => Some(self.gd),
-            3 => Some(self.bd),
-            4 => self.ms.filter(|_| note_type.has_empty_poor_window()),
+            PGREAT_JUDGE_INDEX => Some(self.pg),
+            GREAT_JUDGE_INDEX => Some(self.gr),
+            GOOD_JUDGE_INDEX => Some(self.gd),
+            BAD_JUDGE_INDEX => Some(self.bd),
+            EMPTY_POOR_JUDGE_INDEX => self.ms.filter(|_| note_type.has_empty_poor_window()),
             _ => None,
         };
         match pair {
@@ -255,51 +511,54 @@ impl JudgeWindows {
         self.ms.is_some_and(|w| dmtime >= w.0 && dmtime <= w.1)
     }
 
+    /// Whether `dmtime` sits inside the GOOD band. The `MissCondition::ONE` candidate filter tests
+    /// exactly this pair on a note that has already been judged once
+    /// (`JudgeManager.java:397-399`, `getTime(type, 2, early)`).
+    pub fn in_good_band(&self, dmtime: i64) -> bool {
+        dmtime >= self.gd.0 && dmtime <= self.gd.1
+    }
+
+    /// Classify a timing delta into the reference implementation's window index, mirroring
+    /// `JudgeWindow.getJudge` (`JudgeProperty.java:184-189`): the index of the first band that
+    /// contains `dmtime`, or [`band_count`](Self::band_count) when no band does. Index 4 is the
+    /// 空POOR band, which the press path remaps to judge code 5 (`JudgeManager.java:404`).
+    pub fn judge_code(&self, dmtime: i64) -> usize {
+        let inw = |w: (i64, i64)| dmtime >= w.0 && dmtime <= w.1;
+        if inw(self.pg) {
+            PGREAT_JUDGE_INDEX
+        } else if inw(self.gr) {
+            GREAT_JUDGE_INDEX
+        } else if inw(self.gd) {
+            GOOD_JUDGE_INDEX
+        } else if inw(self.bd) {
+            BAD_JUDGE_INDEX
+        } else if self.ms.is_some_and(inw) {
+            EMPTY_POOR_JUDGE_INDEX
+        } else {
+            self.band_count()
+        }
+    }
+
     /// Classify a timing delta. The MS band yields [`Judge::Miss`] — the reference implementation's judge code 5
     /// (空POOR, `JudgeManager.java:404` maps window index 4 to code 5) — and `None` means the press
     /// reached no window at all. Tables without an MS pair (long-note ends) never yield `Miss`.
     pub fn judge(&self, dmtime: i64) -> Option<Judge> {
-        let inw = |w: (i64, i64)| dmtime >= w.0 && dmtime <= w.1;
-        if inw(self.pg) {
-            Some(Judge::PerfectGreat)
-        } else if inw(self.gr) {
-            Some(Judge::Great)
-        } else if inw(self.gd) {
-            Some(Judge::Good)
-        } else if inw(self.bd) {
-            Some(Judge::Bad)
-        } else if self.ms.is_some_and(inw) {
-            Some(Judge::Miss)
-        } else {
-            None
-        }
+        let code = self.judge_code(dmtime);
+        if code >= self.band_count() { None } else { BAND_JUDGE.get(code).copied() }
     }
 }
 
-/// judgerank percent for the NORMAL window rule, indexed by `#RANK`
-/// (0..4 = VERYHARD/HARD/NORMAL/EASY/VERYEASY).
-const RANK_TABLE: [i32; 5] = [25, 50, 75, 100, 125];
-
-/// judgerank percent used when `#RANK` is missing or out of range, and the base that
-/// `#DEFEXRANK` scales (reference implementation `JudgeWindowRule.NORMAL.judgerank[2][1]`).
-const NORMAL_JUDGERANK: i32 = 75;
-
-/// `#RANK` index → judgerank percent (`BMSPlayerRule.java:62`). Out-of-range falls back to
-/// NORMAL (75) — the reference implementation does not clamp to the table ends.
+/// `#RANK` index -> judgerank percent under [`JudgeWindowRule::Normal`] (`BMSPlayerRule.java:62`).
+/// Out-of-range falls back to NORMAL (75) — the reference implementation does not clamp to the
+/// table ends. Use [`JudgeWindowRule::judgerank_for_rank`] for a mode whose rule is not NORMAL.
 pub fn rank_to_judgerank(rank: i32) -> i32 {
-    if rank < 0 { NORMAL_JUDGERANK } else { RANK_TABLE.get(rank as usize).copied().unwrap_or(NORMAL_JUDGERANK) }
+    JudgeWindowRule::Normal.judgerank_for_rank(rank)
 }
 
-/// Effective judgerank percent for a chart (`BMSPlayerRule.java:62-63`). A chart carrying
-/// `#DEFEXRANK` switches to the `BMS_DEFEXRANK` branch, which never consults the `#RANK` table:
-/// a positive value scales the NORMAL judgerank, anything else falls straight back to NORMAL (75).
-/// Only a chart without `#DEFEXRANK` uses the `#RANK` table.
+/// Effective judgerank percent for a chart under [`JudgeWindowRule::Normal`]
+/// (`BMSPlayerRule.java:62-63`). See [`JudgeWindowRule::judgerank_for`] for the mode-aware form.
 pub fn judgerank_for(rank: i32, defexrank: Option<f64>) -> i32 {
-    match defexrank {
-        Some(d) if d > 0.0 => ((d * NORMAL_JUDGERANK as f64) / 100.0) as i32,
-        Some(_) => NORMAL_JUDGERANK,
-        None => rank_to_judgerank(rank),
-    }
+    JudgeWindowRule::Normal.judgerank_for(rank, defexrank)
 }
 
 #[cfg(test)]
@@ -518,5 +777,314 @@ mod windows_tests {
         assert_eq!(judgerank_for(0, Some(0.0)), 75, "#DEFEXRANK 0 is NORMAL, not #RANK 0 (25)");
         assert_eq!(judgerank_for(4, Some(-10.0)), 75, "negative #DEFEXRANK is NORMAL, not #RANK 4 (125)");
         assert_eq!(judgerank_for(1, None), 50, "no #DEFEXRANK, so the #RANK table applies");
+    }
+
+    fn flat(w: JudgeWindows) -> Vec<i64> {
+        let mut v = vec![w.pg.0, w.pg.1, w.gr.0, w.gr.1, w.gd.0, w.gd.1, w.bd.0, w.bd.1];
+        if let Some(ms) = w.ms {
+            v.push(ms.0);
+            v.push(ms.1);
+        }
+        v
+    }
+
+    fn legacy_scaled(w: &JudgeWindows, judgerank_percent: i32) -> JudgeWindows {
+        let p = judgerank_percent.max(0) as i64;
+        let s = |b: (i64, i64)| (b.0 * p / 100, b.1 * p / 100);
+        JudgeWindows { pg: s(w.pg), gr: s(w.gr), gd: s(w.gd), bd: s(w.bd), ms: w.ms }
+    }
+
+    const REFERENCE_ROWS: [(&str, JudgeProperty); 4] =
+        [("FIVEKEYS", JudgeProperty::FIVEKEYS), ("SEVENKEYS", JudgeProperty::SEVENKEYS), ("PMS", JudgeProperty::PMS), ("KEYBOARD", JudgeProperty::KEYBOARD)];
+
+    #[test]
+    fn judge_property_tables_pin() {
+        let five = JudgeProperty::FIVEKEYS;
+        assert_eq!(flat(five.note), [-20_000, 20_000, -50_000, 50_000, -100_000, 100_000, -150_000, 150_000, -150_000, 500_000], "FIVEKEYS note");
+        assert_eq!(flat(five.scratch), [-30_000, 30_000, -60_000, 60_000, -110_000, 110_000, -160_000, 160_000, -160_000, 500_000], "FIVEKEYS scratch");
+        assert_eq!(flat(five.ln_end), [-120_000, 120_000, -150_000, 150_000, -200_000, 200_000, -250_000, 250_000], "FIVEKEYS longnote");
+        assert_eq!(
+            flat(five.ln_scratch_end),
+            [-130_000, 130_000, -160_000, 160_000, -110_000, 110_000, -260_000, 260_000],
+            "FIVEKEYS longscratch: the third pair really is narrower than the second in JudgeProperty.java:16, so it is copied unchanged"
+        );
+        assert_eq!((five.longnote_margin, five.longscratch_margin), (0, 0), "FIVEKEYS margins");
+        assert_eq!(five.combo, [true, true, true, false, false, false], "FIVEKEYS combo");
+        assert_eq!(five.judge_vanish, [true, true, true, true, true, false], "FIVEKEYS judgeVanish");
+        assert_eq!(five.miss_condition, MissCondition::Always, "FIVEKEYS miss");
+
+        let seven = JudgeProperty::SEVENKEYS;
+        assert_eq!(flat(seven.note), [-20_000, 20_000, -60_000, 60_000, -150_000, 150_000, -280_000, 220_000, -150_000, 500_000], "SEVENKEYS note");
+        assert_eq!(flat(seven.scratch), [-30_000, 30_000, -70_000, 70_000, -160_000, 160_000, -290_000, 230_000, -160_000, 500_000], "SEVENKEYS scratch");
+        assert_eq!(flat(seven.ln_end), [-120_000, 120_000, -160_000, 160_000, -200_000, 200_000, -280_000, 220_000], "SEVENKEYS longnote");
+        assert_eq!(flat(seven.ln_scratch_end), [-130_000, 130_000, -170_000, 170_000, -210_000, 210_000, -290_000, 230_000], "SEVENKEYS longscratch");
+        assert_eq!((seven.longnote_margin, seven.longscratch_margin), (0, 0), "SEVENKEYS margins");
+        assert_eq!(seven.combo, [true, true, true, false, false, true], "SEVENKEYS combo");
+        assert_eq!(seven.judge_vanish, [true, true, true, true, true, false], "SEVENKEYS judgeVanish");
+        assert_eq!(seven.miss_condition, MissCondition::Always, "SEVENKEYS miss");
+
+        let pms = JudgeProperty::PMS;
+        assert_eq!(flat(pms.note), [-20_000, 20_000, -50_000, 50_000, -117_000, 117_000, -183_000, 183_000, -175_000, 500_000], "PMS note");
+        assert_eq!(flat(pms.ln_end), [-120_000, 120_000, -150_000, 150_000, -217_000, 217_000, -283_000, 283_000], "PMS longnote");
+        assert_eq!((pms.longnote_margin, pms.longscratch_margin), (200_000, 0), "PMS margins");
+        assert_eq!(pms.combo, [true, true, true, false, false, false], "PMS combo");
+        assert_eq!(pms.judge_vanish, [true, true, true, false, true, false], "PMS judgeVanish: a BAD does not consume the note");
+        assert_eq!(pms.miss_condition, MissCondition::One, "PMS miss");
+
+        let keyboard = JudgeProperty::KEYBOARD;
+        assert_eq!(flat(keyboard.note), [-30_000, 30_000, -90_000, 90_000, -200_000, 200_000, -320_000, 240_000, -200_000, 650_000], "KEYBOARD note");
+        assert_eq!(flat(keyboard.ln_end), [-160_000, 25_000, -200_000, 75_000, -260_000, 140_000, -320_000, 240_000], "KEYBOARD longnote");
+        assert_eq!((keyboard.longnote_margin, keyboard.longscratch_margin), (0, 0), "KEYBOARD margins");
+        assert_eq!(keyboard.combo, [true, true, true, false, false, true], "KEYBOARD combo");
+        assert_eq!(keyboard.judge_vanish, [true, true, true, true, true, false], "KEYBOARD judgeVanish");
+        assert_eq!(keyboard.miss_condition, MissCondition::Always, "KEYBOARD miss");
+    }
+
+    #[test]
+    fn rows_without_a_scratch_lane_stand_in_their_key_tables() {
+        for (name, prop) in [("PMS", JudgeProperty::PMS), ("KEYBOARD", JudgeProperty::KEYBOARD)] {
+            assert_eq!(prop.scratch, prop.note, "{name} scratch is empty in JudgeProperty.java, so the note table stands in");
+            assert_eq!(prop.ln_scratch_end, prop.ln_end, "{name} longscratch is empty in JudgeProperty.java, so the longnote table stands in");
+        }
+    }
+
+    #[test]
+    fn judge_property_rows_reach_the_engine_through_the_data_file() {
+        for (mode, expected) in [
+            (Mode::BEAT_5K, JudgeProperty::FIVEKEYS),
+            (Mode::BEAT_10K, JudgeProperty::FIVEKEYS),
+            (Mode::BEAT_7K, JudgeProperty::SEVENKEYS),
+            (Mode::BEAT_14K, JudgeProperty::SEVENKEYS),
+            (Mode::POPN_9K, JudgeProperty::PMS),
+        ] {
+            let loaded = JudgeProperty::for_mode(&mode);
+            assert_eq!(flat(loaded.note), flat(expected.note), "{} note", mode.name);
+            assert_eq!(flat(loaded.scratch), flat(expected.scratch), "{} scratch", mode.name);
+            assert_eq!(flat(loaded.ln_end), flat(expected.ln_end), "{} ln_end", mode.name);
+            assert_eq!(flat(loaded.ln_scratch_end), flat(expected.ln_scratch_end), "{} ln_scratch_end", mode.name);
+            assert_eq!(loaded.longnote_margin, expected.longnote_margin, "{} longnote margin", mode.name);
+            assert_eq!(loaded.longscratch_margin, expected.longscratch_margin, "{} longscratch margin", mode.name);
+            assert_eq!(loaded.combo, expected.combo, "{} combo", mode.name);
+            assert_eq!(loaded.judge_vanish, expected.judge_vanish, "{} judgeVanish", mode.name);
+            assert_eq!(loaded.miss_condition, expected.miss_condition, "{} miss", mode.name);
+        }
+    }
+
+    #[test]
+    fn window_rule_tables_pin() {
+        assert_eq!(
+            JudgeWindowRule::Normal.judgerank_table(),
+            [[25, 25, 25, 25, 100], [50, 50, 50, 50, 100], [75, 75, 75, 75, 100], [100, 100, 100, 100, 100], [125, 125, 125, 125, 100]]
+        );
+        assert_eq!(JudgeWindowRule::Normal.fixjudge(), [false, false, false, false, true]);
+        assert_eq!(
+            JudgeWindowRule::Pms.judgerank_table(),
+            [[100, 33, 33, 100, 100], [100, 50, 50, 100, 100], [100, 70, 70, 100, 100], [100, 100, 100, 100, 100], [100, 133, 133, 100, 100]]
+        );
+        assert_eq!(JudgeWindowRule::Pms.fixjudge(), [true, false, false, true, true]);
+    }
+
+    #[test]
+    fn window_rule_for_mode_is_pms_only_for_popn() {
+        assert_eq!(JudgeWindowRule::for_mode(&Mode::POPN_9K), JudgeWindowRule::Pms);
+        for mode in [Mode::BEAT_5K, Mode::BEAT_7K, Mode::BEAT_10K, Mode::BEAT_14K] {
+            assert_eq!(JudgeWindowRule::for_mode(&mode), JudgeWindowRule::Normal, "{}", mode.name);
+        }
+    }
+
+    #[test]
+    fn pms_judgerank_fixes_pg_bd_ms() {
+        assert_eq!(JudgeWindowRule::Pms.judgerank_per_index(75), [100, 75, 75, 100, 100]);
+        assert_eq!(JudgeWindowRule::Normal.judgerank_per_index(75), [75, 75, 75, 75, 100]);
+    }
+
+    #[test]
+    fn the_scalar_judgerank_column_reproduces_each_rules_table_row() {
+        for rule in JudgeWindowRule::ALL {
+            for (rank, row) in rule.judgerank_table().into_iter().enumerate() {
+                assert_eq!(rule.judgerank_per_index(rule.judgerank_for_rank(rank as i32)), row, "{rule:?} rank {rank}");
+            }
+        }
+    }
+
+    #[test]
+    fn pms_reads_its_own_rank_column() {
+        assert_eq!(JudgeWindowRule::Pms.judgerank_for_rank(0), 33, "VERYHARD is 33 on PMS, not 25");
+        assert_eq!(JudgeWindowRule::Pms.judgerank_for_rank(2), 70, "NORMAL is 70 on PMS, not 75");
+        assert_eq!(JudgeWindowRule::Pms.judgerank_for_rank(4), 133);
+        assert_eq!(JudgeWindowRule::Pms.normal_judgerank(), 70);
+        assert_eq!(JudgeWindowRule::Pms.judgerank_for_rank(5), 70, "an out-of-range rank falls back to that rule's NORMAL");
+        assert_eq!(JudgeWindowRule::Pms.judgerank_for(3, Some(200.0)), 140, "#DEFEXRANK scales the PMS NORMAL judgerank");
+        assert_eq!(JudgeWindowRule::Pms.judgerank_for(0, Some(0.0)), 70);
+        assert_eq!(JudgeWindowRule::Normal.judgerank_for_rank(0), 25);
+        assert_eq!(JudgeWindowRule::Normal.normal_judgerank(), 75);
+    }
+
+    #[test]
+    fn the_free_judgerank_helpers_are_the_normal_rule() {
+        for rank in -2..7 {
+            assert_eq!(rank_to_judgerank(rank), JudgeWindowRule::Normal.judgerank_for_rank(rank), "rank {rank}");
+            for defexrank in [None, Some(-1.0), Some(0.0), Some(50.0), Some(200.0)] {
+                assert_eq!(judgerank_for(rank, defexrank), JudgeWindowRule::Normal.judgerank_for(rank, defexrank), "rank {rank} defexrank {defexrank:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn normal_rule_matches_legacy_scaled() {
+        for (name, prop) in REFERENCE_ROWS {
+            for (table, org) in [("note", prop.note), ("scratch", prop.scratch), ("ln_end", prop.ln_end), ("ln_scratch_end", prop.ln_scratch_end)] {
+                for judgerank in [0, 25, 50, 70, 75, 100, 125, 133, 400] {
+                    let rule = JudgeWindowRule::Normal.create(&org, JudgeWindowRule::Normal.judgerank_per_index(judgerank));
+                    assert_eq!(rule, legacy_scaled(&org, judgerank), "{name} {table} at {judgerank}");
+                    assert_eq!(rule, org.scaled(judgerank), "{name} {table} at {judgerank} through the compatibility wrapper");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn pms_create_clamps_great_to_the_pgreat_floor() {
+        let org = JudgeProperty::PMS.note;
+        let w = JudgeWindowRule::Pms.create(&org, JudgeWindowRule::Pms.judgerank_per_index(33));
+        assert_eq!(w.pg, (-20_000, 20_000), "PG is fixjudge");
+        assert_eq!(w.gr, (-20_000, 20_000), "GREAT would scale to 16500 but cannot be narrower than PG");
+        assert_eq!(w.gd, (-38_610, 38_610), "GOOD scales to 117000 * 33 / 100 and stays between PG and BAD");
+        assert_eq!(w.bd, (-183_000, 183_000), "BAD is fixjudge");
+        assert_eq!(w.ms, Some((-175_000, 500_000)), "the 空POOR band is fixjudge");
+    }
+
+    #[test]
+    fn pms_create_clamps_good_to_the_bad_ceiling() {
+        let org = JudgeProperty::PMS.note;
+        let wide = JudgeWindowRule::Pms.create(&org, JudgeWindowRule::Pms.judgerank_per_index(133));
+        assert_eq!(wide.gr, (-66_500, 66_500), "at 133 GREAT stays between PG and BAD");
+        assert_eq!(wide.gd, (-155_610, 155_610), "at 133 GOOD is still inside BAD");
+
+        let wider = JudgeWindowRule::Pms.create(&org, JudgeWindowRule::Pms.judgerank_per_index(200));
+        assert_eq!(wider.gr, (-100_000, 100_000));
+        assert_eq!(wider.gd, (-183_000, 183_000), "GOOD would scale to 234000 but cannot exceed BAD");
+        assert_eq!(wider.bd, (-183_000, 183_000));
+    }
+
+    #[test]
+    fn ln_end_rule_does_not_panic_on_four_pairs() {
+        let org = JudgeProperty::PMS.ln_end;
+        let w = JudgeWindowRule::Pms.create(&org, JudgeWindowRule::Pms.judgerank_per_index(33));
+        assert_eq!(w.pg, (-120_000, 120_000));
+        assert_eq!(w.gr, (-120_000, 120_000), "GREAT scales to 49500 and is lifted to the PG floor");
+        assert_eq!(w.gd, (-120_000, 120_000), "GOOD scales to 71610 and is lifted to the same floor");
+        assert_eq!(w.bd, (-283_000, 283_000));
+        assert_eq!(w.ms, None, "a four-pair table gains no 空POOR band");
+    }
+
+    #[test]
+    fn band_count_and_judge_code_follow_the_table_length() {
+        assert_eq!(W.band_count(), 5);
+        assert_eq!(JudgeWindows::SEVENKEY_LN_END.band_count(), 4);
+
+        assert_eq!(W.judge_code(0), 0);
+        assert_eq!(W.judge_code(-20_000), 0, "PG late edge");
+        assert_eq!(W.judge_code(-20_001), 1);
+        assert_eq!(W.judge_code(-150_000), 2);
+        assert_eq!(W.judge_code(220_000), 3, "BAD early edge");
+        assert_eq!(W.judge_code(220_001), 4, "past BAD on the early side is the 空POOR band");
+        assert_eq!(W.judge_code(500_001), 5, "no band at all yields the band count");
+
+        let ln = JudgeWindows::SEVENKEY_LN_END;
+        assert_eq!(ln.judge_code(-120_000), 0);
+        assert_eq!(ln.judge_code(221_000), 4, "a four-pair table yields 4 for no band, not the 空POOR index");
+        assert_eq!(ln.judge(221_000), None);
+    }
+
+    #[test]
+    fn judge_code_and_judge_classify_the_same_deltas() {
+        for w in [W, JudgeWindows::SEVENKEY_LN_END, JudgeProperty::PMS.note, JudgeProperty::KEYBOARD.ln_end] {
+            for dmtime in [-700_000, -300_000, -150_000, -20_001, 0, 20_000, 60_001, 220_001, 500_000, 700_000] {
+                let expected = match w.judge_code(dmtime) {
+                    0 => Some(Judge::PerfectGreat),
+                    1 => Some(Judge::Great),
+                    2 => Some(Judge::Good),
+                    3 => Some(Judge::Bad),
+                    4 if w.band_count() > 4 => Some(Judge::Miss),
+                    _ => None,
+                };
+                assert_eq!(w.judge(dmtime), expected, "{w:?} at {dmtime}");
+            }
+        }
+    }
+
+    #[test]
+    fn in_good_band_is_the_good_pair_of_the_selected_table() {
+        assert!(W.in_good_band(150_000));
+        assert!(W.in_good_band(-150_000));
+        assert!(!W.in_good_band(150_001));
+        assert!(!W.in_good_band(-150_001));
+        assert!(!W.in_good_band(220_000), "a BAD-only press is outside the GOOD band");
+    }
+
+    #[test]
+    fn get_time_returns_zero_for_a_band_the_table_does_not_carry() {
+        assert_eq!(W.get_time(NoteType::Note, EMPTY_POOR_JUDGE_INDEX, false), -150_000);
+        assert_eq!(W.get_time(NoteType::Note, EMPTY_POOR_JUDGE_INDEX, true), 500_000);
+        assert_eq!(JudgeWindows::SEVENKEY_LN_END.get_time(NoteType::LongNoteEnd, EMPTY_POOR_JUDGE_INDEX, true), 0);
+        assert_eq!(W.get_time(NoteType::Note, BAD_JUDGE_INDEX, false), -280_000);
+    }
+
+    #[test]
+    fn every_judged_table_takes_the_key_judge_width() {
+        let set = JudgeProperty::SEVENKEYS.window_set(JudgeWindowRule::Normal, 100, [50, 100, 100], [100, 100, 100]);
+        assert_eq!(set.note.pg, (-10_000, 10_000), "the key rate halves the note PG window");
+        assert_eq!(set.ln_end.pg, (-60_000, 60_000), "the key rate also drives the long-note end table");
+        assert_eq!(set.scratch.pg, (-15_000, 15_000), "JudgeManager.java:198 builds the scratch table from the key rate too");
+        assert_eq!(set.ln_scratch_end.pg, (-65_000, 65_000));
+    }
+
+    #[test]
+    fn the_scratch_judge_width_moves_only_the_candidate_gate() {
+        let stock = JudgeProperty::SEVENKEYS.window_set(JudgeWindowRule::Normal, 100, UNMODIFIED_JUDGE_WIDTH_RATES, UNMODIFIED_JUDGE_WIDTH_RATES);
+        let narrowed = JudgeProperty::SEVENKEYS.window_set(JudgeWindowRule::Normal, 100, UNMODIFIED_JUDGE_WIDTH_RATES, [50, 50, 50]);
+        assert_eq!(narrowed.note, stock.note, "the scratch rate never reaches a judged table");
+        assert_eq!(narrowed.scratch, stock.scratch);
+        assert_eq!(narrowed.ln_end, stock.ln_end);
+        assert_eq!(narrowed.ln_scratch_end, stock.ln_scratch_end);
+        assert_eq!(stock.candidate_gate, candidate_gate_across(&stock.note, &JudgeProperty::SEVENKEYS.scratch));
+        assert_eq!(narrowed.candidate_gate, stock.candidate_gate, "narrowing PG/GR/GD leaves BAD, which is what the gate folds");
+    }
+
+    #[test]
+    fn a_scratch_press_of_a_widened_run_is_judged_by_the_key_window() {
+        let set = JudgeProperty::SEVENKEYS.window_set(JudgeWindowRule::Normal, 100, UNMODIFIED_JUDGE_WIDTH_RATES, [50, 100, 100]);
+        assert_eq!(set.scratch.pg, JudgeProperty::SEVENKEYS.scratch.pg, "SEVENKEYS scratch PG stays (-30000, 30000)");
+        assert_eq!(set.scratch.judge(25_000), Some(Judge::PerfectGreat), "25 ms into a scratch is still a PERFECT GREAT");
+    }
+
+    #[test]
+    fn the_keyboard_row_is_the_compiled_in_fallback_for_the_24_key_mode() {
+        assert_eq!(
+            flat(JudgeProperty::defaults_for_mode(&Mode::KEYBOARD_24K).note),
+            flat(JudgeProperty::KEYBOARD.note),
+            "a data file with no KEYBOARD_24K row must not silently judge 24K on the 7K table"
+        );
+        assert_eq!(flat(JudgeProperty::defaults_for_mode(&Mode::KEYBOARD_24K).ln_end), flat(JudgeProperty::KEYBOARD.ln_end));
+    }
+
+    #[test]
+    fn window_set_for_mode_applies_the_modes_own_rule() {
+        let popn = JudgeWindowSet::for_mode(&Mode::POPN_9K, 33, [100, 100, 100], [100, 100, 100]);
+        assert_eq!(popn.note.pg, (-20_000, 20_000), "PMS fixes PG whatever the judgerank");
+        assert_eq!(popn.note.gr, (-20_000, 20_000), "PMS lifts GREAT to the PG floor at judgerank 33");
+
+        let seven = JudgeWindowSet::for_mode(&Mode::BEAT_7K, 33, [100, 100, 100], [100, 100, 100]);
+        assert_eq!(seven.note.pg, (-6_600, 6_600), "the NORMAL rule scales PG with everything else");
+        assert_eq!(seven.note.gr, (-19_800, 19_800));
+    }
+
+    #[test]
+    fn window_rule_round_trips_through_ron() {
+        for rule in JudgeWindowRule::ALL {
+            let text = ron::ser::to_string(&rule).unwrap();
+            assert_eq!(ron::from_str::<JudgeWindowRule>(&text).unwrap(), rule, "{rule:?}");
+        }
     }
 }

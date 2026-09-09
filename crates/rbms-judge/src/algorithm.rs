@@ -1,12 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::windows::JudgeWindows;
-
-/// Judge index of GREAT inside a [`JudgeWindows`] row, used by [`JudgeAlgorithm::Score`].
-const GREAT_JUDGE_INDEX: usize = 1;
-
-/// Judge index of GOOD inside a [`JudgeWindows`] row, used by [`JudgeAlgorithm::Combo`].
-const GOOD_JUDGE_INDEX: usize = 2;
+use crate::windows::{GOOD_JUDGE_INDEX, GREAT_JUDGE_INDEX, JudgeWindows};
 
 /// The reference implementation's "unjudged" note state (`Note.getState() == 0`).
 pub const UNJUDGED_STATE: u8 = 0;
@@ -45,15 +39,17 @@ pub struct NoteRef {
 /// Candidate-selection policy for a key press — the reference implementation's `JudgeAlgorithm`
 /// enum, one pairwise predicate per variant.
 ///
-/// The default is [`JudgeAlgorithm::Duration`] because that is what this engine has always done
-/// (nearest `|Δt|` wins). The reference implementation defaults to [`JudgeAlgorithm::Combo`]; that
-/// divergence predates this type and changing it would change judgments, so it is not changed here.
+/// The default is [`JudgeAlgorithm::Combo`], the reference implementation's own
+/// (`JudgeAlgorithm.java:42` lists `{Combo, Duration, Lowest}` with `Combo` first). A replay
+/// recorded before the algorithm was written down names [`JudgeAlgorithm::Duration`], the only one
+/// this engine used to have, and is played back on that. All four variants are selectable, unlike
+/// the reference's three.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub enum JudgeAlgorithm {
     /// Combo first: skip a note that can no longer be taken as GOOD or better.
+    #[default]
     Combo,
     /// Smallest timing difference first.
-    #[default]
     Duration,
     /// Lowest note first: never replace the earliest candidate.
     Lowest,
@@ -118,8 +114,9 @@ mod algorithm_tests {
     }
 
     #[test]
-    fn default_is_duration_because_that_is_the_engines_historic_behaviour() {
-        assert_eq!(JudgeAlgorithm::default(), JudgeAlgorithm::Duration);
+    fn default_is_combo_like_the_reference() {
+        assert_eq!(JudgeAlgorithm::default(), JudgeAlgorithm::Combo);
+        assert_eq!(JudgeAlgorithm::ALL[0], JudgeAlgorithm::default(), "JudgeAlgorithm.java:42 lists the default first");
     }
 
     #[test]
@@ -204,5 +201,58 @@ mod algorithm_tests {
             assert_eq!(text, a.name(), "{a:?}");
             assert_eq!(ron::from_str::<JudgeAlgorithm>(&text).unwrap(), a);
         }
+    }
+    #[test]
+    fn algorithm_table_pins() {
+        let fixtures = [
+            (unjudged(0), unjudged(10_000), "both inside PG, candidate further out"),
+            (unjudged(-200_000), unjudged(100_000), "best past the GOOD late bound"),
+            (unjudged(-100_000), unjudged(50_000), "best still inside GOOD, candidate nearer"),
+            (unjudged(-200_000), unjudged(200_000), "candidate beyond every early bound"),
+            (unjudged(-200_000), judged(100_000), "candidate already judged"),
+            (unjudged(150_000), unjudged(-10_000), "best far early, candidate nearly on time"),
+        ];
+        let expected = [
+            [false, false, false, false],
+            [true, true, false, false],
+            [false, true, false, true],
+            [false, false, false, false],
+            [false, false, false, false],
+            [false, true, false, false],
+        ];
+        for (fixture, (best, cand, what)) in fixtures.iter().enumerate() {
+            for (slot, algorithm) in JudgeAlgorithm::ALL.into_iter().enumerate() {
+                assert_eq!(algorithm.prefer(best, cand, 0, &W, NoteType::Note), expected[fixture][slot], "{algorithm:?}: {what}");
+            }
+        }
+    }
+
+    #[test]
+    fn combo_takes_the_upper_note_once_the_lower_one_is_past_good() {
+        let lower = unjudged(-160_000);
+        let upper = unjudged(-100_000);
+        assert!(JudgeAlgorithm::Combo.prefer(&lower, &upper, 0, &W, NoteType::Note), "the lower note is past the GOOD late bound, so Combo moves up");
+        assert!(!JudgeAlgorithm::Lowest.prefer(&lower, &upper, 0, &W, NoteType::Note), "Lowest never moves up");
+    }
+
+    #[test]
+    fn combo_keeps_a_still_good_lower_note_that_duration_abandons() {
+        let lower = unjudged(-100_000);
+        let upper = unjudged(50_000);
+        assert!(!JudgeAlgorithm::Combo.prefer(&lower, &upper, 0, &W, NoteType::Note), "the lower note is still reachable as GOOD, so Combo keeps it");
+        assert!(JudgeAlgorithm::Duration.prefer(&lower, &upper, 0, &W, NoteType::Note), "Duration only looks at the timing distance");
+        assert!(JudgeAlgorithm::Score.prefer(&lower, &upper, 0, &W, NoteType::Note), "the lower note is past the GREAT late bound, so Score moves up");
+    }
+
+    #[test]
+    fn every_algorithm_uses_the_table_the_note_type_selects() {
+        let ln = JudgeWindows::SEVENKEY_LN_END;
+        let lower = unjudged(-210_000);
+        let upper = unjudged(150_000);
+        assert!(
+            JudgeAlgorithm::Combo.prefer(&lower, &upper, 0, &ln, NoteType::LongNoteEnd),
+            "the long-note end GOOD bounds are wider than the note ones, and both notes sit inside them"
+        );
+        assert!(!JudgeAlgorithm::Combo.prefer(&unjudged(-190_000), &upper, 0, &ln, NoteType::LongNoteEnd), "still inside the long-note end GOOD band");
     }
 }

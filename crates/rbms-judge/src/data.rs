@@ -19,8 +19,8 @@ pub const CURRENT_GAUGE_DATA_VERSION: u32 = 1;
 /// complete mirror of the reference tables.
 pub const KEYBOARD_24K_KEY: &str = "KEYBOARD_24K";
 
-/// Gauge table key used when a mode has no row of its own. Gauge parameters do not vary by mode in
-/// this engine, so every mode resolves to this row.
+/// Gauge table key used when a mode has no row of its own: the seven-key set, which the reference
+/// implementation also falls back to for an unrecognised mode (`BMSPlayerRule.java:17`).
 pub const DEFAULT_GAUGE_KEY: &str = "BEAT_7K";
 
 const BUILTIN_JUDGE_RON: &str = include_str!("../data/judge.ron");
@@ -78,6 +78,7 @@ pub struct JudgeTables {
 pub enum GaugeModifier {
     Total,
     LimitIncrement,
+    ModifyDamage,
     None,
 }
 
@@ -95,8 +96,9 @@ pub struct GaugeParams {
     pub guts: Vec<(f32, f32)>,
 }
 
-/// The six gauges one mode offers. The reference implementation carries nine per mode; the three
-/// course gauges (CLASS/EXCLASS/EXHARDCLASS) are absent here because this engine has no courses.
+/// The nine gauges one mode offers, in the reference implementation's index order. The last three
+/// are the course gauges; this engine builds and updates them for parity but never selects one,
+/// having no course mode. `GaugeSet::at` reaches all nine by [`crate::gauge::GaugeIndex`].
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 pub struct GaugeSet {
     pub assist_easy: GaugeParams,
@@ -105,6 +107,9 @@ pub struct GaugeSet {
     pub hard: GaugeParams,
     pub exhard: GaugeParams,
     pub hazard: GaugeParams,
+    pub class: GaugeParams,
+    pub exclass: GaugeParams,
+    pub exhardclass: GaugeParams,
 }
 
 /// A whole gauge data file: one [`GaugeSet`] per mode id.
@@ -171,7 +176,7 @@ impl JudgeTables {
 }
 
 impl GaugeSet {
-    /// The parameters for one gauge of this set.
+    /// The parameters for one selectable gauge of this set.
     pub fn get(&self, kind: GaugeKind) -> &GaugeParams {
         match kind {
             GaugeKind::AssistEasy => &self.assist_easy,
@@ -190,8 +195,8 @@ impl GaugeTables {
         self.gauges.get(mode_id)
     }
 
-    /// The set for `mode`, falling back to [`DEFAULT_GAUGE_KEY`] because gauge parameters do not
-    /// vary by mode in this engine.
+    /// The set for `mode`, falling back to [`DEFAULT_GAUGE_KEY`] for a mode the file has no row
+    /// for, which is the reference implementation's own fallback (`BMSPlayerRule.java:17`).
     pub fn for_mode(&self, mode: &Mode) -> Option<&GaugeSet> {
         self.get(mode.name).or_else(|| self.get(DEFAULT_GAUGE_KEY))
     }
@@ -237,7 +242,7 @@ mod data_tests {
     use super::*;
     use crate::gauge::default_params;
 
-    const MODES: [Mode; 5] = [Mode::BEAT_5K, Mode::BEAT_7K, Mode::BEAT_10K, Mode::BEAT_14K, Mode::POPN_9K];
+    const MODES: [Mode; 6] = [Mode::BEAT_5K, Mode::BEAT_7K, Mode::BEAT_10K, Mode::BEAT_14K, Mode::POPN_9K, Mode::KEYBOARD_24K];
     const ALL_KINDS: [GaugeKind; 6] = [GaugeKind::AssistEasy, GaugeKind::Easy, GaugeKind::Normal, GaugeKind::Hard, GaugeKind::ExHard, GaugeKind::Hazard];
 
     #[test]
@@ -258,8 +263,6 @@ mod data_tests {
             let loaded = tables.for_mode(&mode).unwrap_or_else(|| panic!("{} row present", mode.name));
             assert_eq!(*loaded, JudgePropertyData::from(JudgeProperty::defaults_for_mode(&mode)), "{} row", mode.name);
         }
-        let keyboard = tables.get(KEYBOARD_24K_KEY).expect("keyboard row present");
-        assert_eq!(*keyboard, JudgePropertyData::from(JudgeProperty::KEYBOARD));
     }
 
     #[test]
@@ -324,12 +327,20 @@ mod data_tests {
     }
 
     #[test]
-    fn every_mode_resolves_to_the_default_gauge_set() {
+    fn every_mode_resolves_to_the_gauge_set_its_rule_names() {
         let tables = builtin_gauge_tables();
         for mode in MODES {
             let set = tables.for_mode(&mode).unwrap_or_else(|| panic!("{} gauge set", mode.name));
-            assert_eq!(set, tables.get(DEFAULT_GAUGE_KEY).unwrap(), "{}", mode.name);
+            let expected = tables.get(crate::gauge_tables::GaugeSetId::for_mode(&mode).data_key()).expect("set row present");
+            assert_eq!(set, expected, "{}", mode.name);
         }
+    }
+
+    #[test]
+    fn a_mode_the_gauge_file_has_no_row_for_falls_back_to_the_default_set() {
+        let tables = builtin_gauge_tables();
+        let unknown = Mode { name: "NOT_IN_THE_DATA_FILE", ..Mode::BEAT_7K };
+        assert_eq!(tables.for_mode(&unknown), tables.get(DEFAULT_GAUGE_KEY));
     }
 
     #[test]

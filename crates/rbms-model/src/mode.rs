@@ -14,6 +14,11 @@ const BEAT7: [i8; 18] = [0, 1, 2, 3, 4, 7, -1, 5, 6, 8, 9, 10, 11, 12, 15, -1, 1
 const BEAT5: [i8; 18] = [0, 1, 2, 3, 4, 5, -1, -1, -1, 6, 7, 8, 9, 10, 11, -1, -1, -1];
 const POPN: [i8; 18] = [0, 1, 2, 3, 4, -1, -1, -1, -1, -1, 5, 6, 7, 8, -1, -1, -1, -1];
 
+/// No raw BMS channel maps to a 24-key lane. The reference implementation reaches its
+/// `KEYBOARD_24K` mode only from a BMSON `mode_hint` string (`BMSONDecoder`); its BMS decoder never
+/// produces it, so the 18-wide channel table is empty rather than invented.
+const KEYBOARD24: [i8; 18] = [-1; 18];
+
 impl Mode {
     pub const BEAT_7K: Mode = Mode { name: "BEAT_7K", key: 8, player: 1, scratch: &[7], channel_assign: &BEAT7 };
     pub const BEAT_5K: Mode = Mode { name: "BEAT_5K", key: 6, player: 1, scratch: &[5], channel_assign: &BEAT5 };
@@ -21,6 +26,14 @@ impl Mode {
     pub const BEAT_14K: Mode = Mode { name: "BEAT_14K", key: 16, player: 2, scratch: &[7, 15], channel_assign: &BEAT7 };
     pub const POPN_9K: Mode = Mode { name: "POPN_9K", key: 9, player: 1, scratch: &[], channel_assign: &POPN };
 
+    /// The reference implementation's `Mode.KEYBOARD_24K`: 26 lanes, one player, lanes 24 and 25
+    /// scratch. The numbers are its enum constructor arguments `(id 25, player 1, key 26,
+    /// scratchKey {24, 25})`.
+    pub const KEYBOARD_24K: Mode = Mode { name: "KEYBOARD_24K", key: 26, player: 1, scratch: &[24, 25], channel_assign: &KEYBOARD24 };
+
+    /// The modes a BMS chart can be detected as and the key-config screen enumerates.
+    /// [`Mode::KEYBOARD_24K`] is deliberately absent: it is judged and gauged like any other mode,
+    /// but nothing selects it from a BMS channel scan and its key bindings are not wired yet.
     pub const ALL: &'static [Mode] = &[Mode::BEAT_7K, Mode::BEAT_5K, Mode::BEAT_10K, Mode::BEAT_14K, Mode::POPN_9K];
 
     pub fn is_scratch(&self, lane: usize) -> bool {
@@ -304,6 +317,36 @@ mod tests {
         assert_eq!(Mode::BEAT_10K.key, 12);
         assert_eq!(Mode::BEAT_14K.key, 16);
         assert_eq!(Mode::POPN_9K.key, 9);
+    }
+
+    #[test]
+    fn keyboard_24k_matches_the_reference_enum_row() {
+        assert_eq!(Mode::KEYBOARD_24K.name, "KEYBOARD_24K");
+        assert_eq!(Mode::KEYBOARD_24K.key, 26);
+        assert_eq!(Mode::KEYBOARD_24K.player, 1);
+        assert_eq!(Mode::KEYBOARD_24K.scratch, &[24, 25]);
+    }
+
+    #[test]
+    fn keyboard_24k_scratch_lanes_are_the_last_two() {
+        for lane in 0..Mode::KEYBOARD_24K.key {
+            assert_eq!(Mode::KEYBOARD_24K.is_scratch(lane), lane >= 24, "lane={lane}");
+        }
+    }
+
+    #[test]
+    fn keyboard_24k_has_no_bms_channel_mapping() {
+        for raw in 0..18 {
+            assert_eq!(Mode::KEYBOARD_24K.lane_of_raw(raw), None, "raw={raw}");
+        }
+    }
+
+    #[test]
+    fn all_excludes_the_keyboard_mode() {
+        assert!(!Mode::ALL.contains(&Mode::KEYBOARD_24K));
+        for mode in Mode::ALL {
+            assert_ne!(mode.name, Mode::KEYBOARD_24K.name);
+        }
     }
 
     #[test]

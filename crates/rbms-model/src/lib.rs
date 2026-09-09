@@ -23,11 +23,22 @@ pub fn default_total(notes: usize) -> f64 {
 }
 
 /// `calculateDefaultTotal` for the 24-key KEYBOARD modes: a higher floor and a `notes + 100`
-/// numerator. Kept alongside [`default_total`] so wiring that mode in later needs no new formula.
+/// numerator.
 pub fn default_total_keyboard(notes: usize) -> f64 {
     let n = notes as f64;
     (7.605 * (n + 100.0) / (0.01 * n + 6.5)).max(300.0)
 }
+
+/// Default `#TOTAL` for a chart of `mode` with `notes` playable notes: the KEYBOARD modes take
+/// [`default_total_keyboard`], every other mode [`default_total`] (`BMSPlayerRule.java:84-89` picks
+/// the formula by rule, and `BMSPlayerRule.java:13-17` picks the rule by mode). Every fallback goes
+/// through here so no mode is silently given the beat-mode curve.
+pub fn default_total_for_mode(mode: &Mode, notes: usize) -> f64 {
+    if mode.name.starts_with(KEYBOARD_MODE_NAME_PREFIX) { default_total_keyboard(notes) } else { default_total(notes) }
+}
+
+/// Name prefix shared by the 24-key modes, which are the ones on the KEYBOARD rule.
+const KEYBOARD_MODE_NAME_PREFIX: &str = "KEYBOARD";
 
 /// `#VOLWAV` value assumed when the header is absent or does not parse as an integer. It is the
 /// percentage that maps to unity gain, so an unspecified chart plays at its authored level.
@@ -50,11 +61,16 @@ pub fn chart_gain(volwav_percent: i32) -> f32 {
     }
 }
 
+/// Long-note flavour carried by a note. `Undefined` is the reference implementation's
+/// `TYPE_UNDEFINED`: the chart did not state a flavour, so the player's long-note mode decides it.
+/// `Ln`, `Cn` and `Hcn` are chart-stated and always win over that mode. Declaration order keeps
+/// `Ln`/`Cn`/`Hcn` at 0/1/2, the encoding the IR `lntype` contract mirrors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LnKind {
     Ln,
     Cn,
     Hcn,
+    Undefined,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -304,6 +320,40 @@ mod tests {
         assert_eq!(LnKind::Ln, LnKind::Ln);
         assert_ne!(LnKind::Ln, LnKind::Cn);
         assert_ne!(LnKind::Cn, LnKind::Hcn);
+    }
+
+    #[test]
+    fn ln_kind_undefined_is_distinct_from_every_stated_flavour() {
+        assert_ne!(LnKind::Undefined, LnKind::Ln);
+        assert_ne!(LnKind::Undefined, LnKind::Cn);
+        assert_ne!(LnKind::Undefined, LnKind::Hcn);
+        assert_eq!(LnKind::Undefined, LnKind::Undefined);
+    }
+
+    #[test]
+    fn ln_kind_round_trips_through_the_lnmode_header_codes() {
+        const LNMODE_HEADER_CODES: [(i32, LnKind); 4] = [(0, LnKind::Undefined), (1, LnKind::Ln), (2, LnKind::Cn), (3, LnKind::Hcn)];
+        let encode = |k: LnKind| match k {
+            LnKind::Undefined => 0,
+            LnKind::Ln => 1,
+            LnKind::Cn => 2,
+            LnKind::Hcn => 3,
+        };
+        for (code, kind) in LNMODE_HEADER_CODES {
+            assert_eq!(encode(kind), code, "{kind:?} encodes to the wrong #LNMODE code");
+            let decoded = LNMODE_HEADER_CODES.iter().find(|(c, _)| *c == code).map(|(_, k)| *k);
+            assert_eq!(decoded, Some(kind), "#LNMODE {code} did not decode back to {kind:?}");
+        }
+    }
+
+    #[test]
+    fn note_kind_round_trips_an_undefined_long_note_through_clone() {
+        let start = NoteKind::LongStart { ln: LnKind::Undefined };
+        let end = NoteKind::LongEnd { ln: LnKind::Undefined };
+        assert_eq!(start.clone(), start);
+        assert_eq!(end.clone(), end);
+        assert_ne!(start, NoteKind::LongStart { ln: LnKind::Ln });
+        assert_ne!(start, end);
     }
 
     #[test]
