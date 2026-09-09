@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use rbms_audio::AudioEngine;
 use rbms_chart::shuffle::NoteOption;
+use rbms_chart::default_total;
 use rbms_chart::to_model;
 use rbms_ir::{API_VERSION, ChartId, JudgeBreakdown, NullScoreServer, PlayOptions, PlayerId, ScoreServer, ScoreSubmission};
 use rbms_judge::GaugeKind;
@@ -12,8 +13,8 @@ use rbms_model::Mode;
 use rbms_play::{PlayEvent, Player};
 use rbms_render::{
     Color, CoverState, DensityView, DetailView, HudView, RANK_BANDS, Rect, RecordRowView, RecordsView, Renderer, ResultView, SelectDetail, SelectHot, SelectModal, SelectRow,
-    SelectView as SelectScene, Skin, SkinConfig, StatCell, cover_rect, dj_rank, draw_text, draw_text_centered, draw_text_right, ex_delta_label, render_hud, render_lane_cover, render_playfield,
-    render_key_bomb, render_result, render_select, text_width,
+    ResultPalette, SelectView as SelectScene, Skin, SkinConfig, StatCell, cover_rect, dj_rank, draw_text, draw_text_centered, draw_text_right, ex_delta_label, render_hud, render_lane_cover,
+    render_playfield, render_key_bomb, render_result_with_palette, render_select, text_width,
 };
 
 use sha2::{Digest, Sha256};
@@ -41,10 +42,10 @@ use format::{
     clear_label_color, clear_type_from_id, clear_type_id, difficulty_color, difficulty_name, fmt_datetime, fmt_duration, gauge_name, mode_color, mode_short, rank_label,
 };
 use gpu::Gpu;
-use ir_map::{gauge_from_name, gauge_token, ir_clear, ir_gauge, ir_lntype, ir_random};
+use ir_map::{assist_flags, combo_breaks, gauge_from_name, gauge_token, ir_clear, ir_gauge, ir_lntype, ir_random};
 use keyconfig::{ControlAction, KeyConfig, key_from_name, key_name};
 use replay::{Replay, ReplayEvent};
-use scores::{ScoreBook, ScoreRecord};
+use scores::{SCORE_RULE_VERSION, ScoreBook, ScoreRecord, rule_version_mark, rule_version_note};
 use settings::PlaySettings;
 use tables::{TableList, TableSource};
 use tablesrc::{fetch_and_match, load_and_match};
@@ -56,9 +57,24 @@ const MODE: Mode = Mode::BEAT_7K;
 /// `#PREVIEW` hover-preview tuning: the reserved sample id, focus-settle debounce (frames), playback
 /// gain, and the silent tail held after the last autoplay event before the loop restarts.
 const PREVIEW_ID: u32 = 0;
-const PREVIEW_DEBOUNCE_FRAMES: u64 = 20;
+const PREVIEW_DEBOUNCE: Duration = Duration::from_millis(333);
 const PREVIEW_GAIN: f32 = 0.85;
 const PREVIEW_LOOP_TAIL_US: i64 = 2_000_000;
+
+/// How long the select focus must rest on a row before its heavy detail (full chart parse + timing
+/// integration + cover decode) is computed. Frame-count debouncing tied the delay to the frame rate;
+/// this keeps it constant.
+const FOCUS_DETAIL_DEBOUNCE: Duration = Duration::from_millis(150);
+
+/// How long a second Esc press at the select root still counts as confirming "quit".
+const ROOT_ESC_CONFIRM: Duration = Duration::from_secs(1);
+
+/// Suffix of the sibling temp file [`write_atomic`] writes before renaming it over the target.
+const TEMP_WRITE_SUFFIX: &str = ".tmp";
+
+/// JUDGE WIDTH percentage that leaves the windows exactly as the chart defines them. Anything above
+/// it widens the windows and counts as an assist (no score submission).
+const JUDGE_RATE_UNMODIFIED: i32 = 100;
 
 /// Background → main-thread messages for an autoplay preview (a chart with no `#PREVIEW` file): the
 /// extracted keysound timeline, then each decoded keysound. The channel disconnecting signals the
@@ -135,6 +151,99 @@ impl Default for PlayerConfig {
 }
 
 
+/// Write `contents` to `path` atomically: create the parent directory, write a sibling temp file,
+/// flush it, then rename it over the target. A crash or a full disk mid-write can then never leave a
+/// *truncated* config/score/replay file behind — the target is either the old contents or the new
+/// ones. The rename itself is not durable (the parent directory is not fsynced), so a crash right
+/// after it may still lose the update. The temp name carries the process id so two instances saving
+/// the same file do not clobber each other's temp. The temp file is removed if anything fails.
+pub(crate) fn write_atomic(path: &Path, contents: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "path has no file name"));
+    };
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let tmp = path.with_file_name(format!("{name}.{}{TEMP_WRITE_SUFFIX}", std::process::id()));
+    let written = std::fs::File::create(&tmp).and_then(|mut f| {
+        f.write_all(contents.as_bytes())?;
+        f.sync_all()
+    });
+    if let Err(e) = written.and_then(|()| std::fs::rename(&tmp, path)) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    Ok(())
+}
+
+/// Judgment time for an input taken at raw song time `raw_us`: the user's judge offset shifts when
+/// the hit is *judged*. Keysound playback must NOT use this (see [`keysound_time_us`]) — beatoraja
+/// plays the sound at the input instant and only offsets the judgment.
+fn judge_time_us(raw_us: i64, offset_ms: i32) -> i64 {
+    raw_us + offset_ms as i64 * 1000
+}
+
+/// Audio-clock time at which an input's keysound is scheduled: the raw input instant rebased onto the
+/// output-stream clock. Independent of the judge offset, so a non-zero offset never delays the sound.
+fn keysound_time_us(raw_us: i64, anchor_us: i64) -> i64 {
+    raw_us + anchor_us
+}
+
+/// Green number (note travel time in ms) for the active scroll mode: CONSTANT is fixed by hi-speed
+/// alone, FLOATING tracks the BPM/SCROLL of the segment under the play head. Both shrink with the
+/// lane cover, which hides the top of the visible window.
+fn green_number_for(constant: bool, bpm: f64, hispeed: f64, scroll: f64, cover: f32) -> f64 {
+    if constant {
+        rbms_chart::scroll::constant_green_number(hispeed, cover as f64)
+    } else {
+        rbms_chart::scroll::green_number(bpm, hispeed, scroll, cover as f64)
+    }
+}
+
+/// Why this run's score must not be sent to the IR, or `None` when it may be submitted. Mirrors
+/// beatoraja: only a real interactive PLAY reaches the IR (`MusicResult.java:82`), and any assist —
+/// a judge window widened past 100% (`BMSPlayer.java:207-213`) or an auto-played lane
+/// (`AutoplayModifier` sets `AssistLevel.ASSIST`, `BMSPlayer.java:233-234`) — clears the score flag.
+fn ir_submission_block_reason(autoplay: bool, replay: bool, judge_rate: i32, scratch_auto: bool) -> Option<&'static str> {
+    if autoplay {
+        return Some("autoplay");
+    }
+    if replay {
+        return Some("replay playback");
+    }
+    if judge_rate > JUDGE_RATE_UNMODIFIED {
+        return Some("judge window widened");
+    }
+    if scratch_auto {
+        return Some("scratch assist");
+    }
+    None
+}
+
+/// Whether this run may update the stored bests (EX / lamp / BP), i.e. it was an unassisted
+/// interactive play. Same predicate as [`ir_submission_block_reason`], so the IR gate and the local
+/// score book never disagree — beatoraja derives both from the one `score` flag
+/// (`BMSPlayer.java:207-213` clears it, `:363` `resource.setUpdateScore(score)`,
+/// `MusicResult.java:444-446` passes it to `PlayDataAccessor.writeScoreData`, and
+/// `ScoreData.java:548,566,572,578` gate exscore/avgjudge/minbp/combo on it).
+fn updates_score(autoplay: bool, replay: bool, judge_rate: i32, scratch_auto: bool) -> bool {
+    ir_submission_block_reason(autoplay, replay, judge_rate, scratch_auto).is_none()
+}
+
+/// Whether an Esc at the select root confirms quitting: only when the previous Esc (`first`) landed
+/// within [`ROOT_ESC_CONFIRM`]. A lone Esc arms the confirmation instead of exiting, so a stray press
+/// can't drop the user out of the app.
+fn esc_confirms_quit(first: Option<Instant>, now: Instant) -> bool {
+    first.is_some_and(|t| now.duration_since(t) <= ROOT_ESC_CONFIRM)
+}
+
+/// Song time once the audio output stream has died: continue from `last_us` (the last position the
+/// audio clock reported) plus the wall time since, so the clock neither freezes nor jumps.
+fn resumed_clock_us(last_us: i64, elapsed_us: i64) -> i64 {
+    last_us + elapsed_us
+}
+
 fn apply_settings(cfg: &mut PlayerConfig, s: &PlaySettings) {
     cfg.hispeed = s.hispeed.clamp(0.5, 10.0);
     cfg.gauge = gauge_from_name(&s.gauge);
@@ -168,10 +277,16 @@ fn apply_settings(cfg: &mut PlayerConfig, s: &PlaySettings) {
 /// Used at startup and when the NETWORK settings tab changes the server URL.
 fn build_server(config: &PlayerConfig) -> (Arc<dyn ScoreServer>, Arc<AtomicBool>) {
     let server: Arc<dyn ScoreServer> = match &config.server_url {
-        Some(url) => {
-            println!("score server: {url}");
-            Arc::new(rbms_ir::HttpScoreServer::new(url.clone(), None))
-        }
+        Some(url) => match rbms_ir::HttpScoreServer::try_new(url.clone(), None) {
+            Ok(s) => {
+                println!("score server: {url}");
+                Arc::new(s)
+            }
+            Err(e) => {
+                eprintln!("score server unavailable ({e}) — playing offline");
+                Arc::new(NullScoreServer)
+            }
+        },
         None => Arc::new(NullScoreServer),
     };
     let connected = Arc::new(AtomicBool::new(false));
@@ -202,13 +317,6 @@ fn compute_build_hash() -> Option<String> {
 /// Client platform tag (`OS-ARCH`, e.g. `macos-aarch64`) paired with the build hash.
 fn client_platform() -> String {
     format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH)
-}
-
-/// beatoraja-style default gauge TOTAL for a chart that omits `#TOTAL`, scaled by note count
-/// (denser charts gain more per note). Charts almost always set `#TOTAL`; this is the fallback.
-fn default_total(notes: usize) -> f64 {
-    let n = notes.max(1) as f64;
-    (7.605 * n / (0.01 * n + 6.5)).max(260.0)
 }
 
 /// Auto-calibration: the new judge offset (ms) given the run's mean timing error. The offset
@@ -568,7 +676,7 @@ impl SortMode {
 /// Cache key for the assembled [`SelectScene`]: rebuild only when one of these changes, so the scene
 /// is not re-allocated every frame of the continuous redraw loop. `select_gen` bumps on any list
 /// rebuild (catches same-length folder swaps); `scores` length catches a freshly saved record.
-type SelectKey = (u64, usize, Option<usize>, usize, bool);
+type SelectKey = (u64, usize, Option<usize>, usize, bool, bool);
 
 /// A clickable region recorded during rendering and hit-tested on a left-click. Immediate-mode:
 /// `App::hot` is rebuilt every frame for the current stage, so the layout math lives in one place.
@@ -645,6 +753,9 @@ struct App {
     /// the audio bank and draws a progress bar, then `start_play()` once `ks_progress == ks_total`.
     ks_rx: Option<std::sync::mpsc::Receiver<(u32, rbms_audio::DecodedAudio)>>,
     ks_progress: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    /// Cooperative cancel for the in-flight keysound decode pool, flipped when the LOADING screen is
+    /// abandoned so the workers stop instead of decoding the whole chart into a discarded bank.
+    ks_cancel: Arc<AtomicBool>,
     ks_total: usize,
     keyconfig: KeyConfig,
     keyconfig_path: PathBuf,
@@ -668,6 +779,8 @@ struct App {
     player: Option<Player>,
     skin: Skin,
     skin_cfg: SkinConfig,
+    /// Result-screen judge colours/labels resolved from the active skin, rebuilt with it.
+    result_palette: ResultPalette,
     bga_images: std::collections::HashMap<i32, Vec<u8>>,
     bga_events: Vec<(i64, i32)>,
     bga_cursor: usize,
@@ -676,6 +789,9 @@ struct App {
     server_connected: Arc<AtomicBool>,
     clock: Instant,
     anchor_us: i64,
+    /// Set once the audio output stream is found dead: the song position the audio clock last
+    /// reported and the instant that was noticed, so `song_us` continues on the wall clock.
+    audio_dead_at: std::cell::Cell<Option<(i64, Instant)>>,
     scores: ScoreBook,
     scores_path: PathBuf,
     /// When the records modal is open, the index into the focused chart's record list (newest
@@ -685,6 +801,10 @@ struct App {
     /// song index it was computed for — recomputed only when the focus moves to a different song.
     focused_detail: Option<ChartDetail>,
     focused_detail_si: Option<usize>,
+    /// Focus-settle debounce for the heavy detail: the row the focus is currently on and when it
+    /// arrived there. The detail is computed only once it has rested for [`FOCUS_DETAIL_DEBOUNCE`].
+    focus_settle_si: Option<usize>,
+    focus_settle_at: Instant,
     cover_rgba: Option<Vec<u8>>,
     cached_select: Option<SelectScene>,
     cached_select_key: Option<SelectKey>,
@@ -692,7 +812,7 @@ struct App {
     preview_audio: Option<AudioEngine>,
     preview_si: Option<usize>,
     preview_target: Option<usize>,
-    preview_target_frame: u64,
+    preview_target_at: Instant,
     preview_loop_us: i64,
     preview_next_us: i64,
     /// Autoplay-preview keysound timeline `(at_us, wav)` for the focused chart when it defines no
@@ -717,6 +837,9 @@ struct App {
     ram_mb: f32,
     /// SHA-256 of this binary, computed once at startup, submitted for build integrity (F8).
     build_sha256: Option<String>,
+    /// When the first Esc at the select root was pressed: a second press within [`ROOT_ESC_CONFIRM`]
+    /// quits, anything else cancels. Guards against losing a session to a stray Esc.
+    esc_quit_at: Option<Instant>,
     // --- replay analysis mode (F4) ---
     /// Active when a replay is playing and REPLAY ANALYSIS is on: shows the analysis overlay and
     /// enables playback controls.
@@ -837,6 +960,7 @@ impl App {
             loading_drawn: false,
             ks_rx: None,
             ks_progress: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            ks_cancel: Arc::new(AtomicBool::new(false)),
             ks_total: 0,
             keyconfig,
             keyconfig_path,
@@ -858,6 +982,7 @@ impl App {
             player: None,
             skin: Skin::default_for(MODE, CW as f32, CH as f32),
             skin_cfg: SkinConfig::default(),
+            result_palette: ResultPalette::from_skin(&SkinConfig::default()),
             bga_images: std::collections::HashMap::new(),
             bga_events: Vec::new(),
             bga_cursor: 0,
@@ -866,11 +991,14 @@ impl App {
             server_connected,
             clock: Instant::now(),
             anchor_us: 0,
+            audio_dead_at: std::cell::Cell::new(None),
             scores,
             scores_path,
             record_modal: None,
             focused_detail: None,
             focused_detail_si: None,
+            focus_settle_si: None,
+            focus_settle_at: Instant::now(),
             cover_rgba: None,
             cached_select: None,
             cached_select_key: None,
@@ -878,7 +1006,7 @@ impl App {
             preview_audio: None,
             preview_si: None,
             preview_target: None,
-            preview_target_frame: 0,
+            preview_target_at: Instant::now(),
             preview_loop_us: 0,
             preview_next_us: 0,
             preview_sched: Vec::new(),
@@ -895,6 +1023,7 @@ impl App {
             frame_count: 0,
             ram_mb: 0.0,
             build_sha256: compute_build_hash(),
+            esc_quit_at: None,
             analysis: false,
             analysis_manual: false,
             analysis_paused: false,
@@ -996,8 +1125,11 @@ impl ApplicationHandler for App {
                     }
                     Stage::Select => {
                         if pressed {
+                            if !matches!(code, KeyCode::Escape | KeyCode::ArrowLeft) {
+                                self.esc_quit_at = None;
+                            }
                             match code {
-                                KeyCode::Escape | KeyCode::ArrowLeft => self.select_back(event_loop),
+                                KeyCode::Escape | KeyCode::ArrowLeft => self.select_escape(event_loop),
                                 KeyCode::Slash => self.start_search(),
                                 KeyCode::F3 => self.cycle_sort(),
                                 KeyCode::Tab => self.stage = Stage::Settings,
@@ -1092,7 +1224,9 @@ impl ApplicationHandler for App {
                         if pressed && code == KeyCode::Escape {
                             self.pending = None;
                             self.scan_rx = None;
+                            self.ks_cancel.store(true, Ordering::Relaxed);
                             self.ks_rx = None; // abandon any in-flight keysound decode
+                            self.stop_preview();
                             // Cancel back to Select rather than exit: during the initial background scan
                             // `songs` is still empty, and routing through `to_select_or_exit` would quit
                             // on the empty library — surprising mid-load. Drop any half-loaded play state.
@@ -1128,14 +1262,14 @@ impl ApplicationHandler for App {
                         if !self.autoplay && self.replay.is_none() {
                             if let Some(lane) = self.lane_for(code) {
                                 let raw = self.song_us();
-                                let judge_t = raw + self.offset_us();
-                                let anchor = self.anchor_us;
+                                let judge_t = judge_time_us(raw, self.config.offset_ms);
+                                let sound_t = keysound_time_us(raw, self.anchor_us);
                                 match event.state {
                                     ElementState::Pressed if !event.repeat => {
                                         self.recording.push(ReplayEvent { t: raw, lane, press: true });
                                         let mut hit: Option<rbms_judge::JudgeResult> = None;
                                         if let (Some(player), Some(audio)) = (self.player.as_mut(), self.audio.as_mut()) {
-                                            hit = player.press(lane, judge_t, |e: PlayEvent| audio.play(e.wav.max(0) as u32, 1.0, 0.0, 1.0, e.at_us + anchor));
+                                            hit = player.press(lane, judge_t, |e: PlayEvent| audio.play(e.wav.max(0) as u32, 1.0, 0.0, 1.0, sound_t));
                                         }
                                         // auto-calibration: accumulate the timing error of accurate hits
                                         // (PG/GR/GD, ±150ms) — offset is recentred for the next run at
@@ -1276,9 +1410,11 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::{
-        SortMode, THEME_TEMPLATE, bundled_skin, calibrated_offset, clear_type_from_id, clear_type_id, client_platform, compute_build_hash, config_dir_from, default_total, fmt_datetime,
+        ROOT_ESC_CONFIRM, SortMode, THEME_TEMPLATE, bundled_skin, calibrated_offset, clear_type_from_id, clear_type_id, client_platform, compute_build_hash, config_dir_from, default_total,
+        esc_confirms_quit, fmt_datetime, green_number_for, ir_submission_block_reason, judge_time_us, keysound_time_us, resumed_clock_us, updates_score, write_atomic,
     };
     use rbms_judge::ClearType;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn config_dir_prefers_home_then_userprofile() {
@@ -1452,5 +1588,153 @@ mod tests {
         let _normal = bundled_skin("NORMAL");
         let _default = bundled_skin("anything-else");
         let _case = bundled_skin("wide"); // case-insensitive match for WIDE
+    }
+
+    #[test]
+    fn judge_time_shifts_by_the_offset_in_milliseconds() {
+        assert_eq!(judge_time_us(1_000_000, 0), 1_000_000);
+        assert_eq!(judge_time_us(1_000_000, 30), 1_030_000, "+30ms offset judges 30ms later");
+        assert_eq!(judge_time_us(1_000_000, -45), 955_000, "-45ms offset judges 45ms earlier");
+    }
+
+    #[test]
+    fn keysound_schedule_uses_raw_input_time_not_the_judge_offset() {
+        assert_eq!(keysound_time_us(1_000_000, 7_500_000), 8_500_000);
+        assert_eq!(keysound_time_us(1_000_000, 0), 1_000_000, "no anchor => the raw instant");
+        assert_eq!(keysound_time_us(0, -250_000), -250_000, "a negative anchor shifts it back");
+    }
+
+    /// Reproduce the press path of `main.rs`'s key handler: judge at `judge_time_us(raw, offset)`,
+    /// schedule the keysound at `keysound_time_us(raw, anchor)`. Returns the times the keysound
+    /// callback was scheduled at.
+    fn press_schedule_times(offset_ms: i32, raw_us: i64, anchor_us: i64) -> Vec<i64> {
+        let model = rbms_chart::to_model(&rbms_parser::parse(b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:01\r\n"), rbms_model::Mode::BEAT_7K);
+        let mut player = rbms_play::Player::new(model, false);
+        let judge_t = judge_time_us(raw_us, offset_ms);
+        let sound_t = keysound_time_us(raw_us, anchor_us);
+        let mut scheduled = Vec::new();
+        player.press(0, judge_t, |_e: rbms_play::PlayEvent| scheduled.push(sound_t));
+        scheduled
+    }
+
+    #[test]
+    fn press_path_schedules_the_keysound_at_raw_plus_anchor_for_every_offset() {
+        let (raw, anchor) = (1_000_000_i64, 7_500_000_i64);
+        for offset_ms in [-200, -30, 0, 30, 200] {
+            let scheduled = press_schedule_times(offset_ms, raw, anchor);
+            assert_eq!(scheduled, vec![8_500_000], "offset {offset_ms}ms must not move the sound");
+        }
+    }
+
+    #[test]
+    fn press_path_moves_the_judgment_with_the_offset_while_the_sound_stays() {
+        let (raw, anchor) = (1_000_000_i64, 7_500_000_i64);
+        assert_eq!(judge_time_us(raw, 30), 1_030_000);
+        assert_eq!(press_schedule_times(30, raw, anchor), vec![8_500_000]);
+        assert_eq!(press_schedule_times(0, raw, anchor), vec![8_500_000]);
+    }
+
+    #[test]
+    fn resumed_clock_continues_from_the_last_audio_position() {
+        assert_eq!(resumed_clock_us(12_000_000, 2_500_000), 14_500_000);
+        assert_eq!(resumed_clock_us(12_000_000, 0), 12_000_000, "no wall time yet => no movement");
+    }
+
+    #[test]
+    fn green_number_constant_depends_only_on_hispeed_and_cover() {
+        assert_eq!(green_number_for(true, 120.0, 2.0, 1.0, 0.0), 1000.0);
+        assert_eq!(green_number_for(true, 300.0, 2.0, 0.5, 0.0), 1000.0, "BPM/SCROLL do not apply");
+        assert!((green_number_for(true, 120.0, 2.0, 1.0, 0.25) - 750.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn green_number_floating_tracks_bpm_scroll_and_cover() {
+        assert_eq!(green_number_for(false, 120.0, 1.0, 1.0, 0.0), 2000.0);
+        assert_eq!(green_number_for(false, 240.0, 1.0, 1.0, 0.0), 1000.0);
+        assert!((green_number_for(false, 120.0, 1.0, 2.0, 0.0) - 1000.0).abs() < 1e-9, "SCROLL 2.0 halves the travel time");
+        assert!((green_number_for(false, 120.0, 2.0, 1.0, 0.0) - 1000.0).abs() < 1e-9, "hi-speed 2.0 halves it too");
+        assert!((green_number_for(false, 120.0, 1.0, 1.0, 0.4) - 1200.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn ir_submission_allowed_only_for_an_unassisted_interactive_play() {
+        assert_eq!(ir_submission_block_reason(false, false, 100, false), None);
+        assert_eq!(ir_submission_block_reason(false, false, 50, false), None, "a NARROWED judge window is not an assist");
+    }
+
+    #[test]
+    fn ir_submission_blocked_for_autoplay_replay_and_assists() {
+        assert_eq!(ir_submission_block_reason(true, false, 100, false), Some("autoplay"));
+        assert_eq!(ir_submission_block_reason(false, true, 100, false), Some("replay playback"));
+        assert_eq!(ir_submission_block_reason(false, false, 105, false), Some("judge window widened"));
+        assert_eq!(ir_submission_block_reason(false, false, 100, true), Some("scratch assist"));
+    }
+
+    #[test]
+    fn updates_score_is_the_exact_complement_of_the_ir_block_reason() {
+        for &autoplay in &[false, true] {
+            for &replay in &[false, true] {
+                for &judge_rate in &[50, 100, 105, 200] {
+                    for &scratch_auto in &[false, true] {
+                        let blocked = ir_submission_block_reason(autoplay, replay, judge_rate, scratch_auto).is_some();
+                        assert_eq!(
+                            updates_score(autoplay, replay, judge_rate, scratch_auto),
+                            !blocked,
+                            "autoplay={autoplay} replay={replay} judge_rate={judge_rate} scratch_auto={scratch_auto}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn updates_score_only_for_an_unassisted_interactive_play() {
+        assert!(updates_score(false, false, 100, false));
+        assert!(updates_score(false, false, 50, false), "a narrowed judge window still scores");
+        assert!(!updates_score(false, false, 101, false), "a widened judge window does not");
+        assert!(!updates_score(false, false, 100, true), "auto scratch does not");
+        assert!(!updates_score(true, false, 100, false));
+        assert!(!updates_score(false, true, 100, false));
+    }
+
+    #[test]
+    fn first_escape_arms_the_quit_confirmation_instead_of_quitting() {
+        assert!(!esc_confirms_quit(None, Instant::now()), "a lone Esc never quits");
+    }
+
+    #[test]
+    fn second_escape_quits_only_within_the_confirm_window() {
+        let now = Instant::now();
+        assert!(esc_confirms_quit(Some(now), now), "an immediate second Esc quits");
+        assert!(esc_confirms_quit(Some(now), now + ROOT_ESC_CONFIRM), "exactly at the window edge still quits");
+        assert!(!esc_confirms_quit(Some(now), now + ROOT_ESC_CONFIRM + Duration::from_millis(1)), "a late second Esc does not quit");
+    }
+
+    #[test]
+    fn write_atomic_writes_the_contents_and_leaves_no_temp_file() {
+        let dir = std::env::temp_dir().join(format!("rbms_atomic_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("nested/settings.ron");
+        write_atomic(&path, "(hispeed: 1.0)").expect("atomic write creates the parent dir and the file");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "(hispeed: 1.0)");
+        assert!(!path.with_file_name("settings.ron.tmp").exists(), "the temp file is renamed away, not left behind");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_atomic_replaces_an_existing_file_wholesale() {
+        let dir = std::env::temp_dir().join(format!("rbms_atomic_replace_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("scores.ron");
+        write_atomic(&path, "aaaaaaaaaaaaaaaaaaaa").unwrap();
+        write_atomic(&path, "bb").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "bb");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_atomic_rejects_a_path_without_a_file_name() {
+        assert!(write_atomic(std::path::Path::new("/"), "x").is_err(), "a directory path is not a writable target");
     }
 }

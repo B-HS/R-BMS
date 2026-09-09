@@ -312,10 +312,9 @@ mod tests {
     }
 
     #[test]
-    fn rank_label_out_of_range_name_with_clamped_percent() {
-        // name has no entry (=> "?") but rank_to_judgerank clamps to the 0..4 table.
-        assert_eq!(rank_label(-1), "? 25%", "negative rank: ? name, clamped to 25%");
-        assert_eq!(rank_label(5), "? 125%", "rank 5: ? name, clamped to 125%");
+    fn rank_label_out_of_range_falls_back_to_normal_judgerank() {
+        assert_eq!(rank_label(-1), "? 75%", "negative rank: ? name, NORMAL 75% fallback");
+        assert_eq!(rank_label(5), "? 75%", "rank 5: ? name, NORMAL 75% fallback");
     }
 
     // --- fmt_duration ---

@@ -26,14 +26,9 @@ impl FolderList {
     }
 
     pub fn save(&self, path: &Path) {
-        if let Some(dir) = path.parent() {
-            if let Err(e) = std::fs::create_dir_all(dir) {
-                eprintln!("folders dir create failed ({}): {e}", dir.display());
-            }
-        }
         match ron::ser::to_string_pretty(self, ron::ser::PrettyConfig::default()) {
             Ok(s) => {
-                if let Err(e) = std::fs::write(path, &s) {
+                if let Err(e) = crate::write_atomic(path, &s) {
                     eprintln!("folders write failed ({}): {e}", path.display());
                 }
             }

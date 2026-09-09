@@ -72,11 +72,19 @@ impl App {
     pub(crate) fn record_row_view(&self, r: &ScoreRecord, older: Option<&ScoreRecord>) -> RecordRowView {
         let (label, color) = clear_label_color(clear_type_from_id(r.clear));
         let trend = older.filter(|_| self.config.score_graph).map(|o| ex_delta_label(r.ex_score as i64 - o.ex_score as i64));
-        RecordRowView { when: fmt_datetime(r.played_at), lamp: color, lamp_label: label, ex: r.ex_score, max_ex: r.max_ex, bp: r.counts[3] + r.counts[4] + r.counts[5], trend }
+        let when = format!("{}{}", fmt_datetime(r.played_at), rule_version_mark(r.rule_version));
+        RecordRowView { when, lamp: color, lamp_label: label, ex: r.ex_score, max_ex: r.max_ex, bp: r.counts[3] + r.counts[4] + r.counts[5], trend }
+    }
+
+    /// Whether a second Esc/Left right now would quit: the arming press must still be inside
+    /// [`crate::ROOT_ESC_CONFIRM`]. Read by both the guide line and the scene cache key, so the
+    /// "press again" prompt disappears exactly when the window closes.
+    pub(crate) fn esc_quit_armed(&self) -> bool {
+        esc_confirms_quit(self.esc_quit_at, Instant::now())
     }
 
     pub(crate) fn select_key(&self) -> SelectKey {
-        (self.select_gen, self.sel, self.record_modal, self.scores.records.len(), self.config.score_graph)
+        (self.select_gen, self.sel, self.record_modal, self.scores.records.len(), self.config.score_graph, self.esc_quit_armed())
     }
 
     /// Rebuild the cached select scene only when [`select_key`] changes. `frame()` runs a continuous
@@ -214,7 +222,7 @@ impl App {
                 clear_label,
                 clear_color,
                 when: fmt_datetime(r.played_at),
-                sub: format!("{}   {}   GAUGE {}", r.mode, r.random, r.gauge),
+                sub: format!("{}   {}   GAUGE {}{}", r.mode, r.random, r.gauge, rule_version_note(r.rule_version)),
                 counts: r.counts,
                 ex: r.ex_score,
                 max_ex: r.max_ex,
@@ -231,7 +239,9 @@ impl App {
             })
         });
 
-        let guide = if self.searching {
+        let guide = if self.esc_quit_armed() {
+            "PRESS ESC AGAIN TO QUIT"
+        } else if self.searching {
             "TYPE TO FILTER   BACKSPACE EDIT   ENTER OPEN   ESC CLEAR"
         } else {
             "\u{2191}\u{2193} MOVE   ENTER OPEN   ESC BACK"
@@ -265,7 +275,11 @@ impl App {
     /// moves to a different song — so scrolling the list parses at most one chart per moved row.
     pub(crate) fn refresh_focused_detail(&mut self) {
         let si = self.focused_song_index();
-        if si == self.focused_detail_si {
+        if si != self.focus_settle_si {
+            self.focus_settle_si = si;
+            self.focus_settle_at = Instant::now();
+        }
+        if si == self.focused_detail_si || self.focus_settle_at.elapsed() < FOCUS_DETAIL_DEBOUNCE {
             return;
         }
         self.focused_detail_si = si;
@@ -293,14 +307,14 @@ impl App {
         let cur = self.focused_song_index();
         if cur != self.preview_target {
             self.preview_target = cur;
-            self.preview_target_frame = self.frame_count;
+            self.preview_target_at = Instant::now();
             if self.preview_si.is_some() {
                 self.reset_preview_playback();
             }
         }
         if self.preview_si != cur {
             if let Some(si) = cur {
-                if self.frame_count.wrapping_sub(self.preview_target_frame) >= PREVIEW_DEBOUNCE_FRAMES {
+                if self.preview_target_at.elapsed() >= PREVIEW_DEBOUNCE {
                     self.start_preview(si);
                 }
             }
@@ -479,9 +493,15 @@ impl App {
             let Ok(bytes) = std::fs::read(&path) else { return };
             let Some(dir) = path.parent().map(Path::to_path_buf) else { return };
             let src = rbms_parser::parse_with(&bytes, Default::default());
+            if cancel.load(Ordering::Relaxed) {
+                return;
+            }
             let chart_name = path.to_string_lossy();
             let mode = rbms_chart::detect_mode(&src, &chart_name);
             let model = to_model(&src, mode);
+            if cancel.load(Ordering::Relaxed) {
+                return;
+            }
             let jobs = keysound_jobs(&model.wavmap, &dir);
             // The autoplay keysound timeline, from a one-shot autoplay pass (judging discarded).
             let mut sched: Vec<(i64, u32)> = Vec::new();
@@ -747,6 +767,10 @@ impl App {
     pub(crate) fn add_table_file(&mut self) {
         if let Some(path) = rfd::FileDialog::new().set_title("Select table json").add_filter("json", &["json"]).pick_file() {
             let location = path.to_string_lossy().to_string();
+            if self.table_sources.iter().any(|t| t.location == location) {
+                eprintln!("table already added: {location}");
+                return;
+            }
             let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("table").to_string();
             self.add_table_source(TableSource { name, location });
         }
@@ -774,7 +798,11 @@ impl App {
                 KeyCode::Enter | KeyCode::NumpadEnter => {
                     let url = self.text_input.take().unwrap_or_default().trim().to_string();
                     if !url.is_empty() {
-                        self.add_table_source(TableSource { name: String::new(), location: url });
+                        if self.table_sources.iter().any(|t| t.location == url) {
+                            eprintln!("table already added: {url}");
+                        } else {
+                            self.add_table_source(TableSource { name: String::new(), location: url });
+                        }
                     }
                 }
                 KeyCode::Escape => self.text_input = None,
@@ -817,6 +845,22 @@ impl App {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Esc in the select screen: one level up, or — at the root — arm the quit confirmation and only
+    /// exit on a second Esc within [`ROOT_ESC_CONFIRM`]. An empty library behaves the same, so a
+    /// first-run window can't be closed by a stray keypress.
+    pub(crate) fn select_escape(&mut self, event_loop: &ActiveEventLoop) {
+        if self.select_view != SelectView::Root {
+            self.esc_quit_at = None;
+            self.select_back(event_loop);
+            return;
+        }
+        if self.esc_quit_armed() {
+            event_loop.exit();
+        } else {
+            self.esc_quit_at = Some(Instant::now());
         }
     }
 
@@ -863,6 +907,9 @@ impl App {
     }
 
     pub(crate) fn to_select_or_exit(&mut self, event_loop: &ActiveEventLoop) {
+        if self.stage == Stage::Play {
+            self.save_settings();
+        }
         if self.songs.is_empty() {
             event_loop.exit();
         } else {

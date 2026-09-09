@@ -277,14 +277,9 @@ impl KeyConfig {
     }
 
     pub fn save(&self, path: &Path) {
-        if let Some(dir) = path.parent() {
-            if let Err(e) = std::fs::create_dir_all(dir) {
-                eprintln!("keyconfig dir create failed ({}): {e}", dir.display());
-            }
-        }
         match ron::ser::to_string_pretty(self, ron::ser::PrettyConfig::default()) {
-            Ok(s) => match std::fs::write(path, &s) {
-                Ok(_) => println!("keyconfig saved: {}", path.display()),
+            Ok(s) => match crate::write_atomic(path, &s) {
+                Ok(()) => println!("keyconfig saved: {}", path.display()),
                 Err(e) => eprintln!("keyconfig write failed ({}): {e}", path.display()),
             },
             Err(e) => eprintln!("keyconfig save failed: {e}"),
@@ -640,6 +635,22 @@ mod tests {
         // and the written file re-loads to an equivalent config
         let kc2 = KeyConfig::load(&path);
         assert_eq!(kc2.lane_keys(Mode::BEAT_7K), kc.lane_keys(Mode::BEAT_7K));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn save_writes_atomically_and_leaves_no_temp_file() {
+        let dir = std::env::temp_dir().join(format!("rbms_kc_atomic_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("nested/keyconfig.ron");
+        KeyConfig::default().save(&path);
+        assert!(path.exists(), "save creates the file and its parent dir");
+        let leftovers: Vec<String> = std::fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
+            .filter(|n| n.ends_with(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "no leftover temp file, got {leftovers:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -233,8 +233,9 @@ impl App {
             }
             self.replay_cursor += 1;
             let res = if ev.press {
+                let sound_t = keysound_time_us(ev.t, anchor);
                 if let (false, Some(audio)) = (mute, self.audio.as_mut()) {
-                    let play = |e: PlayEvent| audio.play(e.wav.max(0) as u32, 1.0, 0.0, 1.0, e.at_us + anchor);
+                    let play = |e: PlayEvent| audio.play(e.wav.max(0) as u32, 1.0, 0.0, 1.0, sound_t);
                     self.player.as_mut().and_then(|p| p.press(ev.lane, ev.t + off, play))
                 } else {
                     self.player.as_mut().and_then(|p| p.press(ev.lane, ev.t + off, |_| {}))
@@ -321,6 +322,7 @@ impl App {
         let mut cfg = self.skin_cfg.clone();
         cfg.scratch_left = self.config.scratch_left;
         cfg.lift = self.config.lift;
+        self.result_palette = ResultPalette::from_skin(&cfg);
         self.skin = Skin::build(&cfg, self.mode, CW as f32, CH as f32);
     }
 

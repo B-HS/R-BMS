@@ -4,7 +4,10 @@
 
 use rbms_chart::shuffle::NoteOption;
 use rbms_ir::RandomOption;
-use rbms_judge::{ClearType, GaugeKind};
+use rbms_judge::{ClearType, GaugeKind, JudgeProperty};
+use rbms_model::Mode;
+
+use crate::JUDGE_RATE_UNMODIFIED;
 
 pub(crate) fn gauge_from_name(s: &str) -> GaugeKind {
     match s.to_ascii_lowercase().as_str() {
@@ -69,6 +72,29 @@ pub(crate) fn ir_lntype(lnmode: i32) -> i32 {
     }
 }
 
+/// Assist tags reported with a submission, one per active assist. Mirrors beatoraja's assist level
+/// sources for the options this client exposes: an auto-played lane (`AutoplayModifier` raises
+/// `AssistLevel.ASSIST`, `BMSPlayer.java:233-234`) and a judge window widened past 100%
+/// (`BMSPlayer.java:207-213`). Empty when the run used no assist.
+pub(crate) fn assist_flags(scratch_auto: bool, judge_rate: i32) -> Vec<String> {
+    let mut out = Vec::new();
+    if scratch_auto {
+        out.push("AUTO_SCRATCH".to_string());
+    }
+    if judge_rate > JUDGE_RATE_UNMODIFIED {
+        out.push("CUSTOM_JUDGE".to_string());
+    }
+    out
+}
+
+/// How many judgments in `counts` (indexed PG, GR, GD, BD, PR, MS) actually broke the combo, per
+/// the mode's `JudgeProperty.combo` table. Not the same as `minbp`: on the BEAT-7K family an empty
+/// POOR (index 5) keeps the combo, while 5-key and PMS reset on it.
+pub(crate) fn combo_breaks(mode: &Mode, counts: [u32; 6]) -> u32 {
+    let combo = JudgeProperty::for_mode(mode).combo;
+    counts.iter().zip(combo).filter(|(_, keeps)| !keeps).map(|(n, _)| *n).sum()
+}
+
 /// Canonical gauge token for settings storage (matches `gauge_from_name`'s vocabulary, so it
 /// round-trips — unlike the display name `gauge_name` which has spaces/hyphens).
 pub(crate) fn gauge_token(g: GaugeKind) -> &'static str {
@@ -95,6 +121,19 @@ mod tests {
         ClearType::Normal, ClearType::Hard, ClearType::ExHard, ClearType::FullCombo,
         ClearType::Perfect, ClearType::Max,
     ];
+
+    #[test]
+    fn assist_flags_empty_for_an_unassisted_run() {
+        assert!(assist_flags(false, 100).is_empty());
+        assert!(assist_flags(false, 50).is_empty(), "a narrowed judge window is not an assist");
+    }
+
+    #[test]
+    fn assist_flags_report_auto_scratch_and_custom_judge() {
+        assert_eq!(assist_flags(true, 100), vec!["AUTO_SCRATCH".to_string()]);
+        assert_eq!(assist_flags(false, 105), vec!["CUSTOM_JUDGE".to_string()]);
+        assert_eq!(assist_flags(true, 200), vec!["AUTO_SCRATCH".to_string(), "CUSTOM_JUDGE".to_string()]);
+    }
 
     // --- gauge_from_name <-> gauge_token round-trip ---
 
@@ -254,6 +293,23 @@ mod tests {
             assert_eq!(parsed, n, "{:?} label round-trips through from_str", n);
             assert_eq!(ir_random(parsed), ir_random(n));
         }
+    }
+
+    #[test]
+    fn combo_breaks_excludes_the_empty_poor_on_seven_keys() {
+        assert_eq!(combo_breaks(&Mode::BEAT_7K, [9, 8, 7, 6, 5, 4]), 11);
+        assert_eq!(combo_breaks(&Mode::BEAT_14K, [0, 0, 0, 2, 3, 100]), 5, "empty poors never break a 7K-family combo");
+    }
+
+    #[test]
+    fn combo_breaks_counts_the_empty_poor_on_five_keys_and_pms() {
+        assert_eq!(combo_breaks(&Mode::BEAT_5K, [9, 8, 7, 6, 5, 4]), 15);
+        assert_eq!(combo_breaks(&Mode::POPN_9K, [9, 8, 7, 6, 5, 4]), 15);
+    }
+
+    #[test]
+    fn combo_breaks_is_zero_for_a_clean_run() {
+        assert_eq!(combo_breaks(&Mode::BEAT_7K, [500, 40, 3, 0, 0, 0]), 0);
     }
 
     #[test]

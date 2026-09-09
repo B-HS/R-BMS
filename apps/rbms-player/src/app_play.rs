@@ -48,6 +48,8 @@ impl App {
         if model.meta.total <= 0.0 {
             model.meta.total = default_total(rbms_chart::count_playable_notes(&model));
         }
+        self.ks_cancel = Arc::new(AtomicBool::new(false));
+        self.audio_dead_at.set(None);
         if self.config.total_override > 0.0 {
             model.meta.total = self.config.total_override;
         }
@@ -76,7 +78,7 @@ impl App {
                     self.ks_rx = None;
                     self.ks_total = 0;
                 } else {
-                    let (rx, progress, _) = spawn_keysound_decode(jobs, std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)));
+                    let (rx, progress, _) = spawn_keysound_decode(jobs, self.ks_cancel.clone());
                     self.ks_rx = Some(rx);
                     self.ks_progress = progress;
                     self.ks_total = total;
@@ -160,6 +162,7 @@ impl App {
     pub(crate) fn start_play(&mut self) {
         self.clock = Instant::now();
         self.anchor_us = self.audio.as_ref().map(|a| a.clock_us()).unwrap_or(0);
+        self.audio_dead_at.set(None);
         self.stage = Stage::Play;
     }
 
@@ -188,11 +191,25 @@ impl App {
         }
     }
 
+    /// Current song position. Normally the audio output clock (sample-accurate); if that stream has
+    /// died (device unplugged / driver error) it stops advancing, so fall back to the wall clock,
+    /// resuming from the last position the audio clock reported instead of freezing the chart.
     pub(crate) fn song_us(&self) -> i64 {
-        match &self.audio {
-            Some(a) => a.clock_us() - self.anchor_us,
-            None => self.clock.elapsed().as_micros() as i64,
+        let Some(audio) = self.audio.as_ref() else { return self.clock.elapsed().as_micros() as i64 };
+        if audio.is_alive() {
+            self.audio_dead_at.set(None);
+            return audio.clock_us() - self.anchor_us;
         }
+        let (last, at) = match self.audio_dead_at.get() {
+            Some(v) => v,
+            None => {
+                let v = (audio.clock_us() - self.anchor_us, Instant::now());
+                self.audio_dead_at.set(Some(v));
+                eprintln!("audio stream stopped — falling back to the wall clock");
+                v
+            }
+        };
+        resumed_clock_us(last, at.elapsed().as_micros() as i64)
     }
 
     pub(crate) fn enter_result(&mut self) {
@@ -233,6 +250,7 @@ impl App {
         });
 
         let model = player.model();
+        let assist = assist_flags(self.config.scratch_auto, self.config.judge_rate);
         let c = j.counts;
         let played_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
         let sub = ScoreSubmission {
@@ -252,7 +270,7 @@ impl App {
                 miss: c[5],
                 fast: j.fast,
                 slow: j.slow,
-                combobreak: c[3] + c[4] + c[5],
+                combobreak: combo_breaks(&self.mode, c),
                 epg: j.early[0],
                 lpg: j.late[0],
                 egr: j.early[1],
@@ -279,7 +297,7 @@ impl App {
                 scratch_auto: self.config.scratch_auto,
                 lntype: self.chart_lntype,
                 input_device: "keyboard".into(),
-                assist: vec![],
+                assist,
                 option: 0,
                 judge_rate: self.config.judge_rate,
                 offset_ms: self.config.offset_ms,
@@ -291,11 +309,7 @@ impl App {
                 autoplay: self.autoplay,
                 auto_offset: self.config.auto_offset,
                 scratch_left: self.config.scratch_left,
-                green_number: if self.config.constant_speed {
-                    2000.0 / self.config.hispeed * (1.0 - self.config.cover as f64)
-                } else {
-                    rbms_chart::scroll::green_number(model.init_bpm, self.config.hispeed, 1.0, self.config.cover as f64)
-                },
+                green_number: green_number_for(self.config.constant_speed, model.init_bpm, self.config.hispeed, 1.0, self.config.cover),
             },
             played_at,
             client: concat!("rbms/", env!("CARGO_PKG_VERSION")).into(),
@@ -308,11 +322,17 @@ impl App {
             client_platform: Some(client_platform()),
             extra: Default::default(),
         };
-        let server = self.server.clone();
-        std::thread::spawn(move || match server.submit_score(&sub) {
-            Ok(r) => println!("score submitted: accepted={} rank={:?}", r.accepted, r.rank),
-            Err(e) => eprintln!("score submit: {e}"),
-        });
+        let scores_count = updates_score(self.autoplay, self.replay.is_some(), self.config.judge_rate, self.config.scratch_auto);
+        match ir_submission_block_reason(self.autoplay, self.replay.is_some(), self.config.judge_rate, self.config.scratch_auto) {
+            Some(reason) => println!("score not submitted: {reason}"),
+            None => {
+                let server = self.server.clone();
+                std::thread::spawn(move || match server.submit_score(&sub) {
+                    Ok(r) => println!("score submitted: accepted={} rank={:?}", r.accepted, r.rank),
+                    Err(e) => eprintln!("score submit: {e}"),
+                });
+            }
+        }
 
         let played_ms = played_at;
         let mut replay_file: Option<String> = None;
@@ -354,6 +374,8 @@ impl App {
                 random: self.config.random.label().to_string(),
                 played_at: played_ms,
                 replay_file,
+                rule_version: SCORE_RULE_VERSION,
+                assisted: !scores_count,
             };
             self.scores.push(record);
             self.scores.save(&self.scores_path);
@@ -364,9 +386,9 @@ impl App {
             let new_offset = calibrated_offset(self.config.offset_ms, mean_us);
             println!("auto-cal: avg {:+} ms over {} hits → judge offset {} ms (was {})", mean_us / 1000, self.cal_count, new_offset, self.config.offset_ms);
             self.config.offset_ms = new_offset;
-            self.save_settings();
         }
 
+        self.save_settings();
         self.stage = Stage::Result;
     }
 
@@ -548,12 +570,7 @@ impl App {
                         let tls = &player.model().timelines;
                         let seg = tls.binary_search_by(|t| t.time_us.cmp(&song)).unwrap_or_else(|i| i.saturating_sub(1));
                         let (bpm, scroll) = tls.get(seg).map(|t| (t.bpm, t.scroll)).unwrap_or((player.model().init_bpm, 1.0));
-                        let cover = self.config.cover as f64;
-                        let green = if self.config.constant_speed {
-                            2000.0 / self.config.hispeed * (1.0 - cover)
-                        } else {
-                            rbms_chart::scroll::green_number(bpm, self.config.hispeed, scroll, cover)
-                        };
+                        let green = green_number_for(self.config.constant_speed, bpm, self.config.hispeed, scroll, self.config.cover);
                         let best_ex = self.scores.best_ex_for_md5(&player.model().md5);
                         let hud = HudView {
                             combo: j.combo,
@@ -736,7 +753,7 @@ impl App {
                 Stage::Result => {
                     gpu.clear_bga();
                     if let Some(view) = self.result.as_ref() {
-                        render_result(gpu, view);
+                        render_result_with_palette(gpu, view, &self.result_palette);
                     }
                 }
             }
@@ -764,11 +781,16 @@ impl App {
                     lines.push(format!("HISPEED {:.2}  OFFSET {:+}MS", self.config.hispeed, self.config.offset_ms));
                     let clk = self.audio.as_ref().map(|a| a.clock_us()).unwrap_or(0);
                     lines.push(format!("AUDIO {} US  ANCHOR {}", clk, anchor));
+                    if let Some(a) = self.audio.as_ref() {
+                        lines.push(format!("STREAM {}  DROP {}  REALLOC {}", if a.is_alive() { "ALIVE" } else { "DEAD" }, a.dropped_commands(), a.scratch_reallocations()));
+                    }
                 } else {
                     lines.push(format!("SEL {} / {}", self.sel + 1, self.select_items.len()));
                     lines.push(format!("SCORES {}  SONGS {}", self.scores.records.len(), self.songs.len()));
                     lines.push(format!("CURSOR {:.0} {:.0}", self.cursor.0, self.cursor.1));
                 }
+                let (layouts, runs) = rbms_render::cache_stats();
+                lines.push(format!("FONT {}/{}  RUNS {}/{}", layouts, rbms_render::LAYOUT_CACHE_LIMIT, runs, rbms_render::RUN_CACHE_LIMIT));
                 let lh = 16.0;
                 let ph = lines.len() as f32 * lh + 12.0;
                 gpu.fill_rect(Rect::new(6.0, 6.0, 320.0, ph), Color { r: 0, g: 0, b: 0, a: 180 });

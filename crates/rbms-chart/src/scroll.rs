@@ -14,13 +14,44 @@ impl LaneGeometry {
     }
 }
 
+/// Reference travel time (ms) across the full lane at hi-speed 1.0 in CONSTANT (green-number-fixed)
+/// scroll: the 120 BPM point ([`green_number`] at `bpm = 120`, `scroll = 1`) that
+/// [`constant_offsets`] is calibrated to (`pps = hispeed * lane_height / 2_000_000`).
+///
+/// This calibration is rbms's own, with no beatoraja counterpart: beatoraja's
+/// `playconfig.isEnableConstant()` only pins the `#SPEED` interpolation to 1.0
+/// (`LaneRenderer.java:319-320`), while its `region` at `:321` still divides by the live
+/// `nbpm`/`nscroll`. rbms's CONSTANT drops the BPM dependency entirely.
+pub const CONSTANT_GREEN_BASE_MS: f64 = 2_000.0;
+
 /// IIDX-style green number: the note travel time (ms) across the full lane. Stays
 /// constant under BPM changes only if hi-speed is fixed per `bpm` (caller's choice).
+///
+/// This is beatoraja's `currentduration` (`LaneRenderer.java:321,330`:
+/// `region = (240000 / nbpm / hispeed / speed) / nscroll`, then `region * (1 - lanecover)`), not the
+/// number its skins label GREEN — the skin property multiplies the same expression by a further
+/// `0.6` (`IntegerPropertyFactory.java:555-556`:
+/// `(240000 / bpm / hispeed) * (cover ? 1 - lanecover : 1) * (green ? 0.6 : 1)`).
+///
+/// LIFT does not enter this: raising the judgment line shrinks the lane but the scroll speed is
+/// normalised to the (lifted) lane height, so the travel time is unchanged — beatoraja computes the
+/// same way (`LaneRenderer.java:321-326` derives `region` from bpm/hispeed/scroll only and scales
+/// `rxhs` by the lifted `hu - hl`; `currentduration` at `:330` multiplies by `1 - lanecover` alone).
 pub fn green_number(bpm: f64, hispeed: f64, scroll: f64, lanecover: f64) -> f64 {
     if bpm <= 0.0 || hispeed <= 0.0 || scroll == 0.0 {
         return 0.0;
     }
     (240_000.0 / bpm / hispeed) / scroll * (1.0 - lanecover)
+}
+
+/// Green number for CONSTANT scroll, where the travel time is fixed by hi-speed alone (BPM and
+/// SCROLL do not apply). Same `1 - lanecover` visible-window scaling as [`green_number`], and the
+/// same rbms-only calibration caveat as [`CONSTANT_GREEN_BASE_MS`].
+pub fn constant_green_number(hispeed: f64, lanecover: f64) -> f64 {
+    if hispeed <= 0.0 {
+        return 0.0;
+    }
+    CONSTANT_GREEN_BASE_MS / hispeed * (1.0 - lanecover)
 }
 
 /// Pixel offset above the judgment line for a note arriving at `note_time_us`, assuming
@@ -350,5 +381,49 @@ mod tests {
         let dt_us = (gn * 1000.0) as i64;
         let off = closed_form_offset(dt_us, 0, 150.0, 1.0, 1.0, h);
         assert!((off - h).abs() < 1.0, "green traversal off={off} expected≈{h}");
+    }
+
+    #[test]
+    fn green_number_is_the_currentduration_not_the_skin_green_property() {
+        assert_eq!(green_number(120.0, 1.0, 1.0, 0.0), 2000.0);
+        assert!((green_number(120.0, 1.0, 1.0, 0.0) * 0.6 - 1200.0).abs() < 1e-9, "the skin GREEN property would read 1200");
+    }
+
+    #[test]
+    fn constant_green_number_is_two_thousand_over_hispeed() {
+        assert_eq!(constant_green_number(1.0, 0.0), 2000.0);
+        assert_eq!(constant_green_number(2.0, 0.0), 1000.0);
+        assert_eq!(constant_green_number(4.0, 0.0), 500.0);
+    }
+
+    #[test]
+    fn constant_green_number_scales_by_visible_window() {
+        assert!((constant_green_number(2.0, 0.25) - 750.0).abs() < 1e-9);
+        assert!((constant_green_number(1.0, 0.9) - 200.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn constant_green_number_zero_for_nonpositive_hispeed() {
+        assert_eq!(constant_green_number(0.0, 0.0), 0.0);
+        assert_eq!(constant_green_number(-2.0, 0.0), 0.0);
+    }
+
+    #[test]
+    fn constant_green_number_equals_floating_green_at_calibration_bpm() {
+        for hs in [0.5, 1.0, 2.5, 8.0] {
+            let floating = green_number(120.0, hs, 1.0, 0.2);
+            let constant = constant_green_number(hs, 0.2);
+            assert!((floating - constant).abs() < 1e-9, "hs={hs}: {floating} vs {constant}");
+        }
+    }
+
+    #[test]
+    fn constant_offsets_traverse_lane_in_the_constant_green_number() {
+        let tls = timelines(b"#BPM 200\r\n#WAV01 a.wav\r\n#00111:01\r\n#00211:01\r\n#00311:01\r\n");
+        let (h, hs) = (600.0f32, 2.0f64);
+        let gn_us = (constant_green_number(hs, 0.0) * 1000.0) as i64;
+        let nt = tls.last().unwrap().time_us;
+        let y = constant_offsets(&tls, nt - gn_us, hs, h).iter().find(|(i, _)| tls[*i].time_us == nt).map(|(_, y)| *y).unwrap();
+        assert!((y - h).abs() < 1.0, "a note {gn_us}us out sits at the lane top (y={y}, h={h})");
     }
 }

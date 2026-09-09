@@ -2,6 +2,20 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+/// Version of the judging rules a record was produced under. Bumped whenever a rule change makes
+/// older records not directly comparable; records written before the field existed default to 0.
+pub const SCORE_RULE_VERSION: u32 = 1;
+
+/// Short marker appended to a record's timestamp when it was judged under an older rule version.
+pub fn rule_version_mark(rule_version: u32) -> &'static str {
+    if rule_version < SCORE_RULE_VERSION { " *" } else { "" }
+}
+
+/// Spelled-out counterpart of [`rule_version_mark`] for the record-detail modal.
+pub fn rule_version_note(rule_version: u32) -> &'static str {
+    if rule_version < SCORE_RULE_VERSION { "   OLD RULE" } else { "" }
+}
+
 /// One persisted play result, kept locally so play history and replays survive without a score
 /// server. `clear` is the beatoraja `ClearType` id (0..10) so lamps round-trip; `replay_file` is
 /// the basename (under `replays/`) of the saved replay, when one was recorded.
@@ -24,6 +38,15 @@ pub struct ScoreRecord {
     pub played_at: i64,
     #[serde(default)]
     pub replay_file: Option<String>,
+    /// Judging-rule version this record was produced under (see [`SCORE_RULE_VERSION`]).
+    #[serde(default)]
+    pub rule_version: u32,
+    /// The run used an assist (widened judge window or an auto-played lane), so it is kept as
+    /// history but excluded from the stored bests — beatoraja clears the same `score` flag and
+    /// gates exscore/minbp/combo on it (`ScoreData.java:548,566,572,578`). Records written before
+    /// the field existed default to `false`.
+    #[serde(default)]
+    pub assisted: bool,
 }
 
 /// All local play records. Append-only in practice; queried by chart md5 for the select screen.
@@ -47,15 +70,9 @@ impl ScoreBook {
     }
 
     pub fn save(&self, path: &Path) {
-        if let Some(dir) = path.parent() {
-            if let Err(e) = std::fs::create_dir_all(dir) {
-                eprintln!("scores dir create failed ({}): {e}", dir.display());
-                return;
-            }
-        }
         match ron::ser::to_string_pretty(self, ron::ser::PrettyConfig::default()) {
             Ok(s) => {
-                if let Err(e) = std::fs::write(path, &s) {
+                if let Err(e) = crate::write_atomic(path, &s) {
                     eprintln!("scores write failed ({}): {e}", path.display());
                 }
             }
@@ -74,16 +91,24 @@ impl ScoreBook {
         v
     }
 
+    /// Records for a chart that may set its bests: assisted runs are history only.
+    fn scoring_records(&self, md5: &str) -> impl Iterator<Item = &ScoreRecord> {
+        self.records.iter().filter(move |r| !r.assisted && r.md5.eq_ignore_ascii_case(md5))
+    }
+
     /// Best EX on a chart, folded without the allocate-and-sort of `for_md5` (called every frame for
-    /// the live score graph). `None` if the chart has no records.
+    /// the live score graph). `None` if the chart has no unassisted records.
     pub fn best_ex_for_md5(&self, md5: &str) -> Option<u32> {
-        self.records.iter().filter(|r| r.md5.eq_ignore_ascii_case(md5)).map(|r| r.ex_score).max()
+        self.scoring_records(md5).map(|r| r.ex_score).max()
     }
 
     /// Best clear-lamp id on a chart (highest `ClearType` id), folded without allocation — used for
-    /// the per-row clear-lamp LED in the select list. `None` if the chart has no records.
+    /// the per-row clear-lamp LED in the select list. `None` if the chart has no unassisted records.
+    /// beatoraja updates the lamp for assisted runs too, but only after demoting it to
+    /// `AssistEasy`/`LightAssistEasy` (`BMSPlayer.java:866`); rbms cannot demote the lamp yet, so an
+    /// assisted run must not raise the LED at all.
     pub fn best_clear_for_md5(&self, md5: &str) -> Option<u8> {
-        self.records.iter().filter(|r| r.md5.eq_ignore_ascii_case(md5)).map(|r| r.clear).max()
+        self.scoring_records(md5).map(|r| r.clear).max()
     }
 }
 
@@ -108,6 +133,8 @@ mod tests {
             random: "OFF".into(),
             played_at,
             replay_file: None,
+            rule_version: SCORE_RULE_VERSION,
+            assisted: false,
         }
     }
 
@@ -222,6 +249,29 @@ mod tests {
     }
 
     #[test]
+    fn assisted_runs_are_kept_as_history_but_never_become_the_best() {
+        let mut book = ScoreBook::default();
+        book.push(rec("AA", 1, 40));
+        let mut assisted = rec("AA", 2, 900);
+        assisted.clear = 9;
+        assisted.assisted = true;
+        book.push(assisted);
+        assert_eq!(book.for_md5("AA").len(), 2, "the assisted play is still in the history list");
+        assert_eq!(book.best_ex_for_md5("AA"), Some(40));
+        assert_eq!(book.best_clear_for_md5("AA"), Some(5));
+    }
+
+    #[test]
+    fn a_chart_with_only_assisted_records_has_no_best() {
+        let mut book = ScoreBook::default();
+        let mut assisted = rec("AA", 1, 500);
+        assisted.assisted = true;
+        book.push(assisted);
+        assert_eq!(book.best_ex_for_md5("AA"), None);
+        assert_eq!(book.best_clear_for_md5("AA"), None);
+    }
+
+    #[test]
     fn best_clear_none_when_no_records() {
         assert_eq!(ScoreBook::default().best_clear_for_md5("AA"), None);
     }
@@ -267,6 +317,52 @@ mod tests {
         assert_eq!(book.records.len(), 1);
         assert_eq!(book.records[0].empty_poor, 0, "empty_poor defaults to 0");
         assert_eq!(book.records[0].replay_file, None, "replay_file defaults to None");
+    }
+
+    #[test]
+    fn rule_version_defaults_to_zero_for_a_pre_versioning_record() {
+        let s = r#"(records: [(
+            md5: "AA", title: "t", mode: "BEAT-7K", clear: 5, ex_score: 10, max_ex: 100,
+            counts: (0, 0, 0, 0, 0, 0), max_combo: 0, total_notes: 50,
+            gauge: "NORMAL", gauge_value: 80.0, random: "OFF", played_at: 1
+        )])"#;
+        let book: ScoreBook = ron::from_str(s).expect("back-compat record parses");
+        assert_eq!(book.records[0].rule_version, 0);
+        assert!(!book.records[0].assisted, "assisted defaults to false for a pre-versioning record");
+        assert_eq!(rule_version_mark(book.records[0].rule_version), " *");
+        assert_eq!(rule_version_note(book.records[0].rule_version), "   OLD RULE");
+    }
+
+    #[test]
+    fn current_rule_version_records_are_not_marked() {
+        assert_eq!(SCORE_RULE_VERSION, 1, "the current judging-rule generation");
+        assert_eq!(rule_version_mark(SCORE_RULE_VERSION), "");
+        assert_eq!(rule_version_note(SCORE_RULE_VERSION), "");
+        assert_eq!(rule_version_mark(SCORE_RULE_VERSION + 1), "", "a newer record is not marked as old");
+    }
+
+    #[test]
+    fn rule_version_round_trips_through_ron() {
+        let mut book = ScoreBook::default();
+        let mut r = rec("AA", 1, 5);
+        r.rule_version = 7;
+        book.push(r);
+        let s = ron::ser::to_string_pretty(&book, ron::ser::PrettyConfig::default()).unwrap();
+        let back: ScoreBook = ron::from_str(&s).unwrap();
+        assert_eq!(back.records[0].rule_version, 7);
+    }
+
+    #[test]
+    fn save_leaves_no_temp_file_behind() {
+        let dir = std::env::temp_dir().join(format!("rbms_scores_tmp_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("scores.ron");
+        let mut book = ScoreBook::default();
+        book.push(rec("AA", 1, 5));
+        book.save(&path);
+        assert!(path.exists());
+        assert!(!path.with_file_name("scores.ron.tmp").exists(), "no leftover temp file");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -35,14 +35,9 @@ impl Replay {
     }
 
     pub fn save(&self, path: &Path) {
-        if let Some(dir) = path.parent() {
-            if let Err(e) = std::fs::create_dir_all(dir) {
-                eprintln!("replay dir create failed ({}): {e}", dir.display());
-            }
-        }
         match ron::ser::to_string_pretty(self, ron::ser::PrettyConfig::default()) {
-            Ok(s) => match std::fs::write(path, &s) {
-                Ok(_) => println!("replay saved: {}", path.display()),
+            Ok(s) => match crate::write_atomic(path, &s) {
+                Ok(()) => println!("replay saved: {}", path.display()),
                 Err(e) => eprintln!("replay write failed ({}): {e}", path.display()),
             },
             Err(e) => eprintln!("replay save failed: {e}"),
