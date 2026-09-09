@@ -21,7 +21,7 @@ R-BMS reimplements the core PLAY loop of a GPL-3.0 reference implementation in R
 - **Replays** — saved per play, replayable with the same seed and options, analysis mode with seek, speed and per-note timing
 - **Skins and themes** — play field and HUD from a RON skin, UI chrome colours from a RON theme, any TTF/OTF font with full Unicode fallback
 - **Input** — every lane and control key rebindable in-app, conflict detection
-- **IR** — optional score submission to a custom server (`--server`, `--player`)
+- **IR** — sign in, submit scores, browse rankings, sync settings, manage rivals and upload or replay ghosts, all from the in-game SETTINGS NETWORK tab and the song-select ranking panel
 - **Debug** — on-screen overlay with FPS, memory, audio clock and judge state
 
 ## Build
@@ -55,7 +55,9 @@ Default lanes follow the reference keyboard layout: 7K `Z S X D C F V` + `LShift
 
 ## Web (IR server + site)
 
-`web/` is a Next.js app that serves both the IR API the player talks to and the public site (leaderboards, charts, players, replays, settings). It runs on Vercel at `https://bms.hyuns.uk`; point the player at it with `--server https://bms.hyuns.uk/api` or the NETWORK tab.
+`web/` is a Next.js app that serves both the IR API the player talks to and the public site (leaderboards, charts, players, replays, settings). It runs on Vercel at `https://bms.hyuns.uk`.
+
+Connect the player from inside the game, not from the command line: press Tab on the song select to open SETTINGS, go to the NETWORK tab, set `SERVER URL` to `https://bms.hyuns.uk/api` and `PLAYER ID` to your account id, then fill EMAIL / PASSWORD and run REGISTER or LOGIN. The bearer token is stored locally, the password never is. The same tab holds settings sync, rival management and the replay auto-upload toggle; press `I` on the song select for the IR ranking panel. The full walkthrough is at [`/guide`](https://bms.hyuns.uk/guide). `--server` and `--player` remain overrides for one run only.
 
 ```sh
 cd web
@@ -66,7 +68,7 @@ bun run dev                       # http://localhost:3000
 bun run verify                    # typecheck · lint · test
 ```
 
-Stack: Next.js 16 (App Router, Route Handlers, Cache Components), React 19, Tailwind v4 + shadcn, TanStack Query v5, Drizzle + MySQL, better-auth. Native endpoints under `/api/*` answer raw JSON exactly as `rbms-ir` expects; site-only endpoints live under `/api/fe/*`. Design tokens, component list and the route/cache matrix are in [docs/web/](docs/web/architecture.md).
+Stack: Next.js 16 (App Router, Route Handlers, Cache Components), React 19, Tailwind v4 + shadcn, TanStack Query v5, Drizzle + MySQL, better-auth. Native endpoints under `/api/*` answer raw JSON exactly as `rbms-ir` expects; site-only endpoints live under `/api/fe/*`. External tools can call the API with a token from the site settings page and an `Authorization: Bearer` header. Design tokens, component list and the route/cache matrix are in [docs/web/](docs/web/architecture.md).
 
 ## Development
 

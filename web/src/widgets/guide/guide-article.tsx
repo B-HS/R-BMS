@@ -1,39 +1,31 @@
 import type { FC } from 'react'
 import Link from 'next/link'
-import { IR_SERVER_BASE_URL } from '@shared/constants/server-info'
+import { GUIDE_ADVANCED_SECTIONS, GUIDE_INTRO, GUIDE_SECTIONS, type GuideSection } from '@widgets/guide/guide-sections'
 
-const SECTIONS = [
-    {
-        title: '1. 서버 주소 지정',
-        body: 'rbms-player 를 실행할 때 --server 플래그로 이 IR 의 API 베이스를 지정합니다. 경로 끝의 /api 까지 포함해야 합니다.',
-        code: `rbms-player --server ${IR_SERVER_BASE_URL} --player <플레이어_ID>`,
-    },
-    {
-        title: '2. 계정 만들기',
-        body: '가입 화면에서 계정을 만들면 아이디가 그대로 IR 플레이어 ID 가 됩니다. 이미 계정이 있다면 로그인만 하면 됩니다.',
-        code: null,
-    },
-    {
-        title: '3. API 토큰 발급',
-        body: '설정 화면의 API 토큰 탭에서 토큰을 발급합니다. 평문 토큰은 발급 직후 한 번만 표시되므로 그 자리에서 저장하세요. 이전에 발급한 토큰은 계속 유효하므로 필요 없으면 목록에서 폐기하세요.',
-        code: 'Authorization: Bearer rbms_<발급받은_토큰>',
-    },
-    {
-        title: '4. 제출 확인',
-        body: '플레이를 마치면 클라이언트가 스코어를 제출합니다. 같은 기록을 다시 보내도 중복 생성되지 않고 기존 score_id 가 돌아옵니다.',
-        code: null,
-    },
-    {
-        title: '5. guest 제출',
-        body: '서버가 guest 제출을 허용한 경우 토큰 없이도 제출할 수 있습니다. guest 기록은 항상 unranked 이고 랭킹과 개인 베스트에 반영되지 않습니다.',
-        code: null,
-    },
-    {
-        title: '6. unranked 가 되는 조건',
-        body: 'autoplay · 스크래치 자동 · 어시스트 사용 · 판정폭 변경 · TOTAL 오버라이드 · 미등록 클라이언트 빌드 · guest 제출 중 하나라도 해당하면 unranked 로 기록되며 랭킹에서 제외됩니다.',
-        code: null,
-    },
-]
+const GuideSectionBlock: FC<{ section: GuideSection }> = ({ section }) => (
+    <section id={section.id} className='flex flex-col gap-2'>
+        <h2 className='text-xl font-semibold tracking-tight'>{section.title}</h2>
+        <p className='text-muted-foreground text-sm leading-7'>{section.body}</p>
+        {section.steps && (
+            <ol className='text-muted-foreground flex list-decimal flex-col gap-1 pl-5 text-sm leading-7'>
+                {section.steps.map((step) => (
+                    <li key={step}>{step}</li>
+                ))}
+            </ol>
+        )}
+        {section.rows && (
+            <dl className='border-border flex flex-col gap-2 border-l pl-4 text-sm leading-7'>
+                {section.rows.map((row) => (
+                    <div key={row.label} className='flex flex-col gap-0.5 sm:flex-row sm:gap-3'>
+                        <dt className='text-foreground shrink-0 font-mono text-2xs sm:w-52 sm:text-sm'>{row.label}</dt>
+                        <dd className='text-muted-foreground'>{row.description}</dd>
+                    </div>
+                ))}
+            </dl>
+        )}
+        {section.code && <pre className='bg-muted text-foreground text-2xs overflow-x-auto p-3 font-mono lg:text-sm'>{section.code}</pre>}
+    </section>
+)
 
 export const GuideArticle: FC = () => (
     <>
@@ -41,16 +33,14 @@ export const GuideArticle: FC = () => (
             <span className='font-mono text-sm'>rbms IR · 연동 가이드</span>
         </header>
         <main className='mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 pt-6 pb-20'>
-            <h1 className='text-3xl font-extrabold tracking-tight'>클라이언트 연동 가이드</h1>
-            <p className='text-muted-foreground text-sm leading-7'>
-                rbms-player 를 이 IR 서버에 연결해 스코어를 제출하고 랭킹을 조회하는 방법입니다.
-            </p>
-            {SECTIONS.map((section) => (
-                <section key={section.title} className='flex flex-col gap-2'>
-                    <h2 className='text-xl font-semibold tracking-tight'>{section.title}</h2>
-                    <p className='text-muted-foreground text-sm leading-7'>{section.body}</p>
-                    {section.code && <pre className='bg-muted text-foreground overflow-x-auto p-3 font-mono text-2xs lg:text-sm'>{section.code}</pre>}
-                </section>
+            <h1 className='text-3xl font-extrabold tracking-tight'>게임 안에서 IR 연동하기</h1>
+            <p className='text-muted-foreground text-sm leading-7'>{GUIDE_INTRO}</p>
+            {GUIDE_SECTIONS.map((section) => (
+                <GuideSectionBlock key={section.id} section={section} />
+            ))}
+            <h2 className='text-2xl font-bold tracking-tight'>고급 (Advanced)</h2>
+            {GUIDE_ADVANCED_SECTIONS.map((section) => (
+                <GuideSectionBlock key={section.id} section={section} />
             ))}
             <nav aria-label='다음 단계' className='flex flex-wrap gap-4 text-sm'>
                 <Link href='/signup' className='underline'>
