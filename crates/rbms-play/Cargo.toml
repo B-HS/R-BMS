@@ -9,6 +9,10 @@ rust-version.workspace = true
 rbms-model = { workspace = true }
 rbms-chart = { workspace = true }
 rbms-judge = { workspace = true }
+rbms-store = { workspace = true }
 
 [dev-dependencies]
 rbms-parser.workspace = true
+
+[lints]
+workspace = true
