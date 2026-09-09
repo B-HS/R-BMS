@@ -11,20 +11,24 @@ const BEAM_RELEASE_US: i64 = 120_000;
 /// Vertical gradient slices per beam — more slices = smoother brightest-at-the-judge-line falloff.
 const BEAM_SLICES: usize = 6;
 
+/// Everything a playfield frame needs beyond the skin: the chart, where in it we are, and the
+/// per-lane beam state. `beam_on`/`beam_off` are press/release timestamps (µs, `i64::MIN` when
+/// inactive); pass `&[]` to omit beams.
+pub struct PlayfieldView<'a> {
+    pub timelines: &'a [TimeLine],
+    pub microtime: i64,
+    pub hispeed: f64,
+    pub beam_on: &'a [i64],
+    pub beam_off: &'a [i64],
+    /// Constant-velocity scrolling (ignore per-section BPM/STOP), i.e. the CONSTANT option.
+    pub constant: bool,
+}
+
 /// Draw the playfield for the current play time using a `Skin`: lane backgrounds, key beams
 /// for held/just-pressed lanes, the judgment line, and every visible note at its scroll
-/// offset. `beam_on`/`beam_off` are the per-lane press/release timestamps (µs, `i64::MIN`
-/// when inactive); pass `&[]` to omit beams. Backend-agnostic.
-pub fn render_playfield<R: Renderer>(
-    r: &mut R,
-    timelines: &[TimeLine],
-    microtime: i64,
-    hispeed: f64,
-    skin: &Skin,
-    beam_on: &[i64],
-    beam_off: &[i64],
-    constant: bool,
-) {
+/// offset. Backend-agnostic.
+pub fn render_playfield_view<R: Renderer>(r: &mut R, skin: &Skin, view: &PlayfieldView<'_>) {
+    let PlayfieldView { timelines, microtime, hispeed, beam_on, beam_off, constant } = *view;
     r.clear(skin.bg);
 
     let n = skin.lane_count();
@@ -36,7 +40,6 @@ pub fn render_playfield<R: Renderer>(
     draw_key_beams(r, skin, beam_on, beam_off, microtime);
     draw_field_decor(r, skin);
 
-    // Judgment line, drawn per field so it does not bridge the gap between DP fields.
     for &(fx, fw) in &skin.fields {
         r.fill_rect(Rect::new(fx, skin.judge_y, fw, 4.0), skin.judge_line);
     }
@@ -47,32 +50,27 @@ pub fn render_playfield<R: Renderer>(
         visible_offsets(timelines, microtime, hispeed, skin.lane_height())
     };
 
-    // Long-note bodies: draw the held segment (head→end) as a translucent bar in the lane behind the
-    // note heads, so an LN reads as a sustained note to HOLD. Only LNs intersecting the visible window
-    // are drawn — a head on-screen uses its offset; a head already past the line clamps the body's
-    // bottom to the line; an end above the screen extends the body to the top edge; a head entirely
-    // above the window (whole LN off-screen) is SKIPPED (otherwise it would tint the whole lane).
     let pos: std::collections::HashMap<usize, f32> = offsets.iter().copied().collect();
     let last_visible = offsets.last().map(|&(i, _)| i).unwrap_or(0);
     let mut ln_open: Vec<Option<usize>> = vec![None; n];
     for (idx, tl) in timelines.iter().enumerate() {
-        for lane in 0..n {
+        for (lane, open_head) in ln_open.iter_mut().enumerate() {
             let Some(note) = &tl.notes[lane] else {
                 continue;
             };
             match note.kind {
-                NoteKind::LongStart { .. } => ln_open[lane] = Some(idx),
+                NoteKind::LongStart { .. } => *open_head = Some(idx),
                 NoteKind::LongEnd { .. } => {
-                    let Some(head_idx) = ln_open[lane].take() else {
+                    let Some(head_idx) = open_head.take() else {
                         continue;
                     };
                     if tl.time_us < microtime {
-                        continue; // whole LN already past the line
+                        continue;
                     }
                     let off_head = match pos.get(&head_idx) {
-                        Some(&o) => o,                                           // head on-screen
-                        None if timelines[head_idx].time_us <= microtime => 0.0, // head past the line → bottom at line
-                        None => continue,                                        // head above the window → LN off-screen, skip
+                        Some(&o) => o,
+                        None if timelines[head_idx].time_us <= microtime => 0.0,
+                        None => continue,
                     };
                     let body_bottom = (skin.judge_y - off_head).min(skin.judge_y);
                     let body_top = pos.get(&idx).map(|o| skin.judge_y - o).unwrap_or(skin.top_y).max(skin.top_y);
@@ -86,7 +84,7 @@ pub fn render_playfield<R: Renderer>(
             }
         }
         if idx >= last_visible && ln_open.iter().all(Option::is_none) {
-            break; // past the visible window with no open LN — nothing further to draw
+            break;
         }
     }
 
@@ -103,10 +101,6 @@ pub fn render_playfield<R: Renderer>(
                 NoteKind::Mine { .. } => skin.mine_color,
                 _ => skin.note_color(lane),
             };
-            // Clip the note to the field's top edge: a note still partly above `top_y` is drawn only
-            // for the portion inside the field, so it slides out from under the frame instead of
-            // popping in whole above it. The field rect [top_y, judge_y] is the real boundary — no
-            // occluding overlay needed.
             let note_top = skin.judge_y - off - skin.note_height;
             let top = note_top.max(skin.top_y);
             let h = (note_top + skin.note_height) - top;
@@ -207,6 +201,35 @@ fn beam_intensity(on: i64, off: i64, now: i64) -> f32 {
     0.0
 }
 
+/// Draw the key bomb: for each lane whose most recent note hit is within the skin's bomb window, an
+/// expanding judge-coloured burst with a shrinking white core at the judgment line. `bomb[lane]` is
+/// `(hit_us, judge_index)` (`i64::MIN` = none). Data-driven via `Skin::bomb_*`; no-op when disabled.
+pub fn render_key_bomb<R: Renderer>(r: &mut R, skin: &Skin, bomb: &[(i64, u8)], microtime: i64) {
+    if !skin.bomb_enabled || skin.bomb_us <= 0 {
+        return;
+    }
+    for (lane, &(hit_us, judge)) in bomb.iter().enumerate().take(skin.lane_count()) {
+        if hit_us == i64::MIN {
+            continue;
+        }
+        let age = microtime - hit_us;
+        if age < 0 || age >= skin.bomb_us {
+            continue;
+        }
+        let p = age as f32 / skin.bomb_us as f32;
+        let cx = skin.x[lane] + skin.w[lane] * 0.5;
+        let cy = skin.judge_y;
+        let base = skin.bomb_size.min(skin.w[lane] * 1.7);
+        let size = base * (0.45 + 0.75 * p);
+        let jc = skin.judge_colors[(judge as usize).min(5)];
+        r.fill_rect(Rect::new(cx - size * 0.5, cy - size * 0.5, size, size), Color { a: ((1.0 - p) * 200.0) as u8, ..jc });
+        let core = base * (1.0 - p) * 0.55;
+        if core > 1.0 {
+            r.fill_rect(Rect::new(cx - core * 0.5, cy - core * 0.5, core, core), Color { r: 255, g: 255, b: 255, a: ((1.0 - p) * 235.0) as u8 });
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -225,6 +248,11 @@ mod tests {
         Skin::default_for(Mode::BEAT_7K, 1280.0, 720.0)
     }
 
+    /// One frame's playfield inputs, so a test reads as a call rather than a struct literal.
+    fn view<'a>(timelines: &'a [TimeLine], microtime: i64, hispeed: f64, beam_on: &'a [i64], beam_off: &'a [i64], constant: bool) -> PlayfieldView<'a> {
+        PlayfieldView { timelines, microtime, hispeed, beam_on, beam_off, constant }
+    }
+
     #[test]
     fn note_drawn_at_expected_lane_and_offset() {
         let timelines = tls(b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:01\r\n");
@@ -232,7 +260,7 @@ mod tests {
         let note_t = 2_000_000;
         let micro = note_t - 300_000;
         let mut canvas = CpuCanvas::new(1280, 720);
-        render_playfield(&mut canvas, &timelines, micro, 1.0, &skin, &[], &[], false);
+        render_playfield_view(&mut canvas, &skin, &view(&timelines, micro, 1.0, &[], &[], false));
 
         let off = closed_form_offset(note_t, micro, 120.0, 1.0, 1.0, skin.lane_height());
         let cx = skin.lane_center(0) as u32;
@@ -243,27 +271,20 @@ mod tests {
 
     #[test]
     fn long_note_draws_a_held_body_bar() {
-        // A long note (channel 5x, LNTYPE 1) on lane 0 spanning ~1 measure. Approaching the line it
-        // must render as a tall held bar between head and end — not a tap-sized cap — so the player
-        // knows to HOLD it. (This is the bug behind "tap LN -> POOR on release": invisible bodies.)
         let timelines = tls(b"#LNTYPE 1\r\n#BPM 120\r\n#WAV01 a.wav\r\n#00151:01000001\r\n");
         let skin = skin();
         let head = timelines.iter().filter_map(|t| t.notes[0].as_ref().map(|nn| nn.time_us)).next().unwrap();
-        let micro = head - 200_000; // both head and end on-screen, approaching the line
+        let micro = head - 200_000;
         let mut c = CpuCanvas::new(1280, 720);
-        render_playfield(&mut c, &timelines, micro, 1.0, &skin, &[], &[], false);
-        // Count rows where lane 0 (has the LN) differs from lane 3 (empty) — isolates the LN's drawn
-        // pixels regardless of lane-bg alpha. (CpuCanvas forces stored alpha to 255, so comparing a
-        // pixel directly to `skin.lane_bg` is unreliable.)
+        render_playfield_view(&mut c, &skin, &view(&timelines, micro, 1.0, &[], &[], false));
         let (cx0, cx3) = (skin.lane_center(0) as u32, skin.lane_center(3) as u32);
         let lane0_drawn = |canvas: &CpuCanvas| (skin.top_y as u32..skin.judge_y as u32).filter(|&y| canvas.pixel_at(cx0, y) != canvas.pixel_at(cx3, y)).count();
         let filled = lane0_drawn(&c);
         assert!(filled > skin.note_height as usize * 4, "LN body should fill many rows in its lane, not just a tap cap (got {filled}px)");
-        // A plain tap note at the same position fills only ~note_height rows.
         let normal = tls(b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:01\r\n");
         let nt = normal.iter().find_map(|t| t.notes[0].as_ref().map(|nn| nn.time_us)).unwrap();
         let mut c2 = CpuCanvas::new(1280, 720);
-        render_playfield(&mut c2, &normal, nt - 200_000, 1.0, &skin, &[], &[], false);
+        render_playfield_view(&mut c2, &skin, &view(&normal, nt - 200_000, 1.0, &[], &[], false));
         let tap_filled = lane0_drawn(&c2);
         assert!(filled > tap_filled * 2, "LN body (filled={filled}) must be much taller than a tap (filled={tap_filled})");
     }
@@ -273,7 +294,7 @@ mod tests {
         let timelines = tls(b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:01\r\n");
         let skin = skin();
         let mut canvas = CpuCanvas::new(1280, 720);
-        render_playfield(&mut canvas, &timelines, 0, 1.0, &skin, &[], &[], false);
+        render_playfield_view(&mut canvas, &skin, &view(&timelines, 0, 1.0, &[], &[], false));
         let cx = skin.lane_center(0) as u32;
         assert_eq!(canvas.pixel_at(cx, skin.judge_y as u32 + 1), Color::JUDGE_LINE);
     }
@@ -288,7 +309,7 @@ mod tests {
 
         let find_note_y = |hispeed: f64| -> u32 {
             let mut c = CpuCanvas::new(1280, 720);
-            render_playfield(&mut c, &timelines, micro, hispeed, &skin, &[], &[], false);
+            render_playfield_view(&mut c, &skin, &view(&timelines, micro, hispeed, &[], &[], false));
             (0..skin.judge_y as u32).find(|&y| c.pixel_at(cx, y) == Color::WHITE).unwrap()
         };
         assert!(find_note_y(2.0) < find_note_y(1.0));
@@ -303,10 +324,10 @@ mod tests {
         let cy = skin.judge_y as u32 - 4;
 
         let mut off = CpuCanvas::new(1280, 720);
-        render_playfield(&mut off, &timelines, 0, 1.0, &skin, &[], &[], false);
+        render_playfield_view(&mut off, &skin, &view(&timelines, 0, 1.0, &[], &[], false));
 
         let mut on = CpuCanvas::new(1280, 720);
-        render_playfield(&mut on, &timelines, 0, 1.0, &skin, &[0], &[], false);
+        render_playfield_view(&mut on, &skin, &view(&timelines, 0, 1.0, &[0], &[], false));
 
         assert_ne!(on.pixel_at(cx0, cy), off.pixel_at(cx0, cy), "held lane 0 beam brightens near the judge line");
         assert_eq!(on.pixel_at(cx3, cy), off.pixel_at(cx3, cy), "lane 3 with no beam is unchanged");
@@ -319,8 +340,6 @@ mod tests {
         assert_eq!(beam_intensity(5, i64::MIN, 9_999), 1.0, "held lane stays full");
     }
 
-    // --- beam_intensity unit math ---
-
     #[test]
     fn beam_intensity_inactive_lane_is_zero() {
         assert_eq!(beam_intensity(i64::MIN, i64::MIN, 1000), 0.0, "never pressed -> no beam");
@@ -328,19 +347,16 @@ mod tests {
 
     #[test]
     fn beam_intensity_held_overrides_release() {
-        // `on` set always returns full, even if an old `off` exists.
         assert_eq!(beam_intensity(100, 0, 10_000_000), 1.0);
     }
 
     #[test]
     fn beam_intensity_before_release_timestamp_is_full() {
-        // now < off (age negative) treated as still held -> full.
         assert_eq!(beam_intensity(i64::MIN, 1_000_000, 500_000), 1.0, "now before release -> full");
     }
 
     #[test]
     fn beam_intensity_decays_linearly_through_release_window() {
-        // Half-way through the release window -> ~0.5 intensity.
         let half = beam_intensity(i64::MIN, 0, BEAM_RELEASE_US / 2);
         assert!((half - 0.5).abs() < 1e-3, "linear fade at the midpoint (got {half})");
         let quarter = beam_intensity(i64::MIN, 0, BEAM_RELEASE_US / 4);
@@ -348,35 +364,26 @@ mod tests {
         assert_eq!(beam_intensity(i64::MIN, 0, BEAM_RELEASE_US), 0.0, "exactly at the window end -> 0");
     }
 
-    // --- note position invariants ---
-
     #[test]
     fn note_just_before_its_time_rests_at_the_judge_line() {
-        // A note's offset shrinks to ~0 as microtime approaches its time; its bottom is at the line.
-        // (Exactly at note_t the note's own timeline is excluded by visible_offsets, so sample just
-        // before — the offset is sub-pixel and the note bottom sits on the judgment line.)
         let timelines = tls(b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:01\r\n");
         let skin = skin();
         let note_t = timelines.iter().find_map(|t| t.notes[0].as_ref().map(|n| n.time_us)).unwrap();
         let mut c = CpuCanvas::new(1280, 720);
-        render_playfield(&mut c, &timelines, note_t - 1_000, 1.0, &skin, &[], &[], false);
+        render_playfield_view(&mut c, &skin, &view(&timelines, note_t - 1_000, 1.0, &[], &[], false));
         let cx = skin.lane_center(0) as u32;
-        // The row just above the line is the note (offset ~0 -> bottom at judge_y).
         let row = skin.judge_y as u32 - 1;
         assert_eq!(c.pixel_at(cx, row), Color::WHITE, "note bottom rests at the judge line");
-        // The judgment line itself is drawn just below judge_y.
         assert_eq!(c.pixel_at(cx, skin.judge_y as u32 + 1), Color::JUDGE_LINE);
     }
 
     #[test]
     fn note_exactly_at_its_time_is_excluded_from_offsets() {
-        // NOTE: at microtime == note_t the note's own timeline is `cur`, and visible_offsets iterates
-        // from cur+1, so the note is NOT drawn the instant it reaches the line (it is judged + gone).
         let timelines = tls(b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:01\r\n");
         let skin = skin();
         let note_t = timelines.iter().find_map(|t| t.notes[0].as_ref().map(|n| n.time_us)).unwrap();
         let mut c = CpuCanvas::new(1280, 720);
-        render_playfield(&mut c, &timelines, note_t, 1.0, &skin, &[], &[], false);
+        render_playfield_view(&mut c, &skin, &view(&timelines, note_t, 1.0, &[], &[], false));
         let cx = skin.lane_center(0) as u32;
         let drawn = (skin.top_y as u32..skin.judge_y as u32).any(|y| c.pixel_at(cx, y) == Color::WHITE);
         assert!(!drawn, "the note at exactly its time is no longer in the visible set");
@@ -384,15 +391,13 @@ mod tests {
 
     #[test]
     fn mine_note_uses_mine_color_not_key_color() {
-        // Channel "D1" = base36 469 -> mine on lane 0.
         let timelines = tls(b"#BPM 120\r\n#WAV01 a.wav\r\n#001D1:01\r\n");
         let skin = skin();
         let has_mine = timelines.iter().any(|t| t.notes[0].as_ref().is_some_and(|n| matches!(n.kind, NoteKind::Mine { .. })));
         assert!(has_mine, "test data must contain a mine");
         let note_t = timelines.iter().find_map(|t| t.notes[0].as_ref().map(|n| n.time_us)).unwrap();
         let mut c = CpuCanvas::new(1280, 720);
-        // Sample just before the note time so it is still in the visible set, resting at the line.
-        render_playfield(&mut c, &timelines, note_t - 1_000, 1.0, &skin, &[], &[], false);
+        render_playfield_view(&mut c, &skin, &view(&timelines, note_t - 1_000, 1.0, &[], &[], false));
         let cx = skin.lane_center(0) as u32;
         let row = skin.judge_y as u32 - 1;
         assert_eq!(c.pixel_at(cx, row), skin.mine_color, "mine draws in mine_color");
@@ -404,20 +409,15 @@ mod tests {
         (skin.top_y as u32..skin.judge_y as u32).filter(|&y| c.pixel_at(cx, y) != c.pixel_at(cref, y)).count()
     }
 
-    // --- long-note body edge cases ---
-
     #[test]
     fn ln_straddling_the_line_draws_body_down_to_the_line() {
-        // Head already past the judgment line, end still on-screen: body must extend down to the line.
         let timelines = tls(b"#LNTYPE 1\r\n#BPM 120\r\n#WAV01 a.wav\r\n#00151:01000001\r\n");
         let skin = skin();
         let head = timelines.iter().find_map(|t| t.notes[0].as_ref().filter(|n| matches!(n.kind, NoteKind::LongStart { .. })).map(|n| n.time_us)).unwrap();
-        // micro just past the head, still before the end -> head clamps body bottom to the line.
         let micro = head + 100_000;
         let mut c = CpuCanvas::new(1280, 720);
-        render_playfield(&mut c, &timelines, micro, 1.0, &skin, &[], &[], false);
+        render_playfield_view(&mut c, &skin, &view(&timelines, micro, 1.0, &[], &[], false));
         let cx = skin.lane_center(0) as u32;
-        // A drawn body pixel sits just above the line (body bottom == judge_y).
         assert_ne!(
             c.pixel_at(cx, skin.judge_y as u32 - 2),
             c.pixel_at(skin.lane_center(3) as u32, skin.judge_y as u32 - 2),
@@ -429,17 +429,13 @@ mod tests {
 
     #[test]
     fn ln_with_end_above_window_extends_body_to_top_edge() {
-        // Head on-screen, end above the visible window -> body_top clamps to top_y (fills to the frame).
         let timelines = tls(b"#LNTYPE 1\r\n#BPM 120\r\n#WAV01 a.wav\r\n#00151:01000001\r\n");
         let skin = skin();
         let head = timelines.iter().find_map(|t| t.notes[0].as_ref().filter(|n| matches!(n.kind, NoteKind::LongStart { .. })).map(|n| n.time_us)).unwrap();
-        // Just before the head reaches the line, with a small lane height so the end is above the window.
         let micro = head - 50_000;
         let mut c = CpuCanvas::new(1280, 720);
-        // High hispeed pushes the end far above the top -> body_top clamps to top_y.
-        render_playfield(&mut c, &timelines, micro, 4.0, &skin, &[], &[], false);
+        render_playfield_view(&mut c, &skin, &view(&timelines, micro, 4.0, &[], &[], false));
         let cx = skin.lane_center(0) as u32;
-        // A body pixel exists right at the top edge of the field.
         assert_ne!(
             c.pixel_at(cx, skin.top_y as u32 + 1),
             c.pixel_at(skin.lane_center(3) as u32, skin.top_y as u32 + 1),
@@ -449,61 +445,48 @@ mod tests {
 
     #[test]
     fn off_screen_ln_whole_above_window_is_not_drawn() {
-        // A tap note early then an LN far later; high hispeed culls the offsets loop before the LN head,
-        // so both head and end are above the window -> the body must be SKIPPED (no whole-lane tint).
         let timelines = tls(b"#LNTYPE 1\r\n#BPM 120\r\n#WAV01 a.wav\r\n#00111:01\r\n#00351:0100000000000001\r\n");
         let skin = skin();
-        // Sanity: the LN head sits at the highest time and is far past the window at micro=0, hs=8.
         let mut c = CpuCanvas::new(1280, 720);
-        render_playfield(&mut c, &timelines, 0, 8.0, &skin, &[], &[], false);
-        // Lane 0 (holds the off-screen LN) must look identical to empty lane 3 — nothing drawn.
+        render_playfield_view(&mut c, &skin, &view(&timelines, 0, 8.0, &[], &[], false));
         let filled = lane_drawn_rows(&c, &skin, 0, 3);
         assert_eq!(filled, 0, "off-screen LN must not tint the lane (got {filled}px)");
     }
 
     #[test]
     fn ln_already_past_the_line_is_not_drawn() {
-        // microtime past the LN end -> the whole LN is behind the line and nothing of it draws.
         let timelines = tls(b"#LNTYPE 1\r\n#BPM 120\r\n#WAV01 a.wav\r\n#00151:01000001\r\n");
         let skin = skin();
         let end = timelines.iter().find_map(|t| t.notes[0].as_ref().filter(|n| matches!(n.kind, NoteKind::LongEnd { .. })).map(|n| n.time_us)).unwrap();
         let mut c = CpuCanvas::new(1280, 720);
-        render_playfield(&mut c, &timelines, end + 500_000, 1.0, &skin, &[], &[], false);
+        render_playfield_view(&mut c, &skin, &view(&timelines, end + 500_000, 1.0, &[], &[], false));
         let filled = lane_drawn_rows(&c, &skin, 0, 3);
         assert_eq!(filled, 0, "an LN fully behind the line draws nothing in its lane (got {filled}px)");
     }
 
     #[test]
     fn long_end_cap_is_not_drawn_as_a_note() {
-        // The note loop skips LongEnd kinds (the body bar represents the hold), so the end produces
-        // no tap-sized cap distinct from the body. Approaching with both visible, the lane's drawn
-        // pixels are dominated by the contiguous body, not two separated caps.
         let timelines = tls(b"#LNTYPE 1\r\n#BPM 120\r\n#WAV01 a.wav\r\n#00151:01000001\r\n");
         let skin = skin();
         let head = timelines.iter().find_map(|t| t.notes[0].as_ref().filter(|n| matches!(n.kind, NoteKind::LongStart { .. })).map(|n| n.time_us)).unwrap();
         let mut c = CpuCanvas::new(1280, 720);
-        render_playfield(&mut c, &timelines, head - 200_000, 1.0, &skin, &[], &[], false);
+        render_playfield_view(&mut c, &skin, &view(&timelines, head - 200_000, 1.0, &[], &[], false));
         let cx = skin.lane_center(0) as u32;
         let cx3 = skin.lane_center(3) as u32;
-        // Find the contiguous span of drawn rows in lane 0; it should be one block (the body+head),
-        // not split into two thin caps with a gap.
         let drawn: Vec<u32> = (skin.top_y as u32..skin.judge_y as u32).filter(|&y| c.pixel_at(cx, y) != c.pixel_at(cx3, y)).collect();
         assert!(!drawn.is_empty(), "LN draws something");
         let gaps = drawn.windows(2).filter(|w| w[1] - w[0] > 1).count();
         assert_eq!(gaps, 0, "the LN renders as one contiguous bar (no body/cap gap)");
     }
 
-    // --- lane cover ---
-
     #[test]
     fn lane_cover_occludes_top_fraction_of_field() {
         let timelines = tls(b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:01\r\n");
         let skin = skin();
         let mut c = CpuCanvas::new(1280, 720);
-        render_playfield(&mut c, &timelines, 0, 1.0, &skin, &[], &[], false);
+        render_playfield_view(&mut c, &skin, &view(&timelines, 0, 1.0, &[], &[], false));
         render_lane_cover(&mut c, &skin, 0.5);
         let cx = skin.lane_center(0) as u32;
-        // Top of the field is painted with the background colour (cover); just below the cover is not.
         let cover_h = ((skin.judge_y - skin.top_y) * 0.5) as u32;
         assert_eq!(c.pixel_at(cx, skin.top_y as u32 + 2), skin.bg, "cover paints field bg over the top fraction");
         assert_ne!(c.pixel_at(cx, skin.top_y as u32 + cover_h + 4), skin.bg, "below the cover the lane bg shows through");
@@ -515,26 +498,22 @@ mod tests {
         let mut a = CpuCanvas::new(1280, 720);
         let mut b = CpuCanvas::new(1280, 720);
         let timelines = tls(b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:01\r\n");
-        render_playfield(&mut a, &timelines, 0, 1.0, &skin, &[], &[], false);
-        render_playfield(&mut b, &timelines, 0, 1.0, &skin, &[], &[], false);
+        render_playfield_view(&mut a, &skin, &view(&timelines, 0, 1.0, &[], &[], false));
+        render_playfield_view(&mut b, &skin, &view(&timelines, 0, 1.0, &[], &[], false));
         render_lane_cover(&mut b, &skin, 0.0);
         assert_eq!(a.pixels(), b.pixels(), "cover_frac 0 leaves the canvas unchanged");
     }
 
     #[test]
     fn lane_cover_clamps_above_point_nine() {
-        // cover_frac > 0.9 clamps to 0.9: the cover never spans the whole field down to the line.
         let skin = skin();
         let mut c = CpuCanvas::new(1280, 720);
         let timelines = tls(b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:01\r\n");
-        render_playfield(&mut c, &timelines, 0, 1.0, &skin, &[], &[], false);
+        render_playfield_view(&mut c, &skin, &view(&timelines, 0, 1.0, &[], &[], false));
         render_lane_cover(&mut c, &skin, 5.0);
         let cx = skin.lane_center(0) as u32;
-        // Just above the line (within the bottom 10%) must NOT be covered by bg.
         assert_ne!(c.pixel_at(cx, skin.judge_y as u32 - 3), skin.bg, "clamped cover leaves the bottom of the field visible");
     }
-
-    // --- determinism / clear ---
 
     #[test]
     fn render_is_deterministic_for_identical_inputs() {
@@ -542,20 +521,17 @@ mod tests {
         let skin = skin();
         let mut a = CpuCanvas::new(1280, 720);
         let mut b = CpuCanvas::new(1280, 720);
-        render_playfield(&mut a, &timelines, 500_000, 1.5, &skin, &[0], &[], false);
-        render_playfield(&mut b, &timelines, 500_000, 1.5, &skin, &[0], &[], false);
+        render_playfield_view(&mut a, &skin, &view(&timelines, 500_000, 1.5, &[0], &[], false));
+        render_playfield_view(&mut b, &skin, &view(&timelines, 500_000, 1.5, &[0], &[], false));
         assert_eq!(a.pixels(), b.pixels(), "same inputs produce byte-identical frames");
     }
 
     #[test]
     fn empty_timelines_just_clears_and_draws_decor() {
-        // No notes at all: render must not panic and clears to the skin bg behind the field.
         let skin = skin();
         let mut c = CpuCanvas::new(1280, 720);
-        render_playfield(&mut c, &[], 0, 1.0, &skin, &[], &[], false);
-        // A pixel far outside any field is the cleared background.
+        render_playfield_view(&mut c, &skin, &view(&[], 0, 1.0, &[], &[], false));
         assert_eq!(c.pixel_at(1, 1), skin.bg, "outside the field is the cleared bg");
-        // The judgment line is still drawn.
         let cx = skin.lane_center(0) as u32;
         assert_eq!(c.pixel_at(cx, skin.judge_y as u32 + 1), skin.judge_line);
     }
@@ -569,13 +545,11 @@ mod tests {
         let cx = skin.lane_center(0) as u32;
         for constant in [false, true] {
             let mut c = CpuCanvas::new(1280, 720);
-            render_playfield(&mut c, &timelines, micro, 1.0, &skin, &[], &[], constant);
+            render_playfield_view(&mut c, &skin, &view(&timelines, micro, 1.0, &[], &[], constant));
             let found = (skin.top_y as u32..skin.judge_y as u32).find(|&y| c.pixel_at(cx, y) == Color::WHITE);
             assert!(found.is_some(), "note visible above the line under constant={constant}");
         }
     }
-
-    // --- key bomb ---
 
     #[test]
     fn key_bomb_disabled_is_noop() {
@@ -594,7 +568,6 @@ mod tests {
         let skin = skin();
         let mut c = CpuCanvas::new(1280, 720);
         c.clear(Color::rgb(0, 0, 0));
-        // lane 0 inactive (i64::MIN), lane 1 expired (age >= bomb_us), lane 2 in the future (age < 0).
         let bomb = vec![(i64::MIN, 0u8), (0i64, 0u8), (10_000_000i64, 0u8)];
         render_key_bomb(&mut c, &skin, &bomb, skin.bomb_us + 5_000_000);
         let lit = (0..1280 * 720).any(|i| c.pixel_at((i % 1280) as u32, (i / 1280) as u32).r > 5);
@@ -606,7 +579,6 @@ mod tests {
         let skin = skin();
         let mut c = CpuCanvas::new(1280, 720);
         c.clear(Color::rgb(0, 0, 0));
-        // A hit at t=0, sampled early in the window -> visible burst near lane 0's judge line.
         render_key_bomb(&mut c, &skin, &[(0i64, 0u8)], skin.bomb_us / 4);
         let lit = (0..1280 * 720).any(|i| c.pixel_at((i % 1280) as u32, (i / 1280) as u32).r > 5);
         assert!(lit, "a fresh hit draws a visible bomb");
@@ -614,58 +586,45 @@ mod tests {
 
     #[test]
     fn key_bomb_clamps_judge_index_out_of_range() {
-        // judge index > 5 must not index out of bounds (clamped to 5).
         let skin = skin();
         let mut c = CpuCanvas::new(1280, 720);
         c.clear(Color::rgb(0, 0, 0));
         render_key_bomb(&mut c, &skin, &[(0i64, 200u8)], skin.bomb_us / 4);
-        // No panic == pass; also something was drawn.
         let lit = (0..1280 * 720).any(|i| c.pixel_at((i % 1280) as u32, (i / 1280) as u32).a == 255);
         assert!(lit);
     }
 
     #[test]
     fn key_bomb_ignores_extra_bomb_entries_beyond_lane_count() {
-        // bomb slice longer than lane_count: only the first lane_count entries are considered.
         let skin = skin();
         let mut c = CpuCanvas::new(1280, 720);
         c.clear(Color::rgb(0, 0, 0));
         let mut bomb = vec![(i64::MIN, 0u8); skin.lane_count()];
-        bomb.push((0i64, 0u8)); // extra entry past the lanes — must be ignored, no panic
+        bomb.push((0i64, 0u8));
         render_key_bomb(&mut c, &skin, &bomb, skin.bomb_us / 4);
         let lit = (0..1280 * 720).any(|i| c.pixel_at((i % 1280) as u32, (i / 1280) as u32).r > 5);
         assert!(!lit, "extra bomb entries past lane_count are ignored");
     }
-}
 
-/// Draw the key bomb: for each lane whose most recent note hit is within the skin's bomb window, an
-/// expanding judge-coloured burst with a shrinking white core at the judgment line. `bomb[lane]` is
-/// `(hit_us, judge_index)` (`i64::MIN` = none). Data-driven via `Skin::bomb_*`; no-op when disabled.
-pub fn render_key_bomb<R: Renderer>(r: &mut R, skin: &Skin, bomb: &[(i64, u8)], microtime: i64) {
-    if !skin.bomb_enabled || skin.bomb_us <= 0 {
-        return;
-    }
-    for lane in 0..skin.lane_count().min(bomb.len()) {
-        let (hit_us, judge) = bomb[lane];
-        if hit_us == i64::MIN {
-            continue;
-        }
-        let age = microtime - hit_us;
-        if age < 0 || age >= skin.bomb_us {
-            continue;
-        }
-        let p = age as f32 / skin.bomb_us as f32;
-        let cx = skin.x[lane] + skin.w[lane] * 0.5;
-        let cy = skin.judge_y;
-        let base = skin.bomb_size.min(skin.w[lane] * 1.7);
-        // Outer burst: grows and fades, tinted by the judgment colour.
-        let size = base * (0.45 + 0.75 * p);
-        let jc = skin.judge_colors[(judge as usize).min(5)];
-        r.fill_rect(Rect::new(cx - size * 0.5, cy - size * 0.5, size, size), Color { a: ((1.0 - p) * 200.0) as u8, ..jc });
-        // Inner core: bright white, shrinks to a point.
-        let core = base * (1.0 - p) * 0.55;
-        if core > 1.0 {
-            r.fill_rect(Rect::new(cx - core * 0.5, cy - core * 0.5, core, core), Color { r: 255, g: 255, b: 255, a: ((1.0 - p) * 235.0) as u8 });
+    /// The struct entry point and the spread-argument shim must produce the same frame under either
+    /// scroll mode, so the player can migrate to [`PlayfieldView`] without a visual change.
+    #[test]
+    fn the_view_entry_point_and_the_spread_argument_shim_agree() {
+        let timelines = tls(b"#LNTYPE 1\r\n#BPM 150\r\n#WAV01 a.wav\r\n#00111:01\r\n#00151:01000001\r\n");
+        let skin = skin();
+        let micro = 1_000_000;
+        let beam_on = vec![0i64; skin.lane_count()];
+        let beam_off = vec![i64::MIN; skin.lane_count()];
+
+        for constant in [false, true] {
+            let mut spread = CpuCanvas::new(1280, 720);
+            render_playfield_view(&mut spread, &skin, &view(&timelines, micro, 1.25, &beam_on, &beam_off, constant));
+
+            let mut view = CpuCanvas::new(1280, 720);
+            let field = PlayfieldView { timelines: &timelines, microtime: micro, hispeed: 1.25, beam_on: &beam_on, beam_off: &beam_off, constant };
+            render_playfield_view(&mut view, &skin, &field);
+
+            assert_eq!(spread.pixels(), view.pixels(), "the compatibility shim only spreads the view fields (constant={constant})");
         }
     }
 }

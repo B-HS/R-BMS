@@ -5,8 +5,25 @@ use rbms_render::{
     render_select,
 };
 
-fn row(folder: bool, title: &str, mode: &'static str, mc: Color, level: &str, dc: Color, lamp: Color, count: Option<usize>) -> SelectRow {
-    SelectRow { folder, title: title.into(), mode_short: mode, mode_color: mc, level: level.into(), difficulty_color: dc, lamp, folder_count: count }
+/// A song-bar row's mode/level badge pair, so `row` stays a short call.
+struct RowBadges {
+    mode: &'static str,
+    mode_color: Color,
+    level: &'static str,
+    difficulty_color: Color,
+}
+
+fn row(folder: bool, title: &str, badges: RowBadges, lamp: Color, count: Option<usize>) -> SelectRow {
+    SelectRow {
+        folder,
+        title: title.into(),
+        mode_short: badges.mode,
+        mode_color: badges.mode_color,
+        level: badges.level.into(),
+        difficulty_color: badges.difficulty_color,
+        lamp,
+        folder_count: count,
+    }
 }
 
 fn rec(when: &str, lamp: Color, label: &'static str, ex: u32, max: u32, bp: u32, trend: Option<(String, Color)>) -> RecordRowView {
@@ -23,8 +40,6 @@ fn main() {
     let hard = Color::WHITE;
     let nolamp = Color::rgb(44, 44, 54);
 
-    // A note-density histogram with a rising-then-falling profile and a couple of spikes. `long` packs
-    // ~15 minutes (900 one-second bins) to exercise the sub-pixel spacing / no-overflow path.
     let n_bins = if std::env::args().any(|a| a == "long") { 900 } else { 130 };
     let half = n_bins as f64 / 2.0;
     let bins: Vec<u32> = (0..n_bins)
@@ -59,8 +74,6 @@ fn main() {
         records: RecordsView {
             plays: 12,
             clears: 8,
-            // Best is by (clear-type, then EX), so the HARD play outranks the higher-played CLEAR — match
-            // the app's rule (main.rs build_select_view) so the headless preview is a reachable state.
             best: Some(rec("2026-05-31 01:02", hard, "HARD", 1602, 1848, 12, None)),
             rank_bar: Some((1602, 1848)),
             recent: vec![
@@ -71,16 +84,17 @@ fn main() {
         },
     };
 
+    let badges = |mode, mode_color, level, difficulty_color| RowBadges { mode, mode_color, level, difficulty_color };
     let rows = vec![
-        row(true, "INSANE BMS DIFFICULTY TABLE", "", Color::GRAY, "", Color::GRAY, nolamp, Some(86)),
-        row(false, "Legend of Eastern Rabbit -SKY DEFENDER-", "7K", blue, "7", red, green, None),
-        row(false, "Another Song With A Fairly Long Title Indeed", "5K", green, "5", normal, normal, None),
-        row(false, "9 Button Madness", "9K", pink, "9", blue, nolamp, None),
-        row(false, "DP Chart Sample -DOUBLE-", "14K", Color::ORANGE, "11", red, hard, None),
-        row(false, "Legend of Eastern Rabbit -SKY DEFENDER- [ANOTHER]", "7K", blue, "12", red, green, None),
-        row(false, "Short", "7K", blue, "3", green, nolamp, None),
-        row(false, "Mid Tier Track", "7K", blue, "8", Color::rgb(240, 200, 70), normal, None),
-        row(false, "Hardest In The Pack", "7K", blue, "★12", pink, red, None),
+        row(true, "INSANE BMS DIFFICULTY TABLE", badges("", Color::GRAY, "", Color::GRAY), nolamp, Some(86)),
+        row(false, "Legend of Eastern Rabbit -SKY DEFENDER-", badges("7K", blue, "7", red), green, None),
+        row(false, "Another Song With A Fairly Long Title Indeed", badges("5K", green, "5", normal), normal, None),
+        row(false, "9 Button Madness", badges("9K", pink, "9", blue), nolamp, None),
+        row(false, "DP Chart Sample -DOUBLE-", badges("14K", Color::ORANGE, "11", red), hard, None),
+        row(false, "Legend of Eastern Rabbit -SKY DEFENDER- [ANOTHER]", badges("7K", blue, "12", red), green, None),
+        row(false, "Short", badges("7K", blue, "3", green), nolamp, None),
+        row(false, "Mid Tier Track", badges("7K", blue, "8", Color::rgb(240, 200, 70)), normal, None),
+        row(false, "Hardest In The Pack", badges("7K", blue, "★12", pink), red, None),
     ];
 
     let modal = std::env::args().any(|a| a == "modal").then(|| SelectModal {

@@ -1,6 +1,6 @@
 use std::sync::LazyLock;
 
-use crate::font::{draw_text, draw_text_centered, draw_text_right};
+use crate::ctx::{RenderCtx, with_render_ctx};
 use crate::skin::{Skin, SkinConfig};
 use crate::{Color, Rect, Renderer};
 
@@ -134,55 +134,64 @@ pub fn render_result<R: Renderer>(r: &mut R, view: &ResultView) {
 }
 
 /// [`render_result`] with the per-judge colours and labels supplied by the caller (e.g. built from
-/// the active skin via [`ResultPalette::from_skin`]) instead of the built-in palette.
+/// the active skin via [`ResultPalette::from_skin`]) instead of the built-in palette. Draws against
+/// this thread's installed theme and shared text engine.
 pub fn render_result_with_palette<R: Renderer>(r: &mut R, view: &ResultView, palette: &ResultPalette) {
-    let th = crate::theme::theme();
+    with_render_ctx(|ctx| render_result_with_palette_ctx(ctx, r, view, palette));
+}
+
+/// [`render_result`] against a caller-supplied context.
+pub fn render_result_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, view: &ResultView) {
+    render_result_with_palette_ctx(ctx, r, view, default_palette());
+}
+
+/// [`render_result_with_palette`] against a caller-supplied context.
+pub fn render_result_with_palette_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, view: &ResultView, palette: &ResultPalette) {
+    let th = ctx.theme;
     let w = r.size().0 as f32;
     r.clear(th.bg);
     r.fill_rect(Rect::new(0.0, 0.0, w, 52.0), th.topbar);
     if !view.title.is_empty() {
-        draw_text_centered(r, w * 0.5, 14.0, 2.0, th.text, &view.title);
+        ctx.draw_text_centered(r, w * 0.5, 14.0, 2.0, th.text, &view.title);
     }
 
-    // --- LEFT: DJ LEVEL + clear lamp + rank bar ---
     let lcx = 232.0;
     let (rank, rcol) = RANK_BANDS[dj_rank(view.ex_score, view.max_score)];
     let rate = if view.max_score > 0 { view.ex_score as f32 / view.max_score as f32 * 100.0 } else { 0.0 };
-    draw_text_centered(r, lcx, 96.0, 7.0, rcol, rank);
-    draw_text_centered(r, lcx, 214.0, 2.4, rcol, &format!("{rate:.2}%"));
+    ctx.draw_text_centered(r, lcx, 96.0, 7.0, rcol, rank);
+    ctx.draw_text_centered(r, lcx, 214.0, 2.4, rcol, &format!("{rate:.2}%"));
     r.fill_rect(Rect::new(44.0, 258.0, 376.0, 48.0), view.clear_color);
-    draw_text_centered(r, lcx, 270.0, 2.6, Color::BLACK, view.clear_label);
+    ctx.draw_text_centered(r, lcx, 270.0, 2.6, Color::BLACK, view.clear_label);
     if view.show_graph {
         draw_rank_bar(r, 44.0, 340.0, 376.0, 18.0, view.ex_score, view.max_score);
         let mut dy = 384.0;
         match view.prev_best_ex {
             Some(pb) => {
                 let (t, c) = ex_delta_label(view.ex_score as i64 - pb as i64);
-                draw_text(r, 44.0, dy, 1.8, c, &format!("{t} vs BEST"));
+                ctx.draw_text(r, 44.0, dy, 1.8, c, &format!("{t} vs BEST"));
                 if view.ex_score > pb {
-                    draw_text_right(r, 420.0, dy, 1.8, Color::YELLOW, "NEW RECORD");
+                    ctx.draw_text_right(r, 420.0, dy, 1.8, Color::YELLOW, "NEW RECORD");
                 }
             }
-            None => draw_text(r, 44.0, dy, 1.8, th.text_muted, "FIRST PLAY"),
+            None => ctx.draw_text(r, 44.0, dy, 1.8, th.text_muted, "FIRST PLAY"),
         }
         if let Some(pp) = view.prev_ex {
             dy += 28.0;
             let (t, c) = ex_delta_label(view.ex_score as i64 - pp as i64);
-            draw_text(r, 44.0, dy, 1.8, c, &format!("{t} vs PREV"));
+            ctx.draw_text(r, 44.0, dy, 1.8, c, &format!("{t} vs PREV"));
         }
     }
 
-    // --- RIGHT: score report ---
     let (rx, rr) = (480.0, 1236.0);
     let mut y = 80.0;
-    draw_text(r, rx, y, 2.4, th.text, "EX SCORE");
-    draw_text_right(r, rr, y, 2.4, th.text, &format!("{} / {}", view.ex_score, view.max_score));
+    ctx.draw_text(r, rx, y, 2.4, th.text, "EX SCORE");
+    ctx.draw_text_right(r, rr, y, 2.4, th.text, &format!("{} / {}", view.ex_score, view.max_score));
     y += 42.0;
-    draw_text(r, rx, y, 2.0, th.text_dim, "MAX COMBO");
-    draw_text_right(r, rr, y, 2.0, Color::GREEN, &format!("{} / {}", view.max_combo, view.total_notes));
+    ctx.draw_text(r, rx, y, 2.0, th.text_dim, "MAX COMBO");
+    ctx.draw_text_right(r, rr, y, 2.0, Color::GREEN, &format!("{} / {}", view.max_combo, view.total_notes));
     y += 30.0;
-    draw_text(r, rx, y, 2.0, th.text_dim, "TOTAL NOTES");
-    draw_text_right(r, rr, y, 2.0, th.text, &view.total_notes.to_string());
+    ctx.draw_text(r, rx, y, 2.0, th.text_dim, "TOTAL NOTES");
+    ctx.draw_text_right(r, rr, y, 2.0, th.text, &view.total_notes.to_string());
     y += 30.0;
     r.fill_rect(Rect::new(rx, y, rr - rx, 2.0), th.divider);
     y += 16.0;
@@ -190,18 +199,18 @@ pub fn render_result_with_palette<R: Renderer>(r: &mut R, view: &ResultView, pal
     let denom = view.total_notes.max(1) as f32;
     for i in 0..6 {
         let col = palette.judge_colors[i];
-        draw_text(r, rx, y, 2.0, col, &palette.judge_labels[i]);
-        draw_text_right(r, rr, y, 2.0, th.text, &view.counts[i].to_string());
+        ctx.draw_text(r, rx, y, 2.0, col, &palette.judge_labels[i]);
+        ctx.draw_text_right(r, rr, y, 2.0, th.text, &view.counts[i].to_string());
         let frac = (view.counts[i] as f32 / denom).min(1.0);
         r.fill_rect(Rect::new(rx, y + 23.0, (rr - rx) * frac, 4.0), col);
         y += 34.0;
     }
     y += 10.0;
-    draw_text(r, rx, y, 1.8, th.accent, &format!("FAST {}", view.fast));
-    draw_text(r, rx + 170.0, y, 1.8, Color::ORANGE, &format!("SLOW {}", view.slow));
-    draw_text_right(r, rr, y, 2.0, view.clear_color, &format!("GAUGE {}%", view.gauge.round() as i32));
+    ctx.draw_text(r, rx, y, 1.8, th.accent, &format!("FAST {}", view.fast));
+    ctx.draw_text(r, rx + 170.0, y, 1.8, Color::ORANGE, &format!("SLOW {}", view.slow));
+    ctx.draw_text_right(r, rr, y, 2.0, view.clear_color, &format!("GAUGE {}%", view.gauge.round() as i32));
 
-    draw_text_centered(r, w * 0.5, 692.0, 1.2, th.text_muted, "ENTER / ESC  SELECT");
+    ctx.draw_text_centered(r, w * 0.5, 692.0, 1.2, th.text_muted, "ENTER / ESC  SELECT");
 }
 
 #[cfg(test)]
@@ -324,7 +333,6 @@ mod tests {
 
     #[test]
     fn dj_rank_bands_match_ninths() {
-        // max_ex = 1800 (900 notes) so k/9 lands on whole numbers: AAA=1600, AA=1400, ... C=800.
         let max = 1800;
         assert_eq!(RANK_BANDS[dj_rank(1800, max)].0, "AAA", "100% is AAA");
         assert_eq!(RANK_BANDS[dj_rank(1600, max)].0, "AAA", "exactly 8/9 is AAA");
@@ -358,14 +366,12 @@ mod tests {
     fn ex_delta_label_large_magnitudes() {
         assert_eq!(ex_delta_label(123456).0, "+123456");
         assert_eq!(ex_delta_label(-987654).0, "-987654");
-        // i64 extremes do not panic and format with the expected sign.
         assert!(ex_delta_label(i64::MAX).0.starts_with('+'));
         assert!(ex_delta_label(i64::MIN).0.starts_with('-'));
     }
 
     #[test]
     fn dj_rank_returns_index_into_bands_in_range() {
-        // Every possible rate maps to a valid 0..=7 band index.
         let max = 900u32;
         for ex in 0..=max {
             let b = dj_rank(ex, max);
@@ -387,18 +393,8 @@ mod tests {
 
     #[test]
     fn dj_rank_every_ninth_boundary_is_exact() {
-        // max=1800 so each k/9 is a whole number; verify all eight band names at their lower bound.
         let max = 1800u32;
-        let expect = [
-            (0, "F"),
-            (400, "E"),    // 2/9
-            (600, "D"),    // 3/9
-            (800, "C"),    // 4/9
-            (1000, "B"),   // 5/9
-            (1200, "A"),   // 6/9
-            (1400, "AA"),  // 7/9
-            (1600, "AAA"), // 8/9
-        ];
+        let expect = [(0, "F"), (400, "E"), (600, "D"), (800, "C"), (1000, "B"), (1200, "A"), (1400, "AA"), (1600, "AAA")];
         for (ex, name) in expect {
             assert_eq!(RANK_BANDS[dj_rank(ex, max)].0, name, "ex {ex}/{max} -> {name}");
             if ex > 0 {
@@ -409,13 +405,11 @@ mod tests {
 
     #[test]
     fn dj_rank_ex_above_max_clamps_to_top_band() {
-        // ex > max gives rate > 1.0 which still satisfies rate >= 8/9 -> AAA (no overflow).
         assert_eq!(RANK_BANDS[dj_rank(5000, 1800)].0, "AAA");
     }
 
     #[test]
     fn dj_rank_zero_max_ignores_ex() {
-        // max_ex == 0 short-circuits to F regardless of ex (no divide-by-zero).
         assert_eq!(dj_rank(0, 0), 0);
         assert_eq!(dj_rank(999, 0), 0);
     }
@@ -434,11 +428,9 @@ mod tests {
     fn draw_rank_bar_runs_without_panic_for_edge_inputs() {
         use crate::CpuCanvas;
         let mut c = CpuCanvas::new(400, 40);
-        // zero max (rate path guarded), full score, and partial score all paint inside bounds.
         draw_rank_bar(&mut c, 10.0, 10.0, 380.0, 18.0, 0, 0);
         draw_rank_bar(&mut c, 10.0, 10.0, 380.0, 18.0, 1800, 1800);
         draw_rank_bar(&mut c, 10.0, 10.0, 380.0, 18.0, 900, 1800);
-        // The bar drew something visible somewhere on the canvas.
         let lit = (0..400 * 40).any(|i| c.pixel_at((i % 400) as u32, (i / 400) as u32).a == 255);
         assert!(lit, "rank bar paints pixels");
     }
@@ -446,7 +438,6 @@ mod tests {
     #[test]
     fn render_result_smoke_first_play_and_with_deltas() {
         use crate::CpuCanvas;
-        // First play (no prev) with the graph shown.
         let view = ResultView {
             title: "TEST SONG".into(),
             counts: [100, 20, 5, 2, 1, 3],
@@ -468,7 +459,6 @@ mod tests {
         let lit = (0..1280 * 720).any(|i| c.pixel_at((i % 1280) as u32, (i / 1280) as u32).r > 40);
         assert!(lit, "result screen renders visible content");
 
-        // With both deltas (a new record) and an empty title — must not panic.
         let view2 = ResultView { title: String::new(), prev_best_ex: Some(200), prev_ex: Some(215), ..view };
         let mut c2 = CpuCanvas::new(1280, 720);
         render_result(&mut c2, &view2);
@@ -477,7 +467,6 @@ mod tests {
     #[test]
     fn render_result_handles_zero_notes_without_divide_by_zero() {
         use crate::CpuCanvas;
-        // total_notes==0 exercises the denom.max(1) guard and max_score==0 rate guard.
         let view = ResultView {
             title: "EMPTY".into(),
             counts: [0; 6],

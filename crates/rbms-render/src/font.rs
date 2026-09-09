@@ -17,6 +17,9 @@ const FALLBACK_FAMILY: &str = "sans-serif";
 /// fallback order from the locale, so a fixed one removes the last host-dependent input.
 const DETERMINISTIC_LOCALE: &str = "en-US";
 
+/// Marker appended to a string [`TextContext::fit_text`] had to clip.
+const ELLIPSIS: &str = "…";
+
 /// Legacy `scale` argument (originally one 5×7 glyph cell = `7*scale` px tall) → font pixel
 /// size, picked so the existing call sites keep a comparable visual size.
 fn px_for(scale: f32) -> f32 {
@@ -71,7 +74,10 @@ const CACHE_RETAIN_PERCENT: usize = 75;
 ///
 /// The layout cache is nested `px -> text -> Laid` so a cache hit (the common per-frame case) is
 /// looked up by `&str` with no key allocation (`String: Borrow<str>`), unlike a `(String, u32)` key.
-struct TextEngine {
+///
+/// Owning one of these and passing it to a renderer (via [`crate::RenderCtx`]) is the injected
+/// alternative to the thread-local engine behind the free functions in this module.
+pub struct TextContext {
     fs: FontSystem,
     swash: SwashCache,
     family: String,
@@ -86,24 +92,31 @@ struct TextEngine {
     tick: u64,
 }
 
-impl TextEngine {
+impl Default for TextContext {
+    fn default() -> Self {
+        TextContext::new()
+    }
+}
+
+impl TextContext {
     /// Adopt a font system whose database already ends with the family this engine should treat as
     /// its default (the last-loaded face wins, matching how [`load_font`] reports a family).
     fn with_font_system(fs: FontSystem) -> Self {
         let family = fs.db().faces().last().and_then(|f| f.families.first().map(|(n, _)| n.clone())).unwrap_or_else(|| FALLBACK_FAMILY.to_string());
-        TextEngine { fs, swash: SwashCache::new(), default_family: family.clone(), family, cache: HashMap::new(), runs: HashMap::new(), tick: 0 }
+        TextContext { fs, swash: SwashCache::new(), default_family: family.clone(), family, cache: HashMap::new(), runs: HashMap::new(), tick: 0 }
     }
 
-    fn new() -> Self {
+    /// A context over the bundled font plus the host's installed fonts (the app default).
+    pub fn new() -> Self {
         let mut fs = FontSystem::new();
         fs.db_mut().load_font_data(BUNDLED_FONT.to_vec());
         Self::with_font_system(fs)
     }
 
-    /// Build an engine whose database holds nothing but the bundled font, on a pinned locale, so
+    /// Build a context whose database holds nothing but the bundled font, on a pinned locale, so
     /// shaping, font matching and fallback have no host-specific input left. See
     /// [`use_embedded_fonts_only`].
-    fn embedded_only() -> Self {
+    pub fn embedded_only() -> Self {
         let mut db = fontdb::Database::new();
         db.load_font_data(BUNDLED_FONT.to_vec());
         Self::with_font_system(FontSystem::new_with_locale_and_db(DETERMINISTIC_LOCALE.to_string(), db))
@@ -173,9 +186,6 @@ impl TextEngine {
         let base = CtColor::rgb(color.r, color.g, color.b);
         let rgb = ((color.r as u32) << 16) | ((color.g as u32) << 8) | color.b as u32;
         let (ox, oy) = (x.round() as i32, y.round() as i32);
-        // Disjoint-field reborrows so `laid` (borrowing self.cache) coexists with building the run
-        // cache (self.fs/self.swash/self.runs). Each glyph is rasterized + horizontally run-merged
-        // once per (glyph, colour); later frames just replay the cached runs into `fill_rect`.
         let (fs, swash, runs_cache) = (&mut self.fs, &mut self.swash, &mut self.runs);
         for &(gx, gy, ck) in &laid.glyphs {
             let key = (ck, rgb);
@@ -206,6 +216,79 @@ impl TextEngine {
         if runs_cache.len() > RUN_CACHE_LIMIT {
             evict_runs(runs_cache);
         }
+    }
+
+    /// Width in pixels the string occupies at the given legacy `scale` (see [`px_for`]).
+    pub fn text_width(&mut self, text: &str, scale: f32) -> f32 {
+        self.width(text, px_for(scale))
+    }
+
+    /// Draw a left-aligned string with its top-left near `(x, y)`.
+    pub fn draw_text<R: Renderer>(&mut self, r: &mut R, x: f32, y: f32, scale: f32, color: Color, text: &str) {
+        self.draw(r, x, y, color, text, px_for(scale));
+    }
+
+    /// Draw a string horizontally centred on `center_x`.
+    pub fn draw_text_centered<R: Renderer>(&mut self, r: &mut R, center_x: f32, y: f32, scale: f32, color: Color, text: &str) {
+        let w = self.text_width(text, scale);
+        self.draw_text(r, center_x - w * 0.5, y, scale, color, text);
+    }
+
+    /// Draw a string whose right edge lands on `right_x`.
+    pub fn draw_text_right<R: Renderer>(&mut self, r: &mut R, right_x: f32, y: f32, scale: f32, color: Color, text: &str) {
+        let w = self.text_width(text, scale);
+        self.draw_text(r, right_x - w, y, scale, color, text);
+    }
+
+    /// Truncate `text` so it fits within `max_width` px at `scale`, appending an ellipsis when
+    /// clipped; returns the original when it already fits.
+    pub fn fit_text(&mut self, text: &str, scale: f32, max_width: f32) -> String {
+        if max_width <= 0.0 || self.text_width(text, scale) <= max_width {
+            return text.to_string();
+        }
+        let ell_w = self.text_width(ELLIPSIS, scale);
+        let mut out = String::new();
+        let mut acc = 0.0;
+        let mut buf = [0u8; 4];
+        for ch in text.chars() {
+            let w = self.text_width(ch.encode_utf8(&mut buf), scale);
+            if acc + w + ell_w > max_width {
+                break;
+            }
+            out.push(ch);
+            acc += w;
+        }
+        out.push_str(ELLIPSIS);
+        out
+    }
+
+    /// Register an extra font face, returning its family name to pass to [`TextContext::set_family`].
+    pub fn load_font(&mut self, data: Vec<u8>) -> Option<String> {
+        self.fs.db_mut().load_font_data(data);
+        self.fs.db().faces().last().and_then(|f| f.families.first().map(|(n, _)| n.clone()))
+    }
+
+    /// Make `name` the preferred family for subsequent text, dropping the caches so it takes effect.
+    pub fn set_family(&mut self, name: &str) {
+        if self.family != name {
+            self.family = name.to_string();
+            self.cache.clear();
+            self.runs.clear();
+        }
+    }
+
+    /// Restore the bundled default family.
+    pub fn reset_family(&mut self) {
+        if self.family != self.default_family {
+            self.family = self.default_family.clone();
+            self.cache.clear();
+            self.runs.clear();
+        }
+    }
+
+    /// Live occupancy as `(layout entries, glyph-run entries)`.
+    pub fn cache_stats(&self) -> (usize, usize) {
+        (self.layout_len(), self.runs.len())
     }
 }
 
@@ -250,85 +333,59 @@ fn merge_runs(mut pixels: Vec<(i32, i32, u8, u8, u8, u8)>) -> Vec<GlyphRun> {
 }
 
 thread_local! {
-    static ENGINE: RefCell<TextEngine> = RefCell::new(TextEngine::new());
+    static ENGINE: RefCell<TextContext> = RefCell::new(TextContext::new());
+}
+
+/// Run `f` against this thread's shared [`TextContext`] — the bridge every global helper below and
+/// [`crate::with_render_ctx`] go through. Do not call a global helper from inside `f`: the context is
+/// borrowed for the whole closure.
+pub fn with_text_context<T>(f: impl FnOnce(&mut TextContext) -> T) -> T {
+    ENGINE.with(|c| f(&mut c.borrow_mut()))
 }
 
 /// Width in pixels the string will occupy at the given scale (proportional, shaping-aware).
 pub fn text_width(text: &str, scale: f32) -> f32 {
-    let px = px_for(scale);
-    ENGINE.with(|c| c.borrow_mut().width(text, px))
+    with_text_context(|e| e.text_width(text, scale))
 }
 
 /// Live occupancy of the two text caches as `(layout entries, glyph-run entries)`, bounded by
 /// [`LAYOUT_CACHE_LIMIT`] and [`RUN_CACHE_LIMIT`]. Always available (not test-only) so an app debug
 /// overlay can show cache pressure next to its frame stats.
 pub fn cache_stats() -> (usize, usize) {
-    ENGINE.with(|c| {
-        let e = c.borrow();
-        (e.layout_len(), e.runs.len())
-    })
+    with_text_context(|e| e.cache_stats())
 }
 
 /// Draw a left-aligned string with its top-left near `(x, y)`. `scale` keeps its legacy meaning
 /// (see [`px_for`]). Any Unicode script the bundled or a system font covers is rendered.
 pub fn draw_text<R: Renderer>(r: &mut R, x: f32, y: f32, scale: f32, color: Color, text: &str) {
-    let px = px_for(scale);
-    ENGINE.with(|c| c.borrow_mut().draw(r, x, y, color, text, px));
+    with_text_context(|e| e.draw_text(r, x, y, scale, color, text));
 }
 
 pub fn draw_text_centered<R: Renderer>(r: &mut R, center_x: f32, y: f32, scale: f32, color: Color, text: &str) {
-    draw_text(r, center_x - text_width(text, scale) * 0.5, y, scale, color, text);
+    with_text_context(|e| e.draw_text_centered(r, center_x, y, scale, color, text));
 }
 
 pub fn draw_text_right<R: Renderer>(r: &mut R, right_x: f32, y: f32, scale: f32, color: Color, text: &str) {
-    draw_text(r, right_x - text_width(text, scale), y, scale, color, text);
+    with_text_context(|e| e.draw_text_right(r, right_x, y, scale, color, text));
 }
 
 /// Truncate `text` so it fits within `max_width` px at `scale`, appending an ellipsis when clipped.
 /// Keeps long titles inside a panel instead of overflowing. Returns the original when it already fits.
 pub fn fit_text(text: &str, scale: f32, max_width: f32) -> String {
-    if max_width <= 0.0 || text_width(text, scale) <= max_width {
-        return text.to_string();
-    }
-    let ellipsis = '…';
-    let ell_w = text_width("…", scale);
-    let mut out = String::new();
-    let mut acc = 0.0;
-    let mut buf = [0u8; 4];
-    for ch in text.chars() {
-        let w = text_width(ch.encode_utf8(&mut buf), scale);
-        if acc + w + ell_w > max_width {
-            break;
-        }
-        out.push(ch);
-        acc += w;
-    }
-    out.push(ellipsis);
-    out
+    with_text_context(|e| e.fit_text(text, scale, max_width))
 }
 
 /// Register an extra font (e.g. a user-chosen TTF/OTF read from disk or fetched as bytes) with
 /// the UI font system, returning its family name to pass to [`set_ui_family`]. Returns `None`
 /// if the data has no usable face.
 pub fn load_font(data: Vec<u8>) -> Option<String> {
-    ENGINE.with(|c| {
-        let e = &mut *c.borrow_mut();
-        e.fs.db_mut().load_font_data(data);
-        e.fs.db().faces().last().and_then(|f| f.families.first().map(|(n, _)| n.clone()))
-    })
+    with_text_context(|e| e.load_font(data))
 }
 
 /// Make `name` the preferred UI family for subsequent text (missing glyphs still fall back to
 /// system fonts). Clears the shaped-glyph cache so the change takes effect.
 pub fn set_ui_family(name: &str) {
-    ENGINE.with(|c| {
-        let e = &mut *c.borrow_mut();
-        if e.family != name {
-            e.family = name.to_string();
-            e.cache.clear();
-            e.runs.clear();
-        }
-    });
+    with_text_context(|e| e.set_family(name));
 }
 
 /// Rebuild the UI text engine so it can only ever use the bundled font: a fresh, empty font
@@ -344,19 +401,12 @@ pub fn set_ui_family(name: &str) {
 /// Affects the calling thread's engine only (the engine is thread-local) and drops every cached
 /// layout and glyph run with the old font system.
 pub fn use_embedded_fonts_only() {
-    ENGINE.with(|c| *c.borrow_mut() = TextEngine::embedded_only());
+    ENGINE.with(|c| *c.borrow_mut() = TextContext::embedded_only());
 }
 
 /// Restore the bundled default UI family.
 pub fn reset_ui_family() {
-    ENGINE.with(|c| {
-        let e = &mut *c.borrow_mut();
-        if e.family != e.default_family {
-            e.family = e.default_family.clone();
-            e.cache.clear();
-            e.runs.clear();
-        }
-    });
+    with_text_context(TextContext::reset_family);
 }
 
 #[cfg(test)]
@@ -458,30 +508,26 @@ mod tests {
         assert!(clipped.ends_with('…'), "clipped text ends with an ellipsis");
         assert!(text_width(&clipped, 1.4) <= wide * 0.4, "clipped text fits the budget");
         assert!(clipped.chars().count() < full.chars().count(), "clipped is shorter");
-        // A single glyph wider than the whole budget collapses to just the ellipsis (no overflow, no loop).
         assert_eq!(fit_text("東", 1.4, 1.0), "…");
         assert_eq!(fit_text("anything", 1.4, 0.0), "anything", "non-positive width is a no-op");
     }
 
     #[test]
     fn merge_runs_coalesces_only_identical_contiguous_pixels() {
-        let c = (200u8, 100u8, 50u8); // a fixed glyph colour
-        // Row 0: three contiguous pixels at one coverage, then a gap, then a different coverage.
+        let c = (200u8, 100u8, 50u8);
         let pixels = vec![
             (0, 0, c.0, c.1, c.2, 180),
             (2, 0, c.0, c.1, c.2, 180),
-            (1, 0, c.0, c.1, c.2, 180), // out of order on purpose — merge sorts first
-            (3, 0, c.0, c.1, c.2, 90),  // coverage change -> new run
-            (5, 0, c.0, c.1, c.2, 90),  // gap at x=4 -> new run
-            (0, 1, c.0, c.1, c.2, 180), // next row -> new run even though same x-start/colour
+            (1, 0, c.0, c.1, c.2, 180),
+            (3, 0, c.0, c.1, c.2, 90),
+            (5, 0, c.0, c.1, c.2, 90),
+            (0, 1, c.0, c.1, c.2, 180),
         ];
         let total: usize = pixels.len();
         let runs = merge_runs(pixels);
-        // 0..=2 merge (w=3); x=3 alone (w=1); x=5 alone (w=1); row 1 x=0 alone (w=1) => 4 runs.
         assert_eq!(runs.len(), 4, "runs split on gap, coverage change and row change");
         let merged = runs.iter().find(|r| r.dy == 0 && r.dx == 0).unwrap();
         assert_eq!(merged.w, 3, "the three contiguous equal pixels coalesce into one width-3 run");
-        // Every original lit pixel is still covered exactly once (no loss, no double-count).
         assert_eq!(runs.iter().map(|r| r.w as usize).sum::<usize>(), total);
     }
 
@@ -493,7 +539,6 @@ mod tests {
 
     #[test]
     fn merge_runs_full_contiguous_row_coalesces_to_one_run() {
-        // A whole row of identical contiguous pixels merges into a single width-N run.
         let c = (10u8, 20u8, 30u8);
         let pixels: Vec<_> = (0..8).map(|x| (x, 0i32, c.0, c.1, c.2, 255u8)).collect();
         let runs = merge_runs(pixels);
@@ -505,7 +550,6 @@ mod tests {
 
     #[test]
     fn merge_runs_all_different_colors_never_coalesce() {
-        // Adjacent pixels with distinct colours each become their own run despite contiguity.
         let pixels = vec![(0, 0, 1u8, 0u8, 0u8, 255u8), (1, 0, 2u8, 0u8, 0u8, 255u8), (2, 0, 3u8, 0u8, 0u8, 255u8)];
         let n = pixels.len();
         let runs = merge_runs(pixels);
@@ -515,13 +559,12 @@ mod tests {
 
     #[test]
     fn merge_runs_preserves_total_pixel_count() {
-        // Whatever the gaps/colours, the runs must cover exactly the input pixel count.
         let pixels = vec![
             (5, 2, 9u8, 9u8, 9u8, 200u8),
             (6, 2, 9u8, 9u8, 9u8, 200u8),
-            (8, 2, 9u8, 9u8, 9u8, 200u8), // gap at x=7
+            (8, 2, 9u8, 9u8, 9u8, 200u8),
             (0, 0, 9u8, 9u8, 9u8, 200u8),
-            (1, 0, 9u8, 9u8, 9u8, 100u8), // coverage change
+            (1, 0, 9u8, 9u8, 9u8, 100u8),
         ];
         let n = pixels.len();
         let runs = merge_runs(pixels);
@@ -530,10 +573,8 @@ mod tests {
 
     #[test]
     fn merge_runs_sorts_rows_then_columns() {
-        // Out-of-order input is row-major sorted; verify runs come out ordered and contiguous merge.
         let pixels = vec![(1, 1, 7u8, 7u8, 7u8, 50u8), (0, 0, 7u8, 7u8, 7u8, 50u8), (1, 0, 7u8, 7u8, 7u8, 50u8), (0, 1, 7u8, 7u8, 7u8, 50u8)];
         let runs = merge_runs(pixels);
-        // Row 0 (0,1) merges to one width-2 run, row 1 (0,1) merges to one width-2 run.
         assert_eq!(runs.len(), 2);
         assert_eq!(runs[0].dy, 0);
         assert_eq!(runs[0].w, 2);
@@ -557,11 +598,9 @@ mod tests {
 
     #[test]
     fn text_width_longer_string_is_at_least_as_wide() {
-        // Appending characters never narrows the line (proportional but monotone in this font).
         let base = text_width("AB", 2.0);
         let more = text_width("ABCDEF", 2.0);
         assert!(more >= base, "longer string is at least as wide ({base} vs {more})");
-        // Repeating the same glyph scales roughly linearly upward.
         let one = text_width("M", 2.0);
         let four = text_width("MMMM", 2.0);
         assert!(four > one, "four glyphs wider than one ({one} vs {four})");
@@ -590,7 +629,6 @@ mod tests {
 
     #[test]
     fn fit_text_single_overwide_glyph_collapses_to_ellipsis() {
-        // One glyph wider than the whole tiny budget -> just the ellipsis, no overflow, no infinite loop.
         let out = fit_text("W", 2.0, 0.5);
         assert_eq!(out, "…");
     }
@@ -608,7 +646,6 @@ mod tests {
 
     #[test]
     fn fit_text_tiny_positive_budget_yields_at_least_an_ellipsis() {
-        // Positive but smaller than any glyph: loop breaks immediately, output is the lone ellipsis.
         let out = fit_text("LONG STRING HERE", 1.4, 0.01);
         assert_eq!(out, "…");
         assert!(out.ends_with('…'));
@@ -616,7 +653,6 @@ mod tests {
 
     #[test]
     fn draw_text_centered_and_right_position_relative_to_width() {
-        // Centered/right helpers reduce to draw_text at a shifted origin; check they paint within bounds.
         let mut c = CpuCanvas::new(300, 40);
         c.clear(Color::rgb(0, 0, 0));
         draw_text_centered(&mut c, 150.0, 12.0, 2.0, Color::WHITE, "MID");
@@ -630,7 +666,6 @@ mod tests {
         let w = text_width("END", 2.0);
         let leftmost = (0..300).find(|&x| (0..40).any(|y| c2.pixel_at(x, y).r > 30));
         if let Some(lx) = leftmost {
-            // Text should sit in the right region: its left edge is near right_x - width.
             assert!((lx as f32) > 299.0 - w - 6.0, "right-aligned text hugs the right edge (lx={lx})");
         }
     }
@@ -675,12 +710,9 @@ mod tests {
 
     #[test]
     fn shapes_and_rasterizes_multilingual_text() {
-        // Proportional, shaping-aware width: positive for shaped scripts, zero for empty.
         assert!(text_width("東方 한국어 ABC", 2.0) > 0.0);
         assert_eq!(text_width("", 2.0), 0.0);
-        // The bundled font is loadable and reports a family.
         assert!(load_font(BUNDLED_FONT.to_vec()).is_some());
-        // Drawing actually emits visible glyph pixels (full path through fill_rect).
         let mut c = CpuCanvas::new(220, 48);
         c.clear(Color::rgb(0, 0, 0));
         draw_text(&mut c, 4.0, 4.0, 2.4, Color::WHITE, "A가");

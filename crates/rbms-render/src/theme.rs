@@ -15,7 +15,6 @@ use crate::Color;
 /// The resolved UI palette. Fields are grouped by role so a theme reads top-to-bottom.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Theme {
-    // Surfaces
     /// Window background.
     pub bg: Color,
     /// Top header bar.
@@ -27,7 +26,6 @@ pub struct Theme {
     /// Hairline dividers / outlines.
     pub divider: Color,
 
-    // Text
     /// Primary text.
     pub text: Color,
     /// Secondary / dimmed text.
@@ -39,7 +37,6 @@ pub struct Theme {
     /// Focus ring / selection rails.
     pub focus: Color,
 
-    // Song-bar list
     /// Focused row title.
     pub title_focus: Color,
     /// Unfocused row title.
@@ -55,13 +52,11 @@ pub struct Theme {
     /// Clear-lamp default (no record yet).
     pub lamp_default: Color,
 
-    // Controls
     /// Button / selected-tab fill.
     pub button: Color,
     /// Active/toggled button fill.
     pub button_active: Color,
 
-    // Meters / feedback
     /// Positive bar (progress, score graph current).
     pub good: Color,
     /// Warning / pacemaker behind.
@@ -203,11 +198,10 @@ mod tests {
 
     #[test]
     fn set_and_get_theme_round_trips() {
-        let mut t = Theme::default();
-        t.bg = Color::rgb(42, 0, 0);
+        let t = Theme { bg: Color::rgb(42, 0, 0), ..Theme::default() };
         set_theme(t);
         assert_eq!(theme().bg, Color::rgb(42, 0, 0));
-        set_theme(Theme::default()); // restore for other tests on this thread
+        set_theme(Theme::default());
         assert_eq!(theme(), Theme::default());
     }
 }

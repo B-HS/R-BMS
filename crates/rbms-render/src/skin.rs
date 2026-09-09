@@ -1,7 +1,30 @@
+use std::path::{Path, PathBuf};
+
 use rbms_model::Mode;
 use serde::Deserialize;
+use thiserror::Error;
 
 use crate::{Color, Rect};
+
+/// Why a skin file could not be turned into a [`SkinConfig`]. Carries the offending path so the
+/// caller can report which skin failed without re-deriving it.
+#[derive(Debug, Error)]
+pub enum SkinError {
+    #[error("cannot read skin file {path}")]
+    Read {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("invalid skin definition in {path}")]
+    Parse {
+        path: PathBuf,
+        /// Boxed because a RON error is far larger than the rest of this enum, and every `load`
+        /// caller would otherwise pay that size on the success path too.
+        #[source]
+        source: Box<ron::error::SpannedError>,
+    },
+}
 
 /// Data-driven skin definition (loadable from a RON file). `field_x`/`field_width` are
 /// fractions of the screen width; vertical fields (`top_y`/`judge_y`/`note_height`) and the
@@ -38,7 +61,6 @@ pub struct SkinConfig {
     pub dual_field: bool,
     /// Gap between the two fields in dual layout, as a fraction of screen width.
     pub dual_gap: f32,
-    // --- HUD presentation (data-driven so a skin restyles the play HUD without code) ---
     /// Per-judge colours (PG, GR, GD, BD, PR, MS) for the combo flash, counters and result rows.
     pub judge_colors: [[u8; 3]; 6],
     /// Full judge labels shown on the combo flash (e.g. "PERFECT").
@@ -112,9 +134,11 @@ impl Default for SkinConfig {
 }
 
 impl SkinConfig {
-    pub fn load(path: &str) -> Result<SkinConfig, String> {
-        let s = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-        ron::from_str(&s).map_err(|e| e.to_string())
+    /// Read and parse a RON skin definition from disk.
+    pub fn load(path: impl AsRef<Path>) -> Result<SkinConfig, SkinError> {
+        let path = path.as_ref();
+        let src = std::fs::read_to_string(path).map_err(|source| SkinError::Read { path: path.to_path_buf(), source })?;
+        ron::from_str(&src).map_err(|source| SkinError::Parse { path: path.to_path_buf(), source: Box::new(source) })
     }
 }
 
@@ -169,15 +193,12 @@ impl Skin {
         let n = mode.key;
         let players = (mode.player as usize).max(1);
         let field_x0 = screen_w * cfg.field_x;
-        let dual = cfg.dual_field && players >= 2 && n % players == 0;
+        let dual = cfg.dual_field && players >= 2 && n.is_multiple_of(players);
 
         let mut x = vec![0.0f32; n];
         let mut fields: Vec<(f32, f32)> = Vec::new();
         let lane_w;
         if dual {
-            // Two fields side by side (P1 left, P2 right), left-anchored and sized to stay clear of
-            // the right-hand BGA/HUD column (so DP 14K/10K never paints over the BGA or counters).
-            // Turntables sit on the OUTER edge of each field (IIDX DP), ignoring SP scratch_left.
             let per_side = n / players;
             let gap = screen_w * cfg.dual_gap;
             let dual_left = screen_w * 0.03;
@@ -281,7 +302,7 @@ impl Skin {
     pub fn note_color(&self, lane: usize) -> Color {
         if self.scratch[lane] {
             self.scratch_color
-        } else if lane % 2 == 0 {
+        } else if lane.is_multiple_of(2) {
             self.key_color
         } else {
             self.key_color_alt
@@ -305,8 +326,7 @@ mod tests {
 
     #[test]
     fn scratch_left_reorders_lanes() {
-        let mut cfg = SkinConfig::default();
-        cfg.scratch_left = true;
+        let cfg = SkinConfig { scratch_left: true, ..SkinConfig::default() };
         let skin = Skin::build(&cfg, Mode::BEAT_7K, 480.0, 640.0);
         let min_x = skin.x.iter().copied().fold(f32::MAX, f32::min);
         assert_eq!(skin.x[7], min_x, "scratch lane 7 should be leftmost");
@@ -346,7 +366,6 @@ mod tests {
 
     #[test]
     fn dual_field_clears_the_bga_column() {
-        // DP fields must stay left of the BGA so the right player field / BGA / counters never stack.
         for cfg in [SkinConfig::default(), ron::from_str("(field_width: 0.42, bga: Some((900.0,360.0,340.0,255.0)))").unwrap()] {
             let skin = Skin::build(&cfg, Mode::BEAT_14K, 1280.0, 720.0);
             let field_right = (0..16).map(|l| skin.x[l] + skin.w[l]).fold(f32::MIN, f32::max);
@@ -357,8 +376,7 @@ mod tests {
 
     #[test]
     fn dual_field_can_be_disabled() {
-        let mut cfg = SkinConfig::default();
-        cfg.dual_field = false;
+        let cfg = SkinConfig { dual_field: false, ..SkinConfig::default() };
         let skin = Skin::build(&cfg, Mode::BEAT_14K, 1280.0, 720.0);
         assert_eq!(skin.fields.len(), 1, "single-field 14K when dual_field is off");
     }
@@ -380,19 +398,15 @@ mod tests {
 
     #[test]
     fn lift_raises_judge_line_toward_top() {
-        let mut cfg = SkinConfig::default();
-        cfg.lift = 0.5;
+        let cfg = SkinConfig { lift: 0.5, ..SkinConfig::default() };
         let skin = Skin::build(&cfg, Mode::BEAT_7K, 1280.0, 720.0);
-        // judge_y = 620 - (620-60)*0.5 = 620 - 280 = 340
         assert_eq!(skin.judge_y, 340.0);
         assert!(skin.judge_y < 620.0, "lift moves the judge line up");
     }
 
     #[test]
     fn lift_clamps_above_point_nine() {
-        // lift > 0.9 clamps to 0.9: judge_y = 620 - 560*0.9 = 116.
-        let mut cfg = SkinConfig::default();
-        cfg.lift = 5.0;
+        let cfg = SkinConfig { lift: 5.0, ..SkinConfig::default() };
         let skin = Skin::build(&cfg, Mode::BEAT_7K, 1280.0, 720.0);
         assert!((skin.judge_y - 116.0).abs() < 1e-3, "lift clamps to 0.9 (got {})", skin.judge_y);
         assert!(skin.judge_y > skin.top_y, "judge line never crosses above the top edge");
@@ -400,8 +414,7 @@ mod tests {
 
     #[test]
     fn lift_clamps_negative_to_zero() {
-        let mut cfg = SkinConfig::default();
-        cfg.lift = -3.0;
+        let cfg = SkinConfig { lift: -3.0, ..SkinConfig::default() };
         let skin = Skin::build(&cfg, Mode::BEAT_7K, 1280.0, 720.0);
         assert_eq!(skin.judge_y, 620.0, "negative lift clamps to 0 (no change)");
     }
@@ -416,7 +429,6 @@ mod tests {
     #[test]
     fn note_color_scratch_keys_alternate() {
         let skin = Skin::default_for(Mode::BEAT_7K, 1280.0, 720.0);
-        // lane 7 is the scratch in 7K
         assert_eq!(skin.note_color(7), skin.scratch_color, "scratch lane uses scratch colour");
         assert_eq!(skin.note_color(0), skin.key_color, "even key lane uses key colour");
         assert_eq!(skin.note_color(2), skin.key_color, "even key lane uses key colour");
@@ -442,17 +454,14 @@ mod tests {
 
     #[test]
     fn beam_height_is_field_height_when_full_fraction() {
-        // default beam_height_frac = 1.0 -> beam_height == judge_y - top_y
         let skin = Skin::default_for(Mode::BEAT_7K, 1280.0, 720.0);
         assert!((skin.beam_height - (skin.judge_y - skin.top_y)).abs() < 1e-3);
     }
 
     #[test]
     fn beam_height_frac_clamps_to_unit_range() {
-        let mut cfg = SkinConfig::default();
-        cfg.beam_height_frac = 4.0;
+        let mut cfg = SkinConfig { beam_height_frac: 4.0, ..SkinConfig::default() };
         let skin = Skin::build(&cfg, Mode::BEAT_7K, 1280.0, 720.0);
-        // clamped to 1.0 -> full field height, not 4x
         assert!((skin.beam_height - (skin.judge_y - skin.top_y)).abs() < 1e-3);
 
         cfg.beam_height_frac = -1.0;
@@ -470,9 +479,7 @@ mod tests {
 
     #[test]
     fn sp_lanes_left_to_right_in_visual_order_no_scratch_left() {
-        // Default scratch_left=false -> keys first then scratch on the right; x increases by lane_w.
         let skin = Skin::default_for(Mode::BEAT_7K, 1280.0, 720.0);
-        // The 7 key lanes 0..7 are placed left-to-right in lane order, scratch (7) goes rightmost.
         for lane in 0..6 {
             assert!(skin.x[lane] < skin.x[lane + 1], "key lane {lane} left of {}", lane + 1);
         }
@@ -482,7 +489,6 @@ mod tests {
 
     #[test]
     fn dual_field_10k_splits_two_fields_with_outer_scratches() {
-        // 10K: key=12, player=2, scratch [5,11]; per-side = 6 lanes.
         let skin = Skin::build(&SkinConfig::default(), Mode::BEAT_10K, 1280.0, 720.0);
         assert_eq!(skin.fields.len(), 2, "10K DP renders two fields");
         let p1_right = (0..6).map(|l| skin.x[l] + skin.w[l]).fold(f32::MIN, f32::max);
@@ -496,7 +502,6 @@ mod tests {
 
     #[test]
     fn popn_single_player_is_never_dual() {
-        // POPN_9K has player=1, so dual is impossible regardless of dual_field flag.
         let skin = Skin::build(&SkinConfig::default(), Mode::POPN_9K, 1280.0, 720.0);
         assert_eq!(skin.fields.len(), 1, "single-player POPN is one field");
         assert!(skin.scratch.iter().all(|&s| !s), "POPN has no scratch lanes");
@@ -537,5 +542,36 @@ mod tests {
         let wide = Skin::default_for(Mode::BEAT_7K, 2560.0, 720.0);
         let narrow = Skin::default_for(Mode::BEAT_7K, 1280.0, 720.0);
         assert!(wide.w[0] > narrow.w[0], "wider screen yields wider SP lanes");
+    }
+
+    #[test]
+    fn loading_a_missing_skin_file_reports_the_path() {
+        let missing = std::env::temp_dir().join("rbms-render-no-such-skin.ron");
+        let err = SkinConfig::load(&missing).expect_err("a missing file cannot load");
+        assert!(matches!(err, SkinError::Read { .. }), "an unreadable path is a Read error, got {err:?}");
+        assert!(err.to_string().contains("rbms-render-no-such-skin.ron"), "the message names the file: {err}");
+        assert!(std::error::Error::source(&err).is_some(), "the io error is kept as the source");
+    }
+
+    #[test]
+    fn loading_malformed_ron_reports_a_parse_error() {
+        let path = std::env::temp_dir().join("rbms-render-broken-skin.ron");
+        std::fs::write(&path, "(field_width: this is not ron").expect("write fixture");
+        let err = SkinConfig::load(&path).expect_err("malformed RON cannot load");
+        std::fs::remove_file(&path).ok();
+        assert!(matches!(err, SkinError::Parse { .. }), "bad syntax is a Parse error, got {err:?}");
+        assert!(err.to_string().contains("rbms-render-broken-skin.ron"), "the message names the file: {err}");
+        assert!(std::error::Error::source(&err).is_some(), "the RON error is kept as the source");
+    }
+
+    #[test]
+    fn loading_a_valid_skin_file_fills_the_unset_fields_with_defaults() {
+        let path = std::env::temp_dir().join("rbms-render-valid-skin.ron");
+        std::fs::write(&path, "(field_width: 0.5, lift: 0.25)").expect("write fixture");
+        let cfg = SkinConfig::load(&path).expect("a well-formed skin loads");
+        std::fs::remove_file(&path).ok();
+        assert_eq!(cfg.field_width, 0.5);
+        assert_eq!(cfg.lift, 0.25);
+        assert_eq!(cfg.note_height, SkinConfig::default().note_height, "unset fields keep their defaults");
     }
 }

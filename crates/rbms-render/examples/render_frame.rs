@@ -2,7 +2,7 @@ use std::io::Write;
 
 use rbms_chart::{detect_mode, to_model};
 use rbms_model::NoteKind;
-use rbms_render::{CpuCanvas, HudView, Skin, SkinConfig, render_hud, render_key_bomb, render_playfield};
+use rbms_render::{CpuCanvas, HudView, PlayfieldView, Skin, SkinConfig, render_hud, render_key_bomb, render_playfield_view};
 
 fn main() {
     let path = std::env::args().nth(1).expect("usage: render_frame <chart> [out.ppm] [--sc-left] [--lift F]");
@@ -23,9 +23,7 @@ fn main() {
     let microtime = pick - 350_000;
 
     let (w, h) = (1280u32, 720u32);
-    let mut cfg = SkinConfig::default();
-    cfg.scratch_left = sc_left;
-    cfg.lift = lift;
+    let cfg = SkinConfig { scratch_left: sc_left, lift, ..SkinConfig::default() };
     let skin = Skin::build(&cfg, mode, w as f32, h as f32);
     let mut canvas = CpuCanvas::new(w, h);
     let mut beam_on = vec![i64::MIN; mode.key];
@@ -34,8 +32,8 @@ fn main() {
             beam_on[lane] = microtime;
         }
     }
-    render_playfield(&mut canvas, &model.timelines, microtime, 1.5, &skin, &beam_on, &[], false);
-    // Three key bombs at different ages (0/35/70 ms) and judgments (PG/GR/GD) to show the burst.
+    let field = PlayfieldView { timelines: &model.timelines, microtime, hispeed: 1.5, beam_on: &beam_on, beam_off: &[], constant: false };
+    render_playfield_view(&mut canvas, &skin, &field);
     let mut bomb = vec![(i64::MIN, 0u8); mode.key];
     for (k, lane) in [0usize, 2, mode.key.saturating_sub(1)].into_iter().enumerate() {
         if lane < bomb.len() {
