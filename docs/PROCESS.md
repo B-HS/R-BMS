@@ -2,7 +2,7 @@
 
 > 새 세션은 **이 문서부터** 읽는다. 현재 상태·아키텍처·실행법·할 일의 SSOT. (ai-process.md 원칙 1·14)
 > 베이스 룰: `~/.claude/CLAUDE.md` + convention. Rust 프로젝트 → TS 전용 규칙(arrow 등) 비적용, **공통 원칙**(주석 금지·설명은 docs/·정확 네이밍·근본 해결·공식문서 우선·검증 후 진행)은 그대로.
-> 위치: `/Users/gkn/R-BMS`. 빌드 `cargo build`, 테스트 `cargo test --workspace`(**Phase C 리뷰 반영 후 실측 1,656 통과 · 0 실패 · 3 ignored**). lint 는 이제 게이트다 — `cargo fmt --all --check` 와 `cargo clippy --workspace --all-targets --all-features -- -D warnings` 가 CI 필수 통과 조건이고 툴체인은 `rust-toolchain.toml` 로 `1.95.0` 고정. 실행은 §5(`./start.sh`).
+> 위치: `/Users/gkn/R-BMS`. 빌드 `cargo build`, 테스트 `cargo test --workspace`(**Phase F 최종 검증 실측 2232 통과 · 0 실패 · 2 ignored**). lint 는 이제 게이트다 — `cargo fmt --all --check` 와 `cargo clippy --workspace --all-targets --all-features -- -D warnings` 가 CI 필수 통과 조건이고 툴체인은 `rust-toolchain.toml` 로 `1.95.0` 고정. 실행은 §5(`./start.sh`).
 > git: **dev(작업)/prod(배포) 브랜치 모델**(CI는 dev, 릴리스는 prod → `docs/ci-release.md`). **커밋 메시지에 co-author(Claude) 넣지 않음**(사용자 명시 지시), 작성자 `Hyunseok Byun <gumyoincirno@gmail.com>`. `target`·`Cargo.lock`·라이브러리 차트 커밋 금지(.gitignore).
 > 다음 할 일(로드맵)은 **`ROADMAP.md`**, 백엔드 설계는 **`docs/backend/`**, 배포/CI는 **`docs/ci-release.md`**.
 
@@ -78,7 +78,7 @@
   - 미실시: 실기 GUI 확인(H1 은 게이트·문서 변경이라 렌더 경로 무변경)
 - [x] D 판정 패리티 완성 + JUDGE 탭 노출(2026-09-10, 명세 `docs/plan/2026-09-09-phase-d-spec.md`; D0~D5 순차 구현 + 적대 리뷰 23건 반영, history `docs/history/2026-09-09-phase-d-judge-parity.md`, 발산 `docs/acknowledge/reference-divergences.md` §Phase D) — J17 알고리즘 4종(기본값 `Combo` 전환)·J20 9게이지+J26 GAS·J21~J23(5세트×9원소 게이지+PMS fixjudge)·J9/A10 정역 2키(BSS/MSS 앱 배선)·J24 CN/HCN 2단계 폴드·J25 LN MODE(모델+리플레이+스코어 키 전부 동일 축)·J6 24K Mode 신설·어시스트 램프 강등(`rule_version` 게이팅). 게이트(Fable 실측): fmt 통과, `cargo test --workspace` **1876 통과 · 0 실패 · 3 ignored**(D 착수 전 1,656), `cargo clippy --workspace --all-targets -- -D warnings` 0 경고, 금지어 grep 0, 신규 `//` 주석 0. HEAD `0c20fa9` 위 워킹트리 변경(미커밋)
 - [ ] E1~E6 스킨 완전 커스터마이징 — 프리미티브(PNG 골든·textured quad·클립·아틀라스)·타이머/키프레임·프로퍼티 바인딩·JSON+Lua 로더·화면 이식·스킨 선택 UI
-- [ ] F UX·기능 고도화 — 옵션 오버레이·토스트·백그라운드 로딩·리트라이/다음곡·타깃/PACEMAKER·그래프·정렬/필터/즐겨찾기·HID/SUD·floating hi-speed·FLIP/BATTLE·리사이즈 레터박스 등
+- [x] F UX·기능 고도화(2026-09-09~10, 명세 `docs/plan/2026-09-09-phase-f-spec.md`; F0~F4 5갈래 병렬 구현 → 통합(`docs/history/2026-09-10-phase-f-integration.md`) → 적대 리뷰 21건(critical 1·major 다수) 반영 19건·발산 등록 2건 → 최종 검증, history `docs/history/2026-09-09-phase-f-ux.md`, 발산 `docs/acknowledge/reference-divergences.md` §Phase F) — 옵션 오버레이(결정 3, 11행)·토스트/상태줄·백그라운드 로딩(폴더스캔/표fetch/키음·BGA 디코드 워커화)·정렬 12종(레퍼런스 `BarSorter` 패리티, 오름차순+무기록 마지막)·필터 패널(레벨/모드/클리어/즐겨찾기)·타깃 8종(고정레이트 11종 전체선택+RANK NEXT)/PACEMAKER 실시간·결과 3분할 그래프(GAUGE/TIMING/JUDGE)·27분위 랭크바. 최종 게이트(Fable 실측, 수정 없이 재검증): fmt 통과(no-op), clippy `-D warnings` 0 경고, `cargo test --workspace` **2232 통과 · 0 실패 · 2 ignored**(테스트 바이너리 38개 전부 ok), 금지어·금지주석 0건. 옵션 오버레이/결과+그래프/필터+토스트 3화면 헤드리스 PNG 육안 확인(임시 하네스, 확인 후 원복). 미구현 2건(BPM 정렬=시작BPM vs 레퍼런스 최고BPM · 차트파싱 미워커화)과 LANE OPTION FLIP/BATTLE 미배선은 발산 문서에 사유·해소조건 등록 후속(경미): 토스트가 곡선택 우하단 힌트 줄과 겹침 — 토스트를 힌트 위로 올리거나 표시 중 힌트를 숨길 것
 - [ ] G 데이터 스케일·롱테일 — 곡DB(rusqlite)·스코어DB·코스·연습 모드·gilrs/MIDI·시스템 사운드·복수 IR
 - [ ] R prod 브랜치·브랜치 보호·첫 릴리스 v0.1.0
 
@@ -257,6 +257,9 @@ $BIN --replay ~/.config/rbms/replays/<f>.ron  # 리플레이 재생
   - `2026-06-07-select-autoplay-preview` — 곡선택 **하이브리드 미리듣기**(#PREVIEW 파일 or 곡 autoplay): 백그라운드 코디네이터 스레드(파싱→autoplay 키음 스케줄→전체 키음 병렬 디코드, 취소가능)·위상연속 루프(+2초 tail)·`load()`와 디코드 헬퍼 공통화. 2R 적대적 리뷰(1R 8건·2R 1건 반영). 헤드리스 통합테스트 추가(889통과).
   - `2026-06-07-first-launch-onboarding` — `.dmg` 대비 **첫 실행/온보딩**: 무인자 GUI 진입(usage+exit 제거)·초기 스캔 백그라운드화(SCANNING+곡수 카운트, 창 즉시 표시)·첫 실행 빈 곡선택 온보딩 CTA(`empty_hint`)·Esc-중-스캔 종료 회귀 수정. 집중 적대 리뷰 1건 반영.
   - `2026-09-09-phase-a-accuracy-hotfix` — Phase A 정확성 핫픽스: 판정 윈도우·게이지 발산 J1~J19+J14(見逃し POOR 슬롯·5K/PMS 윈도우·LN 마진 등, 상세는 `reference-divergences.md`)·오디오 마스터 게인 재조정+seqlock 클럭·IR 타임아웃 강등 제거·폰트 캐시 LRU+골든 하네스 강화·`#SWITCH`계열 결함·앱 통합(IR 제출 게이트·assist 플래그·원자적 저장 등). 갈래별 병렬 구현→적대적 리뷰 1라운드→반영.
+  - `2026-09-09-phase-d-judge-parity` — Phase D 판정 패리티 완성: `JudgeAlgorithm` 4종·9게이지+GAS·BSS/MSS·CN/HCN 2단계 폴드·LN MODE 전축 통일·24K Mode 신설·어시스트 램프 강등. 적대 리뷰 23건 반영.
+  - `2026-09-10-phase-f-integration` — Phase F 갈래 합류: F0~F4 교차 배선(결과 fast/slow 스크래치 분리·모드 라벨·LETTERBOX 매프레임 반영·텍스트에디터 통일·PACEMAKER HUD·re-export·정렬 방향 확인). `stage/play.rs` 800행 초과 분리.
+  - `2026-09-09-phase-f-ux` — Phase F 최종 검증(코드 수정 없음, `cargo fmt --all`만 적용): fmt/clippy(`-D warnings`)/`cargo test --workspace`(2232통과·0실패) 전부 green, 금지어·금지주석 0건, 옵션 오버레이·결과 그래프·필터+토스트 3화면 헤드리스 PNG 육안 확인.
 - **새 세션 진입점 = 이 PROCESS.md**(CLAUDE.md가 지정). 별도 글로벌 하네스 메모리는 사용 안 함 — SSOT는 docs/.
 
 ## 9. 작업 규칙(요약)

@@ -153,3 +153,28 @@
 | C-S4 | §1.1 표 — `App`/`AppShared` 해체 | 두 구조체는 크레이트 루트(`lib.rs`)에 유지, 대신 `assets.rs` 와 `stage/select/{preview,scene}.rs` 분리 | 모든 화면·`app_*` 모듈이 크레이트 루트의 **자손**이라 `AppShared` 의 비공개 필드를 볼 수 있다. 두 구조체를 형제 모듈로 옮기면 필드 69개를 전부 `pub(crate)` 로 열어야 하며, 얻는 것은 짧은 파일 하나뿐이다 |
 
 **와이어 변경 1건(리뷰 반영)**: IR 제출의 `judge_algorithm` 이 하드코딩 `"Combo"` → 실제 정책 `session.judge().algorithm().name()`(기본값에서 `"Duration"`) 으로 바뀌었다. 서버는 이 필드를 검증 없는 `varchar(16)` 로 그대로 저장하므로(`web/src/server/dto/score.ts`, `schema.ts`) 계약 영향은 없고, 바뀐 것은 "메타데이터가 클라이언트의 실제 후보 선택 정책과 일치한다" 는 점뿐이다. C-D1 대로 기본값 자체(`Duration`)는 그대로다 — 즉 이제 제출값이 C-D1 을 정직하게 보고한다. `docs/reference/ir-api.md` 의 예시도 함께 정정했다.
+
+## Phase F — 화면·설정 확장 (2026-09-10, 통합 단계 등록)
+
+> 근거: `docs/plan/2026-09-09-phase-f-spec.md`. 아래는 F0~F4 갈래가 합류하면서 오케스트레이터가 등록한 차이다. 어느 것도 판정 결과를 바꾸지 않는다.
+>
+> **2026-09-10 적대 리뷰 반영**: 밴드 타깃 EX 의 2단 나눗셈 off-by-one(critical), FAST/SLOW 가 리플레이·오토플레이에서 0 으로 나오던 회귀, 옵션 오버레이가 마우스·자동 전이로 브라우저 밖까지 살아남던 문제, SORT 의 진실 출처 이중화, HI-SPEED 상한 규칙 불일치, LANE COVER 100% 에서 hispeed 가 1.0 으로 스냅하던 문제, LEVEL 정렬의 동률 폴백을 수정했다. `ScoreTarget` 은 레퍼런스 고정 레이트 11종 전부(기본 `RATE_AAA`)로 넓혔고, 폰트 다이얼로그·난이도표 파일 파싱·`#PREVIEW` 클립 디코드를 워커로 옮겼다.
+
+| # | 항목 | rbms | 레퍼런스 구현 | 상태 |
+|---|---|---|---|---|
+| F-D1 | **`dj_rank_label` 의 등급 축이 "밴드 3등분"** | `crates/rbms-render/src/result/grade.rs` 의 `BAND_GRADE_LABELS` 가 8개 밴드를 각각 low/mid/high 3등분해 `-`/무표시/`+` 를 붙인다. 결과적으로 AAA 밴드는 step 24=`AAA-`, 25=`AAA`, 26=`MAX-` 이다 | `TargetProperty.java:118-137` 의 *타깃 이름* 축은 `RATE_A-`=17/27 … `RATE_AAA-`=23/27, `RATE_AAA`=24/27, `RATE_AAA+`=25/27, `RATE_MAX-`=26/27 — 같은 이름이 한 스텝 아래에 있다 | **의도적 차이.** 큰 글자·밴드 색·랭크바 세그먼트가 서로 어긋나지 않는 쪽(밴드 우선)을 택했고, `dj_rank`(밴드 판정) 자체는 손대지 않았다. 레퍼런스의 고정 레이트 타깃 11종은 `apps/rbms-player/src/target.rs` 의 `RATE_TARGETS` 가 원문 비율 그대로 들고 있으므로, "타깃 이름" 축이 필요한 곳에서는 그쪽이 정본이다 |
+| F-D2 | **27분위 눈금이 별도 함수** | 눈금은 `draw_rank_bar` 가 아니라 신설 `draw_rank_bar_stepped`(`grade.rs`)에 있고, 결과 화면만 그것을 부른다 | 해당 없음(rbms 내부 배치 문제) | 같은 바를 곡선택의 기록 패널(`crates/rbms-render/src/select.rs`)도 그리고 그 골든이 별도 파일이라, 한 화면의 더 고운 눈금 때문에 다른 화면의 픽셀을 옮기지 않았다 |
+| F-D3 | **곡목록 정렬 방향** | `apps/rbms-player/src/stage/select/list.rs` 의 `sort_cmp` 가 CLEAR/SCORE/MISS COUNT/LAST UPDATE 를 **오름차순**(못한 것 먼저)으로, 기록 없는 곡을 **마지막**으로 둔다 | `BarSorter.java:139,159-162,219` 가 정확히 그렇게 한다(`o1 - o2`, 무기록이면 `return 1`) | **패리티 달성.** 통합 단계에서 레퍼런스를 직접 열어 재확인했다. 아직 구현되지 않은 `RivalClear`/`RivalScore` 의 문서 주석도 같은 방향으로 정정해 두었다(`crates/rbms-config/src/sort.rs`) |
+| F-D4 | **BPM 정렬 축이 시작 BPM** | `sort_cmp` 의 `SortMode::Bpm` 이 `SongEntry.init_bpm`(헤더 `#BPM`)을 비교한다 | `BarSorter.java:78` 은 `getMaxbpm()` — 차트 전체의 최고 BPM 을 쓴다 | **미해소(데이터 부족).** 헤더 전용 스캔이 만드는 `SongEntry`(`crates/rbms-library/src/lib.rs`)에 최고 BPM 필드가 없다. 곡 DB 에 max BPM 이 생기면 비교자 한 줄로 해소된다 |
+
+**Phase F 미구현으로 남긴 것** (레퍼런스 차이가 아니라 rbms 진행 상태):
+
+- `SortMode::Length` / `SortMode::Duration` — LENGTH 는 곡 길이(`BarSorter.java:96`), DURATION 은 평균 판정 오차(`:201` `getAvgjudge`). 헤더 전용 스캔에도 `ScoreRecord` 에도 없어 둘 다 제목 폴백으로 둔다. 곡 DB 또는 `ScoreRecord.avg_judge` 가 생기면 해소된다.
+- `SortMode::RivalClear` / `SortMode::RivalScore` — 라이벌 기록이 붙는 페이즈까지 제목 폴백.
+- `ScoreTarget::Rival` 의 INDEX / RANK(n위) / NEXT(자기 위 n번째) 3축(`RivalTargetProperty`) — 현재는 랭킹 캐시에서 점수가 가장 높은 라이벌 하나. 설정 행이 생기면 `target::TargetContext.rival` 을 넓히면 된다.
+- **LANE OPTION 의 FLIP / BATTLE / BATTLE AUTO-SC** — 설정 쪽(`LaneOption`, `recorded_value()`, `is_assist()`, 라벨, descriptor 행)은 완비됐지만 런에 반영되지 않는다. 반영에는 ① 모델의 레인 재배치와 SP→DP 모드 승격(5K→10K, 7K→14K), `active_keys`/`active_reverse_keys` 재구성, `auto_lanes` 세팅이 `app_play.rs::load` 에, ② BATTLE 계열 어시스트 게이트가 `lib.rs::ir_submission_block_reason` 에 필요하다. **그때까지 이 행은 오버레이뿐 아니라 설정 화면에서도 감춘다**(`settings.rs::unbuilt_row`, `visible: never`) — 고를 수는 있는데 런에 아무 영향이 없는 행은 "선택된 옵션"으로 읽히기 때문이다. descriptor 자체는 남아 있어 저장값 왕복은 그대로고, 구현이 끝나면 `row(...)` 로 되돌리는 한 줄이면 된다.
+- **차트 파싱이 아직 프레임 루프에서 돈다** — `stage/loading.rs` 의 `LoadingTask::Song` 이 `update` 안에서 `AppShared::load()` 를 동기 호출한다(파일 읽기 + `rbms_parser::parse_with` + `to_model` + md5/sha256). 스펙 §F4-2 의 `Loading::Parse` 단계는 아직 없고, 이 구간에는 진행바도 취소 플래그도 없다. 워커로 옮기려면 `load()` 를 "파싱(워커) → 적용(메인)" 두 단계로 쪼개야 하는데, 그 함수가 `AppShared` 의 스킨·오디오·키설정까지 함께 세팅하고 있어 `app_play.rs` 전반의 구조 변경을 동반한다. 키사운드·BGA·표 fetch·폴더 스캔·rfd 다이얼로그 3종·`#PREVIEW` 클립 디코드는 전부 워커로 옮겨져 있으므로, 남은 것은 이 한 구간뿐이다.
+- **차트 간 그린넘버 유지(진짜 floating hi-speed)** — 레퍼런스는 `PlayConfig.java:22-26` 에서 `duration`(그린넘버 ms, 기본 500, 1~10000)을 `hispeed` 와 별도로 저장하고 차트 진입마다 `resetHispeed(basebpm)` 로 speed 를 역산한다. `rbms-config` 에 해당 필드가 없어 현재는 "런 내부 고정"까지다. 필드가 생기면 `hispeed_for_green` 을 그대로 재사용한다.
+- **PREVIEW FADE 가 단일 값** — config 는 `preview_fade_ms` 하나라 페이드 인/아웃이 같은 길이다(스펙 본문의 진입 200ms / 이탈 150ms 와 다름).
+- **곡목록 필터의 레벨·모드·클리어 축이 브라우저 로컬** — 곡선택을 떠나면 초기화된다. 영속·즉시 적용에는 `LibraryOptions` 또는 `AppShared` 에 필드가 필요하다. 같은 이유로 필터 패널은 키보드 전용이다(`Hot` 에 패널 행 variant 가 없어 클릭을 보고할 수 없다).
+- **Shift+F3 역정렬은 ShiftRight 로만** — 옵션 오버레이의 홀드 키(`app_options.rs::HOLD_KEY`)가 `ShiftLeft` press/release 를 브라우저보다 먼저 소비한다. 단 브라우저가 텍스트를 받는 상태(검색·기록 모달·필터 패널)에서는 `StageHandler::holds_keys` 가 오버레이를 물리므로 `ShiftLeft` 가 그대로 검색창에 간다.
