@@ -1,4 +1,6 @@
-use crate::{Color, Rect, Renderer};
+use std::collections::HashMap;
+
+use crate::{BYTES_PER_PIXEL, BlendFactor, BlendMode, CHANNEL_MAX, Color, QuadParams, Rect, Renderer, TextureFilter, TextureId, UvRect};
 
 /// Bits dropped from each averaged channel in [`CpuCanvas::block_signature`]. Quantizing to
 /// `256 >> SIGNATURE_QUANT_SHIFT` levels keeps a golden signature stable against sub-pixel
@@ -11,16 +13,109 @@ const SIGNATURE_QUANT_SHIFT: u32 = 3;
 const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 
-/// Software RGBA8 canvas. Deterministic reference backend for tests and headless checks.
+/// One registered texture: RGBA8 pixels, not premultiplied.
+struct Texture {
+    width: u32,
+    height: u32,
+    rgba: Vec<u8>,
+}
+
+/// Multiply a sampled texel by a quad's tint, channel by channel including alpha. `255` is the
+/// identity, so an untinted quad samples through unchanged.
+pub fn apply_tint(src: Color, tint: Color) -> Color {
+    let mul = |a: u8, b: u8| ((a as u32 * b as u32) / CHANNEL_MAX) as u8;
+    Color { r: mul(src.r, tint.r), g: mul(src.g, tint.g), b: mul(src.b, tint.b), a: mul(src.a, tint.a) }
+}
+
+/// Evaluate one blend factor in `0..=CHANNEL_MAX` fixed point for a single channel.
+fn blend_factor(f: BlendFactor, src_channel: u32, src_alpha: u32, dst_channel: u32) -> u32 {
+    match f {
+        BlendFactor::Zero => 0,
+        BlendFactor::One => CHANNEL_MAX,
+        BlendFactor::SrcAlpha => src_alpha,
+        BlendFactor::OneMinusSrcAlpha => CHANNEL_MAX - src_alpha,
+        BlendFactor::SrcColor => src_channel,
+        BlendFactor::OneMinusDstColor => CHANNEL_MAX - dst_channel,
+    }
+}
+
+fn blend_channel(src: u8, src_alpha: u8, dst: u8, src_factor: BlendFactor, dst_factor: BlendFactor) -> u8 {
+    let (s, sa, d) = (src as u32, src_alpha as u32, dst as u32);
+    let weighted = s * blend_factor(src_factor, s, sa, d) + d * blend_factor(dst_factor, s, sa, d);
+    (weighted / CHANNEL_MAX).min(CHANNEL_MAX) as u8
+}
+
+/// Combine an already-tinted source colour with what the target holds, under one blend mode.
+///
+/// This is the reference the golden images are measured against, and the same
+/// [`BlendMode::factors`] table the GPU pipelines are built from, so both backends agree by
+/// construction. Weighted sums are truncated in `0..=CHANNEL_MAX` fixed point and saturated at the
+/// top, matching [`CpuCanvas::fill_rect`]'s existing source-over arithmetic exactly for
+/// [`BlendMode::Alpha`].
+pub fn apply_blend(src: Color, dst: Color, mode: BlendMode) -> Color {
+    let f = mode.factors();
+    Color {
+        r: blend_channel(src.r, src.a, dst.r, f.src_color, f.dst_color),
+        g: blend_channel(src.g, src.a, dst.g, f.src_color, f.dst_color),
+        b: blend_channel(src.b, src.a, dst.b, f.src_color, f.dst_color),
+        a: blend_channel(src.a, src.a, dst.a, f.src_alpha, f.dst_alpha),
+    }
+}
+
+/// Software RGBA8 canvas. Deterministic reference backend for tests and headless checks, and the
+/// truth the golden images are compared against.
 pub struct CpuCanvas {
     width: u32,
     height: u32,
     pixels: Vec<u8>,
+    /// Registered textures by handle. A released slot stays as `None` so its id is never handed out
+    /// again.
+    textures: Vec<Option<Texture>>,
+    keys: HashMap<String, TextureId>,
+    /// One entry per live `push_clip`, each already intersected with the clip below it. `None`
+    /// means the intersection came out empty and nothing may draw.
+    clips: Vec<Option<Rect>>,
 }
 
 impl CpuCanvas {
     pub fn new(width: u32, height: u32) -> Self {
-        CpuCanvas { width, height, pixels: vec![0; (width * height * 4) as usize] }
+        CpuCanvas {
+            width,
+            height,
+            pixels: vec![0; width as usize * height as usize * BYTES_PER_PIXEL],
+            textures: Vec::new(),
+            keys: HashMap::new(),
+            clips: Vec::new(),
+        }
+    }
+
+    /// How many textures are live, so a test can prove a reload released what it replaced.
+    pub fn live_texture_count(&self) -> usize {
+        self.textures.iter().filter(|t| t.is_some()).count()
+    }
+
+    /// Depth of the clip stack, so a test can prove pushes and pops balance.
+    pub fn clip_depth(&self) -> usize {
+        self.clips.len()
+    }
+
+    /// The pixel rectangle drawing is currently confined to as `(x0, y0, x1, y1)` with the far
+    /// edges exclusive, or `None` when nothing can draw.
+    ///
+    /// Logical and physical pixels are the same size here, so the clip only has to be rounded to
+    /// whole pixels and held inside the canvas. Rounding matches what the GPU backend does before
+    /// handing the rectangle to a scissor test, so both backends clip the same pixels.
+    fn clip_bounds(&self) -> Option<(i64, i64, i64, i64)> {
+        let rect = match self.clips.last() {
+            Some(None) => return None,
+            Some(Some(r)) => *r,
+            None => Rect::new(0.0, 0.0, self.width as f32, self.height as f32),
+        };
+        let x0 = (rect.x.round() as i64).max(0);
+        let y0 = (rect.y.round() as i64).max(0);
+        let x1 = ((rect.x + rect.w).round() as i64).min(self.width as i64);
+        let y1 = ((rect.y + rect.h).round() as i64).min(self.height as i64);
+        (x1 > x0 && y1 > y0).then_some((x0, y0, x1, y1))
     }
 
     pub fn pixels(&self) -> &[u8] {
@@ -75,12 +170,116 @@ impl CpuCanvas {
     }
 }
 
+/// One texel, with out-of-range coordinates clamped to the edge — the same wrap behaviour the GPU
+/// sampler is configured with, so a bilinear tap at a texture border reads the same colour in both
+/// backends.
+fn texel(t: &Texture, x: i64, y: i64) -> Color {
+    let x = x.clamp(0, t.width as i64 - 1) as usize;
+    let y = y.clamp(0, t.height as i64 - 1) as usize;
+    let i = (y * t.width as usize + x) * BYTES_PER_PIXEL;
+    Color { r: t.rgba[i], g: t.rgba[i + 1], b: t.rgba[i + 2], a: t.rgba[i + 3] }
+}
+
+fn sample(t: &Texture, uv: (f32, f32), filter: TextureFilter) -> Color {
+    let (tw, th) = (t.width as f32, t.height as f32);
+    let (fx, fy) = (uv.0 * tw, uv.1 * th);
+    match filter {
+        TextureFilter::Nearest => texel(t, fx.floor() as i64, fy.floor() as i64),
+        TextureFilter::Linear => {
+            let (cx, cy) = (fx - 0.5, fy - 0.5);
+            let (bx, by) = (cx.floor(), cy.floor());
+            let (rx, ry) = (cx - bx, cy - by);
+            let (bx, by) = (bx as i64, by as i64);
+            let corners = [texel(t, bx, by), texel(t, bx + 1, by), texel(t, bx, by + 1), texel(t, bx + 1, by + 1)];
+            let lerp = |a: u8, b: u8, r: f32| a as f32 + (b as f32 - a as f32) * r;
+            let mix = |pick: fn(&Color) -> u8| {
+                let top = lerp(pick(&corners[0]), pick(&corners[1]), rx);
+                let bottom = lerp(pick(&corners[2]), pick(&corners[3]), rx);
+                (top + (bottom - top) * ry).round().clamp(0.0, CHANNEL_MAX as f32) as u8
+            };
+            Color { r: mix(|c| c.r), g: mix(|c| c.g), b: mix(|c| c.b), a: mix(|c| c.a) }
+        }
+    }
+}
+
+/// The screen-to-destination mapping for one quad, resolved once instead of per pixel.
+struct QuadMap {
+    rotated: bool,
+    sin: f32,
+    cos: f32,
+    anchor: (f32, f32),
+    origin: (f32, f32),
+    center: (f32, f32),
+    size: (f32, f32),
+}
+
+impl QuadMap {
+    fn new(p: &QuadParams) -> QuadMap {
+        let (sin, cos) = p.angle_deg.to_radians().sin_cos();
+        QuadMap {
+            rotated: p.is_rotated(),
+            sin,
+            cos,
+            anchor: (p.dst.x + p.center.0, p.dst.y + p.center.1),
+            origin: (p.dst.x, p.dst.y),
+            center: p.center,
+            size: (p.dst.w, p.dst.h),
+        }
+    }
+
+    /// Where a point inside the destination lands on screen. Positive angles turn clockwise, which
+    /// is what a skin's counter-clockwise y-up `angle` becomes once the loader negates it.
+    fn to_screen(&self, local: (f32, f32)) -> (f32, f32) {
+        let (dx, dy) = (local.0 - self.center.0, local.1 - self.center.1);
+        (self.anchor.0 + dx * self.cos - dy * self.sin, self.anchor.1 + dx * self.sin + dy * self.cos)
+    }
+
+    /// Where the centre of pixel `(x, y)` falls inside the destination, or `None` when it falls
+    /// outside it. Sampling by pixel centre is what the GPU rasterizer does, so both backends
+    /// cover the same pixels.
+    fn local_at(&self, x: i64, y: i64) -> Option<(f32, f32)> {
+        let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+        let (lx, ly) = if self.rotated {
+            let (dx, dy) = (px - self.anchor.0, py - self.anchor.1);
+            (dx * self.cos + dy * self.sin + self.center.0, -dx * self.sin + dy * self.cos + self.center.1)
+        } else {
+            (px - self.origin.0, py - self.origin.1)
+        };
+        ((0.0..self.size.0).contains(&lx) && (0.0..self.size.1).contains(&ly)).then_some((lx, ly))
+    }
+
+    /// The pixel rectangle the quad can possibly touch, as `(x0, y0, x1, y1)` with the far edges
+    /// exclusive.
+    fn pixel_bounds(&self) -> (i64, i64, i64, i64) {
+        if !self.rotated {
+            let (x, y, w, h) = (self.origin.0, self.origin.1, self.size.0, self.size.1);
+            return (x.floor() as i64, y.floor() as i64, (x + w).ceil() as i64, (y + h).ceil() as i64);
+        }
+        let (w, h) = self.size;
+        let mut min = (f32::INFINITY, f32::INFINITY);
+        let mut max = (f32::NEG_INFINITY, f32::NEG_INFINITY);
+        for local in [(0.0, 0.0), (w, 0.0), (0.0, h), (w, h)] {
+            let (sx, sy) = self.to_screen(local);
+            min = (min.0.min(sx), min.1.min(sy));
+            max = (max.0.max(sx), max.1.max(sy));
+        }
+        (min.0.floor() as i64, min.1.floor() as i64, max.0.ceil() as i64, max.1.ceil() as i64)
+    }
+}
+
+/// Interpolate the source rectangle at a point given as a share of the destination.
+fn uv_at(src: &UvRect, local: (f32, f32), size: (f32, f32)) -> (f32, f32) {
+    let (rx, ry) = (local.0 / size.0, local.1 / size.1);
+    (src.u0 + rx * (src.u1 - src.u0), src.v0 + ry * (src.v1 - src.v0))
+}
+
 impl Renderer for CpuCanvas {
     fn size(&self) -> (u32, u32) {
         (self.width, self.height)
     }
 
     fn clear(&mut self, color: Color) {
+        self.clips.clear();
         for px in self.pixels.chunks_exact_mut(4) {
             px[0] = color.r;
             px[1] = color.g;
@@ -90,10 +289,13 @@ impl Renderer for CpuCanvas {
     }
 
     fn fill_rect(&mut self, rect: Rect, color: Color) {
-        let x0 = rect.x.floor().max(0.0) as i64;
-        let y0 = rect.y.floor().max(0.0) as i64;
-        let x1 = (rect.x + rect.w).ceil().min(self.width as f32) as i64;
-        let y1 = (rect.y + rect.h).ceil().min(self.height as f32) as i64;
+        let Some((cx0, cy0, cx1, cy1)) = self.clip_bounds() else {
+            return;
+        };
+        let x0 = (rect.x.floor() as i64).max(cx0);
+        let y0 = (rect.y.floor() as i64).max(cy0);
+        let x1 = ((rect.x + rect.w).ceil() as i64).min(cx1);
+        let y1 = ((rect.y + rect.h).ceil() as i64).min(cy1);
         let sa = color.a as u32;
         let ia = 255 - sa;
         for y in y0..y1 {
@@ -111,6 +313,83 @@ impl Renderer for CpuCanvas {
                 self.pixels[i + 3] = 255;
             }
         }
+    }
+
+    fn register_texture(&mut self, key: &str, rgba: &[u8], width: u32, height: u32) -> TextureId {
+        let mut data = rgba.to_vec();
+        data.resize(width as usize * height as usize * BYTES_PER_PIXEL, 0);
+        let texture = Texture { width, height, rgba: data };
+        if let Some(&id) = self.keys.get(key)
+            && let Some(slot) = self.textures.get_mut(id.0 as usize)
+        {
+            *slot = Some(texture);
+            return id;
+        }
+        let id = TextureId(self.textures.len() as u32);
+        self.textures.push(Some(texture));
+        self.keys.insert(key.to_string(), id);
+        id
+    }
+
+    fn release_texture(&mut self, tex: TextureId) {
+        if let Some(slot) = self.textures.get_mut(tex.0 as usize) {
+            *slot = None;
+        }
+        self.keys.retain(|_, id| *id != tex);
+    }
+
+    fn texture_size(&self, tex: TextureId) -> Option<(u32, u32)> {
+        self.textures.get(tex.0 as usize).and_then(|t| t.as_ref()).map(|t| (t.width, t.height))
+    }
+
+    fn draw_textured_quad(&mut self, tex: TextureId, params: QuadParams) {
+        if !(params.dst.w > 0.0 && params.dst.h > 0.0) {
+            return;
+        }
+        let Some((cx0, cy0, cx1, cy1)) = self.clip_bounds() else {
+            return;
+        };
+        let Some(Some(texture)) = self.textures.get(tex.0 as usize) else {
+            return;
+        };
+        if texture.width == 0 || texture.height == 0 {
+            return;
+        }
+        let map = QuadMap::new(&params);
+        let (bx0, by0, bx1, by1) = map.pixel_bounds();
+        let (x0, y0) = (bx0.max(cx0), by0.max(cy0));
+        let (x1, y1) = (bx1.min(cx1), by1.min(cy1));
+        let stride = self.width as usize;
+        let pixels = &mut self.pixels;
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let Some(local) = map.local_at(x, y) else {
+                    continue;
+                };
+                let src = apply_tint(sample(texture, uv_at(&params.src, local, map.size), params.filter), params.tint);
+                let i = (y as usize * stride + x as usize) * BYTES_PER_PIXEL;
+                let dst = Color { r: pixels[i], g: pixels[i + 1], b: pixels[i + 2], a: pixels[i + 3] };
+                let out = apply_blend(src, dst, params.blend);
+                pixels[i] = out.r;
+                pixels[i + 1] = out.g;
+                pixels[i + 2] = out.b;
+                pixels[i + 3] = out.a;
+            }
+        }
+    }
+
+    fn push_clip(&mut self, rect: Rect) {
+        let next = match self.clips.last() {
+            Some(None) => None,
+            Some(Some(current)) => current.intersect(&rect),
+            None => Some(rect),
+        };
+        self.clips.push(next);
+    }
+
+    fn pop_clip(&mut self) {
+        debug_assert!(!self.clips.is_empty(), "pop_clip without a matching push_clip");
+        self.clips.pop();
     }
 }
 

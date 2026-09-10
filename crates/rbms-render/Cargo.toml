@@ -8,6 +8,7 @@ rust-version.workspace = true
 [dependencies]
 rbms-model = { workspace = true }
 rbms-chart = { workspace = true }
+rbms-skin = { workspace = true }
 serde = { workspace = true }
 ron = { workspace = true }
 thiserror = { workspace = true }
@@ -15,6 +16,7 @@ cosmic-text = "0.19.0"
 
 [dev-dependencies]
 rbms-parser = { workspace = true }
+png = "0.18.1"
 
 [lints]
 workspace = true

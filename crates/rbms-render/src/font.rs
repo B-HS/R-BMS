@@ -3,7 +3,8 @@ use std::collections::HashMap;
 
 use cosmic_text::{Attrs, Buffer, CacheKey, Color as CtColor, Family, FontSystem, Metrics, Shaping, SwashCache, fontdb};
 
-use crate::{Color, Rect, Renderer};
+use crate::glyph_atlas::{GlyphAtlas, GlyphAtlasBinding, glyph_bitmap, packed_rgb};
+use crate::{Color, QuadParams, Rect, Renderer};
 
 /// Bundled default UI font (Inter, SIL OFL 1.1). cosmic-text falls back to installed system
 /// fonts for scripts Inter lacks (CJK, Thai, Arabic, …), so any language renders.
@@ -87,6 +88,9 @@ pub struct TextContext {
     /// once per glyph+colour and replayed every frame, so the hot draw path neither re-runs
     /// `swash.with_pixels` nor emits one quad per pixel. Cleared with `cache` on a family change.
     runs: HashMap<(CacheKey, u32), RunEntry>,
+    /// The same rasterizations packed into one texture page, for the textured-quad text path.
+    /// Filled lazily by [`TextContext::draw_text_atlas`] and left empty by the default path.
+    atlas: GlyphAtlas<(CacheKey, u32)>,
     /// Monotonic access counter stamped onto every cache entry on use; the eviction sweep keeps the
     /// entries with the highest stamps.
     tick: u64,
@@ -103,7 +107,16 @@ impl TextContext {
     /// its default (the last-loaded face wins, matching how [`load_font`] reports a family).
     fn with_font_system(fs: FontSystem) -> Self {
         let family = fs.db().faces().last().and_then(|f| f.families.first().map(|(n, _)| n.clone())).unwrap_or_else(|| FALLBACK_FAMILY.to_string());
-        TextContext { fs, swash: SwashCache::new(), default_family: family.clone(), family, cache: HashMap::new(), runs: HashMap::new(), tick: 0 }
+        TextContext {
+            fs,
+            swash: SwashCache::new(),
+            default_family: family.clone(),
+            family,
+            cache: HashMap::new(),
+            runs: HashMap::new(),
+            atlas: GlyphAtlas::new(),
+            tick: 0,
+        }
     }
 
     /// A context over the bundled font plus the host's installed fonts (the app default).
@@ -184,7 +197,7 @@ impl TextContext {
             return;
         };
         let base = CtColor::rgb(color.r, color.g, color.b);
-        let rgb = ((color.r as u32) << 16) | ((color.g as u32) << 8) | color.b as u32;
+        let rgb = packed_rgb(color);
         let (ox, oy) = (x.round() as i32, y.round() as i32);
         let (fs, swash, runs_cache) = (&mut self.fs, &mut self.swash, &mut self.runs);
         for &(gx, gy, ck) in &laid.glyphs {
@@ -274,6 +287,7 @@ impl TextContext {
             self.family = name.to_string();
             self.cache.clear();
             self.runs.clear();
+            self.atlas.clear();
         }
     }
 
@@ -283,12 +297,75 @@ impl TextContext {
             self.family = self.default_family.clone();
             self.cache.clear();
             self.runs.clear();
+            self.atlas.clear();
         }
     }
 
     /// Live occupancy as `(layout entries, glyph-run entries)`.
     pub fn cache_stats(&self) -> (usize, usize) {
         (self.layout_len(), self.runs.len())
+    }
+
+    /// How many glyphs are packed into the atlas page, and how big that page currently is.
+    pub fn glyph_atlas_stats(&self) -> (usize, (u32, u32)) {
+        (self.atlas.len(), self.atlas.size())
+    }
+
+    /// Empties the glyph page and starts it over at its initial height.
+    ///
+    /// The engine is a process-wide singleton, so a test that cares which page a line landed on has
+    /// to start from a known one; nothing in the player calls this.
+    pub fn reset_glyph_atlas(&mut self) {
+        self.atlas.clear();
+    }
+
+    /// Draw a left-aligned string as one textured quad per glyph, reading from the shared glyph
+    /// atlas instead of filling each run of lit pixels.
+    ///
+    /// `at` is the top left of the line, the same anchor [`TextContext::draw_text`] takes.
+    /// `binding` holds the caller's uploaded copy of the page and must belong to `r`. Every glyph
+    /// of the line is packed before any of it is drawn, so a page that fills up and restarts
+    /// part-way through cannot leave the earlier quads pointing at pixels that have moved.
+    ///
+    /// Across lines the same protection comes from the binding: a later line that grows or empties
+    /// the page is given a page of its own, and the one this line measured against stays uploaded
+    /// until [`GlyphAtlasBinding::end_frame`], which a backend that submits a whole frame at the end
+    /// has to call once it has.
+    ///
+    /// The result is pixel-identical to [`TextContext::draw_text`] on an opaque target: the atlas
+    /// stores exactly what the rasterizer produced, and tinting by the text's own alpha reproduces
+    /// the coverage arithmetic the fill path does by hand.
+    pub fn draw_text_atlas<R: Renderer>(&mut self, r: &mut R, binding: &mut GlyphAtlasBinding, at: (f32, f32), scale: f32, color: Color, text: &str) {
+        let px = px_for(scale);
+        self.ensure(text, px);
+        let Some(glyphs) = self.laid(text, px).map(|l| l.glyphs.clone()) else {
+            return;
+        };
+        let base = CtColor::rgb(color.r, color.g, color.b);
+        let rgb = packed_rgb(color);
+        for &(_, _, ck) in &glyphs {
+            if self.atlas.get(&(ck, rgb)).is_none() {
+                let glyph = glyph_bitmap(&mut self.fs, &mut self.swash, ck, base);
+                self.atlas.insert((ck, rgb), glyph.width, glyph.height, glyph.left, glyph.top, &glyph.rgba);
+            }
+        }
+        let tex = binding.sync(r, &self.atlas);
+        let (page_w, page_h) = self.atlas.size();
+        let (ox, oy) = (at.0.round() as i32, at.1.round() as i32);
+        let tint = Color { r: u8::MAX, g: u8::MAX, b: u8::MAX, a: color.a };
+        for (gx, gy, ck) in glyphs {
+            let Some(entry) = self.atlas.get(&(ck, rgb)) else {
+                continue;
+            };
+            if entry.is_empty() {
+                continue;
+            }
+            let dst = Rect::new((ox + gx + entry.left) as f32, (oy + gy + entry.top) as f32, entry.width as f32, entry.height as f32);
+            let mut params = QuadParams::new(dst);
+            params.src = entry.uv(page_w, page_h);
+            params.tint = tint;
+            r.draw_textured_quad(tex, params);
+        }
     }
 }
 
