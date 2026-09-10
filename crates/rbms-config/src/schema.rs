@@ -4,7 +4,10 @@ use rbms_judge::algorithm::JudgeAlgorithm;
 use rbms_judge::gauge::{GaugeAutoShift, clamp_bottom_shiftable};
 use rbms_judge::gauge_tables::GaugeSetId;
 use rbms_judge::ln::LnMode;
+use rbms_skin::dst::{OffsetSource, SkinOffset};
+use rbms_skin::loader::SkinUserConfig;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 use crate::audio::AudioOptions;
 use crate::judge::ScoreTarget;
@@ -171,6 +174,146 @@ pub const DEFAULT_HISPEED: f64 = 2.0;
 /// Skin a fresh install starts on.
 pub const DEFAULT_SKIN: &str = "NORMAL";
 
+/// Every screen a skin document can declare, named for the SKIN tab, indexed by the `SkinType` id
+/// the document writes in its `type` field (`SkinType.java`).
+///
+/// Screens this build draws no skin for are listed too. A player whose document declares one then
+/// sees it named on the row, and is told it is unsupported, rather than finding their skin missing
+/// from the list with no explanation.
+pub const SKIN_SCREEN_LABELS: &[&str] = &[
+    "PLAY 7KEYS",
+    "PLAY 5KEYS",
+    "PLAY 14KEYS",
+    "PLAY 10KEYS",
+    "PLAY 9KEYS",
+    "MUSIC SELECT",
+    "DECIDE",
+    "RESULT",
+    "KEY CONFIG",
+    "SKIN SELECT",
+    "SOUND SET",
+    "THEME",
+    "PLAY 7KEYS BATTLE",
+    "PLAY 5KEYS BATTLE",
+    "PLAY 9KEYS BATTLE",
+    "COURSE RESULT",
+    "PLAY 24KEYS",
+    "PLAY 24KEYS DOUBLE",
+    "PLAY 24KEYS BATTLE",
+];
+
+/// The screen the SKIN tab starts on, which is the seven-key play screen.
+pub const DEFAULT_SKIN_SCREEN: i32 = 0;
+
+/// Directory documents are looked for in when the row names none, relative to the settings file.
+pub const DEFAULT_SKIN_FOLDER: &str = "skin";
+
+/// The name of one screen type, or `None` for an id no `SkinType` declares.
+pub fn skin_screen_label(skin_type: i32) -> Option<&'static str> {
+    usize::try_from(skin_type).ok().and_then(|at| SKIN_SCREEN_LABELS.get(at)).copied()
+}
+
+/// One document's customisation as the settings file stores it.
+///
+/// The rows are addressed by the names the document itself gave them, so a document that gains or
+/// loses a row on its next version keeps the choices made for the rows it still has. This is the
+/// stored half of [`SkinUserConfig`], which is what the skin loader is handed.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SkinCustomisation {
+    /// Customisation row name to the option id it is switched to.
+    pub properties: BTreeMap<String, i32>,
+    /// File slot name to the file chosen for it.
+    pub filepaths: BTreeMap<String, String>,
+    /// Offset id to the nudge applied to it.
+    pub offsets: BTreeMap<i32, SkinOffset>,
+}
+
+/// The nudges a document's own offset ids resolve to, which is how the renderer reads what the
+/// player moved without knowing anything about the settings file.
+impl OffsetSource for SkinCustomisation {
+    fn offset(&self, id: i32) -> Option<SkinOffset> {
+        self.offsets.get(&id).copied()
+    }
+}
+
+/// The SKIN tab: where documents are looked for, which screen is being configured, the document
+/// each screen is drawn with, and what the player chose inside each one.
+///
+/// A screen with no entry in `selected` is drawn by the built-in screen, which is what a fresh
+/// install has for every screen.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SkinOptions {
+    /// Directory documents are looked for in. `None` looks in [`DEFAULT_SKIN_FOLDER`] beside the
+    /// settings file.
+    pub folder: Option<String>,
+    /// The screen the SKIN tab is configuring, as a `SkinType` id.
+    pub screen: i32,
+    /// Document each screen is drawn with, keyed by its `SkinType` id.
+    pub selected: BTreeMap<i32, String>,
+    /// What the player chose inside each document, keyed by the path it was found under.
+    pub custom: BTreeMap<String, SkinCustomisation>,
+}
+
+impl Default for SkinOptions {
+    fn default() -> Self {
+        SkinOptions { folder: None, screen: DEFAULT_SKIN_SCREEN, selected: BTreeMap::new(), custom: BTreeMap::new() }
+    }
+}
+
+impl SkinOptions {
+    /// The document `screen` is drawn with, or `None` for the built-in screen.
+    pub fn document(&self, screen: i32) -> Option<&str> {
+        self.selected.get(&screen).map(String::as_str).filter(|path| !path.is_empty())
+    }
+
+    /// Draw `screen` with `path`, or with the built-in screen when `path` is `None`.
+    pub fn select(&mut self, screen: i32, path: Option<String>) {
+        match path.filter(|path| !path.is_empty()) {
+            Some(path) => self.selected.insert(screen, path),
+            None => self.selected.remove(&screen),
+        };
+    }
+
+    /// What the player chose inside one document, read-only and without creating an entry for a
+    /// document nothing has been chosen in yet.
+    pub fn customisation(&self, path: &str) -> Option<&SkinCustomisation> {
+        self.custom.get(path)
+    }
+
+    /// What the player chose inside one document, created empty the first time it is edited.
+    pub fn customise(&mut self, path: &str) -> &mut SkinCustomisation {
+        self.custom.entry(path.to_owned()).or_default()
+    }
+
+    /// Drop every choice made inside one document, so it loads as its author shipped it.
+    pub fn forget(&mut self, path: &str) {
+        self.custom.remove(path);
+    }
+
+    /// What the skin loader should be handed for one document.
+    pub fn user_config(&self, path: &str) -> SkinUserConfig {
+        let stored = self.custom.get(path);
+        SkinUserConfig {
+            path: path.to_owned(),
+            properties: stored.map(|entry| entry.properties.clone()).unwrap_or_default(),
+            filepaths: stored.map(|entry| entry.filepaths.clone()).unwrap_or_default(),
+            offsets: stored.map(|entry| entry.offsets.clone()).unwrap_or_default(),
+        }
+    }
+
+    /// Pull a hand-edited document back into what the rows can produce: an unnamed screen falls back
+    /// to the one a fresh install configures, and a blank folder means the default folder.
+    pub fn sanitise(&mut self) {
+        if skin_screen_label(self.screen).is_none() {
+            self.screen = DEFAULT_SKIN_SCREEN;
+        }
+        self.folder = self.folder.take().filter(|folder| !folder.trim().is_empty());
+        self.selected.retain(|screen, path| skin_screen_label(*screen).is_some() && !path.trim().is_empty());
+    }
+}
+
 /// The id an unconfigured client submits under. Mirrors the score server's own guest id; the player
 /// pins the two together with a test rather than depending on the IR crate from here.
 pub const DEFAULT_PLAYER_ID: &str = "guest";
@@ -198,6 +341,7 @@ pub struct Config {
     pub audio: AudioOptions,
     pub network: NetworkOptions,
     pub library: LibraryOptions,
+    pub skin: SkinOptions,
 }
 
 impl Default for Config {
@@ -210,6 +354,7 @@ impl Default for Config {
             audio: AudioOptions::default(),
             network: NetworkOptions::default(),
             library: LibraryOptions::default(),
+            skin: SkinOptions::default(),
         }
     }
 }
@@ -233,6 +378,7 @@ impl Config {
         self.judge.sanitise();
         self.display.skin = if self.display.skin.trim().is_empty() { DEFAULT_SKIN.to_string() } else { self.display.skin.to_ascii_uppercase() };
         self.audio.sanitise();
+        self.skin.sanitise();
     }
 }
 

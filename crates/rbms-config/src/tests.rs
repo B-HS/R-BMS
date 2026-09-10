@@ -1,3 +1,14 @@
+//! The configuration document: its shipped values, the vocabularies its rows are stored under, and
+//! the skin choices a player makes for each screen.
+//!
+//! Three neighbours carry the rest, so no one file has to be read whole to change one row: `audio`
+//! for the sound rows and the steps they move in, `library` for the folder and table lists, and
+//! `persistence` for migration and for what reaches the disk.
+
+mod audio;
+mod library;
+mod persistence;
+
 use rbms_chart::shuffle::NoteOption;
 use rbms_judge::GaugeKind;
 use rbms_judge::algorithm::JudgeAlgorithm;
@@ -6,6 +17,10 @@ use rbms_judge::gauge_tables::GaugeSetId;
 use rbms_judge::ln::LnMode;
 
 use super::*;
+use rbms_skin::dst::{OffsetSource, SkinOffset};
+
+/// The `SkinType` id of the song browser, used to prove that two screens keep their own choices.
+const MUSIC_SELECT_SCREEN: i32 = 5;
 
 const ALL_GAUGES: [GaugeKind; 6] = [GaugeKind::AssistEasy, GaugeKind::Easy, GaugeKind::Normal, GaugeKind::Hard, GaugeKind::ExHard, GaugeKind::Hazard];
 
@@ -217,9 +232,88 @@ fn ron_round_trip_preserves_every_field() {
     c.audio.key = 0.7;
     c.audio.bg = 0.35;
     c.audio.system = 0.15;
+    c.skin.folder = Some("/skins".into());
+    c.skin.screen = MUSIC_SELECT_SCREEN;
+    c.skin.select(MUSIC_SELECT_SCREEN, Some("/skins/browser/browser.json".into()));
+    let custom = c.skin.customise("/skins/browser/browser.json");
+    custom.properties.insert("LANE COVER".into(), 902);
+    custom.filepaths.insert("BACKGROUND".into(), "night.png".into());
+    custom.offsets.insert(12, SkinOffset { x: -4.0, y: 8.0, w: 0.0, h: 0.0, r: 90.0, a: -32.0 });
 
     let back: Config = ron::from_str(&ron_of(&c)).expect("a config round-trips");
     assert_eq!(back, c, "every field survives the round trip");
+}
+
+/// The renderer reads what the player nudged through the offset ids the document declared, and
+/// answers nothing for an id nothing was moved under -- which is what leaves that destination where
+/// its author put it.
+#[test]
+fn a_stored_customisation_answers_the_offset_ids_it_holds() {
+    let mut c = Config::default();
+    let nudge = SkinOffset { x: -4.0, y: 8.0, w: 0.0, h: 0.0, r: 90.0, a: -32.0 };
+    c.skin.customise("browser.json").offsets.insert(12, nudge);
+
+    let stored = c.skin.customisation("browser.json").expect("the document has choices");
+    assert_eq!(stored.offset(12), Some(nudge));
+    assert_eq!(stored.offset(13), None, "an id nothing was nudged under reported a nudge");
+}
+
+/// The screen a customisation belongs to is addressed by the `SkinType` id the document writes, so
+/// a document moved between folders keeps neither more nor less than its own choices.
+#[test]
+fn a_skin_choice_is_kept_per_screen_and_per_document() {
+    let mut c = Config::default();
+    assert_eq!(c.skin.screen, DEFAULT_SKIN_SCREEN);
+    assert_eq!(c.skin.document(DEFAULT_SKIN_SCREEN), None, "a fresh install draws every screen with the built-in one");
+
+    c.skin.select(DEFAULT_SKIN_SCREEN, Some("play.json".into()));
+    c.skin.select(MUSIC_SELECT_SCREEN, Some("select.json".into()));
+    assert_eq!(c.skin.document(DEFAULT_SKIN_SCREEN), Some("play.json"));
+    assert_eq!(c.skin.document(MUSIC_SELECT_SCREEN), Some("select.json"));
+
+    c.skin.customise("play.json").properties.insert("NOTE".into(), 15);
+    assert_eq!(c.skin.user_config("play.json").properties.get("NOTE"), Some(&15));
+    assert!(c.skin.user_config("select.json").properties.is_empty(), "one document's choices reached another");
+
+    c.skin.select(DEFAULT_SKIN_SCREEN, None);
+    assert_eq!(c.skin.document(DEFAULT_SKIN_SCREEN), None, "the built-in screen is what no entry means");
+    assert_eq!(c.skin.user_config("play.json").properties.get("NOTE"), Some(&15), "unselecting a document threw its choices away");
+
+    c.skin.forget("play.json");
+    assert!(c.skin.user_config("play.json").properties.is_empty());
+}
+
+/// A document is handed to the loader under the path it was found at, with the three choice maps
+/// the player filled in, so the loader needs to know nothing about the settings file.
+#[test]
+fn the_loader_is_handed_the_choices_made_for_the_document_it_is_loading() {
+    let mut c = Config::default();
+    let custom = c.skin.customise("play.json");
+    custom.properties.insert("GAUGE".into(), 45);
+    custom.filepaths.insert("NOTE".into(), "square.png".into());
+    custom.offsets.insert(3, SkinOffset { y: 12.0, ..SkinOffset::default() });
+
+    let user = c.skin.user_config("play.json");
+    assert_eq!(user.path, "play.json");
+    assert_eq!(user.properties.get("GAUGE"), Some(&45));
+    assert_eq!(user.filepaths.get("NOTE").map(String::as_str), Some("square.png"));
+    assert_eq!(user.offset(3), Some(SkinOffset { y: 12.0, ..SkinOffset::default() }));
+    assert_eq!(user.offset(4), None, "an offset nobody nudged came back as a nudge of nothing");
+}
+
+/// A hand-edited file naming a screen no `SkinType` declares is pulled back onto one that does,
+/// rather than leaving the SKIN tab pointing at a row it cannot show.
+#[test]
+fn a_hand_edited_skin_group_is_pulled_back_onto_a_screen_that_exists() {
+    let mut c = Config::default();
+    c.skin.screen = SKIN_SCREEN_LABELS.len() as i32;
+    c.skin.folder = Some("   ".into());
+    c.skin.selected.insert(-1, "ghost.json".into());
+    c.skin.selected.insert(MUSIC_SELECT_SCREEN, "  ".into());
+    c.sanitise();
+    assert_eq!(c.skin.screen, DEFAULT_SKIN_SCREEN);
+    assert_eq!(c.skin.folder, None, "a blank folder is no folder");
+    assert!(c.skin.selected.is_empty(), "a screen that does not exist, and a document with no name, were both kept");
 }
 
 /// The three new option axes are stored as separator-free tokens, exactly like the gauge next to
@@ -370,365 +464,4 @@ fn sanitise_uppercases_a_skin_name_and_stamps_the_schema() {
     c.sanitise();
     assert_eq!(c.display.skin, "WIDE");
     assert_eq!(c.schema_version, CURRENT_SCHEMA_VERSION);
-}
-
-#[test]
-fn restoring_audio_settings_clamps_a_hand_edited_file() {
-    let mut c = Config::default();
-    c.audio.device = Some("   ".into());
-    c.audio.buffer_frames = Some(0);
-    c.audio.sample_rate = Some(0);
-    c.audio.polyphony = 100_000;
-    c.audio.master = 4.0;
-    c.audio.key = -1.0;
-    c.audio.bg = f32::NAN;
-    c.audio.system = 0.25;
-    c.sanitise();
-    assert_eq!(c.audio.device, None, "a blank device name means the system default");
-    assert_eq!(c.audio.buffer_frames, None, "zero frames is not a buffer size");
-    assert_eq!(c.audio.sample_rate, None);
-    assert_eq!(c.audio.polyphony, AUDIO_POLYPHONY_MAX_VOICES);
-    assert!((c.audio.master - AUDIO_VOLUME_MAX_GAIN).abs() < 1e-6);
-    assert!((c.audio.key - AUDIO_VOLUME_MIN_GAIN).abs() < 1e-6);
-    assert!((c.audio.bg - DEFAULT_BUS_VOLUME).abs() < 1e-6, "a NaN gain falls back instead of silencing the bus");
-    assert!((c.audio.system - 0.25).abs() < 1e-6);
-    assert!(!c.audio.reopen_pending(), "restoring settings is not a parameter change");
-}
-
-#[test]
-fn a_pending_reopen_is_not_part_of_the_document_two_configurations_are_compared_by() {
-    let mut pending = Config::default();
-    pending.audio.mark_reopen_pending();
-    assert_eq!(pending, Config::default(), "a row waiting to be applied has not changed what would be written");
-    assert!(pending.audio.reopen_pending(), "and the flag itself is still set");
-
-    let mut moved = Config::default();
-    moved.audio.polyphony += AUDIO_POLYPHONY_STEP_VOICES;
-    assert_ne!(moved, Config::default(), "a parameter that actually moved is a difference");
-
-    let mut sanitised = pending.clone();
-    sanitised.sanitise();
-    assert_eq!(sanitised.audio, pending.audio, "clearing the flag cannot change how the same document compares");
-}
-
-#[test]
-fn the_shipped_audio_defaults_match_the_config_defaults() {
-    assert_eq!(AudioOptions::default(), Config::default().audio);
-}
-
-#[test]
-fn the_pending_reopen_flag_is_set_and_cleared_explicitly() {
-    let mut audio = AudioOptions::default();
-    assert!(!audio.reopen_pending());
-    audio.mark_reopen_pending();
-    assert!(audio.reopen_pending());
-    audio.clear_reopen_pending();
-    assert!(!audio.reopen_pending());
-}
-
-#[test]
-fn the_pending_reopen_flag_is_never_written_to_disk() {
-    let mut c = Config::default();
-    c.audio.mark_reopen_pending();
-    let back: Config = ron::from_str(&ron_of(&c)).expect("a config round-trips");
-    assert!(!back.audio.reopen_pending(), "a pending reopen is live state, not configuration");
-}
-
-#[test]
-fn a_volume_steps_by_five_percent_and_stops_at_the_ends() {
-    assert_eq!(volume_percent(step_volume(0.5, 1)), 55);
-    assert_eq!(volume_percent(step_volume(0.5, -1)), 45);
-    assert_eq!(volume_percent(step_volume(1.0, 1)), AUDIO_VOLUME_MAX_PERCENT, "the loudest step stays at the top");
-    assert_eq!(volume_percent(step_volume(0.0, -1)), 0, "a muted row cannot go negative");
-    assert_eq!(volume_percent(step_volume(0.02, -1)), 0, "a partial step down lands on mute, not below it");
-}
-
-#[test]
-fn stepping_a_volume_up_and_back_down_lands_on_the_same_percent() {
-    let steps = (AUDIO_VOLUME_MAX_PERCENT - volume_percent(DEFAULT_BUS_VOLUME)) / AUDIO_VOLUME_STEP_PERCENT;
-    let mut gain = DEFAULT_BUS_VOLUME;
-    for _ in 0..steps {
-        gain = step_volume(gain, 1);
-    }
-    assert_eq!(volume_percent(gain), AUDIO_VOLUME_MAX_PERCENT);
-    for _ in 0..steps {
-        gain = step_volume(gain, -1);
-    }
-    assert_eq!(volume_percent(gain), volume_percent(DEFAULT_BUS_VOLUME), "whole-percent steps do not drift");
-}
-
-#[test]
-fn a_volume_row_only_ever_shows_a_multiple_of_its_step() {
-    let mut gain = 0.0;
-    for _ in 0..=(AUDIO_VOLUME_MAX_PERCENT / AUDIO_VOLUME_STEP_PERCENT) {
-        assert_eq!(volume_percent(gain) % AUDIO_VOLUME_STEP_PERCENT, 0, "a step left the row off the percent grid");
-        gain = step_volume(gain, 1);
-    }
-    assert_eq!(volume_percent(gain), AUDIO_VOLUME_MAX_PERCENT, "stepping past the loudest value stays there");
-}
-
-#[test]
-fn volume_percent_reports_whole_percent_within_the_range() {
-    assert_eq!(volume_percent(0.0), 0);
-    assert_eq!(volume_percent(0.5), 50);
-    assert_eq!(volume_percent(1.0), AUDIO_VOLUME_MAX_PERCENT);
-    assert_eq!(volume_percent(9.0), AUDIO_VOLUME_MAX_PERCENT, "an out-of-range gain still shows a legal percent");
-    assert_eq!(volume_percent(-2.0), 0);
-}
-
-#[test]
-fn clamping_a_gain_falls_back_only_for_a_non_number() {
-    assert!((clamp_volume(f32::NAN, DEFAULT_BUS_VOLUME) - DEFAULT_BUS_VOLUME).abs() < 1e-6);
-    assert!((clamp_volume(2.0, DEFAULT_BUS_VOLUME) - AUDIO_VOLUME_MAX_GAIN).abs() < 1e-6);
-    assert!((clamp_volume(-2.0, DEFAULT_BUS_VOLUME) - AUDIO_VOLUME_MIN_GAIN).abs() < 1e-6);
-    assert!((clamp_volume(0.25, DEFAULT_BUS_VOLUME) - 0.25).abs() < 1e-6);
-}
-
-#[test]
-fn an_optional_choice_row_cycles_auto_first_and_wraps_both_ways() {
-    let choices = AUDIO_BUFFER_FRAMES_CHOICES;
-    assert_eq!(cycle_optional_u32(None, &choices, 1), Some(choices[0]));
-    assert_eq!(cycle_optional_u32(Some(choices[0]), &choices, -1), None);
-    assert_eq!(cycle_optional_u32(Some(choices[choices.len() - 1]), &choices, 1), None, "past the last size wraps to AUTO");
-    assert_eq!(cycle_optional_u32(None, &choices, -1), Some(choices[choices.len() - 1]));
-    assert_eq!(cycle_optional_u32(Some(333), &choices, 1), Some(choices[0]), "a size the row never offers steps from AUTO");
-}
-
-#[test]
-fn the_sample_rate_row_offers_auto_and_the_four_rates() {
-    assert_eq!(cycle_optional_u32(None, &AUDIO_SAMPLE_RATE_HZ_CHOICES, 1), Some(44_100));
-    assert_eq!(cycle_optional_u32(Some(44_100), &AUDIO_SAMPLE_RATE_HZ_CHOICES, 1), Some(48_000));
-    assert_eq!(cycle_optional_u32(Some(96_000), &AUDIO_SAMPLE_RATE_HZ_CHOICES, 1), None);
-}
-
-#[test]
-fn the_device_row_cycles_the_default_and_the_reported_names() {
-    let names = vec!["Built-in Output".to_string(), "Studio Monitors".to_string()];
-    assert_eq!(cycle_device(None, &names, 1).as_deref(), Some("Built-in Output"));
-    assert_eq!(cycle_device(Some("Built-in Output"), &names, 1).as_deref(), Some("Studio Monitors"));
-    assert_eq!(cycle_device(Some("Studio Monitors"), &names, 1), None, "past the last device is the system default");
-    assert_eq!(cycle_device(None, &names, -1).as_deref(), Some("Studio Monitors"));
-    assert_eq!(
-        cycle_device(Some("Unplugged Interface"), &names, 1).as_deref(),
-        Some("Built-in Output"),
-        "a device the host no longer reports steps from the default"
-    );
-    assert_eq!(cycle_device(None, &[], 1), None, "with no devices the row stays on the system default");
-}
-
-#[test]
-fn polyphony_steps_by_sixty_four_within_the_voice_range() {
-    assert_eq!(step_polyphony(DEFAULT_POLYPHONY_VOICES, 1), DEFAULT_POLYPHONY_VOICES + AUDIO_POLYPHONY_STEP_VOICES);
-    assert_eq!(step_polyphony(DEFAULT_POLYPHONY_VOICES, -1), DEFAULT_POLYPHONY_VOICES - AUDIO_POLYPHONY_STEP_VOICES);
-    assert_eq!(step_polyphony(AUDIO_POLYPHONY_MIN_VOICES, -1), AUDIO_POLYPHONY_MIN_VOICES);
-    assert_eq!(step_polyphony(AUDIO_POLYPHONY_MAX_VOICES, 1), AUDIO_POLYPHONY_MAX_VOICES);
-    assert_eq!(step_polyphony(0, -1), AUDIO_POLYPHONY_MIN_VOICES, "a hand-edited zero is pulled back into range");
-}
-
-#[test]
-fn the_folder_list_defaults_to_empty_and_keeps_its_order() {
-    assert!(LibraryOptions::default().folders.is_empty());
-    let mut c = Config::default();
-    c.library.folders = vec!["/a".into(), "/b/c".into(), "D:\\songs".into()];
-    let back: Config = ron::from_str(&ron_of(&c)).expect("a config round-trips");
-    assert_eq!(back.library.folders, vec!["/a".to_string(), "/b/c".into(), "D:\\songs".into()]);
-}
-
-#[test]
-fn the_table_list_defaults_to_empty_and_keeps_its_order() {
-    assert!(LibraryOptions::default().tables.is_empty());
-    let mut c = Config::default();
-    c.library.tables = vec![
-        TableSource { name: "Insane".into(), location: "https://example.com/insane.json".into() },
-        TableSource { name: String::new(), location: "/local/table.json".into() },
-    ];
-    let back: Config = ron::from_str(&ron_of(&c)).expect("a config round-trips");
-    assert_eq!(back.library.tables.len(), 2, "count preserved");
-    assert_eq!(back.library.tables[0].name, "Insane");
-    assert_eq!(back.library.tables[0].location, "https://example.com/insane.json");
-    assert_eq!(back.library.tables[1].name, "", "empty name preserved");
-    assert_eq!(back.library.tables[1].location, "/local/table.json");
-}
-
-#[test]
-fn merging_absent_or_empty_legacy_lists_leaves_the_library_alone() {
-    let mut c = Config::default();
-    merge_legacy_lists(&mut c, None, None);
-    assert!(c.library.folders.is_empty(), "a missing folders file adds nothing");
-    assert!(c.library.tables.is_empty(), "a missing tables file adds nothing");
-    merge_legacy_lists(&mut c, Some("()"), Some("()"));
-    assert!(c.library.folders.is_empty(), "an empty unit list adds nothing");
-    assert!(c.library.tables.is_empty());
-}
-
-#[test]
-fn merging_a_malformed_legacy_list_is_skipped_rather_than_fatal() {
-    let mut c = Config::default();
-    c.library.folders = vec!["/songs".into()];
-    merge_legacy_lists(&mut c, Some("@@@ not ron @@@"), Some("not ron at all"));
-    assert_eq!(c.library.folders, vec!["/songs".to_string()], "an unreadable list leaves the library as it was");
-    assert!(c.library.tables.is_empty());
-}
-
-#[test]
-fn merging_legacy_lists_appends_only_what_is_missing() {
-    let mut c = Config::default();
-    c.library.folders = vec!["/songs".into()];
-    c.library.tables = vec![TableSource { name: "kept".into(), location: "/local/table.json".into() }];
-    merge_legacy_lists(
-        &mut c,
-        Some(r#"(folders: ["/songs", "/more"])"#),
-        Some(r#"(tables: [(name: "renamed", location: "/local/table.json"), (name: "Insane", location: "https://example.com/insane.json")])"#),
-    );
-    assert_eq!(c.library.folders, vec!["/songs".to_string(), "/more".into()], "a folder already listed is not duplicated");
-    assert_eq!(c.library.tables.len(), 2, "a table with a known location is not duplicated");
-    assert_eq!(c.library.tables[0].name, "kept", "the configuration's own entry wins");
-    assert_eq!(c.library.tables[1].location, "https://example.com/insane.json");
-}
-
-#[test]
-fn a_versionless_document_migrates_from_the_flat_schema() {
-    let (config, from) = migrate(r#"(hispeed: 3.0, gauge: "HARD", random: "MIRROR", judge_rate: 120, rivals: ["friend"])"#).expect("a v0 file migrates");
-    assert_eq!(from, Some(LEGACY_SCHEMA_VERSION));
-    assert!((config.play.hispeed - 3.0).abs() < 1e-9);
-    assert_eq!(config.play.gauge, GaugeKind::Hard);
-    assert_eq!(config.play.random, NoteOption::Mirror);
-    assert_eq!(config.judge.judge_rate_key, [120; JUDGE_WIDTH_TIER_COUNT], "the one JUDGE WIDTH the flat file held covers every tier");
-    assert_eq!(config.judge.judge_rate_scratch, [120; JUDGE_WIDTH_TIER_COUNT]);
-    assert_eq!(config.network.rivals, vec!["friend".to_string()]);
-    assert_eq!(config.schema_version, CURRENT_SCHEMA_VERSION, "the migrated document is stamped with the current schema");
-}
-
-#[test]
-fn a_flat_file_written_before_the_audio_tab_still_migrates() {
-    let (config, from) =
-        migrate(r#"(hispeed: 3.0, gauge: "HARD", server_url: Some("https://ir.example/api"), player_id: "dj")"#).expect("a pre-audio file migrates");
-    assert_eq!(from, Some(LEGACY_SCHEMA_VERSION));
-    assert_eq!(config.audio, AudioOptions::default(), "a file with no audio keys migrates to the shipped defaults");
-    assert_eq!(config.network.player_id, "dj");
-}
-
-#[test]
-fn a_current_document_needs_no_migration() {
-    let (config, from) = migrate(&ron_of(&Config::default())).expect("a v1 file parses");
-    assert_eq!(from, None);
-    assert_eq!(config, Config::default());
-}
-
-#[test]
-fn migration_clamps_what_the_old_file_held() {
-    let (config, _) = migrate("(hispeed: 99.0, judge_rate: 4000, vol_master: 9.0, audio_polyphony: 100000)").expect("a v0 file migrates");
-    assert!((config.play.hispeed - HISPEED_MAX).abs() < 1e-9);
-    assert_eq!(config.judge.judge_rate_key, [JUDGE_RATE_MAX_PERCENT; JUDGE_WIDTH_TIER_COUNT]);
-    assert!((config.audio.master - AUDIO_VOLUME_MAX_GAIN).abs() < 1e-6);
-    assert_eq!(config.audio.polyphony, AUDIO_POLYPHONY_MAX_VOICES);
-}
-
-#[test]
-fn a_newer_schema_is_refused_rather_than_migrated() {
-    let error = migrate("(schema_version: 99)").expect_err("a newer schema cannot be read");
-    match error {
-        ConfigError::Migrate { from, .. } => assert_eq!(from, 99),
-        other => panic!("expected a migrate error, got {other:?}"),
-    }
-}
-
-#[test]
-fn a_malformed_document_is_a_parse_error() {
-    let error = migrate("definitely not ron )))").expect_err("nonsense is not a configuration");
-    assert!(matches!(error, ConfigError::Parse(_)), "got {error:?}");
-}
-
-#[test]
-fn load_missing_file_writes_and_returns_defaults() {
-    let dir = temp_dir("missing");
-    let path = dir.join("settings.ron");
-    assert!(!path.exists());
-    let outcome = load(&path).expect("a missing file is not an error");
-    assert!(path.exists(), "load() of a missing settings file writes defaults out");
-    assert_eq!(outcome.config, Config::default());
-    assert_eq!(outcome.migrated_from, None);
-    let again = load(&path).expect("the freshly written file loads");
-    assert_eq!(again.config, Config::default(), "re-loading the freshly written file is stable");
-    assert_eq!(again.migrated_from, None, "the file it just wrote is already current");
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn load_malformed_file_backs_up_and_returns_defaults() {
-    let dir = temp_dir("bad");
-    std::fs::create_dir_all(&dir).expect("temp dir");
-    let path = dir.join("settings.ron");
-    std::fs::write(&path, "definitely not ron )))").expect("write");
-    let outcome = load(&path).expect("a malformed file falls back rather than failing");
-    assert_eq!(outcome.config, Config::default(), "malformed file => defaults");
-    assert_eq!(outcome.backup.as_deref(), Some(path.with_extension("ron.bak").as_path()));
-    assert!(path.with_extension("ron.bak").exists(), "malformed file backed up");
-    assert!(!path.exists(), "the corrupt file is renamed away");
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn a_newer_file_is_left_untouched_by_load() {
-    let dir = temp_dir("newer");
-    std::fs::create_dir_all(&dir).expect("temp dir");
-    let path = dir.join("settings.ron");
-    let text = "(schema_version: 99, play: (hispeed: 6.0))";
-    std::fs::write(&path, text).expect("write");
-    let error = load(&path).expect_err("a newer schema is reported");
-    assert!(matches!(error, ConfigError::Migrate { from: 99, .. }), "got {error:?}");
-    assert_eq!(std::fs::read_to_string(&path).expect("read"), text, "the file a newer build wrote is not overwritten");
-    assert!(!path.with_extension("ron.bak").exists(), "a readable newer file is not backed up either");
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn save_then_load_round_trips_on_disk() {
-    let dir = temp_dir("io");
-    let path = dir.join("nested/settings.ron");
-    let mut c = Config::default();
-    c.play.hispeed = 5.5;
-    c.library.folders = vec!["/songs".into()];
-    c.library.tables = vec![TableSource { name: "Insane".into(), location: "https://example.com/insane.json".into() }];
-    for id in tab_rows(SettingTab::Judge, &c) {
-        assert_eq!(adjust(&mut c, id, 1), AdjustOutcome::Changed, "{id:?} steps");
-    }
-    save(&c, &path).expect("save creates the parent directory");
-    assert!(path.exists());
-    let outcome = load(&path).expect("the saved file loads");
-    assert_eq!(outcome.config, c, "every JUDGE row survives a save and a restart");
-    assert_eq!(outcome.config.schema_version, CURRENT_SCHEMA_VERSION);
-    assert_eq!(outcome.migrated_from, None);
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn load_absorbs_the_legacy_sibling_lists_of_a_versionless_file() {
-    let dir = temp_dir("siblings");
-    std::fs::create_dir_all(&dir).expect("temp dir");
-    let path = dir.join("settings.ron");
-    std::fs::write(&path, "(hispeed: 4.0)").expect("write");
-    std::fs::write(dir.join(LEGACY_FOLDERS_FILE), r#"(folders: ["/songs", "/more"])"#).expect("write");
-    std::fs::write(dir.join(LEGACY_TABLES_FILE), r#"(tables: [(name: "Insane", location: "https://example.com/insane.json")])"#).expect("write");
-
-    let outcome = load(&path).expect("a v0 file with siblings loads");
-    assert_eq!(outcome.migrated_from, Some(LEGACY_SCHEMA_VERSION));
-    assert_eq!(outcome.config.library.folders, vec!["/songs".to_string(), "/more".into()]);
-    assert_eq!(outcome.config.library.tables.len(), 1);
-    assert!(dir.join(LEGACY_FOLDERS_FILE).exists(), "the original list is left on disk so an older build still runs");
-    assert!(dir.join(LEGACY_TABLES_FILE).exists());
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn a_current_file_ignores_the_legacy_sibling_lists() {
-    let dir = temp_dir("current_siblings");
-    std::fs::create_dir_all(&dir).expect("temp dir");
-    let path = dir.join("settings.ron");
-    save(&Config::default(), &path).expect("save");
-    std::fs::write(dir.join(LEGACY_FOLDERS_FILE), r#"(folders: ["/removed"])"#).expect("write");
-
-    let outcome = load(&path).expect("a v1 file loads");
-    assert!(outcome.config.library.folders.is_empty(), "a folder removed after the migration does not come back");
-    let _ = std::fs::remove_dir_all(&dir);
 }

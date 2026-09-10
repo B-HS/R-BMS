@@ -5,7 +5,7 @@ use crate::audio::{AudioOptions, DEFAULT_BUS_VOLUME, DEFAULT_MASTER_VOLUME, DEFA
 use crate::gauge::gauge_from_name;
 use crate::schema::{
     CURRENT_SCHEMA_VERSION, Config, DEFAULT_HISPEED, DEFAULT_PLAYER_ID, DEFAULT_SKIN, DisplayOptions, JUDGE_RATE_DEFAULT_PERCENT, JudgeOptions, LANE_SHADE_MIN,
-    LibraryOptions, NetworkOptions, PlayOptions, TOTAL_FROM_CHART, TableSource,
+    LibraryOptions, NetworkOptions, PlayOptions, SkinOptions, TOTAL_FROM_CHART, TableSource,
 };
 
 /// File name of the pre-migration folder list, read once next to `settings.ron` when a version-less
@@ -162,6 +162,7 @@ impl From<LegacyV0> for Config {
                 rivals: old.rivals,
             },
             library: LibraryOptions { folders: Vec::new(), songs_folder: old.songs_folder, preview: old.preview, ..LibraryOptions::default() },
+            skin: SkinOptions::default(),
         }
     }
 }

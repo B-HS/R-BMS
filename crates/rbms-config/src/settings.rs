@@ -28,7 +28,7 @@ use crate::schema::{
     JUDGE_OFFSET_MIN_MS, JUDGE_OFFSET_STEP_MS, JUDGE_RATE_MAX_PERCENT, JUDGE_RATE_MIN_PERCENT, JUDGE_RATE_STEP_PERCENT, JUDGE_TEXT_Y_MAX, JUDGE_TEXT_Y_MIN,
     JUDGE_TEXT_Y_STEP, LANE_SHADE_FINE_STEP_MAX, LANE_SHADE_FINE_STEP_MIN, LANE_SHADE_FINE_STEP_STEP, LANE_SHADE_MAX, LANE_SHADE_MIN, LANE_SHADE_STEP,
     LN_MARGIN_MAX_PERCENT, LN_MARGIN_MIN_PERCENT, LN_MARGIN_STEP_PERCENT, PREVIEW_FADE_MAX_MS, PREVIEW_FADE_MIN_MS, PREVIEW_FADE_STEP_MS, PREVIEW_VOLUME_MAX,
-    PREVIEW_VOLUME_MIN, PREVIEW_VOLUME_STEP, TOTAL_FROM_CHART, TOTAL_STEP,
+    PREVIEW_VOLUME_MIN, PREVIEW_VOLUME_STEP, SKIN_SCREEN_LABELS, TOTAL_FROM_CHART, TOTAL_STEP, skin_screen_label,
 };
 use crate::sort::SortMode;
 
@@ -123,6 +123,10 @@ const SCRATCH_SIDE_LABELS: &[&str] = &["RIGHT", "LEFT"];
 const RANDOM_LABELS: &[&str] = &["OFF", "MIRROR", "RANDOM", "S-RANDOM", "R-RANDOM", "ROTATE", "H-RANDOM", "ALL-SCRATCH"];
 const SKIN_LABELS: &[&str] = &["NORMAL", "WIDE"];
 const AUDIO_DEVICE_LABELS: &[&str] = &[DEFAULT_VALUE];
+
+/// What the SKIN row already knows it can hold: the built-in screen. The documents on disk are only
+/// known once the folder has been walked, so the running program adds those.
+const SKIN_DOCUMENT_LABELS: &[&str] = &[DEFAULT_VALUE];
 const AUDIO_BUFFER_LABELS: &[&str] = &[AUTO_VALUE, "128", "192", "256", "384", "512", "768", "1024", "2048"];
 const AUDIO_SAMPLE_RATE_LABELS: &[&str] = &[AUTO_VALUE, "44100", "48000", "88200", "96000"];
 
@@ -171,6 +175,11 @@ pub enum SettingId {
     Target,
     Total,
     Skin,
+    SkinScreen,
+    SkinDocument,
+    SkinInfo,
+    SkinReload,
+    SkinReset,
     AutoCal,
     AutoReplay,
     DebugMode,
@@ -215,7 +224,7 @@ pub enum SettingId {
 }
 
 /// Rows the settings screen has.
-pub const SETTING_COUNT: usize = 74;
+pub const SETTING_COUNT: usize = 79;
 
 impl SettingId {
     /// Every row, in declaration order.
@@ -253,6 +262,11 @@ impl SettingId {
         SettingId::Target,
         SettingId::Total,
         SettingId::Skin,
+        SettingId::SkinScreen,
+        SettingId::SkinDocument,
+        SettingId::SkinInfo,
+        SettingId::SkinReload,
+        SettingId::SkinReset,
         SettingId::AutoCal,
         SettingId::AutoReplay,
         SettingId::DebugMode,
@@ -314,6 +328,7 @@ pub enum SettingTab {
     Gauge,
     Judge,
     Display,
+    Skin,
     Input,
     Network,
     Audio,
@@ -322,11 +337,12 @@ pub enum SettingTab {
 
 impl SettingTab {
     /// Every tab, left to right.
-    pub const ALL: [SettingTab; 8] = [
+    pub const ALL: [SettingTab; 9] = [
         SettingTab::Play,
         SettingTab::Gauge,
         SettingTab::Judge,
         SettingTab::Display,
+        SettingTab::Skin,
         SettingTab::Input,
         SettingTab::Network,
         SettingTab::Audio,
@@ -340,6 +356,7 @@ impl SettingTab {
             SettingTab::Gauge => "GAUGE",
             SettingTab::Judge => "JUDGE",
             SettingTab::Display => "DISPLAY",
+            SettingTab::Skin => "SKIN",
             SettingTab::Input => "INPUT",
             SettingTab::Network => "NETWORK",
             SettingTab::Audio => "AUDIO",
@@ -368,6 +385,9 @@ pub enum SettingKind {
     Action,
     /// Opens a file picker.
     FilePick,
+    /// Reports something the row cannot change. It holds no value of its own — the running program
+    /// fills it in — and stepping it does nothing.
+    Info,
 }
 
 /// Everything the settings screen needs to know about one row.
@@ -558,6 +578,11 @@ pub const SETTINGS: &[SettingDescriptor] = &[
     row(SettingId::Letterbox, SettingTab::Display, "LETTERBOX", SettingKind::Toggle, "Keep the screen's aspect ratio inside the window"),
     row(SettingId::Bga, SettingTab::Display, "BGA", SettingKind::Toggle, "Show the chart's background animation"),
     row(SettingId::DebugMode, SettingTab::Display, "DEBUG MODE", SettingKind::Toggle, "Draw the frame and audio counters"),
+    row(SettingId::SkinScreen, SettingTab::Skin, "SCREEN", SettingKind::Cycle { values: SKIN_SCREEN_LABELS }, "Which screen's skin the rows below configure"),
+    row(SettingId::SkinDocument, SettingTab::Skin, "SKIN", SettingKind::Cycle { values: SKIN_DOCUMENT_LABELS }, "Which document draws this screen"),
+    host_row(SettingId::SkinInfo, SettingTab::Skin, "LOADED", SettingKind::Info, "What the chosen document is, or why it is not being drawn"),
+    row(SettingId::SkinReload, SettingTab::Skin, "RELOAD", SettingKind::Action, "Read the document again with the choices made here"),
+    row(SettingId::SkinReset, SettingTab::Skin, "RESET", SettingKind::Action, "Drop every choice made in this document"),
     row(
         SettingId::ScratchSide,
         SettingTab::Input,
@@ -734,6 +759,12 @@ fn gain_value(gain: f32, id: SettingId) -> String {
     format!("{}{}", volume_percent(gain), unit_of(id))
 }
 
+/// What the SKIN row shows for a chosen document: the file name alone, which is what tells two
+/// documents apart on a row too narrow for a whole path.
+pub fn skin_document_label(path: &str) -> String {
+    std::path::Path::new(path).file_name().map_or_else(|| path.to_owned(), |name| name.to_string_lossy().into_owned())
+}
+
 fn optional_text(value: Option<&str>) -> String {
     match value.map(str::trim).filter(|text| !text.is_empty()) {
         Some(text) => text.to_string(),
@@ -799,9 +830,17 @@ pub fn display_value(config: &Config, id: SettingId) -> String {
         SettingId::ScratchAuto => on_off(config.play.scratch_auto),
         SettingId::JudgeOffset => format!("{:+}{}", config.judge.offset_ms, unit_of(id)),
         SettingId::Bga => on_off(config.display.bga),
-        SettingId::KeyConfig | SettingId::Login | SettingId::Register | SettingId::Logout | SettingId::UploadSettings | SettingId::DownloadSettings => {
-            ACTION_VALUE.to_string()
-        }
+        SettingId::KeyConfig
+        | SettingId::Login
+        | SettingId::Register
+        | SettingId::Logout
+        | SettingId::UploadSettings
+        | SettingId::DownloadSettings
+        | SettingId::SkinReload
+        | SettingId::SkinReset => ACTION_VALUE.to_string(),
+        SettingId::SkinScreen => skin_screen_label(config.skin.screen).unwrap_or(NONE_VALUE).to_string(),
+        SettingId::SkinDocument => config.skin.document(config.skin.screen).map_or_else(|| DEFAULT_VALUE.to_string(), skin_document_label),
+        SettingId::SkinInfo => NONE_VALUE.to_string(),
         SettingId::JudgeAlgorithm => cycle_label(id, cycle_at(JudgeAlgorithm::ALL, config.judge.judge_algorithm)),
         SettingId::JudgeWidthKeyPGreat
         | SettingId::JudgeWidthKeyGreat
@@ -1062,8 +1101,17 @@ pub fn adjust(config: &mut Config, id: SettingId, delta: i32) -> AdjustOutcome {
             let outcome = store(&mut config.audio.polyphony, next);
             reopen(config, outcome)
         }
+        SettingId::SkinScreen => {
+            let at = stepped(config.skin.screen.max(0) as usize, SKIN_SCREEN_LABELS.len(), delta);
+            let next = i32::try_from(at).unwrap_or(crate::schema::DEFAULT_SKIN_SCREEN);
+            store(&mut config.skin.screen, next)
+        }
+        SettingId::SkinInfo => AdjustOutcome::Unchanged,
         SettingId::KeyConfig
         | SettingId::Skin
+        | SettingId::SkinDocument
+        | SettingId::SkinReload
+        | SettingId::SkinReset
         | SettingId::Font
         | SettingId::ServerUrl
         | SettingId::PlayerId
@@ -1138,7 +1186,7 @@ mod tests {
         names.sort_unstable();
         names.dedup();
         assert_eq!(names.len(), count);
-        assert_eq!(SettingTab::ALL.map(SettingTab::label).to_vec(), vec!["PLAY", "GAUGE", "JUDGE", "DISPLAY", "INPUT", "NETWORK", "AUDIO", "SELECT"]);
+        assert_eq!(SettingTab::ALL.map(SettingTab::label).to_vec(), vec!["PLAY", "GAUGE", "JUDGE", "DISPLAY", "SKIN", "INPUT", "NETWORK", "AUDIO", "SELECT"]);
     }
 
     #[test]
@@ -1237,7 +1285,7 @@ mod tests {
     #[test]
     fn the_rows_the_program_owns_are_the_ones_it_reads_outside_the_document() {
         let owned: Vec<SettingId> = SettingId::ALL.into_iter().filter(|&id| descriptor(id).host_value).collect();
-        assert_eq!(owned, vec![SettingId::Skin, SettingId::Account, SettingId::Password]);
+        assert_eq!(owned, vec![SettingId::Skin, SettingId::SkinInfo, SettingId::Account, SettingId::Password]);
     }
 
     #[test]
@@ -1260,6 +1308,9 @@ mod tests {
             vec![
                 SettingId::KeyConfig,
                 SettingId::Skin,
+                SettingId::SkinDocument,
+                SettingId::SkinReload,
+                SettingId::SkinReset,
                 SettingId::Font,
                 SettingId::ServerUrl,
                 SettingId::PlayerId,
@@ -1304,6 +1355,7 @@ mod tests {
             SettingId::Gauge,
             SettingId::ScratchSide,
             SettingId::Sort,
+            SettingId::SkinScreen,
         ] {
             let values = cycle_values(id);
             let start = display_value(&config, id);
