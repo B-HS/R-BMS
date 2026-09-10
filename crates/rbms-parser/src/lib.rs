@@ -7,6 +7,7 @@ use rbms_model::VOLWAV_DEFAULT_PERCENT;
 use sha2::Sha256;
 
 mod base;
+pub mod bmson;
 mod control;
 
 pub use base::{digit, parse_pair};

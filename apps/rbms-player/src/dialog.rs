@@ -26,6 +26,9 @@ const SONG_FOLDER_TITLE: &str = "Add song folder";
 /// Title of the difficulty-table picker.
 const TABLE_TITLE: &str = "Select table json";
 
+/// Title of the system sound folder picker.
+const SOUND_FOLDER_TITLE: &str = "Select system sound folder";
+
 /// File extension the table picker offers.
 const TABLE_EXTENSION: &str = "json";
 
@@ -84,6 +87,11 @@ pub(crate) fn pick_song_folder() -> DialogHandle {
     open(|| pollster::block_on(rfd::AsyncFileDialog::new().set_title(SONG_FOLDER_TITLE).pick_folder()))
 }
 
+/// Ask for the folder the system sound set is read from.
+pub(crate) fn pick_sound_folder() -> DialogHandle {
+    open(|| pollster::block_on(rfd::AsyncFileDialog::new().set_title(SOUND_FOLDER_TITLE).pick_folder()))
+}
+
 /// Ask for a difficulty-table json to add to the library.
 pub(crate) fn pick_table_file() -> DialogHandle {
     open(|| pollster::block_on(rfd::AsyncFileDialog::new().set_title(TABLE_TITLE).add_filter(TABLE_EXTENSION, &[TABLE_EXTENSION]).pick_file()))
@@ -101,12 +109,12 @@ pub(crate) fn handle_for_tests() -> (std::sync::mpsc::Sender<Option<PathBuf>>, D
 mod tests {
     use super::*;
 
-    /// The pickers themselves cannot be opened without a user, so what is pinned here is that the
-    /// three of them stay distinct and keep offering the file kinds their screens expect — a font
-    /// picker that offered json would silently stop finding fonts.
+    /// The pickers themselves cannot be opened without a user, so what is pinned here is that they
+    /// stay distinct and keep offering the file kinds their screens expect — a font picker that
+    /// offered json would silently stop finding fonts.
     #[test]
     fn each_picker_keeps_its_own_title() {
-        let titles = [FONT_TITLE, SONG_FOLDER_TITLE, TABLE_TITLE];
+        let titles = [FONT_TITLE, SONG_FOLDER_TITLE, TABLE_TITLE, SOUND_FOLDER_TITLE];
         for title in titles {
             assert!(!title.is_empty());
         }

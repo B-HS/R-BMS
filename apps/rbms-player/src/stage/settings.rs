@@ -42,7 +42,13 @@ pub(crate) struct SettingsState {
     paste_held: bool,
     rivals_open: bool,
     rivals_sel: usize,
+    /// The IR profile list while it is open, and the row it is on. The list is drawn in the same
+    /// inline panel the rivals use, so only one of the two is ever up.
+    profiles_open: bool,
+    profiles_sel: usize,
     audio_devices: Vec<String>,
+    /// The system sound folder picker while it is up, on the same terms as the font picker below.
+    sound_picker: Option<DialogHandle>,
     /// The font picker while it is up. It runs beside the frame loop, so the screen keeps drawing
     /// while the user is in front of it and the answer is collected in `update`.
     font_picker: Option<DialogHandle>,
@@ -67,7 +73,10 @@ impl SettingsState {
             paste_held: false,
             rivals_open: false,
             rivals_sel: 0,
+            profiles_open: false,
+            profiles_sel: 0,
             audio_devices: Vec::new(),
+            sound_picker: None,
             font_picker: None,
             rows: Vec::new(),
             lines: Vec::new(),
@@ -166,6 +175,17 @@ impl SettingsState {
             SettingId::AudioDevice => {
                 step_audio_device(&mut ctx.shared.config.audio, delta, &self.audio_devices);
             }
+            SettingId::SoundFolder => {
+                if delta < 0 {
+                    ctx.shared.config.audio.sound_folder = None;
+                    ctx.shared.reload_system_sounds();
+                } else if self.sound_picker.is_none() {
+                    self.sound_picker = Some(crate::dialog::pick_sound_folder());
+                }
+            }
+            SettingId::GuideSe => {
+                ctx.shared.syssound.set_guide_enabled(ctx.shared.config.audio.guide_se);
+            }
             SettingId::SkinDocument => {
                 if ctx.shared.cycle_skin_document(delta) {
                     ctx.shared.reload_skin();
@@ -222,6 +242,23 @@ impl SettingsState {
     ///
     /// The picker runs beside the frame loop, so this is where a chosen font actually lands. A
     /// dismissed picker leaves the font alone.
+    /// Collect the sound folder picker's answer, and read the set it names.
+    fn poll_sound_picker(&mut self, shared: &mut AppShared) {
+        let Some(picker) = self.sound_picker.as_ref() else {
+            return;
+        };
+        match picker.poll() {
+            DialogState::Open => return,
+            DialogState::Picked(path) => {
+                self.sound_picker = None;
+                shared.config.audio.sound_folder = Some(path.to_string_lossy().into_owned());
+                shared.reload_system_sounds();
+            }
+            DialogState::Dismissed => self.sound_picker = None,
+        }
+        self.dirty = true;
+    }
+
     fn poll_font_picker(&mut self, shared: &mut AppShared) {
         let Some(picker) = self.font_picker.as_ref() else {
             return;
@@ -252,6 +289,11 @@ impl SettingsState {
             SettingId::Rivals => {
                 self.rivals_open = true;
                 self.rivals_sel = 0;
+                self.cancel_text_edit();
+            }
+            SettingId::IrProfiles => {
+                self.profiles_open = true;
+                self.profiles_sel = 0;
                 self.cancel_text_edit();
             }
             SettingId::Account => shared.net_status = shared.session.status_text(),
@@ -372,6 +414,66 @@ impl SettingsState {
         }
     }
 
+    /// Keys inside the inline IR profile list. A profile is added by typing its base URL; Enter on
+    /// an existing row turns it on or off, and D removes it.
+    fn profiles_input(&mut self, shared: &mut AppShared, key: &KeyInput<'_>) {
+        if self.text_input.is_some() {
+            match key.code {
+                KeyCode::Enter | KeyCode::NumpadEnter => {
+                    let value = self.text_input.take().map(|mut edit| edit.take()).unwrap_or_default();
+                    if let Some(profile) = new_ir_profile(&value, &shared.config.network.ir_profiles) {
+                        shared.config.network.ir_profiles.push(profile);
+                        self.profiles_sel = shared.config.network.ir_profiles.len().saturating_sub(1);
+                    }
+                }
+                KeyCode::Escape => self.text_input = None,
+                _ => {
+                    if let Some(edit) = self.text_input.as_mut() {
+                        edit_key(edit, key, self.paste_held);
+                    }
+                }
+            }
+            return;
+        }
+        let rows = ir_profile_rows(&shared.config.network.ir_profiles).len();
+        let on_add = self.profiles_sel + 1 >= rows;
+        match key.code {
+            KeyCode::Escape => {
+                self.profiles_open = false;
+                shared.save_settings();
+                shared.rebuild_server();
+            }
+            KeyCode::ArrowUp => self.profiles_sel = self.profiles_sel.saturating_sub(1),
+            KeyCode::ArrowDown => self.profiles_sel = (self.profiles_sel + 1).min(rows.saturating_sub(1)),
+            KeyCode::Enter | KeyCode::NumpadEnter if on_add => {
+                self.text_input = Some(TextEdit::new());
+                self.text_secret = false;
+                self.text_edit_row = None;
+            }
+            KeyCode::Enter | KeyCode::NumpadEnter => {
+                if let Some(profile) = shared.config.network.ir_profiles.get_mut(self.profiles_sel) {
+                    profile.enabled = !profile.enabled;
+                }
+            }
+            KeyCode::KeyD if !on_add && self.profiles_sel < shared.config.network.ir_profiles.len() => {
+                shared.config.network.ir_profiles.remove(self.profiles_sel);
+                self.profiles_sel = self.profiles_sel.min(ir_profile_rows(&shared.config.network.ir_profiles).len().saturating_sub(1));
+            }
+            _ => {}
+        }
+    }
+
+    /// Click inside the inline IR profile list, on the same terms as the rival list.
+    fn profiles_click(&mut self, shared: &AppShared, index: usize) {
+        let rows = ir_profile_rows(&shared.config.network.ir_profiles).len();
+        self.profiles_sel = index.min(rows.saturating_sub(1));
+        if self.profiles_sel + 1 >= rows {
+            self.text_input = Some(TextEdit::new());
+            self.text_secret = false;
+            self.text_edit_row = None;
+        }
+    }
+
     /// Click inside the inline rival list: focus a row, or open the editor on the add row.
     fn rivals_click(&mut self, shared: &AppShared, index: usize) {
         let rows = rival_rows(&shared.config.network.rivals).len();
@@ -387,15 +489,17 @@ impl SettingsState {
     /// is open: it is the only place the engine's open report, and a reopen held back by a running
     /// chart, are visible.
     fn scene(&self, shared: &AppShared) -> SettingsScene {
-        let editor = match (&self.text_input, self.rivals_open) {
+        let list_open = self.rivals_open || self.profiles_open;
+        let editor = match (&self.text_input, list_open) {
             (Some(edit), false) => Some(editor_display(edit, self.text_secret)),
             _ => None,
         };
-        let rivals = self.rivals_open.then(|| RivalsScene {
-            rows: rival_rows(&shared.config.network.rivals),
-            sel: self.rivals_sel,
-            editor: self.text_input.as_ref().map(|edit| editor_display(edit, false)),
-        });
+        let inline_editor = self.text_input.as_ref().map(|edit| editor_display(edit, false));
+        let rivals = if self.profiles_open {
+            Some(RivalsScene { rows: ir_profile_rows(&shared.config.network.ir_profiles), sel: self.profiles_sel, editor: inline_editor })
+        } else {
+            self.rivals_open.then(|| RivalsScene { rows: rival_rows(&shared.config.network.rivals), sel: self.rivals_sel, editor: inline_editor })
+        };
         SettingsScene {
             tabs: SettingTab::ALL.iter().map(|tab| tab.label()).collect(),
             tab: self.tab.min(SettingTab::ALL.len() - 1),
@@ -482,6 +586,7 @@ impl StageHandler for SettingsState {
     /// until a key or a click moves one.
     fn update(&mut self, ctx: &mut FrameCtx<'_>) -> Transition {
         self.poll_font_picker(ctx.shared);
+        self.poll_sound_picker(ctx.shared);
         let rows = rival_rows(&ctx.shared.config.network.rivals).len();
         self.rivals_sel = self.rivals_sel.min(rows.saturating_sub(1));
         if self.rows.contains(&SettingRow::Fixed(SettingId::Account)) {
@@ -504,6 +609,11 @@ impl StageHandler for SettingsState {
             self.dirty = true;
             return Transition::Stay;
         }
+        if self.profiles_open {
+            self.profiles_input(ctx.shared, &key);
+            self.dirty = true;
+            return Transition::Stay;
+        }
         if self.text_input.is_some() {
             self.text_input_key(ctx.shared, &key);
             self.dirty = true;
@@ -515,7 +625,7 @@ impl StageHandler for SettingsState {
     fn handle_mouse(&mut self, ctx: &mut FrameCtx<'_>, at: (f32, f32)) -> Transition {
         self.ensure_rows(ctx.shared);
         match ctx.shared.hit_test(at) {
-            Some(Hot::SettingTab(_) | Hot::SettingRow(_)) if self.rivals_open => {}
+            Some(Hot::SettingTab(_) | Hot::SettingRow(_)) if self.rivals_open || self.profiles_open => {}
             Some(Hot::SettingTab(ti)) => {
                 self.cancel_text_edit();
                 self.tab = ti.min(SettingTab::ALL.len() - 1);
@@ -529,6 +639,7 @@ impl StageHandler for SettingsState {
                     return self.step(ctx, row, ROW_STEP_FORWARD);
                 }
             }
+            Some(Hot::RivalRow(i)) if self.profiles_open => self.profiles_click(ctx.shared, i),
             Some(Hot::RivalRow(i)) => self.rivals_click(ctx.shared, i),
             _ => {}
         }

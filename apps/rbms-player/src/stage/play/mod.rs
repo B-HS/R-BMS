@@ -142,6 +142,9 @@ pub(crate) struct PlayState {
     /// for the run: the records it is settled against are the ones that stood when the run started,
     /// which is what the result screen scores it against too.
     pace_target: Option<ResolvedTarget>,
+    /// The practice slice this run is, when it is one. Its presence is the gauge lock: the run ends
+    /// at the slice's end time rather than at the last note, and an emptied gauge does not stop it.
+    pub(crate) practice: Option<crate::practice::PracticeSession>,
 }
 
 /// The frame `PlaySession::bga_frame` reports before the chart's first background event, which is
@@ -173,7 +176,14 @@ impl PlayState {
             speed: None,
             fine_held: false,
             pace_target: None,
+            practice: None,
         }
+    }
+
+    /// Mark this run as a practice slice, which is what locks the gauge and ends it on the slice's
+    /// own end time.
+    pub(crate) fn set_practice(&mut self, practice: crate::practice::PracticeSession) {
+        self.practice = Some(practice);
     }
 
     /// Early hits of this run, split into the keys and the turntable.
@@ -281,6 +291,9 @@ impl PlayState {
     /// A replay being scrubbed never ends on its own, failed or not: the player is driving the
     /// clock and can scrub back out of it.
     fn run_is_over(&self, song_us: i64) -> bool {
+        if let Some(practice) = &self.practice {
+            return practice.is_past_end(song_us);
+        }
         self.session.is_finished(song_us) || (!self.session.analysis_enabled() && self.session.is_failed())
     }
 
@@ -335,7 +348,14 @@ impl PlayState {
     fn leave_run(&mut self, ctx: &mut FrameCtx<'_>) -> Transition {
         self.esc_down_at = None;
         self.esc_pressed_at = None;
+        ctx.shared.play_system_sound(SystemSound::PlayStop);
         ctx.shared.save_settings();
+        if self.practice.is_some() {
+            return Transition::Back;
+        }
+        if ctx.shared.course_run.is_some() {
+            return crate::end_course(ctx.shared);
+        }
         ctx.shared.leave_play()
     }
 
@@ -365,22 +385,37 @@ impl PlayState {
     /// it. The session is what records the replay, so skipping the call would leave a run with
     /// releases but no presses — a replay that cannot be played back.
     fn lane_key(&mut self, shared: &mut AppShared, key: &KeyInput<'_>) {
-        if shared.config.play.autoplay || shared.replay.is_some() {
-            return;
-        }
         let Some((lane, dir)) = shared.lane_input_for(key.code) else {
             return;
         };
+        if key.pressed {
+            self.lane_input(shared, lane, dir, true);
+        } else if key.released {
+            self.lane_input(shared, lane, dir, false);
+        }
+    }
+
+    /// One lane press or release, whichever device it arrived on. A controller cannot make a
+    /// [`KeyCode`], so it enters here rather than through [`PlayState::lane_key`], and the guards
+    /// that decide whether a run takes input at all live here so both entrances share them.
+    fn lane_input(&mut self, shared: &mut AppShared, lane: usize, dir: ScratchDir, press: bool) {
+        if shared.config.play.autoplay || shared.replay.is_some() {
+            return;
+        }
         let raw = shared.song_us();
         self.sync_judge_settings(shared);
-        if key.pressed {
+        if press {
             let anchor = shared.anchor_us;
             let hit = match shared.audio.as_mut() {
                 Some(audio) => self.session.press_dir(lane, dir, raw, &mut PlayAudioSink::new(audio, anchor)),
                 None => self.session.press_dir(lane, dir, raw, &mut NullSink),
             };
+            let judged = hit.map(|r| r.judge);
             shared.push_timing_sample(raw, hit.map(|r| r.delta_us));
-        } else if key.released {
+            if let Some(judge) = judged {
+                shared.play_system_sound(crate::syssound::guide_for_judge(judge));
+            }
+        } else {
             self.session.release_dir(lane, dir, raw);
         }
     }
@@ -454,6 +489,7 @@ impl StageHandler for PlayState {
     /// A run starting is the moment the reference switches the play timer on and the ready timer
     /// off, which is what a document's opening animation is measured from.
     fn on_enter(&mut self, ctx: &mut FrameCtx<'_>) {
+        ctx.shared.play_system_sound(SystemSound::PlayReady);
         let now_ms = ctx.shared.skin_now_ms();
         ctx.shared.skin_play_timers.start(&mut ctx.shared.skin_timers, now_ms);
     }
@@ -485,6 +521,17 @@ impl StageHandler for PlayState {
         }
         if self.escape_hold_elapsed(ctx.now) {
             return self.leave_run(ctx);
+        }
+        Transition::Stay
+    }
+
+    /// One controller event: a lane goes to the same path a key does, and a control action to the
+    /// same one a bound key does. Controls are only ever emitted on the way down, so there is no
+    /// press gate here.
+    fn handle_pad(&mut self, ctx: &mut FrameCtx<'_>, event: crate::gamepad::PadEvent) -> Transition {
+        match event {
+            crate::gamepad::PadEvent::Lane { lane, dir, press } => self.lane_input(ctx.shared, lane, dir, press),
+            crate::gamepad::PadEvent::Control(action) => self.in_play_control(ctx.shared, action),
         }
         Transition::Stay
     }

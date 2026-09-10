@@ -385,7 +385,7 @@ pub(super) mod tests {
             random: String::new(),
             played_at,
             replay_file: None,
-            rule_version: SCORE_RULE_VERSION,
+            rule_version: rbms_store::SCORE_RULE_VERSION,
             ln_mode: SCORE_LN_MODE_FROM_CHART.to_string(),
             assisted: false,
         }

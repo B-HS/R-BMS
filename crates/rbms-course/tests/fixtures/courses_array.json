@@ -1,0 +1,70 @@
+[
+    {
+        "name": "GENOSIDE 2018 段位認定 五段",
+        "hash": [
+            {
+                "md5": "0d4f7bd1a9a5a1dd6a56b1b1b8a2f001",
+                "sha256": "b34f0d0a0e63e2eb1bd0f7bdd2c5f9f3f4bb3a7c9f61a4c3ad7dcb1c0f2e5a91",
+                "title": "Anthem Landing",
+                "genre": "TRANCE",
+                "artist": "unknown"
+            },
+            {
+                "md5": "1e5f8ce2babc6b2ee7b67c2c29b3f112",
+                "sha256": "c45f1e1b1f74f3fc2ce1a8cee3d6faf4f5cc4b8daf72b5d4be8edc2d1f3f6ba2",
+                "title": "Blue Rain",
+                "notes": 1120
+            },
+            {
+                "md5": "2f609df3cbcd7c3ff8c78d3d3ac40223",
+                "sha256": "d560f2c2c085a4ad3df2b9dff4e70b05a6dd5c9eb083c6e5cf9fed3e2a407cb3",
+                "title": "Cerulean",
+                "level": "12"
+            },
+            {
+                "md5": "3a71aea4dcde8d40a9d89e4e4bd51334",
+                "sha256": "e671a3d3d196b5be4ea3cae005071c16b7ee6da0c194d7f6d00afe4f3b518dc4",
+                "title": "Deep Sea"
+            }
+        ],
+        "constraint": [
+            "CLASS",
+            "NO_SPEED",
+            "LN"
+        ],
+        "trophy": [
+            {
+                "name": "bronzemedal",
+                "missrate": 10.0,
+                "scorerate": 55.0
+            },
+            {
+                "name": "silvermedal",
+                "missrate": 7.0,
+                "scorerate": 70.0
+            },
+            {
+                "name": "goldmedal",
+                "missrate": 5.0,
+                "scorerate": 85.0
+            }
+        ],
+        "release": true,
+        "editor": "someone"
+    },
+    {
+        "name": "Mirror Grade",
+        "song": [
+            {
+                "md5": "4b82bfb5edef9e51bae9af5f5ce62445",
+                "sha256": "f782b4e4e2a7c6cf5fb4dbf116182d27c8ff7eb1d2a5e807e11bf5040c629ed5",
+                "title": "Elysium"
+            }
+        ],
+        "constraint": [
+            "grade_mirror",
+            "gauge_lr2"
+        ],
+        "release": false
+    }
+]

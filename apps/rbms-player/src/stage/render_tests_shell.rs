@@ -51,7 +51,10 @@ fn the_loading_screen_animates_between_frames() {
 #[test]
 fn each_kind_of_wait_paints_a_frame_of_its_own() {
     let mut app = app();
-    let scan = render(&mut app, Stage::Loading(LoadingState::scan(Vec::new(), Vec::new()))).signature();
+    let scan_db = std::env::temp_dir().join(format!("rbms-shell-scan-{}.sqlite", std::process::id()));
+    let _ = std::fs::remove_file(&scan_db);
+    let scan = render(&mut app, Stage::Loading(LoadingState::scan(Vec::new(), Vec::new(), scan_db.clone(), false))).signature();
+    let _ = std::fs::remove_file(&scan_db);
     let source = rbms_config::TableSource { name: "table".into(), location: "/no/such/table.json".into() };
     let fetching = LoadingState::table(&app.shared, source);
     let table = render(&mut app, Stage::Loading(fetching)).signature();

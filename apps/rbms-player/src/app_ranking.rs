@@ -36,11 +36,23 @@ impl AppShared {
         let player = PlayerId { id: self.config.network.player_id.clone() };
         let rivals = self.config.network.rivals.clone();
         self.ranking_cache.insert(md5.clone(), RankingState::Loading);
-        let rx = spawn_query(self.server.clone(), move |server| {
+        let source = self.primary_ir_server();
+        let rx = spawn_query(source, move |server| {
             let state = fetch_board(server, &chart, &player, &rivals);
             Ok::<RankingFetch, rbms_ir::IrError>(RankingFetch { generation, md5, state })
         });
         self.ranking_rx = Some(rx);
+    }
+
+    /// The server the ranking panel reads and a course is submitted to: the primary profile, or the
+    /// legacy single server when no profile is enabled.
+    pub(crate) fn primary_ir_server(&self) -> Arc<dyn ScoreServer> {
+        self.multi_ir.primary_server().and_then(|index| self.profile_servers.get(index).cloned()).unwrap_or_else(|| self.server.clone())
+    }
+
+    /// The server a finished course is submitted to. Courses go to the primary profile only.
+    pub(crate) fn course_ir_server(&self) -> Arc<dyn ScoreServer> {
+        self.primary_ir_server()
     }
 
     /// Hand a finished score submission to the IR worker, uploading the run's replay alongside it
@@ -48,6 +60,19 @@ impl AppShared {
     pub(crate) fn spawn_score_submit(&mut self, submission: ScoreSubmission, replay: Option<ReplayData>) {
         self.ir_status = IrStatus::Sending;
         self.submit_rx = Some(spawn_submit(self.server.clone(), SubmitJob { submission, replay }));
+    }
+
+    /// Submit the same run to every extra IR profile, in parallel and off the frame thread.
+    ///
+    /// `server_url` itself is left to [`AppShared::spawn_score_submit`] — it is the profile that
+    /// also uploads the replay — so this fans out over [`MultiIr::secondary`] and never submits
+    /// there twice. One profile failing does not touch the others' results.
+    pub(crate) fn spawn_profile_submits(&mut self, submission: &ScoreSubmission) {
+        let secondary = self.multi_ir.secondary();
+        if secondary.enabled_profiles().next().is_none() {
+            return;
+        }
+        self.profile_submit_rx = Some(spawn_submit_all(secondary, self.profile_servers.clone(), submission.clone()));
     }
 
     /// The replay payload to upload with this run, or `None` when the setting is off, no replay was
@@ -69,6 +94,7 @@ impl AppShared {
             self.net_status = "replay download dropped: left song select".to_string();
         }
         self.poll_submit();
+        self.poll_profile_submits();
     }
 
     fn poll_ranking(&mut self) {
@@ -97,6 +123,18 @@ impl AppShared {
     fn forget_pending_ranking(&mut self) {
         if let Some(md5) = self.ranking_requested.take() {
             self.ranking_cache.remove(&md5);
+        }
+    }
+
+    /// Collect the extra profiles' fan-out and report how many of them took the score.
+    fn poll_profile_submits(&mut self) {
+        let Some(rx) = self.profile_submit_rx.take() else {
+            return;
+        };
+        match rx.try_recv() {
+            Ok(results) => self.net_status = submit_summary(&results),
+            Err(TryRecvError::Empty) => self.profile_submit_rx = Some(rx),
+            Err(TryRecvError::Disconnected) => self.net_status = "profile submit worker stopped".to_string(),
         }
     }
 

@@ -1,0 +1,51 @@
+[
+    {
+        "hash": [
+            {
+                "md5": "7eb5e2e810120184ed1cd2828fb95778",
+                "sha256": ""
+            },
+            {
+                "md5": "8fc6f3f921231295fe2de39390ca6889",
+                "sha256": "",
+                "title": "Named Stage"
+            }
+        ],
+        "constraint": [
+            "grade",
+            "grade_mirror",
+            "cn",
+            "ln",
+            "no_speed"
+        ],
+        "trophy": [
+            {
+                "name": "keeper",
+                "missrate": 12.5,
+                "scorerate": 60.0
+            },
+            {
+                "name": "",
+                "missrate": 12.5,
+                "scorerate": 60.0
+            }
+        ]
+    },
+    {
+        "name": "No Charts At All",
+        "hash": [],
+        "constraint": [
+            "grade"
+        ]
+    },
+    {
+        "name": "Unidentified Stage",
+        "hash": [
+            {
+                "md5": "",
+                "sha256": "",
+                "title": "nothing to resolve"
+            }
+        ]
+    }
+]

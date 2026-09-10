@@ -12,10 +12,12 @@ use winit::keyboard::KeyCode;
 use crate::AppShared;
 
 pub(crate) mod canvas;
+pub(crate) mod course_result;
 pub(crate) mod folders;
 pub(crate) mod keyconfig;
 pub(crate) mod loading;
 pub(crate) mod play;
+pub(crate) mod practice;
 #[cfg(test)]
 mod render_tests;
 #[cfg(test)]
@@ -36,10 +38,12 @@ pub(crate) mod tables;
 pub(crate) use canvas::Canvas;
 #[cfg(test)]
 pub(crate) use canvas::HeadlessCanvas;
+pub(crate) use course_result::CourseResultState;
 pub(crate) use folders::FoldersState;
 pub(crate) use keyconfig::KeyConfigState;
 pub(crate) use loading::{KeysoundLoad, LoadingState};
 pub(crate) use play::PlayState;
+pub(crate) use practice::PracticeState;
 pub(crate) use result::ResultState;
 pub(crate) use select::SelectState;
 pub(crate) use settings::SettingsState;
@@ -59,6 +63,8 @@ pub(crate) enum Stage {
     Loading(LoadingState),
     Play(Box<PlayState>),
     Result(ResultState),
+    CourseResult(Box<CourseResultState>),
+    Practice(Box<PracticeState>),
 }
 
 /// Which screen a stage is, without its state. Used where only the identity matters — the soak
@@ -74,6 +80,8 @@ pub(crate) enum StageId {
     Loading,
     Play,
     Result,
+    CourseResult,
+    Practice,
 }
 
 /// What a screen hands back to [`crate::App`] after an update, a key or a click.
@@ -125,6 +133,11 @@ pub(crate) trait StageHandler {
         let _ = (ctx, at);
         Transition::Stay
     }
+    /// One controller event, already debounced. A screen with no use for a controller is unchanged.
+    fn handle_pad(&mut self, ctx: &mut FrameCtx<'_>, event: crate::gamepad::PadEvent) -> Transition {
+        let _ = (ctx, event);
+        Transition::Stay
+    }
     fn on_enter(&mut self, ctx: &mut FrameCtx<'_>) {
         let _ = ctx;
     }
@@ -158,13 +171,25 @@ impl StageId {
             StageId::Loading => "Loading",
             StageId::Play => "Play",
             StageId::Result => "Result",
+            StageId::CourseResult => "CourseResult",
+            StageId::Practice => "Practice",
         }
     }
 
     /// Every screen, for the tests that have to cover all of them.
     #[cfg(test)]
-    pub(crate) const ALL: [StageId; 8] =
-        [StageId::Select, StageId::Settings, StageId::KeyConfig, StageId::Tables, StageId::Folders, StageId::Loading, StageId::Play, StageId::Result];
+    pub(crate) const ALL: [StageId; 10] = [
+        StageId::Select,
+        StageId::Settings,
+        StageId::KeyConfig,
+        StageId::Tables,
+        StageId::Folders,
+        StageId::Loading,
+        StageId::Play,
+        StageId::Result,
+        StageId::CourseResult,
+        StageId::Practice,
+    ];
 }
 
 impl Stage {
@@ -178,6 +203,8 @@ impl Stage {
             Stage::Loading(_) => StageId::Loading,
             Stage::Play(_) => StageId::Play,
             Stage::Result(_) => StageId::Result,
+            Stage::CourseResult(_) => StageId::CourseResult,
+            Stage::Practice(_) => StageId::Practice,
         }
     }
 
@@ -192,6 +219,8 @@ impl Stage {
             Stage::Loading(s) => s,
             Stage::Play(s) => s.as_mut(),
             Stage::Result(s) => s,
+            Stage::CourseResult(s) => s.as_mut(),
+            Stage::Practice(s) => s.as_mut(),
         }
     }
 
@@ -205,6 +234,8 @@ impl Stage {
             Stage::Loading(s) => s,
             Stage::Play(s) => s.as_ref(),
             Stage::Result(s) => s,
+            Stage::CourseResult(s) => s.as_ref(),
+            Stage::Practice(s) => s.as_ref(),
         }
     }
 
@@ -239,6 +270,12 @@ impl Stage {
             return Transition::Stay;
         }
         self.handler().handle_mouse(ctx, at)
+    }
+
+    /// Route one controller event to the screen that is up. The option overlay does not take these:
+    /// it is opened and moved with keys, and a lane held on a controller must reach the run under it.
+    pub(crate) fn handle_pad(&mut self, ctx: &mut FrameCtx<'_>, event: crate::gamepad::PadEvent) -> Transition {
+        self.handler().handle_pad(ctx, event)
     }
 
     pub(crate) fn on_enter(&mut self, ctx: &mut FrameCtx<'_>) {

@@ -4,13 +4,9 @@ fn samples_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../samples/preview-demo")
 }
 
-fn idle() -> (AtomicUsize, AtomicBool) {
-    (AtomicUsize::new(0), AtomicBool::new(false))
-}
-
 #[test]
-fn is_chart_accepts_every_bms_extension_in_any_case() {
-    for name in ["a.bms", "a.BME", "a.Bml", "a.pms", "deep/dir/song.bms"] {
+fn is_chart_accepts_every_chart_extension_in_any_case() {
+    for name in ["a.bms", "a.BME", "a.Bml", "a.pms", "a.bmson", "a.BMSON", "deep/dir/song.bms"] {
         assert!(is_chart(Path::new(name)), "{name} is a chart");
     }
 }
@@ -20,60 +16,6 @@ fn is_chart_rejects_non_chart_files() {
     for name in ["a.wav", "a.ogg", "a.png", "a.bms.bak", "a", "dir/"] {
         assert!(!is_chart(Path::new(name)), "{name} is not a chart");
     }
-}
-
-#[test]
-fn scan_folder_reads_the_sample_charts_and_counts_them() {
-    let (count, cancel) = idle();
-    let songs = scan_folder(&samples_dir(), &count, &cancel);
-    assert_eq!(songs.len(), 2, "the sample folder holds two charts");
-    assert_eq!(count.load(Ordering::Relaxed), 2, "the progress counter matches the charts read");
-    assert!(songs.iter().all(|s| !s.md5.is_empty()), "every entry carries the chart md5");
-    assert!(songs.iter().all(|s| s.init_bpm > 0.0), "every entry carries the chart's initial BPM");
-}
-
-#[test]
-fn scan_folder_sorts_by_lowercased_title() {
-    let (count, cancel) = idle();
-    let songs = scan_folder(&samples_dir(), &count, &cancel);
-    let titles: Vec<String> = songs.iter().map(|s| s.title.to_lowercase()).collect();
-    let mut sorted = titles.clone();
-    sorted.sort();
-    assert_eq!(titles, sorted, "entries come back title-ordered");
-}
-
-#[test]
-fn scan_folder_of_a_missing_root_is_empty() {
-    let (count, cancel) = idle();
-    let missing = std::env::temp_dir().join(format!("rbms_library_missing_{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&missing);
-    assert!(scan_folder(&missing, &count, &cancel).is_empty(), "an unreadable folder contributes nothing");
-    assert_eq!(count.load(Ordering::Relaxed), 0);
-}
-
-#[test]
-fn a_cancelled_scan_reads_nothing() {
-    let count = AtomicUsize::new(0);
-    let cancel = AtomicBool::new(true);
-    assert!(scan_folder(&samples_dir(), &count, &cancel).is_empty(), "a scan cancelled up front stops before the first read");
-    assert_eq!(count.load(Ordering::Relaxed), 0);
-}
-
-#[test]
-fn scan_folders_merges_every_folder_into_one_list() {
-    let (count, cancel) = idle();
-    let dir = samples_dir().to_string_lossy().to_string();
-    let one = scan_folders(std::slice::from_ref(&dir), &count, &cancel);
-    let (count2, cancel2) = idle();
-    let twice = scan_folders(&[dir.clone(), dir], &count2, &cancel2);
-    assert_eq!(twice.len(), one.len() * 2, "the library is the union of the folders, duplicates included");
-    assert_eq!(count2.load(Ordering::Relaxed), count.load(Ordering::Relaxed) * 2);
-}
-
-#[test]
-fn scan_folders_of_an_empty_folder_list_is_empty() {
-    let (count, cancel) = idle();
-    assert!(scan_folders(&[], &count, &cancel).is_empty());
 }
 
 #[test]
@@ -139,4 +81,14 @@ fn an_empty_library_answers_every_query() {
     assert!(lib.songs().is_empty());
     assert!(lib.indices_for_md5("AA").is_empty());
     assert_eq!(lib.md5s().count(), 0);
+}
+
+#[test]
+fn only_the_json_extension_reads_as_bmson() {
+    for name in ["a.bmson", "a.BMSON", "deep/dir/song.BmSoN"] {
+        assert!(is_bmson(Path::new(name)), "{name} is bmson");
+    }
+    for name in ["a.bms", "a.bme", "a.pms", "a.json", "a"] {
+        assert!(!is_bmson(Path::new(name)), "{name} is not bmson");
+    }
 }

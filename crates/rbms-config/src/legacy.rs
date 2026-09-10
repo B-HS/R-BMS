@@ -160,6 +160,7 @@ impl From<LegacyV0> for Config {
                 sync_settings: old.sync_settings,
                 auto_upload_replay: old.auto_upload_replay,
                 rivals: old.rivals,
+                ..NetworkOptions::default()
             },
             library: LibraryOptions { folders: Vec::new(), songs_folder: old.songs_folder, preview: old.preview, ..LibraryOptions::default() },
             skin: SkinOptions::default(),

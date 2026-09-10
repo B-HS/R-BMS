@@ -27,6 +27,68 @@ impl PendingChart {
     }
 }
 
+/// What the load path needs from a chart file, whatever format it is written in.
+struct DecodedChart {
+    mode: rbms_model::Mode,
+    model: rbms_model::Model,
+    /// The file hash a replay is checked against.
+    md5: String,
+    /// The long-note mode the chart states, in `#LNMODE` codes.
+    lnmode: i32,
+    /// The bmson document, kept only because bmson states TOTAL as a percentage of the mode default
+    /// and that percentage is not final until the long-note flavour is resolved.
+    bmson: Option<Box<rbms_parser::bmson::BmsonChart>>,
+}
+
+/// Whether a chart path names a bmson document, which is decoded from JSON rather than from the BMS
+/// line grammar.
+fn is_bmson_path(path: &str) -> bool {
+    Path::new(path).extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_ascii_case(rbms_parser::bmson::EXTENSION)).unwrap_or(false)
+}
+
+/// Decode a chart file of either format into the play model. `None` when the bytes are not a chart
+/// this build can read, which the caller reports instead of playing silence.
+fn decode_chart(bytes: &[u8], path: &str) -> Option<DecodedChart> {
+    if is_bmson_path(path) {
+        let chart = rbms_parser::bmson::parse(bytes).ok()?;
+        let mode = chart.mode();
+        let model = chart.to_model();
+        let (md5, lnmode) = (chart.md5.clone(), chart.info.ln_type as i32);
+        return Some(DecodedChart { mode, model, md5, lnmode, bmson: Some(Box::new(chart)) });
+    }
+    let src = rbms_parser::parse_with(bytes, Default::default());
+    let mode = rbms_chart::detect_mode(&src, path);
+    let model = to_model(&src, mode);
+    Some(DecodedChart { mode, model, md5: src.md5.clone(), lnmode: src.headers.lnmode, bmson: None })
+}
+
+/// The chart a practice session is set up on: the model as it stood before any range was cut from
+/// it, plus everything a slice's own session has to be built with.
+///
+/// Every slice is cut from this original rather than from the previous cut, so walking back to the
+/// panel and widening the range gives back the notes the last slice dropped.
+pub(crate) struct PracticeChart {
+    model: rbms_model::Model,
+    mode: rbms_model::Mode,
+    title: String,
+    lntype: i32,
+    ln_mode_key: String,
+    judge_setup: rbms_play::JudgeSetup,
+    seed: u64,
+}
+
+/// The gauge kind a practice slice runs on, folding the three course gauges onto the six a session
+/// can be opened with — the same rule the replay path uses for a course-gauge replay.
+fn practice_gauge_kind(index: rbms_judge::gauge::GaugeIndex) -> rbms_judge::GaugeKind {
+    match index.kind() {
+        Some(kind) => kind,
+        None => match index {
+            rbms_judge::gauge::GaugeIndex::Class => rbms_judge::GaugeKind::Normal,
+            _ => rbms_judge::GaugeKind::ExHard,
+        },
+    }
+}
+
 /// A chart that has just been parsed, plus whatever is still being decoded for it. Either decode is
 /// `None` when there was nothing of that kind to wait for.
 pub(crate) struct LoadedChart {
@@ -130,12 +192,18 @@ impl AppShared {
                 return None;
             }
         };
-        let src = rbms_parser::parse_with(&bytes, Default::default());
-        let mode = rbms_chart::detect_mode(&src, &self.chart_path);
+        let decoded = match decode_chart(&bytes, &self.chart_path) {
+            Some(decoded) => decoded,
+            None => {
+                notify(Level::Error, format!("chart could not be read: {}", self.chart_path));
+                return None;
+            }
+        };
+        let mode = decoded.mode;
         let (random, seed) = match &self.replay {
             Some(rp) => {
-                if !rp.md5.is_empty() && rp.md5 != src.md5 {
-                    notify(Level::Warn, format!("warning: chart md5 mismatch (replay {} vs file {}); replay may desync", rp.md5, src.md5));
+                if !rp.md5.is_empty() && rp.md5 != decoded.md5 {
+                    notify(Level::Warn, format!("warning: chart md5 mismatch (replay {} vs file {}); replay may desync", rp.md5, decoded.md5));
                 }
                 self.config.judge.offset_ms = rp.offset_ms;
                 self.config.play.scratch_auto = rp.scratch_auto;
@@ -147,11 +215,29 @@ impl AppShared {
             None => (self.config.play.random, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1)),
         };
         let judge_setup = run_judge_setup(&self.config, self.replay.as_ref());
-        let mut model = to_model(&src, mode);
+        let mut model = decoded.model;
         let ln_mode_decides_flavour = rbms_chart::contains_undefined_long_note(&model);
         rbms_chart::resolve_long_note_flavour(&mut model, judge_setup.ln_mode.resolve());
-        let lntype = run_lntype(src.headers.lnmode, judge_setup.ln_mode);
+        let lntype = run_lntype(decoded.lnmode, judge_setup.ln_mode);
+        let ln_mode_key = match ln_mode_decides_flavour {
+            true => ln_mode_token(judge_setup.ln_mode).to_string(),
+            false => SCORE_LN_MODE_FROM_CHART.to_string(),
+        };
+        if self.practice_requested {
+            self.practice_chart = Some(Box::new(PracticeChart {
+                model: model.clone(),
+                mode,
+                title: model.meta.title.clone(),
+                lntype,
+                ln_mode_key: ln_mode_key.clone(),
+                judge_setup,
+                seed,
+            }));
+        }
         rbms_chart::shuffle::apply(&mut model, random, seed);
+        if let Some(chart) = &decoded.bmson {
+            model.meta.total = chart.total_for_notes(&mode, rbms_chart::count_playable_notes(&model));
+        }
         if model.meta.total <= 0.0 {
             model.meta.total = default_total_for_mode(&mode, rbms_chart::count_playable_notes(&model));
         }
@@ -239,10 +325,6 @@ impl AppShared {
         };
         let mut session = PlaySession::new(model, options);
         session.set_judge_setup(judge_setup);
-        let ln_mode_key = match ln_mode_decides_flavour {
-            true => ln_mode_token(judge_setup.ln_mode).to_string(),
-            false => SCORE_LN_MODE_FROM_CHART.to_string(),
-        };
         Some(LoadedChart { chart: PendingChart { session, lntype, ln_mode_key }, bga, keysounds })
     }
 
@@ -250,10 +332,105 @@ impl AppShared {
     /// or start play right away when there is nothing left to wait for.
     pub(crate) fn enter_loaded_chart(&mut self, loaded: LoadedChart) -> Stage {
         if loaded.bga.is_none() && loaded.keysounds.is_none() {
+            if let Some(stage) = self.practice_stage_if_requested() {
+                return stage;
+            }
             self.start_play();
             return Stage::Play(Box::new(loaded.chart.into_play(std::collections::HashMap::new())));
         }
         Stage::Loading(LoadingState::assets(loaded))
+    }
+
+    /// The practice panel for the chart that has just finished loading, when the browser asked for
+    /// one. The parsed session that came with it is dropped: a practice slice builds its own from
+    /// the untrimmed model, so nothing of the full run is reused.
+    pub(crate) fn practice_stage_if_requested(&mut self) -> Option<Stage> {
+        if !self.practice_requested {
+            return None;
+        }
+        self.practice_requested = false;
+        let chart = self.practice_chart.as_ref()?;
+        let last_ms = crate::practice::last_timeline_ms(&chart.model);
+        let total = match chart.model.meta.total > 0.0 {
+            true => chart.model.meta.total,
+            false => default_total_for_mode(&chart.mode, rbms_chart::count_playable_notes(&chart.model)),
+        };
+        let saved = self.practice_book.get(&chart.model.md5);
+        let panel = crate::practice::PracticePanel::new(chart.model.md5.clone(), chart.mode, last_ms, saved, total);
+        let title = chart.title.clone();
+        Some(Stage::Practice(Box::new(crate::stage::PracticeState::new(panel, title))))
+    }
+
+    /// Build the run for the range the practice panel describes.
+    ///
+    /// Trimming the timelines is what gives range playback without reaching into `rbms-play`:
+    /// seeking is a replay-only path there, and merely moving the clock would have the first update
+    /// sweep every note before the start time into MISS. The cost is that the gauge's TOTAL is
+    /// spread over the slice's notes rather than the chart's, which is recorded as a divergence.
+    pub(crate) fn start_practice_slice(&mut self, panel: &mut crate::practice::PracticePanel) -> Option<PlayState> {
+        let practice = panel.start();
+        let chart = self.practice_chart.as_ref()?;
+        let mode = chart.mode;
+        let seed = chart.seed;
+        let lntype = chart.lntype;
+        let ln_mode_key = chart.ln_mode_key.clone();
+        let mut judge_setup = chart.judge_setup;
+        let mut model = chart.model.clone();
+        model.timelines.retain(|tl| tl.time_us >= practice.start_us && tl.time_us <= practice.end_us);
+        rbms_chart::shuffle::apply(&mut model, practice.option, seed);
+        match practice.total {
+            Some(total) => model.meta.total = total,
+            None => {
+                if model.meta.total <= 0.0 {
+                    model.meta.total = default_total_for_mode(&mode, rbms_chart::count_playable_notes(&model));
+                }
+            }
+        }
+        self.mode = mode;
+        self.active_keys = self.launch.keys_override.clone().unwrap_or_else(|| self.keyconfig.lane_keys(mode));
+        self.active_reverse_keys = match self.launch.keys_override {
+            Some(_) => Vec::new(),
+            None => self.keyconfig.scratch_reverse_keys(mode),
+        };
+        let options = SessionOptions {
+            gauge: practice_gauge_kind(practice.gauge),
+            judge_offset_us: self.offset_us(),
+            judge_rate_percent: practice.judge_rate_percent,
+            seed,
+            ..SessionOptions::default()
+        };
+        let mut session = PlaySession::new(model, options);
+        judge_setup.gauge_set = Some(practice.gauge_set);
+        judge_setup.judge_rate_key = [practice.judge_rate_percent; rbms_config::JUDGE_WIDTH_TIER_COUNT];
+        judge_setup.judge_rate_scratch = [practice.judge_rate_percent; rbms_config::JUDGE_WIDTH_TIER_COUNT];
+        session.set_judge_setup(judge_setup);
+        let mut play = PlayState::new(session, std::collections::HashMap::new(), lntype, ln_mode_key);
+        play.set_practice(practice);
+        self.start_play();
+        Some(play)
+    }
+
+    /// Raise a system sound on the shared stream. Silent when the stream is not open or the set has
+    /// no file for it.
+    ///
+    /// The set is taken out and put back because the sound bank and the output stream are two
+    /// fields of the same struct and the call needs one of each.
+    pub(crate) fn play_system_sound(&mut self, sound: SystemSound) {
+        let syssound = std::mem::replace(&mut self.syssound, SystemSoundSet::silent());
+        if let Some(engine) = self.audio.as_mut() {
+            syssound.play(engine, sound, SYSTEM_SOUND_GAIN);
+        }
+        self.syssound = syssound;
+    }
+
+    /// Re-read the system sound set after the SOUND FOLDER row changed, and hand it to the running
+    /// stream so the next cue is heard without a restart.
+    pub(crate) fn reload_system_sounds(&mut self) {
+        self.syssound = SystemSoundSet::load_optional(sound_folder_path(&self.config).as_deref());
+        self.syssound.set_guide_enabled(self.config.audio.guide_se);
+        if let Some(engine) = self.audio.as_mut() {
+            self.syssound.install(engine);
+        }
     }
 
     /// Leave a run: back to the song browser, or out of the app when there is no library to return
@@ -301,9 +478,12 @@ impl AppShared {
                 self.audio_failed = false;
                 self.audio_dead_at.set(None);
                 self.apply_audio_gains();
+                let syssound = std::mem::replace(&mut self.syssound, SystemSoundSet::silent());
                 if let Some(engine) = self.audio.as_mut() {
                     engine.set_chart_gain(self.chart_gain);
+                    syssound.install(engine);
                 }
+                self.syssound = syssound;
             }
             Err(e) => {
                 notify(Level::Warn, format!("audio unavailable ({e}) — visual only"));
@@ -380,9 +560,13 @@ impl AppShared {
 
     /// The browser lines of the debug overlay, shown on every screen but PLAY.
     pub(crate) fn browser_debug_lines(&self) -> Vec<String> {
+        let store = match self.scoredb.is_some() {
+            true => scoredb_store::SCOREDB_FILE.to_string(),
+            false => self.scores_path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| scoredb_store::SCORES_RON_FILE.to_string()),
+        };
         vec![
             format!("SEL {} / {}", self.sel + 1, self.select_items.len()),
-            format!("SCORES {}  SONGS {}", self.scores.records().len(), self.library.len()),
+            format!("SCORES {} ({store})  SONGS {}", self.scores.records().len(), self.library.len()),
             format!("CURSOR {:.0} {:.0}", self.cursor.0, self.cursor.1),
         ]
     }
@@ -559,7 +743,8 @@ impl AppShared {
         lines
     }
 
-    pub(crate) fn print_selection(&self) {
+    pub(crate) fn print_selection(&mut self) {
+        self.play_system_sound(SystemSound::Scratch);
         let total = self.select_items.len();
         match self.select_items.get(self.sel) {
             Some(SelectItem::Song(i)) => {

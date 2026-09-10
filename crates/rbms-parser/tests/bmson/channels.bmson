@@ -1,0 +1,43 @@
+{
+    "version": "1.0.0",
+    "info": {
+        "title": "Channels",
+        "artist": "rbms",
+        "genre": "test",
+        "mode_hint": "beat-7k",
+        "judge_rank": 100,
+        "total": 150,
+        "init_bpm": 120,
+        "level": 9,
+        "resolution": 240
+    },
+    "scroll_events": [{ "y": 480, "rate": 2.0 }],
+    "sound_channels": [
+        {
+            "name": "loop.ogg",
+            "notes": [{ "y": 0 }, { "y": 480, "c": true }, { "y": 960, "c": true }]
+        },
+        {
+            "name": "key.ogg",
+            "notes": [{ "x": 1, "y": 0 }, { "x": 1, "y": 0 }]
+        }
+    ],
+    "key_channels": [
+        {
+            "name": "hidden.ogg",
+            "notes": [{ "x": 2, "y": 240 }]
+        }
+    ],
+    "mine_channels": [
+        {
+            "name": "mine.ogg",
+            "notes": [{ "x": 3, "y": 240, "damage": 5.5 }]
+        }
+    ],
+    "bga": {
+        "bga_header": [{ "id": 7, "name": "a.png" }, { "id": 9, "name": "b.png" }],
+        "bga_events": [{ "y": 0, "id": 9 }],
+        "layer_events": [{ "y": 480, "id": 7 }],
+        "poor_events": [{ "y": 960, "id": 7 }]
+    }
+}

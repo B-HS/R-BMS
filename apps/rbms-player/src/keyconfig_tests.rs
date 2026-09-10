@@ -1,3 +1,4 @@
+use crate::gamepad::{ANALOG_THRESHOLD_RANGE, AXIS_DEADZONE_RANGE, AnalogMode, DEBOUNCE_MS_RANGE, PadBinding, PadConfig};
 use crate::keyconfig::{ControlAction, KeyConfig, default_keys_for_mode, key_from_name, key_name, mode_config_key};
 use rbms_model::Mode;
 use rbms_play::ScratchDir;
@@ -516,4 +517,49 @@ fn a_reverse_binding_on_a_non_scratch_lane_or_an_unknown_key_is_dropped() {
     scratch_reverse.insert(mode_config_key(Mode::BEAT_7K).to_string(), vec!["NOSUCHKEY".to_string(); Mode::BEAT_7K.key]);
     let kc = KeyConfig { scratch_reverse, ..KeyConfig::default() };
     assert!(kc.scratch_reverse_keys(Mode::BEAT_7K).is_empty(), "an unknown token leaves the lane unbound");
+}
+
+/// The pad block is a fourth field, so a key config written before a controller was readable still
+/// parses — and gets a table that binds nothing, which plays exactly as it did.
+#[test]
+fn an_older_key_config_without_a_pad_block_still_loads() {
+    let older: KeyConfig = ron::from_str(r#"(lanes: {"7K": ["Z"]}, controls: (hispeed_up: "UP"))"#).expect("a pre-pad config parses");
+    assert_eq!(older.pad, PadConfig::default());
+    for &mode in Mode::ALL {
+        assert!((0..mode.key).all(|lane| older.pad.lane_binding(mode, lane).is_none()), "{} is unbound on the pad", mode.name);
+    }
+    assert_eq!(older.control_key(ControlAction::HiSpeedUp), Some(KeyCode::ArrowUp), "and the keyboard rows it did carry are kept");
+}
+
+/// A pad binding is stored with the rest of the key config and reads back as what it was set to.
+#[test]
+fn the_pad_block_survives_the_file() {
+    let mode = Mode::BEAT_7K;
+    let scratch = (0..mode.key).find(|&lane| mode.is_scratch(lane)).expect("7K has a scratch lane");
+    let mut kc = KeyConfig::default();
+    kc.pad.set_lane(mode, 0, Some(PadBinding::Button(4)));
+    kc.pad.set_lane(mode, scratch, Some(PadBinding::AnalogScratch { axis: 1 }));
+    kc.pad.analog_mode = AnalogMode::V2;
+
+    let text = ron::ser::to_string_pretty(&kc, ron::ser::PrettyConfig::default()).expect("a key config serialises");
+    let back: KeyConfig = ron::from_str(&text).expect("a key config parses");
+    assert_eq!(back.pad, kc.pad);
+    assert_eq!(back.lane_keys(mode), kc.lane_keys(mode), "and the keyboard rows are untouched by it");
+}
+
+/// A hand-edited pad block is pulled back into range as it is read, so an out-of-range threshold
+/// cannot reach the turntable machines.
+#[test]
+fn loading_clamps_an_out_of_range_pad_block() {
+    let dir = std::env::temp_dir().join(format!("rbms_kc_pad_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("keyconfig.ron");
+    std::fs::write(&path, r#"(pad: (analog_threshold: 99999, debounce_ms: 4000, axis_deadzone: 8.0))"#).unwrap();
+
+    let kc = KeyConfig::load(&path);
+    assert_eq!(kc.pad.analog_threshold, *ANALOG_THRESHOLD_RANGE.end());
+    assert_eq!(kc.pad.debounce_ms, *DEBOUNCE_MS_RANGE.end());
+    assert!(kc.pad.axis_deadzone <= *AXIS_DEADZONE_RANGE.end());
+    let _ = std::fs::remove_dir_all(&dir);
 }

@@ -5,6 +5,8 @@ use rbms_model::Mode;
 use serde::{Deserialize, Serialize};
 use winit::keyboard::KeyCode;
 
+use crate::gamepad::PadConfig;
+
 /// Parse a key token (the vocabulary used in the keyconfig file and `--keys`) into a `KeyCode`.
 pub fn key_from_name(s: &str) -> Option<KeyCode> {
     use KeyCode::*;
@@ -297,12 +299,18 @@ impl ControlBinds {
 /// `scratch_reverse` is a second map rather than a second token inside `lanes` so a key config
 /// written before reverse spins existed keeps parsing byte for byte. It ships empty: a scratch lane
 /// with no reverse key behaves exactly as it did with one key.
+///
+/// `pad` holds the same three things for a controller. It lives here rather than in the settings
+/// file because it is the same question the rest of this file answers — what plays which lane —
+/// and a key config written before a controller was readable still loads, filling it with a table
+/// that binds nothing.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct KeyConfig {
     pub lanes: BTreeMap<String, Vec<String>>,
     pub scratch_reverse: BTreeMap<String, Vec<String>>,
     pub controls: ControlBinds,
+    pub pad: PadConfig,
 }
 
 impl Default for KeyConfig {
@@ -317,7 +325,7 @@ impl Default for KeyConfig {
             }
             lanes.insert(mode_config_key(mode).to_string(), row);
         }
-        KeyConfig { lanes, scratch_reverse: BTreeMap::new(), controls: ControlBinds::default() }
+        KeyConfig { lanes, scratch_reverse: BTreeMap::new(), controls: ControlBinds::default(), pad: PadConfig::default() }
     }
 }
 
@@ -436,7 +444,10 @@ impl KeyConfig {
     pub fn load(path: &Path) -> KeyConfig {
         match std::fs::read_to_string(path) {
             Ok(s) => match ron::from_str::<KeyConfig>(&s) {
-                Ok(kc) => kc,
+                Ok(mut kc) => {
+                    kc.pad.sanitise();
+                    kc
+                }
                 Err(e) => {
                     let backup = path.with_extension("ron.bak");
                     match std::fs::rename(path, &backup) {

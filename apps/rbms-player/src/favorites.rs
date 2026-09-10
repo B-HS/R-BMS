@@ -78,6 +78,11 @@ impl Favorites {
     pub(crate) fn len(&self) -> usize {
         self.md5s.len()
     }
+
+    /// Every starred chart's md5, in the order the file holds them.
+    pub(crate) fn md5s(&self) -> impl Iterator<Item = &str> {
+        self.md5s.iter().map(String::as_str)
+    }
 }
 
 impl crate::AppShared {

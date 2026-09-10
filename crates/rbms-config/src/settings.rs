@@ -213,6 +213,7 @@ pub enum SettingId {
     DownloadSettings,
     AutoUploadReplay,
     Rivals,
+    IrProfiles,
     MasterVolume,
     KeyVolume,
     BgmVolume,
@@ -221,10 +222,12 @@ pub enum SettingId {
     AudioBuffer,
     AudioSampleRate,
     AudioPolyphony,
+    SoundFolder,
+    GuideSe,
 }
 
 /// Rows the settings screen has.
-pub const SETTING_COUNT: usize = 79;
+pub const SETTING_COUNT: usize = 82;
 
 impl SettingId {
     /// Every row, in declaration order.
@@ -300,6 +303,7 @@ impl SettingId {
         SettingId::DownloadSettings,
         SettingId::AutoUploadReplay,
         SettingId::Rivals,
+        SettingId::IrProfiles,
         SettingId::MasterVolume,
         SettingId::KeyVolume,
         SettingId::BgmVolume,
@@ -308,6 +312,8 @@ impl SettingId {
         SettingId::AudioBuffer,
         SettingId::AudioSampleRate,
         SettingId::AudioPolyphony,
+        SettingId::SoundFolder,
+        SettingId::GuideSe,
     ];
 
     /// Position of the row in the whole settings list, which is also its index in [`SettingId::ALL`].
@@ -623,6 +629,7 @@ pub const SETTINGS: &[SettingDescriptor] = &[
     row(SettingId::DownloadSettings, SettingTab::Network, "DOWNLOAD SETTINGS NOW", SettingKind::Action, "Take the account's settings"),
     row(SettingId::AutoUploadReplay, SettingTab::Network, "AUTO UPLOAD REPLAY", SettingKind::Toggle, "Send the replay after a ranked score"),
     row(SettingId::Rivals, SettingTab::Network, "RIVALS", SettingKind::Action, "Players shown next to you on the ranking"),
+    row(SettingId::IrProfiles, SettingTab::Network, "IR PROFILES", SettingKind::Action, "Extra score servers this play is also sent to"),
     row(
         SettingId::MasterVolume,
         SettingTab::Audio,
@@ -666,6 +673,8 @@ pub const SETTINGS: &[SettingDescriptor] = &[
         },
         "Voices the mixer may sound at once",
     ),
+    row(SettingId::SoundFolder, SettingTab::Audio, "SOUND FOLDER", SettingKind::Action, "Folder the system sound set is read from"),
+    row(SettingId::GuideSe, SettingTab::Audio, "GUIDE SE", SettingKind::Toggle, "Sound a cue on every judgement"),
     row(SettingId::Sort, SettingTab::Select, "SORT", SettingKind::Cycle { values: SORT_LABELS }, "How the song list is ordered"),
     row(SettingId::FavoriteOnly, SettingTab::Select, "FAVORITE ONLY", SettingKind::Toggle, "List only the charts marked as favourites"),
     row(
@@ -896,6 +905,7 @@ pub fn display_value(config: &Config, id: SettingId) -> String {
         SettingId::SyncSettings => on_off(config.network.sync_settings),
         SettingId::AutoUploadReplay => on_off(config.network.auto_upload_replay),
         SettingId::Rivals => config.network.rivals.len().to_string(),
+        SettingId::IrProfiles => config.network.ir_profiles.len().to_string(),
         SettingId::MasterVolume => gain_value(config.audio.master, id),
         SettingId::KeyVolume => gain_value(config.audio.key, id),
         SettingId::BgmVolume => gain_value(config.audio.bg, id),
@@ -904,6 +914,8 @@ pub fn display_value(config: &Config, id: SettingId) -> String {
         SettingId::AudioBuffer => auto_or_number(config.audio.buffer_frames),
         SettingId::AudioSampleRate => auto_or_number(config.audio.sample_rate),
         SettingId::AudioPolyphony => config.audio.polyphony.to_string(),
+        SettingId::SoundFolder => optional_text(config.audio.sound_folder.as_deref()),
+        SettingId::GuideSe => on_off(config.audio.guide_se),
     }
 }
 
@@ -1070,6 +1082,7 @@ pub fn adjust(config: &mut Config, id: SettingId, delta: i32) -> AdjustOutcome {
         }
         SettingId::SyncSettings => toggle(&mut config.network.sync_settings),
         SettingId::AutoUploadReplay => toggle(&mut config.network.auto_upload_replay),
+        SettingId::GuideSe => toggle(&mut config.audio.guide_se),
         SettingId::MasterVolume => {
             let next = step_volume(config.audio.master, delta);
             store(&mut config.audio.master, next)
@@ -1124,6 +1137,8 @@ pub fn adjust(config: &mut Config, id: SettingId, delta: i32) -> AdjustOutcome {
         | SettingId::UploadSettings
         | SettingId::DownloadSettings
         | SettingId::Rivals
+        | SettingId::IrProfiles
+        | SettingId::SoundFolder
         | SettingId::AudioDevice => AdjustOutcome::Action(id),
     }
 }
@@ -1323,7 +1338,9 @@ mod tests {
                 SettingId::UploadSettings,
                 SettingId::DownloadSettings,
                 SettingId::Rivals,
+                SettingId::IrProfiles,
                 SettingId::AudioDevice,
+                SettingId::SoundFolder,
             ]
         );
     }
@@ -1581,6 +1598,7 @@ mod tests {
                 SettingId::DownloadSettings,
                 SettingId::AutoUploadReplay,
                 SettingId::Rivals,
+                SettingId::IrProfiles,
             ]
         );
         assert_eq!(
@@ -1594,6 +1612,8 @@ mod tests {
                 SettingId::AudioBuffer,
                 SettingId::AudioSampleRate,
                 SettingId::AudioPolyphony,
+                SettingId::SoundFolder,
+                SettingId::GuideSe,
             ]
         );
         for tab in SettingTab::ALL {

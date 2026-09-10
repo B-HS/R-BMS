@@ -37,18 +37,22 @@ const TITLE_CHARS: usize = 30;
 /// How much of a table's location the FETCHING line shows.
 const LOCATION_CHARS: usize = 56;
 
-/// How far a background folder scan has got. Read by the screen while the worker fills it in.
+/// How far the table-matching half of a background scan has got. The chart walk keeps its own
+/// counters inside the library scan it is driving, so only what happens after it lives here.
 #[derive(Default)]
 pub(crate) struct ScanProgress {
-    /// Charts found so far.
-    pub(crate) charts: AtomicUsize,
     /// Difficulty tables matched against the library so far.
     pub(crate) tables: AtomicUsize,
-    /// Set once the folder walk is over and the difficulty tables are being matched, which is the
-    /// step the screen names and the point its bar stops sweeping and starts filling.
-    pub(crate) matching: AtomicBool,
-    /// Set when the screen is left, so the walk stops instead of finishing work nobody wants.
-    pub(crate) cancel: AtomicBool,
+}
+
+/// Which half of a background scan is running: the chart walk into the song database, or the
+/// difficulty-table match against the library that walk produced.
+///
+/// They are two steps rather than one worker because only the first can be stopped — a table match
+/// is an http fetch already in flight — and because the screen names them separately.
+pub(crate) enum ScanStep {
+    Walking { scan: crate::library::LibraryScan, sources: Vec<TableSource> },
+    Matching { rx: Receiver<ScanOutcome> },
 }
 
 /// Result of a background folder scan (run off-thread so the LOADING screen keeps animating instead
@@ -191,7 +195,7 @@ pub(crate) enum LoadingTask {
     /// Load the library chart at this index and enter Play.
     Song(usize),
     /// Rescan every library folder and re-match the tables, then Select.
-    Scan { rx: Receiver<ScanOutcome>, progress: Arc<ScanProgress> },
+    Scan { step: ScanStep, progress: Arc<ScanProgress> },
     /// Decode what a parsed chart named, then enter Play.
     Assets(Box<ChartAssets>),
     /// Fetch one difficulty table, then return to the table manager.
@@ -218,24 +222,17 @@ impl LoadingState {
         LoadingState { task: LoadingTask::Assets(Box::new(assets)), drawn: false }
     }
 
-    /// Rescan every library folder off-thread and merge into one song list (then re-match tables),
+    /// Rescan every library folder off-thread into the song database (then re-match tables),
     /// landing back on Select. Used at startup and after the folder list changes.
-    pub(crate) fn scan(dirs: Vec<String>, sources: Vec<TableSource>) -> LoadingState {
-        let progress = Arc::new(ScanProgress::default());
-        let worker = progress.clone();
-        let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let library = Library::from_songs(scan_folders(&dirs, &worker.charts, &worker.cancel));
-            worker.matching.store(true, Ordering::Relaxed);
-            let (names, levels) = fetch_and_match(&sources, &library, &worker.tables);
-            let _ = tx.send(ScanOutcome { library, names, levels });
-        });
-        LoadingState { task: LoadingTask::Scan { rx, progress }, drawn: false }
+    pub(crate) fn scan(dirs: Vec<String>, sources: Vec<TableSource>, db_path: PathBuf, full: bool) -> LoadingState {
+        let scan = crate::library::spawn_scan(db_path, dirs, full);
+        LoadingState { task: LoadingTask::Scan { step: ScanStep::Walking { scan, sources }, progress: Arc::new(ScanProgress::default()) }, drawn: false }
     }
 
     /// Rescan the folder list as it stands now.
     pub(crate) fn rescan(shared: &AppShared) -> LoadingState {
-        LoadingState::scan(shared.config.library.folders.clone(), shared.config.library.tables.clone())
+        let full = shared.song_db.as_ref().is_none_or(|db| db.needs_full_rescan().unwrap_or(false));
+        LoadingState::scan(shared.config.library.folders.clone(), shared.config.library.tables.clone(), songdb_path(&shared.settings_path), full)
     }
 
     /// Fetch one difficulty table off-thread and match it against the library that is loaded now.
@@ -276,14 +273,42 @@ impl LoadingState {
         Transition::Back
     }
 
-    /// A background folder scan is running; apply it the frame it finishes, otherwise keep
+    /// A background scan is running; move it on the frame its current step finishes, otherwise keep
     /// animating the LOADING screen.
-    fn poll_scan(shared: &mut AppShared, rx: &Receiver<ScanOutcome>) -> Transition {
-        match rx.try_recv() {
-            Ok(out) => LoadingState::apply_scan(shared, out),
-            Err(TryRecvError::Disconnected) => Transition::Back,
-            Err(TryRecvError::Empty) => Transition::Stay,
+    fn poll_scan(shared: &mut AppShared, step: &mut ScanStep, progress: &Arc<ScanProgress>) -> Transition {
+        match step {
+            ScanStep::Walking { scan, sources } => {
+                let Some(report) = scan.poll() else {
+                    return Transition::Stay;
+                };
+                if let Some(failure) = &report.failure {
+                    notify(Level::Error, format!("library scan failed: {failure}"));
+                }
+                if report.cancelled {
+                    notify(Level::Info, format!("library scan stopped early ({} charts read)", report.upserted));
+                } else if report.upserted > 0 || report.removed > 0 {
+                    notify(Level::Info, format!("library: {} chart(s) read, {} dropped", report.upserted, report.removed));
+                }
+                *step = ScanStep::Matching { rx: LoadingState::spawn_table_match(report.library, std::mem::take(sources), Arc::clone(progress)) };
+                Transition::Stay
+            }
+            ScanStep::Matching { rx } => match rx.try_recv() {
+                Ok(out) => LoadingState::apply_scan(shared, out),
+                Err(TryRecvError::Disconnected) => Transition::Back,
+                Err(TryRecvError::Empty) => Transition::Stay,
+            },
         }
+    }
+
+    /// Match every configured difficulty table against the library the walk just produced, off the
+    /// frame loop because each source is an http fetch.
+    fn spawn_table_match(library: Library, sources: Vec<TableSource>, progress: Arc<ScanProgress>) -> Receiver<ScanOutcome> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let (names, levels) = fetch_and_match(&sources, &library, &progress.tables);
+            let _ = tx.send(ScanOutcome { library, names, levels });
+        });
+        rx
     }
 
     /// A table fetch is running; add it to the library the frame it lands. A source whose table
@@ -325,7 +350,8 @@ impl LoadingState {
     fn cancel(&mut self, shared: &mut AppShared) -> Transition {
         match &self.task {
             LoadingTask::Assets(assets) => assets.stop(),
-            LoadingTask::Scan { progress, .. } => progress.cancel.store(true, Ordering::Relaxed),
+            LoadingTask::Scan { step: ScanStep::Walking { scan, .. }, .. } => scan.cancel(),
+            LoadingTask::Scan { step: ScanStep::Matching { .. }, .. } => {}
             LoadingTask::Table(add) => add.cancel.store(true, Ordering::Relaxed),
             LoadingTask::Song(_) => {}
         }
@@ -338,12 +364,17 @@ impl LoadingState {
 
     /// The heading and the line under it: what is being waited for, and which one of it.
     fn heading(&self, shared: &AppShared) -> (&'static str, String) {
+        if let Some(run) = shared.course_run.as_ref()
+            && matches!(&self.task, LoadingTask::Song(_) | LoadingTask::Assets(_))
+        {
+            return ("COURSE", format!("{} - {}", run.course.name, stage_label(run)));
+        }
         match &self.task {
             LoadingTask::Song(i) => ("LOADING", shared.library.songs().get(*i).map(|e| e.title.chars().take(TITLE_CHARS).collect()).unwrap_or_default()),
-            LoadingTask::Scan { progress, .. } if progress.matching.load(Ordering::Relaxed) => {
+            LoadingTask::Scan { step: ScanStep::Matching { .. }, progress } => {
                 ("MATCHING TABLES", format!("{} / {}", progress.tables.load(Ordering::Relaxed), shared.config.library.tables.len()))
             }
-            LoadingTask::Scan { progress, .. } => match progress.charts.load(Ordering::Relaxed) {
+            LoadingTask::Scan { step: ScanStep::Walking { scan, .. }, .. } => match scan.counts().found {
                 0 => ("SCANNING", format!("{} folder(s)", shared.config.library.folders.len())),
                 found => ("SCANNING", format!("{found} charts found")),
             },
@@ -357,9 +388,7 @@ impl LoadingState {
     fn skin_progress(&self, shared: &AppShared) -> (f32, bool) {
         let (done, total) = match &self.task {
             LoadingTask::Assets(assets) => assets.progress(),
-            LoadingTask::Scan { progress, .. } if progress.matching.load(Ordering::Relaxed) => {
-                (progress.tables.load(Ordering::Relaxed), shared.config.library.tables.len())
-            }
+            LoadingTask::Scan { step: ScanStep::Matching { .. }, progress } => (progress.tables.load(Ordering::Relaxed), shared.config.library.tables.len()),
             LoadingTask::Scan { .. } | LoadingTask::Table(_) | LoadingTask::Song(_) => (0, 0),
         };
         if total == 0 {
@@ -391,7 +420,7 @@ impl LoadingState {
 impl StageHandler for LoadingState {
     fn update(&mut self, ctx: &mut FrameCtx<'_>) -> Transition {
         let ready = match &mut self.task {
-            LoadingTask::Scan { rx, .. } => return LoadingState::poll_scan(ctx.shared, rx),
+            LoadingTask::Scan { step, progress } => return LoadingState::poll_scan(ctx.shared, step, progress),
             LoadingTask::Table(add) => return LoadingState::poll_table(ctx.shared, add),
             LoadingTask::Song(index) => {
                 let index = *index;
@@ -405,6 +434,10 @@ impl StageHandler for LoadingState {
         let LoadingTask::Assets(assets) = std::mem::replace(&mut self.task, LoadingTask::Song(0)) else {
             return Transition::Stay;
         };
+        if let Some(stage) = ctx.shared.practice_stage_if_requested() {
+            return Transition::To(stage);
+        }
+        ctx.shared.play_system_sound(SystemSound::Decide);
         ctx.shared.start_play();
         Transition::To(Stage::Play(Box::new(assets.into_play())))
     }
@@ -441,7 +474,7 @@ impl StageHandler for LoadingState {
                 let (done, total) = assets.progress();
                 LoadingState::draw_determinate(canvas, bx, by, done, total, "files");
             }
-            LoadingTask::Scan { progress, .. } if progress.matching.load(Ordering::Relaxed) => {
+            LoadingTask::Scan { step: ScanStep::Matching { .. }, progress } => {
                 let done = progress.tables.load(Ordering::Relaxed);
                 LoadingState::draw_determinate(canvas, bx, by, done, ctx.shared.config.library.tables.len(), "tables");
             }
@@ -516,15 +549,21 @@ mod tests {
         assert!(assets.bga.as_ref().expect("images").cancel.load(Ordering::Relaxed));
     }
 
+    /// Leaving mid-scan has to stop the walk, or an abandoned scan keeps reading a library nobody
+    /// is waiting for. The walk is what owns the flag, so what is checked is that the screen reaches
+    /// it rather than that a scan of its own is stopped.
     #[test]
     fn leaving_a_scan_stops_the_walk() {
-        let state = LoadingState { task: LoadingTask::Scan { rx: std::sync::mpsc::channel().1, progress: Arc::new(ScanProgress::default()) }, drawn: false };
-        let LoadingTask::Scan { progress, .. } = &state.task else {
-            panic!("the task is a scan");
+        let mut app = crate::stage::render_tests::app();
+        let db = std::env::temp_dir().join(format!("rbms-cancel-{}.sqlite", std::process::id()));
+        let _ = std::fs::remove_file(&db);
+        let mut state = LoadingState::scan(Vec::new(), Vec::new(), db.clone(), false);
+        state.cancel(&mut app.shared);
+        let LoadingTask::Scan { step: ScanStep::Walking { scan, .. }, .. } = &state.task else {
+            panic!("the task is a walking scan");
         };
-        assert!(!progress.cancel.load(Ordering::Relaxed));
-        progress.cancel.store(true, Ordering::Relaxed);
-        assert!(progress.cancel.load(Ordering::Relaxed), "the walk reads this between folders");
+        assert_eq!(scan.counts().found, 0, "an empty root walks nothing");
+        let _ = std::fs::remove_file(&db);
     }
 
     /// The audio settings may not reopen the stream under a chart that is still filling its bank,
@@ -551,14 +590,20 @@ mod tests {
     fn the_scan_names_the_step_it_is_on() {
         let mut app = crate::stage::render_tests::app();
         app.shared.config.library.tables = vec![TableSource { name: "one".into(), location: "/one.json".into() }];
+        let db = std::env::temp_dir().join(format!("rbms-step-{}.sqlite", std::process::id()));
+        let _ = std::fs::remove_file(&db);
+        let walking = LoadingState::scan(Vec::new(), Vec::new(), db.clone(), false);
+        assert_eq!(walking.heading(&app.shared).0, "SCANNING");
+        assert_eq!(walking.heading(&app.shared).1, "0 folder(s)");
+
         let progress = Arc::new(ScanProgress::default());
-        let state = LoadingState { task: LoadingTask::Scan { rx: std::sync::mpsc::channel().1, progress: progress.clone() }, drawn: false };
-        assert_eq!(state.heading(&app.shared).0, "SCANNING");
-        progress.charts.store(42, Ordering::Relaxed);
-        assert_eq!(state.heading(&app.shared).1, "42 charts found");
-        progress.matching.store(true, Ordering::Relaxed);
-        let (heading, sub) = state.heading(&app.shared);
+        let matching =
+            LoadingState { task: LoadingTask::Scan { step: ScanStep::Matching { rx: std::sync::mpsc::channel().1 }, progress: progress.clone() }, drawn: false };
+        let (heading, sub) = matching.heading(&app.shared);
         assert_eq!(heading, "MATCHING TABLES");
         assert_eq!(sub, "0 / 1");
+        progress.tables.store(1, Ordering::Relaxed);
+        assert_eq!(matching.heading(&app.shared).1, "1 / 1");
+        let _ = std::fs::remove_file(&db);
     }
 }

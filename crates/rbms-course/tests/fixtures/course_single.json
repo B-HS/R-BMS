@@ -1,0 +1,45 @@
+{
+    "name": "Overjoy 発狂段位",
+    "hash": [
+        {
+            "md5": "5c93c0c6fef0af62cbfab0606df73556",
+            "sha256": "a893c5f5f3b8d7d06ac5ecf2272930384f9a08f2e3b6f918f22c06151d73afe6",
+            "title": "Flowering"
+        },
+        {
+            "md5": "6da4d1d70f01b073dc0bc1717ea84667",
+            "sha256": "b9a4d606049ce8e17bd6fd03383a41495a0b19030c47fa29033017162e84bf70",
+            "title": "Gravity"
+        }
+    ],
+    "constraint": [
+        "grade",
+        "hcn",
+        "no_good",
+        "unknown_future_constraint"
+    ],
+    "trophy": [
+        {
+            "name": "bronzemedal",
+            "missrate": 20.0,
+            "scorerate": 40.0
+        },
+        {
+            "name": "unreachable",
+            "missrate": 0.0,
+            "scorerate": 40.0
+        },
+        {
+            "name": "impossible",
+            "missrate": 5.0,
+            "scorerate": 100.0
+        }
+    ],
+    "unknown_top_level": {
+        "nested": [
+            1,
+            2,
+            3
+        ]
+    }
+}

@@ -39,7 +39,7 @@ use rbms_render::{
 };
 pub(crate) use rbms_skin::loader::{SKIN_TYPE_DECIDE, SKIN_TYPE_KEY_CONFIG, SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_RESULT, mode_skin_type};
 use rbms_skin::timer::TimerState;
-use rbms_store::{Replay, ReplayJudge, SCORE_LN_MODE_FROM_CHART, SCORE_RULE_VERSION, ScoreBook, ScoreRecord};
+use rbms_store::{Replay, ReplayJudge, SCORE_LN_MODE_FROM_CHART, ScoreBook, ScoreRecord};
 
 use sha2::{Digest, Sha256};
 use winit::application::ApplicationHandler;
@@ -55,10 +55,14 @@ mod app_play;
 mod app_ranking;
 mod app_result;
 mod assets;
+mod course_ir;
+mod course_ui;
 mod dialog;
 mod favorites;
 mod format;
+mod gamepad;
 mod gpu;
+mod ir_ext;
 mod ir_outcome;
 mod ir_panel;
 mod ir_ranking;
@@ -70,15 +74,19 @@ mod judge_setup;
 mod keyconfig;
 #[cfg(test)]
 mod keyconfig_tests;
+mod library;
 #[cfg(test)]
 mod main_tests;
 mod notify;
 mod play_sink;
+mod practice;
+mod scoredb_store;
 mod settings_ui;
 mod settings_view;
 mod skin_screen;
 mod skin_select;
 mod stage;
+mod syssound;
 mod tablesrc;
 pub mod target;
 mod textedit;
@@ -86,8 +94,11 @@ mod timing;
 mod toast;
 use app_network::build_server;
 use app_play::schedule_poll_interval_us;
-pub(crate) use assets::{DecodedImage, bundled_skin, decode_bga_image, keysound_jobs, load_theme, resolve_file, scan_folders, spawn_keysound_decode};
+pub(crate) use assets::{DecodedImage, bundled_skin, decode_bga_image, keysound_jobs, load_theme, resolve_file, spawn_keysound_decode};
+use course_ir::{UNRELEASED_COURSE_REASON, build_course_submission};
+use course_ui::{CourseEntry, CourseList, CourseOverrides, SelectTab, courses_dir, library_index, stage_label};
 use favorites::{Favorites, favorites_path};
+use gamepad::{PadEvent, PadState};
 use format::{
     clear_label_color, difficulty_color, difficulty_name, fmt_datetime, fmt_duration, gauge_name, mode_color, mode_short, rank_label, rule_version_mark,
     rule_version_note,
@@ -96,6 +107,7 @@ use gpu::Gpu;
 use ir_outcome::{IR_RESULT_LINE_H, IR_RESULT_SCALE, IR_RESULT_X, IR_RESULT_Y, IrStatus, ir_line_color};
 use ir_ranking::{RANKING_CACHE_CAPACITY, RankingCache, RankingFetch};
 use ir_ranking_view::render_ranking_panel;
+use ir_ext::{MultiIr, ProfileResult, spawn_submit_all, submit_summary};
 use ir_session::{AccountSession, AuthAction};
 use ir_sync::SyncLock;
 use judge_setup::{is_custom_judge, run_judge_setup, run_lntype};
@@ -105,7 +117,8 @@ use play_sink::PlayAudioSink;
 use settings_view::{SettingsHot, render_settings};
 use skin_screen::SkinScreens;
 use skin_select::SkinLibrary;
-use stage::{Canvas, FrameCtx, KeyInput, LoadingState, SelectState, Stage, StageId, Transition};
+use stage::{Canvas, CourseResultState, FrameCtx, KeyInput, LoadingState, SelectState, Stage, StageId, Transition};
+use syssound::{SYSTEM_SOUND_GAIN, SystemSound, SystemSoundSet};
 use tablesrc::{TableLevels, fetch_and_match};
 use textedit::{TextEdit, edit_key};
 use timing::{SoakLogger, SoakSnapshot, TIMING_CSV_ENV, TimingProbe, TimingSample, env_path, us_to_millis};
@@ -192,11 +205,65 @@ fn green_number_for(constant: bool, bpm: f64, hispeed: f64, scroll: f64, cover: 
     }
 }
 
+/// Where the song database lives, next to the settings document it is keyed off.
+fn songdb_path(settings_path: &Path) -> PathBuf {
+    settings_path.parent().map(|d| d.join(crate::library::SONGDB_FILE)).unwrap_or_else(|| PathBuf::from(crate::library::SONGDB_FILE))
+}
+
+/// The configured system sound folder, with a blank setting read as "not configured".
+fn sound_folder_path(config: &Config) -> Option<PathBuf> {
+    config.audio.sound_folder.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(PathBuf::from)
+}
+
+/// Gauge a course stage starts on before anything has been played, read off the class row of the
+/// gauge table so the number the browser shows is the one the run will use.
+fn course_start_gauge(set: rbms_judge::gauge_tables::GaugeSetId) -> f32 {
+    rbms_judge::builtin_gauge_tables().get(set.data_key()).map_or(0.0, |table| table.at(rbms_judge::gauge::GaugeIndex::Class).init)
+}
+
+/// Begin a course: rewrite the play settings the constraints narrow, remember the originals, and
+/// hand the first stage to LOADING.
+fn start_course(shared: &mut AppShared, entry: &CourseEntry) -> Transition {
+    let overrides = CourseOverrides::of(&entry.course);
+    shared.course_settings_backup = Some(shared.config.play.clone());
+    overrides.apply_to(&mut shared.config.play);
+    shared.course_stage_reasons.clear();
+    let set = overrides.gauge_set_for(shared.config.judge.gauge_set).unwrap_or_default();
+    shared.course_overrides = Some(overrides);
+    shared.course_run = Some(rbms_course::CourseRun::new(entry.course.clone(), course_start_gauge(set)));
+    load_course_stage(shared)
+}
+
+/// Hand the stage the run is standing on to LOADING, or give up when the library cannot supply it.
+fn load_course_stage(shared: &mut AppShared) -> Transition {
+    let Some(chart) = shared.course_run.as_ref().and_then(|run| run.current_chart()).cloned() else {
+        return end_course(shared);
+    };
+    let Some(index) = library_index(&shared.library, &chart) else {
+        notify(Level::Warn, format!("course stage not in the library: {}", chart.title));
+        return end_course(shared);
+    };
+    shared.release_play_audio();
+    Transition::To(Stage::Loading(LoadingState::song(index)))
+}
+
+/// Put the player's own settings back and forget the run. Called on the course result screen's way
+/// out and on an abandoned course alike.
+fn end_course(shared: &mut AppShared) -> Transition {
+    if let Some(play) = shared.course_settings_backup.take() {
+        shared.config.play = play;
+    }
+    shared.course_run = None;
+    shared.course_overrides = None;
+    shared.course_stage_reasons.clear();
+    Transition::Back
+}
+
 /// Why this run's score must not be sent to the IR, or `None` when it may be submitted. Mirrors
 /// the reference implementation: only a real interactive PLAY reaches the IR (`MusicResult.java:82`), and any assist —
 /// a judge width or long-note margin widened past 100% (`BMSPlayer.java:208-214`) or an auto-played
 /// lane (`BMSPlayer.java:248-252`) — clears the score flag.
-fn ir_submission_block_reason(autoplay: bool, replay: bool, custom_judge: bool, scratch_auto: bool) -> Option<&'static str> {
+fn ir_submission_block_reason(autoplay: bool, replay: bool, custom_judge: bool, scratch_auto: bool, practice: bool) -> Option<&'static str> {
     if autoplay {
         return Some("autoplay");
     }
@@ -209,7 +276,7 @@ fn ir_submission_block_reason(autoplay: bool, replay: bool, custom_judge: bool, 
     if scratch_auto {
         return Some("scratch assist");
     }
-    None
+    crate::practice::practice_block_reason(practice)
 }
 
 /// Whether this run may update the stored bests (EX / lamp / BP), i.e. it was an unassisted
@@ -219,8 +286,8 @@ fn ir_submission_block_reason(autoplay: bool, replay: bool, custom_judge: bool, 
 /// `resource.setUpdateScore(score)`, `MusicResult.java:444-446` passes it to
 /// `PlayDataAccessor.writeScoreData`, and `ScoreData.java:548,566,572,578` gate
 /// exscore/avgjudge/minbp/combo on it).
-fn updates_score(autoplay: bool, replay: bool, custom_judge: bool, scratch_auto: bool) -> bool {
-    ir_submission_block_reason(autoplay, replay, custom_judge, scratch_auto).is_none()
+fn updates_score(autoplay: bool, replay: bool, custom_judge: bool, scratch_auto: bool, practice: bool) -> bool {
+    ir_submission_block_reason(autoplay, replay, custom_judge, scratch_auto, practice).is_none()
 }
 
 /// Whether a run at this assist level may still leave a replay behind. A custom judge is the level
@@ -290,6 +357,12 @@ enum KcRow {
     Lane(usize),
     /// The second key a scratch lane may be spun backwards with.
     ScratchReverse(usize),
+    /// The controller the pad rows bind against, and the turntable algorithm they read it with.
+    PadDevice,
+    PadAnalogMode,
+    PadControl(ControlAction),
+    PadLane(usize),
+    PadScratchReverse(usize),
 }
 
 fn kc_rows(edit_mode: Mode) -> Vec<KcRow> {
@@ -297,7 +370,17 @@ fn kc_rows(edit_mode: Mode) -> Vec<KcRow> {
     rows.extend(ControlAction::ALL.into_iter().map(KcRow::Control));
     rows.extend((0..edit_mode.key).map(KcRow::Lane));
     rows.extend((0..edit_mode.key).filter(|&lane| edit_mode.is_scratch(lane)).map(KcRow::ScratchReverse));
+    rows.push(KcRow::PadDevice);
+    rows.push(KcRow::PadAnalogMode);
+    rows.extend(ControlAction::ALL.into_iter().map(KcRow::PadControl));
+    rows.extend((0..edit_mode.key).map(KcRow::PadLane));
+    rows.extend((0..edit_mode.key).filter(|&lane| edit_mode.is_scratch(lane)).map(KcRow::PadScratchReverse));
     rows
+}
+
+/// Whether a key-config row binds a controller element rather than a keyboard key.
+fn is_pad_row(row: &KcRow) -> bool {
+    matches!(row, KcRow::PadDevice | KcRow::PadAnalogMode | KcRow::PadControl(_) | KcRow::PadLane(_) | KcRow::PadScratchReverse(_))
 }
 
 /// Where the song-select browser currently is. Navigation is Root → (ALL SONGS | each table →
@@ -321,7 +404,7 @@ enum SelectItem {
 /// Cache key for the assembled [`SelectScene`]: rebuild only when one of these changes, so the scene
 /// is not re-allocated every frame of the continuous redraw loop. `select_gen` bumps on any list
 /// rebuild (catches same-length folder swaps); `scores` length catches a freshly saved record.
-type SelectKey = (u64, usize, Option<usize>, usize, bool, bool);
+type SelectKey = (u64, usize, Option<usize>, usize, bool, bool, SelectTab);
 
 /// A clickable region recorded during rendering and hit-tested on a left-click. Immediate-mode:
 /// `AppShared::hot` is rebuilt every frame for the current stage, so the layout math lives in one place.
@@ -377,11 +460,17 @@ struct AppShared {
     /// The scanned charts plus their md5 index, so every chart-keyed lookup (scores, difficulty
     /// tables, IR rankings) is a hash lookup rather than a scan of the whole library.
     library: Library,
+    /// The song database the library is read back from. `None` when it could not be opened, in
+    /// which case the run browses whatever a scan hands it and stores nothing.
+    song_db: Option<rbms_library::songdb::SongDb>,
     active_keys: Vec<(KeyCode, usize)>,
     /// The second key each scratch lane may be spun with, which ends a charge note the forward key
     /// is holding (`JudgeManager.java:358-372`). Empty for a mode with no scratch lane, and for a
     /// run whose lane bindings came from the command line.
     active_reverse_keys: Vec<(KeyCode, usize)>,
+    /// The controller, when this machine has one to open. `None` is the shipped state and the
+    /// state of a machine with no gilrs backend: the keyboard path is untouched either way.
+    pad: Option<PadState>,
     table_names: Vec<String>,
     table_levels: Vec<TableLevels>,
     select_view: SelectView,
@@ -402,6 +491,15 @@ struct AppShared {
     /// The replay this run was started from, kept for the whole run so every gate that asks
     /// "is this a playback?" reads the same answer the load did.
     replay: Option<Replay>,
+    /// The course being played, when one is. Every stage loads, plays and finishes through the
+    /// screens a single chart uses; this is what tells them they are inside a course.
+    course_run: Option<rbms_course::CourseRun>,
+    /// What the course's constraint set narrows, read back by the keys the course locks out.
+    course_overrides: Option<CourseOverrides>,
+    /// One IR block reason per finished stage, folded into the course verdict at the end.
+    course_stage_reasons: Vec<Option<String>>,
+    /// The play settings as they stood before the course rewrote them, put back when it ends.
+    course_settings_backup: Option<rbms_config::PlayOptions>,
     gpu: Option<Gpu>,
     /// The one output stream for the whole app lifetime. Opened lazily on the first frame (or the
     /// first chart/preview load) and kept across Play, Result and Select; stage changes clear the
@@ -411,6 +509,9 @@ struct AppShared {
     audio_report: Option<AudioOpenReport>,
     /// Voice budget the shared stream was opened with, shown next to the live voice count.
     audio_max_voices: usize,
+    /// The system sound set read from the configured folder. Silent throughout when no folder is
+    /// set, which is what a fresh install holds.
+    syssound: SystemSoundSet,
     /// The options the current stream actually opened with, retried first when a reopen fails.
     audio_opened_with: Option<AudioOptions>,
     /// Set once an open attempt failed, so the device is not probed again every chart and every
@@ -473,6 +574,12 @@ struct AppShared {
     /// Chart path and md5 a downloading replay will be played against.
     replay_download_target: Option<(String, String)>,
     submit_rx: Option<Receiver<SubmitOutcome>>,
+    /// The score servers this play is submitted to, and which one the ranking panel reads.
+    multi_ir: MultiIr,
+    /// One client per profile, index-aligned with `multi_ir.profiles`.
+    profile_servers: Vec<Arc<dyn ScoreServer>>,
+    /// The extra profiles' fan-out, in flight. `server_url` itself goes through `submit_rx`.
+    profile_submit_rx: Option<Receiver<Vec<ProfileResult<rbms_ir::SubmitResponse>>>>,
     /// What the result screen reports about this run's submission. Kept here because the request
     /// outlives the screen that shows it.
     ir_status: IrStatus,
@@ -492,6 +599,19 @@ struct AppShared {
     soak_failed: bool,
     scores: ScoreBook,
     scores_path: PathBuf,
+    /// The durable store the book above is a read-through cache of. `None` when the database could
+    /// not be opened, in which case this run browses and plays but records nothing.
+    scoredb: Option<rbms_store::scoredb::ScoreDb>,
+    /// Where saved replays live, and what the retention policy prunes.
+    replay_dir: PathBuf,
+    /// The per-chart practice ranges the panel remembers between visits.
+    practice_book: crate::practice::PracticeBook,
+    /// The next chart load is for the practice panel rather than for a run, set by the browser's
+    /// practice key and cleared when the loaded chart opens the panel.
+    practice_requested: bool,
+    /// The chart the practice panel is set up on, kept while the panel is open so each slice is cut
+    /// from the untrimmed model.
+    practice_chart: Option<Box<app_play::PracticeChart>>,
     /// The charts the player has starred, and where they are kept.
     favorites: Favorites,
     favorites_path: PathBuf,
@@ -545,8 +665,17 @@ impl App {
             save_config(&config, &settings_path);
         }
 
-        let scores_path = settings_path.parent().map(|d| d.join("scores.ron")).unwrap_or_else(|| PathBuf::from("scores.ron"));
-        let scores = ScoreBook::load(&scores_path);
+        let config_dir = settings_path.parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
+        let (scoredb_path, scores_path, replay_dir) = scoredb_store::score_paths(&config_dir);
+        let mut scoredb = scoredb_store::open_score_db(&scoredb_path, &scores_path);
+        let scores = match &scoredb {
+            Some(db) => scoredb_store::book_from_db(db),
+            None => ScoreBook::load(&scores_path),
+        };
+        if let Some(db) = scoredb.as_mut() {
+            scoredb_store::run_replay_gc(db, &replay_dir, &rbms_store::scoredb::ReplayPolicy::default());
+        }
+        let practice_book = practice::PracticeBook::load(&practice::practice_path(&settings_path));
         let favorites_path = favorites_path(&settings_path);
         let favorites = Favorites::load(&favorites_path);
         if let Some(url) = &launch.table_url
@@ -555,7 +684,17 @@ impl App {
             config.library.tables.push(TableSource { name: String::new(), location: url.clone() });
         }
 
-        let library = Library::default();
+        let songdb_path = songdb_path(&settings_path);
+        let song_db = crate::library::open_song_db(&songdb_path);
+        let library = song_db.as_ref().map(crate::library::stored_library).unwrap_or_default();
+        let full_rescan = song_db.as_ref().is_none_or(|db| db.needs_full_rescan().unwrap_or(true));
+        if let Some(db) = &song_db {
+            for md5 in favorites.md5s() {
+                for row in db.by_md5(md5).unwrap_or_default() {
+                    let _ = db.set_favorite(&row.path, 1);
+                }
+            }
+        }
         let table_names: Vec<String> = Vec::new();
         let table_levels: Vec<TableLevels> = Vec::new();
         let (stage, chart_path, launch_chart) = if let Some(rp) = &replay {
@@ -565,16 +704,24 @@ impl App {
         } else if config.library.folders.is_empty() {
             (Stage::Select(Box::new(SelectState::new())), String::new(), false)
         } else {
-            let stage = Stage::Loading(LoadingState::scan(config.library.folders.clone(), config.library.tables.clone()));
+            let stage = Stage::Loading(LoadingState::scan(config.library.folders.clone(), config.library.tables.clone(), songdb_path.clone(), full_rescan));
             (stage, String::new(), false)
         };
 
         let session = AccountSession::restored(config.network.ir_token.clone(), config.network.ir_login_id.clone());
         let startup_whoami = session.is_logged_in();
         let built = build_server(&config, session.token().map(str::to_string));
+        let multi_ir = MultiIr::from_network(&config.network);
+        let profile_servers = multi_ir.build_servers_reusing(Some(built.server.clone()));
+        let syssound = {
+            let mut set = SystemSoundSet::load_optional(sound_folder_path(&config).as_deref());
+            set.set_guide_enabled(config.audio.guide_se);
+            set
+        };
 
-        let keyconfig_path = launch.keyconfig_path.clone().map(PathBuf::from).unwrap_or_else(|| config_dir().join("keyconfig.ron"));
+        let keyconfig_path = launch.keyconfig_path.clone().map(PathBuf::from).unwrap_or_else(|| config_dir.join("keyconfig.ron"));
         let keyconfig = KeyConfig::load(&keyconfig_path);
+        let pad = PadState::new(&keyconfig.pad);
         let skins = SkinLibrary::new(&settings_path, &config);
 
         let mut app = App {
@@ -588,8 +735,10 @@ impl App {
                 launch,
                 mode: MODE,
                 library,
+                song_db,
                 active_keys: keyconfig.lane_keys(MODE),
                 active_reverse_keys: keyconfig.scratch_reverse_keys(MODE),
+                pad,
                 table_names,
                 table_levels,
                 select_view: SelectView::Root,
@@ -601,11 +750,16 @@ impl App {
                 keyconfig_path,
                 settings_path,
                 replay,
+                course_run: None,
+                course_overrides: None,
+                course_stage_reasons: Vec::new(),
+                course_settings_backup: None,
                 kc_edit_mode: MODE,
                 gpu: None,
                 audio: None,
                 audio_report: None,
                 audio_max_voices: rbms_audio::DEFAULT_MAX_VOICES,
+                syssound,
                 audio_opened_with: None,
                 audio_failed: false,
                 audio_reopen_at: None,
@@ -640,6 +794,9 @@ impl App {
                 replay_download_rx: None,
                 replay_download_target: None,
                 submit_rx: None,
+                multi_ir,
+                profile_servers,
+                profile_submit_rx: None,
                 ir_status: IrStatus::Off,
                 clock: Instant::now(),
                 anchor_us: 0,
@@ -650,6 +807,11 @@ impl App {
                 soak_failed: false,
                 scores,
                 scores_path,
+                scoredb,
+                replay_dir,
+                practice_book,
+                practice_requested: false,
+                practice_chart: None,
                 favorites,
                 favorites_path,
                 toasts: ToastQueue::default(),
@@ -742,6 +904,11 @@ impl App {
         }
         if stage != StageId::Play {
             self.shared.poll_audio_clock();
+        }
+
+        for event in self.shared.poll_pad() {
+            let transition = self.stage.handle_pad(&mut FrameCtx { shared: &mut self.shared, now, dt: 0.0 }, event);
+            self.apply(transition, event_loop);
         }
 
         let transition = self.stage.update(&mut FrameCtx { shared: &mut self.shared, now, dt });

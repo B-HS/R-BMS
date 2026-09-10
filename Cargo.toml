@@ -14,6 +14,7 @@ members = [
     "crates/rbms-store",
     "crates/rbms-config",
     "crates/rbms-library",
+    "crates/rbms-course",
     "apps/rbms-cli",
     "apps/rbms-player",
 ]
@@ -38,6 +39,7 @@ rbms-table = { path = "crates/rbms-table" }
 rbms-store = { path = "crates/rbms-store" }
 rbms-config = { path = "crates/rbms-config" }
 rbms-library = { path = "crates/rbms-library" }
+rbms-course = { path = "crates/rbms-course" }
 md-5 = "0.10"
 sha2 = "0.10"
 encoding_rs = "0.8"
@@ -46,6 +48,8 @@ serde_json = "1.0.150"
 ron = "0.12.1"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 thiserror = "2.0"
+rusqlite = { version = "0.40.2", default-features = false, features = ["bundled", "cache"] }
+gilrs = "0.11.2"
 
 [workspace.lints.rust]
 unsafe_code = "deny"

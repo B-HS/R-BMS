@@ -103,6 +103,24 @@ impl AppShared {
         ControlAction::ALL.into_iter().find(|a| self.keyconfig.control_key(*a) == Some(code))
     }
 
+    /// One frame of controller input, or nothing when there is no controller.
+    ///
+    /// The two fields are taken apart rather than reached through `self`, because the poll needs
+    /// the controller mutably and its bindings immutably at the same time.
+    pub(crate) fn poll_pad(&mut self) -> Vec<PadEvent> {
+        let AppShared { pad, keyconfig, mode, .. } = self;
+        let Some(pad) = pad.as_mut() else {
+            return Vec::new();
+        };
+        pad.poll_now(&keyconfig.pad, *mode)
+    }
+
+    /// Whether the course in progress forbids the hi-speed and lane-shade controls
+    /// (`BMSPlayer.java:419-423` disables the control outright rather than clamping it).
+    pub(crate) fn course_locks_speed(&self) -> bool {
+        self.course_overrides.as_ref().is_some_and(|overrides| !overrides.accepts_speed_input())
+    }
+
     /// How much of the field the lane cover hides right now: the amount the row holds while the
     /// cover is switched on, and nothing while it is off.
     ///
@@ -131,6 +149,9 @@ impl AppShared {
     /// precision without leaving the chart, and the lane shades take the finer of their two steps
     /// while the modifier is down (`PlayConfig.java:87,91`).
     pub(crate) fn apply_control(&mut self, action: ControlAction, ctx: &ControlContext) -> ControlEffect {
+        if self.course_locks_speed() {
+            return ControlEffect::None;
+        }
         let step = if ctx.fine { self.config.play.lanecover_step_fine } else { LANE_SHADE_STEP };
         match action {
             ControlAction::HiSpeedUp => self.step_hispeed(ctx, STEP_UP),
@@ -265,7 +286,12 @@ impl AppShared {
                     || taken_by_a_reverse(None)
                     || ControlAction::ALL.into_iter().any(|a| a != *action && self.keyconfig.control_key(a) == Some(code))
             }
-            KcRow::ModeSelect => false,
+            KcRow::ModeSelect
+            | KcRow::PadDevice
+            | KcRow::PadAnalogMode
+            | KcRow::PadControl(_)
+            | KcRow::PadLane(_)
+            | KcRow::PadScratchReverse(_) => false,
         }
     }
 

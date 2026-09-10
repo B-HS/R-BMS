@@ -283,6 +283,7 @@ mod tests {
         (SettingId::DownloadSettings, "DOWNLOAD SETTINGS NOW", ">"),
         (SettingId::AutoUploadReplay, "AUTO UPLOAD REPLAY", "ON"),
         (SettingId::Rivals, "RIVALS", "0"),
+        (SettingId::IrProfiles, "IR PROFILES", "0"),
         (SettingId::MasterVolume, "MASTER VOL", "100%"),
         (SettingId::KeyVolume, "KEY VOL", "50%"),
         (SettingId::BgmVolume, "BGM VOL", "50%"),
@@ -291,6 +292,8 @@ mod tests {
         (SettingId::AudioBuffer, "BUFFER SIZE", "AUTO"),
         (SettingId::AudioSampleRate, "SAMPLE RATE", "AUTO"),
         (SettingId::AudioPolyphony, "POLYPHONY", "512"),
+        (SettingId::SoundFolder, "SOUND FOLDER", "NONE"),
+        (SettingId::GuideSe, "GUIDE SE", "OFF"),
     ];
 
     /// An app with no library, no window and no server, so every row reads out of a fresh document.

@@ -1,13 +1,12 @@
 //! Everything the player reads off disk or out of the binary before a screen can use it: the
 //! bundled skins, the UI theme template, chart-relative file resolution, the keysound decode pool
-//! and the BGA image decode, plus the library scan the loading screen drives.
+//! and the BGA image decode.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::Receiver;
 
-use rbms_library::SongEntry;
 use rbms_render::{SkinConfig, SkinImage};
 
 /// A decode running on the worker pool: what has arrived, how far it has got, the cooperative
@@ -270,12 +269,6 @@ fn decode_bga_file(path: &PathBuf) -> Option<DecodedImage> {
 /// Decode one named background image, for the single cover the browser shows.
 pub(crate) fn decode_bga_image(dir: &Path, name: &str) -> Option<DecodedImage> {
     decode_bga_file(&resolve_bga_file(dir, name)?)
-}
-
-/// Scan every configured library folder into one song list, stopping when `cancel` is set so
-/// leaving the loading screen does not leave a worker walking the disk behind it.
-pub(crate) fn scan_folders(folders: &[String], count: &AtomicUsize, cancel: &AtomicBool) -> Vec<SongEntry> {
-    rbms_library::scan_folders(folders, count, cancel)
 }
 
 #[cfg(test)]

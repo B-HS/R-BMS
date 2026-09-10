@@ -78,6 +78,8 @@ impl AppShared {
         self.server = built.server;
         self.server_connected = built.connected;
         self.server_probe_stop = built.probe_stop;
+        self.multi_ir = MultiIr::from_network(&self.config.network);
+        self.profile_servers = self.multi_ir.build_servers_reusing(Some(self.server.clone()));
     }
 
     /// Label and value of a NETWORK row, or `None` when the row belongs to another tab.
@@ -95,6 +97,7 @@ impl AppShared {
             SettingId::SyncSettings => on_off(self.config.network.sync_settings),
             SettingId::AutoUploadReplay => on_off(self.config.network.auto_upload_replay),
             SettingId::Rivals => self.config.network.rivals.len().to_string(),
+            SettingId::IrProfiles => self.config.network.ir_profiles.len().to_string(),
             _ => ACTION_VALUE.to_string(),
         };
         Some((label, value))
