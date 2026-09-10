@@ -37,7 +37,7 @@ fn default_values_are_sane() {
     assert_eq!(c.judge.gauge_set, None);
     assert_eq!(c.judge.gauge_auto_shift, GaugeAutoShift::None);
     assert_eq!(c.judge.bottom_shiftable_gauge, GaugeKind::AssistEasy);
-    assert_eq!(c.judge.target, ScoreTarget::LocalBest);
+    assert_eq!(c.judge.target, ScoreTarget::RateAaa);
     assert_eq!(c.judge.offset_ms, 0);
     assert!(c.library.preview);
     assert_eq!(c.library.songs_folder, None);
@@ -87,13 +87,35 @@ fn every_judge_token_round_trips_through_its_own_vocabulary() {
 
 /// A token no vocabulary knows falls back to the shipped value rather than failing the whole load,
 /// which is what keeps a hand-edited or foreign file usable.
+/// Every target the row offers survives a round trip through the file, and the eleven fixed rates
+/// name the eleven the reference has (`TargetProperty.java:117-141`).
+#[test]
+fn every_target_the_row_offers_survives_the_file_it_is_stored_in() {
+    let mut ids: Vec<&str> = Vec::new();
+    let mut rates = 0;
+    for target in ScoreTarget::ALL {
+        assert_eq!(target_from_token(target.token()), target, "{target:?} did not come back from its own token");
+        assert_eq!(target_from_token(&target.token().to_ascii_lowercase()), target, "{target:?} is case sensitive");
+        if let Some(id) = target.rate_id() {
+            rates += 1;
+            ids.push(id);
+        }
+    }
+    assert_eq!(rates, 11, "the row offers a different number of fixed rates from the reference");
+    let count = ids.len();
+    ids.sort_unstable();
+    ids.dedup();
+    assert_eq!(ids.len(), count, "two targets name the same rate");
+    assert_eq!(TARGET_LABELS.len(), ScoreTarget::ALL.len(), "the row's names and its values are different lengths");
+}
+
 #[test]
 fn an_unknown_judge_token_falls_back_to_the_shipped_value() {
     assert_eq!(algorithm_from_token("nonsense"), JudgeAlgorithm::default());
     assert_eq!(ln_mode_from_token(""), LnMode::LongNote);
     assert_eq!(gauge_auto_shift_from_token("SIDEWAYS"), GaugeAutoShift::None);
     assert_eq!(gauge_set_from_token("BEAT_7K"), None, "a mode key is not a choice this row offers");
-    assert_eq!(target_from_token("nonsense"), ScoreTarget::LocalBest);
+    assert_eq!(target_from_token("nonsense"), ScoreTarget::RateAaa);
     let c: Config = ron::from_str(r#"(schema_version: 2, judge: (judge_algorithm: "nonsense", ln_mode: "?", gauge_set: "?"))"#).expect("a fragment parses");
     assert_eq!(c.judge.judge_algorithm, JudgeAlgorithm::default());
     assert_eq!(c.judge.ln_mode, LnMode::LongNote);
@@ -139,6 +161,16 @@ fn ron_round_trip_preserves_every_field() {
     c.play.constant_speed = true;
     c.play.total_override = 320.0;
     c.play.auto_replay = false;
+    c.play.hispeed_step = 0.05;
+    c.play.fix_hispeed = FixHiSpeed::MinBpm;
+    c.play.lane_option = LaneOption::BattleAutoScratch;
+    c.play.legacy_note = true;
+    c.play.enable_lift = true;
+    c.play.enable_cover = false;
+    c.play.hidden = 0.22;
+    c.play.enable_hidden = true;
+    c.play.lanecover_step_fine = 0.002;
+    c.play.play_escape = PlayEscape::Hold;
     c.judge.offset_ms = -33;
     c.judge.auto_offset = true;
     c.judge.judge_rate_key = [150, 145, 140];
@@ -156,7 +188,16 @@ fn ron_round_trip_preserves_every_field() {
     c.display.font_path = Some("/tmp/f.ttf".into());
     c.display.score_graph = false;
     c.display.replay_analysis = false;
+    c.display.result_graphs = false;
+    c.display.show_white_number = true;
+    c.display.judge_text_y = 0.42;
+    c.display.letterbox = true;
+    c.display.five_key_layout = true;
     c.library.preview = false;
+    c.library.preview_volume = 0.4;
+    c.library.preview_fade_ms = 350;
+    c.library.sort = SortMode::LastUpdate;
+    c.library.favorite_only = true;
     c.library.songs_folder = Some("/songs".into());
     c.library.folders = vec!["/a".into(), "/b/c".into()];
     c.library.tables = vec![TableSource { name: "Insane".into(), location: "https://example.com/insane.json".into() }];
@@ -179,6 +220,74 @@ fn ron_round_trip_preserves_every_field() {
 
     let back: Config = ron::from_str(&ron_of(&c)).expect("a config round-trips");
     assert_eq!(back, c, "every field survives the round trip");
+}
+
+/// The three new option axes are stored as separator-free tokens, exactly like the gauge next to
+/// them, so a reworded label leaves what is on disk alone.
+#[test]
+fn the_new_play_option_axes_are_stored_as_their_tokens() {
+    let mut c = Config::default();
+    c.play.fix_hispeed = FixHiSpeed::StartBpm;
+    c.play.lane_option = LaneOption::Battle;
+    c.play.play_escape = PlayEscape::Double;
+    c.library.sort = SortMode::MissCount;
+    let text = ron_of(&c);
+    for token in ["\"STARTBPM\"", "\"BATTLE\"", "\"DOUBLE\"", "\"MISSCOUNT\""] {
+        assert!(text.contains(token), "{token} is not in the file: {text}");
+    }
+    let back: Config = ron::from_str(&text).expect("tokens parse back");
+    assert_eq!(back.play.fix_hispeed, FixHiSpeed::StartBpm);
+    assert_eq!(back.play.lane_option, LaneOption::Battle);
+    assert_eq!(back.play.play_escape, PlayEscape::Double);
+    assert_eq!(back.library.sort, SortMode::MissCount);
+}
+
+/// A file written before these rows existed still loads: every new field falls back to the value a
+/// fresh install holds, which is the one that leaves the program behaving as it did.
+#[test]
+fn a_file_from_before_the_new_rows_loads_with_them_at_their_shipped_values() {
+    let c: Config =
+        ron::from_str(r#"(schema_version: 2, play: (hispeed: 3.0), display: (skin: "WIDE"), library: (preview: false))"#).expect("an older file parses");
+    assert!((c.play.hispeed - 3.0).abs() < 1e-9);
+    assert!((c.play.hispeed_step - HISPEED_STEP).abs() < 1e-9);
+    assert_eq!(c.play.fix_hispeed, FixHiSpeed::default());
+    assert_eq!(c.play.lane_option, LaneOption::Off);
+    assert_eq!(c.play.play_escape, PlayEscape::Immediate);
+    assert!(!c.play.legacy_note);
+    assert!(c.play.enable_cover);
+    assert!(!c.play.enable_lift);
+    assert!(!c.play.enable_hidden);
+    assert!((c.play.hidden - LANE_SHADE_MIN).abs() < 1e-9);
+    assert!((c.play.lanecover_step_fine - DEFAULT_LANE_SHADE_FINE_STEP).abs() < 1e-9);
+    assert!(c.display.result_graphs);
+    assert!(!c.display.show_white_number);
+    assert!(!c.display.letterbox);
+    assert!(!c.display.five_key_layout);
+    assert!((c.display.judge_text_y - JUDGE_TEXT_Y_FROM_SKIN).abs() < 1e-9);
+    assert_eq!(c.library.sort, SortMode::Default);
+    assert!(!c.library.favorite_only);
+    assert!((c.library.preview_volume - DEFAULT_PREVIEW_VOLUME).abs() < 1e-6);
+    assert_eq!(c.library.preview_fade_ms, DEFAULT_PREVIEW_FADE_MS);
+}
+
+/// Every new value a hand-edited file could put out of range is pulled back by `sanitise`, which is
+/// what runs over whatever comes off disk or down from an account.
+#[test]
+fn the_new_ranged_values_are_pulled_back_into_their_rows_ranges() {
+    let mut c = Config::default();
+    c.play.hispeed_step = 99.0;
+    c.play.hidden = -4.0;
+    c.play.lanecover_step_fine = 5.0;
+    c.display.judge_text_y = 8.0;
+    c.library.preview_volume = -1.0;
+    c.library.preview_fade_ms = 99_999;
+    c.sanitise();
+    assert!((c.play.hispeed_step - HISPEED_STEP_MAX).abs() < 1e-9);
+    assert!((c.play.hidden - LANE_SHADE_MIN).abs() < 1e-9);
+    assert!((c.play.lanecover_step_fine - LANE_SHADE_FINE_STEP_MAX).abs() < 1e-9);
+    assert!((c.display.judge_text_y - JUDGE_TEXT_Y_MAX).abs() < 1e-9);
+    assert!((c.library.preview_volume - PREVIEW_VOLUME_MIN).abs() < 1e-6);
+    assert_eq!(c.library.preview_fade_ms, PREVIEW_FADE_MAX_MS);
 }
 
 #[test]

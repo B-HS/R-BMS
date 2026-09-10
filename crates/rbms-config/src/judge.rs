@@ -28,20 +28,31 @@ pub const GAUGE_SET_CYCLE: [Option<GaugeSetId>; 2] = [None, Some(GaugeSetId::Lr2
 /// Names the GAUGE SET row shows, one per entry of [`GAUGE_SET_CYCLE`].
 pub const GAUGE_SET_LABELS: &[&str] = &[AUTO_VALUE, "LR2"];
 
-/// What the play screen paces the run against. The pacer itself is a later phase; the row stores
-/// the choice so the setting survives until then.
+/// How many targets the TARGET row steps through: the reference's eleven fixed rates
+/// (`TargetProperty.java:117-141`) plus the next rank up and the three that name somebody's score.
+pub const TARGET_COUNT: usize = 15;
+
+/// What the play screen paces the run against.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum ScoreTarget {
     /// A theoretical all-PGREAT run.
     Max,
-    /// The EX a DJ rank of A, AA or AAA needs.
+    /// The EX a DJ rank asks for, at each third of each band the reference names
+    /// (`TargetProperty.java:117-141`).
+    RateAMinus,
     RateA,
+    RateAPlus,
+    RateAaMinus,
     RateAa,
+    RateAaPlus,
+    RateAaaMinus,
+    #[default]
     RateAaa,
+    RateAaaPlus,
+    RateMaxMinus,
     /// The EX the next DJ rank up needs.
     RankNext,
     /// The best local record on this chart.
-    #[default]
     LocalBest,
     /// The best score the score server holds for this account.
     IrBest,
@@ -51,11 +62,18 @@ pub enum ScoreTarget {
 
 impl ScoreTarget {
     /// Every target, in the order the row steps through them.
-    pub const ALL: [ScoreTarget; 8] = [
+    pub const ALL: [ScoreTarget; TARGET_COUNT] = [
         ScoreTarget::Max,
+        ScoreTarget::RateAMinus,
         ScoreTarget::RateA,
+        ScoreTarget::RateAPlus,
+        ScoreTarget::RateAaMinus,
         ScoreTarget::RateAa,
+        ScoreTarget::RateAaPlus,
+        ScoreTarget::RateAaaMinus,
         ScoreTarget::RateAaa,
+        ScoreTarget::RateAaaPlus,
+        ScoreTarget::RateMaxMinus,
         ScoreTarget::RankNext,
         ScoreTarget::LocalBest,
         ScoreTarget::IrBest,
@@ -66,9 +84,16 @@ impl ScoreTarget {
     pub fn label(self) -> &'static str {
         match self {
             ScoreTarget::Max => "MAX",
+            ScoreTarget::RateAMinus => "RATE A-",
             ScoreTarget::RateA => "RATE A",
+            ScoreTarget::RateAPlus => "RATE A+",
+            ScoreTarget::RateAaMinus => "RATE AA-",
             ScoreTarget::RateAa => "RATE AA",
+            ScoreTarget::RateAaPlus => "RATE AA+",
+            ScoreTarget::RateAaaMinus => "RATE AAA-",
             ScoreTarget::RateAaa => "RATE AAA",
+            ScoreTarget::RateAaaPlus => "RATE AAA+",
+            ScoreTarget::RateMaxMinus => "RATE MAX-",
             ScoreTarget::RankNext => "RANK NEXT",
             ScoreTarget::LocalBest => "LOCAL BEST",
             ScoreTarget::IrBest => "IR BEST",
@@ -76,23 +101,67 @@ impl ScoreTarget {
         }
     }
 
-    /// Settings-file token for a target.
+    /// Settings-file token for a target. Separator-free, like every other token here, so it
+    /// survives a round trip through the settings file and the account sync blob.
     pub fn token(self) -> &'static str {
         match self {
             ScoreTarget::Max => "MAX",
+            ScoreTarget::RateAMinus => "RATEAMINUS",
             ScoreTarget::RateA => "RATEA",
+            ScoreTarget::RateAPlus => "RATEAPLUS",
+            ScoreTarget::RateAaMinus => "RATEAAMINUS",
             ScoreTarget::RateAa => "RATEAA",
+            ScoreTarget::RateAaPlus => "RATEAAPLUS",
+            ScoreTarget::RateAaaMinus => "RATEAAAMINUS",
             ScoreTarget::RateAaa => "RATEAAA",
+            ScoreTarget::RateAaaPlus => "RATEAAAPLUS",
+            ScoreTarget::RateMaxMinus => "RATEMAXMINUS",
             ScoreTarget::RankNext => "RANKNEXT",
             ScoreTarget::LocalBest => "LOCALBEST",
             ScoreTarget::IrBest => "IRBEST",
             ScoreTarget::Rival => "RIVAL",
         }
     }
+
+    /// The id the reference stores this fixed rate under (`TargetProperty.java:117-141`), or `None`
+    /// for a target that names a score rather than a rate. It is what the pacer looks the rate up
+    /// by, so the two tables cannot drift into naming different bands.
+    pub fn rate_id(self) -> Option<&'static str> {
+        match self {
+            ScoreTarget::Max => Some("MAX"),
+            ScoreTarget::RateAMinus => Some("RATE_A-"),
+            ScoreTarget::RateA => Some("RATE_A"),
+            ScoreTarget::RateAPlus => Some("RATE_A+"),
+            ScoreTarget::RateAaMinus => Some("RATE_AA-"),
+            ScoreTarget::RateAa => Some("RATE_AA"),
+            ScoreTarget::RateAaPlus => Some("RATE_AA+"),
+            ScoreTarget::RateAaaMinus => Some("RATE_AAA-"),
+            ScoreTarget::RateAaa => Some("RATE_AAA"),
+            ScoreTarget::RateAaaPlus => Some("RATE_AAA+"),
+            ScoreTarget::RateMaxMinus => Some("RATE_MAX-"),
+            ScoreTarget::RankNext | ScoreTarget::LocalBest | ScoreTarget::IrBest | ScoreTarget::Rival => None,
+        }
+    }
 }
 
 /// Names the TARGET row shows, one per entry of [`ScoreTarget::ALL`].
-pub const TARGET_LABELS: &[&str] = &["MAX", "RATE A", "RATE AA", "RATE AAA", "RANK NEXT", "LOCAL BEST", "IR BEST", "RIVAL"];
+pub const TARGET_LABELS: &[&str] = &[
+    "MAX",
+    "RATE A-",
+    "RATE A",
+    "RATE A+",
+    "RATE AA-",
+    "RATE AA",
+    "RATE AA+",
+    "RATE AAA-",
+    "RATE AAA",
+    "RATE AAA+",
+    "RATE MAX-",
+    "RANK NEXT",
+    "LOCAL BEST",
+    "IR BEST",
+    "RIVAL",
+];
 
 /// Parse a persisted target token, defaulting to the shipped target.
 pub fn target_from_token(token: &str) -> ScoreTarget {

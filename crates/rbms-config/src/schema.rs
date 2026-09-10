@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::audio::AudioOptions;
 use crate::judge::ScoreTarget;
+use crate::options::{FixHiSpeed, LaneOption, PlayEscape};
+use crate::sort::SortMode;
 
 /// Schema version this build writes. A file without a `schema_version` field is
 /// [`LEGACY_SCHEMA_VERSION`] and is migrated on load.
@@ -21,23 +23,100 @@ pub const SINGLE_JUDGE_WIDTH_SCHEMA_VERSION: u32 = 1;
 /// siblings), which carried no version field at all.
 pub const LEGACY_SCHEMA_VERSION: u32 = 0;
 
-/// Slowest note scroll the HI-SPEED row can hold.
-pub const HISPEED_MIN: f64 = 0.5;
+/// Slowest note scroll the HI-SPEED row can hold (`PlayConfig.java:18`).
+pub const HISPEED_MIN: f64 = 0.01;
 
-/// Fastest note scroll the HI-SPEED row can hold.
-pub const HISPEED_MAX: f64 = 10.0;
+/// Fastest note scroll the HI-SPEED row can hold (`PlayConfig.java:19`).
+pub const HISPEED_MAX: f64 = 20.0;
 
-/// One left/right step on the HI-SPEED row.
+/// One left/right step on the HI-SPEED row as a fresh install has it, and the value the HI-SPEED
+/// STEP row starts on (`PlayConfig.java:54`).
 pub const HISPEED_STEP: f64 = 0.25;
 
-/// Smallest fraction of the lane the LIFT and LANE COVER rows can hide.
+/// The scroll speed one step of `by` away from `hispeed`, or `None` when there is no such speed.
+///
+/// The bounds are tested exclusively, as they are in the reference implementation
+/// (`LaneRenderer.java:236-245` applies a step only while `0 < new < 20`): a step that would land on
+/// or past either end is not taken at all rather than clamped onto it. Both routes to the row — the
+/// settings screen and the in-play key — ask here, so the two cannot end up with different ceilings
+/// and leave a speed the one can reach and the other cannot move off.
+pub fn stepped_hispeed(hispeed: f64, by: f64) -> Option<f64> {
+    let next = hispeed + by;
+    if next <= 0.0 || next >= HISPEED_MAX {
+        return None;
+    }
+    Some(next.max(HISPEED_MIN))
+}
+
+/// Smallest step the HI-SPEED STEP row can hold. Narrower than the reference implementation's own
+/// `HISPEEDMARGIN` range, which starts at a step of zero: a zero step cannot move the row at all.
+pub const HISPEED_STEP_MIN: f64 = 0.01;
+
+/// Largest step the HI-SPEED STEP row can hold. Narrower than the reference implementation's own
+/// ceiling of ten, which would overshoot the whole HI-SPEED range in two presses.
+pub const HISPEED_STEP_MAX: f64 = 1.0;
+
+/// One left/right step on the HI-SPEED STEP row.
+pub const HISPEED_STEP_STEP: f64 = 0.01;
+
+/// Smallest fraction of the lane the LIFT, LANE COVER and HIDDEN+ rows can hide.
 pub const LANE_SHADE_MIN: f32 = 0.0;
 
-/// Largest fraction of the lane the LIFT and LANE COVER rows can hide.
-pub const LANE_SHADE_MAX: f32 = 0.9;
+/// Largest fraction of the lane the LIFT, LANE COVER and HIDDEN+ rows can hide.
+pub const LANE_SHADE_MAX: f32 = 1.0;
 
-/// One left/right step on the LIFT and LANE COVER rows.
-pub const LANE_SHADE_STEP: f32 = 0.05;
+/// One left/right step on the LIFT, LANE COVER and HIDDEN+ rows (`PlayConfig.java:91`).
+pub const LANE_SHADE_STEP: f32 = 0.01;
+
+/// Smallest fine step the COVER FINE STEP row can hold.
+pub const LANE_SHADE_FINE_STEP_MIN: f32 = 0.0001;
+
+/// Largest fine step the COVER FINE STEP row can hold, which is the coarse step.
+pub const LANE_SHADE_FINE_STEP_MAX: f32 = 0.01;
+
+/// One left/right step on the COVER FINE STEP row.
+pub const LANE_SHADE_FINE_STEP_STEP: f32 = 0.0001;
+
+/// The fine lane-shade step a fresh install holds (`PlayConfig.java:87`).
+pub const DEFAULT_LANE_SHADE_FINE_STEP: f32 = 0.001;
+
+/// Lowest fraction of the screen height the judge text may be placed at. Zero means the skin's own
+/// placement is kept, which is what every skin did before the row existed.
+pub const JUDGE_TEXT_Y_MIN: f32 = 0.0;
+
+/// Highest fraction of the screen height the judge text may be placed at.
+pub const JUDGE_TEXT_Y_MAX: f32 = 1.0;
+
+/// One left/right step on the JUDGE TEXT Y row.
+pub const JUDGE_TEXT_Y_STEP: f32 = 0.01;
+
+/// Judge text placement that leaves the skin's own alone.
+pub const JUDGE_TEXT_Y_FROM_SKIN: f32 = 0.0;
+
+/// Quietest the hover preview can be played at.
+pub const PREVIEW_VOLUME_MIN: f32 = 0.0;
+
+/// Loudest the hover preview can be played at.
+pub const PREVIEW_VOLUME_MAX: f32 = 1.0;
+
+/// One left/right step on the PREVIEW VOLUME row.
+pub const PREVIEW_VOLUME_STEP: f32 = 0.05;
+
+/// Gain a fresh install plays the hover preview at, which is the fixed gain the browser played it
+/// at before the row existed, so opening the settings is what changes what an installation hears.
+pub const DEFAULT_PREVIEW_VOLUME: f32 = 0.85;
+
+/// Shortest hover-preview fade the row can hold, which is no fade at all.
+pub const PREVIEW_FADE_MIN_MS: u32 = 0;
+
+/// Longest hover-preview fade the row can hold.
+pub const PREVIEW_FADE_MAX_MS: u32 = 1000;
+
+/// One left/right step on the PREVIEW FADE row.
+pub const PREVIEW_FADE_STEP_MS: u32 = 50;
+
+/// Hover-preview fade a fresh install holds.
+pub const DEFAULT_PREVIEW_FADE_MS: u32 = 200;
 
 /// Earliest judge offset the JUDGE OFFSET row can hold.
 pub const JUDGE_OFFSET_MIN_MS: i32 = -200;
@@ -142,9 +221,15 @@ impl Config {
     pub fn sanitise(&mut self) {
         self.schema_version = CURRENT_SCHEMA_VERSION;
         self.play.hispeed = self.play.hispeed.clamp(HISPEED_MIN, HISPEED_MAX);
+        self.play.hispeed_step = self.play.hispeed_step.clamp(HISPEED_STEP_MIN, HISPEED_STEP_MAX);
         self.play.lift = self.play.lift.clamp(LANE_SHADE_MIN, LANE_SHADE_MAX);
         self.play.cover = self.play.cover.clamp(LANE_SHADE_MIN, LANE_SHADE_MAX);
+        self.play.hidden = self.play.hidden.clamp(LANE_SHADE_MIN, LANE_SHADE_MAX);
+        self.play.lanecover_step_fine = self.play.lanecover_step_fine.clamp(LANE_SHADE_FINE_STEP_MIN, LANE_SHADE_FINE_STEP_MAX);
         self.play.total_override = self.play.total_override.max(TOTAL_FROM_CHART);
+        self.display.judge_text_y = self.display.judge_text_y.clamp(JUDGE_TEXT_Y_MIN, JUDGE_TEXT_Y_MAX);
+        self.library.preview_volume = self.library.preview_volume.clamp(PREVIEW_VOLUME_MIN, PREVIEW_VOLUME_MAX);
+        self.library.preview_fade_ms = self.library.preview_fade_ms.clamp(PREVIEW_FADE_MIN_MS, PREVIEW_FADE_MAX_MS);
         self.judge.sanitise();
         self.display.skin = if self.display.skin.trim().is_empty() { DEFAULT_SKIN.to_string() } else { self.display.skin.to_ascii_uppercase() };
         self.audio.sanitise();
@@ -157,17 +242,43 @@ impl Config {
 pub struct PlayOptions {
     pub autoplay: bool,
     pub hispeed: f64,
+    /// One HI-SPEED step, so a player can trade reach for precision.
+    pub hispeed_step: f64,
     pub constant_speed: bool,
+    /// Which tempo a fixed green number is pinned to. Independent of `constant_speed`: that one
+    /// ignores the chart's tempo changes outright, this one keeps the note travel time constant
+    /// across them.
+    #[serde(with = "crate::options::fix_hispeed_token")]
+    pub fix_hispeed: FixHiSpeed,
     #[serde(with = "note_option_token")]
     pub random: NoteOption,
     #[serde(with = "gauge_kind_token")]
     pub gauge: GaugeKind,
+    /// What is done to the lanes as a whole, which the note shuffle above is applied inside of.
+    #[serde(with = "crate::options::lane_option_token")]
+    pub lane_option: LaneOption,
+    /// Draw long notes as the plain notes an older skin would have shown.
+    pub legacy_note: bool,
     pub lift: f32,
+    /// Whether the LIFT value is applied. Kept apart from the value so switching it off and back on
+    /// does not lose the height that was dialled in (`PlayConfig.java:74`).
+    pub enable_lift: bool,
     pub cover: f32,
+    /// Whether the LANE COVER value is applied (`PlayConfig.java:66`).
+    pub enable_cover: bool,
+    /// Fraction of the lane hidden from the judge line upwards, the counterpart of the cover.
+    pub hidden: f32,
+    /// Whether the HIDDEN+ value is applied (`PlayConfig.java:82`).
+    pub enable_hidden: bool,
+    /// The finer of the two lane-shade steps, used with the modifier held (`PlayConfig.java:87`).
+    pub lanecover_step_fine: f32,
     pub scratch_left: bool,
     pub scratch_auto: bool,
     pub total_override: f64,
     pub auto_replay: bool,
+    /// What an Escape during a run has to be before it abandons the run.
+    #[serde(with = "crate::options::play_escape_token")]
+    pub play_escape: PlayEscape,
 }
 
 impl Default for PlayOptions {
@@ -175,15 +286,25 @@ impl Default for PlayOptions {
         PlayOptions {
             autoplay: true,
             hispeed: DEFAULT_HISPEED,
+            hispeed_step: HISPEED_STEP,
             constant_speed: false,
+            fix_hispeed: FixHiSpeed::default(),
             random: NoteOption::Off,
             gauge: GaugeKind::Normal,
+            lane_option: LaneOption::default(),
+            legacy_note: false,
             lift: LANE_SHADE_MIN,
+            enable_lift: false,
             cover: LANE_SHADE_MIN,
+            enable_cover: true,
+            hidden: LANE_SHADE_MIN,
+            enable_hidden: false,
+            lanecover_step_fine: DEFAULT_LANE_SHADE_FINE_STEP,
             scratch_left: false,
             scratch_auto: false,
             total_override: TOTAL_FROM_CHART,
             auto_replay: true,
+            play_escape: PlayEscape::default(),
         }
     }
 }
@@ -259,7 +380,7 @@ impl JudgeOptions {
 }
 
 /// The DISPLAY tab: what is drawn and with which assets.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DisplayOptions {
     pub bga: bool,
@@ -267,13 +388,36 @@ pub struct DisplayOptions {
     pub skin: String,
     pub font_path: Option<String>,
     pub score_graph: bool,
+    /// Draw the gauge, timing and judge-distribution graphs on the result screen.
+    pub result_graphs: bool,
     pub replay_analysis: bool,
+    /// Show the note travel time to the bottom of the lane cover next to the green number.
+    pub show_white_number: bool,
+    /// Where the judge text sits as a fraction of the screen height, or
+    /// [`JUDGE_TEXT_Y_FROM_SKIN`] to keep the skin's own placement.
+    pub judge_text_y: f32,
+    /// Fit the logical screen inside the window at its own aspect ratio rather than stretching it.
+    pub letterbox: bool,
+    /// Lay a five-key chart out on its own lane widths rather than on the seven-key ones.
+    pub five_key_layout: bool,
     pub debug: bool,
 }
 
 impl Default for DisplayOptions {
     fn default() -> Self {
-        DisplayOptions { bga: true, skin: DEFAULT_SKIN.to_string(), font_path: None, score_graph: true, replay_analysis: true, debug: false }
+        DisplayOptions {
+            bga: true,
+            skin: DEFAULT_SKIN.to_string(),
+            font_path: None,
+            score_graph: true,
+            result_graphs: true,
+            replay_analysis: true,
+            show_white_number: false,
+            judge_text_y: JUDGE_TEXT_Y_FROM_SKIN,
+            letterbox: false,
+            five_key_layout: false,
+            debug: false,
+        }
     }
 }
 
@@ -316,7 +460,7 @@ impl Default for NetworkOptions {
 }
 
 /// Where the songs come from and how the select screen previews them.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LibraryOptions {
     /// Song-library folders. Every folder is scanned and the results merged into one song list, so
@@ -327,13 +471,31 @@ pub struct LibraryOptions {
     pub songs_folder: Option<String>,
     /// Play the focused song's `#PREVIEW` clip on the select screen.
     pub preview: bool,
+    /// Gain the hover preview is played at, under the background bus.
+    pub preview_volume: f32,
+    /// How long the hover preview fades in and back out over.
+    pub preview_fade_ms: u32,
+    /// How the song list is ordered.
+    #[serde(with = "crate::sort")]
+    pub sort: SortMode,
+    /// Show only the charts that have been marked as favourites.
+    pub favorite_only: bool,
     /// User-added difficulty tables.
     pub tables: Vec<TableSource>,
 }
 
 impl Default for LibraryOptions {
     fn default() -> Self {
-        LibraryOptions { folders: Vec::new(), songs_folder: None, preview: true, tables: Vec::new() }
+        LibraryOptions {
+            folders: Vec::new(),
+            songs_folder: None,
+            preview: true,
+            preview_volume: DEFAULT_PREVIEW_VOLUME,
+            preview_fade_ms: DEFAULT_PREVIEW_FADE_MS,
+            sort: SortMode::default(),
+            favorite_only: false,
+            tables: Vec::new(),
+        }
     }
 }
 

@@ -124,6 +124,7 @@ impl From<LegacyV0> for Config {
                 scratch_auto: old.scratch_auto,
                 total_override: old.total_override,
                 auto_replay: old.auto_replay,
+                ..PlayOptions::default()
             },
             judge: {
                 let mut judge = JudgeOptions { offset_ms: old.offset_ms, auto_offset: old.auto_offset, ..JudgeOptions::default() };
@@ -137,6 +138,7 @@ impl From<LegacyV0> for Config {
                 score_graph: old.score_graph,
                 replay_analysis: old.replay_analysis,
                 debug: old.debug,
+                ..DisplayOptions::default()
             },
             audio: AudioOptions {
                 device: old.audio_device,
@@ -159,7 +161,7 @@ impl From<LegacyV0> for Config {
                 auto_upload_replay: old.auto_upload_replay,
                 rivals: old.rivals,
             },
-            library: LibraryOptions { folders: Vec::new(), songs_folder: old.songs_folder, preview: old.preview, tables: Vec::new() },
+            library: LibraryOptions { folders: Vec::new(), songs_folder: old.songs_folder, preview: old.preview, ..LibraryOptions::default() },
         }
     }
 }
