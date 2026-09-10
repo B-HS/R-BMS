@@ -53,3 +53,20 @@
 | OQ5 | 리전 | Vercel `icn1` 가정. `.env` 의 DB 호스트 리전 확인 후 재조정 |
 | OQ6 | `web/` 라이선스 | 레포 GPL-3.0-or-later 그대로(별도 LICENSE 없음) |
 | env 키 | 문서 `MYSQL_*` 표기 | 코드(`env.ts`)가 정본: `DATABASE_URL` 또는 `DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME`. architecture.md §6 을 이에 맞춰 정정 |
+
+## Phase E 착수 결정 (2026-09-10, 웨이브 0)
+
+> 근거 문서: `docs/plan/2026-09-09-phase-e-spec.md` §2.2 / §9.1 / §11.2-5. 웨이브 1 이 막혀 있던 결정을 스캐폴드 단계에서 해소한다.
+
+| # | 결정 | 채택안 |
+|---|---|---|
+| E1 | 드로우 콜 배치 병합 범위 | 계획 §2 E1 의 "per-texture draw call 배치 병합" 문구를 **사양 §2.2 의 "제출 순서 불변 + 연속 구간(run) 병합만 허용"** 으로 대체한다. 텍스처별 전역 수집은 z-order 를 깨므로 채택하지 않는다 (→ `reference-divergences.md` E-D1) |
+| E2 | 골든 PNG 커밋 여부 (§9.1) | **A안 채택** — `crates/rbms-render/tests/golden/` 에 PNG 를 커밋한다. 3장 이하, 코드 생성 텍스처(16x16~64x64) 장면이라 합계 200 KB 미만일 때만 유효하며, 초과하면 그 장면은 기존 `block_signature`/`signature_hash` 방식(B안)으로 남긴다. `block_signature` 는 어느 쪽이든 유지한다 |
+| E3 | `rbms-skin` optional 의존성 버전·라이선스 (§11.2-5) | `json5 = "1.3.1"`(MIT), `mlua = "0.12.1"` + `features = ["lua54", "vendored"]`(MIT, vendored Lua 5.4 도 MIT). 둘 다 레포의 GPL-3.0-or-later 와 호환. LuaJIT 이 아니라 **Lua 5.4** 를 쓴다(레퍼런스 스킨 식이 5.x 문법이고 JIT 이 필요한 부하가 아니다). 두 feature 는 **기본 on**(`default = ["json5", "lua"]`)이며, `lua` 를 끈 빌드는 Lua 식을 담은 스킨을 `SkinError::LuaUnavailable` 로 거부한다 |
+| E4 | `SkinUserConfig` 영속화 위치 | 사양 §5.5 "기존 설정 파일 체계를 따른다" 에 따라 `rbms-config` 문서에 얹는다 → 웨이브 0 이 `crates/rbms-config/Cargo.toml` 에 `rbms-skin` 의존을 미리 넣었다. 웨이브 3 E-ui 가 루트 `Cargo.toml`·`rbms-skin/src/lib.rs` 재머지를 요청하지 않고 진행할 수 있게 하기 위함이다 |
+| E5 | `rbms-skin` 의 `serde_json`·`rbms-model` 의존 | 사양 §5.2(strict JSON 먼저 → json5 폴백)와 §5.5(`SkinLoadOptions.mode: rbms_model::Mode`)가 요구하므로 스캐폴드에서 함께 선언한다. 같은 이유 — 웨이브 0 이후 이 두 파일은 아무도 수정하지 않는다 |
+
+## 마무리 순서 (사용자 지시, 2026-09-10)
+
+- 릴리스(prod 브랜치·보호·v0.1.0 태그·서명)는 **사용자가 자택 보관 키로 직접** 수행한다. 에이전트는 릴리스 단계를 착수하지 않는다.
+- 각 Phase 에서 나온 **경미한 후속 항목은 Phase G 다음의 "H 경미 후속 일괄" 단계**에 모아 한 번에 처리한다(현재: 토스트·힌트 겹침, Phase B 실기 가청 확인).

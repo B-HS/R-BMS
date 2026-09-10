@@ -80,7 +80,8 @@
 - [ ] E1~E6 스킨 완전 커스터마이징 — 프리미티브(PNG 골든·textured quad·클립·아틀라스)·타이머/키프레임·프로퍼티 바인딩·JSON+Lua 로더·화면 이식·스킨 선택 UI
 - [x] F UX·기능 고도화(2026-09-09~10, 명세 `docs/plan/2026-09-09-phase-f-spec.md`; F0~F4 5갈래 병렬 구현 → 통합(`docs/history/2026-09-10-phase-f-integration.md`) → 적대 리뷰 21건(critical 1·major 다수) 반영 19건·발산 등록 2건 → 최종 검증, history `docs/history/2026-09-09-phase-f-ux.md`, 발산 `docs/acknowledge/reference-divergences.md` §Phase F) — 옵션 오버레이(결정 3, 11행)·토스트/상태줄·백그라운드 로딩(폴더스캔/표fetch/키음·BGA 디코드 워커화)·정렬 12종(레퍼런스 `BarSorter` 패리티, 오름차순+무기록 마지막)·필터 패널(레벨/모드/클리어/즐겨찾기)·타깃 8종(고정레이트 11종 전체선택+RANK NEXT)/PACEMAKER 실시간·결과 3분할 그래프(GAUGE/TIMING/JUDGE)·27분위 랭크바. 최종 게이트(Fable 실측, 수정 없이 재검증): fmt 통과(no-op), clippy `-D warnings` 0 경고, `cargo test --workspace` **2232 통과 · 0 실패 · 2 ignored**(테스트 바이너리 38개 전부 ok), 금지어·금지주석 0건. 옵션 오버레이/결과+그래프/필터+토스트 3화면 헤드리스 PNG 육안 확인(임시 하네스, 확인 후 원복). 미구현 2건(BPM 정렬=시작BPM vs 레퍼런스 최고BPM · 차트파싱 미워커화)과 LANE OPTION FLIP/BATTLE 미배선은 발산 문서에 사유·해소조건 등록 후속(경미): 토스트가 곡선택 우하단 힌트 줄과 겹침 — 토스트를 힌트 위로 올리거나 표시 중 힌트를 숨길 것
 - [ ] G 데이터 스케일·롱테일 — 곡DB(rusqlite)·스코어DB·코스·연습 모드·gilrs/MIDI·시스템 사운드·복수 IR
-- [ ] R prod 브랜치·브랜치 보호·첫 릴리스 v0.1.0
+- [ ] H 경미 후속 일괄(사용자 결정 2026-09-10: G 다음에 모아서 처리) — ① 토스트가 곡선택 우하단 힌트 줄과 겹침 ② Phase B 실기 가청 확인(사용자 몫) ③ 이후 발생하는 경미 항목은 여기에 누적
+- [ ] R 릴리스(prod 브랜치·브랜치 보호·v0.1.0 태그·서명) — **사용자가 직접 수행**(자택 보관 키 사용, 2026-09-10 결정). 에이전트는 착수하지 않음
 
 ---
 
