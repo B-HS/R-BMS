@@ -71,14 +71,21 @@ fn app_in(tag: &str, select: Option<PathBuf>) -> App {
 /// against, so a frame drawn onto a different canvas would find none of them.
 fn render_until_compiled(app: &mut App) -> HeadlessCanvas {
     let mut pixels = HeadlessCanvas::new(CW, CH);
+    render_until_compiled_into(app, &mut pixels);
+    pixels
+}
+
+/// Draws the browser onto `pixels` until its document has been compiled, then draws one more frame
+/// so the returned canvas shows the document; answers whether the document compiled in time.
+fn render_until_compiled_into(app: &mut App, pixels: &mut HeadlessCanvas) -> bool {
     for _ in 0..DOCUMENT_LOAD_FRAMES {
-        render_into(app, Stage::Select(Box::new(SelectState::new())), &mut pixels);
+        render_into(app, Stage::Select(Box::new(SelectState::new())), pixels);
         if app.shared.has_compiled_skin(SKIN_TYPE_MUSIC_SELECT) {
-            render_into(app, Stage::Select(Box::new(SelectState::new())), &mut pixels);
-            return pixels;
+            render_into(app, Stage::Select(Box::new(SelectState::new())), pixels);
+            return true;
         }
     }
-    pixels
+    false
 }
 
 /// A document selected for the browser takes the whole screen: every corner is the document's own
@@ -108,14 +115,15 @@ fn a_screen_keeps_drawing_while_its_document_is_read() {
     let document = write_document(&settings);
     let mut app = app_in("pending", Some(document));
 
-    let first = render(&mut app, Stage::Select(Box::new(SelectState::new())));
+    let mut pixels = HeadlessCanvas::new(CW, CH);
+    render_into(&mut app, Stage::Select(Box::new(SelectState::new())), &mut pixels);
     assert!(app.shared.has_skin_document(SKIN_TYPE_MUSIC_SELECT), "the screen has a document from the frame it was chosen on");
     if !app.shared.has_compiled_skin(SKIN_TYPE_MUSIC_SELECT) {
-        assert_ne!(first.pixel_at(0, 0), MARK, "a frame drawn before the files arrived drew the built-in list");
+        assert_ne!(pixels.pixel_at(0, 0), MARK, "a frame drawn before the files arrived drew the built-in list");
     }
 
-    let compiled = render_until_compiled(&mut app);
-    assert_eq!(compiled.pixel_at(0, 0), MARK, "once the files arrive the document takes the screen");
+    assert!(render_until_compiled_into(&mut app, &mut pixels), "the document compiles within the frame budget");
+    assert_eq!(pixels.pixel_at(0, 0), MARK, "once the files arrive the document takes the screen");
 }
 
 /// The same screen with nothing selected draws exactly the frame it drew before the gate existed,
