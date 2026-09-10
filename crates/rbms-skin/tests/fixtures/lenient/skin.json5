@@ -1,0 +1,14 @@
+{
+    // a comment strict JSON refuses
+    type: 5,
+    name: 'lenient fixture',
+    author: 'rbms tests',
+    destination: [
+        {
+            id: 'solo',
+            dst: [
+                { time: 0, x: 1, y: 2, w: 3, h: 4, },
+            ],
+        },
+    ],
+}

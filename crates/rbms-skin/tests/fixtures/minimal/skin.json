@@ -1,0 +1,55 @@
+{
+    "type": 5,
+    "name": "fixture select",
+    "author": "rbms tests",
+    "w": 1280,
+    "h": 720,
+    "category": [{ "name": "layout", "item": ["Panel", "Gauge", "Panel offset"] }],
+    "property": [
+        {
+            "category": "layout",
+            "name": "Panel",
+            "item": [
+                { "name": "on", "op": 901 },
+                { "name": "off", "op": 902 }
+            ],
+            "def": "on"
+        }
+    ],
+    "filepath": [{ "category": "layout", "name": "Gauge", "path": "gauge/*.png", "def": "Random" }],
+    "offset": [{ "category": "layout", "name": "Panel offset", "id": 20, "x": true, "y": true }],
+    "source": [
+        { "id": "0", "path": "images/frame.png" },
+        { "id": "1", "path": "gauge/*.png" }
+    ],
+    "font": [{ "id": "0", "path": "fonts/*.ttf" }],
+    "image": [{ "id": "frame", "src": "0", "x": 0, "y": 0, "w": 64, "h": 64, "divx": 2 }],
+    "destination": [
+        {
+            "id": "frame",
+            "timer": 1,
+            "loop": -1,
+            "blend": 2,
+            "filter": 1,
+            "center": 4,
+            "offset": 20,
+            "offsets": [21],
+            "stretch": 1,
+            "op": [901, -902, 0],
+            "mouseRect": { "x": 0, "y": 0, "w": 32, "h": 32 },
+            "dst": [
+                { "time": 0, "x": 10, "y": 20, "w": 100, "h": 50, "acc": 1, "angle": 30 },
+                { "time": 500, "x": 110 },
+                { "time": 1000, "a": 0, "clip_x": 4, "clip_y": 8, "clip_w": 640, "clip_h": 360 }
+            ]
+        },
+        [
+            { "if": [901], "value": { "id": "panel-on", "dst": [{ "time": 0, "x": 1, "y": 2, "w": 3, "h": 4 }] } },
+            { "if": [902], "value": { "id": "panel-off", "dst": [{ "time": 0, "x": 5, "y": 6, "w": 7, "h": 8 }] } }
+        ],
+        [
+            { "if": [-901], "value": { "id": "never", "dst": [{ "time": 0 }] } }
+        ],
+        { "include": "parts/panel.json" }
+    ]
+}

@@ -7,6 +7,7 @@ members = [
     "crates/rbms-judge",
     "crates/rbms-audio",
     "crates/rbms-render",
+    "crates/rbms-skin",
     "crates/rbms-play",
     "crates/rbms-ir",
     "crates/rbms-table",
@@ -30,6 +31,7 @@ rbms-chart = { path = "crates/rbms-chart" }
 rbms-judge = { path = "crates/rbms-judge" }
 rbms-audio = { path = "crates/rbms-audio" }
 rbms-render = { path = "crates/rbms-render" }
+rbms-skin = { path = "crates/rbms-skin" }
 rbms-play = { path = "crates/rbms-play" }
 rbms-ir = { path = "crates/rbms-ir" }
 rbms-table = { path = "crates/rbms-table" }

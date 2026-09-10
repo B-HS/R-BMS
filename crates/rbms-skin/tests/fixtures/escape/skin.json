@@ -1,0 +1,7 @@
+{
+    "type": 5,
+    "name": "escape fixture",
+    "author": "rbms tests",
+    "source": [{ "id": "0", "path": "../secret.txt" }],
+    "destination": []
+}
