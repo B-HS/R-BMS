@@ -947,11 +947,12 @@ B안이면 §2.5 의 "파일이 없고 `RBMS_GOLDEN_UPDATE=1` 이면 생성 후 
 | - | customfile → filemap 경로 | §5.4.1 로 확정 | `JSONSkinLoader.java:145-157,223-225`, `SkinHeader.java:174-203` |
 | - | op/draw 를 누가 언제 평가하나 | `prepare()` 진입 즉시 `dstdraw` 전건 평가, 하나라도 false 면 `prepareRegion` 도 안 탄다. 정수 `op` 는 로더가 BooleanProperty 로 변환해 `dstdraw` 에 합류 → §3.3 | `SkinObject.java:282-298,590-610` |
 | - | `SkinObjectRenderer` 파일 위치 | 독립 파일이 아니라 **`Skin.java` 내부 클래스**(약 500-700행). "미독"이 아니라 파일을 잘못 짚었던 것 | 실측 |
+| 9 | 최상위 `input`/`scene`/`close`/`fadeout`/`loadend`/`playstart`/`judgetimer`/`finishmargin` 의 의미 | 전부 **ms**. `input` = 화면이 열린 뒤 키를 받기 시작할 때까지의 대기, `scene` = 그 시각이 지나면 화면이 스스로 다음으로 넘어감, `fadeout` = FADEOUT 타이머 기준 페이드 길이(끝나야 실제 전이), `close` = FAILED 타이머 기준 플레이 화면이 닫힐 때까지, `loadend` = `loadstart + loadend` 가 지나야 로드 연출이 끝난 것으로 보고 진행, `playstart` = READY 타이머가 이 값을 넘으면 런 시작, `judgetimer`(기본 1) = 판정 인덱스가 이 값 이하일 때만 판정 타이머를 재시작, `finishmargin`(기본 0) = MUSIC_END 타이머가 이 값을 넘으면 결과 화면으로 | `JsonSkin.java:12-21`, `MusicDecide.java:39-47`, `MusicResult.java:168-268`, `MusicSelector.java:193`, `BMSPlayer.java:470,499,549,598,606,711,748,751`, `JudgeManager.java:673` |
 
 ### 11.2 여전히 미확인 (구현 직전 확인 필요)
 
 1. **`OPTION_*` / `NUMBER_*` / `STRING_*` 의 전체 ID 목록과 대역 경계**: §4.1 기계 추출(총 968개 대조)로 확정한다. §4.2 표는 직접 확인한 앵커만 담은 스팟체크용이다.
-2. **`Skin` 최상위의 `input`/`scene`/`close`/`loadend`/`playstart`/`judgetimer`/`finishmargin` 의 정확한 의미**: 필드 존재만 확인. 화면 전이 타이밍에 직결되므로 **E5(단계 12) 착수 전** `MainState`/각 화면 클래스에서 소비처를 확인한다.
+2. ~~**`Skin` 최상위의 `input`/`scene`/`close`/`loadend`/`playstart`/`judgetimer`/`finishmargin` 의 정확한 의미**~~ → **해소**(§11.1 항목 9). rbms 는 화면 전이를 문서에 맡기지 않으므로 이 필드들을 아직 읽지 않는다. 전이를 맡기게 되면 위 표의 의미대로 배선한다.
 3. **Phase C1 `PlaySession` 의 최종 API**: 미구현이라 §4.3 매핑은 "상태 원천이 거기"까지만 확정. C1 확정 후 `SkinStateSource` 구현체를 작성한다(단계 8a 의 선행).
 4. **Phase I 의 IR 상태 표면**: TIMER 172~174 및 IR 관련 프로퍼티가 `HttpScoreServer` 의 어떤 상태에 붙는지는 **Phase I 완료 후** 확정.
 5. **`json5` / `mlua` 크레이트의 최신 버전·serde 호환**: 실제 추가 시 공식 문서로 확인한다. `mlua` 의 Lua 버전(5.4 vs LuaJIT), `vendored` feature 사용 여부, 라이선스가 레포의 GPL-3.0 과 호환되는지(mlua 는 MIT — 호환, 단 vendored Lua 는 MIT 로 별도 표기 필요)를 함께 확인한다.

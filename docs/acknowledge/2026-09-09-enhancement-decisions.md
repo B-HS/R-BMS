@@ -61,10 +61,25 @@
 | # | 결정 | 채택안 |
 |---|---|---|
 | E1 | 드로우 콜 배치 병합 범위 | 계획 §2 E1 의 "per-texture draw call 배치 병합" 문구를 **사양 §2.2 의 "제출 순서 불변 + 연속 구간(run) 병합만 허용"** 으로 대체한다. 텍스처별 전역 수집은 z-order 를 깨므로 채택하지 않는다 (→ `reference-divergences.md` E-D1) |
-| E2 | 골든 PNG 커밋 여부 (§9.1) | **A안 채택** — `crates/rbms-render/tests/golden/` 에 PNG 를 커밋한다. 3장 이하, 코드 생성 텍스처(16x16~64x64) 장면이라 합계 200 KB 미만일 때만 유효하며, 초과하면 그 장면은 기존 `block_signature`/`signature_hash` 방식(B안)으로 남긴다. `block_signature` 는 어느 쪽이든 유지한다 |
+| E2 | 골든 PNG 커밋 여부 (§9.1) | **A안 채택** — `crates/rbms-render/tests/golden/` 에 PNG 를 커밋한다. 판단 기준은 **바이트 예산(합계 200 KB 미만)** 이며, 코드 생성 텍스처(16x16~64x64) 장면이라 그 안에 들어갈 때만 유효하다. 초과하면 그 장면은 기존 `block_signature`/`signature_hash` 방식(B안)으로 남긴다. `block_signature` 는 어느 쪽이든 유지한다. **현황(2026-09-10): 4장, 합계 32 KB** — 착수 시점에 "3장 이하" 로 적었던 장수 제한은 예산과 무관한 임의 수치였으므로 예산 기준으로 정정한다 |
 | E3 | `rbms-skin` optional 의존성 버전·라이선스 (§11.2-5) | `json5 = "1.3.1"`(MIT), `mlua = "0.12.1"` + `features = ["lua54", "vendored"]`(MIT, vendored Lua 5.4 도 MIT). 둘 다 레포의 GPL-3.0-or-later 와 호환. LuaJIT 이 아니라 **Lua 5.4** 를 쓴다(레퍼런스 스킨 식이 5.x 문법이고 JIT 이 필요한 부하가 아니다). 두 feature 는 **기본 on**(`default = ["json5", "lua"]`)이며, `lua` 를 끈 빌드는 Lua 식을 담은 스킨을 `SkinError::LuaUnavailable` 로 거부한다 |
 | E4 | `SkinUserConfig` 영속화 위치 | 사양 §5.5 "기존 설정 파일 체계를 따른다" 에 따라 `rbms-config` 문서에 얹는다 → 웨이브 0 이 `crates/rbms-config/Cargo.toml` 에 `rbms-skin` 의존을 미리 넣었다. 웨이브 3 E-ui 가 루트 `Cargo.toml`·`rbms-skin/src/lib.rs` 재머지를 요청하지 않고 진행할 수 있게 하기 위함이다 |
 | E5 | `rbms-skin` 의 `serde_json`·`rbms-model` 의존 | 사양 §5.2(strict JSON 먼저 → json5 폴백)와 §5.5(`SkinLoadOptions.mode: rbms_model::Mode`)가 요구하므로 스캐폴드에서 함께 선언한다. 같은 이유 — 웨이브 0 이후 이 두 파일은 아무도 수정하지 않는다 |
+
+## Phase E 구현 결정 (2026-09-10, 웨이브 3 통합)
+
+> 웨이브 3(E-screen ∥ E-ui)이 합류하면서 내려진 결정. 착수 결정(E1~E5)이 답하지 않은 것들이다.
+
+| # | 결정 | 채택안 |
+|---|---|---|
+| E6 | SKIN 탭의 행 구성 | 항상 있는 5개 행(화면 타입 / 문서 / LOADED / RELOAD / RESET)은 `rbms_config::SETTINGS` 의 descriptor 표에 두고, 문서가 스스로 선언한 행(property·filepath·offset)은 `SettingRow::Skin` 으로 **RELOAD 위에 동적 삽입**한다. SKIN 탭만 길이가 고정되지 않는 탭이다 |
+| E7 | 편집 중인 화면 타입의 영속화 | `Config.skin.screen`(= `SkinType` id)에 저장해 다음 실행에서도 같은 화면을 편집한다 |
+| E8 | 사용자 설정의 저장형 | `rbms_skin::loader::SkinUserConfig` 에 `PartialEq` 가 없어 `Config` 의 왕복 비교가 성립하지 않는다 → `Config` 는 자체 `SkinCustomisation`(properties/filepaths/offsets)을 저장형으로 두고 로드 시 `SkinUserConfig` 로 변환한다 |
+| E9 | 문서를 화면 타입별로 들고 있는다 | `SkinLibrary` 의 `loaded` 를 단일 슬롯이 아니라 **화면 타입 키의 맵**으로 둔다. SKIN 탭이 RESULT 를 편집하는 동안에도 브라우저는 자기 문서로 그려져야 하기 때문이다. 읽기마다 단조 증가하는 `build` 번호를 발급해, 컴파일된 화면(`SkinScreens`)이 그 번호가 움직였을 때만 다시 만든다 |
+| E10 | 컴파일된 화면의 소유자 | `AppShared.skin_screens`(화면 타입별 `SkinScreen`). 화면(stage)보다 오래 살아야 한다 — 곡을 고르고 플레이하고 돌아오는 동안 브라우저의 텍스처를 두 번 디코드하지 않기 위해서다. 다시 만들 때는 반드시 이전 화면을 `release` 한 뒤에 만든다(빌드마다 새 텍스처 네임스페이스) |
+| E11 | 플레이 화면의 문서를 고르는 축 | 런의 `Mode` → `rbms_skin::loader::mode_skin_type` 으로 역인출한다. `skin_type_mode` 와 같은 표를 반대로 읽으므로 둘이 어긋날 수 없고, 테스트가 왕복을 단언한다 |
+| E12 | 스킨 빌드 경고의 보고 경로 | 첫 줄 + "(and N more)" 를 `notify(Level::Warn, ..)` 로 한 번만 올린다. 경고 수 전체는 SKIN 탭 LOADED 행이 이미 보고하므로 토스트를 오브젝트 수만큼 쌓지 않는다 |
+| E13 | BGA 256 정사각 제약 해소 | 사양 14단계대로 `Canvas::set_bga` 와 `gpu::BGA_DIM` 을 삭제했다. 디코더는 파일 자체 해상도의 `DecodedImage { rgba, width, height }` 를 넘기고, 두 호출부(플레이·브라우저 커버)는 `Canvas::set_background(rgba, w, h, rect)` 를 쓴다 |
 
 ## 마무리 순서 (사용자 지시, 2026-09-10)
 
