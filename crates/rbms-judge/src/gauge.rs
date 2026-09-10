@@ -118,6 +118,16 @@ pub enum ClearType {
     Max,
 }
 
+impl ClearType {
+    /// Whether this lamp is a clear at all, which every lamp above [`ClearType::Failed`] is.
+    ///
+    /// A run that was never played and one that ran out of gauge are the only two that are not, so
+    /// the question is answered once here rather than restated wherever it is asked.
+    pub fn is_cleared(self) -> bool {
+        !matches!(self, ClearType::NoPlay | ClearType::Failed)
+    }
+}
+
 /// How much assist a play ran with (`BMSPlayer.java:865-867`). Any assist skips the full-combo
 /// lamps and demotes the clear lamp; which lamp it demotes to depends on the level.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -594,6 +604,17 @@ mod clear_type_id_tests {
         ClearType::Perfect,
         ClearType::Max,
     ];
+
+    /// Only a run that was never played and a run that ran out of gauge fall short of a clear;
+    /// every lamp above them counts, which is what a result screen and a skin both ask.
+    #[test]
+    fn every_lamp_above_failed_counts_as_a_clear() {
+        assert!(!ClearType::NoPlay.is_cleared());
+        assert!(!ClearType::Failed.is_cleared());
+        for c in ALL_CLEARS.into_iter().filter(|c| !matches!(c, ClearType::NoPlay | ClearType::Failed)) {
+            assert!(c.is_cleared(), "{c:?} is a clear lamp but did not count as one");
+        }
+    }
 
     #[test]
     fn clear_type_id_round_trips_for_every_lamp() {
