@@ -1,6 +1,10 @@
-//! Headless verification of the song-select autoplay-preview pipeline — the path taken when a chart
-//! defines no `#PREVIEW` file: parse -> model -> autoplay keysound schedule -> keysound decode. The
-//! only stage this cannot exercise is the cpal device output, which is shared with gameplay audio.
+//! Headless verification of the song-select preview pipelines: the autoplay path, taken when a chart
+//! defines no `#PREVIEW` file (parse -> model -> autoplay keysound schedule -> keysound decode), and
+//! the clip path, taken when it does (read -> decode). The only stage neither can exercise is the
+//! cpal device output, which is shared with gameplay audio.
+//!
+//! Both run entirely off the frame loop in the browser, which is what these fixtures stand in for:
+//! every step below is one a worker thread performs before the browser is handed the result.
 
 use std::path::Path;
 
@@ -36,4 +40,20 @@ fn autoplay_preview_extracts_events_and_decodable_keysounds() {
         decoded += 1;
     }
     assert!(decoded >= 1, "the fixture references at least one keysound");
+}
+
+/// A chart that names a `#PREVIEW` clip is played from that file, read and decoded on a worker and
+/// handed to the browser as finished samples — the browser never reads or decodes it itself.
+#[test]
+fn a_named_preview_clip_is_read_and_decoded_into_audible_samples() {
+    let bms = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../samples/preview-demo/preview-demo.bms");
+    let bytes = std::fs::read(&bms).expect("preview-demo fixture is committed");
+    let src = rbms_parser::parse_with(&bytes, Default::default());
+    let named = src.headers.preview.trim().to_string();
+    assert!(!named.is_empty(), "fixture must define a #PREVIEW so it exercises the clip path");
+
+    let path = bms.parent().expect("the fixture is in a folder").join(&named);
+    let data = std::fs::read(&path).unwrap_or_else(|_| panic!("preview clip {} present", path.display()));
+    let dec = rbms_audio::decode_bytes(data, path.extension().and_then(|x| x.to_str())).expect("the clip decodes");
+    assert!(dec.samples.iter().any(|&s| s != 0.0), "a preview clip must decode to audible PCM");
 }

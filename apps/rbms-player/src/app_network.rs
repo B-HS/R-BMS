@@ -42,7 +42,7 @@ pub(crate) fn build_server(config: &Config, token: Option<String>) -> BuiltServe
                 Arc::new(s)
             }
             Err(e) => {
-                eprintln!("score server unavailable ({e}) — playing offline");
+                notify(Level::Warn, format!("score server unavailable ({e}) — playing offline"));
                 Arc::new(NullScoreServer)
             }
         },

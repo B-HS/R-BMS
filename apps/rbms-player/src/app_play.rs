@@ -1,16 +1,37 @@
 //! `AppShared` methods behind the play path: loading a chart, the shared output stream, the song
 //! clock and the timing instrumentation. The PLAY screen itself lives in `stage::play`.
 #![allow(clippy::wildcard_imports)]
+use crate::assets::{bga_jobs, spawn_bga_decode};
+use crate::stage::loading::BgaLoad;
 use crate::stage::{KeysoundLoad, LoadingState, PlayState, Stage, StageId, Transition};
 use crate::*;
 
 /// How much of the output device's name the debug overlay shows before it is cut.
 const DEVICE_NAME_OVERLAY_CHARS: usize = 20;
 
-/// A chart that has just been parsed and turned into a session, plus the keysound decode that is
-/// still running for it. `keysounds` is `None` when there is nothing left to wait for.
+/// A parsed chart, ready to play as soon as the files it names have been decoded.
+///
+/// The background images are not part of it yet: they are decoded on the worker pool like the
+/// keysounds are, and the screen is built once they have arrived. Holding the session apart from
+/// them is what lets the decode happen off the frame loop at all.
+pub(crate) struct PendingChart {
+    session: PlaySession,
+    lntype: i32,
+    ln_mode_key: String,
+}
+
+impl PendingChart {
+    /// Turn the parsed chart into the screen that plays it, now that its images are in.
+    pub(crate) fn into_play(self, bga: std::collections::HashMap<i32, Vec<u8>>) -> PlayState {
+        PlayState::new(self.session, bga, self.lntype, self.ln_mode_key)
+    }
+}
+
+/// A chart that has just been parsed, plus whatever is still being decoded for it. Either decode is
+/// `None` when there was nothing of that kind to wait for.
 pub(crate) struct LoadedChart {
-    pub(crate) play: PlayState,
+    pub(crate) chart: PendingChart,
+    pub(crate) bga: Option<BgaLoad>,
     pub(crate) keysounds: Option<KeysoundLoad>,
 }
 
@@ -105,7 +126,7 @@ impl AppShared {
         let bytes = match std::fs::read(&self.chart_path) {
             Ok(b) => b,
             Err(e) => {
-                eprintln!("chart not found: {} ({e})", self.chart_path);
+                notify(Level::Error, format!("chart not found: {} ({e})", self.chart_path));
                 return None;
             }
         };
@@ -114,7 +135,7 @@ impl AppShared {
         let (random, seed) = match &self.replay {
             Some(rp) => {
                 if !rp.md5.is_empty() && rp.md5 != src.md5 {
-                    eprintln!("warning: chart md5 mismatch (replay {} vs file {}); replay may desync", rp.md5, src.md5);
+                    notify(Level::Warn, format!("warning: chart md5 mismatch (replay {} vs file {}); replay may desync", rp.md5, src.md5));
                 }
                 self.config.judge.offset_ms = rp.offset_ms;
                 self.config.play.scratch_auto = rp.scratch_auto;
@@ -147,7 +168,7 @@ impl AppShared {
         };
         self.skin_cfg = match &self.launch.skin_path {
             Some(p) => SkinConfig::load(p).unwrap_or_else(|e| {
-                eprintln!("skin load failed ({e}), using bundled");
+                notify(Level::Warn, format!("skin load failed ({e}), using bundled"));
                 bundled_skin(&self.config.display.skin)
             }),
             None => bundled_skin(&self.config.display.skin),
@@ -192,18 +213,17 @@ impl AppShared {
             format!("interactive ({hint})")
         };
         println!("playing '{}' [{}] ({} notes) — {}", model.meta.title, mode.name, rbms_chart::count_playable_notes(&model), status);
-        let mut bga_images: std::collections::HashMap<i32, Vec<u8>> = std::collections::HashMap::new();
+        let bga_cancel = Arc::new(AtomicBool::new(false));
+        let mut bga: Option<BgaLoad> = None;
         if self.config.display.bga && self.skin.bga.is_some() {
-            for (id, name) in model.bgamap.iter().enumerate() {
-                if name.is_empty() {
-                    continue;
-                }
-                if let Some(rgba) = decode_bga_256(&dir, name) {
-                    bga_images.insert(id as i32, rgba);
-                }
+            let jobs = bga_jobs(&model.bgamap, &dir);
+            let total = jobs.len();
+            if total > 0 {
+                println!("decoding {total} BGA images...");
+                let (rx, progress, _) = spawn_bga_decode(jobs, bga_cancel.clone());
+                bga = Some(BgaLoad { rx, progress, cancel: bga_cancel, total });
             }
         }
-        println!("loaded {} BGA images", bga_images.len());
 
         let auto_lanes: Vec<bool> = if self.config.play.scratch_auto { (0..mode.key).map(|lane| mode.is_scratch(lane)).collect() } else { Vec::new() };
         let options = SessionOptions {
@@ -223,19 +243,17 @@ impl AppShared {
             true => ln_mode_token(judge_setup.ln_mode).to_string(),
             false => SCORE_LN_MODE_FROM_CHART.to_string(),
         };
-        Some(LoadedChart { play: PlayState::new(session, bga_images, lntype, ln_mode_key), keysounds })
+        Some(LoadedChart { chart: PendingChart { session, lntype, ln_mode_key }, bga, keysounds })
     }
 
-    /// Enter a chart that has just been parsed: keep the LOADING screen up while its keysounds
-    /// decode, or start play right away when there is nothing left to wait for.
+    /// Enter a chart that has just been parsed: keep the LOADING screen up while its files decode,
+    /// or start play right away when there is nothing left to wait for.
     pub(crate) fn enter_loaded_chart(&mut self, loaded: LoadedChart) -> Stage {
-        match loaded.keysounds {
-            Some(load) => Stage::Loading(LoadingState::keysounds(loaded.play, load)),
-            None => {
-                self.start_play();
-                Stage::Play(Box::new(loaded.play))
-            }
+        if loaded.bga.is_none() && loaded.keysounds.is_none() {
+            self.start_play();
+            return Stage::Play(Box::new(loaded.chart.into_play(std::collections::HashMap::new())));
         }
+        Stage::Loading(LoadingState::assets(loaded))
     }
 
     /// Leave a run: back to the song browser, or out of the app when there is no library to return
@@ -288,7 +306,7 @@ impl AppShared {
                 }
             }
             Err(e) => {
-                eprintln!("audio unavailable ({e}) — visual only");
+                notify(Level::Warn, format!("audio unavailable ({e}) — visual only"));
                 self.audio_report = None;
                 self.audio_failed = true;
             }
@@ -309,7 +327,7 @@ impl AppShared {
             if self.audio.is_some() {
                 return;
             }
-            eprintln!("audio: reopen failed — trying the previous device settings");
+            notify(Level::Warn, "audio: reopen failed — trying the previous device settings");
         }
         self.audio_failed = true;
     }
@@ -391,7 +409,7 @@ impl AppShared {
             None => {
                 let v = (audio.audible_us(now), now);
                 self.audio_dead_at.set(Some(v));
-                eprintln!("audio stream stopped — falling back to the wall clock");
+                notify(Level::Warn, "audio stream stopped — falling back to the wall clock");
                 v
             }
         };
@@ -461,7 +479,7 @@ impl AppShared {
         }
         match self.timing.write_csv(&path) {
             Ok(()) => println!("timing: {} samples -> {}", self.timing.len(), path.display()),
-            Err(e) => eprintln!("timing csv write failed ({}): {e}", path.display()),
+            Err(e) => notify(Level::Error, format!("timing csv write failed ({}): {e}", path.display())),
         }
     }
 
@@ -487,7 +505,7 @@ impl AppShared {
             && !self.soak_failed
         {
             self.soak_failed = true;
-            eprintln!("soak log write failed: {e}");
+            notify(Level::Error, format!("soak log write failed: {e}"));
         }
     }
 
@@ -555,6 +573,16 @@ impl AppShared {
             None => {}
         }
     }
+}
+
+/// A parsed chart with nothing in it, for the screens that have to hold one while its files are
+/// still being decoded.
+#[cfg(test)]
+pub(crate) fn pending_chart_for_tests() -> PendingChart {
+    let src = rbms_parser::parse_with(b"#PLAYER 1\n#TITLE pending\n#BPM 120\n", Default::default());
+    let mode = rbms_chart::detect_mode(&src, "pending.bms");
+    let model = to_model(&src, mode);
+    PendingChart { session: PlaySession::new(model, SessionOptions::default()), lntype: 0, ln_mode_key: SCORE_LN_MODE_FROM_CHART.to_string() }
 }
 
 #[cfg(test)]

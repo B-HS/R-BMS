@@ -152,27 +152,35 @@ fn default_total_large_charts_exceed_floor() {
 }
 
 #[test]
-fn sortmode_next_cycles_through_all_and_returns_to_start() {
+fn sortmode_next_cycles_through_the_orderings_the_key_offers_and_returns_to_start() {
     let mut seen = Vec::new();
-    let mut m = SortMode::Default;
-    for _ in 0..SortMode::ALL.len() {
+    let mut m = SortMode::DEFAULT_CYCLE[0];
+    for _ in 0..SortMode::DEFAULT_CYCLE.len() {
         seen.push(m);
         m = m.next();
     }
-    assert_eq!(seen.len(), SortMode::ALL.len());
-    for variant in SortMode::ALL {
+    assert_eq!(seen.len(), SortMode::DEFAULT_CYCLE.len());
+    for variant in SortMode::DEFAULT_CYCLE {
         assert!(seen.contains(&variant), "{:?} visited", variant.label());
     }
-    assert!(m == SortMode::Default, "wraps back to the start after a full cycle");
+    assert!(m == SortMode::DEFAULT_CYCLE[0], "wraps back to the start after a full cycle");
 }
 
 #[test]
 fn sortmode_next_advances_by_one_each_step() {
-    let chain = [SortMode::Default, SortMode::Title, SortMode::Artist, SortMode::Level, SortMode::Clear];
-    for w in chain.windows(2) {
+    for w in SortMode::DEFAULT_CYCLE.windows(2) {
         assert_eq!(w[0].next().label(), w[1].label(), "{} -> {}", w[0].label(), w[1].label());
     }
-    assert_eq!(SortMode::Clear.next().label(), SortMode::Default.label(), "last wraps to first");
+    let last = SortMode::DEFAULT_CYCLE[SortMode::DEFAULT_CYCLE.len() - 1];
+    assert_eq!(last.next().label(), SortMode::DEFAULT_CYCLE[0].label(), "last wraps to first");
+}
+
+/// The key steps back as well as forward, so a list overshot by one press is one press away again.
+#[test]
+fn sortmode_prev_undoes_sortmode_next() {
+    for mode in SortMode::DEFAULT_CYCLE {
+        assert_eq!(mode.next().prev(), mode, "{:?}", mode.label());
+    }
 }
 
 #[test]
@@ -185,6 +193,17 @@ fn sortmode_labels_distinct_and_nonempty() {
     labels.sort_unstable();
     labels.dedup();
     assert_eq!(labels.len(), n, "all labels distinct");
+}
+
+/// The two orderings that compare against a rival are not offered anywhere until there is a rival
+/// to compare against, so neither the key nor the settings row can select one.
+#[test]
+fn sortmode_hides_the_orderings_that_have_nothing_to_compare_against() {
+    for hidden in [SortMode::RivalClear, SortMode::RivalScore] {
+        assert!(SortMode::ALL.contains(&hidden));
+        assert!(!SortMode::DEFAULT_CYCLE.contains(&hidden), "{:?} is on the key", hidden.label());
+        assert!(!SortMode::SELECTABLE.contains(&hidden), "{:?} is on the row", hidden.label());
+    }
 }
 
 #[test]

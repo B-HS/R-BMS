@@ -1,7 +1,10 @@
 //! Difficulty-table loading and library matching: fetch/cache a table (`rbms_table`), match its
 //! entries to the local song library by md5 (`DifficultyTable::match_levels`), and resolve
-//! ASCII-safe display names. Only `load_and_match` / `fetch_and_match` are called by the app; the
-//! rest are internal steps.
+//! ASCII-safe display names. Only `load_and_match_md5s` / `fetch_and_match` are called by the app;
+//! the rest are internal steps. Both take the library's md5s rather than the library itself, so
+//! every caller can do the work on a worker thread.
+
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use rbms_config::TableSource;
 use rbms_library::Library;
@@ -63,19 +66,21 @@ fn fallback_source_name(src: &TableSource) -> String {
     if !s.is_empty() && s.is_ascii() { s.to_ascii_uppercase() } else { "TABLE".into() }
 }
 
-/// Load one table source and match it against the library. A failed load yields the source's
-/// fallback name and an empty level set (kept so the parallel vecs stay aligned with sources).
-pub(crate) fn load_and_match(src: &TableSource, library: &Library) -> (String, TableLevels) {
+/// Load one table source and match it against a copy of the library's md5s, in library order.
+///
+/// Taking the md5s rather than the library is what lets a fetch run on a worker thread: the browser
+/// keeps reading the library it has while the http request is out.
+pub(crate) fn load_and_match_md5s(src: &TableSource, md5s: &[String]) -> (String, TableLevels) {
     println!("loading table: {} ({})", src.name, src.location);
     match load_table_source(&src.location) {
         Ok(t) => {
-            let lv = t.match_levels(library.md5s());
+            let lv = t.match_levels(md5s.iter().map(String::as_str));
             let owned: usize = lv.iter().map(|(_, v)| v.len()).sum();
             println!("  {} entries, matched {owned} local charts across {} levels", t.entries.len(), lv.len());
             (pick_table_name(src, &t), lv)
         }
         Err(e) => {
-            eprintln!("  table load failed: {e}");
+            crate::notify::notify(crate::notify::Level::Warn, format!("table load failed ({}): {e}", src.location));
             (fallback_source_name(src), Vec::new())
         }
     }
@@ -83,13 +88,18 @@ pub(crate) fn load_and_match(src: &TableSource, library: &Library) -> (String, T
 
 /// Load every table source (one entry per source, aligned with `sources`). Returns parallel
 /// `(display name, per-level owned-chart groups)` vecs.
-pub(crate) fn fetch_and_match(sources: &[TableSource], library: &Library) -> (Vec<String>, Vec<TableLevels>) {
+///
+/// `done` is raised as each source is finished, so the screen that started this off-thread can say
+/// how far through the list it is rather than showing a bar that never moves.
+pub(crate) fn fetch_and_match(sources: &[TableSource], library: &Library, done: &AtomicUsize) -> (Vec<String>, Vec<TableLevels>) {
+    let md5s: Vec<String> = library.md5s().map(str::to_string).collect();
     let mut names = Vec::new();
     let mut levels = Vec::new();
     for src in sources {
-        let (name, lv) = load_and_match(src, library);
+        let (name, lv) = load_and_match_md5s(src, &md5s);
         names.push(name);
         levels.push(lv);
+        done.fetch_add(1, Ordering::Relaxed);
     }
     (names, levels)
 }
@@ -152,6 +162,10 @@ mod tests {
         }
     }
 
+    fn library_md5s(library: &Library) -> Vec<String> {
+        library.md5s().map(str::to_string).collect()
+    }
+
     #[test]
     fn a_table_source_is_matched_against_the_library_index_and_reports_library_positions() {
         let path = std::env::temp_dir().join(format!("rbms-lib-table-{}.json", std::process::id()));
@@ -159,9 +173,35 @@ mod tests {
         let library = Library::from_songs(vec![entry("aaaa"), entry("bbbb"), entry("cccc"), entry("DDDD")]);
         let source = TableSource { name: "MINE".into(), location: path.to_string_lossy().to_string() };
 
-        let (name, levels) = load_and_match(&source, &library);
+        let (name, levels) = load_and_match_md5s(&source, &library_md5s(&library));
         assert_eq!(name, "MINE");
         assert_eq!(levels, vec![("1".to_string(), vec![1]), ("2".to_string(), vec![3])], "levels carry positions in the library's own order");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn every_source_is_counted_as_it_is_finished_so_the_screen_can_say_how_far_it_is() {
+        let library = Library::from_songs(vec![entry("aaaa")]);
+        let sources = vec![
+            TableSource { name: "one".into(), location: "/no/such/one.json".into() },
+            TableSource { name: "two".into(), location: "/no/such/two.json".into() },
+        ];
+        let done = AtomicUsize::new(0);
+        let (names, levels) = fetch_and_match(&sources, &library, &done);
+        assert_eq!(done.load(Ordering::Relaxed), 2, "a source that failed is still one the screen no longer waits for");
+        assert_eq!(names.len(), 2);
+        assert_eq!(levels.len(), 2);
+    }
+
+    /// Every source, fetched or read off disk, is matched on a worker against a copy of the
+    /// library's md5s in library order, so what a table row points at is a position in the library.
+    #[test]
+    fn matching_against_the_librarys_md5s_reports_library_positions() {
+        let path = std::env::temp_dir().join(format!("rbms-md5s-table-{}.json", std::process::id()));
+        std::fs::write(&path, br#"[{"md5":"BBBB","level":"1"}]"#).expect("write the fixture");
+        let library = Library::from_songs(vec![entry("aaaa"), entry("bbbb")]);
+        let source = TableSource { name: "MINE".into(), location: path.to_string_lossy().to_string() };
+        assert_eq!(load_and_match_md5s(&source, &library_md5s(&library)), ("MINE".to_string(), vec![("1".to_string(), vec![1])]));
         let _ = std::fs::remove_file(&path);
     }
 
@@ -169,7 +209,7 @@ mod tests {
     fn a_source_that_cannot_be_loaded_keeps_its_slot_with_no_levels() {
         let library = Library::from_songs(vec![entry("aaaa")]);
         let source = TableSource { name: "gone".into(), location: "/no/such/table.json".into() };
-        let (name, levels) = load_and_match(&source, &library);
+        let (name, levels) = load_and_match_md5s(&source, &library_md5s(&library));
         assert_eq!(name, "GONE", "the source name still labels the row");
         assert!(levels.is_empty(), "a failed load must not drop the row and misalign the parallel vecs");
     }

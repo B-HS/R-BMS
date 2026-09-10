@@ -76,6 +76,7 @@ pub(crate) struct Gpu {
     instance_cap: usize,
     quads: Vec<Instance>,
     clear_color: Color,
+    letterbox: bool,
     bga_pipeline: wgpu::RenderPipeline,
     bga_uniform: wgpu::Buffer,
     bga_tex: wgpu::Texture,
@@ -273,6 +274,7 @@ impl Gpu {
             instance_cap,
             quads: Vec::new(),
             clear_color: Color::BLACK,
+            letterbox: false,
             bga_pipeline,
             bga_uniform,
             bga_tex,
@@ -302,6 +304,21 @@ impl Gpu {
     /// Number of quad instances queued so far this frame (debug overlay metric).
     pub(crate) fn quad_count(&self) -> usize {
         self.quads.len()
+    }
+
+    /// Keep the logical screen's own shape inside the window, or stretch it to fill.
+    ///
+    /// Stretching is what the surface has always done and is still the default; a window that is
+    /// not 16:9 then shows the field wider or taller than it was drawn, which moves where a note
+    /// looks like it is. Fitting instead centres the screen and leaves the rest of the window in
+    /// the colour the frame was cleared to.
+    pub(crate) fn set_letterbox(&mut self, on: bool) {
+        self.letterbox = on;
+    }
+
+    /// The part of the surface this frame is drawn into, as `(x, y, w, h)`.
+    fn viewport(&self) -> (f32, f32, f32, f32) {
+        surface_viewport(self.config.width, self.config.height, self.letterbox)
     }
 
     pub(crate) fn render(&mut self) {
@@ -346,6 +363,8 @@ impl Gpu {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
+            let (vx, vy, vw, vh) = self.viewport();
+            rp.set_viewport(vx, vy, vw, vh, 0.0, 1.0);
             if self.bga_active {
                 rp.set_pipeline(&self.bga_pipeline);
                 rp.set_bind_group(0, &self.bga_bind_group, &[]);
@@ -361,6 +380,15 @@ impl Gpu {
         self.queue.submit([enc.finish()]);
         self.window.pre_present_notify();
         frame.present();
+    }
+
+    /// Where a physical window position lands in the fixed logical screen the UI is laid out in.
+    ///
+    /// The inverse of the fit the frame was drawn under, so a click lands on what is under the
+    /// cursor either way. A position in a letterbox bar maps outside the logical screen, which is
+    /// exactly what the hit test wants: there is nothing there to click.
+    pub(crate) fn logical_from_physical(&self, x: f32, y: f32) -> (f32, f32) {
+        logical_from_physical_in(x, y, self.config.width, self.config.height, self.letterbox)
     }
 
     pub(crate) fn resize(&mut self, w: u32, h: u32) {
@@ -387,5 +415,161 @@ impl Renderer for Gpu {
             rect: [rect.x, rect.y, rect.w, rect.h],
             color: [color.r as f32 / 255.0, color.g as f32 / 255.0, color.b as f32 / 255.0, color.a as f32 / 255.0],
         });
+    }
+}
+
+/// The part of a `surface_w` x `surface_h` surface the logical screen is drawn into, as
+/// `(x, y, w, h)`.
+///
+/// Stretched, that is the whole surface. Fitted, it is the largest 16:9 rectangle the surface holds,
+/// centred — so the remainder is one pair of bars, at the sides or above and below depending on
+/// which way the window is the wrong shape.
+///
+/// The rectangle is held inside the surface rather than trusted to land there: scaling by a ratio
+/// and multiplying back out can overshoot by a fraction of a pixel, and a viewport that starts a
+/// hair outside its attachment is rejected outright.
+fn surface_viewport(surface_w: u32, surface_h: u32, letterbox: bool) -> (f32, f32, f32, f32) {
+    let (sw, sh) = (surface_w.max(1) as f32, surface_h.max(1) as f32);
+    if !letterbox {
+        return (0.0, 0.0, sw, sh);
+    }
+    let scale = (sw / CW as f32).min(sh / CH as f32);
+    let (w, h) = ((CW as f32 * scale).min(sw), (CH as f32 * scale).min(sh));
+    ((sw - w) * 0.5, (sh - h) * 0.5, w, h)
+}
+
+/// The mapping from a physical window position to the logical screen, split out so it can be checked
+/// without a window.
+fn logical_from_physical_in(x: f32, y: f32, surface_w: u32, surface_h: u32, letterbox: bool) -> (f32, f32) {
+    let (vx, vy, vw, vh) = surface_viewport(surface_w, surface_h, letterbox);
+    ((x - vx) * CW as f32 / vw, (y - vy) * CH as f32 / vh)
+}
+
+/// Point the window's fit at what the DISPLAY settings ask for. A headless canvas has no surface to
+/// fit, so there is nothing to do for one.
+pub(crate) fn apply_letterbox(canvas: &mut crate::stage::Canvas<'_>, on: bool) {
+    match canvas {
+        crate::stage::Canvas::Window(gpu) => gpu.set_letterbox(on),
+        #[cfg(test)]
+        crate::stage::Canvas::Headless(_) => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A 4:3 window: too tall for the screen's shape, so the bars are above and below it.
+    const TALL: (u32, u32) = (1024, 768);
+
+    /// An ultrawide window: too wide, so the bars are at the sides.
+    const WIDE: (u32, u32) = (2560, 1080);
+
+    fn stretched(x: f32, y: f32, w: u32, h: u32) -> (f32, f32) {
+        logical_from_physical_in(x, y, w, h, false)
+    }
+
+    fn fitted(x: f32, y: f32, w: u32, h: u32) -> (f32, f32) {
+        logical_from_physical_in(x, y, w, h, true)
+    }
+
+    #[test]
+    fn a_window_at_the_logical_size_maps_a_position_onto_itself() {
+        assert_eq!(stretched(0.0, 0.0, CW, CH), (0.0, 0.0));
+        assert_eq!(stretched(640.0, 360.0, CW, CH), (640.0, 360.0));
+        assert_eq!(stretched(CW as f32, CH as f32, CW, CH), (CW as f32, CH as f32));
+    }
+
+    #[test]
+    fn a_resized_window_maps_its_corners_onto_the_logical_corners() {
+        let (w, h) = (CW * 2, CH * 2);
+        assert_eq!(stretched(0.0, 0.0, w, h), (0.0, 0.0));
+        assert_eq!(stretched(w as f32, h as f32, w, h), (CW as f32, CH as f32));
+        assert_eq!(stretched(w as f32 / 2.0, h as f32 / 2.0, w, h), (CW as f32 / 2.0, CH as f32 / 2.0));
+    }
+
+    /// A window reported as zero-sized (minimised on some platforms) must not divide by zero.
+    #[test]
+    fn a_window_with_no_size_yet_maps_without_dividing_by_zero() {
+        for letterbox in [false, true] {
+            let (x, y) = logical_from_physical_in(10.0, 10.0, 0, 0, letterbox);
+            assert!(x.is_finite() && y.is_finite(), "letterbox {letterbox} gave ({x}, {y})");
+        }
+    }
+
+    #[test]
+    fn stretching_fills_the_whole_window() {
+        assert_eq!(surface_viewport(TALL.0, TALL.1, false), (0.0, 0.0, TALL.0 as f32, TALL.1 as f32));
+        assert_eq!(surface_viewport(WIDE.0, WIDE.1, false), (0.0, 0.0, WIDE.0 as f32, WIDE.1 as f32));
+    }
+
+    #[test]
+    fn a_window_of_the_screens_own_shape_is_filled_either_way() {
+        let square_on = surface_viewport(CW * 3, CH * 3, true);
+        assert_eq!(square_on, (0.0, 0.0, (CW * 3) as f32, (CH * 3) as f32), "a 16:9 window has no room left over");
+        assert_eq!(square_on, surface_viewport(CW * 3, CH * 3, false), "so fitting and stretching agree");
+    }
+
+    #[test]
+    fn a_window_that_is_too_tall_gets_bars_above_and_below() {
+        let (x, y, w, h) = surface_viewport(TALL.0, TALL.1, true);
+        assert_eq!((x, w), (0.0, TALL.0 as f32), "the full width is used");
+        assert_eq!(h, 576.0, "1024 wide at 16:9");
+        assert_eq!(y, (TALL.1 as f32 - h) * 0.5, "and the rest is split evenly");
+        assert!(y > 0.0, "there is a bar to split");
+    }
+
+    #[test]
+    fn a_window_that_is_too_wide_gets_bars_at_the_sides() {
+        let (x, y, w, h) = surface_viewport(WIDE.0, WIDE.1, true);
+        assert_eq!((y, h), (0.0, WIDE.1 as f32), "the full height is used");
+        assert_eq!(w, 1920.0, "1080 tall at 16:9");
+        assert_eq!(x, (WIDE.0 as f32 - w) * 0.5);
+        assert!(x > 0.0);
+    }
+
+    #[test]
+    fn the_fitted_screen_keeps_the_shape_it_was_drawn_at() {
+        for (sw, sh) in [TALL, WIDE, (900, 900), (1280, 400), (17, 4000)] {
+            let (x, y, w, h) = surface_viewport(sw, sh, true);
+            assert!((w / h - CW as f32 / CH as f32).abs() < 1e-3, "{sw}x{sh} came out {w}x{h}");
+            assert!(x >= 0.0 && y >= 0.0, "{sw}x{sh} placed the screen outside the window");
+            assert!(x + w <= sw as f32 + 1e-3 && y + h <= sh as f32 + 1e-3, "{sw}x{sh} ran the screen off the window");
+        }
+    }
+
+    #[test]
+    fn a_click_inside_the_fitted_screen_lands_where_it_was_drawn() {
+        for (sw, sh) in [TALL, WIDE] {
+            let (x, y, w, h) = surface_viewport(sw, sh, true);
+            assert_eq!(fitted(x, y, sw, sh), (0.0, 0.0), "{sw}x{sh} top left");
+            let (bx, by) = fitted(x + w, y + h, sw, sh);
+            assert!((bx - CW as f32).abs() < 1e-3 && (by - CH as f32).abs() < 1e-3, "{sw}x{sh} bottom right came out ({bx}, {by})");
+            let (mx, my) = fitted(x + w * 0.5, y + h * 0.5, sw, sh);
+            assert!((mx - CW as f32 * 0.5).abs() < 1e-3 && (my - CH as f32 * 0.5).abs() < 1e-3, "{sw}x{sh} middle came out ({mx}, {my})");
+        }
+    }
+
+    /// A bar is not part of the screen, so a click in one has to miss everything the frame drew.
+    #[test]
+    fn a_click_in_a_bar_lands_outside_the_logical_screen() {
+        let (_, y, _, _) = surface_viewport(TALL.0, TALL.1, true);
+        let (_, above) = fitted(10.0, y * 0.5, TALL.0, TALL.1);
+        assert!(above < 0.0, "a click above the screen came out at {above}");
+        let (_, below) = fitted(10.0, TALL.1 as f32 - y * 0.5, TALL.0, TALL.1);
+        assert!(below > CH as f32, "a click below the screen came out at {below}");
+
+        let (x, ..) = surface_viewport(WIDE.0, WIDE.1, true);
+        let (left, _) = fitted(x * 0.5, 10.0, WIDE.0, WIDE.1);
+        assert!(left < 0.0, "a click left of the screen came out at {left}");
+        let (right, _) = fitted(WIDE.0 as f32 - x * 0.5, 10.0, WIDE.0, WIDE.1);
+        assert!(right > CW as f32, "a click right of the screen came out at {right}");
+    }
+
+    /// The whole point of fitting: the same window shows the screen undistorted rather than
+    /// stretched, so a click in the middle of the drawn field is not the same physical point.
+    #[test]
+    fn fitting_and_stretching_disagree_on_a_window_of_the_wrong_shape() {
+        assert_ne!(fitted(512.0, 100.0, TALL.0, TALL.1), stretched(512.0, 100.0, TALL.0, TALL.1));
     }
 }

@@ -1,11 +1,14 @@
-//! Headless render snapshots and screen-history tests, one per screen.
+//! The headless render harness, the invariants that span every screen, and the screen history.
 //!
 //! Every stage is drawn onto a [`HeadlessCanvas`] with the embedded fonts pinned, so the frames are
-//! deterministic without a window or a GPU. Each test pins that its screen paints something, that
-//! drawing it twice gives the same signature, and that it does not come out looking like another
-//! screen — which is what a stage wired to the wrong state would do. The transition tests at the
-//! bottom pin the screen history: what a screen opened over another resumes, and what it leaves
-//! behind.
+//! deterministic without a window or a GPU. What is here is what only makes sense across all of
+//! them: that each paints something, that drawing one twice gives the same signature, and that no
+//! two come out looking alike — which is what a stage wired to the wrong state would do. The
+//! transition tests at the bottom pin the screen history: what a screen opened over another
+//! resumes, and what it leaves behind.
+//!
+//! Each screen's own snapshots live in a file of its own next door, so two people working on two
+//! screens never edit the same one. They build their screens through the helpers here.
 
 use std::collections::HashSet;
 
@@ -30,54 +33,62 @@ const CHART: &str = concat!(
 
 /// An app with no library, no window and no server: everything the screens read out of
 /// [`crate::AppShared`] is at its default.
-fn app() -> App {
+pub(super) fn app() -> App {
     rbms_render::font::use_embedded_fonts_only();
     let dir = std::env::temp_dir().join(format!("rbms-render-tests-{}", std::process::id()));
     App::new(String::new(), Config::default(), LaunchOptions::default(), dir.join("settings.ron"))
 }
 
-fn play_state() -> PlayState {
+pub(super) fn play_state() -> PlayState {
     let src = rbms_parser::parse_with(CHART.as_bytes(), Default::default());
     let mode = rbms_chart::detect_mode(&src, "snapshot.bms");
     let model = rbms_chart::to_model(&src, mode);
     PlayState::new(PlaySession::new(model, SessionOptions::default()), std::collections::HashMap::new(), 0, SCORE_LN_MODE_FROM_CHART.to_string())
 }
 
-fn result_state() -> ResultState {
+pub(super) fn result_state() -> ResultState {
     ResultState::new(ResultView {
         title: "snapshot".into(),
+        mode_label: "7K",
         counts: [3, 2, 1, 0, 0, 0],
         ex_score: 8,
         max_score: 12,
         max_combo: 5,
         total_notes: 6,
-        fast: 1,
-        slow: 1,
+        fast: [1, 0],
+        slow: [1, 0],
         gauge: 80.0,
         clear_label: "CLEAR",
         clear_color: Color::GREEN,
         prev_best_ex: Some(6),
         prev_ex: Some(4),
         show_graph: true,
+        show_result_graphs: true,
+        gauge_series: Vec::new(),
+        timing_hist: Box::new([]),
+        judge_dist: [0; 6],
     })
 }
+
+/// The frame length the snapshots are drawn at, so a screen that animates draws one frame's worth.
+pub(super) const FRAME_DT: f32 = 1.0 / 60.0;
 
 /// Draw one stage onto a fresh headless canvas and return it. The screen is placed directly rather
 /// than transitioned into, so a screen's `on_enter` (which can enumerate audio devices) stays out
 /// of the render snapshots.
-fn render(app: &mut App, stage: Stage) -> HeadlessCanvas {
+pub(super) fn render(app: &mut App, stage: Stage) -> HeadlessCanvas {
     app.stage = stage;
     let mut pixels = HeadlessCanvas::new(CW, CH);
     let mut canvas = Canvas::Headless(&mut pixels);
     let now = std::time::Instant::now();
     app.shared.hot.clear();
-    let mut ctx = FrameCtx { shared: &mut app.shared, now, dt: 1.0 / 60.0 };
+    let mut ctx = FrameCtx { shared: &mut app.shared, now, dt: FRAME_DT };
     app.stage.draw(&mut ctx, &mut canvas);
     pixels
 }
 
 /// Every screen, freshly constructed, in the order they appear in [`Stage`].
-fn every_stage() -> Vec<(&'static str, Stage)> {
+pub(super) fn every_stage() -> Vec<(&'static str, Stage)> {
     vec![
         ("Select", Stage::Select(Box::new(SelectState::new()))),
         ("Settings", Stage::Settings(SettingsState::new())),
@@ -166,13 +177,13 @@ fn render_judge_tab(app: &mut App, down: usize) -> HeadlessCanvas {
     app.stage = Stage::Settings(SettingsState::on_tab(SettingTab::Judge));
     let now = std::time::Instant::now();
     for _ in 0..down {
-        let mut ctx = FrameCtx { shared: &mut app.shared, now, dt: 1.0 / 60.0 };
+        let mut ctx = FrameCtx { shared: &mut app.shared, now, dt: FRAME_DT };
         app.stage.handle_key(&mut ctx, KeyInput { code: KeyCode::ArrowDown, pressed: true, released: false, text: None });
     }
     let mut pixels = HeadlessCanvas::new(CW, CH);
     let mut canvas = Canvas::Headless(&mut pixels);
     app.shared.hot.clear();
-    let mut ctx = FrameCtx { shared: &mut app.shared, now, dt: 1.0 / 60.0 };
+    let mut ctx = FrameCtx { shared: &mut app.shared, now, dt: FRAME_DT };
     app.stage.draw(&mut ctx, &mut canvas);
     pixels
 }

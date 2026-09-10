@@ -18,6 +18,14 @@ pub(crate) mod loading;
 pub(crate) mod play;
 #[cfg(test)]
 mod render_tests;
+#[cfg(test)]
+mod render_tests_play;
+#[cfg(test)]
+mod render_tests_result;
+#[cfg(test)]
+mod render_tests_select;
+#[cfg(test)]
+mod render_tests_shell;
 pub(crate) mod result;
 pub(crate) mod select;
 pub(crate) mod settings;
@@ -125,6 +133,14 @@ pub(crate) trait StageHandler {
     fn debug_lines(&self, ctx: &FrameCtx<'_>) -> Vec<String> {
         ctx.shared.browser_debug_lines()
     }
+
+    /// Whether this screen is taking every key itself right now — a search box being typed into, a
+    /// modal, a panel of its own. The app-wide overlays step aside while it is, so a shift key held
+    /// to type a capital letter is not read as a request for the option panel.
+    fn holds_keys(&self, ctx: &FrameCtx<'_>) -> bool {
+        let _ = ctx;
+        false
+    }
 }
 
 impl StageId {
@@ -198,11 +214,28 @@ impl Stage {
         self.handler().draw(ctx, canvas);
     }
 
+    /// Route one key to the screen that is up, after the option overlay has had first refusal.
+    ///
+    /// The overlay is offered every key before the screen underneath sees it, because the whole
+    /// point of it is that the list it is drawn over does not move while it is open. A key it does
+    /// not take reaches the screen exactly as it would have.
     pub(crate) fn handle_key(&mut self, ctx: &mut FrameCtx<'_>, key: KeyInput<'_>) -> Transition {
+        let holds_keys = self.view().holds_keys(ctx);
+        if crate::app_options::options_key(ctx, self.id(), holds_keys, &key) {
+            return Transition::Stay;
+        }
         self.handler().handle_key(ctx, key)
     }
 
+    /// Route one click to the screen that is up, unless the option overlay is over it.
+    ///
+    /// An open panel takes the click for the same reason it takes the keys: the list underneath must
+    /// not move while the panel is being read, and a click on a row would otherwise start a chart
+    /// and leave the panel drawn over the run.
     pub(crate) fn handle_mouse(&mut self, ctx: &mut FrameCtx<'_>, at: (f32, f32)) -> Transition {
+        if ctx.shared.options.is_open() {
+            return Transition::Stay;
+        }
         self.handler().handle_mouse(ctx, at)
     }
 

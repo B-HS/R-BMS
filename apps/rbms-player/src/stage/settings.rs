@@ -3,6 +3,7 @@
 //! owns the screen's state and routes keys and clicks into them by name.
 #![allow(clippy::wildcard_imports)]
 
+use crate::dialog::{DialogHandle, DialogState};
 use crate::ir_panel::*;
 use crate::ir_session::{AuthAction, GUEST_PLAYER_ID};
 use crate::settings_ui::{audio_status_text, is_network_row, output_device_names, step_audio_device};
@@ -28,16 +29,22 @@ const ROW_STEP_BACK: i32 = -1;
 pub(crate) struct SettingsState {
     tab: usize,
     sel: usize,
-    text_input: Option<String>,
+    text_input: Option<TextEdit>,
     /// Whether the in-place editor must hide what is being typed.
     text_secret: bool,
     /// Settings row the open in-place editor belongs to. The commit writes this row's field, so a
     /// selection that moves while the editor is open (a mouse click) cannot redirect the value —
     /// which would otherwise persist a typed password into another row.
     text_edit_row: Option<SettingId>,
+    /// Whether a paste modifier is down, which is what turns V into a clipboard paste rather than
+    /// a typed character.
+    paste_held: bool,
     rivals_open: bool,
     rivals_sel: usize,
     audio_devices: Vec<String>,
+    /// The font picker while it is up. It runs beside the frame loop, so the screen keeps drawing
+    /// while the user is in front of it and the answer is collected in `update`.
+    font_picker: Option<DialogHandle>,
     rows: Vec<SettingId>,
     lines: Vec<(&'static str, String)>,
     dirty: bool,
@@ -56,9 +63,11 @@ impl SettingsState {
             text_input: None,
             text_secret: false,
             text_edit_row: None,
+            paste_held: false,
             rivals_open: false,
             rivals_sel: 0,
             audio_devices: Vec::new(),
+            font_picker: None,
             rows: Vec::new(),
             lines: Vec::new(),
             dirty: true,
@@ -130,8 +139,8 @@ impl SettingsState {
             SettingId::Font => {
                 if delta < 0 {
                     ctx.shared.reset_font();
-                } else {
-                    ctx.shared.pick_font();
+                } else if self.font_picker.is_none() {
+                    self.font_picker = Some(crate::dialog::pick_font_file());
                 }
             }
             SettingId::Skin => {
@@ -148,6 +157,25 @@ impl SettingsState {
             }
         }
         Transition::Stay
+    }
+
+    /// Collect the font picker's answer once the user has given one, and load what they chose.
+    ///
+    /// The picker runs beside the frame loop, so this is where a chosen font actually lands. A
+    /// dismissed picker leaves the font alone.
+    fn poll_font_picker(&mut self, shared: &mut AppShared) {
+        let Some(picker) = self.font_picker.as_ref() else {
+            return;
+        };
+        match picker.poll() {
+            DialogState::Open => return,
+            DialogState::Picked(path) => {
+                self.font_picker = None;
+                shared.apply_font(&path);
+            }
+            DialogState::Dismissed => self.font_picker = None,
+        }
+        self.dirty = true;
     }
 
     /// Enter (or a step to the right) on a NETWORK row: open its editor, or run what it names.
@@ -181,12 +209,12 @@ impl SettingsState {
     fn begin_network_edit(&mut self, shared: &AppShared, id: SettingId) {
         self.text_secret = is_secret_row(id);
         self.text_edit_row = Some(id);
-        self.text_input = Some(match id {
+        self.text_input = Some(TextEdit::from_text(match id {
             SettingId::PlayerId => shared.config.network.player_id.clone(),
             SettingId::ServerUrl => shared.config.network.server_url.clone().unwrap_or_default(),
             SettingId::Email => shared.config.network.ir_email.clone().unwrap_or_default(),
             _ => String::new(),
-        });
+        }));
     }
 
     /// Close any open in-place editor, dropping what was typed. Called whenever the focus leaves
@@ -225,7 +253,7 @@ impl SettingsState {
     fn text_input_key(&mut self, shared: &mut AppShared, key: &KeyInput<'_>) {
         match key.code {
             KeyCode::Enter | KeyCode::NumpadEnter => {
-                let raw = self.text_input.take().unwrap_or_default();
+                let raw = self.text_input.take().map(|mut edit| edit.take()).unwrap_or_default();
                 let value = if self.text_secret { raw } else { raw.trim().to_string() };
                 let edited = self.text_edit_row.take();
                 self.text_secret = false;
@@ -234,14 +262,9 @@ impl SettingsState {
                 }
             }
             KeyCode::Escape => self.cancel_text_edit(),
-            KeyCode::Backspace => {
-                if let Some(b) = self.text_input.as_mut() {
-                    b.pop();
-                }
-            }
             _ => {
-                if let (Some(b), Some(t)) = (self.text_input.as_mut(), key.text) {
-                    b.extend(t.chars().filter(|c| !c.is_control()));
+                if let Some(edit) = self.text_input.as_mut() {
+                    edit_key(edit, key, self.paste_held);
                 }
             }
         }
@@ -253,21 +276,16 @@ impl SettingsState {
         if self.text_input.is_some() {
             match key.code {
                 KeyCode::Enter | KeyCode::NumpadEnter => {
-                    let value = self.text_input.take().unwrap_or_default();
+                    let value = self.text_input.take().map(|mut edit| edit.take()).unwrap_or_default();
                     if let Some(id) = normalise_rival(&value, &shared.config.network.rivals) {
                         shared.config.network.rivals.push(id);
                         self.rivals_sel = shared.config.network.rivals.len().saturating_sub(1);
                     }
                 }
                 KeyCode::Escape => self.text_input = None,
-                KeyCode::Backspace => {
-                    if let Some(buffer) = self.text_input.as_mut() {
-                        buffer.pop();
-                    }
-                }
                 _ => {
-                    if let (Some(buffer), Some(text)) = (self.text_input.as_mut(), key.text) {
-                        buffer.extend(text.chars().filter(|c| !c.is_control()));
+                    if let Some(edit) = self.text_input.as_mut() {
+                        edit_key(edit, key, self.paste_held);
                     }
                 }
             }
@@ -283,7 +301,7 @@ impl SettingsState {
             KeyCode::ArrowUp => self.rivals_sel = self.rivals_sel.saturating_sub(1),
             KeyCode::ArrowDown => self.rivals_sel = (self.rivals_sel + 1).min(rows.saturating_sub(1)),
             KeyCode::Enter | KeyCode::NumpadEnter if on_add => {
-                self.text_input = Some(String::new());
+                self.text_input = Some(TextEdit::new());
                 self.text_secret = false;
                 self.text_edit_row = None;
             }
@@ -300,7 +318,7 @@ impl SettingsState {
         let rows = rival_rows(&shared.config.network.rivals).len();
         self.rivals_sel = index.min(rows.saturating_sub(1));
         if self.rivals_sel + 1 >= rows {
-            self.text_input = Some(String::new());
+            self.text_input = Some(TextEdit::new());
             self.text_secret = false;
             self.text_edit_row = None;
         }
@@ -311,13 +329,13 @@ impl SettingsState {
     /// chart, are visible.
     fn scene(&self, shared: &AppShared) -> SettingsScene {
         let editor = match (&self.text_input, self.rivals_open) {
-            (Some(buffer), false) => Some(editor_display(buffer, self.text_secret)),
+            (Some(edit), false) => Some(editor_display(edit, self.text_secret)),
             _ => None,
         };
         let rivals = self.rivals_open.then(|| RivalsScene {
             rows: rival_rows(&shared.config.network.rivals),
             sel: self.rivals_sel,
-            editor: self.text_input.as_ref().map(|buffer| editor_display(buffer, false)),
+            editor: self.text_input.as_ref().map(|edit| editor_display(edit, false)),
         });
         SettingsScene {
             tabs: SettingTab::ALL.iter().map(|tab| tab.label()).collect(),
@@ -349,10 +367,7 @@ impl SettingsState {
                 };
                 match id {
                     SettingId::KeyConfig => return Transition::Open(Stage::KeyConfig(KeyConfigState::new())),
-                    SettingId::Font => {
-                        ctx.shared.pick_font();
-                        self.dirty = true;
-                    }
+                    SettingId::Font => return self.run_action(ctx, SettingId::Font, ROW_STEP_FORWARD),
                     _ if is_network_row(id) => return self.step(ctx, id, ROW_STEP_FORWARD),
                     _ => {
                         ctx.shared.save_settings();
@@ -392,6 +407,7 @@ impl StageHandler for SettingsState {
     /// the tab holding it rebuilds its rows every frame; every other tab keeps the rows it has
     /// until a key or a click moves one.
     fn update(&mut self, ctx: &mut FrameCtx<'_>) -> Transition {
+        self.poll_font_picker(ctx.shared);
         let rows = rival_rows(&ctx.shared.config.network.rivals).len();
         self.rivals_sel = self.rivals_sel.min(rows.saturating_sub(1));
         if self.rows.contains(&SettingId::Account) {
@@ -401,6 +417,10 @@ impl StageHandler for SettingsState {
     }
 
     fn handle_key(&mut self, ctx: &mut FrameCtx<'_>, key: KeyInput<'_>) -> Transition {
+        if matches!(key.code, KeyCode::ControlLeft | KeyCode::ControlRight | KeyCode::SuperLeft | KeyCode::SuperRight) {
+            self.paste_held = key.pressed;
+            return Transition::Stay;
+        }
         if !key.pressed {
             return Transition::Stay;
         }
@@ -454,5 +474,91 @@ impl StageHandler for SettingsState {
             };
             (rect, mapped)
         }));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::stage::render_tests::app;
+
+    fn press(code: KeyCode) -> KeyInput<'static> {
+        KeyInput { code, pressed: true, released: false, text: None }
+    }
+
+    fn typed(text: &str) -> KeyInput<'_> {
+        KeyInput { code: KeyCode::KeyA, pressed: true, released: false, text: Some(text) }
+    }
+
+    /// The in-place editor is the same editor the table manager's URL entry is, so a value typed
+    /// into a settings row can be corrected in the middle rather than only from the end.
+    #[test]
+    fn a_settings_row_can_be_edited_anywhere_in_the_line() {
+        let mut app = app();
+        let mut state = SettingsState::on_tab(SettingTab::Network);
+        state.text_input = Some(TextEdit::from_text("dj@exampletest"));
+
+        state.text_input_key(&mut app.shared, &press(KeyCode::Home));
+        for _ in 0..10 {
+            state.text_input_key(&mut app.shared, &press(KeyCode::ArrowRight));
+        }
+        state.text_input_key(&mut app.shared, &typed("."));
+        assert_eq!(state.text_input.as_ref().expect("the editor is still open").text(), "dj@example.test");
+
+        state.text_input_key(&mut app.shared, &press(KeyCode::End));
+        state.text_input_key(&mut app.shared, &press(KeyCode::Backspace));
+        assert_eq!(state.text_input.as_ref().expect("the editor is still open").text(), "dj@example.tes");
+    }
+
+    /// A password on screen carries neither the password nor, once it is long, its length.
+    #[test]
+    fn a_secret_row_shows_a_capped_mask_and_never_the_value() {
+        let secret = TextEdit::from_text("a-very-long-passphrase-indeed");
+        let shown = editor_display(&secret, true);
+        assert!(!shown.contains("passphrase"), "the value reached the screen");
+        assert!(shown.chars().filter(|c| *c == PASSWORD_MASK_CHAR).count() <= PASSWORD_MASK_MAX, "the mask reports the length");
+    }
+
+    /// A value too long for the column scrolls under the caret rather than showing only its start.
+    #[test]
+    fn a_long_value_shows_the_stretch_the_caret_is_in() {
+        let long = TextEdit::from_text("https://ir.example.test/a/very/long/endpoint/path/that/does/not/fit");
+        let at_end = editor_display(&long, false);
+        let mut at_start = long.clone();
+        at_start.home();
+        assert_ne!(at_end, editor_display(&at_start, false), "the window does not follow the caret");
+        assert!(at_end.ends_with('_'), "the caret is at the end of the line it is at the end of");
+    }
+
+    /// A native picker can sit in front of the user for as long as they like, so the font row opens
+    /// it beside the frame loop and collects the answer in `update` — the window keeps drawing while
+    /// it is up, and the font lands when they choose one.
+    #[test]
+    fn the_font_row_waits_for_its_picker_off_the_frame_loop() {
+        let mut app = app();
+        let mut state = SettingsState::on_tab(SettingTab::Display);
+        let (tx, handle) = crate::dialog::handle_for_tests();
+        state.font_picker = Some(handle);
+        state.update(&mut FrameCtx { shared: &mut app.shared, now: std::time::Instant::now(), dt: 0.0 });
+        assert!(state.font_picker.is_some(), "the screen gave up on a picker nobody has answered");
+
+        tx.send(None).expect("the handle is still held");
+        state.update(&mut FrameCtx { shared: &mut app.shared, now: std::time::Instant::now(), dt: 0.0 });
+        assert!(state.font_picker.is_none(), "the screen kept waiting after the picker was dismissed");
+        assert_eq!(app.shared.config.display.font_path, None, "a dismissed picker changed the font");
+    }
+
+    /// A font the user picked is loaded and written out, so it is the face the next launch starts
+    /// with. A file that is not a font is reported rather than stored.
+    #[test]
+    fn a_picked_font_that_cannot_be_read_is_not_stored() {
+        let mut app = app();
+        let mut state = SettingsState::on_tab(SettingTab::Display);
+        let (tx, handle) = crate::dialog::handle_for_tests();
+        state.font_picker = Some(handle);
+        tx.send(Some(std::path::PathBuf::from("/fonts/no-such-face.ttf"))).expect("the handle is still held");
+        state.update(&mut FrameCtx { shared: &mut app.shared, now: std::time::Instant::now(), dt: 0.0 });
+        assert!(state.font_picker.is_none());
+        assert_eq!(app.shared.config.display.font_path, None, "a font that could not be read was stored anyway");
     }
 }

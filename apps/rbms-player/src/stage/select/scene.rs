@@ -6,6 +6,17 @@
 use crate::stage::select::SelectState;
 use crate::*;
 
+/// The DJ rank of a chart's best run, as the row and the detail panel label it, or `None` when
+/// nothing has been recorded on it. Follows the SCORE GRAPH option, which is what every other rank
+/// on this screen is gated on, so one setting turns the whole scoring readout on and off.
+fn dj_level_of(shared: &AppShared, md5: &str) -> Option<&'static str> {
+    if !shared.config.display.score_graph {
+        return None;
+    }
+    let best = shared.scores.for_md5(md5).into_iter().max_by_key(|r| r.ex_score)?;
+    Some(RANK_BANDS[dj_rank(best.ex_score, best.max_ex)].0)
+}
+
 impl SelectState {
     /// Assemble the backend-agnostic [`SelectScene`] from the current select state. Built before the
     /// canvas is borrowed so the render pass can stay a pure data → pixels call (the cover texture is
@@ -27,6 +38,8 @@ impl SelectState {
                     difficulty_color: Color::GRAY,
                     lamp: Color::rgb(44, 44, 54),
                     folder_count: None,
+                    dj_level: None,
+                    favorite: false,
                 },
                 SelectItem::Song(si) => {
                     let e = &shared.library.songs()[*si];
@@ -40,6 +53,8 @@ impl SelectState {
                         difficulty_color: difficulty_color(e.difficulty),
                         lamp,
                         folder_count: None,
+                        dj_level: dj_level_of(shared, &e.md5),
+                        favorite: shared.favorites.contains(&e.md5),
                     }
                 }
             })
@@ -165,10 +180,13 @@ impl SelectState {
         } else {
             "\u{2191}\u{2193} MOVE   ENTER OPEN   ESC BACK"
         };
+        let filter = self.filter.summary(&shared.config);
         let empty_hint = if !rows.is_empty() {
             None
         } else if shared.searching {
             Some(("NO RESULTS", "Try a different search  \u{00B7}  Esc to clear"))
+        } else if filter.is_some() {
+            Some(("NO CHARTS MATCH", "Press F2 to change the filter  \u{00B7}  Backspace there clears it"))
         } else if shared.config.library.folders.is_empty() {
             Some(("WELCOME TO rbms", "Add your music folder \u{2014} press O or click FOLDERS below"))
         } else {
@@ -182,8 +200,9 @@ impl SelectState {
             detail,
             modal,
             score_graph: shared.config.display.score_graph,
-            search: shared.searching.then(|| shared.search.clone()),
-            sort: shared.sort.label(),
+            search: shared.searching.then(|| self.search_display()),
+            sort: shared.config.library.sort.label(),
+            filter,
             empty_hint,
         }
     }

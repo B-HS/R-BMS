@@ -34,6 +34,7 @@ image = { version = "0.25.10", default-features = false, features = ["png", "bmp
 serde = { version = "1.0.228", features = ["derive"] }
 ron = "0.12.1"
 rfd = "0.15"
+arboard = { version = "3.6", default-features = false }
 memory-stats = "1.2.0"
 sha2 = { workspace = true }
 thiserror = { workspace = true }

@@ -304,6 +304,9 @@ mod tests {
         assert!(lines[0].contains("no"), "{lines:?}");
     }
 
+    /// Every row a tab offers is printed with its value, and each is printed once. A row the table
+    /// keeps but does not offer — one nothing acts on yet — is not printed, so the count here is the
+    /// offered rows rather than the whole table.
     #[test]
     fn every_settings_tab_prints_its_rows_with_a_value() {
         let config = Config::default();
@@ -316,7 +319,8 @@ mod tests {
             }
             rows += lines.len();
         }
-        assert_eq!(rows, rbms_config::SETTING_COUNT, "every row of the settings table is printed exactly once");
+        let offered: usize = SettingTab::ALL.iter().map(|tab| rbms_config::tab_rows(*tab, &config).len()).sum();
+        assert_eq!(rows, offered, "every row the settings table offers is printed exactly once");
     }
 
     #[test]

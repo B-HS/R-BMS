@@ -7,6 +7,8 @@
 
 use rbms_config::{SettingId, SettingKind, SettingTab, descriptor};
 
+use crate::textedit::TextEdit;
+
 /// Value shown on a row that runs an action rather than holding a value; matches the KEY CONFIG
 /// row's affordance.
 pub(crate) use rbms_config::ACTION_VALUE;
@@ -21,8 +23,16 @@ pub(crate) use rbms_config::UNSET_VALUE as PASSWORD_EMPTY_VALUE;
 pub(crate) const PASSWORD_MASK_CHAR: char = '*';
 
 /// Longest mask drawn for the PASSWORD row, so a long password cannot report its exact length or
-/// overflow the value column.
+/// overflow the value column. It is also the widest window the in-place editor opens on a secret
+/// row, so a password being typed keeps that property.
 pub(crate) const PASSWORD_MASK_MAX: usize = 12;
+
+/// Character marking where the next keystroke lands in the in-place editor.
+const EDITOR_CARET_CHAR: char = '_';
+
+/// How much of a value the in-place editor shows at once. A longer value scrolls under the caret
+/// rather than overflowing the value column.
+const EDITOR_WINDOW_CHARS: usize = 28;
 
 /// Row appended under the rival ids in the inline rival list.
 pub(crate) const RIVAL_ADD_ROW: &str = "+ ADD RIVAL (PLAYER ID)";
@@ -85,13 +95,20 @@ pub(crate) fn password_value(len: usize) -> String {
     std::iter::repeat_n(PASSWORD_MASK_CHAR, len.min(PASSWORD_MASK_MAX)).collect()
 }
 
-/// What the in-place editor shows while typing: the buffer with a caret, masked on a secret row.
-pub(crate) fn editor_display(buffer: &str, secret: bool) -> String {
-    if secret {
-        let mask: String = std::iter::repeat_n(PASSWORD_MASK_CHAR, buffer.chars().count().min(PASSWORD_MASK_MAX)).collect();
-        return format!("{mask}_");
-    }
-    format!("{buffer}_")
+/// What the in-place editor shows while typing: the stretch of the line the caret is in, with the
+/// caret marked where it sits, masked on a secret row.
+///
+/// The window follows the caret rather than the end of the line, so editing the middle of a value
+/// too long to show keeps what is being edited on screen. A secret row shows one mask character per
+/// character in its window, which is narrower still, so what is drawn carries neither the password
+/// nor its exact length.
+pub(crate) fn editor_display(edit: &TextEdit, secret: bool) -> String {
+    let (shown, caret) = edit.window(if secret { PASSWORD_MASK_MAX } else { EDITOR_WINDOW_CHARS });
+    let shown: String = if secret { std::iter::repeat_n(PASSWORD_MASK_CHAR, shown.chars().count()).collect() } else { shown };
+    let mut out: String = shown.chars().take(caret).collect();
+    out.push(EDITOR_CARET_CHAR);
+    out.extend(shown.chars().skip(caret));
+    out
 }
 
 /// The inline rival list: one row per rival id, then the add row.
@@ -167,10 +184,10 @@ mod tests {
 
     #[test]
     fn the_editor_masks_a_secret_row_and_shows_a_caret() {
-        assert_eq!(editor_display("dj@example.test", false), "dj@example.test_");
-        assert_eq!(editor_display("hunter2", true), "*******_");
-        assert!(!editor_display("hunter2", true).contains("hunter2"));
-        assert_eq!(editor_display("", true), "_");
+        assert_eq!(editor_display(&TextEdit::from_text("dj@example.test"), false), "dj@example.test_");
+        assert_eq!(editor_display(&TextEdit::from_text("hunter2"), true), "*******_");
+        assert!(!editor_display(&TextEdit::from_text("hunter2"), true).contains("hunter2"));
+        assert_eq!(editor_display(&TextEdit::new(), true), "_");
     }
 
     #[test]

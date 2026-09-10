@@ -9,9 +9,26 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, TryRecvError};
 
+#[cfg(test)]
+use rbms_config::DEFAULT_PREVIEW_FADE_MS;
+
 use crate::app_play::schedule_position_us;
 use crate::stage::select::SelectState;
 use crate::*;
+
+/// Where the preview's level is on its way in or out.
+///
+/// A voice's gain is fixed when the sound is booked, so a clip already playing cannot be faded by
+/// changing it. The background bus can be, and while the browser is up the preview is the only
+/// thing on that bus — so the fade is a ramp on the bus, put back where the settings file has it as
+/// soon as the preview is gone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Fade {
+    /// Nothing is sounding and the background bus is the settings file's to set.
+    Idle,
+    In,
+    Out,
+}
 
 /// The hover preview's playback state: which chart is sounding, the debounce that decides when a
 /// newly focused chart becomes the one to load, and the autoplay-preview timeline being replayed.
@@ -38,6 +55,9 @@ pub(super) struct PreviewState {
     /// Cooperative cancel for the in-flight autoplay-preview load (parse + decode workers), flipped
     /// when the focus moves on so abandoned work stops instead of running to completion.
     cancel: std::sync::Arc<AtomicBool>,
+    /// Which way the preview's level is moving, and when it started moving that way.
+    fade: Fade,
+    fade_at: Instant,
 }
 
 impl Default for PreviewState {
@@ -55,7 +75,20 @@ impl Default for PreviewState {
             end_us: 0,
             prep_rx: None,
             cancel: std::sync::Arc::new(AtomicBool::new(false)),
+            fade: Fade::Idle,
+            fade_at: Instant::now(),
         }
+    }
+}
+
+/// How far through a fade of `span` the preview is, as a level between 0 and 1. A fade of no length
+/// is already over, which is what a `PREVIEW FADE` of zero asks for.
+fn fade_level(fade: Fade, elapsed: Duration, span: Duration) -> f32 {
+    let done = if span.is_zero() { 1.0 } else { (elapsed.as_secs_f32() / span.as_secs_f32()).clamp(0.0, 1.0) };
+    match fade {
+        Fade::Idle => 0.0,
+        Fade::In => done,
+        Fade::Out => 1.0 - done,
     }
 }
 
@@ -88,6 +121,58 @@ impl SelectState {
         }
     }
 
+    /// How long a preview takes to fade in, and to fade back out again.
+    fn fade_span(shared: &AppShared) -> Duration {
+        Duration::from_millis(u64::from(shared.config.library.preview_fade_ms))
+    }
+
+    /// Begin fading the preview out, leaving it sounding until the fade is over. The focus moving
+    /// on is what asks for this, so scrolling past a row lets go of its preview instead of cutting
+    /// it off mid-note.
+    fn begin_fade_out(&mut self, now: Instant) {
+        if self.preview.fade == Fade::Out {
+            return;
+        }
+        self.preview.fade = Fade::Out;
+        self.preview.fade_at = now;
+    }
+
+    /// Begin fading the preview in from silence, which is what a chart that has just begun playing
+    /// asks for.
+    fn begin_fade_in(&mut self, now: Instant) {
+        self.preview.fade = Fade::In;
+        self.preview.fade_at = now;
+    }
+
+    /// Move the fade on by one frame: push the preview's level onto the background bus, and once a
+    /// fade-out has run its course tear the preview down — which is what lets the chart the focus
+    /// has moved to become the one that plays.
+    fn pump_fade(&mut self, shared: &mut AppShared, now: Instant) {
+        if self.preview.fade == Fade::Idle {
+            return;
+        }
+        let span = SelectState::fade_span(shared);
+        let elapsed = now.saturating_duration_since(self.preview.fade_at);
+        if self.preview.fade == Fade::Out && elapsed >= span {
+            self.reset_preview_playback(shared);
+            return;
+        }
+        let level = fade_level(self.preview.fade, elapsed, span);
+        let bg = shared.config.audio.bg;
+        if let Some(audio) = shared.audio.as_mut() {
+            audio.set_bus_gain(Bus::Bg, bg * level);
+        }
+    }
+
+    /// Put the background bus back where the settings file has it, which is what a preview that is
+    /// no longer sounding owes every other screen.
+    fn release_bus(shared: &mut AppShared) {
+        let bg = shared.config.audio.bg;
+        if let Some(audio) = shared.audio.as_mut() {
+            audio.set_bus_gain(Bus::Bg, bg);
+        }
+    }
+
     /// Drive the song-select hover preview once the focus settles (debounced so fast scrolling
     /// doesn't load every row): if the chart defines a `#PREVIEW` clip, decode + loop that file;
     /// otherwise build an autoplay preview of the chart itself (background-decode its keysounds, then
@@ -113,11 +198,13 @@ impl SelectState {
             self.preview.target = cur;
             self.preview.target_at = now;
             if self.preview.si.is_some() {
-                self.reset_preview_playback(shared);
+                self.begin_fade_out(now);
             }
         }
+        self.pump_fade(shared, now);
         if self.preview.si != cur {
             if let Some(si) = cur
+                && self.preview.fade != Fade::Out
                 && self.preview.target_at.elapsed() >= PREVIEW_DEBOUNCE
             {
                 self.start_preview(shared, si);
@@ -128,6 +215,7 @@ impl SelectState {
             let mut done = false;
             loop {
                 match self.preview.prep_rx.as_ref().unwrap().try_recv() {
+                    Ok(PreviewMsg::Clip(dec)) => self.begin_clip_playback(shared, dec, now),
                     Ok(PreviewMsg::Schedule { sched, start_us, end_us }) => {
                         self.preview.sched = sched;
                         self.preview.start_us = start_us;
@@ -148,21 +236,23 @@ impl SelectState {
             }
             if done {
                 self.preview.prep_rx = None;
-                if self.preview.sched.is_empty() {
-                    SelectState::clear_preview_audio(shared);
-                } else {
+                if !self.preview.sched.is_empty() {
                     self.preview.anchor = SelectState::preview_sched_us(shared) - self.preview.start_us;
                     self.preview.cursor = 0;
+                    self.begin_fade_in(now);
+                } else if self.preview.loop_us == 0 {
+                    SelectState::clear_preview_audio(shared);
                 }
             }
             return;
         }
         if !self.preview.sched.is_empty() {
             let song = SelectState::preview_sched_us(shared) - self.preview.anchor;
+            let volume = shared.config.library.preview_volume;
             if let Some(eng) = shared.audio.as_mut() {
                 while self.preview.cursor < self.preview.sched.len() && self.preview.sched[self.preview.cursor].0 <= song {
                     let (at, wav) = self.preview.sched[self.preview.cursor];
-                    eng.play_on(Bus::Bg, SelectState::preview_sample_id(wav), PREVIEW_GAIN, KEYSOUND_PAN, KEYSOUND_PITCH, at + self.preview.anchor);
+                    eng.play_on(Bus::Bg, SelectState::preview_sample_id(wav), volume, KEYSOUND_PAN, KEYSOUND_PITCH, at + self.preview.anchor);
                     self.preview.cursor += 1;
                 }
             }
@@ -174,9 +264,10 @@ impl SelectState {
         }
         if self.preview.loop_us > 0 {
             let sched = SelectState::preview_sched_us(shared);
+            let volume = shared.config.library.preview_volume;
             if let Some(eng) = shared.audio.as_mut() {
                 while sched >= self.preview.next_us {
-                    eng.play_on(Bus::Bg, PREVIEW_ID, PREVIEW_GAIN, KEYSOUND_PAN, KEYSOUND_PITCH, self.preview.next_us);
+                    eng.play_on(Bus::Bg, PREVIEW_ID, volume, KEYSOUND_PAN, KEYSOUND_PITCH, self.preview.next_us);
                     self.preview.next_us += self.preview.loop_us;
                 }
             }
@@ -194,7 +285,7 @@ impl SelectState {
         self.preview.cursor = 0;
         let Some(has_file) = shared.library.songs().get(si).map(|e| !e.preview.trim().is_empty()) else {
             if dbg {
-                eprintln!("[preview] song index {si} out of range");
+                notify(Level::Warn, format!("[preview] song index {si} out of range"));
             }
             return;
         };
@@ -206,48 +297,71 @@ impl SelectState {
         let title = e.title.clone();
         let Some(dir) = e.path.parent() else {
             if dbg {
-                eprintln!("[preview] no parent dir for {}", e.path.display());
+                notify(Level::Warn, format!("[preview] no parent dir for {}", e.path.display()));
             }
             return;
         };
         let Some((path, _)) = resolve_file(dir, &e.preview, &["wav", "ogg", "flac", "mp3"]) else {
             if dbg {
-                eprintln!("[preview] #PREVIEW '{}' not found under {}", e.preview, dir.display());
+                notify(Level::Warn, format!("[preview] #PREVIEW '{}' not found under {}", e.preview, dir.display()));
             }
             return;
-        };
-        let bytes = match std::fs::read(&path) {
-            Ok(b) => b,
-            Err(err) => {
-                if dbg {
-                    eprintln!("[preview] read failed {}: {err}", path.display());
-                }
-                return;
-            }
         };
         let ext = path.extension().and_then(|x| x.to_str()).map(str::to_owned);
         shared.ensure_audio();
-        SelectState::clear_preview_audio(shared);
-        let start_at = SelectState::preview_sched_us(shared);
-        let Some(eng) = shared.audio.as_mut() else {
+        if shared.audio.is_none() {
             if dbg {
-                eprintln!("[preview] no output stream — preview skipped");
+                notify(Level::Warn, "[preview] no output stream — preview skipped");
             }
+            return;
+        }
+        SelectState::clear_preview_audio(shared);
+        let cancel = std::sync::Arc::new(AtomicBool::new(false));
+        self.preview.cancel = cancel.clone();
+        let (tx, rx) = std::sync::mpsc::channel::<PreviewMsg>();
+        self.preview.prep_rx = Some(rx);
+        if dbg {
+            notify(Level::Info, format!("[preview] '{title}' clip: reading {} in background", path.display()));
+        }
+        std::thread::spawn(move || {
+            if cancel.load(Ordering::Relaxed) {
+                return;
+            }
+            let bytes = match std::fs::read(&path) {
+                Ok(bytes) => bytes,
+                Err(err) => {
+                    notify(Level::Warn, format!("[preview] read failed {}: {err}", path.display()));
+                    return;
+                }
+            };
+            if cancel.load(Ordering::Relaxed) {
+                return;
+            }
+            match rbms_audio::decode_bytes(bytes, ext.as_deref()) {
+                Ok(dec) => {
+                    let _ = tx.send(PreviewMsg::Clip(dec));
+                }
+                Err(err) => notify(Level::Warn, format!("[preview] decode failed {}: {err}", path.display())),
+            }
+        });
+    }
+
+    /// Start the `#PREVIEW` clip that has just finished decoding, and set the repeat it loops on.
+    ///
+    /// The clip re-triggers at each boundary rather than being booked ahead: the mixer stops the
+    /// same key on a new play, so a queued repeat would cut the one sounding short.
+    fn begin_clip_playback(&mut self, shared: &mut AppShared, dec: rbms_audio::DecodedAudio, now: Instant) {
+        let start_at = SelectState::preview_sched_us(shared);
+        let volume = shared.config.library.preview_volume;
+        let Some(eng) = shared.audio.as_mut() else {
             return;
         };
-        if let Err(err) = eng.load(PREVIEW_ID, bytes, ext.as_deref()) {
-            if dbg {
-                eprintln!("[preview] decode failed {}: {err}", path.display());
-            }
-            return;
-        }
+        eng.insert_decoded(PREVIEW_ID, dec);
         let dur = eng.sample_duration_us(PREVIEW_ID).unwrap_or(0);
-        eng.play_on(Bus::Bg, PREVIEW_ID, PREVIEW_GAIN, KEYSOUND_PAN, KEYSOUND_PITCH, start_at);
+        eng.play_on(Bus::Bg, PREVIEW_ID, volume, KEYSOUND_PAN, KEYSOUND_PITCH, start_at);
         self.preview.loop_us = dur;
         self.preview.next_us = start_at + dur.max(PREVIEW_MIN_LOOP_US);
-        if dbg {
-            eprintln!("[preview] playing '{title}' ({}) dur_us={dur} start_us={start_at}", path.display());
-        }
+        self.begin_fade_in(now);
     }
 
     /// Start an autoplay preview for a chart with no `#PREVIEW` file. All heavy work — parse, autoplay
@@ -264,7 +378,7 @@ impl SelectState {
         shared.ensure_audio();
         if shared.audio.is_none() {
             if dbg {
-                eprintln!("[preview] no output stream — preview skipped");
+                notify(Level::Warn, "[preview] no output stream — preview skipped");
             }
             return;
         }
@@ -274,7 +388,7 @@ impl SelectState {
         let (tx, rx) = std::sync::mpsc::channel::<PreviewMsg>();
         self.preview.prep_rx = Some(rx);
         if dbg {
-            eprintln!("[preview] '{title}' autoplay: loading in background");
+            notify(Level::Info, format!("[preview] '{title}' autoplay: loading in background"));
         }
         std::thread::spawn(move || {
             if cancel.load(Ordering::Relaxed) {
@@ -327,11 +441,13 @@ impl SelectState {
 
     /// Stop and clear the active preview playback: signal any in-flight autoplay-preview load to stop
     /// (parse + decode workers check this cancel flag), release the preview namespace so its samples
-    /// and ringing voices go away, and clear all playback state. Leaves `target` so the debounce
-    /// state stays owned by the caller.
+    /// and ringing voices go away, hand the background bus back to the settings file, and clear all
+    /// playback state. Leaves `target` so the debounce state stays owned by the caller.
     pub(super) fn reset_preview_playback(&mut self, shared: &mut AppShared) {
         self.preview.cancel.store(true, Ordering::Relaxed);
         SelectState::clear_preview_audio(shared);
+        self.preview.fade = Fade::Idle;
+        SelectState::release_bus(shared);
         self.preview.si = None;
         self.preview.loop_us = 0;
         self.preview.next_us = 0;
@@ -348,5 +464,89 @@ impl SelectState {
     pub(super) fn stop_preview(&mut self, shared: &mut AppShared) {
         self.reset_preview_playback(shared);
         self.preview.target = None;
+    }
+}
+
+/// A `PREVIEW FADE` longer than the settle delay, for the test that pins the two against each other.
+#[cfg(test)]
+const LONG_FADE_MS: u32 = 1000;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SPAN: Duration = Duration::from_millis(200);
+
+    #[test]
+    fn a_fade_in_rises_from_silence_to_the_full_level() {
+        assert_eq!(fade_level(Fade::In, Duration::ZERO, SPAN), 0.0);
+        assert!((fade_level(Fade::In, SPAN / 2, SPAN) - 0.5).abs() < 1e-6);
+        assert_eq!(fade_level(Fade::In, SPAN, SPAN), 1.0);
+        assert_eq!(fade_level(Fade::In, SPAN * 4, SPAN), 1.0, "a fade that has run over stays at the full level");
+    }
+
+    #[test]
+    fn a_fade_out_falls_from_the_full_level_to_silence() {
+        assert_eq!(fade_level(Fade::Out, Duration::ZERO, SPAN), 1.0);
+        assert!((fade_level(Fade::Out, SPAN / 4, SPAN) - 0.75).abs() < 1e-6);
+        assert_eq!(fade_level(Fade::Out, SPAN, SPAN), 0.0);
+        assert_eq!(fade_level(Fade::Out, SPAN * 4, SPAN), 0.0, "a fade that has run over stays silent");
+    }
+
+    /// A `PREVIEW FADE` of zero is what asks for the behaviour the browser had before there were
+    /// fades: the preview is at its full level on the first frame and gone on the frame it stops.
+    #[test]
+    fn a_fade_of_no_length_is_already_over() {
+        assert_eq!(fade_level(Fade::In, Duration::ZERO, Duration::ZERO), 1.0);
+        assert_eq!(fade_level(Fade::Out, Duration::ZERO, Duration::ZERO), 0.0);
+    }
+
+    #[test]
+    fn nothing_sounding_is_silent_whatever_the_span() {
+        assert_eq!(fade_level(Fade::Idle, Duration::ZERO, SPAN), 0.0);
+        assert_eq!(fade_level(Fade::Idle, SPAN, Duration::ZERO), 0.0);
+    }
+
+    /// The fade is as long as the settings row says, so a row moved to zero turns fading off.
+    #[test]
+    fn the_fade_is_as_long_as_the_setting_asks_for() {
+        let mut app = crate::stage::select::tests::app();
+        assert_eq!(SelectState::fade_span(&app.shared), Duration::from_millis(u64::from(DEFAULT_PREVIEW_FADE_MS)));
+        app.shared.config.library.preview_fade_ms = 0;
+        assert!(SelectState::fade_span(&app.shared).is_zero());
+    }
+
+    /// A fade set longer than the settle delay must not be cut off by the chart the focus moved to:
+    /// the row being let go of is left to finish, which is what fading it out was for.
+    #[test]
+    fn a_fade_longer_than_the_settle_delay_is_left_to_finish() {
+        let mut app = crate::stage::select::tests::app();
+        app.shared.config.library.preview_fade_ms = LONG_FADE_MS;
+        assert!(SelectState::fade_span(&app.shared) > PREVIEW_DEBOUNCE, "the fixture does not test what it says it does");
+
+        let mut state = SelectState::new();
+        state.preview.si = Some(0);
+        state.preview.fade = Fade::Out;
+        state.preview.fade_at = Instant::now();
+        state.preview.target = Some(1);
+        state.preview.target_at = Instant::now() - PREVIEW_DEBOUNCE * 2;
+        state.update_preview(&mut app.shared, Instant::now());
+        assert_eq!(state.preview.si, Some(0), "the chart being faded out was cut off by the next one");
+        assert_eq!(state.preview.fade, Fade::Out, "the fade was abandoned part way through");
+    }
+
+    /// Once the fade has run its course the row that was let go of is torn down, and the chart the
+    /// focus has moved to becomes the one that plays.
+    #[test]
+    fn a_finished_fade_lets_the_next_chart_take_over() {
+        let mut app = crate::stage::select::tests::app();
+        app.shared.config.library.preview_fade_ms = 0;
+        let mut state = SelectState::new();
+        state.preview.si = Some(0);
+        state.preview.fade = Fade::Out;
+        state.preview.fade_at = Instant::now();
+        state.update_preview(&mut app.shared, Instant::now());
+        assert_eq!(state.preview.fade, Fade::Idle, "a fade of no length is over on the frame it starts");
+        assert_eq!(state.preview.si, None, "the chart that was let go of is still held");
     }
 }

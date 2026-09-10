@@ -18,8 +18,8 @@ use rbms_chart::default_total_for_mode;
 use rbms_chart::shuffle::NoteOption;
 use rbms_chart::to_model;
 use rbms_config::{
-    Config, HISPEED_MAX, HISPEED_MIN, HISPEED_STEP, LANE_SHADE_MAX, LANE_SHADE_MIN, LANE_SHADE_STEP, TableSource, algorithm_token, gauge_auto_shift_token,
-    gauge_from_name, gauge_set_token, gauge_token, ln_mode_token,
+    Config, HISPEED_MAX, HISPEED_MIN, LANE_SHADE_MAX, LANE_SHADE_MIN, LANE_SHADE_STEP, PLAY_ESCAPE_DOUBLE_MS, PLAY_ESCAPE_HOLD_MS, PlayEscape, SortMode,
+    TableSource, algorithm_token, gauge_auto_shift_token, gauge_from_name, gauge_set_token, gauge_token, ln_mode_token,
 };
 use rbms_ir::mapping::{CUSTOM_JUDGE_ASSIST, LIGHT_ASSIST, NO_ASSIST, assist_flags, assist_level, combo_breaks, ir_clear, ir_gauge, ir_random};
 use rbms_ir::{
@@ -47,11 +47,14 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
 
 mod app_input;
-mod app_library;
 mod app_network;
+mod app_options;
 mod app_play;
 mod app_ranking;
+mod app_result;
 mod assets;
+mod dialog;
+mod favorites;
 mod format;
 mod gpu;
 mod ir_outcome;
@@ -67,15 +70,20 @@ mod keyconfig;
 mod keyconfig_tests;
 #[cfg(test)]
 mod main_tests;
+mod notify;
 mod play_sink;
 mod settings_ui;
 mod settings_view;
 mod stage;
 mod tablesrc;
+pub mod target;
+mod textedit;
 mod timing;
+mod toast;
 use app_network::build_server;
 use app_play::schedule_poll_interval_us;
 pub(crate) use assets::{bundled_skin, decode_bga_256, keysound_jobs, load_theme, resolve_file, scan_folders, spawn_keysound_decode};
+use favorites::{Favorites, favorites_path};
 use format::{
     clear_label_color, difficulty_color, difficulty_name, fmt_datetime, fmt_duration, gauge_name, mode_color, mode_short, rank_label, rule_version_mark,
     rule_version_note,
@@ -88,11 +96,14 @@ use ir_session::{AccountSession, AuthAction};
 use ir_sync::SyncLock;
 use judge_setup::{is_custom_judge, run_judge_setup, run_lntype};
 use keyconfig::{ControlAction, KeyConfig, key_from_name, key_name};
+use notify::{Level, notify};
 use play_sink::PlayAudioSink;
 use settings_view::{SettingsHot, render_settings};
 use stage::{Canvas, FrameCtx, KeyInput, LoadingState, SelectState, Stage, StageId, Transition};
-use tablesrc::{TableLevels, fetch_and_match, load_and_match};
+use tablesrc::{TableLevels, fetch_and_match};
+use textedit::{TextEdit, edit_key};
 use timing::{SoakLogger, SoakSnapshot, TIMING_CSV_ENV, TimingProbe, TimingSample, env_path, us_to_millis};
+use toast::ToastQueue;
 
 pub(crate) use rbms_ir::mapping as ir_map;
 pub(crate) use rbms_store as replay;
@@ -103,11 +114,11 @@ const CH: u32 = 720;
 const MODE: Mode = Mode::BEAT_7K;
 
 /// `#PREVIEW` hover-preview tuning: the reserved sample id (the base of the preview namespace, so
-/// preview sounds never collide with the loaded chart's keysounds), focus-settle debounce, playback
-/// gain, and the silent tail held after the last autoplay event before the loop restarts.
+/// preview sounds never collide with the loaded chart's keysounds), focus-settle debounce, and the
+/// silent tail held after the last autoplay event before the loop restarts. The gain is a setting,
+/// so it is read off the config rather than fixed here.
 const PREVIEW_ID: u32 = IdNamespace::PREVIEW.base;
 const PREVIEW_DEBOUNCE: Duration = Duration::from_millis(333);
-const PREVIEW_GAIN: f32 = 0.85;
 const PREVIEW_LOOP_TAIL_US: i64 = 2_000_000;
 
 /// Shortest loop period the file preview will re-trigger on, so a zero-length clip cannot spin.
@@ -134,10 +145,12 @@ const FOCUS_DETAIL_DEBOUNCE: Duration = Duration::from_millis(150);
 /// How long a second Esc press at the select root still counts as confirming "quit".
 const ROOT_ESC_CONFIRM: Duration = Duration::from_secs(1);
 
-/// Background → main-thread messages for an autoplay preview (a chart with no `#PREVIEW` file): the
-/// extracted keysound timeline, then each decoded keysound. The channel disconnecting signals the
-/// load is complete, at which point [`App::update_preview`] anchors the clock and begins playback.
+/// Background → main-thread messages for a hover preview: a decoded `#PREVIEW` clip, or — for a
+/// chart that names none — the extracted keysound timeline followed by each decoded keysound. The
+/// channel disconnecting signals the load is complete, at which point the browser anchors the clock
+/// and begins playback.
 enum PreviewMsg {
+    Clip(rbms_audio::DecodedAudio),
     Schedule { sched: Vec<(i64, u32)>, start_us: i64, end_us: i64 },
     Keysound(u32, rbms_audio::DecodedAudio),
 }
@@ -299,33 +312,6 @@ enum SelectItem {
     Folder { label: String, target: SelectView },
 }
 
-/// Song-list ordering, cycled with F3 in the select screen.
-#[derive(Clone, Copy, PartialEq)]
-enum SortMode {
-    Default,
-    Title,
-    Artist,
-    Level,
-    Clear,
-}
-
-impl SortMode {
-    const ALL: [SortMode; 5] = [SortMode::Default, SortMode::Title, SortMode::Artist, SortMode::Level, SortMode::Clear];
-    fn label(self) -> &'static str {
-        match self {
-            SortMode::Default => "DEFAULT",
-            SortMode::Title => "TITLE",
-            SortMode::Artist => "ARTIST",
-            SortMode::Level => "LEVEL",
-            SortMode::Clear => "CLEAR",
-        }
-    }
-    fn next(self) -> SortMode {
-        let i = Self::ALL.iter().position(|&m| m == self).unwrap_or(0);
-        Self::ALL[(i + 1) % Self::ALL.len()]
-    }
-}
-
 /// Cache key for the assembled [`SelectScene`]: rebuild only when one of these changes, so the scene
 /// is not re-allocated every frame of the continuous redraw loop. `select_gen` bumps on any list
 /// rebuild (catches same-length folder swaps); `scores` length catches a freshly saved record.
@@ -395,10 +381,10 @@ struct AppShared {
     select_view: SelectView,
     select_items: Vec<SelectItem>,
     /// Incremental song search: `searching` opens the box (`/`), `search` is the live query (filters
-    /// the list by title/artist/subtitle). `sort` orders the filtered list (F3 cycles).
+    /// the list by title/artist/subtitle). What orders the filtered list is the configuration's own
+    /// SORT row, which F3 and the settings screen both move, so the two cannot disagree.
     search: String,
     searching: bool,
-    sort: SortMode,
     sel: usize,
     /// Bumped on any list rebuild, so the assembled select scene can be cached across frames.
     select_gen: u64,
@@ -487,6 +473,15 @@ struct AppShared {
     soak_failed: bool,
     scores: ScoreBook,
     scores_path: PathBuf,
+    /// The charts the player has starred, and where they are kept.
+    favorites: Favorites,
+    favorites_path: PathBuf,
+    /// The messages waiting to be shown over whichever screen is up, refilled every frame from the
+    /// process-wide [`notify`] bus.
+    toasts: ToastQueue,
+    /// The option panel the browser puts over itself, which is offered every key before the screen
+    /// underneath sees it.
+    options: app_options::OptionsOverlay,
     cursor: (f32, f32),
     hot: Vec<(Rect, Hot)>,
     last_frame: Instant,
@@ -510,7 +505,7 @@ impl App {
                 Some(r)
             }
             Err(e) => {
-                eprintln!("replay load failed: {e}");
+                notify(Level::Error, format!("replay load failed: {e}"));
                 None
             }
         });
@@ -533,6 +528,8 @@ impl App {
 
         let scores_path = settings_path.parent().map(|d| d.join("scores.ron")).unwrap_or_else(|| PathBuf::from("scores.ron"));
         let scores = ScoreBook::load(&scores_path);
+        let favorites_path = favorites_path(&settings_path);
+        let favorites = Favorites::load(&favorites_path);
         if let Some(url) = &launch.table_url
             && !config.library.tables.iter().any(|t| &t.location == url)
         {
@@ -579,7 +576,6 @@ impl App {
                 select_items: Vec::new(),
                 search: String::new(),
                 searching: false,
-                sort: SortMode::Default,
                 sel: 0,
                 keyconfig,
                 keyconfig_path,
@@ -629,6 +625,10 @@ impl App {
                 soak_failed: false,
                 scores,
                 scores_path,
+                favorites,
+                favorites_path,
+                toasts: ToastQueue::default(),
+                options: app_options::OptionsOverlay::default(),
                 select_gen: 0,
                 cursor: (0.0, 0.0),
                 hot: Vec::new(),
@@ -675,6 +675,9 @@ impl App {
             Transition::Back => self.suspended.pop().unwrap_or_else(|| Stage::Select(Box::new(SelectState::new()))),
         };
         let now = Instant::now();
+        if !app_options::opens_over(next.id()) {
+            app_options::close(&mut self.shared);
+        }
         self.stage.on_exit(&mut FrameCtx { shared: &mut self.shared, now, dt: 0.0 });
         let previous = std::mem::replace(&mut self.stage, next);
         if suspend {
@@ -695,6 +698,7 @@ impl App {
         }
         self.shared.frame_count = self.shared.frame_count.wrapping_add(1);
         self.shared.soak.record_frame(dt);
+        self.shared.toasts.pump(now);
         if let Some(audio) = self.shared.audio.as_mut() {
             audio.collect_retired();
         }
@@ -734,9 +738,15 @@ impl App {
         self.shared.gpu = Some(gpu);
     }
 
-    /// The two app-wide overlays drawn on top of every screen: the server connection dot and the
-    /// debug panel.
+    /// The overlays drawn on top of every screen: the option panel, the transient messages, the
+    /// server connection dot and the debug panel.
+    ///
+    /// The window's aspect is settled here rather than when a chart loads, so the DISPLAY tab's
+    /// LETTERBOX row takes on the very next frame instead of waiting for the next load.
     fn draw_overlays(stage: &Stage, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'_>) {
+        crate::gpu::apply_letterbox(canvas, ctx.shared.config.display.letterbox);
+        app_options::draw(stage.id(), ctx, canvas);
+        toast::draw(&ctx.shared.toasts, canvas);
         if ctx.shared.config.network.server_url.is_some() {
             let connected = ctx.shared.server_connected.load(Ordering::Relaxed);
             canvas.fill_rect(Rect::new(CW as f32 - 22.0, 10.0, 10.0, 10.0), if connected { Color::GREEN } else { Color::RED });
@@ -821,8 +831,7 @@ impl ApplicationHandler for App {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 if let Some(gpu) = self.shared.gpu.as_ref() {
-                    let sz = gpu.window.inner_size();
-                    self.shared.cursor = (position.x as f32 * CW as f32 / sz.width.max(1) as f32, position.y as f32 * CH as f32 / sz.height.max(1) as f32);
+                    self.shared.cursor = gpu.logical_from_physical(position.x as f32, position.y as f32);
                 }
             }
             WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Left, .. } => {
@@ -861,7 +870,7 @@ impl ApplicationHandler for App {
 fn exit_code(startup_error: Option<&str>) -> ExitCode {
     match startup_error {
         Some(reason) => {
-            eprintln!("{reason}");
+            notify(Level::Error, reason);
             ExitCode::FAILURE
         }
         None => ExitCode::SUCCESS,
@@ -872,7 +881,7 @@ fn exit_code(startup_error: Option<&str>) -> ExitCode {
 /// save in the app goes through here, so the whole document is written as one file.
 fn save_config(config: &Config, path: &Path) {
     if let Err(e) = rbms_config::save(config, path) {
-        eprintln!("settings save failed ({}): {e}", path.display());
+        notify(Level::Error, format!("settings save failed ({}): {e}", path.display()));
     }
 }
 
@@ -906,7 +915,7 @@ pub fn run(args: impl Iterator<Item = String>) -> ExitCode {
             outcome.config
         }
         Err(e) => {
-            eprintln!("settings not loaded ({e}); running on defaults and leaving the file alone");
+            notify(Level::Warn, format!("settings not loaded ({e}); running on defaults and leaving the file alone"));
             Config::default()
         }
     };
@@ -974,9 +983,9 @@ pub fn run(args: impl Iterator<Item = String>) -> ExitCode {
                     rbms_render::set_ui_family(&family);
                     println!("font: {fp} ({family})");
                 }
-                None => eprintln!("font load failed (no usable face): {fp}"),
+                None => notify(Level::Warn, format!("font load failed (no usable face): {fp}")),
             },
-            Err(e) => eprintln!("font not found: {fp} ({e})"),
+            Err(e) => notify(Level::Warn, format!("font not found: {fp} ({e})")),
         }
     }
 
@@ -985,14 +994,14 @@ pub fn run(args: impl Iterator<Item = String>) -> ExitCode {
     let event_loop = match EventLoop::new() {
         Ok(el) => el,
         Err(e) => {
-            eprintln!("cannot open a window: {e}");
+            notify(Level::Error, format!("cannot open a window: {e}"));
             return ExitCode::FAILURE;
         }
     };
     event_loop.set_control_flow(ControlFlow::Poll);
     let mut app = App::new(chart, config, launch, settings_path);
     if let Err(e) = event_loop.run_app(&mut app) {
-        eprintln!("the window event loop stopped: {e}");
+        notify(Level::Error, format!("the window event loop stopped: {e}"));
         return ExitCode::FAILURE;
     }
     exit_code(app.startup_error.as_deref())

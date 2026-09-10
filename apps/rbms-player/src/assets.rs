@@ -3,12 +3,24 @@
 //! and the BGA image decode, plus the library scan the loading screen drives.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::mpsc::Receiver;
 
 use rbms_library::SongEntry;
 use rbms_render::SkinConfig;
 
 use crate::gpu;
+
+/// A decode running on the worker pool: what has arrived, how far it has got, the cooperative
+/// cancel, and how many jobs there are in total.
+pub(crate) type DecodePool<I, T> = (Receiver<(I, T)>, Arc<AtomicUsize>, usize);
+
+/// Most workers a decode is fanned across. Past this the disk, not the CPU, is the limit.
+const DECODE_THREADS_MAX: usize = 8;
+
+/// Workers used when the machine will not say how many cores it has.
+const DECODE_THREADS_FALLBACK: usize = 4;
 
 pub(crate) const SKIN_NORMAL: &str = include_str!("../../../assets/skins/normal.ron");
 pub(crate) const SKIN_WIDE: &str = include_str!("../../../assets/skins/wide.ron");
@@ -100,36 +112,45 @@ pub(crate) fn keysound_jobs(wavmap: &[String], dir: &Path) -> Vec<(u32, PathBuf,
         .collect()
 }
 
-/// Fan keysound decode out over a thread pool, streaming `(id, decoded)` back over a channel with a
-/// progress counter. Workers check `cancel` between jobs so an abandoned load (e.g. the preview
-/// focus moved on) stops promptly instead of decoding to the end. Shared by the Play loader (which
-/// passes a never-set flag) and the autoplay preview.
-pub(crate) fn spawn_keysound_decode(
-    jobs: Vec<(u32, PathBuf, String)>,
-    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
-) -> (std::sync::mpsc::Receiver<(u32, rbms_audio::DecodedAudio)>, std::sync::Arc<std::sync::atomic::AtomicUsize>, usize) {
-    use std::sync::atomic::Ordering;
+/// Fan a decode out over a thread pool, streaming `(id, decoded)` back over a channel with a
+/// progress counter.
+///
+/// Workers check `cancel` between jobs, so an abandoned load stops promptly instead of decoding to
+/// the end. The counter counts jobs *attempted*, not results sent: a file that would not decode is
+/// still one the screen no longer has to wait for, and a bar that stalled on a broken file would
+/// never reach its end.
+fn spawn_decode<I, J, T>(jobs: Vec<(I, J)>, cancel: Arc<AtomicBool>, decode: fn(&J) -> Option<T>) -> DecodePool<I, T>
+where
+    I: Send + 'static,
+    J: Send + 'static,
+    T: Send + 'static,
+{
     let total = jobs.len();
     let (tx, rx) = std::sync::mpsc::channel();
-    let progress = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let progress = Arc::new(AtomicUsize::new(0));
     if total == 0 {
         return (rx, progress, 0);
     }
-    let nthreads = std::thread::available_parallelism().map(|c| c.get().min(8)).unwrap_or(4).max(1);
+    let nthreads = std::thread::available_parallelism().map(|c| c.get().min(DECODE_THREADS_MAX)).unwrap_or(DECODE_THREADS_FALLBACK).max(1);
     let chunk = total.div_ceil(nthreads).max(1);
-    for jc in jobs.chunks(chunk).map(<[_]>::to_vec) {
+    let mut chunks: Vec<Vec<(I, J)>> = Vec::new();
+    for job in jobs {
+        match chunks.last_mut() {
+            Some(last) if last.len() < chunk => last.push(job),
+            _ => chunks.push(vec![job]),
+        }
+    }
+    for jc in chunks {
         let tx = tx.clone();
         let progress = progress.clone();
         let cancel = cancel.clone();
         std::thread::spawn(move || {
-            for (id, path, ext) in jc {
+            for (id, job) in jc {
                 if cancel.load(Ordering::Relaxed) {
                     break;
                 }
-                if let Ok(data) = std::fs::read(&path)
-                    && let Ok(dec) = rbms_audio::decode_bytes(data, Some(ext.as_str()))
-                {
-                    let _ = tx.send((id, dec));
+                if let Some(decoded) = decode(&job) {
+                    let _ = tx.send((id, decoded));
                 }
                 progress.fetch_add(1, Ordering::Relaxed);
             }
@@ -138,16 +159,115 @@ pub(crate) fn spawn_keysound_decode(
     (rx, progress, total)
 }
 
-pub(crate) fn decode_bga_256(dir: &Path, name: &str) -> Option<Vec<u8>> {
-    let (path, _) = resolve_file(dir, name, &["png", "bmp", "jpg", "jpeg"])?;
-    let bytes = std::fs::read(&path).ok()?;
+/// Decode one keysound file.
+fn decode_keysound(job: &(PathBuf, String)) -> Option<rbms_audio::DecodedAudio> {
+    let (path, ext) = job;
+    let data = std::fs::read(path).ok()?;
+    rbms_audio::decode_bytes(data, Some(ext.as_str())).ok()
+}
+
+/// Fan keysound decode out over the worker pool. Shared by the Play loader and the autoplay preview.
+pub(crate) fn spawn_keysound_decode(jobs: Vec<(u32, PathBuf, String)>, cancel: Arc<AtomicBool>) -> DecodePool<u32, rbms_audio::DecodedAudio> {
+    spawn_decode(jobs.into_iter().map(|(id, path, ext)| (id, (path, ext))).collect(), cancel, decode_keysound)
+}
+
+/// Resolve every referenced background image in a chart's `bgamap` to `(id, path)` decode jobs
+/// (empty names skipped, unresolvable files dropped).
+pub(crate) fn bga_jobs(bgamap: &[String], dir: &Path) -> Vec<(i32, PathBuf)> {
+    bgamap
+        .iter()
+        .enumerate()
+        .filter(|(_, name)| !name.trim().is_empty())
+        .filter_map(|(id, name)| resolve_bga_file(dir, name).map(|path| (id as i32, path)))
+        .collect()
+}
+
+/// Fan background-image decode out over the worker pool. A chart can reference hundreds of images
+/// and each is resized on the way in, which is seconds of work the frame loop cannot spend.
+pub(crate) fn spawn_bga_decode(jobs: Vec<(i32, PathBuf)>, cancel: Arc<AtomicBool>) -> DecodePool<i32, Vec<u8>> {
+    spawn_decode(jobs, cancel, decode_bga_file)
+}
+
+/// Where a chart's named background image is on disk.
+fn resolve_bga_file(dir: &Path, name: &str) -> Option<PathBuf> {
+    resolve_file(dir, name, &["png", "bmp", "jpg", "jpeg"]).map(|(path, _)| path)
+}
+
+/// Decode one background image to the square the GPU holds them in.
+fn decode_bga_file(path: &PathBuf) -> Option<Vec<u8>> {
+    let bytes = std::fs::read(path).ok()?;
     let img = image::load_from_memory(&bytes).ok()?;
     Some(img.resize_exact(gpu::BGA_DIM, gpu::BGA_DIM, image::imageops::FilterType::Triangle).to_rgba8().into_raw())
 }
 
-/// Scan every configured library folder into one song list. Wraps the cancellable
-/// `rbms_library` scan; the loading screen does not offer a cancel yet, so the flag is never set.
-pub(crate) fn scan_folders(folders: &[String], count: &std::sync::atomic::AtomicUsize) -> Vec<SongEntry> {
-    static SCAN_NEVER_CANCELLED: AtomicBool = AtomicBool::new(false);
-    rbms_library::scan_folders(folders, count, &SCAN_NEVER_CANCELLED)
+/// Decode one named background image, for the single cover the browser shows.
+pub(crate) fn decode_bga_256(dir: &Path, name: &str) -> Option<Vec<u8>> {
+    decode_bga_file(&resolve_bga_file(dir, name)?)
+}
+
+/// Scan every configured library folder into one song list, stopping when `cancel` is set so
+/// leaving the loading screen does not leave a worker walking the disk behind it.
+pub(crate) fn scan_folders(folders: &[String], count: &AtomicUsize, cancel: &AtomicBool) -> Vec<SongEntry> {
+    rbms_library::scan_folders(folders, count, cancel)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("rbms-assets-{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create the fixture directory");
+        dir
+    }
+
+    /// A chart names its images by `#BMP` slot, and the slot number is what the session asks for
+    /// while it plays — so a name that resolves to nothing has to drop out without shifting the
+    /// ones after it.
+    #[test]
+    fn background_jobs_keep_each_images_own_slot_and_drop_the_ones_that_are_not_there() {
+        let dir = temp_dir("bga-jobs");
+        std::fs::write(dir.join("second.png"), b"not really a png").expect("write the fixture");
+        let jobs = bga_jobs(&[String::new(), "second.png".into(), "missing.png".into(), "   ".into()], &dir);
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].0, 1, "the surviving image keeps slot 1");
+        let _ = std::fs::remove_file(dir.join("second.png"));
+    }
+
+    #[test]
+    fn a_chart_with_no_images_starts_no_workers_and_is_done_at_once() {
+        let (_rx, progress, total) = spawn_bga_decode(Vec::new(), Arc::new(AtomicBool::new(false)));
+        assert_eq!(total, 0);
+        assert_eq!(progress.load(Ordering::Relaxed), 0);
+    }
+
+    /// A file that will not decode still counts as attempted: a bar that waited for a result that
+    /// never comes would sit at not-quite-full for ever.
+    #[test]
+    fn a_file_that_will_not_decode_still_reports_itself_done() {
+        let dir = temp_dir("bga-broken");
+        let path = dir.join("broken.png");
+        std::fs::write(&path, b"not really a png").expect("write the fixture");
+        let (rx, progress, total) = spawn_bga_decode(vec![(0, path.clone())], Arc::new(AtomicBool::new(false)));
+        assert_eq!(total, 1);
+        while progress.load(Ordering::Relaxed) < total {
+            std::hint::spin_loop();
+        }
+        assert!(rx.try_recv().is_err(), "a broken file has no image to hand over");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_cancelled_decode_stops_instead_of_working_through_the_rest() {
+        let dir = temp_dir("bga-cancel");
+        let path = dir.join("cancelled.png");
+        std::fs::write(&path, b"not really a png").expect("write the fixture");
+        let cancel = Arc::new(AtomicBool::new(true));
+        let jobs: Vec<(i32, PathBuf)> = (0..64).map(|id| (id, path.clone())).collect();
+        let (_rx, progress, total) = spawn_bga_decode(jobs, cancel);
+        assert_eq!(total, 64);
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        assert!(progress.load(Ordering::Relaxed) < total, "a flag set before the pool started should stop it early");
+        let _ = std::fs::remove_file(&path);
+    }
 }

@@ -68,9 +68,15 @@ fn default_config_has_every_mode_and_control() {
         assert_eq!(lanes.len(), mode.key, "{} has no duplicate/missing lane", mode.name);
     }
     for action in ControlAction::ALL {
-        assert!(kc.control_key(action).is_some(), "{:?} has a default key", action);
+        let bound = kc.control_key(action).is_some();
+        assert_eq!(bound, !UNBOUND_BY_DEFAULT.contains(&action), "{action:?} default binding");
     }
 }
+
+/// The controls a fresh key config leaves unbound. Every key a default layout could spare is
+/// already taken by a lane or another control, so the hidden band is picked in the key editor
+/// rather than shipped on a key that would shadow something else.
+const UNBOUND_BY_DEFAULT: [ControlAction; 2] = [ControlAction::HiddenUp, ControlAction::HiddenDown];
 
 #[test]
 fn rebinding_a_control_round_trips_via_ron() {
@@ -349,11 +355,13 @@ fn control_token_matches_default_strings() {
     assert_eq!(kc.control_token(ControlAction::CoverDown), "LEFT");
     assert_eq!(kc.control_token(ControlAction::LiftUp), "RBRACKET");
     assert_eq!(kc.control_token(ControlAction::LiftDown), "LBRACKET");
+    assert_eq!(kc.control_token(ControlAction::HiddenUp), "");
+    assert_eq!(kc.control_token(ControlAction::HiddenDown), "");
 }
 
 #[test]
 fn control_action_all_has_distinct_nonempty_labels() {
-    assert_eq!(ControlAction::ALL.len(), 6);
+    assert_eq!(ControlAction::ALL.len(), 8);
     let mut labels: Vec<&str> = ControlAction::ALL.iter().map(|a| a.label()).collect();
     for l in &labels {
         assert!(!l.is_empty(), "label non-empty");

@@ -1,7 +1,11 @@
 //! The song-folder manager: the list of picked library folders, the picker that adds one, and the
 //! rescan that merges the result back into the library on the way out.
+//!
+//! The picker is a native panel the window keeps drawing behind rather than a call that stops the
+//! app until the user answers it.
 #![allow(clippy::wildcard_imports)]
 
+use crate::dialog::{DialogHandle, DialogState};
 use crate::stage::{Canvas, FrameCtx, KeyInput, LoadingState, Stage, StageHandler, Transition};
 use crate::*;
 
@@ -17,10 +21,11 @@ const ROW_TOP: f32 = 124.0;
 const ROW_PITCH: f32 = 44.0;
 const ROW_H: f32 = 36.0;
 
-/// The folder manager's own state: which row is focused.
+/// The folder manager's own state: which row is focused, and the picker while it is up.
 #[derive(Default)]
 pub(crate) struct FoldersState {
     sel: usize,
+    picker: Option<DialogHandle>,
 }
 
 impl FoldersState {
@@ -33,16 +38,16 @@ impl FoldersState {
         shared.config.library.folders.len() + 1
     }
 
-    /// Pick a folder and add it to the library list (deduped, persisted). The merged rescan happens
+    /// Add the folder the picker came back with (deduped, persisted). The merged rescan happens
     /// when the user leaves the Folders screen, so several folders can be added in one visit.
-    fn add_folder_dialog(shared: &mut AppShared) {
-        if let Some(dir) = rfd::FileDialog::new().set_title("Add song folder").pick_folder() {
-            let path = dir.to_string_lossy().to_string();
-            if !shared.config.library.folders.iter().any(|f| f == &path) {
-                shared.config.library.folders.push(path);
-                shared.save_settings();
-            }
+    fn add_picked_folder(shared: &mut AppShared, dir: &std::path::Path) {
+        let path = dir.to_string_lossy().to_string();
+        if shared.config.library.folders.iter().any(|f| f == &path) {
+            notify(Level::Warn, format!("folder already added: {path}"));
+            return;
         }
+        shared.config.library.folders.push(path);
+        shared.save_settings();
     }
 
     fn remove_folder(&mut self, shared: &mut AppShared, idx: usize) {
@@ -55,14 +60,28 @@ impl FoldersState {
 }
 
 impl StageHandler for FoldersState {
-    fn update(&mut self, _ctx: &mut FrameCtx<'_>) -> Transition {
+    /// Collect the picker's answer once the user has given one, which is where an added folder
+    /// actually lands.
+    fn update(&mut self, ctx: &mut FrameCtx<'_>) -> Transition {
+        let Some(picker) = self.picker.as_ref() else {
+            return Transition::Stay;
+        };
+        match picker.poll() {
+            DialogState::Open => return Transition::Stay,
+            DialogState::Picked(path) => {
+                self.picker = None;
+                FoldersState::add_picked_folder(ctx.shared, &path);
+            }
+            DialogState::Dismissed => self.picker = None,
+        }
         Transition::Stay
     }
 
     /// Keys inside the folder manager. Leaving it rescans, so a folder added or removed here is
-    /// merged back into the library on the way out.
+    /// merged back into the library on the way out. Keys are ignored while the native picker is up,
+    /// which owns the keyboard itself.
     fn handle_key(&mut self, ctx: &mut FrameCtx<'_>, key: KeyInput<'_>) -> Transition {
-        if !key.pressed {
+        if !key.pressed || self.picker.is_some() {
             return Transition::Stay;
         }
         let n = FoldersState::row_count(ctx.shared);
@@ -72,7 +91,7 @@ impl StageHandler for FoldersState {
             KeyCode::ArrowUp => self.sel = self.sel.saturating_sub(1),
             KeyCode::ArrowDown => self.sel = (self.sel + 1).min(n.saturating_sub(1)),
             KeyCode::KeyD | KeyCode::Delete if self.sel < ctx.shared.config.library.folders.len() => self.remove_folder(ctx.shared, self.sel),
-            KeyCode::Enter | KeyCode::NumpadEnter if self.sel == add_row => FoldersState::add_folder_dialog(ctx.shared),
+            KeyCode::Enter | KeyCode::NumpadEnter if self.sel == add_row => self.picker = Some(crate::dialog::pick_song_folder()),
             _ => {}
         }
         Transition::Stay
@@ -84,7 +103,10 @@ impl StageHandler for FoldersState {
         canvas.clear(th.bg);
         let x0 = (CW as f32 - PANEL_W) * 0.5;
         draw_text(canvas, x0, 40.0, 3.0, th.text, "SONG FOLDERS");
-        draw_text(canvas, x0, 84.0, 1.3, th.text_muted, "UP DOWN MOVE   ENTER ADD FOLDER   D REMOVE   ESC SAVE/RESCAN");
+        match self.picker.is_some() {
+            true => draw_text(canvas, x0, 84.0, 1.4, Color::YELLOW, "PICK A SONG FOLDER IN THE OPEN DIALOG"),
+            false => draw_text(canvas, x0, 84.0, 1.3, th.text_muted, "UP DOWN MOVE   ENTER ADD FOLDER   D REMOVE   ESC SAVE/RESCAN"),
+        }
         let folders = &ctx.shared.config.library.folders;
         let add_row = folders.len();
         for i in 0..folders.len() + 1 {
@@ -113,5 +135,65 @@ impl StageHandler for FoldersState {
         if ctx.shared.config.library.folders.is_empty() {
             draw_text(canvas, x0, ROW_TOP + ROW_PITCH * 2.0, 1.2, th.text_muted, "No folders yet — ENTER on \"+ ADD FOLDER\" to pick one.");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::stage::render_tests::app;
+
+    fn ctx(app: &mut crate::App) -> FrameCtx<'_> {
+        FrameCtx { shared: &mut app.shared, now: std::time::Instant::now(), dt: 0.0 }
+    }
+
+    fn press(code: KeyCode) -> KeyInput<'static> {
+        KeyInput { code, pressed: true, released: false, text: None }
+    }
+
+    /// The picker is a native window with the keyboard; the screen behind it must not act on keys
+    /// that were meant for it — least of all Escape, which here would leave and start a rescan.
+    #[test]
+    fn keys_are_ignored_while_the_picker_is_up() {
+        let mut app = app();
+        let mut state = FoldersState::new();
+        let (_tx, handle) = crate::dialog::handle_for_tests();
+        state.picker = Some(handle);
+        assert!(matches!(state.handle_key(&mut ctx(&mut app), press(KeyCode::Escape)), Transition::Stay));
+    }
+
+    #[test]
+    fn a_picked_folder_is_added_and_the_screen_stops_waiting() {
+        let mut app = app();
+        let mut state = FoldersState::new();
+        let (tx, handle) = crate::dialog::handle_for_tests();
+        state.picker = Some(handle);
+        state.update(&mut ctx(&mut app));
+        assert!(state.picker.is_some(), "an unanswered picker is still up");
+
+        tx.send(Some(std::path::PathBuf::from("/songs/new"))).expect("the handle is still held");
+        state.update(&mut ctx(&mut app));
+        assert!(state.picker.is_none());
+        assert_eq!(app.shared.config.library.folders, vec!["/songs/new".to_string()]);
+    }
+
+    #[test]
+    fn the_same_folder_is_not_added_twice() {
+        let mut app = app();
+        app.shared.config.library.folders = vec!["/songs/new".to_string()];
+        FoldersState::add_picked_folder(&mut app.shared, std::path::Path::new("/songs/new"));
+        assert_eq!(app.shared.config.library.folders.len(), 1);
+    }
+
+    #[test]
+    fn a_dismissed_picker_adds_nothing() {
+        let mut app = app();
+        let mut state = FoldersState::new();
+        let (tx, handle) = crate::dialog::handle_for_tests();
+        state.picker = Some(handle);
+        tx.send(None).expect("the handle is still held");
+        state.update(&mut ctx(&mut app));
+        assert!(state.picker.is_none());
+        assert!(app.shared.config.library.folders.is_empty());
     }
 }

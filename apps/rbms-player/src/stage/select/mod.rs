@@ -16,10 +16,24 @@ use crate::ir_replay::from_ir_replay;
 use crate::stage::{Canvas, FoldersState, FrameCtx, KeyInput, LoadingState, SettingsState, Stage, StageHandler, TablesState, Transition};
 use crate::*;
 
+mod filter;
+mod list;
 mod preview;
 mod scene;
+#[cfg(test)]
+pub(super) mod tests;
 
+use filter::{FilterKey, FilterPanel, render_filter_panel};
+use list::SelectFilter;
 use preview::PreviewState;
+
+/// What the search box draws where the next character will go.
+const SEARCH_CARET: &str = "_";
+
+/// Roughly how many characters the search box shows at once, so a query too long for it scrolls
+/// under the caret instead of hiding the end being edited. The renderer trims to the exact pixel
+/// width on top of this; this only decides which stretch of the query it is handed.
+const SEARCH_VISIBLE_CHARS: usize = 24;
 
 /// The browser's own state: the record modal, the quit confirmation, the ranking panel, the
 /// lazily computed detail of the focused chart, the assembled scene cache and the hover preview.
@@ -44,6 +58,20 @@ pub(crate) struct SelectState {
     cover_rgba: Option<Vec<u8>>,
     cached_scene: Option<SelectScene>,
     cached_key: Option<SelectKey>,
+    /// Whether a shift key is down, which is what turns the sort key around, and whether a control
+    /// key is, which is what turns V into a paste. Tracked here rather than read from the event
+    /// because a key event only names the key that moved.
+    shift_held: bool,
+    ctrl_held: bool,
+    /// The search query being typed, and where the browser goes back to when the box closes.
+    search_edit: TextEdit,
+    search_resume: Option<(SelectView, usize)>,
+    filter: FilterPanel,
+    /// The list generation, the filter and the ordering the rows on screen were built with. Every
+    /// other screen rebuilds the list unfiltered, and the settings screen can move the favourites
+    /// switch and the SORT row behind the browser's back, so this is what notices any of them and
+    /// rebuilds.
+    applied: Option<(u64, SelectFilter, SortMode)>,
     preview: PreviewState,
 }
 
@@ -61,6 +89,12 @@ impl Default for SelectState {
             cover_rgba: None,
             cached_scene: None,
             cached_key: None,
+            shift_held: false,
+            ctrl_held: false,
+            search_edit: TextEdit::new(),
+            search_resume: None,
+            filter: FilterPanel::default(),
+            applied: None,
             preview: PreviewState::default(),
         }
     }
@@ -98,35 +132,103 @@ impl SelectState {
             Some(SelectItem::Folder { target, .. }) => {
                 shared.select_view = *target;
                 shared.sel = 0;
-                shared.rebuild_select_items();
+                self.rebuild(shared);
                 Transition::Stay
             }
             None => Transition::Stay,
         }
     }
 
-    /// Open the search box (`/`). Search spans the whole library, so switch to the flat song list.
+    /// Rebuild the row list through the filter panel, and remember what it was built from so the
+    /// browser can tell when something behind its back has changed either.
+    fn rebuild(&mut self, shared: &mut AppShared) {
+        let filter = self.filter.filter(&shared.config);
+        shared.rebuild_select_items_with(filter);
+        self.applied = Some((shared.select_gen, filter, shared.config.library.sort));
+    }
+
+    /// Open the search box (`/`). Search spans the whole library, so switch to the flat song list,
+    /// remembering the folder and the row it was opened from.
     fn start_search(&mut self, shared: &mut AppShared) {
+        if !shared.searching {
+            self.search_resume = Some((shared.select_view, shared.sel));
+        }
         shared.searching = true;
+        self.search_edit = TextEdit::new();
         shared.search.clear();
         shared.select_view = SelectView::AllSongs;
         shared.sel = 0;
-        shared.rebuild_select_items();
+        self.rebuild(shared);
     }
 
-    /// Close the search box (Esc) and clear the filter.
+    /// Close the search box (Esc), clear the query and go back to the folder and the row the search
+    /// was opened from — a search is a detour, not a way of leaving the folder you were in.
     fn exit_search(&mut self, shared: &mut AppShared) {
         shared.searching = false;
+        self.search_edit = TextEdit::new();
         shared.search.clear();
+        let (view, sel) = self.search_resume.take().unwrap_or((SelectView::AllSongs, 0));
+        shared.select_view = view;
         shared.sel = 0;
-        shared.rebuild_select_items();
+        self.rebuild(shared);
+        shared.sel = sel.min(shared.select_items.len().saturating_sub(1));
     }
 
-    /// Cycle the song-list sort order (F3).
-    fn cycle_sort(&mut self, shared: &mut AppShared) {
-        shared.sort = shared.sort.next();
+    /// Take what has been typed into the query the list is filtered by.
+    fn apply_search(&mut self, shared: &mut AppShared) {
+        shared.search = self.search_edit.text().to_string();
         shared.sel = 0;
-        shared.rebuild_select_items();
+        self.rebuild(shared);
+    }
+
+    /// The stretch of the query the search box draws, with a caret standing where the next
+    /// character will go. A query longer than the box scrolls with the caret, so editing the start
+    /// of a long one is not done blind.
+    pub(super) fn search_display(&self) -> String {
+        let (shown, at) = self.search_edit.window(SEARCH_VISIBLE_CHARS);
+        let split = shown.char_indices().nth(at).map_or(shown.len(), |(byte, _)| byte);
+        format!("{}{SEARCH_CARET}{}", &shown[..split], &shown[split..])
+    }
+
+    /// Cycle the song-list sort order (F3), or step back through it (Shift+F3).
+    fn cycle_sort(&mut self, shared: &mut AppShared) {
+        self.set_sort(shared, shared.config.library.sort.next());
+    }
+
+    /// Step back through the sort orders, so a list overshot by one press is one press away again.
+    fn cycle_sort_back(&mut self, shared: &mut AppShared) {
+        self.set_sort(shared, shared.config.library.sort.prev());
+    }
+
+    /// Take a new ordering, which is the configuration's own SORT row: the settings screen edits the
+    /// same field, so an ordering chosen either way is the one the list is built with and the one
+    /// that is still there on the next launch.
+    fn set_sort(&mut self, shared: &mut AppShared, sort: SortMode) {
+        if shared.config.library.sort == sort {
+            return;
+        }
+        shared.config.library.sort = sort;
+        shared.sel = 0;
+        self.rebuild(shared);
+        shared.save_settings();
+    }
+
+    /// Show or hide the filter panel (`F2`).
+    fn toggle_filter_panel(&mut self) {
+        self.filter.toggle();
+    }
+
+    /// Keys while the filter panel is up. Returns whether the panel consumed the key.
+    fn filter_panel_input(&mut self, shared: &mut AppShared, code: KeyCode) -> bool {
+        match self.filter.handle_key(shared, code) {
+            FilterKey::Ignored => false,
+            FilterKey::Consumed => true,
+            FilterKey::Moved => {
+                shared.sel = 0;
+                self.rebuild(shared);
+                true
+            }
+        }
     }
 
     /// (Re)compute the focused chart's heavy detail (notes/LN/length/BPM range) only when the focus
@@ -192,7 +294,7 @@ impl SelectState {
                 }
             }
             Err(e) => {
-                eprintln!("replay load failed: {e}");
+                notify(Level::Error, format!("replay load failed: {e}"));
                 self.record_modal = None;
                 Transition::Stay
             }
@@ -362,12 +464,12 @@ impl SelectState {
             SelectView::AllSongs | SelectView::TableLevels(_) => {
                 shared.select_view = SelectView::Root;
                 shared.sel = 0;
-                shared.rebuild_select_items();
+                self.rebuild(shared);
             }
             SelectView::TableLevel(ti, _) => {
                 shared.select_view = SelectView::TableLevels(ti);
                 shared.sel = 0;
-                shared.rebuild_select_items();
+                self.rebuild(shared);
             }
         }
         Transition::Stay
@@ -390,9 +492,20 @@ impl SelectState {
         match key.code {
             KeyCode::Escape => self.exit_search(shared),
             KeyCode::Backspace => {
-                shared.search.pop();
-                shared.sel = 0;
-                shared.rebuild_select_items();
+                self.search_edit.backspace();
+                self.apply_search(shared);
+            }
+            KeyCode::Delete => {
+                self.search_edit.delete();
+                self.apply_search(shared);
+            }
+            KeyCode::ArrowLeft => self.search_edit.left(),
+            KeyCode::ArrowRight => self.search_edit.right(),
+            KeyCode::Home => self.search_edit.home(),
+            KeyCode::End => self.search_edit.end(),
+            KeyCode::KeyV if self.ctrl_held => {
+                self.search_edit.paste();
+                self.apply_search(shared);
             }
             KeyCode::F3 => self.cycle_sort(shared),
             KeyCode::ArrowUp => {
@@ -408,11 +521,9 @@ impl SelectState {
             KeyCode::Enter | KeyCode::NumpadEnter => return self.select_enter(shared),
             _ => {
                 if let Some(t) = key.text {
-                    let add: String = t.chars().filter(|c| !c.is_control()).collect();
-                    if !add.is_empty() {
-                        shared.search.push_str(&add);
-                        shared.sel = 0;
-                        shared.rebuild_select_items();
+                    self.search_edit.insert(t);
+                    if self.search_edit.text() != shared.search {
+                        self.apply_search(shared);
                     }
                 }
             }
@@ -422,10 +533,20 @@ impl SelectState {
 }
 
 impl StageHandler for SelectState {
+    /// The browser takes every key itself while something on it is being typed into or read: the
+    /// search box, the record modal, the filter panel. The option overlay opens on a shift key, and
+    /// a shift key held to type a capital letter belongs to the search box rather than to it.
+    fn holds_keys(&self, ctx: &FrameCtx<'_>) -> bool {
+        ctx.shared.searching || self.record_modal.is_some() || self.filter.is_open()
+    }
+
     fn update(&mut self, ctx: &mut FrameCtx<'_>) -> Transition {
         let started = self.poll_replay_download(ctx.shared);
         if !matches!(started, Transition::Stay) {
             return started;
+        }
+        if self.applied != Some((ctx.shared.select_gen, self.filter.filter(&ctx.shared.config), ctx.shared.config.library.sort)) {
+            self.rebuild(ctx.shared);
         }
         self.refresh_focused_detail(ctx.shared, ctx.now);
         self.update_preview(ctx.shared, ctx.now);
@@ -444,11 +565,28 @@ impl StageHandler for SelectState {
     /// Keys on the browser. While the search box is open, anything that is not a named shortcut —
     /// letters, digits, space — types into the query.
     fn handle_key(&mut self, ctx: &mut FrameCtx<'_>, key: KeyInput<'_>) -> Transition {
+        if matches!(key.code, KeyCode::ShiftLeft | KeyCode::ShiftRight) {
+            if key.pressed {
+                self.shift_held = true;
+            } else if key.released {
+                self.shift_held = false;
+            }
+        }
+        if matches!(key.code, KeyCode::ControlLeft | KeyCode::ControlRight | KeyCode::SuperLeft | KeyCode::SuperRight) {
+            if key.pressed {
+                self.ctrl_held = true;
+            } else if key.released {
+                self.ctrl_held = false;
+            }
+        }
         if !key.pressed {
             return Transition::Stay;
         }
         if self.record_modal.is_some() {
             return self.modal_key(ctx.shared, &key);
+        }
+        if self.filter_panel_input(ctx.shared, key.code) {
+            return Transition::Stay;
         }
         if ctx.shared.searching {
             return self.search_key(ctx.shared, &key);
@@ -462,7 +600,10 @@ impl StageHandler for SelectState {
         match key.code {
             KeyCode::Escape | KeyCode::ArrowLeft => return self.select_escape(ctx.shared),
             KeyCode::Slash => self.start_search(ctx.shared),
+            KeyCode::F3 if self.shift_held => self.cycle_sort_back(ctx.shared),
             KeyCode::F3 => self.cycle_sort(ctx.shared),
+            KeyCode::F2 => self.toggle_filter_panel(),
+            KeyCode::KeyF => ctx.shared.toggle_focused_favorite(),
             KeyCode::Tab => return Transition::Open(Stage::Settings(SettingsState::new())),
             KeyCode::KeyO => return Transition::Open(Stage::Folders(FoldersState::new())),
             KeyCode::KeyT => return Transition::Open(Stage::Tables(TablesState::new())),
@@ -550,42 +691,8 @@ impl StageHandler for SelectState {
             let hot = render_ranking_panel(canvas, &ranking_lines, self.ranking_sel, true);
             ctx.shared.hot.extend(hot.into_iter().map(|(rect, index)| (rect, Hot::RankingRow(index))));
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_file_preview_clip_sits_at_the_base_of_the_preview_namespace() {
-        assert_eq!(PREVIEW_ID, IdNamespace::PREVIEW.base);
-        assert!(IdNamespace::PREVIEW.contains(PREVIEW_ID));
-        assert!(!IdNamespace::PLAY.contains(PREVIEW_ID));
-    }
-
-    #[test]
-    fn preview_keysounds_land_inside_the_preview_namespace() {
-        for wav in [0, 1, 1_295, IdNamespace::PREVIEW.len - 1] {
-            let id = SelectState::preview_sample_id(wav);
-            assert!(IdNamespace::PREVIEW.contains(id), "wav {wav} escaped the preview namespace");
-            assert!(!IdNamespace::PLAY.contains(id));
-            assert_eq!(id, IdNamespace::PREVIEW.base + wav);
-        }
-    }
-
-    #[test]
-    fn an_out_of_range_wav_index_is_clamped_into_the_preview_namespace() {
-        let clamped = SelectState::preview_sample_id(u32::MAX);
-        assert!(IdNamespace::PREVIEW.contains(clamped));
-        assert_eq!(clamped, IdNamespace::PREVIEW.base + IdNamespace::PREVIEW.len - 1);
-    }
-
-    #[test]
-    fn a_chart_keysound_and_the_preview_copy_of_it_never_share_an_id() {
-        for wav in [1u32, 36, 1_295] {
-            assert_ne!(wav, SelectState::preview_sample_id(wav));
-            assert!(IdNamespace::PLAY.contains(wav));
+        if self.filter.is_open() {
+            render_filter_panel(canvas, &self.filter, &ctx.shared.config);
         }
     }
 }

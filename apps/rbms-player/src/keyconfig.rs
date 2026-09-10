@@ -201,16 +201,20 @@ pub enum ControlAction {
     CoverDown,
     LiftUp,
     LiftDown,
+    HiddenUp,
+    HiddenDown,
 }
 
 impl ControlAction {
-    pub const ALL: [ControlAction; 6] = [
+    pub const ALL: [ControlAction; 8] = [
         ControlAction::HiSpeedUp,
         ControlAction::HiSpeedDown,
         ControlAction::CoverUp,
         ControlAction::CoverDown,
         ControlAction::LiftUp,
         ControlAction::LiftDown,
+        ControlAction::HiddenUp,
+        ControlAction::HiddenDown,
     ];
 
     pub fn label(self) -> &'static str {
@@ -221,6 +225,8 @@ impl ControlAction {
             ControlAction::CoverDown => "COVER DOWN",
             ControlAction::LiftUp => "LIFT UP",
             ControlAction::LiftDown => "LIFT DOWN",
+            ControlAction::HiddenUp => "HIDDEN+ UP",
+            ControlAction::HiddenDown => "HIDDEN+ DOWN",
         }
     }
 }
@@ -235,6 +241,10 @@ pub struct ControlBinds {
     pub cover_down: String,
     pub lift_up: String,
     pub lift_down: String,
+    /// The hidden band has no shipped binding: every key a default layout could spare is already
+    /// taken, so it starts unbound and is picked in the key editor.
+    pub hidden_up: String,
+    pub hidden_down: String,
 }
 
 impl Default for ControlBinds {
@@ -246,6 +256,8 @@ impl Default for ControlBinds {
             cover_down: "LEFT".into(),
             lift_up: "RBRACKET".into(),
             lift_down: "LBRACKET".into(),
+            hidden_up: String::new(),
+            hidden_down: String::new(),
         }
     }
 }
@@ -259,6 +271,8 @@ impl ControlBinds {
             ControlAction::CoverDown => &mut self.cover_down,
             ControlAction::LiftUp => &mut self.lift_up,
             ControlAction::LiftDown => &mut self.lift_down,
+            ControlAction::HiddenUp => &mut self.hidden_up,
+            ControlAction::HiddenDown => &mut self.hidden_down,
         }
     }
 
@@ -270,6 +284,8 @@ impl ControlBinds {
             ControlAction::CoverDown => &self.cover_down,
             ControlAction::LiftUp => &self.lift_up,
             ControlAction::LiftDown => &self.lift_down,
+            ControlAction::HiddenUp => &self.hidden_up,
+            ControlAction::HiddenDown => &self.hidden_down,
         }
     }
 }
@@ -324,7 +340,10 @@ impl KeyConfig {
                 }
                 match key_from_name(tok) {
                     Some(code) => by_lane[lane] = Some(code),
-                    None => eprintln!("keyconfig: mode {} lane {} has unknown key {tok:?}; using default", mode.name, lane),
+                    None => crate::notify::notify(
+                        crate::notify::Level::Warn,
+                        format!("keyconfig: mode {} lane {} has unknown key {tok:?}; using default", mode.name, lane),
+                    ),
                 }
             }
         }
@@ -344,7 +363,10 @@ impl KeyConfig {
             .filter_map(|(lane, token)| match key_from_name(token) {
                 Some(code) => Some((code, lane)),
                 None => {
-                    eprintln!("keyconfig: mode {} scratch lane {lane} has unknown reverse key {token:?}; leaving it unbound", mode.name);
+                    crate::notify::notify(
+                        crate::notify::Level::Warn,
+                        format!("keyconfig: mode {} scratch lane {lane} has unknown reverse key {token:?}; leaving it unbound", mode.name),
+                    );
                     None
                 }
             })
@@ -418,8 +440,13 @@ impl KeyConfig {
                 Err(e) => {
                     let backup = path.with_extension("ron.bak");
                     match std::fs::rename(path, &backup) {
-                        Ok(_) => eprintln!("keyconfig parse failed ({e}); backed up to {} and using defaults", backup.display()),
-                        Err(err) => eprintln!("keyconfig parse failed ({e}); backup failed ({err}); using defaults"),
+                        Ok(_) => crate::notify::notify(
+                            crate::notify::Level::Warn,
+                            format!("keyconfig parse failed ({e}); backed up to {} and using defaults", backup.display()),
+                        ),
+                        Err(err) => {
+                            crate::notify::notify(crate::notify::Level::Error, format!("keyconfig parse failed ({e}); backup failed ({err}); using defaults"))
+                        }
                     }
                     KeyConfig::default()
                 }
@@ -436,9 +463,9 @@ impl KeyConfig {
         match ron::ser::to_string_pretty(self, ron::ser::PrettyConfig::default()) {
             Ok(s) => match crate::write_atomic(path, &s) {
                 Ok(()) => println!("keyconfig saved: {}", path.display()),
-                Err(e) => eprintln!("keyconfig write failed ({}): {e}", path.display()),
+                Err(e) => crate::notify::notify(crate::notify::Level::Error, format!("keyconfig write failed ({}): {e}", path.display())),
             },
-            Err(e) => eprintln!("keyconfig save failed: {e}"),
+            Err(e) => crate::notify::notify(crate::notify::Level::Error, format!("keyconfig save failed: {e}")),
         }
     }
 }
