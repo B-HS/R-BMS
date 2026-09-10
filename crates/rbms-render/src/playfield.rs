@@ -22,13 +22,34 @@ pub struct PlayfieldView<'a> {
     pub beam_off: &'a [i64],
     /// Constant-velocity scrolling (ignore per-section BPM/STOP), i.e. the CONSTANT option.
     pub constant: bool,
+    /// Draw every long note as the plain note at its head — the LEGACY NOTE option. The chart is
+    /// judged exactly as it was; only the body and the tail stop being drawn.
+    pub legacy_note: bool,
+}
+
+/// How much of a lane is hidden from the player, as fractions of the field height.
+///
+/// The two are independent, as they are in the reference implementation (`PlayConfig.java:66,74,82`
+/// keeps a switch of its own next to each amount), so a cover and a hidden band can be up at once.
+/// The lift is not here: it moves the judgment line itself and is already folded into the resolved
+/// [`Skin`].
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct LaneShade {
+    /// Hidden from the top of the field down, the SUD+ cover.
+    pub cover: f32,
+    /// Hidden from the judgment line up, the HID+ band.
+    pub hidden: f32,
 }
 
 /// Draw the playfield for the current play time using a `Skin`: lane backgrounds, key beams
 /// for held/just-pressed lanes, the judgment line, and every visible note at its scroll
 /// offset. Backend-agnostic.
+///
+/// The skin decides how many lanes are drawn and the chart decides how many it has. A chart with
+/// fewer than the skin draws — a five-key file reached with a seven-key skin still resolved — leaves
+/// the extra lanes empty rather than ending the frame.
 pub fn render_playfield_view<R: Renderer>(r: &mut R, skin: &Skin, view: &PlayfieldView<'_>) {
-    let PlayfieldView { timelines, microtime, hispeed, beam_on, beam_off, constant } = *view;
+    let PlayfieldView { timelines, microtime, hispeed, beam_on, beam_off, constant, legacy_note } = *view;
     r.clear(skin.bg);
 
     let n = skin.lane_count();
@@ -55,16 +76,16 @@ pub fn render_playfield_view<R: Renderer>(r: &mut R, skin: &Skin, view: &Playfie
     let mut ln_open: Vec<Option<usize>> = vec![None; n];
     for (idx, tl) in timelines.iter().enumerate() {
         for (lane, open_head) in ln_open.iter_mut().enumerate() {
-            let Some(note) = &tl.notes[lane] else {
+            let Some(Some(note)) = tl.notes.get(lane) else {
                 continue;
             };
             match note.kind {
                 NoteKind::LongStart { .. } => *open_head = Some(idx),
-                NoteKind::LongEnd { .. } => {
+                NoteKind::LongEnd { ln } => {
                     let Some(head_idx) = open_head.take() else {
                         continue;
                     };
-                    if tl.time_us < microtime {
+                    if legacy_note || tl.time_us < microtime {
                         continue;
                     }
                     let off_head = match pos.get(&head_idx) {
@@ -75,8 +96,8 @@ pub fn render_playfield_view<R: Renderer>(r: &mut R, skin: &Skin, view: &Playfie
                     let body_bottom = (skin.judge_y - off_head).min(skin.judge_y);
                     let body_top = pos.get(&idx).map(|o| skin.judge_y - o).unwrap_or(skin.top_y).max(skin.top_y);
                     if body_bottom > body_top {
-                        let c = skin.note_color(lane);
-                        let body = Color { r: c.r, g: c.g, b: c.b, a: 90 };
+                        let c = skin.long_note_color(lane, ln);
+                        let body = Color { r: c.r, g: c.g, b: c.b, a: skin.long_note_alpha(ln) };
                         r.fill_rect(Rect::new(skin.x[lane], body_top, skin.w[lane], body_bottom - body_top), body);
                     }
                 }
@@ -91,7 +112,7 @@ pub fn render_playfield_view<R: Renderer>(r: &mut R, skin: &Skin, view: &Playfie
     for (i, off) in offsets {
         let tl = &timelines[i];
         for lane in 0..n {
-            let Some(note) = &tl.notes[lane] else {
+            let Some(Some(note)) = tl.notes.get(lane) else {
                 continue;
             };
             if matches!(note.kind, NoteKind::LongEnd { .. }) {
@@ -99,6 +120,7 @@ pub fn render_playfield_view<R: Renderer>(r: &mut R, skin: &Skin, view: &Playfie
             }
             let color = match note.kind {
                 NoteKind::Mine { .. } => skin.mine_color,
+                NoteKind::LongStart { ln } if !legacy_note => skin.long_note_color(lane, ln),
                 _ => skin.note_color(lane),
             };
             let note_top = skin.judge_y - off - skin.note_height;
@@ -169,17 +191,25 @@ fn draw_field_decor<R: Renderer>(r: &mut R, skin: &Skin) {
     }
 }
 
-/// Draw a lane cover (sudden+): an opaque rect over the top `cover_frac` of the field that
-/// hides approaching notes until they emerge below it. Call AFTER `render_playfield` so it
-/// occludes the notes, and BEFORE the HUD so combo/judgment stay on top.
-pub fn render_lane_cover<R: Renderer>(r: &mut R, skin: &Skin, cover_frac: f32) {
-    let f = cover_frac.clamp(0.0, 0.9);
-    if f <= 0.0 {
-        return;
-    }
-    let h = (skin.judge_y - skin.top_y) * f;
+/// Draw the lane shades: the sudden cover over the top of the field, and the hidden band over the
+/// stretch just above the judgment line. Call AFTER `render_playfield` so they occlude the notes,
+/// and BEFORE the HUD so combo/judgment stay on top.
+///
+/// The two are drawn independently, so a chart played under both is left with the window between
+/// them (`[hidden, 1 - cover]` of the field). A window the two shades have closed entirely simply
+/// shows no notes: the bands are clamped to the field rather than allowed to overrun it.
+pub fn render_lane_cover<R: Renderer>(r: &mut R, skin: &Skin, shade: LaneShade) {
+    let lane_h = skin.judge_y - skin.top_y;
+    let cover = shade.cover.clamp(0.0, 1.0) * lane_h;
+    let hidden = shade.hidden.clamp(0.0, 1.0) * lane_h;
     for &(fx, fw) in &skin.fields {
-        r.fill_rect(Rect::new(fx, skin.top_y, fw, h), skin.bg);
+        if cover > 0.0 {
+            r.fill_rect(Rect::new(fx, skin.top_y, fw, cover.min(lane_h)), skin.bg);
+        }
+        if hidden > 0.0 {
+            let h = hidden.min(lane_h);
+            r.fill_rect(Rect::new(fx, skin.judge_y - h, fw, h), skin.bg);
+        }
     }
 }
 
@@ -237,6 +267,7 @@ mod tests {
     use crate::{Color, CpuCanvas};
     use rbms_chart::scroll::closed_form_offset;
     use rbms_chart::to_model;
+    use rbms_model::LnKind;
     use rbms_model::Mode;
     use rbms_parser::parse;
 
@@ -250,7 +281,17 @@ mod tests {
 
     /// One frame's playfield inputs, so a test reads as a call rather than a struct literal.
     fn view<'a>(timelines: &'a [TimeLine], microtime: i64, hispeed: f64, beam_on: &'a [i64], beam_off: &'a [i64], constant: bool) -> PlayfieldView<'a> {
-        PlayfieldView { timelines, microtime, hispeed, beam_on, beam_off, constant }
+        PlayfieldView { timelines, microtime, hispeed, beam_on, beam_off, constant, legacy_note: false }
+    }
+
+    /// The same frame with long notes drawn as the plain notes at their heads.
+    fn legacy_view<'a>(timelines: &'a [TimeLine], microtime: i64) -> PlayfieldView<'a> {
+        PlayfieldView { legacy_note: true, ..view(timelines, microtime, 1.0, &[], &[], false) }
+    }
+
+    /// A cover with no hidden band, which is what every frame before HID+ existed asked for.
+    fn cover(cover: f32) -> LaneShade {
+        LaneShade { cover, hidden: 0.0 }
     }
 
     #[test]
@@ -485,7 +526,7 @@ mod tests {
         let skin = skin();
         let mut c = CpuCanvas::new(1280, 720);
         render_playfield_view(&mut c, &skin, &view(&timelines, 0, 1.0, &[], &[], false));
-        render_lane_cover(&mut c, &skin, 0.5);
+        render_lane_cover(&mut c, &skin, cover(0.5));
         let cx = skin.lane_center(0) as u32;
         let cover_h = ((skin.judge_y - skin.top_y) * 0.5) as u32;
         assert_eq!(c.pixel_at(cx, skin.top_y as u32 + 2), skin.bg, "cover paints field bg over the top fraction");
@@ -500,19 +541,108 @@ mod tests {
         let timelines = tls(b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:01\r\n");
         render_playfield_view(&mut a, &skin, &view(&timelines, 0, 1.0, &[], &[], false));
         render_playfield_view(&mut b, &skin, &view(&timelines, 0, 1.0, &[], &[], false));
-        render_lane_cover(&mut b, &skin, 0.0);
+        render_lane_cover(&mut b, &skin, cover(0.0));
         assert_eq!(a.pixels(), b.pixels(), "cover_frac 0 leaves the canvas unchanged");
     }
 
+    /// A cover the settings cannot reach still has to stop at the field: the row goes to 1.0 now
+    /// that SUD+ can close the window entirely, and anything past that must not paint over the
+    /// judgment line or above the top of the lane.
     #[test]
-    fn lane_cover_clamps_above_point_nine() {
+    fn a_cover_past_the_whole_field_is_clamped_to_it() {
         let skin = skin();
         let mut c = CpuCanvas::new(1280, 720);
         let timelines = tls(b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:01\r\n");
         render_playfield_view(&mut c, &skin, &view(&timelines, 0, 1.0, &[], &[], false));
-        render_lane_cover(&mut c, &skin, 5.0);
+        let above = c.pixel_at(skin.lane_center(0) as u32, skin.top_y as u32 - 4);
+        render_lane_cover(&mut c, &skin, cover(5.0));
         let cx = skin.lane_center(0) as u32;
-        assert_ne!(c.pixel_at(cx, skin.judge_y as u32 - 3), skin.bg, "clamped cover leaves the bottom of the field visible");
+        assert_eq!(c.pixel_at(cx, skin.judge_y as u32 - 3), skin.bg, "a full cover hides the whole field");
+        assert_eq!(c.pixel_at(cx, skin.top_y as u32 - 4), above, "and paints nothing above the top of it");
+        assert_eq!(c.pixel_at(cx, skin.judge_y as u32 + 1), skin.judge_line, "nor over the judgment line");
+    }
+
+    /// HID+ hides the stretch just above the judgment line, which is the opposite end of the field
+    /// from the cover: a frame with only a hidden band must leave the top of the lane alone.
+    #[test]
+    fn the_hidden_band_occludes_the_bottom_of_the_field_and_not_the_top() {
+        let timelines = tls(b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:01\r\n");
+        let skin = skin();
+        let mut c = CpuCanvas::new(1280, 720);
+        render_playfield_view(&mut c, &skin, &view(&timelines, 0, 1.0, &[], &[], false));
+        render_lane_cover(&mut c, &skin, LaneShade { cover: 0.0, hidden: 0.25 });
+        let cx = skin.lane_center(0) as u32;
+        assert_eq!(c.pixel_at(cx, skin.judge_y as u32 - 3), skin.bg, "the band paints over the lane just above the line");
+        assert_ne!(c.pixel_at(cx, skin.top_y as u32 + 2), skin.bg, "the top of the lane still shows through");
+    }
+
+    /// Both shades up at once leave the window between them, which is what makes SUD+ and HID+
+    /// usable together (`PlayConfig.java:66,82` keep the two switches apart).
+    #[test]
+    fn a_cover_and_a_hidden_band_leave_the_window_between_them() {
+        let timelines = tls(b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:01\r\n");
+        let skin = skin();
+        let mut c = CpuCanvas::new(1280, 720);
+        render_playfield_view(&mut c, &skin, &view(&timelines, 0, 1.0, &[], &[], false));
+        render_lane_cover(&mut c, &skin, LaneShade { cover: 0.3, hidden: 0.3 });
+        let cx = skin.lane_center(0) as u32;
+        let lane_h = skin.judge_y - skin.top_y;
+        assert_eq!(c.pixel_at(cx, (skin.top_y + lane_h * 0.1) as u32), skin.bg, "the top is under the cover");
+        assert_eq!(c.pixel_at(cx, (skin.judge_y - lane_h * 0.1) as u32), skin.bg, "the bottom is under the hidden band");
+        assert_ne!(c.pixel_at(cx, (skin.top_y + lane_h * 0.5) as u32), skin.bg, "the middle is the window that is left");
+    }
+
+    /// The two charge flavours carry obligations a plain long note does not, so each is drawn in a
+    /// colour of its own rather than the lane's.
+    #[test]
+    fn each_long_note_flavour_is_drawn_in_its_own_colour() {
+        let skin = skin();
+        for (flavour, expected) in [(LnKind::Ln, skin.note_color(0)), (LnKind::Cn, skin.charge_note_color), (LnKind::Hcn, skin.hell_charge_note_color)] {
+            assert_eq!(skin.long_note_color(0, flavour), expected, "{flavour:?}");
+        }
+        assert_eq!(skin.long_note_color(0, LnKind::Undefined), skin.note_color(0), "an unresolved flavour is drawn as the plain note it may become");
+    }
+
+    /// A charge note reaches the painted frame in its own colour: the flavour has to change pixels,
+    /// not just a lookup.
+    #[test]
+    fn a_charge_note_paints_a_different_frame_than_a_plain_long_note() {
+        let timelines = tls(b"#LNTYPE 1\r\n#BPM 120\r\n#WAV01 a.wav\r\n#00151:01000001\r\n");
+        let mut charged = timelines.clone();
+        for tl in charged.iter_mut() {
+            if let Some(note) = tl.notes[0].as_mut() {
+                note.kind = match note.kind {
+                    NoteKind::LongStart { .. } => NoteKind::LongStart { ln: LnKind::Cn },
+                    NoteKind::LongEnd { .. } => NoteKind::LongEnd { ln: LnKind::Cn },
+                    ref other => other.clone(),
+                };
+            }
+        }
+        let skin = skin();
+        let head = timelines.iter().find_map(|t| t.notes[0].as_ref().filter(|n| matches!(n.kind, NoteKind::LongStart { .. })).map(|n| n.time_us)).unwrap();
+        let mut plain = CpuCanvas::new(1280, 720);
+        let mut charge = CpuCanvas::new(1280, 720);
+        render_playfield_view(&mut plain, &skin, &view(&timelines, head - 200_000, 1.0, &[], &[], false));
+        render_playfield_view(&mut charge, &skin, &view(&charged, head - 200_000, 1.0, &[], &[], false));
+        assert_ne!(plain.pixels(), charge.pixels(), "a charge note has to look different from a plain long note");
+    }
+
+    /// LEGACY NOTE draws a long note as the plain note at its head: the body and the tail stop being
+    /// drawn, so the lane shows one note-height bar instead of a bar reaching up the field.
+    #[test]
+    fn legacy_notes_draw_only_the_head_of_a_long_note() {
+        let timelines = tls(b"#LNTYPE 1\r\n#BPM 120\r\n#WAV01 a.wav\r\n#00151:01000001\r\n");
+        let skin = skin();
+        let head = timelines.iter().find_map(|t| t.notes[0].as_ref().filter(|n| matches!(n.kind, NoteKind::LongStart { .. })).map(|n| n.time_us)).unwrap();
+        let mut full = CpuCanvas::new(1280, 720);
+        let mut legacy = CpuCanvas::new(1280, 720);
+        render_playfield_view(&mut full, &skin, &view(&timelines, head - 200_000, 1.0, &[], &[], false));
+        render_playfield_view(&mut legacy, &skin, &legacy_view(&timelines, head - 200_000));
+        let full_rows = lane_drawn_rows(&full, &skin, 0, 3);
+        let legacy_rows = lane_drawn_rows(&legacy, &skin, 0, 3);
+        assert!(legacy_rows > 0, "the head is still drawn");
+        assert!(legacy_rows < full_rows, "the body is not: {legacy_rows}px against {full_rows}px");
+        assert!(legacy_rows <= skin.note_height.ceil() as usize + 1, "what is left is one note tall (got {legacy_rows}px)");
     }
 
     #[test]
@@ -621,7 +751,8 @@ mod tests {
             render_playfield_view(&mut spread, &skin, &view(&timelines, micro, 1.25, &beam_on, &beam_off, constant));
 
             let mut view = CpuCanvas::new(1280, 720);
-            let field = PlayfieldView { timelines: &timelines, microtime: micro, hispeed: 1.25, beam_on: &beam_on, beam_off: &beam_off, constant };
+            let field =
+                PlayfieldView { timelines: &timelines, microtime: micro, hispeed: 1.25, beam_on: &beam_on, beam_off: &beam_off, legacy_note: false, constant };
             render_playfield_view(&mut view, &skin, &field);
 
             assert_eq!(spread.pixels(), view.pixels(), "the compatibility shim only spreads the view fields (constant={constant})");

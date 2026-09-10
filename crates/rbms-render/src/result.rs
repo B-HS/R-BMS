@@ -1,19 +1,32 @@
 use std::sync::LazyLock;
 
 use crate::ctx::{RenderCtx, with_render_ctx};
+use crate::hud::{MODE_LABEL_MARGIN, MODE_LABEL_SCALE, MODE_LABEL_Y};
 use crate::skin::{Skin, SkinConfig};
 use crate::{Color, Rect, Renderer};
+
+mod grade;
+mod graphs;
+
+pub use grade::{RATE_STEPS, dj_rank_label, draw_rank_bar_stepped, rate_27};
+
+use graphs::draw_result_graphs;
 
 /// Backend-agnostic result snapshot.
 pub struct ResultView {
     pub title: String,
+    /// Short name of the layout the run was played on, reported in the same corner the play HUD
+    /// reports it in, so a five-key run still says so once it is over.
+    pub mode_label: &'static str,
     pub counts: [u32; 6],
     pub ex_score: u32,
     pub max_score: u32,
     pub max_combo: u32,
     pub total_notes: u32,
-    pub fast: u32,
-    pub slow: u32,
+    /// Inputs judged early, split `[key, scratch]` so a run can be read per lane kind.
+    pub fast: [u32; LANE_KIND_COUNT],
+    /// Inputs judged late, split the same way.
+    pub slow: [u32; LANE_KIND_COUNT],
     pub gauge: f32,
     pub clear_label: &'static str,
     pub clear_color: Color,
@@ -23,6 +36,29 @@ pub struct ResultView {
     pub prev_ex: Option<u32>,
     /// Whether to draw the DJ-LEVEL rank bar + score deltas (the SCORE GRAPH option).
     pub show_graph: bool,
+    /// Whether to draw the gauge, timing and judge-distribution graphs (the RESULT GRAPHS option).
+    pub show_result_graphs: bool,
+    /// The gauge value once a second through the run, oldest first. Empty for a run nothing was
+    /// measured for.
+    pub gauge_series: Vec<f32>,
+    /// How many judged inputs landed in each timing bucket, earliest first.
+    pub timing_hist: Box<[u32]>,
+    /// How many judged inputs took each judgement, best first.
+    pub judge_dist: [u32; 6],
+}
+
+/// How many kinds of lane a judged input can have come from: an ordinary key, or a scratch.
+pub const LANE_KIND_COUNT: usize = 2;
+
+/// Position of the key total in a `[key, scratch]` pair.
+pub const KEY_LANE_KIND: usize = 0;
+
+/// Position of the scratch total in a `[key, scratch]` pair.
+pub const SCRATCH_LANE_KIND: usize = 1;
+
+/// Total of a `[key, scratch]` pair, which is what a screen with room for one number shows.
+pub fn lane_kind_total(counts: [u32; LANE_KIND_COUNT]) -> u32 {
+    counts.iter().sum()
 }
 
 /// PGREAT's signature hot pink on the IIDX result screen.
@@ -116,6 +152,52 @@ pub fn draw_rank_bar<R: Renderer>(r: &mut R, x: f32, y: f32, w: f32, h: f32, ex:
     r.fill_rect(Rect::new(x + rate * w - 1.5, y - 3.0, 3.0, h + 6.0), Color::WHITE);
 }
 
+/// What the run was paced against: the target the TARGET row asked for, resolved on this chart.
+///
+/// It is passed beside [`ResultView`] rather than on it because a target is what the player aimed
+/// at, not part of what the run measured — and because the screens that only report a run should
+/// not have to name one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TargetView {
+    /// The target's name as the TARGET row calls it.
+    pub name: String,
+    /// The EX it asks for on this chart.
+    pub ex: u32,
+}
+
+/// What the result screen shows besides the run itself: what the run was paced against, and whether
+/// the two run-again keys are live on it.
+///
+/// It is a second argument rather than more fields on [`ResultView`] because none of it is something
+/// the run measured — a screen that only reports a finished run passes the default and shows what it
+/// always showed.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ResultExtras {
+    /// The target the run was paced against, when the TARGET row resolved to one.
+    pub target: Option<TargetView>,
+    /// Whether this run can be restarted or followed on, which is what puts those keys in the hint.
+    pub run_again: bool,
+}
+
+/// Left edge of the result screen's content column.
+const CONTENT_X: f32 = 44.0;
+
+/// Right edge of the result screen's content column.
+const CONTENT_RIGHT: f32 = 1236.0;
+
+/// Right edge of the left half, where the rank, the clear lamp and the deltas sit.
+const LEFT_COLUMN_RIGHT: f32 = 420.0;
+
+/// Where the TARGET line sits: under the score deltas, and clear of the score server's own lines
+/// below it.
+const TARGET_Y: f32 = 436.0;
+
+/// Text scale of the TARGET line, matching the deltas above it.
+const TARGET_SCALE: f32 = 1.7;
+
+/// Gap between the TARGET label and the target it names.
+const TARGET_LABEL_GAP: f32 = 14.0;
+
 /// A signed EX delta as `(text, colour)`: green for a gain, red for a loss, grey for no change.
 pub fn ex_delta_label(delta: i64) -> (String, Color) {
     if delta > 0 {
@@ -127,26 +209,38 @@ pub fn ex_delta_label(delta: i64) -> (String, Color) {
     }
 }
 
-/// IIDX music-result layout: a big DJ-LEVEL rank + clear lamp + rank bar on the left, a full score
-/// report (EX / combo / per-judge counts with PGREAT in hot pink / FAST-SLOW / gauge) on the right.
+/// Draw what the run was paced against and how far off it landed, on one line under the deltas: the
+/// target's name and the EX it asked for on the left, the run's distance from it on the right.
+fn draw_target<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, view: &ResultView, target: &TargetView) {
+    let th = ctx.theme;
+    ctx.draw_text(r, CONTENT_X, TARGET_Y, TARGET_SCALE, th.text_dim, "TARGET");
+    let named = CONTENT_X + ctx.text_width("TARGET", TARGET_SCALE) + TARGET_LABEL_GAP;
+    ctx.draw_text(r, named, TARGET_Y, TARGET_SCALE, th.text, &format!("{}  {}", target.name, target.ex));
+    let (delta, color) = ex_delta_label(i64::from(view.ex_score) - i64::from(target.ex));
+    ctx.draw_text_right(r, LEFT_COLUMN_RIGHT, TARGET_Y, TARGET_SCALE, color, &delta);
+}
+
+/// IIDX music-result layout: a big DJ grade + clear lamp + rank bar on the left, a full score report
+/// (EX / combo / per-judge counts with PGREAT in hot pink / FAST-SLOW / gauge) on the right.
 pub fn render_result<R: Renderer>(r: &mut R, view: &ResultView) {
-    render_result_with_palette(r, view, default_palette());
+    render_result_with_palette(r, view, default_palette(), &ResultExtras::default());
 }
 
 /// [`render_result`] with the per-judge colours and labels supplied by the caller (e.g. built from
-/// the active skin via [`ResultPalette::from_skin`]) instead of the built-in palette. Draws against
-/// this thread's installed theme and shared text engine.
-pub fn render_result_with_palette<R: Renderer>(r: &mut R, view: &ResultView, palette: &ResultPalette) {
-    with_render_ctx(|ctx| render_result_with_palette_ctx(ctx, r, view, palette));
+/// the active skin via [`ResultPalette::from_skin`]), plus what surrounds the run on the screen —
+/// the target it was paced against and whether the run-again keys are live. Draws against this
+/// thread's installed theme and shared text engine.
+pub fn render_result_with_palette<R: Renderer>(r: &mut R, view: &ResultView, palette: &ResultPalette, extras: &ResultExtras) {
+    with_render_ctx(|ctx| render_result_with_palette_ctx(ctx, r, view, palette, extras));
 }
 
 /// [`render_result`] against a caller-supplied context.
 pub fn render_result_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, view: &ResultView) {
-    render_result_with_palette_ctx(ctx, r, view, default_palette());
+    render_result_with_palette_ctx(ctx, r, view, default_palette(), &ResultExtras::default());
 }
 
 /// [`render_result_with_palette`] against a caller-supplied context.
-pub fn render_result_with_palette_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, view: &ResultView, palette: &ResultPalette) {
+pub fn render_result_with_palette_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, view: &ResultView, palette: &ResultPalette, extras: &ResultExtras) {
     let th = ctx.theme;
     let w = r.size().0 as f32;
     r.clear(th.bg);
@@ -154,16 +248,17 @@ pub fn render_result_with_palette_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &
     if !view.title.is_empty() {
         ctx.draw_text_centered(r, w * 0.5, 14.0, 2.0, th.text, &view.title);
     }
+    ctx.draw_text_right(r, w - MODE_LABEL_MARGIN, MODE_LABEL_Y, MODE_LABEL_SCALE, th.text_muted, view.mode_label);
 
     let lcx = 232.0;
-    let (rank, rcol) = RANK_BANDS[dj_rank(view.ex_score, view.max_score)];
+    let (_, rcol) = RANK_BANDS[dj_rank(view.ex_score, view.max_score)];
     let rate = if view.max_score > 0 { view.ex_score as f32 / view.max_score as f32 * 100.0 } else { 0.0 };
-    ctx.draw_text_centered(r, lcx, 96.0, 7.0, rcol, rank);
+    ctx.draw_text_centered(r, lcx, 96.0, 7.0, rcol, dj_rank_label(view.ex_score, view.max_score));
     ctx.draw_text_centered(r, lcx, 214.0, 2.4, rcol, &format!("{rate:.2}%"));
     r.fill_rect(Rect::new(44.0, 258.0, 376.0, 48.0), view.clear_color);
     ctx.draw_text_centered(r, lcx, 270.0, 2.6, Color::BLACK, view.clear_label);
     if view.show_graph {
-        draw_rank_bar(r, 44.0, 340.0, 376.0, 18.0, view.ex_score, view.max_score);
+        draw_rank_bar_stepped(r, 44.0, 340.0, 376.0, 18.0, view.ex_score, view.max_score);
         let mut dy = 384.0;
         match view.prev_best_ex {
             Some(pb) => {
@@ -180,6 +275,9 @@ pub fn render_result_with_palette_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &
             let (t, c) = ex_delta_label(view.ex_score as i64 - pp as i64);
             ctx.draw_text(r, 44.0, dy, 1.8, c, &format!("{t} vs PREV"));
         }
+    }
+    if let Some(target) = &extras.target {
+        draw_target(ctx, r, view, target);
     }
 
     let (rx, rr) = (480.0, 1236.0);
@@ -206,11 +304,15 @@ pub fn render_result_with_palette_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &
         y += 34.0;
     }
     y += 10.0;
-    ctx.draw_text(r, rx, y, 1.8, th.accent, &format!("FAST {}", view.fast));
-    ctx.draw_text(r, rx + 170.0, y, 1.8, Color::ORANGE, &format!("SLOW {}", view.slow));
+    ctx.draw_text(r, rx, y, 1.8, th.accent, &format!("FAST {}", lane_kind_total(view.fast)));
+    ctx.draw_text(r, rx + 170.0, y, 1.8, Color::ORANGE, &format!("SLOW {}", lane_kind_total(view.slow)));
     ctx.draw_text_right(r, rr, y, 2.0, view.clear_color, &format!("GAUGE {}%", view.gauge.round() as i32));
 
-    ctx.draw_text_centered(r, w * 0.5, 692.0, 1.2, th.text_muted, "ENTER / ESC  SELECT");
+    if view.show_result_graphs {
+        draw_result_graphs(ctx, r, view, palette);
+    }
+    let hint = if extras.run_again { "ENTER / ESC  SELECT    R  RETRY    N  NEXT SONG" } else { "ENTER / ESC  SELECT" };
+    ctx.draw_text_centered(r, w * 0.5, 692.0, 1.2, th.text_muted, hint);
 }
 
 #[cfg(test)]
@@ -220,19 +322,24 @@ mod tests {
     fn sample_view() -> ResultView {
         ResultView {
             title: "PALETTE TEST".into(),
+            mode_label: "7K",
             counts: [100, 20, 5, 2, 1, 3],
             ex_score: 220,
             max_score: 262,
             max_combo: 120,
             total_notes: 131,
-            fast: 7,
-            slow: 9,
+            fast: [7, 0],
+            slow: [9, 0],
             gauge: 88.4,
             clear_label: "CLEAR",
             clear_color: Color::GREEN,
             prev_best_ex: None,
             prev_ex: None,
             show_graph: true,
+            show_result_graphs: true,
+            gauge_series: Vec::new(),
+            timing_hist: Box::new([]),
+            judge_dist: [0; 6],
         }
     }
 
@@ -260,7 +367,7 @@ mod tests {
         let mut a = CpuCanvas::new(1280, 720);
         let mut b = CpuCanvas::new(1280, 720);
         render_result(&mut a, &view);
-        render_result_with_palette(&mut b, &view, &ResultPalette::default());
+        render_result_with_palette(&mut b, &view, &ResultPalette::default(), &ResultExtras::default());
         assert_eq!(a.pixels(), b.pixels(), "the legacy entry point delegates to the built-in palette unchanged");
     }
 
@@ -273,11 +380,11 @@ mod tests {
         palette.judge_colors[0] = marker;
 
         let mut painted = CpuCanvas::new(1280, 720);
-        render_result_with_palette(&mut painted, &view, &palette);
+        render_result_with_palette(&mut painted, &view, &palette, &ResultExtras::default());
         assert!(count_exact(&painted, marker) > 0, "the PGREAT row bar is filled with the palette colour");
 
         let mut plain = CpuCanvas::new(1280, 720);
-        render_result_with_palette(&mut plain, &view, &ResultPalette::default());
+        render_result_with_palette(&mut plain, &view, &ResultPalette::default(), &ResultExtras::default());
         assert_eq!(count_exact(&plain, marker), 0, "the default palette never paints that colour");
         assert!(count_exact(&plain, Color::rgb(255, 40, 150)) > 0, "the default palette paints the hot pink PGREAT row");
     }
@@ -290,8 +397,8 @@ mod tests {
         palette.judge_labels[0] = "JUST".into();
         let mut a = CpuCanvas::new(1280, 720);
         let mut b = CpuCanvas::new(1280, 720);
-        render_result_with_palette(&mut a, &view, &palette);
-        render_result_with_palette(&mut b, &view, &ResultPalette::default());
+        render_result_with_palette(&mut a, &view, &palette, &ResultExtras::default());
+        render_result_with_palette(&mut b, &view, &ResultPalette::default(), &ResultExtras::default());
         assert_ne!(a.pixels(), b.pixels(), "a renamed judge row renders different pixels");
     }
 
@@ -481,19 +588,24 @@ mod tests {
         use crate::CpuCanvas;
         let view = ResultView {
             title: "TEST SONG".into(),
+            mode_label: "7K",
             counts: [100, 20, 5, 2, 1, 3],
             ex_score: 220,
             max_score: 262,
             max_combo: 120,
             total_notes: 131,
-            fast: 7,
-            slow: 9,
+            fast: [7, 0],
+            slow: [9, 0],
             gauge: 88.4,
             clear_label: "CLEAR",
             clear_color: Color::GREEN,
             prev_best_ex: None,
             prev_ex: None,
             show_graph: true,
+            show_result_graphs: true,
+            gauge_series: Vec::new(),
+            timing_hist: Box::new([]),
+            judge_dist: [0; 6],
         };
         let mut c = CpuCanvas::new(1280, 720);
         render_result(&mut c, &view);
@@ -510,21 +622,123 @@ mod tests {
         use crate::CpuCanvas;
         let view = ResultView {
             title: "EMPTY".into(),
+            mode_label: "7K",
             counts: [0; 6],
             ex_score: 0,
             max_score: 0,
             max_combo: 0,
             total_notes: 0,
-            fast: 0,
-            slow: 0,
+            fast: [0, 0],
+            slow: [0, 0],
             gauge: 0.0,
             clear_label: "FAILED",
             clear_color: Color::RED,
             prev_best_ex: None,
             prev_ex: None,
             show_graph: true,
+            show_result_graphs: true,
+            gauge_series: Vec::new(),
+            timing_hist: Box::new([]),
+            judge_dist: [0; 6],
         };
         let mut c = CpuCanvas::new(1280, 720);
         render_result(&mut c, &view);
+    }
+
+    fn measured_view() -> ResultView {
+        ResultView {
+            gauge_series: vec![100.0, 82.0, 61.0, 74.0, 88.0],
+            timing_hist: vec![1, 3, 9, 24, 61, 22, 8, 2, 1].into_boxed_slice(),
+            judge_dist: [100, 20, 5, 2, 1, 3],
+            ..sample_view()
+        }
+    }
+
+    fn painted(draw: impl FnOnce(&mut crate::CpuCanvas)) -> Vec<u8> {
+        use crate::CpuCanvas;
+        crate::font::use_embedded_fonts_only();
+        let mut canvas = CpuCanvas::new(1280, 720);
+        draw(&mut canvas);
+        canvas.pixels().to_vec()
+    }
+
+    #[test]
+    fn the_measurements_reach_the_screen_once_the_graphs_are_on() {
+        let bare = painted(|c| render_result(c, &sample_view()));
+        let measured = painted(|c| render_result(c, &measured_view()));
+        assert_ne!(bare, measured, "a run with a gauge trend, a timing spread and a judge split draws none of it");
+    }
+
+    #[test]
+    fn turning_the_graphs_off_takes_them_off_the_screen() {
+        let on = painted(|c| render_result(c, &measured_view()));
+        let off = painted(|c| render_result(c, &ResultView { show_result_graphs: false, ..measured_view() }));
+        assert_ne!(on, off, "RESULT GRAPHS off still draws the panels");
+        let off_bare = painted(|c| render_result(c, &ResultView { show_result_graphs: false, ..sample_view() }));
+        assert_eq!(off, off_bare, "with the graphs off the measurements behind them cannot move a pixel");
+    }
+
+    /// A run nothing was measured for still has to draw a finished screen rather than an empty
+    /// space or a panic, which is what an unmeasured replay or a zero-note chart produces.
+    #[test]
+    fn a_run_with_no_measurements_still_draws_its_panels() {
+        let empty = painted(|c| render_result(c, &sample_view()));
+        let off = painted(|c| render_result(c, &ResultView { show_result_graphs: false, ..sample_view() }));
+        assert_ne!(empty, off, "the empty panels are drawn, with their note in them");
+    }
+
+    #[test]
+    fn each_graph_answers_to_its_own_measurement() {
+        let base = painted(|c| render_result(c, &measured_view()));
+        let gauge = painted(|c| render_result(c, &ResultView { gauge_series: vec![10.0, 20.0, 30.0], ..measured_view() }));
+        let timing = painted(|c| render_result(c, &ResultView { timing_hist: vec![9, 1, 1, 1, 1].into_boxed_slice(), ..measured_view() }));
+        let judge = painted(|c| render_result(c, &ResultView { judge_dist: [1, 1, 1, 1, 1, 1], ..measured_view() }));
+        assert_ne!(base, gauge, "the gauge panel ignores its series");
+        assert_ne!(base, timing, "the timing panel ignores its histogram");
+        assert_ne!(base, judge, "the judge panel ignores its distribution");
+    }
+
+    /// A long run has more gauge samples than the panel has columns and a short one has fewer;
+    /// neither may index past the series.
+    #[test]
+    fn the_gauge_trend_handles_more_and_fewer_samples_than_it_has_columns() {
+        for len in [1usize, 2, 379, 1800] {
+            let series: Vec<f32> = (0..len).map(|i| (i % 101) as f32).collect();
+            painted(|c| render_result(c, &ResultView { gauge_series: series, ..measured_view() }));
+        }
+    }
+
+    #[test]
+    fn the_target_the_run_was_paced_against_reaches_the_screen() {
+        let palette = ResultPalette::default();
+        let bare = painted(|c| render_result_with_palette(c, &sample_view(), &palette, &ResultExtras::default()));
+        let extras = ResultExtras { target: Some(TargetView { name: "RANK AAA".into(), ex: 240 }), run_again: false };
+        let paced = painted(|c| render_result_with_palette(c, &sample_view(), &palette, &extras));
+        assert_ne!(bare, paced, "the TARGET line is not drawn");
+    }
+
+    /// The layout a run was played on is reported once it is over, not only while it is running, so
+    /// a five-key result cannot be mistaken for a seven-key one.
+    #[test]
+    fn the_layout_the_run_was_played_on_reaches_the_screen() {
+        let seven = painted(|c| render_result(c, &sample_view()));
+        let five = painted(|c| render_result(c, &ResultView { mode_label: "5K", ..sample_view() }));
+        assert_ne!(seven, five, "the layout name does not reach the screen");
+    }
+
+    #[test]
+    fn a_run_that_can_be_repeated_says_so_and_one_that_cannot_does_not() {
+        let palette = ResultPalette::default();
+        let quiet = painted(|c| render_result_with_palette(c, &sample_view(), &palette, &ResultExtras::default()));
+        let offered = painted(|c| render_result_with_palette(c, &sample_view(), &palette, &ResultExtras { run_again: true, ..ResultExtras::default() }));
+        assert_ne!(quiet, offered, "the run-again keys are not in the hint");
+    }
+
+    #[test]
+    fn the_default_extras_draw_the_screen_the_palette_entry_point_draws() {
+        let palette = ResultPalette::default();
+        let plain = painted(|c| render_result_with_palette(c, &sample_view(), &palette, &ResultExtras::default()));
+        let defaulted = painted(|c| render_result_with_palette(c, &sample_view(), &palette, &ResultExtras::default()));
+        assert_eq!(plain, defaulted, "the older entry point has to keep drawing exactly what it drew");
     }
 }

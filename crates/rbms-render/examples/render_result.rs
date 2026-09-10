@@ -8,19 +8,24 @@ fn main() {
     let mut canvas = CpuCanvas::new(w, h);
     let view = ResultView {
         title: "AltMirrorBell (moon)".into(),
+        mode_label: "7K",
         counts: [712, 64, 21, 8, 5, 2],
         ex_score: 1488,
         max_score: 1624,
         max_combo: 540,
         total_notes: 812,
-        fast: 30,
-        slow: 40,
+        fast: [30, 0],
+        slow: [40, 0],
         gauge: 86.0,
         clear_label: "CLEAR",
         clear_color: Color::BLUE,
         prev_best_ex: Some(1450),
         prev_ex: Some(1402),
         show_graph: true,
+        show_result_graphs: true,
+        gauge_series: Vec::new(),
+        timing_hist: Box::new([]),
+        judge_dist: [0; 6],
     };
     render_result(&mut canvas, &view);
 

@@ -23,6 +23,8 @@ fn row(folder: bool, title: &str, badges: RowBadges, lamp: Color, count: Option<
         difficulty_color: badges.difficulty_color,
         lamp,
         folder_count: count,
+        dj_level: (!folder).then_some("AA"),
+        favorite: !folder,
     }
 }
 
@@ -128,6 +130,7 @@ fn main() {
         score_graph: true,
         search: None,
         sort: "DEFAULT",
+        filter: None,
         empty_hint: None,
     };
 

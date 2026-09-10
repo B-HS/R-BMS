@@ -1,10 +1,20 @@
 use std::path::{Path, PathBuf};
 
-use rbms_model::Mode;
+use rbms_model::{LnKind, Mode};
 use serde::Deserialize;
 use thiserror::Error;
 
 use crate::{Color, Rect};
+
+/// How many lanes a five-key field is given the width of when it is laid out on its own terms: a
+/// seven-key side plus its turntable. A five-key chart then has the note width a seven-key chart
+/// has, in a narrower field, instead of six lanes stretched across the same box.
+const FIVE_KEY_WIDTH_LANES: usize = 8;
+
+/// Whether a mode is a five-key one, either on its own or as the two sides of a ten-key chart.
+fn is_five_key(mode: Mode) -> bool {
+    matches!(mode.name, "BEAT_5K" | "BEAT_10K")
+}
 
 /// Why a skin file could not be turned into a [`SkinConfig`]. Carries the offending path so the
 /// caller can report which skin failed without re-deriving it.
@@ -84,6 +94,18 @@ pub struct SkinConfig {
     pub bomb_enabled: bool,
     pub bomb_height: f32,
     pub bomb_duration_ms: u32,
+    /// Colours of the two charge-note flavours, which a plain long note does not use. A charge note
+    /// has to be released on time and a hell charge note drains while it is let go, so they are told
+    /// apart from an ordinary long note by colour rather than by shape.
+    pub charge_note_color: [u8; 3],
+    pub hell_charge_note_color: [u8; 3],
+    /// Opacity of a long-note body, and of a charge note's, which is drawn more solidly because it
+    /// is a lane the player has to keep held rather than a tail that resolves itself.
+    pub long_note_body_alpha: u8,
+    pub charge_note_body_alpha: u8,
+    /// Lay a five-key chart out with the note width of a seven-key one rather than stretching its
+    /// six lanes across the whole field.
+    pub five_key_layout: bool,
 }
 
 impl Default for SkinConfig {
@@ -129,6 +151,11 @@ impl Default for SkinConfig {
             bomb_enabled: true,
             bomb_height: 56.0,
             bomb_duration_ms: 140,
+            charge_note_color: [250, 200, 60],
+            hell_charge_note_color: [230, 90, 200],
+            long_note_body_alpha: 90,
+            charge_note_body_alpha: 140,
+            five_key_layout: false,
         }
     }
 }
@@ -186,6 +213,10 @@ pub struct Skin {
     pub bomb_enabled: bool,
     pub bomb_size: f32,
     pub bomb_us: i64,
+    pub charge_note_color: Color,
+    pub hell_charge_note_color: Color,
+    pub long_note_body_alpha: u8,
+    pub charge_note_body_alpha: u8,
 }
 
 impl Skin {
@@ -198,16 +229,19 @@ impl Skin {
         let mut x = vec![0.0f32; n];
         let mut fields: Vec<(f32, f32)> = Vec::new();
         let lane_w;
+        let width_lanes = |lanes: usize| if cfg.five_key_layout && is_five_key(mode) { FIVE_KEY_WIDTH_LANES } else { lanes };
         if dual {
             let per_side = n / players;
             let gap = screen_w * cfg.dual_gap;
             let dual_left = screen_w * 0.03;
             let right_limit = cfg.bga.map(|b| b[0]).unwrap_or(screen_w) - 24.0;
             let fit_side = ((right_limit - dual_left) - gap * (players - 1) as f32) / players as f32;
-            let side_w = (screen_w * cfg.field_width).min(fit_side.max(40.0));
-            lane_w = side_w / per_side as f32;
+            let box_w = (screen_w * cfg.field_width).min(fit_side.max(40.0));
+            lane_w = box_w / width_lanes(per_side) as f32;
+            let side_w = lane_w * per_side as f32;
+            let inset = (box_w - side_w) * 0.5;
             for side in 0..players {
-                let base = dual_left + side as f32 * (side_w + gap);
+                let base = dual_left + inset + side as f32 * (box_w + gap);
                 fields.push((base, side_w));
                 let lanes: Vec<usize> = (side * per_side..(side + 1) * per_side).collect();
                 let scr: Vec<usize> = lanes.iter().copied().filter(|&l| mode.is_scratch(l)).collect();
@@ -223,8 +257,10 @@ impl Skin {
                 }
             }
         } else {
-            let field_w = screen_w * cfg.field_width;
-            lane_w = field_w / n as f32;
+            let box_w = screen_w * cfg.field_width;
+            lane_w = box_w / width_lanes(n) as f32;
+            let field_w = lane_w * n as f32;
+            let field_x0 = field_x0 + (box_w - field_w) * 0.5;
             let scratch_lanes: Vec<usize> = mode.scratch.to_vec();
             let non: Vec<usize> = (0..n).filter(|l| !mode.is_scratch(*l)).collect();
             let order: Vec<usize> = if cfg.scratch_left {
@@ -280,6 +316,10 @@ impl Skin {
             bomb_enabled: cfg.bomb_enabled,
             bomb_size: cfg.bomb_height,
             bomb_us: cfg.bomb_duration_ms as i64 * 1000,
+            charge_note_color: col(cfg.charge_note_color),
+            hell_charge_note_color: col(cfg.hell_charge_note_color),
+            long_note_body_alpha: cfg.long_note_body_alpha,
+            charge_note_body_alpha: cfg.charge_note_body_alpha,
         }
     }
 
@@ -306,6 +346,29 @@ impl Skin {
             self.key_color
         } else {
             self.key_color_alt
+        }
+    }
+
+    /// Colour of a long note of `flavour` in `lane`.
+    ///
+    /// A charge note and a hell charge note carry obligations a plain long note does not — the first
+    /// has to be let go on time, the second drains the gauge for as long as it is not held — so each
+    /// gets its own colour instead of the lane's. An undefined flavour is one the LN MODE has yet to
+    /// resolve, and is drawn as the plain note it will become if nothing resolves it.
+    pub fn long_note_color(&self, lane: usize, flavour: LnKind) -> Color {
+        match flavour {
+            LnKind::Cn => self.charge_note_color,
+            LnKind::Hcn => self.hell_charge_note_color,
+            LnKind::Ln | LnKind::Undefined => self.note_color(lane),
+        }
+    }
+
+    /// Opacity a long note's body is drawn at, which is higher for the two charge flavours because
+    /// they are lanes the player has to keep held rather than tails that resolve on their own.
+    pub fn long_note_alpha(&self, flavour: LnKind) -> u8 {
+        match flavour {
+            LnKind::Cn | LnKind::Hcn => self.charge_note_body_alpha,
+            LnKind::Ln | LnKind::Undefined => self.long_note_body_alpha,
         }
     }
 }
@@ -562,6 +625,83 @@ mod tests {
         assert!(matches!(err, SkinError::Parse { .. }), "bad syntax is a Parse error, got {err:?}");
         assert!(err.to_string().contains("rbms-render-broken-skin.ron"), "the message names the file: {err}");
         assert!(std::error::Error::source(&err).is_some(), "the RON error is kept as the source");
+    }
+
+    /// A five-key chart laid out on its own terms gets the note width a seven-key one has, so the
+    /// lanes stop being fat and the field is narrower instead.
+    #[test]
+    fn the_five_key_layout_gives_a_five_key_chart_seven_key_lane_width() {
+        let stretched = Skin::build(&SkinConfig::default(), Mode::BEAT_5K, 1280.0, 720.0);
+        let cfg = SkinConfig { five_key_layout: true, ..SkinConfig::default() };
+        let narrow = Skin::build(&cfg, Mode::BEAT_5K, 1280.0, 720.0);
+        let seven = Skin::build(&cfg, Mode::BEAT_7K, 1280.0, 720.0);
+        assert!(narrow.w[0] < stretched.w[0], "the lanes stop being stretched: {} against {}", narrow.w[0], stretched.w[0]);
+        assert!((narrow.w[0] - seven.w[0]).abs() < 1e-3, "and take the width a seven-key lane has");
+        let (_, narrow_w) = narrow.fields[0];
+        let (_, stretched_w) = stretched.fields[0];
+        assert!(narrow_w < stretched_w, "so the field itself is narrower");
+    }
+
+    /// The narrower field stays where the wider one was centred, so switching the row does not slide
+    /// the chart across the screen.
+    #[test]
+    fn the_five_key_layout_keeps_the_field_centred_where_it_was() {
+        let stretched = Skin::build(&SkinConfig::default(), Mode::BEAT_5K, 1280.0, 720.0);
+        let cfg = SkinConfig { five_key_layout: true, ..SkinConfig::default() };
+        let narrow = Skin::build(&cfg, Mode::BEAT_5K, 1280.0, 720.0);
+        let centre = |skin: &Skin| skin.fields[0].0 + skin.fields[0].1 * 0.5;
+        assert!((centre(&narrow) - centre(&stretched)).abs() < 1e-3, "{} against {}", centre(&narrow), centre(&stretched));
+    }
+
+    /// A ten-key chart is two five-key sides, so it follows the same row and each side keeps its
+    /// outer turntable.
+    #[test]
+    fn the_five_key_layout_narrows_both_sides_of_a_ten_key_chart() {
+        let cfg = SkinConfig { five_key_layout: true, ..SkinConfig::default() };
+        let narrow = Skin::build(&cfg, Mode::BEAT_10K, 1280.0, 720.0);
+        let stretched = Skin::build(&SkinConfig::default(), Mode::BEAT_10K, 1280.0, 720.0);
+        assert_eq!(narrow.fields.len(), 2, "ten-key stays a two-field layout");
+        assert!(narrow.fields[0].1 < stretched.fields[0].1, "each side is narrower");
+        let p1_right = (0..6).map(|l| narrow.x[l] + narrow.w[l]).fold(f32::MIN, f32::max);
+        let p2_left = (6..12).map(|l| narrow.x[l]).fold(f32::MAX, f32::min);
+        assert!(p1_right <= p2_left, "the two sides still do not overlap");
+        assert_eq!(narrow.x[5], (0..6).map(|l| narrow.x[l]).fold(f32::MAX, f32::min), "P1 turntable stays on the outer edge");
+    }
+
+    /// The row names five-key modes, so nothing else may move under it.
+    #[test]
+    fn the_five_key_layout_leaves_every_other_mode_alone() {
+        let cfg = SkinConfig { five_key_layout: true, ..SkinConfig::default() };
+        for mode in [Mode::BEAT_7K, Mode::BEAT_14K, Mode::POPN_9K] {
+            let on = Skin::build(&cfg, mode, 1280.0, 720.0);
+            let off = Skin::build(&SkinConfig::default(), mode, 1280.0, 720.0);
+            assert_eq!(on.x, off.x, "{} moved", mode.name);
+            assert_eq!(on.w, off.w, "{} changed width", mode.name);
+        }
+    }
+
+    /// The charge flavours are skin data, so a RON that names them is what decides the colours.
+    #[test]
+    fn a_skin_ron_can_restyle_the_charge_note_flavours() {
+        let cfg: SkinConfig = ron::from_str("(charge_note_color: (1,2,3), hell_charge_note_color: (4,5,6), charge_note_body_alpha: 200)").unwrap();
+        let skin = Skin::build(&cfg, Mode::BEAT_7K, 1280.0, 720.0);
+        assert_eq!(skin.long_note_color(0, LnKind::Cn), Color::rgb(1, 2, 3));
+        assert_eq!(skin.long_note_color(0, LnKind::Hcn), Color::rgb(4, 5, 6));
+        assert_eq!(skin.long_note_alpha(LnKind::Hcn), 200);
+        assert_eq!(skin.long_note_alpha(LnKind::Ln), SkinConfig::default().long_note_body_alpha, "an unnamed field keeps its default");
+    }
+
+    /// Every field this branch added has to fall back on its own, so a skin written before they
+    /// existed keeps loading byte for byte.
+    #[test]
+    fn a_skin_written_before_these_fields_existed_still_loads() {
+        let cfg: SkinConfig = ron::from_str("(field_width: 0.6)").unwrap();
+        let default = SkinConfig::default();
+        assert_eq!(cfg.charge_note_color, default.charge_note_color);
+        assert_eq!(cfg.hell_charge_note_color, default.hell_charge_note_color);
+        assert_eq!(cfg.long_note_body_alpha, default.long_note_body_alpha);
+        assert_eq!(cfg.charge_note_body_alpha, default.charge_note_body_alpha);
+        assert!(!cfg.five_key_layout, "the layout is off until a skin or the settings ask for it");
     }
 
     #[test]

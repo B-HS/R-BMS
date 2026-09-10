@@ -9,6 +9,7 @@ pub mod result;
 pub mod select;
 pub mod skin;
 pub mod theme;
+pub mod toast;
 
 pub use cpu::CpuCanvas;
 pub use ctx::{RenderCtx, with_render_ctx};
@@ -16,10 +17,11 @@ pub use font::{
     LAYOUT_CACHE_LIMIT, RUN_CACHE_LIMIT, TextContext, cache_stats, draw_text, draw_text_centered, draw_text_right, fit_text, load_font, reset_ui_family,
     set_ui_family, text_width, with_text_context,
 };
-pub use hud::{HudView, render_hud, render_hud_ctx};
-pub use playfield::{PlayfieldView, render_key_bomb, render_lane_cover, render_playfield_view};
+pub use hud::{HudPace, HudView, render_hud, render_hud_ctx};
+pub use playfield::{LaneShade, PlayfieldView, render_key_bomb, render_lane_cover, render_playfield_view};
 pub use result::{
-    RANK_BANDS, ResultPalette, ResultView, dj_rank, draw_rank_bar, ex_delta_label, render_result, render_result_ctx, render_result_with_palette,
+    KEY_LANE_KIND, LANE_KIND_COUNT, RANK_BANDS, RATE_STEPS, ResultExtras, ResultPalette, ResultView, SCRATCH_LANE_KIND, TargetView, dj_rank, dj_rank_label,
+    draw_rank_bar, draw_rank_bar_stepped, ex_delta_label, lane_kind_total, rate_27, render_result, render_result_ctx, render_result_with_palette,
     render_result_with_palette_ctx,
 };
 pub use select::{
@@ -28,6 +30,7 @@ pub use select::{
 };
 pub use skin::{Skin, SkinConfig, SkinError};
 pub use theme::{Theme, ThemeConfig, set_theme, theme};
+pub use toast::{ToastLevel, ToastView, render_toasts, render_toasts_ctx, toast_color};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Color {

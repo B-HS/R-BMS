@@ -69,19 +69,24 @@ mod tests {
     fn view() -> ResultView {
         ResultView {
             title: "CONTEXT".into(),
+            mode_label: "7K",
             counts: [10, 4, 3, 2, 1, 0],
             ex_score: 24,
             max_score: 40,
             max_combo: 12,
             total_notes: 20,
-            fast: 3,
-            slow: 2,
+            fast: [3, 0],
+            slow: [2, 0],
             gauge: 64.0,
             clear_label: "CLEAR",
             clear_color: Color::GREEN,
             prev_best_ex: Some(20),
             prev_ex: None,
             show_graph: true,
+            show_result_graphs: true,
+            gauge_series: Vec::new(),
+            timing_hist: Box::new([]),
+            judge_dist: [0; 6],
         }
     }
 

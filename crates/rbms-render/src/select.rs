@@ -29,6 +29,11 @@ pub struct SelectRow {
     pub difficulty_color: Color,
     pub lamp: Color,
     pub folder_count: Option<usize>,
+    /// DJ rank of the chart's best run (`AAA`, `A` …), or `None` when nothing has been recorded on
+    /// it or the app is not showing ranks.
+    pub dj_level: Option<&'static str>,
+    /// The chart has been starred, which the row marks next to its clear lamp.
+    pub favorite: bool,
 }
 
 /// Per-second note-density readout for the detail panel histogram (`bins`) plus the three scalar
@@ -130,10 +135,15 @@ pub struct SelectView {
     pub detail: SelectDetail,
     pub modal: Option<SelectModal>,
     pub score_graph: bool,
-    /// Live search query while the search box is open (`None` when not searching). Filters the list.
+    /// The query as the search box draws it while it is open, caret and all (`None` when not
+    /// searching). The app composes it, so where the caret sits is the app's to decide.
     pub search: Option<String>,
     /// Current sort-order label (e.g. `"DEFAULT"`, `"TITLE"`), shown top-right.
     pub sort: &'static str,
+    /// What the browser's filter is taking out (e.g. `"LV 10–12  FAVOURITES"`), shown next to the
+    /// sort order, or `None` when it is taking nothing out. A filter with its panel closed would
+    /// otherwise be invisible, and a filtered library looks like a lost one.
+    pub filter: Option<String>,
     /// Shown centered when the list is empty: `(title, body)` onboarding/empty hint (e.g. a first-run
     /// "add a music folder" call to action). Ignored when rows exist.
     pub empty_hint: Option<(&'static str, &'static str)>,
@@ -147,6 +157,14 @@ const TOP: f32 = 60.0;
 const BOTTOM: f32 = 660.0;
 const ROW_H: f32 = 36.0;
 const ROW_GAP: f32 = 4.0;
+
+/// Width of the marker a starred chart carries, drawn in the gap between the clear lamp and the
+/// mode badge so it costs the title no room.
+const FAVORITE_W: f32 = 4.0;
+
+/// Room kept on the right of a row for its DJ rank, so a long title is trimmed to fit rather than
+/// drawn under it.
+const DJ_LEVEL_W: f32 = 48.0;
 
 /// The cover (`#STAGEFILE`) square in the detail panel. The GPU backend uploads the decoded image
 /// here; the renderer frames it / draws a placeholder. Kept as a function so both sides share it.
@@ -231,19 +249,24 @@ pub fn render_select_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &Se
     r.clear(th.bg);
     r.fill_rect(Rect::new(0.0, 0.0, 1280.0, 52.0), th.topbar);
     ctx.draw_text(r, LIST_X, 12.0, 2.6, th.text, "MUSIC SELECT");
+    let m = v.rows.len();
     if let Some(q) = &v.search {
         let bx = 290.0;
         let bw = 240.0;
         r.fill_rect(Rect::new(bx, 10.0, bw, 32.0), th.button_active);
         outline(r, Rect::new(bx, 10.0, bw, 32.0), 1.5, th.focus);
-        let fitted = ctx.fit_text(&format!("\u{1F50D} {q}_"), 1.4, bw - 20.0);
+        let fitted = ctx.fit_text(&format!("\u{1F50D} {q}"), 1.4, bw - 20.0);
         ctx.draw_text(r, bx + 10.0, 18.0, 1.4, th.text, &fitted);
+        ctx.draw_text(r, bx + bw + 12.0, 20.0, 1.2, th.text_dim, &format!("{m} HITS"));
     } else if !v.header.is_empty() {
         let fitted = ctx.fit_text(&v.header, 1.3, LIST_X + LIST_W - 300.0 - 80.0);
         ctx.draw_text(r, 300.0, 22.0, 1.3, th.text_dim, &fitted);
     }
-    let m = v.rows.len();
-    ctx.draw_text_right(r, LIST_X + LIST_W, 6.0, 1.0, th.accent, &format!("SORT: {}", v.sort));
+    let sort_line = match &v.filter {
+        Some(filter) => format!("SORT: {}   FILTER: {filter}", v.sort),
+        None => format!("SORT: {}", v.sort),
+    };
+    ctx.draw_text_right(r, LIST_X + LIST_W, 6.0, 1.0, th.accent, &sort_line);
     ctx.draw_text_right(r, LIST_X + LIST_W, 24.0, 1.4, th.text_dim, &format!("{}/{}", (v.sel + 1).min(m.max(1)), m));
 
     if v.modal.is_none() {
@@ -318,6 +341,9 @@ fn render_list<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &SelectView, 
         }
         r.fill_rect(Rect::new(LIST_X, y, 6.0, h), row.lamp);
         r.fill_rect(Rect::new(LIST_X + LIST_W - 10.0, y, 8.0, h), row.lamp);
+        if row.favorite {
+            r.fill_rect(Rect::new(LIST_X + 6.0, y, FAVORITE_W, h), th.accent);
+        }
         let cy = y + h * 0.5;
         if row.folder {
             let fitted = ctx.fit_text(&format!("\u{25B8} {}", row.title), 1.6, LIST_W - 120.0);
@@ -344,8 +370,12 @@ fn render_list<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &SelectView, 
             badge(ctx, r, &level_chip, &row.level);
             let title_scale = if focused { 1.7 } else { 1.5 };
             let title_color = if focused { th.title_focus } else { th.title_dim };
-            let fitted = ctx.fit_text(&row.title, title_scale, LIST_W - 116.0 - 24.0);
+            let rank_room = if row.dj_level.is_some() { DJ_LEVEL_W } else { 0.0 };
+            let fitted = ctx.fit_text(&row.title, title_scale, LIST_W - 116.0 - 24.0 - rank_room);
             ctx.draw_text(r, LIST_X + 116.0, cy - title_scale * 7.0, title_scale, title_color, &fitted);
+            if let Some(rank) = row.dj_level {
+                ctx.draw_text_right(r, LIST_X + LIST_W - 16.0, cy - 8.0, 1.3, th.text_dim, rank);
+            }
         }
         if !modal_open {
             hot.push((Rect::new(LIST_X, y, LIST_W, h), SelectHot::Row(idx)));

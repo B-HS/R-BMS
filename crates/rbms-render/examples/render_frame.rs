@@ -32,7 +32,7 @@ fn main() {
             beam_on[lane] = microtime;
         }
     }
-    let field = PlayfieldView { timelines: &model.timelines, microtime, hispeed: 1.5, beam_on: &beam_on, beam_off: &[], constant: false };
+    let field = PlayfieldView { timelines: &model.timelines, microtime, hispeed: 1.5, beam_on: &beam_on, beam_off: &[], constant: false, legacy_note: false };
     render_playfield_view(&mut canvas, &skin, &field);
     let mut bomb = vec![(i64::MIN, 0u8); mode.key];
     for (k, lane) in [0usize, 2, mode.key.saturating_sub(1)].into_iter().enumerate() {
@@ -42,15 +42,19 @@ fn main() {
     }
     render_key_bomb(&mut canvas, &skin, &bomb, microtime);
     let hud = HudView {
+        mode_label: mode.name,
+        pace: None,
         combo: 123,
         last_judge: Some(0),
         last_fast: false,
-        fast: 30,
-        slow: 40,
+        fast: [26, 4],
+        slow: [35, 5],
         counts: [712, 64, 21, 8, 5, 2],
         ex_score: 1488,
         gauge: 78.0,
         green_number: 310.0,
+        white_number: 0.0,
+        judge_text_y: 0.0,
         max_ex: 1624,
         best_ex: Some(1502),
     };
