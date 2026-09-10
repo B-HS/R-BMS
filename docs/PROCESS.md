@@ -1,5 +1,6 @@
 # rbms — 레퍼런스 구현 core PLAY 모듈 Rust 포팅 (PROCESS / 단일 출처)
 
+> 세션 핸드오프 스냅샷: `docs/HANDOFF.md`(단일 진입점).
 > **2026-09-10 중단 지점**: 고도화 세션이 Phase G 배선 중 토큰 한도로 멈췄다. 재개는 `docs/history/2026-09-10-session-wrap-up.md` 부터(`dev` 는 clean·CI 통과, 미완 작업은 `wip/phase-g`).
 > 새 세션은 **이 문서부터** 읽는다. 현재 상태·아키텍처·실행법·할 일의 SSOT. (ai-process.md 원칙 1·14)
 > 베이스 룰: `~/.claude/CLAUDE.md` + convention. Rust 프로젝트 → TS 전용 규칙(arrow 등) 비적용, **공통 원칙**(주석 금지·설명은 docs/·정확 네이밍·근본 해결·공식문서 우선·검증 후 진행)은 그대로.

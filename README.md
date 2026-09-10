@@ -19,7 +19,7 @@ R-BMS reimplements the core PLAY loop of a GPL-3.0 reference implementation in R
 - **Song select** — recursive library scan, folders and difficulty tables (`data.json`), search and sort, `#PREVIEW` or autoplay preview, cover art, note density graph, local records with replay playback
 - **Result** — judge counts, FAST / SLOW, max combo, gauge, clear lamp, rank graph and delta against your best
 - **Replays** — saved per play, replayable with the same seed and options, analysis mode with seek, speed and per-note timing
-- **Skins and themes** — play field and HUD from a RON skin, UI chrome colours from a RON theme, any TTF/OTF font with full Unicode fallback
+- **Skins and themes** — reference-format JSON skins (json5, sandboxed Lua expressions, per-screen selection and customisation from the SKIN tab), RON defaults for the play field and HUD, UI chrome colours from a RON theme, any TTF/OTF font with full Unicode fallback
 - **Input** — every lane and control key rebindable in-app, conflict detection
 - **IR** — sign in, submit scores, browse rankings, sync settings, manage rivals and upload or replay ghosts, all from the in-game SETTINGS NETWORK tab and the song-select ranking panel
 - **Debug** — on-screen overlay with FPS, memory, audio clock and judge state
@@ -78,7 +78,7 @@ cargo clippy --workspace --all-targets
 cargo run -p rbms-render --example render_select   # headless render to PPM
 ```
 
-Workspace crates, bottom up: `rbms-model` (chart types) → `rbms-parser` (BMS lexer, `#RANDOM` / `#SWITCH`, MD5 + SHA-256) → `rbms-chart` (timing, lanes, shuffle, scroll) → `rbms-judge` (windows, matcher, gauges) → `rbms-audio` (cpal + symphonia, real-time mixer) / `rbms-render` (`Renderer` trait, CPU reference canvas, skins, fonts) / `rbms-ir` / `rbms-table` → `rbms-play` (session driver) → `apps/rbms-player` (winit + wgpu). CI builds a macOS universal binary and Windows on every push to `dev`.
+Workspace crates, bottom up: `rbms-model` (chart types) → `rbms-parser` (BMS lexer, `#RANDOM` / `#SWITCH`, MD5 + SHA-256) → `rbms-chart` (timing, lanes, shuffle, scroll) → `rbms-judge` (windows, algorithms, gauges, RON tables) → `rbms-audio` (cpal + symphonia, real-time mixer, interpolated clock) / `rbms-render` (`Renderer` trait, CPU reference canvas, skin renderer, fonts) / `rbms-skin` (JSON skin loader) / `rbms-ir` / `rbms-table` / `rbms-store` (scores, replays) / `rbms-library` (scan) / `rbms-config` (settings schema, descriptors) → `rbms-play` (PlaySession) → `apps/rbms-player` (winit + wgpu, stage-based app). CI runs tests on Linux, macOS and Windows with fmt and clippy `-D warnings` gates.
 
 Architecture, the reference parity ledger, decisions and the improvement plan live in [docs/](docs/README.md) (Korean). Start with [docs/PROCESS.md](docs/PROCESS.md).
 

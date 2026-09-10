@@ -75,6 +75,10 @@ Everything drawn — notes, beams, text (cosmic-text), BGA frame — lowers to `
 - **Configuration is one versioned document** (`settings.ron`, `schema_version`): play/judge/display/audio/network/library options in one `Config`. A pre-version file migrates on load and absorbs `folders.ron`/`tables.ron` **without deleting them**; a file from a newer schema is left untouched and the app starts on defaults, so a downgrade cannot destroy settings.
 - **Keymaps** (`KeyConfig`, RON), **skins**, **themes**, **difficulty tables** and **replays** stay their own files under the config dir (every file `#[serde(default)]`, parse-fail → `.ron.bak` + defaults). The config dir resolves `HOME` → `USERPROFILE` → `.` for cross-platform parity (Windows lands in `%USERPROFILE%\.config\rbms`); `config_dir_from` is unit-tested. Every write goes through `rbms_store::write_atomic` (temp + rename).
 
+### JSON skins (`rbms-skin` + `rbms-render::skin_render`)
+
+Since Phase E a screen can be driven by a reference-format JSON skin document instead of its built-in layout: `rbms-skin` loads the document (json5, sandboxed Lua expressions, skin-root file resolution), binds its timers and property ids to live `PlaySession`/app state, and `rbms-render::skin_render` draws it through the textured-quad, clip and rotation primitives of the `Renderer` trait (batched per draw order in the GPU backend). When no document is selected the built-in screens render exactly as before, which the golden signatures pin. Selection and customisation are persisted in `rbms-config` (`Config.skin`) and edited on the SKIN settings tab.
+
 ## App UI state machine (`Stage`)
 
 The screens: `Select` (song list: search `/`, sort `F3`, clickable bottom nav, IR ranking panel) · `Settings` (tab strip over the descriptor table, incl. a **NETWORK** tab that signs in and edits SERVER URL / PLAYER ID in place) · `KeyConfig` · `Tables` (difficulty-table manager) · `Folders` (multi-folder library manager) · `Loading` (determinate keysound-decode progress bar) · `Play` · `Result`.
