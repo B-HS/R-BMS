@@ -32,11 +32,13 @@ use rbms_library::{ChartDetail, Library, compute_chart_detail};
 use rbms_model::Mode;
 use rbms_play::{ANALYSIS_SEEK_STEP_US, NullSink, PlaySession, Player, ScratchDir, SessionClock, SessionOptions};
 use rbms_render::{
-    Color, CoverState, DensityView, DetailView, HudView, PlayfieldView, RANK_BANDS, RecordRowView, RecordsView, Rect, Renderer, ResultPalette, ResultView,
-    SelectDetail, SelectHot, SelectModal, SelectRow, SelectView as SelectScene, Skin, SkinConfig, StatCell, cover_rect, dj_rank, draw_text, draw_text_centered,
-    draw_text_right, ex_delta_label, render_hud, render_key_bomb, render_lane_cover, render_playfield_view, render_result_with_palette, render_select,
-    text_width,
+    Color, CoverState, DensityView, DetailView, HudView, PlayTimers, PlayfieldView, RANK_BANDS, RecordRowView, RecordsView, Rect, Renderer, ResultPalette,
+    ResultView, SelectDetail, SelectHot, SelectModal, SelectRow, SelectTimers, SelectView as SelectScene, Skin, SkinConfig, StatCell, cover_rect, dj_rank,
+    draw_text, draw_text_centered, draw_text_right, ex_delta_label, render_hud, render_key_bomb, render_lane_cover, render_playfield_view,
+    render_result_with_palette, render_select, text_width,
 };
+pub(crate) use rbms_skin::loader::{SKIN_TYPE_DECIDE, SKIN_TYPE_KEY_CONFIG, SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_RESULT, mode_skin_type};
+use rbms_skin::timer::TimerState;
 use rbms_store::{Replay, ReplayJudge, SCORE_LN_MODE_FROM_CHART, SCORE_RULE_VERSION, ScoreBook, ScoreRecord};
 
 use sha2::{Digest, Sha256};
@@ -74,6 +76,8 @@ mod notify;
 mod play_sink;
 mod settings_ui;
 mod settings_view;
+mod skin_screen;
+mod skin_select;
 mod stage;
 mod tablesrc;
 pub mod target;
@@ -82,7 +86,7 @@ mod timing;
 mod toast;
 use app_network::build_server;
 use app_play::schedule_poll_interval_us;
-pub(crate) use assets::{bundled_skin, decode_bga_256, keysound_jobs, load_theme, resolve_file, scan_folders, spawn_keysound_decode};
+pub(crate) use assets::{DecodedImage, bundled_skin, decode_bga_image, keysound_jobs, load_theme, resolve_file, scan_folders, spawn_keysound_decode};
 use favorites::{Favorites, favorites_path};
 use format::{
     clear_label_color, difficulty_color, difficulty_name, fmt_datetime, fmt_duration, gauge_name, mode_color, mode_short, rank_label, rule_version_mark,
@@ -99,6 +103,8 @@ use keyconfig::{ControlAction, KeyConfig, key_from_name, key_name};
 use notify::{Level, notify};
 use play_sink::PlayAudioSink;
 use settings_view::{SettingsHot, render_settings};
+use skin_screen::SkinScreens;
+use skin_select::SkinLibrary;
 use stage::{Canvas, FrameCtx, KeyInput, LoadingState, SelectState, Stage, StageId, Transition};
 use tablesrc::{TableLevels, fetch_and_match};
 use textedit::{TextEdit, edit_key};
@@ -420,6 +426,19 @@ struct AppShared {
     schedule_poll_us: i64,
     skin: Skin,
     skin_cfg: SkinConfig,
+    /// The skin documents on disk and the one each screen is drawn with, which the SKIN tab edits.
+    /// Held here rather than on the settings screen because the document outlives the screen that
+    /// chose it: every other screen draws with it.
+    skins: SkinLibrary,
+    /// The documents that have been compiled into drawable screens, one per screen type. Held
+    /// alongside the library for the same reason: a compiled screen owns textures and must outlive
+    /// the stage that drew with it, so walking into a song and back does not decode a skin twice.
+    skin_screens: SkinScreens,
+    /// The timer table every document animates against, and the memories that decide when each
+    /// screen's timers are switched.
+    skin_timers: TimerState,
+    skin_play_timers: PlayTimers,
+    skin_select_timers: SelectTimers,
     /// Result-screen judge colours/labels resolved from the active skin, rebuilt with it.
     result_palette: ResultPalette,
     server: Arc<dyn ScoreServer>,
@@ -556,6 +575,7 @@ impl App {
 
         let keyconfig_path = launch.keyconfig_path.clone().map(PathBuf::from).unwrap_or_else(|| config_dir().join("keyconfig.ron"));
         let keyconfig = KeyConfig::load(&keyconfig_path);
+        let skins = SkinLibrary::new(&settings_path, &config);
 
         let mut app = App {
             stage,
@@ -593,6 +613,11 @@ impl App {
                 schedule_poll_us: 0,
                 skin: Skin::default_for(MODE, CW as f32, CH as f32),
                 skin_cfg: SkinConfig::default(),
+                skins,
+                skin_screens: SkinScreens::new(),
+                skin_timers: TimerState::default(),
+                skin_play_timers: PlayTimers::new(),
+                skin_select_timers: SelectTimers::new(),
                 result_palette: ResultPalette::from_skin(&SkinConfig::default()),
                 server: built.server,
                 server_connected: built.connected,
@@ -640,6 +665,7 @@ impl App {
             },
         };
         app.shared.rebuild_select_items();
+        app.shared.reload_skin();
         app
     }
 }

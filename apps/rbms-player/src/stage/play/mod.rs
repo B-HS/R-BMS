@@ -14,7 +14,13 @@ use crate::target::ResolvedTarget;
 use crate::*;
 use rbms_config::FixHiSpeed;
 use rbms_render::playfield::LaneShade;
-use rbms_render::{HudPace, KEY_LANE_KIND, LANE_KIND_COUNT, SCRATCH_LANE_KIND};
+use rbms_render::skin_render::state::PlayViewState;
+use rbms_render::{HudPace, KEY_LANE_KIND, LANE_KIND_COUNT, SCRATCH_LANE_KIND, TextureId};
+use rbms_skin::timer::timer_id;
+
+/// Microseconds in one millisecond, which is the unit the play clock is kept in and the unit a
+/// document reads the play head in.
+const MICROS_PER_MILLI: i64 = 1_000;
 
 /// How long Escape has to be held down to abandon a run under [`PlayEscape::Hold`].
 const ESC_HOLD: Duration = Duration::from_millis(PLAY_ESCAPE_HOLD_MS);
@@ -110,7 +116,7 @@ fn pace_ex_at(target_ex: u32, judged: u32, total: u32) -> i64 {
 /// timeline), the chart's decoded BGA images, and the LN mode the score submission reports.
 pub(crate) struct PlayState {
     pub(crate) session: PlaySession,
-    bga: std::collections::HashMap<i32, Vec<u8>>,
+    bga: std::collections::HashMap<i32, crate::DecodedImage>,
     /// IR `lntype` of this run (0=LN, 1=CN, 2=HCN): the chart's own `#LNMODE` when it states one,
     /// and the LN MODE the run was judged under when it does not.
     pub(crate) lntype: i32,
@@ -138,8 +144,22 @@ pub(crate) struct PlayState {
     pace_target: Option<ResolvedTarget>,
 }
 
+/// The frame `PlaySession::bga_frame` reports before the chart's first background event, which is
+/// what a chart with no events of its own stays on.
+#[cfg(test)]
+pub(crate) const NO_BGA_FRAME: i32 = -1;
+
+/// What a play document needs from the frame beyond the HUD snapshot: where the play head is, the
+/// tempo and scroll speed shown beside it, and the background image this frame decoded.
+struct DocumentFrame {
+    song_us: i64,
+    bpm: f64,
+    hispeed: f64,
+    background: Option<TextureId>,
+}
+
 impl PlayState {
-    pub(crate) fn new(session: PlaySession, bga: std::collections::HashMap<i32, Vec<u8>>, lntype: i32, ln_mode_key: String) -> PlayState {
+    pub(crate) fn new(session: PlaySession, bga: std::collections::HashMap<i32, crate::DecodedImage>, lntype: i32, ln_mode_key: String) -> PlayState {
         let bpm = BpmStats::of(session.model());
         PlayState {
             session,
@@ -367,6 +387,39 @@ impl PlayState {
 
     /// The replay-analysis overlay: a playback bar, the current rate/paused state and time, plus the
     /// recent per-note timing errors (ms early = cyan +, late = orange -).
+    /// Draw the document this run's layout is selected for, and report whether it drew.
+    ///
+    /// The mode decides which document: a five-key chart reaches for the five-key screen, and a mode
+    /// no document type covers goes straight back to the built-in field. The document itself was
+    /// read and compiled at the top of the frame, because whether one exists is also what decides
+    /// where the chart's background image goes. The timers are switched from the same HUD snapshot
+    /// the built-in screen is drawn from, so a document's judgement flash and the HUD's own counter
+    /// can never disagree about what just happened.
+    fn draw_document(&self, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'_>, hud: &HudView<'_>, frame: DocumentFrame) -> bool {
+        let DocumentFrame { song_us, bpm, hispeed, background } = frame;
+        let Some(skin_type) = mode_skin_type(ctx.shared.mode).filter(|skin_type| ctx.shared.has_skin_document(*skin_type)) else {
+            return false;
+        };
+        let now_ms = ctx.shared.skin_now_ms();
+        let total_notes = self.session.judge().total_notes();
+        if self.session.is_failed() && !ctx.shared.skin_timers.is_on(timer_id::FAILED) {
+            ctx.shared.skin_play_timers.fail(&mut ctx.shared.skin_timers, now_ms);
+        }
+        ctx.shared.skin_play_timers.update(&mut ctx.shared.skin_timers, hud, total_notes, now_ms);
+        let state = PlayViewState {
+            hud,
+            title: &self.session.model().meta.title,
+            song_ms: song_us / MICROS_PER_MILLI,
+            duration_ms: self.session.last_time_us() / MICROS_PER_MILLI,
+            bpm,
+            hispeed,
+            autoplay: ctx.shared.config.play.autoplay && ctx.shared.replay.is_none(),
+            now_ms,
+            offsets: None,
+        };
+        ctx.shared.draw_play_skin(canvas, skin_type, &state, background)
+    }
+
     fn draw_analysis(&self, canvas: &mut Canvas<'_>, song: i64) {
         let play = &self.session;
         let total = play.last_time_us().max(1);
@@ -398,6 +451,13 @@ impl PlayState {
 }
 
 impl StageHandler for PlayState {
+    /// A run starting is the moment the reference switches the play timer on and the ready timer
+    /// off, which is what a document's opening animation is measured from.
+    fn on_enter(&mut self, ctx: &mut FrameCtx<'_>) {
+        let now_ms = ctx.shared.skin_now_ms();
+        ctx.shared.skin_play_timers.start(&mut ctx.shared.skin_timers, now_ms);
+    }
+
     /// In manual analysis the displayed song time comes from the virtual clock (pausable,
     /// rate-scaled); otherwise it follows the real (audio) clock, and analysis mirrors it so a
     /// first manual control resumes from the live position. Manual analysis mutes keysounds.
@@ -468,28 +528,24 @@ impl StageHandler for PlayState {
         self.ensure_pace_target(ctx.shared);
         let song = self.song_us;
         let play = &self.session;
-        match (ctx.shared.config.display.bga, ctx.shared.skin.bga, self.bga.get(&play.bga_frame())) {
-            (true, Some(rect), Some(img)) => canvas.set_bga(img, rect),
+        let skin_type = mode_skin_type(ctx.shared.mode);
+        if let Some(skin_type) = skin_type {
+            ctx.shared.prepare_skin(canvas, skin_type);
+        }
+        let built_in_background = skin_type.is_none_or(|skin_type| !ctx.shared.has_skin_document(skin_type));
+        let frame_image = ctx.shared.config.display.bga.then(|| self.bga.get(&play.bga_frame())).flatten();
+        let mut document_background = None;
+        match (built_in_background, ctx.shared.skin.bga, frame_image) {
+            (true, Some(rect), Some(img)) => canvas.set_background(img.generation, &img.rgba, img.width, img.height, rect),
+            (false, _, Some(img)) => {
+                canvas.clear_bga();
+                document_background = canvas.background_texture(img.generation, &img.rgba, img.width, img.height);
+            }
             _ => canvas.clear_bga(),
         }
         let constant = ctx.shared.config.play.constant_speed;
         let hispeed = ctx.shared.config.play.hispeed;
         let cover = ctx.shared.effective_cover();
-        render_playfield_view(
-            canvas,
-            &ctx.shared.skin,
-            &PlayfieldView {
-                timelines: &play.model().timelines,
-                microtime: song,
-                hispeed,
-                beam_on: play.beam_on(),
-                beam_off: play.beam_off(),
-                constant,
-                legacy_note: ctx.shared.config.play.legacy_note,
-            },
-        );
-        render_lane_cover(canvas, &ctx.shared.skin, LaneShade { cover, hidden: ctx.shared.effective_hidden() });
-        render_key_bomb(canvas, &ctx.shared.skin, play.bomb(), song);
         let j = play.judge();
         let tls = &play.model().timelines;
         let seg = tls.binary_search_by(|t| t.time_us.cmp(&song)).unwrap_or_else(|i| i.saturating_sub(1));
@@ -525,8 +581,26 @@ impl StageHandler for PlayState {
                 .as_ref()
                 .map(|target| HudPace { name: &target.name, delta: j.ex_score as i64 - pace_ex_at(target.ex, j.total_judged(), j.total_notes()) }),
         };
+        if self.draw_document(ctx, canvas, &hud, DocumentFrame { song_us: song, bpm, hispeed, background: document_background }) {
+            return;
+        }
+        render_playfield_view(
+            canvas,
+            &ctx.shared.skin,
+            &PlayfieldView {
+                timelines: &self.session.model().timelines,
+                microtime: song,
+                hispeed,
+                beam_on: self.session.beam_on(),
+                beam_off: self.session.beam_off(),
+                constant,
+                legacy_note: ctx.shared.config.play.legacy_note,
+            },
+        );
+        render_lane_cover(canvas, &ctx.shared.skin, LaneShade { cover, hidden: ctx.shared.effective_hidden() });
+        render_key_bomb(canvas, &ctx.shared.skin, self.session.bomb(), song);
         render_hud(canvas, &ctx.shared.skin, &hud);
-        if play.analysis_enabled() {
+        if self.session.analysis_enabled() {
             self.draw_analysis(canvas, song);
         }
     }

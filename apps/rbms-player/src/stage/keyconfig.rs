@@ -103,6 +103,11 @@ impl StageHandler for KeyConfigState {
     fn draw(&mut self, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'_>) {
         let th = rbms_render::theme();
         canvas.clear_bga();
+        ctx.shared.prepare_skin(canvas, SKIN_TYPE_KEY_CONFIG);
+        let bound: Vec<String> = (0..ctx.shared.kc_edit_mode.key).map(|lane| ctx.shared.keyconfig.lane_token(ctx.shared.kc_edit_mode, lane)).collect();
+        if ctx.shared.draw_keyconfig_skin(canvas, &bound) {
+            return;
+        }
         canvas.clear(th.bg);
         let x0 = (CW as f32 - PANEL_W) * 0.5;
         draw_text(canvas, x0, 40.0, 3.0, th.text, "KEY CONFIG");

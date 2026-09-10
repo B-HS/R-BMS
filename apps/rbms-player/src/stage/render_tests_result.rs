@@ -10,7 +10,7 @@ fn the_result_screen_paints_its_summary() {
     let mut app = app();
     let pixels = render(&mut app, Stage::Result(result_state()));
     assert!(pixels.painted_pixels() > 0, "the result screen drew nothing");
-    assert!(pixels.bga().is_none(), "the result screen clears the background image slot");
+    assert!(pixels.background().is_none(), "the result screen clears the background image slot");
 }
 
 /// The result screen is the one that runs after a chart, so it must not still be showing the

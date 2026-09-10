@@ -6,10 +6,11 @@
 use crate::dialog::{DialogHandle, DialogState};
 use crate::ir_panel::*;
 use crate::ir_session::{AuthAction, GUEST_PLAYER_ID};
-use crate::settings_ui::{audio_status_text, is_network_row, output_device_names, step_audio_device};
+use crate::settings_ui::{SettingRow, audio_status_text, is_network_row, output_device_names, step_audio_device};
 use crate::settings_view::{RivalsScene, SettingsScene};
+use crate::skin_select::SkinRow;
 use crate::stage::{Canvas, FrameCtx, KeyConfigState, KeyInput, Stage, StageHandler, Transition};
-use rbms_config::{AdjustOutcome, SettingId, SettingTab, adjust, step_skin, tab_rows};
+use rbms_config::{AdjustOutcome, SettingId, SettingTab, adjust, step_skin};
 
 use crate::*;
 
@@ -45,8 +46,8 @@ pub(crate) struct SettingsState {
     /// The font picker while it is up. It runs beside the frame loop, so the screen keeps drawing
     /// while the user is in front of it and the answer is collected in `update`.
     font_picker: Option<DialogHandle>,
-    rows: Vec<SettingId>,
-    lines: Vec<(&'static str, String)>,
+    rows: Vec<SettingRow>,
+    lines: Vec<(String, String)>,
     dirty: bool,
 }
 
@@ -81,8 +82,8 @@ impl SettingsState {
 
     /// Re-read the open tab's rows and their values.
     fn refresh(&mut self, shared: &AppShared) {
-        self.rows = tab_rows(self.current_tab(), &shared.config);
-        self.lines = self.rows.iter().map(|&id| shared.setting_line(id)).collect();
+        self.rows = shared.settings_rows(self.current_tab());
+        self.lines = self.rows.iter().map(|&row| shared.settings_line(row)).collect();
         self.sel = self.sel.min(self.rows.len().saturating_sub(1));
         self.dirty = false;
     }
@@ -95,8 +96,16 @@ impl SettingsState {
     }
 
     /// The row the cursor is on.
-    fn focused(&self) -> Option<SettingId> {
+    fn focused(&self) -> Option<SettingRow> {
         self.rows.get(self.sel).copied()
+    }
+
+    /// The descriptor-table row the cursor is on, or `None` when it is on a skin document's own.
+    fn focused_fixed(&self) -> Option<SettingId> {
+        match self.focused() {
+            Some(SettingRow::Fixed(id)) => Some(id),
+            _ => None,
+        }
     }
 
     /// The AUDIO tab's status line: why the stream is not exactly what the rows ask for.
@@ -109,13 +118,20 @@ impl SettingsState {
 
     /// Apply one left/right step to a row. A row the configuration document cannot step on its own
     /// comes back as an action this screen runs.
-    fn step(&mut self, ctx: &mut FrameCtx<'_>, id: SettingId, delta: i32) -> Transition {
+    fn step(&mut self, ctx: &mut FrameCtx<'_>, row: SettingRow, delta: i32) -> Transition {
+        let id = match row {
+            SettingRow::Fixed(id) => id,
+            SettingRow::Skin(row) => return self.step_skin(ctx, row, delta),
+        };
         let outcome = adjust(&mut ctx.shared.config, id, delta);
         if let AdjustOutcome::Action(action) = outcome {
             return self.run_action(ctx, action, delta);
         }
         if outcome == AdjustOutcome::Changed {
             self.dirty = true;
+            if id == SettingId::SkinScreen {
+                ctx.shared.reload_skin();
+            }
         }
         match id {
             SettingId::MasterVolume | SettingId::KeyVolume | SettingId::BgmVolume | SettingId::SystemVolume => ctx.shared.apply_audio_gains(),
@@ -150,6 +166,24 @@ impl SettingsState {
             SettingId::AudioDevice => {
                 step_audio_device(&mut ctx.shared.config.audio, delta, &self.audio_devices);
             }
+            SettingId::SkinDocument => {
+                if ctx.shared.cycle_skin_document(delta) {
+                    ctx.shared.reload_skin();
+                }
+            }
+            SettingId::SkinReload => {
+                if delta > 0 {
+                    ctx.shared.rescan_skins();
+                    ctx.shared.reload_skin();
+                    ctx.shared.save_settings();
+                }
+            }
+            SettingId::SkinReset => {
+                if delta > 0 {
+                    ctx.shared.reset_skin_document();
+                    ctx.shared.save_settings();
+                }
+            }
             _ => {
                 if delta > 0 {
                     self.enter_network_row(ctx.shared, id);
@@ -157,6 +191,31 @@ impl SettingsState {
             }
         }
         Transition::Stay
+    }
+
+    /// Step one of the chosen document's own customisation rows.
+    ///
+    /// A property or a file changes what is drawn, so the document is read again; an offset is read
+    /// live out of the stored choices and needs no reload.
+    fn step_skin(&mut self, ctx: &mut FrameCtx<'_>, row: SkinRow, delta: i32) -> Transition {
+        if ctx.shared.step_skin_row(row, delta) {
+            self.dirty = true;
+            if ctx.shared.skin_reload_pending() {
+                ctx.shared.reload_skin();
+            }
+        }
+        Transition::Stay
+    }
+
+    /// Put the focused offset row back to what the document's author chose, which is the one row
+    /// kind with a value a key can zero rather than cycle.
+    fn reset_focused_row(&mut self, ctx: &mut FrameCtx<'_>) {
+        let Some(SettingRow::Skin(row)) = self.focused() else {
+            return;
+        };
+        if ctx.shared.reset_skin_row(row) {
+            self.dirty = true;
+        }
     }
 
     /// Collect the font picker's answer once the user has given one, and load what they chose.
@@ -362,13 +421,16 @@ impl SettingsState {
                 self.dirty = true;
             }
             KeyCode::Enter | KeyCode::NumpadEnter => {
-                let Some(id) = focused else {
+                let Some(row) = focused else {
                     return Transition::Stay;
+                };
+                let Some(id) = self.focused_fixed() else {
+                    return self.step(ctx, row, ROW_STEP_FORWARD);
                 };
                 match id {
                     SettingId::KeyConfig => return Transition::Open(Stage::KeyConfig(KeyConfigState::new())),
                     SettingId::Font => return self.run_action(ctx, SettingId::Font, ROW_STEP_FORWARD),
-                    _ if is_network_row(id) => return self.step(ctx, id, ROW_STEP_FORWARD),
+                    _ if is_network_row(id) || is_skin_action_row(id) => return self.step(ctx, row, ROW_STEP_FORWARD),
                     _ => {
                         ctx.shared.save_settings();
                         return Transition::Back;
@@ -378,26 +440,38 @@ impl SettingsState {
             KeyCode::ArrowUp => self.sel = self.sel.saturating_sub(1),
             KeyCode::ArrowDown => self.sel = (self.sel + 1).min(self.rows.len().saturating_sub(1)),
             KeyCode::ArrowLeft => {
-                if let Some(id) = focused {
-                    return self.step(ctx, id, ROW_STEP_BACK);
+                if let Some(row) = focused {
+                    return self.step(ctx, row, ROW_STEP_BACK);
                 }
             }
             KeyCode::ArrowRight => {
-                if let Some(id) = focused {
-                    return self.step(ctx, id, ROW_STEP_FORWARD);
+                if let Some(row) = focused {
+                    return self.step(ctx, row, ROW_STEP_FORWARD);
                 }
             }
+            KeyCode::Digit0 | KeyCode::Numpad0 => self.reset_focused_row(ctx),
             _ => {}
         }
         Transition::Stay
     }
 }
 
+/// Whether Enter on this row runs something rather than leaving the screen: the two SKIN actions
+/// and the document row, which Enter steps the way the right arrow does.
+fn is_skin_action_row(id: SettingId) -> bool {
+    matches!(id, SettingId::SkinDocument | SettingId::SkinReload | SettingId::SkinReset)
+}
+
 impl StageHandler for SettingsState {
     /// Re-read the host's output device list on the way in, so the AUDIO DEVICE row cycles through
-    /// what is plugged in now, and build the rows the first tab shows.
+    /// what is plugged in now; walk the skin folder, so a document dropped into it while the game
+    /// was running is offered; and build the rows the first tab shows.
     fn on_enter(&mut self, ctx: &mut FrameCtx<'_>) {
         self.audio_devices = output_device_names();
+        ctx.shared.rescan_skins();
+        if ctx.shared.skin_reload_pending() {
+            ctx.shared.reload_skin();
+        }
         self.refresh(ctx.shared);
     }
 
@@ -410,7 +484,7 @@ impl StageHandler for SettingsState {
         self.poll_font_picker(ctx.shared);
         let rows = rival_rows(&ctx.shared.config.network.rivals).len();
         self.rivals_sel = self.rivals_sel.min(rows.saturating_sub(1));
-        if self.rows.contains(&SettingId::Account) {
+        if self.rows.contains(&SettingRow::Fixed(SettingId::Account)) {
             self.dirty = true;
         }
         Transition::Stay
@@ -449,10 +523,10 @@ impl StageHandler for SettingsState {
                 self.dirty = true;
             }
             Some(Hot::SettingRow(i)) => {
-                if let Some(id) = self.rows.get(i).copied() {
+                if let Some(row) = self.rows.get(i).copied() {
                     self.cancel_text_edit();
                     self.sel = i;
-                    return self.step(ctx, id, ROW_STEP_FORWARD);
+                    return self.step(ctx, row, ROW_STEP_FORWARD);
                 }
             }
             Some(Hot::RivalRow(i)) => self.rivals_click(ctx.shared, i),
@@ -478,11 +552,14 @@ impl StageHandler for SettingsState {
 }
 
 #[cfg(test)]
+mod skin_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::stage::render_tests::app;
 
-    fn press(code: KeyCode) -> KeyInput<'static> {
+    pub(super) fn press(code: KeyCode) -> KeyInput<'static> {
         KeyInput { code, pressed: true, released: false, text: None }
     }
 

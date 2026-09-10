@@ -19,6 +19,7 @@ rbms-parser = { workspace = true }
 rbms-chart = { workspace = true }
 rbms-config = { workspace = true }
 rbms-render = { workspace = true }
+rbms-skin = { workspace = true }
 rbms-judge = { workspace = true }
 rbms-ir = { workspace = true, features = ["mapping"] }
 rbms-play = { workspace = true }

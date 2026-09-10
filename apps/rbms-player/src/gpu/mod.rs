@@ -2,9 +2,17 @@
 //! plumbing lives apart from the app/UI state machine. `Gpu` implements `rbms_render::Renderer`,
 //! so every UI composer (`render_playfield`/`render_hud`/…) targets it directly.
 
+mod background;
+mod batch;
+
+#[cfg(test)]
+pub(crate) use background::background_upload_needed;
+
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use rbms_render::{Color, Rect, Renderer};
+use batch::{Batch, BatchKind, ColoredInstance, DrawList, TexturedInstance, pad_rows_to_alignment, scissor_rect};
+use rbms_render::{BlendFactor, BlendMode, Color, QuadParams, Rect, Renderer, TextureFilter, TextureId};
 use winit::window::Window;
 
 use crate::{CH, CW};
@@ -29,36 +37,75 @@ fn vs(@builtin(vertex_index) vi: u32, @location(0) rect: vec4<f32>, @location(1)
 fn fs(in: VsOut) -> @location(0) vec4<f32> { return in.color; }
 "#;
 
-pub(crate) const BGA_DIM: u32 = 256;
-const BGA_SHADER: &str = r#"
-struct U { screen: vec4<f32>, rect: vec4<f32> };
-@group(0) @binding(0) var<uniform> u: U;
-@group(0) @binding(1) var t: texture_2d<f32>;
-@group(0) @binding(2) var s: sampler;
-struct VsOut { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32> };
+const TEXTURED_SHADER: &str = r#"
+@group(0) @binding(0) var<uniform> screen: vec4<f32>;
+@group(1) @binding(0) var t: texture_2d<f32>;
+@group(1) @binding(1) var s: sampler;
+struct VsOut { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32>, @location(1) tint: vec4<f32> };
 @vertex
-fn vs(@builtin(vertex_index) vi: u32) -> VsOut {
-    var c = array<vec2<f32>, 6>(vec2<f32>(0.,0.), vec2<f32>(1.,0.), vec2<f32>(0.,1.), vec2<f32>(0.,1.), vec2<f32>(1.,0.), vec2<f32>(1.,1.));
-    let q = c[vi];
-    let px = u.rect.xy + q * u.rect.zw;
-    let ndc = vec2<f32>(px.x / u.screen.x * 2. - 1., 1. - px.y / u.screen.y * 2.);
+fn vs(@builtin(vertex_index) vi: u32,
+      @location(0) rect: vec4<f32>,
+      @location(1) uv: vec4<f32>,
+      @location(2) tint: vec4<f32>,
+      @location(3) rot: vec4<f32>) -> VsOut {
+    var corners = array<vec2<f32>, 6>(
+        vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 0.0), vec2<f32>(0.0, 1.0),
+        vec2<f32>(0.0, 1.0), vec2<f32>(1.0, 0.0), vec2<f32>(1.0, 1.0));
+    let c = corners[vi];
+    let d = c * rect.zw - rot.zw;
+    let turned = vec2<f32>(d.x * rot.x - d.y * rot.y, d.x * rot.y + d.y * rot.x);
+    let px = rect.xy + rot.zw + turned;
+    let ndc = vec2<f32>(px.x / screen.x * 2.0 - 1.0, 1.0 - px.y / screen.y * 2.0);
     var o: VsOut;
-    o.pos = vec4<f32>(ndc, 0., 1.);
-    o.uv = q;
+    o.pos = vec4<f32>(ndc, 0.0, 1.0);
+    o.uv = mix(uv.xy, uv.zw, c);
+    o.tint = tint;
     return o;
 }
 @fragment
-fn fs(in: VsOut) -> @location(0) vec4<f32> { return textureSample(t, s, in.uv); }
+fn fs(in: VsOut) -> @location(0) vec4<f32> { return textureSample(t, s, in.uv) * in.tint; }
 "#;
 
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct Instance {
-    rect: [f32; 4],
-    color: [f32; 4],
+/// The blend modes a textured quad can ask for, in the order their pipelines are built and indexed.
+const BLEND_MODES: [BlendMode; 4] = [BlendMode::Alpha, BlendMode::Add, BlendMode::Multiply, BlendMode::InvertDst];
+
+fn blend_index(mode: BlendMode) -> usize {
+    BLEND_MODES.iter().position(|m| *m == mode).unwrap_or(0)
+}
+
+/// One term of the shared blend table as wgpu names it, so both backends blend by the same rule.
+fn wgpu_factor(factor: BlendFactor) -> wgpu::BlendFactor {
+    match factor {
+        BlendFactor::Zero => wgpu::BlendFactor::Zero,
+        BlendFactor::One => wgpu::BlendFactor::One,
+        BlendFactor::SrcAlpha => wgpu::BlendFactor::SrcAlpha,
+        BlendFactor::OneMinusSrcAlpha => wgpu::BlendFactor::OneMinusSrcAlpha,
+        BlendFactor::SrcColor => wgpu::BlendFactor::Src,
+        BlendFactor::OneMinusDstColor => wgpu::BlendFactor::OneMinusDst,
+    }
+}
+
+fn blend_state(mode: BlendMode) -> wgpu::BlendState {
+    let f = mode.factors();
+    let component = |src, dst| wgpu::BlendComponent { src_factor: wgpu_factor(src), dst_factor: wgpu_factor(dst), operation: wgpu::BlendOperation::Add };
+    wgpu::BlendState { color: component(f.src_color, f.dst_color), alpha: component(f.src_alpha, f.dst_alpha) }
+}
+
+/// One registered texture and the bind groups that read it, one per sampler.
+struct GpuTexture {
+    width: u32,
+    height: u32,
+    texture: wgpu::Texture,
+    nearest: wgpu::BindGroup,
+    linear: wgpu::BindGroup,
 }
 
 const INSTANCE_ATTRS: [wgpu::VertexAttribute; 2] = wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4];
+
+const TEXTURED_ATTRS: [wgpu::VertexAttribute; 4] = wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4];
+
+/// Instances the buffers are sized for before they have to grow.
+const INITIAL_INSTANCE_CAPACITY: usize = 8192;
 
 /// Native instanced-quad renderer. Every `fill_rect` becomes one GPU instance; the whole
 /// note field is drawn in a single instanced draw call (no CPU rasterisation / texture
@@ -74,14 +121,26 @@ pub(crate) struct Gpu {
     bind_group: wgpu::BindGroup,
     instances: wgpu::Buffer,
     instance_cap: usize,
-    quads: Vec<Instance>,
+    /// One pipeline per blend mode, indexed by [`blend_index`]; blending is baked into a pipeline.
+    textured_pipelines: Vec<wgpu::RenderPipeline>,
+    textured_bgl: wgpu::BindGroupLayout,
+    textured_instances: wgpu::Buffer,
+    textured_cap: usize,
+    nearest_sampler: wgpu::Sampler,
+    linear_sampler: wgpu::Sampler,
+    textures: Vec<Option<GpuTexture>>,
+    texture_keys: HashMap<String, TextureId>,
+    draw: DrawList,
     clear_color: Color,
     letterbox: bool,
-    bga_pipeline: wgpu::RenderPipeline,
-    bga_uniform: wgpu::Buffer,
-    bga_tex: wgpu::Texture,
-    bga_bind_group: wgpu::BindGroup,
-    bga_active: bool,
+    /// The background image and where it goes, redrawn by [`Renderer::clear`] so it lands under the
+    /// frame's own quads without leaving the ordinary submission order.
+    background: Option<(TextureId, Rect)>,
+    /// Which decode the uploaded background pixels came from, so handing the same frame over again
+    /// costs no copy and no upload.
+    background_generation: Option<u64>,
+    /// The handle those pixels went to.
+    background_texture: Option<TextureId>,
 }
 
 /// Why the GPU backend could not be brought up. Every variant means the player cannot draw, so the
@@ -162,7 +221,7 @@ impl Gpu {
                 module: &shader,
                 entry_point: Some("vs"),
                 buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: std::mem::size_of::<Instance>() as u64,
+                    array_stride: std::mem::size_of::<ColoredInstance>() as u64,
                     step_mode: wgpu::VertexStepMode::Instance,
                     attributes: &INSTANCE_ATTRS,
                 }],
@@ -181,43 +240,19 @@ impl Gpu {
             cache: None,
         });
 
-        let instance_cap = 8192;
+        let instance_cap = INITIAL_INSTANCE_CAPACITY;
         let instances = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("instances"),
-            size: (instance_cap * std::mem::size_of::<Instance>()) as u64,
+            size: (instance_cap * std::mem::size_of::<ColoredInstance>()) as u64,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
-        let bga_tex = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("bga"),
-            size: wgpu::Extent3d { width: BGA_DIM, height: BGA_DIM, depth_or_array_layers: 1 },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-        let bga_view = bga_tex.create_view(&wgpu::TextureViewDescriptor::default());
-        let bga_sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
-        let bga_uniform = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("bga_u"),
-            size: 32,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let bga_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: None,
+        let textured_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("texture"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float { filterable: true },
@@ -227,44 +262,70 @@ impl Gpu {
                     count: None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 2,
+                    binding: 1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
             ],
         });
-        let bga_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: None,
-            layout: &bga_bgl,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: bga_uniform.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&bga_view) },
-                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&bga_sampler) },
-            ],
+        let textured_shader =
+            device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("textured"), source: wgpu::ShaderSource::Wgsl(TEXTURED_SHADER.into()) });
+        let textured_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("textured"),
+            bind_group_layouts: &[Some(&bgl), Some(&textured_bgl)],
+            immediate_size: 0,
         });
-        let bga_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("bga"), source: wgpu::ShaderSource::Wgsl(BGA_SHADER.into()) });
-        let bga_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: None, bind_group_layouts: &[Some(&bga_bgl)], immediate_size: 0 });
-        let bga_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: None,
-            layout: Some(&bga_pl),
-            vertex: wgpu::VertexState { module: &bga_shader, entry_point: Some("vs"), buffers: &[], compilation_options: Default::default() },
-            fragment: Some(wgpu::FragmentState {
-                module: &bga_shader,
-                entry_point: Some("fs"),
-                targets: &[Some(wgpu::ColorTargetState { format, blend: None, write_mask: wgpu::ColorWrites::ALL })],
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
+        let textured_pipelines = BLEND_MODES
+            .iter()
+            .map(|mode| {
+                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some("textured"),
+                    layout: Some(&textured_layout),
+                    vertex: wgpu::VertexState {
+                        module: &textured_shader,
+                        entry_point: Some("vs"),
+                        buffers: &[wgpu::VertexBufferLayout {
+                            array_stride: std::mem::size_of::<TexturedInstance>() as u64,
+                            step_mode: wgpu::VertexStepMode::Instance,
+                            attributes: &TEXTURED_ATTRS,
+                        }],
+                        compilation_options: Default::default(),
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &textured_shader,
+                        entry_point: Some("fs"),
+                        targets: &[Some(wgpu::ColorTargetState { format, blend: Some(blend_state(*mode)), write_mask: wgpu::ColorWrites::ALL })],
+                        compilation_options: Default::default(),
+                    }),
+                    primitive: wgpu::PrimitiveState::default(),
+                    depth_stencil: None,
+                    multisample: wgpu::MultisampleState::default(),
+                    multiview_mask: None,
+                    cache: None,
+                })
+            })
+            .collect();
+        let textured_instances = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("textured instances"),
+            size: (instance_cap * std::mem::size_of::<TexturedInstance>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
         });
+        let sampler = |filter| {
+            device.create_sampler(&wgpu::SamplerDescriptor {
+                mag_filter: filter,
+                min_filter: filter,
+                mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+                ..Default::default()
+            })
+        };
 
         Ok(Gpu {
             window,
             surface,
+            nearest_sampler: sampler(wgpu::FilterMode::Nearest),
+            linear_sampler: sampler(wgpu::FilterMode::Linear),
             device,
             queue,
             config,
@@ -272,38 +333,24 @@ impl Gpu {
             bind_group,
             instances,
             instance_cap,
-            quads: Vec::new(),
+            textured_pipelines,
+            textured_bgl,
+            textured_instances,
+            textured_cap: instance_cap,
+            textures: Vec::new(),
+            texture_keys: HashMap::new(),
+            draw: DrawList::default(),
             clear_color: Color::BLACK,
             letterbox: false,
-            bga_pipeline,
-            bga_uniform,
-            bga_tex,
-            bga_bind_group,
-            bga_active: false,
+            background: None,
+            background_generation: None,
+            background_texture: None,
         })
-    }
-
-    pub(crate) fn set_bga(&mut self, rgba: &[u8], rect: Rect) {
-        if rgba.len() != (BGA_DIM * BGA_DIM * 4) as usize {
-            return;
-        }
-        self.queue.write_texture(
-            wgpu::TexelCopyTextureInfo { texture: &self.bga_tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
-            rgba,
-            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4 * BGA_DIM), rows_per_image: Some(BGA_DIM) },
-            wgpu::Extent3d { width: BGA_DIM, height: BGA_DIM, depth_or_array_layers: 1 },
-        );
-        self.queue.write_buffer(&self.bga_uniform, 0, bytemuck::cast_slice(&[CW as f32, CH as f32, 0.0, 0.0, rect.x, rect.y, rect.w, rect.h]));
-        self.bga_active = true;
-    }
-
-    pub(crate) fn clear_bga(&mut self) {
-        self.bga_active = false;
     }
 
     /// Number of quad instances queued so far this frame (debug overlay metric).
     pub(crate) fn quad_count(&self) -> usize {
-        self.quads.len()
+        self.draw.quad_count()
     }
 
     /// Keep the logical screen's own shape inside the window, or stretch it to fill.
@@ -330,17 +377,29 @@ impl Gpu {
             }
         };
 
-        if self.quads.len() > self.instance_cap {
-            self.instance_cap = self.quads.len().next_power_of_two();
+        if self.draw.colored.len() > self.instance_cap {
+            self.instance_cap = self.draw.colored.len().next_power_of_two();
             self.instances = self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("instances"),
-                size: (self.instance_cap * std::mem::size_of::<Instance>()) as u64,
+                size: (self.instance_cap * std::mem::size_of::<ColoredInstance>()) as u64,
                 usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
         }
-        if !self.quads.is_empty() {
-            self.queue.write_buffer(&self.instances, 0, bytemuck::cast_slice(&self.quads));
+        if self.draw.textured.len() > self.textured_cap {
+            self.textured_cap = self.draw.textured.len().next_power_of_two();
+            self.textured_instances = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("textured instances"),
+                size: (self.textured_cap * std::mem::size_of::<TexturedInstance>()) as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+        }
+        if !self.draw.colored.is_empty() {
+            self.queue.write_buffer(&self.instances, 0, bytemuck::cast_slice(&self.draw.colored));
+        }
+        if !self.draw.textured.is_empty() {
+            self.queue.write_buffer(&self.textured_instances, 0, bytemuck::cast_slice(&self.draw.textured));
         }
 
         let c = self.clear_color;
@@ -363,23 +422,85 @@ impl Gpu {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            let (vx, vy, vw, vh) = self.viewport();
+            let viewport = self.viewport();
+            let (vx, vy, vw, vh) = viewport;
             rp.set_viewport(vx, vy, vw, vh, 0.0, 1.0);
-            if self.bga_active {
-                rp.set_pipeline(&self.bga_pipeline);
-                rp.set_bind_group(0, &self.bga_bind_group, &[]);
-                rp.draw(0..6, 0..1);
-            }
-            if !self.quads.is_empty() {
-                rp.set_pipeline(&self.pipeline);
-                rp.set_bind_group(0, &self.bind_group, &[]);
-                rp.set_vertex_buffer(0, self.instances.slice(..));
-                rp.draw(0..6, 0..self.quads.len() as u32);
+            rp.set_bind_group(0, &self.bind_group, &[]);
+
+            let surface = (self.config.width, self.config.height);
+            for entry in &self.draw.batches {
+                let Some((sx, sy, sw, sh)) = scissor_rect(entry.clip, viewport, (CW, CH), surface) else {
+                    continue;
+                };
+                rp.set_scissor_rect(sx, sy, sw, sh);
+                self.draw_batch(&mut rp, entry);
             }
         }
         self.queue.submit([enc.finish()]);
         self.window.pre_present_notify();
         frame.present();
+    }
+
+    /// Issue one batch as a single instanced draw, in the order it was queued.
+    fn draw_batch(&self, rp: &mut wgpu::RenderPass<'_>, entry: &Batch) {
+        if entry.count == 0 {
+            return;
+        }
+        match entry.kind {
+            BatchKind::Colored => {
+                rp.set_pipeline(&self.pipeline);
+                rp.set_vertex_buffer(0, self.instances.slice(..));
+            }
+            BatchKind::Textured { tex, blend, filter, .. } => {
+                let Some(Some(texture)) = self.textures.get(tex.0 as usize) else {
+                    return;
+                };
+                rp.set_pipeline(&self.textured_pipelines[blend_index(blend)]);
+                rp.set_bind_group(1, if filter == TextureFilter::Linear { &texture.linear } else { &texture.nearest }, &[]);
+                rp.set_vertex_buffer(0, self.textured_instances.slice(..));
+            }
+        }
+        rp.draw(0..6, entry.first..entry.first + entry.count);
+    }
+
+    /// Hand `rgba` to the GPU under an existing handle, padding rows to the copy alignment.
+    fn upload(&self, texture: &wgpu::Texture, rgba: &[u8], width: u32, height: u32) {
+        if width == 0 || height == 0 {
+            return;
+        }
+        let (data, bytes_per_row) = pad_rows_to_alignment(rgba, width, height);
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo { texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            &data,
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(bytes_per_row), rows_per_image: Some(height) },
+            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        );
+    }
+
+    /// Allocate a texture of `width` x `height` plus the bind groups that read it.
+    fn create_texture(&self, width: u32, height: u32) -> GpuTexture {
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("skin texture"),
+            size: wgpu::Extent3d { width: width.max(1), height: height.max(1), depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let group = |sampler| {
+            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: None,
+                layout: &self.textured_bgl,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
+                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(sampler) },
+                ],
+            })
+        };
+        GpuTexture { width, height, nearest: group(&self.nearest_sampler), linear: group(&self.linear_sampler), texture }
     }
 
     /// Where a physical window position lands in the fixed logical screen the UI is laid out in.
@@ -406,15 +527,75 @@ impl Renderer for Gpu {
     }
 
     fn clear(&mut self, color: Color) {
-        self.quads.clear();
+        self.draw.clear();
         self.clear_color = color;
+        if let Some((tex, params)) = self.background_quad() {
+            self.draw_textured_quad(tex, params);
+        }
     }
 
     fn fill_rect(&mut self, rect: Rect, color: Color) {
-        self.quads.push(Instance {
-            rect: [rect.x, rect.y, rect.w, rect.h],
-            color: [color.r as f32 / 255.0, color.g as f32 / 255.0, color.b as f32 / 255.0, color.a as f32 / 255.0],
-        });
+        self.draw.push_colored(ColoredInstance::new(rect, color));
+    }
+
+    fn register_texture(&mut self, key: &str, rgba: &[u8], width: u32, height: u32) -> TextureId {
+        if let Some(&id) = self.texture_keys.get(key)
+            && let Some(Some(existing)) = self.textures.get(id.0 as usize)
+            && existing.width == width
+            && existing.height == height
+        {
+            self.upload(&existing.texture, rgba, width, height);
+            return id;
+        }
+        let created = self.create_texture(width, height);
+        self.upload(&created.texture, rgba, width, height);
+        match self.texture_keys.get(key).copied() {
+            Some(id) if (id.0 as usize) < self.textures.len() => {
+                self.textures[id.0 as usize] = Some(created);
+                id
+            }
+            _ => {
+                let id = TextureId(self.textures.len() as u32);
+                self.textures.push(Some(created));
+                self.texture_keys.insert(key.to_string(), id);
+                id
+            }
+        }
+    }
+
+    fn release_texture(&mut self, tex: TextureId) {
+        if let Some(slot) = self.textures.get_mut(tex.0 as usize) {
+            *slot = None;
+        }
+        self.texture_keys.retain(|_, id| *id != tex);
+        if self.background.is_some_and(|(id, _)| id == tex) {
+            self.background = None;
+        }
+        if self.background_texture == Some(tex) {
+            self.background_texture = None;
+            self.background_generation = None;
+        }
+    }
+
+    fn texture_size(&self, tex: TextureId) -> Option<(u32, u32)> {
+        self.textures.get(tex.0 as usize).and_then(|t| t.as_ref()).map(|t| (t.width, t.height))
+    }
+
+    fn draw_textured_quad(&mut self, tex: TextureId, params: QuadParams) {
+        let drawable = matches!(self.texture_size(tex), Some((width, height)) if width > 0 && height > 0);
+        if !(drawable && params.dst.w > 0.0 && params.dst.h > 0.0) {
+            return;
+        }
+        let kind = BatchKind::Textured { tex, blend: params.blend, filter: params.filter, rotated: params.is_rotated() };
+        self.draw.push_textured(kind, TexturedInstance::new(&params));
+    }
+
+    fn push_clip(&mut self, rect: Rect) {
+        self.draw.push_clip(rect);
+    }
+
+    fn pop_clip(&mut self) {
+        self.draw.pop_clip();
     }
 }
 

@@ -17,12 +17,22 @@ use crate::*;
 pub(crate) struct ResultState {
     view: Box<ResultView>,
     extras: ResultExtras,
+    /// Whether the run counted as a clear. The view carries the lamp's label and colour but not the
+    /// verdict itself, and a document asks for the verdict.
+    cleared: bool,
 }
 
 impl ResultState {
-    /// A screen reporting a run and nothing around it: no target, and no offer to run it again.
+    /// A screen reporting a run and nothing around it: no target, no offer to run it again, and a
+    /// run that did not clear.
     pub(crate) fn new(view: ResultView) -> ResultState {
-        ResultState { view: Box::new(view), extras: ResultExtras::default() }
+        ResultState { view: Box::new(view), extras: ResultExtras::default(), cleared: false }
+    }
+
+    /// The same screen reporting a run that reached the end with its gauge up.
+    pub(crate) fn cleared(mut self, cleared: bool) -> ResultState {
+        self.cleared = cleared;
+        self
     }
 
     /// The same screen with what surrounds the run on it: the target it was paced against, and
@@ -68,6 +78,10 @@ impl StageHandler for ResultState {
 
     fn draw(&mut self, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'_>) {
         canvas.clear_bga();
+        ctx.shared.prepare_skin(canvas, SKIN_TYPE_RESULT);
+        if ctx.shared.draw_result_skin(canvas, &self.view, self.extras.target.as_ref(), self.cleared) {
+            return;
+        }
         render_result_with_palette(canvas, &self.view, &ctx.shared.result_palette, &self.extras);
         for (i, (text, kind)) in ctx.shared.ir_status.lines().iter().enumerate() {
             draw_text(canvas, IR_RESULT_X, IR_RESULT_Y + i as f32 * IR_RESULT_LINE_H, IR_RESULT_SCALE, ir_line_color(*kind), text);

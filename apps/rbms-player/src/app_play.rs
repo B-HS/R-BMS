@@ -22,7 +22,7 @@ pub(crate) struct PendingChart {
 
 impl PendingChart {
     /// Turn the parsed chart into the screen that plays it, now that its images are in.
-    pub(crate) fn into_play(self, bga: std::collections::HashMap<i32, Vec<u8>>) -> PlayState {
+    pub(crate) fn into_play(self, bga: std::collections::HashMap<i32, crate::DecodedImage>) -> PlayState {
         PlayState::new(self.session, bga, self.lntype, self.ln_mode_key)
     }
 }

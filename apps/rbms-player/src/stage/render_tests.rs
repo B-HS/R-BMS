@@ -40,10 +40,16 @@ pub(super) fn app() -> App {
 }
 
 pub(super) fn play_state() -> PlayState {
+    play_state_with_bga(std::collections::HashMap::new())
+}
+
+/// The same play screen with a background image map of the caller's own, for the tests that need one
+/// on screen.
+pub(super) fn play_state_with_bga(bga: std::collections::HashMap<i32, crate::DecodedImage>) -> PlayState {
     let src = rbms_parser::parse_with(CHART.as_bytes(), Default::default());
     let mode = rbms_chart::detect_mode(&src, "snapshot.bms");
     let model = rbms_chart::to_model(&src, mode);
-    PlayState::new(PlaySession::new(model, SessionOptions::default()), std::collections::HashMap::new(), 0, SCORE_LN_MODE_FROM_CHART.to_string())
+    PlayState::new(PlaySession::new(model, SessionOptions::default()), bga, 0, SCORE_LN_MODE_FROM_CHART.to_string())
 }
 
 pub(super) fn result_state() -> ResultState {
@@ -77,14 +83,23 @@ pub(super) const FRAME_DT: f32 = 1.0 / 60.0;
 /// than transitioned into, so a screen's `on_enter` (which can enumerate audio devices) stays out
 /// of the render snapshots.
 pub(super) fn render(app: &mut App, stage: Stage) -> HeadlessCanvas {
-    app.stage = stage;
     let mut pixels = HeadlessCanvas::new(CW, CH);
-    let mut canvas = Canvas::Headless(&mut pixels);
+    render_into(app, stage, &mut pixels);
+    pixels
+}
+
+/// Draw one stage onto a canvas the caller keeps.
+///
+/// A test that needs several frames of the same screen has to reuse one canvas: a compiled skin
+/// document holds textures registered with the target it was built against, so a fresh canvas per
+/// frame would leave the document pointing at handles that target never heard of.
+pub(super) fn render_into(app: &mut App, stage: Stage, pixels: &mut HeadlessCanvas) {
+    app.stage = stage;
+    let mut canvas = Canvas::Headless(pixels);
     let now = std::time::Instant::now();
     app.shared.hot.clear();
     let mut ctx = FrameCtx { shared: &mut app.shared, now, dt: FRAME_DT };
     app.stage.draw(&mut ctx, &mut canvas);
-    pixels
 }
 
 /// Every screen, freshly constructed, in the order they appear in [`Stage`].
@@ -147,8 +162,87 @@ fn the_background_image_slot_is_cleared_by_the_screens_that_do_not_use_it() {
     let mut app = app();
     for (name, stage) in every_stage() {
         let pixels = render(&mut app, stage);
-        assert!(pixels.bga().is_none(), "{name} left a background image behind");
+        assert!(pixels.background().is_none(), "{name} left a background image behind");
     }
+}
+
+/// The background image is an ordinary texture drawn as an ordinary quad, and the one moment it is
+/// drawn at is the screen's own clear: after the frame is wiped, before the screen queues anything.
+/// Setting it before drawing is therefore enough to put it behind everything, with no special path
+/// in either backend.
+#[test]
+fn a_background_image_is_drawn_by_the_clear_that_follows_it() {
+    const SIDE: u32 = 8;
+    let marker = Color::rgb(9, 200, 40);
+    let pixels: Vec<u8> = (0..SIDE * SIDE).flat_map(|_| [marker.r, marker.g, marker.b, 255]).collect();
+
+    let mut canvas = HeadlessCanvas::new(CW, CH);
+    let rect = rbms_render::Rect::new(0.0, 0.0, CW as f32, CH as f32);
+    Canvas::Headless(&mut canvas).set_background(1, &pixels, SIDE, SIDE, rect);
+    let held = canvas.background().expect("the slot holds where the image goes");
+    assert_eq!((held.x, held.y, held.w, held.h), (rect.x, rect.y, rect.w, rect.h));
+
+    rbms_render::Renderer::clear(&mut canvas, Color::BLACK);
+    assert_eq!(canvas.pixel_at(1, 1), marker, "the clear paints the background over the colour it cleared to");
+    assert_eq!(canvas.quad_count(), 1, "the background is one quad, counted like every other");
+
+    Canvas::Headless(&mut canvas).clear_bga();
+    rbms_render::Renderer::clear(&mut canvas, Color::BLACK);
+    assert_eq!(canvas.pixel_at(1, 1), Color::BLACK, "a cleared slot leaves the frame as the screen wiped it");
+    assert_eq!(canvas.quad_count(), 0);
+}
+
+/// A background is stretched over whatever rectangle the layout gives it, and the chart's own frames
+/// are routinely larger than that. Point sampling a shrink like that turns an animated background
+/// into a shimmer, so the target that draws it uses the same rule a document's own `bga` object
+/// does: interpolate unless the image lands at exactly its own size.
+#[test]
+fn a_resized_background_image_is_interpolated_by_the_clear_that_draws_it() {
+    const SIDE: u32 = 8;
+    let checker: Vec<u8> = (0..SIDE * SIDE)
+        .flat_map(|index| {
+            let light = ((index % SIDE) / 4 + (index / SIDE) / 4).is_multiple_of(2);
+            if light { [255, 255, 255, 255] } else { [0, 0, 0, 255] }
+        })
+        .collect();
+
+    let mut canvas = HeadlessCanvas::new(CW, CH);
+    let rect = rbms_render::Rect::new(0.0, 0.0, CW as f32, CH as f32);
+    Canvas::Headless(&mut canvas).set_background(1, &checker, SIDE, SIDE, rect);
+    rbms_render::Renderer::clear(&mut canvas, Color::BLACK);
+
+    let row: Vec<u8> = (0..CW).map(|x| canvas.pixel_at(x, CH / 4).r).collect();
+    assert!(row.iter().any(|shade| *shade > 20 && *shade < 235), "the enlargement was point sampled rather than interpolated");
+}
+
+/// Handing the same decode over again costs nothing: a background picture lasts hundreds of
+/// milliseconds while the screen offers it on every one of the frames in between, and copying and
+/// re-uploading megabytes sixty times a second for one picture is the difference between a
+/// background that is free and one that is not.
+#[test]
+fn a_background_frame_handed_over_twice_is_uploaded_once() {
+    const SIDE: u32 = 8;
+    let pixels: Vec<u8> = (0..SIDE * SIDE).flat_map(|_| [9u8, 200, 40, 255]).collect();
+
+    let mut canvas = HeadlessCanvas::new(CW, CH);
+    let rect = rbms_render::Rect::new(0.0, 0.0, CW as f32, CH as f32);
+    let first = Canvas::Headless(&mut canvas).background_texture(7, &pixels, SIDE, SIDE);
+    let again = Canvas::Headless(&mut canvas).background_texture(7, &pixels, SIDE, SIDE);
+    assert_eq!(first, again, "one decode is one texture however many frames offer it");
+    Canvas::Headless(&mut canvas).set_background(7, &pixels, SIDE, SIDE, rect);
+
+    assert!(crate::gpu::background_upload_needed(None, 7, (SIDE, SIDE)), "nothing uploaded yet");
+    assert!(!crate::gpu::background_upload_needed(Some((7, (SIDE, SIDE))), 7, (SIDE, SIDE)), "the same decode at the same size is already there");
+    assert!(crate::gpu::background_upload_needed(Some((7, (SIDE, SIDE))), 8, (SIDE, SIDE)), "the next frame of the animation is a new decode");
+    assert!(crate::gpu::background_upload_needed(Some((7, (SIDE, SIDE))), 7, (SIDE, 16)), "a decode that changed size needs a new texture");
+}
+
+/// Pixels that do not fill the size they are handed over with are refused rather than read past.
+#[test]
+fn a_background_image_whose_pixels_do_not_match_its_size_is_refused() {
+    let mut canvas = HeadlessCanvas::new(CW, CH);
+    Canvas::Headless(&mut canvas).set_background(1, &[0, 0, 0, 255], 4, 4, rbms_render::Rect::new(0.0, 0.0, 4.0, 4.0));
+    assert!(canvas.background().is_none(), "one pixel is not a four by four image");
 }
 
 /// The JUDGE tab draws every row it declares, and draws a different frame from the tab next to it —

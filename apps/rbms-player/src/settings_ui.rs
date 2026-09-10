@@ -10,9 +10,27 @@
 use rbms_audio::cpal::traits::{DeviceTrait, HostTrait};
 use rbms_audio::{AudioOpenReport, Bus};
 
-use rbms_config::{AudioOptions, CUSTOM_VALUE, SettingId, SettingTab, cycle_device, descriptor, display_value};
+use rbms_config::{AudioOptions, CUSTOM_VALUE, SettingId, SettingTab, cycle_device, descriptor, display_value, tab_rows};
 
+use crate::skin_select::SkinRow;
 use crate::*;
+
+/// The row the skin document's own customisation rows are listed directly above.
+const SKIN_CUSTOM_ANCHOR: SettingId = SettingId::SkinReload;
+
+/// One row of the settings screen.
+///
+/// Every tab but SKIN is exactly the descriptor table's rows. A skin document declares its own
+/// customisation rows, so the SKIN tab has [`SettingRow::Skin`] entries between the document row and
+/// the actions under it, and the screen addresses a row by what it is rather than by an index into
+/// one flat list.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum SettingRow {
+    /// A row of `rbms_config::SETTINGS`.
+    Fixed(SettingId),
+    /// A customisation row the chosen skin document declares.
+    Skin(SkinRow),
+}
 
 /// Shown while the rows describe a stream the app has not been able to open at all.
 pub(crate) const AUDIO_UNAVAILABLE_STATUS: &str = "NO OUTPUT DEVICE - RUNNING SILENT";
@@ -98,9 +116,76 @@ impl AppShared {
         let value = match id {
             SettingId::Gauge => gauge_name(self.config.play.gauge).to_string(),
             SettingId::Skin if self.launch.skin_path.is_some() => CUSTOM_VALUE.to_string(),
+            SettingId::SkinDocument => self.skins.document_value(&self.config),
+            SettingId::SkinInfo => self.skins.info(&self.config),
             _ => display_value(&self.config, id),
         };
         (label, value)
+    }
+
+    /// The rows one tab shows, top to bottom.
+    ///
+    /// The SKIN tab is the only one whose length is not fixed: the chosen document's own
+    /// customisation rows sit between the document row and the actions under it.
+    pub(crate) fn settings_rows(&self, tab: SettingTab) -> Vec<SettingRow> {
+        let fixed = tab_rows(tab, &self.config);
+        if tab != SettingTab::Skin {
+            return fixed.into_iter().map(SettingRow::Fixed).collect();
+        }
+        let custom = self.skins.rows(&self.config);
+        let at = fixed.iter().position(|id| *id == SKIN_CUSTOM_ANCHOR).unwrap_or(fixed.len());
+        let mut rows: Vec<SettingRow> = fixed[..at].iter().copied().map(SettingRow::Fixed).collect();
+        rows.extend(custom.into_iter().map(SettingRow::Skin));
+        rows.extend(fixed[at..].iter().copied().map(SettingRow::Fixed));
+        rows
+    }
+
+    /// Label and value of one row of the settings screen.
+    pub(crate) fn settings_line(&self, row: SettingRow) -> (String, String) {
+        match row {
+            SettingRow::Fixed(id) => {
+                let (label, value) = self.setting_line(id);
+                (label.to_string(), value)
+            }
+            SettingRow::Skin(row) => self.skins.line(&self.config, row),
+        }
+    }
+
+    /// Step one of the chosen document's customisation rows, and report whether it moved.
+    pub(crate) fn step_skin_row(&mut self, row: SkinRow, delta: i32) -> bool {
+        self.skins.step(&mut self.config, row, delta)
+    }
+
+    /// Put one of the chosen document's customisation rows back to what its author chose.
+    pub(crate) fn reset_skin_row(&mut self, row: SkinRow) -> bool {
+        self.skins.reset_row(&mut self.config, row)
+    }
+
+    /// Step the SKIN row through the built-in screen and every document that draws this screen.
+    pub(crate) fn cycle_skin_document(&mut self, delta: i32) -> bool {
+        self.skins.cycle_document(&mut self.config, delta)
+    }
+
+    /// Drop every choice made in the chosen document and read it again as its author shipped it.
+    pub(crate) fn reset_skin_document(&mut self) {
+        self.skins.forget(&mut self.config);
+        self.reload_skin();
+    }
+
+    /// Walk the skin folder again and read the chosen document with the choices made for it.
+    pub(crate) fn rescan_skins(&mut self) {
+        let settings_path = self.settings_path.clone();
+        self.skins.rescan(&settings_path, &self.config);
+    }
+
+    /// Read the chosen document again, so what is on screen is what the rows say.
+    pub(crate) fn reload_skin(&mut self) {
+        self.skins.reload(&self.config);
+    }
+
+    /// Whether the document chosen for the open screen is not the one that has been read.
+    pub(crate) fn skin_reload_pending(&self) -> bool {
+        self.skins.needs_reload(&self.config)
     }
 
     /// Push the master and per-bus gains to the running output stream. Also called right after the
@@ -175,6 +260,11 @@ mod tests {
         (SettingId::Target, "TARGET", "RATE AAA"),
         (SettingId::Total, "TOTAL", "AUTO"),
         (SettingId::Skin, "SKIN", "NORMAL"),
+        (SettingId::SkinScreen, "SCREEN", "PLAY 7KEYS"),
+        (SettingId::SkinDocument, "SKIN", "DEFAULT"),
+        (SettingId::SkinInfo, "LOADED", "BUILT-IN SCREEN"),
+        (SettingId::SkinReload, "RELOAD", ">"),
+        (SettingId::SkinReset, "RESET", ">"),
         (SettingId::AutoCal, "AUTO CAL", "OFF"),
         (SettingId::AutoReplay, "AUTO REPLAY", "ON"),
         (SettingId::DebugMode, "DEBUG MODE", "OFF"),

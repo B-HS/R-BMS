@@ -4,13 +4,11 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::Receiver;
 
 use rbms_library::SongEntry;
-use rbms_render::SkinConfig;
-
-use crate::gpu;
+use rbms_render::{SkinConfig, SkinImage};
 
 /// A decode running on the worker pool: what has arrived, how far it has got, the cooperative
 /// cancel, and how many jobs there are in total.
@@ -171,6 +169,74 @@ pub(crate) fn spawn_keysound_decode(jobs: Vec<(u32, PathBuf, String)>, cancel: A
     spawn_decode(jobs.into_iter().map(|(id, path, ext)| (id, (path, ext))).collect(), cancel, decode_keysound)
 }
 
+/// Distinguishes one decode from the next.
+///
+/// A background is handed to the target on every frame while the picture only changes every few
+/// hundred milliseconds, so the target needs a cheap way to recognise the frame it already holds
+/// and skip re-uploading megabytes of it. Identity, not content: two decodes of the same file are
+/// two images here, which costs one upload and never shows the wrong picture.
+static NEXT_IMAGE_GENERATION: AtomicU64 = AtomicU64::new(1);
+
+/// One decoded image, at whatever size the file itself was.
+///
+/// Nothing resizes a background on the way in any more: the renderer takes a texture of any size and
+/// stretches it onto the rectangle the screen asks for, so a chart's own resolution survives.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DecodedImage {
+    pub(crate) rgba: Vec<u8>,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    /// This decode's own number, which a draw target uses to tell one frame from the next.
+    pub(crate) generation: u64,
+}
+
+impl DecodedImage {
+    /// One image built in a test, taking a generation of its own like any other decode.
+    #[cfg(test)]
+    pub(crate) fn for_test(rgba: Vec<u8>, width: u32, height: u32) -> DecodedImage {
+        DecodedImage { rgba, width, height, generation: NEXT_IMAGE_GENERATION.fetch_add(1, Ordering::Relaxed) }
+    }
+}
+
+/// Which half of a skin document's files one decode job carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum SkinAssetKind {
+    Image,
+    Font,
+}
+
+/// One of a skin document's files, read and decoded off the frame loop.
+#[derive(Debug)]
+pub(crate) enum SkinAsset {
+    Image(SkinImage),
+    Font(Vec<u8>),
+}
+
+/// What one skin decode job names.
+pub(crate) type SkinAssetJob = (SkinAssetKind, PathBuf);
+
+/// Decode one of a document's files.
+fn decode_skin_asset(job: &SkinAssetJob) -> Option<SkinAsset> {
+    let (kind, path) = job;
+    match kind {
+        SkinAssetKind::Image => {
+            let decoded = image::open(path).ok()?.to_rgba8();
+            let (width, height) = decoded.dimensions();
+            SkinImage::new(width, height, decoded.into_raw()).map(SkinAsset::Image)
+        }
+        SkinAssetKind::Font => std::fs::read(path).ok().map(SkinAsset::Font),
+    }
+}
+
+/// Fan a skin document's images and fonts out over the worker pool.
+///
+/// A published skin names dozens of source images and some of them are two thousand pixels square,
+/// which is seconds of decoding the frame loop cannot spend. Until the pool is done the screen it
+/// belongs to draws its built-in layout.
+pub(crate) fn spawn_skin_asset_decode(jobs: Vec<SkinAssetJob>, cancel: Arc<AtomicBool>) -> DecodePool<SkinAssetJob, SkinAsset> {
+    spawn_decode(jobs.into_iter().map(|job| (job.clone(), job)).collect(), cancel, decode_skin_asset)
+}
+
 /// Resolve every referenced background image in a chart's `bgamap` to `(id, path)` decode jobs
 /// (empty names skipped, unresolvable files dropped).
 pub(crate) fn bga_jobs(bgamap: &[String], dir: &Path) -> Vec<(i32, PathBuf)> {
@@ -184,7 +250,7 @@ pub(crate) fn bga_jobs(bgamap: &[String], dir: &Path) -> Vec<(i32, PathBuf)> {
 
 /// Fan background-image decode out over the worker pool. A chart can reference hundreds of images
 /// and each is resized on the way in, which is seconds of work the frame loop cannot spend.
-pub(crate) fn spawn_bga_decode(jobs: Vec<(i32, PathBuf)>, cancel: Arc<AtomicBool>) -> DecodePool<i32, Vec<u8>> {
+pub(crate) fn spawn_bga_decode(jobs: Vec<(i32, PathBuf)>, cancel: Arc<AtomicBool>) -> DecodePool<i32, DecodedImage> {
     spawn_decode(jobs, cancel, decode_bga_file)
 }
 
@@ -193,15 +259,16 @@ fn resolve_bga_file(dir: &Path, name: &str) -> Option<PathBuf> {
     resolve_file(dir, name, &["png", "bmp", "jpg", "jpeg"]).map(|(path, _)| path)
 }
 
-/// Decode one background image to the square the GPU holds them in.
-fn decode_bga_file(path: &PathBuf) -> Option<Vec<u8>> {
+/// Decode one background image at its own resolution.
+fn decode_bga_file(path: &PathBuf) -> Option<DecodedImage> {
     let bytes = std::fs::read(path).ok()?;
-    let img = image::load_from_memory(&bytes).ok()?;
-    Some(img.resize_exact(gpu::BGA_DIM, gpu::BGA_DIM, image::imageops::FilterType::Triangle).to_rgba8().into_raw())
+    let rgba = image::load_from_memory(&bytes).ok()?.to_rgba8();
+    let (width, height) = rgba.dimensions();
+    Some(DecodedImage { rgba: rgba.into_raw(), width, height, generation: NEXT_IMAGE_GENERATION.fetch_add(1, Ordering::Relaxed) })
 }
 
 /// Decode one named background image, for the single cover the browser shows.
-pub(crate) fn decode_bga_256(dir: &Path, name: &str) -> Option<Vec<u8>> {
+pub(crate) fn decode_bga_image(dir: &Path, name: &str) -> Option<DecodedImage> {
     decode_bga_file(&resolve_bga_file(dir, name)?)
 }
 
@@ -232,6 +299,21 @@ mod tests {
         assert_eq!(jobs.len(), 1);
         assert_eq!(jobs[0].0, 1, "the surviving image keeps slot 1");
         let _ = std::fs::remove_file(dir.join("second.png"));
+    }
+
+    /// A background is handed on at the resolution the file itself was, which is what lets the
+    /// renderer stretch it onto whatever rectangle the screen asks for rather than onto a square
+    /// chosen by the decoder.
+    #[test]
+    fn a_background_keeps_the_size_the_file_was_drawn_at() {
+        let dir = temp_dir("bga-size");
+        let path = dir.join("wide.png");
+        image::RgbaImage::from_pixel(6, 3, image::Rgba([1, 2, 3, 255])).save(&path).expect("write the fixture");
+
+        let decoded = decode_bga_image(&dir, "wide.png").expect("the fixture decodes");
+        assert_eq!((decoded.width, decoded.height), (6, 3), "the decoder resized what it was given");
+        assert_eq!(decoded.rgba.len(), 6 * 3 * 4, "the buffer does not hold that many RGBA pixels");
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

@@ -26,6 +26,8 @@ mod render_tests_result;
 mod render_tests_select;
 #[cfg(test)]
 mod render_tests_shell;
+#[cfg(test)]
+mod render_tests_skin;
 pub(crate) mod result;
 pub(crate) mod select;
 pub(crate) mod settings;

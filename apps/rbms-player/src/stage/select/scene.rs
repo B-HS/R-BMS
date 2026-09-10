@@ -119,7 +119,7 @@ impl SelectState {
                     level: e.level.clone(),
                     difficulty_color: difficulty_color(e.difficulty),
                     difficulty_name: difficulty_name(e.difficulty),
-                    cover: if self.cover_rgba.is_some() { CoverState::Present } else { CoverState::None },
+                    cover: if self.cover_image.is_some() { CoverState::Present } else { CoverState::None },
                     stats: vec![
                         StatCell { label: "BPM", value: bpm },
                         StatCell { label: "DENSITY", value: d.map(|d| format!("{}/s", d.avg_density.round() as i32)).unwrap_or_else(|| "\u{2026}".into()) },

@@ -50,7 +50,7 @@ pub(crate) const RIVALS_TITLE: &str = "RIVALS";
 pub(crate) struct SettingsScene {
     pub(crate) tabs: Vec<&'static str>,
     pub(crate) tab: usize,
-    pub(crate) rows: Vec<(&'static str, String)>,
+    pub(crate) rows: Vec<(String, String)>,
     pub(crate) sel: usize,
     /// Text being typed into the focused row, already masked when the row is a secret.
     pub(crate) editor: Option<String>,
@@ -200,8 +200,8 @@ mod tests {
 
     /// Rows the NETWORK tab shows, taken from the settings table so the scene the tests render is
     /// the one the screen builds.
-    fn network_rows() -> Vec<(&'static str, String)> {
-        tab_rows(SettingTab::Network, &Config::default()).into_iter().map(|id| (network_row_label(id).unwrap(), "value".to_string())).collect()
+    fn network_rows() -> Vec<(String, String)> {
+        tab_rows(SettingTab::Network, &Config::default()).into_iter().map(|id| (network_row_label(id).unwrap().to_string(), "value".to_string())).collect()
     }
 
     fn network_scene(sel: usize) -> SettingsScene {
@@ -223,6 +223,17 @@ mod tests {
         assert_eq!(scroll_start(scene.rows.len(), 0), 0);
         let last = scene.rows.len() - 1;
         assert_eq!(scroll_start(scene.rows.len(), last), scene.rows.len() - visible_rows());
+    }
+
+    /// The tab strip grew a ninth tab. It is laid out left to right from the panel's own left edge,
+    /// so a strip wider than the canvas would draw the last tab off the screen, where it could
+    /// neither be read nor clicked.
+    #[test]
+    fn the_whole_tab_strip_is_drawn_on_the_screen() {
+        rbms_render::font::use_embedded_fonts_only();
+        let x0 = (CANVAS_W - PANEL_W) * 0.5;
+        let width: f32 = SettingTab::ALL.iter().map(|tab| text_width(tab.label(), TAB_SCALE) + TAB_PAD + TAB_GAP).sum();
+        assert!(x0 + width - TAB_GAP <= CANVAS_W, "the tab strip is {width} wide and runs off the {CANVAS_W} wide screen");
     }
 
     #[test]

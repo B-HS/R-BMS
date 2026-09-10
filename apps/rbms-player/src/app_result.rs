@@ -276,7 +276,7 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
     shared.dump_timing_csv();
     let paced_by = run_target(shared, &chart.md5, summary.total_notes, prev_best_ex);
     let extras = ResultExtras { target: Some(TargetView { name: paced_by.name, ex: paced_by.ex }), run_again: offers_retry(shared) };
-    Transition::To(Stage::Result(ResultState::new(view).paced_by(extras)))
+    Transition::To(Stage::Result(ResultState::new(view).paced_by(extras).cleared(lamp.is_cleared())))
 }
 
 /// The target a run on this chart is paced against: the TARGET row settled against the records that

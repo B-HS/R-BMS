@@ -55,7 +55,8 @@ pub(crate) struct SelectState {
     /// arrived there. The detail is computed only once it has rested for [`FOCUS_DETAIL_DEBOUNCE`].
     focus_settle_si: Option<usize>,
     focus_settle_at: Instant,
-    cover_rgba: Option<Vec<u8>>,
+    /// The focused chart's cover art, at the resolution the file itself was decoded at.
+    cover_image: Option<crate::DecodedImage>,
     cached_scene: Option<SelectScene>,
     cached_key: Option<SelectKey>,
     /// Whether a shift key is down, which is what turns the sort key around, and whether a control
@@ -86,7 +87,7 @@ impl Default for SelectState {
             focused_detail_si: None,
             focus_settle_si: None,
             focus_settle_at: Instant::now(),
-            cover_rgba: None,
+            cover_image: None,
             cached_scene: None,
             cached_key: None,
             shift_held: false,
@@ -247,9 +248,9 @@ impl SelectState {
         }
         self.focused_detail_si = si;
         self.focused_detail = si.and_then(|i| shared.library.songs().get(i)).and_then(|e| compute_chart_detail(&e.path, e.mode));
-        self.cover_rgba = si.and_then(|i| shared.library.songs().get(i)).and_then(|e| {
+        self.cover_image = si.and_then(|i| shared.library.songs().get(i)).and_then(|e| {
             let dir = e.path.parent()?;
-            [&e.stagefile, &e.banner].into_iter().filter(|n| !n.trim().is_empty()).find_map(|n| decode_bga_256(dir, n))
+            [&e.stagefile, &e.banner].into_iter().filter(|n| !n.trim().is_empty()).find_map(|n| decode_bga_image(dir, n))
         });
     }
 
@@ -667,9 +668,23 @@ impl StageHandler for SelectState {
         let Some(view) = self.cached_scene.as_ref() else {
             return;
         };
-        match (&self.cover_rgba, &view.detail) {
-            (Some(rgba), SelectDetail::Song(_)) => canvas.set_bga(rgba, cover_rect()),
+        ctx.shared.prepare_skin(canvas, SKIN_TYPE_MUSIC_SELECT);
+        let mut document_background = None;
+        match (&self.cover_image, &view.detail) {
+            (Some(cover), SelectDetail::Song(_)) if !ctx.shared.has_skin_document(SKIN_TYPE_MUSIC_SELECT) => {
+                canvas.set_background(cover.generation, &cover.rgba, cover.width, cover.height, cover_rect());
+            }
+            (Some(cover), SelectDetail::Song(_)) => {
+                canvas.clear_bga();
+                document_background = canvas.background_texture(cover.generation, &cover.rgba, cover.width, cover.height);
+            }
             _ => canvas.clear_bga(),
+        }
+        let now_ms = ctx.shared.skin_now_ms();
+        let row = ctx.shared.sel;
+        ctx.shared.skin_select_timers.update(&mut ctx.shared.skin_timers, row, now_ms);
+        if ctx.shared.draw_select_skin(canvas, view, document_background) {
+            return;
         }
         let hot = render_select(canvas, view);
         ctx.shared.hot.extend(hot.into_iter().map(|(rect, h)| {

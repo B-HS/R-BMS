@@ -70,7 +70,7 @@ pub(crate) struct KeysoundLoad {
 
 /// The in-flight background-image decode of a loaded chart, in the same shape as the keysounds.
 pub(crate) struct BgaLoad {
-    pub(crate) rx: Receiver<(i32, Vec<u8>)>,
+    pub(crate) rx: Receiver<(i32, crate::DecodedImage)>,
     pub(crate) progress: Arc<AtomicUsize>,
     pub(crate) cancel: Arc<AtomicBool>,
     pub(crate) total: usize,
@@ -79,7 +79,7 @@ pub(crate) struct BgaLoad {
 /// A parsed chart waiting for the files it named, and what has arrived so far.
 pub(crate) struct ChartAssets {
     chart: PendingChart,
-    images: std::collections::HashMap<i32, Vec<u8>>,
+    images: std::collections::HashMap<i32, crate::DecodedImage>,
     bga: Option<BgaLoad>,
     keysounds: Option<KeysoundLoad>,
 }
@@ -123,15 +123,15 @@ impl ChartAssets {
     }
 
     /// Drain decoded background images into the chart's own map, on the same last-drain rule.
-    fn poll_images(images: &mut std::collections::HashMap<i32, Vec<u8>>, load: &BgaLoad) -> bool {
-        while let Ok((id, rgba)) = load.rx.try_recv() {
-            images.insert(id, rgba);
+    fn poll_images(images: &mut std::collections::HashMap<i32, crate::DecodedImage>, load: &BgaLoad) -> bool {
+        while let Ok((id, image)) = load.rx.try_recv() {
+            images.insert(id, image);
         }
         if load.progress.load(Ordering::Relaxed) < load.total {
             return false;
         }
-        while let Ok((id, rgba)) = load.rx.try_recv() {
-            images.insert(id, rgba);
+        while let Ok((id, image)) = load.rx.try_recv() {
+            images.insert(id, image);
         }
         println!("loaded {} BGA images", images.len());
         true
@@ -352,6 +352,22 @@ impl LoadingState {
         }
     }
 
+    /// How far the outstanding task has got, in the 0..=1 a document reads it as, and whether it is
+    /// over. A task with no total to count toward reports nothing rather than a made-up fraction.
+    fn skin_progress(&self, shared: &AppShared) -> (f32, bool) {
+        let (done, total) = match &self.task {
+            LoadingTask::Assets(assets) => assets.progress(),
+            LoadingTask::Scan { progress, .. } if progress.matching.load(Ordering::Relaxed) => {
+                (progress.tables.load(Ordering::Relaxed), shared.config.library.tables.len())
+            }
+            LoadingTask::Scan { .. } | LoadingTask::Table(_) | LoadingTask::Song(_) => (0, 0),
+        };
+        if total == 0 {
+            return (0.0, false);
+        }
+        (done as f32 / total as f32, done >= total)
+    }
+
     /// A filled bar with a count under it, for a task that knows how much there is to do.
     fn draw_determinate(canvas: &mut Canvas<'_>, x: f32, y: f32, done: usize, total: usize, unit: &str) {
         let th = rbms_render::theme();
@@ -403,8 +419,14 @@ impl StageHandler for LoadingState {
     fn draw(&mut self, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'_>) {
         let th = rbms_render::theme();
         canvas.clear_bga();
-        canvas.clear(th.bg);
+        ctx.shared.prepare_skin(canvas, SKIN_TYPE_DECIDE);
         let (heading, sub) = self.heading(ctx.shared);
+        let (progress, done) = self.skin_progress(ctx.shared);
+        if ctx.shared.draw_decide_skin(canvas, progress, done, &sub) {
+            self.drawn = true;
+            return;
+        }
+        canvas.clear(th.bg);
         let cx = CW as f32 * 0.5;
         let cy = CH as f32 * 0.5;
         let dots = ".".repeat((ctx.shared.frame_count / DOTS_PERIOD_FRAMES % DOTS_MAX) as usize);
