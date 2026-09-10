@@ -315,6 +315,144 @@ impl TimingMarks {
     }
 }
 
+/// How many buckets the timing histogram spreads its window over.
+pub const TIMING_HIST_BINS: usize = 81;
+
+/// How wide one timing histogram bucket is.
+pub const TIMING_HIST_BIN_US: i64 = 5_000;
+
+/// How far either side of the note the timing histogram reaches. Anything further out is counted in
+/// the outermost bucket rather than dropped, so the totals still add up to the inputs that landed.
+pub const TIMING_HIST_RANGE_US: i64 = TIMING_HIST_BIN_US * (TIMING_HIST_BINS as i64 / 2);
+
+/// How much song time passes between two gauge samples.
+pub const GAUGE_SAMPLE_INTERVAL_US: i64 = 1_000_000;
+
+/// How many gauge samples are kept. At one a second this is long enough for any chart a player will
+/// meet and bounded for the ones they will not, so a very long run cannot grow the series without
+/// end.
+pub const GAUGE_SERIES_CAPACITY: usize = 1_800;
+
+/// How many judgements a judged input can be given, which is the width of the distribution.
+pub const JUDGE_KIND_COUNT: usize = 6;
+
+/// How many kinds of lane an input can come from: the keys and the turntable.
+pub const LANE_KIND_COUNT: usize = 2;
+
+/// Where the keys are counted in a lane-kind split.
+pub const KEY_LANE_KIND: usize = 0;
+
+/// Where the turntable is counted in a lane-kind split.
+pub const SCRATCH_LANE_KIND: usize = 1;
+
+/// Judgements from this one on carry no timing: a miss and an empty poor have no input to be early
+/// or late against, which is where the judge engine stops counting them too
+/// (`JudgeManager.java:652` records only `judge < 4`).
+pub const TIMED_JUDGE_LIMIT: usize = 4;
+
+/// What the run looked like over time, for the graphs the result screen draws.
+///
+/// The gauge series is sampled on the song clock rather than on frames, so it does not change shape
+/// with the frame rate. The two tallies count *inputs the player made*: the judge engine's own
+/// counts include the notes a miss sweep and an auto-played lane resolve, which never pass through
+/// here, so the two are related but not equal — and the histogram needs a timing error, which only
+/// a judged input has.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlayInstrumentation {
+    gauge_series: Vec<f32>,
+    next_gauge_sample_us: i64,
+    timing_hist: [u32; TIMING_HIST_BINS],
+    judge_dist: [u32; JUDGE_KIND_COUNT],
+    fast: [u32; LANE_KIND_COUNT],
+    slow: [u32; LANE_KIND_COUNT],
+}
+
+impl Default for PlayInstrumentation {
+    fn default() -> Self {
+        PlayInstrumentation {
+            gauge_series: Vec::new(),
+            next_gauge_sample_us: 0,
+            timing_hist: [0; TIMING_HIST_BINS],
+            judge_dist: [0; JUDGE_KIND_COUNT],
+            fast: [0; LANE_KIND_COUNT],
+            slow: [0; LANE_KIND_COUNT],
+        }
+    }
+}
+
+impl PlayInstrumentation {
+    /// The gauge value at each sample, oldest first.
+    pub fn gauge_series(&self) -> &[f32] {
+        &self.gauge_series
+    }
+
+    /// How many judged inputs landed in each timing bucket, earliest bucket first. The middle
+    /// bucket straddles the note itself.
+    pub fn timing_hist(&self) -> &[u32; TIMING_HIST_BINS] {
+        &self.timing_hist
+    }
+
+    /// How many judged inputs took each judgement, best first.
+    pub fn judge_dist(&self) -> &[u32; JUDGE_KIND_COUNT] {
+        &self.judge_dist
+    }
+
+    /// Early hits, split into the keys and the turntable.
+    ///
+    /// Counted here rather than by the screen because a run's inputs do not all come through one:
+    /// a replay reproduces its own, and an auto-played lane is judged inside the session. A tally
+    /// kept outside would read zero for every run the player is not physically playing.
+    pub fn fast(&self) -> [u32; LANE_KIND_COUNT] {
+        self.fast
+    }
+
+    /// Late hits, split the same way as [`PlayInstrumentation::fast`].
+    pub fn slow(&self) -> [u32; LANE_KIND_COUNT] {
+        self.slow
+    }
+
+    /// Which bucket a timing error falls in, clamped to the ends of the window.
+    pub fn bin_of(delta_us: i64) -> usize {
+        let middle = TIMING_HIST_BINS / 2;
+        let clamped = delta_us.clamp(-TIMING_HIST_RANGE_US, TIMING_HIST_RANGE_US);
+        let offset = clamped.div_euclid(TIMING_HIST_BIN_US);
+        (middle as i64 + offset).clamp(0, TIMING_HIST_BINS as i64 - 1) as usize
+    }
+
+    fn record(&mut self, result: &JudgeResult, scratch: bool) {
+        self.timing_hist[PlayInstrumentation::bin_of(result.delta_us)] += 1;
+        if let Some(slot) = self.judge_dist.get_mut(result.judge as usize) {
+            *slot += 1;
+        }
+        if (result.judge as usize) >= TIMED_JUDGE_LIMIT {
+            return;
+        }
+        let kind = if scratch { SCRATCH_LANE_KIND } else { KEY_LANE_KIND };
+        let column = if result.fast { &mut self.fast } else { &mut self.slow };
+        column[kind] += 1;
+    }
+
+    /// Take a gauge sample if the song has reached the next sample point. Called every frame; the
+    /// interval is on the song clock, so a paused or scrubbed analysis run does not fill the series
+    /// with duplicates.
+    fn sample_gauge(&mut self, song_us: i64, value: f32) {
+        if song_us < self.next_gauge_sample_us || self.gauge_series.len() == GAUGE_SERIES_CAPACITY {
+            return;
+        }
+        self.gauge_series.push(value);
+        self.next_gauge_sample_us = song_us - song_us.rem_euclid(GAUGE_SAMPLE_INTERVAL_US) + GAUGE_SAMPLE_INTERVAL_US;
+    }
+
+    fn clear(&mut self) {
+        self.gauge_series.clear();
+        self.next_gauge_sample_us = 0;
+        self.timing_hist = [0; TIMING_HIST_BINS];
+        self.judge_dist = [0; JUDGE_KIND_COUNT];
+        self.fast = [0; LANE_KIND_COUNT];
+        self.slow = [0; LANE_KIND_COUNT];
+    }
+}
+
 /// The chart's BGA changes and the frame currently showing.
 #[derive(Debug, Default)]
 struct BgaTimeline {
@@ -383,6 +521,7 @@ pub struct PlaySession {
     calibration: Calibration,
     analysis: AnalysisState,
     marks: TimingMarks,
+    instrumentation: PlayInstrumentation,
     bga: BgaTimeline,
 }
 
@@ -409,6 +548,7 @@ impl PlaySession {
             calibration: Calibration::default(),
             analysis: AnalysisState::new(options.analysis),
             marks: TimingMarks::default(),
+            instrumentation: PlayInstrumentation::default(),
             bga,
         }
     }
@@ -419,6 +559,7 @@ impl PlaySession {
         self.feed_replay(clock.audible_us, sink);
         self.player.update_schedule(clock.scheduled_us, |event| sink.play(scheduled_sound(event)));
         self.player.update_judge(clock.audible_us);
+        self.instrumentation.sample_gauge(clock.audible_us, self.player.judge().gauge.value());
         self.bga.advance(clock.audible_us);
     }
 
@@ -434,8 +575,12 @@ impl PlaySession {
         self.recording.push(ReplayEvent { t: raw_us, lane, press: true, backward: is_backward(dir) });
         let judge_us = raw_us + self.judge_offset_us;
         let result = self.player.press_dir(lane, dir, judge_us, |event| sink.play(immediate_sound(event)));
-        if let (true, Some(result)) = (self.auto_calibration, result.as_ref()) {
-            self.calibration.record(result);
+        if let Some(result) = result.as_ref() {
+            let scratch = self.is_scratch(result.lane);
+            self.instrumentation.record(result, scratch);
+            if self.auto_calibration {
+                self.calibration.record(result);
+            }
         }
         result
     }
@@ -448,7 +593,12 @@ impl PlaySession {
     /// Take one lane release from one physical direction.
     pub fn release_dir(&mut self, lane: usize, dir: ScratchDir, raw_us: i64) -> Option<JudgeResult> {
         self.recording.push(ReplayEvent { t: raw_us, lane, press: false, backward: is_backward(dir) });
-        self.player.release_dir(lane, dir, raw_us + self.judge_offset_us)
+        let result = self.player.release_dir(lane, dir, raw_us + self.judge_offset_us);
+        if let Some(result) = result.as_ref() {
+            let scratch = self.is_scratch(result.lane);
+            self.instrumentation.record(result, scratch);
+        }
+        result
     }
 
     /// Rebuild the judge state at an arbitrary song time by re-running the recorded inputs from the
@@ -494,6 +644,7 @@ impl PlaySession {
         self.analysis.manual = true;
         self.analysis.position_us = target_us;
         self.marks.clear();
+        self.instrumentation.clear();
     }
 
     /// Whether the run is over and the result is due: every note has gone past and the tail silence
@@ -720,6 +871,18 @@ impl PlaySession {
         self.marks.recent(count)
     }
 
+    /// What the run looked like over time: the gauge series and the two tallies the result screen
+    /// draws its graphs from.
+    pub fn instrumentation(&self) -> &PlayInstrumentation {
+        &self.instrumentation
+    }
+
+    /// Whether a lane of this chart is the turntable, which is what splits the early/late tallies
+    /// into their two columns.
+    fn is_scratch(&self, lane: usize) -> bool {
+        self.player.model().mode.is_scratch(lane)
+    }
+
     /// The BGA frame currently showing, or a negative id before the chart's first BGA event.
     pub fn bga_frame(&self) -> i32 {
         self.bga.current
@@ -737,6 +900,8 @@ impl PlaySession {
                 self.player.release_dir(event.lane, dir, event.t + offset_us)
             };
             if let Some(result) = result {
+                let scratch = self.is_scratch(result.lane);
+                self.instrumentation.record(&result, scratch);
                 self.marks.push(TimingMark { lane: result.lane, delta_us: result.delta_us, judge: result.judge as u8 });
             }
         }
@@ -1296,5 +1461,147 @@ mod tests {
     fn the_seed_the_run_was_laid_out_with_is_reported_back() {
         let session = PlaySession::new(one_note(), SessionOptions { seed: 0x5EED, ..Default::default() });
         assert_eq!(session.seed(), 0x5EED);
+    }
+
+    #[test]
+    fn a_timing_error_lands_in_the_bucket_that_straddles_it() {
+        let middle = TIMING_HIST_BINS / 2;
+        assert_eq!(PlayInstrumentation::bin_of(0), middle, "a note hit exactly on time is the middle bucket");
+        assert_eq!(PlayInstrumentation::bin_of(TIMING_HIST_BIN_US), middle + 1);
+        assert_eq!(PlayInstrumentation::bin_of(-TIMING_HIST_BIN_US), middle - 1);
+        assert_eq!(PlayInstrumentation::bin_of(TIMING_HIST_BIN_US - 1), middle, "a bucket holds the whole span up to the next one");
+        assert_eq!(PlayInstrumentation::bin_of(-1), middle - 1, "and the one below it holds everything under the note");
+    }
+
+    /// An input further out than the window is counted at the end rather than dropped, so the
+    /// histogram still totals the inputs that were judged.
+    #[test]
+    fn a_timing_error_past_the_window_is_counted_at_the_end_of_it() {
+        assert_eq!(PlayInstrumentation::bin_of(TIMING_HIST_RANGE_US * 9), TIMING_HIST_BINS - 1);
+        assert_eq!(PlayInstrumentation::bin_of(-TIMING_HIST_RANGE_US * 9), 0);
+        assert_eq!(PlayInstrumentation::bin_of(i64::MAX), TIMING_HIST_BINS - 1);
+        assert_eq!(PlayInstrumentation::bin_of(i64::MIN), 0);
+    }
+
+    #[test]
+    fn a_fresh_run_has_measured_nothing() {
+        let session = PlaySession::new(one_note(), SessionOptions::default());
+        let inst = session.instrumentation();
+        assert!(inst.gauge_series().is_empty());
+        assert_eq!(inst.timing_hist().iter().sum::<u32>(), 0);
+        assert_eq!(inst.judge_dist().iter().sum::<u32>(), 0);
+        assert_eq!(inst.fast(), [0; LANE_KIND_COUNT]);
+        assert_eq!(inst.slow(), [0; LANE_KIND_COUNT]);
+    }
+
+    /// A key and the turntable are counted apart: a turntable is thrown rather than pressed and
+    /// drifts its own way, so a run's early/late reading is only useful split.
+    #[test]
+    fn early_and_late_hits_are_counted_apart_for_the_keys_and_the_turntable() {
+        let m = model(b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:01\r\n#00116:01\r\n");
+        let key_at = m.timelines.iter().flat_map(|t| t.notes[0].as_ref()).map(|n| n.time_us).next().expect("a key note");
+        let scratch_at = m.timelines.iter().flat_map(|t| t.notes[7].as_ref()).map(|n| n.time_us).next().expect("a turntable note");
+        let mut session = PlaySession::new(m, SessionOptions::default());
+        session.press(0, key_at - 4_000, &mut NullSink);
+        session.press(7, scratch_at + 4_000, &mut NullSink);
+        let inst = session.instrumentation();
+        assert_eq!(inst.fast()[KEY_LANE_KIND], 1, "the early key hit is in the key column");
+        assert_eq!(inst.slow()[SCRATCH_LANE_KIND], 1, "the late turntable hit is in the turntable column");
+        assert_eq!(inst.fast()[SCRATCH_LANE_KIND] + inst.slow()[KEY_LANE_KIND], 0, "a hit reached the wrong column");
+    }
+
+    /// A judgement with no timing — the sweep's miss, an empty poor — has no input to be early or
+    /// late against, which is where the judge engine stops counting too.
+    #[test]
+    fn a_judgement_with_no_timing_reaches_neither_column() {
+        let mut inst = PlayInstrumentation::default();
+        for judge in [rbms_judge::Judge::Bad, rbms_judge::Judge::Poor, rbms_judge::Judge::Miss] {
+            inst.record(&JudgeResult { judge, lane: 0, note_index: 0, fast: true, delta_us: 1_000 }, false);
+        }
+        assert_eq!(inst.judge_dist().iter().sum::<u32>(), 3, "every judgement still reaches the distribution");
+        assert_eq!(inst.fast()[KEY_LANE_KIND], 1, "the one judgement inside the timed range is counted");
+        assert_eq!(inst.fast().iter().chain(inst.slow().iter()).sum::<u32>(), 1);
+    }
+
+    /// An auto-played lane is judged inside the engine and never produces an input, so the split —
+    /// which counts what the *player* did — leaves it out where the engine's own totals include it.
+    #[test]
+    fn an_auto_played_lane_is_not_counted_as_something_the_player_hit() {
+        let mut session = PlaySession::new(one_note(), SessionOptions { autoplay: true, ..Default::default() });
+        for step in 0..=40 {
+            session.tick(SessionClock::at(step * 100_000), &mut NullSink);
+        }
+        let judged = session.judge().counts.iter().sum::<u32>();
+        assert!(judged > 0, "the fixture did not autoplay anything");
+        assert_eq!(session.instrumentation().fast(), [0; LANE_KIND_COUNT], "an auto-played note was counted as a player's hit");
+        assert_eq!(session.instrumentation().slow(), [0; LANE_KIND_COUNT]);
+    }
+
+    /// A replayed run is judged inside the session rather than through the screen's key handler, so
+    /// its split has to be counted here or every playback would report nothing.
+    #[test]
+    fn a_replayed_run_counts_its_early_and_late_hits_too() {
+        let m = one_note();
+        let at = m.timelines.iter().flat_map(|t| t.notes[0].as_ref()).map(|n| n.time_us).next().expect("a note");
+        let events = vec![ReplayEvent { t: at - 4_000, lane: 0, press: true, backward: false }];
+        let mut session = PlaySession::new(m, SessionOptions { replay: Some(replay_of(events)), ..Default::default() });
+        for step in 0..=(at / 100_000 + 10) {
+            session.tick(SessionClock::at(step * 100_000), &mut NullSink);
+        }
+        let inst = session.instrumentation();
+        assert_eq!(inst.fast()[KEY_LANE_KIND], 1, "the replayed hit was not counted");
+        assert_eq!(inst.fast().iter().chain(inst.slow().iter()).sum::<u32>(), session.judge().fast + session.judge().slow);
+    }
+
+    #[test]
+    fn the_gauge_is_sampled_once_per_second_of_song_time() {
+        let mut session = PlaySession::new(one_note(), SessionOptions { autoplay: true, ..Default::default() });
+        for step in 0..=6 {
+            session.tick(SessionClock::at(step * GAUGE_SAMPLE_INTERVAL_US / 2), &mut NullSink);
+        }
+        assert_eq!(session.instrumentation().gauge_series().len(), 4, "half-second frames still leave one sample a second");
+        for value in session.instrumentation().gauge_series() {
+            assert!((0.0..=100.0).contains(value), "a gauge sample is a percentage: {value}");
+        }
+    }
+
+    /// A very long run must not grow the series without end, which is what a plain push per second
+    /// would do.
+    #[test]
+    fn the_gauge_series_stops_growing_at_its_capacity() {
+        let mut session = PlaySession::new(one_note(), SessionOptions { autoplay: true, ..Default::default() });
+        for step in 0..(GAUGE_SERIES_CAPACITY as i64 + 50) {
+            session.tick(SessionClock::at(step * GAUGE_SAMPLE_INTERVAL_US), &mut NullSink);
+        }
+        assert_eq!(session.instrumentation().gauge_series().len(), GAUGE_SERIES_CAPACITY);
+    }
+
+    #[test]
+    fn a_judged_press_is_counted_in_both_tallies() {
+        let mut session = PlaySession::new(one_note(), SessionOptions::default());
+        let at = session.last_time_us();
+        let judged = session.press(0, at, &mut NullSink).expect("a press on the note is judged");
+        let inst = session.instrumentation();
+        assert_eq!(inst.judge_dist()[judged.judge as usize], 1, "the judgement it took is tallied");
+        assert_eq!(inst.judge_dist().iter().sum::<u32>(), 1, "and nothing else is");
+        assert_eq!(inst.timing_hist()[PlayInstrumentation::bin_of(judged.delta_us)], 1);
+        assert_eq!(inst.timing_hist().iter().sum::<u32>(), 1);
+    }
+
+    /// Scrubbing rebuilds the run from the recorded inputs, so what was measured before the seek
+    /// describes a run that no longer exists.
+    #[test]
+    fn scrubbing_a_replay_throws_away_what_was_measured_before_it() {
+        let at = PlaySession::new(one_note(), SessionOptions::default()).last_time_us();
+        let events = vec![ReplayEvent { t: at, lane: 0, press: true, backward: false }];
+        let options = SessionOptions { analysis: true, replay: Some(replay_of(events)), ..Default::default() };
+        let mut session = PlaySession::new(one_note(), options);
+        session.tick(SessionClock::at(at + 1), &mut NullSink);
+        assert!(session.instrumentation().judge_dist().iter().sum::<u32>() > 0, "the replayed input was measured");
+        session.seek(0);
+        let inst = session.instrumentation();
+        assert!(inst.gauge_series().is_empty());
+        assert_eq!(inst.timing_hist().iter().sum::<u32>(), 0);
+        assert_eq!(inst.judge_dist().iter().sum::<u32>(), 0);
     }
 }
