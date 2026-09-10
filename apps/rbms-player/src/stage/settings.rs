@@ -6,7 +6,7 @@
 use crate::dialog::{DialogHandle, DialogState};
 use crate::ir_panel::*;
 use crate::ir_session::{AuthAction, GUEST_PLAYER_ID};
-use crate::settings_ui::{SettingRow, audio_status_text, is_network_row, output_device_names, step_audio_device};
+use crate::settings_ui::{SettingRow, audio_status_text, is_network_row, step_audio_device};
 use crate::settings_view::{RivalsScene, SettingsScene};
 use crate::skin_select::SkinRow;
 use crate::stage::{Canvas, FrameCtx, KeyConfigState, KeyInput, Stage, StageHandler, Transition};
@@ -467,7 +467,7 @@ impl StageHandler for SettingsState {
     /// what is plugged in now; walk the skin folder, so a document dropped into it while the game
     /// was running is offered; and build the rows the first tab shows.
     fn on_enter(&mut self, ctx: &mut FrameCtx<'_>) {
-        self.audio_devices = output_device_names();
+        self.audio_devices = rbms_audio::output_device_names();
         ctx.shared.rescan_skins();
         if ctx.shared.skin_reload_pending() {
             ctx.shared.reload_skin();

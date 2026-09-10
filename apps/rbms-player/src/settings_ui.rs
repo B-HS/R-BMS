@@ -4,10 +4,10 @@
 //!
 //! The rows themselves — their tabs, labels, kinds and ranges — are described once in
 //! `rbms_config::SETTINGS`. This file only adds what the configuration document cannot know: the
-//! live account, the password held in memory, a skin forced on the command line, and the host's
-//! output device list.
+//! live account, the password held in memory, and a skin forced on the command line. The device
+//! list the AUDIO DEVICE row cycles through comes from [`rbms_audio::output_device_names`], which
+//! owns the one thread the audio host may be questioned from.
 #![allow(clippy::wildcard_imports)]
-use rbms_audio::cpal::traits::{DeviceTrait, HostTrait};
 use rbms_audio::{AudioOpenReport, Bus};
 
 use rbms_config::{AudioOptions, CUSTOM_VALUE, SettingId, SettingTab, cycle_device, descriptor, display_value, tab_rows};
@@ -84,21 +84,6 @@ pub(crate) fn engine_options(audio: &AudioOptions) -> rbms_audio::AudioOptions {
         buffer_frames: audio.buffer_frames,
         max_voices: audio.polyphony,
     }
-}
-
-/// Output device names the AUDIO DEVICE row cycles through, in host order. These are the same
-/// description names `rbms_audio` resolves [`rbms_audio::AudioOptions::device_name`] against, so a
-/// picked row names a device the engine can find. A device whose description cannot be read is left
-/// out rather than offered under a name that would not match. Empty when the host cannot be
-/// enumerated, which leaves the row on the system default.
-///
-/// Enumerating a host takes tens of milliseconds and runs on the frame loop's own thread, so this
-/// is called once when the settings screen opens rather than on every keystroke.
-pub(crate) fn output_device_names() -> Vec<String> {
-    rbms_audio::cpal::default_host()
-        .output_devices()
-        .map(|devices| devices.filter_map(|device| device.description().ok().map(|d| d.name().to_string())).collect())
-        .unwrap_or_default()
 }
 
 impl AppShared {
