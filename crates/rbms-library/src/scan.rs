@@ -362,11 +362,7 @@ fn parse_bmson_chart(job: &Found, bytes: &[u8]) -> Option<(SongRow, Option<Detai
     let length_ms = duration_us / US_PER_MS;
     let (bpm_min, bpm_max) = bpm_range(&model);
     let density = note_density(&model, model.meta.total);
-    let title = if model.meta.title.is_empty() {
-        job.source.file_name().and_then(|n| n.to_str()).unwrap_or("?").to_string()
-    } else {
-        model.meta.title.clone()
-    };
+    let title = if model.meta.title.is_empty() { job.source.file_name().and_then(|n| n.to_str()).unwrap_or("?").to_string() } else { model.meta.title.clone() };
 
     let row = SongRow {
         path: job.path.clone(),
