@@ -173,6 +173,7 @@ impl SystemSound {
     /// Whether the reference implementation treats this stem as part of the BGM set rather than the
     /// effect set (`SystemSoundManager.java:149-150`). rbms resolves both out of one folder; this
     /// stays so a future split can tell them apart without re-deriving the list.
+    #[cfg(test)]
     pub(crate) fn is_bgm(self) -> bool {
         matches!(self, SystemSound::Select | SystemSound::Decide)
     }
@@ -274,6 +275,7 @@ impl SystemSoundSet {
         self.guide_enabled = enabled;
     }
 
+    #[cfg(test)]
     pub(crate) fn guide_enabled(&self) -> bool {
         self.guide_enabled
     }
@@ -284,6 +286,7 @@ impl SystemSoundSet {
     }
 
     /// How many of the twenty-two slots hold a sample.
+    #[cfg(test)]
     pub(crate) fn resolved_count(&self) -> usize {
         self.slots.iter().filter(|slot| matches!(slot, Slot::Decoded(_))).count()
     }
@@ -320,13 +323,6 @@ impl SystemSoundSet {
             return;
         };
         engine.play_on(Bus::System, cue.id, cue.gain, SYSTEM_SOUND_PAN, SYSTEM_SOUND_PITCH, SYSTEM_SOUND_AT_US);
-    }
-
-    /// Stop a cue that is still sounding, for the long stems a screen change cuts short.
-    pub(crate) fn stop(&self, engine: &mut AudioEngine, sound: SystemSound) {
-        if self.is_resolved(sound) {
-            engine.stop(sound.sample_id());
-        }
     }
 }
 

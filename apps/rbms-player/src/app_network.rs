@@ -80,6 +80,7 @@ impl AppShared {
         self.server_probe_stop = built.probe_stop;
         self.multi_ir = MultiIr::from_network(&self.config.network);
         self.profile_servers = self.multi_ir.build_servers_reusing(Some(self.server.clone()));
+        self.reset_ranking();
     }
 
     /// Label and value of a NETWORK row, or `None` when the row belongs to another tab.

@@ -56,12 +56,7 @@ impl KeyConfigState {
                 KcRow::Control(a) => shared.keyconfig.set_control(*a, code),
                 KcRow::Lane(lane) => shared.keyconfig.set_lane(shared.kc_edit_mode, *lane, code),
                 KcRow::ScratchReverse(lane) => shared.keyconfig.set_scratch_reverse(shared.kc_edit_mode, *lane, code),
-                KcRow::ModeSelect
-                | KcRow::PadDevice
-                | KcRow::PadAnalogMode
-                | KcRow::PadControl(_)
-                | KcRow::PadLane(_)
-                | KcRow::PadScratchReverse(_) => {}
+                KcRow::ModeSelect | KcRow::PadDevice | KcRow::PadAnalogMode | KcRow::PadControl(_) | KcRow::PadLane(_) | KcRow::PadScratchReverse(_) => {}
             }
         }
         self.warn = false;

@@ -98,16 +98,16 @@ pub(crate) use assets::{DecodedImage, bundled_skin, decode_bga_image, keysound_j
 use course_ir::{UNRELEASED_COURSE_REASON, build_course_submission};
 use course_ui::{CourseEntry, CourseList, CourseOverrides, SelectTab, courses_dir, library_index, stage_label};
 use favorites::{Favorites, favorites_path};
-use gamepad::{PadEvent, PadState};
 use format::{
     clear_label_color, difficulty_color, difficulty_name, fmt_datetime, fmt_duration, gauge_name, mode_color, mode_short, rank_label, rule_version_mark,
     rule_version_note,
 };
+use gamepad::{PadEvent, PadState};
 use gpu::Gpu;
+use ir_ext::{MultiIr, ProfileResult, spawn_submit_all, submit_summary};
 use ir_outcome::{IR_RESULT_LINE_H, IR_RESULT_SCALE, IR_RESULT_X, IR_RESULT_Y, IrStatus, ir_line_color};
 use ir_ranking::{RANKING_CACHE_CAPACITY, RankingCache, RankingFetch};
 use ir_ranking_view::render_ranking_panel;
-use ir_ext::{MultiIr, ProfileResult, spawn_submit_all, submit_summary};
 use ir_session::{AccountSession, AuthAction};
 use ir_sync::SyncLock;
 use judge_setup::{is_custom_judge, run_judge_setup, run_lntype};

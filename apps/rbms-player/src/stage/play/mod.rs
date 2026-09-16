@@ -180,10 +180,19 @@ impl PlayState {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn bga_count(&self) -> usize {
+        self.bga.len()
+    }
+
     /// Mark this run as a practice slice, which is what locks the gauge and ends it on the slice's
     /// own end time.
     pub(crate) fn set_practice(&mut self, practice: crate::practice::PracticeSession) {
         self.practice = Some(practice);
+    }
+
+    fn practice_clock(&self) -> crate::practice::PracticeClock {
+        self.practice.as_ref().map(crate::practice::PracticeClock::from_session).unwrap_or_else(crate::practice::PracticeClock::normal)
     }
 
     /// Early hits of this run, split into the keys and the turntable.
@@ -402,16 +411,17 @@ impl PlayState {
         if shared.config.play.autoplay || shared.replay.is_some() {
             return;
         }
-        let raw = shared.song_us();
+        let clock = self.practice_clock();
+        let raw = clock.chart_time_us(shared.song_us());
         self.sync_judge_settings(shared);
         if press {
             let anchor = shared.anchor_us;
             let hit = match shared.audio.as_mut() {
-                Some(audio) => self.session.press_dir(lane, dir, raw, &mut PlayAudioSink::new(audio, anchor)),
+                Some(audio) => self.session.press_dir(lane, dir, raw, &mut PlayAudioSink::new(audio, anchor, clock)),
                 None => self.session.press_dir(lane, dir, raw, &mut NullSink),
             };
             let judged = hit.map(|r| r.judge);
-            shared.push_timing_sample(raw, hit.map(|r| r.delta_us));
+            shared.push_timing_sample(raw, clock, hit.map(|r| r.delta_us));
             if let Some(judge) = judged {
                 shared.play_system_sound(crate::syssound::guide_for_judge(judge));
             }
@@ -494,26 +504,36 @@ impl StageHandler for PlayState {
         ctx.shared.skin_play_timers.start(&mut ctx.shared.skin_timers, now_ms);
     }
 
+    fn on_exit(&mut self, ctx: &mut FrameCtx<'_>) {
+        if self.practice.is_some() {
+            ctx.shared.restore_practice_images(&mut self.bga);
+        }
+    }
+
     /// In manual analysis the displayed song time comes from the virtual clock (pausable,
     /// rate-scaled); otherwise it follows the real (audio) clock, and analysis mirrors it so a
     /// first manual control resumes from the live position. Manual analysis mutes keysounds.
     fn update(&mut self, ctx: &mut FrameCtx<'_>) -> Transition {
         let manual = self.session.analysis_manual();
-        let (song, lookahead) = if manual {
+        let practice_clock = self.practice_clock();
+        let (song, scheduled_us) = if manual {
             let frame_us = (ctx.dt as f64 * 1_000_000.0) as i64;
-            (self.session.advance_analysis(frame_us), 0)
+            let song = self.session.advance_analysis(frame_us);
+            (song, song)
         } else {
-            let (s, lookahead) = ctx.shared.song_and_lookahead_us();
-            self.session.sync_analysis_position(s);
-            (s, lookahead)
+            let (engine_song_us, lookahead_us) = ctx.shared.song_and_lookahead_us();
+            let song = practice_clock.chart_time_us(engine_song_us);
+            self.session.sync_analysis_position(song);
+            let scheduled_engine_us = schedule_position_us(engine_song_us, lookahead_us, ctx.shared.schedule_poll_us, false);
+            (song, practice_clock.chart_time_us(scheduled_engine_us))
         };
         self.song_us = song;
         ctx.shared.push_clock_sample(song);
         self.sync_judge_settings(ctx.shared);
-        let clock = SessionClock { audible_us: song, scheduled_us: schedule_position_us(song, lookahead, ctx.shared.schedule_poll_us, manual) };
+        let clock = SessionClock { audible_us: song, scheduled_us };
         let anchor = ctx.shared.anchor_us;
         match (manual, ctx.shared.audio.as_mut()) {
-            (false, Some(audio)) => self.session.tick(clock, &mut PlayAudioSink::new(audio, anchor)),
+            (false, Some(audio)) => self.session.tick(clock, &mut PlayAudioSink::new(audio, anchor, practice_clock)),
             _ => self.session.tick(clock, &mut NullSink),
         }
         if self.run_is_over(song) {

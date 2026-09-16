@@ -104,7 +104,6 @@ const FREQ_STEP: i32 = 5;
 const FREQ_STEP_TURBO: i32 = 25;
 const FREQ_STEP_ANALOG: i32 = 1;
 const FREQ_STEP_ANALOG_TURBO: i32 = 10;
-/// Playback speed of an unaltered run, and the only speed this engine can actually play at.
 const FREQ_UNMODIFIED: i32 = 100;
 
 /// Whether a practice run may end because the gauge emptied. It may not: the point of practising a
@@ -192,11 +191,6 @@ pub(crate) fn format_practice_time(ms: i32) -> String {
     format!("{:2}:{:02}.{:1}", ms / MS_PER_MINUTE, (ms / MS_PER_SECOND) % 60, (ms / TIME_ROUND_MS) % 10)
 }
 
-/// Everything one chart is practised under, remembered between visits.
-///
-/// `total` of [`TOTAL_FROM_CHART`] means the chart's own TOTAL, which is how the reference spells
-/// "unset" (`PracticeConfiguration.java:70`). `freq` is edited and displayed but a run always plays
-/// at [`FREQ_UNMODIFIED`] — see [`PracticeSession::freq_percent`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub(crate) struct PracticeProperty {
@@ -480,6 +474,7 @@ pub(crate) struct PracticeSession {
     pub(crate) start_gauge: f32,
     /// JUDGE WIDTH percentage for the run.
     pub(crate) judge_rate_percent: i32,
+    pub(crate) freq_percent: i32,
     /// TOTAL override, or `None` for the chart's own.
     pub(crate) total: Option<f64>,
     /// Shuffle the chart is laid out with.
@@ -495,12 +490,43 @@ impl PracticeSession {
     pub(crate) fn is_past_end(&self, song_us: i64) -> bool {
         song_us >= self.end_us
     }
+}
 
-    /// Playback speed the run actually plays at. The property carries the player's choice, but the
-    /// mixer resamples nothing, so every run plays at [`FREQ_UNMODIFIED`] until it can.
-    pub(crate) fn freq_percent(&self) -> i32 {
-        FREQ_UNMODIFIED
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PracticeClock {
+    start_us: i64,
+    freq_percent: i32,
+}
+
+impl PracticeClock {
+    pub(crate) const fn normal() -> PracticeClock {
+        PracticeClock { start_us: 0, freq_percent: FREQ_UNMODIFIED }
     }
+
+    pub(crate) fn new(start_us: i64, freq_percent: i32) -> PracticeClock {
+        PracticeClock { start_us, freq_percent: freq_percent.clamp(FREQ_MIN, FREQ_MAX) }
+    }
+
+    pub(crate) fn from_session(session: &PracticeSession) -> PracticeClock {
+        PracticeClock::new(session.start_us, session.freq_percent)
+    }
+
+    pub(crate) fn chart_time_us(self, engine_elapsed_us: i64) -> i64 {
+        self.start_us.saturating_add(scale_time_us(engine_elapsed_us, i64::from(self.freq_percent), i64::from(FREQ_UNMODIFIED)))
+    }
+
+    pub(crate) fn engine_time_us(self, chart_time_us: i64) -> i64 {
+        scale_time_us(chart_time_us.saturating_sub(self.start_us), i64::from(FREQ_UNMODIFIED), i64::from(self.freq_percent))
+    }
+
+    pub(crate) fn pitch(self, pitch: f32) -> f32 {
+        pitch * self.freq_percent as f32 / FREQ_UNMODIFIED as f32
+    }
+}
+
+fn scale_time_us(value: i64, numerator: i64, denominator: i64) -> i64 {
+    let scaled = i128::from(value) * i128::from(numerator) / i128::from(denominator);
+    scaled.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64
 }
 
 /// The practice screen: the property being edited, the chart it belongs to, and which half of the
@@ -538,6 +564,7 @@ impl PracticePanel {
     }
 
     /// Which half of the screen is up.
+    #[cfg(test)]
     pub(crate) fn phase(&self) -> PracticePhase {
         self.phase
     }
@@ -596,6 +623,7 @@ impl PracticePanel {
             gauge_set: self.property.gauge_set(),
             start_gauge: self.property.start_gauge as f32,
             judge_rate_percent: self.property.judge_rate,
+            freq_percent: self.property.freq,
             total: match self.property.total {
                 TOTAL_FROM_CHART => None,
                 total => Some(total),
@@ -672,11 +700,13 @@ impl PracticeBook {
     }
 
     /// How many charts have been practised, which is what the settings screen reports.
+    #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
         self.charts.len()
     }
 
     /// Whether nothing has been practised yet.
+    #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
         self.charts.is_empty()
     }

@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use rbms_judge::algorithm::JudgeAlgorithm;
-use rbms_judge::gauge::{GaugeAutoShift, GaugeShiftOutcome, clamp_bottom_shiftable};
+use rbms_judge::gauge::{GaugeAutoShift, GaugeIndex, GaugeShiftOutcome, clamp_bottom_shiftable};
 use rbms_judge::gauge_tables::GaugeSetId;
 use rbms_judge::ln::LnMode;
 pub use rbms_judge::matcher::ScratchDir;
@@ -303,6 +303,13 @@ impl Player {
     pub fn set_gauge(&mut self, kind: GaugeKind) {
         self.configured_gauge = kind;
         self.judge.set_gauge(kind, self.model.meta.total);
+    }
+
+    pub fn set_initial_state(&mut self, index: GaugeIndex, gauge_value: f32, initial_combo: u32) {
+        self.judge.gauge.select(index);
+        self.judge.gauge.set_value_at(index, gauge_value);
+        self.judge.combo = initial_combo;
+        self.judge.max_combo = initial_combo;
     }
 
     /// The gauge the player chose, which auto-shift may have moved the selection away from.
@@ -1321,6 +1328,16 @@ mod judge_wiring_tests {
         assert_eq!(p.gauge_set(), GaugeSetId::SevenKeys);
         p.set_gauge_set(GaugeSetId::Lr2);
         assert_eq!(p.gauge_set(), GaugeSetId::Lr2);
+    }
+
+    #[test]
+    fn an_initial_state_selects_and_seeds_a_course_gauge() {
+        let mut p = player(ONE_NOTE, Mode::BEAT_7K);
+        p.set_initial_state(GaugeIndex::Class, 72.0, 120);
+        assert_eq!(p.judge().gauge.selected_index(), GaugeIndex::Class);
+        assert_eq!(p.judge().gauge.value(), 72.0);
+        assert_eq!(p.judge().combo, 120);
+        assert_eq!(p.judge().max_combo, 120);
     }
 
     #[test]

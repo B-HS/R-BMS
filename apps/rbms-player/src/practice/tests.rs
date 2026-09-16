@@ -435,6 +435,7 @@ fn starting_a_slice_hands_over_the_range_in_microseconds_with_the_gauge_locked()
     assert_eq!(session.gauge_set, GaugeSetId::SevenKeys);
     assert_eq!(session.start_gauge, 40.0);
     assert_eq!(session.judge_rate_percent, 80);
+    assert_eq!(session.freq_percent, FREQ_UNMODIFIED);
     assert_eq!(session.total, Some(260.0));
     assert_eq!(session.option, NoteOption::Mirror);
     assert!(session.gauge_locked, "an emptied gauge must not cut a practice slice short");
@@ -459,11 +460,42 @@ fn the_slice_ends_at_its_own_end_rather_than_at_the_last_note() {
 }
 
 #[test]
-fn a_slice_always_plays_at_the_unaltered_speed_whatever_the_panel_says() {
+fn a_slice_hands_the_frequency_to_the_running_clock() {
     let mut panel = PracticePanel::new("md5".to_string(), Mode::BEAT_7K, LONG_CHART_MS, None, 260.0);
     panel.property.freq = FREQ_MAX;
     let session = panel.start();
-    assert_eq!(session.freq_percent(), FREQ_UNMODIFIED, "the mixer resamples nothing, so the chosen speed is not applied yet");
+    assert_eq!(session.freq_percent, FREQ_MAX);
+}
+
+#[test]
+fn the_practice_clock_maps_engine_time_to_the_absolute_chart_slice() {
+    for freq_percent in [FREQ_MIN, FREQ_UNMODIFIED, FREQ_MAX] {
+        let clock = PracticeClock::new(30_000_000, freq_percent);
+        assert_eq!(clock.chart_time_us(0), 30_000_000, "{freq_percent}% must start at the selected chart time");
+        assert_eq!(clock.chart_time_us(10_000_000), 30_000_000 + 10_000_000 * i64::from(freq_percent) / i64::from(FREQ_UNMODIFIED));
+        let engine_us = 12_345_678;
+        let round_trip_us = clock.engine_time_us(clock.chart_time_us(engine_us));
+        assert!((round_trip_us - engine_us).abs() <= 1, "{freq_percent}% round-trip was {round_trip_us} for {engine_us}");
+    }
+}
+
+#[test]
+fn the_normal_practice_clock_is_the_existing_song_axis() {
+    let clock = PracticeClock::normal();
+    for time_us in [-1_000_000, 0, 1_500_000] {
+        assert_eq!(clock.chart_time_us(time_us), time_us);
+        assert_eq!(clock.engine_time_us(time_us), time_us);
+    }
+}
+
+#[test]
+fn the_practice_clock_saturates_at_the_limits_of_the_song_axis() {
+    let clock = PracticeClock::new(0, FREQ_MAX);
+    assert_eq!(clock.chart_time_us(i64::MAX), i64::MAX);
+    assert_eq!(clock.chart_time_us(i64::MIN), i64::MIN);
+    let slow_clock = PracticeClock::new(0, FREQ_MIN);
+    assert_eq!(slow_clock.engine_time_us(i64::MAX), i64::MAX);
+    assert_eq!(slow_clock.engine_time_us(i64::MIN), i64::MIN);
 }
 
 #[test]

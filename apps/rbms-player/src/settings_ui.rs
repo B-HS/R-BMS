@@ -292,7 +292,7 @@ mod tests {
         (SettingId::AudioBuffer, "BUFFER SIZE", "AUTO"),
         (SettingId::AudioSampleRate, "SAMPLE RATE", "AUTO"),
         (SettingId::AudioPolyphony, "POLYPHONY", "512"),
-        (SettingId::SoundFolder, "SOUND FOLDER", "NONE"),
+        (SettingId::SoundFolder, "SOUND FOLDER", "(none)"),
         (SettingId::GuideSe, "GUIDE SE", "OFF"),
     ];
 

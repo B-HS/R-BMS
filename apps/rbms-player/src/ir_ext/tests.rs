@@ -332,6 +332,29 @@ fn a_primary_index_past_the_end_is_rejected() {
 }
 
 #[test]
+fn primary_switching_skips_disabled_profiles_and_wraps() {
+    let mut multi = multi(vec![profile("A", "http://a", true), profile("DISABLED", "http://disabled", false), profile("C", "http://c", true)]);
+
+    assert_eq!(multi.primary_profile(), Some(("A".to_string(), 1, 2)));
+    assert!(!multi.set_primary(1), "a disabled profile is not a primary candidate");
+    assert!(multi.shift_primary(PrimaryProfileDirection::Next));
+    assert_eq!(multi.primary_profile(), Some(("C".to_string(), 2, 2)));
+    assert!(multi.shift_primary(PrimaryProfileDirection::Next));
+    assert_eq!(multi.primary_profile(), Some(("A".to_string(), 1, 2)));
+    assert!(multi.shift_primary(PrimaryProfileDirection::Previous));
+    assert_eq!(multi.primary_profile(), Some(("C".to_string(), 2, 2)));
+}
+
+#[test]
+fn primary_switching_is_a_no_op_without_an_alternative() {
+    let mut single = multi(vec![profile("A", "http://a", true)]);
+    let mut offline = multi(vec![profile("A", "http://a", false)]);
+
+    assert!(!single.shift_primary(PrimaryProfileDirection::Next));
+    assert!(!offline.shift_primary(PrimaryProfileDirection::Next));
+}
+
+#[test]
 fn an_unnamed_profile_is_labelled_by_its_position() {
     assert_eq!(profile_label(&profile("", "http://a", true), 0), "IR 1");
     assert_eq!(profile_label(&profile("   ", "http://b", true), 2), "IR 3");

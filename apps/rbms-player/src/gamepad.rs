@@ -24,8 +24,6 @@
 //!
 //! Wired into the frame loop by the integration branch; see `docs/plan/phase-g-wiring/G5-gamepad.md`.
 
-#![allow(dead_code)]
-
 mod analog;
 #[cfg(test)]
 mod tests;
@@ -65,25 +63,6 @@ pub const AXIS_DEADZONE_RANGE: RangeInclusive<f32> = 0.05..=0.95;
 const CAPTURE_AXIS_THRESHOLD: f32 = 0.5;
 
 const US_PER_MS: i64 = 1_000;
-
-/// Where a scratch input came from. Only [`ScratchSource::Keyboard`] and [`ScratchSource::Pad`]
-/// are produced today; the mouse wheel arm is the seam the reference implementation's
-/// `MouseScratchInput.java` lands on, kept here so adding it does not reshape [`PadEvent`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ScratchSource {
-    Keyboard,
-    Pad,
-    Mouse,
-}
-
-/// A device that produces the same lane and control events a gamepad does.
-///
-/// [`PadState`] is not an implementor: it needs the key config and the running mode to resolve an
-/// event, which a MIDI backend does not. The trait is the shape such a backend is expected to
-/// take, so that adding one is a new file rather than a new event type.
-pub trait ExternalInput {
-    fn poll(&mut self, now_us: i64) -> Vec<PadEvent>;
-}
 
 /// What one lane or control is bound to on a controller.
 ///

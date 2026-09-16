@@ -71,6 +71,12 @@ pub(crate) struct MultiIr {
     pub(crate) has_legacy: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PrimaryProfileDirection {
+    Previous,
+    Next,
+}
+
 impl MultiIr {
     /// Read the profile list out of the NETWORK settings: the legacy single server first (when one
     /// is configured), then every entry of `ir_profiles` in stored order.
@@ -90,6 +96,7 @@ impl MultiIr {
         self.has_legacy.then_some(0)
     }
 
+    #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
         self.profiles.is_empty()
     }
@@ -100,6 +107,7 @@ impl MultiIr {
     }
 
     /// Labels in profile order, for the panel's profile tab strip.
+    #[cfg(test)]
     pub(crate) fn labels(&self) -> Vec<String> {
         self.profiles.iter().enumerate().map(|(index, profile)| profile_label(profile, index)).collect()
     }
@@ -116,14 +124,48 @@ impl MultiIr {
         self.enabled_profiles().map(|(index, _)| index).next()
     }
 
-    /// Move the panel to another profile. Rejects an index that is not a profile, so a stale tab
-    /// index cannot push `primary` out of range.
     pub(crate) fn set_primary(&mut self, index: usize) -> bool {
-        if index >= self.profiles.len() {
+        if !self.profiles.get(index).is_some_and(|profile| profile.enabled) {
             return false;
         }
         self.primary = index;
         true
+    }
+
+    pub(crate) fn primary_profile(&self) -> Option<(String, usize, usize)> {
+        let primary = self.primary_server()?;
+        let mut position = None;
+        let mut count = 0;
+        for (index, _) in self.enabled_profiles() {
+            count += DISPLAY_INDEX_OFFSET;
+            if index == primary {
+                position = Some(count);
+            }
+        }
+        let profile = self.profiles.get(primary)?;
+        Some((profile_label(profile, primary), position?, count))
+    }
+
+    pub(crate) fn can_switch_primary(&self) -> bool {
+        self.enabled_profiles().nth(1).is_some()
+    }
+
+    pub(crate) fn shift_primary(&mut self, direction: PrimaryProfileDirection) -> bool {
+        let enabled: Vec<_> = self.enabled_profiles().map(|(index, _)| index).collect();
+        if enabled.len() < 2 {
+            return false;
+        }
+        let Some(current) = self.primary_server() else {
+            return false;
+        };
+        let Some(position) = enabled.iter().position(|index| *index == current) else {
+            return false;
+        };
+        let next_position = match direction {
+            PrimaryProfileDirection::Previous => position.checked_sub(1).unwrap_or(enabled.len() - 1),
+            PrimaryProfileDirection::Next => (position + 1) % enabled.len(),
+        };
+        self.set_primary(enabled[next_position])
     }
 
     /// One client per profile, index-aligned with `profiles`. A disabled profile, a blank URL and a

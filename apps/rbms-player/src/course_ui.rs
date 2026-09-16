@@ -128,6 +128,7 @@ impl CourseList {
         self.entries.len()
     }
 
+    #[cfg(test)]
     pub(crate) fn entries(&self) -> &[CourseEntry] {
         &self.entries
     }
@@ -261,6 +262,7 @@ impl RandomLock {
     }
 
     /// Whether the course leaves this option alone.
+    #[cfg(test)]
     pub(crate) fn allows(self, chosen: NoteOption) -> bool {
         self.clamp(chosen) == chosen
     }
@@ -311,6 +313,7 @@ impl CourseOverrides {
     }
 
     /// The long-note flavour the run plays under.
+    #[cfg(test)]
     pub(crate) fn ln_mode_for(&self, chosen: LnMode) -> LnMode {
         self.ln_mode.unwrap_or(chosen)
     }

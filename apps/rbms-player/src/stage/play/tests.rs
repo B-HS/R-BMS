@@ -157,6 +157,24 @@ fn a_finished_run_reaches_the_result_screen_under_every_escape_setting() {
 }
 
 #[test]
+fn a_practice_slice_uses_absolute_chart_time_for_clock_schedule_and_end() {
+    let mut panel = crate::practice::PracticePanel::new("md5".to_string(), Mode::BEAT_7K, 60_000, None, 300.0);
+    panel.property.start_ms = 30_000;
+    panel.property.end_ms = 45_000;
+    panel.property.freq = 200;
+    let mut state = play_state();
+    state.set_practice(panel.start());
+    let clock = state.practice_clock();
+
+    assert_eq!(clock.chart_time_us(0), 30_000_000);
+    assert_eq!(clock.chart_time_us(10_000_000), 50_000_000);
+    let scheduled_engine_us = schedule_position_us(10_000_000, 2_000_000, 3_000_000, false);
+    assert_eq!(clock.chart_time_us(scheduled_engine_us), 60_000_000);
+    assert!(!state.run_is_over(44_999_999));
+    assert!(state.run_is_over(45_000_000));
+}
+
+#[test]
 fn a_press_is_recorded_for_the_replay_even_with_no_output_device() {
     let mut app = app();
     assert!(app.shared.audio.is_none(), "the fixture is the audio-unavailable case");

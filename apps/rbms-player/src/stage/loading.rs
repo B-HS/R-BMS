@@ -173,6 +173,10 @@ impl ChartAssets {
     fn into_play(self) -> PlayState {
         self.chart.into_play(self.images)
     }
+
+    fn take_images(&mut self) -> std::collections::HashMap<i32, crate::DecodedImage> {
+        std::mem::take(&mut self.images)
+    }
 }
 
 /// A difficulty table being fetched before it joins the library.
@@ -431,11 +435,15 @@ impl StageHandler for LoadingState {
         if !ready {
             return Transition::Stay;
         }
-        let LoadingTask::Assets(assets) = std::mem::replace(&mut self.task, LoadingTask::Song(0)) else {
+        let LoadingTask::Assets(mut assets) = std::mem::replace(&mut self.task, LoadingTask::Song(0)) else {
             return Transition::Stay;
         };
-        if let Some(stage) = ctx.shared.practice_stage_if_requested() {
-            return Transition::To(stage);
+        if ctx.shared.has_practice_request() {
+            let mut images = assets.take_images();
+            if let Some(stage) = ctx.shared.practice_stage_if_requested(&mut images) {
+                return Transition::To(stage);
+            }
+            assets.images = images;
         }
         ctx.shared.play_system_sound(SystemSound::Decide);
         ctx.shared.start_play();
@@ -504,6 +512,10 @@ mod tests {
         ChartAssets { chart: crate::app_play::pending_chart_for_tests(), images: std::collections::HashMap::new(), bga, keysounds: sounds }
     }
 
+    fn decoded_images() -> std::collections::HashMap<i32, crate::DecodedImage> {
+        [(1, crate::DecodedImage::for_test(vec![1, 2, 3, 4], 1, 1)), (2, crate::DecodedImage::for_test(vec![5, 6, 7, 8], 1, 1))].into_iter().collect()
+    }
+
     /// One bar covers both decodes, so it cannot jump backwards when one of them finishes.
     #[test]
     fn the_bar_counts_every_file_the_chart_named() {
@@ -537,6 +549,27 @@ mod tests {
         let step = assets.step();
         assert!(step.contains("0 / 2 keysounds"), "got {step}");
         assert!(step.contains("0 / 3 images"), "got {step}");
+    }
+
+    #[test]
+    fn taking_images_for_practice_consumes_the_loading_map() {
+        let mut assets = assets(None, None);
+        assets.images = decoded_images();
+
+        let images = assets.take_images();
+
+        assert_eq!(images.len(), 2);
+        assert!(assets.images.is_empty());
+    }
+
+    #[test]
+    fn normal_play_moves_the_loaded_images_into_the_play_state() {
+        let mut assets = assets(None, None);
+        assets.images = decoded_images();
+
+        let play = assets.into_play();
+
+        assert_eq!(play.bga_count(), 2);
     }
 
     /// Leaving mid-load has to stop every worker the screen started, or an abandoned chart keeps
@@ -597,8 +630,10 @@ mod tests {
         assert_eq!(walking.heading(&app.shared).1, "0 folder(s)");
 
         let progress = Arc::new(ScanProgress::default());
-        let matching =
-            LoadingState { task: LoadingTask::Scan { step: ScanStep::Matching { rx: std::sync::mpsc::channel().1 }, progress: progress.clone() }, drawn: false };
+        let matching = LoadingState {
+            task: LoadingTask::Scan { step: ScanStep::Matching { rx: std::sync::mpsc::channel().1 }, progress: progress.clone() },
+            drawn: false,
+        };
         let (heading, sub) = matching.heading(&app.shared);
         assert_eq!(heading, "MATCHING TABLES");
         assert_eq!(sub, "0 / 1");

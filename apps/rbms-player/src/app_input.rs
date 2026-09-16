@@ -286,12 +286,7 @@ impl AppShared {
                     || taken_by_a_reverse(None)
                     || ControlAction::ALL.into_iter().any(|a| a != *action && self.keyconfig.control_key(a) == Some(code))
             }
-            KcRow::ModeSelect
-            | KcRow::PadDevice
-            | KcRow::PadAnalogMode
-            | KcRow::PadControl(_)
-            | KcRow::PadLane(_)
-            | KcRow::PadScratchReverse(_) => false,
+            KcRow::ModeSelect | KcRow::PadDevice | KcRow::PadAnalogMode | KcRow::PadControl(_) | KcRow::PadLane(_) | KcRow::PadScratchReverse(_) => false,
         }
     }
 

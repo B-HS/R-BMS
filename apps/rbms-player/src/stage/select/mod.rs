@@ -11,7 +11,8 @@
 
 use std::sync::mpsc::TryRecvError;
 
-use crate::ir_ranking_view::{PanelAction, PanelLine, offline_lines, panel_action, panel_lines};
+use crate::ir_ext::PrimaryProfileDirection;
+use crate::ir_ranking_view::{PanelAction, PanelLine, offline_lines, panel_action, panel_lines, profile_line};
 use crate::ir_replay::from_ir_replay;
 use crate::stage::{Canvas, FoldersState, FrameCtx, KeyInput, LoadingState, SettingsState, Stage, StageHandler, TablesState, Transition};
 use crate::*;
@@ -124,15 +125,7 @@ impl SelectState {
             SelectTab::Songs => shared.sel,
             SelectTab::Courses => self.courses.cursor().wrapping_add(self.courses.len()),
         };
-        (
-            shared.select_gen,
-            cursor,
-            self.record_modal,
-            shared.scores.records().len(),
-            shared.config.display.score_graph,
-            self.esc_quit_armed(),
-            self.tab,
-        )
+        (shared.select_gen, cursor, self.record_modal, shared.scores.records().len(), shared.config.display.score_graph, self.esc_quit_armed(), self.tab)
     }
 
     /// Enter the focused select item: descend into a folder, or start a chart.
@@ -369,21 +362,39 @@ impl SelectState {
     /// both opens it and gives it focus.
     fn toggle_ranking_panel(&mut self, shared: &mut AppShared) {
         self.ranking_open = !self.ranking_open;
-        self.ranking_sel = 0;
+        self.ranking_sel = self.ranking_selectable_start(shared);
         if self.ranking_open {
             shared.ranking_requested = None;
         }
     }
 
+    fn ranking_selectable_start(&self, shared: &AppShared) -> usize {
+        usize::from(shared.can_switch_primary_ir())
+    }
+
+    fn clamp_ranking_selection(&mut self, shared: &AppShared, lines: &[PanelLine]) {
+        let Some(last) = lines.len().checked_sub(1) else {
+            self.ranking_sel = 0;
+            return;
+        };
+        self.ranking_sel = self.ranking_sel.clamp(self.ranking_selectable_start(shared).min(last), last);
+    }
+
     /// The lines the panel is showing for the focused chart.
     fn ranking_lines(&self, shared: &AppShared) -> Vec<PanelLine> {
-        if shared.config.network.server_url.is_none() {
+        if !shared.has_primary_ir_server() {
             return offline_lines();
         }
-        match shared.focused_md5() {
+        let mut lines = match shared.focused_md5() {
             Some(md5) => panel_lines(shared.ranking_cache.peek(&md5)),
             None => panel_lines(None),
+        };
+        if shared.can_switch_primary_ir()
+            && let Some((label, position, count)) = shared.primary_ir_profile()
+        {
+            lines.insert(0, profile_line(&label, position, count));
         }
+        lines
     }
 
     /// Keys while the ranking panel is open. Returns whether the panel consumed the key.
@@ -395,11 +406,23 @@ impl SelectState {
             return false;
         };
         let lines = self.ranking_lines(shared);
+        self.clamp_ranking_selection(shared, &lines);
+        let start = self.ranking_selectable_start(shared).min(lines.len().saturating_sub(1));
         match action {
             PanelAction::Close => self.toggle_ranking_panel(shared),
-            PanelAction::Up => self.ranking_sel = self.ranking_sel.saturating_sub(1),
+            PanelAction::Up => self.ranking_sel = self.ranking_sel.saturating_sub(1).max(start),
             PanelAction::Down => self.ranking_sel = (self.ranking_sel + 1).min(lines.len().saturating_sub(1)),
             PanelAction::PlayReplay => self.play_ranking_replay(shared),
+            PanelAction::PreviousProfile => {
+                if shared.shift_primary_ir(PrimaryProfileDirection::Previous) {
+                    self.ranking_sel = self.ranking_selectable_start(shared);
+                }
+            }
+            PanelAction::NextProfile => {
+                if shared.shift_primary_ir(PrimaryProfileDirection::Next) {
+                    self.ranking_sel = self.ranking_selectable_start(shared);
+                }
+            }
         }
         true
     }
@@ -411,6 +434,9 @@ impl SelectState {
             return;
         }
         let index = index.min(lines.len() - 1);
+        if index < self.ranking_selectable_start(shared) {
+            return;
+        }
         if self.ranking_sel == index {
             self.play_ranking_replay(shared);
         } else {
@@ -438,7 +464,7 @@ impl SelectState {
         }
         shared.replay_download_target = Some((entry.path.to_string_lossy().to_string(), entry.md5.clone()));
         shared.net_status = format!("downloading replay {replay_id}...");
-        shared.replay_download_rx = Some(rbms_ir::spawn_query(shared.server.clone(), move |server| server.download_replay(&replay_id)));
+        shared.replay_download_rx = Some(rbms_ir::spawn_query(shared.primary_ir_server(), move |server| server.download_replay(&replay_id)));
     }
 
     /// Start a ranking fetch when the focus has settled on a new chart and the panel has no cached
@@ -448,7 +474,7 @@ impl SelectState {
     /// chart's `Loading` placeholder in the cache and leaving the panel on LOADING forever. While a
     /// fetch runs the request for the newly focused chart is simply retried next frame.
     fn update_ranking(&mut self, shared: &mut AppShared) {
-        if !self.ranking_open || shared.config.network.server_url.is_none() || shared.ranking_rx.is_some() {
+        if !self.ranking_open || !shared.has_primary_ir_server() || shared.ranking_rx.is_some() {
             return;
         }
         let Some(chart) = shared.focused_chart_id() else {
@@ -460,7 +486,7 @@ impl SelectState {
         if shared.ranking_requested.as_deref() == Some(chart.md5.as_str()) {
             return;
         }
-        self.ranking_sel = 0;
+        self.ranking_sel = self.ranking_selectable_start(shared);
         shared.start_ranking_fetch(chart);
     }
 
@@ -751,6 +777,7 @@ impl StageHandler for SelectState {
     fn draw(&mut self, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'_>) {
         self.refresh_scene_cache(ctx.shared);
         let ranking_lines = if self.ranking_open { self.ranking_lines(ctx.shared) } else { Vec::new() };
+        self.clamp_ranking_selection(ctx.shared, &ranking_lines);
         let Some(view) = self.cached_scene.as_ref() else {
             return;
         };
@@ -789,7 +816,7 @@ impl StageHandler for SelectState {
             (rect, mapped)
         }));
         if self.ranking_open {
-            let hot = render_ranking_panel(canvas, &ranking_lines, self.ranking_sel, true);
+            let hot = render_ranking_panel(canvas, &ranking_lines, self.ranking_sel, true, ctx.shared.can_switch_primary_ir());
             ctx.shared.hot.extend(hot.into_iter().map(|(rect, index)| (rect, Hot::RankingRow(index))));
         }
         if self.filter.is_open() {

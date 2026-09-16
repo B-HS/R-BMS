@@ -21,11 +21,6 @@ const RESULT_TITLE_CHARS: usize = 48;
 /// Leading md5 characters a saved replay's filename is stemmed to.
 const REPLAY_STEM_MD5_CHARS: usize = 8;
 
-/// The combo a course stage ended on, which the run summary does not carry: `rbms-play` reports the
-/// maximum but not the standing one, and its crate is not part of this phase. Nothing reads it while
-/// the gauge and combo carry is unapplied, and the divergence is recorded.
-const COMBO_AT_END_UNKNOWN: u32 = 0;
-
 /// Which of the three JUDGE WIDTH tiers the score submission reports, the score server's `judge_rate`
 /// being one number rather than six. PGREAT is the tier the setting is read by.
 const SUBMITTED_JUDGE_WIDTH_TIER: usize = 0;
@@ -65,6 +60,7 @@ struct ChartRun {
 pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Transition {
     let play = &state.session;
     let summary = play.summary();
+    let standing_combo = play.standing_combo();
     let chart = ChartRun {
         md5: play.model().md5.clone(),
         sha256: play.model().sha256.clone(),
@@ -78,8 +74,11 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
     let practice = state.practice.is_some();
     let last_time_us = play.last_time_us();
     let save_replay = !practice
-        &&
-        shared.config.play.auto_replay && shared.replay.is_none() && !shared.config.play.autoplay && saves_replay(assist) && !play.recorded_events().is_empty();
+        && shared.config.play.auto_replay
+        && shared.replay.is_none()
+        && !shared.config.play.autoplay
+        && saves_replay(assist)
+        && !play.recorded_events().is_empty();
     let recorded_events = save_replay.then(|| play.recorded_events().to_vec());
     let calibration_mean_us = play.calibration_mean_us();
     let calibration_samples = play.calibration_samples();
@@ -191,7 +190,8 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
         extra: Default::default(),
     };
     let scores_count = updates_score(shared.config.play.autoplay, shared.replay.is_some(), custom_judge, shared.config.play.scratch_auto, practice);
-    let block_reason = ir_submission_block_reason(shared.config.play.autoplay, shared.replay.is_some(), custom_judge, shared.config.play.scratch_auto, practice);
+    let block_reason =
+        ir_submission_block_reason(shared.config.play.autoplay, shared.replay.is_some(), custom_judge, shared.config.play.scratch_auto, practice);
 
     let played_ms = played_at;
     let mut replay_file: Option<String> = None;
@@ -241,7 +241,7 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
             assist,
             played_at_ms: played_ms,
             playtime_ms: crate::scoredb_store::playtime_ms(last_time_us),
-            ir_submitted: block_reason.is_none() && shared.config.network.server_url.is_some(),
+            ir_submitted: block_reason.is_none() && shared.has_primary_ir_server(),
             replay_file: replay_file.clone(),
         };
         let log = crate::scoredb_store::play_log(&finished);
@@ -269,7 +269,7 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
             shared.submit_rx = None;
             shared.ir_status = IrStatus::Skipped(reason);
         }
-        None if shared.config.network.server_url.is_none() => {
+        None if !shared.has_primary_ir_server() => {
             shared.submit_rx = None;
             shared.ir_status = IrStatus::Off;
         }
@@ -277,7 +277,11 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
             let chart = sub.chart.clone();
             let replay = recorded_replay.as_ref().and_then(|rp| shared.replay_upload_payload(rp, &chart, state.lntype));
             shared.spawn_profile_submits(&sub);
-            shared.spawn_score_submit(sub, replay);
+            if shared.multi_ir.legacy_index().is_some() {
+                shared.spawn_score_submit(sub, replay);
+            } else {
+                shared.ir_status = IrStatus::Sending;
+            }
         }
     }
 
@@ -287,7 +291,7 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
         return Transition::Back;
     }
     if shared.course_run.is_some() {
-        return advance_course(shared, &summary, block_reason, lamp);
+        return advance_course(shared, &summary, standing_combo, block_reason, lamp);
     }
     let paced_by = run_target(shared, &chart.md5, summary.total_notes, prev_best_ex);
     let extras = ResultExtras { target: Some(TargetView { name: paced_by.name, ex: paced_by.ex }), run_again: offers_retry(shared) };
@@ -342,7 +346,13 @@ fn following_song(shared: &AppShared) -> Option<(usize, usize)> {
 
 /// Fold the stage that just ended into the course and go wherever it says: the next stage, or the
 /// course result screen.
-fn advance_course(shared: &mut AppShared, summary: &rbms_play::PlaySummary, block_reason: Option<&'static str>, lamp: ClearType) -> Transition {
+fn advance_course(
+    shared: &mut AppShared,
+    summary: &rbms_play::PlaySummary,
+    standing_combo: u32,
+    block_reason: Option<&'static str>,
+    lamp: ClearType,
+) -> Transition {
     shared.course_stage_reasons.push(block_reason.map(str::to_string));
     let stage = rbms_course::StageResult {
         ex_score: summary.ex_score,
@@ -354,7 +364,7 @@ fn advance_course(shared: &mut AppShared, summary: &rbms_play::PlaySummary, bloc
         slow: summary.slow,
         combo_breaks: combo_breaks(&shared.mode, summary.counts),
         max_combo: summary.max_combo,
-        combo_at_end: COMBO_AT_END_UNKNOWN,
+        combo_at_end: standing_combo,
         gauge_value: summary.gauge_value,
         clear: clear_type_id(lamp),
         survived: !summary.failed,

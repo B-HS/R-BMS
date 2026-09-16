@@ -106,6 +106,10 @@ impl RankingCache {
         self.entries.retain(|(key, _)| key != md5);
     }
 
+    pub(crate) fn clear(&mut self) {
+        self.entries.clear();
+    }
+
     /// Whether the chart is cached with a finished answer. A `Loading` placeholder is *not* a hit:
     /// its fetch may have been dropped, and treating it as one would strand the panel.
     pub(crate) fn has_settled_answer(&mut self, md5: &str) -> bool {
@@ -337,6 +341,19 @@ pub(crate) mod tests {
         cache.insert("a".into(), RankingState::Failed("nope".into()));
         assert_eq!(cache.len(), 1);
         assert_eq!(cache.peek("a"), Some(&RankingState::Failed("nope".into())));
+    }
+
+    #[test]
+    fn clearing_the_cache_drops_settled_and_loading_entries() {
+        let mut cache = RankingCache::new(4);
+        cache.insert("loading".into(), RankingState::Loading);
+        cache.insert("ready".into(), RankingState::Failed("down".into()));
+
+        cache.clear();
+
+        assert_eq!(cache.len(), 0);
+        assert!(cache.peek("loading").is_none());
+        assert!(cache.peek("ready").is_none());
     }
 
     #[test]

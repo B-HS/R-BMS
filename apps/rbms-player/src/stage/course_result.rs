@@ -52,12 +52,7 @@ pub(crate) struct CourseResultState {
 impl CourseResultState {
     /// Read the finished run.
     pub(crate) fn of(run: &rbms_course::CourseRun) -> CourseResultState {
-        CourseResultState {
-            rows: crate::course_ui::result_rows(run),
-            cleared: run.failed_at.is_none(),
-            course_name: run.course.name.clone(),
-            announced: false,
-        }
+        CourseResultState { rows: crate::course_ui::result_rows(run), cleared: run.failed_at.is_none(), course_name: run.course.name.clone(), announced: false }
     }
 
     /// The rows this screen lists, for the tests that check what the run put on it.

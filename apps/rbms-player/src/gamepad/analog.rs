@@ -109,20 +109,19 @@ impl AnalogScratch {
         }
     }
 
-    pub fn mode(&self) -> AnalogMode {
-        self.mode
-    }
-
+    #[cfg(test)]
     pub fn threshold(&self) -> u32 {
         self.threshold
     }
 
     /// Whether the axis is currently spinning, in whichever direction it was last seen going.
+    #[cfg(test)]
     pub fn is_active(&self) -> bool {
         self.active
     }
 
     /// Whether the current spin is the rightward one.
+    #[cfg(test)]
     pub fn is_right(&self) -> bool {
         self.right
     }

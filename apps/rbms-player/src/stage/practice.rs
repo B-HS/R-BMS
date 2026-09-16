@@ -46,12 +46,13 @@ pub(crate) struct PracticeState {
     title: String,
     /// Either shift key is down, which is what makes a left/right step the coarse one.
     turbo: bool,
+    slice_open: bool,
 }
 
 impl PracticeState {
     /// Open the panel on a chart that has already been loaded.
     pub(crate) fn new(panel: PracticePanel, title: String) -> PracticeState {
-        PracticeState { panel, title, turbo: false }
+        PracticeState { panel, title, turbo: false, slice_open: false }
     }
 
     /// The panel this screen edits, for the tests that drive it.
@@ -63,7 +64,10 @@ impl PracticeState {
     /// Start the slice the panel describes, or stay put when the chart is no longer loaded.
     fn start_slice(&mut self, shared: &mut AppShared) -> Transition {
         match shared.start_practice_slice(&mut self.panel) {
-            Some(play) => Transition::Open(Stage::Play(Box::new(play))),
+            Some(play) => {
+                self.slice_open = true;
+                Transition::Open(Stage::Play(Box::new(play)))
+            }
             None => {
                 notify(Level::Warn, "practice chart is no longer loaded".to_string());
                 Transition::Back
@@ -117,6 +121,13 @@ impl StageHandler for PracticeState {
         self.panel.finish();
         ctx.shared.practice_book.put(self.panel.chart_key(), self.panel.property.clone());
         ctx.shared.practice_book.save(&practice_path(&ctx.shared.settings_path));
+        if !self.slice_open {
+            ctx.shared.release_practice_chart();
+        }
+    }
+
+    fn on_enter(&mut self, _ctx: &mut FrameCtx<'_>) {
+        self.slice_open = false;
     }
 
     /// The panel holds every key it is drawn with, so the option overlay does not open over it.
@@ -141,8 +152,6 @@ impl StageHandler for PracticeState {
             draw_text(canvas, x0 + LABEL_INSET, y + TEXT_DROP, ROW_SCALE, colour, element.label());
             draw_text_right(canvas, x0 + PANEL_W - VALUE_INSET, y + TEXT_DROP, ROW_SCALE, colour, &self.panel.value_text(element));
         }
-        let unapplied = ROW_TOP + PracticeElement::ALL.len() as f32 * ROW_PITCH + ROW_PITCH * 0.5;
-        draw_text(canvas, x0, unapplied, HINT_SCALE, Color::YELLOW, "GAUGE VALUE AND FREQUENCY ARE STORED BUT NOT YET APPLIED");
         let _ = ctx;
     }
 }

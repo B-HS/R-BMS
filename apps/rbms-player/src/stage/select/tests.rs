@@ -63,6 +63,15 @@ fn frame(app: &mut App, state: &mut SelectState) {
     state.update(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 });
 }
 
+fn add_ir_profile(app: &mut App, name: &str, enabled: bool) {
+    app.shared.config.network.ir_profiles.push(rbms_config::IrProfile {
+        name: name.to_string(),
+        base_url: format!("http://{name}.invalid"),
+        token: None,
+        enabled,
+    });
+}
+
 /// The sort key steps forward on its own and back with a shift held, so a list overshot by one
 /// press is one press away again.
 #[test]
@@ -195,6 +204,60 @@ fn the_filter_panel_takes_the_keys_while_it_is_open() {
     let after = key(&mut app, &mut state, press(KeyCode::ArrowDown));
     assert!(matches!(after, Transition::Stay));
     assert_eq!(app.shared.sel, 1, "Enter did not close the panel, so the list stayed frozen");
+}
+
+#[test]
+fn the_ranking_panel_shows_and_switches_enabled_ir_profiles() {
+    let mut app = app();
+    add_ir_profile(&mut app, "FIRST", true);
+    add_ir_profile(&mut app, "DISABLED", false);
+    add_ir_profile(&mut app, "THIRD", true);
+    app.shared.rebuild_server();
+    let mut state = SelectState::new();
+
+    key(&mut app, &mut state, press(KeyCode::KeyI));
+    assert_eq!(state.ranking_lines(&app.shared)[0].label, "IR 1/2: FIRST");
+    assert_eq!(state.ranking_sel, 1, "the profile label is not replay-selectable");
+
+    key(&mut app, &mut state, press(KeyCode::ArrowUp));
+    assert_eq!(state.ranking_sel, 1, "moving up does not select the profile label");
+
+    key(&mut app, &mut state, press(KeyCode::KeyE));
+    assert_eq!(state.ranking_lines(&app.shared)[0].label, "IR 2/2: THIRD");
+    assert_eq!(state.ranking_sel, 1, "switching profiles keeps a result line selected");
+
+    key(&mut app, &mut state, press(KeyCode::KeyE));
+    assert_eq!(state.ranking_lines(&app.shared)[0].label, "IR 1/2: FIRST");
+
+    key(&mut app, &mut state, press(KeyCode::KeyQ));
+    assert_eq!(state.ranking_lines(&app.shared)[0].label, "IR 2/2: THIRD");
+}
+
+#[test]
+fn the_ranking_panel_keeps_the_offline_view_without_a_profile() {
+    let mut app = app();
+    let mut state = SelectState::new();
+
+    key(&mut app, &mut state, press(KeyCode::KeyI));
+    let before = state.ranking_lines(&app.shared);
+    key(&mut app, &mut state, press(KeyCode::KeyE));
+
+    assert_eq!(state.ranking_lines(&app.shared), before);
+}
+
+#[test]
+fn the_ranking_panel_keeps_its_single_profile_layout() {
+    let mut app = app();
+    add_ir_profile(&mut app, "ONLY", true);
+    app.shared.rebuild_server();
+    let mut state = SelectState::new();
+
+    key(&mut app, &mut state, press(KeyCode::KeyI));
+    let before = state.ranking_lines(&app.shared);
+    key(&mut app, &mut state, press(KeyCode::KeyE));
+
+    assert_eq!(before[0].label, "SELECT A CHART");
+    assert_eq!(state.ranking_lines(&app.shared), before);
 }
 
 /// A level bound set in the panel has to actually take the charts outside it out of the list.
