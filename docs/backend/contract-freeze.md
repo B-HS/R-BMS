@@ -1,7 +1,6 @@
-# IR 계약 동결 + 백엔드 부트스트랩 결정 (Phase 4 게이트 — 사용자 확인 필요)
+# IR 계약 동결 기록 (2026-09-09)
 
-> 로드맵 Phase 4의 **선결 게이트**(open decisions D·E). 백엔드(별 MIT 레포, Bun+Hono+Drizzle+Zod+better-auth)는 그린필드라 코딩 전에 클라(`rbms-ir`)와의 **와이어 계약 3건 + envelope 정책 + 부트스트랩 2건**을 동결해야 재작업이 없다. 본 문서가 그 단일 출처.
-> **라이선스 경계:** 백엔드/FE는 **별 저장소·MIT**(HTTP로만 통신하는 분리 작품). **GPL rbms 레포에 백엔드 코드를 두지 않는다.** 따라서 레포 생성·MySQL·인증 소유권은 사용자 결정/리소스가 필요해 본 문서로 준비만 한다.
+> **역사 상태:** 이 문서는 구현 전 동결 기록입니다. 2026-09-09에 `web/` 안의 Next.js Route Handler + Drizzle(MySQL) + Zod + better-auth 구현으로 전환됐습니다. 별도 MIT 레포와 Hono 부트스트랩 전제는 폐기됐고, 현재 정본은 [README.md](./README.md), [api-spec.md](./api-spec.md), [endpoint-tasks.md](./endpoint-tasks.md) 및 실제 `web/src/`입니다. Phase R의 실제 키·배포 검증은 아직 수행하지 않았습니다.
 
 ## A. 클라가 실제 호출하는 경로 (검증: `crates/rbms-ir/src/http.rs`)
 `base = --server 값(trailing / 제거)`, 각 호출은 `{base}{path}`:
@@ -44,7 +43,7 @@ POST /auth/login
 2. **user/session/account 소유권** — better-auth가 자체 테이블(user/session/account/verification)을 마이그레이션으로 소유 vs Drizzle 스키마가 소유.
    - **권장: better-auth가 인증 코어 테이블 소유**(better-auth Drizzle adapter), 도메인 테이블(chart/score/replay/…)은 `db/schema.ts`(data-model.md). FK는 user.id 참조.
 
-## E. M0 부트스트랩 단계 (greenlight 시 — 별 MIT 레포)
+## E. M0 부트스트랩 단계 (구현 전 계획, 현재는 역사 기록)
 1. 레포 생성(`rbms-server`, MIT LICENSE). `bun init`, deps: hono·@hono/zod-validator·drizzle-orm·mysql2·zod·better-auth.
 2. 구조(컨벤션 `backend.md`): `index.ts`(compose→router→middleware→mount `/api`)·`route/`·`service/`·`dto/`·`db/`(index 싱글톤+schema)·`middleware/`·`lib/`(error 3파일·api-response·with-*·env)·`compose/`.
 3. `lib/env.ts`(getEnv+Zod): `DATABASE_URL`·`BASE_URL`·`JWT_SECRET`·`ALLOW_GUEST`·`REPLAY_MAX_BYTES`·`NODE_ENV`.
@@ -52,4 +51,4 @@ POST /auth/login
 5. 검증: `bun:test`(설명 한국어) + 실제 `rbms-player --server http://localhost:3000/api --player <id>`로 submit→ranking 왕복(PRD §8).
 
 ## 상태
-**대기** — B(1·2·3)·C·D 동결 확인 후 별 MIT 레포에서 M0→M1 구현. 클라측 후속(SubmitResponse 확장·로그인 UI·랭킹 패널 = M2a)은 백엔드 M1 후 이 레포(GPL)에서.
+**완료(2026-09-09)** — 클라이언트 와이어 계약, raw IR/FE envelope 분리, `/api` base 규약을 `web/` 구현에 반영했습니다. `rbms-ir` 확장, GUI 로그인·랭킹·리플레이·settings 동기화도 완료됐습니다. 남은 범위는 실제 키를 투입하는 Phase R 배포 검증, LR2IR 어댑터, replay 재시뮬레이션 검증입니다.

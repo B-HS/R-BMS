@@ -1,5 +1,7 @@
 # G5 컨트롤러 — 배선 지시 (G8 용)
 
+> **역사 배선 지시(2026-09-09)** — Phase G는 완료했습니다. 현재 정본은 [roadmap](../../roadmap.md), 근거는 [PROCESS](../../PROCESS.md)와 [Phase G 이력](../../history/2026-09-16-phase-g-data-long-tail.md)입니다. 아래 본문은 당시 기록으로 보존합니다.
+
 > README 색인 표의 `g5.md` 행이 이 파일이다.
 > 갈래 소유 파일: `apps/rbms-player/src/gamepad.rs`, `apps/rbms-player/src/gamepad/{analog,tests}.rs`,
 > `apps/rbms-player/src/keyconfig.rs`, `apps/rbms-player/src/keyconfig_tests.rs`.
@@ -315,7 +317,7 @@ ENTER 로 캡처를 시작할 때(현재 `KeyCode::Enter` 팔) PAD 행이면 **�
 
 ---
 
-## 7. 레퍼런스 이탈 (G8 이 `docs/reference-divergences.md` 에 등재)
+## 7. 레퍼런스 이탈 (G8 이 `docs/acknowledge/reference-divergences.md` 에 등재)
 
 | # | 이탈 | 내용 |
 |---|---|---|

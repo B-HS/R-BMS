@@ -93,13 +93,12 @@
 ## 8. 시각 단위
 - 레퍼런스 구현 `IRScoreData.date` = **unix초**. rbms/LR2 일부 = ms. → rbms 백엔드 정본은 **epoch ms**, 레퍼런스 구현 호환 입출력 시 ×1000/÷1000 변환.
 
-## 9. 클라이언트 갭 (rbms-ir 현행 → 슈퍼셋)
-현행 `crates/rbms-ir/src/dto.rs`는 합계 judge(fast/slow)만 보유. 백엔드 슈퍼셋 수용을 위해 후속 확장 필요(→ [endpoint-tasks.md] §13):
-- `JudgeBreakdown`: + `epg…lms`(early/late) · `avgjudge` · `empty_poor`.
-- `ScoreSubmission`: + `lntype·seed·judge_algorithm·rule·skin·option` + **`client_build_sha256`·`client_platform`**(무결성).
-- `PlayOptions`: + 전체옵션(`option·judge_rate·offset_ms·constant·hispeed·lift·lane_cover·total_override·autoplay·auto_offset·scratch_left·random_p2·green_number`).
-- `ReplayData`: events를 **µs 구조**(`{t_us,lane,press}[]`)로(현행 `events:Vec<u8>` → µs 보존 직렬화).
-- 신규: settings(get/put)·replay download·register/login/token·course_* 메서드.
+## 9. 클라이언트 정합 상태
+`crates/rbms-ir`은 슈퍼셋 DTO와 HTTP 메서드를 구현했습니다.
+- `JudgeBreakdown`은 `epg…lms`, `avgjudge`, `empty_poor`를 보존합니다.
+- `ScoreSubmission`과 `PlayOptions`는 seed·judge algorithm·rule·skin·옵션·build hash/platform을 전송합니다.
+- `ReplayData.events`는 µs 구조(`{t_us,lane,press}[]`)이며 설정 get/put, replay download, register/login/whoami, rivals, course/page query를 지원합니다.
+- GUI 로그인, 랭킹, replay, settings 동기화도 플레이어에 연결됐습니다. 실제 배포 서버 왕복은 Phase R에서 키를 넣어 검증합니다.
 
 ## 9.5 rbms 전용(LR2IR·레퍼런스 구현에 없음)
 | 기능 | LR2IR | 레퍼런스 구현 | rbms |
@@ -109,8 +108,8 @@
 | 전체 플레이옵션 보존 | 일부 | 다수 | **전수(공평 평가)** |
 | µs 리플레이 | ✗ | (고스트 일부) | **µs 무손실(핵분석)** |
 | 설정 동기화 | ✗ | ✗ | **named blob get/put** |
-| 웹 FE 조회 | (HTML) | ✗ | **search/leaderboard/feed/뷰어 + envelope·CORS** |
-> 서버는 누락 필드를 합계/유도로 수용(하위호환). 현행 rbms-ir 제출도 동작하되, `client_build_sha256` 없으면 `ranked=false`(UNKNOWN_BUILD) 또는 거부(env).
+| 웹 FE 조회 | (HTML) | ✗ | **`/api/fe/*` search/leaderboard/feed/뷰어 envelope** |
+> 서버는 누락 필드를 기본값/유도로 수용합니다. 외부 CORS는 Next 단일 오리진 구조상 구현하지 않았고, build hash의 ranked 정책은 `REQUIRE_BUILD_HASH` 설정을 따릅니다.
 
 ## 출처 (sources)
 - 레퍼런스 구현 원본: `/Users/hyunseokbyun/<reference>/ir/` — `IRConnection.java`·`IRScoreData.java`·`IRChartData.java`·`IRCourseData.java`·`IRTableData.java`·`IRPlayerData.java`·`IRAccount.java`·`IRResponse.java`; `ClearType.java`·`play/JudgeAlgorithm.java`.

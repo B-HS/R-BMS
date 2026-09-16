@@ -1,5 +1,7 @@
 # G2 (스코어DB) 배선 지시
 
+> **역사 배선 지시(2026-09-09)** — Phase G는 완료했습니다. 현재 정본은 [roadmap](../../roadmap.md), 근거는 [PROCESS](../../PROCESS.md)와 [Phase G 이력](../../history/2026-09-16-phase-g-data-long-tail.md)입니다. 아래 본문은 당시 기록으로 보존합니다.
+
 > 대상: W3 통합 갈래(G8). 이 문서만 보고 배선한다. 근거는 스펙 `docs/plan/2026-09-09-phase-g-spec.md` §4.
 > G2 가 소유·완성한 것: `crates/rbms-store/src/scoredb.rs` + `scoredb/{schema.rs,schema.sql,migrate.rs,replay_gc.rs,tests.rs}`,
 > `apps/rbms-player/src/scoredb_store.rs` + `scoredb_store/tests.rs`. 이 파일들은 G8 이 고칠 필요가 없다(§9 의 allow 제거만 예외).

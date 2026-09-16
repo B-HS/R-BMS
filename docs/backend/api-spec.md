@@ -1,5 +1,7 @@
 # rbms 백엔드 — HTTP API 규격 (IR 슈퍼셋)
 
+> **현재 구현 기준(2026-09-16):** 이 문서는 `web/src/app/api`와 `web/src/server`를 따라 읽습니다. 초기 설계에 남은 `/api/settings/*`, `?envelope=1`, 외부 CORS, LR2IR 어댑터 설명은 아래의 구현 상태 표기를 우선합니다. 실제 키를 사용한 배포 검증은 Phase R 보류입니다.
+
 > REST + JSON. 모든 시각은 **unix epoch ms**(레퍼런스 구현 IR은 초 단위 — [compatibility.md](./compatibility.md) 변환표). 차트 키는 **md5(32hex) 또는 sha256(64hex)** 둘 다 허용(`{hash}` 길이로 판별).
 > 인증: `Authorization: Bearer <token>`(선택). 미인증 제출은 서버 설정상 `guest` 허용 가능.
 > 버전: 모든 제출 본문에 `api_version`(현재 **1**). 모든 DTO는 `extra?: object`(free-form) 보존.
@@ -17,10 +19,7 @@
 // 실패
 { "success": false, "error": { "code": "BLOG_POST_NOT_FOUND", "message": "...", "details": { } } }
 ```
-> 단, **IR 호환 GET(랭킹·베스트 등)** 은 클라이언트(`rbms-ir`)가 봉투 없는 raw 배열/객체를 기대하므로(현행 `HttpScoreServer`), 두 가지 모드를 둔다:
-> - **rbms 모드(기본)**: `rbms-ir`가 파싱하는 raw JSON(아래 각 DTO 그대로).
-> - **envelope 모드**: `?envelope=1` 또는 `Accept: application/vnd.rbms.v1+json` 시 위 봉투로 감쌈.
-> (구현 단순화를 위해 v1은 **raw 모드 고정**, envelope는 capability로 후속. `rbms-ir`/`docs/reference/ir-api.md`와 일치.)
+> 네이티브 IR 경로는 `rbms-ir`가 파싱하는 **raw JSON**이고, FE 전용 경로(`/api/fe/*`)만 `{success,data,pagination?}` envelope를 반환합니다. `?envelope=1`과 Accept 협상은 구현하지 않았습니다.
 
 ### 0.2 상태코드 / 에러코드
 | HTTP | 상황 | code(예) |
@@ -206,8 +205,9 @@
 ```
 > `course_hash` = 코스 차트들의 sha256(또는 md5) 결합 해시(레퍼런스 구현/LR2 관행). [compatibility.md] 참조.
 
-### `POST /api/courses` (Bearer) — 코스 메타 업서트
-### `POST /api/courses/{course_hash}/scores` (Bearer) — the reference implementation `sendCoursePlayData`
+### `POST /api/courses` (Bearer) — 코스 결과 제출(네이티브 클라이언트 계약)
+### `POST /api/courses/meta` (admin) — 코스 메타 업서트
+### `POST /api/courses/{course_hash}/scores` (Bearer) — 코스 결과 제출 별칭
 ```jsonc
 // CourseSubmission (judge는 §5와 동일 구조)
 { "api_version":1, "course_hash":"…", "player":{"id":"alice"}, "lntype":1,
@@ -261,7 +261,7 @@
 ```
 ### `GET /api/replays/{id}` → `ReplayData`(events µs 포함) — 다운로드(고스트·관전·**핵분석**·검증)
 ### `GET /api/charts/{hash}/replays?player={id}&limit=` → `ReplayMeta[]`(events 제외 목록)
-> 서버는 events를 **불투명 blob(µs 무손실)** 로 스토리지에 저장 + 메타(event_count·duration_us·build·score 연결) 인덱싱. 재시뮬 검증(FR-12)·핵분석은 µs 스트림 + seed/options로 오프라인 재구성. rbms `Replay`(RON) 1:1 대응.
+> 현재 서버는 events JSON을 MySQL `replay.data`에 저장하고 메타를 같은 행에 인덱싱합니다. `REPLAY_STORAGE=db`만 지원하며, `blob`/Vercel Blob은 미구현입니다. 재시뮬 검증(FR-12)은 후속입니다.
 
 ---
 
@@ -269,34 +269,27 @@
 
 계정에 named 설정 blob 저장. rbms 클라이언트 파일(`settings.ron`·`keyconfig.ron`·`tables.ron`)을 키별로 보관.
 
-### `GET /api/settings` (Bearer) → 보유 키 목록
+### `GET /api/players/{id}/settings/{name}` (Bearer) → 단일 blob
 ```jsonc
-{ "keys":[ {"key":"settings","format":"ron","updated_at":1700000000000,"size":512},
-           {"key":"keyconfig","format":"ron","updated_at":…,"size":…},
-           {"key":"tables","format":"ron","updated_at":…,"size":…} ] }
-```
-### `GET /api/settings/{key}` (Bearer) → 단일 blob
-```jsonc
-{ "key":"settings", "format":"ron", "content":"<문자열>", "updated_at":1700000000000, "extra":{} }
+{ "name":"settings", "format":"ron", "content":"<문자열>", "updated_at":1700000000000 }
 // 404 IR_SETTING_NOT_FOUND
 ```
-### `PUT /api/settings/{key}` (Bearer) — 업서트(낙관적 동기화)
+### `PUT /api/players/{id}/settings/{name}` (Bearer) — 업서트(낙관적 동기화)
 ```jsonc
 // req
 { "api_version":1, "format":"ron", "content":"<문자열>", "base_updated_at":1700000000000, "extra":{} }
-// 200 → { "key":"settings", "updated_at":1700000050000, "conflict":false }
+// 200 → { "updated_at":1700000050000 }
 // 409 conflict: base_updated_at 가 서버 최신과 불일치 → { "conflict":true, "server": {GET 결과} }
 ```
-### `DELETE /api/settings/{key}` (Bearer) → 204
-> 표준 키: `settings`·`keyconfig`·`tables`. 임의 named blob(예: `skin:custom`)도 허용. content는 클라 포맷(RON) 그대로 — 서버는 불투명. 충돌은 `base_updated_at` 기반 낙관적 잠금.
+> 현재 구현은 목록/삭제 `/api/settings/*`를 제공하지 않습니다. 이름별 get/put 경로가 네이티브 `rbms-ir` 계약이며, PUT은 저장한 `updated_at`을 200 응답으로 반환합니다. content는 클라 포맷(RON 포함)을 불투명 문자열로 보관하고, 충돌은 `base_updated_at` 기반입니다.
 
 ---
 
 ## 10. 인증·레이트리밋·CORS·페이지네이션 규약
 - **인증(이중)**: better-auth(컨벤션 §11) 기반 — (a) **네이티브 클라(rbms)** = `Authorization: Bearer <token>`(`/api/auth/token`), (b) **웹 FE** = better-auth **세션 쿠키**(`HttpOnly`·`SameSite`·CSRF). 보호 엔드포인트는 `withAuth`/`withAdmin` HOF. 제출은 토큰/세션의 player == 본문 `player.id` 강제(guest 제외).
-- **CORS**: FE 오리진 화이트리스트(env `ALLOWED_ORIGINS`), 쿠키 인증 시 `credentials: true`. 미들웨어(`middleware/cors`).
+- **CORS**: Next 단일 오리진 배포이며 외부 웹 오리진을 지원하지 않으므로 CORS 미들웨어와 `ALLOWED_ORIGINS`는 없습니다. 네이티브 클라이언트에는 브라우저 CORS가 적용되지 않습니다.
 - **rate-limit**: 로그인 5/min/IP, 제출 60/min/token, 리플레이 업로드 10/min/token → 429 `RATE_LIMITED`.
-- **페이지네이션**: `?page`(1-base)·`limit`(기본 50, 최대 100). 네이티브(rbms-ir)는 raw 배열, **웹 FE는 envelope 모드 권장**(`?envelope=1` → `{success,data,pagination}`).
+- **페이지네이션**: `?page`(1-base)·`limit`(기본/상한은 DTO별). 네이티브는 raw 배열, 웹 FE는 `/api/fe/*` envelope를 사용합니다.
 
 ---
 
@@ -307,8 +300,8 @@
 - 모든 `POST /api/scores`·리플레이 업로드는 `client_build_sha256`(실행 중 클라 바이너리 SHA-256) + `client_platform` 동봉. 서버는 **모든 제출 로그에 빌드 해시 기록**(`submission_audit`).
 - **빌드 allowlist**: 공식 릴리스 빌드 해시를 `client_build` 테이블에 등록(릴리스 CI가 산출물 SHA-256을 자동 등록 — [data-model.md]). 정책:
   - 등록된 신뢰 빌드 → 정상 `ranked`.
-  - 미등록/미상 해시 → `ranked=false` + `flags:["UNKNOWN_BUILD"]`(거부 대신 기록, 정책에 따라 강화 가능).
-  - 빌드 해시 누락(구버전 클라) → unranked 또는 거부(env `REQUIRE_BUILD_HASH`).
+  - 미등록/미상 해시 → `flags:["UNKNOWN_BUILD"]`; `REQUIRE_BUILD_HASH=false`이면 그 flag만으로는 unranked가 되지 않는다.
+  - 명시적 untrusted 빌드, 또는 `REQUIRE_BUILD_HASH=true`인 미상/누락 해시 → unranked. 입력 자체를 거부하지는 않는다.
 - 관리: `GET/POST /api/admin/builds`(admin) — 빌드 해시 등록/조회/신뢰표시.
 
 ### 11.2 ranked 적격성 (자동 판정)
@@ -323,23 +316,16 @@
 
 ---
 
-## 12. FE(web) 전용 엔드포인트 (향후 FE 프로젝트 고려)
-> 네이티브 IR(§1-9) 위에 **웹 FE가 바로 쓸 조회/검색/탐색**을 추가(envelope 모드·세션 쿠키·공개 읽기). 모두 페이지네이션·정렬·필터.
+## 12. FE(web) 전용 엔드포인트
+> 네이티브 IR 위에 구현된 FE 조회 경로입니다. 모두 `/api/fe/*`이고 envelope를 고정으로 사용합니다.
 
-- `GET /api/charts/search?q=&mode=&level=&sort=&page=&limit=` → `ChartMeta[]`(title/artist/md5/sha256 검색). 공개.
-- `GET /api/charts/{hash}/ranking`(§4) — FE 리더보드(envelope+player_name·rank·replay_id 링크).
-- `GET /api/players/{id}` · `GET /api/players/{id}/scores`(§3) — FE 플레이어 페이지.
-- `GET /api/players/{id}/recent?limit=` → 최근 플레이 피드(차트 메타 조인).
-- `GET /api/activity/recent?limit=` → 전체 최근 제출 피드(홈/대시보드). 공개.
-- `GET /api/leaderboards/players?sort=rank_points&page=` → 종합 랭킹(플레이어). 공개.
-- `GET /api/replays/{id}`(§8) — FE **리플레이 뷰어**(µs 이벤트 → 재생/그래프).
-- `GET /api/stats/summary` → 서버 통계(차트수·플레이어수·제출수) 대시보드. 공개.
-- 웹 인증: `POST /api/auth/login`(쿠키 세션), `GET /api/auth/me`, better-auth OAuth(GitHub/Google) 라우트(`/api/auth/*`)도 노출 가능.
-> 원칙: 공개 읽기 엔드포인트는 무인증, 쓰기/개인데이터는 세션. FE는 envelope 모드 고정. 신규 엔드포인트는 추가만(기존 IR 계약 불변).
+- `GET /api/fe/charts/search`, `/api/fe/charts/[hash]/leaderboard`, `/api/fe/activity/recent`, `/api/fe/leaderboards/players`, `/api/fe/players/[playerId]/{recent,stats}`, `/api/fe/stats/summary`.
+- `GET /api/fe/me/settings`, `GET|POST /api/fe/tokens`, `DELETE /api/fe/tokens/[tokenId]`은 세션 사용자 전용입니다.
+- 웹 인증은 better-auth catch-all 및 IR 호환 `/api/auth/{register,login,me,token}` 경로를 사용합니다. OAuth 제공자는 이 저장소에서 구성하지 않았습니다.
 
 ---
 
-## 13. (선택) LR2IR 레거시 호환 어댑터 — `/lr2ir/*`
+## 13. (선택) LR2IR 레거시 호환 어댑터 — 미구현
 원조 LR2 클라이언트/스크레이퍼 호환을 위한 **조회 어댑터**(capability `lr2ir_compat`).
 - `GET /lr2ir/2/getrankingxml.cgi?id={playerid}&songmd5={md5}` → LR2IR XML
   ```xml
@@ -353,7 +339,7 @@
   ```
   - `clear` 1-5(FAILED/EASY/CLEAR/HARD/FULLCOMBO)로 다운매핑(슈퍼셋 램프 → LR2 5단계). `pg=epg+lpg`, `gr=egr+lgr`, `minbp`=BP, `notes`/`combo` 그대로.
 - `GET /lr2ir/search.cgi?mode=ranking&bmsmd5={md5}` → 최소 HTML(title) — 스크레이퍼 호환(선택).
-> 제출(`gateway.cgi`)은 난독 바이너리라 **재현 비범위**(PRD §3). 조회만 어댑팅.
+> 제출(`gateway.cgi`)은 난독 바이너리라 **재현 비범위**(PRD §3)이며, 위 조회 어댑터도 현재 Route Handler로 구현되지 않았습니다.
 
 ---
 
@@ -366,4 +352,4 @@
   - 무결성: `client_build_sha256`(`z.string().length(64)`)·`client_platform`. 모든 스키마에 `.extra: z.record(z.any()).optional()`.
 - 타입은 `z.infer<typeof …>`로 유도.
 
-> 클라이언트(`rbms-ir`) 현행과의 차이(early/late·seed·avgjudge·empty_poor·전체옵션·client_build_sha256·µs리플레이·settings·courses)는 [compatibility.md] §9 클라이언트-갭에 정리. `rbms-ir` DTO를 이 규격으로 확장하는 것이 클라 측 후속 태스크.
+> `rbms-ir`은 이 규격의 DTO·HTTP 확장을 구현했으며, GUI 로그인·랭킹·리플레이·settings 동기화도 완료됐습니다. 남은 실제 서버 배포 확인은 Phase R입니다.

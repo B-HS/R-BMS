@@ -1,5 +1,7 @@
 # rbms web — 아키텍처 설계 (W0)
 
+> **현재 구현 기준(2026-09-16):** W0~W2 작업은 완료됐습니다. 실제 라우트는 `web/src/app/{(app),(public),api}/`, 서버 경계는 `web/src/server/`가 정본입니다. 본문에 남은 "착수 시", "향후", 가정은 설계 이력으로만 읽고, 이 상태 블록과 §9를 우선합니다. 실제 운영 시크릿·배포 smoke test는 Phase R 보류입니다.
+
 > 근거: `docs/acknowledge/2026-09-09-enhancement-decisions.md` §웹·백엔드 단독 서버(W1~W8), `docs/backend/{PRD,api-spec,data-model,endpoint-tasks,compatibility,contract-freeze}.md`, `docs/reference/ir-api.md`, 실제 와이어 `crates/rbms-ir/src/{http.rs,dto.rs}`, `docs/acknowledge/design.md`.
 > 컨벤션: `~/.claude/convention/{common,frontend,fsd,query,security,backend,comments}.md`.
 > 이 문서는 **설계 정본**이다. 코드는 포함하지 않는다(형식 예시 제외). 확정되지 않은 항목은 **가정**으로 표기했다.
@@ -18,7 +20,7 @@
 | 인증 | better-auth(이메일+비밀번호, 세션 쿠키) + 자체 `api_token`(Bearer, 해시 저장) |
 | 응답 | 네이티브 경로 = raw JSON, FE 전용 `/api/fe/*` = envelope |
 | 상태 | 서버 상태 = TanStack Query v5(prefetch + HydrationBoundary) |
-| UI | Tailwind v4 `@theme`(design.md §16) + shadcn new-york |
+| UI | Tailwind v4 `@theme`(design.md §16) + shadcn radix-nova |
 
 ### 0-1. 버전 (2026-09-09 레지스트리 최신, 설치 시 재확인)
 
@@ -32,7 +34,7 @@
 
 ### 1-1. 페이지 — 라우트 그룹 2개 = 디자인 Surface 2개
 
-design.md §1-2 는 두 Surface 가 **스타일시트를 공유하지 않는다**고 못박는다. 라우트 그룹으로 그 경계를 그대로 옮긴다.
+design.md §1-2 는 두 Surface의 **시각 토큰을 분리**한다. 라우트 그룹의 `data-surface` 스코프로 그 경계를 적용한다.
 
 | 그룹 | 라우트 | 화면 | Surface | 인증 |
 |---|---|---|---|---|
@@ -55,7 +57,7 @@ design.md §1-2 는 두 Surface 가 **스타일시트를 공유하지 않는다*
 
 ### 1-2. Route Handler 맵 — 네이티브(계약 동결분, raw JSON)
 
-경로는 contract-freeze A(클라가 실제 호출하는 경로)에 `/api` 프리픽스를 붙인 것과 **정확히 일치**한다. `crates/rbms-ir/src/http.rs` 검증 완료.
+아래 표는 `web/src/app/api`의 실제 Route Handler 전부를 담습니다. 그중 `crates/rbms-ir/src/http.rs`가 호출하는 경로는 contract-freeze A와 대조했습니다.
 
 | 메서드 | 경로 | 파일 | 인증 | 캐시 태그(읽기) |
 |---|---|---|---|---|
@@ -69,6 +71,7 @@ design.md §1-2 는 두 Surface 가 **스타일시트를 공유하지 않는다*
 | POST | `/api/scores` | `app/api/scores/route.ts` | Bearer 또는 guest | — |
 | GET | `/api/scores/[scoreId]` | `app/api/scores/[scoreId]/route.ts` | 없음 | `score:{id}` |
 | GET | `/api/charts/[hash]` | `app/api/charts/[hash]/route.ts` | 없음 | `chart:{sha}` |
+| GET | `/api/charts` | `app/api/charts/route.ts` | 없음 | `chart-search` |
 | POST | `/api/charts` | `app/api/charts/route.ts` | Bearer | — |
 | GET | `/api/charts/[hash]/ranking` | `.../ranking/route.ts` | 없음 | `chart-ranking:{sha}` |
 | GET | `/api/charts/[hash]/best` | `.../best/route.ts` | 없음 | `chart-best:{sha}` |
@@ -80,6 +83,7 @@ design.md §1-2 는 두 Surface 가 **스타일시트를 공유하지 않는다*
 | GET | `/api/players/[playerId]/scores` | `.../scores/route.ts` | 없음 | `player-scores:{id}` |
 | GET/PUT | `/api/players/[playerId]/settings/[name]` | `.../settings/[name]/route.ts` | Bearer·본인 | 없음(개인·비캐시) |
 | POST | `/api/courses` | `app/api/courses/route.ts` | Bearer | — |
+| POST | `/api/courses/meta` | `app/api/courses/meta/route.ts` | admin | — |
 | GET | `/api/courses/[courseHash]` | `.../[courseHash]/route.ts` | 없음 | `course:{hash}` |
 | POST | `/api/courses/[courseHash]/scores` | `.../scores/route.ts` | Bearer | — |
 | GET | `/api/courses/[courseHash]/ranking` | `.../ranking/route.ts` | 없음 | `course-ranking:{hash}` |
@@ -362,15 +366,15 @@ Route Handler (app/api/**/route.ts)
 | `ALLOW_GUEST` | X(기본 `false`) | guest 제출 허용 |
 | `REPLAY_MAX_BYTES` | X(기본 `4194304`) | 리플레이 상한 |
 | `REQUIRE_BUILD_HASH` | X(기본 `false`) | `client_build_sha256` 누락 시 거부 여부 |
-| `REPLAY_STORAGE` | X(기본 `db`) | `db` \| `blob`. blob = Vercel Blob |
-| `BLOB_READ_WRITE_TOKEN` | 조건부 | `REPLAY_STORAGE=blob` 일 때 |
+| `REPLAY_STORAGE` | X(기본 `db`) | 환경값은 `db` \| `blob`을 파싱하지만 구현은 **`db`만** 지원 |
+| `BLOB_READ_WRITE_TOKEN` | 미사용 | Blob 백엔드가 구현되기 전까지 사용하지 않음 |
 | `SERVER_VERSION` `SERVER_COMMIT` | X | `/api/version` 표기(Vercel `VERCEL_GIT_COMMIT_SHA` fallback) |
 | `NODE_ENV` | 자동 | — |
 
 - zod `safeParse`. `DATABASE_URL` 또는 `DB_HOST`/`DB_USER`/`DB_NAME` 조합은 `resolveDatabaseUrl()` 이 판정하고, 실제 접속이 필요한 시점(`getRequiredDatabaseUrl()`)에만 throw 한다 — 빌드 시 DB 미접속 보장(§5-4)을 위해 모듈 로드 시점에 던지지 않는다.
 - **빈 문자열(`KEY=`)은 미설정으로 취급**한다(`.env` 스캐폴드가 빈 값을 담고 있어도 기본값이 적용된다).
 - `process.env` 직접 접근은 `env.ts` 안으로 한정. `NEXT_PUBLIC_*` 에는 시크릿을 넣지 않는다.
-- W1a 에서 추가된 키: `REQUIRE_BUILD_HASH`(기본 false) · `REPLAY_STORAGE`(기본 `db`) · `BLOB_READ_WRITE_TOKEN` · `SERVER_VERSION` · `SERVER_COMMIT` · `VERCEL_GIT_COMMIT_SHA`.
+- `REPLAY_STORAGE=blob`은 compose가 즉시 실패시켜 잘못된 운영 구성을 드러냅니다. Vercel Blob 구현과 토큰 검증은 후속입니다.
 
 ### 6-2. Vercel
 
@@ -378,7 +382,7 @@ Route Handler (app/api/**/route.ts)
 - 리전 **`icn1`**(서울) — DB 위치가 결정되면 그 리전에 맞춘다(**가정**).
 - 도메인 `bms.hyuns.uk`. 클라 안내 문구는 `--server https://bms.hyuns.uk/api`.
 - 빌드 명령 `bun run build`, 설치 `bun install`. `drizzle-kit migrate` 는 **빌드에 포함하지 않는다**(빌드 시 DB 미접속 원칙). 마이그레이션은 별도 수동/CI 스텝.
-- `next.config.ts`: `reactCompiler: true`(이미 설정됨) + **`cacheComponents: true`** + `serverExternalPackages: ['mysql2']`. 뒤 두 개는 현재 스캐폴드에 없으므로 W1a 착수 시 추가한다.
+- `next.config.ts`는 `reactCompiler: true`, `cacheComponents: true`, `serverExternalPackages: ['mysql2']`를 모두 설정했습니다.
 
 ---
 
@@ -436,10 +440,10 @@ Route Handler (app/api/**/route.ts)
 ## 10. 가정 목록 (사용자 회신 시 변경)
 
 1. `web/` 라이선스 = 레포 GPL-3.0(W8). contract-freeze 의 "별 MIT 레포" 전제는 W1 결정으로 폐기됨.
-2. better-auth `user.id` 를 로그인 id(문자열)로 그대로 사용.
+2. better-auth `user.id`는 생성 id이고 로그인 id는 `user.login_id`다.
 3. email 미제공 계정은 `{id}@local.invalid` 합성 주소.
 4. Vercel 리전 `icn1`, mysql2 풀 `connectionLimit: 5`.
-5. 리플레이 저장 기본 `REPLAY_STORAGE=db`(mediumblob), 규모 커지면 Vercel Blob 전환.
+5. 리플레이 저장은 `REPLAY_STORAGE=db`와 `replay.data`(mediumtext)만 구현됐다. Vercel Blob 전환은 후속이다.
 6. 레이트리밋 v1 = 인스턴스 로컬(best-effort).
 7. `POST /api/courses` = 코스 **결과 제출**(클라 계약 우선), 메타 업서트는 `/api/courses/meta`.
 8. `(app)` 인증 게이팅은 미들웨어가 아닌 세그먼트 layout 에서 수행.

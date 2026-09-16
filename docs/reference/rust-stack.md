@@ -1,5 +1,7 @@
 ## rbms — Rust Stack Cheat-Sheet (2026-05 기준 검증 버전)
 
+> **역사 연구(2026-05):** 조사 당시의 후보와 버전 기록입니다. 현재 의존성·툴체인은 `Cargo.toml`·`Cargo.lock`·`rust-toolchain.toml`이 정본이며, 완료 상태는 [roadmap](../roadmap.md)을 따릅니다.
+
 > macOS(CoreAudio) + Windows(WASAPI), Apple Silicon 개발기, Rust 1.95. **핵심 설계 결정: 재생 위치(=판정 시간축)는 vsync 프레임 클럭이 아니라 오디오 디바이스가 실제 재생한 샘플 수에서 유도한다.** 이것이 레퍼런스 구현 대비 가장 중요한 수정이다.
 
 ---

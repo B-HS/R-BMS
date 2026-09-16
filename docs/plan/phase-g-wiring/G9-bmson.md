@@ -1,5 +1,7 @@
 # G9 bmson — G8 배선 지시
 
+> **역사 배선 지시(2026-09-09)** — Phase G는 완료했습니다. 현재 정본은 [roadmap](../../roadmap.md), 근거는 [PROCESS](../../PROCESS.md)와 [Phase G 이력](../../history/2026-09-16-phase-g-data-long-tail.md)입니다. 아래 본문은 당시 기록으로 보존합니다.
+
 > 대상: 스펙 `docs/plan/2026-09-09-phase-g-spec.md` §2 보류항목·§9.2 G9 행, 결정 10(`docs/acknowledge/2026-09-09-enhancement-decisions.md`) = **bmson 은 Phase G 범위 안**.
 > 소유 파일(G9 가 이미 작성 완료): `crates/rbms-parser/src/bmson.rs`, `crates/rbms-parser/src/bmson/{convert.rs,tests.rs}`, `crates/rbms-parser/tests/bmson/*.bmson`.
 > 아래 패치는 전부 **G9 소유가 아닌 파일**에 대한 지시다. G9 는 이 파일들을 한 줄도 건드리지 않았다.

@@ -1,5 +1,7 @@
 # 확정 결정 — 空POOR 처리 · 로컬 기록 스키마
 
+> **상태(2026-09-16): 현재 정책.** 구현은 `rbms-store`의 SQLite 기록 경로와 호환되며, 이 문서의 `scores.ron` 설명은 역사 저장 형식으로 대체됐습니다. 空POOR 의미와 기록 제외 정책은 유지합니다.
+
 ## 대상 파일
 - `crates/rbms-judge/src/matcher.rs` (`JudgeEngine::press`, `empty_poor`)
 - `apps/rbms-player/src/scores.rs` · `apps/rbms-player/src/main.rs` (`enter_result`)
@@ -22,9 +24,10 @@
 - 게이지 페널티는 `Judge::Miss` 델타(MS) 사용 — 레퍼런스 구현 judge 5와 동일 인덱스. 기존(노트 소비 +
   Poor델타 −6%)보다 약함(−2%)이라 **순수 개선**(노트도 살아남음).
 
-## 2. 로컬 기록(scores.ron) 결정
-- 위치: `~/.config/rbms/scores.ron`. `ScoreBook { records: Vec<ScoreRecord> }`(append-only).
-- **서버와 무관하게 항상 저장**(실인터랙티브 플레이). autoplay·replay 재생은 기록 생성 안 함(중복/허수 방지).
+## 2. 로컬 기록(scoredb.sqlite) 결정
+
+- 정본 위치: `~/.config/rbms/scoredb.sqlite`. `ScoreDb`가 실인터랙티브 플레이를 저장하고, 화면 호환용 `ScoreBook`은 DB에서 읽어 만든다.
+- 기존 `scores.ron`은 첫 DB 생성 때 1회 가져오는 역사 형식이다. autoplay·replay·practice는 기록을 만들지 않는다.
 - 램프는 레퍼런스 구현 `ClearType.id`(0..10) 정수로 영속 → 색/라벨 왕복(`clear_type_from_id`). LightAssistEasy(3)
   는 rbms에 별도 램프 없어 AssistEasy로 흡수.
 - `counts: [u32;6]`는 RON 직렬화 시 **튜플 `(...)`**(고정배열=튜플). 손으로 편집/픽스처 작성 시 `[...]`는

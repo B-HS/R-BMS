@@ -4,7 +4,7 @@
 
 **A BMS rhythm-game player in Rust — reference-accurate judgment, sample-clocked audio, wgpu rendering.**
 
-[Features](#features) · [Build](#build) · [Controls](#controls) · [Development](#development)
+[Features](#features) · [Build](#build-and-run) · [Controls](#controls) · [Development](#development)
 
 </div>
 
@@ -26,7 +26,7 @@ R-BMS reimplements the core PLAY loop of a GPL-3.0 reference implementation in R
 
 ## Build and run
 
-Requires Rust 1.95 or newer. Binaries are not published yet.
+Requires Rust 1.95 or newer. The release workflow is present, but this repository has not completed its first `prod` release; do not assume a published binary is available.
 
 ```sh
 cargo build --release -p rbms-player
@@ -77,9 +77,9 @@ Default lanes follow the reference keyboard layout: 7K `Z S X D C F V` + `LShift
 
 ## Web (IR server + site)
 
-`web/` is a Next.js app that serves both the IR API the player talks to and the public site (leaderboards, charts, players, replays, settings). It runs on Vercel at `https://bms.hyuns.uk`.
+`web/` is a Next.js app that serves both the IR API the player talks to and the public site (leaderboards, charts, players, replays, settings). The configured production endpoint is `https://bms.hyuns.uk`, but its current availability is an external deployment concern and must be checked before use.
 
-Connect the player from inside the game, not from the command line: press Tab on the song select to open SETTINGS, go to the NETWORK tab, set `SERVER URL` to `https://bms.hyuns.uk/api` and `PLAYER ID` to your account id, then fill EMAIL / PASSWORD and run REGISTER or LOGIN. The bearer token is stored locally, the password never is. The same tab holds settings sync, rival management and the replay auto-upload toggle; press `I` on the song select for the IR ranking panel. The full walkthrough is at [`/guide`](https://bms.hyuns.uk/guide). `--server` and `--player` remain overrides for one run only.
+When that endpoint is reachable, connect the player from inside the game, not from the command line: press Tab on the song select to open SETTINGS, go to the NETWORK tab, set `SERVER URL` to `https://bms.hyuns.uk/api` and `PLAYER ID` to your account id, then fill EMAIL / PASSWORD and run REGISTER or LOGIN. The bearer token is stored locally, the password never is. The same tab holds settings sync, rival management and the replay auto-upload toggle; press `I` on the song select for the IR ranking panel. The walkthrough endpoint is [`/guide`](https://bms.hyuns.uk/guide). `--server` and `--player` remain overrides for one run only.
 
 ```sh
 cd web
@@ -96,13 +96,13 @@ Stack: Next.js 16 (App Router, Route Handlers, Cache Components), React 19, Tail
 
 ```sh
 cargo test --workspace
-cargo clippy --workspace --all-targets
+cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo run -p rbms-render --example render_select   # headless render to PPM
 ```
 
-Workspace crates, bottom up: `rbms-model` (chart types) → `rbms-parser` (BMS lexer, `#RANDOM` / `#SWITCH`, MD5 + SHA-256) → `rbms-chart` (timing, lanes, shuffle, scroll) → `rbms-judge` (windows, algorithms, gauges, RON tables) → `rbms-audio` (cpal + symphonia, real-time mixer, interpolated clock) / `rbms-render` (`Renderer` trait, CPU reference canvas, skin renderer, fonts) / `rbms-skin` (JSON skin loader) / `rbms-ir` / `rbms-table` / `rbms-store` (scores, replays) / `rbms-library` (scan) / `rbms-config` (settings schema, descriptors) → `rbms-play` (PlaySession) → `apps/rbms-player` (winit + wgpu, stage-based app). CI runs tests on Linux, macOS and Windows with fmt and clippy `-D warnings` gates.
+Workspace crates, bottom up: `rbms-model` (chart types) → `rbms-parser` (BMS lexer, `#RANDOM` / `#SWITCH`, MD5 + SHA-256) → `rbms-chart` (timing, lanes, shuffle, scroll) → `rbms-judge` (windows, algorithms, gauges, RON tables) → `rbms-audio` (cpal + symphonia, real-time mixer, interpolated clock) / `rbms-render` (`Renderer` trait, CPU reference canvas, skin renderer, fonts) / `rbms-skin` (JSON skin loader) / `rbms-ir` / `rbms-table` / `rbms-store` (scores, replays) / `rbms-library` (scan) / `rbms-config` (settings schema, descriptors) / `rbms-course` (course model and run state) → `rbms-play` (PlaySession) → `apps/rbms-player` (winit + wgpu, stage-based app). CI runs tests on Linux, macOS and Windows with fmt and clippy `-D warnings` gates.
 
-Architecture, the reference parity ledger, decisions and the improvement plan live in [docs/](docs/README.md) (Korean). Start with [docs/PROCESS.md](docs/PROCESS.md).
+Architecture, the reference parity ledger, decisions and the improvement plan live in [docs/](docs/README.md) (Korean). Start with [docs/PROCESS.md](docs/PROCESS.md). Phase R (creating `prod`, first release/tag and signing or deployment credentials) is deliberately deferred until the maintainer supplies the required real keys.
 
 ## License
 

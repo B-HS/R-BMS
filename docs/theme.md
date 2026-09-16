@@ -7,7 +7,7 @@ rbms separates two kinds of look-and-feel:
 | **In-play note field** (lanes, notes, beams, gauge, key-bomb, HUD layout) | `SkinConfig` | `assets/skins/*.ron`, or `--skin <file>` |
 | **UI chrome** (song-select, result, settings/keyconfig/tables/folders/loading menus) | `ThemeConfig` → `Theme` | `~/.config/rbms/theme.ron` |
 
-This document covers the **theme** (the chrome). It is the schema a future web front-end will author against.
+This document covers the native-player **theme** (the chrome).
 
 ## How it works
 
@@ -61,9 +61,9 @@ Colours that are **semantic** (not themed): clear-lamp colours, per-mode badge c
 
 Everything not listed keeps its default — so this themes the highlights without redesigning every surface.
 
-## For the web front-end
+## Web front-end boundary
 
-The FE theme editor should expose the 21 fields above as colour pickers (grouped: Surfaces / Text / List / Controls / Meters), serialize to the RON form, and write `theme.ron`. Round-trip is loss-free: `ThemeConfig` is `#[serde(default)]`, so older/newer files interoperate (new fields take defaults). Keep the "semantic colours are not themable" rule in the UI copy.
+`theme.ron` is a **native-player-only** configuration file. The existing web app uses CSS tokens and `next-themes`; it does not read, write, upload, or parse native RON theme files. A browser editor that imports or exports `theme.ron` is future work and needs an explicit file-transfer contract before implementation. If added, it must preserve partial-theme semantics (`ThemeConfig` uses `#[serde(default)]`) and retain the rule that semantic play-result colours are not user-themable.
 
 ## Status / coverage
 

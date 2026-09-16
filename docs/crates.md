@@ -3,7 +3,7 @@
 Per-crate API + invariants reference, accurate to the current code. Generated from a full read of each
 crate; see `architecture.md` for the big picture and `development.md` for build/test/conventions.
 
-Dependency order: `apps/rbms-player → {rbms-config, rbms-library, rbms-play} → {rbms-render, rbms-audio, rbms-ir, rbms-judge, rbms-chart, rbms-table, rbms-store} → rbms-parser → rbms-model`. `rbms-config` also depends on `rbms-store`, for the one durable-write helper (`write_atomic`) both persistence paths share.
+Dependency order: `apps/rbms-player → {rbms-config, rbms-library, rbms-play, rbms-course} → {rbms-render, rbms-audio, rbms-ir, rbms-judge, rbms-chart, rbms-table, rbms-store} → rbms-parser → rbms-model`. `rbms-config` also depends on `rbms-store`, for the one durable-write helper (`write_atomic`) both persistence paths share.
 
 Every crate opts into the workspace lint set (`[lints] workspace = true`) and every crate root carries `#![forbid(unsafe_code)]`; the one
 exception is documented in `architecture.md`.
@@ -153,7 +153,8 @@ exception is documented in `architecture.md`.
   - **update(now_us)** sweeps: a normal note is MISS only when `head - now < miss_bound (= bd.0)` — strict `<`, so exactly at the bound it is not yet swept. A held LN is force-finalized only when `now > end + LN_MARGIN` (strict `>`; `LN_MARGIN = 200_000`); until then it blocks its lane cursor. **All sweep events are recorded as LATE.** update is idempotent after sweep (cursor advances past judged notes).
   - **LN window** (`ln_end`) is a separate field, wider than the note head (PG `±120k`). `from_model` sets it from `ln_end_for_mode(mode).scaled(rank_to_judgerank(rank))` so releases respect mode + `#RANK` + JUDGE WIDTH (recent fix — was previously a hardcoded 100% constant). Mode-less constructors default `ln_end` to `SEVENKEY_LN_END`.
   - **LN flavour per note** (`JNote.ln: Option<LnKind>`): `from_model` carries the chart's real `LnKind` (Ln/Cn/Hcn) through an internal `from_triples`; the public `from_pairs`/`new` (tests) treat any long note as a plain `LnKind::Ln`, so their signatures are unchanged. `is_charge(ln)` gates the charge-note behaviour to `Cn`/`Hcn` only.
-  - **CN/HCN = two counted judgments, plain LN = one.** A charge note (CN/HCN) is judged twice — the **head at press** (committed immediately: `apply`+`record_timing` in `press`) and the **release end at key-up** (its own judge, not capped by the head: `final_judge = end_judge`). A plain LN remains a **single** judgment scored only at release as `worse(head_judge, end_judge)` — byte-identical to before (`is_charge` is false → unchanged path). The same split holds in the `update` sweep (charge head already counted; the end is the swept judgment). `total_notes` (and thus EX/gauge denominators) counts a CN/HCN with an end as **2**, every plain LN/Normal as **1**, matching `rbms_chart::count_playable_notes`. *HCN continuous gauge, CN early-release deferral, and scratch BSS are deferred to Phase 7.* Full spec: `docs/reference/cn-hcn-judgment.md`.
+  - **CN/HCN = two counted judgments, plain LN = one.** A charge note (CN/HCN) is judged twice — the **head at press** (committed immediately: `apply`+`record_timing` in `press`) and the **release end at key-up** (its own judge, not capped by the head: `final_judge = end_judge`). A plain LN remains a **single** judgment scored only at release as `worse(head_judge, end_judge)`. The same split holds in the `update` sweep (charge head already counted; the end is the swept judgment). `total_notes` (and thus EX/gauge denominators) counts a CN/HCN with an end as **2**, every plain LN/Normal as **1**, matching `rbms_chart::count_playable_notes`.
+  - **Charge release, scratch spin, HCN gauge are complete.** An early BAD/POOR CN/HCN release stores `release_us`/`end_judge`; a re-grab before `longnoteMargin` cancels it, otherwise `update` confirms it. `press_dir`/`release_dir` record the scratch owner: BSS ends a charge note with the opposite direction, same-direction input re-grabs it, and the matching-direction mid-spin release is accepted only outside the scratch-end window; MSS releases ownership for the next alternating spin. HCN tracks the passing span in `LaneHold` and each `update` pays at most one 200ms tick: half a GREAT while held (or after a GOOD-or-better end), half a BAD while unheld. Ticks preserve counts, combo, EX, and timing statistics. Full spec: `docs/reference/cn-hcn-judgment.md`.
   - **from_model** builds per-lane notes from `model.timelines`: `Normal` → point note; `LongStart`/`LongEnd` pair into `(head, Some(end), Some(ln))` (kind preserved); `Mine` is skipped; an unterminated `LongStart` (no matching `LongEnd`) is dropped (`pending_start` never flushed). Then sets `ln_end` and `set_gauge(Normal, meta.total)`.
   - **EX score** = `2·PG + 1·GR` only. PG/GR/GD keep combo; BD/POOR/MISS break it (`combo = 0`). `max_combo` is updated in `apply()`.
   - **avg_judge_us** = mean signed `dm` over timed hits (press/release, excludes empty poors and sweeps); 0 when nothing timed. `early[i] + late[i] == counts[i]` always holds.
@@ -163,13 +164,13 @@ exception is documented in `architecture.md`.
 - **Gotchas / edge cases**:
   - BD asymmetry means a `+250ms` press is an (early) empty POOR while `-250ms` is still a real BAD — symmetric reasoning is wrong.
   - The miss/force-finalize bounds are strict inequalities; tests pin the exact 1µs boundary (`1_280_000` not swept, `1_280_001` swept; `end+200_000` still held, `end+200_001` finalized).
-  - LN head reported judge ≠ scored judge: `press` on an LN head returns the head judge but scores nothing (counts/combo/EX unchanged) until `release`. A far-early press on an LN head is an empty poor and must **not** arm a hold.
+  - Plain-LN head reported judge ≠ scored judge: `press` on a plain LN head returns the head judge but scores nothing (counts/combo/EX unchanged) until `release`; CN/HCN heads are the two-judgment exception and count at press. A far-early press on an LN head is an empty poor and must **not** arm a hold.
   - `release` finds the holding note by `position(|n| n.holding)`, not by lane cursor; releasing with nothing held, or on an invalid/empty/out-of-range lane, returns `None`. A consumed note can't be hit twice.
   - `scaled` uses truncating integer division and clamps percent to `>= 1` (never zero-width). MS is intentionally never scaled.
   - `POPN_NOTE`/`POPN_LN_END` currently mirror the SEVENKEY tables (placeholder pending verified PMS values) but are kept as distinct consts so tuning pop'n never touches the beat table.
   - `worse(a,b)` compares enum discriminants — relies on the `Judge` variant ordering being severity order.
 
-- **Tests**: Three inline `#[cfg(test)]` modules. `lib.rs::tests` is the broadest: window classification, press/release/update matching and gating, empty-poor invariants, LN head/release/force-finalize, early/late split + `early+late==counts`, EX/combo/`max_combo`, determinism, `from_model` wiring (notes/LNs/mines, unterminated LongStart, POPN ln_end), and 5 synthetic CN/HCN fixtures (`cn_*`/`hcn_*`/`ln_remains_*`) locking the charge-note two-count behaviour against the unchanged plain-LN single count. `windows.rs::windows_tests` pins exact `judge()` boundaries (PG/GR/GD/BD/MS edges, asymmetry, no-late-POOR, monotonic tier widening), `scaled()` (identity at 100, fixed MS, truncation, clamp-to-1), mode selection, and `rank_to_judgerank` table/clamp/monotonicity. `gauge.rs::gauge_tests` covers init values, TOTAL/LIMIT_INCREMENT modifiers, HARD guts bands, clamping, dead-gauge permanence, and every `clear_lamp` tier/break-detection/kind-mapping path.
+- **Tests**: `tests.rs`와 각 모듈의 `#[cfg(test)]`가 window classification, press/release/update matching and gating, empty-poor, plain-LN force-finalize, early/late split + `early+late==counts`, EX/combo/`max_combo`, determinism, `from_model` wiring을 고정합니다. CN/HCN 2-판정 픽스처 외에 `a_charge_note_release_inside_the_margin_is_rescued_by_a_re_grab`, HCN held/dropped tick·remainder, BSS opposite/same direction·ignored release, MSS alternating spins를 검사합니다. `windows.rs`는 정확한 경계·scale·mode 선택을, `gauge.rs`는 gauge init/modifier/guts/clamp/clear lamp를 검사합니다.
 
 ---
 
@@ -246,9 +247,9 @@ exception is documented in `architecture.md`.
 ### rbms-ir
 - **Role**: Defines the rbms "IR-superset" score-server contract: the `ScoreServer` trait, all wire DTOs (serde JSON), plus two concrete clients (HTTP reference, offline null). It is a pure data/contract crate — no backend, no audio/judge/UI logic lives here.
 - **Public API**:
-  - `ScoreServer` (trait, `Send + Sync`): the score-server contract; 8 required methods (`health`, `submit_score`, `chart_ranking`, `player_best`, `player_profile`, `rivals`, `submit_course`, `upload_replay`) + 6 superset-extension methods with default `Err(Unsupported)` bodies (`course_ranking`, `download_replay`, `get_settings`, `put_settings`, `register`, `login`).
+  - `ScoreServer` (trait, `Send + Sync`): the score-server contract; 8 required methods (`health`, `submit_score`, `chart_ranking`, `player_best`, `player_profile`, `rivals`, `submit_course`, `upload_replay`) + 11 optional extension methods with default `Err(Unsupported)` bodies (`course_ranking`, `download_replay`, settings, register/login/whoami, rival replacement, paged ranking, player-score and chart-replay queries, version).
   - `HttpScoreServer` — REST+JSON reference client over `reqwest::blocking`, optional bearer token.
-  - `NullScoreServer` — offline stub; every required method returns `NotConfigured`.
+  - `NullScoreServer` — offline stub; every required method returns `NotConfigured`; optional extensions retain `Unsupported`.
   - `IrError` (enum): `NotConfigured | Network(String) | Server(u16,String) | Decode(String) | Unsupported`; impls `Display` + `std::error::Error`.
   - `API_VERSION: u32 = 1` — contract version stamped into every submission.
   - DTOs (re-exported by name, not by glob, so the crate's surface is a list rather than whatever `dto` happens to hold): `ChartId{md5,sha256}`, `PlayerId{id}`, `ScoreSubmission`, `ScoreRecord`, `SubmitResponse`, `CourseSubmission`, `PlayerProfile`, `ServerInfo`/`ServerCapabilities`, `JudgeBreakdown`, `PlayOptions`, `ReplayData`/`ReplayEvent`, `SettingsBlob`, `AuthRequest`/`AuthResponse`.
@@ -267,9 +268,9 @@ exception is documented in `architecture.md`.
   - `played_at` and `t_us` are `i64` (signed) on purpose — negative values round-trip.
   - Enum decode is **case-sensitive** and rejects unknown variants (`"normal"` and `"Bogus"` both error) — adding a lamp/gauge/random value is a wire-breaking change for older decoders.
   - `option: i64` in `PlayOptions` is the reference implementation's raw option bitmask, kept verbatim for round-tripping (don't reinterpret).
-  - `HttpScoreServer` is **blocking** (`reqwest::blocking`) — callers must not invoke it on an async/UI thread without offloading.
+  - `HttpScoreServer` is **blocking** (`reqwest::blocking`) — callers must not invoke it on an async/UI thread without offloading. The player performs network work off its UI frame.
   - URL path segments (player id, chart md5, settings name, course hash) are interpolated **without escaping** — assumed safe/hash-like; not URL-encoded.
-- **Tests**: Inline `#[cfg(test)]` modules in each file. `lib.rs` covers `ScoreSubmission` round-trips (full superset + minimal/legacy decode), `ReplayData`, the early+late additive split, `IrError::Display`, `API_VERSION`, and the NaN-`gauge_value` edge case. `dto.rs` exhaustively round-trips every enum variant (asserting exact JSON strings), serde defaults/required-field failures for each DTO, µs-resolution replay deltas, and `extra`-map forward-compat (unknown siblings ignored). `null.rs` asserts all 8 required methods → `NotConfigured`, all 6 superset defaults → `Unsupported`, that the two error variants differ, and that `NullScoreServer` is `Send + Sync` and usable as `Box<dyn ScoreServer>`. No `http.rs` tests (no live-server/mock harness).
+- **Tests**: Inline `#[cfg(test)]` modules and HTTP mock regression tests cover `ScoreSubmission` round-trips (full superset + minimal/legacy decode), `ReplayData`, early+late additive splits, auth/settings/replay/ranking HTTP paths, typed error mapping, DTO defaults/required-field failures, and the offline `NullScoreServer` distinction between required `NotConfigured` and optional `Unsupported` methods.
 
 ---
 
@@ -309,12 +310,13 @@ exception is documented in `architecture.md`.
 ---
 
 ### rbms-store
-- **Role**: Persistence for the player's local play history and replays. Owns the on-disk shape of `scores.ron` and `replays/*.ron`, the durable-write helper every other store file goes through, and the judging-rule generation stamped on each record. Depends on serde/RON only.
+- **Role**: Persistence for the player's local play history and replays. Owns the SQLite `scoredb` history/best/profile store, legacy `scores.ron` and `replays/*.ron` compatibility, the durable-write helper every RON file goes through, and the judging-rule generation stamped on each record.
 - **Public API**:
   - `write_atomic(path, contents) -> std::io::Result<()>` — temp file (pid-suffixed) + rename, so a crash mid-write cannot truncate a good file. Every persisted file in the app (config, keyconfig, scores, replays) goes through it.
   - `SCORE_RULE_VERSION: u32` — the generation of the judging rules a record was produced under. `is_stale_rule_version(v)` answers whether a record predates it; how that is *shown* ("`  *`", "`   OLD RULE`") belongs to the app's `format.rs`, so no layout string lives in a persistence crate.
   - `ScoreRecord` — one finished run: `md5`/`title`/`mode`, `clear` (lamp id), `ex_score`/`max_ex`, `counts[6]`, `empty_poor`, `max_combo`, `total_notes`, `gauge`/`gauge_value`, `random`, `played_at`, `replay_file`, `rule_version`, `assisted`. Every field added since the format existed is `#[serde(default)]`, so an old `scores.ron` still parses.
-  - `ScoreBook` — the history: `load(path)` (a malformed file is renamed to `.ron.bak` and the book starts empty rather than failing the launch), `try_save` / `save`, `from_records`, `push`, `rebuild_index`, `records()` (read-only slice), `for_md5` (newest first), `best_ex_for_md5`, `best_clear_for_md5`. The record list is private, so the only way to grow the book is `push`, which keeps the md5 index in step by construction.
+  - `ScoreBook` — RON compatibility history: `load(path)` (a malformed file is renamed to `.ron.bak` and the book starts empty rather than failing the launch), `try_save` / `save`, `from_records`, `push`, `rebuild_index`, `records()` (read-only slice), `for_md5` (newest first), `best_ex_for_md5`, `best_clear_for_md5`.
+  - `scoredb::ScoreDb` — SQLite storage with schema migration, play history/bests/profile/day statistics, score-book import, backup and replay-GC planning. The player opens `scoredb.sqlite` and imports `scores.ron` when needed.
   - `Replay` / `ReplayEvent` + `Replay::load(path) -> Result<_, StoreError>`, `save` / `try_save`.
   - `StoreError` (thiserror) — read / parse / write, replacing the old `Result<_, String>`.
 - **Key invariants & algorithms**:
@@ -428,10 +430,19 @@ Reference-compatible JSON skin support (Phase E, 2026-09-09~10). Modules: `timer
 
 - **Tests**: A large `#[cfg(test)] mod tests` at the bottom of `/Users/gkn/R-BMS/crates/rbms-play/src/lib.rs` (helpers `model()` via `to_model(parse(bms), Mode::BEAT_7K)`, `autoplay_collect`). Coverage: autoplay perfect-score/EX=2n/full-combo/no-miss invariants over dense charts, mines excluded, LN counted once, dangling-LongStart safety; keysound count/time-ordering; `auto_lanes` length guard and input-drop behaviour; interactive beam/bomb transitions; `nearest_head_wav` lane-scoping and LN-head lookup; `set_judge_rate` widening/clamping (rate 0 → min, fixed-MS-window non-widening); `update()` sweep MISS/LN finalisation, idempotency, monotonic autoplay combo; and rank-scaled LN-end windows. Runnable example: `examples/autoplay_score.rs` (`simulate_autoplay` on a real chart file).
 
+### rbms-course
+- **Role**: Pure course domain crate. It reads reference-compatible course documents, retains only valid and non-conflicting constraints, derives stable course hashes, and advances a `CourseRun` without depending on the player, judge, renderer, or network crates.
+- **Public API**:
+  - `load_dir(path)` / `load_file(path)` / `parse(text)` / `save(dir, course)` — loads, parses and writes JSON course files; invalid entries are normalised or omitted by `Course::validate()`.
+  - `Course`, `CourseChart`, `CourseConstraint`, `TrophyRule` — course metadata, ordered chart identity, the 14 recognised constraints, and trophy criteria. `Course::validate()` normalises a document before it becomes playable; `Course::hash()` identifies a course by its name and ordered chart hashes.
+  - `CourseRun`, `StageResult`, `CourseTotals`, `CourseStep` — one continuous run. `advance()` folds a finished stage, preserves the resulting gauge and combo carry, and returns `Next`, `Cleared`, or `Failed`.
+- **Invariants**: only the first constraint in each of the five exclusive groups survives; an invalid chart identity or empty course is rejected; failed stages still contribute to the final totals but stop subsequent loading; trophies are selected from the highest qualifying rule. The app translates its play result into `StageResult` and owns UI/IR persistence.
+- **Tests**: unit tests cover loading, normalisation, stable hashing, constraint precedence, carry-over, failure termination, totals and trophy boundaries.
+
 ---
 
 ### apps/rbms-player
-- **Role**: The native winit + wgpu front-end for the rbms player: a stage machine (Select / Settings / KeyConfig / Tables / Folders / Loading / Play / Result) wiring the parser, chart, judge, play, audio, render, config, library, store and IR crates together. The crate is built as a **library** (`rbms_player`) with a three-line binary, so the integration tests can reach its types.
+- **Role**: The native winit + wgpu front-end for the rbms player: a ten-stage machine (Select / Settings / KeyConfig / Tables / Folders / Loading / Play / Result / CourseResult / Practice) wiring the parser, chart, judge, play, audio, render, config, library, store, course and IR crates together. The crate is built as a **library** (`rbms_player`) with a three-line binary, so the integration tests can reach its types.
 - **Public API**:
   - `pub fn run(args: impl Iterator<Item = String>) -> ExitCode` — the entry point. `src/main.rs` is `fn main() -> ExitCode { rbms_player::run(std::env::args()) }` and nothing else; every startup failure surfaces as a readable message plus `ExitCode::FAILURE` rather than a panic.
   - Everything else is crate-internal (`pub(crate)`); the binary exports nothing downstream.

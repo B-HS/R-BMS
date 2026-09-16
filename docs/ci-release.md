@@ -1,57 +1,55 @@
 # CI / 릴리스 (GitHub Actions)
 
-> `.github/workflows/ci.yml`(검증) + `release.yml`(자동 버전 + macOS·Windows 빌드 + GitHub Release). **GitHub 원격에 push된 뒤** 동작한다(원격 `github.com/B-HS/R-BMS` 설정됨·`dev` 푸시됨; 잔여는 `prod` 브랜치·첫 태그 — §5).
-> **브랜치 모델**: **`dev` = 작업(개발) 브랜치, `prod` = 배포 브랜치.** dev에서 작업·PR → CI 통과 → prod 머지 시 자동 릴리스.
+> 이 문서는 워크플로 구현과 현재 배포 경계를 설명합니다. 워크플로가 존재한다는 사실은 외부 릴리스 산출물·서명·배포 엔드포인트가 현재 사용 가능하다는 보증이 아닙니다.
+>
+> 2026-09-16 현재 작업 브랜치는 `dev`이고 원격 추적 브랜치도 `origin/dev`만 있습니다. `prod` 생성, 첫 릴리스/태그, 실제 서명 또는 배포 자격 증명 적용은 유지보수자가 실제 키를 준비한 뒤 함께 수행할 Phase R이며, 이 라운드에서는 시작하지 않습니다.
 
-## 1. ci.yml — 검증 (push/PR)
-- 트리거: `dev`·`prod` push, 그 둘로의 PR.
-- `test` 잡: **ubuntu·macos·windows 매트릭스**로 `cargo build --workspace` + `cargo test --workspace`(현재 887). Linux는 cpal(ALSA)·winit(X11/Wayland)·rfd(GTK3) 링크용 dev 라이브러리 설치.
-- `lint` 잡: `cargo fmt --check` + `cargo clippy`(둘 다 **informational**, `continue-on-error` — 프로젝트가 fmt/clippy 게이트가 아니므로 CI 실패 안 시킴).
-- 캐시: `Swatinem/rust-cache@v2`.
+## 1. CI (`.github/workflows/ci.yml`)
 
-## 2. release.yml — 자동 버전 + 빌드 + 릴리스
-세 가지 트리거:
+- 트리거: `dev`·`prod`의 push와 두 브랜치를 대상으로 한 pull request.
+- `test` 잡: Ubuntu, macOS, Windows 매트릭스에서 `cargo build --workspace`, `cargo test --workspace`를 실행합니다. 테스트 수는 고정 계약이 아니지만, 마지막 로컬 Phase H 실행은 3,040개를 등록하고 exit 0이었습니다.
+- Linux 의존성: `libasound2-dev`, `libgtk-3-dev`, `libudev-dev`, `libxkbcommon-dev`, `libwayland-dev`, `libx11-dev`, `libxrandr-dev`, `libxi-dev`, `libxcursor-dev`를 설치합니다. 이는 cpal(ALSA), gilrs(udev), winit(X11/Wayland), rfd(GTK3) 링크 요구를 덮습니다.
+- `lint` 잡: Ubuntu에서 Rust 1.95.0과 `rustfmt`, `clippy`를 설치한 뒤 `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`를 실행합니다. 둘 다 실패 시 CI를 실패시키는 게이트입니다.
+- 캐시: 모든 잡은 `Swatinem/rust-cache@v2`를 사용합니다. CI 툴체인은 `rust-toolchain.toml`과 같은 1.95.0으로 고정됩니다.
 
-### (1) prod 머지 (배포) — `prod`에 push
-- `version` 잡: 최신 `v*.*.*` 태그에서 **patch 자동 bump** → `Cargo.toml [workspace.package] version` 교체(perl, 모든 크레이트가 `version.workspace`라 전체 동기화) → 커밋 `release: vX.Y.Z` → 태그 → push → 빌드 → 릴리스.
+마지막 확인된 CI 실행은 `35055642686`이며 Ubuntu·macOS·Windows test와 fmt/clippy 잡이 모두 성공했습니다. 로컬에서 마지막으로 확인한 관련 명령은 `cargo test --workspace` exit 0(실제 오디오 장치 테스트 2건 ignored), `cargo build --release -p rbms-player` exit 0, fmt와 clippy 게이트 exit 0입니다.
 
-### (2) 수동 bump — Actions → "release" → Run workflow → bump(patch/minor/major)
-- `version` 잡이 선택한 단계로 bump(동일 흐름).
+## 2. 릴리스 워크플로 (`.github/workflows/release.yml`)
 
-### (3) 수동 태그 — `git tag v1.2.3 && git push --tags`
-- `version` 잡 skip(`github.ref_type == 'tag'`), `build-*`가 그 태그로 빌드.
+릴리스 워크플로는 다음 세 경로를 정의합니다.
 
-### 빌드 산출물 (+ SHA-256 체크섬)
-- **macOS**: `aarch64`+`x86_64` 빌드 → `lipo` **유니버설** → **ad-hoc 서명**(`codesign -s -`, arm64 실행 필수) → `rbms-macos-universal.tar.gz` + `.sha256`.
-- **Windows**: `x86_64-pc-windows-msvc` → `rbms-player.exe` → `rbms-windows-x64.zip` + `.sha256`.
-- `release` 잡: `softprops/action-gh-release@v2`로 아카이브 + 체크섬을 **GitHub Release** 첨부(릴리스 노트 자동).
-- 체크섬은 백엔드 `client_build` allowlist(변조 탐지, `docs/backend`)의 입력이 된다 — 릴리스 빌드 해시 ↔ 클라가 런타임에 보내는 `client_build_sha256` 대조.
+1. `prod` push: `version` 잡이 가장 최근 `v*.*.*` 태그에서 patch 버전을 올립니다. 태그가 없으면 `v0.0.0`에서 계산합니다. 루트 `Cargo.toml`의 첫 workspace 버전만 바꾸고 `release: vX.Y.Z` 커밋과 태그를 같은 `prod` ref로 push합니다.
+2. 수동 dispatch: Actions의 `release`에서 patch, minor, major를 선택해 같은 버전·빌드 흐름을 실행합니다.
+3. 태그 push: `v*.*.*` 태그 push는 version 잡을 건너뛰고 그 태그 ref로 빌드합니다.
 
-> 폰트(`assets/fonts/Inter-Regular.ttf`)·스킨은 `include_bytes!/str!`로 바이너리에 임베드 → 산출물은 **단일 실행파일**(런타임 에셋 불필요). 설정은 첫 실행 시 `~/.config/rbms`(win: `%USERPROFILE%\.config\rbms`)에 생성.
+빌드와 게시 단계는 다음과 같습니다.
 
-## 3. 실행 (사용자) — 코드 서명/공증 현실
-- **macOS**: `tar xzf rbms-macos-universal.tar.gz && ./rbms-player <곡폴더>`.
-  - CI에서 **ad-hoc 서명**돼 Apple Silicon(arm64)에서 *실행 자체는 가능*(ad-hoc 없으면 `killed: 9`).
-  - 단 **공증(notarize) 안 됨** → 다운로드 파일엔 `com.apple.quarantine` 부착 → Gatekeeper "확인되지 않은 개발자" **경고로 막힘(하드 차단 아님)**. 우회: 최초 1회 **우클릭→열기**, 또는 `xattr -dr com.apple.quarantine rbms-player`, 또는 설정→개인정보보호→"그래도 열기".
-- **Windows**: zip 풀고 `rbms-player.exe <곡폴더>`. 미서명 → SmartScreen "추가 정보→실행"(하드 차단 아님).
-- **무경고 배포**(P3, 선택): macOS = Apple Developer 인증서 서명 + `notarytool` 공증($99/년), Windows = Authenticode(EV 권장) 서명. 시크릿 추가 시 워크플로에 단계 삽입.
+- macOS: `aarch64-apple-darwin`과 `x86_64-apple-darwin` release binary를 빌드하고 `lipo`로 합친 뒤 ad-hoc `codesign` 합니다. `rbms-macos-universal.tar.gz`와 SHA-256 파일을 만듭니다.
+- Windows: `rbms-player.exe`를 `rbms-windows-x64.zip`으로 묶고 SHA-256 파일을 만듭니다.
+- publish: 두 플랫폼 아카이브와 체크섬을 `softprops/action-gh-release@v2`로 GitHub Release에 첨부합니다. `LICENSE`와 `README.md`는 산출물에 존재할 때 함께 복사하며, 현재 루트 `LICENSE`는 존재합니다.
 
-## 4. 권한 / 시크릿
-- `release.yml`은 `permissions: contents: write`(태그 push·릴리스 생성). `GITHUB_TOKEN` 자동 제공 — 추가 시크릿 불필요.
-- 자동 버전 커밋/태그 push는 기본 `GITHUB_TOKEN`으로 수행되어 **새 워크플로를 트리거하지 않음**(무한루프 방지).
+릴리스 빌드 잡은 현재 CI와 달리 `dtolnay/rust-toolchain@stable`을 사용합니다. Phase R에서 첫 실제 릴리스를 수행하기 전에 이 차이를 의도적으로 유지할지, CI와 같은 고정 버전으로 맞출지 확인합니다.
 
-## 5. 사전 준비 / 주의 (현재 미충족 항목)
-- [x] **GitHub 원격**: `origin = github.com/B-HS/R-BMS` 설정됨. `dev`(작업) 푸시됨(`origin/dev`), `refactor/entire-base`도 원격 존재. 태그 없음.
-- [ ] **`prod` 배포 브랜치 생성**: 아직 없음. `git branch prod && git push -u origin prod` → `prod` push가 release.yml(자동 버전·빌드·릴리스)을 트리거. 단 첫 버전은 v0.0.1 자동 bump 대신 **수동 태그 `v0.1.0`**(Cargo.toml 일치) 권장(§2-3).
-- [ ] **브랜치 보호**: `prod` 보호 시 `version` 잡의 자동 커밋/태그 push가 막힐 수 있음 → bot 예외 허용하거나 자동버전 대신 수동 태그(§2-3) 사용.
-- [ ] **LICENSE 파일**: `Cargo.toml`·README는 `GPL-3.0-or-later`(레퍼런스 구현 포팅)이나 루트 `LICENSE` 파일 없음 → **GPL-3.0 전문 추가 권장**(릴리스 동봉). 폰트 Inter는 OFL(`assets/fonts/Inter-OFL.txt`).
-- [ ] **코드 서명/공증**(P3): §3 참조. 현재 macOS ad-hoc(실행 OK)·미공증, Windows 미서명.
-- [ ] **.app/.dmg / 인스톨러**(P3): 현재 바이너리 아카이브. 더블클릭 `.app`은 무인자 실행 시 폴더 picker 진입하도록 클라 보강 필요(현재 무인자=usage 종료).
+## 3. Phase R 전제와 보안 경계
 
-## 5.1 라이선스 (클라이언트 vs 백엔드/FE)
-- **클라이언트(rbms) = GPL-3.0-or-later 고정**: 레퍼런스 구현(GPL-3.0)의 코어 PLAY를 포팅한 **파생 저작물** → copyleft로 MIT 불가. (판정 윈도우 등 원본 byte 대조 — 클린룸 아님.)
-- **백엔드 서버 / 향후 FE = MIT 등 자유**: HTTP로만 통신하는 **별 프로그램**(파생 아님, mere aggregation) → 별 저장소·MIT 가능. (법적 조언 아님 — 핵심: 클라 GPL, 서버/FE 분리작품.)
-- 폰트 Inter(OFL)·cosmic-text 등 deps는 GPL/MIT 양쪽 호환.
+- 워크플로의 `permissions: contents: write`와 기본 `GITHUB_TOKEN`은 버전 커밋·태그·GitHub Release 생성에 쓰입니다. 이 토큰만으로 macOS 공증이나 Windows Authenticode 서명은 되지 않습니다.
+- 현재 macOS 산출물은 ad-hoc 서명만 하며 공증하지 않습니다. Windows 산출물은 Authenticode 서명 단계가 없습니다. 외부 키, 인증서, 공증 자격 증명은 이 저장소나 문서에 넣지 않습니다.
+- `prod` 보호 규칙이 자동 버전 커밋/태그 push를 막을 수 있습니다. Phase R에서 실제 보호 정책과 릴리스 주체를 확인한 뒤, 필요한 최소 예외 또는 수동 태그 경로를 선택합니다.
+- 첫 릴리스 버전은 루트 `Cargo.toml`의 현재 `0.1.0`과 일치하는 태그 전략을 정한 뒤 진행합니다. 워크플로를 시험하기 위해 `prod`, 태그 또는 외부 배포를 임의로 만들지 않습니다.
 
-## 6. 로컬 검증(완료)
-- 두 워크플로 YAML 파싱 OK(ruby). 버전 bump perl이 워크스페이스 version만 교체(rust-version·외부 dep 불변) 확인. `cargo build --release -p rbms-player` 정상.
+## 4. 사용자 실행 전제
+
+- macOS 아카이브는 압축 해제 후 `./rbms-player <곡폴더>`로 실행합니다. 공증되지 않은 배포물의 Gatekeeper 처리 방식은 실제 서명 상태와 배포 채널을 확인한 뒤 안내합니다.
+- Windows 아카이브는 압축 해제 후 `rbms-player.exe <곡폴더>`로 실행합니다. SmartScreen 동작은 실제 서명·평판 상태에 따라 달라질 수 있습니다.
+- 인자 없이 실행하면 플레이어는 기억한 `songs_folder`, `RBMS_SONGS`, 빈 GUI 순으로 진입합니다. 자세한 실행과 GUI 폴더 등록은 루트 [README.md](../README.md)를 정본으로 사용합니다.
+
+## 5. Phase R 체크리스트
+
+실제 키가 준비된 유지보수자 세션에서만 다음을 수행합니다.
+
+1. `prod` 생성과 보호 정책을 확인하고, 자동 버전 커밋이 허용되는지 결정합니다.
+2. 실제 macOS/Windows 서명 또는 공증 자격 증명을 안전한 CI secret으로 등록합니다.
+3. 첫 버전·태그 전략을 확정하고 release workflow를 실행합니다.
+4. 게시된 아카이브의 체크섬과 실제 설치·실행을 확인합니다.
+
+이 체크리스트 전에는 `dev` CI만 배포 전 검증 근거입니다.

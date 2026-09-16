@@ -1,5 +1,7 @@
 ## rbms — Proposed Architecture & First-Milestone Plan
 
+> **역사 연구(초기 설계):** 현재 크레이트·모듈 구조의 정본이 아닙니다. 구현 완료 상태는 [roadmap](../roadmap.md), 실제 구조와 검증은 [PROCESS](../PROCESS.md) 및 `docs/crates.md`를 따릅니다.
+
 > 레퍼런스 구현 PLAY 코어의 from-scratch Rust 포팅. **스킨 제외**(추후 Rust-native 추상화). 렌더러는 trait 뒤에 숨겨 wgpu/macroquad 교체 가능. 시간 단위 전역 µs(`i64`). 마스터 클럭 = 오디오 디바이스 샘플(stackRef §2).
 
 ---

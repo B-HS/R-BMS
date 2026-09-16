@@ -1,7 +1,7 @@
 # Fable 검토 노트 (관점별)
 
 ## Fable 직접 검증 결과 (코드 확인 완료)
-- [확정] 見逃し POOR → `matcher.rs:306-311` `events.push(Judge::Miss)` → `gauge.update(Miss)` = deltas[5](MS: NORMAL -2, HARD -5). 레퍼런스 구현 `JudgeManager.java:595` `updateMicro(...,4,...)` → value[4](POOR: NORMAL -6, HARD -10). 空POOR 는 `matcher.rs:231-235` Miss(-2) 로 레퍼런스 구현 MS 와 일치. → 자동미스 게이지 페널티가 절반~1/3. **critical, S 효력**(sweep 1줄 + 카운트 라벨 + 테스트). PROCESS.md §6 "게이지 대조 검증됨" 은 이 점에서 오류.
+- [확정] 見逃し POOR → `matcher.rs:306-311` `events.push(Judge::Miss)` → `gauge.update(Miss)` = `deltas[5]`(MS: NORMAL -2, HARD -5). 레퍼런스 구현 `JudgeManager.java:595` `updateMicro(...,4,...)` → `value[4]`(POOR: NORMAL -6, HARD -10). 空POOR 는 `matcher.rs:231-235` Miss(-2) 로 레퍼런스 구현 MS 와 일치. → 자동미스 게이지 페널티가 절반~1/3. **critical, S 효력**(sweep 1줄 + 카운트 라벨 + 테스트). PROCESS.md §6 "게이지 대조 검증됨" 은 이 점에서 오류.
 - [확정] `windows.rs`: 5K → SEVENKEY_NOTE(`note_for_mode` `_ =>`), POPN 복제(주석에 pending 명시), SEVENKEY_LN_END=(120,150,200,±250)+MS 는 레퍼런스 구현 FIVEKEYS LN end 값(SEVENKEYS 는 120,160,200,(-280,220), MS 없음). `LN_MARGIN=200_000` 전모드(레퍼런스 구현 7K/5K/KB=0, PMS=200000). `scaled()` 가 bd 까지 스케일(레퍼런스 구현 judgeWindowRate 는 i<3 만 + 클램프). 스크래치 전용 윈도우 없음.
 - [확정] 오디오 클럭: `engine.rs:133` 콜백 말미에만 clock store → 콜백 사이 정지값. `play/lib.rs:174` `at <= now_us` 만 방출 + `mixer.rs:93` `delay = at_frame.saturating_sub(clock)` → delay 항상 0. 키음 온셋·입력 타임스탬프 모두 버퍼 주기 양자화. 클럭 = 믹싱 완료 프레임(가청보다 앞섬). PROCESS.md §1 "vsync 양자화 구조적 해결" 주장은 부정확(vsync 대신 오디오 버퍼로 양자화).
 - [부분] FLOATING HI-SPEED: rbms `constant_speed` = 그린넘버 고정(2000/hispeed) + 곡 내 BPM 변화 무시(레퍼런스 구현 CONSTANT). IIDX FLOATING/레퍼런스 구현 MAIN/MAX/MIN/START BPM 기준 hispeed 자동조정(곡 내 BPM 변화는 반영)은 없음. 라벨 "FLOATING" 이 IIDX 의미와 반대(rbms FLOATING = 일반 hi-speed).

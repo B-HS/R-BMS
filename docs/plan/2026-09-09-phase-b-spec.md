@@ -1,5 +1,7 @@
 # Phase B 설계 명세 — 오디오 클럭 재설계 (2026-09-09)
 
+> **역사 설계(2026-09-09)** — Phase B 구현은 완료했습니다. 아래 본문의 착수 조건·TODO·라인 앵커는 당시 기록으로 보존합니다. 현재 정본은 [roadmap](../roadmap.md), 근거는 [PROCESS](../PROCESS.md)와 [Phase B 이력](../history/2026-09-09-phase-b-audio-clock.md)입니다.
+
 > 대상: 계획 `docs/plan/2026-09-09-enhancement-plan.md` §2 Phase B 1~6항. 관련 갭 행 §1.2 A1·A2·A4·A5·A6·A8·A9·A13, §1.5 P7·P10, §1.7 U11.
 > **A13(채널 키에 피치 포함)은 이미 해소됐다** — `crates/rbms-audio/src/mixer.rs:40-48` `channel_key(id, pitch) = id*256 + semitone + 128` (Phase A-audio 완료분). **Phase B 작업 없음.**
 > 이 문서는 **설계 명세**다. 구현은 하지 않았다. 구현 에이전트는 §7 파일 소유권 분할과 §3 동결 계약을 그대로 따른다.

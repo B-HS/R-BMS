@@ -1,5 +1,7 @@
 # Phase C — 구조 개편 상세 설계 (2026-09-09)
 
+> **역사 설계(2026-09-09)** — Phase C 구현은 완료했습니다. 아래 본문의 착수 조건·TODO·라인 앵커는 당시 기록으로 보존합니다. 현재 정본은 [roadmap](../roadmap.md), 근거는 [PROCESS](../PROCESS.md)와 [Phase C 이력](../history/2026-09-09-phase-c-structure.md)입니다.
+
 > 상위 계획: `docs/plan/2026-09-09-enhancement-plan.md` §2 Phase C(항목 1~6), 근거 갭 계획 §1.4 C1~C11 · 계획 §1.5 P9.
 > 결정 근거: `docs/acknowledge/2026-09-09-enhancement-decisions.md`(결정 2 `rule_version`, 결정 3 옵션 오버레이, 결정 11 별도 런처 없음, 결정 12 커스텀 판정 정책).
 > 이 문서는 **설계 명세**다. 구현 워크플로는 §8 의 파일 소유권 분할과 §7 의 순서를 그대로 따른다.

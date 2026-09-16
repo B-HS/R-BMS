@@ -1,5 +1,7 @@
 # G7-multi-ir — 배선 지시 위치
 
+> **역사 배선 지시(2026-09-09)** — Phase G는 완료했습니다. 현재 정본은 [roadmap](../../roadmap.md), 근거는 [PROCESS](../../PROCESS.md)와 [Phase G 이력](../../history/2026-09-16-phase-g-data-long-tail.md)입니다. 아래 본문은 당시 기록으로 보존합니다.
+
 이 갈래(멀티 IR)의 배선 지시는 색인(`README.md`)이 G8 에게 지정한 파일명인 [`g7.md`](./g7.md) 에 있다. 내용을 두 벌로 두지 않기 위해 이 문서는 위치만 가리킨다.
 
 - 배선 지시(패치 9건): [`g7.md`](./g7.md)

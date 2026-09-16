@@ -1,5 +1,7 @@
 # rbms IR-superset API 계약 — `rbms-ir` 클라이언트 정본
 
+> **상태(2026-09-16):** 현재 IR 계약과 구현된 경계의 정본입니다. 아래 JSON의 해시·시간·커밋 값은 **형식 예시**이며 현재 배포 식별자가 아닙니다. 알려진 클라이언트 갭은 본문에서 보존하고, 실제 수동 다중 IR/서버 QA는 [roadmap](../roadmap.md)의 미실시 항목입니다.
+
 > 이 문서는 **`crates/rbms-ir` 가 실제로 말하는 와이어 계약**이다. 서버 쪽 설계 정본은 [`docs/backend/`](../backend/README.md) 와 `web/src/server/{dto,route}`(zod 스키마 = 진실 소스), 라우트 매트릭스는 [`docs/web/architecture.md`](../web/architecture.md) §1-2 다.
 > 계약 원칙: **BMS IR(LR2IR/Mocha/Cinnamon 등)의 슈퍼셋**. MD5+SHA-256 양쪽 차트 id, early/late 판정 분해, µs 리플레이, 코스, 설정 동기화, capability 탐색, 그리고 모든 DTO의 `extra`(free-form)로 전방호환.
 > REST + JSON. 네이티브 경로는 **봉투 없이 raw JSON**을 돌려준다(실패 응답만 봉투). 인증은 `Authorization: Bearer <api_token>`.

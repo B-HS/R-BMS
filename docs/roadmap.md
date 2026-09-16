@@ -1,31 +1,38 @@
-# Roadmap / deferred work
+# R-BMS 현재 로드맵
 
-Tracked items the team chose to defer. Ordered roughly by priority.
+> 정본 상태(2026-09-16): Phase A~H는 구현·자동 검증까지 완료했습니다. 이 문서는 현재 남은 작업만 다룹니다. 과거 설계와 당시 TODO는 [계획 문서](plan/2026-09-09-enhancement-plan.md), 완료 근거는 [PROCESS](PROCESS.md)와 [Phase G 이력](history/2026-09-16-phase-g-data-long-tail.md)·[Phase H 이력](history/2026-09-16-phase-h-minor-followups.md)에 보존합니다.
 
-## Deferred features (do later)
+## 완료된 단계
 
-### 1. NETWORK settings tab  *(done — 2026-06-03)*
-~~The IR/online values are CLI-only~~. **Implemented**: `SETTING_TABS` tab `"NETWORK"` with rows SERVER URL / PLAYER ID (indices 22/23), editing via the shared `text_input` field (Enter commits, Esc cancels, in-place pre-fill, buffer shown live). On commit: set `config.server_url`/`config.player_id`, persist to `settings.ron` (new `PlaySettings` fields, round-trip tested), rebuild the `ScoreServer` via the extracted `build_server` helper. Empty URL = offline (Null), empty ID = `guest`.
+| 단계 | 완료 상태 | 근거 |
+|---|---|---|
+| Phase A | 정확성·파서·차트·기초 오디오/앱 보완 완료 | `docs/history/2026-09-09-phase-a-accuracy-hotfix.md` |
+| Phase B | 오디오 클럭·스케줄·볼륨 경로 구현 완료 | `docs/history/2026-09-09-phase-b-audio-clock.md` |
+| Phase C | 크레이트 구조·설정·저장소 개편 완료 | `docs/history/2026-09-09-phase-c-structure.md` |
+| Phase D | 판정·게이지·CN/HCN 패리티 완료 | `docs/history/2026-09-09-phase-d-judge-parity.md` |
+| Phase E | 스킨 로드·렌더·설정 UI 완료 | `docs/history/2026-09-09-phase-e-skin.md` |
+| Phase F | 선택/설정/결과 UX 고도화 완료 | `docs/history/2026-09-10-phase-f-integration.md` |
+| Phase G | SongDB·ScoreDB·Course·Practice·gamepad·system sound·multi-IR·bmson 완료 | `docs/history/2026-09-16-phase-g-data-long-tail.md` |
+| Phase H | 경미 후속과 수동 점검 절차 문서화 완료 | `docs/history/2026-09-16-phase-h-minor-followups.md` |
 
-### 3. Settings screen mouse/button UX  *(deferred — document only)*
-The settings rows/tabs are already click-hittable (`Hot::SettingTab` / `Hot::SettingRow`), but value changes are keyboard-only (←/→). Plan: render explicit ◀ ▶ stepper buttons and an inline toggle switch per row, and a "DONE/BACK" button — mirroring the new bottom-bar buttons on the select screen.
+## 남은 작업
 
-### Theme coverage completion
-The theme system (`docs/theme.md`) covers the main screens. Any remaining hardcoded **chrome** colour is a one-line follow-up (add a `Theme` field + route one `Color::rgb(..)` through `theme()`). Semantic colours (lamps, mode/difficulty badges, dj-rank) are intentionally fixed.
+### Phase R — 사용자와 공동 릴리스
 
-## Known edge-case behaviours (pinned by tests, NOT bugs to fix)
+상태: 미착수. 현재 저장소는 dev-only 운용이며, `prod` 브랜치 생성·보호 규칙·태그·서명·공개 배포에는 사용자 보관 키와 최종 선택이 필요합니다. 키가 제공된 뒤 사용자가 함께 수행합니다. 세부 경계는 [릴리스 전략](acknowledge/release-branch-strategy.md)을 따릅니다.
 
-These were surfaced while hardening the test suite. They are intentional or harmless edge cases; tests assert the *actual* behaviour so any future change is caught.
+### 실제 환경 수동 QA
 
-- **`measure_us(bpm)` is unguarded** for `bpm <= 0` (→ `+inf` / negative). Safe in practice: `rbms_chart::assign_times` clamps `bpm <= 0` to a fallback before any timing math, so charts never reach `measure_us` with a bad BPM.
-- **Parser control-flow on malformed charts**: a stray `#IF 0` with no enclosing `#RANDOM` is *active* (the implicit current-random is 0); `#RANDOM 0` yields value 1 (so `#IF 1` always fires); an unbalanced `#IF` without `#ENDIF` suppresses the rest of the file; `#ENDRANDOM` silently closes dangling `#IF`s. These match a lenient BMS parser; well-formed charts are unaffected.
-- **`CpuCanvas::fill_rect` with `a == 0`** leaves RGB unchanged but still forces the stored alpha to 255 (the canvas is always opaque). No visible effect.
-- **A note exactly at `microtime`** is not in `visible_offsets`/`constant_offsets` (they iterate from the *next* timeline) — the note disappears the instant it reaches the judgment line, which is also when it is hit. By design.
-- **IR `gauge_value: f32` NaN** serializes to JSON `null` and won't decode back. The gauge value is always finite in practice (clamped), so this can't occur from real play.
-- **`clear_type_id`/`clear_type_from_id` are asymmetric at id 3** (the reference implementation `LightAssistEasy` folds to `AssistEasy`) — intentional; rbms has no separate light-assist lamp.
+자동 검증은 완료했지만, 다음은 실제 장치·서버 환경이 필요하여 아직 수행하지 않았습니다.
 
-## Fixed while hardening tests (done)
+- 실제 오디오 장치에서 재생·가청·입력 지연
+- Practice 구간·시작 게이지·50~200% 속도·BGA 반복 재시작
+- Course 연속 게이지/콤보 carry와 결과
+- 다중 IR 프로필 전환·제출·랭킹·리플레이
 
-- Mixer dropped the final source frame (1-frame samples were silent) → now clamps interpolation to the last sample so every frame plays.
-- `mode_color` had no case for BEAT_10K (key 12) → rendered grey while `mode_short` said "10K". Now has a dedicated colour.
-- `tables.ron` / `folders.ron` did not back up a corrupt file before defaulting (unlike keyconfig/settings/scores) → now write `.ron.bak` first, so the next save can't clobber a recoverable file.
+절차와 합격 기준은 [수동 점검 목록](quality-assurance/2026-09-16-phase-h-manual-checks.md)에 있습니다.
+
+## 선택적 후속
+
+- 추가 게이지·코스메틱은 제품 우선순위가 정해질 때 별도 단계로 계획합니다.
+- 스킨의 일부 고급 오브젝트·비디오 BGA·서명/공증은 현재 릴리스 범위 밖입니다. 현재 차이는 [레퍼런스 발산 기록](acknowledge/reference-divergences.md)에서 관리합니다.

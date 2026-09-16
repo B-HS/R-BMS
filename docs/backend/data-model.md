@@ -1,6 +1,6 @@
 # rbms 백엔드 — 데이터 모델 (Drizzle / MySQL)
 
-> 컨벤션 `backend.md §10`: 테이블/컬럼 **snake_case**, TS 필드 **camelCase**, 모델 타입은 `$inferSelect`/`$inferInsert`에서 유도. 시각은 `timestamp(fsp:3)` 또는 `bigint`(epoch ms). 차트 키는 md5/sha256 **둘 다 인덱싱**.
+> 구현 정본은 `web/src/server/db/{schema,auth-schema}.ts`입니다. 테이블/컬럼은 **snake_case**, TS 필드는 **camelCase**, 모델 타입은 `$inferSelect`/`$inferInsert`에서 유도합니다. 시각은 `timestamp(fsp:3)` 또는 `bigint`(epoch ms)입니다. 설계 초안의 FK 표기는 일부가 **논리 관계**이며, 실제 `.references()`는 스키마 파일에 적힌 것만 존재합니다.
 
 ## ER 개요
 ```
@@ -16,10 +16,11 @@ session/account (better-auth)    difficulty_table 1─* table_course *─1 cours
 ### `user` (better-auth 호환 + IR 프로필)
 | 컬럼 | 타입 | 비고 |
 |---|---|---|
-| id | varchar(64) PK | 로그인 id(IRAccount.id) |
-| name | varchar(64) | 표시명(IRPlayerData.name) |
-| email | varchar(255) null | 선택 |
-| password_hash | varchar(255) | better-auth 관리 |
+| id | varchar(36) PK | better-auth 생성 사용자 id |
+| login_id | varchar(64) uniq | IR 로그인 id, `/api/players/{id}`가 해석하는 공개 식별자 |
+| name | varchar(255) | 표시명 |
+| email | varchar(255) | better-auth 이메일 |
+| password_hash | 없음 | better-auth `account` 테이블이 소유 |
 | rank | varchar(32) default '' | 단위/등급(IRPlayerData.rank) |
 | rank_points | double default 0 | 산출 점수 |
 | total_plays | bigint default 0 | 누적(트리거/집계) |
@@ -37,7 +38,7 @@ session/account (better-auth)    difficulty_table 1─* table_course *─1 cours
 | 컬럼 | 타입 | 비고 |
 |---|---|---|
 | sha256 | char(64) PK | 정본 키 |
-| md5 | char(32) **uniq idx, null 허용** | LR2 호환 키 |
+| md5 | char(32) **uniq idx** | LR2 호환 키 |
 | title/subtitle/genre/artist/subartist | varchar | 메타 |
 | level | int null · total | double null · mode varchar(16) · lntype int |
 | judge int · minbpm int · maxbpm int · notes int |
@@ -50,8 +51,8 @@ session/account (better-auth)    difficulty_table 1─* table_course *─1 cours
 | 컬럼 | 타입 | 비고 |
 |---|---|---|
 | id | varchar(36) PK | `sc_…` |
-| user_id | varchar(64) FK→user | 제출자(guest는 null + guest_name) |
-| chart_sha256 | char(64) FK→chart | 정본 차트 키 |
+| user_id | varchar(36), `user.id` 참조 | 제출자(guest는 null + guest_name) |
+| chart_sha256 | char(64), 논리 chart 관계 | 정본 차트 키 |
 | chart_md5 | char(32) null idx | 호환 |
 | mode varchar(16) · lntype int(0=LN,1=CN,2=HCN) |
 | clear | tinyint | ClearType id 0-10 |
@@ -78,7 +79,7 @@ session/account (better-auth)    difficulty_table 1─* table_course *─1 cours
 | ranked | boolean default true idx | 랭킹 적격(서버 산출) |
 | flags | json null | unranked/의심 사유(`["AUTOPLAY",…]`) |
 | verified | boolean default false | µs 리플레이 재시뮬 검증(후속) |
-| replay_id | varchar(36) null FK→replay |
+| replay_id | varchar(36) null, 논리 replay 관계 |
 | played_at | bigint(epoch ms) idx · created_at |
 | extra | json |
 - 인덱스: `uniq(user_id, chart_sha256, played_at)`(멱등), `idx(chart_sha256, ranked, clear, ex_score)`(랭킹은 ranked=true만), `idx(user_id, played_at)`, `idx(client_build_sha256)`.
@@ -89,13 +90,13 @@ session/account (better-auth)    difficulty_table 1─* table_course *─1 cours
 - best 갱신 규칙: 램프 > EX > (BP 낮을수록) 순. 랭킹 조회는 이 테이블 정렬.
 
 ### `replay` (µs 정밀)
-| id varchar(36) PK(`rp_…`) · user_id FK · chart_sha256 idx · score_id null FK→score · format varchar(32) · mode/random/random_p2/seed/lntype/offset_ms/judge_rate/scratch_auto/constant/gauge(재현용) · client_build_sha256 char(64) · **event_count int · duration_us bigint** · size int · storage_key varchar(255) · created_at |
-- `events`(blob)는 **오브젝트 스토리지/파일**(`storage_key`)에 저장(µs 무손실), DB엔 메타만. 상한 env `REPLAY_MAX_BYTES`(예 4MB).
+| id varchar(36) PK · user_id varchar(36) · chart_sha256 idx · score_id null · format varchar(32) · mode/random/random_p2/seed/lntype/offset_ms/judge_rate/scratch_auto/constant/gauge(재현용) · client_build_sha256 char(64) · **event_count int · duration_us bigint** · size int · storage_key varchar(255) null · `data` mediumtext null · created_at |
+- 현재 `REPLAY_STORAGE=db`는 events JSON을 `data`에 저장하고 `storage_key`는 null입니다. 외부 object storage와 `REPLAY_STORAGE=blob`은 미구현입니다. 상한은 `REPLAY_MAX_BYTES`입니다.
 - **µs 보존**: 이벤트 타임스탬프 `t_us`(i64)를 라운딩 없이 저장 → 핵분석(등간격·반응속도·동시성)·재시뮬 가능.
 
 ### `client_build` (빌드 allowlist — 변조 탐지)
 | sha256 char(64) PK · version varchar(32) · platform varchar(32) · channel varchar(16)(stable/dev) · released_at bigint · trusted boolean default true · note varchar(255) · created_at |
-- 릴리스 CI가 산출물 SHA-256을 자동 등록(POST /api/admin/builds). 미등록 해시 제출 → `flags:["UNKNOWN_BUILD"]`.
+- `/api/admin/builds`는 등록 경로를 제공하지만, 실제 키를 쓰는 릴리스 CI 등록은 Phase R에서 검증합니다. 미등록 해시는 `UNKNOWN_BUILD` flag가 되며 `REQUIRE_BUILD_HASH` 설정에 따라 ranked 여부가 달라집니다.
 
 ### `submission_audit` (제출 감사)
 | id PK · score_id FK null · user_id null · client_build_sha256 char(64) idx · client_platform · ip varchar(64) · user_agent varchar(255) · accepted bool · ranked bool · flags json · created_at idx |
@@ -105,18 +106,18 @@ session/account (better-auth)    difficulty_table 1─* table_course *─1 cours
 | user_id varchar(64) + rival_id varchar(64) **복합 PK** · created_at |
 
 ### `setting_blob` (설정 동기화)
-| user_id + key(varchar(64)) **복합 PK** · format varchar(16) · content mediumtext · size int · updated_at |
-- 표준 key: `settings`·`keyconfig`·`tables`. 낙관적 잠금=`updated_at` vs req `base_updated_at`.
+| user_id + name(varchar(64)) **복합 PK** · format varchar(16) · content mediumtext · size int · updated_at |
+- 이름별 `/api/players/{id}/settings/{name}` 경로가 구현돼 있습니다. 낙관적 잠금=`updated_at` vs req `base_updated_at`.
 
 ### `course` / `course_chart` / `course_score`
 - `course`: `course_hash` PK · name · lntype · constraint json · trophy json · extra.
-- `course_chart`: course_hash + position **복합 PK** · chart_sha256 FK.
+- `course_chart`: course_hash + position **복합 PK** · chart_sha256(논리 chart 관계).
 - `course_score`: id PK · user_id · course_hash idx · clear · judge(early/late 동일 컬럼군) · ex_score · max_combo · gauge_value · minbp · trophy · played_at · `uniq(user_id, course_hash, played_at)`.
 - `course_best`: course_hash + user_id 복합 PK(랭킹 가속).
 
 ### `difficulty_table` / `table_folder` / `table_chart` / `table_course` (IRTableData)
 - `difficulty_table`: id PK · name · url · extra.
-- `table_folder`: id PK · table_id FK · name · position.
+- `table_folder`: id PK · table_id(논리 difficulty_table 관계) · name · position.
 - `table_chart`: folder_id + chart_sha256 복합 PK.
 - `table_course`: table_id + course_hash 복합 PK.
 
@@ -135,4 +136,4 @@ type ChartKey = Pick<typeof chart.$inferSelect, 'md5'|'sha256'>
 - **best 분리 테이블**: 랭킹은 차트당 수천 history를 매번 정렬하지 않고 `chart_best`만 정렬 → P95<150ms(NFR).
 - **early/late 인라인**: 레퍼런스 구현 IRScoreData를 무손실 보존(EX·BP·avgjudge·FAST/SLOW 전부 유도). 별도 judge 테이블은 조인비용↑이라 인라인.
 - **md5 null 허용**: sha256만 있는 레퍼런스 구현-only 차트 수용. md5만 있는 LR2 차트는 sha256 backfill 전까지 md5 키로 동작(보조 인덱스).
-- **replay blob 외부화**: DB 비대화 방지, CDN/스토리지로 다운로드 스케일.
+- **replay 저장 경계**: 현재 DB `mediumtext` 저장으로 기능을 제공하고, 규모 확장용 외부 Blob 저장소는 후속입니다.

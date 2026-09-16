@@ -1,5 +1,7 @@
 # G4 연습 모드 — G8 배선 지시
 
+> **역사 배선 지시(2026-09-09)** — Phase G는 완료했습니다. 현재 정본은 [roadmap](../../roadmap.md), 근거는 [PROCESS](../../PROCESS.md)와 [Phase G 이력](../../history/2026-09-16-phase-g-data-long-tail.md)입니다. 아래 본문은 당시 기록으로 보존합니다.
+
 대상 모듈: `apps/rbms-player/src/practice.rs` (+ `practice/tests.rs`). 스펙 §6.
 아래 항목은 **한 항목 = 한 패치**다. 줄 번호가 아니라 심볼명으로 앵커한다.
 

@@ -1,5 +1,7 @@
 # Phase E 상세 설계 — 스킨 완전 커스터마이징 (E1~E6)
 
+> **역사 설계(2026-09-09)** — Phase E 구현은 완료했습니다. 아래 본문의 착수 조건·TODO·라인 앵커는 당시 기록으로 보존합니다. 현재 정본은 [roadmap](../roadmap.md), 근거는 [PROCESS](../PROCESS.md)와 [Phase E 이력](../history/2026-09-09-phase-e-skin.md)입니다.
+
 > 상위 계획: `docs/plan/2026-09-09-enhancement-plan.md` §2 Phase E. 결정: `docs/acknowledge/2026-09-09-enhancement-decisions.md` 결정 1 — **레퍼런스 구현 JSON 스킨 호환 + json5 관대 파서 + Lua 식 평가(mlua, 샌드박스·화이트리스트)**. LR2 CSV 는 후순위.
 > 이 문서는 Phase E 구현 에이전트의 단일 사양이다. 앵커는 **현재 rbms 코드의 file:line**, 패리티 근거는 레퍼런스 구현의 **파일명:라인**으로 표기한다.
 > 주의: `crates/rbms-ir`, `apps/rbms-player` 는 Phase I 워크플로가 동시 수정 중이다. 이 두 트리는 **라인 번호를 신뢰하지 말고 함수명으로 앵커**하며, 착수 시 "Phase I 이후 재확인" 항목을 먼저 검증한다.

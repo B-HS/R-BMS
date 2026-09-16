@@ -1,5 +1,7 @@
 # SONG SELECT 전면 재설계 스펙 (레퍼런스 구현 modern chic 지향)
 
+> **역사 설계(2026-05-31, 완료):** 이 문서의 재설계 항목은 구현됐습니다. `#PREVIEW`·KEY BOMB·결과/메뉴 스킨화도 후속 단계에서 완료됐으며, 현재 미완료와 QA는 [roadmap](../roadmap.md), 완료 근거는 [이력](../history/2026-05-31-select-redesign.md)입니다.
+
 > 1차 타깃: `docs/reference/ui/provided/06-reference-select-target.png`. 전체 UI 스펙은 `ui-design.md`(이 문서는 곡선택만 정밀화).
 > 렌더 프리미티브: `clear` / `fill_rect(Rect)` / `draw_text(_centered/_right)` (scale 1.0≈14px) + **단일 BGA 텍스처 1장**(커버 전용). 좌표공간 1280×720 고정.
 
@@ -135,6 +137,4 @@ pub struct SelectView { pub rows: Vec<SelectRow>, pub sel: usize, pub start: usi
 - [x] d. `rbms-render::render_select` + `SelectView`/`SelectHot` + 예제(헤드리스 PNG)
 - [x] e. main.rs: `build_select_view` 조립(+`SelectKey` 캐시) + hot 매핑 + 커버 디코드/`set_bga`
 - [x] (리뷰) 2라운드 적대적 멀티에이전트 리뷰 — 1R 16건 반영·2R 0건
-- [ ] f. (후속) `#PREVIEW` 재생(데이터 준비완료), KEY BOMB, 스킨 데이터화 결과/메뉴 → `ROADMAP.md`
-</content>
-</invoke>
+- [x] f. (후속) `#PREVIEW` 재생, KEY BOMB, 결과/메뉴 스킨 데이터화

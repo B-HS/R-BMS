@@ -193,9 +193,9 @@ KEYBOARD NOTE: `PG±30000 GR±90000 GD±200000 BD[-320000,+240000] MS[-200000,+6
    - `Combo`: t2 미판정 AND `t1.micro < ptime+table[2][0]` AND `t2.micro <= ptime+table[2][1]` (콤보 유지 노트 우선, GOOD 윈도우 기준).
    - `Duration`: `|t1−ptime| > |t2−ptime|` AND t2 미판정 (시간상 최근접 우선).
    - `Lowest`: 항상 false (첫/최하 노트 유지).
-   - `Score`: Combo와 유사하나 table[1](GREAT) 사용.
+   - `Score`: Combo와 유사하나 `table[1]`(GREAT) 사용.
    - default = `{Combo, Duration, Lowest}` (`PlayConfig.getJudgetype()`로 선택).
-3. **판정 계산** (`JM:411-434`): 후보가 이미 판정됨(state!=0) → `dmtime`이 table[4](empty-poor) 내면 5(MS) 아니면 6(skip). 미판정 → index 0..len 선형 스캔, `dmtime ∈ [table[j][0],table[j][1]]`인 j; `judge = (judge>=4 ? judge+1 : judge)` (0=PG,1=GR,2=GD,3=BD, index4(MS매치)→5(empty MISS)); 무매치 → `judge = len(>=6)`. `judge<4`인 후보는 첫 번째이거나 더 가까울 때만 `tnote`로 채택; `judge>=6`이면 `tnote` 클리어.
+3. **판정 계산** (`JM:411-434`): 후보가 이미 판정됨(state!=0) → `dmtime`이 `table[4]`(empty-poor) 내면 5(MS) 아니면 6(skip). 미판정 → index 0..len 선형 스캔, `dmtime ∈ [table[j][0],table[j][1]]`인 j; `judge = (judge>=4 ? judge+1 : judge)` (0=PG,1=GR,2=GD,3=BD, index4(MS매치)→5(empty MISS)); 무매치 → `judge = len(>=6)`. `judge<4`인 후보는 첫 번째이거나 더 가까울 때만 `tnote`로 채택; `judge>=6`이면 `tnote` 클리어.
 4. **見逃しPOOR(놓침)** (`JM:612-649`): 미판정 NormalNote/LN-head가 `note.time_us + mjudge[3][0]`(BAD-late) 지나면 강제 4(POOR).
 5. **빈 입력(空POOR)**: `tnote==null`이면 기본 7K/5K/KB 규칙에선 판정 카운터 증가 없음(가까운 통과 노트 키음만 재생). PMS는 `MissCondition.ONE`으로 노트당 1회 empty-POOR가 콤보 브레이크.
 

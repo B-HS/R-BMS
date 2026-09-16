@@ -1,5 +1,7 @@
 # G1 곡DB — G8 배선 지시
 
+> **역사 배선 지시(2026-09-09)** — Phase G는 완료했습니다. 현재 정본은 [roadmap](../../roadmap.md), 근거는 [PROCESS](../../PROCESS.md)와 [Phase G 이력](../../history/2026-09-16-phase-g-data-long-tail.md)입니다. 아래 본문은 당시 기록으로 보존합니다.
+
 > 대상 스펙: `docs/plan/2026-09-09-phase-g-spec.md` §3(곡DB·증분 스캔), §11 순서 2·3.
 > 소유 파일(G1이 이미 작성 완료): `crates/rbms-library/src/songdb.rs` + `songdb/**`,
 > `crates/rbms-library/src/scan.rs` + `scan/**`, `apps/rbms-player/src/library.rs` + `library/**`.

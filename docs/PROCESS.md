@@ -2,10 +2,22 @@
 
 > 이전 Phase G 중단 스냅샷은 `docs/HANDOFF.md`와 `docs/history/2026-09-10-session-wrap-up.md`에 보존한다. 현재는 Phase G·H까지 완료했고 Phase R은 실제 키와 함께 추후 진행한다.
 > 새 세션은 **이 문서부터** 읽는다. 현재 상태·아키텍처·실행법·할 일의 SSOT. (ai-process.md 원칙 1·14)
-> 베이스 룰: `~/.claude/CLAUDE.md` + convention. Rust 프로젝트 → TS 전용 규칙(arrow 등) 비적용, **공통 원칙**(주석 금지·설명은 docs/·정확 네이밍·근본 해결·공식문서 우선·검증 후 진행)은 그대로.
+> 베이스 룰: 프로젝트 작업 환경의 `AGENTS.md`와 llm-rules 전문(`ai-process`·`common`·`comments`·`git`·`security`)을 따른다. Rust 프로젝트에는 TS/JS 전용 규칙을 적용하지 않으며, 공통 원칙(문서는 `docs/`에 기록·정확한 이름·근본 해결·공식 문서 확인·검증 후 진행)은 그대로 적용한다.
 > 위치: `/Users/gkn/R-BMS`. 빌드 `cargo build`, 테스트 `cargo test --workspace`(Phase H 최종 실행 exit 0, 등록 테스트 3,040개; 실제 오디오 장치 테스트 2건 ignored). lint 는 이제 게이트다 — `cargo fmt --all --check` 와 `cargo clippy --workspace --all-targets --all-features -- -D warnings` 가 CI 필수 통과 조건이고 툴체인은 `rust-toolchain.toml` 로 `1.95.0` 고정. 실행 정본은 `README.md`다.
 > git: **dev(작업)/prod(배포) 브랜치 모델**(CI는 dev, 릴리스는 prod → `docs/ci-release.md`). **커밋 메시지에 co-author(Claude) 넣지 않음**(사용자 명시 지시), 작성자 `Hyunseok Byun <gumyoincirno@gmail.com>`. `target`·`Cargo.lock`·라이브러리 차트 커밋 금지(.gitignore).
-> 다음 할 일(로드맵)은 **`ROADMAP.md`**, 백엔드 설계는 **`docs/backend/`**, 배포/CI는 **`docs/ci-release.md`**.
+> 다음 할 일(로드맵)은 **`docs/roadmap.md`**, 백엔드 설계는 **`docs/backend/`**, 배포/CI는 **`docs/ci-release.md`**.
+
+---
+
+## 현재 작업 — 문서 정합성·고도화 마무리 (2026-09-16)
+
+> 사용자 지시: `docs/` 전체를 실제 코드·Git·검증 결과와 대조해 정합성을 완성하고, 이번 라운드의 문서 이력과 지도까지 마무리한다. Phase R은 실제 키가 필요한 사용자 동반 배포 작업이므로 미착수 상태를 보존한다.
+
+- [x] D1 문서 인벤토리와 정본·보존 이력 구분 — `README.md`, `docs/roadmap.md`, `docs/PROCESS.md`, `docs/history/`, `docs/plan/`, `docs/reference/`의 역할·중복·현재성 표기를 실제 파일 기준으로 판정했다.
+- [x] D2 활성 문서의 코드·Git·실행·Phase 상태 정합성 수정 — 루트 안내와 `docs/{PROCESS,architecture,crates,ci-release}.md`의 명령·경로·브랜치·테스트 수·완료 상태를 현재 `dev`와 구현에 맞췄다.
+- [x] D3 계획·참조·QA·링크/경로 교차검증과 오래된 지시 정리 — 활성 문서의 깨진 Markdown 링크, 폐기된 실행 지시, 완료 기능의 미구현 표기를 보존 이력과 구분해 정정했다.
+- [x] D4 최종 작업 이력·문서 지도·PROCESS 완료 상태 정리 — 감사 근거와 Phase R 경계를 `docs/history/2026-09-16-documentation-finalization.md` 및 문서 지도에 기록했다.
+- [x] D5 최종 검증·적대 리뷰·커밋/푸시 — Markdown 링크·오래된 패턴·`git diff --check`와 독립 문서 검토를 통과했다. 이 문서 변경을 docs 전용 커밋으로 `dev`에 푸시하고 원격 CI를 확인한다.
 
 ---
 
@@ -104,16 +116,18 @@
 
 ---
 
-## 현재 작업 — 전체 로드맵 실행 (2026-06-03~)
+## 보존 이력 — 전체 로드맵 실행 당시 기록 (2026-06-03~)
 
-> 사용자 지시: "계획을 docs에 반영 후 Phase 0→7까지 멈추지 말고 진행." 확정 순서(9-에이전트 적대적 분석·비평으로 도출, 비평 정정 반영). 상세 forward plan은 로컬 `ROADMAP.md`, 결정 대기 항목은 `docs/acknowledge/`.
+> 이 블록은 당시의 계획·실행 스냅샷을 보존한다. 체크박스와 미구현 표기는 작성 시점의 사실이며 현재 상태를 나타내지 않는다. 현재 정본은 이 문서 상단과 `docs/roadmap.md`이며, Phase A~H는 완료되고 Phase R만 실제 키를 기다리는 미착수 상태다.
+>
+> 당시 사용자 지시: "계획을 docs에 반영 후 Phase 0→7까지 멈추지 말고 진행." 확정 순서(9-에이전트 적대적 분석·비평으로 도출, 비평 정정 반영). 당시 forward plan은 `docs/roadmap.md`, 결정 대기 항목은 `docs/acknowledge/`.
 > 효력: S<1일 · M=1~3일 · L≈1주 · XL=수주. `(선택)`/`(BLOCKED)` 표기.
 
 **Phase 0 — 위생 & 사실 정정 (전부 S, 즉시) ✅ 완료(2026-06-03)**
 - [x] 문서 사실 정정 1패스 — 테스트 수 `132/92/100 → 880`(PROCESS·CLAUDE·ci-release), CN/HCN 판정 미차별 명확화(`divergences.md` 추가)
 - [x] `ci-release.md` stale 정정 — 리모트·dev 존재 반영, prod 브랜치+첫 태그만 잔여
 - [x] 루트 `LICENSE`(GPL-3.0 전문) 추가
-- [x] `ROADMAP.md`·README 배포 섹션 dev/prod·Actions 상태 정정 (역할: ROADMAP=로컬 워킹, docs/roadmap=공개 ledger)
+- [x] `docs/roadmap.md`·README 배포 섹션 dev/prod·Actions 상태 정정 (역할: roadmap=로컬 워킹, docs/roadmap=공개 ledger)
 - [x] 미커밋 `docs/` + `LICENSE`를 dev 커밋(`1d3fb13`, 작성자 Hyunseok Byun, co-author 없음; gitignore 항목 제외)
 - [x] dev → origin 푸시 (CI 3-OS 트리거됨)
 
@@ -121,7 +135,7 @@
 - [x] `PlayOptions.lntype`를 헤더에서 유도 (app_play.rs 하드코딩 제거 → `ir_map::ir_lntype`, 0=LN/1=CN/2=HCN, 테스트)
 - [x] #PREVIEW: `config.debug` 6분기 계측 + `samples/preview-demo` 픽스처 + dead_code 제거 (가청 확인은 수동 1회 — `docs/bug/2026-06-03-preview-playback.md`)
 - [x] (2026-06-07) **곡선택 하이브리드 미리듣기** — `#PREVIEW` 있으면 파일, 없으면 곡 **autoplay 미리듣기**(백그라운드 코디네이터 스레드: 파싱→스케줄→키음 디코드, 취소가능, 위상연속 루프). `load()`와 디코드 헬퍼 공통화. 2R 적대적 리뷰 반영. → `docs/history/2026-06-07-select-autoplay-preview.md` (가청 1회는 사용자 몫)
-- [x] ⭐ `LnKind` 판정 전파 + CN/HCN 2-판정 모델(head@press + end@release, 이른릴리스=end 판정·미히트=2 Miss, 분모 CN=2) + 합성 픽스처 5종. `Cn`/`Hcn` 게이트 → LN/Normal byte 불변. (HCN 연속 게이지·CN deferral·BSS = Phase 7; → `docs/reference/cn-hcn-judgment.md`)
+- [x] ⭐ `LnKind` 판정 전파 + CN/HCN 2-판정 모델(head@press + end@release, 이른릴리스=end 판정·미히트=2 Miss, 분모 CN=2) + 합성 픽스처 5종. `Cn`/`Hcn` 게이트 → LN/Normal byte 불변. HCN 200 ms 틱·CN deferral·BSS/MSS는 **Phase D에서 완료**(→ `docs/history/2026-09-09-phase-d-judge-parity.md`).
 
 **Phase 2 — 첫 릴리스(인프라)**
 - [ ] prod 브랜치 생성·푸시 + 브랜치 보호 전략 결정(필수, `docs/acknowledge` 기록)
@@ -140,7 +154,8 @@
 - [ ] (선택) 설정 화면 마우스 스테퍼 UX
 
 **Phase 7 — 롱테일 / 선택 폴리시 & 하드닝**
-- [ ] HCN 연속 게이지(L, 정확성·HCN 희소) · (선택) 스크래치 BSS · (선택) 게이지 5K/PMS
+- [x] ~~HCN 연속 게이지~~ · ~~스크래치 BSS/MSS~~ — **Phase D에서 완료**(CN deferral·HCN 200 ms 틱 포함, → `docs/history/2026-09-09-phase-d-judge-parity.md`)
+- [ ] (선택) 게이지 5K/PMS
 - [ ] (선택/BLOCKED) 결과·메뉴 레이아웃 RON화 · (선택) 테마 chrome 색 완성
 - [ ] (선택) 백엔드 M4 LR2IR READ 어댑터 · (선택/BLOCKED) FE 리플레이 뷰어 · (선택) 백엔드 M5 안티치트
 - [ ] (선택) macOS 서명/공증·Windows Authenticode · (선택) .app/.dmg+무인자 picker
@@ -210,7 +225,7 @@ crates/
 
 **2026-06-07 세션 (2) — 첫 실행/온보딩(.dmg 대비):** `.dmg` 더블클릭(터미널 없음) 대비. (1) **무인자 진입** — 인자·기억폴더 없을 때 `usage`+`exit` 대신 GUI 진입. (2) **초기 스캔 백그라운드화** — `App::new` 동기 블로킹(창도 안 뜸) → 백그라운드 스레드+`scan_rx`/`apply_scan`, SCANNING 화면에 **곡 수 카운트** 표시. (3) **첫 실행 빈 곡선택 + 온보딩 CTA**(`SelectView.empty_hint`: WELCOME/add-folder, 헤드리스 렌더 시각확인). (4) **Esc-중-스캔** 종료 회귀 수정(취소 복귀). 집중 적대 리뷰 1건 반영. → `docs/history/2026-06-07-first-launch-onboarding.md`. (`.app`/`.dmg` 패키징·공증은 release.yml 측 후속)
 
-상세 이력 → `docs/history/2026-05-31-*.md`·`2026-06-03-session.md` (§8 docs맵). 다음 할 일 → `ROADMAP.md`.
+상세 이력 → `docs/history/2026-05-31-*.md`·`2026-06-03-session.md` (§8 docs맵). 당시 다음 할 일 → `docs/roadmap.md`.
 
 ## 5. 실행
 
@@ -242,12 +257,12 @@ cargo run --release -p rbms-player -- "<차트.bms>" --interactive
 
 - ~~CJK 폰트 없음~~ **해결**(cosmic-text). ~~캐시키 할당~~/~~말줄임~~ **P3 해결**(무할당 중첩 캐시·`fit_text`). **P3a run-length 병합 보류**(프로파일 ROI~11%, AA 텍스트 픽셀별 alpha 상이 → 본 해법은 글리프 텍스처 아틀라스, 후속). **P4 웹폰트(URL)** 후속.
 - ~~14K 단일필드~~ **듀얼필드 해결**(`dual_field`, P1좌·P2우·바깥 스크래치, 필드별 judge라인/구분선/게이지 1개). 비활성화(`dual_field:false`) 시 레거시 단일필드.
-- ~~ALL-SCRATCH/H-RANDOM 미구현~~ **해결**(시간임계 40/125ms). ~~green-number 미반영~~ **표시·반영**(HUD). ~~CN/HCN 미구분~~ **`#LNMODE`→`LnKind` 구분 + 종단 2-판정 차별화 적용**(HCN 연속게이지·CN deferral·스크래치 BSS는 Phase 7). 스크래치 회전(2키 교대) 단순화는 잔존.
+- ~~ALL-SCRATCH/H-RANDOM 미구현~~ **해결**(시간임계 40/125ms). ~~green-number 미반영~~ **표시·반영**(HUD). ~~CN/HCN 미구분~~ **`#LNMODE`→`LnKind` 구분 + 종단 2-판정 차별화 적용**. HCN 200 ms 틱·CN deferral·스크래치 BSS/MSS는 **Phase D에서 완료**(→ `docs/history/2026-09-09-phase-d-judge-parity.md`). 스크래치 회전(2키 교대) 단순화는 잔존.
 - 윈도우 리사이즈 UI 리플로우 없음(논리 1280×720 고정). BGA 비디오(mpg) 미지원. 게이지 5K/PMS 변종·judgerank 커스텀 일부 미반영. 난이도표 추가 fetch는 동기(1개씩).
 - **미구현(2026-09-09 감사, `docs/plan/2026-09-09-enhancement-plan.md` 참조)**: 곡DB(매 실행 전량 스캔·증분 없음) · 컨트롤러/MIDI/마우스 스크래치(의존성 0) · 코스/단위 · 연습 모드 · 곡선택 난이도·모드 필터/즐겨찾기/랜덤 선택 · 볼륨 3분리(system/key/bg, `#VOLWAV` 미반영, 현재 마스터 게인 1계통뿐).
 - **IR 백엔드 = 전체 설계 완료(`docs/backend/`, 문서 단계)·구현 후속**. ~~클라 슈퍼셋 확장 필요~~ **클라 DTO 슈퍼셋 확장 완료**(§4 IR). 서버 미구현이라 신규 메서드(settings/replay-dl/auth/course)는 호출 시 `Unsupported`. `PlayOptions.lntype`에 실제 LN모드 전파는 후속(모델에 lnmode 미보유).
 - ~~UI 곡선택 재설계~~·~~KEY BOMB~~ **완료**(§4). ~~#PREVIEW 파일만~~ **곡선택 하이브리드 미리듣기 완료**(2026-06-07): `#PREVIEW` 있으면 파일, 없으면 곡 **autoplay 미리듣기**(백그라운드 코디네이터·취소가능·위상연속 루프). 실기 가청 1회만 사용자 몫 → `docs/history/2026-06-07-select-autoplay-preview.md`. 남은 UI 후속: **스킨 데이터화**(결과/메뉴 패널까지 — 곡선택 추출·KEY BOMB 데이터화로 진척). ~~`.dmg` 첫 실행 UI~~ **첫 실행/온보딩 런타임 UI 완료**(2026-06-07: 무인자 진입·백그라운드 스캔+곡수·온보딩 CTA·Esc 취소 → `docs/history/2026-06-07-first-launch-onboarding.md`); 남은 건 **`.app`/`.dmg` 패키징·무인자 진입·macOS 공증**(release.yml 측).
-- ~~Windows 설정 경로~~ **해결**(`config_dir` HOME→USERPROFILE, → `docs/reference/windows-compat.md`). ~~CN/HCN 판정 차별화~~ **종단 2-판정 적용**(HCN 연속게이지·CN deferral·BSS는 Phase 7). 남은: **F5 결과/메뉴 패널 위치 RON화**(현재 HUD 표면만 데이터화), **P3a 글리프 아틀라스·P4 웹폰트**, **FE 프로젝트**(별 저장소·MIT) → `ROADMAP.md`. 적대적 리뷰 보류 차이 → `docs/acknowledge/reference-divergences.md`.
+- ~~Windows 설정 경로~~ **해결**(`config_dir` HOME→USERPROFILE, → `docs/reference/windows-compat.md`). ~~CN/HCN 판정 차별화~~ **종단 2-판정 적용**. HCN 200 ms 틱·CN deferral·BSS/MSS는 **Phase D에서 완료**(→ `docs/history/2026-09-09-phase-d-judge-parity.md`). 남은: **F5 결과/메뉴 패널 위치 RON화**(현재 HUD 표면만 데이터화), **P3a 글리프 아틀라스·P4 웹폰트**, **FE 프로젝트**(별 저장소·MIT) → 당시 `docs/roadmap.md`. 적대적 리뷰 보류 차이 → `docs/acknowledge/reference-divergences.md`.
 
 > **세션 이력(완료)**: 입력판정 근본수정(空POOR)·폴더 ←→ 네비·마우스·로컬기록 모달·레퍼런스 구현 램프색·AUTO REPLAY·Play-Esc-즉시결과·DEBUG MODE → `docs/history/2026-05-31-input-judge-nav-mouse-records.md`. 다국어 폰트(cosmic-text) → `…-multilingual-font.md`. 백엔드 IR-슈퍼셋 설계 + CI/CD → `…-backend-ir-ci.md`. (모두 §4 완료기능·§8 docs맵에 반영됨)
 

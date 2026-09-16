@@ -1,5 +1,7 @@
 # 사용자 확정 결정 (rbms 포팅)
 
+> **역사 합의(2026-05-31, 대체됨):** 당시 범위 제한(스킨·IR·셀렉트 제외)은 이후 Phase E~G에서 해소됐습니다. 현재 완료·미완료 정본은 [roadmap](../roadmap.md), 최신 결정은 `2026-09-09-enhancement-decisions.md`와 [PROCESS](../PROCESS.md)입니다.
+
 ## 대상
 레퍼런스 구현 core PLAY 모듈의 Rust 재구현(rbms). 스킨/IR/셀렉트는 범위 밖.
 

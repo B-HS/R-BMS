@@ -25,7 +25,7 @@ cargo run --release -p rbms-player -- <chart.bms> --interactive
 .\target\release\rbms-player.exe <chart.bms> --auto
 ```
 
-- The Phase H workspace test run registered 3,040 tests and exited successfully; actual audio-device tests remain ignored when no device is available. CI gates formatting and the clippy command above, and builds/tests on Linux, macOS, and Windows.
+- The Phase H workspace test run registered 3,040 tests and exited successfully; actual audio-device tests remain ignored when no device is available. CI gates formatting and the clippy command above, and builds/tests on Linux, macOS, and Windows. AUDIO, Practice, Course and Multi-IR have no completed hardware/server manual result; their required procedure is [quality-assurance/2026-09-16-phase-h-manual-checks.md](quality-assurance/2026-09-16-phase-h-manual-checks.md).
 - The first positional argument is a song folder or chart. With no positional argument, the player uses the remembered `songs_folder`, then `RBMS_SONGS`, otherwise opens an empty GUI. A single chart defaults to autoplay; use `--interactive` or `--auto` to choose explicitly. The execution source of truth is the repository `README.md`.
 - To register a folder in the GUI: `O` → `+ ADD FOLDER` → `Enter` → `Esc` (save and rescan).
 - The app reads/writes config under `~/.config/rbms/`. `config_dir()` resolves `HOME` then
@@ -61,9 +61,11 @@ the frame loop, `ApplicationHandler` and `run`. Everything else hangs off it:
 | `assets.rs` | bundled skins, the `theme.ron` template, chart-relative file resolution, the keysound decode pool, BGA decode, the library scan |
 | `gpu.rs` | the wgpu instanced-quad renderer (`Gpu`), fallible so a machine with no adapter gets a message |
 | `stage/mod.rs` | `Stage`, `StageId`, `Transition`, `FrameCtx`, `KeyInput`, the `StageHandler` trait and its dispatch |
-| `stage/{select/,settings,keyconfig,tables,folders,loading,play,result}.rs` | one screen each, owning that screen's own state. `select/` is split again into `mod.rs` (list, record modal, ranking panel), `preview.rs` (hover preview) and `scene.rs` (what the renderer is handed) |
-| `app_input.rs` / `app_library.rs` / `app_network.rs` / `app_play.rs` / `app_ranking.rs` | `AppShared` methods by theme: input mapping, library and tables, the NETWORK tab and sync, chart load / shared stream / song clock, IR ranking |
-| `format.rs` / `tablesrc.rs` / `settings_ui.rs` / `settings_view.rs` / `ir_*.rs` / `play_sink.rs` / `timing.rs` | display formatting, table loading, the settings rows the program owns, the settings renderer, the IR panels and sync, the `SoundSink` adapter, the timing probe |
+| `stage/{select/,settings,keyconfig,tables,folders,loading,play,result,practice,course_result}.rs` | one screen each, owning that screen's own state. `select/` is split into `mod.rs` (list, record modal, ranking panel and course tab), `preview.rs` (hover preview), `list.rs`, `filter.rs` and `scene.rs` (what the renderer is handed). `practice.rs` owns practice setup; `course_result.rs` renders the aggregate course result. |
+| `app_input.rs` / `app_network.rs` / `app_options.rs` / `app_play.rs` / `app_ranking.rs` / `app_result.rs` | `AppShared` methods by concern: keyboard and gamepad input, NETWORK tab and sync, option overlay, chart load / shared stream / song clock, IR ranking and result persistence or submission. |
+| `library.rs` / `scoredb_store.rs` / `practice.rs` / `course_ui.rs` / `course_ir.rs` | Phase G persistence and modes: SQLite song index, SQLite score import and history, per-chart practice properties and clock, course selection/constraints/results, and course IR submission. |
+| `gamepad/` / `syssound.rs` / `ir_ext.rs` | Phase G device and network extensions: gilrs pad state and analog mapping, optional system-sound set, and primary plus additional IR profile fan-out. |
+| `format.rs` / `tablesrc.rs` / `settings_ui.rs` / `settings_view.rs` / `ir_*.rs` / `play_sink.rs` / `timing.rs` | display formatting, table loading, the settings rows the program owns, the settings renderer, IR panels/session/ranking/replay/sync, the `SoundSink` adapter, and the timing probe. |
 | `keyconfig.rs` | the winit `KeyCode` ↔ token map and the `keyconfig.ron` shape (the one persisted type still in the app, because it is the one that needs winit) |
 
 The screen and `app_*` modules use `use crate::*;` so they see the crate-root items, and they are
@@ -92,7 +94,7 @@ the configuration directory.
 ## Conventions
 
 - **Commits: NEVER add a `Co-Authored-By:` line** (or any AI attribution). Description only.
-- Branches: `dev` = work, `prod` = deploy/release (CI auto-bumps + builds universal macOS / Windows).
+- Branches: `dev` = work. `prod` is the deployment branch that Phase R will create when the maintainer provides real release/signing or deployment credentials; do not create or push it as routine development work. The release workflow then auto-bumps and builds universal macOS / Windows artifacts.
 - Tests are edge-case heavy and pin some intentional/suspect behaviours — see `roadmap.md` before
   "fixing" a surprising assertion.
 - The deterministic `CpuCanvas` backend makes rendering testable without a GPU; prefer it in tests.

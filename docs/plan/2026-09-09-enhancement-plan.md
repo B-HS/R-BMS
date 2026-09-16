@@ -1,5 +1,7 @@
 # R-BMS 전면 고도화 계획 (2026-09-09)
 
+> **역사 계획(2026-09-09)** — Phase B~G와 H 경미 후속은 완료했습니다. 이 문서의 순서·수치·TODO는 당시 설계를 보존한 것이며 현재 작업 정본이 아닙니다. 현재 미완료는 [roadmap](../roadmap.md), 진행·검증 근거는 [PROCESS](../PROCESS.md)와 [Phase G 이력](../history/2026-09-16-phase-g-data-long-tail.md)입니다.
+
 > 근거: 9관점 리서치(Opus) + 관점별 회의적 검증(Opus) + 완전성 비평 + IIDX 30~34 웹 조사 + Fable 직접 코드 확인 6건. 원 보고서·검증 보고서·후속 조사·비평 24편과 Fable 검토 노트는 `docs/plan/research-2026-09-09/`에 보존(파일명 `*-verify.md`가 검증, `followup-*.md`가 후속 조사, `critic.md`가 비평, `00-fable-review-notes.md`가 검토 노트). 이 문서는 그 종합이며, 각 주장은 검증자가 확인(confirmed/partially)한 것만 담고 반박된 항목은 제외했다.
 > 대상 커밋 `c6f0885`(dev). 효력 표기: S<1일 · M 1~3일 · L≈1주 · XL 수주.
 

@@ -1,5 +1,7 @@
 # Phase D 상세 설계 — 판정 패리티 완성 + JUDGE 설정 노출
 
+> **역사 설계(2026-09-09)** — Phase D 구현은 완료했습니다. 아래 본문의 착수 조건·TODO·라인 앵커는 당시 기록으로 보존합니다. 현재 정본은 [roadmap](../roadmap.md), 근거는 [PROCESS](../PROCESS.md)와 [Phase D 이력](../history/2026-09-09-phase-d-judge-parity.md)입니다.
+
 > 대상: `docs/plan/2026-09-09-enhancement-plan.md` §2 Phase D. 근거 결정: `docs/acknowledge/2026-09-09-enhancement-decisions.md` 결정 12.
 > 원칙: 레퍼런스 구현의 수치 테이블을 **손으로 재해석하지 않고 그대로 상수화**하고, 테스트가 그 배열을 byte 단위로 고정한다.
 > 레퍼런스 구현 인용은 bare 파일명 + 라인으로만 한다(`JudgeProperty.java:210` 등).

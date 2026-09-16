@@ -1,13 +1,13 @@
 # Architecture
 
-rbms is a Rust port of the reference implementation's PLAY core: a BMS rhythm-game player. Cargo workspace, 12 library
+rbms is a Rust port of the reference implementation's PLAY core: a BMS rhythm-game player. Cargo workspace, 14 library
 crates + 2 apps. The single source of truth for *behaviour* is the code + its tests; this document is
 the map.
 
 ## Crate dependency order (top → bottom)
 
 ```
-apps/rbms-player ─► { rbms-config, rbms-library, rbms-play, rbms-render, rbms-audio, rbms-ir, rbms-judge, rbms-table }
+apps/rbms-player ─► { rbms-config, rbms-library, rbms-play, rbms-render, rbms-audio, rbms-ir, rbms-judge, rbms-table, rbms-course }
      rbms-config ─► rbms-store, rbms-judge, rbms-chart
      rbms-play   ─► rbms-store, rbms-judge
      rbms-library ─► rbms-chart ─► rbms-parser ─► rbms-model
@@ -21,19 +21,22 @@ configuration crate and the play crate share it without a cycle. `rbms-table` de
 | Crate | Role |
 |---|---|
 | **rbms-model** | Dependency-free core types: `Micros = i64` (the global time unit), `Note`/`TimeLine`/`Model`, `Mode` (channel→lane map as data). |
-| **rbms-parser** | BMS lexical: UTF-8/BOM/Shift-JIS decode, `#RANDOM`/`#IF` resolved deterministically from a seed, MD5+SHA-256 of raw bytes, base36/62, `#mmmCC` data lines → `BmsSource`. |
+| **rbms-parser** | BMS lexical and BMSON parser: UTF-8/BOM/Shift-JIS decode, `#RANDOM`/`#IF` resolved deterministically from a seed, MD5+SHA-256 of raw bytes, base36/62, `#mmmCC` data lines → `BmsSource`, and `.bmson` JSON → chart model input. |
 | **rbms-chart** | `BmsSource` → fully-timed `Model`: `detect_mode`, measure→µs integration (BPM/STOP/SCROLL), LN/LNOBJ/mines, `note_density`, `scroll` (render offsets), `shuffle` (note options). |
 | **rbms-judge** | Stateful judge: reference windows (mode-aware), PG/GR/GD/BD/POOR/MISS, combo/EX/early-late, gauges (6 kinds), 空POOR, clear lamp. |
 | **rbms-audio** | RT-safe output: symphonia decode + cpal lock-free mixer. **Master clock = mixed sample count** (the timing-source fix vs the reference implementation). |
 | **rbms-render** | Backend-agnostic 2D: `Renderer` trait (`fill_rect`) → wgpu/CpuCanvas. Skin (RON), playfield, HUD, result, select, key-bomb, multilingual font (cosmic-text), **UI theme** (`docs/theme.md`). |
 | **rbms-ir** | "IR-superset" score-server contract: `ScoreServer` trait + serde DTOs + HTTP/Null clients. |
 | **rbms-table** | BMS difficulty tables (header.json/data.json): fetch, md5-match, level grouping, disk cache. |
-| **rbms-store** | Local persistence: `scores.ron` + `replays/*.ron`, the atomic write every store file goes through, and the judging-rule version stamped on each record. serde/RON only — lamps travel as numeric ids so the judge engine stays out of the file layer. |
-| **rbms-library** | The song library: cancellable folder scan → `SongEntry`, the lazy per-chart `ChartDetail`, and the md5-indexed `Library`. Headless, so `rbms-cli scan` exercises it. |
+| **rbms-store** | Local score persistence: SQLite `scoredb` (history, bests, profiles, replay GC) plus RON compatibility import/export (`scores.ron` + `replays/*.ron`), atomic writes, and judging-rule version stamps. Lamps travel as numeric ids so the judge engine stays out of the file layer. |
+| **rbms-library** | SQLite song database boundary: cancellable folder scan → `SongEntry`, lazy `ChartDetail`, and md5-indexed `Library` backed by `songdb`. Headless, so `rbms-cli scan` exercises it. |
 | **rbms-config** | One versioned configuration document (`Config` + `schema_version`), the migration that absorbs the pre-version `settings.ron`/`folders.ron`/`tables.ron`, and the settings **descriptor table** the settings screen is generated from. |
 | **rbms-play** | Real-time play driver. `Player` advances over the song clock (scheduling and audible axes separately), emits keysound events, feeds judging, tracks beams/bombs; `PlaySession` is one whole run — judging + replay + calibration + analysis clock — emitting sound through a `SoundSink` so it can run with no audio device. |
-| **apps/rbms-player** | Native desktop app: winit event loop, wgpu renderer (`gpu.rs`), the stage machine (Select/Settings/KeyConfig/Tables/Folders/Loading/Play/Result) under `stage/`, IR account and ranking UI under `ir_*.rs`. Built as a library with a three-line binary, so integration tests reach its types. |
+| **rbms-course** | Course domain: reference-compatible course loading/normalisation, constraints and trophies, and a continuous `CourseRun` that carries gauge, combo and totals across stages. |
+| **apps/rbms-player** | Native desktop app: winit event loop, wgpu renderer (`gpu.rs`), ten-stage machine (Select/Settings/KeyConfig/Tables/Folders/Loading/Play/Result/CourseResult/Practice), course and practice UI, and IR account/ranking UI. Built as a library with a three-line binary, so integration tests reach its types. |
 | **apps/rbms-cli** | Headless companion: a bare chart path prints metadata/hashes/counts, `scan <dir>` drives `rbms-library`, `config <settings.ron>` drives `rbms-config` (migration result, the copy it kept, then every settings row), `scores <scores.ron> [--md5 …]` queries `rbms-store`. It never depends on the player, so no window/audio stack is pulled into a CLI build. |
+
+`rbms-library` owns SQLite `songdb`; `rbms-store` owns SQLite `scoredb` and imports legacy RON score history on first use. The RON formats remain the compatibility boundary for portable scores and replays rather than a second UI cache.
 
 ## End-to-end data flow (disk → pixels + audio)
 
@@ -81,7 +84,7 @@ Since Phase E a screen can be driven by a reference-format JSON skin document in
 
 ## App UI state machine (`Stage`)
 
-The screens: `Select` (song list: search `/`, sort `F3`, clickable bottom nav, IR ranking panel) · `Settings` (tab strip over the descriptor table, incl. a **NETWORK** tab that signs in and edits SERVER URL / PLAYER ID in place) · `KeyConfig` · `Tables` (difficulty-table manager) · `Folders` (multi-folder library manager) · `Loading` (determinate keysound-decode progress bar) · `Play` · `Result`.
+The ten screens: `Select` (song list: search `/`, sort `F3`, clickable bottom nav, IR ranking panel and course tab) · `Settings` (tab strip over the descriptor table, incl. a **NETWORK** tab that signs in and edits SERVER URL / PLAYER ID in place) · `KeyConfig` · `Tables` (difficulty-table manager) · `Folders` (multi-folder library manager) · `Loading` (determinate keysound-decode progress bar) · `Play` · `Result` · `CourseResult` · `Practice`.
 
 How they are wired:
 
@@ -96,8 +99,8 @@ How they are wired:
 
 ## Testing and the lint gate
 
-Over 1,650 tests across the workspace, edge-case heavy (boundaries, malformed input, invariants,
-round-trips, determinism). Run `cargo test --workspace`. The deterministic render backend `CpuCanvas`
+As of 2026-09-16, `cargo test --workspace` registers 3,040 tests (two real-audio tests are ignored) across the workspace, covering boundaries, malformed input, invariants,
+round-trips, and determinism. The deterministic render backend `CpuCanvas`
 makes pixel-level rendering testable without a GPU — the player's screens are rendered onto a
 headless canvas in tests, and a whole run (replay included) reproduces through `NullSink` with no
 audio device.

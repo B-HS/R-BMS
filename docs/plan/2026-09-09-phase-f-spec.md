@@ -1,5 +1,7 @@
 # Phase F 상세 설계 — UX·기능 고도화
 
+> **역사 설계(2026-09-09)** — Phase F 구현은 완료했습니다. 아래 본문의 착수 조건·TODO·라인 앵커는 당시 기록으로 보존합니다. 현재 정본은 [roadmap](../roadmap.md), 근거는 [PROCESS](../PROCESS.md)와 [Phase F 이력](../history/2026-09-10-phase-f-integration.md)입니다.
+
 > 상위 계획: `docs/plan/2026-09-09-enhancement-plan.md` §2 Phase F. 결정 근거: `docs/acknowledge/2026-09-09-enhancement-decisions.md`(결정 3·4·6·12). 발산 대장: `docs/acknowledge/reference-divergences.md`.
 > 대상 커밋 `c6f0885`(dev) 기준. 레퍼런스 구현은 자바 원본을 파일명만으로 인용한다(경로·제품명 미기재).
 > **선행 의존**: Phase C(설정 descriptor 테이블, `Stage` 데이터 enum, `rbms-config`) · Phase B(단일 `AudioEngine`, 볼륨 3분리) · Phase I(NETWORK 탭·IR 클라이언트). Phase I 가 동시 진행 중이므로 `crates/rbms-ir`·`apps/rbms-player` 의 IR 관련 라인 번호는 **Phase I 이후 재확인** 대상이며, 이 문서는 그쪽을 함수명으로만 참조한다.

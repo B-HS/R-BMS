@@ -1,6 +1,12 @@
-# HANDOFF — 2026-09-10 세션 스냅샷
+# HANDOFF — 2026-09-10 역사 세션 스냅샷
 
-> 최종 갱신 2026-09-10 · 대응 커밋 `dev` `3c61a53` 이후(이 문서 커밋) · 작성자: 이전 세션의 에이전트. 새 세션의 **단일 진입점**이다. 대화를 보지 않은 사람이 이 문서만 읽고 이어서 작업할 수 있어야 한다.
+> 이 문서는 2026-09-10 시점의 작업 상태를 보존한 역사 기록입니다. 아래의 `wip/phase-g`, Phase G 진행 중, Phase H 미착수, 과거 테스트 수와 다음 세션 TODO는 당시 사실이며 현재 지시로 사용하면 안 됩니다.
+>
+> 현재 진입점과 정본은 [PROCESS.md](PROCESS.md)입니다. 현재 `dev`에는 Phase G·H가 통합되어 있고, 원격 추적 브랜치도 `origin/dev`만 남아 있습니다. Phase R(`prod` 생성, 첫 릴리스/태그, 서명 또는 배포)은 실제 키가 필요한 유지보수자 동반 작업으로 보류 중입니다. 마지막 자동 검증은 `cargo test --workspace` exit 0(3,040개 등록), release player 빌드·fmt·clippy 게이트 통과입니다. 실제 AUDIO·Practice·Course·Multi-IR 수동 확인은 아직 하지 않았으며 절차는 [quality-assurance/2026-09-16-phase-h-manual-checks.md](quality-assurance/2026-09-16-phase-h-manual-checks.md)에 있습니다.
+>
+> 현재 상태가 필요하면 이 문서의 본문을 갱신하지 말고 [PROCESS.md](PROCESS.md), [README.md](README.md), [ci-release.md](ci-release.md), [history/2026-09-16-phase-g-data-long-tail.md](history/2026-09-16-phase-g-data-long-tail.md), [history/2026-09-16-phase-h-minor-followups.md](history/2026-09-16-phase-h-minor-followups.md)를 확인합니다.
+
+## 보존 본문 (2026-09-10 당시 기록)
 
 ## 1. 프로젝트 한 줄 정의
 
