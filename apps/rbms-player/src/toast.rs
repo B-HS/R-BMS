@@ -10,7 +10,9 @@ use std::time::{Duration, Instant};
 use rbms_render::{ToastLevel, ToastView};
 
 use crate::notify::{self, Level};
-use crate::stage::Canvas;
+use crate::stage::{Canvas, StageId};
+
+const SELECT_TOAST_BOTTOM_INSET: f32 = 44.0;
 
 /// How many messages are shown at once. Anything older is dropped rather than queued behind them:
 /// a stack that scrolls is unreadable and the terminal has the full history anyway.
@@ -115,12 +117,13 @@ pub(crate) fn toast_level(level: Level) -> ToastLevel {
 /// Drawn last of everything, so a failure reported while a chart is on screen is readable over it.
 /// An empty queue paints nothing at all, which is what lets every other screen's snapshot stay
 /// still while the bus runs underneath.
-pub(crate) fn draw(queue: &ToastQueue, canvas: &mut Canvas<'_>) {
+pub(crate) fn draw(queue: &ToastQueue, stage: StageId, canvas: &mut Canvas<'_>) {
     if queue.active().is_empty() {
         return;
     }
     let views: Vec<ToastView> = queue.active().iter().map(|toast| ToastView { level: toast.level, text: toast.text.clone() }).collect();
-    rbms_render::render_toasts(canvas, &views);
+    let bottom_inset = if stage == StageId::Select { SELECT_TOAST_BOTTOM_INSET } else { 0.0 };
+    rbms_render::render_toasts_with_bottom_inset(canvas, &views, bottom_inset);
 }
 
 #[cfg(test)]

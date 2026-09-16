@@ -78,16 +78,25 @@ fn toast_width(ctx: &mut RenderCtx<'_>, text: &str) -> f32 {
 /// Draw the live messages bottom-right, newest at the bottom. Returns the height the stack took, so
 /// a caller can keep something else clear of it.
 pub fn render_toasts<R: Renderer>(r: &mut R, toasts: &[ToastView]) -> f32 {
-    with_render_ctx(|ctx| render_toasts_ctx(ctx, r, toasts))
+    render_toasts_with_bottom_inset(r, toasts, 0.0)
+}
+
+pub fn render_toasts_with_bottom_inset<R: Renderer>(r: &mut R, toasts: &[ToastView], bottom_inset: f32) -> f32 {
+    with_render_ctx(|ctx| render_toasts_ctx_with_bottom_inset(ctx, r, toasts, bottom_inset))
 }
 
 /// [`render_toasts`] against an already-borrowed text context.
 pub fn render_toasts_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, toasts: &[ToastView]) -> f32 {
+    render_toasts_ctx_with_bottom_inset(ctx, r, toasts, 0.0)
+}
+
+fn render_toasts_ctx_with_bottom_inset<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, toasts: &[ToastView], bottom_inset: f32) -> f32 {
     if toasts.is_empty() {
         return 0.0;
     }
     let (screen_w, screen_h) = r.size();
-    let mut bottom = screen_h as f32 - TOAST_MARGIN_Y;
+    let initial_bottom = (screen_h as f32 - TOAST_MARGIN_Y - bottom_inset.max(0.0)).max(TOAST_H);
+    let mut bottom = initial_bottom;
     for toast in toasts.iter().rev() {
         let text = toast_text(ctx, toast, screen_w as f32);
         let w = toast_width(ctx, &text);
@@ -99,13 +108,16 @@ pub fn render_toasts_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, toasts
         ctx.draw_text(r, x + TOAST_BAR_W + TOAST_PAD_X, y + (TOAST_H - TOAST_SCALE * 8.0) * 0.5, TOAST_SCALE, accent, &text);
         bottom = y - TOAST_GAP;
     }
-    screen_h as f32 - TOAST_MARGIN_Y - bottom
+    initial_bottom - bottom
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::CpuCanvas;
+
+    const SELECT_TOAST_INSET: f32 = 44.0;
+    const EXTREME_TOAST_INSET: f32 = 1_000_000.0;
 
     fn blank() -> CpuCanvas {
         crate::font::use_embedded_fonts_only();
@@ -139,6 +151,23 @@ mod tests {
         let two =
             render_toasts(&mut canvas, &[ToastView { level: ToastLevel::Info, text: "one".into() }, ToastView { level: ToastLevel::Warn, text: "two".into() }]);
         assert!((two - one - TOAST_H - TOAST_GAP).abs() < 0.01, "one strip and a gap taller: {one} then {two}");
+    }
+
+    #[test]
+    fn a_bottom_inset_does_not_change_the_stack_footprint() {
+        let toasts = [ToastView { level: ToastLevel::Info, text: "one".into() }, ToastView { level: ToastLevel::Warn, text: "two".into() }];
+        let mut default_canvas = blank();
+        let default_footprint = render_toasts(&mut default_canvas, &toasts);
+        let mut inset_canvas = blank();
+        let inset_footprint = render_toasts_with_bottom_inset(&mut inset_canvas, &toasts, SELECT_TOAST_INSET);
+        assert!((default_footprint - inset_footprint).abs() < 0.01, "an inset must move the stack without changing its footprint");
+    }
+
+    #[test]
+    fn an_extreme_bottom_inset_keeps_the_newest_toast_visible() {
+        let mut canvas = blank();
+        render_toasts_with_bottom_inset(&mut canvas, &[ToastView { level: ToastLevel::Error, text: "visible".into() }], EXTREME_TOAST_INSET);
+        assert!(painted(&canvas) > 0, "an excessive inset must not move every toast offscreen");
     }
 
     /// A failure quoting a long path must not start off the left edge of the screen, which is where

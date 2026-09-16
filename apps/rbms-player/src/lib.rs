@@ -939,7 +939,7 @@ impl App {
     fn draw_overlays(stage: &Stage, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'_>) {
         crate::gpu::apply_letterbox(canvas, ctx.shared.config.display.letterbox);
         app_options::draw(stage.id(), ctx, canvas);
-        toast::draw(&ctx.shared.toasts, canvas);
+        toast::draw(&ctx.shared.toasts, stage.id(), canvas);
         if ctx.shared.config.network.server_url.is_some() {
             let connected = ctx.shared.server_connected.load(Ordering::Relaxed);
             canvas.fill_rect(Rect::new(CW as f32 - 22.0, 10.0, 10.0, 10.0), if connected { Color::GREEN } else { Color::RED });
