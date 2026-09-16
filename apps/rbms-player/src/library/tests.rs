@@ -132,16 +132,19 @@ fn every_stored_chart_comes_back_in_the_library() {
 
 #[test]
 fn a_cached_detail_is_served_without_reading_the_chart_again() {
+    let fixture = Fixture::new("cached-detail");
     let mut db = db();
-    let missing = "/nowhere/gone.bms";
-    let mut stored = row(missing, "Gone");
+    let missing = fixture.root.join("gone.bms");
+    assert!(!missing.exists(), "the chart is deliberately unavailable");
+    let key = normalize(&missing);
+    let mut stored = row(&key, "Gone");
     stored.notes = 1234;
     stored.long_notes = 56;
     db.upsert_batch(std::slice::from_ref(&stored)).expect("store the chart");
-    db.put_detail(missing, &DetailRow { duration_us: 90_000_000, peak_density: 21.0, avg_density: 12.5, end_density: 8.0, density: vec![1, 2, 3] })
+    db.put_detail(&key, &DetailRow { duration_us: 90_000_000, peak_density: 21.0, avg_density: 12.5, end_density: 8.0, density: vec![1, 2, 3] })
         .expect("cache the detail");
 
-    let detail = chart_detail(&db, Path::new(missing), Mode::BEAT_7K).expect("the cached detail is served");
+    let detail = chart_detail(&db, &missing, Mode::BEAT_7K).expect("the cached detail is served");
     assert_eq!(detail.notes, 1234);
     assert_eq!(detail.long_notes, 56);
     assert_eq!(detail.duration_us, 90_000_000);
