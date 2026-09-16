@@ -411,20 +411,31 @@ mod tests {
     /// the settings row could reach and the key could then only move downwards from.
     #[test]
     fn the_settings_row_and_the_in_play_key_stop_at_the_same_ceiling() {
-        for at in [rbms_config::HISPEED_MAX - 0.5, rbms_config::HISPEED_MAX - 0.01, rbms_config::HISPEED_MIN] {
-            for delta in [1, -1] {
-                let mut app = app();
-                app.shared.config.play.hispeed_step = 1.0;
-                app.shared.config.play.hispeed = at;
-                let action = if delta > 0 { ControlAction::HiSpeedUp } else { ControlAction::HiSpeedDown };
-                app.shared.apply_control(action, &free(1.0));
-                let by_key = app.shared.config.play.hispeed;
+        let mut app = app();
+        let hispeed_step = rbms_config::HISPEED_STEP_MAX;
+        app.shared.config.play.hispeed_step = hispeed_step;
 
-                let mut config = app.shared.config.clone();
-                config.play.hispeed = at;
-                rbms_config::adjust(&mut config, rbms_config::SettingId::HiSpeed, delta);
-                assert!((config.play.hispeed - by_key).abs() < 1e-9, "at {at} stepping {delta}: row left {} and key left {by_key}", config.play.hispeed);
-            }
+        for (at, action, delta, expected) in [
+            (rbms_config::HISPEED_MAX - hispeed_step, ControlAction::HiSpeedUp, 1, rbms_config::HISPEED_MAX - hispeed_step),
+            (
+                rbms_config::HISPEED_MAX - hispeed_step - rbms_config::HISPEED_STEP_MIN,
+                ControlAction::HiSpeedUp,
+                1,
+                rbms_config::HISPEED_MAX - rbms_config::HISPEED_STEP_MIN,
+            ),
+            (rbms_config::HISPEED_MIN, ControlAction::HiSpeedDown, -1, rbms_config::HISPEED_MIN),
+            (rbms_config::HISPEED_MIN, ControlAction::HiSpeedUp, 1, rbms_config::HISPEED_MIN + hispeed_step),
+        ] {
+            app.shared.config.play.hispeed = at;
+            app.shared.apply_control(action, &free(1.0));
+            let by_key = app.shared.config.play.hispeed;
+
+            let mut config = app.shared.config.clone();
+            config.play.hispeed = at;
+            rbms_config::adjust(&mut config, rbms_config::SettingId::HiSpeed, delta);
+
+            assert!((by_key - expected).abs() < 1e-9, "at {at} stepping {delta}: key left {by_key}, expected {expected}");
+            assert!((config.play.hispeed - expected).abs() < 1e-9, "at {at} stepping {delta}: row left {}, expected {expected}", config.play.hispeed);
         }
     }
 
