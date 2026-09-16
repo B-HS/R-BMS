@@ -479,7 +479,7 @@ fn uses_lua(skin: &LoadedSkin) -> bool {
 
 /// The directory documents are looked for in: the one the row names, or [`DEFAULT_SKIN_FOLDER`]
 /// beside the settings file.
-fn skin_root(settings_path: &Path, config: &Config) -> PathBuf {
+pub(crate) fn skin_root(settings_path: &Path, config: &Config) -> PathBuf {
     match config.skin.folder.as_deref() {
         Some(folder) => PathBuf::from(folder),
         None => settings_path.parent().unwrap_or(Path::new(".")).join(DEFAULT_SKIN_FOLDER),

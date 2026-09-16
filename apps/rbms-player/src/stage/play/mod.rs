@@ -154,6 +154,7 @@ pub(crate) const NO_BGA_FRAME: i32 = -1;
 
 /// What a play document needs from the frame beyond the HUD snapshot: where the play head is, the
 /// tempo and scroll speed shown beside it, and the background image this frame decoded.
+#[derive(Clone, Copy)]
 struct DocumentFrame {
     song_us: i64,
     bpm: f64,
@@ -599,7 +600,8 @@ impl StageHandler for PlayState {
         if let Some(skin_type) = skin_type {
             ctx.shared.prepare_skin(canvas, skin_type);
         }
-        let built_in_background = skin_type.is_none_or(|skin_type| !ctx.shared.has_skin_document(skin_type));
+        let overlay = skin_type.is_some_and(|skin_type| ctx.shared.skin_uses_overlay(skin_type));
+        let built_in_background = overlay || skin_type.is_none_or(|skin_type| !ctx.shared.has_skin_document(skin_type));
         let frame_image = ctx.shared.config.display.bga.then(|| self.bga.get(&play.bga_frame())).flatten();
         let mut document_background = None;
         match (built_in_background, ctx.shared.skin.bga, frame_image) {
@@ -648,7 +650,8 @@ impl StageHandler for PlayState {
                 .as_ref()
                 .map(|target| HudPace { name: &target.name, delta: j.ex_score as i64 - pace_ex_at(target.ex, j.total_judged(), j.total_notes()) }),
         };
-        if self.draw_document(ctx, canvas, &hud, DocumentFrame { song_us: song, bpm, hispeed, background: document_background }) {
+        let document_frame = DocumentFrame { song_us: song, bpm, hispeed, background: document_background };
+        if !overlay && self.draw_document(ctx, canvas, &hud, document_frame) {
             return;
         }
         render_playfield_view(
@@ -669,6 +672,9 @@ impl StageHandler for PlayState {
         render_hud(canvas, &ctx.shared.skin, &hud);
         if self.session.analysis_enabled() {
             self.draw_analysis(canvas, song);
+        }
+        if overlay {
+            self.draw_document(ctx, canvas, &hud, document_frame);
         }
     }
 

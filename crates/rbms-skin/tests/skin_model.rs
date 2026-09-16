@@ -1,7 +1,7 @@
 //! The serde mirror: that a document's defaults, its two ways of naming a property, and its unset
 //! animation fields all survive the trip into Rust unchanged.
 
-use rbms_skin::model::{Animation, Destination, ImageDef, PropertyRef, SkinDef, SliderDef, TextDef};
+use rbms_skin::model::{Animation, Destination, ImageDef, PropertyRef, SkinComposition, SkinDef, SliderDef, TextDef};
 
 /// Reads a document fragment the way the loader's strict path does.
 fn parse<T: serde::de::DeserializeOwned>(text: &str) -> T {
@@ -30,6 +30,14 @@ fn unknown_keys_are_ignored() {
 fn a_type_key_is_read_despite_being_a_rust_keyword() {
     let document: SkinDef = parse(r#"{ "type": 7 }"#);
     assert_eq!(document.skin_type, 7);
+}
+
+#[test]
+fn a_document_composition_defaults_to_replace_and_reads_overlay() {
+    let default_document: SkinDef = parse("{}");
+    let overlay_document: SkinDef = parse(r#"{ "composition": "overlay" }"#);
+    assert_eq!(default_document.composition, SkinComposition::Replace);
+    assert_eq!(overlay_document.composition, SkinComposition::Overlay);
 }
 
 #[test]

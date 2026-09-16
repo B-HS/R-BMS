@@ -94,7 +94,10 @@ mod timing;
 mod toast;
 use app_network::build_server;
 use app_play::schedule_poll_interval_us;
-pub(crate) use assets::{DecodedImage, bundled_skin, decode_bga_image, keysound_jobs, load_theme, resolve_file, spawn_keysound_decode};
+pub(crate) use assets::{
+    DecodedImage, bundled_skin, decode_bga_image, install_default_skin, installed_play_skin_path, keysound_jobs, load_theme, resolve_file,
+    spawn_keysound_decode,
+};
 use course_ir::{UNRELEASED_COURSE_REASON, build_course_submission};
 use course_ui::{CourseEntry, CourseList, CourseOverrides, SelectTab, courses_dir, library_index, stage_label};
 use favorites::{Favorites, favorites_path};
@@ -1099,19 +1102,30 @@ fn config_dir_from(home: Option<std::ffi::OsString>, userprofile: Option<std::ff
 /// rather than overwriting settings it cannot read.
 pub fn run(args: impl Iterator<Item = String>) -> ExitCode {
     let settings_path = config_dir().join("settings.ron");
-    let mut config = match rbms_config::load(&settings_path) {
+    let (mut config, can_install_default_skin) = match rbms_config::load(&settings_path) {
         Ok(outcome) => {
             if let Some(from) = outcome.migrated_from {
                 println!("settings migrated from schema version {from}");
                 save_config(&outcome.config, &settings_path);
             }
-            outcome.config
+            (outcome.config, true)
         }
         Err(e) => {
             notify(Level::Warn, format!("settings not loaded ({e}); running on defaults and leaving the file alone"));
-            Config::default()
+            (Config::default(), false)
         }
     };
+
+    if can_install_default_skin && !config.skin.default_skin_installed && install_default_skin(&settings_path, &mut config) {
+        config.skin.default_skin_installed = true;
+        match rbms_config::save(&config, &settings_path) {
+            Ok(()) => println!("default skin installed: {}", settings_path.display()),
+            Err(e) => {
+                config.skin.default_skin_installed = false;
+                notify(Level::Error, format!("default skin settings save failed ({}): {e}", settings_path.display()));
+            }
+        }
+    }
 
     let mut launch = LaunchOptions::default();
     let mut chart: Option<String> = None;
@@ -1182,7 +1196,7 @@ pub fn run(args: impl Iterator<Item = String>) -> ExitCode {
         }
     }
 
-    load_theme(&settings_path);
+    load_theme(&settings_path, &config);
 
     let event_loop = match EventLoop::new() {
         Ok(el) => el,

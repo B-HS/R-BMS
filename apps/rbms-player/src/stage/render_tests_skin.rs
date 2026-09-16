@@ -39,6 +39,23 @@ const DOCUMENT: &str = r#"{
     "destination": [{ "id": "sheet", "dst": [{ "time": 0, "x": 0, "y": 0, "w": 128, "h": 72 }] }]
 }"#;
 
+const OVERLAY_DOCUMENT: &str = r#"{
+    "type": 5,
+    "composition": "overlay",
+    "name": "corner mark",
+    "w": 128,
+    "h": 72,
+    "source": [{ "id": "mark", "path": "mark.png" }],
+    "image": [{ "id": "sheet", "src": "mark", "x": 0, "y": 0, "w": 2, "h": 2 }],
+    "destination": [{ "id": "sheet", "dst": [{ "time": 0, "x": 0, "y": 0, "w": 8, "h": 8 }] }]
+}"#;
+
+const EMPTY_OVERLAY_DOCUMENT: &str = r#"{
+    "type": 5,
+    "composition": "overlay",
+    "name": "empty"
+}"#;
+
 /// Write the document and its image into a skin folder beside `settings`, and answer the document.
 fn write_document(settings: &Path) -> PathBuf {
     let folder = settings.parent().unwrap_or(Path::new(".")).join(DEFAULT_SKIN_FOLDER);
@@ -100,6 +117,36 @@ fn the_browser_draws_its_document_instead_of_its_own_list() {
     for (x, y) in [(0, 0), (CW - 1, 0), (0, CH - 1), (CW - 1, CH - 1), (CW / 2, CH / 2)] {
         assert_eq!(pixels.pixel_at(x, y), MARK, "the built-in list is still showing at {x},{y}");
     }
+}
+
+#[test]
+fn an_overlay_document_keeps_the_browser_and_its_hot_regions_under_its_decoration() {
+    let mut baseline_app = app_in("overlay-baseline", None);
+    let baseline = render(&mut baseline_app, Stage::Select(Box::new(SelectState::new())));
+
+    let settings = std::env::temp_dir().join(format!("rbms-skin-render-overlay-{}", std::process::id())).join("settings.ron");
+    let document = write_document(&settings);
+    std::fs::write(&document, OVERLAY_DOCUMENT).expect("the overlay document is written");
+    let mut app = app_in("overlay", Some(document));
+
+    let pixels = render_until_compiled(&mut app);
+    assert!([pixels.pixel_at(0, 0), pixels.pixel_at(0, CH - 1)].contains(&MARK), "the overlay decoration did not draw");
+    assert_eq!(pixels.pixel_at(CW / 2, CH / 2), baseline.pixel_at(CW / 2, CH / 2), "the browser was cleared beneath the overlay");
+    assert!(!app.shared.hot.is_empty(), "the overlay suppressed the browser's mouse targets");
+}
+
+#[test]
+fn an_empty_overlay_document_leaves_the_browser_pixels_unchanged() {
+    let mut baseline_app = app_in("empty-overlay-baseline", None);
+    let baseline = render(&mut baseline_app, Stage::Select(Box::new(SelectState::new())));
+
+    let settings = std::env::temp_dir().join(format!("rbms-skin-render-empty-overlay-{}", std::process::id())).join("settings.ron");
+    let document = write_document(&settings);
+    std::fs::write(&document, EMPTY_OVERLAY_DOCUMENT).expect("the empty overlay document is written");
+    let mut app = app_in("empty-overlay", Some(document));
+
+    let pixels = render_until_compiled(&mut app);
+    assert_eq!(pixels.pixel_checksum(), baseline.pixel_checksum(), "the empty overlay changed the browser frame");
 }
 
 /// A document's files are read on the worker pool, so a frame drawn before they arrive draws the

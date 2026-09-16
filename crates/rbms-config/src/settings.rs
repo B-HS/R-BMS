@@ -121,7 +121,7 @@ const PLAY_ESCAPE_LABELS: &[&str] = &["IMMEDIATE", "HOLD", "DOUBLE TAP"];
 const SORT_LABELS: &[&str] = &["DEFAULT", "TITLE", "ARTIST", "BPM", "LENGTH", "LEVEL", "CLEAR", "SCORE", "MISS COUNT", "DURATION", "LAST UPDATE"];
 const SCRATCH_SIDE_LABELS: &[&str] = &["RIGHT", "LEFT"];
 const RANDOM_LABELS: &[&str] = &["OFF", "MIRROR", "RANDOM", "S-RANDOM", "R-RANDOM", "ROTATE", "H-RANDOM", "ALL-SCRATCH"];
-const SKIN_LABELS: &[&str] = &["NORMAL", "WIDE"];
+const SKIN_LABELS: &[&str] = &["NORMAL", "WIDE", crate::schema::STEEL_NEON_SKIN];
 const AUDIO_DEVICE_LABELS: &[&str] = &[DEFAULT_VALUE];
 
 /// What the SKIN row already knows it can hold: the built-in screen. The documents on disk are only
@@ -129,12 +129,6 @@ const AUDIO_DEVICE_LABELS: &[&str] = &[DEFAULT_VALUE];
 const SKIN_DOCUMENT_LABELS: &[&str] = &[DEFAULT_VALUE];
 const AUDIO_BUFFER_LABELS: &[&str] = &[AUTO_VALUE, "128", "192", "256", "384", "512", "768", "1024", "2048"];
 const AUDIO_SAMPLE_RATE_LABELS: &[&str] = &[AUTO_VALUE, "44100", "48000", "88200", "96000"];
-
-/// Bundled skin the SKIN row steps to from anything that is not itself.
-const SKIN_ALTERNATE: &str = "WIDE";
-
-/// Bundled skin the SKIN row steps back to.
-const SKIN_PRIMARY: &str = "NORMAL";
 
 /// Every row of the settings screen.
 ///
@@ -1146,7 +1140,8 @@ pub fn adjust(config: &mut Config, id: SettingId, delta: i32) -> AdjustOutcome {
 /// Step the SKIN row between the bundled skins. The skin the run was started with is a launch
 /// override the document does not hold, so the program clears that before calling this.
 pub fn step_skin(config: &mut Config) {
-    config.display.skin = if config.display.skin.eq_ignore_ascii_case(SKIN_ALTERNATE) { SKIN_PRIMARY.to_string() } else { SKIN_ALTERNATE.to_string() };
+    let selected = SKIN_LABELS.iter().position(|skin| config.display.skin.eq_ignore_ascii_case(skin)).unwrap_or(0);
+    config.display.skin = SKIN_LABELS[(selected + 1) % SKIN_LABELS.len()].to_string();
 }
 
 #[cfg(test)]
@@ -1445,12 +1440,14 @@ mod tests {
     #[test]
     fn the_skin_row_steps_between_the_bundled_skins() {
         let mut config = Config::default();
-        assert_eq!(display_value(&config, SettingId::Skin), SKIN_PRIMARY);
+        assert_eq!(display_value(&config, SettingId::Skin), "NORMAL");
         step_skin(&mut config);
-        assert_eq!(display_value(&config, SettingId::Skin), SKIN_ALTERNATE);
+        assert_eq!(display_value(&config, SettingId::Skin), "WIDE");
         step_skin(&mut config);
-        assert_eq!(display_value(&config, SettingId::Skin), SKIN_PRIMARY);
-        assert_eq!(cycle_values(SettingId::Skin), &[SKIN_PRIMARY, SKIN_ALTERNATE]);
+        assert_eq!(display_value(&config, SettingId::Skin), crate::schema::STEEL_NEON_SKIN);
+        step_skin(&mut config);
+        assert_eq!(display_value(&config, SettingId::Skin), "NORMAL");
+        assert_eq!(cycle_values(SettingId::Skin), SKIN_LABELS);
     }
 
     #[test]

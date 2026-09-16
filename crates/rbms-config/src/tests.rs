@@ -60,6 +60,7 @@ fn default_values_are_sane() {
     assert!(c.library.tables.is_empty());
     assert_eq!(c.display.font_path, None);
     assert_eq!(c.display.skin, DEFAULT_SKIN);
+    assert!(!c.skin.default_skin_installed);
     assert_eq!(c.network.server_url, None);
     assert_eq!(c.network.player_id, DEFAULT_PLAYER_ID, "an unconfigured client submits under the only id the server accepts without a token");
     assert_eq!(c.network.ir_token, None);
@@ -235,6 +236,7 @@ fn ron_round_trip_preserves_every_field() {
     c.skin.folder = Some("/skins".into());
     c.skin.screen = MUSIC_SELECT_SCREEN;
     c.skin.select(MUSIC_SELECT_SCREEN, Some("/skins/browser/browser.json".into()));
+    c.skin.default_skin_installed = true;
     let custom = c.skin.customise("/skins/browser/browser.json");
     custom.properties.insert("LANE COVER".into(), 902);
     custom.filepaths.insert("BACKGROUND".into(), "night.png".into());

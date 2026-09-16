@@ -782,9 +782,10 @@ impl StageHandler for SelectState {
             return;
         };
         ctx.shared.prepare_skin(canvas, SKIN_TYPE_MUSIC_SELECT);
+        let overlay = ctx.shared.skin_uses_overlay(SKIN_TYPE_MUSIC_SELECT);
         let mut document_background = None;
         match (&self.cover_image, &view.detail) {
-            (Some(cover), SelectDetail::Song(_)) if !ctx.shared.has_skin_document(SKIN_TYPE_MUSIC_SELECT) => {
+            (Some(cover), SelectDetail::Song(_)) if overlay || !ctx.shared.has_skin_document(SKIN_TYPE_MUSIC_SELECT) => {
                 canvas.set_background(cover.generation, &cover.rgba, cover.width, cover.height, cover_rect());
             }
             (Some(cover), SelectDetail::Song(_)) => {
@@ -796,7 +797,7 @@ impl StageHandler for SelectState {
         let now_ms = ctx.shared.skin_now_ms();
         let row = ctx.shared.sel;
         ctx.shared.skin_select_timers.update(&mut ctx.shared.skin_timers, row, now_ms);
-        if ctx.shared.draw_select_skin(canvas, view, document_background) {
+        if !overlay && ctx.shared.draw_select_skin(canvas, view, document_background) {
             return;
         }
         let hot = render_select(canvas, view);
@@ -821,6 +822,9 @@ impl StageHandler for SelectState {
         }
         if self.filter.is_open() {
             render_filter_panel(canvas, &self.filter, &ctx.shared.config);
+        }
+        if overlay {
+            ctx.shared.draw_select_skin(canvas, view, document_background);
         }
     }
 }

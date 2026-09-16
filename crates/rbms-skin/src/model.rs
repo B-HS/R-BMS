@@ -345,12 +345,22 @@ pub struct Animation {
     pub angle: Option<i32>,
 }
 
+/// How a skin document is composited with the native screen.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SkinComposition {
+    #[default]
+    Replace,
+    Overlay,
+}
+
 /// A whole skin document.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct SkinDef {
     #[serde(rename = "type")]
     pub skin_type: i32,
+    pub composition: SkinComposition,
     pub name: String,
     pub author: String,
     pub w: i32,
@@ -407,6 +417,7 @@ impl Default for SkinDef {
     fn default() -> Self {
         Self {
             skin_type: SKIN_TYPE_UNSET,
+            composition: SkinComposition::Replace,
             name: String::new(),
             author: String::new(),
             w: DEFAULT_SKIN_WIDTH,

@@ -10,11 +10,77 @@ use std::cell::RefCell;
 
 use serde::Deserialize;
 
-use crate::Color;
+use crate::{Color, Rect};
+
+const SELECT_CANVAS_WIDTH: f32 = 1280.0;
+const SELECT_CANVAS_HEIGHT: f32 = 720.0;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SelectLayout {
+    pub list_rect: Rect,
+    pub detail_rect: Rect,
+    pub row_height: f32,
+    pub row_gap: f32,
+    pub cover_rect: Rect,
+}
+
+impl Default for SelectLayout {
+    fn default() -> Self {
+        SelectLayout {
+            list_rect: Rect::new(32.0, 60.0, 584.0, 600.0),
+            detail_rect: Rect::new(632.0, 60.0, 616.0, 600.0),
+            row_height: 36.0,
+            row_gap: 4.0,
+            cover_rect: Rect::new(648.0, 78.0, 160.0, 160.0),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct SelectLayoutConfig {
+    pub list_rect: Option<(f32, f32, f32, f32)>,
+    pub detail_rect: Option<(f32, f32, f32, f32)>,
+    pub row_height: Option<f32>,
+    pub row_gap: Option<f32>,
+    pub cover_rect: Option<(f32, f32, f32, f32)>,
+}
+
+impl SelectLayoutConfig {
+    fn resolve(&self, default: SelectLayout) -> SelectLayout {
+        let rect = |value: Option<(f32, f32, f32, f32)>, fallback: Rect| match value {
+            Some((x, y, w, h))
+                if x.is_finite()
+                    && y.is_finite()
+                    && w.is_finite()
+                    && h.is_finite()
+                    && x >= 0.0
+                    && y >= 0.0
+                    && w > 0.0
+                    && h > 0.0
+                    && x + w <= SELECT_CANVAS_WIDTH
+                    && y + h <= SELECT_CANVAS_HEIGHT =>
+            {
+                Rect::new(x, y, w, h)
+            }
+            None => fallback,
+            Some(_) => fallback,
+        };
+        let list_rect = rect(self.list_rect, default.list_rect);
+        SelectLayout {
+            list_rect,
+            detail_rect: rect(self.detail_rect, default.detail_rect),
+            row_height: self.row_height.filter(|value| value.is_finite() && *value > 0.0 && *value <= list_rect.h).unwrap_or(default.row_height),
+            row_gap: self.row_gap.filter(|value| value.is_finite() && *value >= 0.0 && *value < list_rect.h).unwrap_or(default.row_gap),
+            cover_rect: rect(self.cover_rect, default.cover_rect),
+        }
+    }
+}
 
 /// The resolved UI palette. Fields are grouped by role so a theme reads top-to-bottom.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Theme {
+    pub select_layout: SelectLayout,
     /// Window background.
     pub bg: Color,
     /// Top header bar.
@@ -66,6 +132,7 @@ pub struct Theme {
 impl Default for Theme {
     fn default() -> Self {
         Theme {
+            select_layout: SelectLayout::default(),
             bg: Color::rgb(8, 8, 14),
             topbar: Color::rgb(18, 18, 30),
             panel: Color::rgb(14, 16, 26),
@@ -96,6 +163,7 @@ impl Default for Theme {
 #[derive(Deserialize, Default, Debug)]
 #[serde(default)]
 pub struct ThemeConfig {
+    pub select_layout: Option<SelectLayoutConfig>,
     pub bg: Option<(u8, u8, u8)>,
     pub topbar: Option<(u8, u8, u8)>,
     pub panel: Option<(u8, u8, u8)>,
@@ -131,6 +199,7 @@ impl ThemeConfig {
         let d = Theme::default();
         let c = |o: Option<(u8, u8, u8)>, def: Color| o.map(|(r, g, b)| Color::rgb(r, g, b)).unwrap_or(def);
         Theme {
+            select_layout: self.select_layout.unwrap_or_default().resolve(d.select_layout),
             bg: c(self.bg, d.bg),
             topbar: c(self.topbar, d.topbar),
             panel: c(self.panel, d.panel),
@@ -170,6 +239,10 @@ pub fn theme() -> Theme {
     THEME.with(|c| *c.borrow())
 }
 
+pub fn select_layout() -> SelectLayout {
+    theme().select_layout
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -188,6 +261,23 @@ mod tests {
         assert_eq!(t.accent, Color::rgb(9, 9, 9), "accent overridden");
         assert_eq!(t.panel, Theme::default().panel, "unset field keeps default");
         assert_eq!(t.text, Theme::default().text, "unset field keeps default");
+    }
+
+    #[test]
+    fn partial_select_layout_keeps_the_legacy_geometry() {
+        let cfg = ThemeConfig::parse("(select_layout: Some((list_rect: Some((664.0, 60.0, 584.0, 600.0)))) )");
+        let layout = cfg.resolve().select_layout;
+        assert_eq!(layout.list_rect, Rect::new(664.0, 60.0, 584.0, 600.0));
+        assert_eq!(layout.detail_rect, SelectLayout::default().detail_rect);
+        assert_eq!(layout.row_height, SelectLayout::default().row_height);
+    }
+
+    #[test]
+    fn invalid_select_geometry_uses_safe_defaults() {
+        let cfg = ThemeConfig::parse("(select_layout: Some((list_rect: Some((0.0, 60.0, 1281.0, 600.0)), row_height: Some(0.0), row_gap: Some(-1.0))))");
+        assert_eq!(cfg.resolve().select_layout, SelectLayout::default());
+        let zero_pitch = ThemeConfig::parse("(select_layout: Some((row_height: Some(0.0), row_gap: Some(0.0))))").resolve().select_layout;
+        assert!(zero_pitch.row_height + zero_pitch.row_gap > 0.0);
     }
 
     #[test]

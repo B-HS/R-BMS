@@ -1,0 +1,18 @@
+{
+    type: 5,
+    name: 'Steel Neon Select',
+    author: 'R-BMS',
+    w: 1280,
+    h: 720,
+    composition: 'overlay',
+    source: [
+        { id: 'overlay', path: 'images/select-overlay.png' },
+        { id: 'common', path: 'images/common-atlas.png' },
+    ],
+    image: [
+        { id: 'select-chrome', src: 'overlay', x: 0, y: 0, w: 1280, h: 720 },
+    ],
+    destination: [
+        { id: 'select-chrome', blend: 2, dst: [{ time: 0, x: 0, y: 0, w: 1280, h: 720 }] },
+    ],
+}

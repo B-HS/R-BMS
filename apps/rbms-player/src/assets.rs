@@ -2,11 +2,14 @@
 //! bundled skins, the UI theme template, chart-relative file resolution, the keysound decode pool
 //! and the BGA image decode.
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::Receiver;
 
+use rbms_config::{Config, DEFAULT_SKIN, STEEL_NEON_SKIN};
+use rbms_model::Mode;
 use rbms_render::{SkinConfig, SkinImage};
 
 /// A decode running on the worker pool: what has arrived, how far it has got, the cooperative
@@ -22,10 +25,116 @@ const DECODE_THREADS_FALLBACK: usize = 4;
 pub(crate) const SKIN_NORMAL: &str = include_str!("../../../assets/skins/normal.ron");
 pub(crate) const SKIN_WIDE: &str = include_str!("../../../assets/skins/wide.ron");
 
+const STEEL_NEON_DIRECTORY: &str = "steel-neon";
+const SKIN_TYPE_PLAY_5KEYS: i32 = 1;
+const SKIN_TYPE_PLAY_14KEYS: i32 = 2;
+const SKIN_TYPE_PLAY_10KEYS: i32 = 3;
+const SKIN_TYPE_PLAY_9KEYS: i32 = 4;
+
+struct BundledFile {
+    path: &'static str,
+    bytes: &'static [u8],
+}
+
+const STEEL_NEON_FILES: &[BundledFile] = &[
+    BundledFile { path: "select.json5", bytes: include_bytes!("../../../assets/skins/steel-neon/select.json5") },
+    BundledFile { path: "decide.json5", bytes: include_bytes!("../../../assets/skins/steel-neon/decide.json5") },
+    BundledFile { path: "play-7k.json5", bytes: include_bytes!("../../../assets/skins/steel-neon/play-7k.json5") },
+    BundledFile { path: "play-5k.json5", bytes: include_bytes!("../../../assets/skins/steel-neon/play-5k.json5") },
+    BundledFile { path: "play-14k.json5", bytes: include_bytes!("../../../assets/skins/steel-neon/play-14k.json5") },
+    BundledFile { path: "play-10k.json5", bytes: include_bytes!("../../../assets/skins/steel-neon/play-10k.json5") },
+    BundledFile { path: "play-9k.json5", bytes: include_bytes!("../../../assets/skins/steel-neon/play-9k.json5") },
+    BundledFile { path: "play-24k.json5", bytes: include_bytes!("../../../assets/skins/steel-neon/play-24k.json5") },
+    BundledFile { path: "result.json5", bytes: include_bytes!("../../../assets/skins/steel-neon/result.json5") },
+    BundledFile { path: "play.ron", bytes: include_bytes!("../../../assets/skins/steel-neon/play.ron") },
+    BundledFile { path: "play-dual.ron", bytes: include_bytes!("../../../assets/skins/steel-neon/play-dual.ron") },
+    BundledFile { path: "theme.ron", bytes: include_bytes!("../../../assets/skins/steel-neon/theme.ron") },
+    BundledFile { path: "palette.json", bytes: include_bytes!("../../../assets/skins/steel-neon/palette.json") },
+    BundledFile { path: "tools/generate-assets.py", bytes: include_bytes!("../../../assets/skins/steel-neon/tools/generate-assets.py") },
+    BundledFile { path: "images/common-atlas.png", bytes: include_bytes!("../../../assets/skins/steel-neon/images/common-atlas.png") },
+    BundledFile { path: "images/select-overlay.png", bytes: include_bytes!("../../../assets/skins/steel-neon/images/select-overlay.png") },
+    BundledFile { path: "images/decide-backdrop.png", bytes: include_bytes!("../../../assets/skins/steel-neon/images/decide-backdrop.png") },
+    BundledFile { path: "images/play-overlay.png", bytes: include_bytes!("../../../assets/skins/steel-neon/images/play-overlay.png") },
+    BundledFile { path: "images/play-dual-overlay.png", bytes: include_bytes!("../../../assets/skins/steel-neon/images/play-dual-overlay.png") },
+    BundledFile { path: "images/result-overlay.png", bytes: include_bytes!("../../../assets/skins/steel-neon/images/result-overlay.png") },
+];
+
+const STEEL_NEON_DOCUMENTS: &[(i32, &str)] = &[
+    (rbms_skin::loader::SKIN_TYPE_MUSIC_SELECT, "select.json5"),
+    (rbms_skin::loader::SKIN_TYPE_DECIDE, "decide.json5"),
+    (rbms_skin::loader::SKIN_TYPE_PLAY_7KEYS, "play-7k.json5"),
+    (SKIN_TYPE_PLAY_5KEYS, "play-5k.json5"),
+    (SKIN_TYPE_PLAY_14KEYS, "play-14k.json5"),
+    (SKIN_TYPE_PLAY_10KEYS, "play-10k.json5"),
+    (SKIN_TYPE_PLAY_9KEYS, "play-9k.json5"),
+    (rbms_skin::loader::SKIN_TYPE_RESULT, "result.json5"),
+];
+
 /// One of the bundled skins by name ("WIDE" or NORMAL). Used when no external `--skin` is given.
 pub(crate) fn bundled_skin(name: &str) -> SkinConfig {
     let s = if name.eq_ignore_ascii_case("WIDE") { SKIN_WIDE } else { SKIN_NORMAL };
     ron::from_str(s).unwrap_or_default()
+}
+
+pub(crate) fn installed_play_skin_path(settings_path: &Path, config: &Config, mode: Mode) -> PathBuf {
+    let filename = if matches!(mode, Mode::BEAT_10K | Mode::BEAT_14K) { "play-dual.ron" } else { "play.ron" };
+    crate::skin_select::skin_root(settings_path, config).join(STEEL_NEON_DIRECTORY).join(filename)
+}
+
+fn active_theme_path(settings_path: &Path, config: &Config) -> PathBuf {
+    if config.display.skin.eq_ignore_ascii_case(STEEL_NEON_SKIN) {
+        return crate::skin_select::skin_root(settings_path, config).join(STEEL_NEON_DIRECTORY).join("theme.ron");
+    }
+    settings_path.parent().map(|directory| directory.join("theme.ron")).unwrap_or_else(|| PathBuf::from("theme.ron"))
+}
+
+pub(crate) fn install_default_skin(settings_path: &Path, config: &mut Config) -> bool {
+    let root = crate::skin_select::skin_root(settings_path, config);
+    let directory = root.join(STEEL_NEON_DIRECTORY);
+    let mut skin_ready = true;
+    for file in STEEL_NEON_FILES {
+        skin_ready = install_bundled_file(&directory.join(file.path), file.bytes) && skin_ready;
+    }
+    let theme_path = settings_path.parent().unwrap_or(Path::new(".")).join("theme.ron");
+    let theme_ready = install_bundled_file(&theme_path, THEME_TEMPLATE.as_bytes());
+
+    if skin_ready {
+        for (screen, file) in STEEL_NEON_DOCUMENTS {
+            let path = directory.join(file);
+            if config.skin.document(*screen).is_none() && path.is_file() {
+                config.skin.select(*screen, Some(path.to_string_lossy().into_owned()));
+            }
+        }
+        if config.display.skin.eq_ignore_ascii_case(DEFAULT_SKIN) && directory.join("play.ron").is_file() && directory.join("play-dual.ron").is_file() {
+            config.display.skin = STEEL_NEON_SKIN.to_string();
+        }
+    }
+    skin_ready && theme_ready
+}
+
+fn install_bundled_file(path: &Path, bytes: &[u8]) -> bool {
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => return path.is_file(),
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => return false,
+        Err(_) => {}
+    }
+    let Some(parent) = path.parent() else {
+        return false;
+    };
+    if std::fs::create_dir_all(parent).is_err() {
+        return false;
+    }
+    let mut file = match std::fs::OpenOptions::new().write(true).create_new(true).open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => return path.is_file(),
+        Err(_) => return false,
+    };
+    if file.write_all(bytes).is_ok() {
+        return true;
+    }
+    drop(file);
+    let _ = std::fs::remove_file(path);
+    false
 }
 
 /// A fully-populated, commented UI-theme template written to `~/.config/rbms/theme.ron` on first run
@@ -59,12 +168,11 @@ pub(crate) const THEME_TEMPLATE: &str = "\
 )
 ";
 
-/// Load the UI theme from `~/.config/rbms/theme.ron`, writing the editable template there on first
-/// run. A missing/broken file falls back to the built-in defaults.
-pub(crate) fn load_theme(settings_path: &Path) {
-    let path = settings_path.parent().map(|d| d.join("theme.ron")).unwrap_or_else(|| PathBuf::from("theme.ron"));
+pub(crate) fn load_theme(settings_path: &Path, config: &Config) {
+    let path = active_theme_path(settings_path, config);
     let src = match std::fs::read_to_string(&path) {
         Ok(s) => s,
+        Err(_) if config.display.skin.eq_ignore_ascii_case(STEEL_NEON_SKIN) => String::new(),
         Err(_) => {
             if let Some(dir) = path.parent() {
                 let _ = std::fs::create_dir_all(dir);
@@ -344,5 +452,87 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(50));
         assert!(progress.load(Ordering::Relaxed) < total, "a flag set before the pool started should stop it early");
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn default_skin_installation_preserves_user_files_and_selections() {
+        let dir = temp_dir("default-skin-install");
+        let settings = dir.join("settings.ron");
+        let root = dir.join("skin");
+        let user_document = root.join("user-select.json5");
+        std::fs::create_dir_all(&root).expect("create the skin folder");
+        std::fs::write(&user_document, r#"{ type: 5, name: 'User', w: 1280, h: 720, destination: [] }"#).expect("write the user document");
+
+        let mut config = Config::default();
+        config.skin.select(rbms_skin::loader::SKIN_TYPE_MUSIC_SELECT, Some(user_document.to_string_lossy().into_owned()));
+        assert!(install_default_skin(&settings, &mut config));
+        assert_eq!(config.skin.document(rbms_skin::loader::SKIN_TYPE_MUSIC_SELECT), Some(user_document.to_string_lossy().as_ref()));
+        assert_eq!(config.display.skin, STEEL_NEON_SKIN);
+        assert!(settings.parent().expect("settings has a parent").join("theme.ron").is_file());
+
+        let installed_single = installed_play_skin_path(&settings, &config, Mode::BEAT_7K);
+        let installed_dual = installed_play_skin_path(&settings, &config, Mode::BEAT_14K);
+        assert!(installed_single.is_file(), "single-field play skin is not installed");
+        assert!(installed_dual.is_file(), "dual-field play skin is not installed");
+        assert_ne!(installed_single, installed_dual, "single and dual fields share the same layout file");
+
+        let single_config = SkinConfig::load(&installed_single).expect("single-field play skin parses");
+        let single_skin = rbms_render::Skin::build(&single_config, Mode::BEAT_7K, 1280.0, 720.0);
+        let single_field_right = single_skin.x.iter().zip(&single_skin.w).map(|(x, width)| x + width).fold(f32::MIN, f32::max);
+        assert!(single_field_right < single_skin.bga.expect("single-field BGA").x, "single field reaches the central BGA");
+
+        let dual_config = SkinConfig::load(&installed_dual).expect("dual-field play skin parses");
+        for mode in [Mode::BEAT_10K, Mode::BEAT_14K] {
+            let dual_skin = rbms_render::Skin::build(&dual_config, mode, 1280.0, 720.0);
+            let dual_field_right = dual_skin.x.iter().zip(&dual_skin.w).map(|(x, width)| x + width).fold(f32::MIN, f32::max);
+            assert_eq!(dual_skin.fields.len(), 2, "{mode:?} is not a two-field layout");
+            assert!(dual_field_right < dual_skin.bga.expect("dual-field BGA").x, "{mode:?} reaches the BGA");
+        }
+
+        let edited = "user play skin";
+        let installed_play = installed_single;
+        std::fs::write(&installed_play, edited).expect("edit the installed play skin");
+        let installed_theme = active_theme_path(&settings, &config);
+        std::fs::write(&installed_theme, "user theme").expect("edit the installed theme");
+        assert!(install_default_skin(&settings, &mut config));
+        assert_eq!(std::fs::read_to_string(&installed_play).expect("read the edited play skin"), edited);
+        assert_eq!(std::fs::read_to_string(&installed_theme).expect("read the edited theme"), "user theme");
+        assert_eq!(std::fs::read_to_string(&user_document).expect("read the user document"), r#"{ type: 5, name: 'User', w: 1280, h: 720, destination: [] }"#);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn default_skin_installation_retries_after_an_unwritable_skin_root() {
+        let dir = temp_dir("default-skin-retry");
+        let settings = dir.join("settings.ron");
+        let blocked_root = dir.join("blocked-root");
+        std::fs::write(&blocked_root, "not a folder").expect("write the blocked root");
+
+        let mut config = Config::default();
+        config.skin.folder = Some(blocked_root.to_string_lossy().into_owned());
+        assert!(!install_default_skin(&settings, &mut config));
+        assert_eq!(config.skin.document(rbms_skin::loader::SKIN_TYPE_PLAY_7KEYS), None);
+        assert_eq!(config.display.skin, DEFAULT_SKIN);
+
+        std::fs::remove_file(&blocked_root).expect("remove the blocked root");
+        assert!(install_default_skin(&settings, &mut config));
+        assert!(config.skin.document(rbms_skin::loader::SKIN_TYPE_PLAY_7KEYS).is_some());
+        let unsupported = rbms_skin::loader::mode_skin_type(rbms_model::Mode::KEYBOARD_24K).expect("the document type is known");
+        assert_eq!(config.skin.document(unsupported), None);
+        assert_eq!(config.display.skin, STEEL_NEON_SKIN);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn selected_preset_loads_its_installed_theme_path() {
+        let settings = PathBuf::from("/tmp/rbms/settings.ron");
+        let mut config = Config::default();
+        assert_eq!(active_theme_path(&settings, &config), PathBuf::from("/tmp/rbms/theme.ron"));
+
+        config.display.skin = "WIDE".to_string();
+        assert_eq!(active_theme_path(&settings, &config), PathBuf::from("/tmp/rbms/theme.ron"));
+
+        config.display.skin = STEEL_NEON_SKIN.to_string();
+        assert_eq!(active_theme_path(&settings, &config), PathBuf::from("/tmp/rbms/skin/steel-neon/theme.ron"));
     }
 }

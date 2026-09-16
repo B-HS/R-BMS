@@ -4,6 +4,9 @@
 use super::fixtures::*;
 use super::*;
 use rbms_config::{Config, SKIN_SCREEN_LABELS};
+use rbms_model::Mode;
+use rbms_render::{CpuCanvas, SkinImage, SkinScreen, TextContext};
+use rbms_skin::loader::{SKIN_TYPE_DECIDE, SKIN_TYPE_RESULT};
 
 struct Fixture {
     _root: PathBuf,
@@ -261,6 +264,59 @@ fn a_document_that_cannot_be_read_falls_back_and_says_why() {
     assert!(fixture.skins.document(MUSIC_SELECT).is_none(), "a document that will not parse was drawn anyway");
     assert_ne!(fixture.skins.info(&fixture.config), NOT_READ_INFO, "the reason never reached the row");
     assert!(fixture.skins.info(&fixture.config).contains("broken.json"), "the reason does not name the document");
+}
+
+#[test]
+fn installed_default_documents_load_without_replacing_an_existing_selection() {
+    let mut fixture = Fixture::new("installed-default-documents");
+    let selected = fixture.settings.parent().expect("the settings file has a folder").join("skin/browser/browser.json");
+    let before = std::fs::read_to_string(&selected).expect("read the existing document");
+    fixture.config.skin.select(MUSIC_SELECT, Some(selected.to_string_lossy().into_owned()));
+
+    assert!(crate::assets::install_default_skin(&fixture.settings, &mut fixture.config));
+    assert_eq!(fixture.config.skin.document(MUSIC_SELECT), Some(selected.to_string_lossy().as_ref()));
+    assert_eq!(std::fs::read_to_string(&selected).expect("read the preserved document"), before);
+
+    fixture.skins.rescan(&fixture.settings, &fixture.config);
+    let play_screens = [Mode::BEAT_7K, Mode::BEAT_5K, Mode::BEAT_14K, Mode::BEAT_10K, Mode::POPN_9K]
+        .map(|mode| crate::mode_skin_type(mode).expect("a supported mode has a screen"));
+    let screens = [MUSIC_SELECT, SKIN_TYPE_DECIDE, SKIN_TYPE_RESULT];
+    for screen in screens.into_iter().chain(play_screens) {
+        fixture.skins.reload_for(&fixture.config, screen);
+        assert!(fixture.skins.document(screen).is_some(), "screen {screen} did not load its selected document");
+    }
+    let unsupported = crate::mode_skin_type(Mode::KEYBOARD_24K).expect("the document type is known");
+    assert_eq!(fixture.config.skin.document(unsupported), None);
+}
+
+#[test]
+fn bundled_default_documents_compile_without_warnings() {
+    let mut fixture = Fixture::new("compiled-default-documents");
+    assert!(crate::assets::install_default_skin(&fixture.settings, &mut fixture.config));
+    fixture.skins.rescan(&fixture.settings, &fixture.config);
+    let play_screens = [Mode::BEAT_7K, Mode::BEAT_5K, Mode::BEAT_14K, Mode::BEAT_10K, Mode::POPN_9K]
+        .map(|mode| crate::mode_skin_type(mode).expect("a supported mode has a screen"));
+    let screens = [MUSIC_SELECT, SKIN_TYPE_DECIDE, SKIN_TYPE_RESULT];
+    for screen in screens.into_iter().chain(play_screens) {
+        fixture.skins.reload_for(&fixture.config, screen);
+        let loaded = fixture.skins.document(screen).expect("the default document loads");
+        let prepared = loaded
+            .sources
+            .values()
+            .map(|path| {
+                let decoded = image::open(path).expect("the default source decodes").to_rgba8();
+                let (width, height) = decoded.dimensions();
+                let image = SkinImage::new(width, height, decoded.into_raw()).expect("the decoded source has RGBA pixels");
+                ((crate::assets::SkinAssetKind::Image, path.clone()), crate::assets::SkinAsset::Image(image))
+            })
+            .collect();
+        let mut assets = crate::skin_screen::PlayerSkinAssets::prepared_only(prepared);
+        let mut canvas = CpuCanvas::new(1280, 720);
+        let mut text = TextContext::embedded_only();
+        let compiled = SkinScreen::build(&mut canvas, &mut text, loaded, &mut assets);
+        assert!(compiled.warnings().is_empty(), "screen {screen}: {:?}", compiled.warnings());
+        assert!(compiled.object_count() > 0, "screen {screen} has no drawable objects");
+    }
 }
 
 /// A document outside the skin folder is refused: the folder is the only place a skin may be

@@ -59,6 +59,8 @@ To register a library through the GUI, press `O`, select `+ ADD FOLDER`, press `
 
 Settings, key config, difficulty tables, local scores and replays live in `~/.config/rbms/` (`%USERPROFILE%\.config\rbms\` on Windows) and are created on first run.
 
+The first run also installs the editable `steel-neon` skin under `~/.config/rbms/skin/steel-neon/` (the equivalent settings folder on Windows). Edit the screen JSON5 files for positions and images, `play.ron` for single-field play, `play-dual.ron` for dual-field play, `theme.ron` for song-select layout and UI colours, and `palette.json` or the PNG files for artwork. On macOS or Linux, run `uv run ~/.config/rbms/skin/steel-neon/tools/generate-assets.py` after changing the palette; the PNG files can also be edited directly. Use Settings → SKIN → RELOAD to reread screen documents, or restart the player after editing the RON files. Existing edited files and explicit screen choices are preserved on later runs.
+
 Options: `--interactive` `--auto` `--hispeed F` `--gauge NAME` `--lift F` `--sc-left` `--sc-auto` `--keys Z,S,X,...` `--skin file.ron` `--font file.ttf` `--table URL` `--keyconfig path.ron` `--replay file.ron` `--server URL` `--player ID`.
 
 ## Controls

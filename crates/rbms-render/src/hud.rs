@@ -34,6 +34,19 @@ const PACE_Y: f32 = 112.0;
 /// Text scale of the pacemaker line, matching the numbers above it.
 const PACE_SCALE: f32 = 1.4;
 
+const GRAPH_FIELD_GAP: f32 = 28.0;
+const GRAPH_BGA_GAP: f32 = 16.0;
+const GRAPH_MAX_WIDTH: f32 = 170.0;
+const GRAPH_MIN_WIDTH: f32 = 80.0;
+const GRAPH_FALLBACK_WIDTH: f32 = 150.0;
+const GRAPH_RIGHT_MARGIN: f32 = 24.0;
+const GRAPH_DEFAULT_TOP_OFFSET: f32 = 26.0;
+const GRAPH_TEXT_GAP: f32 = 8.0;
+const HUD_JUDGE_ROWS: usize = 6;
+const HUD_JUDGE_ROW_HEIGHT: f32 = 16.0;
+const HUD_FAST_SLOW_ROWS: usize = 2;
+const HUD_FAST_SLOW_GAP: f32 = 8.0;
+
 /// The target a run is being paced against, and how the run stands against it right now.
 pub struct HudPace<'a> {
     /// What the target is called, as the TARGET row settled it.
@@ -91,9 +104,35 @@ struct ScoreGraph {
     best: Option<u32>,
 }
 
-/// IIDX-style live "pacemaker" score graph: a vertical panel with A/AA/AAA rank-band lines, a CURRENT
-/// (cyan) EX bar that grows toward the top, and a BEST (green) bar, plus a "vs BEST" delta. Drawn in
-/// the gap between the field and the BGA.
+struct ScoreGraphLayout {
+    rect: Rect,
+    text_x: f32,
+}
+
+fn score_graph_layout(skin: &Skin, field_right: f32, top: f32, judge_y: f32) -> Option<ScoreGraphLayout> {
+    let graph_x = field_right + GRAPH_FIELD_GAP;
+    let graph_right = skin.bga.map(|bga| bga.x - GRAPH_BGA_GAP).unwrap_or(graph_x + GRAPH_FALLBACK_WIDTH);
+    let graph_w = (graph_right - graph_x).clamp(0.0, GRAPH_MAX_WIDTH);
+
+    let Some(bga) = skin.bga else {
+        return (graph_w >= GRAPH_MIN_WIDTH).then_some(ScoreGraphLayout {
+            rect: Rect::new(graph_x, top + GRAPH_DEFAULT_TOP_OFFSET, graph_w, (judge_y - top - GRAPH_DEFAULT_TOP_OFFSET).max(40.0)),
+            text_x: graph_x + graph_w + 20.0,
+        });
+    };
+    let right_graph_x = bga.x + bga.w + GRAPH_BGA_GAP;
+    let right_graph_w = (CW_REFERENCE - GRAPH_RIGHT_MARGIN - right_graph_x).clamp(0.0, GRAPH_MAX_WIDTH);
+    if bga.x >= field_right && right_graph_w >= GRAPH_MIN_WIDTH {
+        let text_height = HUD_JUDGE_ROWS as f32 * HUD_JUDGE_ROW_HEIGHT + HUD_FAST_SLOW_GAP + HUD_FAST_SLOW_ROWS as f32 * HUD_JUDGE_ROW_HEIGHT;
+        let graph_y = top + text_height + GRAPH_TEXT_GAP;
+        return Some(ScoreGraphLayout { rect: Rect::new(right_graph_x, graph_y, right_graph_w, (judge_y - graph_y).max(40.0)), text_x: right_graph_x });
+    }
+    (graph_w >= GRAPH_MIN_WIDTH).then_some(ScoreGraphLayout {
+        rect: Rect::new(graph_x, top + GRAPH_DEFAULT_TOP_OFFSET, graph_w, (judge_y - top - GRAPH_DEFAULT_TOP_OFFSET).max(40.0)),
+        text_x: bga.x.max(field_right + 20.0),
+    })
+}
+
 fn draw_score_graph<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, graph: &ScoreGraph) {
     let ScoreGraph { rect: Rect { x, y, w, h }, ex, max_ex, best } = *graph;
     let th = ctx.theme;
@@ -183,18 +222,14 @@ pub fn render_hud_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, skin: &Sk
         }
     }
 
-    let graph_x = field_right + 28.0;
-    let graph_right = skin.bga.map(|b| b.x - 16.0).unwrap_or(graph_x + 150.0);
-    let graph_w = (graph_right - graph_x).clamp(0.0, 170.0);
-    if graph_w >= 80.0 {
-        let rect = Rect::new(graph_x, top + 26.0, graph_w, (jy - top - 26.0).max(40.0));
-        draw_score_graph(ctx, r, &ScoreGraph { rect, ex: hud.ex_score, max_ex: hud.max_ex, best: hud.best_ex });
+    let score_graph = score_graph_layout(skin, field_right, top, jy);
+    if let Some(layout) = &score_graph {
+        draw_score_graph(ctx, r, &ScoreGraph { rect: layout.rect, ex: hud.ex_score, max_ex: hud.max_ex, best: hud.best_ex });
     }
 
-    let (tx, mut ty) = match skin.bga {
-        Some(b) => (b.x.max(field_right + 20.0), top),
-        None => (graph_x + graph_w + 20.0, top),
-    };
+    let tx =
+        score_graph.as_ref().map(|layout| layout.text_x).unwrap_or_else(|| skin.bga.map(|bga| bga.x.max(field_right + 20.0)).unwrap_or(field_right + 20.0));
+    let mut ty = top;
     for i in 0..6 {
         ctx.draw_text(r, tx, ty, 1.6, skin.judge_colors[i], &skin.judge_labels_short[i]);
         ctx.draw_text(r, tx + 26.0, ty, 1.6, Color::WHITE, &hud.counts[i].to_string());
@@ -219,6 +254,11 @@ mod tests {
 
     fn skin() -> Skin {
         Skin::default_for(Mode::BEAT_7K, 1280.0, 720.0)
+    }
+
+    fn single_field_skin() -> Skin {
+        let cfg: crate::SkinConfig = ron::from_str(include_str!("../../../assets/skins/steel-neon/play.ron")).expect("single-field config parses");
+        Skin::build(&cfg, Mode::BEAT_7K, 1280.0, 720.0)
     }
 
     fn hud() -> HudView<'static> {
@@ -322,5 +362,27 @@ mod tests {
         let shown = drawn(&HudView { white_number: 120.0, ..hud() });
         assert_ne!(none, shown, "the white number does not reach the screen");
         assert_eq!(none, drawn(&HudView { white_number: 0.0, ..hud() }), "a run with no cover draws no white number");
+    }
+
+    #[test]
+    fn a_center_bga_places_the_graph_and_counts_on_the_opposite_side_of_a_single_field() {
+        let skin = single_field_skin();
+        let field_right = skin.x.iter().zip(&skin.w).map(|(x, width)| x + width).fold(f32::MIN, f32::max);
+        let layout = score_graph_layout(&skin, field_right, skin.top_y, skin.judge_y).expect("single-field skin has graph space");
+        let bga = skin.bga.expect("single-field skin has BGA");
+        assert!(layout.rect.x >= bga.x + bga.w + GRAPH_BGA_GAP, "the graph overlays the BGA");
+        assert_eq!(layout.text_x, layout.rect.x, "the counts do not occupy the graph column");
+        assert!(layout.rect.y > skin.top_y + GRAPH_DEFAULT_TOP_OFFSET, "the graph leaves no room for the counts");
+    }
+
+    #[test]
+    fn an_existing_right_bga_keeps_its_graph_in_the_gap_after_the_field() {
+        let skin = skin();
+        let field_right = skin.x.iter().zip(&skin.w).map(|(x, width)| x + width).fold(f32::MIN, f32::max);
+        let layout = score_graph_layout(&skin, field_right, skin.top_y, skin.judge_y).expect("default skin has graph space");
+        let bga = skin.bga.expect("default skin has BGA");
+        assert!(layout.rect.x >= field_right + GRAPH_FIELD_GAP, "the graph moves over the field");
+        assert!(layout.rect.x + layout.rect.w <= bga.x - GRAPH_BGA_GAP, "the graph moves over the BGA");
+        assert_eq!(layout.rect.y, skin.top_y + GRAPH_DEFAULT_TOP_OFFSET, "the existing graph vertical placement changes");
     }
 }

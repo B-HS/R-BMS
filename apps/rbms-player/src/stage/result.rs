@@ -87,12 +87,16 @@ impl StageHandler for ResultState {
     fn draw(&mut self, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'_>) {
         canvas.clear_bga();
         ctx.shared.prepare_skin(canvas, SKIN_TYPE_RESULT);
-        if ctx.shared.draw_result_skin(canvas, &self.view, self.extras.target.as_ref(), self.cleared) {
+        let overlay = ctx.shared.skin_uses_overlay(SKIN_TYPE_RESULT);
+        if !overlay && ctx.shared.draw_result_skin(canvas, &self.view, self.extras.target.as_ref(), self.cleared) {
             return;
         }
         render_result_with_palette(canvas, &self.view, &ctx.shared.result_palette, &self.extras);
         for (i, (text, kind)) in ctx.shared.ir_status.lines().iter().enumerate() {
             draw_text(canvas, IR_RESULT_X, IR_RESULT_Y + i as f32 * IR_RESULT_LINE_H, IR_RESULT_SCALE, ir_line_color(*kind), text);
+        }
+        if overlay {
+            ctx.shared.draw_result_skin(canvas, &self.view, self.extras.target.as_ref(), self.cleared);
         }
     }
 }

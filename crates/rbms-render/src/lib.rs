@@ -38,7 +38,7 @@ pub use skin_render::{
     NoExpressions, PlayTimers, SelectTimers, SkinAssets, SkinDraw, SkinExprEval, SkinFrame, SkinImage, SkinObjectKind, SkinScreen, SkinViewport,
     render_decide_screen, render_keyconfig_screen, render_play_screen, render_result_screen, render_select_screen,
 };
-pub use theme::{Theme, ThemeConfig, set_theme, theme};
+pub use theme::{SelectLayout, SelectLayoutConfig, Theme, ThemeConfig, select_layout, set_theme, theme};
 pub use toast::{ToastLevel, ToastView, render_toasts, render_toasts_ctx, render_toasts_with_bottom_inset, toast_color};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

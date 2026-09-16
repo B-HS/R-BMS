@@ -357,6 +357,12 @@ impl AppShared {
                 notify(Level::Warn, format!("skin load failed ({e}), using bundled"));
                 bundled_skin(&self.config.display.skin)
             }),
+            None if self.config.display.skin.eq_ignore_ascii_case(rbms_config::STEEL_NEON_SKIN) => {
+                SkinConfig::load(installed_play_skin_path(&self.settings_path, &self.config, mode)).unwrap_or_else(|e| {
+                    notify(Level::Warn, format!("skin load failed ({e}), using bundled"));
+                    bundled_skin(&self.config.display.skin)
+                })
+            }
             None => bundled_skin(&self.config.display.skin),
         };
         self.rebuild_skin();

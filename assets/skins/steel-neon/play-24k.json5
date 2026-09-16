@@ -1,0 +1,18 @@
+{
+    type: 16,
+    name: 'Steel Neon 24K',
+    author: 'R-BMS',
+    w: 1280,
+    h: 720,
+    composition: 'overlay',
+    source: [
+        { id: 'overlay', path: 'images/play-overlay.png' },
+        { id: 'common', path: 'images/common-atlas.png' },
+    ],
+    image: [
+        { id: 'play-chrome', src: 'overlay', x: 0, y: 0, w: 1280, h: 720 },
+    ],
+    destination: [
+        { id: 'play-chrome', blend: 2, dst: [{ time: 0, x: 0, y: 0, w: 1280, h: 720 }] },
+    ],
+}

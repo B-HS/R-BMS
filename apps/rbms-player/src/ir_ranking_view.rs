@@ -4,7 +4,7 @@
 //! [`panel_lines`] is the single source of the text on screen, so a headless test asserts on
 //! exactly the strings [`render_ranking_panel`] draws.
 
-use rbms_render::{Color, Rect, Renderer, draw_text, draw_text_right, fit_text, theme};
+use rbms_render::{Color, Rect, Renderer, draw_text, draw_text_right, fit_text, select_layout, theme};
 use winit::keyboard::KeyCode;
 
 use crate::ir_ranking::{RankingBoard, RankingRow, RankingState};
@@ -36,13 +36,6 @@ pub(crate) fn panel_action(code: KeyCode) -> Option<PanelAction> {
         _ => return None,
     })
 }
-
-/// The panel covers the detail column of the select screen (`select.rs` `DETAIL_X`/`DETAIL_W`
-/// between `TOP` and `BOTTOM`), so the song list stays readable behind it.
-pub(crate) const PANEL_X: f32 = 632.0;
-pub(crate) const PANEL_Y: f32 = 60.0;
-pub(crate) const PANEL_W: f32 = 616.0;
-pub(crate) const PANEL_H: f32 = 600.0;
 
 /// Panel chrome: title baseline, hint baseline, first row top, and the row pitch.
 const TITLE_Y: f32 = 12.0;
@@ -175,7 +168,7 @@ pub(crate) fn panel_lines(state: Option<&RankingState>) -> Vec<PanelLine> {
 
 /// How many rows fit in the panel body.
 pub(crate) fn visible_rows() -> usize {
-    (((PANEL_H - ROWS_Y) / ROW_PITCH).floor() as usize).max(1)
+    (((select_layout().detail_rect.h - ROWS_Y) / ROW_PITCH).floor() as usize).max(1)
 }
 
 /// Index of the first drawn line so `sel` stays visible: the selection is centred until the list
@@ -192,35 +185,36 @@ pub(crate) fn scroll_start(len: usize, sel: usize) -> usize {
 /// tagged with its index into [`panel_lines`].
 pub(crate) fn render_ranking_panel<R: Renderer>(r: &mut R, lines: &[PanelLine], sel: usize, focused: bool, can_switch_profile: bool) -> Vec<(Rect, usize)> {
     let th = theme();
+    let panel = select_layout().detail_rect;
     let mut hot = Vec::new();
-    r.fill_rect(Rect::new(PANEL_X, PANEL_Y, PANEL_W, PANEL_H), th.panel);
-    r.fill_rect(Rect::new(PANEL_X, PANEL_Y, PANEL_W, 2.0), th.divider);
-    draw_text(r, PANEL_X + RANK_X, PANEL_Y + TITLE_Y, TITLE_SCALE, if focused { th.accent } else { th.text }, PANEL_TITLE);
+    r.fill_rect(panel, th.panel);
+    r.fill_rect(Rect::new(panel.x, panel.y, panel.w, 2.0), th.divider);
+    draw_text(r, panel.x + RANK_X, panel.y + TITLE_Y, TITLE_SCALE, if focused { th.accent } else { th.text }, PANEL_TITLE);
     let hint = match (focused, can_switch_profile) {
         (true, true) => "UP DOWN MOVE   Q/E PROFILE   ENTER REPLAY   I CLOSE",
         (true, false) => "UP DOWN MOVE   ENTER REPLAY   I CLOSE",
         (false, _) => "I FOCUS PANEL",
     };
-    draw_text(r, PANEL_X + RANK_X, PANEL_Y + HINT_Y, HINT_SCALE, th.text_muted, hint);
+    draw_text(r, panel.x + RANK_X, panel.y + HINT_Y, HINT_SCALE, th.text_muted, hint);
 
     let start = scroll_start(lines.len(), sel);
     for (slot, index) in (start..(start + visible_rows()).min(lines.len())).enumerate() {
         let line = &lines[index];
-        let y = PANEL_Y + ROWS_Y + slot as f32 * ROW_PITCH;
-        let rect = Rect::new(PANEL_X + 4.0, y, PANEL_W - 8.0, ROW_H);
+        let y = panel.y + ROWS_Y + slot as f32 * ROW_PITCH;
+        let rect = Rect::new(panel.x + 4.0, y, panel.w - 8.0, ROW_H);
         if focused && index == sel {
             r.fill_rect(rect, th.row_focus);
         }
         let text_color = if focused && index == sel { th.text } else { th.text_dim };
-        draw_text(r, PANEL_X + RANK_X, y + 5.0, ROW_SCALE, th.text_muted, &line.rank);
-        let label_width = PANEL_W - LABEL_X - SCORE_RIGHT - 8.0;
-        draw_text(r, PANEL_X + LABEL_X, y + 5.0, ROW_SCALE, text_color, &fit_text(&line.label, ROW_SCALE, label_width));
-        draw_text_right(r, PANEL_X + PANEL_W - SCORE_RIGHT, y + 5.0, ROW_SCALE, text_color, &line.score);
+        draw_text(r, panel.x + RANK_X, y + 5.0, ROW_SCALE, th.text_muted, &line.rank);
+        let label_width = panel.w - LABEL_X - SCORE_RIGHT - 8.0;
+        draw_text(r, panel.x + LABEL_X, y + 5.0, ROW_SCALE, text_color, &fit_text(&line.label, ROW_SCALE, label_width));
+        draw_text_right(r, panel.x + panel.w - SCORE_RIGHT, y + 5.0, ROW_SCALE, text_color, &line.score);
         if !line.lamp.is_empty() {
-            draw_text(r, PANEL_X + PANEL_W - LAMP_X, y + 5.0, ROW_SCALE, line.lamp_color, line.lamp);
+            draw_text(r, panel.x + panel.w - LAMP_X, y + 5.0, ROW_SCALE, line.lamp_color, line.lamp);
         }
         if !line.tail.is_empty() {
-            draw_text_right(r, PANEL_X + PANEL_W - TAIL_RIGHT, y + 5.0, ROW_SCALE, th.text_muted, &line.tail);
+            draw_text_right(r, panel.x + panel.w - TAIL_RIGHT, y + 5.0, ROW_SCALE, th.text_muted, &line.tail);
         }
         hot.push((rect, index));
     }
@@ -308,8 +302,9 @@ mod tests {
         let lines = panel_lines(Some(&state));
         let mut canvas = CpuCanvas::new(CANVAS_W, CANVAS_H);
         let hot = render_ranking_panel(&mut canvas, &lines, 0, true, false);
+        let panel = select_layout().detail_rect;
         assert_eq!(hot.len(), lines.len(), "every drawn line is clickable");
-        assert!(hot.iter().all(|(rect, _)| rect.x >= PANEL_X && rect.x + rect.w <= PANEL_X + PANEL_W));
+        assert!(hot.iter().all(|(rect, _)| rect.x >= panel.x && rect.x + rect.w <= panel.x + panel.w));
         assert_ne!(canvas.signature_hash(8, 8), CpuCanvas::new(CANVAS_W, CANVAS_H).signature_hash(8, 8), "the panel put pixels on the canvas");
     }
 

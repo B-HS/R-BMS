@@ -7,7 +7,7 @@
 //! reset with the browser, which is what stops a forgotten filter from looking like a lost library.
 #![allow(clippy::wildcard_imports)]
 
-use rbms_render::{Rect, Renderer, draw_text, draw_text_right, theme};
+use rbms_render::{Rect, Renderer, draw_text, draw_text_right, select_layout, theme};
 
 use crate::stage::select::list::{CLEAR_FILTERS, ClearFilter, SelectFilter};
 use crate::*;
@@ -22,9 +22,6 @@ const LEVEL_MAX: i32 = 25;
 /// The value an unset level bound sits at, one step below the lowest real level.
 const LEVEL_ANY: i32 = 0;
 
-const PANEL_X: f32 = 32.0;
-const PANEL_Y: f32 = 60.0;
-const PANEL_W: f32 = 380.0;
 const ROW_H: f32 = 30.0;
 const ROW_PITCH: f32 = 32.0;
 const ROWS_Y: f32 = 56.0;
@@ -260,21 +257,22 @@ impl FilterPanel {
 /// so a panel row has nothing to report a click as.
 pub(super) fn render_filter_panel<R: Renderer>(r: &mut R, panel: &FilterPanel, config: &Config) {
     let th = theme();
+    let list = select_layout().list_rect;
     let filter = panel.filter(config);
     let height = ROWS_Y + FILTER_ROWS.len() as f32 * ROW_PITCH + 8.0;
-    r.fill_rect(Rect::new(PANEL_X, PANEL_Y, PANEL_W, height), th.panel_hi);
-    r.fill_rect(Rect::new(PANEL_X, PANEL_Y, PANEL_W, 2.0), th.focus);
-    draw_text(r, PANEL_X + LABEL_X, PANEL_Y + 12.0, TITLE_SCALE, th.accent, "FILTER");
-    draw_text(r, PANEL_X + LABEL_X, PANEL_Y + 36.0, HINT_SCALE, th.text_muted, "\u{2191}\u{2193} AXIS   \u{2190}\u{2192} VALUE   BACKSPACE RESET   F2 CLOSE");
+    r.fill_rect(Rect::new(list.x, list.y, list.w, height), th.panel_hi);
+    r.fill_rect(Rect::new(list.x, list.y, list.w, 2.0), th.focus);
+    draw_text(r, list.x + LABEL_X, list.y + 12.0, TITLE_SCALE, th.accent, "FILTER");
+    draw_text(r, list.x + LABEL_X, list.y + 36.0, HINT_SCALE, th.text_muted, "\u{2191}\u{2193} AXIS   \u{2190}\u{2192} VALUE   BACKSPACE RESET   F2 CLOSE");
     for (index, row) in FILTER_ROWS.iter().enumerate() {
-        let y = PANEL_Y + ROWS_Y + index as f32 * ROW_PITCH;
-        let rect = Rect::new(PANEL_X + 4.0, y, PANEL_W - 8.0, ROW_H);
+        let y = list.y + ROWS_Y + index as f32 * ROW_PITCH;
+        let rect = Rect::new(list.x + 4.0, y, list.w - 8.0, ROW_H);
         if index == panel.sel {
             r.fill_rect(rect, th.row_focus);
         }
         let value_color = if row.is_set(&filter) { th.accent } else { th.text_dim };
-        draw_text(r, PANEL_X + LABEL_X, y + TEXT_DROP, ROW_SCALE, th.text, row.label());
-        draw_text_right(r, PANEL_X + PANEL_W - VALUE_RIGHT, y + TEXT_DROP, ROW_SCALE, value_color, &row.value(&filter));
+        draw_text(r, list.x + LABEL_X, y + TEXT_DROP, ROW_SCALE, th.text, row.label());
+        draw_text_right(r, list.x + list.w - VALUE_RIGHT, y + TEXT_DROP, ROW_SCALE, value_color, &row.value(&filter));
     }
 }
 

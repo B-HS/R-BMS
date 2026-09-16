@@ -173,6 +173,7 @@ pub const DEFAULT_HISPEED: f64 = 2.0;
 
 /// Skin a fresh install starts on.
 pub const DEFAULT_SKIN: &str = "NORMAL";
+pub const STEEL_NEON_SKIN: &str = "STEEL NEON";
 
 /// Every screen a skin document can declare, named for the SKIN tab, indexed by the `SkinType` id
 /// the document writes in its `type` field (`SkinType.java`).
@@ -254,11 +255,12 @@ pub struct SkinOptions {
     pub selected: BTreeMap<i32, String>,
     /// What the player chose inside each document, keyed by the path it was found under.
     pub custom: BTreeMap<String, SkinCustomisation>,
+    pub default_skin_installed: bool,
 }
 
 impl Default for SkinOptions {
     fn default() -> Self {
-        SkinOptions { folder: None, screen: DEFAULT_SKIN_SCREEN, selected: BTreeMap::new(), custom: BTreeMap::new() }
+        SkinOptions { folder: None, screen: DEFAULT_SKIN_SCREEN, selected: BTreeMap::new(), custom: BTreeMap::new(), default_skin_installed: false }
     }
 }
 

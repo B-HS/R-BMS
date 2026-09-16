@@ -11,10 +11,6 @@
 //! behind it is read again. A rebuild registers a fresh set of textures, so the previous screen is
 //! always released first.
 //!
-//! A document owns the whole screen it replaces, so the frame is wiped before it draws: the built-in
-//! screens each wipe their own, and a document that leaves a corner unpainted would otherwise show
-//! the frame before it rather than the background behind it.
-
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -28,8 +24,9 @@ use rbms_render::{
     render_play_screen, render_result_screen, render_select_screen, with_render_ctx,
 };
 use rbms_skin::dst::{LuaDrawEval, LuaExprId, OffsetSource};
-use rbms_skin::loader::{LoadedSkin, SKIN_TYPE_DECIDE, SKIN_TYPE_KEY_CONFIG, SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_RESULT};
+use rbms_skin::loader::{LoadedSkin, SKIN_TYPE_DECIDE, SKIN_TYPE_KEY_CONFIG, SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_RESULT, skin_type_mode};
 use rbms_skin::lua::{LuaFrame, LuaSandbox};
+use rbms_skin::model::SkinComposition;
 use rbms_skin::property::SkinStateSource;
 
 use crate::assets::{DecodePool, SkinAsset, SkinAssetJob, SkinAssetKind, spawn_skin_asset_decode};
@@ -291,6 +288,11 @@ impl AppShared {
         self.skin_screens.get(screen).is_some() || self.skin_screens.is_pending(screen)
     }
 
+    pub(crate) fn skin_uses_overlay(&self, screen: i32) -> bool {
+        let supports_overlay = matches!(screen, SKIN_TYPE_MUSIC_SELECT | SKIN_TYPE_RESULT) || skin_type_mode(screen).is_some();
+        supports_overlay && self.skins.document(screen).is_some_and(|document| document.def.composition == SkinComposition::Overlay)
+    }
+
     /// Whether one screen's document has finished being read and compiled, as against merely being
     /// on its way.
     #[cfg(test)]
@@ -335,7 +337,9 @@ impl AppShared {
         let Some(document) = self.skin_frame(canvas, screen, state, &mut lua, background) else {
             return false;
         };
-        canvas.clear(Color::BLACK);
+        if !self.skin_uses_overlay(screen) {
+            canvas.clear(Color::BLACK);
+        }
         with_render_ctx(|ctx| render_play_screen(ctx, canvas, Some(&document), state))
     }
 
@@ -346,7 +350,9 @@ impl AppShared {
         let Some(document) = self.skin_frame(canvas, SKIN_TYPE_MUSIC_SELECT, &state, &mut lua, background) else {
             return false;
         };
-        canvas.clear(Color::BLACK);
+        if !self.skin_uses_overlay(SKIN_TYPE_MUSIC_SELECT) {
+            canvas.clear(Color::BLACK);
+        }
         with_render_ctx(|ctx| render_select_screen(ctx, canvas, Some(&document), view))
     }
 
@@ -357,7 +363,9 @@ impl AppShared {
         let Some(document) = self.skin_frame(canvas, SKIN_TYPE_RESULT, &state, &mut lua, None) else {
             return false;
         };
-        canvas.clear(Color::BLACK);
+        if !self.skin_uses_overlay(SKIN_TYPE_RESULT) {
+            canvas.clear(Color::BLACK);
+        }
         with_render_ctx(|ctx| render_result_screen(ctx, canvas, Some(&document), view, target, cleared))
     }
 
