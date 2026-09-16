@@ -125,7 +125,7 @@ pub struct SelectView { pub rows: Vec<SelectRow>, pub sel: usize, pub start: usi
 
 - `cargo test --workspace`(파서 #BANNER/#PREVIEW·밀도 peak/avg/end).
 - 헤드리스: `examples/render_select.rs`(rbms-render) → PPM→PNG로 레이아웃 확인(커버는 placeholder).
-- 라이브: `./start.sh`로 커버 BGA·포커스 연출·밀도그래프 확인.
+- 라이브: `cargo run --release -p rbms-player -- <곡 폴더>` 또는 빌드 바이너리로 커버 BGA·포커스 연출·밀도그래프 확인.
 
 ## 8. 구현 체크리스트 (완료 2026-05-31)
 

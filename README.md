@@ -24,18 +24,40 @@ R-BMS reimplements the core PLAY loop of a GPL-3.0 reference implementation in R
 - **IR** — sign in, submit scores, browse rankings, sync settings, manage rivals and upload or replay ghosts, all from the in-game SETTINGS NETWORK tab and the song-select ranking panel
 - **Debug** — on-screen overlay with FPS, memory, audio clock and judge state
 
-## Build
+## Build and run
 
 Requires Rust 1.95 or newer. Binaries are not published yet.
 
 ```sh
 cargo build --release -p rbms-player
-./target/release/rbms-player <songs folder>      # song select
-./target/release/rbms-player <chart.bme>         # play one chart (autoplay)
-./target/release/rbms-player <chart.bme> --interactive
 ```
 
-Settings, key config, difficulty tables, local scores and replays live in `~/.config/rbms/` (`%USERPROFILE%\.config\rbms\` on Windows) and are created on first run. Run without arguments to open the last library.
+`README.md` is the execution reference. The first positional argument is a song folder or one chart. With no positional argument, the player opens the remembered `songs_folder`, then `RBMS_SONGS` when set, otherwise an empty GUI.
+
+macOS / Linux:
+
+```sh
+cargo run --release -p rbms-player --                         # source: remembered folder, RBMS_SONGS, or empty GUI
+cargo run --release -p rbms-player -- /path/to/songs           # source: song select
+cargo run --release -p rbms-player -- /path/to/chart.bms       # source: single chart, autoplay
+cargo run --release -p rbms-player -- /path/to/chart.bms --interactive
+./target/release/rbms-player /path/to/songs                    # built binary
+./target/release/rbms-player /path/to/chart.bms --auto          # built binary, explicit autoplay
+```
+
+Windows PowerShell:
+
+```powershell
+cargo run --release -p rbms-player --                          # source: remembered folder, RBMS_SONGS, or empty GUI
+cargo run --release -p rbms-player -- C:\path\to\songs       # source: song select
+cargo run --release -p rbms-player -- C:\path\to\chart.bms --interactive
+.\target\release\rbms-player.exe C:\path\to\songs          # built binary
+.\target\release\rbms-player.exe C:\path\to\chart.bms --auto # built binary, explicit autoplay
+```
+
+To register a library through the GUI, press `O`, select `+ ADD FOLDER`, press `Enter` to choose the folder, then press `Esc` to save and rescan.
+
+Settings, key config, difficulty tables, local scores and replays live in `~/.config/rbms/` (`%USERPROFILE%\.config\rbms\` on Windows) and are created on first run.
 
 Options: `--interactive` `--auto` `--hispeed F` `--gauge NAME` `--lift F` `--sc-left` `--sc-auto` `--keys Z,S,X,...` `--skin file.ron` `--font file.ttf` `--table URL` `--keyconfig path.ron` `--replay file.ron` `--server URL` `--player ID`.
 

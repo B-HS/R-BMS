@@ -2,7 +2,7 @@
 
 > 새 세션은 **이 문서부터** 읽는다. 현재 상태·아키텍처·실행법·할 일의 SSOT. (ai-process.md 원칙 1·14)
 > 베이스 룰: `~/.claude/CLAUDE.md` + convention. Rust 프로젝트 → TS 전용 규칙(arrow 등) 비적용, **공통 원칙**(주석 금지·설명은 docs/·정확 네이밍·근본 해결·공식문서 우선·검증 후 진행)은 그대로.
-> 위치: `/Users/gkn/R-BMS`. 빌드 `cargo build`, 테스트 `cargo test --workspace`(**Phase F 최종 검증 실측 2232 통과 · 0 실패 · 2 ignored**). lint 는 이제 게이트다 — `cargo fmt --all --check` 와 `cargo clippy --workspace --all-targets --all-features -- -D warnings` 가 CI 필수 통과 조건이고 툴체인은 `rust-toolchain.toml` 로 `1.95.0` 고정. 실행은 §5(`./start.sh`).
+> 위치: `/Users/gkn/R-BMS`. 빌드 `cargo build`, 테스트 `cargo test --workspace`(Phase H 최종 실행 exit 0, 등록 테스트 3,040개; 실제 오디오 장치 테스트 2건 ignored). lint 는 이제 게이트다 — `cargo fmt --all --check` 와 `cargo clippy --workspace --all-targets --all-features -- -D warnings` 가 CI 필수 통과 조건이고 툴체인은 `rust-toolchain.toml` 로 `1.95.0` 고정. 실행 정본은 `README.md`다.
 > git: **dev(작업)/prod(배포) 브랜치 모델**(CI는 dev, 릴리스는 prod → `docs/ci-release.md`). **커밋 메시지에 co-author(Claude) 넣지 않음**(사용자 명시 지시), 작성자 `Hyunseok Byun <gumyoincirno@gmail.com>`. `target`·`Cargo.lock`·라이브러리 차트 커밋 금지(.gitignore).
 > 다음 할 일(로드맵)은 **`ROADMAP.md`**, 백엔드 설계는 **`docs/backend/`**, 배포/CI는 **`docs/ci-release.md`**.
 
@@ -94,8 +94,12 @@
       - [x] primary 프로필 선택 UI와 선택 변경 시 랭킹 캐시·진행 중 요청 무효화
     - [x] G5 포함 테스트 전용 API·dead-code 허용 제거 후 player clippy 복구 — test-only 접근자는 `cfg(test)`, 미사용 선행 추상화 삭제, player all-targets clippy 통과
   - [x] workspace fmt·test·clippy 게이트, 적대 리뷰, 실행 스모크, history 갱신 — fmt·clippy·workspace test 실패 0, CLI 임시 폴더 스모크 `charts=1/read=1`, 최종 적대 리뷰 blocker 0 (`docs/history/2026-09-16-phase-g-data-long-tail.md`)
-- [ ] H 경미 후속 일괄(사용자 결정 2026-09-10: G 다음에 모아서 처리) — ① 토스트가 곡선택 우하단 힌트 줄과 겹침 ② Phase B 실기 가청 확인(사용자 몫) ③ `app_input::tests::the_settings_row_and_the_in_play_key_stop_at_the_same_ceiling` 가 Linux CI 에서 60초 초과(전수 루프 → 경계값 검사로 축소) ④ 이후 발생하는 경미 항목은 여기에 누적
-- [ ] R 릴리스(prod 브랜치·브랜치 보호·v0.1.0 태그·서명) — **사용자가 직접 수행**(자택 보관 키 사용, 2026-09-10 결정). 에이전트는 착수하지 않음
+- [x] H 경미 후속 일괄(사용자 결정 2026-09-10: G 다음에 모아서 처리)
+  - [x] H1 곡선택 토스트를 하단 힌트와 겹치지 않는 위치에 배치, 헤드리스 테스트 통과
+  - [x] H2 `app_input::tests::the_settings_row_and_the_in_play_key_stop_at_the_same_ceiling`를 경계값 검사로 축소 — 16.93초 → 3.01초(82% 감소)
+  - [x] H3 실제 오디오와 Phase G 기능의 실기 확인 절차·합격 기준 문서화 — `docs/quality-assurance/2026-09-16-phase-h-manual-checks.md`; 실기 자체는 실제 장치·서버 환경에서 후속
+  - [x] H4 최종 fmt·clippy·test·적대 리뷰·history와 실행 방법 정본화 — fmt·clippy·workspace test·release build·`git diff --check` exit 0, 적대 리뷰 blocker 0; 이력 `docs/history/2026-09-16-phase-h-minor-followups.md`
+- [ ] R 릴리스(prod 브랜치·브랜치 보호·v0.1.0 태그·서명) — **사용자가 실제 키와 함께 추후 진행**(자택 보관 키 사용, 2026-09-10 결정). 에이전트는 착수하지 않음
 
 ---
 
@@ -210,14 +214,14 @@ crates/
 ## 5. 실행
 
 ```bash
-./start.sh                                    # release 빌드 후 기본 라이브러리+발광1 표로 열기
-./start.sh "<폴더|차트>" [옵션...]             # 인자 그대로 전달 (env RBMS_SONGS / RBMS_TABLE 로 기본값 변경)
-cargo build --release -p rbms-player          # 또는 직접 (BIN=./target/release/rbms-player)
-$BIN "<폴더>"                                  # GUI 곡선택
-$BIN "<차트.bme>" [--interactive]              # 단일 차트 (기본 autoplay; --interactive=직접)
-$BIN --replay ~/.config/rbms/replays/<f>.ron  # 리플레이 재생
+cargo run --release -p rbms-player --                    # 기억 폴더 → RBMS_SONGS → 빈 GUI
+cargo run --release -p rbms-player -- "<폴더>"            # GUI 곡선택
+cargo run --release -p rbms-player -- "<차트.bms>" --auto # 단일 차트 autoplay
+cargo run --release -p rbms-player -- "<차트.bms>" --interactive
+./target/release/rbms-player "<폴더>"                    # macOS / Linux 빌드 바이너리
+.\target\release\rbms-player.exe "<폴더>"               # Windows PowerShell 빌드 바이너리
 ```
-- **곡선택**: ↑↓ 이동 · →/Enter 열기/플레이 · ←/Esc 뒤로/상위 · **Tab 설정** · **O 폴더선택(rfd)** · **T 난이도표 관리** · **R 기록 모달** · **마우스**(행 1클릭 선택·재클릭 열기, 우측 기록 클릭→모달). 모달: ↑↓ 이전/다음·Enter 리플레이·Esc 닫기.
+- **곡선택**: ↑↓ 이동 · →/Enter 열기/플레이 · ←/Esc 뒤로/상위 · **Tab 설정** · **O 폴더선택**(`+ ADD FOLDER` 선택 → Enter → Esc로 저장·재스캔) · **T 난이도표 관리** · **R 기록 모달** · **마우스**(행 1클릭 선택·재클릭 열기, 우측 기록 클릭→모달). 모달: ↑↓ 이전/다음·Enter 리플레이·Esc 닫기.
 - **설정(Tab)**: **Tab으로 탭 전환**(PLAY/GAUGE/JUDGE/DISPLAY/INPUT) · ↑↓ 이동 · ←→ 값변경 · Enter(KEY CONFIG 진입) · Esc 저장후복귀.
   - PLAY: AUTOPLAY·HI-SPEED·SPEED FIX(FLOATING/CONSTANT)·RANDOM·**AUTO REPLAY**. GAUGE: GAUGE·TOTAL. JUDGE: JUDGE OFFSET·JUDGE WIDTH·AUTO CAL. DISPLAY: SKIN(NORMAL/WIDE)·**FONT**(DEFAULT/CUSTOM, Enter/우/클릭=파일선택 라이브 적용·좌=기본)·LIFT·LANE COVER·BGA·**DEBUG MODE**. INPUT: SCRATCH SIDE·SCRATCH AUTO·KEY CONFIG. (탭/값 마우스 클릭 가능)
 - **플레이 중**: Esc=뒤로(중도 포기) — 단 **남은 노트가 없으면 Esc로 곧장 결과화면**(아웃트로 대기 스킵). **DEBUG MODE** 시 좌상단 FPS/RAM/프레임시간/노트·콤보·게이지 등 수치 오버레이.

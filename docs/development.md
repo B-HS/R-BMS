@@ -10,34 +10,44 @@ generic "frontend" assumptions do not apply. Cargo workspace, edition 2024, rust
 ## Build / run / test
 
 ```bash
-cargo build --release -p rbms-player          # build the player
-cargo test  --workspace                        # ~887 unit tests, all green
-cargo build --workspace --examples             # build crate examples too
-cargo clippy --workspace                        # informational only (CI is NOT gated on clippy/fmt)
+cargo build --release -p rbms-player
+cargo test --workspace
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
 
-./start.sh ["<song folder | chart | --replay file>"]   # local launcher (gitignored): debug build + run
-./start.sh -r ...                              # release build instead
+cargo run --release -p rbms-player --          # source: remembered folder, RBMS_SONGS, or empty GUI
+cargo run --release -p rbms-player -- <folder> # source: song select
+cargo run --release -p rbms-player -- <chart.bms>
+cargo run --release -p rbms-player -- <chart.bms> --interactive
+./target/release/rbms-player <folder>          # macOS / Linux built binary
+./target/release/rbms-player <chart.bms> --auto
+.\target\release\rbms-player.exe <folder>     # Windows PowerShell built binary
+.\target\release\rbms-player.exe <chart.bms> --auto
 ```
 
-- `./start.sh` with no args opens the GUI on `./assets/songs` (created empty if missing).
+- The Phase H workspace test run registered 3,040 tests and exited successfully; actual audio-device tests remain ignored when no device is available. CI gates formatting and the clippy command above, and builds/tests on Linux, macOS, and Windows.
+- The first positional argument is a song folder or chart. With no positional argument, the player uses the remembered `songs_folder`, then `RBMS_SONGS`, otherwise opens an empty GUI. A single chart defaults to autoplay; use `--interactive` or `--auto` to choose explicitly. The execution source of truth is the repository `README.md`.
+- To register a folder in the GUI: `O` → `+ ADD FOLDER` → `Enter` → `Esc` (save and rescan).
 - The app reads/writes config under `~/.config/rbms/`. `config_dir()` resolves `HOME` then
   `USERPROFILE` (then `.`), so on Windows (where `HOME` is unset) config lands in
   `%USERPROFILE%\.config\rbms`.
 
-## Persistence (`~/.config/rbms/`, all RON, all `#[serde(default)]`)
+## Persistence (`~/.config/rbms/`)
 
 | File | What |
 |---|---|
-| `settings.ron` | play options (`PlaySettings`), incl. `server_url` / `player_id` (IR/NETWORK) |
+| `settings.ron` | versioned `Config`: play, library folders and difficulty tables, display, network profiles and IR token |
 | `keyconfig.ron` | lane/control key bindings |
-| `scores.ron` | local score history (`ScoreBook`) |
-| `tables.ron` | difficulty-table sources |
-| `folders.ron` | **multi-folder** song library (union scanned) |
-| `theme.ron` | **UI theme** colours — written as an editable template on first run (see `theme.md`) |
+| `songdb.sqlite` | scanned song-library index and chart-detail cache |
+| `scoredb.sqlite` | one merged best per chart and full local play history |
+| `scores.ron.migrated` | a legacy `scores.ron` after its first successful import into `scoredb.sqlite` |
+| `favorites.ron` | starred chart MD5 values |
+| `practice.ron` | per-chart practice properties |
+| `theme.ron` | editable UI-theme template written on first run (see `theme.md`) |
 | `replays/` | saved replays (`<md5[:8]>-<ms>.ron`) |
+| `courses/` | user course documents |
 
-Resilient load: a corrupt file is renamed to `.ron.bak` and defaults are used (so the next save can't
-clobber it). This applies to keyconfig / settings / scores / **tables / folders**.
+`settings.ron` includes the current schema version. A parse failure moves it to `*.ron.bak`; a schema migration first copies it to `*.ron.v<version>.bak`. The legacy `folders.ron` and `tables.ron` files are read only when migrating an old settings document, then folded into `settings.ron`. A legacy `scores.ron` is imported into SQLite only when `scoredb.sqlite` is first created; if the database cannot open, the player falls back to reading that legacy score book.
 
 ## App module layout (`apps/rbms-player/src/`)
 
@@ -58,8 +68,9 @@ the frame loop, `ApplicationHandler` and `run`. Everything else hangs off it:
 
 The screen and `app_*` modules use `use crate::*;` so they see the crate-root items, and they are
 *descendants* of the crate root — which is what lets them read `AppShared`'s private fields without
-`App` / `AppShared` having to expose them. Everything persisted other than the key config lives in
-`rbms-config` (settings, folders, tables) or `rbms-store` (scores, replays).
+`App` / `AppShared` having to expose them. `rbms-config` owns the versioned settings schema;
+`rbms-library` and `rbms-store` provide the SQLite song and score stores that the player wires to
+the configuration directory.
 
 ## How to extend
 

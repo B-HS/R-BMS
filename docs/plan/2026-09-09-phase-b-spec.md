@@ -607,7 +607,7 @@ CLOCK   n={clock_n}  fit sd {sd:.3}MS  quantised gap {gap:+.2}MS
 
 절차:
 1. `cargo build --release`.
-2. `RBMS_SOAK_LOG=/tmp/rbms-soak.csv ./start.sh --autoplay <장곡>` 로 **autoplay 무한 반복**(곡 종료 시 결과 → 재시작). 최소 12분.
+2. `RBMS_SOAK_LOG=/tmp/rbms-soak.csv cargo run --release -p rbms-player -- <장곡> --auto` 로 **autoplay 무한 반복**(곡 종료 시 결과 → 재시작). 최소 12분.
 3. 병행 세션 2종을 각각 1회: (a) 곡선택 화면에서 5초 간격 커서 이동(프리뷰 반복 로드/해제 = 네임스페이스 누수 검출), (b) Play ↔ Select 왕복 20회(엔진 수명 유지 검증).
 4. 앱이 60초 간격으로 아래 CSV 1행을 append 한다(신규, `timing.rs` 옆 `soak_log` 함수 또는 오버레이와 동일 소스).
 
@@ -790,7 +790,7 @@ Wave 2 의 두 갈래가 `app_select.rs`/`main.rs` 를 공유하지 않도록, *
 |---|---|
 | `#VOLWAV` 의 rbms-chart 변환 지점 | **`crates/rbms-chart/src/lib.rs:96` `pub fn to_model(src: &BmsSource, mode: Mode) -> Model` 단 하나.** `ModelMeta` 리터럴은 `:189-201` 이고 `total: src.headers.total.unwrap_or(0.0)` 가 `:199` 다. B4 는 그 리터럴에 `volwav: src.headers.volwav,` 1줄을 추가하면 된다. `ModelMeta` 를 만드는 다른 지점은 이 파일에 없다(`grep -n ModelMeta` = `:1` import, `:189` 리터럴). → **B-volwav 의 소유 파일 3개 목록이 이 확인으로 충분함이 증명됐다.** |
 | `Stage::Play` 이탈 지점 전수 | **깔때기 1개 + 방출 3개로 전수 확인.** ① 곡 종료 → `app_play.rs:469` `enter_result()` → `app_play.rs:392` `stage = Stage::Result`. ② Play 중 Esc, 전 노트 판정 완료 → `main.rs:1247` `enter_result()`. ③ Play 중 Esc, 미완료 → `main.rs:1249` `to_select_or_exit()`. ④ Result 에서 Esc/Enter → `main.rs:1220` `to_select_or_exit()`. **엔진 파기는 `app_select.rs:916`(`to_select_or_exit` 내부 `self.audio = None`) 한 곳뿐**이며, 그 외 `self.audio = None` 은 `main.rs:1234`(Loading 취소, Play 미진입) 하나다. → B7 은 이 **2개 지점만** `clear_namespace(PLAY)` 로 바꾸면 되고, `Stage::Play` 를 거치지 않는 누수 경로는 없다. (`enter_result` 는 오디오를 건드리지 않으므로 Result 화면에서도 엔진이 살아 있고, 이는 리절트 BGM/시스템 사운드(Phase F)에 유리하다.) |
-| `start.sh` 의 환경변수 전달 | **`start.sh` 는 이 레포에 존재하지 않는다** — `.gitignore` 가 `start.sh` 를 제외한다(내부 작업 파일). 따라서 §4.3 의 소크 로그 활성화는 스크립트에 의존할 수 없다. **결정: `RBMS_SOAK_LOG` 환경변수를 앱이 직접 읽는다**(`std::env::var("RBMS_SOAK_LOG")`, 값이 있으면 그 경로로 60초마다 append, 없으면 비활성). 실행은 `RBMS_SOAK_LOG=/tmp/rbms-soak.csv cargo run --release -p rbms-player -- --autoplay <곡>` 로 하고, 로컬 `start.sh` 사용 여부와 무관하게 동작한다. 구현은 B8(`timing.rs`, B-app-clock 소유). |
+| 소크 로그 환경변수 전달 | `RBMS_SOAK_LOG` 는 앱이 직접 읽는다(`std::env::var("RBMS_SOAK_LOG")`, 값이 있으면 그 경로로 60초마다 append, 없으면 비활성). 실행은 `RBMS_SOAK_LOG=/tmp/rbms-soak.csv cargo run --release -p rbms-player -- <곡> --auto` 로 한다. 구현은 B8(`timing.rs`, B-app-clock 소유). |
 
 ---
 

@@ -19,7 +19,7 @@
 
 ## 검증 방법 (수동 — 오디오는 헤드리스 불가)
 1. 설정 → DISPLAY → **DEBUG MODE on**, **PREVIEW on**.
-2. `./start.sh samples/preview-demo` (또는 `BIN samples/preview-demo`)로 실행 후 데모 곡 포커스.
+2. `cargo run --release -p rbms-player -- samples/preview-demo` 또는 `./target/release/rbms-player samples/preview-demo`로 실행 후 데모 곡 포커스.
 3. stderr `[preview]` 로그 판독:
    - `playing '…' dur_us=… clock_us=…` 인데 무음 → **가설 2(둘째 cpal 스트림)** — 단일 영속 엔진 재사용 또는 첫 tick 이후 play 스케줄로 수정.
    - `AudioEngine::new failed …` → 스트림 생성 문제(기기/권한).
