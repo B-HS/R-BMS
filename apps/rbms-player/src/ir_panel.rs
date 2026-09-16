@@ -37,6 +37,13 @@ const EDITOR_WINDOW_CHARS: usize = 28;
 /// Row appended under the rival ids in the inline rival list.
 pub(crate) const RIVAL_ADD_ROW: &str = "+ ADD RIVAL (PLAYER ID)";
 
+/// The last row of the inline IR profile list, which opens the editor for a new server URL.
+pub(crate) const PROFILE_ADD_ROW: &str = "+ ADD IR PROFILE (BASE URL)";
+
+/// What a profile row shows for a server a score is, or is not, sent to.
+const PROFILE_ON: &str = "ON";
+const PROFILE_OFF: &str = "OFF";
+
 /// The setting a NETWORK text row edits.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum NetworkTextField {
@@ -116,6 +123,32 @@ pub(crate) fn rival_rows(rivals: &[String]) -> Vec<String> {
     let mut rows: Vec<String> = rivals.to_vec();
     rows.push(RIVAL_ADD_ROW.to_string());
     rows
+}
+
+/// The inline IR profile list: one row per extra score server, then the add row.
+///
+/// A profile is named by its label when it has one and by its URL when it does not, followed by the
+/// switch that decides whether a score is sent to it.
+pub(crate) fn ir_profile_rows(profiles: &[rbms_config::IrProfile]) -> Vec<String> {
+    let mut rows: Vec<String> = profiles
+        .iter()
+        .map(|profile| {
+            let name = if profile.name.trim().is_empty() { profile.base_url.as_str() } else { profile.name.as_str() };
+            let state = if profile.enabled { PROFILE_ON } else { PROFILE_OFF };
+            format!("{name}  [{state}]")
+        })
+        .collect();
+    rows.push(PROFILE_ADD_ROW.to_string());
+    rows
+}
+
+/// A profile for a typed base URL. `None` when the URL is blank or already held.
+pub(crate) fn new_ir_profile(input: &str, existing: &[rbms_config::IrProfile]) -> Option<rbms_config::IrProfile> {
+    let url = input.trim();
+    if url.is_empty() || existing.iter().any(|profile| profile.base_url == url) {
+        return None;
+    }
+    Some(rbms_config::IrProfile { name: String::new(), base_url: url.to_string(), token: None, enabled: true })
 }
 
 /// Normalise a typed rival id. `None` when it is blank or already in the list.

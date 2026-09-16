@@ -11,6 +11,7 @@ mod atomic;
 mod error;
 mod replay;
 mod score;
+pub mod scoredb;
 
 #[cfg(test)]
 mod tests;

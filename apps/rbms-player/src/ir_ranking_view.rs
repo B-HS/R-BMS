@@ -16,6 +16,8 @@ pub(crate) enum PanelAction {
     Up,
     Down,
     PlayReplay,
+    PreviousProfile,
+    NextProfile,
 }
 
 /// The panel's key map.
@@ -29,6 +31,8 @@ pub(crate) fn panel_action(code: KeyCode) -> Option<PanelAction> {
         KeyCode::ArrowUp => PanelAction::Up,
         KeyCode::ArrowDown => PanelAction::Down,
         KeyCode::Enter | KeyCode::NumpadEnter | KeyCode::ArrowRight => PanelAction::PlayReplay,
+        KeyCode::KeyQ => PanelAction::PreviousProfile,
+        KeyCode::KeyE => PanelAction::NextProfile,
         _ => return None,
     })
 }
@@ -153,6 +157,10 @@ pub(crate) fn offline_lines() -> Vec<PanelLine> {
     vec![PanelLine::message(OFFLINE_TEXT)]
 }
 
+pub(crate) fn profile_line(label: &str, position: usize, count: usize) -> PanelLine {
+    PanelLine::message(format!("IR {position}/{count}: {label}"))
+}
+
 /// The panel's lines for a chart's state. `None` means no chart is focused.
 pub(crate) fn panel_lines(state: Option<&RankingState>) -> Vec<PanelLine> {
     match state {
@@ -182,13 +190,17 @@ pub(crate) fn scroll_start(len: usize, sel: usize) -> usize {
 
 /// Draw the panel over the detail column and return the clickable region of each drawn line,
 /// tagged with its index into [`panel_lines`].
-pub(crate) fn render_ranking_panel<R: Renderer>(r: &mut R, lines: &[PanelLine], sel: usize, focused: bool) -> Vec<(Rect, usize)> {
+pub(crate) fn render_ranking_panel<R: Renderer>(r: &mut R, lines: &[PanelLine], sel: usize, focused: bool, can_switch_profile: bool) -> Vec<(Rect, usize)> {
     let th = theme();
     let mut hot = Vec::new();
     r.fill_rect(Rect::new(PANEL_X, PANEL_Y, PANEL_W, PANEL_H), th.panel);
     r.fill_rect(Rect::new(PANEL_X, PANEL_Y, PANEL_W, 2.0), th.divider);
     draw_text(r, PANEL_X + RANK_X, PANEL_Y + TITLE_Y, TITLE_SCALE, if focused { th.accent } else { th.text }, PANEL_TITLE);
-    let hint = if focused { "UP DOWN MOVE   ENTER REPLAY   I CLOSE" } else { "I FOCUS PANEL" };
+    let hint = match (focused, can_switch_profile) {
+        (true, true) => "UP DOWN MOVE   Q/E PROFILE   ENTER REPLAY   I CLOSE",
+        (true, false) => "UP DOWN MOVE   ENTER REPLAY   I CLOSE",
+        (false, _) => "I FOCUS PANEL",
+    };
     draw_text(r, PANEL_X + RANK_X, PANEL_Y + HINT_Y, HINT_SCALE, th.text_muted, hint);
 
     let start = scroll_start(lines.len(), sel);
@@ -295,7 +307,7 @@ mod tests {
         let state = ready_state();
         let lines = panel_lines(Some(&state));
         let mut canvas = CpuCanvas::new(CANVAS_W, CANVAS_H);
-        let hot = render_ranking_panel(&mut canvas, &lines, 0, true);
+        let hot = render_ranking_panel(&mut canvas, &lines, 0, true, false);
         assert_eq!(hot.len(), lines.len(), "every drawn line is clickable");
         assert!(hot.iter().all(|(rect, _)| rect.x >= PANEL_X && rect.x + rect.w <= PANEL_X + PANEL_W));
         assert_ne!(canvas.signature_hash(8, 8), CpuCanvas::new(CANVAS_W, CANVAS_H).signature_hash(8, 8), "the panel put pixels on the canvas");
@@ -306,7 +318,7 @@ mod tests {
         for state in [None, Some(RankingState::Loading), Some(RankingState::Failed("boom".into())), Some(ready_state())] {
             let lines = panel_lines(state.as_ref());
             let mut canvas = CpuCanvas::new(CANVAS_W, CANVAS_H);
-            let hot = render_ranking_panel(&mut canvas, &lines, lines.len().saturating_sub(1), false);
+            let hot = render_ranking_panel(&mut canvas, &lines, lines.len().saturating_sub(1), false, false);
             assert_eq!(hot.len(), lines.len().min(visible_rows()));
         }
     }
@@ -317,7 +329,7 @@ mod tests {
         let state = RankingState::Ready(Box::new(build_board(&rows, None, &[], &[])));
         let lines = panel_lines(Some(&state));
         let mut canvas = CpuCanvas::new(CANVAS_W, CANVAS_H);
-        let hot = render_ranking_panel(&mut canvas, &lines, lines.len() - 1, true);
+        let hot = render_ranking_panel(&mut canvas, &lines, lines.len() - 1, true, false);
         assert_eq!(hot.len(), visible_rows());
         assert!(hot.iter().any(|(_, index)| *index == lines.len() - 1), "the selected line is one of the drawn rows");
     }

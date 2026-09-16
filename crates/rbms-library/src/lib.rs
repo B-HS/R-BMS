@@ -8,10 +8,12 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use rbms_chart::to_model;
 use rbms_model::Mode;
+
+pub mod scan;
+pub mod songdb;
 
 #[cfg(test)]
 mod tests;
@@ -54,77 +56,30 @@ pub struct ChartDetail {
     pub end_density: f64,
 }
 
-/// Whether a path carries one of the BMS chart extensions the scanner reads.
+/// Whether a path carries one of the chart extensions the scanner reads: the BMS family, and the
+/// JSON bmson format the parser decodes on its own path.
 pub fn is_chart(p: &Path) -> bool {
-    matches!(p.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).as_deref(), Some("bms" | "bme" | "bml" | "pms"))
+    matches!(p.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).as_deref(), Some("bms" | "bme" | "bml" | "pms" | "bmson"))
 }
 
-/// Scan every configured library folder and merge the results into one song list (the library is
-/// the union of all folders). Missing/unreadable folders contribute nothing. `count` is bumped per
-/// chart read so a progress screen can follow along; setting `cancel` stops the walk early.
-pub fn scan_folders(folders: &[String], count: &AtomicUsize, cancel: &AtomicBool) -> Vec<SongEntry> {
-    let mut out = Vec::new();
-    for f in folders {
-        out.extend(scan_folder(Path::new(f), count, cancel));
-    }
-    out
-}
-
-/// Scan one folder tree, returning its charts sorted by lowercased title.
-pub fn scan_folder(root: &Path, count: &AtomicUsize, cancel: &AtomicBool) -> Vec<SongEntry> {
-    let mut out = Vec::new();
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        if cancel.load(Ordering::Relaxed) {
-            break;
-        }
-        let Ok(rd) = std::fs::read_dir(&dir) else {
-            continue;
-        };
-        for e in rd.flatten() {
-            let p = e.path();
-            if p.is_dir() {
-                stack.push(p);
-            } else if is_chart(&p)
-                && let Ok(bytes) = std::fs::read(&p)
-            {
-                let src = rbms_parser::parse(&bytes);
-                let mode = rbms_chart::detect_mode(&src, p.to_str().unwrap_or(""));
-                let h = &src.headers;
-                let title = if h.title.is_empty() { p.file_name().and_then(|n| n.to_str()).unwrap_or("?").to_string() } else { h.title.clone() };
-                out.push(SongEntry {
-                    path: p,
-                    title,
-                    subtitle: h.subtitle.clone(),
-                    artist: h.artist.clone(),
-                    genre: h.genre.clone(),
-                    maker: h.maker.clone(),
-                    level: h.play_level.clone(),
-                    difficulty: h.difficulty,
-                    init_bpm: h.init_bpm,
-                    rank: h.rank,
-                    total: h.total.unwrap_or(0.0),
-                    mode,
-                    md5: src.md5.clone(),
-                    stagefile: h.stagefile.clone(),
-                    banner: h.banner.clone(),
-                    preview: h.preview.clone(),
-                });
-                count.fetch_add(1, Ordering::Relaxed);
-            }
-        }
-    }
-    out.sort_by_key(|s| s.title.to_lowercase());
-    out
+/// Whether a path is a bmson chart, which is decoded from JSON instead of the BMS line grammar.
+pub fn is_bmson(p: &Path) -> bool {
+    p.extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_ascii_case(rbms_parser::bmson::EXTENSION)).unwrap_or(false)
 }
 
 /// Parse + time-integrate a single chart to derive its playable-note count, long-note count, length
 /// and BPM range for the select detail panel. `None` if the file can't be read.
 pub fn compute_chart_detail(path: &Path, mode: Mode) -> Option<ChartDetail> {
     let bytes = std::fs::read(path).ok()?;
-    let src = rbms_parser::parse(&bytes);
-    let total_value = src.headers.total.unwrap_or(0.0);
-    let model = to_model(&src, mode);
+    let (model, total_value) = if is_bmson(path) {
+        let chart = rbms_parser::bmson::parse(&bytes).ok()?;
+        let model = chart.to_model_in_mode(mode);
+        let total = model.meta.total;
+        (model, total)
+    } else {
+        let src = rbms_parser::parse(&bytes);
+        (to_model(&src, mode), src.headers.total.unwrap_or(0.0))
+    };
     let long_notes =
         model.timelines.iter().flat_map(|tl| tl.notes.iter().flatten()).filter(|n| matches!(n.kind, rbms_model::NoteKind::LongStart { .. })).count();
     let duration_us = model.timelines.last().map(|t| t.time_us).unwrap_or(0);

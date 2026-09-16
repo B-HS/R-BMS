@@ -238,15 +238,16 @@ fn green_number_floating_tracks_bpm_scroll_and_cover() {
 
 #[test]
 fn ir_submission_allowed_only_for_an_unassisted_interactive_play() {
-    assert_eq!(ir_submission_block_reason(false, false, false, false), None);
+    assert_eq!(ir_submission_block_reason(false, false, false, false, false), None);
 }
 
 #[test]
 fn ir_submission_blocked_for_autoplay_replay_and_assists() {
-    assert_eq!(ir_submission_block_reason(true, false, false, false), Some("autoplay"));
-    assert_eq!(ir_submission_block_reason(false, true, false, false), Some("replay playback"));
-    assert_eq!(ir_submission_block_reason(false, false, true, false), Some("judge window widened"));
-    assert_eq!(ir_submission_block_reason(false, false, false, true), Some("scratch assist"));
+    assert_eq!(ir_submission_block_reason(true, false, false, false, false), Some("autoplay"));
+    assert_eq!(ir_submission_block_reason(false, true, false, false, false), Some("replay playback"));
+    assert_eq!(ir_submission_block_reason(false, false, true, false, false), Some("judge window widened"));
+    assert_eq!(ir_submission_block_reason(false, false, false, true, false), Some("scratch assist"));
+    assert_eq!(ir_submission_block_reason(false, false, false, false, true), Some("practice"));
 }
 
 #[test]
@@ -255,12 +256,14 @@ fn updates_score_is_the_exact_complement_of_the_ir_block_reason() {
         for &replay in &[false, true] {
             for &custom_judge in &[false, true] {
                 for &scratch_auto in &[false, true] {
-                    let blocked = ir_submission_block_reason(autoplay, replay, custom_judge, scratch_auto).is_some();
-                    assert_eq!(
-                        updates_score(autoplay, replay, custom_judge, scratch_auto),
-                        !blocked,
-                        "autoplay={autoplay} replay={replay} custom_judge={custom_judge} scratch_auto={scratch_auto}"
-                    );
+                    for &practice in &[false, true] {
+                        let blocked = ir_submission_block_reason(autoplay, replay, custom_judge, scratch_auto, practice).is_some();
+                        assert_eq!(
+                            updates_score(autoplay, replay, custom_judge, scratch_auto, practice),
+                            !blocked,
+                            "autoplay={autoplay} replay={replay} custom_judge={custom_judge} scratch_auto={scratch_auto} practice={practice}"
+                        );
+                    }
                 }
             }
         }
@@ -269,11 +272,12 @@ fn updates_score_is_the_exact_complement_of_the_ir_block_reason() {
 
 #[test]
 fn updates_score_only_for_an_unassisted_interactive_play() {
-    assert!(updates_score(false, false, false, false));
-    assert!(!updates_score(false, false, true, false), "a widened judge window does not");
-    assert!(!updates_score(false, false, false, true), "auto scratch does not");
-    assert!(!updates_score(true, false, false, false));
-    assert!(!updates_score(false, true, false, false));
+    assert!(updates_score(false, false, false, false, false));
+    assert!(!updates_score(false, false, true, false, false), "a widened judge window does not");
+    assert!(!updates_score(false, false, false, true, false), "auto scratch does not");
+    assert!(!updates_score(true, false, false, false, false));
+    assert!(!updates_score(false, true, false, false, false));
+    assert!(!updates_score(false, false, false, false, true), "a practice slice does not");
 }
 
 /// The exact table decision 12 states, over every judge width and long-note margin the rows can

@@ -429,6 +429,11 @@ impl GrooveGauge {
         self.gauge_at(index).value()
     }
 
+    pub fn set_value_at(&mut self, index: GaugeIndex, value: f32) {
+        let gauge = &mut self.gauges[index.index()];
+        gauge.add_value(value - gauge.value());
+    }
+
     /// The selected gauge.
     pub fn selected(&self) -> &Gauge {
         self.gauge_at(self.selected)
@@ -1193,6 +1198,19 @@ mod groove_gauge_tests {
         assert_eq!(g.value(), 100.0);
         assert!(g.is_cleared(), "HARD starts at 100 with a border of 0");
         assert_eq!(g.lamp(), ClearType::Hard);
+    }
+
+    #[test]
+    fn a_course_gauge_slot_can_be_selected_and_seeded() {
+        let mut g = seven_key(GaugeKind::Normal);
+        g.select(GaugeIndex::Class);
+        g.set_value_at(GaugeIndex::Class, 72.0);
+        assert_eq!(g.selected_index(), GaugeIndex::Class);
+        assert_eq!(g.value(), 72.0);
+        g.set_value_at(GaugeIndex::Class, 200.0);
+        assert_eq!(g.value_at(GaugeIndex::Class), 100.0);
+        g.set_value_at(GaugeIndex::Class, -1.0);
+        assert_eq!(g.value_at(GaugeIndex::Class), 0.0);
     }
 
     #[test]

@@ -27,6 +27,157 @@ impl PendingChart {
     }
 }
 
+/// What the load path needs from a chart file, whatever format it is written in.
+struct DecodedChart {
+    mode: rbms_model::Mode,
+    model: rbms_model::Model,
+    /// The file hash a replay is checked against.
+    md5: String,
+    /// The long-note mode the chart states, in `#LNMODE` codes.
+    lnmode: i32,
+    /// The bmson document, kept only because bmson states TOTAL as a percentage of the mode default
+    /// and that percentage is not final until the long-note flavour is resolved.
+    bmson: Option<Box<rbms_parser::bmson::BmsonChart>>,
+}
+
+/// Whether a chart path names a bmson document, which is decoded from JSON rather than from the BMS
+/// line grammar.
+fn is_bmson_path(path: &str) -> bool {
+    Path::new(path).extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_ascii_case(rbms_parser::bmson::EXTENSION)).unwrap_or(false)
+}
+
+/// Decode a chart file of either format into the play model. `None` when the bytes are not a chart
+/// this build can read, which the caller reports instead of playing silence.
+fn decode_chart(bytes: &[u8], path: &str) -> Option<DecodedChart> {
+    if is_bmson_path(path) {
+        let chart = rbms_parser::bmson::parse(bytes).ok()?;
+        let mode = chart.mode();
+        let model = chart.to_model();
+        let (md5, lnmode) = (chart.md5.clone(), chart.info.ln_type as i32);
+        return Some(DecodedChart { mode, model, md5, lnmode, bmson: Some(Box::new(chart)) });
+    }
+    let src = rbms_parser::parse_with(bytes, Default::default());
+    let mode = rbms_chart::detect_mode(&src, path);
+    let model = to_model(&src, mode);
+    Some(DecodedChart { mode, model, md5: src.md5.clone(), lnmode: src.headers.lnmode, bmson: None })
+}
+
+/// The chart a practice session is set up on: the model as it stood before any range was cut from
+/// it, plus everything a slice's own session has to be built with.
+///
+/// Every slice is cut from this original rather than from the previous cut, so walking back to the
+/// panel and widening the range gives back the notes the last slice dropped.
+pub(crate) struct PracticeChart {
+    model: rbms_model::Model,
+    mode: rbms_model::Mode,
+    title: String,
+    images: std::collections::HashMap<i32, crate::DecodedImage>,
+    lntype: i32,
+    ln_mode_key: String,
+    judge_setup: rbms_play::JudgeSetup,
+    seed: u64,
+}
+
+/// The gauge kind a practice slice runs on, folding the three course gauges onto the six a session
+/// can be opened with — the same rule the replay path uses for a course-gauge replay.
+fn practice_gauge_kind(index: rbms_judge::gauge::GaugeIndex) -> rbms_judge::GaugeKind {
+    match index.kind() {
+        Some(kind) => kind,
+        None => match index {
+            rbms_judge::gauge::GaugeIndex::Class => rbms_judge::GaugeKind::Normal,
+            _ => rbms_judge::GaugeKind::ExHard,
+        },
+    }
+}
+
+fn practice_boundary_timeline(model: &rbms_model::Model, time_us: i64) -> rbms_model::TimeLine {
+    let context = model.timelines.iter().rev().find(|timeline| timeline.time_us <= time_us);
+    let (section, bpm, scroll) = match context {
+        Some(timeline) => (timeline.section, timeline.bpm, timeline.scroll),
+        None => (0.0, model.init_bpm, 1.0),
+    };
+    let mut timeline = rbms_model::TimeLine::empty(model.mode.key, time_us, section, bpm);
+    timeline.scroll = scroll;
+    timeline
+}
+
+fn practice_start_bga_timeline(model: &rbms_model::Model, time_us: i64) -> Option<rbms_model::TimeLine> {
+    let mut timeline = practice_boundary_timeline(model, time_us);
+    timeline.bga = match model.timelines.iter().any(|candidate| candidate.time_us == time_us && candidate.bga >= 0) {
+        true => -1,
+        false => model.timelines.iter().rev().find(|candidate| candidate.time_us < time_us && candidate.bga >= 0).map_or(-1, |candidate| candidate.bga),
+    };
+    timeline.layer = match model.timelines.iter().any(|candidate| candidate.time_us == time_us && candidate.layer >= 0) {
+        true => -1,
+        false => model.timelines.iter().rev().find(|candidate| candidate.time_us < time_us && candidate.layer >= 0).map_or(-1, |candidate| candidate.layer),
+    };
+    (timeline.bga >= 0 || timeline.layer >= 0).then_some(timeline)
+}
+
+fn practice_boundary_note(mut note: rbms_model::Note, time_us: i64, section: f64) -> rbms_model::Note {
+    note.time_us = time_us;
+    note.section = section;
+    note
+}
+
+fn slice_practice_model(model: &rbms_model::Model, start_us: i64, end_us: i64) -> rbms_model::Model {
+    let mut pending_starts = vec![None; model.mode.key];
+    let mut clipped_starts = Vec::new();
+    let mut clipped_ends = Vec::new();
+
+    for timeline in &model.timelines {
+        for (lane, note) in timeline.notes.iter().enumerate() {
+            let Some(note) = note else {
+                continue;
+            };
+            match note.kind {
+                rbms_model::NoteKind::LongStart { .. } => pending_starts[lane] = Some(note.clone()),
+                rbms_model::NoteKind::LongEnd { .. } => {
+                    let Some(start) = pending_starts[lane].take() else {
+                        continue;
+                    };
+                    let start_time_us = start.time_us;
+                    if start_time_us < start_us && note.time_us >= start_us {
+                        clipped_starts.push((lane, start));
+                    }
+                    if start_time_us <= end_us && note.time_us > end_us {
+                        clipped_ends.push((lane, note.clone()));
+                    }
+                }
+                rbms_model::NoteKind::Mine { .. } | rbms_model::NoteKind::Normal => {}
+            }
+        }
+    }
+
+    let mut ordered_timelines = Vec::new();
+    let mut order = 0;
+    for timeline in model.timelines.iter().filter(|timeline| timeline.time_us >= start_us && timeline.time_us <= end_us) {
+        ordered_timelines.push((timeline.time_us, 1, order, timeline.clone()));
+        order += 1;
+    }
+    if let Some(timeline) = practice_start_bga_timeline(model, start_us) {
+        ordered_timelines.push((start_us, 0, order, timeline));
+        order += 1;
+    }
+    for (lane, note) in clipped_starts {
+        let mut timeline = practice_boundary_timeline(model, start_us);
+        timeline.notes[lane] = Some(practice_boundary_note(note, start_us, timeline.section));
+        ordered_timelines.push((start_us, 0, order, timeline));
+        order += 1;
+    }
+    for (lane, note) in clipped_ends {
+        let mut timeline = practice_boundary_timeline(model, end_us);
+        timeline.notes[lane] = Some(practice_boundary_note(note, end_us, timeline.section));
+        ordered_timelines.push((end_us, 2, order, timeline));
+        order += 1;
+    }
+    ordered_timelines.sort_by_key(|(time_us, priority, order, _)| (*time_us, *priority, *order));
+
+    let mut sliced = model.clone();
+    sliced.timelines = ordered_timelines.into_iter().map(|(_, _, _, timeline)| timeline).collect();
+    sliced
+}
+
 /// A chart that has just been parsed, plus whatever is still being decoded for it. Either decode is
 /// `None` when there was nothing of that kind to wait for.
 pub(crate) struct LoadedChart {
@@ -39,6 +190,10 @@ pub(crate) struct LoadedChart {
 /// the previous reading so an interpolated clock can never step backwards inside a frame.
 pub(crate) fn song_position_us(audio_clock_us: i64, anchor_us: i64, previous_us: i64) -> i64 {
     rbms_audio::monotonic_us(previous_us, audio_clock_us - anchor_us)
+}
+
+pub(crate) fn timing_quantized_us(audio_clock_us: i64, anchor_us: i64, clock: crate::practice::PracticeClock) -> i64 {
+    clock.chart_time_us(audio_clock_us.saturating_sub(anchor_us))
 }
 
 /// Shortest horizon the scheduler is allowed to book against, so a frame that measured as almost
@@ -130,12 +285,18 @@ impl AppShared {
                 return None;
             }
         };
-        let src = rbms_parser::parse_with(&bytes, Default::default());
-        let mode = rbms_chart::detect_mode(&src, &self.chart_path);
+        let decoded = match decode_chart(&bytes, &self.chart_path) {
+            Some(decoded) => decoded,
+            None => {
+                notify(Level::Error, format!("chart could not be read: {}", self.chart_path));
+                return None;
+            }
+        };
+        let mode = decoded.mode;
         let (random, seed) = match &self.replay {
             Some(rp) => {
-                if !rp.md5.is_empty() && rp.md5 != src.md5 {
-                    notify(Level::Warn, format!("warning: chart md5 mismatch (replay {} vs file {}); replay may desync", rp.md5, src.md5));
+                if !rp.md5.is_empty() && rp.md5 != decoded.md5 {
+                    notify(Level::Warn, format!("warning: chart md5 mismatch (replay {} vs file {}); replay may desync", rp.md5, decoded.md5));
                 }
                 self.config.judge.offset_ms = rp.offset_ms;
                 self.config.play.scratch_auto = rp.scratch_auto;
@@ -146,12 +307,37 @@ impl AppShared {
             }
             None => (self.config.play.random, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1)),
         };
-        let judge_setup = run_judge_setup(&self.config, self.replay.as_ref());
-        let mut model = to_model(&src, mode);
+        let mut judge_setup = run_judge_setup(&self.config, self.replay.as_ref());
+        let course_state = if self.replay.is_some() { None } else { self.course_run.as_ref().map(|run| (run.carry_gauge, run.totals.combo_carry)) };
+        if course_state.is_some()
+            && let Some(overrides) = self.course_overrides.as_ref()
+        {
+            judge_setup.gauge_set = overrides.gauge_set_for(judge_setup.gauge_set);
+        }
+        let mut model = decoded.model;
         let ln_mode_decides_flavour = rbms_chart::contains_undefined_long_note(&model);
         rbms_chart::resolve_long_note_flavour(&mut model, judge_setup.ln_mode.resolve());
-        let lntype = run_lntype(src.headers.lnmode, judge_setup.ln_mode);
+        let lntype = run_lntype(decoded.lnmode, judge_setup.ln_mode);
+        let ln_mode_key = match ln_mode_decides_flavour {
+            true => ln_mode_token(judge_setup.ln_mode).to_string(),
+            false => SCORE_LN_MODE_FROM_CHART.to_string(),
+        };
+        if self.practice_requested {
+            self.practice_chart = Some(Box::new(PracticeChart {
+                model: model.clone(),
+                mode,
+                title: model.meta.title.clone(),
+                images: std::collections::HashMap::new(),
+                lntype,
+                ln_mode_key: ln_mode_key.clone(),
+                judge_setup,
+                seed,
+            }));
+        }
         rbms_chart::shuffle::apply(&mut model, random, seed);
+        if let Some(chart) = &decoded.bmson {
+            model.meta.total = chart.total_for_notes(&mode, rbms_chart::count_playable_notes(&model));
+        }
         if model.meta.total <= 0.0 {
             model.meta.total = default_total_for_mode(&mode, rbms_chart::count_playable_notes(&model));
         }
@@ -235,14 +421,12 @@ impl AppShared {
             analysis: self.replay.is_some() && self.config.display.replay_analysis,
             auto_calibration: self.config.judge.auto_offset,
             replay: self.replay.clone(),
+            initial_gauge: course_state.map(|(gauge_value, _)| (rbms_judge::gauge::GaugeIndex::Class, gauge_value)),
+            initial_combo: course_state.map_or(0, |(_, combo)| combo),
             ..SessionOptions::default()
         };
         let mut session = PlaySession::new(model, options);
         session.set_judge_setup(judge_setup);
-        let ln_mode_key = match ln_mode_decides_flavour {
-            true => ln_mode_token(judge_setup.ln_mode).to_string(),
-            false => SCORE_LN_MODE_FROM_CHART.to_string(),
-        };
         Some(LoadedChart { chart: PendingChart { session, lntype, ln_mode_key }, bga, keysounds })
     }
 
@@ -250,10 +434,123 @@ impl AppShared {
     /// or start play right away when there is nothing left to wait for.
     pub(crate) fn enter_loaded_chart(&mut self, loaded: LoadedChart) -> Stage {
         if loaded.bga.is_none() && loaded.keysounds.is_none() {
+            let mut images = std::collections::HashMap::new();
+            if let Some(stage) = self.practice_stage_if_requested(&mut images) {
+                return stage;
+            }
             self.start_play();
-            return Stage::Play(Box::new(loaded.chart.into_play(std::collections::HashMap::new())));
+            return Stage::Play(Box::new(loaded.chart.into_play(images)));
         }
         Stage::Loading(LoadingState::assets(loaded))
+    }
+
+    pub(crate) fn has_practice_request(&self) -> bool {
+        self.practice_requested
+    }
+
+    /// The practice panel for the chart that has just finished loading, when the browser asked for
+    /// one. The parsed session that came with it is dropped: a practice slice builds its own from
+    /// the untrimmed model, so nothing of the full run is reused.
+    pub(crate) fn practice_stage_if_requested(&mut self, images: &mut std::collections::HashMap<i32, crate::DecodedImage>) -> Option<Stage> {
+        if !self.practice_requested {
+            return None;
+        }
+        self.practice_requested = false;
+        let chart = self.practice_chart.as_mut()?;
+        chart.images = std::mem::take(images);
+        let last_ms = crate::practice::last_timeline_ms(&chart.model);
+        let total = match chart.model.meta.total > 0.0 {
+            true => chart.model.meta.total,
+            false => default_total_for_mode(&chart.mode, rbms_chart::count_playable_notes(&chart.model)),
+        };
+        let saved = self.practice_book.get(&chart.model.md5);
+        let panel = crate::practice::PracticePanel::new(chart.model.md5.clone(), chart.mode, last_ms, saved, total);
+        let title = chart.title.clone();
+        Some(Stage::Practice(Box::new(crate::stage::PracticeState::new(panel, title))))
+    }
+
+    /// Build the run for the range the practice panel describes.
+    ///
+    /// Trimming the timelines is what gives range playback without reaching into `rbms-play`:
+    /// seeking is a replay-only path there, and merely moving the clock would have the first update
+    /// sweep every note before the start time into MISS. The cost is that the gauge's TOTAL is
+    /// spread over the slice's notes rather than the chart's, which is recorded as a divergence.
+    pub(crate) fn start_practice_slice(&mut self, panel: &mut crate::practice::PracticePanel) -> Option<PlayState> {
+        let practice = panel.start();
+        let chart = self.practice_chart.as_mut()?;
+        let mode = chart.mode;
+        let seed = chart.seed;
+        let lntype = chart.lntype;
+        let ln_mode_key = chart.ln_mode_key.clone();
+        let images = std::mem::take(&mut chart.images);
+        let mut judge_setup = chart.judge_setup;
+        let mut model = slice_practice_model(&chart.model, practice.start_us, practice.end_us);
+        rbms_chart::shuffle::apply(&mut model, practice.option, seed);
+        match practice.total {
+            Some(total) => model.meta.total = total,
+            None => {
+                if model.meta.total <= 0.0 {
+                    model.meta.total = default_total_for_mode(&mode, rbms_chart::count_playable_notes(&model));
+                }
+            }
+        }
+        self.mode = mode;
+        self.active_keys = self.launch.keys_override.clone().unwrap_or_else(|| self.keyconfig.lane_keys(mode));
+        self.active_reverse_keys = match self.launch.keys_override {
+            Some(_) => Vec::new(),
+            None => self.keyconfig.scratch_reverse_keys(mode),
+        };
+        let options = SessionOptions {
+            gauge: practice_gauge_kind(practice.gauge),
+            judge_offset_us: self.offset_us(),
+            judge_rate_percent: practice.judge_rate_percent,
+            seed,
+            initial_gauge: Some((practice.gauge, practice.start_gauge)),
+            ..SessionOptions::default()
+        };
+        let mut session = PlaySession::new(model, options);
+        judge_setup.gauge_set = Some(practice.gauge_set);
+        judge_setup.judge_rate_key = [practice.judge_rate_percent; rbms_config::JUDGE_WIDTH_TIER_COUNT];
+        judge_setup.judge_rate_scratch = [practice.judge_rate_percent; rbms_config::JUDGE_WIDTH_TIER_COUNT];
+        session.set_judge_setup(judge_setup);
+        let mut play = PlayState::new(session, images, lntype, ln_mode_key);
+        play.set_practice(practice);
+        self.start_play();
+        Some(play)
+    }
+
+    pub(crate) fn restore_practice_images(&mut self, images: &mut std::collections::HashMap<i32, crate::DecodedImage>) {
+        let Some(chart) = self.practice_chart.as_mut() else {
+            return;
+        };
+        chart.images = std::mem::take(images);
+    }
+
+    pub(crate) fn release_practice_chart(&mut self) {
+        self.practice_chart = None;
+    }
+
+    /// Raise a system sound on the shared stream. Silent when the stream is not open or the set has
+    /// no file for it.
+    ///
+    /// The set is taken out and put back because the sound bank and the output stream are two
+    /// fields of the same struct and the call needs one of each.
+    pub(crate) fn play_system_sound(&mut self, sound: SystemSound) {
+        let syssound = std::mem::take(&mut self.syssound);
+        if let Some(engine) = self.audio.as_mut() {
+            syssound.play(engine, sound, SYSTEM_SOUND_GAIN);
+        }
+        self.syssound = syssound;
+    }
+
+    /// Re-read the system sound set after the SOUND FOLDER row changed, and hand it to the running
+    /// stream so the next cue is heard without a restart.
+    pub(crate) fn reload_system_sounds(&mut self) {
+        self.syssound = SystemSoundSet::load_optional(sound_folder_path(&self.config).as_deref());
+        self.syssound.set_guide_enabled(self.config.audio.guide_se);
+        if let Some(engine) = self.audio.as_mut() {
+            self.syssound.install(engine);
+        }
     }
 
     /// Leave a run: back to the song browser, or out of the app when there is no library to return
@@ -301,9 +598,12 @@ impl AppShared {
                 self.audio_failed = false;
                 self.audio_dead_at.set(None);
                 self.apply_audio_gains();
+                let syssound = std::mem::take(&mut self.syssound);
                 if let Some(engine) = self.audio.as_mut() {
                     engine.set_chart_gain(self.chart_gain);
+                    syssound.install(engine);
                 }
+                self.syssound = syssound;
             }
             Err(e) => {
                 notify(Level::Warn, format!("audio unavailable ({e}) — visual only"));
@@ -380,9 +680,13 @@ impl AppShared {
 
     /// The browser lines of the debug overlay, shown on every screen but PLAY.
     pub(crate) fn browser_debug_lines(&self) -> Vec<String> {
+        let store = match self.scoredb.is_some() {
+            true => scoredb_store::SCOREDB_FILE.to_string(),
+            false => self.scores_path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| scoredb_store::SCORES_RON_FILE.to_string()),
+        };
         vec![
             format!("SEL {} / {}", self.sel + 1, self.select_items.len()),
-            format!("SCORES {}  SONGS {}", self.scores.records().len(), self.library.len()),
+            format!("SCORES {} ({store})  SONGS {}", self.scores.records().len(), self.library.len()),
             format!("CURSOR {:.0} {:.0}", self.cursor.0, self.cursor.1),
         ]
     }
@@ -444,15 +748,15 @@ impl AppShared {
 
     /// Record one input on both clocks so the overlay and the CSV dump can compare the interpolated
     /// reading against the quantised one, stamped with the wall clock it was taken at.
-    pub(crate) fn push_timing_sample(&mut self, audible_us: i64, judge_delta_us: Option<i64>) {
+    pub(crate) fn push_timing_sample(&mut self, input_at_us: i64, clock: crate::practice::PracticeClock, judge_delta_us: Option<i64>) {
         let Some(audio) = self.audio.as_ref() else {
             return;
         };
         let snapshot = audio.snapshot();
         let sample = TimingSample {
             wall_us: self.clock.elapsed().as_micros() as i64,
-            input_at_us: audible_us,
-            quantized_us: audio.clock_us() - self.anchor_us,
+            input_at_us,
+            quantized_us: timing_quantized_us(audio.clock_us(), self.anchor_us, clock),
             judge_delta_us,
             frames_at_start: snapshot.frames_at_callback_start,
             buffer_frames: snapshot.buffer_frames,
@@ -559,7 +863,8 @@ impl AppShared {
         lines
     }
 
-    pub(crate) fn print_selection(&self) {
+    pub(crate) fn print_selection(&mut self) {
+        self.play_system_sound(SystemSound::Scratch);
         let total = self.select_items.len();
         match self.select_items.get(self.sel) {
             Some(SelectItem::Song(i)) => {
@@ -588,8 +893,277 @@ pub(crate) fn pending_chart_for_tests() -> PendingChart {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::stage::StageHandler;
 
     const BUFFER_US_512_AT_48K: i64 = 10_687;
+
+    fn decoded_images() -> std::collections::HashMap<i32, crate::DecodedImage> {
+        [(1, crate::DecodedImage::for_test(vec![1, 2, 3, 4], 1, 1)), (2, crate::DecodedImage::for_test(vec![5, 6, 7, 8], 1, 1))].into_iter().collect()
+    }
+
+    fn practice_chart() -> PracticeChart {
+        let src =
+            rbms_parser::parse_with(b"#PLAYER 1\n#TITLE practice\n#BPM 120\n#BMP01 one.png\n#BMP02 two.png\n#00104:0102\n#00111:0100\n", Default::default());
+        let mode = rbms_chart::detect_mode(&src, "practice.bms");
+        let model = to_model(&src, mode);
+        PracticeChart {
+            title: model.meta.title.clone(),
+            model,
+            mode,
+            images: std::collections::HashMap::new(),
+            lntype: 0,
+            ln_mode_key: SCORE_LN_MODE_FROM_CHART.to_string(),
+            judge_setup: rbms_play::JudgeSetup::default(),
+            seed: 1,
+        }
+    }
+
+    fn practice_long_note_model(head_us: i64, end_us: i64) -> rbms_model::Model {
+        let mut head = rbms_model::TimeLine::empty(rbms_model::Mode::BEAT_7K.key, head_us, 0.25, 180.0);
+        head.scroll = 0.75;
+        head.notes[0] = Some(rbms_model::Note {
+            kind: rbms_model::NoteKind::LongStart { ln: rbms_model::LnKind::Hcn },
+            wav: 11,
+            start_us: 7,
+            duration_us: 13,
+            time_us: head_us,
+            section: 0.25,
+            layered: vec![rbms_model::Note::normal(12, head_us, 0.25)],
+        });
+        let mut end = rbms_model::TimeLine::empty(rbms_model::Mode::BEAT_7K.key, end_us, 0.5, 200.0);
+        end.scroll = 1.25;
+        end.notes[0] = Some(rbms_model::Note {
+            kind: rbms_model::NoteKind::LongEnd { ln: rbms_model::LnKind::Hcn },
+            wav: 21,
+            start_us: 17,
+            duration_us: 23,
+            time_us: end_us,
+            section: 0.5,
+            layered: vec![rbms_model::Note::normal(22, end_us, 0.5)],
+        });
+        rbms_model::Model {
+            mode: rbms_model::Mode::BEAT_7K,
+            meta: rbms_model::ModelMeta::default(),
+            wavmap: Vec::new(),
+            bgamap: Vec::new(),
+            init_bpm: 120.0,
+            timelines: vec![head, end],
+            md5: String::new(),
+            sha256: String::new(),
+        }
+    }
+
+    fn long_note_points(model: &rbms_model::Model) -> Vec<(i64, rbms_model::Note)> {
+        model
+            .timelines
+            .iter()
+            .flat_map(|timeline| {
+                timeline
+                    .notes
+                    .iter()
+                    .flatten()
+                    .filter(|note| matches!(note.kind, rbms_model::NoteKind::LongStart { .. } | rbms_model::NoteKind::LongEnd { .. }))
+                    .cloned()
+            })
+            .map(|note| (note.time_us, note))
+            .collect()
+    }
+
+    fn practice_bga_model(timelines: Vec<rbms_model::TimeLine>) -> rbms_model::Model {
+        rbms_model::Model {
+            mode: rbms_model::Mode::BEAT_7K,
+            meta: rbms_model::ModelMeta::default(),
+            wavmap: Vec::new(),
+            bgamap: Vec::new(),
+            init_bpm: 120.0,
+            timelines,
+            md5: String::new(),
+            sha256: String::new(),
+        }
+    }
+
+    #[test]
+    fn practice_slice_clips_a_long_note_that_started_before_its_range() {
+        let sliced = slice_practice_model(&practice_long_note_model(10, 30), 20, 40);
+        let points = long_note_points(&sliced);
+
+        assert_eq!(points.iter().map(|(time_us, _)| *time_us).collect::<Vec<_>>(), vec![20, 30]);
+        assert!(matches!(points[0].1.kind, rbms_model::NoteKind::LongStart { ln: rbms_model::LnKind::Hcn }));
+        assert_eq!(points[0].1.wav, 11);
+        assert_eq!(points[0].1.start_us, 7);
+        assert_eq!(points[0].1.duration_us, 13);
+        assert_eq!(points[0].1.layered.len(), 1);
+        assert_eq!(sliced.timelines[0].bpm, 180.0);
+        assert_eq!(sliced.timelines[0].scroll, 0.75);
+        assert_eq!(rbms_judge::JudgeEngine::from_model_for_mode(&sliced).total_notes(), 2);
+    }
+
+    #[test]
+    fn practice_slice_clips_a_long_note_that_ends_after_its_range() {
+        let sliced = slice_practice_model(&practice_long_note_model(20, 50), 10, 40);
+        let points = long_note_points(&sliced);
+
+        assert_eq!(points.iter().map(|(time_us, _)| *time_us).collect::<Vec<_>>(), vec![20, 40]);
+        assert!(matches!(points[1].1.kind, rbms_model::NoteKind::LongEnd { ln: rbms_model::LnKind::Hcn }));
+        assert_eq!(points[1].1.wav, 21);
+        assert_eq!(points[1].1.start_us, 17);
+        assert_eq!(points[1].1.duration_us, 23);
+        assert_eq!(points[1].1.layered.len(), 1);
+        assert_eq!(rbms_judge::JudgeEngine::from_model_for_mode(&sliced).total_notes(), 2);
+    }
+
+    #[test]
+    fn practice_slice_clips_both_boundaries_of_a_spanning_long_note() {
+        let sliced = slice_practice_model(&practice_long_note_model(10, 50), 20, 40);
+        let points = long_note_points(&sliced);
+
+        assert_eq!(points.iter().map(|(time_us, _)| *time_us).collect::<Vec<_>>(), vec![20, 40]);
+        assert!(matches!(points[0].1.kind, rbms_model::NoteKind::LongStart { .. }));
+        assert!(matches!(points[1].1.kind, rbms_model::NoteKind::LongEnd { .. }));
+        assert_eq!(rbms_judge::JudgeEngine::from_model_for_mode(&sliced).total_notes(), 2);
+    }
+
+    #[test]
+    fn practice_slice_does_not_duplicate_long_note_endpoints_on_its_boundaries() {
+        let sliced = slice_practice_model(&practice_long_note_model(20, 40), 20, 40);
+        let points = long_note_points(&sliced);
+
+        assert_eq!(points.iter().map(|(time_us, _)| *time_us).collect::<Vec<_>>(), vec![20, 40]);
+        assert_eq!(sliced.timelines.len(), 2);
+        assert_eq!(rbms_judge::JudgeEngine::from_model_for_mode(&sliced).total_notes(), 2);
+    }
+
+    #[test]
+    fn practice_slice_keeps_a_long_note_fully_inside_its_range_unchanged() {
+        let sliced = slice_practice_model(&practice_long_note_model(25, 35), 20, 40);
+        let points = long_note_points(&sliced);
+
+        assert_eq!(points.iter().map(|(time_us, _)| *time_us).collect::<Vec<_>>(), vec![25, 35]);
+        assert_eq!(points[0].1.wav, 11);
+        assert_eq!(points[1].1.wav, 21);
+        assert_eq!(sliced.timelines.len(), 2);
+        assert_eq!(rbms_judge::JudgeEngine::from_model_for_mode(&sliced).total_notes(), 2);
+    }
+
+    #[test]
+    fn practice_slice_carries_prior_bga_and_layer_to_its_start() {
+        let mut before = rbms_model::TimeLine::empty(rbms_model::Mode::BEAT_7K.key, 10, 0.25, 180.0);
+        before.scroll = 0.75;
+        before.bga = 3;
+        before.layer = 4;
+        let later = rbms_model::TimeLine::empty(rbms_model::Mode::BEAT_7K.key, 30, 0.5, 200.0);
+        let sliced = slice_practice_model(&practice_bga_model(vec![before, later]), 20, 40);
+
+        assert_eq!(sliced.timelines[0].time_us, 20);
+        assert_eq!(sliced.timelines[0].bga, 3);
+        assert_eq!(sliced.timelines[0].layer, 4);
+        assert_eq!(sliced.timelines[0].bpm, 180.0);
+        assert_eq!(sliced.timelines[0].scroll, 0.75);
+
+        let mut session = rbms_play::PlaySession::new(sliced, rbms_play::SessionOptions::default());
+        session.tick(rbms_play::SessionClock::at(20), &mut rbms_play::NullSink);
+        assert_eq!(session.bga_frame(), 3);
+    }
+
+    #[test]
+    fn practice_slice_keeps_start_bga_and_layer_events_ahead_of_prior_state() {
+        let mut before = rbms_model::TimeLine::empty(rbms_model::Mode::BEAT_7K.key, 10, 0.25, 180.0);
+        before.bga = 3;
+        before.layer = 4;
+        let mut at_start = rbms_model::TimeLine::empty(rbms_model::Mode::BEAT_7K.key, 20, 0.5, 200.0);
+        at_start.bga = 6;
+        at_start.layer = 7;
+        let sliced = slice_practice_model(&practice_bga_model(vec![before, at_start]), 20, 40);
+
+        assert_eq!(sliced.timelines.len(), 1);
+        assert_eq!(sliced.timelines[0].bga, 6);
+        assert_eq!(sliced.timelines[0].layer, 7);
+
+        let mut session = rbms_play::PlaySession::new(sliced, rbms_play::SessionOptions::default());
+        session.tick(rbms_play::SessionClock::at(20), &mut rbms_play::NullSink);
+        assert_eq!(session.bga_frame(), 6);
+    }
+
+    #[test]
+    fn practice_slice_carries_bms_poor_bga_as_its_base_frame() {
+        let source = rbms_parser::parse_with(b"#PLAYER 1\n#BPM 120\n#BMP01 poor.png\n#00106:01\n", Default::default());
+        let model = rbms_chart::to_model(&source, rbms_chart::detect_mode(&source, "poor.bms"));
+        let poor_time_us = model.timelines.iter().find(|timeline| timeline.bga == 1).expect("the poor channel becomes a BGA event").time_us;
+        let sliced = slice_practice_model(&model, poor_time_us + 1, poor_time_us + 2);
+
+        assert_eq!(sliced.timelines[0].bga, 1);
+
+        let mut session = rbms_play::PlaySession::new(sliced, rbms_play::SessionOptions::default());
+        session.tick(rbms_play::SessionClock::at(poor_time_us + 1), &mut rbms_play::NullSink);
+        assert_eq!(session.bga_frame(), 1);
+    }
+
+    #[test]
+    fn practice_slice_does_not_add_a_bga_boundary_without_an_active_frame() {
+        let timeline = rbms_model::TimeLine::empty(rbms_model::Mode::BEAT_7K.key, 10, 0.25, 180.0);
+        let sliced = slice_practice_model(&practice_bga_model(vec![timeline]), 20, 40);
+
+        assert!(sliced.timelines.is_empty());
+    }
+
+    #[test]
+    fn practice_moves_loaded_images_between_the_chart_and_each_slice() {
+        let settings = std::env::temp_dir().join(format!("rbms-practice-images-{}.ron", std::process::id()));
+        let mut app = App::new(String::new(), Config::default(), LaunchOptions::default(), settings);
+        app.shared.practice_requested = true;
+        app.shared.practice_chart = Some(Box::new(practice_chart()));
+        let mut images = decoded_images();
+
+        assert!(matches!(app.shared.practice_stage_if_requested(&mut images), Some(Stage::Practice(_))));
+        assert!(images.is_empty());
+        assert_eq!(app.shared.practice_chart.as_ref().expect("practice chart").images.len(), 2);
+
+        let mut panel = crate::practice::PracticePanel::new("practice".to_string(), rbms_model::Mode::BEAT_7K, 60_000, None, 300.0);
+        let mut first = app.shared.start_practice_slice(&mut panel).expect("first practice slice");
+
+        assert_eq!(first.bga_count(), 2);
+        assert!(app.shared.practice_chart.as_ref().expect("practice chart").images.is_empty());
+
+        first.on_exit(&mut crate::stage::FrameCtx { shared: &mut app.shared, now: std::time::Instant::now(), dt: 0.0 });
+
+        assert_eq!(app.shared.practice_chart.as_ref().expect("practice chart").images.len(), 2);
+
+        let mut second = app.shared.start_practice_slice(&mut panel).expect("second practice slice");
+        assert_eq!(second.bga_count(), 2);
+        assert!(app.shared.practice_chart.as_ref().expect("practice chart").images.is_empty());
+
+        second.on_exit(&mut crate::stage::FrameCtx { shared: &mut app.shared, now: std::time::Instant::now(), dt: 0.0 });
+        assert_eq!(app.shared.practice_chart.as_ref().expect("practice chart").images.len(), 2);
+    }
+
+    #[test]
+    fn a_practice_slice_returns_images_before_the_panel_releases_its_chart() {
+        let settings = std::env::temp_dir().join(format!("rbms-practice-release-{}.ron", std::process::id()));
+        let mut app = App::new(String::new(), Config::default(), LaunchOptions::default(), settings);
+        let mut chart = practice_chart();
+        chart.images = decoded_images();
+        app.shared.practice_chart = Some(Box::new(chart));
+        let panel = crate::practice::PracticePanel::new("practice".to_string(), rbms_model::Mode::BEAT_7K, 60_000, None, 300.0);
+        let mut state = crate::stage::PracticeState::new(panel, "practice".to_string());
+
+        let transition = state.handle_key(
+            &mut crate::stage::FrameCtx { shared: &mut app.shared, now: std::time::Instant::now(), dt: 0.0 },
+            crate::stage::KeyInput { code: KeyCode::Enter, pressed: true, released: false, text: None },
+        );
+        let Transition::Open(Stage::Play(mut play)) = transition else {
+            panic!("practice enter must open a play stage");
+        };
+        state.on_exit(&mut crate::stage::FrameCtx { shared: &mut app.shared, now: std::time::Instant::now(), dt: 0.0 });
+        assert!(app.shared.practice_chart.as_ref().expect("practice chart").images.is_empty());
+
+        play.on_exit(&mut crate::stage::FrameCtx { shared: &mut app.shared, now: std::time::Instant::now(), dt: 0.0 });
+        assert_eq!(app.shared.practice_chart.as_ref().expect("practice chart").images.len(), 2);
+
+        state.on_enter(&mut crate::stage::FrameCtx { shared: &mut app.shared, now: std::time::Instant::now(), dt: 0.0 });
+        state.on_exit(&mut crate::stage::FrameCtx { shared: &mut app.shared, now: std::time::Instant::now(), dt: 0.0 });
+
+        assert!(app.shared.practice_chart.is_none());
+    }
 
     #[test]
     fn the_song_clock_is_the_audio_clock_rebased_on_the_anchor() {
@@ -610,6 +1184,19 @@ mod tests {
     #[test]
     fn an_audio_clock_behind_the_anchor_is_clamped_to_the_start() {
         assert_eq!(song_position_us(499_000, 500_000, 0), 0);
+    }
+
+    #[test]
+    fn timing_samples_use_the_practice_clock_axis() {
+        let clock = crate::practice::PracticeClock::new(30_000_000, 200);
+        let quantized_us = timing_quantized_us(45_000_000, 40_000_000, clock);
+        assert_eq!(quantized_us, 40_000_000);
+        assert_eq!(quantized_us, clock.chart_time_us(5_000_000));
+    }
+
+    #[test]
+    fn timing_samples_keep_the_normal_clock_axis_unchanged() {
+        assert_eq!(timing_quantized_us(45_000_000, 40_000_000, crate::practice::PracticeClock::normal()), 5_000_000);
     }
 
     #[test]

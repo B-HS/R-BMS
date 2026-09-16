@@ -62,6 +62,14 @@ impl StageHandler for ResultState {
         Transition::Stay
     }
 
+    fn on_enter(&mut self, ctx: &mut FrameCtx<'_>) {
+        ctx.shared.play_system_sound(crate::syssound::result_sound(self.cleared));
+    }
+
+    fn on_exit(&mut self, ctx: &mut FrameCtx<'_>) {
+        ctx.shared.play_system_sound(SystemSound::ResultClose);
+    }
+
     /// Keys on the result screen: back to the browser, or straight into another run. The two
     /// run-again keys stand down for a run the player did not play, which has nothing to repeat.
     fn handle_key(&mut self, ctx: &mut FrameCtx<'_>, key: KeyInput<'_>) -> Transition {

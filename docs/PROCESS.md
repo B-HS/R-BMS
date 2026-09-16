@@ -1,10 +1,9 @@
 # rbms — 레퍼런스 구현 core PLAY 모듈 Rust 포팅 (PROCESS / 단일 출처)
 
-> 세션 핸드오프 스냅샷: `docs/HANDOFF.md`(단일 진입점).
-> **2026-09-10 중단 지점**: 고도화 세션이 Phase G 배선 중 토큰 한도로 멈췄다. 재개는 `docs/history/2026-09-10-session-wrap-up.md` 부터(`dev` 는 clean·CI 통과, 미완 작업은 `wip/phase-g`).
+> 이전 Phase G 중단 스냅샷은 `docs/HANDOFF.md`와 `docs/history/2026-09-10-session-wrap-up.md`에 보존한다. 현재는 Phase G·H까지 완료했고 Phase R은 실제 키와 함께 추후 진행한다.
 > 새 세션은 **이 문서부터** 읽는다. 현재 상태·아키텍처·실행법·할 일의 SSOT. (ai-process.md 원칙 1·14)
 > 베이스 룰: `~/.claude/CLAUDE.md` + convention. Rust 프로젝트 → TS 전용 규칙(arrow 등) 비적용, **공통 원칙**(주석 금지·설명은 docs/·정확 네이밍·근본 해결·공식문서 우선·검증 후 진행)은 그대로.
-> 위치: `/Users/gkn/R-BMS`. 빌드 `cargo build`, 테스트 `cargo test --workspace`(**Phase F 최종 검증 실측 2232 통과 · 0 실패 · 2 ignored**). lint 는 이제 게이트다 — `cargo fmt --all --check` 와 `cargo clippy --workspace --all-targets --all-features -- -D warnings` 가 CI 필수 통과 조건이고 툴체인은 `rust-toolchain.toml` 로 `1.95.0` 고정. 실행은 §5(`./start.sh`).
+> 위치: `/Users/gkn/R-BMS`. 빌드 `cargo build`, 테스트 `cargo test --workspace`(Phase H 최종 실행 exit 0, 등록 테스트 3,040개; 실제 오디오 장치 테스트 2건 ignored). lint 는 이제 게이트다 — `cargo fmt --all --check` 와 `cargo clippy --workspace --all-targets --all-features -- -D warnings` 가 CI 필수 통과 조건이고 툴체인은 `rust-toolchain.toml` 로 `1.95.0` 고정. 실행 정본은 `README.md`다.
 > git: **dev(작업)/prod(배포) 브랜치 모델**(CI는 dev, 릴리스는 prod → `docs/ci-release.md`). **커밋 메시지에 co-author(Claude) 넣지 않음**(사용자 명시 지시), 작성자 `Hyunseok Byun <gumyoincirno@gmail.com>`. `target`·`Cargo.lock`·라이브러리 차트 커밋 금지(.gitignore).
 > 다음 할 일(로드맵)은 **`ROADMAP.md`**, 백엔드 설계는 **`docs/backend/`**, 배포/CI는 **`docs/ci-release.md`**.
 
@@ -81,9 +80,27 @@
 - [x] D 판정 패리티 완성 + JUDGE 탭 노출(2026-09-10, 명세 `docs/plan/2026-09-09-phase-d-spec.md`; D0~D5 순차 구현 + 적대 리뷰 23건 반영, history `docs/history/2026-09-09-phase-d-judge-parity.md`, 발산 `docs/acknowledge/reference-divergences.md` §Phase D) — J17 알고리즘 4종(기본값 `Combo` 전환)·J20 9게이지+J26 GAS·J21~J23(5세트×9원소 게이지+PMS fixjudge)·J9/A10 정역 2키(BSS/MSS 앱 배선)·J24 CN/HCN 2단계 폴드·J25 LN MODE(모델+리플레이+스코어 키 전부 동일 축)·J6 24K Mode 신설·어시스트 램프 강등(`rule_version` 게이팅). 게이트(Fable 실측): fmt 통과, `cargo test --workspace` **1876 통과 · 0 실패 · 3 ignored**(D 착수 전 1,656), `cargo clippy --workspace --all-targets -- -D warnings` 0 경고, 금지어 grep 0, 신규 `//` 주석 0. HEAD `0c20fa9` 위 워킹트리 변경(미커밋)
 - [x] E1~E6 스킨 완전 커스터마이징(2026-09-09~10, 명세 `docs/plan/2026-09-09-phase-e-spec.md`; 웨이브 0 스캐폴드 → 웨이브 1 E-prim(프리미티브 6종+배칭 규칙, 골든 PNG 3장)+E2(타이머 151개·프로퍼티 968개 생성기 커밋)+DST → 웨이브 2 E-prop(레지스트리+상태원천 라우팅)+E-load(모델·JSON5·Lua `mlua` 샌드박스·경로해석, 로더 통합테스트 신규작성 중 결함 2건 발견 수정) → 웨이브 3 E-screen(`skin_render/` 신규, BGA 특수경로 제거)+E-ui(SKIN 탭+문서탐색/선택/커스터마이즈+`rbms-config` 영속화) → 적대 리뷰 28건(critical 4) 전건 테스트 붙여 수정, history `docs/history/2026-09-09-phase-e-skin.md`, 발산 `docs/acknowledge/reference-divergences.md` §Phase E(착수전 5건+웨이브3 통합 9건+리뷰반영 7건, 총 21건 E-D1~E-D21)) — 최종 게이트(Fable 실측, 이 세션 재검증, 수정 없음): fmt 통과(no-op), `cargo test --workspace` **2633 통과 · 0 실패**, clippy `-D warnings` 0 경고, 금지어 grep 0, 신규 `//` 주석 0(유일 매칭은 raw string 픽스처 리터럴 내부 텍스트). 골든 PNG 4장 합계 23KB(200KB 예산 이내, 이번 세션 무변경). 기본화면/픽스처스킨 헤드리스 PNG 확인 완료. 미구현(후속): Note/Judge/Gauge류 오브젝트(E-D9)·레인별 타이머(E-D14)는 플레이 세션 데이터 배선이 Phase E 범위 밖이라 경고 후 드롭
 - [x] F UX·기능 고도화(2026-09-09~10, 명세 `docs/plan/2026-09-09-phase-f-spec.md`; F0~F4 5갈래 병렬 구현 → 통합(`docs/history/2026-09-10-phase-f-integration.md`) → 적대 리뷰 21건(critical 1·major 다수) 반영 19건·발산 등록 2건 → 최종 검증, history `docs/history/2026-09-09-phase-f-ux.md`, 발산 `docs/acknowledge/reference-divergences.md` §Phase F) — 옵션 오버레이(결정 3, 11행)·토스트/상태줄·백그라운드 로딩(폴더스캔/표fetch/키음·BGA 디코드 워커화)·정렬 12종(레퍼런스 `BarSorter` 패리티, 오름차순+무기록 마지막)·필터 패널(레벨/모드/클리어/즐겨찾기)·타깃 8종(고정레이트 11종 전체선택+RANK NEXT)/PACEMAKER 실시간·결과 3분할 그래프(GAUGE/TIMING/JUDGE)·27분위 랭크바. 최종 게이트(Fable 실측, 수정 없이 재검증): fmt 통과(no-op), clippy `-D warnings` 0 경고, `cargo test --workspace` **2232 통과 · 0 실패 · 2 ignored**(테스트 바이너리 38개 전부 ok), 금지어·금지주석 0건. 옵션 오버레이/결과+그래프/필터+토스트 3화면 헤드리스 PNG 육안 확인(임시 하네스, 확인 후 원복). 미구현 2건(BPM 정렬=시작BPM vs 레퍼런스 최고BPM · 차트파싱 미워커화)과 LANE OPTION FLIP/BATTLE 미배선은 발산 문서에 사유·해소조건 등록 후속(경미): 토스트가 곡선택 우하단 힌트 줄과 겹침 — 토스트를 힌트 위로 올리거나 표시 중 힌트를 숨길 것
-- [ ] G 데이터 스케일·롱테일(**중단·재개 지점**, 2026-09-10 토큰 한도) — 갈래 G0~G7·G9(곡DB·스코어DB·코스·연습·게임패드·시스템 사운드·복수 IR·bmson) 구현 완료분과 G8 배선 지시서는 브랜치 `wip/phase-g`(`729ba39`+1) 에 보존, 컴파일 미완(`settings_ui.rs` SHIPPED_ROWS 79 vs SettingId 82). 재개 절차 `docs/history/2026-09-10-session-wrap-up.md` §3, 스크립트 `docs/utils/workflows/wf-phase-g.js` G8 단계부터. 원계획 — 곡DB(rusqlite)·스코어DB·코스·연습 모드·gilrs/MIDI·시스템 사운드·복수 IR
-- [ ] H 경미 후속 일괄(사용자 결정 2026-09-10: G 다음에 모아서 처리) — ① 토스트가 곡선택 우하단 힌트 줄과 겹침 ② Phase B 실기 가청 확인(사용자 몫) ③ `app_input::tests::the_settings_row_and_the_in_play_key_stop_at_the_same_ceiling` 가 Linux CI 에서 60초 초과(전수 루프 → 경계값 검사로 축소) ④ 이후 발생하는 경미 항목은 여기에 누적
-- [ ] R 릴리스(prod 브랜치·브랜치 보호·v0.1.0 태그·서명) — **사용자가 직접 수행**(자택 보관 키 사용, 2026-09-10 결정). 에이전트는 착수하지 않음
+- [x] G 데이터 스케일·롱테일 — 곡DB(rusqlite)·스코어DB·코스·연습 모드·gilrs/MIDI·시스템 사운드·복수 IR
+  - [x] G0~G7·G9 갈래 산출물과 중단 시점 G8 배선을 `wip/phase-g`에서 복구하고 `cargo check -p rbms-player --tests` 성공 확인
+  - [x] G8 실제 배선 완전성 감사와 첫 clippy 실패 분류 — G2·G5·G6 필수 배선 완료, G1·G3·G4·G7·G9 부분 배선; CLI 구형 스캔 단절·코스 이월·연습 시작 게이지/배속·복수 IR 오프라인 게이트를 후속 구현으로 확정
+  - [x] 미배선 기능을 의존 순서대로 연결하고 갈래별 최소 테스트 통과
+    - [x] G1·G9 CLI를 SQLite 증분 스캔과 bmson 차트 요약 경로로 전환 — `cargo test -p rbms-cli` 12통과, clippy `-D warnings` 통과
+    - [x] G3 코스 gauge·standing combo를 다음 스테이지에 이월 — judge/play/player 단위 테스트 통과, 관련 clippy `-D warnings` 통과
+    - [x] G4 연습 모드 시작 gauge와 재생 배속을 실제 세션·오디오에 적용 — 구간 경계 LN 클리핑·시작 BGA 프레임·BGA 소유권 복원까지 반영
+      - [x] 시작 gauge 종류·값을 세션 생성과 판정 설정 재적용 뒤에도 보존
+      - [x] 50~200% 배속과 중간 구간 시작 원점을 판정·스케줄·키음 시간축에 동일 적용
+      - [x] 연습 재생에서도 로딩한 BGA 이미지를 복제하지 않고 플레이 종료 시 복원
+    - [x] G7 추가 IR만 구성한 오프라인 fan-out과 primary 선택 흐름 완성
+      - [x] extra-only 결과 fan-out·완료 상태 수렴·랭킹 조회·리플레이 다운로드를 primary 기준으로 전환
+      - [x] primary 프로필 선택 UI와 선택 변경 시 랭킹 캐시·진행 중 요청 무효화
+    - [x] G5 포함 테스트 전용 API·dead-code 허용 제거 후 player clippy 복구 — test-only 접근자는 `cfg(test)`, 미사용 선행 추상화 삭제, player all-targets clippy 통과
+  - [x] workspace fmt·test·clippy 게이트, 적대 리뷰, 실행 스모크, history 갱신 — fmt·clippy·workspace test 실패 0, CLI 임시 폴더 스모크 `charts=1/read=1`, 최종 적대 리뷰 blocker 0 (`docs/history/2026-09-16-phase-g-data-long-tail.md`)
+- [x] H 경미 후속 일괄(사용자 결정 2026-09-10: G 다음에 모아서 처리)
+  - [x] H1 곡선택 토스트를 하단 힌트와 겹치지 않는 위치에 배치, 헤드리스 테스트 통과
+  - [x] H2 `app_input::tests::the_settings_row_and_the_in_play_key_stop_at_the_same_ceiling`를 경계값 검사로 축소 — 16.93초 → 3.01초(82% 감소)
+  - [x] H3 실제 오디오와 Phase G 기능의 실기 확인 절차·합격 기준 문서화 — `docs/quality-assurance/2026-09-16-phase-h-manual-checks.md`; 실기 자체는 실제 장치·서버 환경에서 후속
+  - [x] H4 최종 fmt·clippy·test·적대 리뷰·history와 실행 방법 정본화 — fmt·clippy·workspace test·release build·`git diff --check` exit 0, 적대 리뷰 blocker 0; 이력 `docs/history/2026-09-16-phase-h-minor-followups.md`
+- [ ] R 릴리스(prod 브랜치·브랜치 보호·v0.1.0 태그·서명) — **사용자가 실제 키와 함께 추후 진행**(자택 보관 키 사용, 2026-09-10 결정). 에이전트는 착수하지 않음
 
 ---
 
@@ -198,14 +215,14 @@ crates/
 ## 5. 실행
 
 ```bash
-./start.sh                                    # release 빌드 후 기본 라이브러리+발광1 표로 열기
-./start.sh "<폴더|차트>" [옵션...]             # 인자 그대로 전달 (env RBMS_SONGS / RBMS_TABLE 로 기본값 변경)
-cargo build --release -p rbms-player          # 또는 직접 (BIN=./target/release/rbms-player)
-$BIN "<폴더>"                                  # GUI 곡선택
-$BIN "<차트.bme>" [--interactive]              # 단일 차트 (기본 autoplay; --interactive=직접)
-$BIN --replay ~/.config/rbms/replays/<f>.ron  # 리플레이 재생
+cargo run --release -p rbms-player --                    # 기억 폴더 → RBMS_SONGS → 빈 GUI
+cargo run --release -p rbms-player -- "<폴더>"            # GUI 곡선택
+cargo run --release -p rbms-player -- "<차트.bms>" --auto # 단일 차트 autoplay
+cargo run --release -p rbms-player -- "<차트.bms>" --interactive
+./target/release/rbms-player "<폴더>"                    # macOS / Linux 빌드 바이너리
+.\target\release\rbms-player.exe "<폴더>"               # Windows PowerShell 빌드 바이너리
 ```
-- **곡선택**: ↑↓ 이동 · →/Enter 열기/플레이 · ←/Esc 뒤로/상위 · **Tab 설정** · **O 폴더선택(rfd)** · **T 난이도표 관리** · **R 기록 모달** · **마우스**(행 1클릭 선택·재클릭 열기, 우측 기록 클릭→모달). 모달: ↑↓ 이전/다음·Enter 리플레이·Esc 닫기.
+- **곡선택**: ↑↓ 이동 · →/Enter 열기/플레이 · ←/Esc 뒤로/상위 · **Tab 설정** · **O 폴더선택**(`+ ADD FOLDER` 선택 → Enter → Esc로 저장·재스캔) · **T 난이도표 관리** · **R 기록 모달** · **마우스**(행 1클릭 선택·재클릭 열기, 우측 기록 클릭→모달). 모달: ↑↓ 이전/다음·Enter 리플레이·Esc 닫기.
 - **설정(Tab)**: **Tab으로 탭 전환**(PLAY/GAUGE/JUDGE/DISPLAY/INPUT) · ↑↓ 이동 · ←→ 값변경 · Enter(KEY CONFIG 진입) · Esc 저장후복귀.
   - PLAY: AUTOPLAY·HI-SPEED·SPEED FIX(FLOATING/CONSTANT)·RANDOM·**AUTO REPLAY**. GAUGE: GAUGE·TOTAL. JUDGE: JUDGE OFFSET·JUDGE WIDTH·AUTO CAL. DISPLAY: SKIN(NORMAL/WIDE)·**FONT**(DEFAULT/CUSTOM, Enter/우/클릭=파일선택 라이브 적용·좌=기본)·LIFT·LANE COVER·BGA·**DEBUG MODE**. INPUT: SCRATCH SIDE·SCRATCH AUTO·KEY CONFIG. (탭/값 마우스 클릭 가능)
 - **플레이 중**: Esc=뒤로(중도 포기) — 단 **남은 노트가 없으면 Esc로 곧장 결과화면**(아웃트로 대기 스킵). **DEBUG MODE** 시 좌상단 FPS/RAM/프레임시간/노트·콤보·게이지 등 수치 오버레이.

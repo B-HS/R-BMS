@@ -1,0 +1,28 @@
+{
+    "version": "1.0.0",
+    "info": {
+        "title": "Minimal",
+        "subtitle": "sub",
+        "chart_name": "NORMAL",
+        "artist": "rbms",
+        "subartists": ["one", "two"],
+        "genre": "test",
+        "mode_hint": "beat-7k",
+        "judge_rank": 100,
+        "total": 100,
+        "init_bpm": 120,
+        "level": 5,
+        "resolution": 240,
+        "back_image": "back.png",
+        "eyecatch_image": "eye.png",
+        "banner_image": "banner.png",
+        "preview_music": "preview.ogg"
+    },
+    "lines": [{ "y": 0 }, { "y": 960 }],
+    "sound_channels": [
+        {
+            "name": "kick.wav",
+            "notes": [{ "x": 1, "y": 0 }, { "y": 240 }, { "x": 8, "y": 480 }]
+        }
+    ]
+}

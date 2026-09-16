@@ -7,7 +7,7 @@
 //! whole run can be reproduced against [`NullSink`] with no device present.
 
 use rbms_judge::algorithm::JudgeAlgorithm;
-use rbms_judge::gauge::GaugeAutoShift;
+use rbms_judge::gauge::{GaugeAutoShift, GaugeIndex};
 use rbms_judge::gauge_tables::GaugeSetId;
 use rbms_judge::ln::LnMode;
 use rbms_judge::matcher::ScratchDir;
@@ -142,6 +142,8 @@ pub struct SessionOptions {
     pub auto_calibration: bool,
     /// The replay to reproduce instead of taking input.
     pub replay: Option<Replay>,
+    pub initial_gauge: Option<(GaugeIndex, f32)>,
+    pub initial_combo: u32,
 }
 
 impl Default for SessionOptions {
@@ -156,6 +158,8 @@ impl Default for SessionOptions {
             analysis: false,
             auto_calibration: false,
             replay: None,
+            initial_gauge: None,
+            initial_combo: 0,
         }
     }
 }
@@ -223,6 +227,8 @@ struct Setup {
     judge: JudgeSetup,
     auto_lanes: Vec<bool>,
     seed: u64,
+    initial_gauge: Option<(GaugeIndex, f32)>,
+    initial_combo: u32,
 }
 
 /// The replay being reproduced and how far into it the run has got.
@@ -536,6 +542,8 @@ impl PlaySession {
             judge: JudgeSetup::uniform_rate(options.judge_rate_percent),
             auto_lanes: options.auto_lanes,
             seed: options.seed,
+            initial_gauge: options.initial_gauge,
+            initial_combo: options.initial_combo,
         };
         let player = build_player(model, &setup);
         PlaySession {
@@ -705,6 +713,10 @@ impl PlaySession {
     /// Live judge state, for the play HUD.
     pub fn judge(&self) -> &JudgeEngine {
         self.player.judge()
+    }
+
+    pub fn standing_combo(&self) -> u32 {
+        self.player.judge().combo
     }
 
     /// Which note a press takes when several are in range.
@@ -945,6 +957,9 @@ fn apply_setup(player: &mut Player, setup: &Setup) {
     if !setup.auto_lanes.is_empty() {
         player.set_auto_lanes(setup.auto_lanes.clone());
     }
+    if let Some((index, gauge_value)) = setup.initial_gauge {
+        player.set_initial_state(index, gauge_value, setup.initial_combo);
+    }
 }
 
 /// A keysound booked ahead on the song clock: autoplay accompaniment and autoplay note sounds.
@@ -1109,6 +1124,38 @@ mod tests {
         assert_eq!(session.ln_mode(), LnMode::LongNote);
         assert!(!session.is_failed());
         assert!(!session.summary().failed);
+        assert_eq!(session.standing_combo(), 0);
+        assert_eq!(session.summary().gauge_value, 20.0);
+    }
+
+    #[test]
+    fn a_course_session_keeps_its_gauge_and_combo_after_judge_setup() {
+        let mut session = PlaySession::new(
+            one_note(),
+            SessionOptions {
+                initial_gauge: Some((GaugeIndex::Class, 72.0)),
+                initial_combo: 120,
+                replay: Some(replay_of(Vec::new())),
+                ..SessionOptions::default()
+            },
+        );
+        session.set_judge_setup(JudgeSetup { gauge_set: Some(GaugeSetId::Lr2), ..JudgeSetup::default() });
+        session.seek(1_000_000);
+        let summary = session.summary();
+        assert_eq!(session.judge().gauge.selected_index(), GaugeIndex::Class);
+        assert_eq!(summary.gauge_value, 72.0);
+        assert_eq!(session.standing_combo(), 120);
+        assert_eq!(summary.max_combo, 120);
+    }
+
+    #[test]
+    fn a_practice_session_keeps_its_initial_normal_gauge_after_judge_setup() {
+        let mut session = PlaySession::new(one_note(), SessionOptions { initial_gauge: Some((GaugeIndex::Normal, 64.0)), ..SessionOptions::default() });
+        session.set_judge_setup(JudgeSetup { gauge_set: Some(GaugeSetId::Lr2), ..JudgeSetup::default() });
+        let summary = session.summary();
+        assert_eq!(session.judge().gauge.selected_index(), GaugeIndex::Normal);
+        assert_eq!(summary.gauge_value, 64.0);
+        assert_eq!(session.standing_combo(), 0);
     }
 
     #[test]

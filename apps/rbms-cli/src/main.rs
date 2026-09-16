@@ -5,16 +5,16 @@
 
 #![forbid(unsafe_code)]
 
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use rbms_config::{Config, ConfigError, LoadOutcome, SettingTab, descriptor, display_value, tab_rows};
-use rbms_library::{SongEntry, scan_folder};
+use rbms_library::songdb::{SongRow, mode_from_id};
 use rbms_store::{ScoreBook, ScoreRecord};
 
 const USAGE: &str = "usage:\n  \
-    rbms-cli <chart.bms|.bme|.bml|.pms>   chart summary\n  \
+    rbms-cli <chart.bms|.bme|.bml|.pms|.bmson>   chart summary\n  \
     rbms-cli scan <dir>                   scan a song folder\n  \
     rbms-cli config <settings.ron>        read (and migrate) the player configuration\n  \
     rbms-cli scores <scores.ron> [--md5 <md5>]   local score book";
@@ -71,25 +71,66 @@ fn parse_scores_args(rest: &[String]) -> Result<(PathBuf, Option<String>), Strin
     Ok((path.ok_or("scores needs a scores.ron path")?, md5))
 }
 
+fn mode_name(row: &SongRow) -> &'static str {
+    mode_from_id(row.mode).map(|mode| mode.name).unwrap_or("UNKNOWN")
+}
+
 /// Charts per mode, most charts first then by mode name, so the output is deterministic.
-fn mode_histogram(songs: &[SongEntry]) -> Vec<(&'static str, usize)> {
+fn mode_histogram(songs: &[SongRow]) -> Vec<(&'static str, usize)> {
     let mut counts: Vec<(&'static str, usize)> = Vec::new();
-    for s in songs {
-        match counts.iter_mut().find(|(name, _)| *name == s.mode.name) {
+    for row in songs {
+        let name = mode_name(row);
+        match counts.iter_mut().find(|(existing, _)| *existing == name) {
             Some((_, n)) => *n += 1,
-            None => counts.push((s.mode.name, 1)),
+            None => counts.push((name, 1)),
         }
     }
     counts.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
     counts
 }
 
-fn scan_line(entry: &SongEntry) -> String {
-    format!("{}  {:<9} L{:<3} {}", entry.md5, entry.mode.name, entry.level, entry.title)
+fn scan_line(row: &SongRow) -> String {
+    format!("{}  {:<9} L{:<3} {}", row.md5, mode_name(row), row.level, row.title)
 }
 
 fn record_line(r: &ScoreRecord) -> String {
     format!("{:>7} / {:<7} lamp {:<3} combo {:<6} {}", r.ex_score, r.max_ex, r.clear, r.max_combo, r.title)
+}
+
+fn scan_database_path() -> PathBuf {
+    std::env::temp_dir().join(format!("rbms-cli-scan-{}.sqlite", std::process::id()))
+}
+
+fn remove_scan_database(path: &Path) -> std::io::Result<()> {
+    for temporary_path in [path.to_path_buf(), path.with_extension("sqlite-wal"), path.with_extension("sqlite-shm")] {
+        match std::fs::remove_file(temporary_path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
+}
+
+fn scan_rows(dir: &Path) -> Result<(Vec<SongRow>, usize), String> {
+    let db_path = scan_database_path();
+    remove_scan_database(&db_path).map_err(|e| format!("scan database not reset: {e}"))?;
+    let scan_result = (|| {
+        let mut db = rbms_library::songdb::SongDb::open(&db_path).map_err(|e| format!("scan database not opened: {e}"))?;
+        db.migrate().map_err(|e| format!("scan database not migrated: {e}"))?;
+        let request = rbms_library::scan::ScanRequest::new(vec![dir.to_string_lossy().into_owned()], true);
+        rbms_library::scan::scan_into(&mut db, &request).map_err(|e| format!("scan failed: {e}"))?;
+        let rows = db.all_songs().map_err(|e| format!("scan results not read: {e}"))?;
+        Ok((rows, request.progress.counts().parsed))
+    })();
+    let cleanup_result = remove_scan_database(&db_path);
+
+    match (scan_result, cleanup_result) {
+        (Ok(rows), Ok(())) => Ok(rows),
+        (Ok(_), Err(e)) => Err(format!("scan database cleanup failed: {e}")),
+        (Err(e), Ok(())) => Err(e),
+        (Err(e), Err(cleanup_error)) => Err(format!("{e}; scan database cleanup failed: {cleanup_error}")),
+    }
 }
 
 fn scan_command(dir: &Path) -> ExitCode {
@@ -97,12 +138,16 @@ fn scan_command(dir: &Path) -> ExitCode {
         eprintln!("not a folder: {}", dir.display());
         return ExitCode::FAILURE;
     }
-    let count = AtomicUsize::new(0);
-    let cancel = AtomicBool::new(false);
-    let songs = scan_folder(dir, &count, &cancel);
+    let (songs, parsed) = match scan_rows(dir) {
+        Ok(rows) => rows,
+        Err(e) => {
+            eprintln!("{e}");
+            return ExitCode::FAILURE;
+        }
+    };
     println!("folder     : {}", dir.display());
     println!("charts     : {}", songs.len());
-    println!("read       : {}", count.load(Ordering::Relaxed));
+    println!("read       : {parsed}");
     for (mode, n) in mode_histogram(&songs) {
         println!("  {mode:<9} {n}");
     }
@@ -189,9 +234,28 @@ fn chart_command(path: &str) -> ExitCode {
         }
     };
 
-    let src = rbms_parser::parse(&bytes);
-    let mode = rbms_chart::detect_mode(&src, path);
-    let model = rbms_chart::to_model(&src, mode);
+    let is_bmson = Path::new(path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case(rbms_parser::bmson::EXTENSION));
+    let (mode, model, wav_defs, measures) = if is_bmson {
+        let chart = match rbms_parser::bmson::parse(&bytes) {
+            Ok(chart) => chart,
+            Err(e) => {
+                eprintln!("bmson parse error: {e}");
+                return ExitCode::FAILURE;
+            }
+        };
+        let mode = chart.mode();
+        let model = chart.to_model();
+        let wav_defs = model.wavmap.len();
+        (mode, model, wav_defs, 0)
+    } else {
+        let src = rbms_parser::parse(&bytes);
+        let mode = rbms_chart::detect_mode(&src, path);
+        let model = rbms_chart::to_model(&src, mode);
+        (mode, model, src.wav.len(), src.measures.len())
+    };
     let length_s = model.timelines.last().map(|t| t.time_us).unwrap_or(0) as f64 / 1_000_000.0;
 
     println!("file       : {path}");
@@ -202,8 +266,8 @@ fn chart_command(path: &str) -> ExitCode {
     println!("init bpm   : {}", model.init_bpm);
     println!("md5        : {}", model.md5);
     println!("sha256     : {}", model.sha256);
-    println!("wav defs   : {}", src.wav.len());
-    println!("measures   : {}", src.measures.len());
+    println!("wav defs   : {wav_defs}");
+    println!("measures   : {measures}");
     println!("timelines  : {}", model.timelines.len());
     println!("mode       : {}", mode.name);
     println!("notes      : {}", rbms_chart::count_playable_notes(&model));
@@ -245,25 +309,8 @@ mod tests {
         assert!(parse_scores_args(&args(&["--nope", "/a"])).is_err(), "unknown options are rejected");
     }
 
-    fn song(md5: &str, mode: Mode, title: &str) -> SongEntry {
-        SongEntry {
-            path: PathBuf::from(format!("/songs/{title}.bms")),
-            title: title.into(),
-            subtitle: String::new(),
-            artist: String::new(),
-            genre: String::new(),
-            maker: String::new(),
-            level: "7".into(),
-            difficulty: 3,
-            init_bpm: 150.0,
-            rank: 2,
-            total: 300.0,
-            mode,
-            md5: md5.into(),
-            stagefile: String::new(),
-            banner: String::new(),
-            preview: String::new(),
-        }
+    fn song(md5: &str, mode: Mode, title: &str) -> SongRow {
+        SongRow { title: title.into(), level: "7".into(), md5: md5.into(), mode: rbms_library::songdb::mode_id(mode), ..SongRow::default() }
     }
 
     #[test]
@@ -334,5 +381,44 @@ mod tests {
         assert!(line.starts_with("DEADBEEF"), "the md5 leads the line: {line}");
         assert!(line.contains(Mode::BEAT_7K.name), "the mode is shown: {line}");
         assert!(line.ends_with("A Song"), "the title closes the line: {line}");
+    }
+
+    #[test]
+    fn scan_rows_reads_song_rows_from_the_temporary_database() {
+        let dir = std::env::temp_dir().join(format!("rbms-cli-scan-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create the fixture folder");
+        std::fs::write(dir.join("song.bms"), "#TITLE CLI scan\n#BPM 120\n#00111:01\n").expect("write the fixture chart");
+
+        let (rows, parsed) = scan_rows(&dir).expect("scan the fixture folder");
+        assert_eq!(parsed, 1);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].title, "CLI scan");
+        assert!(!scan_database_path().exists(), "the scan database is removed after reading rows");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn chart_command_reads_a_bmson_document() {
+        let dir = std::env::temp_dir().join(format!("rbms-cli-bmson-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create the fixture folder");
+        let path = dir.join("minimal.bmson");
+        std::fs::write(&path, include_bytes!("../../../crates/rbms-parser/tests/bmson/minimal.bmson")).expect("write the bmson fixture");
+
+        assert_eq!(chart_command(path.to_str().expect("a UTF-8 temporary path")), ExitCode::SUCCESS);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn chart_command_rejects_an_invalid_bmson_document() {
+        let dir = std::env::temp_dir().join(format!("rbms-cli-bmson-invalid-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create the fixture folder");
+        let path = dir.join("broken.bmson");
+        std::fs::write(&path, "not JSON").expect("write the invalid bmson fixture");
+
+        assert_eq!(chart_command(path.to_str().expect("a UTF-8 temporary path")), ExitCode::FAILURE);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

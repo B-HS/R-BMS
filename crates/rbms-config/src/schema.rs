@@ -379,6 +379,7 @@ impl Config {
         self.display.skin = if self.display.skin.trim().is_empty() { DEFAULT_SKIN.to_string() } else { self.display.skin.to_ascii_uppercase() };
         self.audio.sanitise();
         self.skin.sanitise();
+        self.network.ir_profiles.retain(|profile| !profile.base_url.trim().is_empty());
     }
 }
 
@@ -588,6 +589,29 @@ pub struct NetworkOptions {
     pub auto_upload_replay: bool,
     /// Cached rival player ids, refreshed from the server on login and after a rival edit.
     pub rivals: Vec<String>,
+    /// Extra score servers a score is submitted to alongside `server_url`. Empty keeps the
+    /// single-server behaviour the fields above describe.
+    pub ir_profiles: Vec<IrProfile>,
+}
+
+/// One score server a play can be submitted to, so a player can hold accounts on several at once.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct IrProfile {
+    /// Label shown in the settings row and on the ranking panel's profile tab.
+    pub name: String,
+    /// Base URL of this server.
+    pub base_url: String,
+    /// Bearer token for this server. `None` = signed out on it.
+    pub token: Option<String>,
+    /// Submit to this server. A disabled profile is kept but skipped.
+    pub enabled: bool,
+}
+
+impl Default for IrProfile {
+    fn default() -> Self {
+        IrProfile { name: String::new(), base_url: String::new(), token: None, enabled: true }
+    }
 }
 
 impl Default for NetworkOptions {
@@ -601,6 +625,7 @@ impl Default for NetworkOptions {
             sync_settings: false,
             auto_upload_replay: true,
             rivals: Vec::new(),
+            ir_profiles: Vec::new(),
         }
     }
 }

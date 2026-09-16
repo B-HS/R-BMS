@@ -1,0 +1,33 @@
+{
+    "version": "1.0.0",
+    "info": {
+        "title": "Long Note",
+        "artist": "rbms",
+        "genre": "test",
+        "mode_hint": "beat-7k",
+        "judge_rank": 100,
+        "total": 100,
+        "init_bpm": 120,
+        "level": 7,
+        "resolution": 240,
+        "ln_type": 2
+    },
+    "sound_channels": [
+        {
+            "name": "ln.ogg",
+            "notes": [{ "x": 2, "y": 0, "l": 960 }]
+        },
+        {
+            "name": "up.ogg",
+            "notes": [{ "x": 3, "y": 480, "up": true }, { "x": 2, "y": 960, "up": true }]
+        },
+        {
+            "name": "ln2.ogg",
+            "notes": [{ "x": 3, "y": 0, "l": 480 }]
+        },
+        {
+            "name": "hcn.ogg",
+            "notes": [{ "x": 4, "y": 0, "l": 240, "t": 3 }]
+        }
+    ]
+}

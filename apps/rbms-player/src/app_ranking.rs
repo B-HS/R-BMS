@@ -8,7 +8,8 @@ use std::sync::mpsc::TryRecvError;
 
 use rbms_ir::{ChartId, PlayerId, ReplayData, ScoreSubmission, SubmitJob, spawn_query, spawn_submit};
 
-use crate::ir_outcome::{IrStatus, format_submit_outcome, short_error};
+use crate::ir_ext::PrimaryProfileDirection;
+use crate::ir_outcome::{IrReport, IrStatus, format_submit_outcome, short_error};
 use crate::ir_ranking::{RankingFetch, RankingState, accept_fetch, fetch_board};
 use crate::ir_replay::{replay_download_is_applicable, to_ir_replay};
 use crate::stage::StageId;
@@ -36,11 +37,50 @@ impl AppShared {
         let player = PlayerId { id: self.config.network.player_id.clone() };
         let rivals = self.config.network.rivals.clone();
         self.ranking_cache.insert(md5.clone(), RankingState::Loading);
-        let rx = spawn_query(self.server.clone(), move |server| {
+        let source = self.primary_ir_server();
+        let rx = spawn_query(source, move |server| {
             let state = fetch_board(server, &chart, &player, &rivals);
             Ok::<RankingFetch, rbms_ir::IrError>(RankingFetch { generation, md5, state })
         });
         self.ranking_rx = Some(rx);
+    }
+
+    /// The server the ranking panel reads and a course is submitted to: the primary profile, or the
+    /// legacy single server when no profile is enabled.
+    pub(crate) fn primary_ir_server(&self) -> Arc<dyn ScoreServer> {
+        self.multi_ir.primary_server().and_then(|index| self.profile_servers.get(index).cloned()).unwrap_or_else(|| self.server.clone())
+    }
+
+    pub(crate) fn has_primary_ir_server(&self) -> bool {
+        self.multi_ir.primary_server().is_some()
+    }
+
+    pub(crate) fn primary_ir_profile(&self) -> Option<(String, usize, usize)> {
+        self.multi_ir.primary_profile()
+    }
+
+    pub(crate) fn can_switch_primary_ir(&self) -> bool {
+        self.multi_ir.can_switch_primary()
+    }
+
+    pub(crate) fn shift_primary_ir(&mut self, direction: PrimaryProfileDirection) -> bool {
+        if !self.multi_ir.shift_primary(direction) {
+            return false;
+        }
+        self.reset_ranking();
+        true
+    }
+
+    pub(crate) fn reset_ranking(&mut self) {
+        self.ranking_cache.clear();
+        self.ranking_requested = None;
+        self.ranking_rx = None;
+        self.ranking_generation = self.ranking_generation.wrapping_add(1);
+    }
+
+    /// The server a finished course is submitted to. Courses go to the primary profile only.
+    pub(crate) fn course_ir_server(&self) -> Arc<dyn ScoreServer> {
+        self.primary_ir_server()
     }
 
     /// Hand a finished score submission to the IR worker, uploading the run's replay alongside it
@@ -48,6 +88,16 @@ impl AppShared {
     pub(crate) fn spawn_score_submit(&mut self, submission: ScoreSubmission, replay: Option<ReplayData>) {
         self.ir_status = IrStatus::Sending;
         self.submit_rx = Some(spawn_submit(self.server.clone(), SubmitJob { submission, replay }));
+    }
+
+    /// Submit the same run to every extra IR profile, in parallel and off the frame thread.
+    ///
+    pub(crate) fn spawn_profile_submits(&mut self, submission: &ScoreSubmission) {
+        let secondary = self.multi_ir.secondary();
+        if secondary.enabled_profiles().next().is_none() {
+            return;
+        }
+        self.profile_submit_rx = Some(spawn_submit_all(secondary, self.profile_servers.clone(), submission.clone()));
     }
 
     /// The replay payload to upload with this run, or `None` when the setting is off, no replay was
@@ -69,6 +119,7 @@ impl AppShared {
             self.net_status = "replay download dropped: left song select".to_string();
         }
         self.poll_submit();
+        self.poll_profile_submits();
     }
 
     fn poll_ranking(&mut self) {
@@ -100,6 +151,30 @@ impl AppShared {
         }
     }
 
+    /// Collect the extra profiles' fan-out and report how many of them took the score.
+    fn poll_profile_submits(&mut self) {
+        let Some(rx) = self.profile_submit_rx.take() else {
+            return;
+        };
+        match rx.try_recv() {
+            Ok(results) => {
+                let report = profile_submit_report(&results);
+                self.net_status = report.score.clone();
+                if self.submit_rx.is_none() && self.ir_status.accepts_report() {
+                    self.ir_status = IrStatus::Reported(report);
+                }
+            }
+            Err(TryRecvError::Empty) => self.profile_submit_rx = Some(rx),
+            Err(TryRecvError::Disconnected) => {
+                let report = IrReport { score: "IR ERROR: profile submit worker stopped".to_string(), new_best: false, replay: None, failed: true };
+                self.net_status = report.score.clone();
+                if self.submit_rx.is_none() && self.ir_status.accepts_report() {
+                    self.ir_status = IrStatus::Reported(report);
+                }
+            }
+        }
+    }
+
     fn poll_submit(&mut self) {
         let Some(rx) = self.submit_rx.take() else {
             return;
@@ -115,5 +190,169 @@ impl AppShared {
         if self.ir_status.accepts_report() {
             self.ir_status = IrStatus::Reported(format_submit_outcome(&outcome));
         }
+    }
+}
+
+fn profile_submit_report(results: &[ProfileResult<rbms_ir::SubmitResponse>]) -> IrReport {
+    IrReport {
+        score: submit_summary(results),
+        new_best: false,
+        replay: None,
+        failed: results.is_empty() || results.iter().any(|(_, result)| !matches!(result, Ok(response) if response.accepted)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn shared(config: Config) -> AppShared {
+        let dir = std::env::temp_dir().join(format!("rbms-app-ranking-tests-{}", std::process::id()));
+        App::new(String::new(), config, LaunchOptions::default(), dir.join("settings.ron")).shared
+    }
+
+    #[test]
+    fn no_enabled_ir_profile_keeps_the_player_offline() {
+        let shared = shared(Config::default());
+
+        assert!(!shared.has_primary_ir_server());
+    }
+
+    #[test]
+    fn an_extra_only_profile_is_the_ranking_primary() {
+        let mut config = Config::default();
+        config.network.ir_profiles.push(rbms_config::IrProfile {
+            name: "EXTRA".to_string(),
+            base_url: "http://extra.invalid".to_string(),
+            token: None,
+            enabled: true,
+        });
+        let shared = shared(config);
+
+        assert!(shared.has_primary_ir_server());
+        assert!(Arc::ptr_eq(&shared.primary_ir_server(), &shared.profile_servers[0]));
+    }
+
+    #[test]
+    fn the_legacy_server_remains_the_ranking_primary_with_extra_profiles() {
+        let mut config = Config::default();
+        config.network.server_url = Some("http://main.invalid".to_string());
+        config.network.ir_profiles.push(rbms_config::IrProfile {
+            name: "EXTRA".to_string(),
+            base_url: "http://extra.invalid".to_string(),
+            token: None,
+            enabled: true,
+        });
+        let shared = shared(config);
+
+        assert!(shared.has_primary_ir_server());
+        assert!(Arc::ptr_eq(&shared.primary_ir_server(), &shared.server));
+    }
+
+    #[test]
+    fn changing_the_primary_drops_every_ranking_answer_and_worker() {
+        let mut config = Config::default();
+        config.network.server_url = Some("http://main.invalid".to_string());
+        config.network.ir_profiles.push(rbms_config::IrProfile {
+            name: "EXTRA".to_string(),
+            base_url: "http://extra.invalid".to_string(),
+            token: None,
+            enabled: true,
+        });
+        let mut shared = shared(config);
+        shared.ranking_cache.insert("loading".to_string(), RankingState::Loading);
+        shared.ranking_cache.insert("ready".to_string(), RankingState::Failed("old server".to_string()));
+        shared.ranking_requested = Some("loading".to_string());
+        let (_tx, rx) = std::sync::mpsc::channel::<Result<RankingFetch, rbms_ir::IrError>>();
+        shared.ranking_rx = Some(rx);
+        let generation = shared.ranking_generation;
+
+        assert!(shared.shift_primary_ir(PrimaryProfileDirection::Next));
+
+        assert!(Arc::ptr_eq(&shared.primary_ir_server(), &shared.profile_servers[1]));
+        assert!(shared.ranking_cache.peek("loading").is_none());
+        assert!(shared.ranking_cache.peek("ready").is_none());
+        assert!(shared.ranking_requested.is_none());
+        assert!(shared.ranking_rx.is_none());
+        assert_eq!(shared.ranking_generation, generation.wrapping_add(1));
+    }
+
+    #[test]
+    fn rebuilding_the_server_drops_every_ranking_answer_and_worker() {
+        let mut shared = shared(Config::default());
+        shared.ranking_cache.insert("loading".to_string(), RankingState::Loading);
+        shared.ranking_cache.insert("ready".to_string(), RankingState::Failed("old server".to_string()));
+        shared.ranking_requested = Some("loading".to_string());
+        let (_tx, rx) = std::sync::mpsc::channel::<Result<RankingFetch, rbms_ir::IrError>>();
+        shared.ranking_rx = Some(rx);
+        let generation = shared.ranking_generation;
+
+        shared.rebuild_server();
+
+        assert!(shared.ranking_cache.peek("loading").is_none());
+        assert!(shared.ranking_cache.peek("ready").is_none());
+        assert!(shared.ranking_requested.is_none());
+        assert!(shared.ranking_rx.is_none());
+        assert_eq!(shared.ranking_generation, generation.wrapping_add(1));
+    }
+
+    #[test]
+    fn changing_the_primary_needs_two_enabled_profiles() {
+        let mut shared = shared(Config::default());
+        let generation = shared.ranking_generation;
+
+        assert!(!shared.shift_primary_ir(PrimaryProfileDirection::Next));
+        assert_eq!(shared.ranking_generation, generation);
+    }
+
+    #[test]
+    fn an_extra_only_profile_submission_reports_its_fan_out() {
+        let results = vec![("EXTRA".to_string(), Ok(rbms_ir::SubmitResponse { accepted: true, ..Default::default() }))];
+
+        let report = profile_submit_report(&results);
+
+        assert_eq!(report.score, "IR 1/1");
+        assert!(!report.failed);
+    }
+
+    #[test]
+    fn a_rejected_extra_profile_does_not_report_success() {
+        let results = vec![("EXTRA".to_string(), Ok(rbms_ir::SubmitResponse::default()))];
+
+        let report = profile_submit_report(&results);
+
+        assert!(report.failed);
+        assert_eq!(report.score, "IR 0/1 — EXTRA: rejected");
+    }
+
+    #[test]
+    fn an_extra_only_submit_finishes_its_sending_status() {
+        let mut shared = shared(Config::default());
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(vec![("EXTRA".to_string(), Ok(rbms_ir::SubmitResponse { accepted: true, ..Default::default() }))]).expect("profile worker receiver is open");
+        shared.ir_status = IrStatus::Sending;
+        shared.profile_submit_rx = Some(rx);
+
+        shared.poll_profile_submits();
+
+        assert!(matches!(shared.ir_status, IrStatus::Reported(report) if report.score == "IR 1/1" && !report.failed));
+    }
+
+    #[test]
+    fn a_legacy_submit_remains_authoritative_while_extra_profiles_finish() {
+        let mut shared = shared(Config::default());
+        let (profile_tx, profile_rx) = std::sync::mpsc::channel();
+        let (_legacy_tx, legacy_rx) = std::sync::mpsc::channel::<rbms_ir::SubmitOutcome>();
+        profile_tx
+            .send(vec![("EXTRA".to_string(), Ok(rbms_ir::SubmitResponse { accepted: true, ..Default::default() }))])
+            .expect("profile worker receiver is open");
+        shared.ir_status = IrStatus::Sending;
+        shared.submit_rx = Some(legacy_rx);
+        shared.profile_submit_rx = Some(profile_rx);
+
+        shared.poll_profile_submits();
+
+        assert!(matches!(shared.ir_status, IrStatus::Sending));
+        assert_eq!(shared.net_status, "IR 1/1");
     }
 }

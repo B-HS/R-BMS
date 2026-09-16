@@ -25,6 +25,9 @@ impl SelectState {
     /// A list with no rows carries an onboarding hint instead: a first-run "add a folder" call to
     /// action, a note that the search matched nothing, or a generic "no charts" message.
     pub(super) fn build_scene(&self, shared: &AppShared) -> SelectScene {
+        if self.tab == SelectTab::Courses {
+            return self.build_course_scene(shared);
+        }
         let rows: Vec<SelectRow> = shared
             .select_items
             .iter()
@@ -203,6 +206,49 @@ impl SelectState {
             search: shared.searching.then(|| self.search_display()),
             sort: shared.config.library.sort.label(),
             filter,
+            empty_hint,
+        }
+    }
+
+    /// The course tab's own scene: one row per course, and a detail panel naming the focused one.
+    ///
+    /// Courses are drawn through the same row type the song list uses, as folders: a course is a
+    /// list of charts to be played in order rather than one chart, and its row carries the stage
+    /// count and the constraint badges where a chart's mode and level would go.
+    fn build_course_scene(&self, shared: &AppShared) -> SelectScene {
+        let rows: Vec<SelectRow> = self
+            .courses
+            .rows()
+            .into_iter()
+            .map(|row| SelectRow {
+                folder: true,
+                title: row.title,
+                mode_short: "",
+                mode_color: Color::GRAY,
+                level: row.badges.join(" "),
+                difficulty_color: if row.playable { Color::WHITE } else { Color::RED },
+                lamp: if row.playable { Color::rgb(44, 44, 54) } else { Color::rgb(70, 30, 30) },
+                folder_count: None,
+                dj_level: None,
+                favorite: false,
+            })
+            .collect();
+        let detail = match self.courses.focused() {
+            Some(entry) => SelectDetail::Folder { label: entry.course.name.clone(), count: entry.course.stage_count() },
+            None => SelectDetail::Empty,
+        };
+        let empty_hint = rows.is_empty().then_some(("NO COURSES", "Put course json files in the courses folder next to your settings"));
+        SelectScene {
+            rows,
+            sel: self.courses.cursor(),
+            header: SelectTab::Courses.label().to_string(),
+            guide: "\u{2191}\u{2193} MOVE   ENTER START   SHIFT+TAB SONGS   ESC BACK",
+            detail,
+            modal: None,
+            score_graph: shared.config.display.score_graph,
+            search: None,
+            sort: shared.config.library.sort.label(),
+            filter: None,
             empty_hint,
         }
     }

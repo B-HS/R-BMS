@@ -11,7 +11,8 @@
 
 use std::sync::mpsc::TryRecvError;
 
-use crate::ir_ranking_view::{PanelAction, PanelLine, offline_lines, panel_action, panel_lines};
+use crate::ir_ext::PrimaryProfileDirection;
+use crate::ir_ranking_view::{PanelAction, PanelLine, offline_lines, panel_action, panel_lines, profile_line};
 use crate::ir_replay::from_ir_replay;
 use crate::stage::{Canvas, FoldersState, FrameCtx, KeyInput, LoadingState, SettingsState, Stage, StageHandler, TablesState, Transition};
 use crate::*;
@@ -74,6 +75,10 @@ pub(crate) struct SelectState {
     /// rebuilds.
     applied: Option<(u64, SelectFilter, SortMode)>,
     preview: PreviewState,
+    /// Which of the two lists the browser is showing.
+    tab: SelectTab,
+    /// The course list, resolved against the library it was built for.
+    courses: CourseList,
 }
 
 impl Default for SelectState {
@@ -97,6 +102,8 @@ impl Default for SelectState {
             filter: FilterPanel::default(),
             applied: None,
             preview: PreviewState::default(),
+            tab: SelectTab::default(),
+            courses: CourseList::default(),
         }
     }
 }
@@ -114,7 +121,11 @@ impl SelectState {
     }
 
     fn select_key(&self, shared: &AppShared) -> SelectKey {
-        (shared.select_gen, shared.sel, self.record_modal, shared.scores.records().len(), shared.config.display.score_graph, self.esc_quit_armed())
+        let cursor = match self.tab {
+            SelectTab::Songs => shared.sel,
+            SelectTab::Courses => self.courses.cursor().wrapping_add(self.courses.len()),
+        };
+        (shared.select_gen, cursor, self.record_modal, shared.scores.records().len(), shared.config.display.score_graph, self.esc_quit_armed(), self.tab)
     }
 
     /// Enter the focused select item: descend into a folder, or start a chart.
@@ -122,22 +133,64 @@ impl SelectState {
     /// Any replay download still in flight is abandoned when a chart starts: its result would
     /// otherwise land mid-load and swap the chart out from under the run that is starting.
     fn select_enter(&mut self, shared: &mut AppShared) -> Transition {
+        if self.tab == SelectTab::Courses {
+            return self.course_enter(shared);
+        }
         match shared.select_items.get(shared.sel) {
             Some(SelectItem::Song(i)) => {
                 let i = *i;
                 self.record_modal = None;
                 shared.replay_download_rx = None;
                 shared.replay_download_target = None;
+                shared.play_system_sound(SystemSound::Select);
                 Transition::Open(Stage::Loading(LoadingState::song(i)))
             }
             Some(SelectItem::Folder { target, .. }) => {
-                shared.select_view = *target;
+                let target = *target;
+                shared.play_system_sound(SystemSound::FolderOpen);
+                shared.select_view = target;
                 shared.sel = 0;
                 self.rebuild(shared);
                 Transition::Stay
             }
             None => Transition::Stay,
         }
+    }
+
+    /// Start the focused course, unless one of its stages is not in the library — the reference
+    /// will not begin a course it cannot supply every chart of.
+    fn course_enter(&mut self, shared: &mut AppShared) -> Transition {
+        let Some(entry) = self.courses.focused() else {
+            return Transition::Stay;
+        };
+        if !entry.is_playable() {
+            notify(Level::Warn, format!("{} stage(s) missing from the library", entry.missing.len()));
+            return Transition::Stay;
+        }
+        let entry = entry.clone();
+        shared.play_system_sound(SystemSound::Select);
+        crate::start_course(shared, &entry)
+    }
+
+    /// Load the course list, or re-resolve the one already loaded against the library as it stands
+    /// now — a scan that has since found a course's charts clears its missing-stage mark.
+    fn refresh_courses(&mut self, shared: &AppShared) {
+        if self.courses.is_empty() {
+            self.courses = CourseList::load(&courses_dir(&crate::config_dir()), &shared.library);
+        } else {
+            self.courses.resolve_in_library(&shared.library);
+        }
+    }
+
+    /// Open the practice panel on the focused chart. The panel needs the parsed chart, so the load
+    /// path is the one a run takes and the flag is what makes it land on the panel instead.
+    fn start_practice(&mut self, shared: &mut AppShared) -> Transition {
+        let Some(index) = shared.focused_song_index() else {
+            return Transition::Stay;
+        };
+        self.record_modal = None;
+        shared.practice_requested = true;
+        Transition::Open(Stage::Loading(LoadingState::song(index)))
     }
 
     /// Rebuild the row list through the filter panel, and remember what it was built from so the
@@ -247,7 +300,10 @@ impl SelectState {
             return;
         }
         self.focused_detail_si = si;
-        self.focused_detail = si.and_then(|i| shared.library.songs().get(i)).and_then(|e| compute_chart_detail(&e.path, e.mode));
+        self.focused_detail = si.and_then(|i| shared.library.songs().get(i)).and_then(|e| match &shared.song_db {
+            Some(db) => crate::library::chart_detail(db, &e.path, e.mode),
+            None => compute_chart_detail(&e.path, e.mode),
+        });
         self.cover_image = si.and_then(|i| shared.library.songs().get(i)).and_then(|e| {
             let dir = e.path.parent()?;
             [&e.stagefile, &e.banner].into_iter().filter(|n| !n.trim().is_empty()).find_map(|n| decode_bga_image(dir, n))
@@ -306,21 +362,39 @@ impl SelectState {
     /// both opens it and gives it focus.
     fn toggle_ranking_panel(&mut self, shared: &mut AppShared) {
         self.ranking_open = !self.ranking_open;
-        self.ranking_sel = 0;
+        self.ranking_sel = self.ranking_selectable_start(shared);
         if self.ranking_open {
             shared.ranking_requested = None;
         }
     }
 
+    fn ranking_selectable_start(&self, shared: &AppShared) -> usize {
+        usize::from(shared.can_switch_primary_ir())
+    }
+
+    fn clamp_ranking_selection(&mut self, shared: &AppShared, lines: &[PanelLine]) {
+        let Some(last) = lines.len().checked_sub(1) else {
+            self.ranking_sel = 0;
+            return;
+        };
+        self.ranking_sel = self.ranking_sel.clamp(self.ranking_selectable_start(shared).min(last), last);
+    }
+
     /// The lines the panel is showing for the focused chart.
     fn ranking_lines(&self, shared: &AppShared) -> Vec<PanelLine> {
-        if shared.config.network.server_url.is_none() {
+        if !shared.has_primary_ir_server() {
             return offline_lines();
         }
-        match shared.focused_md5() {
+        let mut lines = match shared.focused_md5() {
             Some(md5) => panel_lines(shared.ranking_cache.peek(&md5)),
             None => panel_lines(None),
+        };
+        if shared.can_switch_primary_ir()
+            && let Some((label, position, count)) = shared.primary_ir_profile()
+        {
+            lines.insert(0, profile_line(&label, position, count));
         }
+        lines
     }
 
     /// Keys while the ranking panel is open. Returns whether the panel consumed the key.
@@ -332,11 +406,23 @@ impl SelectState {
             return false;
         };
         let lines = self.ranking_lines(shared);
+        self.clamp_ranking_selection(shared, &lines);
+        let start = self.ranking_selectable_start(shared).min(lines.len().saturating_sub(1));
         match action {
             PanelAction::Close => self.toggle_ranking_panel(shared),
-            PanelAction::Up => self.ranking_sel = self.ranking_sel.saturating_sub(1),
+            PanelAction::Up => self.ranking_sel = self.ranking_sel.saturating_sub(1).max(start),
             PanelAction::Down => self.ranking_sel = (self.ranking_sel + 1).min(lines.len().saturating_sub(1)),
             PanelAction::PlayReplay => self.play_ranking_replay(shared),
+            PanelAction::PreviousProfile => {
+                if shared.shift_primary_ir(PrimaryProfileDirection::Previous) {
+                    self.ranking_sel = self.ranking_selectable_start(shared);
+                }
+            }
+            PanelAction::NextProfile => {
+                if shared.shift_primary_ir(PrimaryProfileDirection::Next) {
+                    self.ranking_sel = self.ranking_selectable_start(shared);
+                }
+            }
         }
         true
     }
@@ -348,6 +434,9 @@ impl SelectState {
             return;
         }
         let index = index.min(lines.len() - 1);
+        if index < self.ranking_selectable_start(shared) {
+            return;
+        }
         if self.ranking_sel == index {
             self.play_ranking_replay(shared);
         } else {
@@ -375,7 +464,7 @@ impl SelectState {
         }
         shared.replay_download_target = Some((entry.path.to_string_lossy().to_string(), entry.md5.clone()));
         shared.net_status = format!("downloading replay {replay_id}...");
-        shared.replay_download_rx = Some(rbms_ir::spawn_query(shared.server.clone(), move |server| server.download_replay(&replay_id)));
+        shared.replay_download_rx = Some(rbms_ir::spawn_query(shared.primary_ir_server(), move |server| server.download_replay(&replay_id)));
     }
 
     /// Start a ranking fetch when the focus has settled on a new chart and the panel has no cached
@@ -385,7 +474,7 @@ impl SelectState {
     /// chart's `Loading` placeholder in the cache and leaving the panel on LOADING forever. While a
     /// fetch runs the request for the newly focused chart is simply retried next frame.
     fn update_ranking(&mut self, shared: &mut AppShared) {
-        if !self.ranking_open || shared.config.network.server_url.is_none() || shared.ranking_rx.is_some() {
+        if !self.ranking_open || !shared.has_primary_ir_server() || shared.ranking_rx.is_some() {
             return;
         }
         let Some(chart) = shared.focused_chart_id() else {
@@ -397,7 +486,7 @@ impl SelectState {
         if shared.ranking_requested.as_deref() == Some(chart.md5.as_str()) {
             return;
         }
-        self.ranking_sel = 0;
+        self.ranking_sel = self.ranking_selectable_start(shared);
         shared.start_ranking_fetch(chart);
     }
 
@@ -460,6 +549,10 @@ impl SelectState {
 
     /// Go up one select level; at the root, quit.
     fn select_back(&mut self, shared: &mut AppShared) -> Transition {
+        match shared.select_view {
+            SelectView::Root => return Transition::Quit,
+            _ => shared.play_system_sound(SystemSound::FolderClose),
+        }
         match shared.select_view {
             SelectView::Root => return Transition::Quit,
             SelectView::AllSongs | SelectView::TableLevels(_) => {
@@ -541,6 +634,12 @@ impl StageHandler for SelectState {
         ctx.shared.searching || self.record_modal.is_some() || self.filter.is_open()
     }
 
+    /// Arriving back on the browser is when the course list is re-resolved: a scan that has just
+    /// finished may have supplied the very charts a course was missing.
+    fn on_enter(&mut self, ctx: &mut FrameCtx<'_>) {
+        self.refresh_courses(ctx.shared);
+    }
+
     fn update(&mut self, ctx: &mut FrameCtx<'_>) -> Transition {
         let started = self.poll_replay_download(ctx.shared);
         if !matches!(started, Transition::Stay) {
@@ -604,12 +703,19 @@ impl StageHandler for SelectState {
             KeyCode::F3 if self.shift_held => self.cycle_sort_back(ctx.shared),
             KeyCode::F3 => self.cycle_sort(ctx.shared),
             KeyCode::F2 => self.toggle_filter_panel(),
+            KeyCode::F4 => return self.start_practice(ctx.shared),
+            KeyCode::Tab if self.shift_held => {
+                self.tab = self.tab.next();
+                self.refresh_courses(ctx.shared);
+            }
             KeyCode::KeyF => ctx.shared.toggle_focused_favorite(),
             KeyCode::Tab => return Transition::Open(Stage::Settings(SettingsState::new())),
             KeyCode::KeyO => return Transition::Open(Stage::Folders(FoldersState::new())),
             KeyCode::KeyT => return Transition::Open(Stage::Tables(TablesState::new())),
             KeyCode::KeyR => self.open_record_modal(ctx.shared),
             KeyCode::KeyI => self.toggle_ranking_panel(ctx.shared),
+            KeyCode::ArrowUp if self.tab == SelectTab::Courses => self.courses.move_cursor(-1),
+            KeyCode::ArrowDown if self.tab == SelectTab::Courses => self.courses.move_cursor(1),
             KeyCode::ArrowUp => {
                 ctx.shared.sel = ctx.shared.sel.saturating_sub(1);
                 ctx.shared.print_selection();
@@ -630,6 +736,12 @@ impl StageHandler for SelectState {
     /// keyboard shortcuts, and a click that misses every region closes an open modal.
     fn handle_mouse(&mut self, ctx: &mut FrameCtx<'_>, at: (f32, f32)) -> Transition {
         match ctx.shared.hit_test(at) {
+            Some(Hot::SelectRow(idx)) if self.tab == SelectTab::Courses => {
+                if self.courses.cursor() == idx {
+                    return self.select_enter(ctx.shared);
+                }
+                self.courses.focus(idx);
+            }
             Some(Hot::SelectRow(idx)) => {
                 if ctx.shared.sel == idx {
                     return self.select_enter(ctx.shared);
@@ -665,6 +777,7 @@ impl StageHandler for SelectState {
     fn draw(&mut self, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'_>) {
         self.refresh_scene_cache(ctx.shared);
         let ranking_lines = if self.ranking_open { self.ranking_lines(ctx.shared) } else { Vec::new() };
+        self.clamp_ranking_selection(ctx.shared, &ranking_lines);
         let Some(view) = self.cached_scene.as_ref() else {
             return;
         };
@@ -703,7 +816,7 @@ impl StageHandler for SelectState {
             (rect, mapped)
         }));
         if self.ranking_open {
-            let hot = render_ranking_panel(canvas, &ranking_lines, self.ranking_sel, true);
+            let hot = render_ranking_panel(canvas, &ranking_lines, self.ranking_sel, true, ctx.shared.can_switch_primary_ir());
             ctx.shared.hot.extend(hot.into_iter().map(|(rect, index)| (rect, Hot::RankingRow(index))));
         }
         if self.filter.is_open() {

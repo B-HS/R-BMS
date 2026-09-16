@@ -196,6 +196,7 @@ fn open_key(ctx: &mut FrameCtx<'_>, key: &KeyInput<'_>) -> bool {
         TOGGLE_KEY => ctx.shared.options.open_panel(false),
         _ => return false,
     }
+    ctx.shared.play_system_sound(crate::SystemSound::OptionOpen);
     true
 }
 
@@ -211,6 +212,7 @@ fn step(ctx: &mut FrameCtx<'_>, delta: i32) {
     }
     if adjust(&mut ctx.shared.config, id, delta) == AdjustOutcome::Changed {
         ctx.shared.options.dirty = true;
+        ctx.shared.play_system_sound(crate::SystemSound::OptionChange);
     }
 }
 
@@ -222,6 +224,7 @@ pub(crate) fn close(shared: &mut AppShared) {
     if !shared.options.is_open() {
         return;
     }
+    shared.play_system_sound(crate::SystemSound::OptionClose);
     let dirty = std::mem::take(&mut shared.options.dirty);
     shared.options.close_panel();
     if dirty {

@@ -59,6 +59,10 @@ pub struct AudioOptions {
     pub bg: f32,
     /// Gain of the system bus.
     pub system: f32,
+    /// Folder holding the system sound set. `None` leaves every system sound silent.
+    pub sound_folder: Option<String>,
+    /// Play the per-judgment guide cues while a chart runs.
+    pub guide_se: bool,
     #[serde(skip)]
     pub(crate) reopen_pending: bool,
 }
@@ -74,6 +78,8 @@ impl Default for AudioOptions {
             key: DEFAULT_BUS_VOLUME,
             bg: DEFAULT_BUS_VOLUME,
             system: DEFAULT_BUS_VOLUME,
+            sound_folder: None,
+            guide_se: false,
             reopen_pending: false,
         }
     }
@@ -95,6 +101,8 @@ impl PartialEq for AudioOptions {
             && self.key == other.key
             && self.bg == other.bg
             && self.system == other.system
+            && self.sound_folder == other.sound_folder
+            && self.guide_se == other.guide_se
     }
 }
 
@@ -110,6 +118,7 @@ impl AudioOptions {
         self.key = clamp_volume(self.key, DEFAULT_BUS_VOLUME);
         self.bg = clamp_volume(self.bg, DEFAULT_BUS_VOLUME);
         self.system = clamp_volume(self.system, DEFAULT_BUS_VOLUME);
+        self.sound_folder = self.sound_folder.take().filter(|d| !d.trim().is_empty());
         self.reopen_pending = false;
     }
 

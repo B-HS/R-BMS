@@ -7,14 +7,38 @@ use rbms_render::ToastLevel;
 
 use crate::App;
 use crate::stage::render_tests::{FRAME_DT, app, render};
-use crate::stage::{Canvas, FoldersState, FrameCtx, HeadlessCanvas, LoadingState, Stage, TablesState};
+use crate::stage::{Canvas, FoldersState, FrameCtx, HeadlessCanvas, LoadingState, SelectState, Stage, StageId, TablesState};
 use crate::toast::ToastQueue;
+
+const SELECT_BOTTOM_NAVIGATION_TOP: u32 = 668;
+const SELECT_TOAST_BOTTOM_GAP: u32 = 8;
+const DEFAULT_TOAST_LAST_PIXEL_Y: u32 = 703;
 
 /// Draw the message strip over a frame that has already been painted, the way the frame loop draws
 /// it over whichever screen is up.
 fn overlay_toasts(app: &App, pixels: &mut HeadlessCanvas) {
     let mut canvas = Canvas::Headless(pixels);
-    crate::toast::draw(&app.shared.toasts, &mut canvas);
+    crate::toast::draw(&app.shared.toasts, StageId::Folders, &mut canvas);
+}
+
+fn toast_bottom_pixel(stage: Stage) -> u32 {
+    let mut app = app();
+    let mut queue = ToastQueue::default();
+    queue.push(ToastLevel::Info, "toast geometry", Instant::now());
+    app.shared.toasts = queue;
+    app.stage = stage;
+
+    let mut pixels = HeadlessCanvas::new(crate::CW, crate::CH);
+    let mut canvas = Canvas::Headless(&mut pixels);
+    let mut ctx = FrameCtx { shared: &mut app.shared, now: Instant::now(), dt: FRAME_DT };
+    App::draw_overlays(&app.stage, &mut ctx, &mut canvas);
+
+    for y in (0..crate::CH).rev() {
+        if (0..crate::CW).any(|x| pixels.pixel_at(x, y).a != 0) {
+            return y;
+        }
+    }
+    panic!("toast overlay painted no pixels")
 }
 
 /// One frame the way the app draws it: the screen, and then the overlay pass that settles the
@@ -51,7 +75,10 @@ fn the_loading_screen_animates_between_frames() {
 #[test]
 fn each_kind_of_wait_paints_a_frame_of_its_own() {
     let mut app = app();
-    let scan = render(&mut app, Stage::Loading(LoadingState::scan(Vec::new(), Vec::new()))).signature();
+    let scan_db = std::env::temp_dir().join(format!("rbms-shell-scan-{}.sqlite", std::process::id()));
+    let _ = std::fs::remove_file(&scan_db);
+    let scan = render(&mut app, Stage::Loading(LoadingState::scan(Vec::new(), Vec::new(), scan_db.clone(), false))).signature();
+    let _ = std::fs::remove_file(&scan_db);
     let source = rbms_config::TableSource { name: "table".into(), location: "/no/such/table.json".into() };
     let fetching = LoadingState::table(&app.shared, source);
     let table = render(&mut app, Stage::Loading(fetching)).signature();
@@ -138,6 +165,18 @@ fn the_message_strip_paints_the_same_over_any_screen() {
         assert_ne!(bare_folders, over_folders.pixel_checksum());
         assert_ne!(bare_tables, over_tables.pixel_checksum());
     });
+}
+
+#[test]
+fn select_toasts_clear_the_bottom_navigation_without_moving_other_stages() {
+    let select_bottom = toast_bottom_pixel(Stage::Select(Box::new(SelectState::new())));
+    assert!(
+        select_bottom < SELECT_BOTTOM_NAVIGATION_TOP - SELECT_TOAST_BOTTOM_GAP,
+        "select toast ends at {select_bottom}, overlapping the bottom navigation at {SELECT_BOTTOM_NAVIGATION_TOP}",
+    );
+
+    let folders_bottom = toast_bottom_pixel(Stage::Folders(FoldersState::new()));
+    assert_eq!(folders_bottom, DEFAULT_TOAST_LAST_PIXEL_Y, "non-select toast placement changed");
 }
 
 /// The window fit is pointed at the DISPLAY setting on every frame's overlay pass, so the row takes

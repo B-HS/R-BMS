@@ -6,6 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+rusqlite = { workspace = true }
 serde = { workspace = true }
 ron = { workspace = true }
 thiserror = { workspace = true }
