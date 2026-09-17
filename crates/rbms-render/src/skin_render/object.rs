@@ -12,7 +12,7 @@ use std::borrow::Cow;
 
 use rbms_skin::dst::{DestinationTrack, LuaExprId};
 use rbms_skin::loader::{LoadedSkin, StretchKind};
-use rbms_skin::model::{FloatValueDef, GraphDef, ImageDef, PropertyRef, SliderDef, TextDef, ValueDef};
+use rbms_skin::model::{FloatValueDef, GraphDef, ImageDef, PropertyRef, SkinLayer, SliderDef, TextDef, ValueDef};
 use rbms_skin::property::SkinStateSource;
 use rbms_skin::timer::TimerId;
 
@@ -62,6 +62,7 @@ pub enum SkinObjectKind {
 #[derive(Debug)]
 pub(crate) struct SkinObject {
     pub(crate) id: String,
+    pub(crate) layer: SkinLayer,
     pub(crate) track: DestinationTrack,
     pub(crate) stretch: StretchKind,
     pub(crate) body: Body,
@@ -512,7 +513,7 @@ pub(crate) fn build_objects(
         let Some(body) = build_body(skin, &named.id, sources, families, assets, warnings) else {
             continue;
         };
-        objects.push(SkinObject { id: named.id.clone(), track: named.track.clone(), stretch, body });
+        objects.push(SkinObject { id: named.id.clone(), layer: named.layer, track: named.track.clone(), stretch, body });
     }
     objects
 }

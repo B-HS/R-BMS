@@ -1,0 +1,28 @@
+{
+    type: 6,
+    name: 'Neon Horizon Load',
+    author: 'R-BMS',
+    w: 1280,
+    h: 720,
+    composition: 'replace',
+    source: [
+        { id: 'backdrop', path: 'images/decide-backdrop.png' },
+        { id: 'common', path: 'images/common-atlas.png' },
+    ],
+    image: [
+        { id: 'load-backdrop', src: 'backdrop', x: 0, y: 0, w: 1280, h: 720 },
+    ],
+    text: [
+        { id: 'loading-label', font: 'ui', size: 20, align: 0, constantText: 'PREPARING CHART' },
+        { id: 'song-title', font: 'ui', size: 32, align: 0, value: 10 },
+    ],
+    graph: [
+        { id: 'loading-progress', src: 'common', x: 0, y: 0, w: 128, h: 32, angle: 1, type: 102 },
+    ],
+    destination: [
+        { id: 'load-backdrop', dst: [{ time: 0, x: 0, y: 0, w: 1280, h: 720 }] },
+        { id: 'loading-label', dst: [{ time: 0, x: 74, y: 132, w: 460, h: 22, r: 105, g: 241, b: 228 }] },
+        { id: 'song-title', dst: [{ time: 0, x: 74, y: 176, w: 460, h: 36, r: 244, g: 251, b: 255 }] },
+        { id: 'loading-progress', dst: [{ time: 0, x: 54, y: 408, w: 1172, h: 24 }] },
+    ],
+}

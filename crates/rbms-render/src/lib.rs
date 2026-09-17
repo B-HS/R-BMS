@@ -23,7 +23,7 @@ pub use font::{
 pub use glyph_atlas::{ATLAS_MAX_DIM, ATLAS_TEXTURE_KEY, AtlasEntry, GlyphAtlas, GlyphAtlasBinding};
 pub use golden::{GOLDEN_UPDATE_ENV, GoldenDiff, GoldenImage, GoldenOptions, PngCodec, assert_golden_png};
 pub use hud::{HudPace, HudView, render_hud, render_hud_ctx};
-pub use playfield::{LaneShade, PlayfieldView, render_key_bomb, render_lane_cover, render_playfield_view};
+pub use playfield::{LaneShade, PlayfieldView, render_key_bomb, render_lane_cover, render_playfield_on_background, render_playfield_view};
 pub use result::{
     KEY_LANE_KIND, LANE_KIND_COUNT, RANK_BANDS, RATE_STEPS, ResultExtras, ResultPalette, ResultView, SCRATCH_LANE_KIND, TargetView, dj_rank, dj_rank_label,
     draw_rank_bar, draw_rank_bar_stepped, ex_delta_label, lane_kind_total, rate_27, render_result, render_result_ctx, render_result_with_palette,
@@ -31,7 +31,7 @@ pub use result::{
 };
 pub use select::{
     CoverState, DensityView, DetailView, RecordRowView, RecordsView, SelectDetail, SelectHot, SelectModal, SelectRow, SelectView, StatCell, cover_rect,
-    render_select, render_select_ctx,
+    render_select, render_select_ctx, render_select_on_background, render_select_on_background_ctx,
 };
 pub use skin::{Skin, SkinConfig, SkinError};
 pub use skin_render::{

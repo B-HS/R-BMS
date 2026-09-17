@@ -17,7 +17,7 @@ use rbms_skin::property::{
 };
 
 use crate::hud::HudView;
-use crate::result::{ResultView, TargetView, lane_kind_total};
+use crate::result::{ResultView, TargetView, ex_delta_label, lane_kind_total};
 use crate::select::{SelectDetail, SelectView};
 
 /// How many judgements a run is counted in, best first.
@@ -45,6 +45,23 @@ const GAUGE_FULL: f32 = 100.0;
 /// EX points a single note is worth at its best judgement, which is what turns a note count into a
 /// maximum score.
 const POINTS_PER_NOTE: u32 = 2;
+
+pub const RESULT_TEXT_SCORE: i32 = 20_001;
+pub const RESULT_TEXT_COMBO: i32 = 20_002;
+pub const RESULT_TEXT_NOTES: i32 = 20_003;
+pub const RESULT_TEXT_CLEAR: i32 = 20_004;
+pub const RESULT_TEXT_JUDGE_PERFECT: i32 = 20_005;
+pub const RESULT_TEXT_JUDGE_GREAT: i32 = 20_006;
+pub const RESULT_TEXT_JUDGE_GOOD: i32 = 20_007;
+pub const RESULT_TEXT_JUDGE_BAD: i32 = 20_008;
+pub const RESULT_TEXT_JUDGE_POOR: i32 = 20_009;
+pub const RESULT_TEXT_JUDGE_MISS: i32 = 20_010;
+pub const RESULT_TEXT_TARGET: i32 = 20_011;
+
+const RESULT_TEXT_JUDGE_IDS: [i32; JUDGEMENTS] =
+    [RESULT_TEXT_JUDGE_PERFECT, RESULT_TEXT_JUDGE_GREAT, RESULT_TEXT_JUDGE_GOOD, RESULT_TEXT_JUDGE_BAD, RESULT_TEXT_JUDGE_POOR, RESULT_TEXT_JUDGE_MISS];
+
+const RESULT_JUDGE_LABELS: [&str; JUDGEMENTS] = ["PGREAT", "GREAT", "GOOD", "BAD", "POOR", "MISS"];
 
 /// The whole part of a number a document splits across two objects.
 fn whole(value: f64) -> i32 {
@@ -257,6 +274,12 @@ pub struct ResultViewState<'a> {
     pub cleared: bool,
     pub now_ms: i64,
     pub offsets: Offsets<'a>,
+    score: String,
+    combo: String,
+    notes: String,
+    clear: String,
+    judges: [String; JUDGEMENTS],
+    target_text: String,
 }
 
 impl std::fmt::Debug for ResultViewState<'_> {
@@ -268,6 +291,29 @@ impl std::fmt::Debug for ResultViewState<'_> {
 impl OffsetSource for ResultViewState<'_> {
     fn offset(&self, id: i32) -> Option<SkinOffset> {
         offset_of(self.offsets, id)
+    }
+}
+
+impl<'a> ResultViewState<'a> {
+    pub fn new(view: &'a ResultView, target: Option<&'a TargetView>, cleared: bool, now_ms: i64, offsets: Offsets<'a>) -> ResultViewState<'a> {
+        let judges = std::array::from_fn(|index| format!("{}  {}", RESULT_JUDGE_LABELS[index], view.counts[index]));
+        let target_text = target.map_or_else(String::new, |target| {
+            let (delta, _) = ex_delta_label(i64::from(view.ex_score) - i64::from(target.ex));
+            format!("{}  {}  {}", target.name, target.ex, delta)
+        });
+        ResultViewState {
+            view,
+            target,
+            cleared,
+            now_ms,
+            offsets,
+            score: format!("{} / {}", view.ex_score, view.max_score),
+            combo: format!("{} / {}", view.max_combo, view.total_notes),
+            notes: view.total_notes.to_string(),
+            clear: view.clear_label.to_string(),
+            judges,
+            target_text,
+        }
     }
 }
 
@@ -320,6 +366,12 @@ impl SkinStateSource for ResultViewState<'_> {
     fn string(&self, id: i32) -> &str {
         match id {
             STRING_TITLE | STRING_FULLTITLE => &self.view.title,
+            RESULT_TEXT_SCORE => &self.score,
+            RESULT_TEXT_COMBO => &self.combo,
+            RESULT_TEXT_NOTES => &self.notes,
+            RESULT_TEXT_CLEAR => &self.clear,
+            RESULT_TEXT_TARGET => &self.target_text,
+            _ if let Some(index) = RESULT_TEXT_JUDGE_IDS.iter().position(|value| *value == id) => &self.judges[index],
             _ => UNMAPPED_STRING,
         }
     }

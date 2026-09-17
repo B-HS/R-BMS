@@ -11,6 +11,7 @@ use std::sync::mpsc::Receiver;
 use rbms_config::{Config, DEFAULT_SKIN, STEEL_NEON_SKIN};
 use rbms_model::Mode;
 use rbms_render::{SkinConfig, SkinImage};
+use sha2::{Digest, Sha256};
 
 /// A decode running on the worker pool: what has arrived, how far it has got, the cooperative
 /// cancel, and how many jobs there are in total.
@@ -25,7 +26,8 @@ const DECODE_THREADS_FALLBACK: usize = 4;
 pub(crate) const SKIN_NORMAL: &str = include_str!("../../../assets/skins/normal.ron");
 pub(crate) const SKIN_WIDE: &str = include_str!("../../../assets/skins/wide.ron");
 
-const STEEL_NEON_DIRECTORY: &str = "steel-neon";
+const STEEL_NEON_V1_DIRECTORY: &str = "steel-neon";
+const STEEL_NEON_V2_DIRECTORY: &str = "steel-neon-v2";
 const SKIN_TYPE_PLAY_5KEYS: i32 = 1;
 const SKIN_TYPE_PLAY_14KEYS: i32 = 2;
 const SKIN_TYPE_PLAY_10KEYS: i32 = 3;
@@ -36,7 +38,7 @@ struct BundledFile {
     bytes: &'static [u8],
 }
 
-const STEEL_NEON_FILES: &[BundledFile] = &[
+const STEEL_NEON_V1_FILES: &[BundledFile] = &[
     BundledFile { path: "select.json5", bytes: include_bytes!("../../../assets/skins/steel-neon/select.json5") },
     BundledFile { path: "decide.json5", bytes: include_bytes!("../../../assets/skins/steel-neon/decide.json5") },
     BundledFile { path: "play-7k.json5", bytes: include_bytes!("../../../assets/skins/steel-neon/play-7k.json5") },
@@ -59,6 +61,33 @@ const STEEL_NEON_FILES: &[BundledFile] = &[
     BundledFile { path: "images/result-overlay.png", bytes: include_bytes!("../../../assets/skins/steel-neon/images/result-overlay.png") },
 ];
 
+const STEEL_NEON_V2_FILES: &[BundledFile] = &[
+    BundledFile { path: "select.json5", bytes: include_bytes!("../../../assets/skins/steel-neon-v2/select.json5") },
+    BundledFile { path: "decide.json5", bytes: include_bytes!("../../../assets/skins/steel-neon-v2/decide.json5") },
+    BundledFile { path: "play-7k.json5", bytes: include_bytes!("../../../assets/skins/steel-neon-v2/play-7k.json5") },
+    BundledFile { path: "play-5k.json5", bytes: include_bytes!("../../../assets/skins/steel-neon-v2/play-5k.json5") },
+    BundledFile { path: "play-14k.json5", bytes: include_bytes!("../../../assets/skins/steel-neon-v2/play-14k.json5") },
+    BundledFile { path: "play-10k.json5", bytes: include_bytes!("../../../assets/skins/steel-neon-v2/play-10k.json5") },
+    BundledFile { path: "play-9k.json5", bytes: include_bytes!("../../../assets/skins/steel-neon-v2/play-9k.json5") },
+    BundledFile { path: "play-24k.json5", bytes: include_bytes!("../../../assets/skins/steel-neon-v2/play-24k.json5") },
+    BundledFile { path: "result.json5", bytes: include_bytes!("../../../assets/skins/steel-neon-v2/result.json5") },
+    BundledFile { path: "play.ron", bytes: include_bytes!("../../../assets/skins/steel-neon-v2/play.ron") },
+    BundledFile { path: "play-dual.ron", bytes: include_bytes!("../../../assets/skins/steel-neon-v2/play-dual.ron") },
+    BundledFile { path: "theme.ron", bytes: include_bytes!("../../../assets/skins/steel-neon-v2/theme.ron") },
+    BundledFile { path: "palette.json", bytes: include_bytes!("../../../assets/skins/steel-neon-v2/palette.json") },
+    BundledFile { path: "tools/generate-assets.py", bytes: include_bytes!("../../../assets/skins/steel-neon-v2/tools/generate-assets.py") },
+    BundledFile { path: "images/common-atlas.png", bytes: include_bytes!("../../../assets/skins/steel-neon-v2/images/common-atlas.png") },
+    BundledFile { path: "images/decide-backdrop.png", bytes: include_bytes!("../../../assets/skins/steel-neon-v2/images/decide-backdrop.png") },
+    BundledFile { path: "images/select-background.png", bytes: include_bytes!("../../../assets/skins/steel-neon-v2/images/select-background.png") },
+    BundledFile { path: "images/select-foreground.png", bytes: include_bytes!("../../../assets/skins/steel-neon-v2/images/select-foreground.png") },
+    BundledFile { path: "images/play-background.png", bytes: include_bytes!("../../../assets/skins/steel-neon-v2/images/play-background.png") },
+    BundledFile { path: "images/play-foreground.png", bytes: include_bytes!("../../../assets/skins/steel-neon-v2/images/play-foreground.png") },
+    BundledFile { path: "images/play-dual-background.png", bytes: include_bytes!("../../../assets/skins/steel-neon-v2/images/play-dual-background.png") },
+    BundledFile { path: "images/play-dual-foreground.png", bytes: include_bytes!("../../../assets/skins/steel-neon-v2/images/play-dual-foreground.png") },
+    BundledFile { path: "images/result-background.png", bytes: include_bytes!("../../../assets/skins/steel-neon-v2/images/result-background.png") },
+    BundledFile { path: "images/result-foreground.png", bytes: include_bytes!("../../../assets/skins/steel-neon-v2/images/result-foreground.png") },
+];
+
 const STEEL_NEON_DOCUMENTS: &[(i32, &str)] = &[
     (rbms_skin::loader::SKIN_TYPE_MUSIC_SELECT, "select.json5"),
     (rbms_skin::loader::SKIN_TYPE_DECIDE, "decide.json5"),
@@ -78,38 +107,132 @@ pub(crate) fn bundled_skin(name: &str) -> SkinConfig {
 
 pub(crate) fn installed_play_skin_path(settings_path: &Path, config: &Config, mode: Mode) -> PathBuf {
     let filename = if matches!(mode, Mode::BEAT_10K | Mode::BEAT_14K) { "play-dual.ron" } else { "play.ron" };
-    crate::skin_select::skin_root(settings_path, config).join(STEEL_NEON_DIRECTORY).join(filename)
+    active_bundle_directory(&crate::skin_select::skin_root(settings_path, config)).join(filename)
 }
 
 fn active_theme_path(settings_path: &Path, config: &Config) -> PathBuf {
     if config.display.skin.eq_ignore_ascii_case(STEEL_NEON_SKIN) {
-        return crate::skin_select::skin_root(settings_path, config).join(STEEL_NEON_DIRECTORY).join("theme.ron");
+        return active_bundle_directory(&crate::skin_select::skin_root(settings_path, config)).join("theme.ron");
     }
     settings_path.parent().map(|directory| directory.join("theme.ron")).unwrap_or_else(|| PathBuf::from("theme.ron"))
 }
 
+pub(crate) fn needs_default_skin_install(settings_path: &Path, config: &Config) -> bool {
+    if !config.skin.default_skin_installed {
+        return true;
+    }
+    !STEEL_NEON_V2_FILES.is_empty() && !current_bundle_is_ready(&crate::skin_select::skin_root(settings_path, config).join(STEEL_NEON_V2_DIRECTORY))
+}
+
 pub(crate) fn install_default_skin(settings_path: &Path, config: &mut Config) -> bool {
     let root = crate::skin_select::skin_root(settings_path, config);
-    let directory = root.join(STEEL_NEON_DIRECTORY);
-    let mut skin_ready = true;
-    for file in STEEL_NEON_FILES {
-        skin_ready = install_bundled_file(&directory.join(file.path), file.bytes) && skin_ready;
-    }
+    let legacy_directory = root.join(STEEL_NEON_V1_DIRECTORY);
+    let legacy_ready = legacy_directory.is_dir() && install_bundle(&legacy_directory, STEEL_NEON_V1_FILES);
+    let current_directory = root.join(STEEL_NEON_V2_DIRECTORY);
+    let current_ready = if STEEL_NEON_V2_FILES.is_empty() { false } else { install_bundle(&current_directory, STEEL_NEON_V2_FILES) };
     let theme_path = settings_path.parent().unwrap_or(Path::new(".")).join("theme.ron");
     let theme_ready = install_bundled_file(&theme_path, THEME_TEMPLATE.as_bytes());
 
-    if skin_ready {
-        for (screen, file) in STEEL_NEON_DOCUMENTS {
-            let path = directory.join(file);
-            if config.skin.document(*screen).is_none() && path.is_file() {
-                config.skin.select(*screen, Some(path.to_string_lossy().into_owned()));
-            }
-        }
-        if config.display.skin.eq_ignore_ascii_case(DEFAULT_SKIN) && directory.join("play.ron").is_file() && directory.join("play-dual.ron").is_file() {
+    if legacy_ready || current_ready {
+        let selects_default_documents = config.display.skin.eq_ignore_ascii_case(DEFAULT_SKIN);
+        let can_use_current_bundle = current_bundle_is_ready(&current_directory);
+        let migrates_legacy_wide =
+            can_use_current_bundle && config.display.skin.eq_ignore_ascii_case("WIDE") && has_unmodified_legacy_bundle_selection(&root, config);
+        if (selects_default_documents || migrates_legacy_wide)
+            && active_bundle_directory(&root).join("play.ron").is_file()
+            && active_bundle_directory(&root).join("play-dual.ron").is_file()
+        {
             config.display.skin = STEEL_NEON_SKIN.to_string();
         }
+        if selects_default_documents {
+            select_default_bundle_documents(&root, config);
+        }
+        apply_skin_bundle_selection(settings_path, config);
     }
-    skin_ready && theme_ready
+    (legacy_ready || current_ready) && theme_ready
+}
+
+pub(crate) fn apply_skin_bundle_selection(settings_path: &Path, config: &mut Config) {
+    let root = crate::skin_select::skin_root(settings_path, config);
+    let current_directory = active_bundle_directory(&root);
+    if !config.display.skin.eq_ignore_ascii_case(STEEL_NEON_SKIN) {
+        return;
+    }
+    for (screen, file) in STEEL_NEON_DOCUMENTS {
+        let legacy_path = root.join(STEEL_NEON_V1_DIRECTORY).join(file);
+        let current_path = current_directory.join(file);
+        let selected = config.skin.document(*screen).map(PathBuf::from);
+        if selected.is_some_and(|path| path == legacy_path && current_path != legacy_path && matches_legacy_document(&path, file) && current_path.is_file()) {
+            config.skin.select(*screen, Some(current_path.to_string_lossy().into_owned()));
+        }
+    }
+}
+
+pub(crate) fn skin_document_is_enabled(settings_path: &Path, config: &Config, screen: i32) -> bool {
+    let Some(selected) = config.skin.document(screen) else {
+        return false;
+    };
+    let Some((_, filename)) = STEEL_NEON_DOCUMENTS.iter().find(|(document_screen, _)| *document_screen == screen) else {
+        return true;
+    };
+    let root = crate::skin_select::skin_root(settings_path, config);
+    let legacy_path = root.join(STEEL_NEON_V1_DIRECTORY).join(filename);
+    let current_path = root.join(STEEL_NEON_V2_DIRECTORY).join(filename);
+    let selected_path = Path::new(selected);
+    if selected_path != legacy_path && selected_path != current_path {
+        return true;
+    }
+    config.display.skin.eq_ignore_ascii_case(STEEL_NEON_SKIN) && selected_path == active_bundle_directory(&root).join(filename)
+}
+
+fn install_bundle(directory: &Path, files: &[BundledFile]) -> bool {
+    let mut ready = !files.is_empty();
+    for file in files {
+        ready = install_bundled_file(&directory.join(file.path), file.bytes) && ready;
+    }
+    ready
+}
+
+fn active_bundle_directory(root: &Path) -> PathBuf {
+    let current = root.join(STEEL_NEON_V2_DIRECTORY);
+    if current_bundle_is_ready(&current) {
+        return current;
+    }
+    root.join(STEEL_NEON_V1_DIRECTORY)
+}
+
+fn current_bundle_is_ready(directory: &Path) -> bool {
+    if !STEEL_NEON_V2_FILES.is_empty() {
+        return STEEL_NEON_V2_FILES.iter().all(|file| directory.join(file.path).is_file());
+    }
+    ["theme.ron", "play.ron", "play-dual.ron"].into_iter().chain(STEEL_NEON_DOCUMENTS.iter().map(|(_, file)| *file)).all(|file| directory.join(file).is_file())
+}
+
+fn select_default_bundle_documents(root: &Path, config: &mut Config) {
+    let directory = active_bundle_directory(root);
+    for (screen, file) in STEEL_NEON_DOCUMENTS {
+        let path = directory.join(file);
+        if config.skin.document(*screen).is_none() && path.is_file() {
+            config.skin.select(*screen, Some(path.to_string_lossy().into_owned()));
+        }
+    }
+}
+
+fn matches_legacy_document(path: &Path, filename: &str) -> bool {
+    let Some(file) = STEEL_NEON_V1_FILES.iter().find(|file| file.path == filename) else {
+        return false;
+    };
+    let Ok(actual) = std::fs::read(path) else {
+        return false;
+    };
+    Sha256::digest(actual) == Sha256::digest(file.bytes)
+}
+
+fn has_unmodified_legacy_bundle_selection(root: &Path, config: &Config) -> bool {
+    let selections: Vec<(&str, PathBuf)> =
+        STEEL_NEON_DOCUMENTS.iter().filter_map(|(screen, file)| config.skin.document(*screen).map(|path| (*file, PathBuf::from(path)))).collect();
+    !selections.is_empty()
+        && selections.iter().all(|(file, path)| path == &root.join(STEEL_NEON_V1_DIRECTORY).join(file) && matches_legacy_document(path, file))
 }
 
 fn install_bundled_file(path: &Path, bytes: &[u8]) -> bool {
@@ -469,6 +592,7 @@ mod tests {
         assert_eq!(config.skin.document(rbms_skin::loader::SKIN_TYPE_MUSIC_SELECT), Some(user_document.to_string_lossy().as_ref()));
         assert_eq!(config.display.skin, STEEL_NEON_SKIN);
         assert!(settings.parent().expect("settings has a parent").join("theme.ron").is_file());
+        assert!(!root.join(STEEL_NEON_V1_DIRECTORY).exists(), "a fresh installation also created the obsolete bundle");
 
         let installed_single = installed_play_skin_path(&settings, &config, Mode::BEAT_7K);
         let installed_dual = installed_play_skin_path(&settings, &config, Mode::BEAT_14K);
@@ -520,6 +644,96 @@ mod tests {
         let unsupported = rbms_skin::loader::mode_skin_type(rbms_model::Mode::KEYBOARD_24K).expect("the document type is known");
         assert_eq!(config.skin.document(unsupported), None);
         assert_eq!(config.display.skin, STEEL_NEON_SKIN);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn bundle_selection_preserves_documents_and_gates_the_legacy_bundle_for_wide() {
+        let dir = temp_dir("bundle-selection-wide");
+        let settings = dir.join("settings.ron");
+        let root = dir.join("skin");
+        let external = root.join("external.json5");
+        std::fs::create_dir_all(&root).expect("create the skin folder");
+        std::fs::write(&external, "external").expect("write the external document");
+
+        let mut config = Config::default();
+        assert!(install_default_skin(&settings, &mut config));
+        let legacy = config.skin.document(rbms_skin::loader::SKIN_TYPE_MUSIC_SELECT).expect("the bundled select document is chosen").to_string();
+        config.display.skin = "WIDE".to_string();
+        apply_skin_bundle_selection(&settings, &mut config);
+        assert_eq!(
+            config.skin.document(rbms_skin::loader::SKIN_TYPE_MUSIC_SELECT),
+            Some(legacy.as_str()),
+            "the legacy document selection was erased with the WIDE preset"
+        );
+
+        config.skin.select(rbms_skin::loader::SKIN_TYPE_MUSIC_SELECT, Some(external.to_string_lossy().into_owned()));
+        apply_skin_bundle_selection(&settings, &mut config);
+        assert_eq!(
+            config.skin.document(rbms_skin::loader::SKIN_TYPE_MUSIC_SELECT),
+            Some(external.to_string_lossy().as_ref()),
+            "the external document was cleared with the bundled one"
+        );
+
+        config.skin.select(rbms_skin::loader::SKIN_TYPE_MUSIC_SELECT, Some(legacy.clone()));
+        assert!(
+            !skin_document_is_enabled(&settings, &config, rbms_skin::loader::SKIN_TYPE_MUSIC_SELECT),
+            "the legacy overlay is enabled while the WIDE preset owns the layout"
+        );
+        config.display.skin = STEEL_NEON_SKIN.to_string();
+        apply_skin_bundle_selection(&settings, &mut config);
+        assert_eq!(
+            config.skin.document(rbms_skin::loader::SKIN_TYPE_MUSIC_SELECT),
+            Some(legacy.as_str()),
+            "the document selection changed while returning to the bundled preset"
+        );
+        assert!(
+            skin_document_is_enabled(&settings, &config, rbms_skin::loader::SKIN_TYPE_MUSIC_SELECT),
+            "the legacy overlay stays gated after its matching preset returns"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn unchanged_legacy_document_moves_to_a_complete_current_bundle() {
+        let dir = temp_dir("bundle-migration");
+        let settings = dir.join("settings.ron");
+        let mut config = Config::default();
+        let root = crate::skin_select::skin_root(&settings, &config);
+        let legacy_directory = root.join(STEEL_NEON_V1_DIRECTORY);
+        for file in STEEL_NEON_V1_FILES {
+            let path = legacy_directory.join(file.path);
+            std::fs::create_dir_all(path.parent().expect("legacy bundle file has a parent")).expect("create the legacy bundle");
+            std::fs::write(path, file.bytes).expect("write the legacy bundle file");
+        }
+        let legacy = legacy_directory.join("select.json5");
+        let current = root.join(STEEL_NEON_V2_DIRECTORY);
+        config.skin.select(rbms_skin::loader::SKIN_TYPE_MUSIC_SELECT, Some(legacy.to_string_lossy().into_owned()));
+        config.skin.default_skin_installed = true;
+        config.display.skin = "WIDE".to_string();
+        assert!(install_default_skin(&settings, &mut config));
+        let migrated = current.join("select.json5");
+        assert_eq!(config.display.skin, STEEL_NEON_SKIN, "the unmodified legacy bundle did not move off the incompatible WIDE preset");
+        assert_eq!(
+            config.skin.document(rbms_skin::loader::SKIN_TYPE_MUSIC_SELECT),
+            Some(migrated.to_string_lossy().as_ref()),
+            "the unchanged legacy document was not migrated"
+        );
+        assert!(skin_document_is_enabled(&settings, &config, rbms_skin::loader::SKIN_TYPE_MUSIC_SELECT), "the complete current bundle is gated off");
+
+        std::fs::write(&legacy, "edited").expect("edit the legacy document");
+        config.skin.select(rbms_skin::loader::SKIN_TYPE_MUSIC_SELECT, Some(legacy.to_string_lossy().into_owned()));
+        apply_skin_bundle_selection(&settings, &mut config);
+        assert_eq!(
+            config.skin.document(rbms_skin::loader::SKIN_TYPE_MUSIC_SELECT),
+            Some(legacy.to_string_lossy().as_ref()),
+            "the edited legacy document was migrated over the user's change"
+        );
+        assert!(
+            !skin_document_is_enabled(&settings, &config, rbms_skin::loader::SKIN_TYPE_MUSIC_SELECT),
+            "the edited legacy document stays enabled beside the current bundle"
+        );
+        assert_eq!(std::fs::read_to_string(&legacy).expect("read the edited legacy document"), "edited");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

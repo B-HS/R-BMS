@@ -25,7 +25,7 @@ use serde_json::Value;
 
 use crate::SkinError;
 use crate::dst::{DestinationTrack, OffsetSource, SkinOffset};
-use crate::model::{Destination, Filepath, OffsetDef, PropertyDef, SKIN_TYPE_UNSET, SkinDef};
+use crate::model::{Destination, Filepath, OffsetDef, PropertyDef, SKIN_TYPE_UNSET, SkinDef, SkinLayer};
 use crate::resolve::{CustomFile, Draw, FileResolver, build_filemap, contained, enumerate_custom_files, pattern_for};
 
 /// Bytes a document may be before the loader refuses to parse it.
@@ -255,6 +255,7 @@ pub struct SkinHeader {
 #[derive(Debug, Clone)]
 pub struct NamedTrack {
     pub id: String,
+    pub layer: SkinLayer,
     pub track: DestinationTrack,
 }
 
@@ -527,7 +528,7 @@ pub fn load_skin(path: &Path, options: SkinLoadOptions<'_>) -> Result<LoadedSkin
     let destinations = std::mem::take(&mut skin.def.destination);
     for destination in &destinations {
         match skin.build_track(destination, false) {
-            Ok(Some(track)) => skin.destinations.push(NamedTrack { id: destination.id.clone(), track }),
+            Ok(Some(track)) => skin.destinations.push(NamedTrack { id: destination.id.clone(), layer: destination.layer, track }),
             Ok(None) => {}
             Err(error @ SkinError::LuaUnavailable) => return Err(error),
             Err(error) => skin.warnings.push(format!("object {:?} was skipped: {error}", destination.id)),

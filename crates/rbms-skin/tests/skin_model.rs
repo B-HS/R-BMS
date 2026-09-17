@@ -1,7 +1,7 @@
 //! The serde mirror: that a document's defaults, its two ways of naming a property, and its unset
 //! animation fields all survive the trip into Rust unchanged.
 
-use rbms_skin::model::{Animation, Destination, ImageDef, PropertyRef, SkinComposition, SkinDef, SliderDef, TextDef};
+use rbms_skin::model::{Animation, Destination, ImageDef, PropertyRef, SkinComposition, SkinDef, SkinLayer, SliderDef, TextDef};
 
 /// Reads a document fragment the way the loader's strict path does.
 fn parse<T: serde::de::DeserializeOwned>(text: &str) -> T {
@@ -33,11 +33,21 @@ fn a_type_key_is_read_despite_being_a_rust_keyword() {
 }
 
 #[test]
-fn a_document_composition_defaults_to_replace_and_reads_overlay() {
+fn a_document_composition_defaults_to_replace_and_reads_native_layout_variants() {
     let default_document: SkinDef = parse("{}");
     let overlay_document: SkinDef = parse(r#"{ "composition": "overlay" }"#);
+    let layered_document: SkinDef = parse(r#"{ "composition": "layered" }"#);
     assert_eq!(default_document.composition, SkinComposition::Replace);
     assert_eq!(overlay_document.composition, SkinComposition::Overlay);
+    assert_eq!(layered_document.composition, SkinComposition::Layered);
+}
+
+#[test]
+fn a_destination_defaults_to_the_foreground_and_reads_a_background_layer() {
+    let default_destination: Destination = parse(r#"{ "id": "frame" }"#);
+    let background_destination: Destination = parse(r#"{ "id": "backdrop", "layer": "background" }"#);
+    assert_eq!(default_destination.layer, SkinLayer::Foreground);
+    assert_eq!(background_destination.layer, SkinLayer::Background);
 }
 
 #[test]

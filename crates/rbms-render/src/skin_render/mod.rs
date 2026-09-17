@@ -26,6 +26,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use rbms_skin::dst::{LuaDrawEval, LuaExprId, SkinColor, SkinRect};
 use rbms_skin::loader::LoadedSkin;
+use rbms_skin::model::SkinLayer;
 use rbms_skin::property::SkinStateSource;
 use rbms_skin::timer::TimerState;
 
@@ -312,10 +313,28 @@ impl SkinScreen {
     /// Order is z-order: an object is submitted exactly where the document put it, so a backend that
     /// merges adjacent draws still lands them in the same place.
     pub fn draw<R: Renderer>(&self, ctx: &mut crate::ctx::RenderCtx<'_>, r: &mut R, frame: &SkinFrame<'_>) -> usize {
+        self.draw_matching(ctx, r, frame, |_| true)
+    }
+
+    /// Draws the destinations assigned to one phase of a layered document.
+    pub fn draw_layer<R: Renderer>(&self, ctx: &mut crate::ctx::RenderCtx<'_>, r: &mut R, frame: &SkinFrame<'_>, layer: SkinLayer) -> usize {
+        self.draw_matching(ctx, r, frame, |object| object.layer == layer)
+    }
+
+    fn draw_matching<R: Renderer>(
+        &self,
+        ctx: &mut crate::ctx::RenderCtx<'_>,
+        r: &mut R,
+        frame: &SkinFrame<'_>,
+        matches_layer: impl Fn(&object::SkinObject) -> bool,
+    ) -> usize {
         let (screen_w, screen_h) = r.size();
         let viewport = SkinViewport::new(self.authored, (screen_w as f32, screen_h as f32));
         let mut drawn = 0;
         for object in &self.objects {
+            if !matches_layer(object) {
+                continue;
+            }
             if draw::draw_object(ctx, r, object, &viewport, frame) {
                 drawn += 1;
             }

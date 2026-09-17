@@ -24,7 +24,7 @@ use crate::{AppShared, CH, CW};
 /// run starts, which nothing does yet, and a row that quietly does nothing would read as a chosen
 /// option rather than an unbuilt one. The settings screen leaves it out for the same reason
 /// (`rbms_config::settings::unbuilt_row`), so neither route offers it until the run applies it.
-const OPTION_ROWS: [SettingId; 11] = [
+const OPTION_ROWS: [SettingId; rbms_render::theme::OPTIONS_ROW_COUNT] = [
     SettingId::Random,
     SettingId::Gauge,
     SettingId::HiSpeed,
@@ -44,7 +44,7 @@ const ROW_STEP_FORWARD: i32 = 1;
 /// One step to the left on a row.
 const ROW_STEP_BACK: i32 = -1;
 
-/// Width of the panel.
+/// Width of the legacy panel.
 const PANEL_W: f32 = 420.0;
 
 /// Distance from the right edge of the screen to the panel.
@@ -76,10 +76,6 @@ const ROW_SCALE: f32 = 1.6;
 
 /// Text scale of the keyboard hint.
 const HINT_SCALE: f32 = 1.1;
-
-/// Opacity of the panel behind its rows, so the list underneath still reads as the thing being
-/// played from.
-const PANEL_ALPHA: u8 = 235;
 
 /// Title of the panel.
 const OPTIONS_TITLE: &str = "OPTIONS";
@@ -245,26 +241,35 @@ pub(crate) fn draw(stage: StageId, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'
     }
     let th = theme();
     let rows = OPTION_ROWS.len() as f32;
-    let h = TITLE_H + PANEL_PAD_Y * 2.0 + rows * ROW_PITCH + HINT_H;
-    let x = CW as f32 - PANEL_MARGIN_X - PANEL_W;
-    let y = (CH as f32 - h) * 0.5;
-    canvas.fill_rect(Rect::new(x, y, PANEL_W, h), Color { a: PANEL_ALPHA, ..th.panel });
+    let legacy_h = TITLE_H + PANEL_PAD_Y * 2.0 + rows * ROW_PITCH + HINT_H;
+    let legacy = Rect::new(CW as f32 - PANEL_MARGIN_X - PANEL_W, (CH as f32 - legacy_h) * 0.5, PANEL_W, legacy_h);
+    let configured = th.options_layout.rect.filter(|rect| rect.h >= TITLE_H + PANEL_PAD_Y * 2.0 + rows * ROW_H + HINT_H);
+    let panel = configured.unwrap_or(legacy);
+    let row_pitch = if configured.is_some() { (panel.h - TITLE_H - PANEL_PAD_Y * 2.0 - HINT_H) / rows } else { ROW_PITCH };
+    let x = panel.x;
+    let y = panel.y;
+    canvas.fill_rect(panel, Color { a: th.options_layout.panel_alpha, ..th.panel });
     draw_text(canvas, x + PANEL_PAD_X, y + PANEL_PAD_Y, TITLE_SCALE, th.text, OPTIONS_TITLE);
 
     let mut ry = y + TITLE_H + PANEL_PAD_Y;
     for (index, id) in OPTION_ROWS.into_iter().enumerate() {
+        let row_override = th.options_layout.row_overrides[index];
+        let row_y = y + row_override.and_then(|layout| layout.y).unwrap_or(ry - y);
+        let label_x = x + row_override.and_then(|layout| layout.label_x).unwrap_or(PANEL_PAD_X);
+        let value_right_x = x + row_override.and_then(|layout| layout.value_right_x).unwrap_or(panel.w - PANEL_PAD_X);
         let focused = index == ctx.shared.options.row;
         if focused {
-            canvas.fill_rect(Rect::new(x + PANEL_PAD_X * 0.5, ry - 4.0, PANEL_W - PANEL_PAD_X, ROW_H), th.row_focus);
+            canvas.fill_rect(Rect::new(x + PANEL_PAD_X * 0.5, row_y - 4.0, panel.w - PANEL_PAD_X, ROW_H), th.row_focus);
         }
-        let label_color = if focused { Color::YELLOW } else { th.text_dim };
-        draw_text(canvas, x + PANEL_PAD_X, ry, ROW_SCALE, label_color, descriptor(id).label);
+        let label_color = row_override.and_then(|layout| layout.label_color).unwrap_or(if focused { Color::YELLOW } else { th.text_dim });
+        draw_text(canvas, label_x, row_y, ROW_SCALE, label_color, descriptor(id).label);
         let value = display_value(&ctx.shared.config, id);
-        draw_text_right(canvas, x + PANEL_W - PANEL_PAD_X, ry, ROW_SCALE, th.text, &value);
-        ry += ROW_PITCH;
+        let value_color = row_override.and_then(|layout| layout.value_color).unwrap_or(th.text);
+        draw_text_right(canvas, value_right_x, row_y, ROW_SCALE, value_color, &value);
+        ry += row_pitch;
     }
-    let hint_x = x + (PANEL_W - text_width(OPTIONS_HINT, HINT_SCALE)) * 0.5;
-    draw_text(canvas, hint_x, y + h - HINT_H, HINT_SCALE, th.text_muted, OPTIONS_HINT);
+    let hint_x = x + (panel.w - text_width(OPTIONS_HINT, HINT_SCALE)) * 0.5;
+    draw_text(canvas, hint_x, y + panel.h - HINT_H, HINT_SCALE, th.text_muted, OPTIONS_HINT);
 }
 
 #[cfg(test)]
@@ -475,6 +480,27 @@ mod tests {
         let first = frame(&mut app);
         app.shared.options.move_row(ROW_STEP_FORWARD);
         assert_ne!(first, frame(&mut app), "the focused row does not reach the screen");
+    }
+
+    #[test]
+    fn a_theme_file_override_moves_one_option_row() {
+        rbms_render::font::use_embedded_fonts_only();
+        let mut app = app();
+        app.shared.options.open_panel(false);
+        let now = std::time::Instant::now();
+        let frame = |app: &mut App| {
+            let mut canvas = HeadlessCanvas::new(CW, CH);
+            draw(StageId::Select, &mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 }, &mut Canvas::Headless(&mut canvas));
+            canvas.pixel_checksum()
+        };
+        let original = frame(&mut app);
+        let configured = rbms_render::ThemeConfig::parse(
+            "(options_layout: Some((row_overrides: Some([(index: 2, y: Some(180.0), label_x: Some(50.0), value_right_x: Some(380.0), label_color: Some((255, 0, 0)))]))))",
+        );
+        rbms_render::set_theme(configured.resolve());
+        let moved = frame(&mut app);
+        rbms_render::set_theme(rbms_render::Theme::default());
+        assert_ne!(original, moved, "the row override did not reach the rendered option panel");
     }
 
     /// Leaving the browser with the panel up must not leave it up over the screen that follows: the

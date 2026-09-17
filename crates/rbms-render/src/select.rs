@@ -200,7 +200,7 @@ fn nav_button<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, x: f32, y: f32, l
     let kw = ctx.text_width(key, 1.0);
     let w = lw + kw + 28.0;
     let rect = Rect::new(x, y, w, 30.0);
-    r.fill_rect(rect, if active { th.button_active } else { th.panel_hi });
+    r.fill_rect(rect, select_panel_color(if active { th.button_active } else { th.panel_hi }, th.select_panel_alpha));
     outline(r, rect, 1.0, if active { th.focus } else { th.divider });
     ctx.draw_text(r, x + 10.0, y + 9.0, 1.2, th.text, label);
     ctx.draw_text(r, x + 10.0 + lw + 8.0, y + 11.0, 1.0, th.accent, key);
@@ -225,6 +225,10 @@ fn badge<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, chip: &Badge, text: &s
     ctx.draw_text_centered(r, rect.x + rect.w * 0.5, rect.y + (rect.h - scale * 14.0) * 0.5, scale, text_color, text);
 }
 
+fn select_panel_color(color: Color, alpha: u8) -> Color {
+    Color { a: alpha, ..color }
+}
+
 /// IIDX/LR2-style song select: left bar list (KEY/level badges, clear-lamp LED), right detail panel
 /// (cover, metadata, stat grid, note-density histogram, local records). Returns the clickable regions
 /// (row / record / modal buttons) for the app to hit-test; row/record hits are suppressed while the
@@ -236,16 +240,27 @@ pub fn render_select<R: Renderer>(r: &mut R, v: &SelectView) -> Vec<(Rect, Selec
 /// [`render_select`] against a caller-supplied context.
 pub fn render_select_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &SelectView) -> Vec<(Rect, SelectHot)> {
     let th = ctx.theme;
+    r.clear(th.bg);
+    render_select_on_background_ctx(ctx, r, v)
+}
+
+/// Draws the native browser above content the caller has already placed on the canvas.
+pub fn render_select_on_background<R: Renderer>(r: &mut R, v: &SelectView) -> Vec<(Rect, SelectHot)> {
+    with_render_ctx(|ctx| render_select_on_background_ctx(ctx, r, v))
+}
+
+/// [`render_select_on_background`] against a caller-supplied context.
+pub fn render_select_on_background_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &SelectView) -> Vec<(Rect, SelectHot)> {
+    let th = ctx.theme;
     let list = th.select_layout.list_rect;
     let mut hot = Vec::new();
-    r.clear(th.bg);
-    r.fill_rect(Rect::new(0.0, 0.0, 1280.0, 52.0), th.topbar);
+    r.fill_rect(Rect::new(0.0, 0.0, 1280.0, 52.0), select_panel_color(th.topbar, th.select_panel_alpha));
     ctx.draw_text(r, list.x, 12.0, 2.6, th.text, "MUSIC SELECT");
     let m = v.rows.len();
     if let Some(q) = &v.search {
         let bx = list.x + list.w - 326.0;
         let bw = 240.0;
-        r.fill_rect(Rect::new(bx, 10.0, bw, 32.0), th.button_active);
+        r.fill_rect(Rect::new(bx, 10.0, bw, 32.0), select_panel_color(th.button_active, th.select_panel_alpha));
         outline(r, Rect::new(bx, 10.0, bw, 32.0), 1.5, th.focus);
         let fitted = ctx.fit_text(&format!("\u{1F50D} {q}"), 1.4, bw - 20.0);
         ctx.draw_text(r, bx + 10.0, 18.0, 1.4, th.text, &fitted);
@@ -321,13 +336,13 @@ fn render_list<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &SelectView, 
         let focused = idx == v.sel;
         let h = layout.row_height;
         let bg = if focused {
-            th.row_focus
+            select_panel_color(th.row_focus, th.select_panel_alpha)
         } else if row.folder {
-            th.row_folder
+            select_panel_color(th.row_folder, th.select_panel_alpha)
         } else if idx % 2 == 0 {
-            th.row_even
+            select_panel_color(th.row_even, th.select_panel_alpha)
         } else {
-            th.row_odd
+            select_panel_color(th.row_odd, th.select_panel_alpha)
         };
         r.fill_rect(Rect::new(list.x, y, list.w, h), bg);
         if focused {
@@ -519,7 +534,7 @@ fn render_records<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &SelectVie
     let modal_open = v.modal.is_some();
     for (ri, rec_row) in rec.recent.iter().take(max_rows).enumerate() {
         let y = list_top + ri as f32 * rh;
-        r.fill_rect(Rect::new(inner_x, y, inner_w, rh - 4.0), th.panel);
+        r.fill_rect(Rect::new(inner_x, y, inner_w, rh - 4.0), select_panel_color(th.panel, th.select_panel_alpha));
         r.fill_rect(Rect::new(inner_x, y, 6.0, rh - 4.0), rec_row.lamp);
         ctx.draw_text(r, inner_x + 14.0, y + 3.0, 1.1, th.text_dim, &rec_row.when);
         ctx.draw_text(r, inner_x + 14.0, y + 16.0, 1.2, rec_row.lamp, rec_row.lamp_label);
@@ -544,7 +559,7 @@ fn render_folder_detail<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, label: 
     let detail = th.select_layout.detail_rect;
     outline(r, detail, 1.0, th.divider);
     r.fill_rect(Rect::new(detail.x, detail.y, detail.w, 6.0), Color::rgb(120, 130, 90));
-    r.fill_rect(Rect::new(detail.x + 16.0, detail.y + 36.0, detail.w - 32.0, 120.0), th.panel_hi);
+    r.fill_rect(Rect::new(detail.x + 16.0, detail.y + 36.0, detail.w - 32.0, 120.0), select_panel_color(th.panel_hi, th.select_panel_alpha));
     ctx.draw_text(r, detail.x + 40.0, detail.y + 60.0, 2.4, th.text, "FOLDER");
     let fitted = ctx.fit_text(label, 1.6, detail.w - 80.0);
     ctx.draw_text(r, detail.x + 40.0, detail.y + 108.0, 1.6, Color::rgb(210, 210, 150), &fitted);

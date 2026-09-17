@@ -10,6 +10,7 @@
 //! the built-in screens are drawn from.
 
 use rbms_skin::dst::OffsetSource;
+use rbms_skin::model::SkinLayer;
 use rbms_skin::property::SkinStateSource;
 use rbms_skin::timer::{TimerId, TimerState, timer_id};
 
@@ -50,6 +51,12 @@ impl SkinDraw<'_> {
         let frame = SkinFrame { now_ms: self.now_ms, timers: self.timers, state, lua: self.lua, mouse: self.mouse, background: self.background };
         self.screen.draw(ctx, r, &frame)
     }
+
+    /// Draws one document phase with the frame state used for a full draw.
+    pub fn draw_layer<R: Renderer>(&self, ctx: &mut RenderCtx<'_>, r: &mut R, state: &dyn SkinStateSource, layer: SkinLayer) -> usize {
+        let frame = SkinFrame { now_ms: self.now_ms, timers: self.timers, state, lua: self.lua, mouse: self.mouse, background: self.background };
+        self.screen.draw_layer(ctx, r, &frame, layer)
+    }
 }
 
 /// The play screen. Answers false when no document is selected, which is the caller's cue to draw
@@ -79,7 +86,7 @@ pub fn render_result_screen<R: Renderer>(
     let Some(document) = document else {
         return false;
     };
-    let state = ResultViewState { view, target, cleared, now_ms: document.now_ms, offsets: document.offsets };
+    let state = ResultViewState::new(view, target, cleared, document.now_ms, document.offsets);
     draw_with(ctx, r, Some(document), &state)
 }
 

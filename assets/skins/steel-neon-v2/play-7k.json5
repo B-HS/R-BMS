@@ -1,0 +1,20 @@
+{
+    type: 0,
+    name: 'Neon Horizon 7K',
+    author: 'R-BMS',
+    w: 1280,
+    h: 720,
+    composition: 'layered',
+    source: [
+        { id: 'background', path: 'images/play-background.png' },
+        { id: 'foreground', path: 'images/play-foreground.png' },
+    ],
+    image: [
+        { id: 'play-background', src: 'background', x: 0, y: 0, w: 1280, h: 720 },
+        { id: 'play-foreground', src: 'foreground', x: 0, y: 0, w: 1280, h: 720 },
+    ],
+    destination: [
+        { id: 'play-background', layer: 'background', dst: [{ time: 0, x: 0, y: 0, w: 1280, h: 720 }] },
+        { id: 'play-foreground', layer: 'foreground', dst: [{ time: 0, x: 0, y: 0, w: 1280, h: 720 }] },
+    ],
+}

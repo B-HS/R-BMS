@@ -3,6 +3,7 @@
 #![allow(clippy::wildcard_imports)]
 
 use rbms_render::result::ResultExtras;
+use rbms_skin::model::SkinLayer;
 
 use crate::app_result::{next_song, offers_retry, retry};
 use crate::stage::{Canvas, FrameCtx, KeyInput, StageHandler, Transition};
@@ -88,14 +89,30 @@ impl StageHandler for ResultState {
         canvas.clear_bga();
         ctx.shared.prepare_skin(canvas, SKIN_TYPE_RESULT);
         let overlay = ctx.shared.skin_uses_overlay(SKIN_TYPE_RESULT);
-        if !overlay && ctx.shared.draw_result_skin(canvas, &self.view, self.extras.target.as_ref(), self.cleared) {
+        let layered = ctx.shared.skin_uses_layered_layout(SKIN_TYPE_RESULT);
+        let native_layout = ctx.shared.skin_uses_native_layout(SKIN_TYPE_RESULT);
+        if !native_layout && ctx.shared.draw_result_skin(canvas, &self.view, self.extras.target.as_ref(), self.cleared) {
             return;
         }
-        render_result_with_palette(canvas, &self.view, &ctx.shared.result_palette, &self.extras);
+        if layered {
+            canvas.clear(rbms_render::theme().bg);
+            ctx.shared.draw_result_skin_layer(canvas, &self.view, self.extras.target.as_ref(), self.cleared, SkinLayer::Background);
+            rbms_render::result::render_result_on_background_with_content(
+                canvas,
+                &self.view,
+                &ctx.shared.result_palette,
+                &self.extras,
+                ctx.shared.result_content(),
+            );
+        } else {
+            render_result_with_palette(canvas, &self.view, &ctx.shared.result_palette, &self.extras);
+        }
         for (i, (text, kind)) in ctx.shared.ir_status.lines().iter().enumerate() {
             draw_text(canvas, IR_RESULT_X, IR_RESULT_Y + i as f32 * IR_RESULT_LINE_H, IR_RESULT_SCALE, ir_line_color(*kind), text);
         }
-        if overlay {
+        if layered {
+            ctx.shared.draw_result_skin_layer(canvas, &self.view, self.extras.target.as_ref(), self.cleared, SkinLayer::Foreground);
+        } else if overlay {
             ctx.shared.draw_result_skin(canvas, &self.view, self.extras.target.as_ref(), self.cleared);
         }
     }

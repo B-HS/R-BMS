@@ -133,10 +133,13 @@ fn score_graph_layout(skin: &Skin, field_right: f32, top: f32, judge_y: f32) -> 
     })
 }
 
-fn draw_score_graph<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, graph: &ScoreGraph) {
+fn draw_score_graph<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, graph: &ScoreGraph, draw_frame: bool) {
     let ScoreGraph { rect: Rect { x, y, w, h }, ex, max_ex, best } = *graph;
     let th = ctx.theme;
     r.fill_rect(Rect::new(x, y, w, h), th.panel);
+    if draw_frame {
+        draw_layout_outline(r, graph.rect, th.divider);
+    }
     let ratio = |v: u32| {
         if max_ex > 0 { (v as f32 / max_ex as f32).clamp(0.0, 1.0) } else { 0.0 }
     };
@@ -160,6 +163,13 @@ fn draw_score_graph<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, graph: &Sco
     if best.is_some() {
         ctx.draw_text_centered(r, bx + bar_w + gap + bar_w * 0.5, y + h + 2.0, 1.0, Color::GREEN, "BEST");
     }
+}
+
+fn draw_layout_outline<R: Renderer>(r: &mut R, rect: Rect, color: Color) {
+    r.fill_rect(Rect::new(rect.x, rect.y, rect.w, 1.0), color);
+    r.fill_rect(Rect::new(rect.x, rect.y + rect.h - 1.0, rect.w, 1.0), color);
+    r.fill_rect(Rect::new(rect.x, rect.y, 1.0, rect.h), color);
+    r.fill_rect(Rect::new(rect.x + rect.w - 1.0, rect.y, 1.0, rect.h), color);
 }
 
 /// [`render_hud_ctx`] against this thread's installed theme and shared text engine.
@@ -224,7 +234,13 @@ pub fn render_hud_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, skin: &Sk
 
     let score_graph = score_graph_layout(skin, field_right, top, jy);
     if let Some(layout) = &score_graph {
-        draw_score_graph(ctx, r, &ScoreGraph { rect: layout.rect, ex: hud.ex_score, max_ex: hud.max_ex, best: hud.best_ex });
+        draw_score_graph(ctx, r, &ScoreGraph { rect: layout.rect, ex: hud.ex_score, max_ex: hud.max_ex, best: hud.best_ex }, skin.layout_frame);
+    }
+
+    if skin.layout_frame
+        && let Some(bga) = skin.bga
+    {
+        draw_layout_outline(r, bga, skin.outline);
     }
 
     let tx =

@@ -1,0 +1,20 @@
+{
+    type: 5,
+    name: 'Neon Horizon Select',
+    author: 'R-BMS',
+    w: 1280,
+    h: 720,
+    composition: 'layered',
+    source: [
+        { id: 'background', path: 'images/select-background.png' },
+        { id: 'foreground', path: 'images/select-foreground.png' },
+    ],
+    image: [
+        { id: 'select-background', src: 'background', x: 0, y: 0, w: 1280, h: 720 },
+        { id: 'select-foreground', src: 'foreground', x: 0, y: 0, w: 1280, h: 720 },
+    ],
+    destination: [
+        { id: 'select-background', layer: 'background', dst: [{ time: 0, x: 0, y: 0, w: 1280, h: 720 }] },
+        { id: 'select-foreground', layer: 'foreground', dst: [{ time: 0, x: 0, y: 0, w: 1280, h: 720 }] },
+    ],
+}

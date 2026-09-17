@@ -15,7 +15,8 @@ use crate::*;
 use rbms_config::FixHiSpeed;
 use rbms_render::playfield::LaneShade;
 use rbms_render::skin_render::state::PlayViewState;
-use rbms_render::{HudPace, KEY_LANE_KIND, LANE_KIND_COUNT, SCRATCH_LANE_KIND, TextureId};
+use rbms_render::{HudPace, KEY_LANE_KIND, LANE_KIND_COUNT, QuadParams, SCRATCH_LANE_KIND, TextureId, render_playfield_on_background};
+use rbms_skin::model::SkinLayer;
 use rbms_skin::timer::timer_id;
 
 /// Microseconds in one millisecond, which is the unit the play clock is kept in and the unit a
@@ -466,6 +467,31 @@ impl PlayState {
         ctx.shared.draw_play_skin(canvas, skin_type, &state, background)
     }
 
+    fn draw_document_layer(&self, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'_>, hud: &HudView<'_>, frame: DocumentFrame, layer: SkinLayer) -> bool {
+        let DocumentFrame { song_us, bpm, hispeed, background } = frame;
+        let Some(skin_type) = mode_skin_type(ctx.shared.mode).filter(|skin_type| ctx.shared.has_skin_document(*skin_type)) else {
+            return false;
+        };
+        let now_ms = ctx.shared.skin_now_ms();
+        let total_notes = self.session.judge().total_notes();
+        if self.session.is_failed() && !ctx.shared.skin_timers.is_on(timer_id::FAILED) {
+            ctx.shared.skin_play_timers.fail(&mut ctx.shared.skin_timers, now_ms);
+        }
+        ctx.shared.skin_play_timers.update(&mut ctx.shared.skin_timers, hud, total_notes, now_ms);
+        let state = PlayViewState {
+            hud,
+            title: &self.session.model().meta.title,
+            song_ms: song_us / MICROS_PER_MILLI,
+            duration_ms: self.session.last_time_us() / MICROS_PER_MILLI,
+            bpm,
+            hispeed,
+            autoplay: ctx.shared.config.play.autoplay && ctx.shared.replay.is_none(),
+            now_ms,
+            offsets: None,
+        };
+        ctx.shared.draw_play_skin_layer(canvas, skin_type, &state, background, layer)
+    }
+
     fn draw_analysis(&self, canvas: &mut Canvas<'_>, song: i64) {
         let play = &self.session;
         let total = play.last_time_us().max(1);
@@ -601,10 +627,16 @@ impl StageHandler for PlayState {
             ctx.shared.prepare_skin(canvas, skin_type);
         }
         let overlay = skin_type.is_some_and(|skin_type| ctx.shared.skin_uses_overlay(skin_type));
-        let built_in_background = overlay || skin_type.is_none_or(|skin_type| !ctx.shared.has_skin_document(skin_type));
+        let layered = skin_type.is_some_and(|skin_type| ctx.shared.skin_uses_layered_layout(skin_type));
+        let native_layout = skin_type.is_some_and(|skin_type| ctx.shared.skin_uses_native_layout(skin_type));
+        let built_in_background = native_layout || skin_type.is_none_or(|skin_type| !ctx.shared.has_skin_document(skin_type));
         let frame_image = ctx.shared.config.display.bga.then(|| self.bga.get(&play.bga_frame())).flatten();
         let mut document_background = None;
         match (built_in_background, ctx.shared.skin.bga, frame_image) {
+            (true, Some(_), Some(img)) if layered => {
+                canvas.clear_bga();
+                document_background = canvas.background_texture(img.generation, &img.rgba, img.width, img.height);
+            }
             (true, Some(rect), Some(img)) => canvas.set_background(img.generation, &img.rgba, img.width, img.height, rect),
             (false, _, Some(img)) => {
                 canvas.clear_bga();
@@ -651,29 +683,41 @@ impl StageHandler for PlayState {
                 .map(|target| HudPace { name: &target.name, delta: j.ex_score as i64 - pace_ex_at(target.ex, j.total_judged(), j.total_notes()) }),
         };
         let document_frame = DocumentFrame { song_us: song, bpm, hispeed, background: document_background };
-        if !overlay && self.draw_document(ctx, canvas, &hud, document_frame) {
+        if !native_layout && self.draw_document(ctx, canvas, &hud, document_frame) {
             return;
         }
-        render_playfield_view(
-            canvas,
-            &ctx.shared.skin,
-            &PlayfieldView {
-                timelines: &self.session.model().timelines,
-                microtime: song,
-                hispeed,
-                beam_on: self.session.beam_on(),
-                beam_off: self.session.beam_off(),
-                constant,
-                legacy_note: ctx.shared.config.play.legacy_note,
-            },
-        );
+        let playfield = PlayfieldView {
+            timelines: &self.session.model().timelines,
+            microtime: song,
+            hispeed,
+            beam_on: self.session.beam_on(),
+            beam_off: self.session.beam_off(),
+            constant,
+            legacy_note: ctx.shared.config.play.legacy_note,
+        };
+        if layered {
+            canvas.clear(ctx.shared.skin.bg);
+            self.draw_document_layer(ctx, canvas, &hud, document_frame, SkinLayer::Background);
+            if let (Some(texture), Some(rect)) = (document_background, ctx.shared.skin.bga) {
+                let mut params = QuadParams::new(rect);
+                if let Some(img) = frame_image {
+                    params.filter = rbms_render::background_filter(rect, (img.width, img.height));
+                }
+                canvas.draw_textured_quad(texture, params);
+            }
+            render_playfield_on_background(canvas, &ctx.shared.skin, &playfield);
+        } else {
+            render_playfield_view(canvas, &ctx.shared.skin, &playfield);
+        }
         render_lane_cover(canvas, &ctx.shared.skin, LaneShade { cover, hidden: ctx.shared.effective_hidden() });
         render_key_bomb(canvas, &ctx.shared.skin, self.session.bomb(), song);
         render_hud(canvas, &ctx.shared.skin, &hud);
         if self.session.analysis_enabled() {
             self.draw_analysis(canvas, song);
         }
-        if overlay {
+        if layered {
+            self.draw_document_layer(ctx, canvas, &hud, document_frame, SkinLayer::Foreground);
+        } else if overlay {
             self.draw_document(ctx, canvas, &hud, document_frame);
         }
     }

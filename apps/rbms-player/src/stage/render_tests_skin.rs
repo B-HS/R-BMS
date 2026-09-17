@@ -251,3 +251,107 @@ fn a_play_document_draws_the_charts_background_through_its_own_bga_object() {
     assert!(app.shared.has_compiled_skin(SKIN_TYPE_PLAY_7KEYS), "the play document never finished compiling");
     assert_eq!(canvas.pixel_at(CW / 2, CH / 2), BGA_MARK, "the document's bga object drew nothing");
 }
+
+#[test]
+fn the_current_default_bundle_keeps_information_and_chart_art_visible() {
+    use rbms_library::Library;
+    use rbms_model::Mode;
+
+    use crate::stage::render_tests::result_state;
+    use crate::stage::select::tests::{entry, press};
+    use crate::stage::{Canvas, FrameCtx, KeyInput, StageId};
+    use crate::{SelectView, app_options, assets};
+
+    let directory = std::env::temp_dir().join(format!("rbms-current-skin-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&directory);
+    std::fs::create_dir_all(&directory).expect("create the visual fixture folder");
+    let settings = directory.join("settings.ron");
+    let mut config = Config::default();
+    assert!(assets::install_default_skin(&settings, &mut config));
+    assets::load_theme(&settings, &config);
+    let mut app = App::new(String::new(), config, LaunchOptions::default(), settings.clone());
+    app.shared.library = Library::from_songs(vec![
+        entry("First light", "Artist A", "11"),
+        entry("Blue orbit", "Artist B", "4"),
+        entry("Morning star", "Artist C", "9"),
+        entry("Passing clouds", "Artist D", "12"),
+        entry("Night arrival", "Artist E", "7"),
+    ]);
+    app.shared.select_view = SelectView::AllSongs;
+    app.shared.rebuild_select_items();
+
+    let mut canvas = HeadlessCanvas::new(CW, CH);
+    for _ in 0..DOCUMENT_LOAD_FRAMES {
+        render_into(&mut app, Stage::Select(Box::new(SelectState::new())), &mut canvas);
+        if app.shared.has_compiled_skin(SKIN_TYPE_MUSIC_SELECT) {
+            render_into(&mut app, Stage::Select(Box::new(SelectState::new())), &mut canvas);
+            break;
+        }
+    }
+    assert!(app.shared.has_compiled_skin(SKIN_TYPE_MUSIC_SELECT));
+    assert!(app.shared.hot.iter().any(|(rect, _)| rect.x >= 628.0), "the song rows are not on the right");
+    save_current_bundle_capture("select", &canvas);
+
+    let before_options = canvas.pixel_at(300, 170);
+    let key: KeyInput<'_> = press(crate::KeyCode::F1);
+    let now = std::time::Instant::now();
+    let mut options_context = FrameCtx { shared: &mut app.shared, now, dt: 0.0 };
+    assert!(app_options::options_key(&mut options_context, StageId::Select, false, &key));
+    {
+        let mut target = Canvas::Headless(&mut canvas);
+        App::draw_overlays(&app.stage, &mut options_context, &mut target);
+    }
+    assert_ne!(canvas.pixel_at(300, 170), before_options, "the centered option panel did not draw");
+    save_current_bundle_capture("options", &canvas);
+
+    let side = 4;
+    let pixels: Vec<u8> = (0..side * side).flat_map(|_| [BGA_MARK.r, BGA_MARK.g, BGA_MARK.b, 255]).collect();
+    let mut frames = std::collections::HashMap::new();
+    frames.insert(crate::stage::play::NO_BGA_FRAME, crate::DecodedImage::for_test(pixels, side, side));
+    for (mode, name, probe) in [
+        (Mode::BEAT_5K, "play-5k", (600, 300)),
+        (Mode::BEAT_7K, "play-7k", (600, 300)),
+        (Mode::POPN_9K, "play-9k", (600, 300)),
+        (Mode::BEAT_10K, "play-10k", (1060, 300)),
+        (Mode::BEAT_14K, "play-14k", (1060, 300)),
+    ] {
+        app.shared.mode = mode;
+        app.shared.skin_cfg =
+            crate::SkinConfig::load(assets::installed_play_skin_path(&settings, &app.shared.config, mode)).expect("bundled play layout parses");
+        app.shared.rebuild_skin();
+        for _ in 0..DOCUMENT_LOAD_FRAMES {
+            render_into(&mut app, Stage::Play(Box::new(play_state_with_bga(frames.clone()))), &mut canvas);
+            let screen = rbms_skin::loader::mode_skin_type(mode).expect("mode has a skin type");
+            if app.shared.has_compiled_skin(screen) {
+                render_into(&mut app, Stage::Play(Box::new(play_state_with_bga(frames.clone()))), &mut canvas);
+                break;
+            }
+        }
+        assert_eq!(canvas.pixel_at(probe.0, probe.1), BGA_MARK, "the layered background covered the chart art in {name}");
+        save_current_bundle_capture(name, &canvas);
+    }
+
+    for _ in 0..DOCUMENT_LOAD_FRAMES {
+        render_into(&mut app, Stage::Result(result_state()), &mut canvas);
+        if app.shared.has_compiled_skin(rbms_skin::loader::SKIN_TYPE_RESULT) {
+            render_into(&mut app, Stage::Result(result_state()), &mut canvas);
+            break;
+        }
+    }
+    assert!(app.shared.has_compiled_skin(rbms_skin::loader::SKIN_TYPE_RESULT));
+    save_current_bundle_capture("result", &canvas);
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
+fn save_current_bundle_capture(name: &str, canvas: &HeadlessCanvas) {
+    let Some(directory) = std::env::var_os("RBMS_SKIN_CAPTURE_DIR") else {
+        return;
+    };
+    let directory = std::path::PathBuf::from(directory);
+    std::fs::create_dir_all(&directory).expect("create the capture folder");
+    let image = image::RgbaImage::from_fn(CW, CH, |x, y| {
+        let pixel = canvas.pixel_at(x, y);
+        image::Rgba([pixel.r, pixel.g, pixel.b, pixel.a])
+    });
+    image.save(directory.join(format!("{name}.png"))).expect("save the capture");
+}

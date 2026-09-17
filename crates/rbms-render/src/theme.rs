@@ -15,6 +15,83 @@ use crate::{Color, Rect};
 const SELECT_CANVAS_WIDTH: f32 = 1280.0;
 const SELECT_CANVAS_HEIGHT: f32 = 720.0;
 
+pub const OPTIONS_ROW_COUNT: usize = 11;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OptionsLayout {
+    pub rect: Option<Rect>,
+    pub panel_alpha: u8,
+    pub row_overrides: [Option<OptionsRowOverride>; OPTIONS_ROW_COUNT],
+}
+
+impl Default for OptionsLayout {
+    fn default() -> Self {
+        OptionsLayout { rect: None, panel_alpha: 235, row_overrides: [None; OPTIONS_ROW_COUNT] }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OptionsRowOverride {
+    pub y: Option<f32>,
+    pub label_x: Option<f32>,
+    pub value_right_x: Option<f32>,
+    pub label_color: Option<Color>,
+    pub value_color: Option<Color>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct OptionsRowOverrideConfig {
+    pub index: usize,
+    pub y: Option<f32>,
+    pub label_x: Option<f32>,
+    pub value_right_x: Option<f32>,
+    pub label_color: Option<(u8, u8, u8)>,
+    pub value_color: Option<(u8, u8, u8)>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct OptionsLayoutConfig {
+    pub rect: Option<(f32, f32, f32, f32)>,
+    pub panel_alpha: Option<u8>,
+    pub row_overrides: Option<Vec<OptionsRowOverrideConfig>>,
+}
+
+impl OptionsLayoutConfig {
+    fn resolve(&self, default: OptionsLayout) -> OptionsLayout {
+        let rect = self.rect.and_then(|(x, y, w, h)| {
+            (x.is_finite()
+                && y.is_finite()
+                && w.is_finite()
+                && h.is_finite()
+                && x >= 0.0
+                && y >= 0.0
+                && w > 0.0
+                && h > 0.0
+                && x + w <= SELECT_CANVAS_WIDTH
+                && y + h <= SELECT_CANVAS_HEIGHT)
+                .then(|| Rect::new(x, y, w, h))
+        });
+        let panel = rect.unwrap_or(Rect::new(0.0, 0.0, SELECT_CANVAS_WIDTH, SELECT_CANVAS_HEIGHT));
+        let mut row_overrides = default.row_overrides;
+        for config in self.row_overrides.as_deref().unwrap_or_default() {
+            let Some(slot) = row_overrides.get_mut(config.index) else {
+                continue;
+            };
+            let position = |value: Option<f32>, maximum: f32| value.filter(|value| value.is_finite() && *value >= 0.0 && *value <= maximum);
+            *slot = Some(OptionsRowOverride {
+                y: position(config.y, panel.h),
+                label_x: position(config.label_x, panel.w),
+                value_right_x: position(config.value_right_x, panel.w),
+                label_color: config.label_color.map(|(r, g, b)| Color::rgb(r, g, b)),
+                value_color: config.value_color.map(|(r, g, b)| Color::rgb(r, g, b)),
+            });
+        }
+        OptionsLayout { rect, panel_alpha: self.panel_alpha.unwrap_or(default.panel_alpha), row_overrides }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SelectLayout {
     pub list_rect: Rect,
@@ -81,6 +158,8 @@ impl SelectLayoutConfig {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Theme {
     pub select_layout: SelectLayout,
+    pub options_layout: OptionsLayout,
+    pub select_panel_alpha: u8,
     /// Window background.
     pub bg: Color,
     /// Top header bar.
@@ -133,6 +212,8 @@ impl Default for Theme {
     fn default() -> Self {
         Theme {
             select_layout: SelectLayout::default(),
+            options_layout: OptionsLayout::default(),
+            select_panel_alpha: 255,
             bg: Color::rgb(8, 8, 14),
             topbar: Color::rgb(18, 18, 30),
             panel: Color::rgb(14, 16, 26),
@@ -164,6 +245,8 @@ impl Default for Theme {
 #[serde(default)]
 pub struct ThemeConfig {
     pub select_layout: Option<SelectLayoutConfig>,
+    pub options_layout: Option<OptionsLayoutConfig>,
+    pub select_panel_alpha: Option<u8>,
     pub bg: Option<(u8, u8, u8)>,
     pub topbar: Option<(u8, u8, u8)>,
     pub panel: Option<(u8, u8, u8)>,
@@ -200,6 +283,8 @@ impl ThemeConfig {
         let c = |o: Option<(u8, u8, u8)>, def: Color| o.map(|(r, g, b)| Color::rgb(r, g, b)).unwrap_or(def);
         Theme {
             select_layout: self.select_layout.unwrap_or_default().resolve(d.select_layout),
+            options_layout: self.options_layout.as_ref().map_or(d.options_layout, |layout| layout.resolve(d.options_layout)),
+            select_panel_alpha: self.select_panel_alpha.unwrap_or(d.select_panel_alpha),
             bg: c(self.bg, d.bg),
             topbar: c(self.topbar, d.topbar),
             panel: c(self.panel, d.panel),
@@ -270,6 +355,36 @@ mod tests {
         assert_eq!(layout.list_rect, Rect::new(664.0, 60.0, 584.0, 600.0));
         assert_eq!(layout.detail_rect, SelectLayout::default().detail_rect);
         assert_eq!(layout.row_height, SelectLayout::default().row_height);
+    }
+
+    #[test]
+    fn an_options_layout_and_translucent_select_panels_are_file_configurable() {
+        let cfg =
+            ThemeConfig::parse("(options_layout: Some((rect: Some((240.0, 122.0, 800.0, 476.0)), panel_alpha: Some(255))), select_panel_alpha: Some(210))");
+        let theme = cfg.resolve();
+        assert_eq!(theme.options_layout.rect, Some(Rect::new(240.0, 122.0, 800.0, 476.0)));
+        assert_eq!(theme.options_layout.panel_alpha, 255);
+        assert_eq!(theme.select_panel_alpha, 210);
+    }
+
+    #[test]
+    fn an_options_row_can_be_moved_and_recolored_without_moving_its_neighbors() {
+        let cfg = ThemeConfig::parse(
+            "(options_layout: Some((rect: Some((240.0, 122.0, 800.0, 476.0)), row_overrides: Some([(index: 2, y: Some(98.0), label_x: Some(28.0), value_right_x: Some(760.0), label_color: Some((9, 8, 7)), value_color: Some((6, 5, 4)))]))))",
+        );
+        let layout = cfg.resolve().options_layout;
+        assert!(layout.row_overrides[0].is_none());
+        assert_eq!(
+            layout.row_overrides[2].expect("the third row"),
+            OptionsRowOverride {
+                y: Some(98.0),
+                label_x: Some(28.0),
+                value_right_x: Some(760.0),
+                label_color: Some(Color::rgb(9, 8, 7)),
+                value_color: Some(Color::rgb(6, 5, 4)),
+            }
+        );
+        assert!(layout.row_overrides[3].is_none());
     }
 
     #[test]

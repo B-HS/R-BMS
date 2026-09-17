@@ -49,8 +49,16 @@ pub struct LaneShade {
 /// fewer than the skin draws — a five-key file reached with a seven-key skin still resolved — leaves
 /// the extra lanes empty rather than ending the frame.
 pub fn render_playfield_view<R: Renderer>(r: &mut R, skin: &Skin, view: &PlayfieldView<'_>) {
-    let PlayfieldView { timelines, microtime, hispeed, beam_on, beam_off, constant, legacy_note } = *view;
     r.clear(skin.bg);
+    render_playfield_on_background(r, skin, view);
+}
+
+/// Draws the native field above content the caller has already placed on the canvas.
+///
+/// Layered documents use this path after their background phase so clearing the native
+/// playfield cannot erase the document behind it.
+pub fn render_playfield_on_background<R: Renderer>(r: &mut R, skin: &Skin, view: &PlayfieldView<'_>) {
+    let PlayfieldView { timelines, microtime, hispeed, beam_on, beam_off, constant, legacy_note } = *view;
 
     let n = skin.lane_count();
     let lane_h = skin.judge_y - skin.top_y;
@@ -664,6 +672,17 @@ mod tests {
         assert_eq!(c.pixel_at(1, 1), skin.bg, "outside the field is the cleared bg");
         let cx = skin.lane_center(0) as u32;
         assert_eq!(c.pixel_at(cx, skin.judge_y as u32 + 1), skin.judge_line);
+    }
+
+    #[test]
+    fn drawing_on_an_existing_background_keeps_pixels_outside_the_native_field() {
+        let skin = skin();
+        let backdrop = Color::rgb(12, 34, 56);
+        let mut canvas = CpuCanvas::new(1280, 720);
+        canvas.clear(backdrop);
+        render_playfield_on_background(&mut canvas, &skin, &view(&[], 0, 1.0, &[], &[], false));
+        assert_eq!(canvas.pixel_at(1, 1), backdrop, "the layered path cleared its backdrop");
+        assert_eq!(canvas.pixel_at(skin.lane_center(0) as u32, skin.judge_y as u32 + 1), skin.judge_line);
     }
 
     #[test]

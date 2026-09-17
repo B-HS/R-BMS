@@ -95,8 +95,8 @@ mod toast;
 use app_network::build_server;
 use app_play::schedule_poll_interval_us;
 pub(crate) use assets::{
-    DecodedImage, bundled_skin, decode_bga_image, install_default_skin, installed_play_skin_path, keysound_jobs, load_theme, resolve_file,
-    spawn_keysound_decode,
+    DecodedImage, apply_skin_bundle_selection, bundled_skin, decode_bga_image, install_default_skin, installed_play_skin_path, keysound_jobs, load_theme,
+    needs_default_skin_install, resolve_file, spawn_keysound_decode,
 };
 use course_ir::{UNRELEASED_COURSE_REASON, build_course_submission};
 use course_ui::{CourseEntry, CourseList, CourseOverrides, SelectTab, courses_dir, library_index, stage_label};
@@ -1116,7 +1116,7 @@ pub fn run(args: impl Iterator<Item = String>) -> ExitCode {
         }
     };
 
-    if can_install_default_skin && !config.skin.default_skin_installed && install_default_skin(&settings_path, &mut config) {
+    if can_install_default_skin && needs_default_skin_install(&settings_path, &config) && install_default_skin(&settings_path, &mut config) {
         config.skin.default_skin_installed = true;
         match rbms_config::save(&config, &settings_path) {
             Ok(()) => println!("default skin installed: {}", settings_path.display()),

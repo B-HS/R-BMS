@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use rbms_render::font::with_text_context;
-use rbms_render::result::{ResultView, TargetView};
+use rbms_render::result::{ResultContent, ResultView, TargetView};
 use rbms_render::skin_render::state::{DecideViewState, KeyConfigViewState, PlayViewState, ResultViewState, SelectViewState};
 use rbms_render::{
     Color, Renderer, SkinAssets, SkinDraw, SkinExprEval, SkinImage, SkinScreen, TextContext, TextureId, render_decide_screen, render_keyconfig_screen,
@@ -26,10 +26,10 @@ use rbms_render::{
 use rbms_skin::dst::{LuaDrawEval, LuaExprId, OffsetSource};
 use rbms_skin::loader::{LoadedSkin, SKIN_TYPE_DECIDE, SKIN_TYPE_KEY_CONFIG, SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_RESULT, skin_type_mode};
 use rbms_skin::lua::{LuaFrame, LuaSandbox};
-use rbms_skin::model::SkinComposition;
+use rbms_skin::model::{SkinComposition, SkinLayer};
 use rbms_skin::property::SkinStateSource;
 
-use crate::assets::{DecodePool, SkinAsset, SkinAssetJob, SkinAssetKind, spawn_skin_asset_decode};
+use crate::assets::{DecodePool, SkinAsset, SkinAssetJob, SkinAssetKind, skin_document_is_enabled, spawn_skin_asset_decode};
 use crate::notify::{Level, notify};
 use crate::skin_select::SkinLibrary;
 use crate::stage::Canvas;
@@ -128,6 +128,16 @@ impl SkinExprEval for SkinSandboxFrame<'_> {
 struct BuiltScreen {
     screen: SkinScreen,
     build: u64,
+}
+
+fn result_replacement_ids(name: &str) -> Option<&'static [&'static str]> {
+    match name {
+        "score" => Some(&["result-score-label", "result-score", "result-combo-label", "result-combo", "result-notes-label", "result-notes"]),
+        "clear" => Some(&["result-clear"]),
+        "judgment" => Some(&["result-judge-perfect", "result-judge-great", "result-judge-good", "result-judge-bad", "result-judge-poor", "result-judge-miss"]),
+        "target" => Some(&["result-target"]),
+        _ => None,
+    }
 }
 
 /// One document whose files are still being read off the frame loop.
@@ -236,6 +246,16 @@ impl SkinScreens {
             let more = if rest > 0 { format!(" (and {rest} more)") } else { String::new() };
             notify(Level::Warn, format!("skin: {first}{more}"));
         }
+        if screen == SKIN_TYPE_RESULT
+            && let Some(result) = document.def.result.as_ref()
+        {
+            let available = compiled.object_ids();
+            for name in &result.replace {
+                if !result_replacement_ids(name).is_some_and(|ids| ids.iter().all(|id| available.contains(id))) {
+                    notify(Level::Warn, format!("skin: result replacement {name} is incomplete; native content remains visible"));
+                }
+            }
+        }
         self.built.insert(screen, BuiltScreen { screen: compiled, build: pending.build });
     }
 
@@ -247,6 +267,14 @@ impl SkinScreens {
     /// Whether one screen's document is still having its files read.
     pub(crate) fn is_pending(&self, screen: i32) -> bool {
         self.pending.contains_key(&screen)
+    }
+
+    fn has_objects(&self, screen: i32, ids: &[&str]) -> bool {
+        let Some(screen) = self.get(screen) else {
+            return false;
+        };
+        let available = screen.object_ids();
+        ids.iter().all(|id| available.contains(id))
     }
 }
 
@@ -270,6 +298,9 @@ impl AppShared {
     /// Read and compile the document one screen is drawn with, so the gate below has something to
     /// hand over. Cheap on every frame but the one after a document is chosen or reloaded.
     pub(crate) fn prepare_skin(&mut self, canvas: &mut Canvas<'_>, screen: i32) {
+        if !self.skin_document_is_enabled(screen) {
+            return;
+        }
         if self.skins.needs_reload_for(&self.config, screen) {
             self.skins.reload_for(&self.config, screen);
         }
@@ -285,12 +316,41 @@ impl AppShared {
     /// A document whose files are still being read counts as present, so the background does not
     /// move into the built-in slot for the handful of frames before the document takes over.
     pub(crate) fn has_skin_document(&self, screen: i32) -> bool {
-        self.skin_screens.get(screen).is_some() || self.skin_screens.is_pending(screen)
+        self.skin_document_is_enabled(screen) && (self.skin_screens.get(screen).is_some() || self.skin_screens.is_pending(screen))
     }
 
     pub(crate) fn skin_uses_overlay(&self, screen: i32) -> bool {
         let supports_overlay = matches!(screen, SKIN_TYPE_MUSIC_SELECT | SKIN_TYPE_RESULT) || skin_type_mode(screen).is_some();
-        supports_overlay && self.skins.document(screen).is_some_and(|document| document.def.composition == SkinComposition::Overlay)
+        supports_overlay
+            && self.skin_document_is_enabled(screen)
+            && self.skins.document(screen).is_some_and(|document| document.def.composition == SkinComposition::Overlay)
+    }
+
+    /// Whether the document shares its screen with the native layout.
+    pub(crate) fn skin_uses_native_layout(&self, screen: i32) -> bool {
+        let supports_native_layout = matches!(screen, SKIN_TYPE_MUSIC_SELECT | SKIN_TYPE_RESULT) || skin_type_mode(screen).is_some();
+        supports_native_layout
+            && self.skin_document_is_enabled(screen)
+            && self.skins.document(screen).is_some_and(|document| matches!(document.def.composition, SkinComposition::Overlay | SkinComposition::Layered))
+    }
+
+    /// Whether a native-layout document has separate background and foreground destinations.
+    pub(crate) fn skin_uses_layered_layout(&self, screen: i32) -> bool {
+        self.skin_document_is_enabled(screen) && self.skins.document(screen).is_some_and(|document| document.def.composition == SkinComposition::Layered)
+    }
+
+    pub(crate) fn result_content(&self) -> ResultContent {
+        if !self.skin_uses_layered_layout(SKIN_TYPE_RESULT) {
+            return ResultContent::default();
+        }
+        let Some(result) = self.skins.document(SKIN_TYPE_RESULT).and_then(|document| document.def.result.as_ref()) else {
+            return ResultContent::default();
+        };
+        let replaces = |name: &str| {
+            result.replace.iter().any(|block| block == name)
+                && result_replacement_ids(name).is_some_and(|ids| self.skin_screens.has_objects(SKIN_TYPE_RESULT, ids))
+        };
+        ResultContent { score: replaces("score"), clear: replaces("clear"), judgment: replaces("judgment"), target: replaces("target") }
     }
 
     /// Whether one screen's document has finished being read and compiled, as against merely being
@@ -318,6 +378,9 @@ impl AppShared {
         lua: &'a mut Option<SkinSandboxFrame<'a>>,
         background: Option<TextureId>,
     ) -> Option<SkinDraw<'a>> {
+        if !self.skin_document_is_enabled(screen) {
+            return None;
+        }
         let compiled = self.skin_screens.get(screen)?;
         *lua = self.skins.document(screen).and_then(LoadedSkin::lua).map(|sandbox| SkinSandboxFrame::new(sandbox, state));
         Some(SkinDraw {
@@ -331,6 +394,10 @@ impl AppShared {
         })
     }
 
+    fn skin_document_is_enabled(&self, screen: i32) -> bool {
+        skin_document_is_enabled(&self.settings_path, &self.config, screen)
+    }
+
     /// Draw the play screen's document. `true` when it drew, and the built-in field stands aside.
     pub(crate) fn draw_play_skin(&self, canvas: &mut Canvas<'_>, screen: i32, state: &PlayViewState<'_>, background: Option<TextureId>) -> bool {
         let mut lua = None;
@@ -341,6 +408,25 @@ impl AppShared {
             canvas.clear(Color::BLACK);
         }
         with_render_ctx(|ctx| render_play_screen(ctx, canvas, Some(&document), state))
+    }
+
+    /// Draws one phase of a layered play document without clearing the native frame.
+    pub(crate) fn draw_play_skin_layer(
+        &self,
+        canvas: &mut Canvas<'_>,
+        screen: i32,
+        state: &PlayViewState<'_>,
+        background: Option<TextureId>,
+        layer: SkinLayer,
+    ) -> bool {
+        let mut lua = None;
+        let Some(document) = self.skin_frame(canvas, screen, state, &mut lua, background) else {
+            return false;
+        };
+        with_render_ctx(|ctx| {
+            document.draw_layer(ctx, canvas, state, layer);
+        });
+        true
     }
 
     /// Draw the song browser's document.
@@ -356,9 +442,22 @@ impl AppShared {
         with_render_ctx(|ctx| render_select_screen(ctx, canvas, Some(&document), view))
     }
 
+    /// Draws one phase of a layered browser document without clearing the native frame.
+    pub(crate) fn draw_select_skin_layer(&self, canvas: &mut Canvas<'_>, view: &SelectScene, background: Option<TextureId>, layer: SkinLayer) -> bool {
+        let state = SelectViewState { view, now_ms: self.skin_now_ms(), offsets: self.skin_offsets(SKIN_TYPE_MUSIC_SELECT) };
+        let mut lua = None;
+        let Some(document) = self.skin_frame(canvas, SKIN_TYPE_MUSIC_SELECT, &state, &mut lua, background) else {
+            return false;
+        };
+        with_render_ctx(|ctx| {
+            document.draw_layer(ctx, canvas, &state, layer);
+        });
+        true
+    }
+
     /// Draw the score screen's document.
     pub(crate) fn draw_result_skin(&self, canvas: &mut Canvas<'_>, view: &ResultView, target: Option<&TargetView>, cleared: bool) -> bool {
-        let state = ResultViewState { view, target, cleared, now_ms: self.skin_now_ms(), offsets: self.skin_offsets(SKIN_TYPE_RESULT) };
+        let state = ResultViewState::new(view, target, cleared, self.skin_now_ms(), self.skin_offsets(SKIN_TYPE_RESULT));
         let mut lua = None;
         let Some(document) = self.skin_frame(canvas, SKIN_TYPE_RESULT, &state, &mut lua, None) else {
             return false;
@@ -367,6 +466,25 @@ impl AppShared {
             canvas.clear(Color::BLACK);
         }
         with_render_ctx(|ctx| render_result_screen(ctx, canvas, Some(&document), view, target, cleared))
+    }
+
+    pub(crate) fn draw_result_skin_layer(
+        &self,
+        canvas: &mut Canvas<'_>,
+        view: &ResultView,
+        target: Option<&TargetView>,
+        cleared: bool,
+        layer: SkinLayer,
+    ) -> bool {
+        let state = ResultViewState::new(view, target, cleared, self.skin_now_ms(), self.skin_offsets(SKIN_TYPE_RESULT));
+        let mut lua = None;
+        let Some(document) = self.skin_frame(canvas, SKIN_TYPE_RESULT, &state, &mut lua, None) else {
+            return false;
+        };
+        with_render_ctx(|ctx| {
+            document.draw_layer(ctx, canvas, &state, layer);
+        });
+        true
     }
 
     /// Draw the loading screen's document, which stands in for the reference's decide screen.

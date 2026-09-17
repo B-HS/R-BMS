@@ -287,6 +287,7 @@ impl<'de> Deserialize<'de> for DestinationOption {
 #[serde(default)]
 pub struct Destination {
     pub id: String,
+    pub layer: SkinLayer,
     pub blend: i32,
     pub filter: i32,
     pub timer: Option<PropertyRef>,
@@ -307,6 +308,7 @@ impl Default for Destination {
     fn default() -> Self {
         Self {
             id: String::new(),
+            layer: SkinLayer::Foreground,
             blend: 0,
             filter: 0,
             timer: None,
@@ -352,6 +354,25 @@ pub enum SkinComposition {
     #[default]
     Replace,
     Overlay,
+    Layered,
+}
+
+/// Which native-layout phase draws one destination in a layered document.
+///
+/// Existing documents keep their foreground order. A layered document explicitly puts
+/// background decoration behind native notes and text.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SkinLayer {
+    Background,
+    #[default]
+    Foreground,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct ResultSkin {
+    pub replace: Vec<String>,
 }
 
 /// A whole skin document.
@@ -392,6 +413,7 @@ pub struct SkinDef {
     pub hiterrorvisualizer: Vec<HitErrorVisualizer>,
     pub timingvisualizer: Vec<TimingVisualizer>,
     pub timingdistributiongraph: Vec<TimingDistributionGraph>,
+    pub result: Option<ResultSkin>,
     pub note: Option<NoteSet>,
     pub gauge: Option<GaugeDef>,
     #[serde(rename = "hiddenCover")]
@@ -449,6 +471,7 @@ impl Default for SkinDef {
             hiterrorvisualizer: Vec::new(),
             timingvisualizer: Vec::new(),
             timingdistributiongraph: Vec::new(),
+            result: None,
             note: None,
             gauge: None,
             hidden_cover: Vec::new(),

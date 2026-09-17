@@ -10,6 +10,7 @@ use crate::settings_ui::{SettingRow, audio_status_text, is_network_row, step_aud
 use crate::settings_view::{RivalsScene, SettingsScene};
 use crate::skin_select::SkinRow;
 use crate::stage::{Canvas, FrameCtx, KeyConfigState, KeyInput, Stage, StageHandler, Transition};
+use crate::{apply_skin_bundle_selection, load_theme};
 use rbms_config::{AdjustOutcome, SettingId, SettingTab, adjust, step_skin};
 
 use crate::*;
@@ -171,6 +172,12 @@ impl SettingsState {
             SettingId::Skin => {
                 ctx.shared.launch.skin_path = None;
                 step_skin(&mut ctx.shared.config);
+                let settings_path = ctx.shared.settings_path.clone();
+                apply_skin_bundle_selection(&settings_path, &mut ctx.shared.config);
+                load_theme(&settings_path, &ctx.shared.config);
+                ctx.shared.rescan_skins();
+                ctx.shared.reload_skin();
+                ctx.shared.save_settings();
             }
             SettingId::AudioDevice => {
                 step_audio_device(&mut ctx.shared.config.audio, delta, &self.audio_devices);
