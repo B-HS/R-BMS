@@ -241,6 +241,7 @@ fn ron_round_trip_preserves_every_field() {
     custom.properties.insert("LANE COVER".into(), 902);
     custom.filepaths.insert("BACKGROUND".into(), "night.png".into());
     custom.offsets.insert(12, SkinOffset { x: -4.0, y: 8.0, w: 0.0, h: 0.0, r: 90.0, a: -32.0 });
+    c.skin.shared_customise("browser").properties.insert("PLAY SIDE".into(), 901);
 
     let back: Config = ron::from_str(&ron_of(&c)).expect("a config round-trips");
     assert_eq!(back, c, "every field survives the round trip");
@@ -303,6 +304,57 @@ fn the_loader_is_handed_the_choices_made_for_the_document_it_is_loading() {
     assert_eq!(user.offset(4), None, "an offset nobody nudged came back as a nudge of nothing");
 }
 
+/// A bundle ships one directory of documents, so a row it declares at bundle scope is keyed by that
+/// directory's name however the skin folder was reached -- the one the player named, or the default
+/// one beside the settings file.
+#[test]
+fn a_documents_bundle_is_the_directory_it_sits_in_below_the_skin_folder() {
+    let mut c = Config::default();
+    assert_eq!(c.skin.bundle_key("/home/p/.config/rbms/skin/steel-neon-v2/play-7k.json5").as_deref(), Some("steel-neon-v2"));
+    assert_eq!(c.skin.bundle_key("/home/p/.config/rbms/skin/loose.json5"), None, "a document lying in the skin folder itself was given a bundle");
+    assert_eq!(c.skin.bundle_key("/elsewhere/collection/play.json5"), None, "a document outside the skin folder was given a bundle");
+
+    c.skin.folder = Some("/skins".into());
+    assert_eq!(c.skin.bundle_key("/skins/aurora/select.json5").as_deref(), Some("aurora"));
+    assert_eq!(c.skin.bundle_key("/skins/aurora/screens/select.json5").as_deref(), Some("aurora"), "a nested document left its own bundle");
+    assert_eq!(c.skin.bundle_key("/skins/select.json5"), None, "a document lying in the named folder itself was given a bundle");
+}
+
+/// Bundle-scope choices are what every screen of one bundle shares, and a document that declares the
+/// same row for itself is the narrower answer -- so one choice can be made once and still be
+/// overridden on the screen it does not suit.
+#[test]
+fn bundle_choices_reach_every_document_of_that_bundle_and_yield_to_the_documents_own() {
+    let mut c = Config::default();
+    let select = "/home/p/.config/rbms/skin/steel-neon-v2/select.json5";
+    let play = "/home/p/.config/rbms/skin/steel-neon-v2/play-7k.json5";
+    let outside = "/home/p/.config/rbms/skin/other-bundle/play-7k.json5";
+
+    let shared = c.skin.shared_customise("steel-neon-v2");
+    shared.properties.insert("PLAY SIDE".into(), 900);
+    shared.filepaths.insert("LANE COVER".into(), "solid.png".into());
+    shared.offsets.insert(40, SkinOffset { x: 6.0, ..SkinOffset::default() });
+
+    for path in [select, play] {
+        let user = c.skin.user_config(path);
+        assert_eq!(user.properties.get("PLAY SIDE"), Some(&900), "{path} did not read its bundle's choice");
+        assert_eq!(user.filepaths.get("LANE COVER").map(String::as_str), Some("solid.png"));
+        assert_eq!(user.offset(40), Some(SkinOffset { x: 6.0, ..SkinOffset::default() }));
+    }
+    assert!(c.skin.user_config(outside).properties.is_empty(), "one bundle's choices reached another");
+
+    let own = c.skin.customise(play);
+    own.properties.insert("PLAY SIDE".into(), 901);
+    own.properties.insert("BGA SIZE".into(), 912);
+    let user = c.skin.user_config(play);
+    assert_eq!(user.properties.get("PLAY SIDE"), Some(&901), "the document's own choice lost to its bundle's");
+    assert_eq!(user.properties.get("BGA SIZE"), Some(&912));
+    assert_eq!(user.filepaths.get("LANE COVER").map(String::as_str), Some("solid.png"), "a row only the bundle answers was dropped");
+    assert_eq!(c.skin.user_config(select).properties.get("PLAY SIDE"), Some(&900), "one document's own choice reached its neighbour");
+    assert_eq!(c.skin.shared_customisation("steel-neon-v2").map(|entry| entry.properties.len()), Some(1));
+    assert_eq!(c.skin.shared_customisation("never-chosen-in"), None);
+}
+
 /// A hand-edited file naming a screen no `SkinType` declares is pulled back onto one that does,
 /// rather than leaving the SKIN tab pointing at a row it cannot show.
 #[test]
@@ -312,10 +364,14 @@ fn a_hand_edited_skin_group_is_pulled_back_onto_a_screen_that_exists() {
     c.skin.folder = Some("   ".into());
     c.skin.selected.insert(-1, "ghost.json".into());
     c.skin.selected.insert(MUSIC_SELECT_SCREEN, "  ".into());
+    c.skin.shared_customise("  ").properties.insert("PLAY SIDE".into(), 900);
+    c.skin.shared_customise("aurora").properties.insert("PLAY SIDE".into(), 901);
     c.sanitise();
     assert_eq!(c.skin.screen, DEFAULT_SKIN_SCREEN);
     assert_eq!(c.skin.folder, None, "a blank folder is no folder");
     assert!(c.skin.selected.is_empty(), "a screen that does not exist, and a document with no name, were both kept");
+    assert_eq!(c.skin.shared.len(), 1, "a bundle with no name was kept");
+    assert!(c.skin.shared_customisation("aurora").is_some(), "a named bundle's choices were thrown away with the unnamed one");
 }
 
 /// The three new option axes are stored as separator-free tokens, exactly like the gauge next to
@@ -466,4 +522,27 @@ fn sanitise_uppercases_a_skin_name_and_stamps_the_schema() {
     c.sanitise();
     assert_eq!(c.display.skin, "WIDE");
     assert_eq!(c.schema_version, CURRENT_SCHEMA_VERSION);
+}
+
+/// A bundle's shared choices are keyed by the directory the bundle installs into, so a generation
+/// move has to carry them across or every screen of that bundle silently reverts at once.
+#[test]
+fn bundle_choices_follow_the_bundle_onto_the_generation_that_replaced_it() {
+    let mut c = Config::default();
+    let old = c.skin.shared_customise("steel-neon-v2");
+    old.properties.insert("PLAY SIDE".into(), 901);
+    old.filepaths.insert("LANE COVER".into(), "solid.png".into());
+    old.offsets.insert(40, SkinOffset { x: 6.0, ..SkinOffset::default() });
+
+    c.skin.move_shared("steel-neon-v2", "steel-neon-v3");
+    assert_eq!(c.skin.shared_customisation("steel-neon-v2"), None, "the old bundle kept the choices it handed over");
+    let moved = "/home/p/.config/rbms/skin/steel-neon-v3/play-7k.json5";
+    let user = c.skin.user_config(moved);
+    assert_eq!(user.properties.get("PLAY SIDE"), Some(&901), "the moved bundle lost what was chosen for it");
+    assert_eq!(user.filepaths.get("LANE COVER").map(String::as_str), Some("solid.png"));
+    assert_eq!(user.offset(40), Some(SkinOffset { x: 6.0, ..SkinOffset::default() }));
+
+    c.skin.shared_customise("steel-neon-v1").properties.insert("PLAY SIDE".into(), 900);
+    c.skin.move_shared("steel-neon-v1", "steel-neon-v3");
+    assert_eq!(c.skin.user_config(moved).properties.get("PLAY SIDE"), Some(&901), "choices already made for the new bundle were overwritten");
 }

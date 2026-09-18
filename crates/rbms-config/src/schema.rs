@@ -8,6 +8,7 @@ use rbms_skin::dst::{OffsetSource, SkinOffset};
 use rbms_skin::loader::SkinUserConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::path::{Component, Path};
 
 use crate::audio::AudioOptions;
 use crate::judge::ScoreTarget;
@@ -255,13 +256,49 @@ pub struct SkinOptions {
     pub selected: BTreeMap<i32, String>,
     /// What the player chose inside each document, keyed by the path it was found under.
     pub custom: BTreeMap<String, SkinCustomisation>,
+    /// What the player chose for a whole bundle, keyed by [`SkinOptions::bundle_key`]. A row a
+    /// document declares at bundle scope reads and writes here, so the choice is made once and
+    /// every screen of that bundle is drawn with it.
+    pub shared: BTreeMap<String, SkinCustomisation>,
     pub default_skin_installed: bool,
 }
 
 impl Default for SkinOptions {
     fn default() -> Self {
-        SkinOptions { folder: None, screen: DEFAULT_SKIN_SCREEN, selected: BTreeMap::new(), custom: BTreeMap::new(), default_skin_installed: false }
+        SkinOptions {
+            folder: None,
+            screen: DEFAULT_SKIN_SCREEN,
+            selected: BTreeMap::new(),
+            custom: BTreeMap::new(),
+            shared: BTreeMap::new(),
+            default_skin_installed: false,
+        }
     }
+}
+
+/// The name a path component carries, for the components that name something.
+fn normal_name(component: Component<'_>) -> Option<&str> {
+    match component {
+        Component::Normal(name) => name.to_str(),
+        _ => None,
+    }
+}
+
+/// The first directory of a path taken relative to the skin folder, which is `None` when the path
+/// names a document lying directly in that folder.
+fn first_directory_name(relative: &Path) -> Option<String> {
+    let mut names = relative.components().filter_map(normal_name);
+    let first = names.next()?;
+    names.next()?;
+    Some(first.to_owned())
+}
+
+/// The directory below [`DEFAULT_SKIN_FOLDER`], for a document reached through the default folder
+/// rather than through one the player named.
+fn directory_below_default_folder(path: &Path) -> Option<String> {
+    let names: Vec<&str> = path.components().filter_map(normal_name).collect();
+    let at = names.iter().rposition(|name| *name == DEFAULT_SKIN_FOLDER)?;
+    (names.len() > at + 2).then(|| names[at + 1].to_owned())
 }
 
 impl SkinOptions {
@@ -294,15 +331,59 @@ impl SkinOptions {
         self.custom.remove(path);
     }
 
-    /// What the skin loader should be handed for one document.
-    pub fn user_config(&self, path: &str) -> SkinUserConfig {
-        let stored = self.custom.get(path);
-        SkinUserConfig {
-            path: path.to_owned(),
-            properties: stored.map(|entry| entry.properties.clone()).unwrap_or_default(),
-            filepaths: stored.map(|entry| entry.filepaths.clone()).unwrap_or_default(),
-            offsets: stored.map(|entry| entry.offsets.clone()).unwrap_or_default(),
+    /// The bundle a document belongs to: the directory it sits in below the skin folder.
+    ///
+    /// This is what bundle-scope customisation is keyed by, so the screens shipped together under
+    /// one directory share one set of choices. A document lying directly in the skin folder, or
+    /// outside it altogether, belongs to no bundle and keeps its choices to itself.
+    pub fn bundle_key(&self, path: &str) -> Option<String> {
+        let path = Path::new(path);
+        let named_folder = self.folder.as_deref().map(Path::new).and_then(|folder| path.strip_prefix(folder).ok()).and_then(first_directory_name);
+        named_folder.or_else(|| directory_below_default_folder(path))
+    }
+
+    /// What the player chose for a whole bundle, read-only and without creating an entry for a
+    /// bundle nothing has been chosen in yet.
+    pub fn shared_customisation(&self, bundle: &str) -> Option<&SkinCustomisation> {
+        self.shared.get(bundle)
+    }
+
+    /// What the player chose for a whole bundle, created empty the first time it is edited.
+    pub fn shared_customise(&mut self, bundle: &str) -> &mut SkinCustomisation {
+        self.shared.entry(bundle.to_owned()).or_default()
+    }
+
+    /// Carry a whole bundle's choices onto the bundle that replaced it, so a generation move keeps
+    /// what was chosen once for every screen of that bundle.
+    ///
+    /// Choices already stored under `to` are the ones kept, matching how a document's own choices
+    /// survive a move onto a path that has some already.
+    pub fn move_shared(&mut self, from: &str, to: &str) {
+        if from == to {
+            return;
         }
+        if let Some(choices) = self.shared.remove(from) {
+            self.shared.entry(to.to_owned()).or_insert(choices);
+        }
+    }
+
+    /// What the skin loader should be handed for one document: its bundle's shared choices with the
+    /// document's own laid over them, so a row declared at both scopes answers with the narrower
+    /// one.
+    pub fn user_config(&self, path: &str) -> SkinUserConfig {
+        let shared = self.bundle_key(path).and_then(|bundle| self.shared.get(&bundle));
+        let mut config = SkinUserConfig {
+            path: path.to_owned(),
+            properties: shared.map(|entry| entry.properties.clone()).unwrap_or_default(),
+            filepaths: shared.map(|entry| entry.filepaths.clone()).unwrap_or_default(),
+            offsets: shared.map(|entry| entry.offsets.clone()).unwrap_or_default(),
+        };
+        if let Some(stored) = self.custom.get(path) {
+            config.properties.extend(stored.properties.iter().map(|(row, option)| (row.clone(), *option)));
+            config.filepaths.extend(stored.filepaths.iter().map(|(slot, file)| (slot.clone(), file.clone())));
+            config.offsets.extend(stored.offsets.iter().map(|(id, offset)| (*id, *offset)));
+        }
+        config
     }
 
     /// Pull a hand-edited document back into what the rows can produce: an unnamed screen falls back
@@ -313,6 +394,7 @@ impl SkinOptions {
         }
         self.folder = self.folder.take().filter(|folder| !folder.trim().is_empty());
         self.selected.retain(|screen, path| skin_screen_label(*screen).is_some() && !path.trim().is_empty());
+        self.shared.retain(|bundle, _| !bundle.trim().is_empty());
     }
 }
 
