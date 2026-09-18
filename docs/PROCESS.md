@@ -1,11 +1,25 @@
 # rbms — 레퍼런스 구현 core PLAY 모듈 Rust 포팅 (PROCESS / 단일 출처)
 
-> 이전 Phase G 중단 스냅샷은 `docs/HANDOFF.md`와 `docs/history/2026-09-10-session-wrap-up.md`에 보존한다. 현재는 Phase G·H까지 완료했고 Phase R은 실제 키와 함께 추후 진행한다.
+> 세션 인수인계 스냅샷은 `docs/HANDOFF.md`(2026-09-18, 스킨 시스템 작업 미커밋 상태)다. 이전 Phase G 중단 스냅샷은 `docs/history/2026-09-10-handoff-snapshot.md`와 `docs/history/2026-09-10-session-wrap-up.md`에 보존한다. Phase G·H는 완료했고 Phase R은 실제 키와 함께 추후 진행한다.
 > 새 세션은 **이 문서부터** 읽는다. 현재 상태·아키텍처·실행법·할 일의 SSOT. (ai-process.md 원칙 1·14)
 > 베이스 룰: 프로젝트 작업 환경의 `AGENTS.md`와 llm-rules 전문(`ai-process`·`common`·`comments`·`git`·`security`)을 따른다. Rust 프로젝트에는 TS/JS 전용 규칙을 적용하지 않으며, 공통 원칙(문서는 `docs/`에 기록·정확한 이름·근본 해결·공식 문서 확인·검증 후 진행)은 그대로 적용한다.
-> 위치: `/Users/gkn/R-BMS`. 빌드 `cargo build`, 테스트 `cargo test --workspace`(Phase H 최종 실행 exit 0, 등록 테스트 3,040개; 실제 오디오 장치 테스트 2건 ignored). lint 는 이제 게이트다 — `cargo fmt --all --check` 와 `cargo clippy --workspace --all-targets --all-features -- -D warnings` 가 CI 필수 통과 조건이고 툴체인은 `rust-toolchain.toml` 로 `1.95.0` 고정. 실행 정본은 `README.md`다.
+> 위치: `/Users/gkn/R-BMS`. 빌드 `cargo build`, 테스트 `cargo test --workspace`(2026-09-17 스킨 시스템 K5 게이트 실측 3,181 통과·0 실패; 실제 오디오 장치 테스트 등 ignored 3건). lint 는 이제 게이트다 — `cargo fmt --all --check` 와 `cargo clippy --workspace --all-targets --all-features -- -D warnings` 가 CI 필수 통과 조건이고 툴체인은 `rust-toolchain.toml` 로 `1.95.0` 고정. 실행 정본은 `README.md`다.
 > git: **dev(작업)/prod(배포) 브랜치 모델**(CI는 dev, 릴리스는 prod → `docs/ci-release.md`). **커밋 메시지에 co-author(Claude) 넣지 않음**(사용자 명시 지시), 작성자 `Hyunseok Byun <gumyoincirno@gmail.com>`. `target`·`Cargo.lock`·라이브러리 차트 커밋 금지(.gitignore).
 > 다음 할 일(로드맵)은 **`docs/roadmap.md`**, 백엔드 설계는 **`docs/backend/`**, 배포/CI는 **`docs/ci-release.md`**.
+
+---
+
+## 현재 작업 — 스킨 시스템 완성과 기본 스킨 전면 제작 (2026-09-17)
+
+> 사용자 지시: 제공된 외부 스킨 묶음(구조 분석 입력, 저장소 복사 금지)과 화면 12장을 참고해 기본 스킨·스킨 구조·커스터마이징을 완성하고 필요한 기능은 `docs/`에 사양을 두고 구현한다. 아래 V7-C·V8은 이 작업에 흡수한다. 운용: 조사·구현·적대 리뷰 = Workflow(Opus max, 주제당 질문 3개·10분 상한), 사양·판정·Git = Fable 직접.
+
+- [x] K1. 조사 — R1 엔진 격차(그리는 객체 8종/미지원 15종, 중첩 destination·행/시계열 상태·타이머 3대 차단), R2 앱 배선(대체는 결과 전용, 커스터마이즈 문서경로 키·세대 이동 유실, 사운드 폴더 단일), R3 외부 묶음(좌표 17표·옵션 55/파일 65/오프셋 28·결함 13건) 보고서 확보(Workflow `wf_32fd88cf-707`).
+- [x] K2. 사양 확정 — `docs/plan/2026-09-17-skin-system-completion.md`(§1~§12)와 결정 `docs/acknowledge/2026-09-17-skin-system-decisions.md`(D1~D12) 기록.
+- [x] K3. 엔진 구현 — Workflow `wf_b03ec12f-3f9`(14 에이전트): 로더 중첩 트랙·`replace`·`hotspot`·`scope`, 렌더 객체 13종(note/gauge/judge/songlist/covers/graphs 7종/density), `FrameExtra` 상태, 설정 공유 스코프·세대 목록 설치·custom/shared 이동·번들 사운드 폴더, v3 자산(이미지 21·사운드 22·생성 스크립트). 적대 리뷰 31건 중 critical/major 19건 반영. 게이트: fmt·clippy·`cargo test --workspace` 3,118 통과·금지 명칭 0건. 앱 배선(대체 게이트·상태 조립·타이머·SKIN 탭)은 K4 로.
+- [x] K4. 앱 배선 + 기본 스킨 제작 — Workflow `wf_1a582c5d-df7`(14 에이전트, 사용량 제한으로 1회 재개): W2-0 게이트 일반화·핫스팟·공유 오프셋·옵션 행 → W2-a/b/c/d(play·select·result·SKIN 탭) → W3-1~4 문서(선택·결정/결과·단일 5/7/9·이중 10/14) → 리뷰 23건(major 9) 수정 → 게이트 통과(fmt·clippy·`cargo test --workspace` 0 실패·캡처 20장·금지 명칭 0). 메인 직접 보강: 플레이 문서 오프셋 결함, 결과 `hint`/`ir` 대체 단위, 상태 id 확장(플레이·선택·결정), 네이티브 BGA 사각형 게이트, 이중 필드 RON 폴백, 캡처 프로브.
+- [x] K4-b. 후속 Workflow `wf_136680dc-fb5` — 단일 플레이 `bga` 객체·PLAY SIDE/BGA SIZE/GRAPH POSITION·2P/NEAR 프레임, 문서 minor 일괄, 게이트(3,181 통과·0 실패).
+- [x] K5. 검증 — 헤드리스 캡처 12장(`docs/quality-assurance/2026-09-17-skin-system/captures/`) 메인 육안 판정, 전체 테스트·fmt·clippy 통과. **실제 GPU 창 캡처는 터미널 화면 녹화 권한 부재로 미완(체크리스트 §3 사용자 절차).**
+- [x] K6. 문서·이력·커밋 — `docs/skin.md`·history·QA·README 갱신(2026-09-17), 2026-09-18 핸드오프 준비로 `docs/HANDOFF.md` 재작성·결정 D13~D23·정합성 정정. 사용자 지시(2026-09-18 "커밋 푸시")로 5단위 커밋: `1535b0a` feat(skin) · `4f1a338` feat(config) · `3704b8c` feat(render) · `3cd72f4` feat(player)+v3 자산 · docs(skin)(이 문서 포함, 다음 커밋). author 단독·트레일러 0건 확인.
 
 ---
 
@@ -22,8 +36,8 @@
 - [ ] V7. 개별 객체 기능 구현 — 곡 목록/상세, 플레이 노트·판정·게이지·HUD, 결과 패널/그래프, 옵션 행의 문서 구동과 상태·입력 연결을 검증한다.
   - [x] V7-A. 결과 점수·클리어·판정·목표 텍스트는 개별 JSON5 객체로 이동하고 필요한 객체가 없을 때 네이티브 출력으로 복귀한다.
   - [x] V7-B. 선택 옵션 11행의 글자/값 위치·색을 테마 RON에서 행별로 수정할 수 있고 설정 descriptor와 연결된 상태를 유지한다.
-  - [ ] V7-C. 결과 등급·그래프·하단 힌트, 곡 목록/상세, 플레이 HUD·노트·판정·게이지, 옵션 패널의 나머지 요소를 개별 객체로 전환한다.
-- [ ] V8. 기본 스킨 객체화 — 엔진 V7 완료 후 기본 JSON5를 요소별 파일 값으로 구성하고 5/7/9/10/14키와 선택/옵션/결과 실화면을 확인한다.
+  - [x] V7-C. 결과 등급·그래프·하단 힌트, 곡 목록/상세, 플레이 HUD·노트·판정·게이지, 옵션 패널의 나머지 요소를 개별 객체로 전환한다. — 위 K3·K4 에 흡수해 완료(대체 단위 표 `docs/skin.md` §2.2).
+- [x] V8. 기본 스킨 객체화 — 엔진 V7 완료 후 기본 JSON5를 요소별 파일 값으로 구성하고 5/7/9/10/14키와 선택/옵션/결과 실화면을 확인한다. — 위 K4·K5 에 흡수(`steel-neon-v3`, 헤드리스 캡처 12장). 실제 GPU 창 확인은 K5 와 같이 미완.
 
 ---
 

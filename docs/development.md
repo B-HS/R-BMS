@@ -80,7 +80,10 @@ the configuration directory.
   does not branch on mode (it is data). Judge windows: add a row to `crates/rbms-judge/data/judge.ron`
   keyed by the mode name if it needs different timing; `JudgeProperty::for_mode` reads that file and
   only falls back to the compiled-in table for a mode the file does not name.
-- **Note-field skin**: `assets/skins/*.ron` (`SkinConfig`), or `--skin file.ron`.
+- **Note-field skin**: `assets/skins/*.ron` (`SkinConfig`), or `--skin file.ron`. The RON is the fallback; the
+  installed bundle `~/.config/rbms/skin/steel-neon-v3/` drives every screen with JSON5 documents
+  (bundle sources `assets/skins/steel-neon-v3/`, registered in `assets.rs` `BUNDLE_GENERATIONS`). Authoring
+  contract, replace units, hotspots and bundle-scoped options: `skin.md`.
 - **UI theme**: `~/.config/rbms/theme.ron` (`ThemeConfig`); add a field to `rbms_render::theme::Theme`
   + route one `Color::rgb(..)` through `theme()`. See `theme.md`.
 - **Settings screen**: add a `SettingId` variant and a `SETTINGS` row in `rbms_config::settings`

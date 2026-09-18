@@ -25,7 +25,7 @@ configuration crate and the play crate share it without a cycle. `rbms-table` de
 | **rbms-chart** | `BmsSource` → fully-timed `Model`: `detect_mode`, measure→µs integration (BPM/STOP/SCROLL), LN/LNOBJ/mines, `note_density`, `scroll` (render offsets), `shuffle` (note options). |
 | **rbms-judge** | Stateful judge: reference windows (mode-aware), PG/GR/GD/BD/POOR/MISS, combo/EX/early-late, gauges (6 kinds), 空POOR, clear lamp. |
 | **rbms-audio** | RT-safe output: symphonia decode + cpal lock-free mixer. **Master clock = mixed sample count** (the timing-source fix vs the reference implementation). |
-| **rbms-render** | Backend-agnostic 2D: `Renderer` trait (`fill_rect`) → wgpu/CpuCanvas. Skin (RON), playfield, HUD, result, select, key-bomb, multilingual font (cosmic-text), **UI theme** (`docs/theme.md`). |
+| **rbms-render** | Backend-agnostic 2D: `Renderer` trait (`fill_rect`) → wgpu/CpuCanvas. Skin (RON fallback), playfield, HUD, result, select, key-bomb, the JSON skin object renderer (`skin_render`, 21 object kinds), multilingual font (cosmic-text), **UI theme** (`docs/theme.md`). |
 | **rbms-ir** | "IR-superset" score-server contract: `ScoreServer` trait + serde DTOs + HTTP/Null clients. |
 | **rbms-table** | BMS difficulty tables (header.json/data.json): fetch, md5-match, level grouping, disk cache. |
 | **rbms-store** | Local score persistence: SQLite `scoredb` (history, bests, profiles, replay GC) plus RON compatibility import/export (`scores.ron` + `replays/*.ron`), atomic writes, and judging-rule version stamps. Lamps travel as numeric ids so the judge engine stays out of the file layer. |
@@ -70,7 +70,7 @@ Everything drawn — notes, beams, text (cosmic-text), BGA frame — lowers to `
 ## Data-driven surfaces
 
 - **Modes** are data (`Mode` + an `[i8;18]` channel map) — a new key mode is a constant, never an engine branch.
-- **Skins** (`SkinConfig`, RON): note-field geometry, palettes, gauge thresholds, key-bomb, DP layout.
+- **Skins** (`SkinConfig`, RON): note-field geometry, palettes, gauge thresholds, key-bomb, DP layout. Since 2026-09-17 a play document that declares a `note` object overrides the lane geometry (`Skin::with_document_lanes`); the RON is the fallback for documents without one.
 - **UI theme** (`ThemeConfig`, RON): menu/chrome colours — see `docs/theme.md`.
 - **Judge windows and gauges** are data: `rbms-judge/data/judge.ron` (six modes) and `data/gauge.ron` (`BEAT_7K`) are embedded with `include_str!` and can be overridden from disk. The in-code const tables stay for one release as the fallback *and* as the reference of a **parity guard test** that asserts the parsed data equals them field by field — the values Phase A matched to the reference cannot drift as the data path takes over.
 - **Candidate selection** is a policy value (`JudgeAlgorithm`: Combo / Duration / Lowest / Score) rather than a hard-coded loop; the default stays `Duration`, which is what this engine has always done (see `acknowledge/reference-divergences.md` C-D1).
@@ -81,6 +81,8 @@ Everything drawn — notes, beams, text (cosmic-text), BGA frame — lowers to `
 ### JSON skins (`rbms-skin` + `rbms-render::skin_render`)
 
 Since Phase E a screen can be driven by a reference-format JSON skin document instead of its built-in layout: `rbms-skin` loads the document (json5, sandboxed Lua expressions, skin-root file resolution), binds its timers and property ids to live `PlaySession`/app state, and `rbms-render::skin_render` draws it through the textured-quad, clip and rotation primitives of the `Renderer` trait (batched per draw order in the GPU backend). When no document is selected the built-in screens render exactly as before, which the golden signatures pin. Selection and customisation are persisted in `rbms-config` (`Config.skin`) and edited on the SKIN settings tab.
+
+The 2026-09-17 skin-system completion (spec `docs/plan/2026-09-17-skin-system-completion.md`, guide `docs/skin.md`) made a document able to own a whole screen: the loader assembles nested destinations (`NestedTracks` for note / judge / songlist), a `layered` document lists the native output groups it replaces (`replace`, gated per screen by `SkinScreen::replacement`), declares clickable regions (`hotspot` actions and `songlist.clickable` slots) and marks customisation rows as bundle-wide (`scope: 'bundle'`, stored in `SkinOptions.shared`). The renderer draws note fields, gauges, judge pop-ups, song lists, lane covers and seven graphs from per-frame `FrameExtra` state, timers are driven by `PlayTimers` / `ResultTimers`, and the default bundle `assets/skins/steel-neon-v3/` (installed as generation v3, older generations migrated) supplies object-level documents, generated art and the 22 system-sound stems.
 
 ## App UI state machine (`Stage`)
 

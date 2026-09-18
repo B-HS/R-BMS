@@ -14,6 +14,7 @@
 | Phase F | 선택/설정/결과 UX 고도화 완료 | `docs/history/2026-09-10-phase-f-integration.md` |
 | Phase G | SongDB·ScoreDB·Course·Practice·gamepad·system sound·multi-IR·bmson 완료 | `docs/history/2026-09-16-phase-g-data-long-tail.md` |
 | Phase H | 경미 후속과 수동 점검 절차 문서화 완료 | `docs/history/2026-09-16-phase-h-minor-followups.md` |
+| 스킨 시스템 완성 (2026-09-17) | 객체 21종 렌더·대체 단위·핫스팟·번들 스코프·기본 번들 v3 구현과 헤드리스 검증 완료, 커밋은 사용자 지시 대기 | `docs/history/2026-09-17-skin-system-completion.md`, `docs/HANDOFF.md` |
 
 ## 남은 작업
 
@@ -35,4 +36,4 @@
 ## 선택적 후속
 
 - 추가 게이지·코스메틱은 제품 우선순위가 정해질 때 별도 단계로 계획합니다.
-- 스킨의 일부 고급 오브젝트·비디오 BGA·서명/공증은 현재 릴리스 범위 밖입니다. 현재 차이는 [레퍼런스 발산 기록](acknowledge/reference-divergences.md)에서 관리합니다.
+- 스킨 후속(사양 §12): 곡 선택·결정 BGM 루프, `pmchara`·`practice`·`skinpreview`·`customEvents`·`customTimers`, 객체 `click`/`act` 이벤트, 외부 CSV 스킨 직접 로드, 비디오 BGA, 24키 실제 활성화, 옵션 패널 마우스 조작. 기본 번들의 남은 미세 결함(10키 전용 `frame-dp`, 선택 화면 판정별 카운트 행, NOTES 수치 경계 물림)은 [이력](history/2026-09-17-skin-system-completion.md)의 남은 범위 절에 있습니다. 서명/공증은 릴리스 범위 밖이며 차이는 [레퍼런스 발산 기록](acknowledge/reference-divergences.md)에서 관리합니다.
