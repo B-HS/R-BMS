@@ -43,6 +43,26 @@ impl Fixture {
     fn choose(&mut self) {
         assert!(self.skins.cycle_document(&mut self.config, 1), "there was no document to choose");
     }
+
+    /// The same fixture with the bundle-scope document added to the browser bundle and selected
+    /// for the screen it declares, with both screens read: a bundle whose rows one document
+    /// declares and both screens answer to.
+    fn with_shared(tag: &str) -> Fixture {
+        let mut fixture = Fixture::new(tag);
+        let folder = fixture.settings.parent().expect("the settings file has a folder").join("skin");
+        let shared = fixtures::write_shared(&folder);
+        fixture.skins.rescan(&fixture.settings, &fixture.config);
+        fixture.choose();
+        fixture.config.skin.select(DECIDE, Some(shared.to_string_lossy().into_owned()));
+        fixture.skins.reload_for(&fixture.config, MUSIC_SELECT);
+        fixture.skins.reload_for(&fixture.config, DECIDE);
+        fixture
+    }
+
+    /// The path of the document the browser screen is drawn with.
+    fn browser_path(&self) -> String {
+        self.config.skin.document(MUSIC_SELECT).expect("a document is chosen").to_string()
+    }
 }
 
 /// The folder is walked for documents, not for everything: a file that is not a skin is passed
@@ -331,4 +351,94 @@ fn a_document_outside_the_skin_folder_is_refused() {
 
 fn skin_screen_label_exists(screen: i32) -> bool {
     usize::try_from(screen).is_ok_and(|at| at < SKIN_SCREEN_LABELS.len())
+}
+
+/// A row declared at bundle scope belongs to the bundle rather than to the document that declared
+/// it: it is offered above the document's own rows, under the bundle's heading, on every screen of
+/// that bundle — including the one whose document never mentions it.
+#[test]
+fn a_bundle_scope_row_is_offered_on_every_screen_of_the_bundle() {
+    let mut fixture = Fixture::with_shared("bundle-rows");
+    let shared = vec![SkinRow::BundleProperty(0), SkinRow::BundleFile(0), SkinRow::BundleOffset(0, OffsetAxis::X), SkinRow::BundleOffset(0, OffsetAxis::A)];
+    let own = vec![SkinRow::Property(0), SkinRow::File(0), SkinRow::Offset(0, OffsetAxis::X), SkinRow::Offset(0, OffsetAxis::Y)];
+    assert_eq!(fixture.rows(), [shared.clone(), own].concat(), "the rows another screen's document shares are not on the browser screen");
+
+    assert_eq!(
+        fixture.line(SkinRow::BundleProperty(0)),
+        (SHARED_PROPERTY_LABEL.to_string(), "LARGE".to_string()),
+        "a shared row kept the declaring document's heading"
+    );
+    assert_eq!(fixture.line(SkinRow::BundleFile(0)), ("BUNDLE > LANE COVER".to_string(), "day.png".to_string()));
+    assert_eq!(fixture.line(SkinRow::BundleOffset(0, OffsetAxis::A)), ("BUNDLE > BGA ALPHA".to_string(), "+0".to_string()));
+
+    fixture.config.skin.screen = DECIDE;
+    assert_eq!(fixture.rows(), shared, "moving the SCREEN row inside the bundle changed which rows the bundle shares");
+    assert_eq!(fixture.line(SkinRow::BundleProperty(0)).0, SHARED_PROPERTY_LABEL, "the row the declaring screen shows is not the one the other screen showed");
+}
+
+/// Stepping a shared row writes it against the bundle rather than against the document the tab
+/// happens to be on, and the loader is handed it for every document of that bundle.
+#[test]
+fn stepping_a_bundle_row_is_stored_against_the_bundle() {
+    let mut fixture = Fixture::with_shared("bundle-step");
+    let browser = fixture.browser_path();
+
+    assert!(fixture.skins.step(&mut fixture.config, SkinRow::BundleProperty(0), 1));
+    assert_eq!(fixture.line(SkinRow::BundleProperty(0)).1, "STANDARD");
+    assert_eq!(fixture.config.skin.shared_customisation("browser").and_then(|entry| entry.properties.get("Bga Size")), Some(&911));
+    assert!(fixture.config.skin.customisation(&browser).is_none(), "a shared row was stored against the document the tab was on");
+    assert_eq!(
+        fixture.config.skin.user_config(&browser).properties.get("Bga Size"),
+        Some(&911),
+        "the bundle's choice does not reach a document that did not declare the row"
+    );
+
+    assert!(fixture.skins.step(&mut fixture.config, SkinRow::BundleFile(0), 1));
+    assert_eq!(fixture.line(SkinRow::BundleFile(0)).1, "night.png");
+    assert_eq!(fixture.config.skin.user_config(&browser).filepaths.get("Lane Cover").map(String::as_str), Some("night.png"));
+
+    assert!(fixture.skins.step(&mut fixture.config, SkinRow::BundleOffset(0, OffsetAxis::X), -1));
+    assert_eq!(fixture.line(SkinRow::BundleOffset(0, OffsetAxis::X)).1, "-1");
+    assert_eq!(fixture.config.skin.user_config(&browser).offsets.get(&40).map(|nudge| nudge.x), Some(-1.0));
+}
+
+/// A shared choice changes what every screen of the bundle draws, so each of them is asked to read
+/// its document again — not only the one the tab is configuring. A nudge is read live, so it asks
+/// for nothing.
+#[test]
+fn a_shared_row_asks_every_screen_of_the_bundle_to_be_read_again() {
+    let mut fixture = Fixture::with_shared("bundle-stale");
+    assert!(!fixture.skins.needs_reload_for(&fixture.config, MUSIC_SELECT), "a screen just read still asks to be read");
+    assert!(!fixture.skins.needs_reload_for(&fixture.config, DECIDE));
+
+    assert!(fixture.skins.step(&mut fixture.config, SkinRow::BundleProperty(0), 1));
+    assert!(fixture.skins.needs_reload_for(&fixture.config, MUSIC_SELECT), "the open screen kept the document read with the old choice");
+    assert!(fixture.skins.needs_reload_for(&fixture.config, DECIDE), "the screen the tab is not on kept the document read with the old choice");
+
+    fixture.skins.reload_for(&fixture.config, MUSIC_SELECT);
+    fixture.skins.reload_for(&fixture.config, DECIDE);
+    assert!(fixture.skins.step(&mut fixture.config, SkinRow::BundleOffset(0, OffsetAxis::X), 1));
+    assert!(!fixture.skins.needs_reload_for(&fixture.config, MUSIC_SELECT), "a shared nudge asked for a read it does not need");
+    assert!(!fixture.skins.needs_reload_for(&fixture.config, DECIDE));
+}
+
+/// RESET puts the chosen document back to what its author shipped and leaves the bundle alone:
+/// what the bundle shares answers for screens this one is not. A shared nudge is still zeroed by
+/// the key that zeroes a document's own.
+#[test]
+fn reset_drops_what_the_document_holds_and_keeps_what_the_bundle_shares() {
+    let mut fixture = Fixture::with_shared("bundle-reset");
+    assert!(fixture.skins.step(&mut fixture.config, SkinRow::BundleProperty(0), 1));
+    assert!(fixture.skins.step(&mut fixture.config, SkinRow::Property(0), 1));
+    assert!(fixture.skins.step(&mut fixture.config, SkinRow::BundleOffset(0, OffsetAxis::X), 1));
+
+    assert!(fixture.skins.forget(&mut fixture.config));
+    assert_eq!(fixture.line(SkinRow::Property(0)).1, "OFF", "the document did not go back to what its author chose");
+    assert_eq!(fixture.line(SkinRow::BundleProperty(0)).1, "STANDARD", "the reset reached a choice the whole bundle shares");
+    assert_eq!(fixture.line(SkinRow::BundleOffset(0, OffsetAxis::X)).1, "+1");
+    assert!(fixture.config.skin.shared_customisation("browser").is_some(), "the bundle's stored choices were dropped with the document's");
+
+    assert!(fixture.skins.reset_row(&mut fixture.config, SkinRow::BundleOffset(0, OffsetAxis::X)), "a shared nudge could not be zeroed");
+    assert_eq!(fixture.line(SkinRow::BundleOffset(0, OffsetAxis::X)).1, "+0");
+    assert!(!fixture.skins.reset_row(&mut fixture.config, SkinRow::BundleProperty(0)), "a shared property row was zeroed rather than cycled");
 }

@@ -533,3 +533,260 @@ fn the_layout_the_run_was_played_on_reaches_the_result_screen() {
     };
     assert_eq!(result.view().mode_label, mode_config_key(app.shared.mode));
 }
+
+/// The blocks of the built-in play screen a document can stand in for, in the order the replacement
+/// table names them.
+const EVERY_BLOCK: &str = r#""field", "gauge", "judge", "score", "counts", "graph", "cover", "frame""#;
+
+/// The objects the replacement table asks for by name, each of which the fixture declares as one
+/// plain image: what is being pinned is which blocks step aside, not what replaces them.
+const NAMED_OBJECTS: [&str; 15] = [
+    "play-gauge-value",
+    "play-ex",
+    "play-best",
+    "play-green",
+    "play-count-pg",
+    "play-count-gr",
+    "play-count-gd",
+    "play-count-bd",
+    "play-count-pr",
+    "play-count-ms",
+    "play-fast",
+    "play-slow",
+    "play-graph-ex",
+    "play-graph-best",
+    "play-graph-target",
+];
+
+/// The six words a judgement pop-up is made of.
+const JUDGE_WORDS: [&str; 6] = ["judge-pg", "judge-gr", "judge-gd", "judge-bd", "judge-pr", "judge-ms"];
+
+/// The lane rectangles the fixture states, in the chart's own lane order: the seven keys first and
+/// the turntable last, which is how a seven-key chart numbers them. Nothing like the rectangles the
+/// shipped layout resolves, so a field taken from the document is unmistakable.
+const DOCUMENT_LANES: [(i32, i32); 8] = [(104, 40), (144, 32), (176, 40), (216, 32), (248, 40), (288, 32), (320, 40), (40, 64)];
+
+/// Where the fixture's lanes sit and how tall its notes are, in its own pixels. The document is
+/// authored at the canvas size, so these reach the screen unchanged.
+const LANE_FOOT: i32 = 220;
+const LANE_HEIGHT: i32 = 500;
+const NOTE_HEIGHT: f32 = 22.0;
+
+/// Where the screen's first lane starts and how wide the whole field is once the document's lanes
+/// have been resolved.
+const FIELD_X: f32 = 40.0;
+const FIELD_W: f32 = 320.0;
+
+/// A point inside the built-in gauge's empty half, which is a flat fill rather than text and so is
+/// the same pixel on every machine. The bar sits ten pixels under the judgement line the document
+/// states, and the run's own gauge never reaches this far along it.
+const GAUGE_PROBE: (u32, u32) = (350, 515);
+
+/// What the built-in gauge paints that empty half with.
+const GAUGE_TROUGH: Color = Color::rgb(28, 28, 36);
+
+/// A layered seven-key document that draws each named block for itself.
+///
+/// `blocks` is the replacement list it claims and `with_gauge` whether it actually carries the gauge
+/// those claims need, which is how a complete claim and one that falls short are told apart.
+fn play_document(blocks: &str, with_gauge: bool) -> String {
+    let named = NAMED_OBJECTS.iter().filter(|id| with_gauge || **id != "play-gauge-value");
+    let every: Vec<&str> = named.chain(JUDGE_WORDS.iter()).chain(["note-cell", "gauge-node", "cover-art"].iter()).copied().collect();
+    let images: Vec<String> = every.iter().map(|id| format!(r#"{{ "id": "{id}", "src": "mark", "x": 0, "y": 0, "w": 2, "h": 2 }}"#)).collect();
+    let corners: Vec<String> = NAMED_OBJECTS
+        .iter()
+        .filter(|id| with_gauge || **id != "play-gauge-value")
+        .enumerate()
+        .map(|(at, id)| format!(r#"{{ "id": "{id}", "dst": [{{ "time": 0, "x": {}, "y": 700, "w": 2, "h": 2 }}] }}"#, 1200 + at as i32 * 4))
+        .collect();
+    let lanes: Vec<String> = DOCUMENT_LANES.iter().map(|(x, w)| format!(r#"{{ "x": {x}, "y": {LANE_FOOT}, "w": {w}, "h": {LANE_HEIGHT} }}"#)).collect();
+    let words: Vec<String> =
+        JUDGE_WORDS.iter().map(|id| format!(r#"{{ "id": "{id}", "dst": [{{ "time": 0, "x": 194, "y": 300, "w": 40, "h": 20 }}] }}"#)).collect();
+    let gauge = match with_gauge {
+        true => r#""gauge": { "id": "gauge", "nodes": ["gauge-node", "gauge-node", "gauge-node", "gauge-node"], "parts": 50 },"#,
+        false => "",
+    };
+    let gauge_dst = match with_gauge {
+        true => r#"{ "id": "gauge", "dst": [{ "time": 0, "x": 40, "y": 60, "w": 320, "h": 20 }] },"#,
+        false => "",
+    };
+    format!(
+        r#"{{
+    "type": 0,
+    "composition": "layered",
+    "name": "lanes",
+    "w": 1280,
+    "h": 720,
+    "replace": [{blocks}],
+    "source": [{{ "id": "mark", "path": "mark.png" }}],
+    "image": [{}],
+    "note": {{ "id": "notes", "note": [{}], "size": [{}], "dst": [{}] }},
+    {gauge}
+    "judge": [{{ "id": "judge-1p", "index": 0, "images": [{}] }}],
+    "hiddenCover": [{{ "id": "cover", "src": "mark", "x": 0, "y": 0, "w": 2, "h": 2 }}],
+    "destination": [
+        {{ "id": "notes", "dst": [{{ "time": 0, "x": {FIELD_X}, "y": {LANE_FOOT}, "w": {FIELD_W}, "h": {LANE_HEIGHT} }}] }},
+        {gauge_dst}
+        {{ "id": "judge-1p", "dst": [{{ "time": 0, "x": 194, "y": 300, "w": 40, "h": 20 }}] }},
+        {{ "id": "cover", "dst": [{{ "time": 0, "x": {FIELD_X}, "y": {LANE_FOOT}, "w": {FIELD_W}, "h": {LANE_HEIGHT} }}] }},
+        {}
+    ]
+}}"#,
+        images.join(", "),
+        vec!["\"note-cell\""; DOCUMENT_LANES.len()].join(", "),
+        vec![NOTE_HEIGHT.to_string(); DOCUMENT_LANES.len()].join(", "),
+        lanes.join(", "),
+        words.join(", "),
+        corners.join(", "),
+    )
+}
+
+/// An app whose settings live in a folder of this test's own, with `document` selected as its
+/// seven-key play screen and the source image it draws with written beside it.
+fn document_app(tag: &str, document: &str) -> App {
+    rbms_render::font::use_embedded_fonts_only();
+    let directory = std::env::temp_dir().join(format!("rbms-play-document-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&directory);
+    let folder = directory.join(rbms_config::DEFAULT_SKIN_FOLDER);
+    std::fs::create_dir_all(&folder).expect("the fixture folder is writable");
+    image::RgbaImage::from_pixel(2, 2, image::Rgba([12, 200, 90, 255])).save(folder.join("mark.png")).expect("the source image is written");
+    let path = folder.join("lanes.json");
+    std::fs::write(&path, document).expect("the document is written");
+    let mut config = Config::default();
+    config.play.autoplay = false;
+    config.skin.select(rbms_skin::loader::SKIN_TYPE_PLAY_7KEYS, Some(path.to_string_lossy().into_owned()));
+    App::new(String::new(), config, LaunchOptions::default(), directory.join("settings.ron"))
+}
+
+/// Draws the play screen until its document has compiled, answering the app and the last frame.
+fn play_until_compiled(tag: &str, document: &str) -> (App, crate::stage::HeadlessCanvas) {
+    let mut app = document_app(tag, document);
+    let mut pixels = crate::stage::HeadlessCanvas::new(CW, CH);
+    let compiled = crate::stage::render_tests_skin::render_until_screen_compiled(&mut app, rbms_skin::loader::SKIN_TYPE_PLAY_7KEYS, &mut pixels, || {
+        crate::stage::Stage::Play(Box::new(crate::stage::render_tests::play_state()))
+    });
+    assert!(compiled, "the fixture document never finished compiling: {:?}", app.shared.skin_warnings(rbms_skin::loader::SKIN_TYPE_PLAY_7KEYS));
+    (app, pixels)
+}
+
+#[test]
+fn a_play_document_that_draws_its_own_notes_says_where_every_lane_is() {
+    let (app, _) = play_until_compiled("lanes", &play_document(EVERY_BLOCK, true));
+    let skin = &app.shared.skin;
+
+    for (lane, (x, w)) in DOCUMENT_LANES.iter().enumerate() {
+        assert_eq!((skin.x[lane], skin.w[lane]), (*x as f32, *w as f32), "lane {lane} is not where the document put it");
+    }
+    assert_eq!((skin.top_y, skin.judge_y), (0.0, LANE_HEIGHT as f32), "the field runs from the top of the document's lanes down to their foot");
+    assert_eq!(skin.note_height, NOTE_HEIGHT, "a note is as tall as the document's note set says");
+    assert_eq!(skin.fields, vec![(FIELD_X, FIELD_W)], "the lanes touch, so they are one field rather than several");
+}
+
+#[test]
+fn a_complete_replacement_takes_the_built_in_readings_off_the_play_screen() {
+    let (app, pixels) = play_until_compiled("replaced", &play_document(EVERY_BLOCK, true));
+    let content = app.shared.screen_content(rbms_skin::loader::SKIN_TYPE_PLAY_7KEYS).play;
+
+    assert_eq!(
+        content,
+        rbms_render::content::PlayContent { field: true, gauge: true, judge: true, score: true, counts: true, graph: true, cover: true, frame: true },
+        "a document that named every block and compiled every object it needs replaces all of them"
+    );
+    assert_ne!(pixels.pixel_at(GAUGE_PROBE.0, GAUGE_PROBE.1), GAUGE_TROUGH, "the built-in gauge is still on screen under the document's own");
+}
+
+#[test]
+fn a_replacement_that_falls_short_leaves_that_block_to_the_built_in_screen() {
+    let (app, pixels) = play_until_compiled("short", &play_document(EVERY_BLOCK, false));
+    let content = app.shared.screen_content(rbms_skin::loader::SKIN_TYPE_PLAY_7KEYS).play;
+
+    assert!(!content.gauge, "a document that claimed the gauge without carrying one does not get it");
+    assert!(content.field && content.judge && content.counts, "and the blocks it did carry are replaced all the same");
+    assert_eq!(pixels.pixel_at(GAUGE_PROBE.0, GAUGE_PROBE.1), GAUGE_TROUGH, "the built-in gauge stood aside for a document that cannot draw one");
+}
+
+/// The lane the fixture chart's first note is on, and where its key bomb burns once that note is
+/// hit: the middle of the document's own first lane, at the judgement line the document states.
+const BOMB_LANE: usize = 0;
+const BOMB_PROBE: (u32, u32) = (124, LANE_HEIGHT as u32);
+
+/// A key bomb belongs to no block of native output: `field` hands over the lane backgrounds, the
+/// notes, the judgement line, the key beams and the bar lines, and a document that declares a note
+/// field is never asked for a bomb in return. So a document that replaced every block it could still
+/// gets one, and it burns on the lanes the document itself laid out.
+#[test]
+fn a_hit_still_burns_its_key_bomb_over_a_field_the_document_replaced() {
+    let (mut app, mut quiet) = play_until_compiled("bomb", &play_document(EVERY_BLOCK, true));
+    assert!(app.shared.screen_content(rbms_skin::loader::SKIN_TYPE_PLAY_7KEYS).play.field, "the fixture document did not take the field over");
+
+    let notes = note_times(&crate::stage::render_tests::play_state());
+    let mut settled = crate::stage::render_tests::play_state();
+    settled.song_us = notes[0];
+    crate::stage::render_tests::render_into(&mut app, crate::stage::Stage::Play(Box::new(settled)), &mut quiet);
+
+    let mut burning = crate::stage::render_tests::play_state();
+    hit(&mut burning, BOMB_LANE, notes[0]);
+    burning.song_us = notes[0];
+    let mut lit = crate::stage::HeadlessCanvas::new(CW, CH);
+    crate::stage::render_tests::render_into(&mut app, crate::stage::Stage::Play(Box::new(burning)), &mut lit);
+
+    let (x, y) = BOMB_PROBE;
+    assert_ne!(lit.pixel_at(x, y), quiet.pixel_at(x, y), "the bomb of a note that was hit never reached the judgement line");
+}
+
+#[test]
+fn a_lane_going_down_starts_the_key_timer_that_lane_publishes() {
+    let (mut app, mut pixels) = play_until_compiled("keyon", &play_document(EVERY_BLOCK, true));
+    let first_key = rbms_skin::timer::timer_id::KEYON_1P_KEY1;
+    assert!(app.shared.skin_timers.is_off(first_key), "no key has been touched yet");
+
+    let mut state = crate::stage::render_tests::play_state();
+    let now = Instant::now();
+    state.handle_pad(
+        &mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 },
+        crate::gamepad::PadEvent::Lane { lane: 0, dir: rbms_judge::matcher::ScratchDir::Forward, press: true },
+    );
+    crate::stage::render_tests::render_into(&mut app, crate::stage::Stage::Play(Box::new(state)), &mut pixels);
+
+    assert!(app.shared.skin_timers.is_on(first_key), "the first key of the left-hand field went down and its timer did not start");
+    assert!(app.shared.skin_timers.is_off(rbms_skin::timer::timer_id::KEYOFF_1P_KEY1), "a key that is down is not also reported as released");
+    assert!(app.shared.skin_timers.is_off(rbms_skin::timer::timer_id::KEYON_1P_SCRATCH), "and no other lane was touched");
+}
+
+/// Where the nudged mark sits in the document, in its own y-up space, and on screen once drawn.
+const NUDGED_MARK_DOCUMENT: (i32, i32) = (600, 300);
+const NUDGED_MARK_SCREEN: (u32, u32) = (601, 417);
+const NUDGE_X: f32 = 50.0;
+const NUDGED_MARK_OFFSET_ID: i32 = 40;
+
+#[test]
+fn a_play_document_reads_the_nudges_the_player_stored_for_it() {
+    let (x, y) = NUDGED_MARK_DOCUMENT;
+    let nudged = play_document(EVERY_BLOCK, true)
+        .replacen(r#""image": ["#, r#""image": [{ "id": "mark-dot", "src": "mark", "x": 0, "y": 0, "w": 2, "h": 2 }, "#, 1)
+        .replacen(
+            r#""destination": ["#,
+            &format!(
+                r#""destination": [{{ "id": "mark-dot", "offset": {NUDGED_MARK_OFFSET_ID}, "dst": [{{ "time": 0, "x": {x}, "y": {y}, "w": 4, "h": 4 }}] }}, "#
+            ),
+            1,
+        );
+    let (mut app, mut pixels) = play_until_compiled("nudge", &nudged);
+    let mark = Color::rgb(12, 200, 90);
+    let (sx, sy) = NUDGED_MARK_SCREEN;
+    assert_eq!(pixels.pixel_at(sx, sy), mark, "before any nudge the object sits where the document put it");
+
+    let path = app.shared.config.skin.document(rbms_skin::loader::SKIN_TYPE_PLAY_7KEYS).expect("the fixture document is selected").to_owned();
+    app.shared
+        .config
+        .skin
+        .customise(&path)
+        .offsets
+        .insert(NUDGED_MARK_OFFSET_ID, rbms_skin::dst::SkinOffset { x: NUDGE_X, y: 0.0, w: 0.0, h: 0.0, r: 0.0, a: 0.0 });
+    let redrawn = crate::stage::render_tests_skin::render_until_screen_compiled(&mut app, rbms_skin::loader::SKIN_TYPE_PLAY_7KEYS, &mut pixels, || {
+        crate::stage::Stage::Play(Box::new(crate::stage::render_tests::play_state()))
+    });
+    assert!(redrawn, "the document stays compiled while a nudge is stored");
+    assert_eq!(pixels.pixel_at(sx + NUDGE_X as u32, sy), mark, "the nudge the player stored moved the object on the play screen");
+    assert_ne!(pixels.pixel_at(sx, sy), mark, "and it left the place it was drawn at before");
+}

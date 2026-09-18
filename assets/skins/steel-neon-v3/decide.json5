@@ -1,0 +1,116 @@
+{
+    type: 6,
+    name: 'Steel Neon Decide',
+    author: 'R-BMS',
+    w: 1280,
+    h: 720,
+    composition: 'replace',
+    property: [
+        {
+            category: 'CUSTOMIZE',
+            name: 'DECIDE EFFECT',
+            def: 'ON',
+            scope: 'bundle',
+            item: [
+                { name: 'ON', op: 990 },
+                { name: 'OFF', op: 991 },
+            ],
+        },
+    ],
+    filepath: [
+        { category: 'CUSTOMIZE', name: 'DECIDE BACKGROUND', path: 'images/decide/*.png', def: 'Default.png', scope: 'bundle' },
+    ],
+    source: [
+        { id: 'backdrop', path: 'images/decide/*.png' },
+        { id: 'sheet', path: 'images/ui.png' },
+        { id: 'digits', path: 'images/digits-m.png' },
+        { id: 'digits-large', path: 'images/digits-l.png' },
+    ],
+    image: [
+        { id: 'decide-backdrop', src: 'backdrop', x: 0, y: 0, w: 1280, h: 720 },
+        { id: 'decide-band', src: 'sheet', x: 192, y: 0, w: 64, h: 32 },
+        { id: 'decide-band-edge', src: 'sheet', x: 0, y: 200, w: 128, h: 8 },
+        { id: 'decide-glow', src: 'sheet', x: 0, y: 200, w: 128, h: 8 },
+        { id: 'decide-progress-track', src: 'sheet', x: 64, y: 112, w: 64, h: 8 },
+    ],
+    graph: [
+        { id: 'decide-progress', src: 'sheet', x: 0, y: 200, w: 128, h: 8, angle: 0, value: 102 },
+    ],
+    value: [
+        { id: 'decide-percent', src: 'digits', x: 0, y: 0, w: 200, h: 28, divx: 10, digit: 3, space: 2, align: 0, value: 165 },
+        { id: 'decide-level', src: 'digits-large', x: 0, y: 0, w: 352, h: 44, divx: 11, digit: 2, align: 0, value: 96 },
+    ],
+    text: [
+        { id: 'decide-genre', align: 0, value: 13 },
+        { id: 'decide-title', align: 0, value: 10 },
+        { id: 'decide-subtitle', align: 0, value: 11 },
+        { id: 'decide-artist', align: 0, value: 14 },
+        { id: 'decide-stage', align: 0, constantText: 'NOW ENTERING' },
+        { id: 'decide-loading', align: 2, constantText: 'NOW LOADING' },
+        { id: 'decide-ready', align: 2, constantText: 'READY' },
+        { id: 'decide-percent-mark', align: 0, constantText: '%' },
+    ],
+    destination: [
+        { id: 'decide-backdrop', dst: [{ time: 0, x: 0, y: 0, w: 1280, h: 720 }] },
+        { id: 'decide-band', dst: [{ time: 0, x: 0, y: 194, w: 1280, h: 40, a: 176 }] },
+        {
+            id: 'decide-glow',
+            op: [990],
+            blend: 2,
+            dst: [
+                { time: 0, x: 0, y: 194, w: 1280, h: 40, a: 0 },
+                { time: 1200, a: 56 },
+                { time: 2400, a: 0 },
+            ],
+        },
+        { id: 'decide-band-edge', dst: [{ time: 0, x: 0, y: 192, w: 1280, h: 2 }] },
+        { id: 'decide-stage', dst: [{ time: 0, x: 100, y: 204, w: 320, h: 22, r: 244, g: 251, b: 255 }] },
+        { id: 'decide-loading', op: [80], dst: [{ time: 0, x: 1180, y: 204, w: 320, h: 22, r: 255, g: 211, b: 106 }] },
+        { id: 'decide-ready', op: [81], dst: [{ time: 0, x: 1180, y: 204, w: 320, h: 22, r: 105, g: 241, b: 228 }] },
+        {
+            id: 'decide-genre',
+            op: [990],
+            loop: 300,
+            dst: [
+                { time: 0, x: 1300, y: 402, w: 560, h: 22, r: 169, g: 183, b: 212, acc: 2 },
+                { time: 300, x: 100 },
+            ],
+        },
+        { id: 'decide-genre', op: [991], dst: [{ time: 0, x: 100, y: 402, w: 560, h: 22, r: 169, g: 183, b: 212 }] },
+        {
+            id: 'decide-title',
+            op: [990],
+            loop: 300,
+            dst: [
+                { time: 0, x: 1300, y: 342, w: 700, h: 52, r: 244, g: 251, b: 255, acc: 2 },
+                { time: 300, x: 100 },
+            ],
+        },
+        { id: 'decide-title', op: [991], dst: [{ time: 0, x: 100, y: 342, w: 700, h: 52, r: 244, g: 251, b: 255 }] },
+        {
+            id: 'decide-subtitle',
+            op: [990],
+            loop: 300,
+            dst: [
+                { time: 0, x: 1300, y: 316, w: 560, h: 20, r: 169, g: 183, b: 212, acc: 2 },
+                { time: 300, x: 100 },
+            ],
+        },
+        { id: 'decide-subtitle', op: [991], dst: [{ time: 0, x: 100, y: 316, w: 560, h: 20, r: 169, g: 183, b: 212 }] },
+        {
+            id: 'decide-artist',
+            op: [990],
+            loop: 300,
+            dst: [
+                { time: 0, x: 1300, y: 292, w: 560, h: 20, r: 105, g: 241, b: 228, acc: 2 },
+                { time: 300, x: 100 },
+            ],
+        },
+        { id: 'decide-artist', op: [991], dst: [{ time: 0, x: 100, y: 292, w: 560, h: 20, r: 105, g: 241, b: 228 }] },
+        { id: 'decide-level', dst: [{ time: 0, x: 130, y: 228, w: 32, h: 44, r: 255, g: 211, b: 106 }] },
+        { id: 'decide-percent', dst: [{ time: 0, x: 1100, y: 108, w: 20, h: 28, r: 244, g: 251, b: 255 }] },
+        { id: 'decide-percent-mark', dst: [{ time: 0, x: 1170, y: 112, w: 40, h: 20, r: 169, g: 183, b: 212 }] },
+        { id: 'decide-progress-track', dst: [{ time: 0, x: 100, y: 94, w: 1080, h: 6, a: 96 }] },
+        { id: 'decide-progress', dst: [{ time: 0, x: 100, y: 94, w: 1080, h: 6 }] },
+    ],
+}

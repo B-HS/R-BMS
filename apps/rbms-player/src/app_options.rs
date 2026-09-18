@@ -11,7 +11,9 @@
 //! not a second copy of them.
 
 use rbms_config::{AdjustOutcome, SettingId, adjust, descriptor, display_value};
-use rbms_render::{Color, Rect, Renderer, draw_text, draw_text_right, text_width, theme};
+use rbms_render::{Color, OptionsRows, Rect, Renderer, draw_text, draw_text_right, text_width, theme};
+use rbms_skin::loader::SKIN_TYPE_MUSIC_SELECT;
+use rbms_skin::timer::timer_id;
 use winit::keyboard::KeyCode;
 
 use crate::stage::{Canvas, FrameCtx, KeyInput, StageId};
@@ -192,8 +194,34 @@ fn open_key(ctx: &mut FrameCtx<'_>, key: &KeyInput<'_>) -> bool {
         TOGGLE_KEY => ctx.shared.options.open_panel(false),
         _ => return false,
     }
+    switch_panel_timers(ctx.shared, true);
     ctx.shared.play_system_sound(crate::SystemSound::OptionOpen);
     true
+}
+
+/// Switch the timers a browser document animates the panel's arrival and departure against.
+///
+/// The reference gives every panel a pair -- one started when it opens, the other when it closes --
+/// and a document slides the panel in against the first and out against the second, so both have to
+/// be switched at the moment the panel itself moves rather than when it is next drawn.
+fn switch_panel_timers(shared: &mut AppShared, open: bool) {
+    let now = shared.skin_now_ms();
+    shared.skin_timers.switch(timer_id::PANEL1_ON, open, now);
+    shared.skin_timers.switch(timer_id::PANEL1_OFF, !open, now);
+}
+
+/// The panel's rows as a browser document reads them: what each row is called, what it is set to,
+/// which one is focused and whether the panel is up at all.
+///
+/// Built from the same descriptor table the panel itself draws from, so a document that replaces the
+/// panel shows the values the configuration actually holds rather than a second copy of them.
+pub(crate) fn options_rows(shared: &AppShared) -> OptionsRows<'static> {
+    OptionsRows {
+        labels: OPTION_ROWS.map(|id| descriptor(id).label),
+        values: OPTION_ROWS.map(|id| display_value(&shared.config, id)),
+        focused: shared.options.row,
+        open: shared.options.is_open(),
+    }
 }
 
 /// Move the focused row one step and remember that something changed.
@@ -223,6 +251,7 @@ pub(crate) fn close(shared: &mut AppShared) {
     shared.play_system_sound(crate::SystemSound::OptionClose);
     let dirty = std::mem::take(&mut shared.options.dirty);
     shared.options.close_panel();
+    switch_panel_timers(shared, false);
     if dirty {
         shared.rebuild_skin();
         shared.save_settings();
@@ -235,8 +264,13 @@ pub(crate) fn close(shared: &mut AppShared) {
 /// the same with this call in place as it was without it. Nothing is drawn over a screen the panel
 /// does not belong to either, so a panel that somehow outlived the browser cannot appear over a
 /// running chart.
+///
+/// Nothing is drawn either once the browser's document has taken the panel over: it reads the same
+/// rows through [`options_rows`] and draws them where it chose to, so painting this one on top would
+/// lay a second panel over the first. The keys carry on regardless, because the rows a document
+/// draws are still edited from here.
 pub(crate) fn draw(stage: StageId, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'_>) {
-    if !ctx.shared.options.is_open() || !opens_over(stage) {
+    if !ctx.shared.options.is_open() || !opens_over(stage) || ctx.shared.screen_content(SKIN_TYPE_MUSIC_SELECT).select.options {
         return;
     }
     let th = theme();

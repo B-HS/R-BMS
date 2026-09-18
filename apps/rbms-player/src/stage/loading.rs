@@ -15,6 +15,7 @@ use crate::app_play::{LoadedChart, PendingChart};
 use crate::stage::{Canvas, FrameCtx, KeyInput, PlayState, Stage, StageHandler, Transition};
 use crate::tablesrc::load_and_match_md5s;
 use crate::*;
+use rbms_render::skin_render::state::DecideChart;
 
 /// Width and height of the progress bar under the heading.
 const BAR_W: f32 = 360.0;
@@ -387,6 +388,20 @@ impl LoadingState {
         }
     }
 
+    /// What the library already knows about the chart being loaded, for a document that shows more
+    /// than its title. Nothing while the screen waits for something that is not a chart.
+    fn chart<'a>(&self, shared: &'a AppShared) -> DecideChart<'a> {
+        let LoadingTask::Song(index) = &self.task else {
+            return DecideChart::default();
+        };
+        shared.library.songs().get(*index).map_or_else(DecideChart::default, |entry| DecideChart {
+            subtitle: &entry.subtitle,
+            artist: &entry.artist,
+            genre: &entry.genre,
+            level: entry.level.trim().parse().unwrap_or_default(),
+        })
+    }
+
     /// How far the outstanding task has got, in the 0..=1 a document reads it as, and whether it is
     /// over. A task with no total to count toward reports nothing rather than a made-up fraction.
     fn skin_progress(&self, shared: &AppShared) -> (f32, bool) {
@@ -463,7 +478,8 @@ impl StageHandler for LoadingState {
         ctx.shared.prepare_skin(canvas, SKIN_TYPE_DECIDE);
         let (heading, sub) = self.heading(ctx.shared);
         let (progress, done) = self.skin_progress(ctx.shared);
-        if ctx.shared.draw_decide_skin(canvas, progress, done, &sub) {
+        let chart = self.chart(ctx.shared);
+        if ctx.shared.draw_decide_skin(canvas, progress, done, &sub, chart) {
             self.drawn = true;
             return;
         }

@@ -552,7 +552,7 @@ impl AppShared {
     /// Re-read the system sound set after the SOUND FOLDER row changed, and hand it to the running
     /// stream so the next cue is heard without a restart.
     pub(crate) fn reload_system_sounds(&mut self) {
-        self.syssound = SystemSoundSet::load_optional(sound_folder_path(&self.config).as_deref());
+        self.syssound = SystemSoundSet::load_optional(sound_folder_path(&self.settings_path, &self.config).as_deref());
         self.syssound.set_guide_enabled(self.config.audio.guide_se);
         if let Some(engine) = self.audio.as_mut() {
             self.syssound.install(engine);

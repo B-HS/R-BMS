@@ -7,6 +7,18 @@
 #![allow(clippy::wildcard_imports)]
 
 use crate::*;
+use rbms_render::SkinViewport;
+use rbms_skin::dst::SkinRect;
+
+/// The lane geometry a play document states, already placed on the canvas.
+struct DocumentField {
+    /// One `(x, y, width, height)` per lane, in the chart's own lane order.
+    lanes: Vec<(f32, f32, f32, f32)>,
+    /// Where the document scrolls its notes down to and from, before the player's lift.
+    judge_y: f32,
+    top_y: f32,
+    note_height: f32,
+}
 
 /// The tempo a pinned green number is held at, and the travel time it is being held at.
 ///
@@ -263,6 +275,10 @@ impl AppShared {
     ///
     /// The lift is the effective one: a height the player has set but switched off must not move the
     /// judgment line, and switching it back on must return the height rather than a default.
+    ///
+    /// A play document that draws its own notes states where its lanes are, and from that moment its
+    /// rectangles replace the ones the file resolved: the HUD, the covers and the key bombs read this
+    /// one field, so they cannot land anywhere but on the notes the document draws.
     pub(crate) fn rebuild_skin(&mut self) {
         let mut cfg = self.skin_cfg.clone();
         cfg.scratch_left = self.config.play.scratch_left;
@@ -270,6 +286,46 @@ impl AppShared {
         cfg.five_key_layout = self.config.display.five_key_layout;
         self.result_palette = ResultPalette::from_skin(&cfg);
         self.skin = Skin::build(&cfg, self.mode, CW as f32, CH as f32);
+        if let Some(field) = mode_skin_type(self.mode).and_then(|screen| self.document_field(screen)) {
+            self.skin = self.skin.with_document_lanes(&field.lanes, field.judge_y, field.top_y, field.note_height);
+        }
+    }
+
+    /// The field the document drawn for `screen` states, in screen pixels, or `None` when it states
+    /// none.
+    ///
+    /// The document is read before it is compiled, and its rectangles are authored against a screen
+    /// of its own size, so both the compiled screen (which knows that size) and the document (which
+    /// knows the rectangles) have to be in hand before there is a field to resolve. A screen whose
+    /// document has been switched off keeps its compiled screen until the next frame reaches it, so
+    /// the switch is checked here too rather than being read off what is still in hand.
+    fn document_field(&self, screen: i32) -> Option<DocumentField> {
+        if !assets::skin_document_is_enabled(&self.settings_path, &self.config, screen) {
+            return None;
+        }
+        let compiled = self.skin_screens.get(screen)?;
+        let note = self.skins.document(screen)?.def.note.as_ref()?;
+        let viewport = SkinViewport::new(compiled.authored_size(), (CW as f32, CH as f32));
+        let lanes: Vec<(f32, f32, f32, f32)> = note
+            .dst
+            .iter()
+            .map(|dst| {
+                let placed = viewport.place(SkinRect::new(
+                    dst.x.unwrap_or_default() as f32,
+                    dst.y.unwrap_or_default() as f32,
+                    dst.w.unwrap_or_default() as f32,
+                    dst.h.unwrap_or_default() as f32,
+                ));
+                (placed.x, placed.y, placed.w, placed.h)
+            })
+            .collect();
+        if lanes.is_empty() {
+            return None;
+        }
+        let top_y = lanes.iter().map(|(_, y, ..)| *y).fold(f32::MAX, f32::min);
+        let judge_y = lanes.iter().map(|(_, y, _, h)| y + h).fold(f32::MIN, f32::max);
+        let stated = note.size.iter().copied().find(|size| *size > 0.0).map(|size| size * viewport.scale_y());
+        Some(DocumentField { lanes, judge_y, top_y, note_height: stated.unwrap_or(self.skin.note_height) })
     }
 
     /// Whether binding `code` to `row` (for `mode`) would collide with another action and so

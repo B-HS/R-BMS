@@ -124,6 +124,47 @@ fn the_skin_tabs_own_rows_are_drawn_and_redraw_when_one_moves() {
     assert_ne!(chosen.pixel_checksum(), draw(&mut app, &mut state).pixel_checksum(), "the moved row was not redrawn");
 }
 
+/// A row a document declares for its whole bundle is drawn with the rest of the customisation
+/// rows, is stored against the bundle rather than against the document the tab is on, and comes
+/// back out of the settings file — including when the document that declared it is not the one
+/// being configured.
+#[test]
+fn a_row_the_bundle_shares_is_drawn_stored_against_the_bundle_and_survives_the_file() {
+    let mut app = app();
+    let mut state = skin_screen(&mut app, "bundle");
+    let folder = app.shared.config.skin.folder.clone().expect("the fixture folder is named");
+    let shared = fixtures::write_shared(std::path::Path::new(&folder));
+    app.shared.config.skin.select(fixtures::DECIDE, Some(shared.to_string_lossy().into_owned()));
+    state.on_enter(&mut ctx(&mut app));
+
+    focus(&mut state, SettingRow::Fixed(SettingId::SkinDocument));
+    state.row_key(&mut ctx(&mut app), &press(KeyCode::ArrowRight));
+    state.refresh(&app.shared);
+
+    let shown = labels(&state);
+    let at = |wanted: &str| shown.iter().position(|label| label == wanted).unwrap_or_else(|| panic!("{wanted} is not on the screen: {shown:?}"));
+    assert!(at("LOADED") < at(fixtures::SHARED_PROPERTY_LABEL), "the bundle's own row is above the LOADED row");
+    assert!(at(fixtures::SHARED_PROPERTY_LABEL) < at(fixtures::BROWSER_PROPERTY_LABEL), "the bundle's row is not above the document's own");
+    assert!(at(fixtures::BROWSER_PROPERTY_LABEL) < at("RELOAD"), "the customisation rows are not above the actions");
+
+    let row = SettingRow::Skin(SkinRow::BundleProperty(0));
+    focus(&mut state, row);
+    state.row_key(&mut ctx(&mut app), &press(KeyCode::ArrowRight));
+    state.refresh(&app.shared);
+    let moved = value_of(&state, row);
+    assert!(app.shared.config.skin.custom.is_empty(), "a row the bundle shares was stored against the document the tab was on");
+    assert!(app.shared.config.skin.shared.contains_key("browser"), "the bundle's choice was never stored");
+
+    state.row_key(&mut ctx(&mut app), &press(KeyCode::Escape));
+    let restored = rbms_config::load(&app.shared.settings_path).expect("the file the screen wrote reads back").config;
+    let mut next = crate::stage::render_tests::app();
+    next.shared.settings_path = app.shared.settings_path.clone();
+    next.shared.config = restored;
+    let mut reopened = SettingsState::on_tab(SettingTab::Skin);
+    reopened.on_enter(&mut ctx(&mut next));
+    assert_eq!(value_of(&reopened, row), moved, "the bundle's choice did not come back out of the settings file");
+}
+
 /// Everything the SKIN tab edits goes into the settings file and comes back out of it, so the next
 /// launch draws the screen with the document and the choices the player left it on.
 #[test]

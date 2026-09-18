@@ -1,0 +1,20 @@
+{
+    type: 16,
+    name: 'Steel Neon 24K Preparation',
+    author: 'R-BMS',
+    w: 1280,
+    h: 720,
+    composition: 'layered',
+    source: [
+        { id: 'background', path: 'images/play-bg.png' },
+        { id: 'foreground', path: 'images/frame-sp.png' },
+    ],
+    image: [
+        { id: 'background-plate', src: 'background', x: 0, y: 0, w: 1280, h: 720 },
+        { id: 'foreground-plate', src: 'foreground', x: 0, y: 0, w: 1280, h: 720 },
+    ],
+    destination: [
+        { id: 'background-plate', layer: 'background', dst: [{ time: 0, x: 0, y: 0, w: 1280, h: 720 }] },
+        { id: 'foreground-plate', layer: 'foreground', dst: [{ time: 0, x: 0, y: 0, w: 1280, h: 720 }] },
+    ],
+}

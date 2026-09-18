@@ -55,6 +55,7 @@ pub(super) fn play_state_with_bga(bga: std::collections::HashMap<i32, crate::Dec
 pub(super) fn result_state() -> ResultState {
     ResultState::new(ResultView {
         title: "snapshot".into(),
+        artist: String::new(),
         mode_label: "7K",
         counts: [3, 2, 1, 0, 0, 0],
         ex_score: 8,

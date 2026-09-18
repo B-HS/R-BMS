@@ -1,0 +1,42 @@
+[
+    { if: [900], values: [
+            {
+                id: 'play-judge',
+                index: 0,
+                shift: true,
+                images: [
+                    { id: 'judge-word-pg', timer: 46, loop: -1, dst: [{ time: 0, x: 194, y: 386, w: 0, h: 34, r: 105, g: 241, b: 228, a: 255 }, { time: 600, x: 194, y: 386, w: 0, h: 34, r: 105, g: 241, b: 228, a: 0 }] },
+                    { id: 'judge-word-gr', timer: 46, loop: -1, dst: [{ time: 0, x: 194, y: 386, w: 0, h: 34, r: 109, g: 150, b: 255, a: 255 }, { time: 600, x: 194, y: 386, w: 0, h: 34, r: 109, g: 150, b: 255, a: 0 }] },
+                    { id: 'judge-word-gd', timer: 46, loop: -1, dst: [{ time: 0, x: 194, y: 386, w: 0, h: 34, r: 255, g: 211, b: 106, a: 255 }, { time: 600, x: 194, y: 386, w: 0, h: 34, r: 255, g: 211, b: 106, a: 0 }] },
+                    { id: 'judge-word-bd', timer: 46, loop: -1, dst: [{ time: 0, x: 194, y: 386, w: 0, h: 34, r: 255, g: 161, b: 91, a: 255 }, { time: 600, x: 194, y: 386, w: 0, h: 34, r: 255, g: 161, b: 91, a: 0 }] },
+                    { id: 'judge-word-pr', timer: 46, loop: -1, dst: [{ time: 0, x: 194, y: 386, w: 0, h: 34, r: 255, g: 124, b: 154, a: 255 }, { time: 600, x: 194, y: 386, w: 0, h: 34, r: 255, g: 124, b: 154, a: 0 }] },
+                    { id: 'judge-word-ms', timer: 46, loop: -1, dst: [{ time: 0, x: 194, y: 386, w: 0, h: 34, r: 176, g: 91, b: 128, a: 255 }, { time: 600, x: 194, y: 386, w: 0, h: 34, r: 176, g: 91, b: 128, a: 0 }] },
+                ],
+                numbers: [
+                    { id: 'judge-combo', timer: 46, loop: -1, dst: [{ time: 0, x: 194, y: 430, w: 32, h: 44, r: 244, g: 251, b: 255, a: 255 }, { time: 600, x: 194, y: 430, w: 32, h: 44, r: 244, g: 251, b: 255, a: 0 }] },
+                    { id: 'judge-combo', timer: 46, loop: -1, dst: [{ time: 0, x: 194, y: 430, w: 32, h: 44, r: 244, g: 251, b: 255, a: 255 }, { time: 600, x: 194, y: 430, w: 32, h: 44, r: 244, g: 251, b: 255, a: 0 }] },
+                    { id: 'judge-combo', timer: 46, loop: -1, dst: [{ time: 0, x: 194, y: 430, w: 32, h: 44, r: 244, g: 251, b: 255, a: 255 }, { time: 600, x: 194, y: 430, w: 32, h: 44, r: 244, g: 251, b: 255, a: 0 }] },
+                ],
+            },
+    ] },
+    { if: [901], values: [
+            {
+                id: 'play-judge',
+                index: 0,
+                shift: true,
+                images: [
+                    { id: 'judge-word-pg', timer: 46, loop: -1, dst: [{ time: 0, x: 1086, y: 386, w: 0, h: 34, r: 105, g: 241, b: 228, a: 255 }, { time: 600, x: 1086, y: 386, w: 0, h: 34, r: 105, g: 241, b: 228, a: 0 }] },
+                    { id: 'judge-word-gr', timer: 46, loop: -1, dst: [{ time: 0, x: 1086, y: 386, w: 0, h: 34, r: 109, g: 150, b: 255, a: 255 }, { time: 600, x: 1086, y: 386, w: 0, h: 34, r: 109, g: 150, b: 255, a: 0 }] },
+                    { id: 'judge-word-gd', timer: 46, loop: -1, dst: [{ time: 0, x: 1086, y: 386, w: 0, h: 34, r: 255, g: 211, b: 106, a: 255 }, { time: 600, x: 1086, y: 386, w: 0, h: 34, r: 255, g: 211, b: 106, a: 0 }] },
+                    { id: 'judge-word-bd', timer: 46, loop: -1, dst: [{ time: 0, x: 1086, y: 386, w: 0, h: 34, r: 255, g: 161, b: 91, a: 255 }, { time: 600, x: 1086, y: 386, w: 0, h: 34, r: 255, g: 161, b: 91, a: 0 }] },
+                    { id: 'judge-word-pr', timer: 46, loop: -1, dst: [{ time: 0, x: 1086, y: 386, w: 0, h: 34, r: 255, g: 124, b: 154, a: 255 }, { time: 600, x: 1086, y: 386, w: 0, h: 34, r: 255, g: 124, b: 154, a: 0 }] },
+                    { id: 'judge-word-ms', timer: 46, loop: -1, dst: [{ time: 0, x: 1086, y: 386, w: 0, h: 34, r: 176, g: 91, b: 128, a: 255 }, { time: 600, x: 1086, y: 386, w: 0, h: 34, r: 176, g: 91, b: 128, a: 0 }] },
+                ],
+                numbers: [
+                    { id: 'judge-combo', timer: 46, loop: -1, dst: [{ time: 0, x: 1086, y: 430, w: 32, h: 44, r: 244, g: 251, b: 255, a: 255 }, { time: 600, x: 1086, y: 430, w: 32, h: 44, r: 244, g: 251, b: 255, a: 0 }] },
+                    { id: 'judge-combo', timer: 46, loop: -1, dst: [{ time: 0, x: 1086, y: 430, w: 32, h: 44, r: 244, g: 251, b: 255, a: 255 }, { time: 600, x: 1086, y: 430, w: 32, h: 44, r: 244, g: 251, b: 255, a: 0 }] },
+                    { id: 'judge-combo', timer: 46, loop: -1, dst: [{ time: 0, x: 1086, y: 430, w: 32, h: 44, r: 244, g: 251, b: 255, a: 255 }, { time: 600, x: 1086, y: 430, w: 32, h: 44, r: 244, g: 251, b: 255, a: 0 }] },
+                ],
+            },
+    ] },
+]

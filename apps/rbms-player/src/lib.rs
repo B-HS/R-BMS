@@ -33,8 +33,8 @@ use rbms_model::Mode;
 use rbms_play::{ANALYSIS_SEEK_STEP_US, NullSink, PlaySession, Player, ScratchDir, SessionClock, SessionOptions};
 use rbms_render::{
     Color, CoverState, DensityView, DetailView, HudView, PlayTimers, PlayfieldView, RANK_BANDS, RecordRowView, RecordsView, Rect, Renderer, ResultPalette,
-    ResultView, SelectDetail, SelectHot, SelectModal, SelectRow, SelectTimers, SelectView as SelectScene, Skin, SkinConfig, StatCell, cover_rect, dj_rank,
-    draw_text, draw_text_centered, draw_text_right, ex_delta_label, render_hud, render_key_bomb, render_lane_cover, render_playfield_view,
+    ResultTimers, ResultView, SelectDetail, SelectHot, SelectModal, SelectRow, SelectTimers, SelectView as SelectScene, Skin, SkinConfig, StatCell, cover_rect,
+    dj_rank, draw_text, draw_text_centered, draw_text_right, ex_delta_label, render_key_bomb, render_lane_cover, render_playfield_view,
     render_result_with_palette, render_select, text_width,
 };
 pub(crate) use rbms_skin::loader::{SKIN_TYPE_DECIDE, SKIN_TYPE_KEY_CONFIG, SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_RESULT, mode_skin_type};
@@ -213,9 +213,13 @@ fn songdb_path(settings_path: &Path) -> PathBuf {
     settings_path.parent().map(|d| d.join(crate::library::SONGDB_FILE)).unwrap_or_else(|| PathBuf::from(crate::library::SONGDB_FILE))
 }
 
-/// The configured system sound folder, with a blank setting read as "not configured".
-fn sound_folder_path(config: &Config) -> Option<PathBuf> {
-    config.audio.sound_folder.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(PathBuf::from)
+/// Where system sounds are read from: the folder the player configured, with a blank setting read as
+/// "not configured", and otherwise the set the active bundle ships.
+fn sound_folder_path(settings_path: &Path, config: &Config) -> Option<PathBuf> {
+    match config.audio.sound_folder.as_deref().map(str::trim).filter(|folder| !folder.is_empty()) {
+        Some(folder) => Some(PathBuf::from(folder)),
+        None => crate::assets::bundled_sound_folder(settings_path, config),
+    }
 }
 
 /// Gauge a course stage starts on before anything has been played, read off the class row of the
@@ -411,7 +415,7 @@ type SelectKey = (u64, usize, Option<usize>, usize, bool, bool, SelectTab);
 
 /// A clickable region recorded during rendering and hit-tested on a left-click. Immediate-mode:
 /// `AppShared::hot` is rebuilt every frame for the current stage, so the layout math lives in one place.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Hot {
     SelectRow(usize),
     RecordRow(usize),
@@ -543,6 +547,7 @@ struct AppShared {
     skin_timers: TimerState,
     skin_play_timers: PlayTimers,
     skin_select_timers: SelectTimers,
+    skin_result_timers: ResultTimers,
     /// Result-screen judge colours/labels resolved from the active skin, rebuilt with it.
     result_palette: ResultPalette,
     server: Arc<dyn ScoreServer>,
@@ -717,7 +722,7 @@ impl App {
         let multi_ir = MultiIr::from_network(&config.network);
         let profile_servers = multi_ir.build_servers_reusing(Some(built.server.clone()));
         let syssound = {
-            let mut set = SystemSoundSet::load_optional(sound_folder_path(&config).as_deref());
+            let mut set = SystemSoundSet::load_optional(sound_folder_path(&settings_path, &config).as_deref());
             set.set_guide_enabled(config.audio.guide_se);
             set
         };
@@ -775,6 +780,7 @@ impl App {
                 skin_timers: TimerState::default(),
                 skin_play_timers: PlayTimers::new(),
                 skin_select_timers: SelectTimers::new(),
+                skin_result_timers: ResultTimers::new(),
                 result_palette: ResultPalette::from_skin(&SkinConfig::default()),
                 server: built.server,
                 server_connected: built.connected,

@@ -3,6 +3,7 @@
 #![allow(clippy::wildcard_imports)]
 
 use rbms_render::result::ResultExtras;
+use rbms_render::{FrameExtra, ResultSeriesState};
 use rbms_skin::model::SkinLayer;
 
 use crate::app_result::{next_song, offers_retry, retry};
@@ -21,13 +22,17 @@ pub(crate) struct ResultState {
     /// Whether the run counted as a clear. The view carries the lamp's label and colour but not the
     /// verdict itself, and a document asks for the verdict.
     cleared: bool,
+    /// The chart's tempo as `(progress through the chart, bpm)`, which a document's BPM graph plots.
+    /// It is the chart's own shape rather than something the run measured, so it is held here and
+    /// not on the view.
+    bpm_points: Vec<(f32, f64)>,
 }
 
 impl ResultState {
     /// A screen reporting a run and nothing around it: no target, no offer to run it again, and a
     /// run that did not clear.
     pub(crate) fn new(view: ResultView) -> ResultState {
-        ResultState { view: Box::new(view), extras: ResultExtras::default(), cleared: false }
+        ResultState { view: Box::new(view), extras: ResultExtras::default(), cleared: false, bpm_points: Vec::new() }
     }
 
     /// The same screen reporting a run that reached the end with its gauge up.
@@ -41,6 +46,24 @@ impl ResultState {
     pub(crate) fn paced_by(mut self, extras: ResultExtras) -> ResultState {
         self.extras = extras;
         self
+    }
+
+    /// The same screen carrying the tempo of the chart the run was played on, which is what a
+    /// document plots a BPM graph from.
+    pub(crate) fn tempo(mut self, bpm_points: Vec<(f32, f64)>) -> ResultState {
+        self.bpm_points = bpm_points;
+        self
+    }
+
+    /// The series the document's own graph objects read, which are the same measurements the
+    /// built-in panels are drawn from.
+    fn series(&self) -> ResultSeriesState<'_> {
+        ResultSeriesState {
+            gauge_series: &self.view.gauge_series,
+            timing_hist: &self.view.timing_hist,
+            judge_dist: &self.view.judge_dist,
+            bpm_points: &self.bpm_points,
+        }
     }
 
     /// The run this screen reports, for the tests that check what the run put on it.
@@ -65,6 +88,8 @@ impl StageHandler for ResultState {
 
     fn on_enter(&mut self, ctx: &mut FrameCtx<'_>) {
         ctx.shared.play_system_sound(crate::syssound::result_sound(self.cleared));
+        let now_ms = ctx.shared.skin_now_ms();
+        ctx.shared.skin_result_timers.enter(&mut ctx.shared.skin_timers, &self.view, now_ms);
     }
 
     fn on_exit(&mut self, ctx: &mut FrameCtx<'_>) {
@@ -88,32 +113,32 @@ impl StageHandler for ResultState {
     fn draw(&mut self, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'_>) {
         canvas.clear_bga();
         ctx.shared.prepare_skin(canvas, SKIN_TYPE_RESULT);
+        let now_ms = ctx.shared.skin_now_ms();
+        ctx.shared.skin_result_timers.update(&mut ctx.shared.skin_timers, now_ms);
+        let series = self.series();
         let overlay = ctx.shared.skin_uses_overlay(SKIN_TYPE_RESULT);
         let layered = ctx.shared.skin_uses_layered_layout(SKIN_TYPE_RESULT);
         let native_layout = ctx.shared.skin_uses_native_layout(SKIN_TYPE_RESULT);
-        if !native_layout && ctx.shared.draw_result_skin(canvas, &self.view, self.extras.target.as_ref(), self.cleared) {
+        if !native_layout && ctx.shared.draw_result_skin(canvas, &self.view, &self.extras, self.cleared, FrameExtra::Result(&series)) {
             return;
         }
+        let content = ctx.shared.screen_content(SKIN_TYPE_RESULT).result;
         if layered {
             canvas.clear(rbms_render::theme().bg);
-            ctx.shared.draw_result_skin_layer(canvas, &self.view, self.extras.target.as_ref(), self.cleared, SkinLayer::Background);
-            rbms_render::result::render_result_on_background_with_content(
-                canvas,
-                &self.view,
-                &ctx.shared.result_palette,
-                &self.extras,
-                ctx.shared.result_content(),
-            );
+            ctx.shared.draw_result_skin_layer(canvas, &self.view, &self.extras, self.cleared, FrameExtra::Result(&series), SkinLayer::Background);
+            rbms_render::result::render_result_on_background_with_content(canvas, &self.view, &ctx.shared.result_palette, &self.extras, content);
         } else {
             render_result_with_palette(canvas, &self.view, &ctx.shared.result_palette, &self.extras);
         }
-        for (i, (text, kind)) in ctx.shared.ir_status.lines().iter().enumerate() {
-            draw_text(canvas, IR_RESULT_X, IR_RESULT_Y + i as f32 * IR_RESULT_LINE_H, IR_RESULT_SCALE, ir_line_color(*kind), text);
+        if !content.ir {
+            for (i, (text, kind)) in ctx.shared.ir_status.lines().iter().enumerate() {
+                draw_text(canvas, IR_RESULT_X, IR_RESULT_Y + i as f32 * IR_RESULT_LINE_H, IR_RESULT_SCALE, ir_line_color(*kind), text);
+            }
         }
         if layered {
-            ctx.shared.draw_result_skin_layer(canvas, &self.view, self.extras.target.as_ref(), self.cleared, SkinLayer::Foreground);
+            ctx.shared.draw_result_skin_layer(canvas, &self.view, &self.extras, self.cleared, FrameExtra::Result(&series), SkinLayer::Foreground);
         } else if overlay {
-            ctx.shared.draw_result_skin(canvas, &self.view, self.extras.target.as_ref(), self.cleared);
+            ctx.shared.draw_result_skin(canvas, &self.view, &self.extras, self.cleared, FrameExtra::Result(&series));
         }
     }
 }
@@ -165,6 +190,7 @@ mod tests {
     fn view() -> ResultView {
         ResultView {
             title: "run".into(),
+            artist: String::new(),
             mode_label: "7K",
             counts: [1, 0, 0, 0, 0, 0],
             ex_score: 2,
@@ -241,6 +267,72 @@ mod tests {
         let released = KeyInput { code: KeyCode::Escape, pressed: false, released: true, text: None };
         let moved = state.handle_key(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 }, released);
         assert!(matches!(moved, Transition::Stay));
+    }
+
+    /// The score screen's timers: the trend starts when the screen opens and ends a second later.
+    #[test]
+    fn the_score_screen_times_its_trend_from_the_frame_it_opened_on() {
+        use rbms_skin::timer::timer_id;
+        let mut app = app();
+        let mut state = state();
+        let now = std::time::Instant::now();
+        state.on_enter(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 });
+        let opened = app.shared.skin_timers.get(timer_id::RESULTGRAPH_BEGIN).expect("opening the screen did not start the trend");
+        assert!(app.shared.skin_timers.is_off(timer_id::RESULTGRAPH_END), "the trend ended before it was drawn");
+
+        app.shared.skin_result_timers.update(&mut app.shared.skin_timers, opened);
+        assert!(app.shared.skin_timers.is_off(timer_id::RESULTGRAPH_END), "the trend ended on the frame it began");
+        app.shared.skin_result_timers.update(&mut app.shared.skin_timers, opened + 1_000);
+        assert!(app.shared.skin_timers.is_on(timer_id::RESULTGRAPH_END), "the trend never ended");
+    }
+
+    /// The score timer marks a new best, and is settled as the screen opens: the run it reports was
+    /// measured before the screen existed and never moves while it is up, so a document that waits
+    /// for the timer to change across frames would wait for ever.
+    #[test]
+    fn the_score_timer_marks_a_run_that_beat_what_was_there_before() {
+        use rbms_skin::timer::timer_id;
+        let enter = |view: ResultView| {
+            let mut app = app();
+            let mut state = ResultState::new(view);
+            let now = std::time::Instant::now();
+            state.on_enter(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 });
+            app.shared.skin_timers.is_on(timer_id::RESULT_UPDATESCORE)
+        };
+        assert!(enter(view()), "a first run on a chart is the best there has been and did not mark the score");
+        assert!(enter(ResultView { prev_best_ex: Some(1), ..view() }), "a run that beat its best did not mark the score");
+        assert!(!enter(ResultView { prev_best_ex: Some(2), ..view() }), "a run that matched its best marked the score anyway");
+        assert!(!enter(ResultView { prev_best_ex: Some(3), ..view() }), "a run that fell short of its best marked the score anyway");
+    }
+
+    /// The chart's tempo reaches the screen as one point per tempo it holds, each placed by how far
+    /// through the chart that tempo started.
+    #[test]
+    fn the_charts_tempo_changes_become_the_points_a_document_plots() {
+        use crate::app_result::tempo_points;
+        use rbms_model::TimeLine;
+
+        const LANES: usize = 8;
+        let lines = vec![
+            TimeLine::empty(LANES, 0, 0.0, 120.0),
+            TimeLine::empty(LANES, 1_000_000, 1.0, 120.0),
+            TimeLine::empty(LANES, 2_000_000, 2.0, 180.0),
+            TimeLine::empty(LANES, 4_000_000, 4.0, 180.0),
+        ];
+        assert_eq!(tempo_points(&lines), vec![(0.0, 120.0), (0.5, 180.0)], "a tempo is carried once, at the progress it started from");
+        assert!(tempo_points(&[]).is_empty(), "a chart with no lines has no tempo to plot");
+        assert!(tempo_points(&lines[..1]).is_empty(), "a chart with no length has nothing to place a point on");
+    }
+
+    /// What the run measured and what the chart was written at travel to the document together, from
+    /// the view the built-in screen is drawn from and from the screen's own tempo.
+    #[test]
+    fn the_runs_measurements_and_the_charts_tempo_reach_the_document_as_one_series() {
+        let state = ResultState::new(ResultView { gauge_series: vec![50.0, 60.0], judge_dist: [1, 2, 3, 4, 5, 6], ..view() }).tempo(vec![(0.0, 150.0)]);
+        let series = state.series();
+        assert_eq!(series.gauge_series, &[50.0, 60.0][..], "the gauge the run held is not the one the document reads");
+        assert_eq!(series.judge_dist, &[1, 2, 3, 4, 5, 6], "the judgements the run took are not the ones the document reads");
+        assert_eq!(series.bpm_points, &[(0.0, 150.0)][..], "the chart's tempo is not the one the document reads");
     }
 
     /// What surrounds the run reaches the screen: a screen built with a target and the run-again

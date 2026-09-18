@@ -105,6 +105,55 @@ fn render_until_compiled_into(app: &mut App, pixels: &mut HeadlessCanvas) -> boo
     false
 }
 
+/// An app with the shipped bundle installed and selected, in a folder of this test's own, with the
+/// path to the settings those documents were installed beside.
+///
+/// Every screen of the bundle is checked the same way and each check needs the same three steps --
+/// install, load the theme the bundle came with, and keep the settings path the play layouts are
+/// read off later -- so they live here rather than once per screen.
+pub(super) fn bundled_app(tag: &str) -> (App, PathBuf) {
+    rbms_render::font::use_embedded_fonts_only();
+    let directory = std::env::temp_dir().join(format!("rbms-bundle-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&directory);
+    std::fs::create_dir_all(&directory).expect("the bundle fixture folder is writable");
+    let settings = directory.join("settings.ron");
+    let mut config = Config::default();
+    assert!(crate::assets::install_default_skin(&settings, &mut config), "the bundled skin installs");
+    crate::assets::load_theme(&settings, &config);
+    let app = App::new(String::new(), config, LaunchOptions::default(), settings.clone());
+    (app, settings)
+}
+
+/// Draws the stage `stage` builds onto `pixels` until the document for `screen` has compiled, then
+/// draws one more frame so the canvas shows the document rather than the last built-in frame before
+/// it; answers whether it compiled in time.
+///
+/// A fresh stage per frame, because that is the only way a screen whose own state advances -- the
+/// loading screen starts its work on its second frame -- can be drawn as many times as a document
+/// takes to arrive.
+pub(super) fn render_until_screen_compiled(app: &mut App, screen: i32, pixels: &mut HeadlessCanvas, stage: impl Fn() -> Stage) -> bool {
+    for _ in 0..DOCUMENT_LOAD_FRAMES {
+        render_into(app, stage(), pixels);
+        if app.shared.has_compiled_skin(screen) {
+            render_into(app, stage(), pixels);
+            return true;
+        }
+    }
+    false
+}
+
+/// Holds one of the bundle's own documents to compiling clean: it is selected, it compiles inside
+/// the frames a decode is allowed, and it reports nothing while it does.
+///
+/// A shipped document is the one skin whose warnings are a defect rather than a note about somebody
+/// else's file, so this is the check each screen of the bundle makes.
+pub(super) fn assert_bundled_document_compiles_clean(app: &mut App, screen: i32, stage: impl Fn() -> Stage) {
+    let mut pixels = HeadlessCanvas::new(CW, CH);
+    assert!(render_until_screen_compiled(app, screen, &mut pixels, stage), "the bundled document for skin type {screen} never finished compiling");
+    let warnings = app.shared.skin_warnings(screen);
+    assert!(warnings.is_empty(), "the bundled document for skin type {screen} did not compile clean: {warnings:?}");
+}
+
 /// A document selected for the browser takes the whole screen: every corner is the document's own
 /// colour, which the built-in list never paints.
 #[test]
@@ -252,6 +301,9 @@ fn a_play_document_draws_the_charts_background_through_its_own_bga_object() {
     assert_eq!(canvas.pixel_at(CW / 2, CH / 2), BGA_MARK, "the document's bga object drew nothing");
 }
 
+/// A point inside the option panel the bundle draws over the browser's detail column.
+const OPTIONS_PROBE: (u32, u32) = (300, 300);
+
 #[test]
 fn the_current_default_bundle_keeps_information_and_chart_art_visible() {
     use rbms_library::Library;
@@ -292,16 +344,19 @@ fn the_current_default_bundle_keeps_information_and_chart_art_visible() {
     assert!(app.shared.hot.iter().any(|(rect, _)| rect.x >= 628.0), "the song rows are not on the right");
     save_current_bundle_capture("select", &canvas);
 
-    let before_options = canvas.pixel_at(300, 170);
+    let before_options = canvas.pixel_at(OPTIONS_PROBE.0, OPTIONS_PROBE.1);
     let key: KeyInput<'_> = press(crate::KeyCode::F1);
     let now = std::time::Instant::now();
     let mut options_context = FrameCtx { shared: &mut app.shared, now, dt: 0.0 };
     assert!(app_options::options_key(&mut options_context, StageId::Select, false, &key));
+    render_into(&mut app, Stage::Select(Box::new(SelectState::new())), &mut canvas);
     {
+        let now = std::time::Instant::now();
+        let mut overlay_context = FrameCtx { shared: &mut app.shared, now, dt: 0.0 };
         let mut target = Canvas::Headless(&mut canvas);
-        App::draw_overlays(&app.stage, &mut options_context, &mut target);
+        App::draw_overlays(&app.stage, &mut overlay_context, &mut target);
     }
-    assert_ne!(canvas.pixel_at(300, 170), before_options, "the centered option panel did not draw");
+    assert_ne!(canvas.pixel_at(OPTIONS_PROBE.0, OPTIONS_PROBE.1), before_options, "the option panel did not draw");
     save_current_bundle_capture("options", &canvas);
 
     let side = 4;
@@ -312,8 +367,8 @@ fn the_current_default_bundle_keeps_information_and_chart_art_visible() {
         (Mode::BEAT_5K, "play-5k", (600, 300)),
         (Mode::BEAT_7K, "play-7k", (600, 300)),
         (Mode::POPN_9K, "play-9k", (600, 300)),
-        (Mode::BEAT_10K, "play-10k", (1060, 300)),
-        (Mode::BEAT_14K, "play-14k", (1060, 300)),
+        (Mode::BEAT_10K, "play-10k", (130, 255)),
+        (Mode::BEAT_14K, "play-14k", (130, 255)),
     ] {
         app.shared.mode = mode;
         app.shared.skin_cfg =

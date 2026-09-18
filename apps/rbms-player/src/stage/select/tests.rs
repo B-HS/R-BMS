@@ -5,10 +5,15 @@
 //! list is here, because the list is the thing every one of these keys is really editing.
 #![allow(clippy::wildcard_imports)]
 
+use std::path::{Path, PathBuf};
+
 use rbms_library::Library;
+use rbms_skin::loader::SKIN_TYPE_MUSIC_SELECT;
 
 use super::*;
+use crate::stage::render_tests::render_into;
 pub(crate) use crate::stage::select::list::tests::{entry, record};
+use crate::stage::{HeadlessCanvas, StageId};
 use crate::{App, Config, LaunchOptions};
 
 /// An app on a temp settings directory, so a test that stars a chart writes somewhere disposable.
@@ -396,4 +401,257 @@ fn a_folder_row_counts_only_the_charts_the_filter_leaves() {
     app.shared.config.library.favorite_only = true;
     frame(&mut app, &mut state);
     assert_eq!(titles(&app), vec!["ALL SONGS (1)".to_string()], "the folder row counted charts the filter takes out");
+}
+
+/// Where the fixture document puts its wheel, and how its slots are spaced: far enough right of the
+/// built-in list that a row rectangle says which of the two answered the click.
+const WHEEL_X: i32 = 700;
+const WHEEL_W: i32 = 500;
+const FOCUS_W: i32 = 520;
+const SLOT_H: i32 = 40;
+const SLOT_PITCH: i32 = 44;
+const SLOT_TOP: i32 = 600;
+const WHEEL_SLOTS: usize = 5;
+
+/// The slot the fixture wheel calls its centre, which is where the focused chart lands.
+const WHEEL_CENTER: usize = 2;
+
+/// Charts the fixture browser is given. The cursor starts on the first of them, which is what puts
+/// the second chart on the slot below the centre.
+const FIXTURE_ROWS: usize = 5;
+
+/// Frames a test draws while the fixture's one source image is read off the worker pool.
+const DOCUMENT_FRAMES: usize = 240;
+
+/// The option panel's rows, which is how many label/value pairs a document has to declare before it
+/// may replace the panel.
+const PANEL_ROWS: usize = rbms_render::theme::OPTIONS_ROW_COUNT;
+
+/// Where slot `index` sits in the document, measured as the document measures it.
+fn slot_y(index: usize) -> i32 {
+    SLOT_TOP - SLOT_PITCH * index as i32
+}
+
+/// Where slot `index` lands on the canvas, which is the document's rectangle turned the right way
+/// up: the document measures from its foot and the canvas from its head.
+fn slot_rect(index: usize, focused: bool) -> Rect {
+    let w = if focused { FOCUS_W } else { WHEEL_W };
+    Rect::new(WHEEL_X as f32, (crate::CH as i32 - slot_y(index) - SLOT_H) as f32, w as f32, SLOT_H as f32)
+}
+
+/// One of the wheel's nested lists, written out slot by slot.
+fn slot_list(id: &str, w: i32) -> String {
+    (0..WHEEL_SLOTS)
+        .map(|index| format!(r#"{{"id":"{id}","dst":[{{"x":{WHEEL_X},"y":{},"w":{w},"h":{SLOT_H}}}]}}"#, slot_y(index)))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// The buttons the fixture declares, each standing in for one of the browser's own.
+const FIXTURE_BUTTONS: [(&str, &str); 6] = [
+    ("btn-search", "search"),
+    ("btn-sort", "sort"),
+    ("btn-folders", "folders"),
+    ("btn-tables", "tables"),
+    ("btn-records", "records"),
+    ("btn-settings", "settings"),
+];
+
+/// Every object id the fixture's option panel is made of, in the order the panel replacement asks
+/// for them.
+fn panel_ids() -> Vec<String> {
+    let mut ids = vec!["options-panel".to_owned()];
+    for row in 0..PANEL_ROWS {
+        ids.push(format!("option-row-{row}-label"));
+        ids.push(format!("option-row-{row}-value"));
+    }
+    ids
+}
+
+/// A layered browser document carrying a wheel, the six navigation buttons and the option panel's
+/// rows, naming `replace` as the blocks it stands in for.
+///
+/// Everything is declared whatever is replaced, so a test varies only the `replace` list: the block
+/// gate is what is under test, not whether the objects compiled.
+fn write_blocks_document(settings: &Path, replace: &[&str]) -> PathBuf {
+    let folder = settings.parent().unwrap_or(Path::new(".")).join(rbms_config::DEFAULT_SKIN_FOLDER);
+    let _ = std::fs::remove_dir_all(&folder);
+    std::fs::create_dir_all(&folder).expect("the fixture folder is writable");
+    image::RgbaImage::from_pixel(2, 2, image::Rgba([12, 200, 90, 255])).save(folder.join("mark.png")).expect("the source image is written");
+
+    let panel = panel_ids();
+    let mut images: Vec<String> = vec![r#"{"id":"bar","src":"mark","x":0,"y":0,"w":2,"h":2}"#.to_owned(), r#"{"id":"bar-on","src":"mark"}"#.to_owned()];
+    let mut destinations: Vec<String> = vec![format!(r#"{{"id":"wheel","dst":[{{"x":{WHEEL_X},"y":400,"w":{FOCUS_W},"h":240}}]}}"#)];
+    for (index, (id, _)) in FIXTURE_BUTTONS.iter().enumerate() {
+        images.push(format!(r#"{{"id":"{id}","src":"mark"}}"#));
+        destinations.push(format!(r#"{{"id":"{id}","dst":[{{"x":{},"y":40,"w":100,"h":28}}]}}"#, 24 + 108 * index));
+    }
+    for (index, id) in panel.iter().enumerate() {
+        images.push(format!(r#"{{"id":"{id}","src":"mark"}}"#));
+        destinations.push(format!(r#"{{"id":"{id}","dst":[{{"x":40,"y":{},"w":300,"h":18}}]}}"#, 120 + 20 * index));
+    }
+    let hotspots: Vec<String> = FIXTURE_BUTTONS.iter().map(|(id, action)| format!(r#"{{"id":"{id}","action":"{action}"}}"#)).collect();
+    let replace: Vec<String> = replace.iter().map(|name| format!("\"{name}\"")).collect();
+    let clickable: Vec<String> = (0..WHEEL_SLOTS).map(|index| index.to_string()).collect();
+
+    let body = format!(
+        r#"{{
+            "type": 5, "composition": "layered", "name": "browser blocks", "w": {w}, "h": {h},
+            "replace": [{replace}],
+            "source": [{{ "id": "mark", "path": "mark.png" }}],
+            "image": [{images}],
+            "text": [{{ "id": "row-title", "font": "none", "size": 20, "align": 0 }}],
+            "hotspot": [{hotspots}],
+            "songlist": {{
+                "id": "wheel",
+                "center": {WHEEL_CENTER},
+                "clickable": [{clickable}],
+                "listoff": [{listoff}],
+                "liston": [{liston}],
+                "text": [{text}]
+            }},
+            "destination": [{destinations}]
+        }}"#,
+        w = crate::CW,
+        h = crate::CH,
+        replace = replace.join(","),
+        images = images.join(","),
+        hotspots = hotspots.join(","),
+        clickable = clickable.join(","),
+        listoff = slot_list("bar", WHEEL_W),
+        liston = slot_list("bar-on", FOCUS_W),
+        text = slot_list("row-title", WHEEL_W),
+        destinations = destinations.join(","),
+    );
+    let document = folder.join("blocks.json");
+    std::fs::write(&document, body).expect("the document is written");
+    document
+}
+
+/// A browser on five charts with the fixture document selected, drawn until the document compiled,
+/// answering the app and the canvas it was drawn on.
+///
+/// One canvas throughout, because a compiled document holds textures registered with the target it
+/// was built against.
+fn blocks_app(tag: &str, replace: &[&str]) -> (App, HeadlessCanvas) {
+    rbms_render::font::use_embedded_fonts_only();
+    let directory = std::env::temp_dir().join(format!("rbms-select-blocks-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&directory);
+    std::fs::create_dir_all(&directory).expect("the fixture folder is writable");
+    let settings = directory.join("settings.ron");
+    let document = write_blocks_document(&settings, replace);
+    let mut config = Config::default();
+    config.skin.select(SKIN_TYPE_MUSIC_SELECT, Some(document.to_string_lossy().into_owned()));
+    config.library.sort = SortMode::Title;
+
+    let mut app = App::new(String::new(), config, LaunchOptions::default(), settings);
+    app.shared.library = Library::from_songs((0..FIXTURE_ROWS).map(|index| entry(&format!("song {index}"), "artist", "5")).collect());
+    app.shared.select_view = SelectView::AllSongs;
+    app.shared.rebuild_select_items();
+
+    let mut pixels = HeadlessCanvas::new(crate::CW, crate::CH);
+    for _ in 0..DOCUMENT_FRAMES {
+        render_into(&mut app, Stage::Select(Box::new(SelectState::new())), &mut pixels);
+        if app.shared.has_compiled_skin(SKIN_TYPE_MUSIC_SELECT) {
+            render_into(&mut app, Stage::Select(Box::new(SelectState::new())), &mut pixels);
+            break;
+        }
+    }
+    assert!(
+        app.shared.has_compiled_skin(SKIN_TYPE_MUSIC_SELECT),
+        "the fixture document never compiled: {:?}",
+        app.shared.skin_warnings(SKIN_TYPE_MUSIC_SELECT)
+    );
+    assert!(
+        app.shared.skin_warnings(SKIN_TYPE_MUSIC_SELECT).is_empty(),
+        "the fixture document reported {:?}",
+        app.shared.skin_warnings(SKIN_TYPE_MUSIC_SELECT)
+    );
+    (app, pixels)
+}
+
+/// Every row rectangle the browser is hit-testing, in the order it recorded them.
+fn row_rects(app: &App) -> Vec<Rect> {
+    app.shared.hot.iter().filter(|(_, hot)| matches!(hot, Hot::SelectRow(_))).map(|(rect, _)| *rect).collect()
+}
+
+/// The navigation action one hit answers, named, because [`Hot`] is a rendering record rather than a
+/// compared value and carries no equality of its own.
+fn nav_name(hot: Option<Hot>) -> Option<&'static str> {
+    Some(match hot? {
+        Hot::NavSearch => "search",
+        Hot::NavSort => "sort",
+        Hot::NavFolders => "folders",
+        Hot::NavTables => "tables",
+        Hot::NavRecords => "records",
+        Hot::NavSettings => "settings",
+        _ => "other",
+    })
+}
+
+/// A wheel the document drew answers the clicks the built-in list used to: the rectangles come from
+/// the document's own slots, and a click on one moves the cursor to the chart that landed there.
+#[test]
+fn a_click_on_a_slot_the_document_drew_moves_the_cursor_to_that_chart() {
+    let (mut app, _pixels) = blocks_app("row-click", &["list"]);
+    let target = 1;
+    let rect = app
+        .shared
+        .hot
+        .iter()
+        .find(|(_, hot)| matches!(hot, Hot::SelectRow(row) if *row == target))
+        .map(|(rect, _)| *rect)
+        .expect("the document's wheel offered the second chart a click");
+    assert_eq!(rect, slot_rect(WHEEL_CENTER + target, false), "the row rectangle is not the slot the wheel drew it on");
+
+    let mut state = SelectState::new();
+    let now = Instant::now();
+    state.handle_mouse(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 }, (rect.x + rect.w * 0.5, rect.y + rect.h * 0.5));
+    assert_eq!(app.shared.sel, target, "the click on the document's slot did not move the cursor");
+}
+
+/// The buttons a document declares stand in for the browser's own, so each of the six reaches the
+/// action it named rather than only being drawn.
+#[test]
+fn the_buttons_the_document_declared_answer_the_browsers_own_actions() {
+    let (app, _pixels) = blocks_app("buttons", &["topbar"]);
+    for (index, (_, action)) in FIXTURE_BUTTONS.into_iter().enumerate() {
+        let rect = Rect::new((24 + 108 * index) as f32, (crate::CH - 68) as f32, 100.0, 28.0);
+        let hit = nav_name(app.shared.hit_test((rect.x + 1.0, rect.y + 1.0)));
+        assert_eq!(hit, Some(action), "the document's {action} button answered the wrong action");
+    }
+}
+
+/// A wheel that replaced the list owns every row rectangle on the screen: the built-in list neither
+/// draws nor answers a click, so one chart is never two targets.
+#[test]
+fn a_replaced_list_leaves_no_built_in_row_rectangles() {
+    let (replaced, _pixels) = blocks_app("list-replaced", &["list"]);
+    let placed = [(WHEEL_CENTER, true), (WHEEL_CENTER + 1, false), (WHEEL_CENTER + 2, false)];
+    let wheel: Vec<Rect> = placed.into_iter().map(|(slot, focused)| slot_rect(slot, focused)).collect();
+    assert_eq!(row_rects(&replaced), wheel, "the built-in rows are still answering clicks under the document's wheel");
+
+    let (native, _pixels) = blocks_app("list-kept", &[]);
+    let rows = row_rects(&native);
+    assert_eq!(rows.len(), FIXTURE_ROWS, "a document that replaced nothing lost the built-in rows");
+    assert!(rows.iter().all(|rect| rect.x < WHEEL_X as f32), "the built-in rows were drawn where the document's wheel is");
+}
+
+/// A document that replaced the option panel draws the rows itself, so the built-in overlay adds
+/// nothing to the frame while it is open -- and still draws when no document replaced it.
+#[test]
+fn a_replaced_option_panel_keeps_the_built_in_overlay_off_the_frame() {
+    for (tag, replace, replaced) in [("options-replaced", &["options"][..], true), ("options-kept", &[][..], false)] {
+        let (mut app, mut pixels) = blocks_app(tag, replace);
+        let now = Instant::now();
+        let mut ctx = FrameCtx { shared: &mut app.shared, now, dt: 0.0 };
+        assert!(crate::app_options::options_key(&mut ctx, StageId::Select, false, &press(KeyCode::F1)), "the panel did not take the key that opens it");
+        let before = pixels.pixel_checksum();
+        {
+            let mut canvas = Canvas::Headless(&mut pixels);
+            crate::app_options::draw(StageId::Select, &mut ctx, &mut canvas);
+        }
+        let drew = pixels.pixel_checksum() != before;
+        assert_eq!(drew, !replaced, "the built-in option panel drew the wrong way round with replace {replace:?}");
+    }
 }

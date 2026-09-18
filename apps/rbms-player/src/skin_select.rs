@@ -7,6 +7,11 @@
 //! reset) stay in `rbms_config::SETTINGS` with the rest of the screen; the rows below them are
 //! built here from the chosen document's header and are addressed by [`SkinRow`].
 //!
+//! A row a document declares at bundle scope belongs to the whole skin rather than to the screen it
+//! was written on, so those rows are gathered from every document the player selected out of the
+//! same bundle, listed first under the bundle's own heading, and stored against the bundle. Moving
+//! one asks every screen of that bundle to read its document again.
+//!
 //! Only the header is read to build the rows, which is one parse and one directory scan per
 //! document rather than a whole load; the whole document is read when the player asks for it, or
 //! when a choice that changes what is drawn moves.
@@ -19,7 +24,7 @@ use rbms_skin::dst::{DrawCondition, SkinOffset};
 use rbms_skin::loader::{
     LoadedSkin, ParserKind, SkinHeader, SkinLoadOptions, SkinUserConfig, is_supported_skin_type, load_header, load_skin, selected_option, skin_type_mode,
 };
-use rbms_skin::model::{OffsetDef, PropertyDef};
+use rbms_skin::model::{OffsetDef, PropertyDef, SCOPE_BUNDLE};
 use rbms_skin::resolve::{CustomFile, RANDOM_SELECTION};
 
 /// How deep under the skin folder documents are looked for: the folder itself, one directory per
@@ -52,6 +57,11 @@ const OFFSET_RESET: f32 = 0.0;
 
 /// Separator between a customisation row's category and its own name.
 const CATEGORY_SEPARATOR: &str = " > ";
+
+/// Stands in for the document's own heading on a row the whole bundle shares, so a choice that
+/// answers for every screen of one skin reads as one row rather than as the screen it happened to
+/// be declared on.
+const BUNDLE_CATEGORY: &str = "BUNDLE";
 
 /// Shown on the LOADED row while the built-in screen is being drawn.
 const BUILT_IN_INFO: &str = "BUILT-IN SCREEN";
@@ -140,14 +150,36 @@ impl OffsetAxis {
 
 /// One customisation row the chosen document declares, addressed by its position in the document's
 /// own list so a document that is edited between two runs keeps the rows it still has.
+///
+/// A row a document declares at [`SCOPE_BUNDLE`] belongs to the whole bundle rather than to the
+/// document it was read from, so it is addressed by its place in the bundle's own merged list and
+/// listed above the rows that belong to this document alone.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum SkinRow {
+    /// The bundle-scope property at this index of the bundle's merged list.
+    BundleProperty(usize),
+    /// The bundle-scope file slot at this index of the bundle's merged list.
+    BundleFile(usize),
+    /// One axis of the bundle-scope nudge at this index of the bundle's merged list.
+    BundleOffset(usize, OffsetAxis),
     /// The `property[]` entry at this index: a list of named options, one of which is on.
     Property(usize),
     /// The `filepath[]` entry at this index: a slot filled by one of the files the pattern matches.
     File(usize),
     /// One axis of the `offset[]` entry at this index.
     Offset(usize, OffsetAxis),
+}
+
+/// The customisation rows one bundle shares, gathered from every document the player selected out
+/// of it.
+///
+/// Borrowed from the scanned headers rather than copied: the list is rebuilt whenever the tab asks
+/// for a row, and a bundle declares a handful of rows rather than a table.
+#[derive(Default)]
+struct BundleRows<'a> {
+    properties: Vec<&'a PropertyDef>,
+    files: Vec<&'a CustomFile>,
+    offsets: Vec<&'a OffsetDef>,
 }
 
 /// The documents on disk, and the one being drawn for the screen the SKIN tab is configuring.
@@ -265,25 +297,128 @@ impl SkinLibrary {
         format!("{}X{} - {}{} - {} WARNINGS{}", skin.def.w, skin.def.h, parser, lua, skin.warnings.len(), author)
     }
 
-    /// The customisation rows the chosen document declares, top to bottom.
-    pub(crate) fn rows(&self, config: &Config) -> Vec<SkinRow> {
-        let Some(header) = self.chosen(config) else {
-            return Vec::new();
+    /// The bundle the open screen's document was shipped in, or `None` for a document that belongs
+    /// to no bundle: one lying directly in the skin folder, or the built-in screen.
+    fn active_bundle(&self, config: &Config) -> Option<String> {
+        config.skin.bundle_key(config.skin.document(config.skin.screen)?)
+    }
+
+    /// The headers of the documents the player selected that sit in `bundle`, in screen order.
+    fn bundle_headers(&self, config: &Config, bundle: &str) -> Vec<&SkinHeader> {
+        let mut headers = Vec::new();
+        for path in config.skin.selected.values() {
+            if config.skin.bundle_key(path).as_deref() != Some(bundle) {
+                continue;
+            }
+            if let Some(header) = self.documents.iter().find(|entry| entry.path.to_string_lossy() == path.as_str()) {
+                headers.push(header);
+            }
+        }
+        headers
+    }
+
+    /// The rows the open screen's bundle shares, merged by the name they are stored under so a row
+    /// two of the bundle's documents both declare is offered once.
+    ///
+    /// Which screen the tab is configuring does not enter into it, so the row stays where it is as
+    /// the SCREEN row walks the bundle's screens, and a row another screen's document declares is
+    /// offered on this one.
+    fn bundle_rows(&self, config: &Config) -> BundleRows<'_> {
+        let mut rows = BundleRows::default();
+        let Some(bundle) = self.active_bundle(config) else {
+            return rows;
         };
-        let properties = (0..header.properties.len()).map(SkinRow::Property);
-        let files = (0..header.custom_files.len()).map(SkinRow::File);
+        let mut properties = BTreeSet::new();
+        let mut files = BTreeSet::new();
+        let mut offsets = BTreeSet::new();
+        for header in self.bundle_headers(config, &bundle) {
+            for def in header.properties.iter().filter(|def| shared_scope(def.scope.as_deref())) {
+                if properties.insert(def.name.as_str()) {
+                    rows.properties.push(def);
+                }
+            }
+            for file in header.custom_files.iter().filter(|file| shared_scope(file.scope.as_deref())) {
+                if files.insert(file.name.as_str()) {
+                    rows.files.push(file);
+                }
+            }
+            for def in header.offsets.iter().filter(|def| shared_scope(def.scope.as_deref())) {
+                if offsets.insert(def.id) {
+                    rows.offsets.push(def);
+                }
+            }
+        }
+        rows
+    }
+
+    /// The customisation rows the SKIN tab shows, top to bottom: what the bundle shares, then what
+    /// the chosen document keeps to itself.
+    pub(crate) fn rows(&self, config: &Config) -> Vec<SkinRow> {
+        let bundle = self.bundle_rows(config);
+        let shared_offsets = bundle
+            .offsets
+            .iter()
+            .enumerate()
+            .flat_map(|(at, def)| OffsetAxis::ALL.into_iter().filter(move |axis| axis.allowed(def)).map(move |axis| SkinRow::BundleOffset(at, axis)));
+        let mut rows: Vec<SkinRow> =
+            (0..bundle.properties.len()).map(SkinRow::BundleProperty).chain((0..bundle.files.len()).map(SkinRow::BundleFile)).chain(shared_offsets).collect();
+        let Some(header) = self.chosen(config) else {
+            return rows;
+        };
+        let properties = header.properties.iter().enumerate().filter(|(_, def)| !shared_scope(def.scope.as_deref())).map(|(at, _)| SkinRow::Property(at));
+        let files = header.custom_files.iter().enumerate().filter(|(_, file)| !shared_scope(file.scope.as_deref())).map(|(at, _)| SkinRow::File(at));
         let offsets = header
             .offsets
             .iter()
             .enumerate()
+            .filter(|(_, def)| !shared_scope(def.scope.as_deref()))
             .flat_map(|(at, def)| OffsetAxis::ALL.into_iter().filter(move |axis| axis.allowed(def)).map(move |axis| SkinRow::Offset(at, axis)));
-        properties.chain(files).chain(offsets).collect()
+        rows.extend(properties.chain(files).chain(offsets));
+        rows
     }
 
     /// The label and value of one customisation row.
     pub(crate) fn line(&self, config: &Config, row: SkinRow) -> (String, String) {
+        match row {
+            SkinRow::BundleProperty(_) | SkinRow::BundleFile(_) | SkinRow::BundleOffset(_, _) => self.bundle_line(config, row),
+            SkinRow::Property(_) | SkinRow::File(_) | SkinRow::Offset(_, _) => self.document_line(config, row),
+        }
+    }
+
+    /// The label and value of one row the whole bundle shares, read out of the bundle's own stored
+    /// choices rather than the open document's.
+    fn bundle_line(&self, config: &Config, row: SkinRow) -> (String, String) {
+        let bundle = self.bundle_rows(config);
+        let stored = self.active_bundle(config).and_then(|key| config.skin.shared_customisation(&key));
+        match row {
+            SkinRow::BundleProperty(at) => match bundle.properties.get(at) {
+                Some(property) => (
+                    labelled(BUNDLE_CATEGORY, &property.name),
+                    property_value(property, stored.and_then(|entry| entry.properties.get(&property.name).copied())),
+                ),
+                None => missing_row(),
+            },
+            SkinRow::BundleFile(at) => match bundle.files.get(at) {
+                Some(file) => {
+                    (labelled(BUNDLE_CATEGORY, &file.name), file_value(file, stored.and_then(|entry| entry.filepaths.get(&file.name)).map(String::as_str)))
+                }
+                None => missing_row(),
+            },
+            SkinRow::BundleOffset(at, axis) => match bundle.offsets.get(at) {
+                Some(def) => {
+                    let nudge = stored.and_then(|entry| entry.offsets.get(&def.id).copied()).unwrap_or_default();
+                    (format!("{} {}", labelled(BUNDLE_CATEGORY, &def.name), axis.label()), format!("{:+}", axis.get(nudge) as i32))
+                }
+                None => missing_row(),
+            },
+            SkinRow::Property(_) | SkinRow::File(_) | SkinRow::Offset(_, _) => missing_row(),
+        }
+    }
+
+    /// The label and value of one row that belongs to the chosen document alone.
+    fn document_line(&self, config: &Config, row: SkinRow) -> (String, String) {
         let Some(header) = self.chosen(config) else {
-            return (NONE_VALUE.to_string(), NONE_VALUE.to_string());
+            return missing_row();
         };
         let stored = config.skin.document(config.skin.screen).and_then(|path| config.skin.customisation(path));
         match row {
@@ -292,29 +427,92 @@ impl SkinLibrary {
                     labelled(&property.category, &property.name),
                     property_value(property, stored.and_then(|entry| entry.properties.get(&property.name).copied())),
                 ),
-                None => (NONE_VALUE.to_string(), NONE_VALUE.to_string()),
+                None => missing_row(),
             },
             SkinRow::File(at) => match header.custom_files.get(at) {
                 Some(file) => {
                     (labelled(&file.category, &file.name), file_value(file, stored.and_then(|entry| entry.filepaths.get(&file.name)).map(String::as_str)))
                 }
-                None => (NONE_VALUE.to_string(), NONE_VALUE.to_string()),
+                None => missing_row(),
             },
             SkinRow::Offset(at, axis) => match header.offsets.get(at) {
                 Some(def) => {
                     let nudge = stored.and_then(|entry| entry.offsets.get(&def.id).copied()).unwrap_or_default();
                     (format!("{} {}", labelled(&def.category, &def.name), axis.label()), format!("{:+}", axis.get(nudge) as i32))
                 }
-                None => (NONE_VALUE.to_string(), NONE_VALUE.to_string()),
+                None => missing_row(),
             },
+            SkinRow::BundleProperty(_) | SkinRow::BundleFile(_) | SkinRow::BundleOffset(_, _) => missing_row(),
         }
     }
 
     /// Step one customisation row, and report whether anything moved.
+    pub(crate) fn step(&mut self, config: &mut Config, row: SkinRow, delta: i32) -> bool {
+        match row {
+            SkinRow::BundleProperty(_) | SkinRow::BundleFile(_) | SkinRow::BundleOffset(_, _) => self.step_bundle(config, row, delta),
+            SkinRow::Property(_) | SkinRow::File(_) | SkinRow::Offset(_, _) => self.step_document(config, row, delta),
+        }
+    }
+
+    /// Step one of the rows the bundle shares, storing the answer against the bundle so every
+    /// screen shipped with it is drawn the same way, and asking each of those screens to be read
+    /// again.
+    ///
+    /// A nudge is read live out of the stored choices the same way a document's own is, so it asks
+    /// for no read at all.
+    fn step_bundle(&mut self, config: &mut Config, row: SkinRow, delta: i32) -> bool {
+        let Some(bundle) = self.active_bundle(config) else {
+            return false;
+        };
+        match row {
+            SkinRow::BundleProperty(at) => {
+                let Some(property) = self.bundle_rows(config).properties.get(at).map(|def| (**def).clone()) else {
+                    return false;
+                };
+                let current = config.skin.shared_customisation(&bundle).and_then(|entry| entry.properties.get(&property.name).copied());
+                let at = stepped(property.item.iter().position(|item| item.op == selected_option(&property, current)), property.item.len(), delta);
+                let Some(item) = at.and_then(|at| property.item.get(at)) else {
+                    return false;
+                };
+                config.skin.shared_customise(&bundle).properties.insert(property.name.clone(), item.op);
+                self.stale_bundle(config, &bundle);
+                true
+            }
+            SkinRow::BundleFile(at) => {
+                let Some(file) = self.bundle_rows(config).files.get(at).map(|entry| (**entry).clone()) else {
+                    return false;
+                };
+                let current = config.skin.shared_customisation(&bundle).and_then(|entry| entry.filepaths.get(&file.name)).cloned();
+                let chosen = current.unwrap_or_else(|| file_value(&file, None));
+                let at = stepped(file.candidates.iter().position(|name| *name == chosen), file.candidates.len(), delta);
+                let Some(name) = at.and_then(|at| file.candidates.get(at)) else {
+                    return false;
+                };
+                config.skin.shared_customise(&bundle).filepaths.insert(file.name.clone(), name.clone());
+                self.stale_bundle(config, &bundle);
+                true
+            }
+            SkinRow::BundleOffset(at, axis) => {
+                let Some(id) = self.bundle_rows(config).offsets.get(at).map(|def| def.id) else {
+                    return false;
+                };
+                let stored = config.skin.shared_customise(&bundle).offsets.entry(id).or_default();
+                let next = (axis.get(*stored) + delta as f32 * OFFSET_STEP).clamp(-axis.limit(), axis.limit());
+                if (next - axis.get(*stored)).abs() < f32::EPSILON {
+                    return false;
+                }
+                axis.set(stored, next);
+                true
+            }
+            SkinRow::Property(_) | SkinRow::File(_) | SkinRow::Offset(_, _) => false,
+        }
+    }
+
+    /// Step one of the rows the chosen document keeps to itself.
     ///
     /// A property or a file changes what is drawn and which files are read, so the document has to
     /// be read again; an offset is read live out of the stored choices, so it does not.
-    pub(crate) fn step(&mut self, config: &mut Config, row: SkinRow, delta: i32) -> bool {
+    fn step_document(&mut self, config: &mut Config, row: SkinRow, delta: i32) -> bool {
         let Some(path) = config.skin.document(config.skin.screen).map(str::to_owned) else {
             return false;
         };
@@ -361,15 +559,48 @@ impl SkinLibrary {
                 axis.set(stored, next);
                 true
             }
+            SkinRow::BundleProperty(_) | SkinRow::BundleFile(_) | SkinRow::BundleOffset(_, _) => false,
         }
+    }
+
+    /// Mark every screen the player draws with a document of `bundle` as needing another read,
+    /// which is what a row the whole bundle shares moves: the open screen reads it at once, and the
+    /// rest read it the next time they are drawn.
+    fn stale_bundle(&mut self, config: &Config, bundle: &str) {
+        let screens: Vec<i32> =
+            config.skin.selected.iter().filter(|(_, path)| config.skin.bundle_key(path).as_deref() == Some(bundle)).map(|(screen, _)| *screen).collect();
+        self.stale.extend(screens);
     }
 
     /// Put one customisation row back to what the document's author chose, and report whether it
     /// moved. Only an offset row has a value the player types a key to zero; the rest are cycled.
     pub(crate) fn reset_row(&mut self, config: &mut Config, row: SkinRow) -> bool {
-        let SkinRow::Offset(at, axis) = row else {
+        match row {
+            SkinRow::BundleOffset(at, axis) => self.reset_bundle_offset(config, at, axis),
+            SkinRow::Offset(at, axis) => self.reset_document_offset(config, at, axis),
+            SkinRow::BundleProperty(_) | SkinRow::BundleFile(_) | SkinRow::Property(_) | SkinRow::File(_) => false,
+        }
+    }
+
+    /// Zero one axis of a nudge the whole bundle shares.
+    fn reset_bundle_offset(&mut self, config: &mut Config, at: usize, axis: OffsetAxis) -> bool {
+        let Some(bundle) = self.active_bundle(config) else {
             return false;
         };
+        let Some(id) = self.bundle_rows(config).offsets.get(at).map(|def| def.id) else {
+            return false;
+        };
+        let nudged = config.skin.shared_customisation(&bundle).and_then(|entry| entry.offsets.get(&id).copied()).unwrap_or_default();
+        if (axis.get(nudged) - OFFSET_RESET).abs() < f32::EPSILON {
+            return false;
+        }
+        let stored = config.skin.shared_customise(&bundle).offsets.entry(id).or_default();
+        axis.set(stored, OFFSET_RESET);
+        true
+    }
+
+    /// Zero one axis of a nudge that belongs to the chosen document alone.
+    fn reset_document_offset(&mut self, config: &mut Config, at: usize, axis: OffsetAxis) -> bool {
         let Some(path) = config.skin.document(config.skin.screen).map(str::to_owned) else {
             return false;
         };
@@ -403,6 +634,9 @@ impl SkinLibrary {
     }
 
     /// Drop every choice made in the chosen document, and report whether there was one to drop.
+    ///
+    /// What the bundle shares is left where it is: it answers for screens this one is not, and a
+    /// reset that reached it would undo a choice made on a screen the player is not looking at.
     pub(crate) fn forget(&mut self, config: &mut Config) -> bool {
         let Some(path) = config.skin.document(config.skin.screen).map(str::to_owned) else {
             return false;
@@ -525,6 +759,18 @@ fn is_document(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| DOCUMENT_EXTENSIONS.iter().any(|known| extension.eq_ignore_ascii_case(known)))
+}
+
+/// Whether a document declared this row for its whole bundle, which is what puts the row in the
+/// bundle's own list rather than in the document's.
+fn shared_scope(scope: Option<&str>) -> bool {
+    scope.is_some_and(|scope| scope.eq_ignore_ascii_case(SCOPE_BUNDLE))
+}
+
+/// What the SKIN tab shows for a row whose declaration is no longer there, which is what a document
+/// edited between two runs leaves behind.
+fn missing_row() -> (String, String) {
+    (NONE_VALUE.to_string(), NONE_VALUE.to_string())
 }
 
 /// One row's label: its category and its own name, or its own name when the document gave it no

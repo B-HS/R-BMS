@@ -177,6 +177,7 @@ impl SettingsState {
                 load_theme(&settings_path, &ctx.shared.config);
                 ctx.shared.rescan_skins();
                 ctx.shared.reload_skin();
+                ctx.shared.reload_system_sounds();
                 ctx.shared.save_settings();
             }
             SettingId::AudioDevice => {
@@ -196,6 +197,7 @@ impl SettingsState {
             SettingId::SkinDocument => {
                 if ctx.shared.cycle_skin_document(delta) {
                     ctx.shared.reload_skin();
+                    ctx.shared.reload_system_sounds();
                 }
             }
             SettingId::SkinReload => {

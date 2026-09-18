@@ -8,6 +8,8 @@
 
 use rbms_render::result::{ResultExtras, TargetView};
 
+use rbms_model::TimeLine;
+
 use crate::ir_ranking::RankingState;
 use crate::ir_session::submission_player_id;
 use crate::keyconfig::mode_config_key;
@@ -20,6 +22,11 @@ const RESULT_TITLE_CHARS: usize = 48;
 
 /// Leading md5 characters a saved replay's filename is stemmed to.
 const REPLAY_STEM_MD5_CHARS: usize = 8;
+
+/// How many tempo changes the result screen carries into a document's BPM graph. A chart that keeps
+/// changing tempo says as much as the graph can show long before this, and the screen holds the list
+/// for as long as it is on.
+const BPM_POINT_CAPACITY: usize = 512;
 
 /// Which of the three JUDGE WIDTH tiers the score submission reports, the score server's `judge_rate`
 /// being one number rather than six. PGREAT is the tier the setting is read by.
@@ -43,6 +50,7 @@ struct ChartRun {
     md5: String,
     sha256: String,
     title: String,
+    artist: String,
     init_bpm: f64,
     seed: u64,
 }
@@ -65,6 +73,7 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
         md5: play.model().md5.clone(),
         sha256: play.model().sha256.clone(),
         title: play.model().meta.title.clone(),
+        artist: play.model().meta.artist.clone(),
         init_bpm: play.model().init_bpm,
         seed: play.seed(),
     };
@@ -83,6 +92,7 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
     let calibration_mean_us = play.calibration_mean_us();
     let calibration_samples = play.calibration_samples();
     let instrumentation = play.instrumentation();
+    let tempo = tempo_points(&play.model().timelines);
 
     let lamp = assisted_lamp(summary.clear_lamp, assist);
     let (label, color) = clear_label_color(lamp);
@@ -95,6 +105,7 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
     let prev_best_ex = history.iter().map(|r| r.ex_score).max();
     let view = ResultView {
         title: chart.title.chars().take(RESULT_TITLE_CHARS).collect(),
+        artist: chart.artist.clone(),
         mode_label: mode_config_key(shared.mode),
         counts: summary.counts,
         ex_score: summary.ex_score,
@@ -295,7 +306,30 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
     }
     let paced_by = run_target(shared, &chart.md5, summary.total_notes, prev_best_ex);
     let extras = ResultExtras { target: Some(TargetView { name: paced_by.name, ex: paced_by.ex }), run_again: offers_retry(shared) };
-    Transition::To(Stage::Result(ResultState::new(view).paced_by(extras).cleared(lamp.is_cleared())))
+    Transition::To(Stage::Result(ResultState::new(view).paced_by(extras).cleared(lamp.is_cleared()).tempo(tempo)))
+}
+
+/// The chart's tempo as `(progress through the chart, bpm)`, which is what a document's BPM graph
+/// plots.
+///
+/// One point per tempo the chart holds rather than one per line: a chart states its tempo on every
+/// timeline, and the graph is drawn from where that tempo changed. Progress is measured against the
+/// last line rather than against how far the run got, so the graph shows the whole chart.
+pub(crate) fn tempo_points(timelines: &[TimeLine]) -> Vec<(f32, f64)> {
+    let Some(span) = timelines.last().map(|line| line.time_us).filter(|last| *last > 0) else {
+        return Vec::new();
+    };
+    let mut points: Vec<(f32, f64)> = Vec::new();
+    for line in timelines {
+        if points.len() == BPM_POINT_CAPACITY {
+            break;
+        }
+        if points.last().is_some_and(|(_, bpm)| *bpm == line.bpm) {
+            continue;
+        }
+        points.push(((line.time_us as f64 / span as f64) as f32, line.bpm));
+    }
+    points
 }
 
 /// The target a run on this chart is paced against: the TARGET row settled against the records that
