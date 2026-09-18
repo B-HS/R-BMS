@@ -298,15 +298,14 @@ fn installed_default_documents_load_without_replacing_an_existing_selection() {
     assert_eq!(std::fs::read_to_string(&selected).expect("read the preserved document"), before);
 
     fixture.skins.rescan(&fixture.settings, &fixture.config);
-    let play_screens = [Mode::BEAT_7K, Mode::BEAT_5K, Mode::BEAT_14K, Mode::BEAT_10K, Mode::POPN_9K]
-        .map(|mode| crate::mode_skin_type(mode).expect("a supported mode has a screen"));
+    let play_screens = Mode::ALL.iter().map(|mode| crate::mode_skin_type(*mode).expect("a supported mode has a screen")).collect::<Vec<i32>>();
     let screens = [MUSIC_SELECT, SKIN_TYPE_DECIDE, SKIN_TYPE_RESULT];
     for screen in screens.into_iter().chain(play_screens) {
         fixture.skins.reload_for(&fixture.config, screen);
         assert!(fixture.skins.document(screen).is_some(), "screen {screen} did not load its selected document");
     }
-    let unsupported = crate::mode_skin_type(Mode::KEYBOARD_24K).expect("the document type is known");
-    assert_eq!(fixture.config.skin.document(unsupported), None);
+    let keyboard = crate::mode_skin_type(Mode::KEYBOARD_24K).expect("the document type is known");
+    assert!(fixture.config.skin.document(keyboard).is_some(), "the keyboard screen is selected like every other play screen");
 }
 
 #[test]
@@ -314,8 +313,7 @@ fn bundled_default_documents_compile_without_warnings() {
     let mut fixture = Fixture::new("compiled-default-documents");
     assert!(crate::assets::install_default_skin(&fixture.settings, &mut fixture.config));
     fixture.skins.rescan(&fixture.settings, &fixture.config);
-    let play_screens = [Mode::BEAT_7K, Mode::BEAT_5K, Mode::BEAT_14K, Mode::BEAT_10K, Mode::POPN_9K]
-        .map(|mode| crate::mode_skin_type(mode).expect("a supported mode has a screen"));
+    let play_screens = Mode::ALL.iter().map(|mode| crate::mode_skin_type(*mode).expect("a supported mode has a screen")).collect::<Vec<i32>>();
     let screens = [MUSIC_SELECT, SKIN_TYPE_DECIDE, SKIN_TYPE_RESULT];
     for screen in screens.into_iter().chain(play_screens) {
         fixture.skins.reload_for(&fixture.config, screen);

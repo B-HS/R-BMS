@@ -33,6 +33,8 @@ mod render_tests_skin;
 #[cfg(test)]
 mod render_tests_skin_v3_decide_result;
 #[cfg(test)]
+mod render_tests_skin_v3_play_24k;
+#[cfg(test)]
 mod render_tests_skin_v3_play_dp;
 #[cfg(test)]
 mod render_tests_skin_v3_play_sp;

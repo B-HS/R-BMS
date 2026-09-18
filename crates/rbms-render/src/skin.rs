@@ -37,6 +37,57 @@ fn is_five_key(mode: Mode) -> bool {
     matches!(mode.name, "BEAT_5K" | "BEAT_10K")
 }
 
+/// Whether a mode's key lanes are a piano keyboard rather than a row of equal buttons.
+fn is_keyboard(mode: Mode) -> bool {
+    matches!(mode.name, "KEYBOARD_24K")
+}
+
+/// Semitones in an octave, which is how far along a keyboard a lane's key colour repeats.
+const SEMITONES_IN_AN_OCTAVE: usize = 12;
+
+/// The semitones of an octave a piano draws as a black key, counted from C. A keyboard mode binds
+/// its key lane `i` to MIDI note `48 + i`, so this is the lane pattern too.
+const BLACK_KEYS_IN_AN_OCTAVE: [usize; 5] = [1, 3, 6, 8, 10];
+
+/// How wide a keyboard mode's black key is drawn beside a white one, as a share of the white key's
+/// width. The reference implementation's widest 24-key layout draws 32 against 40.
+const KEYBOARD_BLACK_KEY_WIDTH: f32 = 0.8;
+
+/// How wide a keyboard mode's scratch lane is drawn beside a white key, as a share of the white
+/// key's width. The reference implementation's widest 24-key layout draws 70 against 40.
+const KEYBOARD_SCRATCH_WIDTH: f32 = 1.75;
+
+/// Whether `lane` of a keyboard mode is one of the piano's black keys. Scratch lanes sit past the
+/// keys, so a caller asks [`Mode::is_scratch`] first.
+fn is_black_key(lane: usize) -> bool {
+    BLACK_KEYS_IN_AN_OCTAVE.contains(&(lane % SEMITONES_IN_AN_OCTAVE))
+}
+
+/// How wide each lane of `mode` is drawn, in lane order and in units of one uniform lane.
+///
+/// The weights sum to the mode's lane count, so a field laid out from them is exactly as wide as
+/// the field of equal lanes it replaces and every layout that divides the box by the lane count
+/// still lands where it did. Every mode but a keyboard one is uniform and returns one per lane, so
+/// its layout is the plain multiplication it always was.
+fn lane_width_weights(mode: Mode) -> Vec<f32> {
+    if !is_keyboard(mode) {
+        return vec![1.0; mode.key];
+    }
+    let raw: Vec<f32> = (0..mode.key)
+        .map(|lane| {
+            if mode.is_scratch(lane) {
+                KEYBOARD_SCRATCH_WIDTH
+            } else if is_black_key(lane) {
+                KEYBOARD_BLACK_KEY_WIDTH
+            } else {
+                1.0
+            }
+        })
+        .collect();
+    let total: f32 = raw.iter().sum();
+    raw.iter().map(|weight| weight * mode.key as f32 / total).collect()
+}
+
 /// Why a skin file could not be turned into a [`SkinConfig`]. Carries the offending path so the
 /// caller can report which skin failed without re-deriving it.
 #[derive(Debug, Error)]
@@ -278,6 +329,7 @@ impl Skin {
 
         let mut x = vec![0.0f32; n];
         let mut fields: Vec<(f32, f32)> = Vec::new();
+        let weights = lane_width_weights(mode);
         let lane_w;
         let width_lanes = |lanes: usize| if cfg.five_key_layout && is_five_key(mode) { FIVE_KEY_WIDTH_LANES } else { lanes };
         if dual {
@@ -325,12 +377,14 @@ impl Skin {
             } else {
                 non.iter().copied().chain(scratch_lanes.iter().copied()).collect()
             };
-            for (vis, &lane) in order.iter().enumerate() {
-                x[lane] = field_x0 + vis as f32 * lane_w;
+            let mut offset = 0.0f32;
+            for &lane in &order {
+                x[lane] = field_x0 + offset * lane_w;
+                offset += weights[lane];
             }
             fields.push((field_x0, field_w));
         }
-        let w = vec![lane_w; n];
+        let w: Vec<f32> = weights.iter().map(|weight| lane_w * weight).collect();
 
         let lift = cfg.lift.clamp(0.0, MAX_LIFT);
         let judge_y = cfg.judge_y - (cfg.judge_y - cfg.top_y) * lift;
@@ -795,6 +849,71 @@ mod tests {
         assert_eq!(cfg.long_note_body_alpha, default.long_note_body_alpha);
         assert_eq!(cfg.charge_note_body_alpha, default.charge_note_body_alpha);
         assert!(!cfg.five_key_layout, "the layout is off until a skin or the settings ask for it");
+    }
+
+    /// A twenty-six lane field is a piano rather than twenty-six equal slivers: its white keys are
+    /// wider than its black ones, both scratch lanes are wider than either, and the whole thing
+    /// still fills exactly the box a field of equal lanes would have taken.
+    #[test]
+    fn the_keyboard_field_draws_piano_key_widths_inside_the_same_box() {
+        let seven = Skin::default_for(Mode::BEAT_7K, 1280.0, 720.0);
+        let skin = Skin::default_for(Mode::KEYBOARD_24K, 1280.0, 720.0);
+        assert_eq!(skin.lane_count(), 26, "the keyboard field has a lane per mode lane");
+
+        let (white, black, scratch) = (skin.w[0], skin.w[1], skin.w[24]);
+        assert!(black < white, "a black key is narrower than a white one: {black} against {white}");
+        assert!(white < scratch, "a scratch lane is wider than a key: {scratch} against {white}");
+        assert!((black / white - KEYBOARD_BLACK_KEY_WIDTH).abs() < 1e-4, "black against white is {}", black / white);
+        assert!((scratch / white - KEYBOARD_SCRATCH_WIDTH).abs() < 1e-4, "scratch against white is {}", scratch / white);
+        assert!((skin.w[25] - scratch).abs() < 1e-4, "both scratch lanes are drawn the same width");
+        for lane in 0..24 {
+            let expected = if is_black_key(lane) { black } else { white };
+            assert!((skin.w[lane] - expected).abs() < 1e-4, "lane {lane} is {} wide", skin.w[lane]);
+        }
+
+        let (field_x, field_w) = skin.fields[0];
+        assert!((skin.w.iter().sum::<f32>() - field_w).abs() < 1e-2, "the lanes add up to the field width {field_w}");
+        assert!((field_w - seven.fields[0].1).abs() < 1e-3, "which is the box a seven-key field takes: {field_w}");
+        assert!((field_x - seven.fields[0].0).abs() < 1e-3, "and it starts where every other single field starts");
+    }
+
+    /// Those lanes are laid out edge to edge in visual order, so a narrow key neither overlaps the
+    /// one beside it nor leaves a gap, and the last of them ends where the field says it does.
+    #[test]
+    fn the_keyboard_field_lays_its_lanes_edge_to_edge() {
+        let skin = Skin::default_for(Mode::KEYBOARD_24K, 1280.0, 720.0);
+        let (field_x, field_w) = skin.fields[0];
+        let mut order: Vec<usize> = (0..skin.lane_count()).collect();
+        order.sort_by(|a, b| skin.x[*a].total_cmp(&skin.x[*b]));
+        assert_eq!(order[..24], (0..24).collect::<Vec<usize>>()[..], "the keys are drawn in lane order");
+        assert_eq!(&order[24..], &[24, 25], "and the two scratch lanes close the field");
+        assert!((skin.x[order[0]] - field_x).abs() < 1e-3, "the leftmost lane starts at the field");
+        for pair in order.windows(2) {
+            let (left, right) = (pair[0], pair[1]);
+            assert!((skin.x[left] + skin.w[left] - skin.x[right]).abs() < 1e-3, "lane {left} does not meet lane {right}");
+        }
+        let last = *order.last().expect("the field has lanes");
+        assert!((skin.x[last] + skin.w[last] - (field_x + field_w)).abs() < 1e-2, "the field ends where it says it ends");
+    }
+
+    /// The piano widths belong to the keyboard mode alone: every other mode keeps equal lanes at
+    /// whole-lane steps from the head of its field, which is the layout it always had.
+    #[test]
+    fn every_other_mode_keeps_equal_lanes_at_whole_lane_steps() {
+        for mode in [Mode::BEAT_7K, Mode::BEAT_5K, Mode::BEAT_10K, Mode::BEAT_14K, Mode::POPN_9K] {
+            let skin = Skin::default_for(mode, 1280.0, 720.0);
+            let lane_w = skin.w[0];
+            assert!(skin.w.iter().all(|w| *w == lane_w), "{} has a lane that is not {lane_w} wide", mode.name);
+            for (start, width) in &skin.fields {
+                let mut inside: Vec<usize> = (0..skin.lane_count()).filter(|lane| skin.x[*lane] >= start - 1e-3 && skin.x[*lane] < start + width).collect();
+                inside.sort_by(|a, b| skin.x[*a].total_cmp(&skin.x[*b]));
+                assert_eq!(inside.len(), skin.lane_count() / skin.fields.len(), "{} split its lanes unevenly across its fields", mode.name);
+                for (step, lane) in inside.iter().enumerate() {
+                    let want = start + step as f32 * lane_w;
+                    assert!((skin.x[*lane] - want).abs() < 1e-3, "{} lane {lane} is at {} rather than {want}", mode.name, skin.x[*lane]);
+                }
+            }
+        }
     }
 
     #[test]

@@ -28,13 +28,25 @@ impl Mode {
 
     /// The reference implementation's `Mode.KEYBOARD_24K`: 26 lanes, one player, lanes 24 and 25
     /// scratch. The numbers are its enum constructor arguments `(id 25, player 1, key 26,
-    /// scratchKey {24, 25})`.
+    /// scratchKey {24, 25})`. Lanes 0..24 are two octaves of a piano keyboard, which is what its
+    /// MIDI binding says: key `i` is note `48 + i`, so `i % 12` in `{1, 3, 6, 8, 10}` is a black
+    /// key and the rest are white.
     pub const KEYBOARD_24K: Mode = Mode { name: "KEYBOARD_24K", key: 26, player: 1, scratch: &[24, 25], channel_assign: &KEYBOARD24 };
 
-    /// The modes a BMS chart can be detected as and the key-config screen enumerates.
-    /// [`Mode::KEYBOARD_24K`] is deliberately absent: it is judged and gauged like any other mode,
-    /// but nothing selects it from a BMS channel scan and its key bindings are not wired yet.
-    pub const ALL: &'static [Mode] = &[Mode::BEAT_7K, Mode::BEAT_5K, Mode::BEAT_10K, Mode::BEAT_14K, Mode::POPN_9K];
+    /// Every mode this build plays: what the key-config screen enumerates, what the browser filters
+    /// on, and what a play document's type has to draw for the document to be accepted.
+    ///
+    /// [`Mode::KEYBOARD_24K`] is here even though no BMS channel scan can pick it, because a bmson
+    /// `mode_hint` can: a chart that reaches it needs bindings, a judge row, a gauge set and a
+    /// document exactly as the others do.
+    pub const ALL: &'static [Mode] = &[Mode::BEAT_7K, Mode::BEAT_5K, Mode::BEAT_10K, Mode::BEAT_14K, Mode::POPN_9K, Mode::KEYBOARD_24K];
+
+    /// Whether a raw BMS channel scan can ever land on this mode, which is false only for the modes
+    /// a bmson `mode_hint` is the sole route to. Their channel table is empty, so every lane-cover
+    /// invariant stated over the table has to skip them rather than read an empty map as a hole.
+    pub fn has_bms_channels(&self) -> bool {
+        self.channel_assign.iter().any(|lane| *lane >= 0)
+    }
 
     pub fn is_scratch(&self, lane: usize) -> bool {
         self.scratch.contains(&lane)
@@ -166,11 +178,23 @@ mod tests {
 
     #[test]
     fn lane_of_raw_logical_lanes_cover_full_key_range_once() {
-        for mode in Mode::ALL {
+        for mode in Mode::ALL.iter().filter(|mode| mode.has_bms_channels()) {
             let mut produced: Vec<usize> = (0..18).filter_map(|raw| mode.lane_of_raw(raw)).collect();
             produced.sort_unstable();
             let expected: Vec<usize> = (0..mode.key).collect();
             assert_eq!(produced, expected, "{}", mode.name);
+        }
+    }
+
+    #[test]
+    fn a_mode_no_bms_channel_reaches_maps_no_raw_channel_at_all() {
+        for mode in Mode::ALL.iter().filter(|mode| !mode.has_bms_channels()) {
+            assert_eq!(mode.name, Mode::KEYBOARD_24K.name, "only the keyboard mode is bmson-only today");
+            assert!((0..18).all(|raw| mode.lane_of_raw(raw).is_none()), "{} maps a raw channel", mode.name);
+        }
+        assert!(!Mode::KEYBOARD_24K.has_bms_channels());
+        for mode in [Mode::BEAT_7K, Mode::BEAT_5K, Mode::BEAT_10K, Mode::BEAT_14K, Mode::POPN_9K] {
+            assert!(mode.has_bms_channels(), "{} is reachable from a channel scan", mode.name);
         }
     }
 
@@ -225,7 +249,7 @@ mod tests {
 
     #[test]
     fn scratch_lanes_are_reachable_via_lane_of_raw() {
-        for mode in Mode::ALL {
+        for mode in Mode::ALL.iter().filter(|mode| mode.has_bms_channels()) {
             for &s in mode.scratch {
                 let reachable = (0..18).any(|raw| mode.lane_of_raw(raw) == Some(s));
                 assert!(reachable, "{} scratch lane {s} unreachable", mode.name);
@@ -279,12 +303,13 @@ mod tests {
 
     #[test]
     fn all_constant_has_expected_membership() {
-        assert_eq!(Mode::ALL.len(), 5);
+        assert_eq!(Mode::ALL.len(), 6);
         assert!(Mode::ALL.contains(&Mode::BEAT_7K));
         assert!(Mode::ALL.contains(&Mode::BEAT_5K));
         assert!(Mode::ALL.contains(&Mode::BEAT_10K));
         assert!(Mode::ALL.contains(&Mode::BEAT_14K));
         assert!(Mode::ALL.contains(&Mode::POPN_9K));
+        assert!(Mode::ALL.contains(&Mode::KEYBOARD_24K));
     }
 
     #[test]
@@ -342,11 +367,21 @@ mod tests {
     }
 
     #[test]
-    fn all_excludes_the_keyboard_mode() {
-        assert!(!Mode::ALL.contains(&Mode::KEYBOARD_24K));
-        for mode in Mode::ALL {
-            assert_ne!(mode.name, Mode::KEYBOARD_24K.name);
-        }
+    fn all_carries_the_keyboard_mode_exactly_once() {
+        assert_eq!(Mode::ALL.iter().filter(|mode| mode.name == Mode::KEYBOARD_24K.name).count(), 1);
+        assert_eq!(Mode::ALL.iter().find(|mode| mode.name == Mode::KEYBOARD_24K.name), Some(&Mode::KEYBOARD_24K));
+    }
+
+    #[test]
+    fn the_keyboard_lanes_are_two_octaves_of_a_piano() {
+        const BLACK_KEYS_IN_AN_OCTAVE: [usize; 5] = [1, 3, 6, 8, 10];
+        const SEMITONES_IN_AN_OCTAVE: usize = 12;
+        let black = |lane: usize| BLACK_KEYS_IN_AN_OCTAVE.contains(&(lane % SEMITONES_IN_AN_OCTAVE));
+        let keys = Mode::KEYBOARD_24K.key - Mode::KEYBOARD_24K.scratch.len();
+        assert_eq!(keys, 24, "the keyboard is 24 keys wide once its two scratch lanes are set aside");
+        assert_eq!(keys, SEMITONES_IN_AN_OCTAVE * 2, "which is two octaves");
+        assert_eq!((0..keys).filter(|lane| black(*lane)).count(), 10, "two octaves carry ten black keys");
+        assert_eq!((0..keys).filter(|lane| !black(*lane)).count(), 14, "and fourteen white ones");
     }
 
     #[test]

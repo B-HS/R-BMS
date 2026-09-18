@@ -240,6 +240,53 @@ fn default_keys_have_no_duplicate_keys_within_a_mode() {
     }
 }
 
+/// The lanes of an octave a piano draws as black keys, counted from its C.
+const BLACK_KEYS_IN_AN_OCTAVE: [usize; 5] = [1, 3, 6, 8, 10];
+
+/// Semitones in an octave, which is how far along the keyboard the key colours repeat.
+const SEMITONES_IN_AN_OCTAVE: usize = 12;
+
+/// The keyboard mode's default is a piano rather than a row of buttons: each octave's white keys lie
+/// along one keyboard row and its black keys on the row above, and a scratch lane closes either end.
+///
+/// The exact rows are asserted rather than merely their shape, because a lane bound to the wrong row
+/// is a layout nobody can play and nothing else in this file would notice.
+#[test]
+fn the_keyboard_mode_binds_two_octaves_of_piano_keys_and_both_scratch_lanes() {
+    const LOWER_WHITE: [&str; 7] = ["Z", "X", "C", "V", "B", "N", "M"];
+    const LOWER_BLACK: [&str; 5] = ["S", "D", "G", "H", "J"];
+    const UPPER_WHITE: [&str; 7] = ["Q", "W", "E", "R", "T", "Y", "U"];
+    const UPPER_BLACK: [&str; 5] = ["2", "3", "5", "6", "7"];
+
+    let mode = Mode::KEYBOARD_24K;
+    let binds = default_keys_for_mode(mode);
+    assert_eq!(binds.len(), mode.key, "every one of the 26 lanes is bound");
+    let token = |lane: usize| binds.iter().find(|(_, bound)| *bound == lane).map(|(code, _)| key_name(*code)).expect("the lane is bound");
+    let black = |lane: usize| BLACK_KEYS_IN_AN_OCTAVE.contains(&(lane % SEMITONES_IN_AN_OCTAVE));
+    let row = |octave: usize, want_black: bool| {
+        (octave * SEMITONES_IN_AN_OCTAVE..(octave + 1) * SEMITONES_IN_AN_OCTAVE).filter(|lane| black(*lane) == want_black).map(token).collect::<Vec<_>>()
+    };
+
+    assert_eq!(row(0, false), LOWER_WHITE, "the lower octave's white keys");
+    assert_eq!(row(0, true), LOWER_BLACK, "the lower octave's black keys");
+    assert_eq!(row(1, false), UPPER_WHITE, "the upper octave's white keys");
+    assert_eq!(row(1, true), UPPER_BLACK, "the upper octave's black keys");
+    assert_eq!(token(24), "LSHIFT", "the low scratch lane");
+    assert_eq!(token(25), "RSHIFT", "the high scratch lane");
+    assert_eq!(mode.scratch, &[24, 25], "and those two lanes are the mode's own scratch pair");
+    assert_eq!(mode_config_key(mode), "24K", "the keyboard mode is filed under the short key its siblings use");
+}
+
+/// A key config written by this build carries a complete keyboard row, so a 24-key chart is playable
+/// the moment one is chosen rather than after the key editor has been through 26 lanes.
+#[test]
+fn a_fresh_key_config_binds_every_keyboard_lane() {
+    let kc = KeyConfig::default();
+    let keys = kc.lane_keys(Mode::KEYBOARD_24K);
+    assert_eq!(keys, default_keys_for_mode(Mode::KEYBOARD_24K), "the stored row reads back as the default layout");
+    assert_eq!(kc.lanes.get("24K").map(Vec::len), Some(Mode::KEYBOARD_24K.key), "and it is filed under the keyboard mode's own config key");
+}
+
 /// `mode_config_key` and `default_keys_for_mode` dispatch on `mode.name`, so a synthetic mode that
 /// is in neither match takes the fallback arm and comes out BEAT_7K-shaped.
 #[test]

@@ -140,6 +140,17 @@ pub fn key_name(code: KeyCode) -> &'static str {
 /// Reference-style default lane bindings (Z-row) for a mode, as `(key, lane)`. Lanes are rbms
 /// `Mode` lane indices: 7K keys 0..6 + scratch 7; 14K P1 keys 0..6 scratch 7, P2 keys 8..14
 /// scratch 15; PMS/9K all 9 lanes, no scratch.
+///
+/// `KEYBOARD_24K` is the one mode whose keys are a piano rather than a row of buttons. Lane `i` is
+/// the semitone `i` above the lower octave's C, which is what the mode's MIDI binding states, so
+/// lanes whose index modulo twelve is 1, 3, 6, 8 or 10 are black keys and the rest are white. Each
+/// octave takes two keyboard rows: its white keys along one row and its black keys on the row above,
+/// between the white keys they sit between on a piano.
+///
+/// Lower octave, lanes 0..12: white `Z X C V B N M` on lanes 0, 2, 4, 5, 7, 9, 11 and black
+/// `S D G H J` on lanes 1, 3, 6, 8, 10. Upper octave, lanes 12..24: white `Q W E R T Y U` on lanes
+/// 12, 14, 16, 17, 19, 21, 23 and black `2 3 5 6 7` on lanes 13, 15, 18, 20, 22. The two scratch
+/// lanes close the keyboard at either end: `LSHIFT` on lane 24 and `RSHIFT` on lane 25.
 pub fn default_keys_for_mode(mode: Mode) -> Vec<(KeyCode, usize)> {
     use KeyCode::*;
     match mode.name {
@@ -177,6 +188,34 @@ pub fn default_keys_for_mode(mode: Mode) -> Vec<(KeyCode, usize)> {
             (Slash, 14),
             (ShiftRight, 15),
         ],
+        "KEYBOARD_24K" => vec![
+            (KeyZ, 0),
+            (KeyS, 1),
+            (KeyX, 2),
+            (KeyD, 3),
+            (KeyC, 4),
+            (KeyV, 5),
+            (KeyG, 6),
+            (KeyB, 7),
+            (KeyH, 8),
+            (KeyN, 9),
+            (KeyJ, 10),
+            (KeyM, 11),
+            (KeyQ, 12),
+            (Digit2, 13),
+            (KeyW, 14),
+            (Digit3, 15),
+            (KeyE, 16),
+            (KeyR, 17),
+            (Digit5, 18),
+            (KeyT, 19),
+            (Digit6, 20),
+            (KeyY, 21),
+            (Digit7, 22),
+            (KeyU, 23),
+            (ShiftLeft, 24),
+            (ShiftRight, 25),
+        ],
         _ => vec![(KeyZ, 0), (KeyS, 1), (KeyX, 2), (KeyD, 3), (KeyC, 4), (KeyF, 5), (KeyV, 6), (ShiftLeft, 7)],
     }
 }
@@ -190,6 +229,7 @@ pub fn mode_config_key(mode: Mode) -> &'static str {
         "POPN_9K" => "9K",
         "BEAT_10K" => "10K",
         "BEAT_14K" => "14K",
+        "KEYBOARD_24K" => "24K",
         _ => mode.name,
     }
 }

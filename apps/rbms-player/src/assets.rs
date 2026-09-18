@@ -33,6 +33,7 @@ const SKIN_TYPE_PLAY_5KEYS: i32 = 1;
 const SKIN_TYPE_PLAY_14KEYS: i32 = 2;
 const SKIN_TYPE_PLAY_10KEYS: i32 = 3;
 const SKIN_TYPE_PLAY_9KEYS: i32 = 4;
+const SKIN_TYPE_PLAY_24KEYS: i32 = 16;
 
 /// The folder a bundle keeps its system sound set in, read when the player configured none of their
 /// own.
@@ -129,6 +130,7 @@ const STEEL_NEON_V3_FILES: &[BundledFile] = &[
     BundledFile { path: "images/digits-l.png", bytes: include_bytes!("../../../assets/skins/steel-neon-v3/images/digits-l.png") },
     BundledFile { path: "images/digits-m.png", bytes: include_bytes!("../../../assets/skins/steel-neon-v3/images/digits-m.png") },
     BundledFile { path: "images/digits-s.png", bytes: include_bytes!("../../../assets/skins/steel-neon-v3/images/digits-s.png") },
+    BundledFile { path: "images/frame-24k.png", bytes: include_bytes!("../../../assets/skins/steel-neon-v3/images/frame-24k.png") },
     BundledFile { path: "images/frame-dp.png", bytes: include_bytes!("../../../assets/skins/steel-neon-v3/images/frame-dp.png") },
     BundledFile { path: "images/frame-dp-10k.png", bytes: include_bytes!("../../../assets/skins/steel-neon-v3/images/frame-dp-10k.png") },
     BundledFile { path: "images/frame-result.png", bytes: include_bytes!("../../../assets/skins/steel-neon-v3/images/frame-result.png") },
@@ -183,6 +185,7 @@ const STEEL_NEON_DOCUMENTS: &[(i32, &str)] = &[
     (SKIN_TYPE_PLAY_14KEYS, "play-14k.json5"),
     (SKIN_TYPE_PLAY_10KEYS, "play-10k.json5"),
     (SKIN_TYPE_PLAY_9KEYS, "play-9k.json5"),
+    (SKIN_TYPE_PLAY_24KEYS, "play-24k.json5"),
     (rbms_skin::loader::SKIN_TYPE_RESULT, "result.json5"),
 ];
 
@@ -818,8 +821,9 @@ mod tests {
         std::fs::remove_file(&blocked_root).expect("remove the blocked root");
         assert!(install_default_skin(&settings, &mut config));
         assert!(config.skin.document(rbms_skin::loader::SKIN_TYPE_PLAY_7KEYS).is_some());
-        let unsupported = rbms_skin::loader::mode_skin_type(rbms_model::Mode::KEYBOARD_24K).expect("the document type is known");
-        assert_eq!(config.skin.document(unsupported), None);
+        let keyboard = rbms_skin::loader::mode_skin_type(rbms_model::Mode::KEYBOARD_24K).expect("the document type is known");
+        assert_eq!(keyboard, SKIN_TYPE_PLAY_24KEYS, "the keyboard mode is drawn by the 24-key document type");
+        assert!(config.skin.document(keyboard).is_some(), "and the bundle selects a document for it like every other play screen");
         assert_eq!(config.display.skin, STEEL_NEON_SKIN);
         let _ = std::fs::remove_dir_all(&dir);
     }

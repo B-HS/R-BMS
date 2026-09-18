@@ -646,6 +646,35 @@ def frame_single_play_near(palette: dict[str, str]) -> Canvas:
     return frame_canvas(palette, rects, separators, protected)
 
 
+def frame_keyboard_play(palette: dict[str, str]) -> Canvas:
+    """Frame of the 24-key play screen, whose 610-wide keyboard field leaves one column beside it for the chart art, the counters, the title and the chart info."""
+    rects = (
+        (34, 0, 610, 630),
+        (652, 56, 356, 280),
+        (652, 364, 356, 122),
+        (652, 482, 356, 90),
+        (652, 576, 356, 136),
+        (1008, 8, 264, 704),
+    )
+    separators = (
+        (34, 503, 610, SEPARATOR_THICKNESS),
+        (34, 567, 610, SEPARATOR_THICKNESS),
+        (34, 597, 610, SEPARATOR_THICKNESS),
+    )
+    protected = (
+        (34, 0, 610, 500),
+        (34, 508, 610, 56),
+        (34, 572, 610, 22),
+        (34, 602, 610, 28),
+        (656, 60, 348, 272),
+        (656, 368, 348, 114),
+        (656, 486, 348, 82),
+        (656, 580, 348, 128),
+        (1008, 8, 264, 704),
+    )
+    return frame_canvas(palette, rects, separators, protected)
+
+
 def frame_dual_play(palette: dict[str, str], fields: tuple[tuple[int, int], ...]) -> Canvas:
     (left_x, left_width), (right_x, right_width) = fields
     rects = (
@@ -754,6 +783,7 @@ def main() -> None:
         'frame-sp-2p.png': single_play_frame.mirrored(),
         'frame-sp-near.png': near_play_frame,
         'frame-sp-2p-near.png': near_play_frame.mirrored(),
+        'frame-24k.png': frame_keyboard_play(palette),
         'frame-dp.png': frame_dual_play(palette, DUAL_FIELD_COLUMNS_14K),
         'frame-dp-10k.png': frame_dual_play(palette, DUAL_FIELD_COLUMNS_10K),
         'frame-select.png': frame_select(palette),
