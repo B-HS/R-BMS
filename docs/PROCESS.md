@@ -13,9 +13,9 @@
 
 > 사용자 지시: "커밋 푸시하고 요약한 남은 기능들도 다 구현 시작해서 커밋·푸시·머지". 사양 `docs/plan/2026-09-18-skin-followups.md`(F1~F8). 운용: 연구·구현·적대 리뷰 = Workflow(Opus max, 주제당 질문 3개·10분 상한), 사양·판정·Git = 메인 직접. 머지 대상은 `dev`(`prod`는 Phase R).
 
-- [ ] L1. 연구 — 레퍼런스 의미(커스텀 타이머·이벤트·click/act, skinpreview·practice, 24키 타입 id, pmchara, CSV 명령 표), 비디오 디코더 선택지, 오디오 루프·BGA 경로 사실 → 사양 `[미확인]` 해소.
-- [ ] L2. 구현 1차 — A 번들 결함 4건 / B BGM 루프 / C 문서 이벤트 / D skinpreview·practice·옵션 패널 마우스 / E 24키.
-- [ ] L3. 구현 2차 — F CSV 스킨 로더 / G pmchara / H 비디오 BGA.
+- [x] L1. 연구 — Workflow `wf_86282201-14e`(Opus 4갈래, 5분): 레퍼런스 의미(커스텀 타이머·이벤트·click/act, skinpreview·practice, 24키 타입 16, pmchara `.chp`, CSV 명령 표), 비디오 디코더 선택지(순수 Rust 조합), 오디오 루프·BGA 경로 사실 → 결정 E1~E10 과 사양 확정.
+- [x] L2. 구현 1차 — Workflow `wf_d454c9f2-047`(Opus 5갈래, 격리 워크트리, 44분) → 스쿼시 머지 `50a8ef3`(A 번들 결함) · `ff48ddc`(B 오디오 루프) · `d64b867`(C 문서 이벤트) · `5834221`(D 미리보기·연습·마우스) · `39a586e`(E 24키) + `75fa520`(24키 라벨 보정). 충돌 3건(skin_screen.rs 2, generate-assets.py 1) 메인이 병합. 게이트는 L4 에서 실측.
+- [ ] L3. 구현 2차 — F CSV 스킨 로더 / G pmchara / H 비디오 BGA (Workflow 실행 중, 갈래별 워크트리·개별 target 디렉터리).
 - [ ] L4. 적대 리뷰 → 수정 → 게이트(fmt·clippy·test·금지 명칭·diff-check) → 캡처 → 문서(skin.md·history·acknowledge·HANDOFF) → 단위 커밋 → `dev` 머지·푸시 → CI 확인.
 
 ---
