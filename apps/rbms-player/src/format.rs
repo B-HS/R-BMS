@@ -35,6 +35,7 @@ pub(crate) fn mode_color(mode: Mode) -> Color {
         9 => Color::rgb(230, 120, 200),
         12 => Color::rgb(90, 200, 170),
         16 => Color::ORANGE,
+        26 => Color::rgb(120, 200, 255),
         _ => Color::GRAY,
     }
 }
@@ -107,6 +108,7 @@ pub(crate) fn mode_short(mode: Mode) -> &'static str {
         9 => "9K",
         12 => "10K",
         16 => "14K",
+        26 => "24K",
         _ => "?",
     }
 }
