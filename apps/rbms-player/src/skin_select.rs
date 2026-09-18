@@ -258,7 +258,7 @@ impl SkinLibrary {
     /// The header of the document chosen for the screen being configured.
     fn chosen(&self, config: &Config) -> Option<&SkinHeader> {
         let path = config.skin.document(config.skin.screen)?;
-        self.documents.iter().find(|header| header.path.to_string_lossy() == path)
+        self.documents.iter().find(|header| header.path == Path::new(path))
     }
 
     /// What the SKIN row shows: the document's own name, or the built-in screen.
@@ -310,7 +310,7 @@ impl SkinLibrary {
             if config.skin.bundle_key(path).as_deref() != Some(bundle) {
                 continue;
             }
-            if let Some(header) = self.documents.iter().find(|entry| entry.path.to_string_lossy() == path.as_str()) {
+            if let Some(header) = self.documents.iter().find(|entry| entry.path == Path::new(path)) {
                 headers.push(header);
             }
         }
@@ -620,7 +620,7 @@ impl SkinLibrary {
     pub(crate) fn cycle_document(&mut self, config: &mut Config, delta: i32) -> bool {
         let candidates: Vec<String> = self.candidates(config).iter().map(|header| header.path.to_string_lossy().into_owned()).collect();
         let current = config.skin.document(config.skin.screen).map(str::to_owned);
-        let at = current.as_deref().and_then(|path| candidates.iter().position(|entry| entry == path));
+        let at = current.as_deref().and_then(|path| candidates.iter().position(|entry| Path::new(entry) == Path::new(path)));
         let Some(next) = stepped(Some(at.map_or(0, |at| at + 1)), candidates.len() + 1, delta) else {
             return false;
         };
