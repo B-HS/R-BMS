@@ -685,3 +685,76 @@ fn a_document_of_hundreds_of_objects_draws_them_all_in_one_frame() {
     assert_eq!(drawn, SCALE_OBJECTS, "every object reached the screen");
     assert!(spent < SCALE_FRAME_LIMIT, "one frame of {SCALE_OBJECTS} objects took {spent:?}");
 }
+
+/// The colour the comma-separated fixture's one image is painted, chosen so a wrongly decoded or
+/// wrongly tinted pixel is not any of the canvas's own colours.
+const CSV_IMAGE_COLOR: Color = Color { r: 255, g: 64, b: 32, a: 255 };
+
+/// How wide and tall the comma-separated fixture's image is, which is small enough to read by eye
+/// in the test and big enough to be a real texture.
+const CSV_IMAGE_SIZE: u32 = 4;
+
+/// The canvas the comma-separated fixture is drawn on.
+const CSV_CANVAS: (u32, u32) = (256, 144);
+
+/// The document the fixture writes, which is the whole of a comma-separated skin: a header naming
+/// the screen and the resolution it is authored against, an image slot, and one object placed over
+/// the whole of it.
+const CSV_DOCUMENT: &str = "#INFORMATION,5,Comma,rbms tests\n\
+     #RESOLUTION,0\n\
+     #IMAGE,panel.png\n\
+     #SRC_IMAGE,0,0,0,0,4,4,1,1,0,0\n\
+     #DST_IMAGE,0,0,0,0,640,480,0,255,255,255,255\n";
+
+/// Loads real image files, which is what a comma-separated document names rather than the pattern
+/// files the rest of this fixture set uses.
+struct FileAssets;
+
+impl SkinAssets for FileAssets {
+    fn image(&mut self, path: &Path) -> Option<SkinImage> {
+        let bytes = std::fs::read(path).ok()?;
+        let mut reader = png::Decoder::new(std::io::Cursor::new(bytes)).read_info().ok()?;
+        let mut buffer = vec![0; reader.output_buffer_size()?];
+        let info = reader.next_frame(&mut buffer).ok()?;
+        buffer.truncate(info.buffer_size());
+        SkinImage::new(info.width, info.height, buffer)
+    }
+
+    fn expression(&mut self, _source: &str) -> Option<LuaExprId> {
+        None
+    }
+}
+
+/// A skin in the comma-separated format draws through the very renderer a JSON one draws through,
+/// with nothing between the two but the conversion.
+#[test]
+fn a_comma_separated_document_draws_through_the_same_renderer() {
+    rbms_render::font::use_embedded_fonts_only();
+    let scratch = Scratch::new("csv");
+
+    let pixels = [CSV_IMAGE_COLOR.r, CSV_IMAGE_COLOR.g, CSV_IMAGE_COLOR.b, CSV_IMAGE_COLOR.a].repeat((CSV_IMAGE_SIZE * CSV_IMAGE_SIZE) as usize);
+    let encoded = Png.encode(&GoldenImage::new(CSV_IMAGE_SIZE, CSV_IMAGE_SIZE, pixels)).expect("the fixture image encodes");
+    std::fs::write(scratch.root.join("panel.png"), encoded).expect("the fixture image is written");
+    let document = scratch.write("skin.lr2skin", CSV_DOCUMENT);
+
+    let user = SkinUserConfig::default();
+    let options = SkinLoadOptions { rng_seed: Some(1), ..SkinLoadOptions::new(&scratch.root, &user, rbms_model::Mode::BEAT_7K) };
+    let skin = load_skin(&document, options).expect("the comma-separated document loads");
+    assert_eq!(skin.warnings, Vec::<String>::new(), "the fixture converts without the loader dropping anything");
+
+    let mut text = TextContext::embedded_only();
+    let mut canvas = CpuCanvas::new(CSV_CANVAS.0, CSV_CANVAS.1);
+    let screen = SkinScreen::build(&mut canvas, &mut text, &skin, &mut FileAssets);
+    assert_eq!(screen.object_count(), 1, "the one image the body declares became one draw-list entry");
+    assert_eq!(screen.count_of(SkinObjectKind::Image), 1);
+
+    let timers = TimerState::new();
+    let state = FixtureState::default();
+    canvas.clear(Color::BLACK);
+    let mut ctx = RenderCtx::new(rbms_render::theme(), &mut text);
+    let frame = SkinFrame { now_ms: 0, timers: &timers, state: &state, lua: None, mouse: None, background: None, extra: FrameExtra::None };
+    assert_eq!(screen.draw(&mut ctx, &mut canvas, &frame), 1, "the image reached the screen");
+
+    let middle = canvas.pixel_at(CSV_CANVAS.0 / 2, CSV_CANVAS.1 / 2);
+    assert_eq!(middle, CSV_IMAGE_COLOR, "the full-screen rectangle the body places covers the middle of the canvas");
+}

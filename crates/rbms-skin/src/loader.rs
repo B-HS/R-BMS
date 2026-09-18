@@ -104,6 +104,8 @@ pub enum ParserKind {
     Json,
     /// The lenient parser, which allows comments, trailing commas, unquoted keys and single quotes.
     Json5,
+    /// The comma-separated format, converted into the same mirror by [`crate::csv`].
+    Csv,
 }
 
 /// The field mirror behind [`SkinOffset`]'s serde support.
@@ -570,6 +572,9 @@ fn header_text(value: &Value, key: &str) -> String {
 /// What a document says about itself, without loading it.
 pub fn load_header(path: &Path, options: SkinLoadOptions<'_>) -> Result<SkinHeader, SkinError> {
     let path = contained(options.root, path)?;
+    if crate::csv::is_csv_document(&path) {
+        return crate::csv::load_header(&path, options);
+    }
     let text = read_document(&path, options.max_document_bytes)?;
     let (value, parser) = parse_value(&path, &text)?;
     let directory = path.parent().unwrap_or(options.root).to_path_buf();
@@ -597,6 +602,9 @@ pub fn load_header(path: &Path, options: SkinLoadOptions<'_>) -> Result<SkinHead
 /// refused so the caller can fall back to the built-in skin and say why.
 pub fn load_skin(path: &Path, options: SkinLoadOptions<'_>) -> Result<LoadedSkin, SkinError> {
     let path = contained(options.root, path)?;
+    if crate::csv::is_csv_document(&path) {
+        return crate::csv::load_skin(&path, options);
+    }
     let text = read_document(&path, options.max_document_bytes)?;
     let (mut value, parser) = parse_value(&path, &text)?;
     let directory = path.parent().unwrap_or(options.root).to_path_buf();
@@ -631,6 +639,27 @@ pub fn load_skin(path: &Path, options: SkinLoadOptions<'_>) -> Result<LoadedSkin
     branch::transform(&mut value, &mut branch::BranchContext::new(&enabled, &mut include, &mut warnings))?;
 
     let def = from_value(&path, value)?;
+    assemble(path, Parsed { def, parser, custom_files, enabled, declared, resolver, warnings }, options)
+}
+
+/// What the parse phase settled, whichever format it read.
+///
+/// The two formats disagree only about how a document is spelled: once one has been read into the
+/// mirror, resolved its guarded clauses and settled which option ids hold, the rest of a load is the
+/// same work. [`assemble`] is that rest, and this is what it needs.
+pub(crate) struct Parsed {
+    pub(crate) def: SkinDef,
+    pub(crate) parser: ParserKind,
+    pub(crate) custom_files: Vec<CustomFile>,
+    pub(crate) enabled: BTreeSet<i32>,
+    pub(crate) declared: BTreeSet<i32>,
+    pub(crate) resolver: FileResolver,
+    pub(crate) warnings: Vec<String>,
+}
+
+/// Resolves the files a parsed document names and assembles its destinations into tracks.
+pub(crate) fn assemble(path: PathBuf, parsed: Parsed, options: SkinLoadOptions<'_>) -> Result<LoadedSkin, SkinError> {
+    let Parsed { def, parser, custom_files, enabled, declared, resolver, warnings } = parsed;
     let replace = def.replace.iter().chain(def.result.iter().flat_map(|result| result.replace.iter())).cloned().collect();
 
     let mut skin = LoadedSkin {

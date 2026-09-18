@@ -1,0 +1,9 @@
+#INFORMATION,5,ÉZÉåÉNÉg,rbms tests
+#RESOLUTION,0
+#CUSTOMOPTION,Lane Cover,900,Off,On
+#CUSTOMFILE,Background,LR2files\Theme\basic\bg\*.png,day.png
+#CUSTOMOFFSET,Judge,12,1,1,0,0,0,0
+#ENDOFHEADER
+#IMAGE,LR2files\Theme\basic\images\panel.png
+#IMAGE,LR2files\Theme\basic\images\strip.png
+#INCLUDE,LR2files\Theme\basic\body.csv

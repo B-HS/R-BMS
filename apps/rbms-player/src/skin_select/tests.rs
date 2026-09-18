@@ -440,3 +440,29 @@ fn reset_drops_what_the_document_holds_and_keeps_what_the_bundle_shares() {
     assert_eq!(fixture.line(SkinRow::BundleOffset(0, OffsetAxis::X)).1, "+0");
     assert!(!fixture.skins.reset_row(&mut fixture.config, SkinRow::BundleProperty(0)), "a shared property row was zeroed rather than cycled");
 }
+
+/// A comma-separated skin's header file, written as the bytes it is encoded in rather than as a
+/// Rust string: the format is MS932, and a name that only decodes under MS932 is what proves the
+/// walk read it as MS932 rather than as UTF-8.
+const CSV_DOCUMENT: &[u8] = b"#INFORMATION,5,\x83\x5a\x83\x8c\x83\x4e\x83\x67,dj\n#RESOLUTION,1\n";
+
+/// The name [`CSV_DOCUMENT`] carries, once decoded.
+const CSV_DOCUMENT_NAME: &str = "セレクト";
+
+/// A skin written in the comma-separated format is listed beside the JSON ones, under the screen
+/// its own header declares.
+#[test]
+fn the_folder_lists_a_comma_separated_document_too() {
+    let mut fixture = Fixture::new("csv");
+    let folder = fixture.settings.parent().expect("the settings file has a folder").join("skin");
+    std::fs::write(folder.join("browser").join("theme.lr2skin"), CSV_DOCUMENT).expect("the document is written");
+    std::fs::write(folder.join("browser").join("body.csv"), b"#SRC_IMAGE,0,0,0,0,4,4,1,1,0,0\n").expect("the body is written");
+    fixture.skins.rescan(&fixture.settings, &fixture.config);
+
+    assert_eq!(fixture.skins.documents.len(), 3, "the comma-separated header was passed over, or its body was listed as a document of its own");
+    let candidates = fixture.skins.candidates(&fixture.config);
+    assert_eq!(candidates.len(), 2, "the browser screen offers the JSON document and the comma-separated one");
+    let listed = candidates.iter().find(|header| header.name == CSV_DOCUMENT_NAME).expect("the comma-separated document is listed under its own name");
+    assert_eq!(listed.parser, ParserKind::Csv);
+    assert_eq!((listed.width, listed.height), (1280, 720), "a converted document is authored in this build's own space");
+}

@@ -11,6 +11,9 @@
 
 #![forbid(unsafe_code)]
 
+/// Reading a skin written in the comma-separated format, which is converted into the same document
+/// mirror a JSON skin parses into rather than drawn down a path of its own.
+pub mod csv;
 pub mod dst;
 pub mod loader;
 /// The sandboxed Lua evaluator for expression-typed skin fields. Compiled only with the `lua`

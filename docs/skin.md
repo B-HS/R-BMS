@@ -132,3 +132,82 @@ skin/steel-neon-v3/
 - 이미지는 `palette.json` 을 고친 뒤 `uv run tools/generate-assets.py`, 사운드는 `uv run tools/generate-sounds.py` 로 다시 만든다. PNG/WAV 를 직접 바꿔도 된다. 이중 필드 프레임(`frame-dp.png`·`frame-dp-10k.png`)의 필드 열은 생성기 상수 `DUAL_FIELD_COLUMNS_14K`/`DUAL_FIELD_COLUMNS_10K` 가 정하므로 `play-10k/14k.json5` 의 레인 dst 를 바꾸면 함께 고친다. 24키 프레임은 `frame_keyboard_play`.
 - 헤드리스 캡처: `RBMS_SKIN_CAPTURE_DIR=<폴더> cargo test -p rbms-player the_current_default_bundle_keeps_information_and_chart_art_visible --lib`(select·options·decide·play 5종·result), `RBMS_SKIN_CAPTURE_DIR=<폴더> cargo test -p rbms-player render_tests_skin_v3 --lib`(2P·NEAR·기록 패널 등 v3 장면).
 - 실제 GPU 창 확인 절차는 `docs/quality-assurance/2026-09-17-skin-system/checklist.md` §3.
+
+## 6. CSV 형식 스킨
+
+레퍼런스 구현이 쓰는 쉼표 구분(CSV) 형식 스킨도 그대로 읽는다. 헤더 파일(`.lr2skin`)이 문서이고 그 안에서 `#INCLUDE` 로 끌어오는 CSV 본문은 문서의 일부다. SKIN 탭 검색은 `.json`·`.json5`·`.lr2skin` 세 확장자만 문서로 본다(본문 `.csv` 는 목록에 나오지 않는다).
+
+로더는 CSV 를 별도 렌더 경로로 그리지 않는다. `crates/rbms-skin/src/csv/` 가 문서를 JSON 스킨과 같은 `SkinDef` 로 변환하고, 그 뒤의 파일 해석·커스터마이즈 행·대체 게이트·렌더러는 전부 동일하다. 따라서 §3 의 커스터마이즈와 §2.2 의 `replace` 규칙이 CSV 문서에도 그대로 적용된다.
+
+### 6.1 인코딩과 경로
+
+- 헤더와 본문 모두 **MS932(Shift_JIS)** 로 읽는다. UTF-8 로 저장하면 일본어 이름이 깨진다. 디코드할 수 없는 바이트는 대체 문자로 바꾸고 문서는 계속 읽는다.
+- 경로는 역슬래시를 슬래시로 바꾸고, `LR2files\Theme` 접두사는 스킨 검색 루트로 치환한 뒤 문서 디렉터리 기준 상대 경로로 정규화한다. 접두사가 없으면 문서 디렉터리 기준 상대 경로로 본다.
+- `#CUSTOMFILE` 치환이 먼저이고, 남은 `*` 는 기존 와일드카드·무작위 선택 경로(§3 의 파일 슬롯과 같은 코드)로 해석한다. 루트를 벗어나는 경로는 거부된다.
+- `#IMAGE` 가 가리키는 파일이 없어도 슬롯 번호는 유지되므로 뒤 이미지의 `gr` 번호가 밀리지 않는다.
+
+### 6.2 좌표
+
+`#RESOLUTION` 이 문서의 원본 해상도다(`0`=640×480, `1`=1280×720, `2`=1920×1080, `3`=3840×2160, 생략 시 640×480). 모든 `#DST_*` 사각형은 문서 공간(1280×720, y-up)으로 변환된다.
+
+```
+x' = x * 1280 / srcw
+y' = 720 - (y + h) * 720 / srch
+w' = w * 1280 / srcw
+h' = h * 720 / srch
+```
+
+`#SRC_*` 의 x·y·w·h 는 이미지 안의 좌표이므로 변환하지 않는다(`w`/`h` 가 `-1` 이면 텍스처 전체).
+
+`#DST_*` 필드 순서는 `[1]index [2]time [3]x [4]y [5]w [6]h [7]acc [8]a [9]r [10]g [11]b [12]blend [13]filter [14]angle [15]center [16]loop [17]timer [18..20]op1~3 [21..]offset id` 다. 숫자 필드의 `!` 는 음수 부호이고(`!902` = `-902` = "그 옵션이 꺼져 있을 때"), `timer` 가 0 이하면 타이머 없음이다. blend·filter·center·loop·timer 는 그 객체의 첫 `#DST_*` 중 0 이 아닌 값이 채택되고, 그리기 조건과 offset id 는 첫 줄만 읽는다.
+
+### 6.3 지원하는 명령
+
+| 분류 | 명령 | 변환 결과 |
+| --- | --- | --- |
+| 헤더 | `#INFORMATION` `#RESOLUTION` `#CUSTOMOPTION` `#CUSTOMFILE` `#CUSTOMOFFSET` `#CUSTOMOPTION_ADDITION_SETTING` | `type`·`name`·`author`·`property`·`filepath`·`offset` |
+| 공통 | `#IMAGE` `#SRC_IMAGE`/`#DST_IMAGE` `#IMAGESET`/`#SRC_IMAGESET` | `source`·`image`·`imageset` |
+| 공통 | `#SRC_NUMBER`/`#DST_NUMBER` | `value` |
+| 공통 | `#SRC_TEXT`/`#DST_TEXT` | `text` |
+| 공통 | `#SRC_SLIDER(_REFNUMBER)`/`#DST_SLIDER` | `slider` |
+| 공통 | `#SRC_BARGRAPH(_REFNUMBER)`/`#DST_BARGRAPH` | `graph` |
+| 공통 | `#SRC_BUTTON`/`#DST_BUTTON` `#SRC_ONMOUSE`/`#DST_ONMOUSE` | `image` + `act`/`click`, `mouseRect` |
+| 공통 | `#SRC_GROOVEGAUGE(_EX)`/`#DST_GROOVEGAUGE` | `gauge` |
+| 공통 | `#STRETCH` `#STARTINPUT` `#SCENETIME` `#FADEOUT` `#CLOSE` `#PLAYSTART` `#LOADEND` `#FINISHMARGIN` `#JUDGETIMER` | 문서 상단 타이밍 필드 |
+| 플레이 | `#SRC_NOTE` `#SRC_LN_*` `#SRC_HCN_*` `#SRC_MINE` `#DST_NOTE` `#DST_NOTE2` `#DST_NOTE_EXPANSION_RATE` | `note` |
+| 플레이 | `#SRC_LINE`/`#DST_LINE` | `note.group`(마디선) |
+| 플레이 | `#SRC_JUDGELINE`/`#DST_JUDGELINE` | `image`(오프셋 3 = LIFT 선행) |
+| 플레이 | `#SRC_NOWJUDGE_nP`/`#DST_NOWJUDGE_nP` `#SRC_NOWCOMBO_nP`/`#DST_NOWCOMBO_nP` | `judge` |
+| 플레이 | `#SRC_HIDDEN`/`#DST_HIDDEN` `#SRC_LIFT`/`#DST_LIFT` | `hiddenCover`·`liftCover` |
+| 플레이 | `#SRC_BGA`/`#DST_BGA` | `bga` |
+| 그래프 | `#SRC_NOTECHART*`/`#DST_NOTECHART*` `#SRC_BPMCHART`/`#DST_BPMCHART` `#SRC_TIMING_*`/`#DST_TIMING_*` | `judgegraph`·`bpmgraph`·`timingvisualizer` |
+| 선택 | `#SRC_BAR_BODY` `#DST_BAR_BODY_OFF`/`_ON` `#BAR_CENTER` `#BAR_AVAILABLE` `#SRC/DST_BAR_LEVEL` `LAMP` `MY_LAMP` `RIVAL_LAMP` `TROPHY` `LABEL` `GRAPH` `TITLE` | `songlist` 하나 |
+
+레인 번호는 `lane % 10 == 0` 이면 그 사이드의 스크래치, 그 밖에는 1P 는 `lane - 1`, 2P 는 `lane - 11` 이다. 모드의 건반 수를 넘는 번호는 무시한다. `#SRC_LN_BODY` 는 눌린 몸통과 안 눌린 몸통을 동시에 채우므로 `_INACTIVE`/`_ACTIVE` 는 덮어쓰기용이다.
+
+숫자 강판은 셀 수가 10 미만이면 객체를 만들지 않고, 24 의 배수면 음수 절반이 있어 자릿수를 하나 더 잡고 `zeropadding` 을 자기 필드에서 읽는다. 그 밖에는 10 칸 또는 11 칸으로 본다.
+
+### 6.4 무시하는 것
+
+- `#LR2FONT` 와 `#SRC_TEXT` 의 폰트 번호: 이 빌드는 모든 글자를 자체 엔진 폰트로 그린다. 정렬과 편집 가능 여부만 읽는다.
+- `#SRC_BAR_FLASH`/`#DST_BAR_FLASH`, `#SRC_README`/`#DST_README`: 레퍼런스도 빈 구현이다.
+- `#SRC_BAR_RANK`/`#DST_BAR_RANK`: 곡 목록 모델에 대응 슬롯이 없다.
+- `#DST_PM_CHARA_*`·`#SRC_PM_CHARA_IMAGE` 등 팝픈 캐릭터 명령, `#ENDOFHEADER`·`#TRANSCOLOR`·`#HELPFILE` 같은 헤더 잔여 명령.
+- `gr` 이 100 이상인 `#SRC_IMAGE`(실행 중 게임이 소유한 이미지 참조): 대응 객체가 없어 경고 후 건너뛴다.
+- 읽지 않은 명령은 이름별로 세어 "N command lines are not ones this build reads: …" 경고 한 줄로 보고한다(SKIN 탭 LOADED 행의 경고 수에 포함).
+
+### 6.5 재현한 특이 동작
+
+- **`#IF` 는 중첩되지 않는다.** 레퍼런스 파서는 조건 플래그와 skip 플래그 단 두 개만 들고 있어서, 안쪽 `#ENDIF` 가 바깥 블록까지 해제하고 안쪽 `#IF` 는 바깥 조건을 덮어쓴다. 스택을 쓰는 구현은 그런 스킨에서 다르게 그려지므로 이 빌드도 스택을 쓰지 않는다.
+- **`#INCLUDE` 는 같은 파서 상태에 인라인 전개된다.** 포함된 파일이 `#IF` 를 닫지 않으면 그 skip 상태가 부모 파일로 새어 나간다.
+- `#IF` 조건의 옵션 id 는 문서가 선언한 커스터마이즈 행으로만 판정한다(선택된 항목 = 켜짐, 같은 행의 나머지 = 꺼짐). 변환은 화면이 뜨기 전에 끝나므로 문서가 선언하지 않은 id 는 거짓으로 본다 — 레퍼런스가 실행 중 상태로 되묻는 부분과 다르다.
+- `#SETOPTION` 은 skip 중이 아닐 때만 반영된다.
+- 플레이 타입 문서에는 BGA Size(30·31)·Ghost(34~37)·Score Graph(38·39)·Judge Detail(1997~1999) 네 행과 오프셋 10·30·32·33 이 자동으로 붙는다. `#CUSTOMOPTION_ADDITION_SETTING` 에 0 을 적으면 해당 행이 빠진다.
+- 판정 팝업 순서는 이 빌드 모델이 좋은 판정부터이고 CSV 의 `#SRC_NOWJUDGE_*` 인덱스도 좋은 판정부터이므로 그대로 쓴다. 레퍼런스가 내부에서 쓰는 `5 - index` 뒤집기는 그쪽 저장 순서가 반대라서 있는 것이라 여기서는 적용하지 않는다.
+
+### 6.6 구조상 근사한 부분
+
+- 곡 목록의 레벨·램프·라벨은 CSV 가 "막대 종류별로 한 번" 선언하고 막대에 상대 배치하는 반면 이 빌드 모델은 "슬롯마다 하나"다. 그래서 처음 선언된 종류의 사각형을 슬롯별 막대 좌상단 기준으로 펼친다. 막대 이미지는 종류별로 모아 `bar-body` 이미지셋 하나로 만든다.
+- 게이지는 한 세트(기본 4칸, `_EX` 8칸)만 노드로 읽는다. PMS 명멸용 6·12칸 분할은 이 빌드 게이지 모델의 슬롯 배분(4/8/12/36)에 없어 앞 4칸(또는 8칸)으로 근사한다.
+- `#SRC_TIMING_*` 은 필드 구성이 같은 `timingvisualizer` 로 옮긴다.
+- 노트 객체와 곡 목록 객체는 CSV 에 자기 목적지가 없으므로, 선언된 레인/슬롯 사각형을 모두 감싸는 사각형을 목적지로 만들어 붙인다.

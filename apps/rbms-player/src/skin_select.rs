@@ -35,8 +35,10 @@ const SCAN_MAX_DEPTH: usize = 3;
 /// almost certainly the wrong folder, and the row could not be cycled through them anyway.
 const SCAN_MAX_DOCUMENTS: usize = 512;
 
-/// The extensions a skin document is written with, strict parser first.
-const DOCUMENT_EXTENSIONS: [&str; 2] = ["json", "json5"];
+/// The extensions a skin document is written with, strict parser first. The last is the header file
+/// of a comma-separated skin, which is the document; the bodies it includes are parts of it rather
+/// than documents of their own, so their own extension is not listed.
+const DOCUMENT_EXTENSIONS: [&str; 3] = ["json", "json5", "lr2skin"];
 
 /// One left/right step on an offset row.
 const OFFSET_STEP: f32 = 1.0;
@@ -291,6 +293,7 @@ impl SkinLibrary {
         let parser = match skin.parser {
             ParserKind::Json => "JSON",
             ParserKind::Json5 => "JSON5",
+            ParserKind::Csv => "CSV",
         };
         let lua = if uses_lua(skin) { format!(" - {LUA_INFO}") } else { String::new() };
         let author = if skin.def.author.trim().is_empty() { String::new() } else { format!(" - {}", skin.def.author) };
