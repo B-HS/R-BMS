@@ -9,6 +9,17 @@
 
 ---
 
+## 현재 작업 — 스킨 후속 기능 전면 구현 (2026-09-18, 브랜치 `feat/skin-followups`)
+
+> 사용자 지시: "커밋 푸시하고 요약한 남은 기능들도 다 구현 시작해서 커밋·푸시·머지". 사양 `docs/plan/2026-09-18-skin-followups.md`(F1~F8). 운용: 연구·구현·적대 리뷰 = Workflow(Opus max, 주제당 질문 3개·10분 상한), 사양·판정·Git = 메인 직접. 머지 대상은 `dev`(`prod`는 Phase R).
+
+- [ ] L1. 연구 — 레퍼런스 의미(커스텀 타이머·이벤트·click/act, skinpreview·practice, 24키 타입 id, pmchara, CSV 명령 표), 비디오 디코더 선택지, 오디오 루프·BGA 경로 사실 → 사양 `[미확인]` 해소.
+- [ ] L2. 구현 1차 — A 번들 결함 4건 / B BGM 루프 / C 문서 이벤트 / D skinpreview·practice·옵션 패널 마우스 / E 24키.
+- [ ] L3. 구현 2차 — F CSV 스킨 로더 / G pmchara / H 비디오 BGA.
+- [ ] L4. 적대 리뷰 → 수정 → 게이트(fmt·clippy·test·금지 명칭·diff-check) → 캡처 → 문서(skin.md·history·acknowledge·HANDOFF) → 단위 커밋 → `dev` 머지·푸시 → CI 확인.
+
+---
+
 ## 현재 작업 — 스킨 시스템 완성과 기본 스킨 전면 제작 (2026-09-17)
 
 > 사용자 지시: 제공된 외부 스킨 묶음(구조 분석 입력, 저장소 복사 금지)과 화면 12장을 참고해 기본 스킨·스킨 구조·커스터마이징을 완성하고 필요한 기능은 `docs/`에 사양을 두고 구현한다. 아래 V7-C·V8은 이 작업에 흡수한다. 운용: 조사·구현·적대 리뷰 = Workflow(Opus max, 주제당 질문 3개·10분 상한), 사양·판정·Git = Fable 직접.
