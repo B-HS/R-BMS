@@ -15,6 +15,7 @@ members = [
     "crates/rbms-config",
     "crates/rbms-library",
     "crates/rbms-course",
+    "crates/rbms-video",
     "apps/rbms-cli",
     "apps/rbms-player",
 ]
@@ -40,6 +41,12 @@ rbms-store = { path = "crates/rbms-store" }
 rbms-config = { path = "crates/rbms-config" }
 rbms-library = { path = "crates/rbms-library" }
 rbms-course = { path = "crates/rbms-course" }
+rbms-video = { path = "crates/rbms-video" }
+mpeg-ps = "0.4.0"
+mpeg-pes = "0.4.0"
+oxideav-mpeg12video = "0.0.13"
+re_mp4 = "0.5.1"
+rusty_h264-decoder = "0.16.0"
 md-5 = "0.10"
 sha2 = "0.10"
 encoding_rs = "0.8"

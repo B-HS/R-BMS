@@ -444,6 +444,18 @@ Reference-compatible JSON skin support (Phase E, 2026-09-09~10). Modules: `timer
 - **Invariants**: only the first constraint in each of the five exclusive groups survives; an invalid chart identity or empty course is rejected; failed stages still contribute to the final totals but stop subsequent loading; trophies are selected from the highest qualifying rule. The app translates its play result into `StageResult` and owns UI/IR persistence.
 - **Tests**: unit tests cover loading, normalisation, stable hashing, constraint precedence, carry-over, failure termination, totals and trophy boundaries.
 
+### rbms-video
+- **Role**: Video backgrounds. A chart whose `#BMPxx` names a movie file plays it where its picture would have gone. Pure Rust throughout: no system library, no C toolchain, nothing outside cargo on any of the three CI runners.
+- **Public API**:
+  - `VideoSource::open(path)` — parses the container on the calling thread and starts a worker decoding forward into a bounded queue. `VideoError::Unsupported` names a container this build has no decoder for.
+  - `play(song_us)` / `frame_at(song_us) -> Option<VideoFrame>` / `stop()` / `is_playing()` / `size()` — the whole playback contract. `play` takes the song time as the offset that maps the song clock onto the stream and ignores every later call; `frame_at` hands back the newest picture whose start has passed and drops the ones the clock went by; the end of the stream is `None` from then on, with no loop and no held last frame.
+  - `VideoFrame { rgba: Arc<[u8]>, width, height, generation }` — one picture, ready to upload. `generation` changes when the picture does and only then.
+  - `VIDEO_EXTENSIONS`, `is_video_extension`, `is_video_name` — the reference implementation's extension list, so the loader can tell a movie from a picture before opening either.
+- **Features**: `mpeg1` (`mpeg-ps` + `mpeg-pes` + `oxideav-mpeg12video`) reads `.mpg`/`.mpeg` program streams and `.m1v`/`.m2v` elementary streams; `h264` (`re_mp4` + `rusty_h264-decoder`) reads H.264 in `.mp4`/`.m4v`. Both are on by default and both build on the pinned stable toolchain. `.avi`, `.wmv` and `.webm` are recognised names with no pure-Rust decoder behind them.
+- **Invariants**: no seek anywhere — the decoder only runs forward, and the song clock is mapped onto it by the offset taken at `play`. The bounded queue is the backpressure: a decoder faster than the screen blocks rather than reading a whole film into memory. YUV 4:2:0 becomes RGBA in the crate, by the BT.601 studio-swing matrix with nearest-sample chroma. Dropping a source stops its worker.
+- **Limits**: the MPEG-1/2 decoder has no streaming entry point, so its worker reconstructs a whole sequence in one call and holds every picture of the file while it drains — short loops only. H.264 pictures are emitted in decode order stamped with their own composition time, which is display order for baseline streams.
+- **Tests**: unit tests for the BT.601 matrix, the sequence-header reader, the length-prefix-to-Annex-B rewrite and the extension routing; `tests/decode.rs` plays the committed 48x32 fixture clips (`clip.mpg`, `clip.m1v`, `clip.mp4`, 21 KB in total with two golden frames) through the real `play`/`frame_at` path and asserts the picture count, the size, the blank-at-the-end song time and PSNR against ffmpeg's own RGBA of picture 5 (measured 54.5 dB for MPEG-1, 55.5 dB for H.264, threshold 30 dB).
+
 ---
 
 ### apps/rbms-player

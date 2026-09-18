@@ -636,6 +636,9 @@ pub(crate) fn spawn_skin_asset_decode(jobs: Vec<SkinAssetJob>, cancel: Arc<Atomi
 
 /// Resolve every referenced background image in a chart's `bgamap` to `(id, path)` decode jobs
 /// (empty names skipped, unresolvable files dropped).
+///
+/// A name that resolves to a movie file is not an image job: it is a [`video_jobs`] job instead,
+/// and handing it to the image decoder would only lose it.
 pub(crate) fn bga_jobs(bgamap: &[String], dir: &Path) -> Vec<(i32, PathBuf)> {
     bgamap
         .iter()
@@ -645,15 +648,69 @@ pub(crate) fn bga_jobs(bgamap: &[String], dir: &Path) -> Vec<(i32, PathBuf)> {
         .collect()
 }
 
+/// Resolve every referenced background *video* in a chart's `bgamap` to `(id, path)` open jobs, on
+/// the extension list the reference implementation gates on.
+///
+/// A chart states one `#BMPxx` list whatever the files behind it are, so the same map is walked
+/// twice: once for the pictures and once for the movies, each dropping what the other takes.
+pub(crate) fn video_jobs(bgamap: &[String], dir: &Path) -> Vec<(i32, PathBuf)> {
+    bgamap
+        .iter()
+        .enumerate()
+        .filter(|(_, name)| !name.trim().is_empty())
+        .filter_map(|(id, name)| resolve_video_file(dir, name).map(|path| (id as i32, path)))
+        .collect()
+}
+
+/// Where a chart's named background video is on disk, if the name is a movie at all.
+fn resolve_video_file(dir: &Path, name: &str) -> Option<PathBuf> {
+    let (path, ext) = resolve_file(dir, name, &rbms_video::VIDEO_EXTENSIONS)?;
+    rbms_video::is_video_extension(&ext).then_some(path)
+}
+
+/// Open every background video off the frame loop, on the same worker pool the images use.
+///
+/// Opening parses the container and starts the decoder, which is milliseconds of work for a file
+/// the frame loop has no time for. A container this build has no decoder for is reported once and
+/// dropped: the chart plays with no background for that id rather than not at all.
+pub(crate) fn spawn_video_load(jobs: Vec<(i32, PathBuf)>, cancel: Arc<AtomicBool>) -> DecodePool<i32, rbms_video::VideoSource> {
+    spawn_decode(jobs, cancel, open_bga_video)
+}
+
+/// Open one background video, reporting why a file was dropped.
+fn open_bga_video(path: &PathBuf) -> Option<rbms_video::VideoSource> {
+    match rbms_video::VideoSource::open(path) {
+        Ok(source) => Some(source),
+        Err(err) => {
+            println!("no background video for {}: {err}", path.display());
+            None
+        }
+    }
+}
+
+/// The next background upload's own number, for a picture that did not come from the image
+/// decoder. A video frame is uploaded through the same cache as a decoded image, so the two have
+/// to be numbered by the same counter or one would be mistaken for the other.
+pub(crate) fn next_image_generation() -> u64 {
+    NEXT_IMAGE_GENERATION.fetch_add(1, Ordering::Relaxed)
+}
+
 /// Fan background-image decode out over the worker pool. A chart can reference hundreds of images
 /// and each is resized on the way in, which is seconds of work the frame loop cannot spend.
 pub(crate) fn spawn_bga_decode(jobs: Vec<(i32, PathBuf)>, cancel: Arc<AtomicBool>) -> DecodePool<i32, DecodedImage> {
     spawn_decode(jobs, cancel, decode_bga_file)
 }
 
-/// Where a chart's named background image is on disk.
+/// Extensions a chart's background picture may be written in.
+const BGA_IMAGE_EXTENSIONS: [&str; 4] = ["png", "bmp", "jpg", "jpeg"];
+
+/// Where a chart's named background image is on disk, if the name is a picture at all.
+///
+/// A `#BMPxx` naming a movie resolves here too, because the name is taken as written when the file
+/// beside the chart matches it, so the extension is checked rather than assumed.
 fn resolve_bga_file(dir: &Path, name: &str) -> Option<PathBuf> {
-    resolve_file(dir, name, &["png", "bmp", "jpg", "jpeg"]).map(|(path, _)| path)
+    let (path, ext) = resolve_file(dir, name, &BGA_IMAGE_EXTENSIONS)?;
+    (!rbms_video::is_video_extension(&ext)).then_some(path)
 }
 
 /// Decode one background image at its own resolution.

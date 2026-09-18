@@ -81,11 +81,24 @@ pub(crate) struct BgaLoad {
     pub(crate) total: usize,
 }
 
+/// The in-flight open of a chart's background videos, in the same shape as the images.
+///
+/// Opening one parses its container and starts its decoder, which is why it waits here with the
+/// rest rather than happening on the first frame that needs a picture.
+pub(crate) struct VideoLoad {
+    pub(crate) rx: Receiver<(i32, rbms_video::VideoSource)>,
+    pub(crate) progress: Arc<AtomicUsize>,
+    pub(crate) cancel: Arc<AtomicBool>,
+    pub(crate) total: usize,
+}
+
 /// A parsed chart waiting for the files it named, and what has arrived so far.
 pub(crate) struct ChartAssets {
     chart: PendingChart,
     images: std::collections::HashMap<i32, crate::DecodedImage>,
+    videos: std::collections::HashMap<i32, rbms_video::VideoSource>,
     bga: Option<BgaLoad>,
+    video: Option<VideoLoad>,
     keysounds: Option<KeysoundLoad>,
 }
 
@@ -102,7 +115,12 @@ impl ChartAssets {
         {
             self.bga = Some(load);
         }
-        self.keysounds.is_none() && self.bga.is_none()
+        if let Some(load) = self.video.take()
+            && !ChartAssets::poll_videos(&mut self.videos, &load)
+        {
+            self.video = Some(load);
+        }
+        self.keysounds.is_none() && self.bga.is_none() && self.video.is_none()
     }
 
     /// Drain decoded keysounds into the audio bank; `true` once every worker has reported in.
@@ -142,12 +160,28 @@ impl ChartAssets {
         true
     }
 
+    /// Drain opened background videos into the chart's own map, on the same last-drain rule.
+    fn poll_videos(videos: &mut std::collections::HashMap<i32, rbms_video::VideoSource>, load: &VideoLoad) -> bool {
+        while let Ok((id, source)) = load.rx.try_recv() {
+            videos.insert(id, source);
+        }
+        if load.progress.load(Ordering::Relaxed) < load.total {
+            return false;
+        }
+        while let Ok((id, source)) = load.rx.try_recv() {
+            videos.insert(id, source);
+        }
+        println!("opened {} BGA videos", videos.len());
+        true
+    }
+
     /// How many of the chart's files have been dealt with, and how many it named. Both counters
     /// only ever rise, so the bar drawn from them cannot go backwards.
     fn progress(&self) -> (usize, usize) {
         let sounds = self.keysounds.as_ref().map(|load| (load.progress.load(Ordering::Relaxed).min(load.total), load.total)).unwrap_or_default();
         let images = self.bga.as_ref().map(|load| (load.progress.load(Ordering::Relaxed).min(load.total), load.total)).unwrap_or_default();
-        (sounds.0 + images.0, sounds.1 + images.1)
+        let videos = self.video.as_ref().map(|load| (load.progress.load(Ordering::Relaxed).min(load.total), load.total)).unwrap_or_default();
+        (sounds.0 + images.0 + videos.0, sounds.1 + images.1 + videos.1)
     }
 
     /// What the screen says it is doing: the step still outstanding, with its own count.
@@ -159,20 +193,27 @@ impl ChartAssets {
         if let Some(load) = self.bga.as_ref() {
             steps.push(format!("{} / {} images", load.progress.load(Ordering::Relaxed).min(load.total), load.total));
         }
+        if let Some(load) = self.video.as_ref() {
+            steps.push(format!("{} / {} videos", load.progress.load(Ordering::Relaxed).min(load.total), load.total));
+        }
         steps.join("   ")
     }
 
-    /// Stop both decodes. The workers check between files, so an abandoned chart stops promptly
+    /// Stop every decode. The workers check between files, so an abandoned chart stops promptly
     /// rather than decoding hundreds of samples nobody is going to hear.
     fn stop(&self) {
-        for cancel in [self.keysounds.as_ref().map(|load| &load.cancel), self.bga.as_ref().map(|load| &load.cancel)].into_iter().flatten() {
+        let cancels =
+            [self.keysounds.as_ref().map(|load| &load.cancel), self.bga.as_ref().map(|load| &load.cancel), self.video.as_ref().map(|load| &load.cancel)];
+        for cancel in cancels.into_iter().flatten() {
             cancel.store(true, Ordering::Relaxed);
         }
     }
 
     /// The screen that plays this chart, now that everything it named is in.
     fn into_play(self) -> PlayState {
-        self.chart.into_play(self.images)
+        let mut play = self.chart.into_play(self.images);
+        play.set_videos(self.videos);
+        play
     }
 
     fn take_images(&mut self) -> std::collections::HashMap<i32, crate::DecodedImage> {
@@ -223,7 +264,14 @@ impl LoadingState {
 
     /// Wait for the files a parsed chart named — its keysounds, its background images, or both.
     pub(crate) fn assets(loaded: LoadedChart) -> LoadingState {
-        let assets = ChartAssets { chart: loaded.chart, images: std::collections::HashMap::new(), bga: loaded.bga, keysounds: loaded.keysounds };
+        let assets = ChartAssets {
+            chart: loaded.chart,
+            images: std::collections::HashMap::new(),
+            videos: std::collections::HashMap::new(),
+            bga: loaded.bga,
+            video: loaded.videos,
+            keysounds: loaded.keysounds,
+        };
         LoadingState { task: LoadingTask::Assets(Box::new(assets)), drawn: false }
     }
 
@@ -525,7 +573,14 @@ mod tests {
     }
 
     fn assets(sounds: Option<KeysoundLoad>, bga: Option<BgaLoad>) -> ChartAssets {
-        ChartAssets { chart: crate::app_play::pending_chart_for_tests(), images: std::collections::HashMap::new(), bga, keysounds: sounds }
+        ChartAssets {
+            chart: crate::app_play::pending_chart_for_tests(),
+            images: std::collections::HashMap::new(),
+            videos: std::collections::HashMap::new(),
+            bga,
+            video: None,
+            keysounds: sounds,
+        }
     }
 
     fn decoded_images() -> std::collections::HashMap<i32, crate::DecodedImage> {

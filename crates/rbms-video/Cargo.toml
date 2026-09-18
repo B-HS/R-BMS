@@ -1,0 +1,21 @@
+[package]
+name = "rbms-video"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = ["mpeg1", "h264"]
+mpeg1 = ["dep:mpeg-ps", "dep:mpeg-pes", "dep:oxideav-mpeg12video"]
+h264 = ["dep:re_mp4", "dep:rusty_h264-decoder"]
+
+[dependencies]
+mpeg-ps = { workspace = true, optional = true }
+mpeg-pes = { workspace = true, optional = true }
+oxideav-mpeg12video = { workspace = true, optional = true }
+re_mp4 = { workspace = true, optional = true }
+rusty_h264-decoder = { workspace = true, optional = true }
+
+[lints]
+workspace = true

@@ -790,3 +790,82 @@ fn a_play_document_reads_the_nudges_the_player_stored_for_it() {
     assert_eq!(pixels.pixel_at(sx + NUDGE_X as u32, sy), mark, "the nudge the player stored moved the object on the play screen");
     assert_ne!(pixels.pixel_at(sx, sy), mark, "and it left the place it was drawn at before");
 }
+
+/// The fixture clip the video crate decodes in its own tests, borrowed here so the PLAY screen is
+/// driven against a real decoder rather than a stand-in: ten pictures, 48x32, 25 frames a second.
+const VIDEO_FIXTURE: &str = "../../crates/rbms-video/tests/fixtures/clip.mpg";
+
+/// A chart whose background at measure 0 is `#BMP01`, which the test hands a video for.
+const VIDEO_CHART: &str = "#PLAYER 1\n#TITLE t\n#BPM 120\n#WAV01 a.wav\n#BMP01 clip.mpg\n#00004:01\n#00111:0101\n";
+
+/// The `#BMPxx` id that background switches to.
+const VIDEO_BGA_ID: i32 = 1;
+
+/// Song time the background timeline switches to the video.
+const VIDEO_STARTS_US: i64 = 0;
+
+/// How far past the switch the picture is asked for again. Inside the clip, and past its first two
+/// pictures, so the picture must have moved on by then.
+const VIDEO_CHANGED_BY_US: i64 = 100_000;
+
+/// The clip's own length: ten pictures at 25 frames a second.
+const VIDEO_LENGTH_US: i64 = 400_000;
+
+/// The clip's picture size.
+const VIDEO_SIZE: (u32, u32) = (48, 32);
+
+/// How long the decoder is given to produce the next picture before the test calls it stuck.
+const VIDEO_DEADLINE: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// A run of `VIDEO_CHART` with the fixture clip opened as its one background video.
+fn video_state() -> PlayState {
+    let src = rbms_parser::parse_with(VIDEO_CHART.as_bytes(), Default::default());
+    let mode = rbms_chart::detect_mode(&src, "t.bms");
+    let model = rbms_chart::to_model(&src, mode);
+    let mut state =
+        PlayState::new(PlaySession::new(model, SessionOptions::default()), std::collections::HashMap::new(), 0, SCORE_LN_MODE_FROM_CHART.to_string());
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(VIDEO_FIXTURE);
+    let source = rbms_video::VideoSource::open(&path).expect("open the fixture clip");
+    state.set_videos(std::collections::HashMap::from([(VIDEO_BGA_ID, source)]));
+    state
+}
+
+#[test]
+fn a_background_that_is_a_video_plays_from_the_timeline_event_and_goes_blank_at_its_end() {
+    let mut state = video_state();
+    state.session.tick(rbms_play::SessionClock::at(VIDEO_STARTS_US), &mut rbms_play::NullSink);
+    assert_eq!(state.session.bga_frame(), VIDEO_BGA_ID, "the background timeline switched to the video id");
+
+    let deadline = std::time::Instant::now() + VIDEO_DEADLINE;
+    let first = loop {
+        assert!(std::time::Instant::now() < deadline, "the video produced no picture at the timeline event");
+        if let Some(frame) = state.video_frame(VIDEO_STARTS_US) {
+            break frame;
+        }
+    };
+    assert_eq!((first.width, first.height), VIDEO_SIZE, "the picture is the clip's own size");
+
+    let later = loop {
+        assert!(std::time::Instant::now() < deadline, "the picture never moved on inside the clip");
+        match state.video_frame(VIDEO_STARTS_US + VIDEO_CHANGED_BY_US) {
+            Some(frame) if frame.generation != first.generation => break frame,
+            _ => std::thread::yield_now(),
+        }
+    };
+    assert_ne!(later.rgba, first.rgba, "the later picture is a different one, not the same bytes renumbered");
+    assert!(crate::assets::next_image_generation() > later.generation, "a video picture takes its upload number from the same counter a decoded image does");
+
+    loop {
+        assert!(std::time::Instant::now() < deadline, "the video never reached its end");
+        if state.video_frame(VIDEO_STARTS_US + VIDEO_LENGTH_US).is_none() {
+            break;
+        }
+    }
+    assert!(state.video_frame(VIDEO_STARTS_US + VIDEO_LENGTH_US * 2).is_none(), "the background stays blank past the end of the stream");
+}
+
+#[test]
+fn a_background_with_no_video_for_its_id_asks_for_nothing() {
+    let mut state = play_state();
+    assert!(state.video_frame(VIDEO_STARTS_US).is_none(), "a chart with no video background has no video picture");
+}

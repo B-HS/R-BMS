@@ -1,8 +1,8 @@
 //! `AppShared` methods behind the play path: loading a chart, the shared output stream, the song
 //! clock and the timing instrumentation. The PLAY screen itself lives in `stage::play`.
 #![allow(clippy::wildcard_imports)]
-use crate::assets::{bga_jobs, spawn_bga_decode};
-use crate::stage::loading::BgaLoad;
+use crate::assets::{bga_jobs, spawn_bga_decode, spawn_video_load, video_jobs};
+use crate::stage::loading::{BgaLoad, VideoLoad};
 use crate::stage::{KeysoundLoad, LoadingState, PlayState, Stage, StageId, Transition};
 use crate::*;
 
@@ -183,6 +183,7 @@ fn slice_practice_model(model: &rbms_model::Model, start_us: i64, end_us: i64) -
 pub(crate) struct LoadedChart {
     pub(crate) chart: PendingChart,
     pub(crate) bga: Option<BgaLoad>,
+    pub(crate) videos: Option<VideoLoad>,
     pub(crate) keysounds: Option<KeysoundLoad>,
 }
 
@@ -407,13 +408,21 @@ impl AppShared {
         println!("playing '{}' [{}] ({} notes) — {}", model.meta.title, mode.name, rbms_chart::count_playable_notes(&model), status);
         let bga_cancel = Arc::new(AtomicBool::new(false));
         let mut bga: Option<BgaLoad> = None;
+        let mut videos: Option<VideoLoad> = None;
         if self.config.display.bga && self.skin.bga.is_some() {
             let jobs = bga_jobs(&model.bgamap, &dir);
             let total = jobs.len();
             if total > 0 {
                 println!("decoding {total} BGA images...");
                 let (rx, progress, _) = spawn_bga_decode(jobs, bga_cancel.clone());
-                bga = Some(BgaLoad { rx, progress, cancel: bga_cancel, total });
+                bga = Some(BgaLoad { rx, progress, cancel: bga_cancel.clone(), total });
+            }
+            let jobs = video_jobs(&model.bgamap, &dir);
+            let total = jobs.len();
+            if total > 0 {
+                println!("opening {total} BGA videos...");
+                let (rx, progress, _) = spawn_video_load(jobs, bga_cancel.clone());
+                videos = Some(VideoLoad { rx, progress, cancel: bga_cancel, total });
             }
         }
 
@@ -433,13 +442,13 @@ impl AppShared {
         };
         let mut session = PlaySession::new(model, options);
         session.set_judge_setup(judge_setup);
-        Some(LoadedChart { chart: PendingChart { session, lntype, ln_mode_key }, bga, keysounds })
+        Some(LoadedChart { chart: PendingChart { session, lntype, ln_mode_key }, bga, videos, keysounds })
     }
 
     /// Enter a chart that has just been parsed: keep the LOADING screen up while its files decode,
     /// or start play right away when there is nothing left to wait for.
     pub(crate) fn enter_loaded_chart(&mut self, loaded: LoadedChart) -> Stage {
-        if loaded.bga.is_none() && loaded.keysounds.is_none() {
+        if loaded.bga.is_none() && loaded.videos.is_none() && loaded.keysounds.is_none() {
             let mut images = std::collections::HashMap::new();
             if let Some(stage) = self.practice_stage_if_requested(&mut images) {
                 return stage;

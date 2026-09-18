@@ -141,11 +141,59 @@ fn pace_ex_at(target_ex: u32, judged: u32, total: u32) -> i64 {
     (u64::from(target_ex) * u64::from(judged) / u64::from(total)) as i64
 }
 
+/// The background this frame draws, whichever kind of file the chart named for it.
+///
+/// The draw target takes four things — a number, the pixels, and the two dimensions — and neither
+/// a decoded image nor a decoded video frame is the other, so this is what the two have in common.
+enum BgaPicture<'a> {
+    Video(&'a rbms_video::VideoFrame),
+    Still(&'a crate::DecodedImage),
+}
+
+impl BgaPicture<'_> {
+    /// This picture's own upload number, which is what a draw target caches on.
+    fn generation(&self) -> u64 {
+        match self {
+            BgaPicture::Video(frame) => frame.generation,
+            BgaPicture::Still(image) => image.generation,
+        }
+    }
+
+    fn rgba(&self) -> &[u8] {
+        match self {
+            BgaPicture::Video(frame) => &frame.rgba,
+            BgaPicture::Still(image) => &image.rgba,
+        }
+    }
+
+    fn width(&self) -> u32 {
+        match self {
+            BgaPicture::Video(frame) => frame.width,
+            BgaPicture::Still(image) => image.width,
+        }
+    }
+
+    fn height(&self) -> u32 {
+        match self {
+            BgaPicture::Video(frame) => frame.height,
+            BgaPicture::Still(image) => image.height,
+        }
+    }
+}
+
 /// The run in progress: the session (judge state, replay, recording, analysis clock and BGA
 /// timeline), the chart's decoded BGA images, and the LN mode the score submission reports.
 pub(crate) struct PlayState {
     pub(crate) session: PlaySession,
     bga: std::collections::HashMap<i32, crate::DecodedImage>,
+    /// The chart's background videos, by the same `#BMPxx` id as the images. A video wins over an
+    /// image of the same id, because only one of the two can have been the file the chart named.
+    videos: std::collections::HashMap<i32, rbms_video::VideoSource>,
+    /// The upload number the video picture on screen was given, beside the decoder's own number it
+    /// stands for. The two are counted separately — one per process for uploads, one per process
+    /// for decoded video frames — so a video frame is given an upload number of its own the first
+    /// time it is seen, and keeps it until the picture changes.
+    video_generation: Option<(u64, u64)>,
     /// IR `lntype` of this run (0=LN, 1=CN, 2=HCN): the chart's own `#LNMODE` when it states one,
     /// and the LN MODE the run was judged under when it does not.
     pub(crate) lntype: i32,
@@ -292,6 +340,8 @@ impl PlayState {
         PlayState {
             session,
             bga,
+            videos: std::collections::HashMap::new(),
+            video_generation: None,
             lntype,
             ln_mode_key,
             song_us: 0,
@@ -312,6 +362,46 @@ impl PlayState {
     #[cfg(test)]
     pub(crate) fn bga_count(&self) -> usize {
         self.bga.len()
+    }
+
+    /// Hand over the background videos the loading screen opened for this chart.
+    pub(crate) fn set_videos(&mut self, videos: std::collections::HashMap<i32, rbms_video::VideoSource>) {
+        self.videos = videos;
+    }
+
+    /// The video picture for this instant, when the background the chart is on right now is a
+    /// video at all.
+    ///
+    /// Playback starts the first frame a video becomes the current background: `play` takes the
+    /// song time as the offset that maps the song clock onto the stream, and ignores every later
+    /// call, so a background the chart returns to carries on rather than rewinding — there is no
+    /// seek in the decoder to rewind with.
+    ///
+    /// The picture is renumbered on the way out. A decoded video frame and a decoded image are
+    /// numbered by two different counters, and the draw target uploads by number alone, so a video
+    /// frame that kept the decoder's number could be mistaken for an image already on the canvas.
+    fn video_frame(&mut self, song_us: i64) -> Option<rbms_video::VideoFrame> {
+        let source = self.videos.get_mut(&self.session.bga_frame())?;
+        source.play(song_us);
+        let mut frame = source.frame_at(song_us)?;
+        let upload = match self.video_generation {
+            Some((decoded, upload)) if decoded == frame.generation => upload,
+            _ => {
+                let upload = crate::assets::next_image_generation();
+                self.video_generation = Some((frame.generation, upload));
+                upload
+            }
+        };
+        frame.generation = upload;
+        Some(frame)
+    }
+
+    /// Stop every background video and the thread decoding it, which is what the run ending owes a
+    /// chart whose video is longer than the chart.
+    fn stop_videos(&mut self) {
+        for source in self.videos.values_mut() {
+            source.stop();
+        }
     }
 
     /// Mark this run as a practice slice, which is what locks the gauge and ends it on the slice's
@@ -698,6 +788,7 @@ impl StageHandler for PlayState {
     }
 
     fn on_exit(&mut self, ctx: &mut FrameCtx<'_>) {
+        self.stop_videos();
         if self.practice.is_some() {
             ctx.shared.restore_practice_images(&mut self.bga);
         }
@@ -793,6 +884,8 @@ impl StageHandler for PlayState {
     fn draw(&mut self, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'_>) {
         self.ensure_pace_target(ctx.shared);
         let song = self.song_us;
+        let bga_wanted = ctx.shared.config.display.bga;
+        let video_frame = bga_wanted.then(|| self.video_frame(song)).flatten();
         let play = &self.session;
         let skin_type = mode_skin_type(ctx.shared.mode);
         if let Some(skin_type) = skin_type {
@@ -806,17 +899,18 @@ impl StageHandler for PlayState {
         let layered = skin_type.is_some_and(|skin_type| ctx.shared.skin_uses_layered_layout(skin_type));
         let native_layout = skin_type.is_some_and(|skin_type| ctx.shared.skin_uses_native_layout(skin_type));
         let built_in_background = native_layout || skin_type.is_none_or(|skin_type| !ctx.shared.has_skin_document(skin_type));
-        let frame_image = ctx.shared.config.display.bga.then(|| self.bga.get(&play.bga_frame())).flatten();
+        let still = bga_wanted.then(|| self.bga.get(&play.bga_frame())).flatten();
+        let frame_image = video_frame.as_ref().map(BgaPicture::Video).or_else(|| still.map(BgaPicture::Still));
         let mut document_background = None;
-        match (built_in_background, ctx.shared.skin.bga, frame_image) {
+        match (built_in_background, ctx.shared.skin.bga, frame_image.as_ref()) {
             (true, Some(_), Some(img)) if layered => {
                 canvas.clear_bga();
-                document_background = canvas.background_texture(img.generation, &img.rgba, img.width, img.height);
+                document_background = canvas.background_texture(img.generation(), img.rgba(), img.width(), img.height());
             }
-            (true, Some(rect), Some(img)) => canvas.set_background(img.generation, &img.rgba, img.width, img.height, rect),
+            (true, Some(rect), Some(img)) => canvas.set_background(img.generation(), img.rgba(), img.width(), img.height(), rect),
             (false, _, Some(img)) => {
                 canvas.clear_bga();
-                document_background = canvas.background_texture(img.generation, &img.rgba, img.width, img.height);
+                document_background = canvas.background_texture(img.generation(), img.rgba(), img.width(), img.height());
             }
             _ => canvas.clear_bga(),
         }
@@ -878,8 +972,8 @@ impl StageHandler for PlayState {
             self.draw_document(ctx, canvas, &hud, document_frame, Some(SkinLayer::Background));
             if let (Some(texture), Some(rect), false) = (document_background, ctx.shared.skin.bga, ctx.shared.skin_draws_background(skin_type)) {
                 let mut params = QuadParams::new(rect);
-                if let Some(img) = frame_image {
-                    params.filter = rbms_render::background_filter(rect, (img.width, img.height));
+                if let Some(img) = frame_image.as_ref() {
+                    params.filter = rbms_render::background_filter(rect, (img.width(), img.height()));
                 }
                 canvas.draw_textured_quad(texture, params);
             }
