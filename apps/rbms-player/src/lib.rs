@@ -421,6 +421,8 @@ enum Hot {
     RecordRow(usize),
     SettingTab(usize),
     SettingRow(usize),
+    /// One row of the option overlay, by its index in the panel.
+    OptionRow(usize),
     RivalRow(usize),
     RankingRow(usize),
     ModalClose,
@@ -1056,7 +1058,12 @@ impl ApplicationHandler for App {
             WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Left, .. } => {
                 let now = Instant::now();
                 let at = self.shared.cursor;
-                let transition = self.stage.handle_mouse(&mut FrameCtx { shared: &mut self.shared, now, dt: 0.0 }, at);
+                let stage = self.stage.id();
+                let mut ctx = FrameCtx { shared: &mut self.shared, now, dt: 0.0 };
+                if app_options::options_mouse(&mut ctx, stage, at) {
+                    return;
+                }
+                let transition = self.stage.handle_mouse(&mut ctx, at);
                 self.apply(transition, event_loop);
             }
             WindowEvent::KeyboardInput { event, .. } => {

@@ -12,6 +12,7 @@ use crate::skin_select::SkinRow;
 use crate::stage::{Canvas, FrameCtx, KeyConfigState, KeyInput, Stage, StageHandler, Transition};
 use crate::{apply_skin_bundle_selection, load_theme};
 use rbms_config::{AdjustOutcome, SettingId, SettingTab, adjust, step_skin};
+use rbms_render::TextureId;
 
 use crate::*;
 
@@ -20,6 +21,10 @@ const ROW_STEP_FORWARD: i32 = 1;
 
 /// One step to the left on a row.
 const ROW_STEP_BACK: i32 = -1;
+
+/// How large the SKIN tab's document preview is rendered, matching the thumbnail the screen draws
+/// it into so the picture is neither stretched nor shrunk.
+const SKIN_PREVIEW_SIZE: (u32, u32) = (256, 144);
 
 /// The settings screen's own state: the open tab and row, the rows it is showing, the in-place
 /// editor, and the inline rival list.
@@ -517,7 +522,21 @@ impl SettingsState {
             editor,
             status: self.audio_status_line(shared).unwrap_or_else(|| shared.net_status.clone()),
             rivals,
+            preview: None,
         }
+    }
+
+    /// A still of the document the SKIN tab is configuring, or `None` on any other tab.
+    ///
+    /// Rendered before the scene is assembled rather than while it is drawn, because rendering one
+    /// opens the text engine and the render context itself, and neither may be opened twice over.
+    /// Answered from the cache after the first frame, so the preview costs one comparison per frame
+    /// until the SKIN rows move.
+    fn skin_preview(&self, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'_>) -> Option<TextureId> {
+        if SettingTab::ALL.get(self.tab) != Some(&SettingTab::Skin) {
+            return None;
+        }
+        ctx.shared.skin_preview_texture(canvas, SKIN_PREVIEW_SIZE)
     }
 
     /// Keys on the row list itself, once the editor and the rival list have had their turn.
@@ -657,7 +676,9 @@ impl StageHandler for SettingsState {
 
     fn draw(&mut self, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'_>) {
         self.ensure_rows(ctx.shared);
-        let scene = self.scene(ctx.shared);
+        let preview = self.skin_preview(ctx, canvas);
+        let mut scene = self.scene(ctx.shared);
+        scene.preview = preview;
         canvas.clear_bga();
         let hot = render_settings(canvas, &scene);
         ctx.shared.hot.extend(hot.into_iter().map(|(rect, h)| {
@@ -757,5 +778,70 @@ mod tests {
         state.update(&mut FrameCtx { shared: &mut app.shared, now: std::time::Instant::now(), dt: 0.0 });
         assert!(state.font_picker.is_none());
         assert_eq!(app.shared.config.display.font_path, None, "a font that could not be read was stored anyway");
+    }
+}
+
+/// The SKIN tab's live preview of the document it is configuring.
+#[cfg(test)]
+mod preview_tests {
+    use super::*;
+    use crate::stage::HeadlessCanvas;
+    use crate::stage::render_tests::render_into;
+    use crate::stage::render_tests_skin::bundled_app;
+
+    /// A pixel well inside the thumbnail, measured down from the head of the screen. The preview is
+    /// drawn at (1010, 160) and is 256 by 144.
+    const INSIDE_PREVIEW: (u32, u32) = (1100, 220);
+
+    /// A pixel on the row panel, which the preview must not reach.
+    const ON_THE_ROWS: (u32, u32) = (400, 220);
+
+    /// The preview of the document the SKIN tab is on is rendered, drawn, and clear of the rows.
+    #[test]
+    fn the_skin_tab_draws_a_live_preview_of_the_document_it_is_configuring() {
+        rbms_render::font::use_embedded_fonts_only();
+        let (mut app, _settings) = bundled_app("v3-skin-preview");
+        let mut pixels = HeadlessCanvas::new(CW, CH);
+
+        let image = app
+            .shared
+            .skin_screens
+            .render_preview(&app.shared.skins, app.shared.config.skin.screen, SKIN_PREVIEW_SIZE)
+            .expect("the bundle's document for the tab's screen renders")
+            .clone();
+        assert_eq!((image.width, image.height), SKIN_PREVIEW_SIZE);
+        assert!(image.rgba.iter().any(|channel| *channel != 0), "the preview came out empty");
+
+        render_into(&mut app, Stage::Settings(SettingsState::on_tab(SettingTab::Skin)), &mut pixels);
+        let on_preview = pixels.pixel_at(INSIDE_PREVIEW.0, INSIDE_PREVIEW.1);
+        let on_rows = pixels.pixel_at(ON_THE_ROWS.0, ON_THE_ROWS.1);
+        assert_ne!(on_preview, on_rows, "the preview area is drawn the same as the rows beside it");
+        save("settings-skin", &pixels);
+    }
+
+    /// Saves the frame for the eye to check, when a capture directory was asked for.
+    fn save(name: &str, pixels: &HeadlessCanvas) {
+        let Some(directory) = std::env::var_os("RBMS_SKIN_CAPTURE_DIR") else {
+            return;
+        };
+        let directory = std::path::PathBuf::from(directory);
+        std::fs::create_dir_all(&directory).expect("create the capture folder");
+        let image = image::RgbaImage::from_fn(CW, CH, |x, y| {
+            let pixel = pixels.pixel_at(x, y);
+            image::Rgba([pixel.r, pixel.g, pixel.b, pixel.a])
+        });
+        image.save(directory.join(format!("{name}.png"))).expect("save the capture");
+    }
+
+    /// Every other tab leaves the preview area alone, so the thumbnail belongs to the SKIN tab and
+    /// costs the rest of the screen nothing.
+    #[test]
+    fn another_tab_draws_no_preview() {
+        rbms_render::font::use_embedded_fonts_only();
+        let (mut app, _settings) = bundled_app("v3-skin-preview-other-tab");
+        let mut pixels = HeadlessCanvas::new(CW, CH);
+        render_into(&mut app, Stage::Settings(SettingsState::on_tab(SettingTab::Display)), &mut pixels);
+        let th = rbms_render::theme();
+        assert_eq!(pixels.pixel_at(INSIDE_PREVIEW.0, INSIDE_PREVIEW.1), th.bg, "a tab with no preview painted the preview area");
     }
 }

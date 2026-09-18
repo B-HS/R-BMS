@@ -46,6 +46,10 @@ const MAX_FRACTION_DIGITS: i32 = 8;
 /// mistyped field there is a mistyped allocation -- here it is a slice that stops.
 pub(crate) const MAX_PLACES: usize = 16;
 
+/// Most practice rows one `practice` object may ask the panel for, which is how many the private
+/// id bands carry ([`super::state::PRACTICE_ROW_MAX`]).
+const MAX_PRACTICE_ROWS: i32 = super::state::PRACTICE_ROW_MAX as i32;
+
 /// Which kind of object a draw-list entry is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SkinObjectKind {
@@ -69,6 +73,11 @@ pub enum SkinObjectKind {
     TimingVisualizer,
     HitError,
     Density,
+    /// The pane that draws whichever document the skin settings are on, an rbms extension over the
+    /// reference's own, which offers it on the skin selection screen alone.
+    SkinPreview,
+    /// The practice panel's row pane.
+    Practice,
 }
 
 /// One entry of the draw list.
@@ -104,6 +113,8 @@ impl SkinObject {
             Body::TimingVisualizer(_) => SkinObjectKind::TimingVisualizer,
             Body::HitError(_) => SkinObjectKind::HitError,
             Body::Density(_) => SkinObjectKind::Density,
+            Body::SkinPreview(_) => SkinObjectKind::SkinPreview,
+            Body::Practice(_) => SkinObjectKind::Practice,
         }
     }
 }
@@ -132,6 +143,29 @@ pub(crate) enum Body {
     TimingVisualizer(graphs::TimingVisualizerBody),
     HitError(graphs::HitErrorBody),
     Density(graphs::DensityBody),
+    SkinPreview(PreviewBody),
+    Practice(PracticeBody),
+}
+
+/// The live preview of another document, whose pixels the host renders and hands over.
+///
+/// The texture is the host's rather than the document's: what it shows is whichever document the
+/// skin settings are on, which moves while this one stays compiled. A screen with nothing to show
+/// -- no document chosen, or the chosen one is this very screen -- leaves it unset and the object
+/// draws nothing.
+#[derive(Debug, Default)]
+pub(crate) struct PreviewBody {
+    pub(crate) tex: Option<TextureId>,
+}
+
+/// The practice panel's row pane.
+///
+/// `visible_items` above zero only says how many rows the panel should answer, and the rows
+/// themselves are drawn by whatever objects the document bound to the practice ids. Zero is the
+/// reference's own fallback, where the pane draws the list inside its own rectangle.
+#[derive(Debug)]
+pub(crate) struct PracticeBody {
+    pub(crate) visible_items: i32,
 }
 
 /// One registered texture cut into a grid of animation cells.
@@ -602,6 +636,12 @@ pub(crate) fn build_body(
     }
     if def.bga.as_ref().is_some_and(|bga| bga.id == id) {
         return Some(Body::Background);
+    }
+    if def.skinpreview.as_ref().is_some_and(|preview| preview.id == id) {
+        return Some(Body::SkinPreview(PreviewBody::default()));
+    }
+    if let Some(practice) = def.practice.as_ref().filter(|practice| practice.id == id) {
+        return Some(Body::Practice(PracticeBody { visible_items: practice.visible_items.clamp(0, MAX_PRACTICE_ROWS) }));
     }
     if let Some(body) = notes::build_note(skin, id, sources, families, assets, warnings) {
         return Some(body);

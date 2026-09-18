@@ -14,7 +14,8 @@ use rbms_skin::dst::{DrawStateSource, LuaDrawEval, SkinRect, prepare};
 use rbms_skin::loader::{Filtering, StretchKind, filtering_for, stretch_rect};
 
 use super::object::{
-    Body, DigitLayout, FloatBody, GraphBody, ImageBody, NumberBody, SkinObject, SliderBody, Sprite, TextBody, ValueSource, fraction_glyphs, integer_glyphs,
+    Body, DigitLayout, FloatBody, GraphBody, ImageBody, NumberBody, PracticeBody, PreviewBody, SkinObject, SliderBody, Sprite, TextBody, ValueSource,
+    fraction_glyphs, integer_glyphs,
 };
 use super::{MIN_TEXT_SCALE, SkinFrame, SkinViewport, TEXT_PIXELS_PER_SCALE, covers, gauge, graphs, judge, notes, songlist};
 use crate::ctx::RenderCtx;
@@ -66,6 +67,24 @@ const SHIFT_TOWARDS_START: f32 = -1.0;
 /// The alignment shift a fractional number applies, which pushes its digits the other way
 /// (`SkinFloat.draw`).
 const SHIFT_TOWARDS_END: f32 = 1.0;
+
+/// Where the practice pane's fallback list starts inside its own rectangle, as a share of the
+/// rectangle's height measured up from its foot, and how far apart its rows are -- both as the
+/// reference lays that list out (`SkinPractice.drawLegacy`).
+const PRACTICE_LEGACY_TOP_SHARE: f32 = 7.0 / 8.0;
+const PRACTICE_LEGACY_ROW_PITCH: f32 = 22.0;
+
+/// How far in from the rectangle's left edge a row's label starts, as the divisor of the
+/// rectangle's width the reference uses, and how far past the label its value sits.
+const PRACTICE_LEGACY_LABEL_INSET_DIVISOR: f32 = 8.0;
+const PRACTICE_LEGACY_VALUE_INSET: f32 = 150.0;
+
+/// Height one row of the fallback list is lettered at, in the document's own pixels.
+const PRACTICE_LEGACY_TEXT_PIXELS: f32 = 16.0;
+
+/// How much of the pane's tint an unfocused row keeps, as a fraction.
+const PRACTICE_LEGACY_DIM_NUMERATOR: u16 = 3;
+const PRACTICE_LEGACY_DIM_DENOMINATOR: u16 = 5;
 
 /// The fixed parts of one object's draw: what is being drawn, how it is tinted and turned, and where
 /// the document's space lands on screen.
@@ -178,6 +197,8 @@ pub(crate) fn draw_object<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, objec
         Body::TimingVisualizer(body) => graphs::draw_timing_visualizer(ctx, r, &place, body, rect, frame),
         Body::HitError(body) => graphs::draw_hit_error(ctx, r, &place, body, rect, frame),
         Body::Density(body) => graphs::draw_density(ctx, r, &place, body, rect, frame),
+        Body::SkinPreview(body) => draw_skin_preview(r, &place, body, rect),
+        Body::Practice(body) => draw_practice(ctx, r, &place, body, rect, frame),
     };
 
     if clipped {
@@ -208,6 +229,67 @@ fn draw_background<R: Renderer>(r: &mut R, place: &Placement<'_>, rect: SkinRect
     let filter = r.texture_size(tex).map_or(TextureFilter::Linear, |source| crate::background_filter(dst, source));
     r.draw_textured_quad(tex, place.quad(dst, UvRect::FULL, filter));
     true
+}
+
+/// The live preview of another document, at the place the document put its `skinpreview` object.
+///
+/// The host renders it and registers it; nothing is drawn until it has, which is also how the
+/// recursion guard reads: a screen previewing itself is handed no texture at all.
+fn draw_skin_preview<R: Renderer>(r: &mut R, place: &Placement<'_>, body: &PreviewBody, rect: SkinRect) -> bool {
+    let Some(tex) = body.tex else {
+        return false;
+    };
+    let dst = place.viewport.place(rect);
+    if dst.w <= 0.0 || dst.h <= 0.0 {
+        return false;
+    }
+    let filter = r.texture_size(tex).map_or(TextureFilter::Linear, |source| crate::background_filter(dst, source));
+    r.draw_textured_quad(tex, place.quad(dst, UvRect::FULL, filter));
+    true
+}
+
+/// The practice panel's row pane.
+///
+/// A pane asking for rows draws none of them itself: it only says how many the panel answers, and
+/// the document's own objects read those ids. A pane asking for none draws the list inside its own
+/// rectangle instead, which is the fallback the reference keeps for a document that lays out no
+/// rows of its own.
+fn draw_practice<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, place: &Placement<'_>, body: &PracticeBody, rect: SkinRect, frame: &SkinFrame<'_>) -> bool {
+    if body.visible_items > 0 {
+        return false;
+    }
+    let Some(rows) = frame.extra.practice() else {
+        return false;
+    };
+    let scale = (PRACTICE_LEGACY_TEXT_PIXELS * place.viewport.scale_y() / TEXT_PIXELS_PER_SCALE).max(MIN_TEXT_SCALE);
+    let label_x = rect.x + rect.w / PRACTICE_LEGACY_LABEL_INSET_DIVISOR;
+    let value_x = label_x + PRACTICE_LEGACY_VALUE_INSET;
+    let top = rect.y + rect.h * PRACTICE_LEGACY_TOP_SHARE;
+    let mut drawn = false;
+    ctx.text.reset_family();
+    for index in 0..rows.len() {
+        let Some((label, value)) = rows.row(index) else {
+            break;
+        };
+        let line = top - (index as f32 + 1.0) * PRACTICE_LEGACY_ROW_PITCH;
+        let at = place.viewport.place(SkinRect::new(label_x, line, value_x - label_x, 0.0));
+        let color = if index == rows.focused { place.tint } else { unfocused_tint(place.tint) };
+        ctx.draw_text(r, at.x, at.y, scale, color, label);
+        ctx.draw_text(r, at.x + at.w, at.y, scale, color, value);
+        drawn = true;
+    }
+    drawn
+}
+
+/// An unfocused practice row's colour: the pane's own tint, taken down so the focused row reads as
+/// the one being edited.
+fn unfocused_tint(color: Color) -> Color {
+    Color {
+        r: (u16::from(color.r) * PRACTICE_LEGACY_DIM_NUMERATOR / PRACTICE_LEGACY_DIM_DENOMINATOR) as u8,
+        g: (u16::from(color.g) * PRACTICE_LEGACY_DIM_NUMERATOR / PRACTICE_LEGACY_DIM_DENOMINATOR) as u8,
+        b: (u16::from(color.b) * PRACTICE_LEGACY_DIM_NUMERATOR / PRACTICE_LEGACY_DIM_DENOMINATOR) as u8,
+        a: color.a,
+    }
 }
 
 /// How far a run of digit places is nudged to keep its alignment.

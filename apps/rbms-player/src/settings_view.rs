@@ -4,7 +4,7 @@
 //! Extracted from the frame loop so the screen can be rendered headless in tests and so a tab with
 //! more rows than fit on screen scrolls instead of drawing off the bottom.
 
-use rbms_render::{Color, Rect, Renderer, draw_text, draw_text_right, fit_text, text_width, theme};
+use rbms_render::{Color, QuadParams, Rect, Renderer, TextureFilter, TextureId, draw_text, draw_text_right, fit_text, text_width, theme};
 
 /// Panel geometry, matching the layout the screen has always used.
 const PANEL_W: f32 = 720.0;
@@ -19,6 +19,21 @@ const ROWS_TOP: f32 = 160.0;
 const ROW_PITCH: f32 = 50.0;
 const ROW_H: f32 = 42.0;
 const STATUS_Y: f32 = 672.0;
+
+/// The live preview of the chosen skin document, in the strip to the right of the row panel.
+///
+/// The panel runs from `(CANVAS_W - PANEL_W) / 2` to `CANVAS_W - that`, which leaves 280 logical
+/// pixels down the right-hand edge; the thumbnail sits inside that with a margin either side, so it
+/// never covers a row and every hot rectangle the rows publish stays where it was.
+const PREVIEW_X: f32 = 1010.0;
+const PREVIEW_Y: f32 = ROWS_TOP;
+const PREVIEW_W: f32 = 256.0;
+const PREVIEW_H: f32 = 144.0;
+
+/// The frame drawn around the preview, and the caption over it.
+const PREVIEW_BORDER: f32 = 2.0;
+const PREVIEW_CAPTION_DROP: f32 = 26.0;
+const PREVIEW_CAPTION: &str = "PREVIEW";
 
 /// The inline rival list, drawn centred over the row list.
 const RIVALS_X: f32 = 380.0;
@@ -58,6 +73,10 @@ pub(crate) struct SettingsScene {
     pub(crate) status: String,
     /// The inline rival list, when it is open.
     pub(crate) rivals: Option<RivalsScene>,
+    /// A still of the document the SKIN tab is configuring, already registered with the renderer
+    /// this scene is drawn on. `None` on every other tab, and on the SKIN tab while the built-in
+    /// screen is the one chosen.
+    pub(crate) preview: Option<TextureId>,
 }
 
 /// The inline rival list's own rows and editor.
@@ -153,10 +172,27 @@ pub(crate) fn render_settings<R: Renderer>(r: &mut R, scene: &SettingsScene) -> 
         draw_text(r, x0, STATUS_Y, STATUS_SCALE, th.accent, &fit_text(&scene.status, STATUS_SCALE, PANEL_W));
     }
 
+    if let Some(preview) = scene.preview {
+        render_preview(r, preview);
+    }
     if let Some(rivals) = &scene.rivals {
         hot.extend(render_rivals(r, rivals));
     }
     hot
+}
+
+/// Draws the skin preview thumbnail beside the rows.
+///
+/// Nothing clickable: the preview is what the SKIN rows already edit, so it is shown rather than
+/// operated, and the rows keep every hot rectangle on the screen.
+fn render_preview<R: Renderer>(r: &mut R, preview: TextureId) {
+    let th = theme();
+    draw_text(r, PREVIEW_X, PREVIEW_Y - PREVIEW_CAPTION_DROP, HINT_SCALE, th.text_muted, PREVIEW_CAPTION);
+    let frame = Rect::new(PREVIEW_X - PREVIEW_BORDER, PREVIEW_Y - PREVIEW_BORDER, PREVIEW_W + PREVIEW_BORDER * 2.0, PREVIEW_H + PREVIEW_BORDER * 2.0);
+    r.fill_rect(frame, th.divider);
+    let dst = Rect::new(PREVIEW_X, PREVIEW_Y, PREVIEW_W, PREVIEW_H);
+    r.fill_rect(dst, Color::BLACK);
+    r.draw_textured_quad(preview, QuadParams { filter: TextureFilter::Linear, ..QuadParams::new(dst) });
 }
 
 fn render_rivals<R: Renderer>(r: &mut R, scene: &RivalsScene) -> Vec<(Rect, SettingsHot)> {
@@ -213,6 +249,7 @@ mod tests {
             editor: None,
             status: "logged in as dj".to_string(),
             rivals: None,
+            preview: None,
         }
     }
 
@@ -277,6 +314,29 @@ mod tests {
             })
             .collect();
         assert_eq!(rivals, vec![0, 1]);
+    }
+
+    /// The preview thumbnail is drawn where no row is, so a tab with a preview keeps every row
+    /// clickable and the rectangles the rows publish do not move.
+    #[test]
+    fn the_skin_preview_is_drawn_clear_of_the_rows() {
+        let scene = network_scene(0);
+        let mut without = CpuCanvas::new(1280, 720);
+        let plain = render_settings(&mut without, &scene);
+
+        let mut with = CpuCanvas::new(1280, 720);
+        let pixels: Vec<u8> = (0..4).flat_map(|_| [12u8, 200, 90, 255]).collect();
+        let preview = with.register_texture("preview", &pixels, 2, 2);
+        let mut previewed = network_scene(0);
+        previewed.preview = Some(preview);
+        let hot = render_settings(&mut with, &previewed);
+
+        assert_eq!(hot, plain, "the preview moved or removed a clickable region");
+        assert_eq!(with.pixel_at(PREVIEW_X as u32 + 4, PREVIEW_Y as u32 + 4), Color::rgb(12, 200, 90), "the preview did not reach the screen");
+        let panel_right = (CANVAS_W - PANEL_W) * 0.5 + PANEL_W;
+        assert!(PREVIEW_X >= panel_right, "the preview overlaps the row panel");
+        let right_edge = PREVIEW_X + PREVIEW_W;
+        assert!(right_edge <= CANVAS_W, "the preview runs off the screen at {right_edge}");
     }
 
     #[test]

@@ -32,6 +32,8 @@ mod tests;
 mod tests_list_graphs;
 #[cfg(test)]
 mod tests_play_objects;
+#[cfg(test)]
+mod tests_practice_preview;
 
 use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -52,7 +54,7 @@ pub use screen::{
     LaneTimerState, PlayLanes, PlayTimers, ResultTimers, SelectTimers, SkinDraw, render_decide_screen, render_keyconfig_screen, render_play_screen,
     render_result_screen, render_select_screen,
 };
-pub use state::{FrameExtra, OptionsRows, PlayObjectState, ResultSeriesState, SelectListState, SkinHotAction, SkinHotspot};
+pub use state::{FrameExtra, OptionsRows, PlayObjectState, PracticeRows, PracticeViewState, ResultSeriesState, SelectListState, SkinHotAction, SkinHotspot};
 
 /// Pixel height one unit of the text engine's legacy scale draws at.
 ///
@@ -342,6 +344,47 @@ impl SkinScreen {
     /// Everything that was dropped while building, one line each.
     pub fn warnings(&self) -> &[String] {
         &self.warnings
+    }
+
+    /// How many rows the document's `practice` object asks the panel for, or `None` when it
+    /// declares no such object and the panel keeps its own rows.
+    ///
+    /// Zero is a document asking for no rows of its own, which is the pane drawing the list inside
+    /// its own rectangle instead.
+    pub fn practice_visible_items(&self) -> Option<i32> {
+        self.objects.iter().find_map(|object| match &object.body {
+            object::Body::Practice(body) => Some(body.visible_items),
+            _ => None,
+        })
+    }
+
+    /// Points every `skinpreview` object at the pixels the host rendered for it, or at nothing.
+    ///
+    /// The host owns the texture because what a preview shows is whichever document the skin
+    /// settings are on, which moves while this screen stays compiled. Passing `None` -- for a
+    /// screen with nothing to preview, or one whose preview would be itself -- leaves the object
+    /// drawing nothing at all rather than the last thing it was handed.
+    pub fn set_preview_texture(&mut self, tex: Option<TextureId>) {
+        for object in &mut self.objects {
+            if let object::Body::SkinPreview(body) = &mut object.body {
+                body.tex = tex;
+            }
+        }
+    }
+
+    /// Where one named object's destination lands on a screen of `screen` logical pixels this
+    /// frame, or `None` when the document declares no such object or is not drawing it.
+    ///
+    /// The same resolution a draw makes, so a rectangle answered here is one the object really
+    /// occupies: the caller hit-tests a pointer against what it can see rather than against where
+    /// the document would have put it had every gate been open.
+    pub fn object_rect_on_screen(&self, frame: &SkinFrame<'_>, screen: (u32, u32), id: &str) -> Option<Rect> {
+        let object = self.objects.iter().find(|object| object.id == id)?;
+        let state: &dyn DrawStateSource = frame.state;
+        let gate: Option<&dyn LuaDrawEval> = frame.lua.map(|lua| lua as &dyn LuaDrawEval);
+        let resolved = prepare(&object.track, frame.now_ms, frame.timers, state, gate, (0.0, 0.0), frame.mouse)?;
+        let viewport = SkinViewport::new(self.authored, (screen.0 as f32, screen.1 as f32));
+        Some(viewport.place(resolved.rect))
     }
 
     /// Hands every texture back to `r`. A screen is unusable afterwards and must be rebuilt, which

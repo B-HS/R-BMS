@@ -20,18 +20,24 @@ use rbms_config::SkinCustomisation;
 use rbms_render::font::with_text_context;
 use rbms_render::result::{ResultContent, ResultExtras, ResultView};
 use rbms_render::skin_render::events::DocumentEvents;
-use rbms_render::skin_render::state::{DecideChart, DecideViewState, KeyConfigViewState, PlayViewState, ResultViewState, SelectViewState};
+use rbms_render::skin_render::state::{
+    DecideChart, DecideViewState, KeyConfigViewState, OPTION_ROW_FOCUSED_FIRST, OPTION_ROW_LABEL_FIRST, OPTION_ROW_VALUE_FIRST, PlayViewState, PracticeRows,
+    PracticeViewState, ResultViewState, SelectViewState,
+};
+use rbms_render::theme::OPTIONS_ROW_COUNT;
 use rbms_render::{
-    Color, FrameExtra, OptionsRows, PlayContent, Renderer, ScreenContent, SelectContent, SelectListState, SkinAssets, SkinDraw, SkinExprEval, SkinFrame,
-    SkinHotAction, SkinHotspot, SkinImage, SkinObjectKind, SkinScreen, TextContext, TextureId, render_decide_screen, render_keyconfig_screen,
+    Color, CpuCanvas, FrameExtra, OptionsRows, PlayContent, Rect, Renderer, ScreenContent, SelectContent, SelectListState, SkinAssets, SkinDraw, SkinExprEval,
+    SkinFrame, SkinHotAction, SkinHotspot, SkinImage, SkinObjectKind, SkinScreen, TextContext, TextureId, render_decide_screen, render_keyconfig_screen,
     render_play_screen, render_result_screen, render_select_screen, with_render_ctx,
 };
-use rbms_skin::dst::{LuaDrawEval, LuaExprId, OffsetSource, SkinOffset};
+use rbms_skin::dst::{DrawStateSource, LuaDrawEval, LuaExprId, OffsetSource, SkinOffset};
 use rbms_skin::loader::{LoadedSkin, SKIN_TYPE_DECIDE, SKIN_TYPE_KEY_CONFIG, SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_RESULT, skin_type_mode};
 use rbms_skin::lua::{LuaFrame, LuaSandbox};
 use rbms_skin::model::{SkinComposition, SkinDef, SkinLayer};
 use rbms_skin::property::SkinStateSource;
-use rbms_skin::timer::TimerRequest;
+use rbms_skin::property::generated::OPTION_PANEL1;
+use rbms_skin::property::{UNMAPPED_BOOLEAN, UNMAPPED_FLOAT, UNMAPPED_INTEGER, UNMAPPED_STRING};
+use rbms_skin::timer::{TimerRequest, TimerState};
 
 mod events;
 
@@ -494,6 +500,10 @@ impl PendingScreen {
 pub(crate) struct SkinScreens {
     built: BTreeMap<i32, BuiltScreen>,
     pending: BTreeMap<i32, PendingScreen>,
+    /// The one live preview, of whichever document the skin settings are on. One rather than one per
+    /// screen because only one is ever shown: the settings screen's own thumbnail and a document's
+    /// `skinpreview` pane are both looking at the row the player is editing.
+    preview: Option<PreviewCache>,
 }
 
 impl SkinScreens {
@@ -626,6 +636,7 @@ impl AppShared {
         let skins = &self.skins;
         let screens = &mut self.skin_screens;
         with_text_context(|text| screens.sync(canvas, text, screen, skins));
+        self.refresh_skin_preview(canvas, screen);
     }
 
     /// Whether a document is compiled for one screen, which is what decides whether the built-in
@@ -965,6 +976,307 @@ impl AppShared {
         };
         canvas.clear(Color::BLACK);
         with_render_ctx(|ctx| render_keyconfig_screen(ctx, canvas, Some(&document), keys))
+    }
+}
+
+/// How large the live preview of another document is drawn, in the pixels it is rendered at.
+///
+/// Sixteen by nine, so a document authored at any of the sizes the loader accepts keeps its shape,
+/// and small enough that rendering one costs a fraction of a frame.
+const PREVIEW_SIZE: (u32, u32) = (256, 144);
+
+/// The registry key the one preview texture is held under, so a refreshed preview replaces the
+/// pixels it had rather than leaving a second texture uploaded every time the settings move.
+const PREVIEW_TEXTURE_KEY: &str = "rbms.skin.preview";
+
+/// The preview of one document, rendered once and held until the document behind it is read again.
+///
+/// The pixels and the texture are kept apart because they are made at different moments: the pixels
+/// come from an offscreen pass that needs no renderer, and the texture is registered with whichever
+/// renderer the frame is being drawn on.
+struct PreviewCache {
+    screen: i32,
+    build: u64,
+    size: (u32, u32),
+    /// `None` for a document that would not render, which is remembered so the attempt is not made
+    /// again on the next frame.
+    image: Option<SkinImage>,
+    tex: Option<TextureId>,
+}
+
+/// Everything a document reads while it is being previewed: nothing at all.
+///
+/// A preview is a still of the document rather than of a run, so every property is unmapped, every
+/// timer unset and the clock is at zero. What survives that is the document's own art and the
+/// choices its customisation rows baked in when it was read, which is what a preview is for.
+#[derive(Debug, Default, Clone, Copy)]
+struct PreviewIdleState;
+
+impl OffsetSource for PreviewIdleState {
+    fn offset(&self, _id: i32) -> Option<SkinOffset> {
+        None
+    }
+}
+
+impl DrawStateSource for PreviewIdleState {
+    fn boolean(&self, id: i32) -> bool {
+        if id < 0 { !UNMAPPED_BOOLEAN } else { UNMAPPED_BOOLEAN }
+    }
+}
+
+impl SkinStateSource for PreviewIdleState {
+    fn integer(&self, _id: i32) -> i32 {
+        UNMAPPED_INTEGER
+    }
+
+    fn float(&self, _id: i32) -> f32 {
+        UNMAPPED_FLOAT
+    }
+
+    fn string(&self, _id: i32) -> &str {
+        UNMAPPED_STRING
+    }
+
+    fn timer(&self, _id: i32) -> Option<i64> {
+        None
+    }
+
+    fn now_ms(&self) -> i64 {
+        0
+    }
+}
+
+/// Reads and decodes every file one document names, on the calling thread.
+///
+/// The worker pool does the decoding, exactly as a screen build does; what is different is that the
+/// caller waits for it. A preview is asked for when the settings screen opens or the SKIN rows move,
+/// and the answer is held until that document is read again -- so the wait is paid once per document
+/// rather than once per frame, and no frame loop has to poll for it.
+fn read_document_files(document: &LoadedSkin) -> BTreeMap<SkinAssetJob, SkinAsset> {
+    let images = document.sources.values().map(|path| (SkinAssetKind::Image, path.clone()));
+    let fonts = document.fonts.values().map(|path| (SkinAssetKind::Font, path.clone()));
+    let jobs: Vec<SkinAssetJob> = images.chain(fonts).collect();
+    let (received, _progress, _total) = spawn_skin_asset_decode(jobs, Arc::new(AtomicBool::new(false)));
+    received.into_iter().collect()
+}
+
+/// Draws one document onto a canvas of its own and answers the pixels.
+///
+/// Must not be called from inside a render context or a text context: it opens both itself, and
+/// each is one borrow of a thread-local deep.
+fn render_document_offscreen(document: &LoadedSkin, size: (u32, u32)) -> Option<SkinImage> {
+    let mut canvas = CpuCanvas::new(size.0, size.1);
+    let mut assets = PlayerSkinAssets::new(document, read_document_files(document));
+    let mut compiled = with_text_context(|text| SkinScreen::build(&mut canvas, text, document, &mut assets));
+    let timers = TimerState::default();
+    let state = PreviewIdleState;
+    canvas.clear(Color::BLACK);
+    let frame = SkinFrame { now_ms: 0, timers: &timers, state: &state, lua: None, mouse: None, background: None, extra: FrameExtra::None };
+    with_render_ctx(|ctx| compiled.draw(ctx, &mut canvas, &frame));
+    compiled.release(&mut canvas);
+    SkinImage::new(size.0, size.1, canvas.pixels().to_vec())
+}
+
+impl SkinScreens {
+    /// The compiled screen one screen type is drawn with, for the caller that has something to set
+    /// on it.
+    fn get_mut(&mut self, screen: i32) -> Option<&mut SkinScreen> {
+        self.built.get_mut(&screen).map(|entry| &mut entry.screen)
+    }
+
+    /// The live preview of the document chosen for `screen`, rendered at `size`.
+    ///
+    /// Rendered once per read of that document and held afterwards, so asking every frame costs a
+    /// comparison. `None` while no document is chosen for that screen, or when the document would
+    /// not render -- and one that would not render is remembered as such rather than retried.
+    pub(crate) fn render_preview(&mut self, skins: &SkinLibrary, screen: i32, size: (u32, u32)) -> Option<&SkinImage> {
+        let build = skins.build_of(screen)?;
+        let held = self.preview.as_ref().is_some_and(|cache| cache.screen == screen && cache.build == build && cache.size == size);
+        if !held {
+            let image = skins.document(screen).and_then(|document| render_document_offscreen(document, size));
+            self.preview = Some(PreviewCache { screen, build, size, image, tex: None });
+        }
+        self.preview.as_ref()?.image.as_ref()
+    }
+
+    /// The same preview as a texture registered with `r`, for the screens that draw it.
+    ///
+    /// Registered once per preview under one key, so a frame that asks again is handed the handle it
+    /// already had rather than uploading the picture a second time.
+    pub(crate) fn preview_texture<R: Renderer>(&mut self, r: &mut R, skins: &SkinLibrary, screen: i32, size: (u32, u32)) -> Option<TextureId> {
+        self.render_preview(skins, screen, size)?;
+        let cache = self.preview.as_mut()?;
+        if cache.tex.is_none() {
+            let image = cache.image.as_ref()?;
+            cache.tex = Some(r.register_texture(PREVIEW_TEXTURE_KEY, &image.rgba, image.width, image.height));
+        }
+        cache.tex
+    }
+}
+
+/// The option panel on its own, for resolving where a document put its rows.
+///
+/// Only the panel's own ids are answered, because what is wanted is the rectangle each row landed
+/// on, and a row's rectangle is gated on the panel rather than on the chart underneath it.
+struct OptionPanelState<'a> {
+    rows: &'a OptionsRows<'a>,
+    now_ms: i64,
+    offsets: &'a MergedOffsets<'a>,
+}
+
+impl OffsetSource for OptionPanelState<'_> {
+    fn offset(&self, id: i32) -> Option<SkinOffset> {
+        self.offsets.offset(id)
+    }
+}
+
+impl DrawStateSource for OptionPanelState<'_> {
+    fn boolean(&self, id: i32) -> bool {
+        let asked = id.abs();
+        let answer = if asked == OPTION_PANEL1 {
+            self.rows.open
+        } else {
+            match option_row_of(asked, OPTION_ROW_FOCUSED_FIRST) {
+                Some(row) => self.rows.focused == row,
+                None => UNMAPPED_BOOLEAN,
+            }
+        };
+        if id < 0 { !answer } else { answer }
+    }
+}
+
+impl SkinStateSource for OptionPanelState<'_> {
+    fn integer(&self, _id: i32) -> i32 {
+        UNMAPPED_INTEGER
+    }
+
+    fn float(&self, _id: i32) -> f32 {
+        UNMAPPED_FLOAT
+    }
+
+    fn string(&self, id: i32) -> &str {
+        if let Some(row) = option_row_of(id, OPTION_ROW_LABEL_FIRST) {
+            return self.rows.labels[row];
+        }
+        if let Some(row) = option_row_of(id, OPTION_ROW_VALUE_FIRST) {
+            return self.rows.values[row].as_str();
+        }
+        UNMAPPED_STRING
+    }
+
+    fn timer(&self, _id: i32) -> Option<i64> {
+        None
+    }
+
+    fn now_ms(&self) -> i64 {
+        self.now_ms
+    }
+}
+
+/// Which option row one of the panel's private id bands names, counted from `first`.
+fn option_row_of(id: i32, first: i32) -> Option<usize> {
+    (id >= first && id < first + OPTIONS_ROW_COUNT as i32).then(|| (id - first) as usize)
+}
+
+impl AppShared {
+    /// The preview of whichever document the SKIN tab is configuring, as a texture on `canvas`.
+    ///
+    /// `None` while the built-in screen is chosen for that row, which is the caller's cue to leave
+    /// the preview area empty.
+    pub(crate) fn skin_preview_texture(&mut self, canvas: &mut Canvas<'_>, size: (u32, u32)) -> Option<TextureId> {
+        let screen = self.config.skin.screen;
+        let skins = &self.skins;
+        self.skin_screens.preview_texture(canvas, skins, screen, size)
+    }
+
+    /// Points the document drawn for `screen` at the preview it should show, or at nothing.
+    ///
+    /// The recursion guard is here: a document previewing the very screen it is drawn on would have
+    /// to render itself to draw itself, so that case is handed no texture and the pane stays empty.
+    /// Nothing is rendered at all for a document that declares no preview pane, which is every
+    /// document the bundle ships.
+    pub(crate) fn refresh_skin_preview(&mut self, canvas: &mut Canvas<'_>, screen: i32) {
+        if self.skin_screens.get(screen).is_none_or(|compiled| compiled.count_of(SkinObjectKind::SkinPreview) == 0) {
+            return;
+        }
+        let previewed = self.config.skin.screen;
+        let tex = if previewed == screen {
+            None
+        } else {
+            let skins = &self.skins;
+            self.skin_screens.preview_texture(canvas, skins, previewed, PREVIEW_SIZE)
+        };
+        if let Some(compiled) = self.skin_screens.get_mut(screen) {
+            compiled.set_preview_texture(tex);
+        }
+    }
+
+    /// The rectangle each row of the browser's document-drawn option panel occupies this frame, as
+    /// `(row, rectangle)` pairs placed on the canvas.
+    ///
+    /// Empty unless the document has actually taken the panel over, because until then the panel the
+    /// player clicks is the one the overlay draws itself.
+    ///
+    /// The rows are resolved against the panel alone ([`OptionPanelState`]) rather than against the
+    /// browser's whole frame, so a document that gated one of its rows on something else -- the
+    /// focused chart, say -- would have that row answered here as though the gate were shut.
+    pub(crate) fn option_row_rects(&self, canvas: &Canvas<'_>) -> Vec<(usize, Rect)> {
+        if !self.screen_content(SKIN_TYPE_MUSIC_SELECT).select.options {
+            return Vec::new();
+        }
+        let Some(compiled) = self.skin_screens.get(SKIN_TYPE_MUSIC_SELECT) else {
+            return Vec::new();
+        };
+        let offsets = self.skin_offsets(SKIN_TYPE_MUSIC_SELECT);
+        let rows = crate::app_options::options_rows(self);
+        let state = OptionPanelState { rows: &rows, now_ms: self.skin_now_ms(), offsets: &offsets };
+        let frame = SkinFrame {
+            now_ms: state.now_ms,
+            timers: &self.skin_timers,
+            state: &state,
+            lua: None,
+            mouse: document_cursor(self.cursor, canvas.size(), compiled.authored_size()),
+            background: None,
+            extra: FrameExtra::None,
+        };
+        (0..OPTIONS_ROW_COUNT)
+            .filter_map(|row| compiled.object_rect_on_screen(&frame, canvas.size(), &format!("option-row-{row}-value")).map(|rect| (row, rect)))
+            .collect()
+    }
+
+    /// Which play document the practice panel borrows its rows from, and how many rows it asks for.
+    ///
+    /// `None` when the chart's mode has no document, or the document declares no practice pane, and
+    /// then the panel keeps drawing its own rows.
+    pub(crate) fn practice_document(&self) -> Option<(i32, usize)> {
+        let screen = rbms_skin::loader::mode_skin_type(self.mode)?;
+        if !self.skin_document_is_enabled(screen) {
+            return None;
+        }
+        let visible = self.skin_screens.get(screen)?.practice_visible_items()?;
+        Some((screen, visible.max(0) as usize))
+    }
+
+    /// Draws the practice panel with the play document of the chart's mode: its background layer,
+    /// then its foreground layer, which is where the rows it bound to the practice ids are.
+    ///
+    /// `true` when it drew, and the panel's own rows stand aside. The rows are ordinary objects of
+    /// the document, so the two layer passes are what puts them on screen; what makes them practice
+    /// rows is the state behind them, which answers those ids and nothing else.
+    pub(crate) fn draw_practice_skin(&self, canvas: &mut Canvas<'_>, screen: i32, rows: &PracticeRows<'_>) -> bool {
+        let offsets = self.skin_offsets(screen);
+        let state = PracticeViewState { rows, now_ms: self.skin_now_ms(), offsets: Some(&offsets) };
+        let mut lua = None;
+        let inputs = FrameInputs { background: None, offsets: &offsets, extra: FrameExtra::Practice(rows) };
+        let Some(document) = self.skin_frame(canvas, screen, &state, &mut lua, inputs) else {
+            return false;
+        };
+        canvas.clear(Color::BLACK);
+        with_render_ctx(|ctx| {
+            document.draw_layer(ctx, canvas, &state, SkinLayer::Background);
+            document.draw_layer(ctx, canvas, &state, SkinLayer::Foreground);
+        });
+        true
     }
 }
 

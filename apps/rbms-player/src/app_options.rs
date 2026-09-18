@@ -17,7 +17,7 @@ use rbms_skin::timer::timer_id;
 use winit::keyboard::KeyCode;
 
 use crate::stage::{Canvas, FrameCtx, KeyInput, StageId};
-use crate::{AppShared, CH, CW};
+use crate::{AppShared, CH, CW, Hot};
 
 /// The rows the panel shows, top to bottom: what a player changes for one chart and then changes
 /// back. Everything else stays on the settings screen.
@@ -69,6 +69,9 @@ const ROW_PITCH: f32 = 34.0;
 
 /// Height of a row's highlight.
 const ROW_H: f32 = 28.0;
+
+/// How far a row's highlight starts above the row's own text, so the strip is centred on it.
+const ROW_HIGHLIGHT_RISE: f32 = 4.0;
 
 /// Text scale of the panel title.
 const TITLE_SCALE: f32 = 2.0;
@@ -180,6 +183,40 @@ pub(crate) fn options_key(ctx: &mut FrameCtx<'_>, stage: StageId, screen_holds_k
     true
 }
 
+/// Offer one left click to the overlay before the screen that is up sees it, answering whether the
+/// overlay took it.
+///
+/// Only a click that lands on one of the panel's own rows is taken. The panel has no other furniture
+/// to click and nothing to close itself with, so swallowing the rest would leave a pinned panel with
+/// the whole screen dead behind it -- and a click elsewhere meant the screen underneath before this
+/// existed.
+///
+/// A row is a value being stepped rather than a cursor being placed, because that is what a row of
+/// this panel is for: the click focuses the row and steps it, forward on the right half and back on
+/// the left, which is the arrow keys' own effect with the cursor moved first.
+pub(crate) fn options_mouse(ctx: &mut FrameCtx<'_>, stage: StageId, at: (f32, f32)) -> bool {
+    if !ctx.shared.options.is_open() || !opens_over(stage) {
+        return false;
+    }
+    let (cx, cy) = at;
+    let hit = ctx
+        .shared
+        .hot
+        .iter()
+        .rev()
+        .find(|(rect, hot)| matches!(hot, Hot::OptionRow(_)) && cx >= rect.x && cx <= rect.x + rect.w && cy >= rect.y && cy <= rect.y + rect.h)
+        .map(|(rect, hot)| (*rect, *hot));
+    let Some((rect, Hot::OptionRow(row))) = hit else {
+        return false;
+    };
+    if row >= OPTION_ROWS.len() {
+        return false;
+    }
+    ctx.shared.options.row = row;
+    step(ctx, if cx >= rect.x + rect.w * 0.5 { ROW_STEP_FORWARD } else { ROW_STEP_BACK });
+    true
+}
+
 /// The two keys that open a closed panel: one held down, one that pins it.
 ///
 /// The held one is taken from the browser rather than passed along, so the browser never sees it go
@@ -270,7 +307,12 @@ pub(crate) fn close(shared: &mut AppShared) {
 /// lay a second panel over the first. The keys carry on regardless, because the rows a document
 /// draws are still edited from here.
 pub(crate) fn draw(stage: StageId, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'_>) {
-    if !ctx.shared.options.is_open() || !opens_over(stage) || ctx.shared.screen_content(SKIN_TYPE_MUSIC_SELECT).select.options {
+    if !ctx.shared.options.is_open() || !opens_over(stage) {
+        return;
+    }
+    if ctx.shared.screen_content(SKIN_TYPE_MUSIC_SELECT).select.options {
+        let rects = ctx.shared.option_row_rects(canvas);
+        ctx.shared.hot.extend(rects.into_iter().map(|(row, rect)| (rect, Hot::OptionRow(row))));
         return;
     }
     let th = theme();
@@ -292,9 +334,11 @@ pub(crate) fn draw(stage: StageId, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'
         let label_x = x + row_override.and_then(|layout| layout.label_x).unwrap_or(PANEL_PAD_X);
         let value_right_x = x + row_override.and_then(|layout| layout.value_right_x).unwrap_or(panel.w - PANEL_PAD_X);
         let focused = index == ctx.shared.options.row;
+        let hit = Rect::new(x + PANEL_PAD_X * 0.5, row_y - ROW_HIGHLIGHT_RISE, panel.w - PANEL_PAD_X, ROW_H);
         if focused {
-            canvas.fill_rect(Rect::new(x + PANEL_PAD_X * 0.5, row_y - 4.0, panel.w - PANEL_PAD_X, ROW_H), th.row_focus);
+            canvas.fill_rect(hit, th.row_focus);
         }
+        ctx.shared.hot.push((hit, Hot::OptionRow(index)));
         let label_color = row_override.and_then(|layout| layout.label_color).unwrap_or(if focused { Color::YELLOW } else { th.text_dim });
         draw_text(canvas, label_x, row_y, ROW_SCALE, label_color, descriptor(id).label);
         let value = display_value(&ctx.shared.config, id);
@@ -625,5 +669,84 @@ mod tests {
         let typed = KeyInput { code: KeyCode::KeyA, pressed: true, released: false, text: Some("A") };
         app.stage.handle_key(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 }, typed);
         assert_eq!(app.shared.search, "A", "the letter after the shift key did not reach the search box");
+    }
+
+    /// Draws one frame of the open panel so its rows publish their rectangles, and answers the one
+    /// row `row` landed on.
+    fn drawn_row_rect(app: &mut App, row: usize) -> Rect {
+        rbms_render::font::use_embedded_fonts_only();
+        let now = std::time::Instant::now();
+        let mut canvas = HeadlessCanvas::new(CW, CH);
+        app.shared.hot.clear();
+        draw(StageId::Select, &mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 }, &mut Canvas::Headless(&mut canvas));
+        app.shared
+            .hot
+            .iter()
+            .find_map(|(rect, hot)| (*hot == Hot::OptionRow(row)).then_some(*rect))
+            .unwrap_or_else(|| panic!("row {row} published no rectangle"))
+    }
+
+    /// Offers one click to the overlay and answers whether it took it.
+    fn click(app: &mut App, at: (f32, f32)) -> bool {
+        let now = std::time::Instant::now();
+        options_mouse(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 }, StageId::Select, at)
+    }
+
+    /// A click on the right half of a row is the right arrow with the cursor moved there first: the
+    /// row takes the focus and its value steps forward.
+    #[test]
+    fn a_click_on_the_right_half_of_a_row_focuses_it_and_steps_it_forward() {
+        const CLICKED_ROW: usize = 3;
+        let mut app = app();
+        app.shared.options.open_panel(false);
+        let rect = drawn_row_rect(&mut app, CLICKED_ROW);
+        let id = OPTION_ROWS[CLICKED_ROW];
+        let before = display_value(&app.shared.config, id);
+        let mut expected = app.shared.config.clone();
+        assert_eq!(adjust(&mut expected, id, ROW_STEP_FORWARD), AdjustOutcome::Changed, "the row under test does not step");
+
+        assert!(click(&mut app, (rect.x + rect.w * 0.75, rect.y + rect.h * 0.5)), "the overlay did not take the click");
+        assert_eq!(app.shared.options.row, CLICKED_ROW, "the click did not move the cursor");
+        assert_eq!(display_value(&app.shared.config, id), display_value(&expected, id), "the row did not step forward");
+        assert_ne!(display_value(&app.shared.config, id), before, "the row did not move at all");
+    }
+
+    /// The left half steps the other way, so one row can be walked both ways with the mouse.
+    #[test]
+    fn a_click_on_the_left_half_of_a_row_steps_it_back() {
+        const CLICKED_ROW: usize = 3;
+        let mut app = app();
+        app.shared.options.open_panel(false);
+        let rect = drawn_row_rect(&mut app, CLICKED_ROW);
+        let id = OPTION_ROWS[CLICKED_ROW];
+        let mut expected = app.shared.config.clone();
+        adjust(&mut expected, id, ROW_STEP_BACK);
+
+        assert!(click(&mut app, (rect.x + rect.w * 0.25, rect.y + rect.h * 0.5)));
+        assert_eq!(app.shared.options.row, CLICKED_ROW);
+        assert_eq!(display_value(&app.shared.config, id), display_value(&expected, id), "the row did not step back");
+    }
+
+    /// A click that misses every row belongs to the screen underneath, which is where it went before
+    /// the panel could be clicked at all.
+    #[test]
+    fn a_click_away_from_the_rows_is_left_to_the_screen_underneath() {
+        let mut app = app();
+        app.shared.options.open_panel(false);
+        let rect = drawn_row_rect(&mut app, 0);
+        assert!(!click(&mut app, (rect.x - 200.0, rect.y)), "the overlay took a click that was not on a row");
+    }
+
+    /// A closed panel publishes nothing and takes no click, so the browser keeps every one of them.
+    #[test]
+    fn a_closed_panel_takes_no_click() {
+        let mut app = app();
+        rbms_render::font::use_embedded_fonts_only();
+        let now = std::time::Instant::now();
+        let mut canvas = HeadlessCanvas::new(CW, CH);
+        app.shared.hot.clear();
+        draw(StageId::Select, &mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 }, &mut Canvas::Headless(&mut canvas));
+        assert!(!app.shared.hot.iter().any(|(_, hot)| matches!(hot, Hot::OptionRow(_))), "a closed panel published rows");
+        assert!(!click(&mut app, (CW as f32 * 0.5, CH as f32 * 0.5)));
     }
 }

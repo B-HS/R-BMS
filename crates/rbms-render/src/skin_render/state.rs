@@ -143,6 +143,30 @@ pub const RESULT_TEXT_HINT: i32 = 20_204;
 /// The score server's status lines, joined into one.
 pub const RESULT_TEXT_IR: i32 = 20_205;
 
+/// The first of the practice panel's row-label ids, one per row in panel order.
+///
+/// An rbms extension: the reference draws the practice rows from the play properties the panel
+/// itself publishes, and this build's panel is a screen of its own whose rows are named here so a
+/// play document can lay them out with ordinary text objects.
+pub const PRACTICE_ROW_LABEL_FIRST: i32 = 20_401;
+
+/// The first of the practice panel's row-value ids, one per row.
+pub const PRACTICE_ROW_VALUE_FIRST: i32 = 20_421;
+
+/// The first of the practice panel's row-focus ids, one per row, answered as a boolean.
+pub const PRACTICE_ROW_FOCUSED_FIRST: i32 = 20_441;
+
+/// Most practice rows a document may bind, which is what each band above is long enough for and
+/// what a `practice` object's `visibleItems` is held to.
+pub const PRACTICE_ROW_MAX: usize = 16;
+
+/// Answered true only while the practice panel is the screen being drawn, so a play document can
+/// gate the rows it lays out for that panel and draw none of them during a run.
+///
+/// Past the end of the focus band rather than inside it: sixteen rows of focus run to 20_456, and an
+/// id shared with a row would have that row focused whenever the panel was open.
+pub const PRACTICE_SCREEN_OPEN: i32 = 20_461;
+
 /// The first of the browser detail pane's statistic cells, each `label value` as one string.
 pub const SELECT_STAT_FIRST: i32 = 20_301;
 
@@ -795,6 +819,114 @@ impl SkinStateSource for KeyConfigViewState<'_> {
     }
 }
 
+/// The practice panel's rows, as a play document reads them.
+///
+/// The labels and the values arrive as slices rather than fixed arrays because the panel's row set
+/// belongs to the application: the renderer answers whichever rows it is handed, up to
+/// [`PRACTICE_ROW_MAX`], instead of holding a second copy of the list.
+pub struct PracticeRows<'a> {
+    pub labels: &'a [&'a str],
+    pub values: &'a [String],
+    pub focused: usize,
+    /// How many rows the document asked to show, which is what a `practice` object's `visibleItems`
+    /// sets. A document asking for more rows than the panel has still only gets the panel's own.
+    pub visible: usize,
+}
+
+impl PracticeRows<'_> {
+    /// How many rows are answered: what the panel has, what the document asked for and what the id
+    /// bands are long enough for, whichever is smallest.
+    pub fn len(&self) -> usize {
+        self.labels.len().min(self.values.len()).min(self.visible).min(PRACTICE_ROW_MAX)
+    }
+
+    /// Whether no row is answered at all, which is what a document asking for none reads.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// One row's label and value, or `None` past the last answered row.
+    pub fn row(&self, index: usize) -> Option<(&str, &str)> {
+        (index < self.len()).then(|| (self.labels[index], self.values[index].as_str()))
+    }
+
+    /// Which practice row one of the panel's private id bands names, counted from `first`.
+    fn row_of(id: i32, first: i32) -> Option<usize> {
+        (id >= first && id < first + PRACTICE_ROW_MAX as i32).then(|| (id - first) as usize)
+    }
+}
+
+impl std::fmt::Debug for PracticeRows<'_> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("PracticeRows").field("rows", &self.len()).field("focused", &self.focused).finish_non_exhaustive()
+    }
+}
+
+/// The practice panel's state, read from the rows the panel itself publishes.
+///
+/// A play document is drawn here with everything else unmapped: the panel has no run behind it, so
+/// a note field, a gauge or a score reads nothing and draws nothing, and only the rows the document
+/// bound to the practice ids come out.
+pub struct PracticeViewState<'a> {
+    pub rows: &'a PracticeRows<'a>,
+    pub now_ms: i64,
+    pub offsets: Offsets<'a>,
+}
+
+impl std::fmt::Debug for PracticeViewState<'_> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("PracticeViewState").field("rows", &self.rows.len()).finish_non_exhaustive()
+    }
+}
+
+impl OffsetSource for PracticeViewState<'_> {
+    fn offset(&self, id: i32) -> Option<SkinOffset> {
+        offset_of(self.offsets, id)
+    }
+}
+
+impl DrawStateSource for PracticeViewState<'_> {
+    fn boolean(&self, id: i32) -> bool {
+        let asked = id.abs();
+        let answer = match asked {
+            PRACTICE_SCREEN_OPEN => true,
+            _ => match PracticeRows::row_of(asked, PRACTICE_ROW_FOCUSED_FIRST) {
+                Some(row) => row < self.rows.len() && self.rows.focused == row,
+                None => UNMAPPED_BOOLEAN,
+            },
+        };
+        if id < 0 { !answer } else { answer }
+    }
+}
+
+impl SkinStateSource for PracticeViewState<'_> {
+    fn integer(&self, _id: i32) -> i32 {
+        UNMAPPED_INTEGER
+    }
+
+    fn float(&self, _id: i32) -> f32 {
+        UNMAPPED_FLOAT
+    }
+
+    fn string(&self, id: i32) -> &str {
+        if let Some(row) = PracticeRows::row_of(id, PRACTICE_ROW_LABEL_FIRST) {
+            return self.rows.row(row).map_or(UNMAPPED_STRING, |(label, _)| label);
+        }
+        if let Some(row) = PracticeRows::row_of(id, PRACTICE_ROW_VALUE_FIRST) {
+            return self.rows.row(row).map_or(UNMAPPED_STRING, |(_, value)| value);
+        }
+        UNMAPPED_STRING
+    }
+
+    fn timer(&self, _id: i32) -> Option<i64> {
+        None
+    }
+
+    fn now_ms(&self) -> i64 {
+        self.now_ms
+    }
+}
+
 /// Which native action one of a document's rectangles takes the place of.
 ///
 /// The browser answers a click by hit-testing its own rows and buttons; a document that draws those
@@ -913,6 +1045,8 @@ pub enum FrameExtra<'a> {
     Play(&'a PlayObjectState<'a>),
     Select(&'a SelectListState<'a>),
     Result(&'a ResultSeriesState<'a>),
+    /// The practice panel's rows, for the `practice` object that draws them itself.
+    Practice(&'a PracticeRows<'a>),
 }
 
 impl FrameExtra<'_> {
@@ -936,6 +1070,14 @@ impl FrameExtra<'_> {
     pub fn result(&self) -> Option<&ResultSeriesState<'_>> {
         match self {
             Self::Result(state) => Some(state),
+            _ => None,
+        }
+    }
+
+    /// The practice panel's rows, when this frame is a practice frame.
+    pub fn practice(&self) -> Option<&PracticeRows<'_>> {
+        match self {
+            Self::Practice(rows) => Some(rows),
             _ => None,
         }
     }
