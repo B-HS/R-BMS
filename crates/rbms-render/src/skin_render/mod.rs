@@ -35,6 +35,7 @@ mod tests_list_graphs;
 mod tests_play_objects;
 #[cfg(test)]
 mod tests_pmchara;
+#[cfg(test)]
 mod tests_practice_preview;
 
 use std::path::Path;
