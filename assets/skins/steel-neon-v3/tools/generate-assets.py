@@ -51,6 +51,14 @@ FRAME_BORDER = 2
 FRAME_CORNER = 20
 SEPARATOR_THICKNESS = 2
 
+DUAL_FIELD_COLUMNS_14K = ((300, 320), (674, 320))
+DUAL_FIELD_COLUMNS_10K = ((336, 248), (710, 248))
+DUAL_FIELD_HEIGHT = 564
+DUAL_LANE_HEIGHT = 500
+DUAL_KEY_TOP = 508
+DUAL_KEY_HEIGHT = 56
+DUAL_FIELD_SEPARATOR_TOP = 505
+
 SEGMENT_MAP = {
     0: 'ABCDEF',
     1: 'BC',
@@ -638,11 +646,12 @@ def frame_single_play_near(palette: dict[str, str]) -> Canvas:
     return frame_canvas(palette, rects, separators, protected)
 
 
-def frame_dual_play(palette: dict[str, str]) -> Canvas:
+def frame_dual_play(palette: dict[str, str], fields: tuple[tuple[int, int], ...]) -> Canvas:
+    (left_x, left_width), (right_x, right_width) = fields
     rects = (
         (14, 8, 232, 704),
-        (300, 0, 320, 564),
-        (674, 0, 320, 564),
+        (left_x, 0, left_width, DUAL_FIELD_HEIGHT),
+        (right_x, 0, right_width, DUAL_FIELD_HEIGHT),
         (460, 572, 360, 22),
         (300, 602, 320, 28),
         (674, 602, 320, 28),
@@ -652,18 +661,18 @@ def frame_dual_play(palette: dict[str, str]) -> Canvas:
         (14, 164, 232, SEPARATOR_THICKNESS),
         (14, 346, 232, SEPARATOR_THICKNESS),
         (14, 536, 232, SEPARATOR_THICKNESS),
-        (300, 505, 320, SEPARATOR_THICKNESS),
-        (674, 505, 320, SEPARATOR_THICKNESS),
+        (left_x, DUAL_FIELD_SEPARATOR_TOP, left_width, SEPARATOR_THICKNESS),
+        (right_x, DUAL_FIELD_SEPARATOR_TOP, right_width, SEPARATOR_THICKNESS),
     )
     protected = (
         (14, 8, 232, 150),
         (14, 168, 232, 174),
         (14, 350, 232, 174),
         (14, 540, 232, 170),
-        (300, 0, 320, 500),
-        (300, 508, 320, 56),
-        (674, 0, 320, 500),
-        (674, 508, 320, 56),
+        (left_x, 0, left_width, DUAL_LANE_HEIGHT),
+        (left_x, DUAL_KEY_TOP, left_width, DUAL_KEY_HEIGHT),
+        (right_x, 0, right_width, DUAL_LANE_HEIGHT),
+        (right_x, DUAL_KEY_TOP, right_width, DUAL_KEY_HEIGHT),
         (460, 572, 360, 22),
         (300, 602, 320, 28),
         (674, 602, 320, 28),
@@ -745,7 +754,8 @@ def main() -> None:
         'frame-sp-2p.png': single_play_frame.mirrored(),
         'frame-sp-near.png': near_play_frame,
         'frame-sp-2p-near.png': near_play_frame.mirrored(),
-        'frame-dp.png': frame_dual_play(palette),
+        'frame-dp.png': frame_dual_play(palette, DUAL_FIELD_COLUMNS_14K),
+        'frame-dp-10k.png': frame_dual_play(palette, DUAL_FIELD_COLUMNS_10K),
         'frame-select.png': frame_select(palette),
         'frame-result.png': frame_result(palette),
     }

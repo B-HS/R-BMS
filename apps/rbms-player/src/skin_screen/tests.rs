@@ -137,3 +137,58 @@ fn a_document_nudge_is_read_over_the_one_made_for_its_whole_bundle() {
 
     assert_eq!(MergedOffsets::default().offset(40), None, "a document nobody has customised nudges nothing");
 }
+
+/// A play document that names a `bga` object has taken the chart's art over, and keeps it even once
+/// every destination of that object is gated off.
+///
+/// Switching BGA SIZE to OFF drops the sized destinations at load, so nothing about the object is
+/// left to draw -- and a built-in quad painted underneath would put back exactly the picture the
+/// player just turned off. The document with no `bga` object at all is the other half of the rule:
+/// it claims nothing, so the built-in slot paints as it always did.
+#[test]
+fn a_bga_object_claims_the_chart_art_even_with_every_destination_gated_off() {
+    use rbms_skin::loader::{SkinLoadOptions, SkinUserConfig, load_skin};
+
+    /// The option id the bundle's BGA SIZE row switches to when the art is turned off.
+    const BGA_OFF_OPTION: i32 = 912;
+    /// The id it carries when the art is drawn at full size, which the sized destination is gated on.
+    const BGA_LARGE_OPTION: i32 = 910;
+    /// The name of the row those two ids belong to.
+    const BGA_SIZE_ROW: &str = "BGA SIZE";
+
+    let root = std::env::temp_dir().join(format!("rbms-skin-bga-{}", std::process::id()));
+    std::fs::create_dir_all(&root).expect("the scratch folder is writable");
+    let write = |name: &str, body: &str| {
+        let path = root.join(name);
+        std::fs::write(&path, body).expect("the document is writable");
+        path
+    };
+
+    let sized = write(
+        "sized.json",
+        &format!(
+            r#"{{ "type": 0, "w": 1280, "h": 720,
+                  "category": [{{ "name": "PLAY OPTION", "item": ["{BGA_SIZE_ROW}"] }}],
+                  "property": [{{ "category": "PLAY OPTION", "name": "{BGA_SIZE_ROW}", "def": "LARGE",
+                                  "item": [{{ "name": "LARGE", "op": {BGA_LARGE_OPTION} }},
+                                           {{ "name": "OFF", "op": {BGA_OFF_OPTION} }}] }}],
+                  "bga": {{ "id": "play-bga" }},
+                  "destination": [{{ "id": "play-bga", "op": [{BGA_LARGE_OPTION}],
+                                     "dst": [{{ "time": 0, "x": 0, "y": 0, "w": 640, "h": 480 }}] }}] }}"#
+        ),
+    );
+    let bare = write("bare.json", r#"{ "type": 0, "w": 1280, "h": 720 }"#);
+
+    let turned_off = SkinUserConfig { properties: [(BGA_SIZE_ROW.to_owned(), BGA_OFF_OPTION)].into_iter().collect(), ..SkinUserConfig::default() };
+    let gated = load_skin(&sized, SkinLoadOptions::new(&root, &turned_off, rbms_model::Mode::BEAT_7K)).expect("the sized document loads");
+    assert!(!gated.destinations.iter().any(|track| track.id == "play-bga"), "turning the art off leaves the object with nothing to draw");
+    assert!(document_places_chart_art(&gated.def), "the document still owns the chart art it declared");
+
+    let drawn = SkinUserConfig::default();
+    let shown = load_skin(&sized, SkinLoadOptions::new(&root, &drawn, rbms_model::Mode::BEAT_7K)).expect("the sized document loads");
+    assert!(shown.destinations.iter().any(|track| track.id == "play-bga"), "the default size keeps the destination the art is drawn through");
+    assert!(document_places_chart_art(&shown.def), "and owns the chart art either way");
+
+    let bare = load_skin(&bare, SkinLoadOptions::new(&root, &drawn, rbms_model::Mode::BEAT_7K)).expect("the bare document loads");
+    assert!(!document_places_chart_art(&bare.def), "a document with no bga object leaves the chart art to the built-in slot");
+}

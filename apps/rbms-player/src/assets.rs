@@ -130,6 +130,7 @@ const STEEL_NEON_V3_FILES: &[BundledFile] = &[
     BundledFile { path: "images/digits-m.png", bytes: include_bytes!("../../../assets/skins/steel-neon-v3/images/digits-m.png") },
     BundledFile { path: "images/digits-s.png", bytes: include_bytes!("../../../assets/skins/steel-neon-v3/images/digits-s.png") },
     BundledFile { path: "images/frame-dp.png", bytes: include_bytes!("../../../assets/skins/steel-neon-v3/images/frame-dp.png") },
+    BundledFile { path: "images/frame-dp-10k.png", bytes: include_bytes!("../../../assets/skins/steel-neon-v3/images/frame-dp-10k.png") },
     BundledFile { path: "images/frame-result.png", bytes: include_bytes!("../../../assets/skins/steel-neon-v3/images/frame-result.png") },
     BundledFile { path: "images/frame-select.png", bytes: include_bytes!("../../../assets/skins/steel-neon-v3/images/frame-select.png") },
     BundledFile { path: "images/frame-sp-2p-near.png", bytes: include_bytes!("../../../assets/skins/steel-neon-v3/images/frame-sp-2p-near.png") },

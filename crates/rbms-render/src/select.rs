@@ -59,6 +59,12 @@ pub struct RecordRowView {
     pub ex: u32,
     pub max_ex: u32,
     pub bp: u32,
+    /// How the run's notes were judged, best judgement first, in the order the score screen counts
+    /// them. The detail panel has no room for six lines of its own, but a document that makes room
+    /// reads them through the same ids the score screen answers.
+    pub counts: [u32; 6],
+    /// The longest unbroken run of the play.
+    pub max_combo: u32,
     /// Optional EX-trend tag versus the next-older play, e.g. `("+45", GREEN)`.
     pub trend: Option<(String, Color)>,
 }

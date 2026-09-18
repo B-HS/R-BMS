@@ -29,7 +29,7 @@ fn row(folder: bool, title: &str, badges: RowBadges, lamp: Color, count: Option<
 }
 
 fn rec(when: &str, lamp: Color, label: &'static str, ex: u32, max: u32, bp: u32, trend: Option<(String, Color)>) -> RecordRowView {
-    RecordRowView { when: when.into(), lamp, lamp_label: label, ex, max_ex: max, bp, trend }
+    RecordRowView { when: when.into(), lamp, lamp_label: label, ex, max_ex: max, bp, counts: [780, 210, 40, 6, 6, 0], max_combo: 903, trend }
 }
 
 fn main() {

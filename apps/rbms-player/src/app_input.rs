@@ -368,7 +368,17 @@ impl AppShared {
         let (label, color) = clear_label_color(clear_type_from_id(r.clear));
         let trend = older.filter(|_| self.config.display.score_graph).map(|o| ex_delta_label(r.ex_score as i64 - o.ex_score as i64));
         let when = format!("{}{}", fmt_datetime(r.played_at), rule_version_mark(r.rule_version));
-        RecordRowView { when, lamp: color, lamp_label: label, ex: r.ex_score, max_ex: r.max_ex, bp: r.counts[3] + r.counts[4] + r.counts[5], trend }
+        RecordRowView {
+            when,
+            lamp: color,
+            lamp_label: label,
+            ex: r.ex_score,
+            max_ex: r.max_ex,
+            bp: r.counts[3] + r.counts[4] + r.counts[5],
+            counts: r.counts,
+            max_combo: r.max_combo,
+            trend,
+        }
     }
 }
 

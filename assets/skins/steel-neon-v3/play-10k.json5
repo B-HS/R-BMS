@@ -25,7 +25,7 @@
     ],
     source: [
         { id: 'background', path: 'images/play-bg.png' },
-        { id: 'foreground', path: 'images/frame-dp.png' },
+        { id: 'foreground', path: 'images/frame-dp-10k.png' },
         { id: 'ui', path: 'images/ui.png' },
         { id: 'notes', path: 'images/notes.png' },
         { id: 'cover', path: 'images/covers/*.png' },

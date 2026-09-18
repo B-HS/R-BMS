@@ -28,7 +28,7 @@ use rbms_render::{
 use rbms_skin::dst::{LuaDrawEval, LuaExprId, OffsetSource, SkinOffset};
 use rbms_skin::loader::{LoadedSkin, SKIN_TYPE_DECIDE, SKIN_TYPE_KEY_CONFIG, SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_RESULT, skin_type_mode};
 use rbms_skin::lua::{LuaFrame, LuaSandbox};
-use rbms_skin::model::{SkinComposition, SkinLayer};
+use rbms_skin::model::{SkinComposition, SkinDef, SkinLayer};
 use rbms_skin::property::SkinStateSource;
 
 use crate::assets::{DecodePool, SkinAsset, SkinAssetJob, SkinAssetKind, skin_document_is_enabled, spawn_skin_asset_decode};
@@ -137,6 +137,10 @@ struct BuiltScreen {
     /// draws, once per block, for every screen drawn. Neither side of the question moves while a
     /// screen is built, so it is answered once and read from here.
     content: ScreenContent,
+    /// Whether this document placed the chart's art itself, so the built-in slot must leave it
+    /// alone. Read off the document rather than the compiled screen, for the reason
+    /// [`document_places_chart_art`] gives.
+    places_chart_art: bool,
 }
 
 /// Which of the three screens a skin type belongs to, for the screens that let a document stand in
@@ -366,6 +370,19 @@ fn screen_content_of(screen: i32, compiled: &SkinScreen, names: &std::collection
     content
 }
 
+/// Whether a document places the chart's own art, which is a matter of declaring a `bga` object
+/// rather than of drawing one this frame.
+///
+/// Declaring is the whole test. A document may gate every destination of its `bga` object off --
+/// which is how the default bundle spells BGA SIZE OFF -- and it has still taken the art over: a
+/// built-in quad painted underneath would put back exactly the picture the player turned off, and
+/// the document would have to keep a fully transparent destination alive purely to hold its claim.
+/// A document with no `bga` object at all has claimed nothing, and the built-in slot paints as it
+/// always did.
+fn document_places_chart_art(def: &SkinDef) -> bool {
+    def.bga.is_some()
+}
+
 /// The nudges one document is drawn with: what the player chose for the whole bundle, with what was
 /// chosen inside this document laid over it.
 ///
@@ -521,7 +538,13 @@ impl SkinScreens {
             }
         }
         let content = screen_content_of(screen, &compiled, document.replace_names());
-        self.built.insert(screen, BuiltScreen { screen: compiled, build: pending.build, content });
+        let places_chart_art = document_places_chart_art(&document.def);
+        self.built.insert(screen, BuiltScreen { screen: compiled, build: pending.build, content, places_chart_art });
+    }
+
+    /// Whether the document compiled for `screen` places the chart's art itself.
+    fn places_chart_art(&self, screen: i32) -> bool {
+        self.built.get(&screen).is_some_and(|entry| entry.places_chart_art)
     }
 
     /// Which blocks of native output the compiled document for `screen` has taken over, or none at
@@ -649,10 +672,10 @@ impl AppShared {
         self.ir_status.lines().iter().map(|(text, _)| text.as_str()).collect::<Vec<_>>().join(IR_STATUS_SEPARATOR)
     }
 
-    /// Whether the compiled document for `screen` places the chart's art itself, so the built-in
-    /// slot must not paint it a second time underneath.
+    /// Whether the document for `screen` places the chart's art itself, so the built-in slot must
+    /// not paint it a second time underneath.
     pub(crate) fn skin_draws_background(&self, screen: Option<i32>) -> bool {
-        screen.and_then(|screen| self.skin_screens.get(screen)).is_some_and(|compiled| compiled.count_of(SkinObjectKind::Background) > 0)
+        screen.is_some_and(|screen| self.skin_screens.places_chart_art(screen))
     }
 
     pub(crate) fn skin_offsets(&self, screen: i32) -> MergedOffsets<'_> {

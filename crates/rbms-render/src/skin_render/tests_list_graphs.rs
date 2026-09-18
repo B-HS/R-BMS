@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use rbms_skin::dst::{DrawStateSource, LuaExprId, OffsetSource, SkinOffset};
 use rbms_skin::loader::{HOTSPOT_ACTIONS, SkinLoadOptions, SkinUserConfig, load_skin};
-use rbms_skin::property::generated::OPTION_PANEL1;
+use rbms_skin::property::generated::{NUMBER_BAD, NUMBER_GOOD, NUMBER_GREAT, NUMBER_MAXCOMBO, NUMBER_MISS, NUMBER_PERFECT, NUMBER_POOR, OPTION_PANEL1};
 use rbms_skin::property::{SkinStateSource, UNMAPPED_BOOLEAN, UNMAPPED_FLOAT, UNMAPPED_INTEGER, UNMAPPED_STRING};
 use rbms_skin::timer::TimerState;
 
@@ -24,7 +24,7 @@ use crate::ctx::RenderCtx;
 use crate::font::TextContext;
 use crate::playfield::{LaneShade, PlayfieldView};
 use crate::result::ResultPalette;
-use crate::select::{CoverState, DensityView, DetailView, RecordsView, SelectDetail, SelectRow, SelectView};
+use crate::select::{CoverState, DensityView, DetailView, RecordRowView, RecordsView, SelectDetail, SelectRow, SelectView};
 use crate::skin::Skin;
 use crate::theme::OPTIONS_ROW_COUNT;
 use crate::{BYTES_PER_PIXEL, Color, CpuCanvas, Rect, Renderer};
@@ -379,6 +379,66 @@ fn the_option_panels_rows_answer_the_private_ids_a_document_asks_them_by() {
         assert_eq!(state.boolean(OPTION_ROW_FOCUSED_FIRST + at), row == 3, "row {row} disagreed about being focused");
     }
     assert!(state.boolean(OPTION_PANEL1), "an open panel does not report itself open");
+}
+
+/// The judgement counts and the longest combo of the focused chart's best run answer the same whole
+/// number ids the score screen answers, so a browser document can show a chart's best run broken down
+/// rather than only its total.
+///
+/// A chart nothing has been played on answers every one of them zero: that is a real reading -- no
+/// run, no notes judged -- and not an absent one, so a document draws six zeroes rather than the
+/// counts of whichever chart was focused last.
+#[test]
+fn the_focused_charts_best_run_answers_the_judgement_count_ids() {
+    /// The ids a document reads one run's judgement counts through, best judgement first.
+    const JUDGE_COUNT_IDS: [i32; 6] = [NUMBER_PERFECT, NUMBER_GREAT, NUMBER_GOOD, NUMBER_BAD, NUMBER_POOR, NUMBER_MISS];
+    /// The best run the fixture chart carries, in that same order.
+    const BEST_COUNTS: [u32; 6] = [812, 134, 27, 4, 9, 3];
+    /// The longest unbroken run of that same play.
+    const BEST_MAX_COMBO: u32 = 604;
+
+    let best = RecordRowView {
+        when: "2026-09-18 12:00".to_owned(),
+        lamp: Color::GREEN,
+        lamp_label: "HARD",
+        ex: 1758,
+        max_ex: 1978,
+        bp: BEST_COUNTS[3] + BEST_COUNTS[4] + BEST_COUNTS[5],
+        counts: BEST_COUNTS,
+        max_combo: BEST_MAX_COMBO,
+        trend: None,
+    };
+    let mut played = empty_browser();
+    played.detail = detail_with_record(Some(best));
+    let state = SelectViewState::new(&played, 0, None, None);
+    for (judgement, id) in JUDGE_COUNT_IDS.into_iter().enumerate() {
+        assert_eq!(state.integer(id), BEST_COUNTS[judgement] as i32, "judgement {judgement} answered the wrong count");
+    }
+    assert_eq!(state.integer(NUMBER_MAXCOMBO), BEST_MAX_COMBO as i32, "the longest combo of the best run");
+
+    let mut unplayed = empty_browser();
+    unplayed.detail = detail_with_record(None);
+    let state = SelectViewState::new(&unplayed, 0, None, None);
+    for (judgement, id) in JUDGE_COUNT_IDS.into_iter().enumerate() {
+        assert_eq!(state.integer(id), 0, "judgement {judgement} of a chart with no record");
+    }
+    assert_eq!(state.integer(NUMBER_MAXCOMBO), 0, "and the longest combo of a chart with no record");
+
+    let nothing_focused = empty_browser();
+    let state = SelectViewState::new(&nothing_focused, 0, None, None);
+    assert_eq!(state.integer(JUDGE_COUNT_IDS[0]), 0, "a browser with no chart focused counts nothing either");
+    assert_eq!(state.integer(NUMBER_MAXCOMBO), 0);
+}
+
+/// A focused chart whose only local record is `best`.
+fn detail_with_record(best: Option<RecordRowView>) -> SelectDetail {
+    let plays = usize::from(best.is_some());
+    let mut detail = match detail_with_density(Vec::new()) {
+        SelectDetail::Song(detail) => detail,
+        _ => unreachable!("the density fixture focuses a chart"),
+    };
+    detail.records = RecordsView { plays, clears: plays, best, rank_bar: None, recent: Vec::new() };
+    SelectDetail::Song(detail)
 }
 
 /// A frame the browser carries no panel on answers every one of those ids as an unmapped one, so a

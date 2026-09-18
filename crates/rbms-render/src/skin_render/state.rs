@@ -27,8 +27,12 @@ use crate::theme::OPTIONS_ROW_COUNT;
 /// How many judgements a run is counted in, best first.
 const JUDGEMENTS: usize = 6;
 
-/// The whole-number ids each judgement's count answers, in the order [`ResultView::counts`] holds
-/// them.
+/// The whole-number ids each judgement's count answers, in the order [`ResultView::counts`] and
+/// [`crate::select::RecordRowView::counts`] both hold them.
+///
+/// The score screen answers them from the run that just ended and the browser from the best run
+/// recorded on the focused chart, which is the same reading the reference implementation offers on
+/// each screen.
 const JUDGE_COUNT_IDS: [i32; JUDGEMENTS] = [NUMBER_PERFECT, NUMBER_GREAT, NUMBER_GOOD, NUMBER_BAD, NUMBER_POOR, NUMBER_MISS];
 
 /// The rate id each judgement's share answers, paired with the count it is measured from.
@@ -427,6 +431,11 @@ impl SelectViewState<'_> {
     fn option_row(id: i32, first: i32) -> Option<usize> {
         (id >= first && id < first + OPTIONS_ROW_COUNT as i32).then(|| (id - first) as usize)
     }
+
+    /// The best run recorded on the focused chart, when a chart is focused and has been played.
+    fn best(&self) -> Option<&crate::select::RecordRowView> {
+        self.song().and_then(|song| song.records.best.as_ref())
+    }
 }
 
 impl OffsetSource for SelectViewState<'_> {
@@ -453,8 +462,12 @@ impl DrawStateSource for SelectViewState<'_> {
 
 impl SkinStateSource for SelectViewState<'_> {
     fn integer(&self, id: i32) -> i32 {
+        if let Some(judgement) = JUDGE_COUNT_IDS.iter().position(|count| *count == id) {
+            return self.best().map_or(0, |best| best.counts[judgement] as i32);
+        }
         match id {
             NUMBER_PLAYLEVEL => self.song().and_then(|song| song.level.parse().ok()).unwrap_or(UNMAPPED_INTEGER),
+            NUMBER_MAXCOMBO => self.best().map_or(0, |best| best.max_combo as i32),
             _ => UNMAPPED_INTEGER,
         }
     }
