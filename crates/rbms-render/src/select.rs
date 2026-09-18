@@ -1,3 +1,4 @@
+use crate::content::SelectContent;
 use crate::ctx::{RenderCtx, with_render_ctx};
 use crate::result::{RANK_BANDS, dj_rank, draw_rank_bar};
 use crate::{Color, Rect, Renderer};
@@ -251,9 +252,54 @@ pub fn render_select_on_background<R: Renderer>(r: &mut R, v: &SelectView) -> Ve
 
 /// [`render_select_on_background`] against a caller-supplied context.
 pub fn render_select_on_background_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &SelectView) -> Vec<(Rect, SelectHot)> {
+    render_select_on_background_with_content_ctx(ctx, r, v, SelectContent::default())
+}
+
+/// Draws only the blocks of the native browser `content` has left to it.
+///
+/// A document that draws the wheel, the detail pane or the top bar itself takes the rectangles that
+/// go with them too: the buttons it replaced answer through its own `hotspot` table and its rows
+/// through the wheel's slots, so the block the document took over must contribute neither pixels nor
+/// hit rectangles here. The record modal is never a block, because no document declares one.
+pub fn render_select_on_background_with_content<R: Renderer>(r: &mut R, v: &SelectView, content: SelectContent) -> Vec<(Rect, SelectHot)> {
+    with_render_ctx(|ctx| render_select_on_background_with_content_ctx(ctx, r, v, content))
+}
+
+/// [`render_select_on_background_with_content`] against a caller-supplied context.
+pub fn render_select_on_background_with_content_ctx<R: Renderer>(
+    ctx: &mut RenderCtx<'_>,
+    r: &mut R,
+    v: &SelectView,
+    content: SelectContent,
+) -> Vec<(Rect, SelectHot)> {
+    let mut hot = Vec::new();
+    if !content.topbar {
+        render_top_bar(ctx, r, v);
+        if v.modal.is_none() {
+            render_nav_bar(ctx, r, v, &mut hot);
+        }
+    }
+    if !content.list {
+        render_list(ctx, r, v, &mut hot);
+    }
+    if !content.detail {
+        match &v.detail {
+            SelectDetail::Song(d) => render_song_detail(ctx, r, v, d, &mut hot),
+            SelectDetail::Folder { label, count } => render_folder_detail(ctx, r, label, *count),
+            SelectDetail::Empty => {}
+        }
+    }
+    if let Some(modal) = &v.modal {
+        render_modal(ctx, r, modal, &mut hot);
+    }
+    hot
+}
+
+/// The strip across the head of the screen: the title, the search box or the open folder, and the
+/// ordering with the cursor's place in the list.
+fn render_top_bar<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &SelectView) {
     let th = ctx.theme;
     let list = th.select_layout.list_rect;
-    let mut hot = Vec::new();
     r.fill_rect(Rect::new(0.0, 0.0, 1280.0, 52.0), select_panel_color(th.topbar, th.select_panel_alpha));
     ctx.draw_text(r, list.x, 12.0, 2.6, th.text, "MUSIC SELECT");
     let m = v.rows.len();
@@ -276,39 +322,31 @@ pub fn render_select_on_background_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: 
     };
     ctx.draw_text_right(r, list.x + list.w, 6.0, 1.0, th.accent, &sort_line);
     ctx.draw_text_right(r, list.x + list.w, 24.0, 1.4, th.text_dim, &format!("{}/{}", (v.sel + 1).min(m.max(1)), m));
+}
 
-    if v.modal.is_none() {
-        let by = list.y + list.h + 8.0;
-        let sort_btn = format!("SORT: {}", v.sort);
-        let search_btn = if v.search.is_some() { "\u{2715} SEARCH" } else { "SEARCH" };
-        let buttons: [(&str, &str, SelectHot); 6] = [
-            (search_btn, "/", SelectHot::Search),
-            (&sort_btn, "F3", SelectHot::Sort),
-            ("FOLDERS", "O", SelectHot::Folders),
-            ("TABLES", "T", SelectHot::Tables),
-            ("RECORDS", "R", SelectHot::Records),
-            ("SETTINGS", "TAB", SelectHot::Settings),
-        ];
-        let mut bx = list.x.min(th.select_layout.detail_rect.x);
-        for (label, key, h) in buttons {
-            let active = matches!(h, SelectHot::Search) && v.search.is_some();
-            let w = nav_button(ctx, r, bx, by, label, key, active);
-            hot.push((Rect::new(bx, by, w, 30.0), h));
-            bx += w + 8.0;
-        }
-        ctx.draw_text_right(r, 1280.0 - 20.0, by + 9.0, 1.0, th.text_muted, v.guide);
+/// The row of buttons under the list, each the clickable equivalent of one of the browser's keys.
+fn render_nav_bar<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &SelectView, hot: &mut Vec<(Rect, SelectHot)>) {
+    let th = ctx.theme;
+    let list = th.select_layout.list_rect;
+    let by = list.y + list.h + 8.0;
+    let sort_btn = format!("SORT: {}", v.sort);
+    let search_btn = if v.search.is_some() { "\u{2715} SEARCH" } else { "SEARCH" };
+    let buttons: [(&str, &str, SelectHot); 6] = [
+        (search_btn, "/", SelectHot::Search),
+        (&sort_btn, "F3", SelectHot::Sort),
+        ("FOLDERS", "O", SelectHot::Folders),
+        ("TABLES", "T", SelectHot::Tables),
+        ("RECORDS", "R", SelectHot::Records),
+        ("SETTINGS", "TAB", SelectHot::Settings),
+    ];
+    let mut bx = list.x.min(th.select_layout.detail_rect.x);
+    for (label, key, h) in buttons {
+        let active = matches!(h, SelectHot::Search) && v.search.is_some();
+        let w = nav_button(ctx, r, bx, by, label, key, active);
+        hot.push((Rect::new(bx, by, w, 30.0), h));
+        bx += w + 8.0;
     }
-
-    render_list(ctx, r, v, &mut hot);
-    match &v.detail {
-        SelectDetail::Song(d) => render_song_detail(ctx, r, v, d, &mut hot),
-        SelectDetail::Folder { label, count } => render_folder_detail(ctx, r, label, *count),
-        SelectDetail::Empty => {}
-    }
-    if let Some(modal) = &v.modal {
-        render_modal(ctx, r, modal, &mut hot);
-    }
-    hot
+    ctx.draw_text_right(r, 1280.0 - 20.0, by + 9.0, 1.0, th.text_muted, v.guide);
 }
 
 fn render_list<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &SelectView, hot: &mut Vec<(Rect, SelectHot)>) {

@@ -69,6 +69,7 @@ mod tests {
     fn view() -> ResultView {
         ResultView {
             title: "CONTEXT".into(),
+            artist: String::new(),
             mode_label: "7K",
             counts: [10, 4, 3, 2, 1, 0],
             ex_score: 24,

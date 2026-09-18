@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod content;
 pub mod cpu;
 pub mod ctx;
 pub mod font;
@@ -14,6 +15,7 @@ pub mod skin_render;
 pub mod theme;
 pub mod toast;
 
+pub use content::{PlayContent, ScreenContent, SelectContent};
 pub use cpu::{CpuCanvas, apply_blend, apply_tint};
 pub use ctx::{RenderCtx, with_render_ctx};
 pub use font::{
@@ -22,7 +24,7 @@ pub use font::{
 };
 pub use glyph_atlas::{ATLAS_MAX_DIM, ATLAS_TEXTURE_KEY, AtlasEntry, GlyphAtlas, GlyphAtlasBinding};
 pub use golden::{GOLDEN_UPDATE_ENV, GoldenDiff, GoldenImage, GoldenOptions, PngCodec, assert_golden_png};
-pub use hud::{HudPace, HudView, render_hud, render_hud_ctx};
+pub use hud::{HudPace, HudView, render_hud, render_hud_ctx, render_hud_with_content, render_hud_with_content_ctx};
 pub use playfield::{LaneShade, PlayfieldView, render_key_bomb, render_lane_cover, render_playfield_on_background, render_playfield_view};
 pub use result::{
     KEY_LANE_KIND, LANE_KIND_COUNT, RANK_BANDS, RATE_STEPS, ResultExtras, ResultPalette, ResultView, SCRATCH_LANE_KIND, TargetView, dj_rank, dj_rank_label,
@@ -35,8 +37,9 @@ pub use select::{
 };
 pub use skin::{Skin, SkinConfig, SkinError};
 pub use skin_render::{
-    NoExpressions, PlayTimers, SelectTimers, SkinAssets, SkinDraw, SkinExprEval, SkinFrame, SkinImage, SkinObjectKind, SkinScreen, SkinViewport,
-    render_decide_screen, render_keyconfig_screen, render_play_screen, render_result_screen, render_select_screen,
+    FrameExtra, LaneTimerState, NoExpressions, OptionsRows, PlayLanes, PlayObjectState, PlayTimers, ResultSeriesState, ResultTimers, SelectListState,
+    SelectTimers, SkinAssets, SkinDraw, SkinExprEval, SkinFrame, SkinHotAction, SkinHotspot, SkinImage, SkinObjectKind, SkinScreen, SkinViewport,
+    parse_hex_color, render_decide_screen, render_keyconfig_screen, render_play_screen, render_result_screen, render_select_screen,
 };
 pub use theme::{SelectLayout, SelectLayoutConfig, Theme, ThemeConfig, select_layout, set_theme, theme};
 pub use toast::{ToastLevel, ToastView, render_toasts, render_toasts_ctx, render_toasts_with_bottom_inset, toast_color};

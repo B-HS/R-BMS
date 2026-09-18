@@ -13,6 +13,7 @@ const GOLDEN_RESULT_PACED: u64 = 0x5782_d81c_02bb_d1a9;
 fn result_view() -> ResultView {
     ResultView {
         title: "GOLDEN RESULT".into(),
+        artist: String::new(),
         mode_label: "7K",
         counts: [712, 64, 21, 8, 5, 2],
         ex_score: 1488,

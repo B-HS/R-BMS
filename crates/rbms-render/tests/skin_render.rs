@@ -8,11 +8,11 @@
 
 use std::path::{Path, PathBuf};
 
-use rbms_render::skin_render::state::SelectViewState;
+use rbms_render::skin_render::state::{DecideChart, DecideViewState, SelectViewState};
 use rbms_render::skin_render::{SkinDraw, render_decide_screen, render_keyconfig_screen, render_result_screen, render_select_screen};
 use rbms_render::{
-    Color, CpuCanvas, GoldenImage, GoldenOptions, NoExpressions, PngCodec, RenderCtx, Renderer, SelectDetail, SelectView, SkinAssets, SkinFrame, SkinImage,
-    SkinObjectKind, SkinScreen, TextContext, assert_golden_png, render_select_ctx,
+    Color, CpuCanvas, FrameExtra, GoldenImage, GoldenOptions, NoExpressions, PngCodec, RenderCtx, Renderer, SelectDetail, SelectView, SkinAssets, SkinFrame,
+    SkinImage, SkinObjectKind, SkinScreen, TextContext, assert_golden_png, render_select_ctx,
 };
 use rbms_skin::dst::LuaExprId;
 use rbms_skin::loader::{SkinLoadOptions, SkinUserConfig, load_skin};
@@ -222,7 +222,7 @@ fn frame_at(now_ms: i64, state: &FixtureState) -> CpuCanvas {
     canvas.clear(Color::BLACK);
 
     let mut ctx = RenderCtx::new(rbms_render::theme(), &mut text);
-    let frame = SkinFrame { now_ms, timers: &timers, state, lua: None, mouse: None, background: Some(backdrop) };
+    let frame = SkinFrame { now_ms, timers: &timers, state, lua: None, mouse: None, background: Some(backdrop), extra: FrameExtra::None };
     screen.draw(&mut ctx, &mut canvas, &frame);
     canvas
 }
@@ -339,7 +339,7 @@ fn drawing_a_document_leaves_the_built_in_screens_untouched() {
     let mut timers = TimerState::new();
     timers.set_on(FIXTURE_TIMER, 0);
     let state = FixtureState::default();
-    let frame = SkinFrame { now_ms: 0, timers: &timers, state: &state, lua: None, mouse: None, background: None };
+    let frame = SkinFrame { now_ms: 0, timers: &timers, state: &state, lua: None, mouse: None, background: None, extra: FrameExtra::None };
     screen.draw(&mut RenderCtx::new(rbms_render::theme(), &mut text), &mut scratch, &frame);
 
     let mut after = CpuCanvas::new(CANVAS_W, CANVAS_H);
@@ -350,7 +350,7 @@ fn drawing_a_document_leaves_the_built_in_screens_untouched() {
 #[test]
 fn a_screen_state_answers_the_ids_its_view_knows() {
     let view = plain_select_view();
-    let state = SelectViewState { view: &view, now_ms: 17, offsets: None };
+    let state = SelectViewState::new(&view, 17, None, None);
     assert_eq!(state.now_ms(), 17, "the frame clock is the one the caller passed");
     assert_eq!(state.string(rbms_skin::property::generated::STRING_DIRECTORY), "ROOT", "the browser's header answers the directory id");
     assert_eq!(state.integer(rbms_skin::property::generated::NUMBER_PLAYLEVEL), UNMAPPED_INTEGER, "no chart is focused, so there is no level to report");
@@ -385,6 +385,7 @@ fn a_host_without_a_sandbox_answers_nothing_rather_than_guessing() {
 fn plain_result_view() -> rbms_render::ResultView {
     rbms_render::ResultView {
         title: "GATE".into(),
+        artist: String::new(),
         mode_label: "7K",
         counts: [0; 6],
         ex_score: 0,
@@ -420,7 +421,8 @@ fn every_screen_gate_reports_no_document_and_draws_nothing() {
     let keys = [String::from("SHIFT")];
     assert!(!render_select_screen(&mut ctx, &mut canvas, None, &view));
     assert!(!render_result_screen(&mut ctx, &mut canvas, None, &result, None, false));
-    assert!(!render_decide_screen(&mut ctx, &mut canvas, None, 0.5, false, "GATE"));
+    let loading = DecideViewState { progress: 0.5, done: false, title: "GATE", chart: DecideChart::default(), now_ms: 0, offsets: None };
+    assert!(!render_decide_screen(&mut ctx, &mut canvas, None, &loading));
     assert!(!render_keyconfig_screen(&mut ctx, &mut canvas, None, &keys));
     assert_eq!(canvas.pixels(), blank.as_slice(), "a screen with no document selected leaves the frame for its own layout to fill");
 }
@@ -436,7 +438,7 @@ fn a_screen_gate_draws_the_document_when_one_is_selected() {
 
     canvas.clear(Color::BLACK);
     let blank = canvas.pixels().to_vec();
-    let document = SkinDraw { screen: &screen, timers: &timers, now_ms: 0, lua: None, mouse: None, background: None, offsets: None };
+    let document = SkinDraw { screen: &screen, timers: &timers, now_ms: 0, lua: None, mouse: None, background: None, offsets: None, extra: FrameExtra::None };
     let view = plain_select_view();
     let mut ctx = RenderCtx::new(rbms_render::theme(), &mut text);
     assert!(render_select_screen(&mut ctx, &mut canvas, Some(&document), &view), "a selected document is what the screen draws");
@@ -485,7 +487,7 @@ fn over(screen: &SkinScreen, text: &mut TextContext, canvas: &mut CpuCanvas, gro
     let state = FixtureState::default();
     canvas.clear(ground);
     let mut ctx = RenderCtx::new(rbms_render::theme(), text);
-    let frame = SkinFrame { now_ms: 0, timers: &timers, state: &state, lua: None, mouse: None, background: None };
+    let frame = SkinFrame { now_ms: 0, timers: &timers, state: &state, lua: None, mouse: None, background: None, extra: FrameExtra::None };
     screen.draw(&mut ctx, canvas, &frame);
 }
 
@@ -599,7 +601,7 @@ fn a_documents_background_object_is_interpolated_when_it_is_resized() {
     let state = FixtureState::default();
     canvas.clear(Color::BLACK);
     let mut ctx = RenderCtx::new(rbms_render::theme(), &mut text);
-    let frame = SkinFrame { now_ms: 0, timers: &timers, state: &state, lua: None, mouse: None, background: Some(backdrop) };
+    let frame = SkinFrame { now_ms: 0, timers: &timers, state: &state, lua: None, mouse: None, background: Some(backdrop), extra: FrameExtra::None };
     assert_eq!(screen.draw(&mut ctx, &mut canvas, &frame), 1, "the document's bga object drew");
 
     let shades: Vec<u8> = (0..64).map(|x| canvas.pixel_at(x, 32).r).collect();
@@ -623,7 +625,7 @@ fn a_number_with_no_value_draws_nothing() {
         canvas.clear(Color::BLACK);
         let state = FixtureState { number, ..FixtureState::default() };
         let mut ctx = RenderCtx::new(rbms_render::theme(), &mut text);
-        let frame = SkinFrame { now_ms: 0, timers: &timers, state: &state, lua: None, mouse: None, background: Some(backdrop) };
+        let frame = SkinFrame { now_ms: 0, timers: &timers, state: &state, lua: None, mouse: None, background: Some(backdrop), extra: FrameExtra::None };
         screen.draw(&mut ctx, &mut canvas, &frame)
     };
 
@@ -675,7 +677,7 @@ fn a_document_of_hundreds_of_objects_draws_them_all_in_one_frame() {
     let state = FixtureState::default();
     canvas.clear(Color::BLACK);
     let mut ctx = RenderCtx::new(rbms_render::theme(), &mut text);
-    let frame = SkinFrame { now_ms: 0, timers: &timers, state: &state, lua: None, mouse: None, background: None };
+    let frame = SkinFrame { now_ms: 0, timers: &timers, state: &state, lua: None, mouse: None, background: None, extra: FrameExtra::None };
     let started = std::time::Instant::now();
     let drawn = screen.draw(&mut ctx, &mut canvas, &frame);
     let spent = started.elapsed();

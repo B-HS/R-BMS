@@ -15,6 +15,8 @@ use graphs::draw_result_graphs;
 /// Backend-agnostic result snapshot.
 pub struct ResultView {
     pub title: String,
+    /// The chart's artist, for a document that names it beside the title.
+    pub artist: String,
     /// Short name of the layout the run was played on, reported in the same corner the play HUD
     /// reports it in, so a five-key run still says so once it is over.
     pub mode_label: &'static str,
@@ -179,12 +181,25 @@ pub struct ResultExtras {
     pub run_again: bool,
 }
 
+/// Which blocks of the score screen the selected document draws instead, leaving the built-in
+/// screen to draw the rest.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ResultContent {
     pub score: bool,
     pub clear: bool,
     pub judgment: bool,
     pub target: bool,
+    /// The rank letter, the rate under it, the rank bar and the deltas against the best and the
+    /// previous run.
+    pub grade: bool,
+    /// The gauge, judgement and timing panels along the bottom.
+    pub graphs: bool,
+    /// The top bar, with the chart title and the mode label on it.
+    pub title: bool,
+    /// The key hint along the bottom edge.
+    pub hint: bool,
+    /// The score server's status lines the application writes under the report.
+    pub ir: bool,
 }
 
 /// Left edge of the result screen's content column.
@@ -290,22 +305,26 @@ pub fn render_result_on_background_with_content_ctx<R: Renderer>(
 ) {
     let th = ctx.theme;
     let w = r.size().0 as f32;
-    r.fill_rect(Rect::new(0.0, 0.0, w, 52.0), th.topbar);
-    if !view.title.is_empty() {
-        ctx.draw_text_centered(r, w * 0.5, 14.0, 2.0, th.text, &view.title);
+    if !content.title {
+        r.fill_rect(Rect::new(0.0, 0.0, w, 52.0), th.topbar);
+        if !view.title.is_empty() {
+            ctx.draw_text_centered(r, w * 0.5, 14.0, 2.0, th.text, &view.title);
+        }
+        ctx.draw_text_right(r, w - MODE_LABEL_MARGIN, MODE_LABEL_Y, MODE_LABEL_SCALE, th.text_muted, view.mode_label);
     }
-    ctx.draw_text_right(r, w - MODE_LABEL_MARGIN, MODE_LABEL_Y, MODE_LABEL_SCALE, th.text_muted, view.mode_label);
 
     let lcx = 232.0;
-    let (_, rcol) = RANK_BANDS[dj_rank(view.ex_score, view.max_score)];
-    let rate = if view.max_score > 0 { view.ex_score as f32 / view.max_score as f32 * 100.0 } else { 0.0 };
-    ctx.draw_text_centered(r, lcx, 96.0, 7.0, rcol, dj_rank_label(view.ex_score, view.max_score));
-    ctx.draw_text_centered(r, lcx, 214.0, 2.4, rcol, &format!("{rate:.2}%"));
+    if !content.grade {
+        let (_, rcol) = RANK_BANDS[dj_rank(view.ex_score, view.max_score)];
+        let rate = if view.max_score > 0 { view.ex_score as f32 / view.max_score as f32 * 100.0 } else { 0.0 };
+        ctx.draw_text_centered(r, lcx, 96.0, 7.0, rcol, dj_rank_label(view.ex_score, view.max_score));
+        ctx.draw_text_centered(r, lcx, 214.0, 2.4, rcol, &format!("{rate:.2}%"));
+    }
     if !content.clear {
         r.fill_rect(Rect::new(44.0, 258.0, 376.0, 48.0), view.clear_color);
         ctx.draw_text_centered(r, lcx, 270.0, 2.6, Color::BLACK, view.clear_label);
     }
-    if view.show_graph {
+    if view.show_graph && !content.grade {
         draw_rank_bar_stepped(r, 44.0, 340.0, 376.0, 18.0, view.ex_score, view.max_score);
         let mut dy = 384.0;
         match view.prev_best_ex {
@@ -368,11 +387,21 @@ pub fn render_result_on_background_with_content_ctx<R: Renderer>(
         ctx.draw_text_right(r, rr, y, 2.0, view.clear_color, &format!("GAUGE {}%", view.gauge.round() as i32));
     }
 
-    if view.show_result_graphs {
+    if view.show_result_graphs && !content.graphs {
         draw_result_graphs(ctx, r, view, palette);
     }
-    let hint = if extras.run_again { "ENTER / ESC  SELECT    R  RETRY    N  NEXT SONG" } else { "ENTER / ESC  SELECT" };
-    ctx.draw_text_centered(r, w * 0.5, 692.0, 1.2, th.text_muted, hint);
+    if !content.hint {
+        ctx.draw_text_centered(r, w * 0.5, HINT_Y, HINT_SCALE, th.text_muted, result_hint_text(extras.run_again));
+    }
+}
+
+/// Where the key hint sits and how large it is drawn.
+const HINT_Y: f32 = 692.0;
+const HINT_SCALE: f32 = 1.2;
+
+/// The keys the score screen answers to, as the hint along its bottom edge spells them out.
+pub fn result_hint_text(run_again: bool) -> &'static str {
+    if run_again { "ENTER / ESC  SELECT    R  RETRY    N  NEXT SONG" } else { "ENTER / ESC  SELECT" }
 }
 
 #[cfg(test)]
@@ -382,6 +411,7 @@ mod tests {
     fn sample_view() -> ResultView {
         ResultView {
             title: "PALETTE TEST".into(),
+            artist: String::new(),
             mode_label: "7K",
             counts: [100, 20, 5, 2, 1, 3],
             ex_score: 220,
@@ -470,11 +500,46 @@ mod tests {
             &view,
             &palette,
             &ResultExtras::default(),
-            ResultContent { score: true, clear: true, judgment: true, target: true },
+            ResultContent { score: true, clear: true, judgment: true, target: true, ..ResultContent::default() },
         );
 
         assert!(non_background_pixels(&native, 480, 70, 756, 100) > 0, "the native score rows did not paint their area");
         assert_eq!(non_background_pixels(&replaced, 480, 70, 756, 100), 0, "native score text remained after the replacement was selected");
+    }
+
+    /// The blocks a document stands in for leave nothing of their own behind: the grade, the graph
+    /// strip and the top bar each vanish entirely when the document says it draws them.
+    #[test]
+    fn replaced_grade_graphs_and_title_leave_their_native_areas_empty() {
+        use crate::CpuCanvas;
+
+        let view = ResultView {
+            gauge_series: vec![10.0, 55.0, 90.0],
+            timing_hist: vec![1, 4, 9, 4, 1].into_boxed_slice(),
+            judge_dist: [9, 4, 2, 1, 1, 1],
+            ..sample_view()
+        };
+        let palette = ResultPalette::default();
+        let paint = |content: ResultContent| {
+            let mut canvas = CpuCanvas::new(1280, 720);
+            canvas.clear(crate::theme().bg);
+            render_result_on_background_with_content(&mut canvas, &view, &palette, &ResultExtras::default(), content);
+            canvas
+        };
+        let native = paint(ResultContent::default());
+        let grade = ResultContent { grade: true, ..ResultContent::default() };
+
+        for (area, content, what) in [
+            ((44, 60, 376, 190), grade, "the rank letter and its rate"),
+            ((44, 330, 376, 100), grade, "the rank bar and the score deltas"),
+            ((44, 556, 1192, 120), ResultContent { graphs: true, ..ResultContent::default() }, "the graph strip"),
+            ((0, 0, 1280, 52), ResultContent { title: true, ..ResultContent::default() }, "the top bar"),
+            ((440, 684, 400, 24), ResultContent { hint: true, ..ResultContent::default() }, "the key hint"),
+        ] {
+            let (x, y, w, h) = area;
+            assert!(non_background_pixels(&native, x, y, w, h) > 0, "{what} is not painted by the built-in screen");
+            assert_eq!(non_background_pixels(&paint(content), x, y, w, h), 0, "{what} remained after the replacement was selected");
+        }
     }
 
     #[test]
@@ -676,6 +741,7 @@ mod tests {
         use crate::CpuCanvas;
         let view = ResultView {
             title: "TEST SONG".into(),
+            artist: String::new(),
             mode_label: "7K",
             counts: [100, 20, 5, 2, 1, 3],
             ex_score: 220,
@@ -710,6 +776,7 @@ mod tests {
         use crate::CpuCanvas;
         let view = ResultView {
             title: "EMPTY".into(),
+            artist: String::new(),
             mode_label: "7K",
             counts: [0; 6],
             ex_score: 0,

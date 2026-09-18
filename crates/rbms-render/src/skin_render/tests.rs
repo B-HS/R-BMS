@@ -1,11 +1,21 @@
-//! Unit tests for the parts of the skin renderer that are pure arithmetic: the coordinate change,
-//! the cell animation, and the digit layouts.
+//! Unit tests for the parts of the skin renderer that stand apart from any one object: the
+//! coordinate change, the cell animation, the digit layouts, the play screen's timers and what a
+//! whole screen answers about itself.
 
-use rbms_skin::dst::{SkinColor, SkinRect};
+use rbms_skin::dst::{Acc, DestinationTrack, DrawStateSource, Keyframe, OffsetSource, SkinColor, SkinRect};
+use rbms_skin::loader::StretchKind;
+use rbms_skin::model::SkinLayer;
+use rbms_skin::property::generated::{
+    OFFSET_HIDDEN_COVER, OFFSET_LANECOVER, OFFSET_LIFT, OPTION_1P_EARLY, OPTION_1P_GOOD, OPTION_1P_LATE, OPTION_1P_PERFECT, OPTION_2P_EARLY, OPTION_2P_GOOD,
+    OPTION_2P_PERFECT, OPTION_GAUGE_EX, OPTION_GAUGE_EX_2P, OPTION_GAUGE_GROOVE, OPTION_GAUGE_GROOVE_2P, OPTION_GAUGE_HARD, OPTION_GAUGE_HARD_2P,
+};
 use rbms_skin::timer::{TimerId, TimerState};
 
-use super::object::{DigitLayout, FloatBody, NumberBody, Sprite, ValueSource, fraction_glyphs, fraction_sign, integer_glyphs, integer_padding};
-use super::{SkinViewport, TEXT_PIXELS_PER_SCALE};
+use super::object::{
+    Body, DigitLayout, FloatBody, NumberBody, SkinObject, Sprite, ValueSource, fraction_glyphs, fraction_sign, integer_glyphs, integer_padding,
+};
+use super::state::{PlayViewState, SkinHotAction};
+use super::{FrameExtra, SkinFrame, SkinScreen, SkinViewport, TEXT_PIXELS_PER_SCALE};
 use crate::{Color, Rect, TextureId};
 
 /// A sprite over a texture of `size`, cut into `columns` x `rows` cells.
@@ -49,6 +59,18 @@ fn a_document_filling_its_own_space_fills_the_screen() {
 fn a_document_with_no_extent_maps_one_to_one_rather_than_dividing_by_zero() {
     let viewport = SkinViewport::new((0.0, 0.0), (640.0, 480.0));
     assert_eq!((viewport.scale_x(), viewport.scale_y()), (1.0, 1.0));
+}
+
+#[test]
+fn the_viewport_reads_a_screen_row_back_into_the_documents_own_space() {
+    let viewport = SkinViewport::new((256.0, 144.0), (512.0, 288.0));
+    let placed = viewport.place(SkinRect::new(8.0, 16.0, 32.0, 64.0));
+
+    assert_eq!(viewport.document_y(placed.y), 80.0, "a top edge reads back as how far above the document's foot it sits");
+    assert_eq!(viewport.document_y(0.0), 144.0, "the top of the screen is the document's ceiling");
+
+    let flat = SkinViewport::new((256.0, 144.0), (512.0, 0.0));
+    assert_eq!(flat.document_y(120.0), 144.0, "a screen with no height answers the ceiling rather than dividing by zero");
 }
 
 #[test]
@@ -233,11 +255,17 @@ fn hud(counts: [u32; 6], combo: u32, gauge: f32) -> crate::hud::HudView<'static>
     }
 }
 
+/// A run with no lane state to report, which is what the timer memories above are exercised with:
+/// they are about the judgement, the combo and the gauge rather than about the keys.
+fn no_lanes() -> super::screen::PlayLanes<'static> {
+    super::screen::PlayLanes { lanes: &[], judged_side: 0 }
+}
+
 #[test]
 fn the_first_play_frame_starts_no_timer_by_itself() {
     let mut memory = super::screen::PlayTimers::new();
     let mut timers = TimerState::new();
-    memory.update(&mut timers, &hud([3, 0, 0, 0, 0, 0], 3, 50.0), 10, 1_000);
+    memory.update(&mut timers, &hud([3, 0, 0, 0, 0, 0], 3, 50.0), 10, 1_000, &no_lanes());
 
     assert!(timers.is_off(rbms_skin::timer::timer_id::JUDGE_1P), "the first frame has nothing to compare against, so nothing is treated as new");
     assert!(timers.is_on(rbms_skin::timer::timer_id::COMBO_1P), "a combo that is already running is reported as running");
@@ -247,8 +275,8 @@ fn the_first_play_frame_starts_no_timer_by_itself() {
 fn a_new_judgement_restarts_the_judge_timer() {
     let mut memory = super::screen::PlayTimers::new();
     let mut timers = TimerState::new();
-    memory.update(&mut timers, &hud([1, 0, 0, 0, 0, 0], 1, 50.0), 100, 1_000);
-    memory.update(&mut timers, &hud([2, 0, 0, 0, 0, 0], 2, 50.0), 100, 1_500);
+    memory.update(&mut timers, &hud([1, 0, 0, 0, 0, 0], 1, 50.0), 100, 1_000, &no_lanes());
+    memory.update(&mut timers, &hud([2, 0, 0, 0, 0, 0], 2, 50.0), 100, 1_500, &no_lanes());
 
     assert_eq!(timers.get(rbms_skin::timer::timer_id::JUDGE_1P), Some(1_500), "the pop-up is measured from the moment the input was judged");
     assert_eq!(timers.get(rbms_skin::timer::timer_id::COMBO_1P), Some(1_500), "a longer combo restarts its own flash");
@@ -258,8 +286,8 @@ fn a_new_judgement_restarts_the_judge_timer() {
 fn a_broken_combo_switches_its_timer_off() {
     let mut memory = super::screen::PlayTimers::new();
     let mut timers = TimerState::new();
-    memory.update(&mut timers, &hud([2, 0, 0, 0, 0, 0], 2, 50.0), 100, 1_000);
-    memory.update(&mut timers, &hud([2, 0, 0, 0, 1, 0], 0, 48.0), 100, 1_200);
+    memory.update(&mut timers, &hud([2, 0, 0, 0, 0, 0], 2, 50.0), 100, 1_000, &no_lanes());
+    memory.update(&mut timers, &hud([2, 0, 0, 0, 1, 0], 0, 48.0), 100, 1_200, &no_lanes());
 
     assert!(timers.is_off(rbms_skin::timer::timer_id::COMBO_1P), "a combo of nothing has no flash to animate");
     assert_eq!(timers.get(rbms_skin::timer::timer_id::JUDGE_1P), Some(1_200), "the poor was still a judgement");
@@ -269,15 +297,15 @@ fn a_broken_combo_switches_its_timer_off() {
 fn a_full_combo_and_a_full_gauge_stay_on_while_they_last() {
     let mut memory = super::screen::PlayTimers::new();
     let mut timers = TimerState::new();
-    memory.update(&mut timers, &hud([4, 0, 0, 0, 0, 0], 4, 100.0), 4, 1_000);
+    memory.update(&mut timers, &hud([4, 0, 0, 0, 0, 0], 4, 100.0), 4, 1_000, &no_lanes());
     assert_eq!(timers.get(rbms_skin::timer::timer_id::FULLCOMBO_1P), Some(1_000));
     assert_eq!(timers.get(rbms_skin::timer::timer_id::GAUGE_MAX_1P), Some(1_000));
 
-    memory.update(&mut timers, &hud([5, 0, 0, 0, 0, 0], 5, 100.0), 5, 1_400);
+    memory.update(&mut timers, &hud([5, 0, 0, 0, 0, 0], 5, 100.0), 5, 1_400, &no_lanes());
     assert_eq!(timers.get(rbms_skin::timer::timer_id::FULLCOMBO_1P), Some(1_000), "a timer that is already on keeps the moment it started");
     assert_eq!(timers.get(rbms_skin::timer::timer_id::GAUGE_INCLEASE_1P), None, "a gauge that did not rise does not flash");
 
-    memory.update(&mut timers, &hud([5, 0, 0, 0, 1, 0], 0, 90.0), 6, 1_800);
+    memory.update(&mut timers, &hud([5, 0, 0, 0, 1, 0], 0, 90.0), 6, 1_800, &no_lanes());
     assert!(timers.is_off(rbms_skin::timer::timer_id::FULLCOMBO_1P), "the combo broke, so the full-combo timer goes off");
     assert!(timers.is_off(rbms_skin::timer::timer_id::GAUGE_MAX_1P));
 }
@@ -351,4 +379,133 @@ fn a_plain_measurement_reaches_a_drawn_number_unnarrowed() {
     assert_eq!(sanitize_float(f32::NAN), 0.0, "a value the number line has no room for is not one");
     assert_eq!(sanitize_float(f32::INFINITY), 0.0);
     assert_eq!(clamp_float(2.5), FLOAT_MAX, "a rate is still a share of something and is still narrowed");
+}
+
+/// A play adapter over `hud`, which is also the simplest state source these tests have to hand.
+fn play_state<'a>(hud: &'a crate::hud::HudView<'a>) -> PlayViewState<'a> {
+    PlayViewState {
+        hud,
+        title: "",
+        song_ms: 0,
+        duration_ms: 0,
+        bpm: 0.0,
+        hispeed: 1.0,
+        autoplay: false,
+        now_ms: 0,
+        offsets: None,
+        field: None,
+        shade: crate::playfield::LaneShade::default(),
+        judged_side: 0,
+        gauge_kind: 0,
+        artist: "",
+        level: 0,
+        bpm_min: 0.0,
+        bpm_max: 0.0,
+        bpm_main: 0.0,
+        target_ex: None,
+        target_delta: "",
+    }
+}
+
+#[test]
+fn a_judgement_is_reported_on_the_field_it_was_played_on() {
+    let hud = crate::hud::HudView { last_judge: Some(2), last_fast: true, ..hud([0; 6], 0, 0.0) };
+    let left = play_state(&hud);
+    let right = PlayViewState { judged_side: 1, ..play_state(&hud) };
+
+    assert!(left.boolean(OPTION_1P_GOOD), "the field the input was played on reports the judgement the run took");
+    assert!(!left.boolean(OPTION_2P_GOOD), "and the other field stays quiet, so a double document does not flash both pop-ups at once");
+    assert!(right.boolean(OPTION_2P_GOOD) && !right.boolean(OPTION_1P_GOOD), "an input on the right-hand field is reported there instead");
+    assert!(!left.boolean(OPTION_1P_PERFECT), "a field reports only the judgement the run actually took");
+    assert!(
+        right.boolean(OPTION_2P_PERFECT + 2),
+        "the reference stops naming the second field's band at its third judgement, but a pop-up reads all six of them"
+    );
+    assert!(left.boolean(OPTION_1P_EARLY) && !left.boolean(OPTION_2P_EARLY), "an early hit is early on the field it landed on");
+    assert!(!left.boolean(OPTION_1P_LATE), "and is not also late on it");
+}
+
+/// A document labels the gauge it is drawing from the three gauge options, so the play adapter has
+/// to answer them: without that, every label is hidden and every `op` naming the opposite of one is
+/// drawn, whatever gauge is actually being played.
+#[test]
+fn the_gauge_being_played_answers_the_options_a_document_labels_it_from() {
+    let hud = hud([0; 6], 0, 0.0);
+    let on = |kind: usize, id: i32| PlayViewState { gauge_kind: kind, ..play_state(&hud) }.boolean(id);
+
+    for kind in 0..=2 {
+        assert!(on(kind, OPTION_GAUGE_GROOVE), "gauge {kind} is cleared by filling it and is not named as one");
+        assert!(!on(kind, OPTION_GAUGE_HARD), "gauge {kind} is not survived");
+    }
+    for kind in 3..=5 {
+        assert!(on(kind, OPTION_GAUGE_HARD), "gauge {kind} is survived and is not named as one");
+        assert!(!on(kind, OPTION_GAUGE_GROOVE), "gauge {kind} is not cleared by filling it");
+    }
+    for kind in [0, 1, 4, 5, 7, 8] {
+        assert!(on(kind, OPTION_GAUGE_EX), "gauge {kind} drains at the EX rate and is not named as one");
+    }
+    for kind in [2, 3, 6] {
+        assert!(!on(kind, OPTION_GAUGE_EX), "gauge {kind} does not drain at the EX rate");
+    }
+    assert!(on(6, OPTION_GAUGE_HARD) && !on(6, OPTION_GAUGE_GROOVE), "a course gauge is survived like the rest of its half of the table");
+
+    assert!(on(2, OPTION_GAUGE_GROOVE_2P) && on(3, OPTION_GAUGE_HARD_2P) && on(4, OPTION_GAUGE_EX_2P), "both bands name the one gauge the run carries");
+    assert!(!on(2, -OPTION_GAUGE_GROOVE), "and a document asking for the gauge it is not playing on still gets an answer, not the default");
+}
+
+#[test]
+fn the_running_field_publishes_the_cover_offsets_a_document_places_its_own_covers_with() {
+    let hud = hud([0; 6], 0, 0.0);
+    let mut field = crate::skin::Skin::default_for(rbms_model::Mode::BEAT_7K, 1280.0, 720.0);
+    field.top_y = 100.0;
+    field.judge_y = 500.0;
+    field.lift_height = 40.0;
+    let shade = crate::playfield::LaneShade { cover: 0.25, hidden: 0.5 };
+    let state = PlayViewState { field: Some(&field), shade, ..play_state(&hud) };
+
+    assert_eq!(state.offset(OFFSET_LIFT).map(|offset| offset.y), Some(40.0), "the lift offset is how far the judgement line was raised");
+    assert_eq!(
+        state.offset(OFFSET_LANECOVER).map(|offset| offset.y),
+        Some(-100.0),
+        "the cover the player pulls down from the ceiling moves by its share of the visible field"
+    );
+    assert_eq!(state.offset(OFFSET_HIDDEN_COVER).map(|offset| offset.y), Some(200.0), "and the hidden band rises from the judgement line by its own");
+
+    let bare = PlayViewState { field: Some(&field), ..play_state(&hud) };
+    let hidden = bare.offset(OFFSET_HIDDEN_COVER).expect("a hidden band that is switched off still answers");
+    assert_eq!((hidden.y, hidden.a), (0.0, -255.0), "a hidden band nobody asked for is published as fully transparent rather than as nothing at all");
+    assert!(play_state(&hud).offset(OFFSET_LANECOVER).is_none(), "a screen with no field running leaves the three to the player's own nudges");
+}
+
+/// A destination that holds one rectangle still, fully opaque.
+fn still(rect: SkinRect) -> DestinationTrack {
+    DestinationTrack {
+        frames: vec![Keyframe { time_ms: 0, rect, clip: None, acc: Acc::default(), color: SkinColor::rgba(255, 255, 255, 255), angle_deg: 0.0 }],
+        ..DestinationTrack::default()
+    }
+}
+
+#[test]
+fn a_document_with_no_wheel_still_offers_the_buttons_its_hotspot_table_names() {
+    let rect = SkinRect::new(10.0, 20.0, 40.0, 12.0);
+    let button =
+        SkinObject { id: "button".to_owned(), layer: SkinLayer::Foreground, track: still(rect), stretch: StretchKind::from_id(-1), body: Body::Background };
+    let screen = SkinScreen {
+        authored: (256.0, 144.0),
+        objects: vec![button],
+        textures: Vec::new(),
+        families: Vec::new(),
+        hotspots: vec![("button".to_owned(), SkinHotAction::ModalClose), ("nowhere".to_owned(), SkinHotAction::Search)],
+        warnings: Vec::new(),
+    };
+
+    let timers = TimerState::new();
+    let hud = hud([0; 6], 0, 0.0);
+    let state = play_state(&hud);
+    let frame = SkinFrame { now_ms: 0, timers: &timers, state: &state, lua: None, mouse: None, background: None, extra: FrameExtra::None };
+
+    let spots = screen.hotspots(&frame);
+    assert_eq!(spots.len(), 1, "the entry naming an object the document never declared is dropped");
+    assert_eq!(spots[0].action, SkinHotAction::ModalClose);
+    assert_eq!(spots[0].rect, Rect::new(rect.x, rect.y, rect.w, rect.h), "the rectangle comes back in the document's own coordinates");
 }

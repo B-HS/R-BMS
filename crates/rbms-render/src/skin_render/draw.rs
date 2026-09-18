@@ -16,7 +16,7 @@ use rbms_skin::loader::{Filtering, StretchKind, filtering_for, stretch_rect};
 use super::object::{
     Body, DigitLayout, FloatBody, GraphBody, ImageBody, NumberBody, SkinObject, SliderBody, Sprite, TextBody, ValueSource, fraction_glyphs, integer_glyphs,
 };
-use super::{MIN_TEXT_SCALE, SkinFrame, SkinViewport, TEXT_PIXELS_PER_SCALE};
+use super::{MIN_TEXT_SCALE, SkinFrame, SkinViewport, TEXT_PIXELS_PER_SCALE, covers, gauge, graphs, judge, notes, songlist};
 use crate::ctx::RenderCtx;
 use crate::{BlendMode, Color, QuadParams, Rect, Renderer, TextureFilter, UvRect, skin_center_offset};
 
@@ -69,17 +69,20 @@ const SHIFT_TOWARDS_END: f32 = 1.0;
 
 /// The fixed parts of one object's draw: what is being drawn, how it is tinted and turned, and where
 /// the document's space lands on screen.
-struct Placement<'a> {
-    object: &'a SkinObject,
-    blend: BlendMode,
-    tint: Color,
-    angle_deg: f32,
-    viewport: &'a SkinViewport,
+///
+/// Open to the whole renderer rather than this file because the objects that draw a field, a wheel
+/// or a graph live in modules of their own and place their pieces against the same three decisions.
+pub(crate) struct Placement<'a> {
+    pub(crate) object: &'a SkinObject,
+    pub(crate) blend: BlendMode,
+    pub(crate) tint: Color,
+    pub(crate) angle_deg: f32,
+    pub(crate) viewport: &'a SkinViewport,
 }
 
 impl Placement<'_> {
     /// A quad in screen space, with the rotation anchor measured against it.
-    fn quad(&self, dst: Rect, src: UvRect, filter: TextureFilter) -> QuadParams {
+    pub(crate) fn quad(&self, dst: Rect, src: UvRect, filter: TextureFilter) -> QuadParams {
         QuadParams {
             dst,
             src,
@@ -98,7 +101,7 @@ impl Placement<'_> {
     /// multiplies a destination into screen coordinates before `SkinObject.draw` ever compares it
     /// with the source region. A document authored at half the screen's size would otherwise draw
     /// its unresized objects at half size and pick the wrong filter for everything.
-    fn cell<R: Renderer>(&self, r: &mut R, sprite: &Sprite, cell: u32, rect: SkinRect) -> bool {
+    pub(crate) fn cell<R: Renderer>(&self, r: &mut R, sprite: &Sprite, cell: u32, rect: SkinRect) -> bool {
         let source = sprite.cell_size();
         let dst = fitted_screen_rect(self.viewport, self.object.stretch, rect, source);
         let filter = texture_filter(filtering_for(self.object.track.filter, screen_as_skin(dst), source));
@@ -163,6 +166,18 @@ pub(crate) fn draw_object<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, objec
         Body::Slider(body) => draw_slider(r, &place, body, rect, frame),
         Body::Graph(body) => draw_graph(r, &place, body, rect, frame),
         Body::Background => draw_background(r, &place, rect, frame),
+        Body::Note(body) => notes::draw_note(ctx, r, &place, body, rect, frame),
+        Body::Gauge(body) => gauge::draw_gauge(ctx, r, &place, body, rect, frame),
+        Body::Judge(body) => judge::draw_judge(ctx, r, &place, body, rect, frame),
+        Body::SongList(body) => songlist::draw_songlist(ctx, r, &place, body, rect, frame),
+        Body::HiddenCover(body) | Body::LiftCover(body) => covers::draw_cover(ctx, r, &place, body, rect, frame),
+        Body::GaugeGraph(body) => graphs::draw_gauge_graph(ctx, r, &place, body, rect, frame),
+        Body::JudgeGraph(body) => graphs::draw_judge_graph(ctx, r, &place, body, rect, frame),
+        Body::BpmGraph(body) => graphs::draw_bpm_graph(ctx, r, &place, body, rect, frame),
+        Body::TimingDistribution(body) => graphs::draw_timing_distribution(ctx, r, &place, body, rect, frame),
+        Body::TimingVisualizer(body) => graphs::draw_timing_visualizer(ctx, r, &place, body, rect, frame),
+        Body::HitError(body) => graphs::draw_hit_error(ctx, r, &place, body, rect, frame),
+        Body::Density(body) => graphs::draw_density(ctx, r, &place, body, rect, frame),
     };
 
     if clipped {

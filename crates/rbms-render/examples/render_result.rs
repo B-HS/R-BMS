@@ -8,6 +8,7 @@ fn main() {
     let mut canvas = CpuCanvas::new(w, h);
     let view = ResultView {
         title: "AltMirrorBell (moon)".into(),
+        artist: String::new(),
         mode_label: "7K",
         counts: [712, 64, 21, 8, 5, 2],
         ex_score: 1488,

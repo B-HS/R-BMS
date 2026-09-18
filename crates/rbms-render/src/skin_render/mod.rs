@@ -13,18 +13,29 @@
 //! Nothing here replaces the built-in screens. A screen with no document selected draws exactly what
 //! it drew before; [`SkinScreen`] is what a screen reaches for only once a document has loaded.
 
+mod color;
+mod covers;
 mod draw;
+mod gauge;
+mod graphs;
+mod judge;
+mod notes;
 mod object;
 pub mod screen;
+mod songlist;
 pub mod state;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_list_graphs;
+#[cfg(test)]
+mod tests_play_objects;
 
 use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use rbms_skin::dst::{LuaDrawEval, LuaExprId, SkinColor, SkinRect};
+use rbms_skin::dst::{DrawStateSource, LuaDrawEval, LuaExprId, SkinColor, SkinRect, prepare};
 use rbms_skin::loader::LoadedSkin;
 use rbms_skin::model::SkinLayer;
 use rbms_skin::property::SkinStateSource;
@@ -33,10 +44,13 @@ use rbms_skin::timer::TimerState;
 use crate::font::TextContext;
 use crate::{Color, Rect, Renderer, TextureId};
 
+pub use color::parse_hex_color;
 pub use object::SkinObjectKind;
 pub use screen::{
-    PlayTimers, SelectTimers, SkinDraw, render_decide_screen, render_keyconfig_screen, render_play_screen, render_result_screen, render_select_screen,
+    LaneTimerState, PlayLanes, PlayTimers, ResultTimers, SelectTimers, SkinDraw, render_decide_screen, render_keyconfig_screen, render_play_screen,
+    render_result_screen, render_select_screen,
 };
+pub use state::{FrameExtra, OptionsRows, PlayObjectState, ResultSeriesState, SelectListState, SkinHotAction, SkinHotspot};
 
 /// Pixel height one unit of the text engine's legacy scale draws at.
 ///
@@ -184,6 +198,16 @@ impl SkinViewport {
     pub fn scale_y(&self) -> f32 {
         self.scale_y
     }
+
+    /// How far above the document's own foot a screen row falls.
+    ///
+    /// The inverse of the vertical half of [`SkinViewport::place`], for the objects that have to
+    /// compare a rectangle the document authored with a line the running game measured in screen
+    /// pixels. A screen of no height puts every row at the document's ceiling rather than dividing
+    /// by zero.
+    pub fn document_y(&self, screen_y: f32) -> f32 {
+        if self.scale_y <= 0.0 { self.skin_height } else { self.skin_height - screen_y / self.scale_y }
+    }
 }
 
 /// Everything one frame of a skin needs from the running game.
@@ -198,6 +222,9 @@ pub struct SkinFrame<'a> {
     pub mouse: Option<(f32, f32)>,
     /// The background image this frame, already registered with the renderer.
     pub background: Option<TextureId>,
+    /// The screen-shaped state a property id cannot carry: rows, series and lane geometry. A screen
+    /// with nothing of the kind to say passes [`FrameExtra::None`].
+    pub extra: FrameExtra<'a>,
 }
 
 impl std::fmt::Debug for SkinFrame<'_> {
@@ -219,6 +246,9 @@ pub struct SkinScreen {
     textures: Vec<TextureId>,
     /// The font family each font id resolved to inside the text engine.
     families: Vec<(String, String)>,
+    /// What the document's own `hotspot` table names, as the object id to act on and the built-in
+    /// action it stands in for.
+    hotspots: Vec<(String, state::SkinHotAction)>,
     warnings: Vec<String>,
 }
 
@@ -260,8 +290,9 @@ impl SkinScreen {
         }
 
         let objects = object::build_objects(skin, &sources, &families, assets, &mut warnings);
+        let hotspots = skin.def.hotspot.iter().filter_map(|spot| Some((spot.id.clone(), state::SkinHotAction::from_name(&spot.action)?))).collect();
         let authored = (skin.def.w.max(1) as f32, skin.def.h.max(1) as f32);
-        SkinScreen { authored, objects, textures, families, warnings }
+        SkinScreen { authored, objects, textures, families, hotspots, warnings }
     }
 
     /// The size the document was authored at.
@@ -314,6 +345,55 @@ impl SkinScreen {
     /// merges adjacent draws still lands them in the same place.
     pub fn draw<R: Renderer>(&self, ctx: &mut crate::ctx::RenderCtx<'_>, r: &mut R, frame: &SkinFrame<'_>) -> usize {
         self.draw_matching(ctx, r, frame, |_| true)
+    }
+
+    /// Every rectangle this document offers a click on, in the document's own coordinates.
+    ///
+    /// A browser that hands its wheel to a document stops knowing where its own rows are, so the
+    /// document says instead: the slots of its `songlist` and whatever its `hotspot` list names.
+    /// The caller maps each rectangle onto the canvas with the same [`SkinViewport`] it drew with.
+    ///
+    /// The two halves are answered apart because a document may declare either without the other: a
+    /// score screen offers its modal buttons and no wheel at all, so the `hotspot` table is read
+    /// from the screen itself and the wheel contributes only the rows it drew.
+    pub fn hotspots(&self, frame: &SkinFrame<'_>) -> Vec<state::SkinHotspot> {
+        let mut spots = songlist::hot_rects(&self.objects, frame);
+        spots.extend(self.declared_hotspots(frame));
+        spots
+    }
+
+    /// The same rectangles placed on a screen of `screen` logical pixels, which is the form a
+    /// browser hit-tests its pointer against.
+    ///
+    /// [`SkinScreen::hotspots`] answers in the document's own space, measured up from its foot; the
+    /// canvas is measured down from its head and is rarely the size the document was authored at,
+    /// so the one mapping the frame was drawn through is applied here rather than at each caller.
+    pub fn hotspots_on_screen(&self, frame: &SkinFrame<'_>, screen: (u32, u32)) -> Vec<state::SkinHotspot> {
+        let viewport = SkinViewport::new(self.authored, (screen.0 as f32, screen.1 as f32));
+        self.hotspots(frame)
+            .into_iter()
+            .map(|spot| state::SkinHotspot { rect: viewport.place(SkinRect::new(spot.rect.x, spot.rect.y, spot.rect.w, spot.rect.h)), action: spot.action })
+            .collect()
+    }
+
+    /// Whether the document's `hotspot` table stands in for one native action.
+    pub fn declares_hotspot(&self, action: state::SkinHotAction) -> bool {
+        self.hotspots.iter().any(|(_, declared)| *declared == action)
+    }
+
+    /// The rectangle each entry of the document's `hotspot` table resolves to this frame, skipping
+    /// the entries whose object the document never declared or is not drawing.
+    fn declared_hotspots(&self, frame: &SkinFrame<'_>) -> Vec<state::SkinHotspot> {
+        let state: &dyn DrawStateSource = frame.state;
+        let gate: Option<&dyn LuaDrawEval> = frame.lua.map(|lua| lua as &dyn LuaDrawEval);
+        self.hotspots
+            .iter()
+            .filter_map(|(id, action)| {
+                let object = self.objects.iter().find(|object| object.id == *id)?;
+                let resolved = prepare(&object.track, frame.now_ms, frame.timers, state, gate, (0.0, 0.0), frame.mouse)?;
+                Some(state::SkinHotspot { rect: resolved.rect.into(), action: *action })
+            })
+            .collect()
     }
 
     /// Draws the destinations assigned to one phase of a layered document.

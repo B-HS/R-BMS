@@ -16,7 +16,7 @@ use rbms_skin::model::{FloatValueDef, GraphDef, ImageDef, PropertyRef, SkinLayer
 use rbms_skin::property::SkinStateSource;
 use rbms_skin::timer::TimerId;
 
-use super::{SkinAssets, SkinExprEval};
+use super::{SkinAssets, SkinExprEval, covers, gauge, graphs, judge, notes, songlist};
 use crate::{TextureId, UvRect};
 
 /// Cells a division count of zero or less stands for: the whole image, undivided.
@@ -56,6 +56,19 @@ pub enum SkinObjectKind {
     Slider,
     Graph,
     Background,
+    Note,
+    Gauge,
+    Judge,
+    SongList,
+    HiddenCover,
+    LiftCover,
+    GaugeGraph,
+    JudgeGraph,
+    BpmGraph,
+    TimingDistribution,
+    TimingVisualizer,
+    HitError,
+    Density,
 }
 
 /// One entry of the draw list.
@@ -78,6 +91,19 @@ impl SkinObject {
             Body::Slider(_) => SkinObjectKind::Slider,
             Body::Graph(_) => SkinObjectKind::Graph,
             Body::Background => SkinObjectKind::Background,
+            Body::Note(_) => SkinObjectKind::Note,
+            Body::Gauge(_) => SkinObjectKind::Gauge,
+            Body::Judge(_) => SkinObjectKind::Judge,
+            Body::SongList(_) => SkinObjectKind::SongList,
+            Body::HiddenCover(_) => SkinObjectKind::HiddenCover,
+            Body::LiftCover(_) => SkinObjectKind::LiftCover,
+            Body::GaugeGraph(_) => SkinObjectKind::GaugeGraph,
+            Body::JudgeGraph(_) => SkinObjectKind::JudgeGraph,
+            Body::BpmGraph(_) => SkinObjectKind::BpmGraph,
+            Body::TimingDistribution(_) => SkinObjectKind::TimingDistribution,
+            Body::TimingVisualizer(_) => SkinObjectKind::TimingVisualizer,
+            Body::HitError(_) => SkinObjectKind::HitError,
+            Body::Density(_) => SkinObjectKind::Density,
         }
     }
 }
@@ -93,6 +119,19 @@ pub(crate) enum Body {
     Graph(GraphBody),
     /// The background image slot, which the frame fills rather than the document.
     Background,
+    Note(notes::NoteBody),
+    Gauge(gauge::GaugeBody),
+    Judge(judge::JudgeBody),
+    SongList(songlist::SongListBody),
+    HiddenCover(covers::CoverBody),
+    LiftCover(covers::CoverBody),
+    GaugeGraph(graphs::GaugeGraphBody),
+    JudgeGraph(graphs::JudgeGraphBody),
+    BpmGraph(graphs::BpmGraphBody),
+    TimingDistribution(graphs::TimingDistributionBody),
+    TimingVisualizer(graphs::TimingVisualizerBody),
+    HitError(graphs::HitErrorBody),
+    Density(graphs::DensityBody),
 }
 
 /// One registered texture cut into a grid of animation cells.
@@ -474,7 +513,7 @@ pub(crate) struct GraphBody {
 }
 
 /// Everything the draw list needs about one image source.
-type Source<'a> = &'a [(String, TextureId, (u32, u32))];
+pub(crate) type Source<'a> = &'a [(String, TextureId, (u32, u32))];
 
 /// Looks an image source up by the id a document gave it.
 fn source_of<'a>(sources: Source<'a>, id: &str) -> Option<&'a (String, TextureId, (u32, u32))> {
@@ -487,7 +526,7 @@ fn cell_timer(property: Option<&PropertyRef>) -> Option<TimerId> {
 }
 
 /// The sprite an image definition cuts out of its source.
-fn image_sprite(def: &ImageDef, sources: Source<'_>) -> Option<Sprite> {
+pub(crate) fn image_sprite(def: &ImageDef, sources: Source<'_>) -> Option<Sprite> {
     let (_, tex, size) = source_of(sources, &def.src)?;
     Some(Sprite::new(*tex, *size, (def.x, def.y, def.w, def.h), (def.divx, def.divy), cell_timer(def.timer.as_ref()), def.cycle))
 }
@@ -519,7 +558,7 @@ pub(crate) fn build_objects(
 }
 
 /// The body behind one destination id, or `None` when nothing declares it.
-fn build_body(
+pub(crate) fn build_body(
     skin: &LoadedSkin,
     id: &str,
     sources: Source<'_>,
@@ -563,6 +602,24 @@ fn build_body(
     }
     if def.bga.as_ref().is_some_and(|bga| bga.id == id) {
         return Some(Body::Background);
+    }
+    if let Some(body) = notes::build_note(skin, id, sources, families, assets, warnings) {
+        return Some(body);
+    }
+    if let Some(body) = gauge::build_gauge(skin, id, sources, families, assets, warnings) {
+        return Some(body);
+    }
+    if let Some(body) = judge::build_judge(skin, id, sources, families, assets, warnings) {
+        return Some(body);
+    }
+    if let Some(body) = songlist::build_songlist(skin, id, sources, families, assets, warnings) {
+        return Some(body);
+    }
+    if let Some(body) = covers::build_cover(skin, id, sources, families, assets, warnings) {
+        return Some(body);
+    }
+    if let Some(body) = graphs::build_graph(skin, id, sources, families, assets, warnings) {
+        return Some(body);
     }
     warnings.push(format!("object {id:?} is not a kind this build draws"));
     None

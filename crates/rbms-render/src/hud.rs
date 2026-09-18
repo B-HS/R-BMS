@@ -1,3 +1,4 @@
+use crate::content::PlayContent;
 use crate::ctx::{RenderCtx, with_render_ctx};
 use crate::result::{KEY_LANE_KIND, LANE_KIND_COUNT, SCRATCH_LANE_KIND, lane_kind_total};
 use crate::skin::Skin;
@@ -177,8 +178,27 @@ pub fn render_hud<R: Renderer>(r: &mut R, skin: &Skin, hud: &HudView<'_>) {
     with_render_ctx(|ctx| render_hud_ctx(ctx, r, skin, hud));
 }
 
+/// [`render_hud_with_content_ctx`] against this thread's installed theme and shared text engine.
+pub fn render_hud_with_content<R: Renderer>(r: &mut R, skin: &Skin, hud: &HudView<'_>, content: PlayContent) {
+    with_render_ctx(|ctx| render_hud_with_content_ctx(ctx, r, skin, hud, content));
+}
+
 /// Draw the play HUD: gauge, score column, combo/judgment flash, pacemaker graph and judge counts.
 pub fn render_hud_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, skin: &Skin, hud: &HudView<'_>) {
+    render_hud_with_content_ctx(ctx, r, skin, hud, PlayContent::default());
+}
+
+/// The same HUD with the blocks a document has taken over left out.
+///
+/// Each flag of [`PlayContent`] stands for one block of readings, and a block the document draws
+/// itself is skipped here rather than drawn underneath it. A `content` with nothing replaced -- what
+/// [`render_hud_ctx`] passes -- draws every block, so a screen with no document is untouched by any
+/// of this.
+///
+/// The pacemaker graph is still measured when it is replaced, because the judgement counters are
+/// placed against its left edge: taking the graph away moves its own pixels, not the column beside
+/// it.
+pub fn render_hud_with_content_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, skin: &Skin, hud: &HudView<'_>, content: PlayContent) {
     let th = ctx.theme;
     let field_x0 = skin.x.iter().copied().fold(f32::MAX, f32::min);
     let field_right = skin.x.iter().zip(&skin.w).map(|(x, w)| x + w).fold(f32::MIN, f32::max);
@@ -187,62 +207,74 @@ pub fn render_hud_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, skin: &Sk
     let jy = skin.judge_y;
     let top = skin.top_y;
 
-    let gy = jy + 10.0;
-    let gh = skin.gauge_height;
-    r.fill_rect(Rect::new(field_x0, gy, field_w, gh), Color::rgb(28, 28, 36));
-    let v = (hud.gauge / 100.0).clamp(0.0, 1.0);
-    let gcol = if hud.gauge >= skin.gauge_clear_threshold {
-        skin.gauge_color_clear
-    } else if hud.gauge >= skin.gauge_warn_threshold {
-        skin.gauge_color_warn
-    } else {
-        skin.gauge_color_fail
-    };
-    r.fill_rect(Rect::new(field_x0, gy, field_w * v, gh), gcol);
-    r.fill_rect(Rect::new(field_x0 + field_w * (skin.gauge_clear_threshold / 100.0).clamp(0.0, 1.0), gy - 2.0, 2.0, gh + 4.0), Color::WHITE);
-    ctx.draw_text_right(r, field_x0 + field_w - 4.0, gy + gh + 4.0, 1.6, gcol, &format!("{}", hud.gauge.round() as i32));
-    ctx.draw_text(r, field_x0, gy + gh + 4.0, 1.2, th.text_muted, "0");
-
-    ctx.draw_text_right(r, CW_REFERENCE - MODE_LABEL_MARGIN, MODE_LABEL_Y, MODE_LABEL_SCALE, th.text_muted, hud.mode_label);
-    ctx.draw_text(r, 14.0, 14.0, 2.4, Color::WHITE, &format!("EX {}", hud.ex_score));
-    if let Some(b) = hud.best_ex {
-        ctx.draw_text(r, 14.0, 48.0, 1.4, Color::GREEN, &format!("BEST {b}"));
-    }
-    if hud.green_number > 0.0 {
-        ctx.draw_text(r, 14.0, 72.0, 1.4, CYAN, &format!("GREEN {}", hud.green_number.round() as i32));
-    }
-    if hud.white_number > 0.0 {
-        ctx.draw_text(r, 14.0, 92.0, 1.4, Color::WHITE, &format!("WHITE {}", hud.white_number.round() as i32));
-    }
-    if let Some(pace) = &hud.pace {
-        let (delta, col) = crate::result::ex_delta_label(pace.delta);
-        ctx.draw_text(r, 14.0, PACE_Y, PACE_SCALE, col, &format!("{} {delta}", pace.name));
+    if !content.gauge {
+        let gy = jy + 10.0;
+        let gh = skin.gauge_height;
+        r.fill_rect(Rect::new(field_x0, gy, field_w, gh), Color::rgb(28, 28, 36));
+        let v = (hud.gauge / 100.0).clamp(0.0, 1.0);
+        let gcol = if hud.gauge >= skin.gauge_clear_threshold {
+            skin.gauge_color_clear
+        } else if hud.gauge >= skin.gauge_warn_threshold {
+            skin.gauge_color_warn
+        } else {
+            skin.gauge_color_fail
+        };
+        r.fill_rect(Rect::new(field_x0, gy, field_w * v, gh), gcol);
+        r.fill_rect(Rect::new(field_x0 + field_w * (skin.gauge_clear_threshold / 100.0).clamp(0.0, 1.0), gy - 2.0, 2.0, gh + 4.0), Color::WHITE);
+        ctx.draw_text_right(r, field_x0 + field_w - 4.0, gy + gh + 4.0, 1.6, gcol, &format!("{}", hud.gauge.round() as i32));
+        ctx.draw_text(r, field_x0, gy + gh + 4.0, 1.2, th.text_muted, "0");
     }
 
-    if hud.combo > 0 {
-        ctx.draw_text_centered(r, cx, (jy - skin.combo_y_offset).max(top), 5.0, Color::WHITE, &hud.combo.to_string());
+    if !content.score {
+        ctx.draw_text_right(r, CW_REFERENCE - MODE_LABEL_MARGIN, MODE_LABEL_Y, MODE_LABEL_SCALE, th.text_muted, hud.mode_label);
+        ctx.draw_text(r, 14.0, 14.0, 2.4, Color::WHITE, &format!("EX {}", hud.ex_score));
+        if let Some(b) = hud.best_ex {
+            ctx.draw_text(r, 14.0, 48.0, 1.4, Color::GREEN, &format!("BEST {b}"));
+        }
+        if hud.green_number > 0.0 {
+            ctx.draw_text(r, 14.0, 72.0, 1.4, CYAN, &format!("GREEN {}", hud.green_number.round() as i32));
+        }
+        if hud.white_number > 0.0 {
+            ctx.draw_text(r, 14.0, 92.0, 1.4, Color::WHITE, &format!("WHITE {}", hud.white_number.round() as i32));
+        }
+        if let Some(pace) = &hud.pace {
+            let (delta, col) = crate::result::ex_delta_label(pace.delta);
+            ctx.draw_text(r, 14.0, PACE_Y, PACE_SCALE, col, &format!("{} {delta}", pace.name));
+        }
     }
 
-    if let Some(j) = hud.last_judge {
-        let j = j as usize;
-        ctx.draw_text_centered(r, cx, (jy - judge_text_offset(skin, hud.judge_text_y)).max(top), 3.0, skin.judge_colors[j], &skin.judge_labels[j]);
-        if (1..=3).contains(&j) {
-            let (txt, col) = if hud.last_fast { ("FAST", CYAN) } else { ("SLOW", Color::ORANGE) };
-            ctx.draw_text_centered(r, cx, (jy - skin.fastslow_y_offset).max(top), 2.0, col, txt);
+    if !content.judge {
+        if hud.combo > 0 {
+            ctx.draw_text_centered(r, cx, (jy - skin.combo_y_offset).max(top), 5.0, Color::WHITE, &hud.combo.to_string());
+        }
+
+        if let Some(j) = hud.last_judge {
+            let j = j as usize;
+            ctx.draw_text_centered(r, cx, (jy - judge_text_offset(skin, hud.judge_text_y)).max(top), 3.0, skin.judge_colors[j], &skin.judge_labels[j]);
+            if (1..=3).contains(&j) {
+                let (txt, col) = if hud.last_fast { ("FAST", CYAN) } else { ("SLOW", Color::ORANGE) };
+                ctx.draw_text_centered(r, cx, (jy - skin.fastslow_y_offset).max(top), 2.0, col, txt);
+            }
         }
     }
 
     let score_graph = score_graph_layout(skin, field_right, top, jy);
-    if let Some(layout) = &score_graph {
+    if let Some(layout) = &score_graph
+        && !content.graph
+    {
         draw_score_graph(ctx, r, &ScoreGraph { rect: layout.rect, ex: hud.ex_score, max_ex: hud.max_ex, best: hud.best_ex }, skin.layout_frame);
     }
 
     if skin.layout_frame
+        && !content.frame
         && let Some(bga) = skin.bga
     {
         draw_layout_outline(r, bga, skin.outline);
     }
 
+    if content.counts {
+        return;
+    }
     let tx =
         score_graph.as_ref().map(|layout| layout.text_x).unwrap_or_else(|| skin.bga.map(|bga| bga.x.max(field_right + 20.0)).unwrap_or(field_right + 20.0));
     let mut ty = top;
@@ -298,11 +330,41 @@ mod tests {
     }
 
     fn drawn(hud: &HudView<'_>) -> Vec<u8> {
+        drawn_with(hud, PlayContent::default())
+    }
+
+    fn drawn_with(hud: &HudView<'_>, content: PlayContent) -> Vec<u8> {
         crate::font::use_embedded_fonts_only();
         let mut canvas = CpuCanvas::new(1280, 720);
         canvas.clear(Color::BLACK);
-        render_hud(&mut canvas, &skin(), hud);
+        render_hud_with_content(&mut canvas, &skin(), hud, content);
         canvas.pixels().to_vec()
+    }
+
+    /// The point of the replacement flags: a document that draws every reading for itself gets a
+    /// screen with none of them on it, rather than its own drawn over the built-in ones.
+    #[test]
+    fn a_hud_whose_every_block_is_replaced_paints_nothing_at_all() {
+        let hud = hud();
+        let every = PlayContent { field: true, gauge: true, judge: true, score: true, counts: true, graph: true, cover: true, frame: true };
+        let mut blank = CpuCanvas::new(1280, 720);
+        blank.clear(Color::BLACK);
+
+        assert_eq!(drawn_with(&hud, every), blank.pixels().to_vec(), "a block was drawn that the document had taken over");
+        assert_ne!(drawn_with(&hud, PlayContent::default()), blank.pixels().to_vec(), "and the same HUD with nothing replaced still draws");
+    }
+
+    /// Each flag stands for one block, so replacing one leaves the rest exactly where they were.
+    #[test]
+    fn replacing_one_block_leaves_every_other_block_where_it_was() {
+        let hud = hud();
+        let whole = drawn(&hud);
+        let without_gauge = drawn_with(&hud, PlayContent { gauge: true, ..PlayContent::default() });
+        let without_counts = drawn_with(&hud, PlayContent { counts: true, ..PlayContent::default() });
+
+        assert_ne!(without_gauge, whole, "the gauge did not come off the screen");
+        assert_ne!(without_counts, whole, "the counters did not come off the screen");
+        assert_ne!(without_gauge, without_counts, "two different blocks came off the same pixels");
     }
 
     /// A player who has not moved the row keeps the placement the skin was authored with, which is
