@@ -15,7 +15,7 @@
 
 - [x] L1. 연구 — Workflow `wf_86282201-14e`(Opus 4갈래, 5분): 레퍼런스 의미(커스텀 타이머·이벤트·click/act, skinpreview·practice, 24키 타입 16, pmchara `.chp`, CSV 명령 표), 비디오 디코더 선택지(순수 Rust 조합), 오디오 루프·BGA 경로 사실 → 결정 E1~E10 과 사양 확정.
 - [x] L2. 구현 1차 — Workflow `wf_d454c9f2-047`(Opus 5갈래, 격리 워크트리, 44분) → 스쿼시 머지 `50a8ef3`(A 번들 결함) · `ff48ddc`(B 오디오 루프) · `d64b867`(C 문서 이벤트) · `5834221`(D 미리보기·연습·마우스) · `39a586e`(E 24키) + `75fa520`(24키 라벨 보정). 충돌 3건(skin_screen.rs 2, generate-assets.py 1) 메인이 병합. 머지 트리 게이트 실측: fmt·clippy 통과, `cargo test --workspace` 3,241 통과·0 실패.
-- [x] L3. 구현 2차 — Workflow `wf_9df10520-9ff`(Opus 3갈래, 39분) → 스쿼시 머지 `8da3244`(F CSV 로더) · `5764405`(G pmchara) · `468836f`(H 비디오 BGA, 신규 `crates/rbms-video`). 충돌 4파일 병합, cfg(test)·가이드 번호 보정.
+- [x] L3. 구현 2차 — Workflow `wf_9df10520-9ff`(Opus 3갈래, 39분) → 스쿼시 머지 `8da3244`(F CSV 로더) · `5764405`(G pmchara) · `468836f`(H 비디오 BGA, 신규 `crates/rbms-video`). 충돌 4파일 병합, cfg(test)·가이드 번호 보정. 머지 트리 게이트 실측: fmt·clippy 통과, `cargo test --workspace` 3,311 통과·0 실패.
 - [ ] L4. 적대 리뷰 → 수정 → 게이트(fmt·clippy·test·금지 명칭·diff-check) → 캡처 → 문서(skin.md·history·acknowledge·HANDOFF) → 단위 커밋 → `dev` 머지·푸시 → CI 확인.
 
 ---
