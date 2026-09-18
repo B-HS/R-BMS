@@ -3,7 +3,7 @@
 Per-crate API + invariants reference, accurate to the current code. Generated from a full read of each
 crate; see `architecture.md` for the big picture and `development.md` for build/test/conventions.
 
-Dependency order: `apps/rbms-player → {rbms-config, rbms-library, rbms-play, rbms-course} → {rbms-render, rbms-audio, rbms-ir, rbms-judge, rbms-chart, rbms-table, rbms-store} → rbms-parser → rbms-model`. `rbms-config` also depends on `rbms-store`, for the one durable-write helper (`write_atomic`) both persistence paths share.
+Dependency order: `apps/rbms-player → {rbms-config, rbms-library, rbms-play, rbms-course, rbms-video} → {rbms-render, rbms-audio, rbms-ir, rbms-judge, rbms-chart, rbms-table, rbms-store} → rbms-parser → rbms-model` (`rbms-video` hangs off the player only). `rbms-config` also depends on `rbms-store`, for the one durable-write helper (`write_atomic`) both persistence paths share.
 
 Every crate opts into the workspace lint set (`[lints] workspace = true`) and every crate root carries `#![forbid(unsafe_code)]`; the one
 exception is documented in `architecture.md`.
