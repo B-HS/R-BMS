@@ -431,6 +431,23 @@ enum Hot {
     NavTables,
     NavRecords,
     NavSettings,
+    /// The key configuration screen, which a skin document's own button may open.
+    NavKeyConfig,
+    /// The settings screen opened straight onto its skin tab.
+    NavSkinConfig,
+    /// Reading the library folders again.
+    NavRescan,
+    /// The score server's ranking panel.
+    NavRanking,
+    /// Starting the focused chart, which is what a document's own play button asks for.
+    SelectPlay,
+    /// Opening the practice panel on it.
+    SelectPractice,
+    /// Marking it a favourite, or unmarking it.
+    SelectFavorite,
+    /// A rectangle a document gave an `act` to. What it means is the document's own business until
+    /// the player has run its half ([`AppShared::select_skin_click`]).
+    SkinEvent(rbms_render::skin_render::events::SkinEventClick),
 }
 
 /// The running application: the state that outlives a stage change, the screen that is up, and the

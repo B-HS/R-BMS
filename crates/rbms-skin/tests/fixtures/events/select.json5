@@ -1,0 +1,35 @@
+// A browser document carrying the three things a document fires rather than draws: timers it
+// computes itself, events with a condition and an interval, and objects a click acts on. The
+// pointer rectangle on the last destination is the fourth: a gate on where the cursor is.
+{
+    type: 5,
+    name: 'fixture events',
+    author: 'rbms tests',
+    w: 1280,
+    h: 720,
+    source: [{ id: 'sheet', path: 'sheet.png' }],
+    customTimers: [
+        { id: 10001, timer: 'skin.boolean(900) and skin.time() or nil' },
+        { id: 10002, timer: 41 },
+        { id: 10003 },
+    ],
+    customEvents: [
+        { id: 5000, action: 'skin.set_timer(10003)', condition: 'skin.number(70) > 0', minInterval: 250 },
+        { id: 5001, action: 12 },
+        { id: 5002, action: 5001, condition: 900 },
+    ],
+    image: [
+        { id: 'sort-button', src: 'sheet', act: 12, click: 0 },
+        { id: 'speed-strip', src: 'sheet', act: 57, click: 2 },
+        { id: 'own-button', src: 'sheet', act: 'skin.set_timer(10003)', click: 3 },
+        { id: 'plain', src: 'sheet' },
+    ],
+    imageset: [{ id: 'gauge-set', images: ['plain'], act: 40, click: 1 }],
+    destination: [
+        { id: 'sort-button', dst: [{ time: 0, x: 10, y: 20, w: 40, h: 12 }] },
+        { id: 'speed-strip', dst: [{ time: 0, x: 60, y: 20, w: 80, h: 12 }] },
+        { id: 'own-button', dst: [{ time: 0, x: 150, y: 20, w: 40, h: 12 }] },
+        { id: 'gauge-set', dst: [{ time: 0, x: 200, y: 20, w: 40, h: 12 }] },
+        { id: 'plain', mouseRect: { x: -4, y: -4, w: 48, h: 20 }, dst: [{ time: 0, x: 260, y: 20, w: 40, h: 12 }] },
+    ],
+}

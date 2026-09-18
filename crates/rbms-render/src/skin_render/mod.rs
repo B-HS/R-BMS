@@ -16,6 +16,7 @@
 mod color;
 mod covers;
 mod draw;
+pub mod events;
 mod gauge;
 mod graphs;
 mod judge;
@@ -39,12 +40,13 @@ use rbms_skin::dst::{DrawStateSource, LuaDrawEval, LuaExprId, SkinColor, SkinRec
 use rbms_skin::loader::LoadedSkin;
 use rbms_skin::model::SkinLayer;
 use rbms_skin::property::SkinStateSource;
-use rbms_skin::timer::TimerState;
+use rbms_skin::timer::{TimerRequest, TimerState};
 
 use crate::font::TextContext;
 use crate::{Color, Rect, Renderer, TextureId};
 
 pub use color::parse_hex_color;
+pub use events::{DocumentEvents, SkinEventClick, SkinEventFrame, SkinEventRequest, SkinRef, is_builtin_event};
 pub use object::SkinObjectKind;
 pub use screen::{
     LaneTimerState, PlayLanes, PlayTimers, ResultTimers, SelectTimers, SkinDraw, render_decide_screen, render_keyconfig_screen, render_play_screen,
@@ -131,6 +133,10 @@ pub trait SkinExprEval: LuaDrawEval {
     fn eval_float(&self, expr: LuaExprId) -> Option<f32>;
     /// The expression's text value this frame.
     fn eval_text(&self, expr: LuaExprId) -> Option<String>;
+    /// When the timer the expression stands for switched on, or `None` while it is off.
+    fn eval_timer(&self, expr: LuaExprId) -> Option<i64>;
+    /// Runs the expression for its effects, answering what it asked of the document's own timers.
+    fn run_action(&self, expr: LuaExprId) -> Vec<TimerRequest>;
 }
 
 /// A host with no Lua sandbox: nothing compiles and nothing evaluates.
@@ -157,6 +163,14 @@ impl SkinExprEval for NoExpressions {
 
     fn eval_text(&self, _expr: LuaExprId) -> Option<String> {
         None
+    }
+
+    fn eval_timer(&self, _expr: LuaExprId) -> Option<i64> {
+        None
+    }
+
+    fn run_action(&self, _expr: LuaExprId) -> Vec<TimerRequest> {
+        Vec::new()
     }
 }
 
@@ -373,6 +387,46 @@ impl SkinScreen {
         self.hotspots(frame)
             .into_iter()
             .map(|spot| state::SkinHotspot { rect: viewport.place(SkinRect::new(spot.rect.x, spot.rect.y, spot.rect.w, spot.rect.h)), action: spot.action })
+            .collect()
+    }
+
+    /// The rectangles the document's own `act` objects offer this frame, placed on a screen of
+    /// `screen` logical pixels.
+    ///
+    /// Apart from [`SkinScreen::hotspots`] because the two are declared apart: a `hotspot` entry
+    /// names a native action the document stands in for, while an `act` names an event of the
+    /// reference's own numbering that the document mostly answers itself. `events` is the compiled
+    /// half of the document that owns those, which the caller holds beside this screen.
+    ///
+    /// In draw order, so the caller that tests its last match first tests the topmost object first,
+    /// which is the order the reference walks its own object array in (`Skin.mousePressed`).
+    pub fn event_hotspots_on_screen(&self, frame: &SkinFrame<'_>, screen: (u32, u32), events: &events::DocumentEvents) -> Vec<state::SkinHotspot> {
+        if events.is_empty() {
+            return Vec::new();
+        }
+        let viewport = SkinViewport::new(self.authored, (screen.0 as f32, screen.1 as f32));
+        let drawn = self.drawn_rects(frame);
+        events
+            .hotspots(&drawn)
+            .into_iter()
+            .map(|spot| state::SkinHotspot { rect: viewport.place(SkinRect::new(spot.rect.x, spot.rect.y, spot.rect.w, spot.rect.h)), action: spot.action })
+            .collect()
+    }
+
+    /// Every object that reached the screen this frame, in draw order, with the rectangle it landed
+    /// on in the document's own coordinates.
+    ///
+    /// The same two tests [`draw::draw_object`] leaves on: an object whose conditions fail, whose
+    /// animation has not started or which is fully transparent drew nothing and is not here.
+    fn drawn_rects(&self, frame: &SkinFrame<'_>) -> Vec<(&str, Rect)> {
+        let state: &dyn DrawStateSource = frame.state;
+        let gate: Option<&dyn LuaDrawEval> = frame.lua.map(|lua| lua as &dyn LuaDrawEval);
+        self.objects
+            .iter()
+            .filter_map(|object| {
+                let resolved = prepare(&object.track, frame.now_ms, frame.timers, state, gate, (0.0, 0.0), frame.mouse)?;
+                (resolved.color.a != 0).then(|| (object.id.as_str(), Rect::from(resolved.rect)))
+            })
             .collect()
     }
 

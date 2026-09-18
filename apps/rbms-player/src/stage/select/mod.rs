@@ -14,8 +14,10 @@ use std::sync::mpsc::TryRecvError;
 use crate::ir_ext::PrimaryProfileDirection;
 use crate::ir_ranking_view::{PanelAction, PanelLine, offline_lines, panel_action, panel_lines, profile_line};
 use crate::ir_replay::from_ir_replay;
-use crate::stage::{Canvas, FoldersState, FrameCtx, KeyInput, LoadingState, SettingsState, Stage, StageHandler, TablesState, Transition};
+use crate::stage::{Canvas, FoldersState, FrameCtx, KeyConfigState, KeyInput, LoadingState, SettingsState, Stage, StageHandler, TablesState, Transition};
 use crate::*;
+use rbms_config::SettingTab;
+use rbms_render::skin_render::events::SkinEventClick;
 use rbms_render::{FrameExtra, QuadParams, SkinHotAction};
 use rbms_skin::model::SkinLayer;
 
@@ -367,6 +369,23 @@ impl SelectState {
                 Transition::Stay
             }
         }
+    }
+
+    /// Hands one click on a document's own rectangle to the document, and answers with the browser
+    /// action it turned into, if any.
+    ///
+    /// The scene the document was drawn from is what its expressions read, so a click that arrives
+    /// before the browser has assembled one is dropped rather than answered against a scene of
+    /// nothing.
+    fn skin_event(&self, shared: &mut AppShared, click: SkinEventClick) -> Option<Hot> {
+        shared.select_skin_click(self.cached_scene.as_ref()?, click)
+    }
+
+    /// Read the library folders again, which is what a document's own update button asks for.
+    fn rescan_library(shared: &AppShared) -> Transition {
+        let folders = shared.config.library.folders.clone();
+        let tables = shared.config.library.tables.clone();
+        Transition::Open(Stage::Loading(LoadingState::scan(folders, tables, songdb_path(&shared.settings_path), false)))
     }
 
     /// Show or hide the ranking panel. While it is open it also takes the arrow keys, so one key
@@ -756,8 +775,16 @@ impl StageHandler for SelectState {
 
     /// Clicks on the browser. The bottom navigation buttons are the clickable equivalents of the
     /// keyboard shortcuts, and a click that misses every region closes an open modal.
+    ///
+    /// A rectangle a skin document gave an `act` to is answered by the document first: it runs its
+    /// own timers and events, and what is left is one of the browser's own actions, which is then
+    /// carried out exactly as a click on the native button for it would be.
     fn handle_mouse(&mut self, ctx: &mut FrameCtx<'_>, at: (f32, f32)) -> Transition {
-        match ctx.shared.hit_test(at) {
+        let hit = match ctx.shared.hit_test(at) {
+            Some(Hot::SkinEvent(click)) => self.skin_event(ctx.shared, click),
+            other => other,
+        };
+        match hit {
             Some(Hot::SelectRow(idx)) if self.tab == SelectTab::Courses => {
                 if self.courses.cursor() == idx {
                     return self.select_enter(ctx.shared);
@@ -788,6 +815,13 @@ impl StageHandler for SelectState {
             Some(Hot::NavTables) => return Transition::Open(Stage::Tables(TablesState::new())),
             Some(Hot::NavRecords) => self.open_record_modal(ctx.shared),
             Some(Hot::NavSettings) => return Transition::Open(Stage::Settings(SettingsState::new())),
+            Some(Hot::NavKeyConfig) => return Transition::Open(Stage::KeyConfig(KeyConfigState::new())),
+            Some(Hot::NavSkinConfig) => return Transition::Open(Stage::Settings(SettingsState::on_tab(SettingTab::Skin))),
+            Some(Hot::NavRescan) => return Self::rescan_library(ctx.shared),
+            Some(Hot::NavRanking) => self.toggle_ranking_panel(ctx.shared),
+            Some(Hot::SelectPlay) => return self.select_enter(ctx.shared),
+            Some(Hot::SelectPractice) => return self.start_practice(ctx.shared),
+            Some(Hot::SelectFavorite) => ctx.shared.toggle_focused_favorite(),
             None => self.record_modal = None,
             _ => {}
         }
@@ -825,6 +859,7 @@ impl StageHandler for SelectState {
         let now_ms = ctx.shared.skin_now_ms();
         let row = ctx.shared.sel;
         ctx.shared.skin_select_timers.update(&mut ctx.shared.skin_timers, row, now_ms);
+        ctx.shared.update_select_skin_events(view);
         if !native_layout && ctx.shared.draw_select_skin(canvas, view, document_background, FrameExtra::None) {
             return;
         }
@@ -870,6 +905,7 @@ impl StageHandler for SelectState {
                 SkinHotAction::Settings => Hot::NavSettings,
                 SkinHotAction::ModalReplay => Hot::ModalReplay,
                 SkinHotAction::ModalClose => Hot::ModalClose,
+                SkinHotAction::Event(click) => Hot::SkinEvent(click),
             };
             (spot.rect, mapped)
         }));

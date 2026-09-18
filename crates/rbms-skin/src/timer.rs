@@ -47,6 +47,20 @@ pub fn timer_name(id: TimerId) -> Option<&'static str> {
     ALL_TIMER.iter().find(|(value, _)| *value == id.0).map(|(_, name)| *name)
 }
 
+/// What a document's own action asked of the timers.
+///
+/// The reference's `Skin.setMicroCustomTimer` is the one piece of writable state a skin script
+/// reaches, and this is the request form of it: an action runs inside the sandbox, which cannot
+/// hold a mutable borrow of the player, so what it asked for comes back as values the caller
+/// applies afterwards.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimerRequest {
+    /// Switch the timer on as of the moment the action ran.
+    Set(TimerId),
+    /// Switch the timer off.
+    Clear(TimerId),
+}
+
 /// Which timers are on, and since when.
 ///
 /// The reference keeps an "off" timer as `Long.MIN_VALUE` in a flat array; an absent entry here is
@@ -109,5 +123,29 @@ impl TimerState {
     /// Switches every timer off, as a screen change does (`TimerManager.setMainState`).
     pub fn clear(&mut self) {
         self.on.clear();
+    }
+
+    /// Applies one request a document's own action made, as of `now_ms`.
+    pub fn apply(&mut self, request: TimerRequest, now_ms: i64) {
+        match request {
+            TimerRequest::Set(id) => self.set_on(id, now_ms),
+            TimerRequest::Clear(id) => self.set_off(id),
+        }
+    }
+
+    /// Puts a timer at the moment it switched on, or switches it off when there is no moment.
+    ///
+    /// The form a document's own timer arrives in: its expression answers when it turned on rather
+    /// than that it turned on now, and `None` is the reference's `Long.MIN_VALUE` for a timer that
+    /// is not running (`CustomTimer.update`).
+    pub fn set_at(&mut self, id: TimerId, started_ms: Option<i64>) {
+        match started_ms {
+            Some(started) => {
+                self.on.insert(id, started);
+            }
+            None => {
+                self.on.remove(&id);
+            }
+        }
     }
 }

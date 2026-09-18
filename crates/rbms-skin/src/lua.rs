@@ -27,6 +27,7 @@ pub use crate::loader::Budget;
 /// second trait of the same name: one implementation serves the registry, the interpolator's draw
 /// gating and this evaluator alike.
 pub use crate::property::SkinStateSource;
+use crate::timer::{TimerId, TimerRequest};
 
 /// Instructions between two budget checks. The hook is cheap but not free, so it fires in blocks
 /// rather than on every instruction.
@@ -38,6 +39,12 @@ const RANDOM_SEED: i64 = 0x5eed_5eed;
 
 /// The global table the whitelisted API is published under.
 const SKIN_TABLE: &str = "skin";
+
+/// The function an action switches one of the document's own timers on with.
+const SKIN_SET_TIMER: &str = "set_timer";
+
+/// The function an action switches one of the document's own timers off with.
+const SKIN_CLEAR_TIMER: &str = "clear_timer";
 
 /// The name a compiled expression carries in the interpreter's own messages.
 ///
@@ -190,7 +197,11 @@ impl LuaSandbox {
     }
 
     /// Runs one compiled expression and returns its raw Lua value.
-    fn call(&self, expr: LuaExprId, state: &dyn SkinStateSource) -> Result<Value, SkinError> {
+    ///
+    /// `requests` is the collector an action's own two functions push into. A read -- a draw
+    /// condition, a value, a timer -- passes `None`, and those functions are then not published at
+    /// all, so nothing a document evaluates for its answer can change the player's state on the way.
+    fn call(&self, expr: LuaExprId, state: &dyn SkinStateSource, requests: Option<&RefCell<Vec<TimerRequest>>>) -> Result<Value, SkinError> {
         let function = self.functions.borrow().get(expr.0 as usize).cloned();
         let Some(function) = function else {
             return Err(SkinError::Lua { expr: format!("expression {}", expr.0), message: "no such compiled expression".to_owned() });
@@ -207,6 +218,22 @@ impl LuaSandbox {
             table.set("text", scope.create_function(move |_, id: i32| Ok(state.string(id).to_owned()))?)?;
             table.set("timer", scope.create_function(move |_, id: i32| Ok(state.timer(id)))?)?;
             table.set("time", scope.create_function(move |_, (): ()| Ok(state.now_ms()))?)?;
+            if let Some(requests) = requests {
+                table.set(
+                    SKIN_SET_TIMER,
+                    scope.create_function(move |_, id: i32| {
+                        requests.borrow_mut().push(TimerRequest::Set(TimerId(id)));
+                        Ok(())
+                    })?,
+                )?;
+                table.set(
+                    SKIN_CLEAR_TIMER,
+                    scope.create_function(move |_, id: i32| {
+                        requests.borrow_mut().push(TimerRequest::Clear(TimerId(id)));
+                        Ok(())
+                    })?,
+                )?;
+            }
             self.lua.globals().set(SKIN_TABLE, table)?;
             function.call::<Value>(())
         });
@@ -229,31 +256,59 @@ impl LuaSandbox {
 
     /// Runs a compiled expression as a condition, with Lua's own notion of truth.
     pub fn eval_bool_id(&self, expr: LuaExprId, state: &dyn SkinStateSource) -> Result<bool, SkinError> {
-        let value = self.call(expr, state)?;
+        let value = self.call(expr, state, None)?;
         Ok(!matches!(value, Value::Nil | Value::Boolean(false)))
     }
 
     /// Runs a compiled expression as an integer.
     pub fn eval_int_id(&self, expr: LuaExprId, state: &dyn SkinStateSource) -> Result<i32, SkinError> {
-        let value = self.call(expr, state)?;
+        let value = self.call(expr, state, None)?;
         as_number(&value).map(|number| number.trunc() as i32).ok_or_else(|| type_error(&self.source_of(expr), &value, "a number"))
     }
 
     /// Runs a compiled expression as a float.
     pub fn eval_float_id(&self, expr: LuaExprId, state: &dyn SkinStateSource) -> Result<f32, SkinError> {
-        let value = self.call(expr, state)?;
+        let value = self.call(expr, state, None)?;
         as_number(&value).map(|number| number as f32).ok_or_else(|| type_error(&self.source_of(expr), &value, "a number"))
     }
 
     /// Runs a compiled expression as text.
     pub fn eval_string_id(&self, expr: LuaExprId, state: &dyn SkinStateSource) -> Result<String, SkinError> {
-        let value = self.call(expr, state)?;
+        let value = self.call(expr, state, None)?;
         match &value {
             Value::String(text) => Ok(text.to_string_lossy()),
             Value::Integer(number) => Ok(number.to_string()),
             Value::Number(number) => Ok(number.to_string()),
             _ => Err(type_error(&self.source_of(expr), &value, "a string")),
         }
+    }
+
+    /// Runs a compiled expression as the moment one of the document's own timers switched on, in
+    /// milliseconds on the frame's own clock, or `None` while that timer is not running.
+    ///
+    /// The reference's `TimerProperty` answers in microseconds and writes `Long.MIN_VALUE` for a
+    /// timer that is off (`CustomTimer.update`). This build measures every timer in milliseconds,
+    /// the unit `skin.time()` and `skin.timer(id)` already answer in, so an expression is written
+    /// against the same clock it reads; `nil` and `false` are the off sentinel a document writes,
+    /// because neither is a moment.
+    pub fn eval_timer_id(&self, expr: LuaExprId, state: &dyn SkinStateSource) -> Result<Option<i64>, SkinError> {
+        let value = self.call(expr, state, None)?;
+        if matches!(value, Value::Nil | Value::Boolean(false)) {
+            return Ok(None);
+        }
+        as_number(&value).map(|number| Some(number.trunc() as i64)).ok_or_else(|| type_error(&self.source_of(expr), &value, "a number"))
+    }
+
+    /// Runs a compiled expression for its effects, answering what it asked of the timers.
+    ///
+    /// This is the only path that publishes [`SKIN_SET_TIMER`] and [`SKIN_CLEAR_TIMER`], so an
+    /// expression a document wrote as a value cannot move a timer however it is evaluated. The
+    /// expression's own result is discarded: an action is run for what it asked for, not for what
+    /// it returned.
+    pub fn run_action_id(&self, expr: LuaExprId, state: &dyn SkinStateSource) -> Result<Vec<TimerRequest>, SkinError> {
+        let requests = RefCell::new(Vec::new());
+        self.call(expr, state, Some(&requests))?;
+        Ok(requests.into_inner())
     }
 
     /// Compiles `source` if it is new, then runs it as a condition.
@@ -360,6 +415,23 @@ impl LuaFrame<'_> {
     /// The expression's text this frame.
     pub fn eval_string(&self, expr: LuaExprId) -> Option<String> {
         self.spend(|sandbox, state| sandbox.eval_string_id(expr, state))
+    }
+
+    /// When the timer the expression stands for switched on, or `None` while it is off.
+    ///
+    /// An expression that failed or ran out of budget answers `None` as well, which is the same
+    /// thing a document sees either way: a timer that is not running, so nothing animated against
+    /// it is drawn.
+    pub fn eval_timer(&self, expr: LuaExprId) -> Option<i64> {
+        self.spend(|sandbox, state| sandbox.eval_timer_id(expr, state)).flatten()
+    }
+
+    /// Runs the expression as an action, answering what it asked of the timers.
+    ///
+    /// An action that failed asked for nothing, which leaves the timers where they were rather than
+    /// applying half of what it wanted.
+    pub fn run_action(&self, expr: LuaExprId) -> Vec<TimerRequest> {
+        self.spend(|sandbox, state| sandbox.run_action_id(expr, state)).unwrap_or_default()
     }
 }
 

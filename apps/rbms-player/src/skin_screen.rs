@@ -19,6 +19,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use rbms_config::SkinCustomisation;
 use rbms_render::font::with_text_context;
 use rbms_render::result::{ResultContent, ResultExtras, ResultView};
+use rbms_render::skin_render::events::DocumentEvents;
 use rbms_render::skin_render::state::{DecideChart, DecideViewState, KeyConfigViewState, PlayViewState, ResultViewState, SelectViewState};
 use rbms_render::{
     Color, FrameExtra, OptionsRows, PlayContent, Renderer, ScreenContent, SelectContent, SelectListState, SkinAssets, SkinDraw, SkinExprEval, SkinFrame,
@@ -30,6 +31,9 @@ use rbms_skin::loader::{LoadedSkin, SKIN_TYPE_DECIDE, SKIN_TYPE_KEY_CONFIG, SKIN
 use rbms_skin::lua::{LuaFrame, LuaSandbox};
 use rbms_skin::model::{SkinComposition, SkinDef, SkinLayer};
 use rbms_skin::property::SkinStateSource;
+use rbms_skin::timer::TimerRequest;
+
+mod events;
 
 use crate::assets::{DecodePool, SkinAsset, SkinAssetJob, SkinAssetKind, skin_document_is_enabled, spawn_skin_asset_decode};
 use crate::notify::{Level, notify};
@@ -124,6 +128,14 @@ impl SkinExprEval for SkinSandboxFrame<'_> {
     fn eval_text(&self, expr: LuaExprId) -> Option<String> {
         self.frame.eval_string(expr)
     }
+
+    fn eval_timer(&self, expr: LuaExprId) -> Option<i64> {
+        self.frame.eval_timer(expr)
+    }
+
+    fn run_action(&self, expr: LuaExprId) -> Vec<TimerRequest> {
+        self.frame.run_action(expr)
+    }
 }
 
 /// One compiled screen and the read of its document it was built from.
@@ -141,6 +153,9 @@ struct BuiltScreen {
     /// alone. Read off the document rather than the compiled screen, for the reason
     /// [`document_places_chart_art`] gives.
     places_chart_art: bool,
+    /// The document's own timers, events and clickable objects, compiled beside the screen it draws
+    /// and from the same sandbox.
+    events: DocumentEvents,
 }
 
 /// Which of the three screens a skin type belongs to, for the screens that let a document stand in
@@ -527,8 +542,11 @@ impl SkinScreens {
         };
         let mut assets = PlayerSkinAssets::new(document, pending.ready);
         let compiled = SkinScreen::build(r, text, document, &mut assets);
-        if let Some(first) = compiled.warnings().first() {
-            let rest = compiled.warnings().len() - 1;
+        let mut event_warnings: Vec<String> = Vec::new();
+        let events = DocumentEvents::build(&document.def, &mut assets, &mut event_warnings);
+        let warnings: Vec<&String> = compiled.warnings().iter().chain(event_warnings.iter()).collect();
+        if let Some(first) = warnings.first() {
+            let rest = warnings.len() - 1;
             let more = if rest > 0 { format!(" (and {rest} more)") } else { String::new() };
             notify(Level::Warn, format!("skin: {first}{more}"));
         }
@@ -539,12 +557,17 @@ impl SkinScreens {
         }
         let content = screen_content_of(screen, &compiled, document.replace_names());
         let places_chart_art = document_places_chart_art(&document.def);
-        self.built.insert(screen, BuiltScreen { screen: compiled, build: pending.build, content, places_chart_art });
+        self.built.insert(screen, BuiltScreen { screen: compiled, build: pending.build, content, places_chart_art, events });
     }
 
     /// Whether the document compiled for `screen` places the chart's art itself.
     fn places_chart_art(&self, screen: i32) -> bool {
         self.built.get(&screen).is_some_and(|entry| entry.places_chart_art)
+    }
+
+    /// The compiled timers, events and clickable objects of one screen's document.
+    fn events(&self, screen: i32) -> Option<&DocumentEvents> {
+        self.built.get(&screen).map(|entry| &entry.events)
     }
 
     /// Which blocks of native output the compiled document for `screen` has taken over, or none at
@@ -728,7 +751,17 @@ impl AppShared {
     /// still owns every hit rectangle on the screen. The frame is assembled exactly as a drawn one
     /// is, because a slot is only clickable where it was actually drawn: the same gates, the same
     /// clock and the same pointer.
-    pub(crate) fn skin_hotspots(&self, canvas: &Canvas<'_>, screen: i32, state: &dyn SkinStateSource, extra: FrameExtra<'_>) -> Vec<SkinHotspot> {
+    /// `stands_in` is whether the document has taken over a block of native output whose own
+    /// rectangles it must now answer for. Its own `act` objects are answered either way: those are
+    /// the document's alone, so offering them lays nothing over a native rectangle.
+    pub(crate) fn skin_hotspots(
+        &self,
+        canvas: &Canvas<'_>,
+        screen: i32,
+        state: &dyn SkinStateSource,
+        extra: FrameExtra<'_>,
+        stands_in: bool,
+    ) -> Vec<SkinHotspot> {
         if !self.skin_document_is_enabled(screen) {
             return Vec::new();
         }
@@ -745,7 +778,11 @@ impl AppShared {
             background: None,
             extra,
         };
-        compiled.hotspots_on_screen(&frame, canvas.size())
+        let mut spots = if stands_in { compiled.hotspots_on_screen(&frame, canvas.size()) } else { Vec::new() };
+        if let Some(events) = self.skin_screens.events(screen) {
+            spots.extend(compiled.event_hotspots_on_screen(&frame, canvas.size(), events));
+        }
+        spots
     }
 
     fn skin_document_is_enabled(&self, screen: i32) -> bool {
@@ -851,14 +888,16 @@ impl AppShared {
     /// already put there, and answering anyway would lay a second set of rectangles over the first.
     pub(crate) fn select_hotspots(&self, canvas: &Canvas<'_>, view: &SelectScene) -> Vec<SkinHotspot> {
         let content = self.screen_content(SKIN_TYPE_MUSIC_SELECT).select;
-        if !content.list && !content.topbar {
+        let stands_in = content.list || content.topbar;
+        let acts = self.skin_screens.events(SKIN_TYPE_MUSIC_SELECT).is_some_and(|events| events.click_count() > 0);
+        if !stands_in && !acts {
             return Vec::new();
         }
         let offsets = self.skin_offsets(SKIN_TYPE_MUSIC_SELECT);
         let options = crate::app_options::options_rows(self);
         let own = select_list(view, &options);
         let state = SelectViewState::new(view, self.skin_now_ms(), Some(&offsets), Some(&options));
-        self.skin_hotspots(canvas, SKIN_TYPE_MUSIC_SELECT, &state, FrameExtra::Select(&own))
+        self.skin_hotspots(canvas, SKIN_TYPE_MUSIC_SELECT, &state, FrameExtra::Select(&own), stands_in)
     }
 
     /// Draw the score screen's document.

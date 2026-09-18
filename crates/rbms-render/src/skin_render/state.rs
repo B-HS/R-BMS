@@ -16,6 +16,7 @@ use rbms_skin::property::{
     UNMAPPED_STRING, clamp_float,
 };
 
+use super::events::SkinEventClick;
 use crate::Rect;
 use crate::hud::HudView;
 use crate::playfield::{LaneShade, PlayfieldView};
@@ -812,6 +813,10 @@ pub enum SkinHotAction {
     /// One chart of the browser's own list, by the row index the browser selects with -- not the
     /// wheel slot the document happened to draw it on.
     Row(usize),
+    /// An object the document gave an `act` to, which stands for no native action at all: what a
+    /// click on it does is the document's own business, and the player only carries out what is
+    /// left of it ([`super::events::DocumentEvents::click`]).
+    Event(SkinEventClick),
 }
 
 impl SkinHotAction {
