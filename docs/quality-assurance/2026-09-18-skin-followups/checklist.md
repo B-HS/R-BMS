@@ -12,10 +12,8 @@
 
 ## 2. 통합 게이트 (머지된 브랜치에서 메인 실측)
 
-- [ ] `cargo fmt --all --check`
-- [ ] `cargo clippy --workspace --all-targets --all-features -- -D warnings`
-- [ ] `cargo test --workspace` 0 실패
-- [ ] 금지 명칭 grep 0건, `git diff --check`
+- [x] L2 머지 시점(`0c431a2` 이전 코드 `75fa520`): `cargo fmt --all --check` 통과 · `cargo clippy --workspace --all-targets --all-features -- -D warnings` 경고 0 · `cargo test --workspace` 3,241 통과·0 실패·3 ignored(105 스위트) · 금지 명칭 0건 · `git diff --check` 통과.
+- [ ] L3 머지 뒤 같은 게이트 재실측.
 - [ ] 헤드리스 캡처 재생성(`the_current_default_bundle_keeps_information_and_chart_art_visible`, `render_tests_skin_v3`) 육안 판정
 
 ## 3. 헤드리스 캡처 육안 판정 (메인)
