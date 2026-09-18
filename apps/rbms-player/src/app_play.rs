@@ -549,6 +549,27 @@ impl AppShared {
         self.syssound = syssound;
     }
 
+    /// Start a looping system sound on the shared stream — a screen's background music, which plays
+    /// past the length of its own stem until [`AppShared::stop_system_sound`] ends it. Silent under
+    /// the same conditions as [`AppShared::play_system_sound`], plus a stem that is not a BGM one.
+    pub(crate) fn play_system_sound_loop(&mut self, sound: SystemSound) {
+        let syssound = std::mem::take(&mut self.syssound);
+        if let Some(engine) = self.audio.as_mut() {
+            syssound.play_loop(engine, sound, SYSTEM_SOUND_GAIN);
+        }
+        self.syssound = syssound;
+    }
+
+    /// End a system sound, which is how a loop started by [`AppShared::play_system_sound_loop`] is
+    /// let go. A sound that is not playing is unaffected.
+    pub(crate) fn stop_system_sound(&mut self, sound: SystemSound) {
+        let syssound = std::mem::take(&mut self.syssound);
+        if let Some(engine) = self.audio.as_mut() {
+            syssound.stop(engine, sound);
+        }
+        self.syssound = syssound;
+    }
+
     /// Re-read the system sound set after the SOUND FOLDER row changed, and hand it to the running
     /// stream so the next cue is heard without a restart.
     pub(crate) fn reload_system_sounds(&mut self) {

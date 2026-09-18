@@ -38,6 +38,11 @@ const SEARCH_CARET: &str = "_";
 /// width on top of this; this only decides which stretch of the query it is handed.
 const SEARCH_VISIBLE_CHARS: usize = 24;
 
+/// The system sound the browser loops for as long as it is the screen on top. The reference
+/// implementation plays the same `select` stem as the browser's background music rather than as a
+/// cue, and the decide screen's own stem is what marks a chart being started.
+const BROWSER_BGM: SystemSound = SystemSound::Select;
+
 /// The browser's own state: the record modal, the quit confirmation, the ranking panel, the
 /// lazily computed detail of the focused chart, the assembled scene cache and the hover preview.
 pub(crate) struct SelectState {
@@ -77,6 +82,11 @@ pub(crate) struct SelectState {
     /// rebuilds.
     applied: Option<(u64, SelectFilter, SortMode)>,
     preview: PreviewState,
+    /// Whether this browser has a [`BROWSER_BGM`] loop of its own running. The loop is raised on the
+    /// way in and let go on the way out, and a browser built without ever being entered — the one
+    /// the app starts on — has never raised one, so this is what keeps its exit from stopping a
+    /// sound it never started.
+    bgm_looping: bool,
     /// Which of the two lists the browser is showing.
     tab: SelectTab,
     /// The course list, resolved against the library it was built for.
@@ -104,6 +114,7 @@ impl Default for SelectState {
             filter: FilterPanel::default(),
             applied: None,
             preview: PreviewState::default(),
+            bgm_looping: false,
             tab: SelectTab::default(),
             courses: CourseList::default(),
         }
@@ -144,7 +155,6 @@ impl SelectState {
                 self.record_modal = None;
                 shared.replay_download_rx = None;
                 shared.replay_download_target = None;
-                shared.play_system_sound(SystemSound::Select);
                 Transition::Open(Stage::Loading(LoadingState::song(i)))
             }
             Some(SelectItem::Folder { target, .. }) => {
@@ -170,7 +180,6 @@ impl SelectState {
             return Transition::Stay;
         }
         let entry = entry.clone();
-        shared.play_system_sound(SystemSound::Select);
         crate::start_course(shared, &entry)
     }
 
@@ -638,8 +647,13 @@ impl StageHandler for SelectState {
 
     /// Arriving back on the browser is when the course list is re-resolved: a scan that has just
     /// finished may have supplied the very charts a course was missing.
+    ///
+    /// It is also where the browser's background music starts, so every way back here — from the
+    /// settings screens, from a result, from an abandoned run — raises it again.
     fn on_enter(&mut self, ctx: &mut FrameCtx<'_>) {
         self.refresh_courses(ctx.shared);
+        self.bgm_looping = true;
+        ctx.shared.play_system_sound_loop(BROWSER_BGM);
     }
 
     fn update(&mut self, ctx: &mut FrameCtx<'_>) -> Transition {
@@ -657,10 +671,16 @@ impl StageHandler for SelectState {
     }
 
     /// The preview owns the shared output stream's preview namespace, so it is torn down before any
-    /// other screen can touch the engine.
+    /// other screen can touch the engine. The background music goes with it: a chart starting, the
+    /// settings screens and the managers all open over the browser, and none of them wants it under
+    /// them.
     fn on_exit(&mut self, ctx: &mut FrameCtx<'_>) {
         if self.preview_active() {
             self.stop_preview(ctx.shared);
+        }
+        if self.bgm_looping {
+            self.bgm_looping = false;
+            ctx.shared.stop_system_sound(BROWSER_BGM);
         }
     }
 

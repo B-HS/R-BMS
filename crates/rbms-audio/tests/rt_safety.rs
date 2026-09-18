@@ -88,7 +88,16 @@ fn the_callback_path_never_reaches_the_allocator() {
     let mut queued: Vec<Command> = owned
         .iter()
         .enumerate()
-        .map(|(i, s)| Command::Play { sample: Arc::clone(s), gain: 1.0, pan: 0.0, pitch: 1.0, key: i as u32, at_frame: 0, bus: Bus::ALL[i % Bus::ALL.len()] })
+        .map(|(i, s)| Command::Play {
+            sample: Arc::clone(s),
+            gain: 1.0,
+            pan: 0.0,
+            pitch: 1.0,
+            key: i as u32,
+            at_frame: 0,
+            bus: Bus::ALL[i % Bus::ALL.len()],
+            looping: false,
+        })
         .collect();
 
     mixer.mix(&mut out);

@@ -187,6 +187,9 @@ struct Voice {
     phase: VoicePhase,
     start_frame: u64,
     active: bool,
+    /// Whether the read cursor wraps back to the start of the sample instead of ending the voice.
+    /// A looping voice is ended only by [`release`], so every stop path still reaches it.
+    looping: bool,
     /// A start queued behind this voice's fade-out. Set when the pool was full and this slot was the
     /// one taken, so the incoming sound waits out the victim's release instead of cutting it off
     /// mid-waveform. Started in place, sample accurately, the frame the release reaches silence.
@@ -209,6 +212,7 @@ impl Voice {
             phase: VoicePhase::Attack,
             start_frame: 0,
             active: false,
+            looping: false,
             pending: None,
         }
     }
@@ -264,6 +268,18 @@ fn cancel_pending(v: &mut Voice, retire: &mut RetireSink) {
     retire.take(queued.map(|req| req.sample));
 }
 
+/// Wrap a looping voice's read cursor back inside the sample, keeping the fractional remainder so
+/// the seam continues at the same sub-sample phase the stride produced rather than snapping to a
+/// frame boundary, which is what a click at the loop point sounds like. A stride longer than the
+/// sample skips whole copies of it, hence the remainder rather than one subtraction. Floating point
+/// `rem_euclid` may round its result up to the divisor, which would read past the end, so a result
+/// that lands there is pinned to the start instead.
+fn wrap_loop_pos(pos: f64, nframes: usize) -> f64 {
+    let n = nframes as f64;
+    let wrapped = pos.rem_euclid(n);
+    if wrapped >= n { 0.0 } else { wrapped }
+}
+
 /// Fill a slot with a queued start. `at` is the mixer frame the voice is being started on, which is
 /// the buffer boundary for an immediate start and the frame a fade ended on for a queued one.
 fn start_in_place(v: &mut Voice, req: PlayRequest, delay: u64, at: u64, out_rate: u32) {
@@ -282,19 +298,21 @@ fn start_in_place(v: &mut Voice, req: PlayRequest, delay: u64, at: u64, out_rate
     v.phase = VoicePhase::Attack;
     v.start_frame = at + delay;
     v.active = true;
+    v.looping = req.looping;
     v.pending = None;
 }
 
 /// A mixer instruction queued from the game thread and applied on the audio callback.
 ///
-/// `Play` carries the [`Bus`] the voice belongs to; `StopRange` stops a half-open span of channel
-/// keys, which is how a whole sample-id namespace is cleared. `ChartGain` is `#VOLWAV` / 100 and is
-/// applied to every bus, matching the reference implementation, which multiplies the same
-/// chart-derived volume into note sounds (`AbstractAudioDriver.java:486-491`) and judge sounds
-/// (`AbstractAudioDriver.java:502`) alike.
+/// `Play` carries the [`Bus`] the voice belongs to and whether it loops; `StopRange` stops a
+/// half-open span of channel keys, which is how a whole sample-id namespace is cleared. A looping
+/// `Play` is ended by the same three stop commands as any other voice, and by nothing else.
+/// `ChartGain` is `#VOLWAV` / 100 and is applied to every bus, matching the reference
+/// implementation, which multiplies the same chart-derived volume into note sounds
+/// (`AbstractAudioDriver.java:486-491`) and judge sounds (`AbstractAudioDriver.java:502`) alike.
 #[non_exhaustive]
 pub enum Command {
-    Play { sample: Arc<SampleData>, gain: f32, pan: f32, pitch: f32, key: u32, at_frame: u64, bus: Bus },
+    Play { sample: Arc<SampleData>, gain: f32, pan: f32, pitch: f32, key: u32, at_frame: u64, bus: Bus, looping: bool },
     Stop { key: u32 },
     StopId { id: u32 },
     StopRange { lo_key: u32, hi_key: u32 },
@@ -313,6 +331,7 @@ struct PlayRequest {
     key: u32,
     at_frame: u64,
     bus: Bus,
+    looping: bool,
 }
 
 /// Which rung of the voice-stealing ladder produced a slot.
@@ -403,7 +422,9 @@ impl Mixer {
 
     pub fn apply(&mut self, cmd: Command) {
         match cmd {
-            Command::Play { sample, gain, pan, pitch, key, at_frame, bus } => self.start_voice(PlayRequest { sample, gain, pan, pitch, key, at_frame, bus }),
+            Command::Play { sample, gain, pan, pitch, key, at_frame, bus, looping } => {
+                self.start_voice(PlayRequest { sample, gain, pan, pitch, key, at_frame, bus, looping })
+            }
             Command::Stop { key } => self.stop(key),
             Command::StopId { id } => self.stop_id(id),
             Command::StopRange { lo_key, hi_key } => self.stop_range(lo_key, hi_key),
@@ -550,8 +571,10 @@ impl Mixer {
     ///
     /// A voice that ends part way through the buffer either frees its slot or, when a start was
     /// queued behind its fade, hands the rest of the buffer to that start on the exact frame it
-    /// falls silent. Gains that were changed since the last buffer travel to their new value over
-    /// [`GAIN_SLEW_MS`] rather than jumping, so a volume step is a ramp instead of a click.
+    /// falls silent. A looping voice never reaches that end on its own: its cursor wraps back into
+    /// the sample, so only a stop — which puts it into release — retires it. Gains that were changed
+    /// since the last buffer travel to their new value over [`GAIN_SLEW_MS`] rather than jumping, so
+    /// a volume step is a ramp instead of a click.
     pub fn mix(&mut self, out: &mut [f32]) {
         for s in out.iter_mut() {
             *s = 0.0;
@@ -605,13 +628,16 @@ impl Mixer {
                             }
                         }
                     }
+                    if v.looping && v.phase != VoicePhase::Release && nframes > 0 && v.pos >= nframes as f64 {
+                        v.pos = wrap_loop_pos(v.pos, nframes);
+                    }
                     let i = v.pos as usize;
                     if i >= nframes {
                         ended = true;
                         break;
                     }
                     let frac = (v.pos - i as f64) as f32;
-                    let next = (i + 1).min(nframes - 1);
+                    let next = if v.looping { (i + 1) % nframes } else { (i + 1).min(nframes - 1) };
                     let (sl, sr) = if src_ch == 1 {
                         let a = pcm[i];
                         let b = pcm[next];
@@ -678,7 +704,7 @@ impl Mixer {
 
     #[cfg(test)]
     fn play(&mut self, sample: Arc<SampleData>, gain: f32, pan: f32, pitch: f32, key: u32, at_frame: u64) {
-        self.start_voice(PlayRequest { sample, gain, pan, pitch, key, at_frame, bus: Bus::Key });
+        self.start_voice(PlayRequest { sample, gain, pan, pitch, key, at_frame, bus: Bus::Key, looping: false });
     }
 }
 
@@ -1191,7 +1217,7 @@ mod tests {
     #[test]
     fn play_via_command_path() {
         let mut m = Mixer::new(48000, 2, 16);
-        m.apply(Command::Play { sample: ramp(100, 48000, 1), gain: 1.0, pan: 0.0, pitch: 1.0, key: 9, at_frame: 0, bus: Bus::Bg });
+        m.apply(Command::Play { sample: ramp(100, 48000, 1), gain: 1.0, pan: 0.0, pitch: 1.0, key: 9, at_frame: 0, bus: Bus::Bg, looping: false });
         assert_eq!(active_count(&m), 1);
         assert_eq!(m.voices.iter().find(|v| v.active).unwrap().key, 9);
     }
@@ -1452,7 +1478,16 @@ mod tests {
 
     fn render_on_bus(bus: Bus) -> Vec<f32> {
         let mut m = Mixer::new(48000, 2, 16);
-        m.apply(Command::Play { sample: flat(8, 1, 48000, 0.4), gain: 0.7, pan: -0.25, pitch: 1.0, key: channel_key(3, 1.0), at_frame: 0, bus });
+        m.apply(Command::Play {
+            sample: flat(8, 1, 48000, 0.4),
+            gain: 0.7,
+            pan: -0.25,
+            pitch: 1.0,
+            key: channel_key(3, 1.0),
+            at_frame: 0,
+            bus,
+            looping: false,
+        });
         let mut out = vec![0.0f32; 16];
         m.mix(&mut out);
         out
@@ -1460,7 +1495,16 @@ mod tests {
 
     /// Plays one voice of `sample_value` on `bus` and returns the settled left-channel amplitude.
     fn steady_left_on_bus(m: &mut Mixer, bus: Bus, key: u32, sample_value: f32) -> f32 {
-        m.apply(Command::Play { sample: flat(STEADY_SAMPLE_FRAMES, 1, 48000, sample_value), gain: 1.0, pan: -1.0, pitch: 1.0, key, at_frame: 0, bus });
+        m.apply(Command::Play {
+            sample: flat(STEADY_SAMPLE_FRAMES, 1, 48000, sample_value),
+            gain: 1.0,
+            pan: -1.0,
+            pitch: 1.0,
+            key,
+            at_frame: 0,
+            bus,
+            looping: false,
+        });
         steady_frame(m, 2)[0]
     }
 
@@ -1506,7 +1550,16 @@ mod tests {
             let mut m = Mixer::new(48000, 2, 16);
             m.apply(Command::BusGain { bus: muted, gain: 0.0 });
             for (i, bus) in Bus::ALL.into_iter().enumerate() {
-                m.apply(Command::Play { sample: flat(STEADY_SAMPLE_FRAMES, 1, 48000, 0.5), gain: 1.0, pan: -1.0, pitch: 1.0, key: i as u32, at_frame: 0, bus });
+                m.apply(Command::Play {
+                    sample: flat(STEADY_SAMPLE_FRAMES, 1, 48000, 0.5),
+                    gain: 1.0,
+                    pan: -1.0,
+                    pitch: 1.0,
+                    key: i as u32,
+                    at_frame: 0,
+                    bus,
+                    looping: false,
+                });
             }
             let left = steady_frame(&mut m, 2)[0];
             let expected = 2.0 * 0.5 * DEFAULT_BUS_GAIN;
@@ -1593,6 +1646,7 @@ mod tests {
                     key: i as u32,
                     at_frame: 0,
                     bus,
+                    looping: false,
                 });
             }
         }
@@ -2049,5 +2103,143 @@ mod tests {
         m.apply(Command::StopRange { lo_key: 5 * CHANNELS_PER_SAMPLE_ID, hi_key: 6 * CHANNELS_PER_SAMPLE_ID });
         assert_eq!(active_count(&m), 1);
         assert_eq!(channel_sample_id(m.voices.iter().find(|v| v.active).unwrap().key), 6);
+    }
+
+    /// Frames in the looping fixture. [`ramp`] steps by a hundredth per frame, so a sample this long
+    /// is exactly one climb from zero and every frame of it has a distinct amplitude.
+    const LOOP_SAMPLE_FRAMES: usize = 100;
+
+    /// How far the loop tests render: three and a half passes over [`LOOP_SAMPLE_FRAMES`], so a wrap
+    /// that only worked once would still be caught at the second seam.
+    const LOOP_MIX_FRAMES: usize = 350;
+
+    /// The sample id the loop tests play on, which the stop tests then name.
+    const LOOP_SAMPLE_ID: u32 = 3;
+
+    /// Fraction of a quarter turn a centred pan lands on, mirroring `start_in_place`'s
+    /// `(pan + 1) * 0.5` at `pan == 0`. Both channel gains are the cosine of it.
+    const CENTRE_PAN_ANGLE_SCALE: f32 = 0.5;
+
+    /// Start one looping voice of a [`ramp`] through the real command path.
+    fn play_looping_ramp(m: &mut Mixer, id: u32) {
+        m.apply(Command::Play {
+            sample: ramp(LOOP_SAMPLE_FRAMES, 48000, 1),
+            gain: 1.0,
+            pan: 0.0,
+            pitch: 1.0,
+            key: channel_key(id, 1.0),
+            at_frame: 0,
+            bus: Bus::Bg,
+            looping: true,
+        });
+    }
+
+    /// Left-channel amplitude of frame `f` in a stereo buffer.
+    fn left_at(out: &[f32], f: usize) -> f32 {
+        out[f * 2]
+    }
+
+    #[test]
+    fn wrap_loop_pos_keeps_the_fractional_remainder() {
+        assert_eq!(wrap_loop_pos(100.25, 100), 0.25);
+        assert_eq!(wrap_loop_pos(99.75, 100), 99.75);
+        assert_eq!(wrap_loop_pos(350.5, 100), 50.5);
+    }
+
+    /// A looping voice repeats its sample instead of retiring at the end of it: the second and third
+    /// passes over the ramp render frame for frame the same, each seam steps back down to the start
+    /// of the ramp rather than holding its last value, and the voice is still sounding at the end.
+    #[test]
+    fn a_looping_voice_repeats_its_sample_at_every_seam() {
+        let mut m = Mixer::new(48000, 2, 16);
+        play_looping_ramp(&mut m, LOOP_SAMPLE_ID);
+        let mut out = vec![0.0f32; LOOP_MIX_FRAMES * 2];
+        m.mix(&mut out);
+
+        let pan_gain = (FRAC_PI_2 * CENTRE_PAN_ANGLE_SCALE).cos();
+        for k in 0..LOOP_SAMPLE_FRAMES {
+            let second = left_at(&out, LOOP_SAMPLE_FRAMES + k);
+            let third = left_at(&out, LOOP_SAMPLE_FRAMES * 2 + k);
+            assert!((second - third).abs() < 1e-6, "frame {k} differs between passes: {second} then {third}");
+            let expected = (k as f32 / LOOP_SAMPLE_FRAMES as f32) * DEFAULT_CHAIN_GAIN * pan_gain;
+            assert!((third - expected).abs() < 1e-6, "frame {k} of the third pass is {third}, not the ramp value {expected}");
+        }
+        assert!(
+            left_at(&out, LOOP_SAMPLE_FRAMES * 2 - 1) > left_at(&out, LOOP_SAMPLE_FRAMES * 2),
+            "the seam held the end of the ramp instead of stepping back to its start",
+        );
+        assert_eq!(sounding_count(&m), 1, "the looping voice stopped sounding inside {LOOP_MIX_FRAMES} frames");
+    }
+
+    #[test]
+    fn a_looping_voice_is_silenced_by_stop_id_within_the_release_ramp() {
+        let mut m = Mixer::new(48000, 2, 16);
+        play_looping_ramp(&mut m, LOOP_SAMPLE_ID);
+        let mut out = vec![0.0f32; LOOP_MIX_FRAMES * 2];
+        m.mix(&mut out);
+        assert_eq!(sounding_count(&m), 1);
+
+        m.apply(Command::StopId { id: LOOP_SAMPLE_ID });
+        let mut tail = vec![0.0f32; (ramp_frames(48000, RELEASE_MS) + 1) * 2];
+        m.mix(&mut tail);
+        assert_eq!(active_count(&m), 0, "the loop outlived its release ramp");
+
+        let mut after = vec![0.0f32; LOOP_SAMPLE_FRAMES * 2];
+        m.mix(&mut after);
+        assert!(after.iter().all(|s| *s == 0.0), "the loop was still sounding after it ended");
+    }
+
+    #[test]
+    fn a_looping_voice_is_silenced_by_a_namespace_stop_range() {
+        let mut m = Mixer::new(48000, 2, 16);
+        play_looping_ramp(&mut m, LOOP_SAMPLE_ID);
+        let mut out = vec![0.0f32; LOOP_MIX_FRAMES * 2];
+        m.mix(&mut out);
+        assert_eq!(sounding_count(&m), 1);
+
+        m.apply(Command::StopRange { lo_key: 0, hi_key: (LOOP_SAMPLE_ID + 1) * CHANNELS_PER_SAMPLE_ID });
+        let mut tail = vec![0.0f32; (ramp_frames(48000, RELEASE_MS) + 1) * 2];
+        m.mix(&mut tail);
+        assert_eq!(active_count(&m), 0, "a namespace clear left the loop playing");
+    }
+
+    #[test]
+    fn a_loop_of_an_empty_sample_ends_instead_of_spinning() {
+        let mut m = Mixer::new(48000, 2, 16);
+        m.apply(Command::Play {
+            sample: ramp(0, 48000, 1),
+            gain: 1.0,
+            pan: 0.0,
+            pitch: 1.0,
+            key: channel_key(LOOP_SAMPLE_ID, 1.0),
+            at_frame: 0,
+            bus: Bus::Bg,
+            looping: true,
+        });
+        let mut out = vec![0.0f32; LOOP_SAMPLE_FRAMES * 2];
+        m.mix(&mut out);
+        assert_eq!(active_count(&m), 0, "a zero-frame loop never retired its slot");
+    }
+
+    /// A stride longer than the sample skips whole copies of it, so the wrap has to take a remainder
+    /// rather than subtract once. Pitched up eight times, a hundred-frame sample advances eight
+    /// frames per output frame and still loops.
+    #[test]
+    fn a_loop_pitched_past_its_own_length_still_wraps() {
+        const FAST_PITCH: f32 = 8.0;
+        let mut m = Mixer::new(48000, 2, 16);
+        m.apply(Command::Play {
+            sample: ramp(LOOP_SAMPLE_FRAMES, 48000, 1),
+            gain: 1.0,
+            pan: 0.0,
+            pitch: FAST_PITCH,
+            key: channel_key(LOOP_SAMPLE_ID, FAST_PITCH),
+            at_frame: 0,
+            bus: Bus::Bg,
+            looping: true,
+        });
+        let mut out = vec![0.0f32; LOOP_MIX_FRAMES * 2];
+        m.mix(&mut out);
+        assert_eq!(sounding_count(&m), 1, "the pitched-up loop ended instead of wrapping");
     }
 }

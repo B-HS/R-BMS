@@ -171,9 +171,8 @@ impl SystemSound {
     }
 
     /// Whether the reference implementation treats this stem as part of the BGM set rather than the
-    /// effect set (`SystemSoundManager.java:149-150`). rbms resolves both out of one folder; this
-    /// stays so a future split can tell them apart without re-deriving the list.
-    #[cfg(test)]
+    /// effect set (`SystemSoundManager.java:149-150`). rbms resolves both out of one folder, so this
+    /// is what tells them apart: a BGM stem is the only kind [`SystemSoundSet::play_loop`] will loop.
     pub(crate) fn is_bgm(self) -> bool {
         matches!(self, SystemSound::Select | SystemSound::Decide)
     }
@@ -317,12 +316,41 @@ impl SystemSoundSet {
         Some(SystemSoundCue { id: sound.sample_id(), gain: gain.clamp(SYSTEM_SOUND_GAIN_MIN, SYSTEM_SOUND_GAIN_MAX) })
     }
 
+    /// What looping `sound` at `gain` would ask of the mixer: the gates [`SystemSoundSet::cue`]
+    /// applies plus the BGM gate. Only a BGM stem loops — every other stem is a response to one
+    /// input, and looping one would leave a cue repeating with nothing to end it.
+    pub(crate) fn cue_loop(&self, sound: SystemSound, gain: f32) -> Option<SystemSoundCue> {
+        if !sound.is_bgm() {
+            return None;
+        }
+        self.cue(sound, gain)
+    }
+
     /// Raise `sound` on the System bus. Silent, never fatal, when this set has nothing for it.
     pub(crate) fn play(&self, engine: &mut AudioEngine, sound: SystemSound, gain: f32) {
         let Some(cue) = self.cue(sound, gain) else {
             return;
         };
         engine.play_on(Bus::System, cue.id, cue.gain, SYSTEM_SOUND_PAN, SYSTEM_SOUND_PITCH, SYSTEM_SOUND_AT_US);
+    }
+
+    /// Raise `sound` on the System bus as a loop: the mixer repeats it from its own start until
+    /// [`SystemSoundSet::stop`], so a background track outlasts its stem with no seam and no
+    /// re-scheduling from the frame loop. Silent, never fatal, when [`SystemSoundSet::cue_loop`]
+    /// has nothing for it.
+    pub(crate) fn play_loop(&self, engine: &mut AudioEngine, sound: SystemSound, gain: f32) {
+        let Some(cue) = self.cue_loop(sound, gain) else {
+            return;
+        };
+        engine.play_looping_on(Bus::System, cue.id, cue.gain, SYSTEM_SOUND_PAN, SYSTEM_SOUND_PITCH, SYSTEM_SOUND_AT_US);
+    }
+
+    /// End every voice of `sound`, which is how a loop raised by [`SystemSoundSet::play_loop`] is
+    /// let go. Sent whatever this set holds now: the sound folder can be re-read while a loop is
+    /// running, and a stop gated on what is resolved after that would strand the voice the previous
+    /// set started. Stopping an id nothing is playing is a no-op in the mixer.
+    pub(crate) fn stop(&self, engine: &mut AudioEngine, sound: SystemSound) {
+        engine.stop(sound.sample_id());
     }
 }
 

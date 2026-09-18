@@ -655,3 +655,33 @@ fn a_replaced_option_panel_keeps_the_built_in_overlay_off_the_frame() {
         assert_eq!(drew, !replaced, "the built-in option panel drew the wrong way round with replace {replace:?}");
     }
 }
+
+/// The browser holds its background music for exactly as long as it is the screen on top: raised on
+/// the way in, let go on the way out, and raised again on every way back. A browser that was built
+/// but never entered — the one the app starts on — holds nothing, so its exit does not stop a loop
+/// it never started.
+#[test]
+fn the_browser_holds_its_background_music_only_while_it_is_on_screen() {
+    let mut app = app();
+    let mut state = SelectState::new();
+    let now = Instant::now();
+    assert!(!state.bgm_looping, "a browser that was never entered already claims the background music");
+
+    state.on_enter(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 });
+    assert!(state.bgm_looping, "entering the browser did not raise its background music");
+
+    state.on_exit(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 });
+    assert!(!state.bgm_looping, "leaving the browser left its background music running under the next screen");
+
+    state.on_enter(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 });
+    assert!(state.bgm_looping, "coming back to the browser did not raise its background music again");
+}
+
+/// The stem the browser loops has to be one the sound set will actually loop: [`SystemSoundSet`]
+/// refuses to loop anything but a BGM stem, so a browser pointed at an effect cue would be silent.
+#[test]
+fn the_browser_loops_a_stem_the_sound_set_will_loop() {
+    assert!(BROWSER_BGM.is_bgm(), "the browser's background music is not a stem the sound set loops");
+    let set = crate::syssound::SystemSoundSet::silent();
+    assert!(set.cue_loop(BROWSER_BGM, crate::syssound::SYSTEM_SOUND_GAIN).is_none(), "a silent set looped something");
+}

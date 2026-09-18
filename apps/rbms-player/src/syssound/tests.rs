@@ -192,6 +192,41 @@ fn a_full_folder_resolves_every_slot() {
     }
 }
 
+/// Looping is for background music only. A resolved BGM stem loops at the same id and gain a
+/// one-shot of it would use, and every effect cue refuses — a looping `scratch` would repeat under
+/// the whole screen with nothing to end it.
+#[test]
+fn only_the_bgm_stems_loop() {
+    let dir = temp_dir("loopgate");
+    for sound in SystemSound::ALL {
+        write_wav(&dir, sound);
+    }
+    let mut set = SystemSoundSet::load(&dir);
+    set.set_guide_enabled(true);
+    for sound in SystemSound::ALL {
+        let looped = set.cue_loop(sound, TEST_GAIN);
+        if sound.is_bgm() {
+            let cue = looped.unwrap_or_else(|| panic!("{sound:?} is a BGM stem and did not loop"));
+            assert_eq!(cue.id, sound.sample_id());
+            assert_eq!(cue.gain, TEST_GAIN);
+        } else {
+            assert!(looped.is_none(), "{sound:?} is an effect cue and must not loop");
+        }
+    }
+}
+
+/// The loop gate does not replace the gates a one-shot goes through: an unresolved BGM stem stays
+/// silent rather than looping nothing.
+#[test]
+fn an_unresolved_bgm_stem_does_not_loop() {
+    let dir = temp_dir("loopunresolved");
+    write_wav(&dir, SystemSound::Select);
+    let set = SystemSoundSet::load(&dir);
+    assert!(set.cue_loop(SystemSound::Select, TEST_GAIN).is_some());
+    assert!(set.cue_loop(SystemSound::Decide, TEST_GAIN).is_none());
+    assert!(SystemSoundSet::silent().cue_loop(SystemSound::Select, TEST_GAIN).is_none());
+}
+
 #[test]
 fn one_present_stem_leaves_the_others_silent() {
     let dir = temp_dir("partial");

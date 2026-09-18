@@ -148,6 +148,19 @@ impl IdNamespace {
     }
 }
 
+/// What the game thread asks of one scheduled sample, kept as a struct so the engine's single start
+/// path stays one argument wide as the voice model grows — the same reason the mixer's `PlayRequest`
+/// exists one layer down.
+struct ScheduleRequest {
+    bus: Bus,
+    id: u32,
+    gain: f32,
+    pan: f32,
+    pitch: f32,
+    at_us: i64,
+    looping: bool,
+}
+
 /// Clamp an interpolated clock reading so it never steps backwards. The caller owns `previous`,
 /// which keeps the engine side a pure function of the published callback state.
 pub fn monotonic_us(previous: i64, current: i64) -> i64 {
@@ -465,10 +478,22 @@ impl AudioEngine {
     /// Schedule a sample on `bus`. `at_us` is an absolute position on the engine clock; `0` means
     /// "as soon as the next callback runs", which is what an immediate keysound wants.
     pub fn play_on(&mut self, bus: Bus, id: u32, gain: f32, pan: f32, pitch: f32, at_us: i64) {
-        if let Some(sample) = self.bank.get(&id).cloned() {
-            let at_frame = (at_us.max(0) as i128 * self.out_rate as i128 / 1_000_000) as u64;
-            let key = channel_key(id, pitch);
-            self.push(Command::Play { sample, gain, pan, pitch, key, at_frame, bus });
+        self.schedule(ScheduleRequest { bus, id, gain, pan, pitch, at_us, looping: false });
+    }
+
+    /// Schedule a sample on `bus` as a loop: it repeats from the start of its own accord until
+    /// [`AudioEngine::stop`] (or a namespace clear) ends it, which is what a background track wants.
+    /// Looping inside the voice rather than re-scheduling from the game thread is what keeps the
+    /// seam free of the frame-rate jitter a re-trigger would carry.
+    pub fn play_looping_on(&mut self, bus: Bus, id: u32, gain: f32, pan: f32, pitch: f32, at_us: i64) {
+        self.schedule(ScheduleRequest { bus, id, gain, pan, pitch, at_us, looping: true });
+    }
+
+    fn schedule(&mut self, req: ScheduleRequest) {
+        if let Some(sample) = self.bank.get(&req.id).cloned() {
+            let at_frame = (req.at_us.max(0) as i128 * self.out_rate as i128 / 1_000_000) as u64;
+            let key = channel_key(req.id, req.pitch);
+            self.push(Command::Play { sample, gain: req.gain, pan: req.pan, pitch: req.pitch, key, at_frame, bus: req.bus, looping: req.looping });
         }
     }
 
@@ -1448,6 +1473,7 @@ mod tests {
                             key: next_onset as u32,
                             at_frame,
                             bus: Bus::Bg,
+                            looping: false,
                         });
                         next_onset += 1;
                         booked += 1;
