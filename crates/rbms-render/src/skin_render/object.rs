@@ -16,7 +16,7 @@ use rbms_skin::model::{FloatValueDef, GraphDef, ImageDef, PropertyRef, SkinLayer
 use rbms_skin::property::SkinStateSource;
 use rbms_skin::timer::TimerId;
 
-use super::{SkinAssets, SkinExprEval, covers, gauge, graphs, judge, notes, songlist};
+use super::{SkinAssets, SkinExprEval, covers, gauge, graphs, judge, notes, pmchara, songlist};
 use crate::{TextureId, UvRect};
 
 /// Cells a division count of zero or less stands for: the whole image, undivided.
@@ -78,6 +78,8 @@ pub enum SkinObjectKind {
     SkinPreview,
     /// The practice panel's row pane.
     Practice,
+    /// The character a play document draws from a `.chp` definition.
+    PmChara,
 }
 
 /// One entry of the draw list.
@@ -115,6 +117,7 @@ impl SkinObject {
             Body::Density(_) => SkinObjectKind::Density,
             Body::SkinPreview(_) => SkinObjectKind::SkinPreview,
             Body::Practice(_) => SkinObjectKind::Practice,
+            Body::PmChara(_) => SkinObjectKind::PmChara,
         }
     }
 }
@@ -145,6 +148,8 @@ pub(crate) enum Body {
     Density(graphs::DensityBody),
     SkinPreview(PreviewBody),
     Practice(PracticeBody),
+    /// The character a play document draws from a `.chp` definition.
+    PmChara(pmchara::PmCharaBody),
 }
 
 /// The live preview of another document, whose pixels the host renders and hands over.
@@ -573,6 +578,7 @@ pub(crate) fn image_sprite(def: &ImageDef, sources: Source<'_>) -> Option<Sprite
 pub(crate) fn build_objects(
     skin: &LoadedSkin,
     sources: Source<'_>,
+    charas: &pmchara::CharaLibrary,
     families: &[(String, String)],
     assets: &mut dyn SkinAssets,
     warnings: &mut Vec<String>,
@@ -583,7 +589,13 @@ pub(crate) fn build_objects(
         if !stretch.is_supported() {
             warnings.push(format!("object {:?} asks for stretch {:?}, which is drawn stretched instead", named.id, stretch));
         }
-        let Some(body) = build_body(skin, &named.id, sources, families, assets, warnings) else {
+        let chara = skin.def.pmchara.iter().any(|object| object.id == named.id);
+        let built = if chara {
+            pmchara::build_pmchara(skin, &named.id, charas, &named.track, warnings)
+        } else {
+            build_body(skin, &named.id, sources, families, assets, warnings)
+        };
+        let Some(body) = built else {
             continue;
         };
         objects.push(SkinObject { id: named.id.clone(), layer: named.layer, track: named.track.clone(), stretch, body });

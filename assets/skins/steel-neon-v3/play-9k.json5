@@ -39,6 +39,9 @@
         { id: 'digit-m', path: 'images/digits-m.png' },
         { id: 'digit-l', path: 'images/digits-l.png' },
     ],
+    pmchara: [
+        { id: 'play-chara', src: 'images/chara/default.chp', type: 0, side: 1 },
+    ],
     image: [
         { id: 'background-plate', src: 'background', x: 0, y: 0, w: 1280, h: 720 },
         { id: 'foreground-plate', src: 'foreground', x: 0, y: 0, w: 1280, h: 720 },
@@ -282,6 +285,7 @@
             { id: 'key-widget-on', layer: 'foreground', timer: 108, dst: [{ time: 0, x: 283, y: 168, w: 28, h: 40, r: 255, g: 211, b: 106 }] },
             { id: 'key-widget', layer: 'foreground', dst: [{ time: 0, x: 317, y: 168, w: 28, h: 40, a: 200, r: 244, g: 251, b: 255 }] },
             { id: 'key-widget-on', layer: 'foreground', timer: 109, dst: [{ time: 0, x: 317, y: 168, w: 28, h: 40, r: 244, g: 251, b: 255 }] },
+            { id: 'play-chara', layer: 'foreground', dst: [{ time: 0, x: 40, y: 8, w: 92, h: 92 }] },
         ] },
         { if: [901], values: [
             { id: 'panel-fill', layer: 'background', offset: 48, dst: [{ time: 0, x: 934, y: 220, w: 34, h: 500, a: 210 }] },
@@ -333,6 +337,7 @@
             { id: 'key-widget-on', layer: 'foreground', timer: 108, dst: [{ time: 0, x: 1175, y: 168, w: 28, h: 40, r: 255, g: 211, b: 106 }] },
             { id: 'key-widget', layer: 'foreground', dst: [{ time: 0, x: 1209, y: 168, w: 28, h: 40, a: 200, r: 244, g: 251, b: 255 }] },
             { id: 'key-widget-on', layer: 'foreground', timer: 109, dst: [{ time: 0, x: 1209, y: 168, w: 28, h: 40, r: 244, g: 251, b: 255 }] },
+            { id: 'play-chara', layer: 'foreground', dst: [{ time: 0, x: 1148, y: 8, w: 92, h: 92 }] },
         ] },
         { include: 'shared/objects-play.json5' },
     ],

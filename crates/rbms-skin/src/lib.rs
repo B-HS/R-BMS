@@ -11,6 +11,8 @@
 
 #![forbid(unsafe_code)]
 
+/// Reading a pop'n character definition (`.chp`) and the images it names.
+pub mod chp;
 /// Reading a skin written in the comma-separated format, which is converted into the same document
 /// mirror a JSON skin parses into rather than drawn down a path of its own.
 pub mod csv;

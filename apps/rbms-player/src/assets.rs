@@ -149,6 +149,8 @@ const STEEL_NEON_V3_FILES: &[BundledFile] = &[
     BundledFile { path: "images/select-bg.png", bytes: include_bytes!("../../../assets/skins/steel-neon-v3/images/select-bg.png") },
     BundledFile { path: "images/ui.png", bytes: include_bytes!("../../../assets/skins/steel-neon-v3/images/ui.png") },
     BundledFile { path: "images/decide/Default.png", bytes: include_bytes!("../../../assets/skins/steel-neon-v3/images/decide/Default.png") },
+    BundledFile { path: "images/chara/default.chp", bytes: include_bytes!("../../../assets/skins/steel-neon-v3/images/chara/default.chp") },
+    BundledFile { path: "images/chara/default.png", bytes: include_bytes!("../../../assets/skins/steel-neon-v3/images/chara/default.png") },
     BundledFile { path: "images/covers/Gradient.png", bytes: include_bytes!("../../../assets/skins/steel-neon-v3/images/covers/Gradient.png") },
     BundledFile { path: "images/covers/Solid.png", bytes: include_bytes!("../../../assets/skins/steel-neon-v3/images/covers/Solid.png") },
     BundledFile { path: "images/notes/Default.png", bytes: include_bytes!("../../../assets/skins/steel-neon-v3/images/notes/Default.png") },

@@ -200,6 +200,51 @@ const KEYOFF_BAND: LaneTimerBand = LaneTimerBand {
 /// The judgement pop-up timer of each side.
 const JUDGE_TIMERS: [TimerId; 2] = [timer_id::JUDGE_1P, timer_id::JUDGE_2P];
 
+/// The neutral pose of each side's character, which a run starts in.
+const CHARA_NEUTRAL_TIMERS: [TimerId; 2] = [timer_id::PM_CHARA_1P_NEUTRAL, timer_id::PM_CHARA_2P_NEUTRAL];
+
+/// Every character timer the end of a chart switches off, so the win and loss poses the music-end
+/// timer drives have the screen to themselves (`BMSPlayer`, where the run reaches its finished
+/// state).
+const CHARA_TIMERS: [TimerId; 9] = [
+    timer_id::PM_CHARA_1P_NEUTRAL,
+    timer_id::PM_CHARA_1P_FEVER,
+    timer_id::PM_CHARA_1P_GREAT,
+    timer_id::PM_CHARA_1P_GOOD,
+    timer_id::PM_CHARA_1P_BAD,
+    timer_id::PM_CHARA_2P_NEUTRAL,
+    timer_id::PM_CHARA_2P_GREAT,
+    timer_id::PM_CHARA_2P_BAD,
+    timer_id::PM_CHARA_DANCE,
+];
+
+/// How full the gauge has to be before the first player's character celebrates rather than merely
+/// approves. The reference asks its gauge whether it sits at its own maximum, which is the full bar
+/// the HUD reports.
+const CHARA_FEVER_GAUGE: f32 = GAUGE_FULL;
+
+/// The last judgement index the character treats as a good hit, and the one it treats as a fair
+/// one, in the order `HudView::last_judge` reports them.
+const CHARA_JUDGE_GREAT_LAST: u8 = 1;
+const CHARA_JUDGE_GOOD: u8 = 2;
+
+/// Which character timer one judgement restarts on `side`.
+///
+/// The first player's character reacts to the run directly and celebrates on a full gauge. The
+/// second player's is the opponent, so the mapping is the reference's inverted one: the run going
+/// well is what makes it look bad.
+fn chara_reaction(side: usize, judge: u8, gauge: f32) -> TimerId {
+    if side > 0 {
+        return if judge <= CHARA_JUDGE_GOOD { timer_id::PM_CHARA_2P_BAD } else { timer_id::PM_CHARA_2P_GREAT };
+    }
+    match judge {
+        judge if judge <= CHARA_JUDGE_GREAT_LAST && gauge >= CHARA_FEVER_GAUGE => timer_id::PM_CHARA_1P_FEVER,
+        judge if judge <= CHARA_JUDGE_GREAT_LAST => timer_id::PM_CHARA_1P_GREAT,
+        CHARA_JUDGE_GOOD => timer_id::PM_CHARA_1P_GOOD,
+        _ => timer_id::PM_CHARA_1P_BAD,
+    }
+}
+
 /// The combo timer of each side.
 const COMBO_TIMERS: [TimerId; 2] = [timer_id::COMBO_1P, timer_id::COMBO_2P];
 
@@ -262,6 +307,10 @@ impl PlayTimers {
     pub fn start(&mut self, timers: &mut TimerState, now_ms: i64) {
         timers.set_off(timer_id::READY);
         timers.set_on(timer_id::PLAY, now_ms);
+        timers.set_off(timer_id::MUSIC_END);
+        for neutral in CHARA_NEUTRAL_TIMERS {
+            timers.set_on(neutral, now_ms);
+        }
     }
 
     /// Switches the timer that marks the run being failed.
@@ -279,6 +328,9 @@ impl PlayTimers {
         let judged: u32 = hud.counts.iter().sum();
         if self.seen && judged > self.judged {
             timers.set_on(JUDGE_TIMERS[side], now_ms);
+            if let Some(judge) = hud.last_judge {
+                timers.set_on(chara_reaction(side, judge, hud.gauge), now_ms);
+            }
         }
         if hud.combo > self.combo {
             timers.set_on(COMBO_TIMERS[side], now_ms);
@@ -293,6 +345,7 @@ impl PlayTimers {
         }
         timers.switch(timer_id::GAUGE_MAX_1P, hud.gauge >= GAUGE_FULL, now_ms);
         self.update_lanes(timers, play.lanes, now_ms);
+        update_chara_band(timers, total_notes > 0 && judged >= total_notes, now_ms);
 
         self.judged = judged;
         self.combo = hud.combo;
@@ -343,6 +396,30 @@ impl PlayTimers {
         }
         self.down = down;
         self.bombs = bombs;
+    }
+}
+
+/// Switches the character band from whether the chart still has notes to judge.
+///
+/// While it does, both sides rest in their neutral pose: the pose is a state rather than an edge, so
+/// a run that was already going when the screen was entered still has a character on screen. A
+/// reaction does not switch the neutral timer off here -- the renderer holds the pose back for as
+/// long as the reaction it interrupted is still playing, because how long that is comes from the
+/// definition file rather than from the run.
+///
+/// The reference marks the end of a chart by the play clock passing the last note and clears the
+/// whole band there; every note having been judged is the same moment reported by the state the play
+/// screen already hands over, and it is what the win and loss poses are measured from.
+fn update_chara_band(timers: &mut TimerState, finished: bool, now_ms: i64) {
+    timers.switch(timer_id::MUSIC_END, finished, now_ms);
+    for neutral in CHARA_NEUTRAL_TIMERS {
+        timers.switch(neutral, !finished, now_ms);
+    }
+    if !finished {
+        return;
+    }
+    for timer in CHARA_TIMERS {
+        timers.set_off(timer);
     }
 }
 

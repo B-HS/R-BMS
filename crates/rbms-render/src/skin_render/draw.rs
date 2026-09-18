@@ -17,9 +17,9 @@ use super::object::{
     Body, DigitLayout, FloatBody, GraphBody, ImageBody, NumberBody, PracticeBody, PreviewBody, SkinObject, SliderBody, Sprite, TextBody, ValueSource,
     fraction_glyphs, integer_glyphs,
 };
-use super::{MIN_TEXT_SCALE, SkinFrame, SkinViewport, TEXT_PIXELS_PER_SCALE, covers, gauge, graphs, judge, notes, songlist};
+use super::{MIN_TEXT_SCALE, SkinFrame, SkinViewport, TEXT_PIXELS_PER_SCALE, covers, gauge, graphs, judge, notes, pmchara, songlist};
 use crate::ctx::RenderCtx;
-use crate::{BlendMode, Color, QuadParams, Rect, Renderer, TextureFilter, UvRect, skin_center_offset};
+use crate::{BlendMode, Color, QuadParams, Rect, Renderer, TextureFilter, TextureId, UvRect, skin_center_offset};
 
 /// A number's `align` value that leaves its places where they fall, which is flush right because a
 /// blank place is a leading one (`SkinNumber.prepare`).
@@ -121,13 +121,20 @@ impl Placement<'_> {
     /// with the source region. A document authored at half the screen's size would otherwise draw
     /// its unresized objects at half size and pick the wrong filter for everything.
     pub(crate) fn cell<R: Renderer>(&self, r: &mut R, sprite: &Sprite, cell: u32, rect: SkinRect) -> bool {
-        let source = sprite.cell_size();
+        self.region(r, sprite.tex, sprite.uv(cell), sprite.cell_size(), rect)
+    }
+
+    /// Places one texture region that is not a grid cell, fitted and filtered the same way.
+    ///
+    /// A character's frames are cut from a rectangle table rather than from a grid, so they name
+    /// their own region and their own source size instead of an index into one.
+    pub(crate) fn region<R: Renderer>(&self, r: &mut R, tex: TextureId, src: UvRect, source: (f32, f32), rect: SkinRect) -> bool {
         let dst = fitted_screen_rect(self.viewport, self.object.stretch, rect, source);
         let filter = texture_filter(filtering_for(self.object.track.filter, screen_as_skin(dst), source));
         if dst.w <= 0.0 || dst.h <= 0.0 {
             return false;
         }
-        r.draw_textured_quad(sprite.tex, self.quad(dst, sprite.uv(cell), filter));
+        r.draw_textured_quad(tex, self.quad(dst, src, filter));
         true
     }
 }
@@ -199,6 +206,7 @@ pub(crate) fn draw_object<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, objec
         Body::Density(body) => graphs::draw_density(ctx, r, &place, body, rect, frame),
         Body::SkinPreview(body) => draw_skin_preview(r, &place, body, rect),
         Body::Practice(body) => draw_practice(ctx, r, &place, body, rect, frame),
+        Body::PmChara(body) => pmchara::draw_pmchara(r, &place, body, rect, frame),
     };
 
     if clipped {

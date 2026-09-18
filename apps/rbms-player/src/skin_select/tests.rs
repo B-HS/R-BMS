@@ -318,14 +318,17 @@ fn bundled_default_documents_compile_without_warnings() {
     for screen in screens.into_iter().chain(play_screens) {
         fixture.skins.reload_for(&fixture.config, screen);
         let loaded = fixture.skins.document(screen).expect("the default document loads");
+        let sheets = rbms_skin::chp::chara_image_paths(loaded);
         let prepared = loaded
             .sources
             .values()
+            .cloned()
+            .chain(sheets)
             .map(|path| {
-                let decoded = image::open(path).expect("the default source decodes").to_rgba8();
+                let decoded = image::open(&path).expect("the default source decodes").to_rgba8();
                 let (width, height) = decoded.dimensions();
                 let image = SkinImage::new(width, height, decoded.into_raw()).expect("the decoded source has RGBA pixels");
-                ((crate::assets::SkinAssetKind::Image, path.clone()), crate::assets::SkinAsset::Image(image))
+                ((crate::assets::SkinAssetKind::Image, path), crate::assets::SkinAsset::Image(image))
             })
             .collect();
         let mut assets = crate::skin_screen::PlayerSkinAssets::prepared_only(prepared);

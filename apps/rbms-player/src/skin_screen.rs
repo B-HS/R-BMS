@@ -463,7 +463,8 @@ struct PendingScreen {
 impl PendingScreen {
     /// Starts reading every file `document` names.
     fn start(build: u64, document: &LoadedSkin) -> PendingScreen {
-        let images = document.sources.values().map(|path| (SkinAssetKind::Image, path.clone()));
+        let sheets = rbms_skin::chp::chara_image_paths(document);
+        let images = document.sources.values().cloned().chain(sheets).map(|path| (SkinAssetKind::Image, path));
         let fonts = document.fonts.values().map(|path| (SkinAssetKind::Font, path.clone()));
         let jobs: Vec<SkinAssetJob> = images.chain(fonts).collect();
         let cancel = Arc::new(AtomicBool::new(false));

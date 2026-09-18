@@ -22,6 +22,7 @@ mod graphs;
 mod judge;
 mod notes;
 mod object;
+mod pmchara;
 pub mod screen;
 mod songlist;
 pub mod state;
@@ -33,6 +34,7 @@ mod tests_list_graphs;
 #[cfg(test)]
 mod tests_play_objects;
 #[cfg(test)]
+mod tests_pmchara;
 mod tests_practice_preview;
 
 use std::path::Path;
@@ -305,7 +307,8 @@ impl SkinScreen {
             }
         }
 
-        let objects = object::build_objects(skin, &sources, &families, assets, &mut warnings);
+        let charas = pmchara::load_library(r, skin, assets, serial, &mut textures, &mut warnings);
+        let objects = object::build_objects(skin, &sources, &charas, &families, assets, &mut warnings);
         let hotspots = skin.def.hotspot.iter().filter_map(|spot| Some((spot.id.clone(), state::SkinHotAction::from_name(&spot.action)?))).collect();
         let authored = (skin.def.w.max(1) as f32, skin.def.h.max(1) as f32);
         SkinScreen { authored, objects, textures, families, hotspots, warnings }

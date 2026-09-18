@@ -11,6 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 IMAGES = ROOT / 'images'
 COVERS = IMAGES / 'covers'
+CHARA = IMAGES / 'chara'
 
 SCREEN_WIDTH = 1280
 SCREEN_HEIGHT = 720
@@ -46,6 +47,35 @@ UI_GAUGE_NODE_HEIGHT = 16
 
 COVER_WIDTH = 320
 COVER_HEIGHT = 480
+
+CHARA_FRAME_WIDTH = 96
+CHARA_FRAME_HEIGHT = 120
+CHARA_COLUMNS = 4
+CHARA_ROWS = 3
+CHARA_PLATE_ROW = CHARA_FRAME_HEIGHT * CHARA_ROWS
+CHARA_NAME_SIZE = (128, 32)
+CHARA_PLATE_SIZE = (128, CHARA_FRAME_HEIGHT)
+CHARA_SHEET_SIZE = (CHARA_FRAME_WIDTH * CHARA_COLUMNS, CHARA_PLATE_ROW + CHARA_FRAME_HEIGHT)
+CHARA_BOX = (128, 128)
+CHARA_DEST_LOW = (16, 8, CHARA_FRAME_WIDTH, CHARA_FRAME_HEIGHT)
+CHARA_DEST_HIGH = (16, 4, CHARA_FRAME_WIDTH, CHARA_FRAME_HEIGHT)
+CHARA_FIRST_FRAME_ADDRESS = 2
+CHARA_DEST_LOW_ADDRESS = 36
+CHARA_DEST_HIGH_ADDRESS = 37
+
+CHARA_POSES = (
+    ('neutral-low', 'cyan', 0, 0, 'open'),
+    ('neutral-high', 'cyan', -3, -1, 'open'),
+    ('great-a', 'amber', -8, -2, 'open'),
+    ('great-b', 'amber', -12, -3, 'open'),
+    ('good', 'blue', -4, -1, 'open'),
+    ('bad-a', 'rose', 4, 2, 'shut'),
+    ('bad-b', 'rose', 6, 3, 'shut'),
+    ('fever-a', 'violet', -10, -3, 'wide'),
+    ('fever-b', 'violet', -14, -4, 'wide'),
+    ('win', 'amber', -14, -4, 'wide'),
+    ('lose', 'metal', 6, 4, 'shut'),
+)
 
 FRAME_BORDER = 2
 FRAME_CORNER = 20
@@ -755,10 +785,122 @@ def frame_result(palette: dict[str, str]) -> Canvas:
     return frame_canvas(palette, rects, separators, protected)
 
 
+def chara_pose(canvas: Canvas, x: int, y: int, palette: dict[str, str], accent: str, arm_lift: int, head_lift: int, eyes: str) -> None:
+    shell = color(palette['metalLight'], 255)
+    shade = color(palette['metal'], 255)
+    glow = color(palette[accent], 255)
+    dark = color(palette['ink'], 255)
+    head_x = x + 26
+    head_y = y + 20 + head_lift
+    canvas.rounded(head_x - 2, head_y - 2, 48, 40, shade, radius=8)
+    canvas.rounded(head_x, head_y, 44, 36, shell, radius=7)
+    canvas.rect(head_x + 20, head_y - 8, 4, 8, shade)
+    canvas.ring(head_x + 22, head_y - 10, 4, 2, glow)
+    if eyes == 'shut':
+        canvas.rect(head_x + 9, head_y + 16, 9, 3, dark)
+        canvas.rect(head_x + 26, head_y + 16, 9, 3, dark)
+    else:
+        eye_height = 12 if eyes == 'wide' else 9
+        canvas.rect(head_x + 9, head_y + 11, 9, eye_height, dark)
+        canvas.rect(head_x + 26, head_y + 11, 9, eye_height, dark)
+        canvas.rect(head_x + 11, head_y + 13, 5, 4, glow)
+        canvas.rect(head_x + 28, head_y + 13, 5, 4, glow)
+    body_x = x + 22
+    body_y = y + 58
+    canvas.rounded(body_x - 2, body_y - 2, 56, 48, shade, radius=9)
+    canvas.rounded(body_x, body_y, 52, 44, shell, radius=8)
+    canvas.rect(body_x + 16, body_y + 12, 20, 18, dark)
+    canvas.rect(body_x + 19, body_y + 15, 14, 12, glow)
+    for side in (0, 1):
+        arm_x = body_x - 12 if side == 0 else body_x + 52
+        canvas.rounded(arm_x, body_y + 8 + arm_lift, 12, 30, shade, radius=5)
+        canvas.rounded(arm_x + 2, body_y + 10 + arm_lift, 8, 26, glow, radius=4)
+    for side in (0, 1):
+        leg_x = body_x + 8 + side * 24
+        canvas.rounded(leg_x, body_y + 44, 16, 16, shade, radius=5)
+        canvas.rect(leg_x + 2, body_y + 54, 12, 4, glow)
+
+
+def chara_name_plate(canvas: Canvas, x: int, y: int, palette: dict[str, str]) -> None:
+    canvas.rounded(x, y, CHARA_NAME_SIZE[0], CHARA_NAME_SIZE[1], color(palette['panel'], 235), radius=6)
+    canvas.rect(x + 6, y + 6, CHARA_NAME_SIZE[0] - 12, 2, color(palette['cyan'], 220))
+    canvas.rect(x + 6, y + CHARA_NAME_SIZE[1] - 8, CHARA_NAME_SIZE[0] - 12, 2, color(palette['violet'], 220))
+    for index in range(6):
+        canvas.rect(x + 14 + index * 17, y + 13, 11, 7, color(palette['metalLight'], 206))
+
+
+def chara_background_plate(canvas: Canvas, x: int, y: int, palette: dict[str, str]) -> None:
+    vertical_gradient(canvas, x, y, CHARA_PLATE_SIZE[0], CHARA_PLATE_SIZE[1], color(palette['violetDeep'], 226), color(palette['night'], 226))
+    canvas.rect(x, y, CHARA_PLATE_SIZE[0], 2, color(palette['violet'], 220))
+    canvas.rect(x, y + CHARA_PLATE_SIZE[1] - 2, CHARA_PLATE_SIZE[0], 2, color(palette['cyan'], 220))
+    for index in range(5):
+        canvas.rect(x + 8 + index * 26, y + 10, 2, CHARA_PLATE_SIZE[1] - 20, color(palette['metal'], 120))
+
+
+def chara_sheet(palette: dict[str, str]) -> Canvas:
+    canvas = Canvas(*CHARA_SHEET_SIZE)
+    for index, (_, accent, arm_lift, head_lift, eyes) in enumerate(CHARA_POSES):
+        column = index % CHARA_COLUMNS
+        row = index // CHARA_COLUMNS
+        chara_pose(canvas, column * CHARA_FRAME_WIDTH, row * CHARA_FRAME_HEIGHT, palette, accent, arm_lift, head_lift, eyes)
+    chara_name_plate(canvas, 0, CHARA_PLATE_ROW, palette)
+    chara_background_plate(canvas, CHARA_NAME_SIZE[0], CHARA_PLATE_ROW, palette)
+    return canvas
+
+
+def chara_frame_rect(index: int) -> tuple[int, int, int, int]:
+    column = index % CHARA_COLUMNS
+    row = index // CHARA_COLUMNS
+    return column * CHARA_FRAME_WIDTH, row * CHARA_FRAME_HEIGHT, CHARA_FRAME_WIDTH, CHARA_FRAME_HEIGHT
+
+
+def chara_address(index: int) -> str:
+    digits = '0123456789abcdefghijklmnopqrstuvwxyz'
+    return digits[index // 36] + digits[index % 36]
+
+
+def chara_definition() -> str:
+    lines = [
+        '// Steel Neon default character. Generated by tools/generate-assets.py; do not edit by hand.',
+        '#CharBMP\tdefault.png',
+        f'#Size\t{CHARA_BOX[0]}\t{CHARA_BOX[1]}',
+        '#Anime\t200',
+    ]
+    rects = {
+        0: (0, CHARA_PLATE_ROW, CHARA_NAME_SIZE[0], CHARA_NAME_SIZE[1]),
+        1: (CHARA_NAME_SIZE[0], CHARA_PLATE_ROW, CHARA_PLATE_SIZE[0], CHARA_PLATE_SIZE[1]),
+        CHARA_DEST_LOW_ADDRESS: CHARA_DEST_LOW,
+        CHARA_DEST_HIGH_ADDRESS: CHARA_DEST_HIGH,
+    }
+    for index in range(len(CHARA_POSES)):
+        rects[CHARA_FIRST_FRAME_ADDRESS + index] = chara_frame_rect(index)
+    for address in sorted(rects):
+        x, y, width, height = rects[address]
+        lines.append(f'#{chara_address(address)}\t{x}\t{y}\t{width}\t{height}')
+    low = chara_address(CHARA_DEST_LOW_ADDRESS)
+    high = chara_address(CHARA_DEST_HIGH_ADDRESS)
+    frame = lambda index: chara_address(CHARA_FIRST_FRAME_ADDRESS + index)
+    motions = (
+        (1, 260, frame(0) + frame(1), low + high),
+        (6, 140, frame(7) + frame(8), high + high),
+        (7, 140, frame(2) + frame(3), low + high),
+        (8, 200, frame(4), low),
+        (10, 180, frame(5) + frame(6), low + low),
+        (15, 400, frame(9), high),
+        (16, 400, frame(10), low),
+    )
+    for motion, milliseconds, sources, destinations in motions:
+        lines.append(f'#Frame\t{motion}\t{milliseconds}')
+    for motion, _, sources, destinations in motions:
+        lines.append(f'#Pattern\t{motion}\t{sources}\t{destinations}')
+    return '\n'.join(lines) + '\n'
+
+
 def main() -> None:
     palette = json.loads((ROOT / 'palette.json').read_text())
     IMAGES.mkdir(parents=True, exist_ok=True)
     COVERS.mkdir(parents=True, exist_ok=True)
+    CHARA.mkdir(parents=True, exist_ok=True)
     solid = cover_solid(palette)
     gradient_cover = cover_gradient(palette)
     single_play_frame = frame_single_play(palette)
@@ -793,6 +935,8 @@ def main() -> None:
         canvas.save(IMAGES / name)
     solid.save(COVERS / 'Solid.png')
     gradient_cover.save(COVERS / 'Gradient.png')
+    chara_sheet(palette).save(CHARA / 'default.png')
+    (CHARA / 'default.chp').write_text(chara_definition(), encoding='ascii')
 
 
 if __name__ == '__main__':

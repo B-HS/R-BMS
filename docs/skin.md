@@ -79,11 +79,58 @@ skin/steel-neon-v3/
 - 플레이 문서가 `bga` 객체를 **선언**하기만 하면 내장 BGA 사각형은 그려지지 않는다(목적지가 모두 꺼져 있어도 같다). BGA SIZE OFF 는 목적지를 두지 않는 것으로 표현한다.
 - `skinpreview` 객체는 모든 화면 문서에서 쓸 수 있다(§2.9).
 
-### 2.6 기본 번들의 옵션
+### 2.6 캐릭터(`pmchara`)와 `.chp`
+
+플레이 문서는 `pmchara` 로 캐릭터를 그린다. 이미지를 문서의 `source` 가 아니라 `.chp` 정의 파일에서 읽는 유일한 객체다.
+
+```json5
+pmchara: [{ id: 'play-chara', src: 'images/chara/default.chp', color: 1, type: 0, side: 1 }],
+destination: [{ id: 'play-chara', dst: [{ time: 0, x: 40, y: 8, w: 92, h: 92 }] }],
+```
+
+- `src` 는 `.chp` 파일 경로이거나, 그 안의 첫 `.chp` 를 찾을 폴더다. 문서 폴더 기준 상대 경로이며 스킨 루트 밖은 거부된다. `source` 에 선언한 id 를 적어도 된다.
+- `color` 는 1(기본)/2(2P 색). 2P 색은 정의 파일에 `#CharBMP2P` 가 있을 때만(그리고 `#Texture` 행이 있으면 `#CharTex2P` 도 있을 때만) 적용되고, 없으면 1P 색으로 떨어진다.
+- `side` 는 `type: 0` 일 때 어느 쪽 내장 타이머에 모션을 묶을지 정한다.
+- `type` 은 0=플레이(모든 모션), 1=배경판, 2=이름판, 3=상반신 초상, 4=전신 초상, 5=선택 아이콘, 6~15=단일 모션(NEUTRAL/FEVER/GREAT/GOOD/BAD/FEVERWIN/WIN/LOSE/OJAMA/DANCE). 1~5 는 목적지가 그대로 배치 사각형이고, 6~15 는 그 객체의 `timer` 와 `op` 가 모션을 구동한다.
+
+`.chp` 는 MS932 텍스트이고 탭으로 필드를 나눈다. 빈 필드는 건너뛰고 `/` 로 시작하는 필드부터가 주석이다.
+
+| 지시자 | 뜻 |
+| --- | --- |
+| `#CharBMP` / `#CharBMP2P` | `#Pattern`·`#Layer` 가 쓰는 시트 |
+| `#CharTex` / `#CharTex2P` | `#Texture` 가 쓰는 시트 |
+| `#CharFace` / `#CharFace2P` | 초상 시트 |
+| `#SelectCG` / `#SelectCG2P` | 선택 화면 아이콘 |
+| `#Size W H` | 프레임 목적지를 적는 기준 상자 |
+| `#xx X Y W H` | 스프라이트 사각형 표. `xx` 는 36진 두 자리(0~1295) |
+| `#Anime ms` | 기본 프레임 시간(미지정 100, 1 미만이면 100) |
+| `#Frame m ms` / `#Flame m ms` | 모션 `m` 의 프레임 시간 |
+| `#Loop m n` | 모션 `m` 이 되풀이를 시작하는 프레임(기본 -1) |
+| `#CharFaceUpperSize` / `#CharFaceAllSize` | 초상 사각형(기본 `0 0 256 256`, `320 0 320 480`) |
+| `#Pattern`(`#Patern`) / `#Texture` / `#Layer` | 애니메이션 행. 이 순서로 겹쳐 그린다 |
+
+애니메이션 행은 `#Pattern<TAB>모션<TAB>소스<TAB>목적지<TAB>알파<TAB>각도` 이고, 각 열은 두 글자 필드의 나열이다. 소스·목적지는 `#xx` 주소(36진), 알파·각도는 16진(각도는 256분의 1바퀴)이다. `--` 는 앞 값에서 다음 값까지 선형 보간이며, 목적지 열이 비면 모든 프레임이 `#Size` 상자 전체를 쓴다.
+
+한 프레임이 화면에 놓이는 자리는 목적지 사각형 `(dstx, dsty, dstw, dsth)` 안에서 이렇게 정해진다. `#Size` 는 위가 원점이고 문서는 아래가 원점이라 y 축이 뒤집힌다.
+
+```
+x = dstx + px * dstw / sizeW
+y = dsty + dsth - (py + ph) * dsth / sizeH
+w = pw * dstw / sizeW
+h = ph * dsth / sizeH
+```
+
+`type: 0` 의 모션은 내장 타이머에 묶인다. 1P 는 모션 1→900(NEUTRAL), 6→901(FEVER), 7→902(GREAT), 8→903(GOOD), 10→904(BAD), 15~17→908(MUSIC END). 2P 는 1→905, 7→906, 10→907, 15·16→908. 15(WIN)·16(LOSE)·17(FEVERWIN)은 보더 이상(1240)·100%(240) 조건으로 갈린다. 플레이 화면은 곡이 도는 동안 양쪽 NEUTRAL 을 켜 두고, 판정마다 그 판정이 난 쪽의 반응 타이머를 다시 켠다(PG·GREAT 는 게이지가 가득이면 FEVER, 아니면 GREAT / GOOD / 그 밖은 BAD, 2P 는 레퍼런스대로 뒤집힌 대응). 반응 모션은 한 주기만 돌고 그동안 NEUTRAL 은 물러난다.
+
+기본 번들은 `images/chara/default.chp` 와 `images/chara/default.png` 를 싣고 9키 문서(`play-9k.json5`)가 필드 아래 빈 자리에 `type: 0` 으로 세운다. 두 파일은 `tools/generate-assets.py` 가 만든다.
+
+알려진 차이는 두 가지다. 레퍼런스가 시트 오른쪽 아래 1픽셀을 투명색으로 삼아 빼는 처리는 하지 않으므로 시트는 알파를 가진 PNG 여야 한다. 곡 끝(타이머 908)은 마지막 노트가 판정된 시점으로 잡는다.
+
+### 2.7 기본 번들의 옵션
 
 번들 스코프로 PLAY SIDE(1P/2P: 필드·그래프 열·BGA 미러), BGA SIZE(LARGE/STANDARD/OFF), GRAPH POSITION(FAR/NEAR), JUDGE TIMING(OFF/FAST-SLOW/MILLISECONDS), 배경·노트·레인 커버 파일 슬롯, BGA(40)·FRAME BRIGHTNESS(47)·LANE BRIGHTNESS(48)·SCORE GRAPH(46) 오프셋을 선언한다. 단일 플레이 문서는 `note.dst`를 1P/2P로 분기하므로 사이드를 바꾸면 노트 필드가 통째로 옮겨진다.
 
-### 2.7 알려진 제약
+### 2.8 알려진 제약
 
 - 선택 화면의 최근 기록 행(개별 플레이 목록)은 브라우저 상태에 id가 없다. 최고 기록의 판정별 카운트·최대 콤보는 §2.4 의 레퍼런스 id 로 읽는다.
 - `shared/objects-play.json5`는 옵션 4조합을 펼친 생성 산출물이다. 좌표를 고칠 때 조합별로 함께 고친다. 정보 패널(NOW PLAYING 줄)의 내용 여백은 플레이트 안쪽 8px 이고 LV…NOTES 묶음은 그 여백에 우측 정렬된다.

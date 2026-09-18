@@ -1,0 +1,18 @@
+// A two-frame character, small enough to read by eye.
+#CharBMP	body.png
+#CharBMP2P	body-2p.png
+#Size	128	128
+#Anime	150
+#Frame	1	240
+#Loop	10	0
+#00	0	240	128	32
+#01	128	240	128	80
+#02	0	0	60	80
+#03	60	0	60	80
+#04	120	0	60	80
+#05	180	0	60	80
+#10	10	20	60	80
+#11	10	12	60	80
+#Pattern	1	0203	1011	ff80	0080
+#Pattern	10	0405
+#Layer	1	0203
