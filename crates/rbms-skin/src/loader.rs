@@ -57,6 +57,14 @@ const DEFAULT_MAX_FRAME_MICROS: u64 = 4_000;
 /// The byte-order mark a document authored on Windows often starts with.
 const BYTE_ORDER_MARK: char = '\u{feff}';
 
+/// The native actions a document's hotspot may declare itself the stand-in for.
+///
+/// An rbms extension rather than a reference field: the reference dispatches a document object's own
+/// `click` event, which this build does not, so a document names the built-in action its rectangle
+/// takes the place of. A name outside this list is warned about and dropped, because a rectangle
+/// nobody can act on is a silent dead spot on the screen.
+pub const HOTSPOT_ACTIONS: &[&str] = &["folders", "modal-close", "modal-replay", "records", "search", "settings", "sort", "tables"];
+
 /// The first line and column of a file, as both parsers count them once normalised.
 #[cfg(feature = "json5")]
 const FIRST_POSITION: usize = 1;
@@ -259,6 +267,48 @@ pub struct NamedTrack {
     pub track: DestinationTrack,
 }
 
+/// One judgement pop-up's assembled tracks: the images it shows and the count that rides with them.
+#[derive(Debug, Default, Clone)]
+pub struct JudgeTracks {
+    pub images: Vec<NamedTrack>,
+    /// The combo beside the pop-up, assembled with the relative flag the reference sets on it.
+    pub numbers: Vec<NamedTrack>,
+}
+
+/// The song wheel's assembled tracks, one entry per slot in each list.
+#[derive(Debug, Default, Clone)]
+pub struct SongListTracks {
+    pub listoff: Vec<NamedTrack>,
+    pub liston: Vec<NamedTrack>,
+    pub text: Vec<NamedTrack>,
+    pub level: Vec<NamedTrack>,
+    pub lamp: Vec<NamedTrack>,
+    pub playerlamp: Vec<NamedTrack>,
+    pub rivallamp: Vec<NamedTrack>,
+    pub trophy: Vec<NamedTrack>,
+    pub label: Vec<NamedTrack>,
+    pub graph: Option<NamedTrack>,
+}
+
+/// The destinations a document nests inside its repeating objects, assembled once at load.
+///
+/// The top-level `destination` list is the only one a document draws directly; a note set, a
+/// judgement pop-up and a song wheel each carry their own lists, which the reference assembles the
+/// same way and at the same moment. Keeping them here rather than re-assembling them per frame is
+/// what lets the renderer stay free of the interpolator's build path, and leaves every Lua
+/// compilation and every warning in one place.
+#[derive(Debug, Default, Clone)]
+pub struct NestedTracks {
+    /// Bar lines, one track per note-set `group` entry.
+    pub note_group: Vec<NamedTrack>,
+    pub note_bpm: Vec<NamedTrack>,
+    pub note_stop: Vec<NamedTrack>,
+    pub note_time: Vec<NamedTrack>,
+    /// The pop-ups, keyed by the id the document gave each judge object.
+    pub judge: BTreeMap<String, JudgeTracks>,
+    pub songlist: Option<SongListTracks>,
+}
+
 /// A document, read and ready to draw.
 pub struct LoadedSkin {
     pub def: SkinDef,
@@ -281,8 +331,11 @@ pub struct LoadedSkin {
     pub fonts: BTreeMap<String, PathBuf>,
     /// The document's top-level destinations, assembled.
     pub destinations: Vec<NamedTrack>,
+    /// The destinations its repeating objects nest, assembled alongside the top-level ones.
+    pub nested: NestedTracks,
     /// Everything that went wrong without costing the skin.
     pub warnings: Vec<String>,
+    replace: BTreeSet<String>,
     resolver: FileResolver,
     known_option: fn(i32) -> bool,
     #[cfg(feature = "lua")]
@@ -305,6 +358,16 @@ impl LoadedSkin {
     /// The pattern-to-file-name substitutions this load resolves paths through.
     pub fn filemap(&self) -> &BTreeMap<String, String> {
         self.resolver.filemap()
+    }
+
+    /// Which bundles of native output this document draws in place of.
+    ///
+    /// The document's own `replace` list and the older `result.replace` spelling name the same
+    /// thing, so both are read and the union is what a screen asks about. A name here is a claim
+    /// rather than a guarantee: the caller still checks that every object the bundle needs was
+    /// compiled before it stops drawing the native content.
+    pub fn replace_names(&self) -> &BTreeSet<String> {
+        &self.replace
     }
 
     /// The file a document-relative path names, checked to be inside the skin root.
@@ -340,6 +403,89 @@ impl LoadedSkin {
         let sandbox: Option<&track::Sandbox> = None;
         track::build_track(destination, sandbox, &mut context)
     }
+}
+
+/// Assembles one nested destination, falling back to a track that never draws.
+///
+/// A slot the document rules out with its own customisation choices, and one whose keyframes will
+/// not assemble, both come back as an empty track rather than as nothing at all: the position of an
+/// entry is the slot it belongs to -- judgement number, wheel row, bar line -- so dropping one would
+/// move every slot behind it. An empty track resolves to nothing, which is what a slot that is not
+/// there should look like.
+fn build_slot(skin: &mut LoadedSkin, what: &str, destination: &Destination, relative: bool) -> Result<NamedTrack, SkinError> {
+    let track = match skin.build_track(destination, relative) {
+        Ok(Some(track)) => track,
+        Ok(None) => DestinationTrack::default(),
+        Err(error @ SkinError::LuaUnavailable) => return Err(error),
+        Err(error) => {
+            skin.warnings.push(format!("{what} {:?} was skipped: {error}", destination.id));
+            DestinationTrack::default()
+        }
+    };
+    Ok(NamedTrack { id: destination.id.clone(), layer: destination.layer, track })
+}
+
+/// Assembles a whole nested list, one entry per slot the document declared.
+fn build_slots(skin: &mut LoadedSkin, what: &str, list: &[Destination], relative: bool) -> Result<Vec<NamedTrack>, SkinError> {
+    let mut tracks = Vec::with_capacity(list.len());
+    for destination in list {
+        tracks.push(build_slot(skin, what, destination, relative)?);
+    }
+    Ok(tracks)
+}
+
+/// Assembles the destinations the note set, the judgement pop-ups and the song wheel nest.
+///
+/// The reference assembles these at the same moment as the top-level list and from the same builder
+/// (`JsonPlaySkinObjectLoader`, `JsonSelectSkinObjectLoader`), which is what keeps one document's
+/// Lua compilation and one document's warnings in one place.
+fn build_nested(skin: &mut LoadedSkin) -> Result<(), SkinError> {
+    let note = skin.def.note.take();
+    if let Some(note) = note.as_ref() {
+        skin.nested.note_group = build_slots(skin, "note bar line", &note.group, false)?;
+        skin.nested.note_bpm = build_slots(skin, "note bpm line", &note.bpm, false)?;
+        skin.nested.note_stop = build_slots(skin, "note stop line", &note.stop, false)?;
+        skin.nested.note_time = build_slots(skin, "note time line", &note.time, false)?;
+    }
+    skin.def.note = note;
+
+    let judges = std::mem::take(&mut skin.def.judge);
+    for judge in &judges {
+        let images = build_slots(skin, "judge image", &judge.images, false)?;
+        let numbers = build_slots(skin, "judge number", &judge.numbers, true)?;
+        skin.nested.judge.insert(judge.id.clone(), JudgeTracks { images, numbers });
+    }
+    skin.def.judge = judges;
+
+    let songlist = skin.def.songlist.take();
+    if let Some(list) = songlist.as_ref() {
+        let tracks = SongListTracks {
+            listoff: build_slots(skin, "song bar", &list.listoff, false)?,
+            liston: build_slots(skin, "selected song bar", &list.liston, false)?,
+            text: build_slots(skin, "song bar text", &list.text, false)?,
+            level: build_slots(skin, "song bar level", &list.level, false)?,
+            lamp: build_slots(skin, "song bar lamp", &list.lamp, false)?,
+            playerlamp: build_slots(skin, "song bar player lamp", &list.playerlamp, false)?,
+            rivallamp: build_slots(skin, "song bar rival lamp", &list.rivallamp, false)?,
+            trophy: build_slots(skin, "song bar trophy", &list.trophy, false)?,
+            label: build_slots(skin, "song bar label", &list.label, false)?,
+            graph: list.graph.as_ref().map(|graph| build_slot(skin, "song bar graph", graph, false)).transpose()?,
+        };
+        skin.nested.songlist = Some(tracks);
+    }
+    skin.def.songlist = songlist;
+
+    Ok(())
+}
+
+/// Drops the hotspots whose action this build has no meaning for, warning about each one.
+fn keep_known_hotspots(skin: &mut LoadedSkin) {
+    let declared = std::mem::take(&mut skin.def.hotspot);
+    let (known, unknown): (Vec<_>, Vec<_>) = declared.into_iter().partition(|spot| HOTSPOT_ACTIONS.contains(&spot.action.as_str()));
+    for spot in unknown {
+        skin.warnings.push(format!("hotspot {:?} names the unknown action {:?}", spot.id, spot.action));
+    }
+    skin.def.hotspot = known;
 }
 
 /// Reads a document as text, refusing one that is over the ceiling.
@@ -485,6 +631,7 @@ pub fn load_skin(path: &Path, options: SkinLoadOptions<'_>) -> Result<LoadedSkin
     branch::transform(&mut value, &mut branch::BranchContext::new(&enabled, &mut include, &mut warnings))?;
 
     let def = from_value(&path, value)?;
+    let replace = def.replace.iter().chain(def.result.iter().flat_map(|result| result.replace.iter())).cloned().collect();
 
     let mut skin = LoadedSkin {
         path,
@@ -497,7 +644,9 @@ pub fn load_skin(path: &Path, options: SkinLoadOptions<'_>) -> Result<LoadedSkin
         sources: BTreeMap::new(),
         fonts: BTreeMap::new(),
         destinations: Vec::new(),
+        nested: NestedTracks::default(),
         warnings,
+        replace,
         resolver,
         known_option: options.known_option,
         #[cfg(feature = "lua")]
@@ -525,6 +674,8 @@ pub fn load_skin(path: &Path, options: SkinLoadOptions<'_>) -> Result<LoadedSkin
         }
     }
 
+    keep_known_hotspots(&mut skin);
+
     let destinations = std::mem::take(&mut skin.def.destination);
     for destination in &destinations {
         match skin.build_track(destination, false) {
@@ -535,6 +686,8 @@ pub fn load_skin(path: &Path, options: SkinLoadOptions<'_>) -> Result<LoadedSkin
         }
     }
     skin.def.destination = destinations;
+
+    build_nested(&mut skin)?;
 
     Ok(skin)
 }

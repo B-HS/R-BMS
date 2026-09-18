@@ -1,0 +1,50 @@
+// A play document whose note set arrives through an include and whose judgement pop-up carries a
+// full set of images and counts.
+{
+    type: 0,
+    name: 'fixture play',
+    author: 'rbms tests',
+    w: 1280,
+    h: 720,
+    category: [{ name: 'layout', item: ['Bar lines'] }],
+    property: [
+        {
+            category: 'layout',
+            name: 'Bar lines',
+            item: [
+                { name: 'thick', op: 901 },
+                { name: 'thin', op: 902 },
+            ],
+            def: 'thick',
+        },
+    ],
+    note: { include: 'shared/note.json5' },
+    judge: [
+        {
+            id: 'judge-1p',
+            index: 0,
+            shift: true,
+            images: [
+                { id: 'judge-pg', dst: [{ time: 0, x: 194, y: 300, w: 120, h: 30 }] },
+                { id: 'judge-gr', dst: [{ time: 0, x: 194, y: 300, w: 120, h: 30 }] },
+                { id: 'judge-gd', dst: [{ time: 0, x: 194, y: 300, w: 120, h: 30 }] },
+                { id: 'judge-bd', dst: [{ time: 0, x: 194, y: 300, w: 120, h: 30 }] },
+                { id: 'judge-pr', dst: [{ time: 0, x: 194, y: 300, w: 120, h: 30 }] },
+                { id: 'judge-ms', dst: [{ time: 0, x: 194, y: 300, w: 120, h: 30 }] },
+            ],
+            numbers: [
+                { id: 'combo-pg', dst: [{ time: 0, x: 194, y: 340, w: 20, h: 28 }] },
+                { id: 'combo-gr', dst: [{ time: 0, x: 194, y: 340, w: 20, h: 28 }] },
+                { id: 'combo-gd', dst: [{ time: 0, x: 194, y: 340, w: 20, h: 28 }] },
+                { id: 'combo-bd', dst: [{ time: 0, x: 194, y: 340, w: 20, h: 28 }] },
+                { id: 'combo-pr', dst: [{ time: 0, x: 194, y: 340, w: 20, h: 28 }] },
+                { id: 'combo-ms', dst: [{ time: 0, x: 194, y: 340, w: 20, h: 28 }] },
+            ],
+        },
+    ],
+    replace: ['field', 'judge'],
+    destination: [
+        { id: 'notes', dst: [{ time: 0, x: 34, y: 0, w: 320, h: 500 }] },
+        { id: 'judge-1p', dst: [{ time: 0, x: 194, y: 300, w: 120, h: 30 }] },
+    ],
+}

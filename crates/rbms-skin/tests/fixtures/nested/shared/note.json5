@@ -1,0 +1,32 @@
+// The note set of the play fixture, reached through an include so that the nested lists inside an
+// included file are assembled the same way as the ones written in place.
+{
+    id: 'notes',
+    note: ['n-sc', 'n-w', 'n-b', 'n-w', 'n-b', 'n-w', 'n-b', 'n-w'],
+    lnstart: ['s-sc', 's-w', 's-b', 's-w', 's-b', 's-w', 's-b', 's-w'],
+    lnend: ['e-sc', 'e-w', 'e-b', 'e-w', 'e-b', 'e-w', 'e-b', 'e-w'],
+    lnbody: ['y-sc', 'y-w', 'y-b', 'y-w', 'y-b', 'y-w', 'y-b', 'y-w'],
+    lnbodyActive: ['a-sc', 'a-w', 'a-b', 'a-w', 'a-b', 'a-w', 'a-b', 'a-w'],
+    mine: ['m-sc', 'm-w', 'm-b', 'm-w', 'm-b', 'm-w', 'm-b', 'm-w'],
+    hidden: ['h-sc', 'h-w', 'h-b', 'h-w', 'h-b', 'h-w', 'h-b', 'h-w'],
+    processed: ['p-sc', 'p-w', 'p-b', 'p-w', 'p-b', 'p-w', 'p-b', 'p-w'],
+    size: [22, 22, 22, 22, 22, 22, 22, 22],
+    expansionrate: [100, 100],
+    dst: [
+        { x: 34, y: 0, w: 64, h: 500 },
+        { x: 98, y: 0, w: 40, h: 500 },
+        { x: 138, y: 0, w: 32, h: 500 },
+        { x: 170, y: 0, w: 40, h: 500 },
+        { x: 210, y: 0, w: 32, h: 500 },
+        { x: 242, y: 0, w: 40, h: 500 },
+        { x: 282, y: 0, w: 32, h: 500 },
+        { x: 314, y: 0, w: 40, h: 500 },
+    ],
+    group: [
+        { id: 'bar-line', dst: [{ time: 0, x: 34, y: 0, w: 320, h: 2 }] },
+        { id: 'bar-line-thin', op: [902], dst: [{ time: 0, x: 34, y: 0, w: 320, h: 1 }] },
+    ],
+    bpm: [{ id: 'bpm-line', dst: [{ time: 0, x: 34, y: 0, w: 320, h: 2, r: 255, g: 211, b: 106 }] }],
+    stop: [{ id: 'stop-line', dst: [{ time: 0, x: 34, y: 0, w: 320, h: 2, r: 255, g: 124, b: 154 }] }],
+    time: [{ id: 'time-line', dst: [{ time: 0, x: 34, y: 0, w: 320, h: 2, r: 105, g: 241, b: 228 }] }],
+}

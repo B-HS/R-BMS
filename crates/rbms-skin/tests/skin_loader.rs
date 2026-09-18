@@ -99,6 +99,7 @@ fn two_item_row(default: Option<&str>) -> PropertyDef {
         name: "Panel".to_owned(),
         item: vec![PropertyItem { name: "on".to_owned(), op: PANEL_ON }, PropertyItem { name: "off".to_owned(), op: PANEL_OFF }],
         def: default.map(str::to_owned),
+        scope: None,
     }
 }
 
@@ -575,7 +576,7 @@ fn a_row_with_no_default_falls_back_to_its_first_item() {
 
 #[test]
 fn a_row_with_no_items_selects_the_random_value() {
-    let empty = PropertyDef { category: String::new(), name: "Empty".to_owned(), item: Vec::new(), def: None };
+    let empty = PropertyDef { category: String::new(), name: "Empty".to_owned(), item: Vec::new(), def: None, scope: None };
     assert_eq!(selected_option(&empty, None), OPTION_RANDOM_VALUE);
 }
 

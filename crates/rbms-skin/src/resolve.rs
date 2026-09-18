@@ -105,6 +105,10 @@ pub struct CustomFile {
     pub default: Option<String>,
     /// File names the pattern expands to, [`RANDOM_SELECTION`] first.
     pub candidates: Vec<String>,
+    /// Which set of stored choices this slot belongs to, carried through from
+    /// [`crate::model::Filepath::scope`] so the configuration screen can group a bundle-wide slot
+    /// apart from a document's own.
+    pub scope: Option<String>,
 }
 
 /// Joins a document-relative path onto the skin directory, in the slash-separated form patterns and
@@ -295,7 +299,14 @@ pub fn enumerate_custom_files(def: &SkinDef, skin_dir: &Path, root: &Path) -> Ve
             {
                 candidates.extend(scan_candidates(&directory, &ext));
             }
-            CustomFile { category: entry.category.clone(), name: entry.name.clone(), pattern, default: entry.def.clone(), candidates }
+            CustomFile {
+                category: entry.category.clone(),
+                name: entry.name.clone(),
+                pattern,
+                default: entry.def.clone(),
+                candidates,
+                scope: entry.scope.clone(),
+            }
         })
         .collect()
 }

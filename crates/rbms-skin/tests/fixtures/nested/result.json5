@@ -1,0 +1,12 @@
+// A score document that names its replacements in both the current spelling and the older one the
+// result pane carried on its own.
+{
+    type: 7,
+    name: 'fixture result',
+    author: 'rbms tests',
+    w: 1280,
+    h: 720,
+    replace: ['grade', 'graphs'],
+    result: { replace: ['score', 'grade'] },
+    destination: [{ id: 'result-rank', dst: [{ time: 0, x: 16, y: 48, w: 384, h: 200 }] }],
+}

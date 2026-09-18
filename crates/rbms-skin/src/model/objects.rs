@@ -597,3 +597,29 @@ impl Default for SkinConfigurationProperty {
         Self { custom_bms: Vec::new(), default_category: 0, custom_property_count: -1, custom_offset_style: 0 }
     }
 }
+
+/// Pixels wide the density histogram draws its peak marker by default.
+const DENSITY_LINE_WIDTH: i32 = 1;
+
+/// The note-density histogram of the focused chart.
+///
+/// An rbms extension rather than a reference object: the reference declares nothing that reads a
+/// chart's per-second density, so the field names follow the neighbouring graph records instead of
+/// mirroring a third-party one.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct DensityGraph {
+    pub id: String,
+    #[serde(rename = "barColor")]
+    pub bar_color: String,
+    #[serde(rename = "peakColor")]
+    pub peak_color: String,
+    #[serde(rename = "lineWidth")]
+    pub line_width: i32,
+}
+
+impl Default for DensityGraph {
+    fn default() -> Self {
+        Self { id: String::new(), bar_color: "69F1E4FF".to_owned(), peak_color: "FFD36AFF".to_owned(), line_width: DENSITY_LINE_WIDTH }
+    }
+}

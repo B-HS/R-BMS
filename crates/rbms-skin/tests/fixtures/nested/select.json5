@@ -1,0 +1,113 @@
+// A browser document with a five-slot song wheel, bundle-scoped customisation rows and the
+// hotspots that stand in for the native buttons.
+{
+    type: 5,
+    name: 'fixture select',
+    author: 'rbms tests',
+    w: 1280,
+    h: 720,
+    category: [{ name: 'customize', item: ['Play side', 'Panel', 'Notes', 'Bga'] }],
+    property: [
+        {
+            category: 'customize',
+            name: 'Play side',
+            item: [
+                { name: '1p', op: 900 },
+                { name: '2p', op: 901 },
+            ],
+            def: '1p',
+            scope: 'bundle',
+        },
+        {
+            category: 'customize',
+            name: 'Panel',
+            item: [
+                { name: 'on', op: 910 },
+                { name: 'off', op: 911 },
+            ],
+            def: 'on',
+        },
+    ],
+    filepath: [{ category: 'customize', name: 'Notes', path: 'images/*.png', def: 'Random', scope: 'bundle' }],
+    offset: [{ category: 'customize', name: 'Bga', id: 40, x: true, y: true, scope: 'bundle' }],
+    replace: ['list', 'detail', 'topbar'],
+    hotspot: [
+        { id: 'btn-search', action: 'search' },
+        { id: 'btn-sort', action: 'sort' },
+        { id: 'btn-teleport', action: 'teleport' },
+    ],
+    songlist: {
+        id: 'song-list',
+        center: 2,
+        clickable: [0, 1, 2, 3, 4],
+        listoff: [
+            { id: 'bar-off', dst: [{ time: 0, x: 700, y: 60, w: 556, h: 40 }] },
+            { id: 'bar-off', dst: [{ time: 0, x: 700, y: 100, w: 556, h: 40 }] },
+            { id: 'bar-off', dst: [{ time: 0, x: 700, y: 140, w: 556, h: 40 }] },
+            { id: 'bar-off', dst: [{ time: 0, x: 700, y: 180, w: 556, h: 40 }] },
+            { id: 'bar-off', dst: [{ time: 0, x: 700, y: 220, w: 556, h: 40 }] },
+        ],
+        liston: [
+            { id: 'bar-on', dst: [{ time: 0, x: 680, y: 60, w: 576, h: 40 }] },
+            { id: 'bar-on', dst: [{ time: 0, x: 680, y: 100, w: 576, h: 40 }] },
+            { id: 'bar-on', dst: [{ time: 0, x: 680, y: 140, w: 576, h: 40 }] },
+            { id: 'bar-on', dst: [{ time: 0, x: 680, y: 180, w: 576, h: 40 }] },
+            { id: 'bar-on', dst: [{ time: 0, x: 680, y: 220, w: 576, h: 40 }] },
+        ],
+        text: [
+            { id: 'bar-title', dst: [{ time: 0, x: 810, y: 68, w: 400, h: 22 }] },
+            { id: 'bar-title', dst: [{ time: 0, x: 810, y: 108, w: 400, h: 22 }] },
+            { id: 'bar-title', dst: [{ time: 0, x: 810, y: 148, w: 400, h: 22 }] },
+            { id: 'bar-title', dst: [{ time: 0, x: 810, y: 188, w: 400, h: 22 }] },
+            { id: 'bar-title', dst: [{ time: 0, x: 810, y: 228, w: 400, h: 22 }] },
+        ],
+        level: [
+            { id: 'bar-level', dst: [{ time: 0, x: 714, y: 68, w: 40, h: 20 }] },
+            { id: 'bar-level', dst: [{ time: 0, x: 714, y: 108, w: 40, h: 20 }] },
+            { id: 'bar-level', dst: [{ time: 0, x: 714, y: 148, w: 40, h: 20 }] },
+            { id: 'bar-level', dst: [{ time: 0, x: 714, y: 188, w: 40, h: 20 }] },
+            { id: 'bar-level', dst: [{ time: 0, x: 714, y: 228, w: 40, h: 20 }] },
+        ],
+        lamp: [
+            { id: 'bar-lamp', dst: [{ time: 0, x: 700, y: 60, w: 8, h: 40 }] },
+            { id: 'bar-lamp', dst: [{ time: 0, x: 700, y: 100, w: 8, h: 40 }] },
+            { id: 'bar-lamp', dst: [{ time: 0, x: 700, y: 140, w: 8, h: 40 }] },
+            { id: 'bar-lamp', dst: [{ time: 0, x: 700, y: 180, w: 8, h: 40 }] },
+            { id: 'bar-lamp', dst: [{ time: 0, x: 700, y: 220, w: 8, h: 40 }] },
+        ],
+        playerlamp: [
+            { id: 'bar-player-lamp', dst: [{ time: 0, x: 1220, y: 60, w: 8, h: 40 }] },
+            { id: 'bar-player-lamp', dst: [{ time: 0, x: 1220, y: 100, w: 8, h: 40 }] },
+            { id: 'bar-player-lamp', dst: [{ time: 0, x: 1220, y: 140, w: 8, h: 40 }] },
+            { id: 'bar-player-lamp', dst: [{ time: 0, x: 1220, y: 180, w: 8, h: 40 }] },
+            { id: 'bar-player-lamp', dst: [{ time: 0, x: 1220, y: 220, w: 8, h: 40 }] },
+        ],
+        rivallamp: [
+            { id: 'bar-rival-lamp', dst: [{ time: 0, x: 1236, y: 60, w: 8, h: 40 }] },
+            { id: 'bar-rival-lamp', dst: [{ time: 0, x: 1236, y: 100, w: 8, h: 40 }] },
+            { id: 'bar-rival-lamp', dst: [{ time: 0, x: 1236, y: 140, w: 8, h: 40 }] },
+            { id: 'bar-rival-lamp', dst: [{ time: 0, x: 1236, y: 180, w: 8, h: 40 }] },
+            { id: 'bar-rival-lamp', dst: [{ time: 0, x: 1236, y: 220, w: 8, h: 40 }] },
+        ],
+        trophy: [
+            { id: 'bar-trophy', dst: [{ time: 0, x: 1180, y: 68, w: 24, h: 24 }] },
+            { id: 'bar-trophy', dst: [{ time: 0, x: 1180, y: 108, w: 24, h: 24 }] },
+            { id: 'bar-trophy', dst: [{ time: 0, x: 1180, y: 148, w: 24, h: 24 }] },
+            { id: 'bar-trophy', dst: [{ time: 0, x: 1180, y: 188, w: 24, h: 24 }] },
+            { id: 'bar-trophy', dst: [{ time: 0, x: 1180, y: 228, w: 24, h: 24 }] },
+        ],
+        label: [
+            { id: 'bar-label', dst: [{ time: 0, x: 758, y: 68, w: 48, h: 20 }] },
+            { id: 'bar-label', dst: [{ time: 0, x: 758, y: 108, w: 48, h: 20 }] },
+            { id: 'bar-label', dst: [{ time: 0, x: 758, y: 148, w: 48, h: 20 }] },
+            { id: 'bar-label', dst: [{ time: 0, x: 758, y: 188, w: 48, h: 20 }] },
+            { id: 'bar-label', dst: [{ time: 0, x: 758, y: 228, w: 48, h: 20 }] },
+        ],
+        graph: { id: 'bar-graph', dst: [{ time: 0, x: 1100, y: 70, w: 72, h: 20 }] },
+    },
+    destination: [
+        { id: 'song-list', dst: [{ time: 0, x: 700, y: 60, w: 556, h: 200 }] },
+        { id: 'btn-search', dst: [{ time: 0, x: 24, y: 676, w: 100, h: 28 }] },
+        { id: 'btn-sort', dst: [{ time: 0, x: 132, y: 676, w: 100, h: 28 }] },
+    ],
+}
