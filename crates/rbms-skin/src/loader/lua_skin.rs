@@ -49,7 +49,7 @@ use super::{
 };
 use crate::SkinError;
 use crate::lua::main_state::is_property_name;
-use crate::lua::{LuaBudget, LuaMode, LuaPass, SkinLua, SkinLuaConfig};
+use crate::lua::{LuaBudget, LuaMode, LuaPass, OverlayLimits, SkinLua, SkinLuaConfig};
 use crate::model::{SKIN_TYPE_UNSET, SkinDef};
 use crate::property::{DefaultState, SkinHost};
 use crate::resolve::{contained, enumerate_custom_files};
@@ -106,6 +106,7 @@ fn program(path: &Path, options: &LuaSkinOptions<'_>, mode: LuaMode) -> Result<P
         seed: load.rng_seed,
         budget: options.budget,
         mode,
+        overlay_limits: OverlayLimits::default(),
     })?;
     let root = runtime.paths().root().to_path_buf();
     let entry = entry.file_name().map_or_else(|| entry.clone(), |name| root.join(name));

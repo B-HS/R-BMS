@@ -10,10 +10,10 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use mlua::FromLuaMulti;
-use rbms_skin::lua::{SkinLua, SkinLuaConfig};
+use rbms_skin::lua::{OverlayLimits, SkinLua, SkinLuaConfig};
 
 /// The seed every interpreter of these tests is pinned to.
 const TEST_SEED: u64 = 42;
@@ -50,6 +50,19 @@ const OPEN_FILE_LIMIT: usize = 64;
 
 /// How many files a leak test opens without closing or keeping any: many times the limit.
 const LEAKED_OPENS: usize = 1_000;
+
+/// The size limit the overlay tests run under, small enough to reach with a few writes.
+const SMALL_OVERLAY_BYTES: u64 = 100;
+
+/// How many times a state file is rewritten in the tests that show rewriting is never blocked: many
+/// times the limit's worth of bytes written in all.
+const REWRITES: usize = 500;
+
+/// What a write past the size limit is answered with.
+const OVERLAY_FULL: &str = "io error: the skin's write overlay is full";
+
+/// What a new file or directory past the entry limit is answered with.
+const OVERLAY_CROWDED: &str = "io error: the skin's write overlay holds too many files";
 
 /// The fixture skin's root.
 fn fixture_root() -> PathBuf {
@@ -760,4 +773,315 @@ fn an_external_skin_pack_is_read_and_written_without_touching_its_folder() {
         );
     }
     assert_eq!(listing(&pack), before, "running against the pack changed its folder");
+}
+
+/// A seeded interpreter whose overlay may hold only what `limits` says, measured afresh before every
+/// check so that nothing here waits on a clock.
+fn limited_skin(root: &Path, overlay: &Path, limits: OverlayLimits) -> SkinLua {
+    let limits = OverlayLimits { resync_interval: Duration::ZERO, ..limits };
+    SkinLua::new(SkinLuaConfig { overlay: Some(overlay.to_path_buf()), seed: Some(TEST_SEED), overlay_limits: limits, ..SkinLuaConfig::new(root) })
+        .expect("the runtime builds")
+}
+
+/// A skin root in `scratch` holding the given files, and its path.
+fn skin_root_with(scratch: &Scratch, files: &[(&str, &[u8])]) -> PathBuf {
+    scratch.write("skin/marker.txt", b"m");
+    for (name, bytes) in files {
+        scratch.write(&format!("skin/{name}"), bytes);
+    }
+    scratch.path().join("skin")
+}
+
+/// The bytes of every file and the count of every file and directory under `folder`.
+fn folder_usage(folder: &Path) -> (u64, u64) {
+    let (mut bytes, mut entries) = (0, 0);
+    let mut pending = vec![folder.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        let Ok(listing) = std::fs::read_dir(&directory) else {
+            continue;
+        };
+        for entry in listing.flatten() {
+            let metadata = entry.metadata().expect("the entry should be readable");
+            entries += 1;
+            if metadata.is_dir() {
+                pending.push(entry.path());
+            } else {
+                bytes += metadata.len();
+            }
+        }
+    }
+    (bytes, entries)
+}
+
+/// What a write of `count` bytes to `name` through `io.open` in `mode` answers: whether it failed and the message.
+fn write_outcome(runtime: &SkinLua, name: &str, mode: &str, count: u64) -> (bool, Option<String>) {
+    eval(
+        runtime,
+        &format!(
+            "local file, message = io.open('{name}', '{mode}') if not file then return true, message end \
+             local written, reason = file:write(string.rep('x', {count})) file:close() return written == nil, reason"
+        ),
+    )
+}
+
+#[test]
+fn writes_are_accepted_up_to_the_size_limit_and_refused_past_it() {
+    let scratch = Scratch::new("quota-limit");
+    let root = skin_root_with(&scratch, &[]);
+    let overlay = scratch.overlay();
+    let runtime = limited_skin(&root, &overlay, OverlayLimits { max_bytes: SMALL_OVERLAY_BYTES, ..OverlayLimits::default() });
+
+    assert_eq!(write_outcome(&runtime, "first.txt", "w", 60), (false, None), "a write that fits is accepted");
+    assert_eq!(write_outcome(&runtime, "second.txt", "w", 40), (false, None), "a write that reaches the limit exactly is accepted");
+    assert_eq!(folder_usage(&overlay).0, SMALL_OVERLAY_BYTES);
+
+    assert_eq!(write_outcome(&runtime, "second.txt", "a", 1), (true, Some(OVERLAY_FULL.to_owned())), "one byte more is refused");
+    assert_eq!(write_outcome(&runtime, "third.txt", "w", 1), (true, Some(OVERLAY_FULL.to_owned())), "so is a new file");
+    assert!(
+        eval::<bool>(&runtime, "local file = io.open('first.txt', 'a') local written = file:write('') ~= nil file:close() return written"),
+        "a write of nothing grows nothing"
+    );
+    assert_eq!(folder_usage(&overlay).0, SMALL_OVERLAY_BYTES, "the overlay never went past the limit");
+
+    let seeked: (bool, Option<String>) = eval(
+        &runtime,
+        "local file = io.open('second.txt', 'r+') file:seek('set', 200) local written, reason = file:write('x') file:close() return written == nil, reason",
+    );
+    assert_eq!(seeked, (true, Some(OVERLAY_FULL.to_owned())), "a write far past the end counts the gap it would leave");
+    assert_eq!(folder_usage(&overlay).0, SMALL_OVERLAY_BYTES);
+}
+
+#[test]
+fn a_refused_write_is_a_refused_main_state_helper_too() {
+    let scratch = Scratch::new("quota-main-state");
+    let root = skin_root_with(&scratch, &[("big.txt", &[b'z'; 80])]);
+    let overlay = scratch.overlay();
+    let runtime = limited_skin(&root, &overlay, OverlayLimits { max_bytes: SMALL_OVERLAY_BYTES, ..OverlayLimits::default() });
+
+    let fits: (bool, bool) =
+        eval(&runtime, "local ms = require('main_state') return ms.file_write('a.txt', string.rep('a', 90)), ms.file_append('a.txt', string.rep('b', 10))");
+    assert_eq!(fits, (true, true));
+    let refused: (bool, bool, bool) =
+        eval(&runtime, "local ms = require('main_state') return ms.file_append('a.txt', 'c'), ms.file_write('b.txt', 'c'), ms.file_append('big.txt', 'c')");
+    assert_eq!(refused, (false, false, false), "an append, a new file and an append that must first copy an 80 byte file are all refused");
+    assert_eq!(std::fs::read(overlay.join("a.txt")).expect("the file exists").len(), 100, "the refused append left the file as it was");
+    assert!(!overlay.join("b.txt").exists() && !overlay.join("big.txt").exists(), "a refused write created nothing");
+
+    let freed: (bool, bool) = eval(&runtime, "local ms = require('main_state') return ms.file_clear('a.txt'), ms.file_write('b.txt', string.rep('b', 100))");
+    assert_eq!(freed, (true, true), "clearing a file gives its room back at once");
+    assert_eq!(folder_usage(&overlay).0, SMALL_OVERLAY_BYTES);
+}
+
+#[test]
+fn rewriting_the_same_file_is_never_blocked() {
+    let scratch = Scratch::new("quota-rewrite");
+    let root = skin_root_with(&scratch, &[]);
+    let overlay = scratch.overlay();
+    let runtime = limited_skin(&root, &overlay, OverlayLimits { max_bytes: SMALL_OVERLAY_BYTES, ..OverlayLimits::default() });
+    runtime.lua().globals().set("REWRITES", REWRITES).expect("the global is set");
+
+    let (through_io, through_main_state, through_append_and_clear): (usize, usize, usize) = eval(
+        &runtime,
+        r#"
+        local ms = require('main_state')
+        local io_ok, ms_ok, mixed_ok = 0, 0, 0
+        for turn = 1, REWRITES do
+            local file = io.open('state/io.txt', 'w')
+            if file and file:write(string.rep('i', 90)) then io_ok = io_ok + 1 end
+            if file then file:close() end
+            if ms.file_write('state/main.txt', string.rep('m', 5)) then ms_ok = ms_ok + 1 end
+            if ms.file_clear('state/mixed.txt') and ms.file_append('state/mixed.txt', 'abc') then mixed_ok = mixed_ok + 1 end
+        end
+        return io_ok, ms_ok, mixed_ok
+        "#,
+    );
+    assert_eq!((through_io, through_main_state, through_append_and_clear), (REWRITES, REWRITES, REWRITES), "no rewrite was refused");
+    let (bytes, _) = folder_usage(&overlay);
+    assert_eq!(bytes, 90 + 5 + 3);
+    assert!(bytes * (REWRITES as u64) > SMALL_OVERLAY_BYTES * 10, "far more than the limit was written over time");
+}
+
+#[test]
+fn shrinking_deleting_or_replacing_a_file_gives_its_room_back() {
+    let scratch = Scratch::new("quota-room");
+    let root = skin_root_with(&scratch, &[]);
+    let overlay = scratch.overlay();
+    let runtime = limited_skin(&root, &overlay, OverlayLimits { max_bytes: SMALL_OVERLAY_BYTES, ..OverlayLimits::default() });
+
+    assert!(!write_outcome(&runtime, "big.txt", "w", 100).0);
+    assert!(write_outcome(&runtime, "other.txt", "w", 1).0, "the overlay is full");
+
+    assert!(!write_outcome(&runtime, "big.txt", "w", 10).0, "emptying and rewriting a file smaller is allowed");
+    assert!(!write_outcome(&runtime, "other.txt", "w", 90).0, "and the room it freed is usable at once");
+    assert!(write_outcome(&runtime, "other.txt", "a", 1).0, "full again");
+
+    eval::<()>(&runtime, "local file = io.open('other.txt', 'w') file:close()");
+    assert!(!write_outcome(&runtime, "third.txt", "w", 90).0, "opening a file in w mode releases what it held");
+
+    std::fs::remove_file(overlay.join("third.txt")).expect("the file is removable");
+    assert!(!write_outcome(&runtime, "fourth.txt", "w", 90).0, "a file another process deleted gives its room back");
+    assert_eq!(folder_usage(&overlay).0, 100);
+}
+
+#[test]
+fn a_figure_that_ran_stale_is_measured_again_after_the_interval() {
+    let scratch = Scratch::new("quota-resync");
+    let root = skin_root_with(&scratch, &[]);
+    let overlay = scratch.overlay();
+    let interval = Duration::from_millis(50);
+    let limits = OverlayLimits { max_bytes: SMALL_OVERLAY_BYTES, resync_interval: interval, ..OverlayLimits::default() };
+    let runtime = SkinLua::new(SkinLuaConfig { overlay: Some(overlay.clone()), seed: Some(TEST_SEED), overlay_limits: limits, ..SkinLuaConfig::new(&root) })
+        .expect("the runtime builds");
+
+    assert!(!write_outcome(&runtime, "big.txt", "w", 100).0);
+    std::fs::remove_file(overlay.join("big.txt")).expect("the file is removable");
+    std::thread::sleep(interval * 2);
+    assert!(!write_outcome(&runtime, "again.txt", "w", 100).0, "the folder was measured again once the figure was old enough");
+}
+
+#[test]
+fn an_overlay_already_over_the_limit_can_still_shrink() {
+    let scratch = Scratch::new("quota-over");
+    let root = skin_root_with(&scratch, &[]);
+    let overlay = scratch.overlay();
+    scratch.write("overlay/old.txt", &[b'o'; 300]);
+    let runtime = limited_skin(&root, &overlay, OverlayLimits { max_bytes: SMALL_OVERLAY_BYTES, ..OverlayLimits::default() });
+
+    assert!(write_outcome(&runtime, "new.txt", "w", 1).0, "nothing new fits");
+    assert!(write_outcome(&runtime, "old.txt", "a", 1).0, "and an old file cannot grow");
+    assert!(!write_outcome(&runtime, "old.txt", "w", 50).0, "but it can be replaced by a smaller one");
+    assert!(!write_outcome(&runtime, "new.txt", "w", 50).0, "which makes room");
+}
+
+#[test]
+fn copying_a_root_file_into_the_overlay_must_fit() {
+    let scratch = Scratch::new("quota-copy");
+    let root = skin_root_with(&scratch, &[("history.txt", &[b'h'; 150])]);
+    let overlay = scratch.overlay();
+    let before = snapshot(&root);
+    let runtime = limited_skin(&root, &overlay, OverlayLimits { max_bytes: SMALL_OVERLAY_BYTES, ..OverlayLimits::default() });
+
+    for mode in ["a", "r+", "a+"] {
+        let (refused, message, _) = open_outcome(&runtime, "'history.txt'", mode);
+        assert!(refused && message == OVERLAY_FULL, "mode {mode} answered {message}");
+    }
+    assert!(!overlay.join("history.txt").exists(), "no half copy was left");
+    assert_eq!(read_all(&runtime, "history.txt").len(), 150, "the file is still read from the root");
+    assert!(!write_outcome(&runtime, "history.txt", "w", 10).0, "replacing it with something that fits is allowed");
+    assert_eq!(snapshot(&root), before, "the skin root is unchanged");
+}
+
+#[test]
+fn files_and_directories_are_counted_and_bounded() {
+    let scratch = Scratch::new("quota-entries");
+    let root = skin_root_with(&scratch, &[]);
+    let overlay = scratch.overlay();
+    let before = snapshot(&root);
+    let runtime = limited_skin(&root, &overlay, OverlayLimits { max_entries: 5, ..OverlayLimits::default() });
+    runtime.lua().globals().set("ROOT", runtime.paths().root().to_string_lossy().replace('\\', "/")).expect("the global is set");
+
+    assert!(!write_outcome(&runtime, "deep/er/file.txt", "w", 1).0, "two directories and a file are three entries");
+    let made: (bool, bool) = eval(
+        &runtime,
+        "local File = luajava.bindClass('java.io.File') return luajava.new(File, ROOT .. '/deep/er/sub'):mkdir(), luajava.new(File, ROOT .. '/deep/er/sub2'):mkdir()",
+    );
+    assert_eq!(made, (true, true), "five entries are allowed");
+    assert_eq!(folder_usage(&overlay).1, 5);
+
+    let refused: (bool, bool, bool) = eval(
+        &runtime,
+        "local File = luajava.bindClass('java.io.File') return luajava.new(File, ROOT .. '/deep/er/sub3'):mkdir(), require('main_state').file_mkdir('far/away'), require('main_state').file_write('deep/new.txt', 'x')",
+    );
+    assert_eq!(refused, (false, false, false), "a directory, a path of directories and a file past the limit are refused");
+    assert_eq!(write_outcome(&runtime, "deep/another.txt", "w", 1), (true, Some(OVERLAY_CROWDED.to_owned())));
+    let (tmp, tmp_message): (bool, String) = eval(&runtime, "local file, message = io.tmpfile() return file == nil, message");
+    assert!(tmp && tmp_message == OVERLAY_CROWDED, "a temporary file is a file too: {tmp_message}");
+    assert_eq!(folder_usage(&overlay).1, 5, "refusals created nothing, not even a parent directory");
+
+    assert!(!write_outcome(&runtime, "deep/er/file.txt", "w", 5).0, "rewriting an existing file adds no entry");
+    assert!(!eval::<bool>(&runtime, "return io.open('deep/er/sub3/x.txt', 'w') ~= nil"), "no room even though the name is new");
+    assert_eq!(snapshot(&root), before, "the skin root is unchanged");
+}
+
+/// How long the figures of the two interpreters below are trusted: far longer than the test runs,
+/// so whatever one of them knows of the other's writes it did not learn by walking the folder.
+const NEVER_RESYNC: Duration = Duration::from_secs(3_600);
+
+/// Entries the overlay of the tests below may hold.
+const FEW_ENTRIES: u64 = 3;
+
+/// A write that is refused changes nothing: the directories it would have needed are not made for a
+/// file that then does not fit, whether it is the bytes or the count of entries that has no room.
+#[test]
+fn a_write_that_is_refused_leaves_no_directory_behind() {
+    let scratch = Scratch::new("quota-no-leftover");
+    let root = skin_root_with(&scratch, &[("kept/history.txt", &[b'h'; 150])]);
+    let overlay = scratch.overlay();
+    let before = snapshot(&root);
+    let runtime = limited_skin(&root, &overlay, OverlayLimits { max_bytes: SMALL_OVERLAY_BYTES, max_entries: FEW_ENTRIES, ..OverlayLimits::default() });
+    runtime.lua().globals().set("ROOT", runtime.paths().root().to_string_lossy().replace('\\', "/")).expect("the global is set");
+
+    let too_large: (bool, bool) = eval(
+        &runtime,
+        "local ms = require('main_state') return ms.file_write('new/er/big.txt', string.rep('x', 101)), ms.file_append('kept/history.txt', 'x')",
+    );
+    assert_eq!(too_large, (false, false), "a file past the size limit and an append that must first copy one are refused");
+    assert_eq!(folder_usage(&overlay), (0, 0), "a write refused for its size left a directory behind");
+
+    for mode in ["a", "r+", "a+"] {
+        let (refused, message, _) = open_outcome(&runtime, "'kept/history.txt'", mode);
+        assert!(refused && message == OVERLAY_FULL, "mode {mode} answered {message}");
+    }
+    assert_eq!(folder_usage(&overlay), (0, 0), "an open refused for the copy it needs left a directory behind");
+
+    assert_eq!(write_outcome(&runtime, "a/b/c/file.txt", "w", 1), (true, Some(OVERLAY_CROWDED.to_owned())), "three directories and a file are four entries");
+    assert!(!eval::<bool>(&runtime, "return require('main_state').file_write('a/b/c/file.txt', 'x')"), "and so they are through main_state");
+    assert_eq!(folder_usage(&overlay), (0, 0), "a write refused for its entries left a directory behind");
+
+    assert_eq!(write_outcome(&runtime, "one.txt", "w", 1), (false, None));
+    assert_eq!(write_outcome(&runtime, "two.txt", "w", 1), (false, None));
+    let made: bool = eval(&runtime, "local File = luajava.bindClass('java.io.File') return luajava.new(File, ROOT .. '/kept/sub'):mkdir()");
+    assert!(!made, "a directory whose parent the overlay does not hold yet is two entries, one more than is left");
+    assert_eq!(folder_usage(&overlay), (2, 2), "a directory refused for its entries left its parent behind");
+
+    assert!(eval::<bool>(&runtime, "return require('main_state').file_write('three.txt', 'x')"), "the room the refusals left alone is still there");
+    assert_eq!(folder_usage(&overlay), (3, FEW_ENTRIES));
+    assert_eq!(snapshot(&root), before, "the skin root is unchanged");
+}
+
+/// A pack keeps one overlay for all of its screens and each screen's skin is an interpreter of its
+/// own, so the limits are the folder's: what one interpreter writes counts against the other at
+/// once, without either of them walking the folder again.
+#[test]
+fn two_interpreters_writing_to_one_overlay_share_its_limits() {
+    let scratch = Scratch::new("quota-shared");
+    let root = skin_root_with(&scratch, &[]);
+    let overlay = scratch.overlay();
+    let limits = OverlayLimits { max_bytes: SMALL_OVERLAY_BYTES, max_entries: FEW_ENTRIES, resync_interval: NEVER_RESYNC };
+    let build = || {
+        SkinLua::new(SkinLuaConfig { overlay: Some(overlay.clone()), seed: Some(TEST_SEED), overlay_limits: limits, ..SkinLuaConfig::new(&root) })
+            .expect("the runtime builds")
+    };
+    let (first, second) = (build(), build());
+
+    assert_eq!(write_outcome(&first, "first.txt", "w", 60), (false, None));
+    assert_eq!(
+        write_outcome(&second, "second.txt", "w", 41),
+        (true, Some(OVERLAY_FULL.to_owned())),
+        "the second interpreter did not count the first one's bytes"
+    );
+    assert_eq!(write_outcome(&second, "second.txt", "w", 40), (false, None), "what is left of the folder's room is the second interpreter's to use");
+    assert_eq!(write_outcome(&first, "first.txt", "a", 1), (true, Some(OVERLAY_FULL.to_owned())), "the first interpreter did not count the second one's bytes");
+    assert_eq!(folder_usage(&overlay), (SMALL_OVERLAY_BYTES, 2), "the two together went past the folder's limit");
+
+    assert_eq!(write_outcome(&first, "third.txt", "w", 0), (false, None));
+    let (refused, message, _) = open_outcome(&second, "'fourth.txt'", "w");
+    assert!(refused && message == OVERLAY_CROWDED, "the second interpreter did not count the first one's files: {message}");
+    assert_eq!(folder_usage(&overlay).1, FEW_ENTRIES);
+
+    drop(first);
+    assert_eq!(write_outcome(&second, "first.txt", "w", 10), (false, None), "the figures went with the interpreter that was dropped");
+    assert_eq!(write_outcome(&second, "first.txt", "a", 51), (true, Some(OVERLAY_FULL.to_owned())));
+    assert_eq!(write_outcome(&build(), "first.txt", "a", 50), (false, None), "a later interpreter does not start from the folder as it stands");
+    assert_eq!(folder_usage(&overlay).0, SMALL_OVERLAY_BYTES);
 }

@@ -87,7 +87,7 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::fs::{File, OpenOptions};
+use std::fs::{File, Metadata, OpenOptions};
 use std::io::{Read as _, Write as _};
 use std::path::Path;
 use std::rc::Rc;
@@ -95,7 +95,6 @@ use std::rc::Rc;
 use mlua::chunk::ChunkMode;
 use mlua::{FromLuaMulti, IntoLuaMulti, Lua, Scope, Table, Value, Variadic};
 
-use super::io::copy_into_overlay;
 use super::{LuaFnKind, LuaMode, LuaShared, coerce, package};
 use crate::dst::SkinOffset;
 use crate::property::generated::OFFSET_MAX;
@@ -709,21 +708,45 @@ fn count_lines(shared: &LuaShared, path: &Value) -> Option<usize> {
 /// only the skin root holds starts from a copy of it, so the skin reads back what the reference
 /// would have left in the skin folder. The copy is the overlay's own file, writable whatever the
 /// original's permissions.
+///
+/// The directories, the file and every byte it gains are admitted together before the first
+/// directory is made, so a write that is refused leaves the overlay exactly as it was.
 fn write_file(shared: &LuaShared, path: &Value, text: &str, append: bool) -> std::io::Result<()> {
     let paths = &shared.paths;
+    let quota = &shared.quota;
     let name = coerce::to_jstring(path);
     let target = paths.writable(&name).map_err(std::io::Error::other)?;
+    let mut present = std::fs::metadata(&target).ok().filter(Metadata::is_file).map(|metadata| metadata.len());
+    let original =
+        if append && !target.exists() { Some(paths.readable(&name).map_err(std::io::Error::other)?).filter(|original| original.is_file()) } else { None };
+    let copied = original.as_deref().map(std::fs::metadata).transpose()?.map_or(0, |metadata| metadata.len());
+    let held = present.unwrap_or(0);
+    let start = present.unwrap_or(copied);
+    let after = if append { start.saturating_add(text.len() as u64) } else { text.len() as u64 };
+    let directories = target.parent().map_or(0, |parent| quota.missing_directories(parent));
+    quota.admit(directories + u64::from(present.is_none()), held, after)?;
     if let Some(parent) = target.parent() {
-        std::fs::create_dir_all(parent)?;
+        quota.create_directories(parent)?;
     }
-    if append && !target.exists() {
-        let original = paths.readable(&name).map_err(std::io::Error::other)?;
-        if original.is_file() {
-            copy_into_overlay(&original, &target)?;
-        }
+    if let Some(original) = &original {
+        present = Some(quota.copy_original(original, &target)?);
+    }
+    let before = present.unwrap_or(0);
+    quota.admit_change(before, after)?;
+    let created = present.is_none();
+    if created {
+        quota.admit_entries(1)?;
     }
     let mut file = OpenOptions::new().create(true).write(true).append(append).truncate(!append).open(target)?;
-    file.write_all(text.as_bytes())
+    if created {
+        quota.record_entries(1);
+    }
+    if let Err(error) = file.write_all(text.as_bytes()) {
+        quota.invalidate();
+        return Err(error);
+    }
+    quota.record_change(before, after);
+    Ok(())
 }
 
 /// The functions that need no host, as the table the trampolines receive.
@@ -755,7 +778,7 @@ fn core_table(lua: &Lua, state: &Rc<ModuleState>) -> mlua::Result<Table> {
 
     let files = Rc::clone(state);
     let file_mkdir = lua.create_function(move |_, path: Value| {
-        Ok(files.shared.paths.writable(&coerce::to_jstring(&path)).is_ok_and(|directory| std::fs::create_dir_all(directory).is_ok()))
+        Ok(files.shared.paths.writable(&coerce::to_jstring(&path)).is_ok_and(|directory| files.shared.quota.create_directories(&directory).is_ok()))
     })?;
     core.set("file_mkdir", file_mkdir)?;
 
@@ -999,7 +1022,7 @@ mod tests {
     use std::rc::Rc;
 
     use super::{LineCounter, LuaFnKind, MAX_CACHED_NAME_BYTES, MAX_CACHED_NAMES, ModuleState, UNKNOWN_KEY, is_property_name, java_lines, key_code};
-    use crate::lua::{LuaBudget, LuaLog, LuaMode, LuaShared, Meter, SkinPaths, io};
+    use crate::lua::{LuaBudget, LuaLog, LuaMode, LuaShared, Meter, OverlayLimits, SkinPaths, io};
     use crate::property::{NEGATION_MARK, NameSpace, id_of_name};
 
     /// The state of a module with nothing bound, over this crate's own folder.
@@ -1012,6 +1035,7 @@ mod tests {
             mode: LuaMode::Full,
             seed: None,
             open_files: io::OpenFiles::default(),
+            quota: Rc::new(io::OverlayQuota::measure(None, OverlayLimits::default())),
         };
         ModuleState::new(&Rc::new(shared))
     }

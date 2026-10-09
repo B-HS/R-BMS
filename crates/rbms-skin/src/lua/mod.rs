@@ -47,6 +47,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::time::Duration;
 
 use mlua::chunk::ChunkMode;
 use mlua::{Function, IntoLuaMulti, Lua, Value};
@@ -100,6 +101,15 @@ const FOREIGN_PATH_SEPARATOR: char = '\\';
 /// The marker that makes the interpreter read a chunk name as a file name.
 const FILE_CHUNK_MARKER: char = '@';
 
+/// Bytes the overlay may hold in all unless the configuration says otherwise.
+const DEFAULT_OVERLAY_MAX_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Files and directories the overlay may hold in all unless the configuration says otherwise.
+const DEFAULT_OVERLAY_MAX_ENTRIES: u64 = 4_096;
+
+/// How long the tracked size of the overlay is trusted before the folder is measured again.
+const DEFAULT_OVERLAY_RESYNC_INTERVAL: Duration = Duration::from_secs(5);
+
 /// What a write is refused with when the skin has no overlay.
 const NO_OVERLAY: &str = "the skin has no write overlay";
 
@@ -150,12 +160,48 @@ pub struct SkinLuaConfig {
     /// What the interpreter may spend.
     pub budget: LuaBudget,
     pub mode: LuaMode,
+    /// How much the overlay may hold in all.
+    pub overlay_limits: OverlayLimits,
+}
+
+/// How much a skin may leave in its write overlay.
+///
+/// The size is the overlay folder's current total, not the bytes written so far: a skin that
+/// rewrites a small state file every frame never reaches the limit, and one that shrinks or
+/// replaces what it wrote has room again at once. Every write, append and directory creation is
+/// checked before it happens and, when it would pass a limit, is answered the way a full disk is.
+///
+/// The limits are the folder's rather than one interpreter's: the interpreters of a thread that
+/// write to the same overlay -- a pack's screens, each with a skin of its own -- count against one
+/// total.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OverlayLimits {
+    /// Bytes the files of the overlay may hold in all.
+    pub max_bytes: u64,
+    /// Files and directories the overlay may hold in all.
+    pub max_entries: u64,
+    /// How long the tracked total is trusted before the folder is measured again, which is how
+    /// files another process deleted give their room back. Zero measures before every check.
+    pub resync_interval: Duration,
+}
+
+impl Default for OverlayLimits {
+    fn default() -> Self {
+        Self { max_bytes: DEFAULT_OVERLAY_MAX_BYTES, max_entries: DEFAULT_OVERLAY_MAX_ENTRIES, resync_interval: DEFAULT_OVERLAY_RESYNC_INTERVAL }
+    }
 }
 
 impl SkinLuaConfig {
     /// A read-only, machine-seeded, full-mode configuration for the skin at `root`.
     pub fn new(root: &Path) -> Self {
-        Self { root: root.to_path_buf(), overlay: None, seed: None, budget: LuaBudget::default(), mode: LuaMode::Full }
+        Self {
+            root: root.to_path_buf(),
+            overlay: None,
+            seed: None,
+            budget: LuaBudget::default(),
+            mode: LuaMode::Full,
+            overlay_limits: OverlayLimits::default(),
+        }
     }
 }
 
@@ -561,6 +607,8 @@ pub(crate) struct LuaShared {
     pub(crate) seed: Option<u64>,
     /// How many files of the disk the skin holds open through `io`.
     pub(crate) open_files: io::OpenFiles,
+    /// How much the skin has left in the overlay, and how much more it may.
+    pub(crate) quota: Rc<io::OverlayQuota>,
 }
 
 /// One registered function value and what it is called as.
@@ -612,6 +660,7 @@ impl SkinLua {
             mode: config.mode,
             seed: config.seed,
             open_files: io::OpenFiles::default(),
+            quota: Rc::new(io::OverlayQuota::measure(config.overlay.as_deref(), config.overlay_limits)),
         });
         let lua = env::new_state().map_err(failed)?;
         shared.meter.install(&lua).map_err(failed)?;

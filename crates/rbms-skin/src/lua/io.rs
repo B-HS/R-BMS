@@ -42,6 +42,15 @@
 //!   waits for a disk.
 //! - `io.tmpfile` answers a new file `lua-<unique>.tmp` at the top of the overlay, open for reading
 //!   and writing. As in the reference nothing removes it afterwards.
+//! - The overlay as a whole is bounded by [`OverlayLimits`](super::OverlayLimits): a write, an
+//!   append, a copy of a root file into the overlay, a new file and a new directory are each
+//!   checked before they happen against the folder's current total size and entry count, so a
+//!   skin that rewrites one small file for ever is never stopped and one that shrinks a file has
+//!   its room back. A write that would pass a limit is answered like any other file system
+//!   failure, `nil, "io error: the skin's write overlay is full"`, and leaves nothing behind: the
+//!   directories above a new file are only created once the file itself is known to fit. The
+//!   limits are the folder's, shared by every interpreter of the thread that writes to it. See
+//!   [`OverlayQuota`].
 //! - One read answers at most 64 MiB. A larger one fails instead of being cut short.
 //! - A skin holds at most 64 files open at once. Each one is a descriptor of the whole process, and
 //!   a skin that used them all up would leave the player unable to open a chart or a sound. Skins
@@ -51,18 +60,19 @@
 //!
 //! Nothing here raises a Rust panic on malformed input.
 
-use std::cell::Cell;
-use std::fs::{File, OpenOptions};
+use std::cell::{Cell, RefCell};
+use std::collections::BTreeMap;
+use std::fs::{File, Metadata, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use mlua::{AnyUserData, Function, IntoLuaMulti, Lua, MetaMethod, MultiValue, UserData, UserDataMethods, Value, Variadic};
 
 use super::budget::{Meter, budget_error};
-use super::{LuaShared, SkinPaths, bad_argument, coerce, package};
+use super::{LuaShared, OverlayLimits, SkinPaths, bad_argument, coerce, package};
 use crate::SkinError;
 
 /// The global, and the module name, the library is published under.
@@ -175,6 +185,12 @@ const TEMP_FILE_SUFFIX: &str = ".tmp";
 
 /// Names tried before `io.tmpfile` gives up on finding a free one.
 const TEMP_FILE_ATTEMPTS: u32 = 16;
+
+/// What a write that would pass the overlay's size limit fails with.
+const OVERLAY_FULL: &str = "the skin's write overlay is full";
+
+/// What a new file or directory that would pass the overlay's entry limit fails with.
+const OVERLAY_CROWDED: &str = "the skin's write overlay holds too many files";
 
 /// Sets the temporary files of one process apart from each other.
 static TEMP_FILE_SERIAL: AtomicU64 = AtomicU64::new(0);
@@ -307,6 +323,208 @@ impl Format {
     }
 }
 
+/// What the overlay holds, as the quota believes it.
+#[derive(Debug, Clone, Copy, Default)]
+struct Usage {
+    /// Bytes of every file.
+    bytes: u64,
+    /// Files and directories, not counting the overlay folder itself.
+    entries: u64,
+}
+
+/// The figures of one overlay folder, and when the folder was last walked for them.
+#[derive(Debug, Default)]
+struct Ledger {
+    usage: Cell<Usage>,
+    measured_at: Cell<Option<Instant>>,
+}
+
+thread_local! {
+    /// The ledger of every overlay folder an interpreter of this thread writes to, by the path the
+    /// folder was named with. An entry lasts as long as an interpreter holds its ledger.
+    static LEDGERS: RefCell<BTreeMap<PathBuf, Weak<Ledger>>> = const { RefCell::new(BTreeMap::new()) };
+}
+
+/// The ledger of `overlay`: the one the thread's other interpreters already keep for the folder, or
+/// a new one when none of them writes there.
+fn ledger_of(overlay: &Path) -> Rc<Ledger> {
+    LEDGERS.with_borrow_mut(|ledgers| {
+        ledgers.retain(|_, ledger| ledger.strong_count() > 0);
+        if let Some(shared) = ledgers.get(overlay).and_then(Weak::upgrade) {
+            return shared;
+        }
+        let ledger = Rc::new(Ledger::default());
+        ledgers.insert(overlay.to_path_buf(), Rc::downgrade(&ledger));
+        ledger
+    })
+}
+
+/// How much of its [`OverlayLimits`] a skin has used.
+///
+/// The measure is the overlay folder as it is now, not what the skin has written: the folder is
+/// walked once when the interpreter is built, and from then on every change the skin makes through
+/// this library is added to or taken from the tracked figures, so a check costs no directory walk.
+/// A file another process deleted, or one the skin changed in a way that failed half way, would
+/// leave the figures too high, so the folder is walked again whenever the figures are older than
+/// [`OverlayLimits::resync_interval`] or a failure marked them stale.
+///
+/// The figures belong to the folder, not to the interpreter. A pack keeps one overlay for all of
+/// its screens, and each screen's skin is an interpreter of its own, alive at the same time as the
+/// others; so every interpreter of a thread that names the same overlay folder keeps one set of
+/// figures, and what one of them writes counts against the others at once. Only a writer this
+/// thread does not know of -- another thread's interpreter, another process -- goes unseen until
+/// the folder is next walked.
+///
+/// Callers `admit` a change before making it and `record` it after it succeeded. A change that does
+/// not make the folder larger is always admitted, so a skin that is already over the limit -- its
+/// overlay was filled by an older run -- can still empty and shrink its files.
+#[derive(Debug)]
+pub(crate) struct OverlayQuota {
+    overlay: Option<PathBuf>,
+    limits: OverlayLimits,
+    ledger: Rc<Ledger>,
+}
+
+impl OverlayQuota {
+    /// The quota of `overlay`, with the folder measured as it stands. A skin without an overlay
+    /// cannot write, so its quota never refuses anything.
+    pub(crate) fn measure(overlay: Option<&Path>, limits: OverlayLimits) -> Self {
+        let ledger = overlay.map_or_else(|| Rc::new(Ledger::default()), ledger_of);
+        let quota = Self { overlay: overlay.map(Path::to_path_buf), limits, ledger };
+        quota.remeasure();
+        quota
+    }
+
+    fn remeasure(&self) {
+        self.ledger.usage.set(self.overlay.as_deref().map_or_else(Usage::default, measure_folder));
+        self.ledger.measured_at.set(Some(Instant::now()));
+    }
+
+    /// Walks the folder again when the figures are stale.
+    fn refresh(&self) {
+        let due = self.ledger.measured_at.get().is_none_or(|at| at.elapsed() >= self.limits.resync_interval);
+        if due {
+            self.remeasure();
+        }
+    }
+
+    /// Marks the figures stale, after a change that may have gone only part of the way.
+    pub(crate) fn invalidate(&self) {
+        self.ledger.measured_at.set(None);
+    }
+
+    /// Makes sure `entries` more files or directories may be created and a file may grow from
+    /// `before` bytes to `after`, as one decision. A write that needs directories made for it asks
+    /// this before it makes the first of them, so a write that is refused leaves nothing behind.
+    pub(crate) fn admit(&self, entries: u64, before: u64, after: u64) -> std::io::Result<()> {
+        self.admit_entries(entries)?;
+        self.admit_change(before, after)
+    }
+
+    /// Makes sure a file may grow from `before` bytes to `after`.
+    pub(crate) fn admit_change(&self, before: u64, after: u64) -> std::io::Result<()> {
+        if self.overlay.is_none() || after <= before {
+            return Ok(());
+        }
+        self.refresh();
+        if self.ledger.usage.get().bytes.saturating_add(after - before) > self.limits.max_bytes {
+            return Err(std::io::Error::other(OVERLAY_FULL));
+        }
+        Ok(())
+    }
+
+    /// Notes that a file went from `before` bytes to `after`.
+    pub(crate) fn record_change(&self, before: u64, after: u64) {
+        let mut usage = self.ledger.usage.get();
+        usage.bytes = usage.bytes.saturating_sub(before).saturating_add(after);
+        self.ledger.usage.set(usage);
+    }
+
+    /// Makes sure `count` more files or directories may be created.
+    pub(crate) fn admit_entries(&self, count: u64) -> std::io::Result<()> {
+        if self.overlay.is_none() || count == 0 {
+            return Ok(());
+        }
+        self.refresh();
+        if self.ledger.usage.get().entries.saturating_add(count) > self.limits.max_entries {
+            return Err(std::io::Error::other(OVERLAY_CROWDED));
+        }
+        Ok(())
+    }
+
+    /// Notes that `count` files or directories were created.
+    pub(crate) fn record_entries(&self, count: u64) {
+        let mut usage = self.ledger.usage.get();
+        usage.entries = usage.entries.saturating_add(count);
+        self.ledger.usage.set(usage);
+    }
+
+    /// How many entries [`Self::create_directories`] would add for `directory`: the directories on
+    /// the way to it that are not there yet and lie inside the overlay.
+    pub(crate) fn missing_directories(&self, directory: &Path) -> u64 {
+        self.overlay.as_deref().map_or(0, |overlay| {
+            directory.ancestors().take_while(|ancestor| !ancestor.exists()).filter(|ancestor| *ancestor != overlay && ancestor.starts_with(overlay)).count()
+                as u64
+        })
+    }
+
+    /// Creates `directory` and every missing directory above it, counting the ones that lie inside
+    /// the overlay. Nothing is created when they would not fit.
+    pub(crate) fn create_directories(&self, directory: &Path) -> std::io::Result<()> {
+        let missing = self.missing_directories(directory);
+        self.admit_entries(missing)?;
+        if let Err(error) = std::fs::create_dir_all(directory) {
+            self.invalidate();
+            return Err(error);
+        }
+        self.record_entries(missing);
+        Ok(())
+    }
+
+    /// Creates the one directory `target`, whose parent exists (`Files.createDirectory`).
+    pub(crate) fn create_directory(&self, target: &Path) -> std::io::Result<()> {
+        self.admit_entries(1)?;
+        std::fs::create_dir(target)?;
+        self.record_entries(1);
+        Ok(())
+    }
+
+    /// Gives the overlay its own copy of a file of the skin root, if it fits, and answers its size.
+    pub(crate) fn copy_original(&self, original: &Path, target: &Path) -> std::io::Result<u64> {
+        let length = std::fs::metadata(original)?.len();
+        self.admit_entries(1)?;
+        self.admit_change(0, length)?;
+        copy_into_overlay(original, target)?;
+        self.record_entries(1);
+        self.record_change(0, length);
+        Ok(length)
+    }
+}
+
+/// Bytes and entries under `folder`. A symbolic link is one entry of no size and is not followed;
+/// whatever cannot be read is skipped.
+fn measure_folder(folder: &Path) -> Usage {
+    let mut usage = Usage::default();
+    let mut pending = vec![folder.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let Ok(metadata) = entry.metadata() else {
+                continue;
+            };
+            usage.entries += 1;
+            if metadata.is_dir() {
+                pending.push(entry.path());
+            } else {
+                usage.bytes = usage.bytes.saturating_add(metadata.len());
+            }
+        }
+    }
+    usage
+}
+
 /// How many files of the disk one interpreter's skin holds open.
 #[derive(Debug, Default)]
 pub(crate) struct OpenFiles(Rc<Cell<usize>>);
@@ -329,9 +547,12 @@ impl OpenFiles {
     }
 
     /// Takes `file` into the count, for as long as the value answered lives.
-    fn count(&self, file: File) -> CountedFile {
+    ///
+    /// `quota` is the overlay's, for a file the skin may write; a file of the skin root is opened
+    /// for reading only and has none.
+    fn count(&self, file: File, quota: Option<&Rc<OverlayQuota>>) -> CountedFile {
         self.0.set(self.0.get() + 1);
-        CountedFile { reader: BufReader::new(file), open_files: Rc::clone(&self.0) }
+        CountedFile { reader: BufReader::new(file), open_files: Rc::clone(&self.0), quota: quota.map(Rc::clone) }
     }
 }
 
@@ -339,6 +560,7 @@ impl OpenFiles {
 struct CountedFile {
     reader: BufReader<File>,
     open_files: Rc<Cell<usize>>,
+    quota: Option<Rc<OverlayQuota>>,
 }
 
 impl Drop for CountedFile {
@@ -396,12 +618,27 @@ impl Stream {
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<()> {
         match self {
             Self::Disk(file) => {
-                let reader = &mut file.reader;
+                let CountedFile { reader, quota, .. } = file;
                 if !reader.buffer().is_empty() {
                     let position = reader.stream_position()?;
                     reader.seek(SeekFrom::Start(position))?;
                 }
-                reader.get_mut().write_all(bytes)
+                let disk = reader.get_mut();
+                let Some(quota) = quota else {
+                    return disk.write_all(bytes);
+                };
+                if bytes.is_empty() {
+                    return Ok(());
+                }
+                let before = disk.metadata()?.len();
+                let after = before.max(disk.stream_position()?.saturating_add(bytes.len() as u64));
+                quota.admit_change(before, after)?;
+                if let Err(error) = disk.write_all(bytes) {
+                    quota.invalidate();
+                    return Err(error);
+                }
+                quota.record_change(before, after);
+                Ok(())
             }
             Self::Empty => Ok(()),
             Self::Log(shared) => {
@@ -703,7 +940,9 @@ pub(crate) fn write_target(paths: &SkinPaths, named: &str) -> Result<PathBuf, St
 }
 
 /// Opens the file a skin named (`RestrictedIoLib.openFile`), by the rules in the module
-/// documentation. Nothing is created or emptied for an open that is refused for want of room.
+/// documentation. Nothing is created or emptied for an open that is refused for want of room: the
+/// directories above the file, the file itself and the copy it may start from are admitted
+/// together before the first of them is made.
 fn open(lua: &Lua, shared: &LuaShared, named: &str, mode: Mode) -> Result<Handle, Fault> {
     let paths = &shared.paths;
     if mode.read {
@@ -713,34 +952,51 @@ fn open(lua: &Lua, shared: &LuaShared, named: &str, mode: Mode) -> Result<Handle
         }
         if mode.read_only() {
             shared.open_files.make_room(lua, &shared.meter)?;
-            return Ok(Handle::disk(shared.open_files.count(File::open(source)?)));
+            return Ok(Handle::disk(shared.open_files.count(File::open(source)?, None)));
         }
     }
 
     let target = write_target(paths, named).map_err(Fault::Refused)?;
     shared.open_files.make_room(lua, &shared.meter)?;
-    if let Some(parent) = target.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
+    let quota = &shared.quota;
     let keeps_content = mode.append || mode.read;
-    if keeps_content && !target.exists() {
-        let original = paths.script(named).map_err(|error| Fault::Refused(refusal(named, &error)))?;
-        if original.is_file() {
-            copy_into_overlay(&original, &target)?;
-        }
+    let mut present = std::fs::metadata(&target).ok().filter(Metadata::is_file).map(|metadata| metadata.len());
+    let original = if keeps_content && !target.exists() {
+        Some(paths.script(named).map_err(|error| Fault::Refused(refusal(named, &error)))?).filter(|original| original.is_file())
+    } else {
+        None
+    };
+    let copied = original.as_deref().map(std::fs::metadata).transpose()?.map_or(0, |metadata| metadata.len());
+    let directories = target.parent().map_or(0, |parent| quota.missing_directories(parent));
+    quota.admit(directories + u64::from(present.is_none()), 0, copied)?;
+    if let Some(parent) = target.parent() {
+        quota.create_directories(parent)?;
+    }
+    if let Some(original) = &original {
+        present = Some(quota.copy_original(original, &target)?);
+    }
+    let created = present.is_none();
+    if created {
+        quota.admit_entries(1)?;
     }
     let mut file = OpenOptions::new().read(true).write(true).create(true).truncate(!keeps_content).open(&target)?;
+    if created {
+        quota.record_entries(1);
+    }
+    if !keeps_content {
+        quota.record_change(present.unwrap_or(0), 0);
+    }
     if mode.append {
         file.seek(SeekFrom::End(0))?;
     }
-    Ok(Handle::disk(shared.open_files.count(file)))
+    Ok(Handle::disk(shared.open_files.count(file, Some(quota))))
 }
 
 /// Gives the overlay its own copy of a file of the skin root, so that appending to it or updating it
 /// changes the copy. The copy is a new file with this process's permissions, not the original's:
 /// a skin unpacked read-only must still get a copy that can be written. A copy that fails half way
 /// is removed, because a truncated copy would hide the whole original from then on.
-pub(crate) fn copy_into_overlay(original: &Path, target: &Path) -> std::io::Result<()> {
+fn copy_into_overlay(original: &Path, target: &Path) -> std::io::Result<()> {
     let copied = File::open(original).and_then(|mut source| {
         let mut copy = File::create(target)?;
         std::io::copy(&mut source, &mut copy)
@@ -757,15 +1013,19 @@ pub(crate) fn copy_into_overlay(original: &Path, target: &Path) -> std::io::Resu
 fn temporary(lua: &Lua, shared: &LuaShared) -> Result<Handle, Fault> {
     shared.open_files.make_room(lua, &shared.meter)?;
     let moment = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |since| since.as_nanos());
+    shared.quota.admit_entries(1)?;
     for _ in 0..TEMP_FILE_ATTEMPTS {
         let serial = TEMP_FILE_SERIAL.fetch_add(1, Ordering::Relaxed);
         let name = format!("{TEMP_FILE_PREFIX}{moment:x}-{serial}{TEMP_FILE_SUFFIX}");
         let target = write_target(&shared.paths, &name).map_err(Fault::Refused)?;
         if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent)?;
+            shared.quota.create_directories(parent)?;
         }
         match OpenOptions::new().read(true).write(true).create_new(true).open(&target) {
-            Ok(file) => return Ok(Handle::disk(shared.open_files.count(file))),
+            Ok(file) => {
+                shared.quota.record_entries(1);
+                return Ok(Handle::disk(shared.open_files.count(file, Some(&shared.quota))));
+            }
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
             Err(error) => return Err(error.into()),
         }

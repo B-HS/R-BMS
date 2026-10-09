@@ -482,7 +482,8 @@ fn denial(paths: &SkinPaths, named: &str) -> Option<String> {
 }
 
 /// `File.mkdir` (`Files.createDirectory`) on the tree the skin sees.
-fn make_directory(paths: &SkinPaths, named: &str) -> bool {
+fn make_directory(shared: &LuaShared, named: &str) -> bool {
+    let paths = &shared.paths;
     let Ok(logical) = paths.logical(named) else {
         return false;
     };
@@ -496,7 +497,13 @@ fn make_directory(paths: &SkinPaths, named: &str) -> bool {
     let Ok(target) = paths.writable(named) else {
         return false;
     };
-    target.parent().is_some_and(|directory| std::fs::create_dir_all(directory).is_ok()) && std::fs::create_dir(target).is_ok()
+    let Some(directory) = target.parent() else {
+        return false;
+    };
+    let quota = &shared.quota;
+    quota.admit_entries(quota.missing_directories(directory) + 1).is_ok()
+        && quota.create_directories(directory).is_ok()
+        && quota.create_directory(&target).is_ok()
 }
 
 /// Publishes the `luajava` facade.
@@ -508,7 +515,7 @@ pub(crate) fn install(lua: &Lua, shared: &Rc<LuaShared>) -> mlua::Result<()> {
     core.set("file_denied", lua.create_function(move |_, named: LuaString| Ok(denial(&files.paths, &named.to_string_lossy())))?)?;
 
     let files = Rc::clone(shared);
-    core.set("file_mkdir", lua.create_function(move |_, named: LuaString| Ok(make_directory(&files.paths, &named.to_string_lossy())))?)?;
+    core.set("file_mkdir", lua.create_function(move |_, named: LuaString| Ok(make_directory(&files, &named.to_string_lossy())))?)?;
 
     let files = Rc::clone(shared);
     core.set(

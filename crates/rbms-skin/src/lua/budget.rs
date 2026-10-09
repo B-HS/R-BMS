@@ -15,25 +15,52 @@ use std::time::{Duration, Instant};
 
 use mlua::{HookTriggers, Lua, VmState};
 
-/// Instructions one pass of the entry file may execute. Provisional until the dump tool has
-/// measured a real skin.
-const DEFAULT_LOAD_INSTRUCTIONS: u64 = 500_000_000;
+/// Instructions one pass of the entry file may execute.
+///
+/// Measured with `rbms-cli skin-dump --probe-budget` on the ten documents of a full skin pack: a
+/// pass needs 8 thousand to 36 thousand instructions, and the 1,914-object song select, the heaviest,
+/// needs 0.32 million. This is about three hundred times that. The ceiling is also how long a runaway
+/// loop freezes a scene change before it is cut. At five hundred million, a loop that only counted
+/// was cut after 0.5 seconds and one that allocated after 3 to 3.5; at a hundred million the same
+/// loops are cut in a fifth of that.
+const DEFAULT_LOAD_INSTRUCTIONS: u64 = 100_000_000;
 
-/// Microseconds one pass of the entry file may run for. Provisional.
+/// Microseconds one pass of the entry file may run for.
+///
+/// A whole load of the heaviest measured document takes under 25 milliseconds with a warm disk
+/// cache, most of it outside the interpreter. The ceiling is kept long on purpose: the wall clock
+/// also runs while the skin reads its few hundred files, which a cold disk can stretch to seconds,
+/// and the instruction ceiling above is what cuts a runaway loop promptly.
 const DEFAULT_LOAD_MICROS: u64 = 10_000_000;
 
-/// Function calls one frame may make. Provisional.
+/// Function calls one frame may make.
+///
+/// Calling each of the 1,817 function values of the song select once makes 1,801 calls, nine times
+/// under this ceiling. A renderer that calls a shared timer function once per object that uses it
+/// makes more calls than there are functions (about 2,200 for the same screen by the survey's
+/// count), and the rest of the ceiling is that headroom.
 const DEFAULT_FRAME_CALLS: u32 = 16_384;
 
-/// Microseconds the calls of one frame may spend inside Lua between them. Provisional, and
-/// deliberately several frames long: a call the meter refuses is answered with a stale value, so the
-/// ceiling is there to stop a runaway skin, not to hold a slow one to a frame rate.
+/// Microseconds the calls of one frame may spend inside Lua between them.
+///
+/// Calling every function value of the song select once takes 0.28 milliseconds on average, 0.34
+/// at the 99th percentile and 0.65 at the worst of a thousand frames, which is 75 to 180 times under
+/// this ceiling; no screen of the measured pack came near it. It is deliberately several frames long:
+/// a call the meter refuses is answered with a stale value, so the ceiling is there to stop a runaway
+/// skin, not to hold a slow one to a frame rate.
 const DEFAULT_FRAME_MICROS: u64 = 50_000;
 
-/// Instructions a single call made during a frame may execute. Provisional.
+/// Instructions a single call made during a frame may execute.
+///
+/// No call of the measured pack needed more than the counting resolution, about two thousand
+/// instructions, so this is some five hundred times what a call needs. A runaway call is cut after
+/// about a millisecond.
 const DEFAULT_CALL_INSTRUCTIONS: u64 = 1_000_000;
 
-/// Bytes the interpreter may allocate. Provisional.
+/// Bytes the interpreter may allocate.
+///
+/// The song select holds 6.1 MiB once it is loaded and every other measured screen under 2 MiB, so
+/// this is some forty times the heaviest.
 const DEFAULT_MEMORY_BYTES: usize = 256 * 1024 * 1024;
 
 /// Instructions between two visits of the hook. The hook is cheap but not free, so it accounts for
