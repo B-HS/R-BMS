@@ -1,11 +1,42 @@
 # rbms — 레퍼런스 구현 core PLAY 모듈 Rust 포팅 (PROCESS / 단일 출처)
 
-> 세션 인수인계 스냅샷은 `docs/HANDOFF.md`(2026-09-18, 스킨 시스템 작업 미커밋 상태)다. 이전 Phase G 중단 스냅샷은 `docs/history/2026-09-10-handoff-snapshot.md`와 `docs/history/2026-09-10-session-wrap-up.md`에 보존한다. Phase G·H는 완료했고 Phase R은 실제 키와 함께 추후 진행한다.
+> 세션 인수인계 스냅샷은 `docs/HANDOFF.md`(2026-10-09, Lua 스킨 호환 작업 구현 직전)다. 2026-09-18 스냅샷은 `docs/history/2026-09-18-handoff-snapshot.md`. 이전 Phase G 중단 스냅샷은 `docs/history/2026-09-10-handoff-snapshot.md`와 `docs/history/2026-09-10-session-wrap-up.md`에 보존한다. Phase G·H는 완료했고 Phase R은 실제 키와 함께 추후 진행한다.
 > 새 세션은 **이 문서부터** 읽는다. 현재 상태·아키텍처·실행법·할 일의 SSOT. (ai-process.md 원칙 1·14)
 > 베이스 룰: 프로젝트 작업 환경의 `AGENTS.md`와 llm-rules 전문(`ai-process`·`common`·`comments`·`git`·`security`)을 따른다. Rust 프로젝트에는 TS/JS 전용 규칙을 적용하지 않으며, 공통 원칙(문서는 `docs/`에 기록·정확한 이름·근본 해결·공식 문서 확인·검증 후 진행)은 그대로 적용한다.
-> 위치: `/Users/gkn/R-BMS`. 빌드 `cargo build`, 테스트 `cargo test --workspace`(2026-09-17 스킨 시스템 K5 게이트 실측 3,181 통과·0 실패; 실제 오디오 장치 테스트 등 ignored 3건). lint 는 이제 게이트다 — `cargo fmt --all --check` 와 `cargo clippy --workspace --all-targets --all-features -- -D warnings` 가 CI 필수 통과 조건이고 툴체인은 `rust-toolchain.toml` 로 `1.95.0` 고정. 실행 정본은 `README.md`다.
+> 위치: 저장소 루트(2026-10-09 기준 `/Users/hyunseokbyun/development/R-BMS`). 빌드 `cargo build`, 테스트 `cargo test --workspace`(2026-09-17 스킨 시스템 K5 게이트 실측 3,181 통과·0 실패; 실제 오디오 장치 테스트 등 ignored 3건). lint 는 이제 게이트다 — `cargo fmt --all --check` 와 `cargo clippy --workspace --all-targets --all-features -- -D warnings` 가 CI 필수 통과 조건이고 툴체인은 `rust-toolchain.toml` 로 `1.95.0` 고정. 실행 정본은 `README.md`다.
 > git: **dev(작업)/prod(배포) 브랜치 모델**(CI는 dev, 릴리스는 prod → `docs/ci-release.md`). **커밋 메시지에 co-author(Claude) 넣지 않음**(사용자 명시 지시), 작성자 `Hyunseok Byun <gumyoincirno@gmail.com>`. `target`·`Cargo.lock`·라이브러리 차트 커밋 금지(.gitignore).
 > 다음 할 일(로드맵)은 **`docs/roadmap.md`**, 백엔드 설계는 **`docs/backend/`**, 배포/CI는 **`docs/ci-release.md`**.
+
+---
+
+## 현재 작업 — 레퍼런스 형식 Lua 스킨 완전 호환과 기본 스킨 교체 (2026-10-09)
+
+> 사용자 지시(2026-10-09): beatoraja 용 풀 Lua 스킨 ModernChic 을 그대로 읽어 똑같이 그릴 수 있도록 스킨 체제를 전면 검토·수정하고, 그 스킨을 참조해 조금 단순화한 기본 스킨을 만든다. UI·레이아웃도 크게 바뀐다. 이전 세션의 스킨 작업(`steel-neon` 3세대와 혼합 합성 구조)은 사용자가 부적합하다고 판정해 삭제한다.
+> **사양(정본)**: `docs/plan/2026-10-09-lua-skin-compat.md` · **결정**: `docs/acknowledge/2026-10-09-lua-skin-compat-decisions.md` · **조사**: `docs/reference/skin-compat/README.md`(색인). 스킨 작업 전에 원본을 통독하지 말고 색인에서 절을 찾아 읽는다. 조사 문서는 코드가 바뀌면 같은 단위 안에서 갱신한다.
+> 운용: 위임은 Workflow 전용(Agent 단독 호출·general-purpose 금지), Opus 는 effort high 이하·Sonnet 은 xhigh 이하, 사양·판정·Git 은 메인 직접. 커밋은 웨이브가 게이트를 통과할 때마다 메인이 커밋·푸시한다(D7, 이 작업에 한해 §9 의 "사용자 요청 시에만"을 대체). 이름 금지 규칙은 폐지됐다(D2).
+> 자동 시작: 2026-10-09 21:54 KST 예약(세션 한정 예약이라 세션을 닫으면 사라진다). 예약이 사라졌으면 새 세션에서 사양 §10 "자동 시작 절차"대로 L3 웨이브 1 부터 시작한다.
+
+- [x] L1. 조사 — 외부 묶음의 화면별 요구 기능, 레퍼런스 구현의 스킨 엔진 계약(Lua 환경·객체·속성·화면별 로더), 현 엔진·렌더·앱 배선의 격차를 실제 파일 근거로 확보했다. Workflow `wf_43ad1f8d-42b`(조사자 14 + 종합 1 + 비판 1, 오류 0). 종합의 R-BMS 현황 26행과 레퍼런스 의미론 19항목은 비판 단계가 원본과 대조해 전부 일치를 확인했고, 작업 분해의 결함(소유 파일 누락·빠진 선행·검증 수단 부재)과 빠진 기능 9건·고유 기능 구멍 15건은 `99-critique.md`에 있다.
+- [x] L1-b. 조사 결과 영속화(사용자 지시 2026-10-09) — 보고서 16개 전문(1.5MB)과 색인 `README.md`를 저장했다(미커밋: 보고서에 레퍼런스·외부 묶음 이름이 있어 이름 규칙 결정 대기). 원 지시: 조사 보고서 전문과 색인을 `docs/reference/skin-compat/`에 저장해 이후 세션이 원본을 다시 통독하지 않게 한다. 색인에는 보고서별 다루는 범위와 찾는 법을 적는다. 저장한 조사 문서는 살아 있는 문서로 관리한다: L3~L5 의 각 구현 단위가 끝날 때 그 단위가 바꾼 코드를 다루는 절(특히 현 엔진·렌더·앱 현황과 격차 표)을 같은 단위 안에서 갱신하고, 문서 상단에 최종 갱신일과 대응 단계를 적는다.
+- [x] L2. 사양·결정 확정 — 사용자 결정 7건(D1 기본 스킨 자작, D2 이름 규칙 폐지, D3 구 스킨 삭제, D4 영어·사이드메뉴 2패널, D5 mp4 포함, D6 캡처 없이 좌표 대조, D7 웨이브별 커밋·푸시)을 받아 사양과 결정 문서를 기록했다.
+- [ ] L3. 엔진 구현 — 사양 §6 의 웨이브 1~2.
+  - [ ] 웨이브 1 — 철거와 기반(W1-1a~W1-10): 구 번들·혼합 합성 삭제, Lua 5.2 전환, 타이머 µs·stretch·오프셋 정합, 장면 시계, GPU 논리 크기 런타임화, 해상도 설정, 캡처 하니스, START/SELECT.
+  - [ ] 웨이브 2 — Lua 런타임과 로더(W2-0~W2-9): 환경·io 오버레이·luajava, `SkinHost`·`main_state`, Lua 값 변환, 2패스 로드, 덤프 CLI, 픽스처, 스킨 팩 폴더 지정, 결정 화면 정지 프레임.
+- [ ] L4. 화면·UI 전환 — 사양 §6 의 웨이브 3~7.
+  - [ ] 웨이브 3 — 공통 렌더 의미론과 결정 화면(W3-0~W3-7).
+  - [ ] 웨이브 4 — 결과와 코스 결과(W4-1~W4-7).
+  - [ ] 웨이브 5 — 선곡(W5-1~W5-7).
+  - [ ] 웨이브 6 — 플레이 SP·DP(W6-1~W6-8).
+  - [ ] 웨이브 7 — 동영상과 비트맵 폰트(W7-1~W7-4).
+- [ ] L5. 기본 스킨 — 사양 §6 의 웨이브 8(W8-1~W8-6): 스킨 팩 선택과 SKIN 탭, 자작 기본 스킨 `assets/skins/rbms-default/`, 내장·설치, 폴백 정리, 테스트 재편.
+- [ ] L6. 검증 — 웨이브마다 게이트(fmt, clippy `--all-targets --all-features -D warnings`, `cargo test --workspace`, `git diff --check`)와 캡처를 메인이 직접 확인한다. 최종으로 덤프 도구의 pcall 실패 0 과 화면별 캡처를 `m2`~`m5` 레이아웃과 대조한다.
+- [ ] L7. 문서·이력 — 웨이브마다 조사 문서(`r1`~`r3`, `00-synthesis`)와 이 체크리스트를 갱신하고, 마지막에 `docs/skin.md`·history·QA·HANDOFF 를 정리한다.
+
+---
+
+## 완료 — 실행 스크립트 `start.sh` 재작성 (2026-10-09)
+
+- [x] 루트 `start.sh`(gitignore 대상, 로컬 전용) 작성 — 인자 없이 또는 곡 폴더·차트·옵션을 넘기면 `cargo build --release -p rbms-player` 후 바이너리를 호출 위치 기준으로 실행하고, `./start.sh web` 은 `web/.env.local` 존재를 확인한 뒤 `bun install` → `bun run dev` 를 실행한다. 검증: `bash -n`·`shellcheck` 통과, 릴리스 빌드 1분 성공(`target/release/rbms-player`). GUI 창 기동과 웹 서버 기동은 실행하지 않았다.
 
 ---
 
