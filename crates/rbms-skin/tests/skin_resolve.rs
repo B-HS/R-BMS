@@ -169,13 +169,7 @@ fn a_draw_over_nothing_picks_nothing() {
 #[test]
 fn custom_files_carry_the_directory_scan_and_the_random_entry() {
     let document = SkinDef {
-        filepath: vec![Filepath {
-            category: "layout".to_owned(),
-            name: "Gauge".to_owned(),
-            path: "gauge/*.png".to_owned(),
-            def: Some("Random".to_owned()),
-            scope: None,
-        }],
+        filepath: vec![Filepath { category: "layout".to_owned(), name: "Gauge".to_owned(), path: "gauge/*.png".to_owned(), def: Some("Random".to_owned()) }],
         ..SkinDef::default()
     };
     let root = minimal_root();
@@ -191,7 +185,7 @@ fn custom_files_carry_the_directory_scan_and_the_random_entry() {
 #[test]
 fn a_custom_file_whose_pattern_matches_nothing_offers_only_random() {
     let document = SkinDef {
-        filepath: vec![Filepath { category: String::new(), name: "Nothing".to_owned(), path: "gauge/*.jpg".to_owned(), def: None, scope: None }],
+        filepath: vec![Filepath { category: String::new(), name: "Nothing".to_owned(), path: "gauge/*.jpg".to_owned(), def: None }],
         ..SkinDef::default()
     };
     let root = minimal_root();
@@ -228,7 +222,7 @@ fn a_random_slot_resolves_the_same_way_for_the_same_seed() {
 #[test]
 fn a_slot_with_no_candidates_contributes_no_entry() {
     let document = SkinDef {
-        filepath: vec![Filepath { category: String::new(), name: "Nothing".to_owned(), path: "gauge/*.jpg".to_owned(), def: None, scope: None }],
+        filepath: vec![Filepath { category: String::new(), name: "Nothing".to_owned(), path: "gauge/*.jpg".to_owned(), def: None }],
         ..SkinDef::default()
     };
     let root = minimal_root();
@@ -239,13 +233,7 @@ fn a_slot_with_no_candidates_contributes_no_entry() {
 #[test]
 fn a_documents_suggestion_names_the_file_when_the_player_has_chosen_nothing() {
     let document = SkinDef {
-        filepath: vec![Filepath {
-            category: String::new(),
-            name: "Gauge".to_owned(),
-            path: "gauge/*.png".to_owned(),
-            def: Some("hard.png".to_owned()),
-            scope: None,
-        }],
+        filepath: vec![Filepath { category: String::new(), name: "Gauge".to_owned(), path: "gauge/*.png".to_owned(), def: Some("hard.png".to_owned()) }],
         ..SkinDef::default()
     };
     let root = minimal_root();
@@ -258,13 +246,7 @@ fn a_documents_suggestion_names_the_file_when_the_player_has_chosen_nothing() {
 fn a_built_filemap_key_substitutes_into_the_pattern_it_came_from() {
     let root = minimal_root();
     let document = SkinDef {
-        filepath: vec![Filepath {
-            category: String::new(),
-            name: "Gauge".to_owned(),
-            path: "gauge/*.png".to_owned(),
-            def: Some("hard.png".to_owned()),
-            scope: None,
-        }],
+        filepath: vec![Filepath { category: String::new(), name: "Gauge".to_owned(), path: "gauge/*.png".to_owned(), def: Some("hard.png".to_owned()) }],
         ..SkinDef::default()
     };
     let files = enumerate_custom_files(&document, &root, &root);

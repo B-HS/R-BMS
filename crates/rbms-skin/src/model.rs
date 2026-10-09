@@ -12,8 +12,8 @@ mod objects;
 
 pub use graphs::{BpmGraph, GaugeGraph, HitErrorVisualizer, JudgeGraph, TimingDistributionGraph, TimingVisualizer};
 pub use objects::{
-    BgaDef, DensityGraph, FloatValueDef, GaugeDef, GraphDef, HiddenCover, ImageDef, ImageSet, JudgeDef, LiftCover, NoteSet, PmChara, Practice,
-    SkinConfigurationProperty, SkinPreview, SliderDef, SongList, TextDef, ValueDef,
+    BgaDef, FloatValueDef, GaugeDef, GraphDef, HiddenCover, ImageDef, ImageSet, JudgeDef, LiftCover, NoteSet, PmChara, Practice, SkinConfigurationProperty,
+    SkinPreview, SliderDef, SongList, TextDef, ValueDef,
 };
 
 use std::fmt;
@@ -127,10 +127,6 @@ pub struct PropertyDef {
     pub name: String,
     pub item: Vec<PropertyItem>,
     pub def: Option<String>,
-    /// Which set of stored choices this row belongs to. [`SCOPE_BUNDLE`] shares the player's answer
-    /// across every document of the bundle; anything else, including a document that writes none,
-    /// keeps it to this document.
-    pub scope: Option<String>,
 }
 
 /// One item of a [`PropertyDef`], naming the option id it turns on.
@@ -149,8 +145,6 @@ pub struct Filepath {
     pub name: String,
     pub path: String,
     pub def: Option<String>,
-    /// Which set of stored choices this slot belongs to, read the same way as [`PropertyDef::scope`].
-    pub scope: Option<String>,
 }
 
 /// One nudge slot the player adjusts, and which of its axes the document allows.
@@ -166,8 +160,6 @@ pub struct OffsetDef {
     pub h: bool,
     pub r: bool,
     pub a: bool,
-    /// Which set of stored choices this nudge belongs to, read the same way as [`PropertyDef::scope`].
-    pub scope: Option<String>,
 }
 
 /// An image file the document's objects draw from.
@@ -295,7 +287,6 @@ impl<'de> Deserialize<'de> for DestinationOption {
 #[serde(default)]
 pub struct Destination {
     pub id: String,
-    pub layer: SkinLayer,
     pub blend: i32,
     pub filter: i32,
     pub timer: Option<PropertyRef>,
@@ -316,7 +307,6 @@ impl Default for Destination {
     fn default() -> Self {
         Self {
             id: String::new(),
-            layer: SkinLayer::Foreground,
             blend: 0,
             filter: 0,
             timer: None,
@@ -355,56 +345,12 @@ pub struct Animation {
     pub angle: Option<i32>,
 }
 
-/// How a skin document is composited with the native screen.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SkinComposition {
-    #[default]
-    Replace,
-    Overlay,
-    Layered,
-}
-
-/// Which native-layout phase draws one destination in a layered document.
-///
-/// Existing documents keep their foreground order. A layered document explicitly puts
-/// background decoration behind native notes and text.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SkinLayer {
-    Background,
-    #[default]
-    Foreground,
-}
-
-/// The [`PropertyDef::scope`] value that shares a customisation row across a whole bundle.
-pub const SCOPE_BUNDLE: &str = "bundle";
-
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default)]
-pub struct ResultSkin {
-    pub replace: Vec<String>,
-}
-
-/// One rectangle a document offers the player to click, named by the object that shapes it and the
-/// native action it stands for.
-///
-/// An rbms extension: the reference dispatches a document's own `click` events instead, which this
-/// build does not, so a document says which built-in action an object takes the place of.
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default)]
-pub struct HotspotDef {
-    pub id: String,
-    pub action: String,
-}
-
 /// A whole skin document.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct SkinDef {
     #[serde(rename = "type")]
     pub skin_type: i32,
-    pub composition: SkinComposition,
     pub name: String,
     pub author: String,
     pub w: i32,
@@ -436,8 +382,6 @@ pub struct SkinDef {
     pub hiterrorvisualizer: Vec<HitErrorVisualizer>,
     pub timingvisualizer: Vec<TimingVisualizer>,
     pub timingdistributiongraph: Vec<TimingDistributionGraph>,
-    pub densitygraph: Vec<DensityGraph>,
-    pub result: Option<ResultSkin>,
     pub note: Option<NoteSet>,
     pub gauge: Option<GaugeDef>,
     #[serde(rename = "hiddenCover")]
@@ -456,10 +400,6 @@ pub struct SkinDef {
     pub custom_events: Vec<CustomEvent>,
     #[serde(rename = "customTimers")]
     pub custom_timers: Vec<CustomTimer>,
-    /// Which bundles of native output this document draws in place of. [`ResultSkin::replace`] is
-    /// the older spelling of the same thing and is read as part of the same set.
-    pub replace: Vec<String>,
-    pub hotspot: Vec<HotspotDef>,
     pub destination: Vec<Destination>,
 }
 
@@ -467,7 +407,6 @@ impl Default for SkinDef {
     fn default() -> Self {
         Self {
             skin_type: SKIN_TYPE_UNSET,
-            composition: SkinComposition::Replace,
             name: String::new(),
             author: String::new(),
             w: DEFAULT_SKIN_WIDTH,
@@ -499,8 +438,6 @@ impl Default for SkinDef {
             hiterrorvisualizer: Vec::new(),
             timingvisualizer: Vec::new(),
             timingdistributiongraph: Vec::new(),
-            densitygraph: Vec::new(),
-            result: None,
             note: None,
             gauge: None,
             hidden_cover: Vec::new(),
@@ -514,8 +451,6 @@ impl Default for SkinDef {
             skin_select: None,
             custom_events: Vec::new(),
             custom_timers: Vec::new(),
-            replace: Vec::new(),
-            hotspot: Vec::new(),
             destination: Vec::new(),
         }
     }

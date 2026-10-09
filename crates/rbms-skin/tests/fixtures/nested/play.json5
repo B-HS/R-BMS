@@ -42,7 +42,6 @@
             ],
         },
     ],
-    replace: ['field', 'judge'],
     destination: [
         { id: 'notes', dst: [{ time: 0, x: 34, y: 0, w: 320, h: 500 }] },
         { id: 'judge-1p', dst: [{ time: 0, x: 194, y: 300, w: 120, h: 30 }] },

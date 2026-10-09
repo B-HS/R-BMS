@@ -1,18 +1,13 @@
-//! The destinations a document nests inside its repeating objects, the native output it declares
-//! itself a replacement for, the rectangles it offers the player to click, and the scope a
-//! customisation row is stored under.
+//! The destinations a document nests inside its repeating objects.
 //!
-//! The rules asserted here are the reference implementation's for the parts it has -- a note set's
-//! bar lines, a judgement pop-up's images and counts, a song wheel's per-slot objects, and the
-//! relative flag the play loader sets on judgement counts alone. Replacement bundles, hotspots and
-//! scope are this player's own additions, so their rules are the ones the skin system specification
-//! sets out rather than anyone else's.
+//! The rules asserted here are the reference implementation's -- a note set's bar lines, a
+//! judgement pop-up's images and counts, a song wheel's per-slot objects, and the relative flag the
+//! play loader sets on judgement counts alone.
 
 use std::path::{Path, PathBuf};
 
 use rbms_model::Mode;
-use rbms_skin::loader::{HOTSPOT_ACTIONS, LoadedSkin, NamedTrack, SkinLoadOptions, SkinUserConfig, load_header, load_skin};
-use rbms_skin::model::SCOPE_BUNDLE;
+use rbms_skin::loader::{LoadedSkin, NamedTrack, SkinLoadOptions, SkinUserConfig, load_skin};
 
 /// A seed every wildcard test pins, so a draw is the same on every machine.
 const TEST_SEED: u64 = 7;
@@ -49,7 +44,7 @@ fn load_play() -> LoadedSkin {
     load_fixture("play.json5", Mode::BEAT_7K, &SkinUserConfig::default())
 }
 
-/// The browser fixture, which carries the song wheel and the hotspots.
+/// The browser fixture, which carries the song wheel.
 fn load_select() -> LoadedSkin {
     load_fixture("select.json5", Mode::BEAT_7K, &SkinUserConfig::default())
 }
@@ -129,58 +124,6 @@ fn a_document_with_no_repeating_objects_assembles_no_nested_tracks() {
     assert!(skin.nested.note_time.is_empty());
     assert!(skin.nested.judge.is_empty());
     assert!(skin.nested.songlist.is_none());
-}
-
-#[test]
-fn an_unknown_hotspot_action_is_dropped_and_warned_about() {
-    let skin = load_select();
-    let actions: Vec<&str> = skin.def.hotspot.iter().map(|spot| spot.action.as_str()).collect();
-    assert_eq!(actions, ["search", "sort"], "only the actions this build acts on survive");
-    let warning = skin.warnings.iter().find(|warning| warning.contains("teleport")).expect("the unknown action should be warned about");
-    assert!(warning.contains("btn-teleport"), "the warning should name the object, got {warning:?}");
-}
-
-#[test]
-fn every_action_the_specification_lists_is_one_the_loader_keeps() {
-    for action in ["search", "sort", "folders", "tables", "records", "settings", "modal-replay", "modal-close"] {
-        assert!(HOTSPOT_ACTIONS.contains(&action), "{action} should be an action a document may declare");
-    }
-    assert_eq!(HOTSPOT_ACTIONS.len(), 8, "the list is closed; a new action belongs in the specification first");
-}
-
-#[test]
-fn the_replacement_bundles_are_the_union_of_both_spellings() {
-    let skin = load_fixture("result.json5", Mode::BEAT_7K, &SkinUserConfig::default());
-    let names: Vec<&str> = skin.replace_names().iter().map(String::as_str).collect();
-    assert_eq!(names, ["grade", "graphs", "score"], "the older result spelling is read alongside the document's own list");
-}
-
-#[test]
-fn a_document_that_names_no_replacements_replaces_nothing() {
-    let skin = load_select();
-    assert_eq!(skin.replace_names().len(), 3, "the browser fixture names three and no more");
-    let play = load_play();
-    assert!(play.replace_names().contains("field"));
-    assert!(!play.replace_names().contains("list"));
-}
-
-#[test]
-fn the_header_carries_the_scope_of_every_kind_of_customisation_row() {
-    let user = SkinUserConfig::default();
-    let root = nested_root();
-    let header = load_header(&root.join("select.json5"), seeded(&root, &user, Mode::BEAT_7K)).expect("the browser fixture header should read");
-
-    assert_eq!(header.properties[0].scope.as_deref(), Some(SCOPE_BUNDLE), "a row the document shares across the bundle says so");
-    assert_eq!(header.properties[1].scope.as_deref(), None, "and a row that says nothing stays this document's own");
-    assert_eq!(header.offsets[0].scope.as_deref(), Some(SCOPE_BUNDLE));
-    assert_eq!(header.custom_files[0].scope.as_deref(), Some(SCOPE_BUNDLE));
-}
-
-#[test]
-fn a_load_carries_the_same_file_slot_scope_the_header_reported() {
-    let skin = load_select();
-    assert_eq!(skin.custom_files[0].scope.as_deref(), Some(SCOPE_BUNDLE));
-    assert_eq!(skin.def.filepath[0].scope.as_deref(), Some(SCOPE_BUNDLE));
 }
 
 #[test]

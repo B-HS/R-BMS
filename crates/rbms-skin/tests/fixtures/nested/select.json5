@@ -1,5 +1,4 @@
-// A browser document with a five-slot song wheel, bundle-scoped customisation rows and the
-// hotspots that stand in for the native buttons.
+// A browser document with a five-slot song wheel and customisation rows of every kind.
 {
     type: 5,
     name: 'fixture select',
@@ -16,7 +15,6 @@
                 { name: '2p', op: 901 },
             ],
             def: '1p',
-            scope: 'bundle',
         },
         {
             category: 'customize',
@@ -28,14 +26,8 @@
             def: 'on',
         },
     ],
-    filepath: [{ category: 'customize', name: 'Notes', path: 'images/*.png', def: 'Random', scope: 'bundle' }],
-    offset: [{ category: 'customize', name: 'Bga', id: 40, x: true, y: true, scope: 'bundle' }],
-    replace: ['list', 'detail', 'topbar'],
-    hotspot: [
-        { id: 'btn-search', action: 'search' },
-        { id: 'btn-sort', action: 'sort' },
-        { id: 'btn-teleport', action: 'teleport' },
-    ],
+    filepath: [{ category: 'customize', name: 'Notes', path: 'images/*.png', def: 'Random' }],
+    offset: [{ category: 'customize', name: 'Bga', id: 40, x: true, y: true }],
     songlist: {
         id: 'song-list',
         center: 2,

@@ -25,7 +25,7 @@ use serde_json::Value;
 
 use crate::SkinError;
 use crate::dst::{DestinationTrack, OffsetSource, SkinOffset};
-use crate::model::{Destination, Filepath, OffsetDef, PropertyDef, SKIN_TYPE_UNSET, SkinDef, SkinLayer};
+use crate::model::{Destination, Filepath, OffsetDef, PropertyDef, SKIN_TYPE_UNSET, SkinDef};
 use crate::resolve::{CustomFile, Draw, FileResolver, build_filemap, contained, enumerate_custom_files, pattern_for};
 
 /// Bytes a document may be before the loader refuses to parse it.
@@ -56,14 +56,6 @@ const DEFAULT_MAX_FRAME_MICROS: u64 = 4_000;
 
 /// The byte-order mark a document authored on Windows often starts with.
 const BYTE_ORDER_MARK: char = '\u{feff}';
-
-/// The native actions a document's hotspot may declare itself the stand-in for.
-///
-/// An rbms extension rather than a reference field: the reference dispatches a document object's own
-/// `click` event, which this build does not, so a document names the built-in action its rectangle
-/// takes the place of. A name outside this list is warned about and dropped, because a rectangle
-/// nobody can act on is a silent dead spot on the screen.
-pub const HOTSPOT_ACTIONS: &[&str] = &["folders", "modal-close", "modal-replay", "records", "search", "settings", "sort", "tables"];
 
 /// The first line and column of a file, as both parsers count them once normalised.
 #[cfg(feature = "json5")]
@@ -263,7 +255,6 @@ pub struct SkinHeader {
 #[derive(Debug, Clone)]
 pub struct NamedTrack {
     pub id: String,
-    pub layer: SkinLayer,
     pub track: DestinationTrack,
 }
 
@@ -335,7 +326,6 @@ pub struct LoadedSkin {
     pub nested: NestedTracks,
     /// Everything that went wrong without costing the skin.
     pub warnings: Vec<String>,
-    replace: BTreeSet<String>,
     resolver: FileResolver,
     known_option: fn(i32) -> bool,
     #[cfg(feature = "lua")]
@@ -358,16 +348,6 @@ impl LoadedSkin {
     /// The pattern-to-file-name substitutions this load resolves paths through.
     pub fn filemap(&self) -> &BTreeMap<String, String> {
         self.resolver.filemap()
-    }
-
-    /// Which bundles of native output this document draws in place of.
-    ///
-    /// The document's own `replace` list and the older `result.replace` spelling name the same
-    /// thing, so both are read and the union is what a screen asks about. A name here is a claim
-    /// rather than a guarantee: the caller still checks that every object the bundle needs was
-    /// compiled before it stops drawing the native content.
-    pub fn replace_names(&self) -> &BTreeSet<String> {
-        &self.replace
     }
 
     /// The file a document-relative path names, checked to be inside the skin root.
@@ -422,7 +402,7 @@ fn build_slot(skin: &mut LoadedSkin, what: &str, destination: &Destination, rela
             DestinationTrack::default()
         }
     };
-    Ok(NamedTrack { id: destination.id.clone(), layer: destination.layer, track })
+    Ok(NamedTrack { id: destination.id.clone(), track })
 }
 
 /// Assembles a whole nested list, one entry per slot the document declared.
@@ -476,16 +456,6 @@ fn build_nested(skin: &mut LoadedSkin) -> Result<(), SkinError> {
     skin.def.songlist = songlist;
 
     Ok(())
-}
-
-/// Drops the hotspots whose action this build has no meaning for, warning about each one.
-fn keep_known_hotspots(skin: &mut LoadedSkin) {
-    let declared = std::mem::take(&mut skin.def.hotspot);
-    let (known, unknown): (Vec<_>, Vec<_>) = declared.into_iter().partition(|spot| HOTSPOT_ACTIONS.contains(&spot.action.as_str()));
-    for spot in unknown {
-        skin.warnings.push(format!("hotspot {:?} names the unknown action {:?}", spot.id, spot.action));
-    }
-    skin.def.hotspot = known;
 }
 
 /// Reads a document as text, refusing one that is over the ceiling.
@@ -631,7 +601,6 @@ pub fn load_skin(path: &Path, options: SkinLoadOptions<'_>) -> Result<LoadedSkin
     branch::transform(&mut value, &mut branch::BranchContext::new(&enabled, &mut include, &mut warnings))?;
 
     let def = from_value(&path, value)?;
-    let replace = def.replace.iter().chain(def.result.iter().flat_map(|result| result.replace.iter())).cloned().collect();
 
     let mut skin = LoadedSkin {
         path,
@@ -646,7 +615,6 @@ pub fn load_skin(path: &Path, options: SkinLoadOptions<'_>) -> Result<LoadedSkin
         destinations: Vec::new(),
         nested: NestedTracks::default(),
         warnings,
-        replace,
         resolver,
         known_option: options.known_option,
         #[cfg(feature = "lua")]
@@ -674,12 +642,10 @@ pub fn load_skin(path: &Path, options: SkinLoadOptions<'_>) -> Result<LoadedSkin
         }
     }
 
-    keep_known_hotspots(&mut skin);
-
     let destinations = std::mem::take(&mut skin.def.destination);
     for destination in &destinations {
         match skin.build_track(destination, false) {
-            Ok(Some(track)) => skin.destinations.push(NamedTrack { id: destination.id.clone(), layer: destination.layer, track }),
+            Ok(Some(track)) => skin.destinations.push(NamedTrack { id: destination.id.clone(), track }),
             Ok(None) => {}
             Err(error @ SkinError::LuaUnavailable) => return Err(error),
             Err(error) => skin.warnings.push(format!("object {:?} was skipped: {error}", destination.id)),
