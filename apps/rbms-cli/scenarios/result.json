@@ -1,0 +1,13 @@
+{
+  "static_screen": "result",
+  "booleans": {
+    "90": true,
+    "91": false
+  },
+  "integers": {
+    "370": 5
+  },
+  "timers": {
+    "1": 0
+  }
+}

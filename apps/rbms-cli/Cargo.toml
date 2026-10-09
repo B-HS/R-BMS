@@ -16,6 +16,9 @@ rbms-chart = { workspace = true }
 rbms-config = { workspace = true }
 rbms-library = { workspace = true }
 rbms-store = { workspace = true }
+rbms-skin = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 [lints]
 workspace = true

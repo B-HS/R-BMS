@@ -1,0 +1,20 @@
+{
+  "static_screen": "result",
+  "booleans": {
+    "90": true,
+    "91": false,
+    "290": true
+  },
+  "integers": {
+    "370": 5
+  },
+  "texts": {
+    "150": "Course Stage 1",
+    "151": "Course Stage 2",
+    "152": "Course Stage 3",
+    "153": "Course Stage 4"
+  },
+  "timers": {
+    "1": 0
+  }
+}

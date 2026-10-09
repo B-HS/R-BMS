@@ -1,9 +1,11 @@
 //! Headless companion to the player: inspect a chart, read the player's configuration, scan a song
-//! folder, or query the local score book. The config, scan and scores subcommands drive
-//! `rbms-config`, `rbms-library` and `rbms-store` without a window, which is how those crates get
-//! exercised outside the GUI.
+//! folder, query the local score book, or dump a skin pack. The config, scan, scores and skin-dump
+//! subcommands drive `rbms-config`, `rbms-library`, `rbms-store` and `rbms-skin` without a window,
+//! which is how those crates get exercised outside the GUI.
 
 #![forbid(unsafe_code)]
+
+mod skin_dump;
 
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -17,7 +19,10 @@ const USAGE: &str = "usage:\n  \
     rbms-cli <chart.bms|.bme|.bml|.pms|.bmson>   chart summary\n  \
     rbms-cli scan <dir>                   scan a song folder\n  \
     rbms-cli config <settings.ron>        read (and migrate) the player configuration\n  \
-    rbms-cli scores <scores.ron> [--md5 <md5>]   local score book";
+    rbms-cli scores <scores.ron> [--md5 <md5>]   local score book\n  \
+    rbms-cli skin-dump <skin pack folder|document>   load skins without a game and report what they came to\n      \
+    [--scenario <json>] [--overlay <folder>] [--frames <N>] [--seed <n>] [--json] [--probe-budget]\n      \
+    [--strict] [--allow-failure <document>]...   fail unless every document but the allowed ones comes out clean";
 
 /// Exit code for a usage error, matching the code the bare chart mode has always returned.
 const EXIT_USAGE: u8 = 2;
@@ -44,6 +49,10 @@ fn run(args: impl Iterator<Item = String>) -> ExitCode {
         },
         Some("scores") => match parse_scores_args(&args[1..]) {
             Ok((path, md5)) => scores_command(&path, md5.as_deref()),
+            Err(e) => usage_error(&e),
+        },
+        Some("skin-dump") => match skin_dump::parse_args(&args[1..]) {
+            Ok(parsed) => skin_dump::run(&parsed),
             Err(e) => usage_error(&e),
         },
         Some(chart) => chart_command(chart),

@@ -1,0 +1,9 @@
+{
+  "static_screen": "select",
+  "booleans": {
+    "2": true
+  },
+  "timers": {
+    "1": 0
+  }
+}
