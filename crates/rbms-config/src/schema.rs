@@ -13,6 +13,7 @@ use crate::audio::AudioOptions;
 use crate::judge::ScoreTarget;
 use crate::options::{FixHiSpeed, LaneOption, PlayEscape};
 use crate::sort::SortMode;
+use crate::window::{WindowMode, WindowResolution};
 
 /// Schema version this build writes. A file without a `schema_version` field is
 /// [`LEGACY_SCHEMA_VERSION`] and is migrated on load.
@@ -551,6 +552,12 @@ pub struct DisplayOptions {
     pub judge_text_y: f32,
     /// Fit the logical screen inside the window at its own aspect ratio rather than stretching it.
     pub letterbox: bool,
+    /// Inner size the window opens at, and is put back to when the mode returns to a window.
+    #[serde(with = "crate::window::window_resolution_token")]
+    pub window_resolution: WindowResolution,
+    /// Whether the window is an ordinary one or covers its whole monitor.
+    #[serde(with = "crate::window::window_mode_token")]
+    pub window_mode: WindowMode,
     /// Lay a five-key chart out on its own lane widths rather than on the seven-key ones.
     pub five_key_layout: bool,
     pub debug: bool,
@@ -568,9 +575,20 @@ impl Default for DisplayOptions {
             show_white_number: false,
             judge_text_y: JUDGE_TEXT_Y_FROM_SKIN,
             letterbox: false,
+            window_resolution: WindowResolution::default(),
+            window_mode: WindowMode::default(),
             five_key_layout: false,
             debug: false,
         }
+    }
+}
+
+impl DisplayOptions {
+    /// Whether the logical screen is fitted inside the window at its own proportions. A window that
+    /// covers a monitor takes the monitor's shape, which is not always 16:9, so it is always fitted;
+    /// an ordinary window follows the LETTERBOX row.
+    pub fn fits_screen_shape(&self) -> bool {
+        self.letterbox || self.window_mode == WindowMode::Borderless
     }
 }
 

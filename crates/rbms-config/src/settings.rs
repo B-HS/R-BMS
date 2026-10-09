@@ -31,6 +31,7 @@ use crate::schema::{
     PREVIEW_VOLUME_MIN, PREVIEW_VOLUME_STEP, SKIN_SCREEN_LABELS, TOTAL_FROM_CHART, TOTAL_STEP, skin_screen_label,
 };
 use crate::sort::SortMode;
+use crate::window::{WINDOW_MODE_LABELS, WINDOW_RESOLUTION_LABELS, WindowMode, WindowResolution};
 
 /// Value of a row that is on.
 pub const ON_VALUE: &str = "ON";
@@ -190,6 +191,8 @@ pub enum SettingId {
     WhiteNumber,
     JudgeTextY,
     Letterbox,
+    WindowResolution,
+    WindowMode,
     Sort,
     FavoriteOnly,
     PreviewVolume,
@@ -221,7 +224,7 @@ pub enum SettingId {
 }
 
 /// Rows the settings screen has.
-pub const SETTING_COUNT: usize = 82;
+pub const SETTING_COUNT: usize = 84;
 
 impl SettingId {
     /// Every row, in declaration order.
@@ -280,6 +283,8 @@ impl SettingId {
         SettingId::WhiteNumber,
         SettingId::JudgeTextY,
         SettingId::Letterbox,
+        SettingId::WindowResolution,
+        SettingId::WindowMode,
         SettingId::Sort,
         SettingId::FavoriteOnly,
         SettingId::PreviewVolume,
@@ -575,7 +580,27 @@ pub const SETTINGS: &[SettingDescriptor] = &[
         SettingKind::Percent { min: JUDGE_TEXT_Y_MIN, max: JUDGE_TEXT_Y_MAX, step: JUDGE_TEXT_Y_STEP },
         "Where the judgement text sits, or 0 for the skin's own place",
     ),
-    row(SettingId::Letterbox, SettingTab::Display, "LETTERBOX", SettingKind::Toggle, "Keep the screen's aspect ratio inside the window"),
+    row(
+        SettingId::Letterbox,
+        SettingTab::Display,
+        "LETTERBOX",
+        SettingKind::Toggle,
+        "Keep the screen's aspect ratio inside the window; a borderless window always does",
+    ),
+    row(
+        SettingId::WindowResolution,
+        SettingTab::Display,
+        "RESOLUTION",
+        SettingKind::Cycle { values: WINDOW_RESOLUTION_LABELS },
+        "Size of the window; a borderless window takes its monitor's size instead",
+    ),
+    row(
+        SettingId::WindowMode,
+        SettingTab::Display,
+        "WINDOW MODE",
+        SettingKind::Cycle { values: WINDOW_MODE_LABELS },
+        "An ordinary window or one covering the monitor",
+    ),
     row(SettingId::Bga, SettingTab::Display, "BGA", SettingKind::Toggle, "Show the chart's background animation"),
     row(SettingId::DebugMode, SettingTab::Display, "DEBUG MODE", SettingKind::Toggle, "Draw the frame and audio counters"),
     row(SettingId::SkinScreen, SettingTab::Skin, "SCREEN", SettingKind::Cycle { values: SKIN_SCREEN_LABELS }, "Which screen's skin the rows below configure"),
@@ -887,6 +912,8 @@ pub fn display_value(config: &Config, id: SettingId) -> String {
         SettingId::WhiteNumber => on_off(config.display.show_white_number),
         SettingId::JudgeTextY => shade_value(config.display.judge_text_y, id),
         SettingId::Letterbox => on_off(config.display.letterbox),
+        SettingId::WindowResolution => config.display.window_resolution.label().to_string(),
+        SettingId::WindowMode => config.display.window_mode.label().to_string(),
         SettingId::Sort => config.library.sort.label().to_string(),
         SettingId::FavoriteOnly => on_off(config.library.favorite_only),
         SettingId::PreviewVolume => shade_value(config.library.preview_volume, id),
@@ -1048,6 +1075,14 @@ pub fn adjust(config: &mut Config, id: SettingId, delta: i32) -> AdjustOutcome {
         SettingId::EnableHidden => toggle(&mut config.play.enable_hidden),
         SettingId::WhiteNumber => toggle(&mut config.display.show_white_number),
         SettingId::Letterbox => toggle(&mut config.display.letterbox),
+        SettingId::WindowResolution => {
+            let at = stepped(cycle_at(WindowResolution::ALL, config.display.window_resolution), WindowResolution::ALL.len(), delta);
+            store(&mut config.display.window_resolution, WindowResolution::ALL[at])
+        }
+        SettingId::WindowMode => {
+            let at = stepped(cycle_at(WindowMode::ALL, config.display.window_mode), WindowMode::ALL.len(), delta);
+            store(&mut config.display.window_mode, WindowMode::ALL[at])
+        }
         SettingId::FavoriteOnly => toggle(&mut config.library.favorite_only),
         SettingId::Hidden => {
             let next = (config.play.hidden + delta as f32 * LANE_SHADE_STEP).clamp(LANE_SHADE_MIN, LANE_SHADE_MAX);
@@ -1438,6 +1473,24 @@ mod tests {
     }
 
     #[test]
+    fn the_window_rows_show_the_stored_choice_and_step_through_every_one() {
+        let mut config = Config::default();
+        assert_eq!(display_value(&config, SettingId::WindowResolution), "1280x720");
+        assert_eq!(display_value(&config, SettingId::WindowMode), "WINDOWED");
+        for expected in &WINDOW_RESOLUTION_LABELS[1..] {
+            assert_eq!(adjust(&mut config, SettingId::WindowResolution, 1), AdjustOutcome::Changed);
+            assert_eq!(display_value(&config, SettingId::WindowResolution), *expected);
+        }
+        assert_eq!(adjust(&mut config, SettingId::WindowResolution, 1), AdjustOutcome::Changed, "the list wraps");
+        assert_eq!(display_value(&config, SettingId::WindowResolution), "1280x720");
+        adjust(&mut config, SettingId::WindowResolution, -1);
+        assert_eq!(config.display.window_resolution, WindowResolution::UltraHd2160);
+        assert_eq!(adjust(&mut config, SettingId::WindowMode, 1), AdjustOutcome::Changed);
+        assert_eq!(display_value(&config, SettingId::WindowMode), "BORDERLESS");
+        assert_eq!(cycle_values(SettingId::WindowMode), WINDOW_MODE_LABELS);
+    }
+
+    #[test]
     fn the_skin_row_steps_between_the_bundled_skins() {
         let mut config = Config::default();
         assert_eq!(display_value(&config, SettingId::Skin), "NORMAL");
@@ -1571,6 +1624,8 @@ mod tests {
                 SettingId::WhiteNumber,
                 SettingId::JudgeTextY,
                 SettingId::Letterbox,
+                SettingId::WindowResolution,
+                SettingId::WindowMode,
                 SettingId::Bga,
                 SettingId::DebugMode,
             ]

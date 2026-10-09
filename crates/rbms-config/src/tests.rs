@@ -207,6 +207,8 @@ fn ron_round_trip_preserves_every_field() {
     c.display.show_white_number = true;
     c.display.judge_text_y = 0.42;
     c.display.letterbox = true;
+    c.display.window_resolution = WindowResolution::FullHd1080;
+    c.display.window_mode = WindowMode::Borderless;
     c.display.five_key_layout = true;
     c.library.preview = false;
     c.library.preview_volume = 0.4;
@@ -356,6 +358,8 @@ fn a_file_from_before_the_new_rows_loads_with_them_at_their_shipped_values() {
     assert!(c.display.result_graphs);
     assert!(!c.display.show_white_number);
     assert!(!c.display.letterbox);
+    assert_eq!(c.display.window_resolution, WindowResolution::Hd720);
+    assert_eq!(c.display.window_mode, WindowMode::Windowed);
     assert!(!c.display.five_key_layout);
     assert!((c.display.judge_text_y - JUDGE_TEXT_Y_FROM_SKIN).abs() < 1e-9);
     assert_eq!(c.library.sort, SortMode::Default);
@@ -620,4 +624,40 @@ fn the_retired_preset_is_dropped_from_every_older_schema_and_a_current_file_is_l
     let (config, from) = migrate(&ron_of(&current)).expect("a current file parses");
     assert_eq!(from, None);
     assert_eq!(config.skin.document(MUSIC_SELECT_SCREEN), Some(kept.as_str()), "a selection made under the current schema was dropped on load");
+}
+
+/// An older file holds no window keys, so it migrates without a schema bump and opens the window
+/// the way every earlier build did.
+#[test]
+fn a_file_from_before_the_window_rows_opens_the_shipped_window() {
+    let (config, from) = migrate(r#"(schema_version: 3, display: (skin: "WIDE", letterbox: true))"#).expect("a current-schema file without window keys parses");
+    assert_eq!(from, None, "adding the rows needed no new schema version");
+    assert_eq!(config.display.window_resolution.size(), (1280, 720));
+    assert_eq!(config.display.window_mode, WindowMode::Windowed);
+    assert!(config.display.letterbox, "the keys that were there are kept");
+}
+
+#[test]
+fn the_window_choices_are_stored_under_their_tokens_and_unknown_ones_fall_back() {
+    let mut c = Config::default();
+    c.display.window_resolution = WindowResolution::QuadHd1440;
+    c.display.window_mode = WindowMode::Borderless;
+    let text = ron_of(&c);
+    assert!(text.contains("\"2560x1440\"") && text.contains("\"BORDERLESS\""), "{text}");
+
+    let (config, _) =
+        migrate(r#"(schema_version: 3, display: (window_resolution: "7680x4320", window_mode: "EXCLUSIVE"))"#).expect("unknown tokens still parse");
+    assert_eq!(config.display.window_resolution, WindowResolution::Hd720);
+    assert_eq!(config.display.window_mode, WindowMode::Windowed);
+}
+
+#[test]
+fn a_borderless_window_is_always_fitted_to_its_shape() {
+    let mut display = DisplayOptions::default();
+    assert!(!display.fits_screen_shape(), "an ordinary window stretches unless LETTERBOX is on");
+    display.letterbox = true;
+    assert!(display.fits_screen_shape());
+    display.letterbox = false;
+    display.window_mode = WindowMode::Borderless;
+    assert!(display.fits_screen_shape(), "a monitor that is not 16:9 would stretch the screen");
 }

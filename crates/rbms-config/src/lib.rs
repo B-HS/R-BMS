@@ -22,6 +22,7 @@ mod options;
 mod schema;
 mod settings;
 mod sort;
+mod window;
 
 #[cfg(test)]
 mod tests;
@@ -60,3 +61,4 @@ pub use settings::{
     cycle_values, descriptor, display_value, skin_document_label, step_skin, tab_rows,
 };
 pub use sort::{SORT_CYCLE_COUNT, SORT_MODE_COUNT, SORT_SELECTABLE_COUNT, SortMode};
+pub use window::{WINDOW_MODE_COUNT, WINDOW_MODE_LABELS, WINDOW_RESOLUTION_COUNT, WINDOW_RESOLUTION_LABELS, WindowMode, WindowResolution};
