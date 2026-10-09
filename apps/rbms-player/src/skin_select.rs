@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use rbms_config::{Config, DEFAULT_SKIN_FOLDER, DEFAULT_VALUE, NONE_VALUE, skin_document_label};
-use rbms_skin::dst::{DrawCondition, SkinOffset};
+use rbms_skin::dst::SkinOffset;
 use rbms_skin::loader::{
     LoadedSkin, ParserKind, SkinHeader, SkinLoadOptions, SkinUserConfig, is_supported_skin_type, load_header, load_skin, selected_option, skin_type_mode,
 };
@@ -259,6 +259,7 @@ impl SkinLibrary {
         let parser = match skin.parser {
             ParserKind::Json => "JSON",
             ParserKind::Json5 => "JSON5",
+            ParserKind::Lua => "Lua",
         };
         let lua = if uses_lua(skin) { format!(" - {LUA_INFO}") } else { String::new() };
         let author = if skin.def.author.trim().is_empty() { String::new() } else { format!(" - {}", skin.def.author) };
@@ -472,10 +473,11 @@ impl SkinLibrary {
     }
 }
 
-/// Whether the document leaves any of its draw decisions to a Lua expression, which is worth saying
-/// on the LOADED row because it is the one part of a document that runs rather than being read.
+/// Whether the skin leaves any decision to Lua -- a function a Lua skin handed over, or a script a
+/// document wrote as a string -- which is worth saying on the LOADED row because it is the one part
+/// of a skin that runs rather than being read.
 fn uses_lua(skin: &LoadedSkin) -> bool {
-    skin.destinations.iter().any(|entry| entry.track.draw_conditions.iter().any(|condition| matches!(condition, DrawCondition::Lua(_))))
+    skin.runtime().is_some_and(|runtime| runtime.function_count() > 0)
 }
 
 /// The directory documents are looked for in: the one the row names, or [`DEFAULT_SKIN_FOLDER`]

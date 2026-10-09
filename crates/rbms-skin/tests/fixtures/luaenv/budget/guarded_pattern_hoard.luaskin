@@ -1,0 +1,4 @@
+local subject, replacement = string.rep("x", 100000), string.rep("y", 10000)
+while true do
+    pcall(string.gsub, subject, "x", replacement)
+end

@@ -5,6 +5,12 @@
 //! `SkinLoader.getPath` and the customfile machinery around it, reproduced here with two additions
 //! the reference does not have: every candidate list is sorted so a seeded draw is reproducible,
 //! and every resolved path is checked to be inside the skin root before it is opened.
+//!
+//! One more thing is done here that the reference does elsewhere. A slot's `def` is a suggestion the
+//! reference only acts on in its configuration screen, which writes the matching file name into the
+//! player's stored choices the first time a skin is opened there. This player has no such step, so
+//! [`build_filemap`] applies the same match at load time: a `def` names the candidate it equals,
+//! with or without its extension and ignoring case.
 
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
@@ -25,6 +31,9 @@ pub const RANDOM_SELECTION: &str = "Random";
 
 /// The separator patterns are written with, whatever the host platform uses.
 const PATTERN_SEPARATOR: char = '/';
+
+/// The character a file name's extension starts at.
+const EXTENSION_MARK: char = '.';
 
 /// SplitMix64's odd increment, the constant its author specifies.
 const SPLITMIX_GAMMA: u64 = 0x9e37_79b9_7f4a_7c15;
@@ -150,16 +159,17 @@ fn pattern_directory(pattern: &str) -> Option<&str> {
     pattern.rfind(PATTERN_SEPARATOR).map(|slash| &pattern[..slash])
 }
 
-/// The file names in `dir` whose path ends with `ext`, sorted.
+/// The names of the entries of `dir` whose path ends with `ext`, sorted.
 ///
-/// The reference lower-cases the path but not the suffix, so an upper-case suffix matches nothing;
-/// that is kept. Sorting is not the reference's -- directory order there is the filesystem's -- and
-/// is what makes a seeded draw reproducible across machines.
+/// Every entry counts, a directory as much as a file (`File.listFiles`): a slot written as
+/// `chara/*|1P|` offers the folders under `chara`, and the text after the wildcard is appended to
+/// whichever one is chosen. The reference lower-cases the path but not the suffix, so an upper-case
+/// suffix matches nothing; that is kept. Sorting is not the reference's -- directory order there is
+/// the filesystem's -- and is what makes a seeded draw reproducible across machines.
 fn scan_candidates(dir: &Path, ext: &str) -> Vec<String> {
     let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
     let mut names: Vec<String> = entries
         .flatten()
-        .filter(|entry| entry.path().is_file())
         .filter(|entry| entry.path().to_string_lossy().to_lowercase().ends_with(ext))
         .filter_map(|entry| entry.file_name().into_string().ok())
         .collect();
@@ -258,6 +268,33 @@ impl FileResolver {
         Ok(resolved)
     }
 
+    /// The path a pattern names, as text and without touching the cache
+    /// (`SkinLoader.getPath(...).getPath()`).
+    ///
+    /// This is what a Lua skin's `skin_config.get_path` answers, and it differs from
+    /// [`Self::resolve`] the way the reference's two uses of `getPath` differ. An image source is
+    /// resolved once and kept; this is asked again on every call, so a wildcard no slot covers is
+    /// drawn afresh each time. And it answers for anything: a path that does not exist, a wildcard
+    /// that matches nothing, and a pattern whose directory lies outside the skin root all come back
+    /// as written, because the answer is only a string -- whatever later opens it is what checks
+    /// where it leads. Nothing outside the root is listed to work it out.
+    pub fn path_text(&mut self, pattern: &str) -> String {
+        if let Some(substituted) = apply_filemap(pattern, &self.filemap) {
+            return substituted;
+        }
+        let (Some(ext), Some(directory)) = (wildcard_extension(pattern), pattern_directory(pattern)) else {
+            return pattern.to_owned();
+        };
+        let Ok(inside) = contained(&self.root, Path::new(directory)) else {
+            return pattern.to_owned();
+        };
+        let candidates = scan_candidates(&inside, &ext);
+        match self.draw.index(candidates.len()) {
+            Some(index) => format!("{directory}{PATTERN_SEPARATOR}{}", candidates[index]),
+            None => pattern.to_owned(),
+        }
+    }
+
     /// [`Self::resolve`] without the cache, so the cache stores only accepted paths.
     fn resolve_uncached(&mut self, pattern: &str) -> Result<PathBuf, SkinError> {
         if let Some(substituted) = apply_filemap(pattern, &self.filemap) {
@@ -308,18 +345,42 @@ fn selectable(file: &CustomFile) -> &[String] {
     }
 }
 
-/// Builds the filemap a load substitutes with, following `JSONSkinLoader`'s header pass.
+/// The candidate a slot's `def` names: the one equal to it, or equal to it once its extension is
+/// taken off, ignoring case either way (`SkinConfiguration.updateCustomFiles`).
 ///
-/// A player's choice wins; the document's `def` fills in for a slot nobody has touched; and
-/// [`RANDOM_SELECTION`] draws one of the candidates with `draw`. A slot that resolves to nothing
-/// contributes no entry, which leaves its pattern to the wildcard path in [`FileResolver::resolve`].
+/// A skin writes `def = "default"` for a slot whose files are `default.png` and `dark.png`; the
+/// file map needs the whole name, because that is what takes the wildcard's place.
+pub fn default_candidate<'a>(file: &'a CustomFile, def: &str) -> Option<&'a str> {
+    let wanted = def.to_lowercase();
+    let matches = |name: &str| name.to_lowercase() == wanted || name.rfind(EXTENSION_MARK).is_some_and(|point| name[..point].to_lowercase() == wanted);
+    selectable(file).iter().map(String::as_str).find(|name| matches(name))
+}
+
+/// One of a slot's candidates, drawn with `draw`, or `None` when it has none.
+fn drawn_candidate(file: &CustomFile, draw: &mut Draw) -> Option<String> {
+    let names = selectable(file);
+    draw.index(names.len()).map(|index| names[index].clone())
+}
+
+/// Builds the filemap a load substitutes with (`SkinHeader.setSkinConfigProperty` and the loop that
+/// follows it in `JSONSkinLoader.load`).
+///
+/// A player's stored choice is taken as it stands, and one stored as [`RANDOM_SELECTION`] draws one
+/// of the candidates. A slot nobody has touched takes the candidate its `def` names
+/// ([`default_candidate`]); with no `def`, or one that names no candidate, it draws one too. That
+/// last draw is this player's own: the reference leaves such a slot out of the map and draws again
+/// each time the pattern is resolved, so two objects sharing the slot may show different files.
+/// Settling it once per load keeps a screen consistent with itself and a seeded load reproducible.
+///
+/// A slot that resolves to nothing contributes no entry, which leaves its pattern to the wildcard
+/// path in [`FileResolver::resolve`].
 pub fn build_filemap(files: &[CustomFile], user: &SkinUserConfig, draw: &mut Draw) -> BTreeMap<String, String> {
     let mut filemap = BTreeMap::new();
     for file in files {
-        let chosen = user.filepaths.get(&file.name).map(String::as_str).or(file.default.as_deref());
-        let selected = match chosen {
-            Some(RANDOM_SELECTION) | None => selectable(file).get(draw.index(selectable(file).len()).unwrap_or_default()).cloned(),
+        let selected = match user.filepaths.get(&file.name).map(String::as_str) {
+            Some(RANDOM_SELECTION) => drawn_candidate(file, draw),
             Some(name) => Some(name.to_owned()),
+            None => file.default.as_deref().and_then(|def| default_candidate(file, def)).map(str::to_owned).or_else(|| drawn_candidate(file, draw)),
         };
         if let Some(selected) = selected {
             filemap.insert(file.pattern.clone(), selected);

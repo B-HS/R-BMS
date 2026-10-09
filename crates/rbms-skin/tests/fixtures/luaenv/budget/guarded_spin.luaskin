@@ -1,0 +1,8 @@
+local attempts = 0
+while true do
+    attempts = attempts + 1
+    pcall(function()
+        while true do
+        end
+    end)
+end

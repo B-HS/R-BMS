@@ -9,12 +9,12 @@
 //! the reference switches them. [`PlayTimers`] and [`SelectTimers`] do that from the same snapshots
 //! the built-in screens are drawn from.
 
-use rbms_skin::dst::OffsetSource;
-use rbms_skin::property::SkinStateSource;
+use rbms_skin::dst::{LuaDrawEval, OffsetSource};
+use rbms_skin::property::SkinHost;
 use rbms_skin::timer::{MICROS_PER_MILLI, TIMER_OFF, TimerId, TimerState, timer_id};
 
 use super::state::{DecideViewState, FrameExtra, KeyConfigViewState, PlayViewState, ResultViewState, SelectViewState};
-use super::{SkinExprEval, SkinFrame, SkinScreen};
+use super::{SkinFrame, SkinScreen};
 use crate::ctx::RenderCtx;
 use crate::hud::HudView;
 use crate::result::{ResultView, TargetView};
@@ -30,7 +30,7 @@ pub struct SkinDraw<'a> {
     pub timers: &'a TimerState,
     /// The clock this frame is drawn against, in microseconds.
     pub now_us: i64,
-    pub lua: Option<&'a dyn SkinExprEval>,
+    pub lua: Option<&'a dyn LuaDrawEval>,
     pub mouse: Option<(f32, f32)>,
     pub background: Option<TextureId>,
     /// The player's nudges for this document, when any have been made.
@@ -49,7 +49,7 @@ impl std::fmt::Debug for SkinDraw<'_> {
 impl SkinDraw<'_> {
     /// Draws the document with `state` answering its property reads, and answers how many objects
     /// reached the screen.
-    pub fn draw<R: Renderer>(&self, ctx: &mut RenderCtx<'_>, r: &mut R, state: &dyn SkinStateSource) -> usize {
+    pub fn draw<R: Renderer>(&self, ctx: &mut RenderCtx<'_>, r: &mut R, state: &dyn SkinHost) -> usize {
         let frame =
             SkinFrame { now_us: self.now_us, timers: self.timers, state, lua: self.lua, mouse: self.mouse, background: self.background, extra: self.extra };
         self.screen.draw(ctx, r, &frame)
@@ -112,7 +112,7 @@ pub fn render_keyconfig_screen<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, 
 }
 
 /// The branch every screen shares: draw the document, or report that there is none.
-fn draw_with<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, document: Option<&SkinDraw<'_>>, state: &dyn SkinStateSource) -> bool {
+fn draw_with<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, document: Option<&SkinDraw<'_>>, state: &dyn SkinHost) -> bool {
     match document {
         Some(document) => {
             document.draw(ctx, r, state);

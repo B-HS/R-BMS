@@ -1,0 +1,14 @@
+local skin = {
+	type = 0,
+	name = "No notes placed",
+	w = 1280,
+	h = 720,
+	loadend = 3500,
+	playstart = 1000,
+	close = 3000,
+	judgetimer = 2,
+	finishmargin = 300,
+	note = { id = "notes" },
+	destination = {},
+}
+return skin

@@ -1,23 +1,51 @@
-//! Reading a skin document into something the player can draw.
+//! Reading a skin into something the player can draw.
 //!
-//! The path from file to runtime model is fixed: read within a size limit, parse as strict JSON and
-//! fall back to json5 for the documents that are not quite JSON, resolve the guarded clauses and
-//! includes that encode the player's own choices, then deserialise the mirror in [`crate::model`]
-//! and assemble its destinations into interpolator tracks.
+//! A skin is one of two things, told apart by its file name. A `.json` or `.json5` skin is a
+//! document: it is read within a size limit, parsed as strict JSON with json5 as the fallback for
+//! the files that are not quite JSON, has the guarded clauses and includes that encode the player's
+//! own choices resolved, and is deserialised into the mirror in [`crate::model`]. A `.luaskin` is a
+//! program: [`lua_skin`] runs it twice in one interpreter and converts the table it returns into
+//! the same mirror. From there the two share everything -- the files they name are resolved, their
+//! destinations are assembled into interpolator tracks, and the result is one [`LoadedSkin`].
 //!
-//! Everything the player chose -- which option each customisation row is on, which file each slot
-//! holds, how far each offset is nudged -- arrives as [`SkinUserConfig`] and is applied here rather
-//! than being consulted later, which is what lets a frame draw without asking any questions.
+//! They also share the step in between, which is the reference's header merge
+//! (`JSONSkinLoader.loadJsonSkinHeader` and `SkinHeader.setSkinConfigProperty`): everything the
+//! player chose -- which option each customisation row is on, which file each slot holds, how far
+//! each offset is nudged -- arrives as [`SkinUserConfig`] and is applied here rather than being
+//! consulted later, which is what lets a frame draw without asking any questions.
+//!
+//! Either kind of skin may leave Lua behind for a frame to call: a Lua skin its function values, a
+//! document the scripts it wrote as strings (`script`). Both live in the interpreter the
+//! [`LoadedSkin`] owns.
+//!
+//! What a load is held to:
+//!
+//! | Ceiling | Applies to |
+//! | --- | --- |
+//! | [`SkinLoadOptions::max_document_bytes`] | the document, each file it includes, and a Lua skin's entry file |
+//! | [`MAX_INCLUDE_DEPTH`], [`MAX_INCLUDE_EXPANSIONS`] | a document's includes; a Lua skin has none |
+//! | the interpreter's own per-file ceiling | every file a Lua skin requires or runs |
+//! | the interpreter's budget ([`crate::lua::LuaBudget`]) | each pass of a Lua skin, each script compiled, each frame drawn |
 
 mod branch;
+#[cfg(feature = "lua")]
+pub mod from_lua;
+#[cfg(feature = "lua")]
+pub mod lua_skin;
+mod script;
 mod stretch;
 mod track;
 
-pub use branch::{MAX_INCLUDE_DEPTH, MAX_INCLUDE_EXPANSIONS, OPTION_RANDOM_VALUE, declared_options, enabled_options, option_holds, selected_option};
+pub use branch::{
+    MAX_INCLUDE_DEPTH, MAX_INCLUDE_EXPANSIONS, OPTION_RANDOM_VALUE, declared_options, enabled_options, merged_options, option_holds, selected_option,
+};
 pub use stretch::{Filtering, StretchKind, filtering_for, stretch_rect};
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
+use std::ops::RangeInclusive;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use rbms_model::Mode;
 use serde::{Deserialize, Serialize};
@@ -25,34 +53,20 @@ use serde_json::Value;
 
 use crate::SkinError;
 use crate::dst::{DestinationTrack, OffsetSource, SkinOffset};
-use crate::model::{Destination, Filepath, OffsetDef, PropertyDef, SKIN_TYPE_UNSET, SkinDef};
+use crate::model::{Category, DEFAULT_SKIN_HEIGHT, DEFAULT_SKIN_WIDTH, Destination, Filepath, OffsetDef, PropertyDef, SKIN_TYPE_UNSET, SkinDef};
+use crate::property::generated::{OFFSET_ALL, OFFSET_JUDGE_1P, OFFSET_JUDGEDETAIL_1P, OFFSET_NOTES_1P};
+use crate::property::{DefaultState, SkinHost};
 use crate::resolve::{CustomFile, Draw, FileResolver, build_filemap, contained, enumerate_custom_files, pattern_for};
 
 /// Bytes a document may be before the loader refuses to parse it.
 ///
 /// A skin is third-party data, and the lenient parser walks it character by character, so the
 /// ceiling is here to stop a hostile file from turning into a long parse rather than because real
-/// documents come close to it.
+/// documents come close to it. A Lua skin's entry file is held to the same number.
 pub const DEFAULT_MAX_DOCUMENT_BYTES: u64 = 8 * 1024 * 1024;
 
-/// Instructions a single expression may execute before it is cut off.
-const DEFAULT_MAX_INSTRUCTIONS: u32 = 200_000;
-
-/// Bytes the Lua interpreter may allocate in total.
-const DEFAULT_MAX_MEMORY_BYTES: usize = 8 * 1024 * 1024;
-
-/// Expressions a single frame may evaluate before the rest are skipped.
-const DEFAULT_MAX_CALLS_PER_FRAME: u32 = 4_096;
-
-/// Microseconds a single expression may run for before it is cut off.
-///
-/// The instruction ceiling counts what the interpreter executes, which is not the same as time: a
-/// standard-library call runs inside C and ticks nothing at all. This is the wall clock the hook
-/// checks alongside the count.
-const DEFAULT_MAX_CALL_MICROS: u64 = 20_000;
-
-/// Microseconds one frame may spend inside Lua in total, across every expression it evaluates.
-const DEFAULT_MAX_FRAME_MICROS: u64 = 4_000;
+/// The extension of a skin whose entry file is a Lua program.
+pub const LUA_SKIN_EXTENSION: &str = "luaskin";
 
 /// The byte-order mark a document authored on Windows often starts with.
 const BYTE_ORDER_MARK: char = '\u{feff}';
@@ -61,41 +75,24 @@ const BYTE_ORDER_MARK: char = '\u{feff}';
 #[cfg(feature = "json5")]
 const FIRST_POSITION: usize = 1;
 
-/// What a single expression, and a single frame of expressions, may spend.
-///
-/// Kept here rather than beside the interpreter so that a build compiled without Lua still has the
-/// type, and [`SkinLoadOptions`] has the same shape either way.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Budget {
-    pub max_instructions: u32,
-    pub max_memory_bytes: usize,
-    pub max_calls_per_frame: u32,
-    /// Wall clock one expression may run for, which is the only ceiling a call that spends its time
-    /// inside the standard library ever meets.
-    pub max_call_micros: u64,
-    /// Wall clock one frame may spend inside Lua altogether.
-    pub max_frame_micros: u64,
+/// The separator every path handed to a skin is written with.
+#[cfg(feature = "lua")]
+const SKIN_PATH_SEPARATOR: char = '/';
+
+/// Whether `path` names a Lua skin, by its extension and ignoring case.
+pub fn is_lua_skin(path: &Path) -> bool {
+    path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case(LUA_SKIN_EXTENSION))
 }
 
-impl Default for Budget {
-    fn default() -> Self {
-        Self {
-            max_instructions: DEFAULT_MAX_INSTRUCTIONS,
-            max_memory_bytes: DEFAULT_MAX_MEMORY_BYTES,
-            max_calls_per_frame: DEFAULT_MAX_CALLS_PER_FRAME,
-            max_call_micros: DEFAULT_MAX_CALL_MICROS,
-            max_frame_micros: DEFAULT_MAX_FRAME_MICROS,
-        }
-    }
-}
-
-/// Which of the two parsers read a document.
+/// What read a document.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParserKind {
     /// Strict JSON, which almost every document is.
     Json,
     /// The lenient parser, which allows comments, trailing commas, unquoted keys and single quotes.
     Json5,
+    /// The Lua runtime: the document is the table a `.luaskin` program returned.
+    Lua,
 }
 
 /// The field mirror behind [`SkinOffset`]'s serde support.
@@ -163,39 +160,61 @@ pub struct SkinLoadOptions<'a> {
     pub root: &'a Path,
     /// The player's choices for this document.
     pub user: &'a SkinUserConfig,
-    /// Pins every wildcard draw, so a test or a golden run resolves the same files each time.
+    /// Pins every draw a load makes -- a random option, a random file, a wildcard, and a skin's own
+    /// `math.random` -- so a test or a golden run comes out the same each time.
     pub rng_seed: Option<u64>,
-    /// What a Lua expression may spend.
-    pub lua_budget: Budget,
     /// The mode a play document is being loaded for.
     pub mode: Mode,
     /// The document size ceiling.
     pub max_document_bytes: u64,
     /// Whether an option id is one this build implements.
     pub known_option: fn(i32) -> bool,
+    /// Where a skin's file writes go. A skin never writes into its own folder: with a directory here
+    /// its writes land there and are read back from there, and with `None` every write fails. Only
+    /// Lua writes files, so this matters to a Lua skin and to a document whose scripts do.
+    pub write_overlay: Option<&'a Path>,
 }
 
 impl<'a> SkinLoadOptions<'a> {
     /// Options with the defaults every caller but a test wants.
     pub fn new(root: &'a Path, user: &'a SkinUserConfig, mode: Mode) -> Self {
-        Self {
-            root,
-            user,
-            rng_seed: None,
-            lua_budget: Budget::default(),
-            mode,
-            max_document_bytes: DEFAULT_MAX_DOCUMENT_BYTES,
-            known_option: every_option_known,
-        }
+        Self { root, user, rng_seed: None, mode, max_document_bytes: DEFAULT_MAX_DOCUMENT_BYTES, known_option: every_option_known, write_overlay: None }
     }
 }
 
 /// The play screen for a seven-key chart, and the first of the reference's `SkinType` ids.
 pub const SKIN_TYPE_PLAY_7KEYS: i32 = 0;
 
+/// The play screen for a five-key chart.
+pub const SKIN_TYPE_PLAY_5KEYS: i32 = 1;
+
+/// The play screen for a fourteen-key chart.
+pub const SKIN_TYPE_PLAY_14KEYS: i32 = 2;
+
+/// The play screen for a ten-key chart.
+pub const SKIN_TYPE_PLAY_10KEYS: i32 = 3;
+
+/// The play screen for a nine-button chart.
+pub const SKIN_TYPE_PLAY_9KEYS: i32 = 4;
+
+/// The twenty-four key play screen.
+pub const SKIN_TYPE_PLAY_24KEYS: i32 = 16;
+
+/// The twenty-four key double play screen.
+pub const SKIN_TYPE_PLAY_24KEYS_DOUBLE: i32 = 17;
+
+/// The twenty-four key battle screen, and the last of the reference's `SkinType` ids.
+pub const SKIN_TYPE_PLAY_24KEYS_BATTLE: i32 = 18;
+
 /// The play screens, in `SkinType` order, and the mode each one draws.
-const PLAY_SKIN_MODES: &[(i32, Mode)] =
-    &[(SKIN_TYPE_PLAY_7KEYS, Mode::BEAT_7K), (1, Mode::BEAT_5K), (2, Mode::BEAT_14K), (3, Mode::BEAT_10K), (4, Mode::POPN_9K), (16, Mode::KEYBOARD_24K)];
+const PLAY_SKIN_MODES: &[(i32, Mode)] = &[
+    (SKIN_TYPE_PLAY_7KEYS, Mode::BEAT_7K),
+    (SKIN_TYPE_PLAY_5KEYS, Mode::BEAT_5K),
+    (SKIN_TYPE_PLAY_14KEYS, Mode::BEAT_14K),
+    (SKIN_TYPE_PLAY_10KEYS, Mode::BEAT_10K),
+    (SKIN_TYPE_PLAY_9KEYS, Mode::POPN_9K),
+    (SKIN_TYPE_PLAY_24KEYS, Mode::KEYBOARD_24K),
+];
 
 /// The song browser, in the reference's `SkinType` numbering.
 pub const SKIN_TYPE_MUSIC_SELECT: i32 = 5;
@@ -209,8 +228,68 @@ pub const SKIN_TYPE_RESULT: i32 = 7;
 /// The key configuration screen.
 pub const SKIN_TYPE_KEY_CONFIG: i32 = 8;
 
+/// The skin configuration screen.
+pub const SKIN_TYPE_SKIN_SELECT: i32 = 9;
+
+/// The score screen of a course.
+pub const SKIN_TYPE_COURSE_RESULT: i32 = 15;
+
+/// Every id the reference's `SkinType` has, which is every type a skin can be loaded as. The ids
+/// run from the first to the last without a gap.
+const KNOWN_SKIN_TYPES: RangeInclusive<i32> = SKIN_TYPE_PLAY_7KEYS..=SKIN_TYPE_PLAY_24KEYS_BATTLE;
+
 /// The non-play screens this build draws: music select, decide, result and key config.
 const SCREEN_SKIN_TYPES: &[i32] = &[SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_DECIDE, SKIN_TYPE_RESULT, SKIN_TYPE_KEY_CONFIG];
+
+/// The play screens whose header gains the automatic offsets: every play type but the battle ones
+/// (`JSONSkinLoader.loadJsonSkinHeader`).
+const AUTOMATIC_OFFSET_SKIN_TYPES: &[i32] = &[
+    SKIN_TYPE_PLAY_7KEYS,
+    SKIN_TYPE_PLAY_5KEYS,
+    SKIN_TYPE_PLAY_14KEYS,
+    SKIN_TYPE_PLAY_10KEYS,
+    SKIN_TYPE_PLAY_9KEYS,
+    SKIN_TYPE_PLAY_24KEYS,
+    SKIN_TYPE_PLAY_24KEYS_DOUBLE,
+];
+
+/// The axes an offset has: `x`, `y`, `w`, `h`, `r` and `a`.
+const OFFSET_AXES: usize = 6;
+
+/// One offset the reference adds to a play skin's header: its name, its id, and the axes the player
+/// may move, in the order `x`, `y`, `w`, `h`, `r`, `a`.
+type AutomaticOffset = (&'static str, i32, [bool; OFFSET_AXES]);
+
+/// The offsets every play skin has without declaring them, after its own and in this order.
+const AUTOMATIC_OFFSETS: &[AutomaticOffset] = &[
+    ("All offset(%)", OFFSET_ALL, [true, true, true, true, false, false]),
+    ("Notes offset", OFFSET_NOTES_1P, [false, false, false, true, false, false]),
+    ("Judge offset", OFFSET_JUDGE_1P, [true, true, true, true, false, true]),
+    ("Judge Detail offset", OFFSET_JUDGEDETAIL_1P, [true, true, true, true, false, true]),
+];
+
+/// The sizes a skin may be authored at (`Resolution`). A skin that names any other size is read as
+/// though it had named the default one.
+const SKIN_RESOLUTIONS: &[(i32, i32)] = &[
+    (640, 480),
+    (800, 600),
+    (1024, 768),
+    (DEFAULT_SKIN_WIDTH, DEFAULT_SKIN_HEIGHT),
+    (1280, 960),
+    (1366, 768),
+    (1400, 1050),
+    (1600, 900),
+    (1600, 1200),
+    (1680, 1050),
+    (1920, 1080),
+    (1920, 1200),
+    (2048, 1536),
+    (2560, 1440),
+    (3840, 2160),
+];
+
+/// The `judgetimer` of a play skin whose note object is never placed (`PlaySkin.judgetimer`).
+const DEFAULT_JUDGE_TIMER: i32 = 1;
 
 /// The mode a play document is authored for, or `None` when the type is not a play screen.
 pub fn skin_type_mode(skin_type: i32) -> Option<Mode> {
@@ -228,9 +307,83 @@ pub fn mode_skin_type(mode: Mode) -> Option<i32> {
 /// Whether this build has a screen for the document's type.
 ///
 /// A play type is supported exactly when its mode is one the player actually offers, so the set
-/// follows [`Mode::ALL`] rather than being restated here.
+/// follows [`Mode::ALL`] rather than being restated here. This is the application's question -- can
+/// the skin be put on screen -- and narrower than [`is_known_skin_type`], which is the loader's.
 pub fn is_supported_skin_type(skin_type: i32) -> bool {
     SCREEN_SKIN_TYPES.contains(&skin_type) || skin_type_mode(skin_type).is_some_and(|mode| Mode::ALL.contains(&mode))
+}
+
+/// Whether `skin_type` is one of the reference's `SkinType` ids, which is all a skin needs to be
+/// loaded. The skin configuration screen and the course result load as well as any other, whether
+/// or not this build draws them yet.
+pub fn is_known_skin_type(skin_type: i32) -> bool {
+    KNOWN_SKIN_TYPES.contains(&skin_type)
+}
+
+/// The offsets the reference adds to the header of a skin of this type: four for a play skin, none
+/// for anything else.
+pub fn automatic_offsets(skin_type: i32) -> Vec<OffsetDef> {
+    if !AUTOMATIC_OFFSET_SKIN_TYPES.contains(&skin_type) {
+        return Vec::new();
+    }
+    AUTOMATIC_OFFSETS
+        .iter()
+        .map(|(name, id, [x, y, w, h, r, a])| OffsetDef {
+            category: String::new(),
+            name: (*name).to_owned(),
+            id: *id,
+            x: *x,
+            y: *y,
+            w: *w,
+            h: *h,
+            r: *r,
+            a: *a,
+        })
+        .collect()
+}
+
+/// The size a skin that declares `width` by `height` is authored at: the size itself when it is one
+/// of the reference's resolutions, and 1280 by 720 otherwise (`JSONSkinLoader.loadJsonSkin`).
+pub fn skin_resolution(width: i32, height: i32) -> (i32, i32) {
+    if SKIN_RESOLUTIONS.contains(&(width, height)) { (width, height) } else { (DEFAULT_SKIN_WIDTH, DEFAULT_SKIN_HEIGHT) }
+}
+
+/// The timings a play screen reads from its skin's header.
+///
+/// The reference copies these out of the document at one particular moment: while it builds the
+/// note object, which happens only when a destination places it (`JsonPlaySkinObjectLoader`). A
+/// play skin that declares the fields but never places its notes therefore runs on the defaults,
+/// and so does this.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlayTimings {
+    /// Milliseconds between failing and leaving the screen.
+    pub close: i32,
+    /// Milliseconds loading takes at the least.
+    pub loadend: i32,
+    /// Milliseconds between "ready" and the first note.
+    pub playstart: i32,
+    /// The worst judgement that still fires a lane's bomb timer.
+    pub judgetimer: i32,
+    /// Milliseconds between the last note and the fade out.
+    pub finishmargin: i32,
+}
+
+impl Default for PlayTimings {
+    fn default() -> Self {
+        Self { close: 0, loadend: 0, playstart: 0, judgetimer: DEFAULT_JUDGE_TIMER, finishmargin: 0 }
+    }
+}
+
+impl PlayTimings {
+    /// The timings `def` gives a play screen: its own when a destination places its note object,
+    /// and the defaults when none does.
+    pub fn of(def: &SkinDef) -> Self {
+        let placed = def.note.as_ref().is_some_and(|note| def.destination.iter().any(|destination| destination.id == note.id));
+        if !placed {
+            return Self::default();
+        }
+        Self { close: def.close, loadend: def.loadend, playstart: def.playstart, judgetimer: def.judgetimer, finishmargin: def.finishmargin }
+    }
 }
 
 /// What a document says about itself before any of it is drawn.
@@ -246,7 +399,11 @@ pub struct SkinHeader {
     pub width: i32,
     pub height: i32,
     pub parser: ParserKind,
+    /// The headings the configuration screen groups the rows below under.
+    pub categories: Vec<Category>,
     pub properties: Vec<PropertyDef>,
+    /// The offsets the skin declares, followed by the ones every play skin has
+    /// ([`automatic_offsets`]).
     pub offsets: Vec<OffsetDef>,
     pub custom_files: Vec<CustomFile>,
 }
@@ -300,15 +457,32 @@ pub struct NestedTracks {
     pub songlist: Option<SongListTracks>,
 }
 
-/// A document, read and ready to draw.
+/// A skin, read and ready to draw.
 pub struct LoadedSkin {
+    /// The document: what a JSON skin wrote, or what a Lua skin's body pass returned with the
+    /// customisation rows of its header pass.
     pub def: SkinDef,
     pub path: PathBuf,
     pub root: PathBuf,
     pub parser: ParserKind,
     pub mode: Mode,
+    /// The size the skin is authored at, as the reference reads it ([`skin_resolution`]): the size
+    /// the skin declares when that is one of the reference's resolutions, and 1280 by 720 when it
+    /// is not.
+    ///
+    /// For a Lua skin `def.w` and `def.h` hold the same two numbers, so everything that scales the
+    /// skin agrees. A JSON document's `def.w` and `def.h` are left as it wrote them, and whatever
+    /// still scales a document by those draws one of an unlisted size at the size it declared.
+    pub resolution: (i32, i32),
+    /// The timings a play screen takes from this skin.
+    pub play: PlayTimings,
     /// The file slots the configuration screen offers, scanned once at load.
     pub custom_files: Vec<CustomFile>,
+    /// The offsets the skin declares, followed by the ones every play skin has
+    /// ([`automatic_offsets`]).
+    pub offsets: Vec<OffsetDef>,
+    /// The option each customisation row is on for this load, by row name and in the skin's order.
+    pub selected_options: Vec<(String, i32)>,
     /// The option ids the player's choices turn on.
     pub enabled_options: BTreeSet<i32>,
     /// Every option id this document declares, on or off. A condition naming one of these is
@@ -326,10 +500,11 @@ pub struct LoadedSkin {
     pub nested: NestedTracks,
     /// Everything that went wrong without costing the skin.
     pub warnings: Vec<String>,
-    resolver: FileResolver,
+    filemap: BTreeMap<String, String>,
+    resolver: Rc<RefCell<FileResolver>>,
     known_option: fn(i32) -> bool,
     #[cfg(feature = "lua")]
-    lua: Option<crate::lua::LuaSandbox>,
+    runtime: Option<crate::lua::SkinLua>,
 }
 
 impl std::fmt::Debug for LoadedSkin {
@@ -347,19 +522,24 @@ impl std::fmt::Debug for LoadedSkin {
 impl LoadedSkin {
     /// The pattern-to-file-name substitutions this load resolves paths through.
     pub fn filemap(&self) -> &BTreeMap<String, String> {
-        self.resolver.filemap()
+        &self.filemap
     }
 
     /// The file a document-relative path names, checked to be inside the skin root.
     pub fn resolve(&mut self, relative: &str) -> Result<PathBuf, SkinError> {
         let directory = self.path.parent().unwrap_or(&self.root).to_path_buf();
-        self.resolver.resolve(&pattern_for(&directory, relative))
+        self.resolver.borrow_mut().resolve(&pattern_for(&directory, relative))
     }
 
-    /// The sandbox this document's expressions were compiled into, if it has any.
+    /// The interpreter this skin's Lua lives in: the functions a Lua skin's objects are made of, or
+    /// the scripts a JSON document wrote as strings. A frame binds its host to it once and makes
+    /// every call through that binding ([`SkinLua::frame`](crate::lua::SkinLua::frame)).
+    ///
+    /// The skin owns it: the function ids in the model are indices into this interpreter's registry
+    /// and mean nothing once it is gone, so it lives exactly as long as the loaded skin does.
     #[cfg(feature = "lua")]
-    pub fn lua(&self) -> Option<&crate::lua::LuaSandbox> {
-        self.lua.as_ref()
+    pub fn runtime(&self) -> Option<&crate::lua::SkinLua> {
+        self.runtime.as_ref()
     }
 
     /// Assembles one destination into a track, or `None` when this document's own customisation
@@ -367,7 +547,36 @@ impl LoadedSkin {
     ///
     /// `relative` is the flag the play screen sets on judge-count objects and nothing else, which
     /// is where the reference sets it too (`JsonPlaySkinObjectLoader`).
+    ///
+    /// A destination handed in from outside may still carry a script as the string a document wrote
+    /// it as; it is compiled into this skin's interpreter first, as the loader does for the skin's
+    /// own. No host is bound here, so a timer script that reads game state in its one trial call
+    /// costs the destination its timer.
     pub fn build_track(&mut self, destination: &Destination, relative: bool) -> Result<Option<DestinationTrack>, SkinError> {
+        let mut destination = destination.clone();
+        self.settle(&mut destination)?;
+        self.assemble_track(&destination, relative)
+    }
+
+    /// Compiles the scripts one destination still carries as strings.
+    #[cfg(feature = "lua")]
+    fn settle(&mut self, destination: &mut Destination) -> Result<(), SkinError> {
+        let Some(lua) = self.runtime.as_ref() else {
+            return script::each_destination_slot(destination, &mut script::refuse);
+        };
+        let path = self.path.to_string_lossy().into_owned();
+        let mut settler = script::Settler { lua, path: &path, warnings: &mut self.warnings };
+        script::each_destination_slot(destination, &mut |slot| settler.settle(slot))
+    }
+
+    /// A build without Lua refuses a destination that carries a script.
+    #[cfg(not(feature = "lua"))]
+    fn settle(&mut self, destination: &mut Destination) -> Result<(), SkinError> {
+        script::each_destination_slot(destination, &mut script::refuse)
+    }
+
+    /// Assembles a destination whose scripts are already settled.
+    fn assemble_track(&mut self, destination: &Destination, relative: bool) -> Result<Option<DestinationTrack>, SkinError> {
         let path = self.path.to_string_lossy().into_owned();
         let mut context = track::TrackContext {
             known_option: self.known_option,
@@ -377,11 +586,7 @@ impl LoadedSkin {
             relative,
             warnings: &mut self.warnings,
         };
-        #[cfg(feature = "lua")]
-        let sandbox = self.lua.as_ref();
-        #[cfg(not(feature = "lua"))]
-        let sandbox: Option<&track::Sandbox> = None;
-        track::build_track(destination, sandbox, &mut context)
+        track::build_track(destination, &mut context)
     }
 }
 
@@ -393,7 +598,7 @@ impl LoadedSkin {
 /// move every slot behind it. An empty track resolves to nothing, which is what a slot that is not
 /// there should look like.
 fn build_slot(skin: &mut LoadedSkin, what: &str, destination: &Destination, relative: bool) -> Result<NamedTrack, SkinError> {
-    let track = match skin.build_track(destination, relative) {
+    let track = match skin.assemble_track(destination, relative) {
         Ok(Some(track)) => track,
         Ok(None) => DestinationTrack::default(),
         Err(error @ SkinError::LuaUnavailable) => return Err(error),
@@ -537,89 +742,142 @@ fn header_text(value: &Value, key: &str) -> String {
     value.get(key).and_then(Value::as_str).unwrap_or_default().to_owned()
 }
 
-/// What a document says about itself, without loading it.
-pub fn load_header(path: &Path, options: SkinLoadOptions<'_>) -> Result<SkinHeader, SkinError> {
-    let path = contained(options.root, path)?;
-    let text = read_document(&path, options.max_document_bytes)?;
-    let (value, parser) = parse_value(&path, &text)?;
-    let directory = path.parent().unwrap_or(options.root).to_path_buf();
-    let filepath: Vec<Filepath> = header_list(&value, "filepath");
-    let document = SkinDef { filepath, ..SkinDef::default() };
-
-    Ok(SkinHeader {
-        skin_type: header_number(&value, "type", SKIN_TYPE_UNSET),
-        name: header_text(&value, "name"),
-        author: header_text(&value, "author"),
-        width: header_number(&value, "w", crate::model::DEFAULT_SKIN_WIDTH),
-        height: header_number(&value, "h", crate::model::DEFAULT_SKIN_HEIGHT),
-        parser,
-        properties: header_list(&value, "property"),
-        offsets: header_list(&value, "offset"),
-        custom_files: enumerate_custom_files(&document, &directory, options.root),
-        path,
-    })
+/// The player's choices applied to a skin's header: what `SkinHeader.setSkinConfigProperty` leaves
+/// behind, and the file map `JSONSkinLoader.load` builds from it.
+pub(crate) struct MergedHeader {
+    /// The option each customisation row is on, by row name and in the skin's order.
+    pub options: Vec<(String, i32)>,
+    /// Every option id the rows can turn on.
+    pub declared: BTreeSet<i32>,
+    /// The declared offsets followed by the automatic ones.
+    pub offsets: Vec<OffsetDef>,
+    pub custom_files: Vec<CustomFile>,
+    pub filemap: BTreeMap<String, String>,
+    /// Resolves this load's patterns. Shared, because a Lua skin's `skin_config.get_path` goes on
+    /// resolving through it for as long as the skin is drawn.
+    pub resolver: Rc<RefCell<FileResolver>>,
 }
 
-/// Reads a document and everything it names.
+impl MergedHeader {
+    /// The option ids the choices turn on.
+    pub(crate) fn enabled(&self) -> BTreeSet<i32> {
+        self.options.iter().map(|(_, selected)| *selected).collect()
+    }
+}
+
+/// What a skin's header declares that a player may customise.
+pub(crate) struct HeaderRows<'a> {
+    pub skin_type: i32,
+    pub properties: &'a [PropertyDef],
+    pub filepath: &'a [Filepath],
+    pub offsets: &'a [OffsetDef],
+}
+
+/// The declared offsets of a skin of `skin_type` followed by its automatic ones.
+fn header_offsets(skin_type: i32, declared: &[OffsetDef]) -> Vec<OffsetDef> {
+    declared.iter().cloned().chain(automatic_offsets(skin_type)).collect()
+}
+
+/// Applies the player's choices to a header.
 ///
-/// The document's type is checked before any of it is assembled: a document that declares none is
-/// refused rather than guessed at, and one that declares a screen this build does not draw is
-/// refused so the caller can fall back to the built-in skin and say why.
-pub fn load_skin(path: &Path, options: SkinLoadOptions<'_>) -> Result<LoadedSkin, SkinError> {
-    let path = contained(options.root, path)?;
-    let text = read_document(&path, options.max_document_bytes)?;
-    let (mut value, parser) = parse_value(&path, &text)?;
-    let directory = path.parent().unwrap_or(options.root).to_path_buf();
-
-    let skin_type = header_number(&value, "type", SKIN_TYPE_UNSET);
-    if skin_type == SKIN_TYPE_UNSET {
-        return Err(SkinError::TypeMissing);
-    }
-    if !is_supported_skin_type(skin_type) {
-        return Err(SkinError::TypeUnsupported(skin_type));
-    }
-
-    let properties: Vec<PropertyDef> = header_list(&value, "property");
-    let filepath: Vec<Filepath> = header_list(&value, "filepath");
-    let header_document = SkinDef { filepath, ..SkinDef::default() };
-    let custom_files = enumerate_custom_files(&header_document, &directory, options.root);
-    let enabled = enabled_options(&properties, &options.user.properties);
-    let declared = declared_options(&properties);
-
+/// `directory` is the folder the skin's paths are written against and `root` the folder nothing may
+/// be read outside of. The draws are made in the reference's order -- options, then file slots --
+/// from the one generator the wildcards are later drawn with, so a seed pins all three.
+pub(crate) fn merge_header(rows: &HeaderRows<'_>, directory: &Path, root: &Path, options: &SkinLoadOptions<'_>) -> MergedHeader {
     let mut draw = options.rng_seed.map_or_else(Draw::from_environment, Draw::from_seed);
+    let selected = merged_options(rows.properties, &options.user.properties, &mut draw);
+    let slots = SkinDef { filepath: rows.filepath.to_vec(), ..SkinDef::default() };
+    let custom_files = enumerate_custom_files(&slots, directory, root);
     let filemap = build_filemap(&custom_files, options.user, &mut draw);
-    let mut resolver = FileResolver::new(options.root, filemap, draw);
-    let mut warnings: Vec<String> = Vec::new();
-
-    let limit = options.max_document_bytes;
-    let include_directory = directory.clone();
-    let mut include = |target: &str| -> Result<Value, SkinError> {
-        let file = resolver.resolve(&pattern_for(&include_directory, target))?;
-        let text = read_document(&file, limit)?;
-        parse_value(&file, &text).map(|(value, _)| value)
-    };
-    branch::transform(&mut value, &mut branch::BranchContext::new(&enabled, &mut include, &mut warnings))?;
-
-    let def = from_value(&path, value)?;
-
-    let mut skin = LoadedSkin {
-        path,
-        root: options.root.to_path_buf(),
-        parser,
-        mode: options.mode,
+    MergedHeader {
+        options: selected,
+        declared: declared_options(rows.properties),
+        offsets: header_offsets(rows.skin_type, rows.offsets),
         custom_files,
-        enabled_options: enabled,
-        declared_options: declared,
+        resolver: Rc::new(RefCell::new(FileResolver::new(root, filemap.clone(), draw))),
+        filemap,
+    }
+}
+
+/// A path as `java.io.File.getPath` spells it: runs of separators collapsed and no trailing one.
+#[cfg(feature = "lua")]
+fn file_path_text(path: &str) -> String {
+    let mut text = String::with_capacity(path.len());
+    for character in path.chars() {
+        if character != SKIN_PATH_SEPARATOR || !text.ends_with(SKIN_PATH_SEPARATOR) {
+            text.push(character);
+        }
+    }
+    if text.len() > SKIN_PATH_SEPARATOR.len_utf8() && text.ends_with(SKIN_PATH_SEPARATOR) {
+        text.pop();
+    }
+    text
+}
+
+/// The `skin_config` global a skin's Lua reads (`SkinLuaAccessor.exportSkinProperty`).
+///
+/// `pattern_base` is the spelling of the skin's folder the file map is keyed under and `lua_root`
+/// the spelling the interpreter knows it by; `get_path` resolves under the first and answers under
+/// the second, so the path it hands back is one `dofile`, `io.open` and the audio calls accept.
+///
+/// Offsets are stored by id here, where the reference stores them by name, so the value published
+/// under an offset's name is the one stored under its id.
+#[cfg(feature = "lua")]
+pub(crate) fn skin_config_global(merged: &MergedHeader, user: &SkinUserConfig, pattern_base: &Path, lua_root: &Path) -> crate::lua::SkinConfigGlobal {
+    let resolver = Rc::clone(&merged.resolver);
+    let base = pattern_for(pattern_base, "");
+    let root = pattern_for(lua_root, "");
+    crate::lua::SkinConfigGlobal {
+        options: merged.options.clone(),
+        file_paths: user.filepaths.iter().map(|(name, path)| (name.clone(), path.clone())).collect(),
+        offsets: merged.offsets.iter().map(|offset| (offset.name.clone(), user.offsets.get(&offset.id).copied().unwrap_or_default())).collect(),
+        get_path: Box::new(move |relative: &str| {
+            let located = resolver.borrow_mut().path_text(&pattern_for(Path::new(&base), relative));
+            let tail = located.strip_prefix(base.as_str()).unwrap_or(&located);
+            file_path_text(&format!("{root}{tail}"))
+        }),
+    }
+}
+
+/// Everything the two kinds of skin hand to the part of a load they share.
+pub(crate) struct Assembly {
+    pub def: SkinDef,
+    pub path: PathBuf,
+    pub root: PathBuf,
+    pub parser: ParserKind,
+    pub mode: Mode,
+    pub merged: MergedHeader,
+    pub warnings: Vec<String>,
+    pub known_option: fn(i32) -> bool,
+    #[cfg(feature = "lua")]
+    pub runtime: Option<crate::lua::SkinLua>,
+}
+
+/// Resolves the files a skin names and assembles its destinations (`JSONSkinLoader.loadJsonSkin`).
+pub(crate) fn assemble(parts: Assembly) -> Result<LoadedSkin, SkinError> {
+    let mut skin = LoadedSkin {
+        resolution: skin_resolution(parts.def.w, parts.def.h),
+        play: PlayTimings::of(&parts.def),
+        path: parts.path,
+        root: parts.root,
+        parser: parts.parser,
+        mode: parts.mode,
+        custom_files: parts.merged.custom_files,
+        offsets: parts.merged.offsets,
+        enabled_options: parts.merged.options.iter().map(|(_, selected)| *selected).collect(),
+        selected_options: parts.merged.options,
+        declared_options: parts.merged.declared,
         sources: BTreeMap::new(),
         fonts: BTreeMap::new(),
         destinations: Vec::new(),
         nested: NestedTracks::default(),
-        warnings,
-        resolver,
-        known_option: options.known_option,
+        warnings: parts.warnings,
+        filemap: parts.merged.filemap,
+        resolver: parts.merged.resolver,
+        known_option: parts.known_option,
         #[cfg(feature = "lua")]
-        lua: Some(crate::lua::LuaSandbox::new(options.root, options.lua_budget)?),
-        def,
+        runtime: parts.runtime,
+        def: parts.def,
     };
 
     let sources: Vec<(String, String)> = skin.def.source.iter().map(|source| (source.id.clone(), source.path.clone())).collect();
@@ -644,7 +902,7 @@ pub fn load_skin(path: &Path, options: SkinLoadOptions<'_>) -> Result<LoadedSkin
 
     let destinations = std::mem::take(&mut skin.def.destination);
     for destination in &destinations {
-        match skin.build_track(destination, false) {
+        match skin.assemble_track(destination, false) {
             Ok(Some(track)) => skin.destinations.push(NamedTrack { id: destination.id.clone(), track }),
             Ok(None) => {}
             Err(error @ SkinError::LuaUnavailable) => return Err(error),
@@ -656,4 +914,171 @@ pub fn load_skin(path: &Path, options: SkinLoadOptions<'_>) -> Result<LoadedSkin
     build_nested(&mut skin)?;
 
     Ok(skin)
+}
+
+/// Refuses a skin that declares no type, or one the reference has no screen for.
+pub(crate) fn check_skin_type(skin_type: i32) -> Result<(), SkinError> {
+    if skin_type == SKIN_TYPE_UNSET {
+        return Err(SkinError::TypeMissing);
+    }
+    if !is_known_skin_type(skin_type) {
+        return Err(SkinError::TypeUnsupported(skin_type));
+    }
+    Ok(())
+}
+
+/// What a skin says about itself, without loading it.
+///
+/// A `.luaskin` runs its header pass in an interpreter of its own with no game state behind it
+/// ([`lua_skin::load_lua_header`]); anything else is parsed as a document.
+pub fn load_header(path: &Path, options: SkinLoadOptions<'_>) -> Result<SkinHeader, SkinError> {
+    if is_lua_skin(path) {
+        #[cfg(feature = "lua")]
+        return lua_skin::load_lua_header(path, &lua_skin::LuaSkinOptions::new(options));
+        #[cfg(not(feature = "lua"))]
+        return Err(SkinError::LuaUnavailable);
+    }
+    load_document_header(path, options)
+}
+
+/// What a document says about itself.
+fn load_document_header(path: &Path, options: SkinLoadOptions<'_>) -> Result<SkinHeader, SkinError> {
+    let path = contained(options.root, path)?;
+    let text = read_document(&path, options.max_document_bytes)?;
+    let (value, parser) = parse_value(&path, &text)?;
+    let directory = path.parent().unwrap_or(options.root).to_path_buf();
+    let filepath: Vec<Filepath> = header_list(&value, "filepath");
+    let document = SkinDef { filepath, ..SkinDef::default() };
+    let skin_type = header_number(&value, "type", SKIN_TYPE_UNSET);
+    let declared: Vec<OffsetDef> = header_list(&value, "offset");
+
+    Ok(SkinHeader {
+        skin_type,
+        name: header_text(&value, "name"),
+        author: header_text(&value, "author"),
+        width: header_number(&value, "w", DEFAULT_SKIN_WIDTH),
+        height: header_number(&value, "h", DEFAULT_SKIN_HEIGHT),
+        parser,
+        categories: header_list(&value, "category"),
+        properties: header_list(&value, "property"),
+        offsets: header_offsets(skin_type, &declared),
+        custom_files: enumerate_custom_files(&document, &directory, options.root),
+        path,
+    })
+}
+
+/// Reads a skin and everything it names, with no game state behind it.
+///
+/// This is [`load_skin_with_host`] against a host that knows nothing, which is all a document with no
+/// scripts needs. A Lua skin reads the game state while it builds its screen, so whoever is about to
+/// draw one loads it with the host of the screen being entered.
+pub fn load_skin(path: &Path, options: SkinLoadOptions<'_>) -> Result<LoadedSkin, SkinError> {
+    load_skin_with_host(path, options, &DefaultState)
+}
+
+/// Reads a skin and everything it names.
+///
+/// A `.luaskin` is run as a program ([`lua_skin::load_lua_skin`]) and anything else is parsed as a
+/// document. `host` answers whatever the skin's Lua reads while it loads: the whole body pass of a
+/// Lua skin, and the one trial call a timer script gets in either kind. The state of the screen
+/// being entered therefore has to be settled before this is called.
+///
+/// The skin's type is checked before any of it is assembled: a skin that declares none is refused
+/// rather than guessed at, and so is one that declares a type the reference does not have. Whether
+/// this build has a screen to put the skin on is the caller's question ([`is_supported_skin_type`]).
+pub fn load_skin_with_host(path: &Path, options: SkinLoadOptions<'_>, host: &dyn SkinHost) -> Result<LoadedSkin, SkinError> {
+    if is_lua_skin(path) {
+        #[cfg(feature = "lua")]
+        return lua_skin::load_lua_skin(path, &lua_skin::LuaSkinOptions::new(options), host);
+        #[cfg(not(feature = "lua"))]
+        return Err(SkinError::LuaUnavailable);
+    }
+    load_document(path, options, host)
+}
+
+/// The interpreter a document's scripts are compiled into (`SkinLuaAccessor(true)`): the one a Lua
+/// skin gets, rooted at the document's folder, with the game state published as globals.
+#[cfg(feature = "lua")]
+fn document_runtime(directory: &Path, options: &SkinLoadOptions<'_>) -> Result<crate::lua::SkinLua, SkinError> {
+    let config = crate::lua::SkinLuaConfig {
+        overlay: options.write_overlay.map(Path::to_path_buf),
+        seed: options.rng_seed,
+        ..crate::lua::SkinLuaConfig::new(directory)
+    };
+    let runtime = crate::lua::SkinLua::new(config)?;
+    runtime.publish_globals()?;
+    Ok(runtime)
+}
+
+/// Compiles every script a document wrote as a string into a fresh interpreter, and hands the
+/// interpreter back for the loaded skin to keep.
+#[cfg(feature = "lua")]
+fn settle_scripts(
+    def: &mut SkinDef,
+    path: &Path,
+    directory: &Path,
+    merged: &MergedHeader,
+    options: &SkinLoadOptions<'_>,
+    host: &dyn SkinHost,
+    warnings: &mut Vec<String>,
+) -> Result<crate::lua::SkinLua, SkinError> {
+    let runtime = document_runtime(directory, options)?;
+    runtime.set_skin_config(skin_config_global(merged, options.user, directory, runtime.paths().root()))?;
+    let name = path.to_string_lossy().into_owned();
+    let mut settler = script::Settler { lua: &runtime, path: &name, warnings };
+    runtime.with_host(host, || script::each_slot(def, &mut |slot| settler.settle(slot)))??;
+    Ok(runtime)
+}
+
+/// A build without Lua has nothing to compile a script into and nothing for a host to answer, so a
+/// document that carries one is refused.
+#[cfg(not(feature = "lua"))]
+fn refuse_scripts(def: &mut SkinDef, _host: &dyn SkinHost) -> Result<(), SkinError> {
+    script::each_slot(def, &mut script::refuse)
+}
+
+/// Reads a document and everything it names.
+fn load_document(path: &Path, options: SkinLoadOptions<'_>, host: &dyn SkinHost) -> Result<LoadedSkin, SkinError> {
+    let path = contained(options.root, path)?;
+    let text = read_document(&path, options.max_document_bytes)?;
+    let (mut value, parser) = parse_value(&path, &text)?;
+    let directory = path.parent().unwrap_or(options.root).to_path_buf();
+
+    let skin_type = header_number(&value, "type", SKIN_TYPE_UNSET);
+    check_skin_type(skin_type)?;
+
+    let properties: Vec<PropertyDef> = header_list(&value, "property");
+    let filepath: Vec<Filepath> = header_list(&value, "filepath");
+    let offsets: Vec<OffsetDef> = header_list(&value, "offset");
+    let merged = merge_header(&HeaderRows { skin_type, properties: &properties, filepath: &filepath, offsets: &offsets }, &directory, options.root, &options);
+    let enabled = merged.enabled();
+    let mut warnings: Vec<String> = Vec::new();
+
+    let limit = options.max_document_bytes;
+    let mut include = |target: &str| -> Result<Value, SkinError> {
+        let file = merged.resolver.borrow_mut().resolve(&pattern_for(&directory, target))?;
+        let text = read_document(&file, limit)?;
+        parse_value(&file, &text).map(|(value, _)| value)
+    };
+    branch::transform(&mut value, &mut branch::BranchContext::new(&enabled, &mut include, &mut warnings))?;
+
+    let mut def = from_value(&path, value)?;
+
+    #[cfg(feature = "lua")]
+    let runtime = Some(settle_scripts(&mut def, &path, &directory, &merged, &options, host, &mut warnings)?);
+    #[cfg(not(feature = "lua"))]
+    refuse_scripts(&mut def, host)?;
+
+    assemble(Assembly {
+        def,
+        path,
+        root: options.root.to_path_buf(),
+        parser,
+        mode: options.mode,
+        merged,
+        warnings,
+        known_option: options.known_option,
+        #[cfg(feature = "lua")]
+        runtime,
+    })
 }

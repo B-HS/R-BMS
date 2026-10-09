@@ -1,0 +1,19 @@
+local finalizer = function()
+    while true do
+    end
+end
+local metatable = { __gc = finalizer }
+local object = setmetatable({}, metatable)
+local later = { __gc = true }
+setmetatable({}, later)
+later.__gc = finalizer
+object = nil
+collectgarbage()
+for index = 1, 500 do
+    setmetatable({ index }, metatable)
+end
+collectgarbage()
+return {
+    kept = rawget(metatable, "__gc") == finalizer,
+    returned = getmetatable(setmetatable({}, metatable)) == metatable,
+}

@@ -430,7 +430,7 @@ fn x_half_way(name: &str, keyframes: &str) -> (Acc, f32) {
     let user = SkinUserConfig::default();
     let skin = load_skin(&path, seeded(scratch.path(), &user)).expect("the document should load");
     let track = track(&skin, "eased");
-    let resolved = resolve(track, HALF_WAY_US, &TimerState::new(), &user).expect("the object draws half way along");
+    let resolved = resolve(track, HALF_WAY_US, &TimerState::new(), &user, None).expect("the object draws half way along");
     (track.acc, resolved.rect.x)
 }
 
@@ -476,8 +476,8 @@ fn a_positive_offset_r_turns_an_object_the_way_a_larger_document_angle_does() {
     user.offsets.insert(NUDGED_SLOT, SkinOffset { r: 15.0, ..SkinOffset::default() });
     let skin = load_skin(&path, seeded(scratch.path(), &user)).expect("the document should load");
 
-    let nudged = resolve(track(&skin, "nudged"), 0, &TimerState::new(), &user).expect("the nudged object draws");
-    let written = resolve(track(&skin, "written"), 0, &TimerState::new(), &user).expect("the written object draws");
+    let nudged = resolve(track(&skin, "nudged"), 0, &TimerState::new(), &user, None).expect("the nudged object draws");
+    let written = resolve(track(&skin, "written"), 0, &TimerState::new(), &user, None).expect("the written object draws");
     assert_eq!(nudged.angle_deg, written.angle_deg, "`angle: 30` with `r: 15` is `angle: 45`, because the reference adds the two in the document's own space");
     assert_eq!(nudged.angle_deg, -45.0, "counter-clockwise in the document is negative on a screen that turns clockwise");
 }
@@ -559,56 +559,101 @@ fn an_option_the_document_declares_is_settled_whatever_the_build_predicate_says(
 
 #[cfg(feature = "lua")]
 #[test]
-fn an_expression_names_a_draw_condition_of_its_own_and_compiles_once() {
+fn a_script_names_a_draw_condition_of_its_own_and_a_name_stays_a_name() {
     let mut skin = load_minimal(&SkinUserConfig::default());
-    let mixed = destination(r#"{ "id": "mixed", "op": [901, "skin.number(10) > 0"], "dst": [{ "time": 0 }] }"#);
-    let repeated = destination(r#"{ "id": "repeated", "op": ["skin.number(10) > 0"], "dst": [{ "time": 0 }] }"#);
+    let mixed = destination(r#"{ "id": "mixed", "op": [901, "number(10) > 0", "!autoplay_on"], "draw": "timer(41) > 0", "dst": [{ "time": 0 }] }"#);
 
-    let first = skin.build_track(&mixed, false).expect("the track should build").expect("its conditions hold");
-    let second = skin.build_track(&repeated, false).expect("the track should build").expect("its conditions hold");
-
-    assert_eq!(first.draw_conditions.len(), 1, "the document's own option was settled at load and only the expression is left: {:?}", first.draw_conditions);
-    assert!(matches!(first.draw_conditions[0], DrawCondition::Lua(_)));
-    assert_eq!(first.draw_conditions[0], second.draw_conditions[0], "the same source compiles to the same handle");
-    assert_eq!(skin.lua().expect("a build with Lua carries a sandbox").compiled_count(), 1);
+    let built = skin.build_track(&mixed, false).expect("the track should build").expect("its conditions hold");
+    let conditions = &built.draw_conditions;
+    assert_eq!(conditions.len(), 3, "the document's own option was settled at load and the three strings are left: {conditions:?}");
+    assert!(matches!(conditions[0], DrawCondition::Function(_)), "a string no table knows is a script: {conditions:?}");
+    assert_eq!(conditions[1], DrawCondition::Name("!autoplay_on".to_owned()), "a property name is kept as the document wrote it, negation included");
+    assert!(matches!(conditions[2], DrawCondition::Function(_)), "and `draw` comes last: {conditions:?}");
+    assert_eq!(skin.runtime().expect("a build with Lua gives a document an interpreter").function_count(), 2, "one function per script, none for the name");
+    assert!(skin.warnings.is_empty(), "{:?}", skin.warnings);
 }
 
 #[cfg(feature = "lua")]
 #[test]
-fn an_expression_that_will_not_compile_costs_its_object_and_not_the_skin() {
+fn a_script_that_will_not_compile_costs_its_condition_and_not_the_skin() {
     let scratch = Scratch::new("bad-lua");
     let path = scratch.write(
         "skin.json",
         r#"{ "type": 5, "destination": [{ "id": "broken", "op": ["1 +"], "dst": [{ "time": 0 }] }, { "id": "fine", "dst": [{ "time": 0 }] }] }"#,
     );
     let user = SkinUserConfig::default();
-    let skin = load_skin(&path, seeded(scratch.path(), &user)).expect("one broken expression must not fail the document");
+    let skin = load_skin(&path, seeded(scratch.path(), &user)).expect("one broken script must not fail the document");
 
-    assert_eq!(object_ids(&skin), vec!["fine"]);
-    assert!(skin.warnings[0].contains("1 +"), "the warning should quote the expression, got {:?}", skin.warnings[0]);
+    assert_eq!(object_ids(&skin), vec!["broken", "fine"], "the reference reads a script that will not compile as no condition at all");
+    assert!(track(&skin, "broken").draw_conditions.is_empty());
+    assert!(skin.warnings[0].contains("1 +"), "the warning should quote the script, got {:?}", skin.warnings[0]);
     assert!(!skin.warnings[0].contains("rbms-skin/src"), "a player-facing warning must not name this crate's own files: {:?}", skin.warnings[0]);
+}
+
+#[cfg(feature = "lua")]
+#[test]
+fn every_kind_of_field_a_document_writes_a_script_in_is_compiled_at_load() {
+    use rbms_skin::model::{EventRef, FloatWriterRef, PropertyRef, StringWriterRef};
+
+    let scratch = Scratch::new("script-fields");
+    let path = scratch.write(
+        "skin.json",
+        r#"{
+            "type": 5,
+            "image": [{ "id": "button", "src": "0", "timer": "timer(41)", "act": "event_exec(13)" }],
+            "value": [{ "id": "count", "src": "0", "value": "number(71) + 1" }, { "id": "named", "src": "0", "value": "folder_max" }],
+            "floatvalue": [{ "id": "share", "src": "0", "value": "float_number(110) / 2" }],
+            "text": [{ "id": "title", "font": "0", "value": "text(10) .. '!'", "event": "set_title(...)" }],
+            "slider": [{ "id": "volume", "src": "0", "value": "volume_sys()", "event": "set_volume_sys(...)" }],
+            "graph": [{ "id": "rate", "src": "0", "value": "rate() / 100" }],
+            "customEvents": [{ "id": 1000, "action": "event_exec(14)", "condition": "option(40)" }],
+            "customTimers": [{ "id": 10000, "timer": "timer_observe_boolean(function() return option(40) end)" }],
+            "destination": [{ "id": "button", "timer": "41", "dst": [{ "time": 0 }] }]
+        }"#,
+    );
+    let user = SkinUserConfig::default();
+    let skin = load_skin(&path, seeded(scratch.path(), &user)).expect("the document should load");
+    assert_eq!(skin.warnings, Vec::<String>::new());
+
+    let def = &skin.def;
+    assert!(matches!(def.image[0].timer, Some(PropertyRef::Func(_))));
+    assert!(matches!(def.image[0].act, Some(EventRef::Lua(_))));
+    assert!(matches!(def.value[0].value, Some(PropertyRef::Func(_))));
+    assert_eq!(def.value[1].value, Some(PropertyRef::Name("folder_max".to_owned())), "a number the reference knows by name is that number");
+    assert!(matches!(def.floatvalue[0].value, Some(PropertyRef::Func(_))));
+    assert!(matches!(def.text[0].value, Some(PropertyRef::Func(_))));
+    assert!(matches!(def.text[0].event, Some(StringWriterRef::Lua(_))));
+    assert!(matches!(def.slider[0].value, Some(PropertyRef::Func(_))));
+    assert!(matches!(def.slider[0].event, Some(FloatWriterRef::Lua(_))));
+    assert!(matches!(def.graph[0].value, Some(PropertyRef::Func(_))));
+    assert!(matches!(def.custom_events[0].action, Some(EventRef::Lua(_))));
+    assert!(matches!(def.custom_events[0].condition, Some(PropertyRef::Func(_))));
+    assert!(matches!(def.custom_timers[0].timer, Some(PropertyRef::Func(_))));
+    assert!(matches!(track(&skin, "button").timer, Some(TimerRef::Lua(_))), "a timer has no names, so even a string of digits is a script");
+    assert_eq!(skin.runtime().expect("the document has an interpreter").function_count(), 13);
 }
 
 #[cfg(not(feature = "lua"))]
 #[test]
 fn a_build_without_lua_refuses_a_document_that_needs_it_rather_than_reading_it_as_false() {
     let scratch = Scratch::new("no-lua");
-    let path = scratch.write("skin.json", r#"{ "type": 5, "destination": [{ "id": "gated", "op": ["skin.number(10) > 0"], "dst": [{ "time": 0 }] }] }"#);
+    let path = scratch.write("skin.json", r#"{ "type": 5, "destination": [{ "id": "gated", "op": ["number(10) > 0"], "dst": [{ "time": 0 }] }] }"#);
     let user = SkinUserConfig::default();
     let outcome = load_skin(&path, seeded(scratch.path(), &user));
 
-    assert!(matches!(outcome, Err(SkinError::LuaUnavailable)), "an expression this build cannot evaluate must fail loudly, got {outcome:?}");
+    assert!(matches!(outcome, Err(SkinError::LuaUnavailable)), "a script this build cannot evaluate must fail loudly, got {outcome:?}");
 }
 
+#[cfg(feature = "lua")]
 #[test]
-fn a_timer_named_by_an_expression_runs_on_the_frame_clock_and_says_so() {
-    let scratch = Scratch::new("expression-timer");
-    let path = scratch.write("skin.json", r#"{ "type": 5, "destination": [{ "id": "timed", "timer": "skin.number(10)", "dst": [{ "time": 0 }] }] }"#);
+fn a_timer_script_that_cannot_be_tried_costs_the_object_its_timer_and_says_so() {
+    let scratch = Scratch::new("script-timer");
+    let path = scratch.write("skin.json", r#"{ "type": 5, "destination": [{ "id": "timed", "timer": "no_such_function(10)", "dst": [{ "time": 0 }] }] }"#);
     let user = SkinUserConfig::default();
     let skin = load_skin(&path, seeded(scratch.path(), &user)).expect("the document should load");
 
-    assert!(track(&skin, "timed").timer.is_none(), "the interpolator addresses timers by id, so an expression names none");
-    assert!(skin.warnings[0].contains("frame clock"), "warned {:?}", skin.warnings[0]);
+    assert!(track(&skin, "timed").timer.is_none(), "a timer script is called once as it is compiled, and one that raises names no timer");
+    assert!(skin.warnings[0].contains("no_such_function(10)"), "warned {:?}", skin.warnings[0]);
 }
 
 #[test]

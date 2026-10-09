@@ -6,6 +6,7 @@
 //! decoder here generates -- no binary asset is committed for a skin that only needs to be
 //! recognisable.
 
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
 use rbms_render::skin_render::state::{DecideChart, DecideViewState, SelectViewState};
@@ -14,9 +15,10 @@ use rbms_render::{
     Color, CpuCanvas, FrameExtra, GoldenImage, GoldenOptions, NoExpressions, PngCodec, RenderCtx, Renderer, SelectDetail, SelectView, SkinAssets, SkinFrame,
     SkinImage, SkinObjectKind, SkinScreen, TextContext, assert_golden_png, render_select_ctx,
 };
-use rbms_skin::dst::LuaExprId;
-use rbms_skin::loader::{SkinLoadOptions, SkinUserConfig, load_skin};
-use rbms_skin::property::{SkinStateSource, UNMAPPED_BOOLEAN, UNMAPPED_FLOAT, UNMAPPED_INTEGER, UNMAPPED_STRING};
+use rbms_skin::dst::{DrawCondition, LuaDrawEval, LuaFnId, TimerRef};
+use rbms_skin::loader::{LoadedSkin, SkinLoadOptions, SkinUserConfig, load_skin};
+use rbms_skin::model::PropertyRef;
+use rbms_skin::property::{SkinHost, UNMAPPED_BOOLEAN, UNMAPPED_FLOAT, UNMAPPED_INTEGER, UNMAPPED_STRING};
 use rbms_skin::timer::{MICROS_PER_MILLI, TIMER_OFF, TimerId, TimerState};
 
 /// Width the fixture frames are drawn at, twice the document's own width so the viewport is doing
@@ -75,10 +77,7 @@ impl PngCodec for Png {
 ///
 /// The file is one line, `pattern width height [detail]`, which keeps the committed fixture readable
 /// and its pixels reproducible on every host.
-struct PatternAssets {
-    /// How many expressions were asked for, so a test can prove the document carried none.
-    compiled: usize,
-}
+struct PatternAssets;
 
 impl SkinAssets for PatternAssets {
     fn image(&mut self, path: &Path) -> Option<SkinImage> {
@@ -96,11 +95,6 @@ impl SkinAssets for PatternAssets {
             _ => return None,
         };
         SkinImage::new(width, height, rgba)
-    }
-
-    fn expression(&mut self, _source: &str) -> Option<LuaExprId> {
-        self.compiled += 1;
-        None
     }
 }
 
@@ -158,13 +152,13 @@ impl rbms_skin::dst::OffsetSource for FixtureState {
 }
 
 impl rbms_skin::dst::DrawStateSource for FixtureState {
-    fn boolean(&self, id: i32) -> bool {
+    fn boolean(&self, id: i32) -> Option<bool> {
         let answer = if id.abs() == FIXTURE_GATE_ID { self.gate } else { UNMAPPED_BOOLEAN };
-        if id < 0 { !answer } else { answer }
+        Some(if id < 0 { !answer } else { answer })
     }
 }
 
-impl SkinStateSource for FixtureState {
+impl SkinHost for FixtureState {
     fn integer(&self, id: i32) -> i32 {
         if id == FIXTURE_NUMBER_ID { self.number } else { UNMAPPED_INTEGER }
     }
@@ -173,8 +167,8 @@ impl SkinStateSource for FixtureState {
         if id == FIXTURE_RATE_ID { self.rate } else { UNMAPPED_FLOAT }
     }
 
-    fn string(&self, id: i32) -> &str {
-        if id == FIXTURE_TEXT_ID { &self.text } else { UNMAPPED_STRING }
+    fn text(&self, id: i32) -> Cow<'_, str> {
+        Cow::Borrowed(if id == FIXTURE_TEXT_ID { &self.text } else { UNMAPPED_STRING })
     }
 
     fn timer_us(&self, _id: i32) -> i64 {
@@ -204,7 +198,7 @@ fn build(canvas: &mut CpuCanvas, text: &mut TextContext) -> (SkinScreen, Vec<Str
     let options = SkinLoadOptions { rng_seed: Some(1), ..SkinLoadOptions::new(&root, &user, rbms_model::Mode::BEAT_7K) };
     let skin = load_skin(&root.join("skin.json"), options).expect("the fixture document loads");
     let load_warnings = skin.warnings.clone();
-    let mut assets = PatternAssets { compiled: 0 };
+    let mut assets = PatternAssets;
     let screen = SkinScreen::build(canvas, text, &skin, &mut assets);
     (screen, load_warnings)
 }
@@ -353,33 +347,156 @@ fn a_screen_state_answers_the_ids_its_view_knows() {
     let view = plain_select_view();
     let state = SelectViewState::new(&view, 17, None, false);
     assert_eq!(state.now_us(), 17, "the frame clock is the one the caller passed");
-    assert_eq!(state.string(rbms_skin::property::generated::STRING_DIRECTORY), "ROOT", "the browser's header answers the directory id");
+    assert_eq!(state.text(rbms_skin::property::generated::STRING_DIRECTORY), "ROOT", "the browser's header answers the directory id");
     assert_eq!(state.integer(rbms_skin::property::generated::NUMBER_PLAYLEVEL), UNMAPPED_INTEGER, "no chart is focused, so there is no level to report");
 }
 
 #[test]
-fn a_document_with_no_expressions_never_asks_the_host_to_compile_one() {
-    rbms_render::font::use_embedded_fonts_only();
-    let mut canvas = CpuCanvas::new(CANVAS_W, CANVAS_H);
-    let mut text = TextContext::embedded_only();
+fn a_host_without_a_sandbox_answers_a_function_value_with_the_fallback_of_its_type() {
+    let evaluator = NoExpressions;
+    assert!(!evaluator.call_boolean(LuaFnId(0)));
+    assert_eq!(evaluator.call_integer(LuaFnId(0)), 0);
+    assert_eq!(evaluator.call_float(LuaFnId(0)), 0.0);
+    assert_eq!(evaluator.call_text(LuaFnId(0)), "");
+    assert_eq!(evaluator.call_timer(LuaFnId(0)), TIMER_OFF);
+}
+
+/// The function a scripted fixture reads its number from.
+const NUMBER_FUNCTION: LuaFnId = LuaFnId(0);
+
+/// The function a scripted fixture reads its slider and graph from.
+const RATE_FUNCTION: LuaFnId = LuaFnId(1);
+
+/// The function a scripted fixture reads its text from.
+const TEXT_FUNCTION: LuaFnId = LuaFnId(2);
+
+/// The function a scripted fixture times its animated object by.
+const TIMER_FUNCTION: LuaFnId = LuaFnId(3);
+
+/// The function a scripted fixture gates its last object on.
+const GATE_FUNCTION: LuaFnId = LuaFnId(4);
+
+/// An evaluator that answers the scripted fixture's five functions out of a [`FixtureState`], the
+/// way a loaded Lua skin's functions would read the same game state.
+struct ScriptedFixture<'a> {
+    state: &'a FixtureState,
+    /// The microsecond the scripted timer reports having switched on.
+    started_us: i64,
+}
+
+impl LuaDrawEval for ScriptedFixture<'_> {
+    fn call_boolean(&self, function: LuaFnId) -> bool {
+        function == GATE_FUNCTION && self.state.gate
+    }
+
+    fn call_integer(&self, function: LuaFnId) -> i32 {
+        if function == NUMBER_FUNCTION { self.state.number } else { 0 }
+    }
+
+    fn call_float(&self, function: LuaFnId) -> f32 {
+        if function == RATE_FUNCTION { self.state.rate } else { 0.0 }
+    }
+
+    fn call_text(&self, function: LuaFnId) -> String {
+        if function == TEXT_FUNCTION { self.state.text.clone() } else { String::new() }
+    }
+
+    fn call_timer(&self, function: LuaFnId) -> i64 {
+        if function == TIMER_FUNCTION { self.started_us } else { TIMER_OFF }
+    }
+}
+
+/// The fixture document with every property id it reads replaced by a function handle, which is
+/// what the same document is once a Lua skin has written `value = function() ... end` throughout.
+fn scripted_fixture() -> LoadedSkin {
     let root = fixture_root();
     let user = SkinUserConfig::default();
     let options = SkinLoadOptions { rng_seed: Some(1), ..SkinLoadOptions::new(&root, &user, rbms_model::Mode::BEAT_7K) };
-    let skin = load_skin(&root.join("skin.json"), options).expect("the fixture document loads");
-    let mut assets = PatternAssets { compiled: 0 };
-    let screen = SkinScreen::build(&mut canvas, &mut text, &skin, &mut assets);
+    let mut skin = load_skin(&root.join("skin.json"), options).expect("the fixture document loads");
 
-    assert_eq!(assets.compiled, 0, "every value in the fixture is a plain property id");
-    assert!(screen.families().is_empty(), "the fixture names no font file, so nothing was registered with the text engine");
+    skin.def.value[0].value = Some(PropertyRef::Func(NUMBER_FUNCTION));
+    skin.def.text[0].value = Some(PropertyRef::Func(TEXT_FUNCTION));
+    skin.def.slider[0].value = Some(PropertyRef::Func(RATE_FUNCTION));
+    skin.def.graph[0].value = Some(PropertyRef::Func(RATE_FUNCTION));
+    skin.def.image[0].timer = Some(PropertyRef::Func(TIMER_FUNCTION));
+    for named in &mut skin.destinations {
+        match named.id.as_str() {
+            "frame" => named.track.timer = Some(TimerRef::Lua(TIMER_FUNCTION)),
+            "gated" => named.track.draw_conditions = vec![DrawCondition::Function(GATE_FUNCTION)],
+            _ => {}
+        }
+    }
+    skin
+}
+
+/// Draws one frame of the scripted fixture at `now_ms` against `lua`, with no timer running and a
+/// game state that answers nothing, so every pixel that depends on a value came through `lua`.
+/// Answers the canvas and how many objects reached it.
+fn scripted_frame_at(now_ms: i64, lua: &dyn LuaDrawEval) -> (CpuCanvas, usize) {
+    rbms_render::font::use_embedded_fonts_only();
+    let mut canvas = CpuCanvas::new(CANVAS_W, CANVAS_H);
+    let mut text = TextContext::embedded_only();
+    let mut assets = PatternAssets;
+    let screen = SkinScreen::build(&mut canvas, &mut text, &scripted_fixture(), &mut assets);
+    assert_eq!(screen.warnings(), Vec::<String>::new(), "a function value drops no object");
+
+    let backdrop = canvas.register_texture("test.backdrop", &checker(8, 8, 2), 8, 8);
+    let timers = TimerState::new();
+    let silent = FixtureState { number: 0, rate: 0.0, text: String::new(), gate: false };
+    canvas.clear(Color::BLACK);
+
+    let mut ctx = RenderCtx::new(rbms_render::theme(), &mut text);
+    let frame = SkinFrame {
+        now_us: now_ms * MICROS_PER_MILLI,
+        timers: &timers,
+        state: &silent,
+        lua: Some(lua),
+        mouse: None,
+        background: Some(backdrop),
+        extra: FrameExtra::None,
+    };
+    let drawn = screen.draw(&mut ctx, &mut canvas, &frame);
+    (canvas, drawn)
 }
 
 #[test]
-fn a_host_without_a_sandbox_answers_nothing_rather_than_guessing() {
-    let evaluator = NoExpressions;
-    assert_eq!(rbms_render::SkinExprEval::eval_integer(&evaluator, LuaExprId(0)), None);
-    assert_eq!(rbms_render::SkinExprEval::eval_float(&evaluator, LuaExprId(0)), None);
-    assert_eq!(rbms_render::SkinExprEval::eval_text(&evaluator, LuaExprId(0)), None);
-    assert_eq!(rbms_skin::dst::LuaDrawEval::eval_draw(&evaluator, LuaExprId(0)), None);
+fn a_document_whose_values_are_functions_draws_what_the_same_ids_draw() {
+    for gate in [false, true] {
+        for now_ms in [0, FIXTURE_CYCLE_MS / 4] {
+            let state = FixtureState { gate, ..FixtureState::default() };
+            let by_id = frame_at(now_ms, &state);
+            let (by_function, _) = scripted_frame_at(now_ms, &ScriptedFixture { state: &state, started_us: 0 });
+            assert_eq!(
+                by_id.pixels(),
+                by_function.pixels(),
+                "at {now_ms} ms with the gate {gate}: the number, text, slider, graph, both timers and the draw condition all came through the evaluator"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_function_timer_that_is_off_hides_its_object_and_one_that_starts_later_delays_it() {
+    let state = FixtureState::default();
+    let (_, running) = scripted_frame_at(0, &ScriptedFixture { state: &state, started_us: 0 });
+    let (_, off) = scripted_frame_at(0, &ScriptedFixture { state: &state, started_us: TIMER_OFF });
+    assert_eq!(off, running - 1, "the one object timed by the function is gone and nothing else is");
+
+    let late = FIXTURE_CYCLE_MS / 4;
+    let (shifted, _) = scripted_frame_at(late * 2, &ScriptedFixture { state: &state, started_us: late * MICROS_PER_MILLI });
+    assert_eq!(shifted.pixels(), frame_at(late, &state).pixels(), "a timer the function starts later shows the frame that much earlier");
+}
+
+#[test]
+fn a_document_whose_values_are_functions_draws_their_fallbacks_without_an_interpreter() {
+    let state = FixtureState { gate: true, ..FixtureState::default() };
+    let (_, scripted) = scripted_frame_at(0, &ScriptedFixture { state: &state, started_us: 0 });
+    let (_, unscripted) = scripted_frame_at(0, &NoExpressions);
+    assert_eq!(
+        unscripted,
+        scripted - 4,
+        "the gated object (false), the timed one (off), the text (empty) and the graph (zero) are not drawn; the number draws a zero and the slider rests"
+    );
 }
 
 /// A run that never happened, so the fallback tests have a view to hand the result screen.
@@ -478,7 +595,7 @@ fn compile(root: &Path, document: &Path, canvas: &mut CpuCanvas, text: &mut Text
     let user = SkinUserConfig::default();
     let options = SkinLoadOptions { rng_seed: Some(1), ..SkinLoadOptions::new(root, &user, rbms_model::Mode::BEAT_7K) };
     let skin = load_skin(document, options).expect("the generated document loads");
-    let mut assets = PatternAssets { compiled: 0 };
+    let mut assets = PatternAssets;
     SkinScreen::build(canvas, text, &skin, &mut assets)
 }
 

@@ -1,0 +1,6 @@
+while true do
+    load(function()
+        while true do
+        end
+    end)
+end

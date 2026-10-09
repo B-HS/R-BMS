@@ -6,7 +6,7 @@
 
 use serde::Deserialize;
 
-use super::{Animation, Destination, PropertyRef, SINGLE_DIVISION};
+use super::{Animation, Destination, EventRef, FloatWriterRef, PropertyRef, SINGLE_DIVISION, StringWriterRef};
 
 /// A still or animated image cut from a [`Source`].
 #[derive(Debug, Clone, Deserialize)]
@@ -25,7 +25,11 @@ pub struct ImageDef {
     pub len: i32,
     #[serde(rename = "ref")]
     pub reference: i32,
-    pub act: Option<PropertyRef>,
+    /// What a click on the image runs. An image with none is not clickable.
+    pub act: Option<EventRef>,
+    /// What argument a click hands [`Self::act`]: 0 the direction of the button that was pressed, 1
+    /// the opposite of it, 2 minus one on the left half of the image and one on the right, 3 minus
+    /// one on the lower half and one on the upper (`SkinObject.mousePressed`).
     pub click: i32,
 }
 
@@ -59,7 +63,9 @@ pub struct ImageSet {
     pub reference: i32,
     pub value: Option<PropertyRef>,
     pub images: Vec<String>,
-    pub act: Option<PropertyRef>,
+    /// What a click on the shown image runs, as [`ImageDef::act`].
+    pub act: Option<EventRef>,
+    /// As [`ImageDef::click`].
     pub click: i32,
 }
 
@@ -181,7 +187,9 @@ pub struct TextDef {
     #[serde(rename = "ref")]
     pub reference: i32,
     pub value: Option<PropertyRef>,
-    pub event: Option<PropertyRef>,
+    /// Where an editable text writes what was typed.
+    #[serde(deserialize_with = "StringWriterRef::field")]
+    pub event: Option<StringWriterRef>,
     #[serde(rename = "constantText")]
     pub constant_text: Option<String>,
     pub editable: bool,
@@ -245,7 +253,8 @@ pub struct SliderDef {
     pub slider_type: i32,
     pub changeable: bool,
     pub value: Option<PropertyRef>,
-    pub event: Option<PropertyRef>,
+    /// Where a drag writes the slider's new value.
+    pub event: Option<FloatWriterRef>,
     #[serde(rename = "isRefNum")]
     pub is_ref_num: bool,
     pub min: i32,

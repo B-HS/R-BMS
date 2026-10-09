@@ -2,7 +2,8 @@
 //! coordinate change, the cell animation, the digit layouts, the play screen's timers and what a
 //! whole screen answers about itself.
 
-use rbms_skin::dst::{DrawStateSource, OffsetSource, SkinColor, SkinRect};
+use rbms_skin::dst::{DrawStateSource, LuaDrawEval, LuaFnId, OffsetSource, SkinColor, SkinRect, TimerRef};
+use rbms_skin::property::DefaultState;
 use rbms_skin::property::generated::{
     OFFSET_HIDDEN_COVER, OFFSET_LANECOVER, OFFSET_LIFT, OPTION_1P_EARLY, OPTION_1P_GOOD, OPTION_1P_LATE, OPTION_1P_PERFECT, OPTION_2P_EARLY, OPTION_2P_GOOD,
     OPTION_2P_PERFECT, OPTION_GAUGE_EX, OPTION_GAUGE_EX_2P, OPTION_GAUGE_GROOVE, OPTION_GAUGE_GROOVE_2P, OPTION_GAUGE_HARD, OPTION_GAUGE_HARD_2P,
@@ -11,11 +12,11 @@ use rbms_skin::timer::{MICROS_PER_MILLI, TIMER_OFF, TimerId, TimerState};
 
 use super::object::{DigitLayout, FloatBody, NumberBody, Sprite, ValueSource, fraction_glyphs, fraction_sign, integer_glyphs, integer_padding};
 use super::state::PlayViewState;
-use super::{SkinViewport, TEXT_PIXELS_PER_SCALE};
+use super::{NoExpressions, SkinViewport, TEXT_PIXELS_PER_SCALE};
 use crate::{Color, Rect, TextureId};
 
 /// A sprite over a texture of `size`, cut into `columns` x `rows` cells.
-fn sprite(size: (u32, u32), columns: u32, rows: u32, timer: Option<TimerId>, cycle: i32) -> Sprite {
+fn sprite(size: (u32, u32), columns: u32, rows: u32, timer: Option<TimerRef>, cycle: i32) -> Sprite {
     Sprite { tex: TextureId(0), size, origin: (0, 0), cell: (size.0 / columns, size.1 / rows), columns, rows, timer, cycle }
 }
 
@@ -98,9 +99,9 @@ fn a_cell_index_past_the_last_one_holds_at_the_last() {
 #[test]
 fn an_animation_holds_still_without_a_cycle_or_a_running_timer() {
     let timers = TimerState::new();
-    assert_eq!(sprite((32, 8), 4, 1, None, 0).animation_index(4, 5_000 * MICROS_PER_MILLI, &timers), 0, "no cycle means no animation");
+    assert_eq!(sprite((32, 8), 4, 1, None, 0).animation_index(4, 5_000 * MICROS_PER_MILLI, &timers, None), 0, "no cycle means no animation");
     assert_eq!(
-        sprite((32, 8), 4, 1, Some(TimerId(1)), 400).animation_index(4, 5_000 * MICROS_PER_MILLI, &timers),
+        sprite((32, 8), 4, 1, Some(TimerRef::Id(TimerId(1))), 400).animation_index(4, 5_000 * MICROS_PER_MILLI, &timers, None),
         0,
         "a timer that is off holds the first cell"
     );
@@ -110,25 +111,125 @@ fn an_animation_holds_still_without_a_cycle_or_a_running_timer() {
 fn an_animation_steps_through_its_cells_and_wraps() {
     let mut timers = TimerState::new();
     timers.set_on(TimerId(1), 1_000 * MICROS_PER_MILLI);
-    let sprite = sprite((32, 8), 4, 1, Some(TimerId(1)), 400);
+    let sprite = sprite((32, 8), 4, 1, Some(TimerRef::Id(TimerId(1))), 400);
 
-    assert_eq!(sprite.animation_index(4, 1_000 * MICROS_PER_MILLI, &timers), 0, "the moment the timer starts is the first cell");
-    assert_eq!(sprite.animation_index(4, 1_100 * MICROS_PER_MILLI, &timers), 1);
-    assert_eq!(sprite.animation_index(4, 1_300 * MICROS_PER_MILLI, &timers), 3);
-    assert_eq!(sprite.animation_index(4, 1_400 * MICROS_PER_MILLI, &timers), 0, "one whole cycle is back to the start");
-    assert_eq!(sprite.animation_index(4, 900 * MICROS_PER_MILLI, &timers), 0, "a moment before the timer started is the first cell too");
+    assert_eq!(sprite.animation_index(4, 1_000 * MICROS_PER_MILLI, &timers, None), 0, "the moment the timer starts is the first cell");
+    assert_eq!(sprite.animation_index(4, 1_100 * MICROS_PER_MILLI, &timers, None), 1);
+    assert_eq!(sprite.animation_index(4, 1_300 * MICROS_PER_MILLI, &timers, None), 3);
+    assert_eq!(sprite.animation_index(4, 1_400 * MICROS_PER_MILLI, &timers, None), 0, "one whole cycle is back to the start");
+    assert_eq!(sprite.animation_index(4, 900 * MICROS_PER_MILLI, &timers, None), 0, "a moment before the timer started is the first cell too");
 }
 
 #[test]
 fn an_animation_truncates_the_clock_and_its_timer_to_milliseconds_separately() {
     let mut timers = TimerState::new();
-    let sprite = sprite((32, 8), 4, 1, Some(TimerId(1)), 4);
+    let sprite = sprite((32, 8), 4, 1, Some(TimerRef::Id(TimerId(1))), 4);
 
     timers.set_on(TimerId(1), 1_999);
-    assert_eq!(sprite.animation_index(4, 2_000, &timers), 1, "millisecond 2 less millisecond 1 is one whole millisecond, a cell of a 4 ms cycle");
+    assert_eq!(sprite.animation_index(4, 2_000, &timers, None), 1, "millisecond 2 less millisecond 1 is one whole millisecond, a cell of a 4 ms cycle");
 
     timers.set_on(TimerId(1), 1_000);
-    assert_eq!(sprite.animation_index(4, 1_999, &timers), 0, "999 us into the same millisecond is no time at all");
+    assert_eq!(sprite.animation_index(4, 1_999, &timers, None), 0, "999 us into the same millisecond is no time at all");
+}
+
+/// The function handle the scripted evaluator answers for; every other handle gets the fallback.
+const SCRIPTED_FUNCTION: LuaFnId = LuaFnId(6);
+
+/// The property name the scripted evaluator answers for.
+const SCRIPTED_NAME: &str = "playtime";
+
+/// An evaluator that knows one function and one name, standing in for a loaded Lua skin.
+struct Scripted {
+    integer: i32,
+    float: f32,
+    text: &'static str,
+    /// The microsecond the scripted timer function reports.
+    started_us: i64,
+}
+
+impl LuaDrawEval for Scripted {
+    fn call_integer(&self, function: LuaFnId) -> i32 {
+        if function == SCRIPTED_FUNCTION { self.integer } else { 0 }
+    }
+
+    fn call_float(&self, function: LuaFnId) -> f32 {
+        if function == SCRIPTED_FUNCTION { self.float } else { 0.0 }
+    }
+
+    fn call_text(&self, function: LuaFnId) -> String {
+        if function == SCRIPTED_FUNCTION { self.text.to_owned() } else { String::new() }
+    }
+
+    fn call_timer(&self, function: LuaFnId) -> i64 {
+        if function == SCRIPTED_FUNCTION { self.started_us } else { TIMER_OFF }
+    }
+
+    fn named_integer(&self, name: &str) -> i32 {
+        if name == SCRIPTED_NAME { self.integer } else { 0 }
+    }
+
+    fn named_float(&self, name: &str) -> f32 {
+        if name == SCRIPTED_NAME { self.float } else { 0.0 }
+    }
+
+    fn named_text(&self, name: &str) -> String {
+        if name == SCRIPTED_NAME { self.text.to_owned() } else { String::new() }
+    }
+}
+
+#[test]
+fn a_function_value_is_read_through_the_evaluator() {
+    let lua = Scripted { integer: 573, float: 0.25, text: "ALBIDA", started_us: 0 };
+    let source = ValueSource::Function(SCRIPTED_FUNCTION);
+    assert!(source.is_named());
+    assert_eq!(source.integer(&DefaultState, Some(&lua)), 573);
+    assert_eq!(source.float(&DefaultState, Some(&lua)), 0.25);
+    assert_eq!(source.text(&DefaultState, Some(&lua)), "ALBIDA");
+}
+
+#[test]
+fn a_named_value_is_read_through_the_evaluator() {
+    let lua = Scripted { integer: 573, float: 0.25, text: "ALBIDA", started_us: 0 };
+    let source = ValueSource::Name(SCRIPTED_NAME.to_owned());
+    assert!(source.is_named());
+    assert_eq!(source.integer(&DefaultState, Some(&lua)), 573);
+    assert_eq!(source.float(&DefaultState, Some(&lua)), 0.25);
+    assert_eq!(source.text(&DefaultState, Some(&lua)), "ALBIDA");
+    assert_eq!(ValueSource::Name("nothing".to_owned()).integer(&DefaultState, Some(&lua)), 0, "a name nothing answers to is the fallback");
+}
+
+#[test]
+fn a_function_or_named_value_with_nothing_to_evaluate_it_reads_as_the_fallback() {
+    for source in [ValueSource::Function(SCRIPTED_FUNCTION), ValueSource::Name(SCRIPTED_NAME.to_owned())] {
+        for lua in [None, Some(&NoExpressions as &dyn LuaDrawEval)] {
+            assert_eq!(source.integer(&DefaultState, lua), 0, "{source:?}");
+            assert_eq!(source.float(&DefaultState, lua), 0.0, "{source:?}");
+            assert_eq!(source.text(&DefaultState, lua), "", "{source:?}");
+        }
+    }
+}
+
+#[test]
+fn a_function_value_that_answers_a_broken_number_is_held_to_a_drawable_one() {
+    let lua = Scripted { integer: 0, float: f32::NAN, text: "", started_us: 0 };
+    assert_eq!(ValueSource::Function(SCRIPTED_FUNCTION).float(&DefaultState, Some(&lua)), 0.0, "a script's NaN is cleaned up like a property's");
+}
+
+#[test]
+fn a_cell_animation_follows_a_timer_the_skin_computes() {
+    let timers = TimerState::new();
+    let sprite = sprite((32, 8), 4, 1, Some(TimerRef::Lua(SCRIPTED_FUNCTION)), 400);
+
+    let running = Scripted { integer: 0, float: 0.0, text: "", started_us: 1_000 * MICROS_PER_MILLI };
+    let lua: Option<&dyn LuaDrawEval> = Some(&running);
+    assert_eq!(sprite.animation_index(4, 1_000 * MICROS_PER_MILLI, &timers, lua), 0);
+    assert_eq!(sprite.animation_index(4, 1_100 * MICROS_PER_MILLI, &timers, lua), 1, "elapsed is measured from what the function answered");
+    assert_eq!(sprite.animation_index(4, 1_300 * MICROS_PER_MILLI, &timers, lua), 3);
+
+    let stopped = Scripted { integer: 0, float: 0.0, text: "", started_us: TIMER_OFF };
+    assert_eq!(sprite.animation_index(4, 1_300 * MICROS_PER_MILLI, &timers, Some(&stopped)), 0, "a function that answers off holds the first cell");
+    assert_eq!(sprite.animation_index(4, 1_300 * MICROS_PER_MILLI, &timers, Some(&NoExpressions)), 0, "so does an evaluator that cannot call it");
+    assert_eq!(sprite.animation_index(4, 1_300 * MICROS_PER_MILLI, &timers, None), 0, "and so does having no evaluator");
 }
 
 #[test]
@@ -424,16 +525,19 @@ fn a_judgement_is_reported_on_the_field_it_was_played_on() {
     let left = play_state(&hud);
     let right = PlayViewState { judged_side: 1, ..play_state(&hud) };
 
-    assert!(left.boolean(OPTION_1P_GOOD), "the field the input was played on reports the judgement the run took");
-    assert!(!left.boolean(OPTION_2P_GOOD), "and the other field stays quiet, so a double document does not flash both pop-ups at once");
-    assert!(right.boolean(OPTION_2P_GOOD) && !right.boolean(OPTION_1P_GOOD), "an input on the right-hand field is reported there instead");
-    assert!(!left.boolean(OPTION_1P_PERFECT), "a field reports only the judgement the run actually took");
+    assert!(left.boolean(OPTION_1P_GOOD) == Some(true), "the field the input was played on reports the judgement the run took");
+    assert!(left.boolean(OPTION_2P_GOOD) == Some(false), "and the other field stays quiet, so a double document does not flash both pop-ups at once");
     assert!(
-        right.boolean(OPTION_2P_PERFECT + 2),
+        right.boolean(OPTION_2P_GOOD) == Some(true) && right.boolean(OPTION_1P_GOOD) == Some(false),
+        "an input on the right-hand field is reported there instead"
+    );
+    assert!(left.boolean(OPTION_1P_PERFECT) == Some(false), "a field reports only the judgement the run actually took");
+    assert!(
+        right.boolean(OPTION_2P_PERFECT + 2) == Some(true),
         "the reference stops naming the second field's band at its third judgement, but a pop-up reads all six of them"
     );
-    assert!(left.boolean(OPTION_1P_EARLY) && !left.boolean(OPTION_2P_EARLY), "an early hit is early on the field it landed on");
-    assert!(!left.boolean(OPTION_1P_LATE), "and is not also late on it");
+    assert!(left.boolean(OPTION_1P_EARLY) == Some(true) && left.boolean(OPTION_2P_EARLY) == Some(false), "an early hit is early on the field it landed on");
+    assert!(left.boolean(OPTION_1P_LATE) == Some(false), "and is not also late on it");
 }
 
 /// A document labels the gauge it is drawing from the three gauge options, so the play adapter has
@@ -442,7 +546,7 @@ fn a_judgement_is_reported_on_the_field_it_was_played_on() {
 #[test]
 fn the_gauge_being_played_answers_the_options_a_document_labels_it_from() {
     let hud = hud([0; 6], 0, 0.0);
-    let on = |kind: usize, id: i32| PlayViewState { gauge_kind: kind, ..play_state(&hud) }.boolean(id);
+    let on = |kind: usize, id: i32| PlayViewState { gauge_kind: kind, ..play_state(&hud) }.boolean(id) == Some(true);
 
     for kind in 0..=2 {
         assert!(on(kind, OPTION_GAUGE_GROOVE), "gauge {kind} is cleared by filling it and is not named as one");

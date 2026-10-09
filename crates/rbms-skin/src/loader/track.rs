@@ -11,7 +11,6 @@ use std::collections::BTreeSet;
 use crate::SkinError;
 use crate::dst::{Acc, DestinationTrack, DrawCondition, Keyframe, MouseRect, SkinColor, SkinRect, TimerRef};
 use crate::model::{Animation, Destination, PropertyRef};
-use crate::timer::TimerId;
 
 /// The alpha and colour channels a first keyframe starts at when a document names none.
 const DEFAULT_CHANNEL: i32 = 255;
@@ -146,30 +145,6 @@ pub(crate) struct TrackContext<'a> {
     pub warnings: &'a mut Vec<String>,
 }
 
-/// Compiles one expression-typed field, or reports that this build cannot.
-#[cfg(feature = "lua")]
-fn compile(lua: Option<&crate::lua::LuaSandbox>, source: &str) -> Result<crate::dst::LuaExprId, SkinError> {
-    match lua {
-        Some(lua) => lua.compile(source),
-        None => Err(SkinError::LuaUnavailable),
-    }
-}
-
-/// The build without Lua refuses any document that carries an expression, rather than reading it as
-/// a silent false.
-#[cfg(not(feature = "lua"))]
-fn compile(_lua: Option<&()>, _source: &str) -> Result<crate::dst::LuaExprId, SkinError> {
-    Err(SkinError::LuaUnavailable)
-}
-
-/// The sandbox a build with Lua compiles expressions into.
-#[cfg(feature = "lua")]
-pub(crate) type Sandbox = crate::lua::LuaSandbox;
-
-/// The placeholder a build without Lua carries in the sandbox's place.
-#[cfg(not(feature = "lua"))]
-pub(crate) type Sandbox = ();
-
 /// The keyframes of one destination, filled in and sorted, with the one acceleration the object
 /// interpolates them by.
 ///
@@ -195,12 +170,20 @@ fn keyframes(destination: &Destination, path: &str) -> Result<(Vec<Keyframe>, Ac
 /// The draw conditions of one destination, integer options first and the `draw` field last, or
 /// `None` when the document's own customisation choices already rule the object out.
 ///
+/// An `op` entry with neither an id nor a property -- what a Lua boolean leaves behind -- adds no
+/// condition: its zero id is dropped with every other zero.
+///
 /// An id the document declares for itself cannot change while the document is loaded, so it is
 /// settled here rather than every frame: an unmet one drops the object and a met one leaves no
 /// condition behind, which is what `Skin.prepare` does when it removes objects and empties the
 /// option list of the ones it keeps. Only the ids that address running game state stay as
 /// conditions.
-fn draw_conditions(destination: &Destination, lua: Option<&Sandbox>, context: &mut TrackContext<'_>) -> Result<Option<Vec<DrawCondition>>, SkinError> {
+///
+/// A script a JSON document wrote as a string has been compiled into a function by the time a track
+/// is built (`super::script`). One that has not is source no interpreter ever saw, and the track is
+/// refused with [`SkinError::LuaUnavailable`] rather than drawn as though the condition were not
+/// there.
+fn draw_conditions(destination: &Destination, context: &mut TrackContext<'_>) -> Result<Option<Vec<DrawCondition>>, SkinError> {
     let declared = context.declared_options;
     let enabled = context.enabled_options;
     let known_option = context.known_option;
@@ -228,7 +211,9 @@ fn draw_conditions(destination: &Destination, lua: Option<&Sandbox>, context: &m
                     conditions.push(DrawCondition::Option(*id));
                 }
             }
-            PropertyRef::Expr(source) => conditions.push(DrawCondition::Lua(compile(lua, source)?)),
+            PropertyRef::Func(function) => conditions.push(DrawCondition::Function(*function)),
+            PropertyRef::Name(name) => conditions.push(DrawCondition::Name(name.clone())),
+            PropertyRef::Expr(_) => return Err(SkinError::LuaUnavailable),
         }
     }
     Ok(Some(conditions))
@@ -236,27 +221,29 @@ fn draw_conditions(destination: &Destination, lua: Option<&Sandbox>, context: &m
 
 /// The timer a destination animates against.
 ///
-/// A document may name it with an expression. The interpolator addresses timers by id alone, so an
-/// expression-named timer is reported and the animation runs on the caller's clock instead.
+/// A skin may name it with an id or hand over a function that computes it. Source nobody compiled
+/// into a function names no timer the interpolator can follow, so it is reported and the animation
+/// runs on the caller's clock instead.
 fn timer_of(destination: &Destination, context: &mut TrackContext<'_>) -> Option<TimerRef> {
-    match destination.timer.as_ref()? {
-        PropertyRef::Id(id) => Some(TimerRef::Id(TimerId(*id))),
-        PropertyRef::Expr(source) => {
-            context.warnings.push(format!(
-                "{}: object {:?} names its timer with the expression {source:?}, which runs on the frame clock instead",
-                context.path, destination.id
-            ));
-            None
-        }
+    let property = destination.timer.as_ref()?;
+    let timer = property.timer();
+    if timer.is_none() {
+        context.warnings.push(format!(
+            "{}: object {:?} names its timer with the expression {:?}, which runs on the frame clock instead",
+            context.path,
+            destination.id,
+            property.expr().or(property.name()).unwrap_or_default()
+        ));
     }
+    timer
 }
 
 /// Builds one destination track, or reports that this document's own choices never draw it.
 ///
 /// The offset list is the document's `offsets` with its single `offset` appended, which is what
 /// `JSONSkinLoader.setDestination` hands the object, and it is appended even when it is zero.
-pub(crate) fn build_track(destination: &Destination, lua: Option<&Sandbox>, context: &mut TrackContext<'_>) -> Result<Option<DestinationTrack>, SkinError> {
-    let Some(draw_conditions) = draw_conditions(destination, lua, context)? else {
+pub(crate) fn build_track(destination: &Destination, context: &mut TrackContext<'_>) -> Result<Option<DestinationTrack>, SkinError> {
+    let Some(draw_conditions) = draw_conditions(destination, context)? else {
         return Ok(None);
     };
     let mut offsets = destination.offsets.clone();
@@ -277,4 +264,100 @@ pub(crate) fn build_track(destination: &Destination, lua: Option<&Sandbox>, cont
         mouse_rect: destination.mouse_rect.map(|rect| MouseRect { x: rect.x as f32, y: rect.y as f32, w: rect.w as f32, h: rect.h as f32 }),
         stretch: destination.stretch,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use super::{TrackContext, build_track};
+    use crate::dst::{DestinationTrack, DrawCondition, LuaFnId, TimerRef};
+    use crate::model::{Animation, Destination, DestinationOption, PropertyRef};
+    use crate::timer::TimerId;
+
+    /// An option id the test context reports as one the build implements.
+    const KNOWN_OPTION: i32 = 40;
+
+    /// Builds `destination` on a screen that declares no options of its own, answering the track and
+    /// the warnings it left.
+    fn built(destination: &Destination) -> (DestinationTrack, Vec<String>) {
+        let none = BTreeSet::new();
+        let mut warnings = Vec::new();
+        let mut context = TrackContext {
+            known_option: |id| id == KNOWN_OPTION,
+            declared_options: &none,
+            enabled_options: &none,
+            path: "test.luaskin",
+            relative: false,
+            warnings: &mut warnings,
+        };
+        let track = build_track(destination, &mut context).expect("nothing in the track needs compiling").expect("no option rules the object out");
+        (track, warnings)
+    }
+
+    /// A destination with one keyframe and nothing else.
+    fn destination() -> Destination {
+        Destination { id: "object".to_owned(), dst: vec![Animation::default()], ..Destination::default() }
+    }
+
+    #[test]
+    fn a_function_in_draw_becomes_a_function_condition() {
+        let function = LuaFnId(12);
+        let (track, warnings) = built(&Destination { draw: Some(PropertyRef::Func(function)), ..destination() });
+        assert_eq!(track.draw_conditions, vec![DrawCondition::Function(function)]);
+        assert!(warnings.is_empty(), "a function needs no compiling and no sandbox: {warnings:?}");
+    }
+
+    #[test]
+    fn conditions_keep_the_order_the_reference_evaluates_them_in() {
+        let (in_op, in_draw) = (LuaFnId(1), LuaFnId(2));
+        let op = vec![
+            DestinationOption { id: 0, property: Some(PropertyRef::Func(in_op)) },
+            DestinationOption { id: KNOWN_OPTION, property: None },
+            DestinationOption { id: 0, property: Some(PropertyRef::Name("!is_autoplay".to_owned())) },
+        ];
+        let (track, _) = built(&Destination { op, draw: Some(PropertyRef::Func(in_draw)), ..destination() });
+        assert_eq!(
+            track.draw_conditions,
+            vec![
+                DrawCondition::Option(KNOWN_OPTION),
+                DrawCondition::Function(in_op),
+                DrawCondition::Name("!is_autoplay".to_owned()),
+                DrawCondition::Function(in_draw),
+            ],
+            "integer options first, then the properties of `op` in order, then `draw`"
+        );
+    }
+
+    #[test]
+    fn an_entry_a_lua_boolean_left_behind_gates_nothing() {
+        let op = vec![DestinationOption::UNCONDITIONAL, DestinationOption::UNCONDITIONAL];
+        let (track, warnings) = built(&Destination { op, ..destination() });
+        assert!(track.draw_conditions.is_empty(), "the object draws unconditionally: {:?}", track.draw_conditions);
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn a_function_names_the_timer_it_computes() {
+        let function = LuaFnId(5);
+        let (track, warnings) = built(&Destination { timer: Some(PropertyRef::Func(function)), ..destination() });
+        assert_eq!(track.timer, Some(TimerRef::Lua(function)));
+        assert!(warnings.is_empty(), "a function timer is not a fallback and says nothing: {warnings:?}");
+    }
+
+    #[test]
+    fn an_id_still_names_its_timer() {
+        let (track, _) = built(&Destination { timer: Some(PropertyRef::Id(41)), ..destination() });
+        assert_eq!(track.timer, Some(TimerRef::Id(TimerId(41))));
+    }
+
+    #[test]
+    fn text_in_a_timer_field_names_no_timer_and_says_so() {
+        for property in [PropertyRef::Name("main_state.timer(41)".to_owned()), PropertyRef::Expr("main_state.timer(41)".to_owned())] {
+            let (track, warnings) = built(&Destination { timer: Some(property), ..destination() });
+            assert_eq!(track.timer, None, "a timer has no names, so text is source nobody compiled");
+            assert_eq!(warnings.len(), 1);
+            assert!(warnings[0].contains("main_state.timer(41)") && warnings[0].contains("frame clock"), "warned {:?}", warnings[0]);
+        }
+    }
 }

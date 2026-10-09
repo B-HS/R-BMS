@@ -282,7 +282,7 @@ fn draw_part<R: Renderer>(r: &mut R, place: &Placement<'_>, body: &GaugeBody, sl
     let Some(sprite) = body.slots.get(slot).copied().flatten().and_then(|node| body.nodes.get(usize::from(node)).copied()) else {
         return false;
     };
-    let cell = sprite.animation_index(sprite.cells(), frame.now_us, frame.timers);
+    let cell = sprite.animation_index(sprite.cells(), frame.now_us, frame.timers, frame.script());
     place.cell(r, &sprite, cell, at)
 }
 

@@ -10,13 +10,13 @@
 
 use std::borrow::Cow;
 
-use rbms_skin::dst::{DestinationTrack, LuaExprId, SkinRect};
+use rbms_skin::dst::{DestinationTrack, LuaDrawEval, LuaFnId, SkinRect, TimerRef};
 use rbms_skin::loader::{LoadedSkin, StretchKind};
 use rbms_skin::model::{FloatValueDef, GraphDef, ImageDef, PropertyRef, SliderDef, TextDef, ValueDef};
-use rbms_skin::property::SkinStateSource;
-use rbms_skin::timer::{MICROS_PER_MILLI, TIMER_OFF, TimerId, TimerState};
+use rbms_skin::property::SkinHost;
+use rbms_skin::timer::{MICROS_PER_MILLI, TIMER_OFF, TimerState};
 
-use super::{SkinAssets, SkinExprEval, covers, gauge, graphs, judge, notes, songlist};
+use super::{SkinAssets, covers, gauge, graphs, judge, notes, songlist};
 use crate::{TextureId, UvRect};
 
 /// Cells a division count of zero or less stands for: the whole image, undivided.
@@ -143,7 +143,7 @@ pub(crate) struct Sprite {
     pub(crate) rows: u32,
     /// The timer the cell animation is measured from, or the frame clock when the document names
     /// none.
-    pub(crate) timer: Option<TimerId>,
+    pub(crate) timer: Option<TimerRef>,
     /// Milliseconds one pass over the cells takes. Zero holds cell zero.
     pub(crate) cycle: i32,
 }
@@ -154,7 +154,7 @@ impl Sprite {
     /// A region with no stated extent covers the whole texture. The reference writes that as `-1`
     /// and throws on anything else non-positive; a zero is just as meaningless, so both are read
     /// the same lenient way here.
-    fn new(tex: TextureId, size: (u32, u32), region: (i32, i32, i32, i32), divisions: (i32, i32), timer: Option<TimerId>, cycle: i32) -> Sprite {
+    fn new(tex: TextureId, size: (u32, u32), region: (i32, i32, i32, i32), divisions: (i32, i32), timer: Option<TimerRef>, cycle: i32) -> Sprite {
         let (x, y, w, h) = region;
         let (columns, rows) = (division(divisions.0), division(divisions.1));
         let width = if w > 0 { w as u32 } else { size.0 };
@@ -196,13 +196,15 @@ impl Sprite {
     ///
     /// `now_us` is the frame clock in microseconds. The cycle is in milliseconds, and the clock and
     /// the timer are each truncated to one before they are subtracted, as `TimerProperty.get` has it.
-    pub(crate) fn animation_index(&self, count: u32, now_us: i64, timers: &TimerState) -> u32 {
+    /// `lua` is what a timer the skin computes with a function is asked through; without it such a
+    /// timer is off.
+    pub(crate) fn animation_index(&self, count: u32, now_us: i64, timers: &TimerState, lua: Option<&dyn LuaDrawEval>) -> u32 {
         if self.cycle <= 0 || count == 0 {
             return 0;
         }
         let mut time = now_us / MICROS_PER_MILLI;
         if let Some(timer) = self.timer {
-            let started_us = timers.value_us(timer);
+            let started_us = timer.value_us(timers, lua);
             if started_us == TIMER_OFF {
                 return 0;
             }
@@ -261,35 +263,46 @@ impl Places {
 }
 
 /// Where an object reads one value from.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub(crate) enum ValueSource {
     /// Nothing was named, so the object draws its own default.
     #[default]
     None,
     /// A property id.
     Id(i32),
-    /// A compiled expression.
-    Expr(LuaExprId),
+    /// A Lua function the skin handed over, called on every frame the object is drawn.
+    Function(LuaFnId),
+    /// A property the skin named rather than numbered.
+    Name(String),
 }
 
 impl ValueSource {
-    /// Reads a document field that is either a property id, an expression, or absent, compiling the
-    /// expression now so a frame never has to.
-    fn new(property: Option<&PropertyRef>, fallback: i32, assets: &mut dyn SkinAssets) -> ValueSource {
+    /// Reads a skin field that is a property id, a function, a name, or absent.
+    ///
+    /// A script a document wrote as a string is a function by the time a skin is loaded. Source the
+    /// loader never compiled is no reference at all, and reads as though the field had named
+    /// nothing.
+    fn new(property: Option<&PropertyRef>, fallback: i32) -> ValueSource {
         match property {
             Some(PropertyRef::Id(id)) => ValueSource::Id(*id),
-            Some(PropertyRef::Expr(source)) => assets.expression(source).map_or(ValueSource::None, ValueSource::Expr),
+            Some(PropertyRef::Func(function)) => ValueSource::Function(*function),
+            Some(PropertyRef::Name(name)) => ValueSource::Name(name.clone()),
+            Some(PropertyRef::Expr(_)) => ValueSource::None,
             None if fallback != 0 => ValueSource::Id(fallback),
             None => ValueSource::None,
         }
     }
 
     /// The integer this frame, or zero when nothing was named.
-    pub(crate) fn integer(&self, state: &dyn SkinStateSource, lua: Option<&dyn SkinExprEval>) -> i32 {
+    ///
+    /// A function or a name with no evaluator to ask reads as the reference reads a function that
+    /// raised: zero here, and the zero or empty value of its type in the readers below.
+    pub(crate) fn integer(&self, state: &dyn SkinHost, lua: Option<&dyn LuaDrawEval>) -> i32 {
         match self {
             ValueSource::None => 0,
             ValueSource::Id(id) => state.integer(*id),
-            ValueSource::Expr(expr) => lua.and_then(|lua| lua.eval_integer(*expr)).unwrap_or_default(),
+            ValueSource::Function(function) => lua.map(|lua| lua.call_integer(*function)).unwrap_or_default(),
+            ValueSource::Name(name) => lua.map(|lua| lua.named_integer(name)).unwrap_or_default(),
         }
     }
 
@@ -298,22 +311,24 @@ impl ValueSource {
     /// Nothing is narrowed here: a rate id already answers between zero and one, and a `FLOAT_*` id
     /// carries a plain measurement -- a hi-speed multiplier, an average timing in milliseconds --
     /// that a drawn `floatvalue` shows as it is. What reads a *share* clamps at its own call site.
-    pub(crate) fn float(&self, state: &dyn SkinStateSource, lua: Option<&dyn SkinExprEval>) -> f32 {
+    pub(crate) fn float(&self, state: &dyn SkinHost, lua: Option<&dyn LuaDrawEval>) -> f32 {
         let raw = match self {
             ValueSource::None => 0.0,
             ValueSource::Id(id) => state.float(*id),
-            ValueSource::Expr(expr) => lua.and_then(|lua| lua.eval_float(*expr)).unwrap_or_default(),
+            ValueSource::Function(function) => lua.map(|lua| lua.call_float(*function)).unwrap_or_default(),
+            ValueSource::Name(name) => lua.map(|lua| lua.named_float(name)).unwrap_or_default(),
         };
         rbms_skin::property::sanitize_float(raw)
     }
 
     /// The text this frame, borrowed from the state when it comes from a property so that a line
     /// which has not changed costs no allocation.
-    pub(crate) fn text<'a>(&self, state: &'a dyn SkinStateSource, lua: Option<&dyn SkinExprEval>) -> Cow<'a, str> {
+    pub(crate) fn text<'a>(&self, state: &'a dyn SkinHost, lua: Option<&dyn LuaDrawEval>) -> Cow<'a, str> {
         match self {
             ValueSource::None => Cow::Borrowed(""),
-            ValueSource::Id(id) => Cow::Borrowed(state.string(*id)),
-            ValueSource::Expr(expr) => Cow::Owned(lua.and_then(|lua| lua.eval_text(*expr)).unwrap_or_default()),
+            ValueSource::Id(id) => state.text(*id),
+            ValueSource::Function(function) => Cow::Owned(lua.map(|lua| lua.call_text(*function)).unwrap_or_default()),
+            ValueSource::Name(name) => Cow::Owned(lua.map(|lua| lua.named_text(name)).unwrap_or_default()),
         }
     }
 
@@ -531,9 +546,10 @@ fn source_of<'a>(sources: Source<'a>, id: &str) -> Option<&'a (String, TextureId
     sources.iter().find(|(source, _, _)| source == id)
 }
 
-/// The timer an object animates its cells with, when the document named one as a plain id.
-fn cell_timer(property: Option<&PropertyRef>) -> Option<TimerId> {
-    property.and_then(PropertyRef::id).map(TimerId)
+/// The timer an object animates its cells with, when the skin named one by id or handed over a
+/// function that computes it.
+fn cell_timer(property: Option<&PropertyRef>) -> Option<TimerRef> {
+    property.and_then(PropertyRef::timer)
 }
 
 /// The sprite an image definition cuts out of its source.
@@ -575,7 +591,7 @@ pub(crate) fn build_body(
 ) -> Option<Body> {
     let def = &skin.def;
     if let Some(image) = def.image.iter().find(|image| image.id == id) {
-        return image_body(image, sources, assets, warnings).map(Body::Image);
+        return image_body(image, sources, warnings).map(Body::Image);
     }
     if let Some(set) = def.imageset.iter().find(|set| set.id == id) {
         let variants: Vec<(Sprite, u32, u32)> = set
@@ -589,23 +605,23 @@ pub(crate) fn build_body(
             warnings.push(format!("image set {id:?} names no image this build could load"));
             return None;
         }
-        let select = ValueSource::new(set.value.as_ref(), set.reference, assets);
+        let select = ValueSource::new(set.value.as_ref(), set.reference);
         return Some(Body::Image(ImageBody { variants, select }));
     }
     if let Some(value) = def.value.iter().find(|value| value.id == id) {
-        return number_body(value, sources, assets, warnings).map(Body::Number);
+        return number_body(value, sources, warnings).map(Body::Number);
     }
     if let Some(value) = def.floatvalue.iter().find(|value| value.id == id) {
-        return float_body(value, sources, assets, warnings).map(Body::Float);
+        return float_body(value, sources, warnings).map(Body::Float);
     }
     if let Some(text) = def.text.iter().find(|text| text.id == id) {
-        return Some(Body::Text(text_body(text, families, assets)));
+        return Some(Body::Text(text_body(text, families)));
     }
     if let Some(slider) = def.slider.iter().find(|slider| slider.id == id) {
-        return slider_body(slider, sources, assets, warnings).map(Body::Slider);
+        return slider_body(slider, sources, warnings).map(Body::Slider);
     }
     if let Some(graph) = def.graph.iter().find(|graph| graph.id == id) {
-        return graph_body(graph, sources, assets, warnings).map(Body::Graph);
+        return graph_body(graph, sources, warnings).map(Body::Graph);
     }
     if def.bga.as_ref().is_some_and(|bga| bga.id == id) {
         return Some(Body::Background);
@@ -633,7 +649,7 @@ pub(crate) fn build_body(
 }
 
 /// One image, animated over its cells and optionally split into variants a property picks between.
-fn image_body(def: &ImageDef, sources: Source<'_>, assets: &mut dyn SkinAssets, warnings: &mut Vec<String>) -> Option<ImageBody> {
+fn image_body(def: &ImageDef, sources: Source<'_>, warnings: &mut Vec<String>) -> Option<ImageBody> {
     let Some(sprite) = image_sprite(def, sources) else {
         warnings.push(format!("image {:?} has no usable source {:?}", def.id, def.src));
         return None;
@@ -642,12 +658,12 @@ fn image_body(def: &ImageDef, sources: Source<'_>, assets: &mut dyn SkinAssets, 
     let groups = if def.len > 1 { (def.len as u32).min(cells.max(1)) } else { 1 };
     let per_group = (cells / groups).max(1);
     let variants = (0..groups).map(|group| (sprite, group * per_group, per_group)).collect();
-    let select = if groups > 1 { ValueSource::new(None, def.reference, assets) } else { ValueSource::None };
+    let select = if groups > 1 { ValueSource::new(None, def.reference) } else { ValueSource::None };
     Some(ImageBody { variants, select })
 }
 
 /// A whole number and the strip it is drawn from.
-fn number_body(def: &ValueDef, sources: Source<'_>, assets: &mut dyn SkinAssets, warnings: &mut Vec<String>) -> Option<NumberBody> {
+fn number_body(def: &ValueDef, sources: Source<'_>, warnings: &mut Vec<String>) -> Option<NumberBody> {
     let Some((_, tex, size)) = source_of(sources, &def.src) else {
         warnings.push(format!("value {:?} has no usable source {:?}", def.id, def.src));
         return None;
@@ -661,7 +677,7 @@ fn number_body(def: &ValueDef, sources: Source<'_>, assets: &mut dyn SkinAssets,
         zero_padding: integer_padding(&layout, def),
         space: def.space as f32,
         align: def.align,
-        value: ValueSource::new(def.value.as_ref(), def.reference, assets),
+        value: ValueSource::new(def.value.as_ref(), def.reference),
         offsets: digit_offsets(&def.offset),
     })
 }
@@ -689,7 +705,7 @@ pub(crate) fn integer_padding(layout: &DigitLayout, def: &ValueDef) -> i32 {
 }
 
 /// A fractional number and the strip it is drawn from.
-fn float_body(def: &FloatValueDef, sources: Source<'_>, assets: &mut dyn SkinAssets, warnings: &mut Vec<String>) -> Option<FloatBody> {
+fn float_body(def: &FloatValueDef, sources: Source<'_>, warnings: &mut Vec<String>) -> Option<FloatBody> {
     let Some((_, tex, size)) = source_of(sources, &def.src) else {
         warnings.push(format!("float value {:?} has no usable source {:?}", def.id, def.src));
         return None;
@@ -707,7 +723,7 @@ fn float_body(def: &FloatValueDef, sources: Source<'_>, assets: &mut dyn SkinAss
         space: def.space as f32,
         align: def.align,
         gain: def.gain,
-        value: ValueSource::new(def.value.as_ref(), def.reference, assets),
+        value: ValueSource::new(def.value.as_ref(), def.reference),
         offsets: digit_offsets(&def.offset),
     })
 }
@@ -731,23 +747,23 @@ fn digit_offsets(offsets: &[ValueDef]) -> Vec<(f32, f32, f32, f32)> {
 }
 
 /// A text run and the font it is drawn with.
-fn text_body(def: &TextDef, families: &[(String, String)], assets: &mut dyn SkinAssets) -> TextBody {
+fn text_body(def: &TextDef, families: &[(String, String)]) -> TextBody {
     TextBody {
         family: families.iter().find(|(id, _)| *id == def.font).map(|(_, family)| family.clone()),
         align: def.align,
-        value: ValueSource::new(def.value.as_ref(), def.reference, assets),
+        value: ValueSource::new(def.value.as_ref(), def.reference),
         constant: def.constant_text.clone(),
     }
 }
 
 /// A slider and the track it moves along.
-fn slider_body(def: &SliderDef, sources: Source<'_>, assets: &mut dyn SkinAssets, warnings: &mut Vec<String>) -> Option<SliderBody> {
+fn slider_body(def: &SliderDef, sources: Source<'_>, warnings: &mut Vec<String>) -> Option<SliderBody> {
     let Some((_, tex, size)) = source_of(sources, &def.src) else {
         warnings.push(format!("slider {:?} has no usable source {:?}", def.id, def.src));
         return None;
     };
     let sprite = Sprite::new(*tex, *size, (def.x, def.y, def.w, def.h), (def.divx, def.divy), cell_timer(def.timer.as_ref()), def.cycle);
-    let value = ValueSource::new(def.value.as_ref(), def.slider_type, assets);
+    let value = ValueSource::new(def.value.as_ref(), def.slider_type);
     Some(SliderBody {
         sprite,
         direction: def.angle,
@@ -758,7 +774,7 @@ fn slider_body(def: &SliderDef, sources: Source<'_>, assets: &mut dyn SkinAssets
 }
 
 /// A bar graph and the direction it grows in.
-fn graph_body(def: &GraphDef, sources: Source<'_>, assets: &mut dyn SkinAssets, warnings: &mut Vec<String>) -> Option<GraphBody> {
+fn graph_body(def: &GraphDef, sources: Source<'_>, warnings: &mut Vec<String>) -> Option<GraphBody> {
     let Some((_, tex, size)) = source_of(sources, &def.src) else {
         warnings.push(format!("graph {:?} has no usable source {:?}", def.id, def.src));
         return None;
@@ -767,7 +783,7 @@ fn graph_body(def: &GraphDef, sources: Source<'_>, assets: &mut dyn SkinAssets, 
     Some(GraphBody {
         sprite,
         direction: def.angle,
-        value: ValueSource::new(def.value.as_ref(), def.graph_type, assets),
+        value: ValueSource::new(def.value.as_ref(), def.graph_type),
         ref_num: (def.is_ref_num && def.max > def.min).then_some((def.min, def.max)),
     })
 }

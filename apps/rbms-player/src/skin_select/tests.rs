@@ -74,8 +74,10 @@ fn the_document_row_cycles_through_the_built_in_screen_and_back() {
     assert_eq!(fixture.skins.document_value(&fixture.config), "Browser", "the row does not step backwards");
 }
 
-/// A document with no customisation of its own gets no rows, and the built-in screen gets none
-/// either — there is nothing to configure until a document is chosen.
+/// The built-in screen gets no rows: there is nothing to configure until a document is chosen. A
+/// play document that declares no customisation of its own still gets the four offsets every play
+/// skin has -- the whole screen, the notes, the judgement and its detail -- each with the axes the
+/// reference lets a player move.
 #[test]
 fn only_a_chosen_document_contributes_rows() {
     let mut fixture = Fixture::new("rows-empty");
@@ -83,7 +85,16 @@ fn only_a_chosen_document_contributes_rows() {
 
     fixture.config.skin.screen = PLAY_7KEYS;
     fixture.choose();
-    assert!(fixture.rows().is_empty(), "a document that declares no customisation still produced rows");
+    let whole = [OffsetAxis::X, OffsetAxis::Y, OffsetAxis::W, OffsetAxis::H];
+    let judge = [OffsetAxis::X, OffsetAxis::Y, OffsetAxis::W, OffsetAxis::H, OffsetAxis::A];
+    let expected: Vec<SkinRow> = whole
+        .into_iter()
+        .map(|axis| SkinRow::Offset(0, axis))
+        .chain([SkinRow::Offset(1, OffsetAxis::H)])
+        .chain(judge.into_iter().map(|axis| SkinRow::Offset(2, axis)))
+        .chain(judge.into_iter().map(|axis| SkinRow::Offset(3, axis)))
+        .collect();
+    assert_eq!(fixture.rows(), expected, "a play document's rows are the automatic offsets and nothing of its own");
 }
 
 /// One row per declared property, one per file slot, and one per axis the document allows —

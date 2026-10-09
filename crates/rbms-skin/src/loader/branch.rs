@@ -21,6 +21,7 @@ use serde_json::{Map, Value};
 
 use crate::SkinError;
 use crate::model::PropertyDef;
+use crate::resolve::Draw;
 
 /// The option value the reference stores for "pick one at random"
 /// (`SkinProperty.OPTION_RANDOM_VALUE`). The generated property table carries the same constant.
@@ -147,6 +148,29 @@ pub fn selected_option(property: &PropertyDef, chosen: Option<i32>) -> i32 {
 /// (`JSONSkinLoader.getEnabledOptions`).
 pub fn enabled_options(properties: &[PropertyDef], chosen: &BTreeMap<String, i32>) -> BTreeSet<i32> {
     properties.iter().map(|property| selected_option(property, chosen.get(&property.name).copied())).collect()
+}
+
+/// The option each customisation row is on for one load, by row name and in the document's order
+/// (`SkinHeader.setSkinConfigProperty`).
+///
+/// This is [`selected_option`] with the one choice that cannot be settled without a generator: a
+/// row stored as [`OPTION_RANDOM_VALUE`] takes any one of its items, drawn afresh on every load. A
+/// row with no items has nothing to draw and keeps the same value as its selection, which is what
+/// the reference's `getSelectedOption` answers for a row that selects nothing.
+///
+/// The list is what a Lua skin reads as `skin_config.option` and, in the same order,
+/// `skin_config.enabled_options`; the set of its values is what guarded clauses and draw conditions
+/// are settled against.
+pub fn merged_options(properties: &[PropertyDef], chosen: &BTreeMap<String, i32>, draw: &mut Draw) -> Vec<(String, i32)> {
+    properties
+        .iter()
+        .map(|property| {
+            let stored = chosen.get(&property.name).copied();
+            let drawn = (stored == Some(OPTION_RANDOM_VALUE)).then(|| draw.index(property.item.len())).flatten();
+            let selected = drawn.map_or_else(|| selected_option(property, stored), |index| property.item[index].op);
+            (property.name.clone(), selected)
+        })
+        .collect()
 }
 
 /// Every option id a document's customisation rows can turn on, whether or not they currently do.

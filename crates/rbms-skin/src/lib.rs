@@ -1,9 +1,9 @@
 //! Skin definition data and evaluation, with no rendering backend attached.
 //!
-//! The crate holds everything a JSON skin needs before a pixel is drawn: the timer registry and the
-//! destination interpolator that animates objects, the property registry a skin reads game state
-//! through, the serde mirror of the skin document, the loader that resolves the files it names, and
-//! the sandboxed Lua evaluator for its expression-typed fields.
+//! The crate holds everything a skin needs before a pixel is drawn: the timer registry and the
+//! destination interpolator that animates objects, the property registry and host contract a skin
+//! reads game state through, the mirror of the skin document, the loader that resolves the files it
+//! names, and the Lua runtime a `.luaskin` program is loaded into and called from every frame.
 //!
 //! Geometry and colour are this crate's own plain types rather than the renderer's, so the
 //! dependency runs one way only: `rbms-render` uses `rbms-skin`, never the reverse. That keeps the
@@ -13,9 +13,6 @@
 
 pub mod dst;
 pub mod loader;
-/// The sandboxed Lua evaluator for expression-typed skin fields. Compiled only with the `lua`
-/// feature, which is on by default; a build without it rejects skins that carry Lua expressions
-/// with [`SkinError::LuaUnavailable`] rather than silently treating them as false.
 #[cfg(feature = "lua")]
 pub mod lua;
 pub mod model;
@@ -43,7 +40,8 @@ pub enum SkinError {
     #[error("{path}: {field} value {value} is out of range")]
     NumberRange { path: String, field: String, value: String },
     /// A resolved path left the skin root, whether through `..` segments or a symlink out of the
-    /// tree. The skin root is the only directory a skin may read from.
+    /// tree. The skin root is the only directory a skin may read from, and that holds for the files
+    /// a Lua skin opens, requires and runs as much as for the ones a document names.
     #[error("{0} resolves outside the skin root")]
     PathEscape(String),
     /// The document declares no skin type, so there is no screen to attach it to. The loader does
@@ -59,6 +57,10 @@ pub enum SkinError {
     /// A Lua expression ran past its instruction or memory budget and was cut off.
     #[error("{expr} exceeded its evaluation budget")]
     LuaBudget { expr: String },
+    /// A Lua skin could not be loaded: its entry file did not compile, raised while it ran, or
+    /// returned something no skin can be made from. `path` names the file and the pass.
+    #[error("{path}: {message}")]
+    LuaLoad { path: String, message: String },
     /// The skin needs Lua expression evaluation but this build was compiled without the feature.
     #[error("this build has no Lua support")]
     LuaUnavailable,
@@ -91,6 +93,12 @@ mod tests {
     fn lua_budget_error_names_the_expression() {
         let error = SkinError::LuaBudget { expr: "while true do end".to_owned() };
         assert_eq!(error.to_string(), "while true do end exceeded its evaluation budget");
+    }
+
+    #[test]
+    fn lua_load_error_names_the_file_and_the_cause() {
+        let error = SkinError::LuaLoad { path: "play7.luaskin (body pass)".to_owned(), message: "attempt to call a nil value".to_owned() };
+        assert_eq!(error.to_string(), "play7.luaskin (body pass): attempt to call a nil value");
     }
 
     #[test]

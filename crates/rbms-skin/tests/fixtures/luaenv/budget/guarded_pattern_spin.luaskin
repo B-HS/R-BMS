@@ -1,0 +1,9 @@
+local subject, pattern = string.rep("a", 40), string.rep("a*", 40) .. "b"
+while true do
+    pcall(string.match, subject, pattern)
+    pcall(string.gsub, subject, pattern, "")
+    pcall(function()
+        for _ in string.gmatch(subject, pattern) do
+        end
+    end)
+end

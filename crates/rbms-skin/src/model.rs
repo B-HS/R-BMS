@@ -6,6 +6,11 @@
 //! implementation's `JsonSkin.java` so an existing third-party document parses unchanged; unknown
 //! keys are ignored the way its reader ignores them. Every interpretation of these values --
 //! inheritance, file resolution, Lua compilation -- lives in [`crate::loader`].
+//!
+//! A JSON document reaches this shape through serde, and there a reference to game state is a number
+//! or a string. A Lua skin reaches it through the loader's table converter, which may also put a
+//! function value where a JSON document puts an id; [`PropertyRef`], [`EventRef`],
+//! [`FloatWriterRef`] and [`StringWriterRef`] hold every form either kind of skin can write.
 
 mod graphs;
 mod objects;
@@ -20,6 +25,9 @@ use std::fmt;
 
 use serde::Deserialize;
 use serde::de::{self, Visitor};
+
+use crate::dst::{LuaFnId, TimerRef};
+use crate::timer::TimerId;
 
 /// The width a document is authored against when it names none.
 pub const DEFAULT_SKIN_WIDTH: i32 = 1280;
@@ -41,37 +49,84 @@ pub const STRETCH_UNSET: i32 = -1;
 /// document never spells it out; the mirror reads a missing field as `None` instead.
 pub const ANIMATION_UNSET: i32 = i32::MIN;
 
-/// A reference to game state, written either as a property id or as a Lua expression.
+/// A reference to game state, in any of the forms a skin may write one.
 ///
-/// The reference's serialiser accepts both forms in the same field (`JsonSkinSerializer`'s
-/// `LuaScriptSerializer`), so `"timer": 41` and `"timer": "main_state == 4"` are equally valid.
+/// The reference accepts every form in the same field and settles on one in a fixed order
+/// (`LuaSkinLoader.serializeLuaScript`, and `JsonSkinSerializer`'s `LuaScriptSerializer` for the two
+/// forms JSON can spell): a function value is called, a number is a property id, a string is looked
+/// up as a property name, and only a string no name table knows is Lua source, compiled as
+/// `return <source>`. So `"timer": 41` and `"timer": "main_state == 4"` are equally valid in a JSON
+/// document, and `draw = function() ... end` is as valid as either in a Lua one.
+///
+/// Whatever else a Lua skin puts in such a field -- `nil`, a boolean, a table -- is no reference at
+/// all. Every field of this type is an `Option`, and that case is its `None`: the field reads as
+/// though the skin had left it out.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PropertyRef {
     /// A property id, sign included. Negation of a negative id is the registry's rule.
     Id(i32),
-    /// A Lua expression, which the loader compiles once at load time.
+    /// A Lua function: either a function value a Lua skin handed over, or source the loader
+    /// compiled. The function stays in the interpreter the skin was loaded into and is called by
+    /// this handle on every frame it is read.
+    Func(LuaFnId),
+    /// A property the skin named rather than numbered, spelled exactly as it wrote it. For a boolean
+    /// a leading `!` negates. The loader only leaves a name here once a name table knows it; one it
+    /// does not know is source, and becomes a [`Self::Func`] or an [`Self::Expr`] instead.
+    Name(String),
+    /// Lua source as a JSON document wrote it, which the loader compiles once at load time.
     Expr(String),
 }
 
 impl PropertyRef {
-    /// The id, when the document wrote one.
+    /// The id, when the skin wrote one.
     pub fn id(&self) -> Option<i32> {
         match self {
             Self::Id(id) => Some(*id),
-            Self::Expr(_) => None,
+            Self::Func(_) | Self::Name(_) | Self::Expr(_) => None,
+        }
+    }
+
+    /// The function handle, when the skin handed a function over.
+    pub fn function(&self) -> Option<LuaFnId> {
+        match self {
+            Self::Func(function) => Some(*function),
+            Self::Id(_) | Self::Name(_) | Self::Expr(_) => None,
+        }
+    }
+
+    /// The property name, when the skin named one.
+    pub fn name(&self) -> Option<&str> {
+        match self {
+            Self::Name(name) => Some(name),
+            Self::Id(_) | Self::Func(_) | Self::Expr(_) => None,
         }
     }
 
     /// The expression source, when the document wrote one.
     pub fn expr(&self) -> Option<&str> {
         match self {
-            Self::Id(_) => None,
             Self::Expr(source) => Some(source),
+            Self::Id(_) | Self::Func(_) | Self::Name(_) => None,
+        }
+    }
+
+    /// The timer this names, when it is one an animation can follow: a timer id or a function.
+    ///
+    /// The reference has no timer names (`LuaSkinLoader` passes no name lookup for
+    /// `TimerProperty`), so text in a timer field is source. Source the loader has not compiled into
+    /// a function names no timer here.
+    pub fn timer(&self) -> Option<TimerRef> {
+        match self {
+            Self::Id(id) => Some(TimerRef::Id(TimerId(*id))),
+            Self::Func(function) => Some(TimerRef::Lua(*function)),
+            Self::Name(_) | Self::Expr(_) => None,
         }
     }
 }
 
-/// Reads either form of [`PropertyRef`].
+/// Reads the two forms of [`PropertyRef`] a JSON document can spell: a number is an id and a string
+/// is source. A function never arrives this way, and neither does a name, which only the loader can
+/// tell from source.
 ///
 /// Numbers arrive as `i64`, `u64` or `f64` depending on which parser is in play, so all three are
 /// accepted and narrowed to the `int` field the reference declares.
@@ -108,6 +163,103 @@ impl Visitor<'_> for PropertyRefVisitor {
 impl<'de> Deserialize<'de> for PropertyRef {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         deserializer.deserialize_any(PropertyRefVisitor)
+    }
+}
+
+/// What runs when an image is clicked or a custom event fires (`Event`).
+///
+/// The forms and their order are [`PropertyRef`]'s. What differs is what is done with the result:
+/// an event is run for its effect, and a function is always called with exactly one integer
+/// argument, whatever it declares (`SkinLuaAccessor.loadEvent`, where `narg()` is always one).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EventRef {
+    /// An event id, built in or declared by the skin's own `customEvents`.
+    Id(i32),
+    /// A Lua function, called by this handle each time the event runs.
+    Lua(LuaFnId),
+    /// An event the skin named rather than numbered.
+    Name(String),
+    /// Lua source as a JSON document wrote it. Unlike a property's, it is compiled as it stands,
+    /// with no `return` put in front of it.
+    Script(String),
+}
+
+impl EventRef {
+    /// The same reference a JSON document's number or string spells for a property.
+    fn from_document(value: PropertyRef) -> Self {
+        match value {
+            PropertyRef::Id(id) => Self::Id(id),
+            PropertyRef::Func(function) => Self::Lua(function),
+            PropertyRef::Name(name) => Self::Name(name),
+            PropertyRef::Expr(source) => Self::Script(source),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for EventRef {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        PropertyRef::deserialize(deserializer).map(Self::from_document)
+    }
+}
+
+/// Where a slider writes the value it is dragged to (`FloatWriter`).
+///
+/// A function is called with the new value as its one argument.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FloatWriterRef {
+    /// A rate id, written through the same id space a slider reads its value from.
+    Id(i32),
+    /// A Lua function, called by this handle with each value written.
+    Lua(LuaFnId),
+    /// A rate the skin named rather than numbered.
+    Name(String),
+    /// Lua source as a JSON document wrote it, compiled as it stands.
+    Script(String),
+}
+
+impl FloatWriterRef {
+    /// The same reference a JSON document's number or string spells for a property.
+    fn from_document(value: PropertyRef) -> Self {
+        match value {
+            PropertyRef::Id(id) => Self::Id(id),
+            PropertyRef::Func(function) => Self::Lua(function),
+            PropertyRef::Name(name) => Self::Name(name),
+            PropertyRef::Expr(source) => Self::Script(source),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for FloatWriterRef {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        PropertyRef::deserialize(deserializer).map(Self::from_document)
+    }
+}
+
+/// Where an editable text writes what was typed into it (`StringWriter`).
+///
+/// A function is called with the new text as its one argument. There is no id form: the reference
+/// gives a string writer no id lookup at all, so a number in this field names nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StringWriterRef {
+    /// A Lua function, called by this handle with each text written.
+    Lua(LuaFnId),
+    /// A string property the skin named, written through its writer.
+    Name(String),
+    /// Lua source as a JSON document wrote it, compiled as it stands.
+    Script(String),
+}
+
+impl StringWriterRef {
+    /// Reads a text's `event` field, where a number names nothing and leaves the field unset
+    /// (`JsonSkinSerializer` registers the `StringWriter` reader with no id lookup).
+    pub(crate) fn field<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<Self>, D::Error> {
+        let value: Option<PropertyRef> = Option::deserialize(deserializer)?;
+        Ok(value.and_then(|value| match value {
+            PropertyRef::Id(_) => None,
+            PropertyRef::Func(function) => Some(Self::Lua(function)),
+            PropertyRef::Name(name) => Some(Self::Name(name)),
+            PropertyRef::Expr(source) => Some(Self::Script(source)),
+        }))
     }
 }
 
@@ -195,7 +347,7 @@ pub struct FontFallback {
 #[serde(default)]
 pub struct CustomEvent {
     pub id: i32,
-    pub action: Option<PropertyRef>,
+    pub action: Option<EventRef>,
     pub condition: Option<PropertyRef>,
     #[serde(rename = "minInterval")]
     pub min_interval: i32,
@@ -219,19 +371,35 @@ pub struct RectDef {
     pub h: i32,
 }
 
-/// One draw condition, written either as an option id or as a Lua expression.
-#[derive(Debug, Clone, Default)]
+/// One draw condition: an option id, or a boolean property in any form but an id.
+///
+/// A number in an `op` list is always an option id, sign included, and never a property; a function
+/// or a string is a property (`LuaSkinLoader`'s `DestinationOption` reader).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DestinationOption {
     pub id: i32,
     pub property: Option<PropertyRef>,
 }
 
 impl DestinationOption {
-    /// The shorthand a document actually writes: a bare id or a bare expression.
+    /// The entry that gates nothing: no id and no property.
+    ///
+    /// This is what a Lua skin's `op = { true }` or `op = { false }` becomes. A Lua boolean is
+    /// neither a number nor something that resolves to a property, so the reference keeps an entry
+    /// with id zero and no property, which neither of its two condition lists picks up
+    /// (`JsonSkin.Destination.getOptionIds`, `getDrawConditions`). The object draws either way.
+    pub const UNCONDITIONAL: Self = Self { id: 0, property: None };
+
+    /// Whether this entry gates nothing.
+    pub fn is_unconditional(&self) -> bool {
+        *self == Self::UNCONDITIONAL
+    }
+
+    /// The shorthand a document actually writes: a bare id, or a bare property in another form.
     fn from_shorthand(value: PropertyRef) -> Self {
         match value {
             PropertyRef::Id(id) => Self { id, property: None },
-            PropertyRef::Expr(source) => Self { id: 0, property: Some(PropertyRef::Expr(source)) },
+            property => Self { id: 0, property: Some(property) },
         }
     }
 }

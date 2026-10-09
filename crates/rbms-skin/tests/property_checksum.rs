@@ -1,15 +1,16 @@
-//! Guards the generated property table and the routing table built on top of it.
+//! Guards the generated property tables and the routing table built on top of them.
 //!
 //! The constant table is machine-extracted and committed, so nothing here re-reads the reference:
 //! the tests re-derive the checksum from the committed tables, check the counts against the
 //! declaration totals the extraction reported, and then check that every band of ids the registry
-//! claims is well formed and lands on exactly one source.
+//! claims is well formed and lands on exactly one source. The name tables and the lists of options
+//! that hold still are extracted the same way and guarded the same way.
 
 use rbms_skin::dst::DrawStateSource;
 use rbms_skin::property::generated::*;
 use rbms_skin::property::{
-    DefaultState, FLOAT_MAX, FLOAT_MIN, MAPPINGS, Mapping, PropertyKind, SkinStateSource, StateSource, UNMAPPED_BOOLEAN, UNMAPPED_FLOAT, UNMAPPED_INTEGER,
-    UNMAPPED_STRING, UnmappedLog, clamp_float, normalize_boolean_id, source_of,
+    DefaultState, FLOAT_ABSENT, FLOAT_MAX, FLOAT_MIN, INTEGER_ABSENT, MAPPINGS, Mapping, NameSpace, PropertyKind, SkinHost, StateSource, StaticScope,
+    TEXT_ABSENT, UNMAPPED_FLOAT, UnmappedLog, clamp_float, id_of_name, normalize_boolean_id, reference_implements, reference_writes, source_of, static_scope,
 };
 use rbms_skin::timer::{TIMER_CONSTANT_COUNT, TIMER_OFF, timer_id};
 
@@ -25,6 +26,23 @@ const REFERENCE_DECLARATIONS: usize = 968;
 
 /// The prefixes the generator emits, in the order it hashes them.
 const PREFIXES: [&str; 12] = ["OPTION", "NUMBER", "RATE", "SLIDER", "BARGRAPH", "FLOAT", "STRING", "BUTTON", "OFFSET", "VALUE", "IMAGE", "EVENT"];
+
+/// The stems the generator emits a name table for, in the order it hashes them, each with the id
+/// space the table is read as.
+const NAME_STEMS: [(&str, NameSpace); 7] = [
+    ("BOOLEAN", NameSpace::Boolean),
+    ("INTEGER", NameSpace::Integer),
+    ("IMAGE_INDEX", NameSpace::ImageIndex),
+    ("RATE", NameSpace::Rate),
+    ("FLOAT", NameSpace::Float),
+    ("STRING", NameSpace::Text),
+    ("EVENT", NameSpace::Event),
+];
+
+/// The lists of options that hold still, in the order the generator hashes them, each with the
+/// scope it stands for.
+const STATIC_LISTS: [(&str, StaticScope); 3] =
+    [("STATIC_OUTSIDE_SELECT", StaticScope::OutsideSelect), ("STATIC_ON_RESULT", StaticScope::OnResult), ("STATIC_ALWAYS", StaticScope::Always)];
 
 /// How many `OFFSET_*` declarations share an id with an earlier one.
 ///
@@ -43,6 +61,30 @@ fn derive_checksum() -> u64 {
         }
     }
     hash
+}
+
+fn derive_name_checksum() -> u64 {
+    let names = ALL_NAME_TABLES.iter().flat_map(|(stem, table)| table.iter().map(move |(id, name)| format!("{stem}:{name}={id}\n")));
+    let stills = ALL_STATIC_LISTS.iter().chain(ALL_WRITER_LISTS).flat_map(|(list, ids)| ids.iter().map(move |id| format!("{list}={id}\n")));
+    let mut hash = FNV_OFFSET_BASIS;
+    for byte in names.chain(stills).flat_map(String::into_bytes) {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    hash
+}
+
+fn per_stem_count(stem: &str) -> usize {
+    match stem {
+        "BOOLEAN" => BOOLEAN_NAME_COUNT,
+        "INTEGER" => INTEGER_NAME_COUNT,
+        "IMAGE_INDEX" => IMAGE_INDEX_NAME_COUNT,
+        "RATE" => RATE_NAME_COUNT,
+        "FLOAT" => FLOAT_NAME_COUNT,
+        "STRING" => STRING_NAME_COUNT,
+        "EVENT" => EVENT_NAME_COUNT,
+        other => panic!("{other} has no committed count"),
+    }
 }
 
 fn per_prefix_count(prefix: &str) -> usize {
@@ -201,6 +243,88 @@ fn property_kind_names_its_ids() {
 }
 
 #[test]
+fn name_table_checksum_matches() {
+    assert_eq!(derive_name_checksum(), NAME_TABLE_CHECKSUM, "the committed name tables and their checksum disagree; regenerate rather than hand-edit");
+}
+
+#[test]
+fn name_tables_are_in_generator_order_and_hold_their_committed_counts() {
+    let order: Vec<&str> = ALL_NAME_TABLES.iter().map(|(stem, _)| *stem).collect();
+    assert_eq!(order, NAME_STEMS.map(|(stem, _)| stem), "the name index no longer lists the tables in the order the checksum hashes them");
+    for (stem, table) in ALL_NAME_TABLES {
+        assert_eq!(table.len(), per_stem_count(stem), "{stem} name table length and committed count disagree");
+        assert!(!table.is_empty(), "{stem} name table is empty");
+    }
+    let lists: Vec<&str> = ALL_STATIC_LISTS.iter().map(|(list, _)| *list).collect();
+    assert_eq!(lists, STATIC_LISTS.map(|(list, _)| list));
+}
+
+#[test]
+fn a_name_is_unique_within_its_table_and_resolves_to_an_implemented_id() {
+    for ((stem, table), (_, space)) in ALL_NAME_TABLES.iter().zip(NAME_STEMS) {
+        let mut names: Vec<&str> = table.iter().map(|(_, name)| *name).collect();
+        names.sort_unstable();
+        let total = names.len();
+        names.dedup();
+        assert_eq!(names.len(), total, "{stem} names a property twice");
+        for (id, name) in *table {
+            assert!(!name.is_empty() && name.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_'), "{stem} name {name:?} is not an identifier");
+            assert!(reference_implements(space, *id), "{stem} name {name} stands for id {id}, which the reference would not implement");
+            assert!(id_of_name(space, name).is_some(), "{stem} name {name} does not resolve");
+        }
+    }
+}
+
+#[test]
+fn a_named_option_has_a_positive_id_so_that_its_sign_can_carry_a_negation() {
+    for (id, name) in ALL_BOOLEAN_NAME {
+        assert!(*id > 0, "option {name} has the id {id}");
+        assert_eq!(id_of_name(NameSpace::Boolean, name), Some(*id));
+        assert_eq!(id_of_name(NameSpace::Boolean, &format!("!{name}")), Some(-*id));
+    }
+}
+
+#[test]
+fn the_still_options_are_named_options_each_in_one_list() {
+    let named: Vec<i32> = ALL_BOOLEAN_NAME.iter().map(|(id, _)| *id).collect();
+    let mut seen: Vec<i32> = Vec::new();
+    for ((list, ids), (_, scope)) in ALL_STATIC_LISTS.iter().zip(STATIC_LISTS) {
+        assert!(!ids.is_empty(), "{list} is empty");
+        for id in *ids {
+            assert!(named.contains(id), "{list} holds {id}, which is not a named option");
+            assert!(!seen.contains(id), "{id} is in more than one stillness list");
+            assert_eq!(static_scope(*id), scope, "{id} of {list}");
+            assert_eq!(static_scope(-*id), scope, "a negated option holds as still as the option");
+            seen.push(*id);
+        }
+    }
+    let moving = named.iter().filter(|id| !seen.contains(id)).count();
+    assert_eq!(moving + seen.len(), BOOLEAN_NAME_COUNT);
+    assert_eq!(static_scope(OPTION_AUTOPLAYON), StaticScope::Never);
+    assert_eq!(static_scope(OPTION_BGAON), StaticScope::OutsideSelect);
+    assert_eq!(static_scope(OPTION_RESULT_AAA_1P), StaticScope::OnResult);
+    assert_eq!(static_scope(OPTION_ONLINE), StaticScope::Always);
+}
+
+#[test]
+fn the_writable_ids_are_named_ids_of_their_own_space() {
+    let lists: Vec<&str> = ALL_WRITER_LISTS.iter().map(|(list, _)| *list).collect();
+    assert_eq!(lists, ["WRITABLE_RATES", "WRITABLE_STRINGS"]);
+    for ((list, ids), (space, table)) in ALL_WRITER_LISTS.iter().zip([(NameSpace::Rate, ALL_RATE_NAME), (NameSpace::Text, ALL_STRING_NAME)]) {
+        assert!(!ids.is_empty(), "{list} is empty");
+        for id in *ids {
+            assert!(table.iter().any(|(named, _)| named == id), "{list} holds {id}, which has no name");
+            assert!(reference_writes(space, *id));
+        }
+        let writable = table.iter().filter(|(id, _)| reference_writes(space, *id)).count();
+        assert_eq!(writable, ids.len(), "{list} and the writable names of its table disagree");
+    }
+    assert!(reference_writes(NameSpace::Rate, SLIDER_MUSICSELECT_POSITION));
+    assert!(reference_writes(NameSpace::Text, STRING_SEARCHWORD));
+    assert!(!reference_writes(NameSpace::Text, STRING_TITLE));
+}
+
+#[test]
 fn mappings_are_ordered_and_disjoint() {
     for mapping in MAPPINGS {
         assert!(mapping.first_id <= mapping.last_id, "{mapping:?} runs backwards");
@@ -320,10 +444,11 @@ fn unmapped_ids_have_no_source() {
 #[test]
 fn an_unanswered_read_returns_its_documented_default() {
     let state = DefaultState;
-    assert_eq!(state.boolean(OPTION_1P_AAA), UNMAPPED_BOOLEAN);
-    assert_eq!(state.integer(NUMBER_COMBO), UNMAPPED_INTEGER);
-    assert_eq!(state.float(RATE_SCORE), UNMAPPED_FLOAT);
-    assert_eq!(state.string(STRING_TITLE), UNMAPPED_STRING);
+    assert_eq!(state.boolean(OPTION_1P_AAA), None);
+    assert_eq!(state.integer(NUMBER_COMBO), INTEGER_ABSENT);
+    assert_eq!(state.rate(RATE_SCORE), None);
+    assert_eq!(state.float(RATE_SCORE), FLOAT_ABSENT);
+    assert_eq!(state.text(STRING_TITLE), TEXT_ABSENT);
     assert_eq!(state.timer_us(timer_id::PLAY.get()), TIMER_OFF);
     assert_eq!(rbms_skin::dst::OffsetSource::offset(&state, 0), None);
 }

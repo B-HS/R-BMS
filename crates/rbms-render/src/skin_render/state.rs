@@ -6,14 +6,19 @@
 //! one description of a frame feeding both the built-in screen and a document that replaces it.
 //!
 //! Only the ids this build genuinely knows are answered. Everything else falls through to the
-//! registry's documented defaults, so a document that asks for something rbms does not measure draws
-//! a zero or an empty string instead of failing.
+//! registry's `UNMAPPED_*` defaults, so a document that asks for something rbms does not measure
+//! draws a zero or an empty string instead of failing. These adapters predate the host contract's
+//! "absent" values and deliberately keep those older answers -- an unknown option is `Some(false)`,
+//! an unknown number is zero, and the one float accessor answers the rate ids as well -- so every
+//! document they draw looks as it always did.
+
+use std::borrow::Cow;
 
 use rbms_skin::dst::{DrawStateSource, OffsetSource, SkinOffset};
 use rbms_skin::property::generated::*;
 use rbms_skin::property::{
-    FLOAT_MAX, FLOAT_MIN, STRING_KEYNAME_EXTENDED_FIRST, STRING_KEYNAME_FIRST, SkinStateSource, UNMAPPED_BOOLEAN, UNMAPPED_FLOAT, UNMAPPED_INTEGER,
-    UNMAPPED_STRING, clamp_float,
+    FLOAT_MAX, FLOAT_MIN, STRING_KEYNAME_EXTENDED_FIRST, STRING_KEYNAME_FIRST, SkinHost, UNMAPPED_BOOLEAN, UNMAPPED_FLOAT, UNMAPPED_INTEGER, UNMAPPED_STRING,
+    clamp_float,
 };
 use rbms_skin::timer::TIMER_OFF;
 
@@ -235,7 +240,7 @@ impl OffsetSource for PlayViewState<'_> {
 }
 
 impl DrawStateSource for PlayViewState<'_> {
-    fn boolean(&self, id: i32) -> bool {
+    fn boolean(&self, id: i32) -> Option<bool> {
         let asked = id.abs();
         let answer = match asked {
             OPTION_AUTOPLAYON => self.autoplay,
@@ -248,11 +253,11 @@ impl DrawStateSource for PlayViewState<'_> {
             _ if band_of(asked, &GAUGE_EX_IDS).is_some() => EX_RATE_GAUGES.contains(&self.gauge_kind),
             _ => rank_option(asked, OPTION_NOW_AAA_1P, self.hud.ex_score, self.hud.max_ex).unwrap_or(UNMAPPED_BOOLEAN),
         };
-        if id < 0 { !answer } else { answer }
+        Some(if id < 0 { !answer } else { answer })
     }
 }
 
-impl SkinStateSource for PlayViewState<'_> {
+impl SkinHost for PlayViewState<'_> {
     fn integer(&self, id: i32) -> i32 {
         if let Some(index) = JUDGE_COUNT_IDS.iter().position(|count| *count == id) {
             return self.hud.counts[index] as i32;
@@ -287,6 +292,10 @@ impl SkinStateSource for PlayViewState<'_> {
         }
     }
 
+    fn rate(&self, id: i32) -> Option<f32> {
+        Some(self.float(id))
+    }
+
     fn float(&self, id: i32) -> f32 {
         if let Some((_, index)) = JUDGE_RATE_IDS.iter().find(|(rate, _)| *rate == id) {
             return share(f64::from(self.hud.counts[*index]), f64::from(self.total_notes()));
@@ -301,12 +310,12 @@ impl SkinStateSource for PlayViewState<'_> {
         }
     }
 
-    fn string(&self, id: i32) -> &str {
-        match id {
+    fn text(&self, id: i32) -> Cow<'_, str> {
+        Cow::Borrowed(match id {
             STRING_TITLE | STRING_FULLTITLE => self.title,
             STRING_ARTIST | STRING_FULLARTIST => self.artist,
             _ => UNMAPPED_STRING,
-        }
+        })
     }
 
     fn timer_us(&self, _id: i32) -> i64 {
@@ -357,7 +366,7 @@ impl OffsetSource for SelectViewState<'_> {
 }
 
 impl DrawStateSource for SelectViewState<'_> {
-    fn boolean(&self, id: i32) -> bool {
+    fn boolean(&self, id: i32) -> Option<bool> {
         let asked = id.abs();
         let answer = match asked {
             OPTION_FOLDERBAR => matches!(self.view.detail, SelectDetail::Folder { .. }),
@@ -365,16 +374,20 @@ impl DrawStateSource for SelectViewState<'_> {
             OPTION_PANEL1 => self.options_open,
             _ => UNMAPPED_BOOLEAN,
         };
-        if id < 0 { !answer } else { answer }
+        Some(if id < 0 { !answer } else { answer })
     }
 }
 
-impl SkinStateSource for SelectViewState<'_> {
+impl SkinHost for SelectViewState<'_> {
     fn integer(&self, id: i32) -> i32 {
         match id {
             NUMBER_PLAYLEVEL => self.song().and_then(|song| song.level.parse().ok()).unwrap_or(UNMAPPED_INTEGER),
             _ => UNMAPPED_INTEGER,
         }
+    }
+
+    fn rate(&self, id: i32) -> Option<f32> {
+        Some(self.float(id))
     }
 
     fn float(&self, id: i32) -> f32 {
@@ -387,8 +400,8 @@ impl SkinStateSource for SelectViewState<'_> {
         }
     }
 
-    fn string(&self, id: i32) -> &str {
-        match id {
+    fn text(&self, id: i32) -> Cow<'_, str> {
+        Cow::Borrowed(match id {
             STRING_DIRECTORY => &self.view.header,
             STRING_SEARCHWORD => self.view.search.as_deref().unwrap_or(UNMAPPED_STRING),
             STRING_TITLE | STRING_FULLTITLE => self.song().map_or(UNMAPPED_STRING, |song| song.title.as_str()),
@@ -396,7 +409,7 @@ impl SkinStateSource for SelectViewState<'_> {
             STRING_ARTIST | STRING_FULLARTIST => self.song().map_or(UNMAPPED_STRING, |song| song.artist.as_str()),
             STRING_GENRE => self.song().map_or(UNMAPPED_STRING, |song| song.genre_maker.as_str()),
             _ => UNMAPPED_STRING,
-        }
+        })
     }
 
     fn timer_us(&self, _id: i32) -> i64 {
@@ -438,7 +451,7 @@ impl<'a> ResultViewState<'a> {
 }
 
 impl DrawStateSource for ResultViewState<'_> {
-    fn boolean(&self, id: i32) -> bool {
+    fn boolean(&self, id: i32) -> Option<bool> {
         let asked = id.abs();
         let answer = match asked {
             OPTION_RESULT_CLEAR => self.cleared,
@@ -447,11 +460,11 @@ impl DrawStateSource for ResultViewState<'_> {
                 .or_else(|| rank_option(asked, OPTION_NOW_AAA_1P, self.view.ex_score, self.view.max_score))
                 .unwrap_or(UNMAPPED_BOOLEAN),
         };
-        if id < 0 { !answer } else { answer }
+        Some(if id < 0 { !answer } else { answer })
     }
 }
 
-impl SkinStateSource for ResultViewState<'_> {
+impl SkinHost for ResultViewState<'_> {
     fn integer(&self, id: i32) -> i32 {
         if let Some(index) = JUDGE_COUNT_IDS.iter().position(|count| *count == id) {
             return self.view.counts[index] as i32;
@@ -473,6 +486,10 @@ impl SkinStateSource for ResultViewState<'_> {
         }
     }
 
+    fn rate(&self, id: i32) -> Option<f32> {
+        Some(self.float(id))
+    }
+
     fn float(&self, id: i32) -> f32 {
         if let Some((_, index)) = JUDGE_RATE_IDS.iter().find(|(rate, _)| *rate == id) {
             return share(f64::from(self.view.counts[*index]), f64::from(self.view.total_notes));
@@ -486,12 +503,12 @@ impl SkinStateSource for ResultViewState<'_> {
         }
     }
 
-    fn string(&self, id: i32) -> &str {
-        match id {
+    fn text(&self, id: i32) -> Cow<'_, str> {
+        Cow::Borrowed(match id {
             STRING_TITLE | STRING_FULLTITLE => &self.view.title,
             STRING_ARTIST | STRING_FULLARTIST => &self.view.artist,
             _ => UNMAPPED_STRING,
-        }
+        })
     }
 
     fn timer_us(&self, _id: i32) -> i64 {
@@ -538,23 +555,27 @@ impl OffsetSource for DecideViewState<'_> {
 }
 
 impl DrawStateSource for DecideViewState<'_> {
-    fn boolean(&self, id: i32) -> bool {
+    fn boolean(&self, id: i32) -> Option<bool> {
         let answer = match id.abs() {
             OPTION_NOW_LOADING => !self.done,
             OPTION_LOADED => self.done,
             _ => UNMAPPED_BOOLEAN,
         };
-        if id < 0 { !answer } else { answer }
+        Some(if id < 0 { !answer } else { answer })
     }
 }
 
-impl SkinStateSource for DecideViewState<'_> {
+impl SkinHost for DecideViewState<'_> {
     fn integer(&self, id: i32) -> i32 {
         match id {
             NUMBER_LOADING_PROGRESS => (self.progress.clamp(FLOAT_MIN, FLOAT_MAX) * GAUGE_FULL) as i32,
             NUMBER_PLAYLEVEL => self.chart.level,
             _ => UNMAPPED_INTEGER,
         }
+    }
+
+    fn rate(&self, id: i32) -> Option<f32> {
+        Some(self.float(id))
     }
 
     fn float(&self, id: i32) -> f32 {
@@ -564,14 +585,14 @@ impl SkinStateSource for DecideViewState<'_> {
         }
     }
 
-    fn string(&self, id: i32) -> &str {
-        match id {
+    fn text(&self, id: i32) -> Cow<'_, str> {
+        Cow::Borrowed(match id {
             STRING_TITLE | STRING_FULLTITLE => self.title,
             STRING_SUBTITLE => self.chart.subtitle,
             STRING_ARTIST | STRING_FULLARTIST => self.chart.artist,
             STRING_GENRE => self.chart.genre,
             _ => UNMAPPED_STRING,
-        }
+        })
     }
 
     fn timer_us(&self, _id: i32) -> i64 {
@@ -607,27 +628,31 @@ impl OffsetSource for KeyConfigViewState<'_> {
 }
 
 impl DrawStateSource for KeyConfigViewState<'_> {
-    fn boolean(&self, id: i32) -> bool {
-        if id < 0 { !UNMAPPED_BOOLEAN } else { UNMAPPED_BOOLEAN }
+    fn boolean(&self, id: i32) -> Option<bool> {
+        Some(if id < 0 { !UNMAPPED_BOOLEAN } else { UNMAPPED_BOOLEAN })
     }
 }
 
-impl SkinStateSource for KeyConfigViewState<'_> {
+impl SkinHost for KeyConfigViewState<'_> {
     fn integer(&self, _id: i32) -> i32 {
         UNMAPPED_INTEGER
+    }
+
+    fn rate(&self, id: i32) -> Option<f32> {
+        Some(self.float(id))
     }
 
     fn float(&self, _id: i32) -> f32 {
         UNMAPPED_FLOAT
     }
 
-    fn string(&self, id: i32) -> &str {
+    fn text(&self, id: i32) -> Cow<'_, str> {
         let lane = match id {
             id if id >= STRING_KEYNAME_EXTENDED_FIRST => id - STRING_KEYNAME_EXTENDED_FIRST,
             id if id >= STRING_KEYNAME_FIRST => id - STRING_KEYNAME_FIRST,
-            _ => return UNMAPPED_STRING,
+            _ => return Cow::Borrowed(UNMAPPED_STRING),
         };
-        self.keys.get(lane.max(0) as usize).map_or(UNMAPPED_STRING, String::as_str)
+        Cow::Borrowed(self.keys.get(lane.max(0) as usize).map_or(UNMAPPED_STRING, String::as_str))
     }
 
     fn timer_us(&self, _id: i32) -> i64 {

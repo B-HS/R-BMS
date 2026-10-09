@@ -7,8 +7,9 @@
 //! option and Lua conditions first, then the region, then the pointer test.
 //!
 //! Nothing here reaches for a renderer or for Lua itself. Game state arrives through
-//! [`DrawStateSource`], compiled Lua expressions through [`LuaDrawEval`], so this module is
-//! testable with plain fakes and compiles without the `lua` feature.
+//! [`DrawStateSource`]; the function values a Lua skin hands over, the scripts a document wrote as
+//! strings and the property names a skin spells out all arrive through [`LuaDrawEval`], so this module is testable
+//! with plain fakes and compiles without the `lua` feature.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -81,28 +82,104 @@ pub trait OffsetSource {
 
 /// The game state a draw condition consults.
 ///
-/// The property registry implements this over the whole skin state; the negation rule for a
-/// negative id lives in [`Self::boolean`], not in this module.
+/// The host contract ([`SkinHost`](crate::property::SkinHost)) builds on this, so the one value an
+/// application implements gates a destination and answers every other read alike. The negation rule
+/// for a negative id lives in [`Self::boolean`], not in this module.
 pub trait DrawStateSource: OffsetSource {
-    /// The option under `id`. A negative id reads `abs(id)` and negates the answer
-    /// (`BooleanPropertyFactory.getBooleanProperty`), and an id the build does not implement reads
-    /// as `false`.
-    fn boolean(&self, id: i32) -> bool;
+    /// The option under `id`, exactly as the skin wrote it. A negative id reads `abs(id)` and negates
+    /// the answer, and `None` says the host implements no such option, whichever sign it was asked
+    /// with (`BooleanPropertyFactory.getBooleanProperty`).
+    ///
+    /// The reference settles an unimplemented id against the skin's own customisation options when
+    /// the skin is prepared, which is the loader's business. One that reaches a frame anyway hides
+    /// its object, and a script's `main_state.option` reads it as `false`.
+    fn boolean(&self, id: i32) -> Option<bool>;
 }
 
-/// A handle to a Lua expression the loader compiled once at load time.
+/// A handle to a Lua function value a skin handed over in place of a property id.
 ///
-/// Opaque on purpose: this module never parses or runs Lua, it only asks [`LuaDrawEval`] for the
-/// answer, so the interpolator stands on its own without the `lua` feature.
+/// A Lua skin writes `draw = function() ... end` where a JSON skin writes an option id. The function
+/// itself stays inside the interpreter the skin was loaded into; the model carries this index into
+/// that interpreter's function registry, which is what keeps the model free of the `lua` feature.
+/// The registry hands out one id per distinct function value, so two objects that share a function
+/// share an id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct LuaExprId(pub u32);
+pub struct LuaFnId(pub u32);
 
-/// Evaluates the compiled Lua expressions a document used in place of option ids.
+/// Evaluates everything a skin wrote where a property id belongs: a Lua function value, which is
+/// also what a script a document wrote as a string is compiled into, or a property name.
+///
+/// Every method answers a value rather than an `Option`, because the reference has no failure to
+/// report there: a function that raises yields the fallback of its type, is logged, and is called
+/// again on the next frame (`SkinLuaAccessor.java:601-747`). Each of them defaults to that fallback,
+/// so an evaluator that overrides nothing draws a skin exactly as the reference draws one whose
+/// every function raised. [`NullLuaEval`] is that evaluator.
+///
+/// The opaque handles are the point: this module never parses or runs Lua, it only asks for the
+/// answer, so the interpolator stands on its own without the `lua` feature.
 pub trait LuaDrawEval {
-    /// The expression's value for this frame, or `None` when it raised or ran past its budget. A
-    /// failed expression hides its object rather than failing the skin.
-    fn eval_draw(&self, expr: LuaExprId) -> Option<bool>;
+    /// Calls a function standing in for a boolean property and reads its result as Lua truth: only
+    /// `nil` and `false` are false, so a function that returns nothing hides its object. `false` when
+    /// the call fails.
+    fn call_boolean(&self, _function: LuaFnId) -> bool {
+        false
+    }
+
+    /// Calls a function standing in for an integer property, truncating its result towards zero.
+    /// Zero when the call fails.
+    fn call_integer(&self, _function: LuaFnId) -> i32 {
+        0
+    }
+
+    /// Calls a function standing in for a float property. Zero when the call fails.
+    fn call_float(&self, _function: LuaFnId) -> f32 {
+        0.0
+    }
+
+    /// Calls a function standing in for a string property. Empty when the call fails.
+    fn call_text(&self, _function: LuaFnId) -> String {
+        String::new()
+    }
+
+    /// Calls a function standing in for a timer: the microsecond the timer switched on, or
+    /// [`TIMER_OFF`]. A function that returns nothing answers zero, a timer that has been on since
+    /// the scene began; one that fails answers [`TIMER_OFF`].
+    fn call_timer(&self, _function: LuaFnId) -> i64 {
+        TIMER_OFF
+    }
+
+    /// The boolean property a skin named instead of numbering, exactly as it wrote the name: a
+    /// leading `!` negates (`BooleanPropertyFactory.getBooleanProperty(String)`). `false` for a name
+    /// nothing answers to.
+    fn named_boolean(&self, _name: &str) -> bool {
+        false
+    }
+
+    /// The integer property a skin named instead of numbering. Zero for a name nothing answers to.
+    fn named_integer(&self, _name: &str) -> i32 {
+        0
+    }
+
+    /// The rate property a skin named instead of numbering. Zero for a name nothing answers to.
+    fn named_float(&self, _name: &str) -> f32 {
+        0.0
+    }
+
+    /// The string property a skin named instead of numbering. Empty for a name nothing answers to.
+    fn named_text(&self, _name: &str) -> String {
+        String::new()
+    }
 }
+
+/// The evaluator of a frame with no interpreter behind it.
+///
+/// Every function and name answers the fallback of its type, so a skin drawn against this looks the
+/// way the reference draws one whose every script failed: gated objects hidden, numbers at zero,
+/// text empty and script timers off.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct NullLuaEval;
+
+impl LuaDrawEval for NullLuaEval {}
 
 /// How a keyframe pair is interpolated (`SkinObject.getRate`, `SkinObject.java:545-575`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -178,30 +255,44 @@ impl MouseRect {
 }
 
 /// One condition an object must meet to be drawn at all.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DrawCondition {
     /// An option id, sign included. The negation of a negative id belongs to
     /// [`DrawStateSource::boolean`]; this carries the id exactly as the document wrote it.
     Option(i32),
-    /// A compiled Lua expression.
-    Lua(LuaExprId),
+    /// A Lua function: a function value a Lua skin handed over, or a script a document wrote as a
+    /// string and the loader compiled. It is called every frame the conditions before it hold
+    /// ([`LuaDrawEval::call_boolean`]). Skins hang per-frame work on these, so the order they are
+    /// called in is the order the document declared them in.
+    Function(LuaFnId),
+    /// A boolean property the skin named rather than numbered ([`LuaDrawEval::named_boolean`]).
+    Name(String),
 }
 
-/// What a destination names its timer with.
-///
-/// A document may name a built-in or skin-declared timer by id, and that is the one form there is so
-/// far; the enum is the place a script-computed timer joins it.
+/// What a destination, or an image's cell animation, names its timer with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TimerRef {
     /// A timer id, read from the [`TimerState`] the frame is drawn against.
     Id(TimerId),
+    /// A Lua function that computes the moment the timer switched on, called on every frame it is
+    /// read ([`LuaDrawEval::call_timer`]).
+    Lua(LuaFnId),
 }
 
 impl TimerRef {
     /// The microsecond the timer switched on, or [`TIMER_OFF`] (`TimerProperty.getMicro`).
-    pub fn value_us(self, timers: &TimerState) -> i64 {
+    ///
+    /// A function timer read with no evaluator is off, which hides whatever it times.
+    pub fn value_us(self, timers: &TimerState, lua: Option<&dyn LuaDrawEval>) -> i64 {
         match self {
             Self::Id(id) => timers.value_us(id),
+            Self::Lua(function) => match lua {
+                Some(lua) => lua.call_timer(function),
+                None => {
+                    warn_missing_evaluator();
+                    TIMER_OFF
+                }
+            },
         }
     }
 }
@@ -288,8 +379,16 @@ impl WarnOnce {
     }
 }
 
-/// Fires once when a document carries Lua draw conditions but the caller passed no evaluator.
+/// Fires once when a document needs an evaluator but the caller passed none.
 static MISSING_LUA_EVALUATOR: WarnOnce = WarnOnce::new();
+
+/// Reports, once for the life of the process, that a skin's conditions or timers need an evaluator
+/// the caller did not pass.
+fn warn_missing_evaluator() {
+    if MISSING_LUA_EVALUATOR.should_warn() {
+        eprintln!("skin draw conditions and timers need Lua but no evaluator was supplied; those objects stay hidden");
+    }
+}
 
 /// Turns a document's integer `op` list into draw conditions, the way `SkinObject.setDrawCondition`
 /// does.
@@ -391,11 +490,14 @@ fn offset_alpha(alpha: u8, shift: f32) -> u8 {
 /// reference gets there by truncating the clock and the timer separately before it subtracts them
 /// (`TimerManager.getNowTime` and `TimerProperty.get`), so the same two divisions happen here rather
 /// than one division of the difference.
-pub fn resolve(track: &DestinationTrack, now_us: i64, timers: &TimerState, offsets: &dyn OffsetSource) -> Option<Resolved> {
+///
+/// `lua` is what a track timed by a function asks for its start; such a track read without one is
+/// off.
+pub fn resolve(track: &DestinationTrack, now_us: i64, timers: &TimerState, offsets: &dyn OffsetSource, lua: Option<&dyn LuaDrawEval>) -> Option<Resolved> {
     let last = track.frames.len().checked_sub(1)?;
     let mut time = now_us / MICROS_PER_MILLI;
     if let Some(timer) = track.timer {
-        let started_us = timer.value_us(timers);
+        let started_us = timer.value_us(timers, lua);
         if started_us == TIMER_OFF {
             return None;
         }
@@ -459,18 +561,15 @@ pub fn resolve(track: &DestinationTrack, now_us: i64, timers: &TimerState, offse
 }
 
 /// Whether one draw condition holds this frame.
-fn condition_holds(condition: DrawCondition, state: &dyn DrawStateSource, lua: Option<&dyn LuaDrawEval>) -> bool {
-    match condition {
-        DrawCondition::Option(id) => state.boolean(id),
-        DrawCondition::Lua(expr) => match lua {
-            Some(lua) => lua.eval_draw(expr).unwrap_or(false),
-            None => {
-                if MISSING_LUA_EVALUATOR.should_warn() {
-                    eprintln!("skin draw conditions need Lua but no evaluator was supplied; those objects stay hidden");
-                }
-                false
-            }
-        },
+fn condition_holds(condition: &DrawCondition, state: &dyn DrawStateSource, lua: Option<&dyn LuaDrawEval>) -> bool {
+    match (condition, lua) {
+        (DrawCondition::Option(id), _) => state.boolean(*id).unwrap_or(false),
+        (DrawCondition::Function(function), Some(lua)) => lua.call_boolean(*function),
+        (DrawCondition::Name(name), Some(lua)) => lua.named_boolean(name),
+        (_, None) => {
+            warn_missing_evaluator();
+            false
+        }
     }
 }
 
@@ -481,8 +580,8 @@ fn condition_holds(condition: DrawCondition, state: &dyn DrawStateSource, lua: O
 /// region; then the region, moved by `offset_xy`; then the pointer test against the moved region.
 /// A track with a pointer rectangle and no pointer position is not drawn.
 ///
-/// `lua` may be `None` while no evaluator exists yet; Lua conditions then read as false and warn
-/// once.
+/// `lua` may be `None` while no evaluator exists yet; Lua conditions then read as false, a function
+/// timer reads as off, and the first of either warns once.
 pub fn prepare(
     track: &DestinationTrack,
     now_us: i64,
@@ -493,12 +592,12 @@ pub fn prepare(
     mouse: Option<(f32, f32)>,
 ) -> Option<Resolved> {
     for condition in &track.draw_conditions {
-        if !condition_holds(*condition, state, lua) {
+        if !condition_holds(condition, state, lua) {
             return None;
         }
     }
 
-    let mut resolved = resolve(track, now_us, timers, state)?;
+    let mut resolved = resolve(track, now_us, timers, state, lua)?;
     let (offset_x, offset_y) = offset_xy;
     resolved.rect.x += offset_x;
     resolved.rect.y += offset_y;

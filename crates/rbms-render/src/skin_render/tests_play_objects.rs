@@ -6,11 +6,13 @@
 //! colour per part, which is what lets a test name the cell that reached the screen rather than
 //! recognising a picture.
 
+use std::borrow::Cow;
+
 use rbms_model::{LnKind, Mode, Note, NoteKind, TimeLine};
 use rbms_skin::dst::{DestinationTrack, DrawStateSource, Keyframe, OffsetSource, SkinColor, SkinOffset, SkinRect};
 use rbms_skin::loader::StretchKind;
 use rbms_skin::property::generated::{FLOAT_GROOVEGAUGE_1P, NUMBER_COMBO, OPTION_1P_PERFECT};
-use rbms_skin::property::{SkinStateSource, UNMAPPED_FLOAT, UNMAPPED_INTEGER, UNMAPPED_STRING};
+use rbms_skin::property::{SkinHost, UNMAPPED_FLOAT, UNMAPPED_INTEGER, UNMAPPED_STRING};
 use rbms_skin::timer::{TIMER_OFF, TimerState};
 
 use super::covers::{CoverBand, CoverBody};
@@ -109,12 +111,12 @@ impl OffsetSource for PlayState {
 }
 
 impl DrawStateSource for PlayState {
-    fn boolean(&self, id: i32) -> bool {
-        self.judge.is_some_and(|judge| id == OPTION_1P_PERFECT + judge as i32)
+    fn boolean(&self, id: i32) -> Option<bool> {
+        Some(self.judge.is_some_and(|judge| id == OPTION_1P_PERFECT + judge as i32))
     }
 }
 
-impl SkinStateSource for PlayState {
+impl SkinHost for PlayState {
     fn integer(&self, id: i32) -> i32 {
         if id == NUMBER_COMBO { self.combo } else { UNMAPPED_INTEGER }
     }
@@ -123,8 +125,8 @@ impl SkinStateSource for PlayState {
         if id == FLOAT_GROOVEGAUGE_1P { self.gauge } else { UNMAPPED_FLOAT }
     }
 
-    fn string(&self, _id: i32) -> &str {
-        UNMAPPED_STRING
+    fn text(&self, _id: i32) -> Cow<'_, str> {
+        Cow::Borrowed(UNMAPPED_STRING)
     }
 
     fn timer_us(&self, _id: i32) -> i64 {

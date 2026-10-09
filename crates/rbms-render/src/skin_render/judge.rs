@@ -13,7 +13,7 @@
 //! judgement its first does -- see [`super::state`], which answers both judgement bands from the one
 //! judgement the run carries.
 
-use rbms_skin::dst::{DrawStateSource, LuaDrawEval, Resolved, SkinRect, prepare};
+use rbms_skin::dst::{DrawStateSource, Resolved, SkinRect, prepare};
 use rbms_skin::loader::{LoadedSkin, NamedTrack, StretchKind};
 use rbms_skin::model::{Destination, JudgeDef};
 use rbms_skin::property::generated::{NUMBER_COMBO, OPTION_1P_PERFECT, OPTION_2P_PERFECT};
@@ -143,7 +143,7 @@ fn player_of(def: &JudgeDef, id: &str, warnings: &mut Vec<String>) -> usize {
 /// Which judgement the last input took, or `None` while there has not been one.
 fn current_judgement(player: usize, frame: &SkinFrame<'_>) -> Option<usize> {
     let base = JUDGE_OPTION_BASE[player.min(JUDGE_OPTION_BASE.len() - 1)];
-    (0..JUDGEMENTS).find(|index| frame.state.boolean(base + *index as i32))
+    (0..JUDGEMENTS).find(|index| frame.state.boolean(base + *index as i32).unwrap_or(false))
 }
 
 /// The same placement over one of the pop-up's own parts, tinted and turned the way that part's
@@ -161,8 +161,7 @@ fn part_placement<'a>(object: &'a SkinObject, resolved: &Resolved, place: &Place
 /// Resolves one part's destination for this frame, measured from `origin`.
 fn resolve_part(object: &SkinObject, origin: (f32, f32), frame: &SkinFrame<'_>) -> Option<Resolved> {
     let state: &dyn DrawStateSource = frame.state;
-    let gate: Option<&dyn LuaDrawEval> = frame.lua.map(|lua| lua as &dyn LuaDrawEval);
-    prepare(&object.track, frame.now_us, frame.timers, state, gate, origin, frame.mouse).filter(|resolved| resolved.color.a != 0)
+    prepare(&object.track, frame.now_us, frame.timers, state, frame.script(), origin, frame.mouse).filter(|resolved| resolved.color.a != 0)
 }
 
 /// Draws the pop-up, answering whether anything reached the screen.
@@ -234,7 +233,7 @@ fn combo_run(body: &NumberBody, frame: &SkinFrame<'_>) -> Option<ComboRun> {
     if INTEGER_NO_VALUE.contains(&value) {
         return None;
     }
-    let set = body.sprite.animation_index(body.layout.sets, frame.now_us, frame.timers);
+    let set = body.sprite.animation_index(body.layout.sets, frame.now_us, frame.timers, frame.script());
     Some(ComboRun { places: integer_glyphs(body, value), set, negative: value < 0 })
 }
 
@@ -269,6 +268,6 @@ fn draw_word<R: Renderer>(r: &mut R, place: &Placement<'_>, body: &Body, rect: S
     let Some((sprite, first, count)) = image.variants.get(chosen).or_else(|| image.variants.first()) else {
         return false;
     };
-    let cell = first + sprite.animation_index(*count, frame.now_us, frame.timers);
+    let cell = first + sprite.animation_index(*count, frame.now_us, frame.timers, frame.script());
     place.cell(r, sprite, cell, rect)
 }

@@ -13,12 +13,14 @@ pub mod boolean;
 pub mod float;
 pub mod integer;
 pub mod misc;
+pub mod names;
 pub mod text;
 
 pub use boolean::*;
 pub use float::*;
 pub use integer::*;
 pub use misc::*;
+pub use names::*;
 pub use text::*;
 
 /// How many `OPTION_*` declarations the reference source holds.
@@ -83,3 +85,46 @@ pub const ALL_PROPERTY_TABLES: &[(&str, &[(i32, &str)])] = &[
 /// FNV-1a 64 over the `NAME=VALUE` lines of [`ALL_PROPERTY_TABLES`], table by table and in
 /// order within each.
 pub const PROPERTY_TABLE_CHECKSUM: u64 = 0x4d64eaf3bb954b86;
+
+/// How many constants the reference's `BooleanType` enum holds.
+pub const BOOLEAN_NAME_COUNT: usize = 216;
+
+/// How many constants the reference's `ValueType` enum holds.
+pub const INTEGER_NAME_COUNT: usize = 148;
+
+/// How many constants the reference's `IndexType` enum holds.
+pub const IMAGE_INDEX_NAME_COUNT: usize = 62;
+
+/// How many constants the reference's `RateType` enum holds.
+pub const RATE_NAME_COUNT: usize = 31;
+
+/// How many constants the reference's `FloatType` enum holds.
+pub const FLOAT_NAME_COUNT: usize = 29;
+
+/// How many constants the reference's `StringType` enum holds.
+pub const STRING_NAME_COUNT: usize = 26;
+
+/// How many constants the reference's `EventType` enum holds.
+pub const EVENT_NAME_COUNT: usize = 54;
+
+/// Every emitted name table with its stem, in the order [`NAME_TABLE_CHECKSUM`] hashes them.
+pub const ALL_NAME_TABLES: &[(&str, &[(i32, &str)])] = &[
+    ("BOOLEAN", ALL_BOOLEAN_NAME),
+    ("INTEGER", ALL_INTEGER_NAME),
+    ("IMAGE_INDEX", ALL_IMAGE_INDEX_NAME),
+    ("RATE", ALL_RATE_NAME),
+    ("FLOAT", ALL_FLOAT_NAME),
+    ("STRING", ALL_STRING_NAME),
+    ("EVENT", ALL_EVENT_NAME),
+];
+
+/// Every emitted stillness list with its name, in the order [`NAME_TABLE_CHECKSUM`] hashes them.
+pub const ALL_STATIC_LISTS: &[(&str, &[i32])] =
+    &[("STATIC_OUTSIDE_SELECT", STATIC_OUTSIDE_SELECT), ("STATIC_ON_RESULT", STATIC_ON_RESULT), ("STATIC_ALWAYS", STATIC_ALWAYS)];
+
+/// Every emitted writer list with its name, in the order [`NAME_TABLE_CHECKSUM`] hashes them.
+pub const ALL_WRITER_LISTS: &[(&str, &[i32])] = &[("WRITABLE_RATES", WRITABLE_RATES), ("WRITABLE_STRINGS", WRITABLE_STRINGS)];
+
+/// FNV-1a 64 over the `STEM:name=id` lines of [`ALL_NAME_TABLES`] followed by the `LIST=id` lines
+/// of [`ALL_STATIC_LISTS`] and of [`ALL_WRITER_LISTS`], each in order.
+pub const NAME_TABLE_CHECKSUM: u64 = 0x738a4ba1021efcb0;

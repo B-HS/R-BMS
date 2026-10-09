@@ -1,0 +1,1 @@
+return { type = 15, name = "Course result", w = 1280, h = 720, destination = {} }

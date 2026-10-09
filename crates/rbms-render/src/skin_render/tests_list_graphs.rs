@@ -6,12 +6,13 @@
 //! and checks what reached the canvas -- which is the only way to tell "drew nothing because the
 //! series was empty" from "drew nothing because the object never resolved".
 
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
-use rbms_skin::dst::{DrawStateSource, LuaExprId, OffsetSource, SkinOffset};
+use rbms_skin::dst::{DrawStateSource, OffsetSource, SkinOffset};
 use rbms_skin::loader::{SkinLoadOptions, SkinUserConfig, load_skin};
 use rbms_skin::property::generated::OPTION_PANEL1;
-use rbms_skin::property::{SkinStateSource, UNMAPPED_BOOLEAN, UNMAPPED_FLOAT, UNMAPPED_INTEGER, UNMAPPED_STRING};
+use rbms_skin::property::{SkinHost, UNMAPPED_BOOLEAN, UNMAPPED_FLOAT, UNMAPPED_INTEGER, UNMAPPED_STRING};
 use rbms_skin::timer::{TIMER_OFF, TimerState};
 
 use super::color::{modulate, parse_hex_color};
@@ -69,10 +70,6 @@ impl SkinAssets for SolidAssets {
     fn image(&mut self, _path: &Path) -> Option<SkinImage> {
         SkinImage::new(TEX_SIZE, TEX_SIZE, vec![u8::MAX; (TEX_SIZE * TEX_SIZE) as usize * BYTES_PER_PIXEL])
     }
-
-    fn expression(&mut self, _source: &str) -> Option<LuaExprId> {
-        None
-    }
 }
 
 /// A state source that answers nothing, because every fixture object reads its numbers from the
@@ -86,12 +83,12 @@ impl OffsetSource for Nothing {
 }
 
 impl DrawStateSource for Nothing {
-    fn boolean(&self, id: i32) -> bool {
-        if id < 0 { !UNMAPPED_BOOLEAN } else { UNMAPPED_BOOLEAN }
+    fn boolean(&self, id: i32) -> Option<bool> {
+        Some(if id < 0 { !UNMAPPED_BOOLEAN } else { UNMAPPED_BOOLEAN })
     }
 }
 
-impl SkinStateSource for Nothing {
+impl SkinHost for Nothing {
     fn integer(&self, _id: i32) -> i32 {
         UNMAPPED_INTEGER
     }
@@ -100,8 +97,8 @@ impl SkinStateSource for Nothing {
         UNMAPPED_FLOAT
     }
 
-    fn string(&self, _id: i32) -> &str {
-        UNMAPPED_STRING
+    fn text(&self, _id: i32) -> Cow<'_, str> {
+        Cow::Borrowed(UNMAPPED_STRING)
     }
 
     fn timer_us(&self, _id: i32) -> i64 {
@@ -318,8 +315,8 @@ fn empty_browser() -> SelectView {
 fn the_option_panel_reports_itself_open_through_the_reference_option() {
     let view = empty_browser();
 
-    assert!(SelectViewState::new(&view, 0, None, true).boolean(OPTION_PANEL1), "an open panel does not report itself open");
-    assert!(!SelectViewState::new(&view, 0, None, false).boolean(OPTION_PANEL1), "a closed panel reports itself open");
+    assert_eq!(SelectViewState::new(&view, 0, None, true).boolean(OPTION_PANEL1), Some(true), "an open panel does not report itself open");
+    assert_eq!(SelectViewState::new(&view, 0, None, false).boolean(OPTION_PANEL1), Some(false), "a closed panel reports itself open");
 }
 
 #[test]

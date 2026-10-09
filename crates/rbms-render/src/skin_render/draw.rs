@@ -10,7 +10,7 @@
 
 use std::borrow::Cow;
 
-use rbms_skin::dst::{DrawStateSource, LuaDrawEval, SkinRect, prepare};
+use rbms_skin::dst::{DrawStateSource, SkinRect, prepare};
 use rbms_skin::loader::{Filtering, filtering_for, stretch_rect};
 
 use super::object::{
@@ -136,8 +136,7 @@ fn texture_filter(filtering: Filtering) -> TextureFilter {
 /// otherwise keep darkening the screen at `a: 0`.
 pub(crate) fn draw_object<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, object: &SkinObject, viewport: &SkinViewport, frame: &SkinFrame<'_>) -> bool {
     let state: &dyn DrawStateSource = frame.state;
-    let gate: Option<&dyn LuaDrawEval> = frame.lua.map(|lua| lua as &dyn LuaDrawEval);
-    let Some(resolved) = prepare(&object.track, frame.now_us, frame.timers, state, gate, (0.0, 0.0), frame.mouse) else {
+    let Some(resolved) = prepare(&object.track, frame.now_us, frame.timers, state, frame.script(), (0.0, 0.0), frame.mouse) else {
         return false;
     };
 
@@ -186,7 +185,7 @@ fn draw_image<R: Renderer>(r: &mut R, place: &Placement<'_>, body: &ImageBody, r
     let Some((sprite, first, count)) = body.variants.get(chosen).or_else(|| body.variants.first()) else {
         return false;
     };
-    let cell = first + sprite.animation_index(*count, frame.now_us, frame.timers);
+    let cell = first + sprite.animation_index(*count, frame.now_us, frame.timers, frame.script());
     place.cell(r, sprite, cell, rect)
 }
 
@@ -259,7 +258,7 @@ fn draw_number<R: Renderer>(r: &mut R, place: &Placement<'_>, body: &NumberBody,
         return false;
     }
     let places = integer_glyphs(body, value);
-    let set = body.sprite.animation_index(body.layout.sets, frame.now_us, frame.timers);
+    let set = body.sprite.animation_index(body.layout.sets, frame.now_us, frame.timers, frame.script());
     let run = DigitRun {
         space: body.space,
         align: body.align,
@@ -289,7 +288,7 @@ fn draw_float<R: Renderer>(r: &mut R, place: &Placement<'_>, body: &FloatBody, r
     if places.is_empty() {
         return false;
     }
-    let set = body.sprite.animation_index(body.layout.sets, frame.now_us, frame.timers);
+    let set = body.sprite.animation_index(body.layout.sets, frame.now_us, frame.timers, frame.script());
     let run = DigitRun {
         space: body.space,
         align: body.align,
@@ -349,7 +348,7 @@ fn draw_slider<R: Renderer>(r: &mut R, place: &Placement<'_>, body: &SliderBody,
         DIRECTION_LEFT => at.x -= travel,
         _ => {}
     }
-    let cell = body.sprite.animation_index(body.sprite.cells(), frame.now_us, frame.timers);
+    let cell = body.sprite.animation_index(body.sprite.cells(), frame.now_us, frame.timers, frame.script());
     place.cell(r, &body.sprite, cell, at)
 }
 
@@ -363,7 +362,7 @@ fn draw_graph<R: Renderer>(r: &mut R, place: &Placement<'_>, body: &GraphBody, r
     if value <= 0.0 {
         return false;
     }
-    let cell = body.sprite.animation_index(body.sprite.cells(), frame.now_us, frame.timers);
+    let cell = body.sprite.animation_index(body.sprite.cells(), frame.now_us, frame.timers, frame.script());
     let mut region = body.sprite.region(cell);
     let mut at = rect;
     if body.direction == GRAPH_VERTICAL {

@@ -35,9 +35,9 @@ mod tests_play_objects;
 use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use rbms_skin::dst::{LuaDrawEval, LuaExprId, SkinColor, SkinRect};
+use rbms_skin::dst::{LuaDrawEval, SkinColor, SkinRect};
 use rbms_skin::loader::LoadedSkin;
-use rbms_skin::property::SkinStateSource;
+use rbms_skin::property::SkinHost;
 use rbms_skin::timer::TimerState;
 
 use crate::font::TextContext;
@@ -96,11 +96,13 @@ impl SkinImage {
     }
 }
 
-/// What the host supplies that this crate cannot: an image decoder, and a Lua compiler.
+/// What the host supplies that this crate cannot: decoded images and the bytes of fonts.
 ///
-/// Both are the host's because both are outside a renderer's business. Decoding lives with whatever
-/// image library the application already links, and compiling belongs to the sandbox that will
-/// evaluate the result, which is `rbms_skin`'s and is reached through [`SkinExprEval`] at draw time.
+/// Decoding is the host's because it is outside a renderer's business: it lives with whatever image
+/// library the application already links. Nothing is compiled here either. A skin's Lua -- the
+/// functions a Lua skin hands over and the scripts a document wrote as strings -- is in the
+/// interpreter `rbms_skin` loaded the skin into, and a frame reaches it through
+/// [`LuaDrawEval`].
 pub trait SkinAssets {
     /// Decode the image file at `path` into RGBA8 pixels, or `None` when it cannot be read.
     fn image(&mut self, path: &Path) -> Option<SkinImage>;
@@ -113,51 +115,16 @@ pub trait SkinAssets {
     fn font(&mut self, path: &Path) -> Option<Vec<u8>> {
         std::fs::read(path).ok()
     }
-
-    /// Compile one Lua expression, returning the handle a frame evaluates it by. A host without a
-    /// sandbox returns `None`, which drops the one object that needed it.
-    fn expression(&mut self, source: &str) -> Option<LuaExprId>;
 }
 
-/// Evaluates the compiled expressions a document wrote in place of property ids.
+/// A frame with no interpreter behind it: nothing evaluates.
 ///
-/// The draw gating half comes from the supertrait, so one implementation serves both this and
-/// [`rbms_skin::dst::prepare`].
-pub trait SkinExprEval: LuaDrawEval {
-    /// The expression's integer value this frame, or `None` when it raised or ran out of budget.
-    fn eval_integer(&self, expr: LuaExprId) -> Option<i32>;
-    /// The expression's number value this frame.
-    fn eval_float(&self, expr: LuaExprId) -> Option<f32>;
-    /// The expression's text value this frame.
-    fn eval_text(&self, expr: LuaExprId) -> Option<String>;
-}
-
-/// A host with no Lua sandbox: nothing compiles and nothing evaluates.
-///
-/// A document that carries no expression draws identically with this in place, so a build that has
-/// not wired a sandbox up yet is not blocked from rendering ordinary skins.
+/// A skin that carries no Lua draws identically with this in place. A function value or a property
+/// name reads as its type's fallback: false, zero, empty text, and a timer that is off.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct NoExpressions;
 
-impl LuaDrawEval for NoExpressions {
-    fn eval_draw(&self, _expr: LuaExprId) -> Option<bool> {
-        None
-    }
-}
-
-impl SkinExprEval for NoExpressions {
-    fn eval_integer(&self, _expr: LuaExprId) -> Option<i32> {
-        None
-    }
-
-    fn eval_float(&self, _expr: LuaExprId) -> Option<f32> {
-        None
-    }
-
-    fn eval_text(&self, _expr: LuaExprId) -> Option<String> {
-        None
-    }
-}
+impl LuaDrawEval for NoExpressions {}
 
 /// Maps the document's own coordinate space onto the screen being drawn.
 ///
@@ -215,9 +182,9 @@ pub struct SkinFrame<'a> {
     /// on.
     pub now_us: i64,
     pub timers: &'a TimerState,
-    pub state: &'a dyn SkinStateSource,
-    /// The compiled expressions, when the host has a sandbox.
-    pub lua: Option<&'a dyn SkinExprEval>,
+    pub state: &'a dyn SkinHost,
+    /// The skin's Lua bound to this frame, when the skin has an interpreter.
+    pub lua: Option<&'a dyn LuaDrawEval>,
     /// Where the pointer is in document coordinates, for the objects a document gated on it.
     pub mouse: Option<(f32, f32)>,
     /// The background image this frame, already registered with the renderer.
@@ -225,6 +192,13 @@ pub struct SkinFrame<'a> {
     /// The screen-shaped state a property id cannot carry: rows, series and lane geometry. A screen
     /// with nothing of the kind to say passes [`FrameExtra::None`].
     pub extra: FrameExtra<'a>,
+}
+
+impl<'a> SkinFrame<'a> {
+    /// The evaluator as destination gating and timers ask for it.
+    pub(crate) fn script(&self) -> Option<&'a dyn LuaDrawEval> {
+        self.lua
+    }
 }
 
 impl std::fmt::Debug for SkinFrame<'_> {

@@ -1,0 +1,2 @@
+local grown = string.gsub(string.rep("x", 100000), "x", string.rep("y", 10000))
+return #grown

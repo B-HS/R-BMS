@@ -5,6 +5,7 @@
 //! central claim is that a screen writes *one* state implementation: the same value answers the
 //! registry, gates a draw and backs a Lua expression, with no adapter in between.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -12,7 +13,7 @@ use rbms_model::Mode;
 use rbms_skin::dst::{DrawCondition, DrawStateSource, Keyframe, OffsetSource, SkinColor, SkinOffset, SkinRect, TimerRef, draw_conditions_from_ops, prepare};
 use rbms_skin::loader::{SkinLoadOptions, SkinUserConfig, every_option_known, load_skin};
 use rbms_skin::model::Destination;
-use rbms_skin::property::{DefaultState, MAPPINGS, PropertyKind, SkinStateSource, UNMAPPED_CLOCK_US, UnmappedLog, source_of};
+use rbms_skin::property::{DefaultState, MAPPINGS, PropertyKind, SkinHost, UNMAPPED_CLOCK_US, UnmappedLog, source_of};
 use rbms_skin::timer::{TIMER_OFF, TimerId, TimerState};
 
 /// The clock every frame in this file is drawn against, in microseconds.
@@ -71,12 +72,12 @@ impl OffsetSource for PlayerState {
 }
 
 impl DrawStateSource for PlayerState {
-    fn boolean(&self, id: i32) -> bool {
-        if id < 0 { !self.booleans.contains(&-id) } else { self.booleans.contains(&id) }
+    fn boolean(&self, id: i32) -> Option<bool> {
+        Some(if id < 0 { !self.booleans.contains(&-id) } else { self.booleans.contains(&id) })
     }
 }
 
-impl SkinStateSource for PlayerState {
+impl SkinHost for PlayerState {
     fn integer(&self, id: i32) -> i32 {
         self.integers.get(&id).copied().unwrap_or_default()
     }
@@ -85,8 +86,8 @@ impl SkinStateSource for PlayerState {
         0.0
     }
 
-    fn string(&self, _id: i32) -> &str {
-        ""
+    fn text(&self, _id: i32) -> Cow<'_, str> {
+        Cow::Borrowed("")
     }
 
     fn timer_us(&self, id: i32) -> i64 {
@@ -151,7 +152,7 @@ fn one_state_implementation_serves_the_registry_and_the_interpolator() {
     assert_eq!(state.integer(SAMPLE_NUMBER), SAMPLE_NUMBER_VALUE, "the registry reads it directly");
 
     let gating: &dyn DrawStateSource = &state;
-    assert!(gating.boolean(DECLARED_OPTION), "the same value upcasts to what the interpolator gates on");
+    assert_eq!(gating.boolean(DECLARED_OPTION), Some(true), "the same value upcasts to what the interpolator gates on");
 
     let resolved = prepare(&sample_track(), FRAME_NOW_US, &running_timers(), gating, None, (0.0, 0.0), None);
     assert!(resolved.is_some(), "a track with no conditions draws against the upcast state");
@@ -160,12 +161,12 @@ fn one_state_implementation_serves_the_registry_and_the_interpolator() {
 #[test]
 fn the_registry_trait_carries_every_accessor_the_lua_whitelist_delegates_to() {
     let state = sample_state();
-    let source: &dyn SkinStateSource = &state;
+    let source: &dyn SkinHost = &state;
 
-    assert!(source.boolean(DECLARED_OPTION));
+    assert_eq!(source.boolean(DECLARED_OPTION), Some(true));
     assert_eq!(source.integer(SAMPLE_NUMBER), SAMPLE_NUMBER_VALUE);
     assert_eq!(source.float(SAMPLE_NUMBER), 0.0);
-    assert_eq!(source.string(SAMPLE_NUMBER), "");
+    assert_eq!(source.text(SAMPLE_NUMBER), "");
     assert_eq!(source.timer_us(TRACK_TIMER.get()), TIMER_OFF);
     assert_eq!(source.now_us(), FRAME_NOW_US);
 }
@@ -274,76 +275,83 @@ fn an_id_no_mapping_covers_is_counted_once_and_never_panics() {
     assert_eq!(log.distinct(), vec![(PropertyKind::Integer, UNDECLARED_OPTION)]);
 }
 
-/// The seam between the registry and the Lua evaluator, which only exists in a build with the
-/// feature. The evaluator takes the registry's own trait rather than a second one of its own name,
-/// so a screen hands the same value to both without an adapter.
+/// The seam between the registry and the Lua runtime, which only exists in a build with the
+/// feature. The runtime takes the registry's own trait rather than a second one of its own name, so
+/// a screen hands the same value to both without an adapter.
+///
+/// The scripts here are the ones a JSON document writes as strings: the loader compiles them into
+/// the interpreter the loaded skin owns, where the game state is published as globals.
 #[cfg(feature = "lua")]
 mod with_lua {
     use super::*;
-    use rbms_skin::dst::{DrawCondition, LuaDrawEval};
-    use rbms_skin::loader::Budget;
-    use rbms_skin::lua::LuaSandbox;
+    use rbms_skin::lua::LuaFnKind;
 
-    /// A sandbox rooted at the fixture directory, with the shipping budget.
-    fn sandbox() -> LuaSandbox {
-        LuaSandbox::new(&minimal_root(), Budget::default()).expect("the sandbox should build")
+    /// A destination gated on one script, as a document would write it.
+    fn gated_on(script: &str) -> Destination {
+        serde_json::from_str(&format!(r#"{{ "id": "gated", "timer": {}, "op": ["{script}"], "dst": [{{ "time": 0, "w": 10, "h": 10 }}] }}"#, TRACK_TIMER.0))
+            .expect("the destination should parse")
     }
 
     #[test]
-    fn the_evaluator_takes_the_registry_trait_itself() {
+    fn the_runtime_takes_the_registry_trait_itself() {
         let state = sample_state();
-        let source: &dyn SkinStateSource = &state;
-        let sandbox = sandbox();
+        let skin = load_minimal(every_option_known);
+        let runtime = skin.runtime().expect("a build with Lua gives a document an interpreter");
 
-        let number = sandbox.eval_int("skin.number(110)", source).expect("the expression should run");
-        assert_eq!(number, SAMPLE_NUMBER_VALUE, "the registry implementation backs skin.number with no adapter in between");
+        let number = runtime.compile(&format!("number({SAMPLE_NUMBER})"), LuaFnKind::Integer).expect("the script should compile");
+        let seen = runtime.frame(&state as &dyn SkinHost, |frame| frame.call_integer(number)).expect("the frame binds");
+        assert_eq!(seen, SAMPLE_NUMBER_VALUE, "the registry implementation backs `number` with no adapter in between");
     }
 
     #[test]
-    fn one_state_value_answers_the_registry_the_interpolator_and_an_expression() {
+    fn one_state_value_answers_the_registry_the_interpolator_and_a_script() {
         let state = sample_state();
-        let sandbox = sandbox();
-        let expression = sandbox.compile("skin.boolean(901)").expect("the expression should compile");
+        let mut skin = load_minimal(every_option_known);
+        let track = skin.build_track(&gated_on(&format!("option({DECLARED_OPTION})")), false).expect("the track builds").expect("nothing rules it out");
+        assert!(matches!(track.draw_conditions.as_slice(), [DrawCondition::Function(_)]), "the script is a function condition: {:?}", track.draw_conditions);
 
-        let mut track = sample_track();
-        track.draw_conditions = vec![DrawCondition::Lua(expression)];
-
-        let frame = sandbox.frame(&state);
-        let resolved = prepare(&track, FRAME_NOW_US, &running_timers(), &state, Some(&frame), (0.0, 0.0), None);
-        assert!(resolved.is_some(), "the same value gated the draw and answered the expression");
-        assert_eq!(frame.calls(), 1, "the expression was evaluated once for the frame");
+        let runtime = skin.runtime().expect("the document has an interpreter");
+        let drawn =
+            runtime.frame(&state, |frame| prepare(&track, FRAME_NOW_US, &running_timers(), &state, Some(frame), (0.0, 0.0), None)).expect("the frame binds");
+        assert!(drawn.is_some(), "the same value gated the draw and answered the script");
+        assert!(runtime.diagnostics().function_failures.is_empty(), "{:?}", runtime.diagnostics().function_failures);
     }
 
     #[test]
-    fn a_false_expression_hides_its_object_rather_than_failing_the_frame() {
+    fn a_false_script_hides_its_object_rather_than_failing_the_frame() {
         let state = PlayerState { now: FRAME_NOW_US, ..PlayerState::default() };
-        let sandbox = sandbox();
-        let expression = sandbox.compile("skin.boolean(901)").expect("the expression should compile");
+        let mut skin = load_minimal(every_option_known);
+        let track = skin.build_track(&gated_on(&format!("option({DECLARED_OPTION})")), false).expect("the track builds").expect("nothing rules it out");
 
-        let mut track = sample_track();
-        track.draw_conditions = vec![DrawCondition::Lua(expression)];
-
-        let frame = sandbox.frame(&state);
-        assert!(prepare(&track, FRAME_NOW_US, &running_timers(), &state, Some(&frame), (0.0, 0.0), None).is_none());
-        assert_eq!(frame.eval_draw(expression), Some(false), "and the evaluator reports it plainly");
+        let runtime = skin.runtime().expect("the document has an interpreter");
+        let drawn =
+            runtime.frame(&state, |frame| prepare(&track, FRAME_NOW_US, &running_timers(), &state, Some(frame), (0.0, 0.0), None)).expect("the frame binds");
+        assert!(drawn.is_none());
+        assert!(prepare(&track, FRAME_NOW_US, &running_timers(), &state, None, (0.0, 0.0), None).is_none(), "and so does having nothing to ask");
     }
 
     #[test]
-    fn the_expression_clock_is_the_clock_the_frame_is_drawn_against() {
+    fn the_script_clock_is_the_clock_the_frame_is_drawn_against() {
         let state = sample_state();
-        let sandbox = sandbox();
+        let skin = load_minimal(every_option_known);
+        let runtime = skin.runtime().expect("the document has an interpreter");
 
-        let seen = sandbox.eval_int("skin.time()", &state as &dyn SkinStateSource).expect("the expression should run");
-        assert_eq!(i64::from(seen), FRAME_NOW_US, "skin.time() reads the registry's own clock, which is the one prepare is given for the same frame");
+        let clock = runtime.compile("time()", LuaFnKind::Integer).expect("the script should compile");
+        let seen = runtime.frame(&state, |frame| frame.call_integer(clock)).expect("the frame binds");
+        assert_eq!(i64::from(seen), FRAME_NOW_US, "`time()` reads the registry's own clock, which is the one prepare is given for the same frame");
     }
 
     #[test]
-    fn an_expression_still_cannot_reach_the_filesystem_through_the_registry() {
+    fn a_script_still_cannot_reach_a_file_outside_the_skin_root() {
         let state = sample_state();
-        let sandbox = sandbox();
-        for forbidden in ["io", "os", "require", "load", "dofile"] {
-            let reachable = sandbox.eval_bool(&format!("{forbidden} ~= nil"), &state as &dyn SkinStateSource).expect("the check itself should run");
-            assert!(!reachable, "{forbidden} must stay out of reach whatever state is bound");
+        let skin = load_minimal(every_option_known);
+        let runtime = skin.runtime().expect("the document has an interpreter");
+        assert!(minimal_root().join("..").join("secret.txt").is_file(), "the file the scripts reach for exists, one folder above the skin");
+
+        for refused in ["io.open('../secret.txt') == nil", "not pcall(dofile, '../secret.txt')", "not pcall(require, '..secret')", "os.execute == nil"] {
+            let script = runtime.compile(refused, LuaFnKind::Boolean).expect("the check itself should compile");
+            let held = runtime.frame(&state, |frame| frame.call_boolean(script)).expect("the frame binds");
+            assert!(held, "{refused} must hold whatever state is bound");
         }
     }
 }

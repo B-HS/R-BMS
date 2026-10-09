@@ -1,0 +1,19 @@
+local function nest(depth)
+    while true do
+        local inner = coroutine.create(function()
+            if depth > 0 then
+                nest(depth - 1)
+            end
+            while true do
+            end
+        end)
+        coroutine.resume(inner)
+        load(function()
+            if depth > 0 then
+                nest(depth - 1)
+            end
+        end)
+    end
+end
+
+nest(8)

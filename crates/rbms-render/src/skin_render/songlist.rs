@@ -11,7 +11,7 @@
 //! is the one piece drawn from the document's own image when its id names one, since that is the
 //! piece a wheel is mostly made of; everything else is drawn in the row's own colours.
 
-use rbms_skin::dst::{DestinationTrack, DrawStateSource, LuaDrawEval, Resolved, SkinRect, prepare};
+use rbms_skin::dst::{DestinationTrack, DrawStateSource, Resolved, SkinRect, prepare};
 use rbms_skin::loader::{LoadedSkin, NamedTrack};
 use rbms_skin::model::SkinDef;
 
@@ -189,8 +189,7 @@ pub(crate) fn build_songlist(
 /// Where one nested destination sits this frame, or `None` when it is not drawn at all.
 fn resolve(track: &DestinationTrack, frame: &SkinFrame<'_>) -> Option<Resolved> {
     let state: &dyn DrawStateSource = frame.state;
-    let gate: Option<&dyn LuaDrawEval> = frame.lua.map(|lua| lua as &dyn LuaDrawEval);
-    prepare(track, frame.now_us, frame.timers, state, gate, (0.0, 0.0), frame.mouse)
+    prepare(track, frame.now_us, frame.timers, state, frame.script(), (0.0, 0.0), frame.mouse)
 }
 
 /// Draws one slot's bar, as the image its id names or as a plain filled rectangle when it names

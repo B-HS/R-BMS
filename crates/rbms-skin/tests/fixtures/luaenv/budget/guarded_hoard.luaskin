@@ -1,0 +1,8 @@
+local hoard = {}
+while true do
+    pcall(function()
+        while true do
+            hoard[#hoard + 1] = string.rep("x", 4096) .. #hoard
+        end
+    end)
+end

@@ -7,36 +7,50 @@
 //! which subsystem owns it ([`StateSource`] and [`MAPPINGS`]), what an id this build does not
 //! answer returns, and a place to count those misses ([`UnmappedLog`]).
 //!
-//! The game implements [`SkinStateSource`]. Because that trait builds on
-//! [`DrawStateSource`](crate::dst::DrawStateSource), one implementation serves both the value reads
-//! here and the draw gating in [`crate::dst`].
+//! The game implements [`SkinHost`], which lives in [`host`]. Because that trait builds on
+//! [`DrawStateSource`](crate::dst::DrawStateSource), one implementation serves the value reads here,
+//! the draw gating in [`crate::dst`] and the Lua binding alike.
+//!
+//! [`names`] holds the other way a skin addresses a property -- by the reference's name for it --
+//! together with the reference's own list of the ids it implements and of the options it settles
+//! once per screen.
 
 pub mod generated;
+pub mod host;
+pub mod names;
+
+pub use host::{
+    AudioCommand, CLOCK_ORIGIN_US, DefaultState, FLOAT_ABSENT, HostCall, IMAGE_INDEX_ABSENT, INTEGER_ABSENT, MapHost, ScoreSlot, ScoreSnapshot, SkinHost,
+    TEXT_ABSENT, VolumeBus,
+};
+pub use names::{
+    NEGATION_MARK, NameSpace, PROPERTY_ID_LIMIT, StaticScope, StaticScreen, id_of_name, name_of_id, reference_implements, reference_writes, static_scope,
+};
 
 use std::collections::BTreeSet;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::dst::{DrawStateSource, OffsetSource, SkinOffset};
-use crate::timer::{ALL_TIMER, TIMER_OFF, timer_id};
+use crate::timer::{ALL_TIMER, timer_id};
 use generated::*;
 
 /// What kind of value a skin property id carries, and therefore which accessor of
-/// [`SkinStateSource`] reads it.
+/// [`SkinHost`] reads it.
 ///
 /// Each kind owns its own id space: id 41 is a different property as a boolean, an integer and a
 /// timer. Nothing here is a global id lookup.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum PropertyKind {
-    /// `OPTION_*`, read by [`SkinStateSource::boolean`]. A negative id negates the answer.
+    /// `OPTION_*`, read by [`DrawStateSource::boolean`](crate::dst::DrawStateSource::boolean). A negative id negates the
+    /// answer.
     Boolean,
-    /// `NUMBER_*`, read by [`SkinStateSource::integer`].
+    /// `NUMBER_*`, read by [`SkinHost::integer`].
     Integer,
-    /// `RATE_*`, `SLIDER_*`, `BARGRAPH_*` and `FLOAT_*`, read by [`SkinStateSource::float`].
+    /// `RATE_*`, `SLIDER_*`, `BARGRAPH_*` and `FLOAT_*`, read by [`SkinHost::rate`] and [`SkinHost::float`].
     Float,
-    /// `STRING_*`, read by [`SkinStateSource::string`].
+    /// `STRING_*`, read by [`SkinHost::text`].
     String,
-    /// `TIMER_*`, read by [`SkinStateSource::timer_us`].
+    /// `TIMER_*`, read by [`SkinHost::timer_us`].
     Timer,
 }
 
@@ -79,25 +93,29 @@ impl PropertyKind {
     }
 }
 
-/// What [`SkinStateSource::boolean`] answers for an id this build does not implement.
+/// What a built-in view adapter answers for an option id it does not implement.
+///
+/// The adapters that draw a document from the built-in screens' own views predate the "absent"
+/// values of [`host`] and keep answering these instead, so the documents they draw look as they
+/// always did.
 pub const UNMAPPED_BOOLEAN: bool = false;
 
-/// What [`SkinStateSource::integer`] answers for an id this build does not implement.
+/// What a built-in view adapter answers for a number id it does not implement.
 pub const UNMAPPED_INTEGER: i32 = 0;
 
-/// What [`SkinStateSource::float`] answers for an id this build does not implement.
+/// What a built-in view adapter answers for a float id it does not implement.
 pub const UNMAPPED_FLOAT: f32 = 0.0;
 
-/// What [`SkinStateSource::string`] answers for an id this build does not implement.
+/// What a built-in view adapter answers for a string id it does not implement.
 pub const UNMAPPED_STRING: &str = "";
 
-/// What [`SkinStateSource::now_us`] answers before a frame clock exists.
-pub const UNMAPPED_CLOCK_US: i64 = 0;
+/// What [`SkinHost::now_us`] answers before a frame clock exists.
+pub const UNMAPPED_CLOCK_US: i64 = CLOCK_ORIGIN_US;
 
-/// The low end of the range [`SkinStateSource::float`] answers in.
+/// The low end of the range a rate id answers in.
 pub const FLOAT_MIN: f32 = 0.0;
 
-/// The high end of the range [`SkinStateSource::float`] answers in.
+/// The high end of the range a rate id answers in.
 pub const FLOAT_MAX: f32 = 1.0;
 
 /// Forces a rate into the range a skin expects, mapping a NaN to [`UNMAPPED_FLOAT`].
@@ -126,77 +144,9 @@ pub fn normalize_boolean_id(id: i32) -> i32 {
     id.saturating_abs()
 }
 
-/// Everything a skin can ask the running game.
-///
-/// The boolean and offset reads come from the supertraits, so one implementation serves both this
-/// registry and the draw gating in [`crate::dst`]. Every accessor answers for an id it does not
-/// implement rather than failing: the `UNMAPPED_*` constants above, or [`TIMER_OFF`] for a timer.
-pub trait SkinStateSource: DrawStateSource {
-    /// The integer under `id`, or [`UNMAPPED_INTEGER`].
-    fn integer(&self, id: i32) -> i32;
-    /// The float under `id`, or [`UNMAPPED_FLOAT`].
-    ///
-    /// A rate id -- `RATE_*` and its `SLIDER_*`/`BARGRAPH_*` aliases -- answers in
-    /// [`FLOAT_MIN`]..=[`FLOAT_MAX`], because that is the share a slider or bar graph multiplies by
-    /// its own length. The separate `FLOAT_*` id space carries plain measurements and is not held
-    /// to that range.
-    fn float(&self, id: i32) -> f32;
-    /// The text under `id`, or [`UNMAPPED_STRING`].
-    fn string(&self, id: i32) -> &str;
-    /// The microsecond the timer under `id` switched on, or [`TIMER_OFF`] while it is off.
-    fn timer_us(&self, id: i32) -> i64;
-    /// The clock the frame is being drawn against, in microseconds.
-    ///
-    /// This is what `skin.time()` returns. It must be the same clock the frame passes to
-    /// [`crate::dst::prepare`], so an expression and the animation it gates never disagree about
-    /// what time it is.
-    fn now_us(&self) -> i64;
-}
-
-/// A state source that answers nothing.
-///
-/// Every read returns its documented default, so a screen can resolve a skin before a play session
-/// or a score exists, and a test can supply a baseline without writing one out.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct DefaultState;
-
-impl OffsetSource for DefaultState {
-    fn offset(&self, _id: i32) -> Option<SkinOffset> {
-        None
-    }
-}
-
-impl DrawStateSource for DefaultState {
-    fn boolean(&self, _id: i32) -> bool {
-        UNMAPPED_BOOLEAN
-    }
-}
-
-impl SkinStateSource for DefaultState {
-    fn integer(&self, _id: i32) -> i32 {
-        UNMAPPED_INTEGER
-    }
-
-    fn float(&self, _id: i32) -> f32 {
-        UNMAPPED_FLOAT
-    }
-
-    fn string(&self, _id: i32) -> &str {
-        UNMAPPED_STRING
-    }
-
-    fn timer_us(&self, _id: i32) -> i64 {
-        TIMER_OFF
-    }
-
-    fn now_us(&self) -> i64 {
-        UNMAPPED_CLOCK_US
-    }
-}
-
 /// Which part of rbms owns a property's value.
 ///
-/// This routes rather than reads: it says where the implementation of [`SkinStateSource`] should
+/// This routes rather than reads: it says where the implementation of [`SkinHost`] should
 /// go looking, and therefore which shipping stage wires a band of ids up.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum StateSource {

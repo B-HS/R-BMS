@@ -1,11 +1,11 @@
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 
 use super::{
-    Acc, DestinationTrack, DrawCondition, DrawStateSource, Keyframe, LOOP_ONCE, LuaDrawEval, LuaExprId, MouseRect, OffsetSource, Resolved, STRETCH_UNSPECIFIED,
-    SkinColor, SkinOffset, SkinRect, TimerRef, WarnOnce, draw_conditions_from_ops, prepare, resolve,
+    Acc, DestinationTrack, DrawCondition, DrawStateSource, Keyframe, LOOP_ONCE, LuaDrawEval, LuaFnId, MouseRect, NullLuaEval, OffsetSource, Resolved,
+    STRETCH_UNSPECIFIED, SkinColor, SkinOffset, SkinRect, TimerRef, WarnOnce, draw_conditions_from_ops, prepare, resolve,
 };
-use crate::timer::{MICROS_PER_MILLI, TimerState, timer_id};
+use crate::timer::{MICROS_PER_MILLI, TIMER_OFF, TimerState, timer_id};
 
 /// Float slack for a rate that is not exactly representable, such as 650/1000.
 const TOLERANCE: f32 = 1e-3;
@@ -46,27 +46,56 @@ impl OffsetSource for FakeState {
 }
 
 impl DrawStateSource for FakeState {
-    fn boolean(&self, id: i32) -> bool {
+    fn boolean(&self, id: i32) -> Option<bool> {
         let value = self.options.get(&id.abs()).copied().unwrap_or(false);
-        if id < 0 { !value } else { value }
+        Some(if id < 0 { !value } else { value })
     }
 }
 
+/// An evaluator that answers function values and names from tables, and remembers which functions
+/// it was asked to call and in what order.
 #[derive(Debug, Default)]
-struct FakeLua {
-    answers: HashMap<u32, Option<bool>>,
+struct FakeScript {
+    booleans: HashMap<u32, bool>,
+    timers: HashMap<u32, i64>,
+    names: HashMap<String, bool>,
+    called: RefCell<Vec<u32>>,
 }
 
-impl FakeLua {
-    fn with(mut self, expr: LuaExprId, answer: Option<bool>) -> Self {
-        self.answers.insert(expr.0, answer);
+impl FakeScript {
+    fn with_boolean(mut self, function: LuaFnId, answer: bool) -> Self {
+        self.booleans.insert(function.0, answer);
         self
     }
+
+    fn with_timer(mut self, function: LuaFnId, started_us: i64) -> Self {
+        self.timers.insert(function.0, started_us);
+        self
+    }
+
+    fn with_name(mut self, name: &str, answer: bool) -> Self {
+        self.names.insert(name.to_owned(), answer);
+        self
+    }
+
+    fn called(&self) -> Vec<u32> {
+        self.called.borrow().clone()
+    }
 }
 
-impl LuaDrawEval for FakeLua {
-    fn eval_draw(&self, expr: LuaExprId) -> Option<bool> {
-        self.answers.get(&expr.0).copied().flatten()
+impl LuaDrawEval for FakeScript {
+    fn call_boolean(&self, function: LuaFnId) -> bool {
+        self.called.borrow_mut().push(function.0);
+        self.booleans.get(&function.0).copied().unwrap_or(false)
+    }
+
+    fn call_timer(&self, function: LuaFnId) -> i64 {
+        self.called.borrow_mut().push(function.0);
+        self.timers.get(&function.0).copied().unwrap_or(TIMER_OFF)
+    }
+
+    fn named_boolean(&self, name: &str) -> bool {
+        self.names.get(name).copied().unwrap_or(false)
     }
 }
 
@@ -89,7 +118,7 @@ fn assert_close(actual: f32, expected: f32, what: &str) {
 }
 
 fn resolved(track: &DestinationTrack, now_ms: i64) -> Option<Resolved> {
-    resolve(track, us(now_ms), &TimerState::new(), &FakeState::default())
+    resolve(track, us(now_ms), &TimerState::new(), &FakeState::default(), None)
 }
 
 #[test]
@@ -161,10 +190,10 @@ fn an_off_timer_hides_the_track_and_an_on_one_shifts_its_clock() {
     let track = DestinationTrack { timer: Some(TimerRef::Id(timer_id::PLAY)), ..travelling_track(Acc::Linear, LOOP_ONCE) };
     let mut timers = TimerState::new();
     let state = FakeState::default();
-    assert_eq!(resolve(&track, us(5_250), &timers, &state), None, "an off timer draws nothing");
+    assert_eq!(resolve(&track, us(5_250), &timers, &state, None), None, "an off timer draws nothing");
 
     timers.set_on(timer_id::PLAY, us(5_000));
-    let resolved = resolve(&track, us(5_250), &timers, &state).expect("an on timer draws");
+    let resolved = resolve(&track, us(5_250), &timers, &state, None).expect("an on timer draws");
     assert_close(resolved.rect.x, 250.0, "250 ms after the timer started");
 }
 
@@ -183,11 +212,11 @@ fn offsets_move_and_resize_the_region_unless_it_is_relative() {
     only.rect = SkinRect::new(100.0, 200.0, 50.0, 60.0);
 
     let moved = DestinationTrack { offsets: vec![OFFSET_ID], frames: vec![only], ..DestinationTrack::default() };
-    let resolved = resolve(&moved, us(0), &TimerState::new(), &state).expect("it draws");
+    let resolved = resolve(&moved, us(0), &TimerState::new(), &state, None).expect("it draws");
     assert_eq!(resolved.rect, SkinRect::new(108.0, 216.0, 54.0, 68.0), "position takes the offset minus half its growth");
 
     let relative = DestinationTrack { relative: true, ..moved };
-    let resolved = resolve(&relative, us(0), &TimerState::new(), &state).expect("it draws");
+    let resolved = resolve(&relative, us(0), &TimerState::new(), &state, None).expect("it draws");
     assert_eq!(resolved.rect, SkinRect::new(100.0, 200.0, 54.0, 68.0), "a relative track only grows");
 }
 
@@ -262,7 +291,7 @@ fn an_alpha_offset_applies_to_a_track_whose_colour_never_changes() {
     let shade = SkinColor::rgba(u8::MAX, u8::MAX, u8::MAX, 200);
     let state = FakeState::default().with_offset(OFFSET_ID, SkinOffset { a: -100.0, ..SkinOffset::default() });
     let track = DestinationTrack { offsets: vec![OFFSET_ID], ..coloured_track(shade, shade) };
-    let resolved = resolve(&track, us(500), &TimerState::new(), &state).expect("it draws");
+    let resolved = resolve(&track, us(500), &TimerState::new(), &state, None).expect("it draws");
     assert_eq!(resolved.color, SkinColor::rgba(u8::MAX, u8::MAX, u8::MAX, 100));
 }
 
@@ -272,10 +301,10 @@ fn an_alpha_offset_is_dropped_while_a_changing_colour_interpolates() {
     let state = FakeState::default().with_offset(OFFSET_ID, SkinOffset { a: 50.0, ..SkinOffset::default() });
     let track = DestinationTrack { offsets: vec![OFFSET_ID], ..coloured_track(SkinColor::rgba(0, 0, 0, 0), SkinColor::rgba(100, 200, 40, 200)) };
 
-    let midway = resolve(&track, us(500), &TimerState::new(), &state).expect("it draws");
+    let midway = resolve(&track, us(500), &TimerState::new(), &state, None).expect("it draws");
     assert_eq!(midway.color.a, 100, "the reference's interpolating path returns before it applies the offset");
 
-    let at_keyframe = resolve(&track, us(SPAN_MS), &TimerState::new(), &state).expect("it draws");
+    let at_keyframe = resolve(&track, us(SPAN_MS), &TimerState::new(), &state, None).expect("it draws");
     assert_eq!(at_keyframe.color.a, 250, "resting on a keyframe applies it");
 }
 
@@ -285,10 +314,10 @@ fn an_alpha_offset_clamps() {
     let shade = SkinColor::rgba(0, 0, 0, 200);
     let state = FakeState::default().with_offset(OFFSET_ID, SkinOffset { a: 500.0, ..SkinOffset::default() });
     let track = DestinationTrack { offsets: vec![OFFSET_ID], ..coloured_track(shade, shade) };
-    assert_eq!(resolve(&track, us(0), &TimerState::new(), &state).expect("it draws").color.a, u8::MAX);
+    assert_eq!(resolve(&track, us(0), &TimerState::new(), &state, None).expect("it draws").color.a, u8::MAX);
 
     let state = FakeState::default().with_offset(OFFSET_ID, SkinOffset { a: -500.0, ..SkinOffset::default() });
-    assert_eq!(resolve(&track, us(0), &TimerState::new(), &state).expect("it draws").color.a, 0);
+    assert_eq!(resolve(&track, us(0), &TimerState::new(), &state, None).expect("it draws").color.a, 0);
 }
 
 fn angled_track(first: f32, second: f32) -> DestinationTrack {
@@ -312,11 +341,11 @@ fn each_angle_offset_truncates_on_its_own() {
     let nudge = SkinOffset { r: 0.7, ..SkinOffset::default() };
     let state = FakeState::default().with_offset(FIRST, nudge).with_offset(SECOND, nudge);
     let track = DestinationTrack { offsets: vec![FIRST, SECOND], ..angled_track(0.0, -DOCUMENT_QUARTER_TURN) };
-    let resolved = resolve(&track, us(333), &TimerState::new(), &state).expect("it draws");
+    let resolved = resolve(&track, us(333), &TimerState::new(), &state, None).expect("it draws");
     assert_eq!(resolved.angle_deg, -29.0, "the document's 29 takes 0.7 twice as `(int)(29 + 0.7)`, which adds nothing either time");
 
     let track = DestinationTrack { offsets: vec![FIRST, SECOND], ..angled_track(0.0, DOCUMENT_QUARTER_TURN) };
-    let resolved = resolve(&track, us(333), &TimerState::new(), &state).expect("it draws");
+    let resolved = resolve(&track, us(333), &TimerState::new(), &state, None).expect("it draws");
     assert_eq!(resolved.angle_deg, 27.0, "the document's -29 becomes `(int)(-29 + 0.7)` = -28 and then -27");
 }
 
@@ -335,7 +364,7 @@ fn a_positive_angle_offset_turns_the_way_a_positive_document_angle_does() {
     let mut nudged = frame(0, 0.0);
     nudged.angle_deg = -DOCUMENT_ANGLE;
     let nudged = DestinationTrack { offsets: vec![OFFSET_ID], frames: vec![nudged], ..DestinationTrack::default() };
-    let resolved = resolve(&nudged, 0, &TimerState::new(), &state).expect("it draws");
+    let resolved = resolve(&nudged, 0, &TimerState::new(), &state, None).expect("it draws");
 
     assert_eq!(resolved.angle_deg, expected, "`angle: 30` nudged by `r: 15` is `angle: 45`, as `angle += off.r` has it");
     assert_eq!(resolved.angle_deg, -45.0, "which is 45 degrees counter-clockwise, so a negative clockwise angle");
@@ -346,7 +375,7 @@ fn a_negative_angle_offset_turns_clockwise() {
     const OFFSET_ID: i32 = 4;
     let state = FakeState::default().with_offset(OFFSET_ID, SkinOffset { r: -10.0, ..SkinOffset::default() });
     let track = DestinationTrack { offsets: vec![OFFSET_ID], frames: vec![frame(0, 0.0)], ..DestinationTrack::default() };
-    assert_eq!(resolve(&track, 0, &TimerState::new(), &state).expect("it draws").angle_deg, 10.0);
+    assert_eq!(resolve(&track, 0, &TimerState::new(), &state, None).expect("it draws").angle_deg, 10.0);
 }
 
 #[test]
@@ -365,15 +394,15 @@ fn the_clock_and_the_timer_are_truncated_to_milliseconds_separately() {
     let mut timers = TimerState::new();
 
     timers.set_on(timer_id::PLAY, 1_999);
-    let resolved = resolve(&track, 2_000, &timers, &state).expect("an on timer draws");
+    let resolved = resolve(&track, 2_000, &timers, &state, None).expect("an on timer draws");
     assert_close(resolved.rect.x, 1.0, "2000 us is millisecond 2 and 1999 us is millisecond 1, so one whole millisecond has passed");
 
     timers.set_on(timer_id::PLAY, 1_000);
-    let resolved = resolve(&track, 1_999, &timers, &state).expect("an on timer draws");
+    let resolved = resolve(&track, 1_999, &timers, &state, None).expect("an on timer draws");
     assert_close(resolved.rect.x, 0.0, "999 us into the same millisecond is no time at all");
 
     timers.set_on(timer_id::PLAY, us(5_000) + 999);
-    let resolved = resolve(&track, us(5_250), &timers, &state).expect("an on timer draws");
+    let resolved = resolve(&track, us(5_250), &timers, &state, None).expect("an on timer draws");
     assert_close(resolved.rect.x, 250.0, "the timer's own microseconds are dropped before the subtraction");
 }
 
@@ -447,28 +476,6 @@ fn op_lists_drop_zero_duplicates_and_unknown_ids() {
 }
 
 #[test]
-fn a_lua_condition_follows_its_evaluator() {
-    let expr = LuaExprId(4);
-    let track = DestinationTrack { draw_conditions: vec![DrawCondition::Lua(expr)], ..travelling_track(Acc::Linear, LOOP_ONCE) };
-    let state = FakeState::default();
-
-    let lua = FakeLua::default().with(expr, Some(true));
-    assert!(prepare(&track, us(250), &TimerState::new(), &state, Some(&lua), (0.0, 0.0), None).is_some());
-
-    let lua = FakeLua::default().with(expr, Some(false));
-    assert_eq!(prepare(&track, us(250), &TimerState::new(), &state, Some(&lua), (0.0, 0.0), None), None);
-
-    let lua = FakeLua::default().with(expr, None);
-    assert_eq!(prepare(&track, us(250), &TimerState::new(), &state, Some(&lua), (0.0, 0.0), None), None, "a raising expression hides its object");
-}
-
-#[test]
-fn a_lua_condition_without_an_evaluator_hides_its_object() {
-    let track = DestinationTrack { draw_conditions: vec![DrawCondition::Lua(LuaExprId(1))], ..travelling_track(Acc::Linear, LOOP_ONCE) };
-    assert_eq!(prepare(&track, us(250), &TimerState::new(), &FakeState::default(), None, (0.0, 0.0), None), None);
-}
-
-#[test]
 fn a_warning_latch_fires_once() {
     let latch = WarnOnce::new();
     assert!(latch.should_warn());
@@ -536,7 +543,7 @@ fn a_step_track_holds_its_colour_and_drops_the_alpha_offset() {
     track.acc = Acc::Step;
     track.offsets = vec![OFFSET_ID];
 
-    let midway = resolve(&track, us(500), &TimerState::new(), &state).expect("it draws");
+    let midway = resolve(&track, us(500), &TimerState::new(), &state, None).expect("it draws");
     assert_eq!(midway.color, SkinColor::rgba(0, 0, 0, 10), "a step track holds the keyframe it is on");
     assert_eq!(midway.rect.x, 0.0, "and holds its region with it");
 }
@@ -549,7 +556,7 @@ fn a_step_track_applies_the_alpha_offset_while_it_rests_on_a_keyframe() {
     track.acc = Acc::Step;
     track.offsets = vec![OFFSET_ID];
 
-    let at_end = resolve(&track, us(SPAN_MS), &TimerState::new(), &state).expect("it draws");
+    let at_end = resolve(&track, us(SPAN_MS), &TimerState::new(), &state, None).expect("it draws");
     assert_eq!(at_end.color.a, 250);
 }
 
@@ -561,4 +568,121 @@ fn a_clip_on_the_last_keyframe_needs_no_next_one() {
 
     let track = clipped_track(None, Some(clip));
     assert_eq!(resolved(&track, SPAN_MS).expect("it draws").clip, Some(clip));
+}
+
+#[test]
+fn the_null_evaluator_answers_the_fallback_of_every_type() {
+    let function = LuaFnId(7);
+    let lua = NullLuaEval;
+    assert!(!lua.call_boolean(function));
+    assert_eq!(lua.call_integer(function), 0);
+    assert_eq!(lua.call_float(function), 0.0);
+    assert_eq!(lua.call_text(function), "");
+    assert_eq!(lua.call_timer(function), TIMER_OFF, "a timer nobody can compute is off, not on since the scene began");
+    assert!(!lua.named_boolean("anything"));
+    assert_eq!(lua.named_integer("anything"), 0);
+    assert_eq!(lua.named_float("anything"), 0.0);
+    assert_eq!(lua.named_text("anything"), "");
+}
+
+#[test]
+fn a_function_condition_follows_its_evaluator() {
+    let function = LuaFnId(3);
+    let track = DestinationTrack { draw_conditions: vec![DrawCondition::Function(function)], ..travelling_track(Acc::Linear, LOOP_ONCE) };
+    let state = FakeState::default();
+
+    let lua = FakeScript::default().with_boolean(function, true);
+    assert!(prepare(&track, us(250), &TimerState::new(), &state, Some(&lua), (0.0, 0.0), None).is_some());
+
+    let lua = FakeScript::default().with_boolean(function, false);
+    assert_eq!(prepare(&track, us(250), &TimerState::new(), &state, Some(&lua), (0.0, 0.0), None), None);
+
+    assert_eq!(prepare(&track, us(250), &TimerState::new(), &state, Some(&NullLuaEval), (0.0, 0.0), None), None, "the fallback of a condition is false");
+    assert_eq!(prepare(&track, us(250), &TimerState::new(), &state, None, (0.0, 0.0), None), None, "and so is having no evaluator at all");
+}
+
+#[test]
+fn a_named_condition_follows_its_evaluator() {
+    const NAME: &str = "!is_autoplay";
+    let track = DestinationTrack { draw_conditions: vec![DrawCondition::Name(NAME.to_owned())], ..travelling_track(Acc::Linear, LOOP_ONCE) };
+    let state = FakeState::default();
+
+    let lua = FakeScript::default().with_name(NAME, true);
+    assert!(prepare(&track, us(250), &TimerState::new(), &state, Some(&lua), (0.0, 0.0), None).is_some(), "the name is handed over exactly as written");
+
+    let lua = FakeScript::default().with_name("is_autoplay", true);
+    assert_eq!(prepare(&track, us(250), &TimerState::new(), &state, Some(&lua), (0.0, 0.0), None), None, "a name nothing answers to is false");
+    assert_eq!(prepare(&track, us(250), &TimerState::new(), &state, None, (0.0, 0.0), None), None);
+}
+
+#[test]
+fn conditions_are_asked_in_declared_order_and_stop_at_the_first_false() {
+    const SHOWN: i32 = 5;
+    let (first, second, third) = (LuaFnId(1), LuaFnId(2), LuaFnId(3));
+    let state = FakeState::default().with_option(SHOWN, true);
+    let track = DestinationTrack {
+        draw_conditions: vec![DrawCondition::Option(SHOWN), DrawCondition::Function(first), DrawCondition::Function(second), DrawCondition::Function(third)],
+        ..travelling_track(Acc::Linear, LOOP_ONCE)
+    };
+
+    let lua = FakeScript::default().with_boolean(first, true).with_boolean(second, true).with_boolean(third, true);
+    assert!(prepare(&track, us(250), &TimerState::new(), &state, Some(&lua), (0.0, 0.0), None).is_some());
+    assert_eq!(lua.called(), vec![first.0, second.0, third.0], "every function runs, in the order the document declared them");
+
+    let lua = FakeScript::default().with_boolean(first, true).with_boolean(third, true);
+    assert_eq!(prepare(&track, us(250), &TimerState::new(), &state, Some(&lua), (0.0, 0.0), None), None);
+    assert_eq!(lua.called(), vec![first.0, second.0], "the function after the first false one is never called");
+}
+
+#[test]
+fn a_function_timer_times_its_track() {
+    let function = LuaFnId(9);
+    let track = DestinationTrack { timer: Some(TimerRef::Lua(function)), ..travelling_track(Acc::Linear, LOOP_ONCE) };
+    let state = FakeState::default();
+    let timers = TimerState::new();
+
+    let lua = FakeScript::default().with_timer(function, us(5_000));
+    let resolved = resolve(&track, us(5_250), &timers, &state, Some(&lua)).expect("a timer the function reports as on draws");
+    assert_close(resolved.rect.x, 250.0, "elapsed is measured from the moment the function answered");
+
+    let lua = FakeScript::default().with_timer(function, TIMER_OFF);
+    assert_eq!(resolve(&track, us(5_250), &timers, &state, Some(&lua)), None, "a function that answers off hides the object");
+
+    let lua = FakeScript::default().with_timer(function, 0);
+    let resolved = resolve(&track, us(250), &timers, &state, Some(&lua)).expect("zero is on since the scene began, not off");
+    assert_close(resolved.rect.x, 250.0, "a timer on at zero");
+}
+
+#[test]
+fn a_function_timer_is_off_without_something_to_call_it() {
+    let function = LuaFnId(9);
+    let track = DestinationTrack { timer: Some(TimerRef::Lua(function)), ..travelling_track(Acc::Linear, LOOP_ONCE) };
+    let state = FakeState::default();
+    let mut timers = TimerState::new();
+    timers.set_on(timer_id::PLAY, 0);
+
+    assert_eq!(resolve(&track, us(250), &timers, &state, None), None, "no evaluator");
+    assert_eq!(resolve(&track, us(250), &timers, &state, Some(&NullLuaEval)), None, "the null evaluator");
+    assert_eq!(TimerRef::Lua(function).value_us(&timers, None), TIMER_OFF);
+    assert_eq!(TimerRef::Lua(function).value_us(&timers, Some(&NullLuaEval)), TIMER_OFF);
+    assert_eq!(TimerRef::Id(timer_id::PLAY).value_us(&timers, None), 0, "an id never needed one");
+}
+
+#[test]
+fn a_function_timer_is_only_called_once_the_conditions_hold() {
+    let (gate, timer) = (LuaFnId(1), LuaFnId(2));
+    let track = DestinationTrack {
+        timer: Some(TimerRef::Lua(timer)),
+        draw_conditions: vec![DrawCondition::Function(gate)],
+        ..travelling_track(Acc::Linear, LOOP_ONCE)
+    };
+    let state = FakeState::default();
+
+    let lua = FakeScript::default().with_boolean(gate, false).with_timer(timer, 0);
+    assert_eq!(prepare(&track, us(250), &TimerState::new(), &state, Some(&lua), (0.0, 0.0), None), None);
+    assert_eq!(lua.called(), vec![gate.0], "a hidden object never asks for its timer");
+
+    let lua = FakeScript::default().with_boolean(gate, true).with_timer(timer, 0);
+    assert!(prepare(&track, us(250), &TimerState::new(), &state, Some(&lua), (0.0, 0.0), None).is_some());
+    assert_eq!(lua.called(), vec![gate.0, timer.0], "conditions first, then the timer");
 }

@@ -1,448 +1,357 @@
-//! The Lua sandbox: that the whitelisted API is all a document can reach, that a runaway expression
-//! is cut off rather than hanging the frame, and that a broken one hides its object instead of
-//! failing the skin.
+//! The scripts a JSON document writes as strings.
+//!
+//! A document may put Lua source wherever it may put a property id. The loader compiles each one
+//! into the interpreter the loaded skin owns -- the same runtime a Lua skin is loaded into, with the
+//! game state published as globals the way the reference publishes it for a JSON skin -- and a
+//! frame calls them through its binding. These tests cover that path end to end: what a script can
+//! see, how its result is read, and that the runtime's containment holds for a script as it does
+//! for a Lua skin (`skin_lua_env.rs` covers the runtime itself).
 
 #![cfg(feature = "lua")]
 
-use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use rbms_skin::SkinError;
-use rbms_skin::dst::{DrawStateSource, LuaDrawEval, OffsetSource, SkinOffset};
-use rbms_skin::loader::Budget;
-use rbms_skin::lua::{LuaSandbox, SkinStateSource};
+use rbms_model::Mode;
+use rbms_skin::dst::LuaFnId;
+use rbms_skin::loader::{LoadedSkin, SkinLoadOptions, SkinUserConfig, load_skin_with_host};
+use rbms_skin::lua::{LuaFnKind, SkinLua, SkinLuaConfig};
+use rbms_skin::model::{EventRef, PropertyRef};
+use rbms_skin::property::{DefaultState, INTEGER_ABSENT, MapHost, SkinHost};
 use rbms_skin::timer::TIMER_OFF;
 
-/// Every global the sandbox removes before a document is compiled.
-const FORBIDDEN: &[&str] = &[
-    "dofile",
-    "loadfile",
-    "load",
-    "loadstring",
-    "require",
-    "collectgarbage",
-    "rawset",
-    "rawget",
-    "rawequal",
-    "rawlen",
-    "setmetatable",
-    "getmetatable",
-    "newproxy",
-    "print",
-    "io",
-    "os",
-    "package",
-    "debug",
-];
+/// A seed every load in this file pins.
+const TEST_SEED: u64 = 7;
 
-/// A skin root for the tests that do not touch the filesystem.
-fn root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures").join("minimal")
-}
+/// An integer id the host answers for.
+const SAMPLE_NUMBER: i32 = 71;
 
-/// A sandbox with the shipping budget.
-fn sandbox() -> LuaSandbox {
-    LuaSandbox::new(&root(), Budget::default()).expect("the sandbox should build")
-}
+/// The value stored under [`SAMPLE_NUMBER`].
+const SAMPLE_NUMBER_VALUE: i32 = 1_234;
 
-/// A hand-built game state, standing in for the property registry.
-#[derive(Debug, Default)]
-struct FakeState {
-    booleans: BTreeSet<i32>,
-    integers: BTreeMap<i32, i32>,
-    floats: BTreeMap<i32, f32>,
-    strings: BTreeMap<i32, String>,
-    timers: BTreeMap<i32, i64>,
-    offsets: BTreeMap<i32, SkinOffset>,
-    now: i64,
-}
+/// A text id the host answers for.
+const SAMPLE_TEXT: i32 = 10;
 
-impl OffsetSource for FakeState {
-    fn offset(&self, id: i32) -> Option<SkinOffset> {
-        self.offsets.get(&id).copied()
+/// A timer id the host reports as running.
+const RUNNING_TIMER: i32 = 41;
+
+/// The microsecond [`RUNNING_TIMER`] switched on.
+const RUNNING_SINCE_US: i64 = 5_000_000;
+
+/// The scene clock of the host.
+const NOW_US: i64 = 9_000_000;
+
+/// The option the customisation row of [`CONFIGURED_DOCUMENT`] is on by default.
+const DEFAULT_OPTION: i32 = 901;
+
+/// The offset id [`CONFIGURED_DOCUMENT`] declares.
+const DECLARED_OFFSET: i32 = 40;
+
+/// A scratch directory that removes itself.
+struct Scratch(PathBuf);
+
+impl Scratch {
+    fn new(name: &str) -> Self {
+        let path = std::env::temp_dir().join(format!("rbms-script-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&path);
+        std::fs::create_dir_all(&path).expect("the scratch directory should be creatable");
+        Self(path)
+    }
+
+    fn path(&self) -> &Path {
+        &self.0
+    }
+
+    /// Writes `text` to `relative` under the scratch directory, creating its parents.
+    fn write(&self, relative: &str, text: &str) -> PathBuf {
+        let path = self.0.join(relative);
+        std::fs::create_dir_all(path.parent().expect("a scratch file has a parent")).expect("the parent should be creatable");
+        std::fs::write(&path, text).expect("the scratch file should be writable");
+        path
     }
 }
 
-impl DrawStateSource for FakeState {
-    fn boolean(&self, id: i32) -> bool {
-        if id < 0 { !self.booleans.contains(&-id) } else { self.booleans.contains(&id) }
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 
-impl SkinStateSource for FakeState {
-    fn integer(&self, id: i32) -> i32 {
-        self.integers.get(&id).copied().unwrap_or_default()
+/// A host that answers the sample ids.
+fn host() -> MapHost {
+    let mut host = MapHost::new();
+    host.integers.insert(SAMPLE_NUMBER, SAMPLE_NUMBER_VALUE);
+    host.texts.insert(SAMPLE_TEXT, "ALBIDA".to_owned());
+    host.timers.insert(RUNNING_TIMER, RUNNING_SINCE_US);
+    host.now_us = NOW_US;
+    host
+}
+
+/// Loads `document` from a scratch folder of its own, with `host` behind it.
+fn load(scratch: &Scratch, document: &str, host: &dyn SkinHost) -> LoadedSkin {
+    let path = scratch.write("skin.json", document);
+    let user = SkinUserConfig::default();
+    let options = SkinLoadOptions { rng_seed: Some(TEST_SEED), ..SkinLoadOptions::new(scratch.path(), &user, Mode::BEAT_7K) };
+    load_skin_with_host(&path, options, host).unwrap_or_else(|error| panic!("the document should load: {error}"))
+}
+
+/// A music select document with nothing in it, for the tests that compile their own scripts.
+fn empty(scratch: &Scratch) -> LoadedSkin {
+    load(scratch, r#"{ "type": 5 }"#, &DefaultState)
+}
+
+/// The interpreter a loaded document owns.
+fn runtime(skin: &LoadedSkin) -> &SkinLua {
+    skin.runtime().expect("a build with Lua gives a document an interpreter")
+}
+
+/// The function a property field was compiled into.
+fn function(property: &Option<PropertyRef>) -> LuaFnId {
+    property.as_ref().and_then(PropertyRef::function).unwrap_or_else(|| panic!("the field should hold a compiled script, got {property:?}"))
+}
+
+/// Compiles `source` as a field of `kind` in `skin`'s interpreter.
+fn compile(skin: &LoadedSkin, source: &str, kind: LuaFnKind) -> LuaFnId {
+    runtime(skin).compile(source, kind).unwrap_or_else(|error| panic!("{source} should compile: {error}"))
+}
+
+#[test]
+fn a_document_finds_the_game_state_in_its_globals() {
+    let scratch = Scratch::new("globals");
+    let skin = empty(&scratch);
+    let lua = runtime(&skin).lua();
+
+    for name in ["option", "number", "float_number", "text", "timer", "time", "event_exec", "is_timer_on", "timer_observe_boolean", "event_observe_turn_true"] {
+        let kind: String = lua.load(format!("return type({name})")).eval().expect("the check runs");
+        assert_eq!(kind, "function", "{name} is a global of a document's interpreter");
     }
-
-    fn float(&self, id: i32) -> f32 {
-        self.floats.get(&id).copied().unwrap_or_default()
-    }
-
-    fn string(&self, id: i32) -> &str {
-        self.strings.get(&id).map(String::as_str).unwrap_or_default()
-    }
-
-    fn timer_us(&self, id: i32) -> i64 {
-        self.timers.get(&id).copied().unwrap_or(TIMER_OFF)
-    }
-
-    fn now_us(&self) -> i64 {
-        self.now
-    }
+    let same: bool =
+        lua.load("return option == require('main_state').option and is_timer_on == require('timer_util').is_timer_on").eval().expect("the check runs");
+    assert!(same, "the globals are the modules' own members, so the modules are still there to be required");
 }
 
 #[test]
-fn every_forbidden_global_is_gone() {
-    let sandbox = sandbox();
-    let state = FakeState::default();
-    for name in FORBIDDEN {
-        let present = sandbox.eval_bool(&format!("{name} ~= nil"), &state).expect("the check itself should run");
-        assert!(!present, "{name} must not be reachable from a skin expression");
-    }
+fn a_lua_skin_is_not_given_the_globals() {
+    let scratch = Scratch::new("no-globals");
+    let runtime = SkinLua::new(SkinLuaConfig { seed: Some(TEST_SEED), ..SkinLuaConfig::new(scratch.path()) }).expect("the runtime builds");
+    let absent: bool = runtime.lua().load("return option == nil and number == nil and is_timer_on == nil").eval().expect("the check runs");
+    assert!(absent, "a Lua skin requires the modules; nothing is exported for it");
 }
 
 #[test]
-fn the_libraries_a_skin_may_use_are_still_there() {
-    let sandbox = sandbox();
-    let state = FakeState::default();
-    for name in ["math", "string", "table"] {
-        assert!(sandbox.eval_bool(&format!("{name} ~= nil"), &state).expect("the check should run"), "{name} should be available");
-    }
-}
-
-#[test]
-fn a_skin_cannot_open_a_file() {
-    let sandbox = sandbox();
-    let state = FakeState::default();
-    let outcome = sandbox.eval_bool(r#"io.open("/etc/passwd") ~= nil"#, &state);
-    assert!(matches!(outcome, Err(SkinError::Lua { .. })), "reaching for a file must fail, got {outcome:?}");
-}
-
-#[test]
-fn a_skin_cannot_load_more_code_at_runtime() {
-    let sandbox = sandbox();
-    let state = FakeState::default();
-    assert!(matches!(sandbox.eval_bool(r#"load("return 1")()"#, &state), Err(SkinError::Lua { .. })));
-}
-
-#[test]
-fn an_endless_loop_is_cut_off_by_the_instruction_budget() {
-    let sandbox = LuaSandbox::new(&root(), Budget { max_instructions: 20_000, ..Budget::default() }).expect("the sandbox should build");
-    let state = FakeState::default();
-    let outcome = sandbox.eval_bool("(function() while true do end end)()", &state);
-    assert!(matches!(outcome, Err(SkinError::LuaBudget { .. })), "got {outcome:?}");
-}
-
-#[test]
-fn the_instruction_budget_is_restored_between_expressions() {
-    let sandbox = LuaSandbox::new(&root(), Budget { max_instructions: 60_000, ..Budget::default() }).expect("the sandbox should build");
-    let state = FakeState::default();
-    for _ in 0..4 {
-        let value = sandbox.eval_int("(function() local total = 0 for i = 1, 500 do total = total + i end return total end)()", &state);
-        assert_eq!(value.expect("a short loop fits the budget"), 125_250);
-    }
-}
-
-#[test]
-fn a_runaway_allocation_is_cut_off_by_the_memory_budget() {
-    let sandbox =
-        LuaSandbox::new(&root(), Budget { max_instructions: u32::MAX, max_memory_bytes: 512 * 1024, ..Budget::default() }).expect("the sandbox should build");
-    let state = FakeState::default();
-    let outcome = sandbox.eval_bool("(function() local t = {} local i = 1 while true do t[i] = string.rep('x', 1024) i = i + 1 end end)()", &state);
-    assert!(matches!(outcome, Err(SkinError::LuaBudget { .. })), "got {outcome:?}");
-}
-
-/// The memory ceiling has to be Lua 5.2's own allocator refusing, not the instruction count or the
-/// wall clock happening to stop the loop first, so the loop below is short enough to fit both of
-/// those and is caught inside the expression.
-#[test]
-fn the_memory_ceiling_is_enforced_by_the_allocator_itself() {
-    let sandbox = LuaSandbox::new(&root(), Budget { max_memory_bytes: 512 * 1024, ..Budget::default() }).expect("the sandbox should build");
-    let state = FakeState::default();
-    let source = "(function() local ok, message = pcall(function() local t = {} for i = 1, 2000 do t[i] = string.rep('x', 1024) end end) return tostring(ok) .. ':' .. tostring(message) end)()";
-    let outcome = sandbox.eval_string(source, &state).expect("the pcall should catch the refusal");
-    assert!(outcome.starts_with("false:") && outcome.contains("not enough memory"), "got {outcome}");
-}
-
-/// Lua 5.2 has one number type, so a quotient that lands on a whole number joins into text without a
-/// fractional part, as the reference interpreter's does.
-#[test]
-fn a_whole_quotient_joins_into_text_without_a_fraction() {
-    let sandbox = sandbox();
-    let state = FakeState::default();
-    assert_eq!(sandbox.eval_string(r#""x" .. 10 / 2"#, &state).ok(), Some("x5".to_owned()));
-    assert_eq!(sandbox.eval_string(r#""x" .. 2 ^ 3"#, &state).ok(), Some("x8".to_owned()));
-    assert_eq!(sandbox.eval_string(r#""x" .. math.floor(7.5)"#, &state).ok(), Some("x7".to_owned()));
-}
-
-/// A timer that is off reads as the reference's `Long.MIN_VALUE`, which a skin turns into a double
-/// (minus two to the sixty-third). Subtracting from it must stay a large negative number instead of
-/// wrapping around to a positive one the way a 64-bit integer would.
-#[test]
-fn arithmetic_with_the_off_timer_value_does_not_wrap_around() {
-    let sandbox = sandbox();
-    let state = FakeState::default();
-    let source = "(function() local off = -2 ^ 63 return (1000 - off > 0) and (off - 1000 < 0) and (off - 1000 == off) end)()";
-    assert!(sandbox.eval_bool(source, &state).expect("the arithmetic should run"));
-}
-
-/// The same holds for a value the host hands over: an off timer exported as the smallest 64-bit
-/// integer arrives as a double, so the subtraction below cannot wrap.
-#[test]
-fn a_timer_the_host_hands_over_as_the_smallest_integer_does_not_wrap_around() {
-    let sandbox = sandbox();
-    let mut state = FakeState::default();
-    state.timers.insert(41, TIMER_OFF);
-    assert!(sandbox.eval_bool("skin.timer(41) - 1000 < 0 and 1000 - skin.timer(41) > 0", &state).expect("the arithmetic should run"));
-}
-
-#[test]
-fn randomness_is_pinned_so_two_sandboxes_agree() {
-    let state = FakeState::default();
-    let first = sandbox().eval_float("math.random()", &state).expect("random should run");
-    let second = sandbox().eval_float("math.random()", &state).expect("random should run");
-    assert_eq!(first, second, "a document that reaches for randomness must still draw the same picture");
-}
-
-#[test]
-fn the_whitelisted_api_reads_the_state_it_is_given() {
-    let sandbox = sandbox();
-    let mut state = FakeState { now: 4_200_750, ..FakeState::default() };
-    state.booleans.insert(901);
-    state.integers.insert(10, 37);
-    state.floats.insert(110, 0.25);
-    state.strings.insert(300, "title".to_owned());
-    state.timers.insert(41, 1_500_250);
-
-    assert!(sandbox.eval_bool("skin.boolean(901)", &state).expect("boolean should run"));
-    assert_eq!(sandbox.eval_int("skin.number(10)", &state).expect("number should run"), 37);
-    assert_eq!(sandbox.eval_float("skin.float(110)", &state).expect("float should run"), 0.25);
-    assert_eq!(sandbox.eval_string("skin.text(300)", &state).expect("text should run"), "title");
-    assert_eq!(sandbox.eval_int("skin.timer(41)", &state).expect("timer should run"), 1_500_250, "a timer reads in microseconds");
-    assert_eq!(sandbox.eval_int("skin.time()", &state).expect("time should run"), 4_200_750, "and so does the clock");
-}
-
-#[test]
-fn an_unset_timer_reads_as_the_off_sentinel_rather_than_zero() {
-    let sandbox = sandbox();
-    let state = FakeState::default();
-    assert!(
-        sandbox.eval_bool("skin.timer(41) == -2^63", &state).expect("the check should run"),
-        "the reference's `Long.MIN_VALUE`, as the double a script sees"
+fn a_script_reads_the_host_the_frame_is_bound_to() {
+    let scratch = Scratch::new("reads");
+    let host = host();
+    let document = format!(
+        r#"{{ "type": 5,
+            "value": [{{ "id": "count", "src": "0", "value": "number({SAMPLE_NUMBER}) + 1" }}],
+            "text": [{{ "id": "title", "font": "0", "value": "text({SAMPLE_TEXT}) .. '!'" }}],
+            "destination": [{{ "id": "count", "draw": "is_timer_on(timer({RUNNING_TIMER})) and time() > timer({RUNNING_TIMER})", "dst": [{{ "time": 0 }}] }}] }}"#
     );
-    assert!(sandbox.eval_bool("skin.timer(41) ~= 0 and skin.timer(41) ~= nil", &state).expect("the check should run"));
+    let skin = load(&scratch, &document, &host);
+    assert_eq!(skin.warnings, Vec::<String>::new());
+    let count = function(&skin.def.value[0].value);
+    let title = function(&skin.def.text[0].value);
+    let gate = function(&skin.def.destination[0].draw);
+
+    let (number, text, drawn) =
+        runtime(&skin).frame(&host, |frame| (frame.call_integer(count), frame.call_text(title), frame.call_boolean(gate))).expect("the frame binds");
+    assert_eq!(number, SAMPLE_NUMBER_VALUE + 1);
+    assert_eq!(text, "ALBIDA!");
+    assert!(drawn, "the timer is on and the clock is past the moment it switched on");
+
+    let silent =
+        runtime(&skin).frame(&DefaultState, |frame| (frame.call_integer(count), frame.call_text(title), frame.call_boolean(gate))).expect("the frame binds");
+    assert_eq!(silent, (INTEGER_ABSENT + 1, "!".to_owned(), false), "the same scripts against a host that knows nothing");
 }
 
 #[test]
-fn a_timer_keeps_its_microseconds_across_the_script_boundary() {
-    let sandbox = sandbox();
-    let mut state = FakeState { now: 3_000_000_123, ..FakeState::default() };
-    state.timers.insert(41, 3_000_000_001);
-    assert!(sandbox.eval_bool("skin.time() - skin.timer(41) == 122", &state).expect("the arithmetic should run"), "no millisecond rounding on the way out");
+fn a_script_result_is_read_by_the_rule_of_its_field() {
+    let scratch = Scratch::new("coercion");
+    let skin = empty(&scratch);
+    let zero = compile(&skin, "0", LuaFnKind::Boolean);
+    let nothing = compile(&skin, "nil", LuaFnKind::Boolean);
+    let quotient = compile(&skin, "7 / 2", LuaFnKind::Integer);
+    let whole = compile(&skin, "10 / 2", LuaFnKind::Text);
+    let share = compile(&skin, "'0.25'", LuaFnKind::Float);
+
+    runtime(&skin)
+        .frame(&DefaultState, |frame| {
+            assert!(frame.call_boolean(zero), "truth is Lua's: zero is true");
+            assert!(!frame.call_boolean(nothing));
+            assert_eq!(frame.call_integer(quotient), 3, "an integer field truncates towards zero");
+            assert_eq!(frame.call_text(whole), "5", "a whole quotient is written without a fraction");
+            assert_eq!(frame.call_float(share), 0.25, "a string that spells a number is that number");
+        })
+        .expect("the frame binds");
 }
 
 #[test]
-fn a_negative_option_id_is_negated_by_the_state_source() {
-    let sandbox = sandbox();
-    let mut state = FakeState::default();
-    state.booleans.insert(901);
-    assert!(!sandbox.eval_bool("skin.boolean(-901)", &state).expect("the check should run"));
-    assert!(sandbox.eval_bool("skin.boolean(-902)", &state).expect("the check should run"));
+fn a_timer_script_is_tried_once_and_may_hand_over_a_function() {
+    let scratch = Scratch::new("timers");
+    let host = host();
+    let document = format!(
+        r#"{{ "type": 5, "image": [
+            {{ "id": "plain", "src": "0", "timer": "timer({RUNNING_TIMER})" }},
+            {{ "id": "made", "src": "0", "timer": "timer_function({RUNNING_TIMER})" }},
+            {{ "id": "counted", "src": "0", "timer": "(function() tried = (tried or 0) + 1 return 7 end)()" }}
+        ] }}"#
+    );
+    let skin = load(&scratch, &document, &host);
+    assert_eq!(skin.warnings, Vec::<String>::new());
+    let plain = function(&skin.def.image[0].timer);
+    let made = function(&skin.def.image[1].timer);
+    let counted = function(&skin.def.image[2].timer);
+
+    let tried: i32 = runtime(&skin).lua().load("return tried").eval().expect("the count reads");
+    assert_eq!(tried, 1, "the chunk was called exactly once while the document loaded");
+
+    let (plain, made, counted) =
+        runtime(&skin).frame(&host, |frame| (frame.call_timer(plain), frame.call_timer(made), frame.call_timer(counted))).expect("the frame binds");
+    assert_eq!(plain, RUNNING_SINCE_US, "a chunk that yields a number is itself the timer");
+    assert_eq!(made, RUNNING_SINCE_US, "a chunk that yields a function hands that function over");
+    assert_eq!(counted, 7);
+
+    let off = runtime(&skin).frame(&DefaultState, |frame| frame.call_timer(plain_of(&skin))).expect("the frame binds");
+    assert_eq!(off, TIMER_OFF, "against a host with no such timer the same script reports it off");
+}
+
+/// The first image's timer function, for the one test that reads it twice.
+fn plain_of(skin: &LoadedSkin) -> LuaFnId {
+    function(&skin.def.image[0].timer)
 }
 
 #[test]
-fn an_unimplemented_id_reads_as_a_default_rather_than_failing() {
-    let sandbox = sandbox();
-    let state = FakeState::default();
-    assert!(!sandbox.eval_bool("skin.boolean(12345)", &state).expect("the check should run"));
-    assert_eq!(sandbox.eval_int("skin.number(12345)", &state).expect("the check should run"), 0);
-    assert_eq!(sandbox.eval_string("skin.text(12345)", &state).expect("the check should run"), "");
-}
-
-#[test]
-fn truth_follows_lua_rather_than_rust() {
-    let sandbox = sandbox();
-    let state = FakeState::default();
-    assert!(sandbox.eval_bool("0", &state).expect("zero should run"), "zero is true in Lua");
-    assert!(!sandbox.eval_bool("nil", &state).expect("nil should run"));
-    assert!(!sandbox.eval_bool("false", &state).expect("false should run"));
-    assert!(sandbox.eval_bool(r#""""#, &state).expect("the empty string should run"), "the empty string is true in Lua");
-}
-
-#[test]
-fn the_same_source_compiles_once() {
-    let sandbox = sandbox();
-    let first = sandbox.compile("skin.number(10) > 0").expect("compiles");
-    let second = sandbox.compile("skin.number(10) > 0").expect("compiles");
-    assert_eq!(first, second);
-    assert_eq!(sandbox.compiled_count(), 1);
-}
-
-#[test]
-fn a_source_that_will_not_compile_is_reported_with_its_text() {
-    let sandbox = sandbox();
-    let outcome = sandbox.compile("this is not lua at all ===");
-    match outcome {
-        Err(SkinError::Lua { expr, .. }) => assert_eq!(expr, "this is not lua at all ==="),
-        other => panic!("a broken expression should report itself, got {other:?}"),
-    }
-}
-
-#[test]
-fn a_whole_chunk_compiles_when_the_expression_form_does_not() {
-    let sandbox = sandbox();
-    let state = FakeState::default();
-    assert_eq!(sandbox.eval_int("local total = 1 + 2 return total", &state).expect("a chunk should run"), 3);
-}
-
-#[test]
-fn a_result_of_the_wrong_shape_is_reported() {
-    let sandbox = sandbox();
-    let state = FakeState::default();
-    assert!(matches!(sandbox.eval_int("{}", &state), Err(SkinError::Lua { .. })));
-}
-
-#[test]
-fn a_frame_answers_draw_conditions_and_counts_them() {
-    let sandbox = sandbox();
-    let mut state = FakeState::default();
-    state.integers.insert(10, 1);
-    let expr = sandbox.compile("skin.number(10) > 0").expect("compiles");
-
-    let frame = sandbox.frame(&state);
-    assert_eq!(frame.eval_draw(expr), Some(true));
-    assert_eq!(frame.eval_draw(expr), Some(true));
-    assert_eq!(frame.calls(), 2);
-}
-
-#[test]
-fn a_failing_expression_hides_its_object_instead_of_failing_the_frame() {
-    let sandbox = sandbox();
-    let state = FakeState::default();
-    let expr = sandbox.compile("error('boom')").expect("compiles");
-    assert_eq!(sandbox.frame(&state).eval_draw(expr), None);
-}
-
-#[test]
-fn a_frame_stops_evaluating_once_it_passes_its_call_budget() {
-    let sandbox = LuaSandbox::new(&root(), Budget { max_calls_per_frame: 2, ..Budget::default() }).expect("the sandbox should build");
-    let state = FakeState::default();
-    let expr = sandbox.compile("true").expect("compiles");
-    let frame = sandbox.frame(&state);
-
-    assert_eq!(frame.eval_draw(expr), Some(true));
-    assert_eq!(frame.eval_draw(expr), Some(true));
-    assert_eq!(frame.eval_draw(expr), None, "the third evaluation is past the frame budget");
-    assert_eq!(frame.calls(), 2);
-}
-
-#[test]
-fn a_new_frame_starts_its_call_budget_over() {
-    let sandbox = LuaSandbox::new(&root(), Budget { max_calls_per_frame: 1, ..Budget::default() }).expect("the sandbox should build");
-    let state = FakeState::default();
-    let expr = sandbox.compile("true").expect("compiles");
-
-    assert_eq!(sandbox.frame(&state).eval_draw(expr), Some(true));
-    assert_eq!(sandbox.frame(&state).eval_draw(expr), Some(true));
-}
-
-#[test]
-fn the_sandbox_remembers_the_root_it_was_built_for() {
-    let sandbox = sandbox();
-    assert_eq!(sandbox.root(), root());
-    assert_eq!(sandbox.budget(), Budget::default());
-}
-
-/// The `string` functions the sandbox removes, and why.
-const FORBIDDEN_STRING: &[&str] = &["dump", "find", "gmatch", "gsub", "match"];
-
-/// `string.dump` hands out bytecode, and Lua's own unloader does next to no validation of a chunk it
-/// is given back, so the two belong together: no way to produce bytecode, and no way to load it.
-#[test]
-fn a_skin_cannot_produce_or_load_bytecode() {
-    let sandbox = sandbox();
-    let state = FakeState::default();
-    for name in FORBIDDEN_STRING {
-        let source = format!("string.{name} == nil");
-        assert_eq!(sandbox.eval_bool(&source, &state).ok(), Some(true), "string.{name} is still reachable");
-    }
-
-    let binary = "\u{1b}Lua\u{52}\u{0}";
-    let Err(SkinError::Lua { message, .. }) = sandbox.compile(binary) else {
-        panic!("a chunk that starts with the bytecode signature must be refused");
+fn an_event_script_is_compiled_as_it_stands_and_reaches_the_host() {
+    let scratch = Scratch::new("events");
+    let host = host();
+    let document = r#"{ "type": 5, "image": [
+        { "id": "counter", "src": "0", "act": "pressed = (pressed or 0) + 1" },
+        { "id": "button", "src": "0", "act": "event_exec(13)" }
+    ] }"#;
+    let skin = load(&scratch, document, &host);
+    assert_eq!(skin.warnings, Vec::<String>::new(), "a statement is a whole chunk: no `return` is put in front of an event");
+    let (Some(EventRef::Lua(counter)), Some(EventRef::Lua(button))) = (skin.def.image[0].act.clone(), skin.def.image[1].act.clone()) else {
+        panic!("both events should be compiled: {:?}", skin.def.image);
     };
-    assert!(message.contains("binary chunk"), "it must be refused for being bytecode, not for happening to be malformed: {message}");
+
+    runtime(&skin)
+        .frame(&host, |frame| {
+            frame.call_event(counter, 0);
+            frame.call_event(counter, 0);
+            frame.call_event(button, 0);
+        })
+        .expect("the frame binds");
+    let pressed: i32 = runtime(&skin).lua().load("return pressed").eval().expect("the count reads");
+    assert_eq!(pressed, 2);
+    assert_eq!(host.calls().len(), 1, "the host was asked to run one event: {:?}", host.calls());
 }
 
-/// Pattern matching runs entirely inside C, where the instruction hook never fires and the allocator
-/// is never asked for anything, so a pattern with several `.-` captures over a long subject runs for
-/// as long as it likes with neither budget noticing. The expression below took seconds before those
-/// functions were taken out of the sandbox, on a frame loop that has sixteen milliseconds.
-#[test]
-fn a_backtracking_pattern_cannot_run_at_all_let_alone_forever() {
-    let sandbox = sandbox();
-    let state = FakeState::default();
-    let started = std::time::Instant::now();
-    let outcome = sandbox.eval_bool(r#"string.find(string.rep("a", 120), "^(.-)(.-)(.-)(.-)(.-)b$") ~= nil"#, &state);
-    let spent = started.elapsed();
+/// A document with one customisation row, one file slot and one offset of its own.
+const CONFIGURED_DOCUMENT: &str = r#"{
+    "type": 5,
+    "property": [{ "name": "Panel", "item": [{ "name": "on", "op": 901 }, { "name": "off", "op": 902 }], "def": "on" }],
+    "filepath": [{ "name": "Gauge", "path": "gauge/*.png", "def": "hard" }],
+    "offset": [{ "name": "Shift", "id": 40, "x": true }]
+}"#;
 
-    assert!(matches!(outcome, Err(SkinError::Lua { .. })), "got {outcome:?}");
-    assert!(spent < std::time::Duration::from_millis(200), "the expression ran for {spent:?}");
+#[test]
+fn a_document_is_given_skin_config_too() {
+    let scratch = Scratch::new("config");
+    scratch.write("gauge/groove.png", "");
+    scratch.write("gauge/hard.png", "");
+    let path = scratch.write("skin.json", CONFIGURED_DOCUMENT);
+    let mut user = SkinUserConfig::default();
+    user.offsets.insert(DECLARED_OFFSET, rbms_skin::dst::SkinOffset { x: 12.0, ..rbms_skin::dst::SkinOffset::default() });
+    let options = SkinLoadOptions { rng_seed: Some(TEST_SEED), ..SkinLoadOptions::new(scratch.path(), &user, Mode::BEAT_7K) };
+    let skin = load_skin_with_host(&path, options, &DefaultState).expect("the document should load");
+
+    let option = compile(&skin, "skin_config.option['Panel']", LuaFnKind::Integer);
+    let listed = compile(&skin, "#skin_config.enabled_options", LuaFnKind::Integer);
+    let shift = compile(&skin, "skin_config.offset['Shift'].x", LuaFnKind::Integer);
+    let gauge = compile(&skin, "skin_config.get_path('gauge/*.png')", LuaFnKind::Text);
+    let reads = compile(&skin, "io.open(skin_config.get_path('gauge/*.png'), 'r') ~= nil", LuaFnKind::Boolean);
+
+    runtime(&skin)
+        .frame(&DefaultState, |frame| {
+            assert_eq!(frame.call_integer(option), DEFAULT_OPTION);
+            assert_eq!(frame.call_integer(listed), 1);
+            assert_eq!(frame.call_integer(shift), 12, "an offset is published under its name with the value stored under its id");
+            let path = frame.call_text(gauge);
+            assert!(path.ends_with("/gauge/hard.png"), "the slot's `def` named the file by its stem: {path}");
+            assert!(Path::new(&path).is_absolute(), "the path is one the interpreter's own file functions accept: {path}");
+            assert!(frame.call_boolean(reads), "and `io.open` opens it");
+        })
+        .expect("the frame binds");
 }
 
-/// The formatting and slicing a document actually reaches for is still there: taking the pattern
-/// functions out is not taking the library out.
 #[test]
-fn the_string_functions_a_document_needs_are_still_there() {
-    let sandbox = sandbox();
-    let state = FakeState::default();
-    assert_eq!(sandbox.eval_string(r#"string.format("%02d", 7)"#, &state).ok(), Some("07".to_owned()));
-    assert_eq!(sandbox.eval_string(r#"("rbms"):sub(1, 2):upper()"#, &state).ok(), Some("RB".to_owned()));
+fn a_script_may_require_a_module_beside_its_document() {
+    let scratch = Scratch::new("require");
+    scratch.write("parts/helper.lua", "local helper = {}\nfunction helper.double(value) return value * 2 end\nreturn helper\n");
+    let host = host();
+    let document =
+        format!(r#"{{ "type": 5, "value": [{{ "id": "count", "src": "0", "value": "require('parts.helper').double(number({SAMPLE_NUMBER}))" }}] }}"#);
+    let skin = load(&scratch, &document, &host);
+    let count = function(&skin.def.value[0].value);
+
+    let doubled = runtime(&skin).frame(&host, |frame| frame.call_integer(count)).expect("the frame binds");
+    assert_eq!(doubled, SAMPLE_NUMBER_VALUE * 2);
 }
 
-/// The frame budget is what stops a document's expressions from running the frame loop off the road,
-/// so it has to cover every read a document makes -- not only the draw conditions. A `value`, a
-/// `floatvalue` and a `text` field each take an expression too, and an object is far more likely to
-/// have one of those than a gate.
 #[test]
-fn the_frame_budget_covers_value_reads_as_well_as_draw_conditions() {
-    let sandbox = LuaSandbox::new(&root(), Budget { max_calls_per_frame: 3, ..Budget::default() }).expect("the sandbox should build");
-    let state = FakeState::default();
-    let number = sandbox.compile("7").expect("compiles");
-    let text = sandbox.compile("'x'").expect("compiles");
-    let frame = sandbox.frame(&state);
+fn a_script_that_never_ends_is_cut_off_and_the_frame_goes_on() {
+    let scratch = Scratch::new("runaway");
+    let skin = empty(&scratch);
+    let runaway = compile(&skin, "(function() while true do end end)()", LuaFnKind::Integer);
+    let fine = compile(&skin, "42", LuaFnKind::Integer);
 
-    assert_eq!(frame.eval_int(number), Some(7));
-    assert_eq!(frame.eval_float(number), Some(7.0));
-    assert_eq!(frame.eval_string(text), Some("x".to_owned()));
-    assert_eq!(frame.calls(), 3, "each read spends one of the frame's evaluations");
+    let (stuck, after) = runtime(&skin).frame(&DefaultState, |frame| (frame.call_integer(runaway), frame.call_integer(fine))).expect("the frame binds");
+    assert_eq!(stuck, 0, "a script cut off before it ever answered reads as its field's default");
+    assert_eq!(after, 42, "and the next script of the same frame still runs");
 
-    assert_eq!(frame.eval_int(number), None, "past the budget a value read falls back to its default");
-    assert_eq!(frame.eval_draw(number), None, "and so does a draw condition, out of the same allowance");
+    let diagnostics = runtime(&skin).diagnostics();
+    assert_eq!(diagnostics.frames_over_budget, 1);
+    assert_eq!(diagnostics.function_failures.len(), 1, "the failure is recorded once: {:?}", diagnostics.function_failures);
 }
 
-/// Time is the other half of the same budget: a frame that has spent its whole Lua allowance stops
-/// evaluating, however few evaluations that took.
 #[test]
-fn a_frame_that_spends_its_whole_time_allowance_stops_evaluating() {
-    let sandbox = LuaSandbox::new(&root(), Budget { max_frame_micros: 0, ..Budget::default() }).expect("the sandbox should build");
-    let state = FakeState::default();
-    let expr = sandbox.compile("true").expect("compiles");
-    let frame = sandbox.frame(&state);
+fn a_script_that_raises_reads_as_its_default_and_is_recorded_once() {
+    let scratch = Scratch::new("raises");
+    let skin = empty(&scratch);
+    let broken = compile(&skin, "no_such_function()", LuaFnKind::Boolean);
 
-    assert_eq!(frame.eval_draw(expr), None, "a frame with no time left evaluates nothing");
-    assert_eq!(frame.calls(), 0);
+    let drawn = runtime(&skin).frame(&DefaultState, |frame| (frame.call_boolean(broken), frame.call_boolean(broken))).expect("the frame binds");
+    assert_eq!(drawn, (false, false), "a condition that raises hides its object rather than failing the frame");
+    let failures = runtime(&skin).diagnostics().function_failures;
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].count, 2, "it is called again every time, as the reference does");
+    assert!(failures[0].first_message.contains("no_such_function"), "{}", failures[0].first_message);
 }
 
-/// A wall clock catches what an instruction count cannot. The count is restored per call and the
-/// clock is too, so an expression that fits comfortably still runs on every frame.
 #[test]
-fn an_expression_is_held_to_a_wall_clock_as_well_as_an_instruction_count() {
-    let sandbox = LuaSandbox::new(&root(), Budget { max_instructions: u32::MAX, max_call_micros: 1, ..Budget::default() }).expect("the sandbox builds");
-    let state = FakeState::default();
-    let outcome = sandbox.eval_int("(function() local total = 0 for i = 1, 20000000 do total = total + i end return total end)()", &state);
-    assert!(matches!(outcome, Err(SkinError::LuaBudget { .. })), "got {outcome:?}");
+fn a_script_cannot_make_or_load_bytecode_or_leave_the_root() {
+    let scratch = Scratch::new("contained");
+    scratch.write("skin/inside.lua", "return 1");
+    scratch.write("secret.txt", "not for a skin");
+    let path = scratch.write("skin/skin.json", r#"{ "type": 5 }"#);
+    let root = scratch.path().join("skin");
+    let user = SkinUserConfig::default();
+    let options = SkinLoadOptions { rng_seed: Some(TEST_SEED), ..SkinLoadOptions::new(&root, &user, Mode::BEAT_7K) };
+    let skin = load_skin_with_host(&path, options, &DefaultState).expect("the document should load");
 
-    let quick = sandbox.eval_int("1 + 1", &state);
-    assert_eq!(quick.ok(), Some(2), "the clock starts over for the next expression");
+    let checks = [
+        "string.dump == nil",
+        "load(string.char(27) .. 'Lua') == nil",
+        "dofile('inside.lua') == 1",
+        "not pcall(dofile, '../secret.txt')",
+        "io.open('../secret.txt') == nil",
+        "io.open('written.txt', 'w') == nil",
+        "os.execute == nil and os.remove == nil and os.getenv == nil",
+    ];
+    for check in checks {
+        let script = compile(&skin, check, LuaFnKind::Boolean);
+        let held = runtime(&skin).frame(&DefaultState, |frame| frame.call_boolean(script)).expect("the frame binds");
+        assert!(held, "{check} must hold for a document's script");
+    }
+    assert!(!root.join("written.txt").exists(), "a document loaded with no write overlay writes nowhere");
 }
