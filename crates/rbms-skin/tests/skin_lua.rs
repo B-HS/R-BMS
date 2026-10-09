@@ -151,6 +151,50 @@ fn a_runaway_allocation_is_cut_off_by_the_memory_budget() {
     assert!(matches!(outcome, Err(SkinError::LuaBudget { .. })), "got {outcome:?}");
 }
 
+/// The memory ceiling has to be Lua 5.2's own allocator refusing, not the instruction count or the
+/// wall clock happening to stop the loop first, so the loop below is short enough to fit both of
+/// those and is caught inside the expression.
+#[test]
+fn the_memory_ceiling_is_enforced_by_the_allocator_itself() {
+    let sandbox = LuaSandbox::new(&root(), Budget { max_memory_bytes: 512 * 1024, ..Budget::default() }).expect("the sandbox should build");
+    let state = FakeState::default();
+    let source = "(function() local ok, message = pcall(function() local t = {} for i = 1, 2000 do t[i] = string.rep('x', 1024) end end) return tostring(ok) .. ':' .. tostring(message) end)()";
+    let outcome = sandbox.eval_string(source, &state).expect("the pcall should catch the refusal");
+    assert!(outcome.starts_with("false:") && outcome.contains("not enough memory"), "got {outcome}");
+}
+
+/// Lua 5.2 has one number type, so a quotient that lands on a whole number joins into text without a
+/// fractional part, as the reference interpreter's does.
+#[test]
+fn a_whole_quotient_joins_into_text_without_a_fraction() {
+    let sandbox = sandbox();
+    let state = FakeState::default();
+    assert_eq!(sandbox.eval_string(r#""x" .. 10 / 2"#, &state).ok(), Some("x5".to_owned()));
+    assert_eq!(sandbox.eval_string(r#""x" .. 2 ^ 3"#, &state).ok(), Some("x8".to_owned()));
+    assert_eq!(sandbox.eval_string(r#""x" .. math.floor(7.5)"#, &state).ok(), Some("x7".to_owned()));
+}
+
+/// A timer that is off reads as the reference's `Long.MIN_VALUE`, which a skin turns into a double
+/// (minus two to the sixty-third). Subtracting from it must stay a large negative number instead of
+/// wrapping around to a positive one the way a 64-bit integer would.
+#[test]
+fn arithmetic_with_the_off_timer_value_does_not_wrap_around() {
+    let sandbox = sandbox();
+    let state = FakeState::default();
+    let source = "(function() local off = -2 ^ 63 return (1000 - off > 0) and (off - 1000 < 0) and (off - 1000 == off) end)()";
+    assert!(sandbox.eval_bool(source, &state).expect("the arithmetic should run"));
+}
+
+/// The same holds for a value the host hands over: an off timer exported as the smallest 64-bit
+/// integer arrives as a double, so the subtraction below cannot wrap.
+#[test]
+fn a_timer_the_host_hands_over_as_the_smallest_integer_does_not_wrap_around() {
+    let sandbox = sandbox();
+    let mut state = FakeState::default();
+    state.timers.insert(41, i64::MIN);
+    assert!(sandbox.eval_bool("skin.timer(41) - 1000 < 0 and 1000 - skin.timer(41) > 0", &state).expect("the arithmetic should run"));
+}
+
 #[test]
 fn randomness_is_pinned_so_two_sandboxes_agree() {
     let state = FakeState::default();
@@ -310,7 +354,7 @@ fn a_skin_cannot_produce_or_load_bytecode() {
         assert_eq!(sandbox.eval_bool(&source, &state).ok(), Some(true), "string.{name} is still reachable");
     }
 
-    let binary = "\u{1b}Lua\u{51}\u{0}";
+    let binary = "\u{1b}Lua\u{52}\u{0}";
     let Err(SkinError::Lua { message, .. }) = sandbox.compile(binary) else {
         panic!("a chunk that starts with the bytecode signature must be refused");
     };
