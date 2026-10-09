@@ -1,6 +1,16 @@
 # ModernChic 선곡 화면 스킨 조사 보고서 (m4-select)
 
-> 최종 갱신 2026-10-09 · 대응 단계: L1 조사(구현 전) · 기준 커밋 `9ce92bb` · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 2(Lua 런타임·로더·스킨 팩) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 2B 반영 사항 (2026-10-10)
+
+스킨 덤프 CLI, 앱의 스킨 팩 폴더 지정과 `.luaskin` 로드, 오버레이 총 크기 상한, 외부 스킨 첫 정지 프레임을 넣은 뒤의 상태다.
+
+- (W2-9) m4-select.md §8.3: 'W2-9 캡처: selectmusic-frame 과 mainframe 요소는 좌표대로 나오지만 곡 목록 바는 0개. 원인은 `{id = "songlist"}` destination 에 dst 가 없어 R-BMS 가 해석하지 못하는 것(songlist.lua:245)' 추가
+- (W2-9) m4-select.md §8.4: 'folder-totalsongs destination 에는 op 가 없다(musicdisplay.lua:86). 곡 바에서 보이지 않는 것은 NUMBER 300 이 값 없음(Integer.MIN_VALUE)이기 때문이므로, 호스트는 폴더 바가 아닐 때 300 을 0 이 아니라 값 없음으로 답해야 한다(0 을 주면 (870,498)에 0000 이 그려짐을 캡처로 확인)' 추가
+- (W2-9) m4-select.md §2.1·§4.1·§4.3: 실측 일치 표시 — destination 1914, draw 함수가 걸린 destination 1384, 함수 타이머 420, 등록 함수 1817
+- (W2-6) m4-select.md §2.1(객체 수 수동 전개)와 00-synthesis.md 위험 5: 선곡 본체 실측 destination 1914, 객체 image 1438·imageset 49·value 154·text 65·slider 5·graph 111·judgegraph 1·bpmgraph 1·songlist 1, 함수 값 1817(boolean 1351, integer 4, float 25, text 1, timer 420, event 16). boolean+integer+float+text = 1381 로 '클로저 약 1380 + 타이머 약 420' 과 일치.
+
 
 조사 대상: `/Users/hyunseokbyun/Downloads/ModernChic` 의 선곡 화면(`musicselect.luaskin`). 참조 구현: `/Users/hyunseokbyun/development/beatoraja/src/bms/player/beatoraja/`(이하 `B:`). 이 문서의 경로는 별도 표기가 없으면 ModernChic 루트 기준이며, 줄번호는 원본 파일 기준이다.
 

@@ -1,6 +1,17 @@
 # R1 — `crates/rbms-skin` 현황과 풀 Lua 스킨까지의 격차
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 2A(Lua 런타임과 로더) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 2(Lua 런타임·로더·스킨 팩) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 2B 반영 사항 (2026-10-10)
+
+스킨 덤프 CLI, 앱의 스킨 팩 폴더 지정과 `.luaskin` 로드, 오버레이 총 크기 상한, 외부 스킨 첫 정지 프레임을 넣은 뒤의 상태다.
+
+- (W2-10) r1-rbms-skin.md §2.2: 타입 표에 lua::OverlayLimits { max_bytes 64 MiB, max_entries 4096, resync_interval 5초 }, SkinLuaConfig.overlay_limits 필드, 크레이트 내부 io::OverlayQuota(measure/admit_change/record_change/admit_entries/create_directories/copy_original/invalidate)를 추가
+- (W2-10) r1-rbms-skin.md §5.4: S7(io) 에 '오버레이 폴더 현재 총 크기와 항목 수 상한, 쓰기 전 확인, 초과 시 nil+메시지(io) 또는 false(헬퍼), 크기를 늘리지 않는 쓰기는 항상 허용' 을 구현 완료로 기록
+- (W2-10) r1-rbms-skin.md §8: 테스트 표에 tests/skin_lua_io.rs 27개(오버레이 상한 8개 추가)로 갱신
+- (W2-6) r1-rbms-skin.md §5.4 예산 표와 00-synthesis.md:14 '로드는 명령 수(5억)': 로드 명령 수 기본값이 1억(DEFAULT_LOAD_INSTRUCTIONS)으로 바뀌었고 나머지 상수(로드 10초, 프레임 호출 16,384, 프레임 50ms, 호출당 100만, 메모리 256MiB)는 '잠정'이 아니라 실측 근거를 가진 값이다. 5억에서는 폭주 루프가 최대 3.5초 뒤 차단됐다.
+- (리뷰 수정) r1-rbms-skin.md 상단 '웨이브 2B 반영 사항', §5(샌드박스): OverlayQuota 가 스레드 로컬 장부(오버레이 경로 → Ledger)를 공유하고, missing_directories 와 admit(entries, before, after) 로 디렉터리 생성 전에 전부 승인한다. io.open, main_state.file_write/file_append, luajava File:mkdir 에 적용
+
 
 ## 웨이브 2A 반영 사항 (2026-10-10)
 

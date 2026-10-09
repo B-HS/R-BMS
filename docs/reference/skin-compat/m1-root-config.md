@@ -1,6 +1,16 @@
 # M1 조사 보고서 - ModernChic 공통 계층과 Lua 런타임 의존 전수 조사
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 2A(Lua 런타임과 로더) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 2(Lua 런타임·로더·스킨 팩) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 2B 반영 사항 (2026-10-10)
+
+스킨 덤프 CLI, 앱의 스킨 팩 폴더 지정과 `.luaskin` 로드, 오버레이 총 크기 상한, 외부 스킨 첫 정지 프레임을 넣은 뒤의 상태다.
+
+- (W2-6) m1-root-config.md §3·§2.6, 사양 §6 웨이브 2 '덤프 기준' 객체 수: result 는 코스 제목을 비운 기준 시나리오에서 destination 194(수기와 같음)이고, 모든 문자열을 채우면 195 다. 나머지(play7 286, play5 277, play14 372, play10 354, select 1914, course 175, decide 69, skinselect 108)는 W2-5 실측과 같다. play7 은 NO_BGA(170)=true 일 때 287.
+- (W2-6) m1-root-config.md 웨이브 2A 반영 사항의 W2-3 항목: 이미지 인덱스 55 는 '있어야' 가 아니라 2·3·4(HSFIX MAX/MAIN/MIN)여야 한다. Root/customslider.lua adjustedCover() 가 event 0·1 에서 nil 을 돌려줘 Play/lua/sp/cover.lua:29,35,39,43 과 dp/cover.lua:48,49,54,55,56 의 슬라이더 값 함수가 nil 인덱스 오류를 낸다(실제 게임은 op 조건이 거짓이면 값 함수를 부르지 않으므로 덤프처럼 전부 부를 때만 드러난다).
+- (W2-6) m1-root-config.md §2.7: keyconfig 실패 위치(Decide/lua/require/textproperty.lua:37 isOutlineFont)가 skin-dump 로도 재현됨(헤더는 type 8 로 정상).
+- (리뷰 수정) m1-root-config.md §3(헤더 요약): 덤프 출력으로 대조한 결과 scene/input/fadeout/loadend/playstart/close 6열이 9개 문서(keyconfig 제외) 모두 표와 일치함을 기록. keyconfig 는 본체 실패로 덤프에서 이 6열을 확인하지 못함
+
 
 ## 웨이브 2A 반영 사항 (2026-10-10)
 

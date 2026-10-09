@@ -1,6 +1,18 @@
 # R2 — R-BMS 렌더 계층(crates/rbms-render, GPU 백엔드) 현황과 격차
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 2A(Lua 런타임과 로더) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 2(Lua 런타임·로더·스킨 팩) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 2B 반영 사항 (2026-10-10)
+
+스킨 덤프 CLI, 앱의 스킨 팩 폴더 지정과 `.luaskin` 로드, 오버레이 총 크기 상한, 외부 스킨 첫 정지 프레임을 넣은 뒤의 상태다.
+
+- (W2-9) r2-rbms-render.md §5.3: '음수 id 참조 이미지' 행에 실측 추가 — ModernChic 4화면에서 빠지는 개수는 decide 3, result 5, musicselect 17, play7_hw 13(+ 정의 없는 id 'lamp' 2). 같은 표에 새 행 'dst 없는 최상위 destination(songlist, notes)은 키프레임 0개라 prepare 가 None → 본체 미호출. 레퍼런스는 SkinBar/SkinNote 가 자체 목록으로 그리므로 destination 의 dst 가 필요 없다'를 추가
+- (W2-9) r2-rbms-render.md §5.1: 표 아래에 '음수 폭/높이는 Placement::region(draw.rs)의 `fitted.w <= 0.0 || fitted.h <= 0.0` 에서 버려진다(뒤집기 없음). ModernChic 해당 destination: result 1, musicselect 2, play7_hw 7' 추가. graph 행에 'gra_fastRate, 스코어 막대가 이 때문에 나오지 않음(W2-9 캡처로 확인)' 추가
+- (W2-9) r2-rbms-render.md §5.2: songlist 행과 note 행에 'ModernChic 에서는 현재 한 번도 그려지지 않는다(dst 없는 destination)' 추가. gauge 행의 '결과 화면에서는 그리지 않음'에 '캡처에서 (56,674,400,35)가 검은 빈 칸으로 확인' 추가. gaugegraph 행에 '배경을 불투명하게 칠해 같은 사각형의 judgegraph 를 가린다' 추가
+- (W2-9) r2-rbms-render.md §7.1: '렌더 크레이트 수준에서 Lua 함수 값이 끝까지 평가됨을 crates/rbms-render/tests/skin_external.rs 가 확인. 프레임마다 SkinLua::frame 으로 호스트를 묶어 BoundFrame 을 SkinFrame.lua 로 넘기는 것이 사용법이고 skin_render/mod.rs 변경은 필요 없었다. 평가기 유무에 따른 차이: result 67 대 33 객체' 추가
+- (W2-9) r2-rbms-render.md §3.4: '본체 로드 뒤 실제로 참조되는 source 는 화면당 decide 3/4, result 12/13, musicselect 11/11, play7_hw 23/27 이고 디코드 픽셀은 2.76M / 33.5M / 42.4M / 34.9M px(RGBA 약 11 / 134 / 170 / 140 MiB), 최대 3920x3800(result)·5190x2571(play). "전부 올리면 2.79 GiB"는 팩 전체 기준이고 Lua 스킨은 선택된 옵션의 source 만 선언하므로 화면 하나의 부담은 이 정도' 추가
+- (W2-9) r2-rbms-render.md §9: CpuCanvas 1920x1080 디버그 빌드 실측 추가 — 프레임당 decide 0.28~0.56초, result 0.84~1.03초, musicselect 0.62~1.36초(1897 객체 중 약 100개 그림), play 1.05~1.12초. 빌드(디코드 포함) 0.17 / 1.36 / 1.62 / 1.52초
+
 
 ## 웨이브 2A 반영 사항 (2026-10-10)
 

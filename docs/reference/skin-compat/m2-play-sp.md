@@ -1,6 +1,15 @@
 # M2 조사 보고서: ModernChic 싱글 플레이 스킨(5키 / 7키)
 
-> 최종 갱신 2026-10-09 · 대응 단계: L1 조사(구현 전) · 기준 커밋 `9ce92bb` · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 2(Lua 런타임·로더·스킨 팩) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 2B 반영 사항 (2026-10-10)
+
+스킨 덤프 CLI, 앱의 스킨 팩 폴더 지정과 `.luaskin` 로드, 오버레이 총 크기 상한, 외부 스킨 첫 정지 프레임을 넣은 뒤의 상태다.
+
+- (W2-9) m2-play-sp.md §7.4: '해결하지 못한 관찰'에 'W2-9 캡처에서 좌표 그대로 그리면 게이지 프레임 (14,110,556x69)이 키 베드 아래쪽을 실제로 덮는다(키 아트의 위쪽 약 45px 만 보임). beatoraja 실화면 대조는 여전히 필요' 추가
+- (W2-9) m2-play-sp.md §2.2: destination 수 '약 288' → 실측 289(조립 후 객체 274). §2.4 에 '정의 없는 id: lamp x2, 키프레임 없는 destination: notes, def' 추가
+- (W2-9) m2-play-sp.md §7.2: 'W2-9 캡처 대조: z 1~6, 12, 14, 16, 19 의 프레임·숫자·로딩 창은 좌표대로 나옴. z 8 노트, z 16 막대(음수 폭), -110 계열 오버레이·마스크는 빠짐' 추가
+
 
 작성 범위: `/Users/hyunseokbyun/Downloads/ModernChic` 의 `play7_hw.lua`, `play5_hw.lua`, `Play/lua/{base,background,close}.lua`, `Play/lua/require/*.lua`, `Play/lua/sp/**/*.lua`(detailinfo 포함), `Root/main*.lua`, `Root/custom*.lua`, `Root/define*.lua`, `config.lua`, `Play/parts/{sp_hw,common}` 파일 목록, `io/Play/sp`. 대조용으로 `/Users/hyunseokbyun/development/beatoraja/src/bms/player/beatoraja/{skin,skin/lua,skin/json,play}` 를 읽었다.
 

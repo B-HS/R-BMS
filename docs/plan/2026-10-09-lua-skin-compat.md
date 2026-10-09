@@ -245,6 +245,10 @@ R-BMS 고유 규칙
 
 진행 기록(2026-10-10): **웨이브 2A 완료** — W2-0 → W2-1 ∥ W2-2a → W2-2b ∥ W2-3 ∥ W2-4 → W2-2c → W2-5 → 리뷰 → 수정. Workflow `wf_402f94ef-6d0`(10 에이전트). 게이트 통과(테스트 3,475 통과·0 실패·ignored 3). ModernChic 9/10 로드(keyconfig 는 원본 결함), 9개 모두 pcall 실패 0·경고 0, 스킨 폴더 무변경 확인. 적대 리뷰가 격리 탈출을 실제로 시도했고 파일 가두기·바이트코드·os·debug 는 전부 막혔다. 예산을 뚫는 경로 3건(`__gc` 종료자 루프, 패턴 백트래킹, 조회 실패 이름 캐시)과 파일 읽기·핸들 상한 누락을 수정했다. W2-7 의 미니 픽스처(`tests/fixtures/luaskin/mini/`)와 테스트(`skin_luaskin.rs`, `skin_lua_env.rs`, `skin_lua_io.rs`, `skin_luajava.rs`, `skin_main_state.rs`, `skin_from_lua.rs`, `skin_lua_pattern.rs`)는 이 단계에서 선반영됐다. 남은 것은 웨이브 2B(W2-6 덤프 CLI와 프레임 비용 실측, W2-8 스킨 팩 폴더 지정, W2-9 결정 화면 정지 프레임, 오버레이 총 크기 상한).
 
+**웨이브 2B 완료(2026-10-10)** — W2-6 ∥ W2-8 ∥ W2-10(오버레이 상한) ∥ W2-9 → 리뷰 → 수정. Workflow `wf_c034401f-ce6`(6 에이전트), 리뷰 major 3·minor 8 처리. 게이트 통과(테스트 3,530 통과·0 실패·ignored 3). 결과: `rbms-cli skin-dump`(프레임 비용 실측 포함), 앱의 스킨 팩 폴더 지정과 `.luaskin` 로드(실패 시 알림 1회 + 내장 폴백), 오버레이 총 크기 상한, 외부 스킨 정지 프레임. 메인이 결과·선곡 캡처를 직접 열어 확인했다(상세와 빠진 것 목록은 `docs/reference/skin-compat/v1-first-render.md`). 앱 경로에서는 ModernChic 선곡·결정·결과·플레이 7키가 로드되고 키 설정만 실패한다. 다만 앱의 상태 어댑터가 아는 id 가 적어 앱 경로의 화면은 렌더 단위 캡처보다 빠진 것이 많다(결과의 판정 표 등). 웨이브 3 부터 호스트 군집이 채운다.
+
+웨이브 3 이 먼저 고칠 공통 원인(`v1-first-render.md`): (가) 음수 id 참조 이미지(-100/-101/-102/-110/-111) 미구현, (나) `dst` 가 없는 최상위 destination(`songlist`, `note`)이 키프레임 0개라 그려지지 않음, (다) 음수 폭 객체가 버려짐, (라) 텍스트 크기·overflow 의미론.
+
 덤프 기준 시나리오(화면별): 난이도 option 150~155 중 하나 true(없으면 150), BGA 있음/없음, 곡 메타 문자열 채움 [m5 부록 B, m2 §11]. 기대값: 헤더 표가 [m1 §3] 과 일치, keyconfig 본체만 `Decide/lua/require/textproperty.lua:37` 에서 실패. 객체 수 수기 집계(play7 destination 약 288, play14 약 375, select 1914, result 194, course 175, decide 약 69, skinselect 108)와 다르면 덤프를 믿고 조사 문서를 고친다.
 
 ### 웨이브 3 — 공통 렌더 의미론과 결정 화면

@@ -1,6 +1,26 @@
 # R3 — R-BMS 앱(apps/rbms-player) 스킨 배선·화면 구성·입력 현황과 격차
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 2A(Lua 런타임과 로더) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 2(Lua 런타임·로더·스킨 팩) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 2B 반영 사항 (2026-10-10)
+
+스킨 덤프 CLI, 앱의 스킨 팩 폴더 지정과 `.luaskin` 로드, 오버레이 총 크기 상한, 외부 스킨 첫 정지 프레임을 넣은 뒤의 상태다.
+
+- (W2-8) r3-rbms-app.md §2.1: SkinOptions 는 { folder, pack, screen, selected, custom }. SkinLibrary 필드가 settings_path, root, forced_pack, pack, documents, pack_documents, pack_paths, headers(HeaderCache), loaded, errors, stale, waiting, arrived(RefCell), unannounced, seed, next_build 로 바뀜
+- (W2-8) r3-rbms-app.md §2.2 1~2번: 스캔 확장자는 luaskin/json/json5. 스킨 폴더(깊이 3)와 스킨 팩(깊이 1) 두 곳을 훑고, 헤더는 경로 + 수정 시각 + 크기 키로 캐시(HeaderCache)되어 재스캔 때 Lua 헤더 패스를 다시 돌리지 않음. RELOAD 행(rescan_skins_afresh)만 캐시를 비움. 팩 헤더는 App::new 에서도 읽음
+- (W2-8) r3-rbms-app.md §2.2 3번: 화면의 문서는 SkinLibrary::document_path = 수동 선택(config.skin.selected) 우선, 없으면 팩의 헤더 type 매핑(같은 타입은 파일명순 첫 문서). SKIN 행은 팩 문서를 'PACK: 이름' 으로 표시
+- (W2-8) r3-rbms-app.md §2.2 4번: reload_for 가 프레임 루프에서 load_skin 을 부른다는 서술 교체. JSON 은 request_for 가 즉시 DefaultState 로 읽고, .luaskin 은 waiting 에 올린 뒤 with_skin_frame(화면 상태 어댑터가 호스트)에서 read_waiting 으로 읽고 다음 프레임 prepare_skin 의 adopt 가 반영. 시드는 SkinRead { host, seed } 인자(운영 None, 테스트·캡처 pin_seed). 쓰기 오버레이는 assets::skin_overlay_folder = <설정 폴더>/skin-data/<폴더명-sha256 8바이트>/
+- (W2-8) r3-rbms-app.md §2.2 4·6번: 로드 실패는 errors 에 남고 take_failure 로 첫 줄을 1회 알림('skin: … - drawing the built-in screen'), 자동 재시도 없음. JSON 실패도 같은 알림을 탐
+- (W2-8) r3-rbms-app.md §2.2 8번: 캐시 수명에 'begin_skin_scene(To, 스택 빈 Back)이 expire_scripted 로 성공한 Lua 스킨을 stale 로 만들어 다음 진입에서 다시 읽는다. suspend_skin_scene(Open)은 만료하지 않는다' 추가
+- (W2-8) r3-rbms-app.md §2.3: 게이트는 skin_screen.rs 의 skin_document_is_enabled = skins.document_path(config, screen).is_some(). has_skin_document 는 대기 중인 Lua 스킨도 있는 것으로 봄
+- (W2-8) r3-rbms-app.md §4: SKIN 탭 고정 행이 6개(PACK FOLDER / SCREEN / SKIN / LOADED / RELOAD / RESET). SettingId::SkinPack 은 host_row, SETTING_COUNT 85. LOADED 행에 'READ WHEN ITS SCREEN OPENS' 상태 추가. 커스터마이즈 저장은 여전히 custom[문서 경로]이고 팩 문서도 같은 키를 씀
+- (W2-8) r3-rbms-app.md §5 표: 1행(확장자)·2행(.luaskin 헤더 경로와 캐시) 완료. 4행(워커 스레드 이동)은 '동기 로드 유지, 화면 첫 프레임에서 호스트와 함께 실행'으로 교체. 5행(쓰기 허용 범위)은 오버레이로 확정. 7행('팩 폴더를 고르면 모든 타입 지정')은 config.skin.pack + RBMS_SKIN_PACK 으로 완료. 8행(팩 식별자)은 '문서의 부모 폴더 경로에서 skin_pack_identifier 로 생성'
+- (W2-8) r3-rbms-app.md §8.6: stage/capture.rs 의 팩 테스트는 config.skin.pack 으로 팩을 지정하고 화면별로 로드를 시도해 실패를 출력만 함(테스트 실패 아님), 팩 폴더 무변경 단언 포함. skin_select/tests.rs 6건, skin_screen/tests.rs 2건, stage/settings/skin_tests.rs 1건, assets.rs 1건, rbms-config tests.rs 1건 추가. rbms-player lib 테스트 982건
+- (W2-8) r3-rbms-app.md §7 dialog 서술: 네이티브 대화상자가 5종(pick_skin_pack_folder 추가)
+- (리뷰 수정) r3-rbms-app.md 상단에 '웨이브 2B 반영 사항' 추가, §2(스킨 선택·로드·캐시·리로드 흐름): SkinLibrary 의 실패 기록은 화면이 아니라 (화면, 실패한 경로)로 남고 현재 경로와 같을 때만 재시도를 막는다. drop_moved 가 팩 교체·해제·선택 변경 시 더 이상 그 문서로 그려지지 않는 화면의 loaded·waiting·errors 를 비운다. prepare_skin 은 매 프레임 drop_moved 와 SkinScreens::release_dropped 를 호출해 보이지 않는 화면의 컴파일 결과(텍스처, 디코드 워커)도 해제한다
+- (리뷰 수정) r3-rbms-app.md §5(스킨 폴더 하나를 가리켜 화면별로 쓰기): 팩 폴더 지정(설정 skin.pack, 환경 변수 RBMS_SKIN_PACK)은 구현됨. skin.pack 은 계정 설정 동기화에서 기기 로컬 값(ir_sync.rs keep_local)이라 업로드되지 않고 다운로드로 덮이지 않는다
+- (리뷰 수정) r3-rbms-app.md §6(화면별 상태 공급과 타이머): 결정(로딩) 화면 호스트가 OPTION_DIFFICULTY0~5(150~155)를 곡의 difficulty 로 답한다(1~5 는 해당 옵션, 그 밖과 곡 없음은 150)
+
 
 ## 웨이브 2A 반영 사항 (2026-10-10)
 
