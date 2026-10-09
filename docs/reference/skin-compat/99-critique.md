@@ -1,6 +1,19 @@
 # 99. 종합 보고서(00-synthesis.md) 비판 — 틀린 주장, 빠진 기능, 작업 분해 결함, 고유 기능 구멍
 
-> 최종 갱신 2026-10-09 · 대응 단계: 웨이브 1A(철거) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 1A 반영 사항"이 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 1(철거와 기반) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 1B 반영 사항"과 "웨이브 1A 반영 사항"이 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 1B 반영 사항 (2026-10-10)
+
+타이머 µs, stretch 11종, 장면 시계, 마우스 이벤트, GPU 논리 크기 런타임화와 색 공간, START/SELECT, 해상도 설정, 캡처 하니스를 넣은 뒤의 상태다.
+
+- (W1-4) 99-critique.md §2 W1 과 §4 P1 의 W1-4 행: 해소로 표시. 실제 호출부는 목록에 없던 `apps/rbms-player/src/app_options.rs`(패널 타이머 `switch_panel_timers`)가 하나 더 있었다고 덧붙인다
+- (W1-10) 99-critique.md §0 항목 3, §2 W3, §4 P6 첫 행('START/SELECT 바인딩과 키 인덱스 0~8 상태 질의'), §4 P2 의 'W5-3 선행: START/SELECT 바인딩': 해소됨으로 표시하고 근거를 `keyconfig.rs`(`ControlAction`, `key_index_of`, `HeldKeys`), `app_input.rs`(질의), `gamepad.rs`(`PadMapper::held`, `StandardButton`)로 바꿉니다. 기존 '`keyconfig.rs:199-208` 에 START/SELECT 없음' 줄 번호는 낡았습니다.
+- (W1-9) 99-critique.md §4 P7 1번: '새 하니스를 만드는 단위는 W7-6 뿐'과 상단 반영 사항의 'W1-9 전까지 RBMS_SKIN_CAPTURE_DIR 를 읽는 코드가 없음'은 해소됨. apps/rbms-player/src/stage/capture.rs 가 RBMS_SKIN_CAPTURE_DIR 를 읽고 Shot::take 로 임의 해상도 HeadlessCanvas 프레임을 <이름>.png 로 저장한다고 바꿔야 함.
+- (W1-9) 99-critique.md §4 P7 2번: '캡처는 1280x720 CpuCanvas 픽셀이고 GPU 창과의 동일성은 미검증, GPU 읽기는 코드에 없다'는 낡음. Shot::take_on_gpu 가 Gpu::offscreen + Gpu::capture 로 같은 프레임을 <이름>.gpu.png 로 저장하고, 내장 선곡 화면은 1280x720·1920x1080 에서 CPU 프레임과 채널 차 2 초과 픽셀 1% 이하로 단언된다고 바꿔야 함(실측 0.035%, 0.42%). 실제 창 표면의 동일성은 여전히 사용자 절차.
+- (W1-9) 99-critique.md §4 P7 3번과 수정 제안 첫 항목: 웨이브 1 에 눈으로 볼 결과가 생겼음(select-1280x720, select-1920x1080 의 .png 와 .gpu.png). 외부 스킨 선택 테스트는 RBMS_SKIN_PACK 으로 구현됐고 현재 JSON/JSON5 문서만 대상(.luaskin 은 웨이브 2)이라고 적어야 함.
+- (W1-9) 99-critique.md §0 판정 요약 6번: '검증 수단에 구멍'은 웨이브 1B 의 W1-9 로 메워졌다고 표시해야 함.
+- (리뷰 수정) 99-critique.md P7(캡처 하니스): 헬퍼 구성이 바뀌었습니다. 어댑터 없음 처리는 `Gpu::offscreen_if_available` 과 `gpu::REQUIRE_GPU_ENV`, 프레임 그리기는 `render_tests::render_on`, 문서 컴파일 대기는 `capture::draw_until_compiled` 하나이며 `play/tests.rs` 도 이를 씁니다. 캡처 이름 `document-unresized-1920x1080` 이 추가됐습니다.
+
 
 ## 웨이브 1A 반영 사항 (2026-10-09)
 

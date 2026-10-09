@@ -1,6 +1,22 @@
 # R1 — `crates/rbms-skin` 현황과 풀 Lua 스킨까지의 격차
 
-> 최종 갱신 2026-10-09 · 대응 단계: 웨이브 1A(철거) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 1A 반영 사항"이 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 1(철거와 기반) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 1B 반영 사항"과 "웨이브 1A 반영 사항"이 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 1B 반영 사항 (2026-10-10)
+
+타이머 µs, stretch 11종, 장면 시계, 마우스 이벤트, GPU 논리 크기 런타임화와 색 공간, START/SELECT, 해상도 설정, 캡처 하니스를 넣은 뒤의 상태다.
+
+- (W1-4) r1-rbms-skin.md §0 요약 5번: '확인된 차이는 4건' 중 오프셋 r 부호와 타이머 해상도(ms vs µs)는 W1-4 에서 해소. 남은 것은 미선언·미지원 op 처리와 타이머 식(함수) 미지원
+- (W1-4) r1-rbms-skin.md §2.1 흐름(90행 부근): `SkinFrame { now_ms, ... }` 를 `SkinFrame { now_us, ... }`(µs)로
+- (W1-4) r1-rbms-skin.md §2.2 표: `SkinStateSource` 행의 `timer(id)`/`now_ms()` 를 `timer_us(id) -> i64`(OFF = TIMER_OFF)/`now_us()` 로. `TimerState` 행을 '켜진 시각(µs) 저장소, OFF = i64::MIN, API set_on/off/switch/is_on/value_us/clear, 상수 TIMER_OFF·MICROS_PER_MILLI' 로. `StretchKind`/`stretch_rect` 행에 반환형 `(SkinRect 목적지, SkinRect 소스)` 와 `is_supported` 삭제를 반영. `DestinationTrack` 설명에 `timer: Option<TimerRef>`, `acc: Acc` 필드 추가와 `Keyframe.acc`·`effective_acc()` 삭제를 반영
+- (W1-4) r1-rbms-skin.md §5.1 표 288행 '노출 API': `skin.timer(id)`(꺼져 있으면 nil, ms), `skin.time()`(ms) 를 `skin.timer(id)`(µs, 꺼져 있으면 -2^63), `skin.time()`(µs) 로
+- (W1-4) r1-rbms-skin.md §6.1 표: 'acc' 행의 rbms 위치(dst.rs:134-140, 396)는 유지하되 트랙 단일 값(`DestinationTrack.acc`)임을 적는다. 타이머 `switch` 행의 줄 번호(timer.rs:79-85)가 바뀌었다. 새 일치 행 추가: '경과 시간 = now_us/1000 - timer_us/1000(시계와 타이머를 각각 절삭)' rbms `dst.rs resolve`, `skin_render/object.rs animation_index` / 레퍼런스 `SkinObject.java:352-358`, `TimerProperty.java:8-10`, `TimerManager.java:33-35`
+- (W1-4) r1-rbms-skin.md §6.2: D1(오프셋 r 부호) → 해소(dst.rs 가 `angle_deg - offset.r` 로 문서 공간 덧셈과 동치). D5(타이머 해상도) → 해소(µs 저장, `timer_us`/`now_us`). D6(OFF 표현) → 해소(`TIMER_OFF = i64::MIN`, Lua 에는 -2^63 double). D8(acc 결정) → 해소(로더 track.rs 가 선언 순서 첫 비영 값을 `DestinationTrack.acc` 로, 4 이상·음수는 자리를 차지하고 선형). D10(stretch) → 해소(11종). D4 의 줄 번호 `track.rs:231-242` 는 약 241-252 로 이동했고 반환형이 `Option<TimerRef>` 다
+- (W1-4) r1-rbms-skin.md §6.3: 제목 '미구현 7종' 과 표의 rbms 열을 전부 '구현' 으로. 마지막 문단의 '시그니처로는 표현할 수 없다 … 바꿔야 한다' 를 '`stretch_rect(kind, rect, source: SkinRect) -> (SkinRect, SkinRect)` 로 변경 완료, `(int)` 는 Java 캐스트 의미(0 방향 절삭·포화·NaN 은 0)로 옮김, 소스 면적 0 이하는 무변경 반환' 으로
+- (W1-4) r1-rbms-skin.md §8 테스트 표: `src/timer/tests.rs` 14건 → 15건(상태 테스트 µs·센티널로 재작성), `src/dst/tests.rs` 는 acc 테스트 교체와 오프셋 r·ms 절삭 테스트 추가로 39건 → 43건 수준, `tests/skin_loader.rs` 54건 → 67건(stretch 11종 수치, acc 선언 순서, 오프셋 r), `tests/skin_lua.rs` 32건 → 33건, `tests/skin_integration.rs` 는 stretch 미지원 분류 테스트 1건 삭제
+- (W1-4) r1-rbms-skin.md §9: U2(타이머 µs 화)와 U10(stretch_rect 반환형)을 완료로 표시. '소비자에 전파되는 시그니처 변경' 목록의 `SkinStateSource::timer/now_ms` 단위와 `stretch_rect` 반환형 항목을 완료로
+- (W1-9) r1-rbms-skin.md 로더 절(문서 파싱 관용도): 레퍼런스 기본 스킨 실측 추가 필요. decide.json·result.json·play7.json 은 문자열 자리에 정수 id 를 써서 load_skin 이 거부하고, select.json 은 212행 쉼표 누락으로 load_header 가 Parse 오류를 낸다.
+
 
 ## 웨이브 1A 반영 사항 (2026-10-09)
 

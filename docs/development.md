@@ -37,7 +37,7 @@ cargo run --release -p rbms-player -- <chart.bms> --interactive
 | File | What |
 |---|---|
 | `settings.ron` | versioned `Config`: play, library folders and difficulty tables, display, network profiles and IR token |
-| `keyconfig.ron` | lane/control key bindings |
+| `keyconfig.ron` | lane/control key bindings, including `controls.start` / `controls.select` (defaults A / W on the keyboard, the standard Start / Select buttons on a pad; an older file without them loads with the defaults) |
 | `songdb.sqlite` | scanned song-library index and chart-detail cache |
 | `scoredb.sqlite` | one merged best per chart and full local play history |
 | `scores.ron.migrated` | a legacy `scores.ron` after its first successful import into `scoredb.sqlite` |

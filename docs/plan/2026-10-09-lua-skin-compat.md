@@ -37,14 +37,14 @@
 | --- | --- |
 | E1 | Lua 격리: `require`·`dofile`·io 읽기는 스킨 루트 안만. io 쓰기는 `<설정 폴더>/skin-data/<스킨 식별자>/` 오버레이로 보낸다. `main_state.http_*` 와 luajava `URL` 은 항상 실패를 돌려준다 |
 | E2 | R-BMS 고유 기능 유지: Settings·Tables·Folders·Practice·스캔 대기 화면은 내장. IR 랭킹 패널, 기록 모달, 필터 패널, 옵션 오버레이(F1), 첫 실행·빈 목록 안내, 토스트, 디버그 패널, 리플레이 분석 띠는 스킨 위 시스템 오버레이 |
-| E3 | 조작: 기존 키보드 단축키 유지 + START/SELECT 바인딩 신설. 패널 1~3 은 START/SELECT 로 연다 |
+| E3 | 조작: 기존 키보드 단축키 유지 + START/SELECT 바인딩 신설. 패널 1~3 은 START/SELECT 로 연다. 키보드 기본값은 START = A, SELECT = W(beatoraja 는 Q/W 지만 Q 는 IR 랭킹 패널이 쓰고 있다), 패드는 표준 Start/Select 버튼 |
 | E4 | 폴백: 내장 play/select/result 화면은 이번 작업에서 지우지 않는다. 스킨 로드 실패와 24키가 이 폴백을 쓴다 |
 | E5 | 글자: 스킨 폰트에 없는 글자는 앱의 다국어 폰트로 그린다(beatoraja 는 사각형). "똑같이"의 의도적 예외 |
-| E6 | 창: 기본 창 1280x720 유지, 해상도·전체 화면 설정 추가. 16:9 가 아니면 레터박스 |
+| E6 | 창: 기본 창 1280x720 유지, 해상도·전체 화면 설정 추가. 16:9 가 아니면 레터박스. 구현 상태(웨이브 1B): BORDERLESS 는 항상 비율을 맞추고, 일반 창은 기존 `display.letterbox` 설정(기본 꺼짐)을 따른다. 일반 창의 기본값을 켤지는 웨이브 8 에서 정한다 |
 | E7 | "똑같이"의 기준: 그리기·타이밍은 이 저장소 옆 beatoraja 체크아웃(HEAD `8320241d`) 그대로(특이 동작 18개 [b2 §18] 포함). 명백한 입력 결함은 원작 의도로 교정(luajava `Input.Keys` 는 UP 19 / DOWN 20 / LEFT 21 / RIGHT 22 를 돌려준다) |
 | E8 | IR: 스킨의 IR 타이머 172~174 와 관련 옵션은 실제 `ir_status` 에서 공급한다. 랭킹 값 380~399 등 목록 데이터의 스킨 연결은 후속(웨이브 9) |
 | E9 | 9키: 기본 스킨에 9키 문서를 포함한다(자작이므로 가능). ModernChic 을 고른 사용자의 9키는 내장 폴백 |
-| E10 | 색 공간: 웨이브 1 에서 비교 캡처를 본 뒤 정한다. 기본 방침은 스킨 경로를 바이트 통과(비 sRGB 블렌딩)로 맞추는 것 |
+| E10 | 색 공간: **바이트 통과로 확정(웨이브 1B)**. sRGB 표면에서는 같은 그리기 목록의 GPU 출력이 CpuCanvas 보다 최대 75/255 밝았다(128 → 188, 64 → 137). 표면을 비 sRGB 포맷으로 고른 뒤 차이는 최대 2/255. 부작용: 실제 창의 내장 화면이 전보다 어두워지고 대비가 강해진다(헤드리스 골든과는 일치). 실창 확인은 사용자 절차이며, 테마 색 재조정이 필요하면 별도 작업으로 한다 |
 
 ## 3. 조사로 확정된 전제
 
@@ -209,6 +209,16 @@ R-BMS 고유 규칙
 검증: 게이트, 내장 select/play/result 골든 불변, 새 하니스로 내장 화면 PNG 1장.
 
 진행 기록(2026-10-09): **웨이브 1A 완료** — W1-1b·W1-1c → W1-1a ∥ W1-6 → W1-2 → W1-3 순으로 수행했다(중간 상태가 컴파일되도록 표의 선행 열과 순서를 바꿨다). Workflow `wf_575fa3b4-9ac`, 게이트 통과(테스트 3,111 통과·0 실패·ignored 3), 내장 골든 불변. 표와 달라진 점: 구 스킨 테스트 5개는 지웠지만 문서 단독 그리기·화면 간 격리 검증은 `stage/render_tests_document.rs` 로 남겼다. 계정 설정 블롭(`apps/rbms-player/src/ir_sync.rs`)도 구 번들 정리 마이그레이션을 탄다. `ResultExtras` 는 내장 결과 화면 입력이라 남겼다. 설정 스키마는 3 이다. 남은 것은 웨이브 1B(W1-4, W1-5, W1-7~W1-10).
+
+**웨이브 1B 완료(2026-10-10)** — W1-4 → W1-5 → W1-7 ∥ W1-10 → W1-8 ∥ W1-9 → 리뷰 → 수정. Workflow `wf_e03c0a9e-2fd`(8 에이전트), 리뷰 major 2·minor 5 처리. 게이트 통과(테스트 3,262 통과·0 실패·ignored 3), 내장 골든 불변, GPU 대 CpuCanvas 픽셀 비교 테스트가 이 기기(Metal)에서 실제로 통과. 캡처 하니스 `apps/rbms-player/src/stage/capture.rs`(`Shot`, `take`, `take_on_gpu`, `RBMS_SKIN_CAPTURE_DIR`, `RBMS_SKIN_PACK`, `RBMS_REQUIRE_GPU`)로 내장 선곡 1280x720·1920x1080 PNG 를 CPU·GPU 양쪽으로 확인했다.
+
+웨이브 1 끝 상태의 예외와 뒤 웨이브로 넘긴 것
+- 선곡·결정·결과·키 설정 문서는 창 픽셀에 직접 그린다(`canvas.native()`). **플레이 문서만 1280x720 배율 래퍼에 남아 있다**(note·cover 가 내장 `Skin` 의 세로 지오메트리를 읽기 때문). W6-1 이 note 를 문서 기반 지오메트리로 바꾸면서 `draw_play_skin` 을 `canvas.native()` 로 전환한다.
+- 경과 시간은 beatoraja 원본대로 `now_us/1000 - timer_us/1000`(각각 ms 절삭) 이다. `TimerRef` 는 `crates/rbms-skin/src/dst.rs` 에 있고 `TimerRef::value_us` 한 곳에서 해소한다. 렌더의 `Sprite.timer`(이미지 셀 애니메이션)는 아직 `Option<TimerId>` 라 W2-1 이 함께 넓힌다.
+- 음수 타이머 id 를 "타이머 없음"으로 보는 beatoraja 규칙과 graph 소스 폭의 `(int)` 절삭은 아직 옮기지 않았다(W3-1b, W3-2).
+- 캡처 하니스는 무작위 파일 선택 시드를 고정하지 못한다(`skin_select::reload_for` 가 시드를 받지 않음). W2-8 이 시드 인자를 넣는다.
+- 휠 한 줄 환산값 `PIXELS_PER_SCROLL_LINE = 40` 은 실측하지 않은 값이다(웨이브 5 실화면에서 확인).
+- `KeyConfig.held`(눌림 상태)는 설정 구조체 안의 런타임 상태로 임시 배치돼 있다. 입력 상태를 따로 떼는 정리는 웨이브 5 의 입력 단위에서 한다.
 
 웨이브 8 로 넘기는 결정 사항: 시스템 사운드는 `<설정 폴더>/skin/rbms-default/sound/` 에 고정 설치되고 `skin.folder` 설정을 따르지 않는다. 기본 스킨 문서를 같은 폴더에 설치할 때 SKIN 탭 스캔 루트와 맞춘다. 계정 동기화가 `skin.folder`·`skin.selected`·`skin.custom`(기기 절대 경로)을 원격 값 그대로 받는 기존 동작도 스킨 팩 선택을 넣을 때 기기 로컬로 바꿀지 정한다. 단독 문서의 note 객체는 W6 재작성 전까지 세로 지오메트리를 내장 `Skin` 에서 읽는다.
 

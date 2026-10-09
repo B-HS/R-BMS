@@ -1,6 +1,31 @@
 # R2 — R-BMS 렌더 계층(crates/rbms-render, GPU 백엔드) 현황과 격차
 
-> 최종 갱신 2026-10-09 · 대응 단계: 웨이브 1A(철거) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 1A 반영 사항"이 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 1(철거와 기반) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 1B 반영 사항"과 "웨이브 1A 반영 사항"이 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 1B 반영 사항 (2026-10-10)
+
+타이머 µs, stretch 11종, 장면 시계, 마우스 이벤트, GPU 논리 크기 런타임화와 색 공간, START/SELECT, 해상도 설정, 캡처 하니스를 넣은 뒤의 상태다.
+
+- (W1-4) r2-rbms-render.md 상단 '웨이브 1A 반영 사항' 의 `new(view, now_ms, offsets, options_open)` 표기와 §7.1 표(335-336행 `now_ms` i64 프레임 시계)를 `now_us`(µs)로. 343행 트레이트 목록의 `SkinStateSource::{…, timer, now_ms}` 를 `{…, timer_us, now_us}` 로. 355행 '모든 어댑터의 `timer()` 는 `None`' 을 '`timer_us()` 는 `TIMER_OFF`' 로
+- (W1-4) r2-rbms-render.md §5.1 표 image 행(243행): 셀 애니메이션 식 위치가 `object.rs` 의 `animation_index(count, now_us, timers)` 로 바뀌었고 시계·타이머를 각각 ms 로 절삭한다고 적는다
+- (W1-4) r2-rbms-render.md §5.1 표 graph 행(249행): '소스도 같이 자름(draw.rs:364-387)' 의 구현이 픽셀 영역(`Sprite::region`)을 자른 뒤 `Placement::region` 으로 stretch 를 적용하는 순서로 바뀌었다. 정수 절삭 차이는 그대로 남음
+- (W1-4) r2-rbms-render.md 252행 stretch 문단과 §10 표 D1 행(478행): '4종만 지원, 나머지는 경고 후 늘여 그린다' 를 '11종 전부 구현(W1-4). `Placement::region` 이 `stretch_rect` 가 돌려준 소스 사각형으로 UV(`Sprite::region_uv`)와 필터를 정한다. `is_supported` 와 빌드 경고 삭제' 로. D1 행은 해소로 표시
+- (W1-7) r2-rbms-render.md §0 항목 3: '화면은 1280x720 논리 좌표에 고정' -> Gpu 논리 크기는 레터박스 뒤 뷰포트의 물리 픽셀이고, 내장 화면만 ScaledRenderer(Canvas)로 1280x720 좌표를 유지한다. 텍스트가 720p 기준 사각형이라는 서술은 내장 화면과 아직 Canvas 를 거치는 스킨 문서에 한해 유효.
+- (W1-7) r2-rbms-render.md §0 항목 4: 'GPU 표면이 sRGB ... 실제 화면 확인은 하지 못했다' -> 해소. 오프스크린 실측으로 확인(sRGB 대상에서 CpuCanvas 대비 최대 73~75/255, 128 -> 188, (18,18,24) -> (75,75,86)). 표면은 Bgra8Unorm/Rgba8Unorm 을 우선 고르고, 없으면 sRGB 포맷을 비 sRGB 뷰로 렌더한다. 수정 뒤 차이는 최대 2/255.
+- (W1-7) r2-rbms-render.md §1.1: Renderer 메서드 9개 -> 10개. max_texture_size() -> u32 추가(기본 구현 UNLIMITED_TEXTURE_SIZE = u32::MAX). register_texture 계약에 '한도를 넘는 이미지는 거부되고 돌려받은 핸들은 texture_size 가 None' 추가. lib.rs 줄 번호 전부 어긋남.
+- (W1-7) r2-rbms-render.md §1.2: 보조 타입에 ScaledRenderer<'a, R>(new(inner, size), scale()), scale_between(from, to), scale_rect(rect, scale), UNLIMITED_TEXTURE_SIZE 추가.
+- (W1-7) r2-rbms-render.md §1.3: '렌더 타깃/오프스크린: 없음' -> wgpu 쪽에 테스트 전용 오프스크린 대상과 읽기(Gpu::offscreen, Gpu::capture, Rgba8Unorm)가 있음.
+- (W1-7) r2-rbms-render.md §1.4 '필터 선택' 행과 §4 의 1080p 충실도 항목 2: 1:1 판정이 논리 좌표라는 지적은 스킨 화면이 Canvas::native() 로 그리게 되면 해소된다(API 는 준비됨, 호출부 전환은 미완). 내장 배경 슬롯은 이미 물리 픽셀로 판정.
+- (W1-7) r2-rbms-render.md §2 표: '논리 화면 CW/CH 상수' -> 뷰포트 크기(런타임), '유니폼 생성 시 한 번 기록' -> 뷰포트 크기가 바뀔 때마다 프레임 경계에서 갱신(Gpu::settle), 'size() 항상 (CW, CH)' -> viewport.size(), '표면 포맷 sRGB 우선' -> 비 sRGB 8비트 우선(choose_surface_formats), '배치 키 ... rotated' -> Textured { tex, blend, filter } + 클립, '뷰포트 16:9 고정 계산' -> 생성자 shape 비율 + 정수 픽셀 반올림, '마우스 역변환 logical_from_physical_in' -> position_in_space(x, y, space), '디바이스 한도 DeviceDescriptor::default(), 조회 없음' -> Limits::default().using_resolution(adapter.limits()) 로 요청하고 max_texture_dimension_2d 를 보관.
+- (W1-7) r2-rbms-render.md §2 관찰: 'rotated 가 배치 키에 들어 있다' 삭제. 색 처리 문단은 '해소: 비 sRGB 대상, GPU == CpuCanvas(±2/255) 를 gpu/pixel_tests.rs 가 검증' 으로. 'GPU 백엔드에는 픽셀 테스트가 없다' -> gpu/pixel_tests.rs 11개(어댑터 없으면 건너뜀, RBMS_REQUIRE_GPU=1 이면 필수).
+- (W1-7) r2-rbms-render.md §3.3 표: 'GPU 최대 텍스처 크기 확인: 없음' -> 있음(초과 시 경고 1회 후 거부, 빈 슬롯 핸들 반환).
+- (W1-7) r2-rbms-render.md §3.4 해석 첫 항목: 'wgpu 기본 한도 8192 ... 미확인' -> 확인. wgpu 29 의 Limits::default() 는 max_texture_dimension_2d 8192 이고, 지금은 어댑터 한도로 디바이스를 만든다(이 기기 Metal 은 16384). ModernChic 최대 6400x3800 은 들어간다. 2048 한도 어댑터에서는 28장이 거부된다.
+- (W1-7) r2-rbms-render.md §4 표: 'GPU 유니폼', 'GPU scissor', 'GPU size', '레터박스', '마우스 변환' 행은 해소(런타임 값). '창 생성 LogicalSize(CW, CH)' 는 유지(E6). 표 아래 '고칠 곳 제안' 3항목은 완료. 단 스킨 화면의 native 전환 호출부는 남음.
+- (W1-7) r2-rbms-render.md §9: '불필요한 배치 분할 rotated' 행 삭제 또는 해소 표시.
+- (W1-7) r2-rbms-render.md §10: A1, A2, A3, A5 완료. A4 는 한도 확인과 거부까지 완료, 'wgpu 오류 포착'은 미완. A3 의 실제 구현 위치는 rbms-render lib.rs 의 ScaledRenderer 와 stage/canvas.rs 의 Canvas, NativeCanvas, UI_SIZE.
+- (W1-9) r2-rbms-render.md §215 부근 표('HeadlessCanvas::new(CW, CH) 다수'): HeadlessCanvas 가 임의 크기로 만들어져 capture.rs 에서 1920x1080 으로 쓰이고, HeadlessCanvas::rgba() 로 RGBA8 행을 그대로 내준다는 점을 추가해야 함.
+- (리뷰 수정) r2-rbms-render.md §4·§10(A1~A5): 스킨 화면의 논리 크기 서술을 '선곡·결정·결과·키 설정 문서는 `Canvas::native()`(레터박스 뒤 물리 뷰포트) 위에 직접 그려 viewport 배율이 한 번만 걸린다. 플레이 문서만 W6 까지 1280x720 배율 래퍼 위에 그린다(note·cover 가 내장 `Skin` 의 720 공간 세로 지오메트리를 읽기 때문)'로 바꿔야 합니다. W1-7·W1-9 가 남긴 '두 번 배율' 메모는 플레이 화면 한정으로 좁혀야 합니다.
+
 
 ## 웨이브 1A 반영 사항 (2026-10-09)
 

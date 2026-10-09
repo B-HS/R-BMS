@@ -75,7 +75,7 @@ Options: `--interactive` `--auto` `--hispeed F` `--gauge NAME` `--lift F` `--sc-
 | [ ] | — | Lift |
 | O / T / R / `/` / F3 | Folders / tables / records / search / sort | — |
 
-Default lanes follow the reference keyboard layout: 7K `Z S X D C F V` + `LShift` (scratch), 9K `Z S X D C F V G B`, 14K adds `M K , L . ; /` + `RShift`. Everything is remappable in Settings → KEY CONFIG or `~/.config/rbms/keyconfig.ron`.
+Default lanes follow the reference keyboard layout: 7K `Z S X D C F V` + `LShift` (scratch), 9K `Z S X D C F V G B`, 14K adds `M K , L . ; /` + `RShift`. START is `A` and SELECT is `W` on the keyboard (the standard Start / Select buttons on a controller). Everything is remappable in Settings → KEY CONFIG or `~/.config/rbms/keyconfig.ron`.
 
 ## Web (IR server + site)
 

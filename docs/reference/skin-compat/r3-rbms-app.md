@@ -1,6 +1,33 @@
 # R3 — R-BMS 앱(apps/rbms-player) 스킨 배선·화면 구성·입력 현황과 격차
 
-> 최종 갱신 2026-10-09 · 대응 단계: 웨이브 1A(철거) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 1A 반영 사항"이 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 1(철거와 기반) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 1B 반영 사항"과 "웨이브 1A 반영 사항"이 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 1B 반영 사항 (2026-10-10)
+
+타이머 µs, stretch 11종, 장면 시계, 마우스 이벤트, GPU 논리 크기 런타임화와 색 공간, START/SELECT, 해상도 설정, 캡처 하니스를 넣은 뒤의 상태다.
+
+- (W1-4) r3-rbms-app.md §7(245-246행): `skin_now_ms()` = `clock.elapsed().as_millis()` 를 `skin_now_us()` = `clock.elapsed().as_micros()` 로, `SkinDraw { …, now_ms, … }` 를 `now_us` 로. 257·333·354·356행의 `PlayViewState`/`ResultViewState::new`/`DecideViewState`/`KeyConfigViewState` 필드 `now_ms` 를 `now_us` 로
+- (W1-4) r3-rbms-app.md §12(610행)과 A1 행(629행): `skin_now_ms` 표기를 `skin_now_us` 로. 장면 시계 미도입 문제 자체는 그대로(W1-5)
+- (W1-5) r3-rbms-app.md §6.1: '시계: skin_now_ms() = clock.elapsed()...' 와 '타이머 표는 화면 전환 때 지워지지 않는다(skin_timers.clear() 호출 없음)' 는 낡았습니다. skin_now_us() 는 AppShared.scene_started 기준 장면 경과 µs 이고(skin_screen.rs), App::switch(lib.rs) 가 To/Back(스택 비어 있음)에서 begin_skin_scene() 으로 타이머 전부 OFF + 드라이버 기억(PlayTimers/SelectTimers/ResultTimers) 초기화 + 시계 0 을 수행한다. clock 은 오디오 폴백과 타이밍 계측 전용으로 남고 start_play() 는 스킨 시계를 건드리지 않는다.
+- (W1-5) r3-rbms-app.md §1.1·§1.2: 'App.suspended 스택' 은 이제 Vec<Suspended { stage, scene: SkinScene }> 이다. Open 은 suspend_skin_scene() 으로 아래 화면의 타이머·드라이버 기억·경과 시간을 보관하고 열린 화면은 새 장면으로 시작하며, Back 은 resume_skin_scene() 으로 복원한다(시계는 열려 있던 동안 정지). 전이 실행은 여전히 App::switch 한 곳이다. 스택 비어 있는 Back 은 새 Select + 새 장면이다.
+- (W1-5) r3-rbms-app.md §1.1 화면 계약: StageHandler 에 handle_mouse(ctx, at, button, pressed), handle_mouse_drag(ctx, at), handle_scroll(ctx, lines) 가 있다(handle_mouse 의 시그니처가 (at) 에서 바뀜). Stage::handle_mouse 는 Stage::handle_pointer(ctx, at, PointerInput) 로 바뀌었다.
+- (W1-5) r3-rbms-app.md §7.1 표: '마우스 이동 - 상태만 저장, 이벤트 전달 없음', '마우스 클릭 - Pressed, Left 만', '마우스 release / 우클릭 / 가운데 / 휠 - 처리 없음' 은 낡았다. 이제 CursorMoved 는 버튼이 눌려 있으면 handle_mouse_drag 로, MouseInput 은 좌·우·가운데의 press/release 모두 handle_mouse(at, button, pressed) 로, MouseWheel 은 handle_scroll(lines) 로 전달된다(pointer.rs: PointerInput, HeldButtons, route_pointer). 옵션 패널이 열려 있으면 모두 삼킨다. 뒤로/앞으로 버튼은 전달하지 않는다. Focused(false) 는 눌린 버튼 기록을 비운다. 휠 lines 는 beatoraja amountY 부호(사용자 쪽으로 굴리면 양수)다.
+- (W1-5) r3-rbms-app.md §7.2: 'handle_mouse 구현 화면은 Select 와 Settings 둘뿐' 은 유지되지만 둘 다 is_left_press 가드로 좌클릭 press 에만 반응한다.
+- (W1-5) r3-rbms-app.md §7.5 표: 슬라이더 드래그(버튼 종류·release·drag 의 AppShared.mouse_held 필요) 와 휠(handle_scroll) 행은 '붙일 곳'이 아니라 배선 완료로 고친다. 객체 클릭 행(skin_click)과 호버, 텍스트 입력, 레인 키 select 조작 행은 그대로 남는다.
+- (W1-5) r3-rbms-app.md §12: A1(장면 시계·타이머 수명) 과 A3(입력 이벤트 확장, IME 제외)을 완료로 표시한다. A1 은 '곡 시계와 분리' 까지 끝났다. A3 의 IME 는 미완이다.
+- (W1-7) r3-rbms-app.md 의 Canvas 와 마우스 좌표 서술(§7 부근, 'gpu.logical_from_physical', 'Canvas::Window 가 1280x720', 'gpu.window'): position_in_space(x, y, UI_SIZE), Canvas = UI_SIZE 배율 래퍼 + Canvas::native(), gpu.request_redraw() 로 바뀜. Gpu::new 시그니처는 (window, shape).
+- (W1-10) r3-rbms-app.md §7.1 표 '게임패드' 행: `Stage::handle_pad` 가 `PlayState` 만 구현한다는 서술을 'PlayState 와 SelectState(스크래치 이동, 흰 건반 결정, 검은 건반 폴더 상위, 홀드 반복)'로 바꿔야 합니다. 키보드 행에는 `Stage::handle_key` 가 가장 먼저 `AppShared::note_key` 로 눌림 집합(`KeyConfig.held`)을 갱신한다는 점을 추가합니다.
+- (W1-10) r3-rbms-app.md §7.4 마지막 문단 ('레인 키와 START/SELECT 개념이 없다'): 이제 `ControlAction::{Start, Select}`(기본 키보드 A·W, 패드 STANDARD START/SELECT)와 `AppShared::{start_pressed, select_pressed, key_index_pressed}` 가 있습니다. 선곡의 레인 키 입력은 패드 이벤트만 연결됐고 키보드 레인 키는 아직 목록을 움직이지 않는다고 고칩니다.
+- (W1-10) r3-rbms-app.md §7.5 마지막 행('게임패드/레인 키로 select 조작')과 §14.2 미확인 항목: 'START/SELECT 바인딩이 keyconfig 에 있는지는 미확인' 을 '없었고 W1-10 에서 추가됨(keyconfig.rs `ControlAction`, `ControlBinds.start/select`, gamepad.rs `StandardButton`)'으로 바꿉니다. `SelectState::handle_pad` 는 구현 완료(패널 닫힘 기본 조작만, 패널 1~3 은 W5).
+- (W1-8) r3-rbms-app.md §9.1: '설정 스키마에 해상도·풀스크린 항목이 없다'는 서술이 낡았습니다. DisplayOptions 에 window_resolution(1280x720 기본, 1600x900, 1920x1080, 2560x1440, 3840x2160)과 window_mode(WINDOWED/BORDERLESS)가 생겼습니다. 창 생성은 lib.rs resumed 에서 window_mode::window_attributes(&config.display)를 쓰고(창 크기는 LogicalSize), 창 생성 줄 번호(lib.rs:997)는 바뀌었습니다.
+- (W1-8) r3-rbms-app.md §9.1·§9.4: '표시 모드·풀스크린 지정 없음, Fullscreen/set_fullscreen grep 0건'은 낡았습니다. apps/rbms-player/src/window_mode.rs 가 Fullscreen::Borderless(None) 와 request_inner_size 를 씁니다. 적용은 App::sync_window 가 frame() 첫 줄에서 두 행의 변경을 감지해 수행합니다. 독점 전체 화면(Exclusive)과 vsync 행은 아직 없습니다.
+- (W1-8) r3-rbms-app.md §9.1 레터박스 문단: 레터박스 적용은 draw_overlays 에서 config.display.fits_screen_shape() = letterbox || window_mode==Borderless 값으로 합니다. 즉 BORDERLESS 이면 LETTERBOX 행과 무관하게 항상 맞춰 그립니다(E6 구현).
+- (W1-8) r3-rbms-app.md §9.4 '설정에 해상도·창 모드·vsync 항목 추가': 해상도와 창 모드는 완료(RESOLUTION, WINDOW MODE 행), vsync 만 남음. SETTING_COUNT 는 82 에서 84 로 바뀌었고 테스트 표 SHIPPED_ROWS 도 같이 늘었습니다.
+- (W1-8) r3-rbms-app.md §4 또는 설정 저장 절: 이 변경은 스키마 버전을 올리지 않았습니다. 새 DisplayOptions 필드가 serde(default)로 기본값을 채우기 때문이고, 현재 스키마는 3 그대로입니다.
+- (W1-9) r3-rbms-app.md §8.6(영향받는 테스트 표, 505~513행): stage/capture.rs 행 추가 필요(캡처 하니스, 테스트 6건: UI 크기 캡처가 render_tests 프레임과 동일, 큰 타깃 비율 채움, GPU 일치, 장면 시각, PNG 저장, 팩 선택 테스트). render_tests_document.rs 행은 자체 헬퍼(settings_of, 대기 루프)를 하니스 것으로 바꿨고 GPU 문서 캡처 테스트 1건이 늘어 6건이 됐다고 고쳐야 함.
+- (리뷰 수정) r3-rbms-app.md §7.5·§12: 문서 그리기 진입점 서술에 'skin_frame 은 캔버스를 받지 않고, 커서는 UI_SIZE 공간 값(`AppShared.cursor`)을 그대로 document_cursor 에 넘긴다'를 반영해야 합니다. 입력 절에는 '`WindowEvent::Focused(false)` 에서 `AppShared::release_held_inputs()` 가 키보드 보유 상태(`KeyConfig.held`)와 마우스 버튼을 함께 비운다'를 추가해야 합니다.
+- (리뷰 수정) r3-rbms-app.md §9.4: LETTERBOX 행 도움말이 'Keep the screen's aspect ratio inside the window; a borderless window always does' 로 바뀌었고, `Gpu::new(window, shape, letterbox)` 가 초기 맞춤 여부를 받아 BORDERLESS 로 시작해도 첫 프레임부터 맞춰 그린다는 점을 적어야 합니다. help 문자열은 화면에 그려지지 않는다는 사실도 함께 적는 편이 좋습니다.
+
 
 ## 웨이브 1A 반영 사항 (2026-10-09)
 

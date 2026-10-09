@@ -1,6 +1,13 @@
 # B2. beatoraja 스킨 객체 모델과 공통 그리기 의미론
 
-> 최종 갱신 2026-10-09 · 대응 단계: L1 조사(구현 전) · 기준 커밋 `9ce92bb` · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 1(철거와 기반) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 1B 반영 사항"과 "웨이브 1A 반영 사항"이 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 1B 반영 사항 (2026-10-10)
+
+타이머 µs, stretch 11종, 장면 시계, 마우스 이벤트, GPU 논리 크기 런타임화와 색 공간, START/SELECT, 해상도 설정, 캡처 하니스를 넣은 뒤의 상태다.
+
+- (W1-4) b2-object-model.md §4.1: 수정 불필요하지만 R-BMS 대응 주석이 있다면 '경과 ms = 시계와 타이머를 각각 /1000 한 차' 가 R-BMS dst.rs 에 그대로 옮겨졌다고 적을 수 있다
+
 
 조사 대상 저장소: `/Users/hyunseokbyun/development/beatoraja` (HEAD `8320241d`, 작업 트리 변경 없음, origin `exch-bms2/beatoraja`).
 

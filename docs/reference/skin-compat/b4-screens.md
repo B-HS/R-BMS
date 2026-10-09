@@ -1,6 +1,14 @@
 # B4. beatoraja 선택·결정·결과·코스 결과·키 설정·스킨 설정 화면의 스킨 계약과 화면 수명주기
 
-> 최종 갱신 2026-10-09 · 대응 단계: L1 조사(구현 전) · 기준 커밋 `9ce92bb` · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 1(철거와 기반) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 1B 반영 사항"과 "웨이브 1A 반영 사항"이 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 1B 반영 사항 (2026-10-10)
+
+타이머 µs, stretch 11종, 장면 시계, 마우스 이벤트, GPU 논리 크기 런타임화와 색 공간, START/SELECT, 해상도 설정, 캡처 하니스를 넣은 뒤의 상태다.
+
+- (W1-5) b4-screens.md §1.2·§1.4 와 99-critique.md §4 P8-3: R-BMS 의 Open/Back 은 스킨 장면을 보존하고 To 는 새 장면이라는 규칙이 구현되었다는 주석을 추가한다. 단 선곡 -> Open(Loading) -> To(Play) -> To(Result) -> Back 흐름이 선곡 장면을 복원한다는 점(beatoraja 는 재구성)을 미해결 항목으로 기록한다.
+- (W1-10) b4-screens.md §3.5 는 원본 고정이라 수정 불필요하지만, R-BMS 쪽 인덱스 대응 결정을 r3 또는 00 에 기록하세요: 5키는 키 0~4 + 스크래치 7/8, 9키는 버튼 0~8, DP 는 2P 가 1P 인덱스를 반복(BEAT_14K 표와 동일), 24키는 첫 7키만 인덱스를 가짐. 결정 화면의 `getKeyState(0/2/4/6)` 은 beatoraja 에서 1P 쪽만이지만 R-BMS 는 2P 도 접어 읽음.
+
 
 조사 대상: `/Users/hyunseokbyun/development/beatoraja` (origin `exch-bms2/beatoraja`, HEAD `8320241d`, `MainController.VERSION = "beatoraja 0.8.9"` — `MainController.java:52`).
 경로 표기는 별도 언급이 없으면 `src/bms/player/beatoraja/` 기준 상대 경로다.
