@@ -7,11 +7,11 @@
 //! recognising a picture.
 
 use rbms_model::{LnKind, Mode, Note, NoteKind, TimeLine};
-use rbms_skin::dst::{Acc, DestinationTrack, DrawStateSource, Keyframe, OffsetSource, SkinColor, SkinOffset, SkinRect};
+use rbms_skin::dst::{DestinationTrack, DrawStateSource, Keyframe, OffsetSource, SkinColor, SkinOffset, SkinRect};
 use rbms_skin::loader::StretchKind;
 use rbms_skin::property::generated::{FLOAT_GROOVEGAUGE_1P, NUMBER_COMBO, OPTION_1P_PERFECT};
 use rbms_skin::property::{SkinStateSource, UNMAPPED_FLOAT, UNMAPPED_INTEGER, UNMAPPED_STRING};
-use rbms_skin::timer::TimerState;
+use rbms_skin::timer::{TIMER_OFF, TimerState};
 
 use super::covers::{CoverBand, CoverBody};
 use super::draw::draw_object;
@@ -81,7 +81,7 @@ fn digit_shade(value: u8) -> u8 {
 
 /// A destination that holds one rectangle still, in one colour.
 fn held(rect: SkinRect, color: SkinColor) -> DestinationTrack {
-    DestinationTrack { frames: vec![Keyframe { time_ms: 0, rect, clip: None, acc: Acc::default(), color, angle_deg: 0.0 }], ..DestinationTrack::default() }
+    DestinationTrack { frames: vec![Keyframe { time_ms: 0, rect, clip: None, color, angle_deg: 0.0 }], ..DestinationTrack::default() }
 }
 
 /// A destination that holds one rectangle still, fully opaque.
@@ -127,11 +127,11 @@ impl SkinStateSource for PlayState {
         UNMAPPED_STRING
     }
 
-    fn timer(&self, _id: i32) -> Option<i64> {
-        None
+    fn timer_us(&self, _id: i32) -> i64 {
+        TIMER_OFF
     }
 
-    fn now_ms(&self) -> i64 {
+    fn now_us(&self) -> i64 {
         0
     }
 }
@@ -139,7 +139,7 @@ impl SkinStateSource for PlayState {
 /// Draws one object on a canvas that already holds its textures.
 fn draw_on(canvas: &mut CpuCanvas, object: &SkinObject, state: &PlayState, extra: FrameExtra<'_>) -> bool {
     let timers = TimerState::new();
-    let frame = SkinFrame { now_ms: 0, timers: &timers, state, lua: None, mouse: None, background: None, extra };
+    let frame = SkinFrame { now_us: 0, timers: &timers, state, lua: None, mouse: None, background: None, extra };
     let viewport = SkinViewport::new((CANVAS.0 as f32, CANVAS.1 as f32), (CANVAS.0 as f32, CANVAS.1 as f32));
     with_render_ctx(|ctx| draw_object(ctx, canvas, object, &viewport, &frame))
 }

@@ -56,7 +56,10 @@ impl Gpu {
         Some(tex)
     }
 
-    /// Put the background image behind this frame's quads, at `rect`.
+    /// Put the background image behind this frame's quads, at `rect` in the pixels the frame is
+    /// drawn in. A caller laid out for another size scales the rectangle before it gets here, so
+    /// the 1:1 test that picks the sampling filter is made against the pixels the image really
+    /// covers.
     pub(crate) fn set_background(&mut self, generation: u64, rgba: &[u8], width: u32, height: u32, rect: Rect) {
         if let Some(tex) = self.background_texture(generation, rgba, width, height) {
             self.background = Some((tex, rect));

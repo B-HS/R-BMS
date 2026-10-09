@@ -11,6 +11,7 @@ use rbms_skin::SkinError;
 use rbms_skin::dst::{DrawStateSource, LuaDrawEval, OffsetSource, SkinOffset};
 use rbms_skin::loader::Budget;
 use rbms_skin::lua::{LuaSandbox, SkinStateSource};
+use rbms_skin::timer::TIMER_OFF;
 
 /// Every global the sandbox removes before a document is compiled.
 const FORBIDDEN: &[&str] = &[
@@ -81,11 +82,11 @@ impl SkinStateSource for FakeState {
         self.strings.get(&id).map(String::as_str).unwrap_or_default()
     }
 
-    fn timer(&self, id: i32) -> Option<i64> {
-        self.timers.get(&id).copied()
+    fn timer_us(&self, id: i32) -> i64 {
+        self.timers.get(&id).copied().unwrap_or(TIMER_OFF)
     }
 
-    fn now_ms(&self) -> i64 {
+    fn now_us(&self) -> i64 {
         self.now
     }
 }
@@ -191,7 +192,7 @@ fn arithmetic_with_the_off_timer_value_does_not_wrap_around() {
 fn a_timer_the_host_hands_over_as_the_smallest_integer_does_not_wrap_around() {
     let sandbox = sandbox();
     let mut state = FakeState::default();
-    state.timers.insert(41, i64::MIN);
+    state.timers.insert(41, TIMER_OFF);
     assert!(sandbox.eval_bool("skin.timer(41) - 1000 < 0 and 1000 - skin.timer(41) > 0", &state).expect("the arithmetic should run"));
 }
 
@@ -206,26 +207,38 @@ fn randomness_is_pinned_so_two_sandboxes_agree() {
 #[test]
 fn the_whitelisted_api_reads_the_state_it_is_given() {
     let sandbox = sandbox();
-    let mut state = FakeState { now: 4_200, ..FakeState::default() };
+    let mut state = FakeState { now: 4_200_750, ..FakeState::default() };
     state.booleans.insert(901);
     state.integers.insert(10, 37);
     state.floats.insert(110, 0.25);
     state.strings.insert(300, "title".to_owned());
-    state.timers.insert(41, 1_500);
+    state.timers.insert(41, 1_500_250);
 
     assert!(sandbox.eval_bool("skin.boolean(901)", &state).expect("boolean should run"));
     assert_eq!(sandbox.eval_int("skin.number(10)", &state).expect("number should run"), 37);
     assert_eq!(sandbox.eval_float("skin.float(110)", &state).expect("float should run"), 0.25);
     assert_eq!(sandbox.eval_string("skin.text(300)", &state).expect("text should run"), "title");
-    assert_eq!(sandbox.eval_int("skin.timer(41)", &state).expect("timer should run"), 1_500);
-    assert_eq!(sandbox.eval_int("skin.time()", &state).expect("time should run"), 4_200);
+    assert_eq!(sandbox.eval_int("skin.timer(41)", &state).expect("timer should run"), 1_500_250, "a timer reads in microseconds");
+    assert_eq!(sandbox.eval_int("skin.time()", &state).expect("time should run"), 4_200_750, "and so does the clock");
 }
 
 #[test]
-fn an_unset_timer_reads_as_nil_rather_than_zero() {
+fn an_unset_timer_reads_as_the_off_sentinel_rather_than_zero() {
     let sandbox = sandbox();
     let state = FakeState::default();
-    assert!(sandbox.eval_bool("skin.timer(41) == nil", &state).expect("the check should run"));
+    assert!(
+        sandbox.eval_bool("skin.timer(41) == -2^63", &state).expect("the check should run"),
+        "the reference's `Long.MIN_VALUE`, as the double a script sees"
+    );
+    assert!(sandbox.eval_bool("skin.timer(41) ~= 0 and skin.timer(41) ~= nil", &state).expect("the check should run"));
+}
+
+#[test]
+fn a_timer_keeps_its_microseconds_across_the_script_boundary() {
+    let sandbox = sandbox();
+    let mut state = FakeState { now: 3_000_000_123, ..FakeState::default() };
+    state.timers.insert(41, 3_000_000_001);
+    assert!(sandbox.eval_bool("skin.time() - skin.timer(41) == 122", &state).expect("the arithmetic should run"), "no millisecond rounding on the way out");
 }
 
 #[test]

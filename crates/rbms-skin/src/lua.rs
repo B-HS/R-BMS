@@ -205,8 +205,8 @@ impl LuaSandbox {
             table.set("number", scope.create_function(move |_, id: i32| Ok(state.integer(id)))?)?;
             table.set("float", scope.create_function(move |_, id: i32| Ok(state.float(id)))?)?;
             table.set("text", scope.create_function(move |_, id: i32| Ok(state.string(id).to_owned()))?)?;
-            table.set("timer", scope.create_function(move |_, id: i32| Ok(state.timer(id)))?)?;
-            table.set("time", scope.create_function(move |_, (): ()| Ok(state.now_ms()))?)?;
+            table.set("timer", scope.create_function(move |_, id: i32| Ok(state.timer_us(id)))?)?;
+            table.set("time", scope.create_function(move |_, (): ()| Ok(state.now_us()))?)?;
             self.lua.globals().set(SKIN_TABLE, table)?;
             function.call::<Value>(())
         });

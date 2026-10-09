@@ -12,7 +12,7 @@ use rbms_skin::dst::{DrawStateSource, LuaExprId, OffsetSource, SkinOffset};
 use rbms_skin::loader::{SkinLoadOptions, SkinUserConfig, load_skin};
 use rbms_skin::property::generated::OPTION_PANEL1;
 use rbms_skin::property::{SkinStateSource, UNMAPPED_BOOLEAN, UNMAPPED_FLOAT, UNMAPPED_INTEGER, UNMAPPED_STRING};
-use rbms_skin::timer::TimerState;
+use rbms_skin::timer::{TIMER_OFF, TimerState};
 
 use super::color::{modulate, parse_hex_color};
 use super::state::{FrameExtra, PlayObjectState, ResultSeriesState, SelectListState, SelectViewState};
@@ -104,11 +104,11 @@ impl SkinStateSource for Nothing {
         UNMAPPED_STRING
     }
 
-    fn timer(&self, _id: i32) -> Option<i64> {
-        None
+    fn timer_us(&self, _id: i32) -> i64 {
+        TIMER_OFF
     }
 
-    fn now_ms(&self) -> i64 {
+    fn now_us(&self) -> i64 {
         0
     }
 }
@@ -254,7 +254,7 @@ fn row(index: usize) -> SelectRow {
 
 /// One frame over `extra`, with nothing running and no pointer.
 fn frame<'a>(timers: &'a TimerState, state: &'a Nothing, extra: FrameExtra<'a>) -> SkinFrame<'a> {
-    SkinFrame { now_ms: 0, timers, state, lua: None, mouse: None, background: None, extra }
+    SkinFrame { now_us: 0, timers, state, lua: None, mouse: None, background: None, extra }
 }
 
 /// Draws `screen` over a cleared canvas and answers how many of its objects reached it.

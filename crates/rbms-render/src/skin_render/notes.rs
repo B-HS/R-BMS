@@ -340,7 +340,7 @@ fn draw_bars<R: Renderer>(r: &mut R, place: &Placement<'_>, body: &NoteBody, scr
 fn resolve_bar(track: &DestinationTrack, frame: &SkinFrame<'_>) -> Option<Resolved> {
     let state: &dyn DrawStateSource = frame.state;
     let gate: Option<&dyn LuaDrawEval> = frame.lua.map(|lua| lua as &dyn LuaDrawEval);
-    prepare(track, frame.now_ms, frame.timers, state, gate, (0.0, 0.0), frame.mouse).filter(|resolved| resolved.color.a != 0)
+    prepare(track, frame.now_us, frame.timers, state, gate, (0.0, 0.0), frame.mouse).filter(|resolved| resolved.color.a != 0)
 }
 
 /// One rectangle reshaped by the note set's expansion rate, about its own centre.
@@ -367,7 +367,7 @@ fn textured<R: Renderer>(r: &mut R, place: &Placement<'_>, sprite: &Sprite, dst:
         Filtering::Nearest => TextureFilter::Nearest,
         Filtering::Linear => TextureFilter::Linear,
     };
-    let cell = sprite.animation_index(sprite.cells(), frame.now_ms, frame.timers);
+    let cell = sprite.animation_index(sprite.cells(), frame.now_us, frame.timers);
     r.draw_textured_quad(sprite.tex, place.quad(dst, sprite.uv(cell), filter));
     true
 }

@@ -334,6 +334,10 @@ pub trait Renderer {
     /// frame that arrives half decoded draws dark rather than killing the process -- so a caller
     /// that cares about the length checks it before registering, because the handle that comes back
     /// says nothing about it.
+    ///
+    /// An image with an edge longer than [`Renderer::max_texture_size`] is refused: the handle that
+    /// comes back names no texture, so [`Renderer::texture_size`] answers `None` for it and every
+    /// draw from it is skipped.
     fn register_texture(&mut self, key: &str, rgba: &[u8], width: u32, height: u32) -> TextureId;
 
     /// Drop a texture. An unknown or already released handle is ignored.
@@ -349,4 +353,234 @@ pub trait Renderer {
 
     /// Undo the innermost [`Renderer::push_clip`]. Popping an empty stack is ignored.
     fn pop_clip(&mut self);
+
+    /// The longest edge, in pixels, of a texture this backend can hold.
+    ///
+    /// A backend with no ceiling of its own -- the CPU canvas keeps pixels in ordinary memory --
+    /// answers [`UNLIMITED_TEXTURE_SIZE`]. One that has a ceiling refuses an image past it in
+    /// [`Renderer::register_texture`], so a caller that would rather skip or shrink such an image
+    /// than have it silently not draw asks here first.
+    fn max_texture_size(&self) -> u32 {
+        UNLIMITED_TEXTURE_SIZE
+    }
+}
+
+/// What [`Renderer::max_texture_size`] answers on a backend that can hold a texture of any size.
+pub const UNLIMITED_TEXTURE_SIZE: u32 = u32::MAX;
+
+/// How much one unit of a `from`-sized space measures in a `to`-sized one, per axis.
+///
+/// The two axes are independent, so a target that is not the shape of the space drawn on it
+/// stretches rather than letterboxes; keeping the shape is the target's business. A space with no
+/// extent is treated as one pixel wide rather than dividing by zero.
+pub fn scale_between(from: (u32, u32), to: (u32, u32)) -> (f32, f32) {
+    (to.0 as f32 / from.0.max(1) as f32, to.1 as f32 / from.1.max(1) as f32)
+}
+
+/// `rect` with its position and extent multiplied by a per-axis `scale`.
+pub fn scale_rect(rect: Rect, scale: (f32, f32)) -> Rect {
+    Rect::new(rect.x * scale.0, rect.y * scale.1, rect.w * scale.0, rect.h * scale.1)
+}
+
+/// A [`Renderer`] that is drawn on in one coordinate space and draws into another.
+///
+/// The built-in screens and the system overlays are laid out for a fixed 1280x720 screen, while the
+/// target they end up on is as large as the window is. This adapter is what sits between the two:
+/// it reports the fixed size, takes rectangles in that space, and hands them to the renderer
+/// underneath multiplied out to its size. A skin screen skips it and draws on the target's own
+/// pixels, so both kinds of drawing can share one frame.
+///
+/// Where the two sizes agree every coordinate is multiplied by exactly one, so what comes out is
+/// bit for bit what would have been drawn without the adapter.
+///
+/// Textures are not a matter of coordinates and pass straight through. A rotated quad keeps its
+/// angle and has its destination and rotation centre scaled, which is exact when both axes scale
+/// alike and turns a rectangle of the stretched size, rather than shearing it, when they do not.
+pub struct ScaledRenderer<'a, R: Renderer> {
+    inner: &'a mut R,
+    size: (u32, u32),
+    scale: (f32, f32),
+}
+
+impl<'a, R: Renderer> ScaledRenderer<'a, R> {
+    /// Draw on `inner` as though it were `size` pixels across.
+    pub fn new(inner: &'a mut R, size: (u32, u32)) -> Self {
+        let scale = scale_between(size, inner.size());
+        ScaledRenderer { inner, size, scale }
+    }
+
+    /// How much one unit of the space drawn on measures on the renderer underneath, per axis.
+    pub fn scale(&self) -> (f32, f32) {
+        self.scale
+    }
+}
+
+impl<R: Renderer> Renderer for ScaledRenderer<'_, R> {
+    fn size(&self) -> (u32, u32) {
+        self.size
+    }
+
+    fn clear(&mut self, color: Color) {
+        self.inner.clear(color);
+    }
+
+    fn fill_rect(&mut self, rect: Rect, color: Color) {
+        self.inner.fill_rect(scale_rect(rect, self.scale), color);
+    }
+
+    fn register_texture(&mut self, key: &str, rgba: &[u8], width: u32, height: u32) -> TextureId {
+        self.inner.register_texture(key, rgba, width, height)
+    }
+
+    fn release_texture(&mut self, tex: TextureId) {
+        self.inner.release_texture(tex);
+    }
+
+    fn texture_size(&self, tex: TextureId) -> Option<(u32, u32)> {
+        self.inner.texture_size(tex)
+    }
+
+    fn draw_textured_quad(&mut self, tex: TextureId, params: QuadParams) {
+        let center = (params.center.0 * self.scale.0, params.center.1 * self.scale.1);
+        self.inner.draw_textured_quad(tex, QuadParams { dst: scale_rect(params.dst, self.scale), center, ..params });
+    }
+
+    fn push_clip(&mut self, rect: Rect) {
+        self.inner.push_clip(scale_rect(rect, self.scale));
+    }
+
+    fn pop_clip(&mut self) {
+        self.inner.pop_clip();
+    }
+
+    fn max_texture_size(&self) -> u32 {
+        self.inner.max_texture_size()
+    }
+}
+
+#[cfg(test)]
+mod scaled_tests {
+    use super::*;
+
+    /// The fixed space the adapter is drawn on in these tests.
+    const SPACE: (u32, u32) = (64, 36);
+
+    /// How many times larger than [`SPACE`] the enlarged target is on each axis.
+    const ENLARGEMENT: u32 = 3;
+
+    const BACKDROP: Color = Color::rgb(10, 20, 30);
+    const INK: Color = Color::rgb(200, 100, 50);
+
+    /// Edge of the checker texture the quad tests sample.
+    const CHECKER: u32 = 4;
+
+    /// A texture with a different colour in every texel, so a quad drawn from the wrong place or at
+    /// the wrong size cannot come out looking right.
+    fn checker() -> Vec<u8> {
+        (0..CHECKER * CHECKER).flat_map(|i| [(i * 16) as u8, 255 - (i * 16) as u8, (i * 5) as u8, 255]).collect()
+    }
+
+    /// A little of everything a screen draws: a wash, a translucent rectangle, a clipped one, and
+    /// a textured quad.
+    fn paint<R: Renderer>(r: &mut R) {
+        r.clear(BACKDROP);
+        r.fill_rect(Rect::new(4.0, 6.0, 20.0, 10.0), INK);
+        r.fill_rect(Rect::new(10.0, 10.0, 30.0, 12.0), Color { a: 128, ..Color::WHITE });
+        r.push_clip(Rect::new(40.0, 4.0, 8.0, 8.0));
+        r.fill_rect(Rect::new(36.0, 0.0, 20.0, 20.0), Color::GREEN);
+        r.pop_clip();
+        let tex = r.register_texture("scaled.checker", &checker(), CHECKER, CHECKER);
+        r.draw_textured_quad(tex, QuadParams::new(Rect::new(44.0, 20.0, 8.0, 8.0)));
+    }
+
+    /// The property the built-in screens depend on: drawn through the adapter onto a target of the
+    /// adapter's own size, a frame is the frame it always was.
+    #[test]
+    fn a_target_of_the_same_size_is_drawn_bit_for_bit() {
+        let mut direct = CpuCanvas::new(SPACE.0, SPACE.1);
+        paint(&mut direct);
+
+        let mut target = CpuCanvas::new(SPACE.0, SPACE.1);
+        let mut scaled = ScaledRenderer::new(&mut target, SPACE);
+        assert_eq!(scaled.scale(), (1.0, 1.0));
+        paint(&mut scaled);
+
+        assert_eq!(direct.pixels(), target.pixels());
+    }
+
+    /// On a larger target every pixel of the fixed space becomes a block of the same colour, so the
+    /// screen keeps its place and its size instead of shrinking into a corner.
+    #[test]
+    fn a_larger_target_shows_the_same_frame_enlarged() {
+        let mut small = CpuCanvas::new(SPACE.0, SPACE.1);
+        paint(&mut small);
+
+        let mut large = CpuCanvas::new(SPACE.0 * ENLARGEMENT, SPACE.1 * ENLARGEMENT);
+        let mut scaled = ScaledRenderer::new(&mut large, SPACE);
+        assert_eq!(scaled.size(), SPACE, "the screen is still laid out for the fixed space");
+        paint(&mut scaled);
+
+        for y in 0..SPACE.1 * ENLARGEMENT {
+            for x in 0..SPACE.0 * ENLARGEMENT {
+                assert_eq!(large.pixel_at(x, y), small.pixel_at(x / ENLARGEMENT, y / ENLARGEMENT), "pixel ({x}, {y})");
+            }
+        }
+    }
+
+    /// A window that is not the shape of the fixed space stretches each axis on its own, which is
+    /// what the surface did before the adapter existed.
+    #[test]
+    fn each_axis_scales_on_its_own() {
+        let mut target = CpuCanvas::new(SPACE.0 * 2, SPACE.1);
+        let mut scaled = ScaledRenderer::new(&mut target, SPACE);
+        assert_eq!(scaled.scale(), (2.0, 1.0));
+        scaled.clear(BACKDROP);
+        scaled.fill_rect(Rect::new(4.0, 6.0, 20.0, 10.0), INK);
+
+        assert_eq!(target.pixel_at(8, 6), INK, "the left edge moved out twice as far");
+        assert_eq!(target.pixel_at(47, 15), INK, "and the rectangle is twice as wide but no taller");
+        assert_eq!(target.pixel_at(48, 15), BACKDROP);
+        assert_eq!(target.pixel_at(8, 16), BACKDROP);
+    }
+
+    /// A rotation centre is a position inside the destination, so it has to grow with it or the
+    /// quad would turn about the wrong point.
+    #[test]
+    fn a_rotated_quad_turns_about_the_same_point_of_the_enlarged_destination() {
+        let mut small = CpuCanvas::new(SPACE.0, SPACE.1);
+        let mut large = CpuCanvas::new(SPACE.0 * ENLARGEMENT, SPACE.1 * ENLARGEMENT);
+        let turned = QuadParams { angle_deg: 90.0, center: (4.0, 4.0), ..QuadParams::new(Rect::new(20.0, 12.0, 8.0, 8.0)) };
+
+        small.clear(BACKDROP);
+        let tex = small.register_texture("scaled.checker", &checker(), CHECKER, CHECKER);
+        small.draw_textured_quad(tex, turned);
+
+        let mut scaled = ScaledRenderer::new(&mut large, SPACE);
+        scaled.clear(BACKDROP);
+        let tex = scaled.register_texture("scaled.checker", &checker(), CHECKER, CHECKER);
+        scaled.draw_textured_quad(tex, turned);
+
+        for (x, y) in [(21, 13), (26, 13), (21, 18), (26, 18)] {
+            let middle = ENLARGEMENT / 2;
+            assert_eq!(large.pixel_at(x * ENLARGEMENT + middle, y * ENLARGEMENT + middle), small.pixel_at(x, y), "the quarter of the quad at ({x}, {y})");
+        }
+    }
+
+    #[test]
+    fn textures_and_their_limit_pass_straight_through() {
+        let mut target = CpuCanvas::new(SPACE.0 * ENLARGEMENT, SPACE.1 * ENLARGEMENT);
+        let mut scaled = ScaledRenderer::new(&mut target, SPACE);
+        let tex = scaled.register_texture("scaled.checker", &checker(), CHECKER, CHECKER);
+        assert_eq!(scaled.texture_size(tex), Some((CHECKER, CHECKER)), "a texture is as large as its pixels, whatever it is drawn on");
+        assert_eq!(scaled.max_texture_size(), UNLIMITED_TEXTURE_SIZE, "the CPU canvas underneath has no ceiling");
+        scaled.release_texture(tex);
+        assert_eq!(scaled.texture_size(tex), None);
+        assert_eq!(target.live_texture_count(), 0);
+    }
+
+    #[test]
+    fn a_space_with_no_extent_scales_without_dividing_by_zero() {
+        let (sx, sy) = scale_between((0, 0), (1280, 720));
+        assert!(sx.is_finite() && sy.is_finite());
+    }
 }

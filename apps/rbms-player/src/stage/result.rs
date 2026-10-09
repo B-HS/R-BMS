@@ -87,8 +87,8 @@ impl StageHandler for ResultState {
 
     fn on_enter(&mut self, ctx: &mut FrameCtx<'_>) {
         ctx.shared.play_system_sound(crate::syssound::result_sound(self.cleared));
-        let now_ms = ctx.shared.skin_now_ms();
-        ctx.shared.skin_result_timers.enter(&mut ctx.shared.skin_timers, &self.view, now_ms);
+        let now_us = ctx.shared.skin_now_us();
+        ctx.shared.skin_result_timers.enter(&mut ctx.shared.skin_timers, &self.view, now_us);
     }
 
     fn on_exit(&mut self, ctx: &mut FrameCtx<'_>) {
@@ -112,8 +112,8 @@ impl StageHandler for ResultState {
     fn draw(&mut self, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'_>) {
         canvas.clear_bga();
         ctx.shared.prepare_skin(canvas, SKIN_TYPE_RESULT);
-        let now_ms = ctx.shared.skin_now_ms();
-        ctx.shared.skin_result_timers.update(&mut ctx.shared.skin_timers, now_ms);
+        let now_us = ctx.shared.skin_now_us();
+        ctx.shared.skin_result_timers.update(&mut ctx.shared.skin_timers, now_us);
         let series = self.series();
         if ctx.shared.draw_result_skin(canvas, &self.view, &self.extras, self.cleared, FrameExtra::Result(&series)) {
             return;
@@ -135,7 +135,7 @@ mod tests {
     const PLAYED_PATH: &str = "/songs/played.bms";
 
     fn app() -> App {
-        let dir = std::env::temp_dir().join(format!("rbms-result-stage-tests-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("rbms-result-stage-tests-{}-{:?}", std::process::id(), std::thread::current().id()));
         let mut config = Config::default();
         config.play.autoplay = false;
         App::new(String::new(), config, LaunchOptions::default(), dir.join("settings.ron"))
@@ -254,17 +254,21 @@ mod tests {
     /// The score screen's timers: the trend starts when the screen opens and ends a second later.
     #[test]
     fn the_score_screen_times_its_trend_from_the_frame_it_opened_on() {
-        use rbms_skin::timer::timer_id;
+        use rbms_skin::timer::{MICROS_PER_MILLI, timer_id};
+        const TREND_MS: i64 = 1_000;
         let mut app = app();
         let mut state = state();
         let now = std::time::Instant::now();
         state.on_enter(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 });
-        let opened = app.shared.skin_timers.get(timer_id::RESULTGRAPH_BEGIN).expect("opening the screen did not start the trend");
-        assert!(app.shared.skin_timers.is_off(timer_id::RESULTGRAPH_END), "the trend ended before it was drawn");
+        assert!(app.shared.skin_timers.is_on(timer_id::RESULTGRAPH_BEGIN), "opening the screen did not start the trend");
+        let opened = app.shared.skin_timers.value_us(timer_id::RESULTGRAPH_BEGIN);
+        assert!(!app.shared.skin_timers.is_on(timer_id::RESULTGRAPH_END), "the trend ended before it was drawn");
 
         app.shared.skin_result_timers.update(&mut app.shared.skin_timers, opened);
-        assert!(app.shared.skin_timers.is_off(timer_id::RESULTGRAPH_END), "the trend ended on the frame it began");
-        app.shared.skin_result_timers.update(&mut app.shared.skin_timers, opened + 1_000);
+        assert!(!app.shared.skin_timers.is_on(timer_id::RESULTGRAPH_END), "the trend ended on the frame it began");
+        app.shared.skin_result_timers.update(&mut app.shared.skin_timers, opened + TREND_MS * MICROS_PER_MILLI - 1);
+        assert!(!app.shared.skin_timers.is_on(timer_id::RESULTGRAPH_END), "the trend ended a microsecond short of its second");
+        app.shared.skin_result_timers.update(&mut app.shared.skin_timers, opened + TREND_MS * MICROS_PER_MILLI);
         assert!(app.shared.skin_timers.is_on(timer_id::RESULTGRAPH_END), "the trend never ended");
     }
 

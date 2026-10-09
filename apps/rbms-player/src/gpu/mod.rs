@@ -1,9 +1,22 @@
 //! Native instanced-quad GPU backend (wgpu). Extracted from `main.rs` so the renderer's wgpu
 //! plumbing lives apart from the app/UI state machine. `Gpu` implements `rbms_render::Renderer`,
 //! so every UI composer (`render_playfield`/`render_hud`/…) targets it directly.
+//!
+//! The space a frame is drawn in is the target's own pixels: [`Renderer::size`] answers the size of
+//! the viewport the frame lands in, which is the whole window when it is stretched and the largest
+//! rectangle of the screen's shape when it is fitted. A skin screen draws straight onto that. The
+//! built-in screens are laid out for a fixed size instead and reach this backend through
+//! `rbms_render::ScaledRenderer`, which is what `crate::stage::Canvas` wraps it in.
+//!
+//! Colours go to the target as the bytes they were given as. The surface is configured, or viewed,
+//! in a format without an sRGB transfer, so a texel of 128 is a pixel of 128 and blending works on
+//! those bytes -- the arithmetic `rbms_render::CpuCanvas` does, and what the reference
+//! implementation's default framebuffer does.
 
 mod background;
 mod batch;
+#[cfg(test)]
+mod pixel_tests;
 
 #[cfg(test)]
 pub(crate) use background::background_upload_needed;
@@ -15,7 +28,7 @@ use batch::{Batch, BatchKind, ColoredInstance, DrawList, TexturedInstance, pad_r
 use rbms_render::{BlendFactor, BlendMode, Color, QuadParams, Rect, Renderer, TextureFilter, TextureId};
 use winit::window::Window;
 
-use crate::{CH, CW};
+use crate::notify::{Level, notify};
 
 const SHADER: &str = r#"
 @group(0) @binding(0) var<uniform> screen: vec4<f32>;
@@ -107,16 +120,138 @@ const TEXTURED_ATTRS: [wgpu::VertexAttribute; 4] = wgpu::vertex_attr_array![0 =>
 /// Instances the buffers are sized for before they have to grow.
 const INITIAL_INSTANCE_CAPACITY: usize = 8192;
 
+/// Bytes the uniform holding the size of the space a frame is drawn in takes: one `vec4<f32>`.
+const SCREEN_UNIFORM_BYTES: u64 = 16;
+
+/// Formats whose bytes reach the target exactly as a fragment wrote them, in order of preference.
+const PASSTHROUGH_FORMATS: [wgpu::TextureFormat; 2] = [wgpu::TextureFormat::Bgra8Unorm, wgpu::TextureFormat::Rgba8Unorm];
+
+/// The format an offscreen target is rendered in and read back as.
+#[cfg(test)]
+const OFFSCREEN_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+
+/// Environment variable that makes a test which needs a graphics adapter fail, rather than pass
+/// unchecked, on a machine that cannot bring one up.
+#[cfg(test)]
+pub(crate) const REQUIRE_GPU_ENV: &str = "RBMS_REQUIRE_GPU";
+
+/// Where a finished frame goes.
+enum Target {
+    /// A window's surface, presented as each frame completes.
+    Window { window: Arc<Window>, surface: wgpu::Surface<'static>, config: wgpu::SurfaceConfiguration },
+    /// A texture nothing shows, read back by [`Gpu::capture`].
+    #[cfg(test)]
+    Offscreen { texture: wgpu::Texture },
+}
+
+impl Target {
+    /// The target's size in its own pixels.
+    fn size(&self) -> (u32, u32) {
+        match self {
+            Target::Window { config, .. } => (config.width, config.height),
+            #[cfg(test)]
+            Target::Offscreen { texture } => (texture.width(), texture.height()),
+        }
+    }
+
+    /// Ask for another frame, where there is anything to ask.
+    fn request_redraw(&self) {
+        match self {
+            Target::Window { window, .. } => window.request_redraw(),
+            #[cfg(test)]
+            Target::Offscreen { .. } => {}
+        }
+    }
+
+    /// Tell the windowing system a frame is about to be presented, where there is one to tell.
+    fn pre_present_notify(&self) {
+        match self {
+            Target::Window { window, .. } => window.pre_present_notify(),
+            #[cfg(test)]
+            Target::Offscreen { .. } => {}
+        }
+    }
+}
+
+/// The part of a target a frame is drawn into, in whole target pixels.
+///
+/// Whole pixels on purpose: the viewport's size is the space a frame is drawn in, so a viewport
+/// that ended on a fraction of a pixel would have every skin coordinate land a fraction off the
+/// pixel it names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Viewport {
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+}
+
+impl Viewport {
+    fn size(self) -> (u32, u32) {
+        (self.width, self.height)
+    }
+
+    /// The viewport as `(x, y, w, h)`, which is how a render pass and the scissor arithmetic take
+    /// it.
+    fn as_rect(self) -> (f32, f32, f32, f32) {
+        (self.x as f32, self.y as f32, self.width as f32, self.height as f32)
+    }
+}
+
+/// The format a surface is configured with and the format frames are rendered to it through.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SurfaceFormats {
+    surface: wgpu::TextureFormat,
+    render: wgpu::TextureFormat,
+}
+
+impl SurfaceFormats {
+    fn same(format: wgpu::TextureFormat) -> SurfaceFormats {
+        SurfaceFormats { surface: format, render: format }
+    }
+}
+
+/// Pick the formats that put a fragment's bytes on screen untouched, out of what a surface offers.
+///
+/// A plain 8-bit format is taken as it is. Failing that, an sRGB one is configured and rendered
+/// through a view of its plain counterpart, which `reinterpretable` says the backend allows. Only
+/// when neither is possible does the surface keep a format with a colour transfer of its own: an
+/// sRGB one if it has one, as it always chose, and failing that whatever it lists first. `None`
+/// means the surface offers nothing, which is an adapter that cannot draw on it.
+fn choose_surface_formats(offered: &[wgpu::TextureFormat], reinterpretable: bool) -> Option<SurfaceFormats> {
+    if let Some(plain) = PASSTHROUGH_FORMATS.iter().copied().find(|plain| offered.contains(plain)) {
+        return Some(SurfaceFormats::same(plain));
+    }
+    let viewed = offered.iter().copied().find(|format| format.is_srgb() && PASSTHROUGH_FORMATS.contains(&format.remove_srgb_suffix()));
+    match viewed {
+        Some(srgb) if reinterpretable => Some(SurfaceFormats { surface: srgb, render: srgb.remove_srgb_suffix() }),
+        _ => offered.iter().copied().find(|format| format.is_srgb()).or(offered.first().copied()).map(SurfaceFormats::same),
+    }
+}
+
+/// Whether a `width` x `height` image is within a backend's longest texture edge.
+fn texture_fits(width: u32, height: u32, limit: u32) -> bool {
+    width <= limit && height <= limit
+}
+
 /// Native instanced-quad renderer. Every `fill_rect` becomes one GPU instance; the whole
 /// note field is drawn in a single instanced draw call (no CPU rasterisation / texture
 /// upload). Implements `rbms_render::Renderer`, so the playfield/result composers target
 /// it directly.
 pub(crate) struct Gpu {
-    pub(crate) window: Arc<Window>,
-    surface: wgpu::Surface<'static>,
+    target: Target,
     device: wgpu::Device,
     queue: wgpu::Queue,
-    config: wgpu::SurfaceConfiguration,
+    /// The format frames are rendered in. See [`choose_surface_formats`].
+    format: wgpu::TextureFormat,
+    /// The shape a fitted frame keeps, as a width and a height in any unit.
+    shape: (u32, u32),
+    /// Where this frame lands in the target. Its size is the space the frame is drawn in.
+    viewport: Viewport,
+    /// Holds that size for the vertex shaders, rewritten whenever it changes.
+    screen_uniform: wgpu::Buffer,
+    /// The longest edge of a texture the device accepts.
+    max_texture_size: u32,
     pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
     instances: wgpu::Buffer,
@@ -154,48 +289,116 @@ pub(crate) enum GpuError {
     NoAdapter,
     #[error("the graphics adapter refused a device: {0}")]
     NoDevice(#[from] wgpu::RequestDeviceError),
+    #[cfg(test)]
+    #[error("this target is shown, not read back")]
+    NotOffscreen,
+    #[cfg(test)]
+    #[error("the frame could not be read back: {0}")]
+    Readback(String),
+}
+
+fn instance() -> wgpu::Instance {
+    wgpu::Instance::new(wgpu::InstanceDescriptor {
+        backends: wgpu::Backends::all(),
+        flags: wgpu::InstanceFlags::default(),
+        memory_budget_thresholds: Default::default(),
+        backend_options: Default::default(),
+        display: None,
+    })
+}
+
+/// An adapter that can draw on `surface`, or any adapter at all when there is no surface.
+fn request_adapter(instance: &wgpu::Instance, surface: Option<&wgpu::Surface<'_>>) -> Result<wgpu::Adapter, GpuError> {
+    pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        power_preference: wgpu::PowerPreference::default(),
+        compatible_surface: surface,
+        force_fallback_adapter: false,
+    }))
+    .map_err(|_| GpuError::NoAdapter)
+}
+
+/// A device with the adapter's own texture size limits rather than the portable defaults, so an
+/// image is only ever refused for being larger than this machine can actually hold.
+fn request_device(adapter: &wgpu::Adapter) -> Result<(wgpu::Device, wgpu::Queue), GpuError> {
+    let required_limits = wgpu::Limits::default().using_resolution(adapter.limits());
+    Ok(pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor { required_limits, ..Default::default() }))?)
 }
 
 impl Gpu {
-    pub(crate) fn new(window: Arc<Window>) -> Result<Gpu, GpuError> {
+    /// Bring the backend up on a window. `shape` is the width and height whose proportions a fitted
+    /// frame keeps, and `letterbox` is whether the first frame is fitted to them: the choice
+    /// [`Gpu::set_letterbox`] makes for the frames after it, made here for the one before any of
+    /// them, so a window that opens fitted is never shown stretched first.
+    pub(crate) fn new(window: Arc<Window>, shape: (u32, u32), letterbox: bool) -> Result<Gpu, GpuError> {
         let size = window.inner_size();
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::all(),
-            flags: wgpu::InstanceFlags::default(),
-            memory_budget_thresholds: Default::default(),
-            backend_options: Default::default(),
-            display: None,
-        });
+        let instance = instance();
         let surface = instance.create_surface(window.clone())?;
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::default(),
-            compatible_surface: Some(&surface),
-            force_fallback_adapter: false,
-        }))
-        .map_err(|_| GpuError::NoAdapter)?;
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))?;
+        let adapter = request_adapter(&instance, Some(&surface))?;
+        let (device, queue) = request_device(&adapter)?;
 
         let caps = surface.get_capabilities(&adapter);
-        let format = caps.formats.iter().copied().find(|f| f.is_srgb()).unwrap_or(caps.formats[0]);
+        let reinterpretable = adapter.get_downlevel_capabilities().flags.contains(wgpu::DownlevelFlags::SURFACE_VIEW_FORMATS);
+        let formats = choose_surface_formats(&caps.formats, reinterpretable).ok_or(GpuError::NoAdapter)?;
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format,
+            format: formats.surface,
             width: size.width.max(1),
             height: size.height.max(1),
             present_mode: wgpu::PresentMode::AutoVsync,
             alpha_mode: caps.alpha_modes[0],
-            view_formats: vec![],
+            view_formats: if formats.render == formats.surface { vec![] } else { vec![formats.render] },
             desired_maximum_frame_latency: 2,
         };
         surface.configure(&device, &config);
+        Ok(Gpu::assemble(device, queue, formats.render, Target::Window { window, surface, config }, shape, letterbox))
+    }
 
-        let uniform = device.create_buffer(&wgpu::BufferDescriptor {
+    /// Bring the backend up with no window: frames are drawn into a `width` x `height` texture and
+    /// come back through [`Gpu::capture`].
+    ///
+    /// Fails, rather than panicking, on a machine with no adapter to draw with -- a headless CI box
+    /// has none -- so a caller can skip what it meant to do.
+    #[cfg(test)]
+    fn offscreen(width: u32, height: u32, shape: (u32, u32)) -> Result<Gpu, GpuError> {
+        let adapter = request_adapter(&instance(), None)?;
+        let (device, queue) = request_device(&adapter)?;
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("offscreen target"),
+            size: wgpu::Extent3d { width: width.max(1), height: height.max(1), depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: OFFSCREEN_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        Ok(Gpu::assemble(device, queue, OFFSCREEN_FORMAT, Target::Offscreen { texture }, shape, false))
+    }
+
+    /// [`Gpu::offscreen`] for a test with nothing to check on a machine that has no adapter: `None`
+    /// there, so the test can pass without drawing, unless [`REQUIRE_GPU_ENV`] says the comparison
+    /// has to happen, in which case the missing backend is the failure.
+    #[cfg(test)]
+    pub(crate) fn offscreen_if_available(width: u32, height: u32, shape: (u32, u32)) -> Option<Gpu> {
+        match Gpu::offscreen(width, height, shape) {
+            Ok(gpu) => Some(gpu),
+            Err(error) => {
+                assert!(std::env::var_os(REQUIRE_GPU_ENV).is_none(), "{REQUIRE_GPU_ENV} is set, but the GPU backend did not come up: {error}");
+                None
+            }
+        }
+    }
+
+    /// Build everything that does not depend on what kind of target the frames go to.
+    fn assemble(device: wgpu::Device, queue: wgpu::Queue, format: wgpu::TextureFormat, target: Target, shape: (u32, u32), letterbox: bool) -> Gpu {
+        let viewport = surface_viewport(target.size(), letterbox.then_some(shape));
+        let screen_uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("screen"),
-            size: 16,
+            size: SCREEN_UNIFORM_BYTES,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        queue.write_buffer(&uniform, 0, bytemuck::cast_slice(&[CW as f32, CH as f32, 0.0, 0.0]));
+        write_screen_uniform(&queue, &screen_uniform, viewport.size());
 
         let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: None,
@@ -209,7 +412,7 @@ impl Gpu {
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
             layout: &bgl,
-            entries: &[wgpu::BindGroupEntry { binding: 0, resource: uniform.as_entire_binding() }],
+            entries: &[wgpu::BindGroupEntry { binding: 0, resource: screen_uniform.as_entire_binding() }],
         });
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("quad"), source: wgpu::ShaderSource::Wgsl(SHADER.into()) });
@@ -321,14 +524,17 @@ impl Gpu {
             })
         };
 
-        Ok(Gpu {
-            window,
-            surface,
+        Gpu {
+            target,
             nearest_sampler: sampler(wgpu::FilterMode::Nearest),
             linear_sampler: sampler(wgpu::FilterMode::Linear),
+            max_texture_size: device.limits().max_texture_dimension_2d,
             device,
             queue,
-            config,
+            format,
+            shape,
+            viewport,
+            screen_uniform,
             pipeline,
             bind_group,
             instances,
@@ -341,11 +547,11 @@ impl Gpu {
             texture_keys: HashMap::new(),
             draw: DrawList::default(),
             clear_color: Color::BLACK,
-            letterbox: false,
+            letterbox,
             background: None,
             background_generation: None,
             background_texture: None,
-        })
+        }
     }
 
     /// Number of quad instances queued so far this frame (debug overlay metric).
@@ -353,30 +559,106 @@ impl Gpu {
         self.draw.quad_count()
     }
 
-    /// Keep the logical screen's own shape inside the window, or stretch it to fill.
+    /// Keep the screen's own shape inside the window, or stretch it to fill.
     ///
     /// Stretching is what the surface has always done and is still the default; a window that is
     /// not 16:9 then shows the field wider or taller than it was drawn, which moves where a note
     /// looks like it is. Fitting instead centres the screen and leaves the rest of the window in
     /// the colour the frame was cleared to.
+    ///
+    /// The choice takes hold when the frame in progress has been handed over, not in the middle of
+    /// it: the fit decides the size of the space a frame is drawn in, and the half of a frame
+    /// already queued was laid out for the size it started with.
     pub(crate) fn set_letterbox(&mut self, on: bool) {
         self.letterbox = on;
     }
 
-    /// The part of the surface this frame is drawn into, as `(x, y, w, h)`.
-    fn viewport(&self) -> (f32, f32, f32, f32) {
-        surface_viewport(self.config.width, self.config.height, self.letterbox)
+    /// Ask the window for another frame. A target with no window has nobody to ask.
+    pub(crate) fn request_redraw(&self) {
+        self.target.request_redraw();
     }
 
-    pub(crate) fn render(&mut self) {
-        let frame = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
-            _ => {
-                self.surface.configure(&self.device, &self.config);
-                return;
-            }
-        };
+    /// Work out where the next frame lands, and tell the shaders if that changed the size of the
+    /// space it is drawn in. Called between frames only: see [`Gpu::set_letterbox`].
+    fn settle(&mut self) {
+        let viewport = surface_viewport(self.target.size(), self.letterbox.then_some(self.shape));
+        if viewport.size() != self.viewport.size() {
+            write_screen_uniform(&self.queue, &self.screen_uniform, viewport.size());
+        }
+        self.viewport = viewport;
+    }
 
+    /// Present the queued frame on the window. A target with no window is read with
+    /// [`Gpu::capture`] instead, and this does nothing for it.
+    pub(crate) fn render(&mut self) {
+        let frame = match &self.target {
+            Target::Window { surface, config, .. } => match surface.get_current_texture() {
+                wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
+                _ => {
+                    surface.configure(&self.device, config);
+                    return;
+                }
+            },
+            #[cfg(test)]
+            Target::Offscreen { .. } => return,
+        };
+        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor { format: Some(self.format), ..Default::default() });
+        let commands = self.encode(&view);
+        self.queue.submit([commands.finish()]);
+        self.target.pre_present_notify();
+        frame.present();
+        self.settle();
+    }
+
+    /// Draw the queued frame into the offscreen target and hand its pixels back as tightly packed
+    /// RGBA8 rows, top row first.
+    ///
+    /// The bytes are what the target holds, with no colour transfer applied on the way in or out,
+    /// so they compare directly against what `rbms_render::CpuCanvas` computes for the same draws.
+    #[cfg(test)]
+    pub(crate) fn capture(&mut self) -> Result<Vec<u8>, GpuError> {
+        let texture = match &self.target {
+            Target::Offscreen { texture } => texture.clone(),
+            Target::Window { .. } => return Err(GpuError::NotOffscreen),
+        };
+        let (width, height) = (texture.width(), texture.height());
+        let mut commands = self.encode(&texture.create_view(&wgpu::TextureViewDescriptor::default()));
+
+        let stride = batch::padded_row_bytes(width);
+        let readback = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("capture"),
+            size: u64::from(stride) * u64::from(height),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        commands.copy_texture_to_buffer(
+            texture.as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: &readback,
+                layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(stride), rows_per_image: Some(height) },
+            },
+            texture.size(),
+        );
+        self.queue.submit([commands.finish()]);
+        self.settle();
+
+        let (sender, mapped) = std::sync::mpsc::channel();
+        readback.slice(..).map_async(wgpu::MapMode::Read, move |result| {
+            sender.send(result).ok();
+        });
+        self.device.poll(wgpu::PollType::wait_indefinitely()).map_err(|e| GpuError::Readback(e.to_string()))?;
+        mapped.recv().map_err(|e| GpuError::Readback(e.to_string()))?.map_err(|e| GpuError::Readback(e.to_string()))?;
+
+        let tight = (width * batch::BYTES_PER_PIXEL) as usize;
+        let rows = readback.slice(..).get_mapped_range();
+        let pixels = rows.chunks_exact(stride as usize).flat_map(|row| &row[..tight]).copied().collect();
+        drop(rows);
+        readback.unmap();
+        Ok(pixels)
+    }
+
+    /// Record the queued frame as one render pass onto `view`.
+    fn encode(&mut self, view: &wgpu::TextureView) -> wgpu::CommandEncoder {
         if self.draw.colored.len() > self.instance_cap {
             self.instance_cap = self.draw.colored.len().next_power_of_two();
             self.instances = self.device.create_buffer(&wgpu::BufferDescriptor {
@@ -403,17 +685,17 @@ impl Gpu {
         }
 
         let c = self.clear_color;
-        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let channel = |value: u8| f64::from(value) / f64::from(u8::MAX);
         let mut enc = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
         {
             let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
+                    view,
                     resolve_target: None,
                     depth_slice: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color { r: c.r as f64 / 255.0, g: c.g as f64 / 255.0, b: c.b as f64 / 255.0, a: 1.0 }),
+                        load: wgpu::LoadOp::Clear(wgpu::Color { r: channel(c.r), g: channel(c.g), b: channel(c.b), a: 1.0 }),
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -422,23 +704,21 @@ impl Gpu {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            let viewport = self.viewport();
+            let viewport = self.viewport.as_rect();
             let (vx, vy, vw, vh) = viewport;
             rp.set_viewport(vx, vy, vw, vh, 0.0, 1.0);
             rp.set_bind_group(0, &self.bind_group, &[]);
 
-            let surface = (self.config.width, self.config.height);
+            let surface = self.target.size();
             for entry in &self.draw.batches {
-                let Some((sx, sy, sw, sh)) = scissor_rect(entry.clip, viewport, (CW, CH), surface) else {
+                let Some((sx, sy, sw, sh)) = scissor_rect(entry.clip, viewport, self.viewport.size(), surface) else {
                     continue;
                 };
                 rp.set_scissor_rect(sx, sy, sw, sh);
                 self.draw_batch(&mut rp, entry);
             }
         }
-        self.queue.submit([enc.finish()]);
-        self.window.pre_present_notify();
-        frame.present();
+        enc
     }
 
     /// Issue one batch as a single instanced draw, in the order it was queued.
@@ -451,7 +731,7 @@ impl Gpu {
                 rp.set_pipeline(&self.pipeline);
                 rp.set_vertex_buffer(0, self.instances.slice(..));
             }
-            BatchKind::Textured { tex, blend, filter, .. } => {
+            BatchKind::Textured { tex, blend, filter } => {
                 let Some(Some(texture)) = self.textures.get(tex.0 as usize) else {
                     return;
                 };
@@ -503,27 +783,69 @@ impl Gpu {
         GpuTexture { width, height, nearest: group(&self.nearest_sampler), linear: group(&self.linear_sampler), texture }
     }
 
-    /// Where a physical window position lands in the fixed logical screen the UI is laid out in.
+    /// Where a physical window position lands in a `space`-sized coordinate space laid over the
+    /// viewport the frame is drawn into.
     ///
     /// The inverse of the fit the frame was drawn under, so a click lands on what is under the
-    /// cursor either way. A position in a letterbox bar maps outside the logical screen, which is
-    /// exactly what the hit test wants: there is nothing there to click.
-    pub(crate) fn logical_from_physical(&self, x: f32, y: f32) -> (f32, f32) {
-        logical_from_physical_in(x, y, self.config.width, self.config.height, self.letterbox)
+    /// cursor either way. A position in a letterbox bar maps outside the space, which is exactly
+    /// what the hit test wants: there is nothing there to click. Asked with [`Renderer::size`] the
+    /// answer is in the pixels a skin screen draws in; asked with the size the built-in screens are
+    /// laid out for, it is in theirs.
+    pub(crate) fn position_in_space(&self, x: f32, y: f32, space: (u32, u32)) -> (f32, f32) {
+        position_in_viewport(x, y, self.viewport, space)
     }
 
     pub(crate) fn resize(&mut self, w: u32, h: u32) {
-        if w > 0 && h > 0 {
-            self.config.width = w;
-            self.config.height = h;
-            self.surface.configure(&self.device, &self.config);
+        if w == 0 || h == 0 {
+            return;
+        }
+        match &mut self.target {
+            Target::Window { surface, config, .. } => {
+                config.width = w;
+                config.height = h;
+                surface.configure(&self.device, config);
+            }
+            #[cfg(test)]
+            Target::Offscreen { .. } => return,
+        }
+        self.settle();
+    }
+
+    /// Stand an empty slot in for an image too large to upload, and say so once.
+    ///
+    /// The slot is the handle the caller gets back: it has no size and nothing draws from it. A
+    /// key that is refused again keeps its slot and stays quiet, because a refused image offered on
+    /// every frame would otherwise report itself sixty times a second.
+    fn refuse_texture(&mut self, key: &str, width: u32, height: u32) -> TextureId {
+        let known = self.texture_keys.get(key).copied().filter(|id| (id.0 as usize) < self.textures.len());
+        let already_refused = known.is_some_and(|id| self.textures[id.0 as usize].is_none());
+        if !already_refused {
+            let limit = self.max_texture_size;
+            notify(Level::Warn, format!("texture {key} is {width}x{height}, past the {limit} pixels this graphics adapter holds; it will not be drawn"));
+        }
+        match known {
+            Some(id) => {
+                self.textures[id.0 as usize] = None;
+                id
+            }
+            None => {
+                let id = TextureId(self.textures.len() as u32);
+                self.textures.push(None);
+                self.texture_keys.insert(key.to_string(), id);
+                id
+            }
         }
     }
 }
 
+/// Tell the vertex shaders how large the space a frame is drawn in is.
+fn write_screen_uniform(queue: &wgpu::Queue, uniform: &wgpu::Buffer, size: (u32, u32)) {
+    queue.write_buffer(uniform, 0, bytemuck::cast_slice(&[size.0 as f32, size.1 as f32, 0.0, 0.0]));
+}
+
 impl Renderer for Gpu {
     fn size(&self) -> (u32, u32) {
-        (CW, CH)
+        self.viewport.size()
     }
 
     fn clear(&mut self, color: Color) {
@@ -539,6 +861,9 @@ impl Renderer for Gpu {
     }
 
     fn register_texture(&mut self, key: &str, rgba: &[u8], width: u32, height: u32) -> TextureId {
+        if !texture_fits(width, height, self.max_texture_size) {
+            return self.refuse_texture(key, width, height);
+        }
         if let Some(&id) = self.texture_keys.get(key)
             && let Some(Some(existing)) = self.textures.get(id.0 as usize)
             && existing.width == width
@@ -586,7 +911,7 @@ impl Renderer for Gpu {
         if !(drawable && params.dst.w > 0.0 && params.dst.h > 0.0) {
             return;
         }
-        let kind = BatchKind::Textured { tex, blend: params.blend, filter: params.filter, rotated: params.is_rotated() };
+        let kind = BatchKind::Textured { tex, blend: params.blend, filter: params.filter };
         self.draw.push_textured(kind, TexturedInstance::new(&params));
     }
 
@@ -597,33 +922,38 @@ impl Renderer for Gpu {
     fn pop_clip(&mut self) {
         self.draw.pop_clip();
     }
-}
 
-/// The part of a `surface_w` x `surface_h` surface the logical screen is drawn into, as
-/// `(x, y, w, h)`.
-///
-/// Stretched, that is the whole surface. Fitted, it is the largest 16:9 rectangle the surface holds,
-/// centred — so the remainder is one pair of bars, at the sides or above and below depending on
-/// which way the window is the wrong shape.
-///
-/// The rectangle is held inside the surface rather than trusted to land there: scaling by a ratio
-/// and multiplying back out can overshoot by a fraction of a pixel, and a viewport that starts a
-/// hair outside its attachment is rejected outright.
-fn surface_viewport(surface_w: u32, surface_h: u32, letterbox: bool) -> (f32, f32, f32, f32) {
-    let (sw, sh) = (surface_w.max(1) as f32, surface_h.max(1) as f32);
-    if !letterbox {
-        return (0.0, 0.0, sw, sh);
+    fn max_texture_size(&self) -> u32 {
+        self.max_texture_size
     }
-    let scale = (sw / CW as f32).min(sh / CH as f32);
-    let (w, h) = ((CW as f32 * scale).min(sw), (CH as f32 * scale).min(sh));
-    ((sw - w) * 0.5, (sh - h) * 0.5, w, h)
 }
 
-/// The mapping from a physical window position to the logical screen, split out so it can be checked
-/// without a window.
-fn logical_from_physical_in(x: f32, y: f32, surface_w: u32, surface_h: u32, letterbox: bool) -> (f32, f32) {
-    let (vx, vy, vw, vh) = surface_viewport(surface_w, surface_h, letterbox);
-    ((x - vx) * CW as f32 / vw, (y - vy) * CH as f32 / vh)
+/// The part of a `surface` a frame is drawn into.
+///
+/// Stretched (`fit` is `None`), that is the whole surface. Fitted, it is the largest rectangle of
+/// the proportions `fit` names that the surface holds, centred -- so the remainder is one pair of
+/// bars, at the sides or above and below depending on which way the window is the wrong shape.
+///
+/// The rectangle is rounded to whole pixels and held inside the surface rather than trusted to land
+/// there: its size is the space the frame is drawn in, and a viewport that starts a hair outside
+/// its attachment is rejected outright. A surface with no size yet is treated as one pixel.
+fn surface_viewport(surface: (u32, u32), fit: Option<(u32, u32)>) -> Viewport {
+    let (sw, sh) = (surface.0.max(1), surface.1.max(1));
+    let Some(shape) = fit else {
+        return Viewport { x: 0, y: 0, width: sw, height: sh };
+    };
+    let (shape_w, shape_h) = (shape.0.max(1) as f32, shape.1.max(1) as f32);
+    let scale = (sw as f32 / shape_w).min(sh as f32 / shape_h);
+    let width = ((shape_w * scale).round() as u32).clamp(1, sw);
+    let height = ((shape_h * scale).round() as u32).clamp(1, sh);
+    Viewport { x: (sw - width) / 2, y: (sh - height) / 2, width, height }
+}
+
+/// The mapping from a physical window position to a `space`-sized coordinate space laid over
+/// `viewport`, split out so it can be checked without a window.
+fn position_in_viewport(x: f32, y: f32, viewport: Viewport, space: (u32, u32)) -> (f32, f32) {
+    let (vx, vy, vw, vh) = viewport.as_rect();
+    ((x - vx) * space.0 as f32 / vw, (y - vy) * space.1 as f32 / vh)
 }
 
 /// Point the window's fit at what the DISPLAY settings ask for. A headless canvas has no surface to
@@ -639,6 +969,10 @@ pub(crate) fn apply_letterbox(canvas: &mut crate::stage::Canvas<'_>, on: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{CH, CW};
+
+    /// The shape the built-in screens are laid out for, and so the one a fitted frame keeps.
+    const SHAPE: (u32, u32) = (CW, CH);
 
     /// A 4:3 window: too tall for the screen's shape, so the bars are above and below it.
     const TALL: (u32, u32) = (1024, 768);
@@ -646,12 +980,20 @@ mod tests {
     /// An ultrawide window: too wide, so the bars are at the sides.
     const WIDE: (u32, u32) = (2560, 1080);
 
+    /// How far a fitted viewport's edge may sit from the exact proportion, in pixels: rounding to
+    /// whole pixels moves it by up to half of one.
+    const ROUNDING_SLACK: f32 = 0.5;
+
+    fn viewport(surface: (u32, u32), letterbox: bool) -> Viewport {
+        surface_viewport(surface, letterbox.then_some(SHAPE))
+    }
+
     fn stretched(x: f32, y: f32, w: u32, h: u32) -> (f32, f32) {
-        logical_from_physical_in(x, y, w, h, false)
+        position_in_viewport(x, y, viewport((w, h), false), SHAPE)
     }
 
     fn fitted(x: f32, y: f32, w: u32, h: u32) -> (f32, f32) {
-        logical_from_physical_in(x, y, w, h, true)
+        position_in_viewport(x, y, viewport((w, h), true), SHAPE)
     }
 
     #[test]
@@ -669,60 +1011,96 @@ mod tests {
         assert_eq!(stretched(w as f32 / 2.0, h as f32 / 2.0, w, h), (CW as f32 / 2.0, CH as f32 / 2.0));
     }
 
+    /// The same physical position answers in whichever space it is asked for: the fixed one the
+    /// built-in screens are laid out in, or the viewport's own pixels a skin screen draws in.
+    #[test]
+    fn a_position_is_given_in_the_space_it_is_asked_for() {
+        let surface = (CW * 2, CH * 2);
+        let frame = viewport(surface, false);
+        assert_eq!(position_in_viewport(640.0, 360.0, frame, SHAPE), (320.0, 180.0), "half as far in the fixed space");
+        assert_eq!(position_in_viewport(640.0, 360.0, frame, frame.size()), (640.0, 360.0), "and unmoved in the viewport's own pixels");
+
+        let (wide, bars) = (viewport(WIDE, true), viewport(WIDE, true).x as f32);
+        assert_eq!(position_in_viewport(bars + 100.0, 50.0, wide, wide.size()), (100.0, 50.0), "a fitted frame's own pixels start where its bars end");
+    }
+
     /// A window reported as zero-sized (minimised on some platforms) must not divide by zero.
     #[test]
     fn a_window_with_no_size_yet_maps_without_dividing_by_zero() {
         for letterbox in [false, true] {
-            let (x, y) = logical_from_physical_in(10.0, 10.0, 0, 0, letterbox);
+            let (x, y) = position_in_viewport(10.0, 10.0, viewport((0, 0), letterbox), SHAPE);
             assert!(x.is_finite() && y.is_finite(), "letterbox {letterbox} gave ({x}, {y})");
         }
     }
 
     #[test]
     fn stretching_fills_the_whole_window() {
-        assert_eq!(surface_viewport(TALL.0, TALL.1, false), (0.0, 0.0, TALL.0 as f32, TALL.1 as f32));
-        assert_eq!(surface_viewport(WIDE.0, WIDE.1, false), (0.0, 0.0, WIDE.0 as f32, WIDE.1 as f32));
+        assert_eq!(viewport(TALL, false), Viewport { x: 0, y: 0, width: TALL.0, height: TALL.1 });
+        assert_eq!(viewport(WIDE, false), Viewport { x: 0, y: 0, width: WIDE.0, height: WIDE.1 });
+    }
+
+    /// The size a frame is drawn in is the viewport's, so it follows the window rather than being
+    /// the fixed size it once was.
+    #[test]
+    fn the_space_a_frame_is_drawn_in_is_the_viewport_in_pixels() {
+        assert_eq!(viewport((1920, 1080), false).size(), (1920, 1080));
+        assert_eq!(viewport(TALL, false).size(), TALL, "a stretched frame is drawn across the whole window");
+        assert_eq!(viewport(TALL, true).size(), (1024, 576), "and a fitted one across what is left inside the bars");
+        assert_eq!(viewport(WIDE, true).size(), (1920, 1080));
     }
 
     #[test]
     fn a_window_of_the_screens_own_shape_is_filled_either_way() {
-        let square_on = surface_viewport(CW * 3, CH * 3, true);
-        assert_eq!(square_on, (0.0, 0.0, (CW * 3) as f32, (CH * 3) as f32), "a 16:9 window has no room left over");
-        assert_eq!(square_on, surface_viewport(CW * 3, CH * 3, false), "so fitting and stretching agree");
+        let square_on = viewport((CW * 3, CH * 3), true);
+        assert_eq!(square_on, Viewport { x: 0, y: 0, width: CW * 3, height: CH * 3 }, "a 16:9 window has no room left over");
+        assert_eq!(square_on, viewport((CW * 3, CH * 3), false), "so fitting and stretching agree");
     }
 
     #[test]
     fn a_window_that_is_too_tall_gets_bars_above_and_below() {
-        let (x, y, w, h) = surface_viewport(TALL.0, TALL.1, true);
-        assert_eq!((x, w), (0.0, TALL.0 as f32), "the full width is used");
-        assert_eq!(h, 576.0, "1024 wide at 16:9");
-        assert_eq!(y, (TALL.1 as f32 - h) * 0.5, "and the rest is split evenly");
-        assert!(y > 0.0, "there is a bar to split");
+        let Viewport { x, y, width, height } = viewport(TALL, true);
+        assert_eq!((x, width), (0, TALL.0), "the full width is used");
+        assert_eq!(height, 576, "1024 wide at 16:9");
+        assert_eq!(y, (TALL.1 - height) / 2, "and the rest is split evenly");
+        assert!(y > 0, "there is a bar to split");
     }
 
     #[test]
     fn a_window_that_is_too_wide_gets_bars_at_the_sides() {
-        let (x, y, w, h) = surface_viewport(WIDE.0, WIDE.1, true);
-        assert_eq!((y, h), (0.0, WIDE.1 as f32), "the full height is used");
-        assert_eq!(w, 1920.0, "1080 tall at 16:9");
-        assert_eq!(x, (WIDE.0 as f32 - w) * 0.5);
-        assert!(x > 0.0);
+        let Viewport { x, y, width, height } = viewport(WIDE, true);
+        assert_eq!((y, height), (0, WIDE.1), "the full height is used");
+        assert_eq!(width, 1920, "1080 tall at 16:9");
+        assert_eq!(x, (WIDE.0 - width) / 2);
+        assert!(x > 0);
     }
 
     #[test]
     fn the_fitted_screen_keeps_the_shape_it_was_drawn_at() {
         for (sw, sh) in [TALL, WIDE, (900, 900), (1280, 400), (17, 4000)] {
-            let (x, y, w, h) = surface_viewport(sw, sh, true);
-            assert!((w / h - CW as f32 / CH as f32).abs() < 1e-3, "{sw}x{sh} came out {w}x{h}");
-            assert!(x >= 0.0 && y >= 0.0, "{sw}x{sh} placed the screen outside the window");
-            assert!(x + w <= sw as f32 + 1e-3 && y + h <= sh as f32 + 1e-3, "{sw}x{sh} ran the screen off the window");
+            let Viewport { x, y, width, height } = viewport((sw, sh), true);
+            let scale = (sw as f32 / CW as f32).min(sh as f32 / CH as f32);
+            let (exact_w, exact_h) = (CW as f32 * scale, CH as f32 * scale);
+            assert!((width as f32 - exact_w).abs() <= ROUNDING_SLACK, "{sw}x{sh} came out {width} wide for {exact_w}");
+            assert!((height as f32 - exact_h).abs() <= ROUNDING_SLACK, "{sw}x{sh} came out {height} tall for {exact_h}");
+            assert!(x + width <= sw && y + height <= sh, "{sw}x{sh} ran the screen off the window");
         }
+    }
+
+    /// A shape other than the default one is kept just the same: the fit follows the value it is
+    /// given rather than a size built into the backend.
+    #[test]
+    fn the_fit_follows_the_shape_it_is_given() {
+        let square = surface_viewport(WIDE, Some((1, 1)));
+        assert_eq!(square, Viewport { x: (WIDE.0 - WIDE.1) / 2, y: 0, width: WIDE.1, height: WIDE.1 });
+        let classic = surface_viewport(WIDE, Some((4, 3)));
+        assert_eq!(classic.size(), (1440, 1080));
     }
 
     #[test]
     fn a_click_inside_the_fitted_screen_lands_where_it_was_drawn() {
         for (sw, sh) in [TALL, WIDE] {
-            let (x, y, w, h) = surface_viewport(sw, sh, true);
+            let Viewport { x, y, width, height } = viewport((sw, sh), true);
+            let (x, y, w, h) = (x as f32, y as f32, width as f32, height as f32);
             assert_eq!(fitted(x, y, sw, sh), (0.0, 0.0), "{sw}x{sh} top left");
             let (bx, by) = fitted(x + w, y + h, sw, sh);
             assert!((bx - CW as f32).abs() < 1e-3 && (by - CH as f32).abs() < 1e-3, "{sw}x{sh} bottom right came out ({bx}, {by})");
@@ -734,13 +1112,13 @@ mod tests {
     /// A bar is not part of the screen, so a click in one has to miss everything the frame drew.
     #[test]
     fn a_click_in_a_bar_lands_outside_the_logical_screen() {
-        let (_, y, _, _) = surface_viewport(TALL.0, TALL.1, true);
+        let y = viewport(TALL, true).y as f32;
         let (_, above) = fitted(10.0, y * 0.5, TALL.0, TALL.1);
         assert!(above < 0.0, "a click above the screen came out at {above}");
         let (_, below) = fitted(10.0, TALL.1 as f32 - y * 0.5, TALL.0, TALL.1);
         assert!(below > CH as f32, "a click below the screen came out at {below}");
 
-        let (x, ..) = surface_viewport(WIDE.0, WIDE.1, true);
+        let x = viewport(WIDE, true).x as f32;
         let (left, _) = fitted(x * 0.5, 10.0, WIDE.0, WIDE.1);
         assert!(left < 0.0, "a click left of the screen came out at {left}");
         let (right, _) = fitted(WIDE.0 as f32 - x * 0.5, 10.0, WIDE.0, WIDE.1);
@@ -752,5 +1130,42 @@ mod tests {
     #[test]
     fn fitting_and_stretching_disagree_on_a_window_of_the_wrong_shape() {
         assert_ne!(fitted(512.0, 100.0, TALL.0, TALL.1), stretched(512.0, 100.0, TALL.0, TALL.1));
+    }
+
+    /// The colour decision in one place: a surface that offers a format without an sRGB transfer
+    /// is given it, so the bytes a frame writes are the bytes on screen.
+    #[test]
+    fn a_plain_format_is_preferred_over_the_srgb_one_a_surface_lists_first() {
+        use wgpu::TextureFormat::{Bgra8Unorm, Bgra8UnormSrgb, Rgba8Unorm, Rgba8UnormSrgb, Rgba16Float};
+        for reinterpretable in [false, true] {
+            assert_eq!(choose_surface_formats(&[Bgra8UnormSrgb, Bgra8Unorm, Rgba16Float], reinterpretable), Some(SurfaceFormats::same(Bgra8Unorm)));
+            assert_eq!(choose_surface_formats(&[Rgba8UnormSrgb, Rgba8Unorm], reinterpretable), Some(SurfaceFormats::same(Rgba8Unorm)));
+        }
+    }
+
+    #[test]
+    fn a_surface_with_only_an_srgb_format_is_rendered_through_its_plain_view() {
+        use wgpu::TextureFormat::{Bgra8Unorm, Bgra8UnormSrgb, Rgba16Float};
+        let viewed = choose_surface_formats(&[Rgba16Float, Bgra8UnormSrgb], true);
+        assert_eq!(viewed, Some(SurfaceFormats { surface: Bgra8UnormSrgb, render: Bgra8Unorm }));
+    }
+
+    /// Where the backend cannot view a surface in another format there is nothing left to choose,
+    /// and the surface gets the format it always got: an sRGB one, or its own first.
+    #[test]
+    fn a_surface_that_cannot_be_viewed_plainly_keeps_the_format_it_always_had() {
+        use wgpu::TextureFormat::{Bgra8UnormSrgb, Rgba16Float};
+        assert_eq!(choose_surface_formats(&[Rgba16Float, Bgra8UnormSrgb], false), Some(SurfaceFormats::same(Bgra8UnormSrgb)));
+        assert_eq!(choose_surface_formats(&[Rgba16Float], true), Some(SurfaceFormats::same(Rgba16Float)));
+        assert_eq!(choose_surface_formats(&[], true), None, "a surface that offers nothing cannot be drawn on");
+    }
+
+    #[test]
+    fn an_image_is_refused_only_when_an_edge_is_past_the_limit() {
+        const LIMIT: u32 = 8192;
+        assert!(texture_fits(LIMIT, LIMIT, LIMIT), "an image exactly at the limit still fits");
+        assert!(texture_fits(6400, 1200, LIMIT));
+        assert!(!texture_fits(LIMIT + 1, 1, LIMIT), "one pixel too wide is too wide however short it is");
+        assert!(!texture_fits(1, LIMIT + 1, LIMIT));
     }
 }

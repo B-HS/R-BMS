@@ -3,9 +3,9 @@ use std::collections::HashMap;
 
 use super::{
     Acc, DestinationTrack, DrawCondition, DrawStateSource, Keyframe, LOOP_ONCE, LuaDrawEval, LuaExprId, MouseRect, OffsetSource, Resolved, STRETCH_UNSPECIFIED,
-    SkinColor, SkinOffset, SkinRect, WarnOnce, draw_conditions_from_ops, prepare, resolve,
+    SkinColor, SkinOffset, SkinRect, TimerRef, WarnOnce, draw_conditions_from_ops, prepare, resolve,
 };
-use crate::timer::{TimerState, timer_id};
+use crate::timer::{MICROS_PER_MILLI, TimerState, timer_id};
 
 /// Float slack for a rate that is not exactly representable, such as 650/1000.
 const TOLERANCE: f32 = 1e-3;
@@ -15,6 +15,9 @@ const SPAN_MS: i64 = 1_000;
 
 /// The x the fixture's second keyframe sits at, so a resolved x reads as the shaped rate per mille.
 const TRAVEL: f32 = 1_000.0;
+
+/// A quarter turn in the document's own counter-clockwise degrees.
+const DOCUMENT_QUARTER_TURN: f32 = 90.0;
 
 #[derive(Debug, Default)]
 struct FakeState {
@@ -67,13 +70,18 @@ impl LuaDrawEval for FakeLua {
     }
 }
 
-fn frame(time_ms: i64, x: f32, acc: Acc) -> Keyframe {
-    Keyframe { time_ms, rect: SkinRect::new(x, 0.0, 100.0, 100.0), clip: None, acc, color: SkinColor::rgba(0, 0, 0, u8::MAX), angle_deg: 0.0 }
+/// The frame clock at a whole millisecond, in the microseconds the interpolator is handed.
+const fn us(ms: i64) -> i64 {
+    ms * MICROS_PER_MILLI
+}
+
+fn frame(time_ms: i64, x: f32) -> Keyframe {
+    Keyframe { time_ms, rect: SkinRect::new(x, 0.0, 100.0, 100.0), clip: None, color: SkinColor::rgba(0, 0, 0, u8::MAX), angle_deg: 0.0 }
 }
 
 /// Two keyframes a second apart, travelling [`TRAVEL`] along x.
 fn travelling_track(acc: Acc, loop_ms: i64) -> DestinationTrack {
-    DestinationTrack { loop_ms, frames: vec![frame(0, 0.0, acc), frame(SPAN_MS, TRAVEL, acc)], ..DestinationTrack::default() }
+    DestinationTrack { acc, loop_ms, frames: vec![frame(0, 0.0), frame(SPAN_MS, TRAVEL)], ..DestinationTrack::default() }
 }
 
 fn assert_close(actual: f32, expected: f32, what: &str) {
@@ -81,7 +89,7 @@ fn assert_close(actual: f32, expected: f32, what: &str) {
 }
 
 fn resolved(track: &DestinationTrack, now_ms: i64) -> Option<Resolved> {
-    resolve(track, now_ms, &TimerState::new(), &FakeState::default())
+    resolve(track, us(now_ms), &TimerState::new(), &FakeState::default())
 }
 
 #[test]
@@ -124,15 +132,14 @@ fn a_one_shot_animation_stops_after_its_last_keyframe() {
 
 #[test]
 fn nothing_draws_before_the_first_keyframe() {
-    let track =
-        DestinationTrack { loop_ms: LOOP_ONCE, frames: vec![frame(500, 0.0, Acc::Linear), frame(1_500, TRAVEL, Acc::Linear)], ..DestinationTrack::default() };
+    let track = DestinationTrack { loop_ms: LOOP_ONCE, frames: vec![frame(500, 0.0), frame(1_500, TRAVEL)], ..DestinationTrack::default() };
     assert_eq!(resolved(&track, 499), None);
     assert_close(resolved(&track, 500).expect("the first keyframe draws").rect.x, 0.0, "at the first keyframe");
 }
 
 #[test]
 fn a_single_keyframe_holds_its_rectangle() {
-    let mut only = frame(0, 10.0, Acc::Linear);
+    let mut only = frame(0, 10.0);
     only.rect = SkinRect::new(10.0, 20.0, 30.0, 40.0);
     let held = DestinationTrack { frames: vec![only], ..DestinationTrack::default() };
     assert_eq!(resolved(&held, 0).expect("it draws at zero").rect, only.rect);
@@ -151,13 +158,13 @@ fn a_loop_point_past_the_end_falls_back_to_the_first_keyframe() {
 
 #[test]
 fn an_off_timer_hides_the_track_and_an_on_one_shifts_its_clock() {
-    let track = DestinationTrack { timer: Some(timer_id::PLAY), ..travelling_track(Acc::Linear, LOOP_ONCE) };
+    let track = DestinationTrack { timer: Some(TimerRef::Id(timer_id::PLAY)), ..travelling_track(Acc::Linear, LOOP_ONCE) };
     let mut timers = TimerState::new();
     let state = FakeState::default();
-    assert_eq!(resolve(&track, 5_250, &timers, &state), None, "an off timer draws nothing");
+    assert_eq!(resolve(&track, us(5_250), &timers, &state), None, "an off timer draws nothing");
 
-    timers.set_on(timer_id::PLAY, 5_000);
-    let resolved = resolve(&track, 5_250, &timers, &state).expect("an on timer draws");
+    timers.set_on(timer_id::PLAY, us(5_000));
+    let resolved = resolve(&track, us(5_250), &timers, &state).expect("an on timer draws");
     assert_close(resolved.rect.x, 250.0, "250 ms after the timer started");
 }
 
@@ -172,29 +179,29 @@ fn offsets_move_and_resize_the_region_unless_it_is_relative() {
     const OFFSET_ID: i32 = 7;
     let offset = SkinOffset { x: 10.0, y: 20.0, w: 4.0, h: 8.0, r: 0.0, a: 0.0 };
     let state = FakeState::default().with_offset(OFFSET_ID, offset);
-    let mut only = frame(0, 0.0, Acc::Linear);
+    let mut only = frame(0, 0.0);
     only.rect = SkinRect::new(100.0, 200.0, 50.0, 60.0);
 
     let moved = DestinationTrack { offsets: vec![OFFSET_ID], frames: vec![only], ..DestinationTrack::default() };
-    let resolved = resolve(&moved, 0, &TimerState::new(), &state).expect("it draws");
+    let resolved = resolve(&moved, us(0), &TimerState::new(), &state).expect("it draws");
     assert_eq!(resolved.rect, SkinRect::new(108.0, 216.0, 54.0, 68.0), "position takes the offset minus half its growth");
 
     let relative = DestinationTrack { relative: true, ..moved };
-    let resolved = resolve(&relative, 0, &TimerState::new(), &state).expect("it draws");
+    let resolved = resolve(&relative, us(0), &TimerState::new(), &state).expect("it draws");
     assert_eq!(resolved.rect, SkinRect::new(100.0, 200.0, 54.0, 68.0), "a relative track only grows");
 }
 
 #[test]
 fn a_missing_offset_leaves_the_region_alone() {
-    let mut only = frame(0, 0.0, Acc::Linear);
+    let mut only = frame(0, 0.0);
     only.rect = SkinRect::new(100.0, 200.0, 50.0, 60.0);
     let track = DestinationTrack { offsets: vec![3], frames: vec![only], ..DestinationTrack::default() };
     assert_eq!(resolved(&track, 0).expect("it draws").rect, only.rect);
 }
 
 fn clipped_track(first: Option<SkinRect>, second: Option<SkinRect>) -> DestinationTrack {
-    let mut a = frame(0, 0.0, Acc::Linear);
-    let mut b = frame(SPAN_MS, TRAVEL, Acc::Linear);
+    let mut a = frame(0, 0.0);
+    let mut b = frame(SPAN_MS, TRAVEL);
     a.clip = first;
     b.clip = second;
     DestinationTrack { loop_ms: LOOP_ONCE, frames: vec![a, b], ..DestinationTrack::default() }
@@ -230,24 +237,14 @@ fn an_empty_clip_turns_clipping_off() {
 
 #[test]
 fn a_step_track_holds_its_clip_too() {
-    let track = DestinationTrack {
-        frames: clipped_track(Some(SkinRect::new(0.0, 0.0, 100.0, 100.0)), Some(SkinRect::new(100.0, 0.0, 200.0, 100.0)))
-            .frames
-            .into_iter()
-            .map(|mut frame| {
-                frame.acc = Acc::Step;
-                frame
-            })
-            .collect(),
-        loop_ms: LOOP_ONCE,
-        ..DestinationTrack::default()
-    };
+    let track =
+        DestinationTrack { acc: Acc::Step, ..clipped_track(Some(SkinRect::new(0.0, 0.0, 100.0, 100.0)), Some(SkinRect::new(100.0, 0.0, 200.0, 100.0))) };
     assert_eq!(resolved(&track, 500).expect("it draws").clip, Some(SkinRect::new(0.0, 0.0, 100.0, 100.0)));
 }
 
 fn coloured_track(first: SkinColor, second: SkinColor) -> DestinationTrack {
-    let mut a = frame(0, 0.0, Acc::Linear);
-    let mut b = frame(SPAN_MS, TRAVEL, Acc::Linear);
+    let mut a = frame(0, 0.0);
+    let mut b = frame(SPAN_MS, TRAVEL);
     a.color = first;
     b.color = second;
     DestinationTrack { loop_ms: LOOP_ONCE, frames: vec![a, b], ..DestinationTrack::default() }
@@ -265,7 +262,7 @@ fn an_alpha_offset_applies_to_a_track_whose_colour_never_changes() {
     let shade = SkinColor::rgba(u8::MAX, u8::MAX, u8::MAX, 200);
     let state = FakeState::default().with_offset(OFFSET_ID, SkinOffset { a: -100.0, ..SkinOffset::default() });
     let track = DestinationTrack { offsets: vec![OFFSET_ID], ..coloured_track(shade, shade) };
-    let resolved = resolve(&track, 500, &TimerState::new(), &state).expect("it draws");
+    let resolved = resolve(&track, us(500), &TimerState::new(), &state).expect("it draws");
     assert_eq!(resolved.color, SkinColor::rgba(u8::MAX, u8::MAX, u8::MAX, 100));
 }
 
@@ -275,10 +272,10 @@ fn an_alpha_offset_is_dropped_while_a_changing_colour_interpolates() {
     let state = FakeState::default().with_offset(OFFSET_ID, SkinOffset { a: 50.0, ..SkinOffset::default() });
     let track = DestinationTrack { offsets: vec![OFFSET_ID], ..coloured_track(SkinColor::rgba(0, 0, 0, 0), SkinColor::rgba(100, 200, 40, 200)) };
 
-    let midway = resolve(&track, 500, &TimerState::new(), &state).expect("it draws");
+    let midway = resolve(&track, us(500), &TimerState::new(), &state).expect("it draws");
     assert_eq!(midway.color.a, 100, "the reference's interpolating path returns before it applies the offset");
 
-    let at_keyframe = resolve(&track, SPAN_MS, &TimerState::new(), &state).expect("it draws");
+    let at_keyframe = resolve(&track, us(SPAN_MS), &TimerState::new(), &state).expect("it draws");
     assert_eq!(at_keyframe.color.a, 250, "resting on a keyframe applies it");
 }
 
@@ -288,15 +285,15 @@ fn an_alpha_offset_clamps() {
     let shade = SkinColor::rgba(0, 0, 0, 200);
     let state = FakeState::default().with_offset(OFFSET_ID, SkinOffset { a: 500.0, ..SkinOffset::default() });
     let track = DestinationTrack { offsets: vec![OFFSET_ID], ..coloured_track(shade, shade) };
-    assert_eq!(resolve(&track, 0, &TimerState::new(), &state).expect("it draws").color.a, u8::MAX);
+    assert_eq!(resolve(&track, us(0), &TimerState::new(), &state).expect("it draws").color.a, u8::MAX);
 
     let state = FakeState::default().with_offset(OFFSET_ID, SkinOffset { a: -500.0, ..SkinOffset::default() });
-    assert_eq!(resolve(&track, 0, &TimerState::new(), &state).expect("it draws").color.a, 0);
+    assert_eq!(resolve(&track, us(0), &TimerState::new(), &state).expect("it draws").color.a, 0);
 }
 
 fn angled_track(first: f32, second: f32) -> DestinationTrack {
-    let mut a = frame(0, 0.0, Acc::Linear);
-    let mut b = frame(SPAN_MS, TRAVEL, Acc::Linear);
+    let mut a = frame(0, 0.0);
+    let mut b = frame(SPAN_MS, TRAVEL);
     a.angle_deg = first;
     b.angle_deg = second;
     DestinationTrack { loop_ms: LOOP_ONCE, frames: vec![a, b], ..DestinationTrack::default() }
@@ -314,19 +311,70 @@ fn each_angle_offset_truncates_on_its_own() {
     const SECOND: i32 = 2;
     let nudge = SkinOffset { r: 0.7, ..SkinOffset::default() };
     let state = FakeState::default().with_offset(FIRST, nudge).with_offset(SECOND, nudge);
-    let track = DestinationTrack { offsets: vec![FIRST, SECOND], ..angled_track(0.0, 90.0) };
-    let resolved = resolve(&track, 333, &TimerState::new(), &state).expect("it draws");
-    assert_eq!(resolved.angle_deg, 29.0, "two 0.7 degree nudges truncate separately and add nothing");
+    let track = DestinationTrack { offsets: vec![FIRST, SECOND], ..angled_track(0.0, -DOCUMENT_QUARTER_TURN) };
+    let resolved = resolve(&track, us(333), &TimerState::new(), &state).expect("it draws");
+    assert_eq!(resolved.angle_deg, -29.0, "the document's 29 takes 0.7 twice as `(int)(29 + 0.7)`, which adds nothing either time");
+
+    let track = DestinationTrack { offsets: vec![FIRST, SECOND], ..angled_track(0.0, DOCUMENT_QUARTER_TURN) };
+    let resolved = resolve(&track, us(333), &TimerState::new(), &state).expect("it draws");
+    assert_eq!(resolved.angle_deg, 27.0, "the document's -29 becomes `(int)(-29 + 0.7)` = -28 and then -27");
 }
 
 #[test]
-fn the_first_shaped_keyframe_sets_the_whole_track() {
-    let track = DestinationTrack {
-        frames: vec![frame(0, 0.0, Acc::Linear), frame(500, 500.0, Acc::Decelerate), frame(SPAN_MS, TRAVEL, Acc::Accelerate)],
-        ..DestinationTrack::default()
-    };
-    assert_eq!(track.effective_acc(), Acc::Decelerate);
-    assert_eq!(DestinationTrack::default().effective_acc(), Acc::Linear);
+fn a_positive_angle_offset_turns_the_way_a_positive_document_angle_does() {
+    const OFFSET_ID: i32 = 4;
+    const DOCUMENT_ANGLE: f32 = 30.0;
+    const NUDGE: f32 = 15.0;
+    let state = FakeState::default().with_offset(OFFSET_ID, SkinOffset { r: NUDGE, ..SkinOffset::default() });
+
+    let mut written = frame(0, 0.0);
+    written.angle_deg = -(DOCUMENT_ANGLE + NUDGE);
+    let written = DestinationTrack { frames: vec![written], ..DestinationTrack::default() };
+    let expected = resolved(&written, 0).expect("it draws").angle_deg;
+
+    let mut nudged = frame(0, 0.0);
+    nudged.angle_deg = -DOCUMENT_ANGLE;
+    let nudged = DestinationTrack { offsets: vec![OFFSET_ID], frames: vec![nudged], ..DestinationTrack::default() };
+    let resolved = resolve(&nudged, 0, &TimerState::new(), &state).expect("it draws");
+
+    assert_eq!(resolved.angle_deg, expected, "`angle: 30` nudged by `r: 15` is `angle: 45`, as `angle += off.r` has it");
+    assert_eq!(resolved.angle_deg, -45.0, "which is 45 degrees counter-clockwise, so a negative clockwise angle");
+}
+
+#[test]
+fn a_negative_angle_offset_turns_clockwise() {
+    const OFFSET_ID: i32 = 4;
+    let state = FakeState::default().with_offset(OFFSET_ID, SkinOffset { r: -10.0, ..SkinOffset::default() });
+    let track = DestinationTrack { offsets: vec![OFFSET_ID], frames: vec![frame(0, 0.0)], ..DestinationTrack::default() };
+    assert_eq!(resolve(&track, 0, &TimerState::new(), &state).expect("it draws").angle_deg, 10.0);
+}
+
+#[test]
+fn the_tracks_one_acceleration_shapes_every_keyframe_pair() {
+    let track =
+        DestinationTrack { acc: Acc::Accelerate, frames: vec![frame(0, 0.0), frame(500, 500.0), frame(SPAN_MS, TRAVEL)], ..DestinationTrack::default() };
+    assert_close(resolved(&track, 250).expect("it draws").rect.x, 125.0, "half way through the first pair is a quarter of its travel");
+    assert_close(resolved(&track, 750).expect("it draws").rect.x, 625.0, "and the second pair is shaped the same way");
+    assert_eq!(DestinationTrack::default().acc, Acc::Linear, "a track nobody shaped is linear");
+}
+
+#[test]
+fn the_clock_and_the_timer_are_truncated_to_milliseconds_separately() {
+    let track = DestinationTrack { timer: Some(TimerRef::Id(timer_id::PLAY)), ..travelling_track(Acc::Linear, LOOP_ONCE) };
+    let state = FakeState::default();
+    let mut timers = TimerState::new();
+
+    timers.set_on(timer_id::PLAY, 1_999);
+    let resolved = resolve(&track, 2_000, &timers, &state).expect("an on timer draws");
+    assert_close(resolved.rect.x, 1.0, "2000 us is millisecond 2 and 1999 us is millisecond 1, so one whole millisecond has passed");
+
+    timers.set_on(timer_id::PLAY, 1_000);
+    let resolved = resolve(&track, 1_999, &timers, &state).expect("an on timer draws");
+    assert_close(resolved.rect.x, 0.0, "999 us into the same millisecond is no time at all");
+
+    timers.set_on(timer_id::PLAY, us(5_000) + 999);
+    let resolved = resolve(&track, us(5_250), &timers, &state).expect("an on timer draws");
+    assert_close(resolved.rect.x, 250.0, "the timer's own microseconds are dropped before the subtraction");
 }
 
 #[test]
@@ -349,12 +397,12 @@ fn every_condition_must_hold_before_the_region_is_resolved() {
     track.offsets = vec![OFFSET_ID];
     track.draw_conditions = vec![DrawCondition::Option(SHOWN), DrawCondition::Option(SHOWN)];
 
-    let resolved = prepare(&track, 250, &TimerState::new(), &state, None, (0.0, 0.0), None).expect("both conditions hold");
+    let resolved = prepare(&track, us(250), &TimerState::new(), &state, None, (0.0, 0.0), None).expect("both conditions hold");
     assert_close(resolved.rect.x, 255.0, "the offset moved it");
     assert_eq!(state.offset_reads.get(), 1, "the region resolved once");
 
     track.draw_conditions = vec![DrawCondition::Option(SHOWN), DrawCondition::Option(HIDDEN)];
-    assert_eq!(prepare(&track, 250, &TimerState::new(), &state, None, (0.0, 0.0), None), None, "one false condition hides it");
+    assert_eq!(prepare(&track, us(250), &TimerState::new(), &state, None, (0.0, 0.0), None), None, "one false condition hides it");
     assert_eq!(state.offset_reads.get(), 1, "a hidden object never resolves its region");
 }
 
@@ -363,16 +411,16 @@ fn a_negative_option_id_reads_as_its_negation() {
     const OPTION: i32 = 21;
     let state = FakeState::default().with_option(OPTION, false);
     let track = DestinationTrack { draw_conditions: vec![DrawCondition::Option(-OPTION)], ..travelling_track(Acc::Linear, LOOP_ONCE) };
-    assert!(prepare(&track, 250, &TimerState::new(), &state, None, (0.0, 0.0), None).is_some(), "a false option draws under a negative id");
+    assert!(prepare(&track, us(250), &TimerState::new(), &state, None, (0.0, 0.0), None).is_some(), "a false option draws under a negative id");
 
     let state = FakeState::default().with_option(OPTION, true);
-    assert_eq!(prepare(&track, 250, &TimerState::new(), &state, None, (0.0, 0.0), None), None, "a true option hides it");
+    assert_eq!(prepare(&track, us(250), &TimerState::new(), &state, None, (0.0, 0.0), None), None, "a true option hides it");
 }
 
 #[test]
 fn a_track_without_conditions_always_draws() {
     let track = travelling_track(Acc::Linear, LOOP_ONCE);
-    assert!(prepare(&track, 250, &TimerState::new(), &FakeState::default(), None, (0.0, 0.0), None).is_some());
+    assert!(prepare(&track, us(250), &TimerState::new(), &FakeState::default(), None, (0.0, 0.0), None).is_some());
 }
 
 #[test]
@@ -405,19 +453,19 @@ fn a_lua_condition_follows_its_evaluator() {
     let state = FakeState::default();
 
     let lua = FakeLua::default().with(expr, Some(true));
-    assert!(prepare(&track, 250, &TimerState::new(), &state, Some(&lua), (0.0, 0.0), None).is_some());
+    assert!(prepare(&track, us(250), &TimerState::new(), &state, Some(&lua), (0.0, 0.0), None).is_some());
 
     let lua = FakeLua::default().with(expr, Some(false));
-    assert_eq!(prepare(&track, 250, &TimerState::new(), &state, Some(&lua), (0.0, 0.0), None), None);
+    assert_eq!(prepare(&track, us(250), &TimerState::new(), &state, Some(&lua), (0.0, 0.0), None), None);
 
     let lua = FakeLua::default().with(expr, None);
-    assert_eq!(prepare(&track, 250, &TimerState::new(), &state, Some(&lua), (0.0, 0.0), None), None, "a raising expression hides its object");
+    assert_eq!(prepare(&track, us(250), &TimerState::new(), &state, Some(&lua), (0.0, 0.0), None), None, "a raising expression hides its object");
 }
 
 #[test]
 fn a_lua_condition_without_an_evaluator_hides_its_object() {
     let track = DestinationTrack { draw_conditions: vec![DrawCondition::Lua(LuaExprId(1))], ..travelling_track(Acc::Linear, LOOP_ONCE) };
-    assert_eq!(prepare(&track, 250, &TimerState::new(), &FakeState::default(), None, (0.0, 0.0), None), None);
+    assert_eq!(prepare(&track, us(250), &TimerState::new(), &FakeState::default(), None, (0.0, 0.0), None), None);
 }
 
 #[test]
@@ -433,7 +481,7 @@ fn a_warning_latch_fires_once() {
 fn the_screen_offset_moves_the_region_and_its_clip() {
     let clip = SkinRect::new(10.0, 20.0, 30.0, 40.0);
     let track = clipped_track(Some(clip), Some(clip));
-    let resolved = prepare(&track, 500, &TimerState::new(), &FakeState::default(), None, (7.0, -3.0), None).expect("it draws");
+    let resolved = prepare(&track, us(500), &TimerState::new(), &FakeState::default(), None, (7.0, -3.0), None).expect("it draws");
     assert_close(resolved.rect.x, 507.0, "region x");
     assert_close(resolved.rect.y, -3.0, "region y");
     assert_eq!(resolved.clip, Some(SkinRect::new(17.0, 17.0, 30.0, 40.0)));
@@ -445,24 +493,24 @@ fn a_pointer_rectangle_gates_on_the_moved_region() {
     track.mouse_rect = Some(MouseRect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 });
     let state = FakeState::default();
     let timers = TimerState::new();
-    let inside = prepare(&track, 250, &timers, &state, None, (0.0, 0.0), Some((300.0, 50.0)));
+    let inside = prepare(&track, us(250), &timers, &state, None, (0.0, 0.0), Some((300.0, 50.0)));
     assert!(inside.is_some(), "the pointer sits 50 px into a region that starts at 250");
 
-    assert_eq!(prepare(&track, 250, &timers, &state, None, (0.0, 0.0), Some((240.0, 50.0))), None, "left of the region");
-    assert_eq!(prepare(&track, 250, &timers, &state, None, (0.0, 0.0), Some((300.0, 151.0))), None, "below the region");
-    assert!(prepare(&track, 250, &timers, &state, None, (0.0, 0.0), Some((250.0, 0.0))).is_some(), "the near edge counts as inside");
-    assert!(prepare(&track, 250, &timers, &state, None, (0.0, 0.0), Some((350.0, 100.0))).is_some(), "the far edge counts as inside");
-    assert_eq!(prepare(&track, 250, &timers, &state, None, (0.0, 0.0), None), None, "no pointer means no draw");
+    assert_eq!(prepare(&track, us(250), &timers, &state, None, (0.0, 0.0), Some((240.0, 50.0))), None, "left of the region");
+    assert_eq!(prepare(&track, us(250), &timers, &state, None, (0.0, 0.0), Some((300.0, 151.0))), None, "below the region");
+    assert!(prepare(&track, us(250), &timers, &state, None, (0.0, 0.0), Some((250.0, 0.0))).is_some(), "the near edge counts as inside");
+    assert!(prepare(&track, us(250), &timers, &state, None, (0.0, 0.0), Some((350.0, 100.0))).is_some(), "the far edge counts as inside");
+    assert_eq!(prepare(&track, us(250), &timers, &state, None, (0.0, 0.0), None), None, "no pointer means no draw");
 }
 
 #[test]
 fn a_pointer_rectangle_follows_the_screen_offset() {
     let mut track = travelling_track(Acc::Linear, LOOP_ONCE);
     track.mouse_rect = Some(MouseRect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 });
-    let moved = prepare(&track, 250, &TimerState::new(), &FakeState::default(), None, (400.0, 0.0), Some((700.0, 50.0)));
+    let moved = prepare(&track, us(250), &TimerState::new(), &FakeState::default(), None, (400.0, 0.0), Some((700.0, 50.0)));
     assert!(moved.is_some(), "the region moved to 650, so 700 is inside it");
     assert_eq!(
-        prepare(&track, 250, &TimerState::new(), &FakeState::default(), None, (400.0, 0.0), Some((300.0, 50.0))),
+        prepare(&track, us(250), &TimerState::new(), &FakeState::default(), None, (400.0, 0.0), Some((300.0, 50.0))),
         None,
         "where it used to be is now outside"
     );
@@ -472,9 +520,12 @@ fn a_pointer_rectangle_follows_the_screen_offset() {
 fn an_off_timer_hides_an_object_whose_conditions_hold() {
     const SHOWN: i32 = 5;
     let state = FakeState::default().with_option(SHOWN, true);
-    let track =
-        DestinationTrack { timer: Some(timer_id::FADEOUT), draw_conditions: vec![DrawCondition::Option(SHOWN)], ..travelling_track(Acc::Linear, LOOP_ONCE) };
-    assert_eq!(prepare(&track, 250, &TimerState::new(), &state, None, (0.0, 0.0), None), None);
+    let track = DestinationTrack {
+        timer: Some(TimerRef::Id(timer_id::FADEOUT)),
+        draw_conditions: vec![DrawCondition::Option(SHOWN)],
+        ..travelling_track(Acc::Linear, LOOP_ONCE)
+    };
+    assert_eq!(prepare(&track, us(250), &TimerState::new(), &state, None, (0.0, 0.0), None), None);
 }
 
 #[test]
@@ -482,12 +533,10 @@ fn a_step_track_holds_its_colour_and_drops_the_alpha_offset() {
     const OFFSET_ID: i32 = 2;
     let state = FakeState::default().with_offset(OFFSET_ID, SkinOffset { a: 50.0, ..SkinOffset::default() });
     let mut track = coloured_track(SkinColor::rgba(0, 0, 0, 10), SkinColor::rgba(100, 200, 40, 200));
-    for frame in &mut track.frames {
-        frame.acc = Acc::Step;
-    }
+    track.acc = Acc::Step;
     track.offsets = vec![OFFSET_ID];
 
-    let midway = resolve(&track, 500, &TimerState::new(), &state).expect("it draws");
+    let midway = resolve(&track, us(500), &TimerState::new(), &state).expect("it draws");
     assert_eq!(midway.color, SkinColor::rgba(0, 0, 0, 10), "a step track holds the keyframe it is on");
     assert_eq!(midway.rect.x, 0.0, "and holds its region with it");
 }
@@ -497,12 +546,10 @@ fn a_step_track_applies_the_alpha_offset_while_it_rests_on_a_keyframe() {
     const OFFSET_ID: i32 = 2;
     let state = FakeState::default().with_offset(OFFSET_ID, SkinOffset { a: 50.0, ..SkinOffset::default() });
     let mut track = coloured_track(SkinColor::rgba(0, 0, 0, 10), SkinColor::rgba(100, 200, 40, 200));
-    for frame in &mut track.frames {
-        frame.acc = Acc::Step;
-    }
+    track.acc = Acc::Step;
     track.offsets = vec![OFFSET_ID];
 
-    let at_end = resolve(&track, SPAN_MS, &TimerState::new(), &state).expect("it draws");
+    let at_end = resolve(&track, us(SPAN_MS), &TimerState::new(), &state).expect("it draws");
     assert_eq!(at_end.color.a, 250);
 }
 

@@ -14,7 +14,8 @@ use std::sync::mpsc::TryRecvError;
 use crate::ir_ext::PrimaryProfileDirection;
 use crate::ir_ranking_view::{PanelAction, PanelLine, offline_lines, panel_action, panel_lines, profile_line};
 use crate::ir_replay::from_ir_replay;
-use crate::stage::{Canvas, FoldersState, FrameCtx, KeyInput, LoadingState, SettingsState, Stage, StageHandler, TablesState, Transition};
+use crate::keyconfig::{SCRATCH_BACKWARD_INDEX, SCRATCH_FORWARD_INDEX, key_index_of};
+use crate::stage::{Canvas, FoldersState, FrameCtx, KeyInput, LoadingState, SettingsState, Stage, StageHandler, TablesState, Transition, is_left_press};
 use crate::*;
 
 mod filter;
@@ -35,6 +36,30 @@ const SEARCH_CARET: &str = "_";
 /// under the caret instead of hiding the end being edited. The renderer trims to the exact pixel
 /// width on top of this; this only decides which stretch of the query it is handed.
 const SEARCH_VISIBLE_CHARS: usize = 24;
+
+/// The key indices that open the focused row (play a chart, enter a folder): the white keys, 1 3 5
+/// and 7. In the reference implementation these are `PLAY`, `PRACTICE`, `AUTO` and `REPLAY` on a
+/// chart and `FOLDER_OPEN` on a folder; until the browser grows those, they all open the row
+/// (`MusicSelectKeyProperty.java:8-18`, `b4-screens.md` section 3.5).
+const OPEN_KEY_INDICES: [usize; 4] = [0, 2, 4, 6];
+
+/// The key indices that go up one folder: the black keys 2 and 4 (`FOLDER_CLOSE`). Key 6 is
+/// `NEXT_REPLAY`, which belongs to the replay slots and is left alone here.
+const CLOSE_KEY_INDICES: [usize; 2] = [1, 3];
+
+/// How long a turntable direction is held before the list starts to repeat, and how often it moves
+/// after that (`scrolldurationlow` and `scrolldurationhigh` in `Config.java`, which
+/// `BarRenderer.input` applies to a held scratch).
+const SCRATCH_REPEAT_DELAY: Duration = Duration::from_millis(300);
+const SCRATCH_REPEAT_INTERVAL: Duration = Duration::from_millis(50);
+
+/// A turntable direction that is being held, so the list keeps moving while it is.
+#[derive(Clone, Copy)]
+struct ScratchHold {
+    /// [`SCRATCH_FORWARD_INDEX`] or [`SCRATCH_BACKWARD_INDEX`].
+    index: usize,
+    next_step_at: Instant,
+}
 
 /// The browser's own state: the record modal, the quit confirmation, the ranking panel, the
 /// lazily computed detail of the focused chart, the assembled scene cache and the hover preview.
@@ -79,6 +104,8 @@ pub(crate) struct SelectState {
     tab: SelectTab,
     /// The course list, resolved against the library it was built for.
     courses: CourseList,
+    /// The turntable direction a controller is holding, which repeats the list move.
+    scratch_hold: Option<ScratchHold>,
 }
 
 impl Default for SelectState {
@@ -104,6 +131,7 @@ impl Default for SelectState {
             preview: PreviewState::default(),
             tab: SelectTab::default(),
             courses: CourseList::default(),
+            scratch_hold: None,
         }
     }
 }
@@ -126,6 +154,57 @@ impl SelectState {
             SelectTab::Courses => self.courses.cursor().wrapping_add(self.courses.len()),
         };
         (shared.select_gen, cursor, self.record_modal, shared.scores.records().len(), shared.config.display.score_graph, self.esc_quit_armed(), self.tab)
+    }
+
+    /// Move the focused row one step down the list (`forward`) or up it, on whichever tab is up.
+    /// The song list stops at its ends; the course list wraps.
+    fn step_cursor(&mut self, shared: &mut AppShared, forward: bool) {
+        if self.tab == SelectTab::Courses {
+            self.courses.move_cursor(if forward { 1 } else { -1 });
+            return;
+        }
+        if forward {
+            if shared.sel + 1 < shared.select_items.len() {
+                shared.sel += 1;
+            }
+        } else {
+            shared.sel = shared.sel.saturating_sub(1);
+        }
+        shared.print_selection();
+    }
+
+    /// Whether the list may be moved with the keys of a controller right now: nothing is being
+    /// typed into or read over it, and neither START nor SELECT is held, because with one of them
+    /// down the same keys belong to the option panels.
+    fn takes_pad_keys(&self, ctx: &FrameCtx<'_>) -> bool {
+        !(self.holds_keys(ctx) || self.ranking_open || ctx.shared.options.is_open() || ctx.shared.start_pressed() || ctx.shared.select_pressed())
+    }
+
+    /// Go up one folder from a controller. Unlike Esc this never quits: at the root, and on the
+    /// course tab, there is no folder to leave.
+    fn close_folder(&mut self, shared: &mut AppShared) -> Transition {
+        if self.tab != SelectTab::Songs || shared.select_view == SelectView::Root {
+            return Transition::Stay;
+        }
+        self.select_back(shared)
+    }
+
+    /// Keep the list moving while a turntable direction stays down: one step per
+    /// [`SCRATCH_REPEAT_INTERVAL`] once it has been held for [`SCRATCH_REPEAT_DELAY`]. The hold is
+    /// dropped the moment the key is up or the list stops taking controller keys.
+    fn repeat_scratch(&mut self, ctx: &mut FrameCtx<'_>) {
+        let Some(hold) = self.scratch_hold else {
+            return;
+        };
+        if !self.takes_pad_keys(ctx) || !ctx.shared.key_index_pressed(hold.index) {
+            self.scratch_hold = None;
+            return;
+        }
+        if ctx.now < hold.next_step_at {
+            return;
+        }
+        self.step_cursor(ctx.shared, hold.index == SCRATCH_FORWARD_INDEX);
+        self.scratch_hold = Some(ScratchHold { next_step_at: ctx.now + SCRATCH_REPEAT_INTERVAL, ..hold });
     }
 
     /// Enter the focused select item: descend into a folder, or start a chart.
@@ -645,6 +724,7 @@ impl StageHandler for SelectState {
         if !matches!(started, Transition::Stay) {
             return started;
         }
+        self.repeat_scratch(ctx);
         if self.applied != Some((ctx.shared.select_gen, self.filter.filter(&ctx.shared.config), ctx.shared.config.library.sort)) {
             self.rebuild(ctx.shared);
         }
@@ -714,19 +794,38 @@ impl StageHandler for SelectState {
             KeyCode::KeyT => return Transition::Open(Stage::Tables(TablesState::new())),
             KeyCode::KeyR => self.open_record_modal(ctx.shared),
             KeyCode::KeyI => self.toggle_ranking_panel(ctx.shared),
-            KeyCode::ArrowUp if self.tab == SelectTab::Courses => self.courses.move_cursor(-1),
-            KeyCode::ArrowDown if self.tab == SelectTab::Courses => self.courses.move_cursor(1),
-            KeyCode::ArrowUp => {
-                ctx.shared.sel = ctx.shared.sel.saturating_sub(1);
-                ctx.shared.print_selection();
-            }
-            KeyCode::ArrowDown => {
-                if ctx.shared.sel + 1 < ctx.shared.select_items.len() {
-                    ctx.shared.sel += 1;
-                }
-                ctx.shared.print_selection();
-            }
+            KeyCode::ArrowUp => self.step_cursor(ctx.shared, false),
+            KeyCode::ArrowDown => self.step_cursor(ctx.shared, true),
             KeyCode::Enter | KeyCode::NumpadEnter | KeyCode::ArrowRight => return self.select_enter(ctx.shared),
+            _ => {}
+        }
+        Transition::Stay
+    }
+
+    /// A controller on the browser, with the panels closed: the turntable moves down and up the
+    /// list, a white key opens the focused row and a black key goes up a folder — the first rows
+    /// of the reference implementation's select key table (`b4-screens.md` section 3.5).
+    ///
+    /// Only a lane going down counts. The key is named by its index in the mode that is up
+    /// ([`key_index_of`]), so the second side of a double-play layout does the same as the first.
+    fn handle_pad(&mut self, ctx: &mut FrameCtx<'_>, event: PadEvent) -> Transition {
+        let PadEvent::Lane { lane, dir, press: true } = event else {
+            return Transition::Stay;
+        };
+        let Some(index) = key_index_of(ctx.shared.mode, lane, dir) else {
+            return Transition::Stay;
+        };
+        if !self.takes_pad_keys(ctx) {
+            return Transition::Stay;
+        }
+        self.esc_quit_at = None;
+        match index {
+            SCRATCH_FORWARD_INDEX | SCRATCH_BACKWARD_INDEX => {
+                self.step_cursor(ctx.shared, index == SCRATCH_FORWARD_INDEX);
+                self.scratch_hold = Some(ScratchHold { index, next_step_at: ctx.now + SCRATCH_REPEAT_DELAY });
+            }
+            _ if OPEN_KEY_INDICES.contains(&index) => return self.select_enter(ctx.shared),
+            _ if CLOSE_KEY_INDICES.contains(&index) => return self.close_folder(ctx.shared),
             _ => {}
         }
         Transition::Stay
@@ -734,7 +833,10 @@ impl StageHandler for SelectState {
 
     /// Clicks on the browser. The bottom navigation buttons are the clickable equivalents of the
     /// keyboard shortcuts, and a click that misses every region closes an open modal.
-    fn handle_mouse(&mut self, ctx: &mut FrameCtx<'_>, at: (f32, f32)) -> Transition {
+    fn handle_mouse(&mut self, ctx: &mut FrameCtx<'_>, at: (f32, f32), button: MouseButton, pressed: bool) -> Transition {
+        if !is_left_press(button, pressed) {
+            return Transition::Stay;
+        }
         match ctx.shared.hit_test(at) {
             Some(Hot::SelectRow(idx)) if self.tab == SelectTab::Courses => {
                 if self.courses.cursor() == idx {
@@ -794,9 +896,9 @@ impl StageHandler for SelectState {
             }
             _ => canvas.clear_bga(),
         }
-        let now_ms = ctx.shared.skin_now_ms();
+        let now_us = ctx.shared.skin_now_us();
         let row = ctx.shared.sel;
-        ctx.shared.skin_select_timers.update(&mut ctx.shared.skin_timers, row, now_ms);
+        ctx.shared.skin_select_timers.update(&mut ctx.shared.skin_timers, row, now_us);
         if ctx.shared.draw_select_skin(canvas, view, document_background) {
             return;
         }

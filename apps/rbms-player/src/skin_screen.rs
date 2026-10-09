@@ -15,24 +15,27 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use rbms_config::SkinCustomisation;
 use rbms_render::font::with_text_context;
 use rbms_render::result::{ResultExtras, ResultView};
 use rbms_render::skin_render::state::{DecideChart, DecideViewState, KeyConfigViewState, PlayViewState, ResultViewState, SelectViewState};
 use rbms_render::{
-    Color, FrameExtra, Renderer, SelectListState, SkinAssets, SkinDraw, SkinExprEval, SkinImage, SkinScreen, TextContext, TextureId, render_decide_screen,
-    render_keyconfig_screen, render_play_screen, render_result_screen, render_select_screen, with_render_ctx,
+    Color, FrameExtra, PlayTimers, Renderer, ResultTimers, SelectListState, SelectTimers, SkinAssets, SkinDraw, SkinExprEval, SkinImage, SkinScreen,
+    TextContext, TextureId, render_decide_screen, render_keyconfig_screen, render_play_screen, render_result_screen, render_select_screen, with_render_ctx,
 };
 use rbms_skin::dst::{LuaDrawEval, LuaExprId, OffsetSource, SkinOffset};
 use rbms_skin::loader::{LoadedSkin, SKIN_TYPE_DECIDE, SKIN_TYPE_KEY_CONFIG, SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_RESULT};
 use rbms_skin::lua::{LuaFrame, LuaSandbox};
 use rbms_skin::property::SkinStateSource;
+use rbms_skin::timer::TimerState;
 
 use crate::assets::{DecodePool, SkinAsset, SkinAssetJob, SkinAssetKind, spawn_skin_asset_decode};
 use crate::notify::{Level, notify};
 use crate::skin_select::SkinLibrary;
 use crate::stage::Canvas;
+use crate::stage::canvas::UI_SIZE;
 use crate::{AppShared, SelectScene};
 
 /// Hands one document's already-decoded files to [`SkinScreen::build`], and compiles the
@@ -301,6 +304,10 @@ impl SkinScreens {
 
 /// Where the pointer is in a document's own coordinates: scaled onto the size it was authored at,
 /// and measured up from the bottom the way a document measures everything.
+///
+/// `cursor` is a position in a `screen`-sized space laid over the viewport the frame lands in. Only
+/// the share of that space it has crossed matters, so the answer is the same whichever space the
+/// position was measured in, and however many pixels the document is drawn on.
 fn document_cursor(cursor: (f32, f32), screen: (u32, u32), authored: (f32, f32)) -> Option<(f32, f32)> {
     let (screen_w, screen_h) = (screen.0 as f32, screen.1 as f32);
     if screen_w <= 0.0 || screen_h <= 0.0 {
@@ -310,10 +317,69 @@ fn document_cursor(cursor: (f32, f32), screen: (u32, u32), authored: (f32, f32))
     Some((cursor.0 / screen_w * authored_w, authored_h - cursor.1 / screen_h * authored_h))
 }
 
+/// Everything a scene's skin remembers from one frame to the next: which timers are on and since
+/// when, what each screen's timer driver last saw, and how long the scene had been running.
+///
+/// A scene is one stay on one screen. Opening another screen over it parks this value with the
+/// screen, and going back puts it back, so the scene carries on from where it was left rather than
+/// starting over.
+pub(crate) struct SkinScene {
+    timers: TimerState,
+    play: PlayTimers,
+    select: SelectTimers,
+    result: ResultTimers,
+    elapsed: Duration,
+}
+
 impl AppShared {
-    /// The clock every document is animated against, shared by its timers and its `skin.time()`.
-    pub(crate) fn skin_now_ms(&self) -> i64 {
-        self.clock.elapsed().as_millis() as i64
+    /// The clock every document is animated against, in microseconds since the scene began, shared
+    /// by its timers and its `skin.time()`. It is not the song clock: a run starting does not move it.
+    pub(crate) fn skin_now_us(&self) -> i64 {
+        self.scene_started.elapsed().as_micros() as i64
+    }
+
+    /// Start a scene: every timer off, every timer driver forgetting what it saw, and the scene
+    /// clock back at zero (`TimerManager.setMainState`).
+    pub(crate) fn begin_skin_scene(&mut self) {
+        self.skin_timers.clear();
+        self.skin_play_timers = PlayTimers::new();
+        self.skin_select_timers = SelectTimers::new();
+        self.skin_result_timers = ResultTimers::new();
+        self.scene_started = Instant::now();
+    }
+
+    /// Take the running scene out to be parked, and begin a fresh one for the screen about to be
+    /// opened over it.
+    pub(crate) fn suspend_skin_scene(&mut self) -> SkinScene {
+        let elapsed = self.scene_started.elapsed();
+        let scene = SkinScene {
+            timers: std::mem::take(&mut self.skin_timers),
+            play: self.skin_play_timers,
+            select: self.skin_select_timers,
+            result: self.skin_result_timers,
+            elapsed,
+        };
+        self.begin_skin_scene();
+        scene
+    }
+
+    /// Put a parked scene back. The clock picks up at the moment it was parked, because it stood
+    /// still for as long as the screen opened over it was up.
+    pub(crate) fn resume_skin_scene(&mut self, scene: SkinScene) {
+        let SkinScene { timers, play, select, result, elapsed } = scene;
+        self.skin_timers = timers;
+        self.skin_play_timers = play;
+        self.skin_select_timers = select;
+        self.skin_result_timers = result;
+        let now = Instant::now();
+        self.scene_started = now.checked_sub(elapsed).unwrap_or(now);
+    }
+
+    /// Make the running scene look as old as `by` more, for the tests that need a clock with
+    /// something on it.
+    #[cfg(test)]
+    pub(crate) fn age_skin_scene(&mut self, by: Duration) {
+        self.scene_started = self.scene_started.checked_sub(by).expect("the process has been up for longer than the age asked for");
     }
 
     /// Read and compile the document one screen is drawn with, so the gate below has something to
@@ -367,9 +433,11 @@ impl AppShared {
     ///
     /// The nudges travel in `inputs` rather than being read here because they are borrowed from the
     /// configuration and handed on as a trait object: the caller holds them for the whole frame.
+    ///
+    /// The pointer is kept in the [`UI_SIZE`] space the window's events are mapped onto, which is
+    /// the space it is read back out of here.
     fn skin_frame<'a>(
         &'a self,
-        canvas: &Canvas<'_>,
         screen: i32,
         state: &'a dyn SkinStateSource,
         lua: &'a mut Option<SkinSandboxFrame<'a>>,
@@ -383,9 +451,9 @@ impl AppShared {
         Some(SkinDraw {
             screen: compiled,
             timers: &self.skin_timers,
-            now_ms: state.now_ms(),
+            now_us: state.now_us(),
             lua: lua.as_ref().map(|frame| frame as &dyn SkinExprEval),
-            mouse: document_cursor(self.cursor, canvas.size(), compiled.authored_size()),
+            mouse: document_cursor(self.cursor, UI_SIZE, compiled.authored_size()),
             background: inputs.background,
             offsets: Some(inputs.offsets as &dyn OffsetSource),
             extra: inputs.extra,
@@ -399,6 +467,10 @@ impl AppShared {
     }
 
     /// Draw the play screen's document. `true` when it drew, and the built-in field stands aside.
+    ///
+    /// The one document still drawn on the [`UI_SIZE`] screen rather than on the target's own
+    /// pixels: its note field and covers take their rows from the built-in field's geometry, which
+    /// is measured in that space, so the rest of the document has to be laid out in it too.
     pub(crate) fn draw_play_skin(
         &self,
         canvas: &mut Canvas<'_>,
@@ -409,7 +481,7 @@ impl AppShared {
     ) -> bool {
         let offsets = self.skin_offsets(screen);
         let mut lua = None;
-        let Some(document) = self.skin_frame(canvas, screen, state, &mut lua, FrameInputs { background, offsets: &offsets, extra }) else {
+        let Some(document) = self.skin_frame(screen, state, &mut lua, FrameInputs { background, offsets: &offsets, extra }) else {
             return false;
         };
         canvas.clear(Color::BLACK);
@@ -418,58 +490,65 @@ impl AppShared {
 
     /// Draw the song browser's document, with the browser's rows joined on so a document draws its
     /// wheel without the stage assembling it.
+    ///
+    /// This and the screens below it draw on the target's own pixels ([`Canvas::native`]), so a
+    /// document's rectangles are scaled once, from the size it was authored at straight onto the
+    /// viewport, and whatever it compares with an image's own size is compared in real pixels.
     pub(crate) fn draw_select_skin(&self, canvas: &mut Canvas<'_>, view: &SelectScene, background: Option<TextureId>) -> bool {
         let offsets = self.skin_offsets(SKIN_TYPE_MUSIC_SELECT);
         let options_open = self.options.is_open();
         let own = select_list(view, options_open);
-        let state = SelectViewState::new(view, self.skin_now_ms(), Some(&offsets), options_open);
+        let state = SelectViewState::new(view, self.skin_now_us(), Some(&offsets), options_open);
         let mut lua = None;
         let inputs = FrameInputs { background, offsets: &offsets, extra: FrameExtra::Select(&own) };
-        let Some(document) = self.skin_frame(canvas, SKIN_TYPE_MUSIC_SELECT, &state, &mut lua, inputs) else {
+        let Some(document) = self.skin_frame(SKIN_TYPE_MUSIC_SELECT, &state, &mut lua, inputs) else {
             return false;
         };
-        canvas.clear(Color::BLACK);
-        with_render_ctx(|ctx| render_select_screen(ctx, canvas, Some(&document), view))
+        let mut target = canvas.native();
+        target.clear(Color::BLACK);
+        with_render_ctx(|ctx| render_select_screen(ctx, &mut target, Some(&document), view))
     }
 
     /// Draw the score screen's document.
     pub(crate) fn draw_result_skin(&self, canvas: &mut Canvas<'_>, view: &ResultView, extras: &ResultExtras, cleared: bool, extra: FrameExtra<'_>) -> bool {
         let offsets = self.skin_offsets(SKIN_TYPE_RESULT);
-        let state = ResultViewState::new(view, extras.target.as_ref(), cleared, self.skin_now_ms(), Some(&offsets));
+        let state = ResultViewState::new(view, extras.target.as_ref(), cleared, self.skin_now_us(), Some(&offsets));
         let mut lua = None;
-        let Some(document) = self.skin_frame(canvas, SKIN_TYPE_RESULT, &state, &mut lua, FrameInputs { background: None, offsets: &offsets, extra }) else {
+        let Some(document) = self.skin_frame(SKIN_TYPE_RESULT, &state, &mut lua, FrameInputs { background: None, offsets: &offsets, extra }) else {
             return false;
         };
-        canvas.clear(Color::BLACK);
-        with_render_ctx(|ctx| render_result_screen(ctx, canvas, Some(&document), view, extras.target.as_ref(), cleared))
+        let mut target = canvas.native();
+        target.clear(Color::BLACK);
+        with_render_ctx(|ctx| render_result_screen(ctx, &mut target, Some(&document), view, extras.target.as_ref(), cleared))
     }
 
     /// Draw the loading screen's document, which stands in for the reference's decide screen.
     pub(crate) fn draw_decide_skin(&self, canvas: &mut Canvas<'_>, progress: f32, done: bool, title: &str, chart: DecideChart<'_>) -> bool {
         let offsets = self.skin_offsets(SKIN_TYPE_DECIDE);
-        let state = DecideViewState { progress, done, title, chart, now_ms: self.skin_now_ms(), offsets: Some(&offsets) };
+        let state = DecideViewState { progress, done, title, chart, now_us: self.skin_now_us(), offsets: Some(&offsets) };
         let mut lua = None;
-        let Some(document) =
-            self.skin_frame(canvas, SKIN_TYPE_DECIDE, &state, &mut lua, FrameInputs { background: None, offsets: &offsets, extra: FrameExtra::None })
+        let Some(document) = self.skin_frame(SKIN_TYPE_DECIDE, &state, &mut lua, FrameInputs { background: None, offsets: &offsets, extra: FrameExtra::None })
         else {
             return false;
         };
-        canvas.clear(Color::BLACK);
-        with_render_ctx(|ctx| render_decide_screen(ctx, canvas, Some(&document), &state))
+        let mut target = canvas.native();
+        target.clear(Color::BLACK);
+        with_render_ctx(|ctx| render_decide_screen(ctx, &mut target, Some(&document), &state))
     }
 
     /// Draw the key configuration screen's document.
     pub(crate) fn draw_keyconfig_skin(&self, canvas: &mut Canvas<'_>, keys: &[String]) -> bool {
         let offsets = self.skin_offsets(SKIN_TYPE_KEY_CONFIG);
-        let state = KeyConfigViewState { keys, now_ms: self.skin_now_ms(), offsets: Some(&offsets) };
+        let state = KeyConfigViewState { keys, now_us: self.skin_now_us(), offsets: Some(&offsets) };
         let mut lua = None;
         let Some(document) =
-            self.skin_frame(canvas, SKIN_TYPE_KEY_CONFIG, &state, &mut lua, FrameInputs { background: None, offsets: &offsets, extra: FrameExtra::None })
+            self.skin_frame(SKIN_TYPE_KEY_CONFIG, &state, &mut lua, FrameInputs { background: None, offsets: &offsets, extra: FrameExtra::None })
         else {
             return false;
         };
-        canvas.clear(Color::BLACK);
-        with_render_ctx(|ctx| render_keyconfig_screen(ctx, canvas, Some(&document), keys))
+        let mut target = canvas.native();
+        target.clear(Color::BLACK);
+        with_render_ctx(|ctx| render_keyconfig_screen(ctx, &mut target, Some(&document), keys))
     }
 }
 

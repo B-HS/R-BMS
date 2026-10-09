@@ -10,11 +10,11 @@
 
 use std::borrow::Cow;
 
-use rbms_skin::dst::{DestinationTrack, LuaExprId};
+use rbms_skin::dst::{DestinationTrack, LuaExprId, SkinRect};
 use rbms_skin::loader::{LoadedSkin, StretchKind};
 use rbms_skin::model::{FloatValueDef, GraphDef, ImageDef, PropertyRef, SliderDef, TextDef, ValueDef};
 use rbms_skin::property::SkinStateSource;
-use rbms_skin::timer::TimerId;
+use rbms_skin::timer::{MICROS_PER_MILLI, TIMER_OFF, TimerId, TimerState};
 
 use super::{SkinAssets, SkinExprEval, covers, gauge, graphs, judge, notes, songlist};
 use crate::{TextureId, UvRect};
@@ -172,25 +172,41 @@ impl Sprite {
         (self.cell.0 as f32, self.cell.1 as f32)
     }
 
-    /// Where cell `index` sits in the texture, as normalised coordinates.
-    pub(crate) fn uv(&self, index: u32) -> UvRect {
+    /// Where cell `index` sits in the texture, in pixels: the region a stretch mode measures against
+    /// and, for the trimming modes, cuts down.
+    pub(crate) fn region(&self, index: u32) -> SkinRect {
         let index = index.min(self.cells().saturating_sub(1));
         let (column, row) = (index % self.columns, index / self.columns);
-        UvRect::from_pixels(self.origin.0 + column * self.cell.0, self.origin.1 + row * self.cell.1, self.cell.0, self.cell.1, self.size.0, self.size.1)
+        SkinRect::new((self.origin.0 + column * self.cell.0) as f32, (self.origin.1 + row * self.cell.1) as f32, self.cell.0 as f32, self.cell.1 as f32)
+    }
+
+    /// A pixel region of this sprite's texture as normalised coordinates.
+    pub(crate) fn region_uv(&self, region: SkinRect) -> UvRect {
+        let (width, height) = (self.size.0.max(1) as f32, self.size.1.max(1) as f32);
+        UvRect::new(region.x / width, region.y / height, (region.x + region.w) / width, (region.y + region.h) / height)
+    }
+
+    /// Where cell `index` sits in the texture, as normalised coordinates.
+    pub(crate) fn uv(&self, index: u32) -> UvRect {
+        self.region_uv(self.region(index))
     }
 
     /// Which of `count` cells the animation is on, following `SkinSourceImage.getImageIndex`: a
     /// cycle of zero, a timer that is off, and a moment before the timer started all hold cell zero.
-    pub(crate) fn animation_index(&self, count: u32, now_ms: i64, timers: &rbms_skin::timer::TimerState) -> u32 {
+    ///
+    /// `now_us` is the frame clock in microseconds. The cycle is in milliseconds, and the clock and
+    /// the timer are each truncated to one before they are subtracted, as `TimerProperty.get` has it.
+    pub(crate) fn animation_index(&self, count: u32, now_us: i64, timers: &TimerState) -> u32 {
         if self.cycle <= 0 || count == 0 {
             return 0;
         }
-        let mut time = now_ms;
+        let mut time = now_us / MICROS_PER_MILLI;
         if let Some(timer) = self.timer {
-            let Some(started) = timers.get(timer) else {
+            let started_us = timers.value_us(timer);
+            if started_us == TIMER_OFF {
                 return 0;
-            };
-            time -= started;
+            }
+            time -= started_us / MICROS_PER_MILLI;
         }
         if time < 0 {
             return 0;
@@ -540,14 +556,10 @@ pub(crate) fn build_objects(
 ) -> Vec<SkinObject> {
     let mut objects = Vec::with_capacity(skin.destinations.len());
     for named in &skin.destinations {
-        let stretch = StretchKind::from_id(named.track.stretch);
-        if !stretch.is_supported() {
-            warnings.push(format!("object {:?} asks for stretch {:?}, which is drawn stretched instead", named.id, stretch));
-        }
         let Some(body) = build_body(skin, &named.id, sources, families, assets, warnings) else {
             continue;
         };
-        objects.push(SkinObject { track: named.track.clone(), stretch, body });
+        objects.push(SkinObject { track: named.track.clone(), stretch: StretchKind::from_id(named.track.stretch), body });
     }
     objects
 }

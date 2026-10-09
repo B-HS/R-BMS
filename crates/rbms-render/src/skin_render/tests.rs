@@ -7,7 +7,7 @@ use rbms_skin::property::generated::{
     OFFSET_HIDDEN_COVER, OFFSET_LANECOVER, OFFSET_LIFT, OPTION_1P_EARLY, OPTION_1P_GOOD, OPTION_1P_LATE, OPTION_1P_PERFECT, OPTION_2P_EARLY, OPTION_2P_GOOD,
     OPTION_2P_PERFECT, OPTION_GAUGE_EX, OPTION_GAUGE_EX_2P, OPTION_GAUGE_GROOVE, OPTION_GAUGE_GROOVE_2P, OPTION_GAUGE_HARD, OPTION_GAUGE_HARD_2P,
 };
-use rbms_skin::timer::{TimerId, TimerState};
+use rbms_skin::timer::{MICROS_PER_MILLI, TIMER_OFF, TimerId, TimerState};
 
 use super::object::{DigitLayout, FloatBody, NumberBody, Sprite, ValueSource, fraction_glyphs, fraction_sign, integer_glyphs, integer_padding};
 use super::state::PlayViewState;
@@ -98,21 +98,37 @@ fn a_cell_index_past_the_last_one_holds_at_the_last() {
 #[test]
 fn an_animation_holds_still_without_a_cycle_or_a_running_timer() {
     let timers = TimerState::new();
-    assert_eq!(sprite((32, 8), 4, 1, None, 0).animation_index(4, 5_000, &timers), 0, "no cycle means no animation");
-    assert_eq!(sprite((32, 8), 4, 1, Some(TimerId(1)), 400).animation_index(4, 5_000, &timers), 0, "a timer that is off holds the first cell");
+    assert_eq!(sprite((32, 8), 4, 1, None, 0).animation_index(4, 5_000 * MICROS_PER_MILLI, &timers), 0, "no cycle means no animation");
+    assert_eq!(
+        sprite((32, 8), 4, 1, Some(TimerId(1)), 400).animation_index(4, 5_000 * MICROS_PER_MILLI, &timers),
+        0,
+        "a timer that is off holds the first cell"
+    );
 }
 
 #[test]
 fn an_animation_steps_through_its_cells_and_wraps() {
     let mut timers = TimerState::new();
-    timers.set_on(TimerId(1), 1_000);
+    timers.set_on(TimerId(1), 1_000 * MICROS_PER_MILLI);
     let sprite = sprite((32, 8), 4, 1, Some(TimerId(1)), 400);
 
-    assert_eq!(sprite.animation_index(4, 1_000, &timers), 0, "the moment the timer starts is the first cell");
-    assert_eq!(sprite.animation_index(4, 1_100, &timers), 1);
-    assert_eq!(sprite.animation_index(4, 1_300, &timers), 3);
-    assert_eq!(sprite.animation_index(4, 1_400, &timers), 0, "one whole cycle is back to the start");
-    assert_eq!(sprite.animation_index(4, 900, &timers), 0, "a moment before the timer started is the first cell too");
+    assert_eq!(sprite.animation_index(4, 1_000 * MICROS_PER_MILLI, &timers), 0, "the moment the timer starts is the first cell");
+    assert_eq!(sprite.animation_index(4, 1_100 * MICROS_PER_MILLI, &timers), 1);
+    assert_eq!(sprite.animation_index(4, 1_300 * MICROS_PER_MILLI, &timers), 3);
+    assert_eq!(sprite.animation_index(4, 1_400 * MICROS_PER_MILLI, &timers), 0, "one whole cycle is back to the start");
+    assert_eq!(sprite.animation_index(4, 900 * MICROS_PER_MILLI, &timers), 0, "a moment before the timer started is the first cell too");
+}
+
+#[test]
+fn an_animation_truncates_the_clock_and_its_timer_to_milliseconds_separately() {
+    let mut timers = TimerState::new();
+    let sprite = sprite((32, 8), 4, 1, Some(TimerId(1)), 4);
+
+    timers.set_on(TimerId(1), 1_999);
+    assert_eq!(sprite.animation_index(4, 2_000, &timers), 1, "millisecond 2 less millisecond 1 is one whole millisecond, a cell of a 4 ms cycle");
+
+    timers.set_on(TimerId(1), 1_000);
+    assert_eq!(sprite.animation_index(4, 1_999, &timers), 0, "999 us into the same millisecond is no time at all");
 }
 
 #[test]
@@ -263,7 +279,7 @@ fn the_first_play_frame_starts_no_timer_by_itself() {
     let mut timers = TimerState::new();
     memory.update(&mut timers, &hud([3, 0, 0, 0, 0, 0], 3, 50.0), 10, 1_000, &no_lanes());
 
-    assert!(timers.is_off(rbms_skin::timer::timer_id::JUDGE_1P), "the first frame has nothing to compare against, so nothing is treated as new");
+    assert!(!timers.is_on(rbms_skin::timer::timer_id::JUDGE_1P), "the first frame has nothing to compare against, so nothing is treated as new");
     assert!(timers.is_on(rbms_skin::timer::timer_id::COMBO_1P), "a combo that is already running is reported as running");
 }
 
@@ -274,8 +290,8 @@ fn a_new_judgement_restarts_the_judge_timer() {
     memory.update(&mut timers, &hud([1, 0, 0, 0, 0, 0], 1, 50.0), 100, 1_000, &no_lanes());
     memory.update(&mut timers, &hud([2, 0, 0, 0, 0, 0], 2, 50.0), 100, 1_500, &no_lanes());
 
-    assert_eq!(timers.get(rbms_skin::timer::timer_id::JUDGE_1P), Some(1_500), "the pop-up is measured from the moment the input was judged");
-    assert_eq!(timers.get(rbms_skin::timer::timer_id::COMBO_1P), Some(1_500), "a longer combo restarts its own flash");
+    assert_eq!(timers.value_us(rbms_skin::timer::timer_id::JUDGE_1P), 1_500, "the pop-up is measured from the moment the input was judged");
+    assert_eq!(timers.value_us(rbms_skin::timer::timer_id::COMBO_1P), 1_500, "a longer combo restarts its own flash");
 }
 
 #[test]
@@ -285,8 +301,8 @@ fn a_broken_combo_switches_its_timer_off() {
     memory.update(&mut timers, &hud([2, 0, 0, 0, 0, 0], 2, 50.0), 100, 1_000, &no_lanes());
     memory.update(&mut timers, &hud([2, 0, 0, 0, 1, 0], 0, 48.0), 100, 1_200, &no_lanes());
 
-    assert!(timers.is_off(rbms_skin::timer::timer_id::COMBO_1P), "a combo of nothing has no flash to animate");
-    assert_eq!(timers.get(rbms_skin::timer::timer_id::JUDGE_1P), Some(1_200), "the poor was still a judgement");
+    assert!(!timers.is_on(rbms_skin::timer::timer_id::COMBO_1P), "a combo of nothing has no flash to animate");
+    assert_eq!(timers.value_us(rbms_skin::timer::timer_id::JUDGE_1P), 1_200, "the poor was still a judgement");
 }
 
 #[test]
@@ -294,16 +310,16 @@ fn a_full_combo_and_a_full_gauge_stay_on_while_they_last() {
     let mut memory = super::screen::PlayTimers::new();
     let mut timers = TimerState::new();
     memory.update(&mut timers, &hud([4, 0, 0, 0, 0, 0], 4, 100.0), 4, 1_000, &no_lanes());
-    assert_eq!(timers.get(rbms_skin::timer::timer_id::FULLCOMBO_1P), Some(1_000));
-    assert_eq!(timers.get(rbms_skin::timer::timer_id::GAUGE_MAX_1P), Some(1_000));
+    assert_eq!(timers.value_us(rbms_skin::timer::timer_id::FULLCOMBO_1P), 1_000);
+    assert_eq!(timers.value_us(rbms_skin::timer::timer_id::GAUGE_MAX_1P), 1_000);
 
     memory.update(&mut timers, &hud([5, 0, 0, 0, 0, 0], 5, 100.0), 5, 1_400, &no_lanes());
-    assert_eq!(timers.get(rbms_skin::timer::timer_id::FULLCOMBO_1P), Some(1_000), "a timer that is already on keeps the moment it started");
-    assert_eq!(timers.get(rbms_skin::timer::timer_id::GAUGE_INCLEASE_1P), None, "a gauge that did not rise does not flash");
+    assert_eq!(timers.value_us(rbms_skin::timer::timer_id::FULLCOMBO_1P), 1_000, "a timer that is already on keeps the moment it started");
+    assert_eq!(timers.value_us(rbms_skin::timer::timer_id::GAUGE_INCLEASE_1P), TIMER_OFF, "a gauge that did not rise does not flash");
 
     memory.update(&mut timers, &hud([5, 0, 0, 0, 1, 0], 0, 90.0), 6, 1_800, &no_lanes());
-    assert!(timers.is_off(rbms_skin::timer::timer_id::FULLCOMBO_1P), "the combo broke, so the full-combo timer goes off");
-    assert!(timers.is_off(rbms_skin::timer::timer_id::GAUGE_MAX_1P));
+    assert!(!timers.is_on(rbms_skin::timer::timer_id::FULLCOMBO_1P), "the combo broke, so the full-combo timer goes off");
+    assert!(!timers.is_on(rbms_skin::timer::timer_id::GAUGE_MAX_1P));
 }
 
 #[test]
@@ -312,11 +328,11 @@ fn starting_and_failing_a_run_switch_the_timers_that_mark_them() {
     let mut timers = TimerState::new();
     timers.set_on(rbms_skin::timer::timer_id::READY, 0);
     memory.start(&mut timers, 500);
-    assert!(timers.is_off(rbms_skin::timer::timer_id::READY));
-    assert_eq!(timers.get(rbms_skin::timer::timer_id::PLAY), Some(500));
+    assert!(!timers.is_on(rbms_skin::timer::timer_id::READY));
+    assert_eq!(timers.value_us(rbms_skin::timer::timer_id::PLAY), 500);
 
     memory.fail(&mut timers, 9_000);
-    assert_eq!(timers.get(rbms_skin::timer::timer_id::FAILED), Some(9_000));
+    assert_eq!(timers.value_us(rbms_skin::timer::timer_id::FAILED), 9_000);
 }
 
 #[test]
@@ -324,16 +340,16 @@ fn moving_the_song_wheel_restarts_the_movement_timers_in_the_direction_it_went()
     let mut memory = super::screen::SelectTimers::new();
     let mut timers = TimerState::new();
     memory.update(&mut timers, 4, 1_000);
-    assert!(timers.is_off(rbms_skin::timer::timer_id::SONGBAR_MOVE), "the first frame is where the wheel already was");
+    assert!(!timers.is_on(rbms_skin::timer::timer_id::SONGBAR_MOVE), "the first frame is where the wheel already was");
 
     memory.update(&mut timers, 5, 1_100);
-    assert_eq!(timers.get(rbms_skin::timer::timer_id::SONGBAR_MOVE), Some(1_100));
-    assert_eq!(timers.get(rbms_skin::timer::timer_id::SONGBAR_MOVE_DOWN), Some(1_100));
-    assert!(timers.is_off(rbms_skin::timer::timer_id::SONGBAR_MOVE_UP));
+    assert_eq!(timers.value_us(rbms_skin::timer::timer_id::SONGBAR_MOVE), 1_100);
+    assert_eq!(timers.value_us(rbms_skin::timer::timer_id::SONGBAR_MOVE_DOWN), 1_100);
+    assert!(!timers.is_on(rbms_skin::timer::timer_id::SONGBAR_MOVE_UP));
 
     memory.update(&mut timers, 2, 1_300);
-    assert_eq!(timers.get(rbms_skin::timer::timer_id::SONGBAR_MOVE_UP), Some(1_300), "going the other way starts the other direction's timer");
-    assert_eq!(timers.get(rbms_skin::timer::timer_id::SONGBAR_CHANGE), Some(1_300));
+    assert_eq!(timers.value_us(rbms_skin::timer::timer_id::SONGBAR_MOVE_UP), 1_300, "going the other way starts the other direction's timer");
+    assert_eq!(timers.value_us(rbms_skin::timer::timer_id::SONGBAR_CHANGE), 1_300);
 }
 
 /// A value definition with both of its padding fields set, so which one a strip reads is visible.
@@ -387,7 +403,7 @@ fn play_state<'a>(hud: &'a crate::hud::HudView<'a>) -> PlayViewState<'a> {
         bpm: 0.0,
         hispeed: 1.0,
         autoplay: false,
-        now_ms: 0,
+        now_us: 0,
         offsets: None,
         field: None,
         shade: crate::playfield::LaneShade::default(),

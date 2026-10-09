@@ -11,7 +11,7 @@
 
 use rbms_skin::dst::OffsetSource;
 use rbms_skin::property::SkinStateSource;
-use rbms_skin::timer::{TimerId, TimerState, timer_id};
+use rbms_skin::timer::{MICROS_PER_MILLI, TIMER_OFF, TimerId, TimerState, timer_id};
 
 use super::state::{DecideViewState, FrameExtra, KeyConfigViewState, PlayViewState, ResultViewState, SelectViewState};
 use super::{SkinExprEval, SkinFrame, SkinScreen};
@@ -28,8 +28,8 @@ const GAUGE_FULL: f32 = 100.0;
 pub struct SkinDraw<'a> {
     pub screen: &'a SkinScreen,
     pub timers: &'a TimerState,
-    /// The clock this frame is drawn against.
-    pub now_ms: i64,
+    /// The clock this frame is drawn against, in microseconds.
+    pub now_us: i64,
     pub lua: Option<&'a dyn SkinExprEval>,
     pub mouse: Option<(f32, f32)>,
     pub background: Option<TextureId>,
@@ -42,7 +42,7 @@ pub struct SkinDraw<'a> {
 
 impl std::fmt::Debug for SkinDraw<'_> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.debug_struct("SkinDraw").field("now_ms", &self.now_ms).field("objects", &self.screen.object_count()).finish_non_exhaustive()
+        formatter.debug_struct("SkinDraw").field("now_us", &self.now_us).field("objects", &self.screen.object_count()).finish_non_exhaustive()
     }
 }
 
@@ -51,7 +51,7 @@ impl SkinDraw<'_> {
     /// reached the screen.
     pub fn draw<R: Renderer>(&self, ctx: &mut RenderCtx<'_>, r: &mut R, state: &dyn SkinStateSource) -> usize {
         let frame =
-            SkinFrame { now_ms: self.now_ms, timers: self.timers, state, lua: self.lua, mouse: self.mouse, background: self.background, extra: self.extra };
+            SkinFrame { now_us: self.now_us, timers: self.timers, state, lua: self.lua, mouse: self.mouse, background: self.background, extra: self.extra };
         self.screen.draw(ctx, r, &frame)
     }
 }
@@ -72,7 +72,7 @@ pub fn render_select_screen<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, doc
         return false;
     };
     let options_open = document.extra.select().is_some_and(|list| list.options_open);
-    let state = SelectViewState::new(view, document.now_ms, document.offsets, options_open);
+    let state = SelectViewState::new(view, document.now_us, document.offsets, options_open);
     draw_with(ctx, r, Some(document), &state)
 }
 
@@ -88,7 +88,7 @@ pub fn render_result_screen<R: Renderer>(
     let Some(document) = document else {
         return false;
     };
-    let state = ResultViewState::new(view, target, cleared, document.now_ms, document.offsets);
+    let state = ResultViewState::new(view, target, cleared, document.now_us, document.offsets);
     draw_with(ctx, r, Some(document), &state)
 }
 
@@ -107,7 +107,7 @@ pub fn render_keyconfig_screen<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, 
     let Some(document) = document else {
         return false;
     };
-    let state = KeyConfigViewState { keys, now_ms: document.now_ms, offsets: document.offsets };
+    let state = KeyConfigViewState { keys, now_us: document.now_us, offsets: document.offsets };
     draw_with(ctx, r, Some(document), &state)
 }
 
@@ -251,14 +251,14 @@ impl PlayTimers {
     }
 
     /// Switches the timers that mark the run starting: play on, ready off.
-    pub fn start(&mut self, timers: &mut TimerState, now_ms: i64) {
-        timers.set_off(timer_id::READY);
-        timers.set_on(timer_id::PLAY, now_ms);
+    pub fn start(&mut self, timers: &mut TimerState, now_us: i64) {
+        timers.off(timer_id::READY);
+        timers.set_on(timer_id::PLAY, now_us);
     }
 
     /// Switches the timer that marks the run being failed.
-    pub fn fail(&mut self, timers: &mut TimerState, now_ms: i64) {
-        timers.set_on(timer_id::FAILED, now_ms);
+    pub fn fail(&mut self, timers: &mut TimerState, now_us: i64) {
+        timers.set_on(timer_id::FAILED, now_us);
     }
 
     /// Switches this frame's timers from what changed since the last one.
@@ -266,25 +266,25 @@ impl PlayTimers {
     /// `total_notes` is what a full combo is measured against; a run whose chart has none never
     /// reports one. The gauge and the full combo belong to the run rather than to a field, so they
     /// stay on the left-hand band however many fields the run has.
-    pub fn update(&mut self, timers: &mut TimerState, hud: &HudView<'_>, total_notes: u32, now_ms: i64, play: &PlayLanes<'_>) {
+    pub fn update(&mut self, timers: &mut TimerState, hud: &HudView<'_>, total_notes: u32, now_us: i64, play: &PlayLanes<'_>) {
         let side = usize::from(play.judged_side > 0);
         let judged: u32 = hud.counts.iter().sum();
         if self.seen && judged > self.judged {
-            timers.set_on(JUDGE_TIMERS[side], now_ms);
+            timers.set_on(JUDGE_TIMERS[side], now_us);
         }
         if hud.combo > self.combo {
-            timers.set_on(COMBO_TIMERS[side], now_ms);
+            timers.set_on(COMBO_TIMERS[side], now_us);
         } else if hud.combo == 0 {
             for combo in COMBO_TIMERS {
-                timers.set_off(combo);
+                timers.off(combo);
             }
         }
-        timers.switch(timer_id::FULLCOMBO_1P, total_notes > 0 && hud.combo >= total_notes, now_ms);
+        timers.switch(timer_id::FULLCOMBO_1P, total_notes > 0 && hud.combo >= total_notes, now_us);
         if self.seen && hud.gauge > self.gauge {
-            timers.set_on(timer_id::GAUGE_INCLEASE_1P, now_ms);
+            timers.set_on(timer_id::GAUGE_INCLEASE_1P, now_us);
         }
-        timers.switch(timer_id::GAUGE_MAX_1P, hud.gauge >= GAUGE_FULL, now_ms);
-        self.update_lanes(timers, play.lanes, now_ms);
+        timers.switch(timer_id::GAUGE_MAX_1P, hud.gauge >= GAUGE_FULL, now_us);
+        self.update_lanes(timers, play.lanes, now_us);
 
         self.judged = judged;
         self.combo = hud.combo;
@@ -300,7 +300,7 @@ impl PlayTimers {
     /// began. A bomb is an edge too, taken from whether one is burning: two hits in the same lane
     /// inside one bomb's own window read as the one bomb, which at the length a bomb burns for is a
     /// frame or two of a repeated flash rather than a restarted one.
-    fn update_lanes(&mut self, timers: &mut TimerState, lanes: &[LaneTimerState], now_ms: i64) {
+    fn update_lanes(&mut self, timers: &mut TimerState, lanes: &[LaneTimerState], now_us: i64) {
         let mut down = 0u128;
         let mut bombs = 0u128;
         for (lane, state) in lanes.iter().enumerate().take(LANES_REMEMBERED) {
@@ -309,12 +309,12 @@ impl PlayTimers {
             bombs |= u128::from(state.bomb) << lane;
             let side = usize::from(state.side);
             if let Some(hold) = HOLD_BAND.at(side, state.key) {
-                timers.switch(hold, state.hold, now_ms);
+                timers.switch(hold, state.hold, now_us);
             }
             if let Some(bomb) = BOMB_BAND.at(side, state.key) {
                 match (state.bomb, self.bombs & bit != 0) {
-                    (true, false) => timers.set_on(bomb, now_ms),
-                    (false, true) => timers.set_off(bomb),
+                    (true, false) => timers.set_on(bomb, now_us),
+                    (false, true) => timers.off(bomb),
                     _ => {}
                 }
             }
@@ -323,12 +323,12 @@ impl PlayTimers {
             };
             match (state.down, self.down & bit != 0) {
                 (true, false) => {
-                    timers.set_off(off);
-                    timers.set_on(on, now_ms);
+                    timers.off(off);
+                    timers.set_on(on, now_us);
                 }
                 (false, true) => {
-                    timers.set_off(on);
-                    timers.set_on(off, now_ms);
+                    timers.off(on);
+                    timers.set_on(off, now_us);
                 }
                 _ => {}
             }
@@ -355,12 +355,12 @@ impl SelectTimers {
     ///
     /// The reference restarts the shared movement timer on every change and the directional one for
     /// the way the list went, which is what lets a document animate the wheel turning.
-    pub fn update(&mut self, timers: &mut TimerState, row: usize, now_ms: i64) {
+    pub fn update(&mut self, timers: &mut TimerState, row: usize, now_us: i64) {
         if self.seen && row != self.row {
-            timers.set_on(timer_id::SONGBAR_MOVE, now_ms);
-            timers.set_on(timer_id::SONGBAR_CHANGE, now_ms);
+            timers.set_on(timer_id::SONGBAR_MOVE, now_us);
+            timers.set_on(timer_id::SONGBAR_CHANGE, now_us);
             let moved: TimerId = if row > self.row { timer_id::SONGBAR_MOVE_DOWN } else { timer_id::SONGBAR_MOVE_UP };
-            timers.set_on(moved, now_ms);
+            timers.set_on(moved, now_us);
         }
         self.row = row;
         self.seen = true;
@@ -394,16 +394,17 @@ impl ResultTimers {
     /// Switches the timers that mark the screen opening: the trend begins now, has not ended yet,
     /// and the score timer is on exactly when the run set a new best. A chart with no score behind
     /// it counts as a new best, because every run on it is the best there has been.
-    pub fn enter(&mut self, timers: &mut TimerState, view: &ResultView, now_ms: i64) {
-        timers.set_on(timer_id::RESULTGRAPH_BEGIN, now_ms);
-        timers.set_off(timer_id::RESULTGRAPH_END);
+    pub fn enter(&mut self, timers: &mut TimerState, view: &ResultView, now_us: i64) {
+        timers.set_on(timer_id::RESULTGRAPH_BEGIN, now_us);
+        timers.off(timer_id::RESULTGRAPH_END);
         let record = view.prev_best_ex.is_none_or(|best| view.ex_score > best);
-        timers.switch(timer_id::RESULT_UPDATESCORE, record, now_ms);
+        timers.switch(timer_id::RESULT_UPDATESCORE, record, now_us);
     }
 
     /// Switches this frame's timers: the trend ends a second after the screen opened.
-    pub fn update(&mut self, timers: &mut TimerState, now_ms: i64) {
-        let trend_over = timers.elapsed(timer_id::RESULTGRAPH_BEGIN, now_ms).is_some_and(|open_for| open_for >= RESULT_GRAPH_MS);
-        timers.switch(timer_id::RESULTGRAPH_END, trend_over, now_ms);
+    pub fn update(&mut self, timers: &mut TimerState, now_us: i64) {
+        let began_us = timers.value_us(timer_id::RESULTGRAPH_BEGIN);
+        let trend_over = began_us != TIMER_OFF && (now_us - began_us) / MICROS_PER_MILLI >= RESULT_GRAPH_MS;
+        timers.switch(timer_id::RESULTGRAPH_END, trend_over, now_us);
     }
 }

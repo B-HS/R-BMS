@@ -266,6 +266,8 @@ mod tests {
         (SettingId::WhiteNumber, "WHITE NUMBER", "OFF"),
         (SettingId::JudgeTextY, "JUDGE TEXT Y", "0%"),
         (SettingId::Letterbox, "LETTERBOX", "OFF"),
+        (SettingId::WindowResolution, "RESOLUTION", "1280x720"),
+        (SettingId::WindowMode, "WINDOW MODE", "WINDOWED"),
         (SettingId::Sort, "SORT", "DEFAULT"),
         (SettingId::FavoriteOnly, "FAVORITE ONLY", "OFF"),
         (SettingId::PreviewVolume, "PREVIEW VOLUME", "85%"),
@@ -298,7 +300,7 @@ mod tests {
 
     /// An app with no library, no window and no server, so every row reads out of a fresh document.
     fn shared() -> AppShared {
-        let dir = std::env::temp_dir().join(format!("rbms-settings-ui-tests-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("rbms-settings-ui-tests-{}-{:?}", std::process::id(), std::thread::current().id()));
         crate::App::new(String::new(), Config::default(), LaunchOptions::default(), dir.join("settings.ron")).shared
     }
 
@@ -355,6 +357,15 @@ mod tests {
         assert_eq!(shared.setting_line(SettingId::Skin).1, "NORMAL");
         shared.launch.skin_path = Some("custom.ron".to_string());
         assert_eq!(shared.setting_line(SettingId::Skin).1, CUSTOM_VALUE);
+    }
+
+    #[test]
+    fn the_window_rows_show_the_choice_a_step_made() {
+        let mut shared = shared();
+        adjust(&mut shared.config, SettingId::WindowResolution, 2);
+        adjust(&mut shared.config, SettingId::WindowMode, 1);
+        assert_eq!(shared.setting_line(SettingId::WindowResolution).1, "1920x1080");
+        assert_eq!(shared.setting_line(SettingId::WindowMode).1, "BORDERLESS");
     }
 
     #[test]

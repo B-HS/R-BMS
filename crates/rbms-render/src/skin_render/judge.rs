@@ -162,7 +162,7 @@ fn part_placement<'a>(object: &'a SkinObject, resolved: &Resolved, place: &Place
 fn resolve_part(object: &SkinObject, origin: (f32, f32), frame: &SkinFrame<'_>) -> Option<Resolved> {
     let state: &dyn DrawStateSource = frame.state;
     let gate: Option<&dyn LuaDrawEval> = frame.lua.map(|lua| lua as &dyn LuaDrawEval);
-    prepare(&object.track, frame.now_ms, frame.timers, state, gate, origin, frame.mouse).filter(|resolved| resolved.color.a != 0)
+    prepare(&object.track, frame.now_us, frame.timers, state, gate, origin, frame.mouse).filter(|resolved| resolved.color.a != 0)
 }
 
 /// Draws the pop-up, answering whether anything reached the screen.
@@ -234,7 +234,7 @@ fn combo_run(body: &NumberBody, frame: &SkinFrame<'_>) -> Option<ComboRun> {
     if INTEGER_NO_VALUE.contains(&value) {
         return None;
     }
-    let set = body.sprite.animation_index(body.layout.sets, frame.now_ms, frame.timers);
+    let set = body.sprite.animation_index(body.layout.sets, frame.now_us, frame.timers);
     Some(ComboRun { places: integer_glyphs(body, value), set, negative: value < 0 })
 }
 
@@ -269,6 +269,6 @@ fn draw_word<R: Renderer>(r: &mut R, place: &Placement<'_>, body: &Body, rect: S
     let Some((sprite, first, count)) = image.variants.get(chosen).or_else(|| image.variants.first()) else {
         return false;
     };
-    let cell = first + sprite.animation_index(*count, frame.now_ms, frame.timers);
+    let cell = first + sprite.animation_index(*count, frame.now_us, frame.timers);
     place.cell(r, sprite, cell, rect)
 }

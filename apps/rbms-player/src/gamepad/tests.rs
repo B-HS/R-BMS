@@ -397,3 +397,161 @@ fn every_analog_mode_has_its_own_label() {
     assert_eq!(labels.len(), AnalogMode::ALL.len());
     assert!(labels.iter().all(|label| !label.is_empty()));
 }
+
+fn snapshot_standard(button: StandardButton, pressed: bool) -> PadSnapshot {
+    let mut snapshot = PadSnapshot::default();
+    snapshot.set_standard(button, pressed);
+    snapshot
+}
+
+fn quiet() -> PadConfig {
+    PadConfig { debounce_ms: 0, ..PadConfig::default() }
+}
+
+/// START and SELECT start on the pad's own menu buttons, with nothing written to the file; every
+/// other control, and every lane, starts unbound.
+#[test]
+fn start_and_select_read_the_standard_menu_buttons_until_rebound() {
+    let cfg = PadConfig::default();
+    assert_eq!(cfg.control_binding(ControlAction::Start), Some(PadBinding::Standard(StandardButton::Start)));
+    assert_eq!(cfg.control_binding(ControlAction::Select), Some(PadBinding::Standard(StandardButton::Select)));
+    assert!(cfg.controls.is_empty(), "the defaults are read, not stored");
+    for action in ControlAction::ALL.into_iter().filter(|a| !matches!(a, ControlAction::Start | ControlAction::Select)) {
+        assert_eq!(cfg.control_binding(action), None, "{action:?}");
+    }
+    assert!(cfg.collisions(seven_key()).is_empty(), "and the two defaults share nothing");
+}
+
+/// A binding the player sets wins over the default, and clearing it brings the default back.
+#[test]
+fn a_rebound_start_replaces_the_standard_button_and_clearing_it_restores_it() {
+    let mut cfg = PadConfig::default();
+    cfg.set_control(ControlAction::Start, Some(PadBinding::Button(BUTTON)));
+    assert_eq!(cfg.control_binding(ControlAction::Start), Some(PadBinding::Button(BUTTON)));
+    cfg.set_control(ControlAction::Start, None);
+    assert_eq!(cfg.control_binding(ControlAction::Start), Some(PadBinding::Standard(StandardButton::Start)));
+}
+
+/// A pad block written before START existed (it carries other controls, none of these) reads them on
+/// the standard buttons, and a block with one of them bound keeps that binding.
+#[test]
+fn an_older_pad_block_reads_start_and_select_on_the_standard_buttons() {
+    let older: PadConfig = ron::from_str(r#"(controls: {"HI-SPEED UP": Button(4)}, debounce_ms: 4)"#).expect("an older pad block parses");
+    assert_eq!(older.control_binding(ControlAction::HiSpeedUp), Some(PadBinding::Button(4)));
+    assert_eq!(older.control_binding(ControlAction::Start), Some(PadBinding::Standard(StandardButton::Start)));
+    assert_eq!(older.control_binding(ControlAction::Select), Some(PadBinding::Standard(StandardButton::Select)));
+
+    let bound: PadConfig = ron::from_str(r#"(controls: {"START": Button(9)})"#).expect("a pad block with START bound parses");
+    assert_eq!(bound.control_binding(ControlAction::Start), Some(PadBinding::Button(9)));
+    assert_eq!(bound.control_binding(ControlAction::Select), Some(PadBinding::Standard(StandardButton::Select)));
+}
+
+#[test]
+fn a_standard_binding_round_trips_through_the_config_file() {
+    let mut cfg = PadConfig::default();
+    cfg.set_control(ControlAction::Select, Some(PadBinding::Standard(StandardButton::Start)));
+    let text = ron::ser::to_string_pretty(&cfg, ron::ser::PrettyConfig::default()).expect("a pad config serialises");
+    let back: PadConfig = ron::from_str(&text).expect("and parses back");
+    assert_eq!(back, cfg);
+}
+
+#[test]
+fn a_standard_binding_reads_back_the_label_the_editor_shows() {
+    assert_eq!(PadBinding::Standard(StandardButton::Start).label(), "STANDARD START");
+    assert_eq!(PadBinding::Standard(StandardButton::Select).label(), "STANDARD SELECT");
+    assert_eq!(PadBinding::Standard(StandardButton::Start).as_analog_scratch(), None);
+}
+
+/// The standard START button fires the control on its press only, like any other control, and the
+/// mapper still reports it held until it is let go.
+#[test]
+fn the_standard_start_button_fires_once_and_stays_held_until_released() {
+    let cfg = quiet();
+    let mut mapper = PadMapper::new();
+    assert!(mapper.held(&cfg, seven_key()).is_empty());
+
+    assert_eq!(mapper.resolve(0, &cfg, seven_key(), &snapshot_standard(StandardButton::Start, true)), [PadEvent::Control(ControlAction::Start)]);
+    assert_eq!(mapper.held(&cfg, seven_key()), [PadEvent::Control(ControlAction::Start)]);
+    assert!(mapper.resolve(MS, &cfg, seven_key(), &snapshot_standard(StandardButton::Start, true)).is_empty(), "holding repeats nothing");
+    assert_eq!(mapper.held(&cfg, seven_key()), [PadEvent::Control(ControlAction::Start)], "and it is still down");
+
+    assert!(mapper.resolve(MS * 2, &cfg, seven_key(), &snapshot_standard(StandardButton::Start, false)).is_empty(), "a control has no release event");
+    assert!(mapper.held(&cfg, seven_key()).is_empty(), "but it is no longer held");
+}
+
+/// START and SELECT are separate buttons: one down never reads as the other.
+#[test]
+fn the_two_menu_buttons_are_held_independently() {
+    let cfg = quiet();
+    let mut mapper = PadMapper::new();
+    let mut snapshot = PadSnapshot::default();
+    snapshot.set_standard(StandardButton::Select, true);
+    mapper.resolve(0, &cfg, seven_key(), &snapshot);
+    assert_eq!(mapper.held(&cfg, seven_key()), [PadEvent::Control(ControlAction::Select)]);
+
+    snapshot.set_standard(StandardButton::Start, true);
+    mapper.resolve(MS, &cfg, seven_key(), &snapshot);
+    let held = mapper.held(&cfg, seven_key());
+    assert!(held.contains(&PadEvent::Control(ControlAction::Start)) && held.contains(&PadEvent::Control(ControlAction::Select)));
+}
+
+/// The native code of a button that gilrs also names START does not drive START: only the standard
+/// name does, so an arcade controller whose codes are its own is not misread.
+#[test]
+fn a_native_button_code_does_not_press_the_standard_start() {
+    let cfg = quiet();
+    let mut mapper = PadMapper::new();
+    assert!(mapper.resolve(0, &cfg, seven_key(), &snapshot_button(true)).is_empty());
+    assert!(mapper.held(&cfg, seven_key()).is_empty());
+}
+
+/// A lane's held state follows its button, and a lane two elements drive stays held until both let go.
+#[test]
+fn a_lane_is_held_while_any_element_bound_to_it_is() {
+    let mut cfg = cfg_with_lane(SCRATCH_LANE, PadBinding::Button(BUTTON));
+    cfg.set_scratch_reverse(seven_key(), SCRATCH_LANE, Some(PadBinding::Button(BUTTON + 1)));
+    let mut mapper = PadMapper::new();
+    let forward = PadEvent::Lane { lane: SCRATCH_LANE, dir: ScratchDir::Forward, press: true };
+    let backward = PadEvent::Lane { lane: SCRATCH_LANE, dir: ScratchDir::Backward, press: true };
+
+    mapper.resolve(0, &cfg, seven_key(), &snapshot_button(true));
+    assert_eq!(mapper.held(&cfg, seven_key()), [forward]);
+
+    let mut both = snapshot_button(true);
+    both.set_button(BUTTON + 1, true);
+    mapper.resolve(MS, &cfg, seven_key(), &both);
+    assert_eq!(mapper.held(&cfg, seven_key()), [forward, backward], "both directions of one turntable can be held");
+
+    mapper.resolve(MS * 2, &cfg, seven_key(), &snapshot_button(false));
+    assert!(mapper.held(&cfg, seven_key()).is_empty());
+}
+
+#[test]
+fn an_element_bound_to_two_lanes_holds_both() {
+    let mut cfg = cfg_with_lane(0, PadBinding::Button(BUTTON));
+    cfg.set_lane(seven_key(), 1, Some(PadBinding::Button(BUTTON)));
+    let mut mapper = PadMapper::new();
+    mapper.resolve(0, &cfg, seven_key(), &snapshot_button(true));
+    assert_eq!(mapper.held(&cfg, seven_key()).len(), 2);
+}
+
+/// A controller switched off holds nothing, whatever it last reported.
+#[test]
+fn nothing_is_held_while_the_controller_is_switched_off() {
+    let cfg = cfg_with_lane(0, PadBinding::Button(BUTTON));
+    let mut mapper = PadMapper::new();
+    mapper.resolve(0, &cfg, seven_key(), &snapshot_button(true));
+    let off = PadConfig { enabled: false, ..cfg };
+    assert!(mapper.held(&off, seven_key()).is_empty());
+}
+
+/// What is held is read against the mode that is up: a lane the mode does not have is not held.
+#[test]
+fn a_lane_beyond_the_running_mode_is_not_held() {
+    let mut cfg = quiet();
+    cfg.set_lane(Mode::BEAT_14K, 15, Some(PadBinding::Button(BUTTON)));
+    let mut mapper = PadMapper::new();
+    mapper.resolve(0, &cfg, Mode::BEAT_14K, &snapshot_button(true));
+    assert_eq!(mapper.held(&cfg, Mode::BEAT_14K).len(), 1);
+    assert!(mapper.held(&cfg, Mode::BEAT_7K).is_empty());
+}

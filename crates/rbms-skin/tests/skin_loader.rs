@@ -12,14 +12,14 @@ use std::path::{Path, PathBuf};
 
 use rbms_model::Mode;
 use rbms_skin::SkinError;
-use rbms_skin::dst::{Acc, DrawCondition, LOOP_ONCE, OffsetSource, SkinOffset, SkinRect};
+use rbms_skin::dst::{Acc, DrawCondition, LOOP_ONCE, OffsetSource, SkinOffset, SkinRect, TimerRef, resolve};
 use rbms_skin::loader::{
     DEFAULT_MAX_DOCUMENT_BYTES, Filtering, LoadedSkin, MAX_INCLUDE_DEPTH, OPTION_RANDOM_VALUE, ParserKind, SKIN_TYPE_DECIDE, SKIN_TYPE_KEY_CONFIG,
     SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_PLAY_7KEYS, SKIN_TYPE_RESULT, SkinLoadOptions, SkinUserConfig, StretchKind, enabled_options, filtering_for,
     is_supported_skin_type, load_header, load_skin, mode_skin_type, parse_document, read_document, selected_option, skin_type_mode, stretch_rect,
 };
 use rbms_skin::model::{Destination, PropertyDef, PropertyItem};
-use rbms_skin::timer::TimerId;
+use rbms_skin::timer::{TimerId, TimerState};
 
 /// A seed every wildcard test pins, so a draw is the same on every machine.
 const TEST_SEED: u64 = 7;
@@ -354,7 +354,7 @@ fn a_first_keyframe_fills_its_unset_fields_from_the_type_defaults() {
     assert_eq!(first.time_ms, 0);
     assert_eq!(first.rect, SkinRect::new(10.0, 20.0, 100.0, 50.0));
     assert_eq!((first.color.r, first.color.g, first.color.b, first.color.a), (255, 255, 255, 255));
-    assert_eq!(first.acc, Acc::Accelerate);
+    assert_eq!(track(&skin, "frame").acc, Acc::Accelerate, "the first keyframe's easing is the object's");
     assert!(first.clip.is_none(), "an unset clip on the first keyframe means the object is not clipped");
 }
 
@@ -366,7 +366,6 @@ fn a_later_keyframe_inherits_every_field_it_does_not_restate() {
 
     assert_eq!(middle.time_ms, 500);
     assert_eq!(middle.rect, SkinRect::new(110.0, 20.0, 100.0, 50.0), "only x was restated");
-    assert_eq!(middle.acc, Acc::Accelerate, "the easing carries over too");
     assert_eq!(middle.color.a, 255);
     assert_eq!(frames[2].rect, SkinRect::new(110.0, 20.0, 100.0, 50.0), "the last keyframe restates neither position nor size");
     assert_eq!(frames[2].color.a, 0);
@@ -421,6 +420,68 @@ fn a_keyframe_time_wider_than_the_field_costs_its_object_and_not_the_skin() {
     assert!(skin.warnings[0].contains("dst.time"), "warned {:?}", skin.warnings[0]);
 }
 
+/// The frame clock half way along the one-second tracks below, in microseconds.
+const HALF_WAY_US: i64 = 500_000;
+
+/// Loads a one-object document and resolves that object half way along its second.
+fn x_half_way(name: &str, keyframes: &str) -> (Acc, f32) {
+    let scratch = Scratch::new(name);
+    let path = scratch.write("skin.json", &format!(r#"{{ "type": 5, "destination": [{{ "id": "eased", "loop": -1, "dst": {keyframes} }}] }}"#));
+    let user = SkinUserConfig::default();
+    let skin = load_skin(&path, seeded(scratch.path(), &user)).expect("the document should load");
+    let track = track(&skin, "eased");
+    let resolved = resolve(track, HALF_WAY_US, &TimerState::new(), &user).expect("the object draws half way along");
+    (track.acc, resolved.rect.x)
+}
+
+#[test]
+fn the_objects_easing_is_the_first_one_declared_even_when_the_keyframes_are_written_backwards() {
+    let (acc, x) = x_half_way("acc-reversed", r#"[{ "time": 1000, "x": 1000, "acc": 2 }, { "time": 0, "x": 0, "acc": 1 }]"#);
+    assert_eq!(acc, Acc::Decelerate, "the keyframe written first claims the easing, though it sorts last");
+    assert_eq!(x, 750.0, "1 - (0.5 - 1)^2 of the way, not the 0.5^2 the earliest keyframe's own value would give");
+}
+
+#[test]
+fn the_objects_easing_is_the_first_non_zero_one_in_declaration_order() {
+    let (acc, x) = x_half_way("acc-first-non-zero", r#"[{ "time": 0, "x": 0 }, { "time": 1000, "x": 1000, "acc": 1 }, { "time": 2000, "acc": 2 }]"#);
+    assert_eq!(acc, Acc::Accelerate, "an unset first keyframe leaves the slot open for the next one");
+    assert_eq!(x, 250.0, "and the pair before the keyframe that declared it is shaped by it too");
+
+    let (acc, _) = x_half_way("acc-inherited", r#"[{ "time": 1000, "x": 1000, "acc": 3 }, { "time": 0, "x": 0 }]"#);
+    assert_eq!(acc, Acc::Step, "a later keyframe that restates nothing inherits the claimed value rather than replacing it");
+}
+
+#[test]
+fn an_easing_the_reference_does_not_name_still_claims_the_object() {
+    let (acc, x) = x_half_way("acc-unknown", r#"[{ "time": 0, "x": 0, "acc": 4 }, { "time": 1000, "x": 1000, "acc": 1 }]"#);
+    assert_eq!(acc, Acc::Linear, "4 is not zero, so it takes the slot, and it shapes nothing");
+    assert_eq!(x, 500.0);
+
+    let (acc, _) = x_half_way("acc-negative", r#"[{ "time": 0, "x": 0, "acc": -1 }, { "time": 1000, "x": 1000, "acc": 2 }]"#);
+    assert_eq!(acc, Acc::Linear);
+}
+
+#[test]
+fn a_positive_offset_r_turns_an_object_the_way_a_larger_document_angle_does() {
+    const NUDGED_SLOT: i32 = 20;
+    let scratch = Scratch::new("offset-r");
+    let path = scratch.write(
+        "skin.json",
+        r#"{ "type": 5, "destination": [
+            { "id": "nudged", "offset": 20, "dst": [{ "time": 0, "angle": 30 }] },
+            { "id": "written", "dst": [{ "time": 0, "angle": 45 }] }
+        ] }"#,
+    );
+    let mut user = SkinUserConfig::default();
+    user.offsets.insert(NUDGED_SLOT, SkinOffset { r: 15.0, ..SkinOffset::default() });
+    let skin = load_skin(&path, seeded(scratch.path(), &user)).expect("the document should load");
+
+    let nudged = resolve(track(&skin, "nudged"), 0, &TimerState::new(), &user).expect("the nudged object draws");
+    let written = resolve(track(&skin, "written"), 0, &TimerState::new(), &user).expect("the written object draws");
+    assert_eq!(nudged.angle_deg, written.angle_deg, "`angle: 30` with `r: 15` is `angle: 45`, because the reference adds the two in the document's own space");
+    assert_eq!(nudged.angle_deg, -45.0, "counter-clockwise in the document is negative on a screen that turns clockwise");
+}
+
 #[test]
 fn the_offset_list_is_the_documents_offsets_with_its_single_offset_appended() {
     let skin = load_minimal(&SkinUserConfig::default());
@@ -433,7 +494,7 @@ fn the_drawing_fields_the_document_wrote_are_carried_through() {
     let skin = load_minimal(&SkinUserConfig::default());
     let built = track(&skin, "frame");
 
-    assert_eq!(built.timer, Some(TimerId(1)));
+    assert_eq!(built.timer, Some(TimerRef::Id(TimerId(1))));
     assert_eq!(built.loop_ms, LOOP_ONCE);
     assert_eq!((built.blend, built.filter, built.center), (2, 1, 4));
     assert_eq!(built.stretch, 1);
@@ -637,37 +698,202 @@ fn the_stretch_ids_a_document_writes_name_the_modes_the_reference_declares() {
     assert_eq!(StretchKind::from_id(0), StretchKind::Stretch);
     assert_eq!(StretchKind::from_id(1), StretchKind::FitInner);
     assert_eq!(StretchKind::from_id(2), StretchKind::FitOuter);
+    assert_eq!(StretchKind::from_id(3), StretchKind::FitOuterTrimmed);
+    assert_eq!(StretchKind::from_id(4), StretchKind::FitWidth);
+    assert_eq!(StretchKind::from_id(5), StretchKind::FitWidthTrimmed);
+    assert_eq!(StretchKind::from_id(6), StretchKind::FitHeight);
+    assert_eq!(StretchKind::from_id(7), StretchKind::FitHeightTrimmed);
+    assert_eq!(StretchKind::from_id(8), StretchKind::NoExpanding);
     assert_eq!(StretchKind::from_id(9), StretchKind::NoResize);
     assert_eq!(StretchKind::from_id(10), StretchKind::NoResizeTrimmed);
     assert_eq!(StretchKind::from_id(404), StretchKind::Stretch, "an id nobody declares fills the rectangle too");
 }
 
-#[test]
-fn stretching_fills_the_rectangle_and_fitting_keeps_the_ratio() {
-    let rect = SkinRect::new(0.0, 0.0, 200.0, 100.0);
-    let source = (100.0, 100.0);
+/// A wide rectangle over a square source, where the horizontal scale (2) is the larger one.
+const WIDE_RECT: SkinRect = SkinRect::new(0.0, 0.0, 200.0, 100.0);
 
-    assert_eq!(stretch_rect(StretchKind::Stretch, rect, source), rect, "the default leaves the rectangle as the destination resolved it");
-    assert_eq!(stretch_rect(StretchKind::FitInner, rect, source), SkinRect::new(50.0, 0.0, 100.0, 100.0), "fitting inside letterboxes");
-    assert_eq!(stretch_rect(StretchKind::FitOuter, rect, source), SkinRect::new(0.0, -50.0, 200.0, 200.0), "fitting outside overflows");
-    assert_eq!(stretch_rect(StretchKind::NoResize, rect, source), SkinRect::new(50.0, 0.0, 100.0, 100.0), "no resize draws at the source size, centred");
+/// The square source [`WIDE_RECT`] is fitted with, set away from its texture's corner.
+const SQUARE_SOURCE: SkinRect = SkinRect::new(10.0, 20.0, 100.0, 100.0);
+
+/// A tall rectangle over a wider source, where the vertical scale (3) is larger than the horizontal
+/// one (1.5).
+const TALL_RECT: SkinRect = SkinRect::new(10.0, 20.0, 90.0, 150.0);
+
+/// The source [`TALL_RECT`] is fitted with.
+const LANDSCAPE_SOURCE: SkinRect = SkinRect::new(4.0, 6.0, 60.0, 50.0);
+
+/// A rectangle smaller than its source on both axes.
+const SMALL_RECT: SkinRect = SkinRect::new(0.0, 0.0, 40.0, 30.0);
+
+/// The source [`SMALL_RECT`] is fitted with, twice as wide and five thirds as tall.
+const LARGE_SOURCE: SkinRect = SkinRect::new(3.0, 5.0, 80.0, 50.0);
+
+#[test]
+fn mode_0_stretch_fills_the_rectangle_with_the_whole_source() {
+    assert_eq!(stretch_rect(StretchKind::Stretch, WIDE_RECT, SQUARE_SOURCE), (WIDE_RECT, SQUARE_SOURCE));
+    assert_eq!(stretch_rect(StretchKind::Stretch, SMALL_RECT, LARGE_SOURCE), (SMALL_RECT, LARGE_SOURCE));
 }
 
 #[test]
-fn a_mode_this_build_does_not_reproduce_stretches_instead_of_dropping_the_object() {
-    let rect = SkinRect::new(0.0, 0.0, 200.0, 100.0);
-    let source = (100.0, 100.0);
+fn mode_1_fit_inner_letterboxes_on_the_axis_with_room_to_spare() {
+    assert_eq!(
+        stretch_rect(StretchKind::FitInner, WIDE_RECT, SQUARE_SOURCE),
+        (SkinRect::new(50.0, 0.0, 100.0, 100.0), SQUARE_SOURCE),
+        "scaleX 2 > scaleY 1, so `fitWidth(100 * 1)`"
+    );
+    assert_eq!(
+        stretch_rect(StretchKind::FitInner, TALL_RECT, LANDSCAPE_SOURCE),
+        (SkinRect::new(10.0, 57.5, 90.0, 75.0), LANDSCAPE_SOURCE),
+        "scaleX 1.5 <= scaleY 3, so `fitHeight(50 * 1.5)` about the centre y of 95"
+    );
+}
 
-    assert!(!StretchKind::FitOuterTrimmed.is_supported());
-    assert!(StretchKind::FitInner.is_supported());
-    assert_eq!(stretch_rect(StretchKind::FitOuterTrimmed, rect, source), rect);
+#[test]
+fn mode_2_fit_outer_overflows_on_the_axis_that_is_short() {
+    assert_eq!(
+        stretch_rect(StretchKind::FitOuter, WIDE_RECT, SQUARE_SOURCE),
+        (SkinRect::new(0.0, -50.0, 200.0, 200.0), SQUARE_SOURCE),
+        "scaleX 2 >= scaleY 1, so `fitHeight(100 * 2)`"
+    );
+    assert_eq!(
+        stretch_rect(StretchKind::FitOuter, TALL_RECT, LANDSCAPE_SOURCE),
+        (SkinRect::new(-35.0, 20.0, 180.0, 150.0), LANDSCAPE_SOURCE),
+        "scaleX 1.5 < scaleY 3, so `fitWidth(60 * 3)` about the centre x of 55"
+    );
+}
+
+#[test]
+fn mode_3_fit_outer_trimmed_cuts_the_overflow_out_of_the_source() {
+    assert_eq!(
+        stretch_rect(StretchKind::FitOuterTrimmed, WIDE_RECT, SQUARE_SOURCE),
+        (WIDE_RECT, SkinRect::new(10.0, 45.0, 100.0, 50.0)),
+        "`fitHeightTrimmed(2)`: 100 / 2 = 50 source rows about the source's centre row 70"
+    );
+    assert_eq!(
+        stretch_rect(StretchKind::FitOuterTrimmed, TALL_RECT, LANDSCAPE_SOURCE),
+        (TALL_RECT, SkinRect::new(19.0, 6.0, 30.0, 50.0)),
+        "`fitWidthTrimmed(3)`: 90 / 3 = 30 source columns about the source's centre column 34"
+    );
+}
+
+#[test]
+fn mode_4_fit_width_matches_the_width_and_lets_the_height_follow() {
+    assert_eq!(
+        stretch_rect(StretchKind::FitWidth, WIDE_RECT, SQUARE_SOURCE),
+        (SkinRect::new(0.0, -50.0, 200.0, 200.0), SQUARE_SOURCE),
+        "`fitHeight(100 * 200 / 100)`"
+    );
+    assert_eq!(
+        stretch_rect(StretchKind::FitWidth, TALL_RECT, LANDSCAPE_SOURCE),
+        (SkinRect::new(10.0, 57.5, 90.0, 75.0), LANDSCAPE_SOURCE),
+        "`fitHeight(50 * 90 / 60)`"
+    );
+}
+
+#[test]
+fn mode_5_fit_width_trimmed_cuts_a_too_tall_image_and_centres_a_short_one() {
+    assert_eq!(
+        stretch_rect(StretchKind::FitWidthTrimmed, WIDE_RECT, SQUARE_SOURCE),
+        (WIDE_RECT, SkinRect::new(10.0, 45.0, 100.0, 50.0)),
+        "at scale 2 the image is 200 tall in a 100 tall rectangle, so half its rows are read"
+    );
+    assert_eq!(
+        stretch_rect(StretchKind::FitWidthTrimmed, TALL_RECT, LANDSCAPE_SOURCE),
+        (SkinRect::new(10.0, 57.5, 90.0, 75.0), LANDSCAPE_SOURCE),
+        "at scale 1.5 the image is 75 tall in a 150 tall rectangle, so it is centred untrimmed"
+    );
+    assert_eq!(
+        stretch_rect(StretchKind::FitWidthTrimmed, SkinRect::new(0.0, 0.0, 30.0, 20.0), SkinRect::new(0.0, 7.0, 40.0, 45.0)),
+        (SkinRect::new(0.0, 0.0, 30.0, 20.0), SkinRect::new(0.0, 16.0, 40.0, 26.0)),
+        "at scale 0.75 the 20 rows shown are 26.67 source rows from 16.17, and both land on whole pixels the way `(int)` does"
+    );
+}
+
+#[test]
+fn mode_6_fit_height_matches_the_height_and_lets_the_width_follow() {
+    assert_eq!(
+        stretch_rect(StretchKind::FitHeight, WIDE_RECT, SQUARE_SOURCE),
+        (SkinRect::new(50.0, 0.0, 100.0, 100.0), SQUARE_SOURCE),
+        "`fitWidth(100 * 100 / 100)`"
+    );
+    assert_eq!(
+        stretch_rect(StretchKind::FitHeight, TALL_RECT, LANDSCAPE_SOURCE),
+        (SkinRect::new(-35.0, 20.0, 180.0, 150.0), LANDSCAPE_SOURCE),
+        "`fitWidth(60 * 150 / 50)`"
+    );
+}
+
+#[test]
+fn mode_7_fit_height_trimmed_cuts_a_too_wide_image_and_centres_a_narrow_one() {
+    assert_eq!(
+        stretch_rect(StretchKind::FitHeightTrimmed, WIDE_RECT, SQUARE_SOURCE),
+        (SkinRect::new(50.0, 0.0, 100.0, 100.0), SQUARE_SOURCE),
+        "at scale 1 the image is 100 wide in a 200 wide rectangle, so it is centred untrimmed"
+    );
+    assert_eq!(
+        stretch_rect(StretchKind::FitHeightTrimmed, TALL_RECT, LANDSCAPE_SOURCE),
+        (TALL_RECT, SkinRect::new(19.0, 6.0, 30.0, 50.0)),
+        "at scale 3 the image is 180 wide in a 90 wide rectangle, so half its columns are read"
+    );
+    assert_eq!(
+        stretch_rect(StretchKind::FitHeightTrimmed, SkinRect::new(0.0, 0.0, 20.0, 30.0), SkinRect::new(7.0, 0.0, 45.0, 40.0)),
+        (SkinRect::new(0.0, 0.0, 20.0, 30.0), SkinRect::new(16.0, 0.0, 26.0, 40.0)),
+        "the horizontal twin of the truncation in mode 5"
+    );
+}
+
+#[test]
+fn mode_8_no_expanding_shrinks_to_fit_but_never_enlarges() {
+    assert_eq!(
+        stretch_rect(StretchKind::NoExpanding, SMALL_RECT, LARGE_SOURCE),
+        (SkinRect::new(0.0, 2.5, 40.0, 25.0), LARGE_SOURCE),
+        "min(1, 40 / 80, 30 / 50) = 0.5, so the image is drawn at 40 x 25"
+    );
+    assert_eq!(
+        stretch_rect(StretchKind::NoExpanding, TALL_RECT, LANDSCAPE_SOURCE),
+        (SkinRect::new(25.0, 70.0, 60.0, 50.0), LANDSCAPE_SOURCE),
+        "min(1, 1.5, 3) = 1, so a rectangle with room to spare draws the image at its own size"
+    );
+}
+
+#[test]
+fn mode_9_no_resize_draws_the_source_at_its_own_size_about_the_centre() {
+    assert_eq!(stretch_rect(StretchKind::NoResize, WIDE_RECT, SQUARE_SOURCE), (SkinRect::new(50.0, 0.0, 100.0, 100.0), SQUARE_SOURCE));
+    assert_eq!(
+        stretch_rect(StretchKind::NoResize, SMALL_RECT, LARGE_SOURCE),
+        (SkinRect::new(-20.0, -10.0, 80.0, 50.0), LARGE_SOURCE),
+        "a source larger than the rectangle spills over every edge"
+    );
+}
+
+#[test]
+fn mode_10_no_resize_trimmed_cuts_what_mode_9_would_spill() {
+    assert_eq!(
+        stretch_rect(StretchKind::NoResizeTrimmed, SMALL_RECT, LARGE_SOURCE),
+        (SMALL_RECT, SkinRect::new(23.0, 15.0, 40.0, 30.0)),
+        "40 columns about the centre column 43 and 30 rows about the centre row 30"
+    );
+    assert_eq!(
+        stretch_rect(StretchKind::NoResizeTrimmed, TALL_RECT, LANDSCAPE_SOURCE),
+        (SkinRect::new(25.0, 70.0, 60.0, 50.0), LANDSCAPE_SOURCE),
+        "a source that fits is centred untrimmed, exactly as mode 9 has it"
+    );
+    assert_eq!(
+        stretch_rect(StretchKind::NoResizeTrimmed, SkinRect::new(0.0, 0.0, 40.0, 150.0), LARGE_SOURCE),
+        (SkinRect::new(0.0, 50.0, 40.0, 50.0), SkinRect::new(23.0, 5.0, 40.0, 50.0)),
+        "each axis is settled on its own: the width is trimmed, the height is centred"
+    );
 }
 
 #[test]
 fn a_source_with_no_area_leaves_the_rectangle_alone() {
     let rect = SkinRect::new(0.0, 0.0, 200.0, 100.0);
-    assert_eq!(stretch_rect(StretchKind::FitInner, rect, (0.0, 100.0)), rect);
-    assert_eq!(stretch_rect(StretchKind::FitInner, rect, (100.0, 0.0)), rect);
+    for kind in (0..=10).map(StretchKind::from_id) {
+        let no_width = SkinRect::new(0.0, 0.0, 0.0, 100.0);
+        let no_height = SkinRect::new(0.0, 0.0, 100.0, 0.0);
+        assert_eq!(stretch_rect(kind, rect, no_width), (rect, no_width), "{kind:?}");
+        assert_eq!(stretch_rect(kind, rect, no_height), (rect, no_height), "{kind:?}");
+    }
 }
 
 #[test]

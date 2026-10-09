@@ -6,21 +6,13 @@
 
 use std::path::{Path, PathBuf};
 
-use rbms_config::DEFAULT_SKIN_FOLDER;
 use rbms_skin::loader::{SKIN_TYPE_DECIDE, SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_PLAY_7KEYS, SKIN_TYPE_RESULT};
 
+use crate::stage::capture::{Missed, SCENE_START_US, Shot, app_in, draw_at, draw_until_compiled, settings_of, skin_folder_of};
 use crate::stage::loading::LoadingState;
-use crate::stage::render_tests::{play_state_with_bga, render, render_into, result_state};
+use crate::stage::render_tests::{play_state_with_bga, render, result_state};
 use crate::stage::{HeadlessCanvas, SelectState, Stage};
-use crate::{App, CH, CW, Color, Config, LaunchOptions};
-
-/// Frames a test draws while a document's files are read on the worker pool.
-///
-/// A document is compiled off the frame loop, so the frame it is selected on still draws the
-/// built-in layout and the document takes over once its images have arrived. Four seconds of frames
-/// is far more than a two-pixel image needs and still fails rather than hanging if the pool never
-/// finishes.
-const DOCUMENT_LOAD_FRAMES: usize = 240;
+use crate::{App, CH, CW, Color, Config};
 
 /// The colour the fixture document paints its one image with, picked so no built-in screen draws it.
 const MARK: Color = Color::rgb(12, 200, 90);
@@ -47,20 +39,6 @@ fn flat_document(screen: i32) -> String {
     )
 }
 
-/// The settings file of a folder that belongs to one test, so writing a skin folder beside it
-/// cannot disturb the other render snapshots.
-fn settings_of(tag: &str) -> PathBuf {
-    let directory = std::env::temp_dir().join(format!("rbms-document-render-{tag}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&directory);
-    std::fs::create_dir_all(directory.join(DEFAULT_SKIN_FOLDER)).expect("the fixture folder is writable");
-    directory.join("settings.ron")
-}
-
-/// The skin folder beside one test's settings file.
-fn skin_folder_of(settings: &Path) -> PathBuf {
-    settings.parent().unwrap_or(Path::new(".")).join(DEFAULT_SKIN_FOLDER)
-}
-
 /// Write the flat document for `screen` and its image into the skin folder beside `settings`, and
 /// answer the document.
 fn write_document(settings: &Path, screen: i32) -> PathBuf {
@@ -74,12 +52,11 @@ fn write_document(settings: &Path, screen: i32) -> PathBuf {
 
 /// An app reading `settings`, with `selected` chosen as the document one screen is drawn with.
 fn app_with(settings: PathBuf, selected: Option<(i32, &Path)>) -> App {
-    rbms_render::font::use_embedded_fonts_only();
     let mut config = Config::default();
     if let Some((screen, document)) = selected {
         config.skin.select(screen, Some(document.to_string_lossy().into_owned()));
     }
-    App::new(String::new(), config, LaunchOptions::default(), settings)
+    app_in(settings, config)
 }
 
 /// An app in a folder of this test's own whose `screen` is drawn with the flat document.
@@ -89,23 +66,11 @@ fn app_drawing(tag: &str, screen: i32) -> App {
     app_with(settings, Some((screen, &document)))
 }
 
-/// Draws the stage `stage` builds onto `pixels` until the document for `screen` has compiled, then
-/// draws one more frame so the canvas shows the document rather than the last built-in frame before
-/// it; answers whether it compiled in time.
-///
-/// One canvas throughout: the compiled document registers its textures with the target it was built
-/// against, so a frame drawn onto a different canvas would find none of them. A fresh stage per
-/// frame, because that is the only way a screen whose own state advances -- the loading screen
-/// starts its work on its second frame -- can be drawn as many times as a document takes to arrive.
+/// Draws the stage `stage` builds onto `pixels` until the document for `screen` has compiled;
+/// answers whether it compiled in time. None of these documents animate, so every frame is drawn at
+/// the moment the scene began.
 fn render_until_compiled(app: &mut App, screen: i32, pixels: &mut HeadlessCanvas, stage: impl Fn() -> Stage) -> bool {
-    for _ in 0..DOCUMENT_LOAD_FRAMES {
-        render_into(app, stage(), pixels);
-        if app.shared.has_compiled_skin(screen) {
-            render_into(app, stage(), pixels);
-            return true;
-        }
-    }
-    false
+    draw_until_compiled(app, screen, SCENE_START_US, pixels, stage)
 }
 
 /// A fresh song browser.
@@ -159,7 +124,7 @@ fn a_screen_keeps_drawing_while_its_document_is_read() {
     let mut app = app_drawing("pending", SKIN_TYPE_MUSIC_SELECT);
 
     let mut pixels = HeadlessCanvas::new(CW, CH);
-    render_into(&mut app, browser(), &mut pixels);
+    draw_at(&mut app, browser(), SCENE_START_US, &mut pixels);
     assert!(app.shared.has_skin_document(SKIN_TYPE_MUSIC_SELECT), "the screen has a document from the frame it was chosen on");
     if !app.shared.has_compiled_skin(SKIN_TYPE_MUSIC_SELECT) {
         assert_ne!(pixels.pixel_at(0, 0), MARK, "a frame drawn before the files arrived drew the built-in list");
@@ -167,6 +132,84 @@ fn a_screen_keeps_drawing_while_its_document_is_read() {
 
     assert!(render_until_compiled(&mut app, SKIN_TYPE_MUSIC_SELECT, &mut pixels, browser), "the document compiles within the frame budget");
     assert_eq!(pixels.pixel_at(0, 0), MARK, "once the files arrive the document takes the screen");
+}
+
+/// A document screen is captured on either backend, each from an app of its own: a compiled document
+/// holds textures registered with the target it was compiled against, so the app one target drew
+/// with has nothing the other can draw from.
+#[test]
+fn a_document_screen_is_captured_alike_on_both_backends() {
+    let shot = Shot { name: "document-select", size: (CW, CH), scene_us: SCENE_START_US, document: Some(SKIN_TYPE_MUSIC_SELECT) };
+
+    let mut headless_app = app_drawing("shot-headless", SKIN_TYPE_MUSIC_SELECT);
+    let pixels = shot.take(&mut headless_app, browser).expect("the document compiles within the frame budget");
+    assert_drawn_by_the_document_alone(&pixels, "browser");
+
+    let mut gpu_app = app_drawing("shot-gpu", SKIN_TYPE_MUSIC_SELECT);
+    let from_gpu = match shot.take_on_gpu(&mut gpu_app, browser) {
+        Err(Missed::NoAdapter) => return,
+        taken => taken.expect("the document compiles within the frame budget"),
+    };
+    let mark = [MARK.r, MARK.g, MARK.b, MARK.a];
+    assert!(from_gpu.chunks_exact(mark.len()).all(|pixel| pixel == mark), "the GPU drew something other than the document over the whole target");
+}
+
+/// A target half as large again as the size the unresized fixture is authored at.
+const LARGE: (u32, u32) = (1920, 1080);
+
+/// Size of the image the unresized fixture draws, in the image's own pixels.
+const STAMP: (u32, u32) = (40, 20);
+
+/// Edge of the square the unresized fixture gives that image, centred on the document: roomier than
+/// the image on both axes, at the authored size and on the larger target alike.
+const STAMP_BOX: u32 = 80;
+
+/// The `stretch` value that draws an image at its own pixel size, centred in its destination.
+const STRETCH_NO_RESIZE: i32 = 9;
+
+/// A browser document authored at the size the built-in screens are laid out for, drawing one image
+/// that asks not to be resized.
+fn unresized_document() -> String {
+    let (stamp_w, stamp_h) = STAMP;
+    let (x, y) = ((CW - STAMP_BOX) / 2, (CH - STAMP_BOX) / 2);
+    format!(
+        r#"{{
+            "type": {SKIN_TYPE_MUSIC_SELECT},
+            "name": "unresized",
+            "w": {CW},
+            "h": {CH},
+            "source": [{{ "id": "stamp", "path": "stamp.png" }}],
+            "image": [{{ "id": "stamp", "src": "stamp", "x": 0, "y": 0, "w": {stamp_w}, "h": {stamp_h} }}],
+            "destination": [
+                {{ "id": "stamp", "stretch": {STRETCH_NO_RESIZE}, "dst": [{{ "time": 0, "x": {x}, "y": {y}, "w": {STAMP_BOX}, "h": {STAMP_BOX} }}] }}
+            ]
+        }}"#
+    )
+}
+
+/// A document is drawn on the target's own pixels, not laid out for the built-in screens' size and
+/// then enlarged with them: on a target half as large again as the document, an image that asks not
+/// to be resized still covers exactly as many pixels as it has. Enlarged after the fact it would
+/// cover half as many again on each axis.
+#[test]
+fn a_document_is_laid_out_in_the_targets_own_pixels() {
+    let settings = settings_of("unresized");
+    let folder = skin_folder_of(&settings);
+    image::RgbaImage::from_pixel(STAMP.0, STAMP.1, image::Rgba([MARK.r, MARK.g, MARK.b, MARK.a])).save(folder.join("stamp.png")).expect("the image is written");
+    let document = folder.join("unresized.json");
+    std::fs::write(&document, unresized_document()).expect("the document is written");
+    let mut app = app_with(settings, Some((SKIN_TYPE_MUSIC_SELECT, &document)));
+
+    let shot = Shot { name: "document-unresized-1920x1080", size: LARGE, scene_us: SCENE_START_US, document: Some(SKIN_TYPE_MUSIC_SELECT) };
+    let pixels = shot.take(&mut app, browser).expect("the document compiles within the frame budget");
+
+    let (left, top) = ((LARGE.0 - STAMP.0) / 2, (LARGE.1 - STAMP.1) / 2);
+    let (right, bottom) = (left + STAMP.0, top + STAMP.1);
+    assert_eq!(pixels.pixel_at(left, top), MARK, "the image does not start where its own size, centred, puts it");
+    assert_eq!(pixels.pixel_at(right - 1, bottom - 1), MARK, "the image does not reach as far as its own size");
+    for (x, y) in [(left - 1, top), (left, top - 1), (right, bottom - 1), (right - 1, bottom)] {
+        assert_ne!(pixels.pixel_at(x, y), MARK, "the image was drawn larger than its own pixels: it covers {x},{y}");
+    }
 }
 
 /// The same screen with nothing selected draws exactly the frame the built-in screen draws, whether

@@ -190,7 +190,7 @@ pub(crate) fn build_songlist(
 fn resolve(track: &DestinationTrack, frame: &SkinFrame<'_>) -> Option<Resolved> {
     let state: &dyn DrawStateSource = frame.state;
     let gate: Option<&dyn LuaDrawEval> = frame.lua.map(|lua| lua as &dyn LuaDrawEval);
-    prepare(track, frame.now_ms, frame.timers, state, gate, (0.0, 0.0), frame.mouse)
+    prepare(track, frame.now_us, frame.timers, state, gate, (0.0, 0.0), frame.mouse)
 }
 
 /// Draws one slot's bar, as the image its id names or as a plain filled rectangle when it names

@@ -211,8 +211,9 @@ impl SkinViewport {
 
 /// Everything one frame of a skin needs from the running game.
 pub struct SkinFrame<'a> {
-    /// The clock the frame is drawn against, the same one every timer is measured on.
-    pub now_ms: i64,
+    /// The clock the frame is drawn against, in microseconds, the same one every timer is measured
+    /// on.
+    pub now_us: i64,
     pub timers: &'a TimerState,
     pub state: &'a dyn SkinStateSource,
     /// The compiled expressions, when the host has a sandbox.
@@ -228,7 +229,7 @@ pub struct SkinFrame<'a> {
 
 impl std::fmt::Debug for SkinFrame<'_> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.debug_struct("SkinFrame").field("now_ms", &self.now_ms).field("mouse", &self.mouse).finish_non_exhaustive()
+        formatter.debug_struct("SkinFrame").field("now_us", &self.now_us).field("mouse", &self.mouse).finish_non_exhaustive()
     }
 }
 

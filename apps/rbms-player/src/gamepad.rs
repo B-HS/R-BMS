@@ -64,6 +64,34 @@ const CAPTURE_AXIS_THRESHOLD: f32 = 0.5;
 
 const US_PER_MS: i64 = 1_000;
 
+/// A button every controller layout names the same way, whatever event code the platform gives it.
+///
+/// Only the two menu buttons are modelled: they are what START and SELECT ship bound to, on a pad
+/// whose native codes are not known in advance. Everything else on a controller is bound by the
+/// native code the key editor captures.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum StandardButton {
+    Start,
+    Select,
+}
+
+impl StandardButton {
+    fn from_gilrs(button: gilrs::Button) -> Option<StandardButton> {
+        match button {
+            gilrs::Button::Start => Some(StandardButton::Start),
+            gilrs::Button::Select => Some(StandardButton::Select),
+            _ => None,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            StandardButton::Start => "START",
+            StandardButton::Select => "SELECT",
+        }
+    }
+}
+
 /// What one lane or control is bound to on a controller.
 ///
 /// A button is stored as the platform's own event code rather than a gilrs `Button`, because an
@@ -72,6 +100,8 @@ const US_PER_MS: i64 = 1_000;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PadBinding {
     Button(u32),
+    /// A menu button named by what it is rather than by its code.
+    Standard(StandardButton),
     /// One direction of one axis, held once it passes the deadzone.
     Axis {
         axis: u32,
@@ -89,6 +119,7 @@ impl PadBinding {
     pub fn label(self) -> String {
         match self {
             PadBinding::Button(code) => format!("BUTTON {code}"),
+            PadBinding::Standard(button) => format!("STANDARD {}", button.label()),
             PadBinding::Axis { axis, positive } => format!("AXIS {axis} {}", if positive { "+" } else { "-" }),
             PadBinding::AnalogScratch { axis } => format!("ANALOG {axis}"),
         }
@@ -98,16 +129,28 @@ impl PadBinding {
     pub fn as_analog_scratch(self) -> Option<PadBinding> {
         match self {
             PadBinding::Axis { axis, .. } | PadBinding::AnalogScratch { axis } => Some(PadBinding::AnalogScratch { axis }),
-            PadBinding::Button(_) => None,
+            PadBinding::Button(_) | PadBinding::Standard(_) => None,
         }
+    }
+}
+
+/// What a control reads on a controller until the player binds it to something else: START and
+/// SELECT are the pad's own menu buttons, every other control starts unbound.
+fn default_control_binding(action: ControlAction) -> Option<PadBinding> {
+    match action {
+        ControlAction::Start => Some(PadBinding::Standard(StandardButton::Start)),
+        ControlAction::Select => Some(PadBinding::Standard(StandardButton::Select)),
+        _ => None,
     }
 }
 
 /// What the player's controller is bound to, stored inside the key config file.
 ///
-/// It ships with nothing bound, so a fresh install behaves exactly as it did before a controller
-/// was readable at all. `enabled` is on for that reason: an empty binding table is already inert,
-/// and leaving it on means plugging a controller in and binding it is one screen rather than two.
+/// It ships with no lane bound, so a fresh install plays exactly as it did before a controller was
+/// readable at all; START and SELECT alone start on the pad's menu buttons, which only the screens
+/// that read them react to. `enabled` is on for that reason: a table with no lane bound is already
+/// inert, and leaving it on means plugging a controller in and binding it is one screen rather
+/// than two.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PadConfig {
@@ -120,7 +163,8 @@ pub struct PadConfig {
     /// The binding each scratch lane is spun backwards with, shaped like `lanes`. A turntable
     /// needs no entry here: it drives both directions from the forward slot.
     pub scratch_reverse: BTreeMap<String, Vec<Option<PadBinding>>>,
-    /// In-play controls, keyed by [`ControlAction::label`].
+    /// Control bindings the player has set, keyed by [`ControlAction::label`]. A control with no
+    /// entry reads its default (see [`PadConfig::control_binding`]).
     pub controls: BTreeMap<String, PadBinding>,
     pub debounce_ms: u32,
     pub analog_mode: AnalogMode,
@@ -185,10 +229,14 @@ impl PadConfig {
         set_slot(&mut self.scratch_reverse, mode, lane, binding);
     }
 
+    /// What a control is bound to: the player's binding if there is one, otherwise its default,
+    /// which is the standard menu button for START and SELECT and nothing for the rest. A key
+    /// config written before START and SELECT existed therefore reads them on those buttons.
     pub fn control_binding(&self, action: ControlAction) -> Option<PadBinding> {
-        self.controls.get(action.label()).copied()
+        self.controls.get(action.label()).copied().or_else(|| default_control_binding(action))
     }
 
+    /// Bind a control, or with `None` drop the player's binding so it reads its default again.
     pub fn set_control(&mut self, action: ControlAction, binding: Option<PadBinding>) {
         match binding {
             Some(binding) => {
@@ -237,6 +285,7 @@ impl PadConfig {
             let Some(binding) = self.lane_binding(mode, lane) else { continue };
             match binding {
                 PadBinding::Button(code) => plan.push((PadElement::Button(code), PadTarget::lane(lane, ScratchDir::Forward))),
+                PadBinding::Standard(button) => plan.push((PadElement::Standard(button), PadTarget::lane(lane, ScratchDir::Forward))),
                 PadBinding::Axis { axis, positive } => plan.push((PadElement::AxisDir { axis, positive }, PadTarget::lane(lane, ScratchDir::Forward))),
                 PadBinding::AnalogScratch { axis } => {
                     plan.push((PadElement::AxisDir { axis, positive: true }, PadTarget::lane(lane, ScratchDir::Forward)));
@@ -249,6 +298,7 @@ impl PadConfig {
         for lane in (0..mode.key).filter(|&lane| mode.is_scratch(lane)) {
             match self.scratch_reverse_binding(mode, lane) {
                 Some(PadBinding::Button(code)) => plan.push((PadElement::Button(code), PadTarget::lane(lane, ScratchDir::Backward))),
+                Some(PadBinding::Standard(button)) => plan.push((PadElement::Standard(button), PadTarget::lane(lane, ScratchDir::Backward))),
                 Some(PadBinding::Axis { axis, positive }) => plan.push((PadElement::AxisDir { axis, positive }, PadTarget::lane(lane, ScratchDir::Backward))),
                 Some(PadBinding::AnalogScratch { .. }) | None => {}
             }
@@ -256,6 +306,7 @@ impl PadConfig {
         for action in ControlAction::ALL {
             match self.control_binding(action) {
                 Some(PadBinding::Button(code)) => plan.push((PadElement::Button(code), PadTarget::Control(action))),
+                Some(PadBinding::Standard(button)) => plan.push((PadElement::Standard(button), PadTarget::Control(action))),
                 Some(PadBinding::Axis { axis, positive }) => plan.push((PadElement::AxisDir { axis, positive }, PadTarget::Control(action))),
                 Some(PadBinding::AnalogScratch { .. }) | None => {}
             }
@@ -277,6 +328,7 @@ fn set_slot(rows: &mut BTreeMap<String, Vec<Option<PadBinding>>>, mode: Mode, la
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum PadElement {
     Button(u32),
+    Standard(StandardButton),
     AxisDir { axis: u32, positive: bool },
 }
 
@@ -297,7 +349,8 @@ impl PadTarget {
 ///
 /// A lane carries its spin direction because rbms models a scratch as one lane spun two ways,
 /// where the reference models it as two separate lane assignments. A control carries no state: it
-/// fires on the press, like the key that does the same job.
+/// fires on the press, like the key that does the same job. What is still held afterwards is read
+/// back with [`PadState::held`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PadEvent {
     Lane { lane: usize, dir: ScratchDir, press: bool },
@@ -336,12 +389,17 @@ impl ButtonGate {
 #[derive(Clone, Debug, Default)]
 pub struct PadSnapshot {
     buttons: BTreeMap<u32, bool>,
+    standard: BTreeMap<StandardButton, bool>,
     axes: BTreeMap<u32, f32>,
 }
 
 impl PadSnapshot {
     pub fn set_button(&mut self, code: u32, pressed: bool) {
         self.buttons.insert(code, pressed);
+    }
+
+    pub fn set_standard(&mut self, button: StandardButton, pressed: bool) {
+        self.standard.insert(button, pressed);
     }
 
     pub fn set_axis(&mut self, code: u32, value: f32) {
@@ -352,12 +410,17 @@ impl PadSnapshot {
         self.buttons.get(&code).copied().unwrap_or(false)
     }
 
+    pub fn standard(&self, button: StandardButton) -> bool {
+        self.standard.get(&button).copied().unwrap_or(false)
+    }
+
     pub fn axis(&self, code: u32) -> f32 {
         self.axes.get(&code).copied().unwrap_or_default()
     }
 
     pub fn clear(&mut self) {
         self.buttons.clear();
+        self.standard.clear();
         self.axes.clear();
     }
 }
@@ -417,6 +480,29 @@ impl PadMapper {
             .collect()
     }
 
+    /// Everything the controller is holding down as of the last [`PadMapper::resolve`], as the
+    /// events that put it there, each once. It reads the accepted (debounced) state of every
+    /// element the config listens to, so a lane held by two elements stays held until both let go.
+    pub fn held(&self, cfg: &PadConfig, mode: Mode) -> Vec<PadEvent> {
+        if !cfg.enabled {
+            return Vec::new();
+        }
+        let mut held = Vec::new();
+        for (element, target) in cfg.plan(mode) {
+            if !self.gates.get(&element).is_some_and(|gate| gate.pressed) {
+                continue;
+            }
+            let event = match target {
+                PadTarget::Lane { lane, dir } => PadEvent::Lane { lane, dir, press: true },
+                PadTarget::Control(action) => PadEvent::Control(action),
+            };
+            if !held.contains(&event) {
+                held.push(event);
+            }
+        }
+        held
+    }
+
     /// Forget every turntable when the algorithm or its threshold changes, so a machine mid-spin
     /// under the old settings cannot leave a lane held under the new ones.
     fn retune(&mut self, cfg: &PadConfig, mode: Mode) {
@@ -436,6 +522,7 @@ impl PadMapper {
     fn read(&mut self, element: PadElement, deadzone: f32, snapshot: &PadSnapshot) -> bool {
         match element {
             PadElement::Button(code) => snapshot.button(code),
+            PadElement::Standard(button) => snapshot.standard(button),
             PadElement::AxisDir { axis, positive } => {
                 let value = snapshot.axis(axis);
                 match self.analog.get_mut(&axis) {
@@ -512,6 +599,11 @@ impl PadState {
         self.mapper.resolve(now_us, cfg, mode, &self.snapshot)
     }
 
+    /// What the controller is holding down right now, as of the last poll.
+    pub fn held(&self, cfg: &PadConfig, mode: Mode) -> Vec<PadEvent> {
+        self.mapper.held(cfg, mode)
+    }
+
     /// The binding the player last produced, for the key editor's "press something" mode. Taking
     /// it clears it, so the next binding captured is the next thing pressed.
     pub fn take_capture(&mut self, cfg: &PadConfig) -> Option<PadBinding> {
@@ -535,12 +627,20 @@ impl PadState {
                 continue;
             }
             match event.event {
-                gilrs::EventType::ButtonPressed(_, code) => {
+                gilrs::EventType::ButtonPressed(button, code) => {
                     let code = code.into_u32();
                     self.snapshot.set_button(code, true);
+                    if let Some(standard) = StandardButton::from_gilrs(button) {
+                        self.snapshot.set_standard(standard, true);
+                    }
                     self.capture = Some(PadBinding::Button(code));
                 }
-                gilrs::EventType::ButtonReleased(_, code) => self.snapshot.set_button(code.into_u32(), false),
+                gilrs::EventType::ButtonReleased(button, code) => {
+                    self.snapshot.set_button(code.into_u32(), false);
+                    if let Some(standard) = StandardButton::from_gilrs(button) {
+                        self.snapshot.set_standard(standard, false);
+                    }
+                }
                 gilrs::EventType::AxisChanged(_, value, code) => {
                     let axis = code.into_u32();
                     self.snapshot.set_axis(axis, value);

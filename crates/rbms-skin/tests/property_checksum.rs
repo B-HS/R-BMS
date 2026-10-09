@@ -11,7 +11,7 @@ use rbms_skin::property::{
     DefaultState, FLOAT_MAX, FLOAT_MIN, MAPPINGS, Mapping, PropertyKind, SkinStateSource, StateSource, UNMAPPED_BOOLEAN, UNMAPPED_FLOAT, UNMAPPED_INTEGER,
     UNMAPPED_STRING, UnmappedLog, clamp_float, normalize_boolean_id, source_of,
 };
-use rbms_skin::timer::{TIMER_CONSTANT_COUNT, timer_id};
+use rbms_skin::timer::{TIMER_CONSTANT_COUNT, TIMER_OFF, timer_id};
 
 /// FNV-1a 64-bit offset basis, matching `tools/gen-skin-property.rs`.
 const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
@@ -324,7 +324,7 @@ fn an_unanswered_read_returns_its_documented_default() {
     assert_eq!(state.integer(NUMBER_COMBO), UNMAPPED_INTEGER);
     assert_eq!(state.float(RATE_SCORE), UNMAPPED_FLOAT);
     assert_eq!(state.string(STRING_TITLE), UNMAPPED_STRING);
-    assert_eq!(state.timer(timer_id::PLAY.get()), None);
+    assert_eq!(state.timer_us(timer_id::PLAY.get()), TIMER_OFF);
     assert_eq!(rbms_skin::dst::OffsetSource::offset(&state, 0), None);
 }
 

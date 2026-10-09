@@ -9,14 +9,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use rbms_model::Mode;
-use rbms_skin::dst::{DrawCondition, DrawStateSource, Keyframe, OffsetSource, SkinColor, SkinOffset, SkinRect, draw_conditions_from_ops, prepare};
-use rbms_skin::loader::{SkinLoadOptions, SkinUserConfig, StretchKind, every_option_known, load_skin};
+use rbms_skin::dst::{DrawCondition, DrawStateSource, Keyframe, OffsetSource, SkinColor, SkinOffset, SkinRect, TimerRef, draw_conditions_from_ops, prepare};
+use rbms_skin::loader::{SkinLoadOptions, SkinUserConfig, every_option_known, load_skin};
 use rbms_skin::model::Destination;
-use rbms_skin::property::{DefaultState, MAPPINGS, PropertyKind, SkinStateSource, UNMAPPED_CLOCK_MS, UnmappedLog, source_of};
-use rbms_skin::timer::{TimerId, TimerState};
+use rbms_skin::property::{DefaultState, MAPPINGS, PropertyKind, SkinStateSource, UNMAPPED_CLOCK_US, UnmappedLog, source_of};
+use rbms_skin::timer::{TIMER_OFF, TimerId, TimerState};
 
-/// The clock every frame in this file is drawn against.
-const FRAME_NOW_MS: i64 = 1_234;
+/// The clock every frame in this file is drawn against, in microseconds.
+const FRAME_NOW_US: i64 = 1_234_000;
 
 /// The timer the sample track hangs its keyframes off.
 const TRACK_TIMER: TimerId = TimerId(1);
@@ -89,18 +89,18 @@ impl SkinStateSource for PlayerState {
         ""
     }
 
-    fn timer(&self, id: i32) -> Option<i64> {
-        self.timers.get(&id).copied()
+    fn timer_us(&self, id: i32) -> i64 {
+        self.timers.get(&id).copied().unwrap_or(TIMER_OFF)
     }
 
-    fn now_ms(&self) -> i64 {
+    fn now_us(&self) -> i64 {
         self.now
     }
 }
 
 /// A state with the sample values every test below reads.
 fn sample_state() -> PlayerState {
-    let mut state = PlayerState { now: FRAME_NOW_MS, ..PlayerState::default() };
+    let mut state = PlayerState { now: FRAME_NOW_US, ..PlayerState::default() };
     state.booleans.insert(DECLARED_OPTION);
     state.integers.insert(SAMPLE_NUMBER, SAMPLE_NUMBER_VALUE);
     state.offsets.insert(SAMPLE_OFFSET, SkinOffset { x: SAMPLE_OFFSET_X, ..SkinOffset::default() });
@@ -110,12 +110,11 @@ fn sample_state() -> PlayerState {
 /// A one-keyframe track that draws a fixed rectangle whenever its conditions hold.
 fn sample_track() -> rbms_skin::dst::DestinationTrack {
     rbms_skin::dst::DestinationTrack {
-        timer: Some(TRACK_TIMER),
+        timer: Some(TimerRef::Id(TRACK_TIMER)),
         frames: vec![Keyframe {
             time_ms: 0,
             rect: SkinRect::new(0.0, 0.0, 10.0, 10.0),
             clip: None,
-            acc: rbms_skin::dst::Acc::Linear,
             color: SkinColor::rgba(255, 255, 255, 255),
             angle_deg: 0.0,
         }],
@@ -154,7 +153,7 @@ fn one_state_implementation_serves_the_registry_and_the_interpolator() {
     let gating: &dyn DrawStateSource = &state;
     assert!(gating.boolean(DECLARED_OPTION), "the same value upcasts to what the interpolator gates on");
 
-    let resolved = prepare(&sample_track(), FRAME_NOW_MS, &running_timers(), gating, None, (0.0, 0.0), None);
+    let resolved = prepare(&sample_track(), FRAME_NOW_US, &running_timers(), gating, None, (0.0, 0.0), None);
     assert!(resolved.is_some(), "a track with no conditions draws against the upcast state");
 }
 
@@ -167,13 +166,13 @@ fn the_registry_trait_carries_every_accessor_the_lua_whitelist_delegates_to() {
     assert_eq!(source.integer(SAMPLE_NUMBER), SAMPLE_NUMBER_VALUE);
     assert_eq!(source.float(SAMPLE_NUMBER), 0.0);
     assert_eq!(source.string(SAMPLE_NUMBER), "");
-    assert_eq!(source.timer(TRACK_TIMER.get()), None);
-    assert_eq!(source.now_ms(), FRAME_NOW_MS);
+    assert_eq!(source.timer_us(TRACK_TIMER.get()), TIMER_OFF);
+    assert_eq!(source.now_us(), FRAME_NOW_US);
 }
 
 #[test]
 fn the_default_state_answers_the_documented_clock() {
-    assert_eq!(DefaultState.now_ms(), UNMAPPED_CLOCK_MS, "a screen with no clock yet resolves at the origin");
+    assert_eq!(DefaultState.now_us(), UNMAPPED_CLOCK_US, "a screen with no clock yet resolves at the origin");
 }
 
 #[test]
@@ -182,7 +181,7 @@ fn an_offset_moves_a_drawn_object_through_the_same_state_value() {
     let mut track = sample_track();
     track.offsets.push(SAMPLE_OFFSET);
 
-    let resolved = prepare(&track, FRAME_NOW_MS, &running_timers(), &state, None, (0.0, 0.0), None).expect("the track draws");
+    let resolved = prepare(&track, FRAME_NOW_US, &running_timers(), &state, None, (0.0, 0.0), None).expect("the track draws");
     assert_eq!(resolved.rect.x, SAMPLE_OFFSET_X, "the offset came from the registry implementation's supertrait");
 }
 
@@ -244,18 +243,9 @@ fn an_option_the_registry_does_not_declare_leaves_its_object_visible() {
     track.draw_conditions = undeclared;
     let state = sample_state();
     assert!(
-        prepare(&track, FRAME_NOW_MS, &running_timers(), &state, None, (0.0, 0.0), None).is_some(),
+        prepare(&track, FRAME_NOW_US, &running_timers(), &state, None, (0.0, 0.0), None).is_some(),
         "so the object stays on screen instead of vanishing on an unimplemented build"
     );
-}
-
-#[test]
-fn a_stretch_the_renderer_does_not_implement_is_reported_rather_than_hidden() {
-    let track = sample_track();
-    assert!(StretchKind::from_id(track.stretch).is_supported(), "the unspecified default is drawable");
-
-    let unsupported: Vec<StretchKind> = (0..16).map(StretchKind::from_id).filter(|kind| !kind.is_supported()).collect();
-    assert!(!unsupported.is_empty(), "the classifier names at least one mode the renderer falls back on");
 }
 
 #[test]
@@ -319,14 +309,14 @@ mod with_lua {
         track.draw_conditions = vec![DrawCondition::Lua(expression)];
 
         let frame = sandbox.frame(&state);
-        let resolved = prepare(&track, FRAME_NOW_MS, &running_timers(), &state, Some(&frame), (0.0, 0.0), None);
+        let resolved = prepare(&track, FRAME_NOW_US, &running_timers(), &state, Some(&frame), (0.0, 0.0), None);
         assert!(resolved.is_some(), "the same value gated the draw and answered the expression");
         assert_eq!(frame.calls(), 1, "the expression was evaluated once for the frame");
     }
 
     #[test]
     fn a_false_expression_hides_its_object_rather_than_failing_the_frame() {
-        let state = PlayerState { now: FRAME_NOW_MS, ..PlayerState::default() };
+        let state = PlayerState { now: FRAME_NOW_US, ..PlayerState::default() };
         let sandbox = sandbox();
         let expression = sandbox.compile("skin.boolean(901)").expect("the expression should compile");
 
@@ -334,7 +324,7 @@ mod with_lua {
         track.draw_conditions = vec![DrawCondition::Lua(expression)];
 
         let frame = sandbox.frame(&state);
-        assert!(prepare(&track, FRAME_NOW_MS, &running_timers(), &state, Some(&frame), (0.0, 0.0), None).is_none());
+        assert!(prepare(&track, FRAME_NOW_US, &running_timers(), &state, Some(&frame), (0.0, 0.0), None).is_none());
         assert_eq!(frame.eval_draw(expression), Some(false), "and the evaluator reports it plainly");
     }
 
@@ -344,7 +334,7 @@ mod with_lua {
         let sandbox = sandbox();
 
         let seen = sandbox.eval_int("skin.time()", &state as &dyn SkinStateSource).expect("the expression should run");
-        assert_eq!(i64::from(seen), FRAME_NOW_MS, "skin.time() reads the registry's own clock, which is the one prepare is given for the same frame");
+        assert_eq!(i64::from(seen), FRAME_NOW_US, "skin.time() reads the registry's own clock, which is the one prepare is given for the same frame");
     }
 
     #[test]

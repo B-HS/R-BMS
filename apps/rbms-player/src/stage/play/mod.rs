@@ -581,15 +581,15 @@ impl PlayState {
         let Some(skin_type) = mode_skin_type(ctx.shared.mode).filter(|skin_type| ctx.shared.has_skin_document(*skin_type)) else {
             return false;
         };
-        let now_ms = ctx.shared.skin_now_ms();
+        let now_us = ctx.shared.skin_now_us();
         let total_notes = self.session.judge().total_notes();
         if self.session.is_failed() && !ctx.shared.skin_timers.is_on(timer_id::FAILED) {
-            ctx.shared.skin_play_timers.fail(&mut ctx.shared.skin_timers, now_ms);
+            ctx.shared.skin_play_timers.fail(&mut ctx.shared.skin_timers, now_us);
         }
         let keys_down = self.keys_down();
         let lanes = lane_timer_states(&ctx.shared.skin, &self.session, &self.long_notes, &keys_down, song_us);
         let play = PlayLanes { lanes: &lanes, judged_side: self.judged_side };
-        ctx.shared.skin_play_timers.update(&mut ctx.shared.skin_timers, hud, total_notes, now_ms, &play);
+        ctx.shared.skin_play_timers.update(&mut ctx.shared.skin_timers, hud, total_notes, now_us, &play);
         let offsets = ctx.shared.skin_offsets(skin_type);
         let meta = &self.session.model().meta;
         let gauge_kind = self.session.judge().gauge.selected_index().index();
@@ -601,7 +601,7 @@ impl PlayState {
             bpm,
             hispeed,
             autoplay: ctx.shared.config.play.autoplay && ctx.shared.replay.is_none(),
-            now_ms,
+            now_us,
             offsets: Some(&offsets),
             field: Some(&ctx.shared.skin),
             shade,
@@ -673,8 +673,8 @@ impl StageHandler for PlayState {
     /// off, which is what a document's opening animation is measured from.
     fn on_enter(&mut self, ctx: &mut FrameCtx<'_>) {
         ctx.shared.play_system_sound(SystemSound::PlayReady);
-        let now_ms = ctx.shared.skin_now_ms();
-        ctx.shared.skin_play_timers.start(&mut ctx.shared.skin_timers, now_ms);
+        let now_us = ctx.shared.skin_now_us();
+        ctx.shared.skin_play_timers.start(&mut ctx.shared.skin_timers, now_us);
     }
 
     fn on_exit(&mut self, ctx: &mut FrameCtx<'_>) {

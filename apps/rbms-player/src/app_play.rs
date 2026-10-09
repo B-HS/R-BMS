@@ -663,7 +663,8 @@ impl AppShared {
     }
 
     /// Begin actual play: capture the song-clock anchor, so the position starts at ~0. Called once
-    /// keysounds finish decoding (or immediately when there are none).
+    /// keysounds finish decoding (or immediately when there are none). The skin's scene clock is
+    /// not touched: it belongs to the scene, which the screen change into the run has restarted.
     pub(crate) fn start_play(&mut self) {
         self.clock = Instant::now();
         self.audio_dead_at.set(None);

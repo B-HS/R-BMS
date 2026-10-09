@@ -47,11 +47,20 @@ pub fn timer_name(id: TimerId) -> Option<&'static str> {
     ALL_TIMER.iter().find(|(value, _)| *value == id.0).map(|(_, name)| *name)
 }
 
+/// What an off timer reads as: the reference's `Long.MIN_VALUE`, kept as the same sentinel so a
+/// value crosses into a script and back without a second representation.
+pub const TIMER_OFF: i64 = i64::MIN;
+
+/// Microseconds in the millisecond a keyframe time is written in (`TimerProperty.get`, which divides
+/// the stored value by this).
+pub const MICROS_PER_MILLI: i64 = 1_000;
+
 /// Which timers are on, and since when.
 ///
-/// The reference keeps an "off" timer as `Long.MIN_VALUE` in a flat array; an absent entry here is
-/// that sentinel. Times are milliseconds on the same clock the caller passes to
-/// [`crate::dst::resolve`], so a timer switched on at `now_ms` reads as zero elapsed on that frame.
+/// Every value is the microsecond the timer switched on, on the same clock the caller passes to
+/// [`crate::dst::resolve`], and an off timer reads [`TIMER_OFF`]. The reference keeps the built-in
+/// ids in a flat array filled with that sentinel; an absent entry here is the same thing, and it
+/// covers the band a skin declares for itself as well.
 #[derive(Debug, Default, Clone)]
 pub struct TimerState {
     on: HashMap<TimerId, i64>,
@@ -63,47 +72,39 @@ impl TimerState {
         Self::default()
     }
 
-    /// Switches a timer on as of `now_ms`, restarting it if it was already on
-    /// (`TimerManager.setTimerOn`).
-    pub fn set_on(&mut self, id: TimerId, now_ms: i64) {
-        self.on.insert(id, now_ms);
+    /// Switches a timer on as of `now_us`, restarting it if it was already on
+    /// (`TimerManager.setMicroTimer`). Storing [`TIMER_OFF`] switches it off, as it does there.
+    pub fn set_on(&mut self, id: TimerId, now_us: i64) {
+        if now_us == TIMER_OFF {
+            self.on.remove(&id);
+        } else {
+            self.on.insert(id, now_us);
+        }
     }
 
     /// Switches a timer off (`TimerManager.setTimerOff`).
-    pub fn set_off(&mut self, id: TimerId) {
+    pub fn off(&mut self, id: TimerId) {
         self.on.remove(&id);
     }
 
     /// Switches a timer on or off, leaving an already-on timer at the moment it started rather than
     /// restarting it (`TimerManager.switchTimer`).
-    pub fn switch(&mut self, id: TimerId, on: bool, now_ms: i64) {
-        if on {
-            self.on.entry(id).or_insert(now_ms);
-        } else {
-            self.on.remove(&id);
+    pub fn switch(&mut self, id: TimerId, on: bool, now_us: i64) {
+        if !on {
+            self.off(id);
+        } else if !self.is_on(id) {
+            self.set_on(id, now_us);
         }
     }
 
-    /// Whether the timer is on.
+    /// Whether the timer is on (`TimerManager.isTimerOn`).
     pub fn is_on(&self, id: TimerId) -> bool {
-        self.on.contains_key(&id)
+        self.value_us(id) != TIMER_OFF
     }
 
-    /// Whether the timer is off (`TimerProperty.isOff`).
-    pub fn is_off(&self, id: TimerId) -> bool {
-        !self.is_on(id)
-    }
-
-    /// The millisecond the timer switched on, or `None` while it is off (`TimerProperty.get`).
-    pub fn get(&self, id: TimerId) -> Option<i64> {
-        self.on.get(&id).copied()
-    }
-
-    /// Milliseconds since the timer switched on, or `None` while it is off
-    /// (`TimerManager.getNowTime(id)`, which reports zero for an off timer; the caller decides what
-    /// an absent value means).
-    pub fn elapsed(&self, id: TimerId, now_ms: i64) -> Option<i64> {
-        self.get(id).map(|started| now_ms - started)
+    /// The microsecond the timer switched on, or [`TIMER_OFF`] (`TimerManager.getMicroTimer`).
+    pub fn value_us(&self, id: TimerId) -> i64 {
+        self.on.get(&id).copied().unwrap_or(TIMER_OFF)
     }
 
     /// Switches every timer off, as a screen change does (`TimerManager.setMainState`).

@@ -18,7 +18,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::dst::{DrawStateSource, OffsetSource, SkinOffset};
-use crate::timer::{ALL_TIMER, timer_id};
+use crate::timer::{ALL_TIMER, TIMER_OFF, timer_id};
 use generated::*;
 
 /// What kind of value a skin property id carries, and therefore which accessor of
@@ -36,7 +36,7 @@ pub enum PropertyKind {
     Float,
     /// `STRING_*`, read by [`SkinStateSource::string`].
     String,
-    /// `TIMER_*`, read by [`SkinStateSource::timer`].
+    /// `TIMER_*`, read by [`SkinStateSource::timer_us`].
     Timer,
 }
 
@@ -91,8 +91,8 @@ pub const UNMAPPED_FLOAT: f32 = 0.0;
 /// What [`SkinStateSource::string`] answers for an id this build does not implement.
 pub const UNMAPPED_STRING: &str = "";
 
-/// What [`SkinStateSource::now_ms`] answers before a frame clock exists.
-pub const UNMAPPED_CLOCK_MS: i64 = 0;
+/// What [`SkinStateSource::now_us`] answers before a frame clock exists.
+pub const UNMAPPED_CLOCK_US: i64 = 0;
 
 /// The low end of the range [`SkinStateSource::float`] answers in.
 pub const FLOAT_MIN: f32 = 0.0;
@@ -130,7 +130,7 @@ pub fn normalize_boolean_id(id: i32) -> i32 {
 ///
 /// The boolean and offset reads come from the supertraits, so one implementation serves both this
 /// registry and the draw gating in [`crate::dst`]. Every accessor answers for an id it does not
-/// implement rather than failing: the `UNMAPPED_*` constants above, or `None` for a timer.
+/// implement rather than failing: the `UNMAPPED_*` constants above, or [`TIMER_OFF`] for a timer.
 pub trait SkinStateSource: DrawStateSource {
     /// The integer under `id`, or [`UNMAPPED_INTEGER`].
     fn integer(&self, id: i32) -> i32;
@@ -143,14 +143,14 @@ pub trait SkinStateSource: DrawStateSource {
     fn float(&self, id: i32) -> f32;
     /// The text under `id`, or [`UNMAPPED_STRING`].
     fn string(&self, id: i32) -> &str;
-    /// When the timer under `id` switched on, or `None` while it is off.
-    fn timer(&self, id: i32) -> Option<i64>;
-    /// The clock the frame is being drawn against, in milliseconds.
+    /// The microsecond the timer under `id` switched on, or [`TIMER_OFF`] while it is off.
+    fn timer_us(&self, id: i32) -> i64;
+    /// The clock the frame is being drawn against, in microseconds.
     ///
     /// This is what `skin.time()` returns. It must be the same clock the frame passes to
     /// [`crate::dst::prepare`], so an expression and the animation it gates never disagree about
     /// what time it is.
-    fn now_ms(&self) -> i64;
+    fn now_us(&self) -> i64;
 }
 
 /// A state source that answers nothing.
@@ -185,12 +185,12 @@ impl SkinStateSource for DefaultState {
         UNMAPPED_STRING
     }
 
-    fn timer(&self, _id: i32) -> Option<i64> {
-        None
+    fn timer_us(&self, _id: i32) -> i64 {
+        TIMER_OFF
     }
 
-    fn now_ms(&self) -> i64 {
-        UNMAPPED_CLOCK_MS
+    fn now_us(&self) -> i64 {
+        UNMAPPED_CLOCK_US
     }
 }
 

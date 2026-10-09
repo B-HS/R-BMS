@@ -46,7 +46,7 @@ use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
-use winit::window::{Window, WindowId};
+use winit::window::WindowId;
 
 mod app_input;
 mod app_network;
@@ -79,6 +79,7 @@ mod library;
 mod main_tests;
 mod notify;
 mod play_sink;
+mod pointer;
 mod practice;
 mod scoredb_store;
 mod settings_ui;
@@ -92,6 +93,7 @@ pub mod target;
 mod textedit;
 mod timing;
 mod toast;
+mod window_mode;
 use app_network::build_server;
 use app_play::schedule_poll_interval_us;
 pub(crate) use assets::{DecodedImage, bundled_skin, decode_bga_image, install_default_sounds, keysound_jobs, load_theme, resolve_file, spawn_keysound_decode};
@@ -114,8 +116,9 @@ use judge_setup::{is_custom_judge, run_judge_setup, run_lntype};
 use keyconfig::{ControlAction, KeyConfig, key_from_name, key_name};
 use notify::{Level, notify};
 use play_sink::PlayAudioSink;
+use pointer::{HeldButtons, PointerInput, is_tracked};
 use settings_view::{SettingsHot, render_settings};
-use skin_screen::SkinScreens;
+use skin_screen::{SkinScene, SkinScreens};
 use skin_select::SkinLibrary;
 use stage::{Canvas, CourseResultState, FrameCtx, KeyInput, LoadingState, SelectState, Stage, StageId, Transition};
 use syssound::{SYSTEM_SOUND_GAIN, SystemSound, SystemSoundSet};
@@ -123,6 +126,7 @@ use tablesrc::{TableLevels, fetch_and_match};
 use textedit::{TextEdit, edit_key};
 use timing::{SoakLogger, SoakSnapshot, TIMING_CSV_ENV, TimingProbe, TimingSample, env_path, us_to_millis};
 use toast::ToastQueue;
+use window_mode::{AppWindow, window_attributes};
 
 pub(crate) use rbms_ir::mapping as ir_map;
 pub(crate) use rbms_store as replay;
@@ -437,13 +441,22 @@ struct App {
     stage: Stage,
     /// Screens suspended by one opened on top of them; [`Transition::Back`] resumes the newest.
     /// Only ever a screen the browser (or the settings screen) opened, so it stays one or two deep.
-    suspended: Vec<Stage>,
+    suspended: Vec<Suspended>,
     /// A chart or replay named on the command line, loaded once the window exists.
     launch_chart: bool,
     /// Why the app could not start, set when the window or the GPU backend could not be brought up.
     /// The event loop is asked to exit and [`run`] turns this into a failing exit code, so a machine
     /// with no usable adapter gets a message instead of a panic.
     startup_error: Option<String>,
+    /// The open window and the DISPLAY rows it was last brought to; `None` until the window exists.
+    window: Option<AppWindow>,
+}
+
+/// A screen parked under the one opened over it, with the skin scene it was in, so that coming back
+/// finds its timers and its clock where it left them.
+struct Suspended {
+    stage: Stage,
+    scene: SkinScene,
 }
 
 /// Everything that survives a stage change: the configuration, the library and score book, the
@@ -588,7 +601,11 @@ struct AppShared {
     /// What the result screen reports about this run's submission. Kept here because the request
     /// outlives the screen that shows it.
     ir_status: IrStatus,
+    /// The wall clock the audio fallback and the timing probe read, restarted when a run begins. The
+    /// skin does not read it: that is [`AppShared::scene_started`].
     clock: Instant,
+    /// When the running scene began, which is what the skin clock counts from.
+    scene_started: Instant,
     anchor_us: i64,
     /// Set once the audio output stream is found dead: the song position the audio clock last
     /// reported and the instant that was noticed, so `song_us` continues on the wall clock.
@@ -627,6 +644,8 @@ struct AppShared {
     /// underneath sees it.
     options: app_options::OptionsOverlay,
     cursor: (f32, f32),
+    /// The mouse buttons that are down, which decide whether a cursor move is a drag.
+    mouse_held: HeldButtons,
     hot: Vec<(Rect, Hot)>,
     last_frame: Instant,
     fps: f32,
@@ -734,6 +753,7 @@ impl App {
             suspended: Vec::new(),
             launch_chart,
             startup_error: None,
+            window: None,
             shared: AppShared {
                 chart_path,
                 config,
@@ -805,6 +825,7 @@ impl App {
                 profile_submit_rx: None,
                 ir_status: IrStatus::Off,
                 clock: Instant::now(),
+                scene_started: Instant::now(),
                 anchor_us: 0,
                 audio_dead_at: std::cell::Cell::new(None),
                 song_us_last: std::cell::Cell::new(0),
@@ -824,6 +845,7 @@ impl App {
                 options: app_options::OptionsOverlay::default(),
                 select_gen: 0,
                 cursor: (0.0, 0.0),
+                mouse_held: HeldButtons::default(),
                 hot: Vec::new(),
                 last_frame: Instant::now(),
                 fps: 0.0,
@@ -861,12 +883,25 @@ impl App {
 
     /// Everything a transition does apart from closing the window, so the screen-history rules can
     /// be exercised without an event loop.
+    ///
+    /// The skin's scene changes with the screen: every timer goes off and the scene clock restarts
+    /// at zero. A screen opened over another does not end that one's scene, though -- it is parked
+    /// with the screen, the clock standing still while the other screen is up, and [`Transition::Back`]
+    /// puts it back, so the browser's skin does not play its opening again after a visit to the
+    /// settings.
     fn switch(&mut self, transition: Transition) {
         let suspend = matches!(transition, Transition::Open(_));
+        let mut resumed = None;
         let next = match transition {
             Transition::Stay | Transition::Quit => return,
             Transition::Open(next) | Transition::To(next) => next,
-            Transition::Back => self.suspended.pop().unwrap_or_else(|| Stage::Select(Box::new(SelectState::new()))),
+            Transition::Back => match self.suspended.pop() {
+                Some(Suspended { stage, scene }) => {
+                    resumed = Some(scene);
+                    stage
+                }
+                None => Stage::Select(Box::new(SelectState::new())),
+            },
         };
         let now = Instant::now();
         if !app_options::opens_over(next.id()) {
@@ -875,14 +910,31 @@ impl App {
         self.stage.on_exit(&mut FrameCtx { shared: &mut self.shared, now, dt: 0.0 });
         let previous = std::mem::replace(&mut self.stage, next);
         if suspend {
-            self.suspended.push(previous);
+            let scene = self.shared.suspend_skin_scene();
+            self.suspended.push(Suspended { stage: previous, scene });
+        } else if let Some(scene) = resumed {
+            self.shared.resume_skin_scene(scene);
+        } else {
+            self.shared.begin_skin_scene();
         }
         self.stage.on_enter(&mut FrameCtx { shared: &mut self.shared, now, dt: 0.0 });
+    }
+
+    /// Bring the window to the DISPLAY tab's RESOLUTION and WINDOW MODE rows when either changed,
+    /// whichever way it changed: the settings screen, an account download or a hand-edited file.
+    fn sync_window(&mut self) {
+        let Some(size) = self.window.as_mut().and_then(|window| window.sync(&self.shared.config.display)) else {
+            return;
+        };
+        if let Some(gpu) = self.shared.gpu.as_mut() {
+            gpu.resize(size.width, size.height);
+        }
     }
 
     /// One frame: the shared bookkeeping every screen needs, the screen's own update, then the
     /// screen's own draw with the app-wide overlays on top.
     fn frame(&mut self, event_loop: &ActiveEventLoop) {
+        self.sync_window();
         let now = Instant::now();
         let dt = now.duration_since(self.shared.last_frame).as_secs_f32();
         self.shared.last_frame = now;
@@ -943,7 +995,7 @@ impl App {
     /// The window's aspect is settled here rather than when a chart loads, so the DISPLAY tab's
     /// LETTERBOX row takes on the very next frame instead of waiting for the next load.
     fn draw_overlays(stage: &Stage, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'_>) {
-        crate::gpu::apply_letterbox(canvas, ctx.shared.config.display.letterbox);
+        crate::gpu::apply_letterbox(canvas, ctx.shared.config.display.fits_screen_shape());
         app_options::draw(stage.id(), ctx, canvas);
         toast::draw(&ctx.shared.toasts, stage.id(), canvas);
         if ctx.shared.config.network.server_url.is_some() {
@@ -974,6 +1026,14 @@ impl App {
 }
 
 impl App {
+    /// Hand one mouse event to the screen that is up, at the position the cursor was last seen.
+    fn dispatch_pointer(&mut self, event_loop: &ActiveEventLoop, input: PointerInput) {
+        let now = Instant::now();
+        let at = self.shared.cursor;
+        let transition = self.stage.handle_pointer(&mut FrameCtx { shared: &mut self.shared, now, dt: 0.0 }, at, input);
+        self.apply(transition, event_loop);
+    }
+
     /// Record why the app cannot start and ask the event loop to wind down. [`run`] turns this into
     /// a message and a failing exit code, so a machine that cannot open a window or find a usable
     /// graphics adapter is told so rather than shown a panic.
@@ -991,16 +1051,17 @@ impl ApplicationHandler for App {
         if self.shared.gpu.is_some() {
             return;
         }
-        let attrs = Window::default_attributes().with_title("rbms").with_inner_size(winit::dpi::LogicalSize::new(CW, CH));
-        let window = match event_loop.create_window(attrs) {
+        let window = match event_loop.create_window(window_attributes(&self.shared.config.display)) {
             Ok(window) => Arc::new(window),
             Err(e) => return self.fail_startup(event_loop, format!("cannot open a window: {e}")),
         };
-        match Gpu::new(window.clone()) {
+        match Gpu::new(window.clone(), stage::canvas::UI_SIZE, self.shared.config.display.fits_screen_shape()) {
             Ok(gpu) => self.shared.gpu = Some(gpu),
             Err(e) => return self.fail_startup(event_loop, e.to_string()),
         }
+        self.window = Some(AppWindow::new(window.clone(), &self.shared.config.display));
         self.shared.ensure_audio();
+        self.shared.begin_skin_scene();
         if self.launch_chart {
             self.launch_chart = false;
             match self.shared.load() {
@@ -1018,8 +1079,9 @@ impl ApplicationHandler for App {
     }
 
     /// Translate one winit event into what the current screen understands. A moved cursor is mapped
-    /// onto the fixed 1280x720 logical space the UI is laid out in, which the surface stretches
-    /// across the whole window.
+    /// onto the fixed 1280x720 space the built-in screens are laid out in, which is drawn across
+    /// the viewport the frame lands in. The left, right and middle buttons, a drag with any of them held
+    /// and the wheel all reach the screen; a screen that has no use for one ignores it.
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
@@ -1030,15 +1092,18 @@ impl ApplicationHandler for App {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 if let Some(gpu) = self.shared.gpu.as_ref() {
-                    self.shared.cursor = gpu.logical_from_physical(position.x as f32, position.y as f32);
+                    self.shared.cursor = gpu.position_in_space(position.x as f32, position.y as f32, stage::canvas::UI_SIZE);
+                }
+                if let Some(input) = self.shared.mouse_held.on_move() {
+                    self.dispatch_pointer(event_loop, input);
                 }
             }
-            WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Left, .. } => {
-                let now = Instant::now();
-                let at = self.shared.cursor;
-                let transition = self.stage.handle_mouse(&mut FrameCtx { shared: &mut self.shared, now, dt: 0.0 }, at);
-                self.apply(transition, event_loop);
+            WindowEvent::MouseInput { state, button, .. } if is_tracked(button) => {
+                let input = self.shared.mouse_held.on_button(button, state == ElementState::Pressed);
+                self.dispatch_pointer(event_loop, input);
             }
+            WindowEvent::MouseWheel { delta, .. } => self.dispatch_pointer(event_loop, PointerInput::from_wheel(delta)),
+            WindowEvent::Focused(false) => self.shared.release_held_inputs(),
             WindowEvent::KeyboardInput { event, .. } => {
                 let PhysicalKey::Code(code) = event.physical_key else {
                     return;
@@ -1056,7 +1121,7 @@ impl ApplicationHandler for App {
             WindowEvent::RedrawRequested => {
                 self.frame(event_loop);
                 if let Some(gpu) = self.shared.gpu.as_ref() {
-                    gpu.window.request_redraw();
+                    gpu.request_redraw();
                 }
             }
             _ => {}

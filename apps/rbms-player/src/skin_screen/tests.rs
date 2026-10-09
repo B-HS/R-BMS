@@ -29,6 +29,7 @@ fn every_kind_of_read_a_document_makes_spends_the_frames_lua_budget() {
     use rbms_skin::dst::{DrawStateSource, LuaDrawEval, OffsetSource, SkinOffset};
     use rbms_skin::loader::Budget;
     use rbms_skin::property::{UNMAPPED_BOOLEAN, UNMAPPED_FLOAT, UNMAPPED_INTEGER, UNMAPPED_STRING};
+    use rbms_skin::timer::TIMER_OFF;
 
     struct Nothing;
 
@@ -57,11 +58,11 @@ fn every_kind_of_read_a_document_makes_spends_the_frames_lua_budget() {
             UNMAPPED_STRING
         }
 
-        fn timer(&self, _id: i32) -> Option<i64> {
-            None
+        fn timer_us(&self, _id: i32) -> i64 {
+            TIMER_OFF
         }
 
-        fn now_ms(&self) -> i64 {
+        fn now_us(&self) -> i64 {
             0
         }
     }

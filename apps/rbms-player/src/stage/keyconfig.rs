@@ -254,3 +254,91 @@ impl StageHandler for KeyConfigState {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::keyconfig::ControlAction;
+    use crate::{App, Config, LaunchOptions};
+    use std::time::Instant;
+
+    fn app() -> App {
+        let dir = std::env::temp_dir().join(format!("rbms-keyconfig-stage-tests-{}-{:?}", std::process::id(), std::thread::current().id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a temp dir");
+        App::new(String::new(), Config::default(), LaunchOptions::default(), dir.join("settings.ron"))
+    }
+
+    fn press(app: &mut App, state: &mut KeyConfigState, code: KeyCode) {
+        let key = KeyInput { code, pressed: true, released: false, text: None };
+        state.handle_key(&mut FrameCtx { shared: &mut app.shared, now: Instant::now(), dt: 0.0 }, key);
+    }
+
+    /// An editor focused on the keyboard row of `action`.
+    fn on_row(app: &App, action: ControlAction) -> KeyConfigState {
+        let sel = kc_rows(app.shared.kc_edit_mode).iter().position(|row| matches!(row, KcRow::Control(a) if *a == action)).expect("the row is listed");
+        KeyConfigState { sel, ..KeyConfigState::new() }
+    }
+
+    fn rebind(app: &mut App, state: &mut KeyConfigState, code: KeyCode) {
+        press(app, state, KeyCode::Enter);
+        assert!(state.capturing, "Enter did not arm the capture");
+        press(app, state, code);
+    }
+
+    /// START and SELECT are rebound like any other control: Enter on the row, then the key.
+    #[test]
+    fn start_and_select_are_rebound_from_their_rows() {
+        for (action, free_key) in [(ControlAction::Start, KeyCode::KeyP), (ControlAction::Select, KeyCode::KeyU)] {
+            let mut app = app();
+            let mut state = on_row(&app, action);
+            rebind(&mut app, &mut state, free_key);
+            assert_eq!(app.shared.keyconfig.control_key(action), Some(free_key), "{action:?}");
+            assert!(!state.capturing && !state.warn);
+        }
+    }
+
+    /// A key a lane, another control or the other menu button already has is refused, and the row
+    /// keeps the key it had.
+    #[test]
+    fn a_key_that_is_already_bound_is_refused_for_start_and_select() {
+        let taken = [
+            (ControlAction::Start, KeyCode::KeyZ, "a lane"),
+            (ControlAction::Start, KeyCode::ArrowUp, "a control"),
+            (ControlAction::Start, KeyCode::KeyW, "SELECT"),
+        ];
+        for (action, key, owner) in taken {
+            let mut app = app();
+            let before = app.shared.keyconfig.control_key(action);
+            let mut state = on_row(&app, action);
+            rebind(&mut app, &mut state, key);
+            assert!(state.warn, "{owner}'s key was accepted");
+            assert_eq!(app.shared.keyconfig.control_key(action), before, "{owner}'s key replaced the binding");
+        }
+    }
+
+    /// Both rows are on the keyboard list and the pad list of every mode, after the controls they
+    /// sit beside.
+    #[test]
+    fn the_rows_follow_the_older_controls_on_each_device() {
+        for &mode in Mode::ALL {
+            let rows = kc_rows(mode);
+            let control_positions: Vec<ControlAction> = rows
+                .iter()
+                .filter_map(|row| match row {
+                    KcRow::Control(action) => Some(*action),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(control_positions, ControlAction::ALL.to_vec(), "{} keyboard control rows", mode.name);
+            let pad_positions: Vec<ControlAction> = rows
+                .iter()
+                .filter_map(|row| match row {
+                    KcRow::PadControl(action) => Some(*action),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(pad_positions, ControlAction::ALL.to_vec(), "{} pad control rows", mode.name);
+        }
+    }
+}

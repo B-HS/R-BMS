@@ -1,7 +1,8 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
 use rbms_model::Mode;
+use rbms_play::ScratchDir;
 use serde::{Deserialize, Serialize};
 use winit::keyboard::KeyCode;
 
@@ -194,7 +195,11 @@ pub fn mode_config_key(mode: Mode) -> &'static str {
     }
 }
 
-/// A non-lane, in-play control whose key is user-configurable.
+/// A non-lane control whose key is user-configurable.
+///
+/// The in-play controls move a run's scroll speed and lane shades. START and SELECT are the two
+/// menu buttons of the reference implementation: they are read as held states (see
+/// [`HeldKeys`]) rather than fired once, and the screens combine them with the lane keys.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ControlAction {
     HiSpeedUp,
@@ -205,10 +210,12 @@ pub enum ControlAction {
     LiftDown,
     HiddenUp,
     HiddenDown,
+    Start,
+    Select,
 }
 
 impl ControlAction {
-    pub const ALL: [ControlAction; 8] = [
+    pub const ALL: [ControlAction; 10] = [
         ControlAction::HiSpeedUp,
         ControlAction::HiSpeedDown,
         ControlAction::CoverUp,
@@ -217,6 +224,8 @@ impl ControlAction {
         ControlAction::LiftDown,
         ControlAction::HiddenUp,
         ControlAction::HiddenDown,
+        ControlAction::Start,
+        ControlAction::Select,
     ];
 
     pub fn label(self) -> &'static str {
@@ -229,11 +238,22 @@ impl ControlAction {
             ControlAction::LiftDown => "LIFT DOWN",
             ControlAction::HiddenUp => "HIDDEN+ UP",
             ControlAction::HiddenDown => "HIDDEN+ DOWN",
+            ControlAction::Start => "START",
+            ControlAction::Select => "SELECT",
         }
+    }
+
+    /// Whether a key that also plays a lane keeps playing it instead of acting as this control.
+    ///
+    /// START and SELECT ship bound to letters that a key config written before they existed may
+    /// already have given to a lane; the lane has to win, or loading an old file would silently
+    /// kill a column. The older controls are resolved before lanes, as they always were.
+    pub fn yields_to_lanes(self) -> bool {
+        matches!(self, ControlAction::Start | ControlAction::Select)
     }
 }
 
-/// User-configurable in-play control key tokens.
+/// User-configurable control key tokens.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ControlBinds {
@@ -247,6 +267,11 @@ pub struct ControlBinds {
     /// taken, so it starts unbound and is picked in the key editor.
     pub hidden_up: String,
     pub hidden_down: String,
+    /// START and SELECT. The reference implementation ships them on Q and W
+    /// (`PlayModeConfig.java:320-321`); START takes A here because Q already belongs to the IR ranking
+    /// panel's previous-profile key, and a held START must not also page that panel.
+    pub start: String,
+    pub select: String,
 }
 
 impl Default for ControlBinds {
@@ -260,9 +285,17 @@ impl Default for ControlBinds {
             lift_down: "LBRACKET".into(),
             hidden_up: String::new(),
             hidden_down: String::new(),
+            start: DEFAULT_START_KEY.into(),
+            select: DEFAULT_SELECT_KEY.into(),
         }
     }
 }
+
+/// The key token START ships bound to.
+pub const DEFAULT_START_KEY: &str = "A";
+
+/// The key token SELECT ships bound to, which is the reference implementation's own.
+pub const DEFAULT_SELECT_KEY: &str = "W";
 
 impl ControlBinds {
     fn slot(&mut self, action: ControlAction) -> &mut String {
@@ -275,6 +308,8 @@ impl ControlBinds {
             ControlAction::LiftDown => &mut self.lift_down,
             ControlAction::HiddenUp => &mut self.hidden_up,
             ControlAction::HiddenDown => &mut self.hidden_down,
+            ControlAction::Start => &mut self.start,
+            ControlAction::Select => &mut self.select,
         }
     }
 
@@ -288,13 +323,83 @@ impl ControlBinds {
             ControlAction::LiftDown => &self.lift_down,
             ControlAction::HiddenUp => &self.hidden_up,
             ControlAction::HiddenDown => &self.hidden_down,
+            ControlAction::Start => &self.start,
+            ControlAction::Select => &self.select,
         }
     }
 }
 
+/// How many key indices the screens ask about. The reference implementation numbers the keys of a
+/// select-screen layout 0 to 8: keys one to seven are 0 to 6 and the two turntable directions are
+/// 7 and 8 (`MusicSelectKeyProperty.java`, `BEAT_7K`).
+pub const KEY_INDEX_COUNT: usize = 9;
+
+/// The key index of a turntable spun forward, which the select screen reads as "next row".
+pub const SCRATCH_FORWARD_INDEX: usize = 7;
+
+/// The key index of a turntable spun backward, which the select screen reads as "previous row".
+pub const SCRATCH_BACKWARD_INDEX: usize = 8;
+
+/// The reference implementation's key index (`0..KEY_INDEX_COUNT`) of one input on a lane of
+/// `mode`, or `None` for a lane that has no index.
+///
+/// A scratch lane is index 7 spun forward and index 8 spun backward. Every other lane is its
+/// position on its own side: a double-play mode repeats the first side's indices on the second,
+/// which is what `MusicSelectKeyProperty.BEAT_14K` does with its second set of nine. Pop'n has no
+/// scratch, so its nine buttons are 0 to 8. A mode with a scratch keeps 7 and 8 for it, so a lane
+/// that would land there (the 24-key layout) has no index.
+pub fn key_index_of(mode: Mode, lane: usize, dir: ScratchDir) -> Option<usize> {
+    if lane >= mode.key {
+        return None;
+    }
+    if mode.is_scratch(lane) {
+        return Some(match dir {
+            ScratchDir::Forward => SCRATCH_FORWARD_INDEX,
+            ScratchDir::Backward => SCRATCH_BACKWARD_INDEX,
+        });
+    }
+    let position = lane % (mode.key / usize::from(mode.player).max(1));
+    let limit = if mode.scratch.is_empty() { KEY_INDEX_COUNT } else { SCRATCH_FORWARD_INDEX };
+    (position < limit).then_some(position)
+}
+
+/// The keyboard keys that are down right now, kept from the press and release events the window
+/// reports.
+///
+/// It holds physical keys rather than lanes, so a key rebound while it is down (the editor does
+/// this) is read against the new binding on the next query instead of leaving a lane held. It is
+/// runtime state, never written to the key config file.
+#[derive(Clone, Debug, Default)]
+pub struct HeldKeys {
+    down: HashSet<KeyCode>,
+}
+
+impl HeldKeys {
+    pub fn press(&mut self, code: KeyCode) {
+        self.down.insert(code);
+    }
+
+    pub fn release(&mut self, code: KeyCode) {
+        self.down.remove(&code);
+    }
+
+    pub fn is_down(&self, code: KeyCode) -> bool {
+        self.down.contains(&code)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = KeyCode> + '_ {
+        self.down.iter().copied()
+    }
+
+    /// Forget every key, for a window that lost focus and so will never see them released.
+    pub fn clear(&mut self) {
+        self.down.clear();
+    }
+}
+
 /// The full user key configuration: per-mode lane bindings, the second key each scratch lane may
-/// be spun backwards with, and the in-play control keys. Persisted as RON; absent fields fall back
-/// to the built-in defaults.
+/// be spun backwards with, and the control keys. Persisted as RON; absent fields fall back to the
+/// built-in defaults.
 ///
 /// `scratch_reverse` is a second map rather than a second token inside `lanes` so a key config
 /// written before reverse spins existed keeps parsing byte for byte. It ships empty: a scratch lane
@@ -304,6 +409,9 @@ impl ControlBinds {
 /// file because it is the same question the rest of this file answers — what plays which lane —
 /// and a key config written before a controller was readable still loads, filling it with a table
 /// that binds nothing.
+///
+/// `held` is not configuration. It sits beside the bindings because a held key only means
+/// something read against them, and it is skipped by the file.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct KeyConfig {
@@ -311,6 +419,8 @@ pub struct KeyConfig {
     pub scratch_reverse: BTreeMap<String, Vec<String>>,
     pub controls: ControlBinds,
     pub pad: PadConfig,
+    #[serde(skip)]
+    pub held: HeldKeys,
 }
 
 impl Default for KeyConfig {
@@ -325,7 +435,7 @@ impl Default for KeyConfig {
             }
             lanes.insert(mode_config_key(mode).to_string(), row);
         }
-        KeyConfig { lanes, scratch_reverse: BTreeMap::new(), controls: ControlBinds::default(), pad: PadConfig::default() }
+        KeyConfig { lanes, scratch_reverse: BTreeMap::new(), controls: ControlBinds::default(), pad: PadConfig::default(), held: HeldKeys::default() }
     }
 }
 

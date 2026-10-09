@@ -11,9 +11,11 @@
 //! screens never edit the same one. They build their screens through the helpers here.
 
 use std::collections::HashSet;
+use std::time::Duration;
 
 use rbms_play::{PlaySession, SessionOptions};
 use rbms_render::ResultView;
+use rbms_skin::timer::timer_id;
 use rbms_store::SCORE_LN_MODE_FROM_CHART;
 
 use crate::settings_view::visible_rows;
@@ -33,9 +35,13 @@ const CHART: &str = concat!(
 
 /// An app with no library, no window and no server: everything the screens read out of
 /// [`crate::AppShared`] is at its default.
+///
+/// Its settings folder belongs to the test that asked for it. Tests run side by side, and two apps
+/// opening one score database at the same moment leave one of them reporting a failure, which lands
+/// on the message bus every other test reads.
 pub(super) fn app() -> App {
     rbms_render::font::use_embedded_fonts_only();
-    let dir = std::env::temp_dir().join(format!("rbms-render-tests-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("rbms-render-tests-{}-{:?}", std::process::id(), std::thread::current().id()));
     App::new(String::new(), Config::default(), LaunchOptions::default(), dir.join("settings.ron"))
 }
 
@@ -95,12 +101,16 @@ pub(super) fn render(app: &mut App, stage: Stage) -> HeadlessCanvas {
 /// document holds textures registered with the target it was built against, so a fresh canvas per
 /// frame would leave the document pointing at handles that target never heard of.
 pub(super) fn render_into(app: &mut App, stage: Stage, pixels: &mut HeadlessCanvas) {
+    render_on(app, stage, &mut Canvas::Headless(pixels));
+}
+
+/// [`render_into`] on either kind of target, for the capture harness, which also draws on a GPU.
+pub(super) fn render_on(app: &mut App, stage: Stage, canvas: &mut Canvas<'_>) {
     app.stage = stage;
-    let mut canvas = Canvas::Headless(pixels);
     let now = std::time::Instant::now();
     app.shared.hot.clear();
     let mut ctx = FrameCtx { shared: &mut app.shared, now, dt: FRAME_DT };
-    app.stage.draw(&mut ctx, &mut canvas);
+    app.stage.draw(&mut ctx, canvas);
 }
 
 /// Every screen, freshly constructed, in the order they appear in [`Stage`].
@@ -338,4 +348,127 @@ fn staying_leaves_the_screen_and_its_history_alone() {
     app.switch(Transition::Stay);
     assert_eq!(app.stage.id(), StageId::Folders);
     assert_eq!(app.suspended.len(), 1);
+}
+
+/// How old a scene is made before a transition is judged on what it does to the clock.
+const SCENE_AGE: Duration = Duration::from_secs(10);
+
+/// A visit to another screen far longer than the scene it interrupted had been running.
+const LONG_VISIT: Duration = Duration::from_secs(100);
+
+const SECOND_US: i64 = 1_000_000;
+
+fn aged_app() -> App {
+    let mut app = app();
+    app.shared.age_skin_scene(SCENE_AGE);
+    app
+}
+
+fn scene_age_us(app: &App) -> i64 {
+    app.shared.skin_now_us()
+}
+
+#[test]
+fn replacing_a_screen_switches_every_skin_timer_off_and_restarts_the_scene_clock() {
+    let mut app = aged_app();
+    app.shared.skin_timers.set_on(timer_id::PLAY, SECOND_US);
+    app.shared.skin_timers.set_on(timer_id::PANEL1_ON, SECOND_US);
+    assert!(scene_age_us(&app) >= 10 * SECOND_US, "the scene was not aged");
+
+    app.switch(Transition::To(Stage::Folders(FoldersState::new())));
+    assert!(!app.shared.skin_timers.is_on(timer_id::PLAY), "a timer outlived the scene it belonged to");
+    assert!(!app.shared.skin_timers.is_on(timer_id::PANEL1_ON), "a timer outlived the scene it belonged to");
+    assert!(scene_age_us(&app) < 5 * SECOND_US, "the clock carried on from the previous scene: {} us", scene_age_us(&app));
+}
+
+#[test]
+fn the_timers_the_arriving_screen_switches_on_start_from_a_zero_clock() {
+    let mut app = aged_app();
+    app.switch(Transition::To(Stage::Result(result_state())));
+    let began = app.shared.skin_timers.value_us(timer_id::RESULTGRAPH_BEGIN);
+    assert!(app.shared.skin_timers.is_on(timer_id::RESULTGRAPH_BEGIN), "the result screen did not start its trend");
+    assert!(began < 5 * SECOND_US, "the result screen timed its opening against the old clock: {began} us");
+}
+
+#[test]
+fn a_new_scene_does_not_read_its_first_frame_as_a_change_from_the_last_scenes_last() {
+    let mut app = aged_app();
+    app.shared.skin_select_timers.update(&mut app.shared.skin_timers, 3, SECOND_US);
+    app.switch(Transition::To(Stage::Folders(FoldersState::new())));
+    let now = app.shared.skin_now_us();
+    app.shared.skin_select_timers.update(&mut app.shared.skin_timers, 7, now);
+    assert!(!app.shared.skin_timers.is_on(timer_id::SONGBAR_CHANGE), "the first row seen in a scene counted as a move");
+}
+
+#[test]
+fn going_back_with_nothing_suspended_starts_a_new_scene() {
+    let mut app = aged_app();
+    app.shared.skin_timers.set_on(timer_id::PLAY, SECOND_US);
+    app.switch(Transition::Back);
+    assert!(!app.shared.skin_timers.is_on(timer_id::PLAY));
+    assert!(scene_age_us(&app) < 5 * SECOND_US);
+}
+
+#[test]
+fn a_screen_opened_over_another_gets_a_scene_of_its_own() {
+    let mut app = aged_app();
+    app.shared.skin_timers.set_on(timer_id::PANEL1_ON, SECOND_US);
+    app.switch(Transition::Open(Stage::Folders(FoldersState::new())));
+    assert!(!app.shared.skin_timers.is_on(timer_id::PANEL1_ON), "the screen underneath leaked a timer into the one opened over it");
+    assert!(scene_age_us(&app) < 5 * SECOND_US, "the opened screen inherited the clock of the one underneath");
+}
+
+#[test]
+fn coming_back_resumes_the_scene_with_its_timers_and_a_clock_that_stood_still() {
+    let mut app = aged_app();
+    app.shared.skin_timers.set_on(timer_id::PANEL1_ON, SECOND_US);
+    app.switch(Transition::Open(Stage::Folders(FoldersState::new())));
+    app.shared.age_skin_scene(LONG_VISIT);
+
+    app.switch(Transition::Back);
+    assert_eq!(app.stage.id(), StageId::Select);
+    assert_eq!(app.shared.skin_timers.value_us(timer_id::PANEL1_ON), SECOND_US, "the timer was not put back as it was");
+    let age = scene_age_us(&app);
+    assert!(age >= 10 * SECOND_US, "the clock went back past where the scene was left: {age} us");
+    assert!(age < 20 * SECOND_US, "the clock ran on while another screen was up: {age} us");
+}
+
+#[test]
+fn the_memory_a_timer_driver_keeps_comes_back_with_the_scene() {
+    let mut app = aged_app();
+    app.shared.skin_select_timers.update(&mut app.shared.skin_timers, 3, SECOND_US);
+    app.switch(Transition::Open(Stage::Folders(FoldersState::new())));
+    app.switch(Transition::Back);
+    let now = app.shared.skin_now_us();
+    app.shared.skin_select_timers.update(&mut app.shared.skin_timers, 7, now);
+    assert!(app.shared.skin_timers.is_on(timer_id::SONGBAR_CHANGE), "the driver forgot which row the scene had been on");
+}
+
+#[test]
+fn each_screen_in_a_stack_gets_back_the_scene_it_was_parked_with() {
+    let mut app = aged_app();
+    app.shared.skin_timers.set_on(timer_id::PLAY, SECOND_US);
+    app.switch(Transition::Open(Stage::Settings(SettingsState::new())));
+    app.shared.skin_timers.set_on(timer_id::READY, 2 * SECOND_US);
+    app.switch(Transition::Open(Stage::KeyConfig(KeyConfigState::new())));
+    assert!(!app.shared.skin_timers.is_on(timer_id::READY), "the screen underneath leaked a timer into the one opened over it");
+
+    app.switch(Transition::Back);
+    assert_eq!(app.stage.id(), StageId::Settings);
+    assert_eq!(app.shared.skin_timers.value_us(timer_id::READY), 2 * SECOND_US);
+    assert!(!app.shared.skin_timers.is_on(timer_id::PLAY));
+
+    app.switch(Transition::Back);
+    assert_eq!(app.stage.id(), StageId::Select);
+    assert_eq!(app.shared.skin_timers.value_us(timer_id::PLAY), SECOND_US);
+    assert!(!app.shared.skin_timers.is_on(timer_id::READY));
+}
+
+/// The song clock and the skin clock are different clocks: a run starting resets the one the audio
+/// is anchored to, and a document's opening must not jump when it does.
+#[test]
+fn starting_a_run_does_not_move_the_scene_clock() {
+    let mut app = aged_app();
+    app.shared.start_play();
+    assert!(scene_age_us(&app) >= 10 * SECOND_US, "starting a run restarted the skin clock");
 }

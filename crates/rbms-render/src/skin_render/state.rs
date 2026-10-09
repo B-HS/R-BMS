@@ -15,6 +15,7 @@ use rbms_skin::property::{
     FLOAT_MAX, FLOAT_MIN, STRING_KEYNAME_EXTENDED_FIRST, STRING_KEYNAME_FIRST, SkinStateSource, UNMAPPED_BOOLEAN, UNMAPPED_FLOAT, UNMAPPED_INTEGER,
     UNMAPPED_STRING, clamp_float,
 };
+use rbms_skin::timer::TIMER_OFF;
 
 use crate::hud::HudView;
 use crate::playfield::{LaneShade, PlayfieldView};
@@ -157,7 +158,7 @@ pub struct PlayViewState<'a> {
     /// The scroll speed multiplier.
     pub hispeed: f64,
     pub autoplay: bool,
-    pub now_ms: i64,
+    pub now_us: i64,
     pub offsets: Offsets<'a>,
     /// The resolved field, for the cover offsets a document places its own lane covers with. `None`
     /// on a screen with no field running, which leaves all three to the player's own nudges.
@@ -183,7 +184,7 @@ pub struct PlayViewState<'a> {
 
 impl std::fmt::Debug for PlayViewState<'_> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.debug_struct("PlayViewState").field("title", &self.title).field("now_ms", &self.now_ms).finish_non_exhaustive()
+        formatter.debug_struct("PlayViewState").field("title", &self.title).field("now_us", &self.now_us).finish_non_exhaustive()
     }
 }
 
@@ -308,19 +309,19 @@ impl SkinStateSource for PlayViewState<'_> {
         }
     }
 
-    fn timer(&self, _id: i32) -> Option<i64> {
-        None
+    fn timer_us(&self, _id: i32) -> i64 {
+        TIMER_OFF
     }
 
-    fn now_ms(&self) -> i64 {
-        self.now_ms
+    fn now_us(&self) -> i64 {
+        self.now_us
     }
 }
 
 /// The browser's state, read from the view the built-in browser draws.
 pub struct SelectViewState<'a> {
     pub view: &'a SelectView,
-    pub now_ms: i64,
+    pub now_us: i64,
     pub offsets: Offsets<'a>,
     /// Whether the option panel is open, which is what the reference's first panel option reports.
     pub options_open: bool,
@@ -328,14 +329,14 @@ pub struct SelectViewState<'a> {
 
 impl<'a> SelectViewState<'a> {
     /// The browser's state for one frame.
-    pub fn new(view: &'a SelectView, now_ms: i64, offsets: Offsets<'a>, options_open: bool) -> SelectViewState<'a> {
-        SelectViewState { view, now_ms, offsets, options_open }
+    pub fn new(view: &'a SelectView, now_us: i64, offsets: Offsets<'a>, options_open: bool) -> SelectViewState<'a> {
+        SelectViewState { view, now_us, offsets, options_open }
     }
 }
 
 impl std::fmt::Debug for SelectViewState<'_> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.debug_struct("SelectViewState").field("now_ms", &self.now_ms).finish_non_exhaustive()
+        formatter.debug_struct("SelectViewState").field("now_us", &self.now_us).finish_non_exhaustive()
     }
 }
 
@@ -398,12 +399,12 @@ impl SkinStateSource for SelectViewState<'_> {
         }
     }
 
-    fn timer(&self, _id: i32) -> Option<i64> {
-        None
+    fn timer_us(&self, _id: i32) -> i64 {
+        TIMER_OFF
     }
 
-    fn now_ms(&self) -> i64 {
-        self.now_ms
+    fn now_us(&self) -> i64 {
+        self.now_us
     }
 }
 
@@ -414,13 +415,13 @@ pub struct ResultViewState<'a> {
     pub target: Option<&'a TargetView>,
     /// Whether the run counted as cleared.
     pub cleared: bool,
-    pub now_ms: i64,
+    pub now_us: i64,
     pub offsets: Offsets<'a>,
 }
 
 impl std::fmt::Debug for ResultViewState<'_> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.debug_struct("ResultViewState").field("cleared", &self.cleared).field("now_ms", &self.now_ms).finish_non_exhaustive()
+        formatter.debug_struct("ResultViewState").field("cleared", &self.cleared).field("now_us", &self.now_us).finish_non_exhaustive()
     }
 }
 
@@ -431,8 +432,8 @@ impl OffsetSource for ResultViewState<'_> {
 }
 
 impl<'a> ResultViewState<'a> {
-    pub fn new(view: &'a ResultView, target: Option<&'a TargetView>, cleared: bool, now_ms: i64, offsets: Offsets<'a>) -> ResultViewState<'a> {
-        ResultViewState { view, target, cleared, now_ms, offsets }
+    pub fn new(view: &'a ResultView, target: Option<&'a TargetView>, cleared: bool, now_us: i64, offsets: Offsets<'a>) -> ResultViewState<'a> {
+        ResultViewState { view, target, cleared, now_us, offsets }
     }
 }
 
@@ -493,12 +494,12 @@ impl SkinStateSource for ResultViewState<'_> {
         }
     }
 
-    fn timer(&self, _id: i32) -> Option<i64> {
-        None
+    fn timer_us(&self, _id: i32) -> i64 {
+        TIMER_OFF
     }
 
-    fn now_ms(&self) -> i64 {
-        self.now_ms
+    fn now_us(&self) -> i64 {
+        self.now_us
     }
 }
 
@@ -511,7 +512,7 @@ pub struct DecideViewState<'a> {
     /// The rest of what the loading screen knows about the chart it is bringing in, empty while it
     /// waits for something that is not a chart.
     pub chart: DecideChart<'a>,
-    pub now_ms: i64,
+    pub now_us: i64,
     pub offsets: Offsets<'a>,
 }
 
@@ -573,12 +574,12 @@ impl SkinStateSource for DecideViewState<'_> {
         }
     }
 
-    fn timer(&self, _id: i32) -> Option<i64> {
-        None
+    fn timer_us(&self, _id: i32) -> i64 {
+        TIMER_OFF
     }
 
-    fn now_ms(&self) -> i64 {
-        self.now_ms
+    fn now_us(&self) -> i64 {
+        self.now_us
     }
 }
 
@@ -589,7 +590,7 @@ impl SkinStateSource for DecideViewState<'_> {
 pub struct KeyConfigViewState<'a> {
     /// One binding label per lane, in lane order.
     pub keys: &'a [String],
-    pub now_ms: i64,
+    pub now_us: i64,
     pub offsets: Offsets<'a>,
 }
 
@@ -629,12 +630,12 @@ impl SkinStateSource for KeyConfigViewState<'_> {
         self.keys.get(lane.max(0) as usize).map_or(UNMAPPED_STRING, String::as_str)
     }
 
-    fn timer(&self, _id: i32) -> Option<i64> {
-        None
+    fn timer_us(&self, _id: i32) -> i64 {
+        TIMER_OFF
     }
 
-    fn now_ms(&self) -> i64 {
-        self.now_ms
+    fn now_us(&self) -> i64 {
+        self.now_us
     }
 }
 

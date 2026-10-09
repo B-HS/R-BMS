@@ -1,4 +1,4 @@
-use super::{ALL_TIMER, TIMER_CONSTANT_COUNT, TIMER_TABLE_CHECKSUM, TimerId, TimerState, timer_id, timer_name};
+use super::{ALL_TIMER, MICROS_PER_MILLI, TIMER_CONSTANT_COUNT, TIMER_OFF, TIMER_TABLE_CHECKSUM, TimerId, TimerState, timer_id, timer_name};
 
 /// FNV-1a 64-bit offset basis, matching `tools/gen-skin-timer.rs`.
 const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
@@ -125,21 +125,43 @@ fn id_bands_follow_the_reference_ranges() {
 #[test]
 fn timers_start_off() {
     let state = TimerState::new();
-    assert!(state.is_off(timer_id::PLAY));
     assert!(!state.is_on(timer_id::PLAY));
-    assert_eq!(state.get(timer_id::PLAY), None);
-    assert_eq!(state.elapsed(timer_id::PLAY, 1_000), None);
+    assert_eq!(state.value_us(timer_id::PLAY), TIMER_OFF);
 }
 
 #[test]
-fn switching_on_records_the_moment() {
+fn the_off_sentinel_is_the_references_long_min_value() {
+    assert_eq!(TIMER_OFF, i64::MIN);
+    assert_eq!(TIMER_OFF as f64, -(2f64.powi(63)), "a script reads the sentinel as the same double the reference hands it");
+    assert_eq!(MICROS_PER_MILLI, 1_000);
+}
+
+#[test]
+fn switching_on_records_the_microsecond() {
     let mut state = TimerState::new();
-    state.set_on(timer_id::PLAY, 2_500);
+    state.set_on(timer_id::PLAY, 2_500_999);
     assert!(state.is_on(timer_id::PLAY));
-    assert_eq!(state.get(timer_id::PLAY), Some(2_500));
-    assert_eq!(state.elapsed(timer_id::PLAY, 2_500), Some(0));
-    assert_eq!(state.elapsed(timer_id::PLAY, 3_000), Some(500));
-    assert_eq!(state.elapsed(timer_id::PLAY, 2_000), Some(-500));
+    assert_eq!(state.value_us(timer_id::PLAY), 2_500_999, "the stored value keeps its microseconds");
+    assert_eq!(state.value_us(timer_id::PLAY) / MICROS_PER_MILLI, 2_500, "and reads as whole milliseconds the way `TimerProperty.get` does");
+}
+
+#[test]
+fn every_microsecond_value_survives_the_round_trip() {
+    let mut state = TimerState::new();
+    for started in [0, 1, 999, 1_000, 16_667, i64::from(i32::MAX) * MICROS_PER_MILLI + 1, i64::MAX, -1, i64::MIN + 1] {
+        state.set_on(timer_id::RHYTHM, started);
+        assert!(state.is_on(timer_id::RHYTHM), "{started} is a moment, not the off sentinel");
+        assert_eq!(state.value_us(timer_id::RHYTHM), started);
+    }
+}
+
+#[test]
+fn storing_the_sentinel_switches_the_timer_off() {
+    let mut state = TimerState::new();
+    state.set_on(timer_id::READY, 40);
+    state.set_on(timer_id::READY, TIMER_OFF);
+    assert!(!state.is_on(timer_id::READY), "`setMicroTimer(id, Long.MIN_VALUE)` is how the reference switches a timer off");
+    assert_eq!(state.value_us(timer_id::READY), TIMER_OFF);
 }
 
 #[test]
@@ -147,23 +169,23 @@ fn setting_on_again_restarts_but_switching_does_not() {
     let mut state = TimerState::new();
     state.set_on(timer_id::JUDGE_1P, 100);
     state.set_on(timer_id::JUDGE_1P, 400);
-    assert_eq!(state.get(timer_id::JUDGE_1P), Some(400), "set_on restarts a running timer");
+    assert_eq!(state.value_us(timer_id::JUDGE_1P), 400, "set_on restarts a running timer");
 
     state.switch(timer_id::READY, true, 100);
     state.switch(timer_id::READY, true, 400);
-    assert_eq!(state.get(timer_id::READY), Some(100), "switch leaves a running timer alone");
+    assert_eq!(state.value_us(timer_id::READY), 100, "switch leaves a running timer alone");
 }
 
 #[test]
 fn switching_off_forgets_the_moment() {
     let mut state = TimerState::new();
     state.set_on(timer_id::FADEOUT, 10);
-    state.set_off(timer_id::FADEOUT);
-    assert!(state.is_off(timer_id::FADEOUT));
+    state.off(timer_id::FADEOUT);
+    assert!(!state.is_on(timer_id::FADEOUT));
 
     state.set_on(timer_id::FADEOUT, 20);
     state.switch(timer_id::FADEOUT, false, 30);
-    assert_eq!(state.get(timer_id::FADEOUT), None);
+    assert_eq!(state.value_us(timer_id::FADEOUT), TIMER_OFF);
 }
 
 #[test]
@@ -172,8 +194,8 @@ fn clear_switches_every_timer_off() {
     state.set_on(timer_id::PLAY, 1);
     state.set_on(timer_id::RHYTHM, 2);
     state.clear();
-    assert!(state.is_off(timer_id::PLAY));
-    assert!(state.is_off(timer_id::RHYTHM));
+    assert!(!state.is_on(timer_id::PLAY));
+    assert!(!state.is_on(timer_id::RHYTHM));
 }
 
 #[test]
@@ -181,6 +203,6 @@ fn custom_band_timers_share_the_state() {
     let mut state = TimerState::new();
     let custom = TimerId(timer_id::CUSTOM_BEGIN.get() + 7);
     state.set_on(custom, 5_000);
-    assert_eq!(state.elapsed(custom, 5_250), Some(250));
+    assert_eq!(state.value_us(custom), 5_000);
     assert!(custom.is_custom());
 }

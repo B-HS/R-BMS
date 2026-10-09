@@ -204,7 +204,7 @@ fn open_key(ctx: &mut FrameCtx<'_>, key: &KeyInput<'_>) -> bool {
 /// and a document slides the panel in against the first and out against the second, so both have to
 /// be switched at the moment the panel itself moves rather than when it is next drawn.
 fn switch_panel_timers(shared: &mut AppShared, open: bool) {
-    let now = shared.skin_now_ms();
+    let now = shared.skin_now_us();
     shared.skin_timers.switch(timer_id::PANEL1_ON, open, now);
     shared.skin_timers.switch(timer_id::PANEL1_OFF, !open, now);
 }
@@ -289,13 +289,17 @@ pub(crate) fn draw(stage: StageId, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pointer::PointerInput;
     use crate::stage::{HeadlessCanvas, SelectState, Stage};
     use crate::{App, Config, LaunchOptions};
+    use winit::event::MouseButton;
 
     fn app() -> App {
-        let dir = std::env::temp_dir().join(format!("rbms-app-options-tests-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("rbms-app-options-tests-{}-{:?}", std::process::id(), std::thread::current().id()));
         App::new(String::new(), Config::default(), LaunchOptions::default(), dir.join("settings.ron"))
     }
+
+    const LEFT_PRESS: PointerInput = PointerInput::Button { button: MouseButton::Left, pressed: true };
 
     fn press(code: KeyCode) -> KeyInput<'static> {
         KeyInput { code, pressed: true, released: false, text: None }
@@ -545,11 +549,11 @@ mod tests {
         let now = std::time::Instant::now();
 
         app.shared.options.open_panel(false);
-        app.stage.handle_mouse(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 }, (10.0, 10.0));
+        app.stage.handle_pointer(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 }, (10.0, 10.0), LEFT_PRESS);
         assert_eq!(app.shared.sel, 0, "a click reached the list through an open panel");
 
         close(&mut app.shared);
-        app.stage.handle_mouse(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 }, (10.0, 10.0));
+        app.stage.handle_pointer(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 }, (10.0, 10.0), LEFT_PRESS);
         assert_eq!(app.shared.sel, 1, "the same click has to reach the list once the panel is gone");
     }
 

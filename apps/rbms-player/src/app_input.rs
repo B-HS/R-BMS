@@ -6,6 +6,7 @@
 //! owns it.
 #![allow(clippy::wildcard_imports)]
 
+use crate::keyconfig::key_index_of;
 use crate::*;
 
 /// The tempo a pinned green number is held at, and the travel time it is being held at.
@@ -98,9 +99,66 @@ impl AppShared {
         }
     }
 
-    /// Which configured in-play control (if any) a key triggers.
+    /// The key a control is read from right now. START and SELECT give way to a lane that has the
+    /// same key (see [`ControlAction::yields_to_lanes`]), so a key config that already plays a
+    /// column on the letter they ship on keeps playing it.
+    fn control_key_in_force(&self, action: ControlAction) -> Option<KeyCode> {
+        self.keyconfig.control_key(action).filter(|&code| !action.yields_to_lanes() || self.lane_input_for(code).is_none())
+    }
+
+    /// Which configured control (if any) a key triggers.
     pub(crate) fn control_for(&self, code: KeyCode) -> Option<ControlAction> {
-        ControlAction::ALL.into_iter().find(|a| self.keyconfig.control_key(*a) == Some(code))
+        ControlAction::ALL.into_iter().find(|a| self.control_key_in_force(*a) == Some(code))
+    }
+
+    /// Record one keyboard event in the held-key set the START, SELECT and key-index queries read.
+    /// A repeat of a key already down changes nothing.
+    pub(crate) fn note_key(&mut self, key: &KeyInput<'_>) {
+        if key.pressed {
+            self.keyconfig.held.press(key.code);
+        } else if key.released {
+            self.keyconfig.held.release(key.code);
+        }
+    }
+
+    /// Let go of every key and mouse button the window reported as down.
+    ///
+    /// A window that loses focus is not told about what is released while it is away, so anything
+    /// still counted as down would stay down: a START left held keeps the browser deaf to the
+    /// controller, and a button left held keeps every later cursor move a drag.
+    pub(crate) fn release_held_inputs(&mut self) {
+        self.keyconfig.held.clear();
+        self.mouse_held.clear();
+    }
+
+    /// Whatever the controller is holding down right now, or nothing when there is no controller.
+    fn pad_held(&self) -> Vec<PadEvent> {
+        self.pad.as_ref().map(|pad| pad.held(&self.keyconfig.pad, self.mode)).unwrap_or_default()
+    }
+
+    /// Whether START is down on the keyboard or the controller.
+    pub(crate) fn start_pressed(&self) -> bool {
+        self.control_held(ControlAction::Start)
+    }
+
+    /// Whether SELECT is down on the keyboard or the controller.
+    pub(crate) fn select_pressed(&self) -> bool {
+        self.control_held(ControlAction::Select)
+    }
+
+    fn control_held(&self, action: ControlAction) -> bool {
+        self.control_key_in_force(action).is_some_and(|code| self.keyconfig.held.is_down(code)) || self.pad_held().contains(&PadEvent::Control(action))
+    }
+
+    /// Whether the key with the reference implementation's index `index` (`0..KEY_INDEX_COUNT`:
+    /// keys one to seven are 0 to 6, the turntable forward and backward are 7 and 8) is down on
+    /// the keyboard or the controller, in the mode that is up. See [`key_index_of`] for how a lane
+    /// maps to an index.
+    pub(crate) fn key_index_pressed(&self, index: usize) -> bool {
+        let keyboard =
+            self.keyconfig.held.iter().filter_map(|code| self.lane_input_for(code)).any(|(lane, dir)| key_index_of(self.mode, lane, dir) == Some(index));
+        keyboard
+            || self.pad_held().into_iter().any(|event| matches!(event, PadEvent::Lane { lane, dir, .. } if key_index_of(self.mode, lane, dir) == Some(index)))
     }
 
     /// One frame of controller input, or nothing when there is no controller.
@@ -182,6 +240,7 @@ impl AppShared {
                 self.rebuild_skin();
                 ControlEffect::None
             }
+            ControlAction::Start | ControlAction::Select => ControlEffect::None,
         }
     }
 
@@ -324,6 +383,7 @@ fn shaded(value: f32, delta: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::keyconfig::{KEY_INDEX_COUNT, SCRATCH_BACKWARD_INDEX, SCRATCH_FORWARD_INDEX};
     use crate::{App, Config, LaunchOptions};
 
     /// The reference tempo the green-number arithmetic is checked at.
@@ -335,12 +395,34 @@ mod tests {
     const GREEN_TOLERANCE_MS: f64 = 1e-3;
 
     fn app() -> App {
-        let dir = std::env::temp_dir().join(format!("rbms-app-input-tests-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("rbms-app-input-tests-{}-{:?}", std::process::id(), std::thread::current().id()));
         App::new(String::new(), Config::default(), LaunchOptions::default(), dir.join("settings.ron"))
     }
 
     fn free(base_hispeed: f64) -> ControlContext {
         ControlContext { fine: false, base_hispeed, fixed: None }
+    }
+
+    fn key_down(app: &mut App, code: KeyCode) {
+        app.shared.note_key(&KeyInput { code, pressed: true, released: false, text: None });
+    }
+
+    fn key_up(app: &mut App, code: KeyCode) {
+        app.shared.note_key(&KeyInput { code, pressed: false, released: true, text: None });
+    }
+
+    /// The app switched to `mode` the way loading a chart of that mode switches it: the mode and the
+    /// keys that play its lanes.
+    fn in_mode(mode: Mode) -> App {
+        let mut app = app();
+        app.shared.mode = mode;
+        app.shared.active_keys = app.shared.keyconfig.lane_keys(mode);
+        app.shared.active_reverse_keys = app.shared.keyconfig.scratch_reverse_keys(mode);
+        app
+    }
+
+    fn pressed_indices(app: &App) -> Vec<usize> {
+        (0..KEY_INDEX_COUNT).filter(|&index| app.shared.key_index_pressed(index)).collect()
     }
 
     /// The two directions have to be exact inverses, or a pinned green number would drift every
@@ -559,5 +641,221 @@ mod tests {
         app.shared.config.display.five_key_layout = true;
         app.shared.rebuild_skin();
         assert!(app.shared.skin.w[0] < stretched, "the row does not reach the resolved skin");
+    }
+
+    /// START and SELECT are down exactly while their keys are: a press sets one, a release clears it,
+    /// and a repeat of a key already down is neither.
+    #[test]
+    fn start_and_select_follow_the_keys_that_are_bound_to_them() {
+        let mut app = app();
+        assert!(!app.shared.start_pressed() && !app.shared.select_pressed());
+
+        key_down(&mut app, KeyCode::KeyA);
+        assert!(app.shared.start_pressed());
+        assert!(!app.shared.select_pressed(), "START does not read as SELECT");
+
+        key_down(&mut app, KeyCode::KeyW);
+        assert!(app.shared.start_pressed() && app.shared.select_pressed(), "both can be down at once");
+
+        app.shared.note_key(&KeyInput { code: KeyCode::KeyA, pressed: false, released: false, text: None });
+        assert!(app.shared.start_pressed(), "an auto-repeat is neither a press nor a release");
+
+        key_up(&mut app, KeyCode::KeyA);
+        assert!(!app.shared.start_pressed());
+        assert!(app.shared.select_pressed());
+        key_up(&mut app, KeyCode::KeyW);
+        assert!(!app.shared.select_pressed());
+    }
+
+    /// A window that loses focus is never told that what it saw go down came back up, so losing
+    /// focus lets go of all of it: START, SELECT, a lane key and a mouse button alike.
+    #[test]
+    fn losing_focus_lets_go_of_every_key_and_button_that_was_down() {
+        let mut app = in_mode(Mode::BEAT_7K);
+        key_down(&mut app, KeyCode::KeyA);
+        key_down(&mut app, KeyCode::KeyW);
+        key_down(&mut app, KeyCode::KeyZ);
+        app.shared.mouse_held.on_button(winit::event::MouseButton::Left, true);
+        assert!(app.shared.start_pressed() && app.shared.select_pressed());
+        assert_eq!(pressed_indices(&app), vec![0]);
+        assert_eq!(app.shared.mouse_held.on_move(), Some(PointerInput::Drag));
+
+        app.shared.release_held_inputs();
+        assert!(!app.shared.start_pressed(), "START was left down");
+        assert!(!app.shared.select_pressed(), "SELECT was left down");
+        assert_eq!(pressed_indices(&app), Vec::<usize>::new(), "a lane key was left down");
+        assert_eq!(app.shared.mouse_held.on_move(), None, "a mouse button was left down");
+
+        key_down(&mut app, KeyCode::KeyA);
+        assert!(app.shared.start_pressed(), "a key pressed after the focus came back is down again");
+    }
+
+    /// Rebinding START moves what the query reads: the old key stops counting and the new one starts.
+    #[test]
+    fn a_rebound_start_is_read_from_its_new_key() {
+        let mut app = app();
+        app.shared.keyconfig.set_control(ControlAction::Start, KeyCode::KeyP);
+        key_down(&mut app, KeyCode::KeyA);
+        assert!(!app.shared.start_pressed(), "the key START used to be on no longer is START");
+        key_down(&mut app, KeyCode::KeyP);
+        assert!(app.shared.start_pressed());
+    }
+
+    /// The shipped seven-key layout reads Z S X D C F V as indices 0 to 6 and the turntable as 7.
+    #[test]
+    fn the_key_index_query_follows_the_lane_keys_of_the_mode_that_is_up() {
+        let mut app = in_mode(Mode::BEAT_7K);
+        assert_eq!(pressed_indices(&app), Vec::<usize>::new());
+
+        for (index, code) in [KeyCode::KeyZ, KeyCode::KeyS, KeyCode::KeyX, KeyCode::KeyD, KeyCode::KeyC, KeyCode::KeyF, KeyCode::KeyV].into_iter().enumerate() {
+            key_down(&mut app, code);
+            assert!(app.shared.key_index_pressed(index), "key {} is index {index}", index + 1);
+            assert_eq!(pressed_indices(&app), vec![index], "and only that index");
+            key_up(&mut app, code);
+            assert!(!app.shared.key_index_pressed(index), "letting go clears it");
+        }
+
+        key_down(&mut app, KeyCode::ShiftLeft);
+        assert_eq!(pressed_indices(&app), vec![SCRATCH_FORWARD_INDEX], "the turntable key spins forward");
+    }
+
+    /// The second turntable direction is the reverse key, and an index is down while any of its
+    /// inputs is.
+    #[test]
+    fn the_reverse_key_is_the_backward_turntable_index() {
+        let mut app = app();
+        app.shared.keyconfig.set_scratch_reverse(Mode::BEAT_7K, 7, KeyCode::ControlLeft);
+        app.shared.active_reverse_keys = app.shared.keyconfig.scratch_reverse_keys(Mode::BEAT_7K);
+
+        key_down(&mut app, KeyCode::ControlLeft);
+        assert_eq!(pressed_indices(&app), vec![SCRATCH_BACKWARD_INDEX]);
+        key_down(&mut app, KeyCode::ShiftLeft);
+        assert_eq!(pressed_indices(&app), vec![SCRATCH_FORWARD_INDEX, SCRATCH_BACKWARD_INDEX], "both directions can be down together");
+    }
+
+    /// A key that plays no lane, and the letters START and SELECT sit on, are not indices.
+    #[test]
+    fn a_key_that_plays_no_lane_is_not_an_index() {
+        let mut app = in_mode(Mode::BEAT_7K);
+        for code in [KeyCode::KeyA, KeyCode::KeyW, KeyCode::KeyP, KeyCode::F13] {
+            key_down(&mut app, code);
+        }
+        assert_eq!(pressed_indices(&app), Vec::<usize>::new());
+    }
+
+    /// Pop'n has nine buttons and no turntable: index 8 is its ninth button.
+    #[test]
+    fn a_nine_button_mode_reads_all_nine_indices() {
+        let mut app = in_mode(Mode::POPN_9K);
+        for (lane, (code, _)) in app.shared.keyconfig.lane_keys(Mode::POPN_9K).into_iter().enumerate() {
+            key_down(&mut app, code);
+            assert_eq!(pressed_indices(&app), vec![lane], "button {}", lane + 1);
+            key_up(&mut app, code);
+        }
+    }
+
+    /// The second player's keys of a double-play mode answer to the same indices as the first's.
+    #[test]
+    fn the_second_side_of_a_double_play_mode_reads_the_same_indices() {
+        let mut app = in_mode(Mode::BEAT_14K);
+        let keys = app.shared.keyconfig.lane_keys(Mode::BEAT_14K);
+        let first = keys.iter().find(|(_, lane)| *lane == 2).map(|(code, _)| *code).expect("first side key 3");
+        let second = keys.iter().find(|(_, lane)| *lane == 10).map(|(code, _)| *code).expect("second side key 3");
+
+        key_down(&mut app, second);
+        assert_eq!(pressed_indices(&app), vec![2]);
+        key_down(&mut app, first);
+        assert_eq!(pressed_indices(&app), vec![2], "both sides together are still the one index");
+    }
+
+    /// The mode that is up decides the layout: the same key is a different index in another mode.
+    #[test]
+    fn the_same_physical_key_is_read_against_the_mode_that_is_up() {
+        let mut app = in_mode(Mode::BEAT_7K);
+        key_down(&mut app, KeyCode::KeyG);
+        assert_eq!(pressed_indices(&app), Vec::<usize>::new(), "G plays no seven-key lane");
+        app.shared.mode = Mode::POPN_9K;
+        app.shared.active_keys = app.shared.keyconfig.lane_keys(Mode::POPN_9K);
+        assert_eq!(pressed_indices(&app), vec![7], "but it is the eighth button of the pop'n layout");
+    }
+
+    /// A config written before START existed may play a column on the letter START ships on. The
+    /// lane has to keep playing, and START must not count that key as its own.
+    #[test]
+    fn a_lane_keeps_the_key_it_shares_with_start() {
+        let mut app = app();
+        app.shared.keyconfig.set_lane(Mode::BEAT_7K, 1, KeyCode::KeyA);
+        app.shared.active_keys = app.shared.keyconfig.lane_keys(Mode::BEAT_7K);
+
+        assert_eq!(app.shared.control_for(KeyCode::KeyA), None, "the key plays a column, so it is not a control");
+        key_down(&mut app, KeyCode::KeyA);
+        assert!(!app.shared.start_pressed(), "a column being hit is not START");
+        assert_eq!(pressed_indices(&app), vec![1], "it is the column's index");
+        assert_eq!(app.shared.control_for(KeyCode::KeyW), Some(ControlAction::Select), "the other shipped key is unaffected");
+    }
+
+    /// The older controls still win over a lane that shares their key, as they always did.
+    #[test]
+    fn an_older_control_still_wins_over_a_lane_on_its_key() {
+        let mut app = app();
+        app.shared.keyconfig.set_lane(Mode::BEAT_7K, 1, KeyCode::ArrowUp);
+        app.shared.active_keys = app.shared.keyconfig.lane_keys(Mode::BEAT_7K);
+        assert_eq!(app.shared.control_for(KeyCode::ArrowUp), Some(ControlAction::HiSpeedUp));
+    }
+
+    /// START and SELECT mean nothing to a run yet: handing them to the in-play control path moves
+    /// nothing, so the pad's menu buttons can be pressed mid-song harmlessly.
+    #[test]
+    fn start_and_select_move_nothing_in_a_run() {
+        let mut app = app();
+        let before = (app.shared.config.play.hispeed, app.shared.config.play.cover, app.shared.config.play.lift);
+        for action in [ControlAction::Start, ControlAction::Select] {
+            assert_eq!(app.shared.apply_control(action, &free(2.0)), ControlEffect::None, "{action:?}");
+        }
+        assert_eq!((app.shared.config.play.hispeed, app.shared.config.play.cover, app.shared.config.play.lift), before);
+    }
+
+    /// The editor refuses a key another action already has, for START and SELECT as for the rest, in
+    /// both directions.
+    #[test]
+    fn the_editor_refuses_a_key_that_start_or_a_lane_already_has() {
+        let app = app();
+        let mode = Mode::BEAT_7K;
+        let lane_key = KeyCode::KeyZ;
+        assert!(app.shared.binding_collides(mode, &KcRow::Control(ControlAction::Start), lane_key), "START onto a lane's key");
+        assert!(app.shared.binding_collides(mode, &KcRow::Control(ControlAction::Select), KeyCode::KeyA), "SELECT onto START's key");
+        assert!(app.shared.binding_collides(mode, &KcRow::Lane(0), KeyCode::KeyA), "a lane onto START's key");
+        assert!(app.shared.binding_collides(mode, &KcRow::ScratchReverse(7), KeyCode::KeyW), "a reverse key onto SELECT's key");
+        assert!(!app.shared.binding_collides(mode, &KcRow::Control(ControlAction::Start), KeyCode::KeyA), "START onto its own key");
+        assert!(!app.shared.binding_collides(mode, &KcRow::Control(ControlAction::Start), KeyCode::KeyP), "START onto a free key");
+    }
+
+    /// The editor lists START and SELECT among the control rows, on the keyboard and on the pad, so
+    /// they can be rebound like the rest.
+    #[test]
+    fn the_editor_lists_start_and_select_on_both_devices() {
+        for &mode in Mode::ALL {
+            let rows = crate::kc_rows(mode);
+            for action in [ControlAction::Start, ControlAction::Select] {
+                assert!(rows.iter().any(|row| matches!(row, KcRow::Control(a) if *a == action)), "{} keyboard row {action:?}", mode.name);
+                assert!(rows.iter().any(|row| matches!(row, KcRow::PadControl(a) if *a == action)), "{} pad row {action:?}", mode.name);
+            }
+        }
+    }
+
+    /// Every key the window reports reaches the held set through the stage's own entry point, whether
+    /// or not the screen then does anything with it.
+    #[test]
+    fn the_stage_feeds_every_key_event_into_the_held_set() {
+        let mut app = app();
+        let now = Instant::now();
+        let feed = |app: &mut App, key: KeyInput<'_>| {
+            let mut ctx = crate::stage::FrameCtx { shared: &mut app.shared, now, dt: 0.0 };
+            app.stage.handle_key(&mut ctx, key);
+        };
+        feed(&mut app, KeyInput { code: KeyCode::KeyA, pressed: true, released: false, text: None });
+        assert!(app.shared.start_pressed());
+        feed(&mut app, KeyInput { code: KeyCode::KeyA, pressed: false, released: true, text: None });
+        assert!(!app.shared.start_pressed());
     }
 }

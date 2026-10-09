@@ -12,7 +12,7 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::timer::{TimerId, TimerState};
+use crate::timer::{MICROS_PER_MILLI, TIMER_OFF, TimerId, TimerState};
 
 /// `loop` value that plays the animation once and then stops drawing it, rather than repeating.
 pub const LOOP_ONCE: i64 = -1;
@@ -61,7 +61,8 @@ impl SkinColor {
 /// A live nudge to a destination, addressed by offset id (`SkinObject.SkinOffset`).
 ///
 /// `x`/`y`/`w`/`h` move and resize the region, `r` turns it and `a` shifts its alpha in the same
-/// 0..=255 units as [`SkinColor::a`].
+/// 0..=255 units as [`SkinColor::a`]. `r` is in the document's own degrees, counter-clockwise, the
+/// space the reference adds it to a keyframe's `angle` in.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct SkinOffset {
     pub x: f32,
@@ -153,8 +154,8 @@ pub struct Keyframe {
     pub rect: SkinRect,
     /// The scissor rectangle in force at this keyframe, if the document set one.
     pub clip: Option<SkinRect>,
-    pub acc: Acc,
     pub color: SkinColor,
+    /// Degrees clockwise on a y-down screen, which is the document's `angle` with its sign flipped.
     pub angle_deg: f32,
 }
 
@@ -186,12 +187,38 @@ pub enum DrawCondition {
     Lua(LuaExprId),
 }
 
+/// What a destination names its timer with.
+///
+/// A document may name a built-in or skin-declared timer by id, and that is the one form there is so
+/// far; the enum is the place a script-computed timer joins it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimerRef {
+    /// A timer id, read from the [`TimerState`] the frame is drawn against.
+    Id(TimerId),
+}
+
+impl TimerRef {
+    /// The microsecond the timer switched on, or [`TIMER_OFF`] (`TimerProperty.getMicro`).
+    pub fn value_us(self, timers: &TimerState) -> i64 {
+        match self {
+            Self::Id(id) => timers.value_us(id),
+        }
+    }
+}
+
 /// A skin object's animation: which timer it follows, how it loops, and what it looks like along
 /// the way.
 #[derive(Debug, Clone)]
 pub struct DestinationTrack {
     /// The timer keyframe times are measured from. `None` measures from the caller's clock.
-    pub timer: Option<TimerId>,
+    pub timer: Option<TimerRef>,
+    /// The one acceleration the whole track interpolates with.
+    ///
+    /// The reference keeps one `acc` per object, and the first keyframe to declare a non-zero one
+    /// claims it for good (`SkinObject.setDestination`, `this.acc == 0`). That is the order the
+    /// document wrote its keyframes in, not the time order [`Self::frames`] is sorted into, so the
+    /// loader settles it and the keyframes carry none of their own.
+    pub acc: Acc,
     /// [`LOOP_ONCE`] plays once and stops; any other value repeats from that millisecond to the
     /// last keyframe.
     pub loop_ms: i64,
@@ -219,6 +246,7 @@ impl Default for DestinationTrack {
     fn default() -> Self {
         Self {
             timer: None,
+            acc: Acc::Linear,
             loop_ms: 0,
             blend: 0,
             filter: 0,
@@ -230,17 +258,6 @@ impl Default for DestinationTrack {
             mouse_rect: None,
             stretch: STRETCH_UNSPECIFIED,
         }
-    }
-}
-
-impl DestinationTrack {
-    /// The acceleration the whole track interpolates with.
-    ///
-    /// The reference keeps one `acc` per object and the first non-zero one declared wins
-    /// (`SkinObject.java:218-220`), so a track whose keyframes disagree follows its first shaped
-    /// keyframe. Keyframes carry their own value here because that is how a document writes them.
-    pub fn effective_acc(&self) -> Acc {
-        self.frames.iter().map(|frame| frame.acc).find(|acc| *acc != Acc::Linear).unwrap_or(Acc::Linear)
     }
 }
 
@@ -369,11 +386,20 @@ fn offset_alpha(alpha: u8, shift: f32) -> u8 {
 ///
 /// This looks at the timer and the keyframes alone. Whether the object is drawn at all is
 /// [`prepare`]'s question.
-pub fn resolve(track: &DestinationTrack, now_ms: i64, timers: &TimerState, offsets: &dyn OffsetSource) -> Option<Resolved> {
+///
+/// `now_us` is the frame clock in microseconds. Keyframes are written in milliseconds, and the
+/// reference gets there by truncating the clock and the timer separately before it subtracts them
+/// (`TimerManager.getNowTime` and `TimerProperty.get`), so the same two divisions happen here rather
+/// than one division of the difference.
+pub fn resolve(track: &DestinationTrack, now_us: i64, timers: &TimerState, offsets: &dyn OffsetSource) -> Option<Resolved> {
     let last = track.frames.len().checked_sub(1)?;
-    let mut time = now_ms;
+    let mut time = now_us / MICROS_PER_MILLI;
     if let Some(timer) = track.timer {
-        time -= timers.get(timer)?;
+        let started_us = timer.value_us(timers);
+        if started_us == TIMER_OFF {
+            return None;
+        }
+        time -= started_us / MICROS_PER_MILLI;
     }
 
     let end = track.frames[last].time_ms;
@@ -390,7 +416,7 @@ pub fn resolve(track: &DestinationTrack, now_ms: i64, timers: &TimerState, offse
 
     let applied: Vec<SkinOffset> = if track.offsets.is_empty() { Vec::new() } else { track.offsets.iter().filter_map(|id| offsets.offset(*id)).collect() };
 
-    let acc = track.effective_acc();
+    let acc = track.acc;
     let (index, rate) = frame_index_and_rate(&track.frames, time, acc);
     let frame = &track.frames[index];
     let interpolated = rate != 0.0 && !acc.is_step() && index < last;
@@ -426,7 +452,7 @@ pub fn resolve(track: &DestinationTrack, now_ms: i64, timers: &TimerState, offse
 
     let mut angle_deg = if interpolated { (frame.angle_deg + (track.frames[index + 1].angle_deg - frame.angle_deg) * rate).trunc() } else { frame.angle_deg };
     for offset in &applied {
-        angle_deg = (angle_deg + offset.r).trunc();
+        angle_deg = (angle_deg - offset.r).trunc();
     }
 
     Some(Resolved { rect, clip, color, angle_deg })
@@ -459,7 +485,7 @@ fn condition_holds(condition: DrawCondition, state: &dyn DrawStateSource, lua: O
 /// once.
 pub fn prepare(
     track: &DestinationTrack,
-    now_ms: i64,
+    now_us: i64,
     timers: &TimerState,
     state: &dyn DrawStateSource,
     lua: Option<&dyn LuaDrawEval>,
@@ -472,7 +498,7 @@ pub fn prepare(
         }
     }
 
-    let mut resolved = resolve(track, now_ms, timers, state)?;
+    let mut resolved = resolve(track, now_us, timers, state)?;
     let (offset_x, offset_y) = offset_xy;
     resolved.rect.x += offset_x;
     resolved.rect.y += offset_y;

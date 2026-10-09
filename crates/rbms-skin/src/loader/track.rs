@@ -9,7 +9,7 @@
 use std::collections::BTreeSet;
 
 use crate::SkinError;
-use crate::dst::{Acc, DestinationTrack, DrawCondition, Keyframe, MouseRect, SkinColor, SkinRect};
+use crate::dst::{Acc, DestinationTrack, DrawCondition, Keyframe, MouseRect, SkinColor, SkinRect, TimerRef};
 use crate::model::{Animation, Destination, PropertyRef};
 use crate::timer::TimerId;
 
@@ -18,6 +18,10 @@ const DEFAULT_CHANNEL: i32 = 255;
 
 /// The lowest value a colour channel may take.
 const MIN_CHANNEL: i32 = 0;
+
+/// The `acc` a keyframe carries when it shapes nothing, which leaves the object's one acceleration
+/// for a later keyframe to claim.
+const ACC_UNCLAIMED: i32 = 0;
 
 /// A whole keyframe once every unset field has been filled in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,7 +106,6 @@ impl Filled {
             time_ms: self.time,
             rect: SkinRect::new(self.x as f32, self.y as f32, self.w as f32, self.h as f32),
             clip: self.clip(),
-            acc: Acc::from_id(self.acc),
             color: SkinColor::rgba(channel(self.r), channel(self.g), channel(self.b), channel(self.a)),
             angle_deg: -(self.angle as f32),
         }
@@ -167,8 +170,14 @@ pub(crate) type Sandbox = crate::lua::LuaSandbox;
 #[cfg(not(feature = "lua"))]
 pub(crate) type Sandbox = ();
 
-/// The keyframes of one destination, filled in and sorted.
-fn keyframes(destination: &Destination, path: &str) -> Result<Vec<Keyframe>, SkinError> {
+/// The keyframes of one destination, filled in and sorted, with the one acceleration the object
+/// interpolates them by.
+///
+/// The acceleration is read before the sort, in the order the document wrote its keyframes: the
+/// first one whose filled `acc` is not zero claims it (`SkinObject.setDestination`,
+/// `this.acc == 0`). A value outside 1..=3 claims it just the same and then interpolates linearly,
+/// which is what keeps a later keyframe from shaping the object.
+fn keyframes(destination: &Destination, path: &str) -> Result<(Vec<Keyframe>, Acc), SkinError> {
     let mut filled: Vec<Filled> = Vec::with_capacity(destination.dst.len());
     for frame in &destination.dst {
         let next = match filled.last() {
@@ -177,9 +186,10 @@ fn keyframes(destination: &Destination, path: &str) -> Result<Vec<Keyframe>, Ski
         };
         filled.push(next);
     }
+    let acc = filled.iter().map(|frame| frame.acc).find(|acc| *acc != ACC_UNCLAIMED).map_or(Acc::Linear, Acc::from_id);
     let mut frames: Vec<Keyframe> = filled.iter().map(Filled::keyframe).collect();
     frames.sort_by_key(|frame| frame.time_ms);
-    Ok(frames)
+    Ok((frames, acc))
 }
 
 /// The draw conditions of one destination, integer options first and the `draw` field last, or
@@ -228,9 +238,9 @@ fn draw_conditions(destination: &Destination, lua: Option<&Sandbox>, context: &m
 ///
 /// A document may name it with an expression. The interpolator addresses timers by id alone, so an
 /// expression-named timer is reported and the animation runs on the caller's clock instead.
-fn timer_of(destination: &Destination, context: &mut TrackContext<'_>) -> Option<TimerId> {
+fn timer_of(destination: &Destination, context: &mut TrackContext<'_>) -> Option<TimerRef> {
     match destination.timer.as_ref()? {
-        PropertyRef::Id(id) => Some(TimerId(*id)),
+        PropertyRef::Id(id) => Some(TimerRef::Id(TimerId(*id))),
         PropertyRef::Expr(source) => {
             context.warnings.push(format!(
                 "{}: object {:?} names its timer with the expression {source:?}, which runs on the frame clock instead",
@@ -251,16 +261,18 @@ pub(crate) fn build_track(destination: &Destination, lua: Option<&Sandbox>, cont
     };
     let mut offsets = destination.offsets.clone();
     offsets.push(destination.offset);
+    let (frames, acc) = keyframes(destination, context.path)?;
 
     Ok(Some(DestinationTrack {
         timer: timer_of(destination, context),
+        acc,
         loop_ms: i64::from(destination.loop_ms),
         blend: destination.blend,
         filter: destination.filter,
         center: destination.center,
         offsets,
         relative: context.relative,
-        frames: keyframes(destination, context.path)?,
+        frames,
         draw_conditions,
         mouse_rect: destination.mouse_rect.map(|rect| MouseRect { x: rect.x as f32, y: rect.y as f32, w: rect.w as f32, h: rect.h as f32 }),
         stretch: destination.stretch,

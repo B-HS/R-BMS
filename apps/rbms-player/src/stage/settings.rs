@@ -9,7 +9,7 @@ use crate::ir_session::{AuthAction, GUEST_PLAYER_ID};
 use crate::settings_ui::{SettingRow, audio_status_text, is_network_row, step_audio_device};
 use crate::settings_view::{RivalsScene, SettingsScene};
 use crate::skin_select::SkinRow;
-use crate::stage::{Canvas, FrameCtx, KeyConfigState, KeyInput, Stage, StageHandler, Transition};
+use crate::stage::{Canvas, FrameCtx, KeyConfigState, KeyInput, Stage, StageHandler, Transition, is_left_press};
 use rbms_config::{AdjustOutcome, SettingId, SettingTab, adjust, step_skin};
 
 use crate::*;
@@ -622,7 +622,10 @@ impl StageHandler for SettingsState {
         self.row_key(ctx, &key)
     }
 
-    fn handle_mouse(&mut self, ctx: &mut FrameCtx<'_>, at: (f32, f32)) -> Transition {
+    fn handle_mouse(&mut self, ctx: &mut FrameCtx<'_>, at: (f32, f32), button: MouseButton, pressed: bool) -> Transition {
+        if !is_left_press(button, pressed) {
+            return Transition::Stay;
+        }
         self.ensure_rows(ctx.shared);
         match ctx.shared.hit_test(at) {
             Some(Hot::SettingTab(_) | Hot::SettingRow(_)) if self.rivals_open || self.profiles_open => {}

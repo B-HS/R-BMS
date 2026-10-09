@@ -397,3 +397,268 @@ fn a_folder_row_counts_only_the_charts_the_filter_leaves() {
     frame(&mut app, &mut state);
     assert_eq!(titles(&app), vec!["ALL SONGS (1)".to_string()], "the folder row counted charts the filter takes out");
 }
+
+/// Seven-key lanes the pad tests press: the white keys are lanes 0 2 4 6, the black ones 1 3 5, and
+/// the turntable is lane 7.
+const WHITE_LANES: [usize; 4] = [0, 2, 4, 6];
+const BLACK_CLOSE_LANES: [usize; 2] = [1, 3];
+const NEXT_REPLAY_LANE: usize = 5;
+const TURNTABLE_LANE: usize = 7;
+
+fn lane_event(lane: usize, dir: ScratchDir, press: bool) -> PadEvent {
+    PadEvent::Lane { lane, dir, press }
+}
+
+fn pad(app: &mut App, state: &mut SelectState, event: PadEvent, now: Instant) -> Transition {
+    state.handle_pad(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 }, event)
+}
+
+fn tap(app: &mut App, state: &mut SelectState, lane: usize) -> Transition {
+    pad(app, state, lane_event(lane, ScratchDir::Forward, true), Instant::now())
+}
+
+fn turn(app: &mut App, state: &mut SelectState, dir: ScratchDir, now: Instant) {
+    pad(app, state, lane_event(TURNTABLE_LANE, dir, true), now);
+}
+
+fn three_songs() -> App {
+    browsing(vec![entry("alpha", "a", "5"), entry("beta", "a", "5"), entry("gamma", "a", "5")])
+}
+
+/// Enough rows that a repeating turntable never reaches an end inside a test.
+const LONG_LIST_ROWS: usize = 40;
+
+fn long_list() -> App {
+    browsing((0..LONG_LIST_ROWS).map(|i| entry(&format!("song{i:02}"), "a", "5")).collect())
+}
+
+/// The turntable is the list's up and down: forward goes to the next row, backward to the previous,
+/// and neither runs off an end.
+#[test]
+fn a_turn_of_the_turntable_moves_the_list_and_stops_at_its_ends() {
+    let mut app = three_songs();
+    let mut state = SelectState::new();
+    let now = Instant::now();
+    assert_eq!(app.shared.sel, 0);
+
+    turn(&mut app, &mut state, ScratchDir::Backward, now);
+    assert_eq!(app.shared.sel, 0, "backward at the top stays at the top");
+    turn(&mut app, &mut state, ScratchDir::Forward, now);
+    turn(&mut app, &mut state, ScratchDir::Forward, now);
+    assert_eq!(app.shared.sel, 2);
+    turn(&mut app, &mut state, ScratchDir::Forward, now);
+    assert_eq!(app.shared.sel, 2, "forward at the bottom stays at the bottom");
+    turn(&mut app, &mut state, ScratchDir::Backward, now);
+    assert_eq!(app.shared.sel, 1);
+}
+
+/// A white key starts the focused chart, the same row Enter would.
+#[test]
+fn a_white_key_opens_the_focused_chart() {
+    for lane in WHITE_LANES {
+        let mut app = three_songs();
+        let mut state = SelectState::new();
+        app.shared.sel = 1;
+        let transition = tap(&mut app, &mut state, lane);
+        assert!(matches!(transition, Transition::Open(Stage::Loading(_))), "white key on lane {lane} did not start the chart");
+    }
+}
+
+/// On a folder the same key enters it.
+#[test]
+fn a_white_key_on_a_folder_enters_it() {
+    let mut app = three_songs();
+    let mut state = SelectState::new();
+    app.shared.select_view = SelectView::Root;
+    app.shared.rebuild_select_items();
+
+    assert!(matches!(tap(&mut app, &mut state, WHITE_LANES[0]), Transition::Stay));
+    assert!(app.shared.select_view == SelectView::AllSongs, "the folder was not entered");
+    assert_eq!(app.shared.select_items.len(), 3);
+}
+
+/// A black key goes up a folder, and never quits: at the root there is no folder to leave.
+#[test]
+fn a_black_key_goes_up_a_folder_and_does_nothing_at_the_root() {
+    for lane in BLACK_CLOSE_LANES {
+        let mut app = three_songs();
+        let mut state = SelectState::new();
+        assert!(matches!(tap(&mut app, &mut state, lane), Transition::Stay));
+        assert!(app.shared.select_view == SelectView::Root, "black key on lane {lane} did not leave the folder");
+        assert!(matches!(tap(&mut app, &mut state, lane), Transition::Stay), "at the root it must not quit");
+        assert!(app.shared.select_view == SelectView::Root);
+    }
+}
+
+/// The key between them is the replay slot, which the browser does not have yet: it does nothing.
+#[test]
+fn the_next_replay_key_does_nothing_yet() {
+    let mut app = three_songs();
+    let mut state = SelectState::new();
+    app.shared.sel = 1;
+    assert!(matches!(tap(&mut app, &mut state, NEXT_REPLAY_LANE), Transition::Stay));
+    assert_eq!(app.shared.sel, 1);
+    assert!(app.shared.select_view == SelectView::AllSongs);
+}
+
+/// The second side of a double-play layout does what the first does, turntable included.
+#[test]
+fn both_sides_of_a_double_play_layout_drive_the_list() {
+    let mut app = three_songs();
+    let mut state = SelectState::new();
+    app.shared.mode = Mode::BEAT_14K;
+    let now = Instant::now();
+    pad(&mut app, &mut state, lane_event(7, ScratchDir::Forward, true), now);
+    pad(&mut app, &mut state, lane_event(15, ScratchDir::Forward, true), now);
+    assert_eq!(app.shared.sel, 2, "each turntable moved the list one row");
+    let second_side_white = 8;
+    assert!(matches!(tap(&mut app, &mut state, second_side_white), Transition::Open(Stage::Loading(_))));
+}
+
+/// A release, a control and a lane that has no key index are not moves.
+#[test]
+fn only_a_lane_going_down_with_an_index_moves_the_browser() {
+    let mut app = three_songs();
+    let mut state = SelectState::new();
+    let now = Instant::now();
+    pad(&mut app, &mut state, lane_event(TURNTABLE_LANE, ScratchDir::Forward, false), now);
+    pad(&mut app, &mut state, PadEvent::Control(ControlAction::HiSpeedUp), now);
+    pad(&mut app, &mut state, PadEvent::Control(ControlAction::Start), now);
+    assert_eq!(app.shared.sel, 0);
+
+    app.shared.mode = Mode::KEYBOARD_24K;
+    assert!(matches!(tap(&mut app, &mut state, 10), Transition::Stay), "lane 10 of the 24-key layout has no index");
+    assert_eq!(app.shared.sel, 0);
+}
+
+/// With START or SELECT held the lane keys belong to the option panels, so the list stays put.
+#[test]
+fn the_list_does_not_move_while_start_or_select_is_held() {
+    for (hold, name) in [(KeyCode::KeyA, "START"), (KeyCode::KeyW, "SELECT")] {
+        let mut app = three_songs();
+        let mut state = SelectState::new();
+        let now = Instant::now();
+        app.shared.note_key(&press(hold));
+        turn(&mut app, &mut state, ScratchDir::Forward, now);
+        assert!(matches!(tap(&mut app, &mut state, WHITE_LANES[0]), Transition::Stay), "{name} held, a white key opened the row");
+        assert_eq!(app.shared.sel, 0, "{name} held, the turntable moved the list");
+
+        app.shared.note_key(&release(hold));
+        turn(&mut app, &mut state, ScratchDir::Forward, now);
+        assert_eq!(app.shared.sel, 1, "{name} let go, the turntable did not move the list again");
+    }
+}
+
+/// Whatever is open over the list keeps the controller away from it, like the keyboard.
+#[test]
+fn an_open_panel_keeps_the_controller_off_the_list() {
+    let now = Instant::now();
+
+    let mut app = three_songs();
+    let mut state = SelectState::new();
+    state.ranking_open = true;
+    turn(&mut app, &mut state, ScratchDir::Forward, now);
+    assert_eq!(app.shared.sel, 0, "the ranking panel was open");
+
+    let mut app = three_songs();
+    let mut state = SelectState::new();
+    state.record_modal = Some(0);
+    turn(&mut app, &mut state, ScratchDir::Forward, now);
+    assert_eq!(app.shared.sel, 0, "the record modal was open");
+
+    let mut app = three_songs();
+    let mut state = SelectState::new();
+    app.shared.searching = true;
+    turn(&mut app, &mut state, ScratchDir::Forward, now);
+    assert_eq!(app.shared.sel, 0, "the search box was open");
+
+    let mut app = three_songs();
+    let mut state = SelectState::new();
+    let mut ctx = FrameCtx { shared: &mut app.shared, now, dt: 0.0 };
+    assert!(crate::app_options::options_key(&mut ctx, StageId::Select, false, &press(KeyCode::F1)), "F1 did not open the option overlay");
+    turn(&mut app, &mut state, ScratchDir::Forward, now);
+    assert_eq!(app.shared.sel, 0, "the option overlay was open");
+}
+
+/// A controller key counts as a key press for the quit confirmation: the second Esc must not quit
+/// after the player has moved on.
+#[test]
+fn a_controller_key_cancels_an_armed_quit() {
+    let mut app = app();
+    let mut state = SelectState::new();
+    key(&mut app, &mut state, press(KeyCode::Escape));
+    assert!(state.esc_quit_at.is_some(), "the first Esc did not arm the quit");
+    turn(&mut app, &mut state, ScratchDir::Forward, Instant::now());
+    assert!(state.esc_quit_at.is_none(), "a controller key left the quit armed");
+}
+
+/// A turntable direction that stays down keeps moving the list: nothing before the delay, then one
+/// row per interval, and it stops the moment the key is up. The key state is the keyboard's here
+/// because a test has no controller; the browser reads both the same way.
+#[test]
+fn a_held_turntable_direction_repeats_after_a_delay() {
+    let mut app = long_list();
+    let mut state = SelectState::new();
+    let start = Instant::now();
+
+    turn(&mut app, &mut state, ScratchDir::Forward, start);
+    assert_eq!(app.shared.sel, 1, "the press itself moves one row");
+    app.shared.note_key(&press(KeyCode::ShiftLeft));
+    let at = |offset: Duration, app: &mut App, state: &mut SelectState| {
+        state.update(&mut FrameCtx { shared: &mut app.shared, now: start + offset, dt: 0.0 });
+        app.shared.sel
+    };
+
+    assert_eq!(at(SCRATCH_REPEAT_DELAY - Duration::from_millis(1), &mut app, &mut state), 1, "before the delay nothing repeats");
+    assert_eq!(at(SCRATCH_REPEAT_DELAY, &mut app, &mut state), 2, "the delay is over, one more row");
+    assert_eq!(at(SCRATCH_REPEAT_DELAY + SCRATCH_REPEAT_INTERVAL - Duration::from_millis(1), &mut app, &mut state), 2, "then one per interval");
+    assert_eq!(at(SCRATCH_REPEAT_DELAY + SCRATCH_REPEAT_INTERVAL, &mut app, &mut state), 3);
+    assert_eq!(at(SCRATCH_REPEAT_DELAY + SCRATCH_REPEAT_INTERVAL * 2, &mut app, &mut state), 4);
+
+    app.shared.note_key(&release(KeyCode::ShiftLeft));
+    assert_eq!(at(SCRATCH_REPEAT_DELAY + SCRATCH_REPEAT_INTERVAL * 10, &mut app, &mut state), 4, "once it is up nothing repeats");
+    assert!(state.scratch_hold.is_none(), "and the hold is forgotten");
+}
+
+/// Backward repeats the other way.
+#[test]
+fn a_held_backward_turn_repeats_upwards() {
+    let mut app = long_list();
+    app.shared.sel = LONG_LIST_ROWS / 2;
+    app.shared.keyconfig.set_scratch_reverse(Mode::BEAT_7K, TURNTABLE_LANE, KeyCode::ControlLeft);
+    app.shared.active_reverse_keys = app.shared.keyconfig.scratch_reverse_keys(Mode::BEAT_7K);
+    let mut state = SelectState::new();
+    let start = Instant::now();
+
+    turn(&mut app, &mut state, ScratchDir::Backward, start);
+    assert_eq!(app.shared.sel, LONG_LIST_ROWS / 2 - 1);
+    app.shared.note_key(&press(KeyCode::ControlLeft));
+    state.update(&mut FrameCtx { shared: &mut app.shared, now: start + SCRATCH_REPEAT_DELAY, dt: 0.0 });
+    assert_eq!(app.shared.sel, LONG_LIST_ROWS / 2 - 2);
+}
+
+/// A hold whose key is already up when the delay ends (a release the pad layer never reported, or
+/// one that landed while another screen was up) is dropped without moving the list.
+#[test]
+fn a_hold_whose_key_is_no_longer_down_is_dropped_without_a_move() {
+    let mut app = three_songs();
+    let mut state = SelectState::new();
+    let start = Instant::now();
+    turn(&mut app, &mut state, ScratchDir::Forward, start);
+    assert_eq!(app.shared.sel, 1);
+    state.update(&mut FrameCtx { shared: &mut app.shared, now: start + SCRATCH_REPEAT_DELAY * 4, dt: 0.0 });
+    assert_eq!(app.shared.sel, 1);
+    assert!(state.scratch_hold.is_none());
+}
+
+/// The course tab's list is the one the turntable moves while that tab is up, and it wraps.
+#[test]
+fn the_turntable_moves_the_course_list_on_the_course_tab() {
+    let mut app = three_songs();
+    let mut state = SelectState::new();
+    state.tab = SelectTab::Courses;
+    turn(&mut app, &mut state, ScratchDir::Forward, Instant::now());
+    assert_eq!(app.shared.sel, 0, "the song list stayed where it was");
+    assert!(matches!(tap(&mut app, &mut state, BLACK_CLOSE_LANES[0]), Transition::Stay));
+    assert!(app.shared.select_view == SelectView::AllSongs, "no folder is left from the course tab");
+}

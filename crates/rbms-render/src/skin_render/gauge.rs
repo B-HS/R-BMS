@@ -15,6 +15,7 @@ use rbms_skin::dst::SkinRect;
 use rbms_skin::loader::LoadedSkin;
 use rbms_skin::model::GaugeDef;
 use rbms_skin::property::generated::FLOAT_GROOVEGAUGE_1P;
+use rbms_skin::timer::MICROS_PER_MILLI;
 
 use super::draw::Placement;
 use super::object::{Body, Source, Sprite, image_sprite};
@@ -251,7 +252,8 @@ pub(crate) fn draw_gauge<R: Renderer>(
     let lit = if filled > 0.0 { ((filled * parts as f32) as i32).max(1) } else { 0 };
     let border = (play.field.gauge_clear_threshold / GAUGE_FULL_PERCENT).clamp(0.0, 1.0);
     let column = play.gauge_kind.saturating_mul(SLOTS_PER_GAUGE);
-    let dark = dark_run(body.animation, body.range, body.cycle, frame.now_ms);
+    let now_ms = frame.now_us / MICROS_PER_MILLI;
+    let dark = dark_run(body.animation, body.range, body.cycle, now_ms);
     let step = rect.w / parts as f32;
 
     let mut drawn = false;
@@ -268,7 +270,7 @@ pub(crate) fn draw_gauge<R: Renderer>(
         };
         drawn |= draw_part(r, place, body, column + state + shade, at, frame);
         if body.animation == GaugeAnimation::Pulse && lit == part {
-            let faded = fade(place, pulse_alpha(body.cycle, frame.now_ms));
+            let faded = fade(place, pulse_alpha(body.cycle, now_ms));
             drawn |= draw_part(r, &faded, body, column + SLOT_LEADING + shade, at, frame);
         }
     }
@@ -280,7 +282,7 @@ fn draw_part<R: Renderer>(r: &mut R, place: &Placement<'_>, body: &GaugeBody, sl
     let Some(sprite) = body.slots.get(slot).copied().flatten().and_then(|node| body.nodes.get(usize::from(node)).copied()) else {
         return false;
     };
-    let cell = sprite.animation_index(sprite.cells(), frame.now_ms, frame.timers);
+    let cell = sprite.animation_index(sprite.cells(), frame.now_us, frame.timers);
     place.cell(r, &sprite, cell, at)
 }
 

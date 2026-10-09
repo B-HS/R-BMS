@@ -2,9 +2,10 @@
 //!
 //! Skins draw back to front, so submission order *is* z-order. Nothing here ever reorders a draw.
 //! Merging is only ever applied to a run of adjacent draws that agree on everything a draw call
-//! carries — texture, blend, filter, whether they rotate, and the clip in force. The moment one of
-//! those differs the run ends and a new batch starts, which is what keeps a translucent quad from
-//! being lifted over something drawn after it.
+//! carries — texture, blend, filter, and the clip in force. The moment one of those differs the run
+//! ends and a new batch starts, which is what keeps a translucent quad from being lifted over
+//! something drawn after it. Rotation is not one of them: it travels in each instance and every
+//! textured quad goes through the same pipeline, so a turned quad joins the run it lands in.
 
 use std::borrow::Cow;
 
@@ -61,14 +62,14 @@ impl TexturedInstance {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum BatchKind {
     Colored,
-    Textured { tex: TextureId, blend: BlendMode, filter: TextureFilter, rotated: bool },
+    Textured { tex: TextureId, blend: BlendMode, filter: TextureFilter },
 }
 
 /// The clip in force for a batch. Compared as part of the batch key, so a clip change always ends
 /// the run.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub(crate) struct ClipState {
-    /// The clip rectangle in logical screen pixels, or `None` when drawing is unclipped.
+    /// The clip rectangle in the space the frame is drawn in, or `None` when drawing is unclipped.
     pub(crate) rect: Option<[f32; 4]>,
     /// Set when nested clips stopped overlapping, in which case nothing may draw at all.
     pub(crate) empty: bool,
@@ -171,11 +172,11 @@ impl DrawList {
 /// The scissor rectangle a batch needs, in surface pixels, or `None` when the batch cannot put
 /// anything on screen.
 ///
-/// The logical screen is drawn into `viewport`, which is the whole surface when the window is
-/// stretched and a centred 16:9 rectangle when it is fitted. A scissor is given in surface pixels
-/// rather than viewport-relative ones, so the clip is scaled by the viewport and then offset by
-/// it. Anything outside the surface is trimmed away, because a scissor that leaves its attachment
-/// is rejected outright.
+/// The frame is drawn into `viewport`, which is the whole surface when the window is stretched and
+/// a centred rectangle of the screen's shape when it is fitted, and `logical` is the size of the
+/// space the clip was given in. A scissor is given in surface pixels rather than viewport-relative
+/// ones, so the clip is scaled by the viewport and then offset by it. Anything outside the surface
+/// is trimmed away, because a scissor that leaves its attachment is rejected outright.
 pub(crate) fn scissor_rect(clip: ClipState, viewport: (f32, f32, f32, f32), logical: (u32, u32), surface: (u32, u32)) -> Option<(u32, u32, u32, u32)> {
     if clip.empty {
         return None;
@@ -193,6 +194,13 @@ pub(crate) fn scissor_rect(clip: ClipState, viewport: (f32, f32, f32, f32), logi
     (x1 > x0 && y1 > y0).then(|| (x0, y0, x1 - x0, y1 - y0))
 }
 
+/// Bytes one row of a `width`-pixel RGBA8 image takes once padded out to
+/// [`COPY_BYTES_PER_ROW_ALIGNMENT`], which is the stride a copy between a texture and a buffer has
+/// to be given in either direction.
+pub(crate) fn padded_row_bytes(width: u32) -> u32 {
+    (width * BYTES_PER_PIXEL).div_ceil(COPY_BYTES_PER_ROW_ALIGNMENT) * COPY_BYTES_PER_ROW_ALIGNMENT
+}
+
 /// An RGBA8 image with each row padded out to [`COPY_BYTES_PER_ROW_ALIGNMENT`], and the padded row
 /// stride, ready to be handed to a texture upload.
 ///
@@ -202,7 +210,7 @@ pub(crate) fn scissor_rect(clip: ClipState, viewport: (f32, f32, f32, f32), logi
 /// a truncated frame draws dark instead of killing the process.
 pub(crate) fn pad_rows_to_alignment(rgba: &[u8], width: u32, height: u32) -> (Cow<'_, [u8]>, u32) {
     let tight = width * BYTES_PER_PIXEL;
-    let padded = tight.div_ceil(COPY_BYTES_PER_ROW_ALIGNMENT) * COPY_BYTES_PER_ROW_ALIGNMENT;
+    let padded = padded_row_bytes(width);
     if padded == tight {
         let needed = (tight * height) as usize;
         if rgba.len() == needed {
@@ -237,7 +245,7 @@ mod tests {
     }
 
     fn textured(tex: u32) -> (BatchKind, TexturedInstance) {
-        let kind = BatchKind::Textured { tex: TextureId(tex), blend: BlendMode::Alpha, filter: TextureFilter::Nearest, rotated: false };
+        let kind = BatchKind::Textured { tex: TextureId(tex), blend: BlendMode::Alpha, filter: TextureFilter::Nearest };
         (kind, TexturedInstance::new(&QuadParams::new(Rect::new(0.0, 0.0, 1.0, 1.0))))
     }
 
@@ -287,19 +295,33 @@ mod tests {
     }
 
     #[test]
-    fn a_changed_blend_filter_or_rotation_ends_the_run() {
+    fn a_changed_blend_or_filter_ends_the_run() {
         let base = QuadParams::new(Rect::new(0.0, 0.0, 1.0, 1.0));
-        let plain = BatchKind::Textured { tex: TextureId(1), blend: BlendMode::Alpha, filter: TextureFilter::Nearest, rotated: false };
+        let plain = BatchKind::Textured { tex: TextureId(1), blend: BlendMode::Alpha, filter: TextureFilter::Nearest };
         for changed in [
-            BatchKind::Textured { tex: TextureId(1), blend: BlendMode::Add, filter: TextureFilter::Nearest, rotated: false },
-            BatchKind::Textured { tex: TextureId(1), blend: BlendMode::Alpha, filter: TextureFilter::Linear, rotated: false },
-            BatchKind::Textured { tex: TextureId(1), blend: BlendMode::Alpha, filter: TextureFilter::Nearest, rotated: true },
+            BatchKind::Textured { tex: TextureId(1), blend: BlendMode::Add, filter: TextureFilter::Nearest },
+            BatchKind::Textured { tex: TextureId(1), blend: BlendMode::Alpha, filter: TextureFilter::Linear },
         ] {
             let mut list = DrawList::default();
             list.push_textured(plain, TexturedInstance::new(&base));
             list.push_textured(changed, TexturedInstance::new(&base));
             assert_eq!(list.batches.len(), 2, "{changed:?} should not have joined {plain:?}");
         }
+    }
+
+    /// Every textured quad goes through one pipeline and carries its own rotation, so a turned
+    /// quad costs no draw call of its own.
+    #[test]
+    fn a_rotated_quad_joins_the_run_it_lands_in() {
+        let (kind, upright) = textured(1);
+        let turned = TexturedInstance::new(&QuadParams { angle_deg: 30.0, ..QuadParams::new(Rect::new(0.0, 0.0, 1.0, 1.0)) });
+        let mut list = DrawList::default();
+        list.push_textured(kind, upright);
+        list.push_textured(kind, turned);
+        list.push_textured(kind, upright);
+        assert_eq!(list.batches.len(), 1, "rotation is per instance, not per draw call");
+        assert_eq!(list.batches[0].count, 3);
+        assert_ne!(list.textured[1].rotation, list.textured[0].rotation, "and the turn still reached the instance");
     }
 
     #[test]
@@ -408,6 +430,20 @@ mod tests {
     #[test]
     fn a_window_with_no_size_yet_has_nothing_to_scissor() {
         assert_eq!(scissor_rect(ClipState::default(), (0.0, 0.0, 0.0, 0.0), LOGICAL, (0, 0)), None);
+    }
+
+    #[test]
+    fn a_scissor_in_the_viewports_own_pixels_is_only_offset_by_the_bars() {
+        let clip = ClipState { rect: Some([100.0, 50.0, 400.0, 300.0]), empty: false };
+        let scissor = scissor_rect(clip, (320.0, 0.0, 1920.0, 1080.0), (1920, 1080), (2560, 1080));
+        assert_eq!(scissor, Some((420, 50, 400, 300)), "a frame drawn in the viewport's pixels is clipped in them");
+    }
+
+    #[test]
+    fn a_padded_row_is_the_next_multiple_of_the_copy_alignment() {
+        assert_eq!(padded_row_bytes(64), 256, "an aligned row is left alone");
+        assert_eq!(padded_row_bytes(300), 1280);
+        assert_eq!(padded_row_bytes(1), COPY_BYTES_PER_ROW_ALIGNMENT);
     }
 
     /// The alignment trap: 300 pixels is 1200 bytes a row, which is not a multiple of 256.

@@ -11,7 +11,7 @@
 use std::borrow::Cow;
 
 use rbms_skin::dst::{DrawStateSource, LuaDrawEval, SkinRect, prepare};
-use rbms_skin::loader::{Filtering, StretchKind, filtering_for, stretch_rect};
+use rbms_skin::loader::{Filtering, filtering_for, stretch_rect};
 
 use super::object::{
     Body, DigitLayout, FloatBody, GraphBody, ImageBody, NumberBody, SkinObject, SliderBody, Sprite, TextBody, ValueSource, fraction_glyphs, integer_glyphs,
@@ -95,34 +95,29 @@ impl Placement<'_> {
     }
 
     /// Places one sprite cell, fitting it to the destination the way the object's stretch mode asks.
+    pub(crate) fn cell<R: Renderer>(&self, r: &mut R, sprite: &Sprite, cell: u32, rect: SkinRect) -> bool {
+        self.region(r, sprite, sprite.region(cell), rect)
+    }
+
+    /// Places one pixel region of a sprite's texture, fitting it to the destination the way the
+    /// object's stretch mode asks and reading the part of the region that mode leaves.
     ///
     /// Both the fit and the filter are decided in screen pixels, after the viewport has scaled the
     /// rectangle, because that is the space the reference decides them in: `Skin.setDestination`
     /// multiplies a destination into screen coordinates before `SkinObject.draw` ever compares it
     /// with the source region. A document authored at half the screen's size would otherwise draw
     /// its unresized objects at half size and pick the wrong filter for everything.
-    pub(crate) fn cell<R: Renderer>(&self, r: &mut R, sprite: &Sprite, cell: u32, rect: SkinRect) -> bool {
-        let source = sprite.cell_size();
-        let dst = fitted_screen_rect(self.viewport, self.object.stretch, rect, source);
-        let filter = texture_filter(filtering_for(self.object.track.filter, screen_as_skin(dst), source));
-        if dst.w <= 0.0 || dst.h <= 0.0 {
+    pub(crate) fn region<R: Renderer>(&self, r: &mut R, sprite: &Sprite, region: SkinRect, rect: SkinRect) -> bool {
+        let placed = self.viewport.place(rect);
+        let (fitted, source) = stretch_rect(self.object.stretch, SkinRect::new(placed.x, placed.y, placed.w, placed.h), region);
+        let filter = texture_filter(filtering_for(self.object.track.filter, fitted, (source.w, source.h)));
+        if fitted.w <= 0.0 || fitted.h <= 0.0 {
             return false;
         }
-        r.draw_textured_quad(sprite.tex, self.quad(dst, sprite.uv(cell), filter));
+        let dst = Rect { x: fitted.x, y: fitted.y, w: fitted.w, h: fitted.h };
+        r.draw_textured_quad(sprite.tex, self.quad(dst, sprite.region_uv(source), filter));
         true
     }
-}
-
-/// A screen rectangle back in the shape the skin rules take, which measure sizes and never flip.
-fn screen_as_skin(rect: Rect) -> SkinRect {
-    SkinRect::new(rect.x, rect.y, rect.w, rect.h)
-}
-
-/// Where a document rectangle lands on screen once its stretch mode has fitted it there.
-fn fitted_screen_rect(viewport: &SkinViewport, stretch: StretchKind, rect: SkinRect, source: (f32, f32)) -> Rect {
-    let placed = viewport.place(rect);
-    let fitted = stretch_rect(stretch, screen_as_skin(placed), source);
-    Rect { x: fitted.x, y: fitted.y, w: fitted.w, h: fitted.h }
 }
 
 /// The renderer's filter for the one the skin rules chose.
@@ -142,7 +137,7 @@ fn texture_filter(filtering: Filtering) -> TextureFilter {
 pub(crate) fn draw_object<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, object: &SkinObject, viewport: &SkinViewport, frame: &SkinFrame<'_>) -> bool {
     let state: &dyn DrawStateSource = frame.state;
     let gate: Option<&dyn LuaDrawEval> = frame.lua.map(|lua| lua as &dyn LuaDrawEval);
-    let Some(resolved) = prepare(&object.track, frame.now_ms, frame.timers, state, gate, (0.0, 0.0), frame.mouse) else {
+    let Some(resolved) = prepare(&object.track, frame.now_us, frame.timers, state, gate, (0.0, 0.0), frame.mouse) else {
         return false;
     };
 
@@ -191,7 +186,7 @@ fn draw_image<R: Renderer>(r: &mut R, place: &Placement<'_>, body: &ImageBody, r
     let Some((sprite, first, count)) = body.variants.get(chosen).or_else(|| body.variants.first()) else {
         return false;
     };
-    let cell = first + sprite.animation_index(*count, frame.now_ms, frame.timers);
+    let cell = first + sprite.animation_index(*count, frame.now_us, frame.timers);
     place.cell(r, sprite, cell, rect)
 }
 
@@ -264,7 +259,7 @@ fn draw_number<R: Renderer>(r: &mut R, place: &Placement<'_>, body: &NumberBody,
         return false;
     }
     let places = integer_glyphs(body, value);
-    let set = body.sprite.animation_index(body.layout.sets, frame.now_ms, frame.timers);
+    let set = body.sprite.animation_index(body.layout.sets, frame.now_us, frame.timers);
     let run = DigitRun {
         space: body.space,
         align: body.align,
@@ -294,7 +289,7 @@ fn draw_float<R: Renderer>(r: &mut R, place: &Placement<'_>, body: &FloatBody, r
     if places.is_empty() {
         return false;
     }
-    let set = body.sprite.animation_index(body.layout.sets, frame.now_ms, frame.timers);
+    let set = body.sprite.animation_index(body.layout.sets, frame.now_us, frame.timers);
     let run = DigitRun {
         space: body.space,
         align: body.align,
@@ -354,33 +349,31 @@ fn draw_slider<R: Renderer>(r: &mut R, place: &Placement<'_>, body: &SliderBody,
         DIRECTION_LEFT => at.x -= travel,
         _ => {}
     }
-    let cell = body.sprite.animation_index(body.sprite.cells(), frame.now_ms, frame.timers);
+    let cell = body.sprite.animation_index(body.sprite.cells(), frame.now_us, frame.timers);
     place.cell(r, &body.sprite, cell, at)
 }
 
 /// A bar cropped to its value, in the source as well as the destination so it is revealed rather
 /// than squashed.
+///
+/// The crop comes first and the stretch mode then fits the cropped region, which is the order
+/// `SkinGraph.draw` hands its region to `SkinObject.draw` in.
 fn draw_graph<R: Renderer>(r: &mut R, place: &Placement<'_>, body: &GraphBody, rect: SkinRect, frame: &SkinFrame<'_>) -> bool {
     let value = ratio(&body.value, body.ref_num, frame);
     if value <= 0.0 {
         return false;
     }
-    let cell = body.sprite.animation_index(body.sprite.cells(), frame.now_ms, frame.timers);
-    let mut src = body.sprite.uv(cell);
+    let cell = body.sprite.animation_index(body.sprite.cells(), frame.now_us, frame.timers);
+    let mut region = body.sprite.region(cell);
     let mut at = rect;
     if body.direction == GRAPH_VERTICAL {
+        let shown = region.h * value;
+        region.y += region.h - shown;
+        region.h = shown;
         at.h *= value;
-        src.v0 = src.v1 - (src.v1 - src.v0) * value;
     } else {
+        region.w *= value;
         at.w *= value;
-        src.u1 = src.u0 + (src.u1 - src.u0) * value;
     }
-    let source = body.sprite.cell_size();
-    let dst = fitted_screen_rect(place.viewport, place.object.stretch, at, source);
-    let filter = texture_filter(filtering_for(place.object.track.filter, screen_as_skin(dst), source));
-    if dst.w <= 0.0 || dst.h <= 0.0 {
-        return false;
-    }
-    r.draw_textured_quad(body.sprite.tex, place.quad(dst, src, filter));
-    true
+    place.region(r, &body.sprite, region, at)
 }

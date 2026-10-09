@@ -139,7 +139,7 @@ pub(crate) fn draw_cover<R: Renderer>(
     let Some(visible) = visible_band(body, band, frame) else {
         return false;
     };
-    let cell = body.sprite.animation_index(body.sprite.cells(), frame.now_ms, frame.timers);
+    let cell = body.sprite.animation_index(body.sprite.cells(), frame.now_us, frame.timers);
     let clipped = visible != band;
     if clipped {
         r.push_clip(place.viewport.place(visible));

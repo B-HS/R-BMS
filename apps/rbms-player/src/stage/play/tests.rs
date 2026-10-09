@@ -29,7 +29,7 @@ const REPLAY_TAIL_US: i64 = 1_000_000;
 /// An app with no window, no audio and no server, set to interactive play so the lane path is
 /// live. `App::new` never opens an output stream, so `shared.audio` is the "no device" case.
 fn app() -> App {
-    let dir = std::env::temp_dir().join(format!("rbms-play-stage-tests-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("rbms-play-stage-tests-{}-{:?}", std::process::id(), std::thread::current().id()));
     let mut config = Config::default();
     config.play.autoplay = false;
     let mut app = App::new(String::new(), config, LaunchOptions::default(), dir.join("settings.ron"));
@@ -548,9 +548,6 @@ const NOTE_HEIGHT: f32 = 22.0;
 const FIELD_X: f32 = 40.0;
 const FIELD_W: f32 = 320.0;
 
-/// Frames a test draws while the fixture's one source image is read off the worker pool.
-const DOCUMENT_LOAD_FRAMES: usize = 240;
-
 /// A seven-key document that draws the whole play screen for itself: a note field and nothing else.
 fn play_document() -> String {
     let lanes: Vec<String> = DOCUMENT_LANES.iter().map(|(x, w)| format!(r#"{{ "x": {x}, "y": {LANE_FOOT}, "w": {w}, "h": {LANE_HEIGHT} }}"#)).collect();
@@ -591,19 +588,11 @@ fn document_app(tag: &str, document: &str) -> App {
 }
 
 /// Draws the play screen onto `pixels` until its document has compiled, then draws one more frame so
-/// the canvas shows the document; answers whether it compiled in time.
-///
-/// One canvas throughout, because a compiled document holds textures registered with the target it
-/// was built against.
+/// the canvas shows the document; answers whether it compiled in time. The fixture does not animate,
+/// so every frame is drawn at the moment the scene began.
 fn render_until_document_compiled(app: &mut App, pixels: &mut crate::stage::HeadlessCanvas) -> bool {
-    for _ in 0..DOCUMENT_LOAD_FRAMES {
-        crate::stage::render_tests::render_into(app, crate::stage::Stage::Play(Box::new(crate::stage::render_tests::play_state())), pixels);
-        if app.shared.has_compiled_skin(rbms_skin::loader::SKIN_TYPE_PLAY_7KEYS) {
-            crate::stage::render_tests::render_into(app, crate::stage::Stage::Play(Box::new(crate::stage::render_tests::play_state())), pixels);
-            return true;
-        }
-    }
-    false
+    let stage = || crate::stage::Stage::Play(Box::new(crate::stage::render_tests::play_state()));
+    crate::stage::capture::draw_until_compiled(app, rbms_skin::loader::SKIN_TYPE_PLAY_7KEYS, crate::stage::capture::SCENE_START_US, pixels, stage)
 }
 
 /// Draws the play screen until its document has compiled, answering the app and the last frame.
@@ -619,7 +608,7 @@ fn play_until_compiled(tag: &str, document: &str) -> (App, crate::stage::Headles
 fn a_lane_going_down_starts_the_key_timer_that_lane_publishes() {
     let (mut app, mut pixels) = play_until_compiled("keyon", &play_document());
     let first_key = rbms_skin::timer::timer_id::KEYON_1P_KEY1;
-    assert!(app.shared.skin_timers.is_off(first_key), "no key has been touched yet");
+    assert!(!app.shared.skin_timers.is_on(first_key), "no key has been touched yet");
 
     let mut state = crate::stage::render_tests::play_state();
     let now = Instant::now();
@@ -630,8 +619,8 @@ fn a_lane_going_down_starts_the_key_timer_that_lane_publishes() {
     crate::stage::render_tests::render_into(&mut app, crate::stage::Stage::Play(Box::new(state)), &mut pixels);
 
     assert!(app.shared.skin_timers.is_on(first_key), "the first key of the left-hand field went down and its timer did not start");
-    assert!(app.shared.skin_timers.is_off(rbms_skin::timer::timer_id::KEYOFF_1P_KEY1), "a key that is down is not also reported as released");
-    assert!(app.shared.skin_timers.is_off(rbms_skin::timer::timer_id::KEYON_1P_SCRATCH), "and no other lane was touched");
+    assert!(!app.shared.skin_timers.is_on(rbms_skin::timer::timer_id::KEYOFF_1P_KEY1), "a key that is down is not also reported as released");
+    assert!(!app.shared.skin_timers.is_on(rbms_skin::timer::timer_id::KEYON_1P_SCRATCH), "and no other lane was touched");
 }
 
 /// Where the nudged mark sits in the document, in its own y-up space, and on screen once drawn.

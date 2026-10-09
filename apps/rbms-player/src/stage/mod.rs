@@ -7,11 +7,15 @@
 
 use std::time::Instant;
 
+use winit::event::MouseButton;
 use winit::keyboard::KeyCode;
 
 use crate::AppShared;
+use crate::pointer::{PointerInput, route_pointer};
 
 pub(crate) mod canvas;
+#[cfg(test)]
+mod capture;
 pub(crate) mod course_result;
 pub(crate) mod folders;
 pub(crate) mod keyconfig;
@@ -119,18 +123,36 @@ pub(crate) struct KeyInput<'a> {
     pub text: Option<&'a str>,
 }
 
+/// Whether a mouse event is the left button going down, the one thing the built-in screens act on.
+pub(crate) const fn is_left_press(button: MouseButton, pressed: bool) -> bool {
+    pressed && matches!(button, MouseButton::Left)
+}
+
 /// One screen of the player.
 ///
 /// `update` runs once per frame before drawing, `draw` paints the screen and records its clickable
-/// regions, and the two input methods translate a key or a left-click. `on_enter`/`on_exit` carry
-/// the contracts a screen change has to honour — the select preview is torn down on the way out of
-/// the browser, for instance, before anything else can touch the audio engine.
+/// regions, and the input methods translate a key, a mouse button, a drag or a turn of the wheel.
+/// `on_enter`/`on_exit` carry the contracts a screen change has to honour — the select preview is
+/// torn down on the way out of the browser, for instance, before anything else can touch the audio
+/// engine.
 pub(crate) trait StageHandler {
     fn update(&mut self, ctx: &mut FrameCtx<'_>) -> Transition;
     fn draw(&mut self, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'_>);
     fn handle_key(&mut self, ctx: &mut FrameCtx<'_>, key: KeyInput<'_>) -> Transition;
-    fn handle_mouse(&mut self, ctx: &mut FrameCtx<'_>, at: (f32, f32)) -> Transition {
+    /// A mouse button going down or coming back up at `at`, in the logical space the screen is laid
+    /// out in. A screen that only reacts to a click checks [`is_left_press`].
+    fn handle_mouse(&mut self, ctx: &mut FrameCtx<'_>, at: (f32, f32), button: MouseButton, pressed: bool) -> Transition {
+        let _ = (ctx, at, button, pressed);
+        Transition::Stay
+    }
+    /// The cursor moving to `at` while a button is held.
+    fn handle_mouse_drag(&mut self, ctx: &mut FrameCtx<'_>, at: (f32, f32)) -> Transition {
         let _ = (ctx, at);
+        Transition::Stay
+    }
+    /// The wheel turning by `lines`, positive when it is rolled towards the player.
+    fn handle_scroll(&mut self, ctx: &mut FrameCtx<'_>, lines: f32) -> Transition {
+        let _ = (ctx, lines);
         Transition::Stay
     }
     /// One controller event, already debounced. A screen with no use for a controller is unchanged.
@@ -252,7 +274,11 @@ impl Stage {
     /// The overlay is offered every key before the screen underneath sees it, because the whole
     /// point of it is that the list it is drawn over does not move while it is open. A key it does
     /// not take reaches the screen exactly as it would have.
+    ///
+    /// The held-key set the START, SELECT and key-index queries read is updated first, from every
+    /// key, so a key the overlay or a text box took still counts as down.
     pub(crate) fn handle_key(&mut self, ctx: &mut FrameCtx<'_>, key: KeyInput<'_>) -> Transition {
+        ctx.shared.note_key(&key);
         let holds_keys = self.view().holds_keys(ctx);
         if crate::app_options::options_key(ctx, self.id(), holds_keys, &key) {
             return Transition::Stay;
@@ -260,16 +286,9 @@ impl Stage {
         self.handler().handle_key(ctx, key)
     }
 
-    /// Route one click to the screen that is up, unless the option overlay is over it.
-    ///
-    /// An open panel takes the click for the same reason it takes the keys: the list underneath must
-    /// not move while the panel is being read, and a click on a row would otherwise start a chart
-    /// and leave the panel drawn over the run.
-    pub(crate) fn handle_mouse(&mut self, ctx: &mut FrameCtx<'_>, at: (f32, f32)) -> Transition {
-        if ctx.shared.options.is_open() {
-            return Transition::Stay;
-        }
-        self.handler().handle_mouse(ctx, at)
+    /// Route one mouse event to the screen that is up, unless the option overlay is over it.
+    pub(crate) fn handle_pointer(&mut self, ctx: &mut FrameCtx<'_>, at: (f32, f32), input: PointerInput) -> Transition {
+        route_pointer(self.handler(), ctx, at, input)
     }
 
     /// Route one controller event to the screen that is up. The option overlay does not take these:
