@@ -22,7 +22,8 @@
 - [ ] L3. 엔진 구현 — 사양 §6 의 웨이브 1~2.
   - [x] 웨이브 1A — 철거(W1-1a·b·c, W1-2, W1-3, W1-6): 구 번들 3세대와 혼합 합성 삭제(사운드 22개는 `assets/skins/rbms-default/` 로 이동), 설정 스키마 3 과 마이그레이션(파일·계정 블롭), 모델 확장 필드 삭제, Lua 5.2 전환, 폰트 캐시 패밀리 분리. Workflow `wf_575fa3b4-9ac`(7 에이전트), 리뷰 major 2·minor 3 전부 수정. 게이트: fmt·clippy·`cargo test --workspace` 3,111 통과·0 실패·ignored 3·`git diff --check`, 내장 골든 불변.
   - [x] 웨이브 1B — 기반(W1-4, W1-5, W1-7~W1-10): 타이머 µs(OFF = `i64::MIN`)·stretch 11종·오프셋 r 부호·acc 선언 순서, 장면 시계와 전환 리셋, 마우스 release·drag·휠, GPU 논리 크기 = 물리 뷰포트와 `ScaledRenderer`, 표면 바이트 통과(E10 확정), START/SELECT(A/W), 해상도·창 모드 설정, 캡처 하니스 `stage/capture.rs`. Workflow `wf_e03c0a9e-2fd`(8 에이전트), 리뷰 major 2·minor 5 처리. 게이트: fmt·clippy·`cargo test --workspace` 3,262 통과·0 실패·ignored 3·`git diff --check`, 골든 불변, GPU 대 CPU 픽셀 비교 통과. 메인이 1920x1080 GPU 캡처를 직접 열어 확인. 실창 확인(내장 화면 밝기 변화 포함)은 사용자 절차로 남음. 원래 항목: 구 번들·혼합 합성 삭제, Lua 5.2 전환, 타이머 µs·stretch·오프셋 정합, 장면 시계, GPU 논리 크기 런타임화, 해상도 설정, 캡처 하니스, START/SELECT.
-  - [ ] 웨이브 2 — Lua 런타임과 로더(W2-0~W2-9): 환경·io 오버레이·luajava, `SkinHost`·`main_state`, Lua 값 변환, 2패스 로드, 덤프 CLI, 픽스처, 스킨 팩 폴더 지정, 결정 화면 정지 프레임.
+  - [x] 웨이브 2A — Lua 런타임과 로더 본체(W2-0~W2-5): Lua 5.2 런타임(`crates/rbms-skin/src/lua/`: 환경, `require`/`dofile` 가두기, io 쓰기 오버레이, os, luajava facade, `main_state`, `timer_util`), `SkinHost`·`MapHost`, 값 참조 타입 확장, Lua 값 → `SkinDef` 변환, 2패스 로더, 구 샌드박스 삭제. Workflow `wf_402f94ef-6d0`(10 에이전트), 리뷰 critical 3·major 3·minor 3 처리. 게이트: 테스트 3,475 통과·0 실패. **ModernChic `.luaskin` 9/10 로드**(keyconfig 는 원본 결함), pcall 실패 0, destination 수 play7 286·select 1914·result 195·decide 69, 스킨 폴더 무변경.
+  - [ ] 웨이브 2B — 덤프 CLI와 프레임 비용 실측(W2-6), 스킨 팩 폴더 지정(W2-8), 결정 화면 정지 프레임(W2-9), 오버레이 총 크기 상한. 원래 항목: 환경·io 오버레이·luajava, `SkinHost`·`main_state`, Lua 값 변환, 2패스 로드, 덤프 CLI, 픽스처, 스킨 팩 폴더 지정, 결정 화면 정지 프레임.
 - [ ] L4. 화면·UI 전환 — 사양 §6 의 웨이브 3~7.
   - [ ] 웨이브 3 — 공통 렌더 의미론과 결정 화면(W3-0~W3-7).
   - [ ] 웨이브 4 — 결과와 코스 결과(W4-1~W4-7).

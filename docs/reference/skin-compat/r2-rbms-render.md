@@ -1,6 +1,16 @@
 # R2 — R-BMS 렌더 계층(crates/rbms-render, GPU 백엔드) 현황과 격차
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 1(철거와 기반) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 1B 반영 사항"과 "웨이브 1A 반영 사항"이 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 2A(Lua 런타임과 로더) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 2A 반영 사항 (2026-10-10)
+
+Lua 5.2 런타임(`crates/rbms-skin/src/lua/`), `SkinHost`, Lua 값 변환기, 2패스 `.luaskin` 로더를 넣고 구 샌드박스(`skin.*`)를 삭제한 뒤의 상태다.
+
+- (W2-0) r2-rbms-render.md §7.1 표(362행 `state` 행과 368행 트레이트 줄): `&dyn SkinStateSource` 를 `&dyn SkinHost` 로, 트레이트 목록을 `DrawStateSource::boolean(id) -> Option<bool>`, `SkinHost::{integer, rate, float, text, timer_us, now_us, ...}` 로. state.rs 의 다섯 어댑터가 `rate(id)` 를 `Some(float(id))` 로 답한다는 점 추가.
+- (W2-1) r2-rbms-render.md §5.1 표 image 행과 상단 W1-4 반영 사항: animation_index 시그니처를 animation_index(count, now_us, timers, lua) 로, Sprite.timer 를 Option<TimerRef> 로
+- (W2-1) r2-rbms-render.md §7.1 표(363행) lua 행: '컴파일된 식 평가(eval_draw, eval_integer, eval_float, eval_text)에 더해 상위 트레이트 LuaDrawEval 의 call_*/named_* 로 함수 값·이름을 평가. SkinFrame::script() 가 게이트·타이머용 평가기를 돌려준다' 로. ValueSource 설명이 있는 곳에 Function(LuaFnId)·Name(String) 변형과 Copy 상실을 추가
+- (W2-5) r2-rbms-render.md §7(프레임·평가기 서술)과 SkinAssets 설명 절: `SkinExprEval` 트레이트와 `eval_integer/float/text`, `SkinAssets::expression`, `ValueSource::Expr` 가 삭제됨. `SkinFrame.lua`·`SkinDraw.lua` 는 `Option<&dyn LuaDrawEval>`. `ValueSource::new` 는 assets 인자를 받지 않음
+
 
 ## 웨이브 1B 반영 사항 (2026-10-10)
 

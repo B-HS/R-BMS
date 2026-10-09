@@ -1,6 +1,47 @@
 # B1. beatoraja Lua 스킨 로딩 파이프라인과 Lua 실행 환경 계약
 
-> 최종 갱신 2026-10-09 · 대응 단계: 웨이브 1A(철거) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 1A 반영 사항"이 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 2A(Lua 런타임과 로더) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 2A 반영 사항 (2026-10-10)
+
+Lua 5.2 런타임(`crates/rbms-skin/src/lua/`), `SkinHost`, Lua 값 변환기, 2패스 `.luaskin` 로더를 넣고 구 샌드박스(`skin.*`)를 삭제한 뒤의 상태다.
+
+- (W2-0) b1-lua-env.md §14-5·§14-6: 스칼라 변환 규칙의 구현 위치를 `crates/rbms-skin/src/lua/coerce.rs`, 함수 호출 규약의 구현 위치를 `lua/mod.rs` 의 `BoundFrame::call_*` 로 명시. §2.3 Controllers 행에 'R-BMS 는 스킨에 컨트롤러 없음으로 보고한다(계약)' 를 추가.
+- (W2-1) b1-lua-env.md §5.3 표 'value 함수' 행: '객체별 구현, 이 조사 범위 밖' 에 'SkinNumber.prepare 는 값 함수를 그리기 조건보다 먼저 호출한다(SkinNumber.java:134-150)' 를 추가. 사양 §4.3 의 '조건 통과 객체에 한해 op/draw → timer → 값 함수' 문장과 어긋난다
+- (W2-2a) b1-lua-env.md §2.1: R-BMS 구현 상태 추가. base·table·string·math·bit32·coroutine 은 벤더 Lua 5.2.4 에서 열고 io·os·package 는 Rust/Lua 로 자체 구현. 벤더 빌드에 LUA_COMPAT_ALL 이 없어 unpack·loadstring·math.log10 이 LuaJ 와 똑같이 없음을 테스트로 확인. print 는 진단 로그로, debug 는 { getmetatable } 로 env.rs 가 설치. _VERSION 은 'Lua 5.2'(LuaJ 는 'Luaj-jse 3.0.2')
+- (W2-2a) b1-lua-env.md §2.4: R-BMS 규칙 추가. 상대 경로는 작업 디렉터리가 아니라 항상 스킨 루트 기준, 역슬래시도 구분자, 청크 이름은 `@<루트 상대 경로>`, 실패 메시지는 `cannot open <경로>: <사유>`. require 는 package.path 를 읽지 않으며(표시용으로만 `?.lua;<루트>/?.lua` 설정) 루트 밖 이름은 'module not found' 로 끝남
+- (W2-2a) b1-lua-env.md §5.1: R-BMS 차이 추가. 삼켜진 오류는 pcall·xpcall·coroutine.resume 에서 기록하고, 예산 초과 오류는 이들과 load 가 다시 던짐. Rust 함수가 던진 오류는 pcall 에서 문자열로 바뀜. 예산이 거부·중단한 호출은 기본값이 아니라 직전 값
+- (W2-2a) b1-lua-env.md §12: '난수 시드' 행과 'math.random(m) 에 실수 인자' 행을 'R-BMS 는 인터프리터별 자체 생성기(SplitMix64)로 교체, 인자는 절삭, 시드 없으면 RBMS_SKIN_SEED 또는 시계'로 갱신. 'x % 0' 행의 미확인을 'Lua 5.2 에서 NaN 임을 테스트로 확인'으로. 선택지 2 는 채택·구현 완료로 표시
+- (W2-2a) b1-lua-env.md §13: 'dofile 109회, pcall 110회' 행 근처에 'Lua 파일은 .lua 126개 + .luaskin 10개 = 136개, 전부 CRLF, BOM 없음, Lua 5.2 텍스트 청크로 전부 컴파일됨(실측)' 추가
+- (W2-2a) b1-lua-env.md §15: 'LuaJ 소스 인코딩 처리와 BOM 처리' 미확인 항목에 'R-BMS 는 UTF-8 BOM 을 제거하고 바이트 그대로 넘김' 추가. 'mlua 0.12 의 lua52 기능 제공 여부'는 확인됨으로
+- (W2-4) b1-lua-env.md §4.1: 배열 행에 R-BMS 구현 규칙을 추가해야 합니다. '양의 정수 키 값을 오름차순으로 먼저, 그 뒤 나머지 키 값을 인터프리터 순회 순서로. 시퀀스(구멍 포함)는 LuaJ 와 같고, 섞인 키의 상대 순서는 LuaJ 해시 순서를 재현하지 않는다.' 객체 행에는 '문자열 키만 필드명과 비교한다(숫자·boolean 키의 문자열화가 필드명과 같을 수 없으므로 결과 동일)'를 추가합니다.
+- (W2-4) b1-lua-env.md §4.2: 'R-BMS 구현' 주석이 필요합니다. coerce::to_jstring 이 실수를 Float.toString((float)d) 형식(지수 표기 포함)으로, nan/inf/-inf 와 -0.0 → "0" 으로 냅니다. 테이블·함수는 'table: ...' 가 아니라 타입 이름만 냅니다.
+- (W2-4) b1-lua-env.md §4.3: 표 아래에 R-BMS 대응을 추가해야 합니다. TimerProperty 의 음수 id 는 변환기에서 필드 미설정, StringWriter 의 숫자는 컴파일 실패 경고 후 미설정, 이름 조회는 FromLua.known_name(LuaFnKind, 이름)으로 주입받고 불리언은 선행 '!' 를 모두 뗀 뒤 조회하되 Name 에는 스킨이 쓴 철자 그대로 보관, 컴파일 실패 시 op 원소는 id 0·property 없음.
+- (W2-4) b1-lua-env.md §4.6: 마지막 문단 'R-BMS 는 키 없음을 별도 상태(Option)로 표현하는 편이 안전하다'를 '구현됨: 키가 있으면 어떤 값이든 Some(toint), 없으면 None. 값이 정확히 Integer.MIN_VALUE 인 경우만 원본(미지정)과 다르다'로 바꿔야 합니다.
+- (W2-2b) b1-lua-env.md §2.2: 'LuaJ 의 io.open 은 IOException 을 nil, 메시지 반환으로 바꾼다(… 이 jar 의 바이트코드로는 미확인)' 을 '확인됨'으로 바꿔야 합니다. javap 결과: IoLib.errorresult 는 `nil, "io error: <메시지>"` 두 값(errno 없음). IoLibV.invoke 가 IOException 을 잡아 이 형태로 바꾸되 LINES_ITER(줄 반복자)만 error 로 raise 합니다. io.lines·io.input·io.output 의 파일 열기는 ioopenfile 이 `error("io error: …")` 로 raise 합니다.
+- (W2-2b) b1-lua-env.md §2.2: 'io.popen 금지' 는 raise 가 아닙니다. openProgram 의 IOException 이 errorresult 를 타서 `nil, "io error: Lua io.popen is not allowed"` 가 반환됩니다. 모드가 r·w 가 아니면 argerror 입니다.
+- (W2-2b) b1-lua-env.md §2.2: 이 jar(luaj-jse-3.0.2-custom)의 IoLib 는 공개 3.0.2 보다 새 동작을 갖습니다. 추가할 내용: (1) rawopenfile 이 모드를 검증(첫 글자 r/w/a, 둘째 +, 이후 b; 아니면 argerror), (2) read 형식은 길이 2 이상이고 '*' 로 시작하며 둘째 글자가 n/l/L/a, 숫자는 바이트 수, 인자 없으면 한 줄, 첫 nil 에서 중단, (3) '*L' 지원, (4) io.lines(name, 형식…)은 끝에서 파일을 닫고 file:lines() 는 닫지 않음, (5) write 는 파일 자신을 반환, close 는 true, 표준 스트림 close 는 `nil, "cannot close standard file"`, (6) freadnumber 는 peek 가 EOF 에서 EOFException 을 던져 숫자가 파일 끝에 닿으면 `nil, "io error: java.io.EOFException"`.
+- (W2-2b) b1-lua-env.md §2.2: R-BMS 구현 차이를 추가해야 합니다. 상대 경로는 항상 스킨 루트 기준(작업 디렉터리 규칙 (a) 미적용), 쓰기·추가·r+ 는 오버레이, a·r+ 는 루트 파일을 오버레이로 먼저 복사, stdout·stderr 쓰기는 버리지 않고 진단 로그에 기록, flush 는 fsync 안 함, tmpfile 은 오버레이 최상위, 읽기 1회 64MiB 상한.
+- (W2-2b) b1-lua-env.md §2.1 os 행: 'clock, date, difftime, setlocale, time 만 남는다' 뒤에 LuaJ 의미를 추가해야 합니다. clock = (currentTimeMillis - 클래스 로드 시각)/1000.0 인 벽시계 경과 초, time() = currentTimeMillis/1000.0 인 소수 초, setlocale 은 인자와 무관하게 "C". R-BMS 는 이 셋을 Rust 로 같게 구현했고 date·difftime·time(table) 은 C 라이브러리를 씁니다.
+- (W2-2b) b1-lua-env.md §12 표의 'os.time()' 행: LuaJ 열 '초 단위 수' 를 'ms 를 소수로 가진 초(double)' 로 바꾸고, R-BMS 가 같은 값을 돌려준다고 적어야 합니다.
+- (W2-2b) b1-lua-env.md §15 미확인 목록: 첫 항목 'LuaJ IoLib 가 IOException 을 nil, 메시지 로 바꾸는 정확한 반환 형태' 를 지워야 합니다(확인됨, 두 값).
+- (W2-3) b1-lua-env.md §2.5: 'R-BMS 구현' 주석 추가 — Full 모드는 헤더·본체 두 패스 모두 실제 main_state 테이블이고, 호스트가 묶이지 않은 호출과 HeaderOnly 모드의 호출은 둘 다 'attempt to call ... a nil value' 오류다. main_state 는 전역이 아니라 package.loaded 에만 있다.
+- (W2-3) b1-lua-env.md §6.1 number 행: '없으면 0' 을 '팩토리에 속성이 없는 id·이름은 0, 속성은 있고 값이 없으면 -2147483648' 로 구체화. R-BMS 는 property::reference_implements(Integer, id) 로 가른다.
+- (W2-3) b1-lua-env.md §6.1 key_pressed 행: '이름은 libGDX 1.9.9 Input.Keys.toString 표시 이름(Left, Up, Space, L-Shift, Numpad 0, F1 … 총 112개, 코드 0~255)' 을 jar 확인으로 추가. 숫자를 적은 문자열은 코드로 읽힌다(isnumber 가 먼저).
+- (W2-3) b1-lua-env.md §6.2 event_exec 행: 원본은 인자 0개 또는 4개 이상에서 VarArgFunction 의 invoke/onInvoke 가 서로를 불러 반환하지 않는다는 점과, R-BMS 는 그 경우 Lua 오류를 낸다는 점을 추가.
+- (W2-3) b1-lua-env.md §6.2 file_list 행: R-BMS 는 패턴을 Java 정규식으로 바꾸지 않고 Lua 패턴(string.find)으로 거른다는 의도적 차이를 추가. file_* 쓰기는 오버레이로만 가고 file_append 는 루트 원본을 오버레이로 복사한 뒤 덧붙인다.
+- (W2-3) b1-lua-env.md §6.2 set_timer 행: R-BMS 는 값을 인터프리터 안(lua/main_state.rs 의 커스텀 타이머 저장소)에 두고 호스트에 알리지 않으며 custom_timer_us 로 읽는다.
+- (W2-3) b1-lua-env.md §7: 구현 위치 추가 — crates/rbms-skin/src/lua/prelude.lua(순수 Lua). tolong 은 Lua 로 옮겼고 event_min_interval 의 간격은 32비트로 좁히지 않는다.
+- (W2-3) b1-lua-env.md §14: 요약에 '바인딩 = 영구 트램펄린 + 프레임당 scope 함수 38개, 릴리스 실측 바인딩 약 10µs/프레임·호출 약 80ns' 추가.
+- (W2-2c) b1-lua-env.md §2.3: 'Input.Keys.<NAME> 은 valueOf 를 부른다 ... RIGHT 는 -1' 은 원본 HEAD 서술로 맞지만, R-BMS 는 E7 에 따라 상수 이름(UP 19, DOWN 20, LEFT 21, RIGHT 22)을 먼저 보고 표시 이름을 폴백으로 받으며 모르는 이름은 -1 입니다. '이 숫자는 jar 로 미확인' 문구는 '확인됨: gdx.jar 의 Input$Keys 상수 155개 중 DPAD_*, UP/DOWN/LEFT/RIGHT 가 19~22'로 바꿔야 합니다.
+- (W2-2c) b1-lua-env.md §2.3 표(luajava.new): R-BMS 의 File:mkdir 은 병합 뷰 기준 Files.createDirectory 의미(이미 있음/부모 없음/오버레이 없음은 false)이고 오버레이에 부모 사본을 만든 뒤 한 단계만 만든다는 설명을 추가해야 합니다.
+- (W2-2c) b1-lua-env.md §2.3 세부: URL 연결의 R-BMS 처리를 추가해야 합니다. setRequestMethod(GET 만), setConnectTimeout(숫자 검증)은 원본대로 동작하고 connect/getResponseCode/getInputStream 은 항상 'Legacy Lua skin HTTP connection failed: network access is not available to skins' 입니다.
+- (W2-5) b1-lua-env.md §14 요약 10번: 'def 를 로드 시점에 적용할지 결정 필요' → '로드 시점에 스템 대조로 적용, 미해결 슬롯은 로드당 1회 추첨 고정'으로 확정
+- (W2-5) b1-lua-env.md §3.3: R-BMS 구현 주석 추가 — skin_config.offset 값은 오프셋 id 로 저장된 사용자 값을 이름 키로 게시. get_path 는 스킨 루트 절대 경로를 돌려주고 Java File.getPath 처럼 중복 구분자·끝 구분자를 정리. 슬롯이 덮지 않는 와일드카드는 호출마다 추첨
+- (W2-5) b1-lua-env.md §2 표(샌드박스 모드): R-BMS 헤더 전용 읽기는 luajava 를 설치한 채 실행함을 주석으로 추가(ModernChic 헤더 패스 10개 모두 통과)
+- (리뷰 수정) b1-lua-env.md §2.1(표준 라이브러리 표, 91행 부근 base 행과 string 행): R-BMS 쪽 차이로 `setmetatable` 이 `__gc` 를 종료자로 등록하지 않는다는 점과 `string.find/match/gmatch/gsub` 가 자체 구현이라는 점을 적어야 합니다
+- (리뷰 수정) b1-lua-env.md §2.2(io)와 main_state 파일 API 표(419행 부근 `file_list` 가 있는 표): `file_read_lines` 의 64MiB 상한, `file_count_lines` 의 스트리밍, `file_append` 가 원본 권한을 물려받지 않는 사본을 만든다는 점, io 의 동시 열기 64개 상한을 R-BMS 동작으로 추가해야 합니다
+
 
 ## 웨이브 1A 반영 사항 (2026-10-09)
 

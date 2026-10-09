@@ -1,6 +1,6 @@
 # 스킨 호환 조사 — 색인
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 1(철거와 기반) 완료 · 기준 커밋 `9ce92bb` · 레퍼런스 체크아웃 HEAD `8320241d`
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 2A(Lua 런타임과 로더) 완료 · 기준 커밋 `9ce92bb` · 레퍼런스 체크아웃 HEAD `8320241d`
 > 작업 체크리스트는 `docs/PROCESS.md` "레퍼런스 형식 Lua 스킨 완전 호환과 기본 스킨 교체" 절이다.
 
 이 폴더는 외부 풀 Lua 스킨(ModernChic)을 R-BMS 가 수정 없이 읽어 레퍼런스 구현(beatoraja)과 같게 그리기 위한 조사 결과 전문이다. 조사자 14개 + 종합 1개 + 비판 1개(Workflow `wf_43ad1f8d-42b`, 에이전트 16개, 약 840만 토큰)의 산출물이며, **같은 탐색을 다시 하지 않기 위해** 저장한다.
@@ -63,6 +63,7 @@
 - 새로 필요한 큰 덩어리: Lua 5.2 런타임과 2패스 로더, Lua 값 → 모델 변환과 함수 값 필드, id → 값 공급 계층(호스트 계약), 레퍼런스식 장면 수명과 플레이 상태기계, 객체 의미론 정합(텍스트·songlist·note·gauge·judge·그래프·클릭), 해상도 일반화와 텍스처 수명.
 - START/SELECT 바인딩은 웨이브 1B(W1-10)에서 생겼다(`ControlAction::{Start, Select}`, 키보드 A/W, 질의 `AppShared::{start_pressed, select_pressed, key_index_pressed}`). 패널 1~3·결정 취소·차트 미리보기가 이 질의를 쓴다.
 - 게이지 이력은 레퍼런스에서 전 종류를 500ms 간격으로 동시에 기록한다(`B:play/BMSPlayer.java:625-635`).
+- **실측(웨이브 2A, 실제 로드 결과)**: ModernChic `.luaskin` 10개 중 9개가 로드된다. keyconfig 만 원본 결함(`Decide/lua/require/textproperty.lua:37`)으로 본체 패스가 실패한다. 화면별 type / destination / 함수 값 / Lua 메모리: play7_hw 0 / 286 / 76 / 1.4 MiB, play5_hw 1 / 277 / 76 / 1.4 MiB, play14_hw 2 / 372 / 124 / 1.7 MiB, play10_hw 3 / 354 / 124 / 1.7 MiB, musicselect 5 / 1914 / 1817 / 6.1 MiB, decide 6 / 69 / 2 / 0.7 MiB, result 7 / 195 / 135 / 1.0 MiB, course 15 / 175 / 121 / 0.8 MiB, skinselect 9 / 108 / 0 / 0.7 MiB. 9개 모두 pcall 실패 0, 경고 0. 조사 보고서의 수기 집계(play7 약 288, play14 약 375, play10 약 357, result 194)와 다른 곳은 이 실측이 맞다. 재현: `RBMS_SKIN_PACK=<스킨 폴더> cargo test -p rbms-skin --test skin_luaskin -- --nocapture`
 - 외부 스킨 원본은 476.4 MiB(mp4 192.8, 비트맵 폰트 139.4, TTF 54.7)이고 단순화판은 35~45 MiB 로 추정된다.
 - 외부 스킨 readme 는 스킨 자체의 2차 배포를 금지하고, 개변 스킨 공개 시 원작자명(KASAKO) 표기를 요구한다. 음성·캐릭터 일러스트·일부 랭크 그림 등 제3자 자산은 별도 조건이다(`m6` §12).
 
@@ -74,3 +75,4 @@
 | 2026-10-09 | L2 | 색인 | 확정 사양·결정 문서 연결, 종합 §4~§6 이 사양으로 대체됨을 명시. 기본 스킨은 개변판이 아니라 자작으로 결정(D1) |
 | 2026-10-09 | 웨이브 1A | `r1`·`r2`·`r3`·`00`·`99`·`b1` 상단 "웨이브 1A 반영 사항" | 혼합 합성·구 번들·모델 확장 필드 삭제, Lua 5.2 전환, 폰트 캐시 패밀리 분리. 리뷰 수정: 계정 설정 블롭 마이그레이션(`ir_sync.rs`), 문서 단독 그리기 테스트를 `stage/render_tests_document.rs` 로 복원, `*_on_background`·`object_ids`·`SelectListState.detail` 제거. 본문 줄 번호는 `9ce92bb` 기준이라 어긋날 수 있다 |
 | 2026-10-10 | 웨이브 1B | `r1`, `r2`, `r3`, `00`, `99`, `b2`, `b4` 상단 "웨이브 1B 반영 사항" | 타이머 µs(OFF = `i64::MIN`)·`TimerRef`·오프셋 r 부호·acc 선언 순서·stretch 11종, 장면 시계와 전환 리셋(Open/Back 보존), 마우스 release·drag·휠, GPU 논리 크기 = 물리 뷰포트와 `ScaledRenderer`, 표면 비 sRGB(바이트 통과), 오프스크린 읽기, START/SELECT 와 키 인덱스 질의, 해상도·창 모드 설정, 캡처 하니스 `stage/capture.rs` |
+| 2026-10-10 | 웨이브 2A | `r1`, `r2`, `r3`, `b5`, `b1`, `00`, `m1`, `b2`, `99` 상단 "웨이브 2A 반영 사항", 색인의 실측 수치 | Lua 5.2 런타임(환경, `require`/`dofile` 가두기, io 쓰기 오버레이, os, luajava facade, `main_state`, `timer_util`/`event_util`), `SkinHost`·`MapHost`, 값 참조 타입(`PropertyRef::Func`/`Name`, `TimerRef::Lua`, 이벤트·쓰기 참조), Lua 값 → `SkinDef` 변환, 2패스 로더와 헤더 병합, 구 샌드박스 삭제. 리뷰가 찾은 예산 우회 3건(`__gc` 종료자, 패턴 백트래킹, 이름 캐시)과 파일 읽기·핸들 상한을 수정. ModernChic 9/10 로드 실측 |

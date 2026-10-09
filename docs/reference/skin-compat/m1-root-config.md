@@ -1,6 +1,22 @@
 # M1 조사 보고서 - ModernChic 공통 계층과 Lua 런타임 의존 전수 조사
 
-> 최종 갱신 2026-10-09 · 대응 단계: L1 조사(구현 전) · 기준 커밋 `9ce92bb` · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 2A(Lua 런타임과 로더) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 2A 반영 사항 (2026-10-10)
+
+Lua 5.2 런타임(`crates/rbms-skin/src/lua/`), `SkinHost`, Lua 값 변환기, 2패스 `.luaskin` 로더를 넣고 구 샌드박스(`skin.*`)를 삭제한 뒤의 상태다.
+
+- (W2-2a) m1-root-config.md §2.5: '파트 오류는 생략 + 반드시 로그' 권고가 구현됨(LuaDiagnostics.swallowed 에 메시지·파일·줄·횟수)으로 갱신
+- (W2-2a) m1-root-config.md §4: 항목 7(math.random 시드)에 '설정 시드로 고정 가능, 기본은 비결정'을, 항목 12(dofile 절대 경로)와 항목 20(스킨 폴더 제한)에 구현 완료와 SkinPaths 규칙을 반영. 헤더 단계 실측(10개 모두 성공, 0.2~0.8ms, 70~250KiB) 추가
+- (W2-2a) m1-root-config.md §11: 'require/dofile/package/print/string.match,gsub,gmatch,find 제거' 격차 서술을 해소됨으로 갱신(남은 격차는 io·os·luajava·main_state)
+- (W2-2b) m1-root-config.md §9 네트워크 문단: 'LuaJ 의 os.time() 이 소수 초를 반환하고 … 단서다(추정)' 에서 os.time() 소수 초 부분은 OsLib.time 바이트코드로 확인됐으므로 '(추정)' 을 숫자 문자열화 부분에만 남겨야 합니다.
+- (W2-2b) m1-root-config.md §4 B.8: '존재하지 않는 파일 읽기는 nil, 메시지 반환' 에 실제 메시지 `io error: Lua file not found: <이름>` 과 루트 밖 `io error: Lua skin file access denied: <이름>` 을 적을 수 있습니다. '줄 읽기는 \n 구분' 뒤에 '줄 안의 \r 은 전부 버린다' 를 추가해야 합니다.
+- (W2-2b) m1-root-config.md §9 'R-BMS 구현 시사점': '오버레이로 매핑하고 … 같은 가상 루트를 보게 해야 한다' 를 io 쪽은 구현 완료(lua/io.rs, 읽기 오버레이 → 루트, 쓰기 오버레이, 추가 시 복사)로 갱신해야 합니다.
+- (W2-3) m1-root-config.md §3 또는 사양 §6 웨이브 2 '덤프 기준 시나리오': result·course 시나리오에 NUMBER 370(CLEAR), play 시나리오에 이미지 인덱스 55(hsfix)를 반드시 넣어야 한다는 조건 추가(없으면 각각 Root/customfunction.lua:359/362 의 nil 연결, Play/lua/sp|dp/cover.lua 슬라이더 함수의 nil 인덱스 오류).
+- (W2-2c) m1-root-config.md §5.4: 'BJ 파사드는 ... 모르는 이름은 nil' 은 낡았습니다. valueOf 는 keyNames.get(name, -1) 이라 모르는 이름이 -1 이며 nil 이 아닙니다(R-BMS 도 -1).
+- (W2-5) m1-root-config.md §2.6·§3 과 사양 §6 웨이브 2 '덤프 기준' 객체 수: 실측값으로 교체 — destination 수 play7 286(수기 약 288), play5 277, play14 372(수기 약 375), play10 354, select 1914, result 195(수기 194), course 175, decide 69, skinselect 108. 헤더 표(property/filepath/offset/category)는 실측과 일치(플레이 offset 은 10+4=14)
+- (W2-5) m1-root-config.md §2.7: keyconfig 본체 실패 위치가 `Decide/lua/require/textproperty.lua:37: attempt to call field 'isOutlineFont' (a nil value)` 로 실행 확인됨(헤더는 type 8 로 정상 로드)
+
 
 경로 약어
 - MC = /Users/hyunseokbyun/Downloads/ModernChic

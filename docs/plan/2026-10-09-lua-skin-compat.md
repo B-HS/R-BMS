@@ -74,14 +74,14 @@
 | 버전 | mlua `lua52` + `vendored` | [00 §2.2] |
 | 상태 수명 | 스킨 로드 1회 = 상태 1개. 헤더 패스와 본체 패스가 같은 상태를 쓴다. 화면 진입마다 새로 만든다. 단 `Transition::Open`/`Back`(설정·폴더·표 등을 선곡 위에 여닫기)은 스킨·Lua 상태·장면 시계를 보존한다 | [b1 §3.2, 99 P8-3] |
 | 헤더 전용 읽기 | 스킨 목록·SKIN 탭용. 별도 상태에서 `main_state`/`timer_util`/`event_util` 을 빈 테이블로 두고 1회 실행, 파일 mtime 키로 캐시 | [b1 §14] |
-| 표준 라이브러리 | base 전부(`print` 는 로그), package(자체 검색기), table, string(패턴 포함, `dump` 제외), math, bit32, coroutine. `load` 는 텍스트 청크만 | [b1 §2.1] |
+| 표준 라이브러리 | base 전부(`print` 는 로그), package(자체 검색기), table, string(패턴 포함, `dump` 제외), math, bit32, coroutine. `load` 는 텍스트 청크만. 패턴 함수 4종(find/match/gmatch/gsub)은 예산에 청구되는 자체 구현(`lua/pattern.rs`, lstrlib.c 5.2.4 이식, C 구현과 대조 테스트)이고, `setmetatable` 은 `__gc` 종료자가 돌지 않게 감싼다(LuaJ 와 같은 관찰 결과) | [b1 §2.1] |
 | `require` | 점을 구분자로 바꿔 스킨 루트에서만 찾고 캐시한다 | [b1 §2.4] |
 | `dofile`/`loadfile` | 절대 경로와 루트 상대 경로 허용, 정규화 뒤 루트 밖이면 오류. 캐시 없음, 같은 전역 | [m1 §2.5] |
-| io | 읽기는 오버레이 → 스킨 루트 순. 없는 파일은 `nil, 메시지`. 쓰기는 오버레이(E1). 줄 읽기는 `\r` 을 버린다 | [b1 §2.2, 99 M8] |
+| io | 읽기는 오버레이 → 스킨 루트 순. 없는 파일은 `nil, 메시지`. 쓰기는 오버레이(E1). 줄 읽기는 `\r` 을 버린다. 한도: 동시에 열린 파일 64개, 한 번의 읽기 64 MiB, 오버레이 폴더 총 크기 상한(웨이브 2B 에서 추가) | [b1 §2.2, 99 M8] |
 | os | `clock`, `date`(현지), `difftime`, `time`, `setlocale` 만 | [b1 §2.1] |
 | luajava | `bindClass` 는 `java.io.File`, `com.badlogic.gdx.Gdx`, `com.badlogic.gdx.Input`, Controllers 계열만. `File:mkdir/listFiles` 는 오버레이 규칙. `Gdx.input:isKeyPressed(code)` 는 호스트 키 상태. 키 코드는 E7. `URL` 은 `connect()` 실패 | [b1 §2.3] |
 | 난수 | 운영은 호스트 엔트로피 시드, 테스트·캡처는 고정 시드 | [b1 §12] |
-| 예산 | 로드 단계와 프레임 단계를 분리. 수치는 덤프 도구의 실측(선곡 본체 1000 프레임)으로 정한다. 프레임 초과 시 그 프레임 나머지는 직전 값 | [r1 §5.4, 99 P6] |
+| 예산 | 로드 단계와 프레임 단계를 분리. 수치는 덤프 도구의 실측(선곡 본체 1000 프레임)으로 정한다. 프레임 초과 시 그 프레임 나머지는 직전 값. 프레임 벽시계는 Lua 호출 구간의 누적 시간만 잰다. Rust 로 쓴 라이브러리(패턴, 파일 헬퍼)는 `Meter::charge` 로 작업량을 청구한다 | [r1 §5.4, 99 P6] |
 | 오류 | beatoraja 처럼 기본값(false/0/""/OFF)으로 대체하고 매 프레임 재호출. 로그는 함수별 첫 1회 + 누적 횟수. pcall 로 삼켜진 오류도 기록 | [b1 §5.1] |
 | 바인딩 | `main_state.*` 는 영구 트램펄린, 호스트는 프레임당 1회 `scope` 로 교체(`#![forbid(unsafe_code)]` 유지) | [r1 §5.5] |
 | 스레드 | 장면 전환 시 동기 로드. 이미지 디코드는 기존 워커 | [00 §2.2] |
@@ -96,6 +96,8 @@
 - JSON/JSON5 로더는 유지한다(beatoraja JSON 스킨도 같은 모델).
 
 ### 4.4 호스트 계약 `SkinHost` (`rbms-skin` 선언, 앱 구현)
+
+구현 상태(웨이브 2A, `crates/rbms-skin/src/property/host.rs`): 아래 표의 의미는 그대로이고 배치만 다르다. `boolean(id) -> Option<bool>` 과 `offset(id) -> Option<SkinOffset>`(None = 설정 없음, Lua 에는 0)은 상위 트레이트 `DrawStateSource: OffsetSource`(`dst.rs`)에 있고 `SkinHost: DrawStateSource` 다. `rate()`·`exscore()` 계열은 `score(ScoreSlot) -> ScoreSnapshot`, 볼륨은 `volume(VolumeBus)`/`set_volume` 으로 묶였다. 모든 메서드가 `&self` 이므로 부수효과(이벤트, 오디오, 쓰기)는 호스트가 내부 가변성으로 쌓았다가 프레임 뒤에 적용한다. 테스트·덤프용 `MapHost`(id → 값 맵, serde, 호출 기록)가 같은 파일에 있다.
 
 | 메서드 | 의미 |
 | --- | --- |
@@ -241,6 +243,8 @@ R-BMS 고유 규칙
 | W2-8 | 스킨 팩 폴더 지정(설정 한 줄 + `RBMS_SKIN_PACK`), 화면 타입 → 문서 매핑, 헤더 전용 읽기와 mtime 캐시 | `apps/rbms-player/src/{skin_select.rs, skin_select/tests.rs}`, `crates/rbms-config/src/schema.rs` | W2-5 | opus high | [r3 §5, 99 P5] |
 | W2-9 | 하니스로 결정 화면 정지 프레임 1장(이미지 객체만) | `apps/rbms-player/src/stage/capture.rs` | W2-8 | sonnet high | [99 P7] |
 
+진행 기록(2026-10-10): **웨이브 2A 완료** — W2-0 → W2-1 ∥ W2-2a → W2-2b ∥ W2-3 ∥ W2-4 → W2-2c → W2-5 → 리뷰 → 수정. Workflow `wf_402f94ef-6d0`(10 에이전트). 게이트 통과(테스트 3,475 통과·0 실패·ignored 3). ModernChic 9/10 로드(keyconfig 는 원본 결함), 9개 모두 pcall 실패 0·경고 0, 스킨 폴더 무변경 확인. 적대 리뷰가 격리 탈출을 실제로 시도했고 파일 가두기·바이트코드·os·debug 는 전부 막혔다. 예산을 뚫는 경로 3건(`__gc` 종료자 루프, 패턴 백트래킹, 조회 실패 이름 캐시)과 파일 읽기·핸들 상한 누락을 수정했다. W2-7 의 미니 픽스처(`tests/fixtures/luaskin/mini/`)와 테스트(`skin_luaskin.rs`, `skin_lua_env.rs`, `skin_lua_io.rs`, `skin_luajava.rs`, `skin_main_state.rs`, `skin_from_lua.rs`, `skin_lua_pattern.rs`)는 이 단계에서 선반영됐다. 남은 것은 웨이브 2B(W2-6 덤프 CLI와 프레임 비용 실측, W2-8 스킨 팩 폴더 지정, W2-9 결정 화면 정지 프레임, 오버레이 총 크기 상한).
+
 덤프 기준 시나리오(화면별): 난이도 option 150~155 중 하나 true(없으면 150), BGA 있음/없음, 곡 메타 문자열 채움 [m5 부록 B, m2 §11]. 기대값: 헤더 표가 [m1 §3] 과 일치, keyconfig 본체만 `Decide/lua/require/textproperty.lua:37` 에서 실패. 객체 수 수기 집계(play7 destination 약 288, play14 약 375, select 1914, result 194, course 175, decide 약 69, skinselect 108)와 다르면 덤프를 믿고 조사 문서를 고친다.
 
 ### 웨이브 3 — 공통 렌더 의미론과 결정 화면
@@ -361,6 +365,7 @@ UI 는 실제 렌더를 확인한 뒤에만 됐다고 보고한다(`docs/feedbac
 | GPU 메모리(전부 올리면 2.79 GiB, 4096 초과 8장) | 참조 소스만 로드, 이탈 해제, 한도 초과 생략 |
 | 웨이브 1 철거가 테스트 약 50건을 무효화 | W1-1 을 a/b/c 로 나누고 내장 골든 불변 확인 |
 | 시그니처 변경이 병렬 단위 컴파일을 깨뜨림 | 골격 단위 선행, 변경 단위는 호출부 전부 소유·직렬 |
+| C 라이브러리 한 번의 호출(`table.sort`, `string.rep`, `table.concat`) 안의 시간은 명령 수 훅이 보지 못한다 | 메모리 한도로 한 번의 길이만 묶인다. 영구 정지는 아니고 벽시계 예산을 넘길 수 있다. 실제 스킨에서 문제가 되면 해당 함수를 청구형으로 바꾼다 |
 | 사용량 한도 | 웨이브 단위로 PROCESS 에 진행 기록, Workflow 는 `resumeFromRunId` 로 재개 |
 | 동영상 디코더가 3-OS CI 빌드를 깨뜨림 | W7-1 에서 CI 영향 확인 후 선정, 기능 플래그 뒤에 둔다 |
 

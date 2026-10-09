@@ -1,6 +1,14 @@
 # R3 — R-BMS 앱(apps/rbms-player) 스킨 배선·화면 구성·입력 현황과 격차
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 1(철거와 기반) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 1B 반영 사항"과 "웨이브 1A 반영 사항"이 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 2A(Lua 런타임과 로더) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 2A 반영 사항 (2026-10-10)
+
+Lua 5.2 런타임(`crates/rbms-skin/src/lua/`), `SkinHost`, Lua 값 변환기, 2패스 `.luaskin` 로더를 넣고 구 샌드박스(`skin.*`)를 삭제한 뒤의 상태다.
+
+- (W2-0) r3-rbms-app.md 274행 부근(화면별 상태 구현체 서술): `SkinStateSource` 를 `SkinHost` 로.
+- (W2-5) r3-rbms-app.md 의 skin_screen.rs 절: `PlayerSkinAssets` 가 샌드박스를 들지 않음, `SkinSandboxFrame` 삭제, `skin_frame` → `with_skin_frame`(스킨 인터프리터에 프레임당 1회 호스트 바인딩, 클로저 안에서 그림). SKIN 탭 절: 플레이 문서에 자동 오프셋 행 15개가 생김, `uses_lua` 판정 기준 변경
+
 
 ## 웨이브 1B 반영 사항 (2026-10-10)
 

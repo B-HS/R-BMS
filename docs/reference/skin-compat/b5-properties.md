@@ -1,6 +1,19 @@
 # b5. beatoraja 속성 id 전수 목록과 R-BMS 대조
 
-> 최종 갱신 2026-10-09 · 대응 단계: L1 조사(구현 전) · 기준 커밋 `9ce92bb` · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 2A(Lua 런타임과 로더) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 2A 반영 사항 (2026-10-10)
+
+Lua 5.2 런타임(`crates/rbms-skin/src/lua/`), `SkinHost`, Lua 값 변환기, 2패스 `.luaskin` 로더를 넣고 구 샌드박스(`skin.*`)를 삭제한 뒤의 상태다.
+
+- (W2-0) b5-properties.md §2.5 첫 항목: '`SkinStateSource` 가 integer/float/string/timer/now_ms … 이미지 인덱스, 이벤트, writer 종류가 없다' 를 '계약 자리는 생겼다(`SkinHost::image_index`, `exec_event`, `write_rate`, `write_text`), 값 연결은 미구현' 으로. 셋째 항목 '구현 없는 음수 id 는 true' 는 구 어댑터에 한한 서술임을 밝히고 계약상 미구현은 부호와 무관하게 None 임을 적는다.
+- (W2-0) b5-properties.md §1-7: 'R-BMS 는 `UNMAPPED_INTEGER=0`' 뒤에 '계약 센티널 `INTEGER_ABSENT = i32::MIN` 추가, 구 어댑터만 0 유지(W3-2 에서 전환)' 를 덧붙인다. §137행·§1045행의 `SkinStateSource::integer`/`::timer` 표기도 `SkinHost` 로.
+- (W2-3) b5-properties.md §1 9번과 §2.4: 정적 분류가 이제 생성 표로 있다 — property/generated/names.rs 의 STATIC_OUTSIDE_SELECT 58개, STATIC_ON_RESULT 57개, STATIC_ALWAYS 2개(50, 51). 조회는 property::static_scope(id).holds_on(StaticScreen).
+- (W2-3) b5-properties.md §2.2: 이름 조회의 R-BMS 대응 추가 — property::id_of_name(NameSpace, name). enum 이름표는 생성(BooleanType 216, ValueType 148, IndexType 62, RateType 31, FloatType 29, StringType 26, EventType 54), 번호 붙은 이름군은 property/names.rs 수기 표. '!' 접두는 음수 id 로 돌려준다.
+- (W2-3) b5-properties.md §2.5: 'R-BMS 현재 구조 요약' 갱신 — 종류는 PropertyKind 5개 외에 NameSpace 7개(Boolean, Integer, ImageIndex, Rate, Float, Text, Event)가 생겼고, SkinStateSource 는 SkinHost 로 바뀌었으며 이미지 인덱스·이벤트·writer 가 계약에 있다. writer 가 있는 id 목록은 WRITABLE_RATES(1, 7, 8, 17, 18, 19, 20), WRITABLE_STRINGS(30).
+- (W2-3) b5-properties.md §2.6: 집계 수치의 교차 확인 결과 추가 — reference_implements 로 센 구현 id 수가 OPTION 248, NUMBER 263, RateType 31, FloatType 40, STRING 188 로 이 절의 수치와 일치.
+- (W2-3) b5-properties.md §9: 'R-BMS: 없음(이미지 인덱스 공간 자체가 없음)' 열을 '계약 있음(SkinHost::image_index, main_state.event_index), 값 연결은 앱 호스트 몫' 으로. event_index 는 원본에 인덱스 속성이 없는 id 에서 오류를 낸다.
+
 
 작성 범위: beatoraja `skin/SkinProperty.java`, `skin/SkinPropertyMapper.java`, `skin/property/*`(Integer/Boolean/Float/String/Timer 팩토리, EventFactory, 인터페이스 8개)를 끝까지 읽고, R-BMS `crates/rbms-skin/src/property/{mod.rs,generated/*}`, `timer/generated.rs`, `tools/gen-skin-{property,timer}.rs`, `crates/rbms-render/src/skin_render/{state.rs,screen.rs}`, `apps/rbms-player/src/skin_screen.rs` 및 타이머 호출부와 대조했다. 값의 계산 근거를 정확히 적기 위해 `ScoreDataProperty.java`, `MainState.java`, `TimerManager.java`, `JudgeManager.java`/`KeyInputProccessor.java`/`LaneRenderer.java`/`BMSPlayer.java`/`MusicSelector.java`/`MusicResult.java`/`MusicDecide.java`의 관련 줄, `SkinObject.java`/`Skin.java`/`SkinNumber.java`/`SkinSlider.java`의 소비 규칙, Lua 노출 계층(`MainStatePropertyLuaApiExporter.java`, `LuaSkinLoader.java`, `JsonSkinSerializer.java`)도 읽었다. 비교 표본으로 ModernChic `Root/main*.lua`의 id 표와 `MAIN.*` 참조를 전체 Lua(126개)에서 집계했다.
 

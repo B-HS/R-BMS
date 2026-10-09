@@ -1,6 +1,56 @@
 # R1 — `crates/rbms-skin` 현황과 풀 Lua 스킨까지의 격차
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 1(철거와 기반) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 1B 반영 사항"과 "웨이브 1A 반영 사항"이 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 2A(Lua 런타임과 로더) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 2A 반영 사항 (2026-10-10)
+
+Lua 5.2 런타임(`crates/rbms-skin/src/lua/`), `SkinHost`, Lua 값 변환기, 2패스 `.luaskin` 로더를 넣고 구 샌드박스(`skin.*`)를 삭제한 뒤의 상태다.
+
+- (W2-0) r1-rbms-skin.md §1 모듈 구성 표: `lua` 행을 `lua/{mod, budget, coerce, env, io, os, luajava, main_state, package, legacy}.rs` + `prelude.lua` 로, `loader` 행에 `loader/{from_lua, lua_skin}.rs`, `property` 행에 `property/host.rs` 를 추가. 한 줄 식 샌드박스 위치는 `src/lua.rs` 가 아니라 `src/lua/legacy.rs`.
+- (W2-0) r1-rbms-skin.md §2.2 표: `OffsetSource / DrawStateSource / SkinStateSource` 행을 `DrawStateSource::boolean(id) -> Option<bool>`(None = 미구현), `SkinHost`(property/host.rs, 구 SkinStateSource)로 교체. `string(id) -> &str` 은 `text(id) -> Cow<str>`. 새 메서드 `is_static, image_index, rate, exec_event, write_rate, write_text, audio, key_pressed, screen_size, gauge, gauge_type, judge, score, volume, set_volume` 을 적는다.
+- (W2-0) r1-rbms-skin.md §2.2 표: `SkinError` 행 10종 → 11종(`LuaLoad { path, message }` 추가). `SkinLoadOptions` 행에 `write_overlay: Option<&Path>`, `LoadedSkin` 행에 `runtime: Option<SkinLua>`(접근자 `runtime()`), `SkinHeader`/`LoadedSkin` 의 `ParserKind` 에 `Lua` 변형, `LuaSandbox / LuaFrame` 행 위치를 `src/lua/legacy.rs` 로.
+- (W2-0) r1-rbms-skin.md §5.1: `skin.boolean(id)` 가 호스트의 None 을 false 로 읽는다는 점과 파일 위치(`src/lua/legacy.rs`)를 반영.
+- (W2-0) r1-rbms-skin.md §5.4: S8 은 `LuaBudget { load: LoadBudget, frame: FrameBudget, max_memory_bytes }` + `Meter` 로 구조 확정(수치 잠정, 훅 미구현). S10 은 `SkinLua::frame` + `main_state::bind` 로 확정. S12 는 `LuaExprId` 재사용이 아니라 `LuaFnId`(dst.rs) + `LuaFnKind` 레지스트리(`SkinLua::register`, 함수+종류 동일성으로 중복 제거). S14·S16 은 `LuaLog`(함수별 첫 메시지+횟수, pcall 삼킴 목록, print) 로 구조 확정.
+- (W2-0) r1-rbms-skin.md §5.5: '안전한 구성 한 가지' 를 확정 설계로 바꾼다. 숨은 host 테이블은 레지스트리 키 `rbms.skin.host`, 바인딩 진입점은 `lua/main_state.rs` 의 `bind(lua, shared, scope, host)`, 로드 패스도 `SkinLua::run_entry` 가 같은 방식으로 호스트를 묶는다.
+- (W2-0) r1-rbms-skin.md §9 '소비자에 전파되는 시그니처 변경': `SkinStateSource` → `SkinHost` 개명, `boolean` 의 Option 화, `string` → `text` 를 완료로 표시.
+- (W2-1) r1-rbms-skin.md §2.1(107행 부근): 식 평가 설명에 '함수 값과 이름은 LuaDrawEval 의 call_boolean/integer/float/text/timer(LuaFnId), named_boolean/integer/float/text(&str) 로 평가하며 기본 구현이 beatoraja 기본값(false/0/0.0/""/TIMER_OFF)을 돌려준다. 널 평가기는 dst::NullLuaEval' 을 추가
+- (W2-1) r1-rbms-skin.md §2.2 표: PropertyRef 행을 'Id(i32) / Func(LuaFnId) / Name(String) / Expr(String), 접근자 id·function·name·expr·timer' 로. DrawCondition 행을 'Option(i32) / Lua(LuaExprId) / Function(LuaFnId) / Name(String), Copy 아님' 으로. LuaDrawEval 행에 함수·이름 메서드 9개와 NullLuaEval 추가. TimerRef 행을 'Id(TimerId) / Lua(LuaFnId), value_us(timers, lua)' 로. dst::resolve 시그니처에 끝 인자 lua: Option<&dyn LuaDrawEval> 추가. 신규 행 EventRef, FloatWriterRef, StringWriterRef, DestinationOption::UNCONDITIONAL
+- (W2-1) r1-rbms-skin.md §3.3 표의 'rbms 현재' 열: BooleanProperty·IntegerProperty·FloatProperty·StringProperty 행을 'PropertyRef::Func/Name 으로 모델이 받는다. 함수는 평가기 경유, 이름표는 W2-3 대기' 로. TimerProperty 행을 'Func 는 TimerRef::Lua 로 destination 과 이미지 셀 타이머 모두 지원. 문자열은 여전히 경고 후 프레임 시계' 로. FloatWriter 행을 'SliderDef.event: Option<FloatWriterRef>', StringWriter 행을 'TextDef.event: Option<StringWriterRef>(숫자는 None)', Event 행을 'ImageDef.act·ImageSet.act·CustomEvent.action: Option<EventRef>' 로. DestinationOption 행에 '함수 수용, Lua boolean 은 UNCONDITIONAL' 추가. 말미 결론의 (b) 를 완료로 표시
+- (W2-1) r1-rbms-skin.md §6.2 D4: '함수 타이머 해소(TimerRef::Lua, 프레임마다 LuaDrawEval::call_timer). 이미지 셀 애니메이션 타이머도 Sprite.timer: Option<TimerRef>. 식 문자열 타이머는 미해소(경고 후 프레임 시계)' 로. 줄 번호 track.rs:231-242 와 skin_render/object.rs:524-526 은 낡았다(timer_of 와 cell_timer 가 PropertyRef::timer() 를 쓴다)
+- (W2-1) r1-rbms-skin.md §6.2 D14: '모델에 PropertyRef::Name 과 평가 통로 named_* 가 생겼다. 이름→id 역표와 JSON 문자열의 이름 우선 조회는 미구현(W2-3, W2-5)' 로
+- (W2-1) r1-rbms-skin.md §8 테스트 표: src/dst/tests.rs 41건 → 49건, tests/skin_model.rs 21건 → 32건, src/loader/track.rs 에 인라인 테스트 6건 신설
+- (W2-1) r1-rbms-skin.md §9 U3 행: 완료로 표시. 실제 형태는 PropertyRef::Func(LuaFnId)(LuaExprId 아님), TimerRef::Lua(LuaFnId), 타이머 값은 콜백이 아니라 resolve 의 lua 인자로 받는다. '소비자에 전파되는 시그니처 변경' 의 'PropertyRef 변형 추가(U3) → skin_render/object.rs:267-272, 524-526' 항목을 완료로
+- (W2-2a) r1-rbms-skin.md §5.1: 현재 구조를 lua/{mod, env, package, budget}.rs 기준으로 다시 서술. 구 샌드박스는 lua/legacy.rs 로만 남음
+- (W2-2a) r1-rbms-skin.md §5.4: S1(io·os 제외)·S2·S3·S4·S5·S6·S8·S9·S12·S14·S16 을 구현 완료로, S15 를 '고정 시드에서 설정 시드로 변경'으로 표시. S6 의 'C 내부 폭주는 벽시계로만 막는다'는 '훅이 C 내부에 걸리지 않아 벽시계로도 못 막는다'로 정정
+- (W2-2a) r1-rbms-skin.md §5.5: 로드 뒤 변환·타이머 스크립트 시험 호출용 SkinLua::with_host 가 추가됐음을 반영
+- (W2-2a) r1-rbms-skin.md §5.6: 재사용 표에 '훅 기반 한도는 set_hook 이 아니라 set_global_hook(코루틴 포함)', 'ChunkMode::Text 강제는 Lua 쪽 load 모드 t 강제와 병행', 'WarnOnce 대신 함수별·메시지별 집계'를 반영
+- (W2-2a) r1-rbms-skin.md §2.2: 타입 표에 SkinPaths(logical/script/readable/writable/entries/display/chunk_name), LuaDiagnostics(PrintedLine, SwallowedError 의 file·line), Meter, error_message, error_location 추가
+- (W2-2a) r1-rbms-skin.md §8: 테스트 표에 tests/skin_lua_env.rs 45건과 fixtures/luaenv 추가
+- (W2-4) r1-rbms-skin.md §3.3: 표의 'rbms 현재' 열과 결론 문단이 낡았습니다. Lua 경로는 crates/rbms-skin/src/loader/from_lua.rs 의 skin_def_from_lua 가 구현합니다: 일반 필드는 mlua 값용 serde Deserializer(Reader)가 모델의 Deserialize 정의를 재사용해 toint/tofloat/toboolean/tojstring 규칙으로 읽고, 참조 필드(BooleanProperty~Event, DestinationOption)와 FontFallback 은 두 번째 순회(References)가 함수 → id → 이름 → 컴파일 순서로 읽습니다. 'JSON 경로의 이름 조회도 rbms 에 없다'는 문단은 JSON 경로에 한해 그대로입니다.
+- (W2-4) r1-rbms-skin.md §3.1: `source[]`, `font[]` 행의 'FontFallback 의 문자열 단축형은 미지원'을 'Lua 경로는 지원(from_lua.rs font_fallback), JSON 경로는 미지원'으로 바꿔야 합니다.
+- (W2-4) r1-rbms-skin.md §3.2: `Animation` 행 비고에 'Lua 경로에서 time 을 포함한 모든 정수 필드는 toint(32비트)로 읽는다'를 추가해야 합니다.
+- (W2-4) r1-rbms-skin.md §8 테스트 표: tests/skin_from_lua.rs 17건(선택 테스트 1건 포함)과 src/lua/coerce.rs 단위 테스트의 Float.toString 1건 추가를 반영해야 합니다.
+- (W2-4) r1-rbms-skin.md §9: 'Lua 값 → SkinDef 전용 변환기' 단위를 완료로 표시하고, 남은 것은 lua_skin.rs 의 2패스 로더(W2-5)임을 적어야 합니다.
+- (W2-2b) r1-rbms-skin.md §5.4: 풀 Lua 실행을 위해 바꿔야 할 것 중 io·os 항목을 구현 완료로 갱신해야 합니다(lua/io.rs: Rust UserData 파일 핸들, lua/os.rs: C os 를 연 뒤 허용 목록만 남기고 원본 테이블 비움). 테스트는 tests/skin_lua_io.rs 18개, 픽스처 tests/fixtures/luaio 입니다.
+- (W2-2b) r1-rbms-skin.md §8: 테스트 자산에 tests/skin_lua_io.rs 와 tests/fixtures/luaio/{files.lua, data/*.txt} 를 추가해야 합니다.
+- (W2-3) r1-rbms-skin.md §2.2: 타입 표에 property::names(NameSpace, NumberedNames, StaticScope, StaticScreen, id_of_name, name_of_id, reference_implements, reference_writes, static_scope)와 lua::main_state(named_id, is_property_name, custom_timer_us), BoundFrame::host, 'BoundFrame 이 dst::LuaDrawEval 구현' 을 추가.
+- (W2-3) r1-rbms-skin.md §5.5: '상태 바인딩 설계 제약' 을 구현 결과로 갱신 — 트램펄린은 Lua 함수, 숨은 host 테이블은 레지스트리 키 rbms.skin.host, bind 가 scope 함수로 채우고 scope 소멸자가 비운다. unsafe 없음. 바인딩은 중첩되지 않는다. 호스트가 필요 없는 함수(file_*, set_timer, http_*)는 영구 Rust 함수.
+- (W2-3) r1-rbms-skin.md §8: 테스트 표에 tests/skin_main_state.rs 28건 추가, tests/property_checksum.rs 는 29건(이름표 체크섬·개수·정적 목록·writer 목록 5건 추가), src/property/names.rs 단위 10건, host.rs 4건, lua/main_state.rs 3건.
+- (W2-3) r1-rbms-skin.md §9: 생성 도구 항목에 'tools/gen-skin-property.rs 가 팩토리 enum 이름표·정적 목록·writer 목록도 생성(generated/names.rs, NAME_TABLE_CHECKSUM)' 과 바뀐 실행법(rustc --edition 2024, 생성 파일에만 rustfmt) 추가.
+- (W2-5) r1-rbms-skin.md §2.1·§2.2: 진입점을 `load_skin`(DefaultState) / `load_skin_with_host` / `lua_skin::{load_lua_skin, load_lua_header}` 로 갱신. `LoadedSkin` 에 resolution·play(PlayTimings)·offsets·selected_options 추가, `lua()` 삭제, `runtime()` 이 JSON 에서도 Some. `SkinHeader` 에 categories 추가와 자동 오프셋 포함. `SkinLoadOptions.lua_budget`·`Budget` 삭제
+- (W2-5) r1-rbms-skin.md §4.2 L1·L2·L4: 완료(확장자 분기, 헤더 패스 결과를 from_lua 로 변환, Lua 경로는 branch 변환 없음)
+- (W2-5) r1-rbms-skin.md §4.2 L3: 'Lua 진입 파일에 max_document_bytes, require·dofile 파일에 env.rs 의 파일당 64MiB, include 한도는 JSON 전용'으로 확정
+- (W2-5) r1-rbms-skin.md §4.2 L6: 완료 — `resolve::default_candidate` 가 def 를 전체 이름 또는 스템과 대소문자 무시로 대조. ModernChic 9개 화면의 source 전부가 디스크의 실제 파일로 해석됨을 실행으로 확인
+- (W2-5) r1-rbms-skin.md §4.2 L7·L8·L9: 의도적 차이로 유지(코드 문서에 명시). 추가: `scan_candidates` 가 파일뿐 아니라 폴더도 후보로 포함(원본 listFiles 와 같음, `*|1P|` 슬롯용)
+- (W2-5) r1-rbms-skin.md §4.2 L10: 무작위(-1) 지원 완료(`branch::merged_options`, 시드 난수). 항목에 없는 저장값은 def 폴백 유지로 결정
+- (W2-5) r1-rbms-skin.md §4.2 L11·L14·L16: 완료 — 자동 오프셋 4종(타입 0,1,2,3,4,16,17), `is_known_skin_type`(0~18)로 로드 허용(`is_supported_skin_type` 은 앱의 '그릴 수 있나' 질문으로 유지), `skin_resolution`(Lua 경로는 def.w/h 도 교체, JSON 은 resolution 필드만)
+- (W2-5) r1-rbms-skin.md §5 전체(§5.1 현재 구조, §5.6 재사용·버릴 것): `lua/legacy.rs`(구 lua.rs) 삭제 완료. skin.* 6함수와 한 줄 식 전용 Budget 없음. JSON 식은 `loader/script.rs` 가 로드 시 SkinLua 에 컴파일(이름표 조회 → return 접두 컴파일, 타이머는 시험 호출, 이벤트·writer 는 return 없이). 상단 '웨이브 1B 반영 사항'의 §5.1 skin.timer/skin.time 항목도 폐기
+- (W2-5) r1-rbms-skin.md §6.2: '타이머 식(함수) 미지원' 차이는 JSON 경로에서도 해소(문자열 타이머가 TimerRef::Lua 로 컴파일됨)
+- (W2-5) r1-rbms-skin.md §8 테스트 표: skin_lua.rs 는 legacy 33건 삭제 후 JSON 식 경로 11건으로 재작성, skin_luaskin.rs 25건 신규(미니 픽스처 + RBMS_SKIN_PACK 선택 1건), skin_loader.rs 68건(식 관련 4건 교체), skin_integration.rs with_lua 5건 재작성, dst/tests.rs 에서 LuaExprId 테스트 3건 삭제. 픽스처 `tests/fixtures/luaskin/mini` 추가
+- (W2-5) r1-rbms-skin.md §9: 2패스 로더·헤더 병합·legacy 제거 단위를 완료로 표시. '소비자에 전파되는 시그니처 변경'에 SkinExprEval → LuaDrawEval, SkinAssets::expression 삭제, LoadedSkin::lua 삭제 추가
+- (리뷰 수정) r1-rbms-skin.md §5.4: '풀 Lua 실행을 위해 바꿔야 할 것' 의 예산 항목에 훅(1,000명령 간격)이 보지 못하는 구간과 그 대책을 적어야 합니다. 종료자는 훅이 꺼진 채 돌므로 등록 자체를 막았고, 패턴 함수는 Rust 로 옮겨 단계를 청구하며, 호스트 측 메모리(이름 캐시·줄 읽기·gsub 결과)는 별도 상한을 둡니다
+- (리뷰 수정) r1-rbms-skin.md §5.5: 프레임당 1회 `scope` 바인딩 설명에 '프레임 벽시계는 바인딩 전체가 아니라 호출 구간만 잰다. 앱이 그리기 전체를 한 번의 frame 으로 감싸도 래스터 시간이 스킨 예산을 깎지 않는다'를 추가해야 합니다
+
 
 ## 웨이브 1B 반영 사항 (2026-10-10)
 
