@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use cosmic_text::{Attrs, Buffer, CacheKey, Color as CtColor, Family, FontSystem, Metrics, Shaping, SwashCache, fontdb};
 
@@ -73,8 +74,11 @@ const CACHE_RETAIN_PERCENT: usize = 75;
 /// One text context for the (single-threaded) UI: a font database with fallback, a glyph
 /// rasterization cache, the resolved default family, and the per-string layout cache.
 ///
-/// The layout cache is nested `px -> text -> Laid` so a cache hit (the common per-frame case) is
-/// looked up by `&str` with no key allocation (`String: Borrow<str>`), unlike a `(String, u32)` key.
+/// The layout cache is nested `family -> px -> text -> Laid` so a cache hit (the common per-frame
+/// case) is looked up by `&str` with no key allocation (`String: Borrow<str>`), unlike a composite
+/// key. Keeping one branch per family lets a skin alternate between fonts without losing either
+/// font's shaped lines; the glyph-run and atlas caches need no family level because a
+/// [`CacheKey`] already carries the font it was shaped with.
 ///
 /// Owning one of these and passing it to a renderer (via [`crate::RenderCtx`]) is the injected
 /// alternative to the thread-local engine behind the free functions in this module.
@@ -83,10 +87,10 @@ pub struct TextContext {
     swash: SwashCache,
     family: String,
     default_family: String,
-    cache: HashMap<u32, HashMap<String, Laid>>,
+    cache: HashMap<String, HashMap<u32, HashMap<String, Laid>>>,
     /// Rasterized, run-length-merged glyph pixels keyed by `(glyph cache key, packed RGB)`. Built
     /// once per glyph+colour and replayed every frame, so the hot draw path neither re-runs
-    /// `swash.with_pixels` nor emits one quad per pixel. Cleared with `cache` on a family change.
+    /// `swash.with_pixels` nor emits one quad per pixel. Survives family changes.
     runs: HashMap<(CacheKey, u32), RunEntry>,
     /// The same rasterizations packed into one texture page, for the textured-quad text path.
     /// Filled lazily by [`TextContext::draw_text_atlas`] and left empty by the default path.
@@ -136,28 +140,35 @@ impl TextContext {
     }
 
     fn layout_len(&self) -> usize {
-        self.cache.values().map(|m| m.len()).sum()
+        self.cache.values().flat_map(|by_px| by_px.values()).map(|m| m.len()).sum()
     }
 
     /// Drop the least recently used layout entries until only `CACHE_RETAIN_PERCENT` of the bound
     /// remains, so the next inserts are free again.
     fn evict_layouts(&mut self) {
         let retain = LAYOUT_CACHE_LIMIT * CACHE_RETAIN_PERCENT / 100;
-        let mut ages: Vec<(u64, u32, String)> = self.cache.iter().flat_map(|(px, m)| m.iter().map(move |(t, l)| (l.used, *px, t.clone()))).collect();
+        let mut ages: Vec<(u64, String, u32, String)> = self
+            .cache
+            .iter()
+            .flat_map(|(family, by_px)| by_px.iter().flat_map(move |(px, m)| m.iter().map(move |(t, l)| (l.used, family.clone(), *px, t.clone()))))
+            .collect();
         ages.sort_unstable_by_key(|e| std::cmp::Reverse(e.0));
-        for (_, px, text) in ages.into_iter().skip(retain) {
-            if let Some(m) = self.cache.get_mut(&px) {
+        for (_, family, px, text) in ages.into_iter().skip(retain) {
+            if let Some(m) = self.cache.get_mut(&family).and_then(|by_px| by_px.get_mut(&px)) {
                 m.remove(&text);
             }
         }
-        self.cache.retain(|_, m| !m.is_empty());
+        for by_px in self.cache.values_mut() {
+            by_px.retain(|_, m| !m.is_empty());
+        }
+        self.cache.retain(|_, by_px| !by_px.is_empty());
     }
 
     fn ensure(&mut self, text: &str, px: f32) {
         let pxu = px as u32;
         self.tick += 1;
         let tick = self.tick;
-        if let Some(entry) = self.cache.get_mut(&pxu).and_then(|m| m.get_mut(text)) {
+        if let Some(entry) = self.cache.get_mut(self.family.as_str()).and_then(|by_px| by_px.get_mut(&pxu)).and_then(|m| m.get_mut(text)) {
             entry.used = tick;
             return;
         }
@@ -175,14 +186,14 @@ impl TextContext {
                 glyphs.push((p.x, p.y, p.cache_key));
             }
         }
-        self.cache.entry(pxu).or_default().insert(text.to_string(), Laid { width, glyphs, used: tick });
+        self.cache.entry(self.family.clone()).or_default().entry(pxu).or_default().insert(text.to_string(), Laid { width, glyphs, used: tick });
         if self.layout_len() > LAYOUT_CACHE_LIMIT {
             self.evict_layouts();
         }
     }
 
     fn laid(&self, text: &str, px: f32) -> Option<&Laid> {
-        self.cache.get(&(px as u32)).and_then(|m| m.get(text))
+        self.cache.get(self.family.as_str()).and_then(|by_px| by_px.get(&(px as u32))).and_then(|m| m.get(text))
     }
 
     fn width(&mut self, text: &str, px: f32) -> f32 {
@@ -193,7 +204,7 @@ impl TextContext {
     fn draw<R: Renderer>(&mut self, r: &mut R, x: f32, y: f32, color: Color, text: &str, px: f32) {
         self.ensure(text, px);
         let tick = self.tick;
-        let Some(laid) = self.cache.get(&(px as u32)).and_then(|m| m.get(text)) else {
+        let Some(laid) = self.cache.get(self.family.as_str()).and_then(|by_px| by_px.get(&(px as u32))).and_then(|m| m.get(text)) else {
             return;
         };
         let base = CtColor::rgb(color.r, color.g, color.b);
@@ -276,18 +287,23 @@ impl TextContext {
     }
 
     /// Register an extra font face, returning its family name to pass to [`TextContext::set_family`].
+    ///
+    /// Success means the database gained at least one face from `data`; bytes that are not a font
+    /// add nothing and yield `None`, leaving the database and every cache untouched. Lines already
+    /// shaped under the returned family name are dropped so they are laid out with the new face.
     pub fn load_font(&mut self, data: Vec<u8>) -> Option<String> {
-        self.fs.db_mut().load_font_data(data);
-        self.fs.db().faces().last().and_then(|f| f.families.first().map(|(n, _)| n.clone()))
+        let db = self.fs.db_mut();
+        let loaded = db.load_font_source(fontdb::Source::Binary(Arc::new(data)));
+        let family = loaded.last().and_then(|id| db.face(*id)).and_then(|f| f.families.first().map(|(n, _)| n.clone()))?;
+        self.cache.remove(&family);
+        Some(family)
     }
 
-    /// Make `name` the preferred family for subsequent text, dropping the caches so it takes effect.
+    /// Make `name` the preferred family for subsequent text. Lines shaped under other families stay
+    /// cached, so alternating between families does not re-shape or re-rasterize anything.
     pub fn set_family(&mut self, name: &str) {
         if self.family != name {
             self.family = name.to_string();
-            self.cache.clear();
-            self.runs.clear();
-            self.atlas.clear();
         }
     }
 
@@ -295,9 +311,6 @@ impl TextContext {
     pub fn reset_family(&mut self) {
         if self.family != self.default_family {
             self.family = self.default_family.clone();
-            self.cache.clear();
-            self.runs.clear();
-            self.atlas.clear();
         }
     }
 
@@ -454,13 +467,13 @@ pub fn fit_text(text: &str, scale: f32, max_width: f32) -> String {
 
 /// Register an extra font (e.g. a user-chosen TTF/OTF read from disk or fetched as bytes) with
 /// the UI font system, returning its family name to pass to [`set_ui_family`]. Returns `None`
-/// if the data has no usable face.
+/// if the data adds no face to the font database (for example bytes that are not a font).
 pub fn load_font(data: Vec<u8>) -> Option<String> {
     with_text_context(|e| e.load_font(data))
 }
 
 /// Make `name` the preferred UI family for subsequent text (missing glyphs still fall back to
-/// system fonts). Clears the shaped-glyph cache so the change takes effect.
+/// system fonts). Lines shaped under other families stay cached.
 pub fn set_ui_family(name: &str) {
     with_text_context(|e| e.set_family(name));
 }
@@ -494,9 +507,8 @@ mod tests {
     /// Empty both thread-local caches. Tests share an engine per test thread, so a test that asserts
     /// absolute entry counts starts from a known state instead of whatever ran before it.
     fn clear_caches() {
-        set_ui_family("a family that is definitely not loaded");
-        reset_ui_family();
-        assert_eq!(cache_stats(), (0, 0), "both caches are empty after a family round-trip");
+        use_embedded_fonts_only();
+        assert_eq!(cache_stats(), (0, 0), "both caches are empty on a fresh engine");
     }
 
     #[test]
@@ -565,14 +577,42 @@ mod tests {
     }
 
     #[test]
-    fn changing_the_ui_family_empties_both_caches() {
+    fn switching_families_back_and_forth_keeps_every_familys_cache() {
         clear_caches();
+        let unloaded = "a family that is definitely not loaded";
         let mut c = CpuCanvas::new(64, 16);
         draw_text(&mut c, 0.0, 0.0, 1.0, Color::WHITE, "CACHED");
-        let (layouts, runs) = cache_stats();
-        assert!(layouts > 0 && runs > 0, "drawing populates both caches ({layouts}, {runs})");
-        set_ui_family("a family that is definitely not loaded");
-        assert_eq!(cache_stats(), (0, 0), "a family switch drops every cached layout and glyph run");
+        let after_default = cache_stats();
+        assert!(after_default.0 > 0 && after_default.1 > 0, "drawing populates both caches ({after_default:?})");
+
+        set_ui_family(unloaded);
+        assert_eq!(cache_stats(), after_default, "a family switch drops nothing");
+        draw_text(&mut c, 0.0, 0.0, 1.0, Color::WHITE, "CACHED");
+        let after_second = cache_stats();
+        assert_eq!(after_second.0, after_default.0 + 1, "the second family shapes the string once under its own branch");
+
+        reset_ui_family();
+        draw_text(&mut c, 0.0, 0.0, 1.0, Color::WHITE, "CACHED");
+        assert_eq!(cache_stats(), after_second, "returning to the first family hits its cache (no new layout, no new glyph run)");
+
+        set_ui_family(unloaded);
+        draw_text(&mut c, 0.0, 0.0, 1.0, Color::WHITE, "CACHED");
+        assert_eq!(cache_stats(), after_second, "and the second family still hits as well");
+        reset_ui_family();
+    }
+
+    #[test]
+    fn load_font_rejects_bytes_that_are_not_a_font_without_disturbing_later_loads() {
+        clear_caches();
+        let faces_before = with_text_context(|e| e.fs.db().len());
+        assert_eq!(load_font(b"this is definitely not a font file".to_vec()), None);
+        assert_eq!(load_font(Vec::new()), None);
+        assert_eq!(with_text_context(|e| e.fs.db().len()), faces_before, "rejected data adds no face");
+
+        let family = load_font(BUNDLED_FONT.to_vec()).expect("a real font still loads after a rejected one");
+        assert_eq!(with_text_context(|e| e.fs.db().len()), faces_before + 1, "the real font adds exactly one face");
+        set_ui_family(&family);
+        assert!(text_width("OK", 2.0) > 0.0);
         reset_ui_family();
     }
 
