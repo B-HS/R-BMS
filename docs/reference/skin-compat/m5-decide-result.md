@@ -1,6 +1,15 @@
 # m5. ModernChic 결정(decide) / 결과(result) / 코스 결과(course) 화면 스킨 조사 보고서
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 2(Lua 런타임·로더·스킨 팩) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 3A(공통 그리기 의미론) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 3A 반영 사항 (2026-10-10)
+
+prepare/draw 2단계 파이프라인과 `SkinHost` 직접 그리기, 그리기 조건 의미론, 참조 이미지·음수 크기·이미지 인덱스·숫자·슬라이더·그래프 정합, TTF 텍스트, judgegraph·bpmgraph, Lua 함수 값 프레임 평가, 앱 호스트 군집 A·I·M 을 넣은 뒤의 상태다.
+
+- (W3-1b) m5-decide-result.md §4.1: 'destination 69' 뒤에 '정적 정리 후 34(난이도 5세트 x 7 = 35 제거, 남은 텍스트의 조건 42개는 전부 제거)' 를 추가. §4.2·§4.3 에도 정리 후 수치(result 195 → 160, course 175 → 146, 시나리오 의존)를 적는다
+- (W3-6) m5-decide-result.md 부록 B: '결정 화면 상태 요구' 항목(옵션 150~155 정확히 하나, 96, 문자열 10~15·1003, 191, 타이머 2)이 skin_host 테스트 a_decide_screen_host_has_a_value_for_everything_the_decide_skin_reads 로 검증됨을 덧붙임
+- (W3-3) m5-decide-result.md §9.1 텍스트 표: 비고에 '사각형의 x 는 기준점, y+h 가 대문자 윗선(화면 y = 1080 - (y+h))'를 추가하면 캡처 대조가 쉬움. 실측: tablename 윗선 230, genre 430, title 500, artist 610, tips 835
+
 
 ## 웨이브 2B 반영 사항 (2026-10-10)
 

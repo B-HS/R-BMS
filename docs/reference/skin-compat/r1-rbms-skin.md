@@ -1,6 +1,22 @@
 # R1 — `crates/rbms-skin` 현황과 풀 Lua 스킨까지의 격차
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 2(Lua 런타임·로더·스킨 팩) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 3A(공통 그리기 의미론) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 3A 반영 사항 (2026-10-10)
+
+prepare/draw 2단계 파이프라인과 `SkinHost` 직접 그리기, 그리기 조건 의미론, 참조 이미지·음수 크기·이미지 인덱스·숫자·슬라이더·그래프 정합, TTF 텍스트, judgegraph·bpmgraph, Lua 함수 값 프레임 평가, 앱 호스트 군집 A·I·M 을 넣은 뒤의 상태다.
+
+- (W3-1b) r1-rbms-skin.md §6.2 D2: 해소. 정수 op 는 원본 구현 표(property::reference_implements(NameSpace::Boolean, id))로 갈라 내장이면 DrawCondition::Option(부호 유지), 아니면 스킨 옵션(dstop)으로 분리해 로드 뒤 옵션 맵(loader.rs option_selections, 행 순서대로 put)과 1회 대조. 맵에 없으면 부호와 무관하게 객체 제거. known_option·every_option_known 은 삭제됨
+- (W3-1b) r1-rbms-skin.md §6.2 D3: 해소. loader.rs assemble 끝의 prepare_objects 가 최상위 객체에 한해 SkinHost::is_static(id) 인 조건을 1회 평가(거짓 = 객체 제거, 참 = 조건 제거). 이름 조건(DrawCondition::Name)은 id_of_name 으로 풀어 같은 규칙. 호스트 답이 None 이면 정리하지 않고 프레임 조건으로 남김. 중첩 슬롯은 정리 대상이 아님
+- (W3-1b) r1-rbms-skin.md §6.2 D4·D17: 음수 타이머 id 는 타이머 없음으로 해소(model.rs PropertyRef::timer 가 None, destination 과 이미지 셀 타이머 공통). timer 0 은 그대로 TimerId(0). 웨이브 1 진행 기록의 '음수 타이머 id … 아직 옮기지 않았다(W3-1b)' 도 완료
+- (W3-1b) r1-rbms-skin.md §2.2 표: SkinLoadOptions 행에서 known_option 삭제. dst::draw_conditions_from_ops 의 반환형이 OpLists { conditions, options } 로 바뀜(신규 행 OpLists). LoadedSkin.destinations 는 '조립 후 Skin.prepare 정리를 거친 목록'. loader 내부 TrackContext 는 { path, relative, warnings } 로 줄고 track::build_track 은 BuiltTrack { track, options } 를 돌려줌. assemble 은 host 인자를 받음
+- (W3-1b) r1-rbms-skin.md §2.1 흐름: 로드 순서 끝에 '정리 단계(Skin.prepare): 스킨 옵션 대조 → 정적 조건 1회 평가' 추가. load_skin(DefaultState)은 정적 정리를 하지 않음(is_static 이 항상 false)
+- (W3-1b) r1-rbms-skin.md §8 테스트 표: src/loader/track.rs 인라인 6건 → 10건, tests/skin_loader.rs 75건, tests/skin_luaskin.rs 25건 → 30건(선택 테스트 an_external_skin_pack_sheds_objects_and_conditions_when_it_is_prepared 포함), tests/skin_integration.rs 17건(known_option 주입 테스트 4건을 원본 구현 표 기준 테스트로 교체)
+- (W3-1b) r1-rbms-skin.md §0 요약 5번과 §9: '남은 것은 미선언·미지원 op 처리' 를 완료로 표시
+- (W3-1c) r1-rbms-skin.md 상단에 웨이브 3 반영 사항 추가: BoundFrame::timer(프레임 내 재사용, 프레임 번호 스탬프 캐시), LuaDrawEval::call_timer 가 이 경로를 탐, SkinLua::frame_cost() -> FrameCost { calls, reused, spent }, Meter::frame_calls / frame_spent. §5.4 예산 절에 '거부·중단 시 직전 프레임 값'이 타이머 재사용에도 적용됨을 추가
+- (W3-1c) r1-rbms-skin.md §8 테스트 표: tests/skin_main_state.rs 31건 → 38건
+- (리뷰 수정) r1-rbms-skin.md 의 Lua os 절: os.rs 에 호스트용 local_time(LocalTime) 이 생겼고 lua 모듈이 재수출한다고 추가합니다
+
 
 ## 웨이브 2B 반영 사항 (2026-10-10)
 

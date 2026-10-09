@@ -1,6 +1,20 @@
 # R3 — R-BMS 앱(apps/rbms-player) 스킨 배선·화면 구성·입력 현황과 격차
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 2(Lua 런타임·로더·스킨 팩) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 3A(공통 그리기 의미론) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 3A 반영 사항 (2026-10-10)
+
+prepare/draw 2단계 파이프라인과 `SkinHost` 직접 그리기, 그리기 조건 의미론, 참조 이미지·음수 크기·이미지 인덱스·숫자·슬라이더·그래프 정합, TTF 텍스트, judgegraph·bpmgraph, Lua 함수 값 프레임 평가, 앱 호스트 군집 A·I·M 을 넣은 뒤의 상태다.
+
+- (W3-0) r3-rbms-app.md §6.1: 'SkinDraw { …, background, offsets, extra }' 와 FrameExtra 서술을 'SkinDraw { …, offsets, data }', 'FrameInputs { offsets, data: FrameData }' 로
+- (W3-0) r3-rbms-app.md §6.2 표 'PlayObjectState (FrameExtra)' 행과 '배경 텍스처' 행: NoteField{field, playfield, shade, bomb, keys_down} + GaugeFrame{kind, clear_threshold} + series.recent_hits + BgaFrame 으로 나뉘어 한 FrameData 로 전달. §6.3 배경 텍스처는 BgaFrame::of(background), 행 목록은 SongBars. §6.4 ResultSeriesState 는 FrameSeries(gauge_history, timing, bpm, notes)
+- (W3-0) r3-rbms-app.md §12 와 상단 반영 사항: apps/rbms-player/src/skin_host/ 추가(ScreenHost, ClusterState, ROUTES, 군집 파일 14개, 아직 미연결, lib.rs 에 pub mod skin_host)
+- (W3-1a) r3-rbms-app.md: skin_screen.rs 절에 with_skin_frame 의 새 흐름(ScreenHost 조립: offsets, static_screen, window, fallback -> 바인딩 1회 안 prepare -> 바인딩 밖 draw, 호스트에 기록된 명령은 아직 버림)과 skin_host/mod.rs 의 ScreenHost.fallback(군집이 모르는 id 를 기존 어댑터가 답함, 타이머는 TimerState 직접) 추가
+- (W3-6) r3-rbms-app.md §6(화면별 상태 공급, 22행 리뷰 수정 항목의 결정 화면 호스트 서술): 결정 화면의 150~155·96·문자열·80/81·진행률은 이제 ScreenHost 의 chart·loading 군집이 답하고 구 DecideViewState 는 군집이 모르는 id 의 폴백으로만 남음. skin_screen.rs 절: FrameInputs 가 chart·loading 을 싣고 FrameInputs::new 로 만들며, with_skin_frame 이 모든 화면에 SystemState(skin_system_state)를 채움. AppShared.booted 추가
+- (W3-6) r3-rbms-app.md §2 AppShared 필드 표: booted: Instant(앱 시작 시각, 스킨의 부팅 시간 숫자 27~29 용) 추가
+- (W3-2) r3-rbms-app.md(호스트 절): image_index 를 답하지 않는 id 는 이미지가 숨는다는 점과, 앱이 FrameData.images 를 채워야 한다는 점을 W3-7·W4-5·W5 의 선행 조건으로 추가
+- (리뷰 수정) r3-rbms-app.md 의 skin_host 절(system 군집): WallClock·of_unix_seconds 와 날짜 변환 상수가 삭제되고 SystemState.clock 이 rbms_skin::lua::LocalTime(로컬 시각)이 됐다고 고칩니다. 날짜 변환 구현은 format.rs fmt_datetime(UTC, 기록 목록용) 한 곳만 남습니다
+
 
 ## 웨이브 2B 반영 사항 (2026-10-10)
 

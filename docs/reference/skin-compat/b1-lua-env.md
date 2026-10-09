@@ -1,6 +1,20 @@
 # B1. beatoraja Lua 스킨 로딩 파이프라인과 Lua 실행 환경 계약
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 2(Lua 런타임·로더·스킨 팩) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 3A(공통 그리기 의미론) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 3A 반영 사항 (2026-10-10)
+
+prepare/draw 2단계 파이프라인과 `SkinHost` 직접 그리기, 그리기 조건 의미론, 참조 이미지·음수 크기·이미지 인덱스·숫자·슬라이더·그래프 정합, TTF 텍스트, judgegraph·bpmgraph, Lua 함수 값 프레임 평가, 앱 호스트 군집 A·I·M 을 넣은 뒤의 상태다.
+
+- (W3-1a) b1-lua-env.md §5.3: 표의 'value 함수 | 각 객체의 prepare | 객체별 구현, 이 조사 범위 밖' 행을 b2 §5.3 의 종류별 순서로 대체하고, R-BMS 구현 위치(crates/rbms-render/src/skin_render/object.rs SkinObject::prepare)와 '타이머 함수 프레임당 객체당 2회는 미이식(1회), W3-1c' 를 반영 사항에 추가
+- (W3-1b) b1-lua-env.md §5.3: 'isStatic 인 조건은 한 번만 평가 … 맵에 없는 id 는 어느 부호든 제거' 문단에 R-BMS 구현 완료와 위치(loader.rs prepare_objects·options_hold·settle_static)를 적고, 'destination.draw 가 숫자인데 내장 속성이 없으면 조건 없음(옵션 맵 대조 안 함, LuaSkinLoader.serializeLuaScript 의 byId 가 null)' 과 '중첩 객체(SkinBar·SkinJudge·SkinNote 내부)는 Skin.prepare 를 거치지 않아 dstop 이 영영 검사되지 않고 정적 조건도 매 프레임 평가된다' 를 추가
+- (W3-1c) b1-lua-env.md §5.3: 'Destination.timer 함수' 행에 R-BMS 동작 추가 — 프레임당 함수당 1회 호출 후 같은 프레임의 모든 읽기(다른 객체, 이미지 셀 애니메이션 포함)에 재사용(lua/mod.rs BoundFrame::timer). 조건·값 함수는 객체마다 원본 횟수대로 호출
+- (W3-1c) b1-lua-env.md §5.1: R-BMS 차이 추가 — 타이머 함수 실패는 그 프레임 동안 OFF 로 재사용되고 프레임당 1회만 기록, 다음 프레임에 재호출. 예산이 거부·중단한 타이머는 직전 프레임 값
+- (W3-1c) b1-lua-env.md §7.1: 'destination 의 timer 로 쓰면 프레임당 2회 호출되지만 결과가 같다' 뒤에 'R-BMS 는 1회만 호출한다. 원본 방식(4회)과 1회 재사용의 답이 프레임마다 같음을 테스트로 확인(skin_main_state.rs)' 추가
+- (W3-1c) b1-lua-env.md §8.2: '함수를 destination 에 직접 넣으면 객체마다 따로 호출된다'에 'R-BMS 는 같은 함수 값이면 프레임당 1회' 추가
+- (W3-1c) b1-lua-env.md §14: 요약에 실제 준비 프레임 비용 추가 — 릴리스 빌드 선곡 1,401호출 207~251µs, 결과 98호출 22~34µs, 플레이 7키 23호출 8~15µs, 결정 1호출
+- (리뷰 수정) b1-lua-env.md §6 의 float_number 행: R-BMS 구현 상태로 '원본에 float·rate 속성이 없는 id 와 이름은 0, 있는 id 는 호스트 값(무값 센티널 포함)' 을 적습니다
+
 
 ## 웨이브 2B 반영 사항 (2026-10-10)
 

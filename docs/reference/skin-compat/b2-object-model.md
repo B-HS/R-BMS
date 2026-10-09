@@ -1,6 +1,22 @@
 # B2. beatoraja 스킨 객체 모델과 공통 그리기 의미론
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 2A(Lua 런타임과 로더) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 3A(공통 그리기 의미론) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 3A 반영 사항 (2026-10-10)
+
+prepare/draw 2단계 파이프라인과 `SkinHost` 직접 그리기, 그리기 조건 의미론, 참조 이미지·음수 크기·이미지 인덱스·숫자·슬라이더·그래프 정합, TTF 텍스트, judgegraph·bpmgraph, Lua 함수 값 프레임 평가, 앱 호스트 군집 A·I·M 을 넣은 뒤의 상태다.
+
+- (W3-1a) b2-object-model.md §3.2: 'dst 가 빈 배열이면 키프레임 0개 -> validate() false -> 제거' 뒤에 예외 추가 — SkinBar(select/SkinBar.java:105), SkinNote(play/SkinNote.java:32), SkinJudge(play/SkinJudge.java:55)는 생성자에서 setDestination(0, 0,0,0,0, 0, 0,255,255,255, 0,0,0,0,0,0, []) 로 키프레임 하나를 스스로 넣으므로 dst 없는 destination 으로도 유효. 이때 destination 의 timer/loop/blend/filter/center/op/draw/mouseRect 는 키프레임 루프 안에서만 적용되므로 전혀 적용되지 않고 offset·stretch 만 적용(JSONSkinLoader.java:422-478)
+- (W3-1a) b2-object-model.md §7.3: R-BMS 구현 메모 추가 — prepare/draw 2단계는 SkinScreen::prepare -> PreparedFrame, SkinScreen::draw_prepared. Lua 는 prepare 에서만 호출되고 draw 는 기록된 답을 읽음
+- (W3-1b) b2-object-model.md §3.4: '조건 등록은 첫 키프레임을 읽을 때 일어나므로 dst 가 빈 destination 은 조건도 dstop 도 등록하지 않는다(SkinObject.java:174-182 가 키프레임 루프 안에서만 호출됨)' 와 dstdraw 순서(내장 정수 op → op 의 함수·이름 → draw)의 R-BMS 대응(track.rs conditions)을 추가
+- (W3-1b) b2-object-model.md §5.1: 2~4번 규칙이 R-BMS 에 구현됐음을 적고, 5.1 의 대상이 skin.objects(최상위)뿐이라 중첩 객체의 dstop 은 무시된다는 점을 명시. §18 의 3번(미지 op 는 부호와 무관하게 제거)을 구현 완료로
+- (W3-2) b2-object-model.md 상단 반영 사항: §9.4 의 검정/흰색은 R-BMS 에서 2x1 한 장이 아니라 1x1 두 장(필터 시 이웃 텍셀 섞임 없음)이라는 의도적 차이, §6.6 의 +0.01 보정 미이식을 적을 것
+- (W3-5) b2-object-model.md: JsonSkinObjectLoader 의 judgegraph 는 break 라 같은 id 의 뒤 종류(bpmgraph, hiterror, timingvisualizer, timingdistribution 순)가 이긴다. build_graph 순서를 이에 맞춤
+- (W3-3) b2-object-model.md §12.2: [libGDX] 표시 서술 중 R-BMS 가 채택한 해석을 명시 — 줄 폭은 첫 글리프 잉크 왼쪽~마지막 글리프 잉크 오른쪽, overflow 2 는 '펜이 폭 안에 남는 접두 글리프까지'(마지막 글리프만 잉크 기준), 첫 글리프는 절단 판정에서 제외. 정렬값이 0/1/2 가 아니면 왼쪽으로 처리
+- (W3-3) b2-object-model.md §12.3: 추가할 사실 — libGDX 커닝은 FreeType 의 `kern` 표만 읽으므로 GPOS 만 있는 mgenplus 는 커닝이 없다(R-BMS 도 kern 표 유무로 켠다). capHeight 는 AutoMedium 힌팅된 대문자 높이이며 R-BMS 는 윤곽 높이 x 소문자 맞춤 계수를 반올림해 근사한다(mgenplus black: size 25/40/70/90/170 → 18/29/51/66/124). `size` 0 은 폰트 생성 실패로 미표시
+- (W3-3) b2-object-model.md §6.4 와 §18 #6·#13·#14: 구현됨으로 표시(blend 상속, TTF 는 dst h 가 글자 크기, ref 유효 시 constantText 무시). #6 에 '합성 객체는 자기 destination blend 를 남기는 근사' 단서 추가
+- (W3-3) b2-object-model.md §20: 'GlyphLayout/BitmapFont 글리프 배치' 행에 R-BMS 의 남은 오차 수치(세로 ±1px at size, 가로 글리프당 최대 ±1px at size) 추가
+
 
 ## 웨이브 2A 반영 사항 (2026-10-10)
 

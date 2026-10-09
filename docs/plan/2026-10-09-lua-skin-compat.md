@@ -268,6 +268,15 @@ R-BMS 고유 규칙
 | W3-6 | 호스트 군집 A·I·M | `skin_host/{chart, system, loading}.rs` | W3-0 | sonnet xhigh | [b5 §3~§6·§17, m5 부록 B] |
 | W3-7 | Decide Stage, 장면 수명 헬퍼, 로딩 분리(차트 로드는 백그라운드, 스캔·표 받기 대기는 내장 유지) | `apps/rbms-player/src/stage/{decide.rs, scene_life.rs, loading.rs, mod.rs}`, `stage/select/mod.rs`(곡 결정 전이만), `app_play.rs` | W3-2~W3-6 | opus high | [b4 §4, r3 §6.5] |
 
+진행 기록(2026-10-10): **웨이브 3A 완료** — W3-0 → W3-1a → W3-1b ∥ W3-2 ∥ W3-5 ∥ W3-6 → W3-1c ∥ W3-3 → 리뷰 → 수정. Workflow `wf_02e2af85-d93`(10 에이전트), 리뷰 major 2·minor 5 처리. 게이트 통과(테스트 3,716 통과·0 실패·ignored 3), 내장 골든 불변. 리뷰어가 캡처를 열어 조사 문서 좌표와 대조한 결과 **ModernChic 결정 화면은 m5 §9.1 의 좌표·색·페이드와 일치**하고(틀린 것 없음), 결과·선곡 화면의 공통 객체도 좌표대로 나온다. 메인도 결정 1500ms·선곡 3000ms 캡처를 직접 열어 확인했다. 선곡은 곡 바가 그려지지만 바 안의 제목·레벨·램프는 웨이브 5, 플레이의 노트 세로 지오메트리·게이지·판정은 웨이브 6 범위다. 상세는 `docs/reference/skin-compat/v1-first-render.md` 상단.
+
+구현 메모(뒤 웨이브가 알아야 할 것)
+- 렌더: `SkinScreen::prepare` → `draw` 2단계, 프레임 데이터는 `crates/rbms-render/src/skin_render/frame.rs` 의 `FrameData { field, gauge, bars, series, images, bga }`. 텍스트 조판은 `crates/rbms-render/src/font/block.rs`.
+- 앱 호스트: `apps/rbms-player/src/skin_host/`(`ScreenHost`, 군집별 파일, id → 군집 분배 표 `ROUTES`). 군집이 모르는 id 는 구 어댑터(`skin_render/state.rs`)의 답으로 폴백한다. 구 어댑터는 모르는 옵션에 `Some(false)`, 모르는 이미지 인덱스에 0(첫 그림)을 답하므로, 군집이 채워지기 전에는 실제 설정과 무관한 첫 그림이 보일 수 있다.
+- 스킨 시계(숫자 21~26)는 Lua `os.date` 와 같은 C 라이브러리 로컬 시각(`rbms_skin::lua::local_time`)이다. 새 의존성은 없다.
+- 실수 값 없음은 원본처럼 `f32::from_bits(1)`(`FLOAT_ABSENT`)이다.
+- 남은 웨이브 3 단위: W3-4(텍스처 관리자), W3-7(Decide Stage·장면 수명·로딩 분리) = 웨이브 3B.
+
 ### 웨이브 4 — 결과와 코스 결과
 
 끝 상태: 결과·코스 결과 캡처(클리어/실패, 메뉴 1/2), Info 클릭 전환. 내장 플레이 → 스킨 결과 실화면 흐름.

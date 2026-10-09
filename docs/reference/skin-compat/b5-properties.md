@@ -1,6 +1,20 @@
 # b5. beatoraja 속성 id 전수 목록과 R-BMS 대조
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 2A(Lua 런타임과 로더) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 3A(공통 그리기 의미론) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 3A 반영 사항 (2026-10-10)
+
+prepare/draw 2단계 파이프라인과 `SkinHost` 직접 그리기, 그리기 조건 의미론, 참조 이미지·음수 크기·이미지 인덱스·숫자·슬라이더·그래프 정합, TTF 텍스트, judgegraph·bpmgraph, Lua 함수 값 프레임 평가, 앱 호스트 군집 A·I·M 을 넣은 뒤의 상태다.
+
+- (W3-0) b5-properties.md §17: 군집 → 파일·상태 타입 대응(A chart.rs ChartState … M loading.rs LoadingState)과 '분배 표는 apps/rbms-player/src/skin_host/mod.rs 의 ROUTES' 추가. A 행의 STRING 11-16 에 10(STRING_TITLE)이 빠져 있음을 보정
+- (W3-1b) b5-properties.md §2.3 OPTION 행과 §2.4: 'null → Skin.option 맵 대조 후 제거' 의 R-BMS 대응을 reference_implements 기준 분류로 적고, 정적 평가가 구현됐으며 '호스트가 답하지 않는 정적 id 는 정리하지 않는다' 는 R-BMS 고유 규칙을 추가. §2.5 의 '구현 없는 음수 id 는 true' 서술은 로더 경로에서 더 성립하지 않음(객체 제거)
+- (W3-6) b5-properties.md §3 R-BMS 열: NUMBER 20~37·57~59·333 은 '구현(전 화면, skin_host/system.rs)', 45~49·74·90~91·96·106·350~353·360~365·368·400·1163~1164 는 '구현(skin_host/chart.rs, 메타가 있을 때)', 165 는 '구현(skin_host/loading.rs)'. 17~19 와 92 는 '원천 없음'(앱 연결에서 None)
+- (W3-6) b5-properties.md §4 R-BMS 열: OPTION 150~155·160~164·170~184·190~195·1008·1160~1161·1177 은 '구현(chart.rs)', 80/81 은 'BMSPlayer 상태 기준(LoadingScreen::Preload/Started, 다른 화면은 false)', 280~283·289·290 은 '구현(system.rs)'. §4 의 80/81 '불일치' 표기는 군집이 원본 의미로 정의하고 앱의 결정 화면 연결만 구 어댑터 동작을 유지한다고 갱신
+- (W3-6) b5-properties.md §5-A/§5-B/§6: RATE 17~19 는 system.rs, RATE 102·FLOAT 165 는 loading.rs, FLOAT 360·362·367·368 은 chart.rs, STRING 2·1010 은 system.rs, STRING 10~16·1001~1003·1030~1031 은 chart.rs 가 답함(15·16·1031·1001~1003 의 앱 원천은 아직 비어 있음)
+- (W3-6) b5-properties.md §17 표: 군집 A·I·M 행의 'R-BMS 현황'을 '구현(W3-6): 값은 원본 팩토리 계산 그대로, 원천 없는 id 는 None. A 는 ChartState{Unconnected,Empty,Chart(&ChartMeta)}, I 는 SystemState 스냅샷, M 은 LoadingScreen+진행률'로. §16 표의 정의 불일치 목록은 A·I·M 에 해당하는 항목이 없음을 덧붙임
+- (리뷰 수정) b5-properties.md §2.5 (R-BMS 현재 구조 요약): 실수 무값은 FLOAT_ABSENT = Float.MIN_VALUE 로 원본과 같아졌고, ChartState::Empty 의 360/362/367/368 이 원본처럼 미표시가 된다고 고칩니다. sanitize_float 는 삭제됐습니다
+- (리뷰 수정) b5-properties.md §9 (이미지 인덱스) 의 R-BMS 열: '값 연결은 앱 호스트 몫' 에 '군집 미구현 id 는 구 어댑터가 0 을 답해 첫 후보를 그린다(W4-5·W5 에서 실제 값 연결)' 를 덧붙입니다
+
 
 ## 웨이브 2A 반영 사항 (2026-10-10)
 

@@ -1,6 +1,45 @@
 # V1. 외부 스킨 첫 렌더 결과 — 나온 것과 빠진 것 (웨이브 2B)
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 2B · 기준 커밋: 웨이브 2B 커밋 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 3A(공통 그리기 의미론) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 3A 반영 사항 (2026-10-10)
+
+prepare/draw 2단계 파이프라인과 `SkinHost` 직접 그리기, 그리기 조건 의미론, 참조 이미지·음수 크기·이미지 인덱스·숫자·슬라이더·그래프 정합, TTF 텍스트, judgegraph·bpmgraph, Lua 함수 값 프레임 평가, 앱 호스트 군집 A·I·M 을 넣은 뒤의 상태다.
+
+- (W3-0) v1-first-render.md: '[공통] 그래프 데이터 통로' 항목 — 통로 해소(W3-0, 2026-10-10): 화면과 무관하게 series 를 채울 수 있음. 데이터 공급은 미완이라 캡처는 그대로
+- (W3-0) v1-first-render.md: '[공통·W3-2] 음수 id 참조 이미지' 항목과 실행 기록의 객체 수 — 경고 문구가 사라지고 객체로 조립됨(decide 66→69, result 189→194, musicselect 1897→1914, play7_hw 274→287 객체). 그려지는 객체 수와 픽셀은 동일. build warnings 는 decide 0, result 1, musicselect 1, play7_hw 2
+- (W3-1a) v1-first-render.md: '[공통·W5-1/W6-1] dst 없는 최상위 destination' 해소(W3-1a, 2026-10-10) — songlist·notes·judge(def)가 그려짐. 근거는 SkinBar/SkinNote/SkinJudge 생성자의 자체 키프레임
+- (W3-1a) v1-first-render.md: '[musicselect·웨이브 5] 빠진 것: 곡 목록 바 전체' 일부 해소(W3-1a) — 바 이미지는 x 1125~, 선택 바 y 505~575 에 나옴. 바 안 제목·레벨·램프·트로피는 여전히 없음(W5-1). 그린 객체 수 99/104/110/107
+- (W3-1a) v1-first-render.md: '[play7_hw·웨이브 6] 빠진 것: 노트와 마디선 전체' 일부 해소(W3-1a) — 노트는 레인 열(스크래치 x 54~160)에 나옴. 마디선과 NOTES_1P 오프셋 적용은 여전히 없음(W6-1). 그린 객체 수 78/86/73/79
+- (W3-1a) v1-first-render.md: '구현 단위의 요약' 5번의 공통 원인 (나) 해소 표시, '위험과 주의'의 '함수 타이머는 평가된 프레임 시각에 켜집니다' 항목에 '평가는 이제 prepare 단계에서만 일어남' 추가
+- (W3-1b) v1-first-render.md: 캡처 수치의 객체 수(결정 69, 결과 195, 선곡 1914, 플레이 286~288)가 정리 후 수치(34, 159~160, 1911, 270)로 바뀌었음을 갱신. 빠진 것 목록의 원인 (가)~(라)는 이 단위에서 해소한 항목이 아님
+- (W3-6) v1-first-render.md: [decide·웨이브 3] 앱 경로 결정 화면의 난이도 색·모서리 색·라벨·레벨·장르·제목(FULLTITLE)·아티스트가 호스트 군집으로 나옴 — 해소(W3-6, 2026-10-10, 앱 경로 캡처 확인). 테이블 이름 텍스트(960,815)는 앱에 곡→표 조회가 없어 아직 빠짐
+- (W3-6) v1-first-render.md: [result·웨이브 4] '날짜·플레이어 텍스트'는 렌더 단위 캡처에서만 나오던 것이 앱 경로에서도 나옴 — 해소(W3-6). 단 날짜는 UTC 라 로컬과 하루 어긋날 수 있음(위험 항목)
+- (W3-2) v1-first-render.md: '[공통·W3-2] 음수 id 참조 이미지' 해소(W3-2, 2026-10-10). '[공통·W3-2] 음수 폭/높이 destination' 해소(W3-2, 2026-10-10)
+- (W3-2) v1-first-render.md [decide]: 빠진 것 중 '검정 띠 -110', '스테이지 파일 -100', 'timer 2 페이드아웃의 BLACK' 해소. 테스트에 3750ms 시각이 추가되어 페이드아웃 중간 프레임이 찍힘
+- (W3-2) v1-first-render.md [result]: '하단 BLACK 바', 'gra_fastRate' 해소. [musicselect]: 'stagefile -100', 'banner -102', '분석창 BLACK', 'fastRate (1147,80,-180,34)' 해소. [play7_hw]: '-110 10개', '스코어 막대 3개' 해소
+- (W3-2) v1-first-render.md 재현 절: 프레임이 tests/skin/external/images/{stagefile,backbmp,banner}.png(자작)을 참조 이미지로 넘기고, 시나리오는 191/193(스테이지 파일·배너 있음)을 켠다고 추가. play destination 수 268 → 269
+- (W3-5) v1-first-render.md [공통] 그래프 데이터 통로: 해소(W3-5, 2026-10-10)
+- (W3-5) v1-first-render.md [decide·웨이브 3]: '노트 분포·BPM 그래프' 빠진 것 해소(W3-5). 캡처에서 (460,30,1000,150)에 나옴
+- (W3-5) v1-first-render.md [musicselect]·[play7_hw·웨이브 6]: '노트 분포 그래프' 빠진 것 중 judgegraph/bpmgraph 해소(W3-5). 플레이 커서와 BPM 선도 나옴. 결과 Info 메뉴 2 의 세 그래프는 클릭 전환 후 확인 필요
+- (W3-3) v1-first-render.md: [공통·W3-3] 항목 해소(W3-3, 2026-10-10) — 그림자·overflow·wrapping 구현. 같은 항목의 '선곡 subtitle overflow=1 이 줄지 않고 1080px 폭으로 지나감'은 정정 필요: 그 부제는 dst 폭 1920 보다 짧아 원래 줄지 않는 것이 맞고, 실제 결함은 굵기(black 대신 medium)와 세로 기준(줄 상자라 약 40px 아래)이었음
+- (W3-3) v1-first-render.md 상단 '메인이 직접 연 캡처' 문단: '부제 텍스트가 크게 넘쳐 겹친다'에 해소 표시 — 부제는 띠(화면 y 314..674) 안 y 410~540 에 들어가고, 제목과의 겹침은 원본 좌표 그대로임
+- (W3-3) v1-first-render.md [decide·웨이브 3] 항목: 텍스트 4종의 실측 좌표 추가(title 잉크 x 301..1620 y 499..585, 그림자 4px, 전부 중심 x 960) 와 '제목·tablename 이 black 굵기로 나옴'
+- (리뷰 수정) v1-first-render.md: 웨이브 3A 리뷰의 '앱 경로에서 이미지 인덱스 ref 를 쓰는 image/imageset 누락'(선곡 LN·KEY·SORT·FAV/INV, 결과 chartBtn·useOption·clearType) 해소. 군집이 채워질 때까지 구 어댑터가 첫 세트(UNMAPPED_IMAGE_INDEX = 0)를 답한다고 적습니다
+- (리뷰 수정) v1-first-render.md: '스킨 시계(NUMBER 21~26)가 UTC' 해소. rbms_skin::lua::local_time 이 os.date 와 같은 C 라이브러리 달력으로 로컬 시각을 읽고 새 의존성은 없습니다. 미해결 목록에 올리지 않습니다
+
+### 리뷰어의 화면 대조 (2026-10-10, 캡처를 직접 열어 조사 문서 좌표와 대조)
+
+- 결정(review/decide-0·500·1500·3000·3750) 맞는 것: bg 전체, 검정 띠 (0,200,1920,680) a=200 → 화면 y 200~880 전폭, 스테이지 파일 (640,300,640,480) → x 640~1280·y 300~780 이 띠 아래에서 어둡게, 500ms 는 1x1 시작점이라 안 보임, lockon 모서리 500ms 확대 상태(세트 0 이 약 x 157~544·y 72~459)와 1500ms 의 (627,743)/(1243,743)/(627,288)/(1243,288) 50x50 HYPER 색, tablename 윗변 y 230·genre 430·title 500(잉크 약 498~590, 중심 x 962)·artist 610·tips 835 전부 x=960 가운데 정렬, 난이도 색 (255,192,0) 한 벌만, HYPER 라벨 (840,370,240,45), 레벨 12 가 x 890~1032·y 717~810, 그래프 두 개 (460,30,1000,150) → y 900~1050(0ms 는 바탕과 BPM 선만, 500ms 부터 칩), BPM 선 180 초록 중앙·90 파랑 1/3·240 빨강·정지 자홍, 3750ms 페이드 BLACK y 270~810 과 GET READY (598,514,730,50) 반투명
+- 결정 틀린 것: 없음. 아직 없는 것: 앱 경로의 스테이지 파일·그래프 데이터 공급과 Decide Stage(W3-7), bg 동영상 source(웨이브 7, 앱 로그에 sample.mp4 디코드 경고)
+- 결정 앱 경로(review-app/pack-decide.png, .gpu 동일 배치): 곡 없는 하니스라 UNKNOWN 라벨 (840,370)·레벨 0(align 2 로 x 928~995 중앙)·회색 모서리·tips·검정 띠가 좌표대로 나옴. 제목류와 그래프는 데이터가 없어 비어 있음(W3-7)
+- 결과(review/result-0·500·1500·3000) 맞는 것: mainInfo (35,1024,665,50), mainGraphFrame (35,659,665,356), judgesGraph 칩 (40,774,655,236), 랭크 AA (95,800), infoFrame·NORMAL·1624 Notes, numGauge 86 / .4, mainJudgeFrame (35,70,665,582), EXSCORE 02890·88.97%·+142, COMBO 00812 +22, PG~MS 3열, UPDATE (570,545/480,107,36) 3000ms, gra_slowRate 빨강 x 427~568 과 gra_fastRate (673,427,-246,26) 파랑이 673 에서 왼쪽으로, 0174/0180, lampGreen 8개, diffFrame·7keys·HYPER, 날짜 윗변 y 75·플레이어 115, chartBtn (795,1010,330,64), 하단 BLACK (0,0,1920,50) 위 bottomResult, 버튼 3개, 0ms 캐릭터 2배
+- 결과 틀린 것: 렌더 캡처에는 없음. 앱 캡처는 findings 1·2(chartBtn·useOption·clearType 누락, 날짜 하루 전). 아직 없는 것(뒤 웨이브): 게이지 2001 (56,674,400,35) 빈 칸과 grooveGaugeGraph 자체 양식(W4-2), Info 메뉴 2 의 그래프 3종과 클릭(W4-1), 앱 경로의 판정 표·랭크·램프·라벨(W4-5)
+- 선곡(review/musicselect-0·500·1500·3000) 맞는 것: 시작 연출(0ms 검정, 500ms welcome 문구 (325,513)), stagefile (80,406,480,360) → x 80~560·y 314~674, banner (700,785,300,80), main-top/title/skinname/Ver 4.6/keyinfo, 검색창, OFFLINE/BGA/FAV, 버튼 열과 LN·ALL·曲名, 캐러셀, directory 오른쪽 끝 990·genre/title/fullArtist 1000 에 윗변 340/390/440/530, BPM 프레임과 180, 7KEYS (1527,213), selectmusic-frame y 499~581, 스크롤 램프 y 약 318~350, 하단 3창 수치 전부, bar-fastRate (1147,80,-180,34) 파랑이 빨강과 맞닿음, 분석창 BLACK (1366,97,415,100) 위 분포·BPM 선, 캐릭터 (1700,265), 사이드 아이콘 4개, subtitle 스크롤(3000ms x=768 시작)
+- 선곡 틀린 것: 렌더 캡처에는 없음. 앱 캡처는 findings 1(LN·KEY·SORT 버튼, FAV/INV 누락). 아직 없는 것(W5): 곡 바 안의 제목·레벨·램프·트로피와 바 종류별 그림(지금은 바 이미지와 선택 프레임만), 검색 텍스트 편집(원본은 ref 30 에 writer 가 있으면 빈 문자열도 그림), 폴더 클리어 현황 수치, 패널·IR
+- 플레이(review/play7_hw-0·2000·4000·6000) 맞는 것: -110 마스크 검정, 스코어 막대 now/best/target 이 1192 에서 왼쪽으로, 분포·BPM 그래프 (1402,71,472,107)와 흰 커서, -100 FIT_WIDTH_TRIMMED 가 BGA 위에 희미하게, 로딩 창과 PLEASE WAIT, 노트가 레인 열에 표시. 아직 없는 것(W6): 노트 세로 지오메트리·마디선, 게이지 50칸, 판정, 'lamp' 2개, BGA 위 제목이 직전 가산 blend 를 물려받아 밝게 번짐(원본 규칙대로이나 실기 대조 전), 1280x720 래퍼로 인한 텍스트 흐림
+- 구현 단위 서술과 실제 이미지 대조: W3-0~W3-6 의 좌표 서술은 다시 찍은 캡처와 일치합니다. 다른 곳은 W3-1a 의 '폴백으로 문서가 전과 같이 보인다'는 주석(findings 1)과 W3-1b 의 None 유지 서술(findings 7)입니다
+
 
 ModernChic 의 결정·결과·선곡·플레이 7키 문서를 맵 호스트 시나리오로 로드해 기존 스킨 렌더러로 1920x1080 CpuCanvas 에 그린 결과를 레이아웃 조사(`m2`·`m4`·`m5`)의 좌표와 대조한 기록이다. 웨이브 3~6 의 작업 근거로 쓴다. 해당 결함을 고친 단위는 이 문서의 항목에 "해소(단위, 날짜)"를 붙인다.
 

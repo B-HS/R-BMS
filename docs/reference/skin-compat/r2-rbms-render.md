@@ -1,6 +1,38 @@
 # R2 — R-BMS 렌더 계층(crates/rbms-render, GPU 백엔드) 현황과 격차
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 2(Lua 런타임·로더·스킨 팩) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 3A(공통 그리기 의미론) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 3A 반영 사항 (2026-10-10)
+
+prepare/draw 2단계 파이프라인과 `SkinHost` 직접 그리기, 그리기 조건 의미론, 참조 이미지·음수 크기·이미지 인덱스·숫자·슬라이더·그래프 정합, TTF 텍스트, judgegraph·bpmgraph, Lua 함수 값 프레임 평가, 앱 호스트 군집 A·I·M 을 넣은 뒤의 상태다.
+
+- (W3-0) r2-rbms-render.md §5 서두: 그리기 본체 열거형이 20개 → 22개(Bga 로 이름 변경, TextInput·Reference 추가), SkinObjectKind 에 Reference 추가. 디스패치는 draw.rs 의 draw_object 그대로지만 text → text.rs, bga → bga.rs, 참조 이미지 → refs.rs, 편집 텍스트 → text_input.rs 로 분기
+- (W3-0) r2-rbms-render.md §5.1 표 text 행·bga 행: 구현 위치를 draw.rs → skin_render/text.rs(draw_text, TextBody, text_body), skin_render/bga.rs(draw_bga, 프레임의 data.bga.base)로. text 행에 'editable 이면 Body::TextInput 으로 조립되고 지금은 같은 그림' 추가
+- (W3-0) r2-rbms-render.md §5.2 표의 그래프 6행: 파일 경로 graphs.rs → graphs/{gauge_graph, notes_dist, bpm, timing_dist, timing_vis, hit_error}.rs. gauge 행의 '결과 화면에서는 그리지 않음(gauge.rs:235-248)'을 '프레임이 data.gauge(GaugeFrame)를 줄 때만 그림. 결과 화면 호출부는 아직 주지 않음'으로. bpmgraph 행의 '결과 프레임에서만 데이터가 온다'를 'data.series.bpm 을 채우는 화면이면 어디서나, 현재 채우는 곳은 결과뿐'으로
+- (W3-0) r2-rbms-render.md §5.3 '음수 id 참조 이미지' 행과 상단 W2-9 반영 사항: 'build_body 에 분기가 없어 경고 후 누락'을 'refs.rs 의 build_reference 가 5개 id 를 Body::Reference 로 조립(문서 선언 객체보다 먼저). 그리기는 프레임의 data.images 가 텍스처를 줄 때만이고 현재 공급 없음. 경고는 더 나오지 않음'으로
+- (W3-0) r2-rbms-render.md §3.1 4번·§3.2: 소스 등록과 해제가 skin_render/mod.rs 에서 skin_render/textures.rs 의 SkinTextures::register/release 로 이동(동작 동일: 선언된 source 전부 등록)
+- (W3-0) r2-rbms-render.md §7.1: SkinFrame 필드 표에서 background·extra 행을 'data: FrameData' 한 행으로. FrameExtra 표와 PlayObjectState·SelectListState·ResultSeriesState 표를 FrameData { field: NoteField, gauge: GaugeFrame, bars: SongBars, series: FrameSeries{gauge_history, timing, bpm, notes, recent_hits}, images: ReferenceImages, bga: BgaFrame } 로 교체. 각 타입의 정의 위치(notes.rs, gauge.rs, songlist.rs, graphs/*.rs, refs.rs, bga.rs)를 적음
+- (W3-0) r2-rbms-render.md §7.2 6번·7번: 'FrameExtra 가 화면당 한 종류', '참조 이미지가 background 한 장뿐'은 구조상 해소(W3-0). 남은 것은 각 화면이 데이터를 채우는 일
+- (W3-0) r2-rbms-render.md §8.1 '배경 슬롯 이중 경로' 행: 문서 bga 경로의 입력이 frame.background → frame.data.bga.base
+- (W3-0) r2-rbms-render.md §10: E1 의 'FrameExtra 분해' 부분 완료, C2 는 본체·프레임 필드 골격까지 완료(그리기 의미론은 W3-2), D3 는 진입점 SkinScreen::pointer 자리만 생김
+- (W3-1a) r2-rbms-render.md §5: §5.2 의 songlist 행과 note 행에서 'ModernChic 에서는 현재 한 번도 그려지지 않는다(dst 없는 destination)' 삭제. §5.3 의 'dst 없는 최상위 destination' 행을 '해소(W3-1a): self-placed 3종은 자체 키프레임으로 조립, 그 외 종류는 빌드에서 제외하고 경고' 로 변경. 그리기 진입이 draw_object 에서 SkinObject::prepare + draw::draw_resolved 로 바뀐 것 반영
+- (W3-1a) r2-rbms-render.md §7.1: 프레임 입력 설명에 2단계 추가 — SkinFrame.lua 는 prepare 단계에서만 쓰이고 draw 단계는 PreparedFrame 의 기록을 읽음. 사용법이 'SkinLua::frame 안에서 screen.draw' 에서 'SkinLua::frame 안에서 screen.prepare, 바인딩 밖에서 screen.draw_prepared' 로 바뀜. 앱은 화면별 어댑터 대신 skin_host::ScreenHost(fallback = 기존 어댑터)로 그림
+- (W3-1a) r2-rbms-render.md §8.1: 결합 지점 표에서 앱 skin_screen.rs 가 render_play/select/result/decide/keyconfig_screen 을 부르던 행을 'with_skin_frame 이 ScreenHost 로 prepare 하고 PreparedDocument::draw/draw_native 로 그림. render_*_screen 과 SkinDraw 는 렌더 테스트만 사용' 으로 변경
+- (W3-2) r2-rbms-render.md 상단: '웨이브 3A 반영 사항'에 W3-2 추가 — 기본 객체는 draw.rs 의 Placement::texture 한 경로(뷰포트 → 부호 유지 stretch → 물리 픽셀 필터 판정 → quad 에서 정규화·UV 뒤집기·기준점 보정)로 그려지고, 판정 함수 ImageSelect::slot / number_value / float_value / share 를 prepare(object.rs)와 draw 가 공유한다
+- (W3-2) r2-rbms-render.md §5.1 image 행: (1) 음수 선택값 `.max(0)` → 해소(조건 평가 전 미표시), (2) '일반 정수 속성으로 읽는다' → 해소(host.image_index, 레퍼런스에 없는 id 는 세트 0). imageset 행: 빠진 이미지가 자리를 유지하고 value 는 숫자 공간, ref 는 이미지 인덱스 공간이라고 고칠 것
+- (W3-2) r2-rbms-render.md §5.1 value 행: '자릿수를 1..16 으로 제한' → 0..16(digit 0 은 자리 없음). '자리별 offset 을 뷰포트로 스케일…미확인' → 해소(원본은 스케일하지 않으며 화면 픽셀로 더함, SkinNumber.java:193-194). ref 없는 숫자는 미표시 추가
+- (W3-2) r2-rbms-render.md §5.1 floatvalue 행: '대조하지 않았다(미확인)' → SkinFloat.java:153-207·FloatFormatter 와 대조 완료. 미표시 조건(값 없음, NaN·무한, MIN/MAX gain 전후, 자리 0), zeropadding 0..2 정규화, align 은 숫자와 반대 의미
+- (W3-2) r2-rbms-render.md §5.1 slider 행: 값은 클램프하지 않고 rate 공간에서 읽으며 range 는 (int)(scale*range) 화면 픽셀. graph 행: '레퍼런스는 정수 절삭, R-BMS 는 연속값' → 해소. 값 0..1 클램프 제거, NaN 은 0, isRefNum 은 RateProperty 식(끝점 역순 포함)
+- (W3-2) r2-rbms-render.md §5.3 '음수 id 참조 이미지' 행 → 구현됨(refs.rs). -100/-101/-102 는 FrameData.images, -110/-111 은 렌더 자체 1x1 텍스처, 그 외 음수 id 는 조건만 평가되고 그려지지 않는 객체
+- (W3-5) r2-rbms-render.md §5.2: judgegraph 는 '판정 6종 막대/한 기둥' 모양이 아니라 원본 알고리즘으로 교체됨(초당 5px 열, 4x4 칩, 행 수 20~100, 바탕과 눈금, 750ms/50ms 갱신, 커서). bpmgraph 는 결과 화면 전용이 아니라 FrameSeries.bpm 이 있는 어느 화면에서도 그려짐. 두 그래프는 텍스처로 그려지며 SkinScreen::release 가 해제함
+- (W3-5) r2-rbms-render.md §7.2-6: 결과 화면에서만 bpmgraph 데이터가 있다는 결함 해소(결정·선곡·플레이 캡처에서 두 그래프가 나옴)
+- (W3-1c) r2-rbms-render.md §7(프레임 파이프라인): prepare 단계에서 타이머 함수는 프레임당 1회, 조건·값은 객체당 호출이라는 규칙과 skin_render/tests.rs 의 lua_functions 테스트 4건 추가
+- (W3-3) r2-rbms-render.md §6.1: 스킨 TTF 텍스트는 더 이상 fill_rect 런 경로가 아님. `font/block.rs` 의 `TextContext::compose_block` 이 줄을 흰 글리프 RGBA 블록으로 합성하고 `skin_render/text.rs` 가 객체당 텍스처 1장(`rbms.skin.text.<n>`)으로 그림. 크기는 `px_for`(반올림·최소 8)를 거치지 않고 dst 높이(물리 픽셀) 그대로. 내장 화면과 폰트 없는 스킨 텍스트만 기존 경로
+- (W3-3) r2-rbms-render.md §6.3 과 상단 W1-6 반영 사항: `load_font` 는 face 이름을 돌려줌(같은 family 의 두 번째 굵기는 'family weight'), 같은 바이트는 다시 등록하지 않음. 추가로 '기존에는 mgenplus black/medium 이 같은 typographic family(Mgen+ 1c)라 둘 다 medium 으로 그려졌다(W3-3 에서 해소)'를 기록
+- (W3-3) r2-rbms-render.md §6.4 표: 'TTF 크기' 일치(반올림·최소 8 단서 삭제), '정렬 기준' 잉크 기준 줄 폭으로 구현, '세로 기준' 해소(dst 상단 = 대문자 윗선, 잔차 ±1px at size), 'overflow' 구현(0/1/2), 'wrapping' 구현(줄 나눔 규칙 차이 명시), '그림자(TTF)' 구현, '필터' 1:1 Nearest·축소 Linear(원본과 다름), 'fallback 폰트' FontDef.fallback 무시 유지 + 엔진 폴백(E5), '폰트 종류 분기' .fnt 는 대체 그리기 유지(웨이브 7)
+- (W3-3) r2-rbms-render.md §5.1 표 text 행: prepare 는 값 읽기만, draw 는 text.rs 의 draw_text → draw_line → draw_composed/draw_stand_in. blend 는 자기 것이 아니라 `TextContext::inherited_blend`(draw.rs 의 `text::carry_blend` 가 기록). `SkinObject::release` 가 텍스트 텍스처도 해제
+- (리뷰 수정) r2-rbms-render.md §5 (기본 객체): gauge 는 FLOAT_GROOVEGAUGE_1P 가 값 없음이면 빈 게이지로 읽는다고 적습니다. 구 어댑터 state.rs 가 image_index 를 구현(항상 0)한다는 점도 적습니다
+
 
 ## 웨이브 2B 반영 사항 (2026-10-10)
 

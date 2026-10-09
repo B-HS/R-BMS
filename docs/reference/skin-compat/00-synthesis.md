@@ -1,6 +1,18 @@
 # 00. 조사 종합 — 격차 매트릭스, 목표 구조, 작업 분해, 사용자 결정 목록
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 2(Lua 런타임·로더·스킨 팩) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 3A(공통 그리기 의미론) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 3A 반영 사항 (2026-10-10)
+
+prepare/draw 2단계 파이프라인과 `SkinHost` 직접 그리기, 그리기 조건 의미론, 참조 이미지·음수 크기·이미지 인덱스·숫자·슬라이더·그래프 정합, TTF 텍스트, judgegraph·bpmgraph, Lua 함수 값 프레임 평가, 앱 호스트 군집 A·I·M 을 넣은 뒤의 상태다.
+
+- (W3-1a) 00-synthesis.md 매트릭스: 'songlist·note 의 dst 없는 destination 처리' 항목을 'W3-1a 해소(자체 키프레임 규칙)' 로, prepare/draw 2단계 항목을 'W3-1a 구현' 으로 표시
+- (W3-1b) 00-synthesis.md 매트릭스의 조건 의미론 행(미지 op 제거, 정적 1회 평가, 음수 타이머)과 README.md 갱신 이력: W3-1b 완료로 표시
+- (W3-5) 00-synthesis.md P10 행: judgegraph/bpmgraph 부분 -> 해소(W3-5, 2026-10-10). type 1/2 는 데이터 구조와 색 표까지 완료, 실제 판정 기록 공급은 W4-3/W4-5. T8, E4 행도 같은 내용으로 갱신
+- (W3-5) 00-synthesis.md 위험 목록: 그래프 데이터 통로(FrameExtra 화면당 한 종류) 해소 항목에 NoteDistribution 의 kinds/judgements/early_late/playing 과 BpmTimeline::of_chart 추가
+- (W3-1c) 00-synthesis.md §2.2: '타이머 함수 1회 호출 후 재사용' 을 구현 완료(W3-1c)로 표시
+- (W3-3) 00-synthesis.md 매트릭스의 텍스트 행(TTF)과 누락 글리프 행: 1차 TTF 구현 완료로 갱신, .fnt(type 0/1/2)는 웨이브 7 그대로
+
 
 ## 웨이브 2B 반영 사항 (2026-10-10)
 
