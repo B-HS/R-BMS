@@ -10,11 +10,15 @@
 use std::path::{Path, PathBuf};
 
 use mlua::{FromLuaMulti, Function, Table, Value};
-use rbms_skin::dst::{LuaDrawEval, SkinOffset};
+use rbms_model::Mode;
+use rbms_skin::dst::{LuaDrawEval, SkinOffset, TimerRef, prepare};
+use rbms_skin::loader::lua_skin::{LuaSkinOptions, load_lua_skin};
+use rbms_skin::loader::{SkinLoadOptions, SkinUserConfig};
 use rbms_skin::lua::main_state::{custom_timer_us, named_id};
-use rbms_skin::lua::{LuaFnKind, LuaMode, SkinLua, SkinLuaConfig, error_message};
-use rbms_skin::property::{HostCall, INTEGER_ABSENT, MapHost, NameSpace, ScoreSnapshot, SkinHost, VolumeBus};
-use rbms_skin::timer::TIMER_OFF;
+use rbms_skin::lua::{FrameBudget, LuaBudget, LuaFnKind, LuaMode, SkinLua, SkinLuaConfig, error_message};
+use rbms_skin::model::PropertyRef;
+use rbms_skin::property::{FLOAT_ABSENT, HostCall, INTEGER_ABSENT, MapHost, NameSpace, ScoreSnapshot, SkinHost, VolumeBus};
+use rbms_skin::timer::{TIMER_OFF, TimerState};
 
 /// The seed every interpreter of these tests starts from.
 const TEST_SEED: u64 = 7;
@@ -132,6 +136,86 @@ const SAMPLE_TIMER: i32 = 41;
 
 /// Bytes of the largest file `file_read_lines` reads.
 const LINES_FILE_LIMIT: u64 = 64 * 1024 * 1024;
+
+/// Calls a frame of the refusal test may make before the meter refuses the next.
+const FEW_FRAME_CALLS: u32 = 3;
+
+/// Instructions one call of the cut-off test may execute: far more than a function that ends needs,
+/// and few enough that one that does not end is cut off at once.
+const FEW_CALL_INSTRUCTIONS: u64 = 50_000;
+
+/// How often the reference reads the timer of two objects in one frame: `isOff` and then `get` for
+/// each (`SkinObject.prepareRegion`).
+const READS_OF_TWO_OBJECTS: usize = 4;
+
+/// The option the shared-timer skin gates its last object on.
+const GATE_OPTION: i32 = 900;
+
+/// The scene clock the shared-timer skin is prepared against, in microseconds.
+const SHARED_NOW_US: i64 = 2_000_000;
+
+/// How long before the frame the shared timer of that skin reports it switched on, in microseconds.
+const SHARED_ELAPSED_US: i64 = 250_000;
+
+/// Where a quarter of the way through its one-second slide puts an object of that skin.
+const SHARED_X: f32 = 25.0;
+
+/// A skin of this file's own: two objects and the image they show all follow one timer function,
+/// and a third object is gated by one function and timed by another. Every function counts its own
+/// calls in the global `called`.
+const SHARED_TIMER_SKIN: &str = r#"
+local main_state = require("main_state")
+called = { shared = 0, gate = 0, behind = 0 }
+local function shared()
+    called.shared = called.shared + 1
+    return main_state.time() - SHARED_ELAPSED_US
+end
+local function gate()
+    called.gate = called.gate + 1
+    return main_state.option(GATE_OPTION)
+end
+local function behind()
+    called.behind = called.behind + 1
+    return main_state.time()
+end
+local slide = { { time = 0, x = 0, y = 0, w = 16, h = 16 }, { time = 1000, x = 100 } }
+return {
+    type = 5, name = "shared timer", w = 1280, h = 720,
+    source = { { id = 0, path = "panel.png" } },
+    image = { { id = "tile", src = 0, x = 0, y = 0, w = 32, h = 16, divx = 2, timer = shared, cycle = 1000 } },
+    destination = {
+        { id = "tile", timer = shared, dst = slide },
+        { id = "tile", timer = shared, dst = slide },
+        { id = "tile", draw = gate, timer = behind, dst = slide },
+    },
+}
+"#;
+
+/// What one returned value reads as under each kind: as a condition, a whole number, a number, a
+/// text and a timer.
+type Readings = (bool, i32, f32, &'static str, i64);
+
+/// A function body and what each kind reads of what it returns (`LuaValue.toboolean`, `toint`,
+/// `tofloat`, `tojstring` and `tolong`). Nothing is not an error under any kind: it is false, zero,
+/// the word `nil` and a timer on since the scene began.
+const RETURNED: [(&str, Readings); 16] = [
+    ("", (false, 0, 0.0, "nil", 0)),
+    ("return nil", (false, 0, 0.0, "nil", 0)),
+    ("return false", (false, 0, 0.0, "false", 0)),
+    ("return true", (true, 0, 0.0, "true", 0)),
+    ("return 0", (true, 0, 0.0, "0", 0)),
+    ("return 7.9", (true, 7, 7.9, "7.9", 7)),
+    ("return -7.9", (true, -7, -7.9, "-7.9", -7)),
+    ("return 10 / 4", (true, 2, 2.5, "2.5", 2)),
+    ("return 10 / 2", (true, 5, 5.0, "5", 5)),
+    ("return '12'", (true, 12, 12.0, "12", 12)),
+    ("return '1.5'", (true, 1, 1.5, "1.5", 1)),
+    ("return 'twelve'", (true, 0, 0.0, "twelve", 0)),
+    ("return {}", (true, 0, 0.0, "table", 0)),
+    ("return 1e10", (true, 1_410_065_408, 1.0e10, "10000000000", 10_000_000_000)),
+    ("return 5, 9", (true, 5, 5.0, "5", 5)),
+    ("return ms.timer_off_value", (true, 0, i64::MIN as f32, "-9223372036854775808", TIMER_OFF)),
+];
 
 /// Bytes `file_count_lines` reads at a time, which is where a character can be split in two.
 const COUNT_BLOCK: usize = 64 * 1024;
@@ -284,6 +368,11 @@ fn a_float_falls_back_to_the_rates_and_a_text_is_empty_when_absent() {
     assert_eq!(eval::<f64>(&runtime, &host, "return ms.float_number('musicselect_position')"), 0.25);
     assert_eq!(eval::<f64>(&runtime, &host, "return ms.float_number(9999)"), 0.0);
     assert_eq!(eval::<f64>(&runtime, &host, "return ms.float_number('no_such_float')"), 0.0);
+    assert_eq!(
+        eval::<f64>(&runtime, &host, "return ms.float_number(360)"),
+        f64::from(FLOAT_ABSENT),
+        "a float the reference has and the host carries nothing under is the reference's own 'no value', which is not zero"
+    );
 
     assert_eq!(eval::<String>(&runtime, &host, "return ms.text(10)"), "FREEDOM DiVE");
     assert_eq!(eval::<String>(&runtime, &host, "return ms.text('title')"), "FREEDOM DiVE");
@@ -904,4 +993,205 @@ fn a_scenario_file_drives_the_module_end_to_end() {
         "return ms.option('chart_difficulty_1'), ms.number(96), ms.text(10), ms.timer_elapsed_seconds(1), ms.judge(0), ms.gauge(), ms.volume_sys()",
     );
     assert_eq!(read, (true, 11, "Scenario".to_owned(), 1.5, 12, 20.0, 0.5));
+}
+
+#[test]
+fn every_kind_reads_what_a_function_returned_by_its_own_rule() {
+    let (runtime, host) = (runtime(), sample_host());
+    for (body, expected) in RETURNED {
+        let returned = function(&runtime, &format!("return function() {body} end"), LuaFnKind::Boolean);
+        let read = runtime
+            .frame(&host, |frame| {
+                (frame.call_boolean(returned), frame.call_integer(returned), frame.call_float(returned), frame.call_text(returned), frame.call_timer(returned))
+            })
+            .expect("the frame binds");
+        let (boolean, integer, float, text, timer) = read;
+        assert_eq!((boolean, integer, float, text.as_str(), timer), expected, "{body:?}");
+    }
+    assert!(runtime.diagnostics().function_failures.is_empty(), "no value of any type is an error: {:?}", runtime.diagnostics().function_failures);
+}
+
+/// The reference calls a timer function on every read, and it reads a timer twice for each object
+/// that follows one. A frame drawn through the evaluator calls it once and reuses the answer.
+#[test]
+fn a_timer_read_through_the_evaluator_is_called_once_a_frame() {
+    let (runtime, host) = (runtime(), sample_host());
+    let counted = function(&runtime, "reads = 0 return function() reads = reads + 1 return reads * 1000 end", LuaFnKind::Timer);
+    let other = function(&runtime, "others = 0 return function() others = others + 1 return 7 end", LuaFnKind::Timer);
+    assert_eq!(runtime.frame_cost().calls, 0, "nothing has been called before the first frame");
+
+    let first = runtime
+        .frame(&host, |frame| {
+            let evaluator: &dyn LuaDrawEval = frame;
+            [evaluator.call_timer(counted), evaluator.call_timer(other), evaluator.call_timer(counted), frame.timer(counted)]
+        })
+        .expect("the frame binds");
+    assert_eq!(first, [1_000, 7, 1_000, 1_000], "every read of the frame is given the one call's answer");
+    assert_eq!(eval::<(i64, i64)>(&runtime, &host, "return reads, others"), (1, 1));
+    let cost = runtime.frame_cost();
+    assert_eq!((cost.calls, cost.reused), (2, 2), "two functions were called and two reads were answered without a call");
+
+    let second = runtime.frame(&host, |frame| [frame.timer(counted), frame.timer(counted)]).expect("the frame binds");
+    assert_eq!(second, [2_000, 2_000], "the next frame calls the function again");
+    assert_eq!((runtime.frame_cost().calls, runtime.frame_cost().reused), (1, 1), "and counts its own calls from nothing");
+
+    let plain = runtime.frame(&host, |frame| [frame.call_timer(counted), frame.call_timer(counted)]).expect("the frame binds");
+    assert_eq!(plain, [3_000, 4_000], "a plain call is a call every time it is made");
+    assert_eq!((runtime.frame_cost().calls, runtime.frame_cost().reused), (2, 0));
+}
+
+/// What makes one call a frame safe for the timers a skin builds with `timer_observe_boolean`: the
+/// observer latches against the frame clock, so the reference's second, third and fourth call of a
+/// frame change nothing the first did not. Read the reference's way and read once, the two observers
+/// answer the same on every frame.
+#[test]
+fn an_observed_boolean_answers_the_same_called_once_a_frame_as_called_on_every_read() {
+    let runtime = runtime();
+    runtime.lua().load("flag = false asked = { every = 0, once = 0 }").exec().expect("the globals are set");
+    let every = function(&runtime, "return tu.timer_observe_boolean(function() asked.every = asked.every + 1 return flag end)", LuaFnKind::Timer);
+    let once = function(&runtime, "return tu.timer_observe_boolean(function() asked.once = asked.once + 1 return flag end)", LuaFnKind::Timer);
+    let mut host = MapHost::new();
+    let steps = [(1_000, false), (2_000, true), (3_000, true), (4_000, false), (5_000, false), (6_000, true)];
+
+    let mut answers = Vec::new();
+    for (now_us, flag) in steps {
+        host.now_us = now_us;
+        runtime.lua().globals().set("flag", flag).expect("the flag is set");
+        let (reference, reused) = runtime
+            .frame(&host, |frame| ([(); READS_OF_TWO_OBJECTS].map(|()| frame.call_timer(every)), [(); READS_OF_TWO_OBJECTS].map(|()| frame.timer(once))))
+            .expect("the frame binds");
+        assert_eq!(reused, reference, "at {now_us} with the flag {flag}");
+        answers.push(reused[0]);
+    }
+    assert_eq!(answers, [TIMER_OFF, 2_000, 2_000, TIMER_OFF, TIMER_OFF, 6_000]);
+    let frames = steps.len() as i64;
+    assert_eq!(eval::<(i64, i64)>(&runtime, &host, "return asked.every, asked.once"), (frames * READS_OF_TWO_OBJECTS as i64, frames));
+}
+
+#[test]
+fn a_timer_that_fails_is_off_for_its_frame_is_logged_once_for_it_and_is_called_again_on_the_next() {
+    let (runtime, host) = (runtime(), sample_host());
+    runtime.lua().load("attempts = 0").exec().expect("the counter is set");
+    let flaky = function(
+        &runtime,
+        "return function() attempts = attempts + 1 if attempts % 2 == 1 then error('odd attempt') end return ms.timer(41) end",
+        LuaFnKind::Timer,
+    );
+
+    let failed = runtime.frame(&host, |frame| [frame.timer(flaky), frame.timer(flaky)]).expect("the frame binds");
+    assert_eq!(failed, [TIMER_OFF, TIMER_OFF], "the one failed call answers every read of its frame");
+    let recovered = runtime.frame(&host, |frame| [frame.timer(flaky), frame.timer(flaky)]).expect("the frame binds");
+    assert_eq!(recovered, [TIMER_ON_US, TIMER_ON_US], "the function is not disabled: the next frame calls it again");
+
+    assert_eq!(eval::<i64>(&runtime, &host, "return attempts"), 2, "one call a frame");
+    let failures = runtime.diagnostics().function_failures;
+    assert_eq!(failures.iter().map(|failure| (failure.function, failure.kind, failure.count)).collect::<Vec<_>>(), [(flaky, LuaFnKind::Timer, 1)]);
+    assert!(failures[0].first_message.contains("odd attempt"), "{failures:?}");
+}
+
+#[test]
+fn a_function_the_budget_refuses_answers_what_it_answered_on_the_frame_before() {
+    let budget = LuaBudget { frame: FrameBudget { max_calls: FEW_FRAME_CALLS, ..FrameBudget::default() }, ..LuaBudget::default() };
+    let runtime = runtime_with(SkinLuaConfig { budget, ..SkinLuaConfig::new(&fixture_root()) });
+    runtime.lua().load("ticks = 0").exec().expect("the counter is set");
+    let count = function(&runtime, "return function() ticks = ticks + 1 return ticks end", LuaFnKind::Integer);
+    let label = function(&runtime, "return function() return 'tick ' .. ticks end", LuaFnKind::Text);
+    let since = function(&runtime, "return function() return ticks * 1000 end", LuaFnKind::Timer);
+    let share = function(&runtime, "return function() return ticks / 4 end", LuaFnKind::Float);
+    let shown = function(&runtime, "return function() return ticks > 0 end", LuaFnKind::Boolean);
+    let host = MapHost::new();
+
+    let first = runtime.frame(&host, |frame| (frame.call_integer(count), frame.call_text(label), frame.timer(since))).expect("the frame binds");
+    assert_eq!(first, (1, "tick 1".to_owned(), 1_000));
+    assert_eq!(runtime.diagnostics().frames_over_budget, 0);
+
+    let starved = runtime
+        .frame(&host, |frame| {
+            let spent = [frame.call_integer(count), frame.call_integer(count), frame.call_integer(count)];
+            (spent, frame.call_text(label), frame.timer(since), frame.timer(since), frame.call_float(share), frame.call_boolean(shown))
+        })
+        .expect("the frame binds");
+    assert_eq!(
+        starved,
+        ([2, 3, 4], "tick 1".to_owned(), 1_000, 1_000, 0.0, false),
+        "past the ceiling a text and a timer hold what they answered a frame ago, and a function that has never run answers its default"
+    );
+    assert_eq!((runtime.frame_cost().calls, runtime.frame_cost().reused), (FEW_FRAME_CALLS, 1), "the refused timer was asked for once and reused once");
+    assert_eq!(runtime.diagnostics().frames_over_budget, 1);
+
+    let after = runtime.frame(&host, |frame| (frame.call_text(label), frame.timer(since), frame.call_integer(count))).expect("the frame binds");
+    assert_eq!(after, ("tick 4".to_owned(), 4_000, 5), "the next frame has its own allowance and reads afresh");
+    assert_eq!(runtime.diagnostics().frames_over_budget, 1);
+    assert!(runtime.diagnostics().function_failures.is_empty(), "a call that was not made did not fail");
+}
+
+#[test]
+fn a_call_cut_off_while_it_runs_answers_what_the_function_answered_on_the_frame_before() {
+    let budget = LuaBudget { frame: FrameBudget { max_call_instructions: FEW_CALL_INSTRUCTIONS, ..FrameBudget::default() }, ..LuaBudget::default() };
+    let runtime = runtime_with(SkinLuaConfig { budget, ..SkinLuaConfig::new(&fixture_root()) });
+    runtime.lua().load("spin = false level = 3").exec().expect("the globals are set");
+    let value = function(&runtime, "return function() while spin do end return level end", LuaFnKind::Integer);
+    let since = function(&runtime, "return function() while spin do end return level * 1000 end", LuaFnKind::Timer);
+    let host = MapHost::new();
+    let read = || runtime.frame(&host, |frame| (frame.call_integer(value), frame.timer(since), frame.timer(since))).expect("the frame binds");
+
+    assert_eq!(read(), (3, 3_000, 3_000));
+    runtime.lua().load("spin = true level = 9").exec().expect("the globals are set");
+    assert_eq!(read(), (3, 3_000, 3_000), "a function that ran away is cut off and reads as it did a frame ago");
+    assert_eq!(runtime.frame_cost().calls, 2, "the timer that was cut off is not called a second time in the frame");
+    assert_eq!(runtime.diagnostics().frames_over_budget, 1);
+
+    runtime.lua().load("spin = false").exec().expect("the global is set");
+    assert_eq!(read(), (9, 9_000, 9_000), "and is called again on the next frame");
+    assert_eq!(runtime.diagnostics().frames_over_budget, 1);
+}
+
+/// A timer function is one entry however many objects and images a skin hangs it on, so one call a
+/// frame serves them all, and a function behind a condition that fails is not called at all.
+#[test]
+fn a_loaded_skin_calls_a_timer_its_objects_share_once_a_frame_and_none_behind_a_failed_condition() {
+    let scratch = Scratch::new("shared-timer");
+    std::fs::write(scratch.path().join("panel.png"), []).expect("the source file is written");
+    let entry = scratch.path().join("shared.luaskin");
+    let source = SHARED_TIMER_SKIN.replace("SHARED_ELAPSED_US", &SHARED_ELAPSED_US.to_string()).replace("GATE_OPTION", &GATE_OPTION.to_string());
+    std::fs::write(&entry, source).expect("the skin is written");
+    let mut host = MapHost::new();
+    host.now_us = SHARED_NOW_US;
+    let user = SkinUserConfig::default();
+    let load = SkinLoadOptions { rng_seed: Some(TEST_SEED), ..SkinLoadOptions::new(scratch.path(), &user, Mode::BEAT_7K) };
+    let skin = load_lua_skin(&entry, &LuaSkinOptions::new(load), &host).expect("the skin loads");
+    let runtime = skin.runtime().expect("a Lua skin has an interpreter");
+    let animated = skin.def.image[0].timer.as_ref().and_then(PropertyRef::timer).expect("the image animates on a timer");
+    assert_eq!(skin.destinations[0].track.timer, Some(animated), "the objects and their image name one function, which is one entry");
+    assert_eq!(skin.destinations[1].track.timer, Some(animated));
+    assert!(matches!(animated, TimerRef::Lua(_)));
+
+    let timers = TimerState::new();
+    let called = |runtime: &SkinLua, host: &MapHost| eval::<(i64, i64, i64)>(runtime, host, "return called.shared, called.gate, called.behind");
+    let frame_of = |host: &MapHost| {
+        runtime
+            .frame(host, |frame| {
+                let placed: Vec<Option<f32>> = skin
+                    .destinations
+                    .iter()
+                    .map(|named| {
+                        let placed = prepare(&named.track, host.now_us, &timers, host, Some(frame), (0.0, 0.0), None);
+                        animated.value_us(&timers, Some(frame));
+                        placed.map(|resolved| resolved.rect.x)
+                    })
+                    .collect();
+                placed
+            })
+            .expect("the frame binds")
+    };
+
+    assert_eq!(called(runtime, &host), (0, 0, 0), "nothing is called before the first frame");
+    assert_eq!(frame_of(&host), [Some(SHARED_X), Some(SHARED_X), None], "both objects are placed by the one answer, and the gated one is left out");
+    assert_eq!(called(runtime, &host), (1, 1, 0), "five reads of the shared timer made one call, and the timer behind the failed condition none");
+    assert_eq!((runtime.frame_cost().calls, runtime.frame_cost().reused), (2, 4));
+
+    host.booleans.insert(GATE_OPTION, true);
+    assert_eq!(frame_of(&host), [Some(SHARED_X), Some(SHARED_X), Some(0.0)]);
+    assert_eq!(called(runtime, &host), (2, 2, 1), "each function is called once more on the next frame, the gated timer now among them");
+    assert!(runtime.diagnostics().function_failures.is_empty(), "{:?}", runtime.diagnostics().function_failures);
 }

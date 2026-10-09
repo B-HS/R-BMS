@@ -357,4 +357,19 @@ impl Meter {
     pub fn frames_over_budget(&self) -> u64 {
         self.account.frames_over_budget.get()
     }
+
+    /// Calls the running frame has made so far, or the last frame made once it is over. A call the
+    /// meter refused is not one of them.
+    pub fn frame_calls(&self) -> u32 {
+        self.account.calls.get()
+    }
+
+    /// Wall clock the calls of the running frame have spent inside Lua so far, or those of the last
+    /// frame once it is over. It stops at the frame's allowance, which is where the calls stop too.
+    pub fn frame_spent(&self) -> Duration {
+        if self.account.calls.get() == 0 {
+            return Duration::ZERO;
+        }
+        Duration::from_micros(self.budget.frame.max_micros).saturating_sub(self.account.frame_time_left.get())
+    }
 }

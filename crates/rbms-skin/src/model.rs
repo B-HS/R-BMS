@@ -112,12 +112,16 @@ impl PropertyRef {
 
     /// The timer this names, when it is one an animation can follow: a timer id or a function.
     ///
+    /// A negative id names no timer at all (`TimerPropertyFactory.getTimerProperty`), so whatever
+    /// carries one animates on the scene clock, exactly as though the field had been left out. Zero
+    /// is an id like any other.
+    ///
     /// The reference has no timer names (`LuaSkinLoader` passes no name lookup for
     /// `TimerProperty`), so text in a timer field is source. Source the loader has not compiled into
     /// a function names no timer here.
     pub fn timer(&self) -> Option<TimerRef> {
         match self {
-            Self::Id(id) => Some(TimerRef::Id(TimerId(*id))),
+            Self::Id(id) => (*id >= 0).then_some(TimerRef::Id(TimerId(*id))),
             Self::Func(function) => Some(TimerRef::Lua(*function)),
             Self::Name(_) | Self::Expr(_) => None,
         }

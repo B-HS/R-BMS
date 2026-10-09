@@ -1,0 +1,453 @@
+//! What one frame of a skin is drawn from.
+//!
+//! A document addresses most of the running game by property id, and [`SkinFrame::state`] answers
+//! those. What an id cannot carry travels in [`FrameData`]: the note field, the song bars, the
+//! series a graph plots and the images a document only refers to. Each of those is a capability a
+//! frame may or may not have rather than a kind of screen, so every part is filled on its own and a
+//! part left empty leaves the objects that read it undrawn. That is what lets a gauge be drawn on a
+//! score screen and a tempo graph on the browser: the screen fills the part, and the object asks
+//! for nothing else.
+//!
+//! The shape of each part belongs to the module that draws from it -- [`NoteField`] to the note
+//! field, [`SongBars`] to the wheel, each series to its graph -- and this module only gathers them.
+//!
+//! A frame is made in two stages, as the reference makes one (`Skin.drawAllObjects`). The first
+//! prepares every object in the order the document declared them: its draw conditions, its timer,
+//! where it sits, and the values it shows. Only when the last object has been prepared does the
+//! second stage draw the ones the first left standing, in the same order. A skin's Lua is asked in
+//! the first stage alone, which is what lets a skin hang per-frame work on a `draw` function and
+//! rely on every such function having run before anything reaches the screen. What it answered is
+//! kept in a [`PreparedFrame`] and read back from there while drawing, so the second stage needs no
+//! interpreter at all and can run after the host has been unbound from it.
+
+use std::cell::{Cell, RefCell};
+use std::ops::Range;
+
+use rbms_skin::dst::{LuaDrawEval, LuaFnId, Resolved, WarnOnce};
+use rbms_skin::property::SkinHost;
+use rbms_skin::timer::{TIMER_OFF, TimerState};
+
+use super::bga::BgaFrame;
+use super::gauge::GaugeFrame;
+use super::graphs::{BpmTimeline, GaugeHistory, NoteDistribution, RecentHits, TimingHistogram};
+use super::notes::NoteField;
+use super::object::SkinObject;
+use super::refs::ReferenceImages;
+use super::songlist::SongBars;
+use super::{SkinViewport, draw};
+use crate::Renderer;
+use crate::ctx::RenderCtx;
+
+/// The series a frame carries for the objects that plot a run or a chart rather than one number.
+///
+/// Every one is optional and independent of the others, and none belongs to a screen: whichever
+/// screen knows a series fills it.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct FrameSeries<'a> {
+    /// The gauge at each sample of a run, for the gauge graph.
+    pub gauge_history: Option<GaugeHistory<'a>>,
+    /// How a run's hits were spread around their notes, for the timing distribution graph.
+    pub timing: Option<TimingHistogram<'a>>,
+    /// Where a chart's tempo changes, for the tempo graph.
+    pub bpm: Option<BpmTimeline<'a>>,
+    /// How a chart's notes are spread, for the judgement graph.
+    pub notes: Option<NoteDistribution<'a>>,
+    /// The hits a run has taken most recently, for the two visualisers.
+    pub recent_hits: Option<RecentHits<'a>>,
+}
+
+/// Everything a frame carries beside its scalar property source.
+///
+/// [`FrameData::default`] carries nothing at all, which is what a screen that draws only scalar
+/// objects passes; a screen with more to say fills the parts it has and leaves the rest.
+#[derive(Default, Clone, Copy)]
+pub struct FrameData<'a> {
+    /// The running note field, for the note object and the lane covers.
+    pub field: Option<&'a NoteField<'a>>,
+    /// Which gauge is in play and where it clears, for the gauge object.
+    pub gauge: Option<GaugeFrame>,
+    /// The browser's bars, for the song wheel.
+    pub bars: Option<&'a SongBars<'a>>,
+    pub series: FrameSeries<'a>,
+    /// The images a document refers to rather than ships.
+    pub images: ReferenceImages,
+    /// What the `bga` object shows this frame.
+    pub bga: BgaFrame,
+}
+
+impl std::fmt::Debug for FrameData<'_> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("FrameData")
+            .field("field", &self.field.is_some())
+            .field("gauge", &self.gauge)
+            .field("bars", &self.bars.is_some())
+            .field("series", &self.series)
+            .field("images", &self.images)
+            .field("bga", &self.bga)
+            .finish()
+    }
+}
+
+/// Everything one frame of a skin needs from the running game.
+pub struct SkinFrame<'a> {
+    /// The clock the frame is drawn against, in microseconds, the same one every timer is measured
+    /// on.
+    pub now_us: i64,
+    pub timers: &'a TimerState,
+    pub state: &'a dyn SkinHost,
+    /// The skin's Lua bound to this frame, when the skin has an interpreter. It is asked while the
+    /// frame is prepared and never while it is drawn, so a frame handed to the draw stage alone may
+    /// leave it out.
+    pub lua: Option<&'a dyn LuaDrawEval>,
+    /// Where the pointer is in document coordinates, for the objects a document gated on it.
+    pub mouse: Option<(f32, f32)>,
+    /// The state a property id cannot carry: bars, series, lane geometry and images. A screen with
+    /// nothing of the kind to say passes [`FrameData::default`].
+    pub data: FrameData<'a>,
+}
+
+impl<'a> SkinFrame<'a> {
+    /// The evaluator as destination gating and timers ask for it.
+    pub(crate) fn script(&self) -> Option<&'a dyn LuaDrawEval> {
+        self.lua
+    }
+
+    /// The same frame with `lua` answering in place of its own evaluator, which is how each stage is
+    /// handed the evaluator that belongs to it.
+    fn staged<'b>(&self, lua: Option<&'b dyn LuaDrawEval>) -> SkinFrame<'b>
+    where
+        'a: 'b,
+    {
+        SkinFrame { now_us: self.now_us, timers: self.timers, state: self.state, lua, mouse: self.mouse, data: self.data }
+    }
+}
+
+impl std::fmt::Debug for SkinFrame<'_> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("SkinFrame").field("now_us", &self.now_us).field("mouse", &self.mouse).finish_non_exhaustive()
+    }
+}
+
+/// What an object asked the skin's Lua for while it was prepared.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Asked {
+    /// A function value the skin handed over.
+    Function(LuaFnId),
+    /// A property the skin named rather than numbered.
+    Name(String),
+}
+
+/// What the skin's Lua answered, in the type it was asked for.
+#[derive(Debug, Clone, PartialEq)]
+enum Answer {
+    Boolean(bool),
+    Integer(i32),
+    Float(f32),
+    Text(String),
+    /// The microsecond a timer switched on, or [`TIMER_OFF`].
+    Timer(i64),
+}
+
+/// One question the prepare stage put to the skin's Lua and the answer it got.
+#[derive(Debug, Clone, PartialEq)]
+struct Kept {
+    asked: Asked,
+    answer: Answer,
+}
+
+/// The evaluator of the prepare stage: every question goes to the interpreter, and the answer is
+/// kept so the draw stage can read it back without asking again.
+///
+/// Nothing is shared between two questions here: each goes to the interpreter's frame and each
+/// answer is kept for the object that asked. A condition or a value two objects name is called once
+/// for each, as the reference calls it, because a skin may count on being called that often. A timer
+/// two objects name is the one thing the interpreter's frame calls only once (`BoundFrame::timer` in
+/// `rbms_skin::lua`); both objects are still given its answer.
+struct Recorder<'a> {
+    live: &'a dyn LuaDrawEval,
+    kept: RefCell<Vec<Kept>>,
+}
+
+impl<'a> Recorder<'a> {
+    fn new(live: &'a dyn LuaDrawEval) -> Recorder<'a> {
+        Recorder { live, kept: RefCell::new(Vec::new()) }
+    }
+
+    /// How many answers have been kept so far, which is where the next object's answers begin.
+    fn mark(&self) -> usize {
+        self.kept.borrow().len()
+    }
+
+    fn keep(&self, asked: Asked, answer: Answer) {
+        self.kept.borrow_mut().push(Kept { asked, answer });
+    }
+
+    /// Every answer kept, in the order the questions were asked.
+    fn finish(self) -> Vec<Kept> {
+        self.kept.into_inner()
+    }
+}
+
+impl LuaDrawEval for Recorder<'_> {
+    fn call_boolean(&self, function: LuaFnId) -> bool {
+        let answer = self.live.call_boolean(function);
+        self.keep(Asked::Function(function), Answer::Boolean(answer));
+        answer
+    }
+
+    fn call_integer(&self, function: LuaFnId) -> i32 {
+        let answer = self.live.call_integer(function);
+        self.keep(Asked::Function(function), Answer::Integer(answer));
+        answer
+    }
+
+    fn call_float(&self, function: LuaFnId) -> f32 {
+        let answer = self.live.call_float(function);
+        self.keep(Asked::Function(function), Answer::Float(answer));
+        answer
+    }
+
+    fn call_text(&self, function: LuaFnId) -> String {
+        let answer = self.live.call_text(function);
+        self.keep(Asked::Function(function), Answer::Text(answer.clone()));
+        answer
+    }
+
+    fn call_timer(&self, function: LuaFnId) -> i64 {
+        let answer = self.live.call_timer(function);
+        self.keep(Asked::Function(function), Answer::Timer(answer));
+        answer
+    }
+
+    fn named_boolean(&self, name: &str) -> bool {
+        let answer = self.live.named_boolean(name);
+        self.keep(Asked::Name(name.to_owned()), Answer::Boolean(answer));
+        answer
+    }
+
+    fn named_integer(&self, name: &str) -> i32 {
+        let answer = self.live.named_integer(name);
+        self.keep(Asked::Name(name.to_owned()), Answer::Integer(answer));
+        answer
+    }
+
+    fn named_float(&self, name: &str) -> f32 {
+        let answer = self.live.named_float(name);
+        self.keep(Asked::Name(name.to_owned()), Answer::Float(answer));
+        answer
+    }
+
+    fn named_text(&self, name: &str) -> String {
+        let answer = self.live.named_text(name);
+        self.keep(Asked::Name(name.to_owned()), Answer::Text(answer.clone()));
+        answer
+    }
+}
+
+/// What the prepare stage settled about one frame of one screen: which of its objects are drawn and
+/// where, and everything the skin's Lua answered along the way.
+///
+/// It belongs to the screen and the frame it was prepared from. Drawing another screen with it
+/// draws nothing that screen did not prepare.
+#[derive(Debug, Clone, Default)]
+pub struct PreparedFrame {
+    /// One entry per object of the screen, in document order: where it is drawn, or `None` when its
+    /// conditions, its timer or its own value left it out of the frame.
+    placed: Vec<Option<Resolved>>,
+    /// Which of [`Self::kept`] each object asked for, by the same index.
+    asked_by: Vec<Range<usize>>,
+    kept: Vec<Kept>,
+    /// Whether the frame was prepared with an interpreter to ask.
+    scripted: bool,
+}
+
+impl PreparedFrame {
+    /// How many objects were prepared, which is every object of the screen.
+    pub fn object_count(&self) -> usize {
+        self.placed.len()
+    }
+
+    /// How many objects the prepare stage left to be drawn. An object counted here may still put
+    /// nothing on screen: one with no source for this frame, or one faded to nothing.
+    pub fn visible_count(&self) -> usize {
+        self.placed.iter().filter(|placed| placed.is_some()).count()
+    }
+
+    /// How many answers the skin's Lua gave while the frame was prepared.
+    pub fn answer_count(&self) -> usize {
+        self.kept.len()
+    }
+}
+
+/// Fires once when the draw stage asks for something the prepare stage never did.
+static UNPREPARED_READ: WarnOnce = WarnOnce::new();
+
+/// The evaluator of the draw stage: it answers from what the prepare stage kept and never reaches
+/// the interpreter.
+///
+/// An object is answered from its own questions only. When it asked the same one more than once the
+/// last answer stands, which is the state the reference's object is left in when its `prepare`
+/// returns. A question the object never asked while it was prepared reads as the fallback of its
+/// type and is counted, because it means an object's prepare and its draw have drifted apart.
+struct Replay<'a> {
+    prepared: &'a PreparedFrame,
+    /// The object being drawn.
+    object: Cell<usize>,
+    unprepared: Cell<usize>,
+}
+
+impl<'a> Replay<'a> {
+    fn new(prepared: &'a PreparedFrame) -> Replay<'a> {
+        Replay { prepared, object: Cell::new(0), unprepared: Cell::new(0) }
+    }
+
+    /// Moves on to the object at `index`, whose answers the next questions are read from.
+    fn enter(&self, index: usize) {
+        self.object.set(index);
+    }
+
+    /// How many questions had no answer kept for them.
+    fn unprepared(&self) -> usize {
+        self.unprepared.get()
+    }
+
+    /// The last answer the object being drawn was given to a question `matches` recognises.
+    fn recall<T>(&self, matches: impl Fn(&Kept) -> Option<T>) -> Option<T> {
+        let own = self.prepared.asked_by.get(self.object.get()).cloned().unwrap_or_default();
+        let found = self.prepared.kept.get(own).and_then(|kept| kept.iter().rev().find_map(matches));
+        if found.is_none() {
+            self.unprepared.set(self.unprepared.get() + 1);
+        }
+        found
+    }
+
+    /// The last answer `function` gave the object being drawn, read with `read`.
+    fn function<T>(&self, function: LuaFnId, read: impl Fn(&Answer) -> Option<T>) -> Option<T> {
+        self.recall(|kept| if kept.asked == Asked::Function(function) { read(&kept.answer) } else { None })
+    }
+
+    /// The last answer the property called `name` gave the object being drawn, read with `read`.
+    fn name<T>(&self, name: &str, read: impl Fn(&Answer) -> Option<T>) -> Option<T> {
+        self.recall(|kept| match &kept.asked {
+            Asked::Name(asked) if asked == name => read(&kept.answer),
+            _ => None,
+        })
+    }
+}
+
+/// An answer read as a condition, when it was asked as one.
+fn as_boolean(answer: &Answer) -> Option<bool> {
+    if let Answer::Boolean(value) = answer { Some(*value) } else { None }
+}
+
+/// An answer read as a whole number, when it was asked as one.
+fn as_integer(answer: &Answer) -> Option<i32> {
+    if let Answer::Integer(value) = answer { Some(*value) } else { None }
+}
+
+/// An answer read as a number, when it was asked as one.
+fn as_float(answer: &Answer) -> Option<f32> {
+    if let Answer::Float(value) = answer { Some(*value) } else { None }
+}
+
+/// An answer read as text, when it was asked as text.
+fn as_text(answer: &Answer) -> Option<String> {
+    if let Answer::Text(value) = answer { Some(value.clone()) } else { None }
+}
+
+/// An answer read as a timer, when it was asked as one.
+fn as_timer(answer: &Answer) -> Option<i64> {
+    if let Answer::Timer(value) = answer { Some(*value) } else { None }
+}
+
+impl LuaDrawEval for Replay<'_> {
+    fn call_boolean(&self, function: LuaFnId) -> bool {
+        self.function(function, as_boolean).unwrap_or_default()
+    }
+
+    fn call_integer(&self, function: LuaFnId) -> i32 {
+        self.function(function, as_integer).unwrap_or_default()
+    }
+
+    fn call_float(&self, function: LuaFnId) -> f32 {
+        self.function(function, as_float).unwrap_or_default()
+    }
+
+    fn call_text(&self, function: LuaFnId) -> String {
+        self.function(function, as_text).unwrap_or_default()
+    }
+
+    fn call_timer(&self, function: LuaFnId) -> i64 {
+        self.function(function, as_timer).unwrap_or(TIMER_OFF)
+    }
+
+    fn named_boolean(&self, name: &str) -> bool {
+        self.name(name, as_boolean).unwrap_or_default()
+    }
+
+    fn named_integer(&self, name: &str) -> i32 {
+        self.name(name, as_integer).unwrap_or_default()
+    }
+
+    fn named_float(&self, name: &str) -> f32 {
+        self.name(name, as_float).unwrap_or_default()
+    }
+
+    fn named_text(&self, name: &str) -> String {
+        self.name(name, as_text).unwrap_or_default()
+    }
+}
+
+/// The first stage of a frame: prepares every object, in document order, before anything is drawn.
+///
+/// `frame.lua` is the interpreter the skin was loaded into, bound to the host for this frame. It is
+/// asked here and nowhere after; with none, a function value reads as its fallback, exactly as it
+/// did when a frame was a single pass.
+pub(crate) fn prepare_objects(objects: &[SkinObject], frame: &SkinFrame<'_>) -> PreparedFrame {
+    let recorder = frame.lua.map(Recorder::new);
+    let mark = || recorder.as_ref().map_or(0, Recorder::mark);
+    let staged = frame.staged(recorder.as_ref().map(|recorder| recorder as &dyn LuaDrawEval));
+
+    let mut placed = Vec::with_capacity(objects.len());
+    let mut asked_by = Vec::with_capacity(objects.len());
+    for object in objects {
+        let first = mark();
+        placed.push(object.prepare(&staged));
+        asked_by.push(first..mark());
+    }
+    let scripted = recorder.is_some();
+    PreparedFrame { placed, asked_by, kept: recorder.map(Recorder::finish).unwrap_or_default(), scripted }
+}
+
+/// The second stage of a frame: draws what [`prepare_objects`] left standing, in the same order, and
+/// answers how many objects reached the screen.
+///
+/// `frame.lua` is not consulted. Whatever an object reads from the skin's Lua while it draws comes
+/// out of `prepared`, so this may run with the interpreter no longer bound to anything.
+pub(crate) fn draw_objects<R: Renderer>(
+    ctx: &mut RenderCtx<'_>,
+    r: &mut R,
+    objects: &[SkinObject],
+    viewport: &SkinViewport,
+    frame: &SkinFrame<'_>,
+    prepared: &PreparedFrame,
+) -> usize {
+    let replay = Replay::new(prepared);
+    let staged = frame.staged(prepared.scripted.then_some(&replay as &dyn LuaDrawEval));
+
+    let mut drawn = 0;
+    for (index, (object, placed)) in objects.iter().zip(&prepared.placed).enumerate() {
+        let Some(resolved) = placed else {
+            continue;
+        };
+        replay.enter(index);
+        if draw::draw_resolved(ctx, r, object, viewport, &staged, resolved) {
+            drawn += 1;
+        }
+    }
+    if replay.unprepared() > 0 && UNPREPARED_READ.should_warn() {
+        eprintln!("a skin object read {} values while drawing that it had not read while being prepared; those read as their fallbacks", replay.unprepared());
+    }
+    drawn
+}

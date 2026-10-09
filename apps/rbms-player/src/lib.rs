@@ -84,6 +84,7 @@ mod practice;
 mod scoredb_store;
 mod settings_ui;
 mod settings_view;
+pub mod skin_host;
 mod skin_screen;
 mod skin_select;
 mod stage;
@@ -606,6 +607,8 @@ struct AppShared {
     /// The wall clock the audio fallback and the timing probe read, restarted when a run begins. The
     /// skin does not read it: that is [`AppShared::scene_started`].
     clock: Instant,
+    /// When the application started, which is what the skin's boot-time numbers count from.
+    booted: Instant,
     /// When the running scene began, which is what the skin clock counts from.
     scene_started: Instant,
     anchor_us: i64,
@@ -827,6 +830,7 @@ impl App {
                 profile_submit_rx: None,
                 ir_status: IrStatus::Off,
                 clock: Instant::now(),
+                booted: Instant::now(),
                 scene_started: Instant::now(),
                 anchor_us: 0,
                 audio_dead_at: std::cell::Cell::new(None),

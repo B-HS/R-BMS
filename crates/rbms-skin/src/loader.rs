@@ -52,10 +52,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::SkinError;
-use crate::dst::{DestinationTrack, OffsetSource, SkinOffset};
+use crate::dst::{DestinationTrack, DrawCondition, OffsetSource, SkinOffset};
 use crate::model::{Category, DEFAULT_SKIN_HEIGHT, DEFAULT_SKIN_WIDTH, Destination, Filepath, OffsetDef, PropertyDef, SKIN_TYPE_UNSET, SkinDef};
 use crate::property::generated::{OFFSET_ALL, OFFSET_JUDGE_1P, OFFSET_JUDGEDETAIL_1P, OFFSET_NOTES_1P};
-use crate::property::{DefaultState, SkinHost};
+use crate::property::{DefaultState, NameSpace, SkinHost, id_of_name};
 use crate::resolve::{CustomFile, Draw, FileResolver, build_filemap, contained, enumerate_custom_files, pattern_for};
 
 /// Bytes a document may be before the loader refuses to parse it.
@@ -145,14 +145,6 @@ impl OffsetSource for SkinUserConfig {
     }
 }
 
-/// The predicate a caller with no property registry passes.
-///
-/// Every id is treated as one the state source will answer for, so no draw condition is dropped;
-/// once the registry exists, pass its own membership test instead.
-pub fn every_option_known(_id: i32) -> bool {
-    true
-}
-
 /// How one load is to be performed.
 #[derive(Debug, Clone, Copy)]
 pub struct SkinLoadOptions<'a> {
@@ -167,8 +159,6 @@ pub struct SkinLoadOptions<'a> {
     pub mode: Mode,
     /// The document size ceiling.
     pub max_document_bytes: u64,
-    /// Whether an option id is one this build implements.
-    pub known_option: fn(i32) -> bool,
     /// Where a skin's file writes go. A skin never writes into its own folder: with a directory here
     /// its writes land there and are read back from there, and with `None` every write fails. Only
     /// Lua writes files, so this matters to a Lua skin and to a document whose scripts do.
@@ -178,7 +168,7 @@ pub struct SkinLoadOptions<'a> {
 impl<'a> SkinLoadOptions<'a> {
     /// Options with the defaults every caller but a test wants.
     pub fn new(root: &'a Path, user: &'a SkinUserConfig, mode: Mode) -> Self {
-        Self { root, user, rng_seed: None, mode, max_document_bytes: DEFAULT_MAX_DOCUMENT_BYTES, known_option: every_option_known, write_overlay: None }
+        Self { root, user, rng_seed: None, mode, max_document_bytes: DEFAULT_MAX_DOCUMENT_BYTES, write_overlay: None }
     }
 }
 
@@ -485,16 +475,16 @@ pub struct LoadedSkin {
     pub selected_options: Vec<(String, i32)>,
     /// The option ids the player's choices turn on.
     pub enabled_options: BTreeSet<i32>,
-    /// Every option id this document declares, on or off. A condition naming one of these is
-    /// settled while the track is built rather than every frame, because the answer cannot change
-    /// while the document is loaded: an object whose condition fails is dropped outright and one
-    /// whose condition holds keeps no condition at all (`Skin.prepare`).
+    /// Every option id this document declares, on or off.
     pub declared_options: BTreeSet<i32>,
     /// Image source id to the file it resolved to.
     pub sources: BTreeMap<String, PathBuf>,
     /// Font id to the file it resolved to.
     pub fonts: BTreeMap<String, PathBuf>,
-    /// The document's top-level destinations, assembled.
+    /// The document's top-level destinations, assembled, less the ones preparing the skin removed
+    /// (`Skin.prepare`): an object asking for one of the skin's own options that its customisation
+    /// rows do not grant, and an object one of whose conditions is settled once on this screen and
+    /// came out false. The objects that stay carry only the conditions a frame still has to ask.
     pub destinations: Vec<NamedTrack>,
     /// The destinations its repeating objects nest, assembled alongside the top-level ones.
     pub nested: NestedTracks,
@@ -502,7 +492,7 @@ pub struct LoadedSkin {
     pub warnings: Vec<String>,
     filemap: BTreeMap<String, String>,
     resolver: Rc<RefCell<FileResolver>>,
-    known_option: fn(i32) -> bool,
+    option_selections: BTreeMap<i32, bool>,
     #[cfg(feature = "lua")]
     runtime: Option<crate::lua::SkinLua>,
 }
@@ -543,7 +533,8 @@ impl LoadedSkin {
     }
 
     /// Assembles one destination into a track, or `None` when this document's own customisation
-    /// choices mean it is never drawn.
+    /// choices mean it is never drawn: it asks for one of the skin's own options, and the rows that
+    /// offer those do not grant it.
     ///
     /// `relative` is the flag the play screen sets on judge-count objects and nothing else, which
     /// is where the reference sets it too (`JsonPlaySkinObjectLoader`).
@@ -551,11 +542,13 @@ impl LoadedSkin {
     /// A destination handed in from outside may still carry a script as the string a document wrote
     /// it as; it is compiled into this skin's interpreter first, as the loader does for the skin's
     /// own. No host is bound here, so a timer script that reads game state in its one trial call
-    /// costs the destination its timer.
+    /// costs the destination its timer, and a condition that holds still on the screen being shown
+    /// is left for every frame to ask rather than settled once.
     pub fn build_track(&mut self, destination: &Destination, relative: bool) -> Result<Option<DestinationTrack>, SkinError> {
         let mut destination = destination.clone();
         self.settle(&mut destination)?;
-        self.assemble_track(&destination, relative)
+        let built = self.assemble_track(&destination, relative)?;
+        Ok(options_hold(&built.options, &self.option_selections).then_some(built.track))
     }
 
     /// Compiles the scripts one destination still carries as strings.
@@ -576,18 +569,65 @@ impl LoadedSkin {
     }
 
     /// Assembles a destination whose scripts are already settled.
-    fn assemble_track(&mut self, destination: &Destination, relative: bool) -> Result<Option<DestinationTrack>, SkinError> {
+    fn assemble_track(&mut self, destination: &Destination, relative: bool) -> Result<track::BuiltTrack, SkinError> {
         let path = self.path.to_string_lossy().into_owned();
-        let mut context = track::TrackContext {
-            known_option: self.known_option,
-            declared_options: &self.declared_options,
-            enabled_options: &self.enabled_options,
-            path: &path,
-            relative,
-            warnings: &mut self.warnings,
-        };
+        let mut context = track::TrackContext { path: &path, relative, warnings: &mut self.warnings };
         track::build_track(destination, &mut context)
     }
+}
+
+/// Whether the skin's own options leave an object in the draw list (`Skin.prepare`).
+///
+/// `options` are the ids of the object's `op` list no built-in property answers. A positive one must
+/// be an id a customisation row offers and is switched to. A negative one must name an id a row
+/// offers and is switched away from. An id no row offers is neither, so it removes the object
+/// whichever sign the skin wrote it with.
+fn options_hold(options: &[i32], selections: &BTreeMap<i32, bool>) -> bool {
+    options.iter().all(|option| if *option > 0 { selections.get(option) == Some(&true) } else { selections.get(&option.wrapping_neg()) == Some(&false) })
+}
+
+/// Settles the conditions of one object that hold still on the screen being entered, and answers
+/// whether the object stays in the draw list (`Skin.prepare`).
+///
+/// A built-in option the host calls static is asked once, here: a false answer removes the object
+/// for as long as the skin is loaded, and a true one removes only the condition, so no frame asks
+/// again. A property the skin named is the same property as its id and is settled the same way. A
+/// function is never static. Every condition is looked at, whatever the ones before it answered.
+///
+/// The reference has an answer for every option it calls static. A host that has none yet for one
+/// of them settles nothing: the condition stays, and each frame asks as it would have.
+fn settle_static(track: &mut DestinationTrack, host: &dyn SkinHost) -> bool {
+    let mut stays = true;
+    track.draw_conditions.retain(|condition| {
+        let id = match condition {
+            DrawCondition::Option(id) => Some(*id),
+            DrawCondition::Name(name) => id_of_name(NameSpace::Boolean, name),
+            DrawCondition::Function(_) => None,
+        };
+        let Some(holds) = id.filter(|id| host.is_static(*id)).and_then(|id| host.boolean(id)) else {
+            return true;
+        };
+        stays &= holds;
+        false
+    });
+    stays
+}
+
+/// Removes the objects that are certain never to be drawn and strips the conditions that are
+/// certain always to hold, once, after everything is built (`Skin.prepare`).
+///
+/// Only the top-level objects pass through here, as in the reference, whose `prepare` walks the
+/// skin's own object list and none of the objects nested inside a note field, a judgement pop-up or
+/// a song wheel.
+fn prepare_objects(objects: Vec<(String, track::BuiltTrack)>, selections: &BTreeMap<i32, bool>, host: &dyn SkinHost) -> Vec<NamedTrack> {
+    objects
+        .into_iter()
+        .filter_map(|(id, built)| {
+            let mut track = built.track;
+            let stays = options_hold(&built.options, selections) && settle_static(&mut track, host);
+            stays.then_some(NamedTrack { id, track })
+        })
+        .collect()
 }
 
 /// Assembles one nested destination, falling back to a track that never draws.
@@ -597,10 +637,13 @@ impl LoadedSkin {
 /// entry is the slot it belongs to -- judgement number, wheel row, bar line -- so dropping one would
 /// move every slot behind it. An empty track resolves to nothing, which is what a slot that is not
 /// there should look like.
+///
+/// A slot's conditions are never settled once, because the reference never prepares a nested object:
+/// each of them is asked on every frame the slot is drawn.
 fn build_slot(skin: &mut LoadedSkin, what: &str, destination: &Destination, relative: bool) -> Result<NamedTrack, SkinError> {
     let track = match skin.assemble_track(destination, relative) {
-        Ok(Some(track)) => track,
-        Ok(None) => DestinationTrack::default(),
+        Ok(built) if options_hold(&built.options, &skin.option_selections) => built.track,
+        Ok(_) => DestinationTrack::default(),
         Err(error @ SkinError::LuaUnavailable) => return Err(error),
         Err(error) => {
             skin.warnings.push(format!("{what} {:?} was skipped: {error}", destination.id));
@@ -749,6 +792,8 @@ pub(crate) struct MergedHeader {
     pub options: Vec<(String, i32)>,
     /// Every option id the rows can turn on.
     pub declared: BTreeSet<i32>,
+    /// The skin's own options as the reference keeps them ([`option_selections`]).
+    pub selections: BTreeMap<i32, bool>,
     /// The declared offsets followed by the automatic ones.
     pub offsets: Vec<OffsetDef>,
     pub custom_files: Vec<CustomFile>,
@@ -778,6 +823,15 @@ fn header_offsets(skin_type: i32, declared: &[OffsetDef]) -> Vec<OffsetDef> {
     declared.iter().cloned().chain(automatic_offsets(skin_type)).collect()
 }
 
+/// The skin's own options as `Skin.option` holds them: every id a customisation row offers, and
+/// whether that row is switched to it (`JSONSkinLoader.loadJsonSkin`).
+///
+/// `selected` is the option each row is on, row for row. The rows are entered in order, so an id two
+/// rows offer reads the way the later row has it.
+fn option_selections(properties: &[PropertyDef], selected: &[(String, i32)]) -> BTreeMap<i32, bool> {
+    properties.iter().zip(selected).flat_map(|(row, (_, chosen))| row.item.iter().map(move |item| (item.op, item.op == *chosen))).collect()
+}
+
 /// Applies the player's choices to a header.
 ///
 /// `directory` is the folder the skin's paths are written against and `root` the folder nothing may
@@ -790,6 +844,7 @@ pub(crate) fn merge_header(rows: &HeaderRows<'_>, directory: &Path, root: &Path,
     let custom_files = enumerate_custom_files(&slots, directory, root);
     let filemap = build_filemap(&custom_files, options.user, &mut draw);
     MergedHeader {
+        selections: option_selections(rows.properties, &selected),
         options: selected,
         declared: declared_options(rows.properties),
         offsets: header_offsets(rows.skin_type, rows.offsets),
@@ -848,13 +903,16 @@ pub(crate) struct Assembly {
     pub mode: Mode,
     pub merged: MergedHeader,
     pub warnings: Vec<String>,
-    pub known_option: fn(i32) -> bool,
     #[cfg(feature = "lua")]
     pub runtime: Option<crate::lua::SkinLua>,
 }
 
-/// Resolves the files a skin names and assembles its destinations (`JSONSkinLoader.loadJsonSkin`).
-pub(crate) fn assemble(parts: Assembly) -> Result<LoadedSkin, SkinError> {
+/// Resolves the files a skin names, assembles its destinations (`JSONSkinLoader.loadJsonSkin`) and
+/// then prepares the result for the screen being entered (`Skin.prepare`).
+///
+/// `host` is that screen. It is asked once, after everything is built, for each condition it says
+/// holds still there, so its state has to be settled before a skin is loaded against it.
+pub(crate) fn assemble(parts: Assembly, host: &dyn SkinHost) -> Result<LoadedSkin, SkinError> {
     let mut skin = LoadedSkin {
         resolution: skin_resolution(parts.def.w, parts.def.h),
         play: PlayTimings::of(&parts.def),
@@ -874,7 +932,7 @@ pub(crate) fn assemble(parts: Assembly) -> Result<LoadedSkin, SkinError> {
         warnings: parts.warnings,
         filemap: parts.merged.filemap,
         resolver: parts.merged.resolver,
-        known_option: parts.known_option,
+        option_selections: parts.merged.selections,
         #[cfg(feature = "lua")]
         runtime: parts.runtime,
         def: parts.def,
@@ -901,10 +959,10 @@ pub(crate) fn assemble(parts: Assembly) -> Result<LoadedSkin, SkinError> {
     }
 
     let destinations = std::mem::take(&mut skin.def.destination);
+    let mut objects = Vec::with_capacity(destinations.len());
     for destination in &destinations {
         match skin.assemble_track(destination, false) {
-            Ok(Some(track)) => skin.destinations.push(NamedTrack { id: destination.id.clone(), track }),
-            Ok(None) => {}
+            Ok(built) => objects.push((destination.id.clone(), built)),
             Err(error @ SkinError::LuaUnavailable) => return Err(error),
             Err(error) => skin.warnings.push(format!("object {:?} was skipped: {error}", destination.id)),
         }
@@ -912,6 +970,8 @@ pub(crate) fn assemble(parts: Assembly) -> Result<LoadedSkin, SkinError> {
     skin.def.destination = destinations;
 
     build_nested(&mut skin)?;
+
+    skin.destinations = prepare_objects(objects, &skin.option_selections, host);
 
     Ok(skin)
 }
@@ -980,8 +1040,11 @@ pub fn load_skin(path: &Path, options: SkinLoadOptions<'_>) -> Result<LoadedSkin
 ///
 /// A `.luaskin` is run as a program ([`lua_skin::load_lua_skin`]) and anything else is parsed as a
 /// document. `host` answers whatever the skin's Lua reads while it loads: the whole body pass of a
-/// Lua skin, and the one trial call a timer script gets in either kind. The state of the screen
-/// being entered therefore has to be settled before this is called.
+/// Lua skin, and the one trial call a timer script gets in either kind. It is also asked, once the
+/// skin is assembled, for every draw condition it calls static ([`SkinHost::is_static`]): an object
+/// whose static condition is false is removed for as long as the skin stays loaded, and a static
+/// condition that holds is never asked again (`Skin.prepare`). The state of the screen being entered
+/// therefore has to be settled before this is called.
 ///
 /// The skin's type is checked before any of it is assembled: a skin that declares none is refused
 /// rather than guessed at, and so is one that declares a type the reference does not have. Whether
@@ -1069,16 +1132,18 @@ fn load_document(path: &Path, options: SkinLoadOptions<'_>, host: &dyn SkinHost)
     #[cfg(not(feature = "lua"))]
     refuse_scripts(&mut def, host)?;
 
-    assemble(Assembly {
-        def,
-        path,
-        root: options.root.to_path_buf(),
-        parser,
-        mode: options.mode,
-        merged,
-        warnings,
-        known_option: options.known_option,
-        #[cfg(feature = "lua")]
-        runtime,
-    })
+    assemble(
+        Assembly {
+            def,
+            path,
+            root: options.root.to_path_buf(),
+            parser,
+            mode: options.mode,
+            merged,
+            warnings,
+            #[cfg(feature = "lua")]
+            runtime,
+        },
+        host,
+    )
 }

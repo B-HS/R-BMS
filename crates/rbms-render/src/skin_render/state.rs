@@ -9,23 +9,23 @@
 //! registry's `UNMAPPED_*` defaults, so a document that asks for something rbms does not measure
 //! draws a zero or an empty string instead of failing. These adapters predate the host contract's
 //! "absent" values and deliberately keep those older answers -- an unknown option is `Some(false)`,
-//! an unknown number is zero, and the one float accessor answers the rate ids as well -- so every
-//! document they draw looks as it always did.
+//! an unknown number is zero, an image picked by index shows its first image, and the one float
+//! accessor answers the rate ids as well -- so every document they draw looks as it always did.
 
 use std::borrow::Cow;
 
 use rbms_skin::dst::{DrawStateSource, OffsetSource, SkinOffset};
 use rbms_skin::property::generated::*;
 use rbms_skin::property::{
-    FLOAT_MAX, FLOAT_MIN, STRING_KEYNAME_EXTENDED_FIRST, STRING_KEYNAME_FIRST, SkinHost, UNMAPPED_BOOLEAN, UNMAPPED_FLOAT, UNMAPPED_INTEGER, UNMAPPED_STRING,
-    clamp_float,
+    FLOAT_MAX, FLOAT_MIN, STRING_KEYNAME_EXTENDED_FIRST, STRING_KEYNAME_FIRST, SkinHost, UNMAPPED_BOOLEAN, UNMAPPED_FLOAT, UNMAPPED_IMAGE_INDEX,
+    UNMAPPED_INTEGER, UNMAPPED_STRING, clamp_float,
 };
 use rbms_skin::timer::TIMER_OFF;
 
 use crate::hud::HudView;
-use crate::playfield::{LaneShade, PlayfieldView};
+use crate::playfield::LaneShade;
 use crate::result::{ResultView, TargetView, dj_rank, lane_kind_total};
-use crate::select::{SelectDetail, SelectRow, SelectView};
+use crate::select::{SelectDetail, SelectView};
 use crate::skin::Skin;
 
 /// How many judgements a run is counted in, best first.
@@ -292,6 +292,10 @@ impl SkinHost for PlayViewState<'_> {
         }
     }
 
+    fn image_index(&self, _id: i32) -> i32 {
+        UNMAPPED_IMAGE_INDEX
+    }
+
     fn rate(&self, id: i32) -> Option<f32> {
         Some(self.float(id))
     }
@@ -384,6 +388,10 @@ impl SkinHost for SelectViewState<'_> {
             NUMBER_PLAYLEVEL => self.song().and_then(|song| song.level.parse().ok()).unwrap_or(UNMAPPED_INTEGER),
             _ => UNMAPPED_INTEGER,
         }
+    }
+
+    fn image_index(&self, _id: i32) -> i32 {
+        UNMAPPED_IMAGE_INDEX
     }
 
     fn rate(&self, id: i32) -> Option<f32> {
@@ -484,6 +492,10 @@ impl SkinHost for ResultViewState<'_> {
             NUMBER_LATE_PERFECT => lane_kind_total(self.view.slow) as i32,
             _ => UNMAPPED_INTEGER,
         }
+    }
+
+    fn image_index(&self, _id: i32) -> i32 {
+        UNMAPPED_IMAGE_INDEX
     }
 
     fn rate(&self, id: i32) -> Option<f32> {
@@ -594,6 +606,10 @@ impl SkinHost for DecideViewState<'_> {
         }
     }
 
+    fn image_index(&self, _id: i32) -> i32 {
+        UNMAPPED_IMAGE_INDEX
+    }
+
     fn rate(&self, id: i32) -> Option<f32> {
         Some(self.float(id))
     }
@@ -658,6 +674,10 @@ impl SkinHost for KeyConfigViewState<'_> {
         UNMAPPED_INTEGER
     }
 
+    fn image_index(&self, _id: i32) -> i32 {
+        UNMAPPED_IMAGE_INDEX
+    }
+
     fn rate(&self, id: i32) -> Option<f32> {
         Some(self.float(id))
     }
@@ -681,84 +701,5 @@ impl SkinHost for KeyConfigViewState<'_> {
 
     fn now_us(&self) -> i64 {
         self.now_us
-    }
-}
-
-/// The play screen's per-frame state that no property id can carry.
-///
-/// A note, a cover and a hit-error strip each need a whole series rather than one number, and the
-/// property registry answers scalars. These arrive beside the scalar source instead, so the
-/// registry keeps the shape every existing document was written against.
-pub struct PlayObjectState<'a> {
-    /// The built-in field's resolved geometry. A document's note field takes each lane's column from
-    /// its own rectangles, and the judgement line, the ceiling and the gauge's clear line from here.
-    pub field: &'a Skin,
-    pub playfield: &'a PlayfieldView<'a>,
-    pub shade: LaneShade,
-    /// Which gauge is in play, as the gauge object's cell table is indexed.
-    pub gauge_kind: usize,
-    /// The key bombs still burning, as `(started at, lane)`.
-    pub bomb: &'a [(i64, u8)],
-    /// Which lanes are held, in lane order.
-    pub keys_down: &'a [bool],
-    /// Recent hits as `(error in milliseconds, judgement)`, most recent last.
-    pub recent_hits: &'a [(i64, u8)],
-}
-
-/// The browser's per-frame state that no property id can carry: the rows themselves.
-pub struct SelectListState<'a> {
-    pub rows: &'a [SelectRow],
-    pub sel: usize,
-    /// Whether the application's option panel is open over the browser.
-    pub options_open: bool,
-}
-
-/// The score screen's per-frame series, for the objects that draw a run rather than a number.
-pub struct ResultSeriesState<'a> {
-    /// The gauge at each sample of the run, in the percent the views carry it as.
-    pub gauge_series: &'a [f32],
-    /// How many hits landed in each timing bucket.
-    pub timing_hist: &'a [u32],
-    pub judge_dist: &'a [u32; JUDGEMENTS],
-    /// The tempo timeline as `(progress through the chart, bpm)`.
-    pub bpm_points: &'a [(f32, f64)],
-}
-
-/// The screen-shaped state a frame carries beside its scalar property source.
-///
-/// [`FrameExtra::None`] is what every existing caller passes and what a screen with nothing extra to
-/// say keeps passing, so a document that draws only scalar objects is unaffected by any of this.
-#[derive(Default, Clone, Copy)]
-pub enum FrameExtra<'a> {
-    #[default]
-    None,
-    Play(&'a PlayObjectState<'a>),
-    Select(&'a SelectListState<'a>),
-    Result(&'a ResultSeriesState<'a>),
-}
-
-impl FrameExtra<'_> {
-    /// The play state, when this frame is a play frame.
-    pub fn play(&self) -> Option<&PlayObjectState<'_>> {
-        match self {
-            Self::Play(state) => Some(state),
-            _ => None,
-        }
-    }
-
-    /// The browser state, when this frame is a browser frame.
-    pub fn select(&self) -> Option<&SelectListState<'_>> {
-        match self {
-            Self::Select(state) => Some(state),
-            _ => None,
-        }
-    }
-
-    /// The score series, when this frame is a score frame.
-    pub fn result(&self) -> Option<&ResultSeriesState<'_>> {
-        match self {
-            Self::Result(state) => Some(state),
-            _ => None,
-        }
     }
 }

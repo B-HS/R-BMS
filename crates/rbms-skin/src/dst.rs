@@ -390,25 +390,38 @@ fn warn_missing_evaluator() {
     }
 }
 
-/// Turns a document's integer `op` list into draw conditions, the way `SkinObject.setDrawCondition`
-/// does.
+/// The two lists an object's integer `op` list is sorted into (`SkinObject.setDrawCondition`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OpLists {
+    /// `dstdraw`: the ids a built-in property answers, as conditions a frame evaluates.
+    pub conditions: Vec<DrawCondition>,
+    /// `dstop`: the ids no built-in property answers, sign included. These are the skin's own
+    /// options, and no frame ever sees them: they are checked once, when the skin is prepared,
+    /// against the options the skin's customisation rows offer (`Skin.prepare`).
+    pub options: Vec<i32>,
+}
+
+/// Sorts a document's integer `op` list into draw conditions and the skin's own options, the way
+/// `SkinObject.setDrawCondition` does.
 ///
-/// A zero op is "no condition" and is dropped, a repeated op is dropped, and an op no property
-/// implements is dropped rather than read as false, which is what keeps an object the build does
-/// not understand visible instead of silently hiding it. `is_known` is asked about the positive id.
-pub fn draw_conditions_from_ops<F: FnMut(i32) -> bool>(ops: &[i32], mut is_known: F) -> Vec<DrawCondition> {
+/// A zero op is "no condition" and is dropped, and so is an op that repeats an earlier one, sign
+/// included. Every other op lands in exactly one of the two lists, each of which keeps the order
+/// the document wrote. `is_builtin` is asked about the positive id.
+pub fn draw_conditions_from_ops<F: FnMut(i32) -> bool>(ops: &[i32], mut is_builtin: F) -> OpLists {
     let mut seen: Vec<i32> = Vec::with_capacity(ops.len());
-    let mut conditions = Vec::with_capacity(ops.len());
+    let mut lists = OpLists::default();
     for &op in ops {
         if op == 0 || seen.contains(&op) {
             continue;
         }
         seen.push(op);
-        if is_known(op.saturating_abs()) {
-            conditions.push(DrawCondition::Option(op));
+        if is_builtin(op.saturating_abs()) {
+            lists.conditions.push(DrawCondition::Option(op));
+        } else {
+            lists.options.push(op);
         }
     }
-    conditions
+    lists
 }
 
 /// The keyframe an instant sits on and how far it has travelled towards the next one

@@ -23,7 +23,8 @@ use rbms_skin::loader::LoadedSkin;
 use rbms_skin::model::{HiddenCover, ImageDef, LiftCover};
 
 use super::draw::Placement;
-use super::object::{Body, Source, Sprite, image_sprite};
+use super::object::{Body, Sprite, image_sprite};
+use super::textures::Source;
 use super::{SkinAssets, SkinFrame};
 use crate::Renderer;
 use crate::ctx::RenderCtx;
@@ -111,8 +112,8 @@ fn sprite_or_warn(def: &ImageDef, sources: Source<'_>, id: &str, src: &str, warn
 
 /// Draws one cover, answering whether anything reached the screen.
 ///
-/// A frame that carries no play state leaves the covers to the built-in renderer, which is what a
-/// document loaded on a screen that measures no lane shade wants.
+/// A frame that carries no note field draws no cover, which is what a document loaded on a screen
+/// that measures no lane shade wants.
 pub(crate) fn draw_cover<R: Renderer>(
     _ctx: &mut RenderCtx<'_>,
     r: &mut R,
@@ -121,7 +122,7 @@ pub(crate) fn draw_cover<R: Renderer>(
     rect: SkinRect,
     frame: &SkinFrame<'_>,
 ) -> bool {
-    let Some(play) = frame.extra.play() else {
+    let Some(play) = frame.data.field else {
         return false;
     };
     if rect.h <= 0.0 {

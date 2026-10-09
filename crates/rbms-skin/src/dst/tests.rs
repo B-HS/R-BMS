@@ -2,7 +2,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 
 use super::{
-    Acc, DestinationTrack, DrawCondition, DrawStateSource, Keyframe, LOOP_ONCE, LuaDrawEval, LuaFnId, MouseRect, NullLuaEval, OffsetSource, Resolved,
+    Acc, DestinationTrack, DrawCondition, DrawStateSource, Keyframe, LOOP_ONCE, LuaDrawEval, LuaFnId, MouseRect, NullLuaEval, OffsetSource, OpLists, Resolved,
     STRETCH_UNSPECIFIED, SkinColor, SkinOffset, SkinRect, TimerRef, WarnOnce, draw_conditions_from_ops, prepare, resolve,
 };
 use crate::timer::{MICROS_PER_MILLI, TIMER_OFF, TimerState, timer_id};
@@ -453,26 +453,30 @@ fn a_track_without_conditions_always_draws() {
 }
 
 #[test]
-fn op_lists_drop_zero_duplicates_and_unknown_ids() {
+fn op_lists_drop_zeros_and_repeats_and_set_the_ids_no_property_answers_apart() {
     const KNOWN: i32 = 30;
     const ALSO_KNOWN: i32 = 31;
     const UNKNOWN: i32 = 32;
     let known = |id: i32| id == KNOWN || id == ALSO_KNOWN;
 
-    assert_eq!(draw_conditions_from_ops(&[0, 0, 0], known), vec![], "zero is no condition");
-    assert_eq!(draw_conditions_from_ops(&[KNOWN, KNOWN], known), vec![DrawCondition::Option(KNOWN)], "a repeat is dropped");
+    assert_eq!(draw_conditions_from_ops(&[0, 0, 0], known), OpLists::default(), "zero is no condition");
+    assert_eq!(draw_conditions_from_ops(&[KNOWN, KNOWN], known).conditions, vec![DrawCondition::Option(KNOWN)], "a repeat is dropped");
     assert_eq!(
-        draw_conditions_from_ops(&[KNOWN, -KNOWN], known),
+        draw_conditions_from_ops(&[KNOWN, -KNOWN], known).conditions,
         vec![DrawCondition::Option(KNOWN), DrawCondition::Option(-KNOWN)],
         "an id and its negation are separate conditions"
     );
-    assert_eq!(draw_conditions_from_ops(&[UNKNOWN], known), vec![], "an unimplemented option is ignored, not read as false");
+    assert_eq!(
+        draw_conditions_from_ops(&[UNKNOWN, -UNKNOWN, UNKNOWN], known),
+        OpLists { conditions: vec![], options: vec![UNKNOWN, -UNKNOWN] },
+        "an id no property answers is one of the skin's own options under either sign, and never a condition"
+    );
     assert_eq!(
         draw_conditions_from_ops(&[0, ALSO_KNOWN, UNKNOWN, KNOWN], known),
-        vec![DrawCondition::Option(ALSO_KNOWN), DrawCondition::Option(KNOWN)],
-        "order is kept"
+        OpLists { conditions: vec![DrawCondition::Option(ALSO_KNOWN), DrawCondition::Option(KNOWN)], options: vec![UNKNOWN] },
+        "order is kept in both lists"
     );
-    assert_eq!(draw_conditions_from_ops(&[i32::MIN], |_| false), vec![], "an id with no positive counterpart is unknown");
+    assert_eq!(draw_conditions_from_ops(&[i32::MIN], |_| false).options, vec![i32::MIN], "an id with no positive counterpart is nobody's property");
 }
 
 #[test]

@@ -19,7 +19,8 @@ use rbms_skin::model::{Destination, JudgeDef};
 use rbms_skin::property::generated::{NUMBER_COMBO, OPTION_1P_PERFECT, OPTION_2P_PERFECT};
 
 use super::draw::Placement;
-use super::object::{Body, NumberBody, Places, SkinObject, Source, ValueSource, build_body, integer_glyphs};
+use super::object::{Body, NumberBody, Places, SkinObject, ValueSource, build_body, integer_glyphs};
+use super::textures::Source;
 use super::{SkinAssets, SkinFrame};
 use crate::ctx::RenderCtx;
 use crate::{BlendMode, Renderer};
@@ -164,6 +165,35 @@ fn resolve_part(object: &SkinObject, origin: (f32, f32), frame: &SkinFrame<'_>) 
     prepare(&object.track, frame.now_us, frame.timers, state, frame.script(), origin, frame.mouse).filter(|resolved| resolved.color.a != 0)
 }
 
+/// Prepares the parts [`draw_judge`] is about to draw: the word of the judgement on show, and the
+/// combo beside it when that judgement keeps one.
+///
+/// Whatever those parts ask the skin's Lua -- a condition, a timer, the cell an animation is on --
+/// is asked here, in the order drawing reads it, because the draw stage only reads answers back.
+pub(crate) fn prepare_judge(body: &JudgeBody, frame: &SkinFrame<'_>) {
+    let Some(index) = current_judgement(body.player, frame) else {
+        return;
+    };
+    let Some(word) = body.images.get(index).and_then(Option::as_ref) else {
+        return;
+    };
+    let Some(resolved) = resolve_part(word, (0.0, 0.0), frame) else {
+        return;
+    };
+    if index < COMBO_JUDGEMENTS
+        && let Some(count) = body.numbers.get(index).and_then(Option::as_ref)
+        && let Body::Number(number) = &count.body
+        && resolve_part(count, (resolved.rect.x, resolved.rect.y), frame).is_some()
+    {
+        combo_run(number, frame);
+    }
+    if let Body::Image(image) = &word.body
+        && let Some((sprite, _, _)) = image.chosen(frame)
+    {
+        sprite.prepare(frame);
+    }
+}
+
 /// Draws the pop-up, answering whether anything reached the screen.
 pub(crate) fn draw_judge<R: Renderer>(
     _ctx: &mut RenderCtx<'_>,
@@ -264,8 +294,7 @@ fn draw_word<R: Renderer>(r: &mut R, place: &Placement<'_>, body: &Body, rect: S
     let Body::Image(image) = body else {
         return false;
     };
-    let chosen = if image.select.is_named() { image.select.integer(frame.state, frame.lua).max(0) as usize } else { 0 };
-    let Some((sprite, first, count)) = image.variants.get(chosen).or_else(|| image.variants.first()) else {
+    let Some((sprite, first, count)) = image.chosen(frame) else {
         return false;
     };
     let cell = first + sprite.animation_index(*count, frame.now_us, frame.timers, frame.script());

@@ -14,14 +14,29 @@
 use rbms_skin::dst::SkinRect;
 use rbms_skin::loader::LoadedSkin;
 use rbms_skin::model::GaugeDef;
+use rbms_skin::property::FLOAT_ABSENT;
 use rbms_skin::property::generated::FLOAT_GROOVEGAUGE_1P;
 use rbms_skin::timer::MICROS_PER_MILLI;
 
 use super::draw::Placement;
-use super::object::{Body, Source, Sprite, image_sprite};
+use super::object::{Body, Sprite, image_sprite};
+use super::textures::Source;
 use super::{SkinAssets, SkinFrame};
 use crate::Renderer;
 use crate::ctx::RenderCtx;
+
+/// Which gauge is in play and where it clears, which is what a gauge object needs beyond the
+/// gauge's own value.
+///
+/// Any screen that knows the gauge of a run may hand this over, so a gauge is drawn wherever it is
+/// filled in: on the play screen for the run in progress, on a score screen for the one that ended.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GaugeFrame {
+    /// Which gauge it is, as the gauge object's cell table is indexed.
+    pub kind: usize,
+    /// How full the gauge has to be for the run to count as cleared, in percent.
+    pub clear_threshold: f32,
+}
 
 /// Cells the reference's node table holds: six gauges of six cells each.
 const GAUGE_SLOTS: usize = 36;
@@ -43,6 +58,11 @@ pub(crate) const SLOT_BELOW_BORDER: usize = 1;
 
 /// Percent of a full gauge, which is the unit the resolved field carries its clear line in.
 const GAUGE_FULL_PERCENT: f32 = 100.0;
+
+/// The share of the bar an empty gauge fills, which is also what a host with no gauge to report
+/// fills, and the share a full one does.
+const GAUGE_EMPTY: f32 = 0.0;
+const GAUGE_FULL: f32 = 1.0;
 
 /// Which node image one cell of the table reads. A document names at most thirty-six, so one byte
 /// holds the answer and the whole table stays smaller than a single sprite would.
@@ -233,9 +253,9 @@ fn pulse_alpha(cycle: i32, now_ms: i64) -> f32 {
 
 /// Draws the gauge, answering whether anything reached the screen.
 ///
-/// The clear line and the gauge in play both come from the frame's play state, so a screen that
-/// carries none -- the score screen, whose own gauge growth the reference drives from `starttime`
-/// and `endtime` -- leaves its gauge to the built-in renderer for now.
+/// The clear line and the gauge in play both come from the frame's gauge state, so a frame that
+/// carries none leaves its gauge undrawn. The growth the reference gives a score screen's gauge,
+/// from `starttime` to `endtime`, is not drawn here yet.
 pub(crate) fn draw_gauge<R: Renderer>(
     _ctx: &mut RenderCtx<'_>,
     r: &mut R,
@@ -244,14 +264,15 @@ pub(crate) fn draw_gauge<R: Renderer>(
     rect: SkinRect,
     frame: &SkinFrame<'_>,
 ) -> bool {
-    let Some(play) = frame.extra.play() else {
+    let Some(gauge) = frame.data.gauge else {
         return false;
     };
     let parts = body.parts.max(1);
-    let filled = frame.state.float(FLOAT_GROOVEGAUGE_1P).clamp(0.0, 1.0);
+    let read = frame.state.float(FLOAT_GROOVEGAUGE_1P);
+    let filled = if read == FLOAT_ABSENT { GAUGE_EMPTY } else { read.clamp(GAUGE_EMPTY, GAUGE_FULL) };
     let lit = if filled > 0.0 { ((filled * parts as f32) as i32).max(1) } else { 0 };
-    let border = (play.field.gauge_clear_threshold / GAUGE_FULL_PERCENT).clamp(0.0, 1.0);
-    let column = play.gauge_kind.saturating_mul(SLOTS_PER_GAUGE);
+    let border = (gauge.clear_threshold / GAUGE_FULL_PERCENT).clamp(0.0, 1.0);
+    let column = gauge.kind.saturating_mul(SLOTS_PER_GAUGE);
     let now_ms = frame.now_us / MICROS_PER_MILLI;
     let dark = dark_run(body.animation, body.range, body.cycle, now_ms);
     let step = rect.w / parts as f32;

@@ -14,8 +14,11 @@ use crate::target::ResolvedTarget;
 use crate::*;
 use rbms_config::FixHiSpeed;
 use rbms_render::playfield::LaneShade;
-use rbms_render::skin_render::state::{PlayObjectState, PlayViewState};
-use rbms_render::{FrameExtra, HudPace, KEY_LANE_KIND, LANE_KIND_COUNT, LaneTimerState, PlayLanes, SCRATCH_LANE_KIND, TextureId, render_hud};
+use rbms_render::skin_render::state::PlayViewState;
+use rbms_render::{
+    BgaFrame, FrameData, FrameSeries, GaugeFrame, HudPace, KEY_LANE_KIND, LANE_KIND_COUNT, LaneTimerState, NoteField, PlayLanes, RecentHits, SCRATCH_LANE_KIND,
+    TextureId, render_hud,
+};
 use rbms_skin::timer::timer_id;
 
 /// Microseconds in one millisecond, which is the unit the play clock is kept in and the unit a
@@ -614,16 +617,15 @@ impl PlayState {
             bpm_main: self.bpm.main,
             target_ex: self.pace_target.as_ref().map(|target| target.ex),
         };
-        let objects = PlayObjectState {
-            field: &ctx.shared.skin,
-            playfield,
-            shade,
-            gauge_kind: gauge_kind.min(GAUGE_KINDS - 1),
-            bomb: self.session.bomb(),
-            keys_down: &keys_down,
-            recent_hits: &self.recent_hits,
+        let field = NoteField { field: &ctx.shared.skin, playfield, shade, bomb: self.session.bomb(), keys_down: &keys_down };
+        let data = FrameData {
+            field: Some(&field),
+            gauge: Some(GaugeFrame { kind: gauge_kind.min(GAUGE_KINDS - 1), clear_threshold: ctx.shared.skin.gauge_clear_threshold }),
+            series: FrameSeries { recent_hits: Some(RecentHits::new(&self.recent_hits)), ..FrameSeries::default() },
+            bga: BgaFrame::of(background),
+            ..FrameData::default()
         };
-        ctx.shared.draw_play_skin(canvas, skin_type, &state, background, FrameExtra::Play(&objects))
+        ctx.shared.draw_play_skin(canvas, skin_type, &state, data)
     }
 
     /// Which lanes are being held right now, in lane order.

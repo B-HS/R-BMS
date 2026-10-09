@@ -103,6 +103,11 @@ pub const UNMAPPED_BOOLEAN: bool = false;
 /// What a built-in view adapter answers for a number id it does not implement.
 pub const UNMAPPED_INTEGER: i32 = 0;
 
+/// What a built-in view adapter answers for an image index id, none of which it implements: the
+/// first image of the set, which is what those adapters showed before an image index was a space of
+/// its own.
+pub const UNMAPPED_IMAGE_INDEX: i32 = 0;
+
 /// What a built-in view adapter answers for a float id it does not implement.
 pub const UNMAPPED_FLOAT: f32 = 0.0;
 
@@ -123,19 +128,9 @@ pub const FLOAT_MAX: f32 = 1.0;
 /// Sliders and bar graphs multiply this by a pixel length, so an out-of-range or NaN value would
 /// draw outside its object rather than fail visibly. It is for the rate half of the float id space
 /// alone: a `FLOAT_*` id such as a hi-speed multiplier or an average timing in milliseconds is not
-/// a share of anything and passes through [`sanitize_float`] instead.
+/// a share of anything and is read as it stands.
 pub fn clamp_float(value: f32) -> f32 {
     if value.is_nan() { UNMAPPED_FLOAT } else { value.clamp(FLOAT_MIN, FLOAT_MAX) }
-}
-
-/// Replaces a value a number line has no room for with [`UNMAPPED_FLOAT`], leaving every finite one
-/// as it is.
-///
-/// This is what a drawn `floatvalue` reads through, because `SkinFloat.prepare` scales the property
-/// by the object's `gain` without narrowing it: a hi-speed of 2.5 and a timing average of -12.4 ms
-/// are both ordinary values there.
-pub fn sanitize_float(value: f32) -> f32 {
-    if value.is_finite() { value } else { UNMAPPED_FLOAT }
 }
 
 /// The id a boolean read actually looks up: a negative id addresses `abs(id)` and negates the

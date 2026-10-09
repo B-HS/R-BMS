@@ -35,8 +35,12 @@ pub const INTEGER_ABSENT: i32 = i32::MIN;
 /// image undrawn.
 pub const IMAGE_INDEX_ABSENT: i32 = -1;
 
-/// What [`SkinHost::float`] answers when neither id space carries a value.
-pub const FLOAT_ABSENT: f32 = 0.0;
+/// What [`SkinHost::float`] answers when neither id space carries a value: the reference's
+/// `Float.MIN_VALUE`, which is the smallest positive number rather than the most negative one. A
+/// fractional number object reads it as "draw nothing" (`SkinFloat.prepare`), and the reference's
+/// own properties answer it for a value there is nothing to measure yet, such as the density of a
+/// chart that is not loaded (`FloatPropertyFactory`).
+pub const FLOAT_ABSENT: f32 = f32::from_bits(1);
 
 /// What [`SkinHost::text`] answers when the id carries no text.
 pub const TEXT_ABSENT: &str = "";

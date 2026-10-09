@@ -16,13 +16,13 @@ use rbms_skin::property::{SkinHost, UNMAPPED_FLOAT, UNMAPPED_INTEGER, UNMAPPED_S
 use rbms_skin::timer::{TIMER_OFF, TimerState};
 
 use super::covers::{CoverBand, CoverBody};
-use super::draw::draw_object;
+use super::draw::{ImageSelect, draw_object};
 use super::gauge::{GaugeAnimation, GaugeBody, SLOT_BELOW_BORDER, SLOT_LEADING, SLOT_UNLIT, SLOTS_PER_GAUGE};
 use super::judge::JudgeBody;
 use super::notes::BarLine;
 use super::notes::{NoteBody, NoteLane};
 use super::object::{Body, DigitLayout, ImageBody, NumberBody, SkinObject, Sprite, ValueSource};
-use super::{FrameExtra, PlayObjectState, SkinFrame, SkinViewport};
+use super::{FrameData, GaugeFrame, NoteField, SkinFrame, SkinViewport};
 use crate::ctx::with_render_ctx;
 use crate::playfield::{LaneShade, PlayfieldView, render_playfield_view};
 use crate::skin::{Skin, SkinConfig};
@@ -138,10 +138,15 @@ impl SkinHost for PlayState {
     }
 }
 
+/// What a play frame carries: the running field and the gauge it is played on.
+fn playing<'a>(field: &'a NoteField<'a>, gauge_kind: usize) -> FrameData<'a> {
+    FrameData { field: Some(field), gauge: Some(GaugeFrame { kind: gauge_kind, clear_threshold: field.field.gauge_clear_threshold }), ..FrameData::default() }
+}
+
 /// Draws one object on a canvas that already holds its textures.
-fn draw_on(canvas: &mut CpuCanvas, object: &SkinObject, state: &PlayState, extra: FrameExtra<'_>) -> bool {
+fn draw_on(canvas: &mut CpuCanvas, object: &SkinObject, state: &PlayState, data: FrameData<'_>) -> bool {
     let timers = TimerState::new();
-    let frame = SkinFrame { now_us: 0, timers: &timers, state, lua: None, mouse: None, background: None, extra };
+    let frame = SkinFrame { now_us: 0, timers: &timers, state, lua: None, mouse: None, data };
     let viewport = SkinViewport::new((CANVAS.0 as f32, CANVAS.1 as f32), (CANVAS.0 as f32, CANVAS.1 as f32));
     with_render_ctx(|ctx| draw_object(ctx, canvas, object, &viewport, &frame))
 }
@@ -219,7 +224,7 @@ fn a_document_note_lands_on_the_row_the_built_in_field_puts_it_on() {
     let field = Skin::default_for(Mode::BEAT_7K, CANVAS.0 as f32, CANVAS.1 as f32);
     let timelines = test_chart();
     let view = PlayfieldView { timelines: &timelines, microtime: 0, hispeed: TEST_HISPEED, beam_on: &[], beam_off: &[], constant: false, legacy_note: false };
-    let play = PlayObjectState { field: &field, playfield: &view, shade: LaneShade::default(), gauge_kind: 0, bomb: &[], keys_down: &[], recent_hits: &[] };
+    let play = NoteField { field: &field, playfield: &view, shade: LaneShade::default(), bomb: &[], keys_down: &[] };
 
     let mut native = CpuCanvas::new(CANVAS.0, CANVAS.1);
     render_playfield_view(&mut native, &field, &view);
@@ -228,7 +233,7 @@ fn a_document_note_lands_on_the_row_the_built_in_field_puts_it_on() {
     let colors = [shade(200), shade(160), shade(120), shade(80)];
     let body = test_note_body(&mut document, &field, colors);
     let note = object(SkinRect::new(0.0, 0.0, CANVAS.0 as f32, CANVAS.1 as f32), Body::Note(body));
-    let drawn = draw_on(&mut document, &note, &PlayState::default(), FrameExtra::Play(&play));
+    let drawn = draw_on(&mut document, &note, &PlayState::default(), playing(&play, 0));
 
     assert!(drawn, "the field drew nothing at all");
     for (lane, expected, actual) in [(TEST_LANE, field.note_color(TEST_LANE), colors[0]), (TEST_LANE + 1, field.mine_color, colors[1])] {
@@ -244,13 +249,13 @@ fn a_long_note_body_runs_between_its_own_head_and_tail() {
     let field = Skin::default_for(Mode::BEAT_7K, CANVAS.0 as f32, CANVAS.1 as f32);
     let timelines = test_chart();
     let view = PlayfieldView { timelines: &timelines, microtime: 0, hispeed: TEST_HISPEED, beam_on: &[], beam_off: &[], constant: false, legacy_note: false };
-    let play = PlayObjectState { field: &field, playfield: &view, shade: LaneShade::default(), gauge_kind: 0, bomb: &[], keys_down: &[], recent_hits: &[] };
+    let play = NoteField { field: &field, playfield: &view, shade: LaneShade::default(), bomb: &[], keys_down: &[] };
 
     let mut document = CpuCanvas::new(CANVAS.0, CANVAS.1);
     let colors = [shade(200), shade(160), shade(120), shade(80)];
     let body = test_note_body(&mut document, &field, colors);
     let note = object(SkinRect::new(0.0, 0.0, CANVAS.0 as f32, CANVAS.1 as f32), Body::Note(body));
-    draw_on(&mut document, &note, &PlayState::default(), FrameExtra::Play(&play));
+    draw_on(&mut document, &note, &PlayState::default(), playing(&play, 0));
 
     let column = lane_column(&field, TEST_LANE + 2);
     let tail = rbms_chart::scroll::visible_offsets(&timelines, 0, TEST_HISPEED, field.lane_height());
@@ -267,13 +272,13 @@ fn a_bar_line_is_drawn_on_the_section_line_it_belongs_to() {
     let field = Skin::default_for(Mode::BEAT_7K, CANVAS.0 as f32, CANVAS.1 as f32);
     let timelines = test_chart();
     let view = PlayfieldView { timelines: &timelines, microtime: 0, hispeed: TEST_HISPEED, beam_on: &[], beam_off: &[], constant: false, legacy_note: false };
-    let play = PlayObjectState { field: &field, playfield: &view, shade: LaneShade::default(), gauge_kind: 0, bomb: &[], keys_down: &[], recent_hits: &[] };
+    let play = NoteField { field: &field, playfield: &view, shade: LaneShade::default(), bomb: &[], keys_down: &[] };
 
     let mut document = CpuCanvas::new(CANVAS.0, CANVAS.1);
     let line = shade(90);
     let body = bar_only(&mut document, &field, still(bar_rect(&field)), line);
     let note = object(SkinRect::new(0.0, 0.0, CANVAS.0 as f32, CANVAS.1 as f32), Body::Note(body));
-    draw_on(&mut document, &note, &PlayState::default(), FrameExtra::Play(&play));
+    draw_on(&mut document, &note, &PlayState::default(), playing(&play, 0));
 
     let offsets = rbms_chart::scroll::visible_offsets(&timelines, 0, TEST_HISPEED, field.lane_height());
     let at = offsets.iter().find(|(index, _)| *index == 1).map(|(_, offset)| *offset).expect("the section line is outside the visible window");
@@ -289,7 +294,7 @@ fn a_bar_line_the_document_faded_out_draws_nothing() {
     let field = Skin::default_for(Mode::BEAT_7K, CANVAS.0 as f32, CANVAS.1 as f32);
     let timelines = test_chart();
     let view = PlayfieldView { timelines: &timelines, microtime: 0, hispeed: TEST_HISPEED, beam_on: &[], beam_off: &[], constant: false, legacy_note: false };
-    let play = PlayObjectState { field: &field, playfield: &view, shade: LaneShade::default(), gauge_kind: 0, bomb: &[], keys_down: &[], recent_hits: &[] };
+    let play = NoteField { field: &field, playfield: &view, shade: LaneShade::default(), bomb: &[], keys_down: &[] };
 
     let mut document = CpuCanvas::new(CANVAS.0, CANVAS.1);
     let line = shade(90);
@@ -297,7 +302,7 @@ fn a_bar_line_the_document_faded_out_draws_nothing() {
     let body = bar_only(&mut document, &field, faded, line);
     let note = object(SkinRect::new(0.0, 0.0, CANVAS.0 as f32, CANVAS.1 as f32), Body::Note(body));
 
-    assert!(!draw_on(&mut document, &note, &PlayState::default(), FrameExtra::Play(&play)), "a faded line leaves the field empty");
+    assert!(!draw_on(&mut document, &note, &PlayState::default(), playing(&play, 0)), "a faded line leaves the field empty");
     assert_eq!(first_row_of(&document, lane_column(&field, 0), line), None, "and nothing in its colour reaches the screen");
 }
 
@@ -321,13 +326,13 @@ fn a_gauge_lights_one_part_for_every_part_of_its_value() {
     let field = Skin::default_for(Mode::BEAT_7K, CANVAS.0 as f32, CANVAS.1 as f32);
     let timelines = test_chart();
     let view = PlayfieldView { timelines: &timelines, microtime: 0, hispeed: TEST_HISPEED, beam_on: &[], beam_off: &[], constant: false, legacy_note: false };
-    let play = PlayObjectState { field: &field, playfield: &view, shade: LaneShade::default(), gauge_kind: 0, bomb: &[], keys_down: &[], recent_hits: &[] };
+    let play = NoteField { field: &field, playfield: &view, shade: LaneShade::default(), bomb: &[], keys_down: &[] };
 
     let rect = SkinRect::new(100.0, 100.0, 500.0, 20.0);
     let mut canvas = CpuCanvas::new(CANVAS.0, CANVAS.1);
     let bar = object(rect, Body::Gauge(distinct_gauge(&mut canvas)));
     let state = PlayState { gauge: TEST_GAUGE, ..PlayState::default() };
-    assert!(draw_on(&mut canvas, &bar, &state, FrameExtra::Play(&play)), "the gauge drew nothing at all");
+    assert!(draw_on(&mut canvas, &bar, &state, playing(&play, 0)), "the gauge drew nothing at all");
 
     let row = (CANVAS.1 as f32 - (rect.y + rect.h / 2.0)) as u32;
     let cell = |part: i32| usize::from(canvas.pixel_at(part_column(rect, part), row).r).saturating_sub(1) % SLOTS_PER_GAUGE;
@@ -349,11 +354,10 @@ fn a_gauge_reads_a_column_of_its_own_for_every_kind_of_gauge() {
 
     let mut seen = Vec::new();
     for kind in 0..6 {
-        let play =
-            PlayObjectState { field: &field, playfield: &view, shade: LaneShade::default(), gauge_kind: kind, bomb: &[], keys_down: &[], recent_hits: &[] };
+        let play = NoteField { field: &field, playfield: &view, shade: LaneShade::default(), bomb: &[], keys_down: &[] };
         let mut canvas = CpuCanvas::new(CANVAS.0, CANVAS.1);
         let bar = object(rect, Body::Gauge(distinct_gauge(&mut canvas)));
-        draw_on(&mut canvas, &bar, &state, FrameExtra::Play(&play));
+        draw_on(&mut canvas, &bar, &state, playing(&play, kind));
         seen.push(canvas.pixel_at(part_column(rect, 1), row).r);
     }
     seen.dedup();
@@ -367,22 +371,14 @@ fn a_hidden_cover_takes_the_share_of_the_field_the_player_set() {
     let field = Skin::default_for(Mode::BEAT_7K, CANVAS.0 as f32, CANVAS.1 as f32);
     let timelines = test_chart();
     let view = PlayfieldView { timelines: &timelines, microtime: 0, hispeed: TEST_HISPEED, beam_on: &[], beam_off: &[], constant: false, legacy_note: false };
-    let play = PlayObjectState {
-        field: &field,
-        playfield: &view,
-        shade: LaneShade { cover: 0.0, hidden: 0.3 },
-        gauge_kind: 0,
-        bomb: &[],
-        keys_down: &[],
-        recent_hits: &[],
-    };
+    let play = NoteField { field: &field, playfield: &view, shade: LaneShade { cover: 0.0, hidden: 0.3 }, bomb: &[], keys_down: &[] };
 
     let rect = SkinRect::new(200.0, 100.0, 300.0, 500.0);
     let mut canvas = CpuCanvas::new(CANVAS.0, CANVAS.1);
     let color = shade(210);
     let body = CoverBody { sprite: solid(&mut canvas, "cover", color), band: CoverBand::FromJudgement, disappear_line: -1.0, follows_lift: false };
     let cover = object(rect, Body::HiddenCover(body));
-    assert!(draw_on(&mut canvas, &cover, &PlayState::default(), FrameExtra::Play(&play)), "the cover drew nothing at all");
+    assert!(draw_on(&mut canvas, &cover, &PlayState::default(), playing(&play, 0)), "the cover drew nothing at all");
 
     let column = (rect.x + rect.w / 2.0) as u32;
     let foot = (CANVAS.1 as f32 - rect.y) as u32 - 1;
@@ -396,12 +392,12 @@ fn a_cover_the_player_has_not_asked_for_leaves_the_field_alone() {
     let field = Skin::default_for(Mode::BEAT_7K, CANVAS.0 as f32, CANVAS.1 as f32);
     let timelines = test_chart();
     let view = PlayfieldView { timelines: &timelines, microtime: 0, hispeed: TEST_HISPEED, beam_on: &[], beam_off: &[], constant: false, legacy_note: false };
-    let play = PlayObjectState { field: &field, playfield: &view, shade: LaneShade::default(), gauge_kind: 0, bomb: &[], keys_down: &[], recent_hits: &[] };
+    let play = NoteField { field: &field, playfield: &view, shade: LaneShade::default(), bomb: &[], keys_down: &[] };
     let rect = SkinRect::new(200.0, 100.0, 300.0, 500.0);
     let mut canvas = CpuCanvas::new(CANVAS.0, CANVAS.1);
     let body = CoverBody { sprite: solid(&mut canvas, "cover", shade(210)), band: CoverBand::FromJudgement, disappear_line: -1.0, follows_lift: false };
     let cover = object(rect, Body::HiddenCover(body));
-    assert!(!draw_on(&mut canvas, &cover, &PlayState::default(), FrameExtra::Play(&play)), "a cover of no height should draw nothing");
+    assert!(!draw_on(&mut canvas, &cover, &PlayState::default(), playing(&play, 0)), "a cover of no height should draw nothing");
 }
 
 /// A lift cover covers what the lift has left below the judgement line, so it is empty on a field
@@ -416,10 +412,10 @@ fn a_lift_cover_follows_the_judgement_line_the_lift_raised() {
     let rect = SkinRect::new(200.0, CANVAS.1 as f32 - plain.judge_y, 300.0, plain.lane_height());
     let color = shade(190);
     let cover_over = |field: &Skin, canvas: &mut CpuCanvas| {
-        let play = PlayObjectState { field, playfield: &view, shade: LaneShade::default(), gauge_kind: 0, bomb: &[], keys_down: &[], recent_hits: &[] };
+        let play = NoteField { field, playfield: &view, shade: LaneShade::default(), bomb: &[], keys_down: &[] };
         let body = CoverBody { sprite: solid(canvas, "lift", color), band: CoverBand::BelowJudgement, disappear_line: -1.0, follows_lift: false };
         let cover = object(rect, Body::LiftCover(body));
-        draw_on(canvas, &cover, &PlayState::default(), FrameExtra::Play(&play))
+        draw_on(canvas, &cover, &PlayState::default(), playing(&play, 0))
     };
 
     let mut flat = CpuCanvas::new(CANVAS.0, CANVAS.1);
@@ -451,7 +447,7 @@ fn test_judge(canvas: &mut CpuCanvas, word: Color, shift: bool) -> JudgeBody {
     let images = (0..6)
         .map(|index| {
             let sprite = solid(canvas, &format!("word{index}"), word);
-            Some(object(WORD_RECT, Body::Image(ImageBody { variants: vec![(sprite, 0, 1)], select: ValueSource::None })))
+            Some(object(WORD_RECT, Body::Image(ImageBody { variants: vec![Some((sprite, 0, 1))], select: ImageSelect::First })))
         })
         .collect();
     let strip = digits(canvas);
@@ -479,7 +475,7 @@ fn a_pop_up_shows_the_judgement_it_was_given_and_the_combo_beside_it() {
     let mut canvas = CpuCanvas::new(CANVAS.0, CANVAS.1);
     let pop_up = object(SkinRect::new(0.0, 0.0, 1.0, 1.0), Body::Judge(test_judge(&mut canvas, word, false)));
     let state = PlayState { judge: Some(1), combo: 12, gauge: 0.0 };
-    assert!(draw_on(&mut canvas, &pop_up, &state, FrameExtra::None), "the pop-up drew nothing at all");
+    assert!(draw_on(&mut canvas, &pop_up, &state, FrameData::default()), "the pop-up drew nothing at all");
 
     let word_row = (CANVAS.1 as f32 - (WORD_RECT.y + WORD_RECT.h)) as u32;
     assert_eq!(canvas.pixel_at(120, word_row + 10), word, "the judgement's word should be drawn where its destination put it");
@@ -499,7 +495,7 @@ fn a_pop_up_shows_the_judgement_it_was_given_and_the_combo_beside_it() {
 fn a_pop_up_with_nothing_to_report_draws_nothing() {
     let mut canvas = CpuCanvas::new(CANVAS.0, CANVAS.1);
     let pop_up = object(SkinRect::new(0.0, 0.0, 1.0, 1.0), Body::Judge(test_judge(&mut canvas, shade(240), false)));
-    assert!(!draw_on(&mut canvas, &pop_up, &PlayState::default(), FrameExtra::None), "a run with no judgement yet should draw no pop-up");
+    assert!(!draw_on(&mut canvas, &pop_up, &PlayState::default(), FrameData::default()), "a run with no judgement yet should draw no pop-up");
 }
 
 #[test]
@@ -508,7 +504,7 @@ fn a_shifting_pop_up_slides_left_by_half_its_combo() {
     let mut canvas = CpuCanvas::new(CANVAS.0, CANVAS.1);
     let pop_up = object(SkinRect::new(0.0, 0.0, 1.0, 1.0), Body::Judge(test_judge(&mut canvas, word, true)));
     let state = PlayState { judge: Some(0), combo: 12, gauge: 0.0 };
-    draw_on(&mut canvas, &pop_up, &state, FrameExtra::None);
+    draw_on(&mut canvas, &pop_up, &state, FrameData::default());
 
     let row = (CANVAS.1 as f32 - (WORD_RECT.y + WORD_RECT.h)) as u32 + 10;
     let left = (0..CANVAS.0).find(|column| canvas.pixel_at(*column, row) == word).expect("the word never reached the screen");

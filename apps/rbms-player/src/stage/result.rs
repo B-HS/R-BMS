@@ -3,7 +3,7 @@
 #![allow(clippy::wildcard_imports)]
 
 use rbms_render::result::ResultExtras;
-use rbms_render::{FrameExtra, ResultSeriesState};
+use rbms_render::{BpmTimeline, FrameData, FrameSeries, GaugeHistory, NoteDistribution, TimingHistogram};
 
 use crate::app_result::{next_song, offers_retry, retry};
 use crate::stage::{Canvas, FrameCtx, KeyInput, StageHandler, Transition};
@@ -56,12 +56,13 @@ impl ResultState {
 
     /// The series the document's own graph objects read, which are the same measurements the
     /// built-in panels are drawn from.
-    fn series(&self) -> ResultSeriesState<'_> {
-        ResultSeriesState {
-            gauge_series: &self.view.gauge_series,
-            timing_hist: &self.view.timing_hist,
-            judge_dist: &self.view.judge_dist,
-            bpm_points: &self.bpm_points,
+    fn series(&self) -> FrameSeries<'_> {
+        FrameSeries {
+            gauge_history: Some(GaugeHistory::new(&self.view.gauge_series)),
+            timing: Some(TimingHistogram::new(&self.view.timing_hist)),
+            bpm: Some(BpmTimeline::new(&self.bpm_points)),
+            notes: Some(NoteDistribution::of_judgements(&self.view.judge_dist)),
+            recent_hits: None,
         }
     }
 
@@ -114,8 +115,8 @@ impl StageHandler for ResultState {
         ctx.shared.prepare_skin(canvas, SKIN_TYPE_RESULT);
         let now_us = ctx.shared.skin_now_us();
         ctx.shared.skin_result_timers.update(&mut ctx.shared.skin_timers, now_us);
-        let series = self.series();
-        if ctx.shared.draw_result_skin(canvas, &self.view, &self.extras, self.cleared, FrameExtra::Result(&series)) {
+        let data = FrameData { series: self.series(), ..FrameData::default() };
+        if ctx.shared.draw_result_skin(canvas, &self.view, &self.extras, self.cleared, data) {
             return;
         }
         render_result_with_palette(canvas, &self.view, &ctx.shared.result_palette, &self.extras);
@@ -316,9 +317,9 @@ mod tests {
     fn the_runs_measurements_and_the_charts_tempo_reach_the_document_as_one_series() {
         let state = ResultState::new(ResultView { gauge_series: vec![50.0, 60.0], judge_dist: [1, 2, 3, 4, 5, 6], ..view() }).tempo(vec![(0.0, 150.0)]);
         let series = state.series();
-        assert_eq!(series.gauge_series, &[50.0, 60.0][..], "the gauge the run held is not the one the document reads");
-        assert_eq!(series.judge_dist, &[1, 2, 3, 4, 5, 6], "the judgements the run took are not the ones the document reads");
-        assert_eq!(series.bpm_points, &[(0.0, 150.0)][..], "the chart's tempo is not the one the document reads");
+        assert_eq!(series.gauge_history.map(|history| history.samples), Some(&[50.0, 60.0][..]), "the gauge the run held is not the one the document reads");
+        assert_eq!(series.notes.map(|notes| *notes.judged), Some([1, 2, 3, 4, 5, 6]), "the judgements the run took are not the ones the document reads");
+        assert_eq!(series.bpm.map(|timeline| timeline.points), Some(&[(0.0, 150.0)][..]), "the chart's tempo is not the one the document reads");
     }
 
     /// What surrounds the run reaches the screen: a screen built with a target and the run-again

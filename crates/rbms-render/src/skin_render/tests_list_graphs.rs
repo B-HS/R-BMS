@@ -16,12 +16,14 @@ use rbms_skin::property::{SkinHost, UNMAPPED_BOOLEAN, UNMAPPED_FLOAT, UNMAPPED_I
 use rbms_skin::timer::{TIMER_OFF, TimerState};
 
 use super::color::{modulate, parse_hex_color};
-use super::state::{FrameExtra, PlayObjectState, ResultSeriesState, SelectListState, SelectViewState};
-use super::{SkinAssets, SkinFrame, SkinImage, SkinObjectKind, SkinScreen};
+use super::state::SelectViewState;
+use super::{
+    BpmTimeline, FrameData, FrameSeries, GaugeFrame, GaugeHistory, NoteDistribution, NoteField, RecentHits, SkinAssets, SkinFrame, SkinImage, SkinObjectKind,
+    SkinScreen, SongBars, TimingHistogram,
+};
 use crate::ctx::RenderCtx;
 use crate::font::TextContext;
 use crate::playfield::{LaneShade, PlayfieldView};
-use crate::result::ResultPalette;
 use crate::select::{SelectDetail, SelectRow, SelectView};
 use crate::skin::Skin;
 use crate::{BYTES_PER_PIXEL, Color, CpuCanvas, Rect, Renderer};
@@ -249,18 +251,35 @@ fn row(index: usize) -> SelectRow {
     }
 }
 
-/// One frame over `extra`, with nothing running and no pointer.
-fn frame<'a>(timers: &'a TimerState, state: &'a Nothing, extra: FrameExtra<'a>) -> SkinFrame<'a> {
-    SkinFrame { now_us: 0, timers, state, lua: None, mouse: None, background: None, extra }
+/// One frame over `data`, with nothing running and no pointer.
+fn frame<'a>(timers: &'a TimerState, state: &'a Nothing, data: FrameData<'a>) -> SkinFrame<'a> {
+    SkinFrame { now_us: 0, timers, state, lua: None, mouse: None, data }
+}
+
+/// What a browser frame carries: its bars and nothing else.
+fn browsing<'a>(bars: &'a SongBars<'a>) -> FrameData<'a> {
+    FrameData { bars: Some(bars), ..FrameData::default() }
+}
+
+/// What a score frame carries: the four series a finished run was measured into.
+fn measured<'a>(gauge: &'a [f32], hist: &'a [u32], notes: NoteDistribution<'a>, tempo: &'a [(f32, f64)]) -> FrameData<'a> {
+    let series = FrameSeries {
+        gauge_history: Some(GaugeHistory::new(gauge)),
+        timing: Some(TimingHistogram::new(hist)),
+        bpm: Some(BpmTimeline::new(tempo)),
+        notes: Some(notes),
+        recent_hits: None,
+    };
+    FrameData { series, ..FrameData::default() }
 }
 
 /// Draws `screen` over a cleared canvas and answers how many of its objects reached it.
-fn draw(screen: &SkinScreen, text: &mut TextContext, canvas: &mut CpuCanvas, extra: FrameExtra<'_>) -> usize {
+fn draw(screen: &SkinScreen, text: &mut TextContext, canvas: &mut CpuCanvas, data: FrameData<'_>) -> usize {
     let timers = TimerState::new();
     let state = Nothing;
     canvas.clear(Color::BLACK);
     let mut ctx = RenderCtx::new(crate::theme::theme(), text);
-    screen.draw(&mut ctx, canvas, &frame(&timers, &state, extra))
+    screen.draw(&mut ctx, canvas, &frame(&timers, &state, data))
 }
 
 #[test]
@@ -350,8 +369,8 @@ fn the_focused_chart_lands_on_the_centre_slot() {
     let screen = wheel_screen(&scratch, &mut canvas, &mut text);
 
     let rows: Vec<SelectRow> = (0..ROWS).map(row).collect();
-    let list = SelectListState { rows: &rows, sel: SELECTED, options_open: false };
-    draw(&screen, &mut text, &mut canvas, FrameExtra::Select(&list));
+    let list = SongBars { rows: &rows, sel: SELECTED, options_open: false };
+    draw(&screen, &mut text, &mut canvas, browsing(&list));
 
     let bar_pixel = |slot: usize| canvas.pixel_at(BAR_W as u32 - 5, DOC_H - (slot_y(slot) + SLOT_H) as u32 + 2);
     assert_eq!(bar_pixel(CENTER), Color { r: 240, g: 60, b: 60, a: 255 }, "the focused chart draws the focused bar on the centre slot");
@@ -370,7 +389,7 @@ fn a_wheel_without_the_browsers_rows_draws_nothing() {
     let mut text = TextContext::embedded_only();
     let screen = wheel_screen(&scratch, &mut canvas, &mut text);
 
-    assert_eq!(draw(&screen, &mut text, &mut canvas, FrameExtra::None), 1, "only the button, which reads nothing, is left");
+    assert_eq!(draw(&screen, &mut text, &mut canvas, FrameData::default()), 1, "only the button, which reads nothing, is left");
 }
 
 /// Every graph reads a series that only one screen's state carries, so which of them draw is decided
@@ -385,20 +404,27 @@ fn a_graph_draws_only_on_the_screen_whose_series_it_reads() {
     let gauge = [20.0, 40.0, 60.0, 50.0];
     let hist = [1, 4, 9, 4, 1];
     let counts = [10, 4, 2, 1, 1, 0];
+    let kinds = [[0, 0, 1, 0, 0, 2, 0], [0, 0, 0, 0, 0, 3, 1]];
     let tempo = [(0.0, 150.0), (0.5, 200.0), (0.8, 120.0)];
-    let series = ResultSeriesState { gauge_series: &gauge, timing_hist: &hist, judge_dist: &counts, bpm_points: &tempo };
-    assert_eq!(draw(&screen, &mut text, &mut canvas, FrameExtra::Result(&series)), 5, "the button and the four score-screen graphs");
+    let notes = NoteDistribution { kinds: &kinds, ..NoteDistribution::of_judgements(&counts) };
+    let series = measured(&gauge, &hist, notes, &tempo);
+    assert_eq!(draw(&screen, &mut text, &mut canvas, series), 5, "the button and the four score-screen graphs");
 
     let rows: Vec<SelectRow> = (0..ROWS).map(row).collect();
-    let list = SelectListState { rows: &rows, sel: SELECTED, options_open: false };
-    assert_eq!(draw(&screen, &mut text, &mut canvas, FrameExtra::Select(&list)), 2, "the button and the wheel, which is all a browser frame feeds");
+    let list = SongBars { rows: &rows, sel: SELECTED, options_open: false };
+    assert_eq!(draw(&screen, &mut text, &mut canvas, browsing(&list)), 2, "the button and the wheel, which is all a browser frame feeds");
 
     let field = Skin::default_for(rbms_model::Mode::BEAT_7K, DOC_W as f32, DOC_H as f32);
     let playfield = PlayfieldView { timelines: &[], microtime: 0, hispeed: 1.0, beam_on: &[], beam_off: &[], constant: false, legacy_note: false };
     let hits = [(-30_i64, 1_u8), (8, 0), (45, 2)];
-    let play =
-        PlayObjectState { field: &field, playfield: &playfield, shade: LaneShade::default(), gauge_kind: 0, bomb: &[], keys_down: &[], recent_hits: &hits };
-    assert_eq!(draw(&screen, &mut text, &mut canvas, FrameExtra::Play(&play)), 3, "the button, the judge ruler and the hit errors");
+    let play = NoteField { field: &field, playfield: &playfield, shade: LaneShade::default(), bomb: &[], keys_down: &[] };
+    let playing = FrameData {
+        field: Some(&play),
+        gauge: Some(GaugeFrame { kind: 0, clear_threshold: field.gauge_clear_threshold }),
+        series: FrameSeries { recent_hits: Some(RecentHits::new(&hits)), ..FrameSeries::default() },
+        ..FrameData::default()
+    };
+    assert_eq!(draw(&screen, &mut text, &mut canvas, playing), 3, "the button, the judge ruler and the hit errors");
 }
 
 /// A measurement of nothing is not a measurement of zero: an empty series leaves its panel to the
@@ -410,8 +436,8 @@ fn an_empty_series_draws_no_graph_at_all() {
     let mut text = TextContext::embedded_only();
     let screen = wheel_screen(&scratch, &mut canvas, &mut text);
 
-    let series = ResultSeriesState { gauge_series: &[], timing_hist: &[], judge_dist: &[0; 6], bpm_points: &[] };
-    assert_eq!(draw(&screen, &mut text, &mut canvas, FrameExtra::Result(&series)), 1, "only the button is left when the run measured nothing");
+    let series = measured(&[], &[], NoteDistribution::default(), &[]);
+    assert_eq!(draw(&screen, &mut text, &mut canvas, series), 1, "only the button is left when the run measured nothing");
 }
 
 /// The gauge history is drawn in the colours its own record named: its ground, the line the samples
@@ -424,8 +450,8 @@ fn the_gauge_history_is_drawn_in_the_colours_the_document_named() {
     let screen = wheel_screen(&scratch, &mut canvas, &mut text);
 
     let gauge = [50.0_f32; 8];
-    let series = ResultSeriesState { gauge_series: &gauge, timing_hist: &[], judge_dist: &[0; 6], bpm_points: &[] };
-    draw(&screen, &mut text, &mut canvas, FrameExtra::Result(&series));
+    let series = measured(&gauge, &[], NoteDistribution::default(), &[]);
+    draw(&screen, &mut text, &mut canvas, series);
 
     let panel = Rect::new(200.0, (DOC_H - 140) as f32, 60.0, 40.0);
     assert_eq!(canvas.pixel_at(230, panel.y as u32 + 5), Color::rgb(0x20, 0x30, 0x40), "the panel's ground");
@@ -450,10 +476,11 @@ fn a_colour_that_is_not_one_is_reported_and_replaced() {
     assert_eq!(screen.count_of(SkinObjectKind::TimingDistribution), 1, "and the graph still resolved");
 }
 
-/// Every one of the wheel's slots hangs off the wheel's own destination, so a document that faded
-/// that out drew no rows this frame.
+/// A wheel is placed by the destinations nested under it and drawn in their colours. The colour of
+/// its own destination is never read, as the reference never reads it (`BarRenderer.render`), so a
+/// document that wrote that destination transparent still gets its rows.
 #[test]
-fn a_wheel_the_document_faded_out_draws_none_of_its_rows() {
+fn a_wheel_draws_its_rows_whatever_colour_its_own_destination_names() {
     let scratch = Scratch::new("hidden");
     let mut canvas = CpuCanvas::new(DOC_W, DOC_H);
     let mut text = TextContext::embedded_only();
@@ -461,8 +488,8 @@ fn a_wheel_the_document_faded_out_draws_none_of_its_rows() {
     let screen = wheel_screen_with(&scratch, &mut canvas, &mut text, Fixture { wheel_dst: Some(&dst), ..Fixture::default() });
 
     let rows: Vec<SelectRow> = (0..ROWS).map(row).collect();
-    let list = SelectListState { rows: &rows, sel: SELECTED, options_open: false };
-    assert_eq!(draw(&screen, &mut text, &mut canvas, FrameExtra::Select(&list)), 1, "the faded wheel reaches the screen nowhere, leaving only the button");
+    let list = SongBars { rows: &rows, sel: SELECTED, options_open: false };
+    assert_eq!(draw(&screen, &mut text, &mut canvas, browsing(&list)), 2, "the wheel reaches the screen beside the button");
 }
 
 /// A slot is a box, not an anchor: a title longer than the slot the document drew for it is cut to
@@ -476,8 +503,8 @@ fn a_title_longer_than_its_slot_is_cut_to_it() {
 
     let mut rows: Vec<SelectRow> = (0..ROWS).map(row).collect();
     rows[SELECTED].title = "WIDE".repeat(20);
-    let list = SelectListState { rows: &rows, sel: SELECTED, options_open: false };
-    draw(&screen, &mut text, &mut canvas, FrameExtra::Select(&list));
+    let list = SongBars { rows: &rows, sel: SELECTED, options_open: false };
+    draw(&screen, &mut text, &mut canvas, browsing(&list));
 
     let top = DOC_H - (slot_y(CENTER) + SLOT_H) as u32;
     let inked = |x: u32| {
@@ -512,8 +539,8 @@ fn a_bar_can_be_cut_from_an_image_set_and_one_that_names_nothing_is_reported() {
     assert!(!set.warnings().iter().any(|warning| warning.contains("bar-on")), "declaring it as a set is enough to cut it from: {:?}", set.warnings());
 
     let rows: Vec<SelectRow> = (0..ROWS).map(row).collect();
-    let list = SelectListState { rows: &rows, sel: SELECTED, options_open: false };
-    draw(&set, &mut text, &mut canvas, FrameExtra::Select(&list));
+    let list = SongBars { rows: &rows, sel: SELECTED, options_open: false };
+    draw(&set, &mut text, &mut canvas, browsing(&list));
     let focused = canvas.pixel_at(BAR_W as u32 - 5, DOC_H - (slot_y(CENTER) + SLOT_H) as u32 + 2);
     assert_eq!(focused, Color { r: 240, g: 60, b: 60, a: 255 }, "and the bar it cuts lands in the colour the slot was tinted");
 }
@@ -544,51 +571,4 @@ fn a_wheel_with_no_slots_resolves_to_nothing_and_says_so() {
     assert!(screen.warnings().iter().any(|warning| warning.contains("no slots")), "and the document is told why no wheel was drawn: {:?}", screen.warnings());
 }
 
-/// The judgement graph the document asked for, rather than the one shape for every record: a spread
-/// across six bars, or the one column those six share.
-#[test]
-fn a_judgement_graph_takes_the_shape_its_record_asked_for() {
-    let counts = [10, 4, 2, 1, 1, 0];
-    let series = ResultSeriesState { gauge_series: &[], timing_hist: &[], judge_dist: &counts, bpm_points: &[] };
-    let palette = ResultPalette::default().judge_colors;
-
-    let bars = Scratch::new("judge-bars");
-    let mut canvas = CpuCanvas::new(DOC_W, DOC_H);
-    let mut text = TextContext::embedded_only();
-    let screen = wheel_screen(&bars, &mut canvas, &mut text);
-    draw(&screen, &mut text, &mut canvas, FrameExtra::Result(&series));
-    assert_eq!(canvas.pixel_at(210, 110), palette[1], "by default the second judgement takes a bar of its own, scaled to the commonest");
-    assert_eq!(canvas.pixel_at(210, 100), Color::BLACK, "and nothing of it reaches above its own count");
-
-    let stacked = Scratch::new("judge-stack");
-    let fixture = Fixture { judge_graph: Some(r#"{ "id": "judge-graph", "type": 1 }"#), ..Fixture::default() };
-    let screen = wheel_screen_with(&stacked, &mut canvas, &mut text, fixture);
-    draw(&screen, &mut text, &mut canvas, FrameExtra::Result(&series));
-    assert_eq!(canvas.pixel_at(210, 110), palette[0], "asked to stack them, the best judgement takes the foot of the one column");
-    assert_eq!(canvas.pixel_at(210, 100), palette[1], "the next one sits on top of it");
-    assert_eq!(canvas.pixel_at(210, 95), palette[2], "and so on up, each taking its share of the run");
-}
-
-/// A judgement graph counted in something rbms never recorded is drawn as the one it does record,
-/// and says so, rather than silently handing the document a different graph.
-#[test]
-fn a_judgement_graph_rbms_records_nothing_for_falls_back_and_says_so() {
-    let scratch = Scratch::new("judge-unknown");
-    let mut canvas = CpuCanvas::new(DOC_W, DOC_H);
-    let mut text = TextContext::embedded_only();
-    let fixture = Fixture { judge_graph: Some(r#"{ "id": "judge-graph", "type": 2 }"#), ..Fixture::default() };
-    let screen = wheel_screen_with(&scratch, &mut canvas, &mut text, fixture);
-
-    assert!(
-        screen.warnings().iter().any(|warning| warning.contains("judge-graph") && warning.contains("type 2")),
-        "the fallback is named: {:?}",
-        screen.warnings()
-    );
-
-    let counts = [10, 4, 2, 1, 1, 0];
-    let series = ResultSeriesState { gauge_series: &[], timing_hist: &[], judge_dist: &counts, bpm_points: &[] };
-    draw(&screen, &mut text, &mut canvas, FrameExtra::Result(&series));
-    let palette = ResultPalette::default().judge_colors;
-    assert_eq!(canvas.pixel_at(210, 110), palette[1], "and what it draws is the shape a record with no type at all gets");
-    assert_eq!(canvas.pixel_at(210, 100), Color::BLACK);
-}
+mod graph_pixels;

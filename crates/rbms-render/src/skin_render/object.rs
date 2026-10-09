@@ -7,16 +7,22 @@
 //! The shapes follow the reference implementation's own object classes -- `SkinImage`,
 //! `SkinNumber`, `SkinFloat`, `SkinSlider`, `SkinGraph` -- including how a strip of digits is cut
 //! into sets and which glyph slot the sign and the decimal point occupy.
+//!
+//! So does the order each kind is prepared in ([`SkinObject::prepare`]). A skin's Lua is called
+//! while an object is prepared and at no other time, and which of an object's functions run on a
+//! frame it is hidden on differs from class to class; that order is the reference's, kind by kind.
 
 use std::borrow::Cow;
 
-use rbms_skin::dst::{DestinationTrack, LuaDrawEval, LuaFnId, SkinRect, TimerRef};
+use rbms_skin::dst::{DestinationTrack, DrawStateSource, Keyframe, LuaDrawEval, LuaFnId, Resolved, SkinColor, SkinRect, TimerRef, prepare};
 use rbms_skin::loader::{LoadedSkin, StretchKind};
-use rbms_skin::model::{FloatValueDef, GraphDef, ImageDef, PropertyRef, SliderDef, TextDef, ValueDef};
+use rbms_skin::model::{FloatValueDef, GraphDef, ImageDef, PropertyRef, SliderDef, ValueDef};
 use rbms_skin::property::SkinHost;
 use rbms_skin::timer::{MICROS_PER_MILLI, TIMER_OFF, TimerState};
 
-use super::{SkinAssets, covers, gauge, graphs, judge, notes, songlist};
+use super::draw::{ImageSelect, float_value, number_value, share};
+use super::textures::{Source, source_of};
+use super::{SkinAssets, SkinFrame, bga, covers, gauge, graphs, judge, notes, refs, songlist, text, text_input};
 use crate::{TextureId, UvRect};
 
 /// Cells a division count of zero or less stands for: the whole image, undivided.
@@ -46,6 +52,23 @@ const MAX_FRACTION_DIGITS: i32 = 8;
 /// mistyped field there is a mistyped allocation -- here it is a slice that stops.
 pub(crate) const MAX_PLACES: usize = 16;
 
+/// The keyframe the reference gives a note field, a judgement pop-up and a song wheel as they are
+/// constructed, before the document's own destination is read: at time zero, no extent, white and
+/// fully transparent (`SkinNote`, `SkinJudge` and `SkinBar` each end their constructor with
+/// `setDestination(0, 0, 0, 0, 0, 0, 0, 255, 255, 255, 0, 0, 0, 0, 0, 0, new int[0])`).
+const SELF_PLACED_KEYFRAME: Keyframe = Keyframe {
+    time_ms: 0,
+    rect: SkinRect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+    clip: None,
+    color: SkinColor { r: u8::MAX, g: u8::MAX, b: u8::MAX, a: 0 },
+    angle_deg: 0.0,
+};
+
+/// The colour the parts of a self-placed object are drawn through. The reference never reads such
+/// an object's own colour: its renderer sets the batch to white or draws each part in the colour of
+/// that part's own destination (`LaneRenderer.drawLane`, `BarRenderer.render`, `SkinJudge.draw`).
+const SELF_PLACED_COLOR: SkinColor = SkinColor { r: u8::MAX, g: u8::MAX, b: u8::MAX, a: u8::MAX };
+
 /// Which kind of object a draw-list entry is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SkinObjectKind {
@@ -68,6 +91,8 @@ pub enum SkinObjectKind {
     TimingDistribution,
     TimingVisualizer,
     HitError,
+    /// An image the document refers to by a negative destination id rather than ships.
+    Reference,
 }
 
 /// One entry of the draw list.
@@ -84,10 +109,11 @@ impl SkinObject {
             Body::Image(_) => SkinObjectKind::Image,
             Body::Number(_) => SkinObjectKind::Number,
             Body::Float(_) => SkinObjectKind::Float,
-            Body::Text(_) => SkinObjectKind::Text,
+            Body::Text(_) | Body::TextInput(_) => SkinObjectKind::Text,
             Body::Slider(_) => SkinObjectKind::Slider,
             Body::Graph(_) => SkinObjectKind::Graph,
-            Body::Background => SkinObjectKind::Background,
+            Body::Bga(_) => SkinObjectKind::Background,
+            Body::Reference(_) => SkinObjectKind::Reference,
             Body::Note(_) => SkinObjectKind::Note,
             Body::Gauge(_) => SkinObjectKind::Gauge,
             Body::Judge(_) => SkinObjectKind::Judge,
@@ -104,17 +130,215 @@ impl SkinObject {
     }
 }
 
+impl SkinObject {
+    /// Hands back the textures this object made for itself while it was drawn. The ones it draws
+    /// from belong to the screen, which hands those back on its own.
+    pub(crate) fn release<R: crate::Renderer>(&self, r: &mut R) {
+        graphs::release(&self.body, r);
+        text::release(&self.body, r);
+    }
+
+    /// The entry one top-level destination becomes.
+    ///
+    /// An object that places itself starts from the keyframe the reference constructs it with, so
+    /// the document's own destination only adds to it ([`self_placed_track`]).
+    fn new(declared: &DestinationTrack, body: Body) -> SkinObject {
+        let track = if body.places_itself() { self_placed_track(declared) } else { declared.clone() };
+        SkinObject { stretch: StretchKind::from_id(track.stretch), track, body }
+    }
+
+    /// Everything this object settles before a frame is drawn, or `None` when it is not drawn this
+    /// frame (`SkinObject.prepare` and each subclass's override of it).
+    ///
+    /// The steps every kind shares are [`Self::place`]: the draw conditions in the order the
+    /// document declared them, stopping at the first that fails, then the timer, then where the
+    /// keyframes put the object. What differs by kind is when the value is read and whether a
+    /// hidden object reads it at all, and a skin's Lua sees that difference because a value written
+    /// as a function is called exactly then:
+    ///
+    /// | kind | order | a hidden object still reads |
+    /// | --- | --- | --- |
+    /// | image, image set | value, shared steps, source timer | the value and the source timer |
+    /// | number, float | value, shared steps, source timer | the value |
+    /// | text | shared steps, value | the value |
+    /// | slider, graph | shared steps, source timer, value | nothing |
+    ///
+    /// A number whose value is one of the "no value" sentinels returns before the shared steps, so
+    /// not even its conditions are evaluated (`SkinNumber.prepare`, `SkinFloat.prepare`). So does an
+    /// image whose selecting value is negative (`SkinImage.prepare`); one that selects a set the
+    /// document could not supply goes through the shared steps first and is left out after them.
+    ///
+    /// `frame.lua` is what every one of those reads goes through, for every kind: a condition
+    /// through [`place_part`], a destination's timer and a source's timer through
+    /// [`TimerRef::value_us`], and a value through [`ValueSource`]. Drawing reads the same values
+    /// again, and by then they are answers kept from here.
+    ///
+    /// How often a function is called differs by what it stands for. A condition and a value are
+    /// called once for each object that asks, on every frame the table above has it asked. A timer
+    /// is not: the reference calls a timer function twice for each read (`TimerProperty.isOff`, then
+    /// `get`), and here the frame's evaluator calls it the first time anything reads it and hands
+    /// that answer to every later read of the frame, another object's included. Which frames a
+    /// timer function runs on is unchanged -- it runs when the first object that reaches its timer
+    /// does -- so a skin that does work inside one still has it done on the frame it expects.
+    pub(crate) fn prepare(&self, frame: &SkinFrame<'_>) -> Option<Resolved> {
+        match &self.body {
+            Body::Image(body) => {
+                let slot = body.select.slot(body.variants.len(), frame)?;
+                let placed = self.place(frame);
+                let (sprite, _, _) = body.variants.get(slot)?.as_ref()?;
+                sprite.prepare(frame);
+                placed
+            }
+            Body::Number(body) => {
+                number_value(&body.value, frame)?;
+                let placed = self.place(frame)?;
+                body.sprite.prepare(frame);
+                Some(placed)
+            }
+            Body::Float(body) => {
+                float_value(body, frame)?;
+                let placed = self.place(frame)?;
+                body.sprite.prepare(frame);
+                Some(placed)
+            }
+            Body::Text(body) => {
+                let placed = self.place(frame);
+                prepare_text(body, frame);
+                placed
+            }
+            Body::TextInput(body) => {
+                let placed = self.place(frame);
+                prepare_text(body.shown(), frame);
+                placed
+            }
+            Body::Slider(body) => {
+                let placed = self.place(frame)?;
+                body.sprite.prepare(frame);
+                share(&body.value, body.ref_num, frame);
+                Some(placed)
+            }
+            Body::Graph(body) => {
+                let placed = self.place(frame)?;
+                body.sprite.prepare(frame);
+                share(&body.value, body.ref_num, frame);
+                Some(placed)
+            }
+            Body::Note(body) => {
+                let placed = self.place(frame)?;
+                for lane in &body.lanes {
+                    let sprites = [lane.note, lane.ln_end, lane.ln_start, lane.ln_body_active, lane.ln_body, lane.mine, lane.hidden];
+                    sprites.iter().flatten().for_each(|sprite| sprite.prepare(frame));
+                }
+                for bar in &body.bars {
+                    place_part(&bar.track, frame);
+                    bar.sprite.prepare(frame);
+                }
+                Some(placed)
+            }
+            Body::Judge(body) => {
+                let placed = self.place(frame)?;
+                judge::prepare_judge(body, frame);
+                Some(placed)
+            }
+            Body::SongList(body) => {
+                let placed = self.place(frame)?;
+                songlist::prepare_songlist(body, frame);
+                Some(placed)
+            }
+            Body::Gauge(body) => {
+                let placed = self.place(frame)?;
+                body.nodes.iter().for_each(|sprite| sprite.prepare(frame));
+                Some(placed)
+            }
+            Body::HiddenCover(body) | Body::LiftCover(body) => {
+                let placed = self.place(frame)?;
+                body.sprite.prepare(frame);
+                Some(placed)
+            }
+            Body::Bga(_)
+            | Body::Reference(_)
+            | Body::GaugeGraph(_)
+            | Body::JudgeGraph(_)
+            | Body::BpmGraph(_)
+            | Body::TimingDistribution(_)
+            | Body::TimingVisualizer(_)
+            | Body::HitError(_) => self.place(frame),
+        }
+    }
+
+    /// The steps of [`Self::prepare`] every kind shares: the draw conditions, the timer, and where
+    /// the keyframes put the object on this frame (`SkinObject.prepare`).
+    ///
+    /// An object that places itself answers [`SELF_PLACED_COLOR`] whatever its keyframes say, so
+    /// its parts are drawn in their own colours and the transparent keyframe it starts from does
+    /// not hide them.
+    fn place(&self, frame: &SkinFrame<'_>) -> Option<Resolved> {
+        let mut placed = place_part(&self.track, frame)?;
+        if self.body.places_itself() {
+            placed.color = SELF_PLACED_COLOR;
+        }
+        Some(placed)
+    }
+}
+
+/// Where one destination sits this frame, or `None` when its conditions or its timer leave it out.
+fn place_part(track: &DestinationTrack, frame: &SkinFrame<'_>) -> Option<Resolved> {
+    let state: &dyn DrawStateSource = frame.state;
+    prepare(track, frame.now_us, frame.timers, state, frame.script(), (0.0, 0.0), frame.mouse)
+}
+
+/// The track a self-placed object animates on: the keyframe the reference constructs it with, and
+/// then whatever the document's destination adds.
+///
+/// A destination with no `dst` adds almost nothing. The reference's loader applies a destination's
+/// timer, loop, blend, filter, centre, conditions and pointer rectangle once per keyframe it reads
+/// (`JSONSkinLoader.setDestination`), so with no keyframe to read none of them are applied at all;
+/// only the offsets and the stretch, which it sets after that loop, reach the object. That is how
+/// `{ id = "notes", offset = 30 }` draws a note field: the object is always there, and the lists
+/// nested under it say where everything goes.
+///
+/// A destination that does carry keyframes has them added after the constructed one, which stays
+/// first among those at time zero because the reference inserts a keyframe ahead of the first later
+/// one and no earlier.
+fn self_placed_track(declared: &DestinationTrack) -> DestinationTrack {
+    if declared.frames.is_empty() {
+        return DestinationTrack {
+            offsets: declared.offsets.clone(),
+            relative: declared.relative,
+            stretch: declared.stretch,
+            frames: vec![SELF_PLACED_KEYFRAME],
+            ..DestinationTrack::default()
+        };
+    }
+    let mut track = declared.clone();
+    let at = track.frames.partition_point(|frame| frame.time_ms < SELF_PLACED_KEYFRAME.time_ms);
+    track.frames.insert(at, SELF_PLACED_KEYFRAME);
+    track
+}
+
+/// Reads the text a text object shows, when the document named a property to read it from
+/// (`SkinText.prepare`, which reads it whether or not the object is drawn).
+fn prepare_text(body: &text::TextBody, frame: &SkinFrame<'_>) {
+    if body.value.is_named() {
+        body.value.text(frame.state, frame.lua);
+    }
+}
+
 /// What an object draws, once its source has been resolved.
 #[derive(Debug)]
 pub(crate) enum Body {
     Image(ImageBody),
     Number(NumberBody),
     Float(FloatBody),
-    Text(TextBody),
+    Text(text::TextBody),
+    /// A text object the document marked editable.
+    TextInput(text_input::TextInputBody),
     Slider(SliderBody),
     Graph(GraphBody),
     /// The background image slot, which the frame fills rather than the document.
-    Background,
+    Bga(bga::BgaBody),
+    /// An image the frame supplies, named by a negative destination id.
+    Reference(refs::ReferenceBody),
     Note(notes::NoteBody),
     Gauge(gauge::GaugeBody),
     Judge(judge::JudgeBody),
@@ -127,6 +351,15 @@ pub(crate) enum Body {
     TimingDistribution(graphs::TimingDistributionBody),
     TimingVisualizer(graphs::TimingVisualizerBody),
     HitError(graphs::HitErrorBody),
+}
+
+impl Body {
+    /// Whether the reference constructs this object with a destination of its own, so it is placed
+    /// by the lists nested under it rather than by the document's destination: the note field, the
+    /// judgement pop-up and the song wheel.
+    pub(crate) fn places_itself(&self) -> bool {
+        matches!(self, Body::Note(_) | Body::Judge(_) | Body::SongList(_))
+    }
 }
 
 /// One registered texture cut into a grid of animation cells.
@@ -189,6 +422,13 @@ impl Sprite {
     /// Where cell `index` sits in the texture, as normalised coordinates.
     pub(crate) fn uv(&self, index: u32) -> UvRect {
         self.region_uv(self.region(index))
+    }
+
+    /// Reads the timer the cell animation is measured from, as the prepare stage reads it when it
+    /// picks the cell an object shows (`SkinSource.getImage`). A sprite that does not animate reads
+    /// nothing.
+    pub(crate) fn prepare(&self, frame: &SkinFrame<'_>) {
+        self.animation_index(self.cells(), frame.now_us, frame.timers, frame.script());
     }
 
     /// Which of `count` cells the animation is on, following `SkinSourceImage.getImageIndex`: a
@@ -282,7 +522,7 @@ impl ValueSource {
     /// A script a document wrote as a string is a function by the time a skin is loaded. Source the
     /// loader never compiled is no reference at all, and reads as though the field had named
     /// nothing.
-    fn new(property: Option<&PropertyRef>, fallback: i32) -> ValueSource {
+    pub(crate) fn new(property: Option<&PropertyRef>, fallback: i32) -> ValueSource {
         match property {
             Some(PropertyRef::Id(id)) => ValueSource::Id(*id),
             Some(PropertyRef::Func(function)) => ValueSource::Function(*function),
@@ -306,19 +546,20 @@ impl ValueSource {
         }
     }
 
-    /// The number this frame.
+    /// The number this frame, exactly as its source gave it.
     ///
-    /// Nothing is narrowed here: a rate id already answers between zero and one, and a `FLOAT_*` id
-    /// carries a plain measurement -- a hi-speed multiplier, an average timing in milliseconds --
-    /// that a drawn `floatvalue` shows as it is. What reads a *share* clamps at its own call site.
+    /// Nothing is narrowed or tidied here. A `FLOAT_*` id carries a plain measurement -- a hi-speed
+    /// multiplier, an average timing in milliseconds -- that a drawn `floatvalue` shows as it is,
+    /// and the reference tells a number it cannot show from one it can by looking at the raw value
+    /// ([`float_value`]). A slider and a graph read an id from the rate space instead and come here
+    /// only for a function or a name ([`share`]).
     pub(crate) fn float(&self, state: &dyn SkinHost, lua: Option<&dyn LuaDrawEval>) -> f32 {
-        let raw = match self {
+        match self {
             ValueSource::None => 0.0,
             ValueSource::Id(id) => state.float(*id),
             ValueSource::Function(function) => lua.map(|lua| lua.call_float(*function)).unwrap_or_default(),
             ValueSource::Name(name) => lua.map(|lua| lua.named_float(name)).unwrap_or_default(),
-        };
-        rbms_skin::property::sanitize_float(raw)
+        }
     }
 
     /// The text this frame, borrowed from the state when it comes from a property so that a line
@@ -341,10 +582,20 @@ impl ValueSource {
 /// A still or animated image, or a set of them one property picks between.
 #[derive(Debug)]
 pub(crate) struct ImageBody {
-    /// One entry per selectable variant, each a sprite and the cell range it animates over.
-    pub(crate) variants: Vec<(Sprite, u32, u32)>,
-    /// The integer that picks a variant.
-    pub(crate) select: ValueSource,
+    /// One entry per selectable variant, each a sprite and the cell range it animates over. An
+    /// image set keeps a `None` where it names an image the document could not supply, so the
+    /// variants after it keep their index (`JsonSkinObjectLoader` leaves that source null).
+    pub(crate) variants: Vec<Option<(Sprite, u32, u32)>>,
+    /// What picks a variant.
+    pub(crate) select: ImageSelect,
+}
+
+impl ImageBody {
+    /// The variant this frame shows, or `None` when the image is not drawn: the selecting value is
+    /// negative, or it names a variant the document could not supply ([`ImageSelect::slot`]).
+    pub(crate) fn chosen(&self, frame: &SkinFrame<'_>) -> Option<&(Sprite, u32, u32)> {
+        self.variants.get(self.select.slot(self.variants.len(), frame)?)?.as_ref()
+    }
 }
 
 /// Where each of a twelve-slot fractional set's glyphs sits in a strip that only carries eleven
@@ -367,9 +618,13 @@ const SIGNED_FRACTION_GLYPHS: u32 = 13;
 /// decimal point.
 const FRACTION_GLYPHS: u32 = 12;
 
+/// The `zeropadding` that fills empty places with the strip's alternate zero. A fractional number
+/// reads anything above it as this and anything below zero as none (`FloatFormatter`).
+const ALTERNATE_ZERO_PADDING: i32 = 2;
+
 /// The `zeropadding` an eleven-cell integer strip is forced to, because its eleventh cell is the
 /// alternate zero and there is nothing else it could be for (`JsonSkinObjectLoader`'s `d > 10`).
-const FORCED_ALTERNATE_ZERO: i32 = 2;
+const FORCED_ALTERNATE_ZERO: i32 = ALTERNATE_ZERO_PADDING;
 
 /// How a digit strip is cut up: how many glyph slots one set answers for, where the negative half
 /// of a set starts, and which cell each slot actually reads.
@@ -499,22 +754,6 @@ pub(crate) struct FloatBody {
     pub(crate) offsets: Vec<(f32, f32, f32, f32)>,
 }
 
-/// A run of text.
-///
-/// The document's `size` is not kept: it names the size the reference loads the font at, and the
-/// drawn height is the destination's own, so the ratio the reference computes is already the
-/// destination height here.
-#[derive(Debug)]
-pub(crate) struct TextBody {
-    /// The family the text engine registered this document's font under.
-    pub(crate) family: Option<String>,
-    /// 0 left, 1 centred, 2 right.
-    pub(crate) align: i32,
-    pub(crate) value: ValueSource,
-    /// Text the document wrote out rather than reading from a property.
-    pub(crate) constant: Option<String>,
-}
-
 /// A handle that slides along its track.
 #[derive(Debug)]
 pub(crate) struct SliderBody {
@@ -538,14 +777,6 @@ pub(crate) struct GraphBody {
     pub(crate) ref_num: Option<(i32, i32)>,
 }
 
-/// Everything the draw list needs about one image source.
-pub(crate) type Source<'a> = &'a [(String, TextureId, (u32, u32))];
-
-/// Looks an image source up by the id a document gave it.
-fn source_of<'a>(sources: Source<'a>, id: &str) -> Option<&'a (String, TextureId, (u32, u32))> {
-    sources.iter().find(|(source, _, _)| source == id)
-}
-
 /// The timer an object animates its cells with, when the skin named one by id or handed over a
 /// function that computes it.
 fn cell_timer(property: Option<&PropertyRef>) -> Option<TimerRef> {
@@ -563,6 +794,11 @@ pub(crate) fn image_sprite(def: &ImageDef, sources: Source<'_>) -> Option<Sprite
 /// A destination whose id names nothing this build draws is dropped with a warning rather than
 /// failing the skin: a document written for a screen with more object kinds still shows everything
 /// this build does understand.
+///
+/// So is a destination with no keyframe, unless what it names places itself. The reference removes
+/// such an object before the first frame (`SkinObject.validate`, checked by `Skin.prepare`), so its
+/// conditions are never asked; keeping it would call whatever functions the skin gated it on, on
+/// every frame, for an object that can never be drawn.
 pub(crate) fn build_objects(
     skin: &LoadedSkin,
     sources: Source<'_>,
@@ -575,12 +811,19 @@ pub(crate) fn build_objects(
         let Some(body) = build_body(skin, &named.id, sources, families, assets, warnings) else {
             continue;
         };
-        objects.push(SkinObject { track: named.track.clone(), stretch: StretchKind::from_id(named.track.stretch), body });
+        if named.track.frames.is_empty() && !body.places_itself() {
+            warnings.push(format!("object {:?} has no destination keyframe, so it is never drawn", named.id));
+            continue;
+        }
+        objects.push(SkinObject::new(&named.track, body));
     }
     objects
 }
 
 /// The body behind one destination id, or `None` when nothing declares it.
+///
+/// A reference image is looked for before anything the document declared, which is where the
+/// reference's loader looks for it (`JSONSkinLoader`, ahead of its object loader).
 pub(crate) fn build_body(
     skin: &LoadedSkin,
     id: &str,
@@ -590,23 +833,25 @@ pub(crate) fn build_body(
     warnings: &mut Vec<String>,
 ) -> Option<Body> {
     let def = &skin.def;
+    if let Some(body) = refs::build_reference(id) {
+        return Some(body);
+    }
     if let Some(image) = def.image.iter().find(|image| image.id == id) {
         return image_body(image, sources, warnings).map(Body::Image);
     }
     if let Some(set) = def.imageset.iter().find(|set| set.id == id) {
-        let variants: Vec<(Sprite, u32, u32)> = set
+        let variants: Vec<Option<(Sprite, u32, u32)>> = set
             .images
             .iter()
-            .filter_map(|name| def.image.iter().find(|image| &image.id == name))
-            .filter_map(|image| image_sprite(image, sources))
-            .map(|sprite| (sprite, 0, sprite.cells()))
+            .map(|name| {
+                def.image.iter().find(|image| &image.id == name).and_then(|image| image_sprite(image, sources)).map(|sprite| (sprite, 0, sprite.cells()))
+            })
             .collect();
-        if variants.is_empty() {
+        if variants.iter().all(Option::is_none) {
             warnings.push(format!("image set {id:?} names no image this build could load"));
             return None;
         }
-        let select = ValueSource::new(set.value.as_ref(), set.reference);
-        return Some(Body::Image(ImageBody { variants, select }));
+        return Some(Body::Image(ImageBody { variants, select: ImageSelect::of_set(set.value.as_ref(), set.reference) }));
     }
     if let Some(value) = def.value.iter().find(|value| value.id == id) {
         return number_body(value, sources, warnings).map(Body::Number);
@@ -615,7 +860,7 @@ pub(crate) fn build_body(
         return float_body(value, sources, warnings).map(Body::Float);
     }
     if let Some(text) = def.text.iter().find(|text| text.id == id) {
-        return Some(Body::Text(text_body(text, families)));
+        return Some(if text.editable { Body::TextInput(text_input::text_input_body(text, families)) } else { Body::Text(text::text_body(text, families)) });
     }
     if let Some(slider) = def.slider.iter().find(|slider| slider.id == id) {
         return slider_body(slider, sources, warnings).map(Body::Slider);
@@ -624,7 +869,7 @@ pub(crate) fn build_body(
         return graph_body(graph, sources, warnings).map(Body::Graph);
     }
     if def.bga.as_ref().is_some_and(|bga| bga.id == id) {
-        return Some(Body::Background);
+        return Some(Body::Bga(bga::BgaBody));
     }
     if let Some(body) = notes::build_note(skin, id, sources, families, assets, warnings) {
         return Some(body);
@@ -657,8 +902,8 @@ fn image_body(def: &ImageDef, sources: Source<'_>, warnings: &mut Vec<String>) -
     let cells = sprite.cells();
     let groups = if def.len > 1 { (def.len as u32).min(cells.max(1)) } else { 1 };
     let per_group = (cells / groups).max(1);
-    let variants = (0..groups).map(|group| (sprite, group * per_group, per_group)).collect();
-    let select = if groups > 1 { ValueSource::new(None, def.reference) } else { ValueSource::None };
+    let variants = (0..groups).map(|group| Some((sprite, group * per_group, per_group))).collect();
+    let select = if groups > 1 { ImageSelect::of_index(def.reference) } else { ImageSelect::First };
     Some(ImageBody { variants, select })
 }
 
@@ -673,7 +918,7 @@ fn number_body(def: &ValueDef, sources: Source<'_>, warnings: &mut Vec<String>) 
     Some(NumberBody {
         sprite,
         layout,
-        digits: def.digit.clamp(1, MAX_PLACES as i32) as u32,
+        digits: def.digit.clamp(0, MAX_PLACES as i32) as u32,
         zero_padding: integer_padding(&layout, def),
         space: def.space as f32,
         align: def.align,
@@ -719,7 +964,7 @@ fn float_body(def: &FloatValueDef, sources: Source<'_>, warnings: &mut Vec<Strin
         integer_digits,
         fraction_digits,
         sign: fraction_sign(def.is_sign_visible, &layout),
-        zero_padding: def.zeropadding,
+        zero_padding: def.zeropadding.clamp(0, ALTERNATE_ZERO_PADDING),
         space: def.space as f32,
         align: def.align,
         gain: def.gain,
@@ -746,16 +991,6 @@ fn digit_offsets(offsets: &[ValueDef]) -> Vec<(f32, f32, f32, f32)> {
     offsets.iter().map(|offset| (offset.x as f32, offset.y as f32, offset.w as f32, offset.h as f32)).collect()
 }
 
-/// A text run and the font it is drawn with.
-fn text_body(def: &TextDef, families: &[(String, String)]) -> TextBody {
-    TextBody {
-        family: families.iter().find(|(id, _)| *id == def.font).map(|(_, family)| family.clone()),
-        align: def.align,
-        value: ValueSource::new(def.value.as_ref(), def.reference),
-        constant: def.constant_text.clone(),
-    }
-}
-
 /// A slider and the track it moves along.
 fn slider_body(def: &SliderDef, sources: Source<'_>, warnings: &mut Vec<String>) -> Option<SliderBody> {
     let Some((_, tex, size)) = source_of(sources, &def.src) else {
@@ -769,7 +1004,7 @@ fn slider_body(def: &SliderDef, sources: Source<'_>, warnings: &mut Vec<String>)
         direction: def.angle,
         range: def.range as f32,
         value,
-        ref_num: (def.is_ref_num && def.max > def.min).then_some((def.min, def.max)),
+        ref_num: (def.value.is_none() && def.is_ref_num).then_some((def.min, def.max)),
     })
 }
 
@@ -784,7 +1019,7 @@ fn graph_body(def: &GraphDef, sources: Source<'_>, warnings: &mut Vec<String>) -
         sprite,
         direction: def.angle,
         value: ValueSource::new(def.value.as_ref(), def.graph_type),
-        ref_num: (def.is_ref_num && def.max > def.min).then_some((def.min, def.max)),
+        ref_num: (def.value.is_none() && def.is_ref_num).then_some((def.min, def.max)),
     })
 }
 

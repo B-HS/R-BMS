@@ -31,7 +31,8 @@
 //! - `option(id | name)` is [`DrawStateSource::boolean`], `false` when it answers `None`.
 //!   `number(id | name)` is [`SkinHost::integer`], and zero rather than the "no value" sentinel for
 //!   an id the reference has no property under; `numbers(...)` applies it to each argument.
-//!   `float_number(id | name)` is [`SkinHost::float`] and `text(id | name)` is [`SkinHost::text`].
+//!   `float_number(id | name)` is [`SkinHost::float`], with the same zero for an id the reference
+//!   has no float and no rate under, and `text(id | name)` is [`SkinHost::text`].
 //!   A number, or a string that spells one, is an id; any other string is a name, looked up in the
 //!   tables of [`crate::property::names`]; anything else is no property at all.
 //! - `event_index(id)` is [`SkinHost::image_index`] and raises for an id the reference has no image
@@ -133,6 +134,10 @@ const MICROS_PER_SECOND: f64 = 1_000_000.0;
 
 /// What `number` answers for an id the reference has no property under (`getNumberValue`).
 const NUMBER_WITHOUT_PROPERTY: i32 = 0;
+
+/// What `float_number` answers for an id or a name the reference has no property under
+/// (`FloatNumberFunction`).
+const FLOAT_WITHOUT_PROPERTY: f32 = 0.0;
 
 /// The volume a sound plays at when the skin names none (`SkinAudioLuaApiExporter.play`).
 const AUDIO_VOLUME_DEFAULT: f32 = 1.0;
@@ -856,9 +861,13 @@ impl Binding<'_> {
         }
     }
 
-    /// `float_number`.
+    /// `float_number`: the host's value, sentinel included, for a property the reference has in
+    /// either of the two spaces a float is looked up in, and zero for one it does not.
     fn float_number(&self, value: &Value) -> f32 {
-        self.state.property_id(NameSpace::Float, value).map_or(crate::property::FLOAT_ABSENT, |id| self.host.float(id))
+        match self.state.property_id(NameSpace::Float, value) {
+            Some(id) if reference_implements(NameSpace::Float, id) || reference_implements(NameSpace::Rate, id) => self.host.float(id),
+            _ => FLOAT_WITHOUT_PROPERTY,
+        }
     }
 
     /// `text`, as a string of the interpreter.

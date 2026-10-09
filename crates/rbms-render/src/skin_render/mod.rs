@@ -13,17 +13,24 @@
 //! Nothing here replaces the built-in screens. A screen with no document selected draws exactly what
 //! it drew before; [`SkinScreen`] is what a screen reaches for only once a document has loaded.
 
+mod bga;
 mod color;
 mod covers;
 mod draw;
+pub mod frame;
 mod gauge;
-mod graphs;
+pub mod graphs;
+pub mod input;
 mod judge;
 mod notes;
 mod object;
+pub mod refs;
 pub mod screen;
 mod songlist;
 pub mod state;
+mod text;
+mod text_input;
+mod textures;
 
 #[cfg(test)]
 mod tests;
@@ -37,29 +44,24 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use rbms_skin::dst::{LuaDrawEval, SkinColor, SkinRect};
 use rbms_skin::loader::LoadedSkin;
-use rbms_skin::property::SkinHost;
-use rbms_skin::timer::TimerState;
 
 use crate::font::TextContext;
-use crate::{Color, Rect, Renderer, TextureId};
+use crate::{Color, Rect, Renderer};
 
+pub use bga::BgaFrame;
 pub use color::parse_hex_color;
+pub use frame::{FrameData, FrameSeries, PreparedFrame, SkinFrame};
+pub use gauge::GaugeFrame;
+pub use graphs::{BpmTimeline, GaugeHistory, NoteDistribution, RecentHits, TimingHistogram};
+pub use input::{SkinPointer, SkinPointerButton};
+pub use notes::NoteField;
 pub use object::SkinObjectKind;
+pub use refs::{ReferenceImage, ReferenceImages};
 pub use screen::{
     LaneTimerState, PlayLanes, PlayTimers, ResultTimers, SelectTimers, SkinDraw, render_decide_screen, render_keyconfig_screen, render_play_screen,
     render_result_screen, render_select_screen,
 };
-pub use state::{FrameExtra, PlayObjectState, ResultSeriesState, SelectListState};
-
-/// Pixel height one unit of the text engine's legacy scale draws at.
-///
-/// A skin sizes its text in pixels while [`TextContext`] takes that scale, so the two are related by
-/// this factor. It tracks `font::px_for`; the ratio itself is pinned by test rather than shared,
-/// because the text engine's scale is its own private unit.
-const TEXT_PIXELS_PER_SCALE: f32 = 8.5;
-
-/// The smallest text scale worth asking the engine for, below which it clamps anyway.
-const MIN_TEXT_SCALE: f32 = 0.1;
+pub use songlist::SongBars;
 
 /// Distinguishes one loaded document's textures from another's, so a play screen and a select screen
 /// can each hold a document without their image sources colliding in the registry.
@@ -176,48 +178,18 @@ impl SkinViewport {
     }
 }
 
-/// Everything one frame of a skin needs from the running game.
-pub struct SkinFrame<'a> {
-    /// The clock the frame is drawn against, in microseconds, the same one every timer is measured
-    /// on.
-    pub now_us: i64,
-    pub timers: &'a TimerState,
-    pub state: &'a dyn SkinHost,
-    /// The skin's Lua bound to this frame, when the skin has an interpreter.
-    pub lua: Option<&'a dyn LuaDrawEval>,
-    /// Where the pointer is in document coordinates, for the objects a document gated on it.
-    pub mouse: Option<(f32, f32)>,
-    /// The background image this frame, already registered with the renderer.
-    pub background: Option<TextureId>,
-    /// The screen-shaped state a property id cannot carry: rows, series and lane geometry. A screen
-    /// with nothing of the kind to say passes [`FrameExtra::None`].
-    pub extra: FrameExtra<'a>,
-}
-
-impl<'a> SkinFrame<'a> {
-    /// The evaluator as destination gating and timers ask for it.
-    pub(crate) fn script(&self) -> Option<&'a dyn LuaDrawEval> {
-        self.lua
-    }
-}
-
-impl std::fmt::Debug for SkinFrame<'_> {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.debug_struct("SkinFrame").field("now_us", &self.now_us).field("mouse", &self.mouse).finish_non_exhaustive()
-    }
-}
-
 /// A loaded document, compiled into something a screen draws every frame.
 ///
 /// Building it registers every image source the document names and resolves every object it draws;
-/// after that a frame costs one pass over the object list and no file access at all.
+/// after that a frame costs two passes over the object list, one to prepare and one to draw, and no
+/// file access at all.
 #[derive(Debug)]
 pub struct SkinScreen {
     /// The size the document was authored at, which every coordinate in it is relative to.
     authored: (f32, f32),
     objects: Vec<object::SkinObject>,
     /// Every texture this screen registered, so it can hand them all back.
-    textures: Vec<TextureId>,
+    textures: textures::SkinTextures,
     /// The font family each font id resolved to inside the text engine.
     families: Vec<(String, String)>,
     warnings: Vec<String>,
@@ -237,20 +209,7 @@ impl SkinScreen {
     pub fn build<R: Renderer>(r: &mut R, text: &mut TextContext, skin: &LoadedSkin, assets: &mut dyn SkinAssets) -> SkinScreen {
         let serial = NEXT_SCREEN_SERIAL.fetch_add(1, Ordering::Relaxed);
         let mut warnings: Vec<String> = Vec::new();
-        let mut textures: Vec<TextureId> = Vec::new();
-
-        let mut sources: Vec<(String, TextureId, (u32, u32))> = Vec::new();
-        for (id, path) in &skin.sources {
-            match assets.image(path) {
-                Some(image) => {
-                    let key = format!("rbms.skin.{serial}.source.{id}");
-                    let tex = r.register_texture(&key, &image.rgba, image.width, image.height);
-                    textures.push(tex);
-                    sources.push((id.clone(), tex, (image.width, image.height)));
-                }
-                None => warnings.push(format!("image source {id:?} could not be decoded from {}", path.display())),
-            }
-        }
+        let textures = textures::SkinTextures::register(r, skin, assets, serial, &mut warnings);
 
         let mut families: Vec<(String, String)> = Vec::new();
         for (id, path) in &skin.fonts {
@@ -260,7 +219,7 @@ impl SkinScreen {
             }
         }
 
-        let objects = object::build_objects(skin, &sources, &families, assets, &mut warnings);
+        let objects = object::build_objects(skin, textures.sources(), &families, assets, &mut warnings);
         let authored = (skin.def.w.max(1) as f32, skin.def.h.max(1) as f32);
         SkinScreen { authored, objects, textures, families, warnings }
     }
@@ -282,7 +241,7 @@ impl SkinScreen {
 
     /// How many textures this screen holds.
     pub fn texture_count(&self) -> usize {
-        self.textures.len()
+        self.textures.count()
     }
 
     /// The font families this screen registered, as `(document font id, family name)`.
@@ -298,26 +257,45 @@ impl SkinScreen {
     /// Hands every texture back to `r`. A screen is unusable afterwards and must be rebuilt, which
     /// is what a skin reload does.
     pub fn release<R: Renderer>(&mut self, r: &mut R) {
-        for tex in self.textures.drain(..) {
-            r.release_texture(tex);
+        self.textures.release(r);
+        for object in &self.objects {
+            object.release(r);
         }
         self.objects.clear();
     }
 
-    /// Draws one frame, in the document's own object order, and answers how many objects were drawn.
+    /// The first stage of a frame: prepares every object in the document's own order -- draw
+    /// conditions, then the timer, then where it sits, then the values it shows -- and draws nothing
+    /// (`Skin.drawAllObjects`, the `prepare` loop).
+    ///
+    /// This is the only stage that asks the skin's Lua anything, so it is the one that has to run
+    /// while `frame.lua` is bound to a host. Bind once, prepare inside the binding, and the frame
+    /// can be drawn after the binding has ended.
+    pub fn prepare(&self, frame: &SkinFrame<'_>) -> PreparedFrame {
+        frame::prepare_objects(&self.objects, frame)
+    }
+
+    /// The second stage of a frame: draws what `prepared` left standing, in the document's own
+    /// object order, and answers how many objects were drawn.
     ///
     /// Order is z-order: an object is submitted exactly where the document put it, so a backend that
-    /// merges adjacent draws still lands them in the same place.
-    pub fn draw<R: Renderer>(&self, ctx: &mut crate::ctx::RenderCtx<'_>, r: &mut R, frame: &SkinFrame<'_>) -> usize {
+    /// merges adjacent draws still lands them in the same place. `frame` is the frame `prepared` was
+    /// made from; its `lua` is not consulted, because everything the skin's Lua had to say was said
+    /// while the frame was prepared.
+    pub fn draw_prepared<R: Renderer>(&self, ctx: &mut crate::ctx::RenderCtx<'_>, r: &mut R, frame: &SkinFrame<'_>, prepared: &PreparedFrame) -> usize {
         let (screen_w, screen_h) = r.size();
         let viewport = SkinViewport::new(self.authored, (screen_w as f32, screen_h as f32));
-        let mut drawn = 0;
-        for object in &self.objects {
-            if draw::draw_object(ctx, r, object, &viewport, frame) {
-                drawn += 1;
-            }
-        }
+        let drawn = frame::draw_objects(ctx, r, &self.objects, &viewport, frame, prepared);
         ctx.text.reset_family();
         drawn
+    }
+
+    /// Makes one whole frame, both stages back to back, and answers how many objects were drawn.
+    ///
+    /// Every object is prepared before the first one is drawn, as [`SkinScreen::prepare`] and
+    /// [`SkinScreen::draw_prepared`] called in turn would have it.
+    pub fn draw<R: Renderer>(&self, ctx: &mut crate::ctx::RenderCtx<'_>, r: &mut R, frame: &SkinFrame<'_>) -> usize {
+        let prepared = self.prepare(frame);
+        self.draw_prepared(ctx, r, frame, &prepared)
     }
 }

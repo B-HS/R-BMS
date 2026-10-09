@@ -25,12 +25,29 @@ use rbms_skin::loader::{Filtering, LoadedSkin, filtering_for};
 use rbms_skin::model::{Animation, NoteSet};
 
 use super::draw::Placement;
-use super::object::{Body, Source, Sprite, image_sprite};
+use super::object::{Body, Sprite, image_sprite};
+use super::textures::Source;
 use super::{SkinAssets, SkinFrame};
 use crate::ctx::RenderCtx;
-use crate::playfield::PlayfieldView;
+use crate::playfield::{LaneShade, PlayfieldView};
 use crate::skin::Skin;
 use crate::{BlendMode, Rect, Renderer, TextureFilter};
+
+/// The running note field: the chart under the play head and the geometry it scrolls through.
+///
+/// A note and a lane cover each need a whole field rather than one number, and a property id answers
+/// scalars, so this arrives beside the scalar source instead.
+pub struct NoteField<'a> {
+    /// The built-in field's resolved geometry. A document's note field takes each lane's column from
+    /// its own rectangles, and the judgement line and the ceiling from here.
+    pub field: &'a Skin,
+    pub playfield: &'a PlayfieldView<'a>,
+    pub shade: LaneShade,
+    /// The key bombs still burning, as `(started at, lane)`.
+    pub bomb: &'a [(i64, u8)],
+    /// Which lanes are held, in lane order.
+    pub keys_down: &'a [bool],
+}
 
 /// Percent one whole expansion rate is written as.
 const FULL_EXPANSION_PERCENT: f32 = 100.0;
@@ -179,8 +196,8 @@ impl Scroll<'_> {
 
 /// Draws the field, answering whether anything reached the screen.
 ///
-/// A frame that carries no play state leaves the field to the built-in renderer, which is what a
-/// document loaded on a screen with no chart running wants.
+/// A frame that carries no note field draws none, which is what a document loaded on a screen with
+/// no chart running wants.
 pub(crate) fn draw_note<R: Renderer>(
     _ctx: &mut RenderCtx<'_>,
     r: &mut R,
@@ -189,7 +206,7 @@ pub(crate) fn draw_note<R: Renderer>(
     _rect: SkinRect,
     frame: &SkinFrame<'_>,
 ) -> bool {
-    let Some(play) = frame.extra.play() else {
+    let Some(play) = frame.data.field else {
         return false;
     };
     let field = play.field;

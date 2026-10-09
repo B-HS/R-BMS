@@ -17,12 +17,25 @@ use rbms_skin::model::SkinDef;
 
 use super::color::modulate;
 use super::draw::Placement;
-use super::object::{Body, Source, Sprite, image_sprite};
-use super::state::SelectListState;
-use super::{MIN_TEXT_SCALE, SkinAssets, SkinFrame, TEXT_PIXELS_PER_SCALE};
+use super::object::{Body, Sprite, image_sprite};
+use super::text::{MIN_TEXT_SCALE, TEXT_PIXELS_PER_SCALE};
+use super::textures::Source;
+use super::{SkinAssets, SkinFrame};
 use crate::Color;
 use crate::Renderer;
 use crate::ctx::RenderCtx;
+use crate::select::SelectRow;
+
+/// The browser's bars: the rows a song wheel moves through and which of them is focused.
+///
+/// A wheel needs the rows themselves rather than one number, and a property id answers scalars, so
+/// they arrive beside the scalar source instead.
+pub struct SongBars<'a> {
+    pub rows: &'a [SelectRow],
+    pub sel: usize,
+    /// Whether the application's option panel is open over the browser.
+    pub options_open: bool,
+}
 
 /// A label's `align` that starts the line at its destination's anchor, numbered as a text object's
 /// alignment is because a slot label is one.
@@ -84,7 +97,7 @@ pub(crate) struct SongListBody {
 impl SongListBody {
     /// Which row of the browser's list lands on slot `index`, or `None` when the wheel reaches past
     /// either end of it.
-    fn row_at(&self, list: &SelectListState<'_>, index: usize) -> Option<usize> {
+    fn row_at(&self, list: &SongBars<'_>, index: usize) -> Option<usize> {
         let row = list.sel as isize + index as isize - self.center as isize;
         (row >= 0 && (row as usize) < list.rows.len()).then_some(row as usize)
     }
@@ -192,6 +205,22 @@ fn resolve(track: &DestinationTrack, frame: &SkinFrame<'_>) -> Option<Resolved> 
     prepare(track, frame.now_us, frame.timers, state, frame.script(), (0.0, 0.0), frame.mouse)
 }
 
+/// Prepares every destination the wheel nests, slot by slot, whichever rows the frame carries.
+///
+/// The reference prepares all of a wheel's parts on every frame and only then decides which of them
+/// a row shows (`SkinBar.prepare`), so whatever a part asks the skin's Lua is asked here for all of
+/// them; the draw stage only reads answers back.
+pub(crate) fn prepare_songlist(body: &SongListBody, frame: &SkinFrame<'_>) {
+    for slot in &body.slots {
+        let bars = [&slot.on, &slot.off].into_iter().flatten().map(|bar| &bar.track);
+        let labels = [&slot.title, &slot.level, &slot.label].into_iter().flatten().map(|label| &label.track);
+        let lamps = [&slot.lamp, &slot.player_lamp].into_iter().flatten();
+        for track in bars.chain(labels).chain(lamps) {
+            resolve(track, frame);
+        }
+    }
+}
+
 /// Draws one slot's bar, as the image its id names or as a plain filled rectangle when it names
 /// none.
 fn draw_bar<R: Renderer>(r: &mut R, place: &Placement<'_>, bar: &Bar, frame: &SkinFrame<'_>) -> bool {
@@ -271,8 +300,8 @@ fn draw_lamp<R: Renderer>(r: &mut R, place: &Placement<'_>, track: Option<&Desti
 
 /// Draws the wheel, answering whether anything reached the screen.
 ///
-/// The wheel's own destination places nothing, because every slot carries one of its own; what it
-/// contributes is its colour, which fades or tints the whole wheel at once.
+/// The wheel's own destination places nothing and tints nothing: every slot carries a destination of
+/// its own, and a wheel is drawn through white whatever its own keyframes say.
 pub(crate) fn draw_songlist<R: Renderer>(
     ctx: &mut RenderCtx<'_>,
     r: &mut R,
@@ -281,7 +310,7 @@ pub(crate) fn draw_songlist<R: Renderer>(
     _rect: SkinRect,
     frame: &SkinFrame<'_>,
 ) -> bool {
-    let Some(list) = frame.extra.select() else {
+    let Some(list) = frame.data.bars else {
         return false;
     };
     let mut drawn = false;

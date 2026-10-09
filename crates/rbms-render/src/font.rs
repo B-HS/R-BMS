@@ -1,11 +1,19 @@
+mod block;
+
+#[cfg(test)]
+mod block_tests;
+
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::hash::Hasher;
 use std::sync::Arc;
 
-use cosmic_text::{Attrs, Buffer, CacheKey, Color as CtColor, Family, FontSystem, Metrics, Shaping, SwashCache, fontdb};
+use cosmic_text::{Attrs, Buffer, CacheKey, Color as CtColor, Family, FontSystem, Metrics, Shaping, Stretch, Style, SwashCache, Weight, fontdb};
 
 use crate::glyph_atlas::{GlyphAtlas, GlyphAtlasBinding, glyph_bitmap, packed_rgb};
-use crate::{Color, QuadParams, Rect, Renderer};
+use crate::{BlendMode, Color, QuadParams, Rect, Renderer};
+
+pub use block::{BLOCK_MAX_DIM, BlockAlign, BlockFit, BlockSpec, TextBlock};
 
 /// Bundled default UI font (Inter, SIL OFL 1.1). cosmic-text falls back to installed system
 /// fonts for scripts Inter lacks (CJK, Thai, Arabic, …), so any language renders.
@@ -26,6 +34,45 @@ const ELLIPSIS: &str = "…";
 /// size, picked so the existing call sites keep a comparable visual size.
 fn px_for(scale: f32) -> f32 {
     (scale * 8.5).round().max(8.0)
+}
+
+/// One face of a font family: what the font database is asked for when a line is shaped.
+///
+/// A family name alone does not name a face. Two files of one typographic family -- a medium and a
+/// black cut, say -- report the same family and differ only in weight, so asking for the family
+/// with the default weight would hand back whichever of them sits nearer to regular for both.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Face {
+    family: String,
+    weight: Weight,
+    style: Style,
+    stretch: Stretch,
+    /// The database entry this face was loaded as, when it came through [`TextContext::load_font`].
+    id: Option<fontdb::ID>,
+}
+
+impl Face {
+    /// The face a bare family name asks for: its regular, upright, unstretched cut.
+    fn of_family(family: &str) -> Face {
+        Face { family: family.to_string(), weight: Weight::NORMAL, style: Style::Normal, stretch: Stretch::Normal, id: None }
+    }
+
+    /// Whether two faces are the same cut of the same family, whichever file each came from.
+    fn same_cut(&self, other: &Face) -> bool {
+        self.family == other.family && self.weight == other.weight && self.style == other.style && self.stretch == other.stretch
+    }
+
+    /// What a shaping run asks the font database for.
+    fn attrs(&self) -> Attrs<'_> {
+        Attrs::new().family(Family::Name(&self.family)).weight(self.weight).style(self.style).stretch(self.stretch)
+    }
+}
+
+/// A fingerprint of a font file's bytes, so the same file loaded again is recognised.
+fn content_digest(data: &[u8]) -> (usize, u64) {
+    let mut hasher = std::hash::DefaultHasher::new();
+    hasher.write(data);
+    (data.len(), hasher.finish())
 }
 
 /// A shaped, laid-out single line: total width plus each glyph's pen position and rasterizer
@@ -98,6 +145,15 @@ pub struct TextContext {
     /// Monotonic access counter stamped onto every cache entry on use; the eviction sweep keeps the
     /// entries with the highest stamps.
     tick: u64,
+    /// The face each name [`TextContext::load_font`] handed out stands for.
+    faces: HashMap<String, Face>,
+    /// The name each loaded font file was given, by the fingerprint of its bytes, so a file loaded
+    /// again adds nothing to the database.
+    loaded: HashMap<(usize, u64), String>,
+    /// What [`block`] measured of a face at one design size, by `(name, size bits)`.
+    design: HashMap<(String, u32), block::DesignMetrics>,
+    /// The blend the last skin object that set one left the batch in ([`TextContext::inherited_blend`]).
+    left_blend: BlendMode,
 }
 
 impl Default for TextContext {
@@ -120,6 +176,33 @@ impl TextContext {
             runs: HashMap::new(),
             atlas: GlyphAtlas::new(),
             tick: 0,
+            faces: HashMap::new(),
+            loaded: HashMap::new(),
+            design: HashMap::new(),
+            left_blend: BlendMode::Alpha,
+        }
+    }
+
+    /// The face `name` stands for: the one loaded under it, or the regular cut of the family it
+    /// spells when nothing was.
+    fn face(&self, name: &str) -> Face {
+        self.faces.get(name).cloned().unwrap_or_else(|| Face::of_family(name))
+    }
+
+    /// The name a freshly loaded face is handed out under.
+    ///
+    /// That is its family name, which is what a single font per family has always been called. A
+    /// second cut of a family already loaded cannot share it, so it is told apart by its weight,
+    /// and by its style and stretch as well when even that is taken.
+    fn name_for(&self, face: &Face) -> String {
+        let taken = |name: &str| self.faces.get(name).is_some_and(|known| !known.same_cut(face));
+        let by_weight = format!("{} {}", face.family, face.weight.0);
+        if !taken(&face.family) {
+            face.family.clone()
+        } else if !taken(&by_weight) {
+            by_weight
+        } else {
+            format!("{by_weight} {:?} {:?}", face.style, face.stretch)
         }
     }
 
@@ -172,10 +255,10 @@ impl TextContext {
             entry.used = tick;
             return;
         }
+        let face = self.face(&self.family);
         let mut buf = Buffer::new(&mut self.fs, Metrics::new(px, px * 1.2));
         buf.set_size(None, None);
-        let attrs = Attrs::new().family(Family::Name(&self.family));
-        buf.set_text(text, &attrs, Shaping::Advanced, None);
+        buf.set_text(text, &face.attrs(), Shaping::Advanced, None);
         buf.shape_until_scroll(&mut self.fs, false);
         let mut width = 0f32;
         let mut glyphs = Vec::new();
@@ -286,17 +369,49 @@ impl TextContext {
         out
     }
 
-    /// Register an extra font face, returning its family name to pass to [`TextContext::set_family`].
+    /// Register an extra font face, returning the name to pass to [`TextContext::set_family`].
+    ///
+    /// The name is the face's family name, unless another cut of that family is already loaded:
+    /// then it carries the weight too, so each cut can be asked for on its own.
     ///
     /// Success means the database gained at least one face from `data`; bytes that are not a font
     /// add nothing and yield `None`, leaving the database and every cache untouched. Lines already
-    /// shaped under the returned family name are dropped so they are laid out with the new face.
+    /// shaped under the returned name are dropped so they are laid out with the new face. A file
+    /// that was loaded before is recognised by its bytes and answers the name it was given then,
+    /// without adding a second copy of it to the database.
     pub fn load_font(&mut self, data: Vec<u8>) -> Option<String> {
+        let digest = content_digest(&data);
+        if let Some(name) = self.loaded.get(&digest) {
+            return Some(name.clone());
+        }
         let db = self.fs.db_mut();
         let loaded = db.load_font_source(fontdb::Source::Binary(Arc::new(data)));
-        let family = loaded.last().and_then(|id| db.face(*id)).and_then(|f| f.families.first().map(|(n, _)| n.clone()))?;
-        self.cache.remove(&family);
-        Some(family)
+        let info = loaded.last().and_then(|id| db.face(*id))?;
+        let family = info.families.first().map(|(name, _)| name.clone())?;
+        let face = Face { family, weight: info.weight, style: info.style, stretch: info.stretch, id: Some(info.id) };
+        let name = self.name_for(&face);
+        self.cache.remove(&name);
+        self.design.retain(|(known, _), _| *known != name);
+        self.faces.insert(name.clone(), face);
+        self.loaded.insert(digest, name.clone());
+        Some(name)
+    }
+
+    /// The blend a skin's text is drawn with, which is whatever the object drawn before it left
+    /// behind.
+    ///
+    /// The reference keeps one blend setting on the batch every skin object draws through, and a
+    /// text object is the one kind that never sets it (`SkinTextFont.draw` calls `setType` and
+    /// nothing else), so a line of text is blended the way the last image, number or bar was. It is
+    /// kept here because this is the one piece of drawing state that outlives a frame, as the
+    /// reference's batch does.
+    pub fn inherited_blend(&self) -> BlendMode {
+        self.left_blend
+    }
+
+    /// Records the blend an object that set one has just drawn with ([`TextContext::inherited_blend`]).
+    pub fn leave_blend(&mut self, blend: BlendMode) {
+        self.left_blend = blend;
     }
 
     /// Make `name` the preferred family for subsequent text. Lines shaped under other families stay

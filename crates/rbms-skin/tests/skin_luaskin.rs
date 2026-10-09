@@ -14,16 +14,22 @@ use std::path::{Path, PathBuf};
 use mlua::FromLuaMulti;
 use rbms_model::Mode;
 use rbms_skin::SkinError;
-use rbms_skin::dst::{DrawCondition, SkinOffset, TimerRef};
+use rbms_skin::dst::{DrawCondition, SkinOffset, TimerRef, prepare};
 use rbms_skin::loader::lua_skin::{LuaSkinOptions, load_lua_skin};
 use rbms_skin::loader::{
     DEFAULT_MAX_DOCUMENT_BYTES, LoadedSkin, OPTION_RANDOM_VALUE, ParserKind, PlayTimings, SKIN_TYPE_COURSE_RESULT, SKIN_TYPE_PLAY_7KEYS, SKIN_TYPE_SKIN_SELECT,
     SkinLoadOptions, SkinUserConfig, automatic_offsets, is_known_skin_type, is_lua_skin, load_header, load_skin, load_skin_with_host, skin_resolution,
 };
 use rbms_skin::lua::{LoadBudget, LuaBudget};
-use rbms_skin::model::PropertyRef;
-use rbms_skin::property::{DefaultState, INTEGER_ABSENT, MapHost, PropertyKind, SkinHost};
+use rbms_skin::model::{Destination, PropertyRef, SkinDef};
+use rbms_skin::property::generated::{
+    OPTION_1P_80_89, OPTION_1P_AA, OPTION_7KEYSONG, OPTION_AA, OPTION_BANNER, OPTION_BEST_AA_1P, OPTION_BGA, OPTION_BGAOFF, OPTION_BGAON, OPTION_CLEAR_GROOVE,
+    OPTION_CLEAR_NORMAL, OPTION_GOOD_EXIST, OPTION_GREAT_EXIST, OPTION_JUDGE_NORMAL, OPTION_NO_BACKBMP, OPTION_NO_BPMCHANGE, OPTION_NO_LN,
+    OPTION_NO_RANDOMSEQUENCE, OPTION_NO_TEXT, OPTION_NOW_AA_1P, OPTION_OFFLINE, OPTION_PERFECT_EXIST, OPTION_RESULT_AA_1P, OPTION_STAGEFILE,
+};
+use rbms_skin::property::{DefaultState, INTEGER_ABSENT, MapHost, NameSpace, PropertyKind, SkinHost, StaticScreen, reference_implements};
 use rbms_skin::resolve::RANDOM_SELECTION;
+use rbms_skin::timer::TimerState;
 
 /// A seed every load in this file pins.
 const TEST_SEED: u64 = 7;
@@ -73,6 +79,45 @@ const PLAY_SINCE_US: i64 = 5_000_000;
 
 /// Instructions a budget test lets one pass execute.
 const SMALL_LOAD_INSTRUCTIONS: u64 = 200_000;
+
+/// The song browser, in the reference's `SkinType` numbering.
+const SKIN_TYPE_MUSIC_SELECT: i32 = 5;
+
+/// The score screen.
+const SKIN_TYPE_RESULT: i32 = 7;
+
+/// What the settled pack scenario holds true beside the difficulty: a seven-key chart with a BGA, a
+/// stage file and a banner but no back image, no long notes, no text, one tempo and one sequence,
+/// judged at the normal rank, played offline with the groove gauge and no arrangement, and finished
+/// at an AA with nothing worse than a good.
+const SCENARIO_FACTS: &[i32] = &[
+    OPTION_BGAON,
+    OPTION_BGA,
+    OPTION_OFFLINE,
+    OPTION_7KEYSONG,
+    OPTION_NO_LN,
+    OPTION_NO_TEXT,
+    OPTION_NO_BPMCHANGE,
+    OPTION_NO_RANDOMSEQUENCE,
+    OPTION_JUDGE_NORMAL,
+    OPTION_STAGEFILE,
+    OPTION_BANNER,
+    OPTION_NO_BACKBMP,
+    OPTION_CLEAR_GROOVE,
+    OPTION_CLEAR_NORMAL,
+    OPTION_1P_AA,
+    OPTION_AA,
+    OPTION_1P_80_89,
+    OPTION_RESULT_AA_1P,
+    OPTION_BEST_AA_1P,
+    OPTION_NOW_AA_1P,
+    OPTION_PERFECT_EXIST,
+    OPTION_GREAT_EXIST,
+    OPTION_GOOD_EXIST,
+];
+
+/// The clock the frame tests draw at, in microseconds.
+const FRAME_NOW_US: i64 = 1_000_000;
 
 /// Every file under `root`, as paths relative to it.
 fn files_under(root: &Path) -> BTreeSet<PathBuf> {
@@ -216,6 +261,113 @@ fn report(name: &str, skin: &LoadedSkin) -> usize {
         println!("    print x{}: {}", line.count, line.text);
     }
     diagnostics.swallowed.len()
+}
+
+/// The pack scenario with an answer for every option the reference declares: [`SCENARIO_FACTS`] and
+/// the first difficulty hold and everything else does not. `screen` is the kind of screen the host
+/// says it is, which decides the options it calls static; with `None` it calls none static.
+fn settled_scenario(screen: Option<StaticScreen>) -> MapHost {
+    let mut host = pack_scenario();
+    for (id, _) in PropertyKind::Boolean.tables().iter().flat_map(|table| table.iter()) {
+        host.booleans.entry(*id).or_insert(false);
+    }
+    for fact in SCENARIO_FACTS {
+        host.booleans.insert(*fact, true);
+    }
+    host.static_screen = screen;
+    host
+}
+
+/// The kind of screen a skin of `skin_type` is drawn on, as the static classification sees it.
+fn static_screen_of(skin_type: i32) -> StaticScreen {
+    match skin_type {
+        SKIN_TYPE_MUSIC_SELECT => StaticScreen::Select,
+        SKIN_TYPE_RESULT | SKIN_TYPE_COURSE_RESULT => StaticScreen::Result,
+        _ => StaticScreen::Other,
+    }
+}
+
+/// Every destination a document nests inside its note field, its judgement pop-ups and its song
+/// wheel.
+fn nested_destinations(def: &SkinDef) -> Vec<&Destination> {
+    let note = def.note.iter().flat_map(|note| note.group.iter().chain(&note.bpm).chain(&note.stop).chain(&note.time));
+    let judge = def.judge.iter().flat_map(|judge| judge.images.iter().chain(&judge.numbers));
+    let wheel = def.songlist.iter().flat_map(|list| {
+        list.listoff
+            .iter()
+            .chain(&list.liston)
+            .chain(&list.text)
+            .chain(&list.level)
+            .chain(&list.lamp)
+            .chain(&list.playerlamp)
+            .chain(&list.rivallamp)
+            .chain(&list.trophy)
+            .chain(&list.label)
+            .chain(&list.graph)
+    });
+    note.chain(judge).chain(wheel).collect()
+}
+
+/// How many conditions the objects of a load still carry for a frame to ask.
+fn condition_count(skin: &LoadedSkin) -> usize {
+    skin.destinations.iter().map(|named| named.track.draw_conditions.len()).sum()
+}
+
+/// Loads every loadable Lua skin of the pack `RBMS_SKIN_PACK` names twice against the same game
+/// state -- once on a host that calls no option static, once on a host that calls static what the
+/// reference settles on that kind of screen -- and prints how many objects and conditions preparing
+/// the skin shed. Passes silently when the variable is unset.
+#[test]
+fn an_external_skin_pack_sheds_objects_and_conditions_when_it_is_prepared() {
+    let Some(pack) = std::env::var_os(SKIN_PACK_ENV).map(PathBuf::from) else {
+        return;
+    };
+    let overlay = std::env::temp_dir().join(format!("rbms-luaskin-{}-prepare-overlay", std::process::id()));
+    let _ = std::fs::remove_dir_all(&overlay);
+    let mut entries: Vec<PathBuf> = std::fs::read_dir(&pack)
+        .expect("the pack should be listable")
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case(LUA_SKIN_EXTENSION)))
+        .filter(|path| path.file_name().is_none_or(|name| name != KNOWN_BROKEN_ENTRY))
+        .collect();
+    entries.sort();
+
+    let user = SkinUserConfig::default();
+    let (mut objects_before, mut objects_after) = (0, 0);
+    for entry in &entries {
+        let name = entry.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+        let options = SkinLoadOptions { rng_seed: Some(TEST_SEED), write_overlay: Some(&overlay), ..SkinLoadOptions::new(&pack, &user, Mode::BEAT_7K) };
+        let load = |screen: Option<StaticScreen>| {
+            load_skin_with_host(entry, options, &settled_scenario(screen)).unwrap_or_else(|error| panic!("{name} should load: {error}"))
+        };
+
+        let unsettled = load(None);
+        let screen = static_screen_of(unsettled.def.skin_type);
+        let settled = load(Some(screen));
+        assert_eq!(unsettled.def.destination.len(), settled.def.destination.len(), "{name}: what the host calls static must not change what the skin builds");
+
+        let own_options = |destination: &&Destination| {
+            destination.op.iter().any(|option| option.property.is_none() && option.id != 0 && !reference_implements(NameSpace::Boolean, option.id))
+        };
+        println!(
+            "{name}: {screen:?} | declared {} | after its own options {} | after static settling {} (removed {}) | conditions left for a frame {} -> {} | top-level objects naming a skin option {} | nested slots naming a skin option {}",
+            settled.def.destination.len(),
+            unsettled.destinations.len(),
+            settled.destinations.len(),
+            unsettled.destinations.len() - settled.destinations.len(),
+            condition_count(&unsettled),
+            condition_count(&settled),
+            settled.def.destination.iter().filter(own_options).count(),
+            nested_destinations(&settled.def).into_iter().filter(own_options).count(),
+        );
+        assert!(settled.destinations.len() <= unsettled.destinations.len(), "{name}: settling can only remove objects");
+        assert!(condition_count(&settled) <= condition_count(&unsettled), "{name}: and conditions");
+        objects_before += unsettled.destinations.len();
+        objects_after += settled.destinations.len();
+    }
+    let _ = std::fs::remove_dir_all(&overlay);
+    println!("all screens: {objects_before} objects before static settling, {objects_after} after ({} removed)", objects_before - objects_after);
 }
 
 /// The fixture skin's root.
@@ -722,4 +874,148 @@ fn a_file_that_is_not_there_is_reported_as_unreadable() {
     let user = SkinUserConfig::default();
     let outcome = load_skin_with_host(&root.join("missing.luaskin"), seeded(&root, &user), &MapHost::new());
     assert!(matches!(outcome, Err(SkinError::Read(_))), "got {outcome:?}");
+}
+
+/// A host for the condition tests: a screen of the given kind on which the chart has a BGA.
+fn bga_host(screen: StaticScreen) -> MapHost {
+    let mut host = MapHost::new();
+    host.static_screen = Some(screen);
+    host.booleans.insert(OPTION_BGAON, true);
+    host.booleans.insert(OPTION_BGAOFF, false);
+    host.booleans.insert(AUTOPLAY_OPTION, false);
+    host
+}
+
+/// Loads a one-file skin written on the spot against `host`.
+fn load_scratch_with(scratch: &Scratch, source: &str, host: &dyn SkinHost) -> LoadedSkin {
+    let path = scratch.write("skin.luaskin", source);
+    let user = SkinUserConfig::default();
+    load_skin_with_host(&path, seeded(scratch.path(), &user), host).unwrap_or_else(|error| panic!("the scratch skin should load: {error}"))
+}
+
+/// A decide-screen skin whose one row offers 900, which it is on, and 901, and whose body returns
+/// the given `destination` list. Its functions leave a trail in the global `trail`.
+fn condition_skin(destinations: &str) -> String {
+    format!(
+        r#"
+trail = ""
+local function mark(letter, answer)
+	return function()
+		trail = trail .. letter
+		return answer
+	end
+end
+local at = {{ {{ x = 0, y = 0, w = 8, h = 8 }} }}
+local header = {{
+	type = 6, name = "Conditions", w = 1280, h = 720,
+	property = {{ {{ name = "Row", def = "On", item = {{ {{ name = "On", op = 900 }}, {{ name = "Off", op = 901 }} }} }} }},
+}}
+if not skin_config then
+	return header
+end
+header.destination = {{ {destinations} }}
+return header
+"#
+    )
+}
+
+/// Whether the object `id` of `skin` is drawn on a frame of `host`, with the skin's functions bound.
+fn drawn(skin: &LoadedSkin, id: &str, host: &MapHost) -> bool {
+    let track = &skin.destinations.iter().find(|named| named.id == id).unwrap_or_else(|| panic!("the object {id:?} should be assembled")).track;
+    let runtime = skin.runtime().expect("a Lua skin keeps its interpreter");
+    let timers = TimerState::new();
+    runtime.frame(host, |frame| prepare(track, FRAME_NOW_US, &timers, host, Some(frame), (0.0, 0.0), None)).expect("the frame binds").is_some()
+}
+
+/// Every condition of an object must hold, and they are asked in the reference's order: the
+/// built-in ids of `op` first, wherever the skin wrote them, then the functions of `op`, then
+/// `draw`. The first that fails ends the frame for that object, so nothing after it is called.
+#[test]
+fn a_function_in_draw_is_asked_after_op_and_only_while_everything_before_it_holds() {
+    let scratch = Scratch::new("condition-order");
+    let source = condition_skin(r#"{ id = "gated", op = { mark("a", true), 33, mark("b", true) }, draw = mark("c", true), dst = at }"#);
+    let mut host = MapHost::new();
+    host.booleans.insert(AUTOPLAY_OPTION, false);
+    let skin = load_scratch_with(&scratch, &source, &host);
+
+    let conditions = &skin.destinations[0].track.draw_conditions;
+    assert!(
+        matches!(
+            conditions.as_slice(),
+            [DrawCondition::Option(AUTOPLAY_OPTION), DrawCondition::Function(_), DrawCondition::Function(_), DrawCondition::Function(_)]
+        ),
+        "the built-in id leads though the skin wrote it second: {conditions:?}"
+    );
+    assert_eq!(eval::<String>(&skin, "return trail"), "", "loading a skin calls none of its conditions");
+
+    assert!(!drawn(&skin, "gated", &host), "the option does not hold");
+    assert_eq!(eval::<String>(&skin, "return trail"), "", "so no function behind it was asked");
+
+    host.booleans.insert(AUTOPLAY_OPTION, true);
+    assert!(drawn(&skin, "gated", &host));
+    assert_eq!(eval::<String>(&skin, "return trail"), "abc", "the functions of `op` in order, then `draw`");
+}
+
+#[test]
+fn a_false_function_in_op_keeps_draw_from_being_asked() {
+    let scratch = Scratch::new("condition-stop");
+    let source = condition_skin(r#"{ id = "gated", op = { mark("a", true), mark("b", false), mark("c", true) }, draw = mark("d", true), dst = at }"#);
+    let host = MapHost::new();
+    let skin = load_scratch_with(&scratch, &source, &host);
+
+    assert!(!drawn(&skin, "gated", &host));
+    assert_eq!(eval::<String>(&skin, "return trail"), "ab", "the frame stopped at the first condition that failed");
+}
+
+/// Preparing a Lua skin settles the same three things it settles for a document: the skin's own
+/// options (900 and 901 here), the ids nobody has (888), and the built-in options that hold still on
+/// the screen (40 and 41). A function is never settled, and one on an object that was removed is
+/// never called.
+#[test]
+fn preparing_a_lua_skin_removes_what_can_never_draw_and_keeps_every_function_for_the_frame() {
+    let scratch = Scratch::new("condition-prepare");
+    let source = condition_skin(
+        r#"
+	{ id = "row-on", op = { 900 }, dst = at },
+	{ id = "row-off", op = { 901 }, dst = at },
+	{ id = "unless-off", op = { -901 }, draw = mark("u", true), dst = at },
+	{ id = "nobody", op = { 888 }, draw = mark("n", true), dst = at },
+	{ id = "unless-nobody", op = { -888 }, dst = at },
+	{ id = "static-holds", op = { 41 }, draw = mark("h", true), dst = at },
+	{ id = "static-fails", op = { 40 }, draw = mark("f", true), dst = at },
+	{ id = "named-static", op = { "!bgaoff" }, dst = at },
+	{ id = "untimed", timer = -1, dst = at }
+"#,
+    );
+    let host = bga_host(StaticScreen::Other);
+    let skin = load_scratch_with(&scratch, &source, &host);
+
+    assert_eq!(object_ids(&skin), vec!["row-on", "unless-off", "static-holds", "named-static", "untimed"]);
+    assert_eq!(skin.def.destination.len(), 9, "the table the skin returned is kept whole");
+    assert!(skin.destinations.iter().all(|named| named.track.draw_conditions.iter().all(|condition| matches!(condition, DrawCondition::Function(_)))));
+    assert_eq!(skin.destinations.iter().map(|named| named.track.draw_conditions.len()).collect::<Vec<_>>(), vec![0, 1, 1, 0, 0]);
+    assert_eq!(skin.destinations[4].track.timer, None, "a negative timer id names no timer");
+    assert!(skin.warnings.is_empty(), "{:?}", skin.warnings);
+
+    for id in object_ids(&skin) {
+        assert!(drawn(&skin, id, &host), "{id} is drawn");
+    }
+    assert_eq!(eval::<String>(&skin, "return trail"), "uh", "only the functions of the objects that stayed were ever called");
+}
+
+/// On the song browser the chart under the cursor changes, so the options that describe it are
+/// asked on every frame there and the object comes and goes with the answer.
+#[test]
+fn an_option_that_is_not_static_on_the_screen_is_still_asked_every_frame() {
+    let scratch = Scratch::new("condition-dynamic");
+    let source = condition_skin(r#"{ id = "with-bga", op = { 41 }, dst = at }, { id = "without-bga", op = { 40 }, dst = at }"#);
+    let mut host = bga_host(StaticScreen::Select);
+    let skin = load_scratch_with(&scratch, &source, &host);
+
+    assert_eq!(object_ids(&skin), vec!["with-bga", "without-bga"], "nothing is settled");
+    assert!(drawn(&skin, "with-bga", &host) && !drawn(&skin, "without-bga", &host));
+
+    host.booleans.insert(OPTION_BGAON, false);
+    host.booleans.insert(OPTION_BGAOFF, true);
+    assert!(!drawn(&skin, "with-bga", &host) && drawn(&skin, "without-bga", &host), "the cursor moved to a chart with no BGA");
 }

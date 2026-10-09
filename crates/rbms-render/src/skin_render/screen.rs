@@ -13,13 +13,13 @@ use rbms_skin::dst::{LuaDrawEval, OffsetSource};
 use rbms_skin::property::SkinHost;
 use rbms_skin::timer::{MICROS_PER_MILLI, TIMER_OFF, TimerId, TimerState, timer_id};
 
-use super::state::{DecideViewState, FrameExtra, KeyConfigViewState, PlayViewState, ResultViewState, SelectViewState};
-use super::{SkinFrame, SkinScreen};
+use super::state::{DecideViewState, KeyConfigViewState, PlayViewState, ResultViewState, SelectViewState};
+use super::{FrameData, SkinFrame, SkinScreen};
+use crate::Renderer;
 use crate::ctx::RenderCtx;
 use crate::hud::HudView;
 use crate::result::{ResultView, TargetView};
 use crate::select::SelectView;
-use crate::{Renderer, TextureId};
 
 /// A full gauge, in the percent the HUD and result views carry it as.
 const GAUGE_FULL: f32 = 100.0;
@@ -32,12 +32,11 @@ pub struct SkinDraw<'a> {
     pub now_us: i64,
     pub lua: Option<&'a dyn LuaDrawEval>,
     pub mouse: Option<(f32, f32)>,
-    pub background: Option<TextureId>,
     /// The player's nudges for this document, when any have been made.
     pub offsets: Option<&'a dyn OffsetSource>,
-    /// The screen-shaped state the document's own field, wheel and graphs read, or
-    /// [`FrameExtra::None`] from a screen that draws only scalar objects.
-    pub extra: FrameExtra<'a>,
+    /// The state the document's own field, wheel, graphs and pictures read, or
+    /// [`FrameData::default`] from a screen that draws only scalar objects.
+    pub data: FrameData<'a>,
 }
 
 impl std::fmt::Debug for SkinDraw<'_> {
@@ -50,8 +49,7 @@ impl SkinDraw<'_> {
     /// Draws the document with `state` answering its property reads, and answers how many objects
     /// reached the screen.
     pub fn draw<R: Renderer>(&self, ctx: &mut RenderCtx<'_>, r: &mut R, state: &dyn SkinHost) -> usize {
-        let frame =
-            SkinFrame { now_us: self.now_us, timers: self.timers, state, lua: self.lua, mouse: self.mouse, background: self.background, extra: self.extra };
+        let frame = SkinFrame { now_us: self.now_us, timers: self.timers, state, lua: self.lua, mouse: self.mouse, data: self.data };
         self.screen.draw(ctx, r, &frame)
     }
 }
@@ -71,7 +69,7 @@ pub fn render_select_screen<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, doc
     let Some(document) = document else {
         return false;
     };
-    let options_open = document.extra.select().is_some_and(|list| list.options_open);
+    let options_open = document.data.bars.is_some_and(|bars| bars.options_open);
     let state = SelectViewState::new(view, document.now_us, document.offsets, options_open);
     draw_with(ctx, r, Some(document), &state)
 }

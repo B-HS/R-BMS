@@ -13,9 +13,10 @@
 //! 3. The image sources no drawn object names are dropped before anything is decoded, because a
 //!    pack ships sheets for every customisation it offers and decoding them all costs gigabytes.
 //! 4. [`SkinScreen`] is built on a 1920 by 1080 [`CpuCanvas`] and drawn at a few scene times. Each
-//!    frame binds the host to the skin's interpreter ([`SkinLua::frame`](rbms_skin::lua::SkinLua::frame))
-//!    and hands the binding to the renderer, so every `draw`, `value` and `timer` the skin wrote as
-//!    a function is called rather than read as its fallback.
+//!    frame binds the host to the skin's interpreter once ([`SkinLua::frame`](rbms_skin::lua::SkinLua::frame))
+//!    and prepares every object inside that binding, so every `draw`, `value` and `timer` the skin
+//!    wrote as a function is called rather than read as its fallback. The frame is drawn after the
+//!    binding has ended, from what was prepared.
 //! 5. With `RBMS_SKIN_CAPTURE_DIR` set, each frame is written there as `<screen>-<ms>.png`.
 //!
 //! What is printed along the way -- objects by kind, everything dropped while building, how many
@@ -33,11 +34,13 @@ use rbms_chart::to_model;
 use rbms_model::Mode;
 use rbms_parser::parse;
 use rbms_render::playfield::LaneShade;
+use rbms_render::skin_render::graphs::{EARLY_LATE_BUCKETS, JUDGEMENTS, NOTE_KINDS, PlayCursor};
 use rbms_render::{
-    Color, CpuCanvas, FrameExtra, PlayObjectState, PlayfieldView, RenderCtx, Renderer, ResultSeriesState, SelectListState, SelectRow, Skin, SkinAssets,
-    SkinFrame, SkinImage, SkinObjectKind, SkinScreen, TextContext, TextureId,
+    BgaFrame, BpmTimeline, Color, CpuCanvas, FrameData, FrameSeries, GaugeFrame, GaugeHistory, NoteDistribution, NoteField, PlayfieldView, RecentHits,
+    ReferenceImages, RenderCtx, Renderer, SelectRow, Skin, SkinAssets, SkinFrame, SkinImage, SkinObjectKind, SkinScreen, SongBars, TextContext, TextureId,
+    TimingHistogram,
 };
-use rbms_skin::dst::{DrawCondition, LuaDrawEval, TimerRef};
+use rbms_skin::dst::{DrawCondition, TimerRef};
 use rbms_skin::loader::{LoadedSkin, SkinLoadOptions, SkinUserConfig, load_skin_with_host, parse_value};
 use rbms_skin::model::Destination;
 use rbms_skin::property::{MapHost, PropertyKind};
@@ -109,8 +112,86 @@ const RESULT_TIMING_HIST: [u32; 11] = [2, 6, 18, 60, 180, 420, 210, 70, 22, 8, 3
 /// The judgement counts a result scenario's graphs draw, best first.
 const RESULT_JUDGE_DIST: [u32; 6] = [1320, 250, 40, 6, 8, 0];
 
-/// The tempo line a result scenario's graph draws, as `(progress through the chart, bpm)`.
-const RESULT_BPM_POINTS: [(f32, f64); 4] = [(0.0, 180.0), (0.4, 180.0), (0.4, 90.0), (0.6, 180.0)];
+/// How long the scenario chart lasts, in seconds, which is how many columns its distribution has.
+const CHART_SECONDS: usize = 150;
+
+/// The seconds of the scenario chart in which its notes come three times as thick.
+const CHART_BURST: std::ops::Range<usize> = 60..75;
+
+/// The seconds of the scenario chart in which two long notes are held at a time.
+const CHART_HOLDS: std::ops::Range<usize> = 25..40;
+
+/// Notes a quiet second of the scenario chart holds, before the wobble the second adds.
+const CHART_BASE_NOTES: u32 = 4;
+
+/// How much the second adds to that, at most, in notes.
+const CHART_WOBBLE_NOTES: u32 = 11;
+
+/// Notes a burst adds on top.
+const CHART_BURST_NOTES: u32 = 22;
+
+/// Seconds between two mines.
+const CHART_MINE_EVERY: usize = 17;
+
+/// Seconds between two seconds in which notes were played worse.
+const CHART_SLIP_EVERY: usize = 9;
+
+/// Where the scenario chart's tempo changes, as `(speed, time in milliseconds)`: half speed for
+/// twenty seconds, a stop of one second and a faster finish, ending where the chart does.
+const CHART_TEMPO: [(f64, f64); 6] = [(180.0, 0.0), (90.0, 40_000.0), (180.0, 60_000.0), (0.0, 100_000.0), (240.0, 101_000.0), (240.0, 150_000.0)];
+
+/// The tempo the scenario chart is mostly played at.
+const CHART_MAIN_BPM: f64 = 180.0;
+
+/// The slowest tempo of the scenario chart.
+const CHART_MIN_BPM: f64 = 90.0;
+
+/// The fastest tempo of the scenario chart.
+const CHART_MAX_BPM: f64 = 240.0;
+
+/// How long the scenario chart's song is, in milliseconds.
+const CHART_LENGTH_MS: i32 = 150_000;
+
+/// What the scenario chart is made of, second by second, for the graphs that plot a chart.
+#[derive(Debug)]
+struct Analysis {
+    kinds: Vec<[u32; NOTE_KINDS]>,
+    judgements: Vec<[u32; JUDGEMENTS]>,
+    early_late: Vec<[u32; EARLY_LATE_BUCKETS]>,
+}
+
+/// A chart of [`CHART_SECONDS`] seconds that gets busier in a burst and holds two long notes for a
+/// while, and a run of it that hit most notes best and slipped now and then.
+fn analysis() -> Analysis {
+    let kinds: Vec<[u32; NOTE_KINDS]> = (0..CHART_SECONDS)
+        .map(|second| {
+            let burst = if CHART_BURST.contains(&second) { CHART_BURST_NOTES } else { 0 };
+            let keys = CHART_BASE_NOTES + (second as u32 * 3) % CHART_WOBBLE_NOTES + burst;
+            let scratch = keys / 8;
+            let held = if CHART_HOLDS.contains(&second) { 2 } else { 0 };
+            [0, 0, scratch, 0, held, keys - scratch, u32::from(second % CHART_MINE_EVERY == 0)]
+        })
+        .collect();
+    let judgements: Vec<[u32; JUDGEMENTS]> = kinds
+        .iter()
+        .enumerate()
+        .map(|(second, kinds)| {
+            let notes = kinds[2] + kinds[5];
+            let best = notes * 7 / 10;
+            let great = notes * 2 / 10;
+            let good = if second % CHART_SLIP_EVERY == 0 { notes - best - great } else { 0 };
+            let rest = notes - best - great - good;
+            [0, best, great, good, rest / 2, rest - rest / 2]
+        })
+        .collect();
+    let early_late = judgements
+        .iter()
+        .map(|[_, best, great, good, bad, poor]| {
+            [0, *best, great / 2, good / 2, bad / 2, poor / 2, great - great / 2, good - good / 2, bad - bad / 2, poor - poor / 2]
+        })
+        .collect();
+    Analysis { kinds, judgements, early_late }
+}
 
 /// The row of the browser scenario that is under the cursor.
 const SELECT_CURSOR: usize = 4;
@@ -127,6 +208,13 @@ const SELECT_TITLES: [&str; 9] = [
     "Seventh Track",
     "Eighth Track",
 ];
+
+/// The folder, next to the scenario files, that holds the pictures a frame carries for the objects a
+/// skin names by a negative id. They are drawn for this test and stand in for a chart's own.
+const REFERENCE_IMAGE_DIR: &str = "images";
+
+/// The stems of those pictures: a chart's stage file, its back bitmap and its banner.
+const REFERENCE_IMAGE_STEMS: [&str; 3] = ["stagefile", "backbmp", "banner"];
 
 /// What a frame carries beside its property reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -177,10 +265,11 @@ const PLAY_LOADED_MS: i64 = 3_500;
 /// The screens that are drawn.
 ///
 /// The decide, result and browser screens are drawn as they open, when the reference starts to take
-/// input, in the middle of their animation and at rest. The play screen is drawn while it loads
-/// (twice), in its ready phase and with the chart running.
+/// input, in the middle of their animation and at rest; the decide screen once more partway through
+/// its fade to black. The play screen is drawn while it loads (twice), in its ready phase and with
+/// the chart running.
 const SHOTS: &[Shot] = &[
-    Shot { name: "decide", entry: "decide.luaskin", times_ms: &[0, 500, 1_500, 3_000], extra: Extra::None, switches: &[] },
+    Shot { name: "decide", entry: "decide.luaskin", times_ms: &[0, 500, 1_500, 3_000, 3_750], extra: Extra::None, switches: &[] },
     Shot { name: "result", entry: "result.luaskin", times_ms: &[0, 500, 1_500, 3_000], extra: Extra::Result, switches: &[] },
     Shot { name: "musicselect", entry: "musicselect.luaskin", times_ms: &[0, 500, 1_500, 3_000], extra: Extra::Select, switches: &[] },
     Shot {
@@ -278,6 +367,22 @@ fn decode_png(bytes: &[u8]) -> Option<SkinImage> {
         png::ColorType::Indexed => return None,
     };
     SkinImage::new(info.width, info.height, rgba)
+}
+
+/// One of the stand-in pictures a frame carries as a reference image, decoded.
+fn reference_image(stem: &str) -> SkinImage {
+    let path = scenario_dir().join(REFERENCE_IMAGE_DIR).join(format!("{stem}.{PNG_EXTENSION}"));
+    let bytes = std::fs::read(&path).unwrap_or_else(|error| panic!("{} should be readable: {error}", path.display()));
+    decode_png(&bytes).unwrap_or_else(|| panic!("{} should decode", path.display()))
+}
+
+/// Registers the stand-in pictures with `canvas`, as a frame carries them.
+fn reference_images(canvas: &mut CpuCanvas) -> ReferenceImages {
+    let [stagefile, backbmp, banner] = REFERENCE_IMAGE_STEMS.map(|stem| {
+        let image = reference_image(stem);
+        Some(canvas.register_texture(&format!("rbms.external.reference.{stem}"), &image.rgba, image.width, image.height))
+    });
+    ReferenceImages { stagefile, backbmp, banner }
 }
 
 /// Reads a pack's images and fonts from disk and keeps count of what that cost.
@@ -444,7 +549,7 @@ fn print_grouped(label: &str, lines: &[String]) {
 }
 
 /// Every kind of object a screen can hold, in the order a report lists them.
-const OBJECT_KINDS: [SkinObjectKind; 19] = [
+const OBJECT_KINDS: [SkinObjectKind; 20] = [
     SkinObjectKind::Image,
     SkinObjectKind::Number,
     SkinObjectKind::Float,
@@ -464,6 +569,7 @@ const OBJECT_KINDS: [SkinObjectKind; 19] = [
     SkinObjectKind::TimingDistribution,
     SkinObjectKind::TimingVisualizer,
     SkinObjectKind::HitError,
+    SkinObjectKind::Reference,
 ];
 
 /// How many of a skin's top-level destinations are gated by a function, and how many are timed by
@@ -478,9 +584,10 @@ fn function_counts(skin: &LoadedSkin) -> (usize, usize) {
 /// The ids of the top-level destinations that carry no keyframe at all, each with how often it
 /// occurs.
 ///
-/// A repeating object -- a note field, a song wheel -- is placed by the lists it carries and is named
-/// by a destination with no `dst` of its own. Such a track resolves to nothing on every frame, so
-/// what it names is never asked to draw.
+/// A repeating object -- a note field, a song wheel, a judgement pop-up -- is placed by the lists it
+/// carries and is named by a destination with no `dst` of its own. The renderer gives such an
+/// object the keyframe the reference constructs it with, so it is drawn all the same; any other
+/// kind of object named this way has nowhere to be and is never drawn.
 fn unplaced(skin: &LoadedSkin) -> BTreeMap<&str, usize> {
     let mut ids = BTreeMap::new();
     for named in skin.destinations.iter().filter(|named| named.track.frames.is_empty()) {
@@ -542,31 +649,53 @@ fn save_png(path: &Path, canvas: &CpuCanvas) {
     writer.finish().expect("the capture should be finished");
 }
 
+/// What one frame came to.
+#[derive(Debug, Clone, Copy)]
+struct Painted {
+    /// Objects the prepare stage left to be drawn.
+    visible: usize,
+    /// Objects that put something on screen.
+    drawn: usize,
+    /// Answers the skin's Lua gave while the frame was prepared.
+    answers: usize,
+}
+
 /// Everything one frame is drawn with, beyond the moment it is drawn at.
 struct Stage<'a> {
     shot: &'a Shot,
     skin: &'a LoadedSkin,
     screen: &'a SkinScreen,
     backdrop: TextureId,
+    images: ReferenceImages,
     rows: &'a [SelectRow],
     field: &'a Skin,
     chart: &'a rbms_model::Model,
+    analysis: &'a Analysis,
 }
 
 impl Stage<'_> {
-    /// Draws the screen at `now_ms` onto a cleared canvas and answers how many objects reached it.
+    /// Draws the screen at `now_ms` onto a cleared canvas and answers what the frame came to.
     ///
-    /// With `bound` the host is bound to the skin's interpreter for the length of the frame and the
-    /// renderer asks it for every function value. Without, the frame is drawn as a renderer with no
-    /// interpreter draws it: a function gate reads false and a function timer reads off.
-    fn draw(&self, canvas: &mut CpuCanvas, text: &mut TextContext, host: &MapHost, timers: &TimerState, now_ms: i64, bound: bool) -> usize {
+    /// With `bound` the host is bound to the skin's interpreter while the frame is prepared, and
+    /// every function value is asked there. Without, the frame is prepared as a renderer with no
+    /// interpreter prepares it: a function gate reads false and a function timer reads off. Either
+    /// way the frame is drawn with nothing bound.
+    fn draw(&self, canvas: &mut CpuCanvas, text: &mut TextContext, host: &MapHost, timers: &TimerState, now_ms: i64, bound: bool) -> Painted {
         let now_us = now_ms * MICROS_PER_MILLI;
-        let list = SelectListState { rows: self.rows, sel: SELECT_CURSOR, options_open: false };
-        let series = ResultSeriesState {
-            gauge_series: &RESULT_GAUGE_SERIES,
-            timing_hist: &RESULT_TIMING_HIST,
-            judge_dist: &RESULT_JUDGE_DIST,
-            bpm_points: &RESULT_BPM_POINTS,
+        let list = SongBars { rows: self.rows, sel: SELECT_CURSOR, options_open: false };
+        let tempo = BpmTimeline::of_chart(&CHART_TEMPO, CHART_MAIN_BPM, CHART_MIN_BPM, CHART_MAX_BPM, Some(CHART_LENGTH_MS));
+        let chart_only = NoteDistribution { kinds: &self.analysis.kinds, ..NoteDistribution::default() };
+        let run = NoteDistribution {
+            judgements: &self.analysis.judgements,
+            early_late: &self.analysis.early_late,
+            ..NoteDistribution { kinds: &self.analysis.kinds, ..NoteDistribution::of_judgements(&RESULT_JUDGE_DIST) }
+        };
+        let series = FrameSeries {
+            gauge_history: Some(GaugeHistory::new(&RESULT_GAUGE_SERIES)),
+            timing: Some(TimingHistogram::new(&RESULT_TIMING_HIST)),
+            bpm: Some(tempo),
+            notes: Some(run),
+            recent_hits: None,
         };
         let playfield = PlayfieldView {
             timelines: &self.chart.timelines,
@@ -577,32 +706,38 @@ impl Stage<'_> {
             constant: false,
             legacy_note: false,
         };
-        let play = PlayObjectState {
-            field: self.field,
-            playfield: &playfield,
-            shade: LaneShade::default(),
-            gauge_kind: 0,
-            bomb: &[],
-            keys_down: &[],
-            recent_hits: &[],
-        };
-        let extra = match self.shot.extra {
-            Extra::None => FrameExtra::None,
-            Extra::Select => FrameExtra::Select(&list),
-            Extra::Result => FrameExtra::Result(&series),
-            Extra::Play => FrameExtra::Play(&play),
+        let play = NoteField { field: self.field, playfield: &playfield, shade: LaneShade::default(), bomb: &[], keys_down: &[] };
+        let behind = FrameData { bga: BgaFrame::of(Some(self.backdrop)), images: self.images, ..FrameData::default() };
+        let data = match self.shot.extra {
+            Extra::None => FrameData { series: FrameSeries { bpm: Some(tempo), notes: Some(chart_only), ..FrameSeries::default() }, ..behind },
+            Extra::Select => {
+                FrameData { bars: Some(&list), series: FrameSeries { bpm: Some(tempo), notes: Some(chart_only), ..FrameSeries::default() }, ..behind }
+            }
+            Extra::Result => FrameData { series, ..behind },
+            Extra::Play => FrameData {
+                field: Some(&play),
+                gauge: Some(GaugeFrame { kind: 0, clear_threshold: self.field.gauge_clear_threshold }),
+                series: FrameSeries {
+                    recent_hits: Some(RecentHits::new(&[])),
+                    bpm: Some(tempo),
+                    notes: Some(NoteDistribution { playing: Some(PlayCursor::default()), ..run }),
+                    ..FrameSeries::default()
+                },
+                ..behind
+            },
         };
 
+        let frame = SkinFrame { now_us, timers, state: host, lua: None, mouse: None, data };
+        let prepared = match self.skin.runtime().filter(|_| bound) {
+            Some(runtime) => {
+                runtime.frame(host, |lua| self.screen.prepare(&SkinFrame { lua: Some(lua), ..frame })).expect("the host should bind to the skin's interpreter")
+            }
+            None => self.screen.prepare(&frame),
+        };
         canvas.clear(Color::BLACK);
         let mut ctx = RenderCtx::new(rbms_render::theme(), text);
-        let mut paint = |lua: Option<&dyn LuaDrawEval>| {
-            let frame = SkinFrame { now_us, timers, state: host, lua, mouse: None, background: Some(self.backdrop), extra };
-            self.screen.draw(&mut ctx, canvas, &frame)
-        };
-        match self.skin.runtime().filter(|_| bound) {
-            Some(runtime) => runtime.frame(host, |frame| paint(Some(frame))).expect("the host should bind to the skin's interpreter"),
-            None => paint(None),
-        }
+        let drawn = self.screen.draw_prepared(&mut ctx, canvas, &frame, &prepared);
+        Painted { visible: prepared.visible_count(), drawn, answers: prepared.answer_count() }
     }
 }
 
@@ -642,7 +777,7 @@ fn capture(pack: &Path, overlay: &Path, capture_dir: Option<&Path>, shot: &Shot)
     );
     print_grouped("load warnings", &skin.warnings);
     println!(
-        "  destinations with no keyframe (never resolved, so never drawn): {:?} | destinations with a mirrored keyframe: {}",
+        "  destinations with no keyframe (drawn only when they name a note field, a song wheel or a judgement pop-up): {:?} | destinations with a mirrored keyframe: {}",
         unplaced(&skin),
         mirrored(&skin)
     );
@@ -685,17 +820,32 @@ fn capture(pack: &Path, overlay: &Path, capture_dir: Option<&Path>, shot: &Shot)
     let field = Skin::default_for(Mode::BEAT_7K, CANVAS_W as f32, CANVAS_H as f32);
     let chart = to_model(&parse(PLAY_CHART), Mode::BEAT_7K);
     let backdrop = canvas.register_texture("rbms.external.backdrop", &backdrop(), BACKDROP_W, BACKDROP_H);
-    let stage = Stage { shot, skin: &skin, screen: &screen, backdrop, rows: &rows, field: &field, chart: &chart };
+    let images = reference_images(&mut canvas);
+    let analysis = analysis();
+    let stage = Stage { shot, skin: &skin, screen: &screen, backdrop, images, rows: &rows, field: &field, chart: &chart, analysis: &analysis };
 
     let mut last = (TimerState::new(), 0);
     for now_ms in shot.times_ms {
         let timers = settle(&mut host, &scheduled, shot.switches, *now_ms);
         let drawing = Instant::now();
-        let drawn = stage.draw(&mut canvas, &mut text, &host, &timers, *now_ms, true);
+        let painted = stage.draw(&mut canvas, &mut text, &host, &timers, *now_ms, true);
         let drawn_in = drawing.elapsed();
         let on: Vec<String> = host.timers.keys().map(i32::to_string).collect();
-        println!("  {}-{now_ms}: drew {drawn} of {} objects in {} ms | timers on [{}]", shot.name, screen.object_count(), drawn_in.as_millis(), on.join(", "));
-        assert!(drawn > 0, "{} drew nothing at {now_ms} ms", shot.name);
+        let cost = skin.runtime().map(rbms_skin::lua::SkinLua::frame_cost).unwrap_or_default();
+        println!(
+            "  {}-{now_ms}: prepared {} of {} objects to draw with {} Lua answers ({} calls and {} reused timer reads, {} us inside Lua), drew {} in {} ms | timers on [{}]",
+            shot.name,
+            painted.visible,
+            screen.object_count(),
+            painted.answers,
+            cost.calls,
+            cost.reused,
+            cost.spent.as_micros(),
+            painted.drawn,
+            drawn_in.as_millis(),
+            on.join(", ")
+        );
+        assert!(painted.drawn > 0, "{} drew nothing at {now_ms} ms", shot.name);
         if let Some(directory) = capture_dir {
             let path = directory.join(format!("{}-{now_ms}.png", shot.name));
             save_png(&path, &canvas);
@@ -706,9 +856,9 @@ fn capture(pack: &Path, overlay: &Path, capture_dir: Option<&Path>, shot: &Shot)
 
     let (timers, now_ms) = last;
     let bound: Vec<u8> = canvas.pixels().to_vec();
-    let unbound_drawn = stage.draw(&mut canvas, &mut text, &host, &timers, now_ms, false);
+    let unbound = stage.draw(&mut canvas, &mut text, &host, &timers, now_ms, false);
     let differing = bound.chunks_exact(RGBA_BYTES).zip(canvas.pixels().chunks_exact(RGBA_BYTES)).filter(|(with, without)| with != without).count();
-    println!("  {}-{now_ms} again with no interpreter bound: drew {unbound_drawn} objects, {differing} pixels differ from the bound frame", shot.name);
+    println!("  {}-{now_ms} again with no interpreter bound: drew {} objects, {differing} pixels differ from the bound frame", shot.name, unbound.drawn);
 
     if let Some(runtime) = skin.runtime() {
         let diagnostics = runtime.diagnostics();
@@ -766,7 +916,7 @@ fn an_external_skin_pack_draws_through_the_skin_renderer() {
 
 /// The scenario files are this repository's own, so they are checked whether or not a pack is
 /// named: each one a screen is drawn against parses, describes exactly one difficulty and schedules
-/// no timer before its scene begins.
+/// no timer before its scene begins, and the pictures drawn as reference images decode.
 #[test]
 fn every_scenario_describes_a_host_a_screen_can_be_drawn_against() {
     for shot in SHOTS {
@@ -781,5 +931,9 @@ fn every_scenario_describes_a_host_a_screen_can_be_drawn_against() {
         let at_end = timers_at(&host.timers, shot.times_ms.last().copied().unwrap_or_default() * MICROS_PER_MILLI);
         assert!(at_start.len() <= at_end.len(), "{} loses a timer as its scene runs", shot.name);
         assert_eq!(at_end, host.timers, "{} schedules a timer after its last frame", shot.name);
+    }
+    for stem in REFERENCE_IMAGE_STEMS {
+        let image = reference_image(stem);
+        assert!(image.width > 0 && image.height > 0, "the stand-in {stem} should be a picture");
     }
 }

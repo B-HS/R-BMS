@@ -26,6 +26,10 @@
 //!    JSON path does, and hand the interpreter to the [`LoadedSkin`], which keeps it -- with the
 //!    registry of the skin's functions and the record of what went wrong -- for as long as the
 //!    screen is shown.
+//! 7. **Prepare** the assembled skin against the host, once (`Skin.prepare`): an object whose own
+//!    options the player's choices do not grant is removed, and so is one whose condition the host
+//!    calls static and answers false; a static condition that holds is forgotten. Both passes have
+//!    run by then, so nothing a skin's functions do can be observed from here.
 //!
 //! [`load_lua_header`] is the short form for a skin list: a separate interpreter in
 //! [`LuaMode::HeaderOnly`], the header pass alone, no host.
@@ -202,15 +206,17 @@ pub fn load_lua_skin(path: &Path, options: &LuaSkinOptions<'_>, host: &dyn SkinH
         (def.w, def.h) = resolution;
     }
 
-    assemble(Assembly {
-        mode: skin_type_mode(def.skin_type).unwrap_or(load.mode),
-        def,
-        path: program.entry,
-        root: program.root,
-        parser: ParserKind::Lua,
-        merged,
-        warnings,
-        known_option: load.known_option,
-        runtime: Some(program.runtime),
-    })
+    assemble(
+        Assembly {
+            mode: skin_type_mode(def.skin_type).unwrap_or(load.mode),
+            def,
+            path: program.entry,
+            root: program.root,
+            parser: ParserKind::Lua,
+            merged,
+            warnings,
+            runtime: Some(program.runtime),
+        },
+        host,
+    )
 }

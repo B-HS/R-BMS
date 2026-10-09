@@ -1,3 +1,7 @@
+use rbms_skin::dst::DrawStateSource;
+use rbms_skin::property::generated::{BUTTON_LNMODE, FLOAT_LOADING_PROGRESS, NUMBER_PLAYLEVEL, RATE_LOAD_PROGRESS};
+use rbms_skin::timer::{TIMER_OFF, TimerId};
+
 use super::*;
 
 /// A window pixel becomes a document coordinate: scaled onto the authored size, and measured up
@@ -208,4 +212,131 @@ fn a_pack_that_is_taken_away_releases_the_screens_nobody_is_drawing() {
     assert!(!app.shared.has_compiled_skin(SKIN_TYPE_DECIDE), "a screen compiled from a pack that is gone is still held");
     assert!(app.shared.skins.document(SKIN_TYPE_DECIDE).is_none(), "the document of a pack that is gone is still loaded");
     assert!(!app.shared.has_skin_document(SKIN_TYPE_DECIDE));
+}
+
+/// A Lua skin for the decide screen with one object, gated by a function that counts its own calls
+/// and reads the scene clock, which only a bound host can answer.
+const COUNTED_DECIDE: &str = r#"
+local main_state = require("main_state")
+calls = 0
+local function counted()
+    calls = calls + 1
+    return main_state.time() >= 0
+end
+local skin = { type = 6, name = "Counted", w = 1280, h = 720 }
+if skin_config then
+    skin.destination = { { id = -110, draw = counted, dst = { { x = 0, y = 0, w = 1280, h = 720 } } } }
+end
+return skin
+"#;
+
+/// How often the counted skin's function has run.
+fn counted_calls(app: &crate::App) -> i64 {
+    let runtime = app.shared.skins.document(SKIN_TYPE_DECIDE).and_then(LoadedSkin::runtime).expect("the counted skin is loaded with its interpreter");
+    runtime.lua().globals().get("calls").expect("the skin keeps its count in a global")
+}
+
+/// A frame binds its host to the skin's interpreter once and prepares every object inside that one
+/// binding, so a function the skin wrote runs once a frame; the frame is drawn after the binding
+/// has ended, and drawing it calls nothing.
+#[test]
+fn a_frame_calls_a_skin_function_once_and_only_while_its_host_is_bound() {
+    let (mut app, _) = app_with_decide_skin("counted", COUNTED_DECIDE);
+    let mut pixels = crate::stage::HeadlessCanvas::new(UI_SIZE.0, UI_SIZE.1);
+    let compiled = (0..COMPILE_FRAMES).any(|_| {
+        draw_decide(&mut app, &mut pixels, 1);
+        app.shared.has_compiled_skin(SKIN_TYPE_DECIDE)
+    });
+    assert!(compiled, "the skin never compiled: {:?}", app.shared.skin_failure(SKIN_TYPE_DECIDE));
+
+    let before = counted_calls(&app);
+    let drew = draw_decide(&mut app, &mut pixels, SKIN_FRAMES);
+    assert!(drew.iter().all(|by_document| *by_document), "a compiled skin did not draw its screen: {drew:?}");
+    assert_eq!(counted_calls(&app) - before, SKIN_FRAMES as i64, "the function did not run exactly once a frame");
+
+    let runtime = app.shared.skins.document(SKIN_TYPE_DECIDE).and_then(LoadedSkin::runtime).expect("the counted skin is loaded with its interpreter");
+    assert_eq!(runtime.diagnostics().function_failures, Vec::new(), "a function ran with no host bound, where its reads fail");
+}
+
+/// A timer the tests below switch on, and the moment it was switched on.
+const RUNNING_TIMER: i32 = 1;
+const STARTED_US: i64 = 250_000;
+
+/// The option the decide screen's older state answers while its load is still running.
+const OPTION_NOW_LOADING: i32 = 80;
+
+/// The host a screen is drawn through answers from its clusters first, and until those are filled
+/// in the state the screen was drawn from before answers whatever they do not know. The scene's
+/// timers are the host's own all along.
+#[test]
+fn an_id_no_cluster_knows_is_answered_by_the_state_the_screen_was_drawn_from_before() {
+    let mut timers = TimerState::new();
+    timers.set_on(TimerId(RUNNING_TIMER), STARTED_US);
+    let chart = DecideChart { artist: "Composer", level: 12, ..DecideChart::default() };
+    let older = DecideViewState { progress: 0.5, done: false, title: TITLE, chart, now_us: STARTED_US, offsets: None };
+
+    let mut host = ScreenHost::new(older.now_us(), &timers);
+    assert_eq!(host.text(STRING_TITLE), "", "with no state behind it the host knows no title");
+    assert_eq!(host.boolean(OPTION_NOW_LOADING), None);
+
+    host.fallback = Some(&older);
+    assert_eq!(host.text(STRING_TITLE), TITLE);
+    assert_eq!(host.boolean(OPTION_NOW_LOADING), Some(true));
+    assert_eq!(host.boolean(-OPTION_NOW_LOADING), Some(false), "a negated read reaches the older state with its sign");
+    assert_eq!(host.integer(NUMBER_PLAYLEVEL), 12);
+    assert_eq!(host.rate(RATE_LOAD_PROGRESS), Some(0.5));
+    assert_eq!(host.float(FLOAT_LOADING_PROGRESS), 0.5);
+    assert_eq!(host.image_index(BUTTON_LNMODE), 0, "an image no cluster picks for shows the first of its set, as the older state drew it");
+
+    assert_eq!(older.timer_us(RUNNING_TIMER), TIMER_OFF, "the older state never knew a timer");
+    assert_eq!(host.timer_us(RUNNING_TIMER), STARTED_US, "so a script's timer read comes from the scene's own table");
+}
+
+/// The two colours the picked skin's image set is made of, neither of which a built-in screen paints.
+const FIRST_SET: crate::Color = crate::Color::rgb(12, 200, 90);
+const SECOND_SET: crate::Color = crate::Color::rgb(200, 12, 90);
+
+/// Edge of one image of the picked skin's sheet, which holds the two side by side.
+const SET_EDGE: u32 = 8;
+
+/// The file the picked skin's sheet is written to, beside the skin.
+const SET_SHEET: &str = "sets.png";
+
+/// A Lua skin for the decide screen whose one object is a set of two images over the whole screen,
+/// picked by an image index only the browser's and the player's settings can answer.
+const PICKED_DECIDE: &str = r#"
+local skin = { type = 6, name = "Picked", w = 1280, h = 720 }
+if skin_config then
+    skin.source = { { id = 0, path = "SET_SHEET" } }
+    skin.image = {
+        { id = "first", src = 0, x = 0, y = 0, w = SET_EDGE, h = SET_EDGE },
+        { id = "second", src = 0, x = SET_EDGE, y = 0, w = SET_EDGE, h = SET_EDGE },
+    }
+    skin.imageset = { { id = "picked", ref = PICKED_BY, images = { "first", "second" } } }
+    skin.destination = { { id = "picked", dst = { { x = 0, y = 0, w = 1280, h = 720 } } } }
+end
+return skin
+"#;
+
+/// An image picked by an index no cluster answers yet is still drawn, showing the first of its set:
+/// the state the screen was drawn from before stands in for the cluster, and it never hid an image.
+#[test]
+fn an_image_picked_by_an_index_no_cluster_knows_is_drawn_with_its_first_set() {
+    let source = PICKED_DECIDE.replace("SET_SHEET", SET_SHEET).replace("SET_EDGE", &SET_EDGE.to_string()).replace("PICKED_BY", &BUTTON_LNMODE.to_string());
+    let (mut app, document) = app_with_decide_skin("picked", &source);
+    let sheet = image::RgbaImage::from_fn(SET_EDGE * 2, SET_EDGE, |x, _| {
+        let set = if x < SET_EDGE { FIRST_SET } else { SECOND_SET };
+        image::Rgba([set.r, set.g, set.b, set.a])
+    });
+    sheet.save(document.with_file_name(SET_SHEET)).expect("the sheet is written beside the skin");
+
+    let mut pixels = crate::stage::HeadlessCanvas::new(UI_SIZE.0, UI_SIZE.1);
+    let compiled = (0..COMPILE_FRAMES).any(|_| {
+        draw_decide(&mut app, &mut pixels, 1);
+        app.shared.has_compiled_skin(SKIN_TYPE_DECIDE)
+    });
+    assert!(compiled, "the skin never compiled: {:?}", app.shared.skin_failure(SKIN_TYPE_DECIDE));
+
+    assert_eq!(draw_decide(&mut app, &mut pixels, 1), vec![true], "a compiled skin did not draw its screen");
+    assert_eq!(pixels.pixel_at(UI_SIZE.0 / 2, UI_SIZE.1 / 2), FIRST_SET, "the image was not drawn with the first of its set");
 }

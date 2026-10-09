@@ -16,9 +16,12 @@ use rbms_skin::dst::{Acc, DrawCondition, LOOP_ONCE, OffsetSource, SkinOffset, Sk
 use rbms_skin::loader::{
     DEFAULT_MAX_DOCUMENT_BYTES, Filtering, LoadedSkin, MAX_INCLUDE_DEPTH, OPTION_RANDOM_VALUE, ParserKind, SKIN_TYPE_DECIDE, SKIN_TYPE_KEY_CONFIG,
     SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_PLAY_7KEYS, SKIN_TYPE_RESULT, SkinLoadOptions, SkinUserConfig, StretchKind, enabled_options, filtering_for,
-    is_supported_skin_type, load_header, load_skin, mode_skin_type, parse_document, read_document, selected_option, skin_type_mode, stretch_rect,
+    is_supported_skin_type, load_header, load_skin, load_skin_with_host, mode_skin_type, parse_document, read_document, selected_option, skin_type_mode,
+    stretch_rect,
 };
-use rbms_skin::model::{Destination, PropertyDef, PropertyItem};
+use rbms_skin::model::{Destination, PropertyDef, PropertyItem, PropertyRef};
+use rbms_skin::property::generated::{OPTION_7KEYSONG, OPTION_AUTOPLAYON, OPTION_BGAOFF, OPTION_BGAON};
+use rbms_skin::property::{MapHost, StaticScreen};
 use rbms_skin::timer::{TimerId, TimerState};
 
 /// A seed every wildcard test pins, so a draw is the same on every machine.
@@ -527,34 +530,250 @@ fn an_object_the_documents_own_choices_rule_out_is_dropped_at_load() {
     assert!(ids.contains(&"panel-off"), "and the clause the choice does select is still there: {ids:?}");
 }
 
-#[test]
-fn an_option_this_build_does_not_implement_drops_its_condition() {
-    let scratch = Scratch::new("unknown-option");
-    let path = scratch.write("skin.json", r#"{ "type": 5, "destination": [{ "id": "gated", "op": [777, 888], "dst": [{ "time": 0 }] }] }"#);
-    let user = SkinUserConfig::default();
-    let mut options = seeded(scratch.path(), &user);
-    options.known_option = |id| id != 888;
-    let skin = load_skin(&path, options).expect("the document should load");
-    let conditions = &track(&skin, "gated").draw_conditions;
+/// The header every document of the condition tests starts with: a song browser whose one
+/// customisation row offers [`PANEL_ON`], which it is on by default, and [`PANEL_OFF`].
+const GATED_HEADER: &str = r#""type": 5, "property": [{ "name": "Panel", "item": [{ "name": "on", "op": 901 }, { "name": "off", "op": 902 }], "def": "on" }]"#;
 
-    assert_eq!(conditions.len(), 1, "the unimplemented option drops out rather than hiding the object: {conditions:?}");
-    assert_eq!(conditions[0], DrawCondition::Option(777));
+/// Writes a document of [`GATED_HEADER`] and the given `destination` list into `scratch`.
+fn gated_document(scratch: &Scratch, destinations: &str) -> PathBuf {
+    scratch.write("skin.json", &format!(r#"{{ {GATED_HEADER}, "destination": [{destinations}] }}"#))
 }
 
-/// The build's own predicate has no say over a document's customisation ids, which are declared by
-/// the document. A predicate that knows nothing must neither hide the object nor leave the id to be
-/// asked about at draw time, where no state source answers it.
-#[test]
-fn an_option_the_document_declares_is_settled_whatever_the_build_predicate_says() {
-    let root = minimal_root();
-    let user = SkinUserConfig::default();
-    let mut options = seeded(&root, &user);
-    options.known_option = |_| false;
-    let skin = load_skin(&root.join("skin.json"), options).expect("the fixture should load");
+/// One object gated on `op`, under the id `name`.
+fn gated(name: &str, op: &str) -> String {
+    format!(r#"{{ "id": "{name}", "op": {op}, "dst": [{{ "time": 0 }}] }}"#)
+}
 
-    let ids: Vec<&str> = skin.destinations.iter().map(|named| named.id.as_str()).collect();
-    assert!(ids.contains(&"frame"), "the chosen variant survives a predicate that knows nothing: {ids:?}");
-    assert!(track(&skin, "frame").draw_conditions.is_empty(), "and its conditions were settled rather than left for a frame");
+/// A built-in option stays a condition a frame asks, exactly as the document signed it: the
+/// reference has a property under the id, so the skin's own options are never consulted for it.
+#[test]
+fn a_built_in_option_is_left_for_every_frame_to_ask() {
+    let scratch = Scratch::new("builtin-option");
+    let path = gated_document(&scratch, &[gated("plain", "[33]"), gated("negated", "[-33]"), gated("both", "[40, -33, 40]")].join(","));
+    let user = SkinUserConfig::default();
+    let skin = load_skin(&path, seeded(scratch.path(), &user)).expect("the document should load");
+
+    assert_eq!(object_ids(&skin), vec!["plain", "negated", "both"]);
+    assert_eq!(track(&skin, "plain").draw_conditions, vec![DrawCondition::Option(OPTION_AUTOPLAYON)]);
+    assert_eq!(track(&skin, "negated").draw_conditions, vec![DrawCondition::Option(-OPTION_AUTOPLAYON)]);
+    assert_eq!(
+        track(&skin, "both").draw_conditions,
+        vec![DrawCondition::Option(OPTION_BGAOFF), DrawCondition::Option(-OPTION_AUTOPLAYON)],
+        "in the document's order, with the repeat dropped"
+    );
+}
+
+/// The skin's own options are checked once, when it is prepared, against what its customisation
+/// rows are switched to (`Skin.prepare`): a positive id must be the chosen one and a negative id
+/// must name one that was not chosen.
+#[test]
+fn a_skins_own_option_keeps_or_removes_its_object_by_what_the_row_is_switched_to() {
+    let scratch = Scratch::new("skin-option");
+    let objects = [gated("wants-on", "[901]"), gated("wants-off", "[902]"), gated("unless-on", "[-901]"), gated("unless-off", "[-902]")];
+    let path = gated_document(&scratch, &objects.join(","));
+
+    let default = SkinUserConfig::default();
+    let skin = load_skin(&path, seeded(scratch.path(), &default)).expect("the document should load");
+    assert_eq!(object_ids(&skin), vec!["wants-on", "unless-off"], "the row is on 901");
+    assert!(skin.destinations.iter().all(|named| named.track.draw_conditions.is_empty()), "and what stays keeps no condition for a frame to ask");
+
+    let mut switched = SkinUserConfig::default();
+    switched.properties.insert("Panel".to_owned(), PANEL_OFF);
+    let skin = load_skin(&path, seeded(scratch.path(), &switched)).expect("the document should load");
+    assert_eq!(object_ids(&skin), vec!["wants-off", "unless-on"], "the row is on 902");
+}
+
+/// An id that is neither a built-in option nor one the skin's rows offer satisfies no test the
+/// reference makes, so its object is removed whichever sign it carries: a negative id is not "not
+/// that option", it is an option nobody has.
+#[test]
+fn an_option_nobody_has_removes_its_object_under_either_sign() {
+    let scratch = Scratch::new("unknown-option");
+    let objects = [gated("stray", "[888]"), gated("negated-stray", "[-888]"), gated("mixed", "[901, -888]"), gated("fine", "[901]")];
+    let path = gated_document(&scratch, &objects.join(","));
+    let user = SkinUserConfig::default();
+    let skin = load_skin(&path, seeded(scratch.path(), &user)).expect("the document should load");
+
+    assert_eq!(object_ids(&skin), vec!["fine"], "888 is nobody's, so every object that names it is gone");
+    assert_eq!(skin.def.destination.len(), 4, "the document itself is kept whole");
+    assert!(skin.warnings.is_empty(), "removing an object the skin ruled out is not a fault: {:?}", skin.warnings);
+}
+
+/// A row may offer an id the reference already has a property under. The property wins, as it does
+/// in the reference, where the built-in lookup comes first and the option map is only reached by
+/// the ids it turns down.
+#[test]
+fn a_built_in_option_is_never_answered_by_a_row_that_offers_the_same_id() {
+    let scratch = Scratch::new("shadowed-option");
+    let path = scratch.write(
+        "skin.json",
+        r#"{ "type": 5, "property": [{ "name": "Shadow", "item": [{ "name": "a", "op": 40 }, { "name": "b", "op": 41 }], "def": "b" }],
+            "destination": [{ "id": "gated", "op": [40], "dst": [{ "time": 0 }] }] }"#,
+    );
+    let user = SkinUserConfig::default();
+    let skin = load_skin(&path, seeded(scratch.path(), &user)).expect("the document should load");
+
+    assert_eq!(object_ids(&skin), vec!["gated"], "the row is switched away from 40, and the object is still there");
+    assert_eq!(track(&skin, "gated").draw_conditions, vec![DrawCondition::Option(OPTION_BGAOFF)], "because the running game answers 40");
+}
+
+/// A number in `draw` is looked up as a property. One the reference has none under leaves the object
+/// unconditional: the skin's own options are only ever named in `op`.
+#[test]
+fn a_number_in_draw_is_a_built_in_option_or_no_condition_at_all() {
+    let scratch = Scratch::new("draw-number");
+    let objects = [
+        r#"{ "id": "builtin", "draw": -40, "dst": [{ "time": 0 }] }"#,
+        r#"{ "id": "skin-option", "draw": 902, "dst": [{ "time": 0 }] }"#,
+        r#"{ "id": "nobody", "draw": 888, "dst": [{ "time": 0 }] }"#,
+    ];
+    let path = gated_document(&scratch, &objects.join(","));
+    let user = SkinUserConfig::default();
+    let skin = load_skin(&path, seeded(scratch.path(), &user)).expect("the document should load");
+
+    assert_eq!(object_ids(&skin), vec!["builtin", "skin-option", "nobody"], "`draw` removes nothing");
+    assert_eq!(track(&skin, "builtin").draw_conditions, vec![DrawCondition::Option(-OPTION_BGAOFF)]);
+    assert!(track(&skin, "skin-option").draw_conditions.is_empty(), "902 is not chosen, and `draw` does not ask the rows");
+    assert!(track(&skin, "nobody").draw_conditions.is_empty());
+}
+
+/// A host for the static tests: a screen of the given kind on which the chart has a BGA and the
+/// player is not on autoplay.
+fn static_host(screen: StaticScreen) -> MapHost {
+    let mut host = MapHost::new();
+    host.static_screen = Some(screen);
+    host.booleans.insert(OPTION_BGAOFF, false);
+    host.booleans.insert(OPTION_BGAON, true);
+    host.booleans.insert(OPTION_AUTOPLAYON, false);
+    host
+}
+
+/// The objects of the static tests. `bgaon` and `bgaoff` are settled once outside the song browser;
+/// `autoplay_on` is asked every frame everywhere; the seven-key option is static too, but
+/// [`static_host`] has no answer for it.
+fn static_objects() -> String {
+    [
+        gated("holds", "[41]"),
+        gated("fails", "[40]"),
+        gated("negation-holds", "[-40]"),
+        gated("negation-fails", "[-41]"),
+        gated("dynamic", "[33]"),
+        gated("holds-then-dynamic", "[41, -33, -40]"),
+        gated("dynamic-then-fails", "[-33, 40]"),
+        gated("unanswered", "[160]"),
+    ]
+    .join(",")
+}
+
+/// A condition the host calls static is asked once, after the load: false removes the object and
+/// true removes the condition, so neither is asked again (`Skin.prepare`).
+#[test]
+fn a_static_condition_is_settled_once_when_the_skin_is_prepared() {
+    let scratch = Scratch::new("static-condition");
+    let path = gated_document(&scratch, &static_objects());
+    let user = SkinUserConfig::default();
+    let host = static_host(StaticScreen::Other);
+    let skin = load_skin_with_host(&path, seeded(scratch.path(), &user), &host).expect("the document should load");
+
+    assert_eq!(
+        object_ids(&skin),
+        vec!["holds", "negation-holds", "dynamic", "holds-then-dynamic", "unanswered"],
+        "an object with a static condition that came out false is gone, wherever in its list the condition stood"
+    );
+    assert!(track(&skin, "holds").draw_conditions.is_empty(), "a static condition that held is forgotten");
+    assert!(track(&skin, "negation-holds").draw_conditions.is_empty(), "under either sign");
+    assert_eq!(track(&skin, "dynamic").draw_conditions, vec![DrawCondition::Option(OPTION_AUTOPLAYON)], "a condition that can change is kept");
+    assert_eq!(
+        track(&skin, "holds-then-dynamic").draw_conditions,
+        vec![DrawCondition::Option(-OPTION_AUTOPLAYON)],
+        "and it is all that is left of a list whose other conditions were static"
+    );
+    assert_eq!(
+        track(&skin, "unanswered").draw_conditions,
+        vec![DrawCondition::Option(OPTION_7KEYSONG)],
+        "a static option the host has no answer for yet is left for a frame to ask rather than guessed at"
+    );
+}
+
+/// Which options hold still depends on the screen: the chart's own facts are settled everywhere but
+/// in the song browser, where they change under the cursor. A load with no host settles nothing.
+#[test]
+fn nothing_is_settled_on_a_screen_where_the_option_can_still_change() {
+    let scratch = Scratch::new("static-screen");
+    let path = gated_document(&scratch, &static_objects());
+    let user = SkinUserConfig::default();
+    let every_object = vec!["holds", "fails", "negation-holds", "negation-fails", "dynamic", "holds-then-dynamic", "dynamic-then-fails", "unanswered"];
+
+    let browser = static_host(StaticScreen::Select);
+    let skin = load_skin_with_host(&path, seeded(scratch.path(), &user), &browser).expect("the document should load");
+    assert_eq!(object_ids(&skin), every_object, "the song browser settles none of these");
+    assert_eq!(track(&skin, "fails").draw_conditions, vec![DrawCondition::Option(OPTION_BGAOFF)], "so each condition is still there to be asked");
+    assert_eq!(track(&skin, "holds-then-dynamic").draw_conditions.len(), 3);
+
+    let unhosted = load_skin(&path, seeded(scratch.path(), &user)).expect("the document should load");
+    assert_eq!(object_ids(&unhosted), every_object, "and neither does a load with no screen behind it");
+    assert_eq!(track(&unhosted, "holds").draw_conditions, vec![DrawCondition::Option(OPTION_BGAON)]);
+}
+
+/// A property the document names is the same property as its id, so it is settled the same way.
+#[cfg(feature = "lua")]
+#[test]
+fn a_named_static_condition_is_settled_like_its_id() {
+    let scratch = Scratch::new("static-name");
+    let objects = [
+        gated("named-holds", r#"["bgaon"]"#),
+        gated("named-fails", r#"["bgaoff"]"#),
+        gated("named-negation", r#"["!bgaoff", "!autoplay_on"]"#),
+        r#"{ "id": "drawn-by-name", "draw": "!bgaon", "dst": [{ "time": 0 }] }"#.to_owned(),
+    ];
+    let path = gated_document(&scratch, &objects.join(","));
+    let user = SkinUserConfig::default();
+    let host = static_host(StaticScreen::Other);
+    let skin = load_skin_with_host(&path, seeded(scratch.path(), &user), &host).expect("the document should load");
+
+    assert_eq!(object_ids(&skin), vec!["named-holds", "named-negation"]);
+    assert!(track(&skin, "named-holds").draw_conditions.is_empty());
+    assert_eq!(track(&skin, "named-negation").draw_conditions, vec![DrawCondition::Name("!autoplay_on".to_owned())], "the name that can change is kept");
+}
+
+/// A negative timer id names no timer (`TimerPropertyFactory.getTimerProperty`): the object animates
+/// on the scene clock as though the field were absent, and so do an image's cells. Zero is a real
+/// timer, the one nothing ever switches on.
+#[test]
+fn a_negative_timer_id_is_no_timer_for_a_destination_and_for_an_images_cells() {
+    let scratch = Scratch::new("negative-timer");
+    let path = scratch.write(
+        "skin.json",
+        r#"{
+            "type": 5,
+            "image": [
+                { "id": "untimed", "src": "0", "divx": 2, "timer": -1, "cycle": 100 },
+                { "id": "timed", "src": "0", "divx": 2, "timer": 41, "cycle": 100 }
+            ],
+            "destination": [
+                { "id": "untimed", "timer": -1, "dst": [{ "time": 0, "w": 8, "h": 8 }] },
+                { "id": "zero", "timer": 0, "dst": [{ "time": 0, "w": 8, "h": 8 }] },
+                { "id": "timed", "timer": 41, "dst": [{ "time": 0, "w": 8, "h": 8 }] }
+            ]
+        }"#,
+    );
+    let user = SkinUserConfig::default();
+    let skin = load_skin(&path, seeded(scratch.path(), &user)).expect("the document should load");
+    assert!(skin.warnings.is_empty(), "a negative timer id is what the skin asked for, not a fault: {:?}", skin.warnings);
+
+    assert_eq!(track(&skin, "untimed").timer, None);
+    assert_eq!(track(&skin, "zero").timer, Some(TimerRef::Id(TimerId(0))));
+    assert_eq!(track(&skin, "timed").timer, Some(TimerRef::Id(TimerId(41))));
+
+    let nothing_on = TimerState::new();
+    let offsets = SkinUserConfig::default();
+    assert!(resolve(track(&skin, "untimed"), 0, &nothing_on, &offsets, None).is_some(), "with no timer to wait for it is drawn from the first frame");
+    assert!(resolve(track(&skin, "zero"), 0, &nothing_on, &offsets, None).is_none(), "timer zero is off, so its object is not");
+    assert!(resolve(track(&skin, "timed"), 0, &nothing_on, &offsets, None).is_none());
+
+    let cell_timer = |id: &str| skin.def.image.iter().find(|image| image.id == id).and_then(|image| image.timer.as_ref()).and_then(PropertyRef::timer);
+    assert_eq!(cell_timer("untimed"), None, "the cells of an image read the same rule");
+    assert_eq!(cell_timer("timed"), Some(TimerRef::Id(TimerId(41))));
 }
 
 #[cfg(feature = "lua")]

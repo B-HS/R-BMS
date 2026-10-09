@@ -6,11 +6,10 @@
 //! lists and its counter-clockwise angles into the forms the interpolator expects, so that by the
 //! time a keyframe reaches it, nothing is missing and nothing needs reinterpreting.
 
-use std::collections::BTreeSet;
-
 use crate::SkinError;
-use crate::dst::{Acc, DestinationTrack, DrawCondition, Keyframe, MouseRect, SkinColor, SkinRect, TimerRef};
+use crate::dst::{Acc, DestinationTrack, DrawCondition, Keyframe, MouseRect, OpLists, SkinColor, SkinRect, TimerRef, draw_conditions_from_ops};
 use crate::model::{Animation, Destination, PropertyRef};
+use crate::property::{NameSpace, reference_implements};
 
 /// The alpha and colour channels a first keyframe starts at when a document names none.
 const DEFAULT_CHANNEL: i32 = 255;
@@ -130,19 +129,32 @@ fn keyframe_time(time: Option<i64>, path: &str) -> Result<i64, SkinError> {
 
 /// What a track needs from its surroundings while it is being built.
 pub(crate) struct TrackContext<'a> {
-    /// Whether an option id is one this build implements. An unimplemented id drops its condition
-    /// rather than hiding the object. It is asked only about ids `declared_options` does not carry.
-    pub known_option: fn(i32) -> bool,
-    /// The option ids the document declares for itself, which are known by definition.
-    pub declared_options: &'a BTreeSet<i32>,
-    /// Which of those the player's choices currently turn on.
-    pub enabled_options: &'a BTreeSet<i32>,
     /// The name the document was read from, for error messages.
     pub path: &'a str,
     /// Set on the play screen's judge counts alone, where offsets resize without moving.
     pub relative: bool,
     /// Where a recoverable problem is recorded.
     pub warnings: &'a mut Vec<String>,
+}
+
+/// One destination, assembled, beside the part of its `op` list no frame ever evaluates.
+#[derive(Debug, Clone)]
+pub(crate) struct BuiltTrack {
+    pub track: DestinationTrack,
+    /// The ids of the `op` list no built-in property answers, sign included (`SkinObject.dstop`).
+    /// They are the skin's own options, and whoever prepares the skin checks them once against the
+    /// choices its customisation rows carry (`Skin.prepare`).
+    pub options: Vec<i32>,
+}
+
+/// Whether the reference has a built-in boolean property under `id`, whichever sign the skin wrote
+/// it with (`BooleanPropertyFactory.getBooleanProperty(int)`).
+///
+/// This is the reference's own list and not a question for the host: an id that is on it is a
+/// condition the running game answers, and an id that is not can only be one of the skin's own
+/// options.
+fn is_builtin_option(id: i32) -> bool {
+    reference_implements(NameSpace::Boolean, id)
 }
 
 /// The keyframes of one destination, filled in and sorted, with the one acceleration the object
@@ -167,67 +179,61 @@ fn keyframes(destination: &Destination, path: &str) -> Result<(Vec<Keyframe>, Ac
     Ok((frames, acc))
 }
 
-/// The draw conditions of one destination, integer options first and the `draw` field last, or
-/// `None` when the document's own customisation choices already rule the object out.
+/// The conditions of one destination: the ones a frame evaluates, in the order it evaluates them,
+/// and the skin's own options beside them.
 ///
-/// An `op` entry with neither an id nor a property -- what a Lua boolean leaves behind -- adds no
-/// condition: its zero id is dropped with every other zero.
+/// The frame's list is every integer of `op` a built-in property answers, then every property of
+/// `op` -- a function, a name -- in the order the document wrote them, then `draw`
+/// (`SkinObject.setDrawCondition` followed by `addDrawCondition`, with `draw` appended last by
+/// `JSONSkinLoader.setDestination`). All of them must hold, and a frame stops at the first that does
+/// not, so a function placed in `op` or `draw` is only called while every built-in id of `op`
+/// holds, wherever in the list the document wrote those.
 ///
-/// An id the document declares for itself cannot change while the document is loaded, so it is
-/// settled here rather than every frame: an unmet one drops the object and a met one leaves no
-/// condition behind, which is what `Skin.prepare` does when it removes objects and empties the
-/// option list of the ones it keeps. Only the ids that address running game state stay as
-/// conditions.
+/// An integer of `op` no built-in property answers is one of the skin's own options and goes to the
+/// other list. A number in `draw`, or a property spelled as a number, is not: the reference looks it
+/// up as a property and, finding none, leaves the object without that condition. An `op` entry with
+/// neither an id nor a property -- what a Lua boolean leaves behind -- adds nothing either way.
+///
+/// The reference registers an object's conditions as it reads the object's first keyframe, so a
+/// destination with no keyframe registers none of either kind.
 ///
 /// A script a JSON document wrote as a string has been compiled into a function by the time a track
 /// is built (`super::script`). One that has not is source no interpreter ever saw, and the track is
 /// refused with [`SkinError::LuaUnavailable`] rather than drawn as though the condition were not
 /// there.
-fn draw_conditions(destination: &Destination, context: &mut TrackContext<'_>) -> Result<Option<Vec<DrawCondition>>, SkinError> {
-    let declared = context.declared_options;
-    let enabled = context.enabled_options;
-    let known_option = context.known_option;
-    let is_declared = |id: i32| declared.contains(&id.saturating_abs());
-    let is_known = |id: i32| known_option(id);
-
-    let ids: Vec<i32> = destination.op.iter().filter(|option| option.property.is_none()).map(|option| option.id).collect();
-    if ids.iter().any(|id| is_declared(*id) && !crate::loader::option_holds(*id, enabled)) {
-        return Ok(None);
+fn conditions(destination: &Destination) -> Result<OpLists, SkinError> {
+    if destination.dst.is_empty() {
+        return Ok(OpLists::default());
     }
-    let runtime: Vec<i32> = ids.into_iter().filter(|id| !is_declared(*id)).collect();
-    let mut conditions = crate::dst::draw_conditions_from_ops(&runtime, is_known);
+    let ids: Vec<i32> = destination.op.iter().filter(|option| option.property.is_none()).map(|option| option.id).collect();
+    let mut lists = draw_conditions_from_ops(&ids, is_builtin_option);
 
-    let expressions = destination.op.iter().filter_map(|option| option.property.as_ref()).chain(destination.draw.iter());
-    for expression in expressions {
-        match expression {
-            PropertyRef::Id(id) if *id == 0 => {}
-            PropertyRef::Id(id) if is_declared(*id) => {
-                if !crate::loader::option_holds(*id, enabled) {
-                    return Ok(None);
-                }
-            }
+    let properties = destination.op.iter().filter_map(|option| option.property.as_ref()).chain(destination.draw.iter());
+    for property in properties {
+        match property {
             PropertyRef::Id(id) => {
-                if is_known(id.saturating_abs()) {
-                    conditions.push(DrawCondition::Option(*id));
+                if is_builtin_option(*id) {
+                    lists.conditions.push(DrawCondition::Option(*id));
                 }
             }
-            PropertyRef::Func(function) => conditions.push(DrawCondition::Function(*function)),
-            PropertyRef::Name(name) => conditions.push(DrawCondition::Name(name.clone())),
+            PropertyRef::Func(function) => lists.conditions.push(DrawCondition::Function(*function)),
+            PropertyRef::Name(name) => lists.conditions.push(DrawCondition::Name(name.clone())),
             PropertyRef::Expr(_) => return Err(SkinError::LuaUnavailable),
         }
     }
-    Ok(Some(conditions))
+    Ok(lists)
 }
 
 /// The timer a destination animates against.
 ///
-/// A skin may name it with an id or hand over a function that computes it. Source nobody compiled
-/// into a function names no timer the interpolator can follow, so it is reported and the animation
-/// runs on the caller's clock instead.
+/// A skin may name it with an id or hand over a function that computes it. A negative id names no
+/// timer, which is not a fault and is not reported. Source nobody compiled into a function names no
+/// timer the interpolator can follow either, so that is reported and the animation runs on the
+/// caller's clock instead.
 fn timer_of(destination: &Destination, context: &mut TrackContext<'_>) -> Option<TimerRef> {
     let property = destination.timer.as_ref()?;
     let timer = property.timer();
-    if timer.is_none() {
+    if timer.is_none() && property.id().is_none() {
         context.warnings.push(format!(
             "{}: object {:?} names its timer with the expression {:?}, which runs on the frame clock instead",
             context.path,
@@ -238,19 +244,17 @@ fn timer_of(destination: &Destination, context: &mut TrackContext<'_>) -> Option
     timer
 }
 
-/// Builds one destination track, or reports that this document's own choices never draw it.
+/// Builds one destination track.
 ///
 /// The offset list is the document's `offsets` with its single `offset` appended, which is what
 /// `JSONSkinLoader.setDestination` hands the object, and it is appended even when it is zero.
-pub(crate) fn build_track(destination: &Destination, context: &mut TrackContext<'_>) -> Result<Option<DestinationTrack>, SkinError> {
-    let Some(draw_conditions) = draw_conditions(destination, context)? else {
-        return Ok(None);
-    };
+pub(crate) fn build_track(destination: &Destination, context: &mut TrackContext<'_>) -> Result<BuiltTrack, SkinError> {
+    let OpLists { conditions: draw_conditions, options } = conditions(destination)?;
     let mut offsets = destination.offsets.clone();
     offsets.push(destination.offset);
     let (frames, acc) = keyframes(destination, context.path)?;
 
-    Ok(Some(DestinationTrack {
+    let track = DestinationTrack {
         timer: timer_of(destination, context),
         acc,
         loop_ms: i64::from(destination.loop_ms),
@@ -263,36 +267,28 @@ pub(crate) fn build_track(destination: &Destination, context: &mut TrackContext<
         draw_conditions,
         mouse_rect: destination.mouse_rect.map(|rect| MouseRect { x: rect.x as f32, y: rect.y as f32, w: rect.w as f32, h: rect.h as f32 }),
         stretch: destination.stretch,
-    }))
+    };
+    Ok(BuiltTrack { track, options })
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
-
-    use super::{TrackContext, build_track};
-    use crate::dst::{DestinationTrack, DrawCondition, LuaFnId, TimerRef};
+    use super::{BuiltTrack, TrackContext, build_track};
+    use crate::dst::{DrawCondition, LuaFnId, TimerRef};
     use crate::model::{Animation, Destination, DestinationOption, PropertyRef};
+    use crate::property::generated::{OPTION_AUTOPLAYON, OPTION_BGAOFF};
     use crate::timer::TimerId;
 
-    /// An option id the test context reports as one the build implements.
-    const KNOWN_OPTION: i32 = 40;
+    /// An id the reference has no built-in option under, which only a skin's own customisation rows
+    /// can therefore give a meaning to.
+    const SKIN_OPTION: i32 = 900;
 
-    /// Builds `destination` on a screen that declares no options of its own, answering the track and
-    /// the warnings it left.
-    fn built(destination: &Destination) -> (DestinationTrack, Vec<String>) {
-        let none = BTreeSet::new();
+    /// Builds `destination`, answering what it came to and the warnings it left.
+    fn built(destination: &Destination) -> (BuiltTrack, Vec<String>) {
         let mut warnings = Vec::new();
-        let mut context = TrackContext {
-            known_option: |id| id == KNOWN_OPTION,
-            declared_options: &none,
-            enabled_options: &none,
-            path: "test.luaskin",
-            relative: false,
-            warnings: &mut warnings,
-        };
-        let track = build_track(destination, &mut context).expect("nothing in the track needs compiling").expect("no option rules the object out");
-        (track, warnings)
+        let mut context = TrackContext { path: "test.luaskin", relative: false, warnings: &mut warnings };
+        let built = build_track(destination, &mut context).expect("nothing in the track needs compiling");
+        (built, warnings)
     }
 
     /// A destination with one keyframe and nothing else.
@@ -300,11 +296,16 @@ mod tests {
         Destination { id: "object".to_owned(), dst: vec![Animation::default()], ..Destination::default() }
     }
 
+    /// An `op` list of plain ids.
+    fn ids(ids: &[i32]) -> Vec<DestinationOption> {
+        ids.iter().map(|id| DestinationOption { id: *id, property: None }).collect()
+    }
+
     #[test]
     fn a_function_in_draw_becomes_a_function_condition() {
         let function = LuaFnId(12);
-        let (track, warnings) = built(&Destination { draw: Some(PropertyRef::Func(function)), ..destination() });
-        assert_eq!(track.draw_conditions, vec![DrawCondition::Function(function)]);
+        let (built, warnings) = built(&Destination { draw: Some(PropertyRef::Func(function)), ..destination() });
+        assert_eq!(built.track.draw_conditions, vec![DrawCondition::Function(function)]);
         assert!(warnings.is_empty(), "a function needs no compiling and no sandbox: {warnings:?}");
     }
 
@@ -313,49 +314,90 @@ mod tests {
         let (in_op, in_draw) = (LuaFnId(1), LuaFnId(2));
         let op = vec![
             DestinationOption { id: 0, property: Some(PropertyRef::Func(in_op)) },
-            DestinationOption { id: KNOWN_OPTION, property: None },
+            DestinationOption { id: OPTION_BGAOFF, property: None },
             DestinationOption { id: 0, property: Some(PropertyRef::Name("!is_autoplay".to_owned())) },
+            DestinationOption { id: -OPTION_AUTOPLAYON, property: None },
         ];
-        let (track, _) = built(&Destination { op, draw: Some(PropertyRef::Func(in_draw)), ..destination() });
+        let (built, _) = built(&Destination { op, draw: Some(PropertyRef::Func(in_draw)), ..destination() });
         assert_eq!(
-            track.draw_conditions,
+            built.track.draw_conditions,
             vec![
-                DrawCondition::Option(KNOWN_OPTION),
+                DrawCondition::Option(OPTION_BGAOFF),
+                DrawCondition::Option(-OPTION_AUTOPLAYON),
                 DrawCondition::Function(in_op),
                 DrawCondition::Name("!is_autoplay".to_owned()),
                 DrawCondition::Function(in_draw),
             ],
-            "integer options first, then the properties of `op` in order, then `draw`"
+            "every built-in id of `op` first, then the properties of `op` in order, then `draw`"
         );
+        assert!(built.options.is_empty());
+    }
+
+    #[test]
+    fn an_id_no_built_in_property_answers_is_one_of_the_skins_own_options() {
+        let op = ids(&[SKIN_OPTION, OPTION_BGAOFF, -SKIN_OPTION, 0, SKIN_OPTION]);
+        let (built, warnings) = built(&Destination { op, ..destination() });
+        assert_eq!(built.track.draw_conditions, vec![DrawCondition::Option(OPTION_BGAOFF)], "only the built-in id is left for a frame to ask");
+        assert_eq!(built.options, vec![SKIN_OPTION, -SKIN_OPTION], "the other is kept under each sign it was written with, once, and the zero is dropped");
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn a_number_in_draw_is_a_property_or_nothing_and_never_one_of_the_skins_own_options() {
+        let (known, _) = built(&Destination { draw: Some(PropertyRef::Id(-OPTION_BGAOFF)), ..destination() });
+        assert_eq!(known.track.draw_conditions, vec![DrawCondition::Option(-OPTION_BGAOFF)]);
+
+        let (unknown, _) = built(&Destination { draw: Some(PropertyRef::Id(SKIN_OPTION)), ..destination() });
+        assert!(unknown.track.draw_conditions.is_empty(), "the reference finds no property and leaves the object unconditional");
+        assert!(unknown.options.is_empty(), "and `draw` never reaches the option list");
+    }
+
+    #[test]
+    fn a_destination_with_no_keyframe_registers_no_condition() {
+        let bare = Destination { dst: Vec::new(), op: ids(&[SKIN_OPTION, OPTION_BGAOFF]), draw: Some(PropertyRef::Func(LuaFnId(3))), ..destination() };
+        let (built, _) = built(&bare);
+        assert!(built.track.draw_conditions.is_empty(), "conditions are registered as the first keyframe is read");
+        assert!(built.options.is_empty(), "so nothing can remove the object for its options either");
     }
 
     #[test]
     fn an_entry_a_lua_boolean_left_behind_gates_nothing() {
         let op = vec![DestinationOption::UNCONDITIONAL, DestinationOption::UNCONDITIONAL];
-        let (track, warnings) = built(&Destination { op, ..destination() });
-        assert!(track.draw_conditions.is_empty(), "the object draws unconditionally: {:?}", track.draw_conditions);
+        let (built, warnings) = built(&Destination { op, ..destination() });
+        assert!(built.track.draw_conditions.is_empty(), "the object draws unconditionally: {:?}", built.track.draw_conditions);
+        assert!(built.options.is_empty());
         assert!(warnings.is_empty());
     }
 
     #[test]
     fn a_function_names_the_timer_it_computes() {
         let function = LuaFnId(5);
-        let (track, warnings) = built(&Destination { timer: Some(PropertyRef::Func(function)), ..destination() });
-        assert_eq!(track.timer, Some(TimerRef::Lua(function)));
+        let (built, warnings) = built(&Destination { timer: Some(PropertyRef::Func(function)), ..destination() });
+        assert_eq!(built.track.timer, Some(TimerRef::Lua(function)));
         assert!(warnings.is_empty(), "a function timer is not a fallback and says nothing: {warnings:?}");
     }
 
     #[test]
     fn an_id_still_names_its_timer() {
-        let (track, _) = built(&Destination { timer: Some(PropertyRef::Id(41)), ..destination() });
-        assert_eq!(track.timer, Some(TimerRef::Id(TimerId(41))));
+        let (built, _) = built(&Destination { timer: Some(PropertyRef::Id(41)), ..destination() });
+        assert_eq!(built.track.timer, Some(TimerRef::Id(TimerId(41))));
+    }
+
+    #[test]
+    fn a_negative_id_names_no_timer_and_zero_names_timer_zero() {
+        let (negative, warnings) = built(&Destination { timer: Some(PropertyRef::Id(-1)), ..destination() });
+        assert_eq!(negative.track.timer, None, "the object animates on the scene clock");
+        assert!(warnings.is_empty(), "which is what the skin asked for, so nothing is reported: {warnings:?}");
+
+        let (zero, _) = built(&Destination { timer: Some(PropertyRef::Id(0)), ..destination() });
+        assert_eq!(zero.track.timer, Some(TimerRef::Id(TimerId(0))), "zero is a timer like any other, and one nothing switches on");
     }
 
     #[test]
     fn text_in_a_timer_field_names_no_timer_and_says_so() {
         for property in [PropertyRef::Name("main_state.timer(41)".to_owned()), PropertyRef::Expr("main_state.timer(41)".to_owned())] {
-            let (track, warnings) = built(&Destination { timer: Some(property), ..destination() });
-            assert_eq!(track.timer, None, "a timer has no names, so text is source nobody compiled");
+            let (built, warnings) = built(&Destination { timer: Some(property), ..destination() });
+            assert_eq!(built.track.timer, None, "a timer has no names, so text is source nobody compiled");
             assert_eq!(warnings.len(), 1);
             assert!(warnings[0].contains("main_state.timer(41)") && warnings[0].contains("frame clock"), "warned {:?}", warnings[0]);
         }

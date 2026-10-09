@@ -11,9 +11,9 @@ use std::path::{Path, PathBuf};
 
 use rbms_model::Mode;
 use rbms_skin::dst::{DrawCondition, DrawStateSource, Keyframe, OffsetSource, SkinColor, SkinOffset, SkinRect, TimerRef, draw_conditions_from_ops, prepare};
-use rbms_skin::loader::{SkinLoadOptions, SkinUserConfig, every_option_known, load_skin};
+use rbms_skin::loader::{SkinLoadOptions, SkinUserConfig, load_skin};
 use rbms_skin::model::Destination;
-use rbms_skin::property::{DefaultState, MAPPINGS, PropertyKind, SkinHost, UNMAPPED_CLOCK_US, UnmappedLog, source_of};
+use rbms_skin::property::{DefaultState, MAPPINGS, NameSpace, PropertyKind, SkinHost, UNMAPPED_CLOCK_US, UnmappedLog, reference_implements, source_of};
 use rbms_skin::timer::{TIMER_OFF, TimerId, TimerState};
 
 /// The clock every frame in this file is drawn against, in microseconds.
@@ -33,8 +33,8 @@ const ALTERNATE_OPTION: i32 = 902;
 /// An option the generated registry declares, standing in for an engine option a screen wires up.
 const REGISTRY_OPTION: i32 = rbms_skin::property::generated::boolean::OPTION_PANEL1;
 
-/// A boolean id no document and no registry declares, standing in for an option this build has yet
-/// to implement.
+/// An id no document and no registry declares: as an option, one that neither the reference nor
+/// any skin's customisation rows give a meaning to.
 const UNDECLARED_OPTION: i32 = 88_888;
 
 /// An integer id the sample state answers for.
@@ -135,13 +135,12 @@ fn minimal_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures").join("minimal")
 }
 
-/// Loads the minimal fixture under one option predicate, with its wildcard draws pinned.
-fn load_minimal(known_option: fn(i32) -> bool) -> rbms_skin::loader::LoadedSkin {
+/// Loads the minimal fixture with its wildcard draws pinned.
+fn load_minimal() -> rbms_skin::loader::LoadedSkin {
     let user = SkinUserConfig::default();
     let root = minimal_root();
     let mut options = SkinLoadOptions::new(&root, &user, Mode::BEAT_7K);
     options.rng_seed = Some(TEST_SEED);
-    options.known_option = known_option;
     load_skin(&root.join("skin.json"), options).expect("the minimal fixture should load")
 }
 
@@ -187,71 +186,74 @@ fn an_offset_moves_a_drawn_object_through_the_same_state_value() {
 }
 
 #[test]
-fn the_registry_membership_test_drops_into_the_loader_as_its_option_predicate() {
-    let skin = load_minimal(|id| PropertyKind::Boolean.is_declared(id));
-    assert!(!skin.destinations.is_empty(), "the document still assembles its destinations");
-}
-
-#[test]
-fn the_generated_registry_declares_no_document_custom_option() {
+fn neither_the_generated_registry_nor_the_reference_claims_a_documents_custom_option() {
     assert!(
         !PropertyKind::Boolean.is_declared(DECLARED_OPTION),
         "the fixture's customisation ids are the document's own, so the engine registry must not claim them"
     );
+    assert!(!reference_implements(NameSpace::Boolean, DECLARED_OPTION), "and the reference has no built-in option there to answer in their place");
+    assert!(reference_implements(NameSpace::Boolean, -REGISTRY_OPTION), "while an engine option is built in under either sign");
 }
 
-/// A document's own customisation ids gate its objects whatever the build's predicate knows, and
-/// they gate them at load: the id never reaches a state source, because no state source answers a
-/// number a document invented for itself.
+/// A document's own customisation ids gate its objects at load: the id never reaches a state
+/// source, because no state source answers a number a document invented for itself.
 #[test]
-fn a_documents_own_options_gate_even_under_a_registry_only_predicate() {
-    let ids = |skin: &rbms_skin::loader::LoadedSkin| skin.destinations.iter().map(|named| named.id.clone()).collect::<Vec<String>>();
-    let strict = load_minimal(|id| PropertyKind::Boolean.is_declared(id));
-    let permissive = load_minimal(every_option_known);
+fn a_documents_own_options_gate_at_load_and_never_reach_a_frame() {
+    let skin = load_minimal();
+    let ids: Vec<&str> = skin.destinations.iter().map(|named| named.id.as_str()).collect();
 
-    assert_eq!(ids(&strict), ids(&permissive), "the injected predicate must not change how a document's own options gate");
-    assert!(ids(&strict).contains(&"panel-on".to_owned()), "the chosen variant is drawn: {:?}", ids(&strict));
-    assert!(!ids(&strict).contains(&"panel-off".to_owned()), "and the one nobody chose is not: {:?}", ids(&strict));
+    assert!(ids.contains(&"panel-on"), "the chosen variant is drawn: {ids:?}");
+    assert!(!ids.contains(&"panel-off"), "and the one nobody chose is not: {ids:?}");
     assert!(
-        strict.destinations.iter().all(|named| !named.track.draw_conditions.contains(&DrawCondition::Option(DECLARED_OPTION))),
+        skin.destinations.iter().all(|named| !named.track.draw_conditions.contains(&DrawCondition::Option(DECLARED_OPTION))),
         "a settled customisation id must not be left for a frame to ask about"
     );
 }
 
 #[test]
 fn the_loader_reports_every_option_the_document_declares() {
-    let skin = load_minimal(every_option_known);
+    let skin = load_minimal();
     assert!(skin.declared_options.contains(&DECLARED_OPTION), "the on variant is declared");
     assert!(skin.declared_options.contains(&ALTERNATE_OPTION), "so is the off variant, though the player has not chosen it");
     assert!(skin.enabled_options.contains(&DECLARED_OPTION), "and only the chosen one is enabled");
     assert!(!skin.enabled_options.contains(&ALTERNATE_OPTION));
 }
 
+/// The reference's own list of built-in options is what sorts an `op` list: an id on it is a
+/// condition the state answers every frame, and an id off it is never shown to the state at all.
 #[test]
-fn the_default_predicate_treats_every_option_as_implemented() {
-    assert!(every_option_known(UNDECLARED_OPTION), "a caller with no registry must not hide objects");
-}
-
-#[test]
-fn an_option_the_registry_does_not_declare_leaves_its_object_visible() {
-    let declared = draw_conditions_from_ops(&[REGISTRY_OPTION], |id| PropertyKind::Boolean.is_declared(id));
-    assert_eq!(declared, vec![DrawCondition::Option(REGISTRY_OPTION)], "a declared op becomes a condition");
-
-    let undeclared = draw_conditions_from_ops(&[UNDECLARED_OPTION], |id| PropertyKind::Boolean.is_declared(id));
-    assert!(undeclared.is_empty(), "an op no property implements is dropped rather than read as false");
+fn an_op_the_reference_implements_gates_a_frame_and_one_it_does_not_never_reaches_one() {
+    let builtin = |id: i32| reference_implements(NameSpace::Boolean, id);
+    let lists = draw_conditions_from_ops(&[-REGISTRY_OPTION, UNDECLARED_OPTION, -UNDECLARED_OPTION], builtin);
+    assert_eq!(lists.conditions, vec![DrawCondition::Option(-REGISTRY_OPTION)], "a built-in op becomes a condition, sign included");
+    assert_eq!(lists.options, vec![UNDECLARED_OPTION, -UNDECLARED_OPTION], "anything else is left for the skin's own options to answer when it is prepared");
 
     let mut track = sample_track();
-    track.draw_conditions = undeclared;
-    let state = sample_state();
+    track.draw_conditions = lists.conditions;
+    let mut state = sample_state();
     assert!(
         prepare(&track, FRAME_NOW_US, &running_timers(), &state, None, (0.0, 0.0), None).is_some(),
-        "so the object stays on screen instead of vanishing on an unimplemented build"
+        "the state does not hold the option, so its negation draws"
     );
+    state.booleans.insert(REGISTRY_OPTION);
+    assert!(prepare(&track, FRAME_NOW_US, &running_timers(), &state, None, (0.0, 0.0), None).is_none(), "and stops drawing once it does");
+}
+
+/// An id nobody gives a meaning to removes its object when the skin is prepared, whichever sign the
+/// document wrote it with (`Skin.prepare`), and a state that would answer anything is not asked.
+#[test]
+fn an_op_nobody_answers_removes_its_object_before_any_state_is_asked() {
+    let mut skin = load_minimal();
+    for op in [UNDECLARED_OPTION, -UNDECLARED_OPTION] {
+        let destination: Destination =
+            serde_json::from_str(&format!(r#"{{ "id": "stray", "op": [{op}], "dst": [{{ "time": 0 }}] }}"#)).expect("the destination should parse");
+        assert!(skin.build_track(&destination, false).expect("builds").is_none(), "op {op} names no property and no option of the skin");
+    }
 }
 
 #[test]
 fn only_a_judge_count_object_is_built_relative() {
-    let mut skin = load_minimal(every_option_known);
+    let mut skin = load_minimal();
 
     let destination = Destination::default();
     assert!(!skin.build_track(&destination, false).expect("builds").expect("its conditions hold").relative);
@@ -295,7 +297,7 @@ mod with_lua {
     #[test]
     fn the_runtime_takes_the_registry_trait_itself() {
         let state = sample_state();
-        let skin = load_minimal(every_option_known);
+        let skin = load_minimal();
         let runtime = skin.runtime().expect("a build with Lua gives a document an interpreter");
 
         let number = runtime.compile(&format!("number({SAMPLE_NUMBER})"), LuaFnKind::Integer).expect("the script should compile");
@@ -306,7 +308,7 @@ mod with_lua {
     #[test]
     fn one_state_value_answers_the_registry_the_interpolator_and_a_script() {
         let state = sample_state();
-        let mut skin = load_minimal(every_option_known);
+        let mut skin = load_minimal();
         let track = skin.build_track(&gated_on(&format!("option({DECLARED_OPTION})")), false).expect("the track builds").expect("nothing rules it out");
         assert!(matches!(track.draw_conditions.as_slice(), [DrawCondition::Function(_)]), "the script is a function condition: {:?}", track.draw_conditions);
 
@@ -320,7 +322,7 @@ mod with_lua {
     #[test]
     fn a_false_script_hides_its_object_rather_than_failing_the_frame() {
         let state = PlayerState { now: FRAME_NOW_US, ..PlayerState::default() };
-        let mut skin = load_minimal(every_option_known);
+        let mut skin = load_minimal();
         let track = skin.build_track(&gated_on(&format!("option({DECLARED_OPTION})")), false).expect("the track builds").expect("nothing rules it out");
 
         let runtime = skin.runtime().expect("the document has an interpreter");
@@ -333,7 +335,7 @@ mod with_lua {
     #[test]
     fn the_script_clock_is_the_clock_the_frame_is_drawn_against() {
         let state = sample_state();
-        let skin = load_minimal(every_option_known);
+        let skin = load_minimal();
         let runtime = skin.runtime().expect("the document has an interpreter");
 
         let clock = runtime.compile("time()", LuaFnKind::Integer).expect("the script should compile");
@@ -344,7 +346,7 @@ mod with_lua {
     #[test]
     fn a_script_still_cannot_reach_a_file_outside_the_skin_root() {
         let state = sample_state();
-        let skin = load_minimal(every_option_known);
+        let skin = load_minimal();
         let runtime = skin.runtime().expect("the document has an interpreter");
         assert!(minimal_root().join("..").join("secret.txt").is_file(), "the file the scripts reach for exists, one folder above the skin");
 

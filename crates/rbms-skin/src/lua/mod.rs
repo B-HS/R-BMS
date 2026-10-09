@@ -43,7 +43,7 @@ mod os;
 mod package;
 mod pattern;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -60,6 +60,7 @@ use crate::resolve;
 use crate::timer::TIMER_OFF;
 pub use budget::{BUDGET_EXHAUSTED, FrameBudget, LoadBudget, LuaBudget, Meter, Phase};
 pub use env::{SKIN_CONFIG_GLOBAL, SkinConfigGlobal};
+pub use os::{LocalTime, local_time};
 
 /// Distinct printed lines the log keeps. Later ones are counted but not stored.
 const MAX_LOGGED_PRINTS: usize = 1_024;
@@ -617,6 +618,27 @@ struct RegisteredFn {
     kind: LuaFnKind,
 }
 
+/// What a timer function answered the last time a frame read it, and which frame that was.
+#[derive(Debug, Clone, Copy)]
+struct TimerAnswer {
+    /// The frame the answer belongs to, as [`SkinLua::frame`] counts them.
+    frame: u64,
+    /// The microsecond the timer switched on, or [`TIMER_OFF`].
+    started_us: i64,
+}
+
+/// What the calls of one frame came to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct FrameCost {
+    /// Function calls the frame made. A call the budget refused is not one of them.
+    pub calls: u32,
+    /// Timer reads the frame answered from an earlier read of the same timer, with no call
+    /// ([`BoundFrame::timer`]).
+    pub reused: u32,
+    /// Wall clock the calls spent inside Lua.
+    pub spent: Duration,
+}
+
 /// One skin's interpreter, with everything the skin left in it.
 ///
 /// A loaded skin owns exactly one of these for as long as its screen is shown, because the
@@ -630,6 +652,12 @@ pub struct SkinLua {
     /// What each function answered the last time it ran, by id: the value a frame gets when the
     /// budget will not let it call the function again.
     last_values: RefCell<Vec<Option<Value>>>,
+    /// How many frames have been bound, which is also the number of the one running or last run.
+    frames: Cell<u64>,
+    /// What each timer function answered on the frame that last read it, by id.
+    timer_answers: RefCell<Vec<Option<TimerAnswer>>>,
+    /// Timer reads the frame running, or last run, answered without a call.
+    timer_reuses: Cell<u32>,
 }
 
 impl std::fmt::Debug for SkinLua {
@@ -671,7 +699,16 @@ impl SkinLua {
         main_state::install(&lua, &shared).map_err(failed)?;
         luajava::install(&lua, &shared).map_err(failed)?;
 
-        Ok(Self { lua, shared, functions: RefCell::new(Vec::new()), by_identity: RefCell::new(BTreeMap::new()), last_values: RefCell::new(Vec::new()) })
+        Ok(Self {
+            lua,
+            shared,
+            functions: RefCell::new(Vec::new()),
+            by_identity: RefCell::new(BTreeMap::new()),
+            last_values: RefCell::new(Vec::new()),
+            frames: Cell::new(0),
+            timer_answers: RefCell::new(Vec::new()),
+            timer_reuses: Cell::new(0),
+        })
     }
 
     /// The interpreter itself, for the table converter and for tests. Nothing outside this crate's
@@ -780,8 +817,9 @@ impl SkinLua {
     /// Takes a function value into the registry and answers the id the model keeps for it.
     ///
     /// The same function registered again as the same kind answers the same id, so a timer function
-    /// shared by many objects is one entry and can be called once per frame for all of them. The
-    /// same function registered as a different kind is a different entry.
+    /// shared by many objects is one entry and is called once per frame for all of them
+    /// ([`BoundFrame::timer`]). The same function registered as a different kind is a different
+    /// entry.
     pub fn register(&self, function: Function, kind: LuaFnKind) -> LuaFnId {
         let identity = (function.to_pointer() as usize, kind);
         if let Some(id) = self.by_identity.borrow().get(&identity) {
@@ -791,6 +829,7 @@ impl SkinLua {
         let id = LuaFnId(functions.len() as u32);
         functions.push(RegisteredFn { function, kind });
         self.last_values.borrow_mut().push(None);
+        self.timer_answers.borrow_mut().push(None);
         self.by_identity.borrow_mut().insert(identity, id);
         id
     }
@@ -864,6 +903,26 @@ impl SkinLua {
         }
     }
 
+    /// What `function` answered as a timer on frame `frame`, when that frame has read it already.
+    fn timer_answer(&self, function: LuaFnId, frame: u64) -> Option<i64> {
+        let answer = self.timer_answers.borrow().get(function.0 as usize).copied().flatten()?;
+        (answer.frame == frame).then_some(answer.started_us)
+    }
+
+    /// Keeps `started_us` as what `function` answered as a timer on frame `frame`.
+    fn keep_timer_answer(&self, function: LuaFnId, frame: u64, started_us: i64) {
+        if let Some(slot) = self.timer_answers.borrow_mut().get_mut(function.0 as usize) {
+            *slot = Some(TimerAnswer { frame, started_us });
+        }
+    }
+
+    /// What the calls of the frame now running have come to so far, or those of the last frame once
+    /// it is over. Nothing before the first frame.
+    pub fn frame_cost(&self) -> FrameCost {
+        let meter = &self.shared.meter;
+        FrameCost { calls: meter.frame_calls(), reused: self.timer_reuses.get(), spent: meter.frame_spent() }
+    }
+
     /// Binds `host` for one frame and runs `run` inside the binding.
     ///
     /// Every call a frame makes -- conditions, timers, values, and the events a click fires -- goes
@@ -872,14 +931,20 @@ impl SkinLua {
     /// budget from the moment this is entered, but its wall clock runs only while one of those calls
     /// does: what `run` spends between two calls, drawing included, is not charged to the skin.
     ///
+    /// A binding is also the span a timer function's answer is reused over ([`BoundFrame::timer`]):
+    /// each binding starts with none kept.
+    ///
     /// The only error is a failure to bind at all; a function that fails inside the frame is
     /// recorded in the log and answered with its kind's default.
     pub fn frame<R>(&self, host: &dyn SkinHost, run: impl FnOnce(&BoundFrame<'_>) -> R) -> Result<R, SkinError> {
         let meter = &self.shared.meter;
         meter.begin_frame();
+        let serial = self.frames.get() + 1;
+        self.frames.set(serial);
+        self.timer_reuses.set(0);
         let outcome = self.lua.scope(|scope| {
             main_state::bind(&self.lua, &self.shared, scope, host)?;
-            Ok(run(&BoundFrame { owner: self, host }))
+            Ok(run(&BoundFrame { owner: self, host, serial }))
         });
         meter.finish();
         outcome.map_err(|error| SkinError::Lua { expr: main_state::MAIN_STATE_MODULE.to_owned(), message: error_message(&error) })
@@ -900,14 +965,18 @@ impl SkinLua {
 /// answered the last time it ran to its end, and the kind's default only when it never has. The
 /// object it belongs to therefore holds still for a frame instead of blinking out.
 ///
-/// Still owed by the unit that completes the runtime: a timer function must be called once per frame
-/// however many objects share it.
+/// Every `call_*` is one call of the function, however often it is asked. [`Self::timer`] is the one
+/// reader that is not: it calls a timer function the first time a frame reads it and answers every
+/// later read of the frame with what that call answered. That is the reader a frame is drawn through
+/// (the [`LuaDrawEval`] this implements), because drawing reads one timer many times over.
 ///
 /// Calling a function as a kind other than the one it was registered as is allowed and simply
 /// applies that call's own rules.
 pub struct BoundFrame<'a> {
     owner: &'a SkinLua,
     host: &'a dyn SkinHost,
+    /// Which frame this is, as [`SkinLua::frame`] counts them.
+    serial: u64,
 }
 
 impl std::fmt::Debug for BoundFrame<'_> {
@@ -980,6 +1049,33 @@ impl BoundFrame<'_> {
         self.invoke(function, LuaFnKind::Timer, ()).map_or(TIMER_OFF, |value| coerce::to_long(&value))
     }
 
+    /// The microsecond a timer function reports on this frame: [`Self::call_timer`] the first time
+    /// the frame reads the function, and that same answer every time after.
+    ///
+    /// The reference calls the function on every read, and it reads a timer twice for each object
+    /// that follows one and twice more for each image that animates on one (`isOff` and then `get`,
+    /// `SkinObject.prepareRegion` and `SkinSourceImage.getImageIndex`). One call serves all of those
+    /// here. The answers are the reference's as long as a timer function reports the same moment
+    /// however often one frame asks, which holds for everything the reference builds a timer from:
+    /// the frame clock and every built-in timer are fixed before the first object is prepared, and
+    /// `timer_util.timer_observe_boolean` latches against that same clock, so its second call of a
+    /// frame changes nothing its first did not. Two kinds of function could tell the difference: one
+    /// that counts its own calls, and one that several objects share and that reads something
+    /// another object's function changes between two of them, which here shows a frame later.
+    ///
+    /// What is reused is whatever the one call came to. A function that raised reads as off for the
+    /// rest of the frame and is logged once for it; one the budget refused or cut off reads as what
+    /// it answered on an earlier frame. Either is called again on the next frame.
+    pub fn timer(&self, function: LuaFnId) -> i64 {
+        if let Some(started_us) = self.owner.timer_answer(function, self.serial) {
+            self.owner.timer_reuses.set(self.owner.timer_reuses.get().saturating_add(1));
+            return started_us;
+        }
+        let started_us = self.call_timer(function);
+        self.owner.keep_timer_answer(function, self.serial, started_us);
+        started_us
+    }
+
     /// Calls an event function with its one argument. Failures are recorded and otherwise ignored.
     pub fn call_event(&self, function: LuaFnId, argument: i32) {
         self.invoke(function, LuaFnKind::Event, argument);
@@ -1000,6 +1096,10 @@ impl BoundFrame<'_> {
 /// where a property id belongs. A function is called through the frame's own methods; a name is
 /// turned into its id and read from the host, as the reference resolves a named property once and
 /// reads it like any other.
+///
+/// A condition and a value are called every time they are asked for, because a skin hangs work on
+/// them and counts on each object's own call. A timer is called once a frame however many objects
+/// and images read it ([`BoundFrame::timer`]).
 impl LuaDrawEval for BoundFrame<'_> {
     fn call_boolean(&self, function: LuaFnId) -> bool {
         BoundFrame::call_boolean(self, function)
@@ -1018,7 +1118,7 @@ impl LuaDrawEval for BoundFrame<'_> {
     }
 
     fn call_timer(&self, function: LuaFnId) -> i64 {
-        BoundFrame::call_timer(self, function)
+        self.timer(function)
     }
 
     fn named_boolean(&self, name: &str) -> bool {
