@@ -1,4 +1,3 @@
-use crate::content::SelectContent;
 use crate::ctx::{RenderCtx, with_render_ctx};
 use crate::result::{RANK_BANDS, dj_rank, draw_rank_bar};
 use crate::{Color, Rect, Renderer};
@@ -242,52 +241,16 @@ pub fn render_select<R: Renderer>(r: &mut R, v: &SelectView) -> Vec<(Rect, Selec
 pub fn render_select_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &SelectView) -> Vec<(Rect, SelectHot)> {
     let th = ctx.theme;
     r.clear(th.bg);
-    render_select_on_background_ctx(ctx, r, v)
-}
-
-/// Draws the native browser above content the caller has already placed on the canvas.
-pub fn render_select_on_background<R: Renderer>(r: &mut R, v: &SelectView) -> Vec<(Rect, SelectHot)> {
-    with_render_ctx(|ctx| render_select_on_background_ctx(ctx, r, v))
-}
-
-/// [`render_select_on_background`] against a caller-supplied context.
-pub fn render_select_on_background_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &SelectView) -> Vec<(Rect, SelectHot)> {
-    render_select_on_background_with_content_ctx(ctx, r, v, SelectContent::default())
-}
-
-/// Draws only the blocks of the native browser `content` has left to it.
-///
-/// A document that draws the wheel, the detail pane or the top bar itself takes the rectangles that
-/// go with them too: the buttons it replaced answer through its own `hotspot` table and its rows
-/// through the wheel's slots, so the block the document took over must contribute neither pixels nor
-/// hit rectangles here. The record modal is never a block, because no document declares one.
-pub fn render_select_on_background_with_content<R: Renderer>(r: &mut R, v: &SelectView, content: SelectContent) -> Vec<(Rect, SelectHot)> {
-    with_render_ctx(|ctx| render_select_on_background_with_content_ctx(ctx, r, v, content))
-}
-
-/// [`render_select_on_background_with_content`] against a caller-supplied context.
-pub fn render_select_on_background_with_content_ctx<R: Renderer>(
-    ctx: &mut RenderCtx<'_>,
-    r: &mut R,
-    v: &SelectView,
-    content: SelectContent,
-) -> Vec<(Rect, SelectHot)> {
     let mut hot = Vec::new();
-    if !content.topbar {
-        render_top_bar(ctx, r, v);
-        if v.modal.is_none() {
-            render_nav_bar(ctx, r, v, &mut hot);
-        }
+    render_top_bar(ctx, r, v);
+    if v.modal.is_none() {
+        render_nav_bar(ctx, r, v, &mut hot);
     }
-    if !content.list {
-        render_list(ctx, r, v, &mut hot);
-    }
-    if !content.detail {
-        match &v.detail {
-            SelectDetail::Song(d) => render_song_detail(ctx, r, v, d, &mut hot),
-            SelectDetail::Folder { label, count } => render_folder_detail(ctx, r, label, *count),
-            SelectDetail::Empty => {}
-        }
+    render_list(ctx, r, v, &mut hot);
+    match &v.detail {
+        SelectDetail::Song(d) => render_song_detail(ctx, r, v, d, &mut hot),
+        SelectDetail::Folder { label, count } => render_folder_detail(ctx, r, label, *count),
+        SelectDetail::Empty => {}
     }
     if let Some(modal) = &v.modal {
         render_modal(ctx, r, modal, &mut hot);

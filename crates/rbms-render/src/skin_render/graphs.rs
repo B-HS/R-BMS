@@ -1,6 +1,5 @@
 //! The graphs and visualisers a document draws instead of the built-in panels: the gauge history,
-//! the judgement spread, the tempo timeline, the timing distribution, the running hit error and the
-//! note density of the focused chart.
+//! the judgement spread, the tempo timeline, the timing distribution and the running hit error.
 //!
 //! Each takes its numbers from the screen-shaped state beside the frame's scalar source -- a
 //! property id answers one value and none of these is one value -- and its colours from the record
@@ -20,7 +19,6 @@ use super::object::{Body, Source};
 use super::{SkinAssets, SkinFrame};
 use crate::ctx::RenderCtx;
 use crate::result::ResultPalette;
-use crate::select::{DensityView, SelectDetail};
 use crate::{Color, Rect, Renderer};
 
 /// How many judgements a run is counted in, best first.
@@ -219,14 +217,6 @@ pub(crate) struct HitErrorBody {
     decay: bool,
 }
 
-/// The per-second note density of the focused chart.
-#[derive(Debug)]
-pub(crate) struct DensityBody {
-    bar: Color,
-    peak: Color,
-    width: f32,
-}
-
 /// The graph behind `id`, or `None` when the document declares none by that name.
 pub(crate) fn build_graph(
     skin: &LoadedSkin,
@@ -292,25 +282,18 @@ pub(crate) fn build_graph(
             window_ms: (graph.judge_width_millis.max(1)) as f32,
         }));
     }
-    if let Some(graph) = def.hiterrorvisualizer.iter().find(|graph| graph.id == id) {
-        let colors = [&graph.pgreat_color, &graph.great_color, &graph.good_color, &graph.bad_color, &graph.poor_color];
-        return Some(Body::HitError(HitErrorBody {
-            center: color_of(&graph.center_color, "centre", id, warnings),
-            judges: visualizer_palette(colors.map(String::as_str), id, warnings),
-            average: color_of(&graph.ema_color, "average", id, warnings),
-            width: line_width(graph.line_width),
-            window_ms: (graph.judge_width_millis.max(1)) as f32,
-            window: graph.window_length.max(0) as usize,
-            smoothing: graph.alpha.clamp(0.0, 1.0),
-            draw_average: graph.ema_mode != 0,
-            decay: graph.draw_decay != 0,
-        }));
-    }
-    let graph = def.densitygraph.iter().find(|graph| graph.id == id)?;
-    Some(Body::Density(DensityBody {
-        bar: color_of(&graph.bar_color, "bars", id, warnings),
-        peak: color_of(&graph.peak_color, "peak", id, warnings),
+    let graph = def.hiterrorvisualizer.iter().find(|graph| graph.id == id)?;
+    let colors = [&graph.pgreat_color, &graph.great_color, &graph.good_color, &graph.bad_color, &graph.poor_color];
+    Some(Body::HitError(HitErrorBody {
+        center: color_of(&graph.center_color, "centre", id, warnings),
+        judges: visualizer_palette(colors.map(String::as_str), id, warnings),
+        average: color_of(&graph.ema_color, "average", id, warnings),
         width: line_width(graph.line_width),
+        window_ms: (graph.judge_width_millis.max(1)) as f32,
+        window: graph.window_length.max(0) as usize,
+        smoothing: graph.alpha.clamp(0.0, 1.0),
+        draw_average: graph.ema_mode != 0,
+        decay: graph.draw_decay != 0,
     }))
 }
 
@@ -563,32 +546,5 @@ pub(crate) fn draw_hit_error<R: Renderer>(
     if body.draw_average {
         draw_column(r, plot, middle + error_offset(plot, average, body.window_ms), body.width, modulate(body.average, place.tint));
     }
-    true
-}
-
-/// The focused chart's density, when a chart rather than a folder is focused and it was measured.
-fn density_of<'a>(frame: &'a SkinFrame<'_>) -> Option<&'a DensityView> {
-    match frame.extra.select()?.detail {
-        SelectDetail::Song(detail) => detail.density.as_ref(),
-        _ => None,
-    }
-}
-
-/// Draws the note-density histogram, with the tallest second of the chart marked across it.
-pub(crate) fn draw_density<R: Renderer>(
-    _ctx: &mut RenderCtx<'_>,
-    r: &mut R,
-    place: &Placement<'_>,
-    body: &DensityBody,
-    rect: SkinRect,
-    frame: &SkinFrame<'_>,
-) -> bool {
-    let (Some(density), Some(plot)) = (density_of(frame), plot_of(place, rect)) else {
-        return false;
-    };
-    if !draw_histogram(r, plot, &density.bins, modulate(body.bar, place.tint), BAR_GAP) {
-        return false;
-    }
-    r.fill_rect(Rect::new(plot.x, plot.y, plot.w, body.width), modulate(body.peak, place.tint));
     true
 }

@@ -8,7 +8,7 @@ use super::judge_setup::{is_custom_judge, judge_setup_of};
 use super::{
     ROOT_ESC_CONFIRM, SortMode, assisted_lamp, bundled_skin, calibrated_offset, clear_type_from_id, clear_type_id, client_platform, compute_build_hash,
     config_dir_from, default_total_for_mode, esc_confirms_quit, exit_code, fmt_datetime, green_number_for, ir_submission_block_reason, resumed_clock_us,
-    saves_replay, updates_score, write_atomic,
+    saves_replay, sound_folder_path, updates_score, write_atomic,
 };
 use rbms_chart::{default_total, default_total_keyboard};
 use rbms_config::{Config, JUDGE_RATE_MAX_PERCENT, LN_MARGIN_DEFAULT_PERCENT, LN_MARGIN_MAX_PERCENT, LN_MARGIN_MIN_PERCENT, UNMODIFIED_JUDGE_RATES};
@@ -204,6 +204,31 @@ fn sortmode_hides_the_orderings_that_have_nothing_to_compare_against() {
         assert!(!SortMode::DEFAULT_CYCLE.contains(&hidden), "{:?} is on the key", hidden.label());
         assert!(!SortMode::SELECTABLE.contains(&hidden), "{:?} is on the row", hidden.label());
     }
+}
+
+/// System sounds are read from the folder the player configured, and a player who configured none
+/// -- or left the setting blank -- is given the set the first run installed, whichever note-field
+/// layout is selected. Until that set is on disk there is nothing to read, and the answer is none.
+#[test]
+fn system_sounds_come_from_the_configured_folder_or_else_the_installed_set() {
+    let home = std::env::temp_dir().join(format!("rbms_sound_folder_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    let settings = home.join(".config/rbms/settings.ron");
+    let mut config = Config::default();
+    assert_eq!(sound_folder_path(&settings, &config), None, "a set that was never installed was named");
+
+    assert!(super::install_default_sounds(&settings));
+    let installed = super::assets::default_sound_folder(&settings).expect("the installed set is found");
+    for layout in ["NORMAL", "WIDE"] {
+        config.display.skin = layout.to_string();
+        assert_eq!(sound_folder_path(&settings, &config), Some(installed.clone()), "{layout} does not read the installed set");
+    }
+    config.audio.sound_folder = Some("   ".into());
+    assert_eq!(sound_folder_path(&settings, &config), Some(installed), "a blank setting was read as a folder");
+
+    config.audio.sound_folder = Some("/sounds/mine".into());
+    assert_eq!(sound_folder_path(&settings, &config), Some(std::path::PathBuf::from("/sounds/mine")), "the configured folder lost to the installed set");
+    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]

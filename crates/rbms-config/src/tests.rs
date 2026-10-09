@@ -60,7 +60,6 @@ fn default_values_are_sane() {
     assert!(c.library.tables.is_empty());
     assert_eq!(c.display.font_path, None);
     assert_eq!(c.display.skin, DEFAULT_SKIN);
-    assert!(!c.skin.default_skin_installed);
     assert_eq!(c.network.server_url, None);
     assert_eq!(c.network.player_id, DEFAULT_PLAYER_ID, "an unconfigured client submits under the only id the server accepts without a token");
     assert_eq!(c.network.ir_token, None);
@@ -236,12 +235,10 @@ fn ron_round_trip_preserves_every_field() {
     c.skin.folder = Some("/skins".into());
     c.skin.screen = MUSIC_SELECT_SCREEN;
     c.skin.select(MUSIC_SELECT_SCREEN, Some("/skins/browser/browser.json".into()));
-    c.skin.default_skin_installed = true;
     let custom = c.skin.customise("/skins/browser/browser.json");
     custom.properties.insert("LANE COVER".into(), 902);
     custom.filepaths.insert("BACKGROUND".into(), "night.png".into());
     custom.offsets.insert(12, SkinOffset { x: -4.0, y: 8.0, w: 0.0, h: 0.0, r: 90.0, a: -32.0 });
-    c.skin.shared_customise("browser").properties.insert("PLAY SIDE".into(), 901);
 
     let back: Config = ron::from_str(&ron_of(&c)).expect("a config round-trips");
     assert_eq!(back, c, "every field survives the round trip");
@@ -304,57 +301,6 @@ fn the_loader_is_handed_the_choices_made_for_the_document_it_is_loading() {
     assert_eq!(user.offset(4), None, "an offset nobody nudged came back as a nudge of nothing");
 }
 
-/// A bundle ships one directory of documents, so a row it declares at bundle scope is keyed by that
-/// directory's name however the skin folder was reached -- the one the player named, or the default
-/// one beside the settings file.
-#[test]
-fn a_documents_bundle_is_the_directory_it_sits_in_below_the_skin_folder() {
-    let mut c = Config::default();
-    assert_eq!(c.skin.bundle_key("/home/p/.config/rbms/skin/steel-neon-v2/play-7k.json5").as_deref(), Some("steel-neon-v2"));
-    assert_eq!(c.skin.bundle_key("/home/p/.config/rbms/skin/loose.json5"), None, "a document lying in the skin folder itself was given a bundle");
-    assert_eq!(c.skin.bundle_key("/elsewhere/collection/play.json5"), None, "a document outside the skin folder was given a bundle");
-
-    c.skin.folder = Some("/skins".into());
-    assert_eq!(c.skin.bundle_key("/skins/aurora/select.json5").as_deref(), Some("aurora"));
-    assert_eq!(c.skin.bundle_key("/skins/aurora/screens/select.json5").as_deref(), Some("aurora"), "a nested document left its own bundle");
-    assert_eq!(c.skin.bundle_key("/skins/select.json5"), None, "a document lying in the named folder itself was given a bundle");
-}
-
-/// Bundle-scope choices are what every screen of one bundle shares, and a document that declares the
-/// same row for itself is the narrower answer -- so one choice can be made once and still be
-/// overridden on the screen it does not suit.
-#[test]
-fn bundle_choices_reach_every_document_of_that_bundle_and_yield_to_the_documents_own() {
-    let mut c = Config::default();
-    let select = "/home/p/.config/rbms/skin/steel-neon-v2/select.json5";
-    let play = "/home/p/.config/rbms/skin/steel-neon-v2/play-7k.json5";
-    let outside = "/home/p/.config/rbms/skin/other-bundle/play-7k.json5";
-
-    let shared = c.skin.shared_customise("steel-neon-v2");
-    shared.properties.insert("PLAY SIDE".into(), 900);
-    shared.filepaths.insert("LANE COVER".into(), "solid.png".into());
-    shared.offsets.insert(40, SkinOffset { x: 6.0, ..SkinOffset::default() });
-
-    for path in [select, play] {
-        let user = c.skin.user_config(path);
-        assert_eq!(user.properties.get("PLAY SIDE"), Some(&900), "{path} did not read its bundle's choice");
-        assert_eq!(user.filepaths.get("LANE COVER").map(String::as_str), Some("solid.png"));
-        assert_eq!(user.offset(40), Some(SkinOffset { x: 6.0, ..SkinOffset::default() }));
-    }
-    assert!(c.skin.user_config(outside).properties.is_empty(), "one bundle's choices reached another");
-
-    let own = c.skin.customise(play);
-    own.properties.insert("PLAY SIDE".into(), 901);
-    own.properties.insert("BGA SIZE".into(), 912);
-    let user = c.skin.user_config(play);
-    assert_eq!(user.properties.get("PLAY SIDE"), Some(&901), "the document's own choice lost to its bundle's");
-    assert_eq!(user.properties.get("BGA SIZE"), Some(&912));
-    assert_eq!(user.filepaths.get("LANE COVER").map(String::as_str), Some("solid.png"), "a row only the bundle answers was dropped");
-    assert_eq!(c.skin.user_config(select).properties.get("PLAY SIDE"), Some(&900), "one document's own choice reached its neighbour");
-    assert_eq!(c.skin.shared_customisation("steel-neon-v2").map(|entry| entry.properties.len()), Some(1));
-    assert_eq!(c.skin.shared_customisation("never-chosen-in"), None);
-}
-
 /// A hand-edited file naming a screen no `SkinType` declares is pulled back onto one that does,
 /// rather than leaving the SKIN tab pointing at a row it cannot show.
 #[test]
@@ -364,14 +310,10 @@ fn a_hand_edited_skin_group_is_pulled_back_onto_a_screen_that_exists() {
     c.skin.folder = Some("   ".into());
     c.skin.selected.insert(-1, "ghost.json".into());
     c.skin.selected.insert(MUSIC_SELECT_SCREEN, "  ".into());
-    c.skin.shared_customise("  ").properties.insert("PLAY SIDE".into(), 900);
-    c.skin.shared_customise("aurora").properties.insert("PLAY SIDE".into(), 901);
     c.sanitise();
     assert_eq!(c.skin.screen, DEFAULT_SKIN_SCREEN);
     assert_eq!(c.skin.folder, None, "a blank folder is no folder");
     assert!(c.skin.selected.is_empty(), "a screen that does not exist, and a document with no name, were both kept");
-    assert_eq!(c.skin.shared.len(), 1, "a bundle with no name was kept");
-    assert!(c.skin.shared_customisation("aurora").is_some(), "a named bundle's choices were thrown away with the unnamed one");
 }
 
 /// The three new option axes are stored as separator-free tokens, exactly like the gauge next to
@@ -524,25 +466,158 @@ fn sanitise_uppercases_a_skin_name_and_stamps_the_schema() {
     assert_eq!(c.schema_version, CURRENT_SCHEMA_VERSION);
 }
 
-/// A bundle's shared choices are keyed by the directory the bundle installs into, so a generation
-/// move has to carry them across or every screen of that bundle silently reverts at once.
+/// The `SkinType` id of the screen shown once a song is chosen.
+const DECIDE_SCREEN: i32 = 6;
+
+/// The `SkinType` id of the result screen.
+const RESULT_SCREEN: i32 = 7;
+
+/// The skin folder a configuration that names none looks in, on a machine the fixtures below pretend
+/// to have been written on.
+const DEFAULT_SKIN_ROOT: &str = "/home/p/.config/rbms/skin";
+
+/// A document the fixtures keep outside every skin folder.
+const OUTSIDE_DOCUMENT: &str = "/elsewhere/mine/decide.json5";
+
+/// The DISPLAY preset the retired bundle was switched on with, spelled the way the build that
+/// offered it stored it.
+fn retired_preset() -> String {
+    crate::legacy::RETIRED_BUNDLE_DIRECTORY.replace('-', " ").to_ascii_uppercase()
+}
+
+/// The directory one generation of the retired bundle was installed into; the first carried no
+/// number.
+fn retired_directory(generation: Option<u32>) -> String {
+    let first = crate::legacy::RETIRED_BUNDLE_DIRECTORY;
+    match generation {
+        Some(number) => format!("{first}{}{number}", crate::legacy::RETIRED_BUNDLE_GENERATION_INFIX),
+        None => first.to_string(),
+    }
+}
+
+/// A file written by the last build that shipped a skin bundle of its own comes back with every
+/// trace of that bundle gone -- the preset, the screens pointing into its folders, the choices stored
+/// for those documents and the bundle-wide choices -- while a document the player picked from
+/// anywhere else keeps both its screen and its choices.
 #[test]
-fn bundle_choices_follow_the_bundle_onto_the_generation_that_replaced_it() {
-    let mut c = Config::default();
-    let old = c.skin.shared_customise("steel-neon-v2");
-    old.properties.insert("PLAY SIDE".into(), 901);
-    old.filepaths.insert("LANE COVER".into(), "solid.png".into());
-    old.offsets.insert(40, SkinOffset { x: 6.0, ..SkinOffset::default() });
+fn a_bundled_skin_document_migrates_to_the_built_in_screens_and_keeps_what_the_player_chose() {
+    let current = format!("{DEFAULT_SKIN_ROOT}/{}/play-7k.json5", retired_directory(Some(3)));
+    let first = format!("{DEFAULT_SKIN_ROOT}/{}/select.json5", retired_directory(None));
+    let unselected = format!("{DEFAULT_SKIN_ROOT}/{}/result.json5", retired_directory(Some(2)));
+    let neighbour = format!("{DEFAULT_SKIN_ROOT}/aurora/result.json5");
+    let raw = format!(
+        r#"(
+            schema_version: 2,
+            play: (hispeed: 3.5),
+            display: (skin: "{preset}"),
+            skin: (
+                screen: {MUSIC_SELECT_SCREEN},
+                selected: {{
+                    {DEFAULT_SKIN_SCREEN}: "{current}",
+                    {MUSIC_SELECT_SCREEN}: "{first}",
+                    {DECIDE_SCREEN}: "{OUTSIDE_DOCUMENT}",
+                    {RESULT_SCREEN}: "{neighbour}",
+                }},
+                custom: {{
+                    "{current}": (properties: {{ "LANE COVER": 902 }}),
+                    "{unselected}": (properties: {{ "BACKGROUND": 911 }}),
+                    "{OUTSIDE_DOCUMENT}": (properties: {{ "EFFECT": 991 }}, filepaths: {{ "BACKDROP": "night.png" }}),
+                    "{neighbour}": (offsets: {{ 40: (x: 6.0, y: 0.0, w: 0.0, h: 0.0, r: 0.0, a: 0.0) }}),
+                }},
+                shared: {{ "{bundle}": (properties: {{ "PLAY SIDE": 901 }}), "aurora": (properties: {{ "PLAY SIDE": 900 }}) }},
+            ),
+        )"#,
+        preset = retired_preset(),
+        bundle = retired_directory(Some(3)),
+    );
 
-    c.skin.move_shared("steel-neon-v2", "steel-neon-v3");
-    assert_eq!(c.skin.shared_customisation("steel-neon-v2"), None, "the old bundle kept the choices it handed over");
-    let moved = "/home/p/.config/rbms/skin/steel-neon-v3/play-7k.json5";
-    let user = c.skin.user_config(moved);
-    assert_eq!(user.properties.get("PLAY SIDE"), Some(&901), "the moved bundle lost what was chosen for it");
-    assert_eq!(user.filepaths.get("LANE COVER").map(String::as_str), Some("solid.png"));
-    assert_eq!(user.offset(40), Some(SkinOffset { x: 6.0, ..SkinOffset::default() }));
+    let (config, from) = migrate(&raw).expect("a schema 2 file migrates");
+    assert_eq!(from, Some(BUNDLED_SKIN_SCHEMA_VERSION));
+    assert_eq!(config.schema_version, CURRENT_SCHEMA_VERSION);
+    assert_eq!(config.display.skin, DEFAULT_SKIN, "the preset that switched the retired bundle on was kept");
+    assert!((config.play.hispeed - 3.5).abs() < 1e-9, "the rest of the document did not come across");
+    assert_eq!(config.skin.screen, MUSIC_SELECT_SCREEN, "the screen the SKIN tab was left on moved");
 
-    c.skin.shared_customise("steel-neon-v1").properties.insert("PLAY SIDE".into(), 900);
-    c.skin.move_shared("steel-neon-v1", "steel-neon-v3");
-    assert_eq!(c.skin.user_config(moved).properties.get("PLAY SIDE"), Some(&901), "choices already made for the new bundle were overwritten");
+    assert_eq!(config.skin.document(DEFAULT_SKIN_SCREEN), None, "a screen still points at the retired bundle's current generation");
+    assert_eq!(config.skin.document(MUSIC_SELECT_SCREEN), None, "a screen still points at the retired bundle's first generation");
+    assert_eq!(config.skin.document(DECIDE_SCREEN), Some(OUTSIDE_DOCUMENT), "a document the player picked from outside the skin folder was dropped");
+    assert_eq!(config.skin.document(RESULT_SCREEN), Some(neighbour.as_str()), "a document from another folder of the skin folder was dropped");
+
+    assert_eq!(config.skin.customisation(&current), None, "choices were kept for a document of the retired bundle");
+    assert_eq!(config.skin.customisation(&unselected), None, "choices were kept for a retired document no screen was using");
+    let outside = config.skin.user_config(OUTSIDE_DOCUMENT);
+    assert_eq!(outside.properties.get("EFFECT"), Some(&991), "the player's own document lost a choice");
+    assert_eq!(outside.filepaths.get("BACKDROP").map(String::as_str), Some("night.png"));
+    assert_eq!(config.skin.user_config(&neighbour).offset(40), Some(SkinOffset { x: 6.0, ..SkinOffset::default() }));
+    assert!(config.skin.user_config(&neighbour).properties.is_empty(), "a bundle-wide choice outlived the scope it was stored under");
+
+    let written = ron_of(&config);
+    for dropped in ["shared", crate::legacy::RETIRED_BUNDLE_DIRECTORY] {
+        assert!(!written.contains(dropped), "{dropped} is still written: {written}");
+    }
+    let (again, from) = migrate(&written).expect("the migrated document parses");
+    assert_eq!(from, None, "the file the migration wrote is not current");
+    assert_eq!(again, config);
+}
+
+/// A bundle was only ever installed directly below the skin folder, so that is the only place a
+/// path is taken for one of its documents: the folder the player named when they named one. A
+/// folder that merely starts with the same words, a document lying in the skin folder itself and a
+/// copy kept somewhere else all belong to the player.
+#[test]
+fn only_a_folder_an_install_wrote_below_the_skin_folder_is_taken_for_the_retired_bundle() {
+    let installed = format!("/skins/{}/select.json5", retired_directory(Some(2)));
+    let renamed = format!("/skins/{}-mine/play-7k.json5", retired_directory(None));
+    let copied = format!("/backup/{}/decide.json5", retired_directory(Some(3)));
+    let loose = "/skins/result.json5";
+    let raw = format!(
+        r#"(
+            schema_version: 2,
+            display: (skin: "WIDE"),
+            skin: (
+                folder: Some("/skins"),
+                selected: {{
+                    {DEFAULT_SKIN_SCREEN}: "{renamed}",
+                    {MUSIC_SELECT_SCREEN}: "{installed}",
+                    {DECIDE_SCREEN}: "{copied}",
+                    {RESULT_SCREEN}: "{loose}",
+                }},
+                custom: {{ "{installed}": (properties: {{ "LANE COVER": 902 }}), "{renamed}": (properties: {{ "LANE COVER": 903 }}) }},
+            ),
+        )"#
+    );
+
+    let (config, from) = migrate(&raw).expect("a schema 2 file migrates");
+    assert_eq!(from, Some(BUNDLED_SKIN_SCHEMA_VERSION));
+    assert_eq!(config.display.skin, "WIDE", "a preset that is still offered was reset");
+    assert_eq!(config.skin.folder.as_deref(), Some("/skins"));
+    assert_eq!(config.skin.document(MUSIC_SELECT_SCREEN), None, "a document installed below the named folder was kept");
+    assert_eq!(config.skin.customisation(&installed), None);
+    assert_eq!(config.skin.document(DEFAULT_SKIN_SCREEN), Some(renamed.as_str()), "a folder the player named for themselves was taken for the bundle");
+    assert_eq!(config.skin.user_config(&renamed).properties.get("LANE COVER"), Some(&903));
+    assert_eq!(config.skin.document(DECIDE_SCREEN), Some(copied.as_str()), "a copy kept outside the skin folder was taken for the bundle");
+    assert_eq!(config.skin.document(RESULT_SCREEN), Some(loose), "a document lying in the skin folder itself was dropped");
+}
+
+/// The preset is retired from every schema that could have held it, and a file already on the
+/// current schema is read as written: the migration runs once, on the way in from an older build.
+#[test]
+fn the_retired_preset_is_dropped_from_every_older_schema_and_a_current_file_is_left_alone() {
+    let preset = retired_preset();
+    for version in [SINGLE_JUDGE_WIDTH_SCHEMA_VERSION, BUNDLED_SKIN_SCHEMA_VERSION] {
+        let (config, from) =
+            migrate(&format!(r#"(schema_version: {version}, display: (skin: "{}"))"#, preset.to_ascii_lowercase())).expect("an older file migrates");
+        assert_eq!(from, Some(version));
+        assert_eq!(config.display.skin, DEFAULT_SKIN, "schema {version} kept the retired preset");
+    }
+    let (flat, from) = migrate(&format!(r#"(skin: "{preset}")"#)).expect("a flat file migrates");
+    assert_eq!(from, Some(LEGACY_SCHEMA_VERSION));
+    assert_eq!(flat.display.skin, DEFAULT_SKIN, "the flat schema kept the retired preset");
+
+    let kept = format!("{DEFAULT_SKIN_ROOT}/{}/select.json5", retired_directory(Some(3)));
+    let mut current = Config::default();
+    current.skin.select(MUSIC_SELECT_SCREEN, Some(kept.clone()));
+    let (config, from) = migrate(&ron_of(&current)).expect("a current file parses");
+    assert_eq!(from, None);
+    assert_eq!(config.skin.document(MUSIC_SELECT_SCREEN), Some(kept.as_str()), "a selection made under the current schema was dropped on load");
 }

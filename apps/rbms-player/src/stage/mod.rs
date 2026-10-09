@@ -21,6 +21,8 @@ pub(crate) mod practice;
 #[cfg(test)]
 mod render_tests;
 #[cfg(test)]
+mod render_tests_document;
+#[cfg(test)]
 mod render_tests_play;
 #[cfg(test)]
 mod render_tests_result;
@@ -28,16 +30,6 @@ mod render_tests_result;
 mod render_tests_select;
 #[cfg(test)]
 mod render_tests_shell;
-#[cfg(test)]
-mod render_tests_skin;
-#[cfg(test)]
-mod render_tests_skin_v3_decide_result;
-#[cfg(test)]
-mod render_tests_skin_v3_play_dp;
-#[cfg(test)]
-mod render_tests_skin_v3_play_sp;
-#[cfg(test)]
-mod render_tests_skin_v3_select;
 pub(crate) mod result;
 pub(crate) mod select;
 pub(crate) mod settings;

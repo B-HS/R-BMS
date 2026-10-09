@@ -25,13 +25,6 @@ const FIVE_KEY_WIDTH_LANES: usize = 8;
 /// the line at the ceiling and leave no field to scroll notes down.
 pub const MAX_LIFT: f32 = 0.9;
 
-/// How far apart two lane rectangles may sit and still count as the same field.
-///
-/// Lanes of one field are authored edge to edge, and the gap between the two fields of a double
-/// layout is tens of pixels wide, so anything under a hair's breadth is rounding rather than a
-/// second field.
-const LANE_GAP_TOLERANCE: f32 = 8.0;
-
 /// Whether a mode is a five-key one, either on its own or as the two sides of a ten-key chart.
 fn is_five_key(mode: Mode) -> bool {
     matches!(mode.name, "BEAT_5K" | "BEAT_10K")
@@ -194,26 +187,6 @@ impl SkinConfig {
 
 fn col(c: [u8; 3]) -> Color {
     Color::rgb(c[0], c[1], c[2])
-}
-
-/// The contiguous runs a document's lane rectangles fall into, as the `(x, width)` pairs the
-/// judgement line, the dividers and the covers are drawn per field.
-///
-/// Lane order is the chart's, not the screen's -- a turntable on the right is the first lane of its
-/// side -- so the rectangles are walked left to right instead, and a gap wider than
-/// [`LANE_GAP_TOLERANCE`] starts the next field. A single-field document produces one run, and the
-/// two sides of a double one produce two.
-fn document_fields(lanes: &[(f32, f32, f32, f32)]) -> Vec<(f32, f32)> {
-    let mut ordered: Vec<(f32, f32)> = lanes.iter().map(|(x, _, w, _)| (*x, *w)).collect();
-    ordered.sort_by(|left, right| left.0.total_cmp(&right.0));
-    let mut fields: Vec<(f32, f32)> = Vec::new();
-    for (x, w) in ordered {
-        match fields.last_mut() {
-            Some((start, width)) if x <= *start + *width + LANE_GAP_TOLERANCE => *width = (x + w - *start).max(*width),
-            _ => fields.push((x, w)),
-        }
-    }
-    fields
 }
 
 /// A resolved skin: per-lane geometry, colours and regions computed from a `SkinConfig`
@@ -386,38 +359,6 @@ impl Skin {
 
     pub fn default_for(mode: Mode, screen_w: f32, screen_h: f32) -> Skin {
         Skin::build(&SkinConfig::default(), mode, screen_w, screen_h)
-    }
-
-    /// The same skin with its field taken from a document's own lane rectangles.
-    ///
-    /// A play document that draws its own notes states where every lane is, and from that moment the
-    /// document is the only place those rectangles come from: the HUD, the covers, the key bombs and
-    /// the document's notes all read this one resolved field, so none of them can disagree with the
-    /// others about where a lane is. Everything a document does not state -- colours, the gauge, the
-    /// judgement labels, the chart art -- stays as the file resolved it.
-    ///
-    /// `lanes` are screen rectangles in lane order, `judge_y` and `top_y` the field the document
-    /// scrolls notes down, before the player's lift is applied; the lift is taken from this skin and
-    /// folded in here, so a document field lifts exactly as the built-in one does. Fewer rectangles
-    /// than the mode has lanes leaves the skin untouched rather than resolving a field with holes in
-    /// it.
-    pub fn with_document_lanes(&self, lanes: &[(f32, f32, f32, f32)], judge_y: f32, top_y: f32, note_height: f32) -> Skin {
-        if lanes.len() < self.lane_count() {
-            return self.clone();
-        }
-        let lanes = &lanes[..self.lane_count()];
-        let lifted = judge_y - (judge_y - top_y) * self.lift;
-        Skin {
-            x: lanes.iter().map(|(x, ..)| *x).collect(),
-            w: lanes.iter().map(|(_, _, w, _)| *w).collect(),
-            fields: document_fields(lanes),
-            top_y,
-            judge_y: lifted,
-            lift_height: judge_y - lifted,
-            note_height,
-            beam_height: (lifted - top_y) * (self.beam_height / (self.judge_y - self.top_y).max(f32::EPSILON)).clamp(0.0, 1.0),
-            ..self.clone()
-        }
     }
 
     pub fn lane_count(&self) -> usize {

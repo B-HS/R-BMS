@@ -121,7 +121,7 @@ const PLAY_ESCAPE_LABELS: &[&str] = &["IMMEDIATE", "HOLD", "DOUBLE TAP"];
 const SORT_LABELS: &[&str] = &["DEFAULT", "TITLE", "ARTIST", "BPM", "LENGTH", "LEVEL", "CLEAR", "SCORE", "MISS COUNT", "DURATION", "LAST UPDATE"];
 const SCRATCH_SIDE_LABELS: &[&str] = &["RIGHT", "LEFT"];
 const RANDOM_LABELS: &[&str] = &["OFF", "MIRROR", "RANDOM", "S-RANDOM", "R-RANDOM", "ROTATE", "H-RANDOM", "ALL-SCRATCH"];
-const SKIN_LABELS: &[&str] = &["NORMAL", "WIDE", crate::schema::STEEL_NEON_SKIN];
+const SKIN_LABELS: &[&str] = &["NORMAL", "WIDE"];
 const AUDIO_DEVICE_LABELS: &[&str] = &[DEFAULT_VALUE];
 
 /// What the SKIN row already knows it can hold: the built-in screen. The documents on disk are only
@@ -1443,8 +1443,6 @@ mod tests {
         assert_eq!(display_value(&config, SettingId::Skin), "NORMAL");
         step_skin(&mut config);
         assert_eq!(display_value(&config, SettingId::Skin), "WIDE");
-        step_skin(&mut config);
-        assert_eq!(display_value(&config, SettingId::Skin), crate::schema::STEEL_NEON_SKIN);
         step_skin(&mut config);
         assert_eq!(display_value(&config, SettingId::Skin), "NORMAL");
         assert_eq!(cycle_values(SettingId::Skin), SKIN_LABELS);

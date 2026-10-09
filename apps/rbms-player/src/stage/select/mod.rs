@@ -16,8 +16,6 @@ use crate::ir_ranking_view::{PanelAction, PanelLine, offline_lines, panel_action
 use crate::ir_replay::from_ir_replay;
 use crate::stage::{Canvas, FoldersState, FrameCtx, KeyInput, LoadingState, SettingsState, Stage, StageHandler, TablesState, Transition};
 use crate::*;
-use rbms_render::{FrameExtra, QuadParams, SkinHotAction};
-use rbms_skin::model::SkinLayer;
 
 mod filter;
 mod list;
@@ -784,46 +782,25 @@ impl StageHandler for SelectState {
             return;
         };
         ctx.shared.prepare_skin(canvas, SKIN_TYPE_MUSIC_SELECT);
-        let overlay = ctx.shared.skin_uses_overlay(SKIN_TYPE_MUSIC_SELECT);
-        let layered = ctx.shared.skin_uses_layered_layout(SKIN_TYPE_MUSIC_SELECT);
-        let native_layout = ctx.shared.skin_uses_native_layout(SKIN_TYPE_MUSIC_SELECT);
+        let has_document = ctx.shared.has_skin_document(SKIN_TYPE_MUSIC_SELECT);
         let mut document_background = None;
         match (&self.cover_image, &view.detail) {
-            (Some(cover), SelectDetail::Song(_)) if layered => {
+            (Some(cover), SelectDetail::Song(_)) if has_document => {
                 canvas.clear_bga();
                 document_background = canvas.background_texture(cover.generation, &cover.rgba, cover.width, cover.height);
-            }
-            (Some(cover), SelectDetail::Song(_)) if native_layout || !ctx.shared.has_skin_document(SKIN_TYPE_MUSIC_SELECT) => {
-                canvas.set_background(cover.generation, &cover.rgba, cover.width, cover.height, cover_rect());
             }
             (Some(cover), SelectDetail::Song(_)) => {
-                canvas.clear_bga();
-                document_background = canvas.background_texture(cover.generation, &cover.rgba, cover.width, cover.height);
+                canvas.set_background(cover.generation, &cover.rgba, cover.width, cover.height, cover_rect());
             }
             _ => canvas.clear_bga(),
         }
         let now_ms = ctx.shared.skin_now_ms();
         let row = ctx.shared.sel;
         ctx.shared.skin_select_timers.update(&mut ctx.shared.skin_timers, row, now_ms);
-        if !native_layout && ctx.shared.draw_select_skin(canvas, view, document_background, FrameExtra::None) {
+        if ctx.shared.draw_select_skin(canvas, view, document_background) {
             return;
         }
-        let content = ctx.shared.screen_content(SKIN_TYPE_MUSIC_SELECT).select;
-        let hot = if layered {
-            canvas.clear(rbms_render::theme().bg);
-            ctx.shared.draw_select_skin_layer(canvas, view, document_background, FrameExtra::None, SkinLayer::Background);
-            if let (Some(texture), Some(cover)) = (document_background, self.cover_image.as_ref())
-                && !content.detail
-            {
-                let rect = cover_rect();
-                let mut params = QuadParams::new(rect);
-                params.filter = rbms_render::background_filter(rect, (cover.width, cover.height));
-                canvas.draw_textured_quad(texture, params);
-            }
-            rbms_render::select::render_select_on_background_with_content(canvas, view, content)
-        } else {
-            render_select(canvas, view)
-        };
+        let hot = render_select(canvas, view);
         ctx.shared.hot.extend(hot.into_iter().map(|(rect, h)| {
             let mapped = match h {
                 SelectHot::Row(i) => Hot::SelectRow(i),
@@ -839,31 +816,12 @@ impl StageHandler for SelectState {
             };
             (rect, mapped)
         }));
-        ctx.shared.hot.extend(ctx.shared.select_hotspots(canvas, view).into_iter().map(|spot| {
-            let mapped = match spot.action {
-                SkinHotAction::Row(row) => Hot::SelectRow(row),
-                SkinHotAction::Search => Hot::NavSearch,
-                SkinHotAction::Sort => Hot::NavSort,
-                SkinHotAction::Folders => Hot::NavFolders,
-                SkinHotAction::Tables => Hot::NavTables,
-                SkinHotAction::Records => Hot::NavRecords,
-                SkinHotAction::Settings => Hot::NavSettings,
-                SkinHotAction::ModalReplay => Hot::ModalReplay,
-                SkinHotAction::ModalClose => Hot::ModalClose,
-            };
-            (spot.rect, mapped)
-        }));
         if self.ranking_open {
             let hot = render_ranking_panel(canvas, &ranking_lines, self.ranking_sel, true, ctx.shared.can_switch_primary_ir());
             ctx.shared.hot.extend(hot.into_iter().map(|(rect, index)| (rect, Hot::RankingRow(index))));
         }
         if self.filter.is_open() {
             render_filter_panel(canvas, &self.filter, &ctx.shared.config);
-        }
-        if layered {
-            ctx.shared.draw_select_skin_layer(canvas, view, document_background, FrameExtra::None, SkinLayer::Foreground);
-        } else if overlay {
-            ctx.shared.draw_select_skin(canvas, view, document_background, FrameExtra::None);
         }
     }
 }

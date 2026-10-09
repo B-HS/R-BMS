@@ -261,3 +261,21 @@ fn gain_is_clamped_and_a_non_finite_gain_is_silent() {
     assert!(set.cue(SystemSound::Scratch, f32::NAN).is_none());
     assert_eq!(set.cue(SystemSound::Scratch, f32::INFINITY), None);
 }
+
+/// The set shipped inside the binary is a whole one: once the first run has written it out, every
+/// stem resolves to a file that decodes, so a player who configured no folder hears every cue.
+#[test]
+fn the_shipped_set_resolves_every_slot_once_it_is_installed() {
+    let home = temp_dir("shipped");
+    let settings = home.join("settings.ron");
+    assert!(crate::assets::install_default_sounds(&settings), "the shipped set did not install");
+    let folder = crate::assets::default_sound_folder(&settings).expect("the installed set is found");
+
+    let mut set = SystemSoundSet::load_optional(Some(&folder));
+    set.set_guide_enabled(true);
+    assert_eq!(set.resolved_count(), SYSTEM_SOUND_COUNT, "a shipped sound is missing or does not decode");
+    for sound in SystemSound::ALL {
+        assert!(set.cue(sound, TEST_GAIN).is_some(), "{sound:?} is silent in the shipped set");
+    }
+    let _ = std::fs::remove_dir_all(&home);
+}

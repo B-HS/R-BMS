@@ -7,7 +7,7 @@
 use rbms_ir::{IrError, SettingsBlob, SettingsPutResult};
 use serde::{Deserialize, Serialize};
 
-use rbms_config::{CURRENT_SCHEMA_VERSION, Config, LEGACY_SCHEMA_VERSION, LegacyV0, SINGLE_JUDGE_WIDTH_SCHEMA_VERSION};
+use rbms_config::{BUNDLED_SKIN_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION, Config, LEGACY_SCHEMA_VERSION, LegacyV0, SINGLE_JUDGE_WIDTH_SCHEMA_VERSION};
 
 use crate::keyconfig::KeyConfig;
 
@@ -126,30 +126,36 @@ impl Default for SettingsSchemaProbe {
 /// touched, the same way the configuration loader refuses a file from a newer schema.
 pub(crate) const SETTINGS_BLOB_TOO_NEW: &str = "settings blob is from a newer build";
 
-/// Read a blob fetched with `get_settings` back into a payload, migrating a blob written before
-/// the settings were versioned.
+/// Read a blob fetched with `get_settings` back into a payload, running the same migrations the
+/// configuration loader runs on a file: a blob written before the settings were versioned is
+/// converted, one old JUDGE WIDTH is spread over every tier, and what a blob kept of the retired
+/// skin bundle is dropped. A download is persisted on the current schema straight away, so a step
+/// skipped here would never run again for that copy.
 ///
 /// A blob that declares a schema past this build's is an error rather than a downgrade: parsing it
 /// as the current schema would drop every field the newer build moved or added, and the caller
 /// would then persist that stripped copy locally and upload it over the account's real settings.
 pub(crate) fn parse_blob(blob: &SettingsBlob) -> Result<SyncPayload, String> {
     let probe: BlobSchemaProbe = ron::from_str(&blob.content).map_err(|e| e.to_string())?;
-    if probe.settings.schema_version > CURRENT_SCHEMA_VERSION {
-        return Err(format!("{SETTINGS_BLOB_TOO_NEW} (schema version {})", probe.settings.schema_version));
+    let schema_version = probe.settings.schema_version;
+    if schema_version > CURRENT_SCHEMA_VERSION {
+        return Err(format!("{SETTINGS_BLOB_TOO_NEW} (schema version {schema_version})"));
     }
-    if probe.settings.schema_version != LEGACY_SCHEMA_VERSION {
-        let mut payload: SyncPayload = ron::from_str(&blob.content).map_err(|e| e.to_string())?;
-        if probe.settings.schema_version == SINGLE_JUDGE_WIDTH_SCHEMA_VERSION {
-            let single: SingleJudgeWidthBlobProbe = ron::from_str(&blob.content).map_err(|e| e.to_string())?;
-            payload.settings.judge.spread_uniform_judge_rate(single.settings.judge.judge_rate);
-        }
-        payload.settings.sanitise();
-        return Ok(payload);
+    let mut payload = if schema_version == LEGACY_SCHEMA_VERSION {
+        let legacy: LegacySyncPayload = ron::from_str(&blob.content).map_err(|e| e.to_string())?;
+        SyncPayload { settings: Config::from(legacy.settings), keyconfig: legacy.keyconfig }
+    } else {
+        ron::from_str::<SyncPayload>(&blob.content).map_err(|e| e.to_string())?
+    };
+    if schema_version == SINGLE_JUDGE_WIDTH_SCHEMA_VERSION {
+        let single: SingleJudgeWidthBlobProbe = ron::from_str(&blob.content).map_err(|e| e.to_string())?;
+        payload.settings.judge.spread_uniform_judge_rate(single.settings.judge.judge_rate);
     }
-    let legacy: LegacySyncPayload = ron::from_str(&blob.content).map_err(|e| e.to_string())?;
-    let mut settings = Config::from(legacy.settings);
-    settings.sanitise();
-    Ok(SyncPayload { settings, keyconfig: legacy.keyconfig })
+    if schema_version <= BUNDLED_SKIN_SCHEMA_VERSION {
+        payload.settings.retire_bundled_skin();
+    }
+    payload.settings.sanitise();
+    Ok(payload)
 }
 
 /// One finished settings-sync call, as far as the optimistic lock is concerned.
@@ -228,6 +234,8 @@ mod tests {
     use rbms_config::{JUDGE_WIDTH_TIER_COUNT, TableSource};
     use rbms_ir::SettingsConflict;
     use rbms_judge::GaugeKind;
+
+    use crate::{SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_RESULT};
 
     fn local_settings() -> Config {
         let mut c = Config::default();
@@ -392,6 +400,93 @@ mod tests {
         let blob = SettingsBlob { name: SETTINGS_BLOB_NAME.into(), content: current, ..Default::default() };
         let payload = parse_blob(&blob).expect("a current blob needs no migration");
         assert_eq!(payload.settings.judge.judge_rate_key, [95, 90, 85]);
+    }
+
+    /// The DISPLAY preset the retired skin bundle was switched on with, as the builds that offered
+    /// it uploaded it.
+    const RETIRED_BUNDLE_PRESET: &str = "STEEL NEON";
+
+    /// A document of the retired bundle's last generation, below the skin folder a configuration
+    /// that names none looks in.
+    const RETIRED_BUNDLE_DOCUMENT: &str = "/home/p/.config/rbms/skin/steel-neon-v3/select.json5";
+
+    /// A document of the retired bundle no screen was drawn with, which still had choices stored.
+    const RETIRED_BUNDLE_UNSELECTED_DOCUMENT: &str = "/home/p/.config/rbms/skin/steel-neon/decide.json5";
+
+    /// A document the player keeps outside every skin folder.
+    const PLAYER_DOCUMENT: &str = "/elsewhere/mine/result.json5";
+
+    /// A customisation property the fixtures store for a document, and the option id chosen for it.
+    const STORED_PROPERTY: &str = "BACKGROUND";
+    const STORED_PROPERTY_OPTION: i32 = 911;
+
+    /// The settings half of a blob a build that still shipped the bundle uploaded: the bundle's
+    /// preset, one screen drawn with a bundle document, one with the player's own, and choices
+    /// stored for all three documents.
+    fn bundled_skin_settings(schema_version: u32) -> String {
+        format!(
+            r#"(
+                schema_version: {schema_version},
+                play: (hispeed: 3.5),
+                display: (skin: "{RETIRED_BUNDLE_PRESET}"),
+                skin: (
+                    selected: {{ {SKIN_TYPE_MUSIC_SELECT}: "{RETIRED_BUNDLE_DOCUMENT}", {SKIN_TYPE_RESULT}: "{PLAYER_DOCUMENT}" }},
+                    custom: {{
+                        "{RETIRED_BUNDLE_DOCUMENT}": (properties: {{ "{STORED_PROPERTY}": {STORED_PROPERTY_OPTION} }}),
+                        "{RETIRED_BUNDLE_UNSELECTED_DOCUMENT}": (properties: {{ "{STORED_PROPERTY}": {STORED_PROPERTY_OPTION} }}),
+                        "{PLAYER_DOCUMENT}": (properties: {{ "{STORED_PROPERTY}": {STORED_PROPERTY_OPTION} }}),
+                    }},
+                    shared: {{ "steel-neon-v3": (properties: {{ "PLAY SIDE": 901 }}) }},
+                    default_skin_installed: true,
+                ),
+            )"#
+        )
+    }
+
+    fn blob_of_settings(settings: &str) -> SettingsBlob {
+        SettingsBlob { name: SETTINGS_BLOB_NAME.into(), content: format!("(settings: {settings})"), ..Default::default() }
+    }
+
+    #[test]
+    fn a_blob_from_a_build_that_shipped_the_skin_bundle_comes_down_without_it() {
+        let blob = blob_of_settings(&bundled_skin_settings(BUNDLED_SKIN_SCHEMA_VERSION));
+        let payload = parse_blob(&blob).expect("a schema 2 blob is migrated, not read as the current schema");
+        let merged = merge_downloaded(&local_settings(), payload.settings);
+
+        assert_eq!(merged.schema_version, CURRENT_SCHEMA_VERSION);
+        assert_eq!(merged.display.skin, rbms_config::DEFAULT_SKIN, "the download brought the retired preset back");
+        assert!((merged.play.hispeed - 3.5).abs() < 1e-9, "the rest of the blob still loads");
+        assert_eq!(merged.skin.document(SKIN_TYPE_MUSIC_SELECT), None, "a screen is drawn alone by a document written to be layered");
+        assert_eq!(merged.skin.customisation(RETIRED_BUNDLE_DOCUMENT), None, "choices were kept for a document of the retired bundle");
+        assert_eq!(merged.skin.customisation(RETIRED_BUNDLE_UNSELECTED_DOCUMENT), None, "choices were kept for a retired document no screen used");
+        assert_eq!(merged.skin.document(SKIN_TYPE_RESULT), Some(PLAYER_DOCUMENT), "the player's own document was dropped");
+        assert_eq!(merged.skin.user_config(PLAYER_DOCUMENT).properties.get(STORED_PROPERTY), Some(&STORED_PROPERTY_OPTION));
+
+        let stored = build_blob(&payload_of(sanitise_for_upload(&merged)), 1, None).unwrap();
+        let again = parse_blob(&stored).expect("the copy this build uploads parses").settings;
+        assert_eq!(again.display.skin, merged.display.skin);
+        assert_eq!(again.skin, merged.skin, "the next upload carries the retired bundle back to the account");
+    }
+
+    #[test]
+    fn the_retired_preset_is_dropped_from_a_blob_of_every_older_schema() {
+        for version in [SINGLE_JUDGE_WIDTH_SCHEMA_VERSION, BUNDLED_SKIN_SCHEMA_VERSION] {
+            let payload = parse_blob(&blob_of_settings(&bundled_skin_settings(version))).expect("an older blob is migrated");
+            assert_eq!(payload.settings.display.skin, rbms_config::DEFAULT_SKIN, "schema {version} kept the retired preset");
+            assert_eq!(payload.settings.skin.document(SKIN_TYPE_MUSIC_SELECT), None, "schema {version} kept a retired document");
+        }
+        let flat = blob_of_settings(&format!(r#"(hispeed: 3.0, skin: "{RETIRED_BUNDLE_PRESET}")"#));
+        let payload = parse_blob(&flat).expect("a pre-schema blob is migrated");
+        assert_eq!(payload.settings.display.skin, rbms_config::DEFAULT_SKIN, "the flat schema kept the retired preset");
+        assert!((payload.settings.play.hispeed - 3.0).abs() < 1e-9, "the rest of the flat blob still loads");
+    }
+
+    #[test]
+    fn a_blob_at_the_current_schema_keeps_the_documents_it_selects() {
+        let blob = blob_of_settings(&bundled_skin_settings(CURRENT_SCHEMA_VERSION));
+        let payload = parse_blob(&blob).expect("a current blob needs no migration");
+        assert_eq!(payload.settings.skin.document(SKIN_TYPE_MUSIC_SELECT), Some(RETIRED_BUNDLE_DOCUMENT), "the retirement ran on a blob this build wrote");
+        assert_eq!(payload.settings.skin.document(SKIN_TYPE_RESULT), Some(PLAYER_DOCUMENT));
     }
 
     #[test]

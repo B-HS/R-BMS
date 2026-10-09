@@ -109,31 +109,18 @@ fn compiling_a_document_never_reads_a_file_itself() {
     assert_eq!(assets.font(&font), Some(vec![7, 7]));
 }
 
-/// A bundle-scope nudge is read by every screen of that bundle, and a nudge made inside one document
-/// is read only by that document -- so the two are consulted narrowest first rather than one store
-/// replacing the other.
-///
-/// The document's own store winning matters because the SKIN tab offers both rows: a player who
-/// moved one screen's chart art after moving the whole bundle's would otherwise see the bundle's
-/// value come back.
+/// A nudge is read out of the choices stored for the document being drawn, and an id nothing was
+/// moved under -- or a document nobody has customised at all -- answers nothing, which is what
+/// leaves a destination where its author put it.
 #[test]
-fn a_document_nudge_is_read_over_the_one_made_for_its_whole_bundle() {
-    let bundle_only = SkinOffset { x: 1.0, ..SkinOffset::default() };
-    let both = SkinOffset { x: 2.0, ..SkinOffset::default() };
-    let document_only = SkinOffset { x: 3.0, ..SkinOffset::default() };
-
-    let mut bundle = SkinCustomisation::default();
-    bundle.offsets.insert(40, bundle_only);
-    bundle.offsets.insert(46, both);
+fn a_document_nudge_is_read_from_the_choices_stored_for_that_document() {
+    let nudge = SkinOffset { x: 3.0, ..SkinOffset::default() };
     let mut document = SkinCustomisation::default();
-    document.offsets.insert(46, document_only);
-    document.offsets.insert(47, document_only);
+    document.offsets.insert(46, nudge);
 
-    let merged = MergedOffsets { document: Some(&document), bundle: Some(&bundle) };
-    assert_eq!(merged.offset(40), Some(bundle_only), "a row only the bundle carries is still read");
-    assert_eq!(merged.offset(46), Some(document_only), "the document's own answer wins where both carry the row");
-    assert_eq!(merged.offset(47), Some(document_only), "a row only the document carries is read");
-    assert_eq!(merged.offset(48), None, "a row neither carries is answered by neither");
+    let offsets = DocumentOffsets { document: Some(&document) };
+    assert_eq!(offsets.offset(46), Some(nudge), "a row the document carries is read");
+    assert_eq!(offsets.offset(48), None, "a row the document does not carry is answered anyway");
 
-    assert_eq!(MergedOffsets::default().offset(40), None, "a document nobody has customised nudges nothing");
+    assert_eq!(DocumentOffsets::default().offset(46), None, "a document nobody has customised nudges nothing");
 }

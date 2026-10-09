@@ -9,24 +9,20 @@
 use std::path::{Path, PathBuf};
 
 use rbms_skin::dst::{DrawStateSource, LuaExprId, OffsetSource, SkinOffset};
-use rbms_skin::loader::{HOTSPOT_ACTIONS, SkinLoadOptions, SkinUserConfig, load_skin};
+use rbms_skin::loader::{SkinLoadOptions, SkinUserConfig, load_skin};
 use rbms_skin::property::generated::OPTION_PANEL1;
 use rbms_skin::property::{SkinStateSource, UNMAPPED_BOOLEAN, UNMAPPED_FLOAT, UNMAPPED_INTEGER, UNMAPPED_STRING};
 use rbms_skin::timer::TimerState;
 
 use super::color::{modulate, parse_hex_color};
-use super::state::{
-    FrameExtra, OPTION_ROW_FOCUSED_FIRST, OPTION_ROW_LABEL_FIRST, OPTION_ROW_VALUE_FIRST, OptionsRows, PlayObjectState, ResultSeriesState, SELECT_STAT_COUNT,
-    SELECT_STAT_FIRST, SelectListState, SelectViewState, SkinHotAction, SkinHotspot,
-};
+use super::state::{FrameExtra, PlayObjectState, ResultSeriesState, SelectListState, SelectViewState};
 use super::{SkinAssets, SkinFrame, SkinImage, SkinObjectKind, SkinScreen};
 use crate::ctx::RenderCtx;
 use crate::font::TextContext;
 use crate::playfield::{LaneShade, PlayfieldView};
 use crate::result::ResultPalette;
-use crate::select::{CoverState, DensityView, DetailView, RecordsView, SelectDetail, SelectRow, SelectView};
+use crate::select::{SelectDetail, SelectRow, SelectView};
 use crate::skin::Skin;
-use crate::theme::OPTIONS_ROW_COUNT;
 use crate::{BYTES_PER_PIXEL, Color, CpuCanvas, Rect, Renderer};
 
 /// Width and height the fixture document is authored at, which is also the canvas every frame here
@@ -166,13 +162,11 @@ struct Fixture<'a> {
     judge_graph: Option<&'a str>,
 }
 
-/// A browser document carrying a fifteen-slot wheel, a clickable button and one of every graph, so
+/// A browser document carrying a fifteen-slot wheel, a plain button and one of every graph, so
 /// one load exercises every object this file is about.
 fn write_document(scratch: &Scratch, fixture: Fixture<'_>) -> PathBuf {
     std::fs::write(scratch.root.join("sheet.tex"), "solid").expect("the source file is writable");
     let clickable: Vec<String> = (0..SLOTS).map(|index| index.to_string()).collect();
-    let mut hotspots: Vec<String> = HOTSPOT_ACTIONS.iter().map(|action| format!(r#"{{"id":"button","action":"{action}"}}"#)).collect();
-    hotspots.push(r#"{"id":"button","action":"teleport"}"#.to_owned());
     let body = format!(
         r#"{{
             "type": 5, "name": "wheel fixture", "w": {DOC_W}, "h": {DOC_H},
@@ -189,10 +183,8 @@ fn write_document(scratch: &Scratch, fixture: Fixture<'_>) -> PathBuf {
             "judgegraph": [{judge_graph}],
             "bpmgraph": [{{ "id": "bpm-graph" }}],
             "timingdistributiongraph": [{{ "id": "timing-dist", "devColor": "not a colour" }}],
-            "densitygraph": [{{ "id": "density", "barColor": "00FFFF", "peakColor": "FFD300" }}],
             "timingvisualizer": [{{ "id": "ruler" }}],
             "hiterrorvisualizer": [{{ "id": "errors" }}],
-            "hotspot": [{hotspots}],
             "songlist": {{
                 "id": "wheel",
                 "center": {CENTER},
@@ -209,13 +201,11 @@ fn write_document(scratch: &Scratch, fixture: Fixture<'_>) -> PathBuf {
                 {{ "id": "judge-graph", "dst": [{{ "x": 200, "y": 60, "w": 60, "h": 30 }}] }},
                 {{ "id": "bpm-graph", "dst": [{{ "x": 200, "y": 20, "w": 60, "h": 30 }}] }},
                 {{ "id": "timing-dist", "dst": [{{ "x": 130, "y": 100, "w": 60, "h": 40 }}] }},
-                {{ "id": "density", "dst": [{{ "x": 130, "y": 60, "w": 60, "h": 30 }}] }},
                 {{ "id": "ruler", "dst": [{{ "x": 130, "y": 20, "w": 60, "h": 30 }}] }},
                 {{ "id": "errors", "dst": [{{ "x": 60, "y": 20, "w": 60, "h": 30 }}] }}
             ]
         }}"#,
         clickable = clickable.join(","),
-        hotspots = hotspots.join(","),
         imageset = fixture.imageset,
         judge_graph = fixture.judge_graph.unwrap_or(r#"{ "id": "judge-graph" }"#),
         wheel_dst = fixture.wheel_dst.map_or_else(|| format!(r#""x": 0, "y": 0, "w": 120, "h": {DOC_H}"#), str::to_owned),
@@ -262,26 +252,6 @@ fn row(index: usize) -> SelectRow {
     }
 }
 
-/// A focused chart whose per-second density is `bins`.
-fn detail_with_density(bins: Vec<u32>) -> SelectDetail {
-    SelectDetail::Song(Box::new(DetailView {
-        accent: Color::WHITE,
-        title: "TITLE".to_owned(),
-        subtitle: String::new(),
-        artist: String::new(),
-        genre_maker: String::new(),
-        mode_short: "7K",
-        mode_color: Color::BLUE,
-        level: "12".to_owned(),
-        difficulty_color: Color::RED,
-        difficulty_name: "ANOTHER",
-        cover: CoverState::None,
-        stats: Vec::new(),
-        density: Some(DensityView { bins, peak: 4.0, avg: 2.0, end: 0.0 }),
-        records: RecordsView { plays: 0, clears: 0, best: None, rank_bar: None, recent: Vec::new() },
-    }))
-}
-
 /// One frame over `extra`, with nothing running and no pointer.
 fn frame<'a>(timers: &'a TimerState, state: &'a Nothing, extra: FrameExtra<'a>) -> SkinFrame<'a> {
     SkinFrame { now_ms: 0, timers, state, lua: None, mouse: None, background: None, extra }
@@ -324,26 +294,6 @@ fn an_opaque_white_destination_leaves_a_colour_alone() {
     assert_eq!(modulate(color, Color::rgb(255, 0, 0)), Color { r: 0x20, g: 0, b: 0, a: 0xC0 });
 }
 
-#[test]
-fn no_two_private_id_bands_overlap() {
-    let rows = OPTIONS_ROW_COUNT as i32;
-    let mut ids: Vec<i32> = Vec::new();
-    for first in [OPTION_ROW_LABEL_FIRST, OPTION_ROW_VALUE_FIRST, OPTION_ROW_FOCUSED_FIRST] {
-        ids.extend(first..first + rows);
-    }
-    ids.extend(SELECT_STAT_FIRST..SELECT_STAT_FIRST + SELECT_STAT_COUNT as i32);
-
-    let mut unique = ids.clone();
-    unique.sort_unstable();
-    unique.dedup();
-    assert_eq!(unique.len(), ids.len(), "two of the private id bands share a number");
-}
-
-/// The labels a fixture panel carries, one per row, so a row that answered its neighbour's label
-/// fails rather than passing on a shared string.
-const PANEL_LABELS: [&str; OPTIONS_ROW_COUNT] =
-    ["RANDOM", "GAUGE", "HI-SPEED", "FIX HI-SPEED", "LANE COVER", "LIFT", "HIDDEN", "SCRATCH SIDE", "SCRATCH AUTO", "AUTOPLAY", "TARGET"];
-
 /// A browser showing nothing, for the tests that are about the panel over it rather than the list
 /// under it.
 fn empty_browser() -> SelectView {
@@ -362,60 +312,14 @@ fn empty_browser() -> SelectView {
     }
 }
 
-/// The option panel's rows reach a document through the browser's own state source, because that is
-/// the only thing a document can address: it asks for a private string id and has to be answered
-/// with what the configuration holds rather than with an empty string.
+/// Whether the option panel is open reaches a document through the browser's own state source,
+/// under the reference's first panel option, because that is the only thing a document can address.
 #[test]
-fn the_option_panels_rows_answer_the_private_ids_a_document_asks_them_by() {
+fn the_option_panel_reports_itself_open_through_the_reference_option() {
     let view = empty_browser();
-    let values: [String; OPTIONS_ROW_COUNT] = std::array::from_fn(|row| format!("VALUE {row}"));
-    let rows = OptionsRows { labels: PANEL_LABELS, values, focused: 3, open: true };
-    let state = SelectViewState::new(&view, 0, None, Some(&rows));
 
-    for (row, label) in PANEL_LABELS.iter().enumerate() {
-        let at = row as i32;
-        assert_eq!(state.string(OPTION_ROW_LABEL_FIRST + at), *label, "row {row} answered the wrong label");
-        assert_eq!(state.string(OPTION_ROW_VALUE_FIRST + at), format!("VALUE {row}"), "row {row} answered the wrong value");
-        assert_eq!(state.boolean(OPTION_ROW_FOCUSED_FIRST + at), row == 3, "row {row} disagreed about being focused");
-    }
-    assert!(state.boolean(OPTION_PANEL1), "an open panel does not report itself open");
-}
-
-/// A frame the browser carries no panel on answers every one of those ids as an unmapped one, so a
-/// document that draws a panel over a closed browser draws an empty one rather than the last rows it
-/// happened to see.
-#[test]
-fn a_browser_with_no_option_panel_answers_its_rows_as_unmapped() {
-    let view = empty_browser();
-    let state = SelectViewState::new(&view, 0, None, None);
-
-    assert_eq!(state.string(OPTION_ROW_LABEL_FIRST), UNMAPPED_STRING);
-    assert_eq!(state.string(OPTION_ROW_VALUE_FIRST), UNMAPPED_STRING);
-    assert_eq!(state.boolean(OPTION_ROW_FOCUSED_FIRST), UNMAPPED_BOOLEAN);
-    assert_eq!(state.boolean(OPTION_PANEL1), UNMAPPED_BOOLEAN);
-}
-
-/// A hit rectangle is hit-tested against the pointer on the canvas, not against the document, so the
-/// same flip and scale the frame was drawn through has to be applied to it. The fixture is authored
-/// at the canvas size, so a rectangle low in the document lands high on a screen of that size and
-/// twice as far down one of twice the height.
-#[test]
-fn a_hotspot_is_placed_on_the_canvas_the_frame_was_drawn_on() {
-    let scratch = Scratch::new("placed");
-    let mut canvas = CpuCanvas::new(DOC_W, DOC_H);
-    let mut text = TextContext::embedded_only();
-    let screen = wheel_screen(&scratch, &mut canvas, &mut text);
-
-    let timers = TimerState::new();
-    let state = Nothing;
-    let frame = frame(&timers, &state, FrameExtra::None);
-    let button = |spots: Vec<SkinHotspot>| spots.into_iter().find(|spot| spot.action == SkinHotAction::Search).map(|spot| spot.rect);
-
-    assert_eq!(button(screen.hotspots(&frame)), Some(Rect::new(10.0, 20.0, 40.0, 12.0)), "the document's own answer is in its own coordinates");
-    let same_size = button(screen.hotspots_on_screen(&frame, (DOC_W, DOC_H)));
-    assert_eq!(same_size, Some(Rect::new(10.0, (DOC_H as f32) - 32.0, 40.0, 12.0)), "the vertical axis is flipped onto the canvas");
-    let twice_as_tall = button(screen.hotspots_on_screen(&frame, (DOC_W * 2, DOC_H * 2)));
-    assert_eq!(twice_as_tall, Some(Rect::new(20.0, ((DOC_H as f32) - 32.0) * 2.0, 80.0, 24.0)), "and both axes scale with the canvas");
+    assert!(SelectViewState::new(&view, 0, None, true).boolean(OPTION_PANEL1), "an open panel does not report itself open");
+    assert!(!SelectViewState::new(&view, 0, None, false).boolean(OPTION_PANEL1), "a closed panel reports itself open");
 }
 
 #[test]
@@ -433,7 +337,6 @@ fn the_document_resolves_one_object_of_every_kind_this_file_draws() {
         SkinObjectKind::TimingDistribution,
         SkinObjectKind::TimingVisualizer,
         SkinObjectKind::HitError,
-        SkinObjectKind::Density,
     ] {
         assert_eq!(screen.count_of(kind), 1, "{kind:?} did not resolve: {:?}", screen.warnings());
     }
@@ -450,8 +353,7 @@ fn the_focused_chart_lands_on_the_centre_slot() {
     let screen = wheel_screen(&scratch, &mut canvas, &mut text);
 
     let rows: Vec<SelectRow> = (0..ROWS).map(row).collect();
-    let detail = SelectDetail::Empty;
-    let list = SelectListState { rows: &rows, sel: SELECTED, detail: &detail, options: None };
+    let list = SelectListState { rows: &rows, sel: SELECTED, options_open: false };
     draw(&screen, &mut text, &mut canvas, FrameExtra::Select(&list));
 
     let bar_pixel = |slot: usize| canvas.pixel_at(BAR_W as u32 - 5, DOC_H - (slot_y(slot) + SLOT_H) as u32 + 2);
@@ -474,68 +376,6 @@ fn a_wheel_without_the_browsers_rows_draws_nothing() {
     assert_eq!(draw(&screen, &mut text, &mut canvas, FrameExtra::None), 1, "only the button, which reads nothing, is left");
 }
 
-/// The hit rectangles a click is answered from: one per clickable slot that a row actually landed
-/// on, carrying that row rather than the slot, plus whatever the document's hotspot table names.
-#[test]
-fn the_wheel_reports_a_hit_rectangle_for_every_row_it_drew() {
-    let scratch = Scratch::new("hot");
-    let mut canvas = CpuCanvas::new(DOC_W, DOC_H);
-    let mut text = TextContext::embedded_only();
-    let screen = wheel_screen(&scratch, &mut canvas, &mut text);
-
-    let rows: Vec<SelectRow> = (0..ROWS).map(row).collect();
-    let detail = SelectDetail::Empty;
-    let list = SelectListState { rows: &rows, sel: SELECTED, detail: &detail, options: None };
-    let timers = TimerState::new();
-    let state = Nothing;
-    let spots = screen.hotspots(&frame(&timers, &state, FrameExtra::Select(&list)));
-
-    let rows_reported: Vec<SkinHotAction> = spots.iter().map(|spot| spot.action).filter(|action| matches!(action, SkinHotAction::Row(_))).collect();
-    let expected: Vec<SkinHotAction> = (0..ROWS).map(SkinHotAction::Row).collect();
-    assert_eq!(rows_reported, expected, "every row on screen answers a click, numbered as the browser numbers its own rows");
-
-    let rect_of = |action: SkinHotAction| spots.iter().find(|spot| spot.action == action).map(|spot| spot.rect);
-    let focused_slot = Rect::new(0.0, slot_y(CENTER) as f32, FOCUS_W as f32, SLOT_H as f32);
-    assert_eq!(rect_of(SkinHotAction::Row(SELECTED)), Some(focused_slot), "the focused row's rectangle is the focused bar it was drawn as");
-    let first_slot = Rect::new(0.0, slot_y(CENTER - SELECTED) as f32, BAR_W as f32, SLOT_H as f32);
-    assert_eq!(rect_of(SkinHotAction::Row(0)), Some(first_slot), "and an unfocused row's is its own slot, in document coordinates");
-    assert_eq!(rect_of(SkinHotAction::Search), Some(Rect::new(10.0, 20.0, 40.0, 12.0)), "the hotspot table answers for the button it named");
-}
-
-/// A hotspot is still answered on a frame that carries no rows, because the buttons a document draws
-/// do not depend on the wheel having anything in it.
-///
-/// Every action the loader keeps has to be one the wheel turns into a rectangle, or a document would
-/// declare a hotspot that loads clean and then does nothing; the one the loader already dropped
-/// never reaches here at all.
-#[test]
-fn every_action_the_loader_keeps_becomes_a_rectangle_the_browser_can_act_on() {
-    let scratch = Scratch::new("actions");
-    let mut canvas = CpuCanvas::new(DOC_W, DOC_H);
-    let mut text = TextContext::embedded_only();
-    let screen = wheel_screen(&scratch, &mut canvas, &mut text);
-
-    let timers = TimerState::new();
-    let state = Nothing;
-    let spots: Vec<SkinHotspot> = screen.hotspots(&frame(&timers, &state, FrameExtra::None));
-    let actions: Vec<SkinHotAction> = spots.iter().map(|spot| spot.action).collect();
-    let expected = [
-        SkinHotAction::Folders,
-        SkinHotAction::ModalClose,
-        SkinHotAction::ModalReplay,
-        SkinHotAction::Records,
-        SkinHotAction::Search,
-        SkinHotAction::Settings,
-        SkinHotAction::Sort,
-        SkinHotAction::Tables,
-    ];
-    assert_eq!(expected.len(), HOTSPOT_ACTIONS.len(), "the loader accepts an action this test does not name");
-    assert_eq!(actions, expected, "the wheel reports no rows on this frame, so the hotspot table is all that is left");
-    for spot in &spots {
-        assert_eq!(spot.rect, Rect::new(10.0, 20.0, 40.0, 12.0), "each one is the rectangle of the object it named");
-    }
-}
-
 /// Every graph reads a series that only one screen's state carries, so which of them draw is decided
 /// by the frame rather than by the document.
 #[test]
@@ -553,9 +393,8 @@ fn a_graph_draws_only_on_the_screen_whose_series_it_reads() {
     assert_eq!(draw(&screen, &mut text, &mut canvas, FrameExtra::Result(&series)), 5, "the button and the four score-screen graphs");
 
     let rows: Vec<SelectRow> = (0..ROWS).map(row).collect();
-    let detail = detail_with_density(vec![0, 4, 2]);
-    let list = SelectListState { rows: &rows, sel: SELECTED, detail: &detail, options: None };
-    assert_eq!(draw(&screen, &mut text, &mut canvas, FrameExtra::Select(&list)), 3, "the button, the wheel and the density of the focused chart");
+    let list = SelectListState { rows: &rows, sel: SELECTED, options_open: false };
+    assert_eq!(draw(&screen, &mut text, &mut canvas, FrameExtra::Select(&list)), 2, "the button and the wheel, which is all a browser frame feeds");
 
     let field = Skin::default_for(rbms_model::Mode::BEAT_7K, DOC_W as f32, DOC_H as f32);
     let playfield = PlayfieldView { timelines: &[], microtime: 0, hispeed: 1.0, beam_on: &[], beam_off: &[], constant: false, legacy_note: false };
@@ -576,11 +415,6 @@ fn an_empty_series_draws_no_graph_at_all() {
 
     let series = ResultSeriesState { gauge_series: &[], timing_hist: &[], judge_dist: &[0; 6], bpm_points: &[] };
     assert_eq!(draw(&screen, &mut text, &mut canvas, FrameExtra::Result(&series)), 1, "only the button is left when the run measured nothing");
-
-    let rows: Vec<SelectRow> = (0..ROWS).map(row).collect();
-    let detail = detail_with_density(Vec::new());
-    let list = SelectListState { rows: &rows, sel: SELECTED, detail: &detail, options: None };
-    assert_eq!(draw(&screen, &mut text, &mut canvas, FrameExtra::Select(&list)), 2, "a chart with no measured density draws no histogram");
 }
 
 /// The gauge history is drawn in the colours its own record named: its ground, the line the samples
@@ -603,28 +437,6 @@ fn the_gauge_history_is_drawn_in_the_colours_the_document_named() {
     assert_eq!(canvas.pixel_at(230, panel.y as u32), Color::rgb(255, 0, 0), "and the border is drawn over both");
 }
 
-/// The density histogram is scaled to the busiest second of the chart, which is also where its peak
-/// marker lands.
-#[test]
-fn the_density_histogram_is_scaled_to_the_busiest_second() {
-    let scratch = Scratch::new("density");
-    let mut canvas = CpuCanvas::new(DOC_W, DOC_H);
-    let mut text = TextContext::embedded_only();
-    let screen = wheel_screen(&scratch, &mut canvas, &mut text);
-
-    let rows: Vec<SelectRow> = (0..ROWS).map(row).collect();
-    let detail = detail_with_density(vec![0, 4, 2]);
-    let list = SelectListState { rows: &rows, sel: SELECTED, detail: &detail, options: None };
-    draw(&screen, &mut text, &mut canvas, FrameExtra::Select(&list));
-
-    let top = DOC_H - 90;
-    assert_eq!(canvas.pixel_at(155, top + 15), Color::rgb(0, 255, 255), "the busiest second fills its whole column");
-    assert_eq!(canvas.pixel_at(135, top + 15), Color::BLACK, "a second with no notes draws no bar");
-    assert_eq!(canvas.pixel_at(175, top + 5), Color::BLACK, "a quieter second only fills its share of the column");
-    assert_eq!(canvas.pixel_at(175, top + 20), Color::rgb(0, 255, 255));
-    assert_eq!(canvas.pixel_at(135, top), Color::rgb(0xFF, 0xD3, 0x00), "and the peak is marked across the top of the panel");
-}
-
 /// A colour a document mistyped costs that one colour and a warning, not the graph.
 #[test]
 fn a_colour_that_is_not_one_is_reported_and_replaced() {
@@ -641,11 +453,10 @@ fn a_colour_that_is_not_one_is_reported_and_replaced() {
     assert_eq!(screen.count_of(SkinObjectKind::TimingDistribution), 1, "and the graph still resolved");
 }
 
-/// A row rectangle is only worth answering a click on while its row is on the screen, and every one
-/// of the wheel's slots hangs off the wheel's own destination: a document that faded that out drew
-/// no rows this frame, so a click has to fall through to whatever is behind them.
+/// Every one of the wheel's slots hangs off the wheel's own destination, so a document that faded
+/// that out drew no rows this frame.
 #[test]
-fn a_wheel_the_document_faded_out_answers_no_click_on_its_rows() {
+fn a_wheel_the_document_faded_out_draws_none_of_its_rows() {
     let scratch = Scratch::new("hidden");
     let mut canvas = CpuCanvas::new(DOC_W, DOC_H);
     let mut text = TextContext::embedded_only();
@@ -653,41 +464,8 @@ fn a_wheel_the_document_faded_out_answers_no_click_on_its_rows() {
     let screen = wheel_screen_with(&scratch, &mut canvas, &mut text, Fixture { wheel_dst: Some(&dst), ..Fixture::default() });
 
     let rows: Vec<SelectRow> = (0..ROWS).map(row).collect();
-    let detail = SelectDetail::Empty;
-    let list = SelectListState { rows: &rows, sel: SELECTED, detail: &detail, options: None };
+    let list = SelectListState { rows: &rows, sel: SELECTED, options_open: false };
     assert_eq!(draw(&screen, &mut text, &mut canvas, FrameExtra::Select(&list)), 1, "the faded wheel reaches the screen nowhere, leaving only the button");
-
-    let timers = TimerState::new();
-    let state = Nothing;
-    let spots = screen.hotspots(&frame(&timers, &state, FrameExtra::Select(&list)));
-    assert!(!spots.iter().any(|spot| matches!(spot.action, SkinHotAction::Row(_))), "no row of a wheel nobody can see is clicked: {spots:?}");
-    assert!(spots.iter().any(|spot| spot.action == SkinHotAction::Search), "the buttons beside it are their own objects and still answer");
-}
-
-/// A wheel with a window of its own shows only the slots inside it, so only those are clicked: a
-/// slot scrolled past the edge of the window is drawn nowhere and hit nowhere.
-#[test]
-fn a_row_scrolled_out_of_the_wheels_window_is_clicked_nowhere() {
-    let scratch = Scratch::new("clipped");
-    let mut canvas = CpuCanvas::new(DOC_W, DOC_H);
-    let mut text = TextContext::embedded_only();
-    let dst = format!(r#""x": 0, "y": 0, "w": 120, "h": {DOC_H}, "clip_x": 0, "clip_y": 100, "clip_w": 120, "clip_h": 80"#);
-    let screen = wheel_screen_with(&scratch, &mut canvas, &mut text, Fixture { wheel_dst: Some(&dst), ..Fixture::default() });
-
-    let rows: Vec<SelectRow> = (0..ROWS).map(row).collect();
-    let detail = SelectDetail::Empty;
-    let list = SelectListState { rows: &rows, sel: SELECTED, detail: &detail, options: None };
-    let timers = TimerState::new();
-    let state = Nothing;
-    let spots = screen.hotspots(&frame(&timers, &state, FrameExtra::Select(&list)));
-
-    let reported: Vec<SkinHotAction> = spots.iter().map(|spot| spot.action).filter(|action| matches!(action, SkinHotAction::Row(_))).collect();
-    let expected: Vec<SkinHotAction> = (0..3).map(SkinHotAction::Row).collect();
-    assert_eq!(reported, expected, "the two rows below the window are gone, and the three that reach into it are not");
-
-    let focused = spots.iter().find(|spot| spot.action == SkinHotAction::Row(SELECTED)).map(|spot| spot.rect);
-    let overlap = (slot_y(CENTER) + SLOT_H - 100) as f32;
-    assert_eq!(focused, Some(Rect::new(0.0, 100.0, FOCUS_W as f32, overlap)), "and the row straddling the edge is clickable only where it was drawn");
 }
 
 /// A slot is a box, not an anchor: a title longer than the slot the document drew for it is cut to
@@ -701,8 +479,7 @@ fn a_title_longer_than_its_slot_is_cut_to_it() {
 
     let mut rows: Vec<SelectRow> = (0..ROWS).map(row).collect();
     rows[SELECTED].title = "WIDE".repeat(20);
-    let detail = SelectDetail::Empty;
-    let list = SelectListState { rows: &rows, sel: SELECTED, detail: &detail, options: None };
+    let list = SelectListState { rows: &rows, sel: SELECTED, options_open: false };
     draw(&screen, &mut text, &mut canvas, FrameExtra::Select(&list));
 
     let top = DOC_H - (slot_y(CENTER) + SLOT_H) as u32;
@@ -738,18 +515,16 @@ fn a_bar_can_be_cut_from_an_image_set_and_one_that_names_nothing_is_reported() {
     assert!(!set.warnings().iter().any(|warning| warning.contains("bar-on")), "declaring it as a set is enough to cut it from: {:?}", set.warnings());
 
     let rows: Vec<SelectRow> = (0..ROWS).map(row).collect();
-    let detail = SelectDetail::Empty;
-    let list = SelectListState { rows: &rows, sel: SELECTED, detail: &detail, options: None };
+    let list = SelectListState { rows: &rows, sel: SELECTED, options_open: false };
     draw(&set, &mut text, &mut canvas, FrameExtra::Select(&list));
     let focused = canvas.pixel_at(BAR_W as u32 - 5, DOC_H - (slot_y(CENTER) + SLOT_H) as u32 + 2);
     assert_eq!(focused, Color { r: 240, g: 60, b: 60, a: 255 }, "and the bar it cuts lands in the colour the slot was tinted");
 }
 
-/// A wheel of no slots is no wheel. It has to resolve to nothing at all, because a body of any kind
-/// is what a screen counts when it decides the document has taken the row list over: an empty one
-/// would hide the built-in browser and then draw nothing in its place.
+/// A wheel of no slots is no wheel. It has to resolve to nothing at all and say so, because a body
+/// with nothing in it would be counted as a wheel and then draw nothing.
 #[test]
-fn a_wheel_with_no_slots_leaves_the_rows_to_the_built_in_browser() {
+fn a_wheel_with_no_slots_resolves_to_nothing_and_says_so() {
     let scratch = Scratch::new("empty-wheel");
     let body = format!(
         r#"{{
@@ -769,11 +544,7 @@ fn a_wheel_with_no_slots_leaves_the_rows_to_the_built_in_browser() {
     let screen = SkinScreen::build(&mut canvas, &mut text, &skin, &mut SolidAssets);
 
     assert_eq!(screen.count_of(SkinObjectKind::SongList), 0, "a wheel with nothing in it resolved anyway: {:?}", screen.warnings());
-    assert!(
-        screen.warnings().iter().any(|warning| warning.contains("no slots")),
-        "and the document is told why its rows stayed with the browser: {:?}",
-        screen.warnings()
-    );
+    assert!(screen.warnings().iter().any(|warning| warning.contains("no slots")), "and the document is told why no wheel was drawn: {:?}", screen.warnings());
 }
 
 /// The judgement graph the document asked for, rather than the one shape for every record: a spread

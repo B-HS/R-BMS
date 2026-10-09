@@ -10,11 +10,6 @@
 //! the content, because a row's title, level, lamp and mode are the browser's to know. A slot's bar
 //! is the one piece drawn from the document's own image when its id names one, since that is the
 //! piece a wheel is mostly made of; everything else is drawn in the row's own colours.
-//!
-//! [`hot_rects`] is the other half of the contract: a document that draws the wheel also has to say
-//! where its rows ended up, because the browser answers a click by hit-testing rectangles. Only the
-//! rows: the buttons a document declares in its own `hotspot` table belong to the screen rather than
-//! to the wheel, because a document may declare them without drawing a wheel at all.
 
 use rbms_skin::dst::{DestinationTrack, DrawStateSource, LuaDrawEval, Resolved, SkinRect, prepare};
 use rbms_skin::loader::{LoadedSkin, NamedTrack};
@@ -22,12 +17,12 @@ use rbms_skin::model::SkinDef;
 
 use super::color::modulate;
 use super::draw::Placement;
-use super::object::{Body, SkinObject, Source, Sprite, image_sprite};
-use super::state::{SelectListState, SkinHotAction, SkinHotspot};
+use super::object::{Body, Source, Sprite, image_sprite};
+use super::state::SelectListState;
 use super::{MIN_TEXT_SCALE, SkinAssets, SkinFrame, TEXT_PIXELS_PER_SCALE};
+use crate::Color;
 use crate::Renderer;
 use crate::ctx::RenderCtx;
-use crate::{Color, Rect};
 
 /// A label's `align` that starts the line at its destination's anchor, numbered as a text object's
 /// alignment is because a slot label is one.
@@ -59,7 +54,7 @@ struct Label {
     family: Option<String>,
 }
 
-/// Everything one slot of the wheel draws, and whether a click on it means anything.
+/// Everything one slot of the wheel draws.
 #[derive(Debug)]
 struct Slot {
     off: Option<Bar>,
@@ -69,7 +64,6 @@ struct Slot {
     label: Option<Label>,
     lamp: Option<DestinationTrack>,
     player_lamp: Option<DestinationTrack>,
-    clickable: bool,
 }
 
 impl Slot {
@@ -179,7 +173,6 @@ pub(crate) fn build_songlist(
             label: label_of(&tracks.label, index, &skin.def, families),
             lamp: tracks.lamp.get(index).map(|named| named.track.clone()),
             player_lamp: tracks.playerlamp.get(index).map(|named| named.track.clone()),
-            clickable: wheel.clickable.contains(&(index as i32)),
         });
     }
 
@@ -307,68 +300,4 @@ pub(crate) fn draw_songlist<R: Renderer>(
         drawn |= draw_lamp(r, place, slot.player_lamp.as_ref(), frame, row.lamp);
     }
     drawn
-}
-
-/// Every row rectangle this frame's wheel offers a click on, in the document's own coordinates.
-///
-/// Document space rather than screen space because a draw list knows the size it was authored at
-/// and not the canvas it will land on; the caller maps each rectangle through the same
-/// [`super::SkinViewport`] it draws the frame with.
-///
-/// A row rectangle carries the row of the browser's own list that landed on that slot, not the slot
-/// number, because that is what the built-in [`crate::select::SelectHot::Row`] it stands in for
-/// means and what the browser sets its selection from.
-pub(crate) fn hot_rects(objects: &[SkinObject], frame: &SkinFrame<'_>) -> Vec<SkinHotspot> {
-    let Some((object, wheel)) = objects.iter().find_map(|object| match &object.body {
-        Body::SongList(body) => Some((object, body)),
-        _ => None,
-    }) else {
-        return Vec::new();
-    };
-    let (Some(list), Some(placed)) = (frame.extra.select(), drawn_wheel(object, frame)) else {
-        return Vec::new();
-    };
-
-    let mut spots: Vec<SkinHotspot> = Vec::new();
-    for (index, slot) in wheel.slots.iter().enumerate().filter(|(_, slot)| slot.clickable) {
-        let (Some(row), Some(bar)) = (wheel.row_at(list, index), slot.bar(index == wheel.center)) else {
-            continue;
-        };
-        let Some(rect) = resolve(&bar.track, frame).map(rect_of).and_then(|rect| clipped_to(rect, placed.clip)) else {
-            continue;
-        };
-        spots.push(SkinHotspot { rect, action: SkinHotAction::Row(row) });
-    }
-    spots
-}
-
-/// Where the wheel itself landed this frame, or `None` when the document did not draw it.
-///
-/// A row rectangle is only a rectangle a click means anything on while the row under it is on the
-/// screen, and every one of the wheel's slots hangs off the one destination this resolves: a
-/// document that gated the wheel off, or faded it out, drew no rows this frame and must not answer
-/// a click on them. This is the same pair of tests [`super::draw::draw_object`] leaves on.
-fn drawn_wheel(object: &SkinObject, frame: &SkinFrame<'_>) -> Option<Resolved> {
-    resolve(&object.track, frame).filter(|resolved| resolved.color.a != 0)
-}
-
-/// One rectangle cut down to the wheel's scissor rectangle, or `None` when the two do not overlap.
-///
-/// Both are in document space, where a rectangle is measured up from the bottom left, so the overlap
-/// is the plain one: a slot scrolled out of the wheel's own window is drawn nowhere and is clicked
-/// nowhere either.
-fn clipped_to(rect: Rect, clip: Option<SkinRect>) -> Option<Rect> {
-    let Some(clip) = clip else {
-        return Some(rect);
-    };
-    let left = rect.x.max(clip.x);
-    let right = (rect.x + rect.w).min(clip.x + clip.w);
-    let bottom = rect.y.max(clip.y);
-    let top = (rect.y + rect.h).min(clip.y + clip.h);
-    (right > left && top > bottom).then(|| Rect::new(left, bottom, right - left, top - bottom))
-}
-
-/// A resolved destination as the plain rectangle a hit test takes, still in document space.
-fn rect_of(resolved: Resolved) -> Rect {
-    Rect { x: resolved.rect.x, y: resolved.rect.y, w: resolved.rect.w, h: resolved.rect.h }
 }

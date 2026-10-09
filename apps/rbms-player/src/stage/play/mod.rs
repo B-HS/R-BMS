@@ -13,14 +13,9 @@ use crate::stage::{Canvas, FrameCtx, KeyInput, StageHandler, Transition};
 use crate::target::ResolvedTarget;
 use crate::*;
 use rbms_config::FixHiSpeed;
-use rbms_render::content::PlayContent;
 use rbms_render::playfield::LaneShade;
 use rbms_render::skin_render::state::{PlayObjectState, PlayViewState};
-use rbms_render::{
-    FrameExtra, HudPace, KEY_LANE_KIND, LANE_KIND_COUNT, LaneTimerState, PlayLanes, QuadParams, SCRATCH_LANE_KIND, TextureId, render_hud_with_content,
-    render_playfield_on_background,
-};
-use rbms_skin::model::SkinLayer;
+use rbms_render::{FrameExtra, HudPace, KEY_LANE_KIND, LANE_KIND_COUNT, LaneTimerState, PlayLanes, SCRATCH_LANE_KIND, TextureId, render_hud};
 use rbms_skin::timer::timer_id;
 
 /// Microseconds in one millisecond, which is the unit the play clock is kept in and the unit a
@@ -184,10 +179,6 @@ pub(crate) struct PlayState {
     /// Every long note of the chart as `(head, tail)` in play time, per lane, so a frame can say
     /// whether a lane is holding one without walking the chart.
     long_notes: Vec<Vec<(i64, i64)>>,
-    /// Whether the field has been resolved against the play document yet. The document is read a
-    /// frame or two into the run, so the frame that finds it compiled rebuilds the field once and
-    /// every frame after it leaves the field alone.
-    lanes_synced: bool,
 }
 
 /// Every long note of `model`, per lane, in the order they are played.
@@ -305,7 +296,6 @@ impl PlayState {
             recent_hits: Vec::with_capacity(RECENT_HITS_KEPT),
             judged_side: LEFT_FIELD,
             long_notes,
-            lanes_synced: false,
         }
     }
 
@@ -586,11 +576,7 @@ impl PlayState {
     /// where the chart's background image goes. The timers are switched from the same HUD snapshot
     /// the built-in screen is drawn from, so a document's judgement flash and the HUD's own counter
     /// can never disagree about what just happened.
-    ///
-    /// `layer` names one phase of a layered document, or draws the whole of one when it names none.
-    /// Both go through here so a document that draws its own field, gauge and covers is handed the
-    /// same chart, the same covers and the same held keys either way.
-    fn draw_document(&self, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'_>, hud: &HudView<'_>, frame: DocumentFrame<'_>, layer: Option<SkinLayer>) -> bool {
+    fn draw_document(&self, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'_>, hud: &HudView<'_>, frame: DocumentFrame<'_>) -> bool {
         let DocumentFrame { song_us, bpm, hispeed, background, playfield, shade } = frame;
         let Some(skin_type) = mode_skin_type(ctx.shared.mode).filter(|skin_type| ctx.shared.has_skin_document(*skin_type)) else {
             return false;
@@ -605,7 +591,6 @@ impl PlayState {
         let play = PlayLanes { lanes: &lanes, judged_side: self.judged_side };
         ctx.shared.skin_play_timers.update(&mut ctx.shared.skin_timers, hud, total_notes, now_ms, &play);
         let offsets = ctx.shared.skin_offsets(skin_type);
-        let target_delta = self.pace_target.as_ref().map_or_else(String::new, |_| format!("{:+}", hud.pace.as_ref().map_or(0, |pace| pace.delta)));
         let meta = &self.session.model().meta;
         let gauge_kind = self.session.judge().gauge.selected_index().index();
         let state = PlayViewState {
@@ -628,7 +613,6 @@ impl PlayState {
             bpm_max: self.bpm.max,
             bpm_main: self.bpm.main,
             target_ex: self.pace_target.as_ref().map(|target| target.ex),
-            target_delta: &target_delta,
         };
         let objects = PlayObjectState {
             field: &ctx.shared.skin,
@@ -639,11 +623,7 @@ impl PlayState {
             keys_down: &keys_down,
             recent_hits: &self.recent_hits,
         };
-        let extra = FrameExtra::Play(&objects);
-        match layer {
-            Some(layer) => ctx.shared.draw_play_skin_layer(canvas, skin_type, &state, background, extra, layer),
-            None => ctx.shared.draw_play_skin(canvas, skin_type, &state, background, extra),
-        }
+        ctx.shared.draw_play_skin(canvas, skin_type, &state, background, FrameExtra::Play(&objects))
     }
 
     /// Which lanes are being held right now, in lane order.
@@ -784,12 +764,6 @@ impl StageHandler for PlayState {
     /// the SPEED FIX row pins to when it names one, and otherwise tracking the BPM and SCROLL of the
     /// timeline segment under the play head. The white number beside it is what the rest of the
     /// travel time is spent under the lane cover.
-    ///
-    /// The key bomb is drawn whatever a document replaced, because no block of native output stands
-    /// for it: the `field` block hands over the lanes, the notes, the judgement line, the key beams
-    /// and the bar lines, and a document that declares a note field is never asked for a bomb. Its
-    /// geometry follows the same lanes the document laid out, so it lands where the document's own
-    /// judgement line is.
     fn draw(&mut self, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'_>) {
         self.ensure_pace_target(ctx.shared);
         let song = self.song_us;
@@ -797,24 +771,13 @@ impl StageHandler for PlayState {
         let skin_type = mode_skin_type(ctx.shared.mode);
         if let Some(skin_type) = skin_type {
             ctx.shared.prepare_skin(canvas, skin_type);
-            if !self.lanes_synced && ctx.shared.skin_screens.get(skin_type).is_some() {
-                ctx.shared.rebuild_skin();
-                self.lanes_synced = true;
-            }
         }
-        let overlay = skin_type.is_some_and(|skin_type| ctx.shared.skin_uses_overlay(skin_type));
-        let layered = skin_type.is_some_and(|skin_type| ctx.shared.skin_uses_layered_layout(skin_type));
-        let native_layout = skin_type.is_some_and(|skin_type| ctx.shared.skin_uses_native_layout(skin_type));
-        let built_in_background = native_layout || skin_type.is_none_or(|skin_type| !ctx.shared.has_skin_document(skin_type));
+        let has_document = skin_type.is_some_and(|skin_type| ctx.shared.has_skin_document(skin_type));
         let frame_image = ctx.shared.config.display.bga.then(|| self.bga.get(&play.bga_frame())).flatten();
         let mut document_background = None;
-        match (built_in_background, ctx.shared.skin.bga, frame_image) {
-            (true, Some(_), Some(img)) if layered => {
-                canvas.clear_bga();
-                document_background = canvas.background_texture(img.generation, &img.rgba, img.width, img.height);
-            }
-            (true, Some(rect), Some(img)) => canvas.set_background(img.generation, &img.rgba, img.width, img.height, rect),
-            (false, _, Some(img)) => {
+        match (has_document, ctx.shared.skin.bga, frame_image) {
+            (false, Some(rect), Some(img)) => canvas.set_background(img.generation, &img.rgba, img.width, img.height, rect),
+            (true, _, Some(img)) => {
                 canvas.clear_bga();
                 document_background = canvas.background_texture(img.generation, &img.rgba, img.width, img.height);
             }
@@ -869,38 +832,15 @@ impl StageHandler for PlayState {
         };
         let shade = LaneShade { cover, hidden: ctx.shared.effective_hidden() };
         let document_frame = DocumentFrame { song_us: song, bpm, hispeed, background: document_background, playfield: &playfield, shade };
-        if !native_layout && self.draw_document(ctx, canvas, &hud, document_frame, None) {
+        if self.draw_document(ctx, canvas, &hud, document_frame) {
             return;
         }
-        let content: PlayContent = skin_type.map(|skin_type| ctx.shared.screen_content(skin_type).play).unwrap_or_default();
-        if layered {
-            canvas.clear(ctx.shared.skin.bg);
-            self.draw_document(ctx, canvas, &hud, document_frame, Some(SkinLayer::Background));
-            if let (Some(texture), Some(rect), false) = (document_background, ctx.shared.skin.bga, ctx.shared.skin_draws_background(skin_type)) {
-                let mut params = QuadParams::new(rect);
-                if let Some(img) = frame_image {
-                    params.filter = rbms_render::background_filter(rect, (img.width, img.height));
-                }
-                canvas.draw_textured_quad(texture, params);
-            }
-            if !content.field {
-                render_playfield_on_background(canvas, &ctx.shared.skin, &playfield);
-            }
-        } else {
-            render_playfield_view(canvas, &ctx.shared.skin, &playfield);
-        }
-        if !content.cover {
-            render_lane_cover(canvas, &ctx.shared.skin, shade);
-        }
+        render_playfield_view(canvas, &ctx.shared.skin, &playfield);
+        render_lane_cover(canvas, &ctx.shared.skin, shade);
         render_key_bomb(canvas, &ctx.shared.skin, self.session.bomb(), song);
-        render_hud_with_content(canvas, &ctx.shared.skin, &hud, content);
+        render_hud(canvas, &ctx.shared.skin, &hud);
         if self.session.analysis_enabled() {
             self.draw_analysis(canvas, song);
-        }
-        if layered {
-            self.draw_document(ctx, canvas, &hud, document_frame, Some(SkinLayer::Foreground));
-        } else if overlay {
-            self.draw_document(ctx, canvas, &hud, document_frame, None);
         }
     }
 

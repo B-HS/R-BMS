@@ -16,13 +16,11 @@ use rbms_skin::property::{
     UNMAPPED_STRING, clamp_float,
 };
 
-use crate::Rect;
 use crate::hud::HudView;
 use crate::playfield::{LaneShade, PlayfieldView};
-use crate::result::{ResultView, TargetView, dj_rank, ex_delta_label, lane_kind_total};
+use crate::result::{ResultView, TargetView, dj_rank, lane_kind_total};
 use crate::select::{SelectDetail, SelectRow, SelectView};
 use crate::skin::Skin;
-use crate::theme::OPTIONS_ROW_COUNT;
 
 /// How many judgements a run is counted in, best first.
 const JUDGEMENTS: usize = 6;
@@ -97,56 +95,6 @@ const GAUGE_FULL: f32 = 100.0;
 /// EX points a single note is worth at its best judgement, which is what turns a note count into a
 /// maximum score.
 const POINTS_PER_NOTE: u32 = 2;
-
-pub const RESULT_TEXT_SCORE: i32 = 20_001;
-pub const RESULT_TEXT_COMBO: i32 = 20_002;
-pub const RESULT_TEXT_NOTES: i32 = 20_003;
-pub const RESULT_TEXT_CLEAR: i32 = 20_004;
-pub const RESULT_TEXT_JUDGE_PERFECT: i32 = 20_005;
-pub const RESULT_TEXT_JUDGE_GREAT: i32 = 20_006;
-pub const RESULT_TEXT_JUDGE_GOOD: i32 = 20_007;
-pub const RESULT_TEXT_JUDGE_BAD: i32 = 20_008;
-pub const RESULT_TEXT_JUDGE_POOR: i32 = 20_009;
-pub const RESULT_TEXT_JUDGE_MISS: i32 = 20_010;
-pub const RESULT_TEXT_TARGET: i32 = 20_011;
-
-const RESULT_TEXT_JUDGE_IDS: [i32; JUDGEMENTS] =
-    [RESULT_TEXT_JUDGE_PERFECT, RESULT_TEXT_JUDGE_GREAT, RESULT_TEXT_JUDGE_GOOD, RESULT_TEXT_JUDGE_BAD, RESULT_TEXT_JUDGE_POOR, RESULT_TEXT_JUDGE_MISS];
-
-const RESULT_JUDGE_LABELS: [&str; JUDGEMENTS] = ["PGREAT", "GREAT", "GOOD", "BAD", "POOR", "MISS"];
-
-/// The first of the browser option panel's row-label ids, one per row in panel order.
-pub const OPTION_ROW_LABEL_FIRST: i32 = 20_101;
-
-/// The first of the option panel's row-value ids, one per row.
-pub const OPTION_ROW_VALUE_FIRST: i32 = 20_121;
-
-/// The first of the option panel's row-focus ids, one per row, answered as a boolean.
-pub const OPTION_ROW_FOCUSED_FIRST: i32 = 20_141;
-
-/// The name of whatever the run is being paced against, while it plays.
-pub const PLAY_TEXT_TARGET_NAME: i32 = 20_201;
-
-/// How far ahead of or behind that pace the run is, sign included.
-pub const PLAY_TEXT_TARGET_DELTA: i32 = 20_202;
-
-/// The browser's bottom-bar control hint.
-pub const SELECT_TEXT_HINT: i32 = 20_203;
-
-/// The score screen's bottom-bar control hint.
-pub const RESULT_TEXT_HINT: i32 = 20_204;
-/// The score server's status lines, joined into one.
-pub const RESULT_TEXT_IR: i32 = 20_205;
-
-/// The first of the browser detail pane's statistic cells, each `label value` as one string.
-pub const SELECT_STAT_FIRST: i32 = 20_301;
-
-/// How many statistic cells the detail pane carries.
-pub const SELECT_STAT_COUNT: usize = 6;
-/// The focused chart's local record, one line per id: best EX over its ceiling, its break count,
-/// how often it was played and cleared, the lamp it holds, and when it was set.
-pub const SELECT_RECORD_FIRST: i32 = 20_311;
-pub const SELECT_RECORD_COUNT: usize = 5;
 
 /// The whole part of a number a document splits across two objects.
 fn whole(value: f64) -> i32 {
@@ -231,8 +179,6 @@ pub struct PlayViewState<'a> {
     pub bpm_main: f64,
     /// The EX the target would end on, when the run is paced against one.
     pub target_ex: Option<u32>,
-    /// The signed distance from the target's pace, spelled out for a document's text object.
-    pub target_delta: &'a str,
 }
 
 impl std::fmt::Debug for PlayViewState<'_> {
@@ -358,8 +304,6 @@ impl SkinStateSource for PlayViewState<'_> {
         match id {
             STRING_TITLE | STRING_FULLTITLE => self.title,
             STRING_ARTIST | STRING_FULLARTIST => self.artist,
-            PLAY_TEXT_TARGET_NAME => self.hud.pace.as_ref().map_or(UNMAPPED_STRING, |pace| pace.name),
-            PLAY_TEXT_TARGET_DELTA => self.target_delta,
             _ => UNMAPPED_STRING,
         }
     }
@@ -378,33 +322,14 @@ pub struct SelectViewState<'a> {
     pub view: &'a SelectView,
     pub now_ms: i64,
     pub offsets: Offsets<'a>,
-    /// The option panel's rows, when the browser has them to show. A frame that carries none answers
-    /// every option id as an unmapped one, which is what a document drawing no panel reads.
-    pub options: Option<&'a OptionsRows<'a>>,
-    stats: Vec<String>,
-    records: [String; SELECT_RECORD_COUNT],
+    /// Whether the option panel is open, which is what the reference's first panel option reports.
+    pub options_open: bool,
 }
 
 impl<'a> SelectViewState<'a> {
-    /// The browser's state for one frame, with the focused chart's statistics and record spelled out
-    /// for the document's text objects.
-    pub fn new(view: &'a SelectView, now_ms: i64, offsets: Offsets<'a>, options: Option<&'a OptionsRows<'a>>) -> SelectViewState<'a> {
-        let song = match &view.detail {
-            SelectDetail::Song(detail) => Some(detail),
-            _ => None,
-        };
-        let stats = song.map_or_else(Vec::new, |song| song.stats.iter().map(|cell| format!("{}  {}", cell.label, cell.value)).collect());
-        let records = song.map_or_else(Default::default, |song| {
-            let best = song.records.best.as_ref();
-            [
-                best.map_or_else(String::new, |best| format!("EX  {} / {}", best.ex, best.max_ex)),
-                best.map_or_else(String::new, |best| format!("BP  {}", best.bp)),
-                format!("PLAYS  {}   CLEARS  {}", song.records.plays, song.records.clears),
-                best.map_or_else(String::new, |best| best.lamp_label.to_owned()),
-                best.map_or_else(String::new, |best| best.when.clone()),
-            ]
-        });
-        SelectViewState { view, now_ms, offsets, options, stats, records }
+    /// The browser's state for one frame.
+    pub fn new(view: &'a SelectView, now_ms: i64, offsets: Offsets<'a>, options_open: bool) -> SelectViewState<'a> {
+        SelectViewState { view, now_ms, offsets, options_open }
     }
 }
 
@@ -422,11 +347,6 @@ impl SelectViewState<'_> {
             _ => None,
         }
     }
-
-    /// Which option row one of the panel's private id bands names, counted from `first`.
-    fn option_row(id: i32, first: i32) -> Option<usize> {
-        (id >= first && id < first + OPTIONS_ROW_COUNT as i32).then(|| (id - first) as usize)
-    }
 }
 
 impl OffsetSource for SelectViewState<'_> {
@@ -441,11 +361,8 @@ impl DrawStateSource for SelectViewState<'_> {
         let answer = match asked {
             OPTION_FOLDERBAR => matches!(self.view.detail, SelectDetail::Folder { .. }),
             OPTION_SONGBAR => self.song().is_some(),
-            OPTION_PANEL1 => self.options.is_some_and(|rows| rows.open),
-            _ => match Self::option_row(asked, OPTION_ROW_FOCUSED_FIRST) {
-                Some(row) => self.options.is_some_and(|rows| rows.focused == row),
-                None => UNMAPPED_BOOLEAN,
-            },
+            OPTION_PANEL1 => self.options_open,
+            _ => UNMAPPED_BOOLEAN,
         };
         if id < 0 { !answer } else { answer }
     }
@@ -470,21 +387,8 @@ impl SkinStateSource for SelectViewState<'_> {
     }
 
     fn string(&self, id: i32) -> &str {
-        if let Some(row) = Self::option_row(id, OPTION_ROW_LABEL_FIRST) {
-            return self.options.map_or(UNMAPPED_STRING, |rows| rows.labels[row]);
-        }
-        if let Some(row) = Self::option_row(id, OPTION_ROW_VALUE_FIRST) {
-            return self.options.map_or(UNMAPPED_STRING, |rows| rows.values[row].as_str());
-        }
-        if (SELECT_STAT_FIRST..SELECT_STAT_FIRST + SELECT_STAT_COUNT as i32).contains(&id) {
-            return self.stats.get((id - SELECT_STAT_FIRST) as usize).map_or(UNMAPPED_STRING, String::as_str);
-        }
-        if (SELECT_RECORD_FIRST..SELECT_RECORD_FIRST + SELECT_RECORD_COUNT as i32).contains(&id) {
-            return &self.records[(id - SELECT_RECORD_FIRST) as usize];
-        }
         match id {
             STRING_DIRECTORY => &self.view.header,
-            SELECT_TEXT_HINT => self.view.guide,
             STRING_SEARCHWORD => self.view.search.as_deref().unwrap_or(UNMAPPED_STRING),
             STRING_TITLE | STRING_FULLTITLE => self.song().map_or(UNMAPPED_STRING, |song| song.title.as_str()),
             STRING_SUBTITLE => self.song().map_or(UNMAPPED_STRING, |song| song.subtitle.as_str()),
@@ -512,14 +416,6 @@ pub struct ResultViewState<'a> {
     pub cleared: bool,
     pub now_ms: i64,
     pub offsets: Offsets<'a>,
-    score: String,
-    combo: String,
-    notes: String,
-    clear: String,
-    judges: [String; JUDGEMENTS],
-    target_text: String,
-    hint: String,
-    ir_status: String,
 }
 
 impl std::fmt::Debug for ResultViewState<'_> {
@@ -536,38 +432,7 @@ impl OffsetSource for ResultViewState<'_> {
 
 impl<'a> ResultViewState<'a> {
     pub fn new(view: &'a ResultView, target: Option<&'a TargetView>, cleared: bool, now_ms: i64, offsets: Offsets<'a>) -> ResultViewState<'a> {
-        let judges = std::array::from_fn(|index| format!("{}  {}", RESULT_JUDGE_LABELS[index], view.counts[index]));
-        let target_text = target.map_or_else(String::new, |target| {
-            let (delta, _) = ex_delta_label(i64::from(view.ex_score) - i64::from(target.ex));
-            format!("{}  {}  {}", target.name, target.ex, delta)
-        });
-        ResultViewState {
-            view,
-            target,
-            cleared,
-            now_ms,
-            offsets,
-            score: format!("{} / {}", view.ex_score, view.max_score),
-            combo: format!("{} / {}", view.max_combo, view.total_notes),
-            notes: view.total_notes.to_string(),
-            clear: view.clear_label.to_string(),
-            judges,
-            target_text,
-            hint: String::new(),
-            ir_status: String::new(),
-        }
-    }
-
-    /// The same state with the key hint the built-in screen would show, for a document that draws it.
-    pub fn with_hint(mut self, run_again: bool) -> Self {
-        self.hint = crate::result::result_hint_text(run_again).to_owned();
-        self
-    }
-
-    /// The same state with the score server's status, for a document that shows it.
-    pub fn with_ir_status(mut self, text: String) -> Self {
-        self.ir_status = text;
-        self
+        ResultViewState { view, target, cleared, now_ms, offsets }
     }
 }
 
@@ -624,14 +489,6 @@ impl SkinStateSource for ResultViewState<'_> {
         match id {
             STRING_TITLE | STRING_FULLTITLE => &self.view.title,
             STRING_ARTIST | STRING_FULLARTIST => &self.view.artist,
-            RESULT_TEXT_SCORE => &self.score,
-            RESULT_TEXT_COMBO => &self.combo,
-            RESULT_TEXT_NOTES => &self.notes,
-            RESULT_TEXT_CLEAR => &self.clear,
-            RESULT_TEXT_TARGET => &self.target_text,
-            RESULT_TEXT_HINT => &self.hint,
-            RESULT_TEXT_IR => &self.ir_status,
-            _ if let Some(index) = RESULT_TEXT_JUDGE_IDS.iter().position(|value| *value == id) => &self.judges[index],
             _ => UNMAPPED_STRING,
         }
     }
@@ -781,69 +638,14 @@ impl SkinStateSource for KeyConfigViewState<'_> {
     }
 }
 
-/// Which native action one of a document's rectangles takes the place of.
-///
-/// The browser answers a click by hit-testing its own rows and buttons; a document that draws those
-/// itself has to say where they ended up, which is what a hotspot is. The variants are the built-in
-/// [`crate::select::SelectHot`] actions a document may stand in for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SkinHotAction {
-    Search,
-    Sort,
-    Folders,
-    Tables,
-    Records,
-    Settings,
-    ModalReplay,
-    ModalClose,
-    /// One chart of the browser's own list, by the row index the browser selects with -- not the
-    /// wheel slot the document happened to draw it on.
-    Row(usize),
-}
-
-impl SkinHotAction {
-    /// The action one of a document's `hotspot` entries names, or `None` when it is not one this
-    /// build takes.
-    ///
-    /// The loader drops the names it does not know while it reads the document
-    /// ([`rbms_skin::loader::HOTSPOT_ACTIONS`]), so nothing that loaded cleanly reaches the `None`.
-    /// A wheel slot is not here because no document names one: it is the wheel's own geometry.
-    pub(crate) fn from_name(name: &str) -> Option<SkinHotAction> {
-        Some(match name {
-            "search" => SkinHotAction::Search,
-            "sort" => SkinHotAction::Sort,
-            "folders" => SkinHotAction::Folders,
-            "tables" => SkinHotAction::Tables,
-            "records" => SkinHotAction::Records,
-            "settings" => SkinHotAction::Settings,
-            "modal-replay" => SkinHotAction::ModalReplay,
-            "modal-close" => SkinHotAction::ModalClose,
-            _ => return None,
-        })
-    }
-}
-
-/// One clickable rectangle a document offers, in the document's own coordinates.
-///
-/// Document space rather than screen space because a draw list knows the size it was authored at
-/// and not the canvas it will land on: the caller maps the rectangle onto the canvas with the same
-/// [`super::SkinViewport`] the frame was drawn with, which also turns it the right way up.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct SkinHotspot {
-    /// Document coordinates as [`super::SkinScreen::hotspots`] answers them, and screen coordinates
-    /// once [`super::SkinScreen::hotspots_on_screen`] has placed them on the canvas.
-    pub rect: Rect,
-    pub action: SkinHotAction,
-}
-
 /// The play screen's per-frame state that no property id can carry.
 ///
 /// A note, a cover and a hit-error strip each need a whole series rather than one number, and the
 /// property registry answers scalars. These arrive beside the scalar source instead, so the
 /// registry keeps the shape every existing document was written against.
 pub struct PlayObjectState<'a> {
-    /// The resolved lane geometry, which a document replaces rather than reads when it draws the
-    /// field itself.
+    /// The built-in field's resolved geometry. A document's note field takes each lane's column from
+    /// its own rectangles, and the judgement line, the ceiling and the gauge's clear line from here.
     pub field: &'a Skin,
     pub playfield: &'a PlayfieldView<'a>,
     pub shade: LaneShade,
@@ -857,20 +659,12 @@ pub struct PlayObjectState<'a> {
     pub recent_hits: &'a [(i64, u8)],
 }
 
-/// The option panel's rows, as the browser's document draws them.
-pub struct OptionsRows<'a> {
-    pub labels: [&'a str; OPTIONS_ROW_COUNT],
-    pub values: [String; OPTIONS_ROW_COUNT],
-    pub focused: usize,
-    pub open: bool,
-}
-
 /// The browser's per-frame state that no property id can carry: the rows themselves.
 pub struct SelectListState<'a> {
     pub rows: &'a [SelectRow],
     pub sel: usize,
-    pub detail: &'a SelectDetail,
-    pub options: Option<&'a OptionsRows<'a>>,
+    /// Whether the application's option panel is open over the browser.
+    pub options_open: bool,
 }
 
 /// The score screen's per-frame series, for the objects that draw a run rather than a number.

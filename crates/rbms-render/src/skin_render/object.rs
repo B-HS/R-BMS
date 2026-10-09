@@ -12,7 +12,7 @@ use std::borrow::Cow;
 
 use rbms_skin::dst::{DestinationTrack, LuaExprId};
 use rbms_skin::loader::{LoadedSkin, StretchKind};
-use rbms_skin::model::{FloatValueDef, GraphDef, ImageDef, PropertyRef, SkinLayer, SliderDef, TextDef, ValueDef};
+use rbms_skin::model::{FloatValueDef, GraphDef, ImageDef, PropertyRef, SliderDef, TextDef, ValueDef};
 use rbms_skin::property::SkinStateSource;
 use rbms_skin::timer::TimerId;
 
@@ -68,14 +68,11 @@ pub enum SkinObjectKind {
     TimingDistribution,
     TimingVisualizer,
     HitError,
-    Density,
 }
 
 /// One entry of the draw list.
 #[derive(Debug)]
 pub(crate) struct SkinObject {
-    pub(crate) id: String,
-    pub(crate) layer: SkinLayer,
     pub(crate) track: DestinationTrack,
     pub(crate) stretch: StretchKind,
     pub(crate) body: Body,
@@ -103,7 +100,6 @@ impl SkinObject {
             Body::TimingDistribution(_) => SkinObjectKind::TimingDistribution,
             Body::TimingVisualizer(_) => SkinObjectKind::TimingVisualizer,
             Body::HitError(_) => SkinObjectKind::HitError,
-            Body::Density(_) => SkinObjectKind::Density,
         }
     }
 }
@@ -131,7 +127,6 @@ pub(crate) enum Body {
     TimingDistribution(graphs::TimingDistributionBody),
     TimingVisualizer(graphs::TimingVisualizerBody),
     HitError(graphs::HitErrorBody),
-    Density(graphs::DensityBody),
 }
 
 /// One registered texture cut into a grid of animation cells.
@@ -552,7 +547,7 @@ pub(crate) fn build_objects(
         let Some(body) = build_body(skin, &named.id, sources, families, assets, warnings) else {
             continue;
         };
-        objects.push(SkinObject { id: named.id.clone(), layer: named.layer, track: named.track.clone(), stretch, body });
+        objects.push(SkinObject { track: named.track.clone(), stretch, body });
     }
     objects
 }

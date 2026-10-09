@@ -350,7 +350,7 @@ fn drawing_a_document_leaves_the_built_in_screens_untouched() {
 #[test]
 fn a_screen_state_answers_the_ids_its_view_knows() {
     let view = plain_select_view();
-    let state = SelectViewState::new(&view, 17, None, None);
+    let state = SelectViewState::new(&view, 17, None, false);
     assert_eq!(state.now_ms(), 17, "the frame clock is the one the caller passed");
     assert_eq!(state.string(rbms_skin::property::generated::STRING_DIRECTORY), "ROOT", "the browser's header answers the directory id");
     assert_eq!(state.integer(rbms_skin::property::generated::NUMBER_PLAYLEVEL), UNMAPPED_INTEGER, "no chart is focused, so there is no level to report");

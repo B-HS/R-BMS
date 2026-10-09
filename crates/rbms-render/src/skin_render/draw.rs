@@ -177,7 +177,6 @@ pub(crate) fn draw_object<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, objec
         Body::TimingDistribution(body) => graphs::draw_timing_distribution(ctx, r, &place, body, rect, frame),
         Body::TimingVisualizer(body) => graphs::draw_timing_visualizer(ctx, r, &place, body, rect, frame),
         Body::HitError(body) => graphs::draw_hit_error(ctx, r, &place, body, rect, frame),
-        Body::Density(body) => graphs::draw_density(ctx, r, &place, body, rect, frame),
     };
 
     if clipped {

@@ -8,12 +8,10 @@
 //! placed against the pop-up's own corner rather than the screen's, and when the document sets
 //! `shift` the pop-up slides left by half the combo so the pair stays centred as the count grows.
 //!
-//! rbms widens one thing and narrows another. The reference draws its judgement words from a bitmap,
-//! so `judge.images` may only name an `image`; here it may name a `text` as well, which is what lets
-//! a document show the words in a font rather than ship a strip of them. Against that, rbms judges a
-//! double chart as one run over two fields rather than as two sides with a judgement each, so a
-//! document's second pop-up (`index: 1`) reports the same judgement its first does -- see
-//! [`super::state`], which answers both judgement bands from the one judgement the run carries.
+//! rbms narrows one thing. It judges a double chart as one run over two fields rather than as two
+//! sides with a judgement each, so a document's second pop-up (`index: 1`) reports the same
+//! judgement its first does -- see [`super::state`], which answers both judgement bands from the one
+//! judgement the run carries.
 
 use rbms_skin::dst::{DrawStateSource, LuaDrawEval, Resolved, SkinRect, prepare};
 use rbms_skin::loader::{LoadedSkin, NamedTrack, StretchKind};
@@ -22,7 +20,7 @@ use rbms_skin::property::generated::{NUMBER_COMBO, OPTION_1P_PERFECT, OPTION_2P_
 
 use super::draw::Placement;
 use super::object::{Body, NumberBody, Places, SkinObject, Source, ValueSource, build_body, integer_glyphs};
-use super::{MIN_TEXT_SCALE, SkinAssets, SkinFrame, TEXT_PIXELS_PER_SCALE};
+use super::{SkinAssets, SkinFrame};
 use crate::ctx::RenderCtx;
 use crate::{BlendMode, Renderer};
 
@@ -39,12 +37,6 @@ const JUDGE_OPTION_BASE: [i32; 2] = [OPTION_1P_PERFECT, OPTION_2P_PERFECT];
 /// The whole numbers a property answers with when it has nothing to report, which draw no digits at
 /// all (`SkinNumber.prepare`).
 const INTEGER_NO_VALUE: [i32; 2] = [i32::MIN, i32::MAX];
-
-/// A text object's `align` that starts the line at its destination's anchor.
-const TEXT_ALIGN_LEFT: i32 = 0;
-
-/// A text object's `align` that centres the line on it.
-const TEXT_ALIGN_CENTER: i32 = 1;
 
 /// A number's `align` that leaves its places where they fall, which is flush right.
 const NUMBER_ALIGN_RIGHT: i32 = 0;
@@ -92,7 +84,7 @@ impl PartBuilder<'_, '_> {
         let known = if combo {
             def.value.iter().any(|value| value.id == id)
         } else {
-            def.image.iter().any(|image| image.id == id) || def.imageset.iter().any(|set| set.id == id) || def.text.iter().any(|text| text.id == id)
+            def.image.iter().any(|image| image.id == id) || def.imageset.iter().any(|set| set.id == id)
         };
         if !known {
             self.warnings.push(format!("judge part {id:?} is not a kind a pop-up is made of"));
@@ -102,7 +94,7 @@ impl PartBuilder<'_, '_> {
         if let Body::Number(number) = &mut body {
             number.value = ValueSource::Id(NUMBER_COMBO);
         }
-        Some(SkinObject { id: track.id.clone(), layer: track.layer, track: track.track.clone(), stretch: StretchKind::from_id(track.track.stretch), body })
+        Some(SkinObject { track: track.track.clone(), stretch: StretchKind::from_id(track.track.stretch), body })
     }
 }
 
@@ -175,7 +167,7 @@ fn resolve_part(object: &SkinObject, origin: (f32, f32), frame: &SkinFrame<'_>) 
 
 /// Draws the pop-up, answering whether anything reached the screen.
 pub(crate) fn draw_judge<R: Renderer>(
-    ctx: &mut RenderCtx<'_>,
+    _ctx: &mut RenderCtx<'_>,
     r: &mut R,
     place: &Placement<'_>,
     body: &JudgeBody,
@@ -206,7 +198,7 @@ pub(crate) fn draw_judge<R: Renderer>(
     }
 
     let at = SkinRect::new(resolved.rect.x - slide, resolved.rect.y, resolved.rect.w, resolved.rect.h);
-    drawn |= draw_word(ctx, r, &part_placement(word, &resolved, place), &word.body, at, frame);
+    drawn |= draw_word(r, &part_placement(word, &resolved, place), &word.body, at, frame);
     drawn
 }
 
@@ -268,38 +260,15 @@ fn draw_combo<R: Renderer>(r: &mut R, place: &Placement<'_>, body: &NumberBody, 
     drawn
 }
 
-/// Draws the judgement's word, whether the document cut it from a strip or set it in a font.
-fn draw_word<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, place: &Placement<'_>, body: &Body, rect: SkinRect, frame: &SkinFrame<'_>) -> bool {
-    match body {
-        Body::Image(image) => {
-            let chosen = if image.select.is_named() { image.select.integer(frame.state, frame.lua).max(0) as usize } else { 0 };
-            let Some((sprite, first, count)) = image.variants.get(chosen).or_else(|| image.variants.first()) else {
-                return false;
-            };
-            let cell = first + sprite.animation_index(*count, frame.now_ms, frame.timers);
-            place.cell(r, sprite, cell, rect)
-        }
-        Body::Text(text) => {
-            let line = match &text.constant {
-                Some(constant) => std::borrow::Cow::Borrowed(constant.as_str()),
-                None => text.value.text(frame.state, frame.lua),
-            };
-            if line.is_empty() {
-                return false;
-            }
-            match &text.family {
-                Some(family) => ctx.text.set_family(family),
-                None => ctx.text.reset_family(),
-            }
-            let dst = place.viewport.place(rect);
-            let scale = (dst.h / TEXT_PIXELS_PER_SCALE).max(MIN_TEXT_SCALE);
-            match text.align {
-                TEXT_ALIGN_LEFT => ctx.draw_text(r, dst.x, dst.y, scale, place.tint, &line),
-                TEXT_ALIGN_CENTER => ctx.draw_text_centered(r, dst.x, dst.y, scale, place.tint, &line),
-                _ => ctx.draw_text_right(r, dst.x, dst.y, scale, place.tint, &line),
-            }
-            true
-        }
-        _ => false,
-    }
+/// Draws the judgement's word, cut from the strip the document named.
+fn draw_word<R: Renderer>(r: &mut R, place: &Placement<'_>, body: &Body, rect: SkinRect, frame: &SkinFrame<'_>) -> bool {
+    let Body::Image(image) = body else {
+        return false;
+    };
+    let chosen = if image.select.is_named() { image.select.integer(frame.state, frame.lua).max(0) as usize } else { 0 };
+    let Some((sprite, first, count)) = image.variants.get(chosen).or_else(|| image.variants.first()) else {
+        return false;
+    };
+    let cell = first + sprite.animation_index(*count, frame.now_ms, frame.timers);
+    place.cell(r, sprite, cell, rect)
 }

@@ -181,27 +181,6 @@ pub struct ResultExtras {
     pub run_again: bool,
 }
 
-/// Which blocks of the score screen the selected document draws instead, leaving the built-in
-/// screen to draw the rest.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct ResultContent {
-    pub score: bool,
-    pub clear: bool,
-    pub judgment: bool,
-    pub target: bool,
-    /// The rank letter, the rate under it, the rank bar and the deltas against the best and the
-    /// previous run.
-    pub grade: bool,
-    /// The gauge, judgement and timing panels along the bottom.
-    pub graphs: bool,
-    /// The top bar, with the chart title and the mode label on it.
-    pub title: bool,
-    /// The key hint along the bottom edge.
-    pub hint: bool,
-    /// The score server's status lines the application writes under the report.
-    pub ir: bool,
-}
-
 /// Left edge of the result screen's content column.
 const CONTENT_X: f32 = 44.0;
 
@@ -265,66 +244,22 @@ pub fn render_result_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, view: 
 /// [`render_result_with_palette`] against a caller-supplied context.
 pub fn render_result_with_palette_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, view: &ResultView, palette: &ResultPalette, extras: &ResultExtras) {
     let th = ctx.theme;
-    r.clear(th.bg);
-    render_result_on_background_with_palette_ctx(ctx, r, view, palette, extras);
-}
-
-/// Draws result content over the current canvas without clearing its background.
-pub fn render_result_on_background_with_palette<R: Renderer>(r: &mut R, view: &ResultView, palette: &ResultPalette, extras: &ResultExtras) {
-    with_render_ctx(|ctx| render_result_on_background_with_palette_ctx(ctx, r, view, palette, extras));
-}
-
-/// Draws result content over the current canvas with a caller-supplied render context.
-pub fn render_result_on_background_with_palette_ctx<R: Renderer>(
-    ctx: &mut RenderCtx<'_>,
-    r: &mut R,
-    view: &ResultView,
-    palette: &ResultPalette,
-    extras: &ResultExtras,
-) {
-    render_result_on_background_with_content_ctx(ctx, r, view, palette, extras, ResultContent::default());
-}
-
-pub fn render_result_on_background_with_content<R: Renderer>(
-    r: &mut R,
-    view: &ResultView,
-    palette: &ResultPalette,
-    extras: &ResultExtras,
-    content: ResultContent,
-) {
-    with_render_ctx(|ctx| render_result_on_background_with_content_ctx(ctx, r, view, palette, extras, content));
-}
-
-pub fn render_result_on_background_with_content_ctx<R: Renderer>(
-    ctx: &mut RenderCtx<'_>,
-    r: &mut R,
-    view: &ResultView,
-    palette: &ResultPalette,
-    extras: &ResultExtras,
-    content: ResultContent,
-) {
-    let th = ctx.theme;
     let w = r.size().0 as f32;
-    if !content.title {
-        r.fill_rect(Rect::new(0.0, 0.0, w, 52.0), th.topbar);
-        if !view.title.is_empty() {
-            ctx.draw_text_centered(r, w * 0.5, 14.0, 2.0, th.text, &view.title);
-        }
-        ctx.draw_text_right(r, w - MODE_LABEL_MARGIN, MODE_LABEL_Y, MODE_LABEL_SCALE, th.text_muted, view.mode_label);
+    r.clear(th.bg);
+    r.fill_rect(Rect::new(0.0, 0.0, w, 52.0), th.topbar);
+    if !view.title.is_empty() {
+        ctx.draw_text_centered(r, w * 0.5, 14.0, 2.0, th.text, &view.title);
     }
+    ctx.draw_text_right(r, w - MODE_LABEL_MARGIN, MODE_LABEL_Y, MODE_LABEL_SCALE, th.text_muted, view.mode_label);
 
     let lcx = 232.0;
-    if !content.grade {
-        let (_, rcol) = RANK_BANDS[dj_rank(view.ex_score, view.max_score)];
-        let rate = if view.max_score > 0 { view.ex_score as f32 / view.max_score as f32 * 100.0 } else { 0.0 };
-        ctx.draw_text_centered(r, lcx, 96.0, 7.0, rcol, dj_rank_label(view.ex_score, view.max_score));
-        ctx.draw_text_centered(r, lcx, 214.0, 2.4, rcol, &format!("{rate:.2}%"));
-    }
-    if !content.clear {
-        r.fill_rect(Rect::new(44.0, 258.0, 376.0, 48.0), view.clear_color);
-        ctx.draw_text_centered(r, lcx, 270.0, 2.6, Color::BLACK, view.clear_label);
-    }
-    if view.show_graph && !content.grade {
+    let (_, rcol) = RANK_BANDS[dj_rank(view.ex_score, view.max_score)];
+    let rate = if view.max_score > 0 { view.ex_score as f32 / view.max_score as f32 * 100.0 } else { 0.0 };
+    ctx.draw_text_centered(r, lcx, 96.0, 7.0, rcol, dj_rank_label(view.ex_score, view.max_score));
+    ctx.draw_text_centered(r, lcx, 214.0, 2.4, rcol, &format!("{rate:.2}%"));
+    r.fill_rect(Rect::new(44.0, 258.0, 376.0, 48.0), view.clear_color);
+    ctx.draw_text_centered(r, lcx, 270.0, 2.6, Color::BLACK, view.clear_label);
+    if view.show_graph {
         draw_rank_bar_stepped(r, 44.0, 340.0, 376.0, 18.0, view.ex_score, view.max_score);
         let mut dy = 384.0;
         match view.prev_best_ex {
@@ -343,56 +278,42 @@ pub fn render_result_on_background_with_content_ctx<R: Renderer>(
             ctx.draw_text(r, 44.0, dy, 1.8, c, &format!("{t} vs PREV"));
         }
     }
-    if !content.target
-        && let Some(target) = &extras.target
-    {
+    if let Some(target) = &extras.target {
         draw_target(ctx, r, view, target);
     }
 
     let (rx, rr) = (480.0, 1236.0);
     let mut y = 80.0;
-    if !content.score {
-        ctx.draw_text(r, rx, y, 2.4, th.text, "EX SCORE");
-        ctx.draw_text_right(r, rr, y, 2.4, th.text, &format!("{} / {}", view.ex_score, view.max_score));
-    }
+    ctx.draw_text(r, rx, y, 2.4, th.text, "EX SCORE");
+    ctx.draw_text_right(r, rr, y, 2.4, th.text, &format!("{} / {}", view.ex_score, view.max_score));
     y += 42.0;
-    if !content.score {
-        ctx.draw_text(r, rx, y, 2.0, th.text_dim, "MAX COMBO");
-        ctx.draw_text_right(r, rr, y, 2.0, Color::GREEN, &format!("{} / {}", view.max_combo, view.total_notes));
-    }
+    ctx.draw_text(r, rx, y, 2.0, th.text_dim, "MAX COMBO");
+    ctx.draw_text_right(r, rr, y, 2.0, Color::GREEN, &format!("{} / {}", view.max_combo, view.total_notes));
     y += 30.0;
-    if !content.score {
-        ctx.draw_text(r, rx, y, 2.0, th.text_dim, "TOTAL NOTES");
-        ctx.draw_text_right(r, rr, y, 2.0, th.text, &view.total_notes.to_string());
-    }
+    ctx.draw_text(r, rx, y, 2.0, th.text_dim, "TOTAL NOTES");
+    ctx.draw_text_right(r, rr, y, 2.0, th.text, &view.total_notes.to_string());
     y += 30.0;
-    if !content.score {
-        r.fill_rect(Rect::new(rx, y, rr - rx, 2.0), th.divider);
-    }
+    r.fill_rect(Rect::new(rx, y, rr - rx, 2.0), th.divider);
     y += 16.0;
 
-    if !content.judgment {
-        let denom = view.total_notes.max(1) as f32;
-        for i in 0..6 {
-            let col = palette.judge_colors[i];
-            ctx.draw_text(r, rx, y, 2.0, col, &palette.judge_labels[i]);
-            ctx.draw_text_right(r, rr, y, 2.0, th.text, &view.counts[i].to_string());
-            let frac = (view.counts[i] as f32 / denom).min(1.0);
-            r.fill_rect(Rect::new(rx, y + 23.0, (rr - rx) * frac, 4.0), col);
-            y += 34.0;
-        }
-        y += 10.0;
-        ctx.draw_text(r, rx, y, 1.8, th.accent, &format!("FAST {}", lane_kind_total(view.fast)));
-        ctx.draw_text(r, rx + 170.0, y, 1.8, Color::ORANGE, &format!("SLOW {}", lane_kind_total(view.slow)));
-        ctx.draw_text_right(r, rr, y, 2.0, view.clear_color, &format!("GAUGE {}%", view.gauge.round() as i32));
+    let denom = view.total_notes.max(1) as f32;
+    for i in 0..6 {
+        let col = palette.judge_colors[i];
+        ctx.draw_text(r, rx, y, 2.0, col, &palette.judge_labels[i]);
+        ctx.draw_text_right(r, rr, y, 2.0, th.text, &view.counts[i].to_string());
+        let frac = (view.counts[i] as f32 / denom).min(1.0);
+        r.fill_rect(Rect::new(rx, y + 23.0, (rr - rx) * frac, 4.0), col);
+        y += 34.0;
     }
+    y += 10.0;
+    ctx.draw_text(r, rx, y, 1.8, th.accent, &format!("FAST {}", lane_kind_total(view.fast)));
+    ctx.draw_text(r, rx + 170.0, y, 1.8, Color::ORANGE, &format!("SLOW {}", lane_kind_total(view.slow)));
+    ctx.draw_text_right(r, rr, y, 2.0, view.clear_color, &format!("GAUGE {}%", view.gauge.round() as i32));
 
-    if view.show_result_graphs && !content.graphs {
+    if view.show_result_graphs {
         draw_result_graphs(ctx, r, view, palette);
     }
-    if !content.hint {
-        ctx.draw_text_centered(r, w * 0.5, HINT_Y, HINT_SCALE, th.text_muted, result_hint_text(extras.run_again));
-    }
+    ctx.draw_text_centered(r, w * 0.5, HINT_Y, HINT_SCALE, th.text_muted, result_hint_text(extras.run_again));
 }
 
 /// Where the key hint sits and how large it is drawn.
@@ -400,7 +321,7 @@ const HINT_Y: f32 = 692.0;
 const HINT_SCALE: f32 = 1.2;
 
 /// The keys the score screen answers to, as the hint along its bottom edge spells them out.
-pub fn result_hint_text(run_again: bool) -> &'static str {
+fn result_hint_text(run_again: bool) -> &'static str {
     if run_again { "ENTER / ESC  SELECT    R  RETRY    N  NEXT SONG" } else { "ENTER / ESC  SELECT" }
 }
 
@@ -442,11 +363,6 @@ mod tests {
             .count()
     }
 
-    fn non_background_pixels(canvas: &crate::CpuCanvas, x: u32, y: u32, w: u32, h: u32) -> usize {
-        let background = crate::theme().bg;
-        (y..y + h).flat_map(|py| (x..x + w).map(move |px| canvas.pixel_at(px, py))).filter(|pixel| *pixel != background).count()
-    }
-
     #[test]
     fn default_palette_keeps_the_builtin_hot_pink_pgreat_row() {
         assert_eq!(ResultPalette::default().judge_colors[0], Color::rgb(255, 40, 150), "PGREAT stays hot pink by default");
@@ -482,64 +398,6 @@ mod tests {
         render_result_with_palette(&mut plain, &view, &ResultPalette::default(), &ResultExtras::default());
         assert_eq!(count_exact(&plain, marker), 0, "the default palette never paints that colour");
         assert!(count_exact(&plain, Color::rgb(255, 40, 150)) > 0, "the default palette paints the hot pink PGREAT row");
-    }
-
-    #[test]
-    fn replaced_score_rows_leave_the_native_score_area_empty() {
-        use crate::CpuCanvas;
-
-        let view = sample_view();
-        let palette = ResultPalette::default();
-        let mut native = CpuCanvas::new(1280, 720);
-        render_result_with_palette(&mut native, &view, &palette, &ResultExtras::default());
-
-        let mut replaced = CpuCanvas::new(1280, 720);
-        replaced.clear(crate::theme().bg);
-        render_result_on_background_with_content(
-            &mut replaced,
-            &view,
-            &palette,
-            &ResultExtras::default(),
-            ResultContent { score: true, clear: true, judgment: true, target: true, ..ResultContent::default() },
-        );
-
-        assert!(non_background_pixels(&native, 480, 70, 756, 100) > 0, "the native score rows did not paint their area");
-        assert_eq!(non_background_pixels(&replaced, 480, 70, 756, 100), 0, "native score text remained after the replacement was selected");
-    }
-
-    /// The blocks a document stands in for leave nothing of their own behind: the grade, the graph
-    /// strip and the top bar each vanish entirely when the document says it draws them.
-    #[test]
-    fn replaced_grade_graphs_and_title_leave_their_native_areas_empty() {
-        use crate::CpuCanvas;
-
-        let view = ResultView {
-            gauge_series: vec![10.0, 55.0, 90.0],
-            timing_hist: vec![1, 4, 9, 4, 1].into_boxed_slice(),
-            judge_dist: [9, 4, 2, 1, 1, 1],
-            ..sample_view()
-        };
-        let palette = ResultPalette::default();
-        let paint = |content: ResultContent| {
-            let mut canvas = CpuCanvas::new(1280, 720);
-            canvas.clear(crate::theme().bg);
-            render_result_on_background_with_content(&mut canvas, &view, &palette, &ResultExtras::default(), content);
-            canvas
-        };
-        let native = paint(ResultContent::default());
-        let grade = ResultContent { grade: true, ..ResultContent::default() };
-
-        for (area, content, what) in [
-            ((44, 60, 376, 190), grade, "the rank letter and its rate"),
-            ((44, 330, 376, 100), grade, "the rank bar and the score deltas"),
-            ((44, 556, 1192, 120), ResultContent { graphs: true, ..ResultContent::default() }, "the graph strip"),
-            ((0, 0, 1280, 52), ResultContent { title: true, ..ResultContent::default() }, "the top bar"),
-            ((440, 684, 400, 24), ResultContent { hint: true, ..ResultContent::default() }, "the key hint"),
-        ] {
-            let (x, y, w, h) = area;
-            assert!(non_background_pixels(&native, x, y, w, h) > 0, "{what} is not painted by the built-in screen");
-            assert_eq!(non_background_pixels(&paint(content), x, y, w, h), 0, "{what} remained after the replacement was selected");
-        }
     }
 
     #[test]

@@ -2,20 +2,16 @@
 //! coordinate change, the cell animation, the digit layouts, the play screen's timers and what a
 //! whole screen answers about itself.
 
-use rbms_skin::dst::{Acc, DestinationTrack, DrawStateSource, Keyframe, OffsetSource, SkinColor, SkinRect};
-use rbms_skin::loader::StretchKind;
-use rbms_skin::model::SkinLayer;
+use rbms_skin::dst::{DrawStateSource, OffsetSource, SkinColor, SkinRect};
 use rbms_skin::property::generated::{
     OFFSET_HIDDEN_COVER, OFFSET_LANECOVER, OFFSET_LIFT, OPTION_1P_EARLY, OPTION_1P_GOOD, OPTION_1P_LATE, OPTION_1P_PERFECT, OPTION_2P_EARLY, OPTION_2P_GOOD,
     OPTION_2P_PERFECT, OPTION_GAUGE_EX, OPTION_GAUGE_EX_2P, OPTION_GAUGE_GROOVE, OPTION_GAUGE_GROOVE_2P, OPTION_GAUGE_HARD, OPTION_GAUGE_HARD_2P,
 };
 use rbms_skin::timer::{TimerId, TimerState};
 
-use super::object::{
-    Body, DigitLayout, FloatBody, NumberBody, SkinObject, Sprite, ValueSource, fraction_glyphs, fraction_sign, integer_glyphs, integer_padding,
-};
-use super::state::{PlayViewState, SkinHotAction};
-use super::{FrameExtra, SkinFrame, SkinScreen, SkinViewport, TEXT_PIXELS_PER_SCALE};
+use super::object::{DigitLayout, FloatBody, NumberBody, Sprite, ValueSource, fraction_glyphs, fraction_sign, integer_glyphs, integer_padding};
+use super::state::PlayViewState;
+use super::{SkinViewport, TEXT_PIXELS_PER_SCALE};
 use crate::{Color, Rect, TextureId};
 
 /// A sprite over a texture of `size`, cut into `columns` x `rows` cells.
@@ -403,7 +399,6 @@ fn play_state<'a>(hud: &'a crate::hud::HudView<'a>) -> PlayViewState<'a> {
         bpm_max: 0.0,
         bpm_main: 0.0,
         target_ex: None,
-        target_delta: "",
     }
 }
 
@@ -475,37 +470,4 @@ fn the_running_field_publishes_the_cover_offsets_a_document_places_its_own_cover
     let hidden = bare.offset(OFFSET_HIDDEN_COVER).expect("a hidden band that is switched off still answers");
     assert_eq!((hidden.y, hidden.a), (0.0, -255.0), "a hidden band nobody asked for is published as fully transparent rather than as nothing at all");
     assert!(play_state(&hud).offset(OFFSET_LANECOVER).is_none(), "a screen with no field running leaves the three to the player's own nudges");
-}
-
-/// A destination that holds one rectangle still, fully opaque.
-fn still(rect: SkinRect) -> DestinationTrack {
-    DestinationTrack {
-        frames: vec![Keyframe { time_ms: 0, rect, clip: None, acc: Acc::default(), color: SkinColor::rgba(255, 255, 255, 255), angle_deg: 0.0 }],
-        ..DestinationTrack::default()
-    }
-}
-
-#[test]
-fn a_document_with_no_wheel_still_offers_the_buttons_its_hotspot_table_names() {
-    let rect = SkinRect::new(10.0, 20.0, 40.0, 12.0);
-    let button =
-        SkinObject { id: "button".to_owned(), layer: SkinLayer::Foreground, track: still(rect), stretch: StretchKind::from_id(-1), body: Body::Background };
-    let screen = SkinScreen {
-        authored: (256.0, 144.0),
-        objects: vec![button],
-        textures: Vec::new(),
-        families: Vec::new(),
-        hotspots: vec![("button".to_owned(), SkinHotAction::ModalClose), ("nowhere".to_owned(), SkinHotAction::Search)],
-        warnings: Vec::new(),
-    };
-
-    let timers = TimerState::new();
-    let hud = hud([0; 6], 0, 0.0);
-    let state = play_state(&hud);
-    let frame = SkinFrame { now_ms: 0, timers: &timers, state: &state, lua: None, mouse: None, background: None, extra: FrameExtra::None };
-
-    let spots = screen.hotspots(&frame);
-    assert_eq!(spots.len(), 1, "the entry naming an object the document never declared is dropped");
-    assert_eq!(spots[0].action, SkinHotAction::ModalClose);
-    assert_eq!(spots[0].rect, Rect::new(rect.x, rect.y, rect.w, rect.h), "the rectangle comes back in the document's own coordinates");
 }

@@ -10,7 +10,6 @@
 //! the built-in screens are drawn from.
 
 use rbms_skin::dst::OffsetSource;
-use rbms_skin::model::SkinLayer;
 use rbms_skin::property::SkinStateSource;
 use rbms_skin::timer::{TimerId, TimerState, timer_id};
 
@@ -55,13 +54,6 @@ impl SkinDraw<'_> {
             SkinFrame { now_ms: self.now_ms, timers: self.timers, state, lua: self.lua, mouse: self.mouse, background: self.background, extra: self.extra };
         self.screen.draw(ctx, r, &frame)
     }
-
-    /// Draws one document phase with the frame state used for a full draw.
-    pub fn draw_layer<R: Renderer>(&self, ctx: &mut RenderCtx<'_>, r: &mut R, state: &dyn SkinStateSource, layer: SkinLayer) -> usize {
-        let frame =
-            SkinFrame { now_ms: self.now_ms, timers: self.timers, state, lua: self.lua, mouse: self.mouse, background: self.background, extra: self.extra };
-        self.screen.draw_layer(ctx, r, &frame, layer)
-    }
 }
 
 /// The play screen. Answers false when no document is selected, which is the caller's cue to draw
@@ -72,15 +64,15 @@ pub fn render_play_screen<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, docum
 
 /// The song browser.
 ///
-/// The option panel's rows travel with the frame rather than with the view, because they are the
-/// application's own configuration rows and not something the browser measured; they are lifted back
-/// out here so a document reads them through the same state source as everything else.
+/// Whether the option panel is open travels with the frame rather than with the view, because it is
+/// the application's to know and not something the browser measured; it is lifted back out here so
+/// a document reads it through the same state source as everything else.
 pub fn render_select_screen<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, document: Option<&SkinDraw<'_>>, view: &SelectView) -> bool {
     let Some(document) = document else {
         return false;
     };
-    let options = document.extra.select().and_then(|list| list.options);
-    let state = SelectViewState::new(view, document.now_ms, document.offsets, options);
+    let options_open = document.extra.select().is_some_and(|list| list.options_open);
+    let state = SelectViewState::new(view, document.now_ms, document.offsets, options_open);
     draw_with(ctx, r, Some(document), &state)
 }
 

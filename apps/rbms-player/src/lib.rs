@@ -94,10 +94,7 @@ mod timing;
 mod toast;
 use app_network::build_server;
 use app_play::schedule_poll_interval_us;
-pub(crate) use assets::{
-    DecodedImage, apply_skin_bundle_selection, bundled_skin, decode_bga_image, install_default_skin, installed_play_skin_path, keysound_jobs, load_theme,
-    needs_default_skin_install, resolve_file, spawn_keysound_decode,
-};
+pub(crate) use assets::{DecodedImage, bundled_skin, decode_bga_image, install_default_sounds, keysound_jobs, load_theme, resolve_file, spawn_keysound_decode};
 use course_ir::{UNRELEASED_COURSE_REASON, build_course_submission};
 use course_ui::{CourseEntry, CourseList, CourseOverrides, SelectTab, courses_dir, library_index, stage_label};
 use favorites::{Favorites, favorites_path};
@@ -214,11 +211,11 @@ fn songdb_path(settings_path: &Path) -> PathBuf {
 }
 
 /// Where system sounds are read from: the folder the player configured, with a blank setting read as
-/// "not configured", and otherwise the set the active bundle ships.
+/// "not configured", and otherwise the set the first run installed beside the settings file.
 fn sound_folder_path(settings_path: &Path, config: &Config) -> Option<PathBuf> {
     match config.audio.sound_folder.as_deref().map(str::trim).filter(|folder| !folder.is_empty()) {
         Some(folder) => Some(PathBuf::from(folder)),
-        None => crate::assets::bundled_sound_folder(settings_path, config),
+        None => crate::assets::default_sound_folder(settings_path),
     }
 }
 
@@ -1108,29 +1105,22 @@ fn config_dir_from(home: Option<std::ffi::OsString>, userprofile: Option<std::ff
 /// rather than overwriting settings it cannot read.
 pub fn run(args: impl Iterator<Item = String>) -> ExitCode {
     let settings_path = config_dir().join("settings.ron");
-    let (mut config, can_install_default_skin) = match rbms_config::load(&settings_path) {
+    let mut config = match rbms_config::load(&settings_path) {
         Ok(outcome) => {
             if let Some(from) = outcome.migrated_from {
                 println!("settings migrated from schema version {from}");
                 save_config(&outcome.config, &settings_path);
             }
-            (outcome.config, true)
+            outcome.config
         }
         Err(e) => {
             notify(Level::Warn, format!("settings not loaded ({e}); running on defaults and leaving the file alone"));
-            (Config::default(), false)
+            Config::default()
         }
     };
 
-    if can_install_default_skin && needs_default_skin_install(&settings_path, &config) && install_default_skin(&settings_path, &mut config) {
-        config.skin.default_skin_installed = true;
-        match rbms_config::save(&config, &settings_path) {
-            Ok(()) => println!("default skin installed: {}", settings_path.display()),
-            Err(e) => {
-                config.skin.default_skin_installed = false;
-                notify(Level::Error, format!("default skin settings save failed ({}): {e}", settings_path.display()));
-            }
-        }
+    if !install_default_sounds(&settings_path) {
+        notify(Level::Warn, format!("system sounds not installed beside {}", settings_path.display()));
     }
 
     let mut launch = LaunchOptions::default();
@@ -1202,7 +1192,7 @@ pub fn run(args: impl Iterator<Item = String>) -> ExitCode {
         }
     }
 
-    load_theme(&settings_path, &config);
+    load_theme(&settings_path);
 
     let event_loop = match EventLoop::new() {
         Ok(el) => el,

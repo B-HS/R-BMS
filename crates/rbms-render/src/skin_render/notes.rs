@@ -6,7 +6,7 @@
 //! notes is (`note.size`, or the height of the image's own cell), and which image each kind of note
 //! draws. The chart says how far above the judgement line every note has got, and that comes from
 //! [`visible_offsets`] and [`constant_offsets`] called with exactly the arguments
-//! [`crate::render_playfield_on_background`] calls them with -- so a document that replaces the
+//! [`crate::render_playfield_view`] calls them with -- so a document that replaces the
 //! field puts its notes on the same rows as the field it replaced.
 //!
 //! Two things the reference draws are not drawn here. Its expansion rate pulses with the quarter
