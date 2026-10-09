@@ -170,6 +170,7 @@ pub enum SettingId {
     Target,
     Total,
     Skin,
+    SkinPack,
     SkinScreen,
     SkinDocument,
     SkinInfo,
@@ -224,7 +225,7 @@ pub enum SettingId {
 }
 
 /// Rows the settings screen has.
-pub const SETTING_COUNT: usize = 84;
+pub const SETTING_COUNT: usize = 85;
 
 impl SettingId {
     /// Every row, in declaration order.
@@ -262,6 +263,7 @@ impl SettingId {
         SettingId::Target,
         SettingId::Total,
         SettingId::Skin,
+        SettingId::SkinPack,
         SettingId::SkinScreen,
         SettingId::SkinDocument,
         SettingId::SkinInfo,
@@ -603,6 +605,7 @@ pub const SETTINGS: &[SettingDescriptor] = &[
     ),
     row(SettingId::Bga, SettingTab::Display, "BGA", SettingKind::Toggle, "Show the chart's background animation"),
     row(SettingId::DebugMode, SettingTab::Display, "DEBUG MODE", SettingKind::Toggle, "Draw the frame and audio counters"),
+    host_row(SettingId::SkinPack, SettingTab::Skin, "PACK FOLDER", SettingKind::Action, "Folder of skin documents every screen takes its own from"),
     row(SettingId::SkinScreen, SettingTab::Skin, "SCREEN", SettingKind::Cycle { values: SKIN_SCREEN_LABELS }, "Which screen's skin the rows below configure"),
     row(SettingId::SkinDocument, SettingTab::Skin, "SKIN", SettingKind::Cycle { values: SKIN_DOCUMENT_LABELS }, "Which document draws this screen"),
     host_row(SettingId::SkinInfo, SettingTab::Skin, "LOADED", SettingKind::Info, "What the chosen document is, or why it is not being drawn"),
@@ -866,6 +869,7 @@ pub fn display_value(config: &Config, id: SettingId) -> String {
         | SettingId::DownloadSettings
         | SettingId::SkinReload
         | SettingId::SkinReset => ACTION_VALUE.to_string(),
+        SettingId::SkinPack => optional_text(config.skin.pack.as_deref()),
         SettingId::SkinScreen => skin_screen_label(config.skin.screen).unwrap_or(NONE_VALUE).to_string(),
         SettingId::SkinDocument => config.skin.document(config.skin.screen).map_or_else(|| DEFAULT_VALUE.to_string(), skin_document_label),
         SettingId::SkinInfo => NONE_VALUE.to_string(),
@@ -1151,6 +1155,7 @@ pub fn adjust(config: &mut Config, id: SettingId, delta: i32) -> AdjustOutcome {
         SettingId::SkinInfo => AdjustOutcome::Unchanged,
         SettingId::KeyConfig
         | SettingId::Skin
+        | SettingId::SkinPack
         | SettingId::SkinDocument
         | SettingId::SkinReload
         | SettingId::SkinReset
@@ -1330,7 +1335,7 @@ mod tests {
     #[test]
     fn the_rows_the_program_owns_are_the_ones_it_reads_outside_the_document() {
         let owned: Vec<SettingId> = SettingId::ALL.into_iter().filter(|&id| descriptor(id).host_value).collect();
-        assert_eq!(owned, vec![SettingId::Skin, SettingId::SkinInfo, SettingId::Account, SettingId::Password]);
+        assert_eq!(owned, vec![SettingId::Skin, SettingId::SkinPack, SettingId::SkinInfo, SettingId::Account, SettingId::Password]);
     }
 
     #[test]
@@ -1353,6 +1358,7 @@ mod tests {
             vec![
                 SettingId::KeyConfig,
                 SettingId::Skin,
+                SettingId::SkinPack,
                 SettingId::SkinDocument,
                 SettingId::SkinReload,
                 SettingId::SkinReset,

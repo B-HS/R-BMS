@@ -15,9 +15,10 @@ use rbms_render::{
     Color, CpuCanvas, FrameExtra, GoldenImage, GoldenOptions, NoExpressions, PngCodec, RenderCtx, Renderer, SelectDetail, SelectView, SkinAssets, SkinFrame,
     SkinImage, SkinObjectKind, SkinScreen, TextContext, assert_golden_png, render_select_ctx,
 };
-use rbms_skin::dst::{DrawCondition, LuaDrawEval, LuaFnId, TimerRef};
+use rbms_skin::dst::{DrawCondition, DrawStateSource, LuaDrawEval, LuaFnId, TimerRef};
 use rbms_skin::loader::{LoadedSkin, SkinLoadOptions, SkinUserConfig, load_skin};
 use rbms_skin::model::PropertyRef;
+use rbms_skin::property::generated::{OPTION_DIFFICULTY0, OPTION_DIFFICULTY5};
 use rbms_skin::property::{SkinHost, UNMAPPED_BOOLEAN, UNMAPPED_FLOAT, UNMAPPED_INTEGER, UNMAPPED_STRING};
 use rbms_skin::timer::{MICROS_PER_MILLI, TIMER_OFF, TimerId, TimerState};
 
@@ -543,6 +544,25 @@ fn every_screen_gate_reports_no_document_and_draws_nothing() {
     assert!(!render_decide_screen(&mut ctx, &mut canvas, None, &loading));
     assert!(!render_keyconfig_screen(&mut ctx, &mut canvas, None, &keys));
     assert_eq!(canvas.pixels(), blank.as_slice(), "a screen with no document selected leaves the frame for its own layout to fill");
+}
+
+/// The difficulty slots the decide screen is asked about below, with the slot each is answered as:
+/// the five a chart can name, and on either side of them the charts that name none.
+const DECIDE_DIFFICULTIES: [(i32, i32); 8] = [(-1, 0), (0, 0), (1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 0)];
+
+/// A skin colours the decide screen by walking the six difficulty options and has no colour to give
+/// when none of them is on, so the screen answers exactly one whatever the chart says -- and a
+/// screen that is waiting for something other than a chart answers the one for no difficulty.
+#[test]
+fn the_decide_screen_answers_exactly_one_difficulty_option() {
+    for (difficulty, slot) in DECIDE_DIFFICULTIES {
+        let chart = DecideChart { difficulty, ..DecideChart::default() };
+        let state = DecideViewState { progress: 0.0, done: false, title: "", chart, now_us: 0, offsets: None };
+        let on: Vec<i32> = (OPTION_DIFFICULTY0..=OPTION_DIFFICULTY5).filter(|option| state.boolean(*option) == Some(true)).collect();
+        assert_eq!(on, vec![OPTION_DIFFICULTY0 + slot], "difficulty {difficulty}");
+        let off: Vec<i32> = (OPTION_DIFFICULTY0..=OPTION_DIFFICULTY5).filter(|option| state.boolean(-option) == Some(false)).collect();
+        assert_eq!(off, on, "the negated options of difficulty {difficulty} do not mirror the plain ones");
+    }
 }
 
 #[test]

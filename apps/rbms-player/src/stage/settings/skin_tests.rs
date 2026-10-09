@@ -59,7 +59,7 @@ fn value_of(state: &SettingsState, row: SettingRow) -> String {
     state.lines[at].1.clone()
 }
 
-/// Until a document is chosen the SKIN tab is only the five rows the table declares; choosing
+/// Until a document is chosen the SKIN tab is only the six rows the table declares; choosing
 /// one adds the rows that document declares, between the document row and the actions.
 #[test]
 fn choosing_a_document_adds_the_rows_it_declares_between_the_row_and_the_actions() {
@@ -68,6 +68,7 @@ fn choosing_a_document_adds_the_rows_it_declares_between_the_row_and_the_actions
     assert_eq!(
         state.rows,
         vec![
+            SettingRow::Fixed(SettingId::SkinPack),
             SettingRow::Fixed(SettingId::SkinScreen),
             SettingRow::Fixed(SettingId::SkinDocument),
             SettingRow::Fixed(SettingId::SkinInfo),
@@ -202,4 +203,57 @@ fn reset_drops_the_choices_and_the_file_no_longer_holds_them() {
 
     let written = std::fs::read_to_string(&app.shared.settings_path).expect("the settings file was written");
     assert!(written.contains("skin:"), "the settings file does not hold the skin group");
+}
+
+/// A folder holding one Lua skin for the song browser, which is a skin pack of one document.
+fn lua_pack(app: &App) -> std::path::PathBuf {
+    let pack = app.shared.settings_path.parent().expect("the settings file has a folder").join("pack");
+    std::fs::create_dir_all(&pack).expect("the pack folder is writable");
+    std::fs::write(pack.join("browser.luaskin"), "return { type = 5, name = 'Wheel', author = 'dj', w = 1920, h = 1080, destination = {} }")
+        .expect("the skin is written");
+    pack
+}
+
+/// The PACK FOLDER row opens a folder picker beside the frame loop. The folder that comes back is
+/// the pack every screen takes its document from: it is shown on the row, written to the settings
+/// file, and its Lua skin is what the SKIN row then names for the screen. Stepping the row left
+/// names no pack again.
+#[test]
+fn the_pack_folder_row_takes_a_picked_folder_and_offers_its_lua_skins() {
+    let mut app = app();
+    let mut state = skin_screen(&mut app, "pack");
+    let pack = lua_pack(&app);
+    assert_eq!(value_of(&state, SettingRow::Fixed(SettingId::SkinPack)), "(none)");
+    assert_eq!(value_of(&state, SettingRow::Fixed(SettingId::SkinDocument)), "DEFAULT");
+
+    let (tx, handle) = crate::dialog::handle_for_tests();
+    state.pack_picker = Some(handle);
+    state.update(&mut ctx(&mut app));
+    assert!(state.pack_picker.is_some(), "the screen gave up on a picker nobody has answered");
+    tx.send(Some(pack.clone())).expect("the handle is still held");
+    state.update(&mut ctx(&mut app));
+    assert!(state.pack_picker.is_none());
+    state.refresh(&app.shared);
+
+    assert_eq!(value_of(&state, SettingRow::Fixed(SettingId::SkinPack)), pack.to_string_lossy());
+    assert_eq!(value_of(&state, SettingRow::Fixed(SettingId::SkinDocument)), "PACK: Wheel", "the pack's Lua skin does not draw the screen it declares");
+    assert_eq!(value_of(&state, SettingRow::Fixed(SettingId::SkinInfo)), "READ WHEN ITS SCREEN OPENS", "a Lua skin was read with no screen to read it against");
+    let restored = rbms_config::load(&app.shared.settings_path).expect("the file the screen wrote reads back").config;
+    assert_eq!(restored.skin.pack_folder(), Some(pack.to_string_lossy().as_ref()), "the pack did not reach the settings file");
+
+    focus(&mut state, SettingRow::Fixed(SettingId::SkinDocument));
+    state.row_key(&mut ctx(&mut app), &press(KeyCode::ArrowRight));
+    state.refresh(&app.shared);
+    assert_eq!(value_of(&state, SettingRow::Fixed(SettingId::SkinDocument)), "Browser", "the row does not step from the pack's skin to the folder's document");
+    state.row_key(&mut ctx(&mut app), &press(KeyCode::ArrowRight));
+    state.refresh(&app.shared);
+    assert_eq!(value_of(&state, SettingRow::Fixed(SettingId::SkinDocument)), "Wheel", "the pack's Lua skin cannot be chosen by hand");
+    app.shared.config.skin.select(fixtures::MUSIC_SELECT, None);
+
+    focus(&mut state, SettingRow::Fixed(SettingId::SkinPack));
+    state.row_key(&mut ctx(&mut app), &press(KeyCode::ArrowLeft));
+    state.refresh(&app.shared);
+    assert_eq!(value_of(&state, SettingRow::Fixed(SettingId::SkinPack)), "(none)");
+    assert_eq!(value_of(&state, SettingRow::Fixed(SettingId::SkinDocument)), "DEFAULT", "a pack that is no longer named still draws a screen");
+    assert!(is_skin_action_row(SettingId::SkinPack), "Enter on the row leaves the screen instead of opening the picker");
 }

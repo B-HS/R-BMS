@@ -4,6 +4,43 @@
 use super::fixtures::*;
 use super::*;
 use rbms_config::{Config, SKIN_SCREEN_LABELS};
+use rbms_skin::loader::OPTION_RANDOM_VALUE;
+use rbms_skin::property::MapHost;
+
+/// The `SkinType` id of the decide screen.
+const DECIDE: i32 = 6;
+
+/// The `SkinType` id of the skin configuration screen, which the pack fixture has a document for.
+const SKIN_SELECT: i32 = 9;
+
+/// Entry files in the pack fixture.
+const PACK_DOCUMENTS: u64 = 4;
+
+/// Documents in the skin folder fixture, beside the decoy that is not one.
+const FOLDER_DOCUMENTS: u64 = 2;
+
+/// Rows a play skin with no offsets of its own shows: the automatic offsets, one row for each axis
+/// the player may move -- four for the whole screen, one for the notes, five for each of the two
+/// judgement offsets.
+const AUTOMATIC_OFFSET_ROWS: usize = 15;
+
+/// The number the pack fixture's value function reads, and what the host below answers for it.
+const SCORE_NUMBER: (i32, i32) = (71, 21);
+
+/// A seed the reads below are pinned with.
+const READ_SEED: u64 = 7;
+
+/// How many seeds are tried to show that the seed a read is given decides what it draws.
+const SEEDS_TRIED: u64 = 32;
+
+/// The row of the pack fixture's play skin that is stored as "pick one at random" below.
+const RANDOM_ROW: &str = "Lucky";
+
+/// A Lua skin for the decide screen whose header reads but whose body raises.
+const BROKEN_DECIDE: &str = "if skin_config then\n    error('no such asset')\nend\nreturn { type = 6, name = 'Broken', w = 1280, h = 720 }\n";
+
+/// A document for the decide screen that is only data.
+const PLAIN_DECIDE: &str = r#"{ "type": 6, "name": "Plain", "w": 1280, "h": 720, "destination": [] }"#;
 
 struct Fixture {
     _root: PathBuf,
@@ -40,6 +77,337 @@ impl Fixture {
     fn choose(&mut self) {
         assert!(self.skins.cycle_document(&mut self.config, 1), "there was no document to choose");
     }
+}
+
+/// The Lua skin pack the skin crate's own tests are written against: two play skins, a skin
+/// configuration screen, a course result screen, and the modules and images they share.
+fn mini_pack() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../crates/rbms-skin/tests/fixtures/luaskin/mini")
+        .canonicalize()
+        .expect("the pack fixture is in the repository")
+}
+
+/// Every file under `root`, as paths relative to it.
+fn files_under(root: &Path) -> BTreeSet<PathBuf> {
+    let mut found = BTreeSet::new();
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        for entry in std::fs::read_dir(&directory).expect("the folder is listable").flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if let Ok(relative) = path.strip_prefix(root) {
+                found.insert(relative.to_path_buf());
+            }
+        }
+    }
+    found
+}
+
+/// A copy of the pack fixture a test may change, in a folder of its own beside `settings`.
+fn copied_pack(settings: &Path, name: &str) -> PathBuf {
+    let source = mini_pack();
+    let pack = settings.parent().expect("the settings file has a folder").join(name);
+    for file in files_under(&source) {
+        let target = pack.join(&file);
+        std::fs::create_dir_all(target.parent().expect("a copied file has a folder")).expect("the copy's folder is writable");
+        std::fs::copy(source.join(&file), &target).expect("the fixture file is copied");
+    }
+    pack.canonicalize().expect("the copy was just written")
+}
+
+/// A pack holding one document, in a folder of its own beside `settings`.
+fn one_document_pack(settings: &Path, name: &str, file: &str, text: &str) -> PathBuf {
+    let pack = settings.parent().expect("the settings file has a folder").join(name);
+    std::fs::create_dir_all(&pack).expect("the pack folder is writable");
+    std::fs::write(pack.join(file), text).expect("the document is written");
+    pack.canonicalize().expect("the pack was just written")
+}
+
+/// The file name of the document one screen is to be drawn with.
+fn document_name(fixture: &Fixture, screen: i32) -> Option<String> {
+    let path = fixture.skins.document_path(&fixture.config, screen)?;
+    Path::new(path).file_name().map(|name| name.to_string_lossy().into_owned())
+}
+
+impl Fixture {
+    /// Name `pack` as the configured skin pack and walk the folders again.
+    fn name_pack(&mut self, pack: &Path) {
+        self.config.skin.pack = Some(pack.to_string_lossy().into_owned());
+        self.skins.rescan(&self.settings, &self.config);
+    }
+
+    /// Read the Lua skin waiting for `screen` the way the screen's first two frames do.
+    fn read_waiting(&mut self, screen: i32, host: &dyn SkinHost) {
+        self.skins.read_waiting(&self.config, screen, SkinRead { host, seed: Some(READ_SEED) });
+        self.skins.adopt(screen);
+    }
+}
+
+/// A pack is one folder with a document for each screen: naming it gives every screen the document
+/// that declares it, the first by file name when two do, and leaves a screen the pack has nothing
+/// for to its built-in layout. The modules a Lua skin requires are not documents.
+#[test]
+fn a_pack_gives_each_screen_the_document_that_declares_it() {
+    let mut fixture = Fixture::new("pack-map");
+    assert_eq!(document_name(&fixture, PLAY_7KEYS), None, "a screen had a document before any pack was named");
+
+    fixture.name_pack(&mini_pack());
+    assert_eq!(
+        document_name(&fixture, PLAY_7KEYS).as_deref(),
+        Some("nonote.luaskin"),
+        "two documents declare the play screen and the first by name was not taken"
+    );
+    assert_eq!(document_name(&fixture, SKIN_SELECT).as_deref(), Some("config.luaskin"));
+    assert_eq!(document_name(&fixture, COURSE_RESULT).as_deref(), Some("course.luaskin"));
+    assert_eq!(document_name(&fixture, MUSIC_SELECT), None, "the pack has no document for the browser");
+
+    let lua: Vec<&SkinHeader> = fixture.skins.documents.iter().filter(|header| header.parser == ParserKind::Lua).collect();
+    assert_eq!(
+        lua.len() as u64,
+        PACK_DOCUMENTS,
+        "a module was read as a document, or an entry file was missed: {:?}",
+        lua.iter().map(|header| &header.path).collect::<Vec<_>>()
+    );
+
+    fixture.config.skin.screen = PLAY_7KEYS;
+    assert_eq!(fixture.skins.candidates(&fixture.config).len(), 3, "the SKIN row does not offer the pack's Lua skins beside the folder's document");
+    assert_eq!(fixture.skins.document_value(&fixture.config), "PACK: No notes placed", "the row does not say the pack chose the document");
+    assert_eq!(fixture.skins.rows(&fixture.config).len(), AUTOMATIC_OFFSET_ROWS, "a play skin's rows are its four automatic offsets, one row an axis");
+}
+
+/// A Lua skin's header is a program. It is run once per version of its file: walking the folders
+/// again answers from memory, a file that changed is read again, and a reload reads everything.
+#[test]
+fn a_header_is_not_read_again_while_its_file_has_not_changed() {
+    let mut fixture = Fixture::new("header-cache");
+    let from_folder = fixture.skins.header_reads();
+    assert_eq!(from_folder, FOLDER_DOCUMENTS, "the skin folder holds two documents and a decoy");
+
+    let pack = copied_pack(&fixture.settings, "pack");
+    fixture.name_pack(&pack);
+    let after_pack = fixture.skins.header_reads();
+    assert_eq!(after_pack, from_folder + PACK_DOCUMENTS, "the pack holds four entry files");
+
+    fixture.skins.rescan(&fixture.settings, &fixture.config);
+    fixture.skins.rescan(&fixture.settings, &fixture.config);
+    assert_eq!(fixture.skins.header_reads(), after_pack, "a header whose file did not change was run again");
+    assert_eq!(document_name(&fixture, COURSE_RESULT).as_deref(), Some("course.luaskin"), "the remembered headers lost a document");
+
+    std::fs::write(pack.join("course.luaskin"), "return { type = 15, name = 'Course result, edited', w = 1280, h = 720, destination = {} }")
+        .expect("the copy is writable");
+    fixture.skins.rescan(&fixture.settings, &fixture.config);
+    assert_eq!(fixture.skins.header_reads(), after_pack + 1, "only the file that changed is read again");
+    let edited = fixture.skins.header_of(&fixture.config, COURSE_RESULT).expect("the edited document is still the pack's");
+    assert_eq!(edited.name, "Course result, edited", "the header of a changed file was answered from memory");
+
+    fixture.skins.rescan_afresh(&fixture.settings, &fixture.config);
+    assert_eq!(fixture.skins.header_reads(), after_pack + 1 + FOLDER_DOCUMENTS + PACK_DOCUMENTS, "a reload reads every header from its file");
+}
+
+/// The pack a run is started with outranks the one the settings file names, for that run and
+/// without being written into the settings.
+#[test]
+fn the_pack_named_for_this_run_outranks_the_configured_one() {
+    let fixture = Fixture::new("pack-env");
+    let configured = one_document_pack(&fixture.settings, "configured", "decide.json", PLAIN_DECIDE);
+    let mut config = fixture.config.clone();
+    config.skin.pack = Some(configured.to_string_lossy().into_owned());
+
+    let own = SkinLibrary::new(&fixture.settings, &config);
+    assert!(own.document_path(&config, DECIDE).is_some_and(|path| path.ends_with("decide.json")), "the configured pack is not drawn");
+    assert_eq!(own.document_path(&config, PLAY_7KEYS), None);
+    assert_eq!(own.pack_value(&config), configured.to_string_lossy());
+
+    let forced = SkinLibrary::new(&fixture.settings, &config).forcing_pack(Some(mini_pack()), &config);
+    assert!(forced.document_path(&config, PLAY_7KEYS).is_some_and(|path| path.ends_with("nonote.luaskin")), "the pack named for the run is not drawn");
+    assert_eq!(forced.document_path(&config, DECIDE), None, "the configured pack still draws a screen");
+    assert!(forced.pack_value(&config).ends_with(&format!("({SKIN_PACK_ENV})")), "the row does not say where the pack came from");
+    assert_eq!(config.skin.pack_folder(), Some(configured.to_string_lossy().as_ref()), "the pack named for one run was written into the settings");
+    assert!(!forced.pack_moved(&config));
+
+    assert_eq!(pack_from_environment(None), None);
+    assert_eq!(pack_from_environment(Some("  ".into())), None, "a blank variable named a pack");
+    assert_eq!(pack_from_environment(Some("/skins/pack".into())), Some(PathBuf::from("/skins/pack")));
+}
+
+/// A document the player chose for a screen by hand is the one drawn, pack or no pack, and the
+/// pack's comes back when the choice is dropped.
+#[test]
+fn a_document_chosen_by_hand_outranks_the_packs() {
+    let mut fixture = Fixture::new("pack-manual");
+    fixture.name_pack(&mini_pack());
+    fixture.config.skin.screen = PLAY_7KEYS;
+    let by_hand = fixture.settings.parent().expect("the settings file has a folder").join("skin/play.json5");
+    fixture.config.skin.select(PLAY_7KEYS, Some(by_hand.to_string_lossy().into_owned()));
+
+    assert_eq!(document_name(&fixture, PLAY_7KEYS).as_deref(), Some("play.json5"));
+    assert_eq!(fixture.skins.document_value(&fixture.config), "Lane", "a document chosen by hand is marked as the pack's");
+    fixture.skins.request_for(&fixture.config, PLAY_7KEYS);
+    assert_eq!(fixture.skins.document(PLAY_7KEYS).map(|skin| skin.parser), Some(ParserKind::Json5), "the pack's document was read over the chosen one");
+
+    fixture.config.skin.select(PLAY_7KEYS, None);
+    assert_eq!(document_name(&fixture, PLAY_7KEYS).as_deref(), Some("nonote.luaskin"), "dropping the choice did not give the screen back to the pack");
+    assert!(fixture.skins.needs_reload_for(&fixture.config, PLAY_7KEYS), "the screen still draws the document that is no longer chosen");
+}
+
+/// A Lua skin is not read when it is chosen: it waits for its screen, is read against the state
+/// that screen brings and the seed the read is pinned with, writes into the overlay kept for its
+/// pack and never into its own folder, and is read again for the next scene.
+#[test]
+fn a_lua_skin_waits_for_its_screen_and_is_read_against_its_state() {
+    let mut fixture = Fixture::new("lua-read");
+    let pack = mini_pack();
+    let before = files_under(&pack);
+    fixture.name_pack(&pack);
+    fixture.config.skin.screen = PLAY_7KEYS;
+    let play = pack.join("play.luaskin").to_string_lossy().into_owned();
+    fixture.config.skin.select(PLAY_7KEYS, Some(play.clone()));
+    fixture.config.skin.customise(&play).properties.insert(RANDOM_ROW.to_owned(), OPTION_RANDOM_VALUE);
+
+    assert!(fixture.skins.needs_reload_for(&fixture.config, PLAY_7KEYS));
+    fixture.skins.request_for(&fixture.config, PLAY_7KEYS);
+    assert!(fixture.skins.is_waiting(PLAY_7KEYS), "a Lua skin was read before its screen had a state to read it against");
+    assert!(fixture.skins.document(PLAY_7KEYS).is_none());
+    assert_eq!(fixture.skins.info(&fixture.config), WAITING_INFO);
+    assert!(!fixture.skins.needs_reload_for(&fixture.config, PLAY_7KEYS), "a skin that is waiting was asked for again");
+
+    let mut host = MapHost::new();
+    host.integers.insert(SCORE_NUMBER.0, SCORE_NUMBER.1);
+    fixture.read_waiting(PLAY_7KEYS, &host);
+    assert!(!fixture.skins.is_waiting(PLAY_7KEYS));
+    let skin = fixture.skins.document(PLAY_7KEYS).expect("the skin was read on its screen's frame");
+    assert_eq!(skin.parser, ParserKind::Lua);
+    assert!(fixture.skins.info(&fixture.config).starts_with("1920X1080 - Lua - LUA"), "{}", fixture.skins.info(&fixture.config));
+    let drawn = skin.selected_options.iter().find(|(name, _)| name == RANDOM_ROW).map(|(_, option)| *option).expect("the row is the skin's");
+    assert!(!fixture.skins.needs_reload_for(&fixture.config, PLAY_7KEYS));
+
+    let overlay = skin_overlay_folder(&fixture.settings, Path::new(&play));
+    assert_eq!(std::fs::read_to_string(overlay.join("log").join("loaded.txt")).ok().as_deref(), Some("loaded"), "the skin's write did not land in its overlay");
+    assert!(overlay.starts_with(fixture.settings.parent().expect("the settings file has a folder")));
+    assert_eq!(files_under(&pack), before, "reading the skin changed its folder");
+
+    fixture.skins.expire_scripted();
+    assert!(fixture.skins.needs_reload_for(&fixture.config, PLAY_7KEYS), "a new scene did not ask for its Lua skin again");
+    fixture.skins.request_for(&fixture.config, PLAY_7KEYS);
+    fixture.read_waiting(PLAY_7KEYS, &host);
+    let again = fixture.skins.document(PLAY_7KEYS).expect("the skin was read again");
+    assert_eq!(again.selected_options.iter().find(|(name, _)| name == RANDOM_ROW).map(|(_, option)| *option), Some(drawn), "the same seed drew differently");
+
+    let draws: BTreeSet<i32> = (0..SEEDS_TRIED)
+        .filter_map(|seed| {
+            fixture.skins.reload_for(&fixture.config, PLAY_7KEYS, SkinRead { host: &host, seed: Some(seed) });
+            let skin = fixture.skins.document(PLAY_7KEYS)?;
+            skin.selected_options.iter().find(|(name, _)| name == RANDOM_ROW).map(|(_, option)| *option)
+        })
+        .collect();
+    assert!(draws.len() > 1, "the seed a read is given does not reach its draws: {draws:?}");
+    assert_eq!(files_under(&pack), before, "reading the skin changed its folder");
+}
+
+/// A Lua skin whose body fails leaves its screen to the built-in layout, says why once, and is not
+/// run again on the next frame or for the next scene.
+#[test]
+fn a_lua_skin_that_cannot_be_read_says_why_once_and_is_not_run_again() {
+    let mut fixture = Fixture::new("lua-broken");
+    let pack = one_document_pack(&fixture.settings, "broken", "decide.luaskin", BROKEN_DECIDE);
+    fixture.name_pack(&pack);
+    fixture.config.skin.screen = DECIDE;
+    assert_eq!(document_name(&fixture, DECIDE).as_deref(), Some("decide.luaskin"), "a skin whose body fails still gives its header");
+
+    fixture.skins.request_for(&fixture.config, DECIDE);
+    assert_eq!(fixture.skins.take_failure(DECIDE), None, "a skin that has not been read was reported as failed");
+    fixture.read_waiting(DECIDE, &DefaultState);
+
+    assert!(fixture.skins.document(DECIDE).is_none(), "a skin that raised was drawn anyway");
+    assert!(!fixture.skins.is_waiting(DECIDE));
+    let reason = fixture.skins.take_failure(DECIDE).expect("the failure is reported");
+    assert!(reason.contains("no such asset"), "the reason does not say what the skin raised: {reason}");
+    assert!(!reason.contains('\n'), "more than the first line was reported");
+    assert_eq!(fixture.skins.take_failure(DECIDE), None, "the failure was reported twice");
+    assert!(fixture.skins.info(&fixture.config).contains("no such asset"), "the reason left the LOADED row");
+
+    assert!(!fixture.skins.needs_reload_for(&fixture.config, DECIDE), "a skin that failed is read again on the next frame");
+    fixture.skins.expire_scripted();
+    assert!(!fixture.skins.needs_reload_for(&fixture.config, DECIDE), "a skin that failed is read again for the next scene");
+
+    fixture.skins.reload(&fixture.config);
+    assert!(fixture.skins.is_waiting(DECIDE), "asking for a reload did not ask for the skin again");
+}
+
+/// A failure belongs to the document that failed, not to the screen: naming another pack gives the
+/// screen that pack's document to read, with nothing of the old failure left on the LOADED row.
+#[test]
+fn a_screen_whose_skin_failed_reads_the_document_of_the_pack_named_next() {
+    let mut fixture = Fixture::new("pack-after-failure");
+    let broken = one_document_pack(&fixture.settings, "broken", "decide.luaskin", BROKEN_DECIDE);
+    let plain = one_document_pack(&fixture.settings, "plain", "decide.json", PLAIN_DECIDE);
+    fixture.name_pack(&broken);
+    fixture.config.skin.screen = MUSIC_SELECT;
+
+    fixture.skins.request_for(&fixture.config, DECIDE);
+    fixture.read_waiting(DECIDE, &DefaultState);
+    assert!(fixture.skins.failure(DECIDE).is_some_and(|reason| reason.contains("no such asset")), "the first pack's skin did not fail");
+    assert!(!fixture.skins.needs_reload_for(&fixture.config, DECIDE));
+
+    fixture.name_pack(&plain);
+    assert_eq!(document_name(&fixture, DECIDE).as_deref(), Some("decide.json"));
+    assert_eq!(fixture.skins.failure(DECIDE), None, "the failure of a document the screen is no longer drawn with was kept");
+    assert_eq!(fixture.skins.take_failure(DECIDE), None, "the old pack's failure is still waiting to be announced");
+    assert!(fixture.skins.needs_reload_for(&fixture.config, DECIDE), "a screen that failed in one pack does not read the next pack's document");
+    fixture.skins.request_for(&fixture.config, DECIDE);
+    assert_eq!(fixture.skins.document(DECIDE).map(|skin| skin.def.name.as_str()), Some("Plain"), "the next pack's document was not read");
+    fixture.config.skin.screen = DECIDE;
+    assert!(!fixture.skins.info(&fixture.config).contains("no such asset"), "the LOADED row still shows the old pack's failure");
+}
+
+/// The same holds when the selection moves without the library being told, which is what a settings
+/// file arriving from the account does: the failure of the old document does not stop the new one
+/// being read, and is not what the LOADED row shows for it.
+#[test]
+fn a_failure_does_not_outlive_the_selection_it_was_raised_for() {
+    let mut fixture = Fixture::new("selection-after-failure");
+    let folder = fixture.settings.parent().expect("the settings file has a folder").join("skin");
+    let broken = folder.join("broken.json");
+    std::fs::write(&broken, "{ \"type\": 6, ").expect("the document is written");
+    let plain = folder.join("plain.json");
+    std::fs::write(&plain, PLAIN_DECIDE).expect("the document is written");
+    fixture.config.skin.screen = DECIDE;
+
+    fixture.config.skin.select(DECIDE, Some(broken.to_string_lossy().into_owned()));
+    fixture.skins.reload(&fixture.config);
+    assert!(fixture.skins.info(&fixture.config).contains("broken.json"));
+    assert!(!fixture.skins.needs_reload_for(&fixture.config, DECIDE), "a document that failed is read again unasked");
+
+    fixture.config.skin.select(DECIDE, Some(plain.to_string_lossy().into_owned()));
+    assert!(fixture.skins.needs_reload_for(&fixture.config, DECIDE), "the old document's failure stops the new one being read");
+    assert!(!fixture.skins.info(&fixture.config).contains("broken.json"), "the LOADED row shows the failure of a document that is not chosen");
+
+    fixture.config.skin.select(DECIDE, None);
+    assert_eq!(fixture.skins.info(&fixture.config), BUILT_IN_INFO, "a screen left to its built-in layout still shows a failure");
+    fixture.skins.drop_moved(&fixture.config);
+    assert_eq!(fixture.skins.failure(DECIDE), None);
+    assert!(!fixture.skins.needs_reload_for(&fixture.config, DECIDE), "a screen with nothing read and nothing chosen asks to be read");
+}
+
+/// Taking the pack away, or naming one with nothing for a screen, lets go of what was read for every
+/// screen it drew -- not only the one the tab is configuring.
+#[test]
+fn a_pack_that_is_taken_away_leaves_nothing_read_for_the_screens_it_drew() {
+    let mut fixture = Fixture::new("pack-dropped");
+    let plain = one_document_pack(&fixture.settings, "plain", "decide.json", PLAIN_DECIDE);
+    fixture.name_pack(&plain);
+    fixture.config.skin.screen = MUSIC_SELECT;
+    fixture.skins.request_for(&fixture.config, DECIDE);
+    assert!(fixture.skins.document(DECIDE).is_some(), "the pack's document was never read");
+
+    fixture.config.skin.pack = None;
+    assert!(fixture.skins.pack_moved(&fixture.config));
+    fixture.skins.rescan(&fixture.settings, &fixture.config);
+    assert!(fixture.skins.document(DECIDE).is_none(), "a screen nobody is configuring kept the document of a pack that is gone");
+    assert_eq!(fixture.skins.build_of(DECIDE), None);
+    assert!(!fixture.skins.needs_reload_for(&fixture.config, DECIDE));
 }
 
 /// The folder is walked for documents, not for everything: a file that is not a skin is passed
@@ -219,8 +587,8 @@ fn each_screen_keeps_its_own_document_and_its_own_read() {
     fixture.config.skin.select(PLAY_7KEYS, Some(play.to_string_lossy().into_owned()));
 
     assert!(fixture.skins.needs_reload_for(&fixture.config, MUSIC_SELECT), "an unread screen did not ask to be read");
-    fixture.skins.reload_for(&fixture.config, MUSIC_SELECT);
-    fixture.skins.reload_for(&fixture.config, PLAY_7KEYS);
+    fixture.skins.request_for(&fixture.config, MUSIC_SELECT);
+    fixture.skins.request_for(&fixture.config, PLAY_7KEYS);
 
     assert!(fixture.skins.document(MUSIC_SELECT).is_some(), "reading the play screen dropped the browser's document");
     assert!(fixture.skins.document(PLAY_7KEYS).is_some());
@@ -228,7 +596,7 @@ fn each_screen_keeps_its_own_document_and_its_own_read() {
 
     let first = fixture.skins.build_of(MUSIC_SELECT).expect("the browser was read");
     assert_ne!(fixture.skins.build_of(PLAY_7KEYS), Some(first), "two reads were handed the same build");
-    fixture.skins.reload_for(&fixture.config, MUSIC_SELECT);
+    fixture.skins.request_for(&fixture.config, MUSIC_SELECT);
     assert_ne!(fixture.skins.build_of(MUSIC_SELECT), Some(first), "reading the same screen again reused its build");
 }
 
@@ -242,7 +610,7 @@ fn choosing_the_built_in_screen_drops_the_document_that_was_read() {
 
     fixture.config.skin.select(MUSIC_SELECT, None);
     assert!(fixture.skins.needs_reload_for(&fixture.config, MUSIC_SELECT), "going back to the built-in screen changed nothing");
-    fixture.skins.reload_for(&fixture.config, MUSIC_SELECT);
+    fixture.skins.request_for(&fixture.config, MUSIC_SELECT);
     assert!(fixture.skins.document(MUSIC_SELECT).is_none(), "the built-in screen is drawing but a document is still loaded");
 }
 

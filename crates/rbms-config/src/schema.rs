@@ -246,14 +246,18 @@ impl OffsetSource for SkinCustomisation {
 /// The SKIN tab: where documents are looked for, which screen is being configured, the document
 /// each screen is drawn with, and what the player chose inside each one.
 ///
-/// A screen with no entry in `selected` is drawn by the built-in screen, which is what a fresh
-/// install has for every screen.
+/// A screen with no entry in `selected` is drawn with the pack's document for it, and by the built-in
+/// screen when no pack is named or the pack has none, which is what a fresh install has for every
+/// screen.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SkinOptions {
     /// Directory documents are looked for in. `None` looks in [`DEFAULT_SKIN_FOLDER`] beside the
     /// settings file.
     pub folder: Option<String>,
+    /// The skin pack: one folder holding a document for each screen. Every screen with no entry in
+    /// `selected` is drawn with the document of the pack that declares it. `None` names no pack.
+    pub pack: Option<String>,
     /// The screen the SKIN tab is configuring, as a `SkinType` id.
     pub screen: i32,
     /// Document each screen is drawn with, keyed by its `SkinType` id.
@@ -264,17 +268,24 @@ pub struct SkinOptions {
 
 impl Default for SkinOptions {
     fn default() -> Self {
-        SkinOptions { folder: None, screen: DEFAULT_SKIN_SCREEN, selected: BTreeMap::new(), custom: BTreeMap::new() }
+        SkinOptions { folder: None, pack: None, screen: DEFAULT_SKIN_SCREEN, selected: BTreeMap::new(), custom: BTreeMap::new() }
     }
 }
 
 impl SkinOptions {
-    /// The document `screen` is drawn with, or `None` for the built-in screen.
+    /// The document the player picked for `screen` by hand, or `None` when the screen is left to the
+    /// pack and the built-in screen.
     pub fn document(&self, screen: i32) -> Option<&str> {
         self.selected.get(&screen).map(String::as_str).filter(|path| !path.is_empty())
     }
 
-    /// Draw `screen` with `path`, or with the built-in screen when `path` is `None`.
+    /// The folder of the skin pack, or `None` when no pack is named.
+    pub fn pack_folder(&self) -> Option<&str> {
+        self.pack.as_deref().map(str::trim).filter(|pack| !pack.is_empty())
+    }
+
+    /// Draw `screen` with `path`, or leave it to the pack and the built-in screen when `path` is
+    /// `None`.
     pub fn select(&mut self, screen: i32, path: Option<String>) {
         match path.filter(|path| !path.is_empty()) {
             Some(path) => self.selected.insert(screen, path),
@@ -311,12 +322,14 @@ impl SkinOptions {
     }
 
     /// Pull a hand-edited document back into what the rows can produce: an unnamed screen falls back
-    /// to the one a fresh install configures, and a blank folder means the default folder.
+    /// to the one a fresh install configures, a blank folder means the default folder, and a blank
+    /// pack means no pack.
     pub fn sanitise(&mut self) {
         if skin_screen_label(self.screen).is_none() {
             self.screen = DEFAULT_SKIN_SCREEN;
         }
         self.folder = self.folder.take().filter(|folder| !folder.trim().is_empty());
+        self.pack = self.pack.take().filter(|pack| !pack.trim().is_empty());
         self.selected.retain(|screen, path| skin_screen_label(*screen).is_some() && !path.trim().is_empty());
     }
 }

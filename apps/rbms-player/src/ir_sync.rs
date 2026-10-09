@@ -31,8 +31,9 @@ pub(crate) struct SyncPayload {
 
 /// Fields that describe *this machine or this session*, not the player's preferences, and are
 /// therefore never uploaded and never overwritten by a download: the bearer token and the identity
-/// it belongs to, the server it was issued by, and the local file paths — the song folders and the
-/// difficulty tables among them, since both are paths into this machine's disk.
+/// it belongs to, the server it was issued by, and the local file paths — the song folders, the
+/// difficulty tables and the skin pack folder among them, since all three are paths into this
+/// machine's disk.
 fn keep_local(local: &Config, mut incoming: Config) -> Config {
     incoming.network.ir_token = local.network.ir_token.clone();
     incoming.network.ir_login_id = local.network.ir_login_id.clone();
@@ -43,6 +44,7 @@ fn keep_local(local: &Config, mut incoming: Config) -> Config {
     incoming.library.folders = local.library.folders.clone();
     incoming.library.tables = local.library.tables.clone();
     incoming.display.font_path = local.display.font_path.clone();
+    incoming.skin.pack = local.skin.pack.clone();
     incoming
 }
 
@@ -251,6 +253,7 @@ mod tests {
         c.library.folders = vec!["/local/songs".into()];
         c.library.tables = vec![TableSource { name: "mine".into(), location: "/local/table.json".into() }];
         c.display.font_path = Some("/local/font.ttf".into());
+        c.skin.pack = Some("/local/skins/pack".into());
         c
     }
 
@@ -284,6 +287,7 @@ mod tests {
         assert!(sanitised.library.folders.is_empty(), "the song folders are this machine's paths");
         assert!(sanitised.library.tables.is_empty());
         assert_eq!(sanitised.display.font_path, None);
+        assert_eq!(sanitised.skin.pack, None, "the skin pack is a folder on this machine's disk");
         assert_eq!(sanitised.network.player_id, Config::default().network.player_id);
         assert!((sanitised.play.hispeed - 4.5).abs() < 1e-9, "the play preferences do go up");
         assert_eq!(sanitised.judge.judge_rate_key, [90; JUDGE_WIDTH_TIER_COUNT]);
@@ -292,6 +296,7 @@ mod tests {
         assert!(!blob.content.contains("secret-token"), "the serialised blob cannot leak the token");
         assert!(!blob.content.contains("/local/songs"), "the serialised blob cannot leak a local path");
         assert!(!blob.content.contains("/local/table.json"));
+        assert!(!blob.content.contains("/local/skins/pack"), "the serialised blob cannot leak the skin pack folder");
     }
 
     #[test]
@@ -307,6 +312,7 @@ mod tests {
         remote.library.folders = vec!["/their/songs".into()];
         remote.library.tables = vec![TableSource { name: "theirs".into(), location: "/their/table.json".into() }];
         remote.display.font_path = Some("/their/font.ttf".into());
+        remote.skin.pack = Some("/their/skins/pack".into());
 
         let merged = merge_downloaded(&local, remote);
         assert!((merged.play.hispeed - 1.25).abs() < 1e-9, "preferences come from the server");
@@ -320,6 +326,15 @@ mod tests {
         assert_eq!(merged.library.tables.len(), 1);
         assert_eq!(merged.library.tables[0].location, "/local/table.json");
         assert_eq!(merged.display.font_path.as_deref(), Some("/local/font.ttf"));
+        assert_eq!(merged.skin.pack.as_deref(), Some("/local/skins/pack"), "a downloaded pack folder does not replace this machine's");
+    }
+
+    #[test]
+    fn a_download_onto_a_machine_without_a_pack_does_not_bring_one() {
+        let mut remote = Config::default();
+        remote.skin.pack = Some("/their/skins/pack".into());
+        let merged = merge_downloaded(&Config::default(), remote);
+        assert_eq!(merged.skin.pack, None, "another machine's pack folder was adopted");
     }
 
     #[test]
@@ -465,7 +480,8 @@ mod tests {
         let stored = build_blob(&payload_of(sanitise_for_upload(&merged)), 1, None).unwrap();
         let again = parse_blob(&stored).expect("the copy this build uploads parses").settings;
         assert_eq!(again.display.skin, merged.display.skin);
-        assert_eq!(again.skin, merged.skin, "the next upload carries the retired bundle back to the account");
+        let uploaded = rbms_config::SkinOptions { pack: None, ..merged.skin.clone() };
+        assert_eq!(again.skin, uploaded, "the next upload carries the retired bundle back to the account, or this machine's pack folder with it");
     }
 
     #[test]

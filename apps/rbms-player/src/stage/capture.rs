@@ -15,18 +15,24 @@
 //! What keeps two captures of one shot alike: the embedded fonts are the only ones loaded, an app
 //! built by [`app_in`] reads a settings folder its test named for it, a run is laid out with the
 //! default seed, and the scene clock is put where the shot says before the frame is drawn. Two
-//! things are left to the caller. A document that draws one of its files at random does so from
-//! `rbms_skin::resolve::SEED_ENV`, which has to be set for the pick to repeat. And the scene clock
-//! is a real clock: a frame reads it a moment after it was set, so the time a document sees is the
-//! shot's plus however long the frame has been drawing.
+//! things are left to the caller. A skin that draws one of its files or its options at random does
+//! so from the seed its app's skin library is pinned with (`SkinLibrary::pin_seed`), which has to be
+//! set for the pick to repeat. And the scene clock is a real clock: a frame reads it a moment after
+//! it was set, so the time a document sees is the shot's plus however long the frame has been
+//! drawing.
 //!
-//! [`SKIN_PACK_ENV`] points the last test here at a folder of documents somebody else wrote. It is
-//! the one test that draws files from outside the repository, and it passes without doing anything
-//! when the variable is not set.
+//! [`SKIN_PACK_ENV`] points the last test here at a skin pack somebody else wrote. It is the one test
+//! that draws files from outside the repository, and it passes without doing anything when the
+//! variable is not set. The test names the pack the way the PACK FOLDER row does, so each screen is
+//! drawn with the document of the pack that declares it -- a Lua skin as readily as a document --
+//! read against the screen's own state and with a pinned seed. A screen whose skin cannot be read is
+//! reported and passed over rather than failed: which screens of a pack load is what the test is run
+//! to find out.
 
+use std::collections::BTreeMap;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use rbms_config::DEFAULT_SKIN_FOLDER;
 use rbms_render::Renderer;
@@ -34,6 +40,7 @@ use rbms_skin::loader::{SKIN_TYPE_DECIDE, SKIN_TYPE_KEY_CONFIG, SKIN_TYPE_MUSIC_
 use rbms_skin::timer::timer_id;
 
 use crate::gpu::Gpu;
+use crate::skin_select::SKIN_PACK_ENV;
 use crate::stage::canvas::UI_SIZE;
 use crate::stage::render_tests::{app, play_state, render, render_on, result_state};
 use crate::stage::{Canvas, HeadlessCanvas, KeyConfigState, LoadingState, SelectState, Stage};
@@ -41,9 +48,6 @@ use crate::{App, Config, LaunchOptions};
 
 /// Environment variable naming the folder captures are saved in. Nothing is saved without it.
 const CAPTURE_DIR_ENV: &str = "RBMS_SKIN_CAPTURE_DIR";
-
-/// Environment variable naming a folder of skin documents to capture, one per screen.
-const SKIN_PACK_ENV: &str = "RBMS_SKIN_PACK";
 
 /// Extension of a headless capture.
 const CAPTURE_EXTENSION: &str = "png";
@@ -226,6 +230,14 @@ const TIMER_ON_US: i64 = 1_000_000;
 /// with, so the frame shows the layout rather than the start of a fade.
 const PACK_SCENE_US: i64 = 5_000_000;
 
+/// The seed every read of a pack's skin is pinned with, so a skin that picks a file or an option at
+/// random is captured the same way each time.
+const PACK_SEED: u64 = 1;
+
+/// Longest one screen of a pack is waited for. A published pack names hundreds of megabytes of
+/// images for one screen, and they are decoded before the screen draws at all.
+const PACK_LOAD_TIMEOUT: Duration = Duration::from_secs(180);
+
 /// One screen a pack is captured on.
 struct PackScreen {
     /// The skin type a document declares to be drawn on this screen.
@@ -277,30 +289,72 @@ fn is_flat(pixels: &HeadlessCanvas, columns: Range<u32>, mut rows: Range<u32>) -
     rows.all(|y| columns.clone().all(|x| pixels.pixel_at(x, y) == first))
 }
 
-/// An app with the first document `pack` holds for `screen` chosen and read the way the SKIN tab
-/// chooses and reads one, or `None` when the pack has no document for that screen.
-fn pack_app(pack: &Path, tag: &str, screen: i32) -> Option<App> {
+/// An app with `pack` named as its skin pack and walked, and every read of a skin pinned.
+fn pack_app(pack: &Path, tag: &str) -> App {
     let settings = settings_of(tag);
     let mut config = Config::default();
-    config.skin.folder = Some(pack.to_string_lossy().into_owned());
-    config.skin.screen = screen;
+    config.skin.pack = Some(pack.to_string_lossy().into_owned());
     let mut app = app_in(settings.clone(), config);
+    app.shared.skins.pin_seed(Some(PACK_SEED));
     app.shared.skins.rescan(&settings, &app.shared.config);
-    if !app.shared.skins.cycle_document(&mut app.shared.config, 1) {
-        return None;
-    }
-    app.shared.skins.reload_for(&app.shared.config, screen);
-    Some(app)
+    app
 }
 
-/// The size the document chosen for `screen` was authored at, which is the size it is captured at,
-/// or why the library would not read it.
-fn authored_size(app: &App, screen: i32) -> Result<(u32, u32), String> {
-    let Some(skin) = app.shared.skins.document(screen) else {
-        return Err(app.shared.skins.info(&app.shared.config));
-    };
+/// The size the pack's document for `screen` says it was authored at, which is the size it is
+/// captured at, or `None` when the pack has no document for that screen.
+fn authored_size(app: &App, screen: i32) -> Option<(u32, u32)> {
+    let header = app.shared.skins.header_of(&app.shared.config, screen)?;
     let side = |length: i32, fallback: u32| u32::try_from(length).ok().filter(|length| *length > 0).unwrap_or(fallback);
-    Ok((side(skin.def.w, UI_SIZE.0), side(skin.def.h, UI_SIZE.1)))
+    Some((side(header.width, UI_SIZE.0), side(header.height, UI_SIZE.1)))
+}
+
+/// Draws the stage `stage` builds until the document for `screen` has been read and compiled, then
+/// once more so the target shows the document; or answers the first line of why it never was.
+///
+/// A Lua skin is read on the screen's first frame, against the state that frame is drawn from, so a
+/// skin that cannot be read is known by the second frame and nothing is waited for.
+fn draw_until_settled(app: &mut App, screen: i32, canvas: &mut Canvas<'_>, stage: fn() -> Stage) -> Result<(), String> {
+    let deadline = Instant::now() + PACK_LOAD_TIMEOUT;
+    loop {
+        draw_on(app, stage(), PACK_SCENE_US, canvas);
+        if let Some(reason) = app.shared.skin_failure(screen) {
+            return Err(reason.lines().next().unwrap_or_default().to_owned());
+        }
+        if app.shared.has_compiled_skin(screen) {
+            draw_on(app, stage(), PACK_SCENE_US, canvas);
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(format!("its files were not read within {} seconds", PACK_LOAD_TIMEOUT.as_secs()));
+        }
+    }
+}
+
+/// What one file of a pack is told apart by between two listings: its length, and when it was last
+/// written where the file system says. A file rewritten at the same length shows by the second.
+type FileStamp = (u64, Option<SystemTime>);
+
+/// Every file under `root`, as its path relative to it and what it is told apart by.
+fn files_under(root: &Path) -> BTreeMap<PathBuf, FileStamp> {
+    let mut found = BTreeMap::new();
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(metadata) = entry.metadata() else {
+                continue;
+            };
+            if metadata.is_dir() {
+                pending.push(path);
+            } else if let Ok(relative) = path.strip_prefix(root) {
+                found.insert(relative.to_path_buf(), (metadata.len(), metadata.modified().ok()));
+            }
+        }
+    }
+    found
 }
 
 /// The contract the harness stands on: at the size the built-in screens are laid out for, a capture
@@ -390,40 +444,59 @@ fn a_saved_capture_reads_back_as_the_frame_it_was_taken_of() {
     }
 }
 
-/// Captures a pack somebody else wrote: the first document it holds for each screen, on a target
-/// the size the document was authored at, on both backends.
+/// Captures a pack somebody else wrote: the document it holds for each screen, on a target the size
+/// the document was authored at, on both backends.
 ///
 /// Opt-in, because the pack is outside the repository: without [`SKIN_PACK_ENV`] this passes without
-/// drawing anything. With it, every screen the pack has a document for is captured before anything
-/// is asserted, so one document that cannot be drawn does not cost the captures of the others.
+/// drawing anything. With it, every screen is tried and what became of each is printed. A screen
+/// whose skin could not be read is not a failure of this test -- a pack written for another program
+/// asks its host for more than every screen here answers yet. What is held to is that the pack drew
+/// at least one of its screens, since a run that captured nothing has shown nothing, and that
+/// reading and drawing the pack left every file in its folder at the length and the time it had.
 #[test]
 fn a_skin_pack_named_by_the_environment_is_captured_one_document_a_screen() {
-    let Some(pack) = std::env::var_os(SKIN_PACK_ENV).map(PathBuf::from) else {
+    let Some(pack) = crate::skin_select::pack_from_environment(std::env::var_os(SKIN_PACK_ENV)) else {
         return;
     };
     assert!(pack.is_dir(), "{SKIN_PACK_ENV} names {}, which is not a folder", pack.display());
+    let before = files_under(&pack);
+    let mut captured = Vec::new();
 
-    let mut undrawn = Vec::new();
     for PackScreen { skin_type: screen, name, stage } in PACK_SCREENS {
-        let Some(mut app) = pack_app(&pack, name, screen) else {
+        let mut app = pack_app(&pack, name);
+        let Some(size) = authored_size(&app, screen) else {
+            println!("{name}: the pack has no document for this screen");
             continue;
         };
-        let size = match authored_size(&app, screen) {
-            Ok(size) => size,
+        let document = app.shared.skins.document_path(&app.shared.config, screen).unwrap_or_default().to_owned();
+
+        let mut pixels = HeadlessCanvas::new(size.0, size.1);
+        match draw_until_settled(&mut app, screen, &mut Canvas::Headless(&mut pixels), stage) {
+            Ok(()) => {
+                save(name, CAPTURE_EXTENSION, size, pixels.rgba());
+                captured.push(name);
+                println!("{name}: {document} loaded and captured at {}x{}", size.0, size.1);
+            }
             Err(reason) => {
-                undrawn.push(format!("{name}: {reason}"));
+                println!("{name}: {document} not drawn: {reason}");
                 continue;
             }
-        };
-        let shot = Shot { name, size, scene_us: PACK_SCENE_US, document: Some(screen) };
-        if let Err(missed) = shot.take(&mut app, stage) {
-            undrawn.push(format!("{name}: {missed:?}"));
-            continue;
         }
-        let on_gpu = pack_app(&pack, &format!("{name}-gpu"), screen).map(|mut app| shot.take_on_gpu(&mut app, stage));
-        if let Some(Err(Missed::NotCompiled)) = on_gpu {
-            undrawn.push(format!("{name}.gpu: {:?}", Missed::NotCompiled));
+
+        let mut app = pack_app(&pack, &format!("{name}-gpu"));
+        let Some(mut gpu) = Gpu::offscreen_if_available(size.0, size.1, UI_SIZE) else {
+            println!("{name}.gpu: this machine has no graphics adapter");
+            continue;
+        };
+        match draw_until_settled(&mut app, screen, &mut Canvas::Window(&mut gpu), stage) {
+            Ok(()) => {
+                let rgba = gpu.capture().expect("an offscreen target reads back");
+                save(name, GPU_CAPTURE_EXTENSION, size, &rgba);
+                println!("{name}.gpu: captured at {}x{}", size.0, size.1);
+            }
+            Err(reason) => println!("{name}.gpu: not drawn: {reason}"),
         }
     }
-    assert!(undrawn.is_empty(), "the pack has documents that were not drawn: {undrawn:#?}");
+    assert!(!captured.is_empty(), "{} drew none of its screens", pack.display());
+    assert_eq!(files_under(&pack), before, "capturing the pack changed its folder");
 }

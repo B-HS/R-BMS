@@ -101,6 +101,7 @@ impl AppShared {
         let value = match id {
             SettingId::Gauge => gauge_name(self.config.play.gauge).to_string(),
             SettingId::Skin if self.launch.skin_path.is_some() => CUSTOM_VALUE.to_string(),
+            SettingId::SkinPack => self.skins.pack_value(&self.config),
             SettingId::SkinDocument => self.skins.document_value(&self.config),
             SettingId::SkinInfo => self.skins.info(&self.config),
             _ => display_value(&self.config, id),
@@ -157,10 +158,29 @@ impl AppShared {
         self.reload_skin();
     }
 
-    /// Walk the skin folder again and read the chosen document with the choices made for it.
+    /// Walk the skin folder and the pack again. A header whose file has not changed since it was
+    /// last read is not read again.
     pub(crate) fn rescan_skins(&mut self) {
         let settings_path = self.settings_path.clone();
         self.skins.rescan(&settings_path, &self.config);
+    }
+
+    /// Walk the skin folder and the pack again with every header read from its file, which is what
+    /// the RELOAD row asks for.
+    pub(crate) fn rescan_skins_afresh(&mut self) {
+        let settings_path = self.settings_path.clone();
+        self.skins.rescan_afresh(&settings_path, &self.config);
+    }
+
+    /// Name the skin pack every screen takes its document from, or name none, and read what the
+    /// screen being configured is now drawn with.
+    ///
+    /// A pack named for this run by the environment stays in effect until the run ends; what is set
+    /// here is what the next run starts with.
+    pub(crate) fn set_skin_pack(&mut self, pack: Option<String>) {
+        self.config.skin.pack = pack.filter(|pack| !pack.trim().is_empty());
+        self.rescan_skins();
+        self.reload_skin();
     }
 
     /// Read the chosen document again, so what is on screen is what the rows say.
@@ -245,6 +265,7 @@ mod tests {
         (SettingId::Target, "TARGET", "RATE AAA"),
         (SettingId::Total, "TOTAL", "AUTO"),
         (SettingId::Skin, "SKIN", "NORMAL"),
+        (SettingId::SkinPack, "PACK FOLDER", "(none)"),
         (SettingId::SkinScreen, "SCREEN", "PLAY 7KEYS"),
         (SettingId::SkinDocument, "SKIN", "DEFAULT"),
         (SettingId::SkinInfo, "LOADED", "BUILT-IN SCREEN"),

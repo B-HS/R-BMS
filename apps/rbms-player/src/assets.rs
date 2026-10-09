@@ -10,6 +10,7 @@ use std::sync::mpsc::Receiver;
 
 use rbms_config::DEFAULT_SKIN_FOLDER;
 use rbms_render::{SkinConfig, SkinImage};
+use sha2::{Digest, Sha256};
 
 /// A decode running on the worker pool: what has arrived, how far it has got, the cooperative
 /// cancel, and how many jobs there are in total.
@@ -31,6 +32,22 @@ const DEFAULT_SKIN_DIRECTORY: &str = "rbms-default";
 /// The folder inside [`DEFAULT_SKIN_DIRECTORY`] that holds the system sound set, read when the
 /// player configured no sound folder of their own.
 const DEFAULT_SOUND_DIRECTORY: &str = "sound";
+
+/// The folder beside the settings file that holds everything skins write, one folder per skin pack.
+const SKIN_DATA_FOLDER: &str = "skin-data";
+
+/// What a pack whose folder has no usable name is called in its identifier.
+const SKIN_PACK_FALLBACK_NAME: &str = "skin";
+
+/// Most characters of a pack folder's own name that go into its identifier.
+const SKIN_PACK_NAME_MAX_CHARS: usize = 32;
+
+/// What a character of a pack folder's name that is unsafe in a file name is replaced with.
+const SKIN_PACK_NAME_FILLER: char = '_';
+
+/// Bytes of the pack path's digest that go into its identifier, which is what tells two packs with
+/// the same folder name apart.
+const SKIN_PACK_DIGEST_BYTES: usize = 8;
 
 /// One file shipped inside the binary and written to disk on the first run.
 struct EmbeddedFile {
@@ -106,6 +123,39 @@ pub(crate) fn install_default_sounds(settings_path: &Path) -> bool {
 pub(crate) fn default_sound_folder(settings_path: &Path) -> Option<PathBuf> {
     let directory = default_sound_directory(settings_path);
     directory.is_dir().then_some(directory)
+}
+
+/// The name one skin pack's writes are filed under: the pack folder's own name, made safe for a file
+/// name, and a digest of the folder's whole path.
+///
+/// The path is resolved first when it can be, so the same folder reached by two spellings is one
+/// pack, and the digest is of bytes rather than of anything the standard library may hash
+/// differently next release, so a pack keeps its identifier from run to run.
+pub(crate) fn skin_pack_identifier(pack: &Path) -> String {
+    let resolved = pack.canonicalize().unwrap_or_else(|_| pack.to_path_buf());
+    let name: String = resolved
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default()
+        .chars()
+        .take(SKIN_PACK_NAME_MAX_CHARS)
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { SKIN_PACK_NAME_FILLER })
+        .collect();
+    let name = if name.is_empty() { SKIN_PACK_FALLBACK_NAME.to_owned() } else { name };
+    let digest = Sha256::digest(resolved.to_string_lossy().as_bytes());
+    let digest: String = digest.iter().take(SKIN_PACK_DIGEST_BYTES).map(|byte| format!("{byte:02x}")).collect();
+    format!("{name}-{digest}")
+}
+
+/// Where the skin whose entry file is `document` writes: `skin-data/<pack identifier>` beside the
+/// settings file, the pack being the folder the document is in.
+///
+/// A skin never writes into its own folder, which may be read-only and is not the player's to have
+/// changed under them; whatever it writes lands here and is read back from here. The folder is not
+/// created until a skin writes something.
+pub(crate) fn skin_overlay_folder(settings_path: &Path, document: &Path) -> PathBuf {
+    let pack = document.parent().unwrap_or(Path::new("."));
+    settings_path.parent().unwrap_or(Path::new(".")).join(SKIN_DATA_FOLDER).join(skin_pack_identifier(pack))
 }
 
 /// Write one shipped file unless something is already at its path, and report whether a regular
@@ -451,6 +501,32 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(50));
         assert!(progress.load(Ordering::Relaxed) < total, "a flag set before the pool started should stop it early");
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// A skin's writes are filed under the pack it belongs to, beside the settings file and never
+    /// inside the pack: one folder per pack however its path is spelled, a different one for another
+    /// pack of the same name, and a name that is safe whatever the pack folder is called.
+    #[test]
+    fn a_skin_writes_under_a_folder_named_for_its_pack_beside_the_settings_file() {
+        let home = temp_dir("skin-overlay");
+        let settings = home.join("settings.ron");
+        let pack = home.join("packs").join("Modern Chic!");
+        let twin = home.join("other").join("Modern Chic!");
+        std::fs::create_dir_all(&pack).expect("the pack folder is creatable");
+        std::fs::create_dir_all(&twin).expect("the second pack folder is creatable");
+
+        let overlay = skin_overlay_folder(&settings, &pack.join("select.luaskin"));
+        assert_eq!(overlay.parent(), Some(home.join(SKIN_DATA_FOLDER).as_path()), "the overlay is not beside the settings file");
+        assert!(!overlay.starts_with(&pack), "a skin would write into its own folder");
+        assert!(!overlay.exists(), "the overlay was created before a skin wrote anything");
+
+        let identifier = skin_pack_identifier(&pack);
+        assert!(identifier.starts_with("Modern_Chic_-"), "the folder name was not made safe: {identifier}");
+        assert_eq!(identifier, skin_pack_identifier(&pack), "one pack was given two identifiers");
+        assert_eq!(overlay, skin_overlay_folder(&settings, &pack.join("play7.luaskin")), "two documents of one pack write to different folders");
+        assert_eq!(identifier, skin_pack_identifier(&pack.join("..").join("Modern Chic!")), "another spelling of the same folder is another pack");
+        assert_ne!(identifier, skin_pack_identifier(&twin), "two packs with the same folder name share an overlay");
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     /// A first run on an empty configuration folder writes the whole shipped sound set below the

@@ -1,0 +1,41 @@
+{
+    "static_screen": "other",
+    "screen": [1920, 1080],
+    "booleans": {
+        "153": true,
+        "160": true,
+        "171": true,
+        "176": true,
+        "182": true,
+        "190": true,
+        "192": true,
+        "194": true,
+        "50": true,
+        "1008": true
+    },
+    "integers": {
+        "90": 180,
+        "91": 180,
+        "92": 180,
+        "96": 12,
+        "74": 1624,
+        "400": 2
+    },
+    "texts": {
+        "2": "PLAYER ONE",
+        "10": "Scenario Title",
+        "11": "-capture mix-",
+        "12": "Scenario Title -capture mix-",
+        "13": "SCENARIO GENRE",
+        "14": "Scenario Artist",
+        "15": "obj: Scenario Charter",
+        "16": "Scenario Artist obj: Scenario Charter",
+        "1001": "Scenario Table",
+        "1002": "sl12",
+        "1003": "Scenario Table sl12"
+    },
+    "timers": {
+        "1": 500000,
+        "2": 3000000
+    }
+}

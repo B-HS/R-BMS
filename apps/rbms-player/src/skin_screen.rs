@@ -12,7 +12,12 @@
 //! behind it is read again. A rebuild registers a fresh set of textures, so the previous screen is
 //! always released first.
 //!
-use std::collections::BTreeMap;
+//! A Lua skin is read on the first frame of the screen it draws rather than when it is chosen,
+//! because it builds its screen out of that screen's state: the frame hands the state it is drawn
+//! from to the library, which runs the skin against it, and the next frame takes the result in. A
+//! skin that cannot be read says why once and leaves the screen to its built-in layout.
+//!
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -33,7 +38,7 @@ use rbms_skin::timer::TimerState;
 
 use crate::assets::{DecodePool, SkinAsset, SkinAssetJob, SkinAssetKind, spawn_skin_asset_decode};
 use crate::notify::{Level, notify};
-use crate::skin_select::SkinLibrary;
+use crate::skin_select::{SkinLibrary, SkinRead};
 use crate::stage::Canvas;
 use crate::stage::canvas::UI_SIZE;
 use crate::{AppShared, SelectScene};
@@ -77,6 +82,9 @@ struct BuiltScreen {
     screen: SkinScreen,
     build: u64,
 }
+
+/// What follows the reason a document could not be read, in the one message that says so.
+const SKIN_FALLBACK_NOTE: &str = " - drawing the built-in screen";
 
 /// The nudges one document is drawn with: what the player chose inside it, or nothing at all for a
 /// document nobody has customised.
@@ -231,6 +239,23 @@ impl SkinScreens {
         self.built.get(&screen).map(|entry| &entry.screen)
     }
 
+    /// Let go of every screen compiled from a document the library no longer holds a read of: the
+    /// textures of the ones that were built, and the workers of the ones still being read.
+    ///
+    /// [`SkinScreens::sync`] does this for the screen being drawn. This reaches the others, so a
+    /// document the player has left behind does not stay uploaded until its screen is next opened.
+    pub(crate) fn release_dropped<R: Renderer>(&mut self, r: &mut R, skins: &SkinLibrary) {
+        let dropped: BTreeSet<i32> = self.built.keys().chain(self.pending.keys()).copied().filter(|screen| skins.build_of(*screen).is_none()).collect();
+        for screen in dropped {
+            if let Some(mut stale) = self.built.remove(&screen) {
+                stale.screen.release(r);
+            }
+            if let Some(stale) = self.pending.remove(&screen) {
+                stale.abandon();
+            }
+        }
+    }
+
     /// Whether one screen's document is still having its files read.
     pub(crate) fn is_pending(&self, screen: i32) -> bool {
         self.pending.contains_key(&screen)
@@ -284,8 +309,15 @@ impl AppShared {
     }
 
     /// Start a scene: every timer off, every timer driver forgetting what it saw, and the scene
-    /// clock back at zero (`TimerManager.setMainState`).
+    /// clock back at zero (`TimerManager.setMainState`). Every Lua skin read for an earlier scene is
+    /// read again the next time its screen is drawn, because it was built from that scene's state.
     pub(crate) fn begin_skin_scene(&mut self) {
+        self.reset_skin_scene();
+        self.skins.expire_scripted();
+    }
+
+    /// Put the timers and the scene clock where a scene starts.
+    fn reset_skin_scene(&mut self) {
         self.skin_timers.clear();
         self.skin_play_timers = PlayTimers::new();
         self.skin_select_timers = SelectTimers::new();
@@ -295,6 +327,9 @@ impl AppShared {
 
     /// Take the running scene out to be parked, and begin a fresh one for the screen about to be
     /// opened over it.
+    ///
+    /// The parked screen keeps the skin it was read with: it is drawn again, from the same Lua
+    /// state, when the screen opened over it is left.
     pub(crate) fn suspend_skin_scene(&mut self) -> SkinScene {
         let elapsed = self.scene_started.elapsed();
         let scene = SkinScene {
@@ -304,7 +339,7 @@ impl AppShared {
             result: self.skin_result_timers,
             elapsed,
         };
-        self.begin_skin_scene();
+        self.reset_skin_scene();
         scene
     }
 
@@ -329,12 +364,30 @@ impl AppShared {
 
     /// Read and compile the document one screen is drawn with, so the gate below has something to
     /// hand over. Cheap on every frame but the one after a document is chosen or reloaded.
+    ///
+    /// A document no screen is drawn with any more is let go of first, whichever screen it drew: the
+    /// pack was changed or taken away, or a settings file arrived that chooses differently.
+    ///
+    /// A document that is only data is read here. A Lua skin is asked for here and read by the frame
+    /// that follows, which is the first place the screen's state exists to read it against
+    /// ([`AppShared::with_skin_frame`]); what that frame read is taken in on the next call. A
+    /// document that could not be read is reported once and not read again until the player moves a
+    /// choice or asks for a reload, so the screen falls back to its built-in layout without stalling.
     pub(crate) fn prepare_skin(&mut self, canvas: &mut Canvas<'_>, screen: i32) {
+        if self.skins.pack_moved(&self.config) {
+            self.rescan_skins();
+        }
+        self.skins.drop_moved(&self.config);
+        self.skin_screens.release_dropped(canvas, &self.skins);
         if !self.skin_document_is_enabled(screen) {
             return;
         }
         if self.skins.needs_reload_for(&self.config, screen) {
-            self.skins.reload_for(&self.config, screen);
+            self.skins.request_for(&self.config, screen);
+        }
+        self.skins.adopt(screen);
+        if let Some(reason) = self.skins.take_failure(screen) {
+            notify(Level::Warn, format!("skin: {reason}{SKIN_FALLBACK_NOTE}"));
         }
         let skins = &self.skins;
         let screens = &mut self.skin_screens;
@@ -346,9 +399,12 @@ impl AppShared {
     /// an image placed by the built-in layout would sit wherever that layout put it.
     ///
     /// A document whose files are still being read counts as present, so the background does not
-    /// move into the built-in slot for the handful of frames before the document takes over.
+    /// move into the built-in slot for the handful of frames before the document takes over. So does
+    /// a Lua skin waiting for this screen's frame to be read on, which is also what gets that frame
+    /// drawn through the document's path at all.
     pub(crate) fn has_skin_document(&self, screen: i32) -> bool {
-        self.skin_document_is_enabled(screen) && (self.skin_screens.get(screen).is_some() || self.skin_screens.is_pending(screen))
+        self.skin_document_is_enabled(screen)
+            && (self.skin_screens.get(screen).is_some() || self.skin_screens.is_pending(screen) || self.skins.is_waiting(screen))
     }
 
     /// Whether one screen's document has finished being read and compiled, as against merely being
@@ -367,7 +423,7 @@ impl AppShared {
     /// The nudges the player made in the document one screen is drawn with, held by the caller for
     /// the length of a frame.
     pub(crate) fn skin_offsets(&self, screen: i32) -> DocumentOffsets<'_> {
-        DocumentOffsets { document: self.config.skin.document(screen).and_then(|path| self.config.skin.customisation(path)) }
+        DocumentOffsets { document: self.skins.document_path(&self.config, screen).and_then(|path| self.config.skin.customisation(path)) }
     }
 
     /// Draws one frame of a document: builds everything the frame needs, with `state` answering its
@@ -388,8 +444,16 @@ impl AppShared {
     ///
     /// The pointer is kept in the [`UI_SIZE`] space the window's events are mapped onto, which is
     /// the space it is read back out of here.
+    ///
+    /// This is also where a Lua skin waiting for this screen is read: `state` is the screen's own
+    /// state, settled for the frame, which is what the skin's Lua reads while it builds its tables.
+    /// The frame that reads the skin draws nothing with it -- its files are not decoded yet.
     fn with_skin_frame<R>(&self, screen: i32, state: &dyn SkinHost, inputs: FrameInputs<'_>, draw: impl FnOnce(&SkinDraw<'_>) -> R) -> Option<R> {
         if !self.skin_document_is_enabled(screen) {
+            return None;
+        }
+        if self.skins.is_waiting(screen) {
+            self.skins.read_waiting(&self.config, screen, SkinRead { host: state, seed: self.skins.seed() });
             return None;
         }
         let compiled = self.skin_screens.get(screen)?;
@@ -411,10 +475,17 @@ impl AppShared {
         }
     }
 
-    /// Whether the player chose a document for one screen, which is all it takes for that document
-    /// to draw the screen alone.
+    /// Whether one screen has a document to be drawn with -- the player chose one, or the skin pack
+    /// holds one for it -- which is all it takes for that document to draw the screen alone.
     fn skin_document_is_enabled(&self, screen: i32) -> bool {
-        self.config.skin.document(screen).is_some()
+        self.skins.document_path(&self.config, screen).is_some()
+    }
+
+    /// Why one screen's document could not be read, for the tests and the capture harness that say
+    /// what became of a skin.
+    #[cfg(test)]
+    pub(crate) fn skin_failure(&self, screen: i32) -> Option<&str> {
+        self.skins.failure(screen)
     }
 
     /// Draw the play screen's document. `true` when it drew, and the built-in field stands aside.

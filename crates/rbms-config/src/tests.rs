@@ -235,6 +235,7 @@ fn ron_round_trip_preserves_every_field() {
     c.audio.bg = 0.35;
     c.audio.system = 0.15;
     c.skin.folder = Some("/skins".into());
+    c.skin.pack = Some("/skins/pack".into());
     c.skin.screen = MUSIC_SELECT_SCREEN;
     c.skin.select(MUSIC_SELECT_SCREEN, Some("/skins/browser/browser.json".into()));
     let custom = c.skin.customise("/skins/browser/browser.json");
@@ -310,12 +311,38 @@ fn a_hand_edited_skin_group_is_pulled_back_onto_a_screen_that_exists() {
     let mut c = Config::default();
     c.skin.screen = SKIN_SCREEN_LABELS.len() as i32;
     c.skin.folder = Some("   ".into());
+    c.skin.pack = Some(" ".into());
     c.skin.selected.insert(-1, "ghost.json".into());
     c.skin.selected.insert(MUSIC_SELECT_SCREEN, "  ".into());
     c.sanitise();
     assert_eq!(c.skin.screen, DEFAULT_SKIN_SCREEN);
     assert_eq!(c.skin.folder, None, "a blank folder is no folder");
+    assert_eq!(c.skin.pack, None, "a blank pack is no pack");
     assert!(c.skin.selected.is_empty(), "a screen that does not exist, and a document with no name, were both kept");
+}
+
+/// A settings file written before a skin pack could be named has no `pack` line. It loads with no
+/// pack and with every choice it did hold, and at the schema version it was written at: the new line
+/// has a default, so nothing has to be migrated.
+#[test]
+fn a_file_from_before_the_skin_pack_loads_with_no_pack_and_everything_it_chose() {
+    let text = format!(
+        r#"(schema_version: {CURRENT_SCHEMA_VERSION}, skin: (folder: Some("/skins"), screen: {MUSIC_SELECT_SCREEN}, selected: {{{MUSIC_SELECT_SCREEN}: "/skins/browser.json"}}, custom: {{"/skins/browser.json": (properties: {{"COVER": 902}})}}))"#
+    );
+    let c: Config = ron::from_str(&text).expect("a file with no pack line parses");
+    assert_eq!(c.skin.pack, None);
+    assert_eq!(c.skin.pack_folder(), None);
+    assert_eq!(c.skin.folder.as_deref(), Some("/skins"));
+    assert_eq!(c.skin.document(MUSIC_SELECT_SCREEN), Some("/skins/browser.json"));
+    assert_eq!(c.skin.user_config("/skins/browser.json").properties.get("COVER"), Some(&902));
+
+    let mut named = c.clone();
+    named.skin.pack = Some("/skins/pack".into());
+    let back: Config = ron::from_str(&ron_of(&named)).expect("a file with a pack line parses");
+    assert_eq!(back.skin.pack_folder(), Some("/skins/pack"));
+    assert_eq!(back.skin.document(MUSIC_SELECT_SCREEN), Some("/skins/browser.json"), "naming a pack dropped a choice made by hand");
+    assert_eq!(display_value(&back, SettingId::SkinPack), "/skins/pack");
+    assert_eq!(display_value(&c, SettingId::SkinPack), NONE_VALUE);
 }
 
 /// The three new option axes are stored as separator-free tokens, exactly like the gauge next to

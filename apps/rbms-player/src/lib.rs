@@ -196,6 +196,8 @@ struct LaunchOptions {
     /// `--timing-csv <path>`: where the per-input timing ring is dumped when the result screen is
     /// entered. `None` falls back to the `RBMS_TIMING_CSV` environment variable.
     timing_csv: Option<String>,
+    /// `RBMS_SKIN_PACK`: a skin pack folder drawn for this run, whatever the settings file names.
+    skin_pack: Option<PathBuf>,
 }
 
 /// Green number (note travel time in ms) for the active scroll mode: CONSTANT is fixed by hi-speed
@@ -746,7 +748,7 @@ impl App {
         let keyconfig_path = launch.keyconfig_path.clone().map(PathBuf::from).unwrap_or_else(|| config_dir.join("keyconfig.ron"));
         let keyconfig = KeyConfig::load(&keyconfig_path);
         let pad = PadState::new(&keyconfig.pad);
-        let skins = SkinLibrary::new(&settings_path, &config);
+        let skins = SkinLibrary::new(&settings_path, &config).forcing_pack(launch.skin_pack.clone(), &config);
 
         let mut app = App {
             stage,
@@ -1188,7 +1190,7 @@ pub fn run(args: impl Iterator<Item = String>) -> ExitCode {
         notify(Level::Warn, format!("system sounds not installed beside {}", settings_path.display()));
     }
 
-    let mut launch = LaunchOptions::default();
+    let mut launch = LaunchOptions { skin_pack: skin_select::pack_from_environment(std::env::var_os(skin_select::SKIN_PACK_ENV)), ..LaunchOptions::default() };
     let mut chart: Option<String> = None;
     let mut args = args.skip(1);
     while let Some(a) = args.next() {

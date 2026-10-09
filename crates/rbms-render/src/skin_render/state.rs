@@ -520,6 +520,12 @@ impl SkinHost for ResultViewState<'_> {
     }
 }
 
+/// The difficulty slot of a chart that names none of the five, which [`OPTION_DIFFICULTY0`] is on for.
+const UNNAMED_DIFFICULTY: i32 = 0;
+
+/// The first of the five difficulty slots a chart can name.
+const FIRST_NAMED_DIFFICULTY: i32 = 1;
+
 /// The loading screen's state, which stands in for the reference's decide screen.
 pub struct DecideViewState<'a> {
     /// How far the load has got, from nothing to everything.
@@ -540,6 +546,19 @@ pub struct DecideChart<'a> {
     pub artist: &'a str,
     pub genre: &'a str,
     pub level: i32,
+    /// The difficulty slot the chart names, 1 to 5 from beginner to insane. Anything else is a chart
+    /// that names none, which is also what a screen waiting for something that is not a chart has.
+    pub difficulty: i32,
+}
+
+impl DecideChart<'_> {
+    /// How far past [`OPTION_DIFFICULTY0`] the one difficulty option that is on sits: the chart's
+    /// slot, or nothing at all for a chart outside the five named slots
+    /// (`BooleanPropertyFactory.chart_difficulty_0`). A skin colours the screen by walking these
+    /// options and has no colour when none of them is on, so exactly one always is.
+    fn difficulty_option(&self) -> i32 {
+        if (FIRST_NAMED_DIFFICULTY..=OPTION_DIFFICULTY5 - OPTION_DIFFICULTY0).contains(&self.difficulty) { self.difficulty } else { UNNAMED_DIFFICULTY }
+    }
 }
 
 impl std::fmt::Debug for DecideViewState<'_> {
@@ -559,6 +578,7 @@ impl DrawStateSource for DecideViewState<'_> {
         let answer = match id.abs() {
             OPTION_NOW_LOADING => !self.done,
             OPTION_LOADED => self.done,
+            option @ OPTION_DIFFICULTY0..=OPTION_DIFFICULTY5 => option - OPTION_DIFFICULTY0 == self.chart.difficulty_option(),
             _ => UNMAPPED_BOOLEAN,
         };
         Some(if id < 0 { !answer } else { answer })

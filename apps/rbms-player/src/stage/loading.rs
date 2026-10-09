@@ -399,6 +399,7 @@ impl LoadingState {
             artist: &entry.artist,
             genre: &entry.genre,
             level: entry.level.trim().parse().unwrap_or_default(),
+            difficulty: entry.difficulty,
         })
     }
 

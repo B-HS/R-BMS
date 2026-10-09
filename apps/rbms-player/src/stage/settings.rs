@@ -49,6 +49,8 @@ pub(crate) struct SettingsState {
     audio_devices: Vec<String>,
     /// The system sound folder picker while it is up, on the same terms as the font picker below.
     sound_picker: Option<DialogHandle>,
+    /// The skin pack folder picker while it is up, on the same terms again.
+    pack_picker: Option<DialogHandle>,
     /// The font picker while it is up. It runs beside the frame loop, so the screen keeps drawing
     /// while the user is in front of it and the answer is collected in `update`.
     font_picker: Option<DialogHandle>,
@@ -77,6 +79,7 @@ impl SettingsState {
             profiles_sel: 0,
             audio_devices: Vec::new(),
             sound_picker: None,
+            pack_picker: None,
             font_picker: None,
             rows: Vec::new(),
             lines: Vec::new(),
@@ -186,6 +189,14 @@ impl SettingsState {
             SettingId::GuideSe => {
                 ctx.shared.syssound.set_guide_enabled(ctx.shared.config.audio.guide_se);
             }
+            SettingId::SkinPack => {
+                if delta < 0 {
+                    ctx.shared.set_skin_pack(None);
+                    ctx.shared.save_settings();
+                } else if self.pack_picker.is_none() {
+                    self.pack_picker = Some(crate::dialog::pick_skin_pack_folder());
+                }
+            }
             SettingId::SkinDocument => {
                 if ctx.shared.cycle_skin_document(delta) {
                     ctx.shared.reload_skin();
@@ -193,7 +204,7 @@ impl SettingsState {
             }
             SettingId::SkinReload => {
                 if delta > 0 {
-                    ctx.shared.rescan_skins();
+                    ctx.shared.rescan_skins_afresh();
                     ctx.shared.reload_skin();
                     ctx.shared.save_settings();
                 }
@@ -255,6 +266,24 @@ impl SettingsState {
                 shared.reload_system_sounds();
             }
             DialogState::Dismissed => self.sound_picker = None,
+        }
+        self.dirty = true;
+    }
+
+    /// Collect the skin pack picker's answer: the folder becomes the pack every screen takes its
+    /// document from, and is written out so the next run starts with it.
+    fn poll_pack_picker(&mut self, shared: &mut AppShared) {
+        let Some(picker) = self.pack_picker.as_ref() else {
+            return;
+        };
+        match picker.poll() {
+            DialogState::Open => return,
+            DialogState::Picked(path) => {
+                self.pack_picker = None;
+                shared.set_skin_pack(Some(path.to_string_lossy().into_owned()));
+                shared.save_settings();
+            }
+            DialogState::Dismissed => self.pack_picker = None,
         }
         self.dirty = true;
     }
@@ -560,10 +589,10 @@ impl SettingsState {
     }
 }
 
-/// Whether Enter on this row runs something rather than leaving the screen: the two SKIN actions
-/// and the document row, which Enter steps the way the right arrow does.
+/// Whether Enter on this row runs something rather than leaving the screen: the pack folder row,
+/// the two SKIN actions, and the document row, which Enter steps the way the right arrow does.
 fn is_skin_action_row(id: SettingId) -> bool {
-    matches!(id, SettingId::SkinDocument | SettingId::SkinReload | SettingId::SkinReset)
+    matches!(id, SettingId::SkinPack | SettingId::SkinDocument | SettingId::SkinReload | SettingId::SkinReset)
 }
 
 impl StageHandler for SettingsState {
@@ -587,6 +616,7 @@ impl StageHandler for SettingsState {
     fn update(&mut self, ctx: &mut FrameCtx<'_>) -> Transition {
         self.poll_font_picker(ctx.shared);
         self.poll_sound_picker(ctx.shared);
+        self.poll_pack_picker(ctx.shared);
         let rows = rival_rows(&ctx.shared.config.network.rivals).len();
         self.rivals_sel = self.rivals_sel.min(rows.saturating_sub(1));
         if self.rows.contains(&SettingRow::Fixed(SettingId::Account)) {
