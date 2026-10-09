@@ -1,6 +1,22 @@
 # R2 — R-BMS 렌더 계층(crates/rbms-render, GPU 백엔드) 현황과 격차
 
-> 최종 갱신 2026-10-09 · 대응 단계: L1 조사(구현 전) · 기준 커밋 `9ce92bb` · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-09 · 대응 단계: 웨이브 1A(철거) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 1A 반영 사항"이 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 1A 반영 사항 (2026-10-09)
+
+혼합 합성과 구 번들을 삭제한 뒤의 상태다. 본문의 해당 절은 아래 내용으로 읽는다.
+
+- (리뷰 수정) §8.1(내장 화면 렌더와 스킨 렌더의 결합 지점): `*_on_background` 계열과 lib.rs 재노출이 없어졌음을 반영. SkinScreen 공개 API 를 나열한 곳이 있으면 object_ids 를 빼고, SkinObject 가 문서 id 를 보관하지 않는다는 점(필드는 track, stretch, body)을 적습니다.
+- (리뷰 수정) §7 부근(356~361행): SelectListState 필드 표를 `rows`, `sel`, `options_open` 으로 고쳐야 합니다(`detail` 과 `options` 는 없음). state.rs 행 번호(869-874, 887-898)도 현재 값(약 663-668, 686-692)으로 갱신.
+- (W1-1b) r2-rbms-render.md §5.2(전용 객체 13종): densitygraph 객체(Body::Density, SkinObjectKind::Density, graphs.rs draw_density) 삭제. judge 객체는 judge.images 에 image/imageset 만 허용(text 분기 삭제). songlist 는 hot_rects·clickable 판정 삭제, 그리기만 남음.
+- (W1-1b) r2-rbms-render.md §7.1: SelectViewState 설명에서 '자체 대역' 삭제, 생성자는 new(view, now_ms, offsets, options_open). ResultViewState·PlayViewState 의 자체 대역 문자열 삭제. SelectListState 필드 갱신. §7.2 4번(자체 id 대역 20_001~20_315) 항목 삭제.
+- (W1-1b) r2-rbms-render.md §8.1(결합 지점 전수 표): 대체 플래그, 플래그 소비, 레이어(SkinLayer/draw_layer/draw_matching), 대체 요건 표, 대체 판정, 합성 질의, 레거시 필드 지오메트리(with_document_lanes/document_field), 핫스팟, 자체 id 대역 행을 삭제. '합성 방식' 행은 '모델에만 남음, 소비자 없음(W1-2 삭제 대상)'으로. '플레이/선택/결과 그리기' 행은 '문서가 그리면 반환, 아니면 내장' 2갈래로. '스킨 객체의 Skin 의존' 행에 '이제 내장 필드 그대로(문서로 덮지 않음)' 추가. '배경 슬롯 이중 경로' 는 문서 유무 2분기로.
+- (W1-1b) r2-rbms-render.md §8.2: '걷어낼 것' 중 content.rs·ResultContent·*_with_content*, SkinLayer·draw_layer, hotspot·SkinHotAction, 자체 id 대역, with_document_lanes·document_field 는 완료. 남은 것은 SkinComposition·replace 모델 필드(W1-2)와 스킨 객체의 &Skin 의존(W6). ResultExtras 는 내장 결과 화면 입력으로 유지됨을 명시.
+- (W1-1b) r2-rbms-render.md §1·§10: crates/rbms-render/src/lib.rs 의 재노출 목록에서 content 모듈, render_hud_with_content(_ctx), OptionsRows, SkinHotAction, SkinHotspot 삭제. render_select_screen 시그니처는 그대로(view 를 받음), render_result_screen 도 그대로.
+- (W1-6) r2-rbms-render.md §6.1 마지막 줄 '패밀리 전환: set_family/reset_family 가 ... 캐시를 전부 비운다' 는 '레이아웃 캐시는 family->px->text 로 패밀리별 분기를 가지며 전환 시 아무것도 비우지 않는다. 런·아틀라스 캐시는 CacheKey 의 font_id 로 구분된다' 로 바뀌어야 합니다. 같은 절의 캐시 설명도 'px -> text -> Laid' 가 'family -> px -> text -> Laid' 로 바뀌었고 한도 512 는 전 패밀리 합계입니다.
+- (W1-6) r2-rbms-render.md §6.2 성능 문제 절은 해소됨으로 표시하고(set_family/reset_family 의 캐시 전체 삭제 제거), 요약(§0)·권고(§10)의 해당 항목도 완료 처리해야 합니다.
+- (W1-6) r2-rbms-render.md §6.3 폰트 로드 결함은 해소됨으로 바꿔야 합니다. load_font 는 fontdb load_font_source 가 돌려주는 새 face ID 로 성공을 판정하고 비폰트 바이트는 None 이며 fontdb 가 조용히 버리는 것도 실행 테스트로 확인되었습니다(미확인 문구 삭제). 이에 따라 skin_render/mod.rs:284-290 호출부는 .fnt 를 skin.fonts 로 받으면 이제 오류 분기로 갑니다.
+
 
 조사 기준일 2026-10-09. 읽기 전용 조사. 경로는 별도 표기가 없으면 `/Users/hyunseokbyun/development/R-BMS` 기준이고, `beatoraja:` 접두는 `/Users/hyunseokbyun/development/beatoraja/src/bms/player/beatoraja` 기준이다.
 

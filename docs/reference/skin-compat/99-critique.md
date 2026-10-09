@@ -1,6 +1,15 @@
 # 99. 종합 보고서(00-synthesis.md) 비판 — 틀린 주장, 빠진 기능, 작업 분해 결함, 고유 기능 구멍
 
-> 최종 갱신 2026-10-09 · 대응 단계: L1 조사(구현 전) · 기준 커밋 `9ce92bb` · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-09 · 대응 단계: 웨이브 1A(철거) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 1A 반영 사항"이 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 1A 반영 사항 (2026-10-09)
+
+혼합 합성과 구 번들을 삭제한 뒤의 상태다. 본문의 해당 절은 아래 내용으로 읽는다.
+
+- (W1-1b) 99-critique.md §4 P1 의 W1-1 행: lib.rs 재노출, skin_render/draw.rs 의 Body::Density, skin_render/tests*.rs, stage/mod.rs 선언, skin_select/tests.rs, 5개 테스트 파일은 처리 완료. 남은 것은 rbms-config(STEEL_NEON_SKIN, shared_customise, default_skin_installed)와 stage/settings.rs·settings_ui.rs·settings/skin_tests.rs·main_tests.rs·skin_select/fixtures.rs 의 번들·프리셋 참조(W1-1a). §4 P7 1번: 캡처 테스트 5개는 삭제됐고 W1-9 전까지 RBMS_SKIN_CAPTURE_DIR 를 읽는 코드가 없음.
+- (W1-1a) 99-critique.md §4 P1 의 W1-1 행 중 설정·자산·번들 참조 부분(rbms-config lib.rs/settings.rs/tests.rs, stage/settings.rs, skin_tests.rs, skin_select tests/fixtures, main_tests.rs)과 P6 의 '설정 마이그레이션 테스트' 행: 해소로 표시(검증 파일 crates/rbms-config/src/tests.rs:503, 568, 605).
+- (W1-1a) 99-critique.md 에 새 항목 추가 권장: 계정 설정 블롭 경로(apps/rbms-player/src/ir_sync.rs parse_blob)가 rbms_config::migrate 를 거치지 않아 스키마 2 이하 블롭에 구 번들 마이그레이션이 적용되지 않음.
+
 
 작성일 2026-10-09. 읽기 전용 검증. 세 대상 디렉터리는 수정하지 않았고 cargo 는 실행하지 않았다. 유일한 쓰기는 이 파일과 스크래치의 집계 스크립트 2개(`scratchpad/critique-tools/ids.py`, `casecheck.py`)다.
 

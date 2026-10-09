@@ -1,6 +1,21 @@
 # R1 — `crates/rbms-skin` 현황과 풀 Lua 스킨까지의 격차
 
-> 최종 갱신 2026-10-09 · 대응 단계: L1 조사(구현 전) · 기준 커밋 `9ce92bb` · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-09 · 대응 단계: 웨이브 1A(철거) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 1A 반영 사항"이 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 1A 반영 사항 (2026-10-09)
+
+혼합 합성과 구 번들을 삭제한 뒤의 상태다. 본문의 해당 절은 아래 내용으로 읽는다.
+
+- (리뷰 수정) §(510행, 소비자 쪽 테스트 규모): 'render_tests_skin*.rs 5파일 1,639줄'을 '삭제, 대체 render_tests_document.rs 1파일 약 240줄'로 갱신.
+- (W1-1b) r1-rbms-skin.md §7(확장 표)의 '소비자 위치' 열: composition, destination.layer, replace, hotspot, densitygraph, 사설 id 20001~20315, judge.images 의 text 행은 소비자 없음으로 갱신. assets.rs:1002 의 replace_names 사용도 삭제됨. scope 'bundle' 행(skin_select.rs)과 nested 행은 변동 없음.
+- (W1-1a) r1-rbms-skin.md §7 473행 부근 `scope: 'bundle'` 행의 앱 사용처 열: apps/rbms-player/src/skin_select.rs 사용처는 이제 없음(SCOPE_BUNDLE import 와 shared_scope 삭제). 남은 사용처는 rbms-skin 내부와 그 테스트뿐.
+- (W1-2) r1-rbms-skin.md §0 한 장 요약과 §3.1 표: 마지막 행 '(없음) | composition, densitygraph, result, replace, hotspot | rbms 전용' 이 사라졌습니다. 이제 SkinDef 최상위 필드는 레퍼런스 43개와 일치합니다. 대응 줄(§3.1 line 122, 129)의 '+ rbms 확장 scope' 표기도 삭제하세요.
+- (W1-2) r1 §3.2 표: Property, Filepath, Offset 행의 '추가 scope' 비고와 Destination 행의 '추가 layer' 비고를 삭제하세요.
+- (W1-2) r1 §7 표: composition, destination.layer, replace, hotspot, scope bundle, densitygraph 행을 '이 크레이트에서 제거 완료(W1-2)' 로 바꾸세요. NamedTrack 에서 layer 필드, loader.rs 에서 HOTSPOT_ACTIONS·keep_known_hotspots·replace_names, resolve.rs 에서 CustomFile.scope 가 사라졌고, 줄 번호 참조(model.rs:359-366 등)가 모두 낡았습니다.
+- (W1-2) r1 §8 테스트 표: skin_model.rs 는 23건에서 21건, skin_nested.rs 는 14건에서 8건입니다. 확장 의존 5~6건이 삭제됐고 fixtures/nested 는 확장 키가 정리됐으니 '확장 키 정리' 비고를 완료로 바꾸세요. skin_loader.rs 54건·skin_resolve.rs 30건 그대로입니다(scope 초기화만 삭제).
+- (W1-2) r1 §9 U11 행: 이 크레이트 몫(model.rs·loader.rs·resolve.rs·skin_nested.rs·skin_model.rs·fixtures/nested)이 완료됐고 scope·densitygraph 도 같은 단위에서 함께 삭제됐습니다. §9 말미 '소비자에 전파되는 시그니처 변경' 의 NamedTrack.layer, replace_names, def.hotspot, def.composition 항목은 이 크레이트에서 제거 완료로 표시하세요.
+- (W1-3) r1-rbms-skin.md §5.3 말미 '권고는 lua52 이다' 와 §5.4 S15 등: 'lua52 전환 완료(W1-3), src/lua.rs 는 무수정으로 5.2 에서 동작, skin_lua 테스트 32개 통과'로 현황을 바꿔야 합니다. §5.1~5.2 의 현재 설정이 lua54 라고 적힌 곳이 있으면 lua52 로 고쳐야 합니다.
+
 
 조사일 2026-10-09. 읽기 전용 조사이며 세 디렉터리의 파일은 수정하지 않았다. cargo 는 실행하지 않았다(테스트 통과 여부는 미확인, 코드 정독 기준).
 

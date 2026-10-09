@@ -1,5 +1,7 @@
 # 스킨 제작 가이드
 
+> **2026-10-09 폐기 예정 문서.** 아래의 기본 번들 `steel-neon-v3`, 합성 모드(`overlay`/`layered`), 내장 화면 대체(`replace`), `hotspot`, rbms 전용 속성 id 20000 대역, 번들 스코프 옵션은 웨이브 1A 에서 삭제됐다. 지금은 SKIN 탭에서 고른 JSON/JSON5 문서가 화면을 단독으로 그리거나, 문서가 없으면 내장 화면이 그린다. 새 가이드는 `docs/plan/2026-10-09-lua-skin-compat.md` 의 웨이브 8 에서 다시 쓴다.
+
 최종 갱신 2026-09-18 · 대응 코드: `dev` 작업 트리(기준 커밋 `4537ad6` + 미커밋 스킨 시스템 변경, `docs/HANDOFF.md` 참조).
 
 rbms 는 화면마다 JSON5 스킨 문서를 읽어 그린다. 문서가 없는 화면은 내장 화면으로 그려진다. 이 문서는 기본 번들 `steel-neon-v3` 를 기준으로 폴더 구조, 문서 계약, 커스터마이즈, 검증 방법을 설명한다. 엔진 계약의 정본은 `docs/plan/2026-09-17-skin-system-completion.md` 이고, 색 테마(`theme.ron`)는 `docs/theme.md` 를 본다.

@@ -1,6 +1,34 @@
 # R3 — R-BMS 앱(apps/rbms-player) 스킨 배선·화면 구성·입력 현황과 격차
 
-> 최종 갱신 2026-10-09 · 대응 단계: L1 조사(구현 전) · 기준 커밋 `9ce92bb` · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-09 · 대응 단계: 웨이브 1A(철거) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 1A 반영 사항"이 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 1A 반영 사항 (2026-10-09)
+
+혼합 합성과 구 번들을 삭제한 뒤의 상태다. 본문의 해당 절은 아래 내용으로 읽는다.
+
+- (리뷰 수정) §3 또는 §4(설정 저장·마이그레이션): 구 번들 선택값 폐기가 파일 로더(crates/rbms-config/src/io.rs migrate)뿐 아니라 계정 설정 다운로드(apps/rbms-player/src/ir_sync.rs parse_blob, 409 충돌 서버 사본 포함)에서도 스키마 2 이하 블롭에 적용된다는 점을 추가.
+- (리뷰 수정) §8.2(418, 422, 426행): render_playfield_on_background, render_select_on_background_with_content, render_result_on_background_with_content 를 '제거 대상'으로 적은 행을 '제거 완료'로 갱신. on_background 진입점은 전부 없어졌고 내장 화면은 render_playfield_view, render_select(_ctx), render_result_with_palette(_ctx) 만 남았습니다.
+- (리뷰 수정) §8.6(영향받는 테스트, 477~481행): render_tests_skin.rs 행의 '대부분 폐기 또는 재작성'을 실제 결과로 바꿔야 합니다. 5개 파일 삭제, 남는 동작 5건(문서 단독 그리기, 읽는 동안 내장 화면, 문서 없으면 내장 프레임 불변, 화면 간 격리, play bga 객체)은 apps/rbms-player/src/stage/render_tests_document.rs 로 옮겼고 결과·결정 화면 단독 그리기 1건을 추가(총 6건).
+- (W1-1b) r3-rbms-app.md §8.2(앱 쪽 코드 표): skin_screen.rs·stage/play/mod.rs·stage/select/mod.rs·stage/result.rs·app_options.rs·app_input.rs 행 전부 처리 완료로 바꾸고 줄 번호 삭제. 남은 것은 assets.rs 게이트(아래), stage/loading.rs·stage/keyconfig.rs 의 '문서가 못 그리면 내장' 폴백 두 행뿐. skin_screen.rs 에 남은 진입점은 prepare_skin, has_skin_document, skin_offsets, skin_frame, draw_play_skin, draw_select_skin(canvas, view, background), draw_result_skin, draw_decide_skin, draw_keyconfig_skin.
+- (W1-1b) r3-rbms-app.md §2.3(문서 활성화 게이트): skin_document_is_enabled 는 이제 '선택 없음 → false, 선택 경로가 번들 세대(steel-neon, -v2, -v3) 문서 경로 → 항상 false, 그 외 → true'. display.skin 프리셋은 문서 on/off 에 더 이상 관여하지 않음(필드 RON·theme.ron·sound 선택에만 남음).
+- (W1-1b) r3-rbms-app.md §2.2 7번: '컴파일 전에는 내장 레이아웃' 은 유지. 6번의 '대체 미충족 경고 토스트'는 삭제됨(컴파일 경고 첫 줄 토스트만 남음).
+- (W1-1b) r3-rbms-app.md §6.1~§6.4: FrameExtra::Select 의 SelectListState 는 {rows, sel, detail, options_open: bool}. OptionsRows(라벨·값 11쌍) 삭제. PlayViewState 에서 target_delta 삭제. ResultViewState 의 with_hint/with_ir_status 와 IR 상태 한 줄 문자열(IR_STATUS_SEPARATOR) 삭제 — 결과 문서에 IR 상태는 공급되지 않음. draw_document 의 layer 인자, draw_*_skin_layer 3종 삭제. §6.2 주의점의 '레인 → 타이머 키 번호는 내장 Skin.x' 는 그대로이고, Skin 이 더 이상 문서 note.dst 로 덮이지 않는다는 문장을 추가.
+- (W1-1b) r3-rbms-app.md §7.2(클릭 판정 구조): 스킨 핫스팟 사상(select_hotspots → Hot)이 삭제됨. 문서가 그리는 화면은 hot 영역을 하나도 등록하지 않음. 내장 render_select 의 SelectHot → Hot 사상만 남음.
+- (W1-1b) r3-rbms-app.md §8.5: 옵션 오버레이는 screen_content 게이트 없이 열려 있으면 항상 그림(문서 위 시스템 오버레이). 키 봄은 내장 경로에서만 그림(문서가 그리는 프레임에는 없음).
+- (W1-1b) r3-rbms-app.md §8.6(영향받는 테스트 표): render_tests_skin*.rs 5개 삭제 완료. stage/select/tests.rs 의 write_blocks_document·blocks_app·테스트 4건 삭제(476행 이후 전부). stage/play/tests.rs 는 대체 표·레인 결합·키 봄 테스트 4건 삭제, 단독 문서 픽스처(play_document())로 키 타이머·넛지 2건 유지. skin_select/tests.rs 의 bundled_default_documents_compile_without_warnings 삭제. assets.rs 의 RESULT_REPLACEMENT_CONTRACT 삭제, 게이트 단언 2곳 반전. 전체 테스트 수 3,181 은 낡음(rbms-player lib 858, rbms-render lib 273).
+- (W1-1a) r3-rbms-app.md §2.1 표 '설정' 행: SkinOptions 는 { folder, screen, selected, custom } 넷뿐(schema.rs:252). shared 와 default_skin_installed 삭제, '번들키 → 공유 커스터마이즈' 문구 삭제.
+- (W1-1a) r3-rbms-app.md §2.2 항목 9 (c) '번들 공유 행 변경 → 같은 번들의 모든 화면 stale' 삭제(stale_bundle 없음). 같은 절의 skin_select.rs 줄 번호 전부 재기재 필요(파일 818 → 578줄, skin_root 는 483행).
+- (W1-1a) r3-rbms-app.md §2.3 전체 교체: assets.rs 의 skin_document_is_enabled 는 삭제됐고 게이트는 skin_screen.rs:397 의 비공개 메서드 'config.skin.document(screen).is_some()' 한 줄. DISPLAY SKIN 프리셋은 NORMAL/WIDE 둘뿐이며 필드 RON 만 고름. theme.ron 은 항상 <설정 폴더>/theme.ron, 사운드 폴더는 프리셋과 무관.
+- (W1-1a) r3-rbms-app.md §3.1 전체 교체: 내장분은 사운드 22개뿐(assets.rs:43 embedded_sounds! 매크로, :53 DEFAULT_SOUNDS). 설치는 run() 초입 lib.rs:1122 의 install_default_sounds(settings_path) 가 매 실행 <설정 폴더>/skin/rbms-default/sound/ 에 없는 파일만 create_new 로 씀. 세대, SHA-256 비교, 세대 이동, 최초 선택 채우기, 설치 플래그는 없음. theme.ron 템플릿은 load_theme(assets.rs:171)이 파일이 없을 때 씀. 소스 크기는 assets/skins/rbms-default 580 KB.
+- (W1-1a) r3-rbms-app.md §3.2: '덮어쓰지 않는 규칙 때문에 세대를 올려야 한다' 항목은 세대 개념이 사라져 삭제. compute_build_hash 설명은 유지.
+- (W1-1a) r3-rbms-app.md §4: SkinRow 는 Property / File / Offset(axis) 셋(skin_select.rs:144). '두 스코프', bundle_key, shared[번들키], scope: 'bundle' 공유 행 서술 삭제. user_config(path) 는 custom[path] 만 돌려줌(schema.rs:302).
+- (W1-1a) r3-rbms-app.md §5 표의 6행(skin_document_is_enabled 프리셋 결합), 8행(bundle_key), 14행(sound_folder_path 의 STEEL NEON 조건): 현재 상태로 갱신. 6행은 완료, 8행은 대상 함수 삭제, 14행은 '미지정이면 설치된 기본 세트(assets.rs:106 default_sound_folder)'.
+- (W1-1a) r3-rbms-app.md §8.2 표의 'assets.rs 305-318 skin_document_is_enabled 프리셋 게이트 → 단순화' 행: 완료 표시.
+- (W1-1a) r3-rbms-app.md §8.6 표: 'assets.rs 내 mod tests' 행은 번들 테스트 7건 삭제와 사운드 설치 테스트 3건 추가로 갱신(mod tests 는 382행부터). 'skin_select/tests.rs, fixtures.rs' 행은 번들 스코프 테스트 4건, installed_default_documents 테스트, SHARED 픽스처 삭제 반영. 'stage/settings/skin_tests.rs' 행은 6건 → 5건(번들 공유 행 테스트 삭제).
+- (W1-1a) r3-rbms-app.md §10.1 '폴더 해석 순서': (2)를 '프리셋과 무관하게 <설정 폴더>/skin/rbms-default/sound (첫 실행에 설치, 폴더가 없으면 무음)'으로 교체. 참조는 lib.rs:215 sound_folder_path, assets.rs:106.
+- (W1-1a) r3-rbms-app.md §12 B3 행(schema.rs:247-399 범위)과 §14 의 줄 번호: schema.rs 가 줄어 범위 재기재 필요.
+- (W1-2) r3 와 00-synthesis 의 매트릭스에서 rbms-skin 의 'hotspot/replace/scope/densitygraph/composition/layer' 열이 있다면 '삭제됨' 으로 갱신하세요(해당 열은 이 단위에서 직접 확인하지 못했습니다).
+
 
 - 조사일: 2026-10-09, 대상 브랜치 `dev`(HEAD `9ce92bb`), 읽기 전용 조사
 - 표기: `R:` = `/Users/hyunseokbyun/development/R-BMS/` 기준 경로, `B:` = `/Users/hyunseokbyun/development/beatoraja/src/bms/player/beatoraja/` 기준 경로, `M:` = `/Users/hyunseokbyun/Downloads/ModernChic/` 기준 경로

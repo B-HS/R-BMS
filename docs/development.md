@@ -80,10 +80,11 @@ the configuration directory.
   does not branch on mode (it is data). Judge windows: add a row to `crates/rbms-judge/data/judge.ron`
   keyed by the mode name if it needs different timing; `JudgeProperty::for_mode` reads that file and
   only falls back to the compiled-in table for a mode the file does not name.
-- **Note-field skin**: `assets/skins/*.ron` (`SkinConfig`), or `--skin file.ron`. The RON is the fallback; the
-  installed bundle `~/.config/rbms/skin/steel-neon-v3/` drives every screen with JSON5 documents
-  (bundle sources `assets/skins/steel-neon-v3/`, registered in `assets.rs` `BUNDLE_GENERATIONS`). Authoring
-  contract, replace units, hotspots and bundle-scoped options: `skin.md`.
+- **Note-field skin**: `assets/skins/*.ron` (`SkinConfig`), or `--skin file.ron`. These RON files lay out
+  the built-in play screen. A reference-format JSON/JSON5 skin document selected in Settings → SKIN draws
+  its screen on its own (no mixing with the built-in layout). The bundled `steel-neon` generations and the
+  layered composition were removed on 2026-10-09; full Lua skin support is being built per
+  `plan/2026-10-09-lua-skin-compat.md`. The system sound set lives in `assets/skins/rbms-default/sound/`.
 - **UI theme**: `~/.config/rbms/theme.ron` (`ThemeConfig`); add a field to `rbms_render::theme::Theme`
   + route one `Color::rgb(..)` through `theme()`. See `theme.md`.
 - **Settings screen**: add a `SettingId` variant and a `SETTINGS` row in `rbms_config::settings`
