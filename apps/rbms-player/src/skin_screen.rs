@@ -114,6 +114,7 @@ use crate::assets::{DecodePool, FileStamp, SkinAsset, SkinAssetJob, SkinAssetKin
 use crate::ir_session::submission_player_id;
 use crate::notify::{Level, notify};
 use crate::pointer::PointerInput;
+use crate::scene_clock::SceneClock;
 use crate::skin_host::chart::{ChartMeta, ChartState};
 use crate::skin_host::ir::{IrLink, IrPhase};
 use crate::skin_host::keyconfig::KeyConfigState;
@@ -1025,9 +1026,9 @@ impl AppShared {
         self.skin_screens.hold.map_or_else(|| self.scene_run(), |hold| hold.at)
     }
 
-    /// How long ago the scene clock was started, whether or not the scene is held.
+    /// What the scene clock reads, whether or not the scene is held.
     fn scene_run(&self) -> Duration {
-        self.scene_instant().saturating_duration_since(self.scene_started)
+        self.scene_clock.elapsed(self.scene_instant())
     }
 
     /// The instant the scene clock is read at and started from: now.
@@ -1074,7 +1075,7 @@ impl AppShared {
     fn reset_skin_scene(&mut self) {
         self.skin_timers.clear();
         self.skin_screens.scene_moved();
-        self.scene_started = self.scene_instant();
+        self.scene_clock = SceneClock::begun(self.scene_instant());
     }
 
     /// Take the running scene out to be parked, and begin a fresh one for the screen about to be
@@ -1101,15 +1102,21 @@ impl AppShared {
         self.skin_timers = timers;
         self.skin_screens.scene_moved();
         drop(parked);
-        let now = self.scene_instant();
-        self.scene_started = now.checked_sub(elapsed).unwrap_or(now);
+        self.scene_clock = SceneClock::at(self.scene_instant(), elapsed);
     }
 
     /// Make the running scene look as old as `by` more, for the tests that need a clock with
     /// something on it.
     #[cfg(test)]
     pub(crate) fn age_skin_scene(&mut self, by: Duration) {
-        self.scene_started = self.scene_started.checked_sub(by).expect("the process has been up for longer than the age asked for");
+        self.scene_clock = self.scene_clock.aged(by);
+    }
+
+    /// Put the running scene's clock at `at`, whether or not the scene is held, for the tests and
+    /// the captures that count a scene's time themselves.
+    #[cfg(test)]
+    pub(crate) fn put_skin_scene_at(&mut self, at: Duration) {
+        self.scene_clock = SceneClock::at(self.scene_instant(), at);
     }
 
     /// Make the wait the running scene is held for look as though it has outlasted its limit, for
@@ -1210,8 +1217,7 @@ impl AppShared {
     /// Set a held scene going again from where it stood.
     fn release_scene_hold(&mut self) {
         if let Some(hold) = self.skin_screens.hold.take() {
-            let now = self.scene_instant();
-            self.scene_started = now.checked_sub(hold.at).unwrap_or(now);
+            self.scene_clock = SceneClock::at(self.scene_instant(), hold.at);
         }
     }
 

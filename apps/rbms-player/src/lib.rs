@@ -81,6 +81,7 @@ mod notify;
 mod play_sink;
 mod pointer;
 mod practice;
+mod scene_clock;
 mod scoredb_store;
 mod settings_ui;
 mod settings_view;
@@ -740,12 +741,12 @@ struct AppShared {
     /// outlives the screen that shows it.
     ir_status: IrStatus,
     /// The wall clock the audio fallback and the timing probe read, restarted when a run begins. The
-    /// skin does not read it: that is [`AppShared::scene_started`].
+    /// skin does not read it: that is [`AppShared::scene_clock`].
     clock: Instant,
     /// When the application started, which is what the skin's boot-time numbers count from.
     booted: Instant,
-    /// When the running scene began, which is what the skin clock counts from.
-    scene_started: Instant,
+    /// How long the running scene has run, which is what the skin clock reads.
+    scene_clock: scene_clock::SceneClock,
     /// Where a test has stopped the machine's side of the skin clock
     /// ([`AppShared::stop_scene_clock`]).
     #[cfg(test)]
@@ -975,7 +976,7 @@ impl App {
                 ir_status: IrStatus::Off,
                 clock: Instant::now(),
                 booted: Instant::now(),
-                scene_started: Instant::now(),
+                scene_clock: scene_clock::SceneClock::begun(Instant::now()),
                 #[cfg(test)]
                 scene_stopped_at: None,
                 anchor_us: 0,

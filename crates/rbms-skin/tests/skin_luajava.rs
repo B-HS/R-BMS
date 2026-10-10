@@ -213,13 +213,18 @@ fn list_files(runtime: &SkinLua) -> impl Fn(&str) -> Option<Vec<String>> {
 /// Everything under `root`, directories included, with what shows a change: kind, size and the
 /// moment it was last changed. A directory that gained an entry changes, so this is how a tree is
 /// shown to be untouched.
+///
+/// Each entry is asked for its own record, not the copy its directory's listing carries. Windows
+/// brings the listing's copy of a folder's modification time up to date some time after the folder
+/// changed, so a folder the fixture filled a moment ago would be listed with an older time now and
+/// with its real one later, and read as changed by whatever ran in between.
 fn tree(root: &Path) -> BTreeMap<PathBuf, (bool, u64, SystemTime)> {
     let mut found = BTreeMap::new();
     let mut pending = vec![root.to_path_buf()];
     while let Some(directory) = pending.pop() {
         for entry in std::fs::read_dir(&directory).expect("the directory should be listable").flatten() {
             let path = entry.path();
-            let metadata = entry.metadata().expect("the entry should be readable");
+            let metadata = std::fs::symlink_metadata(&path).expect("the entry should be readable");
             if metadata.is_dir() {
                 pending.push(path.clone());
             }

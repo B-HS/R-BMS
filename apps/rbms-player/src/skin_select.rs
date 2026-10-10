@@ -37,7 +37,7 @@ use rbms_skin::loader::{
 };
 use rbms_skin::model::{OffsetDef, PropertyDef};
 use rbms_skin::property::{DefaultState, SkinHost};
-use rbms_skin::resolve::{CustomFile, RANDOM_SELECTION};
+use rbms_skin::resolve::{CustomFile, RANDOM_SELECTION, plain_path};
 
 use crate::assets::skin_overlay_folder;
 
@@ -220,7 +220,7 @@ pub(crate) struct SkinLibrary {
     /// The pack's document for each screen it has one for.
     pack_documents: BTreeMap<i32, String>,
     /// The documents that were found in the pack, which are the ones read with the pack as their
-    /// root.
+    /// root, each in its plain spelling ([`plain_path`]).
     pack_paths: BTreeSet<PathBuf>,
     /// What every header read so far answered.
     headers: HeaderCache,
@@ -436,7 +436,7 @@ impl SkinLibrary {
         self.root = skin_root(settings_path, config);
         let mut documents = self.headers.scan(&self.root, SCAN_MAX_DEPTH);
         for header in self.read_pack(config) {
-            if !documents.iter().any(|known| known.path == header.path) {
+            if !documents.iter().any(|known| same_document(&known.path, &header.path)) {
                 documents.push(header);
             }
         }
@@ -462,7 +462,7 @@ impl SkinLibrary {
             None => Vec::new(),
         };
         found.sort_by_cached_key(|header| (file_name_key(&header.path), header.path.clone()));
-        self.pack_paths = found.iter().map(|header| header.path.clone()).collect();
+        self.pack_paths = found.iter().map(|header| plain_path(&header.path)).collect();
         self.pack_documents.clear();
         for header in &found {
             self.pack_documents.entry(header.skin_type).or_insert_with(|| header.path.to_string_lossy().into_owned());
@@ -494,7 +494,7 @@ impl SkinLibrary {
     /// The header of the document one screen is to be drawn with.
     pub(crate) fn header_of(&self, config: &Config, screen: i32) -> Option<&SkinHeader> {
         let path = self.document_path(config, screen)?;
-        self.documents.iter().find(|header| header.path == Path::new(path))
+        self.documents.iter().find(|header| same_document(&header.path, Path::new(path)))
     }
 
     /// The header of the document the screen being configured is to be drawn with.
@@ -851,17 +851,28 @@ impl SkinLibrary {
         is_supported_skin_type(screen).then(|| path.to_owned())
     }
 
+    /// The folder `document` may read files from: the pack's for a document found in the pack, and
+    /// the skin folder for any other.
+    ///
+    /// A document is found in the pack whichever way its path spells Windows' verbatim prefix. The
+    /// pack's own documents come back from their headers in more than one spelling -- a Lua skin's
+    /// without the prefix, whatever the pack was named with -- and a path stored by hand may carry
+    /// it or not.
+    fn reading_root(&self, document: &Path) -> &Path {
+        match self.pack.as_deref() {
+            Some(pack) if self.pack_paths.contains(&plain_path(document)) => pack,
+            _ => self.root.as_path(),
+        }
+    }
+
     /// Read the document at `path` whole, for `screen`.
     ///
     /// A document found in the pack may read the pack's folder and nothing above it; any other may
-    /// read the skin folder. Whatever the skin writes goes to the overlay kept for its pack beside
-    /// the settings file, never into the skin's own folder.
+    /// read the skin folder ([`SkinLibrary::reading_root`]). Whatever the skin writes goes to the
+    /// overlay kept for its pack beside the settings file, never into the skin's own folder.
     fn read(&self, config: &Config, path: &str, screen: i32, read: SkinRead<'_>) -> Result<Box<LoadedSkin>, String> {
         let document = Path::new(path);
-        let root = match self.pack.as_deref() {
-            Some(pack) if self.pack_paths.contains(document) => pack,
-            _ => self.root.as_path(),
-        };
+        let root = self.reading_root(document);
         let user = config.skin.user_config(path);
         let overlay = skin_overlay_folder(&self.settings_path, document);
         let mode = skin_type_mode(screen).unwrap_or(crate::MODE);
@@ -900,6 +911,12 @@ pub(crate) fn pack_from_environment(value: Option<OsString>) -> Option<PathBuf> 
 /// ignoring case.
 fn file_name_key(path: &Path) -> String {
     path.file_name().map(|name| name.to_string_lossy().to_ascii_uppercase()).unwrap_or_default()
+}
+
+/// Whether two paths name one document, however each spells Windows' verbatim prefix
+/// ([`plain_path`]): `\\?\C:\skins\pack\play.luaskin` is `C:\skins\pack\play.luaskin`.
+fn same_document(one: &Path, other: &Path) -> bool {
+    plain_path(one) == plain_path(other)
 }
 
 /// Whether the skin leaves any decision to Lua -- a function a Lua skin handed over, or a script a

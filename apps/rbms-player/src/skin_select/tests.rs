@@ -277,7 +277,8 @@ fn a_lua_skin_waits_for_its_screen_and_is_read_against_its_state() {
     host.integers.insert(SCORE_NUMBER.0, SCORE_NUMBER.1);
     fixture.read_waiting(PLAY_7KEYS, &host);
     assert!(!fixture.skins.is_waiting(PLAY_7KEYS));
-    let skin = fixture.skins.document(PLAY_7KEYS).expect("the skin was read on its screen's frame");
+    let skin =
+        fixture.skins.document(PLAY_7KEYS).unwrap_or_else(|| panic!("the skin was not read on its screen's frame: {:?}", fixture.skins.failure(PLAY_7KEYS)));
     assert_eq!(skin.parser, ParserKind::Lua);
     assert!(fixture.skins.info(&fixture.config).starts_with("1920X1080 - Lua - LUA"), "{}", fixture.skins.info(&fixture.config));
     let drawn = skin.selected_options.iter().find(|(name, _)| name == RANDOM_ROW).map(|(_, option)| *option).expect("the row is the skin's");
@@ -304,6 +305,34 @@ fn a_lua_skin_waits_for_its_screen_and_is_read_against_its_state() {
         .collect();
     assert!(draws.len() > 1, "the seed a read is given does not reach its draws: {draws:?}");
     assert_eq!(files_under(&pack), before, "reading the skin changed its folder");
+}
+
+/// A pack's document is read with the pack as its root whichever way its path spells Windows'
+/// verbatim prefix: the pack's Lua skins come back from their headers without it, and a path chosen
+/// by hand -- or made from the pack's canonical folder -- carries it. The paths are Windows' own
+/// and only their text is read, so this holds on every platform.
+#[test]
+fn a_pack_document_is_the_packs_whichever_way_its_path_spells_the_verbatim_prefix() {
+    const PLAIN: &str = r"C:\skins\pack\play.luaskin";
+    const VERBATIM: &str = r"\\?\C:\skins\pack\play.luaskin";
+    const SHARED_PLAIN: &str = r"\\server\share\pack\decide.json";
+    const SHARED_VERBATIM: &str = r"\\?\UNC\server\share\pack\decide.json";
+    const ELSEWHERE: &str = r"\\?\C:\skins\other\play.luaskin";
+
+    assert!(same_document(Path::new(PLAIN), Path::new(VERBATIM)));
+    assert!(same_document(Path::new(SHARED_VERBATIM), Path::new(SHARED_PLAIN)));
+    assert!(!same_document(Path::new(PLAIN), Path::new(ELSEWHERE)), "two folders were taken for one");
+
+    let mut fixture = Fixture::new("pack-verbatim");
+    let pack = mini_pack();
+    fixture.name_pack(&pack);
+    let folder = fixture.skins.root.clone();
+    for (found_as, named_as) in [(PLAIN, VERBATIM), (VERBATIM, PLAIN), (SHARED_VERBATIM, SHARED_PLAIN), (SHARED_PLAIN, SHARED_VERBATIM)] {
+        fixture.skins.pack_paths = BTreeSet::from([plain_path(Path::new(found_as))]);
+        assert_eq!(fixture.skins.reading_root(Path::new(named_as)), pack, "{named_as} was not read as the pack's document {found_as}");
+        assert_eq!(fixture.skins.reading_root(Path::new(found_as)), pack);
+        assert_eq!(fixture.skins.reading_root(Path::new(ELSEWHERE)), folder, "a document outside the pack was given the pack to read");
+    }
 }
 
 /// A Lua skin whose body fails leaves its screen to the built-in layout, says why once, and is not

@@ -125,11 +125,9 @@ thread_local! {
 /// Put the scene clock and the song clock of `app` where the test's count says they are.
 fn pin(app: &mut App) {
     let clocks = CLOCKS.get();
-    let now = Instant::now();
-    let behind = |by: Duration| now.checked_sub(by).expect("the process has been up for longer than the time asked for");
-    app.shared.scene_started = behind(clocks.scene);
+    app.shared.put_skin_scene_at(clocks.scene);
     if let Some(song) = clocks.song {
-        app.shared.clock = behind(song);
+        app.shared.clock = Instant::now().checked_sub(song).expect("the process has been up for longer than the time asked for");
     }
 }
 

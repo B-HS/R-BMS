@@ -244,7 +244,7 @@ fn draw_until_compiled_on(app: &mut App, screen: i32, scene_us: i64, canvas: &mu
 /// the frame is drawn the way the render snapshot tests draw one.
 fn draw_on(app: &mut App, stage: Stage, scene_us: i64, canvas: &mut Canvas<'_>) {
     let age = Duration::from_micros(u64::try_from(scene_us).expect("a scene has no time before it began"));
-    app.shared.scene_started = Instant::now().checked_sub(age).expect("the process has been up for longer than the scene time asked for");
+    app.shared.put_skin_scene_at(age);
     render_on(app, stage, canvas);
 }
 
@@ -665,7 +665,7 @@ fn write_rich_chart(tag: &str) -> PathBuf {
 /// draw, which is the order the application runs them in. Answers what the update asked for.
 pub(super) fn scene_frame_at(app: &mut App, scene_ms: i64, canvas: &mut Canvas<'_>) -> Transition {
     let age = Duration::from_millis(u64::try_from(scene_ms).expect("a scene has no time before it began"));
-    app.shared.scene_started = Instant::now().checked_sub(age).expect("the process has been up for longer than the scene time asked for");
+    app.shared.put_skin_scene_at(age);
     let now = Instant::now();
     let transition = app.stage.update(&mut FrameCtx { shared: &mut app.shared, now, dt: FRAME_DT });
     if matches!(transition, Transition::Stay) {
@@ -1963,10 +1963,9 @@ impl PlayClocks {
         self.scene += by;
         self.song = self.song.map(|song| song + by);
         let now = Instant::now();
-        let behind = |by: Duration| now.checked_sub(by).ok_or_else(|| "the process has not been up for as long as the run".to_owned());
-        app.shared.scene_started = behind(self.scene)?;
+        app.shared.put_skin_scene_at(self.scene);
         if let Some(song) = self.song {
-            app.shared.clock = behind(song)?;
+            app.shared.clock = now.checked_sub(song).ok_or_else(|| "the process has not been up for as long as the run".to_owned())?;
         }
         let transition = app.stage.update(&mut FrameCtx { shared: &mut app.shared, now, dt: FRAME_DT });
         if !matches!(transition, Transition::Stay) {

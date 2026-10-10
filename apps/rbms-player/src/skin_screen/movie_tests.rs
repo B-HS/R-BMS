@@ -77,7 +77,7 @@ impl Pack {
     /// Puts the scene clock at `scene_us`.
     fn set_clock(&mut self, scene_us: i64) {
         let age = Duration::from_micros(u64::try_from(scene_us).expect("a scene has no time before it began"));
-        self.app.shared.scene_started = Instant::now().checked_sub(age).expect("the process has been up for longer than the scene time asked for");
+        self.app.shared.put_skin_scene_at(age);
     }
 
     /// One frame of the key configuration screen with the scene clock where it is; answers whether

@@ -94,7 +94,7 @@ impl AppShared {
     /// skin's first frame the scene's first moment. The skin itself is left as it was read.
     pub(crate) fn start_skin_scene_clock(&mut self) {
         self.skin_timers.clear();
-        self.scene_started = self.scene_instant();
+        self.scene_clock = crate::scene_clock::SceneClock::begun(self.scene_instant());
     }
 }
 
@@ -224,5 +224,29 @@ mod tests {
         assert_eq!(app.shared.skin_now_us(), 0);
         app.shared.begin_skin_scene();
         assert_eq!(app.shared.skin_now_us(), 0);
+    }
+
+    /// A scene is put, parked, put back and aged at a time the machine has not been up for. Windows
+    /// has no instant from before the machine came up, so a scene clock kept as the instant its
+    /// scene began had nowhere to put such a scene, and read it as one that had just begun.
+    #[test]
+    fn the_scene_clock_is_put_further_on_than_the_machine_has_been_up() {
+        const SECONDS_PER_DAY: u64 = 86_400;
+        const DAYS_NO_MACHINE_STAYS_UP: u64 = 3_650;
+        const PUT_AT: std::time::Duration = std::time::Duration::from_secs(DAYS_NO_MACHINE_STAYS_UP * SECONDS_PER_DAY);
+        let put_at_us = i64::try_from(PUT_AT.as_micros()).expect("ten years of microseconds fit");
+        let mut app = crate::stage::render_tests::app();
+        app.shared.stop_scene_clock();
+
+        app.shared.set_skin_scene_clock(put_at_us);
+        assert_eq!(app.shared.skin_now_us(), put_at_us, "a replay carried past the machine's uptime did not take its scene there");
+
+        let parked = app.shared.suspend_skin_scene();
+        assert_eq!(app.shared.skin_now_us(), 0);
+        app.shared.resume_skin_scene(parked);
+        assert_eq!(app.shared.skin_now_us(), put_at_us, "a scene older than the machine's uptime was put back as a new one");
+
+        app.shared.age_skin_scene(PUT_AT);
+        assert_eq!(app.shared.skin_now_us(), put_at_us + put_at_us);
     }
 }
