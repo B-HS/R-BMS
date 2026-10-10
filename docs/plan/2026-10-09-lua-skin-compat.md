@@ -391,6 +391,11 @@ R-BMS 고유 규칙
 - mp4·m4v 외 동영상 확장자(wmv, webm, mpg, avi 등)는 원본대로 동영상으로 분류되지만 디코더가 없어 경고 1회 후 그리지 않는다. BMS 곡의 BGA 동영상은 범위 밖이다(웨이브 9).
 - 미확인: Linux·Windows 빌드와 nasm 없는 x86_64 의 디코드 속도(CI 결과로 확인), 실제 창에서의 연속 재생.
 
+**CI 복구(2026-10-11)** — 웨이브 7B 푸시 뒤 CI 를 처음 확인해, Ubuntu 는 웨이브 1B 부터, Windows 는 웨이브 2A 부터, macOS 는 웨이브 7A 부터 테스트 작업이 실패하고 있었음을 발견했다(메인의 확인 누락). Workflow `wf_c1ed92d1-93e`, `wf_40d5eac7-aed` 로 원인을 고쳐 run `38077937158`(커밋 `cf47348`)에서 세 OS 와 fmt + clippy 가 전부 통과했다(작업당 4~8분, 이전 34~57분).
+- 원인: 입력 값이 할당 크기를 정하는 경로(비트맵 폰트의 조작된 advance 로 64 GiB, 차트 길이로 67 GB), Windows 의 verbatim 접두사 `\\?\` 경로 처리와 CRLF 체크아웃, `App::new` 마다 실행 파일 전체를 해시(테스트가 느려진 주원인), Windows 에서 `Instant - Duration` 이 실패해 장면 시계가 0 으로 돌아가는 제품 결함, 디렉터리 수정 시각의 목록 사본 지연, 벽시계 고정 상한 테스트.
+- 구조 변경: 장면 시계는 `apps/rbms-player/src/scene_clock.rs` 의 `SceneClock`(마지막으로 놓인 Instant + 그때 읽은 시간). 텍스트 블록·그래프 pixmap 상한(변 8192, 총 4096x4096 픽셀). 차트의 초 단위 표 상한 `rbms_chart::MAX_TABLED_SECONDS`(86,400초). 경로 철자는 `rbms_skin::resolve::plain_path`. 연습 구간은 스킨 로드를 기다린 뒤 재생한다. CI 는 `--no-fail-fast` 와 `timeout-minutes`(test 90, lint 20. 실제 소요에 맞춰 W8-3 에서 낮춘다).
+- OpenH264 는 세 OS 에서 추가 설치 단계 없이 빌드되고 동영상 테스트가 통과한다.
+
 ### 웨이브 8 — 기본 스킨, 스킨 팩, 정리
 
 끝 상태: 첫 실행부터 자작 기본 스킨으로 전 화면이 그려진다.
@@ -424,6 +429,7 @@ UI 는 실제 렌더를 확인한 뒤에만 됐다고 보고한다(`docs/feedbac
 ## 8. 게이트와 커밋
 
 - 게이트: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace`, `git diff --check`.
+- **CI 게이트(2026-10-11 추가)**: 푸시 뒤 `gh run list --branch dev --limit 3` 으로 GitHub Actions(ubuntu·macos·windows 의 `cargo test --workspace --no-fail-fast`) 결과를 확인한다. 실패하면 `gh run view <id> --log-failed` 로 원인을 찾아 다음 웨이브 전에 고친다. 로컬 통과는 CI 통과의 근거가 아니다(`docs/feedback/2026-10-11-ci-not-checked-after-push.md`).
 - Rust 규칙: `//` 주석 금지(`//!`·`///` 영어 문서 주석만), 매직넘버 상수화, `#[allow]` 금지, `unsafe` 금지, rustfmt `max_width 160`.
 - 커밋(D7): 웨이브가 게이트를 통과하면 되돌릴 수 있는 논리 단위로 선별 스테이징해 커밋하고 `origin/dev` 에 일반 push. Conventional Commits, 설명은 한국어, author 단독, AI 트레일러 금지, `git add -A` 금지, force push 금지. 하위 에이전트는 커밋하지 않는다.
 
