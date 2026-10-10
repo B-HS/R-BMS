@@ -1,6 +1,15 @@
 # R2 — R-BMS 렌더 계층(crates/rbms-render, GPU 백엔드) 현황과 격차
 
-> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 7B(동영상 source) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 8A(기본 스킨 골격) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 8A 반영 사항 (2026-10-11)
+
+선곡 키 표에서 NEXT_REPLAY 를 빼고(사용자 결정 D8), 자작 기본 스킨의 설계서(`docs/plan/2026-10-11-default-skin-design.md`)와 골격(`assets/skins/rbms-default/`: 공통 Lua, 이미지 생성 스크립트, 결정 화면)을 넣은 뒤의 상태다.
+
+- (W8-2a) 외부 스킨 테스트: `crates/rbms-render/tests/skin_external.rs` 의 SHOTS 는 진입 파일 이름(decide.luaskin, result.luaskin, course.luaskin, musicselect.luaskin, play7_hw.luaskin 등)이 고정이라 ModernChic 전용이다. 헤더 type 으로 문서를 찾는 것은 앱 캡처 하니스뿐이다. 기본 스킨의 저장소 게이트 테스트는 아직 없다(W8-5)
+- (W8-2a) 텍스트: 선언되지 않은 폰트 id 를 쓰는 text 는 경고 없이 `draw_stand_in` 경로(축소·줄바꿈·그림자 없음)로 그려진다. 로더와 덤프에 경고가 없어 오타가 조용히 지나간다
+- (W8-2a) value 객체는 선언한 digit 보다 큰 값의 아래 자리만 그린다(원본과 같은 동작, `skin_render/object.rs` 의 `integer_glyphs`). 기본 스킨은 스킨 쪽에서 자릿수를 값으로 정하거나 최댓값에서 멈추게 한다(설계서 3.3절)
+
 
 ## 웨이브 7B 반영 사항 (2026-10-11)
 

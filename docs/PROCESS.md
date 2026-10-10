@@ -33,7 +33,10 @@
   - [x] 웨이브 7A — 비트맵 폰트(W7-3, W7-4)와 디코더 조사(W7-1): `.fnt` 로더(libGDX 1.9.9 바이트코드 기준 조판), type 0 과 distance field 그리기(CPU·GPU 동일 계산). Workflow `wf_46905912-776`(5 에이전트), 리뷰 major 1·minor 7 처리. 게이트: 테스트 4,676 통과·0 실패, 골든 불변. 디코더는 OpenH264 소스 빌드 + `re_mp4` 로 선정(`docs/reference/skin-compat/v2-video-decoder.md`, 결정 문서 "동영상 디코더" 절).
   - [x] 웨이브 7B — 동영상 source(W7-2): `crates/rbms-video`(OpenH264 + `re_mp4`), 스킨 동영상 source 재생. Workflow `wf_1a4c0731-1e7`(3 에이전트), 리뷰 major 1·minor 5 수정. 게이트: 테스트 4,776 통과·0 실패(피처 끈 구성 포함). ModernChic mp4 8개 전부 디코드(프레임 수 일치), 시스템 디코더와 화소 대조 일치, 앱 플레이 화면의 범용 BGA 동영상을 메인이 직접 확인.
   - [x] CI 복구(2026-10-11) — 웨이브 1B~7B 동안 확인하지 않은 CI 실패(Ubuntu 1B~, Windows 2A~, macOS 7A~)를 고쳤다: 할당 상한(텍스트 블록·그래프·차트 길이), Windows 경로·줄바꿈·장면 시계, 느린 테스트(실행 파일 해시), 벽시계 의존 테스트. Workflow `wf_c1ed92d1-93e`·`wf_40d5eac7-aed`. run `38077937158`(`cf47348`)에서 세 OS 전부 통과, 작업당 4~8분. 이후 푸시마다 `gh run list` 로 확인한다(사양 §8, `docs/feedback/2026-10-11-ci-not-checked-after-push.md`).
-- [ ] L5. 기본 스킨 — 사양 §6 의 웨이브 8(W8-1~W8-6): 스킨 팩 선택과 SKIN 탭, 자작 기본 스킨 `assets/skins/rbms-default/`, 내장·설치, 폴백 정리, 테스트 재편.
+- [ ] L5. 기본 스킨 — 사양 §6 의 웨이브 8. 실행 분할: 8A(W8-0, W8-2a) → 8B(W8-2b 선곡, W8-2c 플레이, W8-2d 결과) → 8C(W8-1 죽은 설정 행·기기 로컬 경로·레터박스 기본값, W8-3 내장·설치·릴리스·제3자 고지, W8-4 폴백, W8-5 테스트 재편, W8-6 문서). 위임은 Workflow 전용, 모델은 Opus(high 이하)와 Sonnet(xhigh 이하)만 쓴다(2026-10-11 사용자 재확인: Fable 금지).
+  - [x] 웨이브 8A — 선곡 키 표의 NEXT_REPLAY 제거(D8, 숫자 4 만 슬롯을 넘김)와 기본 스킨 설계서 `docs/plan/2026-10-11-default-skin-design.md`·골격(`assets/skins/rbms-default/`: 공통 Lua, 이미지 생성 스크립트, 결정 화면). Workflow `wf_38f63f0c-00f`(4 에이전트), 리뷰 major 4·minor 9 처리. 게이트: 테스트 4,812 통과·0 실패, 골든 불변. 메인이 결정 화면 캡처를 직접 확인. ModernChic Lua 136개와 대조해 복사 없음(D1).
+  - [ ] 웨이브 8B — 선곡, 플레이 SP(5/7/9)·DP(10/14), 결과·코스 결과 문서. 설계서 9절의 분할을 따른다.
+  - [ ] 웨이브 8C — W8-1, W8-3~W8-6.
 - [ ] L6. 검증 — 웨이브마다 게이트(fmt, clippy `--all-targets --all-features -D warnings`, `cargo test --workspace`, `git diff --check`)와 캡처를 메인이 직접 확인한다. 최종으로 덤프 도구의 pcall 실패 0 과 화면별 캡처를 `m2`~`m5` 레이아웃과 대조한다.
 - [ ] L7. 문서·이력 — 웨이브마다 조사 문서(`r1`~`r3`, `00-synthesis`)와 이 체크리스트를 갱신하고, 마지막에 `docs/skin.md`·history·QA·HANDOFF 를 정리한다.
 

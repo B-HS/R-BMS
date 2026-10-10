@@ -1,6 +1,13 @@
 # b5. beatoraja 속성 id 전수 목록과 R-BMS 대조
 
-> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 6(플레이) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 8A(기본 스킨 골격) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 8A 반영 사항 (2026-10-11)
+
+선곡 키 표에서 NEXT_REPLAY 를 빼고(사용자 결정 D8), 자작 기본 스킨의 설계서(`docs/plan/2026-10-11-default-skin-design.md`)와 골격(`assets/skins/rbms-default/`: 공통 Lua, 이미지 생성 스크립트, 결정 화면)을 넣은 뒤의 상태다.
+
+- (W8-2a) §5 의 140(RATE_PGREAT) 행과 §16 의 12번 행: 현재 `apps/rbms-player/src/skin_host/score.rs` 는 플레이·결과에서 RATE_PGREAT..=RATE_MAXCOMBO 와 RATE_EXSCORE 에 0.0 을 돌려준다(선곡만 `select.rs` 가 값을 준다). 기본 스킨의 결과 화면 판정 막대는 Lua 값 함수로 설계했다
+
 
 ## 웨이브 6 반영 사항 (2026-10-11)
 
