@@ -14,7 +14,7 @@ pub use data::{
     builtin_judge_tables, load_gauge_tables, load_judge_tables,
 };
 pub use gauge::{ClearType, Gauge, GaugeKind, clear_lamp, clear_type_from_id, clear_type_id};
-pub use matcher::{JudgeEngine, JudgeResult};
+pub use matcher::{JudgeEngine, JudgeResult, NoteMark};
 pub use windows::{JudgeProperty, JudgeWindows, MissCondition, judgerank_for, rank_to_judgerank};
 
 /// A single judgment outcome, in the reference implementation's judge-code order. `Poor` is index 4 (見逃し POOR — a

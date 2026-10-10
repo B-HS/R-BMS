@@ -70,13 +70,14 @@ impl HeldButtons {
     }
 }
 
-/// Hand one event to a screen, unless the option panel is over it.
+/// Hand one event to a screen, unless the option panel is over it or an object of the skin the
+/// screen is drawn with took it ([`crate::AppShared::skin_pointer`]).
 ///
 /// An open panel takes the mouse for the same reason it takes the keys: the list underneath must
 /// not move while the panel is being read, and a click on a row would otherwise start a chart and
 /// leave the panel drawn over the run.
 pub(crate) fn route_pointer(handler: &mut dyn StageHandler, ctx: &mut FrameCtx<'_>, at: (f32, f32), input: PointerInput) -> Transition {
-    if ctx.shared.options.is_open() {
+    if ctx.shared.options.is_open() || ctx.shared.skin_pointer(at, input) {
         return Transition::Stay;
     }
     match input {

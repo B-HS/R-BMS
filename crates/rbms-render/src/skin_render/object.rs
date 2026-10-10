@@ -799,15 +799,18 @@ pub(crate) fn image_sprite(def: &ImageDef, sources: Source<'_>) -> Option<Sprite
 /// such an object before the first frame (`SkinObject.validate`, checked by `Skin.prepare`), so its
 /// conditions are never asked; keeping it would call whatever functions the skin gated it on, on
 /// every frame, for an object that can never be drawn.
+///
+/// `kept` is given, for each object built, which of the document's destinations it was built from.
 pub(crate) fn build_objects(
     skin: &LoadedSkin,
     sources: Source<'_>,
     families: &[(String, String)],
     assets: &mut dyn SkinAssets,
     warnings: &mut Vec<String>,
+    kept: &mut Vec<usize>,
 ) -> Vec<SkinObject> {
     let mut objects = Vec::with_capacity(skin.destinations.len());
-    for named in &skin.destinations {
+    for (destination, named) in skin.destinations.iter().enumerate() {
         let Some(body) = build_body(skin, &named.id, sources, families, assets, warnings) else {
             continue;
         };
@@ -816,6 +819,7 @@ pub(crate) fn build_objects(
             continue;
         }
         objects.push(SkinObject::new(&named.track, body));
+        kept.push(destination);
     }
     objects
 }

@@ -620,7 +620,7 @@ impl PlayState {
         let field = NoteField { field: &ctx.shared.skin, playfield, shade, bomb: self.session.bomb(), keys_down: &keys_down };
         let data = FrameData {
             field: Some(&field),
-            gauge: Some(GaugeFrame { kind: gauge_kind.min(GAUGE_KINDS - 1), clear_threshold: ctx.shared.skin.gauge_clear_threshold }),
+            gauge: Some(GaugeFrame::of_kind(gauge_kind.min(GAUGE_KINDS - 1), ctx.shared.skin.gauge_clear_threshold)),
             series: FrameSeries { recent_hits: Some(RecentHits::new(&self.recent_hits)), ..FrameSeries::default() },
             bga: BgaFrame::of(background),
             ..FrameData::default()

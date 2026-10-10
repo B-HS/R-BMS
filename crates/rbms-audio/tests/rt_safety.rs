@@ -56,6 +56,10 @@ const RETIRE_SLOTS: usize = 256;
 /// Buffers rendered after the last owner reference is dropped, long enough for every voice to reach
 /// the end of its sample and hand it back.
 const DRAIN_BUFFERS: usize = 64;
+/// Buffers a looped effect is rendered for, long enough to wrap its sample several times over.
+const LOOP_WRAPS_BUFFERS: usize = 64;
+/// A channel key whose sample id is `EFFECT_KEY / 256`.
+const EFFECT_KEY: u32 = 40 * 256 + 3;
 
 fn sample(value: f32) -> Arc<SampleData> {
     Arc::new(SampleData { pcm: vec![value; SAMPLE_FRAMES].into(), channels: 1, rate: OUT_RATE })
@@ -128,4 +132,29 @@ fn the_callback_path_never_reaches_the_allocator() {
         handed_back += 1;
     }
     assert_eq!(handed_back, VOICES, "every sample must come back to the owning thread to be freed");
+
+    let (loop_retire_tx, mut loop_retire_rx) = rtrb::RingBuffer::<Arc<SampleData>>::new(RETIRE_SLOTS);
+    let mut looping = Mixer::new(OUT_RATE, OUT_CHANNELS, VOICES);
+    looping.set_retire(loop_retire_tx);
+    let effect_owner = sample(0.5);
+    let mut effect_queued = vec![Command::PlayEffect { sample: Arc::clone(&effect_owner), gain: 1.0, key: EFFECT_KEY, bus: Bus::System, looped: true }];
+    looping.mix(&mut out);
+
+    let wrapping = measure(|| {
+        for cmd in effect_queued.drain(..) {
+            looping.apply(cmd);
+        }
+        for _ in 0..LOOP_WRAPS_BUFFERS {
+            looping.mix(&mut out);
+        }
+        looping.apply(Command::StopId { id: EFFECT_KEY / 256 });
+        for _ in 0..DRAIN_BUFFERS {
+            looping.mix(&mut out);
+        }
+    });
+    assert_eq!(wrapping.allocations, 0, "a looped effect allocated while it wrapped or was stopped");
+    assert_eq!(wrapping.deallocations, 0, "a looped effect freed memory while it wrapped or was stopped");
+    assert_eq!(looping.stats().active_voices, 0, "a stopped loop must leave the mixer");
+    drop(effect_owner);
+    assert!(loop_retire_rx.pop().is_ok(), "the looped sample must come back to the owning thread to be freed");
 }

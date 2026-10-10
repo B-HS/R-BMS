@@ -285,6 +285,23 @@ impl Gauge {
         self.value
     }
 
+    /// The value this gauge has to reach to clear (`GaugeElementProperty.border`), which is where a
+    /// result gauge graph changes colour.
+    pub fn border(&self) -> f32 {
+        self.border
+    }
+
+    /// The highest value this gauge can hold (`GaugeElementProperty.max`), which a result gauge
+    /// graph scales its height against.
+    pub fn max(&self) -> f32 {
+        self.max
+    }
+
+    /// The lowest value this gauge can hold (`GaugeElementProperty.min`).
+    pub fn min(&self) -> f32 {
+        self.min
+    }
+
     /// Which of the nine slots this gauge is.
     pub fn index(&self) -> GaugeIndex {
         self.index

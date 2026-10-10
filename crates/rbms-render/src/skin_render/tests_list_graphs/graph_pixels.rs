@@ -14,8 +14,11 @@ use rbms_skin::timer::{MICROS_PER_MILLI, TimerState, timer_id};
 use super::{Nothing, Scratch, SolidAssets};
 use crate::ctx::RenderCtx;
 use crate::font::TextContext;
+use crate::skin_render::frame::{GAUGE_TYPES, GaugeScale};
 use crate::skin_render::graphs::PlayCursor;
-use crate::skin_render::{BpmTimeline, FrameData, FrameSeries, NoteDistribution, SkinFrame, SkinObjectKind, SkinScreen};
+use crate::skin_render::{
+    BpmTimeline, FrameData, FrameSeries, GaugeFrame, GaugeHistory, NoteDistribution, SkinFrame, SkinObjectKind, SkinScreen, TimingHistogram,
+};
 use crate::{Color, CpuCanvas, QuadParams, Rect, Renderer, TextureId};
 
 const CANVAS_W: u32 = 200;
@@ -514,6 +517,54 @@ fn both_graphs_hand_their_textures_back_with_the_screen() {
     let mut ctx = RenderCtx::new(crate::theme::theme(), &mut text);
     assert_eq!(screen.draw(&mut ctx, &mut tracked, &frame), 2);
     assert_eq!(tracked.live.len(), 3, "the distribution's ground and chips, and the tempo line");
+
+    screen.draw(&mut ctx, &mut tracked, &frame);
+    assert_eq!(tracked.live.len(), 3, "drawing again uploads nothing new");
+
+    screen.release(&mut tracked);
+    assert!(tracked.live.is_empty(), "and releasing the screen hands every one of them back: {:?}", tracked.live);
+}
+
+#[test]
+fn the_gauge_and_timing_graphs_hand_their_textures_back_with_the_screen() {
+    let scratch = Scratch::new("release-run");
+    let body = format!(
+        r#"{{ "type": 7, "name": "run graph fixture", "w": {CANVAS_W}, "h": {CANVAS_H},
+            "gaugegraph": [{{ "id": "gauge-graph" }}], "timingdistributiongraph": [{{ "id": "timing-graph" }}],
+            "destination": [
+                {{ "id": "gauge-graph", "dst": [{{ "x": {JUDGE_X}, "y": {JUDGE_Y}, "w": {JUDGE_W}, "h": {JUDGE_H} }}] }},
+                {{ "id": "timing-graph", "dst": [{{ "x": {BPM_X}, "y": {BPM_Y}, "w": {BPM_W}, "h": {BPM_H} }}] }}
+            ] }}"#
+    );
+    let path = scratch.root.join("run-graphs.json");
+    std::fs::write(&path, body).expect("the document is writable");
+    let user = SkinUserConfig::default();
+    let options = SkinLoadOptions { rng_seed: Some(1), ..SkinLoadOptions::new(&scratch.root, &user, rbms_model::Mode::BEAT_7K) };
+    let skin = load_skin(&path, options).expect("the generated document loads");
+
+    let mut tracked = Counting::new();
+    let mut text = TextContext::embedded_only();
+    let mut screen = SkinScreen::build(&mut tracked, &mut text, &skin, &mut SolidAssets);
+    assert_eq!(screen.count_of(SkinObjectKind::GaugeGraph) + screen.count_of(SkinObjectKind::TimingDistribution), 2);
+    assert!(tracked.live.is_empty(), "a screen uploads nothing for a graph until it draws it");
+
+    let samples = [20.0, 40.0, 60.0];
+    let bins = [0, 3, 9, 3, 0];
+    let series = FrameSeries { gauge_history: Some(GaugeHistory::new(&samples)), timing: Some(TimingHistogram::new(&bins)), ..FrameSeries::default() };
+    let gauge = GaugeFrame::finished(2, 60.0, [GaugeScale::new(2.0, 100.0, 80.0); GAUGE_TYPES]);
+    let timers = TimerState::new();
+    let state = Nothing;
+    let frame = SkinFrame {
+        now_us: 500 * MICROS_PER_MILLI,
+        timers: &timers,
+        state: &state,
+        lua: None,
+        mouse: None,
+        data: FrameData { series, gauge: Some(gauge), ..FrameData::default() },
+    };
+    let mut ctx = RenderCtx::new(crate::theme::theme(), &mut text);
+    assert_eq!(screen.draw(&mut ctx, &mut tracked, &frame), 2);
+    assert_eq!(tracked.live.len(), 3, "the gauge graph's ground and line, and the timing spread");
 
     screen.draw(&mut ctx, &mut tracked, &frame);
     assert_eq!(tracked.live.len(), 3, "drawing again uploads nothing new");

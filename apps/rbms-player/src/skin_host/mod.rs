@@ -12,7 +12,10 @@
 //!
 //! A skin also tells the game things: run an event, move a slider, play a sound. Those arrive while
 //! a frame is being drawn, when nothing may change, so they are recorded as they arrive and handed
-//! over afterwards ([`ScreenHost::take_calls`]).
+//! over afterwards ([`ScreenHost::take_calls`]). What was handed over is then sorted out by who
+//! carries it out ([`dispatch_calls`]): an event or a write goes to the cluster that owns its id
+//! ([`EVENT_ROUTES`], [`WRITE_ROUTES`]), a sound to the sound system, and an id nobody owns goes
+//! nowhere and says nothing, as the reference lets an event no screen defines pass.
 //!
 //! Every skin screen is drawn through this host. Until each cluster has the state it reads, the
 //! screen also hands over the adapter it was drawn from before ([`ScreenHost::fallback`]), and an id
@@ -36,12 +39,14 @@ pub mod writers;
 
 use std::borrow::Cow;
 use std::cell::RefCell;
+use std::path::PathBuf;
 
 use rbms_skin::dst::{DrawStateSource, OffsetSource, SkinOffset};
 use rbms_skin::property::generated::*;
 use rbms_skin::property::{
-    AudioCommand, FLOAT_ABSENT, HostCall, IMAGE_INDEX_ABSENT, INTEGER_ABSENT, STRING_KEYNAME_EXTENDED_FIRST, STRING_KEYNAME_EXTENDED_LAST,
-    STRING_KEYNAME_FIRST, STRING_KEYNAME_LAST, ScoreSlot, ScoreSnapshot, SkinHost, StaticScreen, TEXT_ABSENT, VolumeBus, normalize_boolean_id, static_scope,
+    AudioCommand, FLOAT_ABSENT, HostCall, IMAGE_INDEX_ABSENT, INTEGER_ABSENT, NameSpace, STRING_KEYNAME_EXTENDED_FIRST, STRING_KEYNAME_EXTENDED_LAST,
+    STRING_KEYNAME_FIRST, STRING_KEYNAME_LAST, ScoreSlot, ScoreSnapshot, SkinHost, StaticScreen, TEXT_ABSENT, VolumeBus, normalize_boolean_id,
+    reference_writes, static_scope,
 };
 use rbms_skin::timer::{TimerId, TimerState};
 
@@ -289,6 +294,14 @@ pub const ROUTES: &[Route] = &[
     Route::band(IdSpace::Boolean, OPTION_BEST_AAA_1P, OPTION_BEST_F_1P, Cluster::Score),
     Route::band(IdSpace::Boolean, OPTION_NOW_AAA_1P, OPTION_NOW_F_1P, Cluster::Score),
     Route::band(IdSpace::Boolean, OPTION_PERFECT_EXIST, OPTION_MISS_EXIST, Cluster::Score),
+    Route::band(IdSpace::Integer, NUMBER_PERFECT2, NUMBER_POOR_RATE, Cluster::Score),
+    Route::band(IdSpace::Integer, NUMBER_PERFECT, NUMBER_POOR, Cluster::Score),
+    Route::one(IdSpace::Integer, NUMBER_GROOVEGAUGE_AFTERDOT, Cluster::Score),
+    Route::one(IdSpace::Integer, NUMBER_RIVAL_SCORE, Cluster::Score),
+    Route::one(IdSpace::Float, FLOAT_RIVAL_RATE, Cluster::Score),
+    Route::one(IdSpace::Float, FLOAT_TARGET_RATE, Cluster::Score),
+    Route::one(IdSpace::Float, FLOAT_GROOVEGAUGE_1P, Cluster::Score),
+    Route::band(IdSpace::Rate, RATE_PGREAT, RATE_EXSCORE, Cluster::Score),
     Route::one(IdSpace::Boolean, OPTION_1P_PERFECT, Cluster::Play),
     Route::one(IdSpace::Boolean, OPTION_2P_PERFECT, Cluster::Play),
     Route::one(IdSpace::Boolean, OPTION_3P_PERFECT, Cluster::Play),
@@ -349,10 +362,20 @@ pub const ROUTES: &[Route] = &[
     Route::band(IdSpace::Boolean, OPTION_1PWIN, OPTION_DRAW, Cluster::Result),
     Route::band(IdSpace::Boolean, OPTION_DRAW_SCORE, OPTION_DRAW_TARGET, Cluster::Result),
     Route::band(IdSpace::ImageIndex, INDEX_CLEAR, INDEX_TARGET_CLEAR, Cluster::Result),
+    Route::band(IdSpace::Boolean, OPTION_GAUGE_GROOVE, OPTION_GAUGE_HARD, Cluster::Result),
+    Route::one(IdSpace::Boolean, OPTION_GAUGE_EX, Cluster::Result),
+    Route::band(IdSpace::Boolean, OPTION_NO_REPLAYDATA, OPTION_REPLAYDATA_SAVED, Cluster::Result),
+    Route::band(IdSpace::Boolean, OPTION_NO_REPLAYDATA2, OPTION_REPLAYDATA4_SAVED, Cluster::Result),
+    Route::one(IdSpace::Float, FLOAT_DURATION_AVERAGE, Cluster::Result),
+    Route::one(IdSpace::Float, FLOAT_TIMING_AVERAGE, Cluster::Result),
+    Route::one(IdSpace::Float, FLOAT_TIMIGN_STDDEV, Cluster::Result),
+    Route::band(IdSpace::Text, STRING_COURSE1_TITLE, STRING_COURSE10_TITLE, Cluster::Result),
     Route::band(IdSpace::Integer, NUMBER_IR_RANK, NUMBER_IR_PREVRANK, Cluster::Ir),
     Route::band(IdSpace::Integer, NUMBER_IR_TOTALPLAYER2, NUMBER_IR_PLAYER_TOTAL_FULLCOMBO_RATE_AFTERDOT, Cluster::Ir),
     Route::band(IdSpace::Integer, NUMBER_RIVAL_SCORE, NUMBER_RIVAL_POOR_RATE, Cluster::Ir),
     Route::band(IdSpace::Integer, NUMBER_RANKING1_EXSCORE, NUMBER_RANKING10_CLEAR, Cluster::Ir),
+    Route::band(IdSpace::ImageIndex, NUMBER_RANKING1_EXSCORE, NUMBER_RANKING10_CLEAR, Cluster::Ir),
+    Route::one(IdSpace::Rate, RATE_RANKING_POSITION, Cluster::Ir),
     Route::band(IdSpace::Float, FLOAT_IR_PLAYER_NOPLAY_RATE, FLOAT_IR_TOTALFULLCOMBORATE, Cluster::Ir),
     Route::band(IdSpace::Float, FLOAT_RIVAL_PERFECT_RATE, FLOAT_RIVAL_POOR_RATE, Cluster::Ir),
     Route::band(IdSpace::Boolean, OPTION_OFFLINE, OPTION_ONLINE, Cluster::Ir),
@@ -392,6 +415,313 @@ fn routed_set(space: IdSpace, id: i32) -> u16 {
     ROUTES.iter().filter(|route| route.covers(space, id)).fold(0, |set, route| set | route.cluster.bit())
 }
 
+/// The events the song browser runs, as the reference numbers them and without a constant of their
+/// own there (`EventType.difficulty`, `open_document`, `open_ir` to `open_download_site`,
+/// `songbar_sort`).
+const EVENT_DIFFICULTY: i32 = 10;
+const EVENT_OPEN_DOCUMENT: i32 = 17;
+const EVENT_OPEN_DOWNLOAD_SITE: i32 = 213;
+const EVENT_SONGBAR_SORT: i32 = 312;
+
+/// The events that change a player setting and that the reference numbers without a constant
+/// (`EventType.hispeed1p`, `duration1p`, `notesdisplaytimingautoadjust`, `chartreplicationmode`,
+/// `constant`). `bgaexpand`, 73, has none either and sits inside the run that ends at the third.
+const EVENT_HISPEED: i32 = 57;
+const EVENT_DURATION: i32 = 59;
+const EVENT_TIMING_AUTO_ADJUST: i32 = 75;
+const EVENT_CHART_REPLICATION_MODE: i32 = 344;
+const EVENT_CONSTANT: i32 = 400;
+
+/// The key assignment events, in the two runs the reference numbers them in
+/// (`EventPattern.keyAssignIds`: `keyassign1` to `keyassign39`, then `keyassign40` to `keyassign54`).
+const EVENT_KEY_ASSIGN_FIRST: i32 = 101;
+const EVENT_KEY_ASSIGN_FIRST_LAST: i32 = 139;
+const EVENT_KEY_ASSIGN_SECOND: i32 = 150;
+const EVENT_KEY_ASSIGN_SECOND_LAST: i32 = 164;
+
+/// The last customise row the reference's skin settings screen answers. The row after it has a
+/// constant ([`BUTTON_SKIN_CUSTOMIZE10`]) and no effect, because the screen tests for ids below it
+/// (`SkinPropertyMapper.isSkinCustomizeButton`).
+const EVENT_SKIN_CUSTOMIZE_LAST: i32 = BUTTON_SKIN_CUSTOMIZE10 - 1;
+
+/// One run of event ids a cluster carries out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EventRoute {
+    /// The lowest id of the run, inclusive.
+    pub first: i32,
+    /// The highest id of the run, inclusive.
+    pub last: i32,
+    pub cluster: Cluster,
+}
+
+impl EventRoute {
+    /// A run from its endpoints, both inclusive.
+    const fn band(first: i32, last: i32, cluster: Cluster) -> EventRoute {
+        EventRoute { first, last, cluster }
+    }
+
+    /// A run of a single id.
+    const fn one(id: i32, cluster: Cluster) -> EventRoute {
+        EventRoute::band(id, id, cluster)
+    }
+}
+
+/// Which cluster carries out which events, grouped by cluster.
+///
+/// These are the events the reference gives a meaning to: the ones in its event table
+/// (`EventType`, `EventPattern`) and the ones its skin settings screen answers
+/// (`SkinConfiguration.executeEvent`). Most of the table only does anything on the song browser, and
+/// which settings an event changes is the same wherever it is run from, so a setting's event is the
+/// settings cluster's and a screen's own event is that screen's. An event two screens answer
+/// differently -- the replay slots load a replay on the browser and save one on the result screen --
+/// is routed to both, and each ignores it while its screen is not the one that is up.
+///
+/// An id outside every run is no event at all: the reference still builds one for it, which asks the
+/// screen and is ignored there (`MainState.executeEvent`). That includes the ids it has a constant
+/// for and nothing behind (`BUTTON_GAUGE_2P`, the `BUTTON_ASSIST_*` run, the tenth customise row).
+/// It also includes the skin's own `customEvents`, which nothing loads yet.
+pub const EVENT_ROUTES: &[EventRoute] = &[
+    EventRoute::band(EVENT_DIFFICULTY, EVENT_OPEN_DOCUMENT, Cluster::Select),
+    EventRoute::one(BUTTON_REPLAY, Cluster::Select),
+    EventRoute::one(BUTTON_RIVAL, Cluster::Select),
+    EventRoute::band(BUTTON_FAVORITTE_SONG, BUTTON_FAVORITTE_CHART, Cluster::Select),
+    EventRoute::band(BUTTON_OPEN_IR_WEBSITE, EVENT_OPEN_DOWNLOAD_SITE, Cluster::Select),
+    EventRoute::one(EVENT_SONGBAR_SORT, Cluster::Select),
+    EventRoute::band(BUTTON_PRACTICE, BUTTON_REPLAY4, Cluster::Select),
+    EventRoute::one(BUTTON_REPLAY, Cluster::Result),
+    EventRoute::band(BUTTON_FAVORITTE_SONG, BUTTON_FAVORITTE_CHART, Cluster::Result),
+    EventRoute::one(BUTTON_OPEN_IR_WEBSITE, Cluster::Result),
+    EventRoute::band(BUTTON_REPLAY2, BUTTON_REPLAY4, Cluster::Result),
+    EventRoute::one(BUTTON_GAUGE_1P, Cluster::Options),
+    EventRoute::band(BUTTON_RANDOM_1P, BUTTON_RANDOM_2P, Cluster::Options),
+    EventRoute::band(BUTTON_DPOPTION, BUTTON_HSFIX, Cluster::Options),
+    EventRoute::one(EVENT_HISPEED, Cluster::Options),
+    EventRoute::one(EVENT_DURATION, Cluster::Options),
+    EventRoute::band(BUTTON_BGA, EVENT_TIMING_AUTO_ADJUST, Cluster::Options),
+    EventRoute::band(BUTTON_TARGET, BUTTON_GAUGEAUTOSHIFT, Cluster::Options),
+    EventRoute::one(BUTTON_LNMODE, Cluster::Options),
+    EventRoute::band(BUTTON_AUTOSAVEREPLAY_1, BUTTON_AUTOSAVEREPLAY_4, Cluster::Options),
+    EventRoute::band(BUTTON_LANECOVER, BUTTON_HIDDEN, Cluster::Options),
+    EventRoute::band(BUTTON_JUDGEALGORITHM, EVENT_CHART_REPLICATION_MODE, Cluster::Options),
+    EventRoute::band(BUTTON_EXTRANOTE, BUTTON_LONGNOTEMODE, Cluster::Options),
+    EventRoute::band(BUTTON_SEVENTONINE_PATTERN, BUTTON_SEVENTONINE_TYPE, Cluster::Options),
+    EventRoute::one(EVENT_CONSTANT, Cluster::Options),
+    EventRoute::band(BUTTON_PRACTICE_ITEM1, BUTTON_PRACTICE_ITEM16, Cluster::Play),
+    EventRoute::band(EVENT_KEY_ASSIGN_FIRST, EVENT_KEY_ASSIGN_FIRST_LAST, Cluster::KeyConfig),
+    EventRoute::band(EVENT_KEY_ASSIGN_SECOND, EVENT_KEY_ASSIGN_SECOND_LAST, Cluster::KeyConfig),
+    EventRoute::band(BUTTON_SKINSELECT_7KEY, BUTTON_SKINSELECT_COURSE_RESULT, Cluster::SkinConfig),
+    EventRoute::one(BUTTON_CHANGE_SKIN, Cluster::SkinConfig),
+    EventRoute::band(BUTTON_SKIN_CUSTOMIZE1, EVENT_SKIN_CUSTOMIZE_LAST, Cluster::SkinConfig),
+    EventRoute::band(BUTTON_SKINSELECT_24KEY, BUTTON_SKINSELECT_24KEY_BATTLE, Cluster::SkinConfig),
+];
+
+/// The clusters [`EVENT_ROUTES`] sends an event to, in the order of [`Cluster::ALL`]. None for an
+/// id that is no event.
+pub fn event_clusters(id: i32) -> impl Iterator<Item = Cluster> {
+    let routed = EVENT_ROUTES.iter().filter(|route| route.first <= id && id <= route.last).fold(0, |set, route| set | route.cluster.bit());
+    Cluster::ALL.into_iter().filter(move |cluster| routed & cluster.bit() != 0)
+}
+
+/// Which cluster a value written back under an id belongs to: the rates a slider can be dragged to
+/// (`FloatPropertyFactory.getRateWriter`) and the one string an editable text confirms. An id with
+/// no writer in the reference is not here, and a write to it goes nowhere.
+pub const WRITE_ROUTES: &[Route] = &[
+    Route::one(IdSpace::Rate, RATE_MUSICSELECT_POSITION, Cluster::Select),
+    Route::one(IdSpace::Rate, RATE_SKINSELECT_POSITION, Cluster::SkinConfig),
+    Route::one(IdSpace::Rate, RATE_RANKING_POSITION, Cluster::Select),
+    Route::band(IdSpace::Rate, RATE_MASTERVOLUME, RATE_BGMVOLUME, Cluster::Options),
+    Route::one(IdSpace::Rate, SLIDER_PRACTICE_POSITION, Cluster::Play),
+    Route::one(IdSpace::Text, STRING_SEARCHWORD, Cluster::Select),
+];
+
+/// The cluster a write under `id` of `space` belongs to, or `None` when the reference writes nothing
+/// there.
+pub fn write_cluster(space: IdSpace, id: i32) -> Option<Cluster> {
+    WRITE_ROUTES.iter().find(|route| route.covers(space, id)).map(|route| route.cluster)
+}
+
+/// One thing a skin asked of a cluster: an event to run, or a value to take.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ClusterRequest {
+    /// Run the event `id`. `arg1` is the direction, zero or more for the next of something and
+    /// below zero for the previous; `arg2` is the step the few events that take one move by.
+    Event { id: i32, arg1: i32, arg2: i32 },
+    /// Take `value` as the share under the rate `id`, which is where a slider was dragged to.
+    WriteRate { id: i32, value: f32 },
+    /// Take `value` as the text under the string `id`, which is what was typed.
+    WriteText { id: i32, value: String },
+    /// Set one of the three volumes (`main_state.set_volume_*`).
+    SetVolume { bus: VolumeBus, value: f32 },
+}
+
+/// One thing a skin asked of the sound system through `main_state.audio_*`.
+///
+/// The path is inside the skin's own folder and a volume is already held to the reference's
+/// `0.0..=2.0`; whoever plays it multiplies that by the system volume.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AudioRequest {
+    /// `audio_play` and `audio_loop`.
+    Play { path: PathBuf, volume: f32, looped: bool },
+    /// `audio_preload`.
+    Preload { path: PathBuf },
+    /// `audio_stop`.
+    Stop { path: PathBuf },
+    /// `audio_dispose`.
+    Dispose { path: PathBuf },
+}
+
+/// The requests a skin made of the clusters, waiting for whoever carries each cluster's out.
+///
+/// A request is carried out by the screen that owns its cluster, and a screen learns of it by taking
+/// its own cluster's requests from here ([`RequestQueue::take`]). What nobody takes is dropped when
+/// the queue is next filled, which is how an event with no screen to answer it comes to nothing.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct RequestQueue {
+    /// Oldest first.
+    waiting: Vec<(Cluster, ClusterRequest)>,
+}
+
+impl RequestQueue {
+    /// Adds one request of one cluster behind the ones already waiting.
+    pub fn push(&mut self, cluster: Cluster, request: ClusterRequest) {
+        self.waiting.push((cluster, request));
+    }
+
+    /// Takes every request waiting for `cluster`, oldest first, and leaves the other clusters'.
+    pub fn take(&mut self, cluster: Cluster) -> Vec<ClusterRequest> {
+        let (taken, left): (Vec<_>, Vec<_>) = std::mem::take(&mut self.waiting).into_iter().partition(|(owner, _)| *owner == cluster);
+        self.waiting = left;
+        taken.into_iter().map(|(_, request)| request).collect()
+    }
+
+    /// Drops everything that is waiting.
+    pub fn clear(&mut self) {
+        self.waiting.clear();
+    }
+
+    /// How many requests are waiting, whichever cluster they are for.
+    pub fn len(&self) -> usize {
+        self.waiting.len()
+    }
+
+    /// Whether nothing is waiting.
+    pub fn is_empty(&self) -> bool {
+        self.waiting.is_empty()
+    }
+}
+
+impl RequestHandler for RequestQueue {
+    fn cluster(&mut self, cluster: Cluster, request: ClusterRequest) {
+        self.push(cluster, request);
+    }
+
+    fn audio(&mut self, _request: AudioRequest) {}
+}
+
+/// Who carries out what a skin asked for, once the frame it asked in is over.
+pub trait RequestHandler {
+    /// Carries out one request of one cluster. An event more than one cluster owns arrives once for
+    /// each.
+    fn cluster(&mut self, cluster: Cluster, request: ClusterRequest);
+
+    /// Carries out one request of the sound system.
+    fn audio(&mut self, request: AudioRequest);
+}
+
+/// How one batch of a skin's requests was sorted out.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Dispatched {
+    /// Requests handed to a cluster, counting an event once for each cluster that owns it.
+    pub to_clusters: usize,
+    /// Requests handed to the sound system.
+    pub to_audio: usize,
+    /// Requests nobody owns, which were dropped without a word.
+    pub ignored: usize,
+}
+
+/// Hands each thing a skin told the game to do to whoever carries it out, oldest first.
+///
+/// An event goes to every cluster [`EVENT_ROUTES`] names for its id, a write to the one cluster
+/// [`WRITE_ROUTES`] names, a volume to the settings cluster and a sound to the sound system. An
+/// event id that is no event, and a write under an id the reference has no writer for, are dropped
+/// silently (`MainState.executeEvent`; a slider or a text with no writer never writes).
+pub fn dispatch_calls(calls: impl IntoIterator<Item = HostCall>, handler: &mut dyn RequestHandler) -> Dispatched {
+    let mut done = Dispatched::default();
+    for call in calls {
+        match call {
+            HostCall::Event { id, arg1, arg2 } => {
+                let before = done.to_clusters;
+                for cluster in event_clusters(id) {
+                    handler.cluster(cluster, ClusterRequest::Event { id, arg1, arg2 });
+                    done.to_clusters += 1;
+                }
+                if done.to_clusters == before {
+                    done.ignored += 1;
+                }
+            }
+            HostCall::WriteRate { id, value } => match write_cluster(IdSpace::Rate, id).filter(|_| reference_writes(NameSpace::Rate, id)) {
+                Some(cluster) => {
+                    handler.cluster(cluster, ClusterRequest::WriteRate { id, value });
+                    done.to_clusters += 1;
+                }
+                None => done.ignored += 1,
+            },
+            HostCall::WriteText { id, value } => match write_cluster(IdSpace::Text, id).filter(|_| reference_writes(NameSpace::Text, id)) {
+                Some(cluster) => {
+                    handler.cluster(cluster, ClusterRequest::WriteText { id, value });
+                    done.to_clusters += 1;
+                }
+                None => done.ignored += 1,
+            },
+            HostCall::SetVolume { bus, value } => {
+                handler.cluster(Cluster::Options, ClusterRequest::SetVolume { bus, value });
+                done.to_clusters += 1;
+            }
+            HostCall::AudioPlay { path, volume, looped } => {
+                handler.audio(AudioRequest::Play { path, volume, looped });
+                done.to_audio += 1;
+            }
+            HostCall::AudioPreload { path } => {
+                handler.audio(AudioRequest::Preload { path });
+                done.to_audio += 1;
+            }
+            HostCall::AudioStop { path } => {
+                handler.audio(AudioRequest::Stop { path });
+                done.to_audio += 1;
+            }
+            HostCall::AudioDispose { path } => {
+                handler.audio(AudioRequest::Dispose { path });
+                done.to_audio += 1;
+            }
+        }
+    }
+    done
+}
+
+/// Answers whether a key is held, by its libGDX key code (`Input.Keys`), which is what a skin's
+/// `Gdx.input:isKeyPressed` and `main_state.key_pressed` ask with.
+pub trait HeldKeyQuery {
+    /// Whether the key with this code is down right now. A code no key of this machine stands for
+    /// is not.
+    fn key_pressed(&self, code: i32) -> bool;
+}
+
+/// What the result screen that is up holds itself, beyond the run it reports: the things a skin
+/// asks about that change while the screen is on.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ResultScene {
+    /// The gauge the screen shows, in the reference's numbering, zero to eight
+    /// (`AbstractResult.gaugeType`). It opens on the gauge the run ended on and the player turns it.
+    pub gauge_type: usize,
+    /// The replay slots, first to fourth. A run here is saved by itself when it ends, so the first
+    /// slot reports this run's own replay and the other three are always empty.
+    pub replay: [result::snapshot::ReplaySlot; result::snapshot::REPLAY_SLOT_COUNT],
+    /// How far down the ranking the list is scrolled (`AbstractResult.rankingOffset`).
+    pub ranking_offset: i32,
+    /// How many players the ranking holds (`RankingData.getTotalPlayer`).
+    pub ranking_total: i32,
+}
+
 /// The player's host: the state of the screen being drawn, borrowed for one frame.
 ///
 /// Everything is public so the screen that assembles a frame fills in the clusters it has state
@@ -409,6 +739,9 @@ pub struct ScreenHost<'a> {
     pub static_screen: Option<StaticScreen>,
     /// The window size in pixels, or `None` for the contract's default.
     pub window: Option<(i32, i32)>,
+    /// The keys that are down, asked before anything else for a key. `None` leaves the question to
+    /// the clusters and the older state.
+    pub keys: Option<&'a dyn HeldKeyQuery>,
     pub chart: chart::ChartState<'a>,
     pub score: score::ScoreState<'a>,
     pub play: play::PlayState<'a>,
@@ -437,6 +770,7 @@ impl<'a> ScreenHost<'a> {
             offsets: None,
             static_screen: None,
             window: None,
+            keys: None,
             chart: chart::ChartState::default(),
             score: score::ScoreState::default(),
             play: play::PlayState::default(),
@@ -483,6 +817,19 @@ impl<'a> ScreenHost<'a> {
         let named = Cluster::ALL.into_iter().filter(|cluster| routed & cluster.bit() != 0);
         let rest = Cluster::ALL.into_iter().filter(|cluster| routed & cluster.bit() == 0);
         named.chain(rest).find_map(|cluster| read(self.cluster(cluster)))
+    }
+
+    /// Puts a finished run on this host, with what the result screen holds itself: its score for
+    /// cluster B, the comparison with the score it replaced and the replay slots for cluster G, the
+    /// settings it was played with for cluster E, and the ranking's size and scroll for cluster H.
+    /// The ranking cluster's link is filled separately, as the ranking's state changes while the
+    /// screen is up.
+    pub fn show_result(&mut self, finished: result::snapshot::FinishedRun<'a>) {
+        self.score = score::ScoreState::of_result(finished);
+        self.result = result::ResultState::of(finished);
+        self.options = options::OptionsState::of_result(finished);
+        self.ir.scene = Some(finished.scene);
+        self.ir.target_name = &finished.snapshot.target_name;
     }
 
     /// Records one thing the skin told the game to do.
@@ -575,7 +922,11 @@ impl SkinHost for ScreenHost<'_> {
     }
 
     fn key_pressed(&self, code: i32) -> bool {
-        self.system.key_pressed(code).or_else(|| self.fallback.map(|older| older.key_pressed(code))).unwrap_or_default()
+        self.keys
+            .map(|keys| keys.key_pressed(code))
+            .or_else(|| self.system.key_pressed(code))
+            .or_else(|| self.fallback.map(|older| older.key_pressed(code)))
+            .unwrap_or_default()
     }
 
     fn screen_size(&self) -> (i32, i32) {

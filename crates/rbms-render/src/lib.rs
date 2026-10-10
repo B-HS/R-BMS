@@ -36,8 +36,8 @@ pub use select::{
 pub use skin::{Skin, SkinConfig, SkinError};
 pub use skin_render::{
     BgaFrame, BpmTimeline, FrameData, FrameSeries, GaugeFrame, GaugeHistory, LaneTimerState, NoExpressions, NoteDistribution, NoteField, PlayLanes, PlayTimers,
-    RecentHits, ReferenceImage, ReferenceImages, ResultTimers, SelectTimers, SkinAssets, SkinDraw, SkinFrame, SkinImage, SkinObjectKind, SkinPointer,
-    SkinPointerButton, SkinScreen, SkinViewport, SongBars, TimingHistogram, parse_hex_color, render_decide_screen, render_keyconfig_screen, render_play_screen,
+    RecentHits, ReferenceImage, ReferenceImages, SelectTimers, SkinAssets, SkinDraw, SkinFrame, SkinImage, SkinObjectKind, SkinPointer, SkinPointerButton,
+    SkinScreen, SkinViewport, SongBars, TimingHistogram, parse_hex_color, render_decide_screen, render_keyconfig_screen, render_play_screen,
     render_result_screen, render_select_screen,
 };
 pub use theme::{SelectLayout, SelectLayoutConfig, Theme, ThemeConfig, select_layout, set_theme, theme};

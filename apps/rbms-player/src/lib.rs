@@ -33,9 +33,9 @@ use rbms_model::Mode;
 use rbms_play::{ANALYSIS_SEEK_STEP_US, NullSink, PlaySession, Player, ScratchDir, SessionClock, SessionOptions};
 use rbms_render::{
     Color, CoverState, DensityView, DetailView, HudView, PlayTimers, PlayfieldView, RANK_BANDS, RecordRowView, RecordsView, Rect, Renderer, ResultPalette,
-    ResultTimers, ResultView, SelectDetail, SelectHot, SelectModal, SelectRow, SelectTimers, SelectView as SelectScene, Skin, SkinConfig, StatCell, cover_rect,
-    dj_rank, draw_text, draw_text_centered, draw_text_right, ex_delta_label, render_key_bomb, render_lane_cover, render_playfield_view,
-    render_result_with_palette, render_select, text_width,
+    ResultView, SelectDetail, SelectHot, SelectModal, SelectRow, SelectTimers, SelectView as SelectScene, Skin, SkinConfig, StatCell, cover_rect, dj_rank,
+    draw_text, draw_text_centered, draw_text_right, ex_delta_label, render_key_bomb, render_lane_cover, render_playfield_view, render_result_with_palette,
+    render_select, text_width,
 };
 pub(crate) use rbms_skin::loader::{SKIN_TYPE_DECIDE, SKIN_TYPE_KEY_CONFIG, SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_RESULT, mode_skin_type};
 use rbms_skin::timer::TimerState;
@@ -523,6 +523,15 @@ struct AppShared {
     course_overrides: Option<CourseOverrides>,
     /// One IR block reason per finished stage, folded into the course verdict at the end.
     course_stage_reasons: Vec<Option<String>>,
+    /// What the run that just ended left for a result screen a skin draws: every gauge's history,
+    /// the note timings and the per-second judge tables, to the reference's definitions. One record
+    /// for a single chart; one per finished stage, in order, while a course is being played. Kept
+    /// by [`app_result::enter_result`], which also decides when the list starts over.
+    run_records: Vec<rbms_play::PlayRecord>,
+    /// The seed the next chart load lays its lanes out with, in place of a fresh one: the seed of
+    /// the run a skin's result screen was asked to run again as it was. The load that follows
+    /// takes it, so it shapes that one run.
+    retry_seed: Option<u64>,
     /// The play settings as they stood before the course rewrote them, put back when it ends.
     course_settings_backup: Option<rbms_config::PlayOptions>,
     gpu: Option<Gpu>,
@@ -537,6 +546,9 @@ struct AppShared {
     /// The system sound set read from the configured folder. Silent throughout when no folder is
     /// set, which is what a fresh install holds.
     syssound: SystemSoundSet,
+    /// The sounds the skin of the running scene asked for: what was decoded, what is sounding, and
+    /// the worker that decodes. Emptied whenever a scene begins ([`AppShared::end_scene_sounds`]).
+    skin_sounds: skin_host::audio::SkinSounds,
     /// The options the current stream actually opened with, retried first when a reopen fails.
     audio_opened_with: Option<AudioOptions>,
     /// Set once an open attempt failed, so the device is not probed again every chart and every
@@ -566,7 +578,6 @@ struct AppShared {
     skin_timers: TimerState,
     skin_play_timers: PlayTimers,
     skin_select_timers: SelectTimers,
-    skin_result_timers: ResultTimers,
     /// Result-screen judge colours/labels resolved from the active skin, rebuilt with it.
     result_palette: ResultPalette,
     server: Arc<dyn ScoreServer>,
@@ -789,6 +800,8 @@ impl App {
                 course_run: None,
                 course_overrides: None,
                 course_stage_reasons: Vec::new(),
+                run_records: Vec::new(),
+                retry_seed: None,
                 course_settings_backup: None,
                 kc_edit_mode: MODE,
                 gpu: None,
@@ -796,6 +809,7 @@ impl App {
                 audio_report: None,
                 audio_max_voices: rbms_audio::DEFAULT_MAX_VOICES,
                 syssound,
+                skin_sounds: skin_host::audio::SkinSounds::default(),
                 audio_opened_with: None,
                 audio_failed: false,
                 audio_reopen_at: None,
@@ -808,7 +822,6 @@ impl App {
                 skin_timers: TimerState::default(),
                 skin_play_timers: PlayTimers::new(),
                 skin_select_timers: SelectTimers::new(),
-                skin_result_timers: ResultTimers::new(),
                 result_palette: ResultPalette::from_skin(&SkinConfig::default()),
                 server: built.server,
                 server_connected: built.connected,

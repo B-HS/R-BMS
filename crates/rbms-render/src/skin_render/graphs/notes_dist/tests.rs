@@ -195,3 +195,68 @@ fn run_totals_alone_carry_no_seconds() {
         assert!(notes.rows(kind).0.is_empty());
     }
 }
+
+/// A palette as the colours a pixmap stores for it.
+fn stored(kind: Kind, popn: bool) -> Vec<Rgba> {
+    kind.colors(popn).iter().map(|color| hex_color(*color)).collect()
+}
+
+#[test]
+fn the_judgement_graph_is_coloured_by_the_references_table_from_unjudged_to_poor() {
+    let expected: [Rgba; JUDGEMENTS] =
+        [[0x55, 0x55, 0x55, 255], [0x00, 0x88, 0xff, 255], [0x00, 0xff, 0x88, 255], [0xff, 0xff, 0x00, 255], [0xff, 0x88, 0x00, 255], [0xff, 0x00, 0x00, 255]];
+    assert_eq!(stored(Kind::Judgements, false), expected);
+
+    let popn: [Rgba; JUDGEMENTS] =
+        [[0x55, 0x55, 0x55, 255], [0xff, 0x5e, 0xb0, 255], [0xff, 0xbe, 0x32, 255], [0xdc, 0x46, 0x3c, 255], [0x6c, 0xc6, 0xff, 255], [0x6c, 0xc6, 0xff, 255]];
+    assert_eq!(stored(Kind::Judgements, true), popn);
+}
+
+#[test]
+fn the_early_late_graph_is_coloured_blue_for_early_and_orange_for_late_each_darker_for_a_worse_judgement() {
+    let expected: [Rgba; EARLY_LATE_BUCKETS] = [
+        [0x55, 0x55, 0x55, 255],
+        [0x44, 0xff, 0x44, 255],
+        [0x00, 0x88, 0xff, 255],
+        [0x00, 0x66, 0xcc, 255],
+        [0x00, 0x44, 0x88, 255],
+        [0x00, 0x22, 0x44, 255],
+        [0xff, 0x88, 0x00, 255],
+        [0xcc, 0x66, 0x00, 255],
+        [0x88, 0x44, 0x00, 255],
+        [0x44, 0x22, 0x00, 255],
+    ];
+    assert_eq!(stored(Kind::EarlyLate, false), expected);
+
+    let mut popn = expected;
+    popn[1] = [0xff, 0x5e, 0xb0, 255];
+    assert_eq!(stored(Kind::EarlyLate, true), popn, "only the best judgement has a colour of its own in the nine-key mode");
+}
+
+#[test]
+fn a_second_of_judgements_stacks_from_unjudged_at_the_foot_to_poor_on_top() {
+    let palette = stored(Kind::Judgements, false);
+    let mut chips = Pixmap::new(PITCH, 20 * PITCH);
+    paint_chips(&mut chips, &[1, 3, 2, 1, 1, 2], &palette, 20, PLAIN, 0..1);
+    let stack: Vec<Rgba> = (0..11).map(|row| chip_at(&chips, 0, row)).collect();
+    let expected = [vec![palette[0]], vec![palette[1]; 3], vec![palette[2]; 2], vec![palette[3]], vec![palette[4]], vec![palette[5]; 2], vec![NONE]].concat();
+    assert_eq!(stack, expected);
+
+    let mut reversed = Pixmap::new(PITCH, 20 * PITCH);
+    paint_chips(&mut reversed, &[1, 3, 2, 1, 1, 2], &palette, 20, ChipStyle { reversed: true, ..PLAIN }, 0..1);
+    let stack: Vec<Rgba> = (0..11).map(|row| chip_at(&reversed, 0, row)).collect();
+    let expected = [vec![palette[5]; 2], vec![palette[4]], vec![palette[3]], vec![palette[2]; 2], vec![palette[1]; 3], vec![palette[0]], vec![NONE]].concat();
+    assert_eq!(stack, expected, "a record that reverses the order puts the poors at the foot");
+}
+
+#[test]
+fn a_second_of_early_and_late_stacks_the_best_then_the_early_ones_then_the_late_ones() {
+    let palette = stored(Kind::EarlyLate, false);
+    let mut chips = Pixmap::new(PITCH, 20 * PITCH);
+    paint_chips(&mut chips, &[0, 2, 1, 1, 0, 1, 2, 0, 1, 1], &palette, 20, PLAIN, 0..1);
+    let stack: Vec<Rgba> = (0..10).map(|row| chip_at(&chips, 0, row)).collect();
+    let expected =
+        [vec![palette[1]; 2], vec![palette[2]], vec![palette[3]], vec![palette[5]], vec![palette[6]; 2], vec![palette[8]], vec![palette[9]], vec![NONE]]
+            .concat();
+    assert_eq!(stack, expected, "a class that counts nothing takes no row");
+}

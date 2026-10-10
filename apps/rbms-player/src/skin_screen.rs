@@ -15,6 +15,21 @@
 //! [`SkinScreens`] is the other half: one compiled screen per screen type, rebuilt when the document
 //! behind it is read again, and the textures those screens draw from.
 //!
+//! # The pointer, and what a skin asks for
+//!
+//! A frame leaves behind where it put every object that takes the pointer
+//! ([`rbms_render::skin_render::SkinInputMap`]). A press or a drag that arrives before the next frame
+//! is judged against that at once ([`AppShared::skin_pointer`]), which is what tells the screen
+//! underneath whether the event is still its own, and what the judging says to do is run inside the
+//! next frame's binding, before anything is prepared: an event or a writer that is a function of the
+//! skin is called there, and one that is an id is handed to the host. The reference does both at the
+//! end of the frame the press was seen in; either way the event runs between two frames.
+//!
+//! Whatever the skin told the host while it was read, prepared or run -- an event, a value written
+//! back, a sound -- is sorted out when the frame ends ([`AppShared::finish_skin_frame`]): a sound
+//! goes to the sound system and everything else waits in a queue for the screen that owns it
+//! ([`AppShared::skin_requests`]).
+//!
 //! A Lua skin is read on the first frame of the screen it draws rather than when it is chosen,
 //! because it builds its screen out of that screen's state: the frame hands the state it is drawn
 //! from to the library, which runs the skin against it, and the next frame takes the result in. A
@@ -57,6 +72,7 @@
 //! A file is decoded again only when it was written since it was uploaded, which a worker finds out
 //! with one stat.
 //!
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -67,24 +83,30 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use rbms_config::SkinCustomisation;
 use rbms_render::font::with_text_context;
 use rbms_render::result::{ResultExtras, ResultView};
-use rbms_render::skin_render::PreparedFrame;
 use rbms_render::skin_render::state::{DecideChart, DecideViewState, KeyConfigViewState, PlayViewState, ResultViewState, SelectViewState};
 use rbms_render::skin_render::textures::{SkinTexturePool, TextureStats, referenced_source_files};
+use rbms_render::skin_render::{PreparedFrame, SkinAction, SkinEvent, SkinInputMap, SkinPointer, SkinPointerButton, SkinWriter};
 use rbms_render::{
-    BgaFrame, Color, FrameData, PlayTimers, Renderer, ResultTimers, SelectTimers, SkinAssets, SkinFrame, SkinImage, SkinScreen, SongBars, TextContext,
-    TextureId, with_render_ctx,
+    BgaFrame, Color, FrameData, PlayTimers, Renderer, SelectTimers, SkinAssets, SkinFrame, SkinImage, SkinScreen, SongBars, TextContext, TextureId,
+    with_render_ctx,
 };
 use rbms_skin::dst::{LuaDrawEval, OffsetSource, SkinOffset};
 use rbms_skin::loader::{LoadedSkin, SKIN_TYPE_COURSE_RESULT, SKIN_TYPE_DECIDE, SKIN_TYPE_KEY_CONFIG, SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_RESULT};
-use rbms_skin::property::{SkinHost, StaticScreen};
+use rbms_skin::lua::BoundFrame;
+use rbms_skin::property::{HostCall, SkinHost, StaticScreen};
 use rbms_skin::timer::TimerState;
+use winit::event::MouseButton;
 
 use crate::assets::{DecodePool, FileStamp, SkinAsset, SkinAssetJob, SkinAssetKind, SkinAssetRead, SkinAssetRequest, spawn_skin_asset_decode};
+use crate::ir_session::submission_player_id;
 use crate::notify::{Level, notify};
-use crate::skin_host::ScreenHost;
+use crate::pointer::PointerInput;
 use crate::skin_host::chart::{ChartMeta, ChartState};
+use crate::skin_host::ir::{IrLink, IrPhase};
 use crate::skin_host::loading::{LoadingScreen, LoadingState};
+use crate::skin_host::result::snapshot::{FinishedRun, ResultSnapshot};
 use crate::skin_host::system::{CourseStage, SystemState, Volumes};
+use crate::skin_host::{AudioRequest, Cluster, ClusterRequest, HeldKeyQuery, RequestHandler, RequestQueue, ResultScene, ScreenHost, dispatch_calls};
 use crate::skin_select::{SkinLibrary, SkinRead};
 use crate::stage::Canvas;
 use crate::stage::canvas::UI_SIZE;
@@ -165,12 +187,15 @@ struct FrameInputs<'a> {
     chart: ChartState<'a>,
     /// The load in progress, for the screens that connect it.
     loading: LoadingState,
+    /// The finished run and what the screen holds beside it, for the result screens that keep a
+    /// run. With it the host answers for the run; without it the result clusters answer nothing.
+    result: Option<FinishedRun<'a>>,
 }
 
 impl<'a> FrameInputs<'a> {
     /// The inputs of a screen that connects neither a chart nor a load.
     fn new(offsets: &'a DocumentOffsets<'a>, data: FrameData<'a>, window: (u32, u32)) -> FrameInputs<'a> {
-        FrameInputs { offsets, data, window, chart: ChartState::default(), loading: LoadingState::default() }
+        FrameInputs { offsets, data, window, chart: ChartState::default(), loading: LoadingState::default(), result: None }
     }
 }
 
@@ -181,6 +206,25 @@ pub(crate) struct DecideDraw<'a> {
     /// How much of the chart's files are in, from nothing (0) to everything (1).
     pub(crate) progress: f32,
     /// What no property id carries: the chart's stage image and the series its graphs plot.
+    pub(crate) data: FrameData<'a>,
+}
+
+/// What the result screen brings to one frame of its document.
+pub(crate) struct ResultDraw<'a> {
+    /// The summary of the run, which the state the screen was drawn from before the clusters
+    /// existed still answers from.
+    pub(crate) view: &'a ResultView,
+    pub(crate) extras: &'a ResultExtras,
+    /// Whether the run counted as a clear.
+    pub(crate) cleared: bool,
+    /// The chart the run was played on, when the screen knows it.
+    pub(crate) chart: Option<&'a ChartMeta<'a>>,
+    /// What the screen holds itself: the gauge on show, the replay slots and the ranking's scroll.
+    pub(crate) scene: ResultScene,
+    /// The run the clusters report from, when the screen was built from one: a chart's run, or a
+    /// whole course taken as one (`resource.getScoreData`, `resource.getCourseScoreData`).
+    pub(crate) run: Option<&'a ResultSnapshot>,
+    /// What no property id carries: the gauge, the series the graphs plot and the stage image.
     pub(crate) data: FrameData<'a>,
 }
 
@@ -220,6 +264,12 @@ fn static_screen_of(screen: i32) -> StaticScreen {
         SKIN_TYPE_RESULT | SKIN_TYPE_COURSE_RESULT => StaticScreen::Result,
         _ => StaticScreen::Other,
     }
+}
+
+/// Whether `screen` is one of the two score screens, which are the screens a run's standing with the
+/// score server is read on.
+fn is_result_screen(screen: i32) -> bool {
+    matches!(screen, SKIN_TYPE_RESULT | SKIN_TYPE_COURSE_RESULT)
 }
 
 /// The window size a skin's Lua is told, which the host contract carries as signed pixels.
@@ -342,6 +392,85 @@ struct SceneHold {
     since: Instant,
 }
 
+/// The second argument of an event a press runs, which the reference never gives one
+/// (`Event.exec(state, arg1)` is `exec(state, arg1, 0)`).
+const NO_SECOND_ARGUMENT: i32 = 0;
+
+/// What the pointer and the skin leave between two frames.
+#[derive(Default)]
+struct SkinInput {
+    /// Where the frame drawn last left everything that takes the pointer, and the screen it was a
+    /// frame of.
+    map: Option<(i32, SkinInputMap)>,
+    /// Whether `map` is of a frame drawn since a frame last ended.
+    fresh: bool,
+    /// What the pointer did since the last frame, judged already and waiting for the next frame of
+    /// its screen to be run in, oldest first.
+    actions: Vec<(i32, SkinAction)>,
+    /// What the skin told the game during the frames that have not ended yet, oldest first.
+    calls: Vec<HostCall>,
+}
+
+/// The button of a press as the reference's click table numbers it, or `None` for a button it has
+/// no number for.
+fn skin_button(button: MouseButton) -> Option<SkinPointerButton> {
+    match button {
+        MouseButton::Left => Some(SkinPointerButton::Left),
+        MouseButton::Right => Some(SkinPointerButton::Right),
+        MouseButton::Middle => Some(SkinPointerButton::Middle),
+        MouseButton::Back => Some(SkinPointerButton::Back),
+        MouseButton::Forward => Some(SkinPointerButton::Forward),
+        MouseButton::Other(_) => None,
+    }
+}
+
+/// What one mouse event is to a skin's objects, or `None` when it is nothing to them: a button
+/// coming back up, which the reference does not pass on at all, and a turn of the wheel, which is
+/// the screen's rather than any object's.
+fn skin_pointer_event(input: PointerInput) -> Option<SkinPointer> {
+    match input {
+        PointerInput::Button { button, pressed: true } => skin_button(button).map(SkinPointer::Press),
+        PointerInput::Button { pressed: false, .. } | PointerInput::Scroll { .. } => None,
+        PointerInput::Drag => Some(SkinPointer::Drag),
+    }
+}
+
+/// Runs what the pointer did to a skin's objects: an id is handed to the host, which records it for
+/// the end of the frame, and a function is called in the skin's interpreter, which is why this runs
+/// inside the frame's binding. A function with no interpreter to call it in is not run.
+///
+/// A function event is called with its one argument and a writer with the value
+/// (`SkinLuaAccessor.loadEvent`, `loadFloatWriter`). Typing into an editable text is not here yet,
+/// so a press on one does nothing more than keep the press from the objects beneath it.
+fn run_skin_actions(actions: &[SkinAction], host: &dyn SkinHost, lua: Option<&BoundFrame<'_>>) {
+    for action in actions {
+        match (*action, lua) {
+            (SkinAction::Event { event: SkinEvent::Id(id), argument }, _) => host.exec_event(id, argument, NO_SECOND_ARGUMENT),
+            (SkinAction::Event { event: SkinEvent::Function(function), argument }, Some(lua)) => lua.call_event(function, argument),
+            (SkinAction::Write { writer: SkinWriter::Rate(id), value }, _) => host.write_rate(id, value),
+            (SkinAction::Write { writer: SkinWriter::Function(function), value }, Some(lua)) => lua.call_float_writer(function, value),
+            (SkinAction::Event { .. } | SkinAction::Write { .. }, None) | (SkinAction::FocusText { .. }, _) => {}
+        }
+    }
+}
+
+/// Carries out what a skin asked for during a frame: a cluster's request waits for the screen that
+/// owns the cluster, and a sound goes to the sound system.
+struct PlayerRequests<'a> {
+    shared: &'a mut AppShared,
+    waiting: RequestQueue,
+}
+
+impl RequestHandler for PlayerRequests<'_> {
+    fn cluster(&mut self, cluster: Cluster, request: ClusterRequest) {
+        self.waiting.push(cluster, request);
+    }
+
+    fn audio(&mut self, request: AudioRequest) {
+        crate::skin_host::audio::carry_out(self.shared, request);
+    }
+}
+
 /// The documents that have been compiled into screens, one per screen type, and the textures they
 /// draw from.
 ///
@@ -372,6 +501,12 @@ pub(crate) struct SkinScreens {
     hold: Option<SceneHold>,
     /// Whether the running scene already waited its limit out, and is not held again.
     hold_spent: bool,
+    /// What the pointer and the skin left since the last frame. Behind a cell because a frame is
+    /// made through a shared borrow of everything it is drawn from.
+    input: RefCell<SkinInput>,
+    /// What the skin asked of the clusters during the frame that ended last, waiting for the screen
+    /// that owns each.
+    requests: RequestQueue,
 }
 
 impl SkinScreens {
@@ -470,11 +605,37 @@ impl SkinScreens {
     }
 
     /// Note that the running scene was left, parked or put back, so the frame that follows lets go
-    /// of whatever it no longer draws.
+    /// of whatever it no longer draws. What the pointer did to the scene being left, and what its
+    /// skin asked for and nobody took, goes with it; what the skin told the game on its last frame
+    /// is still sorted out when that frame ends.
     fn scene_moved(&mut self) {
         self.scene_moved = true;
         self.hold = None;
         self.hold_spent = false;
+        let input = self.input.get_mut();
+        input.map = None;
+        input.fresh = false;
+        input.actions.clear();
+        self.requests.clear();
+    }
+
+    /// Keeps where a frame of `screen` left everything that takes the pointer, for the events that
+    /// arrive before the next frame.
+    fn keep_input_map(&self, screen: i32, map: SkinInputMap) {
+        let mut input = self.input.borrow_mut();
+        input.map = Some((screen, map));
+        input.fresh = true;
+    }
+
+    /// Keeps what a skin told its host, to be sorted out when the frame ends.
+    fn keep_calls(&self, calls: Vec<HostCall>) {
+        self.input.borrow_mut().calls.extend(calls);
+    }
+
+    /// Takes what the pointer did to `screen` since its last frame, oldest first. What it did to any
+    /// other screen was done to a frame that is no longer the one on show, and is dropped.
+    fn take_actions(&self, screen: i32) -> Vec<SkinAction> {
+        std::mem::take(&mut self.input.borrow_mut().actions).into_iter().filter(|(of, _)| *of == screen).map(|(_, action)| action).collect()
     }
 
     /// Park the screens the running scene was drawn with for as long as `scene` exists.
@@ -564,7 +725,6 @@ pub(crate) struct SkinScene {
     timers: TimerState,
     play: PlayTimers,
     select: SelectTimers,
-    result: ResultTimers,
     elapsed: Duration,
     /// What keeps the screens this scene was drawn with compiled while it is parked: they are held
     /// for as long as this exists, so a parked scene that is dropped rather than put back lets go of
@@ -601,6 +761,7 @@ impl AppShared {
         self.reset_skin_scene();
         self.skins.expire_scripted();
         self.skin_screens.unpark();
+        self.end_scene_sounds();
     }
 
     /// Put the timers and the scene clock where a scene starts, and note that the scene moved: the
@@ -610,7 +771,6 @@ impl AppShared {
         self.skin_timers.clear();
         self.skin_play_timers = PlayTimers::new();
         self.skin_select_timers = SelectTimers::new();
-        self.skin_result_timers = ResultTimers::new();
         self.skin_screens.scene_moved();
         self.scene_started = Instant::now();
     }
@@ -625,14 +785,7 @@ impl AppShared {
         let elapsed = self.scene_elapsed();
         let parked = Arc::new(());
         self.skin_screens.park(&parked);
-        let scene = SkinScene {
-            timers: std::mem::take(&mut self.skin_timers),
-            play: self.skin_play_timers,
-            select: self.skin_select_timers,
-            result: self.skin_result_timers,
-            elapsed,
-            parked,
-        };
+        let scene = SkinScene { timers: std::mem::take(&mut self.skin_timers), play: self.skin_play_timers, select: self.skin_select_timers, elapsed, parked };
         self.reset_skin_scene();
         scene
     }
@@ -642,11 +795,10 @@ impl AppShared {
     /// kept by being drawn again -- or read and compiled again, when a scene begun over them let go
     /// of them; the screen that was opened over them is let go of by the frame that follows.
     pub(crate) fn resume_skin_scene(&mut self, scene: SkinScene) {
-        let SkinScene { timers, play, select, result, elapsed, parked } = scene;
+        let SkinScene { timers, play, select, elapsed, parked } = scene;
         self.skin_timers = timers;
         self.skin_play_timers = play;
         self.skin_select_timers = select;
-        self.skin_result_timers = result;
         self.skin_screens.scene_moved();
         drop(parked);
         let now = Instant::now();
@@ -765,12 +917,14 @@ impl AppShared {
     /// more are freed -- which is how a screen's textures leave the GPU when the player leaves the
     /// screen, without the screen that follows decoding again what the two share. A scene held for
     /// a screen the frame did not ask for is set going again, so a clock is never left standing for
-    /// a document nobody is waiting on.
+    /// a document nobody is waiting on. Last, what the skin told the game during the frame is sorted
+    /// out ([`AppShared::carry_out_skin_calls`]).
     pub(crate) fn finish_skin_frame(&mut self, canvas: &mut Canvas<'_>) {
         if self.skin_screens.hold.is_some_and(|hold| !self.skin_screens.prepared.contains(&hold.screen)) {
             self.release_scene_hold();
         }
         self.skin_screens.finish_frame(canvas, &self.skins);
+        self.carry_out_skin_calls();
     }
 
     /// The debug panel's line about skin textures: how many are uploaded and what they come to.
@@ -830,8 +984,12 @@ impl AppShared {
     /// binding that cannot be made leaves the document undrawn for the frame, like a document that
     /// is not there.
     ///
-    /// What the skin told the game while it was prepared -- an event, a sound, a value written back
-    /// -- stays recorded in the host and goes with it. Nothing carries those out yet.
+    /// What the pointer did to the screen since its last frame is run first, inside the same
+    /// binding ([`run_skin_actions`]). What the skin told the game along the way -- an event, a
+    /// sound, a value written back -- is recorded in the host, taken from it when the binding ends,
+    /// and sorted out when the frame does ([`AppShared::finish_skin_frame`]). Where the prepared
+    /// frame left the objects that take the pointer is kept for the events that arrive before the
+    /// next one ([`AppShared::skin_pointer`]).
     ///
     /// The nudges travel in `inputs` rather than being read here because they are borrowed from the
     /// configuration and handed on as a trait object: the caller holds them for the whole frame.
@@ -846,16 +1004,28 @@ impl AppShared {
         if !self.skin_document_is_enabled(screen) {
             return None;
         }
+        let keys = self.skin_keys();
+        let ranking = is_result_screen(screen).then(|| self.skin_ir_names());
         let mut host = ScreenHost::new(adapter.now_us(), &self.skin_timers);
+        host.keys = Some(&keys as &dyn HeldKeyQuery);
         host.system = self.skin_system_state();
         host.chart = inputs.chart;
         host.loading = inputs.loading;
+        if let Some(finished) = inputs.result {
+            host.show_result(finished);
+        }
+        if let Some((service_name, user_name)) = &ranking {
+            host.ir.link = Some(self.skin_ir_link());
+            host.ir.service_name = service_name;
+            host.ir.user_name = user_name;
+        }
         host.offsets = Some(inputs.offsets as &dyn OffsetSource);
         host.static_screen = Some(static_screen_of(screen));
         host.window = Some(window_size(inputs.window));
         host.fallback = Some(adapter);
         if self.skins.is_waiting(screen) {
             self.skins.read_waiting(&self.config, screen, SkinRead { host: &host, seed: self.skins.seed() });
+            self.skin_screens.keep_calls(host.take_calls());
             return None;
         }
         let compiled = self.skin_screens.get(screen)?;
@@ -867,11 +1037,82 @@ impl AppShared {
             mouse: document_cursor(self.cursor, UI_SIZE, compiled.authored_size()),
             data: inputs.data,
         };
+        let actions = self.skin_screens.take_actions(screen);
         let prepared = match self.skins.document(screen).and_then(LoadedSkin::runtime) {
-            Some(runtime) => runtime.frame(&host, |bound| compiled.prepare(&SkinFrame { lua: Some(bound as &dyn LuaDrawEval), ..frame })).ok()?,
-            None => compiled.prepare(&frame),
+            Some(runtime) => runtime.frame(&host, |bound| {
+                run_skin_actions(&actions, &host, Some(bound));
+                compiled.prepare(&SkinFrame { lua: Some(bound as &dyn LuaDrawEval), ..frame })
+            }),
+            None => {
+                run_skin_actions(&actions, &host, None);
+                Ok(compiled.prepare(&frame))
+            }
         };
+        self.skin_screens.keep_calls(host.take_calls());
+        let prepared = prepared.ok()?;
+        self.skin_screens.keep_input_map(screen, compiled.input_map(&prepared));
         Some(draw(&PreparedDocument { screen: compiled, frame, prepared }))
+    }
+
+    /// Offers one mouse event at `at` to the skin the last frame was drawn with, and answers whether
+    /// one of its objects took it -- in which case the event is no longer the screen's.
+    ///
+    /// `at` is the cursor in the [`UI_SIZE`] space the window's events are mapped onto. The event is
+    /// judged here and now, against where the frame drawn last left its objects; what an object does
+    /// with it is run inside the next frame of the same screen ([`AppShared::with_skin_frame`]).
+    ///
+    /// The skin is not offered an event over something of the application's own that the last frame
+    /// made clickable: a panel of the application drawn over a skin is on top of it. A button coming
+    /// back up and a turn of the wheel are nothing to a skin's objects, so those are always the
+    /// screen's.
+    pub(crate) fn skin_pointer(&mut self, at: (f32, f32), input: PointerInput) -> bool {
+        let Some(event) = skin_pointer_event(input) else {
+            return false;
+        };
+        if self.hit_test(at).is_some() {
+            return false;
+        }
+        let pointer = self.skin_screens.input.get_mut();
+        let Some((screen, map)) = pointer.map.as_ref() else {
+            return false;
+        };
+        let Some(authored) = self.skin_screens.built.get(screen).map(|entry| entry.screen.authored_size()) else {
+            return false;
+        };
+        let Some(document_at) = document_cursor(at, UI_SIZE, authored) else {
+            return false;
+        };
+        let actions = map.pointer(event, document_at);
+        let taken = !actions.is_empty();
+        let screen = *screen;
+        pointer.actions.extend(actions.into_iter().map(|action| (screen, action)));
+        taken
+    }
+
+    /// What the skin asked of the clusters during the frame that ended last. A screen takes its own
+    /// cluster's requests from here and carries them out: `ctx.shared.skin_requests().take(cluster)`.
+    pub(crate) fn skin_requests(&mut self) -> &mut RequestQueue {
+        &mut self.skin_screens.requests
+    }
+
+    /// Sorts out what the skin told the game during the frame that has just ended: a sound is carried
+    /// out now, and an event or a write waits in [`AppShared::skin_requests`] for its screen. What
+    /// was still waiting there from the frame before had no screen to answer it, and is dropped.
+    ///
+    /// A frame no skin drew also forgets where the last one left its objects, so the pointer is not
+    /// judged against a screen that is no longer on show.
+    fn carry_out_skin_calls(&mut self) {
+        let input = self.skin_screens.input.get_mut();
+        if !std::mem::take(&mut input.fresh) {
+            input.map = None;
+            input.actions.clear();
+        }
+        let calls = std::mem::take(&mut input.calls);
+        let mut handler = PlayerRequests { shared: self, waiting: RequestQueue::default() };
+        dispatch_calls(calls, &mut handler);
+        let waiting = handler.waiting;
+        *self.skin_requests() = waiting;
+        self.settle_skin_sounds();
     }
 
     /// What the machine and the player's totals say: the clock, the volumes, the recorded runs and the
@@ -934,12 +1175,39 @@ impl AppShared {
         self.with_skin_frame(SKIN_TYPE_MUSIC_SELECT, &state, inputs, |document| document.draw_native(canvas)).is_some()
     }
 
-    /// Draw the score screen's document.
-    pub(crate) fn draw_result_skin(&self, canvas: &mut Canvas<'_>, view: &ResultView, extras: &ResultExtras, cleared: bool, data: FrameData<'_>) -> bool {
-        let offsets = self.skin_offsets(SKIN_TYPE_RESULT);
-        let state = ResultViewState::new(view, extras.target.as_ref(), cleared, self.skin_now_us(), Some(&offsets));
-        let inputs = FrameInputs::new(&offsets, data, canvas.native().size());
-        self.with_skin_frame(SKIN_TYPE_RESULT, &state, inputs, |document| document.draw_native(canvas)).is_some()
+    /// Draw the document of a score screen: `screen` is the single chart's result or the course's,
+    /// which is the same frame over a course taken as one run.
+    ///
+    /// The chart cluster answers for the chart when the screen knows it, the run and what the screen
+    /// holds itself are put on the host for the clusters that report them, and the ranking cluster
+    /// is told how the submission stands ([`AppShared::skin_ir_link`]).
+    pub(crate) fn draw_result_skin(&self, canvas: &mut Canvas<'_>, screen: i32, scene: &ResultDraw<'_>) -> bool {
+        let offsets = self.skin_offsets(screen);
+        let state = ResultViewState::new(scene.view, scene.extras.target.as_ref(), scene.cleared, self.skin_now_us(), Some(&offsets));
+        let chart = scene.chart.map_or_else(ChartState::default, ChartState::Chart);
+        let result = scene.run.map(|run| FinishedRun::new(run, scene.scene));
+        let inputs = FrameInputs { chart, result, ..FrameInputs::new(&offsets, scene.data, canvas.native().size()) };
+        self.with_skin_frame(screen, &state, inputs, |document| document.draw_native(canvas)).is_some()
+    }
+
+    /// How the run on a result screen stands with the score server right now: whether one is set up
+    /// at all, and how the submission is going (`main.getIRStatus()`, `AbstractResult.getState`).
+    ///
+    /// The ranking cluster answers a skin's options from this and the result scenes switch the
+    /// connection timers from it, so the two are always the same reading of [`AppShared::ir_status`].
+    /// On a course result the status is the one the course's last stage left: the course's own
+    /// submission is sent without being followed.
+    pub(crate) fn skin_ir_link(&self) -> IrLink {
+        IrLink::new(self.has_primary_ir_server(), IrPhase::from(&self.ir_status))
+    }
+
+    /// The name of the score server the run is sent to and of the player on it, empty when no
+    /// server is set up (`irname`, `irUserName`).
+    fn skin_ir_names(&self) -> (String, String) {
+        match self.primary_ir_profile() {
+            Some((service, ..)) => (service, submission_player_id(&self.session, &self.config.network.player_id)),
+            None => (String::new(), String::new()),
+        }
     }
 
     /// Draw the decide screen's document.

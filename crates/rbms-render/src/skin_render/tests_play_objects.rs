@@ -7,17 +7,18 @@
 //! recognising a picture.
 
 use std::borrow::Cow;
+use std::cell::RefCell;
 
 use rbms_model::{LnKind, Mode, Note, NoteKind, TimeLine};
 use rbms_skin::dst::{DestinationTrack, DrawStateSource, Keyframe, OffsetSource, SkinColor, SkinOffset, SkinRect};
 use rbms_skin::loader::StretchKind;
 use rbms_skin::property::generated::{FLOAT_GROOVEGAUGE_1P, NUMBER_COMBO, OPTION_1P_PERFECT};
 use rbms_skin::property::{SkinHost, UNMAPPED_FLOAT, UNMAPPED_INTEGER, UNMAPPED_STRING};
-use rbms_skin::timer::{TIMER_OFF, TimerState};
+use rbms_skin::timer::{MICROS_PER_MILLI, TIMER_OFF, TimerState};
 
 use super::covers::{CoverBand, CoverBody};
 use super::draw::{ImageSelect, draw_object};
-use super::gauge::{GaugeAnimation, GaugeBody, SLOT_BELOW_BORDER, SLOT_LEADING, SLOT_UNLIT, SLOTS_PER_GAUGE};
+use super::gauge::{GAUGE_TYPES, GaugeAnimation, GaugeBody, GaugeMotion, GaugeScale, SLOT_BELOW_BORDER, SLOT_LEADING, SLOT_LIT, SLOT_UNLIT, SLOTS_PER_GAUGE};
 use super::judge::JudgeBody;
 use super::notes::BarLine;
 use super::notes::{NoteBody, NoteLane};
@@ -140,13 +141,18 @@ impl SkinHost for PlayState {
 
 /// What a play frame carries: the running field and the gauge it is played on.
 fn playing<'a>(field: &'a NoteField<'a>, gauge_kind: usize) -> FrameData<'a> {
-    FrameData { field: Some(field), gauge: Some(GaugeFrame { kind: gauge_kind, clear_threshold: field.field.gauge_clear_threshold }), ..FrameData::default() }
+    FrameData { field: Some(field), gauge: Some(GaugeFrame::of_kind(gauge_kind, field.field.gauge_clear_threshold)), ..FrameData::default() }
 }
 
 /// Draws one object on a canvas that already holds its textures.
 fn draw_on(canvas: &mut CpuCanvas, object: &SkinObject, state: &PlayState, data: FrameData<'_>) -> bool {
+    draw_at(canvas, object, state, data, 0)
+}
+
+/// The same, `now_ms` milliseconds into the scene.
+fn draw_at(canvas: &mut CpuCanvas, object: &SkinObject, state: &PlayState, data: FrameData<'_>, now_ms: i64) -> bool {
     let timers = TimerState::new();
-    let frame = SkinFrame { now_us: 0, timers: &timers, state, lua: None, mouse: None, data };
+    let frame = SkinFrame { now_us: now_ms * MICROS_PER_MILLI, timers: &timers, state, lua: None, mouse: None, data };
     let viewport = SkinViewport::new((CANVAS.0 as f32, CANVAS.1 as f32), (CANVAS.0 as f32, CANVAS.1 as f32));
     with_render_ctx(|ctx| draw_object(ctx, canvas, object, &viewport, &frame))
 }
@@ -306,6 +312,33 @@ fn a_bar_line_the_document_faded_out_draws_nothing() {
     assert_eq!(first_row_of(&document, lane_column(&field, 0), line), None, "and nothing in its colour reaches the screen");
 }
 
+/// The seven-key groove gauge of the reference: never below two, full at a hundred, cleared at
+/// eighty.
+const GROOVE: GaugeScale = GaugeScale::new(2.0, 100.0, 80.0);
+
+/// How many parts the tests that read every part of a gauge cut it into.
+const FEW_PARTS: i32 = 10;
+
+/// How long the flickering test gauge takes over one fade up and down, in milliseconds.
+const FLICKER_CYCLE_MS: i32 = 100;
+
+/// The red a flickering test gauge's lit, unlit and leading cells are drawn in, far enough apart
+/// that a fade between two of them cannot be taken for either.
+const FLICKER_LIT: u8 = 40;
+const FLICKER_UNLIT: u8 = 10;
+const FLICKER_LEADING: u8 = 240;
+
+/// A gauge body over `nodes` and the table that spreads them, with the record's default times.
+fn gauge_of(nodes: Vec<Sprite>, slots: [Option<u8>; 36], parts: i32, animation: GaugeAnimation) -> GaugeBody {
+    GaugeBody { nodes, slots, animation: Some(animation), range: 0, cycle: 0, starttime: 0, endtime: 500, motion: RefCell::new(GaugeMotion::new(parts)) }
+}
+
+/// What a frame carries when the screen knows the gauge outright: its type, its value and its
+/// limits, the same for every type.
+fn gauged(gauge: GaugeFrame) -> FrameData<'static> {
+    FrameData { gauge: Some(gauge), ..FrameData::default() }
+}
+
 /// A gauge over a table of thirty-six distinct nodes, so a drawn part names the cell it read.
 fn distinct_gauge(canvas: &mut CpuCanvas) -> GaugeBody {
     let nodes: Vec<Sprite> = (0..36).map(|slot| solid(canvas, &format!("node{slot}"), shade(slot as u8 + 1))).collect();
@@ -313,7 +346,7 @@ fn distinct_gauge(canvas: &mut CpuCanvas) -> GaugeBody {
     for (slot, entry) in slots.iter_mut().enumerate() {
         *entry = Some(slot as u8);
     }
-    GaugeBody { nodes, slots, parts: TEST_PARTS, animation: GaugeAnimation::Scatter, range: 0, cycle: 0 }
+    gauge_of(nodes, slots, TEST_PARTS, GaugeAnimation::Random)
 }
 
 /// The part of a gauge drawn `part` places along a bar of `rect`, as a canvas column.
@@ -362,6 +395,147 @@ fn a_gauge_reads_a_column_of_its_own_for_every_kind_of_gauge() {
     }
     seen.dedup();
     assert_eq!(seen.len(), 6, "each kind of gauge should read a column of the table of its own");
+}
+
+/// The cell each part of a ten-part gauge read, by the red of the pixel in the middle of it.
+fn cells_read(canvas: &CpuCanvas, rect: SkinRect) -> Vec<usize> {
+    let row = (CANVAS.1 as f32 - (rect.y + rect.h / 2.0)) as u32;
+    (1..=FEW_PARTS).map(|part| usize::from(canvas.pixel_at((rect.x + rect.w * (part as f32 - 0.5) / FEW_PARTS as f32) as u32, row).r).wrapping_sub(1)).collect()
+}
+
+/// Every gauge type reads the six cells the reference gives it, and every part of it the cell its
+/// place asks for: lit, leading or unlit, in the shade for the side of the clear line it is on.
+#[test]
+fn a_gauge_reads_the_cell_the_reference_names_for_every_gauge_type_and_state() {
+    let rect = SkinRect::new(100.0, 100.0, 500.0, 20.0);
+    let columns = [0, 1, 2, 3, 4, 5, 3, 4, 5];
+    let below = SLOT_BELOW_BORDER;
+    for (gauge_type, column) in columns.into_iter().enumerate() {
+        let first = column * SLOTS_PER_GAUGE;
+        let mut canvas = CpuCanvas::new(CANVAS.0, CANVAS.1);
+        let mut body = distinct_gauge(&mut canvas);
+        body.motion = RefCell::new(GaugeMotion::new(FEW_PARTS));
+        let bar = object(rect, Body::Gauge(body));
+
+        let half = GaugeFrame::playing(gauge_type, 50.0, [GROOVE; GAUGE_TYPES]);
+        assert!(draw_on(&mut canvas, &bar, &PlayState::default(), gauged(half)), "gauge type {gauge_type} drew nothing");
+        let lit = first + SLOT_LIT + below;
+        let dark = first + SLOT_UNLIT;
+        let expected = vec![lit, lit, lit, lit, first + SLOT_LEADING + below, dark + below, dark + below, dark, dark, dark];
+        assert_eq!(cells_read(&canvas, rect), expected, "gauge type {gauge_type} at half");
+
+        canvas.clear(Color::BLACK);
+        let full = GaugeFrame::playing(gauge_type, 100.0, [GROOVE; GAUGE_TYPES]);
+        draw_on(&mut canvas, &bar, &PlayState::default(), gauged(full));
+        let bright = first + SLOT_LIT;
+        let expected = vec![lit, lit, lit, lit, lit, lit, lit, bright, bright, first + SLOT_LEADING];
+        assert_eq!(cells_read(&canvas, rect), expected, "gauge type {gauge_type} full");
+    }
+}
+
+/// How many parts of a fifty-part gauge are lit on the canvas.
+fn lit_count(canvas: &CpuCanvas, rect: SkinRect) -> usize {
+    let row = (CANVAS.1 as f32 - (rect.y + rect.h / 2.0)) as u32;
+    let unlit = [SLOT_UNLIT, SLOT_UNLIT + SLOT_BELOW_BORDER];
+    (1..=TEST_PARTS).filter(|part| !unlit.contains(&(usize::from(canvas.pixel_at(part_column(rect, *part), row).r).wrapping_sub(1) % SLOTS_PER_GAUGE))).count()
+}
+
+/// On a score screen the gauge fills from its least value to the one the run ended on, at the pace
+/// that would fill the whole bar between the record's two times.
+#[test]
+fn a_score_screens_gauge_fills_up_to_the_runs_last_value_as_the_scene_opens() {
+    let rect = SkinRect::new(100.0, 100.0, 500.0, 20.0);
+    let mut canvas = CpuCanvas::new(CANVAS.0, CANVAS.1);
+    let bar = object(rect, Body::Gauge(distinct_gauge(&mut canvas)));
+    let ended = gauged(GaugeFrame::finished(2, 90.0, [GROOVE; GAUGE_TYPES]));
+
+    for (now_ms, lit) in [(0, 1), (125, 12), (250, 25), (449, 44), (450, 45), (500, 45), (5_000, 45)] {
+        canvas.clear(Color::BLACK);
+        assert!(draw_at(&mut canvas, &bar, &PlayState::default(), ended, now_ms));
+        assert_eq!(lit_count(&canvas, rect), lit, "{now_ms} ms into the scene");
+    }
+
+    canvas.clear(Color::BLACK);
+    let running = gauged(GaugeFrame::playing(2, 90.0, [GROOVE; GAUGE_TYPES]));
+    draw_at(&mut canvas, &bar, &PlayState::default(), running, 0);
+    assert_eq!(lit_count(&canvas, rect), 45, "a run in progress shows its gauge as it is");
+}
+
+/// A record can put the fill later in the scene, and until then the gauge stands at its least.
+#[test]
+fn a_score_screens_gauge_waits_for_its_start_time() {
+    let rect = SkinRect::new(100.0, 100.0, 500.0, 20.0);
+    let mut canvas = CpuCanvas::new(CANVAS.0, CANVAS.1);
+    let mut body = distinct_gauge(&mut canvas);
+    (body.starttime, body.endtime) = (1_000, 3_000);
+    let bar = object(rect, Body::Gauge(body));
+    let ended = gauged(GaugeFrame::finished(3, 90.0, [GROOVE; GAUGE_TYPES]));
+
+    for (now_ms, lit) in [(0, 1), (999, 1), (2_000, 25), (3_000, 45)] {
+        canvas.clear(Color::BLACK);
+        draw_at(&mut canvas, &bar, &PlayState::default(), ended, now_ms);
+        assert_eq!(lit_count(&canvas, rect), lit, "{now_ms} ms into the scene");
+    }
+}
+
+/// The flickering gauge darkens nothing behind its leading part; it draws that part lit and fades
+/// the leading cell in and out over it.
+#[test]
+fn a_flickering_gauge_fades_its_leading_cell_over_the_lit_one() {
+    let rect = SkinRect::new(100.0, 100.0, 500.0, 20.0);
+    let mut canvas = CpuCanvas::new(CANVAS.0, CANVAS.1);
+    let reds = [FLICKER_LIT, FLICKER_LIT, FLICKER_UNLIT, FLICKER_UNLIT, FLICKER_LEADING, FLICKER_LEADING];
+    let nodes: Vec<Sprite> = reds.iter().enumerate().map(|(state, red)| solid(&mut canvas, &format!("flicker{state}"), shade(*red))).collect();
+    let mut slots = [None; 36];
+    for (slot, entry) in slots.iter_mut().enumerate() {
+        *entry = Some((slot % SLOTS_PER_GAUGE) as u8);
+    }
+    let mut body = gauge_of(nodes, slots, FEW_PARTS, GaugeAnimation::Flickering);
+    (body.range, body.cycle) = (3, FLICKER_CYCLE_MS);
+    let bar = object(rect, Body::Gauge(body));
+    let half = gauged(GaugeFrame::playing(2, 50.0, [GROOVE; GAUGE_TYPES]));
+    let row = (CANVAS.1 as f32 - (rect.y + rect.h / 2.0)) as u32;
+    let red_of = |canvas: &CpuCanvas, part: i32| canvas.pixel_at((rect.x + rect.w * (part as f32 - 0.5) / FEW_PARTS as f32) as u32, row).r;
+
+    draw_at(&mut canvas, &bar, &PlayState::default(), half, 0);
+    assert_eq!(
+        (1..=FEW_PARTS).map(|part| red_of(&canvas, part)).collect::<Vec<_>>(),
+        [vec![FLICKER_LIT; 5], vec![FLICKER_UNLIT; 5]].concat(),
+        "at the start of a cycle"
+    );
+
+    canvas.clear(Color::BLACK);
+    draw_at(&mut canvas, &bar, &PlayState::default(), half, 49);
+    assert_eq!(red_of(&canvas, 5), FLICKER_LEADING, "half way through, the leading cell is fully over the lit one");
+    assert_eq!((red_of(&canvas, 4), red_of(&canvas, 6)), (FLICKER_LIT, FLICKER_UNLIT), "and its neighbours are untouched");
+
+    canvas.clear(Color::BLACK);
+    draw_at(&mut canvas, &bar, &PlayState::default(), half, 1_025);
+    let faded = red_of(&canvas, 5);
+    assert!((130..=150).contains(&faded), "a quarter of the way through, the leading cell is about half over the lit one: {faded}");
+
+    canvas.clear(Color::BLACK);
+    draw_at(&mut canvas, &bar, &PlayState::default(), half, 99);
+    assert_eq!(red_of(&canvas, 5), FLICKER_LIT, "and at the end of the cycle it is gone again");
+}
+
+/// A record whose `type` is none of the four the reference lists is never drawn, and neither is a
+/// gauge on a frame that carries none.
+#[test]
+fn a_gauge_with_no_animation_the_reference_knows_or_no_gauge_to_show_draws_nothing() {
+    let rect = SkinRect::new(100.0, 100.0, 500.0, 20.0);
+    let mut canvas = CpuCanvas::new(CANVAS.0, CANVAS.1);
+    let shown = gauged(GaugeFrame::playing(2, 50.0, [GROOVE; GAUGE_TYPES]));
+
+    let mut unlisted = distinct_gauge(&mut canvas);
+    unlisted.animation = None;
+    assert!(!draw_on(&mut canvas, &object(rect, Body::Gauge(unlisted)), &PlayState::default(), shown));
+
+    let bar = object(rect, Body::Gauge(distinct_gauge(&mut canvas)));
+    assert!(!draw_on(&mut canvas, &bar, &PlayState::default(), FrameData::default()));
+    let past_the_last = gauged(GaugeFrame::playing(GAUGE_TYPES, 50.0, [GROOVE; GAUGE_TYPES]));
+    assert!(!draw_on(&mut canvas, &bar, &PlayState::default(), past_the_last), "a type that names no gauge");
+    assert!(draw_on(&mut canvas, &bar, &PlayState::default(), shown));
 }
 
 /// A hidden cover reports the band the hidden modifier takes off the field, which the reference

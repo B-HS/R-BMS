@@ -9,7 +9,7 @@ use cpal::{BufferSize, FromSample, SampleFormat, SizedSample, StreamConfig, Supp
 
 use crate::AudioError;
 use crate::decode::{DecodedAudio, decode_bytes};
-use crate::mixer::{Bus, CHANNELS_PER_SAMPLE_ID, Command, MixStats, Mixer, SampleData, channel_key};
+use crate::mixer::{Bus, CHANNELS_PER_SAMPLE_ID, Command, MixStats, Mixer, SampleData, channel_key, effect_key};
 
 /// Default polyphony. The reference implementation's `deviceSimultaneousSources` default is 256
 /// (`AudioConfig.java:28`); rbms doubles that for slack, since a full pool still has to take a slot
@@ -19,6 +19,11 @@ pub const DEFAULT_MAX_VOICES: usize = 512;
 /// A pool of zero voices would swallow every sound the mixer is asked to start, so a requested
 /// polyphony is raised to at least this.
 const MIN_MAX_VOICES: usize = 1;
+
+/// The number the next engine to open is known by, so a caller holding state that belongs to one
+/// stream (decoded effects installed in its bank, say) can tell a reopened stream from the one it
+/// filled.
+static NEXT_ENGINE_INSTANCE: AtomicU64 = AtomicU64::new(1);
 
 /// Command ring capacity. One slot per queued play/stop; overflow is counted, never blocking.
 const COMMAND_QUEUE_CAPACITY: usize = 8192;
@@ -251,6 +256,8 @@ pub struct AudioEngine {
     bank: HashMap<u32, Arc<SampleData>>,
     last_clock: Cell<ClockState>,
     last_stats: Cell<MixStats>,
+    instance: u64,
+    effect_serial: u8,
 }
 
 impl AudioEngine {
@@ -325,6 +332,13 @@ impl AudioEngine {
 
     pub fn out_rate(&self) -> u32 {
         self.out_rate
+    }
+
+    /// The number this stream was opened under, different for every engine of the process. A bank
+    /// filled for one engine is empty in the next, which is how a caller that kept its own record of
+    /// what it installed finds out that it has to install again.
+    pub fn instance_id(&self) -> u64 {
+        self.instance
     }
 
     pub fn clock_frames(&self) -> u64 {
@@ -469,6 +483,22 @@ impl AudioEngine {
             let at_frame = (at_us.max(0) as i128 * self.out_rate as i128 / 1_000_000) as u64;
             let key = channel_key(id, pitch);
             self.push(Command::Play { sample, gain, pan, pitch, key, at_frame, bus });
+        }
+    }
+
+    /// Play a sound effect from the bank on `bus`: it starts at the next buffer, centred and
+    /// unpitched, at `gain`, and with `looped` it repeats until [`stop`](Self::stop) or
+    /// [`clear_namespace`](Self::clear_namespace).
+    ///
+    /// Every call starts an instance of its own, so a sound played again while it is still sounding
+    /// overlaps itself the way the reference's effects do, where [`play_on`](Self::play_on) cuts the
+    /// earlier one. A sample that is not in the bank plays nothing. Stopping the id stops every
+    /// instance.
+    pub fn play_effect(&mut self, bus: Bus, id: u32, gain: f32, looped: bool) {
+        if let Some(sample) = self.bank.get(&id).cloned() {
+            let key = effect_key(id, self.effect_serial);
+            self.effect_serial = self.effect_serial.wrapping_add(1);
+            self.push(Command::PlayEffect { sample, gain, key, bus, looped });
         }
     }
 
@@ -916,6 +946,8 @@ fn open_stream(device: &cpal::Device, config: &StreamConfig, sample_format: Samp
         bank: HashMap::new(),
         last_clock: Cell::new(seed_clock),
         last_stats: Cell::new(MixStats::default()),
+        instance: NEXT_ENGINE_INSTANCE.fetch_add(1, Ordering::Relaxed),
+        effect_serial: 0,
     })
 }
 
@@ -1749,5 +1781,43 @@ mod tests {
         assert!(clocks.lookahead_us > 0, "a live stream must ask the scheduler to look ahead");
         assert_eq!(engine.scratch_reallocations(), 0, "the callback allocated on the RT thread");
         assert_eq!(engine.underruns(), 0, "a silent engine should not report dropouts");
+    }
+
+    /// Effects through the real engine: instances overlap, a loop outlasts its sample, stopping the id
+    /// reaches every instance, and two engines are told apart. Silent: the effect is played at zero gain.
+    #[test]
+    #[ignore = "requires a real audio output device"]
+    fn effects_overlap_loop_and_stop_on_a_real_device() {
+        const EFFECT_ID: u32 = 5;
+        const SILENT_GAIN: f32 = 0.0;
+        const EFFECT_MS: u32 = 50;
+        const MS_PER_SECOND: u32 = 1000;
+        const SETTLE: Duration = Duration::from_millis(400);
+        const SHORTLY_AFTER_START: Duration = Duration::from_millis(10);
+
+        let (mut engine, report) = AudioEngine::open(&AudioOptions::default()).expect("audio device");
+        let frames = (report.sample_rate / MS_PER_SECOND * EFFECT_MS) as usize;
+        engine.insert_decoded(EFFECT_ID, DecodedAudio { samples: vec![0.1; frames], channels: 1, rate: report.sample_rate });
+
+        engine.play_effect(Bus::System, EFFECT_ID, SILENT_GAIN, true);
+        engine.play_effect(Bus::System, EFFECT_ID, SILENT_GAIN, true);
+        std::thread::sleep(SETTLE);
+        assert_eq!(engine.mix_stats().active_voices, 2, "two looped instances must both outlast the sample");
+
+        engine.stop(EFFECT_ID);
+        std::thread::sleep(SETTLE);
+        assert_eq!(engine.mix_stats().active_voices, 0, "stopping the id must stop every instance");
+
+        engine.play_effect(Bus::System, EFFECT_ID, SILENT_GAIN, false);
+        engine.play_effect(Bus::System, EFFECT_ID, SILENT_GAIN, false);
+        std::thread::sleep(SHORTLY_AFTER_START);
+        assert_eq!(engine.mix_stats().active_voices, 2, "plain effects overlap");
+        std::thread::sleep(SETTLE);
+        assert_eq!(engine.mix_stats().active_voices, 0, "plain effects end by themselves");
+
+        let first = engine.instance_id();
+        drop(engine);
+        let (reopened, _) = AudioEngine::open(&AudioOptions::default()).expect("audio device");
+        assert_ne!(reopened.instance_id(), first, "a reopened stream must be told apart from the one before");
     }
 }

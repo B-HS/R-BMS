@@ -11,7 +11,7 @@
 
 use rbms_skin::dst::{LuaDrawEval, OffsetSource};
 use rbms_skin::property::SkinHost;
-use rbms_skin::timer::{MICROS_PER_MILLI, TIMER_OFF, TimerId, TimerState, timer_id};
+use rbms_skin::timer::{TimerId, TimerState, timer_id};
 
 use super::state::{DecideViewState, KeyConfigViewState, PlayViewState, ResultViewState, SelectViewState};
 use super::{FrameData, SkinFrame, SkinScreen};
@@ -362,47 +362,5 @@ impl SelectTimers {
         }
         self.row = row;
         self.seen = true;
-    }
-}
-
-/// How long after the score screen is entered the graph timer that marks the end of the trend
-/// animation switches on. The reference runs the gauge trend in over about a second, and a document
-/// measures the end of that run from this timer.
-const RESULT_GRAPH_MS: i64 = 1_000;
-
-/// What the score screen's timers were last switched against.
-///
-/// A document draws the gauge trend growing from the moment the screen opened and marks the score it
-/// reports when that score is a new best, so the screen has to say when it opened and whether the
-/// run it is reporting beat what was there before.
-///
-/// The run is measured once, when the screen is entered, and the summary it reports never moves
-/// afterwards: rbms has no rank reveal for a key to skip and no second submission that rewrites the
-/// score on screen. So the score timer is settled on entry too, rather than watched for a change
-/// across frames that cannot happen.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct ResultTimers;
-
-impl ResultTimers {
-    /// A memory with nothing seen yet.
-    pub fn new() -> ResultTimers {
-        ResultTimers
-    }
-
-    /// Switches the timers that mark the screen opening: the trend begins now, has not ended yet,
-    /// and the score timer is on exactly when the run set a new best. A chart with no score behind
-    /// it counts as a new best, because every run on it is the best there has been.
-    pub fn enter(&mut self, timers: &mut TimerState, view: &ResultView, now_us: i64) {
-        timers.set_on(timer_id::RESULTGRAPH_BEGIN, now_us);
-        timers.off(timer_id::RESULTGRAPH_END);
-        let record = view.prev_best_ex.is_none_or(|best| view.ex_score > best);
-        timers.switch(timer_id::RESULT_UPDATESCORE, record, now_us);
-    }
-
-    /// Switches this frame's timers: the trend ends a second after the screen opened.
-    pub fn update(&mut self, timers: &mut TimerState, now_us: i64) {
-        let began_us = timers.value_us(timer_id::RESULTGRAPH_BEGIN);
-        let trend_over = began_us != TIMER_OFF && (now_us - began_us) / MICROS_PER_MILLI >= RESULT_GRAPH_MS;
-        timers.switch(timer_id::RESULTGRAPH_END, trend_over, now_us);
     }
 }

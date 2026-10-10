@@ -25,6 +25,11 @@ pub(crate) const CHANNELS_PER_SAMPLE_ID: u32 = 256;
 /// Bias added to the semitone offset so the whole semitone range maps into `0..256`.
 pub(crate) const PITCH_CHANNEL_BIAS: i32 = 128;
 
+/// A sound effect is centred, unpitched and starts at the next buffer.
+const EFFECT_PAN: f32 = 0.0;
+const EFFECT_PITCH: f32 = 1.0;
+const EFFECT_AT_FRAME: u64 = 0;
+
 const MIN_SEMITONE_OFFSET: i32 = -128;
 const MAX_SEMITONE_OFFSET: i32 = 127;
 const SEMITONES_PER_OCTAVE: f32 = 12.0;
@@ -86,6 +91,14 @@ pub(crate) fn semitone_offset(pitch: f32) -> i32 {
         return 0;
     }
     (SEMITONES_PER_OCTAVE * pitch.log2()).round().clamp(MIN_SEMITONE_OFFSET as f32, MAX_SEMITONE_OFFSET as f32) as i32
+}
+
+/// Voice channel key of one instance of a sound effect: the sample id's channel span with the
+/// instance's serial in the pitch slot. Effects are fire-and-forget and may overlap themselves
+/// (the reference starts a new instance on every request), so each instance gets its own key and
+/// stopping the sample id still reaches all of them ([`channel_sample_id`]).
+pub(crate) fn effect_key(id: u32, serial: u8) -> u32 {
+    id.wrapping_mul(CHANNELS_PER_SAMPLE_ID).wrapping_add(u32::from(serial))
 }
 
 /// Voice channel key for a sample id played at a pitch ratio. Two plays of the same id at
@@ -187,6 +200,8 @@ struct Voice {
     phase: VoicePhase,
     start_frame: u64,
     active: bool,
+    /// Whether the read position wraps to the start of the sample instead of ending the voice.
+    looped: bool,
     /// A start queued behind this voice's fade-out. Set when the pool was full and this slot was the
     /// one taken, so the incoming sound waits out the victim's release instead of cutting it off
     /// mid-waveform. Started in place, sample accurately, the frame the release reaches silence.
@@ -209,6 +224,7 @@ impl Voice {
             phase: VoicePhase::Attack,
             start_frame: 0,
             active: false,
+            looped: false,
             pending: None,
         }
     }
@@ -282,6 +298,7 @@ fn start_in_place(v: &mut Voice, req: PlayRequest, delay: u64, at: u64, out_rate
     v.phase = VoicePhase::Attack;
     v.start_frame = at + delay;
     v.active = true;
+    v.looped = req.looped;
     v.pending = None;
 }
 
@@ -292,9 +309,14 @@ fn start_in_place(v: &mut Voice, req: PlayRequest, delay: u64, at: u64, out_rate
 /// applied to every bus, matching the reference implementation, which multiplies the same
 /// chart-derived volume into note sounds (`AbstractAudioDriver.java:486-491`) and judge sounds
 /// (`AbstractAudioDriver.java:502`) alike.
+///
+/// `PlayEffect` is a sound effect: it starts at the next buffer, centred and unpitched, and with
+/// `looped` it wraps around the end of the sample until it is stopped. It is the only command that
+/// loops, so a keysound or a preview can never be left running by accident.
 #[non_exhaustive]
 pub enum Command {
     Play { sample: Arc<SampleData>, gain: f32, pan: f32, pitch: f32, key: u32, at_frame: u64, bus: Bus },
+    PlayEffect { sample: Arc<SampleData>, gain: f32, key: u32, bus: Bus, looped: bool },
     Stop { key: u32 },
     StopId { id: u32 },
     StopRange { lo_key: u32, hi_key: u32 },
@@ -313,6 +335,7 @@ struct PlayRequest {
     key: u32,
     at_frame: u64,
     bus: Bus,
+    looped: bool,
 }
 
 /// Which rung of the voice-stealing ladder produced a slot.
@@ -403,7 +426,12 @@ impl Mixer {
 
     pub fn apply(&mut self, cmd: Command) {
         match cmd {
-            Command::Play { sample, gain, pan, pitch, key, at_frame, bus } => self.start_voice(PlayRequest { sample, gain, pan, pitch, key, at_frame, bus }),
+            Command::Play { sample, gain, pan, pitch, key, at_frame, bus } => {
+                self.start_voice(PlayRequest { sample, gain, pan, pitch, key, at_frame, bus, looped: false })
+            }
+            Command::PlayEffect { sample, gain, key, bus, looped } => {
+                self.start_voice(PlayRequest { sample, gain, pan: EFFECT_PAN, pitch: EFFECT_PITCH, key, at_frame: EFFECT_AT_FRAME, bus, looped })
+            }
             Command::Stop { key } => self.stop(key),
             Command::StopId { id } => self.stop_id(id),
             Command::StopRange { lo_key, hi_key } => self.stop_range(lo_key, hi_key),
@@ -605,13 +633,16 @@ impl Mixer {
                             }
                         }
                     }
+                    if v.looped && nframes > 0 && v.pos >= nframes as f64 {
+                        v.pos %= nframes as f64;
+                    }
                     let i = v.pos as usize;
                     if i >= nframes {
                         ended = true;
                         break;
                     }
                     let frac = (v.pos - i as f64) as f32;
-                    let next = (i + 1).min(nframes - 1);
+                    let next = if v.looped && i + 1 >= nframes { 0 } else { (i + 1).min(nframes - 1) };
                     let (sl, sr) = if src_ch == 1 {
                         let a = pcm[i];
                         let b = pcm[next];
@@ -678,9 +709,12 @@ impl Mixer {
 
     #[cfg(test)]
     fn play(&mut self, sample: Arc<SampleData>, gain: f32, pan: f32, pitch: f32, key: u32, at_frame: u64) {
-        self.start_voice(PlayRequest { sample, gain, pan, pitch, key, at_frame, bus: Bus::Key });
+        self.start_voice(PlayRequest { sample, gain, pan, pitch, key, at_frame, bus: Bus::Key, looped: false });
     }
 }
+
+#[cfg(test)]
+mod effect_tests;
 
 #[cfg(test)]
 mod tests {

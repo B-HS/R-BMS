@@ -35,7 +35,8 @@ use rbms_chart::to_model;
 use rbms_model::Mode;
 use rbms_parser::parse;
 use rbms_render::playfield::LaneShade;
-use rbms_render::skin_render::graphs::{EARLY_LATE_BUCKETS, JUDGEMENTS, NOTE_KINDS, PlayCursor};
+use rbms_render::skin_render::frame::{GAUGE_TYPES, GaugeScale};
+use rbms_render::skin_render::graphs::{EARLY_LATE_BUCKETS, GAUGE_SAMPLE_MS, JUDGEMENTS, NOTE_KINDS, PlayCursor, TIMING_JUDGE_AREAS};
 use rbms_render::skin_render::textures::referenced_sources;
 use rbms_render::{
     BgaFrame, BpmTimeline, Color, CpuCanvas, FrameData, FrameSeries, GaugeFrame, GaugeHistory, NoteDistribution, NoteField, PlayfieldView, RecentHits,
@@ -44,6 +45,7 @@ use rbms_render::{
 };
 use rbms_skin::dst::{DrawCondition, TimerRef};
 use rbms_skin::loader::{LoadedSkin, SkinLoadOptions, SkinUserConfig, load_skin_with_host, parse_value};
+use rbms_skin::model::EventRef;
 use rbms_skin::property::{MapHost, PropertyKind};
 use rbms_skin::timer::{MICROS_PER_MILLI, TimerId, TimerState};
 use serde::Deserialize;
@@ -104,14 +106,68 @@ const PLAY_CHART: &[u8] = b"#PLAYER 1\r\n#BPM 150\r\n#WAV01 a.wav\r\n\
 #00111:01000100\r\n#00112:00010001\r\n#00113:01000000\r\n#00114:00000100\r\n#00115:00010000\r\n#00116:01010000\r\n#00118:00000001\r\n#00119:01000000\r\n\
 #00211:0101\r\n#00212:0001\r\n#00213:0100\r\n#00214:0101\r\n#00215:0001\r\n#00216:0100\r\n#00218:0101\r\n#00219:0001\r\n";
 
-/// The gauge a result scenario's trend graph draws, in percent, one sample per step of the run.
-const RESULT_GAUGE_SERIES: [f32; 16] = [20.0, 24.0, 30.0, 38.0, 46.0, 52.0, 50.0, 58.0, 66.0, 72.0, 70.0, 76.0, 80.0, 84.0, 82.0, 86.4];
+/// The reference's number for the gauge the result scenario's run was played on: normal.
+const RESULT_GAUGE_TYPE: usize = 2;
 
-/// The timing histogram a result scenario's distribution graph draws.
-const RESULT_TIMING_HIST: [u32; 11] = [2, 6, 18, 60, 180, 420, 210, 70, 22, 8, 3];
+/// What that gauge stood at when the run ended, which is also what the scenario's numbers say.
+const RESULT_GAUGE_END: f32 = 86.4;
+
+/// What a gauge that clears part way up starts a run at.
+const GROOVE_GAUGE_START: f32 = 20.0;
+
+/// The most any gauge of the scenario holds.
+const GAUGE_FULL: f32 = 100.0;
+
+/// The limits of the nine gauges of a seven-key chart, by the reference's gauge type: the least,
+/// the most and the clear line of each (`GaugeProperty.SEVENKEYS`).
+const SEVEN_KEY_GAUGES: [GaugeScale; GAUGE_TYPES] = [
+    GaugeScale::new(2.0, 100.0, 60.0),
+    GaugeScale::new(2.0, 100.0, 80.0),
+    GaugeScale::new(2.0, 100.0, 80.0),
+    GaugeScale::new(0.0, 100.0, 0.0),
+    GaugeScale::new(0.0, 100.0, 0.0),
+    GaugeScale::new(0.0, 100.0, 0.0),
+    GaugeScale::new(0.0, 100.0, 0.0),
+    GaugeScale::new(0.0, 100.0, 0.0),
+    GaugeScale::new(0.0, 100.0, 0.0),
+];
+
+/// How fast each gauge of the result scenario gains while the run goes well, per sample, by gauge
+/// type. The three that clear part way up gain quickly; the six that clear at nothing barely do.
+const GAUGE_GAIN: [f32; GAUGE_TYPES] = [0.6, 0.55, 0.474, 0.06, 0.04, 0.04, 0.05, 0.04, 0.03];
+
+/// How much each gauge loses when the run slips, by gauge type.
+const GAUGE_LOSS: [f32; GAUGE_TYPES] = [4.0, 6.0, 9.0, 16.0, 26.0, 100.0, 5.0, 9.0, 15.0];
+
+/// How many stages the course scenario reads the result scenario's run as, each as long as the
+/// others.
+const COURSE_STAGES: usize = 4;
+
+/// Samples between two slips of the result scenario's run.
+const GAUGE_SLIP_EVERY: usize = 37;
+
+/// How many milliseconds to either side of a note's moment the result scenario's timing spread
+/// counts, which is the reference's range.
+const TIMING_RANGE_MS: i32 = 150;
+
+/// The offset the result scenario's hits are centred on, in milliseconds early.
+const TIMING_CENTRE_MS: f64 = 4.0;
+
+/// How widely they are spread around it, in milliseconds.
+const TIMING_SPREAD_MS: f64 = 14.0;
+
+/// How many hits the fullest millisecond of the result scenario holds.
+const TIMING_PEAK: f64 = 46.0;
+
+/// The judgement windows of the result scenario's run in milliseconds, best first, each as how late
+/// and how early a hit may be: a seven-key chart at the reference's normal judge rank.
+const RESULT_JUDGE_AREA: [[i32; 2]; TIMING_JUDGE_AREAS] = [[-20, 20], [-60, 60], [-150, 150], [-280, 220], [-150, 500]];
 
 /// The judgement counts a result scenario's graphs draw, best first.
 const RESULT_JUDGE_DIST: [u32; 6] = [1320, 250, 40, 6, 8, 0];
+
+/// Milliseconds in a second, which is what turns the scenario chart's length into gauge samples.
+const MS_PER_SECOND: usize = 1_000;
 
 /// How long the scenario chart lasts, in seconds, which is how many columns its distribution has.
 const CHART_SECONDS: usize = 150;
@@ -194,6 +250,46 @@ fn analysis() -> Analysis {
     Analysis { kinds, judgements, early_late }
 }
 
+/// How every gauge the result scenario's run could have been played on moved, by gauge type, a sample
+/// every half second of the chart: each starts where its kind starts, gains while the run goes well
+/// and loses when it slips, and one that empties stays empty. The gauge the run was played on ends
+/// on the value the scenario's numbers report.
+fn gauge_histories() -> Vec<Vec<f32>> {
+    let samples = CHART_SECONDS * MS_PER_SECOND / GAUGE_SAMPLE_MS as usize;
+    (0..GAUGE_TYPES)
+        .map(|gauge_type| {
+            let scale = SEVEN_KEY_GAUGES[gauge_type];
+            let survival = scale.border == 0.0;
+            let mut value = if survival { GAUGE_FULL } else { GROOVE_GAUGE_START };
+            let mut history: Vec<f32> = (1..=samples)
+                .map(|sample| {
+                    let emptied = survival && value <= 0.0;
+                    let change = if sample % GAUGE_SLIP_EVERY == 0 { -GAUGE_LOSS[gauge_type] } else { GAUGE_GAIN[gauge_type] };
+                    value = if emptied { 0.0 } else { (value + change).clamp(scale.min, scale.max) };
+                    value
+                })
+                .collect();
+            if gauge_type == RESULT_GAUGE_TYPE
+                && let Some(last) = history.last_mut()
+            {
+                *last = RESULT_GAUGE_END;
+            }
+            history
+        })
+        .collect()
+}
+
+/// How the result scenario's hits were spread around their notes: a bell a few milliseconds early,
+/// one count to a millisecond from [`TIMING_RANGE_MS`] late to as far early.
+fn timing_distribution() -> Vec<u32> {
+    (-TIMING_RANGE_MS..=TIMING_RANGE_MS)
+        .map(|offset| {
+            let distance = (f64::from(offset) - TIMING_CENTRE_MS) / TIMING_SPREAD_MS;
+            (TIMING_PEAK * (-distance * distance / 2.0).exp()).round() as u32
+        })
+        .collect()
+}
+
 /// The row of the browser scenario that is under the cursor.
 const SELECT_CURSOR: usize = 4;
 
@@ -226,6 +322,9 @@ enum Extra {
     Select,
     /// The series a result screen's graphs draw.
     Result,
+    /// The series a course's result screen draws: the gauge through every stage with the stage ends
+    /// marked, and no timing spread, which the reference keeps to a single chart's result.
+    CourseResult,
     /// A note field.
     Play,
 }
@@ -240,18 +339,41 @@ struct Switch {
     on: bool,
 }
 
+/// A click on an image of the skin, which a scenario file cannot say either: the skin keeps what
+/// the click changed in its own interpreter.
+#[derive(Debug, Clone, Copy)]
+struct Click {
+    /// The scene time from which the click has happened.
+    at_ms: i64,
+    /// The id of the image whose `act` is run.
+    image: &'static str,
+}
+
 /// One screen of the pack and the moments it is drawn at.
 #[derive(Debug, Clone, Copy)]
 struct Shot {
-    /// The stem of the scenario file and of every capture.
+    /// The stem of the scenario file.
     name: &'static str,
+    /// The stem of every capture.
+    capture: &'static str,
     /// The entry file, relative to the pack.
     entry: &'static str,
     /// The scene times that are drawn, in milliseconds and in order.
     times_ms: &'static [i64],
     extra: Extra,
     switches: &'static [Switch],
+    clicks: &'static [Click],
 }
+
+/// The image a result screen of the pack this was written against switches its information panel
+/// with.
+const RESULT_MENU_BUTTON: &str = "mainMenu";
+
+/// The scene time at which the second result shot presses that button.
+const RESULT_MENU_PRESSED_MS: i64 = 3_000;
+
+/// The argument a left click hands the event it runs.
+const CLICK_ARGUMENT: i32 = 1;
 
 /// The option a play screen reads while the chart is loading.
 const OPTION_NOW_LOADING: i32 = 80;
@@ -267,18 +389,57 @@ const PLAY_LOADED_MS: i64 = 3_500;
 ///
 /// The decide, result and browser screens are drawn as they open, when the reference starts to take
 /// input, in the middle of their animation and at rest; the decide screen once more partway through
-/// its fade to black. The play screen is drawn while it loads (twice), in its ready phase and with
-/// the chart running.
+/// its fade to black, and the result screen twice more while its gauge fills and its graphs are
+/// being revealed. The result screen is then drawn again with its information panel switched to the
+/// second page, where the rest of its graphs are, and the course's result screen is drawn against
+/// the same scenario with the run read as four stages. The play screen is drawn while it loads
+/// (twice), in its ready phase and with the chart running.
 const SHOTS: &[Shot] = &[
-    Shot { name: "decide", entry: "decide.luaskin", times_ms: &[0, 500, 1_500, 3_000, 3_750], extra: Extra::None, switches: &[] },
-    Shot { name: "result", entry: "result.luaskin", times_ms: &[0, 500, 1_500, 3_000], extra: Extra::Result, switches: &[] },
-    Shot { name: "musicselect", entry: "musicselect.luaskin", times_ms: &[0, 500, 1_500, 3_000], extra: Extra::Select, switches: &[] },
+    Shot {
+        name: "decide",
+        capture: "decide",
+        entry: "decide.luaskin",
+        times_ms: &[0, 500, 1_500, 3_000, 3_750],
+        extra: Extra::None,
+        switches: &[],
+        clicks: &[],
+    },
+    Shot {
+        name: "result",
+        capture: "result",
+        entry: "result.luaskin",
+        times_ms: &[0, 250, 500, 750, 1_500, 3_000],
+        extra: Extra::Result,
+        switches: &[],
+        clicks: &[],
+    },
+    Shot {
+        name: "result",
+        capture: "result_menu2",
+        entry: "result.luaskin",
+        times_ms: &[3_000, 3_250, 5_000],
+        extra: Extra::Result,
+        switches: &[],
+        clicks: &[Click { at_ms: RESULT_MENU_PRESSED_MS, image: RESULT_MENU_BUTTON }],
+    },
+    Shot { name: "result", capture: "course", entry: "course.luaskin", times_ms: &[0, 1_500, 3_000], extra: Extra::CourseResult, switches: &[], clicks: &[] },
+    Shot {
+        name: "musicselect",
+        capture: "musicselect",
+        entry: "musicselect.luaskin",
+        times_ms: &[0, 500, 1_500, 3_000],
+        extra: Extra::Select,
+        switches: &[],
+        clicks: &[],
+    },
     Shot {
         name: "play7_hw",
+        capture: "play7_hw",
         entry: "play7_hw.luaskin",
         times_ms: &[0, 2_000, 4_000, 6_000],
         extra: Extra::Play,
         switches: &[Switch { at_ms: PLAY_LOADED_MS, option: OPTION_NOW_LOADING, on: false }, Switch { at_ms: PLAY_LOADED_MS, option: OPTION_LOADED, on: true }],
+        clicks: &[],
     },
 ];
 
@@ -599,6 +760,10 @@ struct Stage<'a> {
     field: &'a Skin,
     chart: &'a rbms_model::Model,
     analysis: &'a Analysis,
+    /// How every gauge of the result scenario's run moved, by gauge type.
+    gauges: &'a [Vec<f32>],
+    /// How the result scenario's hits were spread around their notes.
+    timing: &'a [u32],
 }
 
 impl Stage<'_> {
@@ -619,12 +784,16 @@ impl Stage<'_> {
             ..NoteDistribution { kinds: &self.analysis.kinds, ..NoteDistribution::of_judgements(&RESULT_JUDGE_DIST) }
         };
         let series = FrameSeries {
-            gauge_history: Some(GaugeHistory::new(&RESULT_GAUGE_SERIES)),
-            timing: Some(TimingHistogram::new(&RESULT_TIMING_HIST)),
+            gauge_history: Some(GaugeHistory::of_kinds(self.gauges)),
+            timing: Some(TimingHistogram::new(self.timing).with_judge_area(RESULT_JUDGE_AREA)),
             bpm: Some(tempo),
             notes: Some(run),
             recent_hits: None,
         };
+        let ended = GaugeFrame::finished(RESULT_GAUGE_TYPE, RESULT_GAUGE_END, SEVEN_KEY_GAUGES);
+        let samples = self.gauges.first().map_or(0, Vec::len);
+        let stage_ends: [usize; COURSE_STAGES] = std::array::from_fn(|stage| samples * (stage + 1) / COURSE_STAGES);
+        let course = FrameSeries { gauge_history: Some(GaugeHistory::of_kinds(self.gauges).with_sections(&stage_ends)), timing: None, ..series };
         let playfield = PlayfieldView {
             timelines: &self.chart.timelines,
             microtime: (now_ms - PLAY_STARTS_MS).max(0) * MICROS_PER_MILLI,
@@ -641,10 +810,11 @@ impl Stage<'_> {
             Extra::Select => {
                 FrameData { bars: Some(&list), series: FrameSeries { bpm: Some(tempo), notes: Some(chart_only), ..FrameSeries::default() }, ..behind }
             }
-            Extra::Result => FrameData { series, ..behind },
+            Extra::Result => FrameData { series, gauge: Some(ended), ..behind },
+            Extra::CourseResult => FrameData { series: course, gauge: Some(ended), ..behind },
             Extra::Play => FrameData {
                 field: Some(&play),
-                gauge: Some(GaugeFrame { kind: 0, clear_threshold: self.field.gauge_clear_threshold }),
+                gauge: Some(GaugeFrame::of_kind(0, self.field.gauge_clear_threshold)),
                 series: FrameSeries {
                     recent_hits: Some(RecentHits::new(&[])),
                     bpm: Some(tempo),
@@ -667,6 +837,17 @@ impl Stage<'_> {
         let drawn = self.screen.draw_prepared(&mut ctx, canvas, &frame, &prepared);
         Painted { visible: prepared.visible_count(), drawn, answers: prepared.answer_count() }
     }
+}
+
+/// Runs what a left click on one of the skin's images runs: the function its `act` names, inside the
+/// skin's own interpreter, with the host bound as it is for a frame.
+fn press(skin: &LoadedSkin, host: &MapHost, click: &Click) {
+    let image = skin.def.image.iter().find(|image| image.id == click.image).unwrap_or_else(|| panic!("the skin should declare an image {:?}", click.image));
+    let Some(EventRef::Lua(function)) = image.act else {
+        panic!("the image {:?} should run a function of the skin when it is clicked", click.image);
+    };
+    let runtime = skin.runtime().expect("a skin whose image runs a function has an interpreter");
+    runtime.frame(host, |lua| lua.call_event(function, CLICK_ARGUMENT)).expect("the host should bind to the skin's interpreter");
 }
 
 /// Loads, builds and draws one screen of the pack, printing what it came to.
@@ -752,11 +933,30 @@ fn capture(pack: &Path, overlay: &Path, capture_dir: Option<&Path>, shot: &Shot)
     let backdrop = canvas.register_texture("rbms.external.backdrop", &backdrop(), BACKDROP_W, BACKDROP_H);
     let images = reference_images(&mut canvas);
     let analysis = analysis();
-    let stage = Stage { shot, skin: &skin, screen: &screen, backdrop, images, rows: &rows, field: &field, chart: &chart, analysis: &analysis };
+    let gauges = gauge_histories();
+    let timing = timing_distribution();
+    let stage = Stage {
+        shot,
+        skin: &skin,
+        screen: &screen,
+        backdrop,
+        images,
+        rows: &rows,
+        field: &field,
+        chart: &chart,
+        analysis: &analysis,
+        gauges: &gauges,
+        timing: &timing,
+    };
 
     let mut last = (TimerState::new(), 0);
+    let mut clicked = 0;
     for now_ms in shot.times_ms {
         let timers = settle(&mut host, &scheduled, shot.switches, *now_ms);
+        for click in shot.clicks.iter().skip(clicked).take_while(|click| click.at_ms <= *now_ms) {
+            press(&skin, &host, click);
+            clicked += 1;
+        }
         let drawing = Instant::now();
         let painted = stage.draw(&mut canvas, &mut text, &host, &timers, *now_ms, true);
         let drawn_in = drawing.elapsed();
@@ -764,7 +964,7 @@ fn capture(pack: &Path, overlay: &Path, capture_dir: Option<&Path>, shot: &Shot)
         let cost = skin.runtime().map(rbms_skin::lua::SkinLua::frame_cost).unwrap_or_default();
         println!(
             "  {}-{now_ms}: prepared {} of {} objects to draw with {} Lua answers ({} calls and {} reused timer reads, {} us inside Lua), drew {} in {} ms | timers on [{}]",
-            shot.name,
+            shot.capture,
             painted.visible,
             screen.object_count(),
             painted.answers,
@@ -775,9 +975,9 @@ fn capture(pack: &Path, overlay: &Path, capture_dir: Option<&Path>, shot: &Shot)
             drawn_in.as_millis(),
             on.join(", ")
         );
-        assert!(painted.drawn > 0, "{} drew nothing at {now_ms} ms", shot.name);
+        assert!(painted.drawn > 0, "{} drew nothing at {now_ms} ms", shot.capture);
         if let Some(directory) = capture_dir {
-            let path = directory.join(format!("{}-{now_ms}.png", shot.name));
+            let path = directory.join(format!("{}-{now_ms}.png", shot.capture));
             save_png(&path, &canvas);
             assert!(path.is_file(), "{} was not written", path.display());
         }
@@ -788,7 +988,7 @@ fn capture(pack: &Path, overlay: &Path, capture_dir: Option<&Path>, shot: &Shot)
     let bound: Vec<u8> = canvas.pixels().to_vec();
     let unbound = stage.draw(&mut canvas, &mut text, &host, &timers, now_ms, false);
     let differing = bound.chunks_exact(RGBA_BYTES).zip(canvas.pixels().chunks_exact(RGBA_BYTES)).filter(|(with, without)| with != without).count();
-    println!("  {}-{now_ms} again with no interpreter bound: drew {} objects, {differing} pixels differ from the bound frame", shot.name, unbound.drawn);
+    println!("  {}-{now_ms} again with no interpreter bound: drew {} objects, {differing} pixels differ from the bound frame", shot.capture, unbound.drawn);
 
     if let Some(runtime) = skin.runtime() {
         let diagnostics = runtime.diagnostics();
@@ -851,6 +1051,7 @@ fn an_external_skin_pack_draws_through_the_skin_renderer() {
 fn every_scenario_describes_a_host_a_screen_can_be_drawn_against() {
     for shot in SHOTS {
         let host = scenario(shot.name);
+        assert!(shot.clicks.is_sorted_by_key(|click| click.at_ms), "{} should be clicked in scene order", shot.capture);
         let difficulties = (DIFFICULTY_FIRST..=DIFFICULTY_LAST).filter(|option| host.booleans.get(option).copied().unwrap_or(false)).count();
         assert_eq!(difficulties, 1, "{} should turn exactly one difficulty on", shot.name);
         assert!(host.timers.values().all(|since_us| *since_us >= 0), "{} schedules a timer before its scene begins", shot.name);

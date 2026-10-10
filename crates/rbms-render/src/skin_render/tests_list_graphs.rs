@@ -13,9 +13,10 @@ use rbms_skin::dst::{DrawStateSource, OffsetSource, SkinOffset};
 use rbms_skin::loader::{SkinLoadOptions, SkinUserConfig, load_skin};
 use rbms_skin::property::generated::OPTION_PANEL1;
 use rbms_skin::property::{SkinHost, UNMAPPED_BOOLEAN, UNMAPPED_FLOAT, UNMAPPED_INTEGER, UNMAPPED_STRING};
-use rbms_skin::timer::{TIMER_OFF, TimerState};
+use rbms_skin::timer::{MICROS_PER_MILLI, TIMER_OFF, TimerState};
 
 use super::color::{modulate, parse_hex_color};
+use super::gauge::{GAUGE_TYPES, GaugeScale};
 use super::state::SelectViewState;
 use super::{
     BpmTimeline, FrameData, FrameSeries, GaugeFrame, GaugeHistory, NoteDistribution, NoteField, RecentHits, SkinAssets, SkinFrame, SkinImage, SkinObjectKind,
@@ -26,7 +27,7 @@ use crate::font::TextContext;
 use crate::playfield::{LaneShade, PlayfieldView};
 use crate::select::{SelectDetail, SelectRow, SelectView};
 use crate::skin::Skin;
-use crate::{BYTES_PER_PIXEL, Color, CpuCanvas, Rect, Renderer};
+use crate::{BYTES_PER_PIXEL, Color, CpuCanvas, Renderer};
 
 /// Width and height the fixture document is authored at, which is also the canvas every frame here
 /// is drawn on, so a document rectangle and a screen rectangle differ only by the vertical flip.
@@ -177,11 +178,12 @@ fn write_document(scratch: &Scratch, fixture: Fixture<'_>) -> PathBuf {
                 "id": "gauge-graph",
                 "grooveClearAndHardBGColor": "203040",
                 "grooveClearAndHardLineColor": "00FF00",
-                "borderColor": "FF0000"
+                "borderColor": "FF0000",
+                "borderlineColor": "FFFF00"
             }}],
             "judgegraph": [{judge_graph}],
             "bpmgraph": [{{ "id": "bpm-graph" }}],
-            "timingdistributiongraph": [{{ "id": "timing-dist", "devColor": "not a colour" }}],
+            "timingdistributiongraph": [{{ "id": "timing-dist", "width": 60, "devColor": "not a colour" }}],
             "timingvisualizer": [{{ "id": "ruler" }}],
             "hiterrorvisualizer": [{{ "id": "errors" }}],
             "songlist": {{
@@ -251,9 +253,35 @@ fn row(index: usize) -> SelectRow {
     }
 }
 
-/// One frame over `data`, with nothing running and no pointer.
+/// One frame over `data` at the start of the scene, with nothing running and no pointer.
 fn frame<'a>(timers: &'a TimerState, state: &'a Nothing, data: FrameData<'a>) -> SkinFrame<'a> {
     SkinFrame { now_us: 0, timers, state, lua: None, mouse: None, data }
+}
+
+/// The gauge the reference clears at eighty of a hundred.
+const GROOVE: GaugeScale = GaugeScale::new(2.0, 100.0, 80.0);
+
+/// A gauge that clears at nothing, as the hard gauges do.
+const SURVIVAL: GaugeScale = GaugeScale::new(0.0, 100.0, 0.0);
+
+/// The reference's number for the normal gauge.
+const NORMAL_GAUGE: usize = 2;
+
+/// The reference's number for the hard gauge.
+const HARD_GAUGE: usize = 3;
+
+/// The scene time by which a gauge graph has revealed all of its line.
+const GAUGE_REVEALED_MS: i64 = 1_500;
+
+/// The limits of the nine gauges of a seven-key run: the three that clear part way up, then the six
+/// that clear at nothing.
+fn scales() -> [GaugeScale; GAUGE_TYPES] {
+    std::array::from_fn(|gauge_type| if gauge_type < HARD_GAUGE { GROOVE } else { SURVIVAL })
+}
+
+/// A score screen showing the gauge numbered `gauge_type`, which the run left at `value`.
+fn shown(gauge_type: usize, value: f32) -> GaugeFrame {
+    GaugeFrame::finished(gauge_type, value, scales())
 }
 
 /// What a browser frame carries: its bars and nothing else.
@@ -261,7 +289,8 @@ fn browsing<'a>(bars: &'a SongBars<'a>) -> FrameData<'a> {
     FrameData { bars: Some(bars), ..FrameData::default() }
 }
 
-/// What a score frame carries: the four series a finished run was measured into.
+/// What a score frame carries: the four series a finished run was measured into, and the hard gauge
+/// it was played on.
 fn measured<'a>(gauge: &'a [f32], hist: &'a [u32], notes: NoteDistribution<'a>, tempo: &'a [(f32, f64)]) -> FrameData<'a> {
     let series = FrameSeries {
         gauge_history: Some(GaugeHistory::new(gauge)),
@@ -270,16 +299,21 @@ fn measured<'a>(gauge: &'a [f32], hist: &'a [u32], notes: NoteDistribution<'a>, 
         notes: Some(notes),
         recent_hits: None,
     };
-    FrameData { series, ..FrameData::default() }
+    FrameData { series, gauge: Some(shown(HARD_GAUGE, gauge.last().copied().unwrap_or_default())), ..FrameData::default() }
 }
 
 /// Draws `screen` over a cleared canvas and answers how many of its objects reached it.
 fn draw(screen: &SkinScreen, text: &mut TextContext, canvas: &mut CpuCanvas, data: FrameData<'_>) -> usize {
+    draw_at(screen, text, canvas, data, 0)
+}
+
+/// The same, `now_ms` milliseconds into the scene.
+fn draw_at(screen: &SkinScreen, text: &mut TextContext, canvas: &mut CpuCanvas, data: FrameData<'_>, now_ms: i64) -> usize {
     let timers = TimerState::new();
     let state = Nothing;
     canvas.clear(Color::BLACK);
     let mut ctx = RenderCtx::new(crate::theme::theme(), text);
-    screen.draw(&mut ctx, canvas, &frame(&timers, &state, data))
+    screen.draw(&mut ctx, canvas, &SkinFrame { now_us: now_ms * MICROS_PER_MILLI, ..frame(&timers, &state, data) })
 }
 
 #[test]
@@ -420,44 +454,214 @@ fn a_graph_draws_only_on_the_screen_whose_series_it_reads() {
     let play = NoteField { field: &field, playfield: &playfield, shade: LaneShade::default(), bomb: &[], keys_down: &[] };
     let playing = FrameData {
         field: Some(&play),
-        gauge: Some(GaugeFrame { kind: 0, clear_threshold: field.gauge_clear_threshold }),
+        gauge: Some(GaugeFrame::of_kind(0, field.gauge_clear_threshold)),
         series: FrameSeries { recent_hits: Some(RecentHits::new(&hits)), ..FrameSeries::default() },
         ..FrameData::default()
     };
     assert_eq!(draw(&screen, &mut text, &mut canvas, playing), 3, "the button, the judge ruler and the hit errors");
 }
 
-/// A measurement of nothing is not a measurement of zero: an empty series leaves its panel to the
-/// built-in screen rather than drawing an empty frame over it.
+/// A run that measured nothing still has a gauge graph and a timing graph, as it has in the
+/// reference: each draws its ground with nothing on it. A frame that carries no series at all leaves
+/// every graph out.
 #[test]
-fn an_empty_series_draws_no_graph_at_all() {
+fn an_empty_run_draws_the_grounds_and_a_frame_with_no_series_draws_no_graph() {
     let scratch = Scratch::new("empty");
     let mut canvas = CpuCanvas::new(DOC_W, DOC_H);
     let mut text = TextContext::embedded_only();
     let screen = wheel_screen(&scratch, &mut canvas, &mut text);
 
     let series = measured(&[], &[], NoteDistribution::default(), &[]);
-    assert_eq!(draw(&screen, &mut text, &mut canvas, series), 1, "only the button is left when the run measured nothing");
+    assert_eq!(draw(&screen, &mut text, &mut canvas, series), 3, "the button, and the grounds of the gauge graph and the timing graph");
+    assert_eq!(canvas.pixel_at(GAUGE_PANEL.0 + 30, GAUGE_PANEL.1 + 20), Color::rgb(0x20, 0x30, 0x40), "the gauge graph's ground with no line on it");
+    assert_eq!(draw(&screen, &mut text, &mut canvas, FrameData::default()), 1, "only the button is left when the frame carries nothing");
 }
 
-/// The gauge history is drawn in the colours its own record named: its ground, the line the samples
-/// trace across it, and the border over both.
+/// Where the fixture's gauge graph lands on the canvas: its left edge and its top row. It is sixty
+/// pixels by forty, so row `r` of the pixmap, counted from the foot, is canvas row `top + 39 - r`.
+const GAUGE_PANEL: (u32, u32) = (200, DOC_H - 140);
+
+/// The canvas row the gauge graph's pixmap row `row` lands on.
+fn gauge_row(row: u32) -> u32 {
+    GAUGE_PANEL.1 + 39 - row
+}
+
+/// A run that recorded the normal gauge at ninety and the hard gauge at fifty throughout.
+fn two_gauges() -> Vec<Vec<f32>> {
+    (0..GAUGE_TYPES)
+        .map(|gauge_type| match gauge_type {
+            NORMAL_GAUGE => vec![90.0; 8],
+            HARD_GAUGE => vec![50.0; 8],
+            _ => Vec::new(),
+        })
+        .collect()
+}
+
+/// A score frame carrying a run's gauges and the one of them that is shown.
+fn gauges<'a>(history: GaugeHistory<'a>, gauge: GaugeFrame) -> FrameData<'a> {
+    FrameData { series: FrameSeries { gauge_history: Some(history), ..FrameSeries::default() }, gauge: Some(gauge), ..FrameData::default() }
+}
+
+/// The gauge graph plots the history of the gauge the frame says is shown, in that gauge's colours
+/// and against its clear line, and paints itself again when the shown gauge changes.
 #[test]
-fn the_gauge_history_is_drawn_in_the_colours_the_document_named() {
+fn the_gauge_history_is_drawn_for_the_gauge_that_is_shown_in_the_colours_the_document_named() {
     let scratch = Scratch::new("gauge");
     let mut canvas = CpuCanvas::new(DOC_W, DOC_H);
     let mut text = TextContext::embedded_only();
     let screen = wheel_screen(&scratch, &mut canvas, &mut text);
+    let kinds = two_gauges();
+    let history = GaugeHistory::of_kinds(&kinds);
+    let x = GAUGE_PANEL.0 + 30;
+    let (ground, line) = (Color::rgb(0x20, 0x30, 0x40), Color::rgb(0, 255, 0));
 
-    let gauge = [50.0_f32; 8];
-    let series = measured(&gauge, &[], NoteDistribution::default(), &[]);
-    draw(&screen, &mut text, &mut canvas, series);
+    draw_at(&screen, &mut text, &mut canvas, gauges(history, shown(HARD_GAUGE, 50.0)), GAUGE_REVEALED_MS);
+    assert_eq!(
+        (canvas.pixel_at(x, gauge_row(19)), canvas.pixel_at(x, gauge_row(20))),
+        (line, line),
+        "fifty of a hundred is row nineteen of the thirty-eight the line climbs"
+    );
+    assert_eq!((canvas.pixel_at(x, gauge_row(18)), canvas.pixel_at(x, gauge_row(21))), (ground, ground), "and the line is two pixels thick");
+    assert_eq!(
+        (canvas.pixel_at(GAUGE_PANEL.0, gauge_row(39)), canvas.pixel_at(GAUGE_PANEL.0 + 59, gauge_row(0))),
+        (ground, ground),
+        "one ground for a gauge that clears at nothing"
+    );
+    assert_eq!(canvas.pixel_at(GAUGE_PANEL.0 + 59, gauge_row(19)), line, "the last sample's run reaches the right edge");
 
-    let panel = Rect::new(200.0, (DOC_H - 140) as f32, 60.0, 40.0);
-    assert_eq!(canvas.pixel_at(230, panel.y as u32 + 5), Color::rgb(0x20, 0x30, 0x40), "the panel's ground");
-    let half_way = panel.y + (panel.h - 2.0) * 0.5;
-    assert_eq!(canvas.pixel_at(230, half_way as u32), Color::rgb(0, 255, 0), "a run held at half gauge traces its line half way up");
-    assert_eq!(canvas.pixel_at(230, panel.y as u32), Color::rgb(255, 0, 0), "and the border is drawn over both");
+    draw_at(&screen, &mut text, &mut canvas, gauges(history, shown(NORMAL_GAUGE, 90.0)), GAUGE_REVEALED_MS);
+    let (below, above, over) = (Color::rgb(0, 0x44, 0), Color::rgb(255, 0, 0), Color::rgb(255, 255, 0));
+    assert_eq!((canvas.pixel_at(x, gauge_row(0)), canvas.pixel_at(x, gauge_row(31))), (below, below), "below the clear line at eighty");
+    assert_eq!((canvas.pixel_at(x, gauge_row(32)), canvas.pixel_at(x, gauge_row(39))), (above, above), "and from it to the top");
+    assert_eq!((canvas.pixel_at(x, gauge_row(34)), canvas.pixel_at(x, gauge_row(35))), (over, over), "ninety is above the line, in the colour for that side");
+    assert_eq!(canvas.pixel_at(x, gauge_row(19)), below, "and the hard gauge's line is gone");
+
+    draw_at(&screen, &mut text, &mut canvas, gauges(history, shown(HARD_GAUGE, 50.0)), GAUGE_REVEALED_MS);
+    assert_eq!((canvas.pixel_at(x, gauge_row(19)), canvas.pixel_at(x, gauge_row(34))), (line, ground), "switching back paints the hard gauge again");
+
+    draw_at(&screen, &mut text, &mut canvas, gauges(history, shown(HARD_GAUGE + 3, 50.0)), GAUGE_REVEALED_MS);
+    assert_eq!(canvas.pixel_at(x, gauge_row(5)), ground, "a course gauge is drawn in the colours of the gauge it is a harder form of");
+    assert_eq!(canvas.pixel_at(x, gauge_row(19)), ground, "over its own history, which this run left empty");
+}
+
+/// The ground is there from the first frame and the line is uncovered from the left over a second
+/// and a half of the scene.
+#[test]
+fn the_gauge_line_is_revealed_from_the_left_and_the_ground_is_not() {
+    let scratch = Scratch::new("gauge-reveal");
+    let mut canvas = CpuCanvas::new(DOC_W, DOC_H);
+    let mut text = TextContext::embedded_only();
+    let screen = wheel_screen(&scratch, &mut canvas, &mut text);
+    let kinds = two_gauges();
+    let frame = gauges(GaugeHistory::of_kinds(&kinds), shown(HARD_GAUGE, 50.0));
+    let (ground, line) = (Color::rgb(0x20, 0x30, 0x40), Color::rgb(0, 255, 0));
+    let line_columns = |canvas: &CpuCanvas| (0..60).filter(|column| canvas.pixel_at(GAUGE_PANEL.0 + column, gauge_row(19)) == line).count();
+
+    for (now_ms, columns) in [(0, 0), (375, 15), (750, 30), (1_125, 45), (1_499, 59), (1_500, 60), (60_000, 60)] {
+        assert_eq!(draw_at(&screen, &mut text, &mut canvas, frame, now_ms), 2, "the button and the graph");
+        assert_eq!(line_columns(&canvas), columns, "{now_ms} ms into the scene");
+        assert_eq!(canvas.pixel_at(GAUGE_PANEL.0 + 59, gauge_row(30)), ground, "the ground is whole at {now_ms} ms");
+    }
+    draw_at(&screen, &mut text, &mut canvas, frame, 750);
+    assert_eq!(canvas.pixel_at(GAUGE_PANEL.0 + 29, gauge_row(19)), line, "what is uncovered is the left of the line, not the line squeezed");
+    assert_eq!(canvas.pixel_at(GAUGE_PANEL.0 + 30, gauge_row(19)), ground);
+}
+
+/// A gauge graph needs both halves of what the reference reads: the history, and the gauge that
+/// says which history is shown and where it clears.
+#[test]
+fn a_gauge_graph_with_no_gauge_to_show_or_no_history_draws_nothing() {
+    let scratch = Scratch::new("gauge-missing");
+    let mut canvas = CpuCanvas::new(DOC_W, DOC_H);
+    let mut text = TextContext::embedded_only();
+    let screen = wheel_screen(&scratch, &mut canvas, &mut text);
+    let kinds = two_gauges();
+    let history = GaugeHistory::of_kinds(&kinds);
+
+    let unshown = FrameData { series: FrameSeries { gauge_history: Some(history), ..FrameSeries::default() }, ..FrameData::default() };
+    assert_eq!(draw_at(&screen, &mut text, &mut canvas, unshown, GAUGE_REVEALED_MS), 1);
+    let unrecorded = FrameData { gauge: Some(shown(HARD_GAUGE, 50.0)), ..FrameData::default() };
+    assert_eq!(draw_at(&screen, &mut text, &mut canvas, unrecorded, GAUGE_REVEALED_MS), 1);
+    let short = vec![vec![50.0; 8]; HARD_GAUGE];
+    assert_eq!(
+        draw_at(&screen, &mut text, &mut canvas, gauges(GaugeHistory::of_kinds(&short), shown(HARD_GAUGE, 50.0)), GAUGE_REVEALED_MS),
+        1,
+        "no history for that gauge"
+    );
+    assert_eq!(draw_at(&screen, &mut text, &mut canvas, gauges(history, shown(HARD_GAUGE, 50.0)), GAUGE_REVEALED_MS), 2);
+}
+
+/// A course's graph runs through every stage, with an upright where one stage ends.
+#[test]
+fn the_end_of_a_courses_stage_is_marked_on_the_gauge_graph() {
+    let scratch = Scratch::new("gauge-course");
+    let mut canvas = CpuCanvas::new(DOC_W, DOC_H);
+    let mut text = TextContext::embedded_only();
+    let screen = wheel_screen(&scratch, &mut canvas, &mut text);
+    let kinds = two_gauges();
+    let history = GaugeHistory::of_kinds(&kinds).with_sections(&[4, 8]);
+
+    draw_at(&screen, &mut text, &mut canvas, gauges(history, shown(HARD_GAUGE, 50.0)), GAUGE_REVEALED_MS);
+    let marked = GAUGE_PANEL.0 + 22;
+    let mark = Color::rgb(255, 255, 255);
+    assert_eq!(canvas.pixel_at(marked, gauge_row(39)), mark, "sixty pixels over eight samples puts the fourth on column twenty-two");
+    assert_eq!(canvas.pixel_at(marked, gauge_row(0)), mark);
+    assert_eq!(canvas.pixel_at(marked, gauge_row(19)), Color::rgb(0, 255, 0), "the line runs over the mark");
+    assert_eq!(canvas.pixel_at(marked + 1, gauge_row(39)), Color::rgb(0x20, 0x30, 0x40));
+}
+
+/// Where the fixture's timing graph lands on the canvas: its left edge and its top row. Its record
+/// asks for sixty columns, one to a pixel, and a run whose fullest millisecond holds ten hits is ten
+/// rows tall, four pixels to a row.
+const TIMING_PANEL: (u32, u32) = (130, DOC_H - 140);
+
+/// Canvas pixels one row of that graph is tall.
+const TIMING_ROW_PX: u32 = 4;
+
+/// The colour of the timing graph at `column` and `row`, the top row being row zero.
+fn timing_pixel(canvas: &CpuCanvas, column: u32, row: u32) -> Color {
+    canvas.pixel_at(TIMING_PANEL.0 + column, TIMING_PANEL.1 + row * TIMING_ROW_PX + 1)
+}
+
+/// The timing graph is the reference's pixmap scaled onto the object: windows behind, a tick every
+/// ten milliseconds along the top, the mean and the deviation as uprights, and a bar from the foot
+/// for every millisecond, early to the right.
+#[test]
+fn the_timing_spread_is_drawn_as_bars_over_the_judgement_windows_with_its_mean_and_deviation() {
+    let scratch = Scratch::new("timing");
+    let mut canvas = CpuCanvas::new(DOC_W, DOC_H);
+    let mut text = TextContext::embedded_only();
+    let screen = wheel_screen(&scratch, &mut canvas, &mut text);
+
+    let mut bins = [0_u32; 301];
+    (bins[150], bins[160], bins[130]) = (10, 5, 2);
+    let windows = [[-5, 5], [-15, 15], [-40, 40], [-40, 40], [-40, 40]];
+    let timing = TimingHistogram::new(&bins).with_judge_area(windows);
+    let data = FrameData { series: FrameSeries { timing: Some(timing), ..FrameSeries::default() }, ..FrameData::default() };
+    assert_eq!(draw(&screen, &mut text, &mut canvas, data), 2, "the button and the graph");
+
+    let (bar, mean, deviation) = (Color::rgb(0, 255, 0), Color::rgb(255, 255, 255), Color::rgb(255, 0, 0));
+    let (perfect, great, good) = (Color::rgb(0, 0, 0x88), Color::rgb(0, 0x88, 0), Color::rgb(0x88, 0x88, 0));
+    assert_eq!((timing_pixel(&canvas, 30, 0), timing_pixel(&canvas, 30, 9)), (bar, bar), "ten hits on time fill the middle column");
+    assert_eq!((timing_pixel(&canvas, 40, 4), timing_pixel(&canvas, 40, 5)), (deviation, bar), "five hits ten milliseconds early, to the right");
+    assert_eq!((timing_pixel(&canvas, 10, 7), timing_pixel(&canvas, 10, 8)), (good, bar), "two hits twenty milliseconds late, to the left");
+    assert_eq!((timing_pixel(&canvas, 31, 0), timing_pixel(&canvas, 31, 9)), (mean, mean), "the mean, a millisecond early");
+    assert_eq!(timing_pixel(&canvas, 22, 5), deviation, "a colour that is not one is the reference's red");
+    assert_eq!((timing_pixel(&canvas, 27, 5), timing_pixel(&canvas, 18, 5), timing_pixel(&canvas, 5, 5)), (perfect, great, good));
+    assert_eq!(
+        (timing_pixel(&canvas, 20, 0), timing_pixel(&canvas, 20, 1), timing_pixel(&canvas, 20, 2)),
+        (Color::rgb(0, 103, 0), Color::rgb(0, 103, 0), great),
+        "a tick on the top two rows"
+    );
+
+    (bins[150], bins[160]) = (5, 10);
+    let moved = TimingHistogram::new(&bins).with_judge_area(windows);
+    draw(&screen, &mut text, &mut canvas, FrameData { series: FrameSeries { timing: Some(moved), ..FrameSeries::default() }, ..FrameData::default() });
+    assert_eq!(
+        (timing_pixel(&canvas, 40, 0), timing_pixel(&canvas, 30, 4), timing_pixel(&canvas, 30, 5)),
+        (bar, perfect, bar),
+        "other numbers are painted at once"
+    );
 }
 
 /// A colour a document mistyped costs that one colour and a warning, not the graph.
@@ -469,7 +673,7 @@ fn a_colour_that_is_not_one_is_reported_and_replaced() {
     let screen = wheel_screen(&scratch, &mut canvas, &mut text);
 
     assert!(
-        screen.warnings().iter().any(|warning| warning.contains("timing-dist") && warning.contains("deviation")),
+        screen.warnings().iter().any(|warning| warning.contains("timing-dist") && warning.contains("devColor")),
         "the mistyped colour is named: {:?}",
         screen.warnings()
     );

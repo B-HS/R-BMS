@@ -6,7 +6,8 @@
 //! owns it.
 #![allow(clippy::wildcard_imports)]
 
-use crate::keyconfig::key_index_of;
+use crate::keyconfig::{HeldKeys, key_index_of};
+use crate::skin_host::HeldKeyQuery;
 use crate::*;
 
 /// The tempo a pinned green number is held at, and the travel time it is being held at.
@@ -84,7 +85,130 @@ const STEP_UP: f32 = 1.0;
 /// One step in the decreasing direction.
 const STEP_DOWN: f32 = -1.0;
 
+/// The keys of a keyboard as libGDX numbers them and as the window reports them: each `Input.Keys`
+/// code a skin can ask after, beside the physical key it stands for.
+///
+/// The codes are the ones the skin's own `Input.Keys` table answers (`rbms_skin`'s `luajava`
+/// facade, read out of the reference's `gdx.jar`). A code that is not here names something a
+/// keyboard does not have -- a phone's or a controller's button, a media key -- or a key the window
+/// reports no physical position for, and is never held.
+const GDX_KEYS: &[(i32, KeyCode)] = &[
+    (3, KeyCode::Home),
+    (7, KeyCode::Digit0),
+    (8, KeyCode::Digit1),
+    (9, KeyCode::Digit2),
+    (10, KeyCode::Digit3),
+    (11, KeyCode::Digit4),
+    (12, KeyCode::Digit5),
+    (13, KeyCode::Digit6),
+    (14, KeyCode::Digit7),
+    (15, KeyCode::Digit8),
+    (16, KeyCode::Digit9),
+    (19, KeyCode::ArrowUp),
+    (20, KeyCode::ArrowDown),
+    (21, KeyCode::ArrowLeft),
+    (22, KeyCode::ArrowRight),
+    (29, KeyCode::KeyA),
+    (30, KeyCode::KeyB),
+    (31, KeyCode::KeyC),
+    (32, KeyCode::KeyD),
+    (33, KeyCode::KeyE),
+    (34, KeyCode::KeyF),
+    (35, KeyCode::KeyG),
+    (36, KeyCode::KeyH),
+    (37, KeyCode::KeyI),
+    (38, KeyCode::KeyJ),
+    (39, KeyCode::KeyK),
+    (40, KeyCode::KeyL),
+    (41, KeyCode::KeyM),
+    (42, KeyCode::KeyN),
+    (43, KeyCode::KeyO),
+    (44, KeyCode::KeyP),
+    (45, KeyCode::KeyQ),
+    (46, KeyCode::KeyR),
+    (47, KeyCode::KeyS),
+    (48, KeyCode::KeyT),
+    (49, KeyCode::KeyU),
+    (50, KeyCode::KeyV),
+    (51, KeyCode::KeyW),
+    (52, KeyCode::KeyX),
+    (53, KeyCode::KeyY),
+    (54, KeyCode::KeyZ),
+    (55, KeyCode::Comma),
+    (56, KeyCode::Period),
+    (57, KeyCode::AltLeft),
+    (58, KeyCode::AltRight),
+    (59, KeyCode::ShiftLeft),
+    (60, KeyCode::ShiftRight),
+    (61, KeyCode::Tab),
+    (62, KeyCode::Space),
+    (66, KeyCode::Enter),
+    (67, KeyCode::Backspace),
+    (68, KeyCode::Backquote),
+    (69, KeyCode::Minus),
+    (70, KeyCode::Equal),
+    (71, KeyCode::BracketLeft),
+    (72, KeyCode::BracketRight),
+    (73, KeyCode::Backslash),
+    (74, KeyCode::Semicolon),
+    (75, KeyCode::Quote),
+    (76, KeyCode::Slash),
+    (92, KeyCode::PageUp),
+    (93, KeyCode::PageDown),
+    (112, KeyCode::Delete),
+    (129, KeyCode::ControlLeft),
+    (130, KeyCode::ControlRight),
+    (131, KeyCode::Escape),
+    (132, KeyCode::End),
+    (133, KeyCode::Insert),
+    (144, KeyCode::Numpad0),
+    (145, KeyCode::Numpad1),
+    (146, KeyCode::Numpad2),
+    (147, KeyCode::Numpad3),
+    (148, KeyCode::Numpad4),
+    (149, KeyCode::Numpad5),
+    (150, KeyCode::Numpad6),
+    (151, KeyCode::Numpad7),
+    (152, KeyCode::Numpad8),
+    (153, KeyCode::Numpad9),
+    (244, KeyCode::F1),
+    (245, KeyCode::F2),
+    (246, KeyCode::F3),
+    (247, KeyCode::F4),
+    (248, KeyCode::F5),
+    (249, KeyCode::F6),
+    (250, KeyCode::F7),
+    (251, KeyCode::F8),
+    (252, KeyCode::F9),
+    (253, KeyCode::F10),
+    (254, KeyCode::F11),
+    (255, KeyCode::F12),
+];
+
+/// The physical key a libGDX key code stands for, when it stands for one.
+pub(crate) fn key_of_gdx_code(code: i32) -> Option<KeyCode> {
+    GDX_KEYS.iter().find(|(gdx, _)| *gdx == code).map(|(_, key)| *key)
+}
+
+/// The keyboard as a skin asks about it: by libGDX key code, answered from the keys the window has
+/// reported as down.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SkinKeys<'a> {
+    held: &'a HeldKeys,
+}
+
+impl HeldKeyQuery for SkinKeys<'_> {
+    fn key_pressed(&self, code: i32) -> bool {
+        key_of_gdx_code(code).is_some_and(|key| self.held.is_down(key))
+    }
+}
+
 impl AppShared {
+    /// The held keys in the form a skin's host answers `Gdx.input:isKeyPressed` from.
+    pub(crate) fn skin_keys(&self) -> SkinKeys<'_> {
+        SkinKeys { held: &self.keyconfig.held }
+    }
+
     pub(crate) fn lane_for(&self, code: KeyCode) -> Option<usize> {
         self.active_keys.iter().find(|(k, _)| *k == code).map(|(_, l)| *l)
     }
@@ -841,6 +965,49 @@ mod tests {
                 assert!(rows.iter().any(|row| matches!(row, KcRow::PadControl(a) if *a == action)), "{} pad row {action:?}", mode.name);
             }
         }
+    }
+
+    /// The libGDX codes of the four arrow keys, which are the ones a published skin polls.
+    const GDX_UP: i32 = 19;
+    const GDX_DOWN: i32 = 20;
+    const GDX_LEFT: i32 = 21;
+    const GDX_RIGHT: i32 = 22;
+
+    /// The libGDX codes at the two ends of the letters, and of the last function key.
+    const GDX_A: i32 = 29;
+    const GDX_Z: i32 = 54;
+    const GDX_F12: i32 = 255;
+
+    /// A libGDX code that names a controller's button, and one that names nothing.
+    const GDX_BUTTON_A: i32 = 96;
+    const GDX_NOTHING: i32 = 9_999;
+
+    /// A skin asks about a key by its libGDX code and is answered from the keys the window reported
+    /// as down, each code standing for one physical key and a code no keyboard has for none.
+    #[test]
+    fn a_skin_is_answered_by_libgdx_key_code_from_the_keys_that_are_down() {
+        assert_eq!(
+            [GDX_UP, GDX_DOWN, GDX_LEFT, GDX_RIGHT].map(key_of_gdx_code),
+            [Some(KeyCode::ArrowUp), Some(KeyCode::ArrowDown), Some(KeyCode::ArrowLeft), Some(KeyCode::ArrowRight)]
+        );
+        assert_eq!([GDX_A, GDX_Z, GDX_F12].map(key_of_gdx_code), [Some(KeyCode::KeyA), Some(KeyCode::KeyZ), Some(KeyCode::F12)]);
+        assert_eq!([GDX_BUTTON_A, GDX_NOTHING, -1].map(key_of_gdx_code), [None; 3]);
+        for (index, (code, key)) in GDX_KEYS.iter().enumerate() {
+            assert!(GDX_KEYS[..index].iter().all(|(other, taken)| other != code && taken != key), "{code} or {key:?} is listed twice");
+        }
+
+        let mut app = app();
+        assert!(!app.shared.skin_keys().key_pressed(GDX_RIGHT));
+        key_down(&mut app, KeyCode::ArrowRight);
+        assert!(app.shared.skin_keys().key_pressed(GDX_RIGHT));
+        assert!(!app.shared.skin_keys().key_pressed(GDX_LEFT), "one arrow being down says nothing of another");
+        assert!(!app.shared.skin_keys().key_pressed(GDX_NOTHING));
+        key_up(&mut app, KeyCode::ArrowRight);
+        assert!(!app.shared.skin_keys().key_pressed(GDX_RIGHT));
+
+        key_down(&mut app, KeyCode::ArrowLeft);
+        app.shared.release_held_inputs();
+        assert!(!app.shared.skin_keys().key_pressed(GDX_LEFT), "a window that lost focus holds nothing");
     }
 
     /// Every key the window reports reaches the held set through the stage's own entry point, whether

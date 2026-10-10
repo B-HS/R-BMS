@@ -63,6 +63,12 @@ fn decode_chart(bytes: &[u8], path: &str) -> Option<DecodedChart> {
     Some(DecodedChart { mode, model, md5: src.md5.clone(), lnmode: src.headers.lnmode, bmson: None })
 }
 
+/// The play model of the chart in `bytes`, whatever format it is written in, for the screens that
+/// need to know a chart they are not playing. `None` when the bytes are not a chart.
+pub(crate) fn chart_model(bytes: &[u8], path: &str) -> Option<rbms_model::Model> {
+    decode_chart(bytes, path).map(|decoded| decoded.model)
+}
+
 /// The chart a practice session is set up on: the model as it stood before any range was cut from
 /// it, plus everything a slice's own session has to be built with.
 ///
@@ -282,6 +288,7 @@ impl AppShared {
     /// once they are all in. The shared output stream stays open across stages: entering Play only
     /// releases the namespaces the previous chart and the select preview held.
     pub(crate) fn load(&mut self) -> Option<LoadedChart> {
+        let carried_seed = self.retry_seed.take();
         let bytes = match std::fs::read(&self.chart_path) {
             Ok(b) => b,
             Err(e) => {
@@ -311,6 +318,7 @@ impl AppShared {
             }
             None => (self.config.play.random, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1)),
         };
+        let seed = carried_seed.filter(|_| self.replay.is_none()).unwrap_or(seed);
         let mut judge_setup = run_judge_setup(&self.config, self.replay.as_ref());
         let course_state = if self.replay.is_some() { None } else { self.course_run.as_ref().map(|run| (run.carry_gauge, run.totals.combo_carry)) };
         if course_state.is_some()

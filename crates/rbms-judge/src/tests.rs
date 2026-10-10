@@ -1394,3 +1394,71 @@ fn a_plain_long_note_release_reports_the_larger_of_the_head_and_end_deltas() {
     assert_eq!(e.late[1], 1, "so the commit takes the head's LATE direction");
     assert_eq!(e.early[1], 0);
 }
+
+/// The state and play time a judged note reads back with are what the result screen's timing
+/// distribution and judge graphs are drawn from, so each has to follow `JudgeManager.java:640-651`:
+/// a consuming judgment sets the state, and every counted judgment sets the play time.
+#[test]
+fn note_marks_read_back_the_state_and_play_time_each_judgment_left() {
+    let mut e = JudgeEngine::new(vec![vec![1_000_000, 2_000_000, 3_000_000]], JudgeWindows::SEVENKEY_NOTE);
+    assert!(e.note_marks().all(|mark| mark.state == 0 && mark.play_time_us == 0), "nothing is judged before play");
+    e.press(0, 990_000);
+    e.press(0, 2_050_000);
+    e.update(4_000_000);
+    let marks: Vec<NoteMark> = e.note_marks().collect();
+    assert_eq!(marks.len(), 3);
+    assert_eq!((marks[0].state, marks[0].play_time_us), (1, 10_000), "an early PGREAT is state 1");
+    assert_eq!((marks[1].state, marks[1].play_time_us), (2, -50_000), "a late GREAT is state 2");
+    assert_eq!(marks[2].state, 5, "a swept note is state 5, judge code 4 plus one");
+    assert!(marks[2].play_time_us < JudgeWindows::SEVENKEY_NOTE.bd.0, "and carries how late the sweep found it");
+    assert!(marks.iter().all(|mark| !mark.long_end && !mark.charge && mark.lane == 0));
+    assert_eq!(marks.iter().map(|mark| mark.time_us).collect::<Vec<_>>(), [1_000_000, 2_000_000, 3_000_000]);
+}
+
+/// `JudgeManager.java:651` writes the play time before it asks whether the judgment consumed the
+/// note, so an empty poor moves the play time of a note that stays unjudged.
+#[test]
+fn an_empty_poor_moves_the_play_time_of_a_note_it_does_not_consume() {
+    let mut e = note(1_000_000);
+    e.press(0, 700_000);
+    let mark = e.note_marks().next().unwrap();
+    assert_eq!(mark.state, 0, "空POOR consumes nothing");
+    assert_eq!(mark.play_time_us, 300_000);
+}
+
+/// A plain long note is one judged object: the reference resolves it on the head note and leaves
+/// the end at state 0 (`JudgeManager.java:542`). A charge note is two (`:452, 515`).
+#[test]
+fn a_plain_long_note_marks_its_head_and_a_charge_note_marks_both_ends() {
+    let mut plain = ln(1_000_000, 1_600_000);
+    plain.press(0, 1_000_000);
+    assert_eq!(plain.note_marks().next().unwrap().state, 0, "the head is not resolved until the release");
+    plain.release(0, 1_590_000);
+    let marks: Vec<NoteMark> = plain.note_marks().collect();
+    assert_eq!(marks.len(), 2, "head and end are two objects either way");
+    assert_eq!((marks[0].long_end, marks[0].state, marks[0].play_time_us), (false, 1, 10_000), "the release resolves the head with the larger delta");
+    assert_eq!((marks[1].long_end, marks[1].state, marks[1].time_us), (true, 0, 1_600_000), "the end of a plain long note is never judged itself");
+    assert!(!marks[0].charge && !marks[1].charge);
+
+    let mut charge = hcn_engine(1_000_000, 3_000_000);
+    charge.press(0, 1_005_000);
+    charge.release(0, 2_990_000);
+    let marks: Vec<NoteMark> = charge.note_marks().collect();
+    assert!(marks[0].charge && marks[1].charge);
+    assert_eq!((marks[0].state, marks[0].play_time_us), (1, -5_000), "the head is judged at the press");
+    assert_eq!((marks[1].state, marks[1].play_time_us), (1, 10_000), "and the end at the release");
+}
+
+/// A result gauge graph places a history between a gauge's floor and ceiling and colours it either
+/// side of the border, so the engine has to say where those are for all nine gauges.
+#[test]
+fn every_gauge_reports_the_bounds_its_table_row_states() {
+    let gauges = gauge::GrooveGauge::new(gauge_tables::GaugeSetId::SevenKeys, GaugeKind::Normal, 300.0, 1000);
+    for index in gauge::GaugeIndex::ALL {
+        let row = gauge_tables::params(gauge_tables::GaugeSetId::SevenKeys, index);
+        let gauge = gauges.gauge_at(index);
+        assert_eq!((gauge.min(), gauge.max(), gauge.border()), (row.min, row.max, row.border), "{index:?}");
+    }
+    assert_eq!(gauges.gauge_at(gauge::GaugeIndex::Normal).border(), 80.0);
+    assert_eq!(gauges.gauge_at(gauge::GaugeIndex::Hard).border(), 0.0);
+}

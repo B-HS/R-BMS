@@ -8,13 +8,18 @@ use rbms_model::Mode;
 use rbms_skin::dst::{DrawStateSource, OffsetSource};
 use rbms_skin::lua::LocalTime;
 use rbms_skin::property::generated::*;
-use rbms_skin::property::{AudioCommand, FLOAT_ABSENT, HostCall, IMAGE_INDEX_ABSENT, INTEGER_ABSENT, SkinHost, StaticScreen, TEXT_ABSENT, VolumeBus};
+use rbms_skin::property::{
+    AudioCommand, FLOAT_ABSENT, HostCall, IMAGE_INDEX_ABSENT, INTEGER_ABSENT, NameSpace, SkinHost, StaticScreen, TEXT_ABSENT, VolumeBus, name_of_id,
+};
 use rbms_skin::timer::{TIMER_OFF, TimerId, TimerState};
 
 use super::chart::{BpmRange, ChartContents, ChartMeta, ChartState, Density, NoteCounts};
 use super::loading::{LoadingScreen, LoadingState};
 use super::system::{CourseStage, SystemState, Volumes};
-use super::{Cluster, ClusterState, IdSpace, ROUTES, ScreenHost, clusters_of};
+use super::{
+    AudioRequest, Cluster, ClusterRequest, ClusterState, Dispatched, EVENT_ROUTES, HeldKeyQuery, IdSpace, ROUTES, RequestHandler, RequestQueue, ScreenHost,
+    WRITE_ROUTES, clusters_of, dispatch_calls, event_clusters, write_cluster,
+};
 
 /// A timer id no test switches on, and one a test does.
 const QUIET_TIMER: i32 = 41;
@@ -270,4 +275,166 @@ fn the_machine_clusters_answer_through_the_host_and_negation_applies_to_them() {
     assert_eq!(host.rate(RATE_LOAD_PROGRESS), Some(0.25));
     assert_eq!(host.float(FLOAT_LOADING_PROGRESS), 0.25);
     assert_eq!((host.boolean(OPTION_NOW_LOADING), host.boolean(OPTION_LOADED)), (Some(true), Some(false)));
+}
+
+/// An event id the reference defines nothing for, and the first and last of the ids a skin may
+/// declare events of its own under, which nothing loads yet.
+const UNDEFINED_EVENT: i32 = 9_999;
+const CUSTOM_EVENT_FIRST: i32 = 1_000;
+const CUSTOM_EVENT_LAST: i32 = 1_999;
+
+/// The highest id the event table is walked to, past the last event the reference names.
+const EVENT_ID_LIMIT: i32 = 2_000;
+
+/// A rate the reference reads and never writes.
+const READ_ONLY_RATE: i32 = RATE_MUSIC_PROGRESS;
+
+#[test]
+fn every_event_the_reference_names_is_routed_and_every_run_goes_upwards() {
+    for route in EVENT_ROUTES {
+        assert!(route.first <= route.last, "{route:?} runs backwards");
+    }
+    for id in 0..EVENT_ID_LIMIT {
+        if name_of_id(NameSpace::Event, id).is_some() {
+            assert!(event_clusters(id).next().is_some(), "event {id} has a name in the reference and no cluster here");
+        }
+    }
+}
+
+#[test]
+fn an_event_goes_to_the_cluster_that_owns_it_and_to_both_when_two_screens_answer_it() {
+    assert_eq!(event_clusters(BUTTON_MODE).collect::<Vec<_>>(), [Cluster::Select]);
+    assert_eq!(event_clusters(BUTTON_RANDOM_1P).collect::<Vec<_>>(), [Cluster::Options]);
+    assert_eq!(event_clusters(BUTTON_JUDGE_TIMING).collect::<Vec<_>>(), [Cluster::Options]);
+    assert_eq!(
+        event_clusters(BUTTON_REPLAY).collect::<Vec<_>>(),
+        [Cluster::Result, Cluster::Select],
+        "a replay slot is saved on one screen and played on another"
+    );
+    assert_eq!(event_clusters(BUTTON_FAVORITTE_CHART).collect::<Vec<_>>(), [Cluster::Result, Cluster::Select]);
+    assert_eq!(event_clusters(BUTTON_CHANGE_SKIN).collect::<Vec<_>>(), [Cluster::SkinConfig]);
+    assert_eq!(event_clusters(BUTTON_PRACTICE_ITEM16).collect::<Vec<_>>(), [Cluster::Play]);
+    assert_eq!(event_clusters(BUTTON_SKIN_CUSTOMIZE1).collect::<Vec<_>>(), [Cluster::SkinConfig]);
+
+    for nothing in [BUTTON_GAUGE_2P, BUTTON_ASSIST_EXJUDGE, BUTTON_SKIN_CUSTOMIZE10, CUSTOM_EVENT_FIRST, CUSTOM_EVENT_LAST, UNDEFINED_EVENT, 0, -1] {
+        assert_eq!(event_clusters(nothing).count(), 0, "event {nothing} does nothing in the reference");
+    }
+}
+
+#[test]
+fn a_write_belongs_to_one_cluster_and_only_where_the_reference_has_a_writer() {
+    for route in WRITE_ROUTES {
+        assert!(route.first <= route.last, "{route:?} runs backwards");
+    }
+    assert_eq!(write_cluster(IdSpace::Rate, RATE_MUSICSELECT_POSITION), Some(Cluster::Select));
+    assert_eq!(write_cluster(IdSpace::Rate, RATE_KEYVOLUME), Some(Cluster::Options));
+    assert_eq!(write_cluster(IdSpace::Rate, RATE_SKINSELECT_POSITION), Some(Cluster::SkinConfig));
+    assert_eq!(write_cluster(IdSpace::Rate, READ_ONLY_RATE), None);
+    assert_eq!(write_cluster(IdSpace::Text, STRING_SEARCHWORD), Some(Cluster::Select));
+    assert_eq!(write_cluster(IdSpace::Text, STRING_TITLE), None);
+    assert_eq!(write_cluster(IdSpace::Integer, RATE_MUSICSELECT_POSITION), None, "a write is routed within its own space only");
+}
+
+/// A handler that writes down what it was handed, in the order it was.
+#[derive(Default)]
+struct Recorded {
+    clusters: Vec<(Cluster, ClusterRequest)>,
+    sounds: Vec<AudioRequest>,
+}
+
+impl RequestHandler for Recorded {
+    fn cluster(&mut self, cluster: Cluster, request: ClusterRequest) {
+        self.clusters.push((cluster, request));
+    }
+
+    fn audio(&mut self, request: AudioRequest) {
+        self.sounds.push(request);
+    }
+}
+
+#[test]
+fn what_a_skin_asked_for_is_handed_to_whoever_carries_it_out_and_the_rest_is_dropped_silently() {
+    let timers = TimerState::new();
+    let host = ScreenHost::new(NOW_US, &timers);
+    let sound = Path::new("sound/change.ogg");
+
+    host.exec_event(BUTTON_REPLAY, 1, 0);
+    host.exec_event(UNDEFINED_EVENT, 1, 0);
+    host.exec_event(BUTTON_RANDOM_1P, -1, 0);
+    host.write_rate(RATE_MASTERVOLUME, 0.5);
+    host.write_rate(READ_ONLY_RATE, 0.5);
+    host.write_text(STRING_SEARCHWORD, "typed");
+    host.write_text(STRING_TITLE, "typed");
+    host.audio(AudioCommand::Play { path: sound, volume: 1.0, looped: true });
+    host.audio(AudioCommand::Stop { path: sound });
+    host.set_volume(VolumeBus::Key, 0.25);
+
+    let mut recorded = Recorded::default();
+    let done = dispatch_calls(host.take_calls(), &mut recorded);
+
+    assert_eq!(done, Dispatched { to_clusters: 6, to_audio: 2, ignored: 3 });
+    assert_eq!(
+        recorded.clusters,
+        [
+            (Cluster::Result, ClusterRequest::Event { id: BUTTON_REPLAY, arg1: 1, arg2: 0 }),
+            (Cluster::Select, ClusterRequest::Event { id: BUTTON_REPLAY, arg1: 1, arg2: 0 }),
+            (Cluster::Options, ClusterRequest::Event { id: BUTTON_RANDOM_1P, arg1: -1, arg2: 0 }),
+            (Cluster::Options, ClusterRequest::WriteRate { id: RATE_MASTERVOLUME, value: 0.5 }),
+            (Cluster::Select, ClusterRequest::WriteText { id: STRING_SEARCHWORD, value: "typed".to_owned() }),
+            (Cluster::Options, ClusterRequest::SetVolume { bus: VolumeBus::Key, value: 0.25 }),
+        ]
+    );
+    assert_eq!(
+        recorded.sounds,
+        [AudioRequest::Play { path: sound.to_path_buf(), volume: 1.0, looped: true }, AudioRequest::Stop { path: sound.to_path_buf() }]
+    );
+}
+
+#[test]
+fn a_screen_takes_its_own_cluster_s_requests_and_leaves_the_others_waiting() {
+    let mut queue = RequestQueue::default();
+    let calls = [
+        HostCall::Event { id: BUTTON_REPLAY, arg1: 1, arg2: 0 },
+        HostCall::Event { id: BUTTON_RANDOM_1P, arg1: 1, arg2: 0 },
+        HostCall::Event { id: BUTTON_REPLAY2, arg1: -1, arg2: 0 },
+        HostCall::Event { id: UNDEFINED_EVENT, arg1: 1, arg2: 0 },
+    ];
+    let done = dispatch_calls(calls, &mut queue);
+    assert_eq!((done.to_clusters, done.ignored, queue.len()), (5, 1, 5));
+
+    assert_eq!(
+        queue.take(Cluster::Result),
+        [ClusterRequest::Event { id: BUTTON_REPLAY, arg1: 1, arg2: 0 }, ClusterRequest::Event { id: BUTTON_REPLAY2, arg1: -1, arg2: 0 }],
+        "oldest first"
+    );
+    assert!(queue.take(Cluster::Result).is_empty(), "a request is taken once");
+    assert_eq!(queue.len(), 3, "what belongs to the other clusters is still waiting");
+    assert_eq!(queue.take(Cluster::Options), [ClusterRequest::Event { id: BUTTON_RANDOM_1P, arg1: 1, arg2: 0 }]);
+    queue.clear();
+    assert!(queue.is_empty());
+}
+
+/// The keys one test holds down, by libGDX code.
+struct Holding(&'static [i32]);
+
+impl HeldKeyQuery for Holding {
+    fn key_pressed(&self, code: i32) -> bool {
+        self.0.contains(&code)
+    }
+}
+
+/// The libGDX codes of two arrow keys.
+const GDX_LEFT: i32 = 21;
+const GDX_RIGHT: i32 = 22;
+
+#[test]
+fn a_key_is_answered_from_the_keys_that_are_down_and_is_up_when_nobody_knows() {
+    let timers = TimerState::new();
+    let mut host = ScreenHost::new(NOW_US, &timers);
+    assert!(!host.key_pressed(GDX_RIGHT), "with no keyboard behind it the host holds no key");
+
+    let holding = Holding(&[GDX_RIGHT]);
+    host.keys = Some(&holding);
+    assert!(host.key_pressed(GDX_RIGHT));
+    assert!(!host.key_pressed(GDX_LEFT));
 }

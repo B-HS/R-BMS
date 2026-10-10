@@ -13,6 +13,8 @@ use rbms_model::TimeLine;
 use crate::ir_ranking::RankingState;
 use crate::ir_session::submission_player_id;
 use crate::keyconfig::mode_config_key;
+use crate::skin_host::result::snapshot::PreviousScore;
+use crate::stage::result::{ResultRun, RunStanding};
 use crate::stage::{PlayState, ResultState, Stage, Transition};
 use crate::target::{self, TargetContext};
 use crate::*;
@@ -64,7 +66,9 @@ struct ChartRun {
 /// history and replays survive without a score server; autoplay and replay runs are excluded.
 ///
 /// The TARGET the screen reports is settled against that same standing record rather than the run
-/// that has just ended, so the target a run was paced against is the one it is scored against.
+/// that has just ended, so the target a run was paced against is the one it is scored against. The
+/// best a skin's result screen compares the run with is read at the same point, before the run joins
+/// the book ([`PreviousScore::of_book`]).
 pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Transition {
     let play = &state.session;
     let summary = play.summary();
@@ -92,6 +96,7 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
     let calibration_mean_us = play.calibration_mean_us();
     let calibration_samples = play.calibration_samples();
     let instrumentation = play.instrumentation();
+    let record = play.record();
     let tempo = tempo_points(&play.model().timelines);
 
     let lamp = assisted_lamp(summary.clear_lamp, assist);
@@ -103,6 +108,7 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
     let history = shared.scores.for_md5(&chart.md5);
     let prev_ex = history.first().map(|r| r.ex_score);
     let prev_best_ex = history.iter().map(|r| r.ex_score).max();
+    let previous = PreviousScore::of_book(&shared.scores, &chart.md5, &state.ln_mode_key);
     let view = ResultView {
         title: chart.title.chars().take(RESULT_TITLE_CHARS).collect(),
         artist: chart.artist.clone(),
@@ -301,12 +307,30 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
     if practice {
         return Transition::Back;
     }
+    keep_run_record(shared, record);
     if shared.course_run.is_some() {
         return advance_course(shared, &summary, standing_combo, block_reason, lamp);
     }
     let paced_by = run_target(shared, &chart.md5, summary.total_notes, prev_best_ex);
-    let extras = ResultExtras { target: Some(TargetView { name: paced_by.name, ex: paced_by.ex }), run_again: offers_retry(shared) };
-    Transition::To(Stage::Result(ResultState::new(view).paced_by(extras).cleared(lamp.is_cleared()).tempo(tempo)))
+    let target = TargetView { name: paced_by.name, ex: paced_by.ex };
+    let standing = RunStanding { replay_saved: replay_file.is_some(), lamp, previous, target: Some(target.clone()) };
+    let extras = ResultExtras { target: Some(target), run_again: offers_retry(shared) };
+    let run = ResultRun::of(&state.session, shared, standing);
+    Transition::To(Stage::Result(ResultState::new(view).paced_by(extras).cleared(lamp.is_cleared()).tempo(tempo).played(run)))
+}
+
+/// Keep what the run that just ended left for a skin's result screen.
+///
+/// A single chart replaces whatever the last run left. A course keeps one record per stage, in the
+/// order they were played, because its result screen draws the stages' gauge histories end to end
+/// (`SkinGaugeGraphObject.java:126-131`); the list starts over on the course's first stage. Called
+/// before the course advances, so the stage index is still the one that was just played.
+fn keep_run_record(shared: &mut AppShared, record: rbms_play::PlayRecord) {
+    let continues_a_course = shared.course_run.as_ref().is_some_and(|run| run.index > 0);
+    if !continues_a_course {
+        shared.run_records.clear();
+    }
+    shared.run_records.push(record);
 }
 
 /// The chart's tempo as `(progress through the chart, bpm)`, which is what a document's BPM graph
@@ -369,7 +393,7 @@ fn played_song_index(shared: &AppShared) -> Option<usize> {
 /// The search starts from where the played chart sits in the list, so the run follows the sort and
 /// the filters that were in force when it was started; a chart the current filters have since
 /// dropped falls back to the cursor.
-fn following_song(shared: &AppShared) -> Option<(usize, usize)> {
+pub(crate) fn following_song(shared: &AppShared) -> Option<(usize, usize)> {
     let played = played_song_index(shared);
     let from = shared.select_items.iter().position(|item| matches!(item, SelectItem::Song(i) if Some(*i) == played)).unwrap_or(shared.sel);
     shared.select_items.iter().enumerate().skip(from + 1).find_map(|(at, item)| match item {
@@ -432,7 +456,7 @@ fn finish_course(shared: &mut AppShared) -> Transition {
             });
         }
     }
-    let state = CourseResultState::of(run);
+    let state = CourseResultState::of(run, shared);
     Transition::To(Stage::CourseResult(Box::new(state)))
 }
 
@@ -634,6 +658,69 @@ mod tests {
         shared.select_items = vec![SelectItem::Song(1), SelectItem::Song(2)];
         shared.sel = 0;
         assert_eq!(following_song(&shared), Some((1, 2)));
+    }
+
+    /// Four notes on one key lane, which is all a run needs to leave a record behind.
+    const RECORD_CHART: &[u8] = b"#PLAYER 1\n#BPM 120\n#WAV01 a.wav\n#00111:01010101\n";
+
+    /// How far the fixture run is driven, and at what step: past the first two notes.
+    const RECORD_RUN_US: i64 = 3_000_000;
+    const RECORD_FRAME_US: i64 = 10_000;
+
+    /// A played run on [`RECORD_CHART`] that has been ticked from the start, so its gauges have a
+    /// history, and an app that will take its result.
+    fn finished_run() -> (PlayState, AppShared) {
+        let src = rbms_parser::parse_with(RECORD_CHART, Default::default());
+        let model = rbms_chart::to_model(&src, rbms_chart::detect_mode(&src, "record.bms"));
+        let mut session = PlaySession::new(model, SessionOptions::default());
+        for frame in 0..=RECORD_RUN_US / RECORD_FRAME_US {
+            session.tick(SessionClock::at(frame * RECORD_FRAME_US), &mut NullSink);
+        }
+        let state = PlayState::new(session, std::collections::HashMap::new(), 0, SCORE_LN_MODE_FROM_CHART.to_string());
+        let dir = std::env::temp_dir().join(format!("rbms-app-result-record-tests-{}-{:?}", std::process::id(), std::thread::current().id()));
+        let mut config = Config::default();
+        config.play.autoplay = false;
+        let mut shared = crate::App::new(String::new(), config, LaunchOptions::default(), dir.join("settings.ron")).shared;
+        shared.replay = None;
+        (state, shared)
+    }
+
+    fn two_stage_course() -> rbms_course::CourseRun {
+        let chart = rbms_course::CourseChart { md5: "not-in-the-library".to_string(), ..Default::default() };
+        rbms_course::CourseRun::new(rbms_course::Course { charts: vec![chart.clone(), chart], ..Default::default() }, 100.0)
+    }
+
+    /// A skin's result screen reads the run from the record the play session took, so the record
+    /// has to be the one the session reports and has to replace the last run's.
+    #[test]
+    fn a_finished_run_leaves_its_record_for_the_result_screen() {
+        let (mut state, mut shared) = finished_run();
+        let expected = state.session.record();
+        assert!(!expected.gauge_log.is_empty(), "the fixture run was ticked, so every gauge has a history");
+        assert!(matches!(enter_result(&mut state, &mut shared), Transition::To(Stage::Result(_))));
+        assert_eq!(shared.run_records.as_slice(), std::slice::from_ref(&expected));
+
+        let (mut again, _) = finished_run();
+        enter_result(&mut again, &mut shared);
+        assert_eq!(shared.run_records, [expected], "a second single run replaces the first rather than joining it");
+    }
+
+    /// A course result draws its stages' gauge histories end to end, so each stage's record is
+    /// kept in order and the list starts over only when a course does.
+    #[test]
+    fn a_course_keeps_one_record_per_stage_in_the_order_they_were_played() {
+        let (mut first, mut shared) = finished_run();
+        shared.run_records.push(first.session.record());
+        shared.course_run = Some(two_stage_course());
+        enter_result(&mut first, &mut shared);
+        assert_eq!(shared.run_records.len(), 1, "the first stage of a course starts the list over");
+
+        let (mut second, _) = finished_run();
+        let mut run = two_stage_course();
+        run.index = 1;
+        shared.course_run = Some(run);
+        enter_result(&mut second, &mut shared);
+        assert_eq!(shared.run_records.len(), 2, "a later stage joins the ones before it");
     }
 
     fn ranking_row(player: &str, ex: u32) -> RankingRow {

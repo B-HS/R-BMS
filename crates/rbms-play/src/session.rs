@@ -16,6 +16,7 @@ use rbms_judge::{ClearType, GaugeKind, JudgeEngine, JudgeResult};
 use rbms_model::Model;
 use rbms_store::{Replay, ReplayEvent};
 
+use crate::record::{GaugeLogRecorder, PlayRecord, ScoreProgress, play_time_ms};
 use crate::{JUDGE_WIDTH_TIER_COUNT, PlayEvent, PlaySource, Player, UNMODIFIED_JUDGE_RATES, UNMODIFIED_RATE_PERCENT};
 
 /// Neutral per-voice parameters for a chart keysound: reference level, centred, unpitched. The
@@ -528,6 +529,10 @@ pub struct PlaySession {
     analysis: AnalysisState,
     marks: TimingMarks,
     instrumentation: PlayInstrumentation,
+    /// Every gauge's history on the reference's half-second grid, for a result screen a skin draws.
+    /// Kept beside `instrumentation` rather than in it: that one is the built-in screen's and
+    /// samples the selected gauge once a second.
+    gauge_log: GaugeLogRecorder,
     bga: BgaTimeline,
 }
 
@@ -536,6 +541,7 @@ impl PlaySession {
     /// can rebuild against the same lanes).
     pub fn new(model: Model, options: SessionOptions) -> Self {
         let bga = BgaTimeline::from_model(&model);
+        let gauge_log = GaugeLogRecorder::new(play_time_ms(&model, options.autoplay));
         let setup = Setup {
             autoplay: options.autoplay,
             gauge: options.gauge,
@@ -557,6 +563,7 @@ impl PlaySession {
             analysis: AnalysisState::new(options.analysis),
             marks: TimingMarks::default(),
             instrumentation: PlayInstrumentation::default(),
+            gauge_log,
             bga,
         }
     }
@@ -568,6 +575,7 @@ impl PlaySession {
         self.player.update_schedule(clock.scheduled_us, |event| sink.play(scheduled_sound(event)));
         self.player.update_judge(clock.audible_us);
         self.instrumentation.sample_gauge(clock.audible_us, self.player.judge().gauge.value());
+        self.gauge_log.frame(clock.audible_us, &self.player.judge().gauge, self.player.failed());
         self.bga.advance(clock.audible_us);
     }
 
@@ -653,6 +661,7 @@ impl PlaySession {
         self.analysis.position_us = target_us;
         self.marks.clear();
         self.instrumentation.clear();
+        self.gauge_log.clear();
     }
 
     /// Whether the run is over and the result is due: every note has gone past and the tail silence
@@ -692,6 +701,27 @@ impl PlaySession {
             finished_gauge: judge.gauge.selected_index().kind(),
             gauge_shifted: judge.gauge.is_type_changed(),
         }
+    }
+
+    /// What a skin's result screen asks about this run, each to the reference's definition: every
+    /// gauge's history, the timing of every note, the per-second judge tables and the bounds the
+    /// gauges move between. Everything but the gauge history is read off the judge engine here, so
+    /// a replay that reproduces the judgements reproduces it.
+    pub fn record(&self) -> PlayRecord {
+        PlayRecord::of(self.player.model(), self.player.judge(), self.summary(), &self.gauge_log)
+    }
+
+    /// The score against the notes that have gone by so far, which is how the reference rates a run
+    /// that is still going (`BMSPlayer.java:1031`).
+    pub fn score_progress(&self) -> ScoreProgress {
+        let judge = self.player.judge();
+        ScoreProgress { ex_score: judge.ex_score, pass_notes: judge.total_judged(), total_notes: judge.total_notes() }
+    }
+
+    /// How long the reference keeps this chart in its playing state, in milliseconds on the song
+    /// clock (`BMSPlayer.playtime`). The gauge history stops there.
+    pub fn play_time_ms(&self) -> i64 {
+        self.gauge_log.play_time_ms()
     }
 
     /// Replace everything the JUDGE settings screen controls, before the run starts.

@@ -33,6 +33,14 @@
 //! a scene that runs from its opening to its fade, shown for a chart. That test opens the scene for a
 //! real chart and saves a frame at each of several moments, walking the scene's own times on the way
 //! so the timers a skin animates on are on since when they would be.
+//!
+//! The result scene is captured the same way and for the same reason, and for a run that was really
+//! played: a chart that ships with the repository is run to its end by the engine, once played for
+//! it and once with nobody playing, and the screen the application makes of each is walked from its
+//! first frame, through its other menu, to its fade.
+//!
+//! The course result scene is walked the same way, for a course of that chart played through and
+//! for one that fails before its last stage.
 
 use std::collections::BTreeMap;
 use std::ops::Range;
@@ -40,17 +48,23 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
 use rbms_config::DEFAULT_SKIN_FOLDER;
+use rbms_course::{Course, CourseChart, CourseRun, StageResult};
+use rbms_library::{Library, SongEntry};
+use rbms_play::{NullSink, PlaySession, SessionClock, SessionOptions};
 use rbms_render::Renderer;
-use rbms_skin::loader::{SKIN_TYPE_DECIDE, SKIN_TYPE_KEY_CONFIG, SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_PLAY_7KEYS, SKIN_TYPE_RESULT};
-use rbms_skin::timer::timer_id;
+use rbms_skin::loader::{SKIN_TYPE_COURSE_RESULT, SKIN_TYPE_DECIDE, SKIN_TYPE_KEY_CONFIG, SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_PLAY_7KEYS, SKIN_TYPE_RESULT};
+use rbms_skin::timer::{MICROS_PER_MILLI, timer_id};
+use rbms_store::SCORE_LN_MODE_FROM_CHART;
+use winit::keyboard::KeyCode;
 
 use crate::app_play::loaded_chart_for_tests;
+use crate::app_result::enter_result;
 use crate::gpu::Gpu;
 use crate::skin_select::SKIN_PACK_ENV;
 use crate::stage::canvas::UI_SIZE;
-use crate::stage::render_tests::{FRAME_DT, app, play_state, render, render_on, result_state};
+use crate::stage::render_tests::{FRAME_DT, app, play_state, render, render_on};
 use crate::stage::scene_life::SceneTimes;
-use crate::stage::{Canvas, DecideState, FrameCtx, HeadlessCanvas, KeyConfigState, SelectState, Stage, Transition};
+use crate::stage::{Canvas, CourseResultState, DecideState, FrameCtx, HeadlessCanvas, KeyConfigState, KeyInput, PlayState, SelectState, Stage, Transition};
 use crate::{App, Config, LaunchOptions};
 
 /// Environment variable naming the folder captures are saved in. Nothing is saved without it.
@@ -255,21 +269,16 @@ struct PackScreen {
     stage: fn() -> Stage,
 }
 
-/// The screens a pack is captured on one frame each. The decide scene is captured through its whole
-/// length by a test of its own.
-const PACK_SCREENS: [PackScreen; 4] = [
+/// The screens a pack is captured on one frame each. The decide scene and the result scene are each
+/// captured through their whole length by a test of their own.
+const PACK_SCREENS: [PackScreen; 3] = [
     PackScreen { skin_type: SKIN_TYPE_MUSIC_SELECT, name: "pack-select", stage: browser },
-    PackScreen { skin_type: SKIN_TYPE_RESULT, name: "pack-result", stage: result },
     PackScreen { skin_type: SKIN_TYPE_KEY_CONFIG, name: "pack-keyconfig", stage: key_config },
     PackScreen { skin_type: SKIN_TYPE_PLAY_7KEYS, name: "pack-play7", stage: play },
 ];
 
 fn browser() -> Stage {
     Stage::Select(Box::new(SelectState::new()))
-}
-
-fn result() -> Stage {
-    Stage::Result(result_state())
 }
 
 fn key_config() -> Stage {
@@ -682,4 +691,266 @@ fn the_decide_scene_of_a_skin_pack_named_by_the_environment_is_captured_from_its
     println!("decide-rich: captured {}", saved.join(", "));
 
     assert_eq!(files_under(&pack), before, "capturing the pack's decide scene changed its folder");
+}
+
+/// The chart the result scene is captured for, which the engine runs to its end.
+const RESULT_SAMPLE_CHART: &str = DECIDE_SAMPLE_CHART;
+
+/// The moments of the result scene that are captured before any key is pressed, in milliseconds
+/// from its beginning: its first frame, its opening, and the layout once the opening has cleared.
+const RESULT_SHOTS_MS: [i64; 3] = [0, 1000, 3000];
+
+/// How long after the last of those the left arrow is held for the skin's other menu, how long the
+/// menu is given to settle before it is captured, and how long after that the scene is confirmed.
+const RESULT_MENU_HOLD_MS: i64 = 50;
+const RESULT_MENU_SETTLE_MS: i64 = 600;
+const RESULT_CONFIRM_AFTER_MS: i64 = 100;
+
+/// How far through its fade the result scene is captured, as a share of the skin's fade time.
+const RESULT_FADE_SHARE: (i64, i64) = (3, 4);
+
+/// The step the engine is run at while it plays the chart, and how far past the chart's own playing
+/// time it is run so the last gauge sample is taken.
+const RESULT_RUN_FRAME_US: i64 = 10_000;
+const RESULT_RUN_MARGIN_US: i64 = 1_000_000;
+
+fn key_down(code: KeyCode) -> KeyInput<'static> {
+    KeyInput { code, pressed: true, released: false, text: None }
+}
+
+fn key_up(code: KeyCode) -> KeyInput<'static> {
+    KeyInput { code, pressed: false, released: true, text: None }
+}
+
+/// Run the chart at `chart` from its first moment to past its end -- played for the player when
+/// `autoplay` is set, and with nobody playing otherwise -- and answer the session the run left.
+fn played_session(app: &mut App, chart: &Path, autoplay: bool) -> Result<PlaySession, String> {
+    let bytes = std::fs::read(chart).map_err(|error| format!("{} could not be read: {error}", chart.display()))?;
+    let name = chart.to_string_lossy().into_owned();
+    let source = rbms_parser::parse_with(&bytes, Default::default());
+    let model = rbms_chart::to_model(&source, rbms_chart::detect_mode(&source, &name));
+    let run_us = rbms_play::play_time_ms(&model, autoplay) * MICROS_PER_MILLI + RESULT_RUN_MARGIN_US;
+    app.shared.chart_path = name;
+    app.shared.mode = model.mode;
+    app.shared.config.play.autoplay = autoplay;
+    let mut session = PlaySession::new(model, SessionOptions { autoplay, ..SessionOptions::default() });
+    for frame in 0..=run_us / RESULT_RUN_FRAME_US {
+        session.tick(SessionClock::at(frame * RESULT_RUN_FRAME_US), &mut NullSink);
+    }
+    Ok(session)
+}
+
+/// Run the chart at `chart` to its end and answer what the application makes of the run when it
+/// ends: the screen it goes to, with the run's record kept and its score settled.
+fn finished_run(app: &mut App, chart: &Path, autoplay: bool) -> Result<Transition, String> {
+    let session = played_session(app, chart, autoplay)?;
+    let mut played = PlayState::new(session, std::collections::HashMap::new(), 0, SCORE_LN_MODE_FROM_CHART.to_string());
+    Ok(enter_result(&mut played, &mut app.shared))
+}
+
+/// Run the sample chart, open the pack's result scene on what the run left, and save a frame at
+/// each of [`RESULT_SHOTS_MS`], one of the skin's other menu and one of its fade, as
+/// `<prefix>-<moment>`. Answers the names saved, or why the scene never drew.
+///
+/// The scene is walked the way the decide scene is: a frame is run just past the skin's input time
+/// so `STARTINPUT` goes on when the skin says, the other menu is asked for with the key the skin
+/// polls, and the fade is begun with the key that confirms.
+fn capture_result_scene(pack: &Path, tag: &str, chart: &Path, autoplay: bool, prefix: &str) -> Result<Vec<String>, String> {
+    let mut app = pack_app(pack, tag);
+    let size = authored_size(&app, SKIN_TYPE_RESULT).ok_or_else(|| "the pack has no document for this screen".to_owned())?;
+    let entered = finished_run(&mut app, chart, autoplay)?;
+    if !matches!(entered, Transition::To(Stage::Result(_))) {
+        return Err("the run did not reach the result screen".to_owned());
+    }
+    app.switch(entered);
+    walk_result_scene(&mut app, SKIN_TYPE_RESULT, size, prefix)
+}
+
+/// Walk the score scene of `screen` -- the result or the course result -- that is up in `app`, which
+/// is the same scene on both, and save its frames as `<prefix>-<moment>`.
+fn walk_result_scene(app: &mut App, screen: i32, size: (u32, u32), prefix: &str) -> Result<Vec<String>, String> {
+    let mut pixels = HeadlessCanvas::new(size.0, size.1);
+    let deadline = Instant::now() + PACK_LOAD_TIMEOUT;
+    while !app.shared.has_compiled_skin(screen) {
+        scene_frame_at(app, 0, &mut Canvas::Headless(&mut pixels));
+        if let Some(reason) = app.shared.skin_failure(screen) {
+            return Err(reason.lines().next().unwrap_or_default().to_owned());
+        }
+        if Instant::now() >= deadline {
+            return Err(format!("its files were not read within {} seconds", PACK_LOAD_TIMEOUT.as_secs()));
+        }
+    }
+
+    let times = SceneTimes::of_skin(app.shared.skins.document(screen));
+    let mut saved = Vec::new();
+    let mut shoot = |app: &mut App, at_ms: i64, moment: &str| -> Result<(), String> {
+        if !matches!(scene_frame_at(app, at_ms, &mut Canvas::Headless(&mut pixels)), Transition::Stay) {
+            return Err(format!("the scene was over by {at_ms} ms"));
+        }
+        if !moment.is_empty() {
+            let name = format!("{prefix}-{moment}");
+            save(&name, CAPTURE_EXTENSION, size, pixels.rgba());
+            saved.push(name);
+        }
+        Ok(())
+    };
+
+    let last = RESULT_SHOTS_MS.iter().copied().max().unwrap_or_default().max(times.input_ms + 1);
+    let mut moments: Vec<i64> = RESULT_SHOTS_MS.into_iter().chain([times.input_ms + 1]).collect();
+    moments.sort_unstable();
+    moments.dedup();
+    for at_ms in moments {
+        let moment = if RESULT_SHOTS_MS.contains(&at_ms) { format!("{at_ms:04}ms") } else { String::new() };
+        shoot(app, at_ms, &moment)?;
+    }
+
+    app.shared.note_key(&key_down(KeyCode::ArrowLeft));
+    shoot(app, last + RESULT_MENU_HOLD_MS, "")?;
+    app.shared.note_key(&key_up(KeyCode::ArrowLeft));
+    let menu_ms = last + RESULT_MENU_HOLD_MS + RESULT_MENU_SETTLE_MS;
+    shoot(app, menu_ms, "menu2")?;
+
+    let confirm_ms = menu_ms + RESULT_CONFIRM_AFTER_MS;
+    let now = Instant::now();
+    app.stage.handle_key(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 }, key_down(KeyCode::Enter));
+    shoot(app, confirm_ms, "")?;
+    app.stage.handle_key(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 }, key_up(KeyCode::Enter));
+    if !app.shared.skin_timers.is_on(timer_id::FADEOUT) {
+        return Err("the confirming key did not start the fade".to_owned());
+    }
+    shoot(app, confirm_ms + times.fadeout_ms * RESULT_FADE_SHARE.0 / RESULT_FADE_SHARE.1, "fade")?;
+    Ok(saved)
+}
+
+/// Captures the result scene of a pack somebody else wrote for two runs of a chart that ships with
+/// the repository: one the engine played to a clear, and one nobody played, which fails.
+///
+/// Opt-in like the captures above it: without [`SKIN_PACK_ENV`] this passes without drawing
+/// anything. With it, the scene has to draw for both runs, and the pack's folder has to be left as
+/// it was.
+#[test]
+fn the_result_scene_of_a_skin_pack_named_by_the_environment_is_captured_for_a_clear_and_a_failure() {
+    let Some(pack) = crate::skin_select::pack_from_environment(std::env::var_os(SKIN_PACK_ENV)) else {
+        return;
+    };
+    assert!(pack.is_dir(), "{SKIN_PACK_ENV} names {}, which is not a folder", pack.display());
+    let before = files_under(&pack);
+    let chart = Path::new(env!("CARGO_MANIFEST_DIR")).join(RESULT_SAMPLE_CHART);
+
+    for (autoplay, prefix) in [(true, "result-clear"), (false, "result-fail")] {
+        let saved = capture_result_scene(&pack, prefix, &chart, autoplay, prefix).unwrap_or_else(|reason| panic!("{prefix}: not drawn: {reason}"));
+        println!("{prefix}: captured {}", saved.join(", "));
+    }
+    assert_eq!(files_under(&pack), before, "capturing the pack's result scene changed its folder");
+}
+
+/// How many stages the courses captured below have, and the one the failed course gives up on (the
+/// second, counting from zero), which leaves the third for the library to stand in for.
+const COURSE_STAGES: usize = 3;
+const COURSE_FAILED_STAGE: usize = 1;
+
+/// A library entry for the chart at `path`, so a course stage that names its MD5 resolves to it.
+fn library_entry(path: &Path, md5: &str, mode: rbms_model::Mode) -> SongEntry {
+    SongEntry {
+        path: path.to_path_buf(),
+        title: String::new(),
+        subtitle: String::new(),
+        artist: String::new(),
+        genre: String::new(),
+        maker: String::new(),
+        level: String::new(),
+        difficulty: 0,
+        init_bpm: 0.0,
+        rank: 2,
+        total: 0.0,
+        mode,
+        md5: md5.to_owned(),
+        stagefile: String::new(),
+        banner: String::new(),
+        preview: String::new(),
+    }
+}
+
+/// Play a course of `stages` stages of the chart at `chart`, each played for the player, until
+/// `failing` stage, which nobody plays and which ends the course. Answers the course as the application leaves it
+/// when it ends: the run alive, one record kept for each stage that was played, and the chart in
+/// the library for the stages that were not.
+fn finished_course(app: &mut App, chart: &Path, stages: usize, failing: Option<usize>) -> Result<CourseRun, String> {
+    let mut sessions = Vec::new();
+    for stage in 0..stages {
+        sessions.push(played_session(app, chart, failing != Some(stage))?);
+        if failing == Some(stage) {
+            break;
+        }
+    }
+    let model = sessions.first().ok_or("a course has no stages")?.model();
+    let (md5, mode) = (model.md5.clone(), model.mode);
+    let mut course = Course {
+        name: "CAPTURE COURSE".to_owned(),
+        charts: (1..=stages)
+            .map(|number| CourseChart { md5: md5.clone(), sha256: model.sha256.clone(), title: format!("{} {number}", model.meta.title) })
+            .collect(),
+        ..Course::default()
+    };
+    if !course.validate() {
+        return Err("the course is not valid".to_owned());
+    }
+    let mut run = CourseRun::new(course, 100.0);
+    app.shared.run_records.clear();
+    for (stage, session) in sessions.iter().enumerate() {
+        let summary = session.summary();
+        run.advance(&StageResult {
+            ex_score: summary.ex_score,
+            max_ex_score: summary.max_ex_score,
+            notes: summary.total_notes,
+            counts: summary.counts,
+            empty_poor: summary.empty_poor,
+            fast: summary.fast,
+            slow: summary.slow,
+            combo_breaks: crate::combo_breaks(&mode, summary.counts),
+            max_combo: summary.max_combo,
+            combo_at_end: session.standing_combo(),
+            gauge_value: summary.gauge_value,
+            clear: rbms_judge::clear_type_id(summary.clear_lamp),
+            survived: failing != Some(stage) && !summary.failed,
+        });
+        app.shared.run_records.push(session.record());
+    }
+    app.shared.library = Library::from_songs(vec![library_entry(chart, &md5, mode)]);
+    app.shared.course_run = Some(run.clone());
+    Ok(run)
+}
+
+/// Run a course of the sample chart, open the pack's course result scene on what it left, and walk
+/// it as the result scene is walked, saving its frames as `<prefix>-<moment>`.
+fn capture_course_result_scene(pack: &Path, tag: &str, chart: &Path, failing: Option<usize>, prefix: &str) -> Result<Vec<String>, String> {
+    let mut app = pack_app(pack, tag);
+    let size = authored_size(&app, SKIN_TYPE_COURSE_RESULT).ok_or_else(|| "the pack has no document for this screen".to_owned())?;
+    let run = finished_course(&mut app, chart, COURSE_STAGES, failing)?;
+    let state = CourseResultState::of(&run, &app.shared);
+    app.switch(Transition::To(Stage::CourseResult(Box::new(state))));
+    walk_result_scene(&mut app, SKIN_TYPE_COURSE_RESULT, size, prefix)
+}
+
+/// Captures the course result scene of a pack somebody else wrote for two courses of a chart that
+/// ships with the repository: one played through to a clear, and one that fails on its second stage
+/// and never reaches its third.
+///
+/// Opt-in like the captures above it: without [`SKIN_PACK_ENV`] this passes without drawing
+/// anything. With it, the scene has to draw for both courses, and the pack's folder has to be left
+/// as it was.
+#[test]
+fn the_course_result_scene_of_a_skin_pack_named_by_the_environment_is_captured_for_a_clear_and_a_failure() {
+    let Some(pack) = crate::skin_select::pack_from_environment(std::env::var_os(SKIN_PACK_ENV)) else {
+        return;
+    };
+    assert!(pack.is_dir(), "{SKIN_PACK_ENV} names {}, which is not a folder", pack.display());
+    let before = files_under(&pack);
+    let chart = Path::new(env!("CARGO_MANIFEST_DIR")).join(RESULT_SAMPLE_CHART);
+
+    for (failing, prefix) in [(None, "course-result-clear"), (Some(COURSE_FAILED_STAGE), "course-result-fail")] {
+        let saved = capture_course_result_scene(&pack, prefix, &chart, failing, prefix).unwrap_or_else(|reason| panic!("{prefix}: not drawn: {reason}"));
+        println!("{prefix}: captured {}", saved.join(", "));
+    }
+    assert_eq!(files_under(&pack), before, "capturing the pack's course result scene changed its folder");
 }

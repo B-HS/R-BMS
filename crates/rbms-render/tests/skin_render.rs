@@ -1243,7 +1243,7 @@ fn a_note_field_named_by_a_destination_with_no_keyframe_is_drawn() {
     let timelines = &chart.timelines;
     let playfield = PlayfieldView { timelines, microtime: 0, hispeed: FIELD_HISPEED, beam_on: &[], beam_off: &[], constant: false, legacy_note: false };
     let play = NoteField { field: &field, playfield: &playfield, shade: LaneShade::default(), bomb: &[], keys_down: &[] };
-    let data = FrameData { field: Some(&play), gauge: Some(GaugeFrame { kind: 0, clear_threshold: field.gauge_clear_threshold }), ..FrameData::default() };
+    let data = FrameData { field: Some(&play), gauge: Some(GaugeFrame::of_kind(0, field.gauge_clear_threshold)), ..FrameData::default() };
     let timers = TimerState::new();
     let state = FixtureState::default();
     canvas.clear(Color::BLACK);

@@ -10,7 +10,7 @@ pub(crate) const MUSIC_SELECT: i32 = 5;
 /// The `SkinType` id of the seven-key play screen.
 pub(crate) const PLAY_7KEYS: i32 = 0;
 
-/// A `SkinType` id this build has no screen for, used to prove the row still lists it.
+/// The `SkinType` id of the course result screen.
 pub(crate) const COURSE_RESULT: i32 = 15;
 
 /// A document that declares one of every customisation row: a two-item property, a file slot

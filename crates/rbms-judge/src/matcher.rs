@@ -62,6 +62,35 @@ struct JNote {
     /// Judgment the paired end object took, the reference's `getPair().getState() - 1`. Read by the
     /// hell-charge tick to decide whether a released note still gains gauge.
     end_judge: Option<Judge>,
+    /// `Note.getState()` of the head object: [`UNJUDGED_STATE`] until a judgment consumes it, then
+    /// that judgment's code plus one (`JudgeManager.java:645`).
+    head_state: u8,
+    /// `Note.getState()` of the paired end object.
+    end_state: u8,
+}
+
+/// One object of the chart as the reference's `Note` reads back once it has been played: what the
+/// result screen's timing distribution and per-second judge graph walk the chart for
+/// (`AbstractResult`/`MusicResult.java:352-363`, `SkinNoteDistributionGraph.java:300-360`).
+///
+/// A long note yields two marks, its head and its end, because the reference keeps them as two
+/// objects with a state and a play time each. Mines are not judged objects and yield none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NoteMark {
+    pub lane: usize,
+    /// Chart time of this object: the head's for a head or a normal note, the end's for an end.
+    pub time_us: i64,
+    /// Whether this is the end object of a long note.
+    pub long_end: bool,
+    /// Whether the note this object belongs to is judged at both ends, a charge or hell-charge
+    /// note. A plain long note is judged once, on its head object, and its end keeps state 0.
+    pub charge: bool,
+    /// `Note.getState()`: 0 while nothing has consumed the object, otherwise the judge code of the
+    /// judgment that did plus one, so 1 is PGREAT and 5 is a 見逃し POOR.
+    pub state: u8,
+    /// `Note.getMicroPlayTime()`: the signed timing of the last judgment the object took, positive
+    /// when the input came early. An empty POOR overwrites it without consuming the object.
+    pub play_time_us: i64,
 }
 
 /// CN/HCN ("charge"/"hell-charge") long notes are judged twice — the head at press and the release
@@ -225,6 +254,8 @@ impl JudgeEngine {
                             head_play_time_us: 0,
                             end_play_time_us: 0,
                             end_judge: None,
+                            head_state: UNJUDGED_STATE,
+                            end_state: UNJUDGED_STATE,
                         })
                         .collect(),
                     cursor: 0,
@@ -486,6 +517,26 @@ impl JudgeEngine {
 
     pub fn clear_lamp(&self) -> ClearType {
         clear_lamp(self.gauge.selected(), &self.counts, self.max_combo, self.total_notes)
+    }
+
+    /// Every judged object of the chart with the state and play time the run left on it, lane by
+    /// lane in chart order. See [`NoteMark`].
+    pub fn note_marks(&self) -> impl Iterator<Item = NoteMark> + '_ {
+        self.lanes.iter().enumerate().flat_map(|(lane, l)| {
+            l.notes.iter().flat_map(move |note| {
+                let charge = is_charge(note.ln);
+                let head = NoteMark { lane, time_us: note.head_us, long_end: false, charge, state: note.head_state, play_time_us: note.head_play_time_us };
+                let end = note.end_us.map(|end_us| NoteMark {
+                    lane,
+                    time_us: end_us,
+                    long_end: true,
+                    charge,
+                    state: note.end_state,
+                    play_time_us: note.end_play_time_us,
+                });
+                std::iter::once(head).chain(end)
+            })
+        })
     }
 
     pub fn press(&mut self, lane: usize, press_us: i64) -> Option<JudgeResult> {
@@ -881,10 +932,16 @@ impl JudgeEngine {
     /// a note that already survived a judgment is consumed but not counted, which is what stops a
     /// pop'n BAD from tallying twice.
     fn update_micro(&mut self, lane: usize, idx: usize, judge: Judge, delta_us: i64, on_end: bool, vanish: bool) {
+        let note = &mut self.lanes[lane].notes[idx];
         if vanish {
             self.pass_notes += 1;
+            let state = judge as u8 + 1;
+            if on_end {
+                note.end_state = state;
+            } else {
+                note.head_state = state;
+            }
         }
-        let note = &mut self.lanes[lane].notes[idx];
         let played = if on_end { note.end_play_time_us } else { note.head_play_time_us };
         if self.prop.miss_condition == MissCondition::One && judge == Judge::Poor && was_played(played) {
             return;

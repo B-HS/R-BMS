@@ -619,12 +619,12 @@ fn choosing_the_built_in_screen_drops_the_document_that_was_read() {
 #[test]
 fn a_screen_this_build_does_not_draw_says_so_rather_than_hiding() {
     let mut fixture = Fixture::new("unsupported");
-    assert!(skin_screen_label_exists(COURSE_RESULT), "a screen the reference declares is missing from the row's list");
-    fixture.config.skin.screen = COURSE_RESULT;
-    fixture.config.skin.select(COURSE_RESULT, Some("ghost.json".into()));
+    assert!(skin_screen_label_exists(SKIN_SELECT), "a screen the reference declares is missing from the row's list");
+    fixture.config.skin.screen = SKIN_SELECT;
+    fixture.config.skin.select(SKIN_SELECT, Some("ghost.json".into()));
     assert_eq!(fixture.skins.info(&fixture.config), UNSUPPORTED_INFO);
     fixture.skins.reload(&fixture.config);
-    assert!(fixture.skins.document(COURSE_RESULT).is_none(), "an unsupported screen was read anyway");
+    assert!(fixture.skins.document(SKIN_SELECT).is_none(), "an unsupported screen was read anyway");
 }
 
 /// A document that cannot be read leaves the built-in screen drawing and puts the reason on the

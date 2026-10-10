@@ -12,11 +12,12 @@
 //! out through the destination it placed it at and leaves it alone by drawing it white, which is
 //! what an unstated destination colour already is.
 //!
-//! The two graphs the reference paints into a pixmap of their own, the judgement spread and the
-//! tempo timeline, are the exception: each uploads its pixmap as a texture and draws it scaled onto
-//! the object's rectangle, as the reference does, and the destination's colour tints that texture as
-//! it would any image. What they share for that stays here: [`Layer`], one pixmap's life as a
-//! texture, and [`draw_layer`], which fits a texture to a rectangle.
+//! The graphs the reference paints into a pixmap of their own -- the gauge history, the judgement
+//! spread, the tempo timeline and the timing distribution -- are the exception: each uploads its
+//! pixmap as a texture and draws it scaled onto the object's rectangle, as the reference does, and
+//! the destination's colour tints that texture as it would any image. What they share for that stays
+//! here: [`Layer`], one pixmap's life as a texture, and [`draw_layer`], which fits a texture to a
+//! rectangle.
 //!
 //! What is shared between two or more kinds stays here: reading a colour, the plot rectangle, an
 //! upright line, and the ruler arithmetic the two visualisers have in common.
@@ -40,16 +41,16 @@ use super::draw::Placement;
 use super::object::Body;
 use super::textures::Source;
 use crate::{Color, Rect, Renderer, TextureFilter, TextureId, UvRect};
-use pixmap::Pixmap;
+use pixmap::{Pixmap, Rgba};
 
 pub use bpm::BpmTimeline;
 pub(crate) use bpm::{BpmGraphBody, draw_bpm_graph};
-pub use gauge_graph::GaugeHistory;
+pub use gauge_graph::{GAUGE_SAMPLE_MS, GaugeHistory};
 pub(crate) use gauge_graph::{GaugeGraphBody, draw_gauge_graph};
 pub(crate) use hit_error::{HitErrorBody, draw_hit_error};
 pub use notes_dist::{EARLY_LATE_BUCKETS, JUDGEMENTS, NOTE_KINDS, NoteDistribution, PlayCursor};
 pub(crate) use notes_dist::{JudgeGraphBody, draw_judge_graph};
-pub use timing_dist::TimingHistogram;
+pub use timing_dist::{TIMING_JUDGE_AREAS, TimingHistogram};
 pub(crate) use timing_dist::{TimingDistributionBody, draw_timing_distribution};
 pub use timing_vis::RecentHits;
 pub(crate) use timing_vis::{TimingVisualizerBody, draw_timing_visualizer};
@@ -72,11 +73,33 @@ const FALLBACK_COLOR: Color = Color::WHITE;
 /// Thinnest a line is drawn, so a document that asked for none still leaves a mark.
 const MIN_LINE_W: f32 = 1.0;
 
-/// Narrowest a histogram bar is drawn, so a full histogram still shows every bucket.
-const MIN_BAR_W: f32 = 1.0;
+/// Hex digits a colour's three channels are written in.
+const COLOR_DIGITS: usize = 6;
 
-/// Gap between two histogram bars, taken off the bar rather than added to the pitch.
-const BAR_GAP: f32 = 1.0;
+/// Hex digits a colour that carries its own alpha is written in.
+const ALPHA_DIGITS: usize = 8;
+
+/// Hex digits one channel takes.
+const CHANNEL_DIGITS: usize = 2;
+
+/// The base a colour is written in.
+const HEX_RADIX: u32 = 16;
+
+/// The colour the reference reads from a record's text (`Color.valueOf`, in the build it ships
+/// with), as the bytes a pixmap stores for it, or `None` where the reference throws.
+///
+/// The first six hex digits are the colour, after a `#` if the text starts with one. The alpha is
+/// read from the next two only when the text is exactly eight digits long; a text of any other
+/// length is opaque, whatever follows the sixth digit.
+fn reference_color(text: &str) -> Option<Rgba> {
+    let digits = text.strip_prefix('#').unwrap_or(text);
+    let channel = |index: usize| {
+        let start = index * CHANNEL_DIGITS;
+        digits.get(start..start + CHANNEL_DIGITS).and_then(|pair| u8::from_str_radix(pair, HEX_RADIX).ok())
+    };
+    let alpha = if digits.len() == ALPHA_DIGITS { channel(COLOR_DIGITS / CHANNEL_DIGITS)? } else { u8::MAX };
+    Some([channel(0)?, channel(1)?, channel(2)?, alpha])
+}
 
 /// The colour the document wrote for `what`, or a plain white one with a warning when the text is
 /// not a colour at all.
@@ -118,6 +141,19 @@ fn error_offset(plot: Rect, error_ms: f32, window_ms: f32) -> f32 {
     plot.w * 0.5 * (error_ms / window_ms).clamp(-1.0, 1.0)
 }
 
+/// Which way up a pixmap is uploaded.
+///
+/// The reference draws most of its graph textures with a negative height, so the pixmap's first row
+/// lands on the foot of the rectangle; the one it draws like any other image keeps its first row on
+/// top.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Upload {
+    /// The pixmap's first row lands on the bottom of the rectangle.
+    FirstRowAtFoot,
+    /// The pixmap's first row lands on the top of the rectangle.
+    FirstRowOnTop,
+}
+
 /// One pixmap of a graph, kept uploaded as a texture of its own.
 ///
 /// The pixmap itself belongs to the graph, which paints it when its numbers change. A layer only
@@ -142,13 +178,23 @@ impl Layer {
         self.stale = true;
     }
 
-    /// The texture holding `pixmap`, or `None` when the renderer refused to hold it.
+    /// The texture holding `pixmap` with its first row at the foot, or `None` when the renderer
+    /// refused to hold it.
     fn texture<R: Renderer>(&mut self, r: &mut R, pixmap: &Pixmap) -> Option<TextureId> {
+        self.texture_as(r, pixmap, Upload::FirstRowAtFoot)
+    }
+
+    /// The texture holding `pixmap` the way up `upload` names, or `None` when the renderer refused
+    /// to hold it.
+    fn texture_as<R: Renderer>(&mut self, r: &mut R, pixmap: &Pixmap, upload: Upload) -> Option<TextureId> {
         let (width, height) = pixmap.size();
         let size = (width as u32, height as u32);
         let known = self.handle.and_then(|handle| r.texture_size(handle));
         if self.stale || known != Some(size) {
-            self.handle = Some(r.register_texture(&self.key, &pixmap.bottom_up(), size.0, size.1));
+            self.handle = Some(match upload {
+                Upload::FirstRowAtFoot => r.register_texture(&self.key, &pixmap.bottom_up(), size.0, size.1),
+                Upload::FirstRowOnTop => r.register_texture(&self.key, pixmap.top_down(), size.0, size.1),
+            });
             self.stale = false;
         }
         self.handle.filter(|handle| r.texture_size(*handle).is_some())
@@ -167,8 +213,10 @@ impl Layer {
 /// its own.
 pub(crate) fn release<R: Renderer>(body: &Body, r: &mut R) {
     match body {
+        Body::GaugeGraph(body) => body.release(r),
         Body::JudgeGraph(body) => body.release(r),
         Body::BpmGraph(body) => body.release(r),
+        Body::TimingDistribution(body) => body.release(r),
         _ => {}
     }
 }

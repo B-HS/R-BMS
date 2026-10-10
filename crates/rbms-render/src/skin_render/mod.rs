@@ -53,13 +53,13 @@ pub use color::parse_hex_color;
 pub use frame::{FrameData, FrameSeries, PreparedFrame, SkinFrame};
 pub use gauge::GaugeFrame;
 pub use graphs::{BpmTimeline, GaugeHistory, NoteDistribution, RecentHits, TimingHistogram};
-pub use input::{SkinPointer, SkinPointerButton};
+pub use input::{SkinAction, SkinEvent, SkinInputMap, SkinPointer, SkinPointerButton, SkinWriter};
 pub use notes::NoteField;
 pub use object::SkinObjectKind;
 pub use refs::{ReferenceImage, ReferenceImages};
 pub use screen::{
-    LaneTimerState, PlayLanes, PlayTimers, ResultTimers, SelectTimers, SkinDraw, render_decide_screen, render_keyconfig_screen, render_play_screen,
-    render_result_screen, render_select_screen,
+    LaneTimerState, PlayLanes, PlayTimers, SelectTimers, SkinDraw, render_decide_screen, render_keyconfig_screen, render_play_screen, render_result_screen,
+    render_select_screen,
 };
 pub use songlist::SongBars;
 
@@ -188,6 +188,8 @@ pub struct SkinScreen {
     /// The size the document was authored at, which every coordinate in it is relative to.
     authored: (f32, f32),
     objects: Vec<object::SkinObject>,
+    /// What each object does with the pointer, by the same index as `objects`.
+    interactions: Vec<input::Interaction>,
     /// Every texture this screen registered, so it can hand them all back.
     textures: textures::SkinTextures,
     /// The font family each font id resolved to inside the text engine.
@@ -246,9 +248,11 @@ impl SkinScreen {
             }
         }
 
-        let objects = object::build_objects(skin, textures.sources(), &families, assets, &mut warnings);
+        let mut kept = Vec::new();
+        let objects = object::build_objects(skin, textures.sources(), &families, assets, &mut warnings, &mut kept);
+        let interactions = input::interactions(skin, &kept, &objects);
         let authored = (skin.def.w.max(1) as f32, skin.def.h.max(1) as f32);
-        SkinScreen { authored, objects, textures, families, warnings }
+        SkinScreen { authored, objects, interactions, textures, families, warnings }
     }
 
     /// The size the document was authored at.
@@ -305,6 +309,7 @@ impl SkinScreen {
             object.release(r);
         }
         self.objects.clear();
+        self.interactions.clear();
     }
 
     /// The first stage of a frame: prepares every object in the document's own order -- draw

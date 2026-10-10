@@ -359,3 +359,438 @@ fn an_image_picked_by_an_index_no_cluster_knows_is_drawn_with_its_first_set() {
     assert_eq!(draw_decide(&mut app, &mut pixels, 1), vec![true], "a compiled skin did not draw its screen");
     assert_eq!(pixels.pixel_at(UI_SIZE.0 / 2, UI_SIZE.1 / 2), FIRST_SET, "the image was not drawn with the first of its set");
 }
+
+/// The file the pressed skin's one image source is written to, beside the skin, and its edge.
+const PANEL_SHEET: &str = "panel.png";
+const PANEL_EDGE: u32 = 8;
+
+/// The event the pressed skin's numbered button runs, which the result screen and the browser both
+/// answer, and one the reference defines nothing for.
+const REPLAY_EVENT: i32 = rbms_skin::property::generated::BUTTON_REPLAY;
+const UNDEFINED_EVENT: i32 = 9_999;
+
+/// The rate the pressed skin's plain slider reads and writes.
+const VOLUME_RATE: i32 = rbms_skin::property::generated::RATE_MASTERVOLUME;
+
+/// A Lua skin for the decide screen with three buttons, each 100 by 40, and two sliders that travel
+/// 200 to the right. `scripted` runs a function that counts its presses and keeps its argument,
+/// `numbered` runs [`REPLAY_EVENT`] and `unknown` runs [`UNDEFINED_EVENT`]. `computed` writes where
+/// it was dragged to through a function and `volume` writes it to [`VOLUME_RATE`]. An object of no
+/// size polls the right arrow key on every frame, the way a published skin switches its menus.
+const PRESSED_DECIDE: &str = r#"
+presses = 0
+argument = 0
+written = -1
+right_held = false
+local skin = { type = 6, name = "Pressed", w = 1280, h = 720 }
+if skin_config then
+    local gdx = luajava.bindClass("com.badlogic.gdx.Gdx")
+    local keys = luajava.bindClass("com.badlogic.gdx.Input").Keys
+    local function shape(id, fields)
+        local object = { id = id, src = 0, x = 0, y = 0, w = PANEL_EDGE, h = PANEL_EDGE }
+        for key, value in pairs(fields) do object[key] = value end
+        return object
+    end
+    local function at(x, y, w, h) return { { x = x, y = y, w = w, h = h } } end
+    skin.source = { { id = 0, path = "PANEL_SHEET" } }
+    skin.image = {
+        shape("scripted", { act = function(direction)
+            presses = presses + 1
+            argument = direction
+        end }),
+        shape("numbered", { act = REPLAY_EVENT }),
+        shape("unknown", { act = UNDEFINED_EVENT }),
+    }
+    skin.slider = {
+        shape("computed", { angle = 1, range = 200, value = function() return 0 end, event = function(value) written = value end }),
+        shape("volume", { angle = 1, range = 200, type = VOLUME_RATE }),
+    }
+    skin.destination = {
+        { id = -110, draw = function() right_held = gdx.input:isKeyPressed(keys.RIGHT) end, dst = at(0, 0, 0, 0) },
+        { id = "scripted", dst = at(100, 100, 100, 40) },
+        { id = "numbered", dst = at(300, 100, 100, 40) },
+        { id = "unknown", dst = at(500, 100, 100, 40) },
+        { id = "computed", dst = at(100, 300, 20, 30) },
+        { id = "volume", dst = at(100, 400, 20, 30) },
+    }
+end
+return skin
+"#;
+
+/// A point of the pressed skin, given in the skin's own upward coordinates, as the cursor position
+/// the window would report for it. The skin is authored at the size the cursor is measured in.
+fn cursor_at(x: f32, y: f32) -> (f32, f32) {
+    (x, UI_SIZE.1 as f32 - y)
+}
+
+/// Where the cursor is over each of the pressed skin's buttons, over the middle and the quarter of
+/// its sliders' travel, and over nothing.
+fn over_scripted() -> (f32, f32) {
+    cursor_at(150.0, 120.0)
+}
+fn over_numbered() -> (f32, f32) {
+    cursor_at(350.0, 120.0)
+}
+fn over_unknown() -> (f32, f32) {
+    cursor_at(550.0, 120.0)
+}
+fn over_computed_quarter() -> (f32, f32) {
+    cursor_at(150.0, 310.0)
+}
+fn over_volume_middle() -> (f32, f32) {
+    cursor_at(200.0, 410.0)
+}
+fn over_nothing() -> (f32, f32) {
+    cursor_at(900.0, 600.0)
+}
+
+const LEFT_PRESS: PointerInput = PointerInput::Button { button: MouseButton::Left, pressed: true };
+const RIGHT_PRESS: PointerInput = PointerInput::Button { button: MouseButton::Right, pressed: true };
+const LEFT_RELEASE: PointerInput = PointerInput::Button { button: MouseButton::Left, pressed: false };
+
+/// An app drawing the pressed skin on its decide screen, with one whole frame of it behind it.
+fn app_with_pressed_skin(tag: &str) -> (crate::App, crate::stage::HeadlessCanvas) {
+    let source = PRESSED_DECIDE
+        .replace("PANEL_SHEET", PANEL_SHEET)
+        .replace("PANEL_EDGE", &PANEL_EDGE.to_string())
+        .replace("REPLAY_EVENT", &REPLAY_EVENT.to_string())
+        .replace("UNDEFINED_EVENT", &UNDEFINED_EVENT.to_string())
+        .replace("VOLUME_RATE", &VOLUME_RATE.to_string());
+    let (mut app, document) = app_with_decide_skin(tag, &source);
+    image::RgbaImage::from_pixel(PANEL_EDGE, PANEL_EDGE, image::Rgba([u8::MAX; 4])).save(document.with_file_name(PANEL_SHEET)).expect("the sheet is written");
+    let mut pixels = crate::stage::HeadlessCanvas::new(UI_SIZE.0, UI_SIZE.1);
+    let compiled = draw_decide_until_compiled(&mut app, &mut pixels);
+    assert!(compiled, "the skin never compiled: {:?}", app.shared.skin_failure(SKIN_TYPE_DECIDE));
+    assert_eq!(app.shared.skin_warnings(SKIN_TYPE_DECIDE), &[] as &[String], "the skin did not compile whole");
+    whole_frame(&mut app, &mut pixels);
+    (app, pixels)
+}
+
+/// One frame of the decide screen as the frame loop makes it: drawn, and then ended.
+fn whole_frame(app: &mut crate::App, pixels: &mut crate::stage::HeadlessCanvas) {
+    assert_eq!(draw_decide(app, pixels, 1), vec![true], "the skin did not draw its screen");
+    app.shared.finish_skin_frame(&mut Canvas::Headless(pixels));
+}
+
+/// A number the pressed skin keeps in a global.
+fn skin_number(app: &crate::App, name: &str) -> f64 {
+    let runtime = app.shared.skins.document(SKIN_TYPE_DECIDE).and_then(LoadedSkin::runtime).expect("the pressed skin is loaded with its interpreter");
+    runtime.lua().globals().get(name).expect("the skin keeps the number in a global")
+}
+
+/// A flag the pressed skin keeps in a global.
+fn skin_flag(app: &crate::App, name: &str) -> bool {
+    let runtime = app.shared.skins.document(SKIN_TYPE_DECIDE).and_then(LoadedSkin::runtime).expect("the pressed skin is loaded with its interpreter");
+    runtime.lua().globals().get(name).expect("the skin keeps the flag in a global")
+}
+
+/// A press on an object whose event is a function of the skin is taken at once and run in the next
+/// frame, in the skin's own interpreter, with the direction of the button as its one argument.
+#[test]
+fn a_press_on_a_scripted_object_calls_the_skins_function_in_the_next_frame() {
+    let (mut app, mut pixels) = app_with_pressed_skin("scripted");
+
+    assert!(app.shared.skin_pointer(over_scripted(), LEFT_PRESS), "the object under the cursor did not take the press");
+    assert_eq!(skin_number(&app, "presses"), 0.0, "the function ran outside a frame, where its host is not bound");
+    whole_frame(&mut app, &mut pixels);
+    assert_eq!((skin_number(&app, "presses"), skin_number(&app, "argument")), (1.0, 1.0));
+    whole_frame(&mut app, &mut pixels);
+    assert_eq!(skin_number(&app, "presses"), 1.0, "one press ran the function on a second frame");
+
+    assert!(app.shared.skin_pointer(over_scripted(), RIGHT_PRESS));
+    whole_frame(&mut app, &mut pixels);
+    assert_eq!((skin_number(&app, "presses"), skin_number(&app, "argument")), (2.0, -1.0), "the right button asks for the previous");
+
+    let runtime = app.shared.skins.document(SKIN_TYPE_DECIDE).and_then(LoadedSkin::runtime).expect("the pressed skin is loaded with its interpreter");
+    assert_eq!(runtime.diagnostics().function_failures, Vec::new());
+}
+
+/// A press on an object whose event is an id is handed to the host and reaches the screens that own
+/// the event once the frame has ended; an id the reference defines nothing for takes the press all
+/// the same and then comes to nothing.
+#[test]
+fn a_press_on_a_numbered_object_reaches_the_screen_that_owns_the_event_and_an_undefined_one_nobody() {
+    let (mut app, mut pixels) = app_with_pressed_skin("numbered");
+    let replay = ClusterRequest::Event { id: REPLAY_EVENT, arg1: 1, arg2: 0 };
+
+    assert!(app.shared.skin_pointer(over_numbered(), LEFT_PRESS));
+    assert!(app.shared.skin_requests().is_empty(), "the event was carried out before its frame");
+    whole_frame(&mut app, &mut pixels);
+    assert_eq!(app.shared.skin_requests().take(Cluster::Result), std::slice::from_ref(&replay));
+    assert_eq!(app.shared.skin_requests().take(Cluster::Result), [], "a request is taken once");
+    assert_eq!(app.shared.skin_requests().take(Cluster::Select), [replay], "the browser answers the same event its own way");
+
+    assert!(app.shared.skin_pointer(over_numbered(), LEFT_PRESS));
+    whole_frame(&mut app, &mut pixels);
+    whole_frame(&mut app, &mut pixels);
+    assert!(app.shared.skin_requests().is_empty(), "a request no screen took outlived the frame after it");
+
+    assert!(app.shared.skin_pointer(over_unknown(), LEFT_PRESS), "an object takes the press whatever its event comes to");
+    whole_frame(&mut app, &mut pixels);
+    assert!(app.shared.skin_requests().is_empty(), "an event nobody defines reached a screen");
+}
+
+/// A slider is set by a press on its travel and by a drag along it. One that writes through a
+/// function has it called with the value; one that writes a rate hands the value to the settings.
+#[test]
+fn a_slider_is_set_by_a_press_and_by_a_drag_and_writes_where_its_document_says() {
+    let (mut app, mut pixels) = app_with_pressed_skin("sliders");
+
+    assert!(app.shared.skin_pointer(over_computed_quarter(), PointerInput::Drag));
+    whole_frame(&mut app, &mut pixels);
+    assert_eq!(skin_number(&app, "written"), 0.25);
+
+    assert!(app.shared.skin_pointer(over_volume_middle(), LEFT_PRESS));
+    whole_frame(&mut app, &mut pixels);
+    assert_eq!(app.shared.skin_requests().take(Cluster::Options), [ClusterRequest::WriteRate { id: VOLUME_RATE, value: 0.5 }]);
+
+    assert!(!app.shared.skin_pointer(over_scripted(), PointerInput::Drag), "a drag moved something that is not a slider");
+    whole_frame(&mut app, &mut pixels);
+    assert_eq!(skin_number(&app, "presses"), 0.0);
+}
+
+/// What a skin's objects do not take is still the screen's: a press over nothing, a button coming
+/// back up, the wheel, and anything over a region the application itself made clickable. Nothing is
+/// judged against a skin that is no longer the one on show.
+#[test]
+fn an_event_no_object_takes_is_left_to_the_screen() {
+    let (mut app, mut pixels) = app_with_pressed_skin("left");
+
+    assert!(!app.shared.skin_pointer(over_nothing(), LEFT_PRESS));
+    assert!(!app.shared.skin_pointer(over_scripted(), LEFT_RELEASE), "letting go pressed an object");
+    assert!(!app.shared.skin_pointer(over_scripted(), PointerInput::Scroll { lines: 1.0 }), "the wheel pressed an object");
+
+    app.shared.hot.push((crate::Rect::new(0.0, 0.0, UI_SIZE.0 as f32, UI_SIZE.1 as f32), crate::Hot::SelectRow(0)));
+    assert!(!app.shared.skin_pointer(over_scripted(), LEFT_PRESS), "a skin took a press on something of the application's drawn over it");
+    app.shared.hot.clear();
+    assert!(app.shared.skin_pointer(over_scripted(), LEFT_PRESS));
+
+    app.shared.finish_skin_frame(&mut Canvas::Headless(&mut pixels));
+    assert!(!app.shared.skin_pointer(over_scripted(), LEFT_PRESS), "a frame no skin drew left its objects pressable");
+    whole_frame(&mut app, &mut pixels);
+    assert_eq!(skin_number(&app, "presses"), 0.0, "a press made on a frame that was not drawn again was run later");
+    assert!(app.shared.skin_pointer(over_scripted(), LEFT_PRESS));
+
+    app.shared.begin_skin_scene();
+    assert!(!app.shared.skin_pointer(over_scripted(), LEFT_PRESS), "a scene that was left kept its objects pressable");
+}
+
+/// A screen that counts the mouse events it is handed.
+#[derive(Default)]
+struct Counting {
+    seen: usize,
+}
+
+impl crate::stage::StageHandler for Counting {
+    fn update(&mut self, _ctx: &mut crate::stage::FrameCtx<'_>) -> crate::stage::Transition {
+        crate::stage::Transition::Stay
+    }
+
+    fn draw(&mut self, _ctx: &mut crate::stage::FrameCtx<'_>, _canvas: &mut Canvas<'_>) {}
+
+    fn handle_key(&mut self, _ctx: &mut crate::stage::FrameCtx<'_>, _key: crate::stage::KeyInput<'_>) -> crate::stage::Transition {
+        crate::stage::Transition::Stay
+    }
+
+    fn handle_mouse(&mut self, _ctx: &mut crate::stage::FrameCtx<'_>, _at: (f32, f32), _button: MouseButton, _pressed: bool) -> crate::stage::Transition {
+        self.seen += 1;
+        crate::stage::Transition::Stay
+    }
+
+    fn handle_scroll(&mut self, _ctx: &mut crate::stage::FrameCtx<'_>, _lines: f32) -> crate::stage::Transition {
+        self.seen += 1;
+        crate::stage::Transition::Stay
+    }
+}
+
+/// The screen underneath is not handed a press an object of its skin took, and is handed every
+/// other event as it always was.
+#[test]
+fn a_screen_is_not_handed_the_press_its_skin_took() {
+    let (mut app, mut pixels) = app_with_pressed_skin("routed");
+    let mut screen = Counting::default();
+    let mut route = |app: &mut crate::App, at: (f32, f32), input: PointerInput| {
+        crate::pointer::route_pointer(&mut screen, &mut crate::stage::FrameCtx { shared: &mut app.shared, now: Instant::now(), dt: 0.0 }, at, input);
+        screen.seen
+    };
+
+    assert_eq!(route(&mut app, over_scripted(), LEFT_PRESS), 0, "the screen was handed a press its skin took");
+    assert_eq!(route(&mut app, over_scripted(), LEFT_RELEASE), 1, "letting go is the screen's");
+    assert_eq!(route(&mut app, over_nothing(), LEFT_PRESS), 2, "a press over nothing is the screen's");
+    assert_eq!(route(&mut app, over_scripted(), PointerInput::Scroll { lines: 1.0 }), 3, "the wheel is the screen's");
+
+    whole_frame(&mut app, &mut pixels);
+    assert_eq!(skin_number(&app, "presses"), 1.0, "the press the skin took was not run");
+}
+
+/// A skin that polls a key through `Gdx.input:isKeyPressed` reads the keys the window reported as
+/// down, by the code its own `Input.Keys` table gives the key.
+#[test]
+fn a_skin_polling_a_key_reads_the_keys_that_are_down() {
+    let (mut app, mut pixels) = app_with_pressed_skin("keys");
+    assert!(!skin_flag(&app, "right_held"));
+
+    app.shared.note_key(&crate::stage::KeyInput { code: crate::KeyCode::ArrowRight, pressed: true, released: false, text: None });
+    whole_frame(&mut app, &mut pixels);
+    assert!(skin_flag(&app, "right_held"), "the skin did not see the right arrow go down");
+
+    app.shared.note_key(&crate::stage::KeyInput { code: crate::KeyCode::ArrowLeft, pressed: true, released: false, text: None });
+    app.shared.note_key(&crate::stage::KeyInput { code: crate::KeyCode::ArrowRight, pressed: false, released: true, text: None });
+    whole_frame(&mut app, &mut pixels);
+    assert!(!skin_flag(&app, "right_held"), "another key being down read as the right arrow");
+}
+
+/// Environment variable naming the folder the published-pack test below saves its two frames in.
+const CAPTURE_DIR_ENV: &str = "RBMS_SKIN_CAPTURE_DIR";
+
+/// The seed the published pack's random choices are pinned to, so two runs draw the same files.
+const PACK_SEED: u64 = 1;
+
+/// How long the published pack's result skin is given to be read and decoded.
+const PACK_LOAD_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// How far into its scene the result screen is drawn, which is past its opening, and how long after
+/// the press the second frame is drawn, which is past the fade a menu comes in with.
+const PACK_SETTLED: Duration = Duration::from_secs(8);
+const PACK_SWITCHED: Duration = Duration::from_secs(3);
+
+/// The size the published pack is authored at, and the region its menu switch is drawn in there,
+/// measured up from the bottom: `(x, y, w, h)`.
+const PACK_SIZE: (u32, u32) = (1920, 1080);
+const PACK_MENU_SWITCH: (f32, f32, f32, f32) = (46.0, 601.0, 234.0, 43.0);
+
+/// The panel the two menus are drawn in, in the pack's own pixels measured down from the top:
+/// columns and rows.
+const PACK_MENU_COLUMNS: std::ops::Range<u32> = 35..700;
+const PACK_MENU_ROWS: std::ops::Range<u32> = 428..1010;
+
+/// The share of the menu panel's pixels that has to change for the menu to count as switched.
+const PACK_MENU_CHANGE: f64 = 0.05;
+
+/// A finished run for the published pack's result screen to report.
+fn pack_result_view() -> ResultView {
+    ResultView {
+        title: "snapshot".into(),
+        artist: String::new(),
+        mode_label: "7K",
+        counts: [3, 2, 1, 0, 0, 0],
+        ex_score: 8,
+        max_score: 12,
+        max_combo: 5,
+        total_notes: 6,
+        fast: [1, 0],
+        slow: [1, 0],
+        gauge: 80.0,
+        clear_label: "CLEAR",
+        clear_color: Color::GREEN,
+        prev_best_ex: Some(6),
+        prev_ex: Some(4),
+        show_graph: true,
+        show_result_graphs: true,
+        gauge_series: Vec::new(),
+        timing_hist: Box::new([]),
+        judge_dist: [0; 6],
+    }
+}
+
+/// One frame of whichever screen is up, as the frame loop makes it.
+fn stage_frame(app: &mut crate::App, pixels: &mut crate::stage::HeadlessCanvas) {
+    app.shared.hot.clear();
+    let mut canvas = Canvas::Headless(pixels);
+    let mut ctx = crate::stage::FrameCtx { shared: &mut app.shared, now: Instant::now(), dt: 0.0 };
+    app.stage.draw(&mut ctx, &mut canvas);
+    app.shared.finish_skin_frame(&mut canvas);
+}
+
+/// Saves a frame under `name` in the folder [`CAPTURE_DIR_ENV`] names, when it names one.
+fn save_capture(name: &str, pixels: &crate::stage::HeadlessCanvas) {
+    let Some(folder) = std::env::var_os(CAPTURE_DIR_ENV).map(PathBuf::from) else {
+        return;
+    };
+    std::fs::create_dir_all(&folder).expect("the capture folder is writable");
+    let frame = image::RgbaImage::from_raw(PACK_SIZE.0, PACK_SIZE.1, pixels.rgba().to_vec()).expect("the canvas holds one frame of the pack's size");
+    frame.save(folder.join(format!("{name}.png"))).expect("the capture is written");
+}
+
+/// How many pixels of the menu panel differ between two frames of the published pack.
+fn menu_panel_difference(one: &[u8], other: &[u8]) -> usize {
+    let pixel = rbms_render::BYTES_PER_PIXEL;
+    let row_bytes = PACK_SIZE.0 as usize * pixel;
+    PACK_MENU_ROWS
+        .flat_map(|row| PACK_MENU_COLUMNS.map(move |column| row as usize * row_bytes + column as usize * pixel))
+        .filter(|at| one[*at..*at + pixel] != other[*at..*at + pixel])
+        .count()
+}
+
+/// A press on the menu switch of a published result skin switches the menu it shows: the press is
+/// taken by the object the skin drew there, the function the skin gave it runs in the skin's own
+/// interpreter, and the next frames draw the other menu. Holding the right arrow, which the skin
+/// polls on every frame, brings the first menu back.
+///
+/// The pack is whatever [`SKIN_PACK_ENV`](crate::skin_select::SKIN_PACK_ENV) names; without it the
+/// test passes at once. The region pressed is where the pack this was written against draws its
+/// switch, so another pack is reported and passed over rather than failed.
+#[test]
+fn a_press_on_a_published_result_skin_s_menu_switch_switches_its_menu() {
+    let Some(pack) = std::env::var_os(crate::skin_select::SKIN_PACK_ENV).map(PathBuf::from) else {
+        return;
+    };
+    rbms_render::font::use_embedded_fonts_only();
+    let home = std::env::temp_dir().join(format!("rbms-skin-screen-pack-press-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(&home).expect("the settings folder is writable");
+    let settings = home.join("settings.ron");
+    let mut config = crate::Config::default();
+    config.skin.pack = Some(pack.to_string_lossy().into_owned());
+    let mut app = crate::App::new(String::new(), config, crate::LaunchOptions::default(), settings.clone());
+    app.shared.skins.pin_seed(Some(PACK_SEED));
+    app.shared.skins.rescan(&settings, &app.shared.config);
+    app.stage = crate::stage::Stage::Result(crate::stage::ResultState::new(pack_result_view()).cleared(true));
+
+    let mut pixels = crate::stage::HeadlessCanvas::new(PACK_SIZE.0, PACK_SIZE.1);
+    let began = Instant::now();
+    while !app.shared.has_compiled_skin(SKIN_TYPE_RESULT) {
+        stage_frame(&mut app, &mut pixels);
+        if let Some(reason) = app.shared.skin_failure(SKIN_TYPE_RESULT) {
+            println!("the pack's result skin was not read: {reason}");
+            return;
+        }
+        if began.elapsed() > PACK_LOAD_TIMEOUT {
+            println!("the pack's result skin was not read within {} seconds", PACK_LOAD_TIMEOUT.as_secs());
+            return;
+        }
+        std::thread::sleep(DECODE_FRAME_PAUSE);
+    }
+    app.shared.age_skin_scene(PACK_SETTLED);
+    stage_frame(&mut app, &mut pixels);
+    save_capture("result-menu-before", &pixels);
+    let before = pixels.rgba().to_vec();
+
+    let (x, y, w, h) = PACK_MENU_SWITCH;
+    let middle = (x + w / 2.0, y + h / 2.0);
+    let cursor = (middle.0 / PACK_SIZE.0 as f32 * UI_SIZE.0 as f32, (PACK_SIZE.1 as f32 - middle.1) / PACK_SIZE.1 as f32 * UI_SIZE.1 as f32);
+    if !app.shared.skin_pointer(cursor, LEFT_PRESS) {
+        println!("nothing of the pack's result skin takes a press at {middle:?}; it is not the pack this was written against");
+        return;
+    }
+    stage_frame(&mut app, &mut pixels);
+    app.shared.age_skin_scene(PACK_SWITCHED);
+    stage_frame(&mut app, &mut pixels);
+    save_capture("result-menu-after", &pixels);
+
+    let changed = menu_panel_difference(&before, pixels.rgba());
+    let panel = PACK_MENU_ROWS.len() * PACK_MENU_COLUMNS.len();
+    println!("the menu panel changed in {changed} of {panel} pixels");
+    assert!(changed as f64 > panel as f64 * PACK_MENU_CHANGE, "the press was taken and the menu panel changed in only {changed} of {panel} pixels");
+
+    let switched = pixels.rgba().to_vec();
+    app.shared.note_key(&crate::stage::KeyInput { code: crate::KeyCode::ArrowRight, pressed: true, released: false, text: None });
+    stage_frame(&mut app, &mut pixels);
+    app.shared.note_key(&crate::stage::KeyInput { code: crate::KeyCode::ArrowRight, pressed: false, released: true, text: None });
+    app.shared.age_skin_scene(PACK_SWITCHED);
+    stage_frame(&mut app, &mut pixels);
+    save_capture("result-menu-keyed", &pixels);
+    let keyed = menu_panel_difference(&switched, pixels.rgba());
+    println!("the right arrow changed the menu panel in {keyed} of {panel} pixels");
+    assert!(keyed as f64 > panel as f64 * PACK_MENU_CHANGE, "the skin polls the right arrow for its first menu, and holding it changed only {keyed} pixels");
+}

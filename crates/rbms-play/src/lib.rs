@@ -9,7 +9,14 @@ use rbms_judge::windows::{JudgeWindowRule, JudgeWindowSet};
 use rbms_judge::{GaugeKind, JudgeEngine, JudgeResult};
 use rbms_model::{Model, NoteKind};
 
+mod record;
 mod session;
+
+pub use record::{
+    AVG_DURATION_ABSENT_US, GAUGE_LOG_INTERVAL_MS, GaugeBounds, GaugeLog, JUDGE_SECOND_KINDS, JudgeSeconds, PLAY_TIME_MARGIN_MS, PlayRecord, RANK_STEP_COUNT,
+    ScoreProgress, TIMING_AVERAGE_ABSENT, TIMING_DISTRIBUTION_BINS, TIMING_DISTRIBUTION_RANGE_MS, TIMING_SECOND_KINDS, TIMING_STD_DEV_ABSENT,
+    TimingDistribution, UNJUDGED_DURATION_US, last_event_time_ms, last_note_time_ms, play_time_ms,
+};
 
 pub use session::{
     ANALYSIS_RATE_MAX, ANALYSIS_RATE_MIN, ANALYSIS_RATE_STEP, ANALYSIS_SEEK_STEP_US, GAUGE_SAMPLE_INTERVAL_US, GAUGE_SERIES_CAPACITY, JUDGE_KIND_COUNT,

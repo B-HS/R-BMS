@@ -228,8 +228,9 @@ pub const SKIN_TYPE_COURSE_RESULT: i32 = 15;
 /// run from the first to the last without a gap.
 const KNOWN_SKIN_TYPES: RangeInclusive<i32> = SKIN_TYPE_PLAY_7KEYS..=SKIN_TYPE_PLAY_24KEYS_BATTLE;
 
-/// The non-play screens this build draws: music select, decide, result and key config.
-const SCREEN_SKIN_TYPES: &[i32] = &[SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_DECIDE, SKIN_TYPE_RESULT, SKIN_TYPE_KEY_CONFIG];
+/// The non-play screens this build draws: music select, decide, result, key config and the course
+/// result.
+const SCREEN_SKIN_TYPES: &[i32] = &[SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_DECIDE, SKIN_TYPE_RESULT, SKIN_TYPE_KEY_CONFIG, SKIN_TYPE_COURSE_RESULT];
 
 /// The play screens whose header gains the automatic offsets: every play type but the battle ones
 /// (`JSONSkinLoader.loadJsonSkinHeader`).

@@ -1,0 +1,57 @@
+local main_state = require("main_state")
+
+local skin = {
+    type = 7,
+    name = "Mini Result",
+    w = 1280,
+    h = 720,
+    input = 2000,
+    scene = 3600000,
+    fadeout = 4000,
+}
+
+if skin_config then
+    skin.gaugegraph = { { id = "gauges" } }
+    skin.destination = {
+        { id = -111, dst = { { x = 0, y = 0, w = 1280, h = 720, r = 20, g = 40, b = 80 } } },
+        { id = "gauges", dst = { { x = 140, y = 300, w = 1000, h = 200 } } },
+        { id = -111, timer = 1, dst = { { x = 0, y = 656, w = 64, h = 64, r = 0, g = 255, b = 0 } } },
+        { id = -111, timer = 2, dst = { { x = 1216, y = 656, w = 64, h = 64, r = 255, g = 0, b = 0 } } },
+        { id = -111, timer = 150, dst = { { x = 0, y = 0, w = 64, h = 64, r = 255, g = 255, b = 0 } } },
+        { id = -111, timer = 151, dst = { { x = 100, y = 0, w = 64, h = 64, r = 255, g = 0, b = 255 } } },
+        { id = -111, timer = 152, dst = { { x = 200, y = 0, w = 64, h = 64, r = 0, g = 255, b = 255 } } },
+        {
+            id = -111,
+            draw = function() return main_state.number(71) == 8 and main_state.number(75) == 4 and main_state.number(102) == 100 end,
+            dst = { { x = 300, y = 0, w = 64, h = 64, r = 255, g = 128, b = 0 } },
+        },
+        {
+            id = -111,
+            draw = function() return main_state.option(90) and main_state.number(370) > 1 and main_state.option(330) end,
+            dst = { { x = 400, y = 0, w = 64, h = 64, r = 0, g = 128, b = 255 } },
+        },
+        {
+            id = -111,
+            draw = function() return main_state.option(91) and main_state.number(370) == 1 end,
+            dst = { { x = 500, y = 0, w = 64, h = 64, r = 255, g = 0, b = 128 } },
+        },
+        {
+            id = -111,
+            draw = function() return main_state.number(71) == 0 and main_state.number(114) == 4 and main_state.number(419) == 4 end,
+            dst = { { x = 600, y = 0, w = 64, h = 64, r = 128, g = 255, b = 0 } },
+        },
+        {
+            id = -111,
+            draw = function() return main_state.option(50) and not main_state.option(51) end,
+            dst = { { x = 700, y = 0, w = 64, h = 64, r = 128, g = 0, b = 255 } },
+        },
+        {
+            id = -111,
+            draw = function() return main_state.option(51) and not main_state.option(50) end,
+            dst = { { x = 800, y = 0, w = 64, h = 64, r = 255, g = 255, b = 255 } },
+        },
+        { id = -111, timer = 172, dst = { { x = 900, y = 0, w = 64, h = 64, r = 0, g = 0, b = 255 } } },
+    }
+end
+
+return skin

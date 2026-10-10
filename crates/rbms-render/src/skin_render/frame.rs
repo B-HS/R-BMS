@@ -28,7 +28,7 @@ use rbms_skin::property::SkinHost;
 use rbms_skin::timer::{TIMER_OFF, TimerState};
 
 use super::bga::BgaFrame;
-use super::gauge::GaugeFrame;
+pub use super::gauge::{GAUGE_TYPES, GaugeFrame, GaugeScale};
 use super::graphs::{BpmTimeline, GaugeHistory, NoteDistribution, RecentHits, TimingHistogram};
 use super::notes::NoteField;
 use super::object::SkinObject;
@@ -44,13 +44,17 @@ use crate::ctx::RenderCtx;
 /// screen knows a series fills it.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct FrameSeries<'a> {
-    /// The gauge at each sample of a run, for the gauge graph.
+    /// How a run's gauge moved, for the gauge graph: the samples of every gauge the run could have
+    /// been played on, half a second apart. Which of them is plotted, and where it clears, is the
+    /// frame's [`FrameData::gauge`], so a gauge graph needs both.
     pub gauge_history: Option<GaugeHistory<'a>>,
-    /// How a run's hits were spread around their notes, for the timing distribution graph.
+    /// How a run's hits were spread around their notes, a millisecond to a count, with the run's
+    /// mean, its deviation and its judgement windows, for the timing distribution graph.
     pub timing: Option<TimingHistogram<'a>>,
     /// Where a chart's tempo changes, for the tempo graph.
     pub bpm: Option<BpmTimeline<'a>>,
-    /// How a chart's notes are spread, for the judgement graph.
+    /// How a chart's notes are spread second by second, for the judgement graph: by kind of note,
+    /// by the judgement each took, and by that judgement with early and late apart.
     pub notes: Option<NoteDistribution<'a>>,
     /// The hits a run has taken most recently, for the two visualisers.
     pub recent_hits: Option<RecentHits<'a>>,
@@ -64,7 +68,9 @@ pub struct FrameSeries<'a> {
 pub struct FrameData<'a> {
     /// The running note field, for the note object and the lane covers.
     pub field: Option<&'a NoteField<'a>>,
-    /// Which gauge is in play and where it clears, for the gauge object.
+    /// The gauge a screen shows -- which one, how full, and the limits of every gauge of the run --
+    /// for the gauge object and the gauge graph. A play screen fills it for the run in progress and
+    /// a score screen for the one that ended.
     pub gauge: Option<GaugeFrame>,
     /// The browser's bars, for the song wheel.
     pub bars: Option<&'a SongBars<'a>>,
@@ -277,6 +283,12 @@ impl PreparedFrame {
     /// How many answers the skin's Lua gave while the frame was prepared.
     pub fn answer_count(&self) -> usize {
         self.kept.len()
+    }
+
+    /// Where each object of the screen was left, in document order: its region when it is drawn
+    /// this frame, which is what a pointer event is judged against.
+    pub(crate) fn placed(&self) -> &[Option<Resolved>] {
+        &self.placed
     }
 }
 

@@ -672,7 +672,10 @@ fn pack_frame(app: &mut crate::App, pixels: &mut HeadlessCanvas, screen: PackScr
         PackScreen::Result => {
             let mut canvas = Canvas::Headless(pixels);
             app.shared.prepare_skin(&mut canvas, SKIN_TYPE_RESULT);
-            app.shared.draw_result_skin(&mut canvas, &pack_result_view(), &ResultExtras::default(), true, FrameData::default());
+            let (view, extras) = (pack_result_view(), ResultExtras::default());
+            let scene =
+                ResultDraw { view: &view, extras: &extras, cleared: true, chart: None, scene: ResultScene::default(), run: None, data: FrameData::default() };
+            app.shared.draw_result_skin(&mut canvas, SKIN_TYPE_RESULT, &scene);
             app.shared.finish_skin_frame(&mut canvas);
         }
     }

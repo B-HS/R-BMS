@@ -11,7 +11,9 @@
 //! Guide sounds are gated separately and default to off, mirroring the reference implementation's
 //! `isGuideSE` switch (`BMSPlayer.java:398-410`).
 //!
-//! Playback goes through the System bus so the system-sound volume is the one that governs it.
+//! Playback goes through the System bus so the system-sound volume is the one that governs it. A cue
+//! is played once ([`SystemSoundSet::play`]) and can be cut short ([`SystemSoundSet::stop`]), the way
+//! the reference silences the result cue when the screen closes (`MainState.stop(sound)`).
 
 use std::path::{Path, PathBuf};
 
@@ -19,7 +21,7 @@ use rbms_audio::{AudioEngine, Bus, DecodedAudio, IdNamespace};
 use rbms_judge::Judge;
 
 use crate::notify::{Level, notify};
-use crate::resolve_file;
+use crate::{AppShared, resolve_file};
 
 /// Sample ids reserved for system sounds, kept clear of chart keysounds ([`IdNamespace::PLAY`]) and
 /// of song-select previews ([`IdNamespace::PREVIEW`]) so one engine can hold all three at once.
@@ -323,6 +325,22 @@ impl SystemSoundSet {
             return;
         };
         engine.play_on(Bus::System, cue.id, cue.gain, SYSTEM_SOUND_PAN, SYSTEM_SOUND_PITCH, SYSTEM_SOUND_AT_US);
+    }
+
+    /// Silence `sound`. Asked of a cue that is not sounding it does nothing, and it is asked even of
+    /// one whose file has since been replaced: a copy of the old file that is still sounding is
+    /// stopped by the sample id they share.
+    pub(crate) fn stop(&self, engine: &mut AudioEngine, sound: SystemSound) {
+        engine.stop(sound.sample_id());
+    }
+}
+
+impl AppShared {
+    /// Silence a system sound. Nothing happens when the stream is not open.
+    pub(crate) fn stop_system_sound(&mut self, sound: SystemSound) {
+        if let Some(engine) = self.audio.as_mut() {
+            self.syssound.stop(engine, sound);
+        }
     }
 }
 
