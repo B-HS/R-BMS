@@ -1462,3 +1462,61 @@ fn every_gauge_reports_the_bounds_its_table_row_states() {
     assert_eq!(gauges.gauge_at(gauge::GaugeIndex::Normal).border(), 80.0);
     assert_eq!(gauges.gauge_at(gauge::GaugeIndex::Hard).border(), 0.0);
 }
+
+/// A screen shows each judgment where it landed with the combo it left behind, so the engine keeps
+/// them in the order it counted them: two notes hit on one frame are two entries with two combos.
+#[test]
+fn every_counted_judgment_is_kept_in_order_with_the_combo_it_left() {
+    let mut e = Eng::new(vec![vec![1_000_000], vec![1_000_000], vec![2_000_000]], JudgeWindows::SEVENKEY_NOTE);
+    assert!(e.judged().is_empty(), "nothing has been counted yet");
+
+    e.press(1, 1_000_000);
+    e.press(0, 1_030_000);
+    let kept: Vec<(usize, Judge, i64, u32)> = e.judged().iter().map(|judged| (judged.lane, judged.judge, judged.delta_us, judged.combo)).collect();
+    assert_eq!(kept, [(1, Judge::PerfectGreat, 0, 1), (0, Judge::Great, -30_000, 2)], "the two presses are kept as they came, each with its own combo");
+
+    e.update(3_000_000);
+    let swept = e.judged()[2];
+    assert_eq!((swept.lane, swept.judge, swept.combo), (2, Judge::Poor, 0), "a note that went by is counted in its own lane and breaks the combo");
+    assert_eq!(e.judged().len() as u32, e.counts.iter().sum::<u32>(), "one entry for every judgment the totals count");
+}
+
+/// A press that takes the head of a plain long note counts nothing until the note is over, and a
+/// press that takes no note at all is still a judgment the screen is told of.
+#[test]
+fn the_kept_judgments_are_the_ones_the_totals_count() {
+    let mut plain = ln(1_000_000, 1_600_000);
+    plain.press(0, 1_000_000);
+    assert!(plain.judged().is_empty(), "the head of a plain long note is not counted by itself");
+    plain.release(0, 1_600_000);
+    assert_eq!(plain.judged().len(), 1);
+
+    let mut empty = note(1_000_000);
+    empty.press(0, 700_000);
+    assert_eq!(empty.judged().iter().map(|judged| (judged.lane, judged.judge)).collect::<Vec<_>>(), [(0, Judge::Miss)], "an empty POOR is kept with its lane");
+}
+
+/// The long note a lane holds is named from the press that took its head, which may come before
+/// the head's own time, and the hell-charge note going by is named whether it was hit or not.
+#[test]
+fn a_lane_names_the_long_note_it_holds_and_the_hell_charge_note_going_by() {
+    let mut held = ln(1_000_000, 1_600_000);
+    assert_eq!(held.long_note(0), matcher::LaneLongNote::default());
+    held.press(0, 990_000);
+    assert_eq!(held.long_note(0).processing, Some(1_000_000), "the note is held from the press, ahead of its head");
+    held.release(0, 1_600_000);
+    assert_eq!(held.long_note(0).processing, None, "a resolved note is no longer held");
+    assert_eq!(held.long_note(9), matcher::LaneLongNote::default(), "a lane the chart does not have holds nothing");
+
+    let mut passing = hcn_engine(1_000_000, 3_000_000);
+    passing.update(900_000);
+    assert_eq!(passing.long_note(0).passing, None, "the play head has not reached the note");
+    passing.update(1_100_000);
+    assert_eq!(
+        passing.long_note(0),
+        matcher::LaneLongNote { processing: None, passing: Some(1_000_000) },
+        "an unhit note going by is named without being held"
+    );
+    passing.update(3_100_000);
+    assert_eq!(passing.long_note(0).passing, None, "the note has gone by");
+}

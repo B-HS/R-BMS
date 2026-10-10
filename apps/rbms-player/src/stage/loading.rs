@@ -10,6 +10,12 @@
 //! scene while its files decode ([`crate::stage::decide`]) when a skin draws that scene, and comes
 //! here only for whatever is still outstanding when the scene ends; [`ChartAssets`] is the load
 //! the two screens hand to each other.
+//!
+//! A chart whose play screen a skin draws does not wait here at all. The reference's play screen
+//! has a loading state of its own (`BMSPlayer.STATE_PRELOAD`), which the skin draws, so the chart
+//! goes to the play screen as soon as it is parsed and the decodes go with it
+//! ([`ChartAssets::enter_preloading`], [`ChartLoads`]). Only the folder scan, a table fetch and a
+//! chart with no play skin are waited for on this screen.
 #![allow(clippy::wildcard_imports)]
 
 use std::sync::Arc;
@@ -85,42 +91,47 @@ pub(crate) struct BgaLoad {
     pub(crate) total: usize,
 }
 
-/// A parsed chart waiting for the files it named, and what has arrived so far.
-pub(crate) struct ChartAssets {
-    chart: PendingChart,
-    images: std::collections::HashMap<i32, crate::DecodedImage>,
+/// The decodes of a parsed chart that are still running: its keysounds, its background images, or
+/// both. Either is `None` once it has finished, or when the chart named nothing of that kind.
+///
+/// Whichever screen is up while they run owns this: the LOADING screen, the decide scene, or the
+/// play screen itself while a skin draws its loading state.
+#[derive(Default)]
+pub(crate) struct ChartLoads {
     bga: Option<BgaLoad>,
     keysounds: Option<KeysoundLoad>,
-    /// Whether the decide cue has been heard for this chart already, by a decide scene that showed
-    /// the chart while this was decoding. It is heard once a chart, whichever screen plays it.
-    announced: bool,
 }
 
-impl ChartAssets {
-    /// The load of a chart that has just been parsed, with nothing of it in yet.
-    pub(crate) fn of(loaded: LoadedChart) -> ChartAssets {
-        ChartAssets { chart: loaded.chart, images: std::collections::HashMap::new(), bga: loaded.bga, keysounds: loaded.keysounds, announced: false }
+impl ChartLoads {
+    /// The decodes a chart load started.
+    pub(crate) fn new(bga: Option<BgaLoad>, keysounds: Option<KeysoundLoad>) -> ChartLoads {
+        ChartLoads { bga, keysounds }
     }
 
-    /// Note that the decide cue has been played for this chart, so the screen that starts the run
-    /// does not play it again.
-    pub(crate) fn mark_announced(&mut self) {
-        self.announced = true;
-    }
-
-    /// Take everything that has arrived since the last frame. `true` once nothing is outstanding.
-    pub(crate) fn poll(&mut self, shared: &mut AppShared) -> bool {
+    /// Take everything that has arrived since the last frame: the keysounds into the audio bank and
+    /// the images into `images`. `true` once nothing is outstanding.
+    pub(crate) fn poll(&mut self, shared: &mut AppShared, images: &mut std::collections::HashMap<i32, crate::DecodedImage>) -> bool {
         if let Some(load) = self.keysounds.take()
-            && !ChartAssets::poll_keysounds(shared, &load)
+            && !ChartLoads::poll_keysounds(shared, &load)
         {
             self.keysounds = Some(load);
         }
         if let Some(load) = self.bga.take()
-            && !ChartAssets::poll_images(&mut self.images, &load)
+            && !ChartLoads::poll_images(images, &load)
         {
             self.bga = Some(load);
         }
+        self.is_done()
+    }
+
+    /// Whether nothing is outstanding.
+    pub(crate) fn is_done(&self) -> bool {
         self.keysounds.is_none() && self.bga.is_none()
+    }
+
+    /// Whether keysounds are still decoding.
+    fn keysounds_pending(&self) -> bool {
+        self.keysounds.is_some()
     }
 
     /// Drain decoded keysounds into the audio bank; `true` once every worker has reported in.
@@ -188,6 +199,82 @@ impl ChartAssets {
         }
     }
 
+    /// The heading and the line under it while these decodes are what is waited for: the course
+    /// and its stage on a course, and otherwise the step still outstanding.
+    fn heading(&self, shared: &AppShared) -> (&'static str, String) {
+        course_heading(shared).unwrap_or_else(|| ("LOADING", self.step()))
+    }
+
+    /// The built-in LOADING screen for these decodes: the heading, the step under it, and the bar
+    /// while there is anything to count. The LOADING screen draws a chart's files coming in with
+    /// this, and so does a play screen that waits for them itself when no skin draws its wait.
+    pub(crate) fn draw(&self, shared: &AppShared, canvas: &mut Canvas<'_>) {
+        let (heading, sub) = self.heading(shared);
+        let (bx, by) = draw_heading(canvas, shared.frame_count, heading, &sub);
+        let (done, total) = self.progress();
+        if total > 0 {
+            LoadingState::draw_determinate(canvas, bx, by, done, total, "files");
+        }
+    }
+}
+
+/// The heading of a chart that is loading as a stage of a course, or `None` outside one.
+fn course_heading(shared: &AppShared) -> Option<(&'static str, String)> {
+    shared.course_run.as_ref().map(|run| ("COURSE", format!("{} - {}", run.course.name, stage_label(run))))
+}
+
+/// Paints the screen's ground, the heading with its ellipsis and the line under it, and answers
+/// where the progress bar under them begins.
+fn draw_heading(canvas: &mut Canvas<'_>, frame_count: u64, heading: &str, sub: &str) -> (f32, f32) {
+    let th = rbms_render::theme();
+    canvas.clear(th.bg);
+    let cx = CW as f32 * 0.5;
+    let cy = CH as f32 * 0.5;
+    let dots = ".".repeat((frame_count / DOTS_PERIOD_FRAMES % DOTS_MAX) as usize);
+    draw_text_centered(canvas, cx, cy - 36.0, 3.0, th.text, &format!("{heading}{dots}"));
+    if !sub.is_empty() {
+        draw_text_centered(canvas, cx, cy + 14.0, 1.6, th.text_dim, sub);
+    }
+    (cx - BAR_W * 0.5, cy + 56.0)
+}
+
+/// A parsed chart waiting for the files it named, and what has arrived so far.
+pub(crate) struct ChartAssets {
+    chart: PendingChart,
+    images: std::collections::HashMap<i32, crate::DecodedImage>,
+    loads: ChartLoads,
+    /// Whether the decide cue has been heard for this chart already, by a decide scene that showed
+    /// the chart while this was decoding. It is heard once a chart, whichever screen plays it.
+    announced: bool,
+}
+
+impl ChartAssets {
+    /// The load of a chart that has just been parsed, with nothing of it in yet.
+    pub(crate) fn of(loaded: LoadedChart) -> ChartAssets {
+        ChartAssets { chart: loaded.chart, images: std::collections::HashMap::new(), loads: ChartLoads::new(loaded.bga, loaded.keysounds), announced: false }
+    }
+
+    /// Note that the decide cue has been played for this chart, so the screen that starts the run
+    /// does not play it again.
+    pub(crate) fn mark_announced(&mut self) {
+        self.announced = true;
+    }
+
+    /// Take everything that has arrived since the last frame. `true` once nothing is outstanding.
+    pub(crate) fn poll(&mut self, shared: &mut AppShared) -> bool {
+        self.loads.poll(shared, &mut self.images)
+    }
+
+    /// How many of the chart's files have been dealt with, and how many it named.
+    pub(crate) fn progress(&self) -> (usize, usize) {
+        self.loads.progress()
+    }
+
+    /// Stop both decodes.
+    pub(crate) fn stop(&self) {
+        self.loads.stop();
+    }
+
     /// The screen that plays this chart, now that everything it named is in.
     fn into_play(self) -> PlayState {
         self.chart.into_play(self.images)
@@ -195,6 +282,27 @@ impl ChartAssets {
 
     fn take_images(&mut self) -> std::collections::HashMap<i32, crate::DecodedImage> {
         std::mem::take(&mut self.images)
+    }
+
+    /// Whether the play screen takes this chart before its files are in: a skin draws the play
+    /// screen, so the screen's own loading state waits for them, as the reference's does
+    /// (`BMSPlayer.STATE_PRELOAD`). A chart asked for practice still waits where it always did,
+    /// because the practice panel is built from the decoded chart.
+    pub(crate) fn preloads_on_the_play_screen(shared: &AppShared) -> bool {
+        shared.has_play_scene() && !shared.has_practice_request()
+    }
+
+    /// The play screen for this chart with whatever is still decoding handed to it, which is where
+    /// the chart goes when a skin draws that screen. The song clock is not started: the play screen
+    /// starts it when the run does.
+    pub(crate) fn enter_preloading(self, shared: &mut AppShared) -> Stage {
+        if !self.announced {
+            shared.play_system_sound(SystemSound::Decide);
+        }
+        let ChartAssets { chart, images, loads, .. } = self;
+        let mut play = chart.into_play(images);
+        play.wait_for(loads);
+        Stage::Play(Box::new(play))
     }
 
     /// The screen this chart goes to now that everything it named is in: the practice panel when
@@ -207,6 +315,9 @@ impl ChartAssets {
                 return stage;
             }
             self.images = images;
+        }
+        if ChartAssets::preloads_on_the_play_screen(shared) {
+            return self.enter_preloading(shared);
         }
         if !self.announced {
             shared.play_system_sound(SystemSound::Decide);
@@ -301,7 +412,7 @@ impl LoadingState {
 
     /// Whether keysounds are still decoding, which is what holds an audio-settings reopen back.
     pub(crate) fn keysounds_pending(&self) -> bool {
-        matches!(&self.task, LoadingTask::Assets(assets) if assets.keysounds.is_some())
+        matches!(&self.task, LoadingTask::Assets(assets) if assets.loads.keysounds_pending())
     }
 
     /// Whether this screen plays the decide cue when the run it is waiting for starts, for the tests
@@ -414,15 +525,21 @@ impl LoadingState {
         Transition::Back
     }
 
+    /// Whether the chart queued here is about to be shown by a skin's play screen, whose own loading
+    /// state is what the player is meant to see: the one frame this screen is up for before the
+    /// chart is parsed is then left black rather than drawn as the built-in LOADING screen.
+    fn hands_on_to_a_play_skin(&self, shared: &AppShared) -> bool {
+        let LoadingTask::Song(index) = &self.task else {
+            return false;
+        };
+        !shared.has_practice_request() && shared.library.songs().get(*index).is_some_and(|entry| shared.has_play_scene_for(entry.mode))
+    }
+
     /// The heading and the line under it: what is being waited for, and which one of it.
     fn heading(&self, shared: &AppShared) -> (&'static str, String) {
-        if let Some(run) = shared.course_run.as_ref()
-            && matches!(&self.task, LoadingTask::Song(_) | LoadingTask::Assets(_))
-        {
-            return ("COURSE", format!("{} - {}", run.course.name, stage_label(run)));
-        }
         match &self.task {
-            LoadingTask::Song(i) => ("LOADING", shared.library.songs().get(*i).map(|e| e.title.chars().take(TITLE_CHARS).collect()).unwrap_or_default()),
+            LoadingTask::Song(i) => course_heading(shared)
+                .unwrap_or_else(|| ("LOADING", shared.library.songs().get(*i).map(|e| e.title.chars().take(TITLE_CHARS).collect()).unwrap_or_default())),
             LoadingTask::Scan { step: ScanStep::Matching { .. }, progress } => {
                 ("MATCHING TABLES", format!("{} / {}", progress.tables.load(Ordering::Relaxed), shared.config.library.tables.len()))
             }
@@ -430,7 +547,7 @@ impl LoadingState {
                 0 => ("SCANNING", format!("{} folder(s)", shared.config.library.folders.len())),
                 found => ("SCANNING", format!("{found} charts found")),
             },
-            LoadingTask::Assets(assets) => ("LOADING", assets.step()),
+            LoadingTask::Assets(assets) => assets.loads.heading(shared),
             LoadingTask::Table(add) => ("FETCHING TABLE", add.source.location.chars().take(LOCATION_CHARS).collect()),
         }
     }
@@ -483,19 +600,14 @@ impl StageHandler for LoadingState {
     /// table match, which know how many there are, and a ping-ponging sweep for the folder scan and
     /// the http fetch, which have no total to count toward.
     fn draw(&mut self, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'_>) {
-        let th = rbms_render::theme();
         canvas.clear_bga();
-        let (heading, sub) = self.heading(ctx.shared);
-        canvas.clear(th.bg);
-        let cx = CW as f32 * 0.5;
-        let cy = CH as f32 * 0.5;
-        let dots = ".".repeat((ctx.shared.frame_count / DOTS_PERIOD_FRAMES % DOTS_MAX) as usize);
-        draw_text_centered(canvas, cx, cy - 36.0, 3.0, th.text, &format!("{heading}{dots}"));
-        if !sub.is_empty() {
-            draw_text_centered(canvas, cx, cy + 14.0, 1.6, th.text_dim, &sub);
+        if self.hands_on_to_a_play_skin(ctx.shared) {
+            canvas.native().clear(Color::BLACK);
+            self.drawn = true;
+            return;
         }
-        let bx = cx - BAR_W * 0.5;
-        let by = cy + 56.0;
+        let (heading, sub) = self.heading(ctx.shared);
+        let (bx, by) = draw_heading(canvas, ctx.shared.frame_count, heading, &sub);
         match &self.task {
             LoadingTask::Assets(assets) => {
                 let (done, total) = assets.progress();
@@ -528,7 +640,12 @@ mod tests {
     }
 
     fn assets(sounds: Option<KeysoundLoad>, bga: Option<BgaLoad>) -> ChartAssets {
-        ChartAssets { chart: crate::app_play::pending_chart_for_tests(), images: std::collections::HashMap::new(), bga, keysounds: sounds, announced: false }
+        ChartAssets {
+            chart: crate::app_play::pending_chart_for_tests(),
+            images: std::collections::HashMap::new(),
+            loads: ChartLoads::new(bga, sounds),
+            announced: false,
+        }
     }
 
     fn decoded_images() -> std::collections::HashMap<i32, crate::DecodedImage> {
@@ -540,8 +657,8 @@ mod tests {
     fn the_bar_counts_every_file_the_chart_named() {
         let assets = assets(Some(keysounds(300)), Some(images(4)));
         assert_eq!(assets.progress(), (0, 304));
-        assets.keysounds.as_ref().expect("keysounds").progress.store(120, Ordering::Relaxed);
-        assets.bga.as_ref().expect("images").progress.store(2, Ordering::Relaxed);
+        assets.loads.keysounds.as_ref().expect("keysounds").progress.store(120, Ordering::Relaxed);
+        assets.loads.bga.as_ref().expect("images").progress.store(2, Ordering::Relaxed);
         assert_eq!(assets.progress(), (122, 304));
     }
 
@@ -550,7 +667,7 @@ mod tests {
     #[test]
     fn a_worker_that_over_reports_cannot_push_the_bar_past_full() {
         let assets = assets(Some(keysounds(10)), None);
-        assets.keysounds.as_ref().expect("keysounds").progress.store(99, Ordering::Relaxed);
+        assets.loads.keysounds.as_ref().expect("keysounds").progress.store(99, Ordering::Relaxed);
         assert_eq!(assets.progress(), (10, 10));
     }
 
@@ -558,14 +675,14 @@ mod tests {
     fn a_chart_with_no_images_still_reports_its_keysounds() {
         let assets = assets(Some(keysounds(8)), None);
         assert_eq!(assets.progress(), (0, 8));
-        assert!(assets.step().contains("keysounds"));
-        assert!(!assets.step().contains("images"));
+        assert!(assets.loads.step().contains("keysounds"));
+        assert!(!assets.loads.step().contains("images"));
     }
 
     #[test]
     fn the_step_names_both_decodes_while_both_are_running() {
         let assets = assets(Some(keysounds(2)), Some(images(3)));
-        let step = assets.step();
+        let step = assets.loads.step();
         assert!(step.contains("0 / 2 keysounds"), "got {step}");
         assert!(step.contains("0 / 3 images"), "got {step}");
     }
@@ -597,8 +714,8 @@ mod tests {
     fn leaving_stops_both_decodes() {
         let assets = assets(Some(keysounds(4)), Some(images(4)));
         assets.stop();
-        assert!(assets.keysounds.as_ref().expect("keysounds").cancel.load(Ordering::Relaxed));
-        assert!(assets.bga.as_ref().expect("images").cancel.load(Ordering::Relaxed));
+        assert!(assets.loads.keysounds.as_ref().expect("keysounds").cancel.load(Ordering::Relaxed));
+        assert!(assets.loads.bga.as_ref().expect("images").cancel.load(Ordering::Relaxed));
     }
 
     /// Leaving mid-scan has to stop the walk, or an abandoned scan keeps reading a library nobody

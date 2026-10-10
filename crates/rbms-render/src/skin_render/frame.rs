@@ -8,7 +8,7 @@
 //! score screen and a tempo graph on the browser: the screen fills the part, and the object asks
 //! for nothing else.
 //!
-//! The shape of each part belongs to the module that draws from it -- [`NoteField`] to the note
+//! The shape of each part belongs to the module that draws from it -- [`LaneNotes`] to the note
 //! field, [`SongBars`] to the wheel, each series to its graph -- and this module only gathers them.
 //!
 //! A frame is made in two stages, as the reference makes one (`Skin.drawAllObjects`). The first
@@ -27,10 +27,16 @@ use rbms_skin::dst::{LuaDrawEval, LuaFnId, Resolved, WarnOnce};
 use rbms_skin::property::SkinHost;
 use rbms_skin::timer::{TIMER_OFF, TimerState};
 
-use super::bga::BgaFrame;
+pub use super::bga::{
+    BgaEvent, BgaExpand, BgaFrame, BgaPick, BgaPicture, BgaPlayhead, BgaShow, BgaTextures, DEFAULT_MISS_LAYER_DURATION_MS, MISS_LAYER_NONE, SMALL_PICTURE_EDGE,
+    key_out_black, on_small_canvas,
+};
 pub use super::gauge::{GAUGE_TYPES, GaugeFrame, GaugeScale};
 use super::graphs::{BpmTimeline, GaugeHistory, NoteDistribution, RecentHits, TimingHistogram};
-use super::notes::NoteField;
+pub use super::notes::{
+    ConstantScroll, JUDGE_AREA_WINDOWS, JudgeArea, LaneLong, LaneNotes, LaneOffsets, NOTE_UNJUDGED, NoteDisplay, NoteStates, Unplayed, current_duration_ms,
+    first_lane_rect, fixed_hispeed, lane_offsets,
+};
 use super::object::SkinObject;
 use super::refs::ReferenceImages;
 use super::songlist::SongBars;
@@ -64,14 +70,67 @@ pub struct FrameSeries<'a> {
     pub recent_hits: Option<RecentHits<'a>>,
 }
 
+/// How many judgement regions a play screen can have: one for each player the reference keeps a
+/// judge timer for (`JudgeManager.JUDGE_TIMER`, timers 46, 47 and 247).
+pub const JUDGE_REGIONS: usize = 3;
+
+/// What one judgement region last reported (`JudgeManager.judgenow` and `judgecombo`).
+///
+/// A region is a share of the lanes: a play screen with one judge object has one region that every
+/// lane reports to, and a double screen with two has its left field report to region zero and its
+/// right field to region one (`lane / (lanes / regions)`). Each keeps the last judgement given in it
+/// and the combo the run stood at then, and nothing ever clears either: whether the pop-up is still
+/// on show is left to the timers its own destinations follow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct JudgeHit {
+    /// Which judgement it was, best first: 0 a perfect great, 1 a great, 2 a good, 3 a bad, 4 a
+    /// poor and 5 a miss.
+    pub judgement: usize,
+    /// The combo the run stood at when it landed, carried across the stages of a course
+    /// (`JudgeManager.getCourseCombo`). This is what the pop-up counts, not the live combo.
+    pub combo: i32,
+    /// When it landed, on the frame clock in microseconds: the moment the region's judge timer and
+    /// its combo timer are switched on at. The pop-up is timed by those timers and not by this, so
+    /// this is for whoever keeps them.
+    pub at_us: i64,
+}
+
+/// The judgement regions of a play frame, by region number, for the judge object.
+///
+/// [`JudgeFrame::default`] has judged nothing anywhere, which is what every screen but a play
+/// screen passes and what a play screen passes until its first note is judged.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct JudgeFrame {
+    pub regions: [Option<JudgeHit>; JUDGE_REGIONS],
+}
+
+impl JudgeFrame {
+    /// What the region a judge object follows last reported, or `None` when nothing has been judged
+    /// there or the object names a region no play screen has (`JudgeManager.getNowJudge`).
+    pub fn region(&self, index: i32) -> Option<JudgeHit> {
+        usize::try_from(index).ok().and_then(|index| self.regions.get(index).copied().flatten())
+    }
+
+    /// The same regions with `hit` as the last report of region `index`. A region past the last one
+    /// is ignored.
+    pub fn with_region(mut self, index: usize, hit: JudgeHit) -> JudgeFrame {
+        if let Some(region) = self.regions.get_mut(index) {
+            *region = Some(hit);
+        }
+        self
+    }
+}
+
 /// Everything a frame carries beside its scalar property source.
 ///
 /// [`FrameData::default`] carries nothing at all, which is what a screen that draws only scalar
 /// objects passes; a screen with more to say fills the parts it has and leaves the rest.
 #[derive(Default, Clone, Copy)]
 pub struct FrameData<'a> {
-    /// The running note field, for the note object and the lane covers.
-    pub field: Option<&'a NoteField<'a>>,
+    /// The chart under the play head, for the note object: the timelines, where the play head is,
+    /// what the run has done to each note and how the field scrolls. A frame that leaves it out
+    /// draws no note field.
+    pub notes: Option<&'a LaneNotes<'a>>,
     /// The gauge a screen shows -- which one, how full, and the limits of every gauge of the run --
     /// for the gauge object and the gauge graph. A play screen fills it for the run in progress and
     /// a score screen for the one that ended.
@@ -87,19 +146,22 @@ pub struct FrameData<'a> {
     pub bga: BgaFrame,
     /// The editable text being typed into, which draws what is typed in place of what it shows.
     pub entry: Option<TextEntry<'a>>,
+    /// What each judgement region last reported, for the judge object. Only a play screen has any.
+    pub judge: JudgeFrame,
 }
 
 impl std::fmt::Debug for FrameData<'_> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("FrameData")
-            .field("field", &self.field.is_some())
+            .field("notes", &self.notes)
             .field("gauge", &self.gauge)
             .field("bars", &self.bars.is_some())
             .field("series", &self.series)
             .field("images", &self.images)
             .field("bga", &self.bga)
             .field("entry", &self.entry)
+            .field("judge", &self.judge)
             .finish()
     }
 }

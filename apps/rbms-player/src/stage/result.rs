@@ -625,7 +625,7 @@ impl ResultRun {
 /// The windows the run's key notes were judged in, in whole milliseconds, late bound then early
 /// (`SkinTimingVisualizer.getJudgeArea`): the mode's note table at the chart's judge rank and the
 /// player's judge widths.
-fn judge_area(session: &PlaySession) -> [[i32; 2]; TIMING_JUDGE_AREAS] {
+pub(crate) fn judge_area(session: &PlaySession) -> [[i32; 2]; TIMING_JUDGE_AREAS] {
     let model = session.model();
     let setup = session.judge_setup();
     let judgerank = session.judge_window_rule().judgerank_for(model.meta.rank, model.meta.defexrank);
@@ -890,7 +890,7 @@ impl ResultState {
         };
         let scene = self.scene_facts(shared);
         let run = self.run.as_ref().map(|run| &run.snapshot);
-        let draw = ResultDraw { view: &self.view, extras: &self.extras, cleared: self.cleared, chart: chart.as_ref(), scene, run, data };
+        let draw = ResultDraw { chart: chart.as_ref(), scene, run, data };
         shared.draw_result_skin(canvas, SKIN_TYPE_RESULT, &draw)
     }
 

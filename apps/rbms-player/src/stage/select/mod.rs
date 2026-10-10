@@ -1268,7 +1268,7 @@ impl StageHandler for SelectState {
         let measured = self.focused_detail.as_ref().filter(|_| self.focused_detail_si == focused);
         let meta = focused.and_then(|index| Some(chart_under_cursor(ctx.shared.library.songs().get(index)?, self.facts.of(index), measured)));
         let chart = meta.as_ref().map_or(ChartState::Empty, ChartState::Chart);
-        if ctx.shared.draw_select_skin(canvas, &SelectDraw { view, data, chart, lent }) {
+        if ctx.shared.draw_select_skin(canvas, &SelectDraw { data, chart, lent }) {
             self.draw_skin_overlays(canvas, ctx.shared, view, &ranking_lines);
             return;
         }

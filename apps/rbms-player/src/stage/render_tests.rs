@@ -11,7 +11,7 @@
 //! screens never edit the same one. They build their screens through the helpers here.
 
 use std::collections::HashSet;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use rbms_play::{PlaySession, SessionOptions};
 use rbms_render::ResultView;
@@ -391,16 +391,6 @@ fn the_timers_the_arriving_screen_switches_on_start_from_a_zero_clock() {
 }
 
 #[test]
-fn a_new_scene_does_not_read_its_first_frame_as_a_change_from_the_last_scenes_last() {
-    let mut app = aged_app();
-    app.shared.skin_select_timers.update(&mut app.shared.skin_timers, 3, SECOND_US);
-    app.switch(Transition::To(Stage::Folders(FoldersState::new())));
-    let now = app.shared.skin_now_us();
-    app.shared.skin_select_timers.update(&mut app.shared.skin_timers, 7, now);
-    assert!(!app.shared.skin_timers.is_on(timer_id::SONGBAR_CHANGE), "the first row seen in a scene counted as a move");
-}
-
-#[test]
 fn going_back_with_nothing_suspended_starts_a_new_scene() {
     let mut app = aged_app();
     app.shared.skin_timers.set_on(timer_id::PLAY, SECOND_US);
@@ -418,10 +408,17 @@ fn a_screen_opened_over_another_gets_a_scene_of_its_own() {
     assert!(scene_age_us(&app) < 5 * SECOND_US, "the opened screen inherited the clock of the one underneath");
 }
 
+/// The scene's clock is held against the time the test itself took rather than against a round
+/// number of seconds: a machine busy enough to spend ten seconds between two lines of a test is
+/// then no different from one that spends none, and the hundred seconds of the visit still cannot
+/// hide in what is allowed.
 #[test]
 fn coming_back_resumes_the_scene_with_its_timers_and_a_clock_that_stood_still() {
     let mut app = aged_app();
     app.shared.skin_timers.set_on(timer_id::PANEL1_ON, SECOND_US);
+    let began = Instant::now();
+    let left_at = scene_age_us(&app);
+    assert!(left_at >= 10 * SECOND_US, "the scene was not aged");
     app.switch(Transition::Open(Stage::Folders(FoldersState::new())));
     app.shared.age_skin_scene(LONG_VISIT);
 
@@ -429,19 +426,9 @@ fn coming_back_resumes_the_scene_with_its_timers_and_a_clock_that_stood_still() 
     assert_eq!(app.stage.id(), StageId::Select);
     assert_eq!(app.shared.skin_timers.value_us(timer_id::PANEL1_ON), SECOND_US, "the timer was not put back as it was");
     let age = scene_age_us(&app);
-    assert!(age >= 10 * SECOND_US, "the clock went back past where the scene was left: {age} us");
-    assert!(age < 20 * SECOND_US, "the clock ran on while another screen was up: {age} us");
-}
-
-#[test]
-fn the_memory_a_timer_driver_keeps_comes_back_with_the_scene() {
-    let mut app = aged_app();
-    app.shared.skin_select_timers.update(&mut app.shared.skin_timers, 3, SECOND_US);
-    app.switch(Transition::Open(Stage::Folders(FoldersState::new())));
-    app.switch(Transition::Back);
-    let now = app.shared.skin_now_us();
-    app.shared.skin_select_timers.update(&mut app.shared.skin_timers, 7, now);
-    assert!(app.shared.skin_timers.is_on(timer_id::SONGBAR_CHANGE), "the driver forgot which row the scene had been on");
+    let spent_us = i64::try_from(began.elapsed().as_micros()).expect("a test does not run for centuries");
+    assert!(age >= left_at, "the clock went back past where the scene was left: {age} us, left at {left_at} us");
+    assert!(age <= left_at + spent_us, "the clock ran on while another screen was up: {age} us, left at {left_at} us with {spent_us} us spent since");
 }
 
 #[test]

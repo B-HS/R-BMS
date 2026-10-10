@@ -12,6 +12,12 @@
 //!
 //! Nothing here replaces the built-in screens. A screen with no document selected draws exactly what
 //! it drew before; [`SkinScreen`] is what a screen reaches for only once a document has loaded.
+//!
+//! Nothing here knows the built-in screens either. A document is answered by a
+//! [`SkinHost`](rbms_skin::property::SkinHost) and drawn from a [`FrameData`]: the application
+//! implements the one and fills the other, and which timers a screen switches on, and when, is the
+//! application's to decide. A play document takes its lanes and its judgement line from itself, and
+//! is drawn under the one offset that moves a whole screen (`whole`).
 
 mod bga;
 mod color;
@@ -25,12 +31,11 @@ mod judge;
 mod notes;
 mod object;
 pub mod refs;
-pub mod screen;
 mod songlist;
-pub mod state;
 mod text;
 mod text_input;
 pub mod textures;
+mod whole;
 
 #[cfg(test)]
 mod tests;
@@ -40,10 +45,12 @@ mod tests_list_graphs;
 mod tests_play_objects;
 
 use std::path::Path;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use rbms_skin::dst::{LuaDrawEval, SkinColor, SkinRect};
 use rbms_skin::loader::LoadedSkin;
+use rbms_skin::property::generated::OFFSET_ALL;
 
 use crate::font::TextContext;
 use crate::{Color, Rect, Renderer};
@@ -54,13 +61,8 @@ pub use frame::{FrameData, FrameSeries, PreparedFrame, SkinFrame};
 pub use gauge::GaugeFrame;
 pub use graphs::{BpmTimeline, GaugeHistory, NoteDistribution, RecentHits, TimingHistogram};
 pub use input::{SkinAction, SkinEvent, SkinInputMap, SkinPointer, SkinPointerButton, SkinWriter};
-pub use notes::NoteField;
 pub use object::SkinObjectKind;
 pub use refs::{ReferenceImage, ReferenceImages};
-pub use screen::{
-    LaneTimerState, PlayLanes, PlayTimers, SelectTimers, SkinDraw, render_decide_screen, render_keyconfig_screen, render_play_screen, render_result_screen,
-    render_select_screen,
-};
 pub use songlist::SongBars;
 pub use text_input::{Composition, SkinTextWriter, TextEntry, TextEntryStart};
 
@@ -196,6 +198,11 @@ pub struct SkinScreen {
     /// The font family each font id resolved to inside the text engine.
     families: Vec<(String, String)>,
     warnings: Vec<String>,
+    /// The offset the whole screen is drawn under, settled by the first frame that is drawn and
+    /// kept for as long as the screen is (`Skin.ensureRenderer`, which sets the transform when it
+    /// makes the renderer and never again). `None` for a document that is not of a play type, which
+    /// is never moved.
+    whole: Option<OnceLock<whole::WholeOffset>>,
 }
 
 impl SkinScreen {
@@ -253,7 +260,8 @@ impl SkinScreen {
         let objects = object::build_objects(skin, textures.sources(), &families, assets, &mut warnings, &mut kept);
         let interactions = input::interactions(skin, &kept, &objects);
         let authored = (skin.def.w.max(1) as f32, skin.def.h.max(1) as f32);
-        SkinScreen { authored, objects, interactions, textures, families, warnings }
+        let whole = whole::applies_to(skin.def.skin_type).then(OnceLock::new);
+        SkinScreen { authored, objects, interactions, textures, families, warnings, whole }
     }
 
     /// The size the document was authored at.
@@ -331,10 +339,20 @@ impl SkinScreen {
     /// merges adjacent draws still lands them in the same place. `frame` is the frame `prepared` was
     /// made from; its `lua` is not consulted, because everything the skin's Lua had to say was said
     /// while the frame was prepared.
+    ///
+    /// A play document is drawn under the whole-screen offset the host answers `OFFSET_ALL` with:
+    /// every object, and every clip one is drawn under, is moved by that share of the target and
+    /// stretched away from its bottom left corner. The offset is read on the first frame drawn and
+    /// that reading is kept, as the reference keeps the transform it set when it made its renderer.
+    /// Where the pointer is taken to be is not moved with it, in the reference or here.
     pub fn draw_prepared<R: Renderer>(&self, ctx: &mut crate::ctx::RenderCtx<'_>, r: &mut R, frame: &SkinFrame<'_>, prepared: &PreparedFrame) -> usize {
         let (screen_w, screen_h) = r.size();
         let viewport = SkinViewport::new(self.authored, (screen_w as f32, screen_h as f32));
-        let drawn = frame::draw_objects(ctx, r, &self.objects, &viewport, frame, prepared);
+        let whole = self.whole.as_ref().map(|settled| *settled.get_or_init(|| whole::WholeOffset::of(frame.state.offset(OFFSET_ALL))));
+        let drawn = match whole.filter(|whole| !whole.is_identity()) {
+            Some(whole) => frame::draw_objects(ctx, &mut whole.over(r), &self.objects, &viewport, frame, prepared),
+            None => frame::draw_objects(ctx, r, &self.objects, &viewport, frame, prepared),
+        };
         ctx.text.reset_family();
         drawn
     }

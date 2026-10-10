@@ -47,6 +47,12 @@
 //! lamp, every difficulty and every chart label to show. It is captured on a list of charts, on the
 //! root with its folder and its table, inside the table, and on the course tab; and on the list of
 //! charts once more with each of the three option panels that START and SELECT call up.
+//!
+//! The play scene is captured as a run that is really made: a chart is handed to the play screen the
+//! way the application hands one over, and the screen is walked through the reference's states on
+//! the skin's own times -- loading, ready, playing, and the fade or the failure that closes it --
+//! with the engine playing the chart, or nobody playing it, in between. Seven keys are walked the
+//! whole way; five, ten and fourteen are captured while they play.
 
 use std::collections::BTreeMap;
 use std::ops::Range;
@@ -563,6 +569,9 @@ fn rich_chart() -> String {
     const KEY_CHANNELS: [u32; 7] = [11, 12, 13, 14, 15, 18, 19];
     const SCRATCH_CHANNEL: u32 = 16;
     const LONG_CHANNEL: u32 = 51;
+    /// The channel the plain notes of the key that long note is in are written on. They are left out
+    /// of a measure that has the long note, so no note sits inside it where nobody could play it.
+    const LONG_NOTE_KEY_CHANNEL: u32 = 11;
     const TEMPO_CHANNEL: u32 = 8;
     /// The most notes a key is given in one measure; the count climbs to it and starts over.
     const BUSIEST_MEASURE_NOTES: usize = 8;
@@ -577,12 +586,14 @@ fn rich_chart() -> String {
     chart.push_str(&format!("#STAGEFILE {RICH_STAGE_FILE}\n"));
     for measure in 0..RICH_MEASURES {
         let notes = 1 + measure as usize % BUSIEST_MEASURE_NOTES;
+        let has_long_note = measure.is_multiple_of(TURNTABLE_EVERY);
         for (index, channel) in KEY_CHANNELS.into_iter().enumerate() {
-            if !(measure as usize + index).is_multiple_of(RESTING_KEY_EVERY) {
+            let under_the_long_note = has_long_note && channel == LONG_NOTE_KEY_CHANNEL;
+            if !(measure as usize + index).is_multiple_of(RESTING_KEY_EVERY) && !under_the_long_note {
                 chart.push_str(&format!("#{measure:03}{channel}:{}\n", "01".repeat(notes)));
             }
         }
-        if measure.is_multiple_of(TURNTABLE_EVERY) {
+        if has_long_note {
             chart.push_str(&format!("#{measure:03}{SCRATCH_CHANNEL}:0101\n#{measure:03}{LONG_CHANNEL}:01000001\n"));
         }
         let tempo = match measure {
@@ -1499,4 +1510,412 @@ fn the_overlays_the_application_draws_over_the_browser_of_a_skin_pack_named_by_t
     println!("select overlays: captured {}", saved.join(", "));
 
     assert_eq!((files_under(&pack), files_under(&samples)), before, "capturing the pack's browser overlays changed a folder it only reads");
+}
+
+/// How many keysounds the chart of a captured play scene is still waiting for while it loads, and how
+/// many of them have arrived, so the skin's loading bar has something between nothing and all to show.
+const PLAY_LOADING_TOTAL: usize = 8;
+const PLAY_LOADING_DONE: usize = 5;
+
+/// How far a captured run is stepped at a time, which is a frame at sixty a second.
+const PLAY_STEP_MS: i64 = 16;
+
+/// How many steps a run nobody plays is given to fail in, and a run that is over to begin its fade.
+const PLAY_FAIL_STEPS: usize = 4_000;
+const PLAY_CLOSING_STEPS: usize = 400;
+
+/// How long after the last note of a run the engine played a frame is taken, which is part of the way
+/// through what a skin plays for a full combo.
+const PLAY_FULL_COMBO_AFTER_MS: i64 = 700;
+
+/// The moments of a failure's closing that are captured: it is cut into this many shares, and a
+/// frame is taken at the end of each but the last, which is where the screen leaves.
+const PLAY_CLOSING_SHARES: i64 = 4;
+const PLAY_CLOSING_SHOTS: [&str; 3] = ["close-1", "close-2", "close-3"];
+
+/// The moments of the sample chart and of the written charts that are captured while they play, in
+/// milliseconds of the chart.
+const PLAY_SAMPLE_SHOTS_MS: [i64; 1] = [2_600];
+const PLAY_RICH_SHOTS_MS: [i64; 2] = [6_500, 21_000];
+const PLAY_MODE_SHOT_MS: [i64; 1] = [9_000];
+
+/// How many measures the charts written for five, ten and fourteen keys run for.
+const MODE_CHART_MEASURES: u32 = 16;
+
+/// The channels a chart written for one side of a mode puts its notes on: the keys in order, then the
+/// turntable, and the channel one of its keys' long notes are written on.
+struct SideChannels {
+    notes: &'static [&'static str],
+    long: &'static str,
+    /// Which of `notes` is the key the long notes are in, whose plain notes are left out of a
+    /// measure that has one.
+    long_key: usize,
+}
+
+const FIVE_KEYS_FIRST: SideChannels = SideChannels { notes: &["11", "12", "13", "14", "15", "16"], long: "53", long_key: 2 };
+const FIVE_KEYS_SECOND: SideChannels = SideChannels { notes: &["21", "22", "23", "24", "25", "26"], long: "63", long_key: 2 };
+const SEVEN_KEYS_FIRST: SideChannels = SideChannels { notes: &["11", "12", "13", "14", "15", "18", "19", "16"], long: "54", long_key: 3 };
+const SEVEN_KEYS_SECOND: SideChannels = SideChannels { notes: &["21", "22", "23", "24", "25", "28", "29", "26"], long: "64", long_key: 3 };
+
+/// A chart with notes on every channel of `sides`, in a pattern that leaves each lane busy in some
+/// measures and resting in others, and a long note every fourth measure.
+fn mode_chart(title: &str, sides: &[SideChannels]) -> String {
+    /// One lane in this many rests in each measure, a different one each time.
+    const RESTING_LANE_EVERY: usize = 3;
+    /// The most notes a lane is given in one measure.
+    const BUSIEST_MEASURE_NOTES: usize = 4;
+    /// One measure in this many has a long note.
+    const LONG_NOTE_EVERY: u32 = 4;
+    let mut chart = format!(
+        "#PLAYER 1\n#GENRE Capture Genre\n#TITLE {title}\n#ARTIST Capture Artist\n#BPM 140\n#PLAYLEVEL 7\n#DIFFICULTY 3\n#RANK 2\n#TOTAL 300\n#LNTYPE 1\n#WAV01 a.wav\n"
+    );
+    for measure in 0..MODE_CHART_MEASURES {
+        let has_long_note = measure.is_multiple_of(LONG_NOTE_EVERY);
+        for side in sides {
+            for (index, channel) in side.notes.iter().enumerate() {
+                let under_the_long_note = has_long_note && index == side.long_key;
+                if !(measure as usize + index).is_multiple_of(RESTING_LANE_EVERY) && !under_the_long_note {
+                    let notes = 1 + (measure as usize + index) % BUSIEST_MEASURE_NOTES;
+                    chart.push_str(&format!("#{measure:03}{channel}:{}\n", "01".repeat(notes)));
+                }
+            }
+            if has_long_note {
+                chart.push_str(&format!("#{measure:03}{}:01000001\n", side.long));
+            }
+        }
+    }
+    chart
+}
+
+/// The chart in `text` as the run of a mode sees it. `mode` names the mode for a chart the file's own
+/// channels cannot tell from another: ten keys are written on the channels fourteen are.
+fn chart_model(text: &str, name: &str, mode: Option<rbms_model::Mode>) -> rbms_model::Model {
+    let source = rbms_parser::parse_with(text.as_bytes(), Default::default());
+    let mode = mode.unwrap_or_else(|| rbms_chart::detect_mode(&source, name));
+    rbms_chart::to_model(&source, mode)
+}
+
+/// How a captured run is played and how it is left.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PlayEnding {
+    /// The engine plays the chart, and the run is left while it is still playing.
+    StillPlaying,
+    /// The engine plays the chart to its end: the fade that follows is captured.
+    Fade,
+    /// Nobody plays the chart, on a gauge that empties: the failure's closing is captured.
+    Failure,
+}
+
+/// One run of the play scene to capture.
+struct PlayRun<'a> {
+    /// The settings folder of the run's own app, and the start of every name it saves.
+    tag: &'a str,
+    prefix: &'a str,
+    model: rbms_model::Model,
+    /// The file the chart is said to be, which is where its pictures would be looked for.
+    chart: PathBuf,
+    /// Whether the loading and the ready states are captured on the way in.
+    opening: bool,
+    /// The moments of the chart that are captured while it plays, in order.
+    shots_ms: &'a [i64],
+    ending: PlayEnding,
+}
+
+/// The play screen that is up, or why there is none.
+fn play_screen(app: &App) -> Result<&PlayState, String> {
+    match &app.stage {
+        Stage::Play(state) => Ok(state),
+        other => Err(format!("the {other:?} screen is up, not the play screen")),
+    }
+}
+
+/// The two clocks of a captured run, counted by the harness rather than read off the machine.
+///
+/// The scene clock and the song clock are both real clocks, and a frame of a published skin takes a
+/// good part of a second to draw on a headless canvas -- and saving one takes as long again. So each
+/// frame of a captured run puts both clocks where this says they are before it runs: the run moves
+/// by what was asked for and by nothing else, whatever machine draws it.
+#[derive(Default)]
+struct PlayClocks {
+    /// How long the scene has run.
+    scene: Duration,
+    /// How long the chart has played, once it has started.
+    song: Option<Duration>,
+}
+
+impl PlayClocks {
+    /// Move both clocks on by `millis` and run the update of one frame of the play screen, and its
+    /// draw as well when `canvas` is given.
+    fn frame_after(&mut self, app: &mut App, millis: i64, canvas: Option<&mut Canvas<'_>>) -> Result<(), String> {
+        let by = Duration::from_millis(u64::try_from(millis).map_err(|_| "a run only moves forward".to_owned())?);
+        self.scene += by;
+        self.song = self.song.map(|song| song + by);
+        let now = Instant::now();
+        let behind = |by: Duration| now.checked_sub(by).ok_or_else(|| "the process has not been up for as long as the run".to_owned());
+        app.shared.scene_started = behind(self.scene)?;
+        if let Some(song) = self.song {
+            app.shared.clock = behind(song)?;
+        }
+        let transition = app.stage.update(&mut FrameCtx { shared: &mut app.shared, now, dt: FRAME_DT });
+        if !matches!(transition, Transition::Stay) {
+            return Err(format!("the play screen left at {:?}", play_screen(app).map(|play| play.phase())));
+        }
+        if self.song.is_none() && play_screen(app)?.phase() == Some(crate::skin_host::play::PlayPhase::Play) {
+            self.song = Some(Duration::ZERO);
+        }
+        if let Some(canvas) = canvas {
+            app.shared.hot.clear();
+            app.stage.draw(&mut FrameCtx { shared: &mut app.shared, now, dt: FRAME_DT }, canvas);
+        }
+        Ok(())
+    }
+
+    /// Run the play screen on by `millis` in steps of [`PLAY_STEP_MS`], the way frames would carry
+    /// it there, and draw the last of them. A run is not jumped: the engine plays a chart a frame at
+    /// a time, and a long note it is handed whole, head and end in one frame, is not one it holds.
+    fn play_on(&mut self, app: &mut App, millis: i64, canvas: &mut Canvas<'_>) -> Result<(), String> {
+        let mut left = millis.max(0);
+        while left > PLAY_STEP_MS {
+            self.frame_after(app, PLAY_STEP_MS, None)?;
+            left -= PLAY_STEP_MS;
+        }
+        self.frame_after(app, left, Some(canvas))
+    }
+
+    /// How long the scene has run, in whole milliseconds.
+    fn scene_ms(&self) -> u128 {
+        self.scene.as_millis()
+    }
+}
+
+/// What a frame of a captured run shows, in words, for whoever compares the capture with it.
+fn play_report(app: &App, scene_ms: u128) -> Result<String, String> {
+    let play = play_screen(app)?;
+    let judge = play.session.judge();
+    Ok(format!(
+        "{:?} at {} ms of the chart, scene {} ms: combo {} (max {}), EX {}, gauge {:.1}, PG/GR/GD/BD/PR/MS {:?}, {} of {} notes",
+        play.phase(),
+        play.chart_ms(),
+        scene_ms,
+        judge.combo,
+        judge.max_combo,
+        judge.ex_score,
+        judge.gauge.value(),
+        judge.counts,
+        judge.total_judged(),
+        judge.total_notes(),
+    ))
+}
+
+/// Enter the pack's play scene for one run and walk it, saving a frame at each moment the run asks
+/// for as `<prefix>-<moment>`. Answers what was saved, each with what the frame shows, or why the
+/// scene never drew.
+fn capture_play_scene(pack: &Path, run: PlayRun<'_>) -> Result<Vec<String>, String> {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    use crate::skin_host::play::PlayPhase;
+    use crate::stage::KeysoundLoad;
+    use crate::stage::loading::ChartLoads;
+
+    let mut app = pack_app(pack, run.tag);
+    let mode = run.model.mode;
+    let screen = rbms_skin::loader::mode_skin_type(mode).ok_or_else(|| "no play screen draws this mode".to_owned())?;
+    let size = authored_size(&app, screen).ok_or_else(|| "the pack has no document for this screen".to_owned())?;
+    let autoplay = run.ending != PlayEnding::Failure;
+    let gauge = if autoplay { rbms_judge::GaugeKind::Normal } else { rbms_judge::GaugeKind::Hard };
+    app.shared.chart_path = run.chart.to_string_lossy().into_owned();
+    app.shared.mode = mode;
+    app.shared.config.play.autoplay = autoplay;
+    app.shared.config.play.gauge = gauge;
+    app.shared.active_keys = app.shared.keyconfig.lane_keys(mode);
+    app.shared.active_reverse_keys = app.shared.keyconfig.scratch_reverse_keys(mode);
+    let play_time_ms = rbms_play::play_time_ms(&run.model, autoplay);
+    let session = PlaySession::new(run.model, SessionOptions { autoplay, gauge, ..SessionOptions::default() });
+    let mut play = PlayState::new(session, std::collections::HashMap::new(), 0, SCORE_LN_MODE_FROM_CHART.to_string());
+    let arrived = Arc::new(AtomicUsize::new(PLAY_LOADING_DONE));
+    let (_sender, rx) = std::sync::mpsc::channel();
+    let keysounds = KeysoundLoad { rx, progress: Arc::clone(&arrived), cancel: Arc::new(AtomicBool::new(false)), total: PLAY_LOADING_TOTAL };
+    play.wait_for(ChartLoads::new(None, Some(keysounds)));
+    app.switch(Transition::To(Stage::Play(Box::new(play))));
+
+    let mut pixels = HeadlessCanvas::new(size.0, size.1);
+    let deadline = Instant::now() + PACK_LOAD_TIMEOUT;
+    while !app.shared.has_compiled_skin(screen) {
+        scene_frame_at(&mut app, 0, &mut Canvas::Headless(&mut pixels));
+        if let Some(reason) = app.shared.skin_failure(screen) {
+            return Err(reason.lines().next().unwrap_or_default().to_owned());
+        }
+        if Instant::now() >= deadline {
+            return Err(format!("its files were not read within {} seconds", PACK_LOAD_TIMEOUT.as_secs()));
+        }
+    }
+    let mut clocks = PlayClocks::default();
+    let skin = app.shared.skins.document(screen).ok_or_else(|| "the skin was let go of".to_owned())?;
+    let (loadend_ms, playstart_ms, close_ms, fadeout_ms) =
+        (i64::from(skin.play.loadend), i64::from(skin.play.playstart), i64::from(skin.play.close), i64::from(skin.def.fadeout));
+
+    let mut saved = Vec::new();
+    let mut shoot = |app: &mut App, pixels: &HeadlessCanvas, clocks: &PlayClocks, moment: &str| -> Result<(), String> {
+        let name = format!("{}-{moment}", run.prefix);
+        save(&name, CAPTURE_EXTENSION, size, pixels.rgba());
+        saved.push(format!("{name}: {}", play_report(app, clocks.scene_ms())?));
+        Ok(())
+    };
+
+    clocks.play_on(&mut app, loadend_ms / 2, &mut Canvas::Headless(&mut pixels))?;
+    if run.opening {
+        shoot(&mut app, &pixels, &clocks, "loading")?;
+    }
+    arrived.store(PLAY_LOADING_TOTAL, Ordering::Relaxed);
+    clocks.play_on(&mut app, loadend_ms / 2 + PLAY_STEP_MS, &mut Canvas::Headless(&mut pixels))?;
+    if play_screen(&app)?.phase() != Some(PlayPhase::Ready) {
+        return Err(format!("the chart is not ready after its load time: {:?}", play_screen(&app)?.phase()));
+    }
+    clocks.play_on(&mut app, playstart_ms / 2, &mut Canvas::Headless(&mut pixels))?;
+    if run.opening {
+        shoot(&mut app, &pixels, &clocks, "ready")?;
+    }
+    clocks.play_on(&mut app, playstart_ms / 2 + PLAY_STEP_MS, &mut Canvas::Headless(&mut pixels))?;
+    if play_screen(&app)?.phase() != Some(PlayPhase::Play) {
+        return Err(format!("the chart is not playing after its start time: {:?}", play_screen(&app)?.phase()));
+    }
+
+    for at_ms in run.shots_ms {
+        let left_ms = at_ms - play_screen(&app)?.chart_ms();
+        clocks.play_on(&mut app, left_ms, &mut Canvas::Headless(&mut pixels))?;
+        shoot(&mut app, &pixels, &clocks, &format!("play-{at_ms:05}ms"))?;
+    }
+
+    match run.ending {
+        PlayEnding::StillPlaying => {}
+        PlayEnding::Fade => {
+            let to_the_last_note_ms = play_time_ms - rbms_play::PLAY_TIME_MARGIN_MS - play_screen(&app)?.chart_ms();
+            clocks.play_on(&mut app, to_the_last_note_ms + PLAY_FULL_COMBO_AFTER_MS, &mut Canvas::Headless(&mut pixels))?;
+            shoot(&mut app, &pixels, &clocks, "fullcombo")?;
+            let left_ms = play_time_ms - play_screen(&app)?.chart_ms() + PLAY_STEP_MS;
+            clocks.play_on(&mut app, left_ms, &mut Canvas::Headless(&mut pixels))?;
+            if play_screen(&app)?.phase() != Some(PlayPhase::Finished) {
+                return Err(format!("the run is not finished after its playing time: {:?}", play_screen(&app)?.phase()));
+            }
+            shoot(&mut app, &pixels, &clocks, "finished")?;
+            let mut waited = 0;
+            while !app.shared.skin_timers.is_on(timer_id::FADEOUT) {
+                clocks.frame_after(&mut app, PLAY_STEP_MS, None)?;
+                waited += 1;
+                if waited > PLAY_CLOSING_STEPS {
+                    return Err("the run never began to fade".to_owned());
+                }
+            }
+            clocks.play_on(&mut app, fadeout_ms / 2, &mut Canvas::Headless(&mut pixels))?;
+            shoot(&mut app, &pixels, &clocks, "fade")?;
+        }
+        PlayEnding::Failure => {
+            let mut waited = 0;
+            while play_screen(&app)?.phase() != Some(PlayPhase::Failed) {
+                clocks.frame_after(&mut app, PLAY_STEP_MS, None)?;
+                waited += 1;
+                if waited > PLAY_FAIL_STEPS {
+                    return Err("the run nobody played never failed".to_owned());
+                }
+            }
+            for (share, moment) in PLAY_CLOSING_SHOTS.into_iter().enumerate() {
+                clocks.play_on(&mut app, close_ms / PLAY_CLOSING_SHARES, &mut Canvas::Headless(&mut pixels))?;
+                if share + 1 < PLAY_CLOSING_SHOTS.len() || play_screen(&app)?.phase() == Some(PlayPhase::Failed) {
+                    shoot(&mut app, &pixels, &clocks, moment)?;
+                }
+            }
+        }
+    }
+    Ok(saved)
+}
+
+/// Captures the play scene of a pack somebody else wrote, for runs that are really made: the sample
+/// chart, which is a five-key one, walked from loading until it plays; a busier chart written here
+/// on seven keys, walked from loading to the fade and, with nobody playing it, to a failure; and one
+/// chart each on five, ten and fourteen keys while it plays.
+///
+/// Opt-in like the captures above it: without [`SKIN_PACK_ENV`] this passes without drawing
+/// anything. With it, every run has to draw, and the pack's folder has to be left as it was.
+#[test]
+fn the_play_scene_of_a_skin_pack_named_by_the_environment_is_captured_through_its_states() {
+    let Some(pack) = crate::skin_select::pack_from_environment(std::env::var_os(SKIN_PACK_ENV)) else {
+        return;
+    };
+    assert!(pack.is_dir(), "{SKIN_PACK_ENV} names {}, which is not a folder", pack.display());
+    let before = files_under(&pack);
+
+    let sample = Path::new(env!("CARGO_MANIFEST_DIR")).join(DECIDE_SAMPLE_CHART);
+    let sample_text = std::fs::read_to_string(&sample).expect("the sample chart is read");
+    let rich = write_rich_chart("play-rich-chart");
+    let rich_text = rich_chart();
+    let five = mode_chart("Five Keys", &[FIVE_KEYS_FIRST]);
+    let ten = mode_chart("Ten Keys", &[FIVE_KEYS_FIRST, FIVE_KEYS_SECOND]);
+    let fourteen = mode_chart("Fourteen Keys", &[SEVEN_KEYS_FIRST, SEVEN_KEYS_SECOND]);
+    let written = |name: &str| rich.with_file_name(name);
+
+    let runs = [
+        PlayRun {
+            tag: "play-sample",
+            prefix: "play-sample",
+            model: chart_model(&sample_text, "preview-demo.bms", None),
+            chart: sample,
+            opening: true,
+            shots_ms: &PLAY_SAMPLE_SHOTS_MS,
+            ending: PlayEnding::StillPlaying,
+        },
+        PlayRun {
+            tag: "play7",
+            prefix: "play7",
+            model: chart_model(&rich_text, "rich.bms", None),
+            chart: rich.clone(),
+            opening: true,
+            shots_ms: &PLAY_RICH_SHOTS_MS,
+            ending: PlayEnding::Fade,
+        },
+        PlayRun {
+            tag: "play7-fail",
+            prefix: "play7-fail",
+            model: chart_model(&rich_text, "rich.bms", None),
+            chart: rich.clone(),
+            opening: false,
+            shots_ms: &[],
+            ending: PlayEnding::Failure,
+        },
+        PlayRun {
+            tag: "play5",
+            prefix: "play5",
+            model: chart_model(&five, "five.bms", None),
+            chart: written("five.bms"),
+            opening: false,
+            shots_ms: &PLAY_MODE_SHOT_MS,
+            ending: PlayEnding::StillPlaying,
+        },
+        PlayRun {
+            tag: "play10",
+            prefix: "play10",
+            model: chart_model(&ten, "ten.bms", Some(rbms_model::Mode::BEAT_10K)),
+            chart: written("ten.bms"),
+            opening: false,
+            shots_ms: &PLAY_MODE_SHOT_MS,
+            ending: PlayEnding::StillPlaying,
+        },
+        PlayRun {
+            tag: "play14",
+            prefix: "play14",
+            model: chart_model(&fourteen, "fourteen.bms", None),
+            chart: written("fourteen.bms"),
+            opening: false,
+            shots_ms: &PLAY_MODE_SHOT_MS,
+            ending: PlayEnding::StillPlaying,
+        },
+    ];
+    for run in runs {
+        let prefix = run.prefix;
+        let saved = capture_play_scene(&pack, run).unwrap_or_else(|reason| panic!("{prefix}: not drawn: {reason}"));
+        for line in saved {
+            println!("{line}");
+        }
+    }
+    assert_eq!(files_under(&pack), before, "capturing the pack's play scene changed its folder");
 }

@@ -14,6 +14,7 @@
 use std::sync::atomic::AtomicUsize;
 use std::sync::mpsc::channel;
 
+use rbms_render::result::ResultView;
 use rbms_render::skin_render::textures::rgba_bytes;
 use rbms_skin::loader::SKIN_TYPE_PLAY_7KEYS;
 
@@ -672,9 +673,7 @@ fn pack_frame(app: &mut crate::App, pixels: &mut HeadlessCanvas, screen: PackScr
         PackScreen::Result => {
             let mut canvas = Canvas::Headless(pixels);
             app.shared.prepare_skin(&mut canvas, SKIN_TYPE_RESULT);
-            let (view, extras) = (pack_result_view(), ResultExtras::default());
-            let scene =
-                ResultDraw { view: &view, extras: &extras, cleared: true, chart: None, scene: ResultScene::default(), run: None, data: FrameData::default() };
+            let scene = ResultDraw { chart: None, scene: ResultScene::default(), run: None, data: FrameData::default() };
             app.shared.draw_result_skin(&mut canvas, SKIN_TYPE_RESULT, &scene);
             app.shared.finish_skin_frame(&mut canvas);
         }

@@ -10,12 +10,16 @@
 //! whatever the window does. [`Canvas::native`] is the same target in its own pixels, which is what
 //! a skin screen draws on. Both feed one frame, in the order they are drawn.
 
+use std::collections::HashMap;
+
+use rbms_render::skin_render::frame::{BgaExpand, BgaFrame, BgaPick, BgaTextures};
 use rbms_render::{Color, QuadParams, Rect, Renderer, ScaledRenderer, TextureId, scale_between, scale_rect};
 #[cfg(test)]
 use rbms_render::{CpuCanvas, TextureFilter};
 
+use crate::assets::bga_picture;
 use crate::gpu::Gpu;
-use crate::{CH, CW};
+use crate::{CH, CW, DecodedImage};
 
 /// The size the built-in screens and the system overlays are laid out for, whatever size the target
 /// they end up on is.
@@ -232,6 +236,22 @@ impl<'a> Canvas<'a> {
         }
     }
 
+    /// The frame a skin document's `bga` object draws from: the pictures `pick` names, uploaded
+    /// through `textures` only when they are not the ones it already holds.
+    ///
+    /// Unlike [`Canvas::background_texture`] this keeps the chart's picture, the layer over it and
+    /// the miss layer apart, each in a texture of its own, and shapes the pixels the way the
+    /// reference does ([`BgaTextures`]). A picture number the chart has no image for shows as none.
+    pub(crate) fn bga_frame(&mut self, textures: &mut BgaTextures, pick: BgaPick, expand: BgaExpand, pictures: &HashMap<i32, DecodedImage>) -> BgaFrame {
+        textures.frame(&mut self.native(), pick, expand, |number| pictures.get(&number).map(bga_picture))
+    }
+
+    /// Hands the textures [`Canvas::bga_frame`] made back to the target, for a screen that is done
+    /// with its background.
+    pub(crate) fn release_bga_textures(&mut self, textures: &mut BgaTextures) {
+        textures.release(&mut self.native());
+    }
+
     /// Drop whatever image is behind the screen's quads.
     pub(crate) fn clear_bga(&mut self) {
         match self {
@@ -381,6 +401,8 @@ impl Renderer for Canvas<'_> {
 
 #[cfg(test)]
 mod tests {
+    use rbms_render::skin_render::frame::BgaShow;
+
     use super::*;
 
     /// How many times larger than [`UI_SIZE`] the enlarged target is on each axis.
@@ -393,6 +415,10 @@ mod tests {
 
     /// The one opaque pixel the background tests upload.
     const DOT: [u8; BYTES_PER_PIXEL] = [9, 8, 7, 255];
+
+    /// The side of the square pictures the chart's-pictures test hands over, past the 256 pixels that
+    /// would put one on a canvas of its own.
+    const BGA_SIDE: u32 = 300;
 
     fn enlarged() -> HeadlessCanvas {
         HeadlessCanvas::new(UI_SIZE.0 * ENLARGEMENT, UI_SIZE.1 * ENLARGEMENT)
@@ -466,6 +492,34 @@ mod tests {
         assert_eq!(pixels.background(), Some(Rect::new(PATCH.x * scale, PATCH.y * scale, PATCH.w * scale, PATCH.h * scale)));
         let inside = pixels.pixel_at((PATCH.x + PATCH.w) as u32 * ENLARGEMENT - 1, (PATCH.y + PATCH.h) as u32 * ENLARGEMENT - 1);
         assert_eq!(inside, Color { r: DOT[0], g: DOT[1], b: DOT[2], a: DOT[3] });
+    }
+
+    /// A chart's pictures reach the target through three textures of their own, a picture that stays
+    /// is uploaded once however many frames carry it, a number the chart has no image for is no
+    /// picture, and a screen that is done hands the textures back.
+    #[test]
+    fn a_charts_pictures_reach_the_target_one_texture_each_and_are_uploaded_once() {
+        let picture = |shade: u8| DecodedImage::for_test((0..BGA_SIDE * BGA_SIDE).flat_map(|_| [shade, 0, 0, 255]).collect(), BGA_SIDE, BGA_SIDE);
+        let pictures = HashMap::from([(0, picture(10)), (1, picture(20))]);
+        let mut pixels = HeadlessCanvas::new(UI_SIZE.0, UI_SIZE.1);
+        let mut canvas = Canvas::Headless(&mut pixels);
+        let mut textures = BgaTextures::default();
+        let playing = |base, layer| BgaPick::Playing { base, layer };
+
+        let first = canvas.bga_frame(&mut textures, playing(Some(0), Some(1)), BgaExpand::default(), &pictures);
+        let again = canvas.bga_frame(&mut textures, playing(Some(0), Some(1)), BgaExpand::default(), &pictures);
+        assert_eq!(first, again, "the same two pictures asked for twice came back as different textures");
+        let BgaShow::Playing { base: Some(base), layer: Some(layer) } = first.show else {
+            panic!("a chart with both pictures showed {:?}", first.show);
+        };
+        assert_ne!(base, layer, "the picture and the layer share a texture");
+        assert_eq!(canvas.native().texture_size(base), Some((BGA_SIDE, BGA_SIDE)));
+
+        let lost = canvas.bga_frame(&mut textures, playing(Some(9), None), BgaExpand::default(), &pictures);
+        assert_eq!(lost.show, BgaShow::Playing { base: None, layer: None }, "a number with no image showed a picture");
+
+        canvas.release_bga_textures(&mut textures);
+        assert_eq!(canvas.native().texture_size(base), None, "the textures were not handed back");
     }
 
     #[test]

@@ -10,7 +10,8 @@
 //! Meanwhile the chart loads. It is parsed when it is picked, as the reference parses it, and its
 //! keysounds and images decode on the worker pool while the scene plays. A scene that ends with
 //! everything in goes straight to the run; one that ends early hands what is outstanding to the
-//! LOADING screen, which waits for the rest. Leaving for the browser stops the decodes.
+//! LOADING screen, which waits for the rest -- or, when a skin draws the play screen too, to that
+//! screen, whose own loading state waits for it. Leaving for the browser stops the decodes.
 //!
 //! The screen exists only when a skin draws it. Without a decide skin a picked chart goes to the
 //! LOADING screen as it always did ([`AppShared::decided_song_stage`]), and a skin that turns out
@@ -256,13 +257,18 @@ impl DecideState {
         }
     }
 
-    /// Leave for the run. A scene that played with everything in starts it; anything else -- files
-    /// still decoding, or a skin that never drew -- goes on to the LOADING screen, which is where a
-    /// picked chart goes when there is no decide scene at all.
+    /// Leave for the run. A chart whose play screen a skin draws goes straight to that screen, which
+    /// waits for whatever is still decoding in its own loading state. Otherwise a scene that played
+    /// with everything in starts the run, and anything else -- files still decoding, or a skin that
+    /// never drew -- goes on to the LOADING screen, which is where a picked chart goes when there is
+    /// no decide scene at all.
     fn hand_on(&mut self, shared: &mut AppShared) -> Transition {
         let Some(assets) = self.assets.take() else {
             return self.abandon(shared);
         };
+        if ChartAssets::preloads_on_the_play_screen(shared) {
+            return Transition::To(assets.enter_preloading(shared));
+        }
         if self.loaded && self.skin == SkinStatus::Ready {
             return Transition::To(assets.enter(shared));
         }

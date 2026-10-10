@@ -93,6 +93,35 @@ pub struct NoteMark {
     pub play_time_us: i64,
 }
 
+/// One judgment as the engine counted it, in the order it was counted: what the reference hands its
+/// screen from `JudgeManager.updateMicro` each time it gets as far as counting one
+/// (`JudgeManager.java:652-692`).
+///
+/// A screen that shows a judgment where it landed needs the lane, and one that shows the combo beside
+/// it needs the combo as it stood right then: two judgments counted on the same frame leave two
+/// different combos behind, and the totals only ever show the last.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct JudgedNote {
+    pub lane: usize,
+    pub judge: Judge,
+    /// The signed timing the judgment was counted with, positive when the input came early
+    /// (`mfast`).
+    pub delta_us: i64,
+    /// The combo once this judgment was counted, carried across the stages of a course
+    /// (`JudgeManager.getCourseCombo`).
+    pub combo: u32,
+}
+
+/// The long notes one lane has in hand, each named by the chart time of its head.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct LaneLongNote {
+    /// The long note the lane is holding, from the press that took its head until the note is
+    /// resolved (`LaneState.processing`).
+    pub processing: Option<i64>,
+    /// The hell-charge note the play head is inside, hit or not (`LaneState.passing`).
+    pub passing: Option<i64>,
+}
+
 /// CN/HCN ("charge"/"hell-charge") long notes are judged twice — the head at press and the release
 /// end at key-up — each a counted judgment (the reference implementation's `JudgeManager` calls `updateMicro` at both),
 /// whereas a plain LN is a single judgment (the worse of head/end). This predicate gates the
@@ -223,6 +252,8 @@ pub struct JudgeEngine {
     total_notes: u32,
     /// The reference implementation's `IRScoreData.passnotes`: judgments that consumed their note.
     pass_notes: u32,
+    /// Every judgment counted so far, oldest first. Nothing in the engine reads it back.
+    judged: Vec<JudgedNote>,
 }
 
 impl JudgeEngine {
@@ -304,6 +335,7 @@ impl JudgeEngine {
             timing_count: 0,
             total_notes,
             pass_notes: 0,
+            judged: Vec::new(),
         }
     }
 
@@ -537,6 +569,19 @@ impl JudgeEngine {
                 std::iter::once(head).chain(end)
             })
         })
+    }
+
+    /// Every judgment the run has counted, in the order it counted them. See [`JudgedNote`].
+    pub fn judged(&self) -> &[JudgedNote] {
+        &self.judged
+    }
+
+    /// The long notes `lane` has in hand right now. A lane the chart does not have has none.
+    pub fn long_note(&self, lane: usize) -> LaneLongNote {
+        let head_us = |index: usize| self.lanes.get(lane).and_then(|lane| lane.notes.get(index)).map(|note| note.head_us);
+        self.holds
+            .get(lane)
+            .map_or_else(LaneLongNote::default, |hold| LaneLongNote { processing: hold.note.and_then(head_us), passing: hold.passing.and_then(head_us) })
     }
 
     pub fn press(&mut self, lane: usize, press_us: i64) -> Option<JudgeResult> {
@@ -953,6 +998,7 @@ impl JudgeEngine {
         }
         self.apply(judge);
         self.record_timing(judge, delta_us);
+        self.judged.push(JudgedNote { lane, judge, delta_us, combo: self.combo });
     }
 
     fn apply(&mut self, judge: Judge) {

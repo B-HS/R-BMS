@@ -17,9 +17,8 @@
 //! ([`EVENT_ROUTES`], [`WRITE_ROUTES`]), a sound to the sound system, and an id nobody owns goes
 //! nowhere and says nothing, as the reference lets an event no screen defines pass.
 //!
-//! Every skin screen is drawn through this host. Until each cluster has the state it reads, the
-//! screen also hands over the adapter it was drawn from before ([`ScreenHost::fallback`]), and an id
-//! no cluster knows is answered by that.
+//! Every skin screen is drawn through this host and nothing stands behind it: a screen fills in the
+//! clusters it has state for, and what no cluster knows reads as absent on every screen alike.
 
 pub mod audio;
 pub mod chart;
@@ -321,11 +320,29 @@ pub const ROUTES: &[Route] = &[
     Route::band(IdSpace::Boolean, OPTION_2P_EARLY, OPTION_2P_LATE, Cluster::Play),
     Route::band(IdSpace::Boolean, OPTION_3P_EARLY, OPTION_3P_LATE, Cluster::Play),
     Route::band(IdSpace::Boolean, OPTION_LANECOVER1_CHANGING, OPTION_HIDDEN1_ON, Cluster::Play),
+    Route::band(IdSpace::Boolean, OPTION_AUTOPLAYOFF, OPTION_AUTOPLAYON, Cluster::Play),
+    Route::band(IdSpace::Boolean, OPTION_BGAOFF, OPTION_BGAON, Cluster::Play),
+    Route::band(IdSpace::Boolean, OPTION_GAUGE_GROOVE, OPTION_GAUGE_HARD, Cluster::Play),
+    Route::one(IdSpace::Boolean, OPTION_GAUGE_EX, Cluster::Play),
+    Route::one(IdSpace::Boolean, OPTION_1P_BORDER_OR_MORE, Cluster::Play),
+    Route::one(IdSpace::Boolean, OPTION_STATE_PRACTICE, Cluster::Play),
+    Route::one(IdSpace::Boolean, OPTION_REPLAY_OFF, Cluster::Play),
+    Route::one(IdSpace::Boolean, OPTION_REPLAY_PLAYING, Cluster::Play),
+    Route::one(IdSpace::Boolean, OPTION_CONSTANT, Cluster::Play),
+    Route::one(IdSpace::Integer, NUMBER_HISPEED_LR2, Cluster::Play),
+    Route::one(IdSpace::Integer, NUMBER_JUDGETIMING, Cluster::Play),
+    Route::band(IdSpace::Integer, NUMBER_NOWBPM, NUMBER_TIMELEFT_SECOND, Cluster::Play),
+    Route::band(IdSpace::Integer, NUMBER_HISPEED, NUMBER_DURATION_GREEN, Cluster::Play),
+    Route::one(IdSpace::Float, FLOAT_HISPEED, Cluster::Play),
     Route::one(IdSpace::Integer, NUMBER_LANECOVER1, Cluster::Play),
     Route::band(IdSpace::Integer, NUMBER_LIFT1, NUMBER_LANECOVER2, Cluster::Play),
     Route::band(IdSpace::Integer, VALUE_JUDGE_1P_DURATION, VALUE_JUDGE_3P_DURATION, Cluster::Play),
     Route::band(IdSpace::Integer, NUMBER_DURATION_LANECOVER_ON, NUMBER_MAXBPM_DURATION_GREEN_LANECOVER_OFF, Cluster::Play),
-    Route::band(IdSpace::Rate, RATE_LANECOVER, RATE_LANECOVER2, Cluster::Play),
+    Route::band(IdSpace::Rate, RATE_LANECOVER, RATE_MUSIC_PROGRESS, Cluster::Play),
+    Route::one(IdSpace::Rate, RATE_MUSIC_PROGRESS_BAR, Cluster::Play),
+    Route::band(IdSpace::ImageIndex, BUTTON_GAUGE_1P, BUTTON_RANDOM_2P, Cluster::Play),
+    Route::band(IdSpace::ImageIndex, BUTTON_DPOPTION, BUTTON_HSFIX, Cluster::Play),
+    Route::band(IdSpace::ImageIndex, BUTTON_ASSIST_EXJUDGE, BUTTON_LNMODE, Cluster::Play),
     Route::band(IdSpace::ImageIndex, VALUE_JUDGE_1P_SCRATCH, VALUE_JUDGE_2P_KEY9, Cluster::Play),
     Route::band(IdSpace::ImageIndex, VALUE_JUDGE_1P_KEY10, VALUE_JUDGE_2P_KEY99, Cluster::Play),
     Route::band(IdSpace::Offset, OFFSET_SCRATCHANGLE_1P, OFFSET_HIDDEN_COVER, Cluster::Play),
@@ -766,13 +783,17 @@ pub struct ScreenHost<'a> {
     /// The player's own nudges for the document being drawn, asked after the offsets the game
     /// itself sets.
     pub offsets: Option<&'a dyn OffsetSource>,
+    /// The offsets the game itself sets on the play screen -- the turntable angles, the lift, the
+    /// lane cover and the hidden cover -- asked before anything else for an offset. One it does not
+    /// hold is left to the clusters and then to the player's own nudges.
+    pub play_offsets: Option<&'a play_timers::PlayOffsets>,
     /// Which kind of screen this is, which decides the options that are settled once on it. `None`
     /// settles nothing once.
     pub static_screen: Option<StaticScreen>,
     /// The window size in pixels, or `None` for the contract's default.
     pub window: Option<(i32, i32)>,
     /// The keys that are down, asked before anything else for a key. `None` leaves the question to
-    /// the clusters and the older state.
+    /// the clusters.
     pub keys: Option<&'a dyn HeldKeyQuery>,
     pub chart: chart::ChartState<'a>,
     pub score: score::ScoreState<'a>,
@@ -785,10 +806,6 @@ pub struct ScreenHost<'a> {
     pub skin_config: skin_config::SkinConfigState<'a>,
     pub keyconfig: keyconfig::KeyConfigState<'a>,
     pub loading: loading::LoadingState,
-    /// The host this screen was drawn from before the clusters existed, asked for whatever no
-    /// cluster knows. Its answer to a read is taken as it stands, absent value included; what a
-    /// skin tells the game is never passed on to it.
-    pub fallback: Option<&'a dyn SkinHost>,
     /// What the skin told the game to do this frame, oldest first.
     calls: RefCell<Vec<HostCall>>,
 }
@@ -800,6 +817,7 @@ impl<'a> ScreenHost<'a> {
             now_us,
             timers,
             offsets: None,
+            play_offsets: None,
             static_screen: None,
             window: None,
             keys: None,
@@ -814,7 +832,6 @@ impl<'a> ScreenHost<'a> {
             skin_config: skin_config::SkinConfigState::default(),
             keyconfig: keyconfig::KeyConfigState::default(),
             loading: loading::LoadingState::default(),
-            fallback: None,
             calls: RefCell::new(Vec::new()),
         }
     }
@@ -872,6 +889,14 @@ impl<'a> ScreenHost<'a> {
         self.ir.browser = Some(shown.ir);
     }
 
+    /// Puts the play screen's frame on this host: the run so far for cluster B, the judgement on
+    /// show and the lanes for clusters C and D, and the load the screen is in for cluster M.
+    pub fn show_play(&mut self, shown: &'a play::PlayShown) {
+        self.score = score::ScoreState::of_play(&shown.run, shown.gauge);
+        self.play = play::PlayState::of(shown);
+        self.loading = shown.loading();
+    }
+
     /// Records one thing the skin told the game to do.
     fn record(&self, call: HostCall) {
         self.calls.borrow_mut().push(call);
@@ -886,8 +911,9 @@ impl std::fmt::Debug for ScreenHost<'_> {
 
 impl OffsetSource for ScreenHost<'_> {
     fn offset(&self, id: i32) -> Option<SkinOffset> {
-        self.ask(IdSpace::Offset, id, |cluster| cluster.offset(id))
-            .or_else(|| self.fallback.and_then(|older| older.offset(id)))
+        self.play_offsets
+            .and_then(|play| play.offset(id))
+            .or_else(|| self.ask(IdSpace::Offset, id, |cluster| cluster.offset(id)))
             .or_else(|| self.offsets.and_then(|nudges| nudges.offset(id)))
     }
 }
@@ -895,10 +921,7 @@ impl OffsetSource for ScreenHost<'_> {
 impl DrawStateSource for ScreenHost<'_> {
     fn boolean(&self, id: i32) -> Option<bool> {
         let asked = normalize_boolean_id(id);
-        match self.ask(IdSpace::Boolean, asked, |cluster| cluster.boolean(asked)) {
-            Some(answer) => Some(if id < 0 { !answer } else { answer }),
-            None => self.fallback.and_then(|older| older.boolean(id)),
-        }
+        self.ask(IdSpace::Boolean, asked, |cluster| cluster.boolean(asked)).map(|answer| if id < 0 { !answer } else { answer })
     }
 }
 
@@ -908,28 +931,23 @@ impl SkinHost for ScreenHost<'_> {
     }
 
     fn integer(&self, id: i32) -> i32 {
-        self.ask(IdSpace::Integer, id, |cluster| cluster.integer(id)).or_else(|| self.fallback.map(|older| older.integer(id))).unwrap_or(INTEGER_ABSENT)
+        self.ask(IdSpace::Integer, id, |cluster| cluster.integer(id)).unwrap_or(INTEGER_ABSENT)
     }
 
     fn image_index(&self, id: i32) -> i32 {
-        self.ask(IdSpace::ImageIndex, id, |cluster| cluster.image_index(id))
-            .or_else(|| self.fallback.map(|older| older.image_index(id)))
-            .unwrap_or(IMAGE_INDEX_ABSENT)
+        self.ask(IdSpace::ImageIndex, id, |cluster| cluster.image_index(id)).unwrap_or(IMAGE_INDEX_ABSENT)
     }
 
     fn rate(&self, id: i32) -> Option<f32> {
-        self.ask(IdSpace::Rate, id, |cluster| cluster.rate(id)).or_else(|| self.fallback.and_then(|older| older.rate(id)))
+        self.ask(IdSpace::Rate, id, |cluster| cluster.rate(id))
     }
 
     fn float(&self, id: i32) -> f32 {
-        self.ask(IdSpace::Float, id, |cluster| cluster.float(id))
-            .or_else(|| self.ask(IdSpace::Rate, id, |cluster| cluster.rate(id)))
-            .or_else(|| self.fallback.map(|older| older.float(id)))
-            .unwrap_or(FLOAT_ABSENT)
+        self.ask(IdSpace::Float, id, |cluster| cluster.float(id)).or_else(|| self.ask(IdSpace::Rate, id, |cluster| cluster.rate(id))).unwrap_or(FLOAT_ABSENT)
     }
 
     fn text(&self, id: i32) -> Cow<'_, str> {
-        self.ask(IdSpace::Text, id, |cluster| cluster.text(id)).or_else(|| self.fallback.map(|older| older.text(id))).unwrap_or(Cow::Borrowed(TEXT_ABSENT))
+        self.ask(IdSpace::Text, id, |cluster| cluster.text(id)).unwrap_or(Cow::Borrowed(TEXT_ABSENT))
     }
 
     fn timer_us(&self, id: i32) -> i64 {
@@ -962,11 +980,7 @@ impl SkinHost for ScreenHost<'_> {
     }
 
     fn key_pressed(&self, code: i32) -> bool {
-        self.keys
-            .map(|keys| keys.key_pressed(code))
-            .or_else(|| self.system.key_pressed(code))
-            .or_else(|| self.fallback.map(|older| older.key_pressed(code)))
-            .unwrap_or_default()
+        self.keys.map(|keys| keys.key_pressed(code)).or_else(|| self.system.key_pressed(code)).unwrap_or_default()
     }
 
     fn screen_size(&self) -> (i32, i32) {
@@ -974,23 +988,23 @@ impl SkinHost for ScreenHost<'_> {
     }
 
     fn gauge(&self) -> f32 {
-        self.score.gauge().or_else(|| self.fallback.map(|older| older.gauge())).unwrap_or_default()
+        self.score.gauge().unwrap_or_default()
     }
 
     fn gauge_type(&self) -> i32 {
-        self.score.gauge_type().or_else(|| self.fallback.map(|older| older.gauge_type())).unwrap_or_default()
+        self.score.gauge_type().unwrap_or_default()
     }
 
     fn judge(&self, judge: i32) -> i32 {
-        self.score.judge(judge).or_else(|| self.fallback.map(|older| older.judge(judge))).unwrap_or_default()
+        self.score.judge(judge).unwrap_or_default()
     }
 
     fn score(&self, slot: ScoreSlot) -> ScoreSnapshot {
-        self.score.score(slot).or_else(|| self.fallback.map(|older| older.score(slot))).unwrap_or_default()
+        self.score.score(slot).unwrap_or_default()
     }
 
     fn volume(&self, bus: VolumeBus) -> f32 {
-        self.system.volume(bus).or_else(|| self.fallback.map(|older| older.volume(bus))).unwrap_or_default()
+        self.system.volume(bus).unwrap_or_default()
     }
 
     fn set_volume(&self, bus: VolumeBus, value: f32) {

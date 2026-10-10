@@ -10,7 +10,9 @@
 //!
 //! A destination's own colour modulates whatever the record named, so a document fades a whole graph
 //! out through the destination it placed it at and leaves it alone by drawing it white, which is
-//! what an unstated destination colour already is.
+//! what an unstated destination colour already is. The two visualisers keep the part of that which
+//! the reference keeps: the ground they paint is tinted by the destination like any image, and the
+//! lines the timing visualiser lays over it are not.
 //!
 //! The graphs the reference paints into a pixmap of their own -- the gauge history, the judgement
 //! spread, the tempo timeline and the timing distribution -- are the exception: each uploads its
@@ -19,8 +21,8 @@
 //! here: [`Layer`], one pixmap's life as a texture, and [`draw_layer`], which fits a texture to a
 //! rectangle.
 //!
-//! What is shared between two or more kinds stays here: reading a colour, the plot rectangle, an
-//! upright line, and the ruler arithmetic the two visualisers have in common.
+//! What is shared between two or more kinds stays here: reading a colour, the plot rectangle, and the
+//! arithmetic the two visualisers have in common.
 
 mod bpm;
 mod gauge_graph;
@@ -36,11 +38,10 @@ use rbms_skin::dst::SkinRect;
 use rbms_skin::loader::{Filtering, LoadedSkin, filtering_for, stretch_rect};
 
 use super::SkinAssets;
-use super::color::parse_hex_color;
 use super::draw::Placement;
 use super::object::Body;
 use super::textures::Source;
-use crate::{Color, Rect, Renderer, TextureFilter, TextureId, UvRect};
+use crate::{Rect, Renderer, TextureFilter, TextureId, UvRect};
 use pixmap::{Pixmap, Rgba};
 
 pub use bpm::BpmTimeline;
@@ -55,10 +56,6 @@ pub(crate) use timing_dist::{TimingDistributionBody, draw_timing_distribution};
 pub use timing_vis::RecentHits;
 pub(crate) use timing_vis::{TimingVisualizerBody, draw_timing_visualizer};
 
-/// How many judgements the visualiser palettes name: they stop at a poor, because a miss is what a
-/// note that was never hit takes and a hit error is only recorded for a note that was.
-const VISUALIZER_JUDGEMENTS: usize = 5;
-
 /// Tells one graph object's textures from another's in the renderer's registry.
 static NEXT_GRAPH_SERIAL: AtomicU32 = AtomicU32::new(0);
 
@@ -66,12 +63,6 @@ static NEXT_GRAPH_SERIAL: AtomicU32 = AtomicU32::new(0);
 fn next_serial() -> u32 {
     NEXT_GRAPH_SERIAL.fetch_add(1, Ordering::Relaxed)
 }
-
-/// The colour a graph falls back to when the document wrote something that is not one.
-const FALLBACK_COLOR: Color = Color::WHITE;
-
-/// Thinnest a line is drawn, so a document that asked for none still leaves a mark.
-const MIN_LINE_W: f32 = 1.0;
 
 /// Hex digits a colour's three channels are written in.
 const COLOR_DIGITS: usize = 6;
@@ -101,27 +92,57 @@ fn reference_color(text: &str) -> Option<Rgba> {
     Some([channel(0)?, channel(1)?, channel(2)?, alpha])
 }
 
-/// The colour the document wrote for `what`, or a plain white one with a warning when the text is
-/// not a colour at all.
-fn color_of(text: &str, what: &str, id: &str, warnings: &mut Vec<String>) -> Color {
-    match parse_hex_color(text) {
-        Some(color) => color,
-        None => {
-            warnings.push(format!("graph {id:?} writes its {what} as {text:?}, which is not a colour"));
-            FALLBACK_COLOR
-        }
-    }
+/// How many judgements the visualiser palettes name: they stop at a poor, because a miss is what a
+/// note that was never hit takes and a hit error is only recorded for a note that was.
+const VISUALIZER_JUDGEMENTS: usize = 5;
+
+/// How many recent hits the reference keeps (`JudgeManager.recentJudges`), which is also how many
+/// the timing visualiser draws.
+const RECENT_JUDGES: usize = 100;
+
+/// The first judgement the reference does not record a hit error for: poor (`judge < 4`).
+const FIRST_UNRECORDED_JUDGE: u8 = 4;
+
+/// The fewest and the most pixels a visualiser's lines are thick (`MathUtils.clamp(lineWidth, 1, 4)`).
+const MIN_LINE_WIDTH: i32 = 1;
+const MAX_LINE_WIDTH: i32 = 4;
+
+/// What a visualiser colour that is not hex digits, or is fewer than six of them, reads as: opaque
+/// red (`colorStringValidation`).
+const INVALID_VISUALIZER_COLOR: Rgba = [u8::MAX, 0, 0, u8::MAX];
+
+/// The colour of a translucent pixel that blends away: the "clear" the reference's palette puts
+/// where a document asked for its poor window to be see-through.
+const CLEAR: Rgba = [0; 4];
+
+/// The colour a visualiser record wrote for `what`, validated the way the reference validates it
+/// (`colorStringValidation`): anything that is not at least six hex digits and nothing else is
+/// opaque red, with a warning here where the reference says nothing.
+fn visualizer_color(text: &str, what: &str, id: &str, warnings: &mut Vec<String>) -> Rgba {
+    let valid = text.len() >= COLOR_DIGITS && text.bytes().all(|byte| byte.is_ascii_hexdigit());
+    reference_color(text).filter(|_| valid).unwrap_or_else(|| {
+        warnings.push(format!("visualiser {id:?} writes its {what} as {text:?}, which is not a colour, so it is drawn in red"));
+        INVALID_VISUALIZER_COLOR
+    })
 }
 
-/// The five judgement colours a visualiser palette names, best first.
-fn visualizer_palette(colors: [&str; VISUALIZER_JUDGEMENTS], id: &str, warnings: &mut Vec<String>) -> [Color; VISUALIZER_JUDGEMENTS] {
+/// The five judgement colours a visualiser record names, best first, with the poor one cleared when
+/// the record asks for it (`transparent == 1`).
+fn visualizer_palette(colors: [&str; VISUALIZER_JUDGEMENTS], transparent: i32, id: &str, warnings: &mut Vec<String>) -> [Rgba; VISUALIZER_JUDGEMENTS] {
     const NAMES: [&str; VISUALIZER_JUDGEMENTS] = ["PGColor", "GRColor", "GDColor", "BDColor", "PRColor"];
-    std::array::from_fn(|index| color_of(colors[index], NAMES[index], id, warnings))
+    let poor = VISUALIZER_JUDGEMENTS - 1;
+    std::array::from_fn(|index| if index == poor && transparent == 1 { CLEAR } else { visualizer_color(colors[index], NAMES[index], id, warnings) })
 }
 
-/// How thick a document asked one of a graph's lines to be.
-fn line_width(declared: i32) -> f32 {
-    (declared as f32).max(MIN_LINE_W)
+/// How thick a visualiser's lines are: the record's `lineWidth` held between one and four.
+fn visualizer_line_width(declared: i32) -> i32 {
+    declared.clamp(MIN_LINE_WIDTH, MAX_LINE_WIDTH)
+}
+
+/// How many pixels a millisecond of error is wide on a visualiser (`judgeWidthRate`): the record's
+/// `width` over the number of milliseconds on the ruler, both sides and the middle one.
+fn visualizer_rate(width: i32, center: i32) -> f32 {
+    width as f32 / center.wrapping_mul(2).wrapping_add(1) as f32
 }
 
 /// The screen rectangle a graph plots inside, or `None` when its destination has no extent this
@@ -131,14 +152,22 @@ fn plot_of(place: &Placement<'_>, rect: SkinRect) -> Option<Rect> {
     (dst.w > 0.0 && dst.h > 0.0).then_some(dst)
 }
 
-/// Draws one upright line across a plot, centred on `x`.
-fn draw_column<R: Renderer>(r: &mut R, plot: Rect, x: f32, width: f32, color: Color) {
-    r.fill_rect(Rect::new(x - width * 0.5, plot.y, width, plot.h), color);
+/// The screen rectangle a visualiser lays itself over, which keeps the sign of the destination's
+/// width and height: a document mirrors a visualiser by giving it a negative extent, and the
+/// reference draws it so. `None` when the destination has no extent or none that is a number.
+fn signed_plot_of(place: &Placement<'_>, rect: SkinRect) -> Option<Rect> {
+    let dst = place.viewport.place(rect);
+    let extent = |size: f32| size.is_finite() && size != 0.0;
+    (extent(dst.w) && extent(dst.h) && dst.x.is_finite() && dst.y.is_finite()).then_some(dst)
 }
 
-/// How far from the middle of a ruler one timing error lands, in pixels.
-fn error_offset(plot: Rect, error_ms: f32, window_ms: f32) -> f32 {
-    plot.w * 0.5 * (error_ms / window_ms).clamp(-1.0, 1.0)
+/// The document rectangle that lands on `placed`, a screen rectangle, once the viewport has placed
+/// it: the way back from `SkinViewport::place`, for a piece the reference positions in screen
+/// pixels but whose drawing is shared with every other image. `None` for a screen with no extent.
+fn document_rect_of(place: &Placement<'_>, placed: Rect) -> Option<SkinRect> {
+    let (scale_x, scale_y) = (place.viewport.scale_x(), place.viewport.scale_y());
+    (scale_x > 0.0 && scale_y > 0.0)
+        .then(|| SkinRect::new(placed.x / scale_x, place.viewport.document_y(placed.y + placed.h), placed.w / scale_x, placed.h / scale_y))
 }
 
 /// Which way up a pixmap is uploaded.
@@ -217,6 +246,8 @@ pub(crate) fn release<R: Renderer>(body: &Body, r: &mut R) {
         Body::JudgeGraph(body) => body.release(r),
         Body::BpmGraph(body) => body.release(r),
         Body::TimingDistribution(body) => body.release(r),
+        Body::TimingVisualizer(body) => body.release(r),
+        Body::HitError(body) => body.release(r),
         _ => {}
     }
 }

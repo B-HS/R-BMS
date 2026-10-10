@@ -3,7 +3,7 @@
 #![allow(clippy::wildcard_imports)]
 use crate::assets::{bga_jobs, spawn_bga_decode};
 use crate::skin_host::overview::ChartOverview;
-use crate::stage::loading::BgaLoad;
+use crate::stage::loading::{BgaLoad, ChartAssets};
 use crate::stage::{KeysoundLoad, LoadingState, PlayState, Stage, StageId, Transition};
 use crate::*;
 
@@ -415,7 +415,10 @@ impl AppShared {
         println!("playing '{}' [{}] ({} notes) — {}", model.meta.title, mode.name, rbms_chart::count_playable_notes(&model), status);
         let bga_cancel = Arc::new(AtomicBool::new(false));
         let mut bga: Option<BgaLoad> = None;
-        if self.config.display.bga && self.skin.bga.is_some() {
+        let skin_places_bga =
+            self.has_play_scene().then(|| mode_skin_type(mode).and_then(|screen| self.skins.document(screen)).is_none_or(|skin| skin.def.bga.is_some()));
+        let built_in_slot = skin_places_bga.is_none() && self.skin.bga.is_some();
+        if crate::assets::wants_bga_pictures(self.config.display.bga, skin_places_bga, built_in_slot) {
             let jobs = bga_jobs(&model.bgamap, &dir);
             let total = jobs.len();
             if total > 0 {
@@ -444,9 +447,63 @@ impl AppShared {
         Some(LoadedChart { chart: PendingChart { session, lntype, ln_mode_key }, bga, keysounds, overview })
     }
 
+    /// Whether a skin can draw the play screen of a chart of `mode`: one is chosen for the mode, and
+    /// it has not already been found unreadable.
+    ///
+    /// This is what decides which way a run goes. With a skin the play screen runs the reference's
+    /// states -- it loads, readies, plays and closes on the skin's own times -- and without one the
+    /// chart is waited for on the LOADING screen and the run starts the moment the screen is up, as
+    /// it always did. A skin that failed to read is not tried again until the player moves a choice
+    /// or reloads, so a broken play skin costs one run a moment and no run after it anything.
+    pub(crate) fn has_play_scene_for(&self, mode: rbms_model::Mode) -> bool {
+        mode_skin_type(mode).is_some_and(|screen| {
+            self.skins.document_path(&self.config, screen).is_some()
+                && (self.skins.document(screen).is_some() || self.skins.is_waiting(screen) || self.skins.needs_reload_for(&self.config, screen))
+        })
+    }
+
+    /// [`AppShared::has_play_scene_for`] the chart in hand.
+    pub(crate) fn has_play_scene(&self) -> bool {
+        self.has_play_scene_for(self.mode)
+    }
+
+    /// Put the scene clock at `at_us`, for a run whose own clock is being driven by hand: a replay
+    /// that is paused, slowed or scrubbed carries the scene with it, so what a skin animates on its
+    /// timers stands still, slows and jumps with the chart. A scene held still for its document is
+    /// left held.
+    pub(crate) fn set_skin_scene_clock(&mut self, at_us: i64) {
+        if self.skin_is_held() {
+            return;
+        }
+        let now = Instant::now();
+        self.scene_started = now.checked_sub(Duration::from_micros(u64::try_from(at_us).unwrap_or_default())).unwrap_or(now);
+    }
+
+    /// Cut every keysound of `model` that is still sounding, which is what the reference does the
+    /// moment a run fails (`BMSPlayer.java:657-659`). The bank itself stays loaded.
+    pub(crate) fn stop_chart_sounds(&mut self, model: &rbms_model::Model) {
+        let Some(audio) = self.audio.as_mut() else {
+            return;
+        };
+        for wav in (0..model.wavmap.len()).filter(|wav| !model.wavmap[*wav].is_empty()) {
+            if let Ok(wav) = u32::try_from(wav) {
+                audio.stop(crate::play_sink::play_sample_id(wav));
+            }
+        }
+    }
+
     /// Enter a chart that has just been parsed: keep the LOADING screen up while its files decode,
-    /// or start play right away when there is nothing left to wait for.
+    /// or start play right away when there is nothing left to wait for. A chart whose play screen a
+    /// skin draws goes to that screen at once instead, and waits there.
     pub(crate) fn enter_loaded_chart(&mut self, loaded: LoadedChart) -> Stage {
+        if ChartAssets::preloads_on_the_play_screen(self) {
+            let nothing_to_decode = loaded.bga.is_none() && loaded.keysounds.is_none();
+            let mut assets = ChartAssets::of(loaded);
+            if nothing_to_decode {
+                assets.mark_announced();
+            }
+            return assets.enter_preloading(self);
+        }
         if loaded.bga.is_none() && loaded.keysounds.is_none() {
             let mut images = std::collections::HashMap::new();
             if let Some(stage) = self.practice_stage_if_requested(&mut images) {

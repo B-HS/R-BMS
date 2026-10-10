@@ -1,5 +1,8 @@
+use rbms_render::result::ResultView;
 use rbms_skin::dst::DrawStateSource;
-use rbms_skin::property::generated::{BUTTON_LNMODE, FLOAT_LOADING_PROGRESS, NUMBER_PLAYLEVEL, RATE_LOAD_PROGRESS};
+use rbms_skin::loader::SKIN_TYPE_PLAY_7KEYS;
+use rbms_skin::property::generated::{BUTTON_LNMODE, FLOAT_LOADING_PROGRESS, NUMBER_PLAYLEVEL, OFFSET_ALL, RATE_LOAD_PROGRESS};
+use rbms_skin::property::{FLOAT_ABSENT, IMAGE_INDEX_ABSENT, INTEGER_ABSENT, SkinHost};
 use rbms_skin::timer::{TIMER_OFF, TimerId};
 
 use super::*;
@@ -59,11 +62,41 @@ fn a_document_nudge_is_read_from_the_choices_stored_for_that_document() {
     let mut document = SkinCustomisation::default();
     document.offsets.insert(46, nudge);
 
-    let offsets = DocumentOffsets { document: Some(&document) };
+    let offsets = DocumentOffsets::drawn_at(Some(&document), (1280.0, 720.0), (1280, 720));
     assert_eq!(offsets.offset(46), Some(nudge), "a row the document carries is read");
     assert_eq!(offsets.offset(48), None, "a row the document does not carry is answered anyway");
 
     assert_eq!(DocumentOffsets::default().offset(46), None, "a document nobody has customised nudges nothing");
+}
+
+/// A nudge is so many pixels of what the screen is drawn on, whatever size the document was authored
+/// at: a document drawn at two thirds of its size is told a nudge half as large again in its own
+/// units, which the drawing then scales back to the pixels that were stored. An angle and an alpha
+/// are not lengths, and the offset that moves the whole screen is a share of it; none of them is
+/// touched.
+#[test]
+fn a_nudge_is_pixels_of_the_target_whatever_size_the_document_is_drawn_at() {
+    const AUTHORED: (f32, f32) = (1920.0, 1080.0);
+    const SMALLER: (u32, u32) = (1280, 720);
+    const SCALE: f32 = 1.5;
+    let nudge = SkinOffset { x: 30.0, y: -12.0, w: 6.0, h: 4.0, r: 45.0, a: -100.0 };
+    let mut document = SkinCustomisation::default();
+    document.offsets.insert(46, nudge);
+    document.offsets.insert(OFFSET_ALL, nudge);
+
+    let full = DocumentOffsets::drawn_at(Some(&document), AUTHORED, (1920, 1080));
+    assert_eq!(full.offset(46), Some(nudge), "a document drawn at its own size reads a nudge as stored");
+
+    let smaller = DocumentOffsets::drawn_at(Some(&document), AUTHORED, SMALLER);
+    let told = smaller.offset(46).expect("the row is stored");
+    assert_eq!((told.x, told.y, told.w, told.h), (nudge.x * SCALE, nudge.y * SCALE, nudge.w * SCALE, nudge.h * SCALE));
+    assert_eq!((told.r, told.a), (nudge.r, nudge.a), "an angle or an alpha was scaled like a length");
+    let drawn_scale = SMALLER.0 as f32 / AUTHORED.0;
+    assert_eq!(told.x * drawn_scale, nudge.x, "the nudge does not come to the stored pixels once the document is drawn");
+    assert_eq!(smaller.offset(OFFSET_ALL), Some(nudge), "the whole-screen offset is a share of the screen, not a length");
+
+    let unknown = DocumentOffsets::drawn_at(Some(&document), (0.0, 0.0), (0, 0));
+    assert_eq!(unknown.offset(46), Some(nudge), "a document with no size to go by is read one to one");
 }
 
 /// The `STRING_TITLE` id, which the decide screen's state answers with the title it was handed.
@@ -103,14 +136,22 @@ end
 return { type = 6, name = "Titled", w = 1280, h = 720 }
 "#;
 
+/// The file a pack's decide-screen skin is written to.
+const DECIDE_SKIN_FILE: &str = "decide.luaskin";
+
 /// An app whose skin pack is one folder holding one decide-screen skin, and that skin's path.
 fn app_with_decide_skin(tag: &str, source: &str) -> (crate::App, std::path::PathBuf) {
+    app_with_pack_skin(tag, DECIDE_SKIN_FILE, source)
+}
+
+/// An app whose skin pack is one folder holding one skin under `file`, and that skin's path.
+fn app_with_pack_skin(tag: &str, file: &str, source: &str) -> (crate::App, std::path::PathBuf) {
     rbms_render::font::use_embedded_fonts_only();
     let home = std::env::temp_dir().join(format!("rbms-skin-screen-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&home);
     let pack = home.join("pack");
     std::fs::create_dir_all(&pack).expect("the pack folder is writable");
-    let document = pack.join("decide.luaskin");
+    let document = pack.join(file);
     std::fs::write(&document, source).expect("the skin is written");
     let mut config = crate::Config::default();
     config.skin.pack = Some(pack.to_string_lossy().into_owned());
@@ -284,34 +325,29 @@ fn a_frame_calls_a_skin_function_once_and_only_while_its_host_is_bound() {
 const RUNNING_TIMER: i32 = 1;
 const STARTED_US: i64 = 250_000;
 
-/// The option the decide screen's older state answers while its load is still running.
+/// An option the reference answers that a host with nothing on it has no cluster to answer from.
 const OPTION_NOW_LOADING: i32 = 80;
 
-/// The host a screen is drawn through answers from its clusters first, and until those are filled
-/// in the state the screen was drawn from before answers whatever they do not know. The scene's
-/// timers are the host's own all along.
+/// The host a screen is drawn through answers from its clusters and from nothing else: an id no
+/// cluster knows reads as the absent value of its kind, whichever way it is asked. The scene's
+/// timers are the host's own.
 #[test]
-fn an_id_no_cluster_knows_is_answered_by_the_state_the_screen_was_drawn_from_before() {
+fn an_id_no_cluster_knows_reads_as_absent_and_a_timer_is_read_from_the_scenes_own_table() {
     let mut timers = TimerState::new();
     timers.set_on(TimerId(RUNNING_TIMER), STARTED_US);
-    let chart = DecideChart { artist: "Composer", level: 12, ..DecideChart::default() };
-    let older = DecideViewState { progress: 0.5, done: false, title: TITLE, chart, now_us: STARTED_US, offsets: None };
+    let host = ScreenHost::new(STARTED_US, &timers);
 
-    let mut host = ScreenHost::new(older.now_us(), &timers);
-    assert_eq!(host.text(STRING_TITLE), "", "with no state behind it the host knows no title");
+    assert_eq!(host.text(STRING_TITLE), "", "a host with no chart on it knows no title");
     assert_eq!(host.boolean(OPTION_NOW_LOADING), None);
+    assert_eq!(host.boolean(-OPTION_NOW_LOADING), None, "and negating an option nobody knows does not make it known");
+    assert_eq!(host.integer(NUMBER_PLAYLEVEL), INTEGER_ABSENT);
+    assert_eq!(host.rate(RATE_LOAD_PROGRESS), None);
+    assert_eq!(host.float(FLOAT_LOADING_PROGRESS).to_bits(), FLOAT_ABSENT.to_bits());
+    assert_eq!(host.image_index(BUTTON_LNMODE), IMAGE_INDEX_ABSENT);
 
-    host.fallback = Some(&older);
-    assert_eq!(host.text(STRING_TITLE), TITLE);
-    assert_eq!(host.boolean(OPTION_NOW_LOADING), Some(true));
-    assert_eq!(host.boolean(-OPTION_NOW_LOADING), Some(false), "a negated read reaches the older state with its sign");
-    assert_eq!(host.integer(NUMBER_PLAYLEVEL), 12);
-    assert_eq!(host.rate(RATE_LOAD_PROGRESS), Some(0.5));
-    assert_eq!(host.float(FLOAT_LOADING_PROGRESS), 0.5);
-    assert_eq!(host.image_index(BUTTON_LNMODE), 0, "an image no cluster picks for shows the first of its set, as the older state drew it");
-
-    assert_eq!(older.timer_us(RUNNING_TIMER), TIMER_OFF, "the older state never knew a timer");
-    assert_eq!(host.timer_us(RUNNING_TIMER), STARTED_US, "so a script's timer read comes from the scene's own table");
+    assert_eq!(host.now_us(), STARTED_US);
+    assert_eq!(host.timer_us(RUNNING_TIMER), STARTED_US, "a script's timer read comes from the scene's own table");
+    assert_eq!(host.timer_us(RUNNING_TIMER + 1), TIMER_OFF);
 }
 
 /// The two colours the picked skin's image set is made of, neither of which a built-in screen paints.
@@ -340,10 +376,11 @@ end
 return skin
 "#;
 
-/// An image picked by an index no cluster answers yet is still drawn, showing the first of its set:
-/// the state the screen was drawn from before stands in for the cluster, and it never hid an image.
+/// An image picked by one of the player's settings is drawn with the image that setting names, on a
+/// screen that is neither the browser nor a result: the reference reads the setting off the player's
+/// configuration whichever screen is up.
 #[test]
-fn an_image_picked_by_an_index_no_cluster_knows_is_drawn_with_its_first_set() {
+fn an_image_picked_by_a_setting_is_drawn_with_the_image_the_setting_names() {
     let source = PICKED_DECIDE.replace("SET_SHEET", SET_SHEET).replace("SET_EDGE", &SET_EDGE.to_string()).replace("PICKED_BY", &BUTTON_LNMODE.to_string());
     let (mut app, document) = app_with_decide_skin("picked", &source);
     let sheet = image::RgbaImage::from_fn(SET_EDGE * 2, SET_EDGE, |x, _| {
@@ -357,7 +394,124 @@ fn an_image_picked_by_an_index_no_cluster_knows_is_drawn_with_its_first_set() {
     assert!(compiled, "the skin never compiled: {:?}", app.shared.skin_failure(SKIN_TYPE_DECIDE));
 
     assert_eq!(draw_decide(&mut app, &mut pixels, 1), vec![true], "a compiled skin did not draw its screen");
-    assert_eq!(pixels.pixel_at(UI_SIZE.0 / 2, UI_SIZE.1 / 2), FIRST_SET, "the image was not drawn with the first of its set");
+    assert_eq!(pixels.pixel_at(UI_SIZE.0 / 2, UI_SIZE.1 / 2), FIRST_SET, "the long note mode is the first of the three, and so is the image");
+
+    app.shared.config.judge.ln_mode = rbms_judge::ln::LnMode::ChargeNote;
+    assert_eq!(draw_decide(&mut app, &mut pixels, 1), vec![true]);
+    assert_eq!(pixels.pixel_at(UI_SIZE.0 / 2, UI_SIZE.1 / 2), SECOND_SET, "the image did not follow the setting it is picked by");
+}
+
+/// The file the whole-offset pack's play skin is written to.
+const WHOLE_PLAY_FILE: &str = "play7.luaskin";
+
+/// The colours the whole-offset skin paints: its ground over the whole screen, and one mark on it.
+const WHOLE_GROUND: crate::Color = crate::Color::rgb(20, 40, 80);
+const WHOLE_MARK: crate::Color = crate::Color::rgb(255, 255, 255);
+
+/// A seven-key play skin authored at the size it is drawn at, so a skin pixel is a screen pixel: a
+/// ground over the whole screen and a mark 128 by 72 whose bottom left corner is 256 in and 144 up.
+const WHOLE_PLAY: &str = r#"
+local skin = { type = 0, name = "Whole", w = 1280, h = 720 }
+if skin_config then
+    skin.destination = {
+        { id = -111, dst = { { x = 0, y = 0, w = 1280, h = 720, r = 20, g = 40, b = 80 } } },
+        { id = -111, dst = { { x = 256, y = 144, w = 128, h = 72, r = 255, g = 255, b = 255 } } },
+    }
+end
+return skin
+"#;
+
+/// What the SKIN tab calls the offset every play skin has for moving the whole screen, which it
+/// shows in capitals like every row.
+const WHOLE_OFFSET_ROW: &str = "ALL OFFSET(%)";
+
+/// A chart for the whole-offset skin's play screen to be drawn over.
+const WHOLE_CHART: &[u8] = b"#PLAYER 1\n#BPM 120\n#WAV01 a.wav\n#00111:01\n";
+
+/// Presses the SKIN tab's rows for the whole-screen offset of the seven-key play skin of `app`:
+/// each step is an axis and how many presses, to the right when positive and to the left when not.
+fn step_whole_offset(app: &mut crate::App, steps: &[(crate::skin_select::OffsetAxis, i32)]) {
+    app.shared.config.skin.screen = SKIN_TYPE_PLAY_7KEYS;
+    let rows = app.shared.skins.rows(&app.shared.config);
+    for (axis, presses) in steps {
+        let row = rows
+            .iter()
+            .copied()
+            .find(|row| {
+                matches!(row, crate::skin_select::SkinRow::Offset(_, on) if on == axis)
+                    && app.shared.skins.line(&app.shared.config, *row).0.contains(WHOLE_OFFSET_ROW)
+            })
+            .unwrap_or_else(|| panic!("the SKIN tab has no {axis:?} row for the whole-screen offset among {rows:?}"));
+        for _ in 0..presses.abs() {
+            assert!(app.shared.skins.step(&mut app.shared.config, row, presses.signum()), "the row did not move");
+        }
+    }
+}
+
+/// What a play screen nobody has played on yet shows of its run.
+fn unplayed_run() -> PlayShown {
+    let source = rbms_parser::parse_with(WHOLE_CHART, Default::default());
+    let session = rbms_play::PlaySession::new(rbms_chart::to_model(&source, rbms_model::Mode::BEAT_7K), rbms_play::SessionOptions::default());
+    PlayShown::of(&session, &crate::skin_host::play::PlayLive::default())
+}
+
+/// One frame of the seven-key play screen of `app` as its skin draws it, answering whether it did.
+fn play_frame(app: &mut crate::App, pixels: &mut crate::stage::HeadlessCanvas, shown: &PlayShown) -> bool {
+    let offsets = PlayOffsets::default();
+    let chart = ChartMeta { title: TITLE, ..ChartMeta::default() };
+    let mut canvas = Canvas::Headless(pixels);
+    app.shared.prepare_skin(&mut canvas, SKIN_TYPE_PLAY_7KEYS);
+    app.shared.draw_play_skin(&mut canvas, SKIN_TYPE_PLAY_7KEYS, &PlayDraw { chart: &chart, shown, offsets: &offsets, data: FrameData::default() })
+}
+
+/// Draws the play screen of the whole-offset skin after the player stepped the rows of its
+/// whole-screen offset on the SKIN tab by `steps`.
+fn whole_play_frame(tag: &str, steps: &[(crate::skin_select::OffsetAxis, i32)]) -> crate::stage::HeadlessCanvas {
+    let (mut app, _) = app_with_pack_skin(tag, WHOLE_PLAY_FILE, WHOLE_PLAY);
+    let settings = app.shared.settings_path.clone();
+    app.shared.skins.rescan(&settings, &app.shared.config);
+    step_whole_offset(&mut app, steps);
+
+    let shown = unplayed_run();
+    let mut pixels = crate::stage::HeadlessCanvas::new(UI_SIZE.0, UI_SIZE.1);
+    let began = Instant::now();
+    while !play_frame(&mut app, &mut pixels, &shown) {
+        assert!(began.elapsed() < DECODE_WAIT, "the play skin never drew: {:?}", app.shared.skin_failure(SKIN_TYPE_PLAY_7KEYS));
+        std::thread::sleep(DECODE_FRAME_PAUSE);
+    }
+    pixels
+}
+
+/// What the player sets on the SKIN tab's whole-screen offset rows moves and grows everything the
+/// play skin draws (`Skin.ensureRenderer`): X and Y are a share of the screen, with Y going up, and
+/// W and H stretch the screen away from its bottom left corner. What the moved screen no longer
+/// covers is left black.
+#[test]
+fn the_whole_screen_offset_set_on_the_skin_tab_moves_and_grows_the_play_screen() {
+    use crate::skin_select::OffsetAxis;
+    let black = crate::Color::rgb(0, 0, 0);
+
+    let at_rest = whole_play_frame("whole-rest", &[]);
+    assert_eq!(at_rest.pixel_at(320, 540), WHOLE_MARK, "the mark is not where the skin put it");
+    assert_eq!(at_rest.pixel_at(448, 468), WHOLE_GROUND);
+    assert_eq!(at_rest.pixel_at(60, 300), WHOLE_GROUND, "the ground does not cover the screen");
+
+    let moved = whole_play_frame("whole-moved", &[(OffsetAxis::X, 10), (OffsetAxis::Y, 10)]);
+    assert_eq!(moved.pixel_at(448, 468), WHOLE_MARK, "ten percent right and up is 128 and 72 pixels of a 1280 by 720 screen");
+    assert_eq!(moved.pixel_at(320, 540), WHOLE_GROUND, "the mark was also left where it had been");
+    assert_eq!(moved.pixel_at(60, 300), black, "the ground moved with the mark, and uncovered the left of the screen");
+    assert_eq!(moved.pixel_at(640, 700), black, "and the foot of it");
+
+    let grown = whole_play_frame("whole-grown", &[(OffsetAxis::X, 10), (OffsetAxis::Y, 10), (OffsetAxis::W, 50), (OffsetAxis::H, 50)]);
+    assert_eq!(
+        grown.pixel_at(608, 378),
+        WHOLE_MARK,
+        "half as large again from the bottom left, then moved: the mark spans 512 to 704 across and 324 to 432 down"
+    );
+    assert_eq!(grown.pixel_at(515, 327), WHOLE_MARK);
+    assert_eq!(grown.pixel_at(701, 429), WHOLE_MARK);
+    assert_eq!(grown.pixel_at(508, 378), WHOLE_GROUND, "the mark grew past its left edge");
+    assert_eq!(grown.pixel_at(448, 468), WHOLE_GROUND);
 }
 
 /// The file the pressed skin's one image source is written to, beside the skin, and its edge.
@@ -795,4 +949,68 @@ fn a_press_on_a_published_result_skin_s_menu_switch_switches_its_menu() {
     let keyed = menu_panel_difference(&switched, pixels.rgba());
     println!("the right arrow changed the menu panel in {keyed} of {panel} pixels");
     assert!(keyed as f64 > panel as f64 * PACK_MENU_CHANGE, "the skin polls the right arrow for its first menu, and holding it changed only {keyed} pixels");
+}
+
+/// What the player sets the published pack's whole-screen offset to for the capture below: a little
+/// to the right and up, and a fifth smaller.
+const PACK_WHOLE_STEPS: [(crate::skin_select::OffsetAxis, i32); 4] = [
+    (crate::skin_select::OffsetAxis::X, 5),
+    (crate::skin_select::OffsetAxis::Y, 5),
+    (crate::skin_select::OffsetAxis::W, -20),
+    (crate::skin_select::OffsetAxis::H, -20),
+];
+
+/// One frame of the published pack's seven-key play screen, a few seconds into its scene, with the
+/// whole-screen offset the SKIN tab was stepped to; `None` when the pack's play skin never drew.
+fn pack_play_frame(pack: &Path, tag: &str, steps: &[(crate::skin_select::OffsetAxis, i32)]) -> Option<Vec<u8>> {
+    rbms_render::font::use_embedded_fonts_only();
+    let home = std::env::temp_dir().join(format!("rbms-skin-screen-pack-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(&home).expect("the settings folder is writable");
+    let settings = home.join("settings.ron");
+    let mut config = crate::Config::default();
+    config.skin.pack = Some(pack.to_string_lossy().into_owned());
+    let mut app = crate::App::new(String::new(), config, crate::LaunchOptions::default(), settings.clone());
+    app.shared.skins.pin_seed(Some(PACK_SEED));
+    app.shared.skins.rescan(&settings, &app.shared.config);
+    step_whole_offset(&mut app, steps);
+
+    let shown = unplayed_run();
+    let mut pixels = crate::stage::HeadlessCanvas::new(PACK_SIZE.0, PACK_SIZE.1);
+    let began = Instant::now();
+    while !play_frame(&mut app, &mut pixels, &shown) {
+        if let Some(reason) = app.shared.skin_failure(SKIN_TYPE_PLAY_7KEYS) {
+            println!("the pack's play skin was not read: {reason}");
+            return None;
+        }
+        if began.elapsed() > PACK_LOAD_TIMEOUT {
+            println!("the pack's play skin was not read within {} seconds", PACK_LOAD_TIMEOUT.as_secs());
+            return None;
+        }
+        std::thread::sleep(DECODE_FRAME_PAUSE);
+    }
+    app.shared.age_skin_scene(PACK_SETTLED);
+    play_frame(&mut app, &mut pixels, &shown);
+    save_capture(tag, &pixels);
+    Some(pixels.rgba().to_vec())
+}
+
+/// A published play skin is drawn whole under the offset the SKIN tab's rows were stepped to: the
+/// frame it draws at rest and the one it draws moved and shrunk are saved side by side for a person
+/// to look at, and are not the same frame.
+///
+/// The pack is whatever [`SKIN_PACK_ENV`](crate::skin_select::SKIN_PACK_ENV) names; without it the
+/// test passes at once, and a pack with no seven-key play skin is reported and passed over.
+#[test]
+fn a_published_play_skin_is_moved_and_shrunk_whole_by_the_offset_set_on_the_skin_tab() {
+    let Some(pack) = std::env::var_os(crate::skin_select::SKIN_PACK_ENV).map(PathBuf::from) else {
+        return;
+    };
+    let Some(at_rest) = pack_play_frame(&pack, "play-whole-rest", &[]) else {
+        return;
+    };
+    let Some(moved) = pack_play_frame(&pack, "play-whole-offset", &PACK_WHOLE_STEPS) else {
+        return;
+    };
+    assert!(at_rest != moved, "the whole-screen offset left the pack's play screen where it was");
 }

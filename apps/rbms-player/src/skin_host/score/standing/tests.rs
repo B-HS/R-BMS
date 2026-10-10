@@ -132,3 +132,40 @@ fn a_rank_band_that_does_not_exist_holds_for_no_run() {
     assert!(!standing.best_rank_band(RANK_COUNT + 3));
     assert!(!standing.secured(RANK_STEP_COUNT));
 }
+
+#[test]
+fn a_run_not_yet_judged_has_the_zeros_of_a_fresh_field_and_only_the_targets_set() {
+    let untouched = ScoreSheet { notes: 10, ..ScoreSheet::default() };
+    let standing = ScoreStanding::before_first_judgement(&untouched, PACE);
+
+    assert_eq!((standing.now_point, standing.now_ex, standing.next_rank), (0, 0, 0));
+    assert_eq!((standing.rate, standing.rate_int, standing.rate_after_dot), (0.0, 0, 0));
+    assert_eq!((standing.now_rate, standing.now_rate_int, standing.now_rate_after_dot), (0.0, 0, 0), "not the full rate of a run with nothing gone by");
+    assert!(standing.rank.iter().chain(standing.now_rank.iter()).all(|reached| !*reached), "no rank is reached, not even the lowest");
+    assert_eq!((standing.now_best_score, standing.now_rival_score), (0, 0));
+    assert_eq!((standing.best_score, standing.best_rate_int, standing.rival_score, standing.rival_rate_int), (11, 55, 14, 70));
+    assert!(standing.best_rank_band(3), "the best score's rank stands from the start");
+}
+
+#[test]
+fn a_run_judged_once_is_updated_and_the_fresh_field_is_gone() {
+    let sheet = ScoreSheet { early: [0, 0, 0, 0, 1, 0], notes: 10, ..ScoreSheet::default() };
+    let standing = ScoreStanding::of(&sheet, 0, PACE);
+
+    assert_eq!(standing.now_rate, 1.0, "an empty POOR consumes no note, so nothing has gone by and the rate over them is whole");
+    assert!(standing.now_rank[0], "and the lowest rank is reached");
+}
+
+#[test]
+fn an_engines_tally_becomes_a_sheet_with_the_unreached_notes_counted_as_bad_poor() {
+    let model = rbms_chart::to_model(&rbms_parser::parse(b"#BPM 120\r\n#RANK 3\r\n#WAV01 a.wav\r\n#00111:01010101\r\n"), Mode::BEAT_7K);
+    let mut session = rbms_play::PlaySession::new(model, rbms_play::SessionOptions::default());
+    session.tick(rbms_play::SessionClock::at(1_000_000), &mut rbms_play::NullSink);
+    session.press(0, 2_000_000, &mut rbms_play::NullSink);
+
+    let sheet = ScoreSheet::of_engine(session.judge(), Mode::BEAT_7K);
+
+    assert_eq!((sheet.early, sheet.late), ([1, 0, 0, 0, 0, 0], [0; 6]));
+    assert_eq!((sheet.notes, sheet.max_combo, sheet.min_bp), (4, 1, 3), "the three notes it has not reached are bad-poor already");
+    assert_eq!(sheet.family, PointFamily::Beat7);
+}

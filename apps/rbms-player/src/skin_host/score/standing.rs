@@ -13,7 +13,7 @@
 //! only thing that differs: `pass_notes` is every note on a result screen and the notes gone by
 //! during play.
 
-use rbms_judge::{ClearType, clear_type_id};
+use rbms_judge::{ClearType, JudgeEngine, clear_type_id};
 use rbms_model::Mode;
 use rbms_play::{PlayRecord, RANK_STEP_COUNT};
 
@@ -120,6 +120,22 @@ impl ScoreSheet {
             min_bp: record.min_bp_with_unreached(),
             clear: clear_type_id(clear),
             family,
+        }
+    }
+
+    /// The sheet of a run in progress: what the judge engine has tallied so far, under the lamp the
+    /// gauge stands at, for a chart played in `mode`. The bad-poor count has every note the run has
+    /// not reached added, as it has when the reference closes the run (`BMSPlayer.java:909`).
+    pub fn of_engine(judge: &JudgeEngine, mode: Mode) -> ScoreSheet {
+        let [_, _, _, bad, poor, miss] = judge.counts;
+        ScoreSheet {
+            early: judge.early,
+            late: judge.late,
+            notes: judge.total_notes(),
+            max_combo: judge.max_combo,
+            min_bp: bad + poor + miss + judge.total_notes().saturating_sub(judge.total_judged()),
+            clear: clear_type_id(judge.clear_lamp()),
+            family: PointFamily::of_mode(mode),
         }
     }
 
@@ -274,6 +290,34 @@ impl ScoreStanding {
             rival_rate_after_dot,
             now_rival_score,
             now_rival_rate: paced_rate(now_rival_score),
+        }
+    }
+
+    /// The standing of a run that has not been judged yet, against `target`.
+    ///
+    /// The reference calls `update(score, notes)` only after a judgement, so before the first one
+    /// every figure it derives from the tally is still the zero of a fresh field: no points, no
+    /// rate (not the full one a run with no notes gone by gets once it has been updated), no rank
+    /// reached and no next rank. The best and the target are set at the start of the play
+    /// (`setTargetScore`) and stand from the first frame.
+    pub fn before_first_judgement(sheet: &ScoreSheet, target: TargetPace) -> ScoreStanding {
+        ScoreStanding {
+            now_point: 0,
+            now_ex: 0,
+            rate: 0.0,
+            rate_int: 0,
+            rate_after_dot: 0,
+            now_rate: 0.0,
+            now_rate_int: 0,
+            now_rate_after_dot: 0,
+            rank: [false; RANK_STEP_COUNT],
+            now_rank: [false; RANK_STEP_COUNT],
+            next_rank: 0,
+            now_best_score: 0,
+            now_best_rate: 0.0,
+            now_rival_score: 0,
+            now_rival_rate: 0.0,
+            ..ScoreStanding::of(sheet, 0, target)
         }
     }
 

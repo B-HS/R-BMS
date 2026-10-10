@@ -4,8 +4,9 @@
 //! rates, judgement counts, the best and the target, and the gauge `main_state` reports.
 //! [`standing`] holds the reference's `ScoreData` and `ScoreDataProperty` as plain values, and a
 //! [`RunScore`] is one of each. A finished run is borrowed from its
-//! [`ResultSnapshot`](super::result::snapshot::ResultSnapshot) ([`ScoreState::of_result`]); the play
-//! screen will lend the run so far the same way.
+//! [`ResultSnapshot`](super::result::snapshot::ResultSnapshot) ([`ScoreState::of_result`]); the run
+//! so far on the play screen is made from the live session every frame
+//! ([`RunScore::of_session`]) and lent the same way ([`ScoreState::of_play`]).
 //!
 //! What this cluster answers: numbers 71-72, 75, 80-89, 100-103, 105, 107-108, 110-116, 121-123,
 //! 128, 135-136, 150-158, 170-172, 174, 183-184, 271, 407 and 410-427; floats 85-89, 122, 135, 155,
@@ -21,8 +22,14 @@
 //! 140-147 are the browser's and read zero anywhere else, and `main_state.gauge` is zero outside
 //! play.
 //!
+//! During play the same ids answer for the notes gone by. Until the first judgement the reference
+//! has no score data at all (`ScoreDataProperty.update` runs only after a judgement), so the figures
+//! that need one read as absent and the rest read the zero of a fresh field ([`RunScore::scored`]).
+//!
 //! A cluster that has no run answers nothing, so the ids fall through to whatever else can.
 
+use rbms_judge::JudgeEngine;
+use rbms_play::PlaySession;
 use rbms_skin::property::generated::*;
 use rbms_skin::property::{FLOAT_ABSENT, INTEGER_ABSENT, ScoreSlot, ScoreSnapshot};
 
@@ -75,6 +82,9 @@ fn tenths_digit(value: f32) -> i32 {
 pub struct RunScore {
     pub sheet: ScoreSheet,
     pub standing: ScoreStanding,
+    /// Whether the reference's `ScoreDataProperty` holds score data yet, which it does from the first
+    /// judgement on. Before that the ids that read it (`getScoreData() != null`) are absent.
+    pub scored: bool,
 }
 
 impl RunScore {
@@ -85,7 +95,22 @@ impl RunScore {
 
     /// A run `pass_notes` notes into its chart.
     pub fn in_progress(sheet: ScoreSheet, pass_notes: u32, target: TargetPace) -> RunScore {
-        RunScore { standing: ScoreStanding::of(&sheet, pass_notes, target), sheet }
+        RunScore { standing: ScoreStanding::of(&sheet, pass_notes, target), sheet, scored: true }
+    }
+
+    /// A run that has not been judged yet, held against `target` from the first frame.
+    pub fn unscored(sheet: ScoreSheet, target: TargetPace) -> RunScore {
+        RunScore { standing: ScoreStanding::before_first_judgement(&sheet, target), sheet, scored: false }
+    }
+
+    /// The run so far of a live session, held against the best EX score the player had and the
+    /// target's. It is a plain value of the judge engine's tally and allocates nothing, so a play
+    /// screen can make it every frame.
+    pub fn of_session(session: &PlaySession, best_score: u32, rival_score: u32) -> RunScore {
+        let judge = session.judge();
+        let sheet = ScoreSheet::of_engine(judge, session.model().mode);
+        let target = TargetPace { best_score, rival_score, total_notes: sheet.notes };
+        if judge.counts.iter().any(|count| *count > 0) { RunScore::in_progress(sheet, judge.total_judged(), target) } else { RunScore::unscored(sheet, target) }
     }
 }
 
@@ -106,6 +131,12 @@ pub struct GaugeReading {
 impl GaugeReading {
     /// What the gauge holds when it is full, for a gauge that records a bare percentage.
     pub const FULL: f32 = 100.0;
+
+    /// The gauge a run in progress is being played on (`BMSPlayer.getGauge()`).
+    pub fn of_engine(judge: &JudgeEngine) -> GaugeReading {
+        let gauge = judge.gauge.selected();
+        GaugeReading { value: gauge.value(), max: gauge.max(), kind: gauge.index().index() as i32, live: true }
+    }
 }
 
 /// What this cluster reads from the running game, borrowed for one frame.
@@ -121,6 +152,11 @@ impl<'a> ScoreState<'a> {
     /// The finished run on a result screen, with the gauge the screen has the graph on.
     pub fn of_result(finished: FinishedRun<'a>) -> ScoreState<'a> {
         ScoreState { run: Some(&finished.snapshot.score), gauge: finished.gauge_reading() }
+    }
+
+    /// The run so far on the play screen, with the gauge it is being played on.
+    pub fn of_play(run: &'a RunScore, gauge: GaugeReading) -> ScoreState<'a> {
+        ScoreState { run: Some(run), gauge: Some(gauge) }
     }
 
     /// Which rank an option id of a band that starts at `first` stands for, AAA first, or `None`
@@ -174,6 +210,22 @@ impl ClusterState for ScoreState<'_> {
         let count = |judge: i32| whole(sheet.count(judge));
         let count_on = |judge: i32, early: bool| whole(sheet.count_on(judge, early));
         Some(match id {
+            NUMBER_SCORE
+            | NUMBER_SCORE2
+            | NUMBER_SCORE3
+            | NUMBER_PERFECT2..=NUMBER_POOR2
+            | NUMBER_PERFECT_RATE..=NUMBER_POOR_RATE
+            | NUMBER_SCORE_RATE
+            | NUMBER_SCORE_RATE_AFTERDOT
+            | NUMBER_TOTAL_RATE
+            | NUMBER_TOTAL_RATE_AFTERDOT
+            | NUMBER_SCORE_RATE2
+            | NUMBER_SCORE_RATE_AFTERDOT2
+                if !run.scored =>
+            {
+                INTEGER_ABSENT
+            }
+            NUMBER_MAXSCORE if !run.scored => 0,
             NUMBER_SCORE | NUMBER_SCORE2 | NUMBER_SCORE3 => standing.now_ex,
             NUMBER_MAXSCORE => whole(sheet.max_ex_score()),
             NUMBER_MAXCOMBO | NUMBER_MAXCOMBO2 | NUMBER_MAXCOMBO3 => whole(sheet.max_combo),
@@ -233,7 +285,8 @@ impl ClusterState for ScoreState<'_> {
         let sheet = &run.sheet;
         let standing = &run.standing;
         Some(match id {
-            FLOAT_PERFECT_RATE..=FLOAT_POOR_RATE if sheet.notes > 0 => sheet.count(id - FLOAT_PERFECT_RATE) as f32 / sheet.notes as f32,
+            FLOAT_PERFECT_RATE..=FLOAT_POOR_RATE if sheet.notes > 0 && run.scored => sheet.count(id - FLOAT_PERFECT_RATE) as f32 / sheet.notes as f32,
+            FLOAT_PERFECT_RATE..=FLOAT_POOR_RATE | FLOAT_SCORE_RATE | FLOAT_TOTAL_RATE | FLOAT_SCORE_RATE2 if !run.scored => FLOAT_ABSENT,
             FLOAT_PERFECT_RATE..=FLOAT_POOR_RATE => FLOAT_ABSENT,
             FLOAT_SCORE_RATE => standing.now_rate,
             FLOAT_TOTAL_RATE | FLOAT_SCORE_RATE2 => standing.rate,

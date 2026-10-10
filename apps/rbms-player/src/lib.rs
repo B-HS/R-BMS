@@ -33,10 +33,9 @@ use rbms_model::Mode;
 use rbms_play::{ANALYSIS_SEEK_STEP_US, NullSink, PlaySession, Player, ScratchDir, SessionClock, SessionOptions};
 use rbms_render::skin_render::frame::{BarDistribution, BarKind, BarTrophy};
 use rbms_render::{
-    Color, CoverState, DensityView, DetailView, HudView, PlayTimers, PlayfieldView, RANK_BANDS, RecordRowView, RecordsView, Rect, Renderer, ResultPalette,
-    ResultView, SelectDetail, SelectHot, SelectModal, SelectRow, SelectTimers, SelectView as SelectScene, Skin, SkinConfig, StatCell, cover_rect, dj_rank,
-    draw_text, draw_text_centered, draw_text_right, ex_delta_label, render_key_bomb, render_lane_cover, render_playfield_view, render_result_with_palette,
-    render_select, text_width,
+    Color, CoverState, DensityView, DetailView, HudView, PlayfieldView, RANK_BANDS, RecordRowView, RecordsView, Rect, Renderer, ResultPalette, ResultView,
+    SelectDetail, SelectHot, SelectModal, SelectRow, SelectView as SelectScene, Skin, SkinConfig, StatCell, cover_rect, dj_rank, draw_text, draw_text_centered,
+    draw_text_right, ex_delta_label, render_key_bomb, render_lane_cover, render_playfield_view, render_result_with_palette, render_select, text_width,
 };
 pub(crate) use rbms_skin::loader::{SKIN_TYPE_DECIDE, SKIN_TYPE_KEY_CONFIG, SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_RESULT, mode_skin_type};
 use rbms_skin::timer::TimerState;
@@ -686,11 +685,9 @@ struct AppShared {
     /// of by the frame after its stage is left rather than by the stage itself, which is what lets
     /// the screen that follows take over the files the two share.
     skin_screens: SkinScreens,
-    /// The timer table every document animates against, and the memories that decide when each
-    /// screen's timers are switched.
+    /// The timer table every document animates against. Which of its timers are switched, and
+    /// when, is each screen's own to decide.
     skin_timers: TimerState,
-    skin_play_timers: PlayTimers,
-    skin_select_timers: SelectTimers,
     /// Result-screen judge colours/labels resolved from the active skin, rebuilt with it.
     result_palette: ResultPalette,
     server: Arc<dyn ScoreServer>,
@@ -938,8 +935,6 @@ impl App {
                 skins,
                 skin_screens: SkinScreens::new(),
                 skin_timers: TimerState::default(),
-                skin_play_timers: PlayTimers::new(),
-                skin_select_timers: SelectTimers::new(),
                 result_palette: ResultPalette::from_skin(&SkinConfig::default()),
                 server: built.server,
                 server_connected: built.connected,

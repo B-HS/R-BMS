@@ -1,12 +1,11 @@
-//! The one colour parser every document-declared graph shares, and the one way they mix a colour
-//! with the destination that placed them.
+//! The one colour parser every document-declared graph shares.
 //!
 //! A document writes its palette as hex strings and the mirror in [`rbms_skin::model`] keeps them
 //! exactly as written, because validating a third-party document is not its job. Turning one of
 //! those strings into a colour is, and doing it in one place keeps the graphs from each inventing
 //! their own tolerance for what counts as a colour.
 
-use crate::{CHANNEL_MAX, Color};
+use crate::Color;
 
 /// Hex digits in an opaque `RRGGBB` colour.
 const OPAQUE_DIGITS: usize = 6;
@@ -36,15 +35,4 @@ pub fn parse_hex_color(text: &str) -> Option<Color> {
         channels[index] = u8::from_str_radix(text, HEX_RADIX).ok()?;
     }
     Some(Color { r: channels[0], g: channels[1], b: channels[2], a: channels[3] })
-}
-
-/// One colour scaled by another, channel by channel.
-///
-/// The objects that draw a wheel or a graph carry colours of their own rather than sampling a
-/// texture, so this is what a destination's colour means to them: an unstated destination is opaque
-/// white and leaves the object exactly as its record named it, while a document that dims or fades
-/// one gets the same fade an ordinary image tint would have given it.
-pub(crate) fn modulate(color: Color, tint: Color) -> Color {
-    let channel = |left: u8, right: u8| ((u32::from(left) * u32::from(right)) / CHANNEL_MAX) as u8;
-    Color { r: channel(color.r, tint.r), g: channel(color.g, tint.g), b: channel(color.b, tint.b), a: channel(color.a, tint.a) }
 }

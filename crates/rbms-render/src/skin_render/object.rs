@@ -144,7 +144,8 @@ impl SkinObject {
     /// An object that places itself starts from the keyframe the reference constructs it with, so
     /// the document's own destination only adds to it ([`self_placed_track`]).
     fn new(declared: &DestinationTrack, body: Body) -> SkinObject {
-        let track = if body.places_itself() { self_placed_track(declared) } else { declared.clone() };
+        let mut track = if body.places_itself() { self_placed_track(declared) } else { declared.clone() };
+        covers::attach_offsets(&body, &mut track);
         SkinObject { stretch: StretchKind::from_id(track.stretch), track, body }
     }
 
@@ -226,20 +227,16 @@ impl SkinObject {
             }
             Body::Note(body) => {
                 let placed = self.place(frame)?;
-                for lane in &body.lanes {
-                    let sprites = [lane.note, lane.ln_end, lane.ln_start, lane.ln_body_active, lane.ln_body, lane.mine, lane.hidden];
-                    sprites.iter().flatten().for_each(|sprite| sprite.prepare(frame));
-                }
-                for bar in &body.bars {
-                    place_part(&bar.track, frame);
-                    bar.sprite.prepare(frame);
-                }
+                notes::prepare_note(body, frame);
                 Some(placed)
             }
             Body::Judge(body) => {
-                let placed = self.place(frame)?;
-                judge::prepare_judge(body, frame);
-                Some(placed)
+                if !judge::has_judgement(body, frame) {
+                    return None;
+                }
+                let placed = self.place(frame);
+                let shown = judge::prepare_judge(body, frame);
+                placed.filter(|_| shown)
             }
             Body::SongList(body) => {
                 let placed = self.place(frame)?;

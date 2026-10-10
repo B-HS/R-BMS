@@ -171,7 +171,7 @@ impl CourseResultState {
         let gauge_type = self.scene.gauge_type;
         let data = FrameData { gauge: Some(run.gauge(gauge_type)), series: run.series(), images: ReferenceImages::default(), ..FrameData::default() };
         let scene = ResultScene { gauge_type, ..ResultScene::default() };
-        let draw = ResultDraw { view: &run.view, extras: &run.extras, cleared: self.cleared, chart: Some(&chart), scene, run: Some(&run.snapshot), data };
+        let draw = ResultDraw { chart: Some(&chart), scene, run: Some(&run.snapshot), data };
         shared.draw_result_skin(canvas, SKIN_TYPE_COURSE_RESULT, &draw)
     }
 

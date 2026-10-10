@@ -275,7 +275,6 @@ fn the_course_is_taken_as_one_run_of_every_stage() {
     assert_eq!(skin.chart().notes, Some(8), "the chart cluster is told the notes of the whole course");
     assert_eq!(skin.chart().heading, Some("TEST COURSE"));
     assert_eq!(state.scene.gauge_type, skin.finished_gauge());
-    assert_eq!(skin.view.total_notes, 8);
 }
 
 /// A failed course is charged the stages it never reached: those stages are not in the library, so

@@ -5,15 +5,11 @@
 //! The basic objects are drawn onto a [`CpuCanvas`] through the dispatch a real frame goes through,
 //! from textures of a few flat colours, so what is asserted is the pixel a screen would have shown.
 
-use rbms_skin::dst::{DestinationTrack, DrawStateSource, Keyframe, LuaDrawEval, LuaFnId, OffsetSource, SkinColor, SkinRect, TimerRef};
+use rbms_skin::dst::{DestinationTrack, Keyframe, LuaDrawEval, LuaFnId, SkinColor, SkinRect, TimerRef};
 use rbms_skin::loader::StretchKind;
 use rbms_skin::model::PropertyRef;
-use rbms_skin::property::generated::{
-    BUTTON_LNMODE, FLOAT_HISPEED, NUMBER_PLAYLEVEL, OFFSET_HIDDEN_COVER, OFFSET_LANECOVER, OFFSET_LIFT, OPTION_1P_EARLY, OPTION_1P_GOOD, OPTION_1P_LATE,
-    OPTION_1P_PERFECT, OPTION_2P_EARLY, OPTION_2P_GOOD, OPTION_2P_PERFECT, OPTION_GAUGE_EX, OPTION_GAUGE_EX_2P, OPTION_GAUGE_GROOVE, OPTION_GAUGE_GROOVE_2P,
-    OPTION_GAUGE_HARD, OPTION_GAUGE_HARD_2P, RATE_MUSICSELECT_POSITION,
-};
-use rbms_skin::property::{DefaultState, MapHost, SkinHost};
+use rbms_skin::property::generated::{BUTTON_LNMODE, FLOAT_HISPEED, NUMBER_PLAYLEVEL, RATE_MUSICSELECT_POSITION};
+use rbms_skin::property::{DefaultState, MapHost};
 use rbms_skin::timer::{MICROS_PER_MILLI, TIMER_OFF, TimerId, TimerState};
 
 use super::draw::{ImageSelect, Placement, draw_object};
@@ -22,7 +18,6 @@ use super::object::{
     integer_glyphs, integer_padding,
 };
 use super::refs::{ReferenceImage, ReferenceImages, build_reference};
-use super::state::{DecideChart, DecideViewState, KeyConfigViewState, PlayViewState};
 use super::text::TEXT_PIXELS_PER_SCALE;
 use super::{FrameData, NoExpressions, SkinFrame, SkinViewport};
 use crate::ctx::with_render_ctx;
@@ -790,112 +785,6 @@ fn the_text_scale_factor_matches_the_engine_it_is_handed_to() {
     assert!((ratio - 2.0).abs() < 0.2, "twice the scale is about twice the width, so the factor is a plain linear conversion (got {ratio})");
 }
 
-/// A HUD snapshot with nothing happening, which each timer test then changes one part of.
-fn hud(counts: [u32; 6], combo: u32, gauge: f32) -> crate::hud::HudView<'static> {
-    crate::hud::HudView {
-        mode_label: "7K",
-        combo,
-        last_judge: None,
-        last_fast: false,
-        fast: [0; crate::result::LANE_KIND_COUNT],
-        slow: [0; crate::result::LANE_KIND_COUNT],
-        counts,
-        ex_score: 0,
-        gauge,
-        green_number: 0.0,
-        white_number: 0.0,
-        judge_text_y: 0.0,
-        max_ex: 0,
-        best_ex: None,
-        pace: None,
-    }
-}
-
-/// A run with no lane state to report, which is what the timer memories above are exercised with:
-/// they are about the judgement, the combo and the gauge rather than about the keys.
-fn no_lanes() -> super::screen::PlayLanes<'static> {
-    super::screen::PlayLanes { lanes: &[], judged_side: 0 }
-}
-
-#[test]
-fn the_first_play_frame_starts_no_timer_by_itself() {
-    let mut memory = super::screen::PlayTimers::new();
-    let mut timers = TimerState::new();
-    memory.update(&mut timers, &hud([3, 0, 0, 0, 0, 0], 3, 50.0), 10, 1_000, &no_lanes());
-
-    assert!(!timers.is_on(rbms_skin::timer::timer_id::JUDGE_1P), "the first frame has nothing to compare against, so nothing is treated as new");
-    assert!(timers.is_on(rbms_skin::timer::timer_id::COMBO_1P), "a combo that is already running is reported as running");
-}
-
-#[test]
-fn a_new_judgement_restarts_the_judge_timer() {
-    let mut memory = super::screen::PlayTimers::new();
-    let mut timers = TimerState::new();
-    memory.update(&mut timers, &hud([1, 0, 0, 0, 0, 0], 1, 50.0), 100, 1_000, &no_lanes());
-    memory.update(&mut timers, &hud([2, 0, 0, 0, 0, 0], 2, 50.0), 100, 1_500, &no_lanes());
-
-    assert_eq!(timers.value_us(rbms_skin::timer::timer_id::JUDGE_1P), 1_500, "the pop-up is measured from the moment the input was judged");
-    assert_eq!(timers.value_us(rbms_skin::timer::timer_id::COMBO_1P), 1_500, "a longer combo restarts its own flash");
-}
-
-#[test]
-fn a_broken_combo_switches_its_timer_off() {
-    let mut memory = super::screen::PlayTimers::new();
-    let mut timers = TimerState::new();
-    memory.update(&mut timers, &hud([2, 0, 0, 0, 0, 0], 2, 50.0), 100, 1_000, &no_lanes());
-    memory.update(&mut timers, &hud([2, 0, 0, 0, 1, 0], 0, 48.0), 100, 1_200, &no_lanes());
-
-    assert!(!timers.is_on(rbms_skin::timer::timer_id::COMBO_1P), "a combo of nothing has no flash to animate");
-    assert_eq!(timers.value_us(rbms_skin::timer::timer_id::JUDGE_1P), 1_200, "the poor was still a judgement");
-}
-
-#[test]
-fn a_full_combo_and_a_full_gauge_stay_on_while_they_last() {
-    let mut memory = super::screen::PlayTimers::new();
-    let mut timers = TimerState::new();
-    memory.update(&mut timers, &hud([4, 0, 0, 0, 0, 0], 4, 100.0), 4, 1_000, &no_lanes());
-    assert_eq!(timers.value_us(rbms_skin::timer::timer_id::FULLCOMBO_1P), 1_000);
-    assert_eq!(timers.value_us(rbms_skin::timer::timer_id::GAUGE_MAX_1P), 1_000);
-
-    memory.update(&mut timers, &hud([5, 0, 0, 0, 0, 0], 5, 100.0), 5, 1_400, &no_lanes());
-    assert_eq!(timers.value_us(rbms_skin::timer::timer_id::FULLCOMBO_1P), 1_000, "a timer that is already on keeps the moment it started");
-    assert_eq!(timers.value_us(rbms_skin::timer::timer_id::GAUGE_INCLEASE_1P), TIMER_OFF, "a gauge that did not rise does not flash");
-
-    memory.update(&mut timers, &hud([5, 0, 0, 0, 1, 0], 0, 90.0), 6, 1_800, &no_lanes());
-    assert!(!timers.is_on(rbms_skin::timer::timer_id::FULLCOMBO_1P), "the combo broke, so the full-combo timer goes off");
-    assert!(!timers.is_on(rbms_skin::timer::timer_id::GAUGE_MAX_1P));
-}
-
-#[test]
-fn starting_and_failing_a_run_switch_the_timers_that_mark_them() {
-    let mut memory = super::screen::PlayTimers::new();
-    let mut timers = TimerState::new();
-    timers.set_on(rbms_skin::timer::timer_id::READY, 0);
-    memory.start(&mut timers, 500);
-    assert!(!timers.is_on(rbms_skin::timer::timer_id::READY));
-    assert_eq!(timers.value_us(rbms_skin::timer::timer_id::PLAY), 500);
-
-    memory.fail(&mut timers, 9_000);
-    assert_eq!(timers.value_us(rbms_skin::timer::timer_id::FAILED), 9_000);
-}
-
-#[test]
-fn moving_the_song_wheel_restarts_the_movement_timers_in_the_direction_it_went() {
-    let mut memory = super::screen::SelectTimers::new();
-    let mut timers = TimerState::new();
-    memory.update(&mut timers, 4, 1_000);
-    assert!(!timers.is_on(rbms_skin::timer::timer_id::SONGBAR_MOVE), "the first frame is where the wheel already was");
-
-    memory.update(&mut timers, 5, 1_100);
-    assert_eq!(timers.value_us(rbms_skin::timer::timer_id::SONGBAR_MOVE), 1_100);
-    assert_eq!(timers.value_us(rbms_skin::timer::timer_id::SONGBAR_MOVE_DOWN), 1_100);
-    assert!(!timers.is_on(rbms_skin::timer::timer_id::SONGBAR_MOVE_UP));
-
-    memory.update(&mut timers, 2, 1_300);
-    assert_eq!(timers.value_us(rbms_skin::timer::timer_id::SONGBAR_MOVE_UP), 1_300, "going the other way starts the other direction's timer");
-    assert_eq!(timers.value_us(rbms_skin::timer::timer_id::SONGBAR_CHANGE), 1_300);
-}
-
 /// A value definition with both of its padding fields set, so which one a strip reads is visible.
 fn padded(padding: i32, zeropadding: i32) -> rbms_skin::model::ValueDef {
     rbms_skin::model::ValueDef { padding, zeropadding, ..rbms_skin::model::ValueDef::default() }
@@ -921,104 +810,6 @@ fn a_sign_place_is_kept_only_by_the_strip_that_has_a_glyph_for_it() {
         assert!(!fraction_sign(true, &DigitLayout::fraction(cells)), "a {cells}-cell strip has no sign glyph to draw");
     }
     assert!(!fraction_sign(false, &DigitLayout::fraction(26)), "and a document that did not ask for one does not get one");
-}
-
-/// A play adapter over `hud`, which is also the simplest state source these tests have to hand.
-fn play_state<'a>(hud: &'a crate::hud::HudView<'a>) -> PlayViewState<'a> {
-    PlayViewState {
-        hud,
-        title: "",
-        song_ms: 0,
-        duration_ms: 0,
-        bpm: 0.0,
-        hispeed: 1.0,
-        autoplay: false,
-        now_us: 0,
-        offsets: None,
-        field: None,
-        shade: crate::playfield::LaneShade::default(),
-        judged_side: 0,
-        gauge_kind: 0,
-        artist: "",
-        level: 0,
-        bpm_min: 0.0,
-        bpm_max: 0.0,
-        bpm_main: 0.0,
-        target_ex: None,
-    }
-}
-
-#[test]
-fn a_judgement_is_reported_on_the_field_it_was_played_on() {
-    let hud = crate::hud::HudView { last_judge: Some(2), last_fast: true, ..hud([0; 6], 0, 0.0) };
-    let left = play_state(&hud);
-    let right = PlayViewState { judged_side: 1, ..play_state(&hud) };
-
-    assert!(left.boolean(OPTION_1P_GOOD) == Some(true), "the field the input was played on reports the judgement the run took");
-    assert!(left.boolean(OPTION_2P_GOOD) == Some(false), "and the other field stays quiet, so a double document does not flash both pop-ups at once");
-    assert!(
-        right.boolean(OPTION_2P_GOOD) == Some(true) && right.boolean(OPTION_1P_GOOD) == Some(false),
-        "an input on the right-hand field is reported there instead"
-    );
-    assert!(left.boolean(OPTION_1P_PERFECT) == Some(false), "a field reports only the judgement the run actually took");
-    assert!(
-        right.boolean(OPTION_2P_PERFECT + 2) == Some(true),
-        "the reference stops naming the second field's band at its third judgement, but a pop-up reads all six of them"
-    );
-    assert!(left.boolean(OPTION_1P_EARLY) == Some(true) && left.boolean(OPTION_2P_EARLY) == Some(false), "an early hit is early on the field it landed on");
-    assert!(left.boolean(OPTION_1P_LATE) == Some(false), "and is not also late on it");
-}
-
-/// A document labels the gauge it is drawing from the three gauge options, so the play adapter has
-/// to answer them: without that, every label is hidden and every `op` naming the opposite of one is
-/// drawn, whatever gauge is actually being played.
-#[test]
-fn the_gauge_being_played_answers_the_options_a_document_labels_it_from() {
-    let hud = hud([0; 6], 0, 0.0);
-    let on = |kind: usize, id: i32| PlayViewState { gauge_kind: kind, ..play_state(&hud) }.boolean(id) == Some(true);
-
-    for kind in 0..=2 {
-        assert!(on(kind, OPTION_GAUGE_GROOVE), "gauge {kind} is cleared by filling it and is not named as one");
-        assert!(!on(kind, OPTION_GAUGE_HARD), "gauge {kind} is not survived");
-    }
-    for kind in 3..=5 {
-        assert!(on(kind, OPTION_GAUGE_HARD), "gauge {kind} is survived and is not named as one");
-        assert!(!on(kind, OPTION_GAUGE_GROOVE), "gauge {kind} is not cleared by filling it");
-    }
-    for kind in [0, 1, 4, 5, 7, 8] {
-        assert!(on(kind, OPTION_GAUGE_EX), "gauge {kind} drains at the EX rate and is not named as one");
-    }
-    for kind in [2, 3, 6] {
-        assert!(!on(kind, OPTION_GAUGE_EX), "gauge {kind} does not drain at the EX rate");
-    }
-    assert!(on(6, OPTION_GAUGE_HARD) && !on(6, OPTION_GAUGE_GROOVE), "a course gauge is survived like the rest of its half of the table");
-
-    assert!(on(2, OPTION_GAUGE_GROOVE_2P) && on(3, OPTION_GAUGE_HARD_2P) && on(4, OPTION_GAUGE_EX_2P), "both bands name the one gauge the run carries");
-    assert!(!on(2, -OPTION_GAUGE_GROOVE), "and a document asking for the gauge it is not playing on still gets an answer, not the default");
-}
-
-#[test]
-fn the_running_field_publishes_the_cover_offsets_a_document_places_its_own_covers_with() {
-    let hud = hud([0; 6], 0, 0.0);
-    let mut field = crate::skin::Skin::default_for(rbms_model::Mode::BEAT_7K, 1280.0, 720.0);
-    field.top_y = 100.0;
-    field.judge_y = 500.0;
-    field.lift_height = 40.0;
-    let shade = crate::playfield::LaneShade { cover: 0.25, hidden: 0.5 };
-    let state = PlayViewState { field: Some(&field), shade, ..play_state(&hud) };
-
-    assert_eq!(state.offset(OFFSET_LIFT).map(|offset| offset.y), Some(40.0), "the lift offset is how far the judgement line was raised");
-    assert_eq!(
-        state.offset(OFFSET_LANECOVER).map(|offset| offset.y),
-        Some(-100.0),
-        "the cover the player pulls down from the ceiling moves by its share of the visible field"
-    );
-    assert_eq!(state.offset(OFFSET_HIDDEN_COVER).map(|offset| offset.y), Some(200.0), "and the hidden band rises from the judgement line by its own");
-
-    let bare = PlayViewState { field: Some(&field), ..play_state(&hud) };
-    let hidden = bare.offset(OFFSET_HIDDEN_COVER).expect("a hidden band that is switched off still answers");
-    assert_eq!((hidden.y, hidden.a), (0.0, -255.0), "a hidden band nobody asked for is published as fully transparent rather than as nothing at all");
-    assert!(play_state(&hud).offset(OFFSET_LANECOVER).is_none(), "a screen with no field running leaves the three to the player's own nudges");
 }
 
 /// The canvas the basic objects are drawn on. A document authored at this size maps one to one, so
@@ -1372,21 +1163,6 @@ fn an_image_sets_value_is_a_number_and_its_ref_an_image_index() {
     let timers = TimerState::new();
     let frame = SkinFrame { now_us: 0, timers: &timers, state: &host, lua: None, mouse: None, data: FrameData::default() };
     assert_eq!(by_value.slot(2, &frame), Some(1), "the number, not the image index under the same id, picks the image");
-}
-
-#[test]
-fn an_image_picked_by_index_shows_its_first_set_through_a_built_in_view_adapter() {
-    let hud = hud([0; 6], 0, 0.0);
-    let play = play_state(&hud);
-    let decide = DecideViewState { progress: 0.0, done: false, title: "", chart: DecideChart::default(), now_us: 0, offsets: None };
-    let keys = KeyConfigViewState { keys: &[], now_us: 0, offsets: None };
-    let timers = TimerState::new();
-    let picked = ImageSelect::of_index(BUTTON_LNMODE);
-
-    for (screen, state) in [("play", &play as &dyn SkinHost), ("decide", &decide), ("key configuration", &keys)] {
-        let frame = SkinFrame { now_us: 0, timers: &timers, state, lua: None, mouse: None, data: FrameData::default() };
-        assert_eq!(picked.slot(2, &frame), Some(0), "the {screen} adapter knows no image index, and an image it cannot pick for went undrawn");
-    }
 }
 
 #[test]

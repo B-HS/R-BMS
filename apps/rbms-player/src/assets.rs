@@ -10,6 +10,7 @@ use std::sync::mpsc::Receiver;
 use std::time::SystemTime;
 
 use rbms_config::DEFAULT_SKIN_FOLDER;
+use rbms_render::skin_render::frame::BgaPicture;
 use rbms_render::{SkinConfig, SkinImage};
 use sha2::{Digest, Sha256};
 
@@ -463,6 +464,21 @@ pub(crate) fn decode_bga_image(dir: &Path, name: &str) -> Option<DecodedImage> {
     decode_bga_file(&resolve_bga_file(dir, name)?)
 }
 
+/// Whether a play screen decodes a chart's background images at all.
+///
+/// A screen drawn from a skin document needs them when the player has backgrounds on and the
+/// document places a `bga` object, which `document_has_bga` says (`None` while no document is
+/// known). A screen with no document keeps the rule it always had: backgrounds on and a slot in the
+/// built-in layout (`built_in_slot`) to put one in.
+pub(crate) fn wants_bga_pictures(display_bga: bool, document_has_bga: Option<bool>, built_in_slot: bool) -> bool {
+    display_bga && document_has_bga.unwrap_or(built_in_slot)
+}
+
+/// A decoded background image as the skin renderer's `bga` object takes it.
+pub(crate) fn bga_picture(image: &DecodedImage) -> BgaPicture<'_> {
+    BgaPicture { generation: image.generation, width: image.width, height: image.height, rgba: &image.rgba }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -499,6 +515,26 @@ mod tests {
         assert_eq!((decoded.width, decoded.height), (6, 3), "the decoder resized what it was given");
         assert_eq!(decoded.rgba.len(), 6 * 3 * 4, "the buffer does not hold that many RGBA pixels");
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// A skin document that places a `bga` object decides whether the chart's images are decoded, and
+    /// a screen with no document decides as it always did.
+    #[test]
+    fn backgrounds_are_decoded_for_a_document_that_places_one_and_otherwise_for_the_built_in_slot() {
+        assert!(wants_bga_pictures(true, Some(true), false), "a document with a bga object, over a layout with no slot");
+        assert!(!wants_bga_pictures(true, Some(false), true), "a document with no bga object, over a layout with a slot");
+        assert!(wants_bga_pictures(true, None, true), "no document, a built-in slot");
+        assert!(!wants_bga_pictures(true, None, false), "no document, no slot");
+        assert!(!wants_bga_pictures(false, Some(true), true), "the player turned backgrounds off");
+    }
+
+    /// The renderer tells one decode from the next by its number, and reads the pixels as they are.
+    #[test]
+    fn a_decoded_background_is_handed_to_the_renderer_with_its_own_number_and_size() {
+        let image = DecodedImage::for_test(vec![1, 2, 3, 4, 5, 6, 7, 8], 2, 1);
+        let picture = bga_picture(&image);
+        assert_eq!((picture.generation, picture.width, picture.height), (image.generation, 2, 1));
+        assert_eq!(picture.rgba, image.rgba.as_slice());
     }
 
     /// Edge of the sheet the stamp test writes, and of the one it saves over it.

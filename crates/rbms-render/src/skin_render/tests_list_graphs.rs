@@ -13,23 +13,18 @@ use std::path::{Path, PathBuf};
 
 use rbms_skin::dst::{DrawStateSource, OffsetSource, SkinOffset};
 use rbms_skin::loader::{SkinLoadOptions, SkinUserConfig, load_skin};
-use rbms_skin::property::generated::OPTION_PANEL1;
 use rbms_skin::property::{SkinHost, UNMAPPED_BOOLEAN, UNMAPPED_FLOAT, UNMAPPED_INTEGER, UNMAPPED_STRING};
 use rbms_skin::timer::{MICROS_PER_MILLI, TIMER_OFF, TimerState};
 
-use super::color::{modulate, parse_hex_color};
+use super::color::parse_hex_color;
 use super::frame::{BarKind, SongBar};
 use super::gauge::{GAUGE_TYPES, GaugeScale};
-use super::state::SelectViewState;
 use super::{
-    BpmTimeline, FrameData, FrameSeries, GaugeFrame, GaugeHistory, NoteDistribution, NoteField, RecentHits, SkinAssets, SkinFrame, SkinImage, SkinObjectKind,
-    SkinScreen, SongBars, TimingHistogram,
+    BpmTimeline, FrameData, FrameSeries, GaugeFrame, GaugeHistory, NoteDistribution, RecentHits, SkinAssets, SkinFrame, SkinImage, SkinObjectKind, SkinScreen,
+    SongBars, TimingHistogram,
 };
 use crate::ctx::RenderCtx;
 use crate::font::TextContext;
-use crate::playfield::{LaneShade, PlayfieldView};
-use crate::select::{SelectDetail, SelectView};
-use crate::skin::Skin;
 use crate::{BYTES_PER_PIXEL, Color, CpuCanvas, Renderer};
 
 /// Width and height the fixture document is authored at, which is also the canvas every frame here
@@ -250,6 +245,9 @@ const GROOVE: GaugeScale = GaugeScale::new(2.0, 100.0, 80.0);
 /// A gauge that clears at nothing, as the hard gauges do.
 const SURVIVAL: GaugeScale = GaugeScale::new(0.0, 100.0, 0.0);
 
+/// The percent of a full gauge the gauge of the play frame below clears at.
+const PLAYED_GAUGE_BORDER: f32 = 80.0;
+
 /// The reference's number for the normal gauge.
 const NORMAL_GAUGE: usize = 2;
 
@@ -318,44 +316,6 @@ fn text_that_is_not_a_colour_is_refused() {
     for text in ["", "69F1E", "69F1E4F", "gggggg", "69F1E4FFFF"] {
         assert_eq!(parse_hex_color(text), None, "{text:?} was read as a colour");
     }
-}
-
-/// An unstated destination is opaque white, so modulating by it has to be the identity: every graph
-/// would otherwise be drawn dimmer than the colour its own record named.
-#[test]
-fn an_opaque_white_destination_leaves_a_colour_alone() {
-    let color = Color { r: 0x20, g: 0x40, b: 0x80, a: 0xC0 };
-    assert_eq!(modulate(color, Color::rgb(255, 255, 255)), color);
-    assert_eq!(modulate(color, Color { r: 255, g: 255, b: 255, a: 0 }).a, 0, "a destination faded out takes the graph with it");
-    assert_eq!(modulate(color, Color::rgb(255, 0, 0)), Color { r: 0x20, g: 0, b: 0, a: 0xC0 });
-}
-
-/// A browser showing nothing, for the tests that are about the panel over it rather than the list
-/// under it.
-fn empty_browser() -> SelectView {
-    SelectView {
-        rows: Vec::new(),
-        sel: 0,
-        header: String::new(),
-        guide: "",
-        detail: SelectDetail::Empty,
-        modal: None,
-        score_graph: false,
-        search: None,
-        sort: "DEFAULT",
-        filter: None,
-        empty_hint: None,
-    }
-}
-
-/// Whether the option panel is open reaches a document through the browser's own state source,
-/// under the reference's first panel option, because that is the only thing a document can address.
-#[test]
-fn the_option_panel_reports_itself_open_through_the_reference_option() {
-    let view = empty_browser();
-
-    assert_eq!(SelectViewState::new(&view, 0, None, true).boolean(OPTION_PANEL1), Some(true), "an open panel does not report itself open");
-    assert_eq!(SelectViewState::new(&view, 0, None, false).boolean(OPTION_PANEL1), Some(false), "a closed panel reports itself open");
 }
 
 #[test]
@@ -439,13 +399,9 @@ fn a_graph_draws_only_on_the_screen_whose_series_it_reads() {
     let list = SongBars::new(&bars, SELECTED);
     assert_eq!(draw(&screen, &mut text, &mut canvas, browsing(&list)), 2, "the button and the wheel, which is all a browser frame feeds");
 
-    let field = Skin::default_for(rbms_model::Mode::BEAT_7K, DOC_W as f32, DOC_H as f32);
-    let playfield = PlayfieldView { timelines: &[], microtime: 0, hispeed: 1.0, beam_on: &[], beam_off: &[], constant: false, legacy_note: false };
     let hits = [(-30_i64, 1_u8), (8, 0), (45, 2)];
-    let play = NoteField { field: &field, playfield: &playfield, shade: LaneShade::default(), bomb: &[], keys_down: &[] };
     let playing = FrameData {
-        field: Some(&play),
-        gauge: Some(GaugeFrame::of_kind(0, field.gauge_clear_threshold)),
+        gauge: Some(GaugeFrame::of_kind(0, PLAYED_GAUGE_BORDER)),
         series: FrameSeries { recent_hits: Some(RecentHits::new(&hits)), ..FrameSeries::default() },
         ..FrameData::default()
     };
@@ -714,3 +670,4 @@ fn a_wheel_with_no_slots_resolves_to_nothing_and_says_so() {
 }
 
 mod graph_pixels;
+mod visualizer_pixels;

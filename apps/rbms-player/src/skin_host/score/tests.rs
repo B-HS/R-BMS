@@ -365,3 +365,82 @@ fn every_id_the_reference_implements_in_a_run_routed_to_this_cluster_is_answered
         }
     }
 }
+
+#[test]
+fn the_ids_that_read_score_data_are_absent_until_the_first_judgement_and_a_fresh_field_reads_zero() {
+    let sheet = ScoreSheet { notes: 10, ..ScoreSheet::default() };
+    let run = RunScore::unscored(sheet, TargetPace { best_score: 11, rival_score: 14, total_notes: 10 });
+    let state = ScoreState::of_play(&run, GaugeReading { value: 20.0, max: 100.0, kind: 2, live: true });
+
+    let absent = [
+        NUMBER_SCORE,
+        NUMBER_SCORE2,
+        NUMBER_SCORE3,
+        NUMBER_PERFECT2,
+        NUMBER_POOR2,
+        NUMBER_PERFECT_RATE,
+        NUMBER_POOR_RATE,
+        NUMBER_SCORE_RATE,
+        NUMBER_SCORE_RATE_AFTERDOT,
+        NUMBER_TOTAL_RATE,
+        NUMBER_TOTAL_RATE_AFTERDOT,
+        NUMBER_SCORE_RATE2,
+        NUMBER_SCORE_RATE_AFTERDOT2,
+    ];
+    for id in absent {
+        assert_eq!(state.integer(id), Some(INTEGER_ABSENT), "number {id}");
+    }
+    for id in [FLOAT_PERFECT_RATE, FLOAT_POOR_RATE, FLOAT_SCORE_RATE, FLOAT_TOTAL_RATE, FLOAT_SCORE_RATE2] {
+        assert_eq!(state.float(id), Some(FLOAT_ABSENT), "float {id}");
+    }
+    let zero = [NUMBER_MAXSCORE, NUMBER_MAXCOMBO, NUMBER_POINT, NUMBER_DIFF_EXSCORE, NUMBER_DIFF_HIGHSCORE, NUMBER_DIFF_NEXTRANK, NUMBER_PERFECT, NUMBER_MISS];
+    for id in zero {
+        assert_eq!(state.integer(id), Some(0), "number {id}");
+    }
+    assert_eq!((state.integer(NUMBER_HIGHSCORE), state.integer(NUMBER_TARGET_SCORE), state.integer(NUMBER_BEST_RATE)), (Some(11), Some(14), Some(55)));
+    assert_eq!((state.rate(RATE_SCORE), state.rate(RATE_SCORE_FINAL), state.rate(RATE_BESTSCORE)), (Some(0.0), Some(0.0), Some(0.55)));
+    assert_eq!(on_in(&state, OPTION_1P_AAA, 8), Vec::<i32>::new());
+    assert_eq!(on_in(&state, OPTION_NOW_AAA_1P, 8), Vec::<i32>::new());
+    assert_eq!(on_in(&state, OPTION_BEST_AAA_1P, 8), [OPTION_BEST_AAA_1P + 4], "the best score's rank stands from the first frame");
+    assert_eq!(state.score(ScoreSlot::Current), Some(ScoreSnapshot { rate: 0.0, exscore: 0 }));
+}
+
+#[test]
+fn a_judged_run_reads_its_score_data_even_when_nothing_has_gone_by() {
+    let sheet = ScoreSheet { early: [0, 0, 0, 0, 1, 0], notes: 10, ..ScoreSheet::default() };
+    let run = RunScore::in_progress(sheet, 0, TargetPace::default());
+    let state = ScoreState::of_play(&run, GaugeReading { value: 18.0, max: 100.0, kind: 2, live: true });
+
+    assert_eq!((state.integer(NUMBER_SCORE), state.integer(NUMBER_SCORE_RATE), state.integer(NUMBER_TOTAL_RATE)), (Some(0), Some(100), Some(0)));
+    assert_eq!(state.integer(NUMBER_MAXSCORE), Some(20));
+}
+
+#[test]
+fn a_live_session_makes_the_run_so_far_without_waiting_for_the_end() {
+    let model = rbms_chart::to_model(&rbms_parser::parse(b"#BPM 120\r\n#RANK 3\r\n#WAV01 a.wav\r\n#00111:01010101\r\n"), rbms_model::Mode::BEAT_7K);
+    let mut session = PlaySession::new(model, rbms_play::SessionOptions::default());
+    session.tick(rbms_play::SessionClock::at(1_000_000), &mut rbms_play::NullSink);
+    assert!(!RunScore::of_session(&session, 0, 0).scored);
+
+    session.press(0, 2_000_000, &mut rbms_play::NullSink);
+    session.press(0, 2_500_000 - 40_000, &mut rbms_play::NullSink);
+    let run = RunScore::of_session(&session, 3, 5);
+    let gauge = GaugeReading::of_engine(session.judge());
+    let state = ScoreState::of_play(&run, gauge);
+
+    assert!(run.scored);
+    assert_eq!((state.integer(NUMBER_SCORE), state.integer(NUMBER_MAXSCORE), state.integer(NUMBER_MAXCOMBO)), (Some(3), Some(8), Some(2)));
+    assert_eq!(
+        (state.integer(NUMBER_SCORE_RATE), state.integer(NUMBER_TOTAL_RATE)),
+        (Some(75), Some(37)),
+        "3 of the 4 EX points the two notes gone by could give, and 3 of 8"
+    );
+    assert_eq!(
+        (state.integer(NUMBER_DIFF_HIGHSCORE), state.integer(NUMBER_DIFF_TARGETSCORE)),
+        (Some(2), Some(1)),
+        "against a best of 3 and a target of 5 paced two notes in"
+    );
+    assert_eq!((state.gauge(), state.gauge_type()), (Some(session.judge().gauge.value()), Some(2)));
+    assert_eq!(gauge.max, 100.0);
+    assert!(gauge.live);
+}

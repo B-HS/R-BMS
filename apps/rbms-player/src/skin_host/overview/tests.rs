@@ -2,8 +2,8 @@ use rbms_model::{LnKind, Mode, Model, ModelMeta, Note, NoteKind, TimeLine};
 use rbms_skin::dst::DrawStateSource;
 use rbms_skin::property::SkinHost;
 use rbms_skin::property::generated::{
-    NUMBER_MAXBPM, NUMBER_MINBPM, NUMBER_PLAYLEVEL, NUMBER_TOTALNOTES, OPTION_DIFFICULTY0, OPTION_DIFFICULTY4, OPTION_NO_STAGEFILE, OPTION_STAGEFILE,
-    STRING_ARTIST, STRING_TITLE,
+    NUMBER_MAXBPM, NUMBER_MINBPM, NUMBER_PLAYLEVEL, NUMBER_TOTALNOTE_BSS, NUMBER_TOTALNOTE_LN, NUMBER_TOTALNOTE_NORMAL, NUMBER_TOTALNOTE_SCRATCH,
+    NUMBER_TOTALNOTES, OPTION_DIFFICULTY0, OPTION_DIFFICULTY4, OPTION_NO_STAGEFILE, OPTION_STAGEFILE, STRING_ARTIST, STRING_TITLE,
 };
 use rbms_skin::timer::TimerState;
 
@@ -177,4 +177,30 @@ fn the_graphs_are_handed_the_overviews_rows_and_changes() {
     assert_eq!(tempo.changes, overview.speeds.as_slice());
     assert_eq!((tempo.min_bpm, tempo.max_bpm, tempo.length_ms), (90.0, 120.0, Some(5000)));
     assert!(series.gauge_history.is_none() && series.timing.is_none(), "a chart that was not played has no run to plot");
+}
+
+/// The notes are counted by kind as the reference's chart information counts them: plain and long,
+/// on the keys and on the turntable. A long note is one count, and two when its end is judged apart
+/// from its head; a mine is none. The four add up to the chart's notes, and the chart cluster
+/// answers them from the overview.
+#[test]
+fn the_notes_are_counted_by_kind_and_add_up_to_the_charts_notes() {
+    let chart = model(vec![
+        with_note(with_note(line(0, OPENING_BPM), KEY_LANE, NoteKind::Normal), SCRATCH_LANE, NoteKind::Normal),
+        with_note(with_note(line(1, OPENING_BPM), KEY_LANE, NoteKind::LongStart { ln: LnKind::Ln }), OTHER_KEY_LANE, NoteKind::LongStart { ln: LnKind::Cn }),
+        with_note(with_note(line(2, OPENING_BPM), KEY_LANE, NoteKind::LongEnd { ln: LnKind::Ln }), OTHER_KEY_LANE, NoteKind::LongEnd { ln: LnKind::Cn }),
+        with_note(with_note(line(3, OPENING_BPM), SCRATCH_LANE, NoteKind::LongStart { ln: LnKind::Ln }), KEY_LANE, NoteKind::Mine { damage: 1.0 }),
+        with_note(with_note(line(4, OPENING_BPM), SCRATCH_LANE, NoteKind::LongEnd { ln: LnKind::Ln }), OTHER_KEY_LANE, NoteKind::Normal),
+    ]);
+    let overview = ChartOverview::of_model(&chart);
+    assert_eq!(overview.note_counts, NoteCounts { normal: 2, long: 3, scratch: 1, long_scratch: 1 });
+    let counts = overview.note_counts;
+    assert_eq!(usize::try_from(counts.normal + counts.long + counts.scratch + counts.long_scratch), Ok(overview.notes), "the kinds do not add up to the notes");
+
+    let timers = TimerState::new();
+    let meta = overview.meta(false);
+    let mut host = ScreenHost::new(0, &timers);
+    host.chart = ChartState::Chart(&meta);
+    let read = [NUMBER_TOTALNOTE_NORMAL, NUMBER_TOTALNOTE_LN, NUMBER_TOTALNOTE_SCRATCH, NUMBER_TOTALNOTE_BSS].map(|id| host.integer(id));
+    assert_eq!(read, [2, 3, 1, 1]);
 }

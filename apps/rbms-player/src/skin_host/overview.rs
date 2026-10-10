@@ -3,9 +3,15 @@
 //! The reference keeps the model of the chart that was picked in its player resource, and every
 //! screen that follows reads from it: the decide screen's texts and numbers from the `SongData`
 //! made of it (`PlayerResource.setBMSFile`), its judgement graph and its tempo graph from the model
-//! itself (`SkinNoteDistributionGraph.updateGraph`, `SkinBPMGraph.updateGraph(BMSModel)`). That
-//! `SongData` has no `SongInformation` behind it, so the values a browser reads from one -- the note
-//! counts by kind, the densities and the main tempo -- have no value there.
+//! itself (`SkinNoteDistributionGraph.updateGraph`, `SkinBPMGraph.updateGraph(BMSModel)`). A
+//! `SongData` made that way has no `SongInformation` behind it, so the densities and the main tempo
+//! a browser reads from one have no value here.
+//!
+//! The note counts by kind are the exception. A chart picked in the browser keeps the browser's own
+//! `SongData` through the screens that follow, `SongInformation` and all
+//! (`PlayerResource.setBMSFile` keeps a `songdata` it was handed), and a play skin shows those four
+//! counts while the chart loads. They are counted from the model here, as `SongInformation` counts
+//! them from the same model.
 //!
 //! [`ChartOverview`] is that reading, taken once from the model as it was parsed and before any
 //! lane option moved a note: an owned snapshot the screens lend to the chart cluster
@@ -16,7 +22,7 @@ use rbms_render::skin_render::graphs::NOTE_KINDS;
 use rbms_render::{BpmTimeline, FrameSeries, NoteDistribution};
 use rbms_skin::timer::MICROS_PER_MILLI;
 
-use super::chart::{BpmRange, ChartContents, ChartMeta};
+use super::chart::{BpmRange, ChartContents, ChartMeta, NoteCounts};
 
 /// Microseconds in the second the judgement graph counts a chart's notes by.
 const MICROS_PER_SECOND: i64 = 1_000_000;
@@ -54,6 +60,8 @@ pub struct ChartOverview {
     pub total: f64,
     /// How many notes there are to judge.
     pub notes: usize,
+    /// The same notes by kind: plain and long, on the keys and on the turntable.
+    pub note_counts: NoteCounts,
     /// When the last thing in the chart happens, in milliseconds (`BMSModel.getLastTime`).
     pub length_ms: i32,
     /// The slowest and the fastest tempo the chart states, the opening one included.
@@ -94,6 +102,7 @@ impl ChartOverview {
             judge: meta.rank,
             total: meta.total,
             notes: rbms_chart::count_playable_notes(model),
+            note_counts: note_counts(model),
             length_ms: millis_of(last_us),
             min_bpm: tempos().fold(f64::INFINITY, f64::min),
             max_bpm: tempos().fold(f64::NEG_INFINITY, f64::max),
@@ -127,6 +136,7 @@ impl ChartOverview {
             judge: Some(self.judge),
             length_ms: Some(self.length_ms),
             notes: i32::try_from(self.notes).ok(),
+            note_counts: Some(self.note_counts),
             bpm: Some(BpmRange { min: self.min_bpm as i32, max: self.max_bpm as i32 }),
             total: Some(self.total).filter(|total| *total > 0.0),
             contents: ChartContents {
@@ -174,14 +184,41 @@ fn last_time_us(model: &Model) -> i64 {
     model.timelines.iter().rev().find(|line| has_content(line)).map_or(0, |line| line.time_us)
 }
 
-/// How many notes a line gives the player to judge (`TimeLine.getTotalNotes`).
-fn judged_notes(line: &TimeLine) -> usize {
-    let judged = |kind: &NoteKind| match kind {
+/// Whether a note is one the player is judged on: every plain note and every long note's head, and
+/// a long note's end when it is judged apart from its head. A mine is not.
+fn is_judged(kind: &NoteKind) -> bool {
+    match kind {
         NoteKind::Mine { .. } => false,
         NoteKind::LongEnd { ln } => matches!(ln, LnKind::Cn | LnKind::Hcn),
         NoteKind::Normal | NoteKind::LongStart { .. } => true,
-    };
-    line.notes.iter().flatten().filter(|note| judged(&note.kind)).count()
+    }
+}
+
+/// How many notes a line gives the player to judge (`TimeLine.getTotalNotes`).
+fn judged_notes(line: &TimeLine) -> usize {
+    line.notes.iter().flatten().filter(|note| is_judged(&note.kind)).count()
+}
+
+/// How many notes of each kind a chart gives the player to judge, as `SongInformation` counts them
+/// (`BMSModelUtils.getTotalNotes` asked for the plain and the long notes of the keys and of the
+/// turntable): the four add up to the chart's notes.
+fn note_counts(model: &Model) -> NoteCounts {
+    let mut counts = NoteCounts::default();
+    for line in &model.timelines {
+        for (lane, note) in line.notes.iter().enumerate().take(model.mode.key) {
+            let Some(note) = note.as_ref().filter(|note| is_judged(&note.kind)) else {
+                continue;
+            };
+            let count = match (model.mode.is_scratch(lane), &note.kind) {
+                (false, NoteKind::Normal) => &mut counts.normal,
+                (false, _) => &mut counts.long,
+                (true, NoteKind::Normal) => &mut counts.scratch,
+                (true, _) => &mut counts.long_scratch,
+            };
+            *count += 1;
+        }
+    }
+    counts
 }
 
 /// How many notes of each kind each second of the chart holds, up to the second of its last line

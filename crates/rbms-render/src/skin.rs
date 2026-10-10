@@ -200,11 +200,6 @@ pub struct Skin {
     pub fields: Vec<(f32, f32)>,
     pub top_y: f32,
     pub judge_y: f32,
-    /// The share of the field the lift raises the judgement line by, already folded into `judge_y`.
-    pub lift: f32,
-    /// How far that lift raised `judge_y`, in screen pixels, which is what a document reads as
-    /// `OFFSET_LIFT`.
-    pub lift_height: f32,
     pub note_height: f32,
     pub scratch: Vec<bool>,
     pub key_color: Color,
@@ -317,8 +312,6 @@ impl Skin {
             fields,
             top_y: cfg.top_y,
             judge_y,
-            lift,
-            lift_height: cfg.judge_y - judge_y,
             note_height: cfg.note_height,
             scratch,
             key_color: col(cfg.key_color),

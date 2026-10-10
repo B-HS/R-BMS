@@ -11,21 +11,18 @@ use std::path::{Path, PathBuf};
 
 use rbms_chart::to_model;
 use rbms_parser::parse;
-use rbms_render::playfield::LaneShade;
-use rbms_render::skin_render::frame::{BarKind, SongBar};
-use rbms_render::skin_render::state::{DecideChart, DecideViewState, SelectViewState};
-use rbms_render::skin_render::{SkinDraw, render_decide_screen, render_keyconfig_screen, render_result_screen, render_select_screen};
+use rbms_render::skin_render::frame::{BarKind, LaneNotes, SongBar};
 use rbms_render::{
-    BgaFrame, Color, CpuCanvas, FrameData, GaugeFrame, GoldenImage, GoldenOptions, NoExpressions, NoteField, PlayfieldView, PngCodec, QuadParams, Rect,
-    RenderCtx, Renderer, SelectDetail, SelectView, Skin, SkinAssets, SkinFrame, SkinImage, SkinObjectKind, SkinScreen, SongBars, TextContext, TextureId,
-    assert_golden_png, render_select_ctx,
+    BgaFrame, Color, CpuCanvas, FrameData, GaugeFrame, GoldenImage, GoldenOptions, NoExpressions, PngCodec, QuadParams, Rect, RenderCtx, Renderer,
+    SelectDetail, SelectView, SkinAssets, SkinFrame, SkinImage, SkinObjectKind, SkinScreen, SongBars, TextContext, TextureId, assert_golden_png,
+    render_select_ctx,
 };
-use rbms_skin::dst::{DrawCondition, DrawStateSource, LuaDrawEval, LuaFnId, TimerRef};
+use rbms_skin::dst::{DrawCondition, LuaDrawEval, LuaFnId, SkinOffset, TimerRef};
 use rbms_skin::loader::lua_skin::{LuaSkinOptions, load_lua_skin};
-use rbms_skin::loader::{LoadedSkin, SkinLoadOptions, SkinUserConfig, load_skin};
+use rbms_skin::loader::{LoadedSkin, SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_PLAY_7KEYS, SkinLoadOptions, SkinUserConfig, load_skin};
 use rbms_skin::lua::{FrameBudget, LuaBudget};
 use rbms_skin::model::PropertyRef;
-use rbms_skin::property::generated::{OPTION_DIFFICULTY0, OPTION_DIFFICULTY5};
+use rbms_skin::property::generated::OFFSET_ALL;
 use rbms_skin::property::{HostCall, MapHost, SkinHost, UNMAPPED_BOOLEAN, UNMAPPED_FLOAT, UNMAPPED_INTEGER, UNMAPPED_STRING};
 use rbms_skin::timer::{MICROS_PER_MILLI, TIMER_OFF, TimerId, TimerState};
 
@@ -359,15 +356,6 @@ fn drawing_a_document_leaves_the_built_in_screens_untouched() {
 }
 
 #[test]
-fn a_screen_state_answers_the_ids_its_view_knows() {
-    let view = plain_select_view();
-    let state = SelectViewState::new(&view, 17, None, false);
-    assert_eq!(state.now_us(), 17, "the frame clock is the one the caller passed");
-    assert_eq!(state.text(rbms_skin::property::generated::STRING_DIRECTORY), "ROOT", "the browser's header answers the directory id");
-    assert_eq!(state.integer(rbms_skin::property::generated::NUMBER_PLAYLEVEL), UNMAPPED_INTEGER, "no chart is focused, so there is no level to report");
-}
-
-#[test]
 fn a_host_without_a_sandbox_answers_a_function_value_with_the_fallback_of_its_type() {
     let evaluator = NoExpressions;
     assert!(!evaluator.call_boolean(LuaFnId(0)));
@@ -505,89 +493,6 @@ fn a_document_whose_values_are_functions_draws_their_fallbacks_without_an_interp
         scripted - 4,
         "the gated object (false), the timed one (off), the text (empty) and the graph (zero) are not drawn; the number draws a zero and the slider rests"
     );
-}
-
-/// A run that never happened, so the fallback tests have a view to hand the result screen.
-fn plain_result_view() -> rbms_render::ResultView {
-    rbms_render::ResultView {
-        title: "GATE".into(),
-        artist: String::new(),
-        mode_label: "7K",
-        counts: [0; 6],
-        ex_score: 0,
-        max_score: 0,
-        max_combo: 0,
-        total_notes: 0,
-        fast: [0; 2],
-        slow: [0; 2],
-        gauge: 0.0,
-        clear_label: "FAILED",
-        clear_color: Color::GRAY,
-        prev_best_ex: None,
-        prev_ex: None,
-        show_graph: false,
-        show_result_graphs: false,
-        gauge_series: Vec::new(),
-        timing_hist: Box::new([]),
-        judge_dist: [0; 6],
-    }
-}
-
-#[test]
-fn every_screen_gate_reports_no_document_and_draws_nothing() {
-    rbms_render::font::use_embedded_fonts_only();
-    let mut canvas = CpuCanvas::new(CANVAS_W, CANVAS_H);
-    let mut text = TextContext::embedded_only();
-    let mut ctx = RenderCtx::new(rbms_render::theme(), &mut text);
-    canvas.clear(Color::BLACK);
-    let blank = canvas.pixels().to_vec();
-
-    let view = plain_select_view();
-    let result = plain_result_view();
-    let keys = [String::from("SHIFT")];
-    assert!(!render_select_screen(&mut ctx, &mut canvas, None, &view));
-    assert!(!render_result_screen(&mut ctx, &mut canvas, None, &result, None, false));
-    let loading = DecideViewState { progress: 0.5, done: false, title: "GATE", chart: DecideChart::default(), now_us: 0, offsets: None };
-    assert!(!render_decide_screen(&mut ctx, &mut canvas, None, &loading));
-    assert!(!render_keyconfig_screen(&mut ctx, &mut canvas, None, &keys));
-    assert_eq!(canvas.pixels(), blank.as_slice(), "a screen with no document selected leaves the frame for its own layout to fill");
-}
-
-/// The difficulty slots the decide screen is asked about below, with the slot each is answered as:
-/// the five a chart can name, and on either side of them the charts that name none.
-const DECIDE_DIFFICULTIES: [(i32, i32); 8] = [(-1, 0), (0, 0), (1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 0)];
-
-/// A skin colours the decide screen by walking the six difficulty options and has no colour to give
-/// when none of them is on, so the screen answers exactly one whatever the chart says -- and a
-/// screen that is waiting for something other than a chart answers the one for no difficulty.
-#[test]
-fn the_decide_screen_answers_exactly_one_difficulty_option() {
-    for (difficulty, slot) in DECIDE_DIFFICULTIES {
-        let chart = DecideChart { difficulty, ..DecideChart::default() };
-        let state = DecideViewState { progress: 0.0, done: false, title: "", chart, now_us: 0, offsets: None };
-        let on: Vec<i32> = (OPTION_DIFFICULTY0..=OPTION_DIFFICULTY5).filter(|option| state.boolean(*option) == Some(true)).collect();
-        assert_eq!(on, vec![OPTION_DIFFICULTY0 + slot], "difficulty {difficulty}");
-        let off: Vec<i32> = (OPTION_DIFFICULTY0..=OPTION_DIFFICULTY5).filter(|option| state.boolean(-option) == Some(false)).collect();
-        assert_eq!(off, on, "the negated options of difficulty {difficulty} do not mirror the plain ones");
-    }
-}
-
-#[test]
-fn a_screen_gate_draws_the_document_when_one_is_selected() {
-    rbms_render::font::use_embedded_fonts_only();
-    let mut canvas = CpuCanvas::new(CANVAS_W, CANVAS_H);
-    let mut text = TextContext::embedded_only();
-    let (screen, _) = build(&mut canvas, &mut text);
-    let mut timers = TimerState::new();
-    timers.set_on(FIXTURE_TIMER, 0);
-
-    canvas.clear(Color::BLACK);
-    let blank = canvas.pixels().to_vec();
-    let document = SkinDraw { screen: &screen, timers: &timers, now_us: 0, lua: None, mouse: None, offsets: None, data: FrameData::default() };
-    let view = plain_select_view();
-    let mut ctx = RenderCtx::new(rbms_render::theme(), &mut text);
-    assert!(render_select_screen(&mut ctx, &mut canvas, Some(&document), &view), "a selected document is what the screen draws");
-    assert_ne!(canvas.pixels(), blank.as_slice(), "and it reached the frame");
 }
 
 /// A scratch folder holding one generated document and its sources, removed when the test ends.
@@ -1188,13 +1093,19 @@ const FIELD_CHART: &[u8] = b"#PLAYER 1\r\n#BPM 120\r\n#WAV01 a.wav\r\n#00111:000
 /// Lanes a seven-key field has: the turntable and seven keys.
 const FIELD_LANES: usize = 8;
 
-/// The size the play fixture is authored and drawn at. A note's row comes from the built-in field's
-/// own geometry, which is laid out for a screen this tall.
+/// Where the play head of the play fixture is: a millisecond in, because a chart that has not
+/// started draws no note, as it does not in the reference.
+const FIELD_STARTED_US: i64 = 1_000;
+
+/// The size the play fixture is authored and drawn at.
 const FIELD_SIZE: (u32, u32) = (1280, 720);
 
 /// The scroll speed the play fixture is drawn at, slow enough to keep the chart's one row of notes
 /// inside the field.
-const FIELD_HISPEED: f64 = 0.5;
+const FIELD_HISPEED: f32 = 0.5;
+
+/// The percent of a full gauge the frame's gauge clears at, which the field does not draw.
+const FIELD_GAUGE_BORDER: f32 = 80.0;
 
 /// A play document whose note field is named by a destination that carries an offset and no `dst`,
 /// as a published skin names it.
@@ -1229,12 +1140,10 @@ fn a_note_field_named_by_a_destination_with_no_keyframe_is_drawn() {
     let screen = compile(&scratch.root, &document, &mut canvas, &mut text);
     assert_eq!((screen.count_of(SkinObjectKind::Note), screen.warnings()), (1, &[][..]));
 
-    let field = Skin::default_for(rbms_model::Mode::BEAT_7K, FIELD_SIZE.0 as f32, FIELD_SIZE.1 as f32);
     let chart = to_model(&parse(FIELD_CHART), rbms_model::Mode::BEAT_7K);
     let timelines = &chart.timelines;
-    let playfield = PlayfieldView { timelines, microtime: 0, hispeed: FIELD_HISPEED, beam_on: &[], beam_off: &[], constant: false, legacy_note: false };
-    let play = NoteField { field: &field, playfield: &playfield, shade: LaneShade::default(), bomb: &[], keys_down: &[] };
-    let data = FrameData { field: Some(&play), gauge: Some(GaugeFrame::of_kind(0, field.gauge_clear_threshold)), ..FrameData::default() };
+    let notes = LaneNotes { hispeed: FIELD_HISPEED, ..LaneNotes::new(timelines, FIELD_STARTED_US, chart.init_bpm) };
+    let data = FrameData { notes: Some(&notes), gauge: Some(GaugeFrame::of_kind(0, FIELD_GAUGE_BORDER)), ..FrameData::default() };
     let timers = TimerState::new();
     let state = FixtureState::default();
     canvas.clear(Color::BLACK);
@@ -1270,4 +1179,118 @@ fn an_ordinary_object_named_by_a_destination_with_no_keyframe_is_left_out_of_the
     assert_eq!(screen.object_count(), 1, "only the destination that says where the image goes became an object");
     assert_eq!(screen.warnings().len(), 1, "and the other is reported: {:?}", screen.warnings());
     assert!(screen.warnings()[0].contains("no destination keyframe"), "{:?}", screen.warnings());
+}
+
+/// The size the whole-offset fixture is authored at and drawn on, so a document pixel is a screen
+/// pixel and a percentage of each side is a round number of them.
+const WHOLE_SIZE: (u32, u32) = (200, 100);
+
+/// Where the fixture's one tile sits in the document, measured up from the bottom left as a
+/// document measures: `(x, y, w, h)`.
+const WHOLE_TILE: (u32, u32, u32, u32) = (20, 20, 40, 20);
+
+/// The colour the tile is drawn in: the checker source's opaque white, tinted by nothing.
+const WHOLE_TILE_COLOR: Color = Color { r: 255, g: 255, b: 255, a: 255 };
+
+/// A document of `skin_type` that draws one opaque tile at [`WHOLE_TILE`].
+fn whole_document(scratch: &Scratch, skin_type: i32) -> PathBuf {
+    scratch.write("panel.tex", "checker 16 16 16");
+    let (x, y, w, h) = WHOLE_TILE;
+    let body = format!(
+        r#"{{
+            "type": {skin_type}, "w": {}, "h": {},
+            "source": [{{ "id": "panel", "path": "panel.tex" }}],
+            "image": [{{ "id": "tile", "src": "panel", "x": 0, "y": 0, "w": 16, "h": 16 }}],
+            "destination": [{{ "id": "tile", "dst": [{{ "x": {x}, "y": {y}, "w": {w}, "h": {h} }}] }}]
+        }}"#,
+        WHOLE_SIZE.0, WHOLE_SIZE.1
+    );
+    scratch.write("skin.json", &body)
+}
+
+/// A host that answers nothing but the whole-screen offset the player set.
+fn nudged(x: f32, y: f32, w: f32, h: f32) -> MapHost {
+    let mut host = MapHost::new();
+    host.offsets.insert(OFFSET_ALL, SkinOffset { x, y, w, h, r: 0.0, a: 0.0 });
+    host
+}
+
+/// Draws one frame of `screen` against `host` over black.
+fn whole_frame(screen: &SkinScreen, text: &mut TextContext, canvas: &mut CpuCanvas, host: &MapHost) {
+    let timers = TimerState::new();
+    canvas.clear(Color::BLACK);
+    let frame = SkinFrame { now_us: 0, timers: &timers, state: host, lua: None, mouse: None, data: FrameData::default() };
+    screen.draw(&mut RenderCtx::new(rbms_render::theme(), text), canvas, &frame);
+}
+
+/// The bounding box of the tile on `canvas`, as `(left, top, right, bottom)` in screen pixels with
+/// the far edges exclusive.
+fn tile_bounds(canvas: &CpuCanvas) -> Option<(u32, u32, u32, u32)> {
+    let mut bounds: Option<(u32, u32, u32, u32)> = None;
+    for y in 0..WHOLE_SIZE.1 {
+        for x in 0..WHOLE_SIZE.0 {
+            if canvas.pixel_at(x, y) != WHOLE_TILE_COLOR {
+                continue;
+            }
+            bounds = Some(match bounds {
+                Some((left, top, right, bottom)) => (left.min(x), top.min(y), right.max(x + 1), bottom.max(y + 1)),
+                None => (x, y, x + 1, y + 1),
+            });
+        }
+    }
+    bounds
+}
+
+/// Compiles the whole-offset fixture as a document of `skin_type`, draws one frame of it against
+/// `host`, and answers where the tile landed.
+fn whole_tile_of(tag: &str, skin_type: i32, host: &MapHost) -> Option<(u32, u32, u32, u32)> {
+    rbms_render::font::use_embedded_fonts_only();
+    let scratch = Scratch::new(tag);
+    let document = whole_document(&scratch, skin_type);
+    let mut text = TextContext::embedded_only();
+    let mut canvas = CpuCanvas::new(WHOLE_SIZE.0, WHOLE_SIZE.1);
+    let screen = compile(&scratch.root, &document, &mut canvas, &mut text);
+    whole_frame(&screen, &mut text, &mut canvas, host);
+    tile_bounds(&canvas)
+}
+
+/// `OFFSET_ALL` moves a play screen by a share of the screen and stretches it away from the bottom
+/// left corner (`Skin.ensureRenderer`): ten percent of a 200 by 100 screen is twenty pixels right
+/// and ten pixels up, and half as large again turns a 40 by 20 tile whose corner is 20 in and 20 up
+/// into a 60 by 30 one whose corner is 30 in and 30 up.
+#[test]
+fn the_whole_screen_offset_moves_and_stretches_everything_a_play_document_draws() {
+    let at_rest = whole_tile_of("whole-rest", SKIN_TYPE_PLAY_7KEYS, &MapHost::new());
+    assert_eq!(at_rest, Some((20, 60, 60, 80)), "a host with no offset draws the tile where the document put it");
+    assert_eq!(whole_tile_of("whole-zero", SKIN_TYPE_PLAY_7KEYS, &nudged(0.0, 0.0, 0.0, 0.0)), at_rest, "and so does an offset of nothing");
+
+    assert_eq!(whole_tile_of("whole-moved", SKIN_TYPE_PLAY_7KEYS, &nudged(10.0, 10.0, 0.0, 0.0)), Some((40, 50, 80, 70)));
+    assert_eq!(whole_tile_of("whole-stretched", SKIN_TYPE_PLAY_7KEYS, &nudged(0.0, 0.0, 50.0, 50.0)), Some((30, 40, 90, 70)));
+    assert_eq!(whole_tile_of("whole-both", SKIN_TYPE_PLAY_7KEYS, &nudged(10.0, 10.0, 50.0, 50.0)), Some((50, 30, 110, 60)));
+}
+
+/// Only a play skin is drawn under it (`Skin.getOffsetAll`): the same offset on a browser's document
+/// moves nothing.
+#[test]
+fn the_whole_screen_offset_leaves_a_document_that_is_not_a_play_screen_alone() {
+    let host = nudged(10.0, 10.0, 50.0, 50.0);
+    assert_eq!(whole_tile_of("whole-select", SKIN_TYPE_MUSIC_SELECT, &host), Some((20, 60, 60, 80)));
+}
+
+/// The reference sets the transform when it makes its renderer and never again, so the offset a
+/// screen is first drawn under is the one it keeps.
+#[test]
+fn the_whole_screen_offset_is_settled_by_the_first_frame_drawn() {
+    rbms_render::font::use_embedded_fonts_only();
+    let scratch = Scratch::new("whole-settled");
+    let document = whole_document(&scratch, SKIN_TYPE_PLAY_7KEYS);
+    let mut text = TextContext::embedded_only();
+    let mut canvas = CpuCanvas::new(WHOLE_SIZE.0, WHOLE_SIZE.1);
+    let screen = compile(&scratch.root, &document, &mut canvas, &mut text);
+
+    whole_frame(&screen, &mut text, &mut canvas, &nudged(10.0, 0.0, 0.0, 0.0));
+    let first = tile_bounds(&canvas);
+    assert_eq!(first, Some((40, 60, 80, 80)));
+    whole_frame(&screen, &mut text, &mut canvas, &nudged(-10.0, 0.0, 0.0, 0.0));
+    assert_eq!(tile_bounds(&canvas), first, "an offset that changed after the first frame moved a screen that was already being drawn");
 }

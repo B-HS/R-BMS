@@ -9,18 +9,14 @@
 use std::path::Path;
 
 use rbms_course::{CourseChart, CourseRun};
-use rbms_judge::{ClearType, clear_type_from_id};
 use rbms_model::Mode;
 use rbms_play::last_note_time_ms;
-use rbms_render::result::{ResultExtras, ResultView};
 use rbms_render::skin_render::frame::{GAUGE_TYPES, GaugeScale};
 use rbms_render::{FrameSeries, GaugeFrame, GaugeHistory};
 
 use crate::AppShared;
 use crate::app_play::chart_model;
 use crate::course_ui::library_index;
-use crate::format::clear_label_color;
-use crate::keyconfig::mode_config_key;
 use crate::skin_host::chart::ChartMeta;
 use crate::skin_host::options::{PlayedOptions, random_option_index};
 use crate::skin_host::result::course::{CourseTally, UnplayedStage};
@@ -30,10 +26,6 @@ use crate::skin_host::result::snapshot::ResultSnapshot;
 pub(super) struct CourseSkinRun {
     /// What the clusters report from.
     pub(super) snapshot: ResultSnapshot,
-    /// The summary the screen was drawn from before the clusters existed, which still answers the
-    /// ids no cluster knows.
-    pub(super) view: ResultView,
-    pub(super) extras: ResultExtras,
     gauges: Vec<Vec<f32>>,
     sections: Vec<usize>,
     scales: [GaugeScale; GAUGE_TYPES],
@@ -51,12 +43,8 @@ impl CourseSkinRun {
         let mut tally = CourseTally::of(run, records, &unplayed, shared.mode);
         tally.input.updates_score = shared.course_stage_reasons.iter().all(Option::is_none);
         tally.input.options = PlayedOptions { random: random_option_index(shared.config.play.random), ..PlayedOptions::default() };
-        let lamp = clear_type_from_id(tally.input.sheet.clear);
-        let view = summary_view(run, &tally, lamp, shared.mode);
         CourseSkinRun {
             snapshot: ResultSnapshot::of(tally.input),
-            view,
-            extras: ResultExtras::default(),
             gauges: tally.gauges,
             sections: tally.sections,
             scales: tally.scales,
@@ -92,34 +80,6 @@ impl CourseSkinRun {
     /// of every stage.
     pub(super) fn chart(&self) -> ChartMeta<'_> {
         ChartMeta { title: &self.title, heading: Some(&self.title), mode: Some(self.mode), notes: Some(self.notes), ..ChartMeta::default() }
-    }
-}
-
-/// The summary the screen carried before the clusters existed, taken from the course's totals.
-fn summary_view(run: &CourseRun, tally: &CourseTally, lamp: ClearType, mode: Mode) -> ResultView {
-    let totals = &run.totals;
-    let (clear_label, clear_color) = clear_label_color(lamp);
-    ResultView {
-        title: run.course.name.clone(),
-        artist: String::new(),
-        mode_label: mode_config_key(mode),
-        counts: totals.counts,
-        ex_score: totals.ex,
-        max_score: totals.max_ex,
-        max_combo: totals.max_combo,
-        total_notes: tally.notes,
-        fast: [totals.fast, 0],
-        slow: [totals.slow, 0],
-        gauge: run.carry_gauge,
-        clear_label,
-        clear_color,
-        prev_best_ex: None,
-        prev_ex: None,
-        show_graph: false,
-        show_result_graphs: false,
-        gauge_series: Vec::new(),
-        timing_hist: Box::default(),
-        judge_dist: totals.counts,
     }
 }
 

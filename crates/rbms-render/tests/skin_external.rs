@@ -32,16 +32,17 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
 use rbms_chart::to_model;
-use rbms_model::Mode;
+use rbms_model::{Mode, NoteKind, TimeLine};
 use rbms_parser::parse;
-use rbms_render::playfield::LaneShade;
 use rbms_render::skin_render::frame::{BarDistribution, BarKind, BarScroll, BarTrophy, GAUGE_TYPES, GaugeScale, SongBar};
+use rbms_render::skin_render::frame::{BgaEvent, BgaExpand, BgaPicture, BgaPlayhead, BgaTextures, DEFAULT_MISS_LAYER_DURATION_MS};
+use rbms_render::skin_render::frame::{JUDGE_REGIONS, JudgeFrame, JudgeHit};
+use rbms_render::skin_render::frame::{LaneLong, LaneNotes, NoteDisplay};
 use rbms_render::skin_render::graphs::{EARLY_LATE_BUCKETS, GAUGE_SAMPLE_MS, JUDGEMENTS, NOTE_KINDS, PlayCursor, TIMING_JUDGE_AREAS};
 use rbms_render::skin_render::textures::referenced_sources;
 use rbms_render::{
-    BgaFrame, BpmTimeline, Color, CpuCanvas, FrameData, FrameSeries, GaugeFrame, GaugeHistory, NoteDistribution, NoteField, PlayfieldView, RecentHits,
-    ReferenceImages, RenderCtx, Renderer, Skin, SkinAssets, SkinFrame, SkinImage, SkinObjectKind, SkinScreen, SongBars, TextContext, TextureId,
-    TimingHistogram,
+    BgaFrame, BpmTimeline, Color, CpuCanvas, FrameData, FrameSeries, GaugeFrame, GaugeHistory, NoteDistribution, RecentHits, ReferenceImages, RenderCtx,
+    Renderer, SkinAssets, SkinFrame, SkinImage, SkinObjectKind, SkinScreen, SongBars, TextContext, TextureId, TimingHistogram,
 };
 use rbms_skin::dst::{DrawCondition, TimerRef};
 use rbms_skin::loader::{LoadedSkin, SkinLoadOptions, SkinUserConfig, load_skin_with_host, parse_value};
@@ -98,13 +99,60 @@ const BACKDROP_H: u32 = 144;
 /// its scenario switches the play timer on.
 const PLAY_STARTS_MS: i64 = 4_500;
 
-/// Scroll speed the play scenario's notes are drawn at.
-const PLAY_HISPEED: f64 = 1.5;
+/// Width and height of the stand-in pictures the background scenario's chart names, 16:9 so a
+/// picture fits the pack's background rectangle without bars.
+const BGA_PICTURE: (u32, u32) = (640, 360);
 
-/// A two-measure chart with every lane of a seven-key field filled, written for this test.
-const PLAY_CHART: &[u8] = b"#PLAYER 1\r\n#BPM 150\r\n#WAV01 a.wav\r\n\
-#00111:01000100\r\n#00112:00010001\r\n#00113:01000000\r\n#00114:00000100\r\n#00115:00010000\r\n#00116:01010000\r\n#00118:00000001\r\n#00119:01000000\r\n\
-#00211:0101\r\n#00212:0001\r\n#00213:0100\r\n#00214:0101\r\n#00215:0001\r\n#00216:0100\r\n#00218:0101\r\n#00219:0001\r\n";
+/// The chart's picture numbers in the background scenario: the picture, the layer over it, and the
+/// picture its miss layer shows.
+const BGA_PICTURE_BASE: i32 = 0;
+const BGA_PICTURE_LAYER: i32 = 1;
+const BGA_PICTURE_MISS: i32 = 2;
+
+/// How far into the chart, in milliseconds, the background scenario's player misses.
+const BGA_MISS_AT_MS: i64 = 800;
+
+/// The side of the lit square and the thickness of the bar the layer picture has on black.
+const BGA_LAYER_SQUARE: u32 = 160;
+const BGA_LAYER_BAR: u32 = 20;
+
+/// The red of the picture the miss layer shows.
+const BGA_MISS_RED: u8 = 180;
+
+/// Scroll speed the play scenario's notes are drawn at.
+const PLAY_HISPEED: f32 = 1.5;
+
+/// The percent of a full gauge the play scenario's gauge clears at.
+const PLAY_GAUGE_BORDER: f32 = 80.0;
+
+/// The chart every play scenario scrolls, written for this test, on the channels a five-key field
+/// has on either side, so one text reads as a chart of every mode: a long note that is under the
+/// play head while the scenario's last frame is drawn and one that is still on its way, a mine, a
+/// tempo that halves half way through the second measure, and plain notes around them.
+const PLAY_CHART_FIVE: &[u8] = b"#PLAYER 3\r\n#BPM 150\r\n#WAV01 a.wav\r\n\
+#00051:00000001\r\n#00061:00000001\r\n#00151:00010000\r\n#00161:00010000\r\n\
+#00153:0001000100000000\r\n#00163:0001000100000000\r\n#001D5:00010000\r\n#001E5:00010000\r\n#00103:00004B00\r\n\
+#00112:01010000\r\n#00122:01010000\r\n#00114:0001000000010000\r\n#00124:0001000000010000\r\n#00116:0101\r\n#00126:0101\r\n\
+#00211:0101\r\n#00212:0001\r\n#00214:0101\r\n#00215:0001\r\n#00216:0100\r\n#00221:0101\r\n#00222:0001\r\n#00224:0101\r\n#00225:0001\r\n#00226:0100\r\n";
+
+/// What a seven-key field adds to that chart: its sixth and seventh keys, on either side. A
+/// five-key field reads none of it.
+const PLAY_CHART_SEVEN: &[u8] = b"#00118:0000000100000000\r\n#00128:0000000100000000\r\n#00119:01000100\r\n#00129:01000100\r\n\
+#00218:0101\r\n#00219:0001\r\n#00228:0101\r\n#00229:0001\r\n";
+
+/// The lane of the play scenarios whose long note the player holds while the play head is inside
+/// it. The other long note of the chart is never held, so a frame shows both bodies.
+const PLAY_HELD_LANE: usize = 0;
+
+/// The entry files of the play screens that are not the seven-key one, each of which is drawn
+/// against the chart read as its own mode.
+const ENTRY_PLAY5: &str = "play5_hw.luaskin";
+const ENTRY_PLAY10: &str = "play10_hw.luaskin";
+const ENTRY_PLAY14: &str = "play14_hw.luaskin";
+
+/// The scene time the other play screens are drawn at: a second and a half into the chart, with
+/// the first long note under the play head.
+const PLAY_RUNNING_MS: i64 = 6_000;
 
 /// The reference's number for the gauge the result scenario's run was played on: normal.
 const RESULT_GAUGE_TYPE: usize = 2;
@@ -348,6 +396,9 @@ enum Extra {
     CourseResult,
     /// A note field.
     Play,
+    /// A note field with the chart's pictures behind it: the background the chart is showing at the
+    /// moment, as the game would supply it.
+    PlayBga,
 }
 
 /// An option that changes while the scene runs, which a scenario file cannot say: it describes one
@@ -406,6 +457,36 @@ const OPTION_LOADED: i32 = 81;
 /// written against.
 const PLAY_LOADED_MS: i64 = 3_500;
 
+/// The timer each judgement region switches on when it is judged, by region (`JudgeManager.JUDGE_TIMER`).
+const JUDGE_TIMERS: [i32; JUDGE_REGIONS] = [46, 47, 247];
+
+/// The combo timer each region switches on at the same moment (`JudgeManager.COMBO_TIMER`).
+const COMBO_TIMERS: [i32; JUDGE_REGIONS] = [446, 447, 448];
+
+/// How many judgements a region can report, best first.
+const JUDGEMENT_KINDS: usize = 6;
+
+/// One judgement a play scenario's run takes: which region took it, which judgement it was, the
+/// combo the run stood at and the scene time it landed at.
+#[derive(Debug, Clone, Copy, Deserialize)]
+struct JudgeRow {
+    region: usize,
+    judgement: usize,
+    combo: i32,
+    at_ms: i64,
+}
+
+/// What a play scenario says beside its host: the judgements its run takes as the scene goes on,
+/// which no property id carries and a [`MapHost`] therefore has no table for.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct PlayScript {
+    judge_hits: Vec<JudgeRow>,
+    /// The hits the visualisers plot, each `[error in milliseconds, judgement]` with an early hit
+    /// positive, oldest first.
+    recent_hits: Vec<(i64, u8)>,
+}
+
 /// The screens that are drawn.
 ///
 /// The decide, result and browser screens are drawn as they open, when the reference starts to take
@@ -415,7 +496,12 @@ const PLAY_LOADED_MS: i64 = 3_500;
 /// second page, where the rest of its graphs are, and the course's result screen is drawn against
 /// the same scenario with the run read as four stages. The browser is drawn once more at rest in
 /// every other way, with its wheel half way through sliding one slot along. The play screen is
-/// drawn while it loads (twice), in its ready phase and with the chart running.
+/// drawn while it loads (twice), in its ready phase and with the chart running. It is drawn twice
+/// more against scenarios of its own: one whose run takes a perfect great, a good and a bad half a
+/// second apart, drawn while each pop-up is on show and once after the last has played out, and one
+/// with the lift, the hidden cover and the lane cover all on and a great on show. The pack these
+/// were written against blinks every word but the best on an eighty millisecond cycle, so those
+/// frames are taken on the half of the cycle the word is lit in.
 const SHOTS: &[Shot] = &[
     Shot {
         name: "decide",
@@ -472,7 +558,59 @@ const SHOTS: &[Shot] = &[
         switches: &[Switch { at_ms: PLAY_LOADED_MS, option: OPTION_NOW_LOADING, on: false }, Switch { at_ms: PLAY_LOADED_MS, option: OPTION_LOADED, on: true }],
         clicks: &[],
     },
+    Shot {
+        name: "play7_judge",
+        capture: "play7_judge",
+        entry: "play7_hw.luaskin",
+        times_ms: &[5_100, 5_700, 6_320, 6_800],
+        extra: Extra::Play,
+        switches: &[],
+        clicks: &[],
+    },
+    Shot {
+        name: "play7_visualizers",
+        capture: "play7_visualizers",
+        entry: "play7_hw.luaskin",
+        times_ms: &[PLAY_RUNNING_MS],
+        extra: Extra::Play,
+        switches: &[],
+        clicks: &[],
+    },
+    Shot { name: "play7_cover", capture: "play7_cover", entry: "play7_hw.luaskin", times_ms: &[5_120], extra: Extra::Play, switches: &[], clicks: &[] },
+    Shot {
+        name: "play7_bga",
+        capture: "play7_bga",
+        entry: "play7_hw.luaskin",
+        times_ms: &[4_000, 5_000, 5_500, 6_000],
+        extra: Extra::PlayBga,
+        switches: &[],
+        clicks: &[],
+    },
+    Shot { name: "play5_hw", capture: "play5_hw", entry: ENTRY_PLAY5, times_ms: &[PLAY_RUNNING_MS], extra: Extra::Play, switches: &[], clicks: &[] },
+    Shot { name: "play14_hw", capture: "play14_hw", entry: ENTRY_PLAY14, times_ms: &[PLAY_RUNNING_MS], extra: Extra::Play, switches: &[], clicks: &[] },
+    Shot { name: "play10_hw", capture: "play10_hw", entry: ENTRY_PLAY10, times_ms: &[PLAY_RUNNING_MS], extra: Extra::Play, switches: &[], clicks: &[] },
 ];
+
+/// The mode a shot's chart is read as and its skin is loaded for, which the entry file says.
+fn mode_of(shot: &Shot) -> Mode {
+    match shot.entry {
+        ENTRY_PLAY5 => Mode::BEAT_5K,
+        ENTRY_PLAY10 => Mode::BEAT_10K,
+        ENTRY_PLAY14 => Mode::BEAT_14K,
+        _ => Mode::BEAT_7K,
+    }
+}
+
+/// The long note `lane` has under the play head, by the chart time of its head: the one a player
+/// holding that lane down would be holding.
+fn long_in_hand(timelines: &[TimeLine], lane: usize, microtime: i64) -> Option<i64> {
+    let passed = timelines.iter().take_while(|timeline| timeline.time_us <= microtime);
+    passed.fold(None, |head, timeline| match timeline.notes.get(lane).and_then(Option::as_ref).map(|note| &note.kind) {
+        Some(NoteKind::LongStart { .. }) => Some(timeline.time_us),
+        Some(NoteKind::LongEnd { .. }) => None,
+        _ => head,
+    })
+}
 
 /// Where the scenario files live.
 fn scenario_dir() -> PathBuf {
@@ -494,6 +632,38 @@ fn scenario(name: &str) -> MapHost {
         host.booleans.entry(*option).or_insert(false);
     }
     host
+}
+
+/// What a play scenario says beside its host, read from the same file. A scenario that says nothing
+/// of the kind judges nothing.
+fn play_script(name: &str) -> PlayScript {
+    let path = scenario_dir().join(format!("{name}.json"));
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("{} should be readable: {error}", path.display()));
+    let (value, _) = parse_value(&path, &text).unwrap_or_else(|error| panic!("{} should parse: {error}", path.display()));
+    PlayScript::deserialize(value).unwrap_or_else(|error| panic!("{} should describe a run: {error}", path.display()))
+}
+
+/// What each judgement region last reported by `now_ms`: the latest judgement of the script that
+/// has landed in it.
+fn judge_frame(hits: &[JudgeRow], now_ms: i64) -> JudgeFrame {
+    hits.iter().filter(|hit| hit.at_ms <= now_ms).fold(JudgeFrame::default(), |frame, hit| {
+        frame.with_region(hit.region, JudgeHit { judgement: hit.judgement, combo: hit.combo, at_us: hit.at_ms * MICROS_PER_MILLI })
+    })
+}
+
+/// Switches the judge and combo timer of every region that has been judged by `now_ms` on at the
+/// moment its last judgement landed, in the host a script reads and in the store destinations read.
+fn switch_judge_timers(host: &mut MapHost, timers: &mut TimerState, hits: &[JudgeRow], now_ms: i64) {
+    let judged = judge_frame(hits, now_ms);
+    for (region, hit) in judged.regions.iter().enumerate() {
+        let Some(hit) = hit else {
+            continue;
+        };
+        for id in [JUDGE_TIMERS[region], COMBO_TIMERS[region]] {
+            host.timers.insert(id, hit.at_us);
+            timers.set_on(TimerId(id), hit.at_us);
+        }
+    }
 }
 
 /// The timers a scenario has switched on by `now_us`.
@@ -736,6 +906,52 @@ fn backdrop() -> Vec<u8> {
     rgba
 }
 
+/// The pictures the background scenario's chart names, by picture number: a diagonal ramp, a layer
+/// that is black everywhere but in a lit square and a bar, and a flat red for the miss layer.
+fn chart_pictures() -> [Vec<u8>; 3] {
+    let (width, height) = BGA_PICTURE;
+    let ramp = (0..height)
+        .flat_map(|y| {
+            (0..width).flat_map(move |x| {
+                let across = (x * u32::from(u8::MAX) / width) as u8;
+                let down = (y * u32::from(u8::MAX) / height) as u8;
+                [across, down, OPAQUE - across, OPAQUE]
+            })
+        })
+        .collect();
+    let (square_x, square_y) = ((width - BGA_LAYER_SQUARE) / 2, (height - BGA_LAYER_SQUARE) / 2);
+    let layer = (0..height)
+        .flat_map(|y| {
+            (0..width).flat_map(move |x| {
+                let in_square = (square_x..square_x + BGA_LAYER_SQUARE).contains(&x) && (square_y..square_y + BGA_LAYER_SQUARE).contains(&y);
+                let in_bar = y < BGA_LAYER_BAR;
+                match (in_square, in_bar) {
+                    (true, _) => [OPAQUE, 0, OPAQUE, OPAQUE],
+                    (false, true) => [OPAQUE, OPAQUE, 0, OPAQUE],
+                    (false, false) => [0, 0, 0, OPAQUE],
+                }
+            })
+        })
+        .collect();
+    let miss = (0..width * height).flat_map(|_| [BGA_MISS_RED, 0, 0, OPAQUE]).collect();
+    [ramp, layer, miss]
+}
+
+/// The background the scenario's chart shows `play_ms` into it, which is negative while the chart
+/// has not started: its picture and layer from the start, and a miss at [`BGA_MISS_AT_MS`].
+fn chart_background(canvas: &mut CpuCanvas, play_ms: i64) -> BgaFrame {
+    let mut head = BgaPlayhead::new(vec![BgaEvent { time_ms: 0, base: BGA_PICTURE_BASE, layer: BGA_PICTURE_LAYER, miss: Some(vec![BGA_PICTURE_MISS]) }]);
+    head.prepare(-1);
+    head.prepare(play_ms);
+    head.start_miss(BGA_MISS_AT_MS, DEFAULT_MISS_LAYER_DURATION_MS);
+    let pictures = chart_pictures();
+    let (width, height) = BGA_PICTURE;
+    BgaTextures::default().frame(canvas, head.pick(), BgaExpand::default(), |number| {
+        let rgba = pictures.get(usize::try_from(number).ok()?)?;
+        Some(BgaPicture { generation: u64::from(number.unsigned_abs()), width, height, rgba })
+    })
+}
+
 /// A chart of the browser scenario that is on disk.
 fn chart(title: &str, level: i32, difficulty: i32, lamp: i32, features: u32) -> SongBar {
     SongBar { level, difficulty, lamp, features, ..SongBar::new(BarKind::Song { exists: true }, title) }
@@ -811,13 +1027,16 @@ struct Stage<'a> {
     backdrop: TextureId,
     images: ReferenceImages,
     bars: &'a [SongBar],
-    field: &'a Skin,
     chart: &'a rbms_model::Model,
     analysis: &'a Analysis,
     /// How every gauge of the result scenario's run moved, by gauge type.
     gauges: &'a [Vec<f32>],
     /// How the result scenario's hits were spread around their notes.
     timing: &'a [u32],
+    /// The judgements a play scenario's run takes as its scene goes on.
+    judged: &'a [JudgeRow],
+    /// The hits a play scenario's two visualisers plot.
+    recent: &'a [(i64, u8)],
 }
 
 impl Stage<'_> {
@@ -850,17 +1069,20 @@ impl Stage<'_> {
         let samples = self.gauges.first().map_or(0, Vec::len);
         let stage_ends: [usize; COURSE_STAGES] = std::array::from_fn(|stage| samples * (stage + 1) / COURSE_STAGES);
         let course = FrameSeries { gauge_history: Some(GaugeHistory::of_kinds(self.gauges).with_sections(&stage_ends)), timing: None, ..series };
-        let playfield = PlayfieldView {
-            timelines: &self.chart.timelines,
-            microtime: (now_ms - PLAY_STARTS_MS).max(0) * MICROS_PER_MILLI,
+        let chart_us = (now_ms - PLAY_STARTS_MS).max(0) * MICROS_PER_MILLI;
+        let held = LaneLong { processing: long_in_hand(&self.chart.timelines, PLAY_HELD_LANE, chart_us), ..LaneLong::default() };
+        let longs: Vec<LaneLong> = (0..=PLAY_HELD_LANE).map(|lane| if lane == PLAY_HELD_LANE { held } else { LaneLong::default() }).collect();
+        let notes = LaneNotes {
             hispeed: PLAY_HISPEED,
-            beam_on: &[],
-            beam_off: &[],
-            constant: false,
-            legacy_note: false,
+            longs: &longs,
+            show: NoteDisplay { bpm_guide: true, ..NoteDisplay::default() },
+            ..LaneNotes::new(&self.chart.timelines, chart_us, self.chart.init_bpm)
         };
-        let play = NoteField { field: self.field, playfield: &playfield, shade: LaneShade::default(), bomb: &[], keys_down: &[] };
-        let behind = FrameData { bga: BgaFrame::of(Some(self.backdrop)), images: self.images, ..FrameData::default() };
+        let bga = match self.shot.extra {
+            Extra::PlayBga => chart_background(canvas, now_ms - PLAY_STARTS_MS),
+            _ => BgaFrame::of(Some(self.backdrop)),
+        };
+        let behind = FrameData { bga, images: self.images, ..FrameData::default() };
         let data = match self.shot.extra {
             Extra::None => FrameData { series: FrameSeries { bpm: Some(tempo), notes: Some(chart_only), ..FrameSeries::default() }, ..behind },
             Extra::Select | Extra::SelectSliding => {
@@ -868,11 +1090,11 @@ impl Stage<'_> {
             }
             Extra::Result => FrameData { series, gauge: Some(ended), ..behind },
             Extra::CourseResult => FrameData { series: course, gauge: Some(ended), ..behind },
-            Extra::Play => FrameData {
-                field: Some(&play),
-                gauge: Some(GaugeFrame::of_kind(0, self.field.gauge_clear_threshold)),
+            Extra::Play | Extra::PlayBga => FrameData {
+                notes: Some(&notes),
+                gauge: Some(GaugeFrame::of_kind(0, PLAY_GAUGE_BORDER)),
                 series: FrameSeries {
-                    recent_hits: Some(RecentHits::new(&[])),
+                    recent_hits: Some(RecentHits::new(self.recent).with_judge_area(RESULT_JUDGE_AREA)),
                     bpm: Some(tempo),
                     notes: Some(NoteDistribution { playing: Some(PlayCursor::default()), ..run }),
                     ..FrameSeries::default()
@@ -881,6 +1103,7 @@ impl Stage<'_> {
             },
         };
 
+        let data = FrameData { judge: judge_frame(self.judged, now_ms), ..data };
         let frame = SkinFrame { now_us, timers, state: host, lua: None, mouse: None, data };
         let prepared = match self.skin.runtime().filter(|_| bound) {
             Some(runtime) => {
@@ -914,7 +1137,7 @@ fn capture(pack: &Path, overlay: &Path, capture_dir: Option<&Path>, shot: &Shot)
     settle(&mut host, &scheduled, shot.switches, 0);
 
     let user = SkinUserConfig::default();
-    let options = SkinLoadOptions { rng_seed: Some(TEST_SEED), write_overlay: Some(overlay), ..SkinLoadOptions::new(pack, &user, Mode::BEAT_7K) };
+    let options = SkinLoadOptions { rng_seed: Some(TEST_SEED), write_overlay: Some(overlay), ..SkinLoadOptions::new(pack, &user, mode_of(shot)) };
     let loading = Instant::now();
     let skin = load_skin_with_host(&entry, options, &host).unwrap_or_else(|error| panic!("{} should load: {error}", shot.entry));
     let loaded_in = loading.elapsed();
@@ -984,13 +1207,13 @@ fn capture(pack: &Path, overlay: &Path, capture_dir: Option<&Path>, shot: &Shot)
     print_grouped("build warnings", screen.warnings());
 
     let bars = select_bars();
-    let field = Skin::default_for(Mode::BEAT_7K, CANVAS_W as f32, CANVAS_H as f32);
-    let chart = to_model(&parse(PLAY_CHART), Mode::BEAT_7K);
+    let chart = to_model(&parse(&[PLAY_CHART_FIVE, PLAY_CHART_SEVEN].concat()), mode_of(shot));
     let backdrop = canvas.register_texture("rbms.external.backdrop", &backdrop(), BACKDROP_W, BACKDROP_H);
     let images = reference_images(&mut canvas);
     let analysis = analysis();
     let gauges = gauge_histories();
     let timing = timing_distribution();
+    let script = play_script(shot.name);
     let stage = Stage {
         shot,
         skin: &skin,
@@ -998,17 +1221,19 @@ fn capture(pack: &Path, overlay: &Path, capture_dir: Option<&Path>, shot: &Shot)
         backdrop,
         images,
         bars: &bars,
-        field: &field,
         chart: &chart,
         analysis: &analysis,
         gauges: &gauges,
         timing: &timing,
+        judged: &script.judge_hits,
+        recent: &script.recent_hits,
     };
 
     let mut last = (TimerState::new(), 0);
     let mut clicked = 0;
     for now_ms in shot.times_ms {
-        let timers = settle(&mut host, &scheduled, shot.switches, *now_ms);
+        let mut timers = settle(&mut host, &scheduled, shot.switches, *now_ms);
+        switch_judge_timers(&mut host, &mut timers, &script.judge_hits, *now_ms);
         for click in shot.clicks.iter().skip(clicked).take_while(|click| click.at_ms <= *now_ms) {
             press(&skin, &host, click);
             clicked += 1;
@@ -1122,5 +1347,24 @@ fn every_scenario_describes_a_host_a_screen_can_be_drawn_against() {
     for stem in REFERENCE_IMAGE_STEMS {
         let image = reference_image(stem);
         assert!(image.width > 0 && image.height > 0, "the stand-in {stem} should be a picture");
+    }
+}
+
+/// The judgements a play scenario scripts are this repository's own too: each lands in a region a
+/// play screen has, is a judgement a region can report, and lands in scene order no earlier than the
+/// scene begins and no later than its last frame, so the latest one a frame finds is the last one
+/// written and none goes undrawn.
+#[test]
+fn every_scripted_judgement_is_one_a_play_screen_can_take() {
+    for shot in SHOTS {
+        let script = play_script(shot.name);
+        assert!(script.judge_hits.is_sorted_by_key(|hit| hit.at_ms), "{} should be judged in scene order", shot.name);
+        for hit in &script.judge_hits {
+            assert!(hit.region < JUDGE_REGIONS, "{} judges region {}, which no play screen has", shot.name, hit.region);
+            assert!(hit.judgement < JUDGEMENT_KINDS, "{} takes judgement {}, which no region reports", shot.name, hit.judgement);
+            assert!(hit.at_ms >= 0, "{} is judged before its scene begins", shot.name);
+        }
+        let last = shot.times_ms.last().copied().unwrap_or_default();
+        assert!(script.judge_hits.iter().all(|hit| hit.at_ms <= last), "{} is judged after its last frame", shot.name);
     }
 }

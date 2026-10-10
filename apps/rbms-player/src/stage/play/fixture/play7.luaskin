@@ -1,0 +1,43 @@
+local skin = {
+    type = 0,
+    name = "Mini Play",
+    w = 1280,
+    h = 720,
+    input = 500,
+    fadeout = 600,
+    loadend = 2000,
+    playstart = 1000,
+    close = 1500,
+    finishmargin = 800,
+}
+
+if skin_config then
+    local lanes = {}
+    local sizes = {}
+    local cells = {}
+    for lane = 1, 8 do
+        lanes[lane] = { x = 40 + (lane - 1) * 40, y = 220, w = 40, h = 400 }
+        sizes[lane] = 20
+        cells[lane] = "cell"
+    end
+    local function mark(x, r, g, b)
+        return { { x = x, y = 656, w = 64, h = 64, r = r, g = g, b = b } }
+    end
+    skin.source = { { id = 0, path = "cell.png" } }
+    skin.image = { { id = "cell", src = 0, x = 0, y = 0, w = 2, h = 2 } }
+    skin.note = { id = "notes", note = cells, size = sizes, dst = lanes }
+    skin.destination = {
+        { id = -111, dst = { { x = 0, y = 0, w = 1280, h = 720, r = 20, g = 40, b = 80 } } },
+        { id = "notes", dst = { { x = 40, y = 220, w = 320, h = 400 } } },
+        { id = -111, op = { 80 }, dst = { { x = 608, y = 328, w = 64, h = 64, r = 255, g = 255, b = 255 } } },
+        { id = -111, timer = 40, dst = mark(0, 0, 255, 0) },
+        { id = -111, timer = 41, dst = mark(64, 0, 0, 255) },
+        { id = -111, timer = 141, dst = mark(128, 0, 255, 255) },
+        { id = -111, timer = 1, dst = mark(192, 255, 128, 0) },
+        { id = -111, timer = 2, dst = mark(1088, 255, 255, 0) },
+        { id = -111, timer = 908, dst = mark(1152, 255, 0, 255) },
+        { id = -111, timer = 3, dst = mark(1216, 255, 0, 0) },
+    }
+end
+
+return skin
