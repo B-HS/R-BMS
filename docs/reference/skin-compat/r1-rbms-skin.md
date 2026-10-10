@@ -1,6 +1,13 @@
 # R1 — `crates/rbms-skin` 현황과 풀 Lua 스킨까지의 격차
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 3A(공통 그리기 의미론) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 7B(동영상 source) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 7B 반영 사항 (2026-10-11)
+
+`crates/rbms-video`(OpenH264 + `re_mp4`)와 스킨 동영상 source 재생을 넣은 뒤의 상태다.
+
+- (W7-2) r1-rbms-skin.md: 모델·로더 절에 SourceKind(Image/Movie), resolve::source_kind 와 MOVIE_NAME_ENDINGS, LoadedSkin.movie_sources 와 source_kind() 추가
+
 
 ## 웨이브 3A 반영 사항 (2026-10-10)
 

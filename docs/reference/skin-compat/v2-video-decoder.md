@@ -1,6 +1,57 @@
 # R-BMS 스킨 동영상 디코더 선정 조사 (W7-1)
 
-> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 7A 조사(구현 전) · 결정은 `docs/acknowledge/2026-10-09-lua-skin-compat-decisions.md` 의 "동영상 디코더" 절 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 7B(동영상 source) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 7B 반영 사항 (2026-10-11)
+
+`crates/rbms-video`(OpenH264 + `re_mp4`)와 스킨 동영상 source 재생을 넣은 뒤의 상태다.
+
+- (W7-2) v2-video-decoder.md: 상단 '범위'·'남은 검증'과 §9 '대상 8개의 OpenH264 실제 디코드: 미실행' 행 — 실행 완료로 교체. 8개 전부 프레임 수 일치(600/601/921/750/2564/4229/7415/3604), 거부 샘플 0. 출력은 표시 순서이고 디코더가 crop 된 크기(1920x1080)를 돌려줌
+- (W7-2) v2-video-decoder.md: §6 표와 §9 'CI 빌드 시간: 미확인' — rbms-video 클린 릴리스 빌드 real 8.0 s·user 20.5 s(Apple M5 Max, arm64 는 NEON .S 를 cc 가 조립, nasm 불필요). Linux·Windows 실측은 여전히 없음
+- (W7-2) v2-video-decoder.md: §4.1 성능 행에 이 기기 실측 추가 — 디코드+색 변환 1080p 평균 5.9~7.8 ms·최대 12.8~24.6 ms, 720p 평균 2.4~3.3 ms·최대 5.5~8.1 ms. 디코드만 1080p 3.1~5.2 ms, 720p 1.3~1.9 ms
+- (W7-2) v2-video-decoder.md: §4.2 re_mp4 행과 §9 'Mp4::read 메모리 사용 방식, raw_codec_config 반환 형식: 미확인' — 0.5.1 소스 확인 결과로 교체. Mp4::read 는 mdat 를 seek 로 건너뜀. raw_codec_config 는 avcC 원본. 위험: 컨테이너 안 크기 0 자식 박스에서 skip_box 가 제자리로 돌아가 무한 루프(moov.rs 등), AvcCBox 의 remainder 뺄셈 언더플로(avc1.rs:206), build_tracks 의 stsc/stco/stts/stss 인덱싱과 panic!(), hdlr·meta 의 박스 크기만큼 할당. 그래서 Mp4::read 를 쓰지 않음
+- (W7-2) v2-video-decoder.md: §7.3 구현 구조 제안 표를 실제 구조로 고칠 것 — 디먹스 행: 자체 박스 검증기(crates/rbms-video/src/container.rs)가 moov 를 64 MiB 이하로 읽어 첫 H.264(avc1/avc3) 영상 트랙의 mvhd·tkhd·mdhd·hdlr·stsd(avcC 만)·stts·ctts·stss·stsc·stsz·stco/co64 만으로 moov 를 다시 조립하고 re_mp4 의 MoovBox::read_box 로 읽음. 샘플 표 전개는 mp4.rs 가 검사 산술로 수행(샘플 상한 2^22, 샘플 크기 상한 16 MiB, 파일 끝 넘는 샘플은 오류)
+- (W7-2) v2-video-decoder.md: §7.3 디코드 호출·반복 재생 행 — Flush::NoFlush 로 디코드, 스트림 끝에서 flush_remaining() 의 프레임을 평면 복사로 보관해 하나씩 반환, 되감기는 Decoder 를 새로 만들고 SPS/PPS 를 다시 붙임. 입력 타임스탬프를 줄 수 없어 n번째 출력을 정렬된 합성 시각의 n번째에 대응시킴. 빈 패킷은 디코더에 넣지 않음
+- (W7-2) v2-video-decoder.md: §7.3 워커 스레드·프레임 큐·버퍼 재사용 행 — sync_channel 이 아니라 Mutex+Condvar 한정 큐(기본 3프레임, DEFAULT_QUEUE_FRAMES), 소비자는 advance(시각)으로 가장 새 프레임만 취함, 따라잡을 때는 next_time_us 로 보여 줄 수 없는 프레임의 색 변환을 생략, 버퍼는 spare 목록으로 재사용, drop 시 join. '타이머 재시작' 행은 '장면 시계가 시작 시각보다 뒤로 가면 restart()' 로
+- (W7-2) v2-video-decoder.md: §7.3 색 변환 행 — write_rgba8 을 쓰지 않고 자체 정수 고정소수 변환(color.rs)을 씀. 행렬은 SPS VUI → colr(nclx) → 높이 720 이상 BT.709 관례, 범위는 기본 제한
+- (W7-2) v2-video-decoder.md: §1 표의 'Cargo.lock 에 cc 1.6.0' 근거 — Cargo.lock 은 .gitignore:3 으로 추적되지 않음을 덧붙일 것
+- (W7-2) v2-video-decoder.md: §7.3 cargo 피처 행 — rbms-video 의 openh264(기본 켬), 워크스페이스 의존은 default-features = false, rbms-player 의 video(기본) = rbms-video/openh264, rbms-render 는 dev-dependency + 테스트용 video 피처. 끈 구성에서 open 은 VideoError::Disabled
+- (리뷰 수정) v2-video-decoder.md: 상단에 '웨이브 7B 리뷰 수정 반영 사항' 추가. 본문 7.3 의 '반복 재생' 행에 있는 '탐색(seek)이 필요 없습니다'는 낡았습니다. 실제 구현은 VideoDecoder::seek 로 stss 키 샘플(합성 시각으로 안전성 확인, 탐색 시 IDR NAL 검증)부터 디코드하고, 시계가 여러 패스를 건너뛰면 워커가 pass_start 를 target.div_euclid(duration) * duration 으로 옮깁니다.
+- (리뷰 수정) v2-video-decoder.md: 7.3 '프레임 큐 소비' 행에 추가. 시계가 화면 프레임보다 과거로 가면 큐와 화면 프레임을 버리고 그 시각에서 다시 찾습니다. 실측(릴리스): #default.mp4 20→12초 되감기 84 ms(수정 전 8.03초 정지), BGmovie01 +300초 점프 126 ms(수정 전 45.8초), +36,000초 102 ms, sample.mp4 1→8.2초 161 ms.
+- (리뷰 수정) v2-video-decoder.md: 2절 표에 키 샘플 실측 추가. 8개 모두 stss 의 키가 전부 IDR 이고 합성 시각상 안전합니다. 최대 GOP 는 sample 250, sample2 91, BGmovie01 30, BGmovie02 30, #default 78, cyber 290, NOSTALGIC 169, travel 240 프레임입니다.
+- (리뷰 수정) v2-video-decoder.md: 7.3 '디코드 호출' 행의 '프레임별 오류는 건너뛰고 계속합니다'를 구체화. 거부된 샘플은 표시 슬롯 하나를 넘기고 lost_samples 로 집계하며, 앱이 'is damaged' 경고를 한 번 냅니다. openh264 0.9.8 은 입력 타임스탬프를 받지 않아(decoder.rs 의 decode_with_options) 프레임과 샘플을 직접 대응시킬 수 없습니다. 실측: bitflip.mp4 는 패스당 215 샘플을 잃고 정지 구간이 9.409~16.617초이며, 손상 뒤 프레임은 2장 이릅니다.
+- (리뷰 수정) v2-video-decoder.md: 7.3 '워커 스레드' 행에 추가. 워커가 패닉해도 Drop 가드가 종료를 알리고 사유 'the decoder panicked' 를 남겨 앱의 '경고 1회 후 미표시' 경로가 탑니다.
+- (리뷰 수정) v2-video-decoder.md: 7.3 '트레이트' 행 갱신. VideoDecoder 는 info, next_time_us, next_frame, rewind, seek(기본 구현), lost_samples(기본 0) 입니다. NullDecoder 는 삭제됐고 피처를 끄면 open 이 Disabled 를 돌려줍니다. VideoInfo::frame_rate 도 삭제됐습니다.
+- (리뷰 수정) v2-video-decoder.md: 9절 한계에 추가. stss 가 없는 파일은 첫 샘플만 시작점으로 봅니다. SPS 스케일링 리스트의 delta_scale 이 -128..=127 을 벗어나면 SequenceInfo::parse 가 None 을 돌려줍니다(디버그 빌드 오버플로 패닉 수정).
+
+### 구현 뒤 실측과 검증(리뷰어, 2026-10-11)
+
+- 릴리스 앱 빌드: cargo build --release -p rbms-player 성공(50.6초, 바이너리 23.5 MB)
+- 의존성: 추가된 직접 의존은 rbms-video 의 openh264 0.9.8 과 re_mp4 0.5.1 둘뿐이고 둘 다 optional. cargo search 기준 둘 다 최신. 전이 의존은 openh264-sys2, wide, bytemuck, (빌드) cc, find-msvc-tools, jobserver, libc, shlex, nasm-rs, log, walkdir, same-file, 그리고 re_mp4 쪽 byteorder, bytes, num-rational, num-bigint, num-integer, num-traits, autocfg, serde, serde_core, serde_derive, serde_json, itoa, memchr, zmij, thiserror, thiserror-impl, proc-macro2, quote, syn, unicode-ident
+- 라이선스(cargo tree --format '{p} | {l}'): openh264 와 openh264-sys2 는 BSD-2-Clause. re_mp4, bytes, zmij 는 MIT. byteorder, memchr 는 Unlicense OR MIT. same-file, walkdir 는 Unlicense/MIT. bytemuck, wide 는 Zlib OR Apache-2.0 OR MIT. unicode-ident 는 (MIT OR Apache-2.0) AND Unicode-3.0. 나머지는 전부 MIT OR Apache-2.0. 모두 GPL-3.0-or-later 와 호환되고 카피레프트 충돌이나 비자유 라이선스는 없음
+- 디코드(직접 실행, RBMS_SKIN_PACK=ModernChic, cargo test --release -p rbms-video every_movie_of_an_external_pack): sample 600, sample2 601, BGmovie01 921, BGmovie02 750, #default 2564, cyber 4229, NOSTALGIC 7415, travel 3604 프레임. 8개 모두 거부 샘플 0, 표시 시각 단조 증가, 통과. 자체 측정 바이너리로도 같은 프레임 수와 오류 0 을 확인했고 next_time_us 예고와 실제 시각 불일치 0건
+- 릴리스 프레임당 디코드+색 변환 시간(같은 테스트, 300프레임): 1080p 30fps 는 평균 5.7~7.7 ms, 최대 12.3~16.0 ms(예산 33.3 ms). 720p 30fps 는 평균 2.5~3.3 ms, 최대 5.4~6.8 ms. 720p 60fps(NOSTALGIC)는 평균 2.4 ms, 최대 5.7 ms(예산 16.7 ms). 다른 작업이 돌던 때의 전체 길이 측정에서도 1080p 평균 8.3~10.9 ms, 최대 26.6 ms 로 예산 안
+- 실시간 추종(VideoPlayer 를 4 ms 간격으로 실시간 구동): sample2(1080p30) 25초에 750 중 749프레임 표시, 지연 중앙값 2.9 ms·최대 8.7 ms, 20.03초의 반복 경계를 넘는 동안 표시 간격 최대 33,334 us. NOSTALGIC(720p60) 12초에 720 중 719프레임, 간격 최대 16,667 us. cyber(28.989fps) 8초에 231 중 231프레임. 역행 0건. 30fps 와 60fps 모두 실시간으로 따라감
+- 견고성(실제 시도, sample.mp4 변형 711건을 시드 3개로 반복해 약 2,100건): 임의 위치 절단 30건, 최상위·중첩 박스 길이 0/1/7/8/0x7fffffff/0xffffffff, 64비트 길이, 표 entry_count 0/1/0xffffff/0x7fffffff/0xffffffff, stsz 모순 6종, timescale 0/1/0xffffffff, hdlr 를 soun 으로(영상 트랙 없음), 엔트리를 hvc1·mp4v 로(H.264 아님), avc1 과 avcC 비트·바이트 훼손 300건, 박스별 임의 바이트 훼손, mdat 비트 반전 1~65,536개, mdat 전체 난수·0·0xff, 0바이트 파일, PNG·텍스트·RIFF·0 채움·0xff 채움을 .mp4 로. 릴리스 빌드에서 패닉 0건, 전부 수 초 안에 반환, 스레드 1→1, RSS 증가는 약 30 MB 이내
+- moov 가 앞에 있는 sample2.mp4 절단: 20, 33, 100, 5000, 11247 바이트는 박스 길이 오류. 11248~6,000,000 바이트는 'the file ends before its samples do'. 끝에서 186바이트만 자른 것은 601프레임 전부 디코드
+- 매우 큰 해상도 SPS: 8192x8192 로 선언한 SPS 는 SequenceInfo 가 받아들이지만(FRAME_EDGE_LIMIT 8192) h264.rs 64~67행이 디코드된 프레임이 선언보다 작으면 버퍼를 늘리기 전에 오류를 냄. 선언만으로는 RGBA 버퍼가 할당되지 않음(코드 판독). 2^32 급 선언은 None
+- 스레드·자원: 재생기 1개에 스레드 1→2, drop 뒤 1. 1080p 재생기 4개 동시에 스레드 1→5, RSS 311 MB, drop 뒤 1(ps -M 으로 OS 스레드 수를 직접 셈). 시계를 1.5초 세우면 디코드 0프레임에 CPU 0 ms. 디코더 되감기 400회에서 RSS 59~62 MB 로 일정. 1080p 25초 재생 뒤 RSS 106 MB, 720p 는 36~40 MB 로 영상 길이와 무관
+- 수명 경로(코드 판독): 화면 이탈, 팩 교체, RELOAD 는 모두 SkinScreens::let_go(skin_screen.rs 723, 791, 931행)를 거치고 let_go 가 텍스처 해제 전에 MoviePlayers::let_go 로 재생기를 drop 해 join 함. 재컴파일은 adopt 가 이전 항목을 대체. 앱의 스레드 종료 테스트는 OS 스레드 수가 아니라 스크립트 디코더의 열린 개수(open_on)를 세지만, 디코더 drop 은 워커 안에서만 일어나고 VideoPlayer::drop 이 join 하므로 검증으로 유효
+
+### 화면·화소 대조(리뷰어)
+
+- 맞는 것 - 색: macOS 시스템 디코더(AVFoundation, 허용 오차 0 의 프레임 추출)로 8개 파일 15개 시점의 기준 프레임을 뽑아 rbms-video 출력과 화소 대조했습니다. 채널별 평균 절대차는 R 0.34~1.75, G 0.13~0.84, B 0.24~2.91(8비트)이고 프레임 평균 RGB 는 1 이내로 일치합니다. 색 행렬과 범위(전부 BT.709 제한 범위로 해석)가 맞습니다.
+- 맞는 것 - 방향과 채널 순서: 같은 대조에서 상하 반전으로 가정하면 차이가 0.5~93.7, R/B 를 바꾸면 1.3~99.8 로 대부분 한두 자릿수 커집니다. 차이가 작은 경우는 좌우·상하 대칭에 가까운 어두운 장면입니다. 반전과 채널 뒤바뀜은 없습니다.
+- 맞는 것 - 표시 순서와 드리프트: 8개 파일 모두 ctts 가 있는 High 프로파일(B 프레임)입니다. 기준 프레임과 가장 잘 맞는 우리 프레임 양옆으로 차이가 단조롭게 커져 재정렬 뒤 표시 순서가 맞습니다. 29.97fps 는 19.95초와 118초, 28.989fps 는 60초와 140초, 60fps 는 120초에서도 같은 프레임이라 누적 드리프트가 없습니다. 표시 간격은 전 구간 균일하고(예: 33,366~33,367 us) 마지막 프레임 뒤 간격도 한 프레임이라 반복 경계가 이어집니다.
+- 맞는 것 - 영역: Read 로 연 review/render/decide_movie-3000.png 는 화면 전체 배경에 HUD 영상이 깔리고, 시스템 디코더의 2.9696초 프레임과 나침반 눈금(NW, N), 원형 화살표, 우측 사각 블록 위치가 같습니다. musicselect_movie-3000.png 는 선곡 UI 뒤 배경 전체에 주황 회로 영상이 있습니다. play7_nobga-8000.png 와 review/app/play-movie-play-09000ms.png 는 영상이 BGA 사각형 안에만 그려집니다.
+- 맞는 것 - 프레임 변화: decide_movie-1500 은 눈금이 'NW N NE', -3000 은 'NW N' 입니다. 표시 프레임 시각은 렌더 단위에서 decide 0.000/1.468/2.970초, musicselect 0.000/1.500/3.000초, play7_nobga 0.000/6.000/8.000초였습니다. 앱 하니스에서는 decide-movie 0.968/1.969/2.970초(헤드리스와 GPU 동일), select-movie 3.0/6.0초, play-movie 1.733/4.0/7.5/13.5초였습니다. play7-fullcombo 는 91.4초로 영상 길이 85.47초를 넘겨 둘째 패스가 그려졌습니다.
+- 맞는 것 - GPU 업로드: decide-movie 의 GPU 캡처와 헤드리스 캡처는 영상만 보이는 y 0~199 구간에서 화소가 완전히 같습니다. 그 아래 약 107만 화소 차이(최대 채널 차 96)는 웨이브 7A 의 decide-fnt-1500ms 헤드리스 대 GPU 차이(1,066,999화소, 같은 영역)와 같은 기존 차이입니다.
+- 맞는 것 - 기존 캡처 불변: 렌더 단위 캡처에서 동영상과 무관한 50장 중 49장이 웨이브 7A final 과 바이트 단위로 같습니다. result-750.png 한 장은 1화소(채널 차 2)가 다른데, 릴리스에서 영상 피처를 끈 캡처와 켠 캡처가 바이트 동일이고 디버그에서 영상 피처를 끈 캡처는 7A 와 동일하므로 원인은 빌드 프로파일(디버그 대 릴리스)입니다. 앱 하니스 캡처는 60장이 7A 와 바이트 동일합니다.
+- 틀린 것(영상 변경과 무관하게 달라진 것): result-*, course-result-* 16장은 228x26 영역만 다르고 내용은 날짜 글자(2026/10/10 → 2026/10/11)입니다. pack-select.png 는 헤더 줄무늬와 움직이는 점 등 10,940화소가 다른데, 같은 트리를 두 번 돌린 결과끼리도 39,978화소(GPU 는 16,445화소)가 달라 실행 간 비결정입니다.
+- 틀린 것(의도된 변화): play-sample, play5/7/10/14, play7-*, pack-play7 등 기존 플레이 캡처 12장은 BGA 영역이 7A 와 다릅니다. BGA 없는 곡에서 팩의 범용 영상이 이제 그려지기 때문이고 구현 보고에 적힌 내용과 일치합니다.
+- 관찰 - 고정 오프셋: 편집 목록(edts)이 없는 #default.mp4 와 NOSTALGIC.mp4 는 시스템 디코더보다 한두 프레임 이르게 표시됩니다(#default 는 8.0초와 13.5초에서 우리 쪽 7.967초, 13.467초 프레임이 기준과 일치. NOSTALGIC 은 약 21 ms). 가장 이른 표시 시각을 0 으로 정규화하는 설계 때문이고 시간이 지나도 일정해 결함으로 분류하지 않았습니다. edts 가 있는 6개는 정확히 같은 프레임입니다.
+- 확인 못 한 것: 창에 띄운 실제 앱에서 연속 재생이 눈으로 매끄러운지는 보지 못했습니다(정지 캡처와 표시 프레임 시각 수열로만 판단). Linux, Windows, nasm 없는 x86_64 빌드와 그 디코드 속도는 확인하지 못했습니다. 창 최소화·가림 때 프레임 루프가 멈춰 장면 시계가 건너뛰는지도 확인하지 못했습니다. 색은 채널 평균 수준으로만 대조했고 시스템 디코더와 화소 단위로 같지는 않습니다(크로마 업샘플링 차이).
+
 
 - 조사일: 2026-10-10
 - 범위: 문서 조사만 수행했습니다. 실험 빌드와 실제 디코드 실행은 하지 않았습니다(저장소·Cargo 레지스트리 무변경).

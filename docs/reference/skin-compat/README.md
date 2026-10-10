@@ -1,6 +1,6 @@
 # 스킨 호환 조사 — 색인
 
-> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 7A(비트맵 폰트, 디코더 조사) 완료 · 기준 커밋 `9ce92bb` · 레퍼런스 체크아웃 HEAD `8320241d`
+> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 7(동영상과 비트맵 폰트) 완료 · 기준 커밋 `9ce92bb` · 레퍼런스 체크아웃 HEAD `8320241d`
 > 작업 체크리스트는 `docs/PROCESS.md` "레퍼런스 형식 Lua 스킨 완전 호환과 기본 스킨 교체" 절이다.
 
 이 폴더는 외부 풀 Lua 스킨(ModernChic)을 R-BMS 가 수정 없이 읽어 레퍼런스 구현(beatoraja)과 같게 그리기 위한 조사 결과 전문이다. 조사자 14개 + 종합 1개 + 비판 1개(Workflow `wf_43ad1f8d-42b`, 에이전트 16개, 약 840만 토큰)의 산출물이며, **같은 탐색을 다시 하지 않기 위해** 저장한다.
@@ -92,3 +92,4 @@
 | 2026-10-10 | 웨이브 5 | `b4`, `99`, `r3`, `m6`, `r2`, `m4`, `v1`, `00`, `b2`, `b5` 상단 "웨이브 5 반영 사항" | songlist(`skin_render/songlist/`: `SongBars`, 원형 인덱스, 패스별 그리기, 스크롤 보간, `BarScroller`, 막대 클릭), 선곡 모델(막대 종류·램프·레벨·라벨·트로피·폴더 분포, 내장 뷰와 곡 바를 한 모델에서), 선곡 키 표(`stage/select/keys.rs`)와 패널(`panel.rs`)·옵션 이벤트(`events.rs`), 호스트 군집 F·H·E, 슬라이더 쓰기(`skin_host/writers.rs`)와 편집 텍스트·IME, 선택 BGM 루프와 미리듣기 전환, 시스템 오버레이(`overlay.rs`)와 단축키 안내 |
 | 2026-10-11 | 웨이브 6 | `r3`, `b5`, `m2`, `b3`, `00`, `r2`, `v1`, `m3`, `99`, `m4`, `m5` 상단 "웨이브 6 반영 사항" | note(`skin_render/notes.rs`: `LaneNotes` 계약, y 누적식, LN/CN/HCN, 마디선류, 오프셋 3/4/5 식), judge(영역 콤보·shift), hiddenCover·liftCover, bga 레이어, timingvisualizer·hiterrorvisualizer, 플레이 상태기계(`stage/play/`: PRELOAD/READY/PLAY/FAILED/FINISHED, 미리보기 141, 즉시 재시작), 타이머 드라이버(`skin_host/play_timers.rs`), 호스트 군집 C·D(`PlayShown`), OFFSET_ALL, 구 어댑터·구 드라이버·폴백 삭제. 성능: 7키 512노트 프레임 prepare 19µs + draw 43µs |
 | 2026-10-11 | 웨이브 7A | `b2`, `r2`, `m6`, `r3`, `00`, `v1` 상단 "웨이브 7A 반영 사항", 신규 `v2-video-decoder.md` | 비트맵 폰트(`crates/rbms-render/src/bitmap_font.rs`: BMFont 텍스트 형식, libGDX 1.9.9 바이트코드 기준 조판, 쓰이는 페이지만 로드), type 0 그리기와 distance field(`Renderer::draw_distance_field_quad`, CPU·GPU 동일 계산, 원본 셰이더 식 그대로), 디코더 조사 보고서 |
+| 2026-10-11 | 웨이브 7B | `v2`, `r2`, `r3`, `r1`, `b2`, `v1`, `m6`, `00` 상단 "웨이브 7B 반영 사항"(`v2` 에 구현 뒤 실측) | `crates/rbms-video`(`VideoDecoder` 트레이트, OpenH264 구현, 자체 mp4 박스 검증기 + `re_mp4` 의 표 읽기, `VideoPlayer` 워커와 한정 큐, 반복·탐색), 로더의 동영상 source 분류, 렌더의 `Body::Movie` 와 제자리 텍스처 갱신, 앱의 `skin_screen/movies.rs`. ModernChic mp4 8개 전부 디코드(프레임 수 일치, 거부 0), 1080p 프레임당 약 6~8ms |

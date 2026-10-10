@@ -1,6 +1,13 @@
 # R3 — R-BMS 앱(apps/rbms-player) 스킨 배선·화면 구성·입력 현황과 격차
 
-> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 7A(비트맵 폰트) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 7B(동영상 source) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 7B 반영 사항 (2026-10-11)
+
+`crates/rbms-video`(OpenH264 + `re_mp4`)와 스킨 동영상 source 재생을 넣은 뒤의 상태다.
+
+- (W7-2) r3-rbms-app.md: 상단에 '웨이브 7B 반영 사항' 신설 — assets.rs 의 SkinAssetKind::Movie·SkinAsset::{Movie, Unplayable}(워커가 헤더만 읽어 엶), skin_screen/movies.rs 의 MoviePlayers(PLAYING_MOVIES_LIMIT 4, prepare 와 draw 사이에서 show, let_go 때 정지·해제, 실패 시 경고 1회 후 hide), PreparedDocument 가 재생기를 들고 draw 직전에 갱신, 테스트용 scripted_movie 와 wait_for_movie_frames
+
 
 ## 웨이브 7A 반영 사항 (2026-10-11)
 

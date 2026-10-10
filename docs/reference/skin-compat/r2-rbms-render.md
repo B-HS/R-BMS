@@ -1,6 +1,14 @@
 # R2 — R-BMS 렌더 계층(crates/rbms-render, GPU 백엔드) 현황과 격차
 
-> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 7A(비트맵 폰트) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 7B(동영상 source) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 7B 반영 사항 (2026-10-11)
+
+`crates/rbms-video`(OpenH264 + `re_mp4`)와 스킨 동영상 source 재생을 넣은 뒤의 상태다.
+
+- (W7-2) r2-rbms-render.md: 상단에 '웨이브 7B 반영 사항' 신설, §3.5 '동영상 디코더 의존성이 워크스페이스에 없다' 서술 교체 — SkinAssets::movie(path) -> Result<(u32,u32), String>, textures.rs 의 MovieSlot(키 rbms.skin.<serial>.movie.<n>, 첫 프레임 때 등록, 같은 key 재등록으로 제자리 갱신), MoviePlayback{index,path,size,started_us,starts}, SkinScreen::{movies, show_movie_frame, hide_movie}, referenced_movie_files, referenced_source_files 는 이미지 전용으로 바뀜
+- (W7-2) r2-rbms-render.md: §3.3 한도 표와 §5.1 image 행 — 동영상은 빌드 때 한 프레임분(가로x세로x4)으로 예산·최대 변 검사를 받고 풀(SkinTexturePool)에는 들어가지 않음. Body::Movie 는 프레임 전체를 stretch 대로 맞추고 항상 Linear 로 읽으며 프레임이 없으면 그리지 않음. 첫 prepare 가 started_us 를 정하고 장면 시계가 그보다 뒤로 가면 다시 시작
+
 
 ## 웨이브 7A 반영 사항 (2026-10-11)
 

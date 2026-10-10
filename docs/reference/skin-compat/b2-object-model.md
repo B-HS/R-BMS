@@ -1,6 +1,13 @@
 # B2. beatoraja 스킨 객체 모델과 공통 그리기 의미론
 
-> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 7A(비트맵 폰트) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 7B(동영상 source) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 7B 반영 사항 (2026-10-11)
+
+`crates/rbms-video`(OpenH264 + `re_mp4`)와 스킨 동영상 source 재생을 넣은 뒤의 상태다.
+
+- (W7-2) b2-object-model.md: §8.3 첫 항목 — 확장자 비교가 점을 뗀 문자열의 endsWith 임을 명시(VideoFormat.getAllExtensions 가 substring(1), 그래서 'intromp4' 도 동영상). §9.5 에 R-BMS 대응(첫 prepare 시작, 반복 주기 = 트랙 길이, 프레임 없으면 미표시, 타입 3 = Linear 는 SkinObject.draw:660 의 imageType 분기로 확인) 추가
+
 
 ## 웨이브 7A 반영 사항 (2026-10-11)
 

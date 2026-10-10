@@ -1,6 +1,13 @@
 # V1. 외부 스킨 첫 렌더 결과 — 나온 것과 빠진 것 (웨이브 2B)
 
-> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 7A(비트맵 폰트) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 7B(동영상 source) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 7B 반영 사항 (2026-10-11)
+
+`crates/rbms-video`(OpenH264 + `re_mp4`)와 스킨 동영상 source 재생을 넣은 뒤의 상태다.
+
+- (W7-2) v1-first-render.md: 상단 반영 사항에 동영상 결과 추가 — 결정·선곡의 '背景の種類 = 動画' 와 플레이의 범용 BGA(#default.mp4)가 그려짐. 캡처 이름 decide_movie-*, musicselect_movie-*, play7_nobga-*(렌더), decide-movie-*, select-movie-*, play-movie-*(앱)
+
 
 ## 웨이브 7A 반영 사항 (2026-10-11)
 
