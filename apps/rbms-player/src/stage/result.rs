@@ -11,7 +11,9 @@
 //!
 //! The lane keys are read by the reference's key index (`ResultKeyProperty`): the first four
 //! confirm, the fifth runs the chart again on a new arrangement, the sixth turns the gauge the
-//! graph plots to the next kind, and the seventh runs it again as it was laid out. R and N are this
+//! graph plots to the next kind, and the seventh runs it again as it was laid out. A mode with five
+//! keys a side has no sixth and seventh key, and the reference counts its turntable there, so the
+//! turntable is what turns the gauge and runs the chart again ([`FIVE_KEYS`]). R and N are this
 //! player's own: R is the seventh key's run-again and N starts the chart after this one, both
 //! decided when the key is pressed, behind the same input time and the same fade.
 //!
@@ -69,7 +71,7 @@ enum ResultKey {
     ChangeGraph,
 }
 
-/// What each key index does in the modes with a turntable (`ResultKeyProperty.BEAT_7K`): the
+/// What each key index does in the modes with seven keys a side (`ResultKeyProperty.BEAT_7K`): the
 /// turntable does nothing.
 const BEAT_KEYS: [Option<ResultKey>; KEY_INDEX_COUNT] = [
     Some(ResultKey::Ok),
@@ -81,6 +83,29 @@ const BEAT_KEYS: [Option<ResultKey>; KEY_INDEX_COUNT] = [
     Some(ResultKey::ReplaySame),
     None,
     None,
+];
+
+/// The same for the modes with five keys a side (`ResultKeyProperty.BEAT_5K`).
+///
+/// The reference's table is the seven-key one, read against the keys of a five-key layout, which
+/// are the five keys and then the two ways the turntable turns (`PlayModeConfig.KeyboardConfig`,
+/// `BEAT_5K`). So the sixth and seventh roles are the turntable's: forward turns the gauge and
+/// backward runs the chart again. Here the turntable is always the last two indices
+/// ([`crate::keyconfig::key_index_of`]) and the two before them belong to no lane of such a mode.
+///
+/// The second side of ten keys repeats the first, as it does for every other screen. The
+/// reference reads its fourteen-key table against ten keys' fourteen inputs there, which leaves
+/// the second side's roles two places off.
+const FIVE_KEYS: [Option<ResultKey>; KEY_INDEX_COUNT] = [
+    Some(ResultKey::Ok),
+    Some(ResultKey::Ok),
+    Some(ResultKey::Ok),
+    Some(ResultKey::Ok),
+    Some(ResultKey::ReplayDifferent),
+    None,
+    None,
+    Some(ResultKey::ChangeGraph),
+    Some(ResultKey::ReplaySame),
 ];
 
 /// The same for the nine buttons (`ResultKeyProperty.POPN_9K`), whose last two confirm.
@@ -116,6 +141,8 @@ fn key_assignment(mode: Mode) -> [Option<ResultKey>; KEY_INDEX_COUNT] {
         POPN_KEYS
     } else if mode == Mode::KEYBOARD_24K {
         KEYBOARD_KEYS
+    } else if mode == Mode::BEAT_5K || mode == Mode::BEAT_10K {
+        FIVE_KEYS
     } else {
         BEAT_KEYS
     }

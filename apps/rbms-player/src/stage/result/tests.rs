@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use rbms_library::{Library, SongEntry};
-use rbms_play::{NullSink, SessionClock, SessionOptions};
+use rbms_play::{NullSink, ScratchDir, SessionClock, SessionOptions};
 use rbms_render::result::TargetView;
 use rbms_store::{Replay, SCORE_LN_MODE_FROM_CHART};
 
@@ -15,6 +15,7 @@ use crate::app_result::enter_result;
 use crate::ir_ext::MultiIr;
 use crate::ir_outcome::format_submit_outcome;
 use crate::ir_ranking::{RankingBoard, RankingRow};
+use crate::keyconfig::{SCRATCH_BACKWARD_INDEX, SCRATCH_FORWARD_INDEX, key_index_of};
 use crate::stage::capture::{app_in, settings_of};
 use crate::stage::render_tests::FRAME_DT;
 use crate::stage::select::tests::{press, release};
@@ -261,22 +262,73 @@ fn a_scene_left_alone_runs_its_length_and_leaves_for_the_browser() {
     assert_eq!(fade_out(&mut scene, &mut timers, IDLE), Some(Leave::Browser));
 }
 
-/// The keys are assigned by mode as the reference assigns them: the turntable does nothing, the
-/// nine buttons confirm with their last two, and the keyboard layout has its own order.
+/// The keys are assigned by mode as the reference assigns them: with seven keys a side the
+/// turntable does nothing, with five the turntable has the two roles the sixth and seventh key
+/// have, the nine buttons confirm with their last two, and the keyboard layout has its own order.
 #[test]
 fn each_mode_assigns_its_keys_as_the_reference_does() {
-    for mode in [Mode::BEAT_5K, Mode::BEAT_7K, Mode::BEAT_10K, Mode::BEAT_14K] {
+    for mode in [Mode::BEAT_7K, Mode::BEAT_14K] {
         assert_eq!(key_assignment(mode), BEAT_KEYS, "{}", mode.name);
     }
     assert_eq!(BEAT_KEYS[AFRESH_INDEX], Some(ResultKey::ReplayDifferent));
     assert_eq!(BEAT_KEYS[GRAPH_INDEX], Some(ResultKey::ChangeGraph));
     assert_eq!(BEAT_KEYS[AGAIN_INDEX], Some(ResultKey::ReplaySame));
     assert_eq!(BEAT_KEYS[7..], [None, None], "the turntable closes the screen");
+    for mode in [Mode::BEAT_5K, Mode::BEAT_10K] {
+        let keys = key_assignment(mode);
+        assert_eq!(keys[..=AFRESH_INDEX], BEAT_KEYS[..=AFRESH_INDEX], "{}", mode.name);
+        assert_eq!(keys[GRAPH_INDEX..=AGAIN_INDEX], [None, None], "{} has a sixth and a seventh key", mode.name);
+        assert_eq!(keys[SCRATCH_FORWARD_INDEX], Some(ResultKey::ChangeGraph), "{}", mode.name);
+        assert_eq!(keys[SCRATCH_BACKWARD_INDEX], Some(ResultKey::ReplaySame), "{}", mode.name);
+    }
     assert_eq!(key_assignment(Mode::POPN_9K)[7..], [Some(ResultKey::Ok), Some(ResultKey::Ok)]);
     assert_eq!(
         key_assignment(Mode::KEYBOARD_24K)[..4],
         [Some(ResultKey::Ok), Some(ResultKey::ReplayDifferent), Some(ResultKey::ChangeGraph), Some(ResultKey::ReplaySame)]
     );
+}
+
+/// What the inputs of `mode` do on the result screen: every way every lane is played, through the
+/// index the screens read it by.
+fn roles_within_reach(mode: Mode) -> Vec<ResultKey> {
+    (0..mode.key)
+        .flat_map(|lane| [ScratchDir::Forward, ScratchDir::Backward].map(|dir| key_index_of(mode, lane, dir)))
+        .flatten()
+        .filter_map(|index| key_assignment(mode)[index])
+        .collect()
+}
+
+/// Every mode a chart is played in has an input for each thing a lane key does here. Five and ten
+/// keys once had none that turned the gauge or ran the chart again as it was: their table gave
+/// those to a sixth and a seventh key, which they do not have.
+#[test]
+fn every_mode_has_an_input_for_each_role() {
+    for mode in Mode::ALL {
+        let reach = roles_within_reach(*mode);
+        for role in [ResultKey::Ok, ResultKey::ReplayDifferent, ResultKey::ChangeGraph, ResultKey::ReplaySame] {
+            assert!(reach.contains(&role), "{} has no input for {role:?}", mode.name);
+        }
+    }
+}
+
+/// On a five-key chart the turntable turned forward turns the gauge and does not close the
+/// screen, and turned backward it closes the screen for another run of the chart as it was.
+#[test]
+fn the_turntable_of_five_keys_turns_the_gauge_and_runs_the_chart_again() {
+    let mut scene = Scene::new();
+    assert!(scene.begin(TIMES, Mode::BEAT_5K));
+    let mut timers = TimerState::new();
+    assert_eq!(scene.step(&mut timers, at_ms(LISTENING_MS), IDLE), None);
+    scene.gauge_type = DEFAULT_GAUGE_TYPE;
+
+    scene.step(&mut timers, at_ms(WHILE_LISTENING_MS), holding(SCRATCH_FORWARD_INDEX));
+    assert_eq!(scene.gauge_type, next_gauge_type(DEFAULT_GAUGE_TYPE));
+    assert!(!timers.is_on(timer_id::FADEOUT), "turning the gauge closed the screen");
+    scene.step(&mut timers, at_ms(WHILE_LISTENING_MS + 1), IDLE);
+
+    scene.step(&mut timers, at_ms(WHILE_LISTENING_MS + 2), holding(SCRATCH_BACKWARD_INDEX));
+    assert!(timers.is_on(timer_id::FADEOUT));
+    assert_eq!(fade_out(&mut scene, &mut timers, holding(SCRATCH_BACKWARD_INDEX)), Some(Leave::RunAgain));
 }
 
 /// The fixture skin: a result skin stating the [`TIMES`] above, which paints the screen one colour
