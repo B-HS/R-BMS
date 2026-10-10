@@ -215,7 +215,7 @@ fn slider_writer(def: &SliderDef) -> Option<SkinWriter> {
 fn interaction_of(skin: &LoadedSkin, id: &str, body: &Body) -> Interaction {
     let def = &skin.def;
     match body {
-        Body::Image(_) => {
+        Body::Image(_) | Body::Movie(_) => {
             let declared = def
                 .image
                 .iter()

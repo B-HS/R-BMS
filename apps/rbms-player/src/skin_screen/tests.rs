@@ -208,7 +208,9 @@ fn a_lua_skin_that_cannot_be_read_is_reported_once_and_leaves_the_built_in_scree
 
         let mut said = Vec::new();
         crate::notify::drain(&mut said);
-        let reasons: Vec<&String> = said.iter().map(|(_, message)| message).filter(|message| message.contains("no such asset")).collect();
+        let home = document.ancestors().nth(2).and_then(|home| home.file_name()).map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+        let reasons: Vec<&String> =
+            said.iter().map(|(_, message)| message).filter(|message| message.contains("no such asset") && message.contains(&home)).collect();
         assert_eq!(reasons.len(), 1, "the failure was not said exactly once: {reasons:?}");
         assert!(reasons[0].ends_with(SKIN_FALLBACK_NOTE) && !reasons[0].contains('\n'), "{:?}", reasons[0]);
 

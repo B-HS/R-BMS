@@ -26,6 +26,13 @@
 //! has been decoded. Each of them starts at the scene's first moment like the shots it is compared
 //! with, because a skin times what it shows from the first frame it is asked about.
 //!
+//! A source that is a movie is opened with the pack's images and played the way a host plays it:
+//! it starts on the first frame that prepares an object drawn from it, and every frame after that
+//! is handed the movie frame due that much scene time later, between its two stages. The `*_movie`
+//! shots choose the pack's movie backgrounds, and `play7_nobga` is a chart with no pictures of its
+//! own, which the pack plays a movie behind by default. A build with no video support draws those
+//! shots with the movies' places empty and says so.
+//!
 //! What is printed along the way -- objects by kind, everything dropped while building, how many
 //! images were read and how long a frame took -- is the record of what this build draws of a full
 //! skin and what it does not yet.
@@ -45,7 +52,7 @@ use rbms_render::skin_render::frame::{BgaEvent, BgaExpand, BgaPicture, BgaPlayhe
 use rbms_render::skin_render::frame::{JUDGE_REGIONS, JudgeFrame, JudgeHit};
 use rbms_render::skin_render::frame::{LaneLong, LaneNotes, NoteDisplay};
 use rbms_render::skin_render::graphs::{EARLY_LATE_BUCKETS, GAUGE_SAMPLE_MS, JUDGEMENTS, NOTE_KINDS, PlayCursor, TIMING_JUDGE_AREAS};
-use rbms_render::skin_render::textures::referenced_sources;
+use rbms_render::skin_render::textures::{referenced_movie_files, referenced_sources};
 use rbms_render::{
     BgaFrame, BpmTimeline, Color, CpuCanvas, FrameData, FrameSeries, GaugeFrame, GaugeHistory, NoteDistribution, RecentHits, ReferenceImages, RenderCtx,
     Renderer, SkinAssets, SkinFrame, SkinImage, SkinObjectKind, SkinScreen, SongBars, TextContext, TextureId, TimingHistogram,
@@ -55,6 +62,7 @@ use rbms_skin::loader::{LoadedSkin, SkinLoadOptions, SkinUserConfig, load_header
 use rbms_skin::model::EventRef;
 use rbms_skin::property::{MapHost, PropertyKind};
 use rbms_skin::timer::{MICROS_PER_MILLI, TimerId, TimerState};
+use rbms_video::{VideoDecoder, VideoPlayer};
 use serde::Deserialize;
 
 /// The environment variable that names an external skin pack.
@@ -440,6 +448,13 @@ struct Choice {
 /// The row the pack this was written against offers its bitmap fonts under, switched on.
 const BITMAP_FONTS_ON: &[Choice] = &[Choice { row: "画像フォント", item: "有効" }];
 
+/// The row the pack this was written against chooses what is behind its decide scene and its browser
+/// with, switched to a movie.
+const MOVIE_BACKGROUND: &[Choice] = &[Choice { row: "背景の種類", item: "動画" }];
+
+/// How long a frame waits for the frame of a movie that is due at its scene time.
+const MOVIE_PATIENCE: Duration = Duration::from_secs(120);
+
 /// One screen of the pack and the moments it is drawn at.
 #[derive(Debug, Clone, Copy)]
 struct Shot {
@@ -695,6 +710,36 @@ const SHOTS: &[Shot] = &[
         choices: BITMAP_FONTS_ON,
     },
     Shot {
+        name: "decide",
+        capture: "decide_movie",
+        entry: "decide.luaskin",
+        times_ms: &[0, 1_500, 3_000],
+        extra: Extra::None,
+        switches: &[],
+        clicks: &[],
+        choices: MOVIE_BACKGROUND,
+    },
+    Shot {
+        name: "musicselect",
+        capture: "musicselect_movie",
+        entry: "musicselect.luaskin",
+        times_ms: &[0, 1_500, 3_000],
+        extra: Extra::Select,
+        switches: &[],
+        clicks: &[],
+        choices: MOVIE_BACKGROUND,
+    },
+    Shot {
+        name: "play7_nobga",
+        capture: "play7_nobga",
+        entry: "play7_hw.luaskin",
+        times_ms: &[0, 6_000, 8_000],
+        extra: Extra::Play,
+        switches: &[Switch { at_ms: PLAY_LOADED_MS, option: OPTION_NOW_LOADING, on: false }, Switch { at_ms: PLAY_LOADED_MS, option: OPTION_LOADED, on: true }],
+        clicks: &[],
+        choices: &[],
+    },
+    Shot {
         name: "play7_hw",
         capture: "play7_hw_fnt",
         entry: "play7_hw.luaskin",
@@ -882,6 +927,8 @@ struct PackAssets {
     fonts: usize,
     /// Bytes those fonts take on disk.
     font_bytes: u64,
+    /// The movies opened, each waiting for the screen to start it.
+    movies: BTreeMap<PathBuf, Box<dyn VideoDecoder>>,
 }
 
 impl SkinAssets for PackAssets {
@@ -910,6 +957,58 @@ impl SkinAssets for PackAssets {
         self.fonts += 1;
         self.font_bytes += data.len() as u64;
         Some(data)
+    }
+
+    fn movie(&mut self, path: &Path) -> Result<(u32, u32), String> {
+        let decoder = rbms_video::open(path).map_err(|error| error.to_string())?;
+        let info = decoder.info();
+        self.movies.insert(path.to_path_buf(), decoder);
+        Ok((info.width, info.height))
+    }
+}
+
+/// The movies of one screen being played, as a host plays them.
+#[derive(Debug, Default)]
+struct PackMovies {
+    /// The movies opened when the screen was built, until the screen starts them.
+    opened: BTreeMap<PathBuf, Box<dyn VideoDecoder>>,
+    /// The movies playing, by the number the screen gives each.
+    playing: BTreeMap<usize, VideoPlayer>,
+    /// How many times a frame was handed a new movie frame.
+    shown: usize,
+}
+
+impl PackMovies {
+    /// Brings every movie `screen` has started up to `now_us` on the scene clock and hands the
+    /// screen the frame of each that is newly due, waiting for it to be decoded.
+    fn show(&mut self, screen: &SkinScreen, canvas: &mut CpuCanvas, now_us: i64) {
+        for movie in screen.movies() {
+            let Some(started_us) = movie.started_us else {
+                continue;
+            };
+            if !self.playing.contains_key(&movie.index) {
+                let Some(decoder) = self.opened.remove(&movie.path) else {
+                    continue;
+                };
+                self.playing.insert(movie.index, VideoPlayer::spawn(decoder).expect("a decoding thread should start"));
+            }
+            let Some(player) = self.playing.get_mut(&movie.index) else {
+                continue;
+            };
+            if player.advance_blocking(now_us - started_us, MOVIE_PATIENCE)
+                && let Some(frame) = player.frame()
+            {
+                assert!(screen.show_movie_frame(canvas, movie.index, &frame.rgba), "a decoded frame should be the size the movie said");
+                self.shown += 1;
+            }
+            assert_eq!(player.failure(), None, "{} should go on decoding", movie.path.display());
+        }
+    }
+
+    /// When the frame of each playing movie that is on show is due, in microseconds since the movie
+    /// was started, by movie.
+    fn on_show(&self) -> Vec<(usize, i64)> {
+        self.playing.iter().filter_map(|(index, player)| Some((*index, player.frame()?.time_us))).collect()
     }
 }
 
@@ -1170,7 +1269,10 @@ impl Stage<'_> {
     /// every function value is asked there. Without, the frame is prepared as a renderer with no
     /// interpreter prepares it: a function gate reads false and a function timer reads off. Either
     /// way the frame is drawn with nothing bound.
-    fn draw(&self, screen: &SkinScreen, canvas: &mut CpuCanvas, text: &mut TextContext, moment: &Moment<'_>) -> Painted {
+    ///
+    /// Between the two stages the screen's movies are brought up to the frame's clock (`movies`),
+    /// which is where a host does it: preparing is what starts a movie.
+    fn draw(&self, screen: &SkinScreen, canvas: &mut CpuCanvas, text: &mut TextContext, moment: &Moment<'_>, movies: &mut PackMovies) -> Painted {
         let Moment { host, timers, now_ms, bound } = *moment;
         let now_us = now_ms * MICROS_PER_MILLI;
         let sliding = BarScroll { duration_ms: SLIDE_NOW_MS + SLIDE_LEFT_MS, angle: SLIDE_TRAVEL_MS, now_ms: SLIDE_NOW_MS };
@@ -1236,6 +1338,7 @@ impl Stage<'_> {
             }
             None => screen.prepare(&frame),
         };
+        movies.show(screen, canvas, now_us);
         canvas.clear(Color::BLACK);
         let mut ctx = RenderCtx::new(rbms_render::theme(), text);
         let drawn = screen.draw_prepared(&mut ctx, canvas, &frame, &prepared);
@@ -1324,6 +1427,10 @@ fn capture(pack: &Path, overlay: &Path, capture_dir: Option<&Path>, shot: &Shot)
     let building = Instant::now();
     let mut screen = SkinScreen::build(&mut canvas, &mut text, &skin, &mut assets);
     let built_in = building.elapsed();
+    let mut movies = PackMovies { opened: std::mem::take(&mut assets.movies), ..PackMovies::default() };
+    for movie in screen.movies() {
+        println!("  movie {}: {} at {}x{}", movie.index, movie.path.strip_prefix(pack).unwrap_or(&movie.path).display(), movie.size.0, movie.size.1);
+    }
     let kinds: Vec<String> = OBJECT_KINDS
         .iter()
         .map(|kind| (kind, screen.count_of(*kind)))
@@ -1379,6 +1486,7 @@ fn capture(pack: &Path, overlay: &Path, capture_dir: Option<&Path>, shot: &Shot)
 
     let mut last = (TimerState::new(), 0);
     let mut clicked = 0;
+    let mut movie_frames: Vec<Vec<(usize, i64)>> = Vec::new();
     for now_ms in shot.times_ms {
         let mut timers = settle(&mut host, &scheduled, shot.switches, *now_ms);
         switch_judge_timers(&mut host, &mut timers, &script.judge_hits, *now_ms);
@@ -1388,12 +1496,17 @@ fn capture(pack: &Path, overlay: &Path, capture_dir: Option<&Path>, shot: &Shot)
         }
         let drawing = Instant::now();
         let moment = Moment { host: &host, timers: &timers, now_ms: *now_ms, bound: true };
-        let mut painted = stage.draw(&screen, &mut canvas, &mut text, &moment);
+        let mut painted = stage.draw(&screen, &mut canvas, &mut text, &moment, &mut movies);
         let drawn_in = drawing.elapsed();
         let mut pages = 0;
         while !screen.wanted_font_pages().is_empty() {
             pages += screen.load_font_pages(&mut canvas, &mut assets, None);
-            painted = stage.draw(&screen, &mut canvas, &mut text, &moment);
+            painted = stage.draw(&screen, &mut canvas, &mut text, &moment, &mut movies);
+        }
+        if !movies.playing.is_empty() {
+            let on_show: Vec<String> = movies.on_show().iter().map(|(index, at_us)| format!("movie {index} at {:.3}s", *at_us as f64 / 1e6)).collect();
+            println!("  {}-{now_ms}: on show [{}]", shot.capture, on_show.join(", "));
+            movie_frames.push(movies.on_show());
         }
         if pages > 0 {
             println!(
@@ -1430,7 +1543,7 @@ fn capture(pack: &Path, overlay: &Path, capture_dir: Option<&Path>, shot: &Shot)
 
     let (timers, now_ms) = last;
     let bound: Vec<u8> = canvas.pixels().to_vec();
-    let unbound = stage.draw(&screen, &mut canvas, &mut text, &Moment { host: &host, timers: &timers, now_ms, bound: false });
+    let unbound = stage.draw(&screen, &mut canvas, &mut text, &Moment { host: &host, timers: &timers, now_ms, bound: false }, &mut movies);
     let differing = bound.chunks_exact(RGBA_BYTES).zip(canvas.pixels().chunks_exact(RGBA_BYTES)).filter(|(with, without)| with != without).count();
     println!("  {}-{now_ms} again with no interpreter bound: drew {} objects, {differing} pixels differ from the bound frame", shot.capture, unbound.drawn);
 
@@ -1459,6 +1572,18 @@ fn capture(pack: &Path, overlay: &Path, capture_dir: Option<&Path>, shot: &Shot)
         println!("    {command:?}");
     }
 
+    let named_movies = referenced_movie_files(&skin).len();
+    if named_movies > 0 && !rbms_video::is_enabled() {
+        println!("  {}: this build has no video support, so the places of its {named_movies} movies were drawn empty", shot.capture);
+    } else if named_movies > 0 {
+        assert_eq!(screen.movies().len(), named_movies, "{} should have every movie it names opened", shot.capture);
+        println!("  {}: {} movie frames were handed to the screen", shot.capture, movies.shown);
+        assert_eq!(movie_frames.len(), shot.times_ms.len(), "{} should have a movie playing at every moment it is drawn at", shot.capture);
+        assert!(movie_frames.iter().all(|frames| !frames.is_empty()), "{} drew a moment with no movie frame on show", shot.capture);
+        let moved = movie_frames.windows(2).all(|pair| pair[0] != pair[1]);
+        assert!(moved, "{} showed the same movie frame at two scene times: {movie_frames:?}", shot.capture);
+    }
+    drop(movies);
     screen.release(&mut canvas);
 }
 

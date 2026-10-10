@@ -17,7 +17,7 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::SkinError;
 use crate::loader::SkinUserConfig;
-use crate::model::SkinDef;
+use crate::model::{SkinDef, SourceKind};
 
 /// The character a pattern stands a variable file name on.
 pub const WILDCARD: char = '*';
@@ -31,6 +31,25 @@ pub const RANDOM_SELECTION: &str = "Random";
 
 /// The separator patterns are written with, whatever the host platform uses.
 const PATTERN_SEPARATOR: char = '/';
+
+/// What a file's name ends in when the reference takes it for a movie (`VideoFormat`, every format's
+/// extensions in the order `getAllExtensions` lists them).
+///
+/// They are written without their dot because the reference compares them without it: it strips the
+/// dot from each extension before it asks whether the lower-cased file name ends with one, so a
+/// file called `intromp4` is a movie too ([`source_kind`]).
+pub const MOVIE_NAME_ENDINGS: [&str; 9] = ["mp4", "m4v", "wmv", "webm", "mpg", "mpeg", "m1v", "m2v", "avi"];
+
+/// Whether the file a source resolved to is an image or a movie (`JSONSkinLoader.getSource`).
+///
+/// The reference decides by the file's name alone, after the pattern has been resolved: whatever a
+/// wildcard drew or a file slot chose is judged by the name it came to, not by the pattern that
+/// led to it. The name is lower-cased and tested against each of [`MOVIE_NAME_ENDINGS`]; the
+/// folders above it are not looked at.
+pub fn source_kind(file: &Path) -> SourceKind {
+    let name = file.file_name().map(|name| name.to_string_lossy().to_lowercase()).unwrap_or_default();
+    if MOVIE_NAME_ENDINGS.iter().any(|ending| name.ends_with(ending)) { SourceKind::Movie } else { SourceKind::Image }
+}
 
 /// The character a file name's extension starts at.
 const EXTENSION_MARK: char = '.';

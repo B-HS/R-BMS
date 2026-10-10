@@ -14,8 +14,14 @@ ron = { workspace = true }
 thiserror = { workspace = true }
 cosmic-text = "0.19.0"
 
+[features]
+# The tests that draw an external skin pack decode its movies. Without it they draw every movie's
+# place empty, as a build with no video support does.
+video = ["rbms-video/openh264"]
+
 [dev-dependencies]
 rbms-parser = { workspace = true }
+rbms-video = { workspace = true }
 png = "0.18.1"
 
 [lints]

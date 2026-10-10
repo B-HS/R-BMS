@@ -56,6 +56,14 @@
 //! root with its folder and its table, inside the table, and on the course tab; and on the list of
 //! charts once more with each of the three option panels that START and SELECT call up.
 //!
+//! The movies of the pack are captured as they play: its decide scene and its browser with their
+//! backgrounds switched to a movie, and its play scene for a chart with no pictures of its own,
+//! behind which the pack plays a movie unless it is told not to. Each is drawn at several moments of
+//! its scene, and a frame waits for the movie frame that is due at its moment
+//! ([`MOVIE_FRAME_PATIENCE`]), so what a capture shows of a movie is decided by the scene time it
+//! was asked for and not by how far a decoder thread had got. Every app made over a pack waits that
+//! way, the other captures' included.
+//!
 //! The play scene is captured as a run that is really made: a chart is handed to the play screen the
 //! way the application hands one over, and the screen is walked through the reference's states on
 //! the skin's own times -- loading, ready, playing, and the fade or the failure that closes it --
@@ -296,6 +304,11 @@ const PACK_SEED: u64 = 1;
 /// images for one screen, and they are decoded before the screen draws at all.
 const PACK_LOAD_TIMEOUT: Duration = Duration::from_secs(180);
 
+/// How long a frame of a captured pack waits for the frame of a movie that is due at its scene time.
+/// A movie is decoded off the frame loop and a capture draws one frame, so without the wait a
+/// capture would show whatever had been decoded by then, or nothing.
+const MOVIE_FRAME_PATIENCE: Duration = Duration::from_secs(120);
+
 /// One screen a pack is captured on.
 struct PackScreen {
     /// The skin type a document declares to be drawn on this screen.
@@ -346,6 +359,7 @@ fn pack_app(pack: &Path, tag: &str) -> App {
     let mut app = app_in(settings.clone(), config);
     app.shared.skins.pin_seed(Some(PACK_SEED));
     app.shared.skins.rescan(&settings, &app.shared.config);
+    app.shared.skin_screens.wait_for_movie_frames(Some(MOVIE_FRAME_PATIENCE));
     app
 }
 
@@ -929,9 +943,16 @@ fn choose_in_skin(app: &mut App, screen: i32, row: &str, item: &str) -> bool {
 /// and answer the app and the size the scene is authored at; or `None` when the pack's decide
 /// document offers no such choice.
 fn decide_with_bitmap_fonts(pack: &Path, tag: &str, chart: &Path) -> Option<(App, (u32, u32))> {
+    decide_with_choice(pack, tag, chart, (BITMAP_FONT_ROW, BITMAP_FONT_ON))
+}
+
+/// Open the pack's decide scene for the chart at `chart` with one row of its settings switched to
+/// the item `choice` names, and answer the app and the size the scene is authored at; or `None`
+/// when the pack's decide document offers no such choice.
+fn decide_with_choice(pack: &Path, tag: &str, chart: &Path, choice: (&str, &str)) -> Option<(App, (u32, u32))> {
     let mut app = pack_app(pack, tag);
     let size = authored_size(&app, SKIN_TYPE_DECIDE)?;
-    if !choose_in_skin(&mut app, SKIN_TYPE_DECIDE, BITMAP_FONT_ROW, BITMAP_FONT_ON) {
+    if !choose_in_skin(&mut app, SKIN_TYPE_DECIDE, choice.0, choice.1) {
         return None;
     }
     let bytes = std::fs::read(chart).unwrap_or_else(|error| panic!("{} could not be read: {error}", chart.display()));
@@ -1984,7 +2005,7 @@ fn play_report(app: &App, scene_ms: u128) -> Result<String, String> {
     let play = play_screen(app)?;
     let judge = play.session.judge();
     Ok(format!(
-        "{:?} at {} ms of the chart, scene {} ms: combo {} (max {}), EX {}, gauge {:.1}, PG/GR/GD/BD/PR/MS {:?}, {} of {} notes",
+        "{:?} at {} ms of the chart, scene {} ms: combo {} (max {}), EX {}, gauge {:.1}, PG/GR/GD/BD/PR/MS {:?}, {} of {} notes{MOVIES_REPORTED_AS}{:?}",
         play.phase(),
         play.chart_ms(),
         scene_ms,
@@ -1995,8 +2016,13 @@ fn play_report(app: &App, scene_ms: u128) -> Result<String, String> {
         judge.counts,
         judge.total_judged(),
         judge.total_notes(),
+        app.shared.skin_screens.movie_frames_on_show(),
     ))
 }
+
+/// What a play report says ahead of the movie frames that were on show: when each is due, in
+/// microseconds since its movie was started.
+const MOVIES_REPORTED_AS: &str = ", movie frames on show at ";
 
 /// Enter the pack's play scene for one run and walk it, saving a frame at each moment the run asks
 /// for as `<prefix>-<moment>`. Answers what was saved, each with what the frame shows, or why the
@@ -2209,4 +2235,163 @@ fn the_play_scene_of_a_skin_pack_named_by_the_environment_is_captured_through_it
         }
     }
     assert_eq!(files_under(&pack), before, "capturing the pack's play scene changed its folder");
+}
+
+/// The row a pack this was written against chooses what is behind its decide scene and its browser
+/// with, and what the name of the item that makes it a movie starts with.
+const MOVIE_BACKGROUND_ROW: &str = "背景の種類";
+const MOVIE_BACKGROUND_ON: &str = "動画";
+
+/// The moments of the decide scene its movie is captured at.
+const DECIDE_MOVIE_SHOTS_MS: [i64; 3] = [1000, 2000, 3000];
+
+/// The moment the decide scene's clock is put back to once the last of those is captured, which
+/// its movie has to follow back to the frame it showed then.
+const DECIDE_MOVIE_BACK_MS: i64 = DECIDE_MOVIE_SHOTS_MS[0];
+
+/// One more moment of the browser its movie is captured at, after the two every browser capture is
+/// taken at.
+const BROWSER_MOVIE_LATER_MS: i64 = 6000;
+
+/// The moments of a run its movie is captured at.
+const PLAY_MOVIE_SHOTS_MS: [i64; 2] = [3_000, 9_000];
+
+/// Whether the movie frames that were on show at each of several captures were each a later frame
+/// of a movie than the capture before had: every capture has one, and they move on.
+fn movies_moved_on(on_show: &[Vec<i64>]) -> bool {
+    on_show.iter().all(|frames| !frames.is_empty()) && on_show.windows(2).all(|pair| pair[0] < pair[1])
+}
+
+/// Walk the decide scene that is up through [`DECIDE_MOVIE_SHOTS_MS`] on `canvas` and then back to
+/// [`DECIDE_MOVIE_BACK_MS`], running `shoot` with a name for each moment once its frame is drawn.
+/// Answers when the movie frames on show at each of the moments walked through were due, or why
+/// the scene never drew or its movie did not follow the clock back.
+fn walk_decide_movie(app: &mut App, canvas: &mut Canvas<'_>, mut shoot: impl FnMut(&str, &mut Canvas<'_>)) -> Result<Vec<Vec<i64>>, String> {
+    let deadline = Instant::now() + PACK_LOAD_TIMEOUT;
+    while !app.shared.has_compiled_skin(SKIN_TYPE_DECIDE) {
+        scene_frame_at(app, 0, canvas);
+        if let Some(reason) = app.shared.skin_failure(SKIN_TYPE_DECIDE) {
+            return Err(reason.lines().next().unwrap_or_default().to_owned());
+        }
+        if Instant::now() >= deadline {
+            return Err(format!("its files were not read within {} seconds", PACK_LOAD_TIMEOUT.as_secs()));
+        }
+    }
+    scene_frame_at(app, 0, canvas);
+    let mut on_show = Vec::new();
+    for at_ms in DECIDE_MOVIE_SHOTS_MS {
+        if !matches!(scene_frame_at(app, at_ms, canvas), Transition::Stay) {
+            return Err(format!("the scene was over by {at_ms} ms"));
+        }
+        shoot(&format!("{at_ms:04}ms"), canvas);
+        on_show.push(app.shared.skin_screens.movie_frames_on_show());
+    }
+    if !matches!(scene_frame_at(app, DECIDE_MOVIE_BACK_MS, canvas), Transition::Stay) {
+        return Err(format!("the scene was over when its clock was put back to {DECIDE_MOVIE_BACK_MS} ms"));
+    }
+    shoot(&format!("back-{DECIDE_MOVIE_BACK_MS:04}ms"), canvas);
+    let back = app.shared.skin_screens.movie_frames_on_show();
+    if on_show.first() != Some(&back) {
+        return Err(format!("the movie did not follow the scene clock back: {back:?} is on show where {:?} was", on_show.first()));
+    }
+    Ok(on_show)
+}
+
+/// Captures the movies of a pack somebody else wrote as they play: behind its decide scene and its
+/// browser, each switched to a movie background, and behind the play scene of a chart that has no
+/// pictures of its own. Each is captured at several moments of its scene, and the frame of the
+/// movie that is on show has to be a later one at each. The decide scene's clock is then put back
+/// to the first of its moments, where the movie has to show the frame it showed there before. The
+/// decide scene is captured on the GPU as well, where a machine has one, since that is the backend
+/// a movie is uploaded to frame after frame.
+///
+/// Opt-in like the captures above it, and for a build that decodes movies; one that does not says
+/// so and passes. The pack's folder has to be left as it was.
+#[test]
+fn the_movies_of_a_skin_pack_named_by_the_environment_are_captured_as_they_play() {
+    let Some(pack) = crate::skin_select::pack_from_environment(std::env::var_os(SKIN_PACK_ENV)) else {
+        return;
+    };
+    assert!(pack.is_dir(), "{SKIN_PACK_ENV} names {}, which is not a folder", pack.display());
+    if !rbms_video::is_enabled() {
+        println!("movies: this build decodes no movies, so there is nothing to capture");
+        return;
+    }
+    let before = files_under(&pack);
+    let sample = Path::new(env!("CARGO_MANIFEST_DIR")).join(DECIDE_SAMPLE_CHART);
+    let choice = (MOVIE_BACKGROUND_ROW, MOVIE_BACKGROUND_ON);
+
+    if let Some((mut app, size)) = decide_with_choice(&pack, "decide-movie", &sample, choice) {
+        let mut pixels = HeadlessCanvas::new(size.0, size.1);
+        let on_show = walk_decide_movie(&mut app, &mut Canvas::Headless(&mut pixels), |moment, canvas| {
+            if let Canvas::Headless(pixels) = canvas {
+                save(&format!("decide-movie-{moment}"), CAPTURE_EXTENSION, size, pixels.rgba());
+            }
+        })
+        .unwrap_or_else(|reason| panic!("decide-movie: not drawn: {reason}"));
+        println!("decide-movie: movie frames on show at {on_show:?}; warnings {:?}", app.shared.skin_warnings(SKIN_TYPE_DECIDE));
+        assert!(movies_moved_on(&on_show), "decide-movie: the movie behind the scene did not play: {on_show:?}");
+
+        let gpu = decide_with_choice(&pack, "decide-movie-gpu", &sample, choice).zip(Gpu::offscreen_if_available(size.0, size.1, UI_SIZE));
+        if let Some(((mut app, _), mut gpu)) = gpu {
+            let mut frames: Vec<Vec<u8>> = Vec::new();
+            let on_show = walk_decide_movie(&mut app, &mut Canvas::Window(&mut gpu), |moment, canvas| {
+                if let Canvas::Window(gpu) = canvas {
+                    let rgba = gpu.capture().expect("an offscreen target reads back");
+                    save(&format!("decide-movie-{moment}"), GPU_CAPTURE_EXTENSION, size, &rgba);
+                    frames.push(rgba);
+                }
+            })
+            .unwrap_or_else(|reason| panic!("decide-movie.gpu: not drawn: {reason}"));
+            println!("decide-movie.gpu: movie frames on show at {on_show:?}");
+            assert!(movies_moved_on(&on_show), "decide-movie.gpu: the movie behind the scene did not play: {on_show:?}");
+            assert!(frames.windows(2).all(|pair| pair[0] != pair[1]), "decide-movie.gpu: two moments of the scene came out as one frame");
+        } else {
+            println!("decide-movie.gpu: this machine has no graphics adapter");
+        }
+    } else {
+        println!("decide-movie: the pack's decide document offers no {MOVIE_BACKGROUND_ROW:?} row to switch to {MOVIE_BACKGROUND_ON:?}");
+    }
+
+    let mut app = browse_app(&pack, "select-movie").unwrap_or_else(|reason| panic!("select-movie: not drawn: {reason}"));
+    if choose_in_skin(&mut app, SKIN_TYPE_MUSIC_SELECT, MOVIE_BACKGROUND_ROW, MOVIE_BACKGROUND_ON) {
+        let size = authored_size(&app, SKIN_TYPE_MUSIC_SELECT).expect("a document that offers a choice says its size");
+        let mut pixels = HeadlessCanvas::new(size.0, size.1);
+        app.shared.select_view = SelectView::AllSongs;
+        app.shared.rebuild_select_items();
+        let saved = capture_browser_view(&mut app, &mut pixels, size, "select-movie", SelectState::new())
+            .unwrap_or_else(|reason| panic!("select-movie: not drawn: {reason}"));
+        let mut on_show = vec![app.shared.skin_screens.movie_frames_on_show()];
+        browser_frame_at(&mut app, BROWSER_MOVIE_LATER_MS, &mut pixels, Instant::now() + PACK_LOAD_TIMEOUT)
+            .unwrap_or_else(|reason| panic!("select-movie: not drawn: {reason}"));
+        let later = format!("select-movie-{BROWSER_MOVIE_LATER_MS:04}ms");
+        save(&later, CAPTURE_EXTENSION, size, pixels.rgba());
+        on_show.push(app.shared.skin_screens.movie_frames_on_show());
+        println!("select-movie: captured {}, {later}; movie frames on show at {on_show:?}", saved.join(", "));
+        assert!(movies_moved_on(&on_show), "select-movie: the movie behind the browser did not play: {on_show:?}");
+    } else {
+        println!("select-movie: the pack's browser document offers no {MOVIE_BACKGROUND_ROW:?} row to switch to {MOVIE_BACKGROUND_ON:?}");
+    }
+
+    let rich = write_rich_chart("play-movie-chart");
+    let five = mode_chart("Five Keys", &[FIVE_KEYS_FIRST]);
+    let run = PlayRun {
+        tag: "play-movie",
+        prefix: "play-movie",
+        model: chart_model(&five, "five.bms", None),
+        chart: rich.with_file_name("five.bms"),
+        opening: true,
+        shots_ms: &PLAY_MOVIE_SHOTS_MS,
+        ending: PlayEnding::StillPlaying,
+    };
+    let saved = capture_play_scene(&pack, run).unwrap_or_else(|reason| panic!("play-movie: not drawn: {reason}"));
+    for line in &saved {
+        println!("{line}");
+    }
+    let playing: Vec<&str> = saved.iter().filter(|line| line.contains("-play-")).filter_map(|line| line.split(MOVIES_REPORTED_AS).nth(1)).collect();
+    assert_eq!(playing.len(), PLAY_MOVIE_SHOTS_MS.len(), "play-movie: a moment of the run was not captured: {saved:?}");
+    assert!(playing.iter().all(|frames| *frames != "[]"), "play-movie: a chart with no pictures was played with no movie behind it: {playing:?}");
+    assert!(playing.windows(2).all(|pair| pair[0] != pair[1]), "play-movie: the movie behind the run did not play: {playing:?}");
+
+    assert_eq!(files_under(&pack), before, "capturing the pack's movies changed its folder");
 }

@@ -12,7 +12,11 @@ use std::time::SystemTime;
 use rbms_config::DEFAULT_SKIN_FOLDER;
 use rbms_render::skin_render::frame::BgaPicture;
 use rbms_render::{SkinConfig, SkinImage};
+use rbms_video::{VideoDecoder, VideoError};
 use sha2::{Digest, Sha256};
+
+#[cfg(test)]
+pub(crate) mod scripted_movie;
 
 /// A decode running on the worker pool: what has arrived, how far it has got, the cooperative
 /// cancel, and how many jobs there are in total.
@@ -356,11 +360,13 @@ impl DecodedImage {
     }
 }
 
-/// Which half of a skin document's files one decode job carries.
+/// Which of a skin document's files one decode job carries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum SkinAssetKind {
     Image,
     Font,
+    /// A movie one of the document's images is drawn from.
+    Movie,
 }
 
 /// One of a skin document's files, read and decoded off the frame loop.
@@ -368,6 +374,11 @@ pub(crate) enum SkinAssetKind {
 pub(crate) enum SkinAsset {
     Image(SkinImage),
     Font(Vec<u8>),
+    /// A movie, opened and not yet decoded: its header has been read, which says how large its
+    /// frames are, and its first frame is decoded when something starts playing it.
+    Movie(Box<dyn VideoDecoder>),
+    /// A movie that could not be opened, and why.
+    Unplayable(String),
     /// The file is the one the caller already holds a texture of, so it was not decoded again.
     Unchanged,
 }
@@ -417,6 +428,33 @@ fn decode_skin_asset(request: &SkinAssetRequest) -> Option<SkinAssetRead> {
             SkinImage::new(width, height, decoded.into_raw()).map(|image| SkinAssetRead { asset: SkinAsset::Image(image), stamp })
         }
         SkinAssetKind::Font => std::fs::read(path).ok().map(|bytes| SkinAssetRead { asset: SkinAsset::Font(bytes), stamp: None }),
+        SkinAssetKind::Movie => {
+            let asset = match open_skin_movie(path) {
+                Ok(decoder) => SkinAsset::Movie(decoder),
+                Err(error) => SkinAsset::Unplayable(error.to_string()),
+            };
+            Some(SkinAssetRead { asset, stamp: None })
+        }
+    }
+}
+
+/// Opens the movie one of a skin's sources resolved to.
+///
+/// Opening reads the file's header and nothing else, but that is still a seek to wherever the
+/// header is and a table for every frame, so it is done on the worker that would have decoded the
+/// file had it been an image. A build with no video support opens nothing, and says so.
+#[cfg(not(test))]
+fn open_skin_movie(path: &Path) -> Result<Box<dyn VideoDecoder>, VideoError> {
+    rbms_video::open(path)
+}
+
+/// Opens the movie one of a skin's sources resolved to, or the movie a test wrote out as a script
+/// in its place ([`scripted_movie`]).
+#[cfg(test)]
+fn open_skin_movie(path: &Path) -> Result<Box<dyn VideoDecoder>, VideoError> {
+    match scripted_movie::open(path) {
+        Some(scripted) => scripted,
+        None => rbms_video::open(path),
     }
 }
 

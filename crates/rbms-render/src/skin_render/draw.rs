@@ -14,7 +14,7 @@ use rbms_skin::model::PropertyRef;
 use rbms_skin::property::{FLOAT_ABSENT, INTEGER_ABSENT, NameSpace, reference_implements};
 
 use super::object::{
-    Body, DigitLayout, FloatBody, GraphBody, ImageBody, NumberBody, SkinObject, SliderBody, Sprite, ValueSource, fraction_glyphs, integer_glyphs,
+    Body, DigitLayout, FloatBody, GraphBody, ImageBody, MovieBody, NumberBody, SkinObject, SliderBody, Sprite, ValueSource, fraction_glyphs, integer_glyphs,
 };
 use super::{SkinFrame, SkinViewport, bga, covers, gauge, graphs, judge, notes, refs, songlist, text, text_input};
 use crate::ctx::RenderCtx;
@@ -175,12 +175,18 @@ impl Placement<'_> {
     /// filtering, and only the quad itself is turned the right way round ([`Self::quad`]). A
     /// rectangle with no area, or with a size that is not a number, draws nothing.
     pub(crate) fn texture<R: Renderer>(&self, r: &mut R, tex: TextureId, size: (u32, u32), region: SkinRect, rect: SkinRect) -> bool {
+        self.sampled(r, tex, size, region, rect, None)
+    }
+
+    /// [`Self::texture`], read through `filter` whatever the object's own filter and size would
+    /// have chosen. `None` leaves the choice to them.
+    fn sampled<R: Renderer>(&self, r: &mut R, tex: TextureId, size: (u32, u32), region: SkinRect, rect: SkinRect, filter: Option<TextureFilter>) -> bool {
         let placed = self.viewport.place(rect);
         let (fitted, source) = stretch_rect(self.object.stretch, SkinRect::new(placed.x, placed.y, placed.w, placed.h), region);
         if !(has_extent(fitted.w) && has_extent(fitted.h) && fitted.x.is_finite() && fitted.y.is_finite()) {
             return false;
         }
-        let filter = texture_filter(filtering_for(self.object.track.filter, fitted, (source.w, source.h)));
+        let filter = filter.unwrap_or_else(|| texture_filter(filtering_for(self.object.track.filter, fitted, (source.w, source.h))));
         let dst = Rect { x: fitted.x, y: fitted.y, w: fitted.w, h: fitted.h };
         r.draw_textured_quad(tex, self.quad(dst, pixel_uv(source, size), filter));
         true
@@ -236,6 +242,7 @@ pub(crate) fn draw_resolved<R: Renderer>(
     let rect = resolved.rect;
     let drawn = match &object.body {
         Body::Image(body) => draw_image(r, &place, body, rect, frame),
+        Body::Movie(body) => draw_movie(r, &place, body, rect),
         Body::Number(body) => draw_number(r, &place, body, rect, frame),
         Body::Float(body) => draw_float(r, &place, body, rect, frame),
         Body::Text(body) => text::draw_text(ctx, r, &place, body, rect, frame),
@@ -325,6 +332,23 @@ fn draw_image<R: Renderer>(r: &mut R, place: &Placement<'_>, body: &ImageBody, r
     };
     let cell = first + sprite.animation_index(*count, frame.now_us, frame.timers, frame.script());
     place.cell(r, sprite, cell, rect)
+}
+
+/// An image whose source is a movie: the whole of the frame that is on show, or nothing at all
+/// while there is none (`SkinImage.prepare`, which leaves the object undrawn when its source has no
+/// frame for it yet).
+///
+/// The frame is fitted like any image, by the object's stretch mode, and always read through the
+/// linear filter: the reference draws a movie with its own renderer type, which sets that filter
+/// whatever the destination's `filter` says (`SkinImage.draw`, `Skin.SkinObjectRenderer.setFilter`).
+/// A movie's frames are rarely the size of the rectangle they land in, and read point by point a
+/// playing movie shimmers.
+fn draw_movie<R: Renderer>(r: &mut R, place: &Placement<'_>, body: &MovieBody, rect: SkinRect) -> bool {
+    let Some((tex, size)) = body.movie.frame() else {
+        return false;
+    };
+    let whole = SkinRect::new(0.0, 0.0, size.0 as f32, size.1 as f32);
+    place.sampled(r, tex, size, whole, rect, Some(TextureFilter::Linear))
 }
 
 /// How far a run of digit places is nudged to keep its alignment.

@@ -124,7 +124,22 @@ pub trait SkinAssets {
     fn font(&mut self, path: &Path) -> Option<Vec<u8>> {
         std::fs::read(path).ok()
     }
+
+    /// The size in pixels of the frames of the movie file at `path`, or why the host cannot play
+    /// it.
+    ///
+    /// A source whose file is a movie is never asked of [`SkinAssets::image`]. A screen needs only
+    /// this of it to be built; the frames themselves arrive afterwards, one at a time, through
+    /// [`SkinScreen::show_movie_frame`]. The default plays nothing, which leaves the images drawn
+    /// from a movie out of the screen with a line in its warnings.
+    fn movie(&mut self, path: &Path) -> Result<(u32, u32), String> {
+        let _ = path;
+        Err(NO_MOVIE_SUPPORT.to_owned())
+    }
 }
+
+/// Why a host that does not say how it plays movies cannot play one.
+const NO_MOVIE_SUPPORT: &str = "this host plays no movies";
 
 /// Reads the bitmap font `id` at `path` and makes it one of a screen's faces. The lines of its file
 /// that were skipped go to `warnings`: the ones the font kept in words, and how many more there
@@ -296,7 +311,7 @@ impl SkinScreen {
         }
 
         let mut kept = Vec::new();
-        let objects = object::build_objects(skin, textures.sources(), &fonts, assets, &mut warnings, &mut kept);
+        let objects = object::build_objects(skin, (textures.sources(), textures.movie_sources()), &fonts, assets, &mut warnings, &mut kept);
         let interactions = input::interactions(skin, &kept, &objects);
         let authored = (skin.def.w.max(1) as f32, skin.def.h.max(1) as f32);
         let whole = whole::applies_to(skin.def.skin_type).then(OnceLock::new);
@@ -388,6 +403,33 @@ impl SkinScreen {
     /// This screen's page table.
     fn pages(&self) -> MutexGuard<'_, text::bitmap::PageTable> {
         locked(&self.font_pages)
+    }
+
+    /// The movies this screen draws from, each with where its file is, how large its frames are
+    /// and whether it has been started.
+    ///
+    /// A movie is started by the first frame that prepares an object drawn from it, whether or not
+    /// that object is drawn (`SkinImage.prepare`, which asks its source for a frame either way), and
+    /// from then on the frame of it that is due is the host's to supply: the one shown
+    /// `frame clock - started_us` into the movie, played round and round. A host looks here after a
+    /// frame is prepared and before it is drawn.
+    pub fn movies(&self) -> Vec<textures::MoviePlayback> {
+        self.textures.movies()
+    }
+
+    /// Puts `rgba` on show as the frame of movie `index`: `width * height * 4` bytes of RGBA, top
+    /// row first, at the size the host said the movie's frames are. Answers whether it was that.
+    ///
+    /// The frame replaces the one before it in place, under one texture, and every object drawn
+    /// from the movie shows it from the next draw on.
+    pub fn show_movie_frame<R: Renderer>(&self, r: &mut R, index: usize, rgba: &[u8]) -> bool {
+        self.textures.show_movie_frame(r, index, rgba)
+    }
+
+    /// Takes the frame of movie `index` off show, so the objects drawn from it draw nothing: for a
+    /// movie the host gave up on.
+    pub fn hide_movie(&self, index: usize) {
+        self.textures.hide_movie(index);
     }
 
     /// Everything that was dropped while building, one line each.

@@ -6,9 +6,11 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use rbms_skin::SkinError;
-use rbms_skin::loader::{SkinLoadOptions, SkinUserConfig, load_header};
-use rbms_skin::model::{Filepath, SkinDef};
-use rbms_skin::resolve::{Draw, FileResolver, apply_filemap, build_filemap, contained, enumerate_custom_files, pattern_for, wildcard_extension};
+use rbms_skin::loader::{SkinLoadOptions, SkinUserConfig, load_header, load_skin};
+use rbms_skin::model::{Filepath, SkinDef, SourceKind};
+use rbms_skin::resolve::{
+    Draw, FileResolver, MOVIE_NAME_ENDINGS, apply_filemap, build_filemap, contained, enumerate_custom_files, pattern_for, source_kind, wildcard_extension,
+};
 
 /// A seed the wildcard tests pin so a draw is the same on every machine.
 const TEST_SEED: u64 = 7;
@@ -296,4 +298,76 @@ fn a_pattern_that_leaves_the_root_is_refused_by_the_resolver() {
 #[test]
 fn joining_a_relative_path_normalises_the_separator() {
     assert_eq!(pattern_for(Path::new("/skins/one/"), "images\\frame.png"), "/skins/one/images/frame.png");
+}
+
+#[test]
+fn a_source_is_a_movie_by_what_its_file_name_ends_in() {
+    for ending in MOVIE_NAME_ENDINGS {
+        assert_eq!(source_kind(Path::new(&format!("bg/movie/clip.{ending}"))), SourceKind::Movie, ".{ending}");
+        assert_eq!(source_kind(Path::new(&format!("bg/movie/CLIP.{}", ending.to_uppercase()))), SourceKind::Movie, "an upper-cased .{ending}");
+    }
+    assert_eq!(MOVIE_NAME_ENDINGS, ["mp4", "m4v", "wmv", "webm", "mpg", "mpeg", "m1v", "m2v", "avi"]);
+    for still in ["bg/image/sample.png", "bg/still.jpg", "parts.bmp", "noextension", "clip.mp4.png", "clip.mp3", "clip.mov", "clip.mkv", "clip.ogv", ""] {
+        assert_eq!(source_kind(Path::new(still)), SourceKind::Image, "{still}");
+    }
+}
+
+/// The reference strips the dot from each extension before it compares, so a name that merely ends
+/// in the letters is a movie, and a folder that does is not.
+#[test]
+fn a_movie_is_told_by_the_letters_its_name_ends_in_and_not_by_its_folders() {
+    assert_eq!(source_kind(Path::new("bg/intromp4")), SourceKind::Movie);
+    assert_eq!(source_kind(Path::new("bg/navi")), SourceKind::Movie);
+    assert_eq!(source_kind(Path::new("movies.mp4/still.png")), SourceKind::Image);
+    assert_eq!(source_kind(Path::new("bg/#default.mp4")), SourceKind::Movie);
+}
+
+/// A document over `root` with three sources: a still, a wildcard that only a movie matches, and a
+/// file slot whose candidates are a still and a movie.
+fn write_movie_document(root: &Path) {
+    for folder in ["image", "movie", "either"] {
+        std::fs::create_dir_all(root.join(folder)).expect("the scratch folders should be creatable");
+    }
+    for file in ["image/still.png", "movie/loop.MP4", "either/picture.png", "either/clip.webm"] {
+        std::fs::write(root.join(file), b"not read by the loader").expect("the scratch files should be writable");
+    }
+    let document = r#"{
+        "type": 6, "name": "movies", "w": 1280, "h": 720,
+        "filepath": [{ "name": "Either", "path": "either/*", "def": "picture" }],
+        "source": [
+            { "id": "still", "path": "image/still.png" },
+            { "id": "wild", "path": "movie/*.mp4" },
+            { "id": "slot", "path": "either/*" },
+            { "id": "outside", "path": "../outside.mp4" }
+        ],
+        "image": [{ "id": "bg", "src": "wild", "x": 0, "y": 0, "w": -1, "h": -1 }],
+        "destination": [{ "id": "bg", "dst": [{ "x": 0, "y": 0, "w": 1280, "h": 720 }] }]
+    }"#;
+    std::fs::write(root.join("skin.json"), document).expect("the scratch document should be writable");
+}
+
+#[test]
+fn a_source_takes_its_kind_from_the_file_its_pattern_came_to() {
+    let scratch = Scratch::new("movie-kind");
+    let inside = scratch.path().join("pack");
+    std::fs::create_dir_all(&inside).expect("the pack folder should be creatable");
+    std::fs::write(scratch.path().join("outside.mp4"), b"outside the root").expect("the outside file should be writable");
+    write_movie_document(&inside);
+
+    let user = SkinUserConfig::default();
+    let options = SkinLoadOptions { rng_seed: Some(TEST_SEED), ..SkinLoadOptions::new(&inside, &user, rbms_model::Mode::BEAT_7K) };
+    let skin = load_skin(&inside.join("skin.json"), options).expect("the document loads");
+    assert_eq!(skin.source_kind("still"), Some(SourceKind::Image));
+    assert_eq!(skin.source_kind("wild"), Some(SourceKind::Movie), "a wildcard that came to a movie: {:?}", skin.sources.get("wild"));
+    assert_eq!(skin.source_kind("slot"), Some(SourceKind::Image), "a slot whose default is the still: {:?}", skin.sources.get("slot"));
+    assert_eq!(skin.source_kind("outside"), None, "a movie outside the skin root resolved");
+    assert_eq!(skin.source_kind("undeclared"), None);
+    assert_eq!(skin.movie_sources.iter().map(String::as_str).collect::<Vec<_>>(), ["wild"]);
+
+    let mut chose_movie = SkinUserConfig::default();
+    chose_movie.filepaths.insert("Either".to_owned(), "clip.webm".to_owned());
+    let options = SkinLoadOptions { rng_seed: Some(TEST_SEED), ..SkinLoadOptions::new(&inside, &chose_movie, rbms_model::Mode::BEAT_7K) };
+    let skin = load_skin(&inside.join("skin.json"), options).expect("the document loads");
+    assert_eq!(skin.source_kind("slot"), Some(SourceKind::Movie), "a slot the player set to its movie: {:?}", skin.sources.get("slot"));
+    assert!(skin.sources["slot"].starts_with(&inside), "a movie source resolved outside the skin root");
 }

@@ -12,6 +12,13 @@
 //! its byte budget ([`TextureLimits`]). The objects that would have drawn from a refused source are
 //! dropped one by one as they are built, exactly like the objects of a source that will not decode.
 //!
+//! A source whose file is a movie is not decoded here at all. The host says how large its frames
+//! are when the screen is built -- which is what the movie is counted at against the budget, as one
+//! frame -- and hands over the frame that is on show whenever it has a new one
+//! ([`SkinScreen::show_movie_frame`](super::SkinScreen::show_movie_frame)). Each frame replaces the
+//! last under one registry key, so a playing movie is one texture for as long as its screen is.
+//! Until its first frame arrives it is none, and the image drawn from it draws nothing.
+//!
 //! A screen built on its own registers its textures under keys of its own and hands them back when
 //! it is released. A screen built against a [`SkinTexturePool`] shares them by file instead: two
 //! screens that draw from one file hold one texture, and a texture nobody holds any more stays
@@ -22,13 +29,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 
 use rbms_skin::loader::LoadedSkin;
-use rbms_skin::model::Destination;
+use rbms_skin::model::{Destination, SourceKind};
 
 use super::{SkinAssets, SkinImage};
-use crate::{BYTES_PER_PIXEL, Renderer, TextureId};
+use crate::{BYTES_PER_PIXEL, Renderer, TextureId, locked};
 
+#[cfg(test)]
+mod movie_tests;
 #[cfg(test)]
 mod tests;
 
@@ -133,12 +143,128 @@ pub fn referenced_sources(skin: &LoadedSkin) -> BTreeSet<String> {
     sources
 }
 
-/// The files behind [`referenced_sources`]: every image a host has to have decoded before the
-/// skin's screen is built, each once however many source ids resolve to it.
-pub fn referenced_source_files(skin: &LoadedSkin) -> BTreeSet<&Path> {
+/// The files behind the sources of one kind among [`referenced_sources`], each once however many
+/// source ids resolve to it.
+fn referenced_files(skin: &LoadedSkin, kind: SourceKind) -> BTreeSet<&Path> {
     let referenced = referenced_sources(skin);
-    skin.sources.iter().filter(|(id, _)| referenced.contains(*id)).map(|(_, path)| path.as_path()).collect()
+    let of_kind = |id: &str| referenced.contains(id) && skin.source_kind(id) == Some(kind);
+    skin.sources.iter().filter(|(id, _)| of_kind(id)).map(|(_, path)| path.as_path()).collect()
 }
+
+/// The image files behind [`referenced_sources`]: every image a host has to have decoded before
+/// the skin's screen is built, each once however many source ids resolve to it. A source that is a
+/// movie is not among them ([`referenced_movie_files`]).
+pub fn referenced_source_files(skin: &LoadedSkin) -> BTreeSet<&Path> {
+    referenced_files(skin, SourceKind::Image)
+}
+
+/// The movie files behind [`referenced_sources`]: every movie a host has to be able to say the
+/// frame size of when the skin's screen is built ([`SkinAssets::movie`]).
+pub fn referenced_movie_files(skin: &LoadedSkin) -> BTreeSet<&Path> {
+    referenced_files(skin, SourceKind::Movie)
+}
+
+/// One movie a screen draws from, as the host that plays it is told about it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MoviePlayback {
+    /// Which of the screen's movies this is: what [`SkinScreen::show_movie_frame`](super::SkinScreen::show_movie_frame)
+    /// is told a frame belongs to.
+    pub index: usize,
+    pub path: PathBuf,
+    /// The size of the movie's frames in pixels, as the host said it when the screen was built.
+    pub size: (u32, u32),
+    /// What the frame clock read when the movie was started: the first time an object drawn from it
+    /// was prepared (`SkinSourceMovie.getImage`, which starts playing on its first call). `None`
+    /// until then, which is a movie that is not playing yet.
+    pub started_us: Option<i64>,
+    /// How many times the movie has been started. It goes up again when the frame clock is found
+    /// behind where the movie was started -- the scene began again under the same screen -- and
+    /// the movie is then to be played from its first frame.
+    pub starts: u64,
+}
+
+/// What a movie source is doing.
+#[derive(Debug, Default)]
+struct MovieState {
+    started_us: Option<i64>,
+    starts: u64,
+    /// The texture the movie's frames are uploaded into, once there has been one.
+    texture: Option<TextureId>,
+    /// Whether that texture holds a frame that is to be drawn.
+    shown: bool,
+}
+
+/// One movie a screen draws from: where its frames go, and whether there is one on show.
+///
+/// Shared between the screen, which is handed the frames, and the objects drawn from the movie,
+/// which read it through a shared borrow while a frame is prepared and drawn.
+#[derive(Debug)]
+pub(crate) struct MovieSlot {
+    path: PathBuf,
+    size: (u32, u32),
+    /// The registry key every frame is registered under, each replacing the last.
+    key: String,
+    state: Mutex<MovieState>,
+}
+
+impl MovieSlot {
+    /// Notes that an object drawn from the movie was prepared with the frame clock at `now_us`,
+    /// which starts the movie the first time, and starts it over when the clock has gone back to
+    /// before it was started.
+    pub(crate) fn prepare(&self, now_us: i64) {
+        let mut state = locked(&self.state);
+        let starts_over = state.started_us.is_some_and(|started_us| now_us < started_us);
+        if state.started_us.is_none() || starts_over {
+            state.started_us = Some(now_us);
+            state.starts += 1;
+        }
+        if starts_over {
+            state.shown = false;
+        }
+    }
+
+    /// The frame on show and its size, or `None` when there is nothing to draw: the movie has not
+    /// had a frame decoded yet, or was given up on.
+    pub(crate) fn frame(&self) -> Option<SizedTexture> {
+        let state = locked(&self.state);
+        state.texture.filter(|_| state.shown).map(|texture| (texture, self.size))
+    }
+
+    /// Puts `rgba` on show as the movie's frame, answering whether it was one: a buffer that is not
+    /// a whole frame of the movie's size is refused.
+    fn show<R: Renderer>(&self, r: &mut R, rgba: &[u8]) -> bool {
+        if rgba_bytes(self.size) != rgba.len() as u64 {
+            return false;
+        }
+        let texture = r.register_texture(&self.key, rgba, self.size.0, self.size.1);
+        let mut state = locked(&self.state);
+        state.texture = Some(texture);
+        state.shown = true;
+        true
+    }
+
+    /// Takes the frame off show, for a movie that stopped decoding.
+    fn hide(&self) {
+        locked(&self.state).shown = false;
+    }
+
+    /// Hands the movie's texture back, leaving nothing on show.
+    fn release<R: Renderer>(&self, r: &mut R) {
+        let mut state = locked(&self.state);
+        state.shown = false;
+        if let Some(texture) = state.texture.take() {
+            r.release_texture(texture);
+        }
+    }
+
+    fn playback(&self, index: usize) -> MoviePlayback {
+        let state = locked(&self.state);
+        MoviePlayback { index, path: self.path.clone(), size: self.size, started_us: state.started_us, starts: state.starts }
+    }
+}
+
+/// Every movie source that was admitted, each as `(document source id, the movie it resolved to)`.
+pub(crate) type MovieSources<'a> = &'a [(String, Arc<MovieSlot>)];
 
 /// How many RGBA bytes an image of `size` pixels takes once it is uploaded.
 pub fn rgba_bytes(size: (u32, u32)) -> u64 {
@@ -337,6 +463,10 @@ pub(crate) struct SkinTextures {
     stats: TextureStats,
     /// The registry namespace of the textures this screen registers for itself.
     serial: u32,
+    /// The movies this screen draws from, each file once.
+    movies: Vec<Arc<MovieSlot>>,
+    /// Which movie each movie source id resolved to.
+    movie_sources: Vec<(String, Arc<MovieSlot>)>,
 }
 
 /// Where one file's pixels are when a screen asks for them.
@@ -418,6 +548,41 @@ impl<R: Renderer> Registration<'_, R> {
         true
     }
 
+    /// Takes the movie one source resolved to, when the host can play it and one frame of it fits.
+    ///
+    /// The host is asked how large the movie's frames are, which is all a screen needs of a movie
+    /// to be built: a movie the host cannot open is left out with a line in the warnings, and the
+    /// image drawn from it is dropped as it is built. One frame of the movie is what it is counted
+    /// at against the screen's budget, because one frame is what it ever has uploaded. Two source
+    /// ids that resolve to one file share the movie.
+    fn admit_movie(&mut self, id: &str, path: &Path) {
+        let known = self.textures.movies.iter().find(|movie| movie.path == path).cloned();
+        let movie = known.or_else(|| {
+            let size = match self.assets.movie(path) {
+                Ok(size) if size.0 > 0 && size.1 > 0 => size,
+                Ok(size) => {
+                    self.warnings.push(format!("movie source {id:?} has frames of {}x{}, so it is left out ({})", size.0, size.1, path.display()));
+                    return None;
+                }
+                Err(reason) => {
+                    self.warnings.push(format!("movie source {id:?} could not be opened from {}: {reason}", path.display()));
+                    return None;
+                }
+            };
+            if !self.fits(id, path, size) {
+                return None;
+            }
+            self.textures.stats.add(size);
+            let key = format!("rbms.skin.{}.movie.{}", self.serial, self.textures.movies.len());
+            let movie = Arc::new(MovieSlot { path: path.to_path_buf(), size, key, state: Mutex::default() });
+            self.textures.movies.push(Arc::clone(&movie));
+            Some(movie)
+        });
+        if let Some(movie) = movie {
+            self.textures.movie_sources.push((id.to_owned(), movie));
+        }
+    }
+
     /// The texture and size of the file one source resolved to, or `None` when the screen goes
     /// without it.
     fn admit(&mut self, id: &str, path: &Path) -> Option<SizedTexture> {
@@ -476,6 +641,10 @@ impl SkinTextures {
         let mut registration = Registration { r, assets, pool, limits, serial, warnings, textures: SkinTextures { serial, ..SkinTextures::default() } };
         let mut files: BTreeMap<&Path, Option<SizedTexture>> = BTreeMap::new();
         for (id, path) in skin.sources.iter().filter(|(id, _)| referenced.contains(*id)) {
+            if skin.source_kind(id) == Some(SourceKind::Movie) {
+                registration.admit_movie(id, path);
+                continue;
+            }
             let admitted = match files.get(path.as_path()) {
                 Some(admitted) => *admitted,
                 None => {
@@ -521,9 +690,33 @@ impl SkinTextures {
         &self.sources
     }
 
-    /// How many textures are held, and the RGBA bytes they come to.
+    /// How many textures are held, and the RGBA bytes they come to. A movie is one texture of one
+    /// frame, from the moment the screen is built.
     pub(crate) fn stats(&self) -> TextureStats {
         self.stats
+    }
+
+    /// The movie sources that were admitted, as the object builders look them up.
+    pub(crate) fn movie_sources(&self) -> MovieSources<'_> {
+        &self.movie_sources
+    }
+
+    /// The movies this screen draws from and what each is doing.
+    pub(crate) fn movies(&self) -> Vec<MoviePlayback> {
+        self.movies.iter().enumerate().map(|(index, movie)| movie.playback(index)).collect()
+    }
+
+    /// Puts `rgba` on show as the frame of movie `index`, answering whether it was a whole frame
+    /// of a movie this screen has.
+    pub(crate) fn show_movie_frame<R: Renderer>(&self, r: &mut R, index: usize, rgba: &[u8]) -> bool {
+        self.movies.get(index).is_some_and(|movie| movie.show(r, rgba))
+    }
+
+    /// Takes the frame of movie `index` off show.
+    pub(crate) fn hide_movie(&self, index: usize) {
+        if let Some(movie) = self.movies.get(index) {
+            movie.hide();
+        }
     }
 
     /// Lets go of every texture, leaving nothing held: the screen's own go back to `r`, and the
@@ -536,6 +729,10 @@ impl SkinTextures {
         self.stats = TextureStats::default();
         for tex in self.owned.drain(..) {
             r.release_texture(tex);
+        }
+        self.movie_sources.clear();
+        for movie in self.movies.drain(..) {
+            movie.release(r);
         }
         if let Some(pool) = pool {
             for path in self.pooled.drain(..) {

@@ -326,6 +326,19 @@ pub struct Source {
     pub path: String,
 }
 
+/// What kind of file a source resolved to, which decides how it reaches the screen.
+///
+/// A document does not say: it names a file where it names every other source, and the file's name
+/// decides ([`crate::resolve::source_kind`]).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum SourceKind {
+    /// A still image, decoded once.
+    #[default]
+    Image,
+    /// A movie, whose frame of the moment is what an image drawn from it shows.
+    Movie,
+}
+
 /// A font file, with the fallbacks used for glyphs it lacks.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]

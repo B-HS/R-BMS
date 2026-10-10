@@ -16,13 +16,13 @@ use std::borrow::Cow;
 
 use rbms_skin::dst::{DestinationTrack, DrawStateSource, Keyframe, LuaDrawEval, LuaFnId, Resolved, SkinColor, SkinRect, TimerRef, prepare};
 use rbms_skin::loader::{LoadedSkin, StretchKind};
-use rbms_skin::model::{FloatValueDef, GraphDef, ImageDef, PropertyRef, SliderDef, ValueDef};
+use rbms_skin::model::{FloatValueDef, GraphDef, ImageDef, PropertyRef, SliderDef, SourceKind, ValueDef};
 use rbms_skin::property::SkinHost;
 use rbms_skin::timer::{MICROS_PER_MILLI, TIMER_OFF, TimerState};
 
 use super::draw::{ImageSelect, float_value, number_value, share};
 use super::text::Fonts;
-use super::textures::{Source, source_of};
+use super::textures::{MovieSlot, MovieSources, Source, source_of};
 use super::{SkinAssets, SkinFrame, bga, covers, gauge, graphs, judge, notes, refs, songlist, text, text_input};
 use crate::{TextureId, UvRect};
 
@@ -107,7 +107,7 @@ pub(crate) struct SkinObject {
 impl SkinObject {
     pub(crate) fn kind(&self) -> SkinObjectKind {
         match self.body {
-            Body::Image(_) => SkinObjectKind::Image,
+            Body::Image(_) | Body::Movie(_) => SkinObjectKind::Image,
             Body::Number(_) => SkinObjectKind::Number,
             Body::Float(_) => SkinObjectKind::Float,
             Body::Text(_) | Body::TextInput(_) => SkinObjectKind::Text,
@@ -190,6 +190,11 @@ impl SkinObject {
                 let placed = self.place(frame);
                 let (sprite, _, _) = body.variants.get(slot)?.as_ref()?;
                 sprite.prepare(frame);
+                placed
+            }
+            Body::Movie(body) => {
+                let placed = self.place(frame);
+                body.movie.prepare(frame.now_us);
                 placed
             }
             Body::Number(body) => {
@@ -327,6 +332,8 @@ fn prepare_text(body: &text::TextBody, frame: &SkinFrame<'_>) {
 #[derive(Debug)]
 pub(crate) enum Body {
     Image(ImageBody),
+    /// An image whose source is a movie.
+    Movie(MovieBody),
     Number(NumberBody),
     Float(FloatBody),
     Text(text::TextBody),
@@ -578,6 +585,16 @@ impl ValueSource {
     }
 }
 
+/// An image drawn from a movie: the whole of whichever frame of it is on show
+/// (`SkinImage(SkinSourceMovie)`, which has no region, no cells and nothing to pick between).
+///
+/// It is prepared like an image -- the shared steps, then its source -- and its source is what
+/// starts the movie: the first prepare does, whether or not the object is drawn on that frame.
+#[derive(Debug)]
+pub(crate) struct MovieBody {
+    pub(crate) movie: std::sync::Arc<MovieSlot>,
+}
+
 /// A still or animated image, or a set of them one property picks between.
 #[derive(Debug)]
 pub(crate) struct ImageBody {
@@ -800,9 +817,13 @@ pub(crate) fn image_sprite(def: &ImageDef, sources: Source<'_>) -> Option<Sprite
 /// every frame, for an object that can never be drawn.
 ///
 /// `kept` is given, for each object built, which of the document's destinations it was built from.
+///
+/// `sources` is the screen's image sources and its movie sources. Only a top-level image is drawn
+/// from a movie ([`movie_body`]); everything else looks its source up among the images, where a
+/// movie is not, and is dropped for having none.
 pub(crate) fn build_objects(
     skin: &LoadedSkin,
-    sources: Source<'_>,
+    (sources, movies): (Source<'_>, MovieSources<'_>),
     fonts: &Fonts,
     assets: &mut dyn SkinAssets,
     warnings: &mut Vec<String>,
@@ -810,7 +831,12 @@ pub(crate) fn build_objects(
 ) -> Vec<SkinObject> {
     let mut objects = Vec::with_capacity(skin.destinations.len());
     for (destination, named) in skin.destinations.iter().enumerate() {
-        let Some(body) = build_body(skin, &named.id, sources, fonts, assets, warnings) else {
+        let body = match movie_body(skin, &named.id, movies) {
+            MovieImage::Admitted(body) => Some(Body::Movie(body)),
+            MovieImage::LeftOut => None,
+            MovieImage::NotOne => build_body(skin, &named.id, sources, fonts, assets, warnings),
+        };
+        let Some(body) = body else {
             continue;
         };
         if named.track.frames.is_empty() && !body.places_itself() {
@@ -821,6 +847,37 @@ pub(crate) fn build_objects(
         kept.push(destination);
     }
     objects
+}
+
+/// What a destination is to the screen's movies.
+enum MovieImage {
+    /// It names an image whose source is a movie the screen plays.
+    Admitted(MovieBody),
+    /// It names an image whose source is a movie the screen goes without, which was said when the
+    /// movie was left out and is not said again for the object.
+    LeftOut,
+    /// It names something else, which is built like everything else.
+    NotOne,
+}
+
+/// What a destination is to the screen's movies (`JsonSkinObjectLoader.loadSkinObject`: the first
+/// image of that id decides, and `SkinImage(SkinSourceMovie)` is made of it when its source is one).
+///
+/// A reference image keeps its id, as it does for every other kind of object.
+fn movie_body(skin: &LoadedSkin, id: &str, movies: MovieSources<'_>) -> MovieImage {
+    if refs::build_reference(id).is_some() {
+        return MovieImage::NotOne;
+    }
+    let Some(image) = skin.def.image.iter().find(|image| image.id == id) else {
+        return MovieImage::NotOne;
+    };
+    if skin.source_kind(&image.src) != Some(SourceKind::Movie) {
+        return MovieImage::NotOne;
+    }
+    match movies.iter().find(|(source, _)| *source == image.src) {
+        Some((_, movie)) => MovieImage::Admitted(MovieBody { movie: std::sync::Arc::clone(movie) }),
+        None => MovieImage::LeftOut,
+    }
 }
 
 /// The body behind one destination id, or `None` when nothing declares it.

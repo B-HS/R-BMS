@@ -53,10 +53,10 @@ use serde_json::Value;
 
 use crate::SkinError;
 use crate::dst::{DestinationTrack, DrawCondition, OffsetSource, SkinOffset};
-use crate::model::{Category, DEFAULT_SKIN_HEIGHT, DEFAULT_SKIN_WIDTH, Destination, Filepath, OffsetDef, PropertyDef, SKIN_TYPE_UNSET, SkinDef};
+use crate::model::{Category, DEFAULT_SKIN_HEIGHT, DEFAULT_SKIN_WIDTH, Destination, Filepath, OffsetDef, PropertyDef, SKIN_TYPE_UNSET, SkinDef, SourceKind};
 use crate::property::generated::{OFFSET_ALL, OFFSET_JUDGE_1P, OFFSET_JUDGEDETAIL_1P, OFFSET_NOTES_1P};
 use crate::property::{DefaultState, NameSpace, SkinHost, id_of_name};
-use crate::resolve::{CustomFile, Draw, FileResolver, build_filemap, contained, enumerate_custom_files, pattern_for};
+use crate::resolve::{CustomFile, Draw, FileResolver, build_filemap, contained, enumerate_custom_files, pattern_for, source_kind};
 
 /// Bytes a document may be before the loader refuses to parse it.
 ///
@@ -480,6 +480,8 @@ pub struct LoadedSkin {
     pub declared_options: BTreeSet<i32>,
     /// Image source id to the file it resolved to.
     pub sources: BTreeMap<String, PathBuf>,
+    /// The ids among [`LoadedSkin::sources`] whose file is a movie ([`LoadedSkin::source_kind`]).
+    pub movie_sources: BTreeSet<String>,
     /// Font id to the file it resolved to.
     pub fonts: BTreeMap<String, PathBuf>,
     /// The document's top-level destinations, assembled, less the ones preparing the skin removed
@@ -514,6 +516,17 @@ impl LoadedSkin {
     /// The pattern-to-file-name substitutions this load resolves paths through.
     pub fn filemap(&self) -> &BTreeMap<String, String> {
         &self.filemap
+    }
+
+    /// What kind of file the source `id` resolved to, or `None` for an id that names no source that
+    /// resolved.
+    ///
+    /// The kind is the resolved file's, so a wildcard or a file slot that came to a movie makes its
+    /// source a movie whatever the pattern said. A movie is a file inside the skin root like every
+    /// other source: one that is not never resolved, and is not here.
+    pub fn source_kind(&self, id: &str) -> Option<SourceKind> {
+        let known = self.sources.contains_key(id);
+        known.then(|| if self.movie_sources.contains(id) { SourceKind::Movie } else { SourceKind::Image })
     }
 
     /// The file a document-relative path names, checked to be inside the skin root.
@@ -927,6 +940,7 @@ pub(crate) fn assemble(parts: Assembly, host: &dyn SkinHost) -> Result<LoadedSki
         selected_options: parts.merged.options,
         declared_options: parts.merged.declared,
         sources: BTreeMap::new(),
+        movie_sources: BTreeSet::new(),
         fonts: BTreeMap::new(),
         destinations: Vec::new(),
         nested: NestedTracks::default(),
@@ -943,6 +957,9 @@ pub(crate) fn assemble(parts: Assembly, host: &dyn SkinHost) -> Result<LoadedSki
     for (id, pattern) in sources {
         match skin.resolve(&pattern) {
             Ok(file) => {
+                if source_kind(&file) == SourceKind::Movie {
+                    skin.movie_sources.insert(id.clone());
+                }
                 skin.sources.insert(id, file);
             }
             Err(error) => skin.warnings.push(format!("image source {id:?} was skipped: {error}")),

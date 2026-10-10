@@ -78,6 +78,15 @@
 //! A file is decoded again only when it was written since it was uploaded, which a worker finds out
 //! with one stat.
 //!
+//! # Movies
+//!
+//! A source whose file is a movie is opened on the worker pool with the document's images -- its
+//! header read, nothing decoded -- and is counted against the screen's textures as one frame. It
+//! starts playing when the screen first prepares an object drawn from it, on the scene clock, and
+//! from then on each frame of the screen is handed the frame of the movie that is due between its
+//! two stages: after every object is prepared, before any is drawn ([`movies`]). A movie stands
+//! still whenever the scene clock does, and is stopped when its screen is let go of.
+//!
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -88,7 +97,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use rbms_config::SkinCustomisation;
 use rbms_render::font::with_text_context;
-use rbms_render::skin_render::textures::{SkinTexturePool, TextureStats, referenced_source_files};
+use rbms_render::skin_render::textures::{SkinTexturePool, TextureStats, referenced_movie_files, referenced_source_files};
 use rbms_render::skin_render::{PreparedFrame, SkinAction, SkinEvent, SkinInputMap, SkinPointer, SkinPointerButton, SkinWriter};
 use rbms_render::{Color, FrameData, Renderer, SkinAssets, SkinFrame, SkinImage, SkinScreen, SongBars, TextContext, with_render_ctx};
 use rbms_skin::dst::{LuaDrawEval, OffsetSource, SkinOffset};
@@ -97,6 +106,7 @@ use rbms_skin::lua::BoundFrame;
 use rbms_skin::property::generated::OFFSET_ALL;
 use rbms_skin::property::{HostCall, SkinHost, StaticScreen};
 use rbms_skin::timer::TimerState;
+use rbms_video::VideoDecoder;
 use winit::event::{Ime, MouseButton};
 
 use crate::AppShared;
@@ -120,6 +130,10 @@ use crate::skin_select::{SkinLibrary, SkinRead};
 use crate::stage::canvas::UI_SIZE;
 use crate::stage::{Canvas, KeyInput};
 
+pub(crate) mod movies;
+
+use movies::MoviePlayers;
+
 /// Hands one document's already-decoded files to [`SkinScreen::build`].
 ///
 /// Nothing here touches the disk. A published skin draws from dozens of source images and a font or
@@ -130,12 +144,23 @@ use crate::stage::{Canvas, KeyInput};
 /// produces is owned by the screen or the texture pool afterwards.
 pub(crate) struct PlayerSkinAssets {
     prepared: BTreeMap<SkinAssetJob, SkinAsset>,
+    /// The movies the build asked the size of, each as the worker opened it, kept for whoever plays
+    /// them once the screen is built.
+    movies: BTreeMap<PathBuf, Box<dyn VideoDecoder>>,
 }
+
+/// Why a movie a worker never answered for is not played.
+const MOVIE_NOT_READ: &str = "it was not read";
 
 impl PlayerSkinAssets {
     /// The assets one document is compiled with: the files a worker read.
     pub(crate) fn new(prepared: BTreeMap<SkinAssetJob, SkinAsset>) -> PlayerSkinAssets {
-        PlayerSkinAssets { prepared }
+        PlayerSkinAssets { prepared, movies: BTreeMap::new() }
+    }
+
+    /// The movies the build took, by file, each opened and not yet decoded.
+    fn into_movies(self) -> BTreeMap<PathBuf, Box<dyn VideoDecoder>> {
+        self.movies
     }
 }
 
@@ -151,6 +176,18 @@ impl SkinAssets for PlayerSkinAssets {
         match self.prepared.remove(&(SkinAssetKind::Font, path.to_path_buf())) {
             Some(SkinAsset::Font(bytes)) => Some(bytes),
             _ => None,
+        }
+    }
+
+    fn movie(&mut self, path: &Path) -> Result<(u32, u32), String> {
+        match self.prepared.remove(&(SkinAssetKind::Movie, path.to_path_buf())) {
+            Some(SkinAsset::Movie(decoder)) => {
+                let info = decoder.info();
+                self.movies.insert(path.to_path_buf(), decoder);
+                Ok((info.width, info.height))
+            }
+            Some(SkinAsset::Unplayable(reason)) => Err(reason),
+            _ => Err(MOVIE_NOT_READ.to_owned()),
         }
     }
 }
@@ -323,16 +360,27 @@ const SKIN_VERSION: &str = concat!("R-BMS ", env!("CARGO_PKG_VERSION"));
 /// One frame of a document with its first stage behind it: every object prepared, the skin's Lua
 /// asked everything this frame will ask of it, and nothing drawn yet.
 struct PreparedDocument<'a> {
+    /// Which screen the document draws.
+    screen_type: i32,
     screen: &'a SkinScreen,
     /// The frame the objects were prepared against, with no interpreter in it: drawing reads what
     /// the skin's Lua answered out of `prepared`.
     frame: SkinFrame<'a>,
     prepared: PreparedFrame,
+    /// The players of the screen's movies, which are brought up to the frame's clock before it is
+    /// drawn.
+    movies: &'a RefCell<MoviePlayers>,
 }
 
 impl PreparedDocument<'_> {
     /// The second stage: draws what was prepared onto `r`.
+    ///
+    /// The screen's movies are handed their frames first. Preparing is what starts a movie, and
+    /// what it is started at is the clock this frame was prepared against, so a movie's first frame
+    /// can be on show on the very frame that started it when it has been decoded by now, and is on
+    /// show on a later one when it has not.
     fn draw<R: Renderer>(&self, r: &mut R) {
+        self.movies.borrow_mut().show(self.screen_type, self.screen, r, self.frame.now_us);
         with_render_ctx(|ctx| self.screen.draw_prepared(ctx, r, &self.frame, &self.prepared));
     }
 
@@ -395,7 +443,8 @@ struct PendingScreen {
 
 impl PendingScreen {
     /// Starts reading every file `document` draws from: the fonts it names, and the image sources
-    /// its objects reference -- not the ones it only declares.
+    /// its objects reference -- not the ones it only declares. A source that is a movie is opened
+    /// rather than decoded.
     ///
     /// A file that is uploaded already is held where it is, and a worker is only asked whether it
     /// has been written since ([`SkinAsset::Unchanged`]).
@@ -411,6 +460,7 @@ impl PendingScreen {
             requests.push(((SkinAssetKind::Image, path.to_path_buf()), known));
         }
         requests.extend(document.fonts.values().map(|path| ((SkinAssetKind::Font, path.clone()), None)));
+        requests.extend(referenced_movie_files(document).into_iter().map(|path| ((SkinAssetKind::Movie, path.to_path_buf()), None)));
         let cancel = Arc::new(AtomicBool::new(false));
         let pool = spawn_skin_asset_decode(requests, Arc::clone(&cancel));
         PendingScreen { build, pool, ready: BTreeMap::new(), stamps: BTreeMap::new(), pins, cancel }
@@ -645,6 +695,9 @@ pub(crate) struct SkinScreens {
     /// What the skin asked of the clusters during the frame that ended last, waiting for the screen
     /// that owns each.
     requests: RequestQueue,
+    /// The players of the movies the compiled screens draw from. Behind a cell for the reason
+    /// `input` is: a frame is handed its movies' frames while it is drawn.
+    movies: RefCell<MoviePlayers>,
 }
 
 impl SkinScreens {
@@ -690,6 +743,7 @@ impl SkinScreens {
         };
         let mut assets = PlayerSkinAssets::new(std::mem::take(&mut pending.ready));
         let compiled = SkinScreen::build_shared(r, text, document, &mut assets, &mut self.textures);
+        self.movies.get_mut().adopt(screen, &compiled, assets.into_movies());
         self.stamps.append(&mut pending.stamps);
         pending.unpin(&mut self.textures);
         self.sweep(r);
@@ -707,8 +761,10 @@ impl SkinScreens {
     }
 
     /// Let go of one screen's compiled document and of whatever was still being read for it. The
-    /// textures it held stay uploaded until the next [`SkinScreens::sweep`].
+    /// movies it was playing are stopped first. The textures it held stay uploaded until the next
+    /// [`SkinScreens::sweep`].
     fn let_go<R: Renderer>(&mut self, r: &mut R, screen: i32) {
+        self.movies.get_mut().let_go(screen);
         if let Some(mut stale) = self.built.remove(&screen) {
             stale.screen.release_shared(r, &mut self.textures);
         }
@@ -889,6 +945,26 @@ impl SkinScreens {
     /// Whether one screen's document is still having its files read.
     pub(crate) fn is_pending(&self, screen: i32) -> bool {
         self.pending.contains_key(&screen)
+    }
+
+    /// How many movies the compiled screens are having decoded right now.
+    #[cfg(test)]
+    pub(crate) fn movies_playing(&self) -> usize {
+        self.movies.borrow().playing()
+    }
+
+    /// When the frame of each playing movie that is on show is due, measured from the movie's start
+    /// ([`MoviePlayers::frames_on_show`]).
+    #[cfg(test)]
+    pub(crate) fn movie_frames_on_show(&self) -> Vec<i64> {
+        self.movies.borrow().frames_on_show()
+    }
+
+    /// Makes every frame wait for the frame of each movie that is due at its scene time
+    /// ([`MoviePlayers::wait_for_frames`]).
+    #[cfg(test)]
+    pub(crate) fn wait_for_movie_frames(&mut self, patience: Option<Duration>) {
+        self.movies.get_mut().wait_for_frames(patience);
     }
 
     /// Everything one screen's document reported while it compiled, for the tests that say why a
@@ -1274,7 +1350,7 @@ impl AppShared {
         self.skin_screens.keep_calls(host.take_calls());
         let prepared = prepared.ok()?;
         self.skin_screens.keep_input_map(screen, compiled.input_map(&prepared));
-        Some(draw(&PreparedDocument { screen: compiled, frame, prepared }))
+        Some(draw(&PreparedDocument { screen_type: screen, screen: compiled, frame, prepared, movies: &self.skin_screens.movies }))
     }
 
     /// Offers one mouse event at `at` to the skin the last frame was drawn with, and answers whether
@@ -1562,6 +1638,8 @@ impl AppShared {
 
 #[cfg(test)]
 mod font_page_tests;
+#[cfg(test)]
+mod movie_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
