@@ -1,6 +1,30 @@
 # B4. beatoraja 선택·결정·결과·코스 결과·키 설정·스킨 설정 화면의 스킨 계약과 화면 수명주기
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 4(결과와 코스 결과) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 5(선곡) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 5 반영 사항 (2026-10-10)
+
+songlist 재작성, 선곡 상태 모델, 선곡 입력 키 표와 장면 수명, 패널 1~3 과 옵션 이벤트, 호스트 군집 F·H(선곡)·E, 슬라이더 쓰기와 편집 텍스트, 선곡 사운드, 스킨 위 시스템 오버레이를 넣은 뒤의 상태다.
+
+- (W5-6) b4-screens.md §1.6 선택 행: '프리뷰 프로세서 기본곡으로 등록, 루프 재생'에 R-BMS 구현을 추가합니다. select 사운드가 3초 이상일 때만 BGM으로 루프하며 짧으면 곡 시작 효과음으로 유지합니다. 미리듣기 소리 중에는 레벨 0으로 내려 루프를 유지하고, 미리듣기가 빠질 때 복귀합니다. 화면 이탈(on_exit)에서 정지합니다.
+- (W5-6) b4-screens.md §1.6 결과·코스 결과 행: '루프 여부 audioConfig.loopResultSound'를 R-BMS audio.loop_result_sound / loop_course_result_sound(기본 false, settings.ron 전용)로 대응한다고 적습니다. 내장 화면 이탈 시 루프하던 cue도 정지합니다.
+- (W5-1) b4-screens.md 상단에 '웨이브 5 반영 사항' 추가: §2.2-2 의 'listoff 가 더 짧으면 배열 범위를 넘는다' 에 R-BMS 는 짧은 쪽까지만 슬롯으로 삼고 경고한다는 주석. §2.3 에 len 0 이면 그리지 않는다는 주석
+- (W5-1) b4-screens.md §2.7: 원본 확인 사항 추가 — 제목·트로피·램프·라벨은 draw 플래그를 확인하지 않고 마지막 prepare 의 region·color 로 그려진다(SkinImage.draw(sprite, offsetX, offsetY), SkinBar.drawText). 바 이미지와 레벨은 막대마다 prepare 를 다시 하고(조건 재평가) draw 를 확인한다. 한 번도 배치되지 않은 부품은 초기 color(0,0,0,0)이라 그려지지 않는다
+- (W5-1) b4-screens.md §2.11: 원본 확인 사항 추가 — SkinDistributionGraph.draw 는 SkinObject.draw 를 거치지 않고 sprite.draw 를 직접 불러 색·블렌드·필터 타입을 설정하지 않으므로, songlist 안의 그래프는 직전에 그려진 바 이미지의 배치 상태로 그려진다(Skin.SkinObjectRenderer 의 color/blend/type 는 지속 상태)
+- (W5-1) b4-screens.md §2.2-2: 바 imageset 의 타이머는 '타이머가 지정된 첫 이미지'의 것이고 cycle 은 '처음 발견한 이미지'의 것(JsonSelectSkinObjectLoader.java:57-62)이라는 구분과, imageset 의 첫 이미지(인덱스 0)가 없으면 SkinBar.prepare 에서 그 슬롯의 draw 가 꺼져 슬롯 전체가 그려지지 않는다는 점(SkinImage.prepare 가 값 0 으로 currentImage 를 구함) 추가
+- (W5-1) b4-screens.md §2.6 level 행: 레벨 숫자의 로더 규칙 보강 — 음수 이미지(mimage) 없음, 패딩은 문서 값이 아니라 d > 10 이면 2·아니면 0, value.ref 만 읽고 value 함수는 무시, offsets 없음(JsonSelectSkinObjectLoader.java:180-198)
+- (W5-1) b4-screens.md §2.9: 휠 누적 계산 보강 — remaining 은 (int)max(0, duration - l) / angle 의 정수 나눗셈이라, 같은 밀리초 안의 두 번째 노치나 한 프레임에 2노치가 들어올 때만 2칸 누적(30ms, angle 15)이 된다. 10ms 뒤의 두 번째 노치는 다시 1칸(120ms)
+- (W5-5) b4-screens.md §3.7: R-BMS 대응 추가 — WriteText{30} 은 Select 큐에서 SelectState::search_for 가 받아 기존 내장 검색(start_search, apply_search)을 호출한다(공백 무시, 곡 탭으로 전환, 검색 상자가 열린 상태). 원본은 SearchWordBar 를 만들어 루트로 이동하므로 화면 의미가 다르다. 원본의 Esc 는 TextField 가 처리하지 않아 MusicSelectInputProcessor 의 main.exit() 로 새고 dispose 에서 commit 되지만, R-BMS 는 Esc 를 취소로 하고 입력 중 키를 Stage 로 보내지 않는다. 원본 poll 은 textmode 에서 키 폴링을 멈추고 NUM0~9·Enter 만 막으며 F키·방향키·Esc 는 통과시킨다
+- (W5-2) b4-screens.md 상단 반영 사항: §3.9 대응 — R-BMS 는 updateBar 대신 select_items + SelectBar 모델을 쓰고, 종류 대응은 ALL SONGS = FolderBar, 표 = TableBar, 표 레벨 = HashBar, 코스 탭 = GradeBar. 폴더 램프 집계는 updateFolderStatus 식 그대로(모드 필터만, 표 자체는 집계 없음). 배너·스테이지 파일은 목록 전체 선로딩이 아니라 커서 곡만 워커에서 디코드
+- (W5-2) b4-screens.md §3.2: 3번 항목 옆에 'BACKBMP 는 선곡에서 갱신되지 않고 마지막 setBMSFile 의 것이 남는다(BMSResource.java:66-95, MusicSelector.java:636-644). R-BMS 도 chart_path 기준으로 같은 규칙'을 추가
+- (W5-3a) b4-screens.md §3.2·§3.3(타이머)과 §1.5 표: 원본 근거는 맞음. 상단 반영 사항에 '선택 화면의 STARTINPUT 은 입력 잠금이 아니다(input() 은 skin.input 과 무관하게 매 ms 호출)'를 명시하고, R-BMS 구현 위치(skinned.rs run_scene_timers)와 '패널 타이머 21~23·31~33 은 W5-3b'를 추가
+- (W5-3a) b4-screens.md §3.5(키 매핑, 지시문의 '§3.3 키 표'): 상단 반영 사항에 R-BMS 대응표 추가 — PLAY=select_enter, PRACTICE=Practice Stage(코스는 플레이), AUTO=미구현(에지만 소비), REPLAY=PLAY(슬롯 없음), NEXT_REPLAY=무동작, FOLDER_CLOSE=select_back(루트는 정렬, 검색 중은 검색 종료, 코스 탭은 무동작), NUM1/2/3/0=모드 필터/정렬/LN 모드/검색 상자, F9=즐겨찾기, NUM4·6~9·F8·F10~F12 미대응, F2·F3·ESC·LEFT 는 R-BMS 동작 우선(E3). 키 표 선택은 musicselectinput 설정 대신 현재 모드에 스크래치가 있는지로 정함(없으면 POPN_9K 표)
+- (W5-3a) b4-screens.md §2.9: 상단 반영 사항에 '키보드 방향키는 E3 대로 누를 때마다 즉시 1칸이며 슬라이드·홀드 반복·슬라이드 중 탭 무시를 따르지 않는다. 스크래치 키와 휠만 BarScroller(300/50ms, 휠 2칸 큐)를 탄다. 아날로그 스크롤 버퍼 없음. 휠의 소수 줄은 누적(원본은 프레임마다 절삭 후 리셋)' 추가
+- (W5-3a) b4-screens.md §2.10: '구현(W5-3a): 좌클릭은 폴더면 그 폴더 열기, 아니면 커서 막대 시작(커서가 폴더면 무동작). 그 외 버튼은 close. 기록 모달이 떠 있으면 모달만 닫는다' 추가
+- (W5-4) b4-screens.md §3.1·§3.10: 선곡 타이머 172~174 의 R-BMS 대응은 IrBrowser::timers()(접근 중에만 begin)이며 Stage 의 타이머 드라이버 연결이 남았음을 적는다.
+- (W5-3b) b4-screens.md 상단: '웨이브 5 반영 사항(W5-3b)' 추가 — §3.4 패널 조건과 §3.5 패널 1~3 키 표는 원본대로 구현. §3.6 이벤트 표의 R-BMS 대응을 기록: 구현 = 11, 12, 312, 13, 14, 15, 16, 315, 19/316/317/318, 40, 42, 43, 54, 55, 57, 72, 74, 75, 77, 78, 341, 90, 308, 330~332, 340, 343, 352, 353. 무동작 = 10, 17, 59, 73, 79, 89, 210~213, 321~324, 342, 344, 350, 351, 360, 361, 400
+- (W5-3b) b4-screens.md §3.6: 43(option2p)은 R-BMS 에서 42 와 같은 설정을 바꾸고, 랜덤 순환은 8종(% 10 이 아니라 % 8)이라는 차이를 주석으로 추가
+
 
 ## 웨이브 4 반영 사항 (2026-10-10)
 

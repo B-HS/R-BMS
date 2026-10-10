@@ -1,6 +1,6 @@
 # 스킨 호환 조사 — 색인
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 4(결과와 코스 결과) 완료 · 기준 커밋 `9ce92bb` · 레퍼런스 체크아웃 HEAD `8320241d`
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 5(선곡) 완료 · 기준 커밋 `9ce92bb` · 레퍼런스 체크아웃 HEAD `8320241d`
 > 작업 체크리스트는 `docs/PROCESS.md` "레퍼런스 형식 Lua 스킨 완전 호환과 기본 스킨 교체" 절이다.
 
 이 폴더는 외부 풀 Lua 스킨(ModernChic)을 R-BMS 가 수정 없이 읽어 레퍼런스 구현(beatoraja)과 같게 그리기 위한 조사 결과 전문이다. 조사자 14개 + 종합 1개 + 비판 1개(Workflow `wf_43ad1f8d-42b`, 에이전트 16개, 약 840만 토큰)의 산출물이며, **같은 탐색을 다시 하지 않기 위해** 저장한다.
@@ -88,3 +88,4 @@
 | 2026-10-10 | 웨이브 3A | `r2`, `r3`, `v1`, `99`, `b5`, `b1`, `b2`, `m4`, `00`, `r1`, `m5`, `b3`, `m1` 상단 "웨이브 3A 반영 사항"(`v1` 에는 리뷰어의 화면 대조 포함) | prepare/draw 2단계와 `SkinHost` 직접 그리기, `FrameData`(능력별 프레임 데이터), 조건 의미론(내장·스킨 옵션·미지 op, 정적 1회 평가, 음수 타이머), 참조 이미지(-100~-111), 음수 크기 뒤집기, 이미지 인덱스 공간, 값 없음 센티널, 슬라이더·그래프 비클램프, TTF 텍스트(정렬·overflow·그림자·물리 픽셀 래스터·다국어 폴백), judgegraph·bpmgraph 재작성, 타이머 함수 프레임당 1회, 앱 `skin_host/`(군집 A·I·M) |
 | 2026-10-10 | 웨이브 3B | `r3`, `b4`, `m5`, `99`, `00`, `v1`, `r2`, `b2`, `v1` 상단 "웨이브 3B 반영 사항" | 텍스처 관리자(`skin_render/textures.rs`: 참조 source 만 디코드, `SkinTexturePool`, 화면당 RGBA 1 GiB 예산, 화면 이탈 해제, 디버그 패널 `SKIN TEX` 줄), 문서가 오는 동안 장면 시계 정지, Decide Stage(`stage/decide.rs`, `stage/scene_life.rs`: STARTINPUT 1·FADEOUT 2, 건너뛰기·취소, 백그라운드 로드), `skin_host/overview.rs`(곡 메타·노트 분포·속도 변화). 실측: decide 3장 11 MB, result 12장 134 MB, musicselect 11장 170 MB, play7 22장 138 MB |
 | 2026-10-10 | 웨이브 4 | `99`, `b4`, `b3`, `b5`, `r3`, `00`, `b2`, `b1`, `m5`, `r2`, `v1`, `m1` 상단 "웨이브 4 반영 사항" | 스킨 입력(`skin_render/input.rs`: z 역순 클릭, click 0~3, 슬라이더 드래그, `SkinAction`), 이벤트 분배(`skin_host` 의 `dispatch_calls`·`skin_requests`), libGDX 키 질의, gauge 칸 선택식과 결과 차오름, gaugegraph·timingdistributiongraph·judgegraph type 1·2, 엔진의 전 게이지 종류 이력(500ms)·판정별 early/late·타이밍 분포, Result·CourseResult Stage(타이머 150~152, 입력 잠금, FADEOUT, 게이지 종류 전환), 호스트 군집 B·G·H·E 일부(`ResultSnapshot`), 효과음 버스와 스킨 `audio_play` |
+| 2026-10-10 | 웨이브 5 | `b4`, `99`, `r3`, `m6`, `r2`, `m4`, `v1`, `00`, `b2`, `b5` 상단 "웨이브 5 반영 사항" | songlist(`skin_render/songlist/`: `SongBars`, 원형 인덱스, 패스별 그리기, 스크롤 보간, `BarScroller`, 막대 클릭), 선곡 모델(막대 종류·램프·레벨·라벨·트로피·폴더 분포, 내장 뷰와 곡 바를 한 모델에서), 선곡 키 표(`stage/select/keys.rs`)와 패널(`panel.rs`)·옵션 이벤트(`events.rs`), 호스트 군집 F·H·E, 슬라이더 쓰기(`skin_host/writers.rs`)와 편집 텍스트·IME, 선택 BGM 루프와 미리듣기 전환, 시스템 오버레이(`overlay.rs`)와 단축키 안내 |

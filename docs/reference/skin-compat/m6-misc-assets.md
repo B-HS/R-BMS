@@ -1,6 +1,13 @@
 # M6 조사 보고서: ModernChic 키 설정 · 스킨 선택 스킨, 사운드, 전체 자산
 
-> 최종 갱신 2026-10-09 · 대응 단계: L1 조사(구현 전) · 기준 커밋 `9ce92bb` · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 5(선곡) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 5 반영 사항 (2026-10-10)
+
+songlist 재작성, 선곡 상태 모델, 선곡 입력 키 표와 장면 수명, 패널 1~3 과 옵션 이벤트, 호스트 군집 F·H(선곡)·E, 슬라이더 쓰기와 편집 텍스트, 선곡 사운드, 스킨 위 시스템 오버레이를 넣은 뒤의 상태다.
+
+- (W5-6) m6-misc-assets.md §10: 사운드 세트는 스킨이 아니라 audio.sound_folder(원본 soundpath/bgmpath에 대응)로 정해지므로 ModernChic Sound/는 사용자가 폴더로 지정할 때만 쓰입니다. 이 폴더에는 select.*가 없어 BGM 루프는 생기지 않습니다.
+
 
 조사 대상: `/Users/hyunseokbyun/Downloads/ModernChic` (이하 MC), 비교 기준: `/Users/hyunseokbyun/development/beatoraja` (이하 BJ, 2026-10-07 커밋 8320241d 기준의 포크, LuaJ 사용).
 표기: `MC:파일:줄` = ModernChic 파일, `BJ:경로:줄` = beatoraja 소스(`src/bms/player/beatoraja/` 기준). 미확인은 "미확인"으로 표시.

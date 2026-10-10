@@ -1,6 +1,23 @@
 # b5. beatoraja 속성 id 전수 목록과 R-BMS 대조
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 4(결과와 코스 결과) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 5(선곡) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 5 반영 사항 (2026-10-10)
+
+songlist 재작성, 선곡 상태 모델, 선곡 입력 키 표와 장면 수명, 패널 1~3 과 옵션 이벤트, 호스트 군집 F·H(선곡)·E, 슬라이더 쓰기와 편집 텍스트, 선곡 사운드, 스킨 위 시스템 오버레이를 넣은 뒤의 상태다.
+
+- (W5-5) b5-properties.md §5-A 와 §6: 쓰기 가능 id 표에 R-BMS 열 추가 — rate 1 선곡 Stage, 7 없음(스킨 선택 화면 없음), 8 결과 화면만, 17/18/19 즉시 config.audio.system/key/bg, 20 없음(연습은 별도 화면), 문자열 30 선곡 Stage. b5 §12 의 R-BMS 열도 갱신
+- (W5-2) b5-properties.md §15·§17(군집 F): 원천을 'SelectState.bars(BarList)의 SelectBar 와 cursor(shared)'로 명시하고, 300·320~330 은 SelectBar.distribution.lamps, 선택 막대 종류 옵션은 SelectBar.kind, 클리어 상태 옵션은 SelectBar.lamp 에서 읽는다고 적음. 호스트 연결(SelectDraw·FrameInputs 필드 추가)은 W5-4
+- (W5-4) b5-properties.md §17 군집 표 F 행: R-BMS 현황을 '구현(W5-4): SelectShown 스냅샷(select/shown.rs)과 AppShared::select_shown(select/bridge.rs)이 ScreenHost::show_select 로 넣음. 패널·모드 필터·선택 리플레이·코스 정보는 Stage 연결 대기'로. H 행: 선곡분은 IrBrowser(접근 중/완료/실패, 순위, 받은 행 수, 램프별 수, timers())로 구현, 랭킹 행·라이벌은 값 없음. E 행: SettingsView 로 선곡 설정 표시 인덱스 구현.
+- (W5-4) b5-properties.md §3·§4·§5-A·§5-B·§6·§9 의 R-BMS 열: NUMBER 12·310~313·77~79·243~249 등과 선곡 옵션·RATE 1·8·110~115·140~147·FLOAT 85~89·122·135·157·183·1102·1115·1310 대응 이미지 인덱스·STRING 60~62·150~159·200~219 를 구현으로 갱신하고, 값 없음 목록은 위 leftovers 와 같게 적는다.
+- (W5-4) b5-properties.md §16 표: 선곡에서 RATE 140~147 은 선택 막대 점수 기준(createJudgeRate: 판정 수/곡 노트 수, 147 은 EX/노트/2)이며 R-BMS 는 점수가 가진 notes 를 분모로 씀(LN 모드에 따른 SongData 노트 수와 다를 수 있음)을 덧붙임.
+- (W5-3b) b5-properties.md §8(이벤트 전수 표): 각 이벤트 행에 R-BMS 대응 필드 열 추가 — 40 play.gauge, 42·43 play.random, 54 play.lane_option, 55 play.fix_hispeed, 57 play.hispeed, 72 display.bga, 74 judge.offset_ms, 75 judge.auto_offset, 77 judge.target, 78 judge.gauge_auto_shift, 341 judge.bottom_shiftable_gauge, 308 judge.ln_mode, 330~332 play.enable_cover/lift/hidden, 340 judge.judge_algorithm, 343 audio.guide_se, 352 play.constant_speed, 353 play.legacy_note
+- (W5-3b) b5-properties.md §9(이미지 인덱스) 또는 §15 격차 표: 343(guidese)이 값 없음에서 audio.guide_se 읽기로 바뀜. 197/1197/1200/1203 리플레이 슬롯 옵션은 저장된 리플레이 수만큼 참
+- (리뷰 수정) b5-properties.md §15: 이미지 인덱스 12(sort)는 번호 없는 정렬(Default, Duration, LastUpdate, Rival*)에서 0 을 답합니다. 근거는 Config.sort 와 PlayerConfig.sortid 가 따로이고 songbar_sort(312)가 sortid 만 옮긴다는 것(EventFactory.java:198-212, MusicSelector.java:533-539)
+- (리뷰 수정) b5-properties.md §15: 옵션 1205~1208 은 선택 슬롯이 Some(slot) 일 때만 참이고, 폴더·리플레이 없는 곡·코스는 전부 거짓입니다(MusicSelectCommand.java:25-35)
+- (리뷰 수정) b5-properties.md §17: 문자열 10·12 의 군집 분배에 선곡(F)을 군집 A 앞에 추가합니다. 폴더 바는 선곡 군집이, 곡 바는 군집 A 가 답합니다
+- (리뷰 수정) b5-properties.md §3~§6: 선곡에서 군집 A 의 값 출처를 적습니다 — 90·91·176·177·74·1163·1164·170~175·178·179·1177 은 songdb 행, 92 는 단일 BPM 차트만, 350~353 과 변속 차트의 92 는 미공급, 190~195 는 선곡에서 미공급
+
 
 ## 웨이브 4 반영 사항 (2026-10-10)
 

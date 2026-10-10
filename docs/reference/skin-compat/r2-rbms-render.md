@@ -1,6 +1,19 @@
 # R2 — R-BMS 렌더 계층(crates/rbms-render, GPU 백엔드) 현황과 격차
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 4(결과와 코스 결과) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 5(선곡) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 5 반영 사항 (2026-10-10)
+
+songlist 재작성, 선곡 상태 모델, 선곡 입력 키 표와 장면 수명, 패널 1~3 과 옵션 이벤트, 호스트 군집 F·H(선곡)·E, 슬라이더 쓰기와 편집 텍스트, 선곡 사운드, 스킨 위 시스템 오버레이를 넣은 뒤의 상태다.
+
+- (W5-1) r2-rbms-render.md §5.2 songlist 행: '슬롯 i 는 rows[sel - center + i], 바는 이미지 셀 0 고정, 램프는 단색 사각형' 서술을 교체 — 원형 인덱스, imageset 종류별 이미지, 텍스트 11·레벨 7·램프 11x3·트로피 3·라벨 5·분포 그래프, 패스별 그리기, 스크롤 보간 구현(songlist.rs, songlist/bars.rs, songlist/build.rs). '없다'로 적힌 항목(바 종류별 이미지, 램프 이미지, 레벨 숫자, trophy, rivallamp, 분포 그래프, 바 애니메이션) 삭제
+- (W5-1) r2-rbms-render.md §7.1 FrameData 표: bars 의 타입을 SongBars { bars: &[SongBar], selected, rival, folder_lamps, ln_mode, scroll: BarScroll, options_open } 로 갱신하고 SongBar·BarKind·BarTrophy·BarDistribution·BarScroll·BarScroller 의 정의 위치(skin_render/songlist/bars.rs, frame 모듈에서 재수출)를 추가
+- (W5-1) r2-rbms-render.md §5.3·§8(입력) '마우스 클릭 디스패치' 행: 곡 바 클릭이 SkinAction::SelectBar { slot, offset, bar } / CloseBar 로 판정됨을 추가(clickable 순서, 스크롤 전 위치, 직전 prepare 기준). 실행은 앱(W5-3)
+- (W5-1) r2-rbms-render.md §6(텍스트)·§9(성능) 'songlist 문자열: fit_text 가 매 프레임 String 생성' 과 'songlist 라벨만 말줄임 절단' 삭제 — 제목은 text::draw_line(TTF 조판, overflow 는 text 정의대로)으로 그리고, 줄 텍스처를 막대 단위로 보관해 한 칸 이동에 한 줄만 조판
+- (W5-1) r2-rbms-render.md '내장 팔레트·행 색 차용' 행에서 songlist 라벨·램프 색 항목 삭제(SelectRow 색을 더는 쓰지 않음)
+- (W5-5) r2-rbms-render.md §5: Body::TextInput 이 실제 본체가 됐음(text_input.rs, FrameData.entry: Option<TextEntry>, draw_resolved 의 index 인자, SkinScreen::text_entry_start, SkinInputMap::text_holds). §6 에는 font/block.rs 의 TextContext::caret_x(펜 위치 기준, 첫 글리프 잉크 정렬 보정, 정렬·squeeze 반영)를 추가
+- (W5-7) r2-rbms-render.md: rbms-render 가 select::render_select_modal(r, &SelectModal) 을 공개한다고 추가. 스킨 위에서 기록 모달만 그리는 용도
+
 
 ## 웨이브 4 반영 사항 (2026-10-10)
 

@@ -1,6 +1,41 @@
 # R3 — R-BMS 앱(apps/rbms-player) 스킨 배선·화면 구성·입력 현황과 격차
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 4(결과와 코스 결과) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 5(선곡) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 5 반영 사항 (2026-10-10)
+
+songlist 재작성, 선곡 상태 모델, 선곡 입력 키 표와 장면 수명, 패널 1~3 과 옵션 이벤트, 호스트 군집 F·H(선곡)·E, 슬라이더 쓰기와 편집 텍스트, 선곡 사운드, 스킨 위 시스템 오버레이를 넣은 뒤의 상태다.
+
+- (W5-6) r3-rbms-app.md §10.1 '재생' 줄과 상단 '웨이브 4 반영 사항'의 루프 API 설명: play_loop가 SystemSoundSet::play_loop와 AppShared::play_system_sound_loop, play_result_sound, drive_select_bgm(SelectBgm 상태기계)으로 돌아왔다고 갱신합니다. AudioEngine::set_effect_level(Command::EffectLevel)이 추가됐습니다. 믹서 보이스에 level/level_target/level_step 필드가 생겼습니다.
+- (W5-1) r3-rbms-app.md §6.3: skin_screen.rs 의 select_list 가 SelectRow 를 그대로 넘기던 서술을 'select_bars 임시 변환기(SelectRow → SongBar, 폴더 여부·제목·레벨만)로 교체됨, W5-2 가 선곡 모델에서 SongBar 를 공급하도록 대체 예정' 으로 갱신. 새 액션 SelectBar/CloseBar 가 run_skin_actions 에서 무동작이라는 점 추가
+- (W5-5) r3-rbms-app.md §7.5 '텍스트 입력' 행을 구현 완료로 바꾸고 §2.1 SkinScreens.input 의 SkinInput 필드에 text: Option<TextSession>, text_writes, settings_dirty 를 추가. §7 입력 분배에 Stage::handle_key 가 skin_text_key 를 가장 먼저 부른다는 내용과 lib.rs 의 WindowEvent::Ime → skin_text_ime, App::sync_ime → AppWindow::sync_ime 를 적는다. textedit.rs 의 ImeEdit(TextEdit 는 Stage 크기 예산 때문에 늘리지 않음)와 skin_host/writers.rs 의 TextSession 을 추가
+- (W5-5) r3-rbms-app.md 상단 웨이브 4 반영 사항의 '편집 텍스트 포커스 … 뒤 웨이브다'와 W4-1 의 '텍스트 입력은 FocusText 판정만' 문장을 구현 완료로 교체. skin_screen/tests.rs 의 슬라이더 테스트가 큐 대신 config.audio 를 확인하도록 바뀜
+- (W5-2) r3-rbms-app.md 상단: '웨이브 5 반영 사항(W5-2)' 절 추가 — 선곡 목록 모델 SelectBar(lib.rs), BarList·row_of·wheel_bar(stage/select/scene.rs), ChartFacts·select_bars·course_bars(list.rs), 참조 이미지 워커 SongImages(images.rs), draw_select_skin(canvas, &SelectDraw{view, data})
+- (W5-2) r3-rbms-app.md §6.3: '공급 지점' 문단을 'SelectState::draw 가 FrameData{bars, images, bga} 를 만들어 draw_select_skin(SelectDraw) 로 넘긴다'로 교체. '행 SelectRow … 램프가 색 값이지 램프 id 가 아니다' 문장은 '행은 SelectBar 모델에서 row_of 로 내려 만들고, 모델의 lamp 는 원본 ClearType id(Option<u8>)'로 교체
+- (W5-2) r3-rbms-app.md §6.3 '공급하지 못하는 것' 표: '바 종류 구분' 행 → '모델에 BarKind 로 구분됨(Song·Folder·Table·Course). Executable·RandomCourse·Command·Search·곡 없음은 원천 없음'. '코스 바' 행 → '코스 탭이 Course{complete} 바로 공급됨(구성 곡 특성 포함). 코스 램프·트로피는 로컬 코스 기록이 없어 미공급'. '배너와 스테이지파일을 별도 이미지로' 행 → '스킨 장면에서 -100·-102 를 커서 곡 기준으로 따로 공급, -101 은 마지막 로드 차트의 BACKBMP(원본과 같은 규칙). 내장 화면은 기존대로 1장'. '라이벌' 행에 'SongBars.rival 은 항상 false' 추가
+- (W5-2) r3-rbms-app.md §6.3 타이머 표 아래: 'SONGBAR_CHANGE(11)가 장면 시작 시 켜지지 않아 ModernChic 의 스테이지 파일·배너·제목이 첫 커서 이동 전에는 숨겨진다(W5-3a)' 추가
+- (W5-2) r3-rbms-app.md §8.6 테스트 표: stage/select/bars_tests.rs 14건과 capture.rs 의 the_browser_of_a_skin_pack_named_by_the_environment_is_captured_over_a_scanned_library 추가
+- (W5-3a) r3-rbms-app.md §6.3 타이머 표: '매 프레임 skin_select_timers.update → SONGBAR_MOVE/MOVE_UP/MOVE_DOWN/SONGBAR_CHANGE' 행을 '스킨 장면에서 stage/select/skinned.rs 의 run_scene_timers 가 STARTINPUT(1, input 경과 뒤), SONGBAR_CHANGE(11, 첫 입력 프레임 on, 커서 이동·목록 재구성·스크롤바 쓰기·LN 모드 변경 시 재시작), IR_CONNECT 172~174(ranking_cache 상태)를 켠다. 10/12/13/14 는 켜지 않는다. SelectTimers 는 호출부가 없다(타입 삭제는 W6-8)'로 교체
+- (W5-3a) r3-rbms-app.md §6.3 '공급하지 못하는 것' 표: TIMER_STARTINPUT 행을 '구현(W5-3a)'으로 바꾸고 괄호의 'skin.input 이후 입력 허용'을 '타이머만 켠다. 원본 선곡은 입력을 막지 않는다(B:MainController.java:495-498)'로 정정. IR 상태 타이머는 '구현(패널이 채운 캐시 기준, 자동 조회 없음)', 모드 필터·LN 모드·정렬은 '키 1/2/3 과 곡 바 우클릭(루트)에서 구현, id 공급은 W5-4'로
+- (W5-3a) r3-rbms-app.md §7.1 분배 표와 §7.4 끝 문단: 'R-BMS select 는 레인 키와 START/SELECT 개념이 없다'를 '스킨 장면에서는 원본 키 표(stage/select/keys.rs)를 프레임당 1회 상태로 읽는다. 키보드 레인 키와 패드 모두 key_index_pressed 로 읽고, 프레임 사이의 탭은 handle_key/handle_pad 가 래치한다. 휠은 handle_scroll → BarScroller, 곡 바 클릭은 AppShared::take_skin_bar_presses 로 Stage 가 실행한다. 스킨 없는 선곡은 기존 이벤트 방식 그대로'로
+- (W5-3a) r3-rbms-app.md 상단 웨이브 3B 반영 사항의 '스킨을 기다리는 동안 Select 는 내장 화면을 그렸다가 스킨으로 바뀐다'와 사양 웨이브 3 구현 메모의 같은 문장: 'Select 는 스킨을 기다리는 동안 검정을 그리고 입력을 받지 않는다. 10초 한도 초과나 읽기 실패 시 내장 화면. 스킨 없이 프레임을 그린 뒤 스킨이 처음 그려지는 프레임에 장면 시계 0'으로
+- (W5-4) r3-rbms-app.md §6.3(선곡 어댑터): 구 SelectViewState 의 답은 군집이 모르는 id 의 폴백일 뿐이며, 선곡 프레임은 AppShared::select_shown(skin_host/select/bridge.rs)→SelectShown::of(순수)→ScreenHost::show_select 로 군집 F·E·H 에 전달된다고 갱신. FrameInputs.select 필드와 선곡에서도 IR 이름(1020·1021)을 호스트에 싣는 점 추가.
+- (W5-3b) r3-rbms-app.md 상단: '웨이브 5 반영 사항(W5-3b)' 추가 — stage/select/panel.rs(PanelState, show_panel, panel_keys, press_act)와 stage/select/events.rs(EVENTS 표, step_setting, carry_out_skin_events, run_event) 신설. SelectState 에 panel, options_dirty, autoplay_put_back 필드. SelectDraw 에 panel: u8 과 mode_filter: Option<Mode>. 갱신 순서는 skin_input_frame → carry_out_skin_events → settle_option_changes
+- (W5-3b) r3-rbms-app.md §6.3 타이머 표: '옵션 오버레이 열고 닫을 때 PANEL1_ON, PANEL1_OFF (app_options.rs:207-211)' 행 삭제. 'START/SELECT/숫자 5 홀드로 패널 n 이 바뀔 때 PANELn_ON(21~23)과 PANELn_OFF(31~33)를 setPanelState 대로 전환(stage/select/panel.rs show_panel)'으로 교체
+- (W5-3b) r3-rbms-app.md §6.3 '공급하지 못하는 것' 표: '패널 2·3' 행과 '패널 내 개별 옵션 값' 행을 구현됨으로 변경(옵션 21~23 은 SelectShown.panel, 값은 skin_host/options.rs SettingsView, 쓰기는 events.rs). 남는 것은 duration, 커스텀 판정 토글, 판정 영역, 마크 노트, BPM 가이드, 지뢰 모드, 자동 저장 조건, HS 자동 조정, constant
+- (W5-3b) r3-rbms-app.md §6.3 '리플레이 슬롯 4개와 선택된 슬롯' 행: '슬롯 n = 그 곡의 리플레이 있는 기록 중 n 번째 최신(events.rs replay_in_slot, bridge.rs replays_stored). 선택된 슬롯 모델은 없음(항상 0)'으로 갱신
+- (W5-3b) r3-rbms-app.md §6.3 옵션 패널 행 서술: F1 오버레이 11행은 시스템 오버레이로 유지되고 스킨 패널 타이머와 무관함을 명시(app_options.rs 모듈 문서)
+- (W5-3b) r3-rbms-app.md §7.4(레퍼런스 select 키 계약): 패널 1~3 키 표가 구현됨. 패널 1 타깃 스크롤은 스크래치·휠·방향키로 동작하고 패널 3 DURATION 홀드는 미구현(대응 설정 없음). 숫자 6 → 키 설정, F12 → 설정 SKIN 탭 추가. 건반 5(AUTO)는 1회 오토플레이
+- (W5-3b) r3-rbms-app.md §7.5 또는 §8.6 테스트 표: stage/select/panel.rs 내부 9건, panel_tests.rs 15건, events_tests.rs 21건 추가. skinned_tests.rs 의 key_five_and_key_six_are_taken_and_start_nothing 은 key_five_plays_the_chart_by_itself_once 와 key_six_is_taken_and_starts_nothing 으로 나뉨. capture.rs 선곡 캡처에 select-panel0~3, select-panel1-stepped, select-panels-gone 추가
+- (W5-7) r3-rbms-app.md §6.3: 스킨 선곡 위 시스템 오버레이를 추가한다. SelectState::draw 가 draw_select_skin 직후 overlay.rs::draw_skin_overlays 를 불러 빈 목록 안내 카드, 검색 상자, 코스 탭 표시, 필터 패널, 랭킹 패널, 단축키 안내(guide.rs, H), 기록 모달을 1280x720 래퍼로 그린다고 적는다. 공급하지 못하는 것 표의 'IR 랭킹 … 내장 랭킹 패널로만 존재'와 '검색 텍스트 입력 … 표시용 문자열만' 행을 오버레이로 표시됨으로 바꾸고, 호스트가 search 텍스트에 빈 문자열을 답한다는 점을 명시
+- (W5-7) r3-rbms-app.md §7.2: Hot 열거가 14종에서 16종(OverlayPanel, GuideClose)이 되었고, 스킨 화면의 앱 오버레이는 hot 영역을 등록해 skin_pointer 가 물러난다는 서술로 교체. '문서가 그리는 화면은 hot 영역을 등록하지 않음'은 낡음
+- (W5-7) r3-rbms-app.md §7.4와 §7.5: R-BMS 선곡 단축키 표에 H(안내)를 추가하고 단축키 안내 항목을 구현 완료로 갱신. 키 선택은 H(충돌 없음 확인), F5~F7 은 노트북 Fn 때문에, F8·F10·F11 은 beatoraja 키라서 제외
+- (W5-7) r3-rbms-app.md §8.5 표: 옵션 오버레이, 기록 모달, IR 랭킹 패널, 필터 패널, 검색 상자, 코스 탭, 토스트·연결 점·디버그 패널 행의 선택지를 '시스템 오버레이 유지'로 확정하고 구현 위치(stage/select/overlay.rs, guide.rs, lib.rs draw_overlays)를 적는다. §8.6 테스트 표에 overlay_tests.rs 17건과 capture.rs 의 오버레이 캡처 테스트를 추가
+- (W5-7) r3-rbms-app.md 토스트·연결 점·디버그 패널 절(lib.rs draw_overlays): 선곡이 스킨 문서로 그려질 때 점은 (4,8), 디버그 패널은 (6,144) 로 옮긴다는 규칙. 내장 화면은 (CW-22,10)과 (6,6) 그대로. 토스트는 우하단 유지(하단 인셋 44)
+- (리뷰 수정) r3-rbms-app.md §6.3: 선곡 프레임의 상태 공급을 고칩니다 — 군집 A 는 SelectDraw.chart 로 받고(곡 바 = 라이브러리 엔트리 + songdb ChartFact + ChartDetail, 폴더·코스 = 빈 슬롯), 군집 F 는 BrowserLent(패널, 모드 필터, 코스, 선택 리플레이 슬롯, 커서 곡 최고 기록과 리플레이 수)로 받습니다. 최고 기록은 프레임마다가 아니라 커서·기록 수가 바뀔 때 Stage 가 읽습니다(stage/select/lent.rs)
+- (리뷰 수정) r3-rbms-app.md §7.4: 스킨 선곡의 키 계약을 고칩니다 — 화살표 위·아래는 턴테이블과 같은 유지 키 경로(BarScroller, 300ms 뒤 50ms), 숫자 4 와 건반 6 은 NEXT_REPLAY, 건반 7 은 선택 슬롯의 리플레이(없으면 플레이), 패널 키가 눌린 동안 레인 키는 내장 단축키로 내려가지 않습니다
+- (리뷰 수정) r3-rbms-app.md §11: SelectTimers(skin_select_timers)가 더는 구동되지 않는 상태로 남아 있고 W6-8 에서 지운다는 것을 적습니다
+
 
 ## 웨이브 4 반영 사항 (2026-10-10)
 

@@ -1,6 +1,14 @@
 # B2. beatoraja 스킨 객체 모델과 공통 그리기 의미론
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 4(결과와 코스 결과) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 5(선곡) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 5 반영 사항 (2026-10-10)
+
+songlist 재작성, 선곡 상태 모델, 선곡 입력 키 표와 장면 수명, 패널 1~3 과 옵션 이벤트, 호스트 군집 F·H(선곡)·E, 슬라이더 쓰기와 편집 텍스트, 선곡 사운드, 스킨 위 시스템 오버레이를 넣은 뒤의 상태다.
+
+- (W5-5) b2-object-model.md §12.6 에 R-BMS 구현 메모 추가: 편집 판정은 skin_render/text_input.rs 의 is_editable·text_writer 가 한다(event 가 있고 editable 이 없으면 편집 불가, Name 이 writer 없는 문자열이면 event 없음으로 보고 ref 의 writer 로 폴백). 입력 중에는 TextField 오버레이 대신 text 객체 자신의 폰트·배치로 입력 줄과 2px 캐럿, 밑줄 친 조합 문자열을 그린다(원본은 시스템 폰트 TextField). 캐럿은 TextContext::caret_x 로 구한다. 원본 특이점 유지: 눌린 text 를 다시 누르면 getCurrentText 로 다시 시작, writer 없는 편집 text 도 press 는 소비. 캐럿 깜박임과 가로 스크롤은 없음
+- (W5-5) b2-object-model.md §13.3·§15: 슬라이더 쓰기 적용 위치 추가 — 볼륨 17/18/19 는 writers::carry_out 이 프레임 끝에 config.audio.{system,key,bg} 에 [0,1] 클램프(NaN 은 0.5)로 반영하고 게인을 즉시 적용, 설정 파일은 마우스가 떨어졌을 때 저장(원본은 메모리에만 두었다가 종료 때 저장). 1 은 Cluster::Select 큐 → SelectState::carry_out_skin_writes. FocusText 는 SkinScreens::begin_typing 이 처리하고 commitIfOutside 는 AppShared::confirm_skin_text_outside 가 press 때 먼저 실행
+
 
 ## 웨이브 4 반영 사항 (2026-10-10)
 
