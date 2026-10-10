@@ -35,7 +35,7 @@
   - [x] CI 복구(2026-10-11) — 웨이브 1B~7B 동안 확인하지 않은 CI 실패(Ubuntu 1B~, Windows 2A~, macOS 7A~)를 고쳤다: 할당 상한(텍스트 블록·그래프·차트 길이), Windows 경로·줄바꿈·장면 시계, 느린 테스트(실행 파일 해시), 벽시계 의존 테스트. Workflow `wf_c1ed92d1-93e`·`wf_40d5eac7-aed`. run `38077937158`(`cf47348`)에서 세 OS 전부 통과, 작업당 4~8분. 이후 푸시마다 `gh run list` 로 확인한다(사양 §8, `docs/feedback/2026-10-11-ci-not-checked-after-push.md`).
 - [ ] L5. 기본 스킨 — 사양 §6 의 웨이브 8. 실행 분할: 8A(W8-0, W8-2a) → 8B(W8-2b 선곡, W8-2c 플레이, W8-2d 결과) → 8C(W8-1 죽은 설정 행·기기 로컬 경로·레터박스 기본값, W8-3 내장·설치·릴리스·제3자 고지, W8-4 폴백, W8-5 테스트 재편, W8-6 문서). 위임은 Workflow 전용, 모델은 Opus(high 이하)와 Sonnet(xhigh 이하)만 쓴다(2026-10-11 사용자 재확인: Fable 금지).
   - [x] 웨이브 8A — 선곡 키 표의 NEXT_REPLAY 제거(D8, 숫자 4 만 슬롯을 넘김)와 기본 스킨 설계서 `docs/plan/2026-10-11-default-skin-design.md`·골격(`assets/skins/rbms-default/`: 공통 Lua, 이미지 생성 스크립트, 결정 화면). Workflow `wf_38f63f0c-00f`(4 에이전트), 리뷰 major 4·minor 9 처리. 게이트: 테스트 4,812 통과·0 실패, 골든 불변. 메인이 결정 화면 캡처를 직접 확인. ModernChic Lua 136개와 대조해 복사 없음(D1).
-  - [ ] 웨이브 8B — 선곡, 플레이 SP(5/7/9)·DP(10/14), 결과·코스 결과 문서. 설계서 9절의 분할을 따른다.
+  - [x] 웨이브 8B — 선곡, 플레이 SP(5/7/9)·DP(10/14), 결과·코스 결과 문서와 통합. Workflow `wf_57262b5f-803`(10 에이전트), 화면별 리뷰 major 7·minor 21 처리. 게이트: 테스트 4,815 통과·0 실패, 골든 불변. 문서 9개 덤프 `--strict` 통과, 캡처 80장(메인이 선곡·플레이 7/9/14키·결과 확인), 이미지 93 KiB. 엔진 수정 2건(5·10키 결과의 턴테이블 역할, 선곡 op 190~195). 9키 스킨 플레이가 처음 그려짐.
   - [ ] 웨이브 8C — W8-1, W8-3~W8-6.
 - [ ] L6. 검증 — 웨이브마다 게이트(fmt, clippy `--all-targets --all-features -D warnings`, `cargo test --workspace`, `git diff --check`)와 캡처를 메인이 직접 확인한다. 최종으로 덤프 도구의 pcall 실패 0 과 화면별 캡처를 `m2`~`m5` 레이아웃과 대조한다.
 - [ ] L7. 문서·이력 — 웨이브마다 조사 문서(`r1`~`r3`, `00-synthesis`)와 이 체크리스트를 갱신하고, 마지막에 `docs/skin.md`·history·QA·HANDOFF 를 정리한다.

@@ -1,6 +1,17 @@
 # R3 — R-BMS 앱(apps/rbms-player) 스킨 배선·화면 구성·입력 현황과 격차
 
-> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 8A(기본 스킨 골격, D8 키 표) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 8B(기본 스킨 화면 전부) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 8B 반영 사항 (2026-10-11)
+
+자작 기본 스킨의 나머지 화면(선곡, 플레이 5/7/9/10/14키, 결과, 코스 결과)을 넣고 통합한 뒤의 상태다. 엔진 수정 2건(5·10키 결과의 턴테이블 역할, 선곡의 op 190~195)이 함께 들어갔다. 설계와 최종 좌표는 `docs/plan/2026-10-11-default-skin-design.md`.
+
+- (통합) 선곡의 차트 옵션: 선곡은 커서 곡의 그림이 그 프레임에 로드돼 있는지로 op 190~195 를 답한다(`stage/select/list.rs` 의 `chart_under_cursor` 가 `ReferenceImages` 를 받는다. 그림을 읽는 동안은 "없음"). 웨이브 8A 반영 사항의 "선곡에서 답하지 않는다"는 이 내용으로 대체된다. 기본 스킨은 190 으로 "NO STAGE IMAGE" 를 낸다
+- (W8-2c) 캡처 하니스(`stage/capture.rs`)에 9키 런(NINE_KEYS, play9)이 생겼다. 웨이브 8A 반영 사항의 "9키 런이 없다"는 대체된다. 환경 변수 테스트 가운데 검색 칸 입력(`the_search_box_of_a_skin_pack_named_by_the_environment_is_typed_into`, 누를 자리가 ModernChic 좌표)과 동영상(`the_movies_of_a_skin_pack_named_by_the_environment_are_captured_as_they_play`)은 ModernChic 전용이라 기본 스킨에 실패한다(W8-5 에서 일반화)
+- (통합) 결과 화면의 키: 5·10키는 `stage/result.rs` 의 FIVE_KEYS 표를 쓴다. 턴테이블 앞 = 게이지 전환, 뒤 = 같은 배치로 다시(인덱스 7·8), 인덱스 5·6 은 역할 없음. 10키의 2P 는 1P 를 되풀이한다. 이전에는 7키 표를 써서 5·10키에 누를 입력이 없었다
+- (통합) 기본 스킨 문서 9개 실측: destination decide 59, select 499, play5 190, play7 206, play9 214, play10 248, play14 280, result 148, courseresult 85. pcall 실패 0, 읽기 전용 사본에서도 같음. 프레임 비용 평균 0.04~0.10ms, 최대 0.174ms(courseresult). 이미지 합계 93,069 B
+- (통합) 남은 엔진·앱 사실: 선곡에서 표 이름·레벨(text 1001~1003)과 op 1008 이 채워지지 않는다(`skin_host/select/bridge.rs`). 선곡 위 오버레이의 정합 — `/` 와 숫자 0 이 스킨의 text 30 에 포커스를 주지 않고 앱 검색 상자를 따로 그림, 랭킹 패널이 x 972 까지만 덮음, 옵션 오버레이가 반투명, 토스트와 코스 탭 표지가 스킨 영역을 덮음. 판정 알고리즘 Score 에서 index 340 이 "없음"이고 act 340 이 움직이지 않는다. 결과에서 다시 하기·다음 곡 가능 여부를 알리는 속성이 없다
+
 
 ## 웨이브 8A 반영 사항 (2026-10-11)
 
