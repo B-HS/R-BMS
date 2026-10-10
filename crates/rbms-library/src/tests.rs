@@ -1,5 +1,7 @@
 use crate::*;
 
+const US_PER_SECOND: i64 = 1_000_000;
+
 fn samples_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../samples/preview-demo")
 }
@@ -26,6 +28,23 @@ fn compute_chart_detail_derives_notes_length_and_bpm_range() {
     assert!(d.duration_us > 0, "the sample chart has a length");
     assert!(d.bpm_min > 0.0 && d.bpm_max >= d.bpm_min, "the BPM range is populated and ordered");
     assert!(!d.density.is_empty(), "the density histogram is populated");
+}
+
+#[test]
+fn compute_chart_detail_of_a_chart_years_long_has_no_density_histogram() {
+    let path = std::env::temp_dir().join(format!("rbms_library_years_long_{}.bms", std::process::id()));
+    std::fs::write(&path, "#BPM 0.0001\n#00111:01\n#99911:01\n").expect("write the fixture chart");
+    let detail = compute_chart_detail(&path, Mode::BEAT_7K);
+    let _ = std::fs::remove_file(&path);
+    let detail = detail.expect("the chart parses");
+    assert_eq!(detail.notes, 2);
+    assert!(
+        detail.duration_us / US_PER_SECOND > rbms_chart::MAX_TABLED_SECONDS as i64,
+        "the fixture runs {} us, which is not past the bound",
+        detail.duration_us
+    );
+    assert!(detail.density.is_empty());
+    assert_eq!((detail.peak_density, detail.avg_density, detail.end_density), (0.0, 0.0, 0.0));
 }
 
 #[test]

@@ -644,3 +644,47 @@ fn defexrank_header_reaches_model_meta() {
     let m = model(b"#DEFEXRANK 130\r\n#BPM 120\r\n#WAV01 a.wav\r\n#00111:01\r\n");
     assert_eq!(m.meta.defexrank, Some(130.0));
 }
+
+#[test]
+fn tabled_second_is_the_whole_second_up_to_a_day_and_nothing_past_it() {
+    assert_eq!(tabled_second(0), Some(0));
+    assert_eq!(tabled_second(1_999_999), Some(1));
+    assert_eq!(tabled_second(-1), Some(0));
+    assert_eq!(tabled_second(i64::MIN), Some(0));
+    assert_eq!(tabled_second(MAX_TABLED_SECONDS as i64 * MICROS_PER_SECOND - 1), Some(MAX_TABLED_SECONDS - 1));
+    assert_eq!(tabled_second(MAX_TABLED_SECONDS as i64 * MICROS_PER_SECOND), None);
+    assert_eq!(tabled_second(i64::MAX), None);
+}
+
+#[test]
+fn note_density_of_a_chart_under_a_day_long_has_a_bin_for_each_of_its_seconds() {
+    let m = model(b"#BPM 1\r\n#WAV01 a.wav\r\n#00011:01\r\n#35911:01\r\n");
+    let last_us = m.timelines.iter().rev().find(|tl| tl.notes.iter().any(Option::is_some)).unwrap().time_us;
+    assert_eq!(last_us, 86_160 * MICROS_PER_SECOND, "bar 359 of a chart at one beat a minute starts 86,160 seconds in");
+    let d = note_density(&m, 0.0);
+    assert_eq!(d.bins.len(), 86_162);
+    assert!(d.bins.len() <= MAX_TABLED_SECONDS + 1);
+    assert_eq!(d.bins.iter().sum::<u32>(), 2);
+    assert_eq!(d.peak, 1.0);
+}
+
+#[test]
+fn note_density_of_a_chart_a_day_long_has_no_bins() {
+    let m = model(b"#BPM 1\r\n#WAV01 a.wav\r\n#00011:01\r\n#36011:01\r\n");
+    let last_us = m.timelines.iter().rev().find(|tl| tl.notes.iter().any(Option::is_some)).unwrap().time_us;
+    assert_eq!(last_us, MAX_TABLED_SECONDS as i64 * MICROS_PER_SECOND);
+    let d = note_density(&m, 0.0);
+    assert!(d.bins.is_empty());
+    assert_eq!((d.peak, d.avg, d.end), (0.0, 0.0, 0.0));
+}
+
+#[test]
+fn note_density_of_a_chart_whose_tempo_puts_its_last_note_years_away_has_no_bins() {
+    let m = model(b"#BPM 0.0001\r\n#WAV01 a.wav\r\n#00111:01\r\n#99911:01\r\n");
+    let last_us = m.timelines.iter().rev().find(|tl| tl.notes.iter().any(Option::is_some)).unwrap().time_us;
+    assert!(last_us / MICROS_PER_SECOND > 2_000_000_000, "the chart runs {last_us} microseconds, which is not years");
+    assert_eq!(count_playable_notes(&m), 2);
+    let d = note_density(&m, 0.0);
+    assert!(d.bins.is_empty());
+    assert_eq!((d.peak, d.avg, d.end), (0.0, 0.0, 0.0));
+}

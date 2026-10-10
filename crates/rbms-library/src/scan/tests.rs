@@ -4,6 +4,8 @@ use std::sync::atomic::AtomicU32;
 use super::*;
 use crate::songdb::SongDb;
 
+const US_PER_SECOND: i64 = 1_000_000;
+
 /// Keeps one test's fixture tree clear of another's when the suite runs them in one process.
 static FIXTURE_SEQUENCE: AtomicU32 = AtomicU32::new(0);
 
@@ -359,6 +361,27 @@ fn a_scan_caches_the_detail_panel_of_every_chart_it_parses() {
     let detail = db.detail(&normalize(&path)).expect("read the detail").expect("the scan cached a detail");
     assert!(detail.duration_us > 0, "the chart's length is integrated during the scan");
     assert!(!detail.density.is_empty(), "the density histogram is cached with it");
+}
+
+/// A chart of a few bytes whose tempo puts its last note years away is scanned like any other, and
+/// gets no histogram: one with a bin for each of its seconds would be gigabytes.
+#[test]
+fn a_chart_years_long_is_scanned_without_a_density_histogram() {
+    let fixture = Fixture::new("years");
+    let path = fixture.write("far.bms", "#BPM 0.0001\n#00111:01\n#99911:01\n");
+    let mut db = db();
+    scan(&mut db, &ScanRequest::new(fixture.roots(), false));
+
+    let stored = db.song(&normalize(&path)).expect("read the chart").expect("the chart is stored");
+    assert_eq!(stored.notes, 2);
+    let detail = db.detail(&normalize(&path)).expect("read the detail").expect("the scan cached a detail");
+    assert!(
+        detail.duration_us / US_PER_SECOND > rbms_chart::MAX_TABLED_SECONDS as i64,
+        "the fixture runs {} us, which is not past the bound",
+        detail.duration_us
+    );
+    assert!(detail.density.is_empty());
+    assert_eq!((detail.peak_density, detail.avg_density, detail.end_density), (0.0, 0.0, 0.0));
 }
 
 #[test]

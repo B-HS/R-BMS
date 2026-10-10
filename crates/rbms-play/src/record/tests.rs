@@ -183,6 +183,50 @@ fn a_failed_run_stops_logging_and_is_padded_with_zeroes_to_the_end_of_the_chart(
     assert_eq!(log.last(GaugeIndex::Normal), Some(0.0), "the result reads the padded tail as the final value");
 }
 
+/// A chart whose tempo drops to one beat a minute after two bars of notes, with its last note 997
+/// bars on: more than two days long.
+fn days_long_notes() -> Model {
+    model(
+        b"#BPM 120\r\n#RANK 3\r\n#WAV01 a.wav\r\n#00111:01010101010101010101010101010101\r\n#00211:01010101010101010101010101010101\r\n#00303:01\r\n#99911:01\r\n",
+    )
+}
+
+#[test]
+fn a_run_that_fails_a_chart_days_long_is_padded_for_a_day_and_has_no_table_of_seconds() {
+    let day_ms = rbms_chart::MAX_TABLED_SECONDS as i64 * MILLIS_PER_SECOND;
+    let mut session = PlaySession::new(days_long_notes(), SessionOptions { gauge: GaugeKind::Hard, ..Default::default() });
+    assert!(session.play_time_ms() > 2 * day_ms, "the fixture runs {} ms, which is not days", session.play_time_ms());
+    let mut frame_us = 0;
+    while !session.is_failed() {
+        session.tick(SessionClock::at(frame_us), &mut NullSink);
+        frame_us += FRAME_US;
+        assert!(frame_us < day_ms * 1_000, "an unplayed HARD run fails in the opening bars");
+    }
+    let failed_at_ms = (frame_us - FRAME_US) / 1_000;
+
+    let record = session.record();
+    let mut zeroes = 0;
+    let mut at_ms = failed_at_ms;
+    while at_ms < day_ms {
+        zeroes += 1;
+        at_ms += GAUGE_LOG_INTERVAL_MS;
+    }
+    assert_eq!(record.failed_at_ms, Some(failed_at_ms));
+    assert_eq!(record.gauge_log.len(), samples_by(failed_at_ms) + zeroes, "the zeroes stop a day in, not at the end of the chart");
+    assert!(record.gauge_log.len() <= samples_by(day_ms));
+    assert_eq!(record.seconds, JudgeSeconds::default(), "a chart longer than a day has no row for each of its seconds");
+}
+
+#[test]
+fn the_judge_seconds_of_a_chart_at_the_edge_of_a_day_stop_at_its_last_second() {
+    let day_ms = rbms_chart::MAX_TABLED_SECONDS as i64 * MILLIS_PER_SECOND;
+    let within = JudgeSeconds::of(&[], day_ms - 1);
+    assert_eq!(within.by_judge.len(), rbms_chart::MAX_TABLED_SECONDS);
+    assert_eq!(within.by_timing.len(), rbms_chart::MAX_TABLED_SECONDS);
+    assert_eq!(JudgeSeconds::of(&[], day_ms), JudgeSeconds::default());
+    assert_eq!(JudgeSeconds::of(&[], i64::MAX), JudgeSeconds::default());
+}
+
 #[test]
 fn a_run_the_gauge_shift_rescues_keeps_logging() {
     let mut session = PlaySession::new(dense_notes(), SessionOptions { gauge: GaugeKind::Hard, ..Default::default() });

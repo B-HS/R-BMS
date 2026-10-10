@@ -83,6 +83,11 @@ const NO_BGA_EVENT: i32 = -1;
 const MICROS_PER_MILLI: i64 = 1_000;
 const MILLIS_PER_SECOND: i64 = 1_000;
 
+/// The song time past which a failed run's gauge history is no longer padded: the length of the
+/// longest chart a per-second table is built for. The padding is sized by the chart's length, and
+/// a chart can state one of years.
+const GAUGE_LOG_PADDING_END_MS: i64 = rbms_chart::MAX_TABLED_SECONDS as i64 * MILLIS_PER_SECOND;
+
 /// Chart time in whole milliseconds, the reference's `(int) (microtime / 1000)`.
 fn millis(time_us: i64) -> i64 {
     time_us / MICROS_PER_MILLI
@@ -202,12 +207,13 @@ impl GaugeLogRecorder {
 
     /// The history as the result screen receives it: what was sampled, and for a failed run a zero
     /// for every interval from the failure to half a second past the play time
-    /// (`BMSPlayer.java:723-729`).
+    /// (`BMSPlayer.java:723-729`), or to [`GAUGE_LOG_PADDING_END_MS`] when the chart runs longer.
     pub(crate) fn closed(&self) -> GaugeLog {
         let mut log = self.log.clone();
         if let Some(failed_at_ms) = self.failed_at_ms {
+            let padding_end_ms = self.play_time_ms.saturating_add(GAUGE_LOG_INTERVAL_MS).min(GAUGE_LOG_PADDING_END_MS);
             let mut at_ms = failed_at_ms;
-            while at_ms < self.play_time_ms + GAUGE_LOG_INTERVAL_MS {
+            while at_ms < padding_end_ms {
                 for samples in log.samples.iter_mut() {
                     samples.push(0.0);
                 }
@@ -299,7 +305,8 @@ impl TimingDistribution {
 /// run rather than the chart (`SkinNoteDistributionGraph` type 1 and type 2).
 ///
 /// A note is counted in the second its own chart time falls in, not the second it was hit in. Both
-/// tables have one row per second up to the chart's last event.
+/// tables have one row per second up to the chart's last event, and no row at all for a chart too
+/// long to have one for each of its seconds ([`rbms_chart::tabled_second`]).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct JudgeSeconds {
     /// Type 1: `[unjudged, PGREAT, GREAT, GOOD, BAD, POOR]` per second.
@@ -312,7 +319,10 @@ pub struct JudgeSeconds {
 
 impl JudgeSeconds {
     fn of(marks: &[NoteMark], last_event_ms: i64) -> Self {
-        let seconds = (last_event_ms / MILLIS_PER_SECOND + 1) as usize;
+        let Some(last_second) = rbms_chart::tabled_second(last_event_ms.saturating_mul(MICROS_PER_MILLI)) else {
+            return JudgeSeconds::default();
+        };
+        let seconds = last_second + 1;
         let mut by_judge = vec![[0u32; JUDGE_SECOND_KINDS]; seconds];
         let mut by_timing = vec![[0u32; TIMING_SECOND_KINDS]; seconds];
         for mark in marks {

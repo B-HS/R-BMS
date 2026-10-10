@@ -226,8 +226,13 @@ fn note_counts(model: &Model) -> NoteCounts {
 ///
 /// A long note counts as a body in every second from its start to its end. One whose end is not
 /// judged apart from it trades the body of its last second for an end.
+///
+/// A chart too long to have a row for each of its seconds ([`rbms_chart::tabled_second`]) has none.
 fn note_kinds(model: &Model, last_us: i64) -> Vec<[u32; NOTE_KINDS]> {
-    let mut seconds = vec![[0u32; NOTE_KINDS]; second_of(last_us) + 1];
+    let Some(last_second) = rbms_chart::tabled_second(last_us) else {
+        return Vec::new();
+    };
+    let mut seconds = vec![[0u32; NOTE_KINDS]; last_second + 1];
     let mut started: Vec<Option<usize>> = vec![None; model.mode.key];
     for line in &model.timelines {
         let second = second_of(line.time_us);

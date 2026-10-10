@@ -10,6 +10,22 @@ pub mod shuffle;
 
 const SECTION_EPS: f64 = 1e-7;
 
+const MICROS_PER_SECOND: i64 = 1_000_000;
+
+/// The longest chart a per-second table is built for, in seconds: one day.
+///
+/// Such a table has a row for every second up to the chart's last event, so the chart's length is
+/// what sizes it, and a chart of a few bytes can put its last note years away with a slow enough
+/// tempo. A chart past this length gets no table instead of one of gigabytes.
+pub const MAX_TABLED_SECONDS: usize = 86_400;
+
+/// The row of a per-second table `time_us` falls in, or `None` when the time is at or past
+/// [`MAX_TABLED_SECONDS`] and no table reaches it. A time before the chart's start falls in its
+/// first row.
+pub fn tabled_second(time_us: i64) -> Option<usize> {
+    usize::try_from((time_us / MICROS_PER_SECOND).max(0)).ok().filter(|second| *second < MAX_TABLED_SECONDS)
+}
+
 /// Detect the play mode from the chart's used channels and filename. `.pms` is PMS
 /// (POPN_9K); otherwise BMS-family: P2 channels (21-29) mean a double mode, and the
 /// presence of keys 6/7 ('18'/'19') distinguishes 7-key from 5-key.
@@ -423,9 +439,14 @@ pub struct NoteDensity {
 /// "border" point (`total_notes*(1-100/total_value)` cumulative notes). `total_value` is `#TOTAL`
 /// (≤0 ⇒ the standard BMS default total derived from the note count, mirroring the reference implementation which never
 /// sees a zero total).
+///
+/// A chart whose last note is past [`MAX_TABLED_SECONDS`] has no bins and reads zero on all three.
 pub fn note_density(model: &Model, total_value: f64) -> NoteDensity {
     let last_us = model.timelines.iter().rev().find(|t| t.notes.iter().any(Option::is_some)).map(|t| t.time_us).unwrap_or(0);
-    let bins = (last_us / 1_000_000) as usize + 2;
+    let Some(last_second) = tabled_second(last_us) else {
+        return NoteDensity { bins: Vec::new(), peak: 0.0, avg: 0.0, end: 0.0 };
+    };
+    let bins = last_second + 2;
     let mut data = vec![[0i32; 7]; bins];
     let scr = |lane: usize| model.mode.scratch.contains(&lane);
     let mut open_head = vec![None::<usize>; model.mode.key];

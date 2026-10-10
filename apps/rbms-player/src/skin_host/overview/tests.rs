@@ -22,6 +22,11 @@ const OPENING_BPM: f64 = 120.0;
 
 const SECOND_US: i64 = MICROS_PER_SECOND;
 
+const MILLIS_PER_SECOND: i64 = 1_000;
+
+/// The length of a chart whose tempo puts its last note decades away, as `#BPM 0.0001` does.
+const YEARS_OF_SECONDS: i64 = 2_397_600_000;
+
 /// A line `seconds` into the chart at `bpm`, with nothing on it.
 fn line(seconds: i64, bpm: f64) -> TimeLine {
     TimeLine::empty(MODE.key, seconds * SECOND_US, 0.0, bpm)
@@ -67,6 +72,30 @@ fn plain_notes_and_mines_are_counted_by_second_and_by_lane_group() {
     assert_eq!(overview.kinds, vec![kinds([0, 0, 1], [0, 0, 2], 0), kinds([0; 3], [0; 3], 0), kinds([0; 3], [0; 3], 1)]);
     assert_eq!(overview.length_ms, 2000, "a line with nothing on it is not where the chart ends");
     assert_eq!(overview.notes, 3, "a mine is not a note to judge");
+}
+
+/// The rows are sized by the chart's length, so a chart is given them only while it is short enough
+/// to have one for each of its seconds: up to a day. A longer one has none, and still has its
+/// length, its notes and its changes of speed.
+#[test]
+fn a_chart_longer_than_a_day_has_no_row_for_each_of_its_seconds() {
+    let day = i64::try_from(rbms_chart::MAX_TABLED_SECONDS).expect("a day of seconds fits");
+    let ending_at = |seconds: i64| {
+        let chart = model(vec![with_note(line(0, OPENING_BPM), KEY_LANE, NoteKind::Normal), with_note(line(seconds, OPENING_BPM), KEY_LANE, NoteKind::Normal)]);
+        ChartOverview::of_model(&chart)
+    };
+
+    let within = ending_at(day - 1);
+    assert_eq!(within.kinds.len(), rbms_chart::MAX_TABLED_SECONDS);
+    assert_eq!(within.kinds[within.kinds.len() - 1], kinds([0; 3], [0, 0, 1], 0));
+
+    for seconds in [day, YEARS_OF_SECONDS] {
+        let past = ending_at(seconds);
+        assert!(past.kinds.is_empty(), "a chart {seconds} seconds long was given {} rows", past.kinds.len());
+        assert_eq!(past.notes, 2);
+        assert_eq!(i64::from(past.length_ms), (seconds * MILLIS_PER_SECOND).min(i64::from(i32::MAX)));
+        assert_eq!(past.speeds.len(), 2, "the tempo line still opens and closes");
+    }
 }
 
 /// A long note is a body in every second it spans. One whose end is judged with it gives up the
