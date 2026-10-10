@@ -12,12 +12,13 @@ use std::path::{Path, PathBuf};
 use rbms_chart::to_model;
 use rbms_parser::parse;
 use rbms_render::playfield::LaneShade;
+use rbms_render::skin_render::frame::{BarKind, SongBar};
 use rbms_render::skin_render::state::{DecideChart, DecideViewState, SelectViewState};
 use rbms_render::skin_render::{SkinDraw, render_decide_screen, render_keyconfig_screen, render_result_screen, render_select_screen};
 use rbms_render::{
     BgaFrame, Color, CpuCanvas, FrameData, GaugeFrame, GoldenImage, GoldenOptions, NoExpressions, NoteField, PlayfieldView, PngCodec, QuadParams, Rect,
-    RenderCtx, Renderer, SelectDetail, SelectRow, SelectView, Skin, SkinAssets, SkinFrame, SkinImage, SkinObjectKind, SkinScreen, SongBars, TextContext,
-    TextureId, assert_golden_png, render_select_ctx,
+    RenderCtx, Renderer, SelectDetail, SelectView, Skin, SkinAssets, SkinFrame, SkinImage, SkinObjectKind, SkinScreen, SongBars, TextContext, TextureId,
+    assert_golden_png, render_select_ctx,
 };
 use rbms_skin::dst::{DrawCondition, DrawStateSource, LuaDrawEval, LuaFnId, TimerRef};
 use rbms_skin::loader::lua_skin::{LuaSkinOptions, load_lua_skin};
@@ -1130,12 +1131,13 @@ const WHEEL_BAR_PIXEL: (u32, u32) = (40, 60);
 fn unplaced_wheel(scratch: &Scratch) -> PathBuf {
     scratch.write("panel.tex", "checker 16 16 4");
     let slots: Vec<String> =
-        (0..WHEEL_SLOTS).map(|slot| format!(r#"{{ "id": "bar", "dst": [{{ "x": 16, "y": {}, "w": 96, "h": 24 }}] }}"#, 100 - 40 * slot)).collect();
+        (0..WHEEL_SLOTS).map(|slot| format!(r#"{{ "id": "bars", "dst": [{{ "x": 16, "y": {}, "w": 96, "h": 24 }}] }}"#, 100 - 40 * slot)).collect();
     let body = format!(
         r#"{{
             "type": 5, "w": 256, "h": 144,
             "source": [{{ "id": "panel", "path": "panel.tex" }}],
             "image": [{{ "id": "bar", "src": "panel", "x": 0, "y": 0, "w": 16, "h": 16 }}],
+            "imageset": [{{ "id": "bars", "images": ["bar"] }}],
             "songlist": {{ "id": "wheel", "center": {WHEEL_CENTER}, "listoff": [{slots}], "liston": [{slots}] }},
             "destination": [{{ "id": "wheel" }}]
         }}"#,
@@ -1144,20 +1146,9 @@ fn unplaced_wheel(scratch: &Scratch) -> PathBuf {
     scratch.write("skin.json", &body)
 }
 
-/// One browser row.
-fn wheel_row(index: usize) -> SelectRow {
-    SelectRow {
-        folder: false,
-        title: format!("ROW {index}"),
-        mode_short: "7K",
-        mode_color: Color::BLUE,
-        level: "12".to_owned(),
-        difficulty_color: Color::RED,
-        lamp: Color::GREEN,
-        folder_count: None,
-        dj_level: None,
-        favorite: false,
-    }
+/// One of the browser's bars.
+fn wheel_bar(index: usize) -> SongBar {
+    SongBar::new(BarKind::Song { exists: true }, format!("BAR {index}"))
 }
 
 /// The reference constructs a song wheel with a keyframe of its own (`SkinBar`), so the destination
@@ -1173,8 +1164,8 @@ fn a_song_wheel_named_by_a_destination_with_no_keyframe_is_drawn() {
     let screen = compile(&scratch.root, &document, &mut canvas, &mut text);
     assert_eq!((screen.count_of(SkinObjectKind::SongList), screen.warnings()), (1, &[][..]));
 
-    let rows: Vec<SelectRow> = (0..WHEEL_SLOTS).map(wheel_row).collect();
-    let bars = SongBars { rows: &rows, sel: WHEEL_CENTER, options_open: false };
+    let listed: Vec<SongBar> = (0..WHEEL_SLOTS).map(wheel_bar).collect();
+    let bars = SongBars::new(&listed, WHEEL_CENTER);
     let timers = TimerState::new();
     let state = FixtureState::default();
     canvas.clear(Color::BLACK);

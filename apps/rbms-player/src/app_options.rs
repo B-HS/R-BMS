@@ -9,10 +9,15 @@
 //! way of the same descriptor table — so there is one answer to "what will the next run be played
 //! with" rather than two that can disagree. The panel is a shorter route to a handful of those rows,
 //! not a second copy of them.
+//!
+//! It is the application's own panel and is drawn over whatever draws the browser. The three option
+//! panels of a skin are something else: they are called up by START and SELECT, they switch the
+//! skin's panel timers and they belong to the browser (`stage/select/panel.rs`). The two edit the
+//! same fields, so a value changed in either is the value the other shows; this one starts and
+//! stops no timer of a skin.
 
 use rbms_config::{AdjustOutcome, SettingId, adjust, descriptor, display_value};
 use rbms_render::{Color, Rect, Renderer, draw_text, draw_text_right, text_width, theme};
-use rbms_skin::timer::timer_id;
 use winit::keyboard::KeyCode;
 
 use crate::stage::{Canvas, FrameCtx, KeyInput, StageId};
@@ -85,10 +90,10 @@ const OPTIONS_TITLE: &str = "OPTIONS";
 const OPTIONS_HINT: &str = "UP DOWN MOVE   LEFT RIGHT CHANGE   F1 PIN   ESC CLOSE";
 
 /// The key held to keep the panel up, which closes it again when it is let go.
-const HOLD_KEY: KeyCode = KeyCode::ShiftLeft;
+pub(crate) const HOLD_KEY: KeyCode = KeyCode::ShiftLeft;
 
 /// The key that pins the panel open, for a player who would rather not hold one down.
-const TOGGLE_KEY: KeyCode = KeyCode::F1;
+pub(crate) const TOGGLE_KEY: KeyCode = KeyCode::F1;
 
 /// Whether the overlay is open, the row it is on, and whether a key is being held to keep it up.
 ///
@@ -193,20 +198,8 @@ fn open_key(ctx: &mut FrameCtx<'_>, key: &KeyInput<'_>) -> bool {
         TOGGLE_KEY => ctx.shared.options.open_panel(false),
         _ => return false,
     }
-    switch_panel_timers(ctx.shared, true);
     ctx.shared.play_system_sound(crate::SystemSound::OptionOpen);
     true
-}
-
-/// Switch the timers a browser document animates the panel's arrival and departure against.
-///
-/// The reference gives every panel a pair -- one started when it opens, the other when it closes --
-/// and a document slides the panel in against the first and out against the second, so both have to
-/// be switched at the moment the panel itself moves rather than when it is next drawn.
-fn switch_panel_timers(shared: &mut AppShared, open: bool) {
-    let now = shared.skin_now_us();
-    shared.skin_timers.switch(timer_id::PANEL1_ON, open, now);
-    shared.skin_timers.switch(timer_id::PANEL1_OFF, !open, now);
 }
 
 /// Move the focused row one step and remember that something changed.
@@ -236,7 +229,6 @@ pub(crate) fn close(shared: &mut AppShared) {
     shared.play_system_sound(crate::SystemSound::OptionClose);
     let dirty = std::mem::take(&mut shared.options.dirty);
     shared.options.close_panel();
-    switch_panel_timers(shared, false);
     if dirty {
         shared.rebuild_skin();
         shared.save_settings();

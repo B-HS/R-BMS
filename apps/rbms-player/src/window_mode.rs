@@ -59,12 +59,24 @@ fn changes(applied: WindowRows, wanted: WindowRows) -> Vec<WindowChange> {
 pub(crate) struct AppWindow {
     window: Arc<Window>,
     applied: WindowRows,
+    /// Whether the window is told to hand text typed through an input method over as `Ime` events.
+    ime_allowed: bool,
 }
 
 impl AppWindow {
     /// Wrap a window that was created from [`window_attributes`] of the same rows.
     pub(crate) fn new(window: Arc<Window>, display: &DisplayOptions) -> Self {
-        AppWindow { window, applied: rows_of(display) }
+        AppWindow { window, applied: rows_of(display), ime_allowed: false }
+    }
+
+    /// Let the window take text through an input method while something is being typed into, and
+    /// not otherwise: with it on, a Korean or Japanese input method composes in the window, and with
+    /// it off every key reaches the game as a key, which is what a chart being played wants. Told
+    /// to the window only when it changes.
+    pub(crate) fn sync_ime(&mut self, wanted: bool) {
+        if std::mem::replace(&mut self.ime_allowed, wanted) != wanted {
+            self.window.set_ime_allowed(wanted);
+        }
     }
 
     /// Bring the window to the rows if they changed since the last call. Returns the new size when

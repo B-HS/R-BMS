@@ -63,6 +63,10 @@ pub struct AudioOptions {
     pub sound_folder: Option<String>,
     /// Play the per-judgment guide cues while a chart runs.
     pub guide_se: bool,
+    /// Repeat the chart result's clear or fail cue until the screen closes (`isLoopResultSound`).
+    pub loop_result_sound: bool,
+    /// Repeat the course result's clear or fail cue until the screen closes (`isLoopCourseResultSound`).
+    pub loop_course_result_sound: bool,
     #[serde(skip)]
     pub(crate) reopen_pending: bool,
 }
@@ -80,6 +84,8 @@ impl Default for AudioOptions {
             system: DEFAULT_BUS_VOLUME,
             sound_folder: None,
             guide_se: false,
+            loop_result_sound: false,
+            loop_course_result_sound: false,
             reopen_pending: false,
         }
     }
@@ -103,6 +109,8 @@ impl PartialEq for AudioOptions {
             && self.system == other.system
             && self.sound_folder == other.sound_folder
             && self.guide_se == other.guide_se
+            && self.loop_result_sound == other.loop_result_sound
+            && self.loop_course_result_sound == other.loop_course_result_sound
     }
 }
 

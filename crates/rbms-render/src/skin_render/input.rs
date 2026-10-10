@@ -11,13 +11,17 @@
 //! run with its argument, or the value to write. Running them is the host's, because an event may be
 //! a function in the skin's interpreter and a write may move a setting.
 //!
-//! Three things the reference does with the pointer are not judged here:
+//! The song wheel takes a press like any other object, where it stands among them, and offers it to
+//! the bars of its `clickable` slots in the order the document listed those (`SkinBar.mousePressed`,
+//! which hands the press to `BarRenderer.mousePressed`). A bar is pressed where its slot's
+//! destination puts it, not where a slide is carrying it, and what comes out is which bar it was:
+//! opening it, playing it or closing the folder is the browser's.
+//!
+//! Two things the reference does with the pointer are not judged here:
 //!
 //! - The wheel is no object's. The reference adds it up and the screen that is up reads the total
 //!   (`BMSPlayerInputProcessor.getScroll`), so [`SkinPointer::Scroll`] reaches no object and is left
 //!   to the screen.
-//! - The song wheel takes a press on one of its bars (`SkinBar.mousePressed`, which hands it to the
-//!   bar renderer). That is the browser's to judge, against the bars it laid out.
 //! - An editable text that is being typed into is confirmed by a press outside it
 //!   (`SkinTextInput.commitIfOutside`). A press on one is reported as [`SkinAction::FocusText`] and
 //!   stops the walk as it does in the reference; the typing itself is not here.
@@ -31,9 +35,10 @@ use rbms_skin::loader::LoadedSkin;
 use rbms_skin::model::{EventRef, FloatWriterRef, SliderDef};
 use rbms_skin::property::{NameSpace, id_of_name, reference_writes};
 
-use super::SkinScreen;
 use super::frame::PreparedFrame;
 use super::object::{Body, SkinObject};
+use super::text_input::input_bounds;
+use super::{SkinScreen, songlist};
 
 /// The `click` that hands an event the direction of the button that was pressed.
 const CLICK_BUTTON: i32 = 0;
@@ -72,11 +77,6 @@ const SLIDER_SNAP: f32 = 1.0;
 /// The value of a slider at the start of its travel, and at the end of it.
 const SLIDER_EMPTY: f32 = 0.0;
 const SLIDER_FULL: f32 = 1.0;
-
-/// A text's `align` that puts its region's x at the middle of the text, and the one that puts it at
-/// the right end (`SkinText.getInputBounds`). Anything else is the left end.
-const ALIGN_CENTER: i32 = 1;
-const ALIGN_RIGHT: i32 = 2;
 
 /// Which button a press was made with, numbered as the reference's click table is indexed
 /// (`SkinObject.mousePressed`).
@@ -138,6 +138,17 @@ pub enum SkinAction {
     Write { writer: SkinWriter, value: f32 },
     /// Start typing into the editable text that is the screen's object number `object`.
     FocusText { object: usize },
+    /// A bar of the song wheel was pressed with the left button (`MusicSelector.select`): a bar that
+    /// opens is opened, and any other starts play -- of the bar under the cursor, whichever bar was
+    /// pressed, because that is the one the reference's browser goes on to read.
+    ///
+    /// `bar` is the bar's place in the list the frame was prepared with and `offset` is how many bars
+    /// below the cursor's it was, negative above it, for a host whose cursor has moved since. `slot`
+    /// is the slot of the wheel it was drawn on.
+    SelectBar { slot: usize, offset: i32, bar: usize },
+    /// A bar of the song wheel was pressed with any other button (`BarManager.close`): the folder
+    /// that is open is closed, and at the top of the list the sort order moves on instead.
+    CloseBar,
 }
 
 /// What one object does with the pointer, settled when its screen is built.
@@ -151,6 +162,11 @@ pub(crate) enum Interaction {
     Slide { direction: i32, range: f32, writer: SkinWriter },
     /// An editable text.
     Edit { align: i32 },
+    /// A song wheel, whose bars take the press. Which bars those are is settled frame by frame, so a
+    /// frame's targets carry one [`Interaction::Bar`] for each in its place.
+    Bars,
+    /// One bar of a song wheel as a prepared frame left it. Only a frame's targets hold one.
+    Bar { slot: usize, offset: i32, bar: usize },
 }
 
 /// What a click event reference runs, or `None` when it is source the loader never compiled.
@@ -218,6 +234,7 @@ fn interaction_of(skin: &LoadedSkin, id: &str, body: &Body) -> Interaction {
             .and_then(slider_writer)
             .map_or(Interaction::None, |writer| Interaction::Slide { direction: slider.direction, range: slider.range, writer }),
         Body::TextInput(input) => Interaction::Edit { align: input.shown().align },
+        Body::SongList(_) => Interaction::Bars,
         _ => Interaction::None,
     }
 }
@@ -267,7 +284,11 @@ impl Target {
     /// `Skin.mousePressed`).
     fn pressed(&self, button: SkinPointerButton, x: f32, y: f32) -> Option<SkinAction> {
         match self.interaction {
-            Interaction::None => None,
+            Interaction::None | Interaction::Bars => None,
+            Interaction::Bar { slot, offset, bar } => {
+                let action = if button == SkinPointerButton::Left { SkinAction::SelectBar { slot, offset, bar } } else { SkinAction::CloseBar };
+                holds(self.region, x, y).then_some(action)
+            }
             Interaction::Click { event, kind } => {
                 let region = self.region;
                 let argument = match kind {
@@ -282,15 +303,7 @@ impl Target {
                 holds(region, x, y).then_some(SkinAction::Event { event, argument })
             }
             Interaction::Slide { .. } => self.slid(x, y),
-            Interaction::Edit { align } => {
-                let region = self.region;
-                let left = match align {
-                    ALIGN_RIGHT => region.x - region.w,
-                    ALIGN_CENTER => region.x - region.w / 2.0,
-                    _ => region.x,
-                };
-                holds(SkinRect::new(left, region.y, region.w, region.h), x, y).then_some(SkinAction::FocusText { object: self.object })
-            }
+            Interaction::Edit { align } => holds(input_bounds(self.region, align), x, y).then_some(SkinAction::FocusText { object: self.object }),
         }
     }
 
@@ -326,7 +339,8 @@ impl Target {
 /// against the regions its last `prepare` left.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SkinInputMap {
-    /// The drawn objects that take the pointer, in the order they are drawn.
+    /// The drawn objects that take the pointer, in the order they are drawn. A song wheel is one
+    /// target for each of its bars that takes a press, the bar offered the press first coming last.
     targets: Vec<Target>,
 }
 
@@ -359,6 +373,17 @@ impl SkinInputMap {
         self.targets.iter().rev().find_map(|target| target.slid(x, y)).into_iter().collect()
     }
 
+    /// Whether `at` is where the editable text that is the screen's object number `object` takes the
+    /// pointer, as the last prepared frame left it (`SkinText.getInputBounds`). A frame that did not
+    /// draw it, and an object that is no editable text, take nothing. A press outside it ends the
+    /// typing (`SkinTextInput.commitIfOutside`).
+    pub fn text_holds(&self, object: usize, at: (f32, f32)) -> bool {
+        self.targets.iter().find(|target| target.object == object).is_some_and(|target| match target.interaction {
+            Interaction::Edit { align } => holds(input_bounds(target.region, align), at.0, at.1),
+            _ => false,
+        })
+    }
+
     /// What one pointer event at `at` does. A turn of the wheel does nothing here.
     pub fn pointer(&self, event: SkinPointer, at: (f32, f32)) -> Vec<SkinAction> {
         match event {
@@ -375,17 +400,25 @@ impl SkinScreen {
     /// Only an object the frame draws is in it: one its conditions, its timer, its own value or the
     /// pointer rectangle it is shown under left out of the frame takes nothing, exactly as the
     /// reference skips an object whose `draw` its last `prepare` cleared.
+    ///
+    /// A song wheel's bars are read from the wheel itself, which holds them as the frame prepared
+    /// last left them, so `prepared` has to be that frame.
     pub fn input_map(&self, prepared: &PreparedFrame) -> SkinInputMap {
-        let targets = self
-            .interactions
-            .iter()
-            .zip(prepared.placed())
-            .enumerate()
-            .filter_map(|(object, (interaction, placed))| match (interaction, placed) {
-                (Interaction::None, _) | (_, None) => None,
-                (interaction, Some(resolved)) => Some(Target { object, region: resolved.rect, interaction: *interaction }),
-            })
-            .collect();
+        let mut targets = Vec::new();
+        for (object, (interaction, placed)) in self.interactions.iter().zip(prepared.placed()).enumerate() {
+            match (interaction, placed, self.objects.get(object).map(|object| &object.body)) {
+                (Interaction::None, _, _) | (_, None, _) => {}
+                (Interaction::Bars, Some(_), Some(Body::SongList(wheel))) => {
+                    let bars = songlist::bar_targets(wheel).into_iter().rev();
+                    targets.extend(bars.map(|bar| Target {
+                        object,
+                        region: bar.region,
+                        interaction: Interaction::Bar { slot: bar.slot, offset: bar.offset, bar: bar.bar },
+                    }));
+                }
+                (interaction, Some(resolved), _) => targets.push(Target { object, region: resolved.rect, interaction: *interaction }),
+            }
+        }
         SkinInputMap { targets }
     }
 

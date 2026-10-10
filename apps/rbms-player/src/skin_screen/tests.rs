@@ -540,9 +540,11 @@ fn a_slider_is_set_by_a_press_and_by_a_drag_and_writes_where_its_document_says()
     whole_frame(&mut app, &mut pixels);
     assert_eq!(skin_number(&app, "written"), 0.25);
 
+    app.shared.config.audio.system = 0.9;
     assert!(app.shared.skin_pointer(over_volume_middle(), LEFT_PRESS));
     whole_frame(&mut app, &mut pixels);
-    assert_eq!(app.shared.skin_requests().take(Cluster::Options), [ClusterRequest::WriteRate { id: VOLUME_RATE, value: 0.5 }]);
+    assert_eq!(app.shared.config.audio.system, 0.5, "the volume the slider writes is carried out when the frame ends");
+    assert!(app.shared.skin_requests().is_empty(), "and is not left waiting for a screen to answer it");
 
     assert!(!app.shared.skin_pointer(over_scripted(), PointerInput::Drag), "a drag moved something that is not a slider");
     whole_frame(&mut app, &mut pixels);

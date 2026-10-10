@@ -6,6 +6,13 @@
 //!
 //! The caret is counted in characters rather than bytes, so a line with a Japanese title in it
 //! moves one visible character at a time and can never be cut through the middle of one.
+//!
+//! A line that an input method types into as well as the keyboard is an [`ImeEdit`]: a Korean
+//! syllable that is not final yet, or a Japanese reading waiting for its kanji, is shown at the caret
+//! and is not part of the line until the input method commits it. It is a type of its own, wrapped
+//! round a [`TextEdit`], because a [`TextEdit`] sits inside several screens whose size is budgeted.
+
+use winit::event::Ime;
 
 use crate::KeyCode;
 use crate::notify::{Level, notify};
@@ -38,10 +45,9 @@ impl TextEdit {
         &self.buf
     }
 
-    /// How many characters are before the caret. What the caret is for is drawing it, which
-    /// [`TextEdit::window`] already reports, so outside a test nothing asks for it on its own.
-    #[cfg(test)]
-    fn cursor(&self) -> usize {
+    /// How many characters are before the caret. A screen that draws its caret from
+    /// [`TextEdit::window`] has no use for it; one that draws it from the line itself does.
+    pub(crate) fn cursor(&self) -> usize {
         self.cursor
     }
 
@@ -136,6 +142,92 @@ impl TextEdit {
     /// Byte offset of character `index`, or the end of the line.
     fn byte_of(&self, index: usize) -> usize {
         self.buf.char_indices().nth(index).map(|(at, _)| at).unwrap_or(self.buf.len())
+    }
+}
+
+/// Text an input method is composing at the caret, which the line does not hold yet.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct Composing {
+    pub(crate) text: String,
+    /// Where the input method's own caret stands inside `text`, in characters, or `None` when it
+    /// asks for none to be shown.
+    pub(crate) caret: Option<usize>,
+}
+
+/// A [`TextEdit`] together with what an input method is composing at its caret.
+///
+/// A key goes to the line ([`ImeEdit::line_mut`], [`edit_key`]) and an input method's report goes to
+/// [`ImeEdit::apply_ime`]. Reading [`TextEdit::text`] never sees a half-made syllable.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct ImeEdit {
+    line: TextEdit,
+    composing: Option<Composing>,
+}
+
+impl ImeEdit {
+    /// A line pre-filled with `text`, with the caret at the end of it and nothing being composed.
+    pub(crate) fn from_text(text: impl Into<String>) -> ImeEdit {
+        ImeEdit { line: TextEdit::from_text(text), composing: None }
+    }
+
+    /// The line, without what is being composed.
+    pub(crate) fn line(&self) -> &TextEdit {
+        &self.line
+    }
+
+    /// The line, for the keys that edit it.
+    pub(crate) fn line_mut(&mut self) -> &mut TextEdit {
+        &mut self.line
+    }
+
+    /// What the input method is composing at the caret, if anything.
+    pub(crate) fn composing(&self) -> Option<&Composing> {
+        self.composing.as_ref()
+    }
+
+    /// Take the line out, leaving the editor empty and the composition dropped with it.
+    pub(crate) fn take(&mut self) -> String {
+        self.composing = None;
+        self.line.take()
+    }
+
+    /// Show `text` as what the input method is composing, with its own caret at the byte offset
+    /// `caret` of it. Empty text is no composition at all, which is how an input method says it
+    /// finished or gave up.
+    pub(crate) fn set_composing(&mut self, text: &str, caret: Option<usize>) {
+        if text.is_empty() {
+            self.composing = None;
+            return;
+        }
+        let caret = caret.map(|bytes| text.char_indices().take_while(|(at, _)| *at < bytes).count());
+        self.composing = Some(Composing { text: text.to_owned(), caret });
+    }
+
+    /// Take the input method's final text: the composition is over, and `text` is typed in its place.
+    pub(crate) fn commit_composed(&mut self, text: &str) {
+        self.composing = None;
+        self.line.insert(text);
+    }
+
+    /// Follow one report of the input method. Answers whether the line itself changed, which only a
+    /// commit does; a composition changes what is shown and nothing a caller reads.
+    pub(crate) fn apply_ime(&mut self, ime: &Ime) -> bool {
+        match ime {
+            Ime::Preedit(text, caret) => {
+                self.set_composing(text, caret.map(|(begin, _)| begin));
+                false
+            }
+            Ime::Commit(text) => {
+                let before = self.line.text().len();
+                self.commit_composed(text);
+                self.line.text().len() != before
+            }
+            Ime::Disabled => {
+                self.composing = None;
+                false
+            }
+            Ime::Enabled => false,
+        }
     }
 }
 
@@ -335,6 +427,55 @@ mod tests {
         let (shown, caret) = edit.window(4);
         assert_eq!(caret, 4);
         assert_eq!(shown, "2345", "the caret stays at the right-hand edge of the window as it walks");
+    }
+
+    #[test]
+    fn composing_text_is_shown_beside_the_line_and_is_not_part_of_it() {
+        let mut edit = ImeEdit::from_text("ab");
+        assert!(edit.composing().is_none());
+        edit.set_composing("한", Some(0));
+        let composing = edit.composing().expect("the composition is held");
+        assert_eq!((composing.text.as_str(), composing.caret), ("한", Some(0)));
+        assert_eq!((edit.line().text(), edit.line().cursor()), ("ab", 2), "the line did not take the half-made syllable");
+
+        edit.set_composing("한글", Some("한".len()));
+        assert_eq!(edit.composing().map(|composing| composing.caret), Some(Some(1)), "the caret is counted in characters, not bytes");
+        edit.set_composing("한", None);
+        assert_eq!(edit.composing().map(|composing| composing.caret), Some(None), "an input method can ask for no caret");
+        edit.set_composing("", None);
+        assert!(edit.composing().is_none(), "an empty composition is none");
+    }
+
+    #[test]
+    fn a_commit_replaces_the_composition_with_final_text_at_the_caret() {
+        let mut edit = ImeEdit::from_text("ab");
+        edit.line_mut().left();
+        edit.set_composing("한", Some(0));
+        edit.commit_composed("한");
+        assert!(edit.composing().is_none());
+        assert_eq!((edit.line().text(), edit.line().cursor()), ("a한b", 2));
+
+        edit.set_composing("x", None);
+        let taken = edit.take();
+        assert_eq!(taken, "a한b");
+        assert!(edit.composing().is_none(), "taking the line drops what was being composed with it");
+    }
+
+    #[test]
+    fn the_input_method_reports_are_followed_and_only_a_commit_changes_the_line() {
+        let mut edit = ImeEdit::default();
+        assert!(!edit.apply_ime(&Ime::Enabled));
+        assert!(!edit.apply_ime(&Ime::Preedit("あ".to_string(), Some((0, "あ".len())))), "a composition changes what is shown, not the line");
+        assert_eq!(edit.composing().map(|composing| composing.text.as_str()), Some("あ"));
+        assert!(!edit.apply_ime(&Ime::Preedit(String::new(), None)));
+        assert!(edit.apply_ime(&Ime::Commit("亜".to_string())), "a commit types text");
+        assert_eq!(edit.line().text(), "亜");
+        assert!(!edit.apply_ime(&Ime::Commit("\n".to_string())), "a commit of nothing but control characters types nothing");
+
+        edit.apply_ime(&Ime::Preedit("い".to_string(), None));
+        assert!(!edit.apply_ime(&Ime::Disabled));
+        assert!(edit.composing().is_none(), "an input method that goes away takes its composition with it");
+        assert_eq!(edit.line().text(), "亜");
     }
 
     #[test]

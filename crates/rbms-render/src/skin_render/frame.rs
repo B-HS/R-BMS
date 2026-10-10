@@ -34,6 +34,10 @@ use super::notes::NoteField;
 use super::object::SkinObject;
 use super::refs::ReferenceImages;
 use super::songlist::SongBars;
+pub use super::songlist::{
+    BarDistribution, BarHold, BarKind, BarScroll, BarScroller, BarTrophy, LAMP_KINDS, RANK_KINDS, SCROLL_DURATION_HIGH_MS, SCROLL_DURATION_LOW_MS, SongBar,
+};
+use super::text_input::TextEntry;
 use super::{SkinViewport, draw};
 use crate::Renderer;
 use crate::ctx::RenderCtx;
@@ -72,13 +76,17 @@ pub struct FrameData<'a> {
     /// for the gauge object and the gauge graph. A play screen fills it for the run in progress and
     /// a score screen for the one that ended.
     pub gauge: Option<GaugeFrame>,
-    /// The browser's bars, for the song wheel.
+    /// The browser's bars, for the song wheel: the list on show, where the cursor is in it and how
+    /// far the wheel is through sliding. A frame that leaves it out draws no wheel, and so does one
+    /// whose list is empty.
     pub bars: Option<&'a SongBars<'a>>,
     pub series: FrameSeries<'a>,
     /// The images a document refers to rather than ships.
     pub images: ReferenceImages,
     /// What the `bga` object shows this frame.
     pub bga: BgaFrame,
+    /// The editable text being typed into, which draws what is typed in place of what it shows.
+    pub entry: Option<TextEntry<'a>>,
 }
 
 impl std::fmt::Debug for FrameData<'_> {
@@ -91,6 +99,7 @@ impl std::fmt::Debug for FrameData<'_> {
             .field("series", &self.series)
             .field("images", &self.images)
             .field("bga", &self.bga)
+            .field("entry", &self.entry)
             .finish()
     }
 }
@@ -454,7 +463,7 @@ pub(crate) fn draw_objects<R: Renderer>(
             continue;
         };
         replay.enter(index);
-        if draw::draw_resolved(ctx, r, object, viewport, &staged, resolved) {
+        if draw::draw_resolved(ctx, r, object, index, viewport, &staged, resolved) {
             drawn += 1;
         }
     }

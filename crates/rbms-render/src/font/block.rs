@@ -460,4 +460,39 @@ impl TextContext {
             lines: lines.len(),
         })
     }
+
+    /// Where the caret of a line stands after its first `chars` characters, measured from the left
+    /// edge of the width the line is laid out in, in pixels of the target. This is where
+    /// [`TextContext::compose_block`] puts the pen at that point of the first line, with the same
+    /// alignment and squeeze applied, so a caret drawn there sits between the glyphs that were
+    /// composed.
+    ///
+    /// A character the pen has not reached yet puts the caret at the end of the line. A line with
+    /// nothing in it puts it where an empty line is aligned to. `None` for a size or a width that is
+    /// not a number, or for a font with no capital to hang a line from, which is where a block of
+    /// that spec is not composed either.
+    pub fn caret_x(&mut self, spec: &BlockSpec<'_>, chars: usize) -> Option<f32> {
+        let sized = spec.em_px.is_finite() && spec.em_px > 0.0 && spec.design_px.is_finite() && spec.design_px > 0.0;
+        if !sized || !spec.width.is_finite() {
+            return None;
+        }
+        let face = self.face(spec.family);
+        self.design_metrics(spec.family, &face, spec.design_px)?;
+        let scale = spec.em_px / spec.design_px;
+
+        let shaped = if spec.text.is_empty() { Vec::new() } else { self.shape_block(&face, spec.text, spec.em_px, None) };
+        let Some(glyphs) = shaped.first() else {
+            return Some(slack(spec.align, spec.width, 0.0));
+        };
+        let line = self.place_line(glyphs, spec.em_px, scale);
+        let squeeze = if spec.fit == BlockFit::Shrink && line.width > spec.width { spec.width / line.width } else { 1.0 };
+
+        let byte = spec.text.char_indices().nth(chars).map_or(spec.text.len(), |(at, _)| at);
+        let pen = glyphs
+            .iter()
+            .zip(&line.glyphs)
+            .find(|(glyph, _)| glyph.start >= byte)
+            .map_or_else(|| line.glyphs.last().map_or(0.0, |last| last.end), |(_, placed)| placed.start);
+        Some(slack(spec.align, spec.width, line.width * squeeze) + pen.max(0.0) * squeeze)
+    }
 }

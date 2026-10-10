@@ -136,6 +136,7 @@ impl SkinObject {
     pub(crate) fn release<R: crate::Renderer>(&self, r: &mut R) {
         graphs::release(&self.body, r);
         text::release(&self.body, r);
+        songlist::release(&self.body, r);
     }
 
     /// The entry one top-level destination becomes.
@@ -864,7 +865,11 @@ pub(crate) fn build_body(
         return float_body(value, sources, warnings).map(Body::Float);
     }
     if let Some(text) = def.text.iter().find(|text| text.id == id) {
-        return Some(if text.editable { Body::TextInput(text_input::text_input_body(text, families)) } else { Body::Text(text::text_body(text, families)) });
+        return Some(if text_input::is_editable(text) {
+            Body::TextInput(text_input::text_input_body(text, families))
+        } else {
+            Body::Text(text::text_body(text, families))
+        });
     }
     if let Some(slider) = def.slider.iter().find(|slider| slider.id == id) {
         return slider_body(slider, sources, warnings).map(Body::Slider);

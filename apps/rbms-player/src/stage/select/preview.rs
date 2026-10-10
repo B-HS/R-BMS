@@ -4,6 +4,27 @@
 //!
 //! Preview sounds live in their own id namespace inside the shared output engine, so a chart load
 //! never disturbs them and leaving the browser clears exactly what the preview owned.
+//!
+//! # The browser's music and the preview
+//!
+//! A set whose `select` sound is music has it looped for as long as the browser is up
+//! ([`crate::syssound`]). The reference runs the two as one switch (`PreviewMusicProcessor`): the
+//! music plays until a song's preview starts, is turned down to nothing under it, and is turned back
+//! up when the preview is stopped. rbms keeps that and decides the cases the reference does not meet,
+//! because here every chart has a preview, an autoplay pass over its keysounds when it names no
+//! `#PREVIEW` clip:
+//!
+//! - The music is turned down when a preview begins to sound ([`Fade::In`]), over the preview's own
+//!   fade, and is turned up when it begins to leave ([`Fade::Out`], which the focus moving on starts),
+//!   over the same fade. The two cross: as the row being left fades out, the music comes in.
+//! - While the focus has settled nowhere, which is the debounce ([`PREVIEW_DEBOUNCE`]) and the load
+//!   that follows it, no preview sounds and the music is up. Scrolling through a list therefore
+//!   brings the music in between rows, and a row that is stayed on takes it down again once its
+//!   preview is ready (the reference does the same for a row with a clip, and keeps the music up
+//!   throughout for a row with none).
+//! - A focus that is not a chart, a library with previews switched off, and a chart whose preview
+//!   cannot be played all leave the music up.
+//! - The music keeps running under a preview; it is not restarted when the preview goes.
 #![allow(clippy::wildcard_imports)]
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -90,6 +111,11 @@ fn fade_level(fade: Fade, elapsed: Duration, span: Duration) -> f32 {
         Fade::In => done,
         Fade::Out => 1.0 - done,
     }
+}
+
+/// Whether the select music is turned down: while a preview is sounding and not on its way out.
+fn select_bgm_is_held(fade: Fade) -> bool {
+    fade == Fade::In
 }
 
 impl SelectState {
@@ -187,6 +213,19 @@ impl SelectState {
     /// each clip boundary: the mixer stops the same key on a new play, so booking the next clip
     /// ahead would cut the current one short.
     pub(super) fn update_preview(&mut self, shared: &mut AppShared, now: Instant) {
+        self.drive_preview(shared, now);
+        let hold = select_bgm_is_held(self.preview.fade);
+        shared.drive_select_bgm(true, hold, SelectState::fade_span(shared));
+    }
+
+    /// Stop the browser's music, which is what leaving the browser asks for. Nothing happens when it
+    /// was not running, so a set whose `select` is a cue keeps it sounding on the way out.
+    pub(super) fn end_select_bgm(shared: &mut AppShared) {
+        shared.drive_select_bgm(false, false, Duration::ZERO);
+    }
+
+    /// One frame of the preview itself: the debounce, the load, the playback and the fades.
+    fn drive_preview(&mut self, shared: &mut AppShared, now: Instant) {
         if !shared.config.library.preview {
             if self.preview_active() {
                 self.stop_preview(shared);
@@ -499,6 +538,32 @@ mod tests {
     fn a_fade_of_no_length_is_already_over() {
         assert_eq!(fade_level(Fade::In, Duration::ZERO, Duration::ZERO), 1.0);
         assert_eq!(fade_level(Fade::Out, Duration::ZERO, Duration::ZERO), 0.0);
+    }
+
+    /// The music is down only while a preview is sounding: not before one starts (the debounce and the
+    /// load), not once it has begun to leave, and not when there is none.
+    #[test]
+    fn the_select_music_is_held_only_while_a_preview_is_sounding() {
+        assert!(select_bgm_is_held(Fade::In));
+        assert!(!select_bgm_is_held(Fade::Out), "a preview that is leaving lets the music back in");
+        assert!(!select_bgm_is_held(Fade::Idle), "with no preview the music plays");
+    }
+
+    /// Following a preview through its life gives the sequence the module documents: music, then
+    /// held when it sounds, then up again as the focus moves, then held for the next one.
+    #[test]
+    fn scrolling_past_a_row_brings_the_music_in_between_previews() {
+        use crate::syssound::{BgmStep, SelectBgm};
+        const ENGINE: u64 = 1;
+        let mut bgm = SelectBgm::default();
+        let mut steps = Vec::new();
+        for fade in [Fade::Idle, Fade::Idle, Fade::In, Fade::In, Fade::Out, Fade::Idle, Fade::Idle, Fade::In] {
+            steps.push(bgm.step(true, Some(ENGINE), select_bgm_is_held(fade)));
+        }
+        assert_eq!(
+            steps,
+            [BgmStep::Start, BgmStep::Idle, BgmStep::Level(0.0), BgmStep::Idle, BgmStep::Level(1.0), BgmStep::Idle, BgmStep::Idle, BgmStep::Level(0.0)]
+        );
     }
 
     #[test]

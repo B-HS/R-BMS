@@ -89,7 +89,7 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
     let save_replay = !practice
         && shared.config.play.auto_replay
         && shared.replay.is_none()
-        && !shared.config.play.autoplay
+        && !shared.run_plays_itself()
         && saves_replay(assist)
         && !play.recorded_events().is_empty();
     let recorded_events = save_replay.then(|| play.recorded_events().to_vec());
@@ -190,7 +190,7 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
             lift: shared.config.play.lift,
             lane_cover: shared.config.play.cover,
             total_override: shared.config.play.total_override,
-            autoplay: shared.config.play.autoplay,
+            autoplay: shared.run_plays_itself(),
             auto_offset: shared.config.judge.auto_offset,
             scratch_left: shared.config.play.scratch_left,
             green_number: green_number_for(shared.config.play.constant_speed, chart.init_bpm, shared.config.play.hispeed, 1.0, shared.config.play.cover),
@@ -206,9 +206,8 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
         client_platform: Some(client_platform()),
         extra: Default::default(),
     };
-    let scores_count = updates_score(shared.config.play.autoplay, shared.replay.is_some(), custom_judge, shared.config.play.scratch_auto, practice);
-    let block_reason =
-        ir_submission_block_reason(shared.config.play.autoplay, shared.replay.is_some(), custom_judge, shared.config.play.scratch_auto, practice);
+    let scores_count = updates_score(shared.run_plays_itself(), shared.replay.is_some(), custom_judge, shared.config.play.scratch_auto, practice);
+    let block_reason = ir_submission_block_reason(shared.run_plays_itself(), shared.replay.is_some(), custom_judge, shared.config.play.scratch_auto, practice);
 
     let played_ms = played_at;
     let mut replay_file: Option<String> = None;
@@ -243,7 +242,7 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
         recorded_replay = Some(rp);
     }
 
-    if shared.replay.is_none() && !shared.config.play.autoplay && !practice {
+    if shared.replay.is_none() && !shared.run_plays_itself() && !practice {
         let finished = crate::scoredb_store::FinishedPlay {
             md5: &chart.md5,
             sha256: &chart.sha256,
@@ -268,7 +267,7 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
         shared.scores.push(crate::scoredb_store::record_of(&log));
     }
 
-    if let (true, true, true, Some(mean_us)) = (shared.config.judge.auto_offset, !shared.config.play.autoplay, shared.replay.is_none(), calibration_mean_us) {
+    if let (true, true, true, Some(mean_us)) = (shared.config.judge.auto_offset, !shared.run_plays_itself(), shared.replay.is_none(), calibration_mean_us) {
         let new_offset = calibrated_offset(shared.config.judge.offset_ms, mean_us);
         println!(
             "auto-cal: avg {:+} ms over {} hits → judge offset {} ms (was {})",
@@ -493,7 +492,7 @@ pub(crate) fn next_song(shared: &mut AppShared) -> Transition {
 /// autoplay demonstration or a replay being watched — has nothing to retry, and neither has a chart
 /// that is not in the library to be started again from.
 pub(crate) fn offers_retry(shared: &AppShared) -> bool {
-    !shared.config.play.autoplay && shared.replay.is_none() && played_song_index(shared).is_some()
+    !shared.run_plays_itself() && shared.replay.is_none() && played_song_index(shared).is_some()
 }
 
 #[cfg(test)]

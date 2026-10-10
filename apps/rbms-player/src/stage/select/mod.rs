@@ -5,29 +5,77 @@
 //! [`AppShared`], because every other screen returns here and the debug overlay reports it from
 //! anywhere. What this screen owns is what only makes sense while it is up.
 //!
-//! The two largest pieces of that live in their own files: [`preview`] drives the hover preview's
-//! loading and playback, and [`scene`] assembles what the renderer draws.
+//! The largest pieces of that live in their own files: [`preview`] drives the hover preview's
+//! loading and playback, [`list`] builds the list and its model, [`scene`] converts that model into
+//! what each renderer draws, and [`images`] reads the pictures a skin's frame refers to.
+//!
+//! A browser a skin draws is also driven the way the reference's is: [`keys`] is its key table and
+//! [`skinned`] is the frame of input and the timers that go with it, [`panel`] is the three option
+//! panels the held keys call up, and [`events`] is what the skin's buttons and those panels' keys
+//! run. The keys the browser has always had keep doing what they did there, and a browser no skin
+//! draws is not touched by any of them.
+//!
+//! What is the application's rather than a skin's is drawn over the skin ([`overlay`]): the hint on
+//! an empty list, the ranking panel, the record modal, the filter panel, the search box and the key
+//! guide ([`guide`]), each of which takes the keys and the mouse before the skin does.
 #![allow(clippy::wildcard_imports)]
 
 use std::sync::mpsc::TryRecvError;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use rbms_render::skin_render::frame::{BarHold, BarScroller, SCROLL_DURATION_HIGH_MS, SCROLL_DURATION_LOW_MS};
+use rbms_render::{BgaFrame, FrameData, ReferenceImages, SongBars};
+use rbms_skin::property::generated::{BUTTON_KEYCONFIG, BUTTON_SKINSELECT};
 
 use crate::ir_ext::PrimaryProfileDirection;
 use crate::ir_ranking_view::{PanelAction, PanelLine, offline_lines, panel_action, panel_lines, profile_line};
 use crate::ir_replay::from_ir_replay;
 use crate::keyconfig::{SCRATCH_BACKWARD_INDEX, SCRATCH_FORWARD_INDEX, key_index_of};
+use crate::skin_host::chart::ChartState;
+use crate::skin_host::select::{BrowserLent, CourseShown};
+use crate::skin_screen::SelectDraw;
+use crate::stage::result::SkinStatus;
 use crate::stage::{Canvas, FoldersState, FrameCtx, KeyInput, SettingsState, Stage, StageHandler, TablesState, Transition, is_left_press};
 use crate::*;
 
+#[cfg(test)]
+mod bars_tests;
+mod events;
+#[cfg(test)]
+mod events_tests;
 mod filter;
+mod guide;
+mod images;
+mod keys;
+mod lent;
+#[cfg(test)]
+mod lent_tests;
 mod list;
+mod overlay;
+#[cfg(test)]
+mod overlay_tests;
+mod panel;
+#[cfg(test)]
+mod panel_tests;
 mod preview;
 mod scene;
+mod skin_writes;
+mod skinned;
+#[cfg(test)]
+mod skinned_tests;
 #[cfg(test)]
 pub(super) mod tests;
 
 use filter::{FilterKey, FilterPanel, render_filter_panel};
-use list::SelectFilter;
+use guide::GUIDE_KEY;
+use images::{SongImages, Wanted};
+use keys::{KeyLayout, SelectKeys};
+use lent::FocusedRecords;
+use list::{ChartFacts, SelectFilter, chart_under_cursor};
+use panel::PanelState;
 use preview::PreviewState;
+use scene::BarList;
+use skinned::{BarMark, WallClock, skin_status};
 
 /// What the search box draws where the next character will go.
 const SEARCH_CARET: &str = "_";
@@ -37,21 +85,19 @@ const SEARCH_CARET: &str = "_";
 /// width on top of this; this only decides which stretch of the query it is handed.
 const SEARCH_VISIBLE_CHARS: usize = 24;
 
-/// The key indices that open the focused row (play a chart, enter a folder): the white keys, 1 3 5
-/// and 7. In the reference implementation these are `PLAY`, `PRACTICE`, `AUTO` and `REPLAY` on a
-/// chart and `FOLDER_OPEN` on a folder; until the browser grows those, they all open the row
-/// (`MusicSelectKeyProperty.java:8-18`, `b4-screens.md` section 3.5).
-const OPEN_KEY_INDICES: [usize; 4] = [0, 2, 4, 6];
-
-/// The key indices that go up one folder: the black keys 2 and 4 (`FOLDER_CLOSE`). Key 6 is
-/// `NEXT_REPLAY`, which belongs to the replay slots and is left alone here.
-const CLOSE_KEY_INDICES: [usize; 2] = [1, 3];
+/// The key table the built-in browser reads its controller keys by, whatever mode is up: the
+/// reference's table for a layout with a turntable ([`keys`]). The keys that open the focused row
+/// are the ones that carry `FOLDER_OPEN` there, which on a chart are `PLAY`, `PRACTICE`, `AUTO` and
+/// `REPLAY` -- the built-in browser opens the row for all of them -- and the keys that go up one
+/// folder are the ones that carry `FOLDER_CLOSE`. A browser a skin draws reads the whole table, by
+/// the mode that is up.
+const BUILT_IN_KEY_LAYOUT: KeyLayout = KeyLayout::Beat;
 
 /// How long a turntable direction is held before the list starts to repeat, and how often it moves
-/// after that (`scrolldurationlow` and `scrolldurationhigh` in `Config.java`, which
-/// `BarRenderer.input` applies to a held scratch).
-const SCRATCH_REPEAT_DELAY: Duration = Duration::from_millis(300);
-const SCRATCH_REPEAT_INTERVAL: Duration = Duration::from_millis(50);
+/// after that: the two times a skin's wheel slides by (`scrolldurationlow` and `scrolldurationhigh`
+/// in `Config.java`, which `BarRenderer.input` applies to a held scratch).
+const SCRATCH_REPEAT_DELAY: Duration = Duration::from_millis(SCROLL_DURATION_LOW_MS as u64);
+const SCRATCH_REPEAT_INTERVAL: Duration = Duration::from_millis(SCROLL_DURATION_HIGH_MS as u64);
 
 /// A turntable direction that is being held, so the list keeps moving while it is.
 #[derive(Clone, Copy)]
@@ -81,8 +127,10 @@ pub(crate) struct SelectState {
     /// arrived there. The detail is computed only once it has rested for [`FOCUS_DETAIL_DEBOUNCE`].
     focus_settle_si: Option<usize>,
     focus_settle_at: Instant,
-    /// The focused chart's cover art, at the resolution the file itself was decoded at.
+    /// The focused chart's cover art, at the resolution the file itself was decoded at, and the
+    /// song index it was decoded for.
     cover_image: Option<crate::DecodedImage>,
+    cover_si: Option<usize>,
     cached_scene: Option<SelectScene>,
     cached_key: Option<SelectKey>,
     /// Whether a shift key is down, which is what turns the sort key around, and whether a control
@@ -106,6 +154,56 @@ pub(crate) struct SelectState {
     courses: CourseList,
     /// The turntable direction a controller is holding, which repeats the list move.
     scratch_hold: Option<ScratchHold>,
+    /// The list on show as bars, which is what both the built-in rows and a skin's wheel are made
+    /// from.
+    bars: BarList,
+    /// What the song database adds to the library's charts, read for a skin's wheel.
+    facts: ChartFacts,
+    /// How often [`SelectState::facts`] and the course list have been read, which is what tells the
+    /// bars built from them that they are out of date.
+    facts_generation: u64,
+    courses_generation: u64,
+    /// The pictures a skin's frame refers to: those of the chart under the cursor and the back
+    /// image of the chart loaded last.
+    images: SongImages,
+    /// The back image of the chart loaded last, with the chart and the reading of the facts it was
+    /// looked up for.
+    loaded_backbmp: Option<(String, u64, Option<PathBuf>)>,
+    /// The reference's key table as a browser a skin draws last read it, and whether it is being
+    /// read at all: a browser that has just come up, or has just had its keys back from something
+    /// drawn over it, takes what is held as held rather than as pressed.
+    keys: SelectKeys,
+    listening: bool,
+    /// The slide of a skin's wheel and the repeat of a key held on it.
+    scroller: BarScroller,
+    /// How far the mouse wheel has turned since the list last moved by it, in lines.
+    wheel_lines: f32,
+    /// The bar the cursor was on when a skin's bar timer was last looked after, and whether
+    /// something has asked for that timer to start over since.
+    bar_seen: Option<BarMark>,
+    bar_changed: bool,
+    /// What had become of the skin on the frame drawn last.
+    skin_seen: Option<SkinStatus>,
+    /// What dates the frames of a skin's wheel.
+    clock: WallClock,
+    /// The option panel the held keys call up on a browser a skin draws.
+    panel: PanelState,
+    /// Whether the key guide is up over a browser a skin draws.
+    guide_open: bool,
+    /// Whether an event of the skin changed a setting that has not been written out yet.
+    options_dirty: bool,
+    /// What the player's records hold of the chart under the cursor, read when the cursor comes to
+    /// a chart rather than on every frame a skin asks about it.
+    focused_records: FocusedRecords,
+    /// The replay slot a replay of the bar under the cursor would be played from, or `None` when it
+    /// has no replay (`MusicSelector.selectedreplay`).
+    selected_replay: Option<usize>,
+    /// The course under the cursor as a skin reads it, with the reading of the course list and the
+    /// row it was made for.
+    course_shown: Option<(u64, usize, CourseShown)>,
+    /// The way an arrow key that went down since the last frame of a skin's browser moves the
+    /// wheel, kept so that a press let go before that frame is still one.
+    arrow_tap: BarHold,
 }
 
 impl Default for SelectState {
@@ -120,6 +218,7 @@ impl Default for SelectState {
             focus_settle_si: None,
             focus_settle_at: Instant::now(),
             cover_image: None,
+            cover_si: None,
             cached_scene: None,
             cached_key: None,
             shift_held: false,
@@ -132,6 +231,27 @@ impl Default for SelectState {
             tab: SelectTab::default(),
             courses: CourseList::default(),
             scratch_hold: None,
+            bars: BarList::default(),
+            facts: ChartFacts::default(),
+            facts_generation: 0,
+            courses_generation: 0,
+            images: SongImages::default(),
+            loaded_backbmp: None,
+            keys: SelectKeys::default(),
+            listening: false,
+            scroller: BarScroller::default(),
+            wheel_lines: 0.0,
+            bar_seen: None,
+            bar_changed: false,
+            skin_seen: None,
+            clock: WallClock::now(),
+            panel: PanelState::default(),
+            guide_open: false,
+            options_dirty: false,
+            focused_records: FocusedRecords::default(),
+            selected_replay: None,
+            course_shown: None,
+            arrow_tap: BarHold::None,
         }
     }
 }
@@ -139,6 +259,30 @@ impl Default for SelectState {
 impl SelectState {
     pub(crate) fn new() -> SelectState {
         SelectState::default()
+    }
+
+    /// A browser on its course tab, holding `courses` resolved against `library`, for the tests and
+    /// the capture harness that show a course list without a settings folder to read one from.
+    #[cfg(test)]
+    pub(crate) fn on_courses(courses: Vec<rbms_course::Course>, library: &rbms_library::Library) -> SelectState {
+        let mut courses = CourseList::from_courses(courses);
+        courses.resolve_in_library(library);
+        SelectState { tab: SelectTab::Courses, courses, ..SelectState::default() }
+    }
+
+    /// Whether every picture the browser asked for has been read, for the harness that waits for
+    /// them before it saves a frame.
+    #[cfg(test)]
+    pub(crate) fn pictures_are_in(&self) -> bool {
+        self.images.is_settled()
+    }
+
+    /// Whether the wheel of a skin's browser is not sliding, for the harness that waits a slide out
+    /// before it saves a frame.
+    #[cfg(test)]
+    pub(crate) fn wheel_is_at_rest(&self) -> bool {
+        let slide = self.scroller.at(self.clock.millis_at(Instant::now()));
+        slide.duration_ms == 0 || slide.duration_ms <= slide.now_ms
     }
 
     /// Whether a second Esc/Left right now would quit: the arming press must still be inside
@@ -153,18 +297,41 @@ impl SelectState {
             SelectTab::Songs => shared.sel,
             SelectTab::Courses => self.courses.cursor().wrapping_add(self.courses.len()),
         };
-        (shared.select_gen, cursor, self.record_modal, shared.scores.records().len(), shared.config.display.score_graph, self.esc_quit_armed(), self.tab)
+        (
+            shared.select_gen,
+            cursor,
+            self.record_modal,
+            shared.scores.records().len(),
+            shared.config.display.score_graph,
+            self.esc_quit_armed(),
+            self.tab,
+            self.is_skinned(shared),
+        )
+    }
+
+    /// Whether a skin draws the browser, or is on its way to: the scene is worded for the screen
+    /// that draws it.
+    fn is_skinned(&self, shared: &AppShared) -> bool {
+        shared.has_skin_document(SKIN_TYPE_MUSIC_SELECT)
     }
 
     /// Move the focused row one step down the list (`forward`) or up it, on whichever tab is up.
-    /// The song list stops at its ends; the course list wraps.
+    ///
+    /// The course list wraps. The song list wraps when a skin draws the browser, whose wheel goes
+    /// round the ends of its list as the reference's does (`BarManager.move`); the built-in
+    /// browser's list stops at its ends, as it always has.
     fn step_cursor(&mut self, shared: &mut AppShared, forward: bool) {
         if self.tab == SelectTab::Courses {
             self.courses.move_cursor(if forward { 1 } else { -1 });
             return;
         }
-        if forward {
-            if shared.sel + 1 < shared.select_items.len() {
+        let rows = shared.select_items.len();
+        if shared.has_skin_document(SKIN_TYPE_MUSIC_SELECT) {
+            if rows > 0 {
+                shared.sel = (shared.sel.min(rows - 1) + if forward { 1 } else { rows - 1 }) % rows;
+            }
+        } else if forward {
+            if shared.sel + 1 < rows {
                 shared.sel += 1;
             }
         } else {
@@ -215,10 +382,17 @@ impl SelectState {
     /// Any replay download still in flight is abandoned when a chart starts: its result would
     /// otherwise land mid-load and swap the chart out from under the run that is starting.
     fn select_enter(&mut self, shared: &mut AppShared) -> Transition {
+        self.enter_row(shared, shared.sel)
+    }
+
+    /// Enter the select item on `row` of the song list, which is the focused one for every way in
+    /// but a press on a folder a skin's wheel shows off the cursor. The course tab has no rows of
+    /// that list on show: there it is the focused course that starts.
+    fn enter_row(&mut self, shared: &mut AppShared, row: usize) -> Transition {
         if self.tab == SelectTab::Courses {
             return self.course_enter(shared);
         }
-        match shared.select_items.get(shared.sel) {
+        match shared.select_items.get(row) {
             Some(SelectItem::Song(i)) => {
                 let i = *i;
                 self.record_modal = None;
@@ -262,6 +436,7 @@ impl SelectState {
         } else {
             self.courses.resolve_in_library(&shared.library);
         }
+        self.courses_generation = self.courses_generation.wrapping_add(1);
     }
 
     /// Open the practice panel on the focused chart. The panel needs the parsed chart, so the load
@@ -370,15 +545,18 @@ impl SelectState {
     /// (Re)compute the focused chart's heavy detail (notes/LN/length/BPM range) only when the focus
     /// moves to a different song — so scrolling the list parses at most one chart per moved row.
     ///
-    /// The cover (`#STAGEFILE`, then `#BANNER`) is decoded on the same schedule and uploaded into
-    /// the single BGA slot when the browser draws, so it costs one decode per moved row too.
+    /// The cover is decoded on the same schedule ([`SelectState::refresh_cover`]).
     fn refresh_focused_detail(&mut self, shared: &AppShared, now: Instant) {
         let si = shared.focused_song_index();
         if si != self.focus_settle_si {
             self.focus_settle_si = si;
             self.focus_settle_at = now;
         }
-        if si == self.focused_detail_si || self.focus_settle_at.elapsed() < FOCUS_DETAIL_DEBOUNCE {
+        if self.focus_settle_at.elapsed() < FOCUS_DETAIL_DEBOUNCE {
+            return;
+        }
+        self.refresh_cover(shared, si);
+        if si == self.focused_detail_si {
             return;
         }
         self.focused_detail_si = si;
@@ -386,10 +564,54 @@ impl SelectState {
             Some(db) => crate::library::chart_detail(db, &e.path, e.mode),
             None => compute_chart_detail(&e.path, e.mode),
         });
+    }
+
+    /// Decode the cover of the chart the focus has settled on (`#STAGEFILE`, then `#BANNER`), which
+    /// is uploaded into the single BGA slot when the built-in browser draws, so it costs one decode
+    /// per moved row.
+    ///
+    /// A browser a skin draws does not decode it here, on the frame loop: its pictures are read by a
+    /// worker ([`SelectState::refresh_song_images`]) and the cover is taken from those. The cover is
+    /// forgotten while a skin draws, so a skin that goes away -- one that could not be read, or one
+    /// the player switched off -- leaves the built-in browser to decode its cover again.
+    fn refresh_cover(&mut self, shared: &AppShared, si: Option<usize>) {
+        if shared.has_skin_document(SKIN_TYPE_MUSIC_SELECT) {
+            self.cover_image = None;
+            self.cover_si = None;
+            return;
+        }
+        if si == self.cover_si {
+            return;
+        }
+        self.cover_si = si;
         self.cover_image = si.and_then(|i| shared.library.songs().get(i)).and_then(|e| {
             let dir = e.path.parent()?;
             [&e.stagefile, &e.banner].into_iter().filter(|n| !n.trim().is_empty()).find_map(|n| decode_bga_image(dir, n))
         });
+    }
+
+    /// Ask for the pictures a skin's frame refers to, and take in the ones that have been read.
+    ///
+    /// The stage file and the banner are those of the chart under the cursor, changed the moment
+    /// the cursor moves, as the reference changes them (`MusicSelector.selectedBarMoved`); any
+    /// other kind of bar has none. The back image is the one of the chart that was loaded last,
+    /// which is the only back image the reference's browser ever has
+    /// (`BMSResource.setBMSFile`). A browser no skin draws asks for nothing.
+    fn refresh_song_images(&mut self, shared: &AppShared) {
+        if !shared.has_skin_document(SKIN_TYPE_MUSIC_SELECT) {
+            self.images.want(Wanted::default());
+            return;
+        }
+        if self.loaded_backbmp.as_ref().is_none_or(|(chart, facts, _)| *chart != shared.chart_path || *facts != self.facts_generation) {
+            self.loaded_backbmp = Some((shared.chart_path.clone(), self.facts_generation, shared.loaded_chart_backbmp(&self.facts)));
+        }
+        let focused = self.bars.bars().get(self.cursor(shared)).and_then(|bar| bar.chart.as_ref()).map(|chart| &chart.images);
+        self.images.want(Wanted {
+            stagefile: focused.and_then(|images| images.stagefile.as_deref()),
+            banner: focused.and_then(|images| images.banner.as_deref()),
+            backbmp: self.loaded_backbmp.as_ref().and_then(|(_, _, backbmp)| backbmp.as_deref()),
+        });
+        self.images.poll();
     }
 
     /// Open the record-detail modal for the focused chart (newest record first), if it has any.
@@ -420,8 +642,14 @@ impl SelectState {
         };
         let file = shared.scores.for_md5(&md5).get(ri).and_then(|r| r.replay_file.clone());
         let Some(file) = file else { return Transition::Stay };
+        self.play_replay_file(shared, &file)
+    }
+
+    /// Load the saved replay `file` and start it, which also closes the record modal: a replay that
+    /// cannot be read leaves the browser where it is with a message.
+    fn play_replay_file(&mut self, shared: &mut AppShared, file: &str) -> Transition {
         let dir = shared.settings_path.parent().map(|d| d.join("replays")).unwrap_or_else(|| PathBuf::from("replays"));
-        match Replay::load(&dir.join(&file)) {
+        match Replay::load(&dir.join(file)) {
             Ok(rp) => {
                 self.record_modal = None;
                 shared.chart_path = rp.chart_path.clone();
@@ -663,6 +891,28 @@ impl SelectState {
         Transition::Stay
     }
 
+    /// One key going down on a browser a skin draws, once the key table has noted it, for the two
+    /// things only such a browser has: the screens the reference's browser opens from its own keys,
+    /// and the option panels. Answers what the key asked for, or `None` when it is not one of these.
+    ///
+    /// `6` opens the key configuration and `F12` the skin settings, which are the events 13 and 14
+    /// (`MusicSelector.input`). While an option panel is called up the keys that move through the
+    /// list and start what is under the cursor are the panel's and do nothing to the list: the
+    /// reference reads none of them with a panel up, and the two arrows that move the cursor scroll
+    /// the first panel's target instead ([`panel`]).
+    fn skin_screen_key(&mut self, shared: &mut AppShared, code: KeyCode) -> Option<Transition> {
+        match code {
+            KeyCode::Digit6 => Some(self.run_event(shared, BUTTON_KEYCONFIG, 0)),
+            KeyCode::F12 => Some(self.run_event(shared, BUTTON_SKINSELECT, 0)),
+            KeyCode::ArrowUp | KeyCode::ArrowDown | KeyCode::ArrowLeft | KeyCode::ArrowRight | KeyCode::Enter | KeyCode::NumpadEnter
+                if self.panel_is_called_up(shared) =>
+            {
+                Some(Transition::Stay)
+            }
+            _ => None,
+        }
+    }
+
     /// Keys while the search box is open: everything that is not a control key types into the query.
     fn search_key(&mut self, shared: &mut AppShared, key: &KeyInput<'_>) -> Transition {
         match key.code {
@@ -713,25 +963,64 @@ impl StageHandler for SelectState {
     /// search box, the record modal, the filter panel. The option overlay opens on a shift key, and
     /// a shift key held to type a capital letter belongs to the search box rather than to it.
     fn holds_keys(&self, ctx: &FrameCtx<'_>) -> bool {
-        ctx.shared.searching || self.record_modal.is_some() || self.filter.is_open()
+        ctx.shared.searching || self.record_modal.is_some() || self.filter.is_open() || self.guide_open
     }
 
     /// Arriving back on the browser is when the course list is re-resolved: a scan that has just
-    /// finished may have supplied the very charts a course was missing.
+    /// finished may have supplied the very charts a course was missing. A key still held from the
+    /// screen that was left is not a press here.
     fn on_enter(&mut self, ctx: &mut FrameCtx<'_>) {
+        SelectState::end_autoplay_run(ctx.shared);
         self.refresh_courses(ctx.shared);
+        self.listening = false;
+        self.guide_open = false;
     }
 
+    /// One frame of the browser. What moves the list depends on what draws it: a skin's browser
+    /// reads the reference's key table once a frame ([`SelectState::skin_input_frame`]) and keeps
+    /// the skin's timers ([`SelectState::run_scene_timers`]), a browser waiting for its skin takes
+    /// no input at all, and the built-in browser repeats a held turntable as it always has.
     fn update(&mut self, ctx: &mut FrameCtx<'_>) -> Transition {
         let started = self.poll_replay_download(ctx.shared);
         if !matches!(started, Transition::Stay) {
             return started;
         }
-        self.repeat_scratch(ctx);
+        let skin = skin_status(ctx.shared);
+        self.refresh_lent(ctx.shared);
+        let asked = match skin {
+            SkinStatus::Ready => match self.skin_input_frame(ctx) {
+                Transition::Stay => self.carry_out_skin_events(ctx.shared),
+                asked => asked,
+            },
+            SkinStatus::Reading => {
+                self.listening = false;
+                self.guide_open = false;
+                self.panel = PanelState::default();
+                Transition::Stay
+            }
+            SkinStatus::Gone => {
+                self.listening = false;
+                self.guide_open = false;
+                self.panel = PanelState::default();
+                self.repeat_scratch(ctx);
+                Transition::Stay
+            }
+        };
+        self.settle_option_changes(ctx.shared);
+        if !matches!(asked, Transition::Stay) {
+            return asked;
+        }
+        self.bar_changed |= skin == SkinStatus::Ready && SelectState::scrollbar_was_dragged(ctx.shared);
+        self.carry_out_skin_writes(ctx.shared);
         if self.applied != Some((ctx.shared.select_gen, self.filter.filter(&ctx.shared.config), ctx.shared.config.library.sort)) {
             self.rebuild(ctx.shared);
         }
         self.refresh_focused_detail(ctx.shared, ctx.now);
+        self.refresh_bars(ctx.shared);
+        if skin == SkinStatus::Ready {
+            self.run_scene_timers(ctx.shared);
+        }
+        self.refresh_song_images(ctx.shared);
         self.update_preview(ctx.shared, ctx.now);
         self.update_ranking(ctx.shared);
         Transition::Stay
@@ -740,9 +1029,11 @@ impl StageHandler for SelectState {
     /// The preview owns the shared output stream's preview namespace, so it is torn down before any
     /// other screen can touch the engine.
     fn on_exit(&mut self, ctx: &mut FrameCtx<'_>) {
+        self.write_option_changes(ctx.shared);
         if self.preview_active() {
             self.stop_preview(ctx.shared);
         }
+        SelectState::end_select_bgm(ctx.shared);
     }
 
     /// Keys on the browser. While the search box is open, anything that is not a named shortcut —
@@ -765,6 +1056,14 @@ impl StageHandler for SelectState {
         if !key.pressed {
             return Transition::Stay;
         }
+        let skin = skin_status(ctx.shared);
+        if skin == SkinStatus::Reading {
+            return Transition::Stay;
+        }
+        if self.guide_open {
+            self.guide_key(key.code);
+            return Transition::Stay;
+        }
         if self.record_modal.is_some() {
             return self.modal_key(ctx.shared, &key);
         }
@@ -779,6 +1078,18 @@ impl StageHandler for SelectState {
         }
         if !matches!(key.code, KeyCode::Escape | KeyCode::ArrowLeft) {
             self.esc_quit_at = None;
+        }
+        if skin == SkinStatus::Ready {
+            if key.code == GUIDE_KEY && !self.ctrl_held && !self.ranking_open {
+                self.guide_open = true;
+                return Transition::Stay;
+            }
+            if self.skinned_key(ctx, key.code) {
+                return Transition::Stay;
+            }
+            if let Some(asked) = self.skin_screen_key(ctx.shared, key.code) {
+                return asked;
+            }
         }
         match key.code {
             KeyCode::Escape | KeyCode::ArrowLeft => return self.select_escape(ctx.shared),
@@ -811,6 +1122,10 @@ impl StageHandler for SelectState {
     ///
     /// Only a lane going down counts. The key is named by its index in the mode that is up
     /// ([`key_index_of`]), so the second side of a double-play layout does the same as the first.
+    ///
+    /// That is the built-in browser. A browser a skin draws reads the whole table off the keys'
+    /// state once a frame, so there a key going down is only noted for the frame that follows, and
+    /// a browser waiting for its skin takes nothing.
     fn handle_pad(&mut self, ctx: &mut FrameCtx<'_>, event: PadEvent) -> Transition {
         let PadEvent::Lane { lane, dir, press: true } = event else {
             return Transition::Stay;
@@ -818,6 +1133,14 @@ impl StageHandler for SelectState {
         let Some(index) = key_index_of(ctx.shared.mode, lane, dir) else {
             return Transition::Stay;
         };
+        match skin_status(ctx.shared) {
+            SkinStatus::Reading => return Transition::Stay,
+            SkinStatus::Ready => {
+                self.note_key_index(ctx, index);
+                return Transition::Stay;
+            }
+            SkinStatus::Gone => {}
+        }
         if !self.takes_pad_keys(ctx) {
             return Transition::Stay;
         }
@@ -827,8 +1150,8 @@ impl StageHandler for SelectState {
                 self.step_cursor(ctx.shared, index == SCRATCH_FORWARD_INDEX);
                 self.scratch_hold = Some(ScratchHold { index, next_step_at: ctx.now + SCRATCH_REPEAT_DELAY });
             }
-            _ if OPEN_KEY_INDICES.contains(&index) => return self.select_enter(ctx.shared),
-            _ if CLOSE_KEY_INDICES.contains(&index) => return self.close_folder(ctx.shared),
+            _ if BUILT_IN_KEY_LAYOUT.carries(index, keys::SelectKey::FolderOpen) => return self.select_enter(ctx.shared),
+            _ if BUILT_IN_KEY_LAYOUT.carries(index, keys::SelectKey::FolderClose) => return self.close_folder(ctx.shared),
             _ => {}
         }
         Transition::Stay
@@ -859,6 +1182,8 @@ impl StageHandler for SelectState {
             Some(Hot::RankingRow(i)) => self.ranking_click(ctx.shared, i),
             Some(Hot::ModalReplay) => return self.play_record_replay(ctx.shared),
             Some(Hot::ModalClose) => self.record_modal = None,
+            Some(Hot::GuideClose) => self.guide_open = false,
+            Some(Hot::OverlayPanel) => {}
             Some(Hot::NavSearch) => {
                 if ctx.shared.searching {
                     self.exit_search(ctx.shared);
@@ -877,32 +1202,78 @@ impl StageHandler for SelectState {
         Transition::Stay
     }
 
+    /// The wheel of the mouse turns a skin's list, and waits for the frame that follows like the
+    /// keys do (`BarRenderer.input`). The built-in browser has no use for it.
+    fn handle_scroll(&mut self, ctx: &mut FrameCtx<'_>, lines: f32) -> Transition {
+        if skin_status(ctx.shared) == SkinStatus::Ready && !self.keys_are_elsewhere(ctx) {
+            self.wheel_lines += lines;
+        }
+        Transition::Stay
+    }
+
     /// Paints the browser. The focused chart's cover goes into the single BGA slot, drawn behind the
     /// panel quads: the renderer leaves the cover square unfilled so the texture shows through.
+    ///
+    /// A skin that is on its way is waited for in the dark rather than behind the built-in browser:
+    /// the reference stands still on the frame it left while it reads a skin, which after a result
+    /// has faded out is black. A skin that is not coming -- it could not be read, or it has been
+    /// waited for too long -- leaves the built-in browser to draw.
+    ///
+    /// The frame a skin can first be drawn on, after this browser has drawn frames without it, is
+    /// the first moment of its scene: every timer off and the scene clock at zero. A skin that was
+    /// there on the browser's first frame is carrying a scene on -- the one that was begun when the
+    /// screen was entered, or the one a screen opened over the browser was closed back onto -- and
+    /// is left to.
     fn draw(&mut self, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'_>) {
         self.refresh_scene_cache(ctx.shared);
+        self.refresh_lent(ctx.shared);
         let ranking_lines = if self.ranking_open { self.ranking_lines(ctx.shared) } else { Vec::new() };
         self.clamp_ranking_selection(ctx.shared, &ranking_lines);
         let Some(view) = self.cached_scene.as_ref() else {
             return;
         };
         ctx.shared.prepare_skin(canvas, SKIN_TYPE_MUSIC_SELECT);
+        let skin = skin_status(ctx.shared);
+        if skin == SkinStatus::Ready && self.skin_seen.is_some_and(|seen| seen != SkinStatus::Ready) {
+            ctx.shared.start_skin_scene_clock();
+        }
+        self.skin_seen = Some(skin);
         let has_document = ctx.shared.has_skin_document(SKIN_TYPE_MUSIC_SELECT);
-        let mut document_background = None;
-        match (&self.cover_image, &view.detail) {
-            (Some(cover), SelectDetail::Song(_)) if has_document => {
-                canvas.clear_bga();
-                document_background = canvas.background_texture(cover.generation, &cover.rgba, cover.width, cover.height);
-            }
-            (Some(cover), SelectDetail::Song(_)) => {
+        match (self.cover_image.as_ref().or_else(|| self.images.cover()), &view.detail) {
+            (Some(cover), SelectDetail::Song(_)) if !has_document => {
                 canvas.set_background(cover.generation, &cover.rgba, cover.width, cover.height, cover_rect());
             }
             _ => canvas.clear_bga(),
         }
-        let now_us = ctx.shared.skin_now_us();
-        let row = ctx.shared.sel;
-        ctx.shared.skin_select_timers.update(&mut ctx.shared.skin_timers, row, now_us);
-        if ctx.shared.draw_select_skin(canvas, view, document_background) {
+        let wall_clock = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+        let cursor = self.cursor(ctx.shared);
+        let images = if has_document { self.images.textures(canvas) } else { ReferenceImages::default() };
+        let bars = if has_document { self.bars.wheel(i64::try_from(wall_clock.as_secs()).unwrap_or(i64::MAX)) } else { &[] };
+        let wheel = SongBars {
+            ln_mode: i32::from(ctx.shared.config.judge.ln_mode.id()),
+            scroll: self.scroller.at(self.clock.millis_at(ctx.now)),
+            ..SongBars::new(bars, cursor)
+        };
+        let data = FrameData { bars: Some(&wheel), images, bga: BgaFrame::of(images.stagefile.or(images.banner)), ..FrameData::default() };
+        let lent = BrowserLent {
+            courses: &view.header,
+            panel: self.panel.number(),
+            mode_filter: self.filter.filter(&ctx.shared.config).mode,
+            course: self.course_shown.as_ref().map(|(_, _, course)| course),
+            selected_replay: self.selected_replay,
+            best: self.focused_records.best(),
+            replays_stored: self.focused_records.replays_stored(),
+        };
+        let focused = if self.tab == SelectTab::Songs { ctx.shared.focused_song_index() } else { None };
+        let measured = self.focused_detail.as_ref().filter(|_| self.focused_detail_si == focused);
+        let meta = focused.and_then(|index| Some(chart_under_cursor(ctx.shared.library.songs().get(index)?, self.facts.of(index), measured)));
+        let chart = meta.as_ref().map_or(ChartState::Empty, ChartState::Chart);
+        if ctx.shared.draw_select_skin(canvas, &SelectDraw { view, data, chart, lent }) {
+            self.draw_skin_overlays(canvas, ctx.shared, view, &ranking_lines);
+            return;
+        }
+        if skin == SkinStatus::Reading {
+            canvas.native().clear(Color::BLACK);
             return;
         }
         let hot = render_select(canvas, view);

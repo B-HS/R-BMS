@@ -1,20 +1,138 @@
 //! What the song browser hands the renderer: the row list, the focused chart's detail panel, the
 //! record modal, and the cache that keeps all of it from being rebuilt on every frame of the
 //! continuous redraw loop.
+//!
+//! The rows are not read off the library here. The browser keeps one model of its list
+//! ([`BarList`], a [`SelectBar`] for every row), and both screens that can draw the list are
+//! converted down from it: the built-in browser's rows ([`row_of`]) and the bars a skin's wheel
+//! turns through ([`wheel_bar`]).
 #![allow(clippy::wildcard_imports)]
 
+use rbms_render::skin_render::frame::SongBar;
+
 use crate::stage::select::SelectState;
+use crate::stage::select::list::{ChartFacts, course_bars};
 use crate::*;
 
-/// The DJ rank of a chart's best run, as the row and the detail panel label it, or `None` when
-/// nothing has been recorded on it. Follows the SCORE GRAPH option, which is what every other rank
-/// on this screen is gated on, so one setting turns the whole scoring readout on and off.
-fn dj_level_of(shared: &AppShared, md5: &str) -> Option<&'static str> {
-    if !shared.config.display.score_graph {
-        return None;
+/// How long a chart counts as newly added, in seconds: a day (`BarRenderer.prepare`,
+/// `3600 * 24`).
+const NEW_FOR_SECS: i64 = 86_400;
+
+/// The colour of the lamp of a row nothing has been recorded on.
+const LAMP_UNLIT: Color = Color::rgb(44, 44, 54);
+
+/// The colour of the lamp of a course the library cannot supply every chart of.
+const LAMP_UNPLAYABLE: Color = Color::rgb(70, 30, 30);
+
+/// What the first-run hint says under its title. The built-in browser has a row of buttons to point
+/// at; a browser a skin draws has none, so it names the keys instead.
+const WELCOME_BODY: &str = "Add your music folder \u{2014} press O or click FOLDERS below";
+const WELCOME_BODY_SKINNED: &str = "Add your music folder \u{2014} press O   (H lists every key)";
+
+/// What a [`BarList`] was built from: the list's generation, how many records the score book
+/// holds, the tab on show, how often the course list and the chart facts have been read, the play
+/// mode the folders were counted under, and whether they were built for a skin to read.
+type BarsKey = (u64, usize, SelectTab, u64, u64, Option<Mode>, bool);
+
+/// The browser's list as bars, and the same list as the bars a skin's wheel reads.
+///
+/// The model is rebuilt when what it was built from changes ([`BarsKey`]), which leaves out the
+/// cursor: moving through a list rebuilds nothing. The wheel's bars are made from the model the
+/// first time a skin's frame asks for them and again when the model changes or a chart on show
+/// stops being new.
+#[derive(Default)]
+pub(super) struct BarList {
+    key: Option<BarsKey>,
+    bars: Vec<SelectBar>,
+    wheel: Option<Wheel>,
+}
+
+/// The wheel's bars, and the second up to which they hold.
+struct Wheel {
+    bars: Vec<SongBar>,
+    /// The last second every bar marked as new still is, or `None` when none is.
+    fresh_until: Option<i64>,
+}
+
+impl BarList {
+    /// The model: one bar for every row of the list on show.
+    pub(super) fn bars(&self) -> &[SelectBar] {
+        &self.bars
     }
-    let best = shared.scores.for_md5(md5).into_iter().max_by_key(|r| r.ex_score)?;
-    Some(RANK_BANDS[dj_rank(best.ex_score, best.max_ex)].0)
+
+    /// The bars a skin's wheel turns through at `now_secs` on the wall clock.
+    pub(super) fn wheel(&mut self, now_secs: i64) -> &[SongBar] {
+        let stale = self.wheel.as_ref().is_none_or(|wheel| wheel.fresh_until.is_some_and(|until| now_secs > until));
+        if stale {
+            let fresh_until = self.bars.iter().filter_map(new_until).filter(|until| now_secs <= *until).min();
+            self.wheel = Some(Wheel { bars: self.bars.iter().map(|bar| wheel_bar(bar, now_secs)).collect(), fresh_until });
+        }
+        self.wheel.as_ref().map_or(&[], |wheel| wheel.bars.as_slice())
+    }
+}
+
+/// The last second a bar counts as newly added, for the bars that can: a chart the song database
+/// knows the arrival of.
+fn new_until(bar: &SelectBar) -> Option<i64> {
+    Some(bar.chart.as_ref()?.added_at? + NEW_FOR_SECS)
+}
+
+/// One bar as a skin's wheel reads it at `now_secs` on the wall clock (`BarRenderer.prepare` and
+/// `render`, with every question they ask a bar answered).
+pub(super) fn wheel_bar(bar: &SelectBar, now_secs: i64) -> SongBar {
+    let chart = bar.chart.as_ref();
+    SongBar {
+        kind: bar.kind,
+        title: bar.full_title(),
+        is_new: new_until(bar).is_some_and(|until| now_secs <= until),
+        level: chart.map_or(0, |chart| chart.level),
+        difficulty: chart.map_or(0, |chart| chart.difficulty),
+        lamp: i32::from(bar.lamp.unwrap_or_default()),
+        rival_lamp: i32::from(bar.rival_lamp.unwrap_or_default()),
+        trophy: bar.trophy,
+        features: chart.map(|chart| chart.features).or(bar.course.as_ref().map(|course| course.features)).unwrap_or_default(),
+        distribution: bar.distribution.map(Box::new),
+    }
+}
+
+/// One bar as the row the built-in browser draws. `score_graph` is the SCORE GRAPH option, which
+/// is what every rank on that screen is gated on.
+fn row_of(bar: &SelectBar, score_graph: bool) -> SelectRow {
+    let opens = SelectRow {
+        folder: true,
+        title: bar.title.clone(),
+        mode_short: "",
+        mode_color: Color::GRAY,
+        level: String::new(),
+        difficulty_color: Color::GRAY,
+        lamp: LAMP_UNLIT,
+        folder_count: None,
+        dj_level: None,
+        favorite: false,
+    };
+    if let Some(course) = &bar.course {
+        let playable = bar.kind == BarKind::Course { complete: true };
+        return SelectRow {
+            level: course.badges.join(" "),
+            difficulty_color: if playable { Color::WHITE } else { Color::RED },
+            lamp: if playable { LAMP_UNLIT } else { LAMP_UNPLAYABLE },
+            ..opens
+        };
+    }
+    let Some(chart) = &bar.chart else {
+        return SelectRow { folder: bar.kind.is_directory(), ..opens };
+    };
+    SelectRow {
+        folder: false,
+        mode_short: mode_short(chart.mode),
+        mode_color: mode_color(chart.mode),
+        level: chart.level_text.clone(),
+        difficulty_color: difficulty_color(chart.difficulty),
+        lamp: bar.lamp.map_or(LAMP_UNLIT, |clear| clear_label_color(clear_type_from_id(clear)).1),
+        dj_level: chart.best.filter(|_| score_graph).map(|best| RANK_BANDS[dj_rank(best.ex, best.max_ex)].0),
+        favorite: chart.favorite,
+        ..opens
+    }
 }
 
 impl SelectState {
@@ -28,40 +146,7 @@ impl SelectState {
         if self.tab == SelectTab::Courses {
             return self.build_course_scene(shared);
         }
-        let rows: Vec<SelectRow> = shared
-            .select_items
-            .iter()
-            .map(|item| match item {
-                SelectItem::Folder { label, .. } => SelectRow {
-                    folder: true,
-                    title: label.clone(),
-                    mode_short: "",
-                    mode_color: Color::GRAY,
-                    level: String::new(),
-                    difficulty_color: Color::GRAY,
-                    lamp: Color::rgb(44, 44, 54),
-                    folder_count: None,
-                    dj_level: None,
-                    favorite: false,
-                },
-                SelectItem::Song(si) => {
-                    let e = &shared.library.songs()[*si];
-                    let lamp = shared.scores.best_clear_for_md5(&e.md5).map(|c| clear_label_color(clear_type_from_id(c)).1).unwrap_or(Color::rgb(44, 44, 54));
-                    SelectRow {
-                        folder: false,
-                        title: e.title.clone(),
-                        mode_short: mode_short(e.mode),
-                        mode_color: mode_color(e.mode),
-                        level: e.level.clone(),
-                        difficulty_color: difficulty_color(e.difficulty),
-                        lamp,
-                        folder_count: None,
-                        dj_level: dj_level_of(shared, &e.md5),
-                        favorite: shared.favorites.contains(&e.md5),
-                    }
-                }
-            })
-            .collect();
+        let rows: Vec<SelectRow> = self.bars.bars().iter().map(|bar| row_of(bar, shared.config.display.score_graph)).collect();
 
         let header = match shared.select_view {
             SelectView::Root => {
@@ -191,7 +276,7 @@ impl SelectState {
         } else if filter.is_some() {
             Some(("NO CHARTS MATCH", "Press F2 to change the filter  \u{00B7}  Backspace there clears it"))
         } else if shared.config.library.folders.is_empty() {
-            Some(("WELCOME TO rbms", "Add your music folder \u{2014} press O or click FOLDERS below"))
+            Some(("WELCOME TO rbms", if self.is_skinned(shared) { WELCOME_BODY_SKINNED } else { WELCOME_BODY }))
         } else {
             Some(("NO CHARTS", "Press O to manage folders  \u{00B7}  T for difficulty tables"))
         };
@@ -216,26 +301,10 @@ impl SelectState {
     /// list of charts to be played in order rather than one chart, and its row carries the stage
     /// count and the constraint badges where a chart's mode and level would go.
     fn build_course_scene(&self, shared: &AppShared) -> SelectScene {
-        let rows: Vec<SelectRow> = self
-            .courses
-            .rows()
-            .into_iter()
-            .map(|row| SelectRow {
-                folder: true,
-                title: row.title,
-                mode_short: "",
-                mode_color: Color::GRAY,
-                level: row.badges.join(" "),
-                difficulty_color: if row.playable { Color::WHITE } else { Color::RED },
-                lamp: if row.playable { Color::rgb(44, 44, 54) } else { Color::rgb(70, 30, 30) },
-                folder_count: None,
-                dj_level: None,
-                favorite: false,
-            })
-            .collect();
-        let detail = match self.courses.focused() {
-            Some(entry) => SelectDetail::Folder { label: entry.course.name.clone(), count: entry.course.stage_count() },
-            None => SelectDetail::Empty,
+        let rows: Vec<SelectRow> = self.bars.bars().iter().map(|bar| row_of(bar, shared.config.display.score_graph)).collect();
+        let detail = match self.bars.bars().get(self.courses.cursor()) {
+            Some(SelectBar { title, course: Some(course), .. }) => SelectDetail::Folder { label: title.clone(), count: course.stages },
+            _ => SelectDetail::Empty,
         };
         let empty_hint = rows.is_empty().then_some(("NO COURSES", "Put course json files in the courses folder next to your settings"));
         SelectScene {
@@ -257,10 +326,42 @@ impl SelectState {
     /// redraws continuously, so rebuilding every frame would re-walk and re-allocate the whole song
     /// list.
     pub(super) fn refresh_scene_cache(&mut self, shared: &AppShared) {
+        self.refresh_bars(shared);
         let key = self.select_key(shared);
         if self.cached_key != Some(key) || self.cached_scene.is_none() {
             self.cached_scene = Some(self.build_scene(shared));
             self.cached_key = Some(key);
+        }
+    }
+}
+
+impl SelectState {
+    /// Bring the list's model up to date: read the chart facts a skin's wheel labels a chart by when
+    /// a skin is drawing and they have not been read for this library, and rebuild the bars when
+    /// anything they are built from has changed.
+    pub(super) fn refresh_bars(&mut self, shared: &AppShared) {
+        let skinned = shared.has_skin_document(SKIN_TYPE_MUSIC_SELECT);
+        if !self.facts.serve(&shared.library, skinned) {
+            self.facts = if skinned { ChartFacts::read(shared.song_db.as_ref(), &shared.library) } else { ChartFacts::unread(&shared.library) };
+            self.facts_generation = self.facts_generation.wrapping_add(1);
+        }
+        let mode = self.applied.and_then(|(_, filter, _)| filter.mode);
+        let key = (shared.select_gen, shared.scores.records().len(), self.tab, self.courses_generation, self.facts_generation, mode, skinned);
+        if self.bars.key == Some(key) {
+            return;
+        }
+        let bars = match self.tab {
+            SelectTab::Songs => shared.select_bars(&self.facts, mode, skinned),
+            SelectTab::Courses => course_bars(&self.courses, &shared.library, &self.facts),
+        };
+        self.bars = BarList { key: Some(key), bars, wheel: None };
+    }
+
+    /// Where the cursor is in the list on show.
+    pub(super) fn cursor(&self, shared: &AppShared) -> usize {
+        match self.tab {
+            SelectTab::Songs => shared.sel,
+            SelectTab::Courses => self.courses.cursor(),
         }
     }
 }

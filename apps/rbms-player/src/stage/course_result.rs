@@ -147,7 +147,7 @@ impl CourseResultState {
             (SkinStatus::Ready, false) => Cues::of(shared).fail,
             (_, cleared) => course_result_sound(cleared),
         };
-        shared.play_system_sound(cue);
+        shared.play_result_sound(cue, shared.config.audio.loop_course_result_sound);
     }
 
     /// Play the closing cue where the fade begins, once, silencing the arrival cue
@@ -247,6 +247,10 @@ impl StageHandler for CourseResultState {
     fn on_exit(&mut self, ctx: &mut FrameCtx<'_>) {
         if !self.scene.begun {
             ctx.shared.play_system_sound(SystemSound::CourseClose);
+            if ctx.shared.config.audio.loop_course_result_sound {
+                ctx.shared.stop_system_sound(SystemSound::CourseClear);
+                ctx.shared.stop_system_sound(SystemSound::CourseFail);
+            }
             return;
         }
         let cues = Cues::of(ctx.shared);

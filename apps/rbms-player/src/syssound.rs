@@ -12,10 +12,35 @@
 //! `isGuideSE` switch (`BMSPlayer.java:398-410`).
 //!
 //! Playback goes through the System bus so the system-sound volume is the one that governs it. A cue
-//! is played once ([`SystemSoundSet::play`]) and can be cut short ([`SystemSoundSet::stop`]), the way
-//! the reference silences the result cue when the screen closes (`MainState.stop(sound)`).
+//! is played once ([`SystemSoundSet::play`]) or repeated until it is stopped
+//! ([`SystemSoundSet::play_loop`]), and can be cut short ([`SystemSoundSet::stop`]), the way the
+//! reference plays the result cue with `isLoopResultSound` and silences it when the screen closes
+//! (`MainState.play(sound, loop)`, `MainState.stop(sound)`).
+//!
+//! # The select music
+//!
+//! The reference plays the `select` sound as the song browser's music, looped from the moment the
+//! browser is up until it is left, and turns it down to nothing while a song preview sounds and back
+//! up afterwards (`PreviewMusicProcessor.PreviewThread.run`: the music is played at the system volume
+//! with `loop = true`, faded to 0 over eleven 15 ms steps when a preview takes over, and set back to
+//! the system volume when the preview is stopped, with the loop having kept running underneath).
+//! [`SelectBgm`] holds that, and [`AppShared::drive_select_bgm`] puts it on the mixer: the music is a
+//! looped effect whose level is moved (`AudioEngine::set_effect_level`) instead of being stopped, so
+//! it keeps its place under a preview.
+//!
+//! rbms has always played `select` once as the cue for starting a chart, and the set it ships
+//! carries a half-second cue under that name. A sound that short is not music, so [`SelectBgm`] only
+//! runs when the file is at least [`SELECT_BGM_MIN_DURATION_US`] long, and a set whose `select` is
+//! that long is music rather than a cue: it is not also played once when a chart is started. A set
+//! with a short `select` behaves exactly as before.
+//!
+//! Which set is read is the player's own setting (`audio.sound_folder`), not the skin's: the
+//! reference chooses its sound set and BGM set from `soundpath` and `bgmpath`, separately from the
+//! skin (`SystemSoundManager.shuffle`), so a skin pack's `Sound` folder is not read unless the player
+//! points the setting at it.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use rbms_audio::{AudioEngine, Bus, DecodedAudio, IdNamespace};
 use rbms_judge::Judge;
@@ -47,6 +72,17 @@ const SYSTEM_SOUND_GAIN_MAX: f32 = 1.0;
 /// The gain a cue is raised at. Loudness is the System bus's job — the settings screen already
 /// pushes `audio.system` to it — so a cue is played at unity and left to the bus.
 pub(crate) const SYSTEM_SOUND_GAIN: f32 = 1.0;
+
+const MICROS_PER_SECOND: i64 = 1_000_000;
+const MILLIS_PER_SECOND: f32 = 1000.0;
+
+/// The shortest `select` sound that is played as music. The reference's is a song-length loop; a
+/// cue for starting a chart is a fraction of a second.
+pub(crate) const SELECT_BGM_MIN_DURATION_US: i64 = 3 * MICROS_PER_SECOND;
+
+/// The level the select music is held at under a preview, and the one it plays at otherwise.
+const SELECT_BGM_HELD_LEVEL: f32 = 0.0;
+const SELECT_BGM_FULL_LEVEL: f32 = 1.0;
 
 /// One slot of a sound set: either nothing was found for the stem, or a decoded clip is held ready
 /// to be handed to a mixer bank. The set keeps its own copy so a stream that is reopened — which
@@ -223,10 +259,63 @@ pub(crate) struct SystemSoundCue {
     pub(crate) gain: f32,
 }
 
+/// What the select music needs done on the mixer this frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum BgmStep {
+    Idle,
+    /// Start the loop.
+    Start,
+    /// Stop the loop.
+    Stop,
+    /// Move the loop's level to this value, keeping it running.
+    Level(f32),
+}
+
+/// Whether the select music is running, on which output stream, and whether it is turned down.
+///
+/// It is asked once a frame for what it wants ([`SelectBgm::step`]) and is told nothing else, so a
+/// stream that was reopened (and so lost the loop) is noticed by its instance id and the loop is
+/// started again on the new one.
+///
+/// A loop is never started while it is to be held: it would begin audibly and be turned down a
+/// moment later. It starts on the first frame it is not held.
+#[derive(Debug, Default)]
+pub(crate) struct SelectBgm {
+    started_on: Option<u64>,
+    held: bool,
+}
+
+impl SelectBgm {
+    /// What to do this frame. `wanted` is whether the browser is up and has music, `engine` the
+    /// instance id of the open output stream (`None` when there is none), and `hold` whether a
+    /// preview is sounding.
+    pub(crate) fn step(&mut self, wanted: bool, engine: Option<u64>, hold: bool) -> BgmStep {
+        let running = engine.is_some() && self.started_on == engine;
+        if !wanted {
+            *self = SelectBgm::default();
+            return if running { BgmStep::Stop } else { BgmStep::Idle };
+        }
+        if !running {
+            if hold || engine.is_none() {
+                *self = SelectBgm::default();
+                return BgmStep::Idle;
+            }
+            *self = SelectBgm { started_on: engine, held: false };
+            return BgmStep::Start;
+        }
+        if hold == self.held {
+            return BgmStep::Idle;
+        }
+        self.held = hold;
+        BgmStep::Level(if hold { SELECT_BGM_HELD_LEVEL } else { SELECT_BGM_FULL_LEVEL })
+    }
+}
+
 /// A loaded sound set: at most one sample per [`SystemSound`], plus the guide switch.
 pub(crate) struct SystemSoundSet {
     slots: Vec<Slot>,
     guide_enabled: bool,
+    bgm: SelectBgm,
 }
 
 impl Default for SystemSoundSet {
@@ -238,7 +327,7 @@ impl Default for SystemSoundSet {
 impl SystemSoundSet {
     /// A set that plays nothing, which is what an unconfigured folder yields.
     pub(crate) fn silent() -> SystemSoundSet {
-        SystemSoundSet { slots: (0..SYSTEM_SOUND_COUNT).map(|_| Slot::Missing).collect(), guide_enabled: false }
+        SystemSoundSet { slots: (0..SYSTEM_SOUND_COUNT).map(|_| Slot::Missing).collect(), guide_enabled: false, bgm: SelectBgm::default() }
     }
 
     /// Read and decode every stem found under `dir`. A stem with no file, or with a file that will
@@ -287,6 +376,20 @@ impl SystemSoundSet {
         matches!(self.slots[sound.slot()], Slot::Decoded(_))
     }
 
+    /// How long the sound in this slot lasts, or `None` when there is none.
+    pub(crate) fn duration_us(&self, sound: SystemSound) -> Option<i64> {
+        let Slot::Decoded(decoded) = &self.slots[sound.slot()] else {
+            return None;
+        };
+        let frames = decoded.samples.len() as i64 / i64::from(decoded.channels.max(1));
+        Some(frames * MICROS_PER_SECOND / i64::from(decoded.rate.max(1)))
+    }
+
+    /// Whether this set's `select` sound is music for the browser to loop rather than a cue.
+    pub(crate) fn select_plays_as_bgm(&self) -> bool {
+        self.duration_us(SystemSound::Select).is_some_and(|duration| duration >= SELECT_BGM_MIN_DURATION_US)
+    }
+
     /// How many of the twenty-two slots hold a sample.
     #[cfg(test)]
     pub(crate) fn resolved_count(&self) -> usize {
@@ -304,9 +407,20 @@ impl SystemSoundSet {
         }
     }
 
-    /// What playing `sound` at `gain` would ask of the mixer, or `None` when this set stays silent
-    /// for it: no file, a guide cue with guides off, or a gain that is not a usable number.
+    /// What playing `sound` once at `gain` would ask of the mixer, or `None` when this set stays
+    /// silent for it: no file, a guide cue with guides off, a gain that is not a usable number, or the
+    /// `select` sound of a set whose `select` is music (see the module documentation), which is looped
+    /// by the browser and not played as the cue for starting a chart.
     pub(crate) fn cue(&self, sound: SystemSound, gain: f32) -> Option<SystemSoundCue> {
+        if sound == SystemSound::Select && self.select_plays_as_bgm() {
+            return None;
+        }
+        self.loop_cue(sound, gain)
+    }
+
+    /// What starting `sound` as a loop at `gain` would ask of the mixer: [`SystemSoundSet::cue`]
+    /// without the rule that keeps music from being played as a cue.
+    pub(crate) fn loop_cue(&self, sound: SystemSound, gain: f32) -> Option<SystemSoundCue> {
         if !self.is_resolved(sound) {
             return None;
         }
@@ -327,6 +441,16 @@ impl SystemSoundSet {
         engine.play_on(Bus::System, cue.id, cue.gain, SYSTEM_SOUND_PAN, SYSTEM_SOUND_PITCH, SYSTEM_SOUND_AT_US);
     }
 
+    /// Start `sound` and repeat it until it is stopped ([`SystemSoundSet::stop`]). Silent, never
+    /// fatal, when this set has nothing for it. A second call starts a second copy on top of the
+    /// first, as the reference's does, so a caller asks once.
+    pub(crate) fn play_loop(&self, engine: &mut AudioEngine, sound: SystemSound, gain: f32) {
+        let Some(cue) = self.loop_cue(sound, gain) else {
+            return;
+        };
+        engine.play_effect(Bus::System, cue.id, cue.gain, true);
+    }
+
     /// Silence `sound`. Asked of a cue that is not sounding it does nothing, and it is asked even of
     /// one whose file has since been replaced: a copy of the old file that is still sounding is
     /// stopped by the sample id they share.
@@ -336,6 +460,45 @@ impl SystemSoundSet {
 }
 
 impl AppShared {
+    /// Start a system sound and repeat it until [`AppShared::stop_system_sound`]. Silent when the
+    /// stream is not open or the set has no file for it.
+    pub(crate) fn play_system_sound_loop(&mut self, sound: SystemSound) {
+        if let Some(engine) = self.audio.as_mut() {
+            self.syssound.play_loop(engine, sound, SYSTEM_SOUND_GAIN);
+        }
+    }
+
+    /// Play a result screen's clear or fail cue once, or repeated when `looped` (the player's
+    /// `isLoopResultSound` / `isLoopCourseResultSound`).
+    pub(crate) fn play_result_sound(&mut self, sound: SystemSound, looped: bool) {
+        if looped {
+            self.play_system_sound_loop(sound);
+        } else {
+            self.play_system_sound(sound);
+        }
+    }
+
+    /// Bring the select music to where the browser wants it: running while `wanted`, turned down
+    /// while `hold`, over `ramp`. Called every frame the browser is up and once with `wanted` false
+    /// when it is left. Does nothing, and opens no stream, for a set without select music.
+    pub(crate) fn drive_select_bgm(&mut self, wanted: bool, hold: bool, ramp: Duration) {
+        let wanted = wanted && self.syssound.select_plays_as_bgm();
+        if wanted {
+            self.ensure_audio();
+        }
+        let engine_id = self.audio.as_ref().map(AudioEngine::instance_id);
+        let step = self.syssound.bgm.step(wanted, engine_id, hold);
+        let Some(engine) = self.audio.as_mut() else {
+            return;
+        };
+        match step {
+            BgmStep::Idle => {}
+            BgmStep::Start => self.syssound.play_loop(engine, SystemSound::Select, SYSTEM_SOUND_GAIN),
+            BgmStep::Stop => self.syssound.stop(engine, SystemSound::Select),
+            BgmStep::Level(level) => engine.set_effect_level(SystemSound::Select.sample_id(), level, ramp.as_secs_f32() * MILLIS_PER_SECOND),
+        }
+    }
+
     /// Silence a system sound. Nothing happens when the stream is not open.
     pub(crate) fn stop_system_sound(&mut self, sound: SystemSound) {
         if let Some(engine) = self.audio.as_mut() {

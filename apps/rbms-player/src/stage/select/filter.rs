@@ -122,6 +122,11 @@ fn step_mode(mode: Option<Mode>, delta: i32) -> Option<Mode> {
     (next > 0).then(|| Mode::ALL[next as usize - 1])
 }
 
+/// The modes the mode axis goes round when it is stepped from a browser a skin draws, starting at
+/// "every mode": the reference's order (`ModeFilter`), less the filters this browser has no mode
+/// for.
+const MODE_FILTER_CYCLE: [Option<Mode>; 6] = [None, Some(Mode::BEAT_7K), Some(Mode::BEAT_14K), Some(Mode::POPN_9K), Some(Mode::BEAT_5K), Some(Mode::BEAT_10K)];
+
 /// Move one step through a fixed list of values, wrapping at neither end so a held key settles.
 fn step_in<T: Copy + PartialEq>(values: &[T], current: T, delta: i32) -> T {
     let at = values.iter().position(|candidate| *candidate == current).unwrap_or(0) as i32;
@@ -158,6 +163,15 @@ impl FilterPanel {
     pub(super) fn toggle(&mut self) {
         self.open = !self.open;
         self.sel = 0;
+    }
+
+    /// Step the mode axis round [`MODE_FILTER_CYCLE`], forward or back, whether or not the panel is
+    /// up (`EventType.mode`). Unlike the panel's own row this goes round the ends: it is stepped by
+    /// one key, which has no other way back.
+    pub(super) fn cycle_mode(&mut self, forward: bool) {
+        let len = MODE_FILTER_CYCLE.len();
+        let at = MODE_FILTER_CYCLE.iter().position(|mode| *mode == self.filter.mode).unwrap_or(0);
+        self.filter.mode = MODE_FILTER_CYCLE[(at + if forward { 1 } else { len - 1 }) % len];
     }
 
     /// The filter the list is built through: this panel's axes, plus the favourites switch as the
@@ -251,6 +265,12 @@ impl FilterPanel {
     }
 }
 
+/// Where the panel is: over the top of the row list's rectangle, as tall as its rows.
+pub(super) fn filter_panel_rect() -> Rect {
+    let list = select_layout().list_rect;
+    Rect::new(list.x, list.y, list.w, ROWS_Y + FILTER_ROWS.len() as f32 * ROW_PITCH + 8.0)
+}
+
 /// Draw the panel over the top of the row list.
 ///
 /// It is keyboard-only: the browser's clickable regions name rows and buttons of the list itself,
@@ -259,8 +279,7 @@ pub(super) fn render_filter_panel<R: Renderer>(r: &mut R, panel: &FilterPanel, c
     let th = theme();
     let list = select_layout().list_rect;
     let filter = panel.filter(config);
-    let height = ROWS_Y + FILTER_ROWS.len() as f32 * ROW_PITCH + 8.0;
-    r.fill_rect(Rect::new(list.x, list.y, list.w, height), th.panel_hi);
+    r.fill_rect(filter_panel_rect(), th.panel_hi);
     r.fill_rect(Rect::new(list.x, list.y, list.w, 2.0), th.focus);
     draw_text(r, list.x + LABEL_X, list.y + 12.0, TITLE_SCALE, th.accent, "FILTER");
     draw_text(r, list.x + LABEL_X, list.y + 36.0, HINT_SCALE, th.text_muted, "\u{2191}\u{2193} AXIS   \u{2190}\u{2192} VALUE   BACKSPACE RESET   F2 CLOSE");

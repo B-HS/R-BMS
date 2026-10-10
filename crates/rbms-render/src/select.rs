@@ -258,6 +258,18 @@ pub fn render_select_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &Se
     hot
 }
 
+/// Draw only the record-detail modal, over whatever the target already shows, for a screen that
+/// draws the list and the detail panel itself (a skin) and still needs the application's own
+/// modal on top of it. Returns the modal's clickable regions, which are the same as
+/// [`render_select`] reports while the modal is up.
+pub fn render_select_modal<R: Renderer>(r: &mut R, modal: &SelectModal) -> Vec<(Rect, SelectHot)> {
+    with_render_ctx(|ctx| {
+        let mut hot = Vec::new();
+        render_modal(ctx, r, modal, &mut hot);
+        hot
+    })
+}
+
 /// The strip across the head of the screen: the title, the search box or the open folder, and the
 /// ordering with the cursor's place in the list.
 fn render_top_bar<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &SelectView) {

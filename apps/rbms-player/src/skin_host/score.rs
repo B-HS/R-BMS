@@ -33,14 +33,14 @@ use standing::{CUMULATIVE_RANK_STEPS, RANK_COUNT, ScoreSheet, ScoreStanding, Tar
 pub mod standing;
 
 /// How many judgement kinds there are, PGREAT to MISS.
-const JUDGE_KINDS: i32 = 6;
+pub(super) const JUDGE_KINDS: i32 = 6;
 
 /// The judgement codes the combined counts add up, in the reference's order
 /// (`IntegerPropertyFactory.java:441-476`).
-const GREAT: i32 = 1;
-const BAD: i32 = 3;
-const POOR: i32 = 4;
-const MISS: i32 = 5;
+pub(super) const GREAT: i32 = 1;
+pub(super) const BAD: i32 = 3;
+pub(super) const POOR: i32 = 4;
+pub(super) const MISS: i32 = 5;
 
 /// The share of the gauge each of the gauge-range options (0-9, 10-19 ... 90-99 and 100) covers
 /// (`BooleanPropertyFactory.GaugeDrawCondition`).
@@ -48,7 +48,7 @@ const GAUGE_RANGE_SHARE: f32 = 0.1;
 
 /// Early and late: the two sides each judgement's count is split on, in the order the numbers 410-419
 /// pair them.
-const SIDES_PER_JUDGEMENT: i32 = 2;
+pub(super) const SIDES_PER_JUDGEMENT: i32 = 2;
 
 /// A share of a hundred, which is what the judgement-rate numbers are cut to.
 const PERCENT: i32 = 100;

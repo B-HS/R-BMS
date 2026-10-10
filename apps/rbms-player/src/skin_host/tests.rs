@@ -43,7 +43,12 @@ fn every_route_is_a_run_that_goes_upwards_and_every_cluster_has_one() {
 fn an_id_is_routed_to_the_clusters_that_claim_it_in_the_order_they_are_asked() {
     assert_eq!(clusters_of(IdSpace::Integer, NUMBER_PLAYLEVEL).collect::<Vec<_>>(), [Cluster::Chart]);
     assert_eq!(clusters_of(IdSpace::Boolean, OPTION_NOW_LOADING).collect::<Vec<_>>(), [Cluster::Loading]);
-    assert_eq!(clusters_of(IdSpace::Text, STRING_TITLE).collect::<Vec<_>>(), [Cluster::Chart]);
+    assert_eq!(
+        clusters_of(IdSpace::Text, STRING_TITLE).collect::<Vec<_>>(),
+        [Cluster::Select, Cluster::Chart],
+        "the browser answers for a folder before the chart cluster answers for an empty slot"
+    );
+    assert_eq!(clusters_of(IdSpace::Text, STRING_SUBTITLE).collect::<Vec<_>>(), [Cluster::Chart]);
     assert_eq!(clusters_of(IdSpace::Rate, RATE_MUSICSELECT_POSITION).collect::<Vec<_>>(), [Cluster::Select]);
     assert_eq!(clusters_of(IdSpace::Offset, OFFSET_LIFT).collect::<Vec<_>>(), [Cluster::Play]);
     assert_eq!(

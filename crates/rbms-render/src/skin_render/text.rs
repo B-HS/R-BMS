@@ -182,19 +182,35 @@ impl TextBody {
     /// The string shown this frame (`SkinText.prepare`): what the property reads, and the written
     /// out text only for an object with no property. A property that reads empty shows nothing,
     /// whatever the document wrote out beside it.
-    fn shown<'a>(&'a self, frame: &SkinFrame<'a>) -> Cow<'a, str> {
+    pub(crate) fn shown<'a>(&'a self, frame: &SkinFrame<'a>) -> Cow<'a, str> {
         if self.reads_property() {
             return self.value.text(frame.state, frame.lua);
         }
         Cow::Borrowed(self.constant.as_deref().unwrap_or_default())
     }
 
-    fn block_align(&self) -> BlockAlign {
+    pub(crate) fn block_align(&self) -> BlockAlign {
         match self.align {
             TEXT_ALIGN_CENTER => BlockAlign::Center,
             TEXT_ALIGN_RIGHT => BlockAlign::Right,
             _ => BlockAlign::Left,
         }
+    }
+
+    /// How `line` is laid out when this text is drawn into `dst`, a destination on screen, or `None`
+    /// for a text whose font did not load, which is drawn in the stand-in face instead.
+    pub(crate) fn layout<'a>(&'a self, line: &'a str, dst: Rect, max_dim: u32) -> Option<BlockSpec<'a>> {
+        let family = self.family.as_deref()?;
+        Some(BlockSpec {
+            text: line,
+            family,
+            em_px: dst.h,
+            design_px: self.size as f32,
+            width: dst.w,
+            align: self.block_align(),
+            fit: self.block_fit(),
+            max_dim,
+        })
     }
 
     /// What becomes of a line too long for its destination (`SkinTextFont.setLayout`). Wrapping
@@ -277,18 +293,16 @@ pub(crate) fn draw_line<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, place: 
         return false;
     }
     let dst = place.viewport.place(rect);
-    match &body.family {
-        Some(family) => draw_composed(ctx, r, place, body, family, dst, line),
+    match body.layout(line, dst, r.max_texture_size()) {
+        Some(spec) => draw_composed(ctx, r, place, body, &spec, dst),
         None => draw_stand_in(ctx, r, place, body, dst, line),
     }
 }
 
 /// Draws a line in the document's own font, the way the reference places it.
-fn draw_composed<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, place: &Placement<'_>, body: &TextBody, family: &str, dst: Rect, line: &str) -> bool {
-    let align = body.block_align();
-    let spec =
-        BlockSpec { text: line, family, em_px: dst.h, design_px: body.size as f32, width: dst.w, align, fit: body.block_fit(), max_dim: r.max_texture_size() };
-    let Some((tex, stamp)) = body.line.borrow_mut().texture(ctx.text, r, &spec) else {
+fn draw_composed<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, place: &Placement<'_>, body: &TextBody, spec: &BlockSpec<'_>, dst: Rect) -> bool {
+    let align = spec.align;
+    let Some((tex, stamp)) = body.line.borrow_mut().texture(ctx.text, r, spec) else {
         return false;
     };
 

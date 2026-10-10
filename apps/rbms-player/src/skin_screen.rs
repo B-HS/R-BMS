@@ -30,6 +30,12 @@
 //! goes to the sound system and everything else waits in a queue for the screen that owns it
 //! ([`AppShared::skin_requests`]).
 //!
+//! A press on an editable text of a skin starts typing into it ([`AppShared::skin_text_key`],
+//! [`AppShared::skin_text_ime`]): until the typing ends, the keyboard and the window's input method
+//! are that text's, and the frame draws what is typed in the text's place and font. Enter, or a press
+//! anywhere else, confirms it and the text is written inside the next frame of its screen, where a
+//! writer that is a function of the skin can be called ([`crate::skin_host::writers`]).
+//!
 //! A Lua skin is read on the first frame of the screen it draws rather than when it is chosen,
 //! because it builds its screen out of that screen's state: the frame hands the state it is drawn
 //! from to the library, which runs the skin against it, and the next frame takes the result in. A
@@ -86,16 +92,13 @@ use rbms_render::result::{ResultExtras, ResultView};
 use rbms_render::skin_render::state::{DecideChart, DecideViewState, KeyConfigViewState, PlayViewState, ResultViewState, SelectViewState};
 use rbms_render::skin_render::textures::{SkinTexturePool, TextureStats, referenced_source_files};
 use rbms_render::skin_render::{PreparedFrame, SkinAction, SkinEvent, SkinInputMap, SkinPointer, SkinPointerButton, SkinWriter};
-use rbms_render::{
-    BgaFrame, Color, FrameData, PlayTimers, Renderer, SelectTimers, SkinAssets, SkinFrame, SkinImage, SkinScreen, SongBars, TextContext, TextureId,
-    with_render_ctx,
-};
+use rbms_render::{Color, FrameData, PlayTimers, Renderer, SelectTimers, SkinAssets, SkinFrame, SkinImage, SkinScreen, SongBars, TextContext, with_render_ctx};
 use rbms_skin::dst::{LuaDrawEval, OffsetSource, SkinOffset};
 use rbms_skin::loader::{LoadedSkin, SKIN_TYPE_COURSE_RESULT, SKIN_TYPE_DECIDE, SKIN_TYPE_KEY_CONFIG, SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_RESULT};
 use rbms_skin::lua::BoundFrame;
 use rbms_skin::property::{HostCall, SkinHost, StaticScreen};
 use rbms_skin::timer::TimerState;
-use winit::event::MouseButton;
+use winit::event::{Ime, MouseButton};
 
 use crate::assets::{DecodePool, FileStamp, SkinAsset, SkinAssetJob, SkinAssetKind, SkinAssetRead, SkinAssetRequest, spawn_skin_asset_decode};
 use crate::ir_session::submission_player_id;
@@ -105,11 +108,13 @@ use crate::skin_host::chart::{ChartMeta, ChartState};
 use crate::skin_host::ir::{IrLink, IrPhase};
 use crate::skin_host::loading::{LoadingScreen, LoadingState};
 use crate::skin_host::result::snapshot::{FinishedRun, ResultSnapshot};
+use crate::skin_host::select::{BrowserLent, SelectShown};
 use crate::skin_host::system::{CourseStage, SystemState, Volumes};
+use crate::skin_host::writers::{self, TextSession, TextWrite, Typing};
 use crate::skin_host::{AudioRequest, Cluster, ClusterRequest, HeldKeyQuery, RequestHandler, RequestQueue, ResultScene, ScreenHost, dispatch_calls};
 use crate::skin_select::{SkinLibrary, SkinRead};
-use crate::stage::Canvas;
 use crate::stage::canvas::UI_SIZE;
+use crate::stage::{Canvas, KeyInput};
 use crate::{AppShared, SelectScene};
 
 /// Hands one document's already-decoded files to [`SkinScreen::build`].
@@ -190,12 +195,15 @@ struct FrameInputs<'a> {
     /// The finished run and what the screen holds beside it, for the result screens that keep a
     /// run. With it the host answers for the run; without it the result clusters answer nothing.
     result: Option<FinishedRun<'a>>,
+    /// The song browser's frame, for the browser. With it the host answers for the bar under the
+    /// cursor, the settings and the ranking; without it the browser's clusters answer nothing.
+    select: Option<&'a SelectShown>,
 }
 
 impl<'a> FrameInputs<'a> {
     /// The inputs of a screen that connects neither a chart nor a load.
     fn new(offsets: &'a DocumentOffsets<'a>, data: FrameData<'a>, window: (u32, u32)) -> FrameInputs<'a> {
-        FrameInputs { offsets, data, window, chart: ChartState::default(), loading: LoadingState::default(), result: None }
+        FrameInputs { offsets, data, window, chart: ChartState::default(), loading: LoadingState::default(), result: None, select: None }
     }
 }
 
@@ -207,6 +215,23 @@ pub(crate) struct DecideDraw<'a> {
     pub(crate) progress: f32,
     /// What no property id carries: the chart's stage image and the series its graphs plot.
     pub(crate) data: FrameData<'a>,
+}
+
+/// What the song browser brings to one frame of its document.
+pub(crate) struct SelectDraw<'a> {
+    /// The scene the built-in browser draws, which the state the screen was drawn from before the
+    /// clusters existed still answers from.
+    pub(crate) view: &'a SelectScene,
+    /// What no property id carries: the list as the bars a wheel turns through, and the pictures of
+    /// the chart under the cursor.
+    pub(crate) data: FrameData<'a>,
+    /// The chart under the cursor, or an empty slot when the bar there is a folder or a course
+    /// (`MusicSelector.render`, which hands the resource the chart of a song bar and nothing for
+    /// any other bar).
+    pub(crate) chart: ChartState<'a>,
+    /// What only the browser holds: the panel that is up, the mode its list is held to, the course
+    /// and the records of the bar under the cursor, and the replay slot selected.
+    pub(crate) lent: BrowserLent<'a>,
 }
 
 /// What the result screen brings to one frame of its document.
@@ -275,16 +300,6 @@ fn is_result_screen(screen: i32) -> bool {
 /// The window size a skin's Lua is told, which the host contract carries as signed pixels.
 fn window_size(size: (u32, u32)) -> (i32, i32) {
     (i32::try_from(size.0).unwrap_or(i32::MAX), i32::try_from(size.1).unwrap_or(i32::MAX))
-}
-
-/// The browser's frame state: the rows the browser measured, with whether the option panel is open
-/// joined on.
-///
-/// The panel is the application's rather than something the browser measured, so its state is
-/// attached here -- beside the offsets and the timers, which are the application's too -- rather
-/// than travelling through the browser's own view.
-fn select_list(view: &SelectScene, options_open: bool) -> SongBars<'_> {
-    SongBars { rows: &view.rows, sel: view.sel, options_open }
 }
 
 /// How long a scene is held still for a document that is on its way before it is given up on and
@@ -409,6 +424,12 @@ struct SkinInput {
     actions: Vec<(i32, SkinAction)>,
     /// What the skin told the game during the frames that have not ended yet, oldest first.
     calls: Vec<HostCall>,
+    /// The editable text being typed into, if any. The keyboard is its until it ends.
+    text: Option<TextSession>,
+    /// Text that was confirmed and is waiting for the next frame of its screen to be written in.
+    text_writes: Vec<(i32, TextWrite)>,
+    /// Whether a setting a skin changed has not been written to the settings file yet.
+    settings_dirty: bool,
 }
 
 /// The button of a press as the reference's click table numbers it, or `None` for a button it has
@@ -440,8 +461,9 @@ fn skin_pointer_event(input: PointerInput) -> Option<SkinPointer> {
 /// inside the frame's binding. A function with no interpreter to call it in is not run.
 ///
 /// A function event is called with its one argument and a writer with the value
-/// (`SkinLuaAccessor.loadEvent`, `loadFloatWriter`). Typing into an editable text is not here yet,
-/// so a press on one does nothing more than keep the press from the objects beneath it.
+/// (`SkinLuaAccessor.loadEvent`, `loadFloatWriter`). Typing into an editable text is begun by the
+/// frame ([`SkinScreens::begin_typing`]), which needs the screen's objects, so a press on one is
+/// nothing more than the press kept from the objects beneath it here.
 fn run_skin_actions(actions: &[SkinAction], host: &dyn SkinHost, lua: Option<&BoundFrame<'_>>) {
     for action in actions {
         match (*action, lua) {
@@ -449,7 +471,8 @@ fn run_skin_actions(actions: &[SkinAction], host: &dyn SkinHost, lua: Option<&Bo
             (SkinAction::Event { event: SkinEvent::Function(function), argument }, Some(lua)) => lua.call_event(function, argument),
             (SkinAction::Write { writer: SkinWriter::Rate(id), value }, _) => host.write_rate(id, value),
             (SkinAction::Write { writer: SkinWriter::Function(function), value }, Some(lua)) => lua.call_float_writer(function, value),
-            (SkinAction::Event { .. } | SkinAction::Write { .. }, None) | (SkinAction::FocusText { .. }, _) => {}
+            (SkinAction::Event { .. } | SkinAction::Write { .. }, None)
+            | (SkinAction::FocusText { .. } | SkinAction::SelectBar { .. } | SkinAction::CloseBar, _) => {}
         }
     }
 }
@@ -463,6 +486,9 @@ struct PlayerRequests<'a> {
 
 impl RequestHandler for PlayerRequests<'_> {
     fn cluster(&mut self, cluster: Cluster, request: ClusterRequest) {
+        if writers::carry_out(self.shared, &request) {
+            return;
+        }
         self.waiting.push(cluster, request);
     }
 
@@ -616,6 +642,8 @@ impl SkinScreens {
         input.map = None;
         input.fresh = false;
         input.actions.clear();
+        input.text = None;
+        input.text_writes.clear();
         self.requests.clear();
     }
 
@@ -636,6 +664,32 @@ impl SkinScreens {
     /// other screen was done to a frame that is no longer the one on show, and is dropped.
     fn take_actions(&self, screen: i32) -> Vec<SkinAction> {
         std::mem::take(&mut self.input.borrow_mut().actions).into_iter().filter(|(of, _)| *of == screen).map(|(_, action)| action).collect()
+    }
+
+    /// Takes the text confirmed since `screen`'s last frame, oldest first. What was confirmed on any
+    /// other screen was typed on a frame that is no longer the one on show, and is dropped.
+    fn take_text_writes(&self, screen: i32) -> Vec<TextWrite> {
+        std::mem::take(&mut self.input.borrow_mut().text_writes).into_iter().filter(|(of, _)| *of == screen).map(|(_, write)| write).collect()
+    }
+
+    /// The text being typed into on `screen`, copied so a frame can draw it while the pointer and the
+    /// keyboard go on changing the original.
+    fn typing_on(&self, screen: i32) -> Option<TextSession> {
+        self.input.borrow().text.as_ref().filter(|session| session.screen() == screen).cloned()
+    }
+
+    /// Starts typing into every editable text `actions` pressed, which `compiled` knows the writer
+    /// and the shown text of. The reference refocuses a text that is pressed again, and starts over
+    /// from what it shows (`SkinTextInput.focus`); a text with no writer takes no focus.
+    fn begin_typing(&self, screen: i32, compiled: &SkinScreen, actions: &[SkinAction], frame: &SkinFrame<'_>) {
+        for action in actions {
+            let SkinAction::FocusText { object } = action else {
+                continue;
+            };
+            if let Some(start) = compiled.text_entry_start(*object, frame) {
+                self.input.borrow_mut().text = Some(TextSession::new(screen, *object, start));
+            }
+        }
     }
 
     /// Park the screens the running scene was drawn with for as long as `scene` exists.
@@ -925,6 +979,9 @@ impl AppShared {
         }
         self.skin_screens.finish_frame(canvas, &self.skins);
         self.carry_out_skin_calls();
+        if self.mouse_held.on_move().is_none() && std::mem::take(&mut self.skin_screens.input.get_mut().settings_dirty) {
+            self.save_settings();
+        }
     }
 
     /// The debug panel's line about skin textures: how many are uploaded and what they come to.
@@ -1005,7 +1062,7 @@ impl AppShared {
             return None;
         }
         let keys = self.skin_keys();
-        let ranking = is_result_screen(screen).then(|| self.skin_ir_names());
+        let ranking = (is_result_screen(screen) || inputs.select.is_some()).then(|| self.skin_ir_names());
         let mut host = ScreenHost::new(adapter.now_us(), &self.skin_timers);
         host.keys = Some(&keys as &dyn HeldKeyQuery);
         host.system = self.skin_system_state();
@@ -1014,8 +1071,11 @@ impl AppShared {
         if let Some(finished) = inputs.result {
             host.show_result(finished);
         }
+        if let Some(shown) = inputs.select {
+            host.show_select(shown);
+        }
         if let Some((service_name, user_name)) = &ranking {
-            host.ir.link = Some(self.skin_ir_link());
+            host.ir.link = is_result_screen(screen).then(|| self.skin_ir_link());
             host.ir.service_name = service_name;
             host.ir.user_name = user_name;
         }
@@ -1029,22 +1089,29 @@ impl AppShared {
             return None;
         }
         let compiled = self.skin_screens.get(screen)?;
+        let typing = self.skin_screens.typing_on(screen);
         let frame = SkinFrame {
             now_us: host.now_us,
             timers: &self.skin_timers,
             state: &host,
             lua: None,
             mouse: document_cursor(self.cursor, UI_SIZE, compiled.authored_size()),
-            data: inputs.data,
+            data: FrameData { entry: typing.as_ref().map(TextSession::entry), ..inputs.data },
         };
         let actions = self.skin_screens.take_actions(screen);
+        let writes = self.skin_screens.take_text_writes(screen);
         let prepared = match self.skins.document(screen).and_then(LoadedSkin::runtime) {
             Some(runtime) => runtime.frame(&host, |bound| {
+                let live = SkinFrame { lua: Some(bound as &dyn LuaDrawEval), ..frame };
+                writes.iter().for_each(|write| writers::run_text_write(write, &host, Some(bound)));
                 run_skin_actions(&actions, &host, Some(bound));
-                compiled.prepare(&SkinFrame { lua: Some(bound as &dyn LuaDrawEval), ..frame })
+                self.skin_screens.begin_typing(screen, compiled, &actions, &live);
+                compiled.prepare(&live)
             }),
             None => {
+                writes.iter().for_each(|write| writers::run_text_write(write, &host, None));
                 run_skin_actions(&actions, &host, None);
+                self.skin_screens.begin_typing(screen, compiled, &actions, &frame);
                 Ok(compiled.prepare(&frame))
             }
         };
@@ -1069,6 +1136,9 @@ impl AppShared {
         let Some(event) = skin_pointer_event(input) else {
             return false;
         };
+        if matches!(event, SkinPointer::Press(_)) {
+            self.confirm_skin_text_outside(at);
+        }
         if self.hit_test(at).is_some() {
             return false;
         }
@@ -1087,6 +1157,100 @@ impl AppShared {
         let screen = *screen;
         pointer.actions.extend(actions.into_iter().map(|action| (screen, action)));
         taken
+    }
+
+    /// Takes the presses on the bars of `screen`'s song wheel that are waiting for its next frame,
+    /// oldest first. They are the screen's to carry out rather than the skin's
+    /// ([`run_skin_actions`] does nothing with one), so the screen takes them before that frame is
+    /// made. Everything else the pointer did stays where it is.
+    pub(crate) fn take_skin_bar_presses(&mut self, screen: i32) -> Vec<SkinAction> {
+        let input = self.skin_screens.input.get_mut();
+        let is_bar_press = |of: i32, action: &SkinAction| of == screen && matches!(action, SkinAction::SelectBar { .. } | SkinAction::CloseBar);
+        let (presses, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut input.actions).into_iter().partition(|(of, action)| is_bar_press(*of, action));
+        input.actions = rest;
+        presses.into_iter().map(|(_, action)| action).collect()
+    }
+
+    /// Whether an editable text of a skin is being typed into, which is when the keyboard is its and
+    /// the window is to hand it what an input method composes.
+    pub(crate) fn skin_text_is_focused(&self) -> bool {
+        self.skin_screens.input.borrow().text.is_some()
+    }
+
+    /// Offers one key to the editable text being typed into, and answers whether it took it. While
+    /// one is typed into it takes every key, so nothing typed reaches a shortcut of the screen under
+    /// it or of the application. A key coming up is still noted, or a key held when the typing
+    /// began would stay held for ever.
+    ///
+    /// Enter confirms the typing and Escape throws it away. Confirming queues the write, which is
+    /// made inside the next frame of the screen it was typed on.
+    pub(crate) fn skin_text_key(&mut self, key: &KeyInput<'_>) -> bool {
+        let input = self.skin_screens.input.get_mut();
+        let Some(session) = input.text.as_mut() else {
+            return false;
+        };
+        match session.key(key) {
+            Typing::Going => {}
+            Typing::Confirmed => {
+                if let Some(session) = input.text.take() {
+                    let screen = session.screen();
+                    input.text_writes.push((screen, session.confirm()));
+                }
+            }
+            Typing::Cancelled => input.text = None,
+        }
+        if key.released {
+            self.note_key(key);
+        }
+        true
+    }
+
+    /// Hands what the input method reports -- the text it is composing, and the text it commits -- to
+    /// the editable text being typed into. Nothing is typed into, nothing is taken.
+    pub(crate) fn skin_text_ime(&mut self, ime: &Ime) {
+        if let Some(session) = self.skin_screens.input.get_mut().text.as_mut() {
+            session.apply_ime(ime);
+        }
+    }
+
+    /// Ends the typing with what was typed when a button goes down anywhere but on the text being
+    /// typed into, as the reference does before it judges any press (`Skin.mousePressed`,
+    /// `SkinTextInput.commitIfOutside`). The press then goes on to whatever it lands on.
+    ///
+    /// A frame that did not draw the text leaves nowhere for the press to be inside of, so it ends
+    /// the typing too.
+    fn confirm_skin_text_outside(&mut self, at: (f32, f32)) {
+        let input = self.skin_screens.input.get_mut();
+        let Some(session) = input.text.as_ref() else {
+            return;
+        };
+        let inside = input.map.as_ref().filter(|(screen, _)| *screen == session.screen()).is_some_and(|(screen, map)| {
+            self.skin_screens
+                .built
+                .get(screen)
+                .and_then(|entry| document_cursor(at, UI_SIZE, entry.screen.authored_size()))
+                .is_some_and(|document_at| map.text_holds(session.object(), document_at))
+        });
+        if inside {
+            return;
+        }
+        if let Some(session) = input.text.take() {
+            let screen = session.screen();
+            input.text_writes.push((screen, session.confirm()));
+            input.actions.retain(|(_, action)| !matches!(action, SkinAction::FocusText { .. }));
+        }
+    }
+
+    /// Notes that a skin changed a setting, which is written to the settings file once no mouse
+    /// button is held ([`AppShared::finish_skin_frame`]).
+    pub(crate) fn note_skin_settings_changed(&mut self) {
+        self.skin_screens.input.get_mut().settings_dirty = true;
+    }
+
+    /// Whether a setting a skin changed is waiting to be written, which is forgotten by asking.
+    #[cfg(test)]
+    pub(crate) fn take_skin_settings_dirty(&mut self) -> bool {
+        std::mem::take(&mut self.skin_screens.input.get_mut().settings_dirty)
     }
 
     /// What the skin asked of the clusters during the frame that ended last. A screen takes its own
@@ -1160,18 +1324,24 @@ impl AppShared {
         .is_some()
     }
 
-    /// Draw the song browser's document, with the browser's rows joined on so a document draws its
-    /// wheel without the stage assembling it.
+    /// Draw the song browser's document.
+    ///
+    /// The browser hands over its list as bars and the pictures of the chart under the cursor
+    /// ([`SelectDraw::data`]), the chart itself for the chart cluster ([`SelectDraw::chart`]) and
+    /// what else only it holds ([`SelectDraw::lent`]). Whether the option overlay is open is joined
+    /// onto the bars here: the overlay is the application's rather than something the browser
+    /// holds, like the offsets and the timers beside it.
     ///
     /// This and the screens below it draw on the target's own pixels
     /// ([`PreparedDocument::draw_native`]).
-    pub(crate) fn draw_select_skin(&self, canvas: &mut Canvas<'_>, view: &SelectScene, background: Option<TextureId>) -> bool {
+    pub(crate) fn draw_select_skin(&self, canvas: &mut Canvas<'_>, scene: &SelectDraw<'_>) -> bool {
         let offsets = self.skin_offsets(SKIN_TYPE_MUSIC_SELECT);
         let options_open = self.options.is_open();
-        let own = select_list(view, options_open);
-        let state = SelectViewState::new(view, self.skin_now_us(), Some(&offsets), options_open);
-        let data = FrameData { bars: Some(&own), bga: BgaFrame::of(background), ..FrameData::default() };
-        let inputs = FrameInputs::new(&offsets, data, canvas.native().size());
+        let bars = scene.data.bars.map(|bars| SongBars { options_open, ..*bars });
+        let state = SelectViewState::new(scene.view, self.skin_now_us(), Some(&offsets), options_open);
+        let data = FrameData { bars: bars.as_ref(), ..scene.data };
+        let shown = self.select_shown(bars.as_ref(), &scene.lent);
+        let inputs = FrameInputs { chart: scene.chart, select: Some(&shown), ..FrameInputs::new(&offsets, data, canvas.native().size()) };
         self.with_skin_frame(SKIN_TYPE_MUSIC_SELECT, &state, inputs, |document| document.draw_native(canvas)).is_some()
     }
 
@@ -1240,3 +1410,5 @@ impl AppShared {
 mod tests;
 #[cfg(test)]
 pub(crate) mod texture_tests;
+#[cfg(test)]
+mod typing_tests;

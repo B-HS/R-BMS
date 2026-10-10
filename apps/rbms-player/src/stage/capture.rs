@@ -41,6 +41,12 @@
 //!
 //! The course result scene is walked the same way, for a course of that chart played through and
 //! for one that fails before its last stage.
+//!
+//! The browser is captured over a library that was really scanned: the sample charts that ship with
+//! the repository and a handful written here, with a record on most of them, so its wheel has every
+//! lamp, every difficulty and every chart label to show. It is captured on a list of charts, on the
+//! root with its folder and its table, inside the table, and on the course tab; and on the list of
+//! charts once more with each of the three option panels that START and SELECT call up.
 
 use std::collections::BTreeMap;
 use std::ops::Range;
@@ -49,12 +55,14 @@ use std::time::{Duration, Instant, SystemTime};
 
 use rbms_config::DEFAULT_SKIN_FOLDER;
 use rbms_course::{Course, CourseChart, CourseRun, StageResult};
+use rbms_library::scan::ScanRequest;
 use rbms_library::{Library, SongEntry};
 use rbms_play::{NullSink, PlaySession, SessionClock, SessionOptions};
 use rbms_render::Renderer;
 use rbms_skin::loader::{SKIN_TYPE_COURSE_RESULT, SKIN_TYPE_DECIDE, SKIN_TYPE_KEY_CONFIG, SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_PLAY_7KEYS, SKIN_TYPE_RESULT};
 use rbms_skin::timer::{MICROS_PER_MILLI, timer_id};
 use rbms_store::SCORE_LN_MODE_FROM_CHART;
+use rbms_store::scoredb::{ScoreDb, migrate_score_book};
 use winit::keyboard::KeyCode;
 
 use crate::app_play::loaded_chart_for_tests;
@@ -64,8 +72,9 @@ use crate::skin_select::SKIN_PACK_ENV;
 use crate::stage::canvas::UI_SIZE;
 use crate::stage::render_tests::{FRAME_DT, app, play_state, render, render_on};
 use crate::stage::scene_life::SceneTimes;
+use crate::stage::select::tests::record;
 use crate::stage::{Canvas, CourseResultState, DecideState, FrameCtx, HeadlessCanvas, KeyConfigState, KeyInput, PlayState, SelectState, Stage, Transition};
-use crate::{App, Config, LaunchOptions};
+use crate::{App, Config, LaunchOptions, SelectView, SortMode};
 
 /// Environment variable naming the folder captures are saved in. Nothing is saved without it.
 const CAPTURE_DIR_ENV: &str = "RBMS_SKIN_CAPTURE_DIR";
@@ -607,7 +616,7 @@ fn write_rich_chart(tag: &str) -> PathBuf {
 
 /// One frame of the stage that is up with the scene clock put at `scene_ms`: its update and then its
 /// draw, which is the order the application runs them in. Answers what the update asked for.
-fn scene_frame_at(app: &mut App, scene_ms: i64, canvas: &mut Canvas<'_>) -> Transition {
+pub(super) fn scene_frame_at(app: &mut App, scene_ms: i64, canvas: &mut Canvas<'_>) -> Transition {
     let age = Duration::from_millis(u64::try_from(scene_ms).expect("a scene has no time before it began"));
     app.shared.scene_started = Instant::now().checked_sub(age).expect("the process has been up for longer than the scene time asked for");
     let now = Instant::now();
@@ -953,4 +962,541 @@ fn the_course_result_scene_of_a_skin_pack_named_by_the_environment_is_captured_f
         println!("{prefix}: captured {}", saved.join(", "));
     }
     assert_eq!(files_under(&pack), before, "capturing the pack's course result scene changed its folder");
+}
+
+/// The moment of the browser's scene its cursor is moved at, in milliseconds from its beginning,
+/// and the moments that are captured after it: the bars on their way in with what the move brought
+/// faded in, and the settled layout.
+const BROWSER_MOVE_MS: i64 = 1000;
+const BROWSER_SHOTS_MS: [i64; 2] = [1300, 3000];
+
+/// The keys START and SELECT ship on, which call up the browser's option panels.
+const BROWSER_START_KEY: KeyCode = KeyCode::KeyA;
+const BROWSER_SELECT_KEY: KeyCode = KeyCode::KeyW;
+
+/// The option panels the browser is captured with, each by the name it is saved under and the keys
+/// that are held for it: none, the play options, the assist options and the detail options.
+const BROWSER_PANELS: [(&str, &[KeyCode]); 4] = [
+    ("select-panel0", &[]),
+    ("select-panel1", &[BROWSER_START_KEY]),
+    ("select-panel2", &[BROWSER_SELECT_KEY]),
+    ("select-panel3", &[BROWSER_START_KEY, BROWSER_SELECT_KEY]),
+];
+
+/// The moment of the browser's scene the first panel's keys go down at, how long each panel is
+/// given to arrive before it is captured, which is also how long it is given to go before the next
+/// one's keys go down, and the name the browser is saved under once the last panel has gone.
+const BROWSER_PANELS_FROM_MS: i64 = 4000;
+const BROWSER_PANEL_SETTLE_MS: i64 = 1000;
+const BROWSER_PANELS_GONE: &str = "select-panels-gone";
+
+/// The keys the default seven-key layout puts on key one and key three, which with the first panel
+/// up step the random option and the gauge, and the name the panel is saved under once they have.
+const BROWSER_STEP_KEYS: [KeyCode; 2] = [KeyCode::KeyZ, KeyCode::KeyX];
+const BROWSER_PANEL_STEPPED: &str = "select-panel1-stepped";
+
+/// The folder of sample charts that ships with the repository, named from this crate's folder.
+const BROWSER_SAMPLE_FOLDER: &str = "../../samples/preview-demo";
+
+/// The pictures written beside the charts below, which one of them names, and their sizes.
+const BROWSER_STAGE_FILE: &str = "browse-stage.png";
+const BROWSER_BANNER_FILE: &str = "browse-banner.png";
+const BROWSER_STAGE_SIZE: (u32, u32) = (640, 480);
+const BROWSER_BANNER_SIZE: (u32, u32) = (300, 80);
+
+/// The title of the chart the browser's cursor is put on, which is the one that names pictures.
+const BROWSER_FOCUS_TITLE: &str = "Borealis";
+
+/// The most a record of the charts below could have scored, and when each was played.
+const BROWSER_RECORD_BREAKS: u32 = 3;
+const BROWSER_RECORD_PLAYED_AT: i64 = 1_000;
+
+/// What the best judgement is worth in EX, which is what cuts a record's score into the judgements
+/// it is stored as: as many of the best as go into it, and one of the next for what is left.
+const EX_PER_PGREAT: u32 = 2;
+
+/// The title of a chart nobody has played, which the browser is captured on for a score window with
+/// nothing in it.
+const BROWSER_UNPLAYED_TITLE: &str = "Drift";
+
+/// The name the browser is saved under in the order a new player's list is in, which the reference's
+/// order switch has no number for.
+const BROWSER_DEFAULT_ORDER: &str = "select-order-default";
+
+/// The notes of a chart with nothing special about it.
+const BROWSER_PLAIN_NOTES: &str = "#00111:01010101\n#00218:0101\n";
+
+/// The notes of a chart with a long note whose kind the player's mode decides.
+const BROWSER_LONG_NOTES: &str = "#LNTYPE 1\n#00151:01000001\n#00118:0101\n";
+
+/// The notes of a chart with a mine.
+const BROWSER_MINE_NOTES: &str = "#002D1:0100\n#00118:0101\n";
+
+/// The notes of a chart that picks some of them at random.
+const BROWSER_RANDOM_NOTES: &str = "#RANDOM 2\n#IF 1\n#00111:0101\n#ENDIF\n#IF 2\n#00112:0101\n#ENDIF\n#00118:01\n";
+
+/// One chart written for the browser to list.
+struct BrowseChart {
+    file: &'static str,
+    title: &'static str,
+    subtitle: &'static str,
+    level: u32,
+    /// `#DIFFICULTY`, or zero for a chart that names none.
+    difficulty: u32,
+    notes: &'static str,
+    /// The best clear recorded on it, as the reference numbers them, and the EX of that run; `None`
+    /// for a chart nobody has played.
+    record: Option<(u8, u32)>,
+}
+
+/// The charts written for the browser: between them every difficulty, every clear lamp and every
+/// chart label.
+const BROWSE_CHARTS: [BrowseChart; 11] = [
+    BrowseChart { file: "a1.bms", title: "Aurora", subtitle: "[BEGINNER]", level: 2, difficulty: 1, notes: BROWSER_PLAIN_NOTES, record: Some((8, 990)) },
+    BrowseChart { file: "a2.bms", title: "Aurora", subtitle: "[HYPER]", level: 9, difficulty: 3, notes: BROWSER_LONG_NOTES, record: Some((6, 850)) },
+    BrowseChart { file: "a3.bms", title: "Aurora", subtitle: "[ANOTHER]", level: 12, difficulty: 4, notes: BROWSER_MINE_NOTES, record: Some((7, 780)) },
+    BrowseChart { file: "b.bms", title: BROWSER_FOCUS_TITLE, subtitle: "", level: 7, difficulty: 2, notes: BROWSER_RANDOM_NOTES, record: Some((4, 640)) },
+    BrowseChart { file: "c.bms", title: "Cascade", subtitle: "[INSANE]", level: 25, difficulty: 5, notes: BROWSER_PLAIN_NOTES, record: Some((1, 210)) },
+    BrowseChart { file: "d.bms", title: "Drift", subtitle: "", level: 5, difficulty: 0, notes: BROWSER_PLAIN_NOTES, record: None },
+    BrowseChart { file: "e.bms", title: "Ember", subtitle: "", level: 10, difficulty: 4, notes: BROWSER_PLAIN_NOTES, record: Some((5, 700)) },
+    BrowseChart { file: "f.bms", title: "Flux", subtitle: "", level: 3, difficulty: 2, notes: BROWSER_PLAIN_NOTES, record: Some((2, 420)) },
+    BrowseChart { file: "g.bms", title: "Glacier", subtitle: "", level: 11, difficulty: 3, notes: BROWSER_PLAIN_NOTES, record: Some((9, 998)) },
+    BrowseChart { file: "h.bms", title: "Halo", subtitle: "", level: 1, difficulty: 1, notes: BROWSER_PLAIN_NOTES, record: Some((10, 1000)) },
+    BrowseChart { file: "i.bms", title: "Iris", subtitle: "", level: 6, difficulty: 2, notes: BROWSER_PLAIN_NOTES, record: Some((3, 500)) },
+];
+
+/// Write the charts above and the two pictures one of them names into a folder of this test's own,
+/// and answer the folder.
+fn write_browse_charts(tag: &str) -> PathBuf {
+    let folder = settings_of(tag).with_file_name("charts");
+    std::fs::create_dir_all(&folder).expect("the chart folder is writable");
+    for (file, (width, height)) in [(BROWSER_STAGE_FILE, BROWSER_STAGE_SIZE), (BROWSER_BANNER_FILE, BROWSER_BANNER_SIZE)] {
+        let picture = image::RgbaImage::from_fn(width, height, |x, y| {
+            let band = u8::try_from((x * u32::from(u8::MAX)) / width).unwrap_or(u8::MAX);
+            let rise = u8::try_from((y * u32::from(u8::MAX)) / height).unwrap_or(u8::MAX);
+            image::Rgba([u8::MAX - band, rise, band, u8::MAX])
+        });
+        picture.save(folder.join(file)).expect("the picture is written");
+    }
+    for chart in &BROWSE_CHARTS {
+        let pictures =
+            if chart.title == BROWSER_FOCUS_TITLE { format!("#STAGEFILE {BROWSER_STAGE_FILE}\n#BANNER {BROWSER_BANNER_FILE}\n") } else { String::new() };
+        let text = format!(
+            "#PLAYER 1\n#GENRE Capture\n#TITLE {}\n#SUBTITLE {}\n#ARTIST Capture Artist\n#BPM 150\n#PLAYLEVEL {}\n#DIFFICULTY {}\n#RANK 2\n#TOTAL 300\n{pictures}{}",
+            chart.title, chart.subtitle, chart.level, chart.difficulty, chart.notes
+        );
+        std::fs::write(folder.join(chart.file), text).expect("the chart is written");
+    }
+    folder
+}
+
+/// An app drawing with `pack` whose library was scanned from the sample folder and the charts
+/// written above, into a song database of the test's own, with the records those charts name.
+///
+/// The records are in the score book the browser lists by and in a score database in memory, which
+/// is what a skin's score window is read from: the judgements of each add up to the score it names,
+/// so the two agree about it.
+///
+/// The browser's preview is switched off and the sound device is marked as one that would not
+/// open, so the frames that are walked never ask the machine for one.
+fn browse_app(pack: &Path, tag: &str) -> Result<App, String> {
+    let mut app = pack_app(pack, tag);
+    let charts = write_browse_charts(&format!("{tag}-charts"));
+    let samples = Path::new(env!("CARGO_MANIFEST_DIR")).join(BROWSER_SAMPLE_FOLDER);
+    let database = charts.with_file_name("songs.db");
+    let roots = [charts.as_path(), samples.as_path()].map(|root| root.to_string_lossy().into_owned()).to_vec();
+    let report = crate::library::scan_now(&database, &ScanRequest::new(roots, true));
+    if let Some(failure) = report.failure {
+        return Err(format!("the library was not scanned: {failure}"));
+    }
+    app.shared.library = report.library;
+    app.shared.song_db = crate::library::open_song_db(&database);
+    let records = BROWSE_CHARTS.iter().filter_map(|chart| {
+        let (clear, ex) = chart.record?;
+        let entry = app.shared.library.songs().iter().find(|entry| entry.title == chart.title && entry.subtitle == chart.subtitle)?;
+        Some(rbms_store::ScoreRecord {
+            mode: entry.mode.name.to_owned(),
+            counts: [ex / EX_PER_PGREAT, ex % EX_PER_PGREAT, 0, BROWSER_RECORD_BREAKS, 0, 0],
+            ..record(&entry.md5, clear, ex, BROWSER_RECORD_BREAKS, BROWSER_RECORD_PLAYED_AT)
+        })
+    });
+    app.shared.scores = rbms_store::ScoreBook::from_records(records.collect());
+    let mut scores = ScoreDb::open_in_memory().map_err(|error| format!("the score database did not open: {error}"))?;
+    scores.migrate().map_err(|error| format!("the score database was not laid out: {error}"))?;
+    migrate_score_book(&mut scores, &app.shared.scores).map_err(|error| format!("the records were not stored: {error}"))?;
+    app.shared.scoredb = Some(scores);
+    app.shared.config.library.sort = SortMode::Title;
+    app.shared.config.library.preview = false;
+    app.shared.audio_failed = true;
+    Ok(app)
+}
+
+/// Whether the browser that is up has come to rest: every picture it asked for is read, and its
+/// wheel is not sliding.
+fn browser_is_at_rest(app: &App) -> bool {
+    match &app.stage {
+        Stage::Select(state) => state.pictures_are_in() && state.wheel_is_at_rest(),
+        _ => true,
+    }
+}
+
+/// The row of the list on show the chart called `title` is on.
+fn browser_row_of(app: &App, title: &str) -> Option<usize> {
+    let songs = app.shared.library.songs();
+    app.shared
+        .select_items
+        .iter()
+        .position(|item| matches!(item, crate::SelectItem::Song(index) if songs.get(*index).is_some_and(|entry| entry.title == title)))
+}
+
+/// One frame of the browser at `scene_ms`, or why its skin will never draw.
+fn browser_frame_at(app: &mut App, scene_ms: i64, pixels: &mut HeadlessCanvas, deadline: Instant) -> Result<(), String> {
+    scene_frame_at(app, scene_ms, &mut Canvas::Headless(pixels));
+    if let Some(reason) = app.shared.skin_failure(SKIN_TYPE_MUSIC_SELECT) {
+        return Err(reason.lines().next().unwrap_or_default().to_owned());
+    }
+    if Instant::now() >= deadline {
+        return Err(format!("its files were not read within {} seconds", PACK_LOAD_TIMEOUT.as_secs()));
+    }
+    Ok(())
+}
+
+/// Put `state` up as the browser with its cursor one row above where it is wanted, wait for the
+/// pack's document, move the cursor down onto the row with the key a player would press, wait for
+/// the pictures of the chart it landed on and for the wheel to finish the slide the key started,
+/// and save a frame at each of [`BROWSER_SHOTS_MS`] as `<prefix>-<milliseconds>ms`. Every frame is
+/// the browser's update and then its draw, as the application runs them.
+///
+/// The cursor is moved rather than placed because a skin shows what belongs to the bar under the
+/// cursor on the timer a move starts, so a browser nobody has moved shows none of it. The key is let
+/// go again once the browser has seen it: a key left down would be held on every panel captured
+/// afterwards, and the down arrow scrolls the first panel's target. The wheel slides on the wall
+/// clock rather than on the scene's, so the slide is waited out rather than aged past.
+fn capture_browser_view(app: &mut App, pixels: &mut HeadlessCanvas, size: (u32, u32), prefix: &str, state: SelectState) -> Result<Vec<String>, String> {
+    app.stage = Stage::Select(Box::new(state));
+    let deadline = Instant::now() + PACK_LOAD_TIMEOUT;
+    while !app.shared.has_compiled_skin(SKIN_TYPE_MUSIC_SELECT) {
+        browser_frame_at(app, 0, pixels, deadline)?;
+    }
+    browser_frame_at(app, BROWSER_MOVE_MS, pixels, deadline)?;
+    let now = Instant::now();
+    app.stage.handle_key(&mut FrameCtx { shared: &mut app.shared, now, dt: FRAME_DT }, key_down(KeyCode::ArrowDown));
+    browser_frame_at(app, BROWSER_MOVE_MS, pixels, deadline)?;
+    app.stage.handle_key(&mut FrameCtx { shared: &mut app.shared, now, dt: FRAME_DT }, key_up(KeyCode::ArrowDown));
+    while !browser_is_at_rest(app) {
+        browser_frame_at(app, BROWSER_MOVE_MS, pixels, deadline)?;
+    }
+    let mut saved = Vec::new();
+    for at_ms in BROWSER_SHOTS_MS {
+        browser_frame_at(app, at_ms, pixels, deadline)?;
+        let name = format!("{prefix}-{at_ms:04}ms");
+        save(&name, CAPTURE_EXTENSION, size, pixels.rgba());
+        saved.push(name);
+    }
+    Ok(saved)
+}
+
+/// Capture the browser that is up with each of its option panels in turn, the first of them once
+/// more after two of its keys were pressed, and the browser after the last has gone. Answers the
+/// names saved, or why the browser stopped drawing.
+///
+/// A panel is called up the way a player calls it up: its keys go down, the browser runs a frame
+/// on which it puts the panel up and starts the skin's timer for it, and the frame that is saved is
+/// drawn once the skin has had time to slide the panel in. The keys are let go on a frame of their
+/// own, so the panel has the same time to slide out before the next one's keys go down.
+fn capture_browser_panels(app: &mut App, pixels: &mut HeadlessCanvas, size: (u32, u32)) -> Result<Vec<String>, String> {
+    let deadline = Instant::now() + PACK_LOAD_TIMEOUT;
+    let mut saved = Vec::new();
+    let mut at_ms = BROWSER_PANELS_FROM_MS;
+    for (name, keys) in BROWSER_PANELS {
+        for key in keys {
+            app.shared.note_key(&key_down(*key));
+        }
+        browser_frame_at(app, at_ms, pixels, deadline)?;
+        at_ms += BROWSER_PANEL_SETTLE_MS;
+        browser_frame_at(app, at_ms, pixels, deadline)?;
+        save(name, CAPTURE_EXTENSION, size, pixels.rgba());
+        saved.push(name.to_owned());
+        for key in keys {
+            app.shared.note_key(&key_up(*key));
+        }
+        browser_frame_at(app, at_ms, pixels, deadline)?;
+        at_ms += BROWSER_PANEL_SETTLE_MS;
+    }
+
+    app.shared.note_key(&key_down(BROWSER_START_KEY));
+    browser_frame_at(app, at_ms, pixels, deadline)?;
+    for input in [key_down, key_up] {
+        for key in BROWSER_STEP_KEYS {
+            app.shared.note_key(&input(key));
+        }
+        browser_frame_at(app, at_ms, pixels, deadline)?;
+    }
+    at_ms += BROWSER_PANEL_SETTLE_MS;
+    browser_frame_at(app, at_ms, pixels, deadline)?;
+    save(BROWSER_PANEL_STEPPED, CAPTURE_EXTENSION, size, pixels.rgba());
+    saved.push(BROWSER_PANEL_STEPPED.to_owned());
+    app.shared.note_key(&key_up(BROWSER_START_KEY));
+    browser_frame_at(app, at_ms, pixels, deadline)?;
+    at_ms += BROWSER_PANEL_SETTLE_MS;
+
+    browser_frame_at(app, at_ms, pixels, deadline)?;
+    save(BROWSER_PANELS_GONE, CAPTURE_EXTENSION, size, pixels.rgba());
+    saved.push(BROWSER_PANELS_GONE.to_owned());
+    Ok(saved)
+}
+
+/// A course of two charts the scanned library holds, and one that names a chart it does not.
+fn browse_courses(library: &Library) -> Vec<Course> {
+    let held: Vec<CourseChart> =
+        library.songs().iter().take(2).map(|entry| CourseChart { md5: entry.md5.clone(), sha256: String::new(), title: entry.title.clone() }).collect();
+    let absent = CourseChart { md5: "0".repeat(32), sha256: String::new(), title: "absent".to_owned() };
+    let mut courses = vec![
+        Course { name: "CAPTURE COURSE".to_owned(), charts: held.clone(), ..Course::default() },
+        Course { name: "MISSING COURSE".to_owned(), charts: held.into_iter().chain([absent]).collect(), ..Course::default() },
+    ];
+    courses.retain_mut(Course::validate);
+    courses
+}
+
+/// Capture the pack's browser on four lists of one scanned library: its charts, its root, the
+/// levels of a table, and its courses; and over its charts, with each of its option panels up, on a
+/// chart with a score and on one nobody has played, and in the order a new player's list is in.
+/// Answers the names saved, or why the browser never drew.
+fn capture_browser(pack: &Path) -> Result<Vec<String>, String> {
+    let mut app = browse_app(pack, "browser")?;
+    let size = authored_size(&app, SKIN_TYPE_MUSIC_SELECT).ok_or_else(|| "the pack has no document for this screen".to_owned())?;
+    let mut pixels = HeadlessCanvas::new(size.0, size.1);
+    let mut saved = Vec::new();
+
+    app.shared.select_view = SelectView::AllSongs;
+    app.shared.rebuild_select_items();
+    let focus =
+        app.shared.library.songs().iter().position(|entry| entry.title == BROWSER_FOCUS_TITLE).ok_or("the scan did not find the chart that names pictures")?;
+    app.shared.sel = focus.checked_sub(1).ok_or("the chart that names pictures is the first of the list")?;
+    saved.extend(capture_browser_view(&mut app, &mut pixels, size, "select-songs", SelectState::new())?);
+    saved.extend(capture_browser_panels(&mut app, &mut pixels, size)?);
+
+    let unplayed = browser_row_of(&app, BROWSER_UNPLAYED_TITLE).ok_or("the scan did not find the chart nobody has played")?;
+    app.shared.sel = unplayed.checked_sub(1).ok_or("the chart nobody has played is the first of the list")?;
+    saved.extend(capture_browser_view(&mut app, &mut pixels, size, "select-unplayed", SelectState::new())?);
+
+    app.shared.config.library.sort = SortMode::Default;
+    let deadline = Instant::now() + PACK_LOAD_TIMEOUT;
+    browser_frame_at(&mut app, BROWSER_MOVE_MS, &mut pixels, deadline)?;
+    while !browser_is_at_rest(&app) {
+        browser_frame_at(&mut app, BROWSER_MOVE_MS, &mut pixels, deadline)?;
+    }
+    browser_frame_at(&mut app, OVERLAY_AT_MS, &mut pixels, deadline)?;
+    save(BROWSER_DEFAULT_ORDER, CAPTURE_EXTENSION, size, pixels.rgba());
+    saved.push(BROWSER_DEFAULT_ORDER.to_owned());
+    app.shared.config.library.sort = SortMode::Title;
+
+    let charts = app.shared.library.len();
+    app.shared.table_names = vec!["CAPTURE TABLE".to_owned()];
+    app.shared.table_levels = vec![vec![("1".to_owned(), (0..charts / 2).collect()), ("2".to_owned(), (charts / 2..charts).collect())]];
+    app.shared.select_view = SelectView::Root;
+    app.shared.rebuild_select_items();
+    app.shared.sel = app.shared.select_items.len().saturating_sub(1);
+    saved.extend(capture_browser_view(&mut app, &mut pixels, size, "select-root", SelectState::new())?);
+
+    app.shared.select_view = SelectView::TableLevels(0);
+    app.shared.rebuild_select_items();
+    app.shared.sel = app.shared.select_items.len().saturating_sub(1);
+    saved.extend(capture_browser_view(&mut app, &mut pixels, size, "select-table", SelectState::new())?);
+
+    let courses = SelectState::on_courses(browse_courses(&app.shared.library), &app.shared.library);
+    saved.extend(capture_browser_view(&mut app, &mut pixels, size, "select-courses", courses)?);
+    Ok(saved)
+}
+
+/// Captures the browser of a pack somebody else wrote over a library that was really scanned, so the
+/// bars of its wheel carry the titles, levels, lamps and labels of real charts.
+///
+/// Opt-in like the captures above it: without [`SKIN_PACK_ENV`] this passes without drawing
+/// anything. With it, the browser has to draw every list, and neither the pack's folder nor the
+/// sample folder may be changed by it.
+#[test]
+fn the_browser_of_a_skin_pack_named_by_the_environment_is_captured_over_a_scanned_library() {
+    let Some(pack) = crate::skin_select::pack_from_environment(std::env::var_os(SKIN_PACK_ENV)) else {
+        return;
+    };
+    assert!(pack.is_dir(), "{SKIN_PACK_ENV} names {}, which is not a folder", pack.display());
+    let samples = Path::new(env!("CARGO_MANIFEST_DIR")).join(BROWSER_SAMPLE_FOLDER);
+    let before = (files_under(&pack), files_under(&samples));
+
+    let saved = capture_browser(&pack).unwrap_or_else(|reason| panic!("select: not drawn: {reason}"));
+    println!("select: captured {}", saved.join(", "));
+
+    assert_eq!((files_under(&pack), files_under(&samples)), before, "capturing the pack's browser changed a folder it only reads");
+}
+
+/// The moment of the browser's scene every overlay is captured at, and where each is saved under.
+const OVERLAY_AT_MS: i64 = 3000;
+const OVERLAY_GUIDE: &str = "overlay-guide";
+const OVERLAY_FILTER: &str = "overlay-filter";
+const OVERLAY_RANKING: &str = "overlay-ranking";
+const OVERLAY_MODAL: &str = "overlay-modal";
+const OVERLAY_SEARCH: &str = "overlay-search";
+const OVERLAY_OPTIONS: &str = "overlay-options";
+const OVERLAY_SYSTEM: &str = "overlay-system";
+const OVERLAY_COURSES: &str = "overlay-courses";
+const OVERLAY_FIRST_RUN: &str = "overlay-first-run";
+const OVERLAY_NO_RESULTS: &str = "overlay-no-results";
+
+/// What is typed into the search box of the overlay captures, a letter at a time, with the key each
+/// letter is on. None of them is a key START or SELECT is on: those are held by the key set the
+/// harness keeps and would call an option panel up over the shot.
+const OVERLAY_QUERY: [(KeyCode, &str); 3] = [(KeyCode::KeyB, "b"), (KeyCode::KeyO, "o"), (KeyCode::KeyR, "r")];
+
+/// What is typed into the search box of the capture that finds nothing.
+const OVERLAY_NO_MATCH: [(KeyCode, &str); 3] = [(KeyCode::KeyZ, "z"), (KeyCode::KeyX, "x"), (KeyCode::KeyC, "c")];
+
+/// What the application's own overlays are drawn with: the frame's end, which hands the scene's
+/// bookkeeping on, and then the panels drawn over every screen -- the option overlay, the messages,
+/// the connection dot and the debug panel.
+pub(super) fn draw_app_overlays(app: &mut App, canvas: &mut Canvas<'_>) {
+    let now = Instant::now();
+    let mut ctx = FrameCtx { shared: &mut app.shared, now, dt: FRAME_DT };
+    ctx.shared.finish_skin_frame(canvas);
+    App::draw_overlays(&app.stage, &mut ctx, canvas);
+}
+
+/// Hand one key to the screen that is up, the way the window does.
+fn press_key(app: &mut App, key: KeyInput<'_>) {
+    let now = Instant::now();
+    app.stage.handle_key(&mut FrameCtx { shared: &mut app.shared, now, dt: FRAME_DT }, key);
+}
+
+/// One frame of the browser with the application's overlays on top, saved as `name`.
+fn overlay_shot(app: &mut App, pixels: &mut HeadlessCanvas, size: (u32, u32), name: &str, deadline: Instant) -> Result<(), String> {
+    browser_frame_at(app, OVERLAY_AT_MS, pixels, deadline)?;
+    draw_app_overlays(app, &mut Canvas::Headless(pixels));
+    save(name, CAPTURE_EXTENSION, size, pixels.rgba());
+    Ok(())
+}
+
+/// Put `open` to the browser, capture the frame it makes, and put `close` to it, so the next overlay
+/// starts from the browser as it was. Every key goes up again once it has gone down, because the
+/// harness keeps the keys that are held and a key left down would still be down on the next shot.
+fn overlay_with(
+    app: &mut App,
+    pixels: &mut HeadlessCanvas,
+    size: (u32, u32),
+    name: &str,
+    open: &[KeyInput<'_>],
+    close: KeyCode,
+    deadline: Instant,
+) -> Result<(), String> {
+    for key in open {
+        press_key(app, KeyInput { code: key.code, pressed: key.pressed, released: key.released, text: key.text });
+        press_key(app, key_up(key.code));
+        browser_frame_at(app, OVERLAY_AT_MS, pixels, deadline)?;
+    }
+    overlay_shot(app, pixels, size, name, deadline)?;
+    press_key(app, key_down(close));
+    press_key(app, key_up(close));
+    browser_frame_at(app, OVERLAY_AT_MS, pixels, deadline)
+}
+
+/// A key typing `text`, to be put to the browser's search box.
+fn typed_key(code: KeyCode, text: &'static str) -> KeyInput<'static> {
+    KeyInput { code, pressed: true, released: false, text: Some(text) }
+}
+
+/// Wait for the pack's browser to compile on the stage that is up.
+fn wait_for_browser(app: &mut App, pixels: &mut HeadlessCanvas) -> Result<(), String> {
+    let deadline = Instant::now() + PACK_LOAD_TIMEOUT;
+    while !app.shared.has_compiled_skin(SKIN_TYPE_MUSIC_SELECT) {
+        browser_frame_at(app, 0, pixels, deadline)?;
+    }
+    browser_frame_at(app, OVERLAY_AT_MS, pixels, deadline)
+}
+
+/// Capture the pack's browser with each of the application's overlays up over it: the key guide,
+/// the filter, the ranking, a record, the search box, the option overlay, and the messages, the
+/// connection dot and the debug panel; and the course tab; and a library with nothing in it, first
+/// as a new player has it and then after a search that found nothing.
+fn capture_browser_overlays(pack: &Path) -> Result<Vec<String>, String> {
+    let mut app = browse_app(pack, "overlays")?;
+    let size = authored_size(&app, SKIN_TYPE_MUSIC_SELECT).ok_or_else(|| "the pack has no document for this screen".to_owned())?;
+    let mut pixels = HeadlessCanvas::new(size.0, size.1);
+    app.shared.select_view = SelectView::AllSongs;
+    app.shared.rebuild_select_items();
+    let focus =
+        app.shared.library.songs().iter().position(|entry| entry.title == BROWSER_FOCUS_TITLE).ok_or("the scan did not find the chart that names pictures")?;
+    app.shared.sel = focus.checked_sub(1).ok_or("the chart that names pictures is the first of the list")?;
+    capture_browser_view(&mut app, &mut pixels, size, "overlay-base", SelectState::new())?;
+    let deadline = Instant::now() + PACK_LOAD_TIMEOUT;
+    let mut saved = vec!["overlay-base-1300ms".to_owned(), "overlay-base-3000ms".to_owned()];
+
+    overlay_with(&mut app, &mut pixels, size, OVERLAY_GUIDE, &[key_down(KeyCode::KeyH)], KeyCode::KeyH, deadline)?;
+    overlay_with(&mut app, &mut pixels, size, OVERLAY_FILTER, &[key_down(KeyCode::F2)], KeyCode::F2, deadline)?;
+    overlay_with(&mut app, &mut pixels, size, OVERLAY_RANKING, &[key_down(KeyCode::KeyI)], KeyCode::KeyI, deadline)?;
+    overlay_with(&mut app, &mut pixels, size, OVERLAY_MODAL, &[key_down(KeyCode::KeyR)], KeyCode::Escape, deadline)?;
+    let mut search = vec![key_down(KeyCode::Slash)];
+    search.extend(OVERLAY_QUERY.map(|(code, text)| typed_key(code, text)));
+    overlay_with(&mut app, &mut pixels, size, OVERLAY_SEARCH, &search, KeyCode::Escape, deadline)?;
+    overlay_with(&mut app, &mut pixels, size, OVERLAY_OPTIONS, &[key_down(KeyCode::F1)], KeyCode::Escape, deadline)?;
+    saved.extend([OVERLAY_GUIDE, OVERLAY_FILTER, OVERLAY_RANKING, OVERLAY_MODAL, OVERLAY_SEARCH, OVERLAY_OPTIONS].map(str::to_owned));
+
+    app.shared.config.display.debug = true;
+    app.shared.config.network.server_url = Some("http://capture.invalid".to_owned());
+    let now = Instant::now();
+    for (level, text) in [
+        (rbms_render::ToastLevel::Info, "scanned 1204 charts"),
+        (rbms_render::ToastLevel::Warn, "table load failed"),
+        (rbms_render::ToastLevel::Error, "replay load failed: no such file"),
+    ] {
+        app.shared.toasts.push(level, text, now);
+    }
+    overlay_shot(&mut app, &mut pixels, size, OVERLAY_SYSTEM, deadline)?;
+    saved.push(OVERLAY_SYSTEM.to_owned());
+    app.shared.config.display.debug = false;
+
+    let courses = SelectState::on_courses(browse_courses(&app.shared.library), &app.shared.library);
+    app.stage = Stage::Select(Box::new(courses));
+    browser_frame_at(&mut app, OVERLAY_AT_MS, &mut pixels, deadline)?;
+    overlay_shot(&mut app, &mut pixels, size, OVERLAY_COURSES, deadline)?;
+    saved.push(OVERLAY_COURSES.to_owned());
+
+    let mut empty = pack_app(pack, "overlays-empty");
+    empty.shared.library = Library::from_songs(Vec::new());
+    empty.shared.select_view = SelectView::AllSongs;
+    empty.shared.rebuild_select_items();
+    empty.shared.audio_failed = true;
+    empty.shared.config.library.preview = false;
+    empty.stage = Stage::Select(Box::new(SelectState::new()));
+    wait_for_browser(&mut empty, &mut pixels)?;
+    overlay_shot(&mut empty, &mut pixels, size, OVERLAY_FIRST_RUN, deadline)?;
+    let nothing = [key_down(KeyCode::Slash)].into_iter().chain(OVERLAY_NO_MATCH.map(|(code, text)| typed_key(code, text)));
+    for key in nothing {
+        let code = key.code;
+        press_key(&mut empty, key);
+        press_key(&mut empty, key_up(code));
+        browser_frame_at(&mut empty, OVERLAY_AT_MS, &mut pixels, deadline)?;
+    }
+    overlay_shot(&mut empty, &mut pixels, size, OVERLAY_NO_RESULTS, deadline)?;
+    saved.extend([OVERLAY_FIRST_RUN, OVERLAY_NO_RESULTS].map(str::to_owned));
+    Ok(saved)
+}
+
+/// Captures the application's own overlays over the browser of a pack somebody else wrote.
+///
+/// Opt-in like the captures above it: without [`SKIN_PACK_ENV`] this passes without drawing
+/// anything. With it, the pack's browser has to draw with every overlay up, and neither the pack's
+/// folder nor the sample folder may be changed by it.
+#[test]
+fn the_overlays_the_application_draws_over_the_browser_of_a_skin_pack_named_by_the_environment_are_captured() {
+    let Some(pack) = crate::skin_select::pack_from_environment(std::env::var_os(SKIN_PACK_ENV)) else {
+        return;
+    };
+    assert!(pack.is_dir(), "{SKIN_PACK_ENV} names {}, which is not a folder", pack.display());
+    let samples = Path::new(env!("CARGO_MANIFEST_DIR")).join(BROWSER_SAMPLE_FOLDER);
+    let before = (files_under(&pack), files_under(&samples));
+
+    let saved = capture_browser_overlays(&pack).unwrap_or_else(|reason| panic!("select overlays: not drawn: {reason}"));
+    println!("select overlays: captured {}", saved.join(", "));
+
+    assert_eq!((files_under(&pack), files_under(&samples)), before, "capturing the pack's browser overlays changed a folder it only reads");
 }

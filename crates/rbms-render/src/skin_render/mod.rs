@@ -62,6 +62,7 @@ pub use screen::{
     render_select_screen,
 };
 pub use songlist::SongBars;
+pub use text_input::{Composition, SkinTextWriter, TextEntry, TextEntryStart};
 
 /// Distinguishes one loaded document's textures from another's, so a play screen and a select screen
 /// can each hold a document without their image sources colliding in the registry.

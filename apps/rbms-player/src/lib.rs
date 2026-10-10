@@ -31,6 +31,7 @@ use rbms_judge::{ClearType, clear_type_from_id, clear_type_id};
 use rbms_library::{ChartDetail, Library, compute_chart_detail};
 use rbms_model::Mode;
 use rbms_play::{ANALYSIS_SEEK_STEP_US, NullSink, PlaySession, Player, ScratchDir, SessionClock, SessionOptions};
+use rbms_render::skin_render::frame::{BarDistribution, BarKind, BarTrophy};
 use rbms_render::{
     Color, CoverState, DensityView, DetailView, HudView, PlayTimers, PlayfieldView, RANK_BANDS, RecordRowView, RecordsView, Rect, Renderer, ResultPalette,
     ResultView, SelectDetail, SelectHot, SelectModal, SelectRow, SelectTimers, SelectView as SelectScene, Skin, SkinConfig, StatCell, cover_rect, dj_rank,
@@ -417,10 +418,116 @@ enum SelectItem {
     Folder { label: String, target: SelectView },
 }
 
+/// The best score the player holds on a chart: the EX of the run that scored highest and the most
+/// that run could have scored.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct BarScore {
+    pub(crate) ex: u32,
+    pub(crate) max_ex: u32,
+}
+
+/// The pictures a chart names for the screens that show it, each as the file it would be read from.
+/// A picture the chart does not name is `None`; one it names may still not be on disk.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct BarImages {
+    /// `#STAGEFILE`.
+    pub(crate) stagefile: Option<PathBuf>,
+    /// `#BANNER`.
+    pub(crate) banner: Option<PathBuf>,
+    /// `#BACKBMP`, which only the song database remembers.
+    pub(crate) backbmp: Option<PathBuf>,
+}
+
+/// What a bar that is a chart knows about its chart beyond its title.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct BarChart {
+    /// Where the chart is in [`AppShared::library`].
+    pub(crate) index: usize,
+    /// `#SUBTITLE`, which the reference writes after the title on a bar (`SongData.getFullTitle`).
+    pub(crate) subtitle: String,
+    pub(crate) mode: Mode,
+    /// `#PLAYLEVEL` as the chart wrote it, which is what the built-in row shows.
+    pub(crate) level_text: String,
+    /// `#PLAYLEVEL` as a number, zero when it is not one (`SongData.getLevel`).
+    pub(crate) level: i32,
+    /// `#DIFFICULTY` as the chart wrote it (`SongData.getDifficulty`).
+    pub(crate) difficulty: i32,
+    /// What the chart is made of, as the reference's `SongData.getFeature` bits. Zero when the
+    /// song database has not been asked ([`stage::select`] asks it only for a skin).
+    pub(crate) features: u32,
+    /// When the chart first entered the song database, in seconds, or `None` when that is not
+    /// known (`SongData.getAdddate`).
+    pub(crate) added_at: Option<i64>,
+    pub(crate) favorite: bool,
+    /// The run that scored highest, when anything has been recorded on the chart.
+    pub(crate) best: Option<BarScore>,
+    pub(crate) images: BarImages,
+}
+
+/// What a bar that is a course knows about its course beyond its name.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct BarCourse {
+    /// How many stages the course has.
+    pub(crate) stages: usize,
+    /// The constraints the course plays under and whether it is released, as the built-in row
+    /// labels them.
+    pub(crate) badges: Vec<&'static str>,
+    /// The features of every chart of the course or-ed together, which is what the reference
+    /// labels a course with. Zero for a course the library cannot supply in full.
+    pub(crate) features: u32,
+}
+
+/// One bar of the browser's list, with what every screen that draws the list reads off it: the
+/// reference's `Bar` with the questions a wheel and the bar properties ask already answered.
+///
+/// `kind` says which of the reference's bar classes it stands for. What this build has no source
+/// for is left at "nothing": no rival is ever picked, so `rival_lamp` is always `None`, and a
+/// course's own clear and medal are not kept anywhere, so a course never has a `lamp` or a
+/// `trophy`.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct SelectBar {
+    pub(crate) kind: BarKind,
+    /// What the bar is called. A chart's is its `#TITLE` alone; [`SelectBar::full_title`] is what
+    /// the reference writes on the bar.
+    pub(crate) title: String,
+    /// The chart behind a bar that is one.
+    pub(crate) chart: Option<BarChart>,
+    /// The course behind a bar that is one.
+    pub(crate) course: Option<BarCourse>,
+    /// The best clear the player holds on the bar, as the reference numbers its `ClearType`s, or
+    /// `None` when nothing was recorded on it. A folder's is the lowest clear any chart under it
+    /// sits on (`DirectoryBar.getLamp`).
+    pub(crate) lamp: Option<u8>,
+    /// The same for the rival that is picked.
+    pub(crate) rival_lamp: Option<u8>,
+    /// The medal of a course (`GradeBar.getTrophy`).
+    pub(crate) trophy: Option<BarTrophy>,
+    /// How the charts under a bar that opens have been cleared and scored, for the bars the
+    /// reference counts that for: a folder of charts and a level of a table, not a table itself.
+    pub(crate) distribution: Option<BarDistribution>,
+}
+
+impl SelectBar {
+    /// A bar of `kind` called `title` with nothing else known about it.
+    pub(crate) fn new(kind: BarKind, title: impl Into<String>) -> SelectBar {
+        SelectBar { kind, title: title.into(), chart: None, course: None, lamp: None, rival_lamp: None, trophy: None, distribution: None }
+    }
+
+    /// What the reference writes on the bar (`Bar.getTitle`): a chart's title with its subtitle
+    /// after it when it has one (`SongData.getFullTitle`), and any other bar's own name.
+    pub(crate) fn full_title(&self) -> String {
+        match self.chart.as_ref().map(|chart| chart.subtitle.as_str()).filter(|subtitle| !subtitle.is_empty()) {
+            Some(subtitle) => format!("{} {subtitle}", self.title),
+            None => self.title.clone(),
+        }
+    }
+}
+
 /// Cache key for the assembled [`SelectScene`]: rebuild only when one of these changes, so the scene
 /// is not re-allocated every frame of the continuous redraw loop. `select_gen` bumps on any list
-/// rebuild (catches same-length folder swaps); `scores` length catches a freshly saved record.
-type SelectKey = (u64, usize, Option<usize>, usize, bool, bool, SelectTab);
+/// rebuild (catches same-length folder swaps); `scores` length catches a freshly saved record; the
+/// last flag is whether a skin draws the browser, which words some of its hints differently.
+type SelectKey = (u64, usize, Option<usize>, usize, bool, bool, SelectTab, bool);
 
 /// A clickable region recorded during rendering and hit-tested on a left-click. Immediate-mode:
 /// `AppShared::hot` is rebuilt every frame for the current stage, so the layout math lives in one place.
@@ -440,6 +547,12 @@ enum Hot {
     NavTables,
     NavRecords,
     NavSettings,
+    /// A region of a panel the application draws over a skin, which takes a press that lands on it
+    /// without doing anything, so the skin beneath is not handed it.
+    OverlayPanel,
+    /// Everything on screen but the key guide the application draws over a skin: a press there
+    /// closes it.
+    GuideClose,
 }
 
 /// The running application: the state that outlives a stage change, the screen that is up, and the
@@ -653,6 +766,11 @@ struct AppShared {
     /// The next chart load is for the practice panel rather than for a run, set by the browser's
     /// practice key and cleared when the loaded chart opens the panel.
     practice_requested: bool,
+    /// The run the browser started is to play itself whatever the AUTOPLAY setting says, set by the
+    /// skin's autoplay button and its key and cleared when the browser is next arrived at
+    /// ([`AppShared::run_plays_itself`]). The setting itself is never touched for it, so nothing
+    /// that writes the settings out while the run is on can write it switched on.
+    autoplay_once: bool,
     /// The chart the practice panel is set up on, kept while the panel is open so each slice is cut
     /// from the untrimmed model.
     practice_chart: Option<Box<app_play::PracticeChart>>,
@@ -863,6 +981,7 @@ impl App {
                 replay_dir,
                 practice_book,
                 practice_requested: false,
+                autoplay_once: false,
                 practice_chart: None,
                 favorites,
                 favorites_path,
@@ -893,6 +1012,27 @@ const DEBUG_PANEL_W: f32 = 380.0;
 
 /// Line height of the debug overlay.
 const DEBUG_LINE_H: f32 = 16.0;
+
+/// Where the connection dot and the debug panel stand, as the top left corner of each in the fixed
+/// screen the application lays itself out for: the built-in screens' places, and the places they
+/// move to over a browser a skin draws.
+///
+/// A skin fills the screen with its own, and the corners are where a frame puts what it has least to
+/// say. ModernChic's top frame is 138 high with its help button at x 20, its skin name and version
+/// down the right edge and its row of buttons under that, so over it the dot is in the left corner,
+/// clear of the button and of the version, and the panel is under the frame instead of over the help
+/// button and the title. The messages stay where they are: bottom right, over the skin's
+/// least-read window.
+const BUILT_IN_DOT_ORIGIN: (f32, f32) = (CW as f32 - 22.0, 10.0);
+const SKIN_DOT_ORIGIN: (f32, f32) = (4.0, 8.0);
+const BUILT_IN_DEBUG_ORIGIN: (f32, f32) = (6.0, 6.0);
+const SKIN_DEBUG_ORIGIN: (f32, f32) = (6.0, 144.0);
+
+/// The size of the connection dot.
+const CONNECTION_DOT_SIZE: f32 = 10.0;
+
+/// Where the debug panel's first line is from its corner.
+const DEBUG_TEXT_INSET: (f32, f32) = (8.0, 6.0);
 
 impl App {
     /// Apply a screen change: the leaving screen's `on_exit`, the swap, then the arriving screen's
@@ -956,10 +1096,21 @@ impl App {
         }
     }
 
+    /// Let the window take text through an input method exactly while an editable text of a skin is
+    /// being typed into, so Hangul and kana compose in it, and no longer: a chart being played reads
+    /// keys, not text.
+    fn sync_ime(&mut self) {
+        let wanted = self.shared.skin_text_is_focused();
+        if let Some(window) = self.window.as_mut() {
+            window.sync_ime(wanted);
+        }
+    }
+
     /// One frame: the shared bookkeeping every screen needs, the screen's own update, then the
     /// screen's own draw with the app-wide overlays on top.
     fn frame(&mut self, event_loop: &ActiveEventLoop) {
         self.sync_window();
+        self.sync_ime();
         let now = Instant::now();
         let dt = now.duration_since(self.shared.last_frame).as_secs_f32();
         self.shared.last_frame = now;
@@ -1024,9 +1175,11 @@ impl App {
         crate::gpu::apply_letterbox(canvas, ctx.shared.config.display.fits_screen_shape());
         app_options::draw(stage.id(), ctx, canvas);
         toast::draw(&ctx.shared.toasts, stage.id(), canvas);
+        let over_skin = stage.id() == StageId::Select && ctx.shared.has_skin_document(SKIN_TYPE_MUSIC_SELECT);
         if ctx.shared.config.network.server_url.is_some() {
             let connected = ctx.shared.server_connected.load(Ordering::Relaxed);
-            canvas.fill_rect(Rect::new(CW as f32 - 22.0, 10.0, 10.0, 10.0), if connected { Color::GREEN } else { Color::RED });
+            let (dot_x, dot_y) = if over_skin { SKIN_DOT_ORIGIN } else { BUILT_IN_DOT_ORIGIN };
+            canvas.fill_rect(Rect::new(dot_x, dot_y, CONNECTION_DOT_SIZE, CONNECTION_DOT_SIZE), if connected { Color::GREEN } else { Color::RED });
         }
         if !ctx.shared.config.display.debug {
             return;
@@ -1044,10 +1197,11 @@ impl App {
         lines.push(format!("FONT {}/{}  RUNS {}/{}", layouts, rbms_render::LAYOUT_CACHE_LIMIT, runs, rbms_render::RUN_CACHE_LIMIT));
         lines.push(ctx.shared.debug_skin_texture_line());
         let ph = lines.len() as f32 * DEBUG_LINE_H + 12.0;
-        canvas.fill_rect(Rect::new(6.0, 6.0, DEBUG_PANEL_W, ph), Color { r: 0, g: 0, b: 0, a: 180 });
+        let (panel_x, panel_y) = if over_skin { SKIN_DEBUG_ORIGIN } else { BUILT_IN_DEBUG_ORIGIN };
+        canvas.fill_rect(Rect::new(panel_x, panel_y, DEBUG_PANEL_W, ph), Color { r: 0, g: 0, b: 0, a: 180 });
         for (i, l) in lines.iter().enumerate() {
             let col = if i == 0 { Color::YELLOW } else { Color::rgb(120, 240, 140) };
-            draw_text(canvas, 14.0, 12.0 + i as f32 * DEBUG_LINE_H, 1.2, col, l);
+            draw_text(canvas, panel_x + DEBUG_TEXT_INSET.0, panel_y + DEBUG_TEXT_INSET.1 + i as f32 * DEBUG_LINE_H, 1.2, col, l);
         }
     }
 }
@@ -1131,6 +1285,7 @@ impl ApplicationHandler for App {
             }
             WindowEvent::MouseWheel { delta, .. } => self.dispatch_pointer(event_loop, PointerInput::from_wheel(delta)),
             WindowEvent::Focused(false) => self.shared.release_held_inputs(),
+            WindowEvent::Ime(ime) => self.shared.skin_text_ime(&ime),
             WindowEvent::KeyboardInput { event, .. } => {
                 let PhysicalKey::Code(code) = event.physical_key else {
                     return;

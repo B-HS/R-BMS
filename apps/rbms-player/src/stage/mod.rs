@@ -285,9 +285,16 @@ impl Stage {
     /// point of it is that the list it is drawn over does not move while it is open. A key it does
     /// not take reaches the screen exactly as it would have.
     ///
-    /// The held-key set the START, SELECT and key-index queries read is updated first, from every
+    /// An editable text of a skin that is being typed into takes every key before anything else,
+    /// the overlay and the held-key set included: what is typed must not press START or SELECT or
+    /// open a panel.
+    ///
+    /// The held-key set the START, SELECT and key-index queries read is updated next, from every
     /// key, so a key the overlay or a text box took still counts as down.
     pub(crate) fn handle_key(&mut self, ctx: &mut FrameCtx<'_>, key: KeyInput<'_>) -> Transition {
+        if ctx.shared.skin_text_key(&key) {
+            return Transition::Stay;
+        }
         ctx.shared.note_key(&key);
         let holds_keys = self.view().holds_keys(ctx);
         if crate::app_options::options_key(ctx, self.id(), holds_keys, &key) {

@@ -54,6 +54,18 @@ use rbms_skin::timer::{TimerId, TimerState};
 /// numbers without declaring a constant for it.
 const INDEX_DIFFICULTY_FILTER: i32 = 10;
 
+/// The texts the reference numbers without a constant: the browser's mode filter, order and
+/// difficulty filter (`StringType.mode`, `sort`, `difficulty`), and the target with the two runs of
+/// ten that name the targets before and after it (`StringType.target`, `StringPropertyPattern`
+/// `TARGET_NAME_PREVIOUS` and `TARGET_NAME_NEXT`).
+const STRING_MODE_FILTER: i32 = 60;
+const STRING_SORT: i32 = 61;
+const STRING_DIFFICULTY_FILTER: i32 = 62;
+const STRING_TARGET_NAME: i32 = 3;
+const STRING_TARGET_PREVIOUS_FIRST: i32 = 200;
+const STRING_TARGET_NEXT_FIRST: i32 = 210;
+const STRING_TARGET_NEXT_LAST: i32 = 219;
+
 /// The image indices of the options the target score was played with, first and last
 /// (`IndexType.option_target1_1p` to `option_target1_dp`).
 const INDEX_TARGET_OPTION_FIRST: i32 = 61;
@@ -317,7 +329,7 @@ pub const ROUTES: &[Route] = &[
     Route::band(IdSpace::ImageIndex, VALUE_JUDGE_1P_SCRATCH, VALUE_JUDGE_2P_KEY9, Cluster::Play),
     Route::band(IdSpace::ImageIndex, VALUE_JUDGE_1P_KEY10, VALUE_JUDGE_2P_KEY99, Cluster::Play),
     Route::band(IdSpace::Offset, OFFSET_SCRATCHANGLE_1P, OFFSET_HIDDEN_COVER, Cluster::Play),
-    Route::band(IdSpace::ImageIndex, INDEX_DIFFICULTY_FILTER, BUTTON_SORT, Cluster::Options),
+    Route::band(IdSpace::ImageIndex, INDEX_DIFFICULTY_FILTER, BUTTON_SORT, Cluster::Select),
     Route::band(IdSpace::ImageIndex, BUTTON_GAUGE_1P, BUTTON_RANDOM_2P, Cluster::Options),
     Route::band(IdSpace::ImageIndex, BUTTON_DPOPTION, BUTTON_HSFIX, Cluster::Options),
     Route::band(IdSpace::ImageIndex, INDEX_TARGET_OPTION_FIRST, INDEX_TARGET_OPTION_LAST, Cluster::Options),
@@ -339,15 +351,26 @@ pub const ROUTES: &[Route] = &[
     Route::one(IdSpace::Float, FLOAT_HISPEED, Cluster::Options),
     Route::band(IdSpace::Rate, RATE_MASTERVOLUME, RATE_BGMVOLUME, Cluster::Options),
     Route::band(IdSpace::Boolean, OPTION_DISABLE_SAVE_SCORE, OPTION_NO_SAVE_CLEAR, Cluster::Options),
+    Route::one(IdSpace::Text, STRING_TARGET_NAME, Cluster::Options),
+    Route::band(IdSpace::Text, STRING_TARGET_PREVIOUS_FIRST, STRING_TARGET_NEXT_LAST, Cluster::Options),
     Route::band(IdSpace::Boolean, OPTION_FOLDERBAR, OPTION_PLAYABLEBAR, Cluster::Select),
     Route::band(IdSpace::Boolean, OPTION_PANEL1, OPTION_PANEL3, Cluster::Select),
     Route::band(IdSpace::Boolean, OPTION_SELECT_BAR_NOT_PLAYED, OPTION_SELECT_BAR_FULL_COMBO_CLEARED, Cluster::Select),
-    Route::band(IdSpace::Boolean, OPTION_IR_NOPLAYER, OPTION_IR_BUSY, Cluster::Select),
     Route::band(IdSpace::Boolean, OPTION_NOT_COMPARE_RIVAL, OPTION_COMPARE_RIVAL, Cluster::Select),
     Route::band(IdSpace::Boolean, OPTION_GRADEBAR_CLASS, OPTION_GRADEBAR_HCN, Cluster::Select),
     Route::band(IdSpace::Boolean, OPTION_RANDOMSELECTBAR, OPTION_RANDOMCOURSEBAR, Cluster::Select),
     Route::band(IdSpace::Boolean, OPTION_SELECT_BAR_ASSIST_EASY_CLEARED, OPTION_SELECT_BAR_MAX_CLEARED, Cluster::Select),
+    Route::band(IdSpace::Boolean, OPTION_NO_REPLAYDATA, OPTION_REPLAYDATA_SAVED, Cluster::Select),
+    Route::band(IdSpace::Boolean, OPTION_NO_REPLAYDATA2, OPTION_REPLAYDATA4_SAVED, Cluster::Select),
     Route::band(IdSpace::Boolean, OPTION_SELECT_REPLAYDATA, OPTION_SELECT_REPLAYDATA4, Cluster::Select),
+    Route::band(IdSpace::ImageIndex, BUTTON_FAVORITTE_SONG, BUTTON_FAVORITTE_CHART, Cluster::Select),
+    Route::band(IdSpace::ImageIndex, INDEX_CLEAR, INDEX_TARGET_CLEAR, Cluster::Select),
+    Route::one(IdSpace::Text, STRING_TITLE, Cluster::Select),
+    Route::one(IdSpace::Text, STRING_FULLTITLE, Cluster::Select),
+    Route::one(IdSpace::Text, STRING_SEARCHWORD, Cluster::Select),
+    Route::band(IdSpace::Text, STRING_MODE_FILTER, STRING_DIFFICULTY_FILTER, Cluster::Select),
+    Route::band(IdSpace::Text, STRING_COURSE1_TITLE, STRING_COURSE10_TITLE, Cluster::Select),
+    Route::one(IdSpace::Text, STRING_DIRECTORY, Cluster::Select),
     Route::band(IdSpace::Integer, NUMBER_PLAYCOUNT, NUMBER_FAILCOUNT, Cluster::Select),
     Route::band(IdSpace::Integer, NUMBER_LASTPLAY_TIMESTAMP, NUMBER_LASTPLAY_SECOND, Cluster::Select),
     Route::one(IdSpace::Integer, NUMBER_FOLDER_TOTALSONGS, Cluster::Select),
@@ -594,6 +617,15 @@ impl RequestQueue {
         taken.into_iter().map(|(_, request)| request).collect()
     }
 
+    /// Takes the requests waiting for `cluster` that `wanted` picks, oldest first, and leaves every
+    /// other request where it is, so a screen can take the writes it carries out without taking the
+    /// events another part of it answers.
+    pub fn take_if(&mut self, cluster: Cluster, mut wanted: impl FnMut(&ClusterRequest) -> bool) -> Vec<ClusterRequest> {
+        let (taken, left): (Vec<_>, Vec<_>) = std::mem::take(&mut self.waiting).into_iter().partition(|(owner, request)| *owner == cluster && wanted(request));
+        self.waiting = left;
+        taken.into_iter().map(|(_, request)| request).collect()
+    }
+
     /// Drops everything that is waiting.
     pub fn clear(&mut self) {
         self.waiting.clear();
@@ -830,6 +862,14 @@ impl<'a> ScreenHost<'a> {
         self.options = options::OptionsState::of_result(finished);
         self.ir.scene = Some(finished.scene);
         self.ir.target_name = &finished.snapshot.target_name;
+    }
+
+    /// Puts the song browser's frame on this host: the bar under the cursor for cluster F, the
+    /// settings the bar is read against for cluster E, and the ranking of its chart for cluster H.
+    pub fn show_select(&mut self, shown: &'a select::SelectShown) {
+        self.select = select::SelectState::of(shown);
+        self.options = options::OptionsState::of_settings(shown.settings);
+        self.ir.browser = Some(shown.ir);
     }
 
     /// Records one thing the skin told the game to do.

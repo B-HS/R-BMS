@@ -214,3 +214,80 @@ fn a_plain_play_never_loops() {
     render(&mut m, LONG_RENDER_FRAMES);
     assert_eq!(m.stats().active_voices, 0);
 }
+
+const LEVEL_RAMP_MS: f32 = 10.0;
+const NO_RAMP_MS: f32 = 0.0;
+const HELD_FRAMES: usize = 4_800;
+const SETTLE_FRAMES: usize = 1_024;
+
+fn level_of(m: &Mixer) -> f32 {
+    m.voices.iter().find(|v| v.active).map(|v| v.level).unwrap()
+}
+
+#[test]
+fn a_looped_effect_turned_down_goes_silent_but_keeps_advancing_and_returns_where_it_got_to() {
+    let mut m = mixer();
+    m.apply(effect(flat(LONG_RENDER_FRAMES, OUT_RATE, SAMPLE_LEVEL), effect_key(EFFECT_ID, 0), Bus::System, 1.0, true));
+    render(&mut m, SETTLE_FRAMES);
+    m.apply(Command::EffectLevel { id: EFFECT_ID, level: 0.0, ramp_ms: LEVEL_RAMP_MS });
+    render(&mut m, SETTLE_FRAMES);
+    let before = m.voices.iter().find(|v| v.active).unwrap().pos;
+    let silent = render(&mut m, HELD_FRAMES);
+    assert!(silent.iter().all(|&s| s == 0.0), "a voice held at level 0 must make no sound");
+    assert_eq!(m.stats().active_voices, 1, "turning a loop down must not stop it");
+    let after = m.voices.iter().find(|v| v.active).unwrap().pos;
+    assert!(after - before >= HELD_FRAMES as f64 - 1.0, "the held loop stopped advancing: {before} -> {after}");
+
+    m.apply(Command::EffectLevel { id: EFFECT_ID, level: 1.0, ramp_ms: LEVEL_RAMP_MS });
+    let back = left(&render(&mut m, SETTLE_FRAMES));
+    let steady = centred(SAMPLE_LEVEL * DEFAULT_BUS_GAIN);
+    assert!((back.last().unwrap() - steady).abs() < TOLERANCE, "the loop did not come back to full level");
+}
+
+#[test]
+fn a_level_change_travels_over_its_ramp_and_not_in_one_step() {
+    let mut m = mixer();
+    m.apply(effect(flat(LONG_RENDER_FRAMES, OUT_RATE, SAMPLE_LEVEL), effect_key(EFFECT_ID, 0), Bus::System, 1.0, true));
+    render(&mut m, SETTLE_FRAMES);
+    m.apply(Command::EffectLevel { id: EFFECT_ID, level: 0.0, ramp_ms: LEVEL_RAMP_MS });
+    render(&mut m, BUFFER_FRAMES / 4);
+    let midway = level_of(&m);
+    assert!(midway > 0.0 && midway < 1.0, "the level should be part way through its ramp, was {midway}");
+    render(&mut m, SETTLE_FRAMES);
+    assert_eq!(level_of(&m), 0.0);
+}
+
+#[test]
+fn a_level_of_no_ramp_lands_at_once() {
+    let mut m = mixer();
+    m.apply(effect(flat(LONG_RENDER_FRAMES, OUT_RATE, SAMPLE_LEVEL), effect_key(EFFECT_ID, 0), Bus::System, 1.0, true));
+    m.apply(Command::EffectLevel { id: EFFECT_ID, level: 0.0, ramp_ms: NO_RAMP_MS });
+    render(&mut m, 2);
+    assert_eq!(level_of(&m), 0.0);
+}
+
+#[test]
+fn a_level_reaches_every_instance_of_its_id_and_no_other_id_or_keysound() {
+    let mut m = mixer();
+    for serial in 0..INSTANCES {
+        m.apply(effect(flat(SHORT_SAMPLE_FRAMES, OUT_RATE, SAMPLE_LEVEL), effect_key(EFFECT_ID, serial), Bus::System, 1.0, true));
+    }
+    m.apply(effect(flat(SHORT_SAMPLE_FRAMES, OUT_RATE, SAMPLE_LEVEL), effect_key(OTHER_EFFECT_ID, 0), Bus::System, 1.0, true));
+    m.apply(Command::EffectLevel { id: EFFECT_ID, level: 0.0, ramp_ms: NO_RAMP_MS });
+    render(&mut m, SETTLE_FRAMES);
+    let held = m.voices.iter().filter(|v| v.active && channel_sample_id(v.key) == EFFECT_ID).all(|v| v.level == 0.0);
+    let others = m.voices.iter().filter(|v| v.active && channel_sample_id(v.key) == OTHER_EFFECT_ID).all(|v| v.level == 1.0);
+    assert!(held, "an instance of the held id stayed audible");
+    assert!(others, "another id was held");
+}
+
+#[test]
+fn a_voice_started_after_a_level_command_sounds_at_full_level() {
+    let mut m = mixer();
+    m.apply(effect(flat(LONG_RENDER_FRAMES, OUT_RATE, SAMPLE_LEVEL), effect_key(EFFECT_ID, 0), Bus::System, 1.0, true));
+    m.apply(Command::EffectLevel { id: EFFECT_ID, level: 0.0, ramp_ms: NO_RAMP_MS });
+    m.apply(Command::StopId { id: EFFECT_ID });
+    render(&mut m, SETTLE_FRAMES);
+    m.apply(effect(flat(LONG_RENDER_FRAMES, OUT_RATE, SAMPLE_LEVEL), effect_key(EFFECT_ID, 1), Bus::System, 1.0, true));
+    assert_eq!(level_of(&m), 1.0);
+}

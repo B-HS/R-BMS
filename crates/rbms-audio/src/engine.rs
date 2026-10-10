@@ -502,6 +502,13 @@ impl AudioEngine {
         }
     }
 
+    /// Move every sounding voice of a sample id to `level` (0 to 1) over `ramp_ms`, keeping it
+    /// playing: a looped effect turned down to 0 goes on advancing silently and is heard again from
+    /// wherever it has got to. A voice started afterwards sounds at full level.
+    pub fn set_effect_level(&mut self, id: u32, level: f32, ramp_ms: f32) {
+        self.push(Command::EffectLevel { id, level, ramp_ms });
+    }
+
     /// Stop every voice of a sample id, whatever pitch it was started at.
     pub fn stop(&mut self, id: u32) {
         self.push(Command::StopId { id });

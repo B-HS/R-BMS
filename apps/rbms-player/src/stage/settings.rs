@@ -88,7 +88,7 @@ impl SettingsState {
     }
 
     /// The open tab.
-    fn current_tab(&self) -> SettingTab {
+    pub(crate) fn current_tab(&self) -> SettingTab {
         SettingTab::ALL[self.tab.min(SettingTab::ALL.len() - 1)]
     }
 

@@ -35,12 +35,12 @@ use rbms_chart::to_model;
 use rbms_model::Mode;
 use rbms_parser::parse;
 use rbms_render::playfield::LaneShade;
-use rbms_render::skin_render::frame::{GAUGE_TYPES, GaugeScale};
+use rbms_render::skin_render::frame::{BarDistribution, BarKind, BarScroll, BarTrophy, GAUGE_TYPES, GaugeScale, SongBar};
 use rbms_render::skin_render::graphs::{EARLY_LATE_BUCKETS, GAUGE_SAMPLE_MS, JUDGEMENTS, NOTE_KINDS, PlayCursor, TIMING_JUDGE_AREAS};
 use rbms_render::skin_render::textures::referenced_sources;
 use rbms_render::{
     BgaFrame, BpmTimeline, Color, CpuCanvas, FrameData, FrameSeries, GaugeFrame, GaugeHistory, NoteDistribution, NoteField, PlayfieldView, RecentHits,
-    ReferenceImages, RenderCtx, Renderer, SelectRow, Skin, SkinAssets, SkinFrame, SkinImage, SkinObjectKind, SkinScreen, SongBars, TextContext, TextureId,
+    ReferenceImages, RenderCtx, Renderer, Skin, SkinAssets, SkinFrame, SkinImage, SkinObjectKind, SkinScreen, SongBars, TextContext, TextureId,
     TimingHistogram,
 };
 use rbms_skin::dst::{DrawCondition, TimerRef};
@@ -290,21 +290,40 @@ fn timing_distribution() -> Vec<u32> {
         .collect()
 }
 
-/// The row of the browser scenario that is under the cursor.
-const SELECT_CURSOR: usize = 4;
+/// The bar of the browser scenario that is under the cursor: the chart the scenario file describes.
+const SELECT_CURSOR: usize = 10;
 
-/// The titles of the browser scenario's rows, a folder first.
-const SELECT_TITLES: [&str; 9] = [
-    "Scenario Folder",
-    "Opening Track",
-    "Second Track -long title to see how a bar treats overflow-",
-    "Third Track",
-    "Scenario Title",
-    "Fifth Track",
-    "Sixth Track",
-    "Seventh Track",
-    "Eighth Track",
-];
+/// The clear lamps the browser scenario's bars hold, by the reference's numbers.
+const LAMP_FAILED: i32 = 1;
+const LAMP_ASSIST: i32 = 2;
+const LAMP_LIGHT_ASSIST: i32 = 3;
+const LAMP_EASY: i32 = 4;
+const LAMP_NORMAL: i32 = 5;
+const LAMP_HARD: i32 = 6;
+const LAMP_EX_HARD: i32 = 7;
+const LAMP_FULL_COMBO: i32 = 8;
+const LAMP_PERFECT: i32 = 9;
+const LAMP_MAX: i32 = 10;
+
+/// The difficulties of the browser scenario's charts, by the reference's numbers.
+const DIFFICULTY_UNKNOWN: i32 = 0;
+const DIFFICULTY_BEGINNER: i32 = 1;
+const DIFFICULTY_NORMAL: i32 = 2;
+const DIFFICULTY_HYPER: i32 = 3;
+const DIFFICULTY_ANOTHER: i32 = 4;
+const DIFFICULTY_INSANE: i32 = 5;
+
+/// How the charts under the browser scenario's counted folders are spread over the clear lamps,
+/// from no play to max.
+const FOLDER_LAMPS: [u32; 11] = [6, 2, 1, 1, 4, 9, 7, 3, 2, 1, 1];
+
+/// How long one slot's travel takes in the browser scenario's slide, and how much of it is left in
+/// the frame that is drawn: half.
+const SLIDE_TRAVEL_MS: i32 = 300;
+const SLIDE_LEFT_MS: i64 = 150;
+
+/// A wall clock for the browser scenario's slide to be measured on.
+const SLIDE_NOW_MS: i64 = 1_700_000_000_000;
 
 /// The folder, next to the scenario files, that holds the pictures a frame carries for the objects a
 /// skin names by a negative id. They are drawn for this test and stand in for a chart's own.
@@ -318,8 +337,10 @@ const REFERENCE_IMAGE_STEMS: [&str; 3] = ["stagefile", "backbmp", "banner"];
 enum Extra {
     /// Nothing: the screen draws scalar objects alone.
     None,
-    /// The browser's rows.
+    /// The browser's bars, with the wheel at rest.
     Select,
+    /// The browser's bars half way through sliding one slot towards the next bar.
+    SelectSliding,
     /// The series a result screen's graphs draw.
     Result,
     /// The series a course's result screen draws: the gauge through every stage with the stage ends
@@ -392,8 +413,9 @@ const PLAY_LOADED_MS: i64 = 3_500;
 /// its fade to black, and the result screen twice more while its gauge fills and its graphs are
 /// being revealed. The result screen is then drawn again with its information panel switched to the
 /// second page, where the rest of its graphs are, and the course's result screen is drawn against
-/// the same scenario with the run read as four stages. The play screen is drawn while it loads
-/// (twice), in its ready phase and with the chart running.
+/// the same scenario with the run read as four stages. The browser is drawn once more at rest in
+/// every other way, with its wheel half way through sliding one slot along. The play screen is
+/// drawn while it loads (twice), in its ready phase and with the chart running.
 const SHOTS: &[Shot] = &[
     Shot {
         name: "decide",
@@ -429,6 +451,15 @@ const SHOTS: &[Shot] = &[
         entry: "musicselect.luaskin",
         times_ms: &[0, 500, 1_500, 3_000],
         extra: Extra::Select,
+        switches: &[],
+        clicks: &[],
+    },
+    Shot {
+        name: "musicselect",
+        capture: "musicselect_slide",
+        entry: "musicselect.luaskin",
+        times_ms: &[0, 3_000],
+        extra: Extra::SelectSliding,
         switches: &[],
         clicks: &[],
     },
@@ -705,24 +736,47 @@ fn backdrop() -> Vec<u8> {
     rgba
 }
 
-/// The browser scenario's rows.
-fn select_rows() -> Vec<SelectRow> {
-    SELECT_TITLES
-        .iter()
-        .enumerate()
-        .map(|(index, title)| SelectRow {
-            folder: index == 0,
-            title: (*title).to_owned(),
-            mode_short: "7K",
-            mode_color: Color::rgb(120, 200, 255),
-            level: format!("{}", index + 3),
-            difficulty_color: Color::rgb(255, 192, 0),
-            lamp: Color::rgb(80, 200, 120),
-            folder_count: (index == 0).then_some(SELECT_TITLES.len() - 1),
-            dj_level: (index == SELECT_CURSOR).then_some("A"),
-            favorite: false,
-        })
-        .collect()
+/// A chart of the browser scenario that is on disk.
+fn chart(title: &str, level: i32, difficulty: i32, lamp: i32, features: u32) -> SongBar {
+    SongBar { level, difficulty, lamp, features, ..SongBar::new(BarKind::Song { exists: true }, title) }
+}
+
+/// A bar of the browser scenario that opens, with the charts under it counted.
+fn counted(kind: BarKind, title: &str) -> SongBar {
+    SongBar { distribution: Some(Box::new(BarDistribution { lamps: FOLDER_LAMPS, ..BarDistribution::default() })), ..SongBar::new(kind, title) }
+}
+
+/// The browser scenario's bars: one of every kind a wheel draws differently, and a chart on every
+/// clear lamp, difficulty and label. The wheel of the pack this was written against shows the
+/// seventeen around the cursor, the first and the last of them all but off the screen.
+fn select_bars() -> Vec<SongBar> {
+    let (mines, random) = (SongBar::FEATURE_MINE_NOTE, SongBar::FEATURE_RANDOM);
+    let (open, long, charge, hell) =
+        (SongBar::FEATURE_UNDEFINED_LN, SongBar::FEATURE_LONG_NOTE, SongBar::FEATURE_CHARGE_NOTE, SongBar::FEATURE_HELL_CHARGE_NOTE);
+    vec![
+        chart("Bar Above The Wheel", 1, DIFFICULTY_BEGINNER, 0, 0),
+        chart("Another Bar Above The Wheel", 2, DIFFICULTY_NORMAL, 0, 0),
+        counted(BarKind::Table, "Scenario Table Insane"),
+        SongBar::new(BarKind::Search, "Search : 'scenario'"),
+        SongBar::new(BarKind::Command, "Scenario Command"),
+        SongBar { is_new: true, ..counted(BarKind::Folder, "Scenario Folder (new, counted)") },
+        SongBar { trophy: Some(BarTrophy::Gold), lamp: LAMP_EASY, features: long, ..SongBar::new(BarKind::Course { complete: true }, "Scenario Course") },
+        SongBar { lamp: LAMP_LIGHT_ASSIST, ..SongBar::new(BarKind::Course { complete: false }, "Scenario Course With A Chart Missing") },
+        chart("Opening Track", 3, DIFFICULTY_BEGINNER, LAMP_FAILED, 0),
+        chart("Second Track -a long title to see how a bar treats a line wider than its box-", 5, DIFFICULTY_NORMAL, LAMP_ASSIST, mines),
+        chart("Scenario Title", 12, DIFFICULTY_ANOTHER, LAMP_NORMAL, long | mines | random),
+        chart("Fifth Track", 12, DIFFICULTY_INSANE, LAMP_HARD, open),
+        chart("Sixth Track", 9, DIFFICULTY_HYPER, LAMP_EX_HARD, charge | random),
+        chart("Seventh Track", 10, DIFFICULTY_ANOTHER, LAMP_FULL_COMBO, hell),
+        SongBar { is_new: true, ..chart("Eighth Track (new)", 11, DIFFICULTY_ANOTHER, LAMP_PERFECT, 0) },
+        chart("Ninth Track", 1, DIFFICULTY_UNKNOWN, LAMP_MAX, 0),
+        SongBar { level: 8, difficulty: DIFFICULTY_HYPER, ..SongBar::new(BarKind::Song { exists: false }, "Chart That Is Not On Disk") },
+        counted(BarKind::Table, "Scenario Table Normal"),
+        SongBar::new(BarKind::Executable, "[RANDOM] Scenario Random Select"),
+        SongBar::new(BarKind::RandomCourse { complete: true }, "Scenario Random Course"),
+        SongBar::new(BarKind::Folder, "Folder Below The Wheel"),
+        chart("Bar Below The Wheel", 4, DIFFICULTY_HYPER, 0, 0),
+    ]
 }
 
 /// Writes the canvas to `path` as an opaque PNG.
@@ -756,7 +810,7 @@ struct Stage<'a> {
     screen: &'a SkinScreen,
     backdrop: TextureId,
     images: ReferenceImages,
-    rows: &'a [SelectRow],
+    bars: &'a [SongBar],
     field: &'a Skin,
     chart: &'a rbms_model::Model,
     analysis: &'a Analysis,
@@ -775,7 +829,9 @@ impl Stage<'_> {
     /// way the frame is drawn with nothing bound.
     fn draw(&self, canvas: &mut CpuCanvas, text: &mut TextContext, host: &MapHost, timers: &TimerState, now_ms: i64, bound: bool) -> Painted {
         let now_us = now_ms * MICROS_PER_MILLI;
-        let list = SongBars { rows: self.rows, sel: SELECT_CURSOR, options_open: false };
+        let sliding = BarScroll { duration_ms: SLIDE_NOW_MS + SLIDE_LEFT_MS, angle: SLIDE_TRAVEL_MS, now_ms: SLIDE_NOW_MS };
+        let scroll = if self.shot.extra == Extra::SelectSliding { sliding } else { BarScroll::default() };
+        let list = SongBars { scroll, ..SongBars::new(self.bars, SELECT_CURSOR) };
         let tempo = BpmTimeline::of_chart(&CHART_TEMPO, CHART_MAIN_BPM, CHART_MIN_BPM, CHART_MAX_BPM, Some(CHART_LENGTH_MS));
         let chart_only = NoteDistribution { kinds: &self.analysis.kinds, ..NoteDistribution::default() };
         let run = NoteDistribution {
@@ -807,7 +863,7 @@ impl Stage<'_> {
         let behind = FrameData { bga: BgaFrame::of(Some(self.backdrop)), images: self.images, ..FrameData::default() };
         let data = match self.shot.extra {
             Extra::None => FrameData { series: FrameSeries { bpm: Some(tempo), notes: Some(chart_only), ..FrameSeries::default() }, ..behind },
-            Extra::Select => {
+            Extra::Select | Extra::SelectSliding => {
                 FrameData { bars: Some(&list), series: FrameSeries { bpm: Some(tempo), notes: Some(chart_only), ..FrameSeries::default() }, ..behind }
             }
             Extra::Result => FrameData { series, gauge: Some(ended), ..behind },
@@ -927,7 +983,7 @@ fn capture(pack: &Path, overlay: &Path, capture_dir: Option<&Path>, shot: &Shot)
     }
     print_grouped("build warnings", screen.warnings());
 
-    let rows = select_rows();
+    let bars = select_bars();
     let field = Skin::default_for(Mode::BEAT_7K, CANVAS_W as f32, CANVAS_H as f32);
     let chart = to_model(&parse(PLAY_CHART), Mode::BEAT_7K);
     let backdrop = canvas.register_texture("rbms.external.backdrop", &backdrop(), BACKDROP_W, BACKDROP_H);
@@ -941,7 +997,7 @@ fn capture(pack: &Path, overlay: &Path, capture_dir: Option<&Path>, shot: &Shot)
         screen: &screen,
         backdrop,
         images,
-        rows: &rows,
+        bars: &bars,
         field: &field,
         chart: &chart,
         analysis: &analysis,

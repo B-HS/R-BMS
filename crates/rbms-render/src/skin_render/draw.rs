@@ -201,7 +201,7 @@ fn texture_filter(filtering: Filtering) -> TextureFilter {
 /// of one object's drawing reaches for.
 #[cfg(test)]
 pub(crate) fn draw_object<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, object: &SkinObject, viewport: &SkinViewport, frame: &SkinFrame<'_>) -> bool {
-    object.prepare(frame).is_some_and(|resolved| draw_resolved(ctx, r, object, viewport, frame, &resolved))
+    object.prepare(frame).is_some_and(|resolved| draw_resolved(ctx, r, object, 0, viewport, frame, &resolved))
 }
 
 /// Draws one object where the prepare stage put it, answering whether anything reached the screen.
@@ -210,10 +210,14 @@ pub(crate) fn draw_object<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, objec
 /// leaves too. Under alpha and additive blending that only saves work, but multiply and
 /// invert-destination read no source alpha at all, so an object fading out under one of those would
 /// otherwise keep darkening the screen at `a: 0`.
+///
+/// `index` is the object's place among its screen's objects, which is how an editable text finds out
+/// that it is the one being typed into.
 pub(crate) fn draw_resolved<R: Renderer>(
     ctx: &mut RenderCtx<'_>,
     r: &mut R,
     object: &SkinObject,
+    index: usize,
     viewport: &SkinViewport,
     frame: &SkinFrame<'_>,
     resolved: &Resolved,
@@ -235,7 +239,7 @@ pub(crate) fn draw_resolved<R: Renderer>(
         Body::Number(body) => draw_number(r, &place, body, rect, frame),
         Body::Float(body) => draw_float(r, &place, body, rect, frame),
         Body::Text(body) => text::draw_text(ctx, r, &place, body, rect, frame),
-        Body::TextInput(body) => text_input::draw_text_input(ctx, r, &place, body, rect, frame),
+        Body::TextInput(body) => text_input::draw_text_input(ctx, r, &place, body, index, rect, frame),
         Body::Slider(body) => draw_slider(r, &place, body, rect, frame),
         Body::Graph(body) => draw_graph(r, &place, body, rect, frame),
         Body::Bga(body) => bga::draw_bga(r, &place, body, rect, frame),

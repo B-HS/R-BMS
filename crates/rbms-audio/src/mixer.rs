@@ -54,6 +54,9 @@ const GAIN_SLEW_MS: f32 = 3.0;
 
 const MS_PER_SECOND: f32 = 1000.0;
 
+/// The level a voice sounds at before [`Command::EffectLevel`] moves it.
+const UNITY_LEVEL: f32 = 1.0;
+
 /// Per-frame envelope increment of a ramp lasting `ms` at `out_rate`. A ramp is at least one frame
 /// long, so a degenerate output rate yields an instant ramp instead of dividing by zero.
 fn ramp_step_per_frame(out_rate: u32, ms: f32) -> f32 {
@@ -202,6 +205,11 @@ struct Voice {
     active: bool,
     /// Whether the read position wraps to the start of the sample instead of ending the voice.
     looped: bool,
+    /// Level the voice is held at on top of its gain, travelling to `level_target` by `level_step`
+    /// per frame. Unity until [`Command::EffectLevel`] moves it.
+    level: f32,
+    level_target: f32,
+    level_step: f32,
     /// A start queued behind this voice's fade-out. Set when the pool was full and this slot was the
     /// one taken, so the incoming sound waits out the victim's release instead of cutting it off
     /// mid-waveform. Started in place, sample accurately, the frame the release reaches silence.
@@ -225,6 +233,9 @@ impl Voice {
             start_frame: 0,
             active: false,
             looped: false,
+            level: UNITY_LEVEL,
+            level_target: UNITY_LEVEL,
+            level_step: 0.0,
             pending: None,
         }
     }
@@ -299,6 +310,9 @@ fn start_in_place(v: &mut Voice, req: PlayRequest, delay: u64, at: u64, out_rate
     v.start_frame = at + delay;
     v.active = true;
     v.looped = req.looped;
+    v.level = UNITY_LEVEL;
+    v.level_target = UNITY_LEVEL;
+    v.level_step = 0.0;
     v.pending = None;
 }
 
@@ -313,6 +327,11 @@ fn start_in_place(v: &mut Voice, req: PlayRequest, delay: u64, at: u64, out_rate
 /// `PlayEffect` is a sound effect: it starts at the next buffer, centred and unpitched, and with
 /// `looped` it wraps around the end of the sample until it is stopped. It is the only command that
 /// loops, so a keysound or a preview can never be left running by accident.
+///
+/// `EffectLevel` moves every sounding voice of a sample id to `level` (0 to 1) over `ramp_ms`
+/// without stopping it, so a looped effect that is turned down keeps its place and comes back where
+/// it would have been: the reference turns its select music down to nothing under a preview and
+/// back up afterwards (`PreviewMusicProcessor`). A voice started after the command is at unity.
 #[non_exhaustive]
 pub enum Command {
     Play { sample: Arc<SampleData>, gain: f32, pan: f32, pitch: f32, key: u32, at_frame: u64, bus: Bus },
@@ -320,6 +339,7 @@ pub enum Command {
     Stop { key: u32 },
     StopId { id: u32 },
     StopRange { lo_key: u32, hi_key: u32 },
+    EffectLevel { id: u32, level: f32, ramp_ms: f32 },
     MasterGain(f32),
     BusGain { bus: Bus, gain: f32 },
     ChartGain(f32),
@@ -435,6 +455,7 @@ impl Mixer {
             Command::Stop { key } => self.stop(key),
             Command::StopId { id } => self.stop_id(id),
             Command::StopRange { lo_key, hi_key } => self.stop_range(lo_key, hi_key),
+            Command::EffectLevel { id, level, ramp_ms } => self.set_effect_level(id, level, ramp_ms),
             Command::MasterGain(g) => {
                 self.master_slew = slew_step(self.master_gain, g, self.slew_frames);
                 self.master_gain_target = g;
@@ -519,6 +540,19 @@ impl Mixer {
             }
             if v.active && channel_sample_id(v.key) == id {
                 release(v, retire);
+            }
+        }
+    }
+
+    /// Send every sounding voice of a sample id toward `level` over `ramp_ms`. A voice still waiting
+    /// out its scheduling delay is moved too, so the level holds from its first frame.
+    fn set_effect_level(&mut self, id: u32, level: f32, ramp_ms: f32) {
+        let target = if level.is_nan() { UNITY_LEVEL } else { level.clamp(0.0, UNITY_LEVEL) };
+        let step = ramp_step_per_frame(self.out_rate, ramp_ms.max(0.0));
+        for v in &mut self.voices {
+            if v.active && channel_sample_id(v.key) == id {
+                v.level_target = target;
+                v.level_step = step;
             }
         }
     }
@@ -656,7 +690,10 @@ impl Mixer {
                         (l, r)
                     };
                     let vbus = if bus_settled { bus_gain[bi] } else { approach(bus_gain[bi], bus_target[bi], bus_slew[bi] * f as f32) };
-                    let g = v.gain * v.env * vbus;
+                    if v.level != v.level_target {
+                        v.level = approach(v.level, v.level_target, v.level_step);
+                    }
+                    let g = v.gain * v.env * vbus * v.level;
                     let l = sl * g * v.lgain;
                     let r = sr * g * v.rgain;
                     let o = f * oc;

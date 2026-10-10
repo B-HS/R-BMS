@@ -14,9 +14,16 @@
 #![allow(clippy::wildcard_imports)]
 
 use std::cmp::Ordering;
+use std::collections::HashMap;
 
 use rbms_library::SongEntry;
+use rbms_library::songdb::{
+    CONTENT_BGA, CONTENT_TEXT, FEATURE_CHARGE_NOTE, FEATURE_HELL_CHARGE_NOTE, FEATURE_LONG_NOTE, FEATURE_RANDOM, FEATURE_STOP_SEQUENCE, FEATURE_UNDEFINED_LN,
+    SongDb, SongRow,
+};
+use rbms_render::skin_render::frame::{LAMP_KINDS, RANK_KINDS};
 
+use crate::skin_host::chart::{BpmRange, ChartContents, ChartMeta};
 use crate::*;
 
 /// Level a chart whose `#PLAYLEVEL` is not a number sorts under: after every chart that has one,
@@ -341,6 +348,332 @@ impl AppShared {
         }
         rows.into_iter().map(|row| row.index).collect()
     }
+}
+
+/// The highest lamp a folder counts a chart under (`DirectoryBar.getLamps`, whose last slot is
+/// `Max`).
+const TOP_LAMP: usize = LAMP_KINDS - 1;
+
+/// The highest rank a folder counts a chart under, which is also how many steps a full score is cut
+/// into (`exscore * 27 / (notes * 2)`).
+const TOP_RANK: usize = RANK_KINDS - 1;
+
+/// What the song database holds about a chart that the library's entry leaves out.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ChartFact {
+    /// The chart's `feature` bits (`SongData.getFeature`).
+    pub(crate) features: u32,
+    /// The chart's `content` bits (`SongData.getContent`).
+    pub(crate) content: i32,
+    /// When the chart first entered the database, in seconds (`SongData.getAdddate`).
+    pub(crate) added_at: i64,
+    /// `#BACKBMP` as the chart names it.
+    pub(crate) backbmp: String,
+    /// The chart's second artist line and its other hash (`SongData.getSubartist`, `getSha256`).
+    pub(crate) subartist: String,
+    pub(crate) sha256: String,
+    /// The slowest and the fastest tempo the chart plays at, in whole BPM (`SongData.getMinbpm`,
+    /// `getMaxbpm`).
+    pub(crate) min_bpm: i32,
+    pub(crate) max_bpm: i32,
+    /// How long the chart plays, in milliseconds, and how many notes it has to judge
+    /// (`SongData.getLength`, `getNotes`).
+    pub(crate) length_ms: i64,
+    pub(crate) notes: i32,
+}
+
+impl ChartFact {
+    /// `chart` with what the song database holds about it: its tempo range, its length and note
+    /// count, and which of its extras it has, each as the reference reads it off its `SongData`.
+    ///
+    /// Which pictures a chart names is left unsaid. The reference's options for them ask whether the
+    /// chart that was loaded last brought a picture (`BMSResource.getStagefile`), not whether the
+    /// one under the cursor names one, so this is not the place that knows.
+    pub(crate) fn describe<'a>(&'a self, chart: ChartMeta<'a>) -> ChartMeta<'a> {
+        let has_feature = |bits: i32| self.features & u32::try_from(bits).unwrap_or_default() != 0;
+        let any_long_note = FEATURE_UNDEFINED_LN | FEATURE_LONG_NOTE | FEATURE_CHARGE_NOTE | FEATURE_HELL_CHARGE_NOTE;
+        ChartMeta {
+            subartist: &self.subartist,
+            sha256: &self.sha256,
+            bpm: Some(BpmRange { min: self.min_bpm, max: self.max_bpm }),
+            length_ms: i32::try_from(self.length_ms).ok(),
+            notes: Some(self.notes),
+            contents: ChartContents {
+                bga: Some(self.content & CONTENT_BGA != 0),
+                text: Some(self.content & CONTENT_TEXT != 0),
+                long_note: Some(has_feature(any_long_note)),
+                random_sequence: Some(has_feature(FEATURE_RANDOM)),
+                bpm_stop: Some(has_feature(FEATURE_STOP_SEQUENCE)),
+                ..chart.contents
+            },
+            ..chart
+        }
+    }
+}
+
+/// The chart under the cursor as the chart cluster reads it: what the library's entry says, what the
+/// song database adds when it was asked (`fact`), and what measuring the notes found once the cursor
+/// has rested on it (`detail`).
+///
+/// The database is what the reference reads all of this from, so its answers are there on the frame
+/// the cursor arrives. Without one, the tempo, the length and the note count wait for the
+/// measurement, and until then read as not known.
+///
+/// The tempo most of the notes are played at is something neither holds (`SongInformation.mainbpm`).
+/// For a chart that keeps one tempo throughout it is that tempo and is said; for a chart that
+/// changes tempo it is left not known rather than guessed.
+pub(crate) fn chart_under_cursor<'a>(entry: &'a SongEntry, fact: Option<&'a ChartFact>, detail: Option<&ChartDetail>) -> ChartMeta<'a> {
+    let named = ChartMeta::of_entry(entry);
+    let named = ChartMeta { contents: ChartContents { stagefile: None, banner: None, ..named.contents }, ..named };
+    let described = match fact {
+        Some(fact) => fact.describe(named),
+        None => named,
+    };
+    let measured = match detail {
+        Some(detail) => described.with_detail(detail),
+        None => described,
+    };
+    ChartMeta { main_bpm: measured.bpm.filter(|bpm| bpm.min == bpm.max).map(|bpm| f64::from(bpm.min)), ..measured }
+}
+
+/// The [`ChartFact`]s of one library, by a chart's place in it.
+///
+/// The library's entries are what the built-in browser draws a row from, and they leave these out.
+/// A wheel a skin draws labels a chart by what it is made of and by how new it is, so the browser
+/// reads them from the database once for each library it is handed, and only when a skin asks: a
+/// browser no skin draws holds [`ChartFacts::unread`] and never touches the database for them.
+#[derive(Debug, Default)]
+pub(crate) struct ChartFacts {
+    /// Which library these belong to: where it keeps its charts and how many it has. A library is
+    /// replaced whole, with the old one still held while the new one is built, so the two never
+    /// answer alike.
+    library: Option<(usize, usize)>,
+    /// Whether the database was asked.
+    read: bool,
+    facts: Vec<Option<ChartFact>>,
+}
+
+impl ChartFacts {
+    /// What tells one library from the next.
+    fn stamp(library: &Library) -> (usize, usize) {
+        let songs = library.songs();
+        (songs.as_ptr().addr(), songs.len())
+    }
+
+    /// Whether these are the facts a browser of `library` needs: they belong to it, and they were
+    /// read from the database when `wanted` says something is going to look at them.
+    pub(crate) fn serve(&self, library: &Library, wanted: bool) -> bool {
+        self.library == Some(Self::stamp(library)) && (self.read || !wanted)
+    }
+
+    /// The facts of a library nothing has asked the database about: none for any chart.
+    pub(crate) fn unread(library: &Library) -> ChartFacts {
+        ChartFacts { library: Some(Self::stamp(library)), read: false, facts: Vec::new() }
+    }
+
+    /// Read the facts of every chart of `library` out of `db`. A chart the database does not hold,
+    /// and every chart when there is no database, has none.
+    pub(crate) fn read(db: Option<&SongDb>, library: &Library) -> ChartFacts {
+        let rows = db.and_then(|db| db.all_songs().ok()).unwrap_or_default();
+        let by_path: HashMap<&str, &SongRow> = rows.iter().map(|row| (row.path.as_str(), row)).collect();
+        let facts = library
+            .songs()
+            .iter()
+            .map(|entry| {
+                by_path.get(entry.path.to_string_lossy().as_ref()).map(|row| ChartFact {
+                    features: u32::try_from(row.feature).unwrap_or_default(),
+                    content: row.content,
+                    added_at: row.adddate,
+                    backbmp: row.backbmp.clone(),
+                    subartist: row.subartist.clone(),
+                    sha256: row.sha256.clone(),
+                    min_bpm: row.min_bpm,
+                    max_bpm: row.max_bpm,
+                    length_ms: row.length_ms,
+                    notes: row.notes,
+                })
+            })
+            .collect();
+        ChartFacts { library: Some(Self::stamp(library)), read: true, facts }
+    }
+
+    /// What the database holds about the chart at `index` of the library.
+    pub(crate) fn of(&self, index: usize) -> Option<&ChartFact> {
+        self.facts.get(index)?.as_ref()
+    }
+}
+
+/// The file a chart's header names for one of its pictures, beside the chart, or `None` when the
+/// header names none.
+fn picture_beside(chart: &Path, name: &str) -> Option<PathBuf> {
+    let name = name.trim();
+    if name.is_empty() {
+        return None;
+    }
+    Some(chart.parent()?.join(name))
+}
+
+/// The pictures one chart names: the two its library entry carries and the one only the database
+/// remembers.
+pub(crate) fn chart_images(entry: &SongEntry, fact: Option<&ChartFact>) -> BarImages {
+    BarImages {
+        stagefile: picture_beside(&entry.path, &entry.stagefile),
+        banner: picture_beside(&entry.path, &entry.banner),
+        backbmp: fact.and_then(|fact| picture_beside(&entry.path, &fact.backbmp)),
+    }
+}
+
+/// The best score recorded on a chart: the run with the highest EX, and among runs that tie the
+/// oldest, which is the run the built-in row has always ranked a chart by.
+fn best_score(scores: &ScoreBook, md5: &str) -> Option<BarScore> {
+    scores.for_md5(md5).into_iter().max_by_key(|record| record.ex_score).map(|record| BarScore { ex: record.ex_score, max_ex: record.max_ex })
+}
+
+/// Which of the reference's bars a row that opens `target` stands for: a folder of charts for the
+/// flat list, and a table for a difficulty table and for a level of one.
+fn folder_kind(target: SelectView) -> BarKind {
+    match target {
+        SelectView::Root | SelectView::AllSongs => BarKind::Folder,
+        SelectView::TableLevels(_) | SelectView::TableLevel(..) => BarKind::Table,
+    }
+}
+
+/// The lowest lamp any chart of a folder sits on, or `None` for a folder with no charts counted
+/// (`DirectoryBar.getLamp`).
+fn folder_lamp(distribution: &BarDistribution) -> Option<u8> {
+    distribution.lamps.iter().position(|count| *count > 0).and_then(|lamp| u8::try_from(lamp).ok())
+}
+
+impl AppShared {
+    /// The list on show as bars: one for every row of [`AppShared::select_items`], in order.
+    ///
+    /// `facts` is what the song database adds to a chart, and `mode` is the play mode the browser is
+    /// filtered to, which is the one filter the reference counts a folder's clears under
+    /// (`DirectoryBar.updateFolderStatus`).
+    ///
+    /// `skinned` says whether a skin is going to read the bars. Only a skin reads how the charts
+    /// under a folder are cleared and which pictures a chart names, and the first of those is a walk
+    /// of every chart under the folder, so a browser no skin draws is not made to count it.
+    pub(crate) fn select_bars(&self, facts: &ChartFacts, mode: Option<Mode>, skinned: bool) -> Vec<SelectBar> {
+        self.select_items
+            .iter()
+            .map(|item| match item {
+                SelectItem::Song(index) => self.chart_bar(*index, facts, skinned),
+                SelectItem::Folder { label, target } if skinned => self.folder_bar(label, *target, mode),
+                SelectItem::Folder { label, target } => SelectBar::new(folder_kind(*target), label.as_str()),
+            })
+            .collect()
+    }
+
+    /// The bar of the chart at `index` of the library (`SongBar`). An index the library does not
+    /// hold is a chart that is not on disk, with nothing known about it.
+    fn chart_bar(&self, index: usize, facts: &ChartFacts, skinned: bool) -> SelectBar {
+        let Some(entry) = self.library.songs().get(index) else {
+            return SelectBar::new(BarKind::Song { exists: false }, String::new());
+        };
+        let fact = facts.of(index);
+        SelectBar {
+            chart: Some(BarChart {
+                index,
+                subtitle: entry.subtitle.clone(),
+                mode: entry.mode,
+                level_text: entry.level.clone(),
+                level: entry.level.trim().parse().unwrap_or_default(),
+                difficulty: entry.difficulty,
+                features: fact.map_or(0, |fact| fact.features),
+                added_at: fact.map(|fact| fact.added_at),
+                favorite: self.favorites.contains(&entry.md5),
+                best: best_score(&self.scores, &entry.md5),
+                images: if skinned { chart_images(entry, fact) } else { BarImages::default() },
+            }),
+            lamp: self.scores.best_clear_for_md5(&entry.md5),
+            ..SelectBar::new(BarKind::Song { exists: true }, entry.title.as_str())
+        }
+    }
+
+    /// The back image of the chart that was loaded last ([`AppShared::chart_path`]), when the library
+    /// holds that chart and the song database remembers the image. Nothing for a chart outside the
+    /// library, and nothing before any chart was loaded.
+    pub(crate) fn loaded_chart_backbmp(&self, facts: &ChartFacts) -> Option<PathBuf> {
+        if self.chart_path.is_empty() {
+            return None;
+        }
+        let loaded = Path::new(&self.chart_path);
+        let (index, entry) = self.library.songs().iter().enumerate().find(|(_, entry)| entry.path == loaded)?;
+        chart_images(entry, facts.of(index)).backbmp
+    }
+
+    /// The bar of a row that opens another list.
+    ///
+    /// The flat list of every chart stands for the reference's folder of charts (`FolderBar`), a
+    /// difficulty table for its `TableBar` and a level of one for the `HashBar` under it. The
+    /// reference counts the clears under the first and the last and not under a table itself, whose
+    /// bars are levels rather than charts.
+    fn folder_bar(&self, label: &str, target: SelectView, mode: Option<Mode>) -> SelectBar {
+        let distribution = match target {
+            SelectView::Root | SelectView::TableLevels(_) => None,
+            SelectView::AllSongs => Some(self.distribution(0..self.library.len(), mode)),
+            SelectView::TableLevel(table, level) => {
+                let charts = self.table_levels.get(table).and_then(|levels| levels.get(level)).map_or(&[][..], |(_, charts)| charts.as_slice());
+                Some(self.distribution(charts.iter().copied(), mode))
+            }
+        };
+        SelectBar { lamp: distribution.as_ref().and_then(folder_lamp), distribution, ..SelectBar::new(folder_kind(target), label) }
+    }
+
+    /// How the charts at `indices` of the library have been cleared and scored
+    /// (`DirectoryBar.updateFolderStatus`): each chart of the mode on show is counted once under the
+    /// best lamp it holds and once under the rank of its best score, and a chart with nothing
+    /// recorded is counted under no play and under the lowest rank.
+    fn distribution(&self, indices: impl Iterator<Item = usize>, mode: Option<Mode>) -> BarDistribution {
+        let mut counted = BarDistribution::default();
+        for entry in indices.filter_map(|index| self.library.songs().get(index)) {
+            if mode.is_some_and(|mode| entry.mode != mode) {
+                continue;
+            }
+            let (lamp, rank) = match best_score(&self.scores, &entry.md5) {
+                Some(best) => {
+                    let lamp = usize::from(self.scores.best_clear_for_md5(&entry.md5).unwrap_or_default()).min(TOP_LAMP);
+                    let rank = if best.max_ex == 0 { 0 } else { (best.ex as usize * TOP_RANK / best.max_ex as usize).min(TOP_RANK) };
+                    (lamp, rank)
+                }
+                None => (0, 0),
+            };
+            counted.lamps[lamp] += 1;
+            counted.ranks[rank] += 1;
+        }
+        counted
+    }
+}
+
+/// The course list as bars: one for every course, in order (`GradeBar`).
+///
+/// A course every chart of which the library holds carries the features of all of them. Its own
+/// clear and medal are not kept anywhere in this build, so it has neither.
+pub(crate) fn course_bars(courses: &CourseList, library: &Library, facts: &ChartFacts) -> Vec<SelectBar> {
+    courses
+        .entries()
+        .iter()
+        .zip(courses.rows())
+        .map(|(entry, row)| {
+            let complete = entry.is_playable();
+            let features = if complete {
+                entry
+                    .course
+                    .charts
+                    .iter()
+                    .filter_map(|chart| library_index(library, chart))
+                    .filter_map(|index| facts.of(index))
+                    .fold(0, |all, fact| all | fact.features)
+            } else {
+                0
+            };
+            SelectBar {
+                course: Some(BarCourse { stages: entry.course.stage_count(), badges: row.badges, features }),
+                ..SelectBar::new(BarKind::Course { complete }, row.title)
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]

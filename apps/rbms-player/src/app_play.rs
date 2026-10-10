@@ -397,7 +397,7 @@ impl AppShared {
             println!("audio unavailable — visual only");
         }
 
-        let status = if self.config.play.autoplay {
+        let status = if self.run_plays_itself() {
             "AUTOPLAY".to_string()
         } else {
             let mut keys = self.active_keys.clone();
@@ -427,7 +427,7 @@ impl AppShared {
 
         let auto_lanes: Vec<bool> = if self.config.play.scratch_auto { (0..mode.key).map(|lane| mode.is_scratch(lane)).collect() } else { Vec::new() };
         let options = SessionOptions {
-            autoplay: self.config.play.autoplay && self.replay.is_none(),
+            autoplay: self.run_plays_itself() && self.replay.is_none(),
             gauge: self.config.play.gauge,
             judge_offset_us: self.offset_us(),
             auto_lanes,
@@ -460,6 +460,15 @@ impl AppShared {
 
     pub(crate) fn has_practice_request(&self) -> bool {
         self.practice_requested
+    }
+
+    /// Whether the run in hand plays itself: the AUTOPLAY setting is on, or the browser started this
+    /// one run to play itself ([`AppShared::autoplay_once`]). Everything that treats a run nobody
+    /// played differently -- the keys it ignores, the score, the replay and the ranking it does not
+    /// write -- asks this rather than the setting, so a run started that way is told apart without
+    /// the setting ever being changed for it.
+    pub(crate) fn run_plays_itself(&self) -> bool {
+        self.config.play.autoplay || self.autoplay_once
     }
 
     /// The practice panel for the chart that has just finished loading, when the browser asked for

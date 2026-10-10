@@ -31,7 +31,7 @@ pub use result::{
 };
 pub use select::{
     CoverState, DensityView, DetailView, RecordRowView, RecordsView, SelectDetail, SelectHot, SelectModal, SelectRow, SelectView, StatCell, cover_rect,
-    render_select, render_select_ctx,
+    render_select, render_select_ctx, render_select_modal,
 };
 pub use skin::{Skin, SkinConfig, SkinError};
 pub use skin_render::{

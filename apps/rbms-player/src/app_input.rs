@@ -226,7 +226,7 @@ impl AppShared {
     /// The key a control is read from right now. START and SELECT give way to a lane that has the
     /// same key (see [`ControlAction::yields_to_lanes`]), so a key config that already plays a
     /// column on the letter they ship on keeps playing it.
-    fn control_key_in_force(&self, action: ControlAction) -> Option<KeyCode> {
+    pub(crate) fn control_key_in_force(&self, action: ControlAction) -> Option<KeyCode> {
         self.keyconfig.control_key(action).filter(|&code| !action.yields_to_lanes() || self.lane_input_for(code).is_none())
     }
 

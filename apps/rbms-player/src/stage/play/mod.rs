@@ -530,7 +530,7 @@ impl PlayState {
     /// [`KeyCode`], so it enters here rather than through [`PlayState::lane_key`], and the guards
     /// that decide whether a run takes input at all live here so both entrances share them.
     fn lane_input(&mut self, shared: &mut AppShared, lane: usize, dir: ScratchDir, press: bool) {
-        if shared.config.play.autoplay || shared.replay.is_some() {
+        if shared.run_plays_itself() || shared.replay.is_some() {
             return;
         }
         let clock = self.practice_clock();
@@ -603,7 +603,7 @@ impl PlayState {
             duration_ms: self.session.last_time_us() / MICROS_PER_MILLI,
             bpm,
             hispeed,
-            autoplay: ctx.shared.config.play.autoplay && ctx.shared.replay.is_none(),
+            autoplay: ctx.shared.run_plays_itself() && ctx.shared.replay.is_none(),
             now_us,
             offsets: Some(&offsets),
             field: Some(&ctx.shared.skin),

@@ -128,7 +128,6 @@ impl CourseList {
         self.entries.len()
     }
 
-    #[cfg(test)]
     pub(crate) fn entries(&self) -> &[CourseEntry] {
         &self.entries
     }

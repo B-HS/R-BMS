@@ -63,7 +63,7 @@ fn frame(app: &mut App, state: &mut SelectState) {
     state.update(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 });
 }
 
-fn add_ir_profile(app: &mut App, name: &str, enabled: bool) {
+pub(crate) fn add_ir_profile(app: &mut App, name: &str, enabled: bool) {
     app.shared.config.network.ir_profiles.push(rbms_config::IrProfile {
         name: name.to_string(),
         base_url: format!("http://{name}.invalid"),

@@ -550,7 +550,7 @@ impl ResultRun {
         let setup = session.judge_setup();
         let stored = replay_saved || shared.replay.is_some() || shared.scores.for_md5(&chart.md5).iter().any(|past| past.replay_file.is_some());
         let custom_judge = is_custom_judge(&setup);
-        let updates_score = updates_score(shared.config.play.autoplay, shared.replay.is_some(), custom_judge, shared.config.play.scratch_auto, false);
+        let updates_score = updates_score(shared.run_plays_itself(), shared.replay.is_some(), custom_judge, shared.config.play.scratch_auto, false);
         let snapshot = ResultSnapshot::of(ResultInput {
             previous,
             target,
@@ -819,7 +819,7 @@ impl ResultState {
     /// Play the clear or fail cue, once (`MusicResult.prepare`).
     fn announce(&mut self, shared: &mut AppShared) {
         if !std::mem::replace(&mut self.stage.announced, true) {
-            shared.play_system_sound(result_sound(self.cleared));
+            shared.play_result_sound(result_sound(self.cleared), shared.config.audio.loop_result_sound);
         }
     }
 
@@ -966,6 +966,10 @@ impl StageHandler for ResultState {
     fn on_exit(&mut self, ctx: &mut FrameCtx<'_>) {
         if !self.stage.scene.begun {
             self.close(ctx.shared);
+            if ctx.shared.config.audio.loop_result_sound {
+                ctx.shared.stop_system_sound(SystemSound::ResultClear);
+                ctx.shared.stop_system_sound(SystemSound::ResultFail);
+            }
             return;
         }
         for sound in [SystemSound::ResultClear, SystemSound::ResultFail, SystemSound::ResultClose] {

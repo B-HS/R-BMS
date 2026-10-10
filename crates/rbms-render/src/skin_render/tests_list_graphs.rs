@@ -2,9 +2,11 @@
 //! the colour parser they share.
 //!
 //! The wheel and the graphs are the two object kinds that read whole series rather than single
-//! properties, so each test here loads a real document, hands it a frame's worth of rows or series,
+//! properties, so each test here loads a real document, hands it a frame's worth of bars or series,
 //! and checks what reached the canvas -- which is the only way to tell "drew nothing because the
-//! series was empty" from "drew nothing because the object never resolved".
+//! series was empty" from "drew nothing because the object never resolved". What a wheel draws of
+//! each bar, and where, is tested beside the wheel itself (`songlist/tests.rs`); the tests here are
+//! about a wheel as one object among the others of a screen.
 
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
@@ -16,6 +18,7 @@ use rbms_skin::property::{SkinHost, UNMAPPED_BOOLEAN, UNMAPPED_FLOAT, UNMAPPED_I
 use rbms_skin::timer::{MICROS_PER_MILLI, TIMER_OFF, TimerState};
 
 use super::color::{modulate, parse_hex_color};
+use super::frame::{BarKind, SongBar};
 use super::gauge::{GAUGE_TYPES, GaugeScale};
 use super::state::SelectViewState;
 use super::{
@@ -25,7 +28,7 @@ use super::{
 use crate::ctx::RenderCtx;
 use crate::font::TextContext;
 use crate::playfield::{LaneShade, PlayfieldView};
-use crate::select::{SelectDetail, SelectRow, SelectView};
+use crate::select::{SelectDetail, SelectView};
 use crate::skin::Skin;
 use crate::{BYTES_PER_PIXEL, Color, CpuCanvas, Renderer};
 
@@ -49,17 +52,16 @@ const SLOT_H: i32 = 10;
 const BAR_W: i32 = 100;
 const FOCUS_W: i32 = 110;
 
-/// Where a slot's title box starts and how wide it is, which is also where it lands on screen
-/// because the fixture is drawn at the size it was authored at.
+/// Where a bar's title box starts on the bar and how wide it is.
 const TITLE_X: i32 = 2;
 const TITLE_W: i32 = 60;
 
-/// How bright a channel has to be to be the white of a title rather than the red of the bar under
-/// it, so a scan can tell one from the other.
-const INK_LEVEL: u8 = 150;
+/// Where a bar's lamp starts on the bar and how wide it is.
+const LAMP_X: i32 = 112;
+const LAMP_W: i32 = 6;
 
-/// The rows the fixture browser is showing and which of them is focused.
-const ROWS: usize = 5;
+/// The bars the fixture browser is showing and which of them is under the cursor.
+const BARS: usize = 5;
 const SELECTED: usize = 2;
 
 /// Size of the one texture the fixture's images are cut from.
@@ -138,7 +140,7 @@ fn slot_y(index: usize) -> i32 {
     SLOT_TOP - SLOT_PITCH * index as i32
 }
 
-/// One of the wheel's nested lists, written out slot by slot.
+/// One of the wheel's two lists of bars, written out slot by slot.
 fn slot_list(id: &str, x: i32, w: i32, color: (u8, u8, u8)) -> String {
     let (r, g, b) = color;
     (0..SLOTS)
@@ -150,14 +152,12 @@ fn slot_list(id: &str, x: i32, w: i32, color: (u8, u8, u8)) -> String {
         .join(",")
 }
 
-/// What one generated document varies from the shared fixture, so a test that needs the wheel gated
-/// off, clipped, or drawing its bars from an image set writes only the part it is about.
+/// What one generated document varies from the shared fixture, so a test that needs the wheel
+/// written transparent or another judgement graph writes only the part it is about.
 #[derive(Default, Clone, Copy)]
 struct Fixture<'a> {
-    /// The members of the wheel's own destination keyframe, which every slot hangs off.
+    /// The members of the wheel's own destination keyframe.
     wheel_dst: Option<&'a str>,
-    /// The document's `imageset` records, as JSON members.
-    imageset: &'a str,
     /// The document's one `judgegraph` record.
     judge_graph: Option<&'a str>,
 }
@@ -171,8 +171,8 @@ fn write_document(scratch: &Scratch, fixture: Fixture<'_>) -> PathBuf {
         r#"{{
             "type": 5, "name": "wheel fixture", "w": {DOC_W}, "h": {DOC_H},
             "source": [{{ "id": "sheet", "path": "sheet.tex" }}],
-            "image": [{{ "id": "bar", "src": "sheet" }}, {{ "id": "button", "src": "sheet" }}],
-            "imageset": [{imageset}],
+            "image": [{{ "id": "bar", "src": "sheet" }}, {{ "id": "lamp", "src": "sheet" }}, {{ "id": "button", "src": "sheet" }}],
+            "imageset": [{{ "id": "bars", "images": ["bar"] }}],
             "text": [{{ "id": "row-title", "font": "none", "size": 10, "align": 0 }}],
             "gaugegraph": [{{
                 "id": "gauge-graph",
@@ -192,8 +192,8 @@ fn write_document(scratch: &Scratch, fixture: Fixture<'_>) -> PathBuf {
                 "clickable": [{clickable}],
                 "listoff": [{listoff}],
                 "liston": [{liston}],
-                "text": [{text}],
-                "lamp": [{lamp}]
+                "text": [{{ "id": "row-title", "dst": [{{ "x": {TITLE_X}, "y": 0, "w": {TITLE_W}, "h": {SLOT_H} }}] }}],
+                "lamp": [{{ "id": "lamp", "dst": [{{ "x": {LAMP_X}, "y": 0, "w": {LAMP_W}, "h": {SLOT_H} }}] }}]
             }},
             "destination": [
                 {{ "id": "wheel", "dst": [{{ {wheel_dst} }}] }},
@@ -207,13 +207,10 @@ fn write_document(scratch: &Scratch, fixture: Fixture<'_>) -> PathBuf {
             ]
         }}"#,
         clickable = clickable.join(","),
-        imageset = fixture.imageset,
         judge_graph = fixture.judge_graph.unwrap_or(r#"{ "id": "judge-graph" }"#),
         wheel_dst = fixture.wheel_dst.map_or_else(|| format!(r#""x": 0, "y": 0, "w": 120, "h": {DOC_H}"#), str::to_owned),
-        listoff = slot_list("bar", 0, BAR_W, (40, 60, 200)),
-        liston = slot_list("bar-on", 0, FOCUS_W, (240, 60, 60)),
-        text = slot_list("row-title", TITLE_X, TITLE_W, (255, 255, 255)),
-        lamp = slot_list("lamp", 112, 6, (255, 255, 255)),
+        listoff = slot_list("bars", 0, BAR_W, (40, 60, 200)),
+        liston = slot_list("bars", 0, FOCUS_W, (240, 60, 60)),
     );
     let path = scratch.root.join("wheel.json");
     std::fs::write(&path, body).expect("the document is writable");
@@ -237,20 +234,9 @@ fn wheel_screen_with(scratch: &Scratch, canvas: &mut CpuCanvas, text: &mut TextC
     SkinScreen::build(canvas, text, &skin, &mut SolidAssets)
 }
 
-/// One browser row, distinguishable from its neighbours by its title alone.
-fn row(index: usize) -> SelectRow {
-    SelectRow {
-        folder: false,
-        title: format!("ROW {index}"),
-        mode_short: "7K",
-        mode_color: Color::BLUE,
-        level: "12".to_owned(),
-        difficulty_color: Color::RED,
-        lamp: Color::GREEN,
-        folder_count: None,
-        dj_level: None,
-        favorite: false,
-    }
+/// One of the browser's bars, distinguishable from its neighbours by its title alone.
+fn bar(index: usize) -> SongBar {
+    SongBar::new(BarKind::Song { exists: true }, format!("BAR {index}"))
 }
 
 /// One frame over `data` at the start of the scene, with nothing running and no pointer.
@@ -392,38 +378,43 @@ fn the_document_resolves_one_object_of_every_kind_this_file_draws() {
     }
 }
 
-/// The wheel is a ring the rows move through: the focused chart lands on the slot the document
-/// called its centre, the slots either side of it hold its neighbours, and the slots past the ends
-/// of the list hold nothing at all.
+/// The bar under the cursor lands on the slot the document called its centre and is drawn with the
+/// selected destination, every other slot draws the other one, and a list shorter than the wheel
+/// goes round until every slot is filled.
 #[test]
-fn the_focused_chart_lands_on_the_centre_slot() {
+fn the_bar_under_the_cursor_lands_on_the_centre_slot_and_the_list_goes_round() {
     let scratch = Scratch::new("centre");
     let mut canvas = CpuCanvas::new(DOC_W, DOC_H);
     let mut text = TextContext::embedded_only();
     let screen = wheel_screen(&scratch, &mut canvas, &mut text);
 
-    let rows: Vec<SelectRow> = (0..ROWS).map(row).collect();
-    let list = SongBars { rows: &rows, sel: SELECTED, options_open: false };
+    let bars: Vec<SongBar> = (0..BARS).map(bar).collect();
+    let list = SongBars::new(&bars, SELECTED);
     draw(&screen, &mut text, &mut canvas, browsing(&list));
 
     let bar_pixel = |slot: usize| canvas.pixel_at(BAR_W as u32 - 5, DOC_H - (slot_y(slot) + SLOT_H) as u32 + 2);
-    assert_eq!(bar_pixel(CENTER), Color { r: 240, g: 60, b: 60, a: 255 }, "the focused chart draws the focused bar on the centre slot");
-    assert_eq!(bar_pixel(CENTER - 1), Color { r: 40, g: 60, b: 200, a: 255 }, "the slot above it holds the row before it, unfocused");
-    assert_eq!(bar_pixel(CENTER + 2), Color { r: 40, g: 60, b: 200, a: 255 }, "and the last row of the list still lands two slots below");
-    assert_eq!(bar_pixel(CENTER + 3), Color::BLACK, "a slot past the end of the list draws nothing");
-    assert_eq!(bar_pixel(CENTER - 3), Color::BLACK, "and neither does one before its start");
+    assert_eq!(bar_pixel(CENTER), Color { r: 240, g: 60, b: 60, a: 255 }, "the bar under the cursor is drawn with the selected destination");
+    for slot in (0..SLOTS).filter(|slot| *slot != CENTER) {
+        assert_eq!(bar_pixel(slot), Color { r: 40, g: 60, b: 200, a: 255 }, "slot {slot} holds a bar, drawn with the other destination");
+    }
+    let lamp_pixel = |slot: usize| canvas.pixel_at(LAMP_X as u32 + 2, DOC_H - (slot_y(slot) + SLOT_H) as u32 + 2);
+    assert_eq!(lamp_pixel(0), Color::rgb(255, 255, 255), "a lamp is placed against the corner of its own bar");
+    assert_eq!(lamp_pixel(SLOTS - 1), Color::rgb(255, 255, 255));
 }
 
-/// The wheel needs the browser's rows, which only a select frame carries; a document that places
-/// one on another screen draws no wheel rather than an empty ring of bars.
+/// The wheel needs the browser's bars, which only a select frame carries; a document that places
+/// one on another screen draws no wheel rather than an empty ring of bars. Neither does a browser
+/// with nothing in its list.
 #[test]
-fn a_wheel_without_the_browsers_rows_draws_nothing() {
-    let scratch = Scratch::new("no-rows");
+fn a_wheel_without_the_browsers_bars_draws_nothing() {
+    let scratch = Scratch::new("no-bars");
     let mut canvas = CpuCanvas::new(DOC_W, DOC_H);
     let mut text = TextContext::embedded_only();
     let screen = wheel_screen(&scratch, &mut canvas, &mut text);
 
     assert_eq!(draw(&screen, &mut text, &mut canvas, FrameData::default()), 1, "only the button, which reads nothing, is left");
+    let none: Vec<SongBar> = Vec::new();
+    assert_eq!(draw(&screen, &mut text, &mut canvas, browsing(&SongBars::new(&none, 0))), 1, "and an empty list leaves the wheel bare");
 }
 
 /// Every graph reads a series that only one screen's state carries, so which of them draw is decided
@@ -444,8 +435,8 @@ fn a_graph_draws_only_on_the_screen_whose_series_it_reads() {
     let series = measured(&gauge, &hist, notes, &tempo);
     assert_eq!(draw(&screen, &mut text, &mut canvas, series), 5, "the button and the four score-screen graphs");
 
-    let rows: Vec<SelectRow> = (0..ROWS).map(row).collect();
-    let list = SongBars { rows: &rows, sel: SELECTED, options_open: false };
+    let bars: Vec<SongBar> = (0..BARS).map(bar).collect();
+    let list = SongBars::new(&bars, SELECTED);
     assert_eq!(draw(&screen, &mut text, &mut canvas, browsing(&list)), 2, "the button and the wheel, which is all a browser frame feeds");
 
     let field = Skin::default_for(rbms_model::Mode::BEAT_7K, DOC_W as f32, DOC_H as f32);
@@ -682,71 +673,18 @@ fn a_colour_that_is_not_one_is_reported_and_replaced() {
 
 /// A wheel is placed by the destinations nested under it and drawn in their colours. The colour of
 /// its own destination is never read, as the reference never reads it (`BarRenderer.render`), so a
-/// document that wrote that destination transparent still gets its rows.
+/// document that wrote that destination transparent still gets its bars.
 #[test]
-fn a_wheel_draws_its_rows_whatever_colour_its_own_destination_names() {
+fn a_wheel_draws_its_bars_whatever_colour_its_own_destination_names() {
     let scratch = Scratch::new("hidden");
     let mut canvas = CpuCanvas::new(DOC_W, DOC_H);
     let mut text = TextContext::embedded_only();
     let dst = format!(r#""x": 0, "y": 0, "w": 120, "h": {DOC_H}, "a": 0"#);
     let screen = wheel_screen_with(&scratch, &mut canvas, &mut text, Fixture { wheel_dst: Some(&dst), ..Fixture::default() });
 
-    let rows: Vec<SelectRow> = (0..ROWS).map(row).collect();
-    let list = SongBars { rows: &rows, sel: SELECTED, options_open: false };
+    let bars: Vec<SongBar> = (0..BARS).map(bar).collect();
+    let list = SongBars::new(&bars, SELECTED);
     assert_eq!(draw(&screen, &mut text, &mut canvas, browsing(&list)), 2, "the wheel reaches the screen beside the button");
-}
-
-/// A slot is a box, not an anchor: a title longer than the slot the document drew for it is cut to
-/// fit, the way the built-in row cuts one, rather than running on across whatever is beside it.
-#[test]
-fn a_title_longer_than_its_slot_is_cut_to_it() {
-    let scratch = Scratch::new("long-title");
-    let mut canvas = CpuCanvas::new(DOC_W, DOC_H);
-    let mut text = TextContext::embedded_only();
-    let screen = wheel_screen(&scratch, &mut canvas, &mut text);
-
-    let mut rows: Vec<SelectRow> = (0..ROWS).map(row).collect();
-    rows[SELECTED].title = "WIDE".repeat(20);
-    let list = SongBars { rows: &rows, sel: SELECTED, options_open: false };
-    draw(&screen, &mut text, &mut canvas, browsing(&list));
-
-    let top = DOC_H - (slot_y(CENTER) + SLOT_H) as u32;
-    let inked = |x: u32| {
-        (top..top + SLOT_H as u32).any(|y| {
-            let pixel = canvas.pixel_at(x, y);
-            pixel.g > INK_LEVEL && pixel.b > INK_LEVEL
-        })
-    };
-    let right = (TITLE_X + TITLE_W) as u32;
-    assert!((TITLE_X as u32..right).any(inked), "the title is drawn in its slot at all");
-    assert!(!(right..FOCUS_W as u32).any(inked), "and none of it lands past the slot, across the rest of the bar");
-}
-
-/// A slot's bar is cut from the image its id names, or from the first image of the set it names, and
-/// an id that names neither is a document fault worth a line rather than a wheel of plain rectangles
-/// nobody asked for.
-#[test]
-fn a_bar_can_be_cut_from_an_image_set_and_one_that_names_nothing_is_reported() {
-    let scratch = Scratch::new("bar-source");
-    let mut canvas = CpuCanvas::new(DOC_W, DOC_H);
-    let mut text = TextContext::embedded_only();
-    let plain = wheel_screen(&scratch, &mut canvas, &mut text);
-    assert!(
-        plain.warnings().iter().any(|warning| warning.contains("bar-on") && warning.contains("neither an image nor an image set")),
-        "the focused bar names nothing the document declared: {:?}",
-        plain.warnings()
-    );
-
-    let other = Scratch::new("bar-set");
-    let fixture = Fixture { imageset: r#"{ "id": "bar-on", "images": ["bar"] }"#, ..Fixture::default() };
-    let set = wheel_screen_with(&other, &mut canvas, &mut text, fixture);
-    assert!(!set.warnings().iter().any(|warning| warning.contains("bar-on")), "declaring it as a set is enough to cut it from: {:?}", set.warnings());
-
-    let rows: Vec<SelectRow> = (0..ROWS).map(row).collect();
-    let list = SongBars { rows: &rows, sel: SELECTED, options_open: false };
-    draw(&set, &mut text, &mut canvas, browsing(&list));
-    let focused = canvas.pixel_at(BAR_W as u32 - 5, DOC_H - (slot_y(CENTER) + SLOT_H) as u32 + 2);
-    assert_eq!(focused, Color { r: 240, g: 60, b: 60, a: 255 }, "and the bar it cuts lands in the colour the slot was tinted");
 }
 
 /// A wheel of no slots is no wheel. It has to resolve to nothing at all and say so, because a body

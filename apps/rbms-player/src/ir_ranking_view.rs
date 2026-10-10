@@ -184,8 +184,21 @@ pub(crate) fn scroll_start(len: usize, sel: usize) -> usize {
 /// Draw the panel over the detail column and return the clickable region of each drawn line,
 /// tagged with its index into [`panel_lines`].
 pub(crate) fn render_ranking_panel<R: Renderer>(r: &mut R, lines: &[PanelLine], sel: usize, focused: bool, can_switch_profile: bool) -> Vec<(Rect, usize)> {
+    render_ranking_panel_at(r, select_layout().detail_rect, lines, sel, focused, can_switch_profile)
+}
+
+/// [`render_ranking_panel`] in `panel` rather than over the detail column, for a screen that has put
+/// its own list there. [`visible_rows`] counts the rows the detail column holds, so a panel meant to
+/// show all of them is as tall as that column is.
+pub(crate) fn render_ranking_panel_at<R: Renderer>(
+    r: &mut R,
+    panel: Rect,
+    lines: &[PanelLine],
+    sel: usize,
+    focused: bool,
+    can_switch_profile: bool,
+) -> Vec<(Rect, usize)> {
     let th = theme();
-    let panel = select_layout().detail_rect;
     let mut hot = Vec::new();
     r.fill_rect(panel, th.panel);
     r.fill_rect(Rect::new(panel.x, panel.y, panel.w, 2.0), th.divider);
