@@ -7,7 +7,6 @@ local Builder = {}
 Builder.__index = Builder
 
 local OPAQUE = 255
-local FILTER_LINEAR = 1
 local DIGIT_BASE = 10
 local SIGNED_STRIP_ROWS = 2
 local ATLAS_MODULE_PREFIX = "lua.atlas."
@@ -52,12 +51,12 @@ function ui.merge(opts, overrides)
     return result
 end
 
-local function has_value(value)
+function ui.has_value(value)
     return value ~= nil and value ~= props.no_value.LOW and value ~= props.no_value.HIGH
 end
 
 local function digits_of(value)
-    if not has_value(value) then
+    if not ui.has_value(value) then
         return "0"
     end
     return tostring(math.floor(math.abs(value)))
@@ -81,7 +80,7 @@ end
 local function filtered(opts)
     local result = ui.merge(opts)
     if result.filter == nil then
-        result.filter = FILTER_LINEAR
+        result.filter = props.filter.LINEAR
     end
     return result
 end
@@ -164,6 +163,11 @@ function Builder:sprite(name)
     return sprite
 end
 
+function Builder:sprite_source(name)
+    local sprite = self:sprite(name)
+    return { src = sprite.src, x = sprite.x, y = sprite.y, w = sprite.w, h = sprite.h, divx = sprite.divx, divy = sprite.divy }
+end
+
 function Builder:dst(id, box, opts, parent)
     opts = opts or {}
     local destination = { id = id }
@@ -205,8 +209,8 @@ function Builder:define_image(sprite_name, def)
     if self.defined[id] then
         return id
     end
-    local sprite = self:sprite(sprite_name)
-    local image = { id = id, src = sprite.src, x = sprite.x, y = sprite.y, w = sprite.w, h = sprite.h, divx = sprite.divx, divy = sprite.divy }
+    local image = self:sprite_source(sprite_name)
+    image.id = id
     for _, field in ipairs(IMAGE_FIELDS) do
         image[field] = def[field]
     end
@@ -264,7 +268,7 @@ local function saturating(ref, places)
     local most = DIGIT_BASE ^ places - 1
     return function()
         local value = main_state.number(ref)
-        if not has_value(value) then
+        if not ui.has_value(value) then
             return value
         end
         return math.max(-most, math.min(most, value))
@@ -274,21 +278,13 @@ end
 function Builder:define_number(spec, digits)
     local id = spec.id or self:next_id("num")
     local sprite = self:sprite(spec.sprite)
-    local value = {
-        id = id,
-        src = sprite.src,
-        x = sprite.x,
-        y = sprite.y,
-        w = sprite.w,
-        h = sprite.h,
-        divx = sprite.divx,
-        divy = sprite.divy,
-        digit = digits,
-        align = NUMBER_ALIGN[spec.align or "left"],
-        padding = spec.padding or 0,
-        zeropadding = spec.zeropadding or 0,
-        space = spec.space or 0,
-    }
+    local value = self:sprite_source(spec.sprite)
+    value.id = id
+    value.digit = digits
+    value.align = NUMBER_ALIGN[spec.align or "left"]
+    value.padding = spec.padding or props.padding.NONE
+    value.zeropadding = spec.zeropadding or 0
+    value.space = spec.space or 0
     if spec.value ~= nil then
         value.value = spec.value
     elseif spec.saturate then

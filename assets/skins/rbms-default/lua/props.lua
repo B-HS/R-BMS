@@ -68,6 +68,8 @@ props.option = {
     PANEL3 = 23,
     AUTOPLAY_OFF = 32,
     AUTOPLAY_ON = 33,
+    DISABLE_SAVE_SCORE = 60,
+    ENABLE_SAVE_SCORE = 61,
     BGA_OFF = 40,
     BGA_ON = 41,
     GAUGE_GROOVE = 42,
@@ -141,6 +143,9 @@ props.option = {
     JUDGE_1P_MISS = 246,
     JUDGE_1P_EARLY = 1242,
     JUDGE_1P_LATE = 1243,
+    JUDGE_2P_PERFECT = 261,
+    JUDGE_2P_EARLY = 1262,
+    JUDGE_2P_LATE = 1263,
     LANECOVER1_CHANGING = 270,
     LANECOVER1_ON = 271,
     LIFT1_ON = 272,
@@ -209,6 +214,8 @@ props.number = {
     EARLY_POOR = 418,
     LATE_POOR = 419,
     MISS = 420,
+    EARLY_MISS = 421,
+    LATE_MISS = 422,
     TOTAL_EARLY = 423,
     TOTAL_LATE = 424,
     COMBOBREAK = 425,
@@ -313,6 +320,7 @@ props.index = {
     TIMING_AUTO_ADJUST = 75,
     GAUGEAUTOSHIFT = 78,
     FAVORITE_CHART = 90,
+    ASSIST_EXJUDGE = 301,
     ASSIST_CONSTANT = 302,
     ASSIST_LEGACY = 304,
     LNMODE = 308,
@@ -321,6 +329,7 @@ props.index = {
     HIDDEN = 332,
     JUDGEALGORITHM = 340,
     CLEAR = 370,
+    TARGET_CLEAR = 371,
 }
 
 props.rate = {
@@ -407,6 +416,39 @@ props.number_align = {
 
 props.loop = {
     ONCE = -1,
+}
+
+props.filter = {
+    NEAREST = 0,
+    LINEAR = 1,
+}
+
+props.padding = {
+    NONE = 0,
+    ZEROS = 1,
+}
+
+props.graph_angle = {
+    RIGHT = 0,
+    UP = 1,
+}
+
+props.slider_angle = {
+    UP = 0,
+    RIGHT = 1,
+    DOWN = 2,
+    LEFT = 3,
+}
+
+props.judge_graph = {
+    NOTES = 0,
+    JUDGES = 1,
+    FAST_SLOW = 2,
+}
+
+props.back_texture = {
+    DRAWN = 0,
+    OFF = 1,
 }
 
 props.no_value = {

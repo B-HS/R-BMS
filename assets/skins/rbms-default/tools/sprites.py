@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path
@@ -9,6 +10,11 @@ from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parent.parent
 FONT_FILE = ROOT / 'font' / 'Inter-Regular.ttf'
+THEME_FILE = ROOT / 'lua' / 'theme.lua'
+THEME_GROUP = r'^theme\.{group} = \{{\n(.*?)^\}}'
+THEME_COLOR = re.compile(r'^\s*\[?(\w+)\]? = \{ (\d+), (\d+), (\d+) \},$', re.MULTILINE)
+
+Rgb = tuple[int, int, int]
 
 GLYPH_PAD = 2
 OPAQUE = 255
@@ -37,6 +43,15 @@ class Sprite:
 @cache
 def font_at(size: int) -> ImageFont.FreeTypeFont:
     return ImageFont.truetype(str(FONT_FILE), size)
+
+
+@cache
+def palette(group: str) -> dict[str, Rgb]:
+    block = re.search(THEME_GROUP.format(group=re.escape(group)), THEME_FILE.read_text(encoding='utf-8'), re.MULTILINE | re.DOTALL)
+    colors = {name: (int(red), int(green), int(blue)) for name, red, green, blue in THEME_COLOR.findall(block.group(1) if block else '')}
+    if not colors:
+        raise SystemExit(f'{THEME_FILE.name} has no colors under theme.{group}')
+    return colors
 
 
 def tinted(mask: Image.Image, color: tuple[int, int, int] = WHITE) -> Image.Image:

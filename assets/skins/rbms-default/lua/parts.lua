@@ -21,6 +21,22 @@ local JUDGE_RANK_LABELS = {
     { op = props.option.JUDGE_VERYEASY, label = "VERY EASY" },
 }
 
+parts.judges = {
+    { name = "PGREAT", color = theme.judge.pgreat, count = props.number.PERFECT, fast = props.number.EARLY_PERFECT, slow = props.number.LATE_PERFECT },
+    { name = "GREAT", color = theme.judge.great, count = props.number.GREAT, fast = props.number.EARLY_GREAT, slow = props.number.LATE_GREAT },
+    { name = "GOOD", color = theme.judge.good, count = props.number.GOOD, fast = props.number.EARLY_GOOD, slow = props.number.LATE_GOOD },
+    { name = "BAD", color = theme.judge.bad, count = props.number.BAD, fast = props.number.EARLY_BAD, slow = props.number.LATE_BAD },
+    { name = "POOR", color = theme.judge.poor, count = props.number.POOR, fast = props.number.EARLY_POOR, slow = props.number.LATE_POOR },
+    { name = "EMPTY POOR", color = theme.judge.miss, count = props.number.MISS, fast = props.number.EARLY_MISS, slow = props.number.LATE_MISS, empty = true },
+}
+
+parts.stage_image = {
+    name = "Stage Image",
+    show = props.option.CUSTOM_FIRST,
+    hide = props.option.CUSTOM_FIRST + 1,
+    missing = "NO STAGE IMAGE",
+}
+
 local function with_op(opts, op)
     local ops = { op }
     for _, existing in ipairs((opts or {}).op or {}) do
@@ -87,6 +103,38 @@ end
 
 function parts.judge_rank_text(s, spec, box, opts)
     labelled(s, JUDGE_RANK_LABELS, spec, box, opts)
+end
+
+function parts.shown_or_hidden(name, show, hide)
+    return { name = name, item = { { name = "Show", op = show }, { name = "Hide", op = hide } }, def = "Show" }
+end
+
+function parts.stage_image_property()
+    local option = parts.stage_image
+    return parts.shown_or_hidden(option.name, option.show, option.hide)
+end
+
+function parts.stage_image_shown()
+    return skin_config.option[parts.stage_image.name] ~= parts.stage_image.hide
+end
+
+function parts.choice(main_state, id, names, missing)
+    return function()
+        return names[main_state.event_index(id)] or missing
+    end
+end
+
+function parts.bpm_graph(lines)
+    local line = lines or theme.bpm_line
+    return {
+        lineWidth = line.width,
+        mainBPMColor = theme.hex(line.main),
+        minBPMColor = theme.hex(line.min),
+        maxBPMColor = theme.hex(line.max),
+        otherBPMColor = theme.hex(line.other),
+        stopLineColor = theme.hex(line.stop),
+        transitionLineColor = theme.hex(line.transition),
+    }
 end
 
 function parts.fade_from_black(s, duration)

@@ -1,7 +1,167 @@
 from __future__ import annotations
 
-from sprites import Sprite
+from PIL import Image, ImageDraw
+
+from sprites import OPAQUE, WHITE, Rgb, Sprite, block, palette, tinted, word
+
+SURFACE = palette('color')
+LEVEL = palette('difficulty')
+JUDGE = palette('judge')
+LAMP = palette('lamp')
+
+BACKGROUND: Rgb = SURFACE['bg']
+UNLIT: Rgb = SURFACE['line']
+DRAIN: Rgb = JUDGE['miss']
+
+NOTE_COLORS: dict[str, Rgb] = {
+    'white': SURFACE['text'],
+    'cyan': SURFACE['accent'],
+    'red': LEVEL['4'],
+    'yellow': LEVEL['3'],
+    'green': LEVEL['1'],
+    'blue': LEVEL['2'],
+}
+NOTE_SIZE = (4, 8)
+NOTE_FOOT_ROWS = 1
+NOTE_FOOT_SHARE = 0.55
+BODY_SIZE = (8, 4)
+BODY_COLUMNS = (1, 7)
+BODY_IDLE_SHARE = 0.4
+BODY_HELD_SHARE = 0.8
+RAIL_COLUMNS = (3, 5)
+RAIL_SIDE_SHARE = 0.3
+MINE_SIZE = (4, 8)
+MINE_EDGE_ROWS = 2
+MINE_FILL_ALPHA = 130
+
+GAUGE_COLORS: tuple[Rgb, ...] = (LAMP['assist'], LAMP['easy'], LAMP['normal'], LAMP['hard'], LAMP['exhard'], JUDGE['poor'])
+GAUGE_NODE_SIZE = (4, 8)
+GAUGE_GAP_COLUMNS = 1
+GAUGE_BELOW_BORDER_SHARE = 0.55
+GAUGE_AHEAD_SHARE = 0.25
+GAUGE_TIP_WHITE_SHARE = 0.5
+
+JUDGE_WORDS = ('PGREAT', 'GREAT', 'GOOD', 'BAD', 'POOR', 'MISS')
+JUDGE_WORD_SIZE = 64
+
+BOMB_FRAMES = 8
+BOMB_SIDE = 128
+BOMB_OVERSAMPLE = 4
+BOMB_RADII = (16.0, 46.0)
+BOMB_WIDTHS = (10.0, 2.0)
+BOMB_ALPHAS = (255, 70)
+
+BEAM_SIZE = (8, 64)
+BEAM_ALPHA = 150
+BEAM_CURVE = 2
+
+BAR_LENGTH = 256
+BAR_THICKNESS = 4
+
+
+def mixed(color: Rgb, toward: Rgb, share: float) -> Rgb:
+    return tuple(round(toward[channel] + (color[channel] - toward[channel]) * share) for channel in range(len(color)))
+
+
+def shaded(color: Rgb, share: float) -> Rgb:
+    return mixed(color, BACKGROUND, share)
+
+
+def filled(size: tuple[int, int], color: Rgb, alpha: int = OPAQUE) -> Image.Image:
+    return Image.new('RGBA', size, (*color, alpha))
+
+
+def note(name: str, color: Rgb) -> Sprite:
+    width, height = NOTE_SIZE
+    image = filled(NOTE_SIZE, color)
+    image.paste(filled((width, NOTE_FOOT_ROWS), shaded(color, NOTE_FOOT_SHARE)), (0, height - NOTE_FOOT_ROWS))
+    return Sprite(name, image)
+
+
+def body(name: str, side: Rgb, middle: Rgb | None = None) -> Sprite:
+    _, height = BODY_SIZE
+    left, right = BODY_COLUMNS
+    image = Image.new('RGBA', BODY_SIZE, (*WHITE, 0))
+    image.paste(filled((right - left, height), side), (left, 0))
+    if middle is not None:
+        inner_left, inner_right = RAIL_COLUMNS
+        image.paste(filled((inner_right - inner_left, height), middle), (inner_left, 0))
+    return Sprite(name, image)
+
+
+def mine(name: str) -> Sprite:
+    width, height = MINE_SIZE
+    image = filled(MINE_SIZE, DRAIN, MINE_FILL_ALPHA)
+    edge = filled((width, MINE_EDGE_ROWS), DRAIN)
+    image.paste(edge, (0, 0))
+    image.paste(edge, (0, height - MINE_EDGE_ROWS))
+    return Sprite(name, image)
+
+
+def notes() -> list[Sprite]:
+    sprites = [mine('mine'), body('hell_drain', shaded(DRAIN, RAIL_SIDE_SHARE), DRAIN)]
+    for key, color in NOTE_COLORS.items():
+        sprites.append(note(f'note_{key}', color))
+        sprites.append(body(f'long_{key}', shaded(color, BODY_IDLE_SHARE)))
+        sprites.append(body(f'held_{key}', shaded(color, BODY_HELD_SHARE)))
+        sprites.append(body(f'hell_{key}', shaded(color, RAIL_SIDE_SHARE), shaded(color, BODY_HELD_SHARE)))
+        sprites.append(body(f'hell_held_{key}', shaded(color, BODY_IDLE_SHARE), mixed(color, WHITE, GAUGE_TIP_WHITE_SHARE)))
+    return sprites
+
+
+def gauge_node(name: str, color: Rgb) -> Sprite:
+    width, height = GAUGE_NODE_SIZE
+    image = Image.new('RGBA', GAUGE_NODE_SIZE, (*WHITE, 0))
+    image.paste(filled((width - GAUGE_GAP_COLUMNS, height), color), (0, 0))
+    return Sprite(name, image)
+
+
+def gauge_states(color: Rgb) -> tuple[Rgb, ...]:
+    return (
+        color,
+        shaded(color, GAUGE_BELOW_BORDER_SHARE),
+        shaded(color, GAUGE_AHEAD_SHARE),
+        UNLIT,
+        mixed(color, WHITE, GAUGE_TIP_WHITE_SHARE),
+        color,
+    )
+
+
+def gauge() -> list[Sprite]:
+    return [gauge_node(f'gauge_{kind}_{state}', shade) for kind, color in enumerate(GAUGE_COLORS) for state, shade in enumerate(gauge_states(color))]
+
+
+def between(ends: tuple[float, float], share: float) -> float:
+    return ends[0] + (ends[1] - ends[0]) * share
+
+
+def bomb(name: str) -> Sprite:
+    side = BOMB_SIDE * BOMB_OVERSAMPLE
+    middle = side / 2
+    mask = Image.new('L', (BOMB_SIDE * BOMB_FRAMES, BOMB_SIDE), 0)
+    for frame in range(BOMB_FRAMES):
+        share = frame / (BOMB_FRAMES - 1)
+        radius = between(BOMB_RADII, share) * BOMB_OVERSAMPLE
+        width = round(between(BOMB_WIDTHS, share) * BOMB_OVERSAMPLE)
+        ring = Image.new('L', (side, side), 0)
+        bounds = (middle - radius, middle - radius, middle + radius, middle + radius)
+        ImageDraw.Draw(ring).ellipse(bounds, outline=round(between(BOMB_ALPHAS, share)), width=width)
+        mask.paste(ring.resize((BOMB_SIDE, BOMB_SIDE), Image.Resampling.BOX), (frame * BOMB_SIDE, 0))
+    return Sprite(name, tinted(mask), BOMB_FRAMES, 1)
+
+
+def beam(name: str) -> Sprite:
+    width, height = BEAM_SIZE
+    mask = Image.new('L', BEAM_SIZE, 0)
+    for row in range(height):
+        share = (row + 1) / height
+        mask.paste(round(BEAM_ALPHA * share**BEAM_CURVE), (0, row, width, row + 1))
+    return Sprite(name, tinted(mask))
 
 
 def build() -> list[Sprite]:
-    return []
+    sprites = notes() + gauge()
+    sprites += [word(f'judge_{text.lower()}', text, JUDGE_WORD_SIZE) for text in JUDGE_WORDS]
+    sprites += [bomb('bomb'), beam('beam')]
+    sprites += [block('bar_h', BAR_LENGTH, BAR_THICKNESS), block('bar_v', BAR_THICKNESS, BAR_LENGTH)]
+    return sprites

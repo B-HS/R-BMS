@@ -7,8 +7,7 @@ local parts = require("lua.parts")
 local decide = {}
 
 local TIME = { input = 300, scene = 3200, fadeout = 800 }
-local OPTION = { STAGE_SHOW = 900, STAGE_HIDE = 901, GRAPH_SHOW = 902, GRAPH_HIDE = 903 }
-local STAGE_OPTION_NAME = "Stage Image"
+local OPTION = { STAGE_SHOW = parts.stage_image.show, GRAPH_SHOW = 902, GRAPH_HIDE = 903 }
 
 local HERO = { top = 256, height = 320, bar_width = 8, text_gap = 32, grow = 350, first_plain_line = 2 }
 local HERO_LINES = {
@@ -35,17 +34,6 @@ local FACTS = {
 }
 
 local GRAPH = { caption_top = 872, top = 900, height = 84, at = 500 }
-local GRAPH_COLORS = {
-    mainBPMColor = "4cc9f0",
-    minBPMColor = "568cf5",
-    maxBPMColor = "f0564c",
-    otherBPMColor = "f2b33d",
-    stopLineColor = "b26bf0",
-    transitionLineColor = "667387",
-}
-local GRAPH_LINE_WIDTH = 2
-local NOTE_GRAPH_BY_KIND = 0
-local NO_BACK_TEXTURE = 1
 
 local FOOTER = { hint_top = 1022, hint_fade = 200 }
 local CLOSING = { sweep = 300, cover_at = 200, cover = 500 }
@@ -61,8 +49,8 @@ function decide.header()
         scene = TIME.scene,
         fadeout = TIME.fadeout,
         property = {
-            { name = STAGE_OPTION_NAME, item = { { name = "Show", op = OPTION.STAGE_SHOW }, { name = "Hide", op = OPTION.STAGE_HIDE } }, def = "Show" },
-            { name = "Note Graph", item = { { name = "Show", op = OPTION.GRAPH_SHOW }, { name = "Hide", op = OPTION.GRAPH_HIDE } }, def = "Show" },
+            parts.stage_image_property(),
+            parts.shown_or_hidden("Note Graph", OPTION.GRAPH_SHOW, OPTION.GRAPH_HIDE),
         },
     }
 end
@@ -76,7 +64,7 @@ local function hero(s, main_state)
 
     local stage_x = theme.column(STAGE.column, STAGE.span)
     local text_x = grid.margin + HERO.bar_width + HERO.text_gap
-    local staged = skin_config.option[STAGE_OPTION_NAME] ~= OPTION.STAGE_HIDE
+    local staged = parts.stage_image_shown()
     local text_end = staged and stage_x - grid.gutter * 2 or grid.margin + theme.content_width()
     local text_width = text_end - text_x
     for index, line in ipairs(HERO_LINES) do
@@ -94,9 +82,9 @@ local function stage(s)
     local image = motion.fade_in(STAGE.image_at, STAGE.image_fade, { op = { OPTION.STAGE_SHOW, props.option.STAGEFILE }, stretch = props.stretch.FIT_INNER })
     s:reference(props.image.STAGEFILE, box, image)
     local size = theme.type.caption
-    local label = { x = x, top = STAGE.top + (STAGE.height - theme.cap_height(size)) / 2, w = width }
+    local label = { x = x, top = theme.centered_top(box, size), w = width }
     local missing = motion.fade_in(STAGE.image_at, STAGE.image_fade, { op = { OPTION.STAGE_SHOW, props.option.NO_STAGEFILE }, color = theme.color.muted })
-    s:text({ text = "NO STAGE IMAGE", size = size, align = "center" }, label, missing)
+    s:text({ text = parts.stage_image.missing, size = size, align = "center" }, label, missing)
 end
 
 local function fact_label(s, fact, label, order)
@@ -116,7 +104,7 @@ local function level_fact(s, main_state)
     end)
     local size = theme.type.body
     local name_x = x + s:number_box(spec, box).span + fact.name_gap
-    local name = { x = name_x, top = FACTS.baseline - theme.cap_height(size), w = x + width - name_x }
+    local name = { x = name_x, top = theme.text_top(FACTS.baseline, size), w = x + width - name_x }
     parts.difficulty_text(s, { size = size, overflow = props.text_overflow.SHRINK }, name, motion.fade_in(start))
 end
 
@@ -151,7 +139,7 @@ end
 local function word_fact(s, fact, label, order, place)
     local x, width, start = fact_label(s, fact, label, order)
     local size = theme.type.heading
-    local box = { x = x, top = FACTS.baseline - theme.cap_height(size), w = width }
+    local box = { x = x, top = theme.text_top(FACTS.baseline, size), w = width }
     place(s, { size = size, overflow = props.text_overflow.SHRINK }, box, motion.fade_in(start, nil, { color = theme.color.text }))
 end
 
@@ -172,8 +160,8 @@ local function graph(s)
     parts.caption(s, "NOTE DISTRIBUTION", { x = grid.margin, top = GRAPH.caption_top, w = width }, appear)
     local box = { x = grid.margin, top = GRAPH.top, w = width, h = GRAPH.height }
     parts.panel(s, box, appear)
-    s:object("judgegraph", { type = NOTE_GRAPH_BY_KIND, backTexOff = NO_BACK_TEXTURE }, box, appear)
-    s:object("bpmgraph", ui.merge(GRAPH_COLORS, { lineWidth = GRAPH_LINE_WIDTH }), box, appear)
+    s:object("judgegraph", { type = props.judge_graph.NOTES, backTexOff = props.back_texture.OFF }, box, appear)
+    s:object("bpmgraph", parts.bpm_graph(), box, appear)
 end
 
 local function footer(s)

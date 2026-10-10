@@ -1851,7 +1851,7 @@ const PLAY_SAMPLE_SHOTS_MS: [i64; 1] = [2_600];
 const PLAY_RICH_SHOTS_MS: [i64; 2] = [6_500, 21_000];
 const PLAY_MODE_SHOT_MS: [i64; 1] = [9_000];
 
-/// How many measures the charts written for five, ten and fourteen keys run for.
+/// How many measures the charts written for five, nine, ten and fourteen keys run for.
 const MODE_CHART_MEASURES: u32 = 16;
 
 /// The channels a chart written for one side of a mode puts its notes on: the keys in order, then the
@@ -1868,6 +1868,10 @@ const FIVE_KEYS_FIRST: SideChannels = SideChannels { notes: &["11", "12", "13", 
 const FIVE_KEYS_SECOND: SideChannels = SideChannels { notes: &["21", "22", "23", "24", "25", "26"], long: "63", long_key: 2 };
 const SEVEN_KEYS_FIRST: SideChannels = SideChannels { notes: &["11", "12", "13", "14", "15", "18", "19", "16"], long: "54", long_key: 3 };
 const SEVEN_KEYS_SECOND: SideChannels = SideChannels { notes: &["21", "22", "23", "24", "25", "28", "29", "26"], long: "64", long_key: 3 };
+
+/// The nine buttons of a chart that has no turntable: five on the first side's key channels and four
+/// on the second side's, which is how such a chart is written.
+const NINE_KEYS: SideChannels = SideChannels { notes: &["11", "12", "13", "14", "15", "22", "23", "24", "25"], long: "53", long_key: 2 };
 
 /// A chart with notes on every channel of `sides`, in a pattern that leaves each lane busy in some
 /// measures and resting in others, and a long note every fourth measure.
@@ -2149,7 +2153,7 @@ fn capture_play_scene(pack: &Path, run: PlayRun<'_>) -> Result<Vec<String>, Stri
 /// Captures the play scene of a pack somebody else wrote, for runs that are really made: the sample
 /// chart, which is a five-key one, walked from loading until it plays; a busier chart written here
 /// on seven keys, walked from loading to the fade and, with nobody playing it, to a failure; and one
-/// chart each on five, ten and fourteen keys while it plays.
+/// chart each on five, nine, ten and fourteen keys while it plays.
 ///
 /// Opt-in like the captures above it: without [`SKIN_PACK_ENV`] this passes without drawing
 /// anything. With it, every run has to draw, and the pack's folder has to be left as it was.
@@ -2166,6 +2170,7 @@ fn the_play_scene_of_a_skin_pack_named_by_the_environment_is_captured_through_it
     let rich = write_rich_chart("play-rich-chart");
     let rich_text = rich_chart();
     let five = mode_chart("Five Keys", &[FIVE_KEYS_FIRST]);
+    let nine = mode_chart("Nine Keys", &[NINE_KEYS]);
     let ten = mode_chart("Ten Keys", &[FIVE_KEYS_FIRST, FIVE_KEYS_SECOND]);
     let fourteen = mode_chart("Fourteen Keys", &[SEVEN_KEYS_FIRST, SEVEN_KEYS_SECOND]);
     let written = |name: &str| rich.with_file_name(name);
@@ -2203,6 +2208,15 @@ fn the_play_scene_of_a_skin_pack_named_by_the_environment_is_captured_through_it
             prefix: "play5",
             model: chart_model(&five, "five.bms", None),
             chart: written("five.bms"),
+            opening: false,
+            shots_ms: &PLAY_MODE_SHOT_MS,
+            ending: PlayEnding::StillPlaying,
+        },
+        PlayRun {
+            tag: "play9",
+            prefix: "play9",
+            model: chart_model(&nine, "nine.pms", None),
+            chart: written("nine.pms"),
             opening: false,
             shots_ms: &PLAY_MODE_SHOT_MS,
             ending: PlayEnding::StillPlaying,
