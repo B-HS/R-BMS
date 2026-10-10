@@ -21,6 +21,7 @@ use rbms_library::songdb::{
     CONTENT_BGA, CONTENT_TEXT, FEATURE_CHARGE_NOTE, FEATURE_HELL_CHARGE_NOTE, FEATURE_LONG_NOTE, FEATURE_RANDOM, FEATURE_STOP_SEQUENCE, FEATURE_UNDEFINED_LN,
     SongDb, SongRow,
 };
+use rbms_render::ReferenceImages;
 use rbms_render::skin_render::frame::{LAMP_KINDS, RANK_KINDS};
 
 use crate::skin_host::chart::{BpmRange, ChartContents, ChartMeta};
@@ -386,9 +387,9 @@ impl ChartFact {
     /// `chart` with what the song database holds about it: its tempo range, its length and note
     /// count, and which of its extras it has, each as the reference reads it off its `SongData`.
     ///
-    /// Which pictures a chart names is left unsaid. The reference's options for them ask whether the
-    /// chart that was loaded last brought a picture (`BMSResource.getStagefile`), not whether the
-    /// one under the cursor names one, so this is not the place that knows.
+    /// Which pictures a chart names is left unsaid. The reference's options for them ask whether a
+    /// picture is loaded (`BMSResource.getStagefile`), not whether the chart names one, so this is
+    /// not the place that knows: [`chart_under_cursor`] is told.
     pub(crate) fn describe<'a>(&'a self, chart: ChartMeta<'a>) -> ChartMeta<'a> {
         let has_feature = |bits: i32| self.features & u32::try_from(bits).unwrap_or_default() != 0;
         let any_long_note = FEATURE_UNDEFINED_LN | FEATURE_LONG_NOTE | FEATURE_CHARGE_NOTE | FEATURE_HELL_CHARGE_NOTE;
@@ -412,8 +413,8 @@ impl ChartFact {
 }
 
 /// The chart under the cursor as the chart cluster reads it: what the library's entry says, what the
-/// song database adds when it was asked (`fact`), and what measuring the notes found once the cursor
-/// has rested on it (`detail`).
+/// song database adds when it was asked (`fact`), what measuring the notes found once the cursor
+/// has rested on it (`detail`), and which of its pictures the frame has to draw (`pictures`).
 ///
 /// The database is what the reference reads all of this from, so its answers are there on the frame
 /// the cursor arrives. Without one, the tempo, the length and the note count wait for the
@@ -422,9 +423,25 @@ impl ChartFact {
 /// The tempo most of the notes are played at is something neither holds (`SongInformation.mainbpm`).
 /// For a chart that keeps one tempo throughout it is that tempo and is said; for a chart that
 /// changes tempo it is left not known rather than guessed.
-pub(crate) fn chart_under_cursor<'a>(entry: &'a SongEntry, fact: Option<&'a ChartFact>, detail: Option<&ChartDetail>) -> ChartMeta<'a> {
+///
+/// Whether there is a stage image, a banner and a back image is whether one is loaded, as it is on
+/// every other screen. The reference's browser hands the pictures of the bar under its cursor to the
+/// same place a loaded chart's are kept, frame by frame (`MusicSelector.render`,
+/// `BMSResource.setStagefile`), so a picture that is still being read is not there yet.
+pub(crate) fn chart_under_cursor<'a>(
+    entry: &'a SongEntry,
+    fact: Option<&'a ChartFact>,
+    detail: Option<&ChartDetail>,
+    pictures: &ReferenceImages,
+) -> ChartMeta<'a> {
     let named = ChartMeta::of_entry(entry);
-    let named = ChartMeta { contents: ChartContents { stagefile: None, banner: None, ..named.contents }, ..named };
+    let contents = ChartContents {
+        stagefile: Some(pictures.stagefile.is_some()),
+        banner: Some(pictures.banner.is_some()),
+        backbmp: Some(pictures.backbmp.is_some()),
+        ..named.contents
+    };
+    let named = ChartMeta { contents, ..named };
     let described = match fact {
         Some(fact) => fact.describe(named),
         None => named,

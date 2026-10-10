@@ -8,8 +8,12 @@
 use rbms_course::{Course, CourseChart, CourseConstraint};
 use rbms_library::songdb::{CONTENT_BGA, FEATURE_LONG_NOTE, FEATURE_STOP_SEQUENCE};
 use rbms_library::{ChartDetail, Library};
+use rbms_render::TextureId;
 use rbms_skin::property::generated::{NUMBER_MAINBPM, NUMBER_MAXBPM, NUMBER_MINBPM, NUMBER_TOTALNOTES, STRING_GENRE, STRING_SUBARTIST};
-use rbms_skin::property::generated::{OPTION_7KEYSONG, OPTION_BGA, OPTION_BPMCHANGE, OPTION_BPMSTOP, OPTION_LN, OPTION_SELECT_REPLAYDATA, OPTION_TEXT};
+use rbms_skin::property::generated::{
+    OPTION_7KEYSONG, OPTION_BACKBMP, OPTION_BANNER, OPTION_BGA, OPTION_BPMCHANGE, OPTION_BPMSTOP, OPTION_LN, OPTION_NO_BACKBMP, OPTION_NO_BANNER,
+    OPTION_NO_STAGEFILE, OPTION_SELECT_REPLAYDATA, OPTION_STAGEFILE, OPTION_TEXT,
+};
 use rbms_store::ScoreBook;
 use rbms_store::scoredb::{ScoreDb, migrate_score_book};
 
@@ -19,6 +23,13 @@ use super::tests::{entry, record};
 use super::*;
 use crate::skin_host::ClusterState;
 use crate::skin_host::select::REPLAY_SLOTS;
+
+/// Two pictures a draw target holds, told apart by nothing but being different.
+const STAGE_PICTURE: TextureId = TextureId(1);
+const BACK_PICTURE: TextureId = TextureId(2);
+
+/// A frame with none of a chart's pictures loaded.
+const NO_PICTURES: ReferenceImages = ReferenceImages { stagefile: None, backbmp: None, banner: None };
 
 /// Where the fixture draws each square, as its left edge in the skin's own coordinates, and the box
 /// they share: one while the chart under the cursor is a seven-key chart, one while the bar there is
@@ -121,7 +132,7 @@ fn the_chart_under_the_cursor_reads_what_the_song_database_holds() {
         ..ChartFact::default()
     };
 
-    let meta = chart_under_cursor(&chart, Some(&fact), None);
+    let meta = chart_under_cursor(&chart, Some(&fact), None, &NO_PICTURES);
     let state = ChartState::Chart(&meta);
     assert_eq!([NUMBER_MINBPM, NUMBER_MAXBPM, NUMBER_TOTALNOTES].map(|id| state.integer(id)), [Some(90), Some(180), Some(1624)]);
     assert_eq!(state.integer(NUMBER_MAINBPM), None, "the tempo most notes are played at was guessed for a chart that changes tempo");
@@ -132,7 +143,7 @@ fn the_chart_under_the_cursor_reads_what_the_song_database_holds() {
     assert_eq!(state.text(STRING_GENRE).as_deref(), Some("GENRE"), "the genre is the chart's own, without its maker");
     assert_eq!(state.text(STRING_SUBARTIST).as_deref(), Some("obj: somebody"));
 
-    let unread = chart_under_cursor(&chart, None, None);
+    let unread = chart_under_cursor(&chart, None, None, &NO_PICTURES);
     let state = ChartState::Chart(&unread);
     assert_eq!(state.integer(NUMBER_MAXBPM), None, "a tempo nobody measured was made up");
     assert_eq!(state.boolean(OPTION_7KEYSONG), Some(true), "the library's entry says what kind of play it is");
@@ -148,11 +159,32 @@ fn the_chart_under_the_cursor_reads_what_the_song_database_holds() {
         avg_density: 0.0,
         end_density: 0.0,
     };
-    let measured = chart_under_cursor(&chart, None, Some(&detail));
+    let measured = chart_under_cursor(&chart, None, Some(&detail), &NO_PICTURES);
     let state = ChartState::Chart(&measured);
     assert_eq!([NUMBER_MAXBPM, NUMBER_TOTALNOTES].map(|id| state.integer(id)), [Some(150), Some(800)]);
     assert_eq!(state.integer(NUMBER_MAINBPM), Some(150), "a chart with one tempo is played at that tempo");
     assert_eq!(state.boolean(OPTION_BPMCHANGE), Some(false));
+}
+
+/// A skin asking whether the chart under the cursor has a stage image, a banner or a back image is
+/// told whether one is loaded for the frame, as the reference's browser tells it
+/// (`MusicSelector.loadSelectedSongImages`). It once was told neither that there was one nor that
+/// there was none, so nothing a skin drew for either case showed -- not even for a chart that names
+/// a picture, which says nothing of whether the picture could be read.
+#[test]
+fn the_chart_under_the_cursor_has_the_pictures_that_are_loaded() {
+    let mut chart = entry("alpha", "composer", "7");
+    chart.stagefile = "stage.png".to_owned();
+    let options = [OPTION_STAGEFILE, OPTION_NO_STAGEFILE, OPTION_BANNER, OPTION_NO_BANNER, OPTION_BACKBMP, OPTION_NO_BACKBMP];
+
+    let unloaded = chart_under_cursor(&chart, None, None, &NO_PICTURES);
+    let state = ChartState::Chart(&unloaded);
+    assert_eq!(options.map(|id| state.boolean(id)), [Some(false), Some(true), Some(false), Some(true), Some(false), Some(true)]);
+
+    let pictures = ReferenceImages { stagefile: Some(STAGE_PICTURE), backbmp: Some(BACK_PICTURE), banner: None };
+    let loaded = chart_under_cursor(&chart, None, None, &pictures);
+    let state = ChartState::Chart(&loaded);
+    assert_eq!(options.map(|id| state.boolean(id)), [Some(true), Some(false), Some(false), Some(true), Some(true), Some(false)]);
 }
 
 /// The replay slot goes to the lowest slot that holds a replay whenever the bar under the cursor
