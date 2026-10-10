@@ -1,6 +1,29 @@
 # R2 — R-BMS 렌더 계층(crates/rbms-render, GPU 백엔드) 현황과 격차
 
-> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 6(플레이) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 7A(비트맵 폰트) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 7A 반영 사항 (2026-10-11)
+
+비트맵 폰트(.fnt) 로더와 표준·distance field 그리기를 넣은 뒤의 상태다.
+
+- (W7-3) r2-rbms-render.md §6.4 표: '폰트 종류 분기' 구현(bitmap_font::is_bitmap_font, 대소문자 무시 .fnt), '.fnt 크기' 구현(size × viewport.scale_x ÷ original_size, dst 높이 무관), '.fnt 메타' 구현(size 없으면 lineHeight), '.fnt 타입' 0 구현·1/2 는 type 0 방식+경고, '그림자(표준 fnt)' 구현, '필터' fnt 는 항상 Linear, 'fallback 폰트' fnt 폴백 체인 미구현(E5 로 대체), '정렬 기준' 행에 TTF 는 잉크 기준·fnt 는 advance 기준이라는 차이와 바이트코드 근거 추가
+- (W7-3) r2-rbms-render.md §6.1/§5.1 text 행: 그리기 경로에 text.rs draw_line → text/bitmap.rs draw 분기 추가. 비트맵 텍스트는 글리프마다 페이지 텍스처의 쿼드(색, 그림자 2패스), 폴백 글리프는 객체당 오버레이 텍스처 1장(rbms.skin.text.fallback.<n>). 조판은 crate::bitmap_font 의 layout_fitted, 결과는 (문자열, scale, 폭) 키로 객체에 캐시
+- (W7-3) r2-rbms-render.md §3.1·§3.3: 폰트 페이지 경로 추가 — SkinScreen::wanted_font_pages / settle_font_page / load_font_pages / font_page_count, SkinTextures::admit_late(소스와 같은 최대 변·예산·풀 규칙, 등록 키는 풀 사용 시 rbms.skin.file.<n>, 단독은 rbms.skin.<serial>.source.font page <경로>). 앱은 SkinScreens::sync_font_pages 가 finish_frame 첫머리에서 도착분 반영 → 새 요청을 워커로
+- (W7-3) r2-rbms-render.md §3.4: 画像フォント 켠 실측 추가 — 화면이 잡은 페이지 결정 12장, 결과 4장, 선곡 15장, 플레이 12장(각 16 MiB). 텍스처 합계 결정 212,364,992 B, 결과 201,170,688 B, 선곡 421,347,040 B, 플레이 339,220,276 B. ASCII 글리프가 페이지에 흩어져 있음(title.fnt 30장 중 17장)
+- (W7-3) r2-rbms-render.md §10: '폰트 캐시' 권고를 완료로(비트맵 폰트 파싱 캐시). 남은 것으로 bilinear 전용 셰이더(웨이브 9 항목과 같은 것), 페이지 선요청, 프레임 분할 업로드
+- (W7-4) r2-rbms-render.md 상단: '웨이브 7 반영 사항'에 W7-4 추가 — distance field(type 1·2) 구현 완료, Renderer 프리미티브 추가, GPU 전용 파이프라인, GPU·CPU 실측 최대 차이 2/255(Metal)
+- (W7-4) r2-rbms-render.md §1.1·§1.2: Renderer 에 `draw_distance_field_quad(tex, DistanceFieldParams)`(기본 구현 = `as_plain_quad` 폴백) 추가. 보조 타입 `DistanceFieldStyle{outline_distance, outline_color, shadow_color, shadow_smoothing, shadow_offset}`, `DistanceFieldStyle::PLAIN`, `DistanceFieldParams{dst, src, tint, blend, style}`, 상수 `DISTANCE_FIELD_SMOOTHING`(1/16)·`DISTANCE_FIELD_EDGE`(0.5), 공개 함수 `distance_field_fragment` 기록
+- (W7-4) r2-rbms-render.md §1.3 백엔드별 구현 표: distance field 쿼드 행 추가 — CpuCanvas·Gpu 구현, ScaledRenderer·OffsetRenderer·NativeCanvas·Canvas·HeadlessCanvas 전달, 테스트용 구현체는 기본 폴백
+- (W7-4) r2-rbms-render.md §2 GPU 백엔드: `DISTANCE_FIELD_SHADER`(WGSL, EDGE·SMOOTHING 상수는 rbms_render 에서 주입), 블렌드 모드별 파이프라인 4개(`distance_field_pipelines`), `DistanceFieldInstance`(vec4 6개: rect, uv, tint, outline, shadow, field), `BatchKind::DistanceField{tex, blend}`, 초기 용량 1024 의 전용 인스턴스 버퍼, 거리장은 샘플러가 아니라 `textureLoad` 수동 쌍선형, 텍스처 바인드 그룹은 기존 것을 재사용. 유니폼이 인스턴스 속성이라 스타일이 달라도 같은 페이지면 한 드로콜
+- (W7-4) r2-rbms-render.md §6.4 레퍼런스 의미론 대비: 비트맵 type 1·2 행을 '미구현(type 0 방식으로 그림)'에서 '구현'으로. 유니폼 대응(FieldInk::style), 그림자 한 번 그리기(절반 밝기 2패스 없음), 폴백 글자는 일반 쿼드, 글리프를 페이지 단위 순서로 그림(BitmapFontCache.draw)을 기록. '빌드 경고 distance field font ... for now' 서술 삭제
+- (W7-4) r2-rbms-render.md §6.4 또는 §9: CPU 경로는 `CpuCanvas::paint_quad` 로 일반 쿼드와 루프를 공유하고 거리장은 반올림 없는 f32 쌍선형(`field_at`)으로 읽는다고 추가
+- (리뷰 수정) r2-rbms-render.md §6.4 (.fnt 메타 행): 페이지는 page 줄이 나온 순서가 번호이고(BitmapFontData.load 의 'Page IDs must be indices starting at 0'), 번호가 순서와 다른 줄은 이미지 없이 자리만 남기며, common 의 pages= 는 읽지 않는다고 적어야 합니다
+- (리뷰 수정) r2-rbms-render.md §6.4 (.fnt 종류 분기·크기 행 아래 구현 메모): advance + kerning 은 Java int 처럼 wrapping 덧셈이고, 건너뛴 줄은 앞 3줄만 문장으로 보관하고 나머지는 개수(BitmapFont::skipped)로만 센다고 적어야 합니다
+- (리뷰 수정) r2-rbms-render.md §3.1·§3.3 (로드 경로, 한도): 비트맵 폰트 페이지는 글리프가 처음 그려질 때 또는 constantText 는 화면 빌드 때 요청되고, 글리프는 자기 페이지가 올라온 프레임부터 그려지며 같은 줄의 다른 글리프는 기다리지 않는다고 적어야 합니다. '줄 전체가 페이지를 기다린다'는 서술이 들어가면 틀립니다
+- (리뷰 수정) r2-rbms-render.md §6.1 또는 §6.4: 파싱 캐시(FONTS)의 키는 (스킨 루트, .fnt 경로)이고, 다른 루트의 폰트를 읽을 때 아무 화면도 쥐지 않은 폰트를 내보낸다고 적어야 합니다
+- (리뷰 수정) r2-rbms-render.md §5.1 text 행과 §6: 폰트 id 는 FontRef(Family 또는 Bitmap)로 풀려 text_body 에 직접 전달되고 전역 등록표는 없으며, SkinScreen::families() 는 TTF 만, bitmap_font_count() 는 비트맵 폰트 수를 돌려준다고 적어야 합니다
+- (리뷰 수정) r2-rbms-render.md §1.2 (보조 타입): Color::unit_channels 가 추가됐고 CPU 거리장 셰이더와 GPU 인스턴스가 이것을 함께 쓴다고 적어야 합니다
+
 
 ## 웨이브 6 반영 사항 (2026-10-11)
 

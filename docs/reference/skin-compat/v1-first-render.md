@@ -1,6 +1,27 @@
 # V1. 외부 스킨 첫 렌더 결과 — 나온 것과 빠진 것 (웨이브 2B)
 
-> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 6(플레이) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 7A(비트맵 폰트) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 7A 반영 사항 (2026-10-11)
+
+비트맵 폰트(.fnt) 로더와 표준·distance field 그리기를 넣은 뒤의 상태다.
+
+
+### 리뷰어의 비트맵 폰트 화면 대조 (2026-10-11)
+
+- 맞는 것 — 画像フォント 를 끈 캡처는 웨이브 6 과 동일: decide/musicselect/musicselect_slide/course/result/result_menu2/play7_hw/play7_bga/play7_cover/play7_judge/play7_visualizers/play5·10·14_hw 40장이 wave6-captures/final 과 cmp 로 바이트 단위 일치
+- 맞는 것 — Decide(decide_fnt-1500 대 decide-1500, type 1 거리장): 표 이름·장르·제목·아티스트·Tips 가 TTF 와 같은 가운데 정렬 위치와 같은 높이에 나옴. 제목 크롭에서 글리프가 선명하고 난이도색의 어두운 외곽선이 사방에 둘러짐(outlineWidth=1). Tips 줄은 outlineWidth 가 없어 외곽선 없이 나오며 가나·한자가 폰트 글리프로 그려짐. 페이지 뒤섞임·깨진 글리프 없음
+- 맞는 것 — Select(musicselect_fnt-3000 대 musicselect-3000): 오른쪽 정렬인 제목·장르·아티스트·디렉터리(type 1)가 TTF 와 같은 오른쪽 끝에 맞고 어두운 외곽선이 나옴. 곡 바 텍스트(bartext.fnt, type 0)는 왼쪽 끝과 윗선이 같고 넘치는 줄('Second Track -a long title…')이 TTF 와 마찬가지로 상자 밖으로 이어짐. 바 글자 폭은 TTF 보다 조금 넓음(다른 폰트 파일)
+- 맞는 것 — Result(result_fnt-3000 대 result-3000, type 0): 날짜와 Player 줄이 같은 가운데 위치. 하단 제목 줄은 SHRINK 로 상자 안에 들어가며 TTF 보다 큼(비트맵은 size=30 기준, TTF 는 dst h 기준이라는 원본 규칙)
+- 맞는 것 — Play(play7_hw_fnt-2000 대 play7_hw-2000, type 0): 로딩 대제목·장르·아티스트·상단 제목이 같은 위치. fnt 쪽에 그림자가 없는 것은 스킨이 비트맵 폰트 분기에서 shadowOffset 을 주지 않기 때문(Play/lua/require/textproperty.lua 확인)
+- 맞는 것 — 앱 경로 GPU 캡처: decide-fnt-1500ms.gpu.png(폰트 페이지 11장, 경고 0)과 field-font-1920x1080.gpu.png 가 헤드리스 캡처와 같은 모양. 자작 픽스처는 흰 본체·빨간 외곽선·우하단 파란 그림자가 보임
+- 맞는 것 — 쓰이는 페이지만 올라감: Decide 는 두 폰트 합계 18장 중 11장만 텍스처가 됨(앱 캡처 로그)
+- 틀린 것 — 화면 캡처에서 원본 규칙과 어긋나는 위치·크기·정렬·글리프는 찾지 못함
+- 확인 못 한 것 — 한글 등 폰트에 없는 글자의 폴백: ModernChic 폰트에는 한글(U+AC00)이 없고 가나는 있음. 캡처 시나리오의 문자열이 전부 라틴·일본어라 폴백이 화면에 나오는 장면이 없음. 유닛 테스트(a_character_the_font_lacks_…, field_tests 의 폴백 건)가 통과한 것만 확인
+- 확인 못 한 것 — type 0 그림자 패스: 비트맵 폰트 분기에서 그림자를 쓰는 텍스트가 Play 의 18px 기호('~', '%', '/')뿐이라 캡처로 판별하지 못함. 유닛 테스트 a_shadow_is_the_line_at_half_brightness_moved_right_and_down 통과만 확인
+- 확인 못 한 것 — 실제 GPU 창에서의 동작: 화면 진입 직후와 선곡 스크롤 중 텍스트가 비는 시간, 16 MiB 페이지 여러 장이 한 프레임에 업로드될 때의 끊김
+- 확인 못 한 것 — decide-fnt-1500ms 의 GPU·헤드리스 차이 245픽셀(최대 96/255): 레벨 숫자 이미지 가장자리라는 구현 보고를 픽셀 단위로 재확인하지 않음. Metal 외 백엔드(Vulkan·DX12·GL)의 거리장 셰이더
+
 
 ## 웨이브 6 반영 사항 (2026-10-11)
 

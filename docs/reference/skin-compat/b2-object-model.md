@@ -1,6 +1,25 @@
 # B2. beatoraja 스킨 객체 모델과 공통 그리기 의미론
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 5(선곡) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 7A(비트맵 폰트) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 7A 반영 사항 (2026-10-11)
+
+비트맵 폰트(.fnt) 로더와 표준·distance field 그리기를 넣은 뒤의 상태다.
+
+- (W7-3) b2-object-model.md §12.2: 마지막 [libGDX] 항목('GlyphLayout 의 줄 폭은 첫 글리프의 왼쪽 여백과 마지막 글리프의 advance 여분을 다듬은 값')을 고칠 것 — libGDX 1.9.9 바이트코드에서 setText 는 getGlyphs 의 tightBounds 로 colorRun 을 넘기고 beatoraja 는 markup 을 켜지 않으므로 항상 false. 일반 줄은 첫 글리프 xAdvance 0, 마지막은 xadvance×scaleX. 잉크 기준이 되는 것은 wrap 된 다음 줄의 시작(-xoffset×scaleX - padLeft)과 wrap·truncate 로 끝난 줄의 끝((xoffset+width)×scaleX - padRight)뿐
+- (W7-3) b2-object-model.md §12.2 overflow 표: truncate 의 실제 규칙 추가 — 발동 조건은 i>1 이고 직전 글리프의 잉크 오른쪽이 폭을 0.0001 넘게 넘을 때. 남기는 것은 advance 끝이 폭 안인 글리프까지이고 끝은 adjustLastGlyph. 둘째 글리프 advance 가 이미 폭을 넘으면 전부 지움. 한 글자짜리 줄은 잘리지 않음. 잘린 뒤의 줄(\n 이후)은 배치하지 않음
+- (W7-3) b2-object-model.md §12.2 wrapping 행: 1.9.9 규칙 추가 — targetWidth <= spaceWidth(스케일 적용)이면 줄바꿈하지 않음. getWrapIndex 는 뒤쪽 공백을 건너뛴 뒤 그 앞의 공백 다음 위치, 없으면 넘친 글리프 앞. wrap 은 줄 끝 공백을 지우지 않고 그 advance 를 줄 폭에 남김
+- (W7-3) b2-object-model.md §12.4 [libGDX] 항목: 지식 기반 표시를 바이트코드 확인으로 바꾸고 추가 — setScale 은 padLeft·padRight 도 세로 배율(scaleY/이전 scaleY)로 곱함. 폭 0 인 space 는 width = padLeft + xadvance + padRight, xoffset = -padLeft 로 채우고 spaceWidth 는 그 width. capHeight 는 capChars(M,N,B,D,C,E,F,K,A,…) 중 처음 있는 글리프 높이 - (padTop+padBottom), 없으면 잉크 있는 글리프 최대 높이. common 은 split(' ', 7) 로 lineHeight·base·pages 를 위치로 읽음. 커닝은 byte 로 저장. 그리기 좌표는 x + run.x + ΣxAdvance + xoffset×scaleX, y + ascent + run.y + yoffset×scaleY 이며 integer=false 라 반올림 없음
+- (W7-3) b2-object-model.md §12.4: 이 체크아웃의 SkinTextBitmap 은 본문보다 새 버전임을 적을 것 — fallback .fnt 체인, BMP 밖 글리프의 사설 영역 재매핑, CachedTextLayout, glyphYOffset 대표값(S,P,A,N,O,T,H,E,R,[,],M,0)이 들어 있음. '폰트 캐시' 줄에 R-BMS 대응 추가: bitmap_font::load 가 경로 키 + 바이트 지문으로 파싱 결과를 공유, 페이지 텍스처는 화면별 PageTable
+- (W7-3) b2-object-model.md §12.4 타입 표: type 0 의 TYPE_BILINEAR 는 텍스처 필터가 아니라 src/glsl/bilinear.frag 셰이더(중심 텍셀 알파 + 알파 가중 4탭 색 보간)이고 페이지 텍스처는 useMipMaps=true 로 만든다는 점 추가. R-BMS 는 Linear 필터로 근사
+- (W7-3) b2-object-model.md §20: 'libGDX 1.9.9 … 소스 없음' 행 수정 — beatoraja/lib/gdx.jar 이 1.9.9(Version.VERSION)이고 로컬 JDK(~/development/java/sdkman/candidates/java/25.0.3-tem/bin/javap -c -p)로 바이트코드를 읽을 수 있음. BitmapFontData.load·getGlyphs·getWrapIndex·setScale·setGlyphRegion, GlyphLayout.setText·wrap·truncate·adjustLastGlyph, BitmapFontCache.addText·addGlyph, BitmapFont.draw 는 W7-3 에서 확인 완료. FreeTypeFontGenerator 는 gdx-freetype.jar 로 같은 방법 가능(미확인)
+- (W7-3) b2-object-model.md 상단: '웨이브 7 반영 사항' 절 신설 — (W7-3) .fnt type 0 구현, E5 예외(누락 글리프는 □ 대신 엔진 글꼴, 〜/～ 대체는 유지), 페이지 지연 로드는 원본(전 페이지 선로드)과 의도적으로 다름, type 1·2 는 W7-4 까지 type 0 방식
+- (W7-4) b2-object-model.md §12.4: 'smoothing = 1/16 고정' 뒤에 '거리 단위 상수라 화면상 가장자리 폭은 글자 배율에 비례' 추가. 기본값에서 알파가 램프의 4제곱(외곽선 알파 0 이 같은 램프로 섞인 뒤 mix 에서 한 번 더 가중)이고 반투명 텍스트는 알파가 제곱된다는 점, `u_shadowSmoothing = 0` 이면 `smoothstep(0.5, 0.5, d)` 로 사양상 미정의이며 R-BMS 는 계단(d > 0.5)으로 정했다는 점 추가
+- (W7-4) b2-object-model.md §12.4: '타입 1 과 2 는 그리기 경로가 같다' 뒤에 'type 은 폴백 폰트의 컬러 글리프 판별(activeFallbackPages)과 캐시 키에만 쓰임' 추가. 그림자는 글리프 쿼드 안에서만 그려지고 `uv - offset` 이 페이지의 이웃 글리프를 읽을 수 있음, 오프셋은 화면 픽셀이 아니라 페이지 텍셀 단위라 글자 배율과 함께 커짐을 추가
+- (W7-4) b2-object-model.md §12.1 '색 파싱 실패 시 흰색': libGDX 1.9.9 `Color.valueOf` 규칙으로 구체화 — '#' 생략 가능, 앞 6자리가 RGB, 길이가 정확히 8일 때만 알파, 그 밖의 길이는 불투명, 예외 시 불투명 흰색(기본값 ffffff00 의 투명 흰색과 다름)
+- (W7-4) b2-object-model.md §12.4: libGDX 근거 추가 — BitmapFontCache 가 페이지별 정점 배열(pageVertices)로 페이지 순서대로 그림, 정점 색은 run.color 의 toFloatBits(알파 최하위 비트 제거)이고 SpriteBatch 색은 쓰이지 않음. gdx.jar 버전 1.9.9 확인
+- (W7-4) b2-object-model.md §18 재현할 특이 동작 목록: DF 텍스트 항목 추가(4제곱 알파와 흰색 번짐, 쿼드에 잘리는 그림자와 이웃 번짐, 외곽선 폭 하한 0.1, 스케일 무관 스무딩)
+
 
 ## 웨이브 5 반영 사항 (2026-10-10)
 

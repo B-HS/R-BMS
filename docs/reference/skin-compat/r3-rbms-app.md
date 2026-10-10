@@ -1,6 +1,15 @@
 # R3 — R-BMS 앱(apps/rbms-player) 스킨 배선·화면 구성·입력 현황과 격차
 
-> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 6(플레이) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 7A(비트맵 폰트) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 7A 반영 사항 (2026-10-11)
+
+비트맵 폰트(.fnt) 로더와 표준·distance field 그리기를 넣은 뒤의 상태다.
+
+- (W7-3) r3-rbms-app.md(스킨 화면 수명 절): SkinScreens 에 font_pages(FontPageDecode) 추가, finish_frame 이 sync_font_pages 를 먼저 부름. 디코드 실패 페이지는 워커 종료 시 '없음'으로 정산해 무한 대기를 막음. 페이지 대기 중에는 scene hold 를 걸지 않음
+- (W7-4) r3-rbms-app.md 캡처 하니스 절: capture.rs 에 추가된 `draw_until_text_settles`(프레임마다 finish_skin_frame, 폰트 페이지가 다 들어온 프레임까지), `choose_in_skin`(스킨 옵션 행 선택), 자작 DF 팩 캡처 테스트, ModernChic 결정 화면 비트맵 폰트 양 백엔드 캡처 테스트, `DOCUMENT_LOAD_WAIT`(프레임 예산의 4초 하한)를 기록
+- (리뷰 수정) r3-rbms-app.md 캡처 하니스 절(stage/capture.rs 의 draw_until_compiled): 240프레임 예산을 없애고 '컴파일됨 또는 더는 로딩 중이 아님'을 기다리며 60초는 멈춤 방지용이라고 적어야 합니다. 근거(GPU 대상에서 240프레임이 약 8ms, 3배 부하에서 86번째 프레임 도착, 실제 실패는 재현 못 함)도 함께 남겨야 합니다
+
 
 ## 웨이브 6 반영 사항 (2026-10-11)
 

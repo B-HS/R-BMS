@@ -378,6 +378,10 @@ R-BMS 고유 규칙
 | W7-3 | `.fnt`(BMFont 텍스트) 로더와 type 0 그리기 | 웨이브 6 | opus high |
 | W7-4 | distance field(type 1/2) 파이프라인과 검증 방법 | W7-3 | opus high |
 
+진행 기록(2026-10-11): **웨이브 7A 완료** — W7-1(디코더 조사) ∥ W7-3 → W7-4 → 리뷰 → 수정. Workflow `wf_46905912-776`(5 에이전트), 리뷰 major 1·minor 7 처리. 게이트 통과(테스트 4,676 통과·0 실패·ignored 5), 골든 불변, 画像フォント 를 끈 캡처 40장은 웨이브 6 과 바이트 동일. ModernChic 의 画像フォント 옵션을 켠 결정·선곡·결과·플레이 화면에서 비트맵 글리프가 TTF 와 같은 위치에 나오고 distance field 폰트의 외곽선이 그려진다(리뷰어 대조). 조판은 `beatoraja/lib/gdx.jar`(libGDX 1.9.9)의 바이트코드를 디스어셈블해 옮겼다. 한글 폴백과 type 0 그림자는 유닛 테스트로만 확인했다.
+
+동영상 디코더 선정(W7-1 조사 `docs/reference/skin-compat/v2-video-decoder.md`, 메인 결정): **OpenH264 소스 동봉 정적 빌드(`openh264` 크레이트) + `re_mp4` 디먹서**. 이유: 정적 링크라 런타임 의존이 없고, cc 빌드라 CI 필수 설치 단계가 없으며, safe API 라 `unsafe_code = "deny"` 와 충돌하지 않고, BSD-2-Clause·MIT 로 GPL-3.0-or-later 와 호환된다. 대상 mp4 8개(전부 H.264 High, CABAC, B 프레임, 8비트 4:2:0 프로그레시브)가 지원 범위 안이다. 새 크레이트 `crates/rbms-video` 에 디코더 트레이트 뒤로 격리하고 cargo 피처로 끌 수 있게 한다. 사용자에게 알릴 사실: Cisco 의 FAQ 는 소스에서 빌드한 OpenH264 가 Cisco 의 특허 비용 부담 대상이 아니라고 명시한다. 아직 배포 바이너리가 없으므로(Phase R 보류) 배포 시 동영상 피처의 포함 여부는 릴리스 단계에서 정한다.
+
 ### 웨이브 8 — 기본 스킨, 스킨 팩, 정리
 
 끝 상태: 첫 실행부터 자작 기본 스킨으로 전 화면이 그려진다.

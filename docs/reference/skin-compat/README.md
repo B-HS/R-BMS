@@ -1,6 +1,6 @@
 # 스킨 호환 조사 — 색인
 
-> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 6(플레이) 완료 · 기준 커밋 `9ce92bb` · 레퍼런스 체크아웃 HEAD `8320241d`
+> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 7A(비트맵 폰트, 디코더 조사) 완료 · 기준 커밋 `9ce92bb` · 레퍼런스 체크아웃 HEAD `8320241d`
 > 작업 체크리스트는 `docs/PROCESS.md` "레퍼런스 형식 Lua 스킨 완전 호환과 기본 스킨 교체" 절이다.
 
 이 폴더는 외부 풀 Lua 스킨(ModernChic)을 R-BMS 가 수정 없이 읽어 레퍼런스 구현(beatoraja)과 같게 그리기 위한 조사 결과 전문이다. 조사자 14개 + 종합 1개 + 비판 1개(Workflow `wf_43ad1f8d-42b`, 에이전트 16개, 약 840만 토큰)의 산출물이며, **같은 탐색을 다시 하지 않기 위해** 저장한다.
@@ -59,6 +59,7 @@
 
 | 문서 | 찾을 수 있는 것 |
 | --- | --- |
+| [v2-video-decoder.md](v2-video-decoder.md) | mp4 디코더 선정 조사: 외부 스킨 mp4 8개의 코덱·프로파일(전부 H.264 High, CABAC, B 프레임), 후보별 평가(OpenH264 소스 빌드, FFmpeg 정적 링크, 사이드카, OS 디코더, GStreamer, 순수 Rust), 근거 URL, 권고와 구현 구조 제안, 미결 질문 |
 | [v1-first-render.md](v1-first-render.md) | ModernChic 결정·결과·선곡·플레이 7키를 실제로 그린 첫 결과. 화면별로 나온 것·빠진 것·잘못 나온 것과 공통 원인(음수 id 참조 이미지 미구현, `dst` 없는 `songlist`·`note` destination 이 그려지지 않음, 음수 폭 객체가 버려짐). 웨이브 3~6 의 작업 근거 |
 
 프레임 비용 실측(웨이브 2B, `rbms-cli skin-dump <팩> --frames 1000`, 조건을 보지 않고 함수 값 전부를 프레임마다 한 번씩 부른 상한): 선곡 1,801호출 평균 0.278ms·p99 0.339ms·최대 0.653ms, 플레이 5/7키 75호출 평균 0.03ms, 10/14키 123호출 평균 0.05ms, 결과 118호출 0.025ms, 코스 결과 119호출 0.040ms. 로드 한 패스의 명령 수는 8천~32만, Lua 메모리 최대 6.1 MiB. 예산 기본값: 로드 1억 명령·10초, 프레임 50ms·호출당 100만 명령, 메모리 256 MiB.
@@ -90,3 +91,4 @@
 | 2026-10-10 | 웨이브 4 | `99`, `b4`, `b3`, `b5`, `r3`, `00`, `b2`, `b1`, `m5`, `r2`, `v1`, `m1` 상단 "웨이브 4 반영 사항" | 스킨 입력(`skin_render/input.rs`: z 역순 클릭, click 0~3, 슬라이더 드래그, `SkinAction`), 이벤트 분배(`skin_host` 의 `dispatch_calls`·`skin_requests`), libGDX 키 질의, gauge 칸 선택식과 결과 차오름, gaugegraph·timingdistributiongraph·judgegraph type 1·2, 엔진의 전 게이지 종류 이력(500ms)·판정별 early/late·타이밍 분포, Result·CourseResult Stage(타이머 150~152, 입력 잠금, FADEOUT, 게이지 종류 전환), 호스트 군집 B·G·H·E 일부(`ResultSnapshot`), 효과음 버스와 스킨 `audio_play` |
 | 2026-10-10 | 웨이브 5 | `b4`, `99`, `r3`, `m6`, `r2`, `m4`, `v1`, `00`, `b2`, `b5` 상단 "웨이브 5 반영 사항" | songlist(`skin_render/songlist/`: `SongBars`, 원형 인덱스, 패스별 그리기, 스크롤 보간, `BarScroller`, 막대 클릭), 선곡 모델(막대 종류·램프·레벨·라벨·트로피·폴더 분포, 내장 뷰와 곡 바를 한 모델에서), 선곡 키 표(`stage/select/keys.rs`)와 패널(`panel.rs`)·옵션 이벤트(`events.rs`), 호스트 군집 F·H·E, 슬라이더 쓰기(`skin_host/writers.rs`)와 편집 텍스트·IME, 선택 BGM 루프와 미리듣기 전환, 시스템 오버레이(`overlay.rs`)와 단축키 안내 |
 | 2026-10-11 | 웨이브 6 | `r3`, `b5`, `m2`, `b3`, `00`, `r2`, `v1`, `m3`, `99`, `m4`, `m5` 상단 "웨이브 6 반영 사항" | note(`skin_render/notes.rs`: `LaneNotes` 계약, y 누적식, LN/CN/HCN, 마디선류, 오프셋 3/4/5 식), judge(영역 콤보·shift), hiddenCover·liftCover, bga 레이어, timingvisualizer·hiterrorvisualizer, 플레이 상태기계(`stage/play/`: PRELOAD/READY/PLAY/FAILED/FINISHED, 미리보기 141, 즉시 재시작), 타이머 드라이버(`skin_host/play_timers.rs`), 호스트 군집 C·D(`PlayShown`), OFFSET_ALL, 구 어댑터·구 드라이버·폴백 삭제. 성능: 7키 512노트 프레임 prepare 19µs + draw 43µs |
+| 2026-10-11 | 웨이브 7A | `b2`, `r2`, `m6`, `r3`, `00`, `v1` 상단 "웨이브 7A 반영 사항", 신규 `v2-video-decoder.md` | 비트맵 폰트(`crates/rbms-render/src/bitmap_font.rs`: BMFont 텍스트 형식, libGDX 1.9.9 바이트코드 기준 조판, 쓰이는 페이지만 로드), type 0 그리기와 distance field(`Renderer::draw_distance_field_quad`, CPU·GPU 동일 계산, 원본 셰이더 식 그대로), 디코더 조사 보고서 |
