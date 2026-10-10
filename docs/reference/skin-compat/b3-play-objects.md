@@ -1,6 +1,40 @@
 # B3. beatoraja 플레이 화면 전용 스킨 객체와 플레이 화면 수명주기
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 4(결과와 코스 결과) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 6(플레이) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 6 반영 사항 (2026-10-11)
+
+note·judge·커버·bga·비주얼라이저 재작성, 플레이 상태기계(PRELOAD → READY → PLAY → FAILED/FINISHED), 플레이 타이머 드라이버와 오프셋 1~5, 호스트 군집 C·D, 스킨 경로의 내장 레이아웃 의존 제거와 구 어댑터(`state.rs`)·구 드라이버(`screen.rs`) 삭제를 한 뒤의 상태다.
+
+- (W6-5) b3-play-objects.md §4.3: 숫자 316은 (1.0 - lift)*cover*1000을 double로 계산해 0.1/0.25에서 224가 나옵니다. 1312~1327의 커버 on 변종은 커버가 꺼져 있어도 1-lanecover를 곱합니다. RATE 4/5는 커버가 꺼지면 0입니다.
+- (W6-4) b3-play-objects.md §11.1: 908 TIMER_MUSIC_END 행의 '끄는 시점: -' 을 '프랙티스 재시작(900~909 를 끄는 루프에 포함, BMSPlayer.java:539)' 으로 정정. 2 TIMER_FADEOUT 행에 'stopPlay 는 setTimerOn, FINISHED 의 finishmargin 경과는 switchTimer(true) 이나 이미 켜진 페이드에는 어느 경로도 도달하지 않음' 추가
+- (W6-4) b3-play-objects.md §11.2: 'PLAY 전이는 타이머 140 만 설정하고 rhythmtimer 필드는 그대로라 첫 PLAY 프레임에 TIMER_RHYTHM 이 0 에서 누적한 값으로 덮인다(첫 마디선이 0 이면 같은 프레임에 재설정)', '마디선은 프레임당 1개만 통과', '프랙티스 재시작 때 sections 와 rhythmtimer 를 초기화하지 않음', '100 / freq 는 freq > 100 이면 0, freq = 0 이면 예외' 추가
+- (W6-4) b3-play-objects.md §11.4: 키 on 설명에 'scratchKey 초기값은 0 이라 첫 스크래치 입력은 방향 전환으로 본다', '스크래치 두 키를 함께 누르면 scratchKey 가 매 프레임 바뀌어 키 on 이 매 프레임 재시작(판정 시작 전·오토플레이)', 'stopJudge 는 judge != null 일 때만 keyBeamStop 을 세운다', '판정 정지 뒤 홀드·HCN 타이머는 꺼지지 않고 남는다' 추가
+- (W6-4) b3-play-objects.md §11.5: 'deltatime 은 getNowTime() 의 ms 정수 차', '두 키를 함께 누르면 두 번째 키(scratchToKey[s][1])가 이긴다', 'keyBeamStop 과 무관하게 돈다', '2160ms 를 넘는 프레임에서는 Java % 때문에 값과 각도가 음수가 된다', '스크래치가 없는 모드는 오프셋 1·2 를 쓰지 않는다' 추가
+- (W6-4) b3-play-objects.md §6.4: 'judgeregion 3 에서 lane / (레인 수 / 3) 이 3 이상이면(7키의 레인 6·7) JUDGE_TIMER 배열 범위를 넘는다', 'MissCondition.ONE 에서 이미 판정된 노트의 POOR 는 타이머와 BMSPlayer.update 전에 return(JudgeManager.java:646-648)' 추가. R-BMS 는 앞의 경우 판정·콤보 타이머만 건너뜀
+- (W6-4) b3-play-objects.md §12: KEYBOARD_24K 행에 'R-BMS Mode::KEYBOARD_24K 는 scratch [24, 25] 를 갖지만 타이머 번호는 LaneProperty 대로 26레인 전부 건반(1~26, 10 이상은 base10 대역)' 추가. R-BMS 대응 함수로 skin_host/play_timers.rs 의 lane_slots, LaneTimer::id, judge_region, judge_regions 를 적음
+- (W6-4) b3-play-objects.md §11.1 PM_CHARA 행: 'R-BMS 는 PlayTimerDriver 가 PomyuCharaProcessor.updateTimer 를 그대로 옮김, 모션 주기는 로더가 없어 기본 1ms' 추가
+- (W6-2) b3-play-objects.md §6.2: (1) 숫자 d 판정에는 24배수(부호) 분기가 없다(셀 24·48 은 11글리프, 세트 수 = 셀/11). (2) images[i] 는 sk.image 에서만 찾고 getSourceImage 전 셀을 한 애니메이션으로 쓴다(len·ref 미적용). (3) 'x -= w*digit/2' 는 JsonSkin.Animation 의 원시 int 에 적용되어, 미지정(MIN_VALUE) 키프레임은 digit 이 짝수면 그대로 상속되고 홀수면 x 가 -1073741824 가 된다. x 만 쓰고 w 를 생략한 키프레임은 짝수 digit 에서 전혀 이동하지 않는다. (4) Animation 을 제자리 수정하므로 같은 judge id 를 두 번 배치하면 두 번째 객체는 두 번 당겨진다(R-BMS 미재현). 네 항목 추가
+- (W6-2) b3-play-objects.md §6.3: 'judgenow < 0 이면 super.prepare 전에 반환하므로 자기 draw 조건 함수를 부르지 않는다', 'super.prepare 가 draw=false 여도 nowJudge·nowCount 는 prepare 된다(Lua 조건이 호출됨)', 'SkinImage.prepare 는 조건 실패 뒤에도 소스 타이머를 읽고, SkinNumber.prepare 는 그려질 때만 읽는다', '알파 0 인 숫자도 length 가 계산되어 문자를 민다'를 추가
+- (W6-2) b3-play-objects.md §4.1: liftCover 의 offsets 배열은 길이 +2 인데 하나만 채워 끝의 0 이 setOffsetID 에서 걸러진다는 점, 오프셋은 IntSet 이라 문서가 이미 3 을 써도 한 번만 적용된다는 점, pushClip 은 폭·높이 0 이하에서 false 라 그 경우 커버를 그리지 않는다는 점 추가
+- (W6-1) b3-play-objects.md §3.3.3: 'i == 0 식은 첫 타임라인이 시각 0·section 0 이고 microtime <= 0 이면 0.0 * x / 0 = NaN 이 되어 두 패스 모두 첫 타임라인에서 끝난다. 따라서 TIMER_PLAY 가 켜지기 전(READY)에는 노트가 그려지지 않고, 첫 마디선은 (int)NaN = 0 오프셋으로 판정선에 그려진다. microtime 이 음수면 선의 prepareRegion 이 starttime > time 으로 그 선도 숨긴다'를 추가.
+- (W6-1) b3-play-objects.md §3.3.4: 'tl.getStop() 은 ms 정수라 1ms 미만의 STOP 은 정지선 조건에 걸리지 않는다', '라벨의 x 는 가운데 정렬이 아니라 그룹 중앙에서 시작하는 왼쪽 정렬이다'를 추가.
+- (W6-1) b3-play-objects.md §3.3.6: 구현 확인 메모 추가 — 짧은 LN(dy < scale)은 본체 높이가 음수가 되어 뒤집혀 그려지고, 끝·시작 이미지가 그 위를 덮는다(테스트로 그리기 순서 확인).
+- (W6-1) b3-play-objects.md §14 체크리스트 2·3·4·5·6: 구현 완료 표시와 R-BMS 대응 추가 — lane_offsets, LaneNotes, note_nudge, long_names, Lines::draw.
+- (W6-7) b3-play-objects.md §8.3: 눈금자 선은 object 의 dst 색·각도를 받지 않고(draw(sprite, line, x, y, w, h, lineColors[i], 0) 가 angle 0·자기 색을 씀) 원시 width/lineWidth 로 화면 px 에 놓인다는 점을 명시. 배경 텍스처만 dst 색·각도·stretch 를 받음. 음수 폭 dst(ModernChic hrv)면 region.width 가 음수여서 x = region.x + (음수 폭 - lineWidth)/2 + v*rate 이므로 눈금자 중앙은 양수 폭과 같은 자리에 선이 남고 배경만 거울상.
+- (W6-7) b3-play-objects.md §8.4: 최근 판정 버퍼는 index 가 기록 전에 증가해(슬롯 0 은 한 바퀴 돌기 전까지 Long.MIN_VALUE) 최신이 recent[index], 최근 N개의 i 번째(1=가장 오래됨)는 recent[(index - N + i) mod 100]. colorMode 0 의 알파 lineColor.a*i/(windowLength/2) 는 1 을 넘을 수 있고 Color.rgba8888 정수 합성에서 알파 바이트가 255 를 넘으면 &0xFF 로 접히고 bit8 이 파랑 채널 최하위 비트로 새어 들어감. EMA 는 인덱스가 바뀐 프레임마다 최신 값 하나만 반영(두 판정이 한 프레임에 들어오면 앞의 것은 건너뜀). EMA 갱신 조건은 judgeArea[6] < last < judgeArea[7] 엄격 부등호(BD 창).
+- (W6-6) b3-play-objects.md §7.1: 'Config.bgaExpand 기본값 KEEP_ASPECT_RATIO(FIT_INNER)' 표는 맞음. 단 destination stretch >= 0 이면 그것이 우선한다는 줄에 '각 destination 은 별개 SkinBGA 이고 같은 BGAProcessor 상태를 공유하며, SkinBGA.draw 는 destination angle 을 쓰지 않는다(sprite.draw(image, x, y, w, h))'를 추가
+- (W6-6) b3-play-objects.md §7.2: 'BGA OFF(Config.bga=2)'면 BMSResource.java:107 이 모델을 null 로 넘겨 BGAProcessor.setModel 이 빈 timelines 를 만들고, 시간이 0 이상이어도 drawBGA 가 검정 사각형을 채운다는 점을 추가. 'BMS 채널 06 은 jbms-parser Section 이 EventType.MISS 이벤트 레이어(단일 시퀀스)로 만들며 본 그림을 바꾸지 않는다(Section.class 상수 풀 확인, Integer.MIN_VALUE 상수는 없음)'를 추가. 'misslayertime != 0' 때문에 시각 0 의 미스는 미스 레이어를 켜지 않는다는 점과 '(len-1)*경과/길이 이므로 시퀀스의 마지막 단계는 도달하지 않는다'는 점을 추가
+- (W6-6) b3-play-objects.md §7.2 draw 3번: TYPE_LAYER 는 Skin.SkinObjectRenderer.setFilter 가 Linear 를 걸지 않아 레이어는 Nearest 로 샘플링된다(텍스처가 다른 곳에서 Linear 로 그려진 적이 없을 때). 레이어 셰이더는 샘플된 값에 적용되므로 Nearest 에서는 텍셀 키아웃과 같다는 점을 추가
+- (W6-6) b3-play-objects.md §14 12번 R-BMS 체크리스트: 구현됨(W6-6). R-BMS 와의 차이로 'rbms-chart 가 채널 06 을 TimeLine.bga 로 합치므로 미스 레이어가 모델에 없다'를 추가
+- (W6-3) b3-play-objects.md §10.2: R-BMS 대응 열 추가 — PRELOAD 의 mediaLoadFinished 는 'ChartLoads 완료 + 스킨 로드 완료(장면 시계는 스킨이 오는 동안 정지)', startpressedtime 초기값 0 때문에 최소 1초 대기가 그대로 재현됨, PRACTICE 상태는 쓰지 않고 연습 구간은 READY 부터 시작하며 starttimeoffset = 구간 시작, playtime 은 rbms_play::play_time_ms, 연습은 구간 끝에서 FINISHED
+- (W6-3) b3-play-objects.md §4.4: ControlInputProcessor 표에 R-BMS 구현 여부 열 추가 — START+건반·START+스크래치·더블탭·SELECT+건반/스크래치·START+SELECT 짧게·휠·노트 종료 후 START/SELECT 는 구현(스킨 장면 한정), 방향키·START+SELECT 길게·ESC 즉시·숫자키 배속은 R-BMS 방식 유지로 미구현. 스크래치 두 키가 laneCoverStartTiming 을 공유해 한 키만 누르면 매 프레임 초기화되어 marginHigh 에 도달하지 않는다는 점 추가
+- (W6-3) b3-play-objects.md §11.4: 'R-BMS 는 판정 스레드가 없어 엔진이 스스로 내린 판정을 노트 상태 변화(RunTrace)로 찾아 Judged 사건을 만들고, 키 눌림은 beam_on 시각 변화로 Pressed 사건을 만든다. 한 프레임의 판정은 레인순' 추가
+- (W6-3) b3-play-objects.md §3.3: 'R-BMS 는 judgetiming 을 입력 쪽에 적용하므로 노트 필드 시각에는 더하지 않는다. FAILED/FINISHED 뒤에도 TIMER_PLAY 가 켜진 채라 노트는 장면 시계로 계속 흐른다(원본과 같음)' 추가
+- (리뷰 수정) b3-play-objects.md §7(BGA): 'R-BMS 대응'에 'BGA 끔이면 bga 객체는 처음부터 끝까지 검정 사각형(BGAProcessor.java:337-340)'과 '리플레이 탐색은 reset() 뒤 prepare(-1) 을 불러 시각 0 이벤트를 다시 적용'을 추가
+- (리뷰 수정) b3-play-objects.md §8.3·§8.4(비주얼라이저): 최근 판정 버퍼는 judge < 4 만 100개 보관(JudgeManager.java:654-658)한다고 R-BMS 구현 메모 수정
+- (리뷰 수정) b3-play-objects.md §11(타이머 표): HCN active/damage(270~) 행에 '머리 미판정(passing.getState() == 0)이면 둘 다 off, hold 타이머는 processing 또는 passing && inclease', FULLCOMBO(48) 행에 '스테이지 콤보 getCombo() 기준' 구현 메모 추가
+
 
 ## 웨이브 4 반영 사항 (2026-10-10)
 

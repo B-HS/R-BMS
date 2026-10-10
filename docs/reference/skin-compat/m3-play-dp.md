@@ -1,6 +1,14 @@
 # M3 조사 보고서: ModernChic 더블 플레이 스킨 (10키 / 14키)
 
-> 최종 갱신 2026-10-09 · 대응 단계: L1 조사(구현 전) · 기준 커밋 `9ce92bb` · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 6(플레이) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 6 반영 사항 (2026-10-11)
+
+note·judge·커버·bga·비주얼라이저 재작성, 플레이 상태기계(PRELOAD → READY → PLAY → FAILED/FINISHED), 플레이 타이머 드라이버와 오프셋 1~5, 호스트 군집 C·D, 스킨 경로의 내장 레이아웃 의존 제거와 구 어댑터(`state.rs`)·구 드라이버(`screen.rs`) 삭제를 한 뒤의 상태다.
+
+- (W6-1) m3-play-dp.md §12.1: 10키·14키 캡처로 x 좌표 표가 확인됐다는 메모 추가(좌 492/555/606/669/720/783/834 와 381, 우 1026… 및 10키 1140…1431).
+- (W6-3) m3-play-dp.md §12: 10키·14키 앱 경로 캡처로 두 판정 영역(영역 = lane / (레인 수 / 2))이 좌우 필드에 각각 표시됨을 확인했다는 문장 추가
+
 
 작성 근거는 전부 /Users/hyunseokbyun/Downloads/ModernChic 아래 파일이며 `파일:줄` 형식으로 표기한다. 경로 접두 `Play/lua/`는 `P/`, `Play/lua/dp/`는 `dp/`, `Play/lua/require/`는 `req/`로 줄여 쓰는 곳이 있다. beatoraja 쪽 근거는 /Users/hyunseokbyun/development/beatoraja/src/bms/player/beatoraja 아래이며 `bj:`(= 그 경로) 접두를 쓴다.
 

@@ -1,6 +1,35 @@
 # R3 — R-BMS 앱(apps/rbms-player) 스킨 배선·화면 구성·입력 현황과 격차
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 5(선곡) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 6(플레이) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 6 반영 사항 (2026-10-11)
+
+note·judge·커버·bga·비주얼라이저 재작성, 플레이 상태기계(PRELOAD → READY → PLAY → FAILED/FINISHED), 플레이 타이머 드라이버와 오프셋 1~5, 호스트 군집 C·D, 스킨 경로의 내장 레이아웃 의존 제거와 구 어댑터(`state.rs`)·구 드라이버(`screen.rs`) 삭제를 한 뒤의 상태다.
+
+- (W6-5) r3-rbms-app.md §6.2: 플레이 화면 상태 공급을 갱신합니다. 구 PlayViewState 어댑터 대신 PlayShown::of(&PlaySession, &PlayLive)와 ScreenHost::show_play가 군집 B·C·D·M에 싣는 구조입니다. Stage 연결은 W6-3 대기, 구 어댑터는 폴백만 담당한다고 적습니다.
+- (W6-5) r3-rbms-app.md §8.6 테스트 표: skin_host/play/tests.rs 33건, play/shown/tests.rs 9건, score/tests.rs 3건, score/standing/tests.rs 3건을 추가합니다.
+- (W6-4) r3-rbms-app.md §6.2: 타이머 표 아래에 '새 드라이버 apps/rbms-player/src/skin_host/play_timers.rs(PlayTimerDriver, SceneEvent 18종, PlaySetup, Reached, PlayOffsets/FieldOffsets) 추가, Stage 연결은 W6-3, 구 PlayTimers 삭제는 W6-8' 을 추가. 주의점의 '레인 → 타이머 키 번호는 내장 Skin.x 를 x 좌표순으로 정렬해 매긴다' 는 구 드라이버 한정이며 새 드라이버는 lane_slots(mode)(LaneProperty 표)로 매긴다고 적음. '공급하지 못하는 것' 표의 TIMER_STARTINPUT, TIMER_RHYTHM, MUSIC_END/ENDOFNOTE/FADEOUT, SCORE_A~TARGET, PM_CHARA 행을 '드라이버 구현(W6-4), 사건 공급 대기(W6-3)' 로 변경
+- (W6-4) r3-rbms-app.md §6.1 또는 §6.2: ScreenHost 에 play_offsets: Option<&PlayOffsets> 필드가 생겼고 오프셋 질의 순서가 play_offsets → 군집 → fallback → 사용자 nudge 라는 점 추가
+- (W6-2) r3-rbms-app.md §6.2(플레이 프레임 조립): 'PlayViewState 의 judged_side·last_judge 로 판정 표시를 구동'하던 서술을 '스킨 판정 표시는 FrameData.judge(영역별 JudgeHit)와 타이머 46/47/247 로 구동. 앱이 판정마다 영역 = lane / (레인 수 / judgeregion) 로 채워야 하며 현재 미연결'로 갱신. skin_host/play_timers.rs 의 judge_regions 와 rbms-render 의 JudgeFrame::region_count 중복을 기록
+- (W6-1) r3-rbms-app.md §6.2: 플레이 화면 스킨 그리기 절에 'draw_play_skin 은 창 픽셀 직접 그리기. W6-3 이 FrameData.notes 를 채우기 전까지 skin_screen.rs 의 lane_notes_of / held_long_notes 가 기존 NoteField 에서 임시 변환'을 추가.
+- (W6-1) r3-rbms-app.md §11-4: 스킨 경로의 내장 Skin 의존 목록에서 note 를 빼고, 남은 것은 구 어댑터 state.rs 의 OFFSET_LIFT·커버 오프셋과 게이지 임계값이라고 갱신.
+- (W6-7) r3-rbms-app.md §6.2: FrameSeries.recent_hits 의 계약 변경. RecentHits{hits, recorded, judge_area}. hits 는 (오차 ms, 판정), 빠름이 양수(beatoraja mfast/1000), 최근 100개를 읽고 judge >= 4 는 기록하지 않음. judge_area 는 JudgeProperty.getNoteJudge ms 5쌍으로 앱이 채워야 함. 앱의 RECENT_HITS_KEPT(64)는 100 이상이어야 하고 recorded 를 넘겨야 함.
+- (W6-6) r3-rbms-app.md §10.2 와 상단 반영 사항: BGA 로드 조건이 내장 Skin.bga 가 아니라 '문서에 bga 객체가 있는가'(wants_bga_pictures)와 display.bga 로 바뀜, Canvas::bga_frame/release_bga_textures 가 단일 background_texture 슬롯을 대체함. 미스 레이어 데이터는 rbms-chart/rbms-model 변경 전까지 없음
+- (W6-3) r3-rbms-app.md §6.2: 'Play 는 진입 즉시 곡 시작, PlayTimers.start/update/fail 로 타이머 구동, PlayViewState 어댑터'를 '플레이 스킨이 있으면 on_enter 에서 PlayScene(stage/play/scene.rs) 시작: PRELOAD → READY(40) → PLAY(41, start_play 로 곡 시계 시작) → FAILED(3, close) / FINISHED(908 → finishmargin → 2 → fadeout). 사건은 SkinFeed(stage/play/skin.rs)가 PlayTimerDriver 에 보내고, 프레임 데이터는 LaneNotes·JudgeFrame·GaugeFrame::playing·BgaPlayhead·NoteDistribution(초 단위 판정표)·RecentHits, 속성은 PlayShown. 스킨이 없으면 scene = None 으로 기존 흐름'으로 교체
+- (W6-3) r3-rbms-app.md §6.5: 'Decide 는 로드가 끝났으면 Play, 아니면 Loading' 에 '플레이 스킨이 있으면(ChartAssets::preloads_on_the_play_screen) 로드 여부와 무관하게 Play(PRELOAD)로 직행하고 디코드는 ChartLoads 로 넘어간다. 연습 요청은 기존 Loading 경로. LoadingState::Song 은 플레이 스킨이 받을 차트면 한 프레임을 검정으로 그린다' 추가
+- (W6-3) r3-rbms-app.md §11: 격차 목록에서 'PRELOAD/READY/폐점 연출 없음', '플레이 문서만 배율 래퍼', '차트 미리보기 141 없음', '폐점 즉시 재시작 없음' 항목을 해결로 표시하고, 남은 격차로 'CONSTANT·LEGACY NOTE 의 스킨 대응 없음, 엔진의 LN 보유 상태 미공개, BACKBMP 미공급' 추가
+- (W6-3) r3-rbms-app.md §7.1: 플레이 입력 분배에 '스킨 장면에서는 PLAY 상태에서만 건반을 세션에 전달하고(그 전 눌림은 키빔만), stage/play/controls.rs 가 START/SELECT 조합(하이스피드, 커버, 더블탭, duration, 리프트/히든 전환, 휠)을 매 프레임 읽는다' 추가
+- (W6-3) r3-rbms-app.md §1.2: 전이 그래프에 'Decide → Play(스킨 있음)', 'Loading(Song) → Play(PRELOAD)', 'Play(FAILED) → Loading(즉시 재시작)' 간선 추가
+- (W6-8) r3-rbms-app.md §6.1: with_skin_frame 에서 older 인자와 ScreenHost.fallback 이 없어졌고, 군집이 모르는 id 는 모든 화면에서 값 없음이라고 수정. FrameInputs 에 keyconfig: KeyConfigState 와 settings: Option<SettingsView> 추가
+- (W6-8) r3-rbms-app.md §6.2(Play): AppShared.skin_play_timers·skin_select_timers 와 SkinScene 의 play·select 필드 삭제. 플레이 타이머는 skin_host/play_timers.rs 의 드라이버만 씀
+- (W6-8) r3-rbms-app.md §6.3·§6.4: SelectDraw.view, ResultDraw.view·extras·cleared, CourseSkinRun.view·extras·summary_view 삭제. 선곡 노트 수(350~353)와 코스 결과 TOTAL(368)은 이전에 구 어댑터의 0 이 그려졌고 지금은 빈칸이라고 기록
+- (W6-8) r3-rbms-app.md §6.5(Decide, KeyConfig): 키 이름은 skin_host/keyconfig.rs 군집 K 가 답함(40+i → i번째 레인, 240+i → 10+i번째). 결정·키 설정 화면은 options 군집에 SettingsView::of_config 를 실음
+- (W6-8) r3-rbms-app.md §11-4: 해소로 표시. BGA 디코드 조건은 문서의 bga 유무, 레인·판정 측·봄은 play_timers 와 모드 표, 결과 팔레트는 내장 화면 전용
+- (W6-8) r3-rbms-app.md §11(상단 웨이브 5 '리뷰 수정' 항목): SelectTimers 타입 삭제 완료로 표시
+- (W6-8) r3-rbms-app.md §8.6 테스트 표: 삭제된 테스트(render_tests.rs 의 타이머 드라이버 기억 2건, skin_render/tests.rs 의 구 드라이버·어댑터 테스트, tests/skin_render.rs 의 게이트·어댑터 4건)와 추가된 테스트(whole.rs 6건, tests/skin_render.rs 3건, keyconfig.rs 3건, skin_screen/tests.rs 의 SKIN 탭 OFFSET_ALL 1건과 팩 선택 테스트 1건) 반영
+- (리뷰 수정) r3-rbms-app.md §6.2: 플레이 화면 절에 반영 — RunTrace 는 노트 상태 비교가 아니라 엔진 판정 로그를 소비(빈 POOR 레인 추정 삭제), 풀콤보는 스테이지 콤보(이월 콤보 제외), 폐점·종료 중 뗌 입력 미전달, 자동 레인은 세션 빔 상태 OR, 노트 필드 시각은 한 번 절삭, 스킨 실패 시 PRELOAD 는 내장 LOADING 표시
+- (리뷰 수정) r3-rbms-app.md §11-4(스킨 경로의 RON 의존 제거 절): SceneEvent::PracticeRestarted 와 PlayPhase::Practice/PracticeFinished 삭제 반영. 옵션 1080(OPTION_STATE_PRACTICE)은 항상 false
+
 
 ## 웨이브 5 반영 사항 (2026-10-10)
 

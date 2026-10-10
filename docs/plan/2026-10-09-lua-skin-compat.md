@@ -355,6 +355,18 @@ R-BMS 고유 규칙
 | W6-7 | timingvisualizer, hiterrorvisualizer, 슬라이더 type 4/5/6 | `skin_render/graphs/{timing_vis, hit_error}.rs` | 웨이브 5 | sonnet high | [b3 §8.3·§8.4] |
 | W6-8 | 스킨 경로의 내장 `Skin`(RON) 의존 제거(내장 렌더러용 `Skin` 은 유지), 구 `state.rs`·`screen.rs` 삭제, `OFFSET_ALL`(플레이 타입에서만, 이동은 스킨 크기의 %, 배율 (w+100)/100) | `crates/rbms-render/src/{skin.rs, lib.rs, skin_render/{mod, state, screen}.rs}`, `apps/rbms-player/src/{app_input.rs, app_play.rs}` | W6-1~W6-5 | opus high | [r3 §11-4, 99 W5·P8-4] |
 
+진행 기록(2026-10-11): **웨이브 6 완료** — W6-1 ∥ W6-2 ∥ W6-4 ∥ W6-5 → W6-3 ∥ W6-6 ∥ W6-7 → W6-8 → 리뷰 → 수정. Workflow `wf_1f1087ff-ad5`(10 에이전트), 리뷰 major 1·minor 14 중 13건 수정. 게이트 통과(테스트 4,589 통과·0 실패·ignored 5), 골든 불변, 곡 시계·판정 입력 경로 무변경. 앱 경로에서 실제 차트의 오토플레이로 찍은 ModernChic 7/5/10/14키 플레이 화면이 m2·m3 좌표와 엔진 수치에 일치한다(리뷰어 대조, 메인이 7키 플레이 프레임 직접 확인). 로딩 연출 → READY → 플레이 → 완주 페이드/폐점 셔터가 동작한다. 성능(릴리스, 헤드리스): 7키 512노트 프레임 prepare 19µs + draw 명령 생성 43µs, 14키 1,024노트 21µs + 45µs. GPU 래스터 시간은 미측정.
+
+구현 메모와 원본과의 의도적 차이
+- `rbms-judge` 에 읽기 전용 접근자 2개(판정 순서 로그, 레인별 processing·passing)를 추가했다. 판정 계산은 그대로다(기존 테스트 불변).
+- R-BMS 의 CONSTANT 와 LEGACY NOTE 설정은 스킨 노트 필드에도 적용한다. CONSTANT 는 원본(시작 BPM 고정)이 아니라 R-BMS 기존 정의(2000ms/하이스피드)다. 옵션 400 은 원본에서 다른 기능이라 false 다.
+- READY 동안(차트 시각 0) 노트가 보이지 않는 것은 원본 동작 그대로다.
+- 사용자 오프셋 값은 출력 픽셀로 취급한다(스케일하지 않음, `OFFSET_ALL` 제외).
+- 코스의 TOTAL(368) 빈칸은 원본도 빈칸이다.
+- 스킨 장면의 연습 런은 BGA 자리에 원본의 연습 설정 화면 대신 BGA 를 그대로 그린다(연습 설정은 R-BMS 의 Practice Stage 가 맡는다).
+- **결정 필요(다음 사용자 확인 때 묻는다)**: 선곡 화면의 종류별 노트 수(350~353)와 밀도(360~365)·주 BPM(92)은 songdb 에 열을 추가하고 전체 재스캔을 해야 채울 수 있다. 그 전까지 빈칸이다.
+- 원천 데이터가 없어 남은 것: 미스 레이어 분리, BACKBMP·배너, 키별 판정 이미지 인덱스, bgaExpand 설정, 오토플레이 중 숫자키 배속, PMS 의 박자 확대.
+
 ### 웨이브 7 — 동영상과 비트맵 폰트
 
 끝 상태: ModernChic 의 동영상 배경·범용 BGA 와 "画像フォント" 옵션이 동작한다.

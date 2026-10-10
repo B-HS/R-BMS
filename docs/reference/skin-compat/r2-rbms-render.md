@@ -1,6 +1,25 @@
 # R2 — R-BMS 렌더 계층(crates/rbms-render, GPU 백엔드) 현황과 격차
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 5(선곡) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 6(플레이) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 6 반영 사항 (2026-10-11)
+
+note·judge·커버·bga·비주얼라이저 재작성, 플레이 상태기계(PRELOAD → READY → PLAY → FAILED/FINISHED), 플레이 타이머 드라이버와 오프셋 1~5, 호스트 군집 C·D, 스킨 경로의 내장 레이아웃 의존 제거와 구 어댑터(`state.rs`)·구 드라이버(`screen.rs`) 삭제를 한 뒤의 상태다.
+
+- (W6-2) r2-rbms-render.md §5.2 judge 행: '콤보 숫자는 NUMBER_COMBO 로 강제, 플레이어 인덱스 2 이상은 두 번째로 접음, images 에 imageset 허용'을 '원본 SkinJudge 대로: index = 판정 영역(FrameData.judge.regions[index], 없으면 미표시), 문자·숫자는 위치로 짝지음(최대 7칸), 문자는 image 만·전 셀 한 애니메이션, 숫자는 영역 콤보·가운데 정렬·셀%10==0 이면 10글리프 아니면 11글리프(裏0 채움), 로더의 x -= w*digit/2 를 정수 래핑 연산으로 재현, shift 는 이동 전 좌표로 숫자를 놓은 뒤 표시 폭 절반 이동, PG+MAX 는 7번째 슬롯(문자·숫자 따로 폴백), BD 이하 숫자 없음'으로 교체
+- (W6-2) r2-rbms-render.md §5.2 hiddenCover / liftCover 행: '덮는 높이를 계산해 자르고(LaneShade.hidden, Skin.judge_y)'를 '내장 Skin 을 읽지 않음. 빌드 시 covers::attach_offsets 가 hiddenCover 에 오프셋 3·5, liftCover 에 3 을 중복 없이 붙이고 위치·알파는 일반 destination 경로, disapearLine(+연동 시 OFFSET_LIFT.y) 아래는 scissor, 폭 0 이하에서 클립이 필요하면 미표시'로 교체. 'covers.rs:12-15 의 오프셋 미공급 주석' 문장 삭제
+- (W6-2) r2-rbms-render.md 프레임 데이터 절(FrameData 표): 'judge: JudgeFrame { regions: [Option<JudgeHit{judgement, combo, at_us}>; 3] }' 필드와 JUDGE_REGIONS, JudgeFrame::region_count(skin) 추가. 접근 경로는 rbms_render::skin_render::frame
+- (W6-2) r2-rbms-render.md '스킨 객체의 Skin 의존' 행과 E2 항목: covers.rs 를 목록에서 제거(judge_y·LaneShade 미사용). object.rs 의 Body::Judge prepare 순서(판정 유무 → 자기 조건 → 부품)와 SkinObject::new 의 커버 오프셋 부착을 기록
+- (W6-1) r2-rbms-render.md §5.2: note 행을 다음으로 교체 — '문서 note.dst 만으로 지오메트리 결정(내장 Skin 미사용), LaneRenderer.drawLane 식 이식(y 누적, CONSTANT, LN/CN/HCN, 선 4종과 라벨, expansion, dst2, 판정 영역), 입력은 FrameData.notes(LaneNotes), 테스트는 skin_render/notes/tests.rs'. 상단에 웨이브 6 반영 사항을 추가.
+- (W6-1) r2-rbms-render.md §4: '플레이 문서만 1280x720 배율 래퍼'를 '플레이 문서도 canvas.native() 에 직접 그림(draw_play_skin → draw_native)'으로 갱신.
+- (W6-1) r2-rbms-render.md §7.1: FrameData 에 `notes: Option<&LaneNotes>` 가 추가됐고 `field`(NoteField)는 내장 지오메트리·음영을 아직 읽는 곳을 위한 잔여이며 W6-8 에서 제거 예정임을 추가.
+- (W6-6) r2-rbms-render.md §5 bga 행: '프레임이 넘긴 배경 텍스처를 그 자리에 그림(draw.rs:200-211)'을 'BgaFrame{show: BgaShow, expand: BgaExpand} 를 원본 순서로 그림: 사전 검정, 미스 그림 단독, 본 그림(없으면 검정)+레이어. 각도 무시, destination stretch 가 우선하고 없으면 bgaExpand. BgaPlayhead(prepareBGA 이식)와 BgaTextures(256 캔버스, 레이어 검정 키아웃, 역할별 텍스처 3개)'로 교체
+- (W6-8) r2-rbms-render.md §7.1·§7.2: skin_render/state.rs(어댑터 5종)와 screen.rs(SkinDraw, render_*_screen, PlayTimers, SelectTimers, LaneTimerState, PlayLanes) 삭제를 반영. FrameData 표에서 field: NoteField 행 삭제(notes 만 남음). lib.rs 재노출 목록에서 해당 심볼 삭제
+- (W6-8) r2-rbms-render.md §8.1 '스킨 객체의 Skin 의존' 행과 §8.2 '스킨 객체의 &Skin 의존(W6)': 해소로 표시. skin_render 에 내장 Skin·playfield·hud 참조가 없고, 내장 Skin 의 lift·lift_height 필드도 삭제됨
+- (W6-8) r2-rbms-render.md §8.1 '화면 게이트 render_{play,select,result,decide,keyconfig}_screen' 행: 삭제됨으로 표시
+- (W6-8) r2-rbms-render.md §1.2·§5.3: skin_render/whole.rs 추가를 기록. WholeOffset, OffsetRenderer(fill·quad·clip 을 좌하단 기준 배율 후 이동), SkinScreen 이 플레이 타입 7종에서 첫 프레임의 OFFSET_ALL 을 OnceLock 으로 고정. 식은 Skin.java:377-392, 720-728
+- (W6-8) r2-rbms-render.md §4·§10(A1~A5)과 상단 웨이브 1B '리뷰 수정' 항목: '플레이 문서만 1280x720 배율 래퍼'를 해소로 표시(draw_play_skin 이 draw_native)
+
 
 ## 웨이브 5 반영 사항 (2026-10-10)
 

@@ -1,6 +1,25 @@
 # b5. beatoraja 속성 id 전수 목록과 R-BMS 대조
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 5(선곡) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 6(플레이) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 6 반영 사항 (2026-10-11)
+
+note·judge·커버·bga·비주얼라이저 재작성, 플레이 상태기계(PRELOAD → READY → PLAY → FAILED/FINISHED), 플레이 타이머 드라이버와 오프셋 1~5, 호스트 군집 C·D, 스킨 경로의 내장 레이아웃 의존 제거와 구 어댑터(`state.rs`)·구 드라이버(`screen.rs`) 삭제를 한 뒤의 상태다.
+
+- (W6-5) b5-properties.md §16 #4·#5·#6: 1242/1243은 원본 정의(판정 GREAT 이하이고 timing 부호)로 구현했습니다. 242~246/262~266과 44/45/1047은 팩토리가 없어 None으로 답한다고 적습니다.
+- (W6-5) b5-properties.md §16 #7·#8·#9·#10·#11·#14·#15: 플레이 경로에서 해소되었다고 적습니다. 통과 노트 기준 nowrate, 14/314~316은 float*1000, 407은 소수 1자리, 152는 nowEX-nowBest, 1102는 nowrate이고 1107은 0..100 원값, 410~424는 early/late 원본 정의입니다.
+- (W6-5) b5-properties.md §17 군집 표 B·C·D 행: 구현(W6-5)으로 갱신합니다. 키별 판정 이미지(500~519, 1510~1699)와 3P, ghost 페이스는 값 없음으로 남습니다.
+- (W6-5) b5-properties.md §3·§4·§5-A·§5-B·§9의 R-BMS 열: 숫자 10, 12, 14, 160~164, 310~316, 525~527, 1312~1327, 옵션 32/33/40~43/82/84/241/261/361/270~273/400/1080/1240/1242~1243/1262~1263/1362~1363, 비율 4~6/101, FLOAT 310, 이미지 인덱스 40/42/43/54/55/301~308을 skin_host/play.rs 구현으로 표시합니다.
+- (W6-5) b5-properties.md §2.3·§18: 첫 판정 전에는 ScoreDataProperty에 ScoreData가 없습니다(update는 판정 뒤에만 호출, BMSPlayer.java:1031). 그래서 71·101·171, 80~84, 85~89, 102·103, 115·155·156, FLOAT 1102·1115는 MIN_VALUE이고 72는 0입니다. ModernChic attack.lua:61의 -2147483648 비교가 이 값입니다.
+- (W6-4) b5-properties.md §7 타이머 표 R-BMS 열: 1, 2, 3, 40, 41, 44, 46/47/247, 48, 50~69, 70~89, 100~139, 140, 141, 143, 250~289, 348~352, 446~448, 900~909, 1010~2199 를 '새 드라이버 구현(W6-4), Stage 연결 대기' 로, 42 는 '새 드라이버는 켜지 않음' 으로 갱신
+- (W6-4) b5-properties.md §16 표 17·19·21·24번: '새 드라이버(skin_host/play_timers.rs)에서 해소: READY 유지, 42 미구동, 봄은 judgetimer 이하 판정마다 재시작하고 끄지 않음, OFFSET_SCRATCHANGLE_1P/2P 는 PlayTimerDriver::offsets 가 계산. 구 screen.rs 는 W6-8 까지 남음' 으로 갱신
+- (W6-4) b5-properties.md §10 오프셋 표 R-BMS 열: 1·2 는 'PlayTimerDriver::offsets(KeyInputProccessor 식)', 3·4·5 는 'FieldOffsets 로 받은 값을 ScreenHost.play_offsets 가 답함(값 계산은 W6-1, 미공급 시 구 cover_offset 폴백)' 으로 갱신
+- (W6-4) b5-properties.md §11: '레인 -> (player, offset)' 행의 R-BMS 대응으로 lane_slots(mode) 와 LaneTimer::{Bomb, Hold, KeyOn, KeyOff, HcnActive, HcnDamage}::id(player, key) 를 적음
+- (W6-4) b5-properties.md §17 군집 표 D 행: 타이머 KEYON/KEYOFF/BOMB/HOLD/HCN 과 OFFSET 1-5 의 R-BMS 현황을 'play_timers.rs 드라이버 구현(W6-4), 사건 공급은 W6-3' 으로 갱신
+- (W6-7) b5-properties.md §12: 플레이용 슬라이더(type 4, 5, 6)·그래프(101, 102)는 draw_slider/draw_graph 가 원본 SkinSlider/SkinGraph 와 이미 정합(방향 0..3, 클램프 없음, range 는 화면 정수 px)이고 값은 호스트 rate 로만 받음을 확인함. 변경 없음.
+- (W6-8) b5-properties.md §17 군집 표: 군집 K 가 구현됨(문자열 40~49, 240~283)으로 갱신
+- (리뷰 수정) b5-properties.md §17 군집 A: 350~353 은 플레이·결정·결과에서 ChartOverview 가 모델에서 세어 공급, 선곡은 songdb 열 추가 전까지 값 없음. 368 은 코스 결과에서 원본도 빈칸(코스 스테이지 SongData 에 SongInformation 없음: PlayerResource.java:172-176, 361)이라고 수정
+
 
 ## 웨이브 5 반영 사항 (2026-10-10)
 
