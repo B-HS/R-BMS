@@ -26,7 +26,7 @@
   - [x] 웨이브 2B — `rbms-cli skin-dump` 와 프레임 비용 실측(선곡 1,801호출 평균 0.28ms·최대 0.65ms), 앱의 스킨 팩 폴더 지정(`skin.pack`, `RBMS_SKIN_PACK`, SKIN 탭 PACK FOLDER), 오버레이 총 크기 상한, 외부 스킨 정지 프레임(`crates/rbms-render/tests/skin_external.rs`). Workflow `wf_c034401f-ce6`(6 에이전트), 리뷰 major 3·minor 8 처리. 게이트: 테스트 3,530 통과·0 실패. 메인이 ModernChic 결과·선곡 1920x1080 캡처를 직접 확인(결과는 거의 다 나옴, 선곡은 곡 바 목록과 텍스트 의미론이 빠짐 → `docs/reference/skin-compat/v1-first-render.md`). 원래 항목: 환경·io 오버레이·luajava, `SkinHost`·`main_state`, Lua 값 변환, 2패스 로드, 덤프 CLI, 픽스처, 스킨 팩 폴더 지정, 결정 화면 정지 프레임.
 - [ ] L4. 화면·UI 전환 — 사양 §6 의 웨이브 3~7.
   - [x] 웨이브 3A — 공통 그리기 의미론(W3-0~W3-3, W3-5, W3-6): prepare/draw 2단계, `SkinHost` 직접 그리기, 조건 의미론, 참조 이미지·음수 크기·이미지 인덱스·센티널, TTF 텍스트, judgegraph·bpmgraph, Lua 함수 값 프레임 평가, 앱 `skin_host/` 군집 A·I·M. Workflow `wf_02e2af85-d93`(10 에이전트), 리뷰 major 2·minor 5 처리. 게이트: 테스트 3,716 통과·0 실패, 골든 불변. **ModernChic 결정 화면이 조사 문서의 좌표·색·페이드와 일치**(리뷰어와 메인이 캡처를 직접 확인). 선곡·결과의 공통 객체도 좌표대로.
-  - [ ] 웨이브 3B — 텍스처 관리자(W3-4), Decide Stage·장면 수명·로딩 분리(W3-7).
+  - [x] 웨이브 3B — 텍스처 관리자(W3-4: 참조 source 만 디코드, 화면 이탈 해제, 화면당 1 GiB 예산)와 Decide Stage·장면 수명·로딩 분리(W3-7). Workflow `wf_28b3ee25-269`(4 에이전트), 리뷰 major 1·minor 4 처리. 게이트: 테스트 3,776 통과·0 실패, 골든 불변. 앱 경로에서 실제 차트로 찍은 ModernChic 결정 화면이 좌표·색·페이드와 일치(리뷰어 판정, 메인이 페이드 프레임 확인). 실창 확인은 사용자 절차.
   - [ ] 웨이브 4 — 결과와 코스 결과(W4-1~W4-7).
   - [ ] 웨이브 5 — 선곡(W5-1~W5-7).
   - [ ] 웨이브 6 — 플레이 SP·DP(W6-1~W6-8).

@@ -1,6 +1,6 @@
 # 스킨 호환 조사 — 색인
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 3A(공통 그리기 의미론) 완료 · 기준 커밋 `9ce92bb` · 레퍼런스 체크아웃 HEAD `8320241d`
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 3(공통 그리기 의미론과 결정 화면) 완료 · 기준 커밋 `9ce92bb` · 레퍼런스 체크아웃 HEAD `8320241d`
 > 작업 체크리스트는 `docs/PROCESS.md` "레퍼런스 형식 Lua 스킨 완전 호환과 기본 스킨 교체" 절이다.
 
 이 폴더는 외부 풀 Lua 스킨(ModernChic)을 R-BMS 가 수정 없이 읽어 레퍼런스 구현(beatoraja)과 같게 그리기 위한 조사 결과 전문이다. 조사자 14개 + 종합 1개 + 비판 1개(Workflow `wf_43ad1f8d-42b`, 에이전트 16개, 약 840만 토큰)의 산출물이며, **같은 탐색을 다시 하지 않기 위해** 저장한다.
@@ -86,3 +86,4 @@
 | 2026-10-10 | 웨이브 2A | `r1`, `r2`, `r3`, `b5`, `b1`, `00`, `m1`, `b2`, `99` 상단 "웨이브 2A 반영 사항", 색인의 실측 수치 | Lua 5.2 런타임(환경, `require`/`dofile` 가두기, io 쓰기 오버레이, os, luajava facade, `main_state`, `timer_util`/`event_util`), `SkinHost`·`MapHost`, 값 참조 타입(`PropertyRef::Func`/`Name`, `TimerRef::Lua`, 이벤트·쓰기 참조), Lua 값 → `SkinDef` 변환, 2패스 로더와 헤더 병합, 구 샌드박스 삭제. 리뷰가 찾은 예산 우회 3건(`__gc` 종료자, 패턴 백트래킹, 이름 캐시)과 파일 읽기·핸들 상한을 수정. ModernChic 9/10 로드 실측 |
 | 2026-10-10 | 웨이브 2B | `r1`, `r2`, `m5`, `m4`, `m2`, `00`, `r3`, `99`, `b1`, `m1` 상단 "웨이브 2B 반영 사항", 신규 `v1-first-render.md`, 색인의 프레임 비용 실측 | `rbms-cli skin-dump`(헤더·객체 수·진단·프레임 비용·예산 탐색), 앱의 스킨 팩 폴더(`skin.pack`, `RBMS_SKIN_PACK`, SKIN 탭 PACK FOLDER 행, 헤더 캐시, 오버레이 `<설정 폴더>/skin-data/<식별자>/`, 실패 시 내장 폴백), 오버레이 총 크기 상한(64 MiB·4,096 항목), 외부 스킨 정지 프레임 테스트 `crates/rbms-render/tests/skin_external.rs` |
 | 2026-10-10 | 웨이브 3A | `r2`, `r3`, `v1`, `99`, `b5`, `b1`, `b2`, `m4`, `00`, `r1`, `m5`, `b3`, `m1` 상단 "웨이브 3A 반영 사항"(`v1` 에는 리뷰어의 화면 대조 포함) | prepare/draw 2단계와 `SkinHost` 직접 그리기, `FrameData`(능력별 프레임 데이터), 조건 의미론(내장·스킨 옵션·미지 op, 정적 1회 평가, 음수 타이머), 참조 이미지(-100~-111), 음수 크기 뒤집기, 이미지 인덱스 공간, 값 없음 센티널, 슬라이더·그래프 비클램프, TTF 텍스트(정렬·overflow·그림자·물리 픽셀 래스터·다국어 폴백), judgegraph·bpmgraph 재작성, 타이머 함수 프레임당 1회, 앱 `skin_host/`(군집 A·I·M) |
+| 2026-10-10 | 웨이브 3B | `r3`, `b4`, `m5`, `99`, `00`, `v1`, `r2`, `b2`, `v1` 상단 "웨이브 3B 반영 사항" | 텍스처 관리자(`skin_render/textures.rs`: 참조 source 만 디코드, `SkinTexturePool`, 화면당 RGBA 1 GiB 예산, 화면 이탈 해제, 디버그 패널 `SKIN TEX` 줄), 문서가 오는 동안 장면 시계 정지, Decide Stage(`stage/decide.rs`, `stage/scene_life.rs`: STARTINPUT 1·FADEOUT 2, 건너뛰기·취소, 백그라운드 로드), `skin_host/overview.rs`(곡 메타·노트 분포·속도 변화). 실측: decide 3장 11 MB, result 12장 134 MB, musicselect 11장 170 MB, play7 22장 138 MB |

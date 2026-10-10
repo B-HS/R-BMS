@@ -1,6 +1,30 @@
 # R3 — R-BMS 앱(apps/rbms-player) 스킨 배선·화면 구성·입력 현황과 격차
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 3A(공통 그리기 의미론) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 3(공통 그리기 의미론과 결정 화면) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 3B 반영 사항 (2026-10-10)
+
+스킨 텍스처 관리자(참조 source 만 로드, 화면 이탈 해제, 예산)와 Decide Stage(장면 수명 헬퍼, 백그라운드 차트 로드)를 넣은 뒤의 상태다.
+
+- (W3-7) r3-rbms-app.md §1.1: Stage 열거가 11종(Decide 추가, Box<DecideState>), StageId::Decide 와 라벨 'Decide', StageId::ALL 11개
+- (W3-7) r3-rbms-app.md §1.2 전이표: Select Enter/흰 건반 곡 행은 결정 스킨이 있으면 Open(Decide), 없으면 Open(Loading::song)(AppShared::decided_song_stage). F4 연습도 같은 규칙. 기록·IR 리플레이 재생은 load() 뒤 decided_chart_stage(스킨 없으면 기존 enter_loaded_chart). 코스는 load_course_stage 가 run.index == 0 일 때만 Decide
+- (W3-7) r3-rbms-app.md §1.2 전이표에 Decide 행 추가: FADEOUT 경과 > fadeout 이고 로드 완료면 To(Play) 또는 To(Practice), 미완료면 To(Loading::waiting_on). 취소면 Back(코스는 end_course). 스킨 로드 실패면 To(Loading). Loading(assets) 행은 'Decide 가 이미 울렸으면 Decide 큐 생략(ChartAssets.announced)' 으로
+- (W3-7) r3-rbms-app.md §1.4 화면 대응표 DECIDE(6) 행: 대응 Stage 를 Loading 에서 Decide(stage/decide.rs)로. '스캔·테이블 받기 중에도 같은 문서를 그린다'는 서술 삭제. Loading 은 항상 내장 화면
+- (W3-7) r3-rbms-app.md §6.5: draw_decide_skin(canvas, &DecideDraw { chart: &ChartMeta, progress, data: FrameData }) 로 교체. 곡 상태는 skin_host/overview.rs 의 ChartOverview(셔플 전 모델에서 load() 가 계산해 LoadedChart.overview 로 전달)가 군집 A 와 FrameSeries(notes.kinds, bpm of_chart)로 공급. 스테이지 파일은 진입 시 동기 디코드해 Canvas::background_texture 로 올려 ReferenceImages.stagefile 에 실음. 로딩 군집은 LoadingScreen::Elsewhere(옵션 80/81 둘 다 off). 타이머 1·2 사용. DECIDE 사운드는 '로딩 완료 시'가 아니라 '스킨 첫 프레임(장면 시작)'
+- (W3-7) r3-rbms-app.md §6.6: '앱은 input/scene/fadeout 을 읽는 곳이 없다'를 'stage/scene_life.rs 의 SceneTimes::of_skin 이 LoadedSkin.def.input/scene/fadeout 을 읽고 advance/takes_input/begin_fadeout 이 STARTINPUT(1)·FADEOUT(2)을 켠다. 현재 사용처는 Decide 뿐, 결과·선곡·플레이는 뒤 웨이브'로
+- (W3-7) r3-rbms-app.md §8.6 테스트 표: stage/decide/tests.rs 19건, stage/scene_life.rs 6건, skin_host/overview/tests.rs 6건 추가. render_tests_document.rs 는 'score and decide screens' 로 이름이 바뀌고 Loading 이 decide 문서를 그리지 않는다는 테스트 1건 추가. capture.rs 는 PACK_SCREENS 4개(decide 제외)와 결정 장면 전용 캡처 테스트(실차트 7시점 + 자작 차트 2시점) 추가. rbms-player lib 테스트 1084건
+- (W3-7) r3-rbms-app.md 상단: '웨이브 3B 반영 사항' 절 추가(Decide Stage, scene_life, 로딩 분리, ChartOverview, stage_owns_chart_audio 에 Decide 포함, app_play::loaded_chart_for_tests)
+- (W3-4) r3-rbms-app.md 상단: '웨이브 3B 반영 사항'에 W3-4 추가 — skin_screen.rs 에 AppShared::skin_is_loading, finish_skin_frame, debug_skin_texture_line 추가. skin_now_us 는 문서가 오는 동안 멈춘다. lib.rs frame() 이 stage.draw 뒤에 finish_skin_frame 을 부른다
+- (W3-4) r3-rbms-app.md §2.1 표 '컴파일 캐시' 행: SkinScreens 필드가 { built, pending, textures: SkinTexturePool, stamps, prepared, last_prepared, parked, scene_moved, hold, hold_spent } 로. SkinScene 에 parked: Arc<()> 추가
+- (W3-4) r3-rbms-app.md §2.2 5번: PendingScreen::start 가 document.sources 전부가 아니라 referenced_source_files 만 요청하고, 올라와 있는 파일은 pin 한 뒤 stat 요청(SkinAsset::Unchanged)으로 보낸다. assets.rs 의 타입이 SkinAssetRequest/SkinAssetRead/FileStamp 로 늘었다
+- (W3-4) r3-rbms-app.md §2.2 6번: 컴파일은 SkinScreen::build_shared(풀 사용). 7번 '그 사이의 화면': 내장 레이아웃이 그려지는 것은 그대로이나 그동안 장면 시계가 멈추고(SCENE_HOLD_LIMIT 10초), Decide 는 W3-7 이 검정을 그린다
+- (W3-4) r3-rbms-app.md §2.2 8번 '캐시 수명': '타입별로 앱 수명 동안 유지' 서술과 상단 W2-8 의 관련 항목을 '화면을 떠나면 해제, Open 중 유지, 같은 파일은 재디코드 없이 재사용, 파일이 바뀌면(수정 시각·길이) 다음 읽기에서 재디코드'로 교체
+- (W3-4) r3-rbms-app.md §8.6: 테스트 추가 — skin_screen/texture_tests.rs 10건(선택 실행 1건 포함), assets.rs 1건, rbms-render textures/tests.rs 8건. rbms-player lib 테스트 1085건
+- (W3-4) r3-rbms-app.md §11(위험): '1920x1080 스킨 10종을 전부 상주시키면 GPU 메모리 사용이 크다' 항목을 해소로 표시
+- (리뷰 수정) r3-rbms-app.md §1.1·§1.2(및 상단 W1-5 반영 사항): 'Open 은 아래 화면을 주차하고 Back 이 복원한다'에 '주차된 화면의 컴파일 결과와 텍스처는 그 위에서 To 전이로 새 장면이 시작되면(begin_skin_scene → SkinScreens::unpark) 다음 프레임 끝에 해제된다. 선곡 → Open(Decide) → To(Play) 가 대표 경로이고, 주차된 장면(타이머·경과 시간)은 남아 Back 때 복원되며 스킨은 그때 다시 읽고 컴파일한다. To 없이 Back 하는 Open(설정, 결정 취소)은 유지' 추가
+- (리뷰 수정) r3-rbms-app.md §2.2 8번(캐시 수명, W2-8 반영 사항): 'begin_skin_scene 은 expire_scripted 에 더해 주차 목록을 비운다. 스킨 종류(Lua·JSON)와 무관하게 주차 화면이 해제된다' 추가
+- (리뷰 수정) r3-rbms-app.md §6.5 Decide: '스킨을 SCENE_HOLD_LIMIT(10초) 넘게 기다리면 AppShared::skin_wait_is_spent 로 Gone 처리해 Loading 으로 넘긴다. Reading 중 Esc 또는 START+SELECT 는 페이드 없이 즉시 abandon(Back, 코스면 end_course)' 추가. 'Reading 상태에서는 무조건 Stay' 서술이 있으면 삭제
+
 
 ## 웨이브 3A 반영 사항 (2026-10-10)
 

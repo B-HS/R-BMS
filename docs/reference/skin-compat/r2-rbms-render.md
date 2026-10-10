@@ -1,6 +1,20 @@
 # R2 — R-BMS 렌더 계층(crates/rbms-render, GPU 백엔드) 현황과 격차
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 3A(공통 그리기 의미론) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 3(공통 그리기 의미론과 결정 화면) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 3B 반영 사항 (2026-10-10)
+
+스킨 텍스처 관리자(참조 source 만 로드, 화면 이탈 해제, 예산)와 Decide Stage(장면 수명 헬퍼, 백그라운드 차트 로드)를 넣은 뒤의 상태다.
+
+- (W3-4) r2-rbms-render.md 상단: '웨이브 3B 반영 사항'에 W3-4 추가 — 텍스처는 skin_render/textures.rs 가 결정한다. referenced_sources/referenced_source_files(조립된 destination 기준), TextureLimits(최대 변, 화면당 RGBA 1 GiB = SKIN_TEXTURE_BUDGET_BYTES), SkinTexturePool(경로 키·참조 수·sweep 전까지 유지·제자리 교체), SkinScreen::build_shared/release_shared/texture_stats
+- (W3-4) r2-rbms-render.md §3.1 2번·4번: '선언된 sources 전부를 디코드 잡으로'를 '참조된 source 파일만(중복 경로 1회), 이미 올라온 파일은 stat 만 하는 요청으로'로. 등록 키는 풀 사용 시 rbms.skin.file.<n>, 단독 빌드는 종전 rbms.skin.<serial>.source.<id>
+- (W3-4) r2-rbms-render.md §3.2: '호출 시점은 같은 화면 종류의 빌드 번호가 바뀔 때뿐', 'SkinScreens.built 는 화면 종류별로 계속 보유', '선택 화면 문서는 플레이 중에도 업로드된 채 남는다'를 삭제하고 새 규칙으로 교체 — 장면 이동 뒤 첫 프레임 끝에 그려지지 않고 주차되지 않은 화면을 놓고, 다음 화면이 공유 파일을 잡은 뒤 sweep. Open 으로 주차된 화면은 유지
+- (W3-4) r2-rbms-render.md §3.3 표: '이미지 크기 상한 없음', 'GPU 최대 텍스처 크기 확인 없음', '메모리 예산·계측 없음' 세 행을 '있음'으로(경고 1회 후 생략, Renderer::max_texture_size, 화면당 1 GiB, 디버그 패널 SKIN TEX 줄)
+- (W3-4) r2-rbms-render.md §3.4 와 상단 W2-9 반영 사항: 웨이브 3B 실측으로 갱신 — decide 3/4장 11.0 MB, result 12/13장 134.1 MB, musicselect 11/11장 169.7 MB, play7_hw 22/27장 137.9 MB(종전 23/27, 34.9M px 에서 정적 제거 반영으로 1장 감소). '현재 R-BMS 는 선언된 소스를 전부 디코드·업로드한다' 문장 삭제. 레퍼런스와의 차이 한 줄 추가: 레퍼런스는 객체 생성 시 로드하므로 나중에 정적 제거되는 객체의 source 도 읽는다
+- (W3-4) r2-rbms-render.md §10: 텍스처 수명 관련 권고 항목을 완료로 표시하고 남은 것(프레임 분할 업로드, 최대 변 헤더 선검사, 폰트 캐시)을 적음
+- (리뷰 수정) r2-rbms-render.md §3.2 해제: '화면을 떠나면 다음 화면 첫 프레임 끝에 해제, 주차 화면은 유지'를 '주차 화면은 그 위에 Open 된 화면만 있는 동안 유지되고, To 전이가 일어나면 해제된다'로 수정. ModernChic 실측(플레이 중 GPU 에 선곡 약 170 MiB 가 남지 않음, 결과 화면 12장 134,061,824 바이트만 업로드) 반영
+- (리뷰 수정) r2-rbms-render.md §3.1 로드 경로: 'PendingScreen::poll 은 진행 카운터가 총계에 닿거나 워커 채널이 끊기면(모든 워커 종료) 완료로 본다. 집계되지 않은 파일은 빠진 채 컴파일되고 경고가 남는다' 추가
+
 
 ## 웨이브 3A 반영 사항 (2026-10-10)
 

@@ -1,6 +1,16 @@
 # B4. beatoraja 선택·결정·결과·코스 결과·키 설정·스킨 설정 화면의 스킨 계약과 화면 수명주기
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 1(철거와 기반) 반영 · 본문은 기준 커밋 `9ce92bb` 시점 서술이며, 아래 "웨이브 1B 반영 사항"과 "웨이브 1A 반영 사항"이 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 3(공통 그리기 의미론과 결정 화면) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 3B 반영 사항 (2026-10-10)
+
+스킨 텍스처 관리자(참조 source 만 로드, 화면 이탈 해제, 예산)와 Decide Stage(장면 수명 헬퍼, 백그라운드 차트 로드)를 넣은 뒤의 상태다.
+
+- (W3-7) b4-screens.md §4: R-BMS 구현 주석 추가. Enter 는 NumpadEnter 포함. Enter/Esc 는 isKeyPressed 대로 '눌린 채 미소비'일 때 STARTINPUT 뒤 첫 프레임에 동작하고, 떼면 잊힘. 키 0/2/4/6 은 상태 판정이며 2P 를 접어 읽음. 스킨 준비 전 프레임은 검정이고 장면 시계는 스킨 첫 프레임에 0
+- (W3-7) b4-screens.md §1.6: 결정 화면 사운드 행에 'R-BMS 는 선곡 결정 시 Select 큐도 낸다(고유), DECIDE 정지 없음' 추가
+- (W3-7) b4-screens.md §9 전이 요약: R-BMS 대응 추가. 결정 스킨이 없으면 DECIDE 를 건너뛰고 Loading. 로드 미완료면 DECIDE 뒤 Loading 을 거침(PRELOAD 는 웨이브 6)
+- (리뷰 수정) b4-screens.md §4(DECIDE) 상단 반영 사항: 'R-BMS 는 DECIDE → MUSICSELECT 취소에서 선곡 스킨을 다시 읽지 않는다(MainController.changeState 248-281 과의 차이, 의도된 선택)' 추가
+
 
 ## 웨이브 1B 반영 사항 (2026-10-10)
 
