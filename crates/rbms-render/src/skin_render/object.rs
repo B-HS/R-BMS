@@ -21,6 +21,7 @@ use rbms_skin::property::SkinHost;
 use rbms_skin::timer::{MICROS_PER_MILLI, TIMER_OFF, TimerState};
 
 use super::draw::{ImageSelect, float_value, number_value, share};
+use super::text::Fonts;
 use super::textures::{Source, source_of};
 use super::{SkinAssets, SkinFrame, bga, covers, gauge, graphs, judge, notes, refs, songlist, text, text_input};
 use crate::{TextureId, UvRect};
@@ -802,14 +803,14 @@ pub(crate) fn image_sprite(def: &ImageDef, sources: Source<'_>) -> Option<Sprite
 pub(crate) fn build_objects(
     skin: &LoadedSkin,
     sources: Source<'_>,
-    families: &[(String, String)],
+    fonts: &Fonts,
     assets: &mut dyn SkinAssets,
     warnings: &mut Vec<String>,
     kept: &mut Vec<usize>,
 ) -> Vec<SkinObject> {
     let mut objects = Vec::with_capacity(skin.destinations.len());
     for (destination, named) in skin.destinations.iter().enumerate() {
-        let Some(body) = build_body(skin, &named.id, sources, families, assets, warnings) else {
+        let Some(body) = build_body(skin, &named.id, sources, fonts, assets, warnings) else {
             continue;
         };
         if named.track.frames.is_empty() && !body.places_itself() {
@@ -830,7 +831,7 @@ pub(crate) fn build_body(
     skin: &LoadedSkin,
     id: &str,
     sources: Source<'_>,
-    families: &[(String, String)],
+    fonts: &Fonts,
     assets: &mut dyn SkinAssets,
     warnings: &mut Vec<String>,
 ) -> Option<Body> {
@@ -863,9 +864,9 @@ pub(crate) fn build_body(
     }
     if let Some(text) = def.text.iter().find(|text| text.id == id) {
         return Some(if text_input::is_editable(text) {
-            Body::TextInput(text_input::text_input_body(text, families))
+            Body::TextInput(text_input::text_input_body(text, fonts))
         } else {
-            Body::Text(text::text_body(text, families))
+            Body::Text(text::text_body(text, fonts))
         });
     }
     if let Some(slider) = def.slider.iter().find(|slider| slider.id == id) {
@@ -877,22 +878,22 @@ pub(crate) fn build_body(
     if def.bga.as_ref().is_some_and(|bga| bga.id == id) {
         return Some(Body::Bga(bga::BgaBody));
     }
-    if let Some(body) = notes::build_note(skin, id, sources, families, assets, warnings) {
+    if let Some(body) = notes::build_note(skin, id, sources, fonts, assets, warnings) {
         return Some(body);
     }
-    if let Some(body) = gauge::build_gauge(skin, id, sources, families, assets, warnings) {
+    if let Some(body) = gauge::build_gauge(skin, id, sources, fonts, assets, warnings) {
         return Some(body);
     }
-    if let Some(body) = judge::build_judge(skin, id, sources, families, assets, warnings) {
+    if let Some(body) = judge::build_judge(skin, id, sources, fonts, assets, warnings) {
         return Some(body);
     }
-    if let Some(body) = songlist::build_songlist(skin, id, sources, families, assets, warnings) {
+    if let Some(body) = songlist::build_songlist(skin, id, sources, fonts, assets, warnings) {
         return Some(body);
     }
-    if let Some(body) = covers::build_cover(skin, id, sources, families, assets, warnings) {
+    if let Some(body) = covers::build_cover(skin, id, sources, fonts, assets, warnings) {
         return Some(body);
     }
-    if let Some(body) = graphs::build_graph(skin, id, sources, families, assets, warnings) {
+    if let Some(body) = graphs::build_graph(skin, id, sources, fonts, assets, warnings) {
         return Some(body);
     }
     warnings.push(format!("object {id:?} is not a kind this build draws"));

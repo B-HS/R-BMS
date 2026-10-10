@@ -13,7 +13,7 @@
 use std::collections::HashMap;
 
 use rbms_render::skin_render::frame::{BgaExpand, BgaFrame, BgaPick, BgaTextures};
-use rbms_render::{Color, QuadParams, Rect, Renderer, ScaledRenderer, TextureId, scale_between, scale_rect};
+use rbms_render::{Color, DistanceFieldParams, QuadParams, Rect, Renderer, ScaledRenderer, TextureId, scale_between, scale_rect};
 #[cfg(test)]
 use rbms_render::{CpuCanvas, TextureFilter};
 
@@ -146,6 +146,11 @@ impl Renderer for HeadlessCanvas {
     fn draw_textured_quad(&mut self, tex: TextureId, params: QuadParams) {
         self.quads += 1;
         self.pixels.draw_textured_quad(tex, params);
+    }
+
+    fn draw_distance_field_quad(&mut self, tex: TextureId, params: DistanceFieldParams) {
+        self.quads += 1;
+        self.pixels.draw_distance_field_quad(tex, params);
     }
 
     fn push_clip(&mut self, rect: Rect) {
@@ -324,6 +329,14 @@ impl Renderer for NativeCanvas<'_, '_> {
         }
     }
 
+    fn draw_distance_field_quad(&mut self, tex: TextureId, params: DistanceFieldParams) {
+        match &mut *self.0 {
+            Canvas::Window(gpu) => gpu.draw_distance_field_quad(tex, params),
+            #[cfg(test)]
+            Canvas::Headless(canvas) => canvas.draw_distance_field_quad(tex, params),
+        }
+    }
+
     fn push_clip(&mut self, rect: Rect) {
         match &mut *self.0 {
             Canvas::Window(gpu) => gpu.push_clip(rect),
@@ -380,6 +393,10 @@ impl Renderer for Canvas<'_> {
 
     fn draw_textured_quad(&mut self, tex: TextureId, params: QuadParams) {
         self.scaled(|ui| ui.draw_textured_quad(tex, params));
+    }
+
+    fn draw_distance_field_quad(&mut self, tex: TextureId, params: DistanceFieldParams) {
+        self.scaled(|ui| ui.draw_distance_field_quad(tex, params));
     }
 
     fn push_clip(&mut self, rect: Rect) {

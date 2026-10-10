@@ -16,8 +16,8 @@
 //!   the document's offset: right for a positive `shadowOffsetX` and down for a positive
 //!   `shadowOffsetY`. The offset is in screen pixels and is not scaled with the skin.
 //! - `outlineColor`, `outlineWidth`, `shadowColor` and `shadowSmoothness` are read by the
-//!   reference's distance-field bitmap fonts only. A TrueType text ignores all four, and so does
-//!   this.
+//!   reference's distance-field bitmap fonts only ([`bitmap::FieldInk`]). A TrueType text ignores
+//!   all four, and so does this.
 //! - A text sets no blend of its own. It is drawn with whatever the object before it left on the
 //!   batch ([`carry_blend`]), and it is never turned or stretched.
 //!
@@ -25,12 +25,18 @@
 //! ([`TextContext::compose_block`](crate::font::TextContext::compose_block)), and composed again
 //! only when the string, the size or the width changes.
 //!
-//! A text whose font did not load -- a bitmap `.fnt`, which is drawn in a later stage, or an id the
-//! document never declared -- keeps the stand-in it has always had: the default face at the
-//! destination's height, anchored the same way and with none of the above.
+//! A text whose font is a bitmap `.fnt` shares the anchor, the top edge, the shadow and the blend
+//! above and none of the rest: its size comes from the document's `size` rather than from the
+//! destination's height, and its glyphs are cut out of the font's pages rather than composed
+//! ([`bitmap`]).
+//!
+//! A text whose font did not load -- a file that would not read, or an id the document never
+//! declared -- keeps the stand-in it has always had: the default face at the destination's height,
+//! anchored the same way and with none of the above.
 
 use std::borrow::Cow;
 use std::cell::RefCell;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use rbms_skin::dst::SkinRect;
@@ -43,6 +49,8 @@ use super::object::{Body, ValueSource};
 use crate::ctx::RenderCtx;
 use crate::font::{BlockAlign, BlockFit, BlockSpec, TextContext};
 use crate::{BlendMode, Color, QuadParams, Rect, Renderer, TextureFilter, TextureId};
+
+pub(crate) mod bitmap;
 
 #[cfg(test)]
 mod tests;
@@ -165,6 +173,12 @@ pub(crate) struct TextBody {
     /// How far the shadow is moved right and down, in screen pixels. No shadow when both are zero.
     shadow: (f32, f32),
     line: RefCell<Line>,
+    /// The bitmap font this text is drawn with and the line it laid out last, when its font is one.
+    /// Such a text has no `family`.
+    bitmap: Option<RefCell<bitmap::BitmapText>>,
+    /// The outline and the shadow a distance field font draws this text with. No other font reads
+    /// them.
+    field: bitmap::FieldInk,
 }
 
 impl TextBody {
@@ -213,8 +227,8 @@ impl TextBody {
         })
     }
 
-    /// What becomes of a line too long for its destination (`SkinTextFont.setLayout`). Wrapping
-    /// wins over every `overflow`.
+    /// What becomes of a line too long for its destination (`SkinTextFont.setLayout`,
+    /// `SkinTextBitmap.setLayout`). Wrapping wins over every `overflow`.
     fn block_fit(&self) -> BlockFit {
         match self.overflow {
             _ if self.wrapping => BlockFit::Wrap,
@@ -227,13 +241,61 @@ impl TextBody {
     /// Hands the texture the line was composed into back to the renderer.
     pub(crate) fn release<R: Renderer>(&self, r: &mut R) {
         self.line.borrow_mut().release(r);
+        if let Some(bitmap) = &self.bitmap {
+            bitmap.borrow_mut().release(r);
+        }
     }
 }
 
+/// Where a line's layout starts: the destination's `x` is the left end of a left-aligned line, the
+/// middle of a centred one and the right end of a right-aligned one, and the line is aligned again
+/// inside the destination's width from there (`SkinTextFont.draw`, `SkinTextBitmap.draw`).
+fn anchor_x(align: BlockAlign, dst: Rect) -> f32 {
+    match align {
+        BlockAlign::Left => dst.x,
+        BlockAlign::Center => dst.x - dst.w / 2.0,
+        BlockAlign::Right => dst.x - dst.w,
+    }
+}
+
+/// What a font a document declared was loaded as.
+#[derive(Debug, Clone)]
+pub(crate) enum FontRef {
+    /// A TrueType font, by the name the text engine registered it under.
+    Family(String),
+    /// A bitmap font, as the screen that loaded it draws with it.
+    Bitmap(Arc<bitmap::ScreenFace>),
+}
+
+impl FontRef {
+    /// The text engine's name for the font, when it is one of the engine's.
+    pub(crate) fn family(&self) -> Option<&str> {
+        match self {
+            FontRef::Family(family) => Some(family),
+            FontRef::Bitmap(_) => None,
+        }
+    }
+
+    fn face(&self) -> Option<&Arc<bitmap::ScreenFace>> {
+        match self {
+            FontRef::Family(_) => None,
+            FontRef::Bitmap(face) => Some(face),
+        }
+    }
+}
+
+/// The fonts a screen's text objects are built from: each font id of the document that loaded, and
+/// what it loaded as.
+pub(crate) type Fonts = [(String, FontRef)];
+
 /// A text run and the font it is drawn with.
-pub(crate) fn text_body(def: &TextDef, families: &[(String, String)]) -> TextBody {
-    TextBody {
-        family: families.iter().find(|(id, _)| *id == def.font).map(|(_, family)| family.clone()),
+///
+/// A text in a bitmap font whose string the document wrote out has the pages of that string asked
+/// for here, when the screen is built, rather than on the frame the object first comes on screen.
+pub(crate) fn text_body(def: &TextDef, fonts: &Fonts) -> TextBody {
+    let font = fonts.iter().find(|(id, _)| *id == def.font).map(|(_, font)| font);
+    let body = TextBody {
+        family: font.and_then(FontRef::family).map(str::to_string),
         align: def.align,
         value: ValueSource::new(def.value.as_ref(), def.reference),
         constant: def.constant_text.clone(),
@@ -242,7 +304,13 @@ pub(crate) fn text_body(def: &TextDef, families: &[(String, String)]) -> TextBod
         overflow: def.overflow,
         shadow: (def.shadow_offset_x, def.shadow_offset_y),
         line: RefCell::new(Line::new()),
+        bitmap: font.and_then(FontRef::face).map(|face| RefCell::new(bitmap::BitmapText::new(Arc::clone(face)))),
+        field: bitmap::FieldInk::of(def),
+    };
+    if let (Some(face), Some(constant), false) = (font.and_then(FontRef::face), &body.constant, body.reads_property()) {
+        face.want_pages_of(constant);
     }
+    body
 }
 
 /// Hands back the texture a text object in `body` holds. Every other kind of object holds none of
@@ -293,6 +361,9 @@ pub(crate) fn draw_line<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, place: 
         return false;
     }
     let dst = place.viewport.place(rect);
+    if let Some(bitmap) = &body.bitmap {
+        return bitmap::draw(ctx, r, place, body, &mut bitmap.borrow_mut(), dst, line);
+    }
     match body.layout(line, dst, r.max_texture_size()) {
         Some(spec) => draw_composed(ctx, r, place, body, &spec, dst),
         None => draw_stand_in(ctx, r, place, body, dst, line),
@@ -306,11 +377,7 @@ fn draw_composed<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, place: &Placem
         return false;
     };
 
-    let anchor = match align {
-        BlockAlign::Left => dst.x,
-        BlockAlign::Center => dst.x - dst.w / 2.0,
-        BlockAlign::Right => dst.x - dst.w,
-    };
+    let anchor = anchor_x(align, dst);
     let (width, height) = (stamp.size.0 as f32, stamp.size.1 as f32);
     let at = Rect::new((anchor + stamp.left).round(), (dst.y + stamp.top).round(), stamp.drawn_width, height);
     let filter = if stamp.drawn_width == width { TextureFilter::Nearest } else { TextureFilter::Linear };

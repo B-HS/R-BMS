@@ -14,6 +14,7 @@ use crate::glyph_atlas::{GlyphAtlas, GlyphAtlasBinding, glyph_bitmap, packed_rgb
 use crate::{BlendMode, Color, QuadParams, Rect, Renderer};
 
 pub use block::{BLOCK_MAX_DIM, BlockAlign, BlockFit, BlockSpec, TextBlock};
+pub(crate) use block::{CAP_CHARS, CLEAR_PIXEL, slack};
 
 /// Bundled default UI font (Inter, SIL OFL 1.1). cosmic-text falls back to installed system
 /// fonts for scripts Inter lacks (CJK, Thai, Arabic, …), so any language renders.
@@ -420,6 +421,12 @@ impl TextContext {
         if self.family != name {
             self.family = name.to_string();
         }
+    }
+
+    /// The family a line is drawn in when nothing else was asked for: the bundled face, which the
+    /// engine's fallback fills in for any character it lacks.
+    pub fn default_family(&self) -> &str {
+        &self.default_family
     }
 
     /// Restore the bundled default family.

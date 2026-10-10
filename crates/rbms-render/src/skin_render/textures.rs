@@ -49,7 +49,7 @@ static NEXT_POOLED_TEXTURE: AtomicU32 = AtomicU32::new(0);
 pub(crate) type Source<'a> = &'a [(String, TextureId, (u32, u32))];
 
 /// A texture and its size in pixels.
-type SizedTexture = (TextureId, (u32, u32));
+pub(crate) type SizedTexture = (TextureId, (u32, u32));
 
 /// Looks an image source up by the id a document gave it.
 pub(crate) fn source_of<'a>(sources: Source<'a>, id: &str) -> Option<&'a (String, TextureId, (u32, u32))> {
@@ -335,6 +335,8 @@ pub(crate) struct SkinTextures {
     pooled: Vec<PathBuf>,
     /// The textures held, each file counted once.
     stats: TextureStats,
+    /// The registry namespace of the textures this screen registers for itself.
+    serial: u32,
 }
 
 /// Where one file's pixels are when a screen asks for them.
@@ -471,7 +473,7 @@ impl SkinTextures {
     ) -> SkinTextures {
         let limits = pool.as_deref().map_or_else(|| TextureLimits::of(r), |pool| pool.limits(r));
         let referenced = referenced_sources(skin);
-        let mut registration = Registration { r, assets, pool, limits, serial, warnings, textures: SkinTextures::default() };
+        let mut registration = Registration { r, assets, pool, limits, serial, warnings, textures: SkinTextures { serial, ..SkinTextures::default() } };
         let mut files: BTreeMap<&Path, Option<SizedTexture>> = BTreeMap::new();
         for (id, path) in skin.sources.iter().filter(|(id, _)| referenced.contains(*id)) {
             let admitted = match files.get(path.as_path()) {
@@ -487,6 +489,31 @@ impl SkinTextures {
             }
         }
         registration.textures
+    }
+
+    /// Takes one more file for a screen that is already built, under the same limits and the same
+    /// ownership as the sources it was built with: a page of a bitmap font, which is asked for only
+    /// once a glyph on it is to be drawn.
+    ///
+    /// `assets` is asked for the file's pixels first and `pool` for a texture it already holds of
+    /// it second, as for a source. `label` is what the file is called in a warning, and what tells
+    /// its registry key from the sources' when the screen has no pool; it has to be the file's own.
+    /// `None`, with a line in `warnings`, when the screen goes without the file.
+    pub(crate) fn admit_late<R: Renderer>(
+        &mut self,
+        r: &mut R,
+        label: &str,
+        path: &Path,
+        assets: &mut dyn SkinAssets,
+        pool: Option<&mut SkinTexturePool>,
+        warnings: &mut Vec<String>,
+    ) -> Option<SizedTexture> {
+        let limits = pool.as_deref().map_or_else(|| TextureLimits::of(r), |pool| pool.limits(r));
+        let serial = self.serial;
+        let mut registration = Registration { r, assets, pool, limits, serial, warnings, textures: std::mem::take(self) };
+        let admitted = registration.admit(label, path);
+        *self = registration.textures;
+        admitted
     }
 
     /// The registered sources, as the object builders look them up.

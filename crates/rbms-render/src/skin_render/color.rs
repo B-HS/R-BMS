@@ -14,10 +14,10 @@ const OPAQUE_DIGITS: usize = 6;
 const ALPHA_DIGITS: usize = 8;
 
 /// Hex digits one channel takes.
-const DIGITS_PER_CHANNEL: usize = 2;
+pub(crate) const DIGITS_PER_CHANNEL: usize = 2;
 
 /// The base a colour is written in.
-const HEX_RADIX: u32 = 16;
+pub(crate) const HEX_RADIX: u32 = 16;
 
 /// The colour a document wrote, or `None` when the text is not one.
 ///

@@ -5,11 +5,13 @@
 //! carries — texture, blend, filter, and the clip in force. The moment one of those differs the run
 //! ends and a new batch starts, which is what keeps a translucent quad from being lifted over
 //! something drawn after it. Rotation is not one of them: it travels in each instance and every
-//! textured quad goes through the same pipeline, so a turned quad joins the run it lands in.
+//! textured quad goes through the same pipeline, so a turned quad joins the run it lands in. Nor is
+//! what a distance field quad tells its shader: the outline and the shadow travel in each instance
+//! too, so the glyphs of two texts cut from one page are one call.
 
 use std::borrow::Cow;
 
-use rbms_render::{BlendMode, Color, QuadParams, Rect, TextureFilter, TextureId};
+use rbms_render::{BlendMode, Color, DistanceFieldParams, QuadParams, Rect, TextureFilter, TextureId};
 
 /// Bytes a texture upload's rows are padded to. `wgpu` requires this of a buffer-to-texture copy,
 /// and a padded upload is correct either way.
@@ -30,6 +32,34 @@ impl ColoredInstance {
     pub(crate) fn new(rect: Rect, color: Color) -> ColoredInstance {
         let channel = |c: u8| c as f32 / u8::MAX as f32;
         ColoredInstance { rect: [rect.x, rect.y, rect.w, rect.h], color: [channel(color.r), channel(color.g), channel(color.b), channel(color.a)] }
+    }
+}
+
+/// One quad cut out of a distance field: where it lands, what it reads, the glyph's colour, and what
+/// the reference's shader takes as uniforms -- the outline's colour, the shadow's colour, and the
+/// rest packed as `(shadow offset u, shadow offset v, outline distance, shadow smoothing)`.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub(crate) struct DistanceFieldInstance {
+    pub(crate) rect: [f32; 4],
+    pub(crate) uv: [f32; 4],
+    pub(crate) tint: [f32; 4],
+    pub(crate) outline: [f32; 4],
+    pub(crate) shadow: [f32; 4],
+    pub(crate) field: [f32; 4],
+}
+
+impl DistanceFieldInstance {
+    pub(crate) fn new(params: &DistanceFieldParams) -> DistanceFieldInstance {
+        let style = &params.style;
+        DistanceFieldInstance {
+            rect: [params.dst.x, params.dst.y, params.dst.w, params.dst.h],
+            uv: [params.src.u0, params.src.v0, params.src.u1, params.src.v1],
+            tint: params.tint.unit_channels(),
+            outline: style.outline_color.unit_channels(),
+            shadow: style.shadow_color.unit_channels(),
+            field: [style.shadow_offset.0, style.shadow_offset.1, style.outline_distance, style.shadow_smoothing],
+        }
     }
 }
 
@@ -62,7 +92,17 @@ impl TexturedInstance {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum BatchKind {
     Colored,
-    Textured { tex: TextureId, blend: BlendMode, filter: TextureFilter },
+    Textured {
+        tex: TextureId,
+        blend: BlendMode,
+        filter: TextureFilter,
+    },
+    /// Quads drawn through the distance field shader. The field is always read bilinearly, so
+    /// there is no filter to tell two runs apart by.
+    DistanceField {
+        tex: TextureId,
+        blend: BlendMode,
+    },
 }
 
 /// The clip in force for a batch. Compared as part of the batch key, so a clip change always ends
@@ -104,6 +144,7 @@ pub(crate) struct Batch {
 pub(crate) struct DrawList {
     pub(crate) colored: Vec<ColoredInstance>,
     pub(crate) textured: Vec<TexturedInstance>,
+    pub(crate) distance_field: Vec<DistanceFieldInstance>,
     pub(crate) batches: Vec<Batch>,
     clips: Vec<ClipState>,
 }
@@ -114,6 +155,7 @@ impl DrawList {
     pub(crate) fn clear(&mut self) {
         self.colored.clear();
         self.textured.clear();
+        self.distance_field.clear();
         self.batches.clear();
         self.clips.clear();
     }
@@ -139,7 +181,7 @@ impl DrawList {
 
     /// How many quads the frame has queued, which is what the debug overlay reports.
     pub(crate) fn quad_count(&self) -> usize {
-        self.colored.len() + self.textured.len()
+        self.colored.len() + self.textured.len() + self.distance_field.len()
     }
 
     pub(crate) fn push_colored(&mut self, instance: ColoredInstance) {
@@ -152,6 +194,12 @@ impl DrawList {
         let first = self.textured.len() as u32;
         self.textured.push(instance);
         self.extend(kind, first);
+    }
+
+    pub(crate) fn push_distance_field(&mut self, tex: TextureId, blend: BlendMode, instance: DistanceFieldInstance) {
+        let first = self.distance_field.len() as u32;
+        self.distance_field.push(instance);
+        self.extend(BatchKind::DistanceField { tex, blend }, first);
     }
 
     /// Add the instance at `first` to the open batch when it can join it, and open a new one when
@@ -236,7 +284,7 @@ pub(crate) fn pad_rows_to_alignment(rgba: &[u8], width: u32, height: u32) -> (Co
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rbms_render::UvRect;
+    use rbms_render::{DistanceFieldStyle, UvRect};
 
     const LOGICAL: (u32, u32) = (1280, 720);
 
@@ -322,6 +370,61 @@ mod tests {
         assert_eq!(list.batches.len(), 1, "rotation is per instance, not per draw call");
         assert_eq!(list.batches[0].count, 3);
         assert_ne!(list.textured[1].rotation, list.textured[0].rotation, "and the turn still reached the instance");
+    }
+
+    /// A distance field quad is a draw like any other: it keeps its place among the quads around
+    /// it, joins a run of its own kind on the same page, and what its shader is told is no reason to
+    /// end one.
+    #[test]
+    fn distance_field_quads_keep_their_place_and_merge_only_with_their_own_kind() {
+        let glyph = |outline_distance: f32| {
+            let style = DistanceFieldStyle { outline_distance, ..DistanceFieldStyle::PLAIN };
+            let params = DistanceFieldParams { dst: Rect::new(0.0, 0.0, 1.0, 1.0), src: UvRect::FULL, tint: Color::WHITE, blend: BlendMode::Alpha, style };
+            DistanceFieldInstance::new(&params)
+        };
+        let (plain, plain_instance) = textured(1);
+        let mut list = DrawList::default();
+        list.push_textured(plain, plain_instance);
+        list.push_distance_field(TextureId(1), BlendMode::Alpha, glyph(0.5));
+        list.push_distance_field(TextureId(1), BlendMode::Alpha, glyph(0.25));
+        list.push_distance_field(TextureId(2), BlendMode::Alpha, glyph(0.5));
+        list.push_distance_field(TextureId(2), BlendMode::Add, glyph(0.5));
+        list.push_textured(plain, plain_instance);
+
+        let field = |tex: u32, blend: BlendMode| BatchKind::DistanceField { tex: TextureId(tex), blend };
+        let kinds: Vec<BatchKind> = list.batches.iter().map(|batch| batch.kind).collect();
+        assert_eq!(kinds, vec![plain, field(1, BlendMode::Alpha), field(2, BlendMode::Alpha), field(2, BlendMode::Add), plain]);
+        assert_eq!((list.batches[1].first, list.batches[1].count), (0, 2), "two styles on one page are one call");
+        assert_eq!(list.distance_field[1].field, [0.0, 0.0, 0.25, 0.0], "and each instance still carries its own");
+        assert_eq!((list.batches[2].first, list.batches[3].first), (2, 3));
+        assert_eq!(list.quad_count(), 6);
+        list.clear();
+        assert_eq!(list.quad_count(), 0);
+    }
+
+    #[test]
+    fn a_distance_field_instance_carries_what_the_shader_is_told() {
+        let style = DistanceFieldStyle {
+            outline_distance: 0.25,
+            outline_color: Color { r: 255, g: 0, b: 0, a: 255 },
+            shadow_color: Color { r: 0, g: 0, b: 255, a: 128 },
+            shadow_smoothing: 0.125,
+            shadow_offset: (0.01, -0.02),
+        };
+        let params = DistanceFieldParams {
+            dst: Rect::new(10.0, 20.0, 30.0, 40.0),
+            src: UvRect::new(0.25, 0.5, 0.75, 1.0),
+            tint: Color { r: 0, g: 255, b: 0, a: 255 },
+            blend: BlendMode::Alpha,
+            style,
+        };
+        let instance = DistanceFieldInstance::new(&params);
+        assert_eq!(instance.rect, [10.0, 20.0, 30.0, 40.0]);
+        assert_eq!(instance.uv, [0.25, 0.5, 0.75, 1.0]);
+        assert_eq!(instance.tint, [0.0, 1.0, 0.0, 1.0]);
+        assert_eq!(instance.outline, [1.0, 0.0, 0.0, 1.0]);
+        assert_eq!(instance.shadow, [0.0, 0.0, 1.0, 128.0 / 255.0]);
+        assert_eq!(instance.field, [0.01, -0.02, 0.25, 0.125]);
     }
 
     #[test]

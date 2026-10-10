@@ -20,6 +20,12 @@
 //!    binding has ended, from what was prepared.
 //! 5. With `RBMS_SKIN_CAPTURE_DIR` set, each frame is written there as `<screen>-<ms>.png`.
 //!
+//! A shot may also make the choices a player makes in the skin's own settings ([`Choice`]). The
+//! `*_fnt` shots turn the pack's bitmap fonts on that way, and those are drawn the way a host draws
+//! them: a frame whose text touched a font page that is not in yet is drawn again once the page
+//! has been decoded. Each of them starts at the scene's first moment like the shots it is compared
+//! with, because a skin times what it shows from the first frame it is asked about.
+//!
 //! What is printed along the way -- objects by kind, everything dropped while building, how many
 //! images were read and how long a frame took -- is the record of what this build draws of a full
 //! skin and what it does not yet.
@@ -45,7 +51,7 @@ use rbms_render::{
     Renderer, SkinAssets, SkinFrame, SkinImage, SkinObjectKind, SkinScreen, SongBars, TextContext, TextureId, TimingHistogram,
 };
 use rbms_skin::dst::{DrawCondition, TimerRef};
-use rbms_skin::loader::{LoadedSkin, SkinLoadOptions, SkinUserConfig, load_skin_with_host, parse_value};
+use rbms_skin::loader::{LoadedSkin, SkinLoadOptions, SkinUserConfig, load_header, load_skin_with_host, parse_value};
 use rbms_skin::model::EventRef;
 use rbms_skin::property::{MapHost, PropertyKind};
 use rbms_skin::timer::{MICROS_PER_MILLI, TimerId, TimerState};
@@ -421,6 +427,19 @@ struct Click {
     image: &'static str,
 }
 
+/// A choice the player made in the skin's own settings, which a scenario file cannot say: it is
+/// the skin that numbers its options, and only its header says how.
+#[derive(Debug, Clone, Copy)]
+struct Choice {
+    /// The name of the customisation row.
+    row: &'static str,
+    /// What the name of the chosen item starts with.
+    item: &'static str,
+}
+
+/// The row the pack this was written against offers its bitmap fonts under, switched on.
+const BITMAP_FONTS_ON: &[Choice] = &[Choice { row: "画像フォント", item: "有効" }];
+
 /// One screen of the pack and the moments it is drawn at.
 #[derive(Debug, Clone, Copy)]
 struct Shot {
@@ -435,6 +454,8 @@ struct Shot {
     extra: Extra,
     switches: &'static [Switch],
     clicks: &'static [Click],
+    /// The settings of the skin that are not left as the skin has them.
+    choices: &'static [Choice],
 }
 
 /// The image a result screen of the pack this was written against switches its information panel
@@ -511,6 +532,7 @@ const SHOTS: &[Shot] = &[
         extra: Extra::None,
         switches: &[],
         clicks: &[],
+        choices: &[],
     },
     Shot {
         name: "result",
@@ -520,6 +542,7 @@ const SHOTS: &[Shot] = &[
         extra: Extra::Result,
         switches: &[],
         clicks: &[],
+        choices: &[],
     },
     Shot {
         name: "result",
@@ -529,8 +552,18 @@ const SHOTS: &[Shot] = &[
         extra: Extra::Result,
         switches: &[],
         clicks: &[Click { at_ms: RESULT_MENU_PRESSED_MS, image: RESULT_MENU_BUTTON }],
+        choices: &[],
     },
-    Shot { name: "result", capture: "course", entry: "course.luaskin", times_ms: &[0, 1_500, 3_000], extra: Extra::CourseResult, switches: &[], clicks: &[] },
+    Shot {
+        name: "result",
+        capture: "course",
+        entry: "course.luaskin",
+        times_ms: &[0, 1_500, 3_000],
+        extra: Extra::CourseResult,
+        switches: &[],
+        clicks: &[],
+        choices: &[],
+    },
     Shot {
         name: "musicselect",
         capture: "musicselect",
@@ -539,6 +572,7 @@ const SHOTS: &[Shot] = &[
         extra: Extra::Select,
         switches: &[],
         clicks: &[],
+        choices: &[],
     },
     Shot {
         name: "musicselect",
@@ -548,6 +582,7 @@ const SHOTS: &[Shot] = &[
         extra: Extra::SelectSliding,
         switches: &[],
         clicks: &[],
+        choices: &[],
     },
     Shot {
         name: "play7_hw",
@@ -557,6 +592,7 @@ const SHOTS: &[Shot] = &[
         extra: Extra::Play,
         switches: &[Switch { at_ms: PLAY_LOADED_MS, option: OPTION_NOW_LOADING, on: false }, Switch { at_ms: PLAY_LOADED_MS, option: OPTION_LOADED, on: true }],
         clicks: &[],
+        choices: &[],
     },
     Shot {
         name: "play7_judge",
@@ -566,6 +602,7 @@ const SHOTS: &[Shot] = &[
         extra: Extra::Play,
         switches: &[],
         clicks: &[],
+        choices: &[],
     },
     Shot {
         name: "play7_visualizers",
@@ -575,8 +612,18 @@ const SHOTS: &[Shot] = &[
         extra: Extra::Play,
         switches: &[],
         clicks: &[],
+        choices: &[],
     },
-    Shot { name: "play7_cover", capture: "play7_cover", entry: "play7_hw.luaskin", times_ms: &[5_120], extra: Extra::Play, switches: &[], clicks: &[] },
+    Shot {
+        name: "play7_cover",
+        capture: "play7_cover",
+        entry: "play7_hw.luaskin",
+        times_ms: &[5_120],
+        extra: Extra::Play,
+        switches: &[],
+        clicks: &[],
+        choices: &[],
+    },
     Shot {
         name: "play7_bga",
         capture: "play7_bga",
@@ -585,10 +632,78 @@ const SHOTS: &[Shot] = &[
         extra: Extra::PlayBga,
         switches: &[],
         clicks: &[],
+        choices: &[],
     },
-    Shot { name: "play5_hw", capture: "play5_hw", entry: ENTRY_PLAY5, times_ms: &[PLAY_RUNNING_MS], extra: Extra::Play, switches: &[], clicks: &[] },
-    Shot { name: "play14_hw", capture: "play14_hw", entry: ENTRY_PLAY14, times_ms: &[PLAY_RUNNING_MS], extra: Extra::Play, switches: &[], clicks: &[] },
-    Shot { name: "play10_hw", capture: "play10_hw", entry: ENTRY_PLAY10, times_ms: &[PLAY_RUNNING_MS], extra: Extra::Play, switches: &[], clicks: &[] },
+    Shot {
+        name: "play5_hw",
+        capture: "play5_hw",
+        entry: ENTRY_PLAY5,
+        times_ms: &[PLAY_RUNNING_MS],
+        extra: Extra::Play,
+        switches: &[],
+        clicks: &[],
+        choices: &[],
+    },
+    Shot {
+        name: "play14_hw",
+        capture: "play14_hw",
+        entry: ENTRY_PLAY14,
+        times_ms: &[PLAY_RUNNING_MS],
+        extra: Extra::Play,
+        switches: &[],
+        clicks: &[],
+        choices: &[],
+    },
+    Shot {
+        name: "play10_hw",
+        capture: "play10_hw",
+        entry: ENTRY_PLAY10,
+        times_ms: &[PLAY_RUNNING_MS],
+        extra: Extra::Play,
+        switches: &[],
+        clicks: &[],
+        choices: &[],
+    },
+    Shot {
+        name: "decide",
+        capture: "decide_fnt",
+        entry: "decide.luaskin",
+        times_ms: &[0, 1_500, 3_750],
+        extra: Extra::None,
+        switches: &[],
+        clicks: &[],
+        choices: BITMAP_FONTS_ON,
+    },
+    Shot {
+        name: "result",
+        capture: "result_fnt",
+        entry: "result.luaskin",
+        times_ms: &[0, 3_000],
+        extra: Extra::Result,
+        switches: &[],
+        clicks: &[],
+        choices: BITMAP_FONTS_ON,
+    },
+    Shot {
+        name: "musicselect",
+        capture: "musicselect_fnt",
+        entry: "musicselect.luaskin",
+        times_ms: &[0, 3_000],
+        extra: Extra::Select,
+        switches: &[],
+        clicks: &[],
+        choices: BITMAP_FONTS_ON,
+    },
+    Shot {
+        name: "play7_hw",
+        capture: "play7_hw_fnt",
+        entry: "play7_hw.luaskin",
+        times_ms: &[0, 2_000, 6_000],
+        extra: Extra::Play,
+        switches: &[Switch { at_ms: PLAY_LOADED_MS, option: OPTION_NOW_LOADING, on: false }, Switch { at_ms: PLAY_LOADED_MS, option: OPTION_LOADED, on: true }],
+        clicks: &[],
+        choices: BITMAP_FONTS_ON,
+    },
 ];
 
 /// The mode a shot's chart is read as and its skin is loaded for, which the entry file says.
@@ -1023,7 +1138,6 @@ struct Painted {
 struct Stage<'a> {
     shot: &'a Shot,
     skin: &'a LoadedSkin,
-    screen: &'a SkinScreen,
     backdrop: TextureId,
     images: ReferenceImages,
     bars: &'a [SongBar],
@@ -1039,14 +1153,25 @@ struct Stage<'a> {
     recent: &'a [(i64, u8)],
 }
 
+/// The moment one frame is drawn at and what answers for it.
+#[derive(Clone, Copy)]
+struct Moment<'a> {
+    host: &'a MapHost,
+    timers: &'a TimerState,
+    now_ms: i64,
+    /// Whether the host is bound to the skin's interpreter while the frame is prepared.
+    bound: bool,
+}
+
 impl Stage<'_> {
-    /// Draws the screen at `now_ms` onto a cleared canvas and answers what the frame came to.
+    /// Draws `screen` at `now_ms` onto a cleared canvas and answers what the frame came to.
     ///
     /// With `bound` the host is bound to the skin's interpreter while the frame is prepared, and
     /// every function value is asked there. Without, the frame is prepared as a renderer with no
     /// interpreter prepares it: a function gate reads false and a function timer reads off. Either
     /// way the frame is drawn with nothing bound.
-    fn draw(&self, canvas: &mut CpuCanvas, text: &mut TextContext, host: &MapHost, timers: &TimerState, now_ms: i64, bound: bool) -> Painted {
+    fn draw(&self, screen: &SkinScreen, canvas: &mut CpuCanvas, text: &mut TextContext, moment: &Moment<'_>) -> Painted {
+        let Moment { host, timers, now_ms, bound } = *moment;
         let now_us = now_ms * MICROS_PER_MILLI;
         let sliding = BarScroll { duration_ms: SLIDE_NOW_MS + SLIDE_LEFT_MS, angle: SLIDE_TRAVEL_MS, now_ms: SLIDE_NOW_MS };
         let scroll = if self.shot.extra == Extra::SelectSliding { sliding } else { BarScroll::default() };
@@ -1107,13 +1232,13 @@ impl Stage<'_> {
         let frame = SkinFrame { now_us, timers, state: host, lua: None, mouse: None, data };
         let prepared = match self.skin.runtime().filter(|_| bound) {
             Some(runtime) => {
-                runtime.frame(host, |lua| self.screen.prepare(&SkinFrame { lua: Some(lua), ..frame })).expect("the host should bind to the skin's interpreter")
+                runtime.frame(host, |lua| screen.prepare(&SkinFrame { lua: Some(lua), ..frame })).expect("the host should bind to the skin's interpreter")
             }
-            None => self.screen.prepare(&frame),
+            None => screen.prepare(&frame),
         };
         canvas.clear(Color::BLACK);
         let mut ctx = RenderCtx::new(rbms_render::theme(), text);
-        let drawn = self.screen.draw_prepared(&mut ctx, canvas, &frame, &prepared);
+        let drawn = screen.draw_prepared(&mut ctx, canvas, &frame, &prepared);
         Painted { visible: prepared.visible_count(), drawn, answers: prepared.answer_count() }
     }
 }
@@ -1129,6 +1254,29 @@ fn press(skin: &LoadedSkin, host: &MapHost, click: &Click) {
     runtime.frame(host, |lua| lua.call_event(function, CLICK_ARGUMENT)).expect("the host should bind to the skin's interpreter");
 }
 
+/// The player's settings for one shot: the skin's own, but for the rows the shot chooses in. Which
+/// option id a choice comes to is read off the skin's header, which is where the skin numbers them.
+fn chosen(pack: &Path, overlay: &Path, shot: &Shot) -> SkinUserConfig {
+    let mut user = SkinUserConfig::default();
+    if shot.choices.is_empty() {
+        return user;
+    }
+    let untouched = SkinUserConfig::default();
+    let options = SkinLoadOptions { rng_seed: Some(TEST_SEED), write_overlay: Some(overlay), ..SkinLoadOptions::new(pack, &untouched, mode_of(shot)) };
+    let header = load_header(&pack.join(shot.entry), options).unwrap_or_else(|error| panic!("the header of {} should load: {error}", shot.entry));
+    for choice in shot.choices {
+        let row = header.properties.iter().find(|row| row.name == choice.row).unwrap_or_else(|| panic!("{} should offer a row {:?}", shot.entry, choice.row));
+        let item = row
+            .item
+            .iter()
+            .find(|item| item.name.starts_with(choice.item))
+            .unwrap_or_else(|| panic!("the row {:?} should offer {:?}", choice.row, choice.item));
+        println!("{}: {:?} is set to {:?} (option {})", shot.capture, row.name, item.name, item.op);
+        user.properties.insert(row.name.clone(), item.op);
+    }
+    user
+}
+
 /// Loads, builds and draws one screen of the pack, printing what it came to.
 fn capture(pack: &Path, overlay: &Path, capture_dir: Option<&Path>, shot: &Shot) {
     let entry = pack.join(shot.entry);
@@ -1136,7 +1284,7 @@ fn capture(pack: &Path, overlay: &Path, capture_dir: Option<&Path>, shot: &Shot)
     let scheduled = host.timers.clone();
     settle(&mut host, &scheduled, shot.switches, 0);
 
-    let user = SkinUserConfig::default();
+    let user = chosen(pack, overlay, shot);
     let options = SkinLoadOptions { rng_seed: Some(TEST_SEED), write_overlay: Some(overlay), ..SkinLoadOptions::new(pack, &user, mode_of(shot)) };
     let loading = Instant::now();
     let skin = load_skin_with_host(&entry, options, &host).unwrap_or_else(|error| panic!("{} should load: {error}", shot.entry));
@@ -1183,7 +1331,7 @@ fn capture(pack: &Path, overlay: &Path, capture_dir: Option<&Path>, shot: &Shot)
         .map(|(kind, count)| format!("{kind:?} {count}"))
         .collect();
     println!(
-        "  built in {} ms: {} objects of {} destinations ({}) | textures {} ({} RGBA bytes) | images read {} ({} px, {} bytes on disk, largest {}x{}, decoded in {} ms) | not decoded {} | fonts read {} ({} bytes), families {}",
+        "  built in {} ms: {} objects of {} destinations ({}) | textures {} ({} RGBA bytes) | images read {} ({} px, {} bytes on disk, largest {}x{}, decoded in {} ms) | not decoded {} | fonts read {} ({} bytes), families {} of which bitmap fonts {}",
         built_in.as_millis(),
         screen.object_count(),
         skin.destinations.len(),
@@ -1200,6 +1348,7 @@ fn capture(pack: &Path, overlay: &Path, capture_dir: Option<&Path>, shot: &Shot)
         assets.fonts,
         assets.font_bytes,
         screen.families().len(),
+        screen.bitmap_font_count(),
     );
     for refused in &assets.refused {
         println!("    not decoded: {}", refused.strip_prefix(pack).unwrap_or(refused).display());
@@ -1217,7 +1366,6 @@ fn capture(pack: &Path, overlay: &Path, capture_dir: Option<&Path>, shot: &Shot)
     let stage = Stage {
         shot,
         skin: &skin,
-        screen: &screen,
         backdrop,
         images,
         bars: &bars,
@@ -1239,8 +1387,23 @@ fn capture(pack: &Path, overlay: &Path, capture_dir: Option<&Path>, shot: &Shot)
             clicked += 1;
         }
         let drawing = Instant::now();
-        let painted = stage.draw(&mut canvas, &mut text, &host, &timers, *now_ms, true);
+        let moment = Moment { host: &host, timers: &timers, now_ms: *now_ms, bound: true };
+        let mut painted = stage.draw(&screen, &mut canvas, &mut text, &moment);
         let drawn_in = drawing.elapsed();
+        let mut pages = 0;
+        while !screen.wanted_font_pages().is_empty() {
+            pages += screen.load_font_pages(&mut canvas, &mut assets, None);
+            painted = stage.draw(&screen, &mut canvas, &mut text, &moment);
+        }
+        if pages > 0 {
+            println!(
+                "  {}-{now_ms}: drawn again with {pages} more font pages in | the screen holds {} font pages, {} textures ({} RGBA bytes)",
+                shot.capture,
+                screen.font_page_count(),
+                screen.texture_stats().count,
+                screen.texture_stats().bytes
+            );
+        }
         let on: Vec<String> = host.timers.keys().map(i32::to_string).collect();
         let cost = skin.runtime().map(rbms_skin::lua::SkinLua::frame_cost).unwrap_or_default();
         println!(
@@ -1267,7 +1430,7 @@ fn capture(pack: &Path, overlay: &Path, capture_dir: Option<&Path>, shot: &Shot)
 
     let (timers, now_ms) = last;
     let bound: Vec<u8> = canvas.pixels().to_vec();
-    let unbound = stage.draw(&mut canvas, &mut text, &host, &timers, now_ms, false);
+    let unbound = stage.draw(&screen, &mut canvas, &mut text, &Moment { host: &host, timers: &timers, now_ms, bound: false });
     let differing = bound.chunks_exact(RGBA_BYTES).zip(canvas.pixels().chunks_exact(RGBA_BYTES)).filter(|(with, without)| with != without).count();
     println!("  {}-{now_ms} again with no interpreter bound: drew {} objects, {differing} pixels differ from the bound frame", shot.capture, unbound.drawn);
 

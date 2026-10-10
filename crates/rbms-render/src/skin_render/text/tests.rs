@@ -13,7 +13,7 @@ use rbms_skin::property::generated::STRING_TITLE;
 use rbms_skin::property::{MapHost, NameSpace, reference_implements};
 use rbms_skin::timer::TimerState;
 
-use super::{TEXT_PIXELS_PER_SCALE, text_body};
+use super::{FontRef, Fonts, TEXT_PIXELS_PER_SCALE, text_body};
 use crate::ctx::RenderCtx;
 use crate::font::TextContext;
 use crate::skin_render::draw::{ImageSelect, draw_object};
@@ -59,10 +59,10 @@ const BLEND_ADD: i32 = 2;
 
 /// An engine holding only the bundled face, loaded once more the way a skin loads its own font,
 /// and the font table a screen would have built from it.
-fn engine() -> (TextContext, Vec<(String, String)>) {
+fn engine() -> (TextContext, Vec<(String, FontRef)>) {
     let mut text = TextContext::embedded_only();
     let family = text.load_font(include_bytes!("../../../../../assets/fonts/Inter-Regular.ttf").to_vec()).expect("the bundled font loads as a skin font");
-    (text, vec![(FONT_ID.to_string(), family)])
+    (text, vec![(FONT_ID.to_string(), FontRef::Family(family))])
 }
 
 /// A text record in the registered font, generated at [`EM`].
@@ -77,13 +77,13 @@ fn track(width: f32, color: SkinColor) -> DestinationTrack {
 }
 
 /// The text object `def` declares, in a destination of `width`, in white.
-fn text_object(def: &TextDef, families: &[(String, String)], width: f32) -> SkinObject {
+fn text_object(def: &TextDef, families: &Fonts, width: f32) -> SkinObject {
     let white = SkinColor::rgba(u8::MAX, u8::MAX, u8::MAX, u8::MAX);
     SkinObject { track: track(width, white), stretch: StretchKind::Stretch, body: Body::Text(text_body(def, families)) }
 }
 
 /// A text object showing `line` written out.
-fn constant(line: &str, families: &[(String, String)], width: f32, change: impl FnOnce(&mut TextDef)) -> SkinObject {
+fn constant(line: &str, families: &Fonts, width: f32, change: impl FnOnce(&mut TextDef)) -> SkinObject {
     let mut def = TextDef { constant_text: Some(line.to_string()), ..record() };
     change(&mut def);
     text_object(&def, families, width)

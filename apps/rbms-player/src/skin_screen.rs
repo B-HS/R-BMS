@@ -460,6 +460,52 @@ impl PendingScreen {
     }
 }
 
+/// Pages of the compiled screens' bitmap fonts that a worker is decoding.
+///
+/// A bitmap font's pages are not read with the document: which of them a screen needs is only known
+/// once a line of text has been laid out, so a page is asked for after the frame that first wanted
+/// a glyph on it, and the glyphs on it are drawn from the frame after its texture arrives. The rest
+/// of their line is drawn in the meantime.
+struct FontPageDecode {
+    pool: DecodePool<SkinAssetJob, SkinAssetRead>,
+    /// The files this batch was asked for and has not answered for yet.
+    asked: BTreeSet<PathBuf>,
+}
+
+impl FontPageDecode {
+    /// Starts decoding `pages`.
+    fn start(pages: BTreeSet<PathBuf>) -> FontPageDecode {
+        let requests = pages.iter().map(|path| ((SkinAssetKind::Image, path.clone()), None)).collect();
+        FontPageDecode { pool: spawn_skin_asset_decode(requests, Arc::new(AtomicBool::new(false))), asked: pages }
+    }
+
+    /// Collects whatever has arrived, as each file and the image it decoded to. Once the workers
+    /// are done, every file still unanswered is one that would not decode, and is answered for with
+    /// no image; the counter is read before the channel is drained, as [`PendingScreen::poll`] does.
+    fn poll(&mut self) -> Vec<(PathBuf, Option<SkinImage>)> {
+        let (received, progress, total) = &self.pool;
+        let mut done = progress.load(Ordering::Relaxed) >= *total;
+        let mut arrived = Vec::new();
+        loop {
+            match received.try_recv() {
+                Ok(((_, path), read)) => {
+                    self.asked.remove(&path);
+                    arrived.push((path, if let SkinAsset::Image(image) = read.asset { Some(image) } else { None }));
+                }
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    done = true;
+                    break;
+                }
+            }
+        }
+        if done {
+            arrived.extend(std::mem::take(&mut self.asked).into_iter().map(|path| (path, None)));
+        }
+        arrived
+    }
+}
+
 /// A scene standing still while the document it is drawn with is on its way.
 #[derive(Debug, Clone, Copy)]
 struct SceneHold {
@@ -577,6 +623,8 @@ pub(crate) struct SkinScreens {
     /// The stamp of the version of each file that is uploaded, which is what a worker compares the
     /// file against before decoding it again.
     stamps: BTreeMap<PathBuf, FileStamp>,
+    /// The bitmap font pages the compiled screens have asked for and a worker has not answered yet.
+    font_pages: Vec<FontPageDecode>,
     /// The screens asked for since a frame last ended.
     prepared: BTreeSet<i32>,
     /// The screens the frame before that asked for: what the scene being left was drawn with.
@@ -769,12 +817,48 @@ impl SkinScreens {
         self.parked.clear();
     }
 
+    /// Move the bitmap font pages of the compiled screens one step along: hand each page a worker
+    /// has finished with to the screens waiting for it, then start decoding the pages the frame
+    /// just drawn found it needed.
+    ///
+    /// A page another screen already has uploaded is taken hold of where it is, with no decode. A
+    /// page that would not decode is answered for as well, so it is not asked for again and its
+    /// glyphs are left out for good.
+    fn sync_font_pages<R: Renderer>(&mut self, r: &mut R) {
+        let arrived: Vec<(PathBuf, Option<SkinImage>)> = self.font_pages.iter_mut().flat_map(FontPageDecode::poll).collect();
+        self.font_pages.retain(|batch| !batch.asked.is_empty());
+        for (path, image) in arrived {
+            let decoded = image.map(|image| ((SkinAssetKind::Image, path.clone()), SkinAsset::Image(image)));
+            let mut assets = PlayerSkinAssets::new(decoded.into_iter().collect());
+            for built in self.built.values_mut() {
+                built.screen.settle_font_page(r, &path, &mut assets, Some(&mut self.textures));
+            }
+        }
+
+        let mut wanted: BTreeSet<PathBuf> = BTreeSet::new();
+        for built in self.built.values_mut() {
+            for path in built.screen.wanted_font_pages() {
+                if self.textures.contains(&path) {
+                    built.screen.settle_font_page(r, &path, &mut PlayerSkinAssets::new(BTreeMap::new()), Some(&mut self.textures));
+                } else if !self.font_pages.iter().any(|batch| batch.asked.contains(&path)) {
+                    wanted.insert(path);
+                }
+            }
+        }
+        if !wanted.is_empty() {
+            self.font_pages.push(FontPageDecode::start(wanted));
+        }
+    }
+
     /// End a frame: once after a scene has moved, let go of every screen the frame did not ask for
-    /// and that is not parked under another; then free the textures nobody holds.
+    /// and that is not parked under another; then free the textures nobody holds. Before any of
+    /// that, the bitmap font pages the frame's text asked for are seen to
+    /// ([`SkinScreens::sync_font_pages`]).
     ///
     /// The textures are left where they are while a screen the frame asked for is still waiting for
     /// its Lua skin to be read, because that skin has not yet said which of them it draws from too.
     pub(crate) fn finish_frame<R: Renderer>(&mut self, r: &mut R, skins: &SkinLibrary) {
+        self.sync_font_pages(r);
         let prepared = std::mem::take(&mut self.prepared);
         if self.scene_moved {
             self.scene_moved = false;
@@ -1476,6 +1560,8 @@ impl AppShared {
     }
 }
 
+#[cfg(test)]
+mod font_page_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

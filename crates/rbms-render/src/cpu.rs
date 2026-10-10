@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use crate::{BYTES_PER_PIXEL, BlendFactor, BlendMode, CHANNEL_MAX, Color, QuadParams, Rect, Renderer, TextureFilter, TextureId, UvRect};
+use crate::{
+    BYTES_PER_PIXEL, BlendFactor, BlendMode, CHANNEL_MAX, Color, DISTANCE_FIELD_EDGE, DISTANCE_FIELD_SMOOTHING, DistanceFieldParams, DistanceFieldStyle,
+    QuadParams, Rect, Renderer, TextureFilter, TextureId, UvRect,
+};
 
 /// Bits dropped from each averaged channel in [`CpuCanvas::block_signature`]. Quantizing to
 /// `256 >> SIGNATURE_QUANT_SHIFT` levels keeps a golden signature stable against sub-pixel
@@ -60,6 +63,74 @@ pub fn apply_blend(src: Color, dst: Color, mode: BlendMode) -> Color {
         b: blend_channel(src.b, src.a, dst.b, f.src_color, f.dst_color),
         a: blend_channel(src.a, src.a, dst.a, f.src_alpha, f.dst_alpha),
     }
+}
+
+/// The two coefficients of the cubic GLSL's `smoothstep` eases with: `t * t * (3 - 2 * t)`.
+const SMOOTHSTEP_CUBIC: f32 = 3.0;
+const SMOOTHSTEP_SLOPE: f32 = 2.0;
+
+/// GLSL's `smoothstep(low, high, x)` as its definition computes it, `t * t * (3 - 2 * t)` with
+/// `t = clamp((x - low) / (high - low), 0, 1)`.
+///
+/// The specification leaves `low >= high` undefined, and the reference's shader is handed exactly
+/// that for a shadow with no smoothing. What a driver's division then comes to is settled here so
+/// both backends agree: a ramp of no width is a step, off up to and on `low` and on past it, and a
+/// ramp whose ends are the wrong way round runs the wrong way.
+fn smoothstep(low: f32, high: f32, x: f32) -> f32 {
+    if high == low {
+        return if x > low { 1.0 } else { 0.0 };
+    }
+    let t = ((x - low) / (high - low)).clamp(0.0, 1.0);
+    t * t * (SMOOTHSTEP_CUBIC - SMOOTHSTEP_SLOPE * t)
+}
+
+/// GLSL's `mix(from, to, share)`.
+fn mix(from: f32, to: f32, share: f32) -> f32 {
+    from * (1.0 - share) + to * share
+}
+
+/// What the reference's distance field shader writes for one fragment (`distance_field.frag`), as
+/// red, green, blue and alpha in shares of one and not premultiplied.
+///
+/// `distance` is the field under the fragment and `shadow_distance` the field where the shadow reads
+/// it. The lines are the shader's own:
+///
+/// ```text
+/// outlineFactor = smoothstep(0.5 - smoothing, 0.5 + smoothing, distance)
+/// color         = mix(u_outlineColor, v_color, outlineFactor)
+/// alpha         = smoothstep(u_outlineDistance - smoothing, u_outlineDistance + smoothing, distance)
+/// mainColor     = vec4(color.rgb, color.a * alpha)
+/// shadowAlpha   = smoothstep(0.5 - u_shadowSmoothing, 0.5 + u_shadowSmoothing, shadowDistance)
+/// shadow        = vec4(u_shadowColor.rgb, u_shadowColor.a * shadowAlpha)
+/// gl_FragColor  = mix(shadow, mainColor, mainColor.a)
+/// ```
+///
+/// Three things in them are not what a distance field is usually drawn with, and are kept. The
+/// width of the ramps is a share of the field, not of a pixel. The last line weighs the glyph by
+/// its own alpha once more, alpha channel included, so with no shadow a glyph's alpha comes out
+/// squared -- and with no outline its edge is the ramp to the fourth power, because the outline's
+/// alpha is mixed into the glyph's over the same ramp. And the colour that is weighed against the
+/// glyph's is the shadow's whether or not the shadow shows, so a soft edge is tinted with the
+/// shadow's colour: white, unless the text says otherwise.
+pub fn distance_field_fragment(distance: f32, shadow_distance: f32, tint: Color, style: &DistanceFieldStyle) -> [f32; 4] {
+    let (ink, outline, shade) = (tint.unit_channels(), style.outline_color.unit_channels(), style.shadow_color.unit_channels());
+    let outline_factor = smoothstep(DISTANCE_FIELD_EDGE - DISTANCE_FIELD_SMOOTHING, DISTANCE_FIELD_EDGE + DISTANCE_FIELD_SMOOTHING, distance);
+    let color: [f32; 4] = std::array::from_fn(|channel| mix(outline[channel], ink[channel], outline_factor));
+    let alpha = smoothstep(style.outline_distance - DISTANCE_FIELD_SMOOTHING, style.outline_distance + DISTANCE_FIELD_SMOOTHING, distance);
+    let main = [color[0], color[1], color[2], color[ALPHA] * alpha];
+
+    let shadow_alpha = smoothstep(DISTANCE_FIELD_EDGE - style.shadow_smoothing, DISTANCE_FIELD_EDGE + style.shadow_smoothing, shadow_distance);
+    let shadow = [shade[0], shade[1], shade[2], shade[ALPHA] * shadow_alpha];
+    std::array::from_fn(|channel| mix(shadow[channel], main[channel], main[ALPHA]))
+}
+
+/// Which of a colour's four channels is its alpha.
+const ALPHA: usize = 3;
+
+/// A share of one as the nearest 8-bit channel value, which is how a target stores what a shader
+/// wrote.
+fn channel_of(share: f32) -> u8 {
+    (share.clamp(0.0, 1.0) * CHANNEL_MAX as f32).round() as u8
 }
 
 /// Software RGBA8 canvas. Deterministic reference backend for tests and headless checks, and the
@@ -170,6 +241,47 @@ impl CpuCanvas {
     }
 }
 
+impl CpuCanvas {
+    /// Blends one colour into every pixel the quad `params` places covers: what `shade` makes of the
+    /// texture at the point of the source rectangle under the pixel's centre. The quad's filter and
+    /// tint are `shade`'s business.
+    fn paint_quad(&mut self, tex: TextureId, params: &QuadParams, shade: impl Fn(&Texture, (f32, f32)) -> Color) {
+        if !(params.dst.w > 0.0 && params.dst.h > 0.0) {
+            return;
+        }
+        let Some((cx0, cy0, cx1, cy1)) = self.clip_bounds() else {
+            return;
+        };
+        let Some(Some(texture)) = self.textures.get(tex.0 as usize) else {
+            return;
+        };
+        if texture.width == 0 || texture.height == 0 {
+            return;
+        }
+        let map = QuadMap::new(params);
+        let (bx0, by0, bx1, by1) = map.pixel_bounds();
+        let (x0, y0) = (bx0.max(cx0), by0.max(cy0));
+        let (x1, y1) = (bx1.min(cx1), by1.min(cy1));
+        let stride = self.width as usize;
+        let pixels = &mut self.pixels;
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let Some(local) = map.local_at(x, y) else {
+                    continue;
+                };
+                let src = shade(texture, uv_at(&params.src, local, map.size));
+                let i = (y as usize * stride + x as usize) * BYTES_PER_PIXEL;
+                let dst = Color { r: pixels[i], g: pixels[i + 1], b: pixels[i + 2], a: pixels[i + 3] };
+                let out = apply_blend(src, dst, params.blend);
+                pixels[i] = out.r;
+                pixels[i + 1] = out.g;
+                pixels[i + 2] = out.b;
+                pixels[i + 3] = out.a;
+            }
+        }
+    }
+}
+
 /// One texel, with out-of-range coordinates clamped to the edge — the same wrap behaviour the GPU
 /// sampler is configured with, so a bilinear tap at a texture border reads the same colour in both
 /// backends.
@@ -200,6 +312,23 @@ fn sample(t: &Texture, uv: (f32, f32), filter: TextureFilter) -> Color {
             Color { r: mix(|c| c.r), g: mix(|c| c.g), b: mix(|c| c.b), a: mix(|c| c.a) }
         }
     }
+}
+
+/// The distance a field holds at `uv`: its alpha channel as a share of one, interpolated between the
+/// four texels around the point and clamped at the texture's edge.
+///
+/// This is [`sample`]'s bilinear arithmetic without its rounding to a channel value at the end. A
+/// distance is fed to a ramp a sixteenth wide, so the fraction a rounded channel throws away would
+/// show as steps along a glyph's edge.
+fn field_at(t: &Texture, uv: (f32, f32)) -> f32 {
+    let (cx, cy) = (uv.0 * t.width as f32 - 0.5, uv.1 * t.height as f32 - 0.5);
+    let (bx, by) = (cx.floor(), cy.floor());
+    let (rx, ry) = (cx - bx, cy - by);
+    let (bx, by) = (bx as i64, by as i64);
+    let held = |x: i64, y: i64| texel(t, x, y).a as f32 / CHANNEL_MAX as f32;
+    let top = held(bx, by) + (held(bx + 1, by) - held(bx, by)) * rx;
+    let bottom = held(bx, by + 1) + (held(bx + 1, by + 1) - held(bx, by + 1)) * rx;
+    top + (bottom - top) * ry
 }
 
 /// The screen-to-destination mapping for one quad, resolved once instead of per pixel.
@@ -343,39 +472,15 @@ impl Renderer for CpuCanvas {
     }
 
     fn draw_textured_quad(&mut self, tex: TextureId, params: QuadParams) {
-        if !(params.dst.w > 0.0 && params.dst.h > 0.0) {
-            return;
-        }
-        let Some((cx0, cy0, cx1, cy1)) = self.clip_bounds() else {
-            return;
-        };
-        let Some(Some(texture)) = self.textures.get(tex.0 as usize) else {
-            return;
-        };
-        if texture.width == 0 || texture.height == 0 {
-            return;
-        }
-        let map = QuadMap::new(&params);
-        let (bx0, by0, bx1, by1) = map.pixel_bounds();
-        let (x0, y0) = (bx0.max(cx0), by0.max(cy0));
-        let (x1, y1) = (bx1.min(cx1), by1.min(cy1));
-        let stride = self.width as usize;
-        let pixels = &mut self.pixels;
-        for y in y0..y1 {
-            for x in x0..x1 {
-                let Some(local) = map.local_at(x, y) else {
-                    continue;
-                };
-                let src = apply_tint(sample(texture, uv_at(&params.src, local, map.size), params.filter), params.tint);
-                let i = (y as usize * stride + x as usize) * BYTES_PER_PIXEL;
-                let dst = Color { r: pixels[i], g: pixels[i + 1], b: pixels[i + 2], a: pixels[i + 3] };
-                let out = apply_blend(src, dst, params.blend);
-                pixels[i] = out.r;
-                pixels[i + 1] = out.g;
-                pixels[i + 2] = out.b;
-                pixels[i + 3] = out.a;
-            }
-        }
+        self.paint_quad(tex, &params, |texture, uv| apply_tint(sample(texture, uv, params.filter), params.tint));
+    }
+
+    fn draw_distance_field_quad(&mut self, tex: TextureId, params: DistanceFieldParams) {
+        let (shift_u, shift_v) = params.style.shadow_offset;
+        self.paint_quad(tex, &params.as_plain_quad(), |texture, uv| {
+            let written = distance_field_fragment(field_at(texture, uv), field_at(texture, (uv.0 - shift_u, uv.1 - shift_v)), params.tint, &params.style);
+            Color { r: channel_of(written[0]), g: channel_of(written[1]), b: channel_of(written[2]), a: channel_of(written[ALPHA]) }
+        });
     }
 
     fn push_clip(&mut self, rect: Rect) {
@@ -392,6 +497,9 @@ impl Renderer for CpuCanvas {
         self.clips.pop();
     }
 }
+
+#[cfg(test)]
+mod distance_field_tests;
 
 #[cfg(test)]
 mod tests {

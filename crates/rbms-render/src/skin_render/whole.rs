@@ -21,7 +21,7 @@ use rbms_skin::loader::{
     SKIN_TYPE_PLAY_24KEYS_DOUBLE,
 };
 
-use crate::{Color, QuadParams, Rect, Renderer, TextureId};
+use crate::{Color, DistanceFieldParams, QuadParams, Rect, Renderer, TextureId};
 
 /// What an offset's values are a hundredth of: a move of one is one percent of the screen, and a
 /// stretch of one makes the screen one percent larger.
@@ -136,6 +136,10 @@ impl<R: Renderer> Renderer for OffsetRenderer<'_, R> {
     fn draw_textured_quad(&mut self, tex: TextureId, params: QuadParams) {
         let center = (params.center.0 * self.scale.0, params.center.1 * self.scale.1);
         self.inner.draw_textured_quad(tex, QuadParams { dst: self.place(params.dst), center, ..params });
+    }
+
+    fn draw_distance_field_quad(&mut self, tex: TextureId, params: DistanceFieldParams) {
+        self.inner.draw_distance_field_quad(tex, DistanceFieldParams { dst: self.place(params.dst), ..params });
     }
 
     fn push_clip(&mut self, rect: Rect) {

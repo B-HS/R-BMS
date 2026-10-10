@@ -33,7 +33,7 @@ pub const BLOCK_MAX_DIM: u32 = 8192;
 
 /// The capitals a font's capital height is read from, in the order they are tried
 /// (`BitmapFont.BitmapFontData.capChars`).
-const CAP_CHARS: [char; 26] =
+pub(crate) const CAP_CHARS: [char; 26] =
     ['M', 'N', 'B', 'D', 'C', 'E', 'F', 'K', 'A', 'G', 'H', 'I', 'J', 'L', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'];
 
 /// The small letter whose rounded top the reference's hinter fits to the pixel grid. FreeType reads
@@ -67,7 +67,7 @@ const KERN_TABLE: u32 = u32::from_be_bytes(*b"kern");
 
 /// A pixel of nothing: white, so a filtered sample at a glyph's edge does not darken towards it,
 /// and fully transparent.
-const CLEAR_PIXEL: [u8; BYTES_PER_PIXEL] = [u8::MAX, u8::MAX, u8::MAX, 0];
+pub(crate) const CLEAR_PIXEL: [u8; BYTES_PER_PIXEL] = [u8::MAX, u8::MAX, u8::MAX, 0];
 
 /// The largest value one channel holds, as the wide integer the compositing arithmetic runs in.
 const CHANNEL_MAX: u32 = u8::MAX as u32;
@@ -209,7 +209,7 @@ impl Line {
 }
 
 /// How far a line is moved right inside the width it was laid out in.
-fn slack(align: BlockAlign, width: f32, line: f32) -> f32 {
+pub(crate) fn slack(align: BlockAlign, width: f32, line: f32) -> f32 {
     match align {
         BlockAlign::Left => 0.0,
         BlockAlign::Center => (width - line) / 2.0,

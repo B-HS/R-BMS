@@ -18,7 +18,7 @@ use super::{BarArea, BarPart, GraphPart, ImagePart, Kept, LevelPart, PADDING_ALT
 use crate::skin_render::SkinAssets;
 use crate::skin_render::draw::ImageSelect;
 use crate::skin_render::object::{Body, ImageBody, MAX_PLACES, SkinObject, Sprite, image_sprite};
-use crate::skin_render::text::text_body;
+use crate::skin_render::text::{Fonts, text_body};
 use crate::skin_render::textures::Source;
 
 /// The cycle the reference starts a bar set's search with, which the first image found replaces
@@ -55,7 +55,7 @@ fn image_body(sprite: Sprite) -> Body {
 struct Builder<'a, 'b> {
     def: &'a SkinDef,
     sources: Source<'a>,
-    families: &'a [(String, String)],
+    fonts: &'a Fonts,
     warnings: &'b mut Vec<String>,
 }
 
@@ -124,8 +124,8 @@ impl Builder<'_, '_> {
             return None;
         };
         Some(TextPart {
-            object: object_of(&named.track, Body::Text(text_body(def, self.families))),
-            lines: (0..slots).map(|_| text_body(def, self.families)).collect(),
+            object: object_of(&named.track, Body::Text(text_body(def, self.fonts))),
+            lines: (0..slots).map(|_| text_body(def, self.fonts)).collect(),
             owners: (0..slots).map(|_| Cell::new(None)).collect(),
             kept: Cell::new(Kept::NEVER),
         })
@@ -197,7 +197,7 @@ pub(crate) fn build_songlist(
     skin: &LoadedSkin,
     id: &str,
     sources: Source<'_>,
-    families: &[(String, String)],
+    fonts: &Fonts,
     _assets: &mut dyn SkinAssets,
     warnings: &mut Vec<String>,
 ) -> Option<Body> {
@@ -219,7 +219,7 @@ pub(crate) fn build_songlist(
         ));
     }
 
-    let mut builder = Builder { def: &skin.def, sources, families, warnings };
+    let mut builder = Builder { def: &skin.def, sources, fonts, warnings };
     let mut slots: Vec<Slot> = Vec::with_capacity(count);
     for (on, off) in tracks.liston.iter().zip(&tracks.listoff).take(count) {
         slots.push(match builder.bar_set(&on.id) {

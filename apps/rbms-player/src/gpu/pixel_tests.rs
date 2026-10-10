@@ -5,11 +5,18 @@
 //! shaders, the blend states and the target format through an actual adapter, and what they pin is
 //! the colour rule: the same draws give the same bytes on both backends.
 //!
+//! The distance field scenes at the end put the reference's distance field shader through the same
+//! comparison: one disc-shaped field, drawn with and without an outline and a shadow, at its own
+//! size, enlarged, shrunk and on fractions of a pixel. Each prints how far apart the two backends
+//! came out, so a run with `--nocapture` shows the measured difference beside the allowance.
+//!
 //! A machine with no adapter -- a headless CI box -- cannot run them, and there they pass without
 //! checking anything. Setting [`super::REQUIRE_GPU_ENV`] turns that into a failure, for a run that has to
 //! prove the comparison really happened.
 
-use rbms_render::{BlendMode, Color, CpuCanvas, QuadParams, Rect, Renderer, ScaledRenderer, TextureFilter, TextureId, UvRect};
+use rbms_render::{
+    BlendMode, Color, CpuCanvas, DistanceFieldParams, DistanceFieldStyle, QuadParams, Rect, Renderer, ScaledRenderer, TextureFilter, TextureId, UvRect,
+};
 
 use super::Gpu;
 use super::batch::BYTES_PER_PIXEL;
@@ -301,4 +308,187 @@ fn a_target_of_another_size_reads_back_every_row_unpadded() {
     let last = pixels.len() - BYTES_PER_PIXEL as usize;
     assert_eq!(&pixels[last..], &[MIDTONE.r, MIDTONE.g, MIDTONE.b, u8::MAX], "and the last pixel is the last pixel drawn");
     assert_eq!(&pixels[..BYTES_PER_PIXEL as usize], &[BACKDROP.r, BACKDROP.g, BACKDROP.b, u8::MAX]);
+}
+
+/// Edge of the distance field the field scenes draw from, in texels.
+const FIELD: u32 = 32;
+
+/// The radius of the disc the field describes, in texels, and how far either side of its outline
+/// the field runs from nothing to everything.
+const DISC_RADIUS: f32 = 8.0;
+const DISC_SPREAD: f32 = 4.0;
+
+/// The distance a field holds on the outline it describes, as a share of one.
+const ON_THE_OUTLINE: f32 = 0.5;
+
+/// What the field scenes are cleared to: a colour with three different channels, none of them at
+/// either end, so a wrong channel or a wrong weight shows.
+const FIELD_BACKDROP: Color = Color::rgb(40, 90, 150);
+
+/// The colour the field scenes' glyph is drawn in: translucent, so its alpha is weighed too.
+const FIELD_INK: Color = Color { r: 250, g: 220, b: 40, a: 230 };
+
+/// An outline and a shadow that are both plainly there: an outline reaching half the field's range
+/// further out, and a soft shadow moved three texels right and two down.
+const DRESSED: DistanceFieldStyle = DistanceFieldStyle {
+    outline_distance: 0.25,
+    outline_color: Color { r: 200, g: 30, b: 60, a: 255 },
+    shadow_color: Color { r: 10, g: 20, b: 80, a: 200 },
+    shadow_smoothing: 0.125,
+    shadow_offset: (3.0 / FIELD as f32, 2.0 / FIELD as f32),
+};
+
+/// The same shadow with no smoothing, which hands the shader a ramp of no width.
+const HARD_SHADOWED: DistanceFieldStyle = DistanceFieldStyle { outline_distance: 0.5, shadow_smoothing: 0.0, ..DRESSED };
+
+/// The distance field of a disc in the middle of a [`FIELD`]-texel square: white, with the distance
+/// to the disc's outline in its alpha -- half on the outline, more inside and less outside.
+fn disc_field() -> Vec<u8> {
+    let middle = FIELD as f32 / 2.0;
+    (0..FIELD * FIELD)
+        .flat_map(|i| {
+            let (x, y) = ((i % FIELD) as f32 + 0.5 - middle, (i / FIELD) as f32 + 0.5 - middle);
+            let held = (ON_THE_OUTLINE + (DISC_RADIUS - x.hypot(y)) / (2.0 * DISC_SPREAD)).clamp(0.0, 1.0);
+            [u8::MAX, u8::MAX, u8::MAX, (held * f32::from(u8::MAX)).round() as u8]
+        })
+        .collect()
+}
+
+fn register_field<R: Renderer>(r: &mut R) -> TextureId {
+    r.register_texture("pixel_tests.field", &disc_field(), FIELD, FIELD)
+}
+
+/// One arrangement of distance field quads, queued identically on both backends.
+#[derive(Debug, Clone, Copy)]
+enum FieldScene {
+    /// What a text that asks for nothing is drawn with, on whole pixels and on fractions of one.
+    Plain,
+    /// An outline and a soft shadow.
+    Dressed,
+    /// The dressed glyph at twice its size, at half of it, and squeezed across only.
+    Resized,
+    /// A shadow with no smoothing, on whole pixels.
+    HardShadowed,
+    /// The dressed glyph under each blend a text can inherit, clipped, and between ordinary quads.
+    Blended,
+}
+
+const FIELD_SCENES: [FieldScene; 5] = [FieldScene::Plain, FieldScene::Dressed, FieldScene::Resized, FieldScene::HardShadowed, FieldScene::Blended];
+
+fn field_quad(dst: Rect, style: DistanceFieldStyle) -> DistanceFieldParams {
+    DistanceFieldParams { dst, src: UvRect::FULL, tint: FIELD_INK, blend: BlendMode::Alpha, style }
+}
+
+fn paint_field<R: Renderer>(scene: FieldScene, r: &mut R) {
+    let edge = FIELD as f32;
+    r.clear(FIELD_BACKDROP);
+    let tex = register_field(r);
+    match scene {
+        FieldScene::Plain => {
+            r.draw_distance_field_quad(tex, field_quad(Rect::new(8.0, 16.0, edge, edge), DistanceFieldStyle::PLAIN));
+            r.draw_distance_field_quad(tex, field_quad(Rect::new(52.5, 14.25, edge, edge), DistanceFieldStyle::PLAIN));
+        }
+        FieldScene::Dressed => {
+            r.draw_distance_field_quad(tex, field_quad(Rect::new(8.0, 16.0, edge, edge), DRESSED));
+            r.draw_distance_field_quad(tex, field_quad(Rect::new(52.5, 14.25, edge, edge), DRESSED));
+        }
+        FieldScene::Resized => {
+            r.draw_distance_field_quad(tex, field_quad(Rect::new(0.0, 0.0, 2.0 * edge, 2.0 * edge), DRESSED));
+            r.draw_distance_field_quad(tex, field_quad(Rect::new(70.0, 4.0, edge / 2.0, edge / 2.0), DRESSED));
+            r.draw_distance_field_quad(tex, field_quad(Rect::new(66.3, 28.6, 0.7 * edge, edge), DRESSED));
+        }
+        FieldScene::HardShadowed => {
+            r.draw_distance_field_quad(tex, field_quad(Rect::new(8.0, 16.0, edge, edge), HARD_SHADOWED));
+            r.draw_distance_field_quad(tex, field_quad(Rect::new(52.0, 14.0, edge, edge), HARD_SHADOWED));
+        }
+        FieldScene::Blended => {
+            r.fill_rect(Rect::new(0.0, 0.0, 48.0, 64.0), MIDTONE);
+            r.draw_distance_field_quad(tex, DistanceFieldParams { blend: BlendMode::Add, ..field_quad(Rect::new(0.0, 0.0, edge, edge), DRESSED) });
+            r.draw_distance_field_quad(tex, DistanceFieldParams { blend: BlendMode::Multiply, ..field_quad(Rect::new(32.0, 0.0, edge, edge), DRESSED) });
+            r.draw_distance_field_quad(tex, DistanceFieldParams { blend: BlendMode::InvertDst, ..field_quad(Rect::new(64.0, 0.0, edge, edge), DRESSED) });
+            r.push_clip(Rect::new(10.0, 40.0, 20.0, 24.0));
+            r.draw_distance_field_quad(tex, field_quad(Rect::new(0.0, 32.0, edge, edge), DRESSED));
+            r.pop_clip();
+            let swatch = register_swatch(r);
+            r.draw_textured_quad(swatch, QuadParams::new(Rect::new(40.0, 36.0, 24.0, 24.0)));
+            r.draw_distance_field_quad(tex, field_quad(Rect::new(48.0, 32.0, edge, edge), DistanceFieldStyle::PLAIN));
+            r.fill_rect(Rect::new(72.0, 44.0, 20.0, 8.0), Color { a: 128, ..Color::GREEN });
+        }
+    }
+}
+
+/// The reference's distance field shader comes to the same pixels on the GPU as on the CPU canvas:
+/// the ramps, the outline, the shadow and the final mix, at every size and under every blend.
+#[test]
+fn distance_field_quads_come_out_the_way_the_cpu_canvas_draws_them() {
+    let Some(mut gpu) = offscreen(WIDTH, HEIGHT) else {
+        return;
+    };
+    for scene in FIELD_SCENES {
+        paint_field(scene, &mut gpu);
+        let from_gpu = gpu.capture().expect("an offscreen target reads back");
+
+        let mut cpu = CpuCanvas::new(WIDTH, HEIGHT);
+        paint_field(scene, &mut cpu);
+
+        let (difference, (x, y)) = worst_difference(&from_gpu, cpu.pixels(), WIDTH);
+        println!("distance field {scene:?}: the backends are at most {difference}/255 apart, at ({x}, {y}); {TOLERANCE} allowed");
+        assert_frames_agree(&from_gpu, cpu.pixels(), WIDTH, &format!("distance field {scene:?}"));
+        assert_ne!(cpu.pixels(), CpuCanvas::new(WIDTH, HEIGHT).pixels(), "the scene drew nothing to compare");
+    }
+}
+
+/// What a text on a built-in sized screen goes through on a larger window: the same field quads
+/// scaled out by the adapter agree as well.
+#[test]
+fn distance_field_quads_scaled_out_to_a_larger_target_agree_on_both_backends() {
+    let (width, height) = (WIDTH * ENLARGEMENT, HEIGHT * ENLARGEMENT);
+    let Some(mut gpu) = offscreen(width, height) else {
+        return;
+    };
+    for scene in [FieldScene::Dressed, FieldScene::Resized] {
+        paint_field(scene, &mut ScaledRenderer::new(&mut gpu, SHAPE));
+        let from_gpu = gpu.capture().expect("an offscreen target reads back");
+
+        let mut cpu = CpuCanvas::new(width, height);
+        paint_field(scene, &mut ScaledRenderer::new(&mut cpu, SHAPE));
+
+        let (difference, (x, y)) = worst_difference(&from_gpu, cpu.pixels(), width);
+        println!("distance field {scene:?} enlarged: the backends are at most {difference}/255 apart, at ({x}, {y}); {TOLERANCE} allowed");
+        assert_frames_agree(&from_gpu, cpu.pixels(), width, &format!("distance field {scene:?} enlarged"));
+    }
+}
+
+/// The comparison above would pass as readily if both backends drew the field as a plain texture.
+/// This holds the GPU's own pixels to what the shader has to write where that is beyond argument:
+/// the glyph's colour deep inside the disc, the outline's in the band around it, the shadow's where
+/// only the shadow reaches, and nothing at all past them.
+#[test]
+fn a_distance_field_glyph_on_the_gpu_has_its_body_its_outline_and_its_shadow() {
+    const LEFT: u32 = 8;
+    const TOP: u32 = 16;
+    let Some(mut gpu) = offscreen(WIDTH, HEIGHT) else {
+        return;
+    };
+    gpu.clear(Color::BLACK);
+    let tex = register_field(&mut gpu);
+    let opaque = Color { a: u8::MAX, ..FIELD_INK };
+    let shadow = Color { a: u8::MAX, ..DRESSED.shadow_color };
+    let style = DistanceFieldStyle { shadow_color: shadow, shadow_offset: (6.0 / FIELD as f32, 0.0), ..DRESSED };
+    gpu.draw_distance_field_quad(
+        tex,
+        DistanceFieldParams { tint: opaque, ..field_quad(Rect::new(LEFT as f32, TOP as f32, FIELD as f32, FIELD as f32), style) },
+    );
+    let pixels = gpu.capture().expect("an offscreen target reads back");
+    let at = |x: u32, y: u32| {
+        let i = ((y * WIDTH + x) * BYTES_PER_PIXEL) as usize;
+        Color { r: pixels[i], g: pixels[i + 1], b: pixels[i + 2], a: pixels[i + 3] }
+    };
+    let (middle_x, middle_y) = (LEFT + FIELD / 2, TOP + FIELD / 2);
+
+    assert_eq!(at(middle_x, middle_y), opaque, "the middle of the disc is the glyph's own colour");
+    assert_eq!(at(middle_x + 6, middle_y + 6), DRESSED.outline_color, "nine texels out along the diagonal is past the disc and inside its outline");
+    assert_eq!(at(middle_x + 11, middle_y), shadow, "eleven right is past the outline and inside the shadow, which was moved six right");
+    assert_eq!(at(middle_x - 12, middle_y), Color::BLACK, "twelve left is past both");
+    assert_eq!(at(LEFT + FIELD + 2, middle_y), Color::BLACK, "and nothing is drawn outside the quad");
 }

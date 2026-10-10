@@ -38,6 +38,7 @@ use rbms_skin::timer::MICROS_PER_MILLI;
 
 use super::draw::Placement;
 use super::object::{Body, Sprite, image_sprite};
+use super::text::Fonts;
 use super::textures::Source;
 use super::{SkinAssets, SkinFrame};
 use crate::ctx::RenderCtx;
@@ -406,7 +407,7 @@ pub(crate) fn build_gauge(
     skin: &LoadedSkin,
     id: &str,
     sources: Source<'_>,
-    _families: &[(String, String)],
+    _fonts: &Fonts,
     _assets: &mut dyn SkinAssets,
     warnings: &mut Vec<String>,
 ) -> Option<Body> {

@@ -32,6 +32,7 @@ use rbms_skin::property::generated::FLOAT_GROOVEGAUGE_1P;
 use super::draw::{ImageSelect, Placement};
 use super::frame::JudgeHit;
 use super::object::{Body, ImageBody, MAX_PLACES, SkinObject, Sprite, image_sprite};
+use super::text::Fonts;
 use super::textures::Source;
 use super::{SkinAssets, SkinFrame};
 use crate::ctx::RenderCtx;
@@ -267,7 +268,7 @@ pub(crate) fn build_judge(
     skin: &LoadedSkin,
     id: &str,
     sources: Source<'_>,
-    _families: &[(String, String)],
+    _fonts: &Fonts,
     _assets: &mut dyn SkinAssets,
     warnings: &mut Vec<String>,
 ) -> Option<Body> {

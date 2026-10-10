@@ -40,6 +40,7 @@ use rbms_skin::loader::{Filtering, LoadedSkin, filtering_for, stretch_rect};
 use super::SkinAssets;
 use super::draw::Placement;
 use super::object::Body;
+use super::text::Fonts;
 use super::textures::Source;
 use crate::{Rect, Renderer, TextureFilter, TextureId, UvRect};
 use pixmap::{Pixmap, Rgba};
@@ -285,7 +286,7 @@ pub(crate) fn build_graph(
     skin: &LoadedSkin,
     id: &str,
     _sources: Source<'_>,
-    _families: &[(String, String)],
+    _fonts: &Fonts,
     _assets: &mut dyn SkinAssets,
     warnings: &mut Vec<String>,
 ) -> Option<Body> {

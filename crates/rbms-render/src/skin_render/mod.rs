@@ -44,16 +44,17 @@ mod tests_list_graphs;
 #[cfg(test)]
 mod tests_play_objects;
 
-use std::path::Path;
-use std::sync::OnceLock;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, MutexGuard, OnceLock};
 
 use rbms_skin::dst::{LuaDrawEval, SkinColor, SkinRect};
 use rbms_skin::loader::LoadedSkin;
 use rbms_skin::property::generated::OFFSET_ALL;
 
+use crate::bitmap_font;
 use crate::font::TextContext;
-use crate::{Color, Rect, Renderer};
+use crate::{Color, Rect, Renderer, locked};
 
 pub use bga::BgaFrame;
 pub use color::parse_hex_color;
@@ -112,7 +113,10 @@ pub trait SkinAssets {
     /// Decode the image file at `path` into RGBA8 pixels, or `None` when it cannot be read.
     fn image(&mut self, path: &Path) -> Option<SkinImage>;
 
-    /// The bytes of the font file at `path`, or `None` when it cannot be read.
+    /// The bytes of the font file at `path`, or `None` when it cannot be read. A bitmap font's
+    /// `.fnt` file is asked for here like any other font; its page images are asked of
+    /// [`SkinAssets::image`], and only once a glyph on one is to be drawn
+    /// ([`SkinScreen::wanted_font_pages`]).
     ///
     /// The default reads the file, which is what a host with nothing prepared wants. A host that
     /// keeps its frame loop off the disk overrides this with bytes it read on a worker, the same
@@ -120,6 +124,28 @@ pub trait SkinAssets {
     fn font(&mut self, path: &Path) -> Option<Vec<u8>> {
         std::fs::read(path).ok()
     }
+}
+
+/// Reads the bitmap font `id` at `path` and makes it one of a screen's faces. The lines of its file
+/// that were skipped go to `warnings`: the ones the font kept in words, and how many more there
+/// were.
+fn bitmap_face(
+    skin: &LoadedSkin,
+    id: &str,
+    path: &Path,
+    pages: &text::bitmap::SharedPages,
+    assets: &mut dyn SkinAssets,
+    warnings: &mut Vec<String>,
+) -> Result<Arc<text::bitmap::ScreenFace>, String> {
+    let bytes = assets.font(path).ok_or_else(|| "the file could not be read".to_string())?;
+    let font = bitmap_font::load(path, &skin.root, &bytes)?;
+    let said = font.warnings();
+    warnings.extend(said.iter().map(|line| format!("font {id:?}: {line}")));
+    if font.skipped() > said.len() {
+        warnings.push(format!("font {id:?}: and {} more lines like those", font.skipped() - said.len()));
+    }
+    let font_type = skin.def.font.iter().find(|font| font.id == id).map_or(0, |font| font.font_type);
+    Ok(Arc::new(text::bitmap::ScreenFace::new(font, text::bitmap::BitmapKind::of(font_type), Arc::clone(pages))))
 }
 
 /// A frame with no interpreter behind it: nothing evaluates.
@@ -195,8 +221,13 @@ pub struct SkinScreen {
     interactions: Vec<input::Interaction>,
     /// Every texture this screen registered, so it can hand them all back.
     textures: textures::SkinTextures,
-    /// The font family each font id resolved to inside the text engine.
+    /// The font family each TrueType font id resolved to inside the text engine.
     families: Vec<(String, String)>,
+    /// How many of the document's fonts loaded as bitmap fonts. The text objects drawn with one
+    /// hold it themselves.
+    bitmap_fonts: usize,
+    /// The page images the bitmap fonts have asked for and what became of each.
+    font_pages: text::bitmap::SharedPages,
     warnings: Vec<String>,
     /// The offset the whole screen is drawn under, settled by the first frame that is drawn and
     /// kept for as long as the screen is (`Skin.ensureRenderer`, which sets the transform when it
@@ -248,20 +279,30 @@ impl SkinScreen {
         let mut warnings: Vec<String> = Vec::new();
         let textures = textures::SkinTextures::register(r, skin, assets, serial, pool, &mut warnings);
 
-        let mut families: Vec<(String, String)> = Vec::new();
+        let mut fonts: Vec<(String, text::FontRef)> = Vec::new();
+        let font_pages = text::bitmap::SharedPages::default();
         for (id, path) in &skin.fonts {
+            if bitmap_font::is_bitmap_font(path) {
+                match bitmap_face(skin, id, path, &font_pages, assets, &mut warnings) {
+                    Ok(face) => fonts.push((id.clone(), text::FontRef::Bitmap(face))),
+                    Err(error) => warnings.push(format!("font {id:?} could not be loaded from {}: {error}", path.display())),
+                }
+                continue;
+            }
             match assets.font(path).and_then(|data| text.load_font(data)) {
-                Some(family) => families.push((id.clone(), family)),
+                Some(family) => fonts.push((id.clone(), text::FontRef::Family(family))),
                 None => warnings.push(format!("font {id:?} could not be loaded from {}", path.display())),
             }
         }
 
         let mut kept = Vec::new();
-        let objects = object::build_objects(skin, textures.sources(), &families, assets, &mut warnings, &mut kept);
+        let objects = object::build_objects(skin, textures.sources(), &fonts, assets, &mut warnings, &mut kept);
         let interactions = input::interactions(skin, &kept, &objects);
         let authored = (skin.def.w.max(1) as f32, skin.def.h.max(1) as f32);
         let whole = whole::applies_to(skin.def.skin_type).then(OnceLock::new);
-        SkinScreen { authored, objects, interactions, textures, families, warnings, whole }
+        let families: Vec<(String, String)> = fonts.iter().filter_map(|(id, font)| Some((id.clone(), font.family()?.to_string()))).collect();
+        let bitmap_fonts = fonts.len() - families.len();
+        SkinScreen { authored, objects, interactions, textures, families, bitmap_fonts, font_pages, warnings, whole }
     }
 
     /// The size the document was authored at.
@@ -289,9 +330,64 @@ impl SkinScreen {
         self.textures.stats()
     }
 
-    /// The font families this screen registered, as `(document font id, family name)`.
+    /// The font families this screen registered, as `(document font id, family name)`. A bitmap
+    /// font is no family and is not among them ([`SkinScreen::bitmap_font_count`]).
     pub fn families(&self) -> &[(String, String)] {
         &self.families
+    }
+
+    /// How many of this screen's fonts are bitmap fonts.
+    pub fn bitmap_font_count(&self) -> usize {
+        self.bitmap_fonts
+    }
+
+    /// The page images of this screen's bitmap fonts that a glyph was to be drawn from and that
+    /// nobody has answered for yet.
+    ///
+    /// A bitmap font's pages are not loaded with the screen: a line of text touches one or two of
+    /// the dozens a published font has, so a page is wanted the first time a glyph on it is to be
+    /// drawn -- or from the start, for a string the document wrote out. A host looks here after a
+    /// frame, has each file decoded however it decodes images, and answers with
+    /// [`SkinScreen::settle_font_page`]. A glyph is drawn from the frame after its page is answered
+    /// for; the glyphs of its line that are on other pages do not wait for it.
+    pub fn wanted_font_pages(&self) -> Vec<PathBuf> {
+        self.pages().wanted()
+    }
+
+    /// How many font pages this screen holds as textures.
+    pub fn font_page_count(&self) -> usize {
+        self.pages().loaded()
+    }
+
+    /// Answers for the font page at `path`, when it is one this screen is waiting for: uploads the
+    /// image `assets` has for it, or takes hold of the texture `pool` already has, under the same
+    /// edge limit and byte budget as the screen's image sources. Answers whether the page became a
+    /// texture; one that did not leaves a line in [`SkinScreen::warnings`] and its glyphs draw
+    /// nothing from then on.
+    ///
+    /// `pool` has to be the pool the screen was built against, or `None` for a screen built on its
+    /// own.
+    pub fn settle_font_page<R: Renderer>(&mut self, r: &mut R, path: &Path, assets: &mut dyn SkinAssets, pool: Option<&mut textures::SkinTexturePool>) -> bool {
+        if !self.pages().is_wanted(path) {
+            return false;
+        }
+        let label = format!("font page {}", path.display());
+        let admitted = self.textures.admit_late(r, &label, path, assets, pool, &mut self.warnings);
+        self.pages().settle(path, admitted);
+        admitted.is_some()
+    }
+
+    /// Answers for every font page this screen is waiting for, decoding each through `assets` as it
+    /// goes, and says how many became textures. This is the whole of what a host that decodes on
+    /// its frame loop has to do: draw a frame, call this, and the next frame has its text.
+    pub fn load_font_pages<R: Renderer>(&mut self, r: &mut R, assets: &mut dyn SkinAssets, mut pool: Option<&mut textures::SkinTexturePool>) -> usize {
+        let wanted = self.wanted_font_pages();
+        wanted.iter().filter(|path| self.settle_font_page(r, path, assets, pool.as_deref_mut())).count()
+    }
+
+    /// This screen's page table.
+    fn pages(&self) -> MutexGuard<'_, text::bitmap::PageTable> {
+        locked(&self.font_pages)
     }
 
     /// Everything that was dropped while building, one line each.
@@ -314,6 +410,7 @@ impl SkinScreen {
     /// Lets go of everything this screen registered or holds.
     fn release_textures<R: Renderer>(&mut self, r: &mut R, pool: Option<&mut textures::SkinTexturePool>) {
         self.textures.release(r, pool);
+        self.pages().clear();
         for object in &self.objects {
             object.release(r);
         }

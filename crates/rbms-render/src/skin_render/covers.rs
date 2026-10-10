@@ -32,6 +32,7 @@ use rbms_skin::property::generated::{OFFSET_HIDDEN_COVER, OFFSET_LIFT};
 
 use super::draw::Placement;
 use super::object::{Body, Sprite, image_sprite};
+use super::text::Fonts;
 use super::textures::Source;
 use super::{SkinAssets, SkinFrame};
 use crate::Renderer;
@@ -117,7 +118,7 @@ pub(crate) fn build_cover(
     skin: &LoadedSkin,
     id: &str,
     sources: Source<'_>,
-    _families: &[(String, String)],
+    _fonts: &Fonts,
     _assets: &mut dyn SkinAssets,
     warnings: &mut Vec<String>,
 ) -> Option<Body> {

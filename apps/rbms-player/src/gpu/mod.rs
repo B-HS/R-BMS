@@ -24,8 +24,10 @@ pub(crate) use background::background_upload_needed;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use batch::{Batch, BatchKind, ColoredInstance, DrawList, TexturedInstance, pad_rows_to_alignment, scissor_rect};
-use rbms_render::{BlendFactor, BlendMode, Color, QuadParams, Rect, Renderer, TextureFilter, TextureId};
+use batch::{Batch, BatchKind, ColoredInstance, DistanceFieldInstance, DrawList, TexturedInstance, pad_rows_to_alignment, scissor_rect};
+use rbms_render::{
+    BlendFactor, BlendMode, Color, DISTANCE_FIELD_EDGE, DISTANCE_FIELD_SMOOTHING, DistanceFieldParams, QuadParams, Rect, Renderer, TextureFilter, TextureId,
+};
 use winit::window::Window;
 
 use crate::notify::{Level, notify};
@@ -79,6 +81,97 @@ fn vs(@builtin(vertex_index) vi: u32,
 fn fs(in: VsOut) -> @location(0) vec4<f32> { return textureSample(t, s, in.uv) * in.tint; }
 "#;
 
+/// The reference's distance field shader (`distance_field.frag`), line for line, with two things
+/// settled that it leaves to the driver so that this backend and `rbms_render::CpuCanvas` come to
+/// the same pixels.
+///
+/// The field is read with `textureLoad` and interpolated here rather than through a sampler: it is
+/// the same bilinear arithmetic at the precision of the rest of the shader, where a sampler weighs
+/// its four texels in a fixed point the ramps downstream would magnify. And `smoothstep` with both
+/// ends alike, which the reference asks for whenever a shadow has no smoothing and the
+/// specification leaves undefined, is a step.
+///
+/// What the reference passes as uniforms arrives per instance, so a change of outline or shadow
+/// does not end a draw call. `EDGE` and `SMOOTHING` are prepended by [`distance_field_shader`].
+const DISTANCE_FIELD_SHADER: &str = r#"
+@group(0) @binding(0) var<uniform> screen: vec4<f32>;
+@group(1) @binding(0) var t: texture_2d<f32>;
+struct VsOut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+    @location(1) @interpolate(flat) tint: vec4<f32>,
+    @location(2) @interpolate(flat) outline: vec4<f32>,
+    @location(3) @interpolate(flat) shadow: vec4<f32>,
+    @location(4) @interpolate(flat) field: vec4<f32>,
+};
+@vertex
+fn vs(@builtin(vertex_index) vi: u32,
+      @location(0) rect: vec4<f32>,
+      @location(1) uv: vec4<f32>,
+      @location(2) tint: vec4<f32>,
+      @location(3) outline: vec4<f32>,
+      @location(4) shadow: vec4<f32>,
+      @location(5) field: vec4<f32>) -> VsOut {
+    var corners = array<vec2<f32>, 6>(
+        vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 0.0), vec2<f32>(0.0, 1.0),
+        vec2<f32>(0.0, 1.0), vec2<f32>(1.0, 0.0), vec2<f32>(1.0, 1.0));
+    let c = corners[vi];
+    let px = rect.xy + c * rect.zw;
+    let ndc = vec2<f32>(px.x / screen.x * 2.0 - 1.0, 1.0 - px.y / screen.y * 2.0);
+    var o: VsOut;
+    o.pos = vec4<f32>(ndc, 0.0, 1.0);
+    o.uv = mix(uv.xy, uv.zw, c);
+    o.tint = tint;
+    o.outline = outline;
+    o.shadow = shadow;
+    o.field = field;
+    return o;
+}
+fn ramp(low: f32, high: f32, x: f32) -> f32 {
+    if (high == low) {
+        return select(0.0, 1.0, x > low);
+    }
+    let k = clamp((x - low) / (high - low), 0.0, 1.0);
+    return k * k * (3.0 - 2.0 * k);
+}
+fn held(at: vec2<i32>, last: vec2<i32>) -> f32 {
+    return textureLoad(t, clamp(at, vec2<i32>(0, 0), last), 0).a;
+}
+fn distance_at(uv: vec2<f32>) -> f32 {
+    let size = textureDimensions(t);
+    let at = uv * vec2<f32>(size) - vec2<f32>(0.5, 0.5);
+    let base = floor(at);
+    let part = at - base;
+    let corner = vec2<i32>(base);
+    let last = vec2<i32>(size) - vec2<i32>(1, 1);
+    let top_left = held(corner, last);
+    let top_right = held(corner + vec2<i32>(1, 0), last);
+    let bottom_left = held(corner + vec2<i32>(0, 1), last);
+    let bottom_right = held(corner + vec2<i32>(1, 1), last);
+    let top = top_left + (top_right - top_left) * part.x;
+    let bottom = bottom_left + (bottom_right - bottom_left) * part.x;
+    return top + (bottom - top) * part.y;
+}
+@fragment
+fn fs(in: VsOut) -> @location(0) vec4<f32> {
+    let distance = distance_at(in.uv);
+    let outline_factor = ramp(EDGE - SMOOTHING, EDGE + SMOOTHING, distance);
+    let color = mix(in.outline, in.tint, outline_factor);
+    let alpha = ramp(in.field.z - SMOOTHING, in.field.z + SMOOTHING, distance);
+    let glyph = vec4<f32>(color.rgb, color.a * alpha);
+    let shadow_distance = distance_at(in.uv - in.field.xy);
+    let shadow_alpha = ramp(EDGE - in.field.w, EDGE + in.field.w, shadow_distance);
+    let shadow = vec4<f32>(in.shadow.rgb, in.shadow.a * shadow_alpha);
+    return mix(shadow, glyph, glyph.a);
+}
+"#;
+
+/// [`DISTANCE_FIELD_SHADER`] with the two constants it shares with the CPU canvas written in front
+/// of it, so the two backends cannot drift apart on them.
+fn distance_field_shader() -> String {
+    format!("const EDGE: f32 = {DISTANCE_FIELD_EDGE:?};\nconst SMOOTHING: f32 = {DISTANCE_FIELD_SMOOTHING:?};\n{DISTANCE_FIELD_SHADER}")
+}
+
 /// The blend modes a textured quad can ask for, in the order their pipelines are built and indexed.
 const BLEND_MODES: [BlendMode; 4] = [BlendMode::Alpha, BlendMode::Add, BlendMode::Multiply, BlendMode::InvertDst];
 
@@ -116,6 +209,13 @@ struct GpuTexture {
 const INSTANCE_ATTRS: [wgpu::VertexAttribute; 2] = wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4];
 
 const TEXTURED_ATTRS: [wgpu::VertexAttribute; 4] = wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4];
+
+const DISTANCE_FIELD_ATTRS: [wgpu::VertexAttribute; 6] =
+    wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4, 4 => Float32x4, 5 => Float32x4];
+
+/// Distance field instances the buffer is sized for before it has to grow: a screen of text, not a
+/// note field.
+const INITIAL_DISTANCE_FIELD_CAPACITY: usize = 1024;
 
 /// Instances the buffers are sized for before they have to grow.
 const INITIAL_INSTANCE_CAPACITY: usize = 8192;
@@ -261,6 +361,11 @@ pub(crate) struct Gpu {
     textured_bgl: wgpu::BindGroupLayout,
     textured_instances: wgpu::Buffer,
     textured_cap: usize,
+    /// One pipeline per blend mode for quads cut out of a distance field, indexed like
+    /// `textured_pipelines`. They read a texture through the same bind groups.
+    distance_field_pipelines: Vec<wgpu::RenderPipeline>,
+    distance_field_instances: wgpu::Buffer,
+    distance_field_cap: usize,
     nearest_sampler: wgpu::Sampler,
     linear_sampler: wgpu::Sampler,
     textures: Vec<Option<GpuTexture>>,
@@ -515,6 +620,46 @@ impl Gpu {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let distance_field_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("distance field"),
+            source: wgpu::ShaderSource::Wgsl(distance_field_shader().into()),
+        });
+        let distance_field_pipelines = BLEND_MODES
+            .iter()
+            .map(|mode| {
+                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some("distance field"),
+                    layout: Some(&textured_layout),
+                    vertex: wgpu::VertexState {
+                        module: &distance_field_shader,
+                        entry_point: Some("vs"),
+                        buffers: &[wgpu::VertexBufferLayout {
+                            array_stride: std::mem::size_of::<DistanceFieldInstance>() as u64,
+                            step_mode: wgpu::VertexStepMode::Instance,
+                            attributes: &DISTANCE_FIELD_ATTRS,
+                        }],
+                        compilation_options: Default::default(),
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &distance_field_shader,
+                        entry_point: Some("fs"),
+                        targets: &[Some(wgpu::ColorTargetState { format, blend: Some(blend_state(*mode)), write_mask: wgpu::ColorWrites::ALL })],
+                        compilation_options: Default::default(),
+                    }),
+                    primitive: wgpu::PrimitiveState::default(),
+                    depth_stencil: None,
+                    multisample: wgpu::MultisampleState::default(),
+                    multiview_mask: None,
+                    cache: None,
+                })
+            })
+            .collect();
+        let distance_field_instances = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("distance field instances"),
+            size: (INITIAL_DISTANCE_FIELD_CAPACITY * std::mem::size_of::<DistanceFieldInstance>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         let sampler = |filter| {
             device.create_sampler(&wgpu::SamplerDescriptor {
                 mag_filter: filter,
@@ -543,6 +688,9 @@ impl Gpu {
             textured_bgl,
             textured_instances,
             textured_cap: instance_cap,
+            distance_field_pipelines,
+            distance_field_instances,
+            distance_field_cap: INITIAL_DISTANCE_FIELD_CAPACITY,
             textures: Vec::new(),
             texture_keys: HashMap::new(),
             draw: DrawList::default(),
@@ -677,6 +825,18 @@ impl Gpu {
                 mapped_at_creation: false,
             });
         }
+        if self.draw.distance_field.len() > self.distance_field_cap {
+            self.distance_field_cap = self.draw.distance_field.len().next_power_of_two();
+            self.distance_field_instances = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("distance field instances"),
+                size: (self.distance_field_cap * std::mem::size_of::<DistanceFieldInstance>()) as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+        }
+        if !self.draw.distance_field.is_empty() {
+            self.queue.write_buffer(&self.distance_field_instances, 0, bytemuck::cast_slice(&self.draw.distance_field));
+        }
         if !self.draw.colored.is_empty() {
             self.queue.write_buffer(&self.instances, 0, bytemuck::cast_slice(&self.draw.colored));
         }
@@ -738,6 +898,14 @@ impl Gpu {
                 rp.set_pipeline(&self.textured_pipelines[blend_index(blend)]);
                 rp.set_bind_group(1, if filter == TextureFilter::Linear { &texture.linear } else { &texture.nearest }, &[]);
                 rp.set_vertex_buffer(0, self.textured_instances.slice(..));
+            }
+            BatchKind::DistanceField { tex, blend } => {
+                let Some(Some(texture)) = self.textures.get(tex.0 as usize) else {
+                    return;
+                };
+                rp.set_pipeline(&self.distance_field_pipelines[blend_index(blend)]);
+                rp.set_bind_group(1, &texture.linear, &[]);
+                rp.set_vertex_buffer(0, self.distance_field_instances.slice(..));
             }
         }
         rp.draw(0..6, entry.first..entry.first + entry.count);
@@ -913,6 +1081,14 @@ impl Renderer for Gpu {
         }
         let kind = BatchKind::Textured { tex, blend: params.blend, filter: params.filter };
         self.draw.push_textured(kind, TexturedInstance::new(&params));
+    }
+
+    fn draw_distance_field_quad(&mut self, tex: TextureId, params: DistanceFieldParams) {
+        let drawable = matches!(self.texture_size(tex), Some((width, height)) if width > 0 && height > 0);
+        if !(drawable && params.dst.w > 0.0 && params.dst.h > 0.0) {
+            return;
+        }
+        self.draw.push_distance_field(tex, params.blend, DistanceFieldInstance::new(&params));
     }
 
     fn push_clip(&mut self, rect: Rect) {

@@ -34,6 +34,14 @@
 //! real chart and saves a frame at each of several moments, walking the scene's own times on the way
 //! so the timers a skin animates on are on since when they would be.
 //!
+//! A bitmap font is captured twice over. A pack written here, whose one font is the renderer's
+//! distance field fixture, is drawn on both backends by a test that runs on every machine and holds
+//! the two frames to each other. And the decide scene of the pack [`SKIN_PACK_ENV`] names is drawn
+//! once more with the row that turns the pack's bitmap fonts on switched on, on both backends, so the
+//! two can be laid side by side. Either way the frame that counts is the first one whose text had
+//! every page of its fonts: a page is decoded off the frame loop, after the frame that first wanted
+//! a glyph on it.
+//!
 //! The result scene is captured the same way and for the same reason, and for a run that was really
 //! played: a chart that ships with the repository is run to its end by the engine, once played for
 //! it and once with nobody playing, and the screen the application makes of each is walked from its
@@ -91,13 +99,19 @@ const CAPTURE_EXTENSION: &str = "png";
 /// Extension of the same frame drawn by the GPU, so the two sit side by side under one name.
 const GPU_CAPTURE_EXTENSION: &str = "gpu.png";
 
-/// Frames a test draws while a document's files are read on the worker pool.
+/// How long a test goes on drawing frames for a document that is still on its way before it gives
+/// the document up.
 ///
 /// A document is compiled off the frame loop, so the frame it is selected on still draws the
-/// built-in layout and the document takes over once its images have arrived. Four seconds of frames
-/// is far more than a small image needs and still fails rather than hanging if the pool never
-/// finishes.
-const DOCUMENT_LOAD_FRAMES: usize = 240;
+/// built-in layout and the document takes over once its images have arrived. What a test waits for
+/// is that: the document compiled, or known not to be coming. This is only what keeps a worker pool
+/// that never finishes from hanging the test, and is far more than a small image needs on a machine
+/// busy with every other test.
+const DOCUMENT_LOAD_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// How long a frame that finds work still on the worker pool stands back for it. The frames a test
+/// draws are not paced, and on a window-less GPU one is over in tens of microseconds.
+const WORKER_PAUSE: Duration = Duration::from_millis(1);
 
 /// The scene time of a frame drawn the moment its scene began.
 pub(super) const SCENE_START_US: i64 = 0;
@@ -199,15 +213,23 @@ pub(super) fn draw_until_compiled(app: &mut App, screen: i32, scene_us: i64, pix
 }
 
 /// [`draw_until_compiled`] on either kind of target.
+///
+/// The wait is for the document and not for a number of frames: it ends on the frame that finds the
+/// document compiled, or on the first that finds it neither compiled nor on its way, which is a
+/// document that could not be read.
 fn draw_until_compiled_on(app: &mut App, screen: i32, scene_us: i64, canvas: &mut Canvas<'_>, stage: impl Fn() -> Stage) -> bool {
-    for _ in 0..DOCUMENT_LOAD_FRAMES {
+    let deadline = Instant::now() + DOCUMENT_LOAD_TIMEOUT;
+    loop {
         draw_on(app, stage(), scene_us, canvas);
         if app.shared.has_compiled_skin(screen) {
             draw_on(app, stage(), scene_us, canvas);
             return true;
         }
+        if !app.shared.skin_is_loading(screen) || Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(WORKER_PAUSE);
     }
-    false
 }
 
 /// [`draw_at`] on either kind of target: the scene clock is put where the frame was asked for, and
@@ -710,6 +732,275 @@ fn the_decide_scene_of_a_skin_pack_named_by_the_environment_is_captured_from_its
         .unwrap_or_else(|reason| panic!("decide-rich: not drawn: {reason}"));
     println!("decide-rich: captured {}", saved.join(", "));
 
+    assert_eq!(files_under(&pack), before, "capturing the pack's decide scene changed its folder");
+}
+
+/// The folder of the renderer's bitmap font fixtures, named from this crate's folder, and the files
+/// of the distance field font among them.
+const FIELD_FONT_FOLDER: &str = "../../crates/rbms-render/tests/skin/fonts";
+const FIELD_FONT_FILES: [&str; 2] = ["field.fnt", "field_0.png"];
+
+/// The size the fixture font was made at, which draws it one to one on a target of the size the
+/// document below is authored at.
+const FIELD_FONT_SIZE: u32 = 32;
+
+/// Where the document's first line starts and how far below the top of the screen its top edge is,
+/// and how many times the font's own size it is drawn.
+const FIELD_LINE_LEFT: u32 = 100;
+const FIELD_LINE_TOP: u32 = 100;
+const FIELD_LINE_ENLARGED: u32 = 2;
+
+/// How far below the top of the screen the document's second and third lines are, and the room
+/// every line is given.
+const FIELD_PLAIN_TOP: u32 = 300;
+const FIELD_SMALL_TOP: u32 = 420;
+const FIELD_LINE_ROOM: u32 = 900;
+
+/// How far right of a line's start and below its top edge the middle of the fixture's `O` is, and
+/// the radius of its disc, at the size the font was made at.
+const FIELD_DISC_MIDDLE: u32 = 16;
+const FIELD_DISC_RADIUS: f32 = 12.0;
+
+/// How far past the disc, in the font's own texels, the middle of the first line's outline is: the
+/// outline is a quarter of the field's range wide, which is two texels, and its inner texel is
+/// wholly the outline's colour.
+const FIELD_OUTLINE_MIDDLE: f32 = 1.0;
+
+/// The colours the first line is drawn in: its glyphs, its outline and its shadow.
+const FIELD_INK: crate::Color = crate::Color { r: 255, g: 255, b: 255, a: 255 };
+const FIELD_OUTLINE: crate::Color = crate::Color { r: 255, g: 0, b: 0, a: 255 };
+
+/// A pack of one test's own: a key configuration document whose only font is the fixture's
+/// distance field font, showing a line with an outline and a soft shadow at twice the font's size,
+/// a translucent line at the font's own size with neither, and a line at half of it.
+fn field_font_pack(tag: &str) -> PathBuf {
+    let pack = settings_of(tag).with_file_name("pack");
+    std::fs::create_dir_all(&pack).expect("the pack folder is writable");
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join(FIELD_FONT_FOLDER);
+    for file in FIELD_FONT_FILES {
+        std::fs::copy(fixture.join(file), pack.join(file)).expect("the fixture font is copied");
+    }
+    let (width, height) = UI_SIZE;
+    let (large, plain, small) = (FIELD_FONT_SIZE * FIELD_LINE_ENLARGED, FIELD_FONT_SIZE, FIELD_FONT_SIZE / 2);
+    let line = |id: &str, top: u32, size: u32, color: &str| {
+        let bottom = height - top - size;
+        format!(r#"{{ "id": "{id}", "dst": [{{ "time": 0, "x": {FIELD_LINE_LEFT}, "y": {bottom}, "w": {FIELD_LINE_ROOM}, "h": {size}{color} }}] }}"#)
+    };
+    let document = format!(
+        r#"{{
+            "type": {SKIN_TYPE_KEY_CONFIG}, "name": "Distance field font", "w": {width}, "h": {height},
+            "font": [{{ "id": "0", "path": "{}", "type": 1 }}],
+            "text": [
+                {{ "id": "dressed", "font": "0", "size": {large}, "constantText": "OIO IO",
+                   "outlineColor": "ff0000ff", "outlineWidth": 0.5,
+                   "shadowColor": "2040ffc8", "shadowOffsetX": 3, "shadowOffsetY": 3, "shadowSmoothness": 0.25 }},
+                {{ "id": "plain", "font": "0", "size": {plain}, "constantText": "OOII OIOI" }},
+                {{ "id": "small", "font": "0", "size": {small}, "constantText": "OIOIOIOI IIOO",
+                   "outlineColor": "00c060ff", "outlineWidth": 0.4 }}
+            ],
+            "destination": [{}, {}, {}]
+        }}"#,
+        FIELD_FONT_FILES[0],
+        line("dressed", FIELD_LINE_TOP, large, ""),
+        line("plain", FIELD_PLAIN_TOP, plain, r#", "r": 250, "g": 220, "b": 40, "a": 230"#),
+        line("small", FIELD_SMALL_TOP, small, ""),
+    );
+    std::fs::write(pack.join("keys.json"), document).expect("the document is written");
+    pack
+}
+
+/// Draws frames with `frame`, ending each the way the application ends one, until the document for
+/// `screen` has compiled and a frame has been drawn whose text had every font page it asked for.
+///
+/// A bitmap font's pages are decoded off the frame loop and only once a glyph on one is to be
+/// drawn, so the frame a line is first drawn on wants its pages and shows nothing of it, and the
+/// frame its last page arrives on was drawn before that. The frame that counts is the one after: it
+/// ends with no page wanted and no more pages in than the frame before it ended with.
+fn draw_until_text_settles(app: &mut App, screen: i32, canvas: &mut Canvas<'_>, mut frame: impl FnMut(&mut App, &mut Canvas<'_>)) -> Result<(), String> {
+    let deadline = Instant::now() + PACK_LOAD_TIMEOUT;
+    let mut pages_in = None;
+    loop {
+        frame(app, canvas);
+        app.shared.finish_skin_frame(canvas);
+        if let Some(reason) = app.shared.skin_failure(screen) {
+            return Err(reason.lines().next().unwrap_or_default().to_owned());
+        }
+        let settled = app.shared.skin_screens.get(screen).filter(|compiled| compiled.wanted_font_pages().is_empty()).map(|compiled| compiled.font_page_count());
+        if settled.is_some() && settled == pages_in {
+            return Ok(());
+        }
+        pages_in = settled;
+        if Instant::now() >= deadline {
+            return Err(format!("its text was not drawn within {} seconds", PACK_LOAD_TIMEOUT.as_secs()));
+        }
+        std::thread::sleep(WORKER_PAUSE);
+    }
+}
+
+/// How far apart two frames of one shot are: how many pixels have a channel more than
+/// [`GPU_TOLERANCE`] apart, and the widest any channel is apart.
+fn frames_apart(one: &[u8], other: &[u8]) -> (usize, u8) {
+    assert_eq!(one.len(), other.len(), "the two frames are not the same size");
+    let pixels = one.chunks_exact(rbms_render::BYTES_PER_PIXEL).zip(other.chunks_exact(rbms_render::BYTES_PER_PIXEL));
+    let widest = |(one, other): &(&[u8], &[u8])| one.iter().zip(*other).map(|(a, b)| a.abs_diff(*b)).max().unwrap_or(0);
+    pixels.map(|pair| widest(&pair)).fold((0, 0), |(apart, worst), widest| (apart + usize::from(widest > GPU_TOLERANCE), worst.max(widest)))
+}
+
+/// One pixel of a frame given as tightly packed RGBA8 rows of `width` pixels.
+fn pixel_of(rgba: &[u8], width: u32, x: u32, y: u32) -> crate::Color {
+    let at = (y as usize * width as usize + x as usize) * rbms_render::BYTES_PER_PIXEL;
+    crate::Color { r: rgba[at], g: rgba[at + 1], b: rgba[at + 2], a: rgba[at + 3] }
+}
+
+/// The name the distance field fixture's capture is saved under.
+const FIELD_FONT_SHOT: &str = "field-font-1920x1080";
+
+/// A document whose font is a distance field font is drawn by the application through the distance
+/// field shader on both backends, and the two frames are the same frame. The target is half as
+/// large again as the document is authored at, so every glyph is scaled by a factor that is not a
+/// whole number and lands on fractions of a pixel.
+///
+/// The pack is written here from the renderer's own fixture, so this runs wherever the tests do; on
+/// a machine with no adapter the headless half still holds the frame to what the shader has to
+/// draw.
+#[test]
+fn a_distance_field_font_is_captured_alike_on_the_gpu_and_on_the_headless_canvas() {
+    let (name, size) = (FIELD_FONT_SHOT, LARGE);
+    let pack = field_font_pack("field-font-files");
+    let key_config_frame = |app: &mut App, canvas: &mut Canvas<'_>| draw_on(app, key_config(), SCENE_START_US, canvas);
+    let scale = size.0 as f32 / UI_SIZE.0 as f32;
+    let enlarged = scale * FIELD_LINE_ENLARGED as f32;
+    let middle_of = |start: u32| scale * (start + FIELD_LINE_ENLARGED * FIELD_DISC_MIDDLE) as f32;
+    let middle = (middle_of(FIELD_LINE_LEFT), middle_of(FIELD_LINE_TOP));
+    let along_the_diagonal = (FIELD_DISC_RADIUS + FIELD_OUTLINE_MIDDLE) * enlarged * std::f32::consts::FRAC_1_SQRT_2;
+    let in_the_disc = (middle.0 as u32, middle.1 as u32);
+    let in_the_outline = ((middle.0 + along_the_diagonal) as u32, (middle.1 + along_the_diagonal) as u32);
+
+    let mut app = pack_app(&pack, name);
+    let mut headless = HeadlessCanvas::new(size.0, size.1);
+    draw_until_text_settles(&mut app, SKIN_TYPE_KEY_CONFIG, &mut Canvas::Headless(&mut headless), key_config_frame)
+        .unwrap_or_else(|reason| panic!("{name}: not drawn: {reason}"));
+    save(name, CAPTURE_EXTENSION, size, headless.rgba());
+    assert!(app.shared.skin_warnings(SKIN_TYPE_KEY_CONFIG).is_empty(), "{name}: {:?}", app.shared.skin_warnings(SKIN_TYPE_KEY_CONFIG));
+    assert_eq!(headless.pixel_at(in_the_disc.0, in_the_disc.1), FIELD_INK, "{name}: the middle of the first glyph is the text's colour");
+    assert_eq!(headless.pixel_at(in_the_outline.0, in_the_outline.1), FIELD_OUTLINE, "{name}: and a texel past its edge is its outline's");
+
+    let mut app = pack_app(&pack, &format!("{name}-gpu"));
+    let Some(mut gpu) = Gpu::offscreen_if_available(size.0, size.1, UI_SIZE) else {
+        return;
+    };
+    draw_until_text_settles(&mut app, SKIN_TYPE_KEY_CONFIG, &mut Canvas::Window(&mut gpu), key_config_frame)
+        .unwrap_or_else(|reason| panic!("{name}.gpu: not drawn: {reason}"));
+    let from_gpu = gpu.capture().expect("an offscreen target reads back");
+    save(name, GPU_CAPTURE_EXTENSION, size, &from_gpu);
+    assert_eq!(pixel_of(&from_gpu, size.0, in_the_disc.0, in_the_disc.1), FIELD_INK, "{name}.gpu: the middle of the first glyph");
+    assert_eq!(pixel_of(&from_gpu, size.0, in_the_outline.0, in_the_outline.1), FIELD_OUTLINE, "{name}.gpu: its outline");
+
+    let (apart, worst) = frames_apart(&from_gpu, headless.rgba());
+    println!("{name}: {apart} pixels are more than {GPU_TOLERANCE}/255 apart between the backends; the widest any channel is apart is {worst}/255");
+    assert_eq!(apart, 0, "{name}: the backends drew the distance field text differently, by as much as {worst}/255");
+}
+
+/// The row a pack this was written against offers its bitmap fonts under, and what the name of the
+/// item that switches them on starts with.
+const BITMAP_FONT_ROW: &str = "画像フォント";
+const BITMAP_FONT_ON: &str = "有効";
+
+/// How far into the decide scene the bitmap font capture is taken: the settled layout.
+const DECIDE_FONT_SHOT_MS: i64 = 1500;
+
+/// Make the choice a player makes on the SKIN tab: in the document the pack draws `screen` with,
+/// switch the row called `row` to the item whose name starts with `item`. Answers whether the
+/// document offers such a row and such an item.
+fn choose_in_skin(app: &mut App, screen: i32, row: &str, item: &str) -> bool {
+    let chosen = app.shared.skins.header_of(&app.shared.config, screen).and_then(|header| {
+        let offered = header.properties.iter().find(|offered| offered.name == row)?;
+        offered.item.iter().find(|offered| offered.name.starts_with(item)).map(|item| item.op)
+    });
+    let document = app.shared.skins.document_path(&app.shared.config, screen).map(str::to_owned);
+    let (Some(option), Some(document)) = (chosen, document) else {
+        return false;
+    };
+    app.shared.config.skin.customise(&document).properties.insert(row.to_owned(), option);
+    true
+}
+
+/// Open the pack's decide scene for the chart at `chart` with the pack's bitmap fonts switched on,
+/// and answer the app and the size the scene is authored at; or `None` when the pack's decide
+/// document offers no such choice.
+fn decide_with_bitmap_fonts(pack: &Path, tag: &str, chart: &Path) -> Option<(App, (u32, u32))> {
+    let mut app = pack_app(pack, tag);
+    let size = authored_size(&app, SKIN_TYPE_DECIDE)?;
+    if !choose_in_skin(&mut app, SKIN_TYPE_DECIDE, BITMAP_FONT_ROW, BITMAP_FONT_ON) {
+        return None;
+    }
+    let bytes = std::fs::read(chart).unwrap_or_else(|error| panic!("{} could not be read: {error}", chart.display()));
+    app.shared.chart_path = chart.to_string_lossy().into_owned();
+    let loaded = loaded_chart_for_tests(&bytes, &app.shared.chart_path);
+    app.stage = Stage::Decide(Box::new(DecideState::loaded(&app.shared, loaded)));
+    Some((app, size))
+}
+
+/// Walk the decide scene that is up to [`DECIDE_FONT_SHOT_MS`] on `canvas`: its first moment until
+/// the document has compiled, a frame just past its input time so the timer that starts there is
+/// on, and then the moment itself until its text has every font page.
+fn walk_decide_to_the_font_shot(app: &mut App, canvas: &mut Canvas<'_>) -> Result<(), String> {
+    let frame_at = |at_ms: i64| {
+        move |app: &mut App, canvas: &mut Canvas<'_>| {
+            scene_frame_at(app, at_ms, canvas);
+        }
+    };
+    draw_until_text_settles(app, SKIN_TYPE_DECIDE, canvas, frame_at(0))?;
+    let times = SceneTimes::of_skin(app.shared.skins.document(SKIN_TYPE_DECIDE));
+    if times.input_ms + 1 < DECIDE_FONT_SHOT_MS {
+        frame_at(times.input_ms + 1)(app, canvas);
+        app.shared.finish_skin_frame(canvas);
+    }
+    draw_until_text_settles(app, SKIN_TYPE_DECIDE, canvas, frame_at(DECIDE_FONT_SHOT_MS))
+}
+
+/// Captures the decide scene of a pack somebody else wrote with its bitmap fonts switched on, on
+/// both backends, so the text a distance field font draws can be looked at beside the same scene in
+/// the pack's TrueType fonts and the two backends beside each other.
+///
+/// Opt-in like the captures above it, and for a pack that offers the choice; one that does not is
+/// said and passed over. How far apart the two backends came out is printed rather than held to a
+/// number: the scene is a real clock's, so each backend draws its own moment of the skin's
+/// animations a few milliseconds from the other's.
+#[test]
+fn the_decide_scene_of_a_skin_pack_with_its_bitmap_fonts_on_is_captured_on_both_backends() {
+    let Some(pack) = crate::skin_select::pack_from_environment(std::env::var_os(SKIN_PACK_ENV)) else {
+        return;
+    };
+    assert!(pack.is_dir(), "{SKIN_PACK_ENV} names {}, which is not a folder", pack.display());
+    let before = files_under(&pack);
+    let sample = Path::new(env!("CARGO_MANIFEST_DIR")).join(DECIDE_SAMPLE_CHART);
+    let name = format!("decide-fnt-{DECIDE_FONT_SHOT_MS:04}ms");
+
+    let Some((mut app, size)) = decide_with_bitmap_fonts(&pack, "decide-fnt", &sample) else {
+        println!("{name}: the pack's decide document offers no {BITMAP_FONT_ROW:?} row to switch on");
+        return;
+    };
+    let mut headless = HeadlessCanvas::new(size.0, size.1);
+    walk_decide_to_the_font_shot(&mut app, &mut Canvas::Headless(&mut headless)).unwrap_or_else(|reason| panic!("{name}: not drawn: {reason}"));
+    save(&name, CAPTURE_EXTENSION, size, headless.rgba());
+    let pages = app.shared.skin_screens.get(SKIN_TYPE_DECIDE).map_or(0, |compiled| compiled.font_page_count());
+    println!("{name}: captured at {}x{} with {pages} font pages in; warnings {:?}", size.0, size.1, app.shared.skin_warnings(SKIN_TYPE_DECIDE));
+    assert!(pages > 0, "{name}: the scene drew no text from a bitmap font");
+
+    let gpu = decide_with_bitmap_fonts(&pack, "decide-fnt-gpu", &sample).zip(Gpu::offscreen_if_available(size.0, size.1, UI_SIZE));
+    if let Some(((mut app, _), mut gpu)) = gpu {
+        walk_decide_to_the_font_shot(&mut app, &mut Canvas::Window(&mut gpu)).unwrap_or_else(|reason| panic!("{name}.gpu: not drawn: {reason}"));
+        let from_gpu = gpu.capture().expect("an offscreen target reads back");
+        save(&name, GPU_CAPTURE_EXTENSION, size, &from_gpu);
+        let (apart, worst) = frames_apart(&from_gpu, headless.rgba());
+        let share = apart as f64 * 100.0 / (size.0 as f64 * size.1 as f64);
+        println!(
+            "{name}.gpu: {apart} pixels ({share:.3}%) are more than {GPU_TOLERANCE}/255 apart from the headless frame; the widest any channel is apart is {worst}/255"
+        );
+    } else {
+        println!("{name}.gpu: this machine has no graphics adapter");
+    }
     assert_eq!(files_under(&pack), before, "capturing the pack's decide scene changed its folder");
 }
 

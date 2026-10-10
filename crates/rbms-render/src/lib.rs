@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod bitmap_font;
 pub mod cpu;
 pub mod ctx;
 pub mod font;
@@ -14,7 +15,9 @@ pub mod skin_render;
 pub mod theme;
 pub mod toast;
 
-pub use cpu::{CpuCanvas, apply_blend, apply_tint};
+use std::sync::{Mutex, MutexGuard, PoisonError};
+
+pub use cpu::{CpuCanvas, apply_blend, apply_tint, distance_field_fragment};
 pub use ctx::{RenderCtx, with_render_ctx};
 pub use font::{
     LAYOUT_CACHE_LIMIT, RUN_CACHE_LIMIT, TextContext, cache_stats, draw_text, draw_text_centered, draw_text_right, fit_text, load_font, reset_ui_family,
@@ -92,6 +95,19 @@ impl Rect {
 /// Highest value any 8-bit colour channel can hold. Blend factors are evaluated in this same
 /// fixed-point range so `channel * factor / CHANNEL_MAX` stays in `u8`.
 pub const CHANNEL_MAX: u32 = 255;
+
+impl Color {
+    /// The colour's red, green, blue and alpha as the shares of one a shader works in.
+    pub fn unit_channels(self) -> [f32; 4] {
+        [self.r, self.g, self.b, self.a].map(|channel| channel as f32 / CHANNEL_MAX as f32)
+    }
+}
+
+/// The lock on `mutex`, whoever panicked while holding it before: nothing this crate keeps behind a
+/// lock is left half written by a panic.
+pub(crate) fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 /// Bytes per pixel in every RGBA8 buffer this crate hands to or takes from a backend.
 pub const BYTES_PER_PIXEL: usize = 4;
@@ -274,6 +290,74 @@ impl QuadParams {
     }
 }
 
+/// Half the width of the ramp a distance field's edge is smoothed over, in the field's own units
+/// (`distance_field.frag`: `const float smoothing = 1.0/16.0`).
+///
+/// It is a share of the field and not of the screen, so the edge of a glyph drawn large is as many
+/// times wider on screen as the glyph is, and the edge of one drawn small is narrower than a pixel.
+pub const DISTANCE_FIELD_SMOOTHING: f32 = 1.0 / 16.0;
+
+/// The distance a field holds along a glyph's outline: more inside it, less outside
+/// (`distance_field.frag`: `smoothstep(0.5 - smoothing, 0.5 + smoothing, distance)`).
+pub const DISTANCE_FIELD_EDGE: f32 = 0.5;
+
+/// What the reference's distance field shader is told about one run of glyphs, besides where they go:
+/// its uniforms (`distance_field.frag`).
+///
+/// A field holds, in its alpha channel, how far each texel is from the glyph's outline:
+/// [`DISTANCE_FIELD_EDGE`] on it. The shader is not the textbook one, and
+/// [`distance_field_fragment`] is its arithmetic line for line.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DistanceFieldStyle {
+    /// The distance the glyph is opaque from (`u_outlineDistance`): [`DISTANCE_FIELD_EDGE`] for no
+    /// outline, and less for an outline reaching that much further out.
+    pub outline_distance: f32,
+    /// The colour of the band between `outline_distance` and the glyph's own edge (`u_outlineColor`).
+    pub outline_color: Color,
+    /// The colour of the shadow (`u_shadowColor`).
+    pub shadow_color: Color,
+    /// Half the width of the ramp the shadow's edge is smoothed over (`u_shadowSmoothing`).
+    pub shadow_smoothing: f32,
+    /// How far the shadow is moved, as a share of the texture: right and down for positive values
+    /// (`u_shadowOffset`, which the shader subtracts from the texture coordinate).
+    pub shadow_offset: (f32, f32),
+}
+
+impl DistanceFieldStyle {
+    /// What a text that says nothing about its outline or its shadow is drawn with
+    /// (`JsonSkin.Text`): no outline, and an outline and a shadow of white at no opacity.
+    pub const PLAIN: DistanceFieldStyle = DistanceFieldStyle {
+        outline_distance: DISTANCE_FIELD_EDGE,
+        outline_color: Color { r: u8::MAX, g: u8::MAX, b: u8::MAX, a: 0 },
+        shadow_color: Color { r: u8::MAX, g: u8::MAX, b: u8::MAX, a: 0 },
+        shadow_smoothing: 0.0,
+        shadow_offset: (0.0, 0.0),
+    };
+}
+
+/// Everything one quad cut out of a distance field needs beyond the texture itself.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DistanceFieldParams {
+    /// Where the quad lands, in logical screen pixels.
+    pub dst: Rect,
+    /// Which part of the field to read. The shadow reads beside it, wherever that falls in the
+    /// texture.
+    pub src: UvRect,
+    /// The colour of the glyph itself, alpha included (`v_color`).
+    pub tint: Color,
+    /// How what the shader writes is combined with the target.
+    pub blend: BlendMode,
+    pub style: DistanceFieldStyle,
+}
+
+impl DistanceFieldParams {
+    /// The same quad drawn as an ordinary textured one: the field's texels multiplied by the tint.
+    /// It is what a backend with no distance field path falls back to.
+    pub fn as_plain_quad(&self) -> QuadParams {
+        QuadParams { src: self.src, tint: self.tint, blend: self.blend, filter: TextureFilter::Linear, ..QuadParams::new(self.dst) }
+    }
+}
+
 /// Horizontal share of the destination each skin `center` anchor sits at, `SkinObject.java:80-81`.
 const SKIN_CENTER_X: [f32; 10] = [0.5, 0.0, 0.5, 1.0, 0.0, 0.5, 1.0, 0.0, 0.5, 1.0];
 
@@ -345,6 +429,17 @@ pub trait Renderer {
     fn texture_size(&self, tex: TextureId) -> Option<(u32, u32)>;
 
     fn draw_textured_quad(&mut self, tex: TextureId, params: QuadParams);
+
+    /// Draw a quad cut out of a distance field, the way the reference's distance field shader does
+    /// ([`distance_field_fragment`]). The field is always read bilinearly and the quad is never
+    /// turned.
+    ///
+    /// A backend that draws distance fields overrides this. One that does not -- a wrapper has to
+    /// hand the call on, and only a renderer that ends in pixels can do the arithmetic -- draws the
+    /// field's texels as an ordinary quad, which puts ink where the glyph is and nothing more.
+    fn draw_distance_field_quad(&mut self, tex: TextureId, params: DistanceFieldParams) {
+        self.draw_textured_quad(tex, params.as_plain_quad());
+    }
 
     /// Restrict drawing to `rect`, in logical screen pixels. Nested pushes intersect, so an empty
     /// intersection discards every draw until the matching [`Renderer::pop_clip`].
@@ -442,6 +537,10 @@ impl<R: Renderer> Renderer for ScaledRenderer<'_, R> {
     fn draw_textured_quad(&mut self, tex: TextureId, params: QuadParams) {
         let center = (params.center.0 * self.scale.0, params.center.1 * self.scale.1);
         self.inner.draw_textured_quad(tex, QuadParams { dst: scale_rect(params.dst, self.scale), center, ..params });
+    }
+
+    fn draw_distance_field_quad(&mut self, tex: TextureId, params: DistanceFieldParams) {
+        self.inner.draw_distance_field_quad(tex, DistanceFieldParams { dst: scale_rect(params.dst, self.scale), ..params });
     }
 
     fn push_clip(&mut self, rect: Rect) {

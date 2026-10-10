@@ -21,6 +21,7 @@ use crate::ctx::RenderCtx;
 use crate::font::{BlockAlign, BlockFit, BlockSpec, TextContext};
 use crate::skin_render::draw::draw_resolved;
 use crate::skin_render::object::{Body, SkinObject};
+use crate::skin_render::text::{FontRef, Fonts};
 use crate::skin_render::{FrameData, SkinAction, SkinAssets, SkinFrame, SkinPointer, SkinPointerButton, SkinScreen, SkinViewport};
 use crate::{Color, CpuCanvas, Renderer, Theme};
 
@@ -47,10 +48,10 @@ const READ_ONLY_STRING: i32 = STRING_TITLE;
 /// The widest a caret bar may be on this stage: the reference's cursor is two pixels wide.
 const CARET_PX: i32 = 2;
 
-fn engine() -> (TextContext, Vec<(String, String)>) {
+fn engine() -> (TextContext, Vec<(String, FontRef)>) {
     let mut text = TextContext::embedded_only();
     let family = text.load_font(include_bytes!("../../../../../assets/fonts/Inter-Regular.ttf").to_vec()).expect("the bundled font loads as a skin font");
-    (text, vec![(FONT_ID.to_string(), family)])
+    (text, vec![(FONT_ID.to_string(), FontRef::Family(family))])
 }
 
 fn record(reference: i32) -> TextDef {
@@ -63,7 +64,7 @@ fn track(x: f32) -> DestinationTrack {
     DestinationTrack { frames: vec![Keyframe { time_ms: 0, rect, clip: None, color: white, angle_deg: 0.0 }], ..DestinationTrack::default() }
 }
 
-fn object(def: &TextDef, families: &[(String, String)], x: f32) -> SkinObject {
+fn object(def: &TextDef, families: &Fonts, x: f32) -> SkinObject {
     SkinObject { track: track(x), stretch: StretchKind::Stretch, body: Body::TextInput(text_input_body(def, families)) }
 }
 
@@ -140,7 +141,7 @@ fn the_bounds_a_press_is_taken_in_follow_the_alignment_of_the_text() {
 #[test]
 fn the_caret_stands_between_the_glyphs_a_line_is_composed_with() {
     let (mut text, families) = engine();
-    let family = families[0].1.as_str();
+    let family = families[0].1.family().expect("the bundled font is one of the text engine's");
     let spec = |line: &'static str, align: BlockAlign, fit: BlockFit| BlockSpec {
         text: line,
         family,

@@ -36,7 +36,7 @@ use rbms_skin::property::{NameSpace, id_of_name, reference_writes};
 
 use super::draw::Placement;
 use super::object::Body;
-use super::text::{MIN_TEXT_SCALE, TEXT_PIXELS_PER_SCALE, TextBody, draw_line, draw_text, text_body};
+use super::text::{Fonts, MIN_TEXT_SCALE, TEXT_PIXELS_PER_SCALE, TextBody, draw_line, draw_text, text_body};
 use super::{SkinFrame, SkinScreen};
 use crate::ctx::RenderCtx;
 use crate::font::BlockAlign;
@@ -150,8 +150,8 @@ impl TextInputBody {
 }
 
 /// The editable text a text record declares.
-pub(crate) fn text_input_body(def: &TextDef, families: &[(String, String)]) -> TextInputBody {
-    TextInputBody { text: text_body(def, families), writer: text_writer(def) }
+pub(crate) fn text_input_body(def: &TextDef, fonts: &Fonts) -> TextInputBody {
+    TextInputBody { text: text_body(def, fonts), writer: text_writer(def) }
 }
 
 impl SkinScreen {

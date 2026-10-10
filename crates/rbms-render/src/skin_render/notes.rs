@@ -44,6 +44,7 @@ use rbms_skin::timer::MICROS_PER_MILLI;
 
 use super::draw::{ImageSelect, Placement};
 use super::object::{Body, ImageBody, SkinObject, Sprite, image_sprite};
+use super::text::Fonts;
 use super::textures::Source;
 use super::{SkinAssets, SkinFrame, SkinViewport};
 use crate::ctx::RenderCtx;
@@ -557,7 +558,7 @@ pub(crate) fn build_note(
     skin: &LoadedSkin,
     id: &str,
     sources: Source<'_>,
-    _families: &[(String, String)],
+    _fonts: &Fonts,
     _assets: &mut dyn SkinAssets,
     warnings: &mut Vec<String>,
 ) -> Option<Body> {
