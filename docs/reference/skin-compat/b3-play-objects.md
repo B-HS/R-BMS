@@ -1,6 +1,19 @@
 # B3. beatoraja 플레이 화면 전용 스킨 객체와 플레이 화면 수명주기
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 3A(공통 그리기 의미론) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 4(결과와 코스 결과) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 4 반영 사항 (2026-10-10)
+
+스킨 입력 디스패치와 이벤트 실행기, gauge·gaugegraph·timingdistributiongraph·judgegraph type 1·2, 플레이 엔진 기록 확장, Result·CourseResult Stage 의 장면 수명, 호스트 군집 B·G·H·E 일부, 스킨 사운드 버스를 넣은 뒤의 상태다.
+
+- (W4-3) b3-play-objects.md §10.1: 'playtime = (오토플레이 ? lastTime : lastNoteTime) + 5000' 뒤에 'jbms-parser.jar 바이트코드로 확인: getLastNoteMilliTime 은 existNote(lane) 만, getLastMilliTime 은 existNote·hidden·BG·BGA·layer 를 본다. R-BMS 대응은 rbms_play::{last_note_time_ms, last_event_time_ms, play_time_ms}'를 추가
+- (W4-3) b3-play-objects.md §10.2 PLAY 행: '500ms 마다 게이지 로그'를 '매 프레임 gaugelog.size <= ptime/500 이면 전 종류에 1개 추가(프레임당 최대 1개)'로 구체화하고, '같은 프레임에 FAILED 와 playtime 초과가 겹치면 뒤의 FINISHED 대입이 이긴다(:651-687)'를 추가
+- (W4-3) b3-play-objects.md §8.1: type 1·2 의 R-BMS 데이터 원천으로 'rbms_play::JudgeSeconds(by_judge 6칸, by_timing 10칸, 행 = 노트 차트 시각의 초, 길이 = lastTime/1000+1)'를 추가
+- (W4-2) b3-play-objects.md §5.3: INCLEASE/DECLEASE 도 RANDOM 처럼 `atime < time` 일 때만 한 번 전진하고 atime = time + cycle 로 둔다는 점, type 이 0~3 밖이면 prepare/draw 의 switch 에 default 가 없어 아무것도 그리지 않는다는 점, parts 재계산이 float 나머지 연산이라 border 75/max 100 은 64, PMS 85/120 은 96 이 된다는 점 추가
+- (W4-2) b3-play-objects.md §5.4: SkinGauge.draw 는 SkinObjectRenderer.draw 를 직접 불러 stretch·angle·dstfilter 를 적용하지 않고 TYPE_NORMAL(텍스처 기본 nearest)로 그린다는 점, FLICKERING 알파는 Color.set 의 clamp 뒤 (int)(255*a) 절삭이라 홀수 cycle 에서 몫이 1 을 넘고 cycle 2 는 NaN → 0 이라는 점 추가
+- (W4-2) b3-play-objects.md §8.5: timingdistributiongraph 전문으로 교체 — gx = max(1,width) / clamp(lineWidth,1,width), c = gx/2, max = 10 또는 (d/10)*10+10, 판정 띠(judgeArea 를 +-c 로 자름), 10열 눈금(0,0,0,0.25) 상단 2행, 평균·편차선 Math.round, 막대는 -center < i < center 만, colorStringValidation(6자 미만·비16진 → FF0000FF), 뒤집지 않고 그림, 통계식(statisticValueCalcuate), 양수 = 빠름 = 오른쪽
+- (W4-2) b3-play-objects.md §8.1: type 1·2 의 색 표와 쌓는 순서가 구현·테스트로 확인됨(W4-2), ModernChic judgesGraph(orderReverse)는 PR 이 바닥이라는 캡처 결과 추가
+
 
 ## 웨이브 3A 반영 사항 (2026-10-10)
 

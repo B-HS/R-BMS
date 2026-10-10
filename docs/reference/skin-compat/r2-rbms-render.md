@@ -1,6 +1,15 @@
 # R2 — R-BMS 렌더 계층(crates/rbms-render, GPU 백엔드) 현황과 격차
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 3(공통 그리기 의미론과 결정 화면) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 4(결과와 코스 결과) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 4 반영 사항 (2026-10-10)
+
+스킨 입력 디스패치와 이벤트 실행기, gauge·gaugegraph·timingdistributiongraph·judgegraph type 1·2, 플레이 엔진 기록 확장, Result·CourseResult Stage 의 장면 수명, 호스트 군집 B·G·H·E 일부, 스킨 사운드 버스를 넣은 뒤의 상태다.
+
+- (W4-2) r2-rbms-render.md §5.2: gauge 행(프레임 GaugeFrame 에서 값·종류·scales, 상태형 애니메이션, 결과 차오름, 내장 Skin 의존 제거), gaugegraph 행(pixmap 2장 + 6종 색 + 드러남 + 코스 경계), timingdistributiongraph 행(pixmap 1장, 판정 띠·눈금·통계선·막대) 갱신. graphs/pixmap.rs 에 원본식 blend_rect 추가
+- (W4-2) r2-rbms-render.md 상단 '웨이브 4 반영 사항': FrameData.gauge 가 GaugeFrame{gauge_type,value,scales[9],mode_changed,result}로 바뀌고 GaugeHistory{samples,kinds,sections}, TimingHistogram{bins,average,std_dev,judge_area}가 됨
+- (리뷰 수정) r2-rbms-render.md §(463행, 타이머 구동): '`ResultTimers`(394-417)는 RESULTGRAPH_BEGIN/END, RESULT_UPDATESCORE' 삭제. 결과 타이머는 앱의 stage/result.rs switch_score_timers 가 켠다
+
 
 ## 웨이브 3B 반영 사항 (2026-10-10)
 

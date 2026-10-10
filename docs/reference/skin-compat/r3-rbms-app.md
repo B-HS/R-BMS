@@ -1,6 +1,43 @@
 # R3 — R-BMS 앱(apps/rbms-player) 스킨 배선·화면 구성·입력 현황과 격차
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 3(공통 그리기 의미론과 결정 화면) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 4(결과와 코스 결과) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 4 반영 사항 (2026-10-10)
+
+스킨 입력 디스패치와 이벤트 실행기, gauge·gaugegraph·timingdistributiongraph·judgegraph type 1·2, 플레이 엔진 기록 확장, Result·CourseResult Stage 의 장면 수명, 호스트 군집 B·G·H·E 일부, 스킨 사운드 버스를 넣은 뒤의 상태다.
+
+- (W4-3) r3-rbms-app.md §6.4 '공급하지 못하는 것' 표의 '게이지 종류 전환 … 게이지 로그도 1종만(app_result.rs:124)' 행: '기록은 생겼다 — AppShared.run_records 의 PlayRecord.gauge_log 가 9종 500ms 이력과 폐점 0 채움을 갖는다. 종류 전환 입력과 그래프 연결은 W4-4·W4-5. ResultView.gauge_series(1종 1초)는 내장 화면용으로 유지'로 교체
+- (W4-3) r3-rbms-app.md §6.4 본문: 'enter_result 가 play.record() 를 keep_run_record 로 AppShared.run_records 에 둔다(단곡은 교체, 코스는 스테이지별 누적, 연습은 제외)'를 추가하고, 상단에 '웨이브 4 반영 사항(W4-3)' 절을 만들어 같은 내용과 AppShared 필드 표의 run_records 를 적음
+- (W4-3) r3-rbms-app.md §8.6 테스트 표: rbms-play record/tests.rs 17건, rbms-judge tests.rs 4건, app_result.rs 2건(앱 2건은 통합 뒤 실행 확인 필요) 추가
+- (W4-1) r3-rbms-app.md §7.1: 마우스 분배 순서를 '옵션 패널 열림 → AppShared::skin_pointer(스킨 객체가 소비) → Stage::handle_mouse/handle_mouse_drag/handle_scroll' 로 고칩니다(pointer.rs route_pointer). release 와 휠은 스킨이 받지 않습니다
+- (W4-1) r3-rbms-app.md §7.2: '문서가 그리는 화면은 hot 영역을 등록하지 않음' 뒤에 추가합니다 — 스킨 화면의 클릭 판정은 직전 프레임의 SkinInputMap(SkinScreens.input)으로 하고, 앱이 등록한 hot 영역이 커서 아래 있으면 스킨보다 앱이 먼저 받습니다
+- (W4-1) r3-rbms-app.md §7.5 표: '객체 클릭(skin_click 신설)' 행을 구현 완료로 바꿉니다 — AppShared::skin_pointer(at, PointerInput) -> bool, 실행은 다음 프레임 바인딩 안의 run_skin_actions, 결과 요청은 ctx.shared.skin_requests().take(Cluster). 슬라이더 드래그·호버도 구현, 텍스트 입력은 FocusText 판정만, 곡 바 클릭은 웨이브 5
+- (W4-1) r3-rbms-app.md §2.1 '컴파일 캐시' 행: SkinScreens 필드에 input: RefCell<SkinInput>{map, fresh, actions, calls} 와 requests: RequestQueue 를 추가합니다
+- (W4-1) r3-rbms-app.md §6.1: with_skin_frame 이 host.take_calls() 를 거두고(스킨 읽기 프레임 포함) finish_skin_frame 이 dispatch_calls 로 분배한다는 내용을 추가합니다. 'Nothing carries those out yet' 에 해당하는 서술은 삭제합니다
+- (W4-1) r3-rbms-app.md 상단: '웨이브 4 반영 사항'에 W4-1 을 추가합니다 — 키 질의는 app_input.rs 의 GDX_KEYS(90개)·SkinKeys·AppShared::skin_keys, ScreenHost.keys: Option<&dyn HeldKeyQuery>
+- (W4-7) r3-rbms-app.md §10.1 '재생' 줄: '루프·정지 API 가 없다' 를 삭제하고, SystemSoundSet::play_loop/stop/stop_loops/looping_sounds 와 AppShared::play_system_sound_loop/stop_system_sound/stop_system_sound_loops 가 생겼으며 루프는 AudioEngine::play_effect(Bus::System, id, gain, looped=true) 로 재생한다고 적는다. 반복 중인 시스템 사운드는 begin_skin_scene 에서 stop_system_sound_loops 로 멈춘다.
+- (W4-7) r3-rbms-app.md §10.1 'ModernChic 쪽 실측' 마지막 줄: '스킨 발 재생을 받을 버스·id 네임스페이스·로더가 없다' 를 갱신한다. 이제 skin_host/audio.rs 의 SkinSounds 가 System 버스, SKIN_SOUND_NAMESPACE(0x00A0_0000, 길이 0x1000), 워커 스레드 디코드로 처리한다. 상단 '웨이브 4 반영 사항' 에 AppShared.skin_sounds 필드와 begin_skin_scene → end_scene_sounds, carry_out_skin_calls → settle_skin_sounds 연결을 추가한다.
+- (W4-7) r3-rbms-app.md §9 표 E1(사운드 확장): 루프·정지·스킨 발 버스는 완료, 스킨 팩 사운드 폴더와 select BGM 호출은 웨이브 5 로 갱신한다.
+- (W4-4) r3-rbms-app.md §6.4: 공급 지점을 ResultState::draw → draw_result_skin(canvas, &ResultDraw { view, extras, cleared, chart: Option<&ChartMeta>, scene: skin_host::ResultScene, data: FrameData })로 교체. ResultSeriesState 서술 삭제. ResultRun(stage/result.rs)이 PlayRecord 에서 9종 게이지 이력·경계, 301칸 타이밍 분포 + 판정 폭(JudgeWindowSet::for_mode 의 note, ms), 초별 판정표를, ChartOverview(플레이된 모델)에서 노트 종류 분포·BPM 변화·스테이지 파일을 FrameData.gauge(GaugeFrame::finished)·series·images 로 싣는다고 기록
+- (W4-4) r3-rbms-app.md §6.4 '공급하지 못하는 것' 표: STARTINPUT·입력 잠금·scene 자동 종료·FADEOUT 후 전환, RESULTGRAPH_BEGIN/END 동시 on, RESULT_UPDATESCORE(ranktime 0 고정), 게이지 종류 전환, IR_CONNECT 타이머 172~174, 리플레이 슬롯 상태(1번 슬롯 = 자동 저장 결과), RESULT_CLOSE 를 fadeout 시작에 재생 행을 '구현(W4-4)'으로 변경. 남는 행: 이전 스코어 전체·IR 순위 값(W4-5 연결 대기), 결과 BGM 루프(설정 없음), 코스 결과
+- (W4-4) r3-rbms-app.md §6.4 타이머 문단: 'on_enter 에서 skin_result_timers.enter, 1000ms 뒤 END' 를 'on_enter 와 스킨 첫 프레임, 이후 매 update 에서 150·151·152 를 switch(true). ResultTimers(skin_result_timers)는 Result Stage 가 더는 쓰지 않음' 으로 교체
+- (W4-4) r3-rbms-app.md §1.2 전이표 Result 행: 스킨 없음 = 키 즉시(기존). 스킨 있음 = input 뒤 확인(키 인덱스 0~3·4·6, Enter, Esc) 또는 R/N → FADEOUT → fadeout 초과 시 Back/Quit(leave_play), To(Loading::song)(재도전·다음 곡). 스킨 대기 중 Esc 는 즉시 leave_play
+- (W4-4) r3-rbms-app.md 상단 웨이브 3B 반영 사항의 '스킨을 기다리는 동안 Select·Play·Result 는 내장 화면을 그렸다가 스킨으로 바뀐다': Result 는 스킨이 오는 동안 검정을 그리고 Esc 만 받는다로 수정(스킨 실패·10초 초과 시 내장 폴백)
+- (W4-4) r3-rbms-app.md §6.6: scene_life 사용처에 Result 추가(SceneTimes::of_skin, advance, takes_input, begin_fadeout)
+- (W4-4) r3-rbms-app.md §8.6 테스트 표: stage/result/tests.rs 31건(자작 픽스처 stage/result/fixture/result.luaskin) 추가. stage/capture.rs 는 PACK_SCREENS 3개(result 제외)와 결과 장면 전용 캡처 테스트(클리어·실패 x 0/1000/3000ms/menu2/fade) 추가. rbms-player lib 테스트 1227건
+- (W4-4) r3-rbms-app.md §7(입력) 또는 §11: AppShared.retry_seed(결과 화면의 같은 배치 재도전이 다음 load() 한 번에 넘기는 시드. 리플레이 로드에서는 무시)와 skin_host::ResultScene / ScreenHost.result_scene(결과 화면이 스스로 가진 상태: gauge_type, replay[4], ranking_offset, ranking_total) 추가를 기록
+- (W4-5) r3-rbms-app.md §6.4 Result: 결과 화면 상태 공급이 구 ResultViewState(skin_render/state.rs)에서 ScreenHost 군집(B·G·H·E) + ResultSnapshot 으로 옮겨감을 기술하고, 구 어댑터는 폴백만 담당(W6-8 삭제 대상)임을 명시. IrStatus 는 문자열만 갖고 숫자 순위는 없다는 점, IR 타이머 172~174 의 phase 매핑(IrLink::timers).
+- (W4-6) r3-rbms-app.md §1.4 화면 대응표 COURSERESULT(15) 행: '스킨 호출 없음, 내장 텍스트만'과 '타입 15 는 로더가 지원 목록에 없음'이 낡았다. 이제 stage/course_result.rs 가 skin_screen::draw_course_result_skin 으로 type 15 문서를 그리고, rbms-skin loader.rs SCREEN_SKIN_TYPES 에 SKIN_TYPE_COURSE_RESULT 가 들어갔다. 스킨이 없으면 내장 행 목록 화면.
+- (W4-6) r3-rbms-app.md §1.1·§8.6: CourseResultState::of 시그니처가 of(run, &AppShared)로 바뀜(스킨이 선택돼 있을 때만 CourseSkinRun 을 만든다). stage/course_result/{skin_run.rs, tests.rs, fixture/course.luaskin} 추가, 테스트 17건. skin_host/result/course/tests.rs 10건. app_play.rs 에 chart_model.
+- (W4-6) r3-rbms-app.md skin_screen.rs 절: FrameInputs 에 result: Option<&ResultSnapshot> 추가, with_skin_frame 이 스냅샷이 있으면 host.show_result(snapshot, scene)을 부른다. CourseResultDraw 와 draw_course_result_skin 신설, draw_result_skin 은 draw_result_document(screen, …) 공통 헬퍼로.
+- (W4-6) r3-rbms-app.md §6.4(결과 화면 상태 공급): 코스 결과는 ChartMeta.notes 를 코스 전체 노트 합, heading 을 코스 이름으로, sheet 를 코스 합계 ScoreSheet, course_titles·course_clear 로 같은 ResultSnapshot::of 에서 만든다. 단일 결과는 아직 스냅샷을 FrameInputs 로 넘기지 않음.
+- (리뷰 수정) r3-rbms-app.md §6.4: 'on_enter 에서 skin_result_timers.enter(view, now) … 매 프레임 update(now) 1000ms 뒤 RESULTGRAPH_END' 서술 삭제. ResultTimers 와 AppShared.skin_result_timers 는 없어졌고, 결과·코스 결과는 stage/result.rs 의 begin_scene_with_skin(스킨 첫 프레임에 장면 시작, 시계 0, 150~152 on)과 run_scene_frame(IR 타이머, 장면 step, 페이드 시작 감지)을 공유한다고 교체
+- (리뷰 수정) r3-rbms-app.md §6.4: 단곡 결과의 상태 공급 경로 추가 — enter_result 가 scores.push 이전에 PreviousScore::of_book 을 읽고 ResultRun::of(session, shared, RunStanding{replay_saved, lamp, previous, target}) 가 ResultSnapshot 을 만들어 ResultDraw.run 으로 넘긴다. draw_result_skin(canvas, screen, &ResultDraw) 하나가 type 7·15 를 그리고 CourseResultDraw·draw_course_result_skin 은 없다
+- (리뷰 수정) r3-rbms-app.md §6.4: IR 공급 추가 — with_skin_frame 이 결과·코스 결과에서 host.ir.link = IrLink::new(has_primary_ir_server, IrPhase::from(&ir_status)) 와 service_name(주 프로필 라벨)·user_name(submission_player_id)을 매 프레임 채운다(Lua 로드 전). 타이머 172~174 는 IrLink::timers() 한 곳에서 두 화면이 쓴다. 코스 결과는 마지막 스테이지의 ir_status 를 쓴다는 한계 명시. 상단 '결과 문서에 IR 상태는 공급되지 않음'(웨이브 1A 반영 사항 W1-1b) 문장은 낡음
+- (리뷰 수정) r3-rbms-app.md §2.1(234행 표): 타이머 행의 `skin_result_timers` 삭제, '화면별 드라이버 3개' 를 2개(PlayTimers, SelectTimers)로
+- (리뷰 수정) r3-rbms-app.md 웨이브 1B 반영 사항(W1-5, 77행): '드라이버 기억(PlayTimers/SelectTimers/ResultTimers) 초기화' 에서 ResultTimers 삭제
+- (리뷰 수정) r3-rbms-app.md §10.1(668행)과 00-synthesis.md S11·T9: 시스템 사운드는 1회 재생 + 정지(SystemSoundSet::stop, AppShared::stop_system_sound)까지 있고 루프 API 는 없다. play_loop 는 호출부가 없어 웨이브 4 리뷰에서 삭제, 선택 BGM·결과 루프 설정은 웨이브 5 에서 호출부와 함께 추가한다고 고침
+
 
 ## 웨이브 3B 반영 사항 (2026-10-10)
 

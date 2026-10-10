@@ -1,6 +1,16 @@
 # B2. beatoraja 스킨 객체 모델과 공통 그리기 의미론
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 3(공통 그리기 의미론과 결정 화면) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 4(결과와 코스 결과) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 4 반영 사항 (2026-10-10)
+
+스킨 입력 디스패치와 이벤트 실행기, gauge·gaugegraph·timingdistributiongraph·judgegraph type 1·2, 플레이 엔진 기록 확장, Result·CourseResult Stage 의 장면 수명, 호스트 군집 B·G·H·E 일부, 스킨 사운드 버스를 넣은 뒤의 상태다.
+
+- (W4-1) b2-object-model.md §15: R-BMS 구현 메모를 추가합니다 — crates/rbms-render/src/skin_render/input.rs(SkinInputMap, SkinAction{Event, Write, FocusText}). 판정은 마지막 PreparedFrame 의 영역으로 하고 실행은 앱 몫입니다. click 이 0~3 밖이면 원본 switch 처럼 받지 않습니다. SkinBar press 와 commitIfOutside 는 미구현입니다
+- (W4-1) b2-object-model.md §15.1: R-BMS 차이를 추가합니다 — press 를 받은 즉시 판정하고 다음 프레임 prepare 전에 실행합니다(원본은 프레임 끝). touchUp 무처리는 같습니다
+- (W4-1) b2-object-model.md §13.3: R-BMS 차이를 추가합니다 — range 는 문서 좌표 그대로이고(원본은 출력 해상도 스케일 뒤 int 절삭) 포인터가 실수라 값이 픽셀 단위로 양자화되지 않습니다. writer 결정 규칙 3갈래(value 가 있으면 event, isRefNum 이면 없음, 그 외는 changeable 이고 getRateWriter 가 있는 type)가 구현됐습니다
+- (W4-1) b2-object-model.md §2.4: R-BMS 마우스 좌표는 UI_SIZE(1280x720) 공간의 실수를 문서 좌표로 바꾼 값이며(document_cursor) 정수 절삭이 없다는 점을 추가합니다
+
 
 ## 웨이브 3B 반영 사항 (2026-10-10)
 

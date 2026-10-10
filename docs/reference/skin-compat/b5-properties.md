@@ -1,6 +1,20 @@
 # b5. beatoraja 속성 id 전수 목록과 R-BMS 대조
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 3A(공통 그리기 의미론) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 4(결과와 코스 결과) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 4 반영 사항 (2026-10-10)
+
+스킨 입력 디스패치와 이벤트 실행기, gauge·gaugegraph·timingdistributiongraph·judgegraph type 1·2, 플레이 엔진 기록 확장, Result·CourseResult Stage 의 장면 수명, 호스트 군집 B·G·H·E 일부, 스킨 사운드 버스를 넣은 뒤의 상태다.
+
+- (W4-3) b5-properties.md §16 표 7·10·11번: 'R-BMS 엔진이 통과 노트 기준 값을 제공한다 — rbms_play::ScoreProgress(now_rate, qualifies_now_rank, paced), PlaySession::score_progress(). 호스트 연결은 W4-5·웨이브 6'을 덧붙임
+- (W4-3) b5-properties.md §16 표 14·15번: '원본 정의의 값이 PlayRecord 에 있다 — 410~421 은 summary.early/late[judge], 423/424 는 total_early()/total_late()(판정 1~5). 구 어댑터의 lane_kind_total 은 내장 화면용으로 남는다'를 덧붙임
+- (W4-3) b5-properties.md §18 첫 항목: 'ScoreData 클래스 본문 미열람'을 '필드 확인: epg~lms(판정별 early/late), passnotes, minbp(기본 Integer.MAX_VALUE), avgjudge(µs, 기본 Long.MAX_VALUE), totalDuration. avgjudge 는 createScoreData(BMSPlayer.java:911-930)가 노트별 |playtime|(state 1~4) 또는 1,000,000 의 평균으로 채운다'로 교체
+- (W4-1) b5-properties.md §8: R-BMS 열 '없음'을 '분배 구현(skin_host/mod.rs EVENT_ROUTES: Select, Result, Options, Play, KeyConfig, SkinConfig), 개별 동작 미구현'으로 바꿉니다. 원본에 구현이 없는 id(41, 301~307, 229)와 커스텀 1000~1999 는 무시됩니다. writer 는 WRITE_ROUTES(rate 1·8 → Select, 7 → SkinConfig, 17~19 → Options, 20 → Play, string 30 → Select)
+- (W4-5) b5-properties.md §17 군집 표 B·G·H·E 행: 'R-BMS 현황'을 '구현(W4-5, 결과 화면 경로): B 는 ScoreSheet/ScoreStanding(apps/rbms-player/src/skin_host/score/standing.rs)이 ScoreData·ScoreDataProperty 를 f32/i32 정밀도까지 옮김, G 는 ResultSnapshot 과 ResultScene 을 읽음, H 는 IrLink(오프라인/전송 중/완료)와 ResultScene.ranking_total, E 는 이미지 인덱스 40·42·43·54·61~63·89·90·301~308 과 옵션 60~62'로 갱신. 플레이 경로의 B 는 웨이브 6.
+- (W4-5) b5-properties.md §16 #7, #9, #10, #11, #12, #14, #15, #16: 결과 화면 경로에서 해소됨을 표시. 통과 노트 기준 nowrate(#7), 407 소수 1자리(#9), DIFF_HIGHSCORE = nowEX - nowBestScore(#10), 1102 = nowrate 와 1115 = rate 와 1107 = 0..100 원값(#11), RATE 140~147 은 선곡 전용이라 0(#12), 410/411 은 PERFECT 의 early/late(#14), 423/424 는 판정 1..5 의 early/late 합(#15), 104 는 무응답(#16). #7·#11·#9 의 플레이 경로는 RunScore::in_progress 로 준비됐고 연결은 웨이브 6.
+- (W4-5) b5-properties.md §3·§4·§5-A·§5-B·§6 의 R-BMS 열: NUMBER 71~72, 75, 80~89, 100~103, 105, 107~108, 110~116, 121~123, 128, 135~136, 150~158, 170~172, 174, 183~184, 271, 407, 410~427 은 구현(skin_host/score.rs). NUMBER 76, 173, 175~178, 370~377 과 float 372·374·376, 옵션 42·43·1046·90·91·196~198·330~336·352~354·1196~1204·1330~1336, 문자열 150~159 는 구현(skin_host/result.rs). NUMBER 179·180·182·200·202~242·280~289·380~399, 문자열 1·3·120~129·1020·1021, rate 8, 옵션 50·51·603·604·606·608 은 구현(skin_host/ir.rs, 랭킹 목록은 값 없음). 옵션 60~62 는 skin_host/options.rs.
+- (W4-5) b5-properties.md §9 이미지 인덱스 표: 결과 화면 값 연결 추가 — 40=ResultScene.gauge_type, 42/43/54=PlayedOptions, 61~63=값 없음(타깃이 점수만 있고 플레이 옵션이 없음), 89/90=즐겨찾기(곡 단위 없음→89 값 없음), 301~307=PlayedOptions 의 보조 플래그, 308=long_note_mode, 370/371=새·이전 클리어, 380~399=값 없음.
+
 
 ## 웨이브 3A 반영 사항 (2026-10-10)
 

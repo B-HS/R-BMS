@@ -1,6 +1,15 @@
 # B1. beatoraja Lua 스킨 로딩 파이프라인과 Lua 실행 환경 계약
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 3A(공통 그리기 의미론) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 4(결과와 코스 결과) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 4 반영 사항 (2026-10-10)
+
+스킨 입력 디스패치와 이벤트 실행기, gauge·gaugegraph·timingdistributiongraph·judgegraph type 1·2, 플레이 엔진 기록 확장, Result·CourseResult Stage 의 장면 수명, 호스트 군집 B·G·H·E 일부, 스킨 사운드 버스를 넣은 뒤의 상태다.
+
+- (W4-1) b1-lua-env.md §5.3 표: 'act (클릭)' 과 '슬라이더·텍스트 event' 행에 R-BMS 구현 위치를 추가합니다 — skin_screen.rs run_skin_actions → BoundFrame::call_event(인자 1개) / call_float_writer, 프레임 바인딩 안 prepare 전
+- (W4-1) b1-lua-env.md §2.3: Gdx.input:isKeyPressed 와 main_state.key_pressed 가 이제 앱의 실제 키 상태를 답한다는 점을 추가합니다(libGDX 코드 → winit KeyCode 표, 키보드에 없는 코드는 false)
+- (W4-7) b1-lua-env.md §6 audio_* 표: 구현 위치를 skin_host/audio.rs 로 적는다. audio_preload 는 볼륨 0 재생이라 소리 없이 디코드만 하고, audio_play/loop 의 클램프된 볼륨이 0.001 이하이거나 NaN 이면 프리로드로 처리한다. 이미 루프 중인 소리에 audio_loop 를 또 부르면 무시하고, audio_stop 은 모든 복사본을, audio_dispose 는 정지와 캐시 제거를 한다. 파일이 없으면 wav, flac, ogg, mp3 순으로 같은 이름의 다른 확장자를 찾는다.
+
 
 ## 웨이브 3A 반영 사항 (2026-10-10)
 

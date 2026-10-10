@@ -1,6 +1,20 @@
 # m5. ModernChic 결정(decide) / 결과(result) / 코스 결과(course) 화면 스킨 조사 보고서
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 3(공통 그리기 의미론과 결정 화면) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 4(결과와 코스 결과) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 4 반영 사항 (2026-10-10)
+
+스킨 입력 디스패치와 이벤트 실행기, gauge·gaugegraph·timingdistributiongraph·judgegraph type 1·2, 플레이 엔진 기록 확장, Result·CourseResult Stage 의 장면 수명, 호스트 군집 B·G·H·E 일부, 스킨 사운드 버스를 넣은 뒤의 상태다.
+
+- (W4-1) m5-decide-result.md §12.1: 'Info 클릭과 방향키 RIGHT 로 메뉴 1 ↔ 2 전환이 앱 경로에서 동작함을 캡처로 확인(W4-1)'을 추가합니다
+- (W4-2) m5-decide-result.md §9.3: 'W4-2 캡처 대조 결과' 추가 — 게이지 2001 x 56~455·y 371~405, grooveGaugeGraph x 40~694·y 70~305(보더 y 117/118), judgesGraph 같은 사각형, 메뉴2 의 notesGraph y 651~738·fsGraph y 781~868·timingdistributiongraph x 51~683·y 911~998, 코스 결과의 곡 경계선
+- (W4-2) m5-decide-result.md §10.1: 8자리 배경색이 pixmap 혼합으로 보더 위에서 (68,0,46,141)이 된다는 주석 추가(지금은 '알파 0x55 = 약 33%'만 있음)
+- (W4-2) m5-decide-result.md §10.3: 기본 배색의 막대 00FF00EE 가 판정 띠 위에 섞여 PG 위에서 (0,238,10)이 된다는 점 추가
+- (W4-4) m5-decide-result.md 상단과 §9.3: 'W4-4 앱 경로 캡처 대조 결과' 추가. 실제 런(오토플레이 MAX, 무입력 FAILED)으로 mainInfo·mainGraphFrame·gaugegraph(1500ms 노출)·gauge 2001(결과 차오름)·rank·infoFrame·judgesGraph·mainMenu·판정 행·centerinfo·chartBtn·하단 바·prepare(1000ms 선 y 380/698, 띠, stripe)·fadeout(finishClear/finishFailed)·메뉴 2(JUDGE, TOTAL/Ref, notesGraph+bpmgraph, fsGraph, timingdistributiongraph 판정 띠)가 표 좌표와 일치. EXSCORE·COMBO·clearType(370)·preClearType 는 호스트 군집 미연결로 0/NOPLAY
+- (W4-5) m5-decide-result.md 부록 A: 항목별 구현 위치 표를 추가(option 90/91·300~307·320~327·330~332·196~198+1196~1204 = B/G, 51·606 = H, 280~290 = system.rs, 150~155·160~164·180~184·191 = chart.rs / number 74·368·96 = chart.rs, 나머지 = score.rs/result.rs). '첫 플레이에서 값 없음인 것은 175·178 뿐'이라는 점과 'RBMS_SKIN_PACK 외부 테스트 결과(result.luaskin 354회, course.luaskin 357회 함수 호출, 실패 0)'를 덧붙임. IR 메뉴가 켜지면(51 true) 202~240 과 380~399 가 E8 대로 값 없음이고 1080회 호출에도 실패 0.
+- (W4-5) m5-decide-result.md §7.1·§7.2: 7.1 의 '179, 182, 180: IR 전용'에 '오프라인이면 MIN_VALUE, 전송 중·완료면 0 에서 시작(원본 AbstractResult.getState)'을 추가. 7.2 의 606(IR_WAITING)은 결과 화면에서 항상 false 임을 명시(-606 은 true).
+- (W4-6) m5-decide-result.md §14 아래에 캡처 대조 결과 추가: 코스 결과(3곡 코스)에서 bottomCourse 텍스트가 (960,10)에 코스 이름, menu2 의 courseFrame(MAIN_POS_X,78,652x377)과 course1~3 이 posY 350/285/220, 4th·5th 빈 칸으로 나온다. mainInfo2 고정에 judgesGraph 없음. 실패 코스는 빨간 배경·FAILED 램프·D 랭크와 '残りノーツ' 프레임이 미도달 곡 노트 수를 표시.
+
 
 ## 웨이브 3B 반영 사항 (2026-10-10)
 

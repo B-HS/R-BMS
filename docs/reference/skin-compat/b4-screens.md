@@ -1,6 +1,28 @@
 # B4. beatoraja 선택·결정·결과·코스 결과·키 설정·스킨 설정 화면의 스킨 계약과 화면 수명주기
 
-> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 3(공통 그리기 의미론과 결정 화면) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-10 · 대응 단계: 웨이브 4(결과와 코스 결과) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 4 반영 사항 (2026-10-10)
+
+스킨 입력 디스패치와 이벤트 실행기, gauge·gaugegraph·timingdistributiongraph·judgegraph type 1·2, 플레이 엔진 기록 확장, Result·CourseResult Stage 의 장면 수명, 호스트 군집 B·G·H·E 일부, 스킨 사운드 버스를 넣은 뒤의 상태다.
+
+- (W4-3) b4-screens.md §5.6 마지막 문단: '이력 샘플 간격은 이 파일에서 확인되지 않는다(…500ms 로 추정되나 미확인)'을 '500ms 로 확인(BMSPlayer.java:631-635), 폐점 0 채움은 :723-729'로 교체
+- (W4-3) b4-screens.md §5.5 타이밍 분포 행: 정의 보강 — 입력이 아니라 노트 기준, state >= 1 인 노트의 getPlayTime()(µs/1000 절삭, ms)을 ±150 안에서만 집계, LN 모드의 LN 끝 제외, 비었으면 평균 Float.MAX_VALUE·표준편차 -1. R-BMS 대응은 rbms_play::TimingDistribution
+- (W4-1) b4-screens.md §1.3 표 7행: R-BMS 대응을 추가합니다 — 클릭 판정은 이벤트 도착 시, 실행은 다음 프레임. 휠은 스킨 객체가 아니라 Stage::handle_scroll 이 받습니다
+- (W4-2) b4-screens.md §5.6: (1) Pixmap 은 기본 SourceOver 이고 동봉 libGDX(2017-12 빌드)의 혼합식은 채널 = dst + a*(src-dst)/255(0 방향 절삭), 알파 = (1-(1-sa)(1-da))*255 절삭. ModernChic 의 44004455 위 44000055 는 (68,0,46,141) (2) fillRectangle 폭 0 은 x-1..x 두 열을 칠함(hline 이 양끝을 교환), 왼쪽 끝에서는 안 칠함 (3) Color.valueOf 는 길이가 정확히 8 일 때만 알파를 읽음 (4) 표시 종류·border·max 는 GrooveGauge 에서, 이력은 resource.getGauge()[type] 에서 읽음 → R-BMS 는 FrameData.gauge + GaugeHistory::of_kinds 로 분리 (5) '이력 샘플 간격 미확인'을 500ms(GAUGE_SAMPLE_MS)로 확정 표기
+- (W4-2) b4-screens.md §5.5: 게이지 값 FLOAT 1107 은 원값(0~max)이고 gauge 객체는 속성이 아니라 이력의 마지막 값을 직접 읽는다는 점 추가
+- (W4-7) b4-screens.md §1.6: '상태를 떠날 때 전부 정지' 는 begin_skin_scene 에서 end_scene_sounds 가 스킨 소리 전체와 반복 중인 시스템 사운드를 멈추는 것으로 구현했다. 화면별 호출 지점(CLEAR/FAIL 루프 시작과 fadeout 시 정지)은 아직 없고 Stage 단위(W4-4)가 추가한다.
+- (W4-4) b4-screens.md §5.2·§5.3: R-BMS 구현 주석 추가. 키 인덱스는 2P 를 접어 0~8 로 읽고 프레임마다 샘플링해 getKeyState && resetKeyChangedTime 과 같은 의미로 처리. Enter 는 NumpadEnter 포함. R = REPLAY_SAME(누른 순간 결정, 키를 떼도 유지), N = 다음 곡(R-BMS 고유)이며 둘 다 입력 잠금·IR 대기·FADEOUT 을 탄다. STATE_IR_PROCESSING = IrStatus::Sending 이고 수신 채널이 살아 있을 때. scoreData == null 자동 닫힘과 NUM1~4, F11 은 미구현
+- (W4-4) b4-screens.md §5.2 FADEOUT 완료 표: 단곡의 REPLAY_SAME 은 직전 런의 시드를 retry_seed 로 넘기고, 점수 갱신 불가(updates_score false)면 원본처럼 새 시드. REPLAY_DIFFERENT 는 항상 새 시드. PLAY 모드 조건은 offers_retry(오토플레이·리플레이·라이브러리 밖 차트 제외). 코스 분기는 미구현
+- (W4-4) b4-screens.md §5.4: R-BMS 규칙 추가. 슬롯 저장 이벤트(19, 316~318)는 무동작. 슬롯 1 = 이번 런의 자동 저장 결과(SAVED), 저장되지 않았으면 그 차트에 리플레이가 있거나 리플레이 재생 중일 때 EXIST, 아니면 NOT_EXIST. 슬롯 2~4 는 항상 NOT_EXIST
+- (W4-4) b4-screens.md §1.6 결과 행: R-BMS 는 스킨이 있으면 CLEAR/FAIL 을 스킨 첫 프레임(장면 시작)에 1회 재생(루프 설정 없음), FADEOUT 시작에 RESULT_CLOSE 파일이 있으면 CLEAR/FAIL 정지 후 재생, 화면 이탈 시 3종 정지. 스킨이 없으면 진입 시 재생 + 이탈 시 RESULT_CLOSE(기존)
+- (W4-5) b4-screens.md §5.5 '결과 화면이 스킨에 주는 상태': R-BMS 대응으로 ResultSnapshot(진입 시 1회, 불변) + ResultScene(Stage 가 매 프레임 말하는 gauge_type, replay[4], ranking_offset, ranking_total) 구조와 FinishedRun 을 추가. PreviousScore::of_book 이 push 이전에 계산돼야 한다는 제약, 리플레이 슬롯 '1번 = 이번 플레이 자동 저장, 나머지 없음'.
+- (W4-6) b4-screens.md §6: R-BMS 구현 주석 추가. CourseResult 는 stage/course_result.rs 가 결과 Stage 의 Scene 을 Scene::of_course()(게이지 순환 (g-5)%3+6 부호 있는 식)로 재사용한다. FADEOUT 뒤는 항상 end_course(선곡). 코스 점수는 skin_host/result/course.rs CourseTally 가 단계 PlayRecord 를 합산(판정 early/late 합, 노트는 미도달 곡 포함, 실패 시 미도달 곡 노트를 BP 로 가산, 곡별 게이지 이력 이어 붙임과 누적 곡 경계, 미도달 곡 0 채움 (lastNote+500)/500).
+- (W4-6) b4-screens.md §1.6·§6: 코스 결과 사운드는 COURSE_CLEAR/FAIL/CLOSE 가 없으면 RESULT_* 로 대체한다(스킨 장면에서만 적용, 내장 화면은 기존 대로 코스 큐만). FADEOUT 시작에서 CLEAR/FAIL 정지 후 CLOSE 재생, on_exit 에서 3종 정지.
+- (리뷰 수정) b4-screens.md §6(CourseResult)·m5-decide-result.md §14: 코스 결과 게이지 바는 getCourseGauge().get(size-1) 의 끝값(미도달 곡이 있으면 0, 점등 칸 0)이고 숫자 107 은 마지막 플레이 곡의 끝값이라는 구분을 구현 상태로 명시(SkinGauge.java 162~169)
+- (리뷰 수정) b4-screens.md §5~§6 또는 b5-properties.md §16: 실패 코스의 minbp 는 미도달 곡 노트를 두 번 더한다(MusicResult.java 183~193 과 429~439 가 같은 곡 집합). R-BMS 는 E7 에 따라 그대로 옮김(skin_host/result/course.rs UNREACHED_STAGE_CHARGES)
+- (리뷰 수정) b4-screens.md §5 또는 r3-rbms-app.md §6.4: 원본은 단곡에서 PG~BD 합이 0 이면 createScoreData 가 null(BMSPlayer.java 858~861)이라 점수 없는 결과가 되지만 R-BMS 는 무입력 실패도 FAILED·POOR 를 스냅샷으로 공급한다는 차이를 기록
+
 
 ## 웨이브 3B 반영 사항 (2026-10-10)
 
