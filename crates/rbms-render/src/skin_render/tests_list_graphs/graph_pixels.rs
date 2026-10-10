@@ -21,8 +21,8 @@ use crate::skin_render::{
 };
 use crate::{Color, CpuCanvas, QuadParams, Rect, Renderer, TextureId};
 
-const CANVAS_W: u32 = 200;
-const CANVAS_H: u32 = 160;
+pub(super) const CANVAS_W: u32 = 200;
+pub(super) const CANVAS_H: u32 = 160;
 
 /// Where the judgement graph is placed, in document coordinates: twelve seconds of twenty rows, which
 /// is a texture of exactly this size.
@@ -125,14 +125,14 @@ fn tempo_of(timeline: BpmTimeline<'_>) -> FrameSeries<'_> {
 }
 
 /// Counts the textures a renderer holds, and can be told it holds few of them.
-struct Counting {
+pub(super) struct Counting {
     inner: CpuCanvas,
-    live: BTreeSet<u32>,
-    limit: u32,
+    pub(super) live: BTreeSet<u32>,
+    pub(super) limit: u32,
 }
 
 impl Counting {
-    fn new() -> Counting {
+    pub(super) fn new() -> Counting {
         Counting { inner: CpuCanvas::new(CANVAS_W, CANVAS_H), live: BTreeSet::new(), limit: u32::MAX }
     }
 }

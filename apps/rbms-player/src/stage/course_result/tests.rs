@@ -399,11 +399,15 @@ fn the_gauge_graph_marks_where_each_stage_ends() {
 
 /// A confirming key tapped while the scene waits out its input time does nothing; the same key once
 /// it listens starts the fade, and the screen leaves for the browser when the fade has run its time.
+///
+/// The scene's time is counted here rather than left to the machine, which would otherwise have
+/// to get through the frames of the wait inside the input time for them to be in it.
 #[test]
 fn a_confirming_key_fades_the_scene_out_to_the_browser() {
     let (mut app, run) = finish_course(skinned_app("confirm", SKIN), run_of(2, false));
     let mut pixels = HeadlessCanvas::new(CW, CH);
     enter(&mut app, &run);
+    app.shared.stop_scene_clock();
     run_until_begun(&mut app, &mut pixels);
 
     for code in [KeyCode::Enter, KeyCode::Escape] {

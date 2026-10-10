@@ -30,7 +30,7 @@ use super::super::SkinFrame;
 use super::super::draw::Placement;
 use super::super::object::Body;
 use super::pixmap::{Pixmap, Rgba, TRANSPARENT, hex_color, unit_color};
-use super::{Layer, draw_layer, next_serial, plot_of};
+use super::{Layer, draw_layer, next_serial, paintable, plot_of};
 use crate::ctx::RenderCtx;
 use crate::{Rect, Renderer};
 
@@ -484,7 +484,8 @@ pub(crate) fn draw_judge_graph<R: Renderer>(
     };
     let (data, classes) = notes.rows(kind);
     let seconds = data.len() / classes;
-    let Some(plot) = plot_of(place, rect).filter(|_| seconds > 0 && (seconds * PITCH) as u64 <= u64::from(r.max_texture_size())) else {
+    let across = i64::try_from(seconds.saturating_mul(PITCH)).unwrap_or(i64::MAX);
+    let Some(plot) = plot_of(place, rect).filter(|_| paintable(r, across, (MAX_ROWS * PITCH) as i64)) else {
         return false;
     };
     let now_ms = frame.now_us / MICROS_PER_MILLI;

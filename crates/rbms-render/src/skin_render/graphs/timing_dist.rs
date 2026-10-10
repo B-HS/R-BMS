@@ -29,7 +29,7 @@ use super::super::SkinFrame;
 use super::super::draw::Placement;
 use super::super::object::Body;
 use super::pixmap::{Pixmap, Rgba, unit_color};
-use super::{Layer, Upload, draw_layer, next_serial, plot_of, reference_color};
+use super::{Layer, Upload, draw_layer, next_serial, paintable, plot_of, reference_color};
 use crate::ctx::RenderCtx;
 use crate::{Rect, Renderer};
 
@@ -324,13 +324,9 @@ pub(crate) fn draw_timing_distribution<R: Renderer>(
     let Some(histogram) = frame.data.series.timing else {
         return false;
     };
-    let Some(plot) = plot_of(place, rect).filter(|_| body.columns > 0) else {
+    let Some(plot) = plot_of(place, rect).filter(|_| paintable(r, i64::from(body.columns), i64::from(row_count(histogram.bins)))) else {
         return false;
     };
-    let largest = i64::from(r.max_texture_size());
-    if i64::from(body.columns) > largest || i64::from(row_count(histogram.bins)) > largest {
-        return false;
-    }
 
     let mut drawn = body.state.borrow_mut();
     if !drawn.painted.as_ref().is_some_and(|painted| painted.shows(&histogram)) {

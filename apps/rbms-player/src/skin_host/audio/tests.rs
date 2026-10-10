@@ -606,3 +606,17 @@ fn a_path_is_inside_a_folder_when_it_is_under_it_once_dots_are_worked_out() {
     assert!(is_inside_any(&root.join("a.ogg"), &[PathBuf::from("/nowhere"), root.clone()]));
     assert!(!is_inside_any(Path::new("/"), &roots));
 }
+
+/// A folder named by the path Windows resolves it to holds what a skin names the plain way, and
+/// the other way round: the two spellings are one folder.
+#[cfg(windows)]
+#[test]
+fn a_folder_spelled_with_the_verbatim_prefix_holds_the_paths_a_skin_spells_without_it() {
+    let verbatim = [PathBuf::from(r"\\?\C:\skins\pack")];
+    let plain = [PathBuf::from(r"C:\skins\pack")];
+    assert!(is_inside_any(Path::new(r"C:\skins\pack\sounds\a.ogg"), &verbatim));
+    assert!(is_inside_any(Path::new("C:/skins/pack/sounds/a.ogg"), &verbatim));
+    assert!(is_inside_any(Path::new(r"\\?\C:\skins\pack\sounds\a.ogg"), &plain));
+    assert!(!is_inside_any(Path::new(r"C:\skins\other\a.ogg"), &verbatim));
+    assert!(!is_inside_any(Path::new(r"C:\skins\pack\..\other\a.ogg"), &verbatim));
+}

@@ -47,7 +47,7 @@ use super::SkinFrame;
 use super::draw::Placement;
 use super::object::{Body, ValueSource};
 use crate::ctx::RenderCtx;
-use crate::font::{BlockAlign, BlockFit, BlockSpec, TextContext};
+use crate::font::{BLOCK_MAX_EM, BlockAlign, BlockFit, BlockSpec, TextContext};
 use crate::{BlendMode, Color, QuadParams, Rect, Renderer, TextureFilter, TextureId};
 
 pub(crate) mod bitmap;
@@ -393,8 +393,13 @@ fn draw_composed<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, place: &Placem
     true
 }
 
-/// Draws a line whose font did not load, in the default face at the destination's height.
+/// Draws a line whose font did not load, in the default face at the destination's height. A
+/// destination taller than [`BLOCK_MAX_EM`] draws nothing, as it does in a font that did load: the
+/// height is the size every glyph of the line is asked of the rasterizer at.
 fn draw_stand_in<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, place: &Placement<'_>, body: &TextBody, dst: Rect, line: &str) -> bool {
+    if dst.h > BLOCK_MAX_EM as f32 {
+        return false;
+    }
     ctx.text.reset_family();
     let scale = (dst.h / TEXT_PIXELS_PER_SCALE).max(MIN_TEXT_SCALE);
     match body.block_align() {

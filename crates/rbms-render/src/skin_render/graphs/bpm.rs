@@ -17,7 +17,7 @@ use super::super::SkinFrame;
 use super::super::draw::Placement;
 use super::super::object::Body;
 use super::pixmap::{Pixmap, Rgba, hex_color};
-use super::{Layer, draw_layer, next_serial, plot_of};
+use super::{Layer, draw_layer, next_serial, paintable, plot_of};
 use crate::ctx::RenderCtx;
 use crate::{Rect, Renderer};
 
@@ -277,7 +277,7 @@ pub(crate) fn draw_bpm_graph<R: Renderer>(
         return false;
     };
     let (width, height) = (plot.w.abs() as i32, plot.h.abs() as i32);
-    if width <= 0 || height <= 0 || width as u64 > u64::from(r.max_texture_size()) {
+    if !paintable(r, i64::from(width), i64::from(height)) {
         return false;
     }
     let now_ms = frame.now_us / MICROS_PER_MILLI;

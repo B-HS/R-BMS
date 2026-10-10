@@ -6,9 +6,9 @@
 use super::assets::THEME_TEMPLATE;
 use super::judge_setup::{is_custom_judge, judge_setup_of};
 use super::{
-    ROOT_ESC_CONFIRM, SortMode, assisted_lamp, bundled_skin, calibrated_offset, clear_type_from_id, clear_type_id, client_platform, compute_build_hash,
-    config_dir_from, default_total_for_mode, esc_confirms_quit, exit_code, fmt_datetime, green_number_for, ir_submission_block_reason, resumed_clock_us,
-    saves_replay, sound_folder_path, updates_score, write_atomic,
+    ROOT_ESC_CONFIRM, SortMode, assisted_lamp, build_hash, bundled_skin, calibrated_offset, clear_type_from_id, clear_type_id, client_platform,
+    compute_build_hash, config_dir_from, default_total_for_mode, esc_confirms_quit, exit_code, fmt_datetime, green_number_for, ir_submission_block_reason,
+    resumed_clock_us, saves_replay, sound_folder_path, updates_score, write_atomic,
 };
 use rbms_chart::{default_total, default_total_keyboard};
 use rbms_config::{Config, JUDGE_RATE_MAX_PERCENT, LN_MARGIN_DEFAULT_PERCENT, LN_MARGIN_MAX_PERCENT, LN_MARGIN_MIN_PERCENT, UNMODIFIED_JUDGE_RATES};
@@ -61,11 +61,15 @@ fn clear_lamp_id_roundtrips() {
     }
 }
 
+/// The executable is read through the digest once here and once by [`build_hash`], however many
+/// apps the tests of this process build: the hash an app carries is the remembered one.
 #[test]
 fn build_hash_is_64_hex_chars() {
     let h = compute_build_hash().expect("the test binary should be readable");
     assert_eq!(h.len(), 64, "SHA-256 hex is 64 chars");
     assert!(h.chars().all(|c| c.is_ascii_hexdigit()), "hash is lowercase hex");
+    assert_eq!(build_hash().as_deref(), Some(h.as_str()), "the hash an app carries is not the executable's");
+    assert_eq!(build_hash().as_deref(), Some(h.as_str()), "asking again answered another hash");
 }
 
 #[test]

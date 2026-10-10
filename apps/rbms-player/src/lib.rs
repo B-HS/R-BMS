@@ -8,9 +8,9 @@
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use rbms_audio::{AudioEngine, AudioOpenReport, AudioOptions, Bus, IdNamespace};
@@ -343,14 +343,22 @@ fn resumed_clock_us(last_us: i64, elapsed_us: i64) -> i64 {
 }
 
 /// SHA-256 of the running client binary, submitted as `client_build_sha256` for build-integrity /
-/// ranked eligibility. Computed once at startup. `None` if the executable can't be read — the
-/// server decides how to treat an unknown build (e.g. ranked=false).
+/// ranked eligibility. `None` if the executable can't be read — the server decides how to treat an
+/// unknown build (e.g. ranked=false).
 fn compute_build_hash() -> Option<String> {
     let exe = std::env::current_exe().ok()?;
     let bytes = std::fs::read(exe).ok()?;
     let mut hasher = Sha256::new();
     hasher.update(&bytes);
     Some(format!("{:x}", hasher.finalize()))
+}
+
+/// [`compute_build_hash`], worked out the first time it is asked for and remembered for the life of
+/// the process. The executable is the same file however many times an [`App`] is built from it, and
+/// reading the whole of it through a digest is the most expensive thing building one does.
+fn build_hash() -> Option<String> {
+    static BUILD_HASH: OnceLock<Option<String>> = OnceLock::new();
+    BUILD_HASH.get_or_init(compute_build_hash).clone()
 }
 
 /// Client platform tag (`OS-ARCH`, e.g. `macos-aarch64`) paired with the build hash.
@@ -738,6 +746,10 @@ struct AppShared {
     booted: Instant,
     /// When the running scene began, which is what the skin clock counts from.
     scene_started: Instant,
+    /// Where a test has stopped the machine's side of the skin clock
+    /// ([`AppShared::stop_scene_clock`]).
+    #[cfg(test)]
+    scene_stopped_at: Option<Instant>,
     anchor_us: i64,
     /// Set once the audio output stream is found dead: the song position the audio clock last
     /// reported and the instant that was noticed, so `song_us` continues on the wall clock.
@@ -964,6 +976,8 @@ impl App {
                 clock: Instant::now(),
                 booted: Instant::now(),
                 scene_started: Instant::now(),
+                #[cfg(test)]
+                scene_stopped_at: None,
                 anchor_us: 0,
                 audio_dead_at: std::cell::Cell::new(None),
                 song_us_last: std::cell::Cell::new(0),
@@ -990,7 +1004,7 @@ impl App {
                 fps: 0.0,
                 frame_count: 0,
                 ram_mb: 0.0,
-                build_sha256: compute_build_hash(),
+                build_sha256: build_hash(),
             },
         };
         app.shared.rebuild_select_items();

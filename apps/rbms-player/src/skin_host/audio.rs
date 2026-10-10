@@ -408,8 +408,13 @@ pub(crate) fn voice_gain(volume: f32) -> Option<f32> {
 }
 
 /// The path with `.` and `..` worked out, made absolute, or `None` when `..` would leave the root.
+///
+/// A path spelled with Windows' verbatim prefix is read without it
+/// ([`rbms_skin::resolve::plain_path`]). A skin's own paths are never spelled that way, so a folder
+/// that is -- a pack named by its resolved path -- would otherwise have nothing a skin asks for
+/// under it.
 fn lexically_normalized(path: &Path) -> Option<PathBuf> {
-    let absolute = std::path::absolute(path).ok()?;
+    let absolute = std::path::absolute(rbms_skin::resolve::plain_path(path)).ok()?;
     let mut normalized = PathBuf::new();
     for component in absolute.components() {
         match component {

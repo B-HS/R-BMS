@@ -56,7 +56,7 @@ use rbms_skin::model::TextDef;
 use super::{SHADOW_DIVISOR, TextBody, anchor_x};
 use crate::bitmap_font::{BitmapFont, Piece};
 use crate::ctx::RenderCtx;
-use crate::font::{BlockAlign, BlockFit, BlockSpec, CLEAR_PIXEL, TextBlock, TextContext};
+use crate::font::{BLOCK_MAX_PIXELS, BlockAlign, BlockFit, BlockSpec, CLEAR_PIXEL, TextBlock, TextContext, block_extent};
 use crate::skin_render::color::{DIGITS_PER_CHANNEL, HEX_RADIX};
 use crate::skin_render::draw::Placement;
 use crate::skin_render::textures::SizedTexture;
@@ -241,6 +241,34 @@ struct FallbackGlyph {
     block: Option<Arc<TextBlock>>,
 }
 
+/// The stand-ins a face remembers, and how many pixels they hold between them.
+#[derive(Debug, Default)]
+struct Fallbacks {
+    known: HashMap<(char, u32), FallbackGlyph>,
+    pixels: usize,
+}
+
+impl Fallbacks {
+    /// Remembers `glyph` under `key`, forgetting every glyph remembered so far when there are
+    /// [`FALLBACK_CACHE_LIMIT`] of them or when this one would take what they hold past
+    /// [`BLOCK_MAX_PIXELS`]: the size of a stand-in is the size the document asks its text at, so
+    /// how many are kept cannot be all that bounds what they weigh.
+    fn remember(&mut self, key: (char, u32), glyph: &FallbackGlyph) {
+        let pixels = glyph.block.as_ref().map_or(0, |block| block_pixels(block));
+        if self.known.len() >= FALLBACK_CACHE_LIMIT || self.pixels.saturating_add(pixels) > BLOCK_MAX_PIXELS {
+            self.known.clear();
+            self.pixels = 0;
+        }
+        self.pixels += pixels;
+        self.known.insert(key, glyph.clone());
+    }
+}
+
+/// How many pixels a composed stand-in holds.
+fn block_pixels(block: &TextBlock) -> usize {
+    block.width as usize * block.height as usize
+}
+
 /// A bitmap font as one screen draws with it: the font, how its pages are read, the screen's page
 /// table and the stand-ins for the characters it lacks.
 #[derive(Debug)]
@@ -248,12 +276,12 @@ pub(crate) struct ScreenFace {
     font: Arc<BitmapFont>,
     kind: BitmapKind,
     pages: SharedPages,
-    fallbacks: Mutex<HashMap<(char, u32), FallbackGlyph>>,
+    fallbacks: Mutex<Fallbacks>,
 }
 
 impl ScreenFace {
     pub(crate) fn new(font: Arc<BitmapFont>, kind: BitmapKind, pages: SharedPages) -> ScreenFace {
-        ScreenFace { font, kind, pages, fallbacks: Mutex::new(HashMap::new()) }
+        ScreenFace { font, kind, pages, fallbacks: Mutex::new(Fallbacks::default()) }
     }
 
     /// How the font's pages are meant to be read.
@@ -269,12 +297,9 @@ impl ScreenFace {
     /// the glyphs of the scripts a bitmap font tends to lack -- Hangul, kana, ideographs -- have.
     fn fallback(&self, text: &mut TextContext, ch: char, em: f32, max_dim: u32) -> FallbackGlyph {
         let key = (ch, em.to_bits());
-        let mut known = locked(&self.fallbacks);
-        if let Some(glyph) = known.get(&key) {
+        let mut fallbacks = locked(&self.fallbacks);
+        if let Some(glyph) = fallbacks.known.get(&key) {
             return glyph.clone();
-        }
-        if known.len() >= FALLBACK_CACHE_LIMIT {
-            known.clear();
         }
         let mut utf8 = [0u8; 4];
         let family = text.default_family().to_string();
@@ -292,7 +317,7 @@ impl ScreenFace {
         let block = text.compose_block(&spec);
         let bearing = block.as_ref().map_or(0.0, |block| (reach - block.layout_width).max(0.0));
         let glyph = FallbackGlyph { advance: reach + bearing, bearing, block: block.map(Arc::new) };
-        known.insert(key, glyph.clone());
+        fallbacks.remember(key, &glyph);
         glyph
     }
 
@@ -423,22 +448,21 @@ struct Overlay {
     origin: (i32, i32),
 }
 
-/// Composes `stamps` into one image no longer on an edge than `max_dim`, or `None` when there is
-/// nothing to compose. Where two glyphs overlap the more opaque pixel is kept.
+/// Composes `stamps` into one image no larger than a block of text may be
+/// ([`block_extent`](crate::font::block_extent)) and no longer on an edge than `max_dim`, or `None`
+/// when there is nothing to compose. Where two glyphs overlap the more opaque pixel is kept.
 ///
 /// Where a stamp lands is as far off as the font's advances put it, and a font may give any, so
-/// the distances between stamps are worked out in numbers wide enough for any two of them.
+/// the distances between stamps are worked out in numbers wide enough for any two of them, and
+/// the image is cut off where a block is rather than made to reach from the first stamp to the
+/// last: a renderer that keeps its pixels in ordinary memory names no longest edge of its own.
 fn compose_overlay(stamps: &[Stamp], max_dim: u32) -> Option<Overlay> {
     let far = |near: i32, extent: u32| i64::from(near) + i64::from(extent);
     let left = stamps.iter().map(|stamp| stamp.x).min()?;
     let top = stamps.iter().map(|stamp| stamp.y).min()?;
     let right = stamps.iter().map(|stamp| far(stamp.x, stamp.block.width)).max()?;
     let bottom = stamps.iter().map(|stamp| far(stamp.y, stamp.block.height)).max()?;
-    let width = (right - i64::from(left)).clamp(0, i64::from(max_dim)) as u32;
-    let height = (bottom - i64::from(top)).clamp(0, i64::from(max_dim)) as u32;
-    if width == 0 || height == 0 {
-        return None;
-    }
+    let (width, height) = block_extent(right - i64::from(left), bottom - i64::from(top), max_dim)?;
     let mut rgba = CLEAR_PIXEL.repeat(width as usize * height as usize);
     for stamp in stamps {
         let across = stamp.block.width as usize;
@@ -491,6 +515,10 @@ impl BitmapText {
     /// Lays `line` out and keeps the result: a quad for every glyph the font has, and one texture
     /// for the characters it lacks.
     ///
+    /// The stand-ins a line is composed from hold no more than [`BLOCK_MAX_PIXELS`] between them,
+    /// which is all the texture they are composed into can show; one that would take them past it
+    /// is left out.
+    ///
     /// The quads are kept page by page, in the order of the line within a page, which is the order
     /// the reference draws them in (`BitmapFontCache.draw` goes through its pages one at a time).
     /// Where the quads of two neighbours overlap, as they do in a font made with padding, that
@@ -508,6 +536,7 @@ impl BitmapText {
         let mut quads: Vec<GlyphQuad> = Vec::new();
         let mut pages: BTreeSet<usize> = BTreeSet::new();
         let mut stamps: Vec<Stamp> = Vec::new();
+        let mut room = BLOCK_MAX_PIXELS;
         for run in &laid.runs {
             let top = run.row as f32 * font.line_height() * scale;
             for (pen, piece) in run.placed() {
@@ -526,7 +555,9 @@ impl BitmapText {
                     Piece::Glyph { .. } => {}
                     Piece::Fallback { ch, .. } => {
                         let glyph = face.fallback(text, *ch, em, max_dim);
-                        if let Some(block) = glyph.block {
+                        let fits = |block: &Arc<TextBlock>| block_pixels(block) <= room;
+                        if let Some(block) = glyph.block.filter(fits) {
+                            room -= block_pixels(&block);
                             let x = ((run.x + pen) / squeeze + glyph.bearing + block.left).round() as i32;
                             stamps.push(Stamp { x, y: (top + block.top).round() as i32, block });
                         }

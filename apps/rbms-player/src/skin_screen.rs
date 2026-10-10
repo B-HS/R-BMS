@@ -1022,7 +1022,34 @@ impl AppShared {
 
     /// How long the running scene has run, not counting any time it was held still for its document.
     fn scene_elapsed(&self) -> Duration {
-        self.skin_screens.hold.map_or_else(|| self.scene_started.elapsed(), |hold| hold.at)
+        self.skin_screens.hold.map_or_else(|| self.scene_run(), |hold| hold.at)
+    }
+
+    /// How long ago the scene clock was started, whether or not the scene is held.
+    fn scene_run(&self) -> Duration {
+        self.scene_instant().saturating_duration_since(self.scene_started)
+    }
+
+    /// The instant the scene clock is read at and started from: now.
+    ///
+    /// Everything that reads the scene clock or puts it somewhere goes through here, so a test can
+    /// stop the machine's side of it ([`AppShared::stop_scene_clock`]) and count the scene's time
+    /// itself.
+    pub(crate) fn scene_instant(&self) -> Instant {
+        #[cfg(test)]
+        if let Some(stopped) = self.scene_stopped_at {
+            return stopped;
+        }
+        Instant::now()
+    }
+
+    /// Stop the machine's side of the scene clock where it is, for the tests of what a scene does
+    /// before and after one of its times: from here on the clock moves only when it is put
+    /// somewhere or aged ([`AppShared::age_skin_scene`]), a scene that begins reads exactly zero,
+    /// and the time the machine takes over a frame is no part of the scene.
+    #[cfg(test)]
+    pub(crate) fn stop_scene_clock(&mut self) {
+        self.scene_stopped_at = Some(Instant::now());
     }
 
     /// Start a scene: every timer off and the scene clock back at zero
@@ -1047,7 +1074,7 @@ impl AppShared {
     fn reset_skin_scene(&mut self) {
         self.skin_timers.clear();
         self.skin_screens.scene_moved();
-        self.scene_started = Instant::now();
+        self.scene_started = self.scene_instant();
     }
 
     /// Take the running scene out to be parked, and begin a fresh one for the screen about to be
@@ -1074,7 +1101,7 @@ impl AppShared {
         self.skin_timers = timers;
         self.skin_screens.scene_moved();
         drop(parked);
-        let now = Instant::now();
+        let now = self.scene_instant();
         self.scene_started = now.checked_sub(elapsed).unwrap_or(now);
     }
 
@@ -1170,7 +1197,7 @@ impl AppShared {
         let loading = self.skin_is_loading(screen);
         match self.skin_screens.hold {
             None if loading && !self.skin_screens.hold_spent => {
-                self.skin_screens.hold = Some(SceneHold { screen, at: self.scene_started.elapsed(), since: Instant::now() });
+                self.skin_screens.hold = Some(SceneHold { screen, at: self.scene_run(), since: Instant::now() });
             }
             Some(hold) if hold.screen == screen && (!loading || hold.since.elapsed() > SCENE_HOLD_LIMIT) => {
                 self.skin_screens.hold_spent = loading;
@@ -1183,7 +1210,7 @@ impl AppShared {
     /// Set a held scene going again from where it stood.
     fn release_scene_hold(&mut self) {
         if let Some(hold) = self.skin_screens.hold.take() {
-            let now = Instant::now();
+            let now = self.scene_instant();
             self.scene_started = now.checked_sub(hold.at).unwrap_or(now);
         }
     }

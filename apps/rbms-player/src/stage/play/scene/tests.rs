@@ -201,6 +201,28 @@ fn a_practice_slice_begins_ready_and_its_play_timer_starts_at_the_slice() {
     assert_eq!(elapsed_ms(&timers, timer_id::RHYTHM, started_at), SLICE_START_US / MICROS_PER_MILLI);
 }
 
+/// A slice whose skin is still on its way is ready and stays ready: a skin that has not been read
+/// states no start time, and the time of no skin at all is over the moment the clock moves. It
+/// starts on the skin's own time once the skin is in.
+#[test]
+fn a_practice_slice_stays_ready_until_its_skin_is_in() {
+    let (mut driver, mut timers) = stage();
+    let mut scene = PlayScene::ready();
+    let waiting = |now_us| SceneFacts { loaded: false, times: PlayTimes::default(), ..facts(now_us, 0) };
+
+    assert_eq!(scene.step(&mut driver, &mut timers, &waiting(FRAME_US)), SceneStep::Ready);
+    for frame in 2..=4 {
+        assert_eq!(scene.step(&mut driver, &mut timers, &waiting(FRAME_US * frame)), SceneStep::Stay, "a slice started on the times of a skin that is not in");
+    }
+    assert_eq!(scene.phase(), PlayPhase::Ready);
+    assert!(!timers.is_on(timer_id::PLAY));
+
+    let late = FRAME_US + at_ms(TIMES.playstart_ms + 1);
+    assert_eq!(scene.step(&mut driver, &mut timers, &SceneFacts { loaded: false, ..facts(late, 0) }), SceneStep::Stay, "a slice started without its skin");
+    assert_eq!(scene.step(&mut driver, &mut timers, &facts(FRAME_US + at_ms(TIMES.playstart_ms), 0)), SceneStep::Stay);
+    assert_eq!(scene.step(&mut driver, &mut timers, &facts(late, 0)), SceneStep::Started);
+}
+
 /// A run whose gauge empties fails: the failure's timer goes on, and the run is left for the result
 /// once that timer has run for longer than the skin's `close`.
 #[test]

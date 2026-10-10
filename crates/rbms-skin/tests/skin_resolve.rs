@@ -9,7 +9,8 @@ use rbms_skin::SkinError;
 use rbms_skin::loader::{SkinLoadOptions, SkinUserConfig, load_header, load_skin};
 use rbms_skin::model::{Filepath, SkinDef, SourceKind};
 use rbms_skin::resolve::{
-    Draw, FileResolver, MOVIE_NAME_ENDINGS, apply_filemap, build_filemap, contained, enumerate_custom_files, pattern_for, source_kind, wildcard_extension,
+    Draw, FileResolver, MOVIE_NAME_ENDINGS, apply_filemap, build_filemap, contained, enumerate_custom_files, file_spelling, pattern_for, plain_path,
+    source_kind, wildcard_extension, without_verbatim_prefix,
 };
 
 /// A seed the wildcard tests pin so a draw is the same on every machine.
@@ -298,6 +299,52 @@ fn a_pattern_that_leaves_the_root_is_refused_by_the_resolver() {
 #[test]
 fn joining_a_relative_path_normalises_the_separator() {
     assert_eq!(pattern_for(Path::new("/skins/one/"), "images\\frame.png"), "/skins/one/images/frame.png");
+}
+
+/// Windows resolves every path to its verbatim spelling, and a folder named that way is what a
+/// caller holds after asking for the canonical path of a pack. Written with the separator patterns
+/// use, the prefix stops being one -- `//?/C:/skins` is a share called `C:` on a machine called
+/// `?` -- so it is taken off before anything is joined on. The texts are Windows' own, and the rule
+/// reads nothing but the text, so it is checked here on whatever platform the tests run on.
+#[test]
+fn a_folder_spelled_with_the_verbatim_prefix_is_joined_onto_without_it() {
+    assert_eq!(pattern_for(Path::new(r"\\?\C:\skins\pack"), "parts/frame.lua"), "C:/skins/pack/parts/frame.lua");
+    assert_eq!(pattern_for(Path::new(r"\\?\C:\skins\pack\"), ""), "C:/skins/pack", "the folder itself");
+    assert_eq!(pattern_for(Path::new(r"\\?\UNC\server\share\pack"), r"bg\day.png"), "//server/share/pack/bg/day.png", "a folder on another machine");
+    assert_eq!(pattern_for(Path::new(r"C:\skins\pack"), "parts/frame.lua"), "C:/skins/pack/parts/frame.lua", "a plain folder is joined onto as it is");
+    assert_eq!(pattern_for(Path::new(r"\\server\share\pack"), "a.png"), "//server/share/pack/a.png");
+}
+
+#[test]
+fn only_a_verbatim_path_with_a_plain_spelling_loses_its_prefix() {
+    assert_eq!(without_verbatim_prefix(r"\\?\C:\skins\pack").as_deref(), Some(r"C:\skins\pack"));
+    assert_eq!(without_verbatim_prefix(r"\\?\d:").as_deref(), Some("d:"), "a drive alone");
+    assert_eq!(without_verbatim_prefix(r"\\?\UNC\server\share").as_deref(), Some(r"\\server\share"));
+    assert_eq!(without_verbatim_prefix(r"\\?\Volume{4c1b02c1-d990-11dc-99ae-806e6f6e6963}\pack"), None, "a volume by its identifier has no other spelling");
+    assert_eq!(without_verbatim_prefix(r"\\?\C:skins"), None, "a drive with no root is not a drive's folder");
+    assert_eq!(without_verbatim_prefix(r"\\?\"), None);
+    assert_eq!(without_verbatim_prefix(r"C:\skins\pack"), None, "a plain path has nothing to take off");
+    assert_eq!(without_verbatim_prefix("/skins/pack"), None);
+    assert_eq!(without_verbatim_prefix("//?/C:/skins"), None, "written with the other separator it was never a prefix");
+
+    assert_eq!(plain_path(Path::new(r"\\?\C:\skins\pack")), PathBuf::from(r"C:\skins\pack"));
+    assert_eq!(plain_path(Path::new("/skins/pack")), PathBuf::from("/skins/pack"), "a path with no prefix is answered as it is");
+}
+
+/// The path `skin_config.get_path` answers is spelled the way the reference's `File` spells one:
+/// separators that run together are one, and none is left at the end. Where two separators at the
+/// start name another machine they are kept, or the path would come back naming a folder of the
+/// current drive.
+#[test]
+fn a_path_is_spelled_with_single_separators_and_keeps_the_pair_that_names_a_machine() {
+    assert_eq!(file_spelling("C:/skins//pack///a.png", true), "C:/skins/pack/a.png");
+    assert_eq!(file_spelling("C:/skins/pack/", true), "C:/skins/pack", "no separator is left at the end");
+    assert_eq!(file_spelling("//server/share//pack/a.png", true), "//server/share/pack/a.png", "the pair that names a machine is kept");
+    assert_eq!(file_spelling("///server/share/", true), "//server/share", "and is never more than a pair");
+    assert_eq!(file_spelling("//server/share//pack/a.png", false), "/server/share/pack/a.png", "where a pair names nothing it is one separator");
+    assert_eq!(file_spelling("/skins//pack/", false), "/skins/pack");
+    assert_eq!(file_spelling("/", false), "/", "the root keeps its only separator");
+    assert_eq!(file_spelling("", true), "");
 }
 
 #[test]

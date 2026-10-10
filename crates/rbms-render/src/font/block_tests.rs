@@ -3,9 +3,11 @@
 //! size, the three overflow rules, wrapping, the fallback for a character a font lacks, and how a
 //! loaded font is named.
 
-use super::block::{BLOCK_MAX_DIM, BlockAlign, BlockFit, BlockSpec, TextBlock, small_letter_fit};
+use cosmic_text::{Placement, SwashImage};
+
+use super::block::{BLOCK_MAX_DIM, BLOCK_MAX_EM, BLOCK_MAX_PIXELS, BlockAlign, BlockFit, BlockSpec, TextBlock, block_extent, small_letter_fit, takes_room};
 use super::{BUNDLED_FONT, Face, TextContext};
-use crate::BYTES_PER_PIXEL;
+use crate::{BYTES_PER_PIXEL, UNLIMITED_TEXTURE_SIZE};
 
 /// The em size most of these blocks are composed at.
 const EM: f32 = 40.0;
@@ -198,6 +200,64 @@ fn a_block_is_white_ink_and_no_longer_than_its_caller_can_hold() {
     let limit = 16;
     let cropped = text.compose_block(&BlockSpec { max_dim: limit, ..spec(LONG_LINE, &family) }).expect("a cropped line composes");
     assert!(cropped.width <= limit && cropped.height <= limit, "a block is cut off at the longest edge its caller holds");
+}
+
+/// The places a block's glyphs land at come from numbers a document wrote -- the width a line is
+/// aligned in, the advances of a font -- and the image they are laid into is asked of the allocator
+/// in one piece. Its size is therefore never the distance between two glyphs: whatever that is,
+/// neither edge passes the longest a block has and the two together hold no more than a block may,
+/// on a renderer with no ceiling of its own as on any other.
+#[test]
+fn the_image_of_a_block_is_no_larger_than_a_block_may_be_whatever_its_glyphs_span() {
+    let longest = i64::from(BLOCK_MAX_DIM);
+    let spans = [(i64::MAX, i64::MAX), (i64::from(u32::MAX), 8), (8, i64::from(u32::MAX)), (longest + 1, longest + 1), (longest, longest)];
+    for (width, height) in spans {
+        let (across, down) = block_extent(width, height, UNLIMITED_TEXTURE_SIZE).expect("a span of something is an image of something");
+        assert!(across <= BLOCK_MAX_DIM && down <= BLOCK_MAX_DIM, "{width} by {height} came to an edge past the longest: {across} by {down}");
+        assert!(across as usize * down as usize <= BLOCK_MAX_PIXELS, "{width} by {height} came to {across} by {down}, more pixels than a block holds");
+    }
+
+    assert_eq!(block_extent(100, 50, UNLIMITED_TEXTURE_SIZE), Some((100, 50)), "a block that fits is left as it is");
+    assert_eq!(block_extent(i64::MAX, 8, UNLIMITED_TEXTURE_SIZE), Some((BLOCK_MAX_DIM, 8)), "a line too long is cut off at the longest edge");
+    assert_eq!(block_extent(100, 50, 16), Some((16, 16)), "and at the longest edge its caller holds, when that is shorter");
+    assert_eq!(block_extent(0, 50, UNLIMITED_TEXTURE_SIZE), None, "no width is no image");
+    assert_eq!(block_extent(100, -1, UNLIMITED_TEXTURE_SIZE), None, "and neither is a height below nothing");
+}
+
+/// A glyph's pixels are asked of the allocator at the size of the line, which is the height of a
+/// destination and so any number a document cares to write. Past the largest em nothing is
+/// rasterized and nothing is drawn.
+#[test]
+fn a_line_taller_than_the_largest_em_is_not_drawn() {
+    let (mut text, family) = engine();
+    let largest = BLOCK_MAX_EM as f32;
+    for em_px in [largest + 1.0, 1.0e9, f32::MAX] {
+        let tall = BlockSpec { em_px, ..spec("A", &family) };
+        assert_eq!(text.compose_block(&tall), None, "a line {em_px} pixels tall was composed");
+        assert_eq!(text.caret_x(&tall, 1), None, "and so was the caret of one");
+    }
+    assert!(text.compose_block(&spec("A", &family)).is_some(), "a line of an ordinary size still is");
+}
+
+/// The glyphs of a block are rasterized before the block is cut to size, so how many pixels they
+/// hold between them is counted as they are made: one that would take them past what a block holds
+/// is left without ink, and so is every glyph after it.
+#[test]
+fn the_glyphs_of_a_block_stop_taking_pixels_when_its_room_runs_out() {
+    let glyph = |width: u32, height: u32| {
+        let mut image = SwashImage::new();
+        image.placement = Placement { left: 0, top: 0, width, height };
+        image
+    };
+    let mut room = 100;
+    assert!(takes_room(&mut room, &glyph(6, 10)), "a glyph that fits is kept");
+    assert_eq!(room, 40);
+    assert!(!takes_room(&mut room, &glyph(7, 6)), "one that does not fit is left out");
+    assert_eq!(room, 0, "and takes what room there was");
+    assert!(!takes_room(&mut room, &glyph(1, 1)), "so that nothing after it is drawn either");
+
+    let mut whole = BLOCK_MAX_PIXELS;
+    assert!(!takes_room(&mut whole, &glyph(u32::MAX, u32::MAX)), "the largest glyph there could be is counted as what it is");
 }
 
 #[test]

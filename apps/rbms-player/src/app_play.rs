@@ -475,7 +475,7 @@ impl AppShared {
         if self.skin_is_held() {
             return;
         }
-        let now = Instant::now();
+        let now = self.scene_instant();
         self.scene_started = now.checked_sub(Duration::from_micros(u64::try_from(at_us).unwrap_or_default())).unwrap_or(now);
     }
 

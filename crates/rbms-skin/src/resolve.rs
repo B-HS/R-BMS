@@ -32,6 +32,25 @@ pub const RANDOM_SELECTION: &str = "Random";
 /// The separator patterns are written with, whatever the host platform uses.
 const PATTERN_SEPARATOR: char = '/';
 
+/// The separator Windows writes a path with.
+const WINDOWS_SEPARATOR: char = '\\';
+
+/// What Windows puts before a path it is to take exactly as written, which is the spelling it
+/// resolves every path to: `std::fs::canonicalize` answers `\\?\C:\skins\pack`.
+const VERBATIM_PREFIX: &str = r"\\?\";
+
+/// What follows [`VERBATIM_PREFIX`] when the path is on another machine
+/// (`\\?\UNC\server\share\pack`).
+const VERBATIM_NETWORK_MARK: &str = r"UNC\";
+
+/// What a path on another machine opens with when it is not spelled verbatim (`\\server\share`),
+/// and the same in the separator patterns are written with.
+const NETWORK_PREFIX: &str = r"\\";
+const PATTERN_NETWORK_PREFIX: &str = "//";
+
+/// What follows the letter of a drive.
+const DRIVE_MARK: char = ':';
+
 /// What a file's name ends in when the reference takes it for a movie (`VideoFormat`, every format's
 /// extensions in the order `getAllExtensions` lists them).
 ///
@@ -135,11 +154,63 @@ pub struct CustomFile {
     pub candidates: Vec<String>,
 }
 
+/// The text of a path without Windows' verbatim prefix, or `None` for a path with none that can be
+/// taken off.
+///
+/// A verbatim path is one Windows takes as written: in it a `/` is a character of a name and not a
+/// separator, and the prefix itself is only a prefix while every one of its separators is a `\`.
+/// A skin joins its paths with `/`, and so does every pattern here, so a folder spelled that way
+/// cannot be the start of either: `//?/C:/skins/pack/parts/a.lua` is not a path under
+/// `\\?\C:\skins\pack`, it is a path on a machine called `?`. The folder is therefore spelled
+/// the plain way before anything is joined onto it -- `\\?\C:\skins` is `C:\skins`, and
+/// `\\?\UNC\server\share` is `\\server\share`. A verbatim path of any other kind, a volume
+/// named by its identifier, has no plain spelling and is left as it is.
+///
+/// The rule reads the text alone and is the same on every platform, as [`pattern_for`]'s reading
+/// of `\` is.
+pub fn without_verbatim_prefix(path: &str) -> Option<String> {
+    let rest = path.strip_prefix(VERBATIM_PREFIX)?;
+    if let Some(share) = rest.strip_prefix(VERBATIM_NETWORK_MARK) {
+        return Some(format!("{NETWORK_PREFIX}{share}"));
+    }
+    let mut characters = rest.chars();
+    let lettered = characters.next().is_some_and(|letter| letter.is_ascii_alphabetic()) && characters.next() == Some(DRIVE_MARK);
+    (lettered && matches!(characters.next(), None | Some(WINDOWS_SEPARATOR))).then(|| rest.to_owned())
+}
+
+/// `path` without Windows' verbatim prefix ([`without_verbatim_prefix`]). A path that has none, or
+/// that is not text, is answered as it is.
+pub fn plain_path(path: &Path) -> PathBuf {
+    path.to_str().and_then(without_verbatim_prefix).map_or_else(|| path.to_path_buf(), PathBuf::from)
+}
+
+/// A path as `java.io.File.getPath` spells it, in the separator patterns are written with: runs of
+/// separators collapsed and no trailing one.
+///
+/// `network_paths` says whether two separators at the very start name another machine, which they
+/// do on Windows and nowhere else. There the reference's `File` keeps the pair, and a path that
+/// lost one of them would name a folder of the current drive instead.
+pub fn file_spelling(path: &str, network_paths: bool) -> String {
+    let kept = if network_paths && path.starts_with(PATTERN_NETWORK_PREFIX) { PATTERN_NETWORK_PREFIX.len() } else { 0 };
+    let mut text = String::with_capacity(path.len());
+    for (index, character) in path.char_indices() {
+        if index < kept || character != PATTERN_SEPARATOR || !text.ends_with(PATTERN_SEPARATOR) {
+            text.push(character);
+        }
+    }
+    if text.len() > kept.max(PATTERN_SEPARATOR.len_utf8()) && text.ends_with(PATTERN_SEPARATOR) {
+        text.pop();
+    }
+    text
+}
+
 /// Joins a document-relative path onto the skin directory, in the slash-separated form patterns and
-/// filemap keys are both written in.
+/// filemap keys are both written in. A directory spelled with Windows' verbatim prefix is spelled
+/// without it ([`without_verbatim_prefix`]).
 pub fn pattern_for(skin_dir: &Path, relative: &str) -> String {
-    let base = skin_dir.to_string_lossy().replace('\\', "/");
-    let relative = relative.replace('\\', "/");
+    let spelled = skin_dir.to_string_lossy();
+    let base = without_verbatim_prefix(&spelled).unwrap_or_else(|| spelled.into_owned()).replace(WINDOWS_SEPARATOR, "/");
+    let relative = relative.replace(WINDOWS_SEPARATOR, "/");
     let base = base.trim_end_matches(PATTERN_SEPARATOR);
     if relative.is_empty() { base.to_owned() } else { format!("{base}{PATTERN_SEPARATOR}{relative}") }
 }

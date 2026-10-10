@@ -27,6 +27,8 @@
 mod bpm;
 mod gauge_graph;
 mod hit_error;
+#[cfg(test)]
+mod limit_tests;
 mod notes_dist;
 mod pixmap;
 mod timing_dist;
@@ -42,6 +44,7 @@ use super::draw::Placement;
 use super::object::Body;
 use super::text::Fonts;
 use super::textures::Source;
+use crate::font::BLOCK_MAX_PIXELS;
 use crate::{Rect, Renderer, TextureFilter, TextureId, UvRect};
 use pixmap::{Pixmap, Rgba};
 
@@ -144,6 +147,24 @@ fn visualizer_line_width(declared: i32) -> i32 {
 /// `width` over the number of milliseconds on the ruler, both sides and the middle one.
 fn visualizer_rate(width: i32, center: i32) -> f32 {
     width as f32 / center.wrapping_mul(2).wrapping_add(1) as f32
+}
+
+/// The most pixels one graph paints into a pixmap of its own: what a block of text may hold, which
+/// is more than a screen has.
+///
+/// A pixmap is asked of the allocator whole, and its size is a number somebody else wrote -- a
+/// destination's extent, a count the document gives, the length of a chart. The longest edge a
+/// renderer holds does not bound it: a renderer that keeps its pixels in ordinary memory names no
+/// such edge, and two edges a renderer does hold are still a gigabyte between them.
+const PIXMAP_MAX_PIXELS: u64 = BLOCK_MAX_PIXELS as u64;
+
+/// Whether a pixmap `width` by `height` is one a graph paints: something on both edges, neither
+/// longer than `r` holds as a texture, and no more than [`PIXMAP_MAX_PIXELS`] between them. A graph
+/// asks this before it makes a pixmap, and one that is told no draws nothing.
+fn paintable<R: Renderer>(r: &R, width: i64, height: i64) -> bool {
+    let largest = i64::from(r.max_texture_size());
+    let held = (1..=largest).contains(&width) && (1..=largest).contains(&height);
+    held && width.unsigned_abs().saturating_mul(height.unsigned_abs()) <= PIXMAP_MAX_PIXELS
 }
 
 /// The screen rectangle a graph plots inside, or `None` when its destination has no extent this

@@ -56,6 +56,8 @@ use crate::dst::{DestinationTrack, DrawCondition, OffsetSource, SkinOffset};
 use crate::model::{Category, DEFAULT_SKIN_HEIGHT, DEFAULT_SKIN_WIDTH, Destination, Filepath, OffsetDef, PropertyDef, SKIN_TYPE_UNSET, SkinDef, SourceKind};
 use crate::property::generated::{OFFSET_ALL, OFFSET_JUDGE_1P, OFFSET_JUDGEDETAIL_1P, OFFSET_NOTES_1P};
 use crate::property::{DefaultState, NameSpace, SkinHost, id_of_name};
+#[cfg(feature = "lua")]
+use crate::resolve::file_spelling;
 use crate::resolve::{CustomFile, Draw, FileResolver, build_filemap, contained, enumerate_custom_files, pattern_for, source_kind};
 
 /// Bytes a document may be before the loader refuses to parse it.
@@ -74,10 +76,6 @@ const BYTE_ORDER_MARK: char = '\u{feff}';
 /// The first line and column of a file, as both parsers count them once normalised.
 #[cfg(feature = "json5")]
 const FIRST_POSITION: usize = 1;
-
-/// The separator every path handed to a skin is written with.
-#[cfg(feature = "lua")]
-const SKIN_PATH_SEPARATOR: char = '/';
 
 /// Whether `path` names a Lua skin, by its extension and ignoring case.
 pub fn is_lua_skin(path: &Path) -> bool {
@@ -868,19 +866,10 @@ pub(crate) fn merge_header(rows: &HeaderRows<'_>, directory: &Path, root: &Path,
     }
 }
 
-/// A path as `java.io.File.getPath` spells it: runs of separators collapsed and no trailing one.
+/// A path as `java.io.File.getPath` spells it on this platform ([`file_spelling`]).
 #[cfg(feature = "lua")]
 fn file_path_text(path: &str) -> String {
-    let mut text = String::with_capacity(path.len());
-    for character in path.chars() {
-        if character != SKIN_PATH_SEPARATOR || !text.ends_with(SKIN_PATH_SEPARATOR) {
-            text.push(character);
-        }
-    }
-    if text.len() > SKIN_PATH_SEPARATOR.len_utf8() && text.ends_with(SKIN_PATH_SEPARATOR) {
-        text.pop();
-    }
-    text
+    file_spelling(path, cfg!(windows))
 }
 
 /// The `skin_config` global a skin's Lua reads (`SkinLuaAccessor.exportSkinProperty`).

@@ -227,6 +227,32 @@ fn a_write_lands_in_the_overlay_and_leaves_the_root_alone() {
     assert_eq!(written, expected, "every write landed in the overlay at the same relative path");
 }
 
+/// A caller may name the skin root by its canonical path, which is how a tool that follows links
+/// to the folder it lists arrives at one. On Windows that spelling is a verbatim path, and joined
+/// with the `/` a skin joins its paths with it names nothing: the root a skin is told of is
+/// therefore never spelled that way, and a path the skin builds on it is still a path under it.
+#[test]
+fn a_root_named_by_its_canonical_path_is_one_a_skin_can_build_paths_on() {
+    let scratch = Scratch::new("canonical-root");
+    let overlay = scratch.overlay();
+    let canonical = fixture_root().canonicalize().expect("the fixture root exists");
+    let runtime = skin(&canonical, Some(&overlay));
+    let root = runtime.paths().root().to_string_lossy().replace('\\', "/");
+    assert!(!root.starts_with("//?/"), "the root is spelled verbatim, which no skin can join a path onto: {root}");
+    runtime.lua().globals().set("ROOT", root).expect("the global is set");
+
+    let (read, wrote): (String, bool) = eval(
+        &runtime,
+        r#"
+        local files = require('files')
+        files.overwrite(ROOT .. '/made/by-canonical-root.txt', 'written\n')
+        return files.lines(ROOT .. '/data/shadowed.txt')[1], files.exists(ROOT .. '/made/by-canonical-root.txt')
+        "#,
+    );
+    assert_eq!((read.as_str(), wrote), ("from the root", true), "an absolute name built on the root reads the root and writes the overlay");
+    assert_eq!(std::fs::read(overlay.join("made").join("by-canonical-root.txt")).expect("the write landed in the overlay"), b"written\n");
+}
+
 #[test]
 fn appending_copies_the_roots_file_into_the_overlay_first() {
     let scratch = Scratch::new("append-copy");

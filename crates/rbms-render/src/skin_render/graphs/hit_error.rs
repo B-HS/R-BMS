@@ -18,7 +18,7 @@ use super::super::draw::Placement;
 use super::super::object::Body;
 use super::pixmap::{Pixmap, Rgba};
 use super::{
-    Layer, RECENT_JUDGES, TIMING_JUDGE_AREAS, Upload, VISUALIZER_JUDGEMENTS, next_serial, signed_plot_of, visualizer_color, visualizer_line_width,
+    Layer, RECENT_JUDGES, TIMING_JUDGE_AREAS, Upload, VISUALIZER_JUDGEMENTS, next_serial, paintable, signed_plot_of, visualizer_color, visualizer_line_width,
     visualizer_palette, visualizer_rate,
 };
 use crate::Renderer;
@@ -235,11 +235,7 @@ pub(crate) fn draw_hit_error<R: Renderer>(
     let Some(recent) = frame.data.series.recent_hits else {
         return false;
     };
-    if signed_plot_of(place, rect).is_none() || body.width <= 0 {
-        return false;
-    }
-    let largest = i64::from(r.max_texture_size());
-    if i64::from(body.width) > largest || i64::from(body.window * ROWS_PER_HIT) > largest {
+    if signed_plot_of(place, rect).is_none() || !paintable(r, i64::from(body.width), i64::from(body.window) * i64::from(ROWS_PER_HIT)) {
         return false;
     }
 

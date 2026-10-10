@@ -16,8 +16,6 @@
 //! The two timers are the scene's ordinary skin timers, so what a skin animates on them and what
 //! the screen decides from them cannot drift apart.
 
-use std::time::Instant;
-
 use rbms_skin::loader::LoadedSkin;
 use rbms_skin::timer::{MICROS_PER_MILLI, TimerState, timer_id};
 
@@ -96,7 +94,7 @@ impl AppShared {
     /// skin's first frame the scene's first moment. The skin itself is left as it was read.
     pub(crate) fn start_skin_scene_clock(&mut self) {
         self.skin_timers.clear();
-        self.scene_started = Instant::now();
+        self.scene_started = self.scene_instant();
     }
 }
 
@@ -196,5 +194,35 @@ mod tests {
         assert!(!app.shared.skin_timers.is_on(timer_id::STARTINPUT) && !app.shared.skin_timers.is_on(timer_id::FADEOUT));
         let restarted_us = app.shared.skin_now_us();
         assert!(restarted_us < aged_us, "the clock was not put back: {restarted_us} us");
+    }
+
+    /// A scene clock a test has stopped reads the same however long the machine takes, moves by
+    /// exactly what it is aged or put to, and reads zero the moment a scene begins.
+    #[test]
+    fn a_stopped_scene_clock_moves_only_when_it_is_moved() {
+        const AGED: std::time::Duration = std::time::Duration::from_millis(1_500);
+        const MACHINE_TIME: std::time::Duration = std::time::Duration::from_millis(5);
+        const PUT_AT_US: i64 = 42_000;
+        let mut app = crate::stage::render_tests::app();
+        app.shared.stop_scene_clock();
+        let stopped_us = app.shared.skin_now_us();
+        std::thread::sleep(MACHINE_TIME);
+        assert_eq!(app.shared.skin_now_us(), stopped_us, "a stopped clock ran on with the machine");
+
+        app.shared.age_skin_scene(AGED);
+        assert_eq!(app.shared.skin_now_us(), stopped_us + AGED.as_micros() as i64);
+        app.shared.set_skin_scene_clock(PUT_AT_US);
+        assert_eq!(app.shared.skin_now_us(), PUT_AT_US);
+
+        let parked = app.shared.suspend_skin_scene();
+        assert_eq!(app.shared.skin_now_us(), 0, "a scene begun over a parked one did not begin at zero");
+        app.shared.age_skin_scene(AGED);
+        app.shared.resume_skin_scene(parked);
+        assert_eq!(app.shared.skin_now_us(), PUT_AT_US, "a scene put back did not pick up where it was parked");
+
+        app.shared.start_skin_scene_clock();
+        assert_eq!(app.shared.skin_now_us(), 0);
+        app.shared.begin_skin_scene();
+        assert_eq!(app.shared.skin_now_us(), 0);
     }
 }

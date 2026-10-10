@@ -79,8 +79,18 @@ const TIMER_STEP: Duration = Duration::from_millis(100);
 /// A stretch far longer than any time in the fixture's header.
 const LONG_AFTER: Duration = Duration::from_secs(3600);
 
-/// A scene clock reading a scene that has only just begun is under.
+/// A scene clock reading well past a scene that has only just begun and far short of one aged by
+/// [`LONG_AFTER`]: at or past it, the scene was carried on.
 const JUST_BEGUN_US: i64 = 2_000_000;
+
+/// Whether the scene clock reads a scene that began no earlier than `since`: no more than the time
+/// the machine has taken from there. The clock is the machine's, so this holds for a scene that
+/// began then however long the machine stalls before the reading, and fails by the whole age of a
+/// scene that did not.
+fn began_since(browser: &Browser, since: Instant) -> bool {
+    let scene_us = u128::try_from(browser.app.shared.skin_now_us()).expect("a scene clock does not run backwards");
+    scene_us <= since.elapsed().as_micros()
+}
 
 /// The timers the reference has a name for on its browser and never switches.
 const NEVER_SWITCHED: [TimerId; 5] =
@@ -803,11 +813,12 @@ fn the_frame_a_waited_for_skin_arrives_on_begins_its_scene() {
     browser.frame();
     assert!(browser.timer(timer_id::PLAY).is_some(), "the scene began before its skin was in");
 
+    let arriving = Instant::now();
     drop(decode);
     browser.frame();
     assert!(browser.app.shared.has_compiled_skin(SKIN_TYPE_MUSIC_SELECT));
     assert_eq!(browser.timer(timer_id::PLAY), None, "a timer of the scene before was left on");
-    assert!(browser.app.shared.skin_now_us() < JUST_BEGUN_US, "the scene did not begin on the frame its skin arrived");
+    assert!(began_since(&browser, arriving), "the scene did not begin on the frame its skin arrived");
 
     browser.app.shared.skin_timers.set_on(timer_id::PLAY, 0);
     browser.app.shared.age_skin_scene(LONG_AFTER);
@@ -919,11 +930,13 @@ fn the_browser_of_a_skin_pack_named_by_the_environment_waits_in_the_dark_and_ope
     save_frame(&browser.pixels, "select-waiting");
 
     let deadline = Instant::now() + PACK_WAIT;
+    let mut arriving = Instant::now();
     while !browser.app.shared.has_compiled_skin(SKIN_TYPE_MUSIC_SELECT) {
+        arriving = Instant::now();
         browser.frame();
         assert!(Instant::now() < deadline, "the pack's browser never compiled: {:?}", browser.app.shared.skin_failure(SKIN_TYPE_MUSIC_SELECT));
     }
-    assert!(browser.app.shared.skin_now_us() < JUST_BEGUN_US, "the scene did not begin on the frame the pack arrived");
+    assert!(began_since(&browser, arriving), "the scene did not begin on the frame the pack arrived");
     browser.frame();
     assert!(browser.timer(timer_id::SONGBAR_CHANGE).is_some(), "the bar timer is off on a browser nobody has moved");
     save_frame(&browser.pixels, "select-opening");

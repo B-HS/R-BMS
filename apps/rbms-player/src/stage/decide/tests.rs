@@ -386,6 +386,11 @@ fn a_course_opens_with_the_decide_scene_and_loads_its_later_stages_directly() {
 
 /// The scene's clock starts on the frame its skin first draws, whatever was on the clock and the
 /// timers while the skin was being read, and the screen is the skin's alone from then on.
+///
+/// The clock is the machine's, so a scene that began in those frames reads no more than the time
+/// the machine has taken since the first of them, and one that did not begin reads all the time it
+/// was read for besides. The reading is held against that measured time, so a machine that stalls
+/// between the frame and the reading changes nothing.
 #[test]
 fn the_scene_begins_on_the_frame_its_skin_first_draws_with_its_timers_off() {
     const WHILE_READING: Duration = Duration::from_secs(30);
@@ -397,9 +402,15 @@ fn the_scene_begins_on_the_frame_its_skin_first_draws_with_its_timers_off() {
 
     app.shared.age_skin_scene(WHILE_READING);
     app.shared.skin_timers.set_on(timer_id::STARTINPUT, 0);
+    let drawing = Instant::now();
     run_until_begun(&mut app, &mut pixels);
 
-    assert!(app.shared.skin_now_us() < at_ms(TIMES.input_ms), "the scene did not begin when its skin first drew");
+    let scene_us = u128::try_from(app.shared.skin_now_us()).expect("a scene clock does not run backwards");
+    let since_drawing_us = drawing.elapsed().as_micros();
+    assert!(
+        scene_us <= since_drawing_us,
+        "the scene did not begin when its skin first drew: it reads {scene_us} us, {since_drawing_us} us after the first frame"
+    );
     assert!(!app.shared.skin_timers.is_on(timer_id::STARTINPUT), "a timer was on before the scene began");
     assert_eq!(decide(&app).scene.times, TIMES, "the scene does not run on its skin's own times");
     assert_eq!(pixels.pixel_at(MIDDLE.0, MIDDLE.1), GROUND, "the skin is not what drew the screen");
@@ -454,11 +465,15 @@ fn a_scene_that_ends_before_the_chart_is_in_hands_the_load_to_the_loading_screen
 
 /// Enter after the scene has started listening skips the rest of its length: the fade starts at
 /// once, and the scene leaves after it. The same key before then does nothing.
+///
+/// The scene's time is counted here rather than left to the machine, which would otherwise have
+/// to get from the scene's first frame to the key inside the input time for "before" to be before.
 #[test]
 fn enter_skips_the_scene_only_once_it_listens() {
     let mut app = app_with_decide_skin("skipped", SKIN);
     let mut pixels = HeadlessCanvas::new(CW, CH);
     open(&mut app, chart());
+    app.shared.stop_scene_clock();
     run_until_begun(&mut app, &mut pixels);
 
     key(&mut app, press(KeyCode::Enter));

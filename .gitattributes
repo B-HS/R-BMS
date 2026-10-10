@@ -1,1 +1,4 @@
+# Text is checked out with LF on every platform, so a fixture's bytes are the same on Windows
+# (whose runners set core.autocrlf) as everywhere else. Binary files are detected and left alone.
+* text=auto eol=lf
 crates/rbms-parser/tests/bmson/*.bmson text eol=lf

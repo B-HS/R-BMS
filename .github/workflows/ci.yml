@@ -18,6 +18,11 @@ jobs:
   test:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    # Longer than the slowest job so far (57 minutes on ubuntu, before the suite was sped up), so
+    # a slow run still ends with its list of failures instead of being cancelled without one. A
+    # job past it is hung, and is stopped rather than left to run to the six hour default. Lower
+    # it once a run of the faster suite has shown how long that takes.
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -43,12 +48,15 @@ jobs:
 
       - name: Build
         run: cargo build --workspace
+      # --no-fail-fast: every test binary runs even after one has failed, so one run shows every
+      # failure on a platform instead of only the first.
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --workspace --no-fail-fast
 
   lint:
     name: fmt + clippy
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - name: Install Linux build deps

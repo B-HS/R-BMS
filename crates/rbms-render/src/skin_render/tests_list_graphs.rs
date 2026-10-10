@@ -669,5 +669,6 @@ fn a_wheel_with_no_slots_resolves_to_nothing_and_says_so() {
     assert!(screen.warnings().iter().any(|warning| warning.contains("no slots")), "and the document is told why no wheel was drawn: {:?}", screen.warnings());
 }
 
+mod graph_limits;
 mod graph_pixels;
 mod visualizer_pixels;

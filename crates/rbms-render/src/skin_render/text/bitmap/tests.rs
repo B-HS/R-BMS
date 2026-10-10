@@ -24,16 +24,16 @@ use rbms_skin::property::MapHost;
 use rbms_skin::property::generated::STRING_TITLE;
 use rbms_skin::timer::TimerState;
 
-use super::{BitmapKind, PageTable, ScreenFace, SharedPages};
+use super::{BitmapKind, PageTable, ScreenFace, SharedPages, Stamp, compose_overlay};
 use crate::bitmap_font;
 use crate::ctx::RenderCtx;
-use crate::font::TextContext;
+use crate::font::{BLOCK_MAX_DIM, BLOCK_MAX_PIXELS, TextBlock, TextContext};
 use crate::skin_render::draw::{ImageSelect, draw_object};
 use crate::skin_render::object::{Body, ImageBody, SkinObject, Sprite};
 use crate::skin_render::text::{FontRef, Fonts, text_body};
 use crate::skin_render::textures::{SkinTexturePool, rgba_bytes};
 use crate::skin_render::{FrameData, SkinAssets, SkinFrame, SkinImage, SkinScreen, SkinViewport};
-use crate::{BlendMode, Color, CpuCanvas, Renderer, Theme, locked};
+use crate::{BlendMode, Color, CpuCanvas, Renderer, Theme, UNLIMITED_TEXTURE_SIZE, locked};
 
 /// The canvas every line is drawn on, which is also the size the document is authored at.
 const STAGE: (u32, u32) = (200, 100);
@@ -779,6 +779,29 @@ fn a_font_with_an_advance_past_any_screen_is_still_only_a_line_of_text() {
     for line in lines {
         assert_eq!(frame(&screen, &mut text, &mut canvas, line), 1, "{line:?} is drawn, its first glyph on the anchor");
     }
+}
+
+/// The texture a line's stand-ins are composed into is asked of the allocator in one piece, and
+/// where the stand-ins land is the font's to say. Two of them as far apart as two places can be,
+/// on a renderer that names no longest edge, still come to an image no larger than a block of text
+/// may be -- which is what the font above came to sixty-four gigabytes of before it was held to it.
+#[test]
+fn stand_ins_any_distance_apart_are_composed_into_no_more_than_a_block_holds() {
+    let dot = Arc::new(TextBlock { width: 1, height: 1, rgba: vec![u8::MAX; RGBA_BYTES], left: 0.0, top: 0.0, drawn_width: 1.0, layout_width: 1.0, lines: 1 });
+    let stamps = [Stamp { x: i32::MIN, y: i32::MIN, block: Arc::clone(&dot) }, Stamp { x: i32::MAX, y: i32::MAX, block: dot }];
+
+    let overlay = compose_overlay(&stamps, UNLIMITED_TEXTURE_SIZE).expect("the first stand-in is in it");
+    let (width, height) = overlay.size;
+    assert!(width <= BLOCK_MAX_DIM && height <= BLOCK_MAX_DIM, "an edge of {width} by {height} is past the longest a block has");
+    assert!(overlay.rgba.len() <= BLOCK_MAX_PIXELS * RGBA_BYTES, "{} bytes were asked for, more than a block holds", overlay.rgba.len());
+    assert_eq!(overlay.rgba.len(), width as usize * height as usize * RGBA_BYTES);
+    assert_eq!(overlay.origin, (i32::MIN, i32::MIN), "the image starts at the first stand-in");
+    assert_eq!(overlay.rgba[..RGBA_BYTES], [u8::MAX; RGBA_BYTES], "which is drawn; the one past the edge is cut off");
+
+    let narrow = 16;
+    let held = compose_overlay(&stamps, narrow).expect("the first stand-in is in it");
+    assert_eq!(held.size, (narrow, narrow), "a renderer with a shorter edge is given no longer one");
+    assert!(compose_overlay(&[], UNLIMITED_TEXTURE_SIZE).is_none(), "no stand-ins, no image");
 }
 
 /// A distance field font is a bitmap font like any other to the screen: it is not warned about,

@@ -53,6 +53,10 @@ const PLAY_TIME_MS: i64 = LAST_NOTE_MS + scene::TIME_MARGIN_MS;
 /// How far either side of a time a test steps.
 const SLACK_MS: i64 = 250;
 
+/// What [`spent_ms`] adds to the whole milliseconds the machine has taken: one to round them up,
+/// and one for the readings it bounds being rounded down themselves.
+const SPENT_ROUNDING_MS: i64 = 2;
+
 /// How long past a note the engine counts it as missed, with room to spare.
 const MISS_AFTER_MS: i64 = 1_000;
 
@@ -234,6 +238,18 @@ fn update(app: &mut App) {
     assert!(matches!(transition, Transition::Stay), "the play screen left in the {:?} state", phase(app));
 }
 
+/// How long the machine has taken since `since`, in milliseconds rounded up, and one more for the
+/// two readings it is held against being whole milliseconds themselves.
+///
+/// A frame pins both clocks before and after itself, so a clock read inside a frame or after it has
+/// run on from its pin by the time the machine took to get there, and by nothing else. Two readings
+/// that should agree are therefore apart by no more than the time the machine has taken since the
+/// first frame either of them goes back to, and that is what they are held to: a machine that
+/// stalls is allowed its stall and nothing more.
+fn spent_ms(since: Instant) -> i64 {
+    i64::try_from(since.elapsed().as_millis()).expect("a test does not run for centuries") + SPENT_ROUNDING_MS
+}
+
 /// One frame that has to leave the screen where it is.
 fn stay(app: &mut App, pixels: &mut HeadlessCanvas) {
     assert!(matches!(frame(app, pixels), Transition::Stay), "the play screen left in the {:?} state", phase(app));
@@ -382,14 +398,19 @@ fn the_song_clock_starts_when_the_chart_starts_playing() {
     assert_eq!(phase(&app), Some(PlayPhase::Ready));
     assert_eq!(play(&app).session.judge().total_judged(), 0);
 
+    let starting = Instant::now();
     stay_after(&mut app, &mut pixels, TIMES.playstart_ms + SLACK_MS);
     assert_eq!(phase(&app), Some(PlayPhase::Play));
     stay(&mut app, &mut pixels);
     let song_ms = play(&app).song_us / MICROS_PER_MILLI;
+    let played_ms = elapsed_ms(&app.shared.skin_timers, timer_id::PLAY, app.shared.skin_now_us());
+    let since_start_ms = spent_ms(starting);
     assert!((0..FIRST_NOTE_MS).contains(&song_ms), "the chart did not start from its beginning: it is at {song_ms} ms");
     assert_eq!(play(&app).session.judge().total_judged(), 0, "notes went by before the chart started");
-    let played_ms = elapsed_ms(&app.shared.skin_timers, timer_id::PLAY, app.shared.skin_now_us());
-    assert!((song_ms - played_ms).abs() < SLACK_MS, "the play timer reads {played_ms} ms with the chart at {song_ms} ms");
+    assert!(
+        (song_ms - played_ms).abs() < since_start_ms,
+        "the play timer reads {played_ms} ms with the chart at {song_ms} ms, {since_start_ms} ms after it started"
+    );
 }
 
 /// A run whose gauge empties fails where it is: the failure's timer goes on, the screen stays up
@@ -460,16 +481,55 @@ fn a_practice_slice_begins_ready_and_plays_from_where_the_slice_starts() {
     run_until_drawn(&mut app, &mut pixels);
     assert_eq!(pixel(&pixels, LOADING_AT), GROUND, "a slice that is ready was drawn as loading");
     assert_eq!(pixel(&pixels, READY_AT), READY_MARK);
+    let starting = Instant::now();
     stay_after(&mut app, &mut pixels, TIMES.playstart_ms + SLACK_MS);
     assert_eq!(phase(&app), Some(PlayPhase::Play));
     stay(&mut app, &mut pixels);
     let played_ms = elapsed_ms(&app.shared.skin_timers, timer_id::PLAY, app.shared.skin_now_us());
+    let since_start_ms = spent_ms(starting);
     let slice_start = i64::from(SLICE_START_MS);
-    assert!((played_ms - slice_start).abs() < SLACK_MS, "the play timer reads {played_ms} ms at the start of a slice from {slice_start} ms");
+    assert!(
+        (played_ms - slice_start).abs() < since_start_ms,
+        "the play timer reads {played_ms} ms at the start of a slice from {slice_start} ms, {since_start_ms} ms after it started"
+    );
 
     stay_after(&mut app, &mut pixels, i64::from(SLICE_END_MS - SLICE_START_MS) + SLACK_MS);
     assert_eq!(phase(&app), Some(PlayPhase::Finished), "a slice did not end where it ends, or its locked gauge failed it");
     assert_eq!(pixel(&pixels, FAILED_AT), GROUND);
+}
+
+/// A practice slice waits for its skin as every run does. Its scene is ready from its first update
+/// and its skin is asked for by its first draw, so the two are a little apart on the scene clock,
+/// and the times a scene goes by are its skin's: a skin that is not in yet states none. The slice
+/// stands ready through all of that and starts on the skin's own time once the skin is in.
+#[test]
+fn a_practice_slice_does_not_start_before_its_skin_is_in() {
+    const UPDATE_TO_DRAW_MS: i64 = 5;
+    const SLICE_START_MS: i32 = 1_000;
+    let mut app = app_with_play_skin("practice-waits");
+    let mut pixels = canvas();
+    let mut panel = crate::practice::PracticePanel::new("md5".to_string(), Mode::BEAT_7K, 60_000, None, 300.0);
+    panel.property.start_ms = SLICE_START_MS;
+    let mut slice = unplayed();
+    slice.set_practice(panel.start());
+    enter(&mut app, slice);
+
+    pin(&mut app);
+    update(&mut app);
+    assert!(app.shared.skin_timers.is_on(timer_id::READY), "a slice was not ready from its first update");
+    pass(&mut app, UPDATE_TO_DRAW_MS);
+    let now = Instant::now();
+    app.stage.draw(&mut FrameCtx { shared: &mut app.shared, now, dt: FRAME_DT }, &mut Canvas::Headless(&mut pixels));
+    pin(&mut app);
+    assert!(!app.shared.has_compiled_skin(SKIN_TYPE_PLAY_7KEYS), "the skin was in on the frame it was asked for");
+
+    run_until_drawn(&mut app, &mut pixels);
+    assert_eq!(phase(&app), Some(PlayPhase::Ready), "a slice started while its skin was on its way");
+    assert!(!app.shared.skin_timers.is_on(timer_id::PLAY));
+    stay_after(&mut app, &mut pixels, TIMES.playstart_ms - UPDATE_TO_DRAW_MS - SLACK_MS);
+    assert_eq!(phase(&app), Some(PlayPhase::Ready), "a slice started before the skin's start time was over");
+    stay_after(&mut app, &mut pixels, SLACK_MS * 2);
+    assert_eq!(phase(&app), Some(PlayPhase::Play));
 }
 
 /// Holding START while the chart loads previews it on timer 141, a second ahead of the first note,
@@ -485,15 +545,24 @@ fn holding_start_while_the_chart_loads_previews_it() {
     assert_eq!(pixel(&pixels, PREVIEW_AT), GROUND);
 
     app.shared.note_key(&press(START_KEY));
+    let previewing = Instant::now();
     stay(&mut app, &mut pixels);
     stay(&mut app, &mut pixels);
     assert_eq!(pixel(&pixels, PREVIEW_AT), PREVIEW_MARK, "the preview's timer is not on");
     let ahead_ms = FIRST_NOTE_MS - elapsed_ms(&app.shared.skin_timers, CHART_PREVIEW, app.shared.skin_now_us());
-    assert!((ahead_ms - 1_000).abs() < SLACK_MS, "the preview is {ahead_ms} ms ahead of the first note, not a second");
+    let since_preview_ms = spent_ms(previewing);
+    assert!(
+        (ahead_ms - 1_000).abs() < since_preview_ms,
+        "the preview is {ahead_ms} ms ahead of the first note, not a second, {since_preview_ms} ms after it began"
+    );
     stay_after(&mut app, &mut pixels, PREVIEWED_FOR_MS);
     let previewed_ms = play(&app).drawn_chart_us(&app.shared) / MICROS_PER_MILLI;
+    let since_preview_ms = spent_ms(previewing);
     let expected_ms = FIRST_NOTE_MS - 1_000 + PREVIEWED_FOR_MS;
-    assert!((previewed_ms - expected_ms).abs() < SLACK_MS, "the note field is drawn at {previewed_ms} ms of the chart");
+    assert!(
+        (previewed_ms - expected_ms).abs() < since_preview_ms,
+        "the note field is drawn at {previewed_ms} ms of the chart, not {expected_ms} ms, {since_preview_ms} ms after the preview began"
+    );
     assert!((FIELD_TOP..FIELD_BOTTOM).any(|y| pixel(&pixels, (FIRST_LANE_X, y)) == NOTE), "the previewed chart's notes are not in the skin's note field");
 
     app.shared.note_key(&release(START_KEY));
@@ -664,10 +733,16 @@ fn a_judgement_the_engine_gives_by_itself_reaches_the_skins_timers() {
 /// A replay under analysis that is paused carries the scene clock with it: the scene's time is the
 /// play timer's start plus the place in the chart, so the skin stands still with the notes. A jump
 /// moves the scene with the chart and switches every lane's timers off.
+///
+/// The scene clock is the machine's, so it has run on by the time it is read back, by however long
+/// the machine took to get from the step that set it to the line that reads it. That is held against
+/// the time the test itself spent there rather than against a round number: a machine that stalls
+/// for longer than the pause between the two frames is then no different from one that does not,
+/// and a scene that had run on through the pause is still that whole pause too far on.
 #[test]
 fn a_replay_under_analysis_carries_the_scene_clock_with_it() {
-    const BETWEEN_FRAMES_US: i64 = 120_000;
-    const BETWEEN_FRAMES: Duration = Duration::from_micros(BETWEEN_FRAMES_US.unsigned_abs());
+    const BETWEEN_FRAMES: Duration = Duration::from_millis(120);
+    let spent_us = |since: Instant| i64::try_from(since.elapsed().as_micros()).expect("a test does not run for centuries");
     let mut app = app_with_play_skin("analysis");
     let mut pixels = canvas();
     let replay = rbms_store::Replay {
@@ -692,13 +767,16 @@ fn a_replay_under_analysis_carries_the_scene_clock_with_it() {
     let paused_at = play(&app).session.analysis_position_us();
     let scene_at = |app: &App| app.shared.skin_now_us() - app.shared.skin_timers.value_us(timer_id::PLAY);
     std::thread::sleep(BETWEEN_FRAMES);
+    let updated = Instant::now();
     update(&mut app);
     assert_eq!(play(&app).session.analysis_position_us(), paused_at);
     let drift_us = scene_at(&app) - paused_at;
-    assert!((0..BETWEEN_FRAMES_US).contains(&drift_us), "the scene ran on by {drift_us} us while the replay was paused");
+    let since_update_us = spent_us(updated);
+    assert!((0..=since_update_us).contains(&drift_us), "the scene ran on by {drift_us} us while the replay was paused, {since_update_us} us after it was set");
 
     app.shared.skin_timers.set_on(timer_id::KEYON_1P_KEY1, 0);
     app.shared.skin_timers.set_on(timer_id::BOMB_1P_SCRATCH, 0);
+    let jumped = Instant::now();
     assert!(matches!(key(&mut app, press(KeyCode::PageUp)), Transition::Stay));
     assert!(
         !app.shared.skin_timers.is_on(timer_id::KEYON_1P_KEY1) && !app.shared.skin_timers.is_on(timer_id::BOMB_1P_SCRATCH),
@@ -707,7 +785,8 @@ fn a_replay_under_analysis_carries_the_scene_clock_with_it() {
     let jumped_to = play(&app).session.analysis_position_us();
     assert_eq!(jumped_to, paused_at + ANALYSIS_SEEK_STEP_US);
     let off_us = scene_at(&app) - jumped_to;
-    assert!((0..BETWEEN_FRAMES_US).contains(&off_us), "the scene did not jump with the chart: it is {off_us} us off");
+    let since_jump_us = spent_us(jumped);
+    assert!((0..=since_jump_us).contains(&off_us), "the scene did not jump with the chart: it is {off_us} us off, {since_jump_us} us after the jump");
     stay(&mut app, &mut pixels);
     assert_eq!(phase(&app), Some(PlayPhase::Play), "a replay under analysis ended by itself");
 }

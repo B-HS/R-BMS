@@ -31,6 +31,17 @@ use crate::BYTES_PER_PIXEL;
 /// there rather than asked of the renderer as one enormous texture.
 pub const BLOCK_MAX_DIM: u32 = 8192;
 
+/// The largest em a glyph is drawn at, in pixels. A glyph is about as many pixels each way as its
+/// em, and its pixels are asked of the allocator whole before any of them is looked at, so a size a
+/// document made up -- the height of a destination is one -- is refused past this rather than
+/// handed on. No screen is as tall as a glyph of this size.
+pub const BLOCK_MAX_EM: u32 = 4096;
+
+/// The most pixels a composed block holds, and the most its glyphs hold between them before they
+/// are laid into it: what one glyph of [`BLOCK_MAX_EM`] covers. The longest edge alone would let
+/// [`BLOCK_MAX_DIM`] squared through, a quarter of a gigabyte for one line of text.
+pub const BLOCK_MAX_PIXELS: usize = BLOCK_MAX_EM as usize * BLOCK_MAX_EM as usize;
+
 /// The capitals a font's capital height is read from, in the order they are tried
 /// (`BitmapFont.BitmapFontData.capChars`).
 pub(crate) const CAP_CHARS: [char; 26] =
@@ -111,6 +122,15 @@ pub struct BlockSpec<'a> {
     pub fit: BlockFit,
     /// The longest edge the caller can hold as a texture.
     pub max_dim: u32,
+}
+
+impl BlockSpec<'_> {
+    /// Whether the sizes are ones a block can be laid out at: numbers, more than nothing, and an
+    /// em no larger than [`BLOCK_MAX_EM`].
+    fn sized(&self) -> bool {
+        let drawable = self.em_px.is_finite() && self.em_px > 0.0 && self.em_px <= BLOCK_MAX_EM as f32;
+        drawable && self.design_px.is_finite() && self.design_px > 0.0 && self.width.is_finite()
+    }
 }
 
 /// A composed block: its pixels and where they sit.
@@ -258,10 +278,41 @@ fn glyph_pixel(image: &SwashImage, index: usize) -> Option<[u8; BYTES_PER_PIXEL]
 }
 
 /// A glyph image and where its top left corner lands in the block.
+///
+/// Where it lands is as far off as the width the block is laid out in puts it, and a document may
+/// give any, so the places are kept in numbers wide enough for the distance between any two.
 struct Stamp<'a> {
     image: &'a SwashImage,
-    x: i32,
-    y: i32,
+    x: i64,
+    y: i64,
+}
+
+/// The size of the image a block is composed into, for stamps that reach `width` across and
+/// `height` down, or `None` when that is no room at all.
+///
+/// Neither edge is longer than `max_dim` or [`BLOCK_MAX_DIM`], and the two together hold no more
+/// than [`BLOCK_MAX_PIXELS`]: a block past that is cut off at the bottom, the way one too long is
+/// cut off at the right. Whatever the stamps' places say, this is all that is ever asked of the
+/// allocator for them.
+pub(crate) fn block_extent(width: i64, height: i64, max_dim: u32) -> Option<(u32, u32)> {
+    let limit = i64::from(max_dim.min(BLOCK_MAX_DIM));
+    let width = width.clamp(0, limit) as usize;
+    let height = height.clamp(0, limit) as usize;
+    if width == 0 || height == 0 {
+        return None;
+    }
+    Some((width as u32, height.min(BLOCK_MAX_PIXELS / width) as u32))
+}
+
+/// Takes the pixels of `image` out of `room`, the pixels a block's glyphs may still hold, answering
+/// whether they fitted. A glyph that does not fit takes all the room there was, so no glyph after
+/// it is drawn either: a line stops where its room ran out rather than going on in whichever
+/// glyphs happen to be small.
+pub(super) fn takes_room(room: &mut usize, image: &SwashImage) -> bool {
+    let pixels = (image.placement.width as usize).saturating_mul(image.placement.height as usize);
+    let fits = pixels <= *room;
+    *room = if fits { *room - pixels } else { 0 };
+    fits
 }
 
 impl TextContext {
@@ -288,11 +339,15 @@ impl TextContext {
         self.fs.get_font(id, face.weight).is_some_and(|font| font.as_swash().table(KERN_TABLE).is_some())
     }
 
-    /// One glyph's pixels at `px`, on the pixel grid.
+    /// One glyph's pixels at `px`, on the pixel grid, or `None` for a glyph with none and for a
+    /// size past [`BLOCK_MAX_EM`], which is not drawn.
     ///
     /// Nothing is kept: the block the glyph goes into is what the caller holds on to, and a glyph
     /// this large kept per size would outgrow every other cache the engine has.
     fn raster(&mut self, glyph: &LayoutGlyph, px: f32) -> Option<SwashImage> {
+        if px > BLOCK_MAX_EM as f32 {
+            return None;
+        }
         let (key, ..) = CacheKey::new(glyph.font_id, glyph.glyph_id, px, (0.0, 0.0), glyph.font_weight, glyph.cache_key_flags);
         self.swash.get_image_uncached(&mut self.fs, key)
     }
@@ -344,11 +399,17 @@ impl TextContext {
     /// `scale` is how much larger the glyphs are drawn than the font is generated: an advance is
     /// rounded to a whole pixel at the generated size and then multiplied out, which is what
     /// scaling a font of whole-pixel advances comes to.
-    fn place_line(&mut self, glyphs: &[LayoutGlyph], em_px: f32, scale: f32) -> Line {
+    ///
+    /// `room` is how many pixels the glyphs of the block may still hold. A glyph is given pixels
+    /// only while there is room for them, so a line of any length and any size keeps no more than
+    /// the block it is composed into could show; the glyphs past that keep their places and have
+    /// no ink.
+    fn place_line(&mut self, glyphs: &[LayoutGlyph], em_px: f32, scale: f32, room: &mut usize) -> Line {
         let mut pen = 0.0;
         let mut placed: Vec<Placed> = Vec::with_capacity(glyphs.len());
         for glyph in glyphs {
-            let image = self.raster(glyph, em_px).filter(|image| image.placement.width > 0 && image.placement.height > 0);
+            let image = if *room == 0 { None } else { self.raster(glyph, em_px) };
+            let image = image.filter(|image| image.placement.width > 0 && image.placement.height > 0).filter(|image| takes_room(room, image));
             let ink = image.as_ref().map_or((0.0, 0.0), |image| {
                 let left = image.placement.left as f32;
                 (left, left + image.placement.width as f32)
@@ -373,11 +434,10 @@ impl TextContext {
     }
 
     /// Lays `spec` out and composes it, or `None` when nothing of it would be drawn: an empty
-    /// string, a size or a width that is not a number, a font with no capital to hang a line from,
-    /// or a block that was squeezed or cut down to nothing.
+    /// string, a size or a width that is not a number, a size past [`BLOCK_MAX_EM`], a font with no
+    /// capital to hang a line from, or a block that was squeezed or cut down to nothing.
     pub fn compose_block(&mut self, spec: &BlockSpec<'_>) -> Option<TextBlock> {
-        let sized = spec.em_px.is_finite() && spec.em_px > 0.0 && spec.design_px.is_finite() && spec.design_px > 0.0;
-        if !sized || !spec.width.is_finite() || spec.text.is_empty() {
+        if !spec.sized() || spec.text.is_empty() {
             return None;
         }
         let face = self.face(spec.family);
@@ -386,9 +446,10 @@ impl TextContext {
 
         let wrap = (spec.fit == BlockFit::Wrap).then_some(spec.width.max(0.0));
         let shaped = self.shape_block(&face, spec.text, spec.em_px, wrap);
+        let mut room = BLOCK_MAX_PIXELS;
         let mut lines: Vec<Line> = Vec::with_capacity(shaped.len());
         for glyphs in &shaped {
-            lines.push(self.place_line(glyphs, spec.em_px, scale));
+            lines.push(self.place_line(glyphs, spec.em_px, scale, &mut room));
         }
         if spec.fit == BlockFit::Truncate
             && let Some(cut) = lines.iter().position(|line| line.overflows(spec.width))
@@ -409,8 +470,8 @@ impl TextContext {
             let baseline = ((design.cap + index as f32 * design.line) * scale).round();
             for glyph in &line.glyphs {
                 if let Some(image) = &glyph.image {
-                    let x = (origin + glyph.origin).round() as i32 + image.placement.left;
-                    let y = (baseline - glyph.lift).round() as i32 - image.placement.top;
+                    let x = i64::from((origin + glyph.origin).round() as i32) + i64::from(image.placement.left);
+                    let y = i64::from((baseline - glyph.lift).round() as i32) - i64::from(image.placement.top);
                     stamps.push(Stamp { image, x, y });
                 }
             }
@@ -418,26 +479,21 @@ impl TextContext {
 
         let left = stamps.iter().map(|stamp| stamp.x).min()?;
         let top = stamps.iter().map(|stamp| stamp.y).min()?;
-        let right = stamps.iter().map(|stamp| stamp.x + stamp.image.placement.width as i32).max()?;
-        let bottom = stamps.iter().map(|stamp| stamp.y + stamp.image.placement.height as i32).max()?;
-        let limit = spec.max_dim.min(BLOCK_MAX_DIM);
-        let width = ((right - left).max(0) as u32).min(limit);
-        let height = ((bottom - top).max(0) as u32).min(limit);
-        if width == 0 || height == 0 {
-            return None;
-        }
+        let right = stamps.iter().map(|stamp| stamp.x + i64::from(stamp.image.placement.width)).max()?;
+        let bottom = stamps.iter().map(|stamp| stamp.y + i64::from(stamp.image.placement.height)).max()?;
+        let (width, height) = block_extent(right - left, bottom - top, spec.max_dim)?;
 
         let mut rgba = CLEAR_PIXEL.repeat(width as usize * height as usize);
         for stamp in &stamps {
             let across = stamp.image.placement.width as usize;
             for row in 0..stamp.image.placement.height as usize {
-                let y = stamp.y - top + row as i32;
-                if y < 0 || y >= height as i32 {
+                let y = stamp.y - top + row as i64;
+                if y < 0 || y >= i64::from(height) {
                     continue;
                 }
                 for column in 0..across {
-                    let x = stamp.x - left + column as i32;
-                    if x < 0 || x >= width as i32 {
+                    let x = stamp.x - left + column as i64;
+                    if x < 0 || x >= i64::from(width) {
                         continue;
                     }
                     let Some(pixel) = glyph_pixel(stamp.image, row * across + column) else {
@@ -469,11 +525,10 @@ impl TextContext {
     ///
     /// A character the pen has not reached yet puts the caret at the end of the line. A line with
     /// nothing in it puts it where an empty line is aligned to. `None` for a size or a width that is
-    /// not a number, or for a font with no capital to hang a line from, which is where a block of
-    /// that spec is not composed either.
+    /// not a number, for a size past [`BLOCK_MAX_EM`], or for a font with no capital to hang a line
+    /// from, which is where a block of that spec is not composed either.
     pub fn caret_x(&mut self, spec: &BlockSpec<'_>, chars: usize) -> Option<f32> {
-        let sized = spec.em_px.is_finite() && spec.em_px > 0.0 && spec.design_px.is_finite() && spec.design_px > 0.0;
-        if !sized || !spec.width.is_finite() {
+        if !spec.sized() {
             return None;
         }
         let face = self.face(spec.family);
@@ -484,7 +539,8 @@ impl TextContext {
         let Some(glyphs) = shaped.first() else {
             return Some(slack(spec.align, spec.width, 0.0));
         };
-        let line = self.place_line(glyphs, spec.em_px, scale);
+        let mut room = BLOCK_MAX_PIXELS;
+        let line = self.place_line(glyphs, spec.em_px, scale, &mut room);
         let squeeze = if spec.fit == BlockFit::Shrink && line.width > spec.width { spec.width / line.width } else { 1.0 };
 
         let byte = spec.text.char_indices().nth(chars).map_or(spec.text.len(), |(at, _)| at);

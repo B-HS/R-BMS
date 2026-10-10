@@ -30,6 +30,8 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use rbms_skin::resolve::plain_path;
+
 pub use args::DumpArgs;
 pub use args::parse as parse_args;
 
@@ -46,8 +48,12 @@ fn is_document(path: &Path) -> bool {
 
 /// The folder skins may read from and the documents to dump: a pack folder's documents, or one file
 /// and the folder it is in.
+///
+/// The target is resolved, so a link to a pack is the pack, and then spelled without the verbatim
+/// prefix Windows resolves a path to: every path a loaded skin reports is spelled that way, and the
+/// files a dump reports are named by what is left of them once the folder is taken off the front.
 fn documents(target: &Path) -> Result<(PathBuf, Vec<PathBuf>), String> {
-    let target = std::fs::canonicalize(target).map_err(|e| format!("{} not found: {e}", target.display()))?;
+    let target = plain_path(&std::fs::canonicalize(target).map_err(|e| format!("{} not found: {e}", target.display()))?);
     if target.is_file() {
         let root = target.parent().map(Path::to_path_buf).ok_or_else(|| format!("{} has no folder", target.display()))?;
         return Ok((root, vec![target]));

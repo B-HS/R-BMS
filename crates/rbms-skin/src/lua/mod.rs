@@ -218,7 +218,9 @@ impl SkinLuaConfig {
 /// The root is made absolute and free of `.` and `..` once, on construction, and that one spelling
 /// is the prefix of every absolute path handed back to a skin. It is deliberately not the canonical
 /// spelling: on Windows that is a verbatim path, in which the `/` a skin joins its own paths with
-/// would no longer separate anything. The canonical form is kept beside it and used only to decide
+/// would no longer separate anything. A caller that names the root by its canonical path is no
+/// exception, so a verbatim prefix the root arrives with is taken off
+/// ([`crate::resolve::plain_path`]). The canonical form is kept beside it and used only to decide
 /// containment. A path that does not exist yet is checked against its deepest existing ancestor, as
 /// [`crate::resolve::contained`] does, and nothing here creates a file or a directory: the overlay
 /// appears when the first write creates it.
@@ -234,7 +236,7 @@ impl SkinPaths {
     /// not exist is [`SkinError::Read`].
     pub fn new(root: &Path, overlay: Option<&Path>) -> Result<Self, SkinError> {
         let absolute = std::path::absolute(root).map_err(SkinError::Read)?;
-        let root = resolve::contained(&absolute, &absolute)?;
+        let root = resolve::plain_path(&resolve::contained(&absolute, &absolute)?);
         let root_real = root.canonicalize().map_err(SkinError::Read)?;
         Ok(Self { root, root_real, overlay: overlay.map(Path::to_path_buf) })
     }
@@ -253,10 +255,12 @@ impl SkinPaths {
     ///
     /// An absolute path is taken as it is and a relative one is joined onto the root; the working
     /// directory plays no part. A backslash is read as a separator on every platform, because skins
-    /// are mostly written on Windows.
+    /// are mostly written on Windows, and a name spelled with Windows' verbatim prefix is read
+    /// without it, since reading its backslashes as separators would otherwise unmake the prefix.
     pub fn logical(&self, path: &str) -> Result<PathBuf, SkinError> {
         let escape = || SkinError::PathEscape(path.to_owned());
-        let named = PathBuf::from(path.replace(FOREIGN_PATH_SEPARATOR, LUA_PATH_SEPARATOR));
+        let plain = resolve::without_verbatim_prefix(path);
+        let named = PathBuf::from(plain.as_deref().unwrap_or(path).replace(FOREIGN_PATH_SEPARATOR, LUA_PATH_SEPARATOR));
         let candidate = if named.is_absolute() { named } else { self.root.join(named) };
         let normalized = match resolve::contained(&self.root, &candidate) {
             Ok(normalized) => normalized,

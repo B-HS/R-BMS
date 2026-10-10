@@ -9,7 +9,7 @@
 //! | State | Leaves when | For |
 //! | --- | --- | --- |
 //! | `PRELOAD` | everything is loaded, `loadend` has passed, and START and SELECT have been up for a second | `READY` |
-//! | `READY` | the `READY` timer has run for longer than `playstart` | `PLAY` |
+//! | `READY` | everything is loaded and the `READY` timer has run for longer than `playstart` | `PLAY` |
 //! | `PLAY` | the gauge empties | `FAILED` |
 //! | `PLAY` | the chart's playing time is over | `FINISHED` |
 //! | `FAILED` | the `FAILED` timer has run for longer than `close` | the result |
@@ -20,6 +20,12 @@
 //! and SELECT have to have been up for is counted from the scene's own beginning when neither was
 //! ever touched, so no chart is ready sooner than a second after its screen came up. And a run that
 //! fails and runs out on the same frame is finished rather than failed, with both timers on.
+//!
+//! `READY` asks whether everything is loaded for the sake of a run that begins there, which is this
+//! player's own: a practice slice. The reference has its skin before its screen exists and a chart
+//! is ready only once its files are in, so there the question is always answered yes. Here a slice
+//! is ready before its skin has been read, and a skin that has not been read states no `playstart`
+//! to wait for.
 //!
 //! The scene decides nothing about the run. Whether the files are in, whether the gauge has emptied
 //! and where the chart stands are handed to it as [`SceneFacts`], and what it decides comes back as
@@ -224,7 +230,7 @@ impl PlayScene {
             }
             PlayPhase::Ready if !timers.is_on(timer_id::READY) => self.make_ready(driver, timers, now_us),
             PlayPhase::Ready => {
-                if elapsed_ms(timers, timer_id::READY, now_us) <= times.playstart_ms {
+                if !facts.loaded || elapsed_ms(timers, timer_id::READY, now_us) <= times.playstart_ms {
                     return SceneStep::Stay;
                 }
                 self.phase = PlayPhase::Play;

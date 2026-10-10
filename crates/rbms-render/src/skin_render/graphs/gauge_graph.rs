@@ -31,7 +31,7 @@ use super::super::draw::Placement;
 use super::super::gauge::GaugeScale;
 use super::super::object::Body;
 use super::pixmap::{Pixmap, Rgba};
-use super::{Layer, draw_layer, next_serial, plot_of, reference_color};
+use super::{Layer, draw_layer, next_serial, paintable, plot_of, reference_color};
 use crate::ctx::RenderCtx;
 use crate::{Rect, Renderer};
 
@@ -321,8 +321,7 @@ pub(crate) fn draw_gauge_graph<R: Renderer>(
         return false;
     };
     let (width, height) = (plot.w as i32, plot.h as i32);
-    let largest = i64::from(r.max_texture_size());
-    if width <= 0 || height <= 0 || i64::from(width) > largest || i64::from(height) > largest {
+    if !paintable(r, i64::from(width), i64::from(height)) {
         return false;
     }
 

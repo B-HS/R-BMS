@@ -579,11 +579,15 @@ fn the_scene_begins_on_the_frame_its_skin_first_draws() {
 
 /// A key pressed while the scene waits out its input time does nothing; the same key once it
 /// listens starts the fade, and the screen leaves for the browser when the fade has run its time.
+///
+/// The scene's time is counted here rather than left to the machine, which would otherwise have
+/// to get through the three frames of the wait inside the input time for them to be in it.
 #[test]
 fn a_confirming_key_is_ignored_until_the_scene_listens_and_then_fades_it_out() {
     let mut app = app_with_result_skin("confirm", SKIN);
     let mut pixels = HeadlessCanvas::new(CW, CH);
     enter(&mut app, state());
+    app.shared.stop_scene_clock();
     run_until_begun(&mut app, &mut pixels);
 
     for code in [KeyCode::Enter, KeyCode::Escape] {
@@ -627,6 +631,9 @@ fn the_lane_keys_confirm_and_turn_the_gauge() {
 
 /// R runs the chart again as it was laid out and N starts the chart after it, each once the fade
 /// they start has run out. The run laid out as it was hands its seed to the load that follows.
+///
+/// The scene's time is counted here rather than left to the machine, which would otherwise have
+/// to get from the scene's first frame to the tap inside the input time for it to be in the wait.
 #[test]
 fn the_players_own_keys_start_another_run_when_the_fade_ends() {
     for (code, carries_seed) in [(KeyCode::KeyR, true), (KeyCode::KeyN, false)] {
@@ -636,6 +643,7 @@ fn the_players_own_keys_start_another_run_when_the_fade_ends() {
         assert!(run.updates_score, "a run the player played counts towards the records");
         let mut pixels = HeadlessCanvas::new(CW, CH);
         enter(&mut app, state().played(run));
+        app.shared.stop_scene_clock();
         run_until_begun(&mut app, &mut pixels);
 
         assert!(matches!(key(&mut app, press(code)), Transition::Stay), "{code:?} started a run without waiting for the scene");

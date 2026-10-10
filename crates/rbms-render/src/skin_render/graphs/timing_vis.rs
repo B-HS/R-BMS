@@ -19,7 +19,7 @@ use super::super::draw::Placement;
 use super::super::object::Body;
 use super::pixmap::{Pixmap, Rgba, unit_color};
 use super::{
-    FIRST_UNRECORDED_JUDGE, Layer, RECENT_JUDGES, TIMING_JUDGE_AREAS, Upload, VISUALIZER_JUDGEMENTS, document_rect_of, next_serial, signed_plot_of,
+    FIRST_UNRECORDED_JUDGE, Layer, RECENT_JUDGES, TIMING_JUDGE_AREAS, Upload, VISUALIZER_JUDGEMENTS, document_rect_of, next_serial, paintable, signed_plot_of,
     visualizer_color, visualizer_line_width, visualizer_palette, visualizer_rate,
 };
 use crate::ctx::RenderCtx;
@@ -230,7 +230,7 @@ pub(crate) fn draw_timing_visualizer<R: Renderer>(
         return false;
     };
     let columns = body.center as i64 * 2 + 1;
-    if columns > i64::from(r.max_texture_size()) {
+    if !paintable(r, columns, 1) {
         return false;
     }
 
