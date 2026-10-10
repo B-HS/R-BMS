@@ -125,9 +125,31 @@ fn draw_decide(app: &mut crate::App, pixels: &mut crate::stage::HeadlessCanvas, 
         .map(|_| {
             let mut canvas = Canvas::Headless(pixels);
             app.shared.prepare_skin(&mut canvas, SKIN_TYPE_DECIDE);
-            app.shared.draw_decide_skin(&mut canvas, 0.0, false, TITLE, DecideChart::default())
+            let chart = ChartMeta { title: TITLE, ..ChartMeta::default() };
+            app.shared.draw_decide_skin(&mut canvas, &DecideDraw { chart: &chart, progress: 0.0, data: FrameData::default() })
         })
         .collect()
+}
+
+/// How long a skin with a file to decode is given to compile, and how long a frame that finds it
+/// still decoding stands back for the worker pool. The decode is off the frame loop, so the number
+/// of frames drawn says nothing about how long a worker has had.
+const DECODE_WAIT: Duration = Duration::from_secs(20);
+const DECODE_FRAME_PAUSE: Duration = Duration::from_millis(1);
+
+/// Draw the decide screen until its skin has compiled, answering whether it did in time.
+fn draw_decide_until_compiled(app: &mut crate::App, pixels: &mut crate::stage::HeadlessCanvas) -> bool {
+    let began = Instant::now();
+    loop {
+        draw_decide(app, pixels, 1);
+        if app.shared.has_compiled_skin(SKIN_TYPE_DECIDE) {
+            return true;
+        }
+        if began.elapsed() > DECODE_WAIT {
+            return false;
+        }
+        std::thread::sleep(DECODE_FRAME_PAUSE);
+    }
 }
 
 /// A Lua skin that cannot be read costs the screen one read and one message: its body runs once,
@@ -331,10 +353,7 @@ fn an_image_picked_by_an_index_no_cluster_knows_is_drawn_with_its_first_set() {
     sheet.save(document.with_file_name(SET_SHEET)).expect("the sheet is written beside the skin");
 
     let mut pixels = crate::stage::HeadlessCanvas::new(UI_SIZE.0, UI_SIZE.1);
-    let compiled = (0..COMPILE_FRAMES).any(|_| {
-        draw_decide(&mut app, &mut pixels, 1);
-        app.shared.has_compiled_skin(SKIN_TYPE_DECIDE)
-    });
+    let compiled = draw_decide_until_compiled(&mut app, &mut pixels);
     assert!(compiled, "the skin never compiled: {:?}", app.shared.skin_failure(SKIN_TYPE_DECIDE));
 
     assert_eq!(draw_decide(&mut app, &mut pixels, 1), vec![true], "a compiled skin did not draw its screen");

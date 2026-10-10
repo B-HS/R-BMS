@@ -28,6 +28,11 @@
 //! read against the screen's own state and with a pinned seed. A screen whose skin cannot be read is
 //! reported and passed over rather than failed: which screens of a pack load is what the test is run
 //! to find out.
+//!
+//! The decide scene is captured by a test of its own, because one frame says little about it: it is
+//! a scene that runs from its opening to its fade, shown for a chart. That test opens the scene for a
+//! real chart and saves a frame at each of several moments, walking the scene's own times on the way
+//! so the timers a skin animates on are on since when they would be.
 
 use std::collections::BTreeMap;
 use std::ops::Range;
@@ -39,11 +44,13 @@ use rbms_render::Renderer;
 use rbms_skin::loader::{SKIN_TYPE_DECIDE, SKIN_TYPE_KEY_CONFIG, SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_PLAY_7KEYS, SKIN_TYPE_RESULT};
 use rbms_skin::timer::timer_id;
 
+use crate::app_play::loaded_chart_for_tests;
 use crate::gpu::Gpu;
 use crate::skin_select::SKIN_PACK_ENV;
 use crate::stage::canvas::UI_SIZE;
-use crate::stage::render_tests::{app, play_state, render, render_on, result_state};
-use crate::stage::{Canvas, HeadlessCanvas, KeyConfigState, LoadingState, SelectState, Stage};
+use crate::stage::render_tests::{FRAME_DT, app, play_state, render, render_on, result_state};
+use crate::stage::scene_life::SceneTimes;
+use crate::stage::{Canvas, DecideState, FrameCtx, HeadlessCanvas, KeyConfigState, SelectState, Stage, Transition};
 use crate::{App, Config, LaunchOptions};
 
 /// Environment variable naming the folder captures are saved in. Nothing is saved without it.
@@ -228,7 +235,7 @@ const TIMER_ON_US: i64 = 1_000_000;
 
 /// How far into its scene a pack's screen is captured: past the opening most documents animate in
 /// with, so the frame shows the layout rather than the start of a fade.
-const PACK_SCENE_US: i64 = 5_000_000;
+const PACK_SCENE: Duration = Duration::from_secs(5);
 
 /// The seed every read of a pack's skin is pinned with, so a skin that picks a file or an option at
 /// random is captured the same way each time.
@@ -248,10 +255,10 @@ struct PackScreen {
     stage: fn() -> Stage,
 }
 
-/// The screens a pack is captured on.
-const PACK_SCREENS: [PackScreen; 5] = [
+/// The screens a pack is captured on one frame each. The decide scene is captured through its whole
+/// length by a test of its own.
+const PACK_SCREENS: [PackScreen; 4] = [
     PackScreen { skin_type: SKIN_TYPE_MUSIC_SELECT, name: "pack-select", stage: browser },
-    PackScreen { skin_type: SKIN_TYPE_DECIDE, name: "pack-decide", stage: loading },
     PackScreen { skin_type: SKIN_TYPE_RESULT, name: "pack-result", stage: result },
     PackScreen { skin_type: SKIN_TYPE_KEY_CONFIG, name: "pack-keyconfig", stage: key_config },
     PackScreen { skin_type: SKIN_TYPE_PLAY_7KEYS, name: "pack-play7", stage: play },
@@ -259,10 +266,6 @@ const PACK_SCREENS: [PackScreen; 5] = [
 
 fn browser() -> Stage {
     Stage::Select(Box::new(SelectState::new()))
-}
-
-fn loading() -> Stage {
-    Stage::Loading(LoadingState::song(0))
 }
 
 fn result() -> Stage {
@@ -308,25 +311,35 @@ fn authored_size(app: &App, screen: i32) -> Option<(u32, u32)> {
     Some((side(header.width, UI_SIZE.0), side(header.height, UI_SIZE.1)))
 }
 
-/// Draws the stage `stage` builds until the document for `screen` has been read and compiled, then
-/// once more so the target shows the document; or answers the first line of why it never was.
+/// Draws the stage `stage` builds from the first moment of its scene until the document for
+/// `screen` has been read and compiled, then once more [`PACK_SCENE`] into the scene so the
+/// target shows the document past its opening; or answers the first line of why it never was.
+///
+/// The scene is entered the way the application enters one. Its clock is put at its beginning once
+/// and then left alone: it stands still while the document is on its way and starts on the frame the
+/// document first draws, which is where a skin's Lua first sees the time and where the timers it
+/// keeps for itself are started from. Only then is the scene made as old as the capture asks for.
+/// Putting the clock at the capture's time on every frame instead would show the skin at the moment
+/// it was first run -- an opening not yet begun, not a layout that has settled.
 ///
 /// A Lua skin is read on the screen's first frame, against the state that frame is drawn from, so a
 /// skin that cannot be read is known by the second frame and nothing is waited for.
 fn draw_until_settled(app: &mut App, screen: i32, canvas: &mut Canvas<'_>, stage: fn() -> Stage) -> Result<(), String> {
     let deadline = Instant::now() + PACK_LOAD_TIMEOUT;
+    draw_on(app, stage(), SCENE_START_US, canvas);
     loop {
-        draw_on(app, stage(), PACK_SCENE_US, canvas);
         if let Some(reason) = app.shared.skin_failure(screen) {
             return Err(reason.lines().next().unwrap_or_default().to_owned());
         }
         if app.shared.has_compiled_skin(screen) {
-            draw_on(app, stage(), PACK_SCENE_US, canvas);
+            app.shared.age_skin_scene(PACK_SCENE);
+            render_on(app, stage(), canvas);
             return Ok(());
         }
         if Instant::now() >= deadline {
             return Err(format!("its files were not read within {} seconds", PACK_LOAD_TIMEOUT.as_secs()));
         }
+        render_on(app, stage(), canvas);
     }
 }
 
@@ -499,4 +512,174 @@ fn a_skin_pack_named_by_the_environment_is_captured_one_document_a_screen() {
     }
     assert!(!captured.is_empty(), "{} drew none of its screens", pack.display());
     assert_eq!(files_under(&pack), before, "capturing the pack changed its folder");
+}
+
+/// The chart the decide scene is captured for: a sample that ships with the repository, named from
+/// this crate's folder.
+const DECIDE_SAMPLE_CHART: &str = "../../samples/preview-demo/preview-demo.bms";
+
+/// The moments of the decide scene that are captured for the sample chart, in milliseconds from its
+/// beginning: its first frame, the opening, the settled layout, the end of its length, and three
+/// moments of the fade that follows. A skin that fades for a second after a scene of three is half a
+/// second, three quarters and all but through its fade at the last three.
+const DECIDE_SHOTS_MS: [i64; 7] = [0, 500, 1500, 3000, 3500, 3750, 3950];
+
+/// The moments captured for the chart written below, which has what the sample lacks.
+const DECIDE_RICH_SHOTS_MS: [i64; 2] = [1500, 3750];
+
+/// How many measures the written chart runs for, and where its tempo halves, quadruples and returns.
+const RICH_MEASURES: u32 = 48;
+const RICH_SLOW_FROM: u32 = 12;
+const RICH_FAST_FROM: u32 = 24;
+const RICH_HOME_FROM: u32 = 36;
+
+/// The size of the stage image written beside that chart.
+const RICH_STAGE_SIZE: (u32, u32) = (640, 480);
+
+/// The file that image is written to, which the chart names.
+const RICH_STAGE_FILE: &str = "stage.png";
+
+/// A chart with everything a decide skin can show: a named difficulty and a level, a stage image, a
+/// tempo that changes, long notes, and enough notes on the keys and the turntable to fill a graph.
+fn rich_chart() -> String {
+    const KEY_CHANNELS: [u32; 7] = [11, 12, 13, 14, 15, 18, 19];
+    const SCRATCH_CHANNEL: u32 = 16;
+    const LONG_CHANNEL: u32 = 51;
+    const TEMPO_CHANNEL: u32 = 8;
+    /// The most notes a key is given in one measure; the count climbs to it and starts over.
+    const BUSIEST_MEASURE_NOTES: usize = 8;
+    /// One key in this many rests in each measure, a different one each time.
+    const RESTING_KEY_EVERY: usize = 3;
+    /// One measure in this many has turntable notes and a long note.
+    const TURNTABLE_EVERY: u32 = 4;
+    let mut chart = String::from(concat!(
+        "#PLAYER 1\n#GENRE Capture Genre\n#TITLE Capture Title\n#SUBTITLE [ANOTHER]\n#ARTIST Capture Artist\n#BPM 150\n",
+        "#PLAYLEVEL 12\n#DIFFICULTY 4\n#RANK 2\n#TOTAL 300\n#LNTYPE 1\n#BPM01 75\n#BPM02 300\n#BPM03 150\n#WAV01 a.wav\n",
+    ));
+    chart.push_str(&format!("#STAGEFILE {RICH_STAGE_FILE}\n"));
+    for measure in 0..RICH_MEASURES {
+        let notes = 1 + measure as usize % BUSIEST_MEASURE_NOTES;
+        for (index, channel) in KEY_CHANNELS.into_iter().enumerate() {
+            if !(measure as usize + index).is_multiple_of(RESTING_KEY_EVERY) {
+                chart.push_str(&format!("#{measure:03}{channel}:{}\n", "01".repeat(notes)));
+            }
+        }
+        if measure.is_multiple_of(TURNTABLE_EVERY) {
+            chart.push_str(&format!("#{measure:03}{SCRATCH_CHANNEL}:0101\n#{measure:03}{LONG_CHANNEL}:01000001\n"));
+        }
+        let tempo = match measure {
+            RICH_SLOW_FROM => Some("01"),
+            RICH_FAST_FROM => Some("02"),
+            RICH_HOME_FROM => Some("03"),
+            _ => None,
+        };
+        if let Some(tempo) = tempo {
+            chart.push_str(&format!("#{measure:03}{TEMPO_CHANNEL:02}:{tempo}\n"));
+        }
+    }
+    chart
+}
+
+/// Write the chart above and its stage image into a folder of this test's own, and answer the chart.
+fn write_rich_chart(tag: &str) -> PathBuf {
+    let folder = settings_of(tag).with_file_name("chart");
+    std::fs::create_dir_all(&folder).expect("the chart folder is writable");
+    let (width, height) = RICH_STAGE_SIZE;
+    let stage = image::RgbaImage::from_fn(width, height, |x, y| {
+        let band = u8::try_from((x * u32::from(u8::MAX)) / width).unwrap_or(u8::MAX);
+        let rise = u8::try_from((y * u32::from(u8::MAX)) / height).unwrap_or(u8::MAX);
+        image::Rgba([band, rise, u8::MAX - band, u8::MAX])
+    });
+    stage.save(folder.join(RICH_STAGE_FILE)).expect("the stage image is written");
+    let chart = folder.join("rich.bms");
+    std::fs::write(&chart, rich_chart()).expect("the chart is written");
+    chart
+}
+
+/// One frame of the stage that is up with the scene clock put at `scene_ms`: its update and then its
+/// draw, which is the order the application runs them in. Answers what the update asked for.
+fn scene_frame_at(app: &mut App, scene_ms: i64, canvas: &mut Canvas<'_>) -> Transition {
+    let age = Duration::from_millis(u64::try_from(scene_ms).expect("a scene has no time before it began"));
+    app.shared.scene_started = Instant::now().checked_sub(age).expect("the process has been up for longer than the scene time asked for");
+    let now = Instant::now();
+    let transition = app.stage.update(&mut FrameCtx { shared: &mut app.shared, now, dt: FRAME_DT });
+    if matches!(transition, Transition::Stay) {
+        app.shared.hot.clear();
+        app.stage.draw(&mut FrameCtx { shared: &mut app.shared, now, dt: FRAME_DT }, canvas);
+    }
+    transition
+}
+
+/// Open the pack's decide scene for the chart at `chart` and save a frame at each of `shots_ms` as
+/// `<prefix>-<milliseconds>ms`. Answers the names saved, or why the scene never drew.
+///
+/// The scene is walked rather than jumped through: besides the moments that are saved, a frame is
+/// run just past the scene's input time and just past its length, so `STARTINPUT` and `FADEOUT` go
+/// on when the skin's own times say and a later frame shows a fade as far along as it would be.
+fn capture_decide_scene(pack: &Path, tag: &str, chart: &Path, prefix: &str, shots_ms: &[i64]) -> Result<Vec<String>, String> {
+    let mut app = pack_app(pack, tag);
+    let size = authored_size(&app, SKIN_TYPE_DECIDE).ok_or_else(|| "the pack has no document for this screen".to_owned())?;
+    let bytes = std::fs::read(chart).map_err(|error| format!("{} could not be read: {error}", chart.display()))?;
+    app.shared.chart_path = chart.to_string_lossy().into_owned();
+    let loaded = loaded_chart_for_tests(&bytes, &app.shared.chart_path);
+    app.stage = Stage::Decide(Box::new(DecideState::loaded(&app.shared, loaded)));
+
+    let mut pixels = HeadlessCanvas::new(size.0, size.1);
+    let deadline = Instant::now() + PACK_LOAD_TIMEOUT;
+    while !app.shared.has_compiled_skin(SKIN_TYPE_DECIDE) {
+        scene_frame_at(&mut app, 0, &mut Canvas::Headless(&mut pixels));
+        if let Some(reason) = app.shared.skin_failure(SKIN_TYPE_DECIDE) {
+            return Err(reason.lines().next().unwrap_or_default().to_owned());
+        }
+        if Instant::now() >= deadline {
+            return Err(format!("its files were not read within {} seconds", PACK_LOAD_TIMEOUT.as_secs()));
+        }
+    }
+
+    let times = SceneTimes::of_skin(app.shared.skins.document(SKIN_TYPE_DECIDE));
+    let last = shots_ms.iter().copied().max().unwrap_or_default();
+    let edges = [times.input_ms + 1, times.scene_ms + 1].into_iter().filter(|edge| *edge < last);
+    let mut moments: Vec<i64> = shots_ms.iter().copied().chain(edges).collect();
+    moments.sort_unstable();
+    moments.dedup();
+    let mut saved = Vec::new();
+    for at_ms in moments {
+        let transition = scene_frame_at(&mut app, at_ms, &mut Canvas::Headless(&mut pixels));
+        if !matches!(transition, Transition::Stay) {
+            return Err(format!("the scene was over by {at_ms} ms"));
+        }
+        if shots_ms.contains(&at_ms) {
+            let name = format!("{prefix}-{at_ms:04}ms");
+            save(&name, CAPTURE_EXTENSION, size, pixels.rgba());
+            saved.push(name);
+        }
+    }
+    Ok(saved)
+}
+
+/// Captures the decide scene of a pack somebody else wrote, from its first frame to its fade, for a
+/// chart that ships with the repository and for one written here that has a stage image, a named
+/// difficulty and a tempo that changes.
+///
+/// Opt-in like the capture above it: without [`SKIN_PACK_ENV`] this passes without drawing anything.
+/// With it, the scene has to draw for both charts, and the pack's folder has to be left as it was.
+#[test]
+fn the_decide_scene_of_a_skin_pack_named_by_the_environment_is_captured_from_its_opening_to_its_fade() {
+    let Some(pack) = crate::skin_select::pack_from_environment(std::env::var_os(SKIN_PACK_ENV)) else {
+        return;
+    };
+    assert!(pack.is_dir(), "{SKIN_PACK_ENV} names {}, which is not a folder", pack.display());
+    let before = files_under(&pack);
+
+    let sample = Path::new(env!("CARGO_MANIFEST_DIR")).join(DECIDE_SAMPLE_CHART);
+    let saved =
+        capture_decide_scene(&pack, "decide-sample", &sample, "decide", &DECIDE_SHOTS_MS).unwrap_or_else(|reason| panic!("decide: not drawn: {reason}"));
+    println!("decide: captured {}", saved.join(", "));
+
+    let rich = write_rich_chart("decide-rich-chart");
+    let saved = capture_decide_scene(&pack, "decide-rich", &rich, "decide-rich", &DECIDE_RICH_SHOTS_MS)
+        .unwrap_or_else(|reason| panic!("decide-rich: not drawn: {reason}"));
+    println!("decide-rich: captured {}", saved.join(", "));
+
+    assert_eq!(files_under(&pack), before, "capturing the pack's decide scene changed its folder");
 }

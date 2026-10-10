@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::Receiver;
+use std::time::SystemTime;
 
 use rbms_config::DEFAULT_SKIN_FOLDER;
 use rbms_render::{SkinConfig, SkinImage};
@@ -366,31 +367,65 @@ pub(crate) enum SkinAssetKind {
 pub(crate) enum SkinAsset {
     Image(SkinImage),
     Font(Vec<u8>),
+    /// The file is the one the caller already holds a texture of, so it was not decoded again.
+    Unchanged,
 }
 
 /// What one skin decode job names.
 pub(crate) type SkinAssetJob = (SkinAssetKind, PathBuf);
 
+/// What tells one version of a file from the next without reading it: when it was last written and
+/// how long it is.
+pub(crate) type FileStamp = (SystemTime, u64);
+
+/// One skin decode job as a worker is handed it: the file, and the stamp of the version of it the
+/// caller already has uploaded, when it has one.
+pub(crate) type SkinAssetRequest = (SkinAssetJob, Option<FileStamp>);
+
+/// What a worker read of one of a document's files.
+#[derive(Debug)]
+pub(crate) struct SkinAssetRead {
+    pub(crate) asset: SkinAsset,
+    /// The file's stamp when the worker looked, taken before the file was read: a file written in
+    /// between is then decoded once more than it had to be rather than once too few. `None` for a
+    /// font, and for a file that cannot be stat'ed, which is never taken for unchanged.
+    pub(crate) stamp: Option<FileStamp>,
+}
+
+/// The stamp of the file at `path` as it is now.
+fn file_stamp(path: &Path) -> Option<FileStamp> {
+    let file = std::fs::metadata(path).ok()?;
+    Some((file.modified().ok()?, file.len()))
+}
+
 /// Decode one of a document's files.
-fn decode_skin_asset(job: &SkinAssetJob) -> Option<SkinAsset> {
-    let (kind, path) = job;
+///
+/// An image the caller already has uploaded costs one stat when the file has not been written
+/// since. That keeps the texture a screen shares with the one before it from being decoded twice,
+/// and still shows a sheet its author just saved over the next time the skin is read.
+fn decode_skin_asset(request: &SkinAssetRequest) -> Option<SkinAssetRead> {
+    let ((kind, path), uploaded) = request;
     match kind {
         SkinAssetKind::Image => {
+            let stamp = file_stamp(path);
+            if stamp.is_some() && stamp == *uploaded {
+                return Some(SkinAssetRead { asset: SkinAsset::Unchanged, stamp });
+            }
             let decoded = image::open(path).ok()?.to_rgba8();
             let (width, height) = decoded.dimensions();
-            SkinImage::new(width, height, decoded.into_raw()).map(SkinAsset::Image)
+            SkinImage::new(width, height, decoded.into_raw()).map(|image| SkinAssetRead { asset: SkinAsset::Image(image), stamp })
         }
-        SkinAssetKind::Font => std::fs::read(path).ok().map(SkinAsset::Font),
+        SkinAssetKind::Font => std::fs::read(path).ok().map(|bytes| SkinAssetRead { asset: SkinAsset::Font(bytes), stamp: None }),
     }
 }
 
 /// Fan a skin document's images and fonts out over the worker pool.
 ///
-/// A published skin names dozens of source images and some of them are two thousand pixels square,
-/// which is seconds of decoding the frame loop cannot spend. Until the pool is done the screen it
-/// belongs to draws its built-in layout.
-pub(crate) fn spawn_skin_asset_decode(jobs: Vec<SkinAssetJob>, cancel: Arc<AtomicBool>) -> DecodePool<SkinAssetJob, SkinAsset> {
-    spawn_decode(jobs.into_iter().map(|job| (job.clone(), job)).collect(), cancel, decode_skin_asset)
+/// A published skin draws from dozens of source images and some of them are several thousand pixels
+/// square, which is seconds of decoding the frame loop cannot spend. Until the pool is done the
+/// screen it belongs to draws its built-in layout.
+pub(crate) fn spawn_skin_asset_decode(requests: Vec<SkinAssetRequest>, cancel: Arc<AtomicBool>) -> DecodePool<SkinAssetJob, SkinAssetRead> {
+    spawn_decode(requests.into_iter().map(|request| (request.0.clone(), request)).collect(), cancel, decode_skin_asset)
 }
 
 /// Resolve every referenced background image in a chart's `bgamap` to `(id, path)` decode jobs
@@ -463,6 +498,38 @@ mod tests {
         let decoded = decode_bga_image(&dir, "wide.png").expect("the fixture decodes");
         assert_eq!((decoded.width, decoded.height), (6, 3), "the decoder resized what it was given");
         assert_eq!(decoded.rgba.len(), 6 * 3 * 4, "the buffer does not hold that many RGBA pixels");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Edge of the sheet the stamp test writes, and of the one it saves over it.
+    const SHEET_EDGE: u32 = 2;
+    const EDITED_SHEET_EDGE: u32 = 3;
+
+    /// A sheet the caller already has uploaded costs a worker one stat for as long as its file is
+    /// the one that was uploaded, and is decoded again once the file has been written since. A
+    /// caller that holds nothing of the file has it decoded whatever its stamp.
+    #[test]
+    fn a_skin_image_is_decoded_again_only_once_its_file_was_written() {
+        let dir = temp_dir("skin-stamp");
+        let path = dir.join("sheet.png");
+        image::RgbaImage::from_pixel(SHEET_EDGE, SHEET_EDGE, image::Rgba([1, 2, 3, 255])).save(&path).expect("write the fixture");
+        let job = (SkinAssetKind::Image, path.clone());
+
+        let first = decode_skin_asset(&(job.clone(), None)).expect("the fixture decodes");
+        assert!(matches!(&first.asset, SkinAsset::Image(image) if image.width == SHEET_EDGE), "a sheet nobody holds was not decoded");
+        let stamp = first.stamp.expect("a file that was just written has a stamp");
+
+        let again = decode_skin_asset(&(job.clone(), Some(stamp))).expect("the fixture is still there");
+        assert!(matches!(again.asset, SkinAsset::Unchanged), "a sheet that was not written since was decoded again");
+        assert_eq!(again.stamp, Some(stamp));
+
+        image::RgbaImage::from_pixel(EDITED_SHEET_EDGE, SHEET_EDGE, image::Rgba([1, 2, 3, 255])).save(&path).expect("save over the fixture");
+        let edited = decode_skin_asset(&(job, Some(stamp))).expect("the edited fixture decodes");
+        assert!(matches!(&edited.asset, SkinAsset::Image(image) if image.width == EDITED_SHEET_EDGE), "a sheet that was saved over was taken for unchanged");
+        assert_ne!(edited.stamp, Some(stamp));
+
+        let missing = (SkinAssetKind::Image, dir.join("missing.png"));
+        assert!(decode_skin_asset(&(missing, None)).is_none(), "a file that is not there was handed over");
         let _ = std::fs::remove_file(&path);
     }
 

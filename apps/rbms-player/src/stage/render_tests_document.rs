@@ -9,9 +9,8 @@ use std::path::{Path, PathBuf};
 use rbms_skin::loader::{SKIN_TYPE_DECIDE, SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_PLAY_7KEYS, SKIN_TYPE_RESULT};
 
 use crate::stage::capture::{Missed, SCENE_START_US, Shot, app_in, draw_at, draw_until_compiled, settings_of, skin_folder_of};
-use crate::stage::loading::LoadingState;
 use crate::stage::render_tests::{play_state_with_bga, render, result_state};
-use crate::stage::{HeadlessCanvas, SelectState, Stage};
+use crate::stage::{DecideState, HeadlessCanvas, LoadingState, SelectState, Stage};
 use crate::{App, CH, CW, Color, Config};
 
 /// The colour the fixture document paints its one image with, picked so no built-in screen draws it.
@@ -96,20 +95,41 @@ fn the_browser_draws_its_document_instead_of_its_own_list() {
     assert_drawn_by_the_document_alone(&pixels, "browser");
 }
 
-/// The score screen and the loading screen hand their whole frame to a document the same way the
-/// browser does: nothing of the built-in layout is left under or over it.
+/// The score screen and the decide screen hand their whole frame to a document the same way the
+/// browser does: nothing of a built-in layout is left under or over it.
 #[test]
-fn the_score_and_loading_screens_are_drawn_by_their_documents_alone() {
+fn the_score_and_decide_screens_are_drawn_by_their_documents_alone() {
     let mut score = app_drawing("score", SKIN_TYPE_RESULT);
     let mut pixels = HeadlessCanvas::new(CW, CH);
     assert!(render_until_compiled(&mut score, SKIN_TYPE_RESULT, &mut pixels, || Stage::Result(result_state())), "the score document compiles in time");
     assert_drawn_by_the_document_alone(&pixels, "score");
 
-    let mut loading = app_drawing("loading", SKIN_TYPE_DECIDE);
+    let mut decide = app_drawing("decide", SKIN_TYPE_DECIDE);
     let mut pixels = HeadlessCanvas::new(CW, CH);
+    let stage = || Stage::Decide(Box::new(DecideState::song(0)));
+    assert!(render_until_compiled(&mut decide, SKIN_TYPE_DECIDE, &mut pixels, stage), "the decide document compiles in time");
+    assert_drawn_by_the_document_alone(&pixels, "decide");
+}
+
+/// Frames the loading screen is drawn for below: more than the two a document takes to be asked for
+/// and read.
+const LOADING_FRAMES: usize = 4;
+
+/// The LOADING screen is the built-in one whatever documents are chosen: a decide document draws
+/// the decide scene, and what the loading screen waits for after it -- or instead of it, for a scan
+/// or a table -- is not that scene.
+#[test]
+fn the_loading_screen_is_never_drawn_by_the_decide_document() {
     let stage = || Stage::Loading(LoadingState::song(0));
-    assert!(render_until_compiled(&mut loading, SKIN_TYPE_DECIDE, &mut pixels, stage), "the loading document compiles in time");
-    assert_drawn_by_the_document_alone(&pixels, "loading");
+    let built_in = render(&mut crate::stage::render_tests::app(), stage());
+
+    let mut app = app_drawing("loading", SKIN_TYPE_DECIDE);
+    let mut pixels = HeadlessCanvas::new(CW, CH);
+    for _ in 0..LOADING_FRAMES {
+        draw_at(&mut app, stage(), SCENE_START_US, &mut pixels);
+    }
+    assert!(!app.shared.has_skin_document(SKIN_TYPE_DECIDE), "the loading screen asked for the decide document");
+    assert_eq!(pixels.pixel_checksum(), built_in.pixel_checksum(), "the loading screen is not the built-in one");
 }
 
 /// A document's files are read on the worker pool, so a frame drawn before they arrive draws the

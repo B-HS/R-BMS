@@ -24,6 +24,7 @@ pub mod ir;
 pub mod keyconfig;
 pub mod loading;
 pub mod options;
+pub mod overview;
 pub mod play;
 pub mod play_timers;
 pub mod result;

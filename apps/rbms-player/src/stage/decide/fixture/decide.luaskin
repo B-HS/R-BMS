@@ -1,0 +1,24 @@
+local skin = {
+    type = 6,
+    name = "Mini Decide",
+    w = 1280,
+    h = 720,
+    input = 2000,
+    scene = 10000,
+    fadeout = 4000,
+}
+
+if skin_config then
+    skin.judgegraph = { { id = "notes", type = 0 } }
+    skin.bpmgraph = { { id = "tempo" } }
+    skin.destination = {
+        { id = -111, dst = { { x = 0, y = 0, w = 1280, h = 720, r = 20, g = 40, b = 80 } } },
+        { id = -100, dst = { { x = 480, y = 240, w = 320, h = 240 } } },
+        { id = "notes", dst = { { x = 140, y = 30, w = 1000, h = 150 } } },
+        { id = "tempo", dst = { { x = 140, y = 30, w = 1000, h = 150 } } },
+        { id = -111, timer = 1, dst = { { x = 0, y = 656, w = 64, h = 64, r = 0, g = 255, b = 0 } } },
+        { id = -111, timer = 2, dst = { { x = 1216, y = 656, w = 64, h = 64, r = 255, g = 0, b = 0 } } },
+    }
+end
+
+return skin

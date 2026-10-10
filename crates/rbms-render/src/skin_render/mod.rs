@@ -30,7 +30,7 @@ mod songlist;
 pub mod state;
 mod text;
 mod text_input;
-mod textures;
+pub mod textures;
 
 #[cfg(test)]
 mod tests;
@@ -180,9 +180,9 @@ impl SkinViewport {
 
 /// A loaded document, compiled into something a screen draws every frame.
 ///
-/// Building it registers every image source the document names and resolves every object it draws;
-/// after that a frame costs two passes over the object list, one to prepare and one to draw, and no
-/// file access at all.
+/// Building it registers every image source the document's objects draw from and resolves every
+/// object it draws; after that a frame costs two passes over the object list, one to prepare and one
+/// to draw, and no file access at all.
 #[derive(Debug)]
 pub struct SkinScreen {
     /// The size the document was authored at, which every coordinate in it is relative to.
@@ -207,9 +207,36 @@ impl SkinScreen {
     /// name the same source id without colliding. That also means a reload registers a fresh set of
     /// textures: [`SkinScreen::release`] the old screen first, or the old set stays uploaded.
     pub fn build<R: Renderer>(r: &mut R, text: &mut TextContext, skin: &LoadedSkin, assets: &mut dyn SkinAssets) -> SkinScreen {
+        SkinScreen::compile(r, text, skin, assets, None)
+    }
+
+    /// [`SkinScreen::build`], with the screen's image sources held in `pool` rather than registered
+    /// for this screen alone.
+    ///
+    /// A file the pool already holds is drawn from the texture that is there, and `assets` is only
+    /// asked for it in case the host decoded it again. The screen has to be handed back with
+    /// [`SkinScreen::release_shared`] and the same pool.
+    pub fn build_shared<R: Renderer>(
+        r: &mut R,
+        text: &mut TextContext,
+        skin: &LoadedSkin,
+        assets: &mut dyn SkinAssets,
+        pool: &mut textures::SkinTexturePool,
+    ) -> SkinScreen {
+        SkinScreen::compile(r, text, skin, assets, Some(pool))
+    }
+
+    /// Compiles a document, taking its textures from `pool` when there is one.
+    fn compile<R: Renderer>(
+        r: &mut R,
+        text: &mut TextContext,
+        skin: &LoadedSkin,
+        assets: &mut dyn SkinAssets,
+        pool: Option<&mut textures::SkinTexturePool>,
+    ) -> SkinScreen {
         let serial = NEXT_SCREEN_SERIAL.fetch_add(1, Ordering::Relaxed);
         let mut warnings: Vec<String> = Vec::new();
-        let textures = textures::SkinTextures::register(r, skin, assets, serial, &mut warnings);
+        let textures = textures::SkinTextures::register(r, skin, assets, serial, pool, &mut warnings);
 
         let mut families: Vec<(String, String)> = Vec::new();
         for (id, path) in &skin.fonts {
@@ -241,7 +268,12 @@ impl SkinScreen {
 
     /// How many textures this screen holds.
     pub fn texture_count(&self) -> usize {
-        self.textures.count()
+        self.textures.stats().count
+    }
+
+    /// How many image-source textures this screen holds and the RGBA bytes they come to.
+    pub fn texture_stats(&self) -> textures::TextureStats {
+        self.textures.stats()
     }
 
     /// The font families this screen registered, as `(document font id, family name)`.
@@ -257,7 +289,18 @@ impl SkinScreen {
     /// Hands every texture back to `r`. A screen is unusable afterwards and must be rebuilt, which
     /// is what a skin reload does.
     pub fn release<R: Renderer>(&mut self, r: &mut R) {
-        self.textures.release(r);
+        self.release_textures(r, None);
+    }
+
+    /// [`SkinScreen::release`] for a screen made by [`SkinScreen::build_shared`]: its hold on each
+    /// pooled texture goes back to `pool`, where the texture waits for the pool's next sweep.
+    pub fn release_shared<R: Renderer>(&mut self, r: &mut R, pool: &mut textures::SkinTexturePool) {
+        self.release_textures(r, Some(pool));
+    }
+
+    /// Lets go of everything this screen registered or holds.
+    fn release_textures<R: Renderer>(&mut self, r: &mut R, pool: Option<&mut textures::SkinTexturePool>) {
+        self.textures.release(r, pool);
         for object in &self.objects {
             object.release(r);
         }

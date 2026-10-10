@@ -15,7 +15,7 @@ use crate::ir_ext::PrimaryProfileDirection;
 use crate::ir_ranking_view::{PanelAction, PanelLine, offline_lines, panel_action, panel_lines, profile_line};
 use crate::ir_replay::from_ir_replay;
 use crate::keyconfig::{SCRATCH_BACKWARD_INDEX, SCRATCH_FORWARD_INDEX, key_index_of};
-use crate::stage::{Canvas, FoldersState, FrameCtx, KeyInput, LoadingState, SettingsState, Stage, StageHandler, TablesState, Transition, is_left_press};
+use crate::stage::{Canvas, FoldersState, FrameCtx, KeyInput, SettingsState, Stage, StageHandler, TablesState, Transition, is_left_press};
 use crate::*;
 
 mod filter;
@@ -209,6 +209,9 @@ impl SelectState {
 
     /// Enter the focused select item: descend into a folder, or start a chart.
     ///
+    /// A chart goes to the decide scene when a skin draws one and to the LOADING screen otherwise
+    /// ([`AppShared::decided_song_stage`]); either way the browser stays suspended underneath.
+    ///
     /// Any replay download still in flight is abandoned when a chart starts: its result would
     /// otherwise land mid-load and swap the chart out from under the run that is starting.
     fn select_enter(&mut self, shared: &mut AppShared) -> Transition {
@@ -222,7 +225,7 @@ impl SelectState {
                 shared.replay_download_rx = None;
                 shared.replay_download_target = None;
                 shared.play_system_sound(SystemSound::Select);
-                Transition::Open(Stage::Loading(LoadingState::song(i)))
+                Transition::Open(shared.decided_song_stage(i))
             }
             Some(SelectItem::Folder { target, .. }) => {
                 let target = *target;
@@ -269,7 +272,7 @@ impl SelectState {
         };
         self.record_modal = None;
         shared.practice_requested = true;
-        Transition::Open(Stage::Loading(LoadingState::song(index)))
+        Transition::Open(shared.decided_song_stage(index))
     }
 
     /// Rebuild the row list through the filter panel, and remember what it was built from so the
@@ -425,7 +428,7 @@ impl SelectState {
                 shared.replay = Some(rp);
                 self.stop_preview(shared);
                 match shared.load() {
-                    Some(loaded) => Transition::Open(shared.enter_loaded_chart(loaded)),
+                    Some(loaded) => Transition::Open(shared.decided_chart_stage(loaded)),
                     None => Transition::Stay,
                 }
             }
@@ -591,7 +594,7 @@ impl SelectState {
                 shared.replay = Some(replay);
                 self.stop_preview(shared);
                 match shared.load() {
-                    Some(loaded) => Transition::Open(shared.enter_loaded_chart(loaded)),
+                    Some(loaded) => Transition::Open(shared.decided_chart_stage(loaded)),
                     None => Transition::Stay,
                 }
             }

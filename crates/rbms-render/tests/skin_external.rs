@@ -10,8 +10,9 @@
 //!    the game. Every option the reference declares reads as off unless the scenario turns it on,
 //!    so a condition written as "not a folder bar" holds.
 //! 2. The skin is loaded against that host -- header pass, body pass, the lot.
-//! 3. The image sources no drawn object names are dropped before anything is decoded, because a
-//!    pack ships sheets for every customisation it offers and decoding them all costs gigabytes.
+//! 3. The image sources no drawn object names are never decoded, because a pack ships sheets for
+//!    every customisation it offers and decoding them all costs gigabytes. Which ones those are is
+//!    the renderer's own answer ([`referenced_sources`]), the one the application decodes by too.
 //! 4. [`SkinScreen`] is built on a 1920 by 1080 [`CpuCanvas`] and drawn at a few scene times. Each
 //!    frame binds the host to the skin's interpreter once ([`SkinLua::frame`](rbms_skin::lua::SkinLua::frame))
 //!    and prepares every object inside that binding, so every `draw`, `value` and `timer` the skin
@@ -26,7 +27,7 @@
 //! The pack is read only. A skin's writes go to an overlay in the temporary directory, and the
 //! pack's folder is compared before and after.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -35,6 +36,7 @@ use rbms_model::Mode;
 use rbms_parser::parse;
 use rbms_render::playfield::LaneShade;
 use rbms_render::skin_render::graphs::{EARLY_LATE_BUCKETS, JUDGEMENTS, NOTE_KINDS, PlayCursor};
+use rbms_render::skin_render::textures::referenced_sources;
 use rbms_render::{
     BgaFrame, BpmTimeline, Color, CpuCanvas, FrameData, FrameSeries, GaugeFrame, GaugeHistory, NoteDistribution, NoteField, PlayfieldView, RecentHits,
     ReferenceImages, RenderCtx, Renderer, SelectRow, Skin, SkinAssets, SkinFrame, SkinImage, SkinObjectKind, SkinScreen, SongBars, TextContext, TextureId,
@@ -42,7 +44,6 @@ use rbms_render::{
 };
 use rbms_skin::dst::{DrawCondition, TimerRef};
 use rbms_skin::loader::{LoadedSkin, SkinLoadOptions, SkinUserConfig, load_skin_with_host, parse_value};
-use rbms_skin::model::Destination;
 use rbms_skin::property::{MapHost, PropertyKind};
 use rbms_skin::timer::{MICROS_PER_MILLI, TimerId, TimerState};
 use serde::Deserialize;
@@ -435,79 +436,6 @@ impl SkinAssets for PackAssets {
     }
 }
 
-/// Adds the object id of each nested destination to `named`.
-fn name_all(named: &mut BTreeSet<String>, destinations: &[Destination]) {
-    named.extend(destinations.iter().map(|destination| destination.id.clone()));
-}
-
-/// The image sources the skin's drawn objects read, by source id.
-///
-/// An object is drawn when a top-level destination names it, or when a repeating object a
-/// destination names -- a note set, a gauge, a judgement pop-up, a song wheel -- lists it. Every
-/// definition with a `src` that is named either way keeps its source; everything else the skin
-/// declares is a sheet for a customisation the player did not pick.
-fn referenced_sources(skin: &LoadedSkin) -> BTreeSet<String> {
-    let def = &skin.def;
-    let mut named: BTreeSet<String> = skin.destinations.iter().map(|track| track.id.clone()).collect();
-    if let Some(note) = def.note.as_ref().filter(|note| named.contains(&note.id)) {
-        let lists = [
-            &note.note,
-            &note.lnstart,
-            &note.lnend,
-            &note.lnbody,
-            &note.lnbody_active,
-            &note.lnactive,
-            &note.hcnstart,
-            &note.hcnend,
-            &note.hcnbody,
-            &note.hcnactive,
-            &note.hcnbody_active,
-            &note.hcndamage,
-            &note.hcnbody_miss,
-            &note.hcnreactive,
-            &note.hcnbody_reactive,
-            &note.mine,
-            &note.hidden,
-            &note.processed,
-        ];
-        named.extend(lists.into_iter().flatten().cloned());
-        for nested in [&note.group, &note.bpm, &note.stop, &note.time] {
-            name_all(&mut named, nested);
-        }
-    }
-    if let Some(gauge) = def.gauge.as_ref().filter(|gauge| named.contains(&gauge.id)) {
-        named.extend(gauge.nodes.iter().cloned());
-    }
-    for judge in def.judge.iter().filter(|judge| named.contains(&judge.id)).collect::<Vec<_>>() {
-        name_all(&mut named, &judge.images);
-        name_all(&mut named, &judge.numbers);
-    }
-    if let Some(list) = def.songlist.as_ref().filter(|list| named.contains(&list.id)) {
-        for nested in [&list.listoff, &list.liston, &list.text, &list.level, &list.lamp, &list.playerlamp, &list.rivallamp, &list.trophy, &list.label] {
-            name_all(&mut named, nested);
-        }
-        named.extend(list.graph.iter().map(|graph| graph.id.clone()));
-    }
-    let from_sets: Vec<String> = def.imageset.iter().filter(|set| named.contains(&set.id)).flat_map(|set| set.images.iter().cloned()).collect();
-    named.extend(from_sets);
-
-    let mut sources = BTreeSet::new();
-    let mut keep = |id: &str, src: &str| {
-        if named.contains(id) {
-            sources.insert(src.to_owned());
-        }
-    };
-    def.image.iter().for_each(|image| keep(&image.id, &image.src));
-    def.value.iter().for_each(|value| keep(&value.id, &value.src));
-    def.floatvalue.iter().for_each(|value| keep(&value.id, &value.src));
-    def.slider.iter().for_each(|slider| keep(&slider.id, &slider.src));
-    def.graph.iter().for_each(|graph| keep(&graph.id, &graph.src));
-    def.hidden_cover.iter().for_each(|cover| keep(&cover.id, &cover.src));
-    def.lift_cover.iter().for_each(|cover| keep(&cover.id, &cover.src));
-    def.pmchara.iter().for_each(|chara| keep(&chara.id, &chara.src));
-    sources
-}
-
 /// A warning with everything it quotes taken out, so warnings that differ only in the object they
 /// name count as one kind.
 fn shape_of(warning: &str) -> String {
@@ -751,12 +679,12 @@ fn capture(pack: &Path, overlay: &Path, capture_dir: Option<&Path>, shot: &Shot)
     let user = SkinUserConfig::default();
     let options = SkinLoadOptions { rng_seed: Some(TEST_SEED), write_overlay: Some(overlay), ..SkinLoadOptions::new(pack, &user, Mode::BEAT_7K) };
     let loading = Instant::now();
-    let mut skin = load_skin_with_host(&entry, options, &host).unwrap_or_else(|error| panic!("{} should load: {error}", shot.entry));
+    let skin = load_skin_with_host(&entry, options, &host).unwrap_or_else(|error| panic!("{} should load: {error}", shot.entry));
     let loaded_in = loading.elapsed();
 
     let declared_sources = skin.sources.len();
     let referenced = referenced_sources(&skin);
-    skin.sources.retain(|id, _| referenced.contains(id));
+    let drawn_sources = skin.sources.keys().filter(|id| referenced.contains(*id)).count();
     let (gated, timed) = function_counts(&skin);
     println!(
         "{}: type {} {:?} {}x{} | input {} scene {} fadeout {} | loaded in {} ms | destinations {} (function gate {gated}, function timer {timed}) | functions {} | sources {} of {declared_sources} referenced | fonts {} | load warnings {}",
@@ -771,7 +699,7 @@ fn capture(pack: &Path, overlay: &Path, capture_dir: Option<&Path>, shot: &Shot)
         loaded_in.as_millis(),
         skin.destinations.len(),
         skin.runtime().map_or(0, rbms_skin::lua::SkinLua::function_count),
-        skin.sources.len(),
+        drawn_sources,
         skin.fonts.len(),
         skin.warnings.len(),
     );
@@ -795,11 +723,13 @@ fn capture(pack: &Path, overlay: &Path, capture_dir: Option<&Path>, shot: &Shot)
         .map(|(kind, count)| format!("{kind:?} {count}"))
         .collect();
     println!(
-        "  built in {} ms: {} objects of {} destinations ({}) | images read {} ({} px, {} bytes on disk, largest {}x{}, decoded in {} ms) | not decoded {} | fonts read {} ({} bytes), families {}",
+        "  built in {} ms: {} objects of {} destinations ({}) | textures {} ({} RGBA bytes) | images read {} ({} px, {} bytes on disk, largest {}x{}, decoded in {} ms) | not decoded {} | fonts read {} ({} bytes), families {}",
         built_in.as_millis(),
         screen.object_count(),
         skin.destinations.len(),
         kinds.join(", "),
+        screen.texture_stats().count,
+        screen.texture_stats().bytes,
         assets.images,
         assets.pixels,
         assets.image_bytes,

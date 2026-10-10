@@ -13,18 +13,55 @@
 //! binding ends, and the frame is drawn from what was prepared.
 //!
 //! [`SkinScreens`] is the other half: one compiled screen per screen type, rebuilt when the document
-//! behind it is read again. A rebuild registers a fresh set of textures, so the previous screen is
-//! always released first.
+//! behind it is read again, and the textures those screens draw from.
 //!
 //! A Lua skin is read on the first frame of the screen it draws rather than when it is chosen,
 //! because it builds its screen out of that screen's state: the frame hands the state it is drawn
 //! from to the library, which runs the skin against it, and the next frame takes the result in. A
 //! skin that cannot be read says why once and leaves the screen to its built-in layout.
 //!
+//! # Textures
+//!
+//! A screen takes the image sources its assembled destinations draw from and no others
+//! ([`referenced_source_files`]): a published skin declares a sheet for every customisation it
+//! offers, and decoding the ones this load never shows costs gigabytes. Those files are decoded on
+//! the worker pool, never on the frame loop.
+//!
+//! The reference reads a skin's images where it reads the skin, and the screen stands still until
+//! it has. Here the frame loop keeps running, so two rules stand in for that:
+//!
+//! - **Nothing of a document is drawn before its files are in.** The screen is compiled on the
+//!   frame the last of its files has been read, so an object whose source is still being decoded is
+//!   not drawn on that frame or any before it; until then the document draws nothing at all and its
+//!   screen's built-in layout stands in.
+//! - **A scene does not begin before its document can be drawn.** While the document of the screen
+//!   being drawn is on its way -- waiting to be read, or read and having its files decoded -- the
+//!   scene clock stands still where it was when the wait began, which is at the scene's first
+//!   moment for a screen that was just entered ([`AppShared::skin_is_loading`]). The clock moves
+//!   again on the frame the document is compiled, so no part of a timer's animation plays out
+//!   before there is a texture to show it with. A wait longer than [`SCENE_HOLD_LIMIT`] is given up
+//!   on and the scene runs without its document for as long as that takes; a screen that is nothing
+//!   but its document asks whether that has happened ([`AppShared::skin_wait_is_spent`]) and moves
+//!   on.
+//!
+//! Textures are shared by file and counted ([`SkinTexturePool`]). A screen that is left --
+//! [`Transition::To`](crate::stage::Transition) or a return from it -- gives its textures up at the
+//! end of the first frame of the screen that follows, and they are freed once that screen has said
+//! which files it shares with it, so a file two screens in a row draw from is uploaded once. A
+//! screen with another opened over it keeps its textures while it is parked and nothing but opened
+//! screens stand over it -- the settings and back. The first scene begun over it by
+//! [`Transition::To`](crate::stage::Transition) ends that: a chart picked in the browser leaves the
+//! browser parked under the decide scene, and the run that follows is a screen change like any
+//! other, as it is in the reference, where every change of screen disposes of the skin it leaves.
+//! So the browser's textures are gone while the chart is played and are read again on the way back.
+//! A file is decoded again only when it was written since it was uploaded, which a worker finds out
+//! with one stat.
+//!
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::TryRecvError;
+use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use rbms_config::SkinCustomisation;
@@ -32,6 +69,7 @@ use rbms_render::font::with_text_context;
 use rbms_render::result::{ResultExtras, ResultView};
 use rbms_render::skin_render::PreparedFrame;
 use rbms_render::skin_render::state::{DecideChart, DecideViewState, KeyConfigViewState, PlayViewState, ResultViewState, SelectViewState};
+use rbms_render::skin_render::textures::{SkinTexturePool, TextureStats, referenced_source_files};
 use rbms_render::{
     BgaFrame, Color, FrameData, PlayTimers, Renderer, ResultTimers, SelectTimers, SkinAssets, SkinFrame, SkinImage, SkinScreen, SongBars, TextContext,
     TextureId, with_render_ctx,
@@ -41,7 +79,7 @@ use rbms_skin::loader::{LoadedSkin, SKIN_TYPE_COURSE_RESULT, SKIN_TYPE_DECIDE, S
 use rbms_skin::property::{SkinHost, StaticScreen};
 use rbms_skin::timer::TimerState;
 
-use crate::assets::{DecodePool, SkinAsset, SkinAssetJob, SkinAssetKind, spawn_skin_asset_decode};
+use crate::assets::{DecodePool, FileStamp, SkinAsset, SkinAssetJob, SkinAssetKind, SkinAssetRead, SkinAssetRequest, spawn_skin_asset_decode};
 use crate::notify::{Level, notify};
 use crate::skin_host::ScreenHost;
 use crate::skin_host::chart::{ChartMeta, ChartState};
@@ -54,11 +92,12 @@ use crate::{AppShared, SelectScene};
 
 /// Hands one document's already-decoded files to [`SkinScreen::build`].
 ///
-/// Nothing here touches the disk. A published skin names dozens of source images and a font or two,
-/// and decoding them is seconds of work; that happens on the worker pool before the screen is built
-/// at all ([`PendingScreen`]), so the frame the document first draws on costs a texture upload and
-/// nothing else. Held only for the length of one build: everything it produces is owned by the
-/// screen afterwards.
+/// Nothing here touches the disk. A published skin draws from dozens of source images and a font or
+/// two, and decoding them is seconds of work; that happens on the worker pool before the screen is
+/// built at all ([`PendingScreen`]), so the frame the document first draws on costs a texture upload
+/// and nothing else. An image that is not here is one the screen draws from the texture already
+/// uploaded for its file, or goes without. Held only for the length of one build: everything it
+/// produces is owned by the screen or the texture pool afterwards.
 pub(crate) struct PlayerSkinAssets {
     prepared: BTreeMap<SkinAssetJob, SkinAsset>,
 }
@@ -135,6 +174,16 @@ impl<'a> FrameInputs<'a> {
     }
 }
 
+/// What the decide screen brings to one frame of its document.
+pub(crate) struct DecideDraw<'a> {
+    /// The chart that was picked.
+    pub(crate) chart: &'a ChartMeta<'a>,
+    /// How much of the chart's files are in, from nothing (0) to everything (1).
+    pub(crate) progress: f32,
+    /// What no property id carries: the chart's stage image and the series its graphs plot.
+    pub(crate) data: FrameData<'a>,
+}
+
 /// The version the skin's version text shows.
 const SKIN_VERSION: &str = concat!("R-BMS ", env!("CARGO_PKG_VERSION"));
 
@@ -188,28 +237,54 @@ fn select_list(view: &SelectScene, options_open: bool) -> SongBars<'_> {
     SongBars { rows: &view.rows, sel: view.sel, options_open }
 }
 
+/// How long a scene is held still for a document that is on its way before it is given up on and
+/// runs without it. Far longer than the largest screen of a published skin takes to decode, so it is
+/// only ever reached by a read that has gone wrong.
+const SCENE_HOLD_LIMIT: Duration = Duration::from_secs(10);
+
+/// How far past its limit a test makes a wait look.
+#[cfg(test)]
+const WAIT_OVERRUN: Duration = Duration::from_secs(1);
+
 /// One document whose files are still being read off the frame loop.
 ///
 /// The screen it belongs to keeps drawing its built-in layout until every file has arrived, which
-/// is the whole point: a published skin is dozens of source images, some of them two thousand
+/// is the whole point: a published skin is dozens of source images, some of them several thousand
 /// pixels square, and decoding those between two frames is a visible stall at the exact moment a
 /// chart starts.
 struct PendingScreen {
     build: u64,
-    pool: DecodePool<SkinAssetJob, SkinAsset>,
+    pool: DecodePool<SkinAssetJob, SkinAssetRead>,
     ready: BTreeMap<SkinAssetJob, SkinAsset>,
+    /// The stamp each image file had when a worker looked at it.
+    stamps: BTreeMap<PathBuf, FileStamp>,
+    /// The files this document draws from that were uploaded already when it was asked for, each
+    /// held so that letting go of the screen that had it does not free it before this one is built.
+    pins: Vec<PathBuf>,
     cancel: Arc<AtomicBool>,
 }
 
 impl PendingScreen {
-    /// Starts reading every file `document` names.
-    fn start(build: u64, document: &LoadedSkin) -> PendingScreen {
-        let images = document.sources.values().map(|path| (SkinAssetKind::Image, path.clone()));
-        let fonts = document.fonts.values().map(|path| (SkinAssetKind::Font, path.clone()));
-        let jobs: Vec<SkinAssetJob> = images.chain(fonts).collect();
+    /// Starts reading every file `document` draws from: the fonts it names, and the image sources
+    /// its objects reference -- not the ones it only declares.
+    ///
+    /// A file that is uploaded already is held where it is, and a worker is only asked whether it
+    /// has been written since ([`SkinAsset::Unchanged`]).
+    fn start(build: u64, document: &LoadedSkin, textures: &mut SkinTexturePool, stamps: &BTreeMap<PathBuf, FileStamp>) -> PendingScreen {
+        let mut pins = Vec::new();
+        let mut requests: Vec<SkinAssetRequest> = Vec::new();
+        for path in referenced_source_files(document) {
+            let uploaded = textures.hold(path);
+            if uploaded {
+                pins.push(path.to_path_buf());
+            }
+            let known = if uploaded || textures.is_refused(path) { stamps.get(path).copied() } else { None };
+            requests.push(((SkinAssetKind::Image, path.to_path_buf()), known));
+        }
+        requests.extend(document.fonts.values().map(|path| ((SkinAssetKind::Font, path.clone()), None)));
         let cancel = Arc::new(AtomicBool::new(false));
-        let pool = spawn_skin_asset_decode(jobs, Arc::clone(&cancel));
-        PendingScreen { build, pool, ready: BTreeMap::new(), cancel }
+        let pool = spawn_skin_asset_decode(requests, Arc::clone(&cancel));
+        PendingScreen { build, pool, ready: BTreeMap::new(), stamps: BTreeMap::new(), pins, cancel }
     }
 
     /// Collects whatever has arrived, answering whether every job is now accounted for.
@@ -217,30 +292,86 @@ impl PendingScreen {
     /// The counter is read before the channel is drained: a worker sends its result and only then
     /// counts the job, so a count that has reached the total means everything sent is already
     /// waiting to be taken.
+    ///
+    /// A pool whose workers have all gone is accounted for whatever it counted. A worker that died
+    /// on a file never counts it or the files queued behind it, and nothing more is coming: the
+    /// document is compiled without them, each with a line in its warnings, rather than waited for
+    /// for ever.
     fn poll(&mut self) -> bool {
         let (received, progress, total) = &self.pool;
-        let done = progress.load(Ordering::Relaxed) >= *total;
-        while let Ok((job, asset)) = received.try_recv() {
-            self.ready.insert(job, asset);
+        let counted = progress.load(Ordering::Relaxed) >= *total;
+        loop {
+            match received.try_recv() {
+                Ok((job, read)) => {
+                    if let Some(stamp) = read.stamp {
+                        self.stamps.insert(job.1.clone(), stamp);
+                    }
+                    if !matches!(read.asset, SkinAsset::Unchanged) {
+                        self.ready.insert(job, read.asset);
+                    }
+                }
+                Err(TryRecvError::Empty) => return counted,
+                Err(TryRecvError::Disconnected) => return true,
+            }
         }
-        done
     }
 
-    /// Stops the workers, for a document nobody is waiting for any more.
-    fn abandon(&self) {
+    /// Gives back the hold on every file that was pinned when the document was asked for.
+    fn unpin(&mut self, textures: &mut SkinTexturePool) {
+        for path in self.pins.drain(..) {
+            textures.release(&path);
+        }
+    }
+
+    /// Stops the workers and lets go of what was pinned, for a document nobody is waiting for any
+    /// more.
+    fn abandon(mut self, textures: &mut SkinTexturePool) {
         self.cancel.store(true, Ordering::Relaxed);
+        self.unpin(textures);
     }
 }
 
-/// The documents that have been compiled into screens, one per screen type.
+/// A scene standing still while the document it is drawn with is on its way.
+#[derive(Debug, Clone, Copy)]
+struct SceneHold {
+    /// The screen whose document is being waited for.
+    screen: i32,
+    /// What the scene clock read when the wait began, which is what it reads until the wait ends.
+    at: Duration,
+    /// When the wait began.
+    since: Instant,
+}
+
+/// The documents that have been compiled into screens, one per screen type, and the textures they
+/// draw from.
 ///
-/// A screen holds registered textures, so this outlives the stage that draws with it: the browser's
-/// document stays compiled while a chart is played and is drawn again on the way back, rather than
-/// being decoded twice.
+/// A screen is compiled for as long as it is being drawn or is parked under nothing but screens
+/// opened over it. The frame after its scene is left, or after a scene is begun over it while it is
+/// parked, it is let go of, and its textures are freed once the screen that follows has taken hold
+/// of the files the two share (the module's own notes say how).
 #[derive(Default)]
 pub(crate) struct SkinScreens {
     built: BTreeMap<i32, BuiltScreen>,
     pending: BTreeMap<i32, PendingScreen>,
+    /// The texture of every image file a compiled screen draws from, one per file.
+    textures: SkinTexturePool,
+    /// The stamp of the version of each file that is uploaded, which is what a worker compares the
+    /// file against before decoding it again.
+    stamps: BTreeMap<PathBuf, FileStamp>,
+    /// The screens asked for since a frame last ended.
+    prepared: BTreeSet<i32>,
+    /// The screens the frame before that asked for: what the scene being left was drawn with.
+    last_prepared: BTreeSet<i32>,
+    /// The screens parked under another that was opened over them, each for as long as the scene it
+    /// was parked with exists and no scene has been begun over it.
+    parked: Vec<(i32, Weak<()>)>,
+    /// Whether a scene began, was parked or was put back since the screens nobody draws any more
+    /// were last let go of.
+    scene_moved: bool,
+    /// The wait the running scene is standing still for.
+    hold: Option<SceneHold>,
+    /// Whether the running scene already waited its limit out, and is not held again.
+    hold_spent: bool,
 }
 
 impl SkinScreens {
@@ -254,25 +385,21 @@ impl SkinScreens {
     /// The first call for a read starts its files decoding on the worker pool and returns; later
     /// calls collect what has arrived, and the one that finds everything present compiles the
     /// screen. Until then [`SkinScreens::get`] answers `None` and the built-in layout draws, so no
-    /// frame ever waits on a file.
+    /// frame ever waits on a file and no object is drawn before the image it draws from is in.
     ///
-    /// The previous screen is released before the new one is built, because each build claims a
-    /// texture namespace of its own: skipping the release would leave the old set uploaded for the
-    /// rest of the session.
+    /// The screen compiled from an earlier read is let go of first, but its textures are not freed
+    /// until the new read has taken hold of the files it shares with it: a skin read again for a
+    /// new scene decodes nothing it already had uploaded.
     pub(crate) fn sync<R: Renderer>(&mut self, r: &mut R, text: &mut TextContext, screen: i32, skins: &SkinLibrary) {
         let wanted = skins.build_of(screen);
         let held = self.built.get(&screen).map(|entry| entry.build).or_else(|| self.pending.get(&screen).map(|entry| entry.build));
         if wanted != held {
-            if let Some(mut stale) = self.built.remove(&screen) {
-                stale.screen.release(r);
-            }
-            if let Some(stale) = self.pending.remove(&screen) {
-                stale.abandon();
-            }
+            self.let_go(r, screen);
             let (Some(build), Some(document)) = (wanted, skins.document(screen)) else {
                 return;
             };
-            self.pending.insert(screen, PendingScreen::start(build, document));
+            self.pending.insert(screen, PendingScreen::start(build, document, &mut self.textures, &self.stamps));
+            self.sweep(r);
         }
 
         let Some(pending) = self.pending.get_mut(&screen) else {
@@ -281,14 +408,18 @@ impl SkinScreens {
         if !pending.poll() {
             return;
         }
-        let Some(pending) = self.pending.remove(&screen) else {
+        let Some(mut pending) = self.pending.remove(&screen) else {
             return;
         };
         let Some(document) = skins.document(screen) else {
+            pending.abandon(&mut self.textures);
             return;
         };
-        let mut assets = PlayerSkinAssets::new(pending.ready);
-        let compiled = SkinScreen::build(r, text, document, &mut assets);
+        let mut assets = PlayerSkinAssets::new(std::mem::take(&mut pending.ready));
+        let compiled = SkinScreen::build_shared(r, text, document, &mut assets, &mut self.textures);
+        self.stamps.append(&mut pending.stamps);
+        pending.unpin(&mut self.textures);
+        self.sweep(r);
         if let Some(first) = compiled.warnings().first() {
             let rest = compiled.warnings().len() - 1;
             let more = if rest > 0 { format!(" (and {rest} more)") } else { String::new() };
@@ -302,6 +433,24 @@ impl SkinScreens {
         self.built.get(&screen).map(|entry| &entry.screen)
     }
 
+    /// Let go of one screen's compiled document and of whatever was still being read for it. The
+    /// textures it held stay uploaded until the next [`SkinScreens::sweep`].
+    fn let_go<R: Renderer>(&mut self, r: &mut R, screen: i32) {
+        if let Some(mut stale) = self.built.remove(&screen) {
+            stale.screen.release_shared(r, &mut self.textures);
+        }
+        if let Some(stale) = self.pending.remove(&screen) {
+            stale.abandon(&mut self.textures);
+        }
+    }
+
+    /// Free every texture no screen, and no document on its way to being one, holds any more.
+    fn sweep<R: Renderer>(&mut self, r: &mut R) {
+        self.textures.sweep(r);
+        let textures = &self.textures;
+        self.stamps.retain(|path, _| textures.contains(path) || textures.is_refused(path));
+    }
+
     /// Let go of every screen compiled from a document the library no longer holds a read of: the
     /// textures of the ones that were built, and the workers of the ones still being read.
     ///
@@ -310,13 +459,68 @@ impl SkinScreens {
     pub(crate) fn release_dropped<R: Renderer>(&mut self, r: &mut R, skins: &SkinLibrary) {
         let dropped: BTreeSet<i32> = self.built.keys().chain(self.pending.keys()).copied().filter(|screen| skins.build_of(*screen).is_none()).collect();
         for screen in dropped {
-            if let Some(mut stale) = self.built.remove(&screen) {
-                stale.screen.release(r);
-            }
-            if let Some(stale) = self.pending.remove(&screen) {
-                stale.abandon();
+            self.let_go(r, screen);
+        }
+    }
+
+    /// Note that a frame asked for one screen's document, which is what keeps it compiled when the
+    /// frame ends.
+    fn mark_prepared(&mut self, screen: i32) {
+        self.prepared.insert(screen);
+    }
+
+    /// Note that the running scene was left, parked or put back, so the frame that follows lets go
+    /// of whatever it no longer draws.
+    fn scene_moved(&mut self) {
+        self.scene_moved = true;
+        self.hold = None;
+        self.hold_spent = false;
+    }
+
+    /// Park the screens the running scene was drawn with for as long as `scene` exists.
+    fn park(&mut self, scene: &Arc<()>) {
+        let drawn: Vec<i32> = self.last_prepared.union(&self.prepared).copied().collect();
+        self.parked.extend(drawn.into_iter().map(|screen| (screen, Arc::downgrade(scene))));
+    }
+
+    /// Stop keeping every parked screen compiled: a scene was begun over them, which is a change of
+    /// screen and not a screen opened to be closed again. The frame that follows lets go of them
+    /// with whatever else it does not draw, and their scenes read them again when they are put back.
+    fn unpark(&mut self) {
+        self.parked.clear();
+    }
+
+    /// End a frame: once after a scene has moved, let go of every screen the frame did not ask for
+    /// and that is not parked under another; then free the textures nobody holds.
+    ///
+    /// The textures are left where they are while a screen the frame asked for is still waiting for
+    /// its Lua skin to be read, because that skin has not yet said which of them it draws from too.
+    pub(crate) fn finish_frame<R: Renderer>(&mut self, r: &mut R, skins: &SkinLibrary) {
+        let prepared = std::mem::take(&mut self.prepared);
+        if self.scene_moved {
+            self.scene_moved = false;
+            self.parked.retain(|(_, scene)| scene.strong_count() > 0);
+            let parked = &self.parked;
+            let left: BTreeSet<i32> = self
+                .built
+                .keys()
+                .chain(self.pending.keys())
+                .copied()
+                .filter(|screen| !prepared.contains(screen) && !parked.iter().any(|(kept, _)| kept == screen))
+                .collect();
+            for screen in left {
+                self.let_go(r, screen);
             }
         }
+        if !prepared.iter().any(|screen| skins.is_waiting(*screen)) {
+            self.sweep(r);
+        }
+        self.last_prepared = prepared;
+    }
+
+    /// How many textures the compiled screens have uploaded between them, and their RGBA bytes.
+    pub(crate) fn texture_stats(&self) -> TextureStats {
+        self.textures.stats()
     }
 
     /// Whether one screen's document is still having its files read.
@@ -362,58 +566,89 @@ pub(crate) struct SkinScene {
     select: SelectTimers,
     result: ResultTimers,
     elapsed: Duration,
+    /// What keeps the screens this scene was drawn with compiled while it is parked: they are held
+    /// for as long as this exists, so a parked scene that is dropped rather than put back lets go of
+    /// them all the same.
+    parked: Arc<()>,
 }
 
 impl AppShared {
     /// The clock every document is animated against, in microseconds since the scene began, shared
     /// by its timers and its scripts' `time()`. It is not the song clock: a run starting does not move it.
+    ///
+    /// It stands still while the document of the screen being drawn is on its way
+    /// ([`AppShared::skin_is_loading`]), so a scene's first moment is the first one its skin can be
+    /// drawn at.
     pub(crate) fn skin_now_us(&self) -> i64 {
-        self.scene_started.elapsed().as_micros() as i64
+        self.scene_elapsed().as_micros() as i64
+    }
+
+    /// How long the running scene has run, not counting any time it was held still for its document.
+    fn scene_elapsed(&self) -> Duration {
+        self.skin_screens.hold.map_or_else(|| self.scene_started.elapsed(), |hold| hold.at)
     }
 
     /// Start a scene: every timer off, every timer driver forgetting what it saw, and the scene
     /// clock back at zero (`TimerManager.setMainState`). Every Lua skin read for an earlier scene is
     /// read again the next time its screen is drawn, because it was built from that scene's state.
+    ///
+    /// The screens parked under the one being left stop being kept compiled. The reference disposes
+    /// of a screen's skin on every change of screen (`MainController.changeState`), and a screen
+    /// parked here is one the player has left for as long as a run and its result take: its
+    /// textures do not stay uploaded beside theirs. Its scene is still put back as it was parked,
+    /// and reads its document again then.
     pub(crate) fn begin_skin_scene(&mut self) {
         self.reset_skin_scene();
         self.skins.expire_scripted();
+        self.skin_screens.unpark();
     }
 
-    /// Put the timers and the scene clock where a scene starts.
+    /// Put the timers and the scene clock where a scene starts, and note that the scene moved: the
+    /// frame that follows lets go of the screens it no longer draws
+    /// ([`AppShared::finish_skin_frame`]).
     fn reset_skin_scene(&mut self) {
         self.skin_timers.clear();
         self.skin_play_timers = PlayTimers::new();
         self.skin_select_timers = SelectTimers::new();
         self.skin_result_timers = ResultTimers::new();
+        self.skin_screens.scene_moved();
         self.scene_started = Instant::now();
     }
 
     /// Take the running scene out to be parked, and begin a fresh one for the screen about to be
     /// opened over it.
     ///
-    /// The parked screen keeps the skin it was read with: it is drawn again, from the same Lua
-    /// state, when the screen opened over it is left.
+    /// The parked screen keeps the skin it was read with and the textures it was compiled with: it
+    /// is drawn again, from the same Lua state, when the screen opened over it is left -- unless a
+    /// scene is begun over it in between ([`AppShared::begin_skin_scene`]), which lets go of both.
     pub(crate) fn suspend_skin_scene(&mut self) -> SkinScene {
-        let elapsed = self.scene_started.elapsed();
+        let elapsed = self.scene_elapsed();
+        let parked = Arc::new(());
+        self.skin_screens.park(&parked);
         let scene = SkinScene {
             timers: std::mem::take(&mut self.skin_timers),
             play: self.skin_play_timers,
             select: self.skin_select_timers,
             result: self.skin_result_timers,
             elapsed,
+            parked,
         };
         self.reset_skin_scene();
         scene
     }
 
     /// Put a parked scene back. The clock picks up at the moment it was parked, because it stood
-    /// still for as long as the screen opened over it was up.
+    /// still for as long as the screen opened over it was up. Its screens stop being parked and are
+    /// kept by being drawn again -- or read and compiled again, when a scene begun over them let go
+    /// of them; the screen that was opened over them is let go of by the frame that follows.
     pub(crate) fn resume_skin_scene(&mut self, scene: SkinScene) {
-        let SkinScene { timers, play, select, result, elapsed } = scene;
+        let SkinScene { timers, play, select, result, elapsed, parked } = scene;
         self.skin_timers = timers;
         self.skin_play_timers = play;
         self.skin_select_timers = select;
         self.skin_result_timers = result;
+        self.skin_screens.scene_moved();
+        drop(parked);
         let now = Instant::now();
         self.scene_started = now.checked_sub(elapsed).unwrap_or(now);
     }
@@ -423,6 +658,14 @@ impl AppShared {
     #[cfg(test)]
     pub(crate) fn age_skin_scene(&mut self, by: Duration) {
         self.scene_started = self.scene_started.checked_sub(by).expect("the process has been up for longer than the age asked for");
+    }
+
+    /// Make the wait the running scene is held for look as though it has outlasted its limit, for
+    /// the tests of what a screen does once its document has been given up on.
+    #[cfg(test)]
+    pub(crate) fn outlast_skin_wait(&mut self) {
+        let hold = self.skin_screens.hold.as_mut().expect("the scene is held for its document");
+        hold.since = Instant::now().checked_sub(SCENE_HOLD_LIMIT + WAIT_OVERRUN).expect("the process has been up for longer than the limit");
     }
 
     /// Read and compile the document one screen is drawn with, so the gate below has something to
@@ -436,7 +679,18 @@ impl AppShared {
     /// ([`AppShared::with_skin_frame`]); what that frame read is taken in on the next call. A
     /// document that could not be read is reported once and not read again until the player moves a
     /// choice or asks for a reload, so the screen falls back to its built-in layout without stalling.
+    ///
+    /// Asking is also what keeps the screen compiled: one that a scene's first frame does not ask
+    /// for is let go of when that frame ends. And it is where the scene is held still for a
+    /// document that is on its way, and set going again on the frame the document is compiled.
     pub(crate) fn prepare_skin(&mut self, canvas: &mut Canvas<'_>, screen: i32) {
+        self.skin_screens.mark_prepared(screen);
+        self.read_and_compile_skin(canvas, screen);
+        self.hold_scene_while_loading(screen);
+    }
+
+    /// The reading and compiling half of [`AppShared::prepare_skin`].
+    fn read_and_compile_skin(&mut self, canvas: &mut Canvas<'_>, screen: i32) {
         if self.skins.pack_moved(&self.config) {
             self.rescan_skins();
         }
@@ -455,6 +709,74 @@ impl AppShared {
         let skins = &self.skins;
         let screens = &mut self.skin_screens;
         with_text_context(|text| screens.sync(canvas, text, screen, skins));
+    }
+
+    /// Whether one screen's document is on its way but cannot be drawn yet: a Lua skin waiting for
+    /// the screen's first frame to be read on, or a document that was read and whose images and
+    /// fonts are still being decoded.
+    ///
+    /// A screen that waits for its skin before it starts -- the reference waits for every skin --
+    /// asks this. A document that failed to read is not loading: it is not coming.
+    pub(crate) fn skin_is_loading(&self, screen: i32) -> bool {
+        self.skin_document_is_enabled(screen)
+            && self.skin_screens.get(screen).is_none()
+            && (self.skin_screens.is_pending(screen) || self.skins.is_waiting(screen))
+    }
+
+    /// Whether the running scene waited its limit out for `screen`'s document, which is still not
+    /// drawable: the scene runs without it, and a screen that has nothing else to draw moves on.
+    pub(crate) fn skin_wait_is_spent(&self, screen: i32) -> bool {
+        self.skin_screens.hold_spent && self.skin_is_loading(screen)
+    }
+
+    /// Hold the scene clock still while `screen`'s document is on its way, and set it going again
+    /// once the document is compiled, is known not to be coming, or has been waited for longer
+    /// than [`SCENE_HOLD_LIMIT`].
+    ///
+    /// The clock picks up where it stood, so a timer switched on before the wait began is as old
+    /// afterwards as it was before, and a scene that was only just entered begins at its first
+    /// moment with its document on screen.
+    fn hold_scene_while_loading(&mut self, screen: i32) {
+        let loading = self.skin_is_loading(screen);
+        match self.skin_screens.hold {
+            None if loading && !self.skin_screens.hold_spent => {
+                self.skin_screens.hold = Some(SceneHold { screen, at: self.scene_started.elapsed(), since: Instant::now() });
+            }
+            Some(hold) if hold.screen == screen && (!loading || hold.since.elapsed() > SCENE_HOLD_LIMIT) => {
+                self.skin_screens.hold_spent = loading;
+                self.release_scene_hold();
+            }
+            _ => {}
+        }
+    }
+
+    /// Set a held scene going again from where it stood.
+    fn release_scene_hold(&mut self) {
+        if let Some(hold) = self.skin_screens.hold.take() {
+            let now = Instant::now();
+            self.scene_started = now.checked_sub(hold.at).unwrap_or(now);
+        }
+    }
+
+    /// End a frame of whichever screen is up, after it has drawn.
+    ///
+    /// The first frame after a scene was left, parked or put back lets go of every compiled screen
+    /// it did not ask for and that is not parked under another, and the textures nobody holds any
+    /// more are freed -- which is how a screen's textures leave the GPU when the player leaves the
+    /// screen, without the screen that follows decoding again what the two share. A scene held for
+    /// a screen the frame did not ask for is set going again, so a clock is never left standing for
+    /// a document nobody is waiting on.
+    pub(crate) fn finish_skin_frame(&mut self, canvas: &mut Canvas<'_>) {
+        if self.skin_screens.hold.is_some_and(|hold| !self.skin_screens.prepared.contains(&hold.screen)) {
+            self.release_scene_hold();
+        }
+        self.skin_screens.finish_frame(canvas, &self.skins);
+    }
+
+    /// The debug panel's line about skin textures: how many are uploaded and what they come to.
+    pub(crate) fn debug_skin_texture_line(&self) -> String {
+        let stats = self.skin_screens.texture_stats();
+        format!("SKIN TEX {}  {:.1} MB", stats.count, stats.mebibytes())
     }
 
     /// Whether a document is compiled for one screen, which is what decides whether the built-in
@@ -620,21 +942,20 @@ impl AppShared {
         self.with_skin_frame(SKIN_TYPE_RESULT, &state, inputs, |document| document.draw_native(canvas)).is_some()
     }
 
-    /// Draw the loading screen's document, which stands in for the reference's decide screen.
-    pub(crate) fn draw_decide_skin(&self, canvas: &mut Canvas<'_>, progress: f32, done: bool, title: &str, chart: DecideChart<'_>) -> bool {
+    /// Draw the decide screen's document.
+    ///
+    /// The chart cluster answers for the chart and the loading cluster for how much of it is in. The
+    /// decide screen is not the player screen, so neither loading option is on, as on the reference's
+    /// decide screen. The state the screen was drawn from before the clusters existed still answers
+    /// the ids no cluster knows.
+    pub(crate) fn draw_decide_skin(&self, canvas: &mut Canvas<'_>, scene: &DecideDraw<'_>) -> bool {
         let offsets = self.skin_offsets(SKIN_TYPE_DECIDE);
-        let state = DecideViewState { progress, done, title, chart, now_us: self.skin_now_us(), offsets: Some(&offsets) };
-        let meta = ChartMeta {
-            title,
-            subtitle: chart.subtitle,
-            genre: chart.genre,
-            artist: chart.artist,
-            level: chart.level,
-            difficulty: chart.difficulty,
-            ..ChartMeta::default()
-        };
-        let loading = LoadingState { screen: if done { LoadingScreen::Started } else { LoadingScreen::Preload }, progress };
-        let inputs = FrameInputs { chart: ChartState::Chart(&meta), loading, ..FrameInputs::new(&offsets, FrameData::default(), canvas.native().size()) };
+        let chart = scene.chart;
+        let older = DecideChart { subtitle: chart.subtitle, artist: chart.artist, genre: chart.genre, level: chart.level, difficulty: chart.difficulty };
+        let state =
+            DecideViewState { progress: scene.progress, done: false, title: chart.title, chart: older, now_us: self.skin_now_us(), offsets: Some(&offsets) };
+        let loading = LoadingState { screen: LoadingScreen::Elsewhere, progress: scene.progress };
+        let inputs = FrameInputs { chart: ChartState::Chart(chart), loading, ..FrameInputs::new(&offsets, scene.data, canvas.native().size()) };
         self.with_skin_frame(SKIN_TYPE_DECIDE, &state, inputs, |document| document.draw_native(canvas)).is_some()
     }
 
@@ -649,3 +970,5 @@ impl AppShared {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+pub(crate) mod texture_tests;

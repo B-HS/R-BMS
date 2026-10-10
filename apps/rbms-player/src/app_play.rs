@@ -2,6 +2,7 @@
 //! clock and the timing instrumentation. The PLAY screen itself lives in `stage::play`.
 #![allow(clippy::wildcard_imports)]
 use crate::assets::{bga_jobs, spawn_bga_decode};
+use crate::skin_host::overview::ChartOverview;
 use crate::stage::loading::BgaLoad;
 use crate::stage::{KeysoundLoad, LoadingState, PlayState, Stage, StageId, Transition};
 use crate::*;
@@ -184,6 +185,9 @@ pub(crate) struct LoadedChart {
     pub(crate) chart: PendingChart,
     pub(crate) bga: Option<BgaLoad>,
     pub(crate) keysounds: Option<KeysoundLoad>,
+    /// What the chart says about itself, read before any lane option moved a note, for the screen
+    /// that shows the chart while its files decode.
+    pub(crate) overview: ChartOverview,
 }
 
 /// Song position from a raw audio-clock reading: rebased on the play anchor, then clamped against
@@ -242,11 +246,11 @@ pub(crate) fn audio_reopen_deadline(pending: bool, armed: Option<Instant>, now: 
 
 /// Screens that hold the loaded chart's keysound bank in the shared stream.
 ///
-/// LOADING is where the bank is filled, PLAY sounds from it, and RESULT still holds it — the bank
-/// is only handed back by [`AppShared::release_play_audio`], which runs when the run is left, not
-/// when the result screen opens.
+/// DECIDE and LOADING are where the bank is filled, PLAY sounds from it, and RESULT still holds it —
+/// the bank is only handed back by [`AppShared::release_play_audio`], which runs when the run is
+/// left, not when the result screen opens.
 pub(crate) fn stage_owns_chart_audio(stage: StageId) -> bool {
-    matches!(stage, StageId::Play | StageId::Loading | StageId::Result)
+    matches!(stage, StageId::Decide | StageId::Play | StageId::Loading | StageId::Result)
 }
 
 /// Whether a chart owns the shared stream right now, in which case a reopen has to wait. Closing
@@ -334,6 +338,7 @@ impl AppShared {
                 seed,
             }));
         }
+        let mut overview = ChartOverview::of_model(&model);
         rbms_chart::shuffle::apply(&mut model, random, seed);
         if let Some(chart) = &decoded.bmson {
             model.meta.total = chart.total_for_notes(&mode, rbms_chart::count_playable_notes(&model));
@@ -341,6 +346,7 @@ impl AppShared {
         if model.meta.total <= 0.0 {
             model.meta.total = default_total_for_mode(&mode, rbms_chart::count_playable_notes(&model));
         }
+        overview.total = model.meta.total;
         let cancel = Arc::new(AtomicBool::new(false));
         self.audio_dead_at.set(None);
         if self.config.play.total_override > 0.0 {
@@ -427,7 +433,7 @@ impl AppShared {
         };
         let mut session = PlaySession::new(model, options);
         session.set_judge_setup(judge_setup);
-        Some(LoadedChart { chart: PendingChart { session, lntype, ln_mode_key }, bga, keysounds })
+        Some(LoadedChart { chart: PendingChart { session, lntype, ln_mode_key }, bga, keysounds, overview })
     }
 
     /// Enter a chart that has just been parsed: keep the LOADING screen up while its files decode,
@@ -891,6 +897,17 @@ pub(crate) fn pending_chart_for_tests() -> PendingChart {
     PendingChart { session: PlaySession::new(model, SessionOptions::default()), lntype: 0, ln_mode_key: SCORE_LN_MODE_FROM_CHART.to_string() }
 }
 
+/// The chart in `bytes`, parsed the way [`AppShared::load`] parses one and with nothing left to
+/// decode, for the screens a test has to hand a parsed chart without opening an output stream.
+/// `name` is the file name the chart's mode is read from.
+#[cfg(test)]
+pub(crate) fn loaded_chart_for_tests(bytes: &[u8], name: &str) -> LoadedChart {
+    let decoded = decode_chart(bytes, name).expect("the fixture is a chart");
+    let overview = ChartOverview::of_model(&decoded.model);
+    let session = PlaySession::new(decoded.model, SessionOptions::default());
+    LoadedChart { chart: PendingChart { session, lntype: 0, ln_mode_key: SCORE_LN_MODE_FROM_CHART.to_string() }, bga: None, keysounds: None, overview }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1257,8 +1274,15 @@ mod tests {
 
     #[test]
     fn reopening_the_stream_waits_while_a_chart_owns_it() {
-        for (stage, blocked) in [(StageId::Play, true), (StageId::Loading, true), (StageId::Result, true), (StageId::Select, false), (StageId::Settings, false)]
-        {
+        let stages = [
+            (StageId::Decide, true),
+            (StageId::Play, true),
+            (StageId::Loading, true),
+            (StageId::Result, true),
+            (StageId::Select, false),
+            (StageId::Settings, false),
+        ];
+        for (stage, blocked) in stages {
             assert_eq!(audio_reopen_blocked(stage, false), blocked, "stage {stage:?}");
         }
         assert!(audio_reopen_blocked(StageId::Select, true), "keysounds are still decoding");

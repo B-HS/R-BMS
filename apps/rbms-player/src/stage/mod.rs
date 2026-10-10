@@ -1,7 +1,7 @@
 //! The stages the app can be in and the state each one owns.
 //!
-//! A stage is one screen of the player: song select, the settings screens, loading, play and
-//! result. [`Stage`] is what [`crate::App`] dispatches on; everything that outlives a stage change
+//! A stage is one screen of the player: song select, the settings screens, the decide scene,
+//! loading, play and result. [`Stage`] is what [`crate::App`] dispatches on; everything that outlives a stage change
 //! lives in [`crate::AppShared`] instead. Each screen implements [`StageHandler`], so the frame
 //! loop and the window-event handler are a dispatch each rather than one long match per concern.
 
@@ -17,6 +17,7 @@ pub(crate) mod canvas;
 #[cfg(test)]
 mod capture;
 pub(crate) mod course_result;
+pub(crate) mod decide;
 pub(crate) mod folders;
 pub(crate) mod keyconfig;
 pub(crate) mod loading;
@@ -35,6 +36,7 @@ mod render_tests_select;
 #[cfg(test)]
 mod render_tests_shell;
 pub(crate) mod result;
+pub(crate) mod scene_life;
 pub(crate) mod select;
 pub(crate) mod settings;
 pub(crate) mod tables;
@@ -43,6 +45,7 @@ pub(crate) use canvas::Canvas;
 #[cfg(test)]
 pub(crate) use canvas::HeadlessCanvas;
 pub(crate) use course_result::CourseResultState;
+pub(crate) use decide::DecideState;
 pub(crate) use folders::FoldersState;
 pub(crate) use keyconfig::KeyConfigState;
 pub(crate) use loading::{KeysoundLoad, LoadingState};
@@ -55,15 +58,16 @@ pub(crate) use tables::TablesState;
 
 /// Which screen the app is currently running, together with the state that screen owns.
 ///
-/// `Play` and `Select` are boxed: the session with its decoded BGA images, and the browser with its
-/// cached scene, would otherwise set the size of every other variant and make each stage change a
-/// large memcpy.
+/// `Play`, `Select` and `Decide` are boxed: the session with its decoded BGA images, the browser
+/// with its cached scene, and the decide scene with everything it shows of its chart would otherwise
+/// set the size of every other variant and make each stage change a large memcpy.
 pub(crate) enum Stage {
     Select(Box<SelectState>),
     Settings(SettingsState),
     KeyConfig(KeyConfigState),
     Tables(TablesState),
     Folders(FoldersState),
+    Decide(Box<DecideState>),
     Loading(LoadingState),
     Play(Box<PlayState>),
     Result(ResultState),
@@ -81,6 +85,7 @@ pub(crate) enum StageId {
     KeyConfig,
     Tables,
     Folders,
+    Decide,
     Loading,
     Play,
     Result,
@@ -190,6 +195,7 @@ impl StageId {
             StageId::KeyConfig => "KeyConfig",
             StageId::Tables => "Tables",
             StageId::Folders => "Folders",
+            StageId::Decide => "Decide",
             StageId::Loading => "Loading",
             StageId::Play => "Play",
             StageId::Result => "Result",
@@ -200,12 +206,13 @@ impl StageId {
 
     /// Every screen, for the tests that have to cover all of them.
     #[cfg(test)]
-    pub(crate) const ALL: [StageId; 10] = [
+    pub(crate) const ALL: [StageId; 11] = [
         StageId::Select,
         StageId::Settings,
         StageId::KeyConfig,
         StageId::Tables,
         StageId::Folders,
+        StageId::Decide,
         StageId::Loading,
         StageId::Play,
         StageId::Result,
@@ -222,6 +229,7 @@ impl Stage {
             Stage::KeyConfig(_) => StageId::KeyConfig,
             Stage::Tables(_) => StageId::Tables,
             Stage::Folders(_) => StageId::Folders,
+            Stage::Decide(_) => StageId::Decide,
             Stage::Loading(_) => StageId::Loading,
             Stage::Play(_) => StageId::Play,
             Stage::Result(_) => StageId::Result,
@@ -238,6 +246,7 @@ impl Stage {
             Stage::KeyConfig(s) => s,
             Stage::Tables(s) => s,
             Stage::Folders(s) => s,
+            Stage::Decide(s) => s.as_mut(),
             Stage::Loading(s) => s,
             Stage::Play(s) => s.as_mut(),
             Stage::Result(s) => s,
@@ -253,6 +262,7 @@ impl Stage {
             Stage::KeyConfig(s) => s,
             Stage::Tables(s) => s,
             Stage::Folders(s) => s,
+            Stage::Decide(s) => s.as_ref(),
             Stage::Loading(s) => s,
             Stage::Play(s) => s.as_ref(),
             Stage::Result(s) => s,

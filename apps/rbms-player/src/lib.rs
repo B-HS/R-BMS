@@ -246,6 +246,10 @@ fn start_course(shared: &mut AppShared, entry: &CourseEntry) -> Transition {
 }
 
 /// Hand the stage the run is standing on to LOADING, or give up when the library cannot supply it.
+///
+/// The first stage is a chart picked in the browser like any other, so it goes through the decide
+/// scene when a skin draws one. The stages after it follow straight on from a result screen, as the
+/// reference's do (`MusicResult.render`).
 fn load_course_stage(shared: &mut AppShared) -> Transition {
     let Some(chart) = shared.course_run.as_ref().and_then(|run| run.current_chart()).cloned() else {
         return end_course(shared);
@@ -255,7 +259,8 @@ fn load_course_stage(shared: &mut AppShared) -> Transition {
         return end_course(shared);
     };
     shared.release_play_audio();
-    Transition::To(Stage::Loading(LoadingState::song(index)))
+    let opens_the_course = shared.course_run.as_ref().is_some_and(|run| run.index == 0);
+    Transition::To(if opens_the_course { shared.decided_song_stage(index) } else { Stage::Loading(LoadingState::song(index)) })
 }
 
 /// Put the player's own settings back and forget the run. Called on the course result screen's way
@@ -551,9 +556,10 @@ struct AppShared {
     /// Held here rather than on the settings screen because the document outlives the screen that
     /// chose it: every other screen draws with it.
     skins: SkinLibrary,
-    /// The documents that have been compiled into drawable screens, one per screen type. Held
-    /// alongside the library for the same reason: a compiled screen owns textures and must outlive
-    /// the stage that drew with it, so walking into a song and back does not decode a skin twice.
+    /// The documents that have been compiled into drawable screens, one per screen type, and the
+    /// textures they draw from. Held alongside the library because a screen's textures are let go
+    /// of by the frame after its stage is left rather than by the stage itself, which is what lets
+    /// the screen that follows take over the files the two share.
     skin_screens: SkinScreens,
     /// The timer table every document animates against, and the memories that decide when each
     /// screen's timers are switched.
@@ -989,6 +995,7 @@ impl App {
             let mut canvas = Canvas::Window(&mut gpu);
             let mut ctx = FrameCtx { shared: &mut self.shared, now, dt };
             self.stage.draw(&mut ctx, &mut canvas);
+            ctx.shared.finish_skin_frame(&mut canvas);
             App::draw_overlays(&self.stage, &mut ctx, &mut canvas);
         }
         gpu.render();
@@ -1022,6 +1029,7 @@ impl App {
         lines.extend(ctx.shared.debug_audio_lines(ctx.shared.anchor_us, stage.id() == StageId::Play));
         let (layouts, runs) = rbms_render::cache_stats();
         lines.push(format!("FONT {}/{}  RUNS {}/{}", layouts, rbms_render::LAYOUT_CACHE_LIMIT, runs, rbms_render::RUN_CACHE_LIMIT));
+        lines.push(ctx.shared.debug_skin_texture_line());
         let ph = lines.len() as f32 * DEBUG_LINE_H + 12.0;
         canvas.fill_rect(Rect::new(6.0, 6.0, DEBUG_PANEL_W, ph), Color { r: 0, g: 0, b: 0, a: 180 });
         for (i, l) in lines.iter().enumerate() {

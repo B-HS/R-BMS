@@ -5,6 +5,11 @@
 //! background images, and fetching a difficulty table — so that none of it happens on the frame
 //! loop with the window frozen. Each task says what step it is on and how far through it is, and
 //! each carries a cancel the Escape key sets, so leaving does not leave a worker behind.
+//!
+//! The screen is always the built-in one. A chart picked in the browser is shown by the decide
+//! scene while its files decode ([`crate::stage::decide`]) when a skin draws that scene, and comes
+//! here only for whatever is still outstanding when the scene ends; [`ChartAssets`] is the load
+//! the two screens hand to each other.
 #![allow(clippy::wildcard_imports)]
 
 use std::sync::Arc;
@@ -15,7 +20,6 @@ use crate::app_play::{LoadedChart, PendingChart};
 use crate::stage::{Canvas, FrameCtx, KeyInput, PlayState, Stage, StageHandler, Transition};
 use crate::tablesrc::load_and_match_md5s;
 use crate::*;
-use rbms_render::skin_render::state::DecideChart;
 
 /// Width and height of the progress bar under the heading.
 const BAR_W: f32 = 360.0;
@@ -87,11 +91,25 @@ pub(crate) struct ChartAssets {
     images: std::collections::HashMap<i32, crate::DecodedImage>,
     bga: Option<BgaLoad>,
     keysounds: Option<KeysoundLoad>,
+    /// Whether the decide cue has been heard for this chart already, by a decide scene that showed
+    /// the chart while this was decoding. It is heard once a chart, whichever screen plays it.
+    announced: bool,
 }
 
 impl ChartAssets {
+    /// The load of a chart that has just been parsed, with nothing of it in yet.
+    pub(crate) fn of(loaded: LoadedChart) -> ChartAssets {
+        ChartAssets { chart: loaded.chart, images: std::collections::HashMap::new(), bga: loaded.bga, keysounds: loaded.keysounds, announced: false }
+    }
+
+    /// Note that the decide cue has been played for this chart, so the screen that starts the run
+    /// does not play it again.
+    pub(crate) fn mark_announced(&mut self) {
+        self.announced = true;
+    }
+
     /// Take everything that has arrived since the last frame. `true` once nothing is outstanding.
-    fn poll(&mut self, shared: &mut AppShared) -> bool {
+    pub(crate) fn poll(&mut self, shared: &mut AppShared) -> bool {
         if let Some(load) = self.keysounds.take()
             && !ChartAssets::poll_keysounds(shared, &load)
         {
@@ -144,7 +162,7 @@ impl ChartAssets {
 
     /// How many of the chart's files have been dealt with, and how many it named. Both counters
     /// only ever rise, so the bar drawn from them cannot go backwards.
-    fn progress(&self) -> (usize, usize) {
+    pub(crate) fn progress(&self) -> (usize, usize) {
         let sounds = self.keysounds.as_ref().map(|load| (load.progress.load(Ordering::Relaxed).min(load.total), load.total)).unwrap_or_default();
         let images = self.bga.as_ref().map(|load| (load.progress.load(Ordering::Relaxed).min(load.total), load.total)).unwrap_or_default();
         (sounds.0 + images.0, sounds.1 + images.1)
@@ -164,7 +182,7 @@ impl ChartAssets {
 
     /// Stop both decodes. The workers check between files, so an abandoned chart stops promptly
     /// rather than decoding hundreds of samples nobody is going to hear.
-    fn stop(&self) {
+    pub(crate) fn stop(&self) {
         for cancel in [self.keysounds.as_ref().map(|load| &load.cancel), self.bga.as_ref().map(|load| &load.cancel)].into_iter().flatten() {
             cancel.store(true, Ordering::Relaxed);
         }
@@ -177,6 +195,24 @@ impl ChartAssets {
 
     fn take_images(&mut self) -> std::collections::HashMap<i32, crate::DecodedImage> {
         std::mem::take(&mut self.images)
+    }
+
+    /// The screen this chart goes to now that everything it named is in: the practice panel when
+    /// the browser asked for one, and otherwise the run, started here with the decide cue unless a
+    /// decide scene has already played it.
+    pub(crate) fn enter(mut self, shared: &mut AppShared) -> Stage {
+        if shared.has_practice_request() {
+            let mut images = self.take_images();
+            if let Some(stage) = shared.practice_stage_if_requested(&mut images) {
+                return stage;
+            }
+            self.images = images;
+        }
+        if !self.announced {
+            shared.play_system_sound(SystemSound::Decide);
+        }
+        shared.start_play();
+        Stage::Play(Box::new(self.into_play()))
     }
 }
 
@@ -223,8 +259,12 @@ impl LoadingState {
 
     /// Wait for the files a parsed chart named — its keysounds, its background images, or both.
     pub(crate) fn assets(loaded: LoadedChart) -> LoadingState {
-        let assets = ChartAssets { chart: loaded.chart, images: std::collections::HashMap::new(), bga: loaded.bga, keysounds: loaded.keysounds };
-        LoadingState { task: LoadingTask::Assets(Box::new(assets)), drawn: false }
+        LoadingState::waiting_on(Box::new(ChartAssets::of(loaded)))
+    }
+
+    /// Carry on waiting for a load another screen started, from wherever it has got to.
+    pub(crate) fn waiting_on(assets: Box<ChartAssets>) -> LoadingState {
+        LoadingState { task: LoadingTask::Assets(assets), drawn: false }
     }
 
     /// Rescan every library folder off-thread into the song database (then re-match tables),
@@ -262,6 +302,13 @@ impl LoadingState {
     /// Whether keysounds are still decoding, which is what holds an audio-settings reopen back.
     pub(crate) fn keysounds_pending(&self) -> bool {
         matches!(&self.task, LoadingTask::Assets(assets) if assets.keysounds.is_some())
+    }
+
+    /// Whether this screen plays the decide cue when the run it is waiting for starts, for the tests
+    /// that hold the cue to once a chart.
+    #[cfg(test)]
+    pub(crate) fn plays_the_decide_cue(&self) -> bool {
+        matches!(&self.task, LoadingTask::Assets(assets) if !assets.announced)
     }
 
     /// Apply a finished background scan: swap in the merged library/tables and return to the
@@ -388,35 +435,6 @@ impl LoadingState {
         }
     }
 
-    /// What the library already knows about the chart being loaded, for a document that shows more
-    /// than its title. Nothing while the screen waits for something that is not a chart.
-    fn chart<'a>(&self, shared: &'a AppShared) -> DecideChart<'a> {
-        let LoadingTask::Song(index) = &self.task else {
-            return DecideChart::default();
-        };
-        shared.library.songs().get(*index).map_or_else(DecideChart::default, |entry| DecideChart {
-            subtitle: &entry.subtitle,
-            artist: &entry.artist,
-            genre: &entry.genre,
-            level: entry.level.trim().parse().unwrap_or_default(),
-            difficulty: entry.difficulty,
-        })
-    }
-
-    /// How far the outstanding task has got, in the 0..=1 a document reads it as, and whether it is
-    /// over. A task with no total to count toward reports nothing rather than a made-up fraction.
-    fn skin_progress(&self, shared: &AppShared) -> (f32, bool) {
-        let (done, total) = match &self.task {
-            LoadingTask::Assets(assets) => assets.progress(),
-            LoadingTask::Scan { step: ScanStep::Matching { .. }, progress } => (progress.tables.load(Ordering::Relaxed), shared.config.library.tables.len()),
-            LoadingTask::Scan { .. } | LoadingTask::Table(_) | LoadingTask::Song(_) => (0, 0),
-        };
-        if total == 0 {
-            return (0.0, false);
-        }
-        (done as f32 / total as f32, done >= total)
-    }
-
     /// A filled bar with a count under it, for a task that knows how much there is to do.
     fn draw_determinate(canvas: &mut Canvas<'_>, x: f32, y: f32, done: usize, total: usize, unit: &str) {
         let th = rbms_render::theme();
@@ -451,19 +469,10 @@ impl StageHandler for LoadingState {
         if !ready {
             return Transition::Stay;
         }
-        let LoadingTask::Assets(mut assets) = std::mem::replace(&mut self.task, LoadingTask::Song(0)) else {
+        let LoadingTask::Assets(assets) = std::mem::replace(&mut self.task, LoadingTask::Song(0)) else {
             return Transition::Stay;
         };
-        if ctx.shared.has_practice_request() {
-            let mut images = assets.take_images();
-            if let Some(stage) = ctx.shared.practice_stage_if_requested(&mut images) {
-                return Transition::To(stage);
-            }
-            assets.images = images;
-        }
-        ctx.shared.play_system_sound(SystemSound::Decide);
-        ctx.shared.start_play();
-        Transition::To(Stage::Play(Box::new(assets.into_play())))
+        Transition::To(assets.enter(ctx.shared))
     }
 
     fn handle_key(&mut self, ctx: &mut FrameCtx<'_>, key: KeyInput<'_>) -> Transition {
@@ -476,14 +485,7 @@ impl StageHandler for LoadingState {
     fn draw(&mut self, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'_>) {
         let th = rbms_render::theme();
         canvas.clear_bga();
-        ctx.shared.prepare_skin(canvas, SKIN_TYPE_DECIDE);
         let (heading, sub) = self.heading(ctx.shared);
-        let (progress, done) = self.skin_progress(ctx.shared);
-        let chart = self.chart(ctx.shared);
-        if ctx.shared.draw_decide_skin(canvas, progress, done, &sub, chart) {
-            self.drawn = true;
-            return;
-        }
         canvas.clear(th.bg);
         let cx = CW as f32 * 0.5;
         let cy = CH as f32 * 0.5;
@@ -526,7 +528,7 @@ mod tests {
     }
 
     fn assets(sounds: Option<KeysoundLoad>, bga: Option<BgaLoad>) -> ChartAssets {
-        ChartAssets { chart: crate::app_play::pending_chart_for_tests(), images: std::collections::HashMap::new(), bga, keysounds: sounds }
+        ChartAssets { chart: crate::app_play::pending_chart_for_tests(), images: std::collections::HashMap::new(), bga, keysounds: sounds, announced: false }
     }
 
     fn decoded_images() -> std::collections::HashMap<i32, crate::DecodedImage> {
