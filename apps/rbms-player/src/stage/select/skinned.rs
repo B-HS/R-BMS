@@ -261,9 +261,6 @@ impl SelectState {
             self.panel_keys(shared, layout, panel, now_ms);
             return self.press_bars(shared, presses);
         }
-        if self.keys.pressed(layout, SelectKey::NextReplay, true) {
-            self.next_replay(shared);
-        }
         let wheel = self.take_wheel();
         let hold = self.list_hold(shared, layout, tapped);
         let moved = self.scroller.input(wheel, hold, now_ms);

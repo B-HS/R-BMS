@@ -343,8 +343,7 @@ fn key_five_plays_the_chart_by_itself_once() {
     assert!(!browser.app.shared.run_plays_itself(), "the run after it would play itself too");
 }
 
-/// Key six steps through replay slots the browser does not keep a choice of: the press is taken and
-/// nothing happens (`NEXT_REPLAY`).
+/// Key six starts nothing and moves the cursor nowhere (it carries no `NEXT_REPLAY`).
 #[test]
 fn key_six_is_taken_and_starts_nothing() {
     let mut browser = Browser::three_songs("keys-next-replay");

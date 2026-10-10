@@ -3,11 +3,11 @@
 //!
 //! This is the reference's own table (`MusicSelectKeyProperty`) and its own way of reading it
 //! (`MusicSelectKeyProperty.isPressed`, `BMSPlayerInputProcessor.resetKeyChangedTime`), used when a
-//! skin draws the browser. A key is known by its index ([`crate::keyconfig::key_index_of`]): keys
-//! one to seven are 0 to 6 and the two turntable directions are 7 and 8, on the keyboard and on a
-//! controller alike. Each index carries one role for the list and one for each option panel, and
-//! which of them a key press means is decided by whether START and SELECT are held
-//! ([`Panel::held`]).
+//! skin draws the browser, except that the keys carry no `NEXT_REPLAY`. A key is known by its
+//! index ([`crate::keyconfig::key_index_of`]): keys one to seven are 0 to 6 and the two turntable
+//! directions are 7 and 8, on the keyboard and on a controller alike. Each index carries one role
+//! for the list and one for each option panel, and which of them a key press means is decided by
+//! whether START and SELECT are held ([`Panel::held`]).
 //!
 //! The reference reads the keys once a frame rather than as they arrive. A role is asked for by
 //! name; the first key that carries it and is down answers, either with "it is down" or with "it
@@ -59,7 +59,6 @@ pub(super) enum SelectKey {
     NotesDisplayTimingUp,
     NotesDisplayTimingDown,
     NotesDisplayTimingAutoAdjust,
-    NextReplay,
 }
 
 /// The roles of each key index, in the order the reference lists them.
@@ -68,19 +67,25 @@ type KeyTable = [&'static [SelectKey]; KEY_INDEX_COUNT];
 /// The table of a layout with a turntable (`BEAT_7K`). The reference's two-sided table
 /// (`BEAT_14K`) is this one twice, which is what folding both sides onto the same nine indices
 /// comes to.
+///
+/// It is the reference's with one intended difference: `NEXT_REPLAY` is not on key six. The
+/// replay slot moves on only with the number key `4`, so key six only stars the chart. A click on
+/// one of a skin's replay buttons plays the replay in that button's slot and leaves the selected
+/// slot where it was.
 const BEAT_TABLE: KeyTable = [
     &[SelectKey::Play, SelectKey::FolderOpen, SelectKey::Option1Down, SelectKey::JudgeWindowUp, SelectKey::BgaDown],
     &[SelectKey::FolderClose, SelectKey::Option1Up, SelectKey::Constant, SelectKey::GaugeAutoShiftDown],
     &[SelectKey::Practice, SelectKey::FolderOpen, SelectKey::GaugeDown, SelectKey::JudgeArea, SelectKey::NotesDisplayTimingAutoAdjust],
     &[SelectKey::FolderClose, SelectKey::OptionDpDown, SelectKey::LegacyNote, SelectKey::DurationDown],
     &[SelectKey::FolderOpen, SelectKey::Auto, SelectKey::HsFixDown, SelectKey::MarkNote, SelectKey::NotesDisplayTimingDown],
-    &[SelectKey::NextReplay, SelectKey::Option2Up, SelectKey::BpmGuide, SelectKey::DurationUp],
+    &[SelectKey::Option2Up, SelectKey::BpmGuide, SelectKey::DurationUp],
     &[SelectKey::FolderOpen, SelectKey::Replay, SelectKey::Option2Down, SelectKey::NoMine, SelectKey::NotesDisplayTimingUp],
     &[SelectKey::Up, SelectKey::TargetUp],
     &[SelectKey::Down, SelectKey::TargetDown],
 ];
 
-/// The table of a layout of nine buttons and no turntable (`POPN_9K`).
+/// The table of a layout of nine buttons and no turntable (`POPN_9K`). Like [`BEAT_TABLE`] it has
+/// no `NEXT_REPLAY`, which the reference puts on button eight.
 const POPN_TABLE: KeyTable = [
     &[SelectKey::Auto, SelectKey::Option1Down, SelectKey::JudgeWindowUp, SelectKey::BgaDown],
     &[SelectKey::Option1Up, SelectKey::Constant, SelectKey::GaugeAutoShiftDown],
@@ -89,7 +94,7 @@ const POPN_TABLE: KeyTable = [
     &[SelectKey::Play, SelectKey::FolderOpen, SelectKey::HsFixDown, SelectKey::MarkNote, SelectKey::NotesDisplayTimingDown],
     &[SelectKey::Up, SelectKey::Option2Up, SelectKey::BpmGuide, SelectKey::DurationUp],
     &[SelectKey::Practice, SelectKey::FolderOpen, SelectKey::Option2Down, SelectKey::NoMine, SelectKey::NotesDisplayTimingUp],
-    &[SelectKey::TargetUp, SelectKey::NextReplay],
+    &[SelectKey::TargetUp],
     &[SelectKey::Replay, SelectKey::TargetDown],
 ];
 
@@ -302,9 +307,9 @@ mod tests {
     }
 
     /// Every role of the reference's tables, index by index, as `MusicSelectKeyProperty.java`
-    /// lists them.
+    /// lists them, with the one intended difference: `NEXT_REPLAY` is on no key.
     #[test]
-    fn the_tables_are_the_references() {
+    fn the_tables_are_the_references_without_next_replay() {
         use SelectKey::*;
         let beat: [&[SelectKey]; KEY_INDEX_COUNT] = [
             &[Play, FolderOpen, Option1Down, JudgeWindowUp, BgaDown],
@@ -312,15 +317,15 @@ mod tests {
             &[Practice, FolderOpen, GaugeDown, JudgeArea, NotesDisplayTimingAutoAdjust],
             &[FolderClose, OptionDpDown, LegacyNote, DurationDown],
             &[FolderOpen, Auto, HsFixDown, MarkNote, NotesDisplayTimingDown],
-            &[NextReplay, Option2Up, BpmGuide, DurationUp],
+            &[Option2Up, BpmGuide, DurationUp],
             &[FolderOpen, Replay, Option2Down, NoMine, NotesDisplayTimingUp],
             &[Up, TargetUp],
             &[Down, TargetDown],
         ];
         assert_eq!(*KeyLayout::Beat.table(), beat);
         let popn_list_roles: [&[SelectKey]; KEY_INDEX_COUNT] =
-            [&[Auto], &[], &[FolderClose], &[Down], &[Play, FolderOpen], &[Up], &[Practice, FolderOpen], &[NextReplay], &[Replay]];
-        let list_roles = [Play, Auto, Replay, Up, Down, FolderOpen, FolderClose, Practice, NextReplay];
+            [&[Auto], &[], &[FolderClose], &[Down], &[Play, FolderOpen], &[Up], &[Practice, FolderOpen], &[], &[Replay]];
+        let list_roles = [Play, Auto, Replay, Up, Down, FolderOpen, FolderClose, Practice];
         for (index, expected) in popn_list_roles.iter().enumerate() {
             let listed: Vec<SelectKey> = KeyLayout::Popn.table()[index].iter().copied().filter(|role| list_roles.contains(role)).collect();
             assert_eq!(listed.as_slice(), *expected, "the list roles of button {index}");

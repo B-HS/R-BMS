@@ -368,7 +368,6 @@ mod tests {
             SelectKey::FolderOpen,
             SelectKey::FolderClose,
             SelectKey::Practice,
-            SelectKey::NextReplay,
             SelectKey::TargetUp,
             SelectKey::TargetDown,
             SelectKey::DurationUp,

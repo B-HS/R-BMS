@@ -8,8 +8,9 @@
 //!
 //! The replay slot is the reference's (`MusicSelector.selectedreplay`): whenever the bar under the
 //! cursor changes it goes back to the lowest slot that holds a replay, or to none
-//! (`MusicSelectCommand.RESET_REPLAY`), and the key for the next replay moves it round the slots
-//! that hold one (`NEXT_REPLAY`). The slots are the replays saved of the chart, the newest first.
+//! (`MusicSelectCommand.RESET_REPLAY`), and the number key `4` moves it round the slots that hold
+//! one (`NEXT_REPLAY`); no key of the key table does. The slots are the replays saved of the chart,
+//! the newest first.
 //!
 //! None of this is read for a browser no skin draws.
 

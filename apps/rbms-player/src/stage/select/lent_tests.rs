@@ -176,8 +176,8 @@ fn the_replay_slot_follows_the_bar_under_the_cursor() {
     assert_eq!(browser.state.selected_replay, Some(0));
 }
 
-/// The key for the next replay moves the slot round the slots that hold a replay and no further,
-/// and does nothing with no other slot to move to (`NEXT_REPLAY`).
+/// The number key `4` moves the slot round the slots that hold a replay and no further, and does
+/// nothing with no other slot to move to (`NEXT_REPLAY`).
 #[test]
 fn the_next_replay_key_goes_round_the_slots_that_hold_one() {
     let mut browser = browser("lent-next");
@@ -186,23 +186,41 @@ fn the_next_replay_key_goes_round_the_slots_that_hold_one() {
 
     let mut seen = Vec::new();
     for _ in 0..REPLAY_SLOTS {
-        browser.tap(KEY_SIX);
+        browser.key(KeyCode::Digit4);
         seen.push(browser.state.selected_replay);
     }
     assert_eq!(seen, [Some(1), Some(2), Some(0), Some(1)], "three replays are three slots, and the fourth is passed over");
 
-    browser.state.selected_replay = Some(0);
-    browser.key(KeyCode::Digit4);
-    assert_eq!(browser.state.selected_replay, Some(1), "the number key is the same command");
-
     let mut browser = self::browser("lent-next-one");
     record_plays(&mut browser, vec![played("md5-alpha", 1, Some("only"))]);
-    browser.tap(KEY_SIX);
+    browser.key(KeyCode::Digit4);
     assert_eq!(browser.state.selected_replay, Some(0), "with one replay there is nowhere to move to");
 
     let mut browser = self::browser("lent-next-none");
-    browser.tap(KEY_SIX);
+    browser.key(KeyCode::Digit4);
     assert_eq!(browser.state.selected_replay, None, "a chart with no replay was given a slot");
+}
+
+/// Key six, the `F` key, only stars the chart: it carries no `NEXT_REPLAY`, so the replay slot
+/// stays where it is whether the key is tapped or held, while the number key `4` still moves it.
+#[test]
+fn key_six_stars_the_chart_and_leaves_the_replay_slot() {
+    let mut browser = browser("lent-key-six");
+    record_plays(&mut browser, (1..=3).map(|at| played("md5-alpha", at, Some("replay"))).collect());
+    assert_eq!(browser.state.selected_replay, Some(0));
+    assert!(!browser.app.shared.focused_md5().is_some_and(|md5| browser.app.shared.favorites.contains(&md5)));
+
+    browser.hold(KEY_SIX);
+    browser.key(KEY_SIX);
+    browser.frame_after(SHORT_STEP);
+    browser.frame_after(SHORT_STEP);
+    browser.let_go(KEY_SIX);
+    browser.frame_after(SHORT_STEP);
+    assert_eq!(browser.state.selected_replay, Some(0), "key six moved the replay slot");
+    assert!(browser.app.shared.focused_md5().is_some_and(|md5| browser.app.shared.favorites.contains(&md5)), "key six did not star the chart");
+
+    browser.key(KeyCode::Digit4);
+    assert_eq!(browser.state.selected_replay, Some(1), "the number key is the way to move the slot");
 }
 
 /// Key seven plays the replay in the slot that is selected, and plays the chart when none is
