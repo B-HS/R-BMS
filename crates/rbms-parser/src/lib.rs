@@ -9,6 +9,7 @@ use sha2::Sha256;
 mod base;
 pub mod bmson;
 mod control;
+mod encoding;
 
 pub use base::{digit, parse_pair};
 
@@ -131,7 +132,7 @@ pub fn parse(bytes: &[u8]) -> BmsSource {
 pub fn parse_with(bytes: &[u8], opts: ParseOptions) -> BmsSource {
     let md5 = hex(Md5::digest(bytes).as_slice());
     let sha256 = hex(Sha256::digest(bytes).as_slice());
-    let text = decode_text(bytes);
+    let text = encoding::decode_text(bytes);
 
     let mut src = BmsSource {
         headers: Headers::default(),
@@ -294,17 +295,6 @@ fn parse_header_line(src: &mut BmsSource, body: &str) {
             }
         }
     }
-}
-
-fn decode_text(bytes: &[u8]) -> String {
-    if let [0xEF, 0xBB, 0xBF, rest @ ..] = bytes {
-        return String::from_utf8_lossy(rest).into_owned();
-    }
-    if let Ok(s) = std::str::from_utf8(bytes) {
-        return s.to_owned();
-    }
-    let (cow, _, _) = encoding_rs::SHIFT_JIS.decode(bytes);
-    cow.into_owned()
 }
 
 fn hex(bytes: &[u8]) -> String {

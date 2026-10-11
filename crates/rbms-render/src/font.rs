@@ -32,6 +32,27 @@ const FALLBACK_FAMILY: &str = "sans-serif";
 /// fallback order from the locale, so a fixed one removes the last host-dependent input.
 const DETERMINISTIC_LOCALE: &str = "en-US";
 
+/// The locale whose font draws an ideograph no loaded font has, on a host that is not set to
+/// Chinese.
+///
+/// One code point is drawn differently in Japan, Korea and the Chinese-speaking regions, so the
+/// engine picks the fallback font for ideographs by locale, and it knows the bare language codes
+/// only: a host set to `ko-KR` or `en-US` is answered with the Simplified Chinese font. A chart's
+/// ideographs are almost always Japanese, and they stand beside kana that the Japanese font draws
+/// whatever the locale, so the Japanese font is asked for instead. Hangul is matched by script and
+/// goes to the Korean font either way.
+const HAN_LOCALE: &str = "ja";
+
+/// The language code of the locales whose ideographs are left to the engine, which tells the
+/// Chinese-speaking regions apart itself.
+const CHINESE_LANGUAGE: &str = "zh";
+
+/// The locale the engine matches ideographs under on a host whose locale is `system`.
+fn han_locale(system: &str) -> &str {
+    let language = system.split(['-', '_']).next().unwrap_or_default();
+    if language.eq_ignore_ascii_case(CHINESE_LANGUAGE) { system } else { HAN_LOCALE }
+}
+
 /// Marker appended to a string [`TextContext::fit_text`] had to clip.
 const ELLIPSIS: &str = "…";
 
@@ -212,10 +233,13 @@ impl TextContext {
     }
 
     /// A context over the bundled font plus the host's installed fonts (the app default).
+    ///
+    /// A character the font in use lacks is drawn from an installed one. Which one draws an
+    /// ideograph is decided by [`han_locale`] rather than by the host's locale as it stands.
     pub fn new() -> Self {
-        let mut fs = FontSystem::new();
-        fs.db_mut().load_font_data(BUNDLED_FONT.to_vec());
-        Self::with_font_system(fs)
+        let (locale, mut db) = FontSystem::new().into_locale_and_db();
+        db.load_font_data(BUNDLED_FONT.to_vec());
+        Self::with_font_system(FontSystem::new_with_locale_and_db(han_locale(&locale).to_string(), db))
     }
 
     /// Build a context whose database holds nothing but the bundled font, on a pinned locale, so
@@ -949,6 +973,16 @@ mod tests {
         draw_text(&mut c, 4.0, 4.0, 2.4, Color::WHITE, marker);
         let lit = (0..48 * 40).any(|i| c.pixel_at((i % 48) as u32, (i / 48) as u32).r > 30);
         assert!(lit, "an uncovered codepoint rasterizes as a visible notdef");
+    }
+
+    #[test]
+    fn ideographs_are_matched_as_japanese_unless_the_host_is_chinese() {
+        for system in ["ko-KR", "ko", "en-US", "en-KR", "ja-JP", "ja", "de_DE", ""] {
+            assert_eq!(han_locale(system), "ja", "{system:?}");
+        }
+        for system in ["zh-TW", "zh-HK", "zh-CN", "zh-Hant-TW", "zh", "ZH-tw"] {
+            assert_eq!(han_locale(system), system, "a Chinese host keeps the font of its own region");
+        }
     }
 
     #[test]

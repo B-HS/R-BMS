@@ -129,6 +129,52 @@ fn a_full_scan_re_reads_charts_whose_files_never_moved() {
     assert_eq!(full.progress.counts(), ScanCounts { found: 1, parsed: 1, skipped: 0, removed: 0 });
 }
 
+/// The parse generation that read every chart as Shift_JIS, so a database it filled holds Korean
+/// titles as half-width katakana.
+const SHIFT_JIS_ONLY_GENERATION: u32 = 1;
+
+/// `별의 노래` in EUC-KR.
+const EUC_KR_TITLE: [u8; 9] = [0xBA, 0xB0, 0xC0, 0xC7, 0x20, 0xB3, 0xEB, 0xB7, 0xA1];
+
+#[test]
+fn a_library_scanned_before_euc_kr_was_read_is_read_again_and_keeps_what_is_not_the_parse() {
+    let fixture = Fixture::new("generation");
+    let mut body = b"#TITLE ".to_vec();
+    body.extend_from_slice(&EUC_KR_TITLE);
+    body.extend_from_slice(b"\n#ARTIST tester\n#BPM 120\n#WAV01 kick.wav\n#00111:01010101\n");
+    let source = fixture.root.join("song.bms");
+    std::fs::write(&source, &body).expect("write the fixture chart");
+    let path = normalize(&source);
+    let mut db = db();
+    scan(&mut db, &ScanRequest::new(fixture.roots(), false));
+
+    let scanned = db.song(&path).expect("read the chart").expect("the chart is stored");
+    let old_generation = SongRow { title: "\u{FF7A}\u{FF70}\u{FF80}\u{FF87}".to_string(), ..scanned.clone() };
+    db.upsert_batch(std::slice::from_ref(&old_generation)).expect("store the title the old generation read");
+    db.set_favorite(&path, 1).expect("star the chart");
+    db.set_parser_version(SHIFT_JIS_ONLY_GENERATION).expect("stamp the old generation");
+    let before = db.song(&path).expect("read the chart").expect("the chart is stored");
+    assert_eq!(before.title, old_generation.title);
+
+    let full = db.needs_full_rescan().expect("read the generation");
+    assert!(full, "rows the Shift_JIS-only generation wrote are not trusted by this one");
+    let request = ScanRequest::new(fixture.roots(), full);
+    assert_eq!(scan(&mut db, &request), ScanOutcomeG::Completed { upserted: 1, removed: 0 });
+    assert_eq!(request.progress.counts(), ScanCounts { found: 1, parsed: 1, skipped: 0, removed: 0 }, "the file never moved and is read all the same");
+
+    let after = db.song(&path).expect("read the chart").expect("the chart is stored");
+    assert_eq!(after.title, "별의 노래");
+    assert_eq!(
+        (after.md5.as_str(), after.sha256.as_str()),
+        (before.md5.as_str(), before.sha256.as_str()),
+        "the hashes scores are kept under come from the bytes"
+    );
+    assert_eq!(after.favorite, 1, "a star is the user's and outlives the rescan");
+    assert_eq!(after.adddate, before.adddate, "the chart is no newer for having been read again");
+    assert_eq!(db.parser_version().expect("read the generation"), Some(PARSER_VERSION));
+    assert!(!db.needs_full_rescan().expect("read the generation"), "the next scan is incremental again");
+}
+
 #[test]
 fn a_scan_cancelled_before_it_starts_reads_nothing_and_deletes_nothing() {
     let fixture = Fixture::new("cancel");

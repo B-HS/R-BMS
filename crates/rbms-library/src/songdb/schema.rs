@@ -12,7 +12,11 @@ pub const SCHEMA_VERSION: u32 = 1;
 /// Generation of the parse that filled the rows. Raising it makes the next scan re-read every
 /// chart even when its file has not changed, which is how a parser or model change reaches charts
 /// that are already stored.
-pub const PARSER_VERSION: u32 = 1;
+///
+/// Generation 1 read every chart that was not UTF-8 as Shift_JIS. Generation 2 tells EUC-KR apart
+/// and reads past a UTF-8 mark in front of legacy text, which changes the stored titles, artists
+/// and file names of the charts written that way and nothing that scores are kept under.
+pub const PARSER_VERSION: u32 = 2;
 
 /// Connection settings every open applies: the write-ahead log so a scan writing in one connection
 /// does not block the browser reading in another, and the foreign keys that make `song_detail`
