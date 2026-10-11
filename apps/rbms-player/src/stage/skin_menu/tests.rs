@@ -23,7 +23,8 @@ use crate::stage::preview_menu::{
     COLUMN_GAP, COLUMNS_TOP, COUNTER_RISE, HINT_GAP, HINT_SCALE, HINT_Y, INFO_LEAD_LINES as INFO_LOADED_LINES, INFO_LEAD_Y as INFO_LOADED_Y, INFO_LINE_PITCH,
     INFO_PAD, INFO_RECT, INFO_ROW_Y, INFO_SCALE, INFO_VALUE_LINES, MARGIN, PREVIEW_BORDER, PREVIEW_RECT, ROW_PAD, SCROLL_BAR_ROOM, STATUS_DETAIL_LINES,
     STATUS_DETAIL_PITCH, STATUS_DETAIL_SCALE, STATUS_PAD, STATUS_SCALE, TAB_H as KIND_TAB_H, TAB_SCALE as KIND_SCALE, TAB_STRIP_Y as KIND_STRIP_Y, TITLE_Y,
-    VALUE_MAX_SHARE, row_rect, scroll_thumb, scroll_track, status_detail_lines, tab_rect, tab_width, wrapped,
+    VALUE_MAX_SHARE, number_label_room, number_value_rect, number_value_room, row_rect, scroll_thumb, scroll_track, slider_rect, status_detail_lines, tab_rect,
+    tab_width, wrapped,
 };
 use crate::stage::render_tests::{FRAME_DT, app};
 use crate::stage::{HeadlessCanvas, StageId};
@@ -235,8 +236,58 @@ impl Menu {
 
     /// The middle of what the frame drawn last made clickable for `hot`.
     fn middle_of_hot(&self, hot: Hot) -> (f32, f32) {
+        middle(self.rect_of_hot(hot))
+    }
+
+    /// Where the frame drawn last made `hot` clickable.
+    fn rect_of_hot(&self, hot: Hot) -> Rect {
         let (rect, _) = self.app.shared.hot.iter().find(|(_, entry)| *entry == hot).unwrap_or_else(|| panic!("{hot:?} is not on the screen"));
-        middle(*rect)
+        *rect
+    }
+
+    /// A point on the label of one row as the frame drawn last drew it: on the row, and on neither
+    /// the slider nor the number of a row that holds a number.
+    fn on_the_label_of(&self, row: SettingRow) -> (f32, f32) {
+        let rect = self.rect_of_hot(Hot::SkinMenuRow(self.at(row)));
+        (rect.x + ROW_PAD, rect.y + rect.h * 0.5)
+    }
+
+    /// Where the frame drawn last drew the slider of one row that holds a number.
+    fn slider_of(&self, row: SettingRow) -> Rect {
+        slider_rect(self.rect_of_hot(Hot::SkinMenuRow(self.at(row))))
+    }
+
+    /// The middle of where the frame drawn last wrote the number of one row that holds one.
+    fn on_the_number_of(&self, row: SettingRow) -> (f32, f32) {
+        middle(number_value_rect(self.rect_of_hot(Hot::SkinMenuRow(self.at(row)))))
+    }
+
+    /// The pointer moved to a point of the screen with a button held.
+    fn drag(&mut self, at: (f32, f32)) {
+        self.state.handle_mouse_drag(&mut FrameCtx { shared: &mut self.app.shared, now: std::time::Instant::now(), dt: 0.0 }, at);
+    }
+
+    /// The left button let go of at a point of the screen.
+    fn let_go(&mut self, at: (f32, f32)) {
+        self.state.handle_mouse(&mut FrameCtx { shared: &mut self.app.shared, now: std::time::Instant::now(), dt: 0.0 }, at, MouseButton::Left, false);
+    }
+
+    /// A press of the right button at a point of the screen, judged against the frame drawn last.
+    fn right_click(&mut self, at: (f32, f32)) -> Transition {
+        self.state.handle_mouse(&mut FrameCtx { shared: &mut self.app.shared, now: std::time::Instant::now(), dt: 0.0 }, at, MouseButton::Right, true)
+    }
+
+    /// One key pressed that types `text`.
+    fn typed(&mut self, text: &'static str) -> Transition {
+        let input = KeyInput { code: KeyCode::KeyA, pressed: true, released: false, text: Some(text) };
+        self.state.handle_key(&mut FrameCtx { shared: &mut self.app.shared, now: std::time::Instant::now(), dt: 0.0 }, input)
+    }
+
+    /// A key pressed as many times over as it is asked.
+    fn keys(&mut self, code: KeyCode, presses: usize) {
+        for _ in 0..presses {
+            self.key(code);
+        }
     }
 
     /// The rows the frame drawn last made clickable, top to bottom.
@@ -948,19 +999,22 @@ fn a_press_of_the_right_button_steps_the_row_back() {
     let offset = SettingRow::Skin(SkinRow::Offset(0, OffsetAxis::X));
     menu.focus(offset);
     menu.frame();
-    let on_offset = menu.middle_of_hot(Hot::SkinMenuRow(menu.at(offset)));
+    let on_offset = menu.on_the_label_of(offset);
     menu.state.focus(0);
     menu.click(on_offset);
     assert_eq!(menu.value_of(offset), "+1");
-    let right = |menu: &mut Menu, at| {
-        menu.state.handle_mouse(&mut FrameCtx { shared: &mut menu.app.shared, now: std::time::Instant::now(), dt: 0.0 }, at, MouseButton::Right, true)
-    };
+    let right = |menu: &mut Menu, at| menu.right_click(at);
     menu.state.focus(0);
     assert!(matches!(right(&mut menu, on_offset), Transition::Stay));
     assert_eq!(menu.value_of(offset), "+0", "the right button did not take the step back");
     assert_eq!(menu.state.sel, menu.at(offset), "the right button did not move the cursor to the row");
     right(&mut menu, on_offset);
     assert_eq!(menu.value_of(offset), "-1");
+    let (on_slider, on_number) = (middle(menu.slider_of(offset)), menu.on_the_number_of(offset));
+    right(&mut menu, on_slider);
+    right(&mut menu, on_number);
+    assert_eq!(menu.value_of(offset), "-3", "the right button does not step a row back from its slider and its number");
+    assert_eq!((menu.state.numbers.dragged(), menu.state.numbers.editing()), (None, None), "the right button took hold of the slider or opened the number");
 
     let skin = menu.app.shared.config.skin.clone();
     menu.focus_fixed(SettingId::SkinReset);
@@ -971,7 +1025,7 @@ fn a_press_of_the_right_button_steps_the_row_back() {
 }
 
 /// With Shift held an arrow moves an offset row ten steps, and stops at the row's own limit. Any
-/// other row is stepped once whatever is held, and Enter is one step always.
+/// other row is stepped once whatever is held.
 #[test]
 fn shift_moves_an_offset_ten_steps_at_a_time_and_nothing_else() {
     let mut menu = Menu::over(app_with_long_document("shift"));
@@ -985,8 +1039,6 @@ fn shift_moves_an_offset_ten_steps_at_a_time_and_nothing_else() {
     menu.key(KeyCode::ArrowLeft);
     menu.key(KeyCode::ArrowLeft);
     assert_eq!(menu.value_of(offset), "-10");
-    menu.key(KeyCode::Enter);
-    assert_eq!(menu.value_of(offset), "-9", "Enter took more than a step with Shift held");
     assert_eq!(menu.app.shared.skins.build_of(screen), build, "an offset had the document read again");
 
     let option = SettingRow::Skin(SkinRow::Property(0));
@@ -998,7 +1050,7 @@ fn shift_moves_an_offset_ten_steps_at_a_time_and_nothing_else() {
     menu.key_up(KeyCode::ShiftLeft);
     menu.focus(offset);
     menu.key(KeyCode::ArrowRight);
-    assert_eq!(menu.value_of(offset), "-8", "an arrow went on moving ten steps with Shift let go");
+    assert_eq!(menu.value_of(offset), "-9", "an arrow went on moving ten steps with Shift let go");
 }
 
 /// A path too long for its row keeps its end and gives up its beginning, so the folder's own name is

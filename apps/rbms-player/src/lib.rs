@@ -78,6 +78,7 @@ mod library;
 #[cfg(test)]
 mod main_tests;
 mod notify;
+mod number_row;
 mod play_sink;
 mod pointer;
 mod practice;

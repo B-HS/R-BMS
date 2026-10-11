@@ -4,8 +4,14 @@
 //!
 //! Extracted from the frame loop so the screen can be rendered headless in tests and so a tab with
 //! more rows than fit on screen scrolls instead of drawing off the bottom.
+//!
+//! A row that holds a number is drawn with a slider before its number, each in a room of its own,
+//! with the parts every built-in screen draws such a row with ([`crate::number_row`]). Which part
+//! of such a row a press landed on is told from where the row was drawn ([`number_part_at`]).
 
 use rbms_render::{Color, Rect, Renderer, draw_text, draw_text_right, fit_text, text_width, theme};
+
+use crate::number_row::{NumberEdit, NumberValue, RowPart, SliderLook, draw_edit, draw_refusal, draw_slider, row_part};
 
 /// Panel geometry, matching the layout the screen has always used.
 const PANEL_W: f32 = 720.0;
@@ -52,15 +58,34 @@ const NOTE_GAP: f32 = 16.0;
 /// Widest a row's value is drawn, as a share of the panel.
 const VALUE_MAX_SHARE: f32 = 0.6;
 
+/// A row that holds a number: how wide the room its number is written in is, how wide the slider
+/// before it, and the gap between the two. The number has a room of its own, whatever it reads, so
+/// the slider stands in the same place on every row and does not move under a pointer dragging it.
+const NUMBER_VALUE_W: f32 = 84.0;
+const SLIDER_W: f32 = 200.0;
+const SLIDER_GAP: f32 = 14.0;
+
 /// Keyboard hint under the title: the keys of the screen that are its own, then the three that open
 /// the play menu, the skin menu and the key editor from it, each named by the key it is on.
 const SETTINGS_HINT_OWN: &str = "TAB SWITCH   UP DOWN MOVE   LEFT RIGHT CHANGE   ENTER OPEN   ESC BACK";
+
+/// What the hint under the title says in place of the keys of the screen while the cursor is on a
+/// row that holds a number: what sets one. The keys that move the cursor and leave the screen are
+/// the ones every row has, and give their room up to these.
+const NUMBER_ROW_HINT_OWN: &str = "LEFT RIGHT 1 STEP   SHIFT x10   ENTER TYPE   0 DEFAULT   DRAG SLIDER";
 
 /// The hint under the title, naming `play_menu`, `skin_menu` and `key_config` as the keys that open
 /// the play menu, the skin menu and the key editor. They are the keys the key configuration holds,
 /// so the hint follows a key the player moved.
 pub(crate) fn settings_hint(play_menu: &str, skin_menu: &str, key_config: &str) -> String {
     format!("{SETTINGS_HINT_OWN}   {play_menu} PLAY   {skin_menu} SKINS   {key_config} KEYS")
+}
+
+/// The hint under the title while the cursor is on a row that holds a number: what sets the row,
+/// and the same three keys to the other screens [`settings_hint`] names, which are as near from
+/// such a row as from any other.
+pub(crate) fn number_row_hint(play_menu: &str, skin_menu: &str, key_config: &str) -> String {
+    format!("{NUMBER_ROW_HINT_OWN}   {play_menu} PLAY   {skin_menu} SKINS   {key_config} KEYS")
 }
 
 /// What the first of the two buttons at the right end of the tab strip reads: it opens the play
@@ -90,13 +115,16 @@ pub(crate) struct SettingsLine {
     /// the label and the value, a step brighter on the focused row so it reads against the
     /// highlight, and the value of an annotated row is dimmed until the row is focused.
     pub(crate) note: Option<&'static str>,
+    /// The number the row holds, or `None` for a row that holds none. A row that holds one is
+    /// drawn with a slider before its value.
+    pub(crate) number: Option<NumberValue>,
 }
 
 impl SettingsLine {
-    /// A row with nothing said beside it.
+    /// A row with nothing said beside it, which holds no number.
     #[cfg(test)]
     pub(crate) fn bare(label: &str, value: &str) -> SettingsLine {
-        SettingsLine { label: label.to_string(), value: value.to_string(), note: None }
+        SettingsLine { label: label.to_string(), value: value.to_string(), note: None, number: None }
     }
 }
 
@@ -114,6 +142,13 @@ pub(crate) struct SettingsScene {
     pub(crate) status: String,
     /// The inline rival list, when it is open.
     pub(crate) rivals: Option<RivalsScene>,
+    /// The row that holds a number and is being typed into, by its place in `rows`, with the figure
+    /// typed so far.
+    pub(crate) typed: Option<(usize, NumberEdit)>,
+    /// The row whose slider is being dragged, by its place in `rows`.
+    pub(crate) dragged: Option<usize>,
+    /// The row saying that what was typed into it was not a number, by its place in `rows`.
+    pub(crate) refused: Option<usize>,
 }
 
 /// The inline rival list's own rows and editor.
@@ -164,12 +199,51 @@ fn rivals_scroll_start(len: usize, sel: usize) -> usize {
     sel.saturating_sub(visible / 2).min(len - visible)
 }
 
+/// Where the number of a row that holds one is written, on the row whose top is at `y`: against
+/// the panel's right edge. A press there opens the row to be typed into.
+fn number_value_rect(x0: f32, y: f32) -> Rect {
+    Rect::new(x0 + PANEL_W - ROW_PAD - NUMBER_VALUE_W, y, NUMBER_VALUE_W + ROW_PAD, ROW_H)
+}
+
+/// Where the slider of a row that holds a number is drawn, on the row whose top is at `y`: before
+/// the number, as tall as the row, so a press anywhere over it takes hold of it.
+fn slider_rect(x0: f32, y: f32) -> Rect {
+    Rect::new(x0 + PANEL_W - ROW_PAD - NUMBER_VALUE_W - SLIDER_GAP - SLIDER_W, y, SLIDER_W, ROW_H)
+}
+
+/// Where a figure being typed into a row is drawn: over the slider and the number both.
+fn number_edit_rect(x0: f32, y: f32) -> Rect {
+    let slider = slider_rect(x0, y);
+    Rect::new(slider.x, y, x0 + PANEL_W - ROW_PAD * 0.5 - slider.x, ROW_H)
+}
+
+/// Where the slider of a row that holds a number is, the row having been drawn at `row`.
+pub(crate) fn row_slider(row: Rect) -> Rect {
+    slider_rect(row.x, row.y)
+}
+
+/// Where the number of a row that holds one is written, the row having been drawn at `row`.
+pub(crate) fn row_number(row: Rect) -> Rect {
+    number_value_rect(row.x, row.y)
+}
+
+/// Which part of a row that holds a number a press at `at` landed on, the row having been drawn at
+/// `row`.
+pub(crate) fn number_part_at(row: Rect, at: (f32, f32)) -> RowPart {
+    row_part(row_slider(row), row_number(row), at)
+}
+
+/// Where what is written on the right of a row begins: its value as it is drawn, or the slider of
+/// a row that holds a number.
+fn value_left(x0: f32, value: &str, holds_number: bool) -> f32 {
+    if holds_number { slider_rect(x0, 0.0).x } else { x0 + PANEL_W - ROW_PAD - text_width(value, VALUE_SCALE) }
+}
+
 /// Where a row's note starts and how much room it has: what is left of the row between the label
-/// and the value as they are drawn, less a gap on either side.
-fn note_span(x0: f32, label: &str, value: &str) -> (f32, f32) {
+/// and what is drawn on its right ([`value_left`]), less a gap on either side.
+fn note_span(x0: f32, label: &str, value_left: f32) -> (f32, f32) {
     let left = x0 + ROW_PAD + text_width(label, LABEL_SCALE) + NOTE_GAP;
-    let right = x0 + PANEL_W - ROW_PAD - text_width(value, VALUE_SCALE) - NOTE_GAP;
-    (left, right - left)
+    (left, value_left - NOTE_GAP - left)
 }
 
 /// How wide a tab of the strip is drawn for the name on it.
@@ -242,7 +316,7 @@ pub(crate) fn render_settings<R: Renderer>(r: &mut R, scene: &SettingsScene) -> 
 
     let start = scroll_start(scene.rows.len(), scene.sel);
     for (slot, index) in (start..(start + visible_rows()).min(scene.rows.len())).enumerate() {
-        let SettingsLine { label, value, note } = &scene.rows[index];
+        let SettingsLine { label, value, note, number } = &scene.rows[index];
         let y = ROWS_TOP + slot as f32 * ROW_PITCH;
         let on = index == scene.sel;
         let rect = Rect::new(x0, y, PANEL_W, ROW_H);
@@ -262,10 +336,24 @@ pub(crate) fn render_settings<R: Renderer>(r: &mut R, scene: &SettingsScene) -> 
         } else {
             th.text
         };
-        let fitted = fit_text(&shown, VALUE_SCALE, PANEL_W * VALUE_MAX_SHARE);
-        draw_text_right(r, x0 + PANEL_W - ROW_PAD, y + ROW_TEXT_Y, VALUE_SCALE, color, &fitted);
+        let fitted = fit_text(&shown, VALUE_SCALE, if number.is_some() { NUMBER_VALUE_W } else { PANEL_W * VALUE_MAX_SHARE });
+        match (number, scene.typed.as_ref().filter(|(typed, _)| *typed == index)) {
+            (Some(_), Some((_, edit))) => draw_edit(r, number_edit_rect(x0, y), y + ROW_TEXT_Y, VALUE_SCALE, edit),
+            (Some(_), None) if scene.refused == Some(index) => draw_refusal(r, x0 + PANEL_W - ROW_PAD, y + ROW_TEXT_Y, VALUE_SCALE),
+            (Some(number), None) => {
+                let look = match (number.locked, scene.dragged == Some(index), on) {
+                    (true, _, _) => SliderLook::Locked,
+                    (false, true, _) => SliderLook::Dragged,
+                    (false, false, true) => SliderLook::Focused,
+                    (false, false, false) => SliderLook::Plain,
+                };
+                draw_slider(r, slider_rect(x0, y), number.fraction(), look);
+                draw_text_right(r, x0 + PANEL_W - ROW_PAD, y + ROW_TEXT_Y, VALUE_SCALE, color, &fitted);
+            }
+            (None, _) => draw_text_right(r, x0 + PANEL_W - ROW_PAD, y + ROW_TEXT_Y, VALUE_SCALE, color, &fitted),
+        }
         if let Some(note) = *note {
-            let (left, room) = note_span(x0, label, &fitted);
+            let (left, room) = note_span(x0, label, value_left(x0, &fitted, number.is_some()));
             if room > 0.0 {
                 draw_text(r, left, y + NOTE_Y, NOTE_SCALE, if on { th.text_dim } else { th.text_muted }, &fit_text(note, NOTE_SCALE, room));
             }
@@ -341,6 +429,9 @@ mod tests {
             editor: None,
             status: "logged in as dj".to_string(),
             rivals: None,
+            typed: None,
+            dragged: None,
+            refused: None,
         }
     }
 
@@ -395,6 +486,13 @@ mod tests {
         assert!(width <= room, "the hint is {width} wide and the room beside the button {room}");
         let longest = settings_hint("BACKSPACE", "BACKSLASH", "RBRACKET");
         assert!(text_width(&longest, HINT_SCALE) <= PANEL_W, "a hint naming three long keys runs off the panel");
+
+        let on_a_number = number_row_hint("F8", "F12", "F5");
+        assert!(on_a_number.contains("F8 PLAY") && on_a_number.contains("F12 SKINS") && on_a_number.contains("F5 KEYS"), "{on_a_number}");
+        let width = text_width(&on_a_number, HINT_SCALE);
+        assert!(width <= room, "the hint of a number row is {width} wide and the room beside the button {room}");
+        let longest = number_row_hint("BACKSPACE", "BACKSLASH", "RBRACKET");
+        assert!(text_width(&longest, HINT_SCALE) <= PANEL_W, "a hint of a number row naming three long keys runs off the panel");
     }
 
     #[test]
@@ -467,8 +565,9 @@ mod tests {
                 continue;
             };
             annotated += 1;
+            let holds_number = rbms_config::number_spec(row.id).is_some();
             for value in shown_values(row.id) {
-                let (left, room) = note_span(x0, row.label, &value);
+                let (left, room) = note_span(x0, row.label, value_left(x0, &value, holds_number));
                 let needed = text_width(skinned.note, NOTE_SCALE);
                 assert!(left > x0 && needed <= room, "{:?} showing {value}: the note needs {needed} and has {room}", row.id);
                 assert_eq!(fit_text(skinned.note, NOTE_SCALE, room), skinned.note, "{:?} showing {value}: the note is drawn cut short", row.id);
@@ -488,6 +587,9 @@ mod tests {
             editor: None,
             status: String::new(),
             rivals: None,
+            typed: None,
+            dragged: None,
+            refused: None,
         }
     }
 

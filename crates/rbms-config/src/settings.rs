@@ -25,6 +25,7 @@ use crate::audio::{
 use crate::judge::{
     GAUGE_AUTO_SHIFT_LABELS, GAUGE_SET_CYCLE, GAUGE_SET_LABELS, JUDGE_ALGORITHM_LABELS, LN_MODE_LABELS, ScoreTarget, TARGET_LABELS, gauge_set_token,
 };
+use crate::number::NumberSpec;
 use crate::options;
 use crate::schema::{
     Config, DEFAULT_PLAYER_ID, HISPEED_MAX, HISPEED_MIN, HISPEED_STEP, HISPEED_STEP_MAX, HISPEED_STEP_MIN, HISPEED_STEP_STEP, JUDGE_OFFSET_MAX_MS,
@@ -34,7 +35,7 @@ use crate::schema::{
     PREVIEW_VOLUME_MIN, PREVIEW_VOLUME_STEP, SKIN_SCREEN_LABELS, TOTAL_FROM_CHART, TOTAL_STEP, skin_screen_label,
 };
 use crate::sort::SortMode;
-use crate::speed::{GREEN_NUMBER_MAX, GREEN_NUMBER_MIN, duration_stepped_by_green, green_of_duration};
+use crate::speed::{GREEN_NUMBER_MAX, GREEN_NUMBER_MIN, duration_of_green, duration_stepped_by_green, green_of_duration};
 use crate::window::{WINDOW_MODE_LABELS, WINDOW_RESOLUTION_LABELS, WindowMode, WindowResolution};
 
 /// Value of a row that is on.
@@ -432,11 +433,12 @@ impl SettingTab {
 pub enum SettingKind {
     /// On or off.
     Toggle,
-    /// A whole number, shown with `unit` after it.
+    /// A whole number, shown with `unit` after it. `step` is what one call to [`adjust`] moves it
+    /// by, which for some rows is more than the smallest change the row holds ([`number_spec`]).
     IntRange { min: i32, max: i32, step: i32, unit: &'static str },
     /// A fractional number, shown to `decimals` places with `unit` after it.
     FloatRange { min: f64, max: f64, step: f64, decimals: u8, unit: &'static str },
-    /// A fraction of one, shown as a whole percent.
+    /// A fraction of one, shown in percent.
     Percent { min: f32, max: f32, step: f32 },
     /// A fixed list of values stepped through in order. A row whose list is only known at run time
     /// (the enumerated output devices) declares the entries the program already knows.
@@ -528,14 +530,14 @@ pub const SETTINGS: &[SettingDescriptor] = &[
         SettingTab::PlaySpeed,
         "HI-SPEED",
         SettingKind::FloatRange { min: HISPEED_MIN, max: HISPEED_MAX, step: HISPEED_STEP, decimals: HISPEED_DECIMALS, unit: NO_UNIT },
-        "How fast the notes scroll; one press moves it by HI-SPEED STEP. Worked out for every chart while KEEP GREEN NUMBER is on",
+        "How fast the notes scroll; a HI-SPEED key of a run moves it by HI-SPEED STEP. Worked out for every chart while KEEP GREEN NUMBER is on",
     ),
     row(
         SettingId::HiSpeedStep,
         SettingTab::PlaySpeed,
         "HI-SPEED STEP",
         SettingKind::FloatRange { min: HISPEED_STEP_MIN, max: HISPEED_STEP_MAX, step: HISPEED_STEP_STEP, decimals: HISPEED_DECIMALS, unit: NO_UNIT },
-        "How far one HI-SPEED press moves the scroll",
+        "How far one press of a HI-SPEED key moves the scroll during a run and on the option panel",
     ),
     row(
         SettingId::FixHiSpeed,
@@ -984,8 +986,7 @@ pub fn display_value(config: &Config, id: SettingId) -> String {
         SettingId::FiveKeyLayout => on_off(config.display.five_key_layout),
         SettingId::PlayEscapeMode => cycle_label(id, cycle_at(options::PlayEscape::ALL, config.play.play_escape)),
         SettingId::Gauge => cycle_label(id, gauge_at(config.play.gauge)),
-        SettingId::Lift => shade_value(config.play.lift, id),
-        SettingId::LaneCover => shade_value(config.play.cover, id),
+        SettingId::Lift | SettingId::LaneCover | SettingId::Hidden => number_text(config, id),
         SettingId::ScratchSide => cycle_label(id, usize::from(config.play.scratch_left)),
         SettingId::ScratchAuto => on_off(config.play.scratch_auto),
         SettingId::JudgeOffset => format!("{:+}{}", config.judge.offset_ms, unit_of(id)),
@@ -1039,7 +1040,6 @@ pub fn display_value(config: &Config, id: SettingId) -> String {
         SettingId::Preview => on_off(config.library.preview),
         SettingId::EnableLift => on_off(config.play.enable_lift),
         SettingId::EnableCover => on_off(config.play.enable_cover),
-        SettingId::Hidden => shade_value(config.play.hidden, id),
         SettingId::EnableHidden => on_off(config.play.enable_hidden),
         SettingId::LaneCoverFineStep => format!("{:.*}", LANE_SHADE_FINE_DECIMALS as usize, config.play.lanecover_step_fine),
         SettingId::WhiteNumber => on_off(config.display.show_white_number),
@@ -1323,6 +1323,224 @@ pub fn adjust(config: &mut Config, id: SettingId, delta: i32) -> AdjustOutcome {
     }
 }
 
+/// How many steps of a row that holds a scroll speed make one: the row is counted in hundredths.
+const HISPEED_STEPS_PER_ONE: i64 = 100;
+
+/// How many steps of a lane shade -- the lane cover, the lift, the hidden cover -- make the whole
+/// lane, and how many make one percent of it: a shade is counted in tenths of a percent, which is
+/// one of the white number a cover reads as. It is shown to the one place that tells two steps
+/// apart.
+const SHADE_STEPS_PER_LANE: i64 = 1000;
+const SHADE_STEPS_PER_PERCENT: i64 = 10;
+const SHADE_DECIMALS: u8 = 1;
+
+/// How many steps of the fine cover step make one: the row is counted in ten-thousandths.
+const SHADE_FINE_STEPS_PER_ONE: i64 = 10_000;
+
+/// How many steps of a share shown in whole percent make the whole of it.
+const PERCENT_STEPS_PER_ONE: i64 = 100;
+
+/// The largest TOTAL the row holds when it is set by hand, which is the ceiling the reference's
+/// practice screen holds a total to (`PracticeConfiguration.java:616`). A larger one a settings
+/// file brings is read as it is until the row is next set.
+pub const TOTAL_ROW_MAX: i64 = 5000;
+
+/// A number as a whole count of steps, `per_one` of them to one.
+fn counted(value: f64, per_one: i64) -> i64 {
+    (value * per_one as f64).round() as i64
+}
+
+/// A count of steps as the share of one it stands for, `per_one` of them to the whole.
+fn share_of(steps: i64, per_one: i64) -> f32 {
+    steps as f32 / per_one as f32
+}
+
+/// The most values above the nearest one that are tried for a share of the lane that is not read
+/// short ([`shade_of`]).
+const SHADE_NUDGES: usize = 4;
+
+/// A count of steps of a lane shade as the share of the lane it stands for: the nearest value to
+/// it that a skin, which shows a shade in thousandths with the rest cut off, does not read one
+/// short. A quarter of the lane and a thousandth more is stored a hair above 0.251 rather than a
+/// hair below it, which a figure cut from it would show as 250.
+fn shade_of(steps: i64) -> f32 {
+    let mut share = share_of(steps, SHADE_STEPS_PER_LANE);
+    for _ in 0..SHADE_NUDGES {
+        if share * SHADE_STEPS_PER_LANE as f32 >= steps as f32 {
+            break;
+        }
+        share = share.next_up();
+    }
+    share
+}
+
+/// The steps of one row that holds a number, or `None` for a row that holds none: a switch, a
+/// list, text, or something that is run.
+///
+/// The steps are the smallest change each row can hold, which is what one press of a key moves it
+/// by on the screens that set a row by hand, what a slider dragged along the row lands on, and
+/// what a figure typed into it is rounded to. [`adjust`] moves some rows further at a press: that
+/// is the step of the option panel and of the events a skin sends, which this does not change.
+pub fn number_spec(id: SettingId) -> Option<NumberSpec> {
+    let spec = match id {
+        SettingId::GreenNumber => NumberSpec::whole(i64::from(GREEN_NUMBER_MIN), i64::from(GREEN_NUMBER_MAX), NO_UNIT),
+        SettingId::HiSpeed => NumberSpec::fine(
+            counted(HISPEED_MIN, HISPEED_STEPS_PER_ONE),
+            counted(HISPEED_MAX, HISPEED_STEPS_PER_ONE),
+            HISPEED_STEPS_PER_ONE,
+            HISPEED_DECIMALS,
+            NO_UNIT,
+        ),
+        SettingId::HiSpeedStep => NumberSpec::fine(
+            counted(HISPEED_STEP_MIN, HISPEED_STEPS_PER_ONE),
+            counted(HISPEED_STEP_MAX, HISPEED_STEPS_PER_ONE),
+            HISPEED_STEPS_PER_ONE,
+            HISPEED_DECIMALS,
+            NO_UNIT,
+        ),
+        SettingId::LaneCover | SettingId::Lift | SettingId::Hidden => NumberSpec::fine(
+            counted(f64::from(LANE_SHADE_MIN), SHADE_STEPS_PER_LANE),
+            counted(f64::from(LANE_SHADE_MAX), SHADE_STEPS_PER_LANE),
+            SHADE_STEPS_PER_PERCENT,
+            SHADE_DECIMALS,
+            PERCENT_UNIT,
+        ),
+        SettingId::LaneCoverFineStep => NumberSpec::fine(
+            counted(f64::from(LANE_SHADE_FINE_STEP_MIN), SHADE_FINE_STEPS_PER_ONE),
+            counted(f64::from(LANE_SHADE_FINE_STEP_MAX), SHADE_FINE_STEPS_PER_ONE),
+            SHADE_FINE_STEPS_PER_ONE,
+            LANE_SHADE_FINE_DECIMALS,
+            NO_UNIT,
+        ),
+        SettingId::JudgeOffset => NumberSpec::whole(i64::from(JUDGE_OFFSET_MIN_MS), i64::from(JUDGE_OFFSET_MAX_MS), MILLISECOND_UNIT).with_sign(),
+        SettingId::JudgeWidthKeyPGreat
+        | SettingId::JudgeWidthKeyGreat
+        | SettingId::JudgeWidthKeyGood
+        | SettingId::JudgeWidthScratchPGreat
+        | SettingId::JudgeWidthScratchGreat
+        | SettingId::JudgeWidthScratchGood => NumberSpec::whole(i64::from(JUDGE_RATE_MIN_PERCENT), i64::from(JUDGE_RATE_MAX_PERCENT), PERCENT_UNIT),
+        SettingId::LongNoteMargin => NumberSpec::whole(i64::from(LN_MARGIN_MIN_PERCENT), i64::from(LN_MARGIN_MAX_PERCENT), PERCENT_UNIT),
+        SettingId::Total => NumberSpec::whole(counted(TOTAL_FROM_CHART, 1), TOTAL_ROW_MAX, NO_UNIT),
+        SettingId::JudgeTextY => NumberSpec::whole(
+            counted(f64::from(JUDGE_TEXT_Y_MIN), PERCENT_STEPS_PER_ONE),
+            counted(f64::from(JUDGE_TEXT_Y_MAX), PERCENT_STEPS_PER_ONE),
+            PERCENT_UNIT,
+        ),
+        SettingId::PreviewVolume => NumberSpec::whole(
+            counted(f64::from(PREVIEW_VOLUME_MIN), PERCENT_STEPS_PER_ONE),
+            counted(f64::from(PREVIEW_VOLUME_MAX), PERCENT_STEPS_PER_ONE),
+            PERCENT_UNIT,
+        ),
+        SettingId::PreviewFade => NumberSpec::whole(i64::from(PREVIEW_FADE_MIN_MS), i64::from(PREVIEW_FADE_MAX_MS), MILLISECOND_UNIT),
+        SettingId::MasterVolume | SettingId::KeyVolume | SettingId::BgmVolume | SettingId::SystemVolume => NumberSpec::whole(
+            counted(f64::from(AUDIO_VOLUME_MIN_GAIN), PERCENT_STEPS_PER_ONE),
+            counted(f64::from(AUDIO_VOLUME_MAX_GAIN), PERCENT_STEPS_PER_ONE),
+            PERCENT_UNIT,
+        ),
+        SettingId::AudioPolyphony => NumberSpec::whole(AUDIO_POLYPHONY_MIN_VOICES as i64, AUDIO_POLYPHONY_MAX_VOICES as i64, NO_UNIT),
+        _ => return None,
+    };
+    Some(spec)
+}
+
+/// The step one row that holds a number stands on, held to the row's two ends, or `None` for a row
+/// that holds none. A value between two steps -- one a settings file was written with by hand, or
+/// a cover moved by its fine step during a run -- reads as the nearer.
+pub fn number_steps(config: &Config, id: SettingId) -> Option<i64> {
+    let spec = number_spec(id)?;
+    let steps = match id {
+        SettingId::GreenNumber => i64::from(green_of_duration(config.play.duration_ms)),
+        SettingId::HiSpeed => counted(config.play.hispeed, HISPEED_STEPS_PER_ONE),
+        SettingId::HiSpeedStep => counted(config.play.hispeed_step, HISPEED_STEPS_PER_ONE),
+        SettingId::LaneCover => counted(f64::from(config.play.cover), SHADE_STEPS_PER_LANE),
+        SettingId::Lift => counted(f64::from(config.play.lift), SHADE_STEPS_PER_LANE),
+        SettingId::Hidden => counted(f64::from(config.play.hidden), SHADE_STEPS_PER_LANE),
+        SettingId::LaneCoverFineStep => counted(f64::from(config.play.lanecover_step_fine), SHADE_FINE_STEPS_PER_ONE),
+        SettingId::JudgeOffset => i64::from(config.judge.offset_ms),
+        SettingId::LongNoteMargin => i64::from(config.judge.longnote_margin_rate),
+        SettingId::Total => counted(config.play.total_override, 1),
+        SettingId::JudgeTextY => counted(f64::from(config.display.judge_text_y), PERCENT_STEPS_PER_ONE),
+        SettingId::PreviewVolume => counted(f64::from(config.library.preview_volume), PERCENT_STEPS_PER_ONE),
+        SettingId::PreviewFade => i64::from(config.library.preview_fade_ms),
+        SettingId::MasterVolume => i64::from(volume_percent(config.audio.master)),
+        SettingId::KeyVolume => i64::from(volume_percent(config.audio.key)),
+        SettingId::BgmVolume => i64::from(volume_percent(config.audio.bg)),
+        SettingId::SystemVolume => i64::from(volume_percent(config.audio.system)),
+        SettingId::AudioPolyphony => config.audio.polyphony as i64,
+        _ => i64::from(judge_width(config, id)?),
+    };
+    Some(spec.clamp(steps))
+}
+
+/// Put one row that holds a number on the step `steps`, held to the row's two ends, and report
+/// whether the document moved. A row already on that step is left exactly as it is stored, and a
+/// row that holds no number is left alone.
+///
+/// What is stored is the count of steps divided by how many make one, never a sum of steps, so a
+/// row moved a step at a time holds the nearest value there is to each step however long it is
+/// moved for.
+pub fn set_number_steps(config: &mut Config, id: SettingId, steps: i64) -> AdjustOutcome {
+    let Some(spec) = number_spec(id) else {
+        return AdjustOutcome::Unchanged;
+    };
+    let steps = spec.clamp(steps);
+    if number_steps(config, id) == Some(steps) {
+        return AdjustOutcome::Unchanged;
+    }
+    let whole = steps as i32;
+    match id {
+        SettingId::GreenNumber => store(&mut config.play.duration_ms, duration_of_green(whole)),
+        SettingId::HiSpeed => store(&mut config.play.hispeed, steps as f64 / HISPEED_STEPS_PER_ONE as f64),
+        SettingId::HiSpeedStep => store(&mut config.play.hispeed_step, steps as f64 / HISPEED_STEPS_PER_ONE as f64),
+        SettingId::LaneCover => store(&mut config.play.cover, shade_of(steps)),
+        SettingId::Lift => store(&mut config.play.lift, shade_of(steps)),
+        SettingId::Hidden => store(&mut config.play.hidden, shade_of(steps)),
+        SettingId::LaneCoverFineStep => store(&mut config.play.lanecover_step_fine, share_of(steps, SHADE_FINE_STEPS_PER_ONE)),
+        SettingId::JudgeOffset => store(&mut config.judge.offset_ms, whole),
+        SettingId::LongNoteMargin => store(&mut config.judge.longnote_margin_rate, whole),
+        SettingId::Total => store(&mut config.play.total_override, steps as f64),
+        SettingId::JudgeTextY => store(&mut config.display.judge_text_y, share_of(steps, PERCENT_STEPS_PER_ONE)),
+        SettingId::PreviewVolume => store(&mut config.library.preview_volume, share_of(steps, PERCENT_STEPS_PER_ONE)),
+        SettingId::PreviewFade => store(&mut config.library.preview_fade_ms, steps as u32),
+        SettingId::MasterVolume => store(&mut config.audio.master, share_of(steps, PERCENT_STEPS_PER_ONE)),
+        SettingId::KeyVolume => store(&mut config.audio.key, share_of(steps, PERCENT_STEPS_PER_ONE)),
+        SettingId::BgmVolume => store(&mut config.audio.bg, share_of(steps, PERCENT_STEPS_PER_ONE)),
+        SettingId::SystemVolume => store(&mut config.audio.system, share_of(steps, PERCENT_STEPS_PER_ONE)),
+        SettingId::AudioPolyphony => {
+            let outcome = store(&mut config.audio.polyphony, steps as usize);
+            reopen(config, outcome)
+        }
+        _ => match judge_width_mut(config, id) {
+            Some(rate) => store(rate, whole),
+            None => AdjustOutcome::Unchanged,
+        },
+    }
+}
+
+/// Move one row that holds a number `by` steps, stopping at the row's two ends, and report whether
+/// the document moved.
+pub fn move_number_steps(config: &mut Config, id: SettingId, by: i64) -> AdjustOutcome {
+    match (number_spec(id), number_steps(config, id)) {
+        (Some(spec), Some(steps)) => set_number_steps(config, id, spec.moved(steps, by)),
+        _ => AdjustOutcome::Unchanged,
+    }
+}
+
+/// The step one row that holds a number stands on in a configuration nothing has been changed in,
+/// which is where the key that resets a row puts it back to, or `None` for a row that holds none.
+pub fn shipped_number_steps(id: SettingId) -> Option<i64> {
+    static SHIPPED: std::sync::LazyLock<Config> = std::sync::LazyLock::new(Config::default);
+    number_steps(&SHIPPED, id)
+}
+
+/// What a row that holds a number shows for the step it stands on, and nothing for any other row.
+fn number_text(config: &Config, id: SettingId) -> String {
+    match (number_spec(id), number_steps(config, id)) {
+        (Some(spec), Some(steps)) => spec.text(steps),
+        _ => String::new(),
+    }
+}
+
 /// Step the SKIN row between the bundled skins. The skin the run was started with is a launch
 /// override the document does not hold, so the program clears that before calling this.
 pub fn step_skin(config: &mut Config) {
@@ -1582,7 +1800,7 @@ mod tests {
                     assert_eq!(adjust(&mut config, id, wide), AdjustOutcome::Changed, "{id:?} stopped short of {percent}%");
                     let share = ranged_value(&config, id) as f32;
                     assert_eq!((share * THOUSANDTHS) as i32, percent * 10, "{id:?} at {percent}% in steps of {wide} holds {share}");
-                    assert_eq!(display_value(&config, id), format!("{percent}%"));
+                    assert_eq!(display_value(&config, id), format!("{percent}.0%"), "a shade is shown to the tenth it is counted in");
                 }
             }
         }
@@ -1797,7 +2015,7 @@ mod tests {
         assert_eq!(display_value(&config, SettingId::GreenNumber), "300", "PlayConfig.java:24 ships a duration of 500");
         assert_eq!(display_value(&config, SettingId::LaneOption), "OFF");
         assert_eq!(display_value(&config, SettingId::PlayEscapeMode), "IMMEDIATE", "escaping a run stays the one press it has always been");
-        assert_eq!(display_value(&config, SettingId::Hidden), "0%");
+        assert_eq!(display_value(&config, SettingId::Hidden), "0.0%");
         assert_eq!(display_value(&config, SettingId::EnableCover), ON_VALUE, "PlayConfig.java:66 ships the cover applied");
         assert_eq!(display_value(&config, SettingId::EnableLift), OFF_VALUE, "PlayConfig.java:74");
         assert_eq!(display_value(&config, SettingId::EnableHidden), OFF_VALUE, "PlayConfig.java:82");
@@ -1806,7 +2024,7 @@ mod tests {
         assert_eq!(display_value(&config, SettingId::PreviewFade), "200 MS");
         assert_eq!(display_value(&config, SettingId::Random), "OFF");
         assert_eq!(display_value(&config, SettingId::Gauge), "NORMAL");
-        assert_eq!(display_value(&config, SettingId::Lift), "0%");
+        assert_eq!(display_value(&config, SettingId::Lift), "0.0%");
         assert_eq!(display_value(&config, SettingId::ScratchSide), "RIGHT");
         assert_eq!(display_value(&config, SettingId::JudgeOffset), "+0 MS");
         assert_eq!(display_value(&config, SettingId::JudgeWidthKeyPGreat), "100%");
@@ -1976,5 +2194,161 @@ mod tests {
                 assert_eq!(tab_of(id), tab);
             }
         }
+    }
+
+    /// Every row that holds a number, with the smallest change it can hold as it is shown and the
+    /// two ends of the row as they are shown.
+    const NUMBER_ROWS: [(SettingId, &str, &str, &str); 23] = [
+        (SettingId::GreenNumber, "1", "1", "6000"),
+        (SettingId::HiSpeed, "0.01", "0.01", "20.00"),
+        (SettingId::HiSpeedStep, "0.01", "0.01", "1.00"),
+        (SettingId::LaneCover, "0.1%", "0.0%", "100.0%"),
+        (SettingId::Lift, "0.1%", "0.0%", "100.0%"),
+        (SettingId::Hidden, "0.1%", "0.0%", "100.0%"),
+        (SettingId::LaneCoverFineStep, "0.0001", "0.0001", "0.0100"),
+        (SettingId::JudgeOffset, "+1 MS", "-200 MS", "+200 MS"),
+        (SettingId::JudgeWidthKeyPGreat, "1%", "50%", "200%"),
+        (SettingId::JudgeWidthKeyGreat, "1%", "50%", "200%"),
+        (SettingId::JudgeWidthKeyGood, "1%", "50%", "200%"),
+        (SettingId::JudgeWidthScratchPGreat, "1%", "50%", "200%"),
+        (SettingId::JudgeWidthScratchGreat, "1%", "50%", "200%"),
+        (SettingId::JudgeWidthScratchGood, "1%", "50%", "200%"),
+        (SettingId::LongNoteMargin, "1%", "50%", "200%"),
+        (SettingId::Total, "1", "0", "5000"),
+        (SettingId::JudgeTextY, "1%", "0%", "100%"),
+        (SettingId::PreviewVolume, "1%", "0%", "100%"),
+        (SettingId::PreviewFade, "1 MS", "0 MS", "1000 MS"),
+        (SettingId::MasterVolume, "1%", "0%", "100%"),
+        (SettingId::KeyVolume, "1%", "0%", "100%"),
+        (SettingId::BgmVolume, "1%", "0%", "100%"),
+        (SettingId::SystemVolume, "1%", "0%", "100%"),
+    ];
+
+    /// The one row that holds a number and is not in [`NUMBER_ROWS`]: its range is a count of
+    /// voices, checked on its own.
+    const VOICES_ROW: SettingId = SettingId::AudioPolyphony;
+
+    #[test]
+    fn the_rows_that_hold_a_number_are_the_rows_of_a_range_and_no_other() {
+        for row in SETTINGS {
+            let ranged = matches!(row.kind, SettingKind::IntRange { .. } | SettingKind::FloatRange { .. } | SettingKind::Percent { .. });
+            assert_eq!(number_spec(row.id).is_some(), ranged, "{:?} is a {:?}", row.id, row.kind);
+            assert_eq!(number_steps(&Config::default(), row.id).is_some(), ranged, "{:?}", row.id);
+        }
+        let listed: Vec<SettingId> = NUMBER_ROWS.iter().map(|(id, ..)| *id).chain([VOICES_ROW]).collect();
+        for row in SETTINGS {
+            assert_eq!(listed.contains(&row.id), number_spec(row.id).is_some(), "{:?} is not checked row by row", row.id);
+        }
+    }
+
+    #[test]
+    fn every_number_row_is_counted_in_its_smallest_change_between_its_two_ends() {
+        for (id, smallest, low, high) in NUMBER_ROWS {
+            let spec = number_spec(id).expect("the row holds a number");
+            assert_eq!(spec.text(spec.min), low, "{id:?}");
+            assert_eq!(spec.text(spec.max), high, "{id:?}");
+            assert_eq!(spec.text(1), smallest, "{id:?}");
+        }
+        let voices = number_spec(VOICES_ROW).expect("the row holds a number");
+        assert_eq!((voices.min, voices.max, voices.per_one), (AUDIO_POLYPHONY_MIN_VOICES as i64, AUDIO_POLYPHONY_MAX_VOICES as i64, 1));
+    }
+
+    /// Every step of every row can be stored and reads back as itself, and what the row shows for
+    /// it is the step: nothing is lost between the count and the field it is stored in.
+    #[test]
+    fn every_step_of_every_number_row_is_stored_and_read_back() {
+        for id in NUMBER_ROWS.iter().map(|(id, ..)| *id).chain([VOICES_ROW]) {
+            let spec = number_spec(id).expect("the row holds a number");
+            let mut config = Config::default();
+            for steps in spec.min..=spec.max {
+                set_number_steps(&mut config, id, steps);
+                assert_eq!(number_steps(&config, id), Some(steps), "{id:?}");
+            }
+            for steps in (spec.min..=spec.max).rev() {
+                set_number_steps(&mut config, id, steps);
+                assert_eq!(number_steps(&config, id), Some(steps), "{id:?} on the way down");
+            }
+        }
+    }
+
+    /// A row moved one step at a time stands on every step on the way and shows it, however many
+    /// steps it is moved: the value stored is a count divided, not a sum of steps.
+    #[test]
+    fn a_row_moved_a_step_at_a_time_never_drifts_off_its_steps() {
+        let mut config = Config::default();
+        set_number_steps(&mut config, SettingId::LaneCover, 0);
+        for steps in 1..=1000 {
+            assert_eq!(move_number_steps(&mut config, SettingId::LaneCover, 1), AdjustOutcome::Changed);
+            assert_eq!(display_value(&config, SettingId::LaneCover), format!("{}.{}%", steps / 10, steps % 10));
+            assert_eq!((config.play.cover * 1000.0) as i64, steps, "the white number a skin cuts from a cover of {steps} tenths of a percent");
+        }
+        assert_eq!(move_number_steps(&mut config, SettingId::LaneCover, 1), AdjustOutcome::Unchanged, "the whole lane is the end of the row");
+
+        set_number_steps(&mut config, SettingId::HiSpeed, 1);
+        for steps in 2..=2000 {
+            move_number_steps(&mut config, SettingId::HiSpeed, 1);
+            assert_eq!(display_value(&config, SettingId::HiSpeed), format!("{}.{:02}", steps / 100, steps % 100));
+        }
+        assert_eq!(move_number_steps(&mut config, SettingId::HiSpeed, 10), AdjustOutcome::Unchanged);
+        assert_eq!(move_number_steps(&mut config, SettingId::HiSpeed, -10), AdjustOutcome::Changed);
+        assert_eq!(display_value(&config, SettingId::HiSpeed), "19.90");
+    }
+
+    #[test]
+    fn a_number_row_stops_at_its_ends_and_is_held_to_them() {
+        let mut config = Config::default();
+        assert_eq!(set_number_steps(&mut config, SettingId::JudgeOffset, 999), AdjustOutcome::Changed);
+        assert_eq!(config.judge.offset_ms, JUDGE_OFFSET_MAX_MS);
+        assert_eq!(move_number_steps(&mut config, SettingId::JudgeOffset, 1), AdjustOutcome::Unchanged);
+        assert_eq!(set_number_steps(&mut config, SettingId::JudgeOffset, i64::MIN), AdjustOutcome::Changed);
+        assert_eq!(config.judge.offset_ms, JUDGE_OFFSET_MIN_MS);
+        assert_eq!(set_number_steps(&mut config, SettingId::MasterVolume, 37), AdjustOutcome::Changed);
+        assert_eq!(display_value(&config, SettingId::MasterVolume), "37%");
+        assert_eq!(set_number_steps(&mut config, SettingId::AudioPolyphony, 500), AdjustOutcome::Changed);
+        assert_eq!(config.audio.polyphony, 500);
+        assert!(config.audio.reopen_pending(), "a count of voices reaches the stream only when it is opened again");
+        assert_eq!(set_number_steps(&mut config, SettingId::Total, 0), AdjustOutcome::Unchanged);
+        assert_eq!(display_value(&config, SettingId::Total), AUTO_VALUE);
+        assert_eq!(set_number_steps(&mut config, SettingId::Total, 321), AdjustOutcome::Changed);
+        assert_eq!(display_value(&config, SettingId::Total), "321");
+        assert_eq!(set_number_steps(&mut config, SettingId::Autoplay, 1), AdjustOutcome::Unchanged, "a switch holds no number");
+        assert_eq!(move_number_steps(&mut config, SettingId::Gauge, 1), AdjustOutcome::Unchanged, "a list holds no number");
+    }
+
+    /// A value between two steps is left as it is stored by a row put on the step it already reads
+    /// as, and goes onto the steps the first time it is moved.
+    #[test]
+    fn a_value_between_two_steps_reads_as_the_nearer_and_is_kept_until_it_is_moved() {
+        let mut config = Config::default();
+        config.play.cover = 0.25349;
+        assert_eq!(number_steps(&config, SettingId::LaneCover), Some(253));
+        assert_eq!(set_number_steps(&mut config, SettingId::LaneCover, 253), AdjustOutcome::Unchanged);
+        assert!((config.play.cover - 0.25349).abs() < f32::EPSILON, "a row put where it already reads was rewritten");
+        assert_eq!(move_number_steps(&mut config, SettingId::LaneCover, 1), AdjustOutcome::Changed);
+        assert!((config.play.cover - 0.254).abs() < f32::EPSILON);
+        assert_eq!(number_steps(&config, SettingId::LaneCover), Some(254));
+
+        config.play.duration_ms = 501;
+        assert_eq!(number_steps(&config, SettingId::GreenNumber), Some(300));
+        assert_eq!(set_number_steps(&mut config, SettingId::GreenNumber, 300), AdjustOutcome::Unchanged);
+        assert_eq!(config.play.duration_ms, 501);
+
+        config.play.total_override = 9000.0;
+        assert_eq!(number_steps(&config, SettingId::Total), Some(TOTAL_ROW_MAX), "a total past the row reads as its end");
+        assert_eq!(display_value(&config, SettingId::Total), "9000", "and is shown as what is stored");
+    }
+
+    /// The step [`adjust`] takes is the option panel's and a skin event's, which the count of steps
+    /// leaves as it was.
+    #[test]
+    fn the_step_of_the_option_panel_is_what_it_was() {
+        let mut config = Config::default();
+        config.play.hispeed = 2.0;
+        config.play.hispeed_step = 0.25;
+        adjust(&mut config, SettingId::HiSpeed, 1);
+        assert!((config.play.hispeed - 2.25).abs() < 1e-9);
+        config.play.cover = 0.0;
+        adjust(&mut config, SettingId::LaneCover, 1);
+        assert_eq!(display_value(&config, SettingId::LaneCover), "1.0%");
     }
 }

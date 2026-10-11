@@ -139,7 +139,7 @@ const PART_HIDDEN: f32 = 0.1;
 
 /// How many presses of an arrow with Shift held take a part from all of its opacity to none on the
 /// skin menu, and what its row reads then.
-const WIDE_STEPS_TO_NOTHING: usize = 4;
+const WIDE_STEPS_TO_NOTHING: usize = 10;
 const NOTHING_ON_THE_MENU: &str = "0%";
 
 /// The offset that leaves a part at `percent` of its opacity: what is added to its alpha, which is

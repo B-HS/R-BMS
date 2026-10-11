@@ -12,14 +12,21 @@
 //! browser ([`Shortcut::KeyConfig`]), and the button above the other two. That button is not one of
 //! the regions a frame registers ([`Hot`]): it is where the screen's layout says it is
 //! ([`key_config_link`]), and a press is tested against that.
+//!
+//! A row that holds a number -- a volume, a judge width, a fade -- is set as such a row is on every
+//! built-in screen ([`crate::number_row`]): an arrow moves it one step of the smallest change it
+//! can hold, and ten with Shift held; its slider is dragged; and Enter, or a press on the number,
+//! opens it to be typed into. A drag writes the settings file once, when the button comes back up.
 #![allow(clippy::wildcard_imports)]
 
 use crate::dialog::{DialogHandle, DialogState};
 use crate::ir_panel::*;
 use crate::ir_session::{AuthAction, GUEST_PLAYER_ID};
 use crate::keyconfig::Shortcut;
+use crate::number_row::{EDIT_HINT, EditKey, NumberInput, NumberValue, RowPart, hot_rect};
 use crate::settings_ui::{SettingRow, audio_status_text, is_network_row, step_audio_device};
-use crate::settings_view::{RivalsScene, SettingsLine, SettingsScene, key_config_link, settings_hint};
+use crate::settings_view::{RivalsScene, SettingsLine, SettingsScene, key_config_link, number_part_at, number_row_hint, settings_hint};
+use crate::stage::preview_menu::shift_after;
 use crate::stage::{Canvas, FrameCtx, KeyConfigState, KeyInput, PlayMenuState, SkinMenuState, Stage, StageHandler, Transition, is_left_press};
 use rbms_config::{AdjustOutcome, SettingId, SettingTab, adjust, step_skin};
 
@@ -66,10 +73,31 @@ pub(crate) struct SettingsState {
     rows: Vec<SettingRow>,
     lines: Vec<SettingsLine>,
     dirty: bool,
+    /// What the screen keeps about its rows that hold a number. Kept behind a pointer, because this
+    /// state is moved with every screen change.
+    numbers: Box<NumberRows>,
+}
+
+/// What the settings screen keeps about its rows that hold a number.
+struct NumberRows {
+    /// Which row is being typed into, and which is being dragged.
+    input: NumberInput<SettingId>,
+    /// Where a drag has carried a row whose number is stored when the drag ends
+    /// ([`applies_when_released`]), until it does.
+    carried: Option<(SettingId, i64)>,
+    /// Whether Shift is held, which turns one step of a number into ten.
+    shift_held: bool,
 }
 
 /// What the hint names as the key of a screen the player has left without one.
 const NO_KEY: &str = "-";
+
+/// Whether a row's number is stored when a drag of its slider ends rather than as the slider moves:
+/// the count of voices reaches the output stream only by opening it again, which a slider must not
+/// do at every place it passes.
+fn applies_when_released(id: SettingId) -> bool {
+    id == SettingId::AudioPolyphony
+}
 
 impl SettingsState {
     pub(crate) fn new() -> SettingsState {
@@ -96,13 +124,14 @@ impl SettingsState {
             rows: Vec::new(),
             lines: Vec::new(),
             dirty: true,
+            numbers: Box::new(NumberRows { input: NumberInput::new(), carried: None, shift_held: false }),
         }
     }
 
-    /// Whether one of the lists drawn over the rows, or the in-place editor, has the screen: the
+    /// Whether one of the lists drawn over the rows, or an in-place editor, has the screen: the
     /// keys and the buttons that leave it for another screen stand down while one does.
     fn is_busy(&self) -> bool {
-        self.rivals_open || self.profiles_open || self.text_input.is_some()
+        self.rivals_open || self.profiles_open || self.text_input.is_some() || self.numbers.input.editing().is_some()
     }
 
     /// The open tab.
@@ -111,9 +140,18 @@ impl SettingsState {
     }
 
     /// Re-read the open tab's rows and their values.
+    ///
+    /// A row a drag is carrying without storing it yet reads as where the drag has it.
     fn refresh(&mut self, shared: &AppShared) {
         self.rows = shared.settings_rows(self.current_tab());
         self.lines = self.rows.iter().map(|&row| shared.settings_scene_line(row)).collect();
+        if let Some((id, steps)) = self.numbers.carried
+            && let Some(line) = self.rows.iter().position(|row| *row == SettingRow::Fixed(id)).and_then(|at| self.lines.get_mut(at))
+            && let Some(number) = line.number.as_mut()
+        {
+            number.steps = steps;
+            line.value = number.spec.text(steps);
+        }
         self.sel = self.sel.min(self.rows.len().saturating_sub(1));
         self.dirty = false;
     }
@@ -146,13 +184,129 @@ impl SettingsState {
         Some(audio_status_text(shared.audio_report.as_ref(), shared.audio_failed))
     }
 
-    /// Apply one left/right step to a row. A row the configuration document cannot step on its own
-    /// comes back as an action this screen runs. A row a skin document declares is the skin menu's,
-    /// and no tab of this screen lists one.
-    fn step(&mut self, ctx: &mut FrameCtx<'_>, row: SettingRow, delta: i32) -> Transition {
+    /// The number one row holds as the screen shows it: what is stored, or where a drag has carried
+    /// a row whose number is stored when the drag ends.
+    fn number_of(&self, shared: &AppShared, id: SettingId) -> Option<NumberValue> {
+        let stored = shared.setting_number(id)?;
+        let steps = self.numbers.carried.filter(|(carried, _)| *carried == id).map_or(stored.steps, |(_, steps)| steps);
+        Some(NumberValue { steps, ..stored })
+    }
+
+    /// The row under the cursor and the number it holds, when it holds one.
+    fn focused_number(&self, shared: &AppShared) -> Option<(SettingId, NumberValue)> {
+        let id = self.focused_fixed()?;
+        self.number_of(shared, id).map(|value| (id, value))
+    }
+
+    /// Put one row that holds a number on the step `steps`. A volume reaches the output stream at
+    /// once, so a slider dragged along one is heard as it moves.
+    fn set_number(&mut self, ctx: &mut FrameCtx<'_>, id: SettingId, steps: i64) {
+        if !ctx.shared.set_row_number(SettingRow::Fixed(id), steps) {
+            return;
+        }
+        self.dirty = true;
+        if matches!(id, SettingId::MasterVolume | SettingId::KeyVolume | SettingId::BgmVolume | SettingId::SystemVolume) {
+            ctx.shared.apply_audio_gains();
+        }
+    }
+
+    /// Store what was typed into the row being typed into, and close its editor. What is not a
+    /// number is not stored, and the row says so for a while.
+    fn commit_number_edit(&mut self, ctx: &mut FrameCtx<'_>) {
+        let Some((id, typed)) = self.numbers.input.take_edit() else {
+            return;
+        };
+        let Some(value) = self.number_of(ctx.shared, id) else {
+            return;
+        };
+        if let Some(steps) = self.numbers.input.typed_steps(id, &value.spec, &typed, ctx.now) {
+            self.set_number(ctx, id, steps);
+        }
+    }
+
+    /// Carry the row being dragged to where the pointer is along its slider. The number is stored
+    /// as it moves, except for a row whose number is stored when the drag ends.
+    fn drag_to(&mut self, ctx: &mut FrameCtx<'_>, x: f32) {
+        let Some((id, _)) = self.numbers.input.dragged() else {
+            return;
+        };
+        let Some(steps) = self.number_of(ctx.shared, id).and_then(|value| self.numbers.input.dragged_to(&value, x)) else {
+            return;
+        };
+        if applies_when_released(id) {
+            self.numbers.carried = Some((id, steps));
+            self.dirty = true;
+        } else {
+            self.set_number(ctx, id, steps);
+        }
+    }
+
+    /// End a drag: store the number of a row that was only being carried, and write the settings
+    /// file, once for the whole drag.
+    fn end_drag(&mut self, ctx: &mut FrameCtx<'_>) {
+        if !self.numbers.input.end_drag() {
+            return;
+        }
+        if let Some((id, steps)) = self.numbers.carried.take() {
+            self.dirty = true;
+            self.set_number(ctx, id, steps);
+        }
+        ctx.shared.save_settings();
+    }
+
+    /// A press of the left button at `at` on `row`, the row at `index` of the open tab. On a row
+    /// that holds a number, a press on the slider begins a drag -- the row is put where the press
+    /// landed, unless it landed on the knob, which is taken hold of where it stands -- and one on
+    /// the number opens the row to be typed into. Any other press steps the row once.
+    fn press_row(&mut self, ctx: &mut FrameCtx<'_>, row: SettingRow, index: usize, at: (f32, f32)) -> Transition {
         let SettingRow::Fixed(id) = row else {
             return Transition::Stay;
         };
+        let part = hot_rect(ctx.shared, Hot::SettingRow(index)).map_or(RowPart::Rest, |drawn| number_part_at(drawn, at));
+        match (self.number_of(ctx.shared, id), part) {
+            (Some(value), RowPart::Slider(area)) => {
+                if !self.numbers.input.begin_drag(id, area, &value, at.0) {
+                    self.drag_to(ctx, at.0);
+                }
+            }
+            (Some(value), RowPart::Number) => self.numbers.input.begin_edit(id, &value),
+            (Some(_), RowPart::Rest) | (None, _) => return self.step(ctx, row, ROW_STEP_FORWARD, false),
+        }
+        Transition::Stay
+    }
+
+    /// A press of the right button at `at`: a row that holds a number goes one step back, so a step
+    /// taken by mistake with the mouse can be taken back with it. Any other row, and every row under
+    /// a list or an editor, is left alone.
+    fn step_back_under(&mut self, ctx: &mut FrameCtx<'_>, at: (f32, f32)) {
+        if self.rivals_open || self.profiles_open || self.text_input.is_some() {
+            return;
+        }
+        let Some(Hot::SettingRow(index)) = ctx.shared.hit_test(at) else {
+            return;
+        };
+        let Some(SettingRow::Fixed(id)) = self.rows.get(index).copied() else {
+            return;
+        };
+        self.commit_number_edit(ctx);
+        if let Some(value) = self.number_of(ctx.shared, id) {
+            self.sel = index;
+            self.set_number(ctx, id, value.stepped(ROW_STEP_BACK, false));
+        }
+    }
+
+    /// Apply one left/right step to a row. A row that holds a number moves one step of the smallest
+    /// change it can hold, and ten when `wide` asks. A row the configuration document cannot step on
+    /// its own comes back as an action this screen runs. A row a skin document declares is the skin
+    /// menu's, and no tab of this screen lists one.
+    fn step(&mut self, ctx: &mut FrameCtx<'_>, row: SettingRow, delta: i32, wide: bool) -> Transition {
+        let SettingRow::Fixed(id) = row else {
+            return Transition::Stay;
+        };
+        if let Some(value) = self.number_of(ctx.shared, id) {
+            self.set_number(ctx, id, value.stepped(delta, wide));
+            return Transition::Stay;
+        }
         let outcome = adjust(&mut ctx.shared.config, id, delta);
         if let AdjustOutcome::Action(action) = outcome {
             return self.run_action(ctx, action, delta);
@@ -463,8 +617,8 @@ impl SettingsState {
 
     /// Everything the settings screen draws this frame. The AUDIO tab owns the status line while it
     /// is open: it is the only place the engine's open report, and a reopen held back by a running
-    /// chart, are visible.
-    fn scene(&self, shared: &AppShared) -> SettingsScene {
+    /// chart, are visible. `now` is what a row that refused a typed figure stops saying so against.
+    fn scene(&self, shared: &AppShared, now: Instant) -> SettingsScene {
         let list_open = self.rivals_open || self.profiles_open;
         let editor = match (&self.text_input, list_open) {
             (Some(edit), false) => Some(editor_display(edit, self.text_secret)),
@@ -481,20 +635,40 @@ impl SettingsState {
             tab: self.tab.min(SettingTab::SHOWN.len() - 1),
             rows: self.lines.clone(),
             sel: self.sel.min(self.lines.len().saturating_sub(1)),
-            hint: settings_hint(
-                shared.shortcut_key(Shortcut::PlayMenu).map_or(NO_KEY, key_name),
-                shared.shortcut_key(Shortcut::SkinMenu).map_or(NO_KEY, key_name),
-                shared.shortcut_key(Shortcut::KeyConfig).map_or(NO_KEY, key_name),
-            ),
+            hint: self.hint(shared),
             editor,
             status: self.audio_status_line(shared).unwrap_or_else(|| shared.net_status.clone()),
             rivals,
+            typed: self.numbers.input.editing().and_then(|id| Some((self.row_at(id)?, self.numbers.input.edit_of(id)?.clone()))),
+            dragged: self.numbers.input.dragged().and_then(|(id, _)| self.row_at(id)),
+            refused: self.rows.iter().position(|row| matches!(row, SettingRow::Fixed(id) if self.numbers.input.is_refused(*id, now))),
         }
+    }
+
+    /// Where a row of the settings table is in the open tab.
+    fn row_at(&self, id: SettingId) -> Option<usize> {
+        self.rows.iter().position(|row| *row == SettingRow::Fixed(id))
+    }
+
+    /// The keys of the screen as the hint under the title names them: what a number being typed
+    /// takes, or the keys of the row under the cursor -- what sets its number when it holds one,
+    /// and the keys of the screen when it does not -- and the three that open the other screens.
+    fn hint(&self, shared: &AppShared) -> String {
+        if self.numbers.input.editing().is_some() {
+            return EDIT_HINT.to_string();
+        }
+        let key_of = |shortcut| shared.shortcut_key(shortcut).map_or(NO_KEY, key_name);
+        let (play_menu, skin_menu, key_config) = (key_of(Shortcut::PlayMenu), key_of(Shortcut::SkinMenu), key_of(Shortcut::KeyConfig));
+        if !self.is_busy() && self.focused_number(shared).is_some() {
+            return number_row_hint(play_menu, skin_menu, key_config);
+        }
+        settings_hint(play_menu, skin_menu, key_config)
     }
 
     /// Keys on the row list itself, once the editor and the rival list have had their turn.
     fn row_key(&mut self, ctx: &mut FrameCtx<'_>, key: &KeyInput<'_>) -> Transition {
         let focused = self.focused();
+        let number = self.focused_number(ctx.shared);
         match key.code {
             KeyCode::Escape => {
                 ctx.shared.save_settings();
@@ -510,12 +684,13 @@ impl SettingsState {
                     return Transition::Stay;
                 };
                 let Some(id) = self.focused_fixed() else {
-                    return self.step(ctx, row, ROW_STEP_FORWARD);
+                    return self.step(ctx, row, ROW_STEP_FORWARD, false);
                 };
-                match id {
-                    SettingId::KeyConfig => return Transition::Open(Stage::KeyConfig(KeyConfigState::new())),
-                    SettingId::Font => return self.run_action(ctx, SettingId::Font, ROW_STEP_FORWARD),
-                    _ if is_network_row(id) => return self.step(ctx, row, ROW_STEP_FORWARD),
+                match (id, number) {
+                    (_, Some((_, value))) => self.numbers.input.begin_edit(id, &value),
+                    (SettingId::KeyConfig, None) => return Transition::Open(Stage::KeyConfig(KeyConfigState::new())),
+                    (SettingId::Font, None) => return self.run_action(ctx, SettingId::Font, ROW_STEP_FORWARD),
+                    _ if is_network_row(id) => return self.step(ctx, row, ROW_STEP_FORWARD, false),
                     _ => {
                         ctx.shared.save_settings();
                         return Transition::Back;
@@ -526,12 +701,17 @@ impl SettingsState {
             KeyCode::ArrowDown => self.sel = (self.sel + 1).min(self.rows.len().saturating_sub(1)),
             KeyCode::ArrowLeft => {
                 if let Some(row) = focused {
-                    return self.step(ctx, row, ROW_STEP_BACK);
+                    return self.step(ctx, row, ROW_STEP_BACK, self.numbers.shift_held);
                 }
             }
             KeyCode::ArrowRight => {
                 if let Some(row) = focused {
-                    return self.step(ctx, row, ROW_STEP_FORWARD);
+                    return self.step(ctx, row, ROW_STEP_FORWARD, self.numbers.shift_held);
+                }
+            }
+            KeyCode::Digit0 | KeyCode::Numpad0 if number.is_some() => {
+                if let Some((id, value)) = number {
+                    self.set_number(ctx, id, value.shipped);
                 }
             }
             code if ctx.shared.is_shortcut(Shortcut::PlayMenu, code) => return Transition::Open(PlayMenuState::stage()),
@@ -568,15 +748,23 @@ impl StageHandler for SettingsState {
         Transition::Stay
     }
 
+    /// A key pressed while a slider is being dragged ends the drag first, which stores where the
+    /// drag had the row: the key that leaves the screen must not leave what the slider showed
+    /// behind, and neither must a drag whose button was never seen coming back up.
     fn handle_key(&mut self, ctx: &mut FrameCtx<'_>, key: KeyInput<'_>) -> Transition {
         if matches!(key.code, KeyCode::ControlLeft | KeyCode::ControlRight | KeyCode::SuperLeft | KeyCode::SuperRight) {
             self.paste_held = key.pressed;
+            return Transition::Stay;
+        }
+        if let Some(held) = shift_after(self.numbers.shift_held, &key) {
+            self.numbers.shift_held = held;
             return Transition::Stay;
         }
         if !key.pressed {
             return Transition::Stay;
         }
         self.ensure_rows(ctx.shared);
+        self.end_drag(ctx);
         if self.rivals_open {
             self.rivals_input(ctx.shared, &key);
             self.dirty = true;
@@ -592,14 +780,43 @@ impl StageHandler for SettingsState {
             self.dirty = true;
             return Transition::Stay;
         }
+        match self.numbers.input.edit_key(&key) {
+            Some(EditKey::Taken) => return Transition::Stay,
+            Some(EditKey::Cancel) => {
+                self.numbers.input.cancel_edit();
+                return Transition::Stay;
+            }
+            Some(EditKey::Commit) => {
+                self.commit_number_edit(ctx);
+                return Transition::Stay;
+            }
+            Some(EditKey::CommitThenPass) => self.commit_number_edit(ctx),
+            None => {}
+        }
         self.row_key(ctx, &key)
     }
 
+    /// A press of the left button acts on what it lands on, after storing a number that was being
+    /// typed. On a row that holds a number it takes hold of the slider, opens the number to be typed
+    /// into, or moves the row one step, by where on the row it lands; a press of the right button on
+    /// such a row moves it one step back. The left button coming back up ends a drag.
     fn handle_mouse(&mut self, ctx: &mut FrameCtx<'_>, at: (f32, f32), button: MouseButton, pressed: bool) -> Transition {
-        if !is_left_press(button, pressed) {
+        if !pressed {
+            if button == MouseButton::Left {
+                self.end_drag(ctx);
+            }
             return Transition::Stay;
         }
         self.ensure_rows(ctx.shared);
+        self.end_drag(ctx);
+        if button == MouseButton::Right {
+            self.step_back_under(ctx, at);
+            return Transition::Stay;
+        }
+        if !is_left_press(button, pressed) {
+            return Transition::Stay;
+        }
+        self.commit_number_edit(ctx);
         let link = key_config_link();
         if link.x <= at.0 && at.0 < link.x + link.w && link.y <= at.1 && at.1 < link.y + link.h {
             return if self.is_busy() { Transition::Stay } else { Transition::Open(Stage::KeyConfig(KeyConfigState::new())) };
@@ -619,7 +836,7 @@ impl StageHandler for SettingsState {
                 if let Some(row) = self.rows.get(i).copied() {
                     self.cancel_text_edit();
                     self.sel = i;
-                    return self.step(ctx, row, ROW_STEP_FORWARD);
+                    return self.press_row(ctx, row, i, at);
                 }
             }
             Some(Hot::RivalRow(i)) if self.profiles_open => self.profiles_click(ctx.shared, i),
@@ -629,9 +846,16 @@ impl StageHandler for SettingsState {
         Transition::Stay
     }
 
+    /// The cursor moving with a button held carries the row being dragged along its slider, wherever
+    /// on the screen the pointer is.
+    fn handle_mouse_drag(&mut self, ctx: &mut FrameCtx<'_>, at: (f32, f32)) -> Transition {
+        self.drag_to(ctx, at.0);
+        Transition::Stay
+    }
+
     fn draw(&mut self, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'_>) {
         self.ensure_rows(ctx.shared);
-        let scene = self.scene(ctx.shared);
+        let scene = self.scene(ctx.shared, ctx.now);
         canvas.clear_bga();
         let hot = render_settings(canvas, &scene);
         ctx.shared.hot.extend(hot.into_iter().filter_map(|(rect, h)| {
@@ -650,6 +874,8 @@ impl StageHandler for SettingsState {
 
 #[cfg(test)]
 mod note_tests;
+#[cfg(test)]
+mod number_tests;
 #[cfg(test)]
 mod play_tests;
 #[cfg(test)]
@@ -792,7 +1018,7 @@ mod tests {
         let mut app = app();
         let mut state = SettingsState::new();
         let mode = app.shared.mode;
-        assert!(state.scene(&app.shared).hint.contains("F8 PLAY   F12 SKINS   F5 KEYS"), "{}", state.scene(&app.shared).hint);
+        assert!(state.scene(&app.shared, Instant::now()).hint.contains("F8 PLAY   F12 SKINS   F5 KEYS"), "{}", state.scene(&app.shared, Instant::now()).hint);
         assert!(matches!(state.handle_key(&mut ctx(&mut app), press(KeyCode::F8)), Transition::Open(Stage::PlayMenu(_))), "the key the play menu ships on");
         app.shared.keyconfig.bind(mode, Bindable::Shortcut(Shortcut::KeyConfig), Some(KeyCode::F6));
         app.shared.keyconfig.bind(mode, Bindable::Shortcut(Shortcut::SkinMenu), Some(KeyCode::F7));
@@ -803,9 +1029,13 @@ mod tests {
         assert!(matches!(state.handle_key(&mut ctx(&mut app), press(KeyCode::F6)), Transition::Open(Stage::KeyConfig(_))));
         assert!(matches!(state.handle_key(&mut ctx(&mut app), press(KeyCode::F7)), Transition::Open(Stage::SkinMenu(_))));
         assert!(matches!(state.handle_key(&mut ctx(&mut app), press(KeyCode::F10)), Transition::Open(Stage::PlayMenu(_))));
-        assert!(state.scene(&app.shared).hint.contains("F10 PLAY   F7 SKINS   F6 KEYS"), "{}", state.scene(&app.shared).hint);
+        assert!(state.scene(&app.shared, Instant::now()).hint.contains("F10 PLAY   F7 SKINS   F6 KEYS"), "{}", state.scene(&app.shared, Instant::now()).hint);
         app.shared.keyconfig.bind(mode, Bindable::Shortcut(Shortcut::PlayMenu), None);
-        assert!(state.scene(&app.shared).hint.contains("- PLAY"), "a menu left without a key is not named as one: {}", state.scene(&app.shared).hint);
+        assert!(
+            state.scene(&app.shared, Instant::now()).hint.contains("- PLAY"),
+            "a menu left without a key is not named as one: {}",
+            state.scene(&app.shared, Instant::now()).hint
+        );
     }
 
     /// The screen draws the button to the key editor where a press is tested for it, at the size the

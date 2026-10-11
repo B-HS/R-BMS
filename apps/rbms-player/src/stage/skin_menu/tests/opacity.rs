@@ -100,12 +100,12 @@ fn the_opacities_of_a_skin_are_listed_together_under_their_own_names() {
     }
 }
 
-/// An opacity row is stepped five percent by an arrow and by Enter, a quarter of the way with
-/// Shift held, stops at none of it and at two hundred percent, and is put back to a hundred by the
-/// zero key. A press of the right button takes a step back and one of the left a step forwards.
-/// What is stored is the alpha offset, and the document is not read again.
+/// An opacity row is stepped one percent by an arrow and ten with Shift held, stops at none of it
+/// and at all of it, and is put back to a hundred by the zero key. A press of the right button
+/// takes a step back and one of the left on the row's label a step forwards. What is stored is the
+/// alpha offset, and the document is not read again.
 #[test]
-fn an_opacity_row_is_stepped_by_five_and_by_twenty_five_percent_and_put_back_by_the_zero_key() {
+fn an_opacity_row_is_stepped_by_one_and_by_ten_percent_and_put_back_by_the_zero_key() {
     let mut menu = Menu::over(app_with_fading_play("opacity-keys"));
     let screen = menu.app.shared.config.skin.screen;
     let build = menu.app.shared.skins.build_of(screen);
@@ -113,29 +113,21 @@ fn an_opacity_row_is_stepped_by_five_and_by_twenty_five_percent_and_put_back_by_
     menu.focus(row);
 
     menu.key(KeyCode::ArrowRight);
-    assert_eq!(
-        (menu.value_of(row).as_str(), menu.stored_alpha(FADING_GROUND_OPACITY)),
-        ("105% (+13)", Some(opacity_alpha(105))),
-        "an opacity cannot be added to"
-    );
+    menu.shifted(KeyCode::ArrowRight);
+    assert_eq!((menu.value_of(row).as_str(), menu.stored_alpha(FADING_GROUND_OPACITY)), ("100%", None), "an opacity went past all of it");
     menu.key(KeyCode::ArrowLeft);
-    menu.key(KeyCode::ArrowLeft);
+    assert_eq!((menu.value_of(row).as_str(), menu.stored_alpha(FADING_GROUND_OPACITY)), ("99%", Some(opacity_alpha(99))), "one press is not one percent");
+    menu.keys(KeyCode::ArrowLeft, 4);
     assert_eq!((menu.value_of(row).as_str(), menu.stored_alpha(FADING_GROUND_OPACITY)), ("95%", Some(opacity_alpha(95))));
     menu.shifted(KeyCode::ArrowLeft);
-    assert_eq!((menu.value_of(row).as_str(), menu.stored_alpha(FADING_GROUND_OPACITY)), ("70%", Some(opacity_alpha(70))), "Shift is not a quarter of the way");
-    menu.key(KeyCode::Enter);
-    assert_eq!(menu.value_of(row), "75%", "Enter is not one step forwards");
-    for expected in ["100%", "125% (+64)", "150% (+128)", "175% (+191)", "200% (+255)", "200% (+255)"] {
-        menu.shifted(KeyCode::ArrowRight);
-        assert_eq!(menu.value_of(row), expected);
-    }
-    assert_eq!(menu.stored_alpha(FADING_GROUND_OPACITY), Some(255.0), "two hundred percent is not the whole alpha added");
-    menu.key(KeyCode::ArrowRight);
-    assert_eq!(menu.value_of(row), "200% (+255)", "an opacity went past the whole alpha added");
+    assert_eq!((menu.value_of(row).as_str(), menu.stored_alpha(FADING_GROUND_OPACITY)), ("85%", Some(opacity_alpha(85))), "Shift is not ten percent");
+    menu.shifted(KeyCode::ArrowRight);
+    menu.shifted(KeyCode::ArrowRight);
+    assert_eq!(menu.value_of(row), "100%", "a wide step past all of the opacity did not stop at it");
     menu.key(KeyCode::Digit0);
     assert_eq!(menu.value_of(row), "100%");
 
-    for expected in ["75%", "50%", "25%", "0%", "0%"] {
+    for expected in ["90%", "80%", "70%", "60%", "50%", "40%", "30%", "20%", "10%", "0%", "0%"] {
         menu.shifted(KeyCode::ArrowLeft);
         assert_eq!(menu.value_of(row), expected);
     }
@@ -144,21 +136,18 @@ fn an_opacity_row_is_stepped_by_five_and_by_twenty_five_percent_and_put_back_by_
     assert_eq!(menu.value_of(row), "0%", "an opacity went below none");
     menu.shifted(KeyCode::ArrowRight);
     menu.key(KeyCode::ArrowLeft);
-    assert_eq!(menu.value_of(row), "20%", "a wide step from none did not land on a step");
+    assert_eq!(menu.value_of(row), "9%");
 
     menu.key(KeyCode::Digit0);
     assert_eq!((menu.value_of(row).as_str(), menu.stored_alpha(FADING_GROUND_OPACITY)), ("100%", Some(0.0)), "the zero key did not put the opacity back");
 
     menu.frame();
-    let on_row = menu.middle_of_hot(Hot::SkinMenuRow(menu.at(row)));
-    let right = |menu: &mut Menu, at| {
-        menu.state.handle_mouse(&mut FrameCtx { shared: &mut menu.app.shared, now: std::time::Instant::now(), dt: 0.0 }, at, MouseButton::Right, true)
-    };
-    right(&mut menu, on_row);
-    right(&mut menu, on_row);
-    assert_eq!(menu.value_of(row), "90%", "the right button did not step the opacity back");
+    let on_row = menu.on_the_label_of(row);
+    menu.right_click(on_row);
+    menu.right_click(on_row);
+    assert_eq!(menu.value_of(row), "98%", "the right button did not step the opacity back");
     menu.click(on_row);
-    assert_eq!(menu.value_of(row), "95%", "the left button did not step it forwards");
+    assert_eq!(menu.value_of(row), "99%", "the left button did not step it forwards");
     assert_eq!(menu.app.shared.skins.build_of(screen), build, "an opacity had the document read again");
     assert_eq!(menu.value_of(menu.row_called(FADING_NOTES_ROW)), "100%", "one opacity moved another");
 }
@@ -183,7 +172,7 @@ fn the_alpha_of_an_offset_that_also_moves_stays_a_number() {
 #[test]
 fn the_opacities_survive_the_settings_file() {
     let mut menu = Menu::over(app_with_fading_play("opacity-persist"));
-    for (label, wide_steps) in [(FADING_GROUND_ROW, 4), (FADING_PANEL_ROW, 2)] {
+    for (label, wide_steps) in [(FADING_GROUND_ROW, 10), (FADING_PANEL_ROW, 5)] {
         menu.focus(menu.row_called(label));
         for _ in 0..wide_steps {
             menu.shifted(KeyCode::ArrowLeft);
@@ -217,15 +206,13 @@ fn the_preview_is_drawn_with_an_opacity_on_the_frame_after_its_row_moved() {
     assert_eq!(menu.previewed(ON_THE_PANEL), Color::rgb(FADING_PANEL.1.0, FADING_PANEL.1.1, FADING_PANEL.1.2), "the panel is not where the skin put it");
 
     menu.focus(menu.row_called(FADING_PANEL_ROW));
-    menu.shifted(KeyCode::ArrowLeft);
-    menu.shifted(KeyCode::ArrowLeft);
+    (0..5).for_each(|_| menu.shifted(KeyCode::ArrowLeft));
     assert_eq!(menu.stored_alpha(FADING_PANEL_OPACITY), Some(opacity_alpha(50)));
     menu.frame();
     assert_eq!(*menu.state.preview.status(), PreviewStatus::Drawn, "a step of an opacity cost a frame of the preview");
     assert_eq!(menu.previewed(ON_THE_PANEL), over_black(FADING_PANEL.1, HALF_ALPHA), "the panel is not at half on the frame after its row moved");
 
-    menu.shifted(KeyCode::ArrowLeft);
-    menu.shifted(KeyCode::ArrowLeft);
+    (0..5).for_each(|_| menu.shifted(KeyCode::ArrowLeft));
     menu.frame();
     assert_eq!(menu.previewed(ON_THE_PANEL), Color::rgb(0, 0, 0), "a panel with none of its opacity left is drawn");
     assert_eq!(menu.app.shared.skins.build_of(screen), build, "an opacity had the document read again");
@@ -242,7 +229,7 @@ fn the_opacity_rows_of_a_play_skin_can_be_captured() {
     let mut menu = Menu::over(app_with_fading_play("opacity-capture"));
     assert_eq!(menu.until_said(), PreviewStatus::Drawn);
     menu.capture_at("skin-menu-opacity-all", CAPTURE_SECONDS);
-    for (label, wide_steps) in [(FADING_GROUND_ROW, 4), (FADING_LINE_ROW, 4), (FADING_PANEL_ROW, 2)] {
+    for (label, wide_steps) in [(FADING_GROUND_ROW, 10), (FADING_LINE_ROW, 10), (FADING_PANEL_ROW, 5)] {
         menu.focus(menu.row_called(label));
         for _ in 0..wide_steps {
             menu.shifted(KeyCode::ArrowLeft);
@@ -260,12 +247,13 @@ fn the_opacity_rows_of_a_play_skin_can_be_captured() {
 
 /// Every offset row of the seven-key play skin of the pack [`SKIN_PACK_ENV`] names behaves as its
 /// kind says, whatever the pack calls it: an offset the pack lets the player move along its alpha
-/// alone reads in percent, a hundred with nothing stored, steps five percent either way and is
-/// stored as the alpha offset that comes to; every other axis reads the number that is added and
-/// steps by one, as it always did. Each row is put back as it was found.
+/// alone reads in percent, a hundred with nothing stored, steps one percent down from there and no
+/// further up, and is stored as the alpha offset that comes to; every other axis reads the number
+/// that is added and steps by one, as it always did. Each row is put back as it was found.
 ///
 /// A published pack names such an offset on a shade it lays over a lane and brings up with it, so
-/// a step above a hundred has to be there for it. Opt-in, because the pack is outside the
+/// a percent above a hundred has to be there for it: a figure typed into the row reaches it, and
+/// the arrows then step the row from where it stands. Opt-in, because the pack is outside the
 /// repository: without the variable this checks nothing.
 #[test]
 fn the_offset_rows_of_the_pack_the_environment_names_behave_as_their_kind_says() {
@@ -294,10 +282,17 @@ fn the_offset_rows_of_the_pack_the_environment_names_behave_as_their_kind_says()
             Some(SkinRowKind::Opacity) => {
                 assert_eq!(menu.value_of(row), "100%", "{label} does not open at a hundred percent");
                 menu.key(KeyCode::ArrowRight);
-                assert_eq!(menu.value_of(row), "105% (+13)", "{label} cannot be added to");
+                assert_eq!(menu.value_of(row), "100%", "{label}: an arrow carried an opacity past all of it");
                 menu.key(KeyCode::ArrowLeft);
+                assert_eq!(menu.value_of(row), "99%", "{label}");
+                menu.key(KeyCode::Enter);
+                for digit in ["1", "5", "0"] {
+                    menu.typed(digit);
+                }
+                menu.key(KeyCode::Enter);
+                assert_eq!(menu.value_of(row), "150% (+128)", "{label} cannot be added to");
                 menu.key(KeyCode::ArrowLeft);
-                assert_eq!(menu.value_of(row), "95%", "{label}");
+                assert_eq!(menu.value_of(row), "149% (+125)", "{label} is not stepped from where a typed figure put it");
                 assert_eq!(row_help(&menu.app.shared, row), OPACITY_HELP, "{label}");
             }
             Some(SkinRowKind::Offset(axis)) => {
@@ -348,7 +343,7 @@ const SHIPPED_BARE_ROWS: [&str; 9] = [
 ];
 
 /// The parts of the shipped pack's seven-key play skin are taken off its preview with the keys of
-/// the menu: each of [`SHIPPED_BARE_ROWS`] opens at a hundred percent and is at none after four
+/// the menu: each of [`SHIPPED_BARE_ROWS`] opens at a hundred percent and is at none after ten
 /// presses of the left arrow with Shift held, the preview is drawn on the frame after each with
 /// the document never read again, and what is stored for each is the offset that takes all of an
 /// alpha away. The zero key puts each back.
@@ -363,10 +358,10 @@ fn the_parts_of_the_shipped_play_skin_are_taken_off_its_preview_with_the_keys_of
         assert_eq!(menu.value_of(row), "100%", "{label} does not open at a hundred percent");
         assert_eq!(row_help(&menu.app.shared, row), OPACITY_HELP, "{label}");
         menu.focus(row);
-        for _ in 0..4 {
+        for _ in 0..10 {
             menu.shifted(KeyCode::ArrowLeft);
         }
-        assert_eq!(menu.value_of(row), "0%", "{label} was not taken to nothing by four wide steps");
+        assert_eq!(menu.value_of(row), "0%", "{label} was not taken to nothing by ten wide steps");
         menu.frame();
         assert_eq!(*menu.state.preview.status(), PreviewStatus::Drawn, "taking {label} to nothing cost a frame of the preview");
     }
@@ -385,3 +380,5 @@ fn the_parts_of_the_shipped_play_skin_are_taken_off_its_preview_with_the_keys_of
         assert_eq!(menu.value_of(row), "100%", "{label} was not put back by the zero key");
     }
 }
+
+mod numbers;

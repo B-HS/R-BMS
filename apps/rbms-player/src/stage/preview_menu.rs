@@ -10,6 +10,12 @@
 //! What is not here is what a row is. A menu builds its own rows, steps them through its own calls
 //! and says what each is for; it hands this module the words to write.
 //!
+//! A row that holds a number is drawn with a slider before its number ([`ListEntry::number`]), and
+//! a press on such a row is told by where on the row it landed ([`number_part_at`]): on the slider
+//! it drags the row, and on the number it opens the row to be typed into. How a row is counted,
+//! dragged and typed into is not this module's either ([`crate::number_row`]); it says where on a
+//! row the slider and the number go.
+//!
 //! Everything is laid out in the fixed space every built-in screen is laid out in
 //! ([`crate::stage::canvas::UI_SIZE`]).
 
@@ -17,6 +23,8 @@ use rbms_render::{Color, Rect, Renderer, draw_text, draw_text_centered, draw_tex
 use winit::event::MouseButton;
 use winit::keyboard::KeyCode;
 
+use crate::number_row::{NumberEdit, RowPart, SliderLook, draw_edit, draw_refusal, draw_slider, hot_rect, row_part};
+pub(crate) use crate::number_row::{ONE_STEP, SHIFT_STEPS};
 use crate::skin_preview::region::with_region;
 use crate::skin_preview::{PreviewStatus, SkinPreview};
 use crate::stage::{Canvas, FrameCtx, KeyInput};
@@ -112,6 +120,14 @@ pub(crate) const VALUE_SCALE: f32 = 1.4;
 pub(crate) const VALUE_MAX_SHARE: f32 = 0.55;
 pub(crate) const LABEL_GAP: f32 = 12.0;
 
+/// A row that holds a number: how wide the room its number is written in is, how wide the slider
+/// before it, and the gap between the two. The number has a room of its own, whatever it reads, so
+/// the slider stands in the same place on every row and does not move under a pointer dragging it
+/// when the number grows a digit.
+const NUMBER_VALUE_W: f32 = 58.0;
+const SLIDER_W: f32 = 100.0;
+const SLIDER_GAP: f32 = 10.0;
+
 /// The most bytes one character is written in, which is the buffer a character is measured from.
 pub(crate) const UTF8_MAX_BYTES: usize = 4;
 
@@ -173,11 +189,6 @@ pub(crate) const INFO_ROW_UNDER_FIGURES_Y: f32 = 54.0;
 pub(crate) const ROW_STEP_FORWARD: i32 = 1;
 pub(crate) const ROW_STEP_BACK: i32 = -1;
 
-/// How many steps one press of an arrow moves a row by, and by how many with Shift held, for the
-/// rows a menu steps further with it.
-pub(crate) const ONE_STEP: u8 = 1;
-pub(crate) const SHIFT_STEPS: u8 = 10;
-
 /// One step along the strip of tabs: forwards, and back.
 pub(crate) const NEXT_TAB: i32 = 1;
 pub(crate) const PREVIOUS_TAB: i32 = -1;
@@ -199,12 +210,28 @@ pub(crate) enum RowLook {
 }
 
 /// One entry of the list as it is written: its label, its value already cut to the room it has
-/// ([`fitted_value`]), and how it is drawn.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// ([`fitted_value`]), how it is drawn, and its slider when it holds a number.
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ListEntry<'a> {
     pub(crate) label: &'a str,
     pub(crate) value: String,
     pub(crate) look: RowLook,
+    /// The slider of a row that holds a number, or `None` for a row that holds none. The value of
+    /// such a row is written in the room a number has ([`number_value_room`]).
+    pub(crate) number: Option<NumberCell<'a>>,
+}
+
+/// What is drawn on a row that holds a number besides its label and its value.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct NumberCell<'a> {
+    /// How far along its slider the row stands, from nothing to one.
+    pub(crate) fraction: f32,
+    /// Whether the row is being dragged, and so drawn as one that is.
+    pub(crate) dragged: bool,
+    /// The figure being typed into the row, which is drawn in place of the slider and the number.
+    pub(crate) edit: Option<&'a NumberEdit>,
+    /// Whether the row is saying that what was typed into it was not a number.
+    pub(crate) refused: bool,
 }
 
 /// One figure of the row a panel can be led with: what it is called, the figure and the colour it
@@ -267,6 +294,42 @@ pub(crate) fn row_room() -> f32 {
 /// A row's value cut to the room a value has, at its end.
 pub(crate) fn fitted_value(value: &str) -> String {
     fit_text(value, VALUE_SCALE, row_room() * VALUE_MAX_SHARE)
+}
+
+/// The room the number of a row that holds one is written in.
+#[cfg(test)]
+pub(crate) const fn number_value_room() -> f32 {
+    NUMBER_VALUE_W
+}
+
+/// Where the number of a row that holds one is written, on the row drawn at `row`: against the
+/// row's right edge. A press there opens the row to be typed into.
+pub(crate) fn number_value_rect(row: Rect) -> Rect {
+    Rect::new(row.x + row.w - ROW_PAD - NUMBER_VALUE_W, row.y, NUMBER_VALUE_W + ROW_PAD, row.h)
+}
+
+/// Where the slider of a row that holds a number is drawn, on the row drawn at `row`: before the
+/// number, as tall as the row, so a press anywhere over it takes hold of it.
+pub(crate) fn slider_rect(row: Rect) -> Rect {
+    Rect::new(row.x + row.w - ROW_PAD - NUMBER_VALUE_W - SLIDER_GAP - SLIDER_W, row.y, SLIDER_W, row.h)
+}
+
+/// Where a figure being typed into a row is drawn, on the row drawn at `row`: over the slider and
+/// the number both.
+pub(crate) fn number_edit_rect(row: Rect) -> Rect {
+    let slider = slider_rect(row);
+    Rect::new(slider.x, row.y, row.x + row.w - ROW_PAD * 0.5 - slider.x, row.h)
+}
+
+/// Which part of a row that holds a number a press at `at` landed on, the row being what the last
+/// frame made clickable as `hot`.
+pub(crate) fn number_part_at(shared: &AppShared, hot: Hot, at: (f32, f32)) -> RowPart {
+    hot_rect(shared, hot).map_or(RowPart::Rest, |row| row_part(slider_rect(row), number_value_rect(row), at))
+}
+
+/// The room the label of a row that holds a number has: what its slider leaves.
+pub(crate) fn number_label_room() -> f32 {
+    slider_rect(row_rect(0)).x - LABEL_GAP - (row_rect(0).x + ROW_PAD)
 }
 
 /// The whole length the scroll bar's thumb travels, which is drawn under it so the thumb's own
@@ -424,12 +487,17 @@ pub(crate) fn draw_tabs<'a>(
 /// `entry` is asked for the entries on show and no others. A value is written as it is handed over:
 /// cutting it to its room is the menu's ([`fitted_value`]), because a menu may have a row whose
 /// value is cut another way. A label is cut to what its value leaves.
+///
+/// A row that holds a number has its slider before its number, each in a room of its own, and the
+/// label has what the slider leaves. The row is clickable as any row is; which part of it a press
+/// landed on is told from where the row was drawn ([`number_part_at`]). While the row is being
+/// typed into, the figure typed is drawn where the slider and the number were.
 pub(crate) fn draw_list<'a>(shared: &mut AppShared, canvas: &mut Canvas<'_>, list: ListWindow, entry: impl Fn(usize) -> ListEntry<'a>, hot: fn(usize) -> Hot) {
     let colors = theme();
     canvas.fill_rect(LIST_RECT, colors.panel);
     let shown = list.top..(list.top + VISIBLE_ROWS).min(list.len);
     for (slot, index) in shown.enumerate() {
-        let ListEntry { label, value, look } = entry(index);
+        let ListEntry { label, value, look, number } = entry(index);
         let rect = row_rect(slot);
         if look == RowLook::Heading {
             draw_text(canvas, rect.x + ROW_PAD, rect.y + LABEL_TEXT_Y, LABEL_SCALE, colors.accent, &fit_text(label, LABEL_SCALE, row_room()));
@@ -439,15 +507,35 @@ pub(crate) fn draw_list<'a>(shared: &mut AppShared, canvas: &mut Canvas<'_>, lis
         if on {
             canvas.fill_rect(rect, colors.button);
         }
-        let label = fit_text(label, LABEL_SCALE, row_room() - text_width(&value, VALUE_SCALE) - LABEL_GAP);
         let (label_color, value_color) = match (look, on) {
             (RowLook::ReadOnly, true) => (colors.text_dim, colors.text_dim),
             (RowLook::ReadOnly, false) => (colors.text_muted, colors.text_muted),
             (_, true) => (colors.text, Color::YELLOW),
             (_, false) => (colors.text_dim, colors.text),
         };
-        draw_text(canvas, rect.x + ROW_PAD, rect.y + LABEL_TEXT_Y, LABEL_SCALE, label_color, &label);
-        draw_text_right(canvas, rect.x + rect.w - ROW_PAD, rect.y + VALUE_TEXT_Y, VALUE_SCALE, value_color, &value);
+        let Some(cell) = number else {
+            let label = fit_text(label, LABEL_SCALE, row_room() - text_width(&value, VALUE_SCALE) - LABEL_GAP);
+            draw_text(canvas, rect.x + ROW_PAD, rect.y + LABEL_TEXT_Y, LABEL_SCALE, label_color, &label);
+            draw_text_right(canvas, rect.x + rect.w - ROW_PAD, rect.y + VALUE_TEXT_Y, VALUE_SCALE, value_color, &value);
+            shared.hot.push((rect, hot(index)));
+            continue;
+        };
+        draw_text(canvas, rect.x + ROW_PAD, rect.y + LABEL_TEXT_Y, LABEL_SCALE, label_color, &fit_text(label, LABEL_SCALE, number_label_room()));
+        let slider = slider_rect(rect);
+        if let Some(edit) = cell.edit {
+            draw_edit(canvas, number_edit_rect(rect), rect.y + VALUE_TEXT_Y, VALUE_SCALE, edit);
+        } else if cell.refused {
+            draw_refusal(canvas, rect.x + rect.w - ROW_PAD, rect.y + VALUE_TEXT_Y, VALUE_SCALE);
+        } else {
+            let slider_look = match (look, cell.dragged, on) {
+                (RowLook::ReadOnly, _, _) => SliderLook::Locked,
+                (_, true, _) => SliderLook::Dragged,
+                (_, false, true) => SliderLook::Focused,
+                (_, false, false) => SliderLook::Plain,
+            };
+            draw_slider(canvas, slider, cell.fraction, slider_look);
+            draw_text_right(canvas, rect.x + rect.w - ROW_PAD, rect.y + VALUE_TEXT_Y, VALUE_SCALE, value_color, &fit_text(&value, VALUE_SCALE, NUMBER_VALUE_W));
+        }
         shared.hot.push((rect, hot(index)));
     }
     if list.len <= VISIBLE_ROWS {

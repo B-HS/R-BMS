@@ -25,6 +25,14 @@
 //! play screen works its own speed out with. This screen writes the settings and tells the preview
 //! that one moved; the mode and the tempo it hands over as what to show.
 //!
+//! A row that holds a number -- a speed, a cover, the judge offset, an offset of the play skin -- is
+//! set as such a row is on every built-in screen ([`crate::number_row`]): an arrow moves it one step
+//! of the smallest change it can hold, and ten with Shift held; its slider is dragged, and the
+//! preview follows it frame by frame; and Enter, or a press on the number, opens it to be typed
+//! into. A drag writes the settings file once, when the button comes back up. In the list such a row
+//! reads as its number alone, in the room its slider leaves; what the number comes to -- the white
+//! number of a cover, the travel time of a green number -- is said under the preview.
+//!
 //! The screen is opened over the screen it was asked for from, which Escape goes back to after the
 //! settings have been written out.
 
@@ -34,13 +42,14 @@ use rbms_skin::loader::{SKIN_TYPE_PLAY_5KEYS, SKIN_TYPE_PLAY_7KEYS, SKIN_TYPE_PL
 use winit::event::MouseButton;
 use winit::keyboard::KeyCode;
 
+use crate::number_row::{EDIT_HINT, EditKey, NumberInput, NumberValue, RowPart};
 use crate::skin_preview::target::SpeedReadout;
 use crate::skin_preview::{PlayTarget, SkinPreview};
 use crate::skin_select::{SkinRow, SkinRowKind};
 use crate::stage::preview_menu::{
-    INFO_ROW_UNDER_FIGURES_Y, InfoFigure, LIST_RECT, ListEntry, ListWindow, NEXT_TAB, PREVIOUS_TAB, ROW_STEP_BACK, ROW_STEP_FORWARD, RowLook, VISIBLE_ROWS,
-    click_step, contains, draw_head, draw_hint, draw_info_figures, draw_info_panel, draw_info_row_at, draw_list, draw_preview, draw_tabs, fitted_value,
-    last_top, revealed_top, shift_after, stepped_tab, wheel_scrolled,
+    INFO_ROW_UNDER_FIGURES_Y, InfoFigure, LIST_RECT, ListEntry, ListWindow, NEXT_TAB, NumberCell, PREVIOUS_TAB, ROW_STEP_BACK, ROW_STEP_FORWARD, RowLook,
+    VISIBLE_ROWS, click_step, contains, draw_head, draw_hint, draw_info_figures, draw_info_panel, draw_info_row_at, draw_list, draw_preview, draw_tabs,
+    fitted_value, last_top, number_part_at, revealed_top, shift_after, stepped_tab, wheel_scrolled,
 };
 use crate::stage::skin_menu::automatic_offset_help;
 use crate::stage::{Canvas, FrameCtx, KeyInput, Stage, StageHandler, Transition, is_left_press};
@@ -49,8 +58,8 @@ use crate::{AppShared, Hot};
 mod rows;
 
 use rows::{
-    BPM_UNIT, Fold, Folds, Line, PREVIEW_BPM_LABEL, Row, bpm_value, fold_value, folded, help, hispeed_figure, is_read_only, listed, reset_setting,
-    setting_value, step_setting,
+    BPM_UNIT, Fold, Folds, Line, PREVIEW_BPM_LABEL, Row, bpm_value, fold_value, folded, help, hispeed_figure, is_read_only, listed, number_figure, number_of,
+    reset_setting, setting_value, step_setting,
 };
 
 /// The screen's title.
@@ -93,7 +102,7 @@ const LIMIT_NOTE: &str = "HI-SPEED IS AT THE END OF ITS RANGE: NO SPEED HOLDS TH
 
 /// The keys of the screen, written along its foot.
 const HINT: &str =
-    "UP DOWN MOVE   LEFT RIGHT CHANGE   SHIFT x10, OPACITY 25%   ENTER NEXT   0 DEFAULT   TAB MODE   WHEEL SCROLL   RIGHT CLICK BACK   ESC SAVE/BACK";
+    "UP DOWN MOVE   LEFT RIGHT CHANGE   SHIFT x10   ENTER NEXT OR TYPE   0 DEFAULT   DRAG A SLIDER   TAB MODE   WHEEL SCROLL   RIGHT CLICK BACK   ESC SAVE";
 
 /// The play menu's own state: the preview on its right, the mode and the tempo it is shown on, the
 /// rows it lists and where the cursor and the list are, and the modifier that turns the key for the
@@ -119,6 +128,8 @@ pub(crate) struct PlayMenuState {
     folds: Folds,
     /// The part of a line the wheel has turned that has not moved the list yet.
     wheel_lines: f32,
+    /// Which row that holds a number is being typed into, and which is being dragged.
+    numbers: NumberInput<Row>,
 }
 
 impl PlayMenuState {
@@ -135,6 +146,7 @@ impl PlayMenuState {
             dirty: true,
             folds: Folds::default(),
             wheel_lines: 0.0,
+            numbers: NumberInput::new(),
         }
     }
 
@@ -254,9 +266,93 @@ impl PlayMenuState {
         }
     }
 
+    /// The number one row holds as the menu shows it, or `None` for a row that holds none.
+    fn number_of(&self, shared: &AppShared, row: Row) -> Option<NumberValue> {
+        let target = self.target();
+        number_of(shared, &target.readout(&shared.config.play), target.screen, row)
+    }
+
+    /// Put one row that holds a number on the step `steps`, and tell the preview when that moved
+    /// it. A row whose number is worked out from the others is left as it is.
+    fn set_number(&mut self, ctx: &mut FrameCtx<'_>, row: Row, steps: i64) {
+        let moved = match row {
+            _ if is_read_only(&ctx.shared.config.play, row) => false,
+            Row::Setting(id) => ctx.shared.set_row_number(crate::settings_ui::SettingRow::Fixed(id), steps),
+            Row::Skin(skin_row) => ctx.shared.skins.set_number_for(&mut ctx.shared.config, self.target().screen, skin_row, steps),
+            Row::Group(_) | Row::PreviewBpm | Row::Fold(_) => false,
+        };
+        if moved {
+            self.preview.settings_changed(ctx.shared);
+        }
+    }
+
+    /// Store what was typed into the row being typed into, and close its editor. What is not a
+    /// number is not stored, and the row says so for a while.
+    fn commit_edit(&mut self, ctx: &mut FrameCtx<'_>) {
+        let Some((row, typed)) = self.numbers.take_edit() else {
+            return;
+        };
+        let Some(value) = self.number_of(ctx.shared, row) else {
+            return;
+        };
+        if let Some(steps) = self.numbers.typed_steps(row, &value.spec, &typed, ctx.now) {
+            self.set_number(ctx, row, steps);
+        }
+    }
+
+    /// Carry the row being dragged to where the pointer is along its slider.
+    fn drag_to(&mut self, ctx: &mut FrameCtx<'_>, x: f32) {
+        let Some((row, _)) = self.numbers.dragged() else {
+            return;
+        };
+        if let Some(steps) = self.number_of(ctx.shared, row).and_then(|value| self.numbers.dragged_to(&value, x)) {
+            self.set_number(ctx, row, steps);
+        }
+    }
+
+    /// End a drag, and write the settings file: once for the whole drag.
+    fn end_drag(&mut self, ctx: &mut FrameCtx<'_>) {
+        if self.numbers.end_drag() {
+            ctx.shared.save_settings();
+        }
+    }
+
+    /// A press of a button on `row`, which the last frame drew as `hot`. On a row that holds a
+    /// number, a press of the left button on the slider begins a drag -- the row is put where the
+    /// press landed, unless it landed on the knob, which is taken hold of where it stands -- and
+    /// one on the number opens the row to be typed into. Any other press steps the row once,
+    /// forwards or back as `delta` says. A row whose number is worked out from the others takes the
+    /// cursor and nothing else, wherever on it the press lands.
+    fn press_row(&mut self, ctx: &mut FrameCtx<'_>, row: Row, hot: Hot, at: (f32, f32), button: MouseButton, delta: i32) {
+        let number = self.number_of(ctx.shared, row).filter(|value| button == MouseButton::Left && !value.locked);
+        match number.map(|value| (value, number_part_at(ctx.shared, hot, at))) {
+            Some((value, RowPart::Slider(area))) => {
+                if !self.numbers.begin_drag(row, area, &value, at.0) {
+                    self.drag_to(ctx, at.0);
+                }
+            }
+            Some((value, RowPart::Number)) => self.numbers.begin_edit(row, &value),
+            Some((_, RowPart::Rest)) | None => self.step(ctx, row, delta, false),
+        }
+    }
+
+    /// Enter on the row under the cursor: a row that holds a number is opened to be typed into, and
+    /// any other row is stepped forwards.
+    fn enter_focused(&mut self, ctx: &mut FrameCtx<'_>) {
+        self.reveal_cursor();
+        let Some(row) = self.focused() else {
+            return;
+        };
+        match self.number_of(ctx.shared, row) {
+            Some(value) => self.numbers.begin_edit(row, &value),
+            None => self.step(ctx, row, ROW_STEP_FORWARD, false),
+        }
+    }
+
     /// Apply one left/right step to a row, and tell the preview when a setting moved. A row that
-    /// holds a number is stepped ten times over when `wide` asks, an opacity a quarter of the way,
-    /// and any other row once. A row whose value is worked out from the others is left as it is.
+    /// holds a number moves one step of the smallest change it can hold, and ten when `wide` asks;
+    /// any other row is stepped once. A row whose value is worked out from the others is left as it
+    /// is.
     ///
     /// The tempo of the sample chart is no setting: the preview is shown another target, and is not
     /// told a setting moved. Neither is a fold, which shows or hides its rows whichever way it is
@@ -293,8 +389,10 @@ impl PlayMenuState {
     /// frame, so the frame after the step shows it with nothing read again.
     fn step_skin_row(&self, shared: &mut AppShared, row: SkinRow, delta: i32, wide: bool) -> bool {
         let screen = self.target().screen;
-        let steps = if wide { shared.skins.wide_steps_for(&shared.config, screen, row) } else { 1 };
-        let moved = (0..steps).filter(|_| shared.skins.step_for(&mut shared.config, screen, row, delta)).count() > 0;
+        let moved = match shared.skins.number_for(&shared.config, screen, row) {
+            Some(value) => shared.skins.set_number_for(&mut shared.config, screen, row, value.stepped(delta, wide)),
+            None => shared.skins.step_for(&mut shared.config, screen, row, delta),
+        };
         if moved {
             self.reread_skin(shared);
         }
@@ -331,7 +429,11 @@ impl PlayMenuState {
                 }
                 moved
             }
-            Row::Skin(offset @ SkinRow::Offset(_, _)) => ctx.shared.skins.reset_row_for(&mut ctx.shared.config, self.target().screen, offset),
+            Row::Skin(offset @ SkinRow::Offset(_, _)) => {
+                let screen = self.target().screen;
+                let shipped = ctx.shared.skins.number_for(&ctx.shared.config, screen, offset).map(|value| value.shipped);
+                shipped.is_some_and(|shipped| ctx.shared.skins.set_number_for(&mut ctx.shared.config, screen, offset, shipped))
+            }
             Row::Group(_) | Row::Skin(SkinRow::File(_)) | Row::Fold(_) => false,
         };
         if moved {
@@ -391,21 +493,36 @@ impl PlayMenuState {
             KeyCode::PageDown => self.focus(self.sel + VISIBLE_ROWS, ROW_STEP_FORWARD),
             KeyCode::ArrowLeft => self.step_focused(ctx, ROW_STEP_BACK, self.shift_held),
             KeyCode::ArrowRight => self.step_focused(ctx, ROW_STEP_FORWARD, self.shift_held),
-            KeyCode::Enter | KeyCode::NumpadEnter => self.step_focused(ctx, ROW_STEP_FORWARD, false),
+            KeyCode::Enter | KeyCode::NumpadEnter => self.enter_focused(ctx),
             KeyCode::Digit0 | KeyCode::Numpad0 => self.reset_focused(ctx),
             _ => {}
         }
         Transition::Stay
     }
 
-    /// Draw the entries on show ([`draw_list`]), each value cut to the room a value has.
-    fn draw_rows(&self, shared: &mut AppShared, canvas: &mut Canvas<'_>, readout: &SpeedReadout) {
+    /// Draw the entries on show ([`draw_list`]), each value cut to the room a value has. A row that
+    /// holds a number is drawn with its slider and reads as its number alone ([`number_figure`]),
+    /// or with the figure being typed into it. `now` is what a row that refused a typed figure stops
+    /// saying so against.
+    fn draw_rows(&self, shared: &mut AppShared, canvas: &mut Canvas<'_>, readout: &SpeedReadout, now: std::time::Instant) {
         let list = ListWindow { len: self.rows.len(), sel: self.sel, top: self.top };
         let shown = self.top..(self.top + VISIBLE_ROWS).min(self.rows.len());
-        let lines: Vec<Line> = self.rows[shown].iter().map(|row| self.line(shared, readout, *row)).collect();
+        let screen = self.target().screen;
+        let lines: Vec<(Line, Option<NumberValue>)> =
+            self.rows[shown].iter().map(|row| (self.line(shared, readout, *row), number_of(shared, readout, screen, *row))).collect();
         let entry = |index: usize| {
-            let Line { label, value, look } = &lines[index - self.top];
-            ListEntry { label, value: fitted_value(value), look: *look }
+            let (Line { label, value, look }, number) = &lines[index - self.top];
+            let row = self.rows[index];
+            let Some(number) = number else {
+                return ListEntry { label, value: fitted_value(value), look: *look, number: None };
+            };
+            let cell = NumberCell {
+                fraction: number.fraction(),
+                dragged: self.numbers.is_dragging(row),
+                edit: self.numbers.edit_of(row),
+                refused: self.numbers.is_refused(row, now),
+            };
+            ListEntry { label, value: number_figure(row, number), look: *look, number: Some(cell) }
         };
         draw_list(shared, canvas, list, entry, Hot::PlayMenuRow);
     }
@@ -477,7 +594,9 @@ impl StageHandler for PlayMenuState {
         Transition::Stay
     }
 
-    /// Escape writes the settings out and goes back to the screen the menu was opened over.
+    /// Escape writes the settings out and goes back to the screen the menu was opened over. A key
+    /// pressed while a slider is being dragged ends the drag first: the key may move the cursor or
+    /// the mode on, and the pointer must not go on carrying whatever row is then in that place.
     fn handle_key(&mut self, ctx: &mut FrameCtx<'_>, key: KeyInput<'_>) -> Transition {
         if let Some(held) = shift_after(self.shift_held, &key) {
             self.shift_held = held;
@@ -487,23 +606,48 @@ impl StageHandler for PlayMenuState {
             return Transition::Stay;
         }
         self.ensure_rows(ctx.shared);
+        self.end_drag(ctx);
+        match self.numbers.edit_key(&key) {
+            Some(EditKey::Taken) => return Transition::Stay,
+            Some(EditKey::Cancel) => {
+                self.numbers.cancel_edit();
+                return Transition::Stay;
+            }
+            Some(EditKey::Commit) => {
+                self.commit_edit(ctx);
+                return Transition::Stay;
+            }
+            Some(EditKey::CommitThenPass) => self.commit_edit(ctx),
+            None => {}
+        }
         self.row_key(ctx, key.code)
     }
 
     /// A press on a row moves the cursor there and steps the row once: forwards with the left
     /// button, and back with the right, so a step taken by mistake can be taken back with the mouse.
-    /// A press of the left button on a tab of the strip previews that mode. A press anywhere else
-    /// -- the preview and the name of a group included -- does nothing.
+    /// On a row that holds a number, a press of the left button on the slider puts the row where the
+    /// press landed and begins a drag, and one on the number opens the row to be typed into; the
+    /// left button coming back up ends a drag. A press of the left button on a tab of the strip
+    /// previews that mode. A press anywhere else -- the preview and the name of a group included --
+    /// does nothing, but any press stores a number that was being typed.
     fn handle_mouse(&mut self, ctx: &mut FrameCtx<'_>, at: (f32, f32), button: MouseButton, pressed: bool) -> Transition {
-        let Some(delta) = click_step(button).filter(|_| pressed) else {
+        if !pressed {
+            if button == MouseButton::Left {
+                self.end_drag(ctx);
+            }
+            return Transition::Stay;
+        }
+        let Some(delta) = click_step(button) else {
             return Transition::Stay;
         };
         self.ensure_rows(ctx.shared);
+        self.end_drag(ctx);
+        self.commit_edit(ctx);
         match ctx.shared.hit_test(at) {
-            Some(Hot::PlayMenuRow(index)) => {
+            Some(hot @ Hot::PlayMenuRow(index)) => {
                 if let Some(row) = self.rows.get(index).copied().filter(|row| !row.is_heading()) {
                     self.sel = index;
-                    self.step(ctx, row, delta, false);
+                    self.press_row(ctx, row, hot, at, button, delta);
                 }
             }
             Some(Hot::PlayMenuMode(index)) if is_left_press(button, pressed) && index < PREVIEW_MODES.len() => self.retarget(index, self.bpm),
@@ -512,8 +656,16 @@ impl StageHandler for PlayMenuState {
         Transition::Stay
     }
 
-    /// The wheel scrolls the list while the pointer is over it, and does nothing anywhere else. The
-    /// cursor stays on its row, which the next key that moves it brings back onto the screen.
+    /// The cursor moving with a button held carries the row being dragged along its slider, wherever
+    /// on the screen the pointer is.
+    fn handle_mouse_drag(&mut self, ctx: &mut FrameCtx<'_>, at: (f32, f32)) -> Transition {
+        self.drag_to(ctx, at.0);
+        Transition::Stay
+    }
+
+    /// The wheel scrolls the list while the pointer is over it, and does nothing anywhere else --
+    /// over a slider too, which a turn of the wheel never moves. The cursor stays on its row, which
+    /// the next key that moves it brings back onto the screen.
     fn handle_scroll(&mut self, ctx: &mut FrameCtx<'_>, lines: f32) -> Transition {
         if !lines.is_finite() || !contains(LIST_RECT, ctx.shared.cursor) {
             return Transition::Stay;
@@ -537,10 +689,10 @@ impl StageHandler for PlayMenuState {
         canvas.clear(theme().bg);
         draw_head(canvas, TITLE, &self.subtitle());
         draw_tabs(ctx.shared, canvas, PREVIEW_MODES.iter().map(|(_, name)| *name), Some(self.mode), Hot::PlayMenuMode);
-        self.draw_rows(ctx.shared, canvas, &readout);
+        self.draw_rows(ctx.shared, canvas, &readout, ctx.now);
         self.draw_info(ctx.shared, canvas, &readout);
         draw_preview(&mut self.preview, ctx, canvas);
-        draw_hint(canvas, HINT);
+        draw_hint(canvas, if self.numbers.editing().is_some() { EDIT_HINT } else { HINT });
     }
 
     /// The browser's lines, and what the preview is of and last left in its rectangle.

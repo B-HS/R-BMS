@@ -175,8 +175,8 @@ fn a_fold_shows_and_hides_its_rows_and_keeps_the_cursor() {
     assert!(!menu.state.rows.contains(&Row::Fold(Fold::Opacity)), "a mode with no play skin lists the folds of another's");
 }
 
-/// An opacity is read and stepped here as the skin menu reads and steps it -- five percent a step,
-/// a quarter of the way with Shift, back to a hundred with the zero key -- and is stored for the
+/// An opacity is read and stepped here as the skin menu reads and steps it -- one percent a step,
+/// ten with Shift, never past a hundred, back to a hundred with the zero key -- and is stored for the
 /// play skin's document as the alpha offset the skin menu reads, with the screen the skin menu
 /// configures left alone and nothing read again.
 #[test]
@@ -192,25 +192,26 @@ fn an_opacity_is_stepped_here_and_read_by_the_skin_menu_from_the_same_place() {
 
     menu.focus(row);
     menu.key(KeyCode::ArrowRight);
-    assert_eq!(menu.line(row).value, "105% (+13)", "an opacity cannot be added to");
-    menu.key(KeyCode::ArrowLeft);
-    menu.key(KeyCode::ArrowLeft);
-    assert_eq!(menu.line(row).value, "95%");
+    assert_eq!((menu.line(row).value.as_str(), menu.stored(FADING_GROUND_OPACITY)), ("100%", None), "an opacity went past all of it");
+    menu.keys(KeyCode::ArrowLeft, 5);
+    assert_eq!(menu.line(row).value, "95%", "one press is not one percent");
     menu.shifted(KeyCode::ArrowLeft);
-    assert_eq!(menu.line(row).value, "70%", "Shift is not a quarter of the way");
+    menu.shifted(KeyCode::ArrowLeft);
+    menu.keys(KeyCode::ArrowLeft, 5);
+    assert_eq!(menu.line(row).value, "70%", "Shift is not ten percent");
     assert_eq!(menu.stored(FADING_GROUND_OPACITY).map(|offset| offset.a), Some(opacity_alpha(70)));
     assert_eq!(menu.as_the_skin_menu_reads(FADING_GROUND_ROW), "70%", "the skin menu reads the opacity from somewhere else");
     assert_eq!(menu.app.shared.config.skin.screen, SKIN_TYPE_MUSIC_SELECT, "the screen the skin menu configures moved");
 
-    for expected in ["45%", "20%", "0%", "0%"] {
+    for expected in ["60%", "50%", "40%", "30%", "20%", "10%", "0%", "0%"] {
         menu.shifted(KeyCode::ArrowLeft);
         assert_eq!(menu.line(row).value, expected);
     }
     assert_eq!(menu.stored(FADING_GROUND_OPACITY).map(|offset| offset.a), Some(-255.0));
-    menu.key(KeyCode::Enter);
-    assert_eq!(menu.line(row).value, "5%", "Enter is not one step forwards");
+    menu.key(KeyCode::ArrowRight);
+    assert_eq!(menu.line(row).value, "1%");
     menu.frame();
-    let on_row = menu.middle_of_hot(Hot::PlayMenuRow(menu.at(row)));
+    let on_row = menu.on_the_label_of(row);
     menu.click(on_row, MouseButton::Left);
     menu.click(on_row, MouseButton::Right);
     menu.click(on_row, MouseButton::Right);
@@ -324,14 +325,12 @@ fn the_preview_is_drawn_with_an_opacity_on_the_frame_after_its_row_moved() {
 
     menu.toggle(Fold::Opacity);
     menu.focus(menu.row_called(FADING_PANEL_ROW));
-    menu.shifted(KeyCode::ArrowLeft);
-    menu.shifted(KeyCode::ArrowLeft);
+    (0..5).for_each(|_| menu.shifted(KeyCode::ArrowLeft));
     menu.frame();
     assert_eq!(*menu.state.preview.status(), PreviewStatus::Drawn, "a step of an opacity cost a frame of the preview");
     assert_eq!(menu.previewed(ON_THE_PANEL), over_black(FADING_PANEL.1, HALF_ALPHA), "the panel is not at half on the frame after its row moved");
 
-    menu.shifted(KeyCode::ArrowLeft);
-    menu.shifted(KeyCode::ArrowLeft);
+    (0..5).for_each(|_| menu.shifted(KeyCode::ArrowLeft));
     menu.frame();
     assert_eq!(menu.previewed(ON_THE_PANEL), Color::rgb(0, 0, 0), "a panel with none of its opacity left is drawn");
     assert_eq!(menu.app.shared.skins.build_of(screen), build, "an opacity had the document read again");
@@ -372,7 +371,7 @@ fn the_folds_of_a_play_skins_offsets_can_be_captured() {
     menu.capture_at("play-menu-folds-closed", RUN_SECONDS);
 
     menu.toggle(Fold::Opacity);
-    for (label, wide_steps) in [(FADING_GROUND_ROW, 4), (FADING_LINE_ROW, 4), (FADING_PANEL_ROW, 2)] {
+    for (label, wide_steps) in [(FADING_GROUND_ROW, 10), (FADING_LINE_ROW, 10), (FADING_PANEL_ROW, 5)] {
         menu.focus(menu.row_called(label));
         for _ in 0..wide_steps {
             menu.shifted(KeyCode::ArrowLeft);
@@ -414,10 +413,10 @@ fn every_opacity_of_the_shipped_play_skin_is_taken_to_nothing_and_put_back() {
         let label = menu.line(*row).label;
         assert_eq!(menu.line(*row).value, "100%", "{label} does not open at a hundred percent");
         menu.focus(*row);
-        for _ in 0..4 {
+        for _ in 0..10 {
             menu.shifted(KeyCode::ArrowLeft);
         }
-        assert_eq!(menu.line(*row).value, "0%", "{label} was not taken to nothing by four wide steps");
+        assert_eq!(menu.line(*row).value, "0%", "{label} was not taken to nothing by ten wide steps");
         menu.frame();
         assert_eq!(*menu.state.preview.status(), PreviewStatus::Drawn, "taking {label} to nothing cost a frame of the preview");
     }

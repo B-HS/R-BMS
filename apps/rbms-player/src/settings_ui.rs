@@ -13,9 +13,13 @@
 #![allow(clippy::wildcard_imports)]
 use rbms_audio::{AudioOpenReport, Bus};
 
-use rbms_config::{AudioOptions, CUSTOM_VALUE, SettingId, SettingTab, cycle_device, descriptor, display_value, skinned_note, tab_rows};
+use rbms_config::{
+    AdjustOutcome, AudioOptions, CUSTOM_VALUE, SettingId, SettingTab, cycle_device, descriptor, display_value, number_spec, number_steps, set_number_steps,
+    shipped_number_steps, skinned_note, tab_rows,
+};
 use rbms_skin::loader::is_supported_skin_type;
 
+use crate::number_row::NumberValue;
 use crate::settings_view::SettingsLine;
 use crate::skin_select::SkinRow;
 use crate::*;
@@ -147,7 +151,31 @@ impl AppShared {
     /// beside it.
     pub(crate) fn settings_scene_line(&self, row: SettingRow) -> SettingsLine {
         let (label, value) = self.settings_line(row);
-        SettingsLine { label, value, note: self.settings_note(row) }
+        SettingsLine { label, value, note: self.settings_note(row), number: self.row_number(row) }
+    }
+
+    /// The number one row of the settings table holds, or `None` for a row that holds none: how it
+    /// is counted, the step it stands on, and the step a fresh configuration has it on.
+    pub(crate) fn setting_number(&self, id: SettingId) -> Option<NumberValue> {
+        Some(NumberValue::of(number_spec(id)?, number_steps(&self.config, id)?, shipped_number_steps(id)?))
+    }
+
+    /// The number one row holds, of the settings screen or of the skin menu, or `None` for a row
+    /// that holds none.
+    pub(crate) fn row_number(&self, row: SettingRow) -> Option<NumberValue> {
+        match row {
+            SettingRow::Fixed(id) => self.setting_number(id),
+            SettingRow::Skin(row) => self.skins.number(&self.config, row),
+        }
+    }
+
+    /// Put one row that holds a number on the step `steps`, held to the row's two ends, and report
+    /// whether what is stored moved.
+    pub(crate) fn set_row_number(&mut self, row: SettingRow, steps: i64) -> bool {
+        match row {
+            SettingRow::Fixed(id) => set_number_steps(&mut self.config, id, steps) == AdjustOutcome::Changed,
+            SettingRow::Skin(row) => self.skins.set_number(&mut self.config, row, steps),
+        }
     }
 
     /// What is said beside one row of the settings screen, or `None` for a row shown bare.
@@ -178,11 +206,6 @@ impl AppShared {
     /// Step one of the chosen document's customisation rows, and report whether it moved.
     pub(crate) fn step_skin_row(&mut self, row: SkinRow, delta: i32) -> bool {
         self.skins.step(&mut self.config, row, delta)
-    }
-
-    /// Put one of the chosen document's customisation rows back to what its author chose.
-    pub(crate) fn reset_skin_row(&mut self, row: SkinRow) -> bool {
-        self.skins.reset_row(&mut self.config, row)
     }
 
     /// Step the skin menu's SKIN row through the built-in screen and every document that draws the
@@ -290,8 +313,8 @@ mod tests {
         (SettingId::FiveKeyLayout, "5KEYS LAYOUT", "OFF"),
         (SettingId::PlayEscapeMode, "ESCAPE", "IMMEDIATE"),
         (SettingId::Gauge, "GAUGE", "NORMAL"),
-        (SettingId::Lift, "LIFT", "0%"),
-        (SettingId::LaneCover, "LANE COVER", "0%"),
+        (SettingId::Lift, "LIFT", "0.0%"),
+        (SettingId::LaneCover, "LANE COVER", "0.0%"),
         (SettingId::ScratchSide, "SCRATCH SIDE", "RIGHT"),
         (SettingId::ScratchAuto, "SCRATCH AUTO", "OFF"),
         (SettingId::JudgeOffset, "JUDGE OFFSET", "+0 MS"),
@@ -328,7 +351,7 @@ mod tests {
         (SettingId::Preview, "PREVIEW", "ON"),
         (SettingId::EnableLift, "LIFT ON", "OFF"),
         (SettingId::EnableCover, "LANE COVER ON", "ON"),
-        (SettingId::Hidden, "HIDDEN+", "0%"),
+        (SettingId::Hidden, "HIDDEN+", "0.0%"),
         (SettingId::EnableHidden, "HIDDEN+ ON", "OFF"),
         (SettingId::LaneCoverFineStep, "COVER FINE STEP", "0.0010"),
         (SettingId::WhiteNumber, "WHITE NUMBER", "OFF"),

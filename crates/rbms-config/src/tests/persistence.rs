@@ -170,3 +170,64 @@ fn a_current_file_ignores_the_legacy_sibling_lists() {
     assert!(outcome.config.library.folders.is_empty(), "a folder removed after the migration does not come back");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A row that holds a number, set through the count of its steps, is written in the field it
+/// always was and in no new one: the file a build with sliders writes has the keys of the file a
+/// build without them wrote, and reads back as the configuration it was written from.
+#[test]
+fn a_number_set_by_its_steps_is_written_in_the_fields_the_file_always_had() {
+    let keys = |text: &str| text.lines().map(|line| line.split(':').next().unwrap_or_default().trim().to_string()).collect::<Vec<String>>();
+    let shipped = ron_of(&Config::default());
+    let mut config = Config::default();
+    let set = [
+        (SettingId::HiSpeed, 137),
+        (SettingId::HiSpeedStep, 7),
+        (SettingId::LaneCover, 253),
+        (SettingId::Lift, 1),
+        (SettingId::Hidden, 999),
+        (SettingId::LaneCoverFineStep, 33),
+        (SettingId::JudgeOffset, -17),
+        (SettingId::JudgeWidthKeyGreat, 123),
+        (SettingId::LongNoteMargin, 77),
+        (SettingId::Total, 321),
+        (SettingId::JudgeTextY, 41),
+        (SettingId::PreviewVolume, 9),
+        (SettingId::PreviewFade, 137),
+        (SettingId::MasterVolume, 63),
+        (SettingId::AudioPolyphony, 500),
+    ];
+    for (id, steps) in set {
+        assert_eq!(set_number_steps(&mut config, id, steps), AdjustOutcome::Changed, "{id:?}");
+    }
+    let written = ron_of(&config);
+    assert_ne!(written, shipped);
+    assert_eq!(keys(&written), keys(&shipped), "a number set by its steps added a key to the file, or took one away");
+    let (restored, from) = migrate(&written).expect("the file reads back");
+    assert_eq!(from, None, "the file a slider wrote needs migrating");
+    for (id, steps) in set {
+        assert_eq!(number_steps(&restored, id), Some(steps), "{id:?} did not survive the file");
+        assert_eq!(display_value(&restored, id), display_value(&config, id), "{id:?}");
+    }
+}
+
+/// A file written before the rows were counted in steps reads as it did: a cover on a whole
+/// percent, a speed on a quarter and a volume on a twentieth each stand on a step of their own, and
+/// reading them changes nothing that is stored.
+#[test]
+fn a_file_written_before_the_steps_reads_on_them() {
+    let (config, _) = migrate("(hispeed: 3.25, cover: 0.3, lift: 0.15, vol_master: 0.85, judge_rate: 120)").expect("a v0 file migrates");
+    assert_eq!(number_steps(&config, SettingId::HiSpeed), Some(325));
+    assert_eq!((number_steps(&config, SettingId::LaneCover), number_steps(&config, SettingId::Lift)), (Some(300), Some(150)));
+    assert_eq!((display_value(&config, SettingId::LaneCover).as_str(), display_value(&config, SettingId::Lift).as_str()), ("30.0%", "15.0%"));
+    assert_eq!(number_steps(&config, SettingId::MasterVolume), Some(85));
+    assert_eq!(number_steps(&config, SettingId::JudgeWidthKeyPGreat), Some(120));
+    assert_eq!(display_value(&config, SettingId::HiSpeed), "3.25");
+    let before = config.clone();
+    let mut read = config;
+    for id in SettingId::ALL {
+        if let Some(steps) = number_steps(&read, id) {
+            assert_eq!(set_number_steps(&mut read, id, steps), AdjustOutcome::Unchanged, "{id:?} was rewritten by being put where it reads");
+        }
+    }
+    assert_eq!(read, before);
+}

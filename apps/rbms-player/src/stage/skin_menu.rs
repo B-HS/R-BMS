@@ -18,6 +18,12 @@
 //! left dark -- and tells the preview when a setting moved. The preview takes no press of the mouse:
 //! a button of a previewed skin does nothing.
 //!
+//! A row that holds a number -- an offset of the chosen document, or how opaque one of its parts is
+//! -- is set as such a row is on every built-in screen ([`crate::number_row`]): an arrow moves it one
+//! unit, and ten with Shift held; its slider is dragged, and the preview follows it frame by frame,
+//! because an offset is read where it is stored; and Enter, or a press on the number, opens it to be
+//! typed into. A drag writes the settings file once, when the button comes back up.
+//!
 //! The screen is laid out in the fixed space every built-in screen is laid out in, and is opened
 //! over the screen it was asked for from, which Escape goes back to.
 
@@ -31,15 +37,16 @@ use winit::event::MouseButton;
 use winit::keyboard::KeyCode;
 
 use crate::dialog::{DialogHandle, DialogState, pick_skin_pack_folder};
+use crate::number_row::{EDIT_HINT, EditKey, NumberInput, RowPart};
 use crate::settings_ui::SettingRow;
 use crate::settings_view::SettingsLine;
 use crate::skin_preview::SkinPreview;
 use crate::skin_select::{OffsetAxis, SkinRow, SkinRowKind};
 use crate::stage::preview_menu::{
-    LABEL_GAP, LABEL_SCALE, LIST_RECT, ListEntry, ListWindow, NEXT_TAB as NEXT_SCREEN, ONE_STEP, PREVIOUS_TAB as PREVIOUS_SCREEN, ROW_STEP_BACK,
+    LABEL_GAP, LABEL_SCALE, LIST_RECT, ListEntry, ListWindow, NEXT_TAB as NEXT_SCREEN, NumberCell, PREVIOUS_TAB as PREVIOUS_SCREEN, ROW_STEP_BACK,
     ROW_STEP_FORWARD, RowLook, UTF8_MAX_BYTES, VALUE_SCALE, VISIBLE_ROWS, click_step, contains, draw_head, draw_hint, draw_info_lead, draw_info_note,
-    draw_info_panel, draw_info_row, draw_list, draw_preview, draw_tabs, fitted_value, last_top, revealed_top, row_room, shift_after, stepped_tab,
-    wheel_scrolled,
+    draw_info_panel, draw_info_row, draw_list, draw_preview, draw_tabs, fitted_value, last_top, number_part_at, revealed_top, row_room, shift_after,
+    stepped_tab, wheel_scrolled,
 };
 use crate::stage::{Canvas, FrameCtx, KeyInput, Stage, StageHandler, Transition, is_left_press};
 use crate::{AppShared, Hot};
@@ -75,7 +82,7 @@ const TITLE: &str = "SKIN";
 
 /// The keys of the screen, written along its foot.
 const HINT: &str =
-    "UP DOWN MOVE   LEFT RIGHT CHANGE   SHIFT OFFSET x10, OPACITY 25%   ENTER RUN   0 RESET   TAB SCREEN   WHEEL SCROLL   RIGHT CLICK BACK   ESC SAVE";
+    "UP DOWN MOVE   LEFT RIGHT CHANGE   SHIFT x10   ENTER RUN OR TYPE   0 RESET   DRAG A SLIDER   TAB SCREEN   WHEEL SCROLL   RIGHT CLICK BACK   ESC SAVE";
 
 /// What is written under the preview in place of the row under the cursor while the folder picker is
 /// up.
@@ -87,18 +94,25 @@ const PICKER_NOTE: &str = "CHOOSE THE PACK FOLDER IN THE WINDOW THAT OPENED";
 /// An offset is said by its axis. A place and a size are counted in pixels of the screen, except for
 /// the one offset that moves a whole play screen, which is a share of it; a row is not told which
 /// offset it is of, so both are said. An offset the player may move along its alpha alone is an
-/// opacity, and is said as one: it reads in percent, a hundred being no offset at all.
+/// opacity, and is said as one: it reads in percent, a hundred being no offset at all. Its slider
+/// and its arrows end there, so its help says what goes further: a typed figure, for the part a
+/// skin draws with no alpha of its own and lights by adding to it.
+///
+/// A place or a size runs over thousands of pixels, more than its slider has places for, so its
+/// help says what sets it to the pixel.
 const PROPERTY_HELP: &str = "An option this skin declares";
 const FILE_HELP: &str = "A file slot this skin declares: which of its files is used";
-const OFFSET_PLACE_HELP: &str = "An offset of this skin, in pixels - in percent when it is of the whole screen. 0 puts it back";
-const OFFSET_ANGLE_HELP: &str = "An offset of this skin: a turn, in degrees. 0 puts it back";
-const OFFSET_ALPHA_HELP: &str = "An offset of this skin: added to the opacity, from -255 (gone) to +255. 0 puts it back";
-const OPACITY_HELP: &str = "How opaque this part is: 0% hides it, 100% is the skin's own, more only adds to a translucent part. 0 key resets";
+const OFFSET_PLACE_HELP: &str =
+    "An offset of this skin, in pixels - percent for the whole screen. The slider is coarse: arrows or ENTER set it exactly. 0 key resets";
+const OFFSET_ANGLE_HELP: &str = "An offset of this skin: a turn, in degrees. 0 key resets";
+const OFFSET_ALPHA_HELP: &str = "An offset of this skin: added to the opacity, from -255 (gone) to +255. 0 key resets";
+const OPACITY_HELP: &str = "How opaque this part is: 0% hides it, 100% is the skin's own. Typing past 100% (to 200%) adds alpha. 0 key resets";
 
 /// What is said of a row of an offset the game adds to every play skin, which no document declares:
 /// a row of that name in a skin's own list would be read as the skin's.
-const AUTOMATIC_PLACE_HELP: &str = "An offset the game adds to every play skin, in pixels - in percent for the whole screen. 0 puts it back";
-const AUTOMATIC_ALPHA_HELP: &str = "An offset the game adds to every play skin: added to the opacity, from -255 (gone) to +255. 0 puts it back";
+const AUTOMATIC_PLACE_HELP: &str =
+    "An offset the game adds to every play skin, in pixels - percent for the whole screen. Arrows or ENTER set it exactly. 0 key resets";
+const AUTOMATIC_ALPHA_HELP: &str = "An offset the game adds to every play skin: added to the opacity, from -255 (gone) to +255. 0 key resets";
 
 /// The skin menu's own state: the rows it lists and where the cursor and the list are, the folder
 /// picker while it is up, the preview on its right, and the modifier that turns the key for the next
@@ -123,6 +137,8 @@ pub(crate) struct SkinMenuState {
     open_pack_picker: fn() -> DialogHandle,
     /// The part of a line the wheel has turned that has not moved the list yet.
     wheel_lines: f32,
+    /// Which row that holds a number is being typed into, and which is being dragged.
+    numbers: NumberInput<SettingRow>,
 }
 
 impl SkinMenuState {
@@ -138,6 +154,7 @@ impl SkinMenuState {
             pack_picker: None,
             open_pack_picker: pick_skin_pack_folder,
             wheel_lines: 0.0,
+            numbers: NumberInput::new(),
         }
     }
 
@@ -202,17 +219,72 @@ impl SkinMenuState {
         self.preview.settings_changed(ctx.shared);
     }
 
-    /// Apply one left/right step to a row, and tell the preview when it moved something. An offset
-    /// row is stepped as many times over as a wide step of it is when `wide` asks -- ten for a place,
-    /// a size or a turn, a quarter of the way for an opacity -- and any other row once, whatever is
-    /// asked.
-    fn step(&mut self, ctx: &mut FrameCtx<'_>, row: SettingRow, delta: i32, wide: bool) {
-        let moved = match row {
-            SettingRow::Skin(row @ SkinRow::Offset(_, _)) => {
-                let shared = &mut *ctx.shared;
-                let steps = if wide { shared.skins.wide_steps_for(&shared.config, shared.config.skin.screen, row) } else { usize::from(ONE_STEP) };
-                (0..steps).filter(|_| shared.step_skin_row(row, delta)).count() > 0
+    /// Put one row that holds a number on the step `steps`, and tell the preview when that moved
+    /// it. An offset is read where it is stored by every frame, so the frame after shows it.
+    fn set_number(&mut self, ctx: &mut FrameCtx<'_>, row: SettingRow, steps: i64) {
+        if ctx.shared.set_row_number(row, steps) {
+            self.settings_moved(ctx);
+        }
+    }
+
+    /// Store what was typed into the row being typed into, and close its editor. What is not a
+    /// number is not stored, and the row says so for a while.
+    fn commit_edit(&mut self, ctx: &mut FrameCtx<'_>) {
+        let Some((row, typed)) = self.numbers.take_edit() else {
+            return;
+        };
+        let Some(value) = ctx.shared.row_number(row) else {
+            return;
+        };
+        if let Some(steps) = self.numbers.typed_steps(row, &value.spec, &typed, ctx.now) {
+            self.set_number(ctx, row, steps);
+        }
+    }
+
+    /// Carry the row being dragged to where the pointer is along its slider.
+    fn drag_to(&mut self, ctx: &mut FrameCtx<'_>, x: f32) {
+        let Some((row, _)) = self.numbers.dragged() else {
+            return;
+        };
+        if let Some(steps) = ctx.shared.row_number(row).and_then(|value| self.numbers.dragged_to(&value, x)) {
+            self.set_number(ctx, row, steps);
+        }
+    }
+
+    /// End a drag, and write the settings file: once for the whole drag.
+    fn end_drag(&mut self, ctx: &mut FrameCtx<'_>) {
+        if self.numbers.end_drag() {
+            ctx.shared.save_settings();
+        }
+    }
+
+    /// A press of a button on `row`, which the last frame drew as `hot`. On a row that holds a
+    /// number, a press of the left button on the slider begins a drag -- the row is put where the
+    /// press landed, unless it landed on the knob, which is taken hold of where it stands -- and
+    /// one on the number opens the row to be typed into. Any other press steps the row once,
+    /// forwards or back as `delta` says.
+    fn press_row(&mut self, ctx: &mut FrameCtx<'_>, row: SettingRow, hot: Hot, at: (f32, f32), button: MouseButton, delta: i32) {
+        let number = ctx.shared.row_number(row).filter(|_| button == MouseButton::Left);
+        match number.map(|value| (value, number_part_at(ctx.shared, hot, at))) {
+            Some((value, RowPart::Slider(area))) => {
+                if !self.numbers.begin_drag(row, area, &value, at.0) {
+                    self.drag_to(ctx, at.0);
+                }
             }
+            Some((value, RowPart::Number)) => self.numbers.begin_edit(row, &value),
+            Some((_, RowPart::Rest)) | None => self.step(ctx, row, delta, false),
+        }
+    }
+
+    /// Apply one left/right step to a row, and tell the preview when it moved something. A row that
+    /// holds a number moves one step of the smallest change it can hold, and ten when `wide` asks;
+    /// any other row is stepped once, whatever is asked.
+    fn step(&mut self, ctx: &mut FrameCtx<'_>, row: SettingRow, delta: i32, wide: bool) {
+        if let Some(value) = ctx.shared.row_number(row) {
+            self.set_number(ctx, row, value.stepped(delta, wide));
+            return;
+        }
+        let moved = match row {
             SettingRow::Skin(row) => SkinMenuState::step_document_row(ctx.shared, row, delta),
             SettingRow::Fixed(id) => match adjust(&mut ctx.shared.config, id, delta) {
                 AdjustOutcome::Action(action) => self.run_action(ctx.shared, action, delta),
@@ -284,14 +356,15 @@ impl SkinMenuState {
         }
     }
 
-    /// Put the focused offset row back to what the document's author chose, which is the one row
-    /// kind with a value a key can zero rather than cycle.
+    /// Put the focused row back to what the document's author chose, when it is a row that holds a
+    /// number: the one row kind with a value a key can put back rather than cycle. An offset goes
+    /// back to none, which for an opacity is the whole of it.
     fn reset_focused_row(&mut self, ctx: &mut FrameCtx<'_>) {
-        let Some(SettingRow::Skin(row)) = self.focused() else {
+        let Some(row) = self.focused() else {
             return;
         };
-        if ctx.shared.reset_skin_row(row) {
-            self.settings_moved(ctx);
+        if let Some(value) = ctx.shared.row_number(row) {
+            self.set_number(ctx, row, value.shipped);
         }
     }
 
@@ -344,7 +417,7 @@ impl SkinMenuState {
             KeyCode::PageDown => self.focus(self.sel + VISIBLE_ROWS),
             KeyCode::ArrowLeft => self.step_focused(ctx, ROW_STEP_BACK, self.shift_held),
             KeyCode::ArrowRight => self.step_focused(ctx, ROW_STEP_FORWARD, self.shift_held),
-            KeyCode::Enter | KeyCode::NumpadEnter => self.step_focused(ctx, ROW_STEP_FORWARD, false),
+            KeyCode::Enter | KeyCode::NumpadEnter => self.enter_focused(ctx),
             KeyCode::Digit0 | KeyCode::Numpad0 => {
                 self.reveal_cursor();
                 self.reset_focused_row(ctx);
@@ -352,6 +425,19 @@ impl SkinMenuState {
             _ => {}
         }
         Transition::Stay
+    }
+
+    /// Enter on the row under the cursor: a row that holds a number is opened to be typed into, and
+    /// any other row is stepped forwards, which runs the ones that are run.
+    fn enter_focused(&mut self, ctx: &mut FrameCtx<'_>) {
+        self.reveal_cursor();
+        let Some(row) = self.focused() else {
+            return;
+        };
+        match ctx.shared.row_number(row) {
+            Some(value) => self.numbers.begin_edit(row, &value),
+            None => self.step(ctx, row, ROW_STEP_FORWARD, false),
+        }
     }
 
     /// Step the row under the cursor, with the row on show. A press of an arrow with Shift held
@@ -366,16 +452,27 @@ impl SkinMenuState {
 
     /// Draw the rows on show ([`draw_list`]). A value too long for its row is cut short at its end,
     /// except the pack folder's, which is a path: it keeps its end ([`fit_path`]) and has all the
-    /// room its row's short label leaves.
-    fn draw_rows(&self, shared: &mut AppShared, canvas: &mut Canvas<'_>) {
+    /// room its row's short label leaves. A row that holds a number is drawn with its slider and
+    /// reads as its number alone, in the room a number has -- what an opacity past all of it adds
+    /// is said under the preview -- or with the figure being typed into it. `now` is what a row that
+    /// refused a typed figure stops saying so against.
+    fn draw_rows(&self, shared: &mut AppShared, canvas: &mut Canvas<'_>, now: std::time::Instant) {
         let list = ListWindow { len: self.lines.len(), sel: self.sel, top: self.top };
         let entry = |index: usize| {
-            let SettingsLine { label, value, .. } = &self.lines[index];
-            let value = match self.rows.get(index) {
-                Some(SettingRow::Fixed(SettingId::SkinPack)) => fit_path(value, VALUE_SCALE, pack_value_room(label)),
+            let SettingsLine { label, value, number, .. } = &self.lines[index];
+            let row = self.rows.get(index).copied();
+            let value = match (row, number) {
+                (Some(SettingRow::Fixed(SettingId::SkinPack)), _) => fit_path(value, VALUE_SCALE, pack_value_room(label)),
+                (_, Some(number)) => number.spec.text(number.steps),
                 _ => fitted_value(value),
             };
-            ListEntry { label, value, look: RowLook::Plain }
+            let number = (*number).zip(row).map(|(number, row)| NumberCell {
+                fraction: number.fraction(),
+                dragged: self.numbers.is_dragging(row),
+                edit: self.numbers.edit_of(row),
+                refused: self.numbers.is_refused(row, now),
+            });
+            ListEntry { label, value, look: RowLook::Plain, number }
         };
         draw_list(shared, canvas, list, entry, Hot::SkinMenuRow);
     }
@@ -494,7 +591,9 @@ impl StageHandler for SkinMenuState {
 
     /// Escape writes the settings out and goes back to the screen the menu was opened over. Keys are
     /// ignored while the native folder picker is up: it has the keyboard, and the screen behind it
-    /// must not act on what is typed there.
+    /// must not act on what is typed there. A key pressed while a slider is being dragged ends the
+    /// drag first: the key may move the cursor or the screen on, and the pointer must not go on
+    /// carrying whatever row is then in that place.
     fn handle_key(&mut self, ctx: &mut FrameCtx<'_>, key: KeyInput<'_>) -> Transition {
         if let Some(held) = shift_after(self.shift_held, &key) {
             self.shift_held = held;
@@ -504,26 +603,51 @@ impl StageHandler for SkinMenuState {
             return Transition::Stay;
         }
         self.ensure_rows(ctx.shared);
+        self.end_drag(ctx);
+        match self.numbers.edit_key(&key) {
+            Some(EditKey::Taken) => return Transition::Stay,
+            Some(EditKey::Cancel) => {
+                self.numbers.cancel_edit();
+                return Transition::Stay;
+            }
+            Some(EditKey::Commit) => {
+                self.commit_edit(ctx);
+                return Transition::Stay;
+            }
+            Some(EditKey::CommitThenPass) => self.commit_edit(ctx),
+            None => {}
+        }
         self.row_key(ctx, key.code)
     }
 
     /// A press on a row moves the cursor there and steps the row once: forwards with the left
     /// button, and back with the right, so a step taken by mistake can be taken back with the mouse.
-    /// A press of the left button on a tab of the strip configures that screen. A press anywhere
-    /// else -- the preview included -- does nothing.
+    /// On a row that holds a number, a press of the left button on the slider puts the row where the
+    /// press landed and begins a drag, and one on the number opens the row to be typed into; the
+    /// left button coming back up ends a drag. A press of the left button on a tab of the strip
+    /// configures that screen. A press anywhere else -- the preview included -- does nothing, but
+    /// any press stores a number that was being typed.
     fn handle_mouse(&mut self, ctx: &mut FrameCtx<'_>, at: (f32, f32), button: MouseButton, pressed: bool) -> Transition {
+        if !pressed {
+            if button == MouseButton::Left {
+                self.end_drag(ctx);
+            }
+            return Transition::Stay;
+        }
         let Some(delta) = click_step(button) else {
             return Transition::Stay;
         };
-        if !pressed || self.pack_picker.is_some() {
+        if self.pack_picker.is_some() {
             return Transition::Stay;
         }
         self.ensure_rows(ctx.shared);
+        self.end_drag(ctx);
+        self.commit_edit(ctx);
         match ctx.shared.hit_test(at) {
-            Some(Hot::SkinMenuRow(index)) => {
+            Some(hot @ Hot::SkinMenuRow(index)) => {
                 if let Some(row) = self.rows.get(index).copied() {
                     self.sel = index;
-                    self.step(ctx, row, delta, false);
+                    self.press_row(ctx, row, hot, at, button, delta);
                 }
             }
             Some(Hot::SkinMenuKind(index)) if is_left_press(button, pressed) => {
@@ -536,8 +660,16 @@ impl StageHandler for SkinMenuState {
         Transition::Stay
     }
 
-    /// The wheel scrolls the list while the pointer is over it, and does nothing anywhere else. The
-    /// cursor stays on its row, which the next key that moves it brings back onto the screen.
+    /// The cursor moving with a button held carries the row being dragged along its slider, wherever
+    /// on the screen the pointer is.
+    fn handle_mouse_drag(&mut self, ctx: &mut FrameCtx<'_>, at: (f32, f32)) -> Transition {
+        self.drag_to(ctx, at.0);
+        Transition::Stay
+    }
+
+    /// The wheel scrolls the list while the pointer is over it, and does nothing anywhere else --
+    /// over a slider too, which a turn of the wheel never moves. The cursor stays on its row, which
+    /// the next key that moves it brings back onto the screen.
     fn handle_scroll(&mut self, ctx: &mut FrameCtx<'_>, lines: f32) -> Transition {
         if !lines.is_finite() || !contains(LIST_RECT, ctx.shared.cursor) {
             return Transition::Stay;
@@ -568,10 +700,10 @@ impl StageHandler for SkinMenuState {
         draw_head(canvas, TITLE, &ctx.shared.setting_line(SettingId::SkinScreen).1);
         let chosen = kind_index(ctx.shared.config.skin.screen);
         draw_tabs(ctx.shared, canvas, SCREEN_KINDS.iter().map(|(_, name)| *name), chosen, Hot::SkinMenuKind);
-        self.draw_rows(ctx.shared, canvas);
+        self.draw_rows(ctx.shared, canvas, ctx.now);
         self.draw_info(ctx.shared, canvas);
         draw_preview(&mut self.preview, ctx, canvas);
-        draw_hint(canvas, HINT);
+        draw_hint(canvas, if self.numbers.editing().is_some() { EDIT_HINT } else { HINT });
     }
 
     /// The browser's lines, and what the preview last left in its rectangle.

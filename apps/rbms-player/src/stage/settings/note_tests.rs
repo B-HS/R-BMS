@@ -136,7 +136,7 @@ fn an_annotated_row_still_steps() {
     let mut state = screen_on(&mut app, SettingTab::Input, Some(SettingId::ScratchSide));
     let before = app.shared.config.play.scratch_left;
     let row = state.focused().expect("the cursor is on a row");
-    state.step(&mut ctx(&mut app), row, ROW_STEP_FORWARD);
+    state.step(&mut ctx(&mut app), row, ROW_STEP_FORWARD, false);
     assert_ne!(app.shared.config.play.scratch_left, before, "the annotated row did not move");
     state.ensure_rows(&app.shared);
     assert_eq!(state.lines[row_at(&state, SettingId::ScratchSide)].note, Some(SKIN_OPTION_NOTE), "the note was lost when the row moved");

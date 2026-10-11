@@ -25,8 +25,8 @@ use crate::keyconfig::Shortcut;
 use crate::skin_preview::{PreviewAbsence, PreviewStatus, PreviewTarget};
 use crate::skin_select::{SKIN_PACK_ENV, SkinLibrary, pack_from_environment};
 use crate::stage::preview_menu::{
-    FIGURE_NOTE_SCALE, HINT_SCALE, INFO_PAD, INFO_RECT, INFO_SCALE, LABEL_GAP, LABEL_SCALE, MARGIN, PREVIEW_RECT, TITLE_Y, VALUE_SCALE, figure_width, figure_x,
-    head_subtitle, row_room, tab_rect,
+    FIGURE_NOTE_SCALE, HINT_SCALE, INFO_PAD, INFO_RECT, INFO_SCALE, LABEL_GAP, LABEL_SCALE, MARGIN, PREVIEW_RECT, ROW_PAD, TITLE_Y, VALUE_SCALE, figure_width,
+    figure_x, head_subtitle, number_label_room, number_value_rect, number_value_room, row_room, slider_rect, tab_rect,
 };
 use crate::stage::render_tests::{FRAME_DT, app};
 use crate::stage::select::PLAY_MENU_KEY;
@@ -238,8 +238,58 @@ impl Menu {
 
     /// The middle of what the frame drawn last made clickable for `hot`.
     fn middle_of_hot(&self, hot: Hot) -> (f32, f32) {
+        middle(self.rect_of_hot(hot))
+    }
+
+    /// Where the frame drawn last made `hot` clickable.
+    fn rect_of_hot(&self, hot: Hot) -> Rect {
         let (rect, _) = self.app.shared.hot.iter().find(|(_, entry)| *entry == hot).unwrap_or_else(|| panic!("{hot:?} is not on the screen"));
-        middle(*rect)
+        *rect
+    }
+
+    /// A point on the label of one row as the frame drawn last drew it: on the row, and on neither
+    /// the slider nor the number of a row that holds a number.
+    fn on_the_label_of(&self, row: Row) -> (f32, f32) {
+        let rect = self.rect_of_hot(Hot::PlayMenuRow(self.at(row)));
+        (rect.x + ROW_PAD, rect.y + rect.h * 0.5)
+    }
+
+    /// Where the frame drawn last drew the slider of one row that holds a number.
+    fn slider_of(&self, row: Row) -> Rect {
+        slider_rect(self.rect_of_hot(Hot::PlayMenuRow(self.at(row))))
+    }
+
+    /// The middle of where the frame drawn last wrote the number of one row that holds one.
+    fn on_the_number_of(&self, row: Row) -> (f32, f32) {
+        middle(number_value_rect(self.rect_of_hot(Hot::PlayMenuRow(self.at(row)))))
+    }
+
+    /// The pointer moved to a point of the screen with a button held.
+    fn drag(&mut self, at: (f32, f32)) {
+        self.state.handle_mouse_drag(&mut FrameCtx { shared: &mut self.app.shared, now: std::time::Instant::now(), dt: 0.0 }, at);
+    }
+
+    /// The left button let go of at a point of the screen.
+    fn let_go(&mut self, at: (f32, f32)) {
+        self.state.handle_mouse(&mut FrameCtx { shared: &mut self.app.shared, now: std::time::Instant::now(), dt: 0.0 }, at, MouseButton::Left, false);
+    }
+
+    /// One key pressed that types `text`.
+    fn typed(&mut self, text: &'static str) -> Transition {
+        let input = KeyInput { code: KeyCode::KeyA, pressed: true, released: false, text: Some(text) };
+        self.state.handle_key(&mut FrameCtx { shared: &mut self.app.shared, now: std::time::Instant::now(), dt: 0.0 }, input)
+    }
+
+    /// A key pressed as many times over as it is asked.
+    fn keys(&mut self, code: KeyCode, presses: usize) {
+        for _ in 0..presses {
+            self.key(code);
+        }
+    }
+
+    /// The step one row that holds a number stands on.
+    fn steps_of(&self, row: Row) -> i64 {
+        self.state.number_of(&self.app.shared, row).unwrap_or_else(|| panic!("{row:?} holds no number")).steps
     }
 
     /// The rows the frame drawn last made clickable, top to bottom.
@@ -637,9 +687,17 @@ fn the_green_number_and_the_speed_change_places_with_the_switch_that_holds_one()
         }
         menu.shifted(KeyCode::ArrowRight);
         menu.frame();
-        let at = menu.middle_of_hot(Hot::PlayMenuRow(menu.at(Row::Setting(id))));
-        menu.click(at, MouseButton::Left);
-        menu.click(at, MouseButton::Right);
+        let row = Row::Setting(id);
+        let slider = menu.slider_of(row);
+        for at in [menu.on_the_label_of(row), middle(slider), menu.on_the_number_of(row)] {
+            menu.click(at, MouseButton::Left);
+            menu.drag((slider.x, at.1));
+            menu.let_go((slider.x, at.1));
+            menu.typed("7");
+            menu.key(KeyCode::Enter);
+            menu.click(at, MouseButton::Right);
+        }
+        assert_eq!(menu.state.numbers.editing(), None, "{id:?} was opened to be typed into while it is worked out from the other");
         assert_eq!(menu.app.shared.config, before, "{id:?} was moved while it is worked out from the other");
     };
 
@@ -650,7 +708,7 @@ fn the_green_number_and_the_speed_change_places_with_the_switch_that_holds_one()
     assert_eq!(help(&menu.app.shared.config.play, Row::Setting(SettingId::HiSpeed), None), descriptor(SettingId::HiSpeed).help);
     untouched(&mut menu, SettingId::GreenNumber);
     menu.focus_setting(SettingId::HiSpeed);
-    menu.key(KeyCode::ArrowRight);
+    menu.keys(KeyCode::ArrowRight, 25);
     assert_eq!(menu.value(SettingId::HiSpeed), "2.25x");
     assert_eq!(menu.value(SettingId::GreenNumber), "426 (711 MS) AUTO", "the number shown did not follow the speed");
     menu.focus(Row::PreviewBpm);
@@ -688,14 +746,14 @@ fn every_row_reads_with_its_unit() {
     let mut menu = Menu::over(bare_app("units"));
     assert_eq!(menu.line(Row::PreviewBpm).value, "150 BPM");
     assert_eq!(menu.value(SettingId::HiSpeedStep), "0.25x");
-    assert_eq!(menu.value(SettingId::LaneCover), "0% (WHITE 0)");
+    assert_eq!(menu.value(SettingId::LaneCover), "0.0% (WHITE 0)");
     menu.app.shared.config.play.cover = 0.3;
     menu.app.shared.config.play.lift = 0.15;
     menu.app.shared.config.play.hidden = 0.1;
     menu.app.shared.config.judge.offset_ms = 5;
-    assert_eq!(menu.value(SettingId::LaneCover), "30% (WHITE 300)");
-    assert_eq!(menu.value(SettingId::Lift), "15%");
-    assert_eq!(menu.value(SettingId::Hidden), "10%");
+    assert_eq!(menu.value(SettingId::LaneCover), "30.0% (WHITE 300)");
+    assert_eq!(menu.value(SettingId::Lift), "15.0%");
+    assert_eq!(menu.value(SettingId::Hidden), "10.0%");
     assert_eq!(menu.value(SettingId::LaneCoverFineStep), "0.0010 (WHITE 1.0)");
     assert_eq!(menu.value(SettingId::JudgeOffset), "+5 MS");
     assert_eq!(menu.value(SettingId::KeepGreenNumber), "OFF");
@@ -708,9 +766,9 @@ fn every_row_reads_with_its_unit() {
 }
 
 /// A lane cover set with the keys reads as ten times its percent in the white number, on its row and
-/// under the preview, at every percent there is: a press at a time up the whole lane, and ten at a
-/// time with Shift. The cover is never written to here but by the keys, which is how a player sets
-/// it.
+/// under the preview, at every tenth of a percent there is: a press at a time up the whole lane,
+/// which is one of the white number at a time, and ten at a time with Shift. The cover is never
+/// written to here but by the keys, which is how a player sets it.
 #[test]
 fn a_lane_cover_set_with_the_keys_reads_as_ten_times_its_percent_in_the_white_number() {
     let mut menu = Menu::over(bare_app("white"));
@@ -719,24 +777,26 @@ fn a_lane_cover_set_with_the_keys_reads_as_ten_times_its_percent_in_the_white_nu
         let play = &menu.app.shared.config.play;
         summary(&menu.state.target().readout(play), play.constant_speed)[4].value.clone()
     };
-    for percent in 1..=100 {
+    let reads = |white: i32| format!("{}.{}% (WHITE {white})", white / 10, white % 10);
+    for white in 1..=1000 {
         menu.key(KeyCode::ArrowRight);
-        assert_eq!(menu.value(SettingId::LaneCover), format!("{percent}% (WHITE {})", percent * 10));
-        assert_eq!(white_under_the_preview(&menu), (percent * 10).to_string(), "at {percent}%");
+        assert_eq!(menu.value(SettingId::LaneCover), reads(white));
+        assert_eq!(white_under_the_preview(&menu), white.to_string(), "at {white} tenths of a percent");
+        assert_eq!((menu.app.shared.config.play.cover * 1000.0) as i32, white, "a skin that cuts the cover to thousandths reads it one short");
     }
-    for percent in (0..100).rev() {
+    for white in (0..1000).rev() {
         menu.key(KeyCode::ArrowLeft);
-        assert_eq!(menu.value(SettingId::LaneCover), format!("{percent}% (WHITE {})", percent * 10), "on the way down");
+        assert_eq!(menu.value(SettingId::LaneCover), reads(white), "on the way down");
     }
-    for tens in 1..=10 {
+    for percent in 1..=100 {
         menu.shifted(KeyCode::ArrowRight);
-        assert_eq!(menu.value(SettingId::LaneCover), format!("{}% (WHITE {})", tens * 10, tens * 100), "ten steps at a time");
+        assert_eq!(menu.value(SettingId::LaneCover), reads(percent * 10), "ten steps at a time");
     }
 }
 
-/// Left, Right and Enter step the row under the cursor in the field of the configuration the
-/// settings screen wrote it in, a row at an end of its range stays there, and a switch and a list
-/// go round.
+/// Left and Right step the row under the cursor in the field of the configuration the settings
+/// screen wrote it in -- a row that holds a number by the smallest change it can hold -- a row at
+/// an end of its range stays there, and a switch and a list go round, which Enter steps forwards.
 #[test]
 fn the_arrows_and_enter_step_the_row_under_the_cursor_to_the_ends_of_its_range() {
     let mut menu = Menu::over(bare_app("steps"));
@@ -744,12 +804,12 @@ fn the_arrows_and_enter_step_the_row_under_the_cursor_to_the_ends_of_its_range()
     menu.key(KeyCode::ArrowLeft);
     assert!(menu.app.shared.config.play.cover.abs() < f32::EPSILON, "the cover went below nothing");
     menu.key(KeyCode::ArrowRight);
-    menu.key(KeyCode::Enter);
-    assert!(menu.value(SettingId::LaneCover).starts_with("2% (WHITE "), "{}", menu.value(SettingId::LaneCover));
-    for _ in 0..SHIFT_STEPS + 1 {
+    menu.key(KeyCode::ArrowRight);
+    assert_eq!(menu.value(SettingId::LaneCover), "0.2% (WHITE 2)", "the cover is not stepped a tenth of a percent at a time");
+    for _ in 0..=1000 / SHIFT_STEPS {
         menu.shifted(KeyCode::ArrowRight);
     }
-    assert_eq!(menu.value(SettingId::LaneCover), "100% (WHITE 1000)", "the cover does not stop at the whole lane");
+    assert_eq!(menu.value(SettingId::LaneCover), "100.0% (WHITE 1000)", "the cover does not stop at the whole lane");
 
     menu.focus_setting(SettingId::JudgeOffset);
     menu.key(KeyCode::ArrowRight);
@@ -804,28 +864,28 @@ fn shift_moves_a_number_ten_steps_at_a_time_and_nothing_else() {
     );
 
     menu.focus_setting(SettingId::HiSpeed);
-    menu.shifted(KeyCode::ArrowRight);
-    assert_eq!(menu.value(SettingId::HiSpeed), "4.50x");
     menu.key(KeyCode::ArrowRight);
-    assert_eq!(menu.value(SettingId::HiSpeed), "4.75x", "shift was still held after it was let go of");
-    for _ in 0..SHIFT_STEPS {
-        menu.shifted(KeyCode::ArrowRight);
-    }
-    assert_eq!(menu.value(SettingId::HiSpeed), "19.75x", "a wide step past the fastest speed did not go as far as there was room for");
-    for _ in 0..SHIFT_STEPS {
-        menu.shifted(KeyCode::ArrowLeft);
-    }
-    assert_eq!(menu.value(SettingId::HiSpeed), "0.25x", "a wide step past the slowest speed did not go as far as there was room for");
+    assert_eq!(menu.value(SettingId::HiSpeed), "2.01x", "one press is not a hundredth, whatever HI-SPEED STEP holds");
+    menu.shifted(KeyCode::ArrowRight);
+    assert_eq!(menu.value(SettingId::HiSpeed), "2.11x");
+    menu.key(KeyCode::ArrowRight);
+    assert_eq!(menu.value(SettingId::HiSpeed), "2.12x", "shift was still held after it was let go of");
+    menu.app.shared.config.play.hispeed = 19.95;
+    menu.shifted(KeyCode::ArrowRight);
+    assert_eq!(menu.value(SettingId::HiSpeed), "20.00x", "a wide step past the fastest speed did not go as far as there was room for");
+    menu.app.shared.config.play.hispeed = 0.05;
+    menu.shifted(KeyCode::ArrowLeft);
+    assert_eq!(menu.value(SettingId::HiSpeed), "0.01x", "a wide step past the slowest speed did not go as far as there was room for");
 
     menu.focus_setting(SettingId::HiSpeedStep);
     menu.shifted(KeyCode::ArrowRight);
     assert_eq!(menu.value(SettingId::HiSpeedStep), "0.35x");
     menu.focus_setting(SettingId::Lift);
     menu.shifted(KeyCode::ArrowRight);
-    assert_eq!(menu.value(SettingId::Lift), "10%");
+    assert_eq!(menu.value(SettingId::Lift), "1.0%");
     menu.focus_setting(SettingId::Hidden);
     menu.shifted(KeyCode::ArrowRight);
-    assert_eq!(menu.value(SettingId::Hidden), "10%");
+    assert_eq!(menu.value(SettingId::Hidden), "1.0%");
     menu.focus_setting(SettingId::LaneCoverFineStep);
     menu.shifted(KeyCode::ArrowRight);
     assert_eq!(menu.value(SettingId::LaneCoverFineStep), "0.0020 (WHITE 2.0)");
@@ -917,7 +977,9 @@ fn the_cursor_steps_over_the_names_of_the_groups_and_stays_on_show() {
 }
 
 /// A press on a row moves the cursor there and steps the row once, forwards with the left button
-/// and back with the right. The name of a group takes no press, and neither does the preview.
+/// and back with the right -- a row that holds a number by the smallest change it can hold, when
+/// the press lands on its label, and back with the right button wherever on the row it lands. The
+/// name of a group takes no press, and neither does the preview.
 #[test]
 fn a_press_steps_the_row_it_lands_on_forwards_or_back() {
     let mut menu = Menu::over(bare_app("click"));
@@ -926,15 +988,17 @@ fn a_press_steps_the_row_it_lands_on_forwards_or_back() {
     let headings = menu.state.rows.iter().take(VISIBLE_ROWS).filter(|row| row.is_heading()).count();
     assert_eq!(menu.rows_on_show().len(), VISIBLE_ROWS - headings, "the names of the groups on show are not the only entries that take no press");
     let speed = menu.at(Row::Setting(SettingId::HiSpeed));
-    let at = menu.middle_of_hot(Hot::PlayMenuRow(speed));
+    let at = menu.on_the_label_of(Row::Setting(SettingId::HiSpeed));
     assert!(matches!(menu.click(at, MouseButton::Left), Transition::Stay));
-    assert_eq!((menu.state.sel, menu.value(SettingId::HiSpeed)), (speed, "2.25x".to_string()));
+    assert_eq!((menu.state.sel, menu.value(SettingId::HiSpeed)), (speed, "2.01x".to_string()));
     menu.click(at, MouseButton::Right);
-    menu.click(at, MouseButton::Right);
-    assert_eq!(menu.value(SettingId::HiSpeed), "1.75x", "the right button did not step the row back");
+    menu.click(middle(menu.slider_of(Row::Setting(SettingId::HiSpeed))), MouseButton::Right);
+    menu.click(menu.on_the_number_of(Row::Setting(SettingId::HiSpeed)), MouseButton::Right);
+    assert_eq!(menu.value(SettingId::HiSpeed), "1.98x", "the right button did not step the row back, wherever on the row it landed");
     menu.click(at, MouseButton::Middle);
-    menu.state.handle_mouse(&mut FrameCtx { shared: &mut menu.app.shared, now: std::time::Instant::now(), dt: 0.0 }, at, MouseButton::Left, false);
-    assert_eq!(menu.value(SettingId::HiSpeed), "1.75x", "another button, or letting one go, stepped the row");
+    menu.let_go(at);
+    assert_eq!(menu.value(SettingId::HiSpeed), "1.98x", "another button, or letting one go, stepped the row");
+    menu.click(at, MouseButton::Left);
     menu.click(at, MouseButton::Left);
 
     let cover = menu.middle_of_hot(Hot::PlayMenuRow(menu.at(Row::Setting(SettingId::EnableCover))));
@@ -1195,13 +1259,12 @@ fn the_menu_over_the_shipped_pack_can_be_captured() {
     };
     menu.focus_setting(SettingId::LaneCover);
     assert_eq!(menu.capture_at("play-menu-covers-before", RUN_SECONDS), PreviewStatus::Drawn);
-    (0..3).for_each(|_| menu.shifted(KeyCode::ArrowRight));
+    (0..30).for_each(|_| menu.shifted(KeyCode::ArrowRight));
     menu.focus_setting(SettingId::EnableLift);
     menu.key(KeyCode::ArrowRight);
     menu.focus_setting(SettingId::Lift);
-    menu.shifted(KeyCode::ArrowRight);
-    (0..5).for_each(|_| drop(menu.key(KeyCode::ArrowRight)));
-    assert_eq!((menu.value(SettingId::LaneCover).as_str(), menu.value(SettingId::Lift).as_str()), ("30% (WHITE 300)", "15%"));
+    (0..15).for_each(|_| menu.shifted(KeyCode::ArrowRight));
+    assert_eq!((menu.value(SettingId::LaneCover).as_str(), menu.value(SettingId::Lift).as_str()), ("30.0% (WHITE 300)", "15.0%"));
     assert_eq!(menu.capture_at("play-menu-covers-after", RUN_SECONDS), PreviewStatus::Drawn);
 
     menu.focus_setting(SettingId::KeepGreenNumber);
@@ -1254,7 +1317,7 @@ fn the_menu_over_the_shipped_pack_can_be_captured() {
 
     let mut large = Menu::sized(app_with_shipped_pack("capture-large"), LARGE);
     large.focus_setting(SettingId::LaneCover);
-    (0..3).for_each(|_| large.shifted(KeyCode::ArrowRight));
+    (0..30).for_each(|_| large.shifted(KeyCode::ArrowRight));
     assert_eq!(large.capture_at("play-menu-default", RUN_SECONDS), PreviewStatus::Drawn);
     large.focus_setting(SettingId::PlayEscapeMode);
     assert_eq!(large.capture_at("play-menu-scrolled-end", RUN_SECONDS), PreviewStatus::Drawn);
@@ -1288,4 +1351,5 @@ fn the_menu_over_the_pack_the_environment_names_can_be_captured() {
     assert_ne!(menu.capture_at("play-menu-pack-7k-held-100", RUN_SECONDS), PreviewStatus::Loading);
 }
 
+mod numbers;
 mod skin_offsets;

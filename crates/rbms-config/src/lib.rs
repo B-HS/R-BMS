@@ -18,6 +18,7 @@ mod gauge;
 mod io;
 mod judge;
 mod legacy;
+mod number;
 mod options;
 mod schema;
 mod settings;
@@ -42,6 +43,7 @@ pub use judge::{
     target_from_token,
 };
 pub use legacy::{LEGACY_FOLDERS_FILE, LEGACY_TABLES_FILE, LegacyV0, merge_legacy_lists};
+pub use number::NumberSpec;
 pub use options::{FIX_HISPEED_COUNT, FixHiSpeed, LANE_OPTION_COUNT, LaneOption, PLAY_ESCAPE_COUNT, PLAY_ESCAPE_DOUBLE_MS, PLAY_ESCAPE_HOLD_MS, PlayEscape};
 pub use rbms_store::write_atomic;
 pub use schema::{
@@ -60,8 +62,8 @@ pub use settings::{
     ACTION_VALUE, AUDIO_VOLUME_STEP_GAIN, AUTO_VALUE, AdjustOutcome, BUILT_IN_ONLY_NOTE, CUSTOM_VALUE, DEFAULT_VALUE, EMAIL_MAX_LEN, GAUGE_CYCLE, GAUGE_LABELS,
     GREEN_NUMBER_ROW_STEP, HISPEED_DECIMALS, LANE_SHADE_FINE_DECIMALS, MILLISECOND_UNIT, NO_UNIT, NONE_VALUE, OFF_VALUE, ON_VALUE, PASSWORD_MAX_LEN,
     PERCENT_SCALE, PERCENT_UNIT, PLAYER_ID_MAX_LEN, SERVER_URL_MAX_LEN, SETTING_COUNT, SETTINGS, SKIN_OPTION_NOTE, SettingDescriptor, SettingId, SettingKind,
-    SettingTab, SkinnedRow, TOTAL_DECIMALS, TOTAL_MAX, UNSET_VALUE, adjust, cycle_values, descriptor, display_value, skin_document_label, skinned_note,
-    step_skin, tab_rows,
+    SettingTab, SkinnedRow, TOTAL_DECIMALS, TOTAL_MAX, TOTAL_ROW_MAX, UNSET_VALUE, adjust, cycle_values, descriptor, display_value, move_number_steps,
+    number_spec, number_steps, set_number_steps, shipped_number_steps, skin_document_label, skinned_note, step_skin, tab_rows,
 };
 pub use sort::{SORT_CYCLE_COUNT, SORT_MODE_COUNT, SORT_SELECTABLE_COUNT, SortMode};
 pub use speed::{

@@ -692,10 +692,42 @@ fn an_offset_row_steps_stops_at_its_limit_and_is_reset_to_nothing() {
     assert_eq!(fixture.line(row).1, format!("+{}", OFFSET_POSITION_LIMIT as i32), "the row left the range its axis declares");
     assert!(!fixture.skins.step(&mut fixture.config, row, 1), "a row at its limit still reported a move");
 
-    assert!(fixture.skins.reset_row(&mut fixture.config, row));
+    assert!(put_back(&mut fixture, row));
     assert_eq!(fixture.line(row).1, "+0");
-    assert!(!fixture.skins.reset_row(&mut fixture.config, row), "a row already at nothing still reported a move");
-    assert!(!fixture.skins.reset_row(&mut fixture.config, SkinRow::Property(0)), "a property row was zeroed rather than cycled");
+    assert!(!put_back(&mut fixture, row), "a row already at nothing still reported a move");
+    assert!(!put_back(&mut fixture, SkinRow::Property(0)), "a property row was zeroed rather than cycled");
+}
+
+/// Put one row that holds a number back on the step it ships on, as the key that resets a row
+/// does, and answer whether that moved it. A row that holds no number is left alone.
+fn put_back(fixture: &mut Fixture, row: SkinRow) -> bool {
+    let shipped = fixture.skins.number(&fixture.config, row).map(|value| value.shipped);
+    shipped.is_some_and(|shipped| fixture.skins.set_number(&mut fixture.config, row, shipped))
+}
+
+/// An offset row is counted in the whole units its document writes it in, as far either way as its
+/// axis may be nudged, and is put on any step of that range at once: what a slider dragged along it
+/// and a figure typed into it do.
+#[test]
+fn an_offset_row_is_counted_in_whole_units_between_the_limits_of_its_axis() {
+    let mut fixture = Fixture::new("offset-number");
+    fixture.choose();
+    fixture.skins.reload(&fixture.config);
+    let row = SkinRow::Offset(0, OffsetAxis::Y);
+    let value = fixture.skins.number(&fixture.config, row).expect("an offset holds a number");
+    let limit = OFFSET_POSITION_LIMIT as i64;
+    assert_eq!((value.spec.min, value.spec.max, value.spec.per_one, value.steps, value.shipped, value.locked), (-limit, limit, 1, 0, 0, false));
+    assert_eq!(value.spec.text(1), "+1", "the smallest change of a place is one pixel");
+
+    assert!(fixture.skins.set_number(&mut fixture.config, row, -37));
+    assert_eq!(fixture.line(row).1, "-37");
+    assert!(!fixture.skins.set_number(&mut fixture.config, row, -37), "a row put where it stands reported a move");
+    assert!(fixture.skins.set_number(&mut fixture.config, row, i64::MAX));
+    assert_eq!(fixture.line(row).1, format!("+{limit}"), "a step past the end is not held to it");
+    assert!(!fixture.skins.needs_reload(&fixture.config), "an offset asked for a reload it does not need");
+    assert_eq!(fixture.skins.number(&fixture.config, SkinRow::Property(0)), None, "an option holds no number");
+    assert!(!fixture.skins.set_number(&mut fixture.config, SkinRow::Property(0), 1));
+    assert_eq!(fixture.skins.number(&fixture.config, SkinRow::Offset(99, OffsetAxis::X)), None, "a row the document does not declare holds a number");
 }
 
 /// RESET drops the choices made in one document and leaves the ones made in another alone.
@@ -839,20 +871,30 @@ fn stored_alpha(fixture: &Fixture, path: &str, id: i32) -> Option<f32> {
 /// the opacity is an offset of nothing, none of it takes the whole alpha range away, and between
 /// them the offset is `round((percent - 100) * 255 / 100)`. Every whole percent comes back from
 /// the offset it was stored as, so no step of a row lands beside the one it was asked for.
+///
+/// The same holds past all of it, where the offset adds alpha: a skin lights a part it draws with
+/// no alpha of its own that way, so the row holds up to the whole range added, which is twice all
+/// of the opacity.
 #[test]
 fn an_opacity_and_the_alpha_offset_it_is_stored_as_agree_on_every_percent() {
     assert_eq!((opacity_alpha(100), opacity_alpha(0), opacity_alpha(50), opacity_alpha(200)), (0.0, -255.0, -128.0, 255.0));
     assert_eq!((opacity_percent(0.0), opacity_percent(-255.0), opacity_percent(255.0)), (100, 0, 200));
+    let mut stored = Vec::new();
     for percent in 0..=200 {
         let alpha = opacity_alpha(percent);
         assert_eq!(alpha, ((percent - 100) as f32 * 255.0 / 100.0).round(), "{percent}% is not stored as the contract's offset");
         assert_eq!(alpha.fract(), 0.0, "{percent}% is stored as a part of an alpha");
-        assert!((-OFFSET_ALPHA_LIMIT..=OFFSET_ALPHA_LIMIT).contains(&alpha), "{percent}% is stored outside the alpha range");
+        assert!((-OFFSET_ALPHA_LIMIT..=OFFSET_ALPHA_LIMIT).contains(&alpha), "{percent}% is stored outside the range an offset is stored in");
+        assert_eq!(alpha <= 0.0, percent <= 100, "{percent}% is stored on the wrong side of no offset at all");
         assert_eq!(opacity_percent(alpha), percent, "{percent}% stored as {alpha} does not read back");
+        stored.push(alpha as i32);
     }
+    assert!(stored.windows(2).all(|pair| pair[0] < pair[1]), "two percents are stored as one alpha: {stored:?}");
     assert_eq!((opacity_alpha(240), opacity_alpha(-3)), (255.0, -255.0), "an opacity outside its range is not held to it");
-    assert_eq!((opacity_percent(900.0), opacity_percent(-900.0)), (200, 0), "an offset outside the alpha range reads outside the row's");
-    assert_eq!(opacity_percent(128.0), 150, "an offset that adds half the alpha range reads half as much again");
+    assert_eq!((opacity_percent(900.0), opacity_percent(-900.0)), (200, 0), "an offset outside the range an opacity is stored in reads outside the row's");
+    assert_eq!((opacity_percent(128.0), opacity_percent(13.0)), (150, 105), "an offset that adds alpha does not read past all of the opacity");
+    assert_eq!((opacity_value(128.0), opacity_value(0.0), opacity_value(-128.0)), ("150% (+128)".to_string(), "100%".to_string(), "50%".to_string()));
+    assert_eq!(opacity_value(900.0), "200% (+255)", "an offset past what an alpha holds is said to add more than an alpha holds");
 }
 
 /// An offset the document lets the player move along its alpha and nothing else is one row, called
@@ -884,85 +926,114 @@ fn an_offset_of_alpha_alone_is_one_row_read_as_an_opacity() {
     assert_eq!(fixture.skins.kind(&fixture.config, SkinRow::Offset(99, OffsetAxis::A)), None, "a row the document does not declare has a kind");
 }
 
-/// An opacity row moves five percent a step from none of it, through the skin's own at a hundred,
-/// to the whole alpha range added at two hundred, stops at both ends, and is put back to a
-/// hundred. What is stored is the alpha offset the format reads, under the offset's id, and
-/// nothing has the document read again.
+/// An opacity row moves one percent a step between none of it and all of it, stops at both ends,
+/// and is put back to all of it. A step does not carry it past all of it, though the row holds
+/// more. What is stored is the alpha offset the format reads, under the offset's id, and nothing
+/// has the document read again.
 #[test]
-fn an_opacity_row_steps_by_five_percent_and_is_stored_as_an_alpha_offset() {
+fn an_opacity_row_steps_by_one_percent_and_is_stored_as_an_alpha_offset() {
     let (mut fixture, path) = fading_fixture("opacity-step");
     fixture.skins.reload(&fixture.config);
     let row = row_called(&fixture, FADING_GROUND_ROW);
+    let value = fixture.skins.number(&fixture.config, row).expect("an opacity holds a number");
+    assert_eq!((value.spec.min, value.spec.max, value.spec.per_one, value.steps, value.shipped), (0, 200, 1, 100, 100));
+    assert_eq!((value.slider_max, value.fraction()), (100, 1.0), "the slider of an opacity does not end at all of it");
+    assert_eq!(value.spec.text(1), "1%", "the smallest change of an opacity is one percent");
 
     assert_eq!(stored_alpha(&fixture, &path, FADING_GROUND_OPACITY), None, "a row nobody stepped has something stored");
-    let mut above = Vec::new();
-    while fixture.skins.step(&mut fixture.config, row, 1) {
-        let value = fixture.line(row).1;
-        let (percent, added) = value.split_once("% (").expect("an opacity that adds reads its percent and then the alpha it adds");
-        let percent: i32 = percent.parse().expect("an opacity is a whole percent");
-        assert_eq!(added, format!("{:+})", opacity_alpha(percent) as i32), "{value} does not name the alpha it stands for");
-        assert_eq!(stored_alpha(&fixture, &path, FADING_GROUND_OPACITY), Some(opacity_alpha(percent)));
-        above.push(percent);
-    }
-    assert_eq!(fixture.line(row).1, "200% (+255)");
-    assert_eq!(above, (21..=40).map(|step| step * 5).collect::<Vec<_>>(), "the row did not walk every fifth percent up to two hundred");
-    assert_eq!(stored_alpha(&fixture, &path, FADING_GROUND_OPACITY), Some(255.0), "two hundred percent is the whole alpha range added");
-    assert!(fixture.skins.reset_row(&mut fixture.config, row));
-    assert_eq!(fixture.line(row).1, "100%");
+    assert!(!fixture.skins.step(&mut fixture.config, row, 1), "an opacity went past all of it");
+    assert_eq!(stored_alpha(&fixture, &path, FADING_GROUND_OPACITY), None, "a step that moved nothing stored something");
 
     assert!(fixture.skins.step(&mut fixture.config, row, -1));
-    assert_eq!(fixture.line(row).1, "95%");
-    assert_eq!(stored_alpha(&fixture, &path, FADING_GROUND_OPACITY), Some(-13.0), "95% is round(-5 * 255 / 100)");
+    assert_eq!(fixture.line(row).1, "99%");
+    assert_eq!(stored_alpha(&fixture, &path, FADING_GROUND_OPACITY), Some(-3.0), "99% is round(-1 * 255 / 100)");
     assert!(!fixture.skins.needs_reload(&fixture.config), "an opacity asked for a reload it does not need");
 
-    let mut seen = vec![95];
+    let mut seen = vec![99];
     while fixture.skins.step(&mut fixture.config, row, -1) {
         let percent: i32 = fixture.line(row).1.trim_end_matches('%').parse().expect("an opacity is a whole percent");
         assert_eq!(stored_alpha(&fixture, &path, FADING_GROUND_OPACITY), Some(opacity_alpha(percent)));
         seen.push(percent);
     }
-    assert_eq!(seen, (0..=19).rev().map(|step| step * 5).collect::<Vec<_>>(), "the row did not walk every fifth percent down to none");
+    assert_eq!(seen, (0..=99).rev().collect::<Vec<_>>(), "the row did not walk every percent down to none");
     assert_eq!(stored_alpha(&fixture, &path, FADING_GROUND_OPACITY), Some(-255.0), "none of the opacity is the whole alpha range taken away");
 
-    for expected in (1..=20).map(|step| step * 5) {
+    for expected in 1..=100 {
         assert!(fixture.skins.step(&mut fixture.config, row, 1));
-        assert_eq!(fixture.line(row).1, format!("{expected}%"), "a step up from {}% landed beside its own", expected - 5);
+        assert_eq!(fixture.line(row).1, format!("{expected}%"), "a step up from {}% landed beside its own", expected - 1);
     }
     assert_eq!(stored_alpha(&fixture, &path, FADING_GROUND_OPACITY), Some(0.0));
 
-    for _ in 0..7 {
-        fixture.skins.step(&mut fixture.config, row, -1);
-    }
+    assert!(fixture.skins.set_number(&mut fixture.config, row, 65));
     assert_eq!(fixture.line(row).1, "65%");
-    assert!(fixture.skins.reset_row(&mut fixture.config, row));
+    assert!(put_back(&mut fixture, row));
     assert_eq!(
         (fixture.line(row).1.as_str(), stored_alpha(&fixture, &path, FADING_GROUND_OPACITY)),
         ("100%", Some(0.0)),
         "the row was not put back to all of it"
     );
-    assert!(!fixture.skins.reset_row(&mut fixture.config, row), "an opacity already at a hundred still reported a move");
+    assert!(!put_back(&mut fixture, row), "an opacity already at a hundred still reported a move");
 
     let other = row_called(&fixture, FADING_NOTES_ROW);
     assert_eq!(fixture.line(other).1, "100%", "one opacity moved another");
 }
 
-/// A wide step of an opacity is a quarter of the way and one of any other offset is ten steps, and
-/// a row that is cycled has no wide step.
+/// Every whole percent of an opacity row is stored and reads back as itself, set in any order: a
+/// slider dragged along the row and a figure typed into it land on the percent they ask for. Past
+/// all of it the row reads the alpha it adds after the percent.
 #[test]
-fn a_wide_step_is_a_quarter_of_an_opacity_and_ten_of_an_offset() {
-    let (fixture, _) = fading_fixture("opacity-wide");
-    let wide = |row: SkinRow| fixture.skins.wide_steps_for(&fixture.config, PLAY_7KEYS, row);
-    assert_eq!(wide(row_called(&fixture, FADING_GROUND_ROW)) as i32 * OPACITY_STEP_PERCENT, 25);
-    assert_eq!(wide(row_called(&fixture, "MARK PLACE X")), 10);
-    assert_eq!(wide(row_called(&fixture, "GLOW ALPHA")), 10, "the alpha of an offset that also moves is stepped as a number");
-    assert_eq!(wide(SkinRow::Property(0)), 1);
+fn every_percent_of_an_opacity_row_is_stored_and_read_back() {
+    let (mut fixture, path) = fading_fixture("opacity-every");
+    let row = row_called(&fixture, FADING_GROUND_ROW);
+    for percent in (0..=200).chain((0..=200).rev()) {
+        fixture.skins.set_number(&mut fixture.config, row, percent);
+        assert_eq!(fixture.skins.number(&fixture.config, row).map(|value| value.steps), Some(percent));
+        let alpha = opacity_alpha(percent as i32);
+        let read = if percent > 100 { format!("{percent}% ({alpha:+})") } else { format!("{percent}%") };
+        assert_eq!(fixture.line(row).1, read);
+        assert_eq!(stored_alpha(&fixture, &path, FADING_GROUND_OPACITY), Some(alpha));
+    }
+    assert!(fixture.skins.set_number(&mut fixture.config, row, 250));
+    assert_eq!(stored_alpha(&fixture, &path, FADING_GROUND_OPACITY), Some(OFFSET_ALPHA_LIMIT), "a step past the row's end is not held to it");
+    assert!(fixture.skins.set_number(&mut fixture.config, row, -40));
+    assert_eq!(stored_alpha(&fixture, &path, FADING_GROUND_OPACITY), Some(-OFFSET_ALPHA_LIMIT));
+}
+
+/// Setting a row to the step it already reads leaves what is stored exactly as it is: an offset a
+/// settings file holds between two steps, or adding alpha, is not rewritten by a press that takes
+/// hold of its slider, by Enter on the figure it opens on, or by the key that puts back a row
+/// already where it ships.
+#[test]
+fn setting_a_row_to_the_step_it_reads_leaves_what_is_stored_alone() {
+    let (mut fixture, path) = fading_fixture("opacity-same-step");
+    let held = [
+        (FADING_PANEL_OPACITY, SkinOffset { a: 128.0, ..SkinOffset::default() }),
+        (FADING_NOTES_OPACITY, SkinOffset { a: -100.0, ..SkinOffset::default() }),
+        (FADING_GROUND_OPACITY, SkinOffset { a: 1.0, ..SkinOffset::default() }),
+        (FADING_MARK_PLACE, SkinOffset { x: 12.4, ..SkinOffset::default() }),
+    ];
+    for (id, offset) in held {
+        fixture.config.skin.customise(&path).offsets.insert(id, offset);
+    }
+    let before = fixture.config.clone();
+    for label in [FADING_PANEL_ROW, FADING_NOTES_ROW, FADING_GROUND_ROW, "MARK PLACE X"] {
+        let row = row_called(&fixture, label);
+        let reads = fixture.skins.number(&fixture.config, row).expect("the row holds a number").steps;
+        assert!(!fixture.skins.set_number(&mut fixture.config, row, reads), "{label}: setting the row to what it reads reported a move");
+    }
+    let ground = row_called(&fixture, FADING_GROUND_ROW);
+    assert!(!put_back(&mut fixture, ground), "a row that reads where it ships was put back");
+    assert_eq!(fixture.config, before, "what is stored was rewritten by setting rows to what they read");
+    assert_eq!(fixture.line(row_called(&fixture, FADING_PANEL_ROW)).1, "150% (+128)");
 }
 
 /// The offsets a settings file already holds are read as they were written: an alpha offset that
 /// was stored before there was an opacity row is the opacity it comes to, one that stands between
-/// two steps is shown to the nearest percent and stepped to the nearest step that way, and an
-/// offset that moves reads as the number it always was. Writing the file and reading it back
-/// changes none of it.
+/// two percents is shown as the nearer and stepped from it, and an offset that moves reads as the
+/// number it always was. Writing the file and reading it back changes none of it.
+///
+/// An opacity stored as an offset that adds alpha reads as more than all of it, with the alpha it
+/// adds after the percent, and is stepped from where it stands either way.
 #[test]
 fn the_offsets_a_settings_file_holds_are_read_as_they_were_written() {
     let (mut fixture, path) = fading_fixture("opacity-file");
@@ -987,11 +1058,7 @@ fn the_offsets_a_settings_file_holds_are_read_as_they_were_written() {
     let read = |fixture: &Fixture, label: &str| fixture.line(row_called(fixture, label)).1;
     assert_eq!(read(&fixture, FADING_GROUND_ROW), "50%");
     assert_eq!(read(&fixture, FADING_NOTES_ROW), "61%", "an offset of -100 leaves 60.8 percent");
-    assert_eq!(
-        read(&fixture, FADING_PANEL_ROW),
-        "178% (+200)",
-        "an offset that adds alpha, as a skin's shade over a lane is brought up with, reads past a hundred, with the alpha that is stored"
-    );
+    assert_eq!(read(&fixture, FADING_PANEL_ROW), "178% (+200)", "an offset that adds alpha does not read as more than all of the opacity");
     assert_eq!(stored_alpha(&fixture, &path, FADING_PANEL_OPACITY), Some(200.0), "reading an offset rewrote it");
     assert_eq!((read(&fixture, "MARK PLACE X"), read(&fixture, "MARK PLACE Y")), ("+12".to_string(), "-7".to_string()));
     assert_eq!((read(&fixture, "GLOW Y"), read(&fixture, "GLOW ALPHA")), ("+3".to_string(), "-40".to_string()));
@@ -999,11 +1066,18 @@ fn the_offsets_a_settings_file_holds_are_read_as_they_were_written() {
 
     let notes = row_called(&fixture, FADING_NOTES_ROW);
     assert!(fixture.skins.step(&mut fixture.config, notes, 1));
-    assert_eq!(fixture.line(notes).1, "65%", "a step up from between two steps did not land on the next one");
+    assert_eq!(fixture.line(notes).1, "62%", "a step up from between two percents did not land on the next one");
     fixture.config.skin.customise(&path).offsets.insert(FADING_NOTES_OPACITY, SkinOffset { a: -100.0, ..SkinOffset::default() });
     assert!(fixture.skins.step(&mut fixture.config, notes, -1));
-    assert_eq!(fixture.line(notes).1, "60%", "a step down from between two steps did not land on the one below");
+    assert_eq!(fixture.line(notes).1, "60%", "a step down from between two percents did not land on the one below");
     assert_eq!(stored_alpha(&fixture, &path, FADING_GROUND_OPACITY), Some(-128.0), "stepping one opacity rewrote another");
+
+    let panel = row_called(&fixture, FADING_PANEL_ROW);
+    assert!(fixture.skins.step(&mut fixture.config, panel, 1), "a row past all of its opacity is not stepped from where it stands");
+    assert_eq!((fixture.line(panel).1.as_str(), stored_alpha(&fixture, &path, FADING_PANEL_OPACITY)), ("179% (+201)", Some(201.0)));
+    fixture.config.skin.customise(&path).offsets.insert(FADING_PANEL_OPACITY, SkinOffset { a: 200.0, ..SkinOffset::default() });
+    assert!(fixture.skins.step(&mut fixture.config, panel, -1));
+    assert_eq!((fixture.line(panel).1.as_str(), stored_alpha(&fixture, &path, FADING_PANEL_OPACITY)), ("177% (+196)", Some(196.0)));
     assert_eq!(
         fixture.config.skin.customisation(&path).and_then(|entry| entry.offsets.get(&FADING_MARK_PLACE)).map(|offset| (offset.x, offset.y)),
         Some((12.0, -7.0))

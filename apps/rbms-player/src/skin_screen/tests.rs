@@ -1076,7 +1076,7 @@ fn over_black(color: (u8, u8, u8), alpha: u32) -> crate::Color {
 fn an_opacity_and_a_nudge_set_on_the_skin_tab_are_drawn_with_on_the_next_frame() {
     use crate::skin_select::fixtures::{FADING_GROUND, FADING_GROUND_ROW, FADING_JUDGE_PART, FADING_PANEL, FADING_PANEL_ROW};
     const HALF_ALPHA: u32 = 127;
-    const HALF_STEPS: i32 = 10;
+    const HALF_STEPS: i32 = 50;
     const RAISED: i32 = 30;
     const ACROSS: i32 = 100;
     let black = crate::Color::rgb(0, 0, 0);

@@ -23,9 +23,12 @@
 //! cannot. What either comes to is read from the one place the preview's own scroll is
 //! ([`SpeedReadout`]).
 
-use rbms_config::{AdjustOutcome, Config, HISPEED_DECIMALS, MILLISECOND_UNIT, PlayOptions, SettingId, SettingKind, SettingTab, adjust, descriptor, tab_rows};
+use rbms_config::{
+    AdjustOutcome, Config, HISPEED_DECIMALS, MILLISECOND_UNIT, PlayOptions, SettingId, SettingTab, adjust, descriptor, move_number_steps, number_spec, tab_rows,
+};
 
 use crate::AppShared;
+use crate::number_row::NumberValue;
 use crate::skin_preview::target::SpeedReadout;
 use crate::skin_select::{SkinRow, SkinRowKind};
 use crate::stage::preview_menu::{ONE_STEP, RowLook, SHIFT_STEPS};
@@ -301,24 +304,57 @@ pub(super) fn help(play: &PlayOptions, row: Row, kind: Option<SkinRowKind>) -> &
     }
 }
 
-/// Whether a row of the settings table holds a number, which is what Shift moves ten steps at a
-/// time: a switch has two places and a list is walked one name at a time.
+/// Whether a row of the settings table holds a number, which is what is moved a step of its
+/// smallest change at a time and ten with Shift, dragged along a slider and typed: a switch has two
+/// places and a list is walked one name at a time.
 pub(super) fn holds_a_number(id: SettingId) -> bool {
-    matches!(descriptor(id).kind, SettingKind::IntRange { .. } | SettingKind::FloatRange { .. } | SettingKind::Percent { .. })
+    number_spec(id).is_some()
 }
 
-/// Step one row of the settings table, and report whether it moved. `wide` asks for ten steps at
-/// once, which a row that holds no number takes as one.
+/// The number one row holds, or `None` for a row that holds none: a row of the settings table that
+/// holds one, or an offset of the play skin of `screen`.
 ///
-/// A wide step that would carry a row past the end of its range is refused whole by a row that does
-/// not stop at its end -- the scroll speed -- so what single steps there is room for are taken
-/// instead, and the row ends where holding the key down would have left it.
-pub(super) fn step_setting(config: &mut Config, id: SettingId, delta: i32, wide: bool) -> bool {
-    let steps = if wide && holds_a_number(id) { i32::from(SHIFT_STEPS) } else { i32::from(ONE_STEP) };
-    if adjust(config, id, delta * steps) == AdjustOutcome::Changed {
-        return true;
+/// A row whose value is worked out from the others is locked, and stands where `readout` has it:
+/// the scroll speed a held green number comes to, or the green number a stored speed comes to.
+pub(super) fn number_of(shared: &AppShared, readout: &SpeedReadout, screen: i32, row: Row) -> Option<NumberValue> {
+    match row {
+        Row::Setting(id) => {
+            let stored = shared.setting_number(id)?;
+            if !is_read_only(&shared.config.play, row) {
+                return Some(stored);
+            }
+            let steps = match id {
+                SettingId::HiSpeed => stored.spec.steps_of(readout.hispeed),
+                SettingId::GreenNumber => stored.spec.clamp(i64::from(readout.green_number)),
+                _ => stored.steps,
+            };
+            Some(NumberValue { steps, locked: true, ..stored })
+        }
+        Row::Skin(skin_row) => shared.skins.number_for(&shared.config, screen, skin_row),
+        Row::Group(_) | Row::PreviewBpm | Row::Fold(_) => None,
     }
-    steps > 1 && (0..steps).filter(|_| adjust(config, id, delta) == AdjustOutcome::Changed).count() > 0
+}
+
+/// What a row that holds a number reads in the list, in the room a number has beside its slider:
+/// the number and its unit, without what the row says of it under the preview -- the travel time a
+/// green number stands for, the white number a cover reads as.
+pub(super) fn number_figure(row: Row, value: &NumberValue) -> String {
+    let figure = value.spec.text(value.steps);
+    match row {
+        Row::Setting(SettingId::HiSpeed | SettingId::HiSpeedStep) => format!("{figure}{HISPEED_UNIT}"),
+        _ => figure,
+    }
+}
+
+/// Step one row of the settings table, and report whether it moved. A row that holds a number
+/// moves one step of the smallest change it can hold, and ten when `wide` asks, stopping at the
+/// end of its range; a row that holds none is stepped once, whatever is asked.
+pub(super) fn step_setting(config: &mut Config, id: SettingId, delta: i32, wide: bool) -> bool {
+    if !holds_a_number(id) {
+        return adjust(config, id, delta) == AdjustOutcome::Changed;
+    }
+    let steps = if wide { SHIFT_STEPS } else { ONE_STEP };
+    move_number_steps(config, id, i64::from(delta.signum()) * i64::from(steps)) == AdjustOutcome::Changed
 }
 
 /// Put one row of the settings table back to what a fresh configuration holds for it, and report
