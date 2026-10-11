@@ -110,7 +110,7 @@ Default lanes follow the reference keyboard layout: 7K `Z S X D C F V` + `LShift
 
 ### Number rows
 
-Every row that holds a number in the play menu, the skin menu and Settings is set the same three ways.
+Every row that holds a number in the play menu, the skin menu, Settings and the practice panel is set the same three ways.
 
 | Input | What it does |
 | --- | --- |
@@ -119,13 +119,17 @@ Every row that holds a number in the play menu, the skin menu and Settings is se
 | `Enter`, or a click on the number | Type the number in place. The current value is selected, so the first digit replaces it. `Enter` sets it (held to the row's range and rounded to its step), `Esc` cancels the typing only, and `↑` `↓` `Tab` set it and move on. A unit typed after the number (`%`, `ms`, `x`, `px`) is ignored; anything that is not a number is refused and the row says `NOT A NUMBER`. |
 | `0` | Back to the default. A right click steps once back. |
 
-A position or size offset runs over ±2000, more than its slider has places for, so use the arrows or type the number to set one exactly. An opacity's slider and arrows stop at 100%; typing goes up to 200%, which adds alpha and only matters to a skin that lights a part it draws fully transparent. A row that is worked out from the others (HI-SPEED while KEEP GREEN NUMBER is on) is drawn faint and cannot be set. The option panels of the song select, the in-play keys and the practice panel keep their own key steps.
+A position or size offset runs over ±2000, more than its slider has places for, so use the arrows or type the number to set one exactly. An opacity's slider and arrows stop at 100%; typing goes up to 200%, which adds alpha and only matters to a skin that lights a part it draws fully transparent. A row that is worked out from the others (HI-SPEED while KEEP GREEN NUMBER is on) is drawn faint and cannot be set. The option panels of the song select and the in-play keys keep their own key steps.
+
+The **practice panel** (`F4` on the song select) sets its six numbers the same way: START TIME and END TIME in steps of 0.1 s, GAUGE VALUE, JUDGERANK, TOTAL and FREQUENCY in steps of 1. A time is shown as `1:05.5` and typed either as seconds (`65.5`) or as minutes and seconds (`1:05.5`). The first row, START, starts the slice with `Enter` or a click, and the cursor is on it when the panel opens; `Enter` starts the slice from the three choice rows as well, and on a number row it opens the row for typing instead. `Tab` moves the cursor down and `Shift` + `Tab` up. END TIME never goes below START TIME + 1 s. Raising START TIME past END TIME pushes it along; while START TIME is being dragged the push lasts only as long as it is past END TIME, so a drag that overshoots and comes back leaves END TIME where it was. TOTAL's slider and arrows run from 10 to 1000, and typing goes up to 5000.
 
 ## Difficulty tables
 
 Press `T` on the song select to open the table manager, choose `+ ADD TABLE (URL)` and enter the address of a table's page (or `+ ADD TABLE (FILE)` for a `data.json` on disk). Each table that loads becomes a folder on the song select with its levels inside.
 
-A table at an address is downloaded once. The player keeps a copy in `~/.config/rbms/tables/` and every later start, and every library rescan, reads that copy without touching the network, so MATCHING TABLES no longer waits on the table's server. The copy is not refreshed by itself:
+Adding a table does not leave the table manager: the new row appears at once, reads `FETCHING...` (`READING...` for a file) while the table is fetched in the background, and you can go on using the manager or go back to the song select. When the table arrives its folder appears in the song list and a notification says `table added: NAME (N local charts)`. If it cannot be fetched the row stays, says `LOAD FAILED` with the reason, and can be fetched again with `R` or removed with `D`.
+
+A table at an address is downloaded once. The player keeps a copy in `~/.config/rbms/tables/` and every later start, and every library rescan, reads that copy without touching the network. Starting the player never waits for a table's server: MATCHING TABLES reads only the saved copies and the table files on disk. A table that has no copy yet (one that has never been fetched successfully) is fetched once the song select is up, in the background; its folder appears where it belongs when it arrives, with the cursor left on the folder it was on, and a notification says `difficulty tables fetched for the first time: N added, M failed`. An address that does not answer costs no waiting: about 15 seconds after the song select appears a notification says `table fetch failed (ADDRESS): REASON`, the row in the table manager says `LOAD FAILED`, and the address is not asked again until the next start, `R`, `A` or `F6`. The copy is not refreshed by itself:
 
 | Key | Where | What it does |
 | --- | --- | --- |
@@ -133,7 +137,7 @@ A table at an address is downloaded once. The player keeps a copy in `~/.config/
 | `A` | Table manager | Fetch every table again |
 | `F6` | Song select | Fetch every table again (the key can be moved in the key config) |
 
-A reload runs in the background: the screen stays usable, the row reads `RELOADING...`, and when the table arrives its folder changes in place and a notification says `difficulty tables reloaded: N updated, M failed`. If a reload fails, or the address now answers with an empty table, the saved copy and the folder stay as they were and the row says `RELOAD FAILED` with the reason. Each row shows how long ago its copy was fetched (`SAVED 3 DAYS AGO`); after 30 days the age is drawn in the warning colour. Removing a table (`D`) deletes its copy. A table registered as a file has no copy and is read from the file each time. A table that has never been fetched successfully has no copy, so the player tries it again on every start until it loads or is removed.
+A reload runs in the background: the screen stays usable, the row reads `RELOADING...`, and when the table arrives its folder changes in place and a notification says `difficulty tables reloaded: N updated, M failed`. If a reload fails, or the address now answers with an empty table, the saved copy and the folder stay as they were and the row says `RELOAD FAILED` with the reason. Each row shows how long ago its copy was fetched (`SAVED 3 DAYS AGO`); after 30 days the age is drawn in the warning colour. Removing a table (`D`) deletes its copy, also while it is being fetched. A table registered as a file has no copy and is read from the file each time. A table that has never been fetched successfully has no copy, so the player tries it once on every start, after the song select is up, until it loads or is removed. A table given with `--table` is treated the same way: read from its copy at startup, or fetched after the song select is up when it has none.
 
 ## Web (IR server + site)
 
