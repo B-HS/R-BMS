@@ -53,6 +53,7 @@ use super::SelectState;
 use crate::app_options::options_key;
 use crate::keyconfig::{Shortcut, ShortcutScreen, belongs_to_a_typed_line};
 use crate::stage::{FrameCtx, KeyInput, StageId, Transition};
+use crate::tablesrc::ListPlace;
 use crate::textedit::{ImeEdit, edit_key};
 use crate::{AppShared, KeyCode, SelectTab, SelectView};
 
@@ -148,7 +149,7 @@ impl SelectState {
         if self.search_resume.is_some() {
             return;
         }
-        self.search_resume = Some((shared.select_view, shared.sel));
+        self.search_resume = Some(ListPlace::of(shared));
         shared.select_view = SelectView::AllSongs;
         shared.sel = 0;
         self.rebuild(shared);
@@ -196,15 +197,20 @@ impl SelectState {
 
     /// Leave the search, typed or on show: clear the word and go back to the folder and the row the
     /// search was made from -- a search is a detour, not a way of leaving the folder you were in.
+    ///
+    /// A difficulty table can arrive, or come back changed, while the search is on. Where the
+    /// search was made from is kept as a place that is found again in the list as it is now
+    /// ([`ListPlace`]): the folder the cursor was on wherever it stands now, and the level the
+    /// browser was inside by its name.
     pub(super) fn exit_search(&mut self, shared: &mut AppShared) {
         shared.searching = false;
         self.search_edit = ImeEdit::default();
         shared.search.clear();
-        let (view, sel) = self.search_resume.take().unwrap_or((SelectView::AllSongs, 0));
-        shared.select_view = view;
+        let place = self.search_resume.take();
+        shared.select_view = place.as_ref().map_or(SelectView::AllSongs, |place| place.view(shared));
         shared.sel = 0;
         self.rebuild(shared);
-        shared.sel = sel.min(shared.select_items.len().saturating_sub(1));
+        shared.sel = place.map_or(0, |place| place.row(shared));
         self.cached_key = None;
     }
 

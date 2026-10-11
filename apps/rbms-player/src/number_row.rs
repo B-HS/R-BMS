@@ -1,13 +1,19 @@
 //! A row that holds a number, as every built-in screen sets one: by a key, by a slider and by a
 //! figure typed into the row.
 //!
-//! Three screens list such rows -- the settings screen, the skin menu and the play menu -- and all
-//! three count a row the same way ([`rbms_config::NumberSpec`]: whole steps of the smallest change
-//! the row can hold), draw its slider with the same call ([`draw_slider`]), turn a place on the
+//! Four screens list such rows -- the settings screen, the skin menu, the play menu and the practice
+//! panel -- and all of them count a row the same way ([`rbms_config::NumberSpec`]: whole steps of
+//! the smallest change the row can hold), draw its slider with the same call ([`draw_slider`]), turn a place on the
 //! slider into a step with the same arithmetic ([`steps_at`]), and take a typed figure with the
 //! same editor ([`NumberEdit`]) and the same bookkeeping ([`NumberInput`]). What differs from one
 //! screen to the next is what a row is and where its number is stored, which is the screen's: it
-//! answers what a row holds ([`NumberValue`]) and writes the step it is handed.
+//! answers what a row holds ([`NumberValue`]) and writes the step it is handed. A screen answers
+//! anew every time it is asked, so a row whose ends depend on the rows beside it -- the gauge a
+//! practice slice starts at, under the gauge that is selected -- is counted between the ends it has
+//! at that moment, and the screen holds the step it is handed to whatever else the row must keep to.
+//!
+//! A row that holds a length of time ([`rbms_config::NumberSpec::as_clock`]) is written as minutes
+//! and seconds, and is typed either that way or as seconds ([`NumberEdit`], [`EDIT_HINT_CLOCK`]).
 //!
 //! A key moves a row one step, and ten with Shift held. A press on the slider puts the row where
 //! the press landed and a drag carries it along with the pointer, wherever the pointer goes, until
@@ -62,6 +68,12 @@ const EDIT_MAX_CHARS: usize = 12;
 
 /// The keys of a screen while a row is being typed into, written where the screen names its keys.
 pub(crate) const EDIT_HINT: &str = "TYPE A NUMBER   ENTER SET   ESC CANCEL   UP DOWN TAB SET AND MOVE ON";
+
+/// The same while the row being typed into holds a length of time.
+pub(crate) const EDIT_HINT_CLOCK: &str = "TYPE SECONDS OR MIN:SEC   ENTER SET   ESC CANCEL   UP DOWN TAB SET AND MOVE ON";
+
+/// What stands between the minutes and the seconds of a length of time as it is typed.
+const CLOCK_SEPARATOR: char = ':';
 
 /// What a row says in place of its number when what was typed into it was not one, and for how
 /// long it says so.
@@ -217,18 +229,26 @@ pub(crate) enum EditKey {
 ///
 /// It opens on the number the row holds, wholly selected: the first character typed replaces it,
 /// a delete empties it, and a move of the caret lets go of the selection and leaves the number to
-/// be corrected. Only what a number is written with is taken -- digits, a sign and a decimal point
-/// -- so a unit typed after it is dropped as it is typed.
+/// be corrected. Only what a number is written with is taken -- digits, a sign and a decimal point,
+/// and for a length of time the colon between its minutes and its seconds -- so a unit typed after
+/// it is dropped as it is typed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct NumberEdit {
     line: TextEdit,
     all_selected: bool,
+    /// Whether the row holds a length of time, which is typed with a colon.
+    clock: bool,
 }
 
 impl NumberEdit {
     /// An editor opened on the number a row holds, wholly selected.
     pub(crate) fn over(spec: &NumberSpec, steps: i64) -> NumberEdit {
-        NumberEdit { line: TextEdit::from_text(spec.plain(steps)), all_selected: true }
+        NumberEdit { line: TextEdit::from_text(spec.plain(steps)), all_selected: true, clock: spec.clock }
+    }
+
+    /// Whether the row being typed into holds a length of time.
+    pub(crate) fn is_clock(&self) -> bool {
+        self.clock
     }
 
     /// What has been typed.
@@ -249,7 +269,7 @@ impl NumberEdit {
     /// Type `text` in at the caret, keeping only what a number is written with, in place of the
     /// whole figure while it is selected.
     fn type_in(&mut self, text: &str) {
-        let typed: String = text.chars().filter(|ch| ch.is_ascii_digit() || matches!(ch, '+' | '-' | '.')).collect();
+        let typed: String = text.chars().filter(|ch| ch.is_ascii_digit() || matches!(ch, '+' | '-' | '.') || (self.clock && *ch == CLOCK_SEPARATOR)).collect();
         if typed.is_empty() {
             return;
         }
@@ -361,6 +381,12 @@ impl<K: Copy + PartialEq> NumberInput<K> {
         steps
     }
 
+    /// The line of keys a screen writes while a row is being typed into: the one for a length of
+    /// time while the row holds one, and `None` while no row is being typed into.
+    pub(crate) fn edit_hint(&self) -> Option<&'static str> {
+        self.edit.as_ref().map(|(_, edit)| if edit.is_clock() { EDIT_HINT_CLOCK } else { EDIT_HINT })
+    }
+
     /// Whether `row` is still saying that what was typed into it was not a number.
     pub(crate) fn is_refused(&self, row: K, now: Instant) -> bool {
         self.refused.is_some_and(|(refused, until)| refused == row && now < until)
@@ -438,6 +464,7 @@ mod tests {
 
     const PERCENT: NumberSpec = NumberSpec::whole(0, 100, "%");
     const PLACE: NumberSpec = NumberSpec::whole(-2000, 2000, "").with_sign();
+    const CLOCK: NumberSpec = NumberSpec::fine(0, 6000, 10, 1, "").as_clock();
     const AREA: Rect = Rect { x: 200.0, y: 40.0, w: 108.0, h: 29.0 };
 
     fn press(code: KeyCode) -> KeyInput<'static> {
@@ -529,6 +556,38 @@ mod tests {
             long.key(&typed("9"));
         }
         assert_eq!(long.text().chars().count(), EDIT_MAX_CHARS);
+    }
+
+    /// A length of time opens as it is written and takes the colon it is written with, which no
+    /// other row does; what is typed into it reads as minutes and seconds or as seconds alone.
+    #[test]
+    fn a_length_of_time_is_typed_with_its_colon() {
+        let mut edit = NumberEdit::over(&CLOCK, 834);
+        assert_eq!((edit.text(), edit.is_all_selected(), edit.is_clock()), ("1:23.4", true, true));
+        for text in ["2", ":", "0", "5", ".", "5", "s"] {
+            assert_eq!(edit.key(&typed(text)), EditKey::Taken);
+        }
+        assert_eq!(edit.text(), "2:05.5");
+        assert_eq!(CLOCK.parse(edit.text()), Some(1255));
+
+        let mut plain = NumberEdit::over(&PERCENT, 40);
+        assert!(!plain.is_clock());
+        plain.key(&typed(":"));
+        assert_eq!((plain.text(), plain.is_all_selected()), ("40", true), "a colon typed over a number that is no length of time replaced it");
+        plain.key(&typed("1"));
+        plain.key(&typed(":"));
+        assert_eq!(plain.text(), "1");
+
+        let mut input: NumberInput<usize> = NumberInput::new();
+        assert_eq!(input.edit_hint(), None);
+        input.begin_edit(0, &NumberValue::of(CLOCK, 834, 0));
+        assert_eq!(input.edit_hint(), Some(EDIT_HINT_CLOCK));
+        assert_eq!(input.edit_key(&typed("9")), Some(EditKey::Taken));
+        assert_eq!(input.edit_key(&typed("0")), Some(EditKey::Taken));
+        let (row, text) = input.take_edit().expect("a row was being typed into");
+        assert_eq!(input.typed_steps(row, &CLOCK, &text, Instant::now()), Some(900), "seconds alone are not a length of time");
+        input.begin_edit(1, &value(40));
+        assert_eq!(input.edit_hint(), Some(EDIT_HINT));
     }
 
     #[test]

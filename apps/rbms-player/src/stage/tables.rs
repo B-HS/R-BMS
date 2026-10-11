@@ -1,26 +1,29 @@
 //! The difficulty-table manager: the list of table sources, the URL/file pickers that add one, and
 //! the removal that drops its matched levels with it.
 //!
-//! Neither way of adding one stops the app: the file picker is a native panel the window keeps
-//! drawing behind, and the table itself — fetched from a URL or read off disk — is parsed and
-//! matched against the library on the LOADING screen rather than on the frame loop.
+//! Neither way of adding one stops the app, or leaves this screen: the file picker is a native
+//! panel the window keeps drawing behind, and the table itself — fetched from a URL or read off
+//! disk — is fetched, parsed and matched against the library on a worker beside the frame loop
+//! ([`register_table`]). The source is a row from the moment it is added, which says the table is
+//! on its way until it has landed.
 //!
-//! Each source says what became of its table: how many of its charts the library has, or that it
-//! could not be loaded and why. A table that failed is not a folder in the song list, so this is
-//! the screen that has to account for it.
+//! Each source says what became of its table: how many of its charts the library has, that it has
+//! not been fetched yet, that it is being fetched, or that it could not be loaded and why. A table
+//! that has not arrived or that failed is not a folder in the song list, so this is the screen
+//! that has to account for it.
 //!
 //! A table at an address is fetched once and read from the copy kept of it after that, so the row
 //! also says how long ago that copy was fetched, and points its age out once it is old. Nothing
 //! fetches a table again by itself: R does, for the table under the cursor, and A for every table.
-//! Those run beside the screen, which goes on being used while the row says the table is on its
-//! way.
+//! Those run beside the screen too, which goes on being used while the row says the table is on
+//! its way. A fetch goes on after the screen is left, and lands on the song list.
 #![allow(clippy::wildcard_imports)]
 
 use crate::dialog::{DialogHandle, DialogState};
-use crate::stage::{Canvas, FrameCtx, KeyInput, LoadingState, Stage, StageHandler, Transition};
+use crate::stage::{Canvas, FrameCtx, KeyInput, StageHandler, Transition};
 use crate::tablesrc::{
-    COPY_OLD_AFTER_DAYS, TableOrigin, TableStatus, TableStore, apply_finished_reloads, copy_age, copy_age_days, forget_table_status, reload_tables,
-    table_is_reloading, table_status, unix_now,
+    COPY_OLD_AFTER_DAYS, TableOrigin, TableStatus, apply_finished_fetches, copy_age, copy_age_days, forget_table, is_address, register_table, reload_tables,
+    table_is_fetching, table_status, unix_now,
 };
 use crate::*;
 
@@ -73,14 +76,27 @@ const LIST_KEYS: &str = "UP DOWN MOVE   ENTER SELECT   R RELOAD   A RELOAD ALL  
 const RELOADING: &str = "RELOADING...";
 const RELOADING_DETAIL: &str = "FETCHING THE TABLE AGAIN - IT STAYS AS IT IS UNTIL THE NEW ONE ARRIVES";
 
+/// The same two for a table that is on its way and is not in the song list yet: one at an address
+/// that has never arrived, and one that is a file being read.
+const FETCHING: &str = "FETCHING...";
+const FETCHING_DETAIL: &str = "FETCHING THE TABLE - ITS FOLDER APPEARS IN THE SONG LIST WHEN IT ARRIVES";
+const READING: &str = "READING...";
+const READING_DETAIL: &str = "READING THE TABLE FILE - ITS FOLDER APPEARS IN THE SONG LIST WHEN IT HAS BEEN READ";
+
+/// What the row of a table at an address says when nothing has been fetched of it and nothing is
+/// fetching it, and what is said of it under the list.
+const NOT_FETCHED: &str = "NOT FETCHED YET";
+const NOT_FETCHED_DETAIL: &str = "NOT FETCHED YET - THE SONG LIST FETCHES IT WHEN IT IS NEXT UP, AND R FETCHES IT NOW";
+
 /// What is said of a copy before how long ago it was fetched, and all that is said of one that
 /// does not record when that was.
 const SAVED_UNDATED: &str = "SAVED";
 
 /// What reloading is, along the bottom of the screen: where the lines end above the bottom edge,
 /// their pitch and their scale.
-const RELOAD_NOTE: [&str; 2] = [
+const RELOAD_NOTE: [&str; 3] = [
     "A TABLE AT AN ADDRESS IS FETCHED ONCE AND READ FROM ITS SAVED COPY AFTER THAT - THE ROW SHOWS HOW LONG AGO THE COPY WAS FETCHED.",
+    "A TABLE IS FETCHED WHILE YOU GO ON USING THE PLAYER, HERE OR IN THE SONG LIST - ITS FOLDER APPEARS WHEN IT ARRIVES.",
     "R FETCHES THE TABLE UNDER THE CURSOR AGAIN, A EVERY TABLE. A TABLE REGISTERED AS A FILE IS READ FROM THE FILE AGAIN.",
 ];
 const NOTE_BOTTOM: f32 = 40.0;
@@ -114,6 +130,7 @@ fn status_summary(status: &TableStatus) -> (String, bool) {
         TableStatus::Loaded { entries, levels, owned, stale: None, .. } => (format!("{owned} OF {entries} CHARTS OWNED  -  {levels} LEVELS"), false),
         TableStatus::Loaded { entries, owned, stale: Some(_), .. } => (format!("RELOAD FAILED  -  {owned} OF {entries} CHARTS OWNED"), true),
         TableStatus::Failed { .. } => ("LOAD FAILED".to_string(), true),
+        TableStatus::NotFetched => (NOT_FETCHED.to_string(), false),
     }
 }
 
@@ -127,6 +144,7 @@ fn status_detail(status: &TableStatus) -> Option<String> {
         TableStatus::Loaded { entries: 0, .. } => Some("THE TABLE WAS READ BUT LISTS NO CHARTS - IT HAS NO FOLDER IN THE SONG LIST".to_string()),
         TableStatus::Loaded { owned: 0, .. } => Some("NONE OF THIS TABLE'S CHARTS ARE IN THE LIBRARY YET - ITS FOLDER IS EMPTY".to_string()),
         TableStatus::Loaded { .. } => None,
+        TableStatus::NotFetched => Some(NOT_FETCHED_DETAIL.to_string()),
     }
 }
 
@@ -139,20 +157,34 @@ fn saved_note(status: &TableStatus, now: u64) -> Option<(String, bool)> {
             Some((format!("{SAVED_UNDATED} {}", copy_age(*at, now)), copy_age_days(*at, now) > COPY_OLD_AFTER_DAYS))
         }
         TableStatus::Loaded { origin: TableOrigin::Address { fetched_at: None }, .. } => Some((SAVED_UNDATED.to_string(), false)),
-        TableStatus::Loaded { origin: TableOrigin::File, .. } | TableStatus::Failed { .. } => None,
+        TableStatus::Loaded { origin: TableOrigin::File, .. } | TableStatus::Failed { .. } | TableStatus::NotFetched => None,
+    }
+}
+
+/// What a table that is on its way says: the few words of its row, and the line under the list.
+///
+/// A table that is in the song list is being fetched again and stays as it is meanwhile. One that
+/// is not -- never fetched, or failed the last time -- has no folder until this fetch lands, and
+/// one registered as a file is being read rather than fetched.
+fn on_its_way(source: &TableSource, status: Option<&TableStatus>) -> (&'static str, &'static str) {
+    match status {
+        Some(TableStatus::Loaded { .. }) => (RELOADING, RELOADING_DETAIL),
+        _ if is_address(&source.location) => (FETCHING, FETCHING_DETAIL),
+        _ => (READING, READING_DETAIL),
     }
 }
 
 /// What is said under the list of the source under the cursor, and whether it reports a problem:
-/// that the table is being fetched again while it is, and otherwise what there is to say of what
-/// became of it ([`status_detail`]). A reload that is out says nothing of the one that failed
-/// before it, which is not what is happening to the table now.
-fn focused_detail(status: Option<&TableStatus>, reloading: bool) -> Option<(String, bool)> {
-    if reloading {
-        return Some((RELOADING_DETAIL.to_string(), false));
+/// that the table is on its way while it is (`arriving`, the line [`on_its_way`] gives it), and
+/// otherwise what there is to say of what became of it ([`status_detail`]). A fetch that is out
+/// says nothing of the one that failed before it, which is not what is happening to the table now.
+fn focused_detail(status: Option<&TableStatus>, arriving: Option<&str>) -> Option<(String, bool)> {
+    if let Some(arriving) = arriving {
+        return Some((arriving.to_string(), false));
     }
     let status = status?;
-    status_detail(status).map(|detail| (detail, !matches!(status, TableStatus::Loaded { stale: None, .. })))
+    let is_problem = !matches!(status, TableStatus::Loaded { stale: None, .. } | TableStatus::NotFetched);
+    status_detail(status).map(|detail| (detail, is_problem))
 }
 
 /// The line that says how old an old copy is and how to replace it, for the source under the
@@ -187,27 +219,36 @@ impl TablesState {
         shared.config.library.tables.len() + 2
     }
 
-    /// Add the table the file picker came back with, on the same screen of its own the typed URL
-    /// uses.
+    /// Add `source` to the list and start fetching its table, without leaving the screen: the row
+    /// is there at once with the cursor on it, and says the table is on its way until it has
+    /// landed. A source already in the list is not added twice, whether its table has arrived or is
+    /// still out.
+    fn add_source(&mut self, shared: &mut AppShared, source: TableSource) {
+        if shared.config.library.tables.iter().any(|t| t.location == source.location) {
+            notify(Level::Warn, format!("table already added: {}", source.location));
+            return;
+        }
+        self.sel = shared.config.library.tables.len();
+        register_table(shared, source);
+    }
+
+    /// Add the table the file picker came back with.
     ///
     /// A table file is not always small — an insane-level table is tens of thousands of entries, and
     /// each is matched against every chart in the library — so it is parsed and matched on a worker
-    /// rather than in the middle of a frame.
-    fn add_picked_file(&mut self, shared: &AppShared, path: &std::path::Path) -> Transition {
+    /// rather than in the middle of a frame, the same worker a table at an address is fetched on.
+    fn add_picked_file(&mut self, shared: &mut AppShared, path: &std::path::Path) {
         let location = path.to_string_lossy().to_string();
-        if shared.config.library.tables.iter().any(|t| t.location == location) {
-            notify(Level::Warn, format!("table already added: {location}"));
-            return Transition::Stay;
-        }
         let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or(DEFAULT_TABLE_NAME).to_string();
-        Transition::Open(Stage::Loading(LoadingState::table(shared, TableSource { name, location })))
+        self.add_source(shared, TableSource { name, location });
     }
 
+    /// Take a source off the list, with everything kept of its table. One whose table is still on
+    /// its way is removed like any other: what arrives for it afterwards is kept nowhere.
     fn remove_table_source(&mut self, shared: &mut AppShared, idx: usize) {
         if idx < shared.config.library.tables.len() {
             let removed = shared.config.library.tables.remove(idx);
-            forget_table_status(&removed.location);
-            TableStore::beside(&shared.settings_path).forget(&removed.location);
+            forget_table(shared, &removed.location);
             if idx < shared.table_names.len() {
                 shared.table_names.remove(idx);
             }
@@ -219,25 +260,21 @@ impl TablesState {
         }
     }
 
-    /// Start fetching the typed URL, on a screen of its own so the window keeps drawing while the
-    /// request is out.
-    fn add_typed_url(&mut self, shared: &AppShared) -> Transition {
+    /// Add the typed URL as a source and start fetching it. The request is out beside the screen,
+    /// which shows the list again with the new row in it.
+    fn add_typed_url(&mut self, shared: &mut AppShared) {
         let url = self.text_input.take().map(|mut edit| edit.take()).unwrap_or_default().trim().to_string();
-        if url.is_empty() {
-            return Transition::Stay;
+        if !url.is_empty() {
+            self.add_source(shared, TableSource { name: String::new(), location: url });
         }
-        if shared.config.library.tables.iter().any(|t| t.location == url) {
-            notify(Level::Warn, format!("table already added: {url}"));
-            return Transition::Stay;
-        }
-        Transition::Open(Stage::Loading(LoadingState::table(shared, TableSource { name: String::new(), location: url })))
     }
 
     /// Typing the URL of a new table. Enter adds it, Esc abandons the entry, and the caret keys
-    /// edit what has been typed so far rather than only its end.
-    fn url_entry_key(&mut self, shared: &AppShared, key: &KeyInput<'_>) -> Transition {
+    /// edit what has been typed so far rather than only its end. None of them leaves the screen.
+    fn url_entry_key(&mut self, shared: &mut AppShared, key: &KeyInput<'_>) -> Transition {
         if key.code == KeyCode::Enter || key.code == KeyCode::NumpadEnter {
-            return self.add_typed_url(shared);
+            self.add_typed_url(shared);
+            return Transition::Stay;
         }
         if key.code == KeyCode::Escape {
             self.text_input = None;
@@ -280,19 +317,19 @@ impl TablesState {
 }
 
 impl StageHandler for TablesState {
-    /// Take the tables a reload has come back with, and collect the file picker's answer once the
+    /// Take the tables a fetch has come back with, and collect the file picker's answer once the
     /// user has given one. Both run beside the frame loop, so this is where a reloaded table and an
     /// added one actually land.
     fn update(&mut self, ctx: &mut FrameCtx<'_>) -> Transition {
-        apply_finished_reloads(ctx.shared);
+        apply_finished_fetches(ctx.shared);
         let Some(picker) = self.picker.as_ref() else {
             return Transition::Stay;
         };
         match picker.poll() {
-            DialogState::Open => return Transition::Stay,
+            DialogState::Open => {}
             DialogState::Picked(path) => {
                 self.picker = None;
-                return self.add_picked_file(ctx.shared, &path);
+                self.add_picked_file(ctx.shared, &path);
             }
             DialogState::Dismissed => self.picker = None,
         }
@@ -302,7 +339,7 @@ impl StageHandler for TablesState {
     /// Table-manager input. In URL-text mode, type the URL (Enter adds, Esc cancels); otherwise
     /// navigate, add (URL/file), reload (R the table under the cursor, A every table), remove (D),
     /// or leave (Esc — rebuilds the browse list). Keys are ignored while the native picker is up,
-    /// which owns the keyboard itself. A reload goes on after the screen is left.
+    /// which owns the keyboard itself. A fetch goes on after the screen is left.
     fn handle_key(&mut self, ctx: &mut FrameCtx<'_>, key: KeyInput<'_>) -> Transition {
         if matches!(key.code, KeyCode::ControlLeft | KeyCode::ControlRight | KeyCode::SuperLeft | KeyCode::SuperRight) {
             self.paste_held = key.pressed;
@@ -357,8 +394,8 @@ impl StageHandler for TablesState {
         }
         draw_text(canvas, x0, 84.0, 1.3, th.text_muted, LIST_KEYS);
         let now = unix_now();
-        let settings_path = &ctx.shared.settings_path;
-        let tables = &ctx.shared.config.library.tables;
+        let shared = &*ctx.shared;
+        let tables = &shared.config.library.tables;
         let add_url = tables.len();
         let row_count = tables.len() + 2;
         for i in 0..row_count {
@@ -388,10 +425,10 @@ impl StageHandler for TablesState {
                 draw_text_right(canvas, status_right, y + STATUS_DY, STATUS_SCALE, saved_col, &saved);
                 status_right -= text_width(&saved, STATUS_SCALE) + SAVED_GAP;
             }
-            let reloading = tables.get(i).is_some_and(|source| table_is_reloading(settings_path, &source.location));
-            let summary = if reloading { Some((RELOADING.to_string(), false)) } else { status.as_ref().map(status_summary) };
+            let arriving = tables.get(i).filter(|source| table_is_fetching(shared, &source.location)).map(|source| on_its_way(source, status.as_ref()).0);
+            let summary = arriving.map(|arriving| (arriving.to_string(), false)).or_else(|| status.as_ref().map(status_summary));
             if let Some((summary, is_problem)) = summary {
-                let status_col = match (reloading, is_problem, on) {
+                let status_col = match (arriving.is_some(), is_problem, on) {
                     (true, ..) => Color::YELLOW,
                     (false, true, _) => th.warn,
                     (false, false, true) => th.text,
@@ -404,9 +441,10 @@ impl StageHandler for TablesState {
             draw_text(canvas, x0 + ROW_PAD_X, y + ROW_TEXT_DY, ROW_TEXT_SCALE, col, &rbms_render::fit_text(&label, ROW_TEXT_SCALE, label_w));
         }
         let focused = tables.get(self.sel).and_then(|source| table_status(&source.location));
-        let focused_reloading = tables.get(self.sel).is_some_and(|source| table_is_reloading(settings_path, &source.location));
+        let focused_arriving =
+            tables.get(self.sel).filter(|source| table_is_fetching(shared, &source.location)).map(|source| on_its_way(source, focused.as_ref()).1);
         let mut line_top = ROW_TOP + row_count as f32 * ROW_PITCH + DETAIL_GAP;
-        if let Some((detail, is_problem)) = focused_detail(focused.as_ref(), focused_reloading) {
+        if let Some((detail, is_problem)) = focused_detail(focused.as_ref(), focused_arriving) {
             let detail: Vec<char> = detail.chars().collect();
             for chars in detail.chunks(DETAIL_LINE_CHARS).take(DETAIL_MAX_LINES) {
                 let text: String = chars.iter().collect();
@@ -415,7 +453,7 @@ impl StageHandler for TablesState {
                 line_top += DETAIL_PITCH;
             }
         }
-        if let Some(note) = focused.as_ref().filter(|_| !focused_reloading).and_then(|status| old_copy_note(status, now)) {
+        if let Some(note) = focused.as_ref().filter(|_| focused_arriving.is_none()).and_then(|status| old_copy_note(status, now)) {
             draw_text(canvas, x0, line_top, DETAIL_SCALE, th.warn, &rbms_render::fit_text(&note, DETAIL_SCALE, PANEL_W));
         }
         let note_top = CH as f32 - NOTE_BOTTOM - NOTE_PITCH * (RELOAD_NOTE.len() - 1) as f32;
@@ -429,6 +467,7 @@ impl StageHandler for TablesState {
 mod tests {
     use super::*;
     use crate::stage::render_tests::app;
+    use crate::tablesrc::{TableStore, forget_table_status, read_and_match};
 
     fn press(code: KeyCode) -> KeyInput<'static> {
         KeyInput { code, pressed: true, released: false, text: None }
@@ -438,17 +477,158 @@ mod tests {
         KeyInput { code: KeyCode::KeyA, pressed: true, released: false, text: Some(text) }
     }
 
-    /// A URL is fetched on a screen of its own, so the window keeps drawing while the request is
-    /// out rather than freezing on the table manager.
+    /// A typed URL is a row of the list from the moment Enter is pressed, with the cursor on it,
+    /// and the table is fetched beside the screen: nothing leaves for another screen, and nothing
+    /// waits for the request. The source is in the settings whatever becomes of its table.
     #[test]
-    fn adding_a_url_leaves_for_the_loading_screen_rather_than_fetching_here() {
-        let app = app();
-        let mut state = TablesState::new();
-        state.text_input = Some(TextEdit::from_text("https://example.test/table.json"));
-        let moved = matches!(state.url_entry_key(&app.shared, &press(KeyCode::Enter)), Transition::Open(Stage::Loading(_)));
-        assert!(moved, "adding a table has to leave the frame loop free");
-        assert!(state.text_input.is_none(), "the entry is finished with");
-        assert!(app.shared.config.library.tables.is_empty(), "nothing is added until the fetch comes back");
+    fn adding_a_url_puts_its_row_in_the_list_at_once_and_fetches_beside_the_screen() {
+        crate::notify::exclusive(|| {
+            let address = "https://tables.test/manager/typed/";
+            let mut app = app();
+            let mut addresses = Addresses::of(&app);
+            addresses.tables.serve(address, "Typed", TWO_LEVELS);
+            addresses.registered.push(address.to_string());
+            let mut state = TablesState::new();
+            state.sel = TablesState::row_count(&app.shared) - 1;
+            state.text_input = Some(TextEdit::from_text(address));
+
+            let open = addresses.tables.hold();
+            assert!(matches!(state.url_entry_key(&mut app.shared, &press(KeyCode::Enter)), Transition::Stay), "adding a table left the screen");
+            assert!(state.text_input.is_none(), "the entry is finished with");
+            assert_eq!(app.shared.config.library.tables.len(), 1, "the row is not there until the table has arrived");
+            assert_eq!(state.sel, 0, "the cursor is not on the row that was added");
+            assert!(table_is_fetching(&app.shared, address), "nothing is fetching the table that was added");
+            assert_eq!(table_status(address), Some(TableStatus::NotFetched));
+            assert_eq!((app.shared.table_names.len(), app.shared.table_levels.len()), (1, 1), "the row has no slot in the song list's tables");
+            assert_eq!(folders(&mut app, SelectView::Root).len(), 1, "a table that has not arrived is a folder already");
+            let kept = rbms_config::load(&app.shared.settings_path).expect("the settings were saved");
+            assert_eq!(kept.config.library.tables.iter().map(|source| source.location.as_str()).collect::<Vec<_>>(), vec![address]);
+            assert!(matches!(state.update(&mut ctx(&mut app)), Transition::Stay), "the screen stopped while the table was out");
+
+            drop(open);
+            addresses.wait_for_fetches(&mut app, &mut state);
+            assert_eq!(addresses.tables.asked(), 1);
+            assert_eq!(table_status(address).as_ref().map(status_summary), Some(("0 OF 2 CHARTS OWNED  -  2 LEVELS".to_string(), false)));
+            assert!(addresses.store().has_copy_file(address), "a table that was registered was not kept");
+            assert_eq!(folders(&mut app, SelectView::Root).len(), 2, "the table that arrived is not a folder");
+            let mut said = Vec::new();
+            crate::notify::drain(&mut said);
+            assert!(said.iter().any(|(level, message)| *level == Level::Info && message == "table added: TYPED (0 local charts)"), "{said:?}");
+        });
+    }
+
+    /// A table whose address does not answer keeps its row, which says why, and nothing announces
+    /// it as added. It is not fetched again by itself, and R fetches it again.
+    #[test]
+    fn a_registered_address_that_does_not_answer_keeps_its_row_and_says_why() {
+        crate::notify::exclusive(|| {
+            let address = "https://tables.test/manager/unanswered/";
+            let mut app = app();
+            let mut addresses = Addresses::of(&app);
+            addresses.register(&mut app, address);
+
+            assert_eq!(app.shared.config.library.tables.len(), 1, "the row is there to look at, fetch again and remove");
+            let status = table_status(address).expect("the failure is remembered");
+            assert_eq!(status_summary(&status), ("LOAD FAILED".to_string(), true));
+            assert!(status_detail(&status).is_some_and(|detail| detail.starts_with("LOAD FAILED: ")), "the row does not say why");
+            assert!(!addresses.store().has_copy_file(address));
+            assert_eq!(folders(&mut app, SelectView::Root).len(), 1, "a table that was not fetched is a folder");
+            let mut said = Vec::new();
+            crate::notify::drain(&mut said);
+            assert!(said.iter().all(|(_, message)| !message.contains("table added")), "{said:?}");
+            assert_eq!(
+                said.iter().filter(|(level, message)| *level == Level::Warn && message.starts_with(&format!("table load failed ({address}): "))).count(),
+                1,
+                "{said:?}"
+            );
+
+            let mut state = TablesState::new();
+            for _ in 0..3 {
+                state.update(&mut ctx(&mut app));
+            }
+            assert_eq!(addresses.tables.asked(), 1, "a table whose fetch failed was fetched again by itself");
+
+            addresses.tables.serve(address, "Answered", ONE_LEVEL);
+            state.handle_key(&mut ctx(&mut app), press(KeyCode::KeyR));
+            addresses.wait_for_fetches(&mut app, &mut state);
+            assert_eq!(addresses.tables.asked(), 2);
+            assert_eq!(table_status(address).as_ref().map(status_summary), Some(("0 OF 1 CHARTS OWNED  -  1 LEVELS".to_string(), false)));
+            assert!(addresses.store().has_copy_file(address));
+        });
+    }
+
+    /// While a table that was registered is still out: registering its address again is refused,
+    /// and the keys that fetch tables again do not fetch it a second time.
+    #[test]
+    fn a_table_on_its_way_is_not_registered_or_fetched_a_second_time() {
+        crate::notify::exclusive(|| {
+            let address = "https://tables.test/manager/once/";
+            let mut app = app();
+            let mut addresses = Addresses::of(&app);
+            addresses.tables.serve(address, "Once", ONE_LEVEL);
+            addresses.registered.push(address.to_string());
+            let mut state = TablesState::new();
+
+            let open = addresses.tables.hold();
+            state.text_input = Some(TextEdit::from_text(address));
+            state.url_entry_key(&mut app.shared, &press(KeyCode::Enter));
+            state.text_input = Some(TextEdit::from_text(address));
+            state.url_entry_key(&mut app.shared, &press(KeyCode::Enter));
+            assert_eq!(app.shared.config.library.tables.len(), 1, "the address of a table on its way was registered again");
+            state.handle_key(&mut ctx(&mut app), press(KeyCode::KeyR));
+            state.handle_key(&mut ctx(&mut app), press(KeyCode::KeyA));
+            let mut said = Vec::new();
+            crate::notify::drain(&mut said);
+            assert!(said.iter().any(|(level, message)| *level == Level::Warn && message == &format!("table already added: {address}")), "{said:?}");
+            assert_eq!(said.iter().filter(|(_, message)| message == "the tables are being fetched already").count(), 2, "{said:?}");
+
+            drop(open);
+            addresses.wait_for_fetches(&mut app, &mut state);
+            assert_eq!(addresses.tables.asked(), 1, "a table on its way was fetched a second time");
+            assert_eq!(app.shared.table_names, vec!["ONCE".to_string()]);
+        });
+    }
+
+    /// A table removed while it is still on its way from being registered leaves nothing: no row,
+    /// no copy, and no word that it was added. Registered again before that fetch is back, it is
+    /// fetched for itself and is there when it lands.
+    #[test]
+    fn a_table_removed_while_it_is_being_registered_leaves_nothing_and_can_be_registered_again() {
+        crate::notify::exclusive(|| {
+            let address = "https://tables.test/manager/removed-while-registering/";
+            let mut app = app();
+            let mut addresses = Addresses::of(&app);
+            addresses.tables.serve(address, "Going", ONE_LEVEL);
+            addresses.registered.push(address.to_string());
+            let mut state = TablesState::new();
+
+            let open = addresses.tables.hold();
+            state.text_input = Some(TextEdit::from_text(address));
+            state.url_entry_key(&mut app.shared, &press(KeyCode::Enter));
+            state.handle_key(&mut ctx(&mut app), press(KeyCode::KeyD));
+            assert!(app.shared.config.library.tables.is_empty() && app.shared.table_names.is_empty() && app.shared.table_levels.is_empty());
+            assert_eq!(table_status(address), None);
+            drop(open);
+            addresses.wait_for_fetches(&mut app, &mut state);
+            assert!(!addresses.store().has_copy_file(address), "the fetch left a copy of a table that is no longer registered");
+            let mut said = Vec::new();
+            crate::notify::drain(&mut said);
+            assert!(said.iter().all(|(_, message)| !message.contains("table added")), "{said:?}");
+
+            let open = addresses.tables.hold();
+            state.text_input = Some(TextEdit::from_text(address));
+            state.url_entry_key(&mut app.shared, &press(KeyCode::Enter));
+            state.handle_key(&mut ctx(&mut app), press(KeyCode::KeyD));
+            state.text_input = Some(TextEdit::from_text(address));
+            state.url_entry_key(&mut app.shared, &press(KeyCode::Enter));
+            drop(open);
+            addresses.wait_for_fetches(&mut app, &mut state);
+            assert_eq!(app.shared.table_names, vec!["GOING".to_string()], "the table registered again never arrived");
+            assert!(addresses.store().has_copy_file(address), "the table registered again has no copy");
+            assert_eq!(addresses.tables.asked(), 3, "each registration is one fetch of its own");
+            crate::notify::drain(&mut said);
+            assert_eq!(said.iter().filter(|(_, message)| message.starts_with("table added:")).count(), 1, "{said:?}");
+        });
     }
 
     #[test]
@@ -458,19 +638,21 @@ mod tests {
         let mut state = TablesState::new();
 
         state.text_input = Some(TextEdit::from_text("   "));
-        assert!(matches!(state.url_entry_key(&app.shared, &press(KeyCode::Enter)), Transition::Stay));
+        assert!(matches!(state.url_entry_key(&mut app.shared, &press(KeyCode::Enter)), Transition::Stay));
+        assert_eq!(app.shared.config.library.tables.len(), 1, "an empty entry was added as a table");
 
         state.text_input = Some(TextEdit::from_text("https://example.test/have.json"));
-        assert!(matches!(state.url_entry_key(&app.shared, &press(KeyCode::Enter)), Transition::Stay));
+        assert!(matches!(state.url_entry_key(&mut app.shared, &press(KeyCode::Enter)), Transition::Stay));
         assert_eq!(app.shared.config.library.tables.len(), 1, "the same table is not added twice");
+        assert!(app.shared.table_fetches.is_idle(), "a table that was refused is being fetched");
     }
 
     #[test]
     fn escape_abandons_what_was_typed_without_adding_it() {
-        let app = app();
+        let mut app = app();
         let mut state = TablesState::new();
         state.text_input = Some(TextEdit::from_text("https://example.test/table.json"));
-        assert!(matches!(state.url_entry_key(&app.shared, &press(KeyCode::Escape)), Transition::Stay));
+        assert!(matches!(state.url_entry_key(&mut app.shared, &press(KeyCode::Escape)), Transition::Stay));
         assert!(state.text_input.is_none());
         assert!(app.shared.config.library.tables.is_empty());
     }
@@ -478,17 +660,17 @@ mod tests {
     /// A URL is the one value in the app long enough to need editing rather than retyping.
     #[test]
     fn the_caret_keys_edit_the_typed_url_in_place() {
-        let app = app();
+        let mut app = app();
         let mut state = TablesState::new();
         state.text_input = Some(TextEdit::from_text("http//x"));
         for key in [KeyCode::Home, KeyCode::ArrowRight, KeyCode::ArrowRight, KeyCode::ArrowRight, KeyCode::ArrowRight] {
-            state.url_entry_key(&app.shared, &press(key));
+            state.url_entry_key(&mut app.shared, &press(key));
         }
-        state.url_entry_key(&app.shared, &typed("s:"));
+        state.url_entry_key(&mut app.shared, &typed("s:"));
         assert_eq!(state.text_input.as_ref().expect("still typing").text(), "https://x");
 
-        state.url_entry_key(&app.shared, &press(KeyCode::End));
-        state.url_entry_key(&app.shared, &press(KeyCode::Backspace));
+        state.url_entry_key(&mut app.shared, &press(KeyCode::End));
+        state.url_entry_key(&mut app.shared, &press(KeyCode::Backspace));
         assert_eq!(state.text_input.as_ref().expect("still typing").text(), "https://");
     }
 
@@ -500,12 +682,12 @@ mod tests {
         state.text_input = Some(TextEdit::new());
         state.handle_key(&mut ctx(&mut app), KeyInput { code: KeyCode::ControlLeft, pressed: true, released: false, text: None });
         assert!(state.paste_held);
-        state.url_entry_key(&app.shared, &KeyInput { code: KeyCode::KeyA, pressed: true, released: false, text: Some("a") });
+        state.url_entry_key(&mut app.shared, &KeyInput { code: KeyCode::KeyA, pressed: true, released: false, text: Some("a") });
         assert_eq!(state.text_input.as_ref().expect("still typing").text(), "", "a shortcut is not typed into the line");
 
         state.handle_key(&mut ctx(&mut app), KeyInput { code: KeyCode::ControlLeft, pressed: false, released: true, text: None });
         assert!(!state.paste_held);
-        state.url_entry_key(&app.shared, &typed("a"));
+        state.url_entry_key(&mut app.shared, &typed("a"));
         assert_eq!(state.text_input.as_ref().expect("still typing").text(), "a");
     }
 
@@ -525,29 +707,40 @@ mod tests {
     }
 
     /// A table file can be tens of thousands of entries, each matched against every chart in the
-    /// library, so a picked file goes to the LOADING screen the same way a typed URL does rather
-    /// than being parsed in the middle of a frame.
+    /// library, so a picked file is read on the worker a typed URL is fetched on rather than in the
+    /// middle of a frame. Its row is there at once, on this screen, and says the file is being read.
     #[test]
-    fn a_picked_file_is_parsed_on_the_loading_screen_rather_than_in_a_frame() {
+    fn a_picked_file_is_a_row_at_once_and_is_read_beside_the_screen() {
+        let file = TableFile::written("picked", br#"[{"md5":"1111","level":"1"}]"#);
         let mut app = app();
         let mut state = TablesState::new();
+        state.sel = TablesState::row_count(&app.shared) - 1;
         let (tx, handle) = crate::dialog::handle_for_tests();
         state.picker = Some(handle);
-        tx.send(Some(std::path::PathBuf::from("/tables/insane.json"))).expect("the handle is still held");
-        let moved = state.update(&mut ctx(&mut app));
-        assert!(matches!(moved, Transition::Open(Stage::Loading(_))), "a picked file was not sent to the loading screen");
-        assert!(app.shared.config.library.tables.is_empty(), "the source is added only once its table has been read");
+        tx.send(Some(file.0.clone())).expect("the handle is still held");
+
+        assert!(matches!(state.update(&mut ctx(&mut app)), Transition::Stay), "a picked file left the screen");
+        assert!(state.picker.is_none());
+        assert_eq!(app.shared.config.library.tables.len(), 1, "the row is not there until the file has been read");
+        assert_eq!(state.sel, 0, "the cursor is not on the row that was added");
+        assert_eq!(on_its_way(&app.shared.config.library.tables[0], table_status(&file.location()).as_ref()), (READING, READING_DETAIL));
+        while !app.shared.table_fetches.is_idle() {
+            state.update(&mut ctx(&mut app));
+            std::thread::yield_now();
+        }
+        assert_eq!(table_status(&file.location()).as_ref().map(status_summary), Some(("0 OF 1 CHARTS OWNED  -  1 LEVELS".to_string(), false)));
+        assert_eq!(app.shared.table_names.len(), 1);
     }
 
-    /// A source already in the list is not added twice, and saying so does not open a screen.
+    /// A source already in the list is not added twice, and nothing is fetched for it.
     #[test]
     fn a_file_already_in_the_list_is_not_added_again() {
         let mut app = app();
         let mut state = TablesState::new();
         app.shared.config.library.tables.push(TableSource { name: "one".into(), location: "/tables/one.json".into() });
-        let moved = state.add_picked_file(&app.shared, std::path::Path::new("/tables/one.json"));
-        assert!(matches!(moved, Transition::Stay));
+        state.add_picked_file(&mut app.shared, std::path::Path::new("/tables/one.json"));
         assert_eq!(app.shared.config.library.tables.len(), 1);
+        assert!(app.shared.table_fetches.is_idle());
     }
 
     /// A table file written for one test, removed when the test is over.
@@ -572,19 +765,14 @@ mod tests {
         }
     }
 
-    /// Register `file` the way the picker does and stay on the LOADING screen it opens until the
-    /// table has been read and the screen hands back.
+    /// Register `file` the way the picker does, and run the table manager's frames until the file
+    /// has been read and its table has landed.
     fn register(app: &mut crate::App, file: &TableFile) {
         let mut state = TablesState::new();
-        let Transition::Open(Stage::Loading(mut loading)) = state.add_picked_file(&app.shared, &file.0) else {
-            panic!("a picked file was not sent to the loading screen");
-        };
-        loop {
-            match loading.update(&mut ctx(app)) {
-                Transition::Stay => std::thread::yield_now(),
-                Transition::Back => return,
-                _ => panic!("the loading screen left for somewhere other than the table manager"),
-            }
+        state.add_picked_file(&mut app.shared, &file.0);
+        while !app.shared.table_fetches.is_idle() {
+            assert!(matches!(state.update(&mut ctx(app)), Transition::Stay), "the table manager left for another screen");
+            std::thread::yield_now();
         }
     }
 
@@ -717,7 +905,7 @@ mod tests {
 
         let nothing_owned = rbms_table::Md5Index::new(std::iter::empty());
         let store = TableStore::beside(&app.shared.settings_path);
-        crate::tablesrc::load_and_match(&store, crate::tablesrc::LoadPolicy::SavedFirst, &app.shared.config.library.tables[0], &nothing_owned);
+        read_and_match(&store, &app.shared.config.library.tables[0], &nothing_owned);
         let failed = crate::stage::render_tests::render(&mut app, Stage::Tables(TablesState::new())).pixel_checksum();
         assert_ne!(unknown, failed, "the failure is not on the screen");
     }
@@ -754,30 +942,20 @@ mod tests {
             TableStore::beside(&self.settings)
         }
 
-        /// Register the table at `address` the way typing its URL does, and stay on the LOADING
-        /// screen until it hands back.
+        /// Register the table at `address` the way typing its URL does, and run the table
+        /// manager's frames until its fetch has landed.
         fn register(&mut self, app: &mut crate::App, address: &str) {
             self.registered.push(address.to_string());
             let mut state = TablesState::new();
             state.text_input = Some(TextEdit::from_text(address));
-            let Transition::Open(Stage::Loading(mut loading)) = state.url_entry_key(&app.shared, &press(KeyCode::Enter)) else {
-                panic!("a typed address was not sent to the loading screen");
-            };
-            loop {
-                match loading.update(&mut ctx(app)) {
-                    Transition::Stay => std::thread::yield_now(),
-                    Transition::Back => return,
-                    _ => panic!("the loading screen left for somewhere other than the table manager"),
-                }
-            }
+            assert!(matches!(state.url_entry_key(&mut app.shared, &press(KeyCode::Enter)), Transition::Stay), "a typed address left the table manager");
+            self.wait_for_fetches(app, &mut state);
         }
 
-        /// Run the table manager's frames until nothing of this app's is being reloaded any more.
-        fn wait_for_reloads(&self, app: &mut crate::App, state: &mut TablesState) {
-            while app.shared.config.library.tables.iter().any(|source| table_is_reloading(&self.settings, &source.location))
-                || self.registered.iter().any(|address| table_is_reloading(&self.settings, address))
-            {
-                state.update(&mut ctx(app));
+        /// Run the table manager's frames until nothing of this app's is being fetched any more.
+        fn wait_for_fetches(&self, app: &mut crate::App, state: &mut TablesState) {
+            while !app.shared.table_fetches.is_idle() {
+                assert!(matches!(state.update(&mut ctx(app)), Transition::Stay), "the table manager left for another screen");
                 std::thread::yield_now();
             }
         }
@@ -842,12 +1020,12 @@ mod tests {
             let mut state = TablesState::new();
             let open = addresses.tables.hold();
             assert!(matches!(state.handle_key(&mut ctx(&mut app), press(KeyCode::KeyR)), Transition::Stay), "a reload left the screen");
-            assert!(table_is_reloading(&app.shared.settings_path, address), "the row has nothing to say the table is on its way");
+            assert!(table_is_fetching(&app.shared, address), "the row has nothing to say the table is on its way");
             assert!(matches!(state.update(&mut ctx(&mut app)), Transition::Stay), "the screen stopped while the table was out");
             assert_eq!(app.shared.table_names, vec!["BEFORE".to_string()], "the table changed before the reload came back");
             state.handle_key(&mut ctx(&mut app), press(KeyCode::KeyR));
             drop(open);
-            addresses.wait_for_reloads(&mut app, &mut state);
+            addresses.wait_for_fetches(&mut app, &mut state);
 
             assert_eq!(addresses.tables.asked(), 2, "one registration and one reload; a second R while it was out is not a second fetch");
             assert_eq!(app.shared.table_names, vec!["AFTER".to_string()]);
@@ -875,7 +1053,7 @@ mod tests {
             addresses.tables.take_down(address);
             let mut state = TablesState::new();
             state.handle_key(&mut ctx(&mut app), press(KeyCode::KeyR));
-            addresses.wait_for_reloads(&mut app, &mut state);
+            addresses.wait_for_fetches(&mut app, &mut state);
 
             assert_eq!(app.shared.table_names, vec!["KEPT".to_string()]);
             assert_eq!(folders(&mut app, SelectView::TableLevels(0)), vec!["LV 1 (0)", "LV 2 (0)"], "the folder of a table whose reload failed changed");
@@ -895,7 +1073,7 @@ mod tests {
 
             addresses.tables.serve(address, "Back", ONE_LEVEL);
             state.handle_key(&mut ctx(&mut app), press(KeyCode::KeyR));
-            addresses.wait_for_reloads(&mut app, &mut state);
+            addresses.wait_for_fetches(&mut app, &mut state);
             assert_eq!(
                 table_status(address).as_ref().map(status_summary),
                 Some(("0 OF 1 CHARTS OWNED  -  1 LEVELS".to_string(), false)),
@@ -926,7 +1104,7 @@ mod tests {
             let mut state = TablesState::new();
             state.sel = TablesState::row_count(&app.shared) - 1;
             state.handle_key(&mut ctx(&mut app), press(KeyCode::KeyA));
-            addresses.wait_for_reloads(&mut app, &mut state);
+            addresses.wait_for_fetches(&mut app, &mut state);
 
             assert_eq!(addresses.tables.asked(), 4, "each table at an address is fetched once more, and the file is not fetched at all");
             let levels: Vec<usize> = app.shared.table_levels.iter().map(Vec::len).collect();
@@ -958,7 +1136,7 @@ mod tests {
             let mut said = Vec::new();
             crate::notify::drain(&mut said);
             drop(open);
-            addresses.wait_for_reloads(&mut app, &mut state);
+            addresses.wait_for_fetches(&mut app, &mut state);
 
             assert!(app.shared.config.library.tables.is_empty() && app.shared.table_names.is_empty() && app.shared.table_levels.is_empty());
             assert!(!addresses.store().has_copy_file(address), "the reload left a copy of a table that is no longer registered");
@@ -987,7 +1165,7 @@ mod tests {
         addresses.tables.serve(address, "Twice", TWO_LEVELS);
         let mut state = TablesState::new();
         state.handle_key(&mut ctx(&mut app), press(KeyCode::KeyA));
-        addresses.wait_for_reloads(&mut app, &mut state);
+        addresses.wait_for_fetches(&mut app, &mut state);
 
         assert_eq!(addresses.tables.asked(), 2, "one registration and one reload: an address listed twice is fetched once");
         let levels: Vec<usize> = app.shared.table_levels.iter().map(Vec::len).collect();
@@ -1016,20 +1194,20 @@ mod tests {
         addresses.tables.serve(address, "Followed", LEVELS_0_1_2);
         let mut state = TablesState::new();
         state.handle_key(&mut ctx(&mut app), press(KeyCode::KeyR));
-        addresses.wait_for_reloads(&mut app, &mut state);
+        addresses.wait_for_fetches(&mut app, &mut state);
         assert_eq!(names(&app), vec!["0", "1", "2"]);
         assert!(app.shared.select_view == SelectView::TableLevel(0, 2), "the list is no longer looking into level 2, which moved one place down");
 
         addresses.tables.serve(address, "Followed", LEVELS_0_1);
         state.handle_key(&mut ctx(&mut app), press(KeyCode::KeyR));
-        addresses.wait_for_reloads(&mut app, &mut state);
+        addresses.wait_for_fetches(&mut app, &mut state);
         assert_eq!(names(&app), vec!["0", "1"]);
         assert!(app.shared.select_view == SelectView::TableLevels(0), "a level the table no longer has is still being looked into");
 
         app.shared.select_view = SelectView::TableLevel(0, 0);
         addresses.tables.serve(address, "Followed", LEVELS_1_2_3);
         state.handle_key(&mut ctx(&mut app), press(KeyCode::KeyR));
-        addresses.wait_for_reloads(&mut app, &mut state);
+        addresses.wait_for_fetches(&mut app, &mut state);
         assert!(
             app.shared.select_view == SelectView::TableLevels(0),
             "the list went on looking into the first level, which is another level now that level 0 is gone"
@@ -1099,19 +1277,75 @@ mod tests {
             stale: Some("the address lists no charts now".into()),
         };
         let failed = TableStatus::Failed { reason: "address: HTTP 404 Not Found".into() };
-        for status in [Some(&stale), Some(&failed), None] {
-            assert_eq!(focused_detail(status, true), Some((RELOADING_DETAIL.to_string(), false)), "{status:?}");
+        for status in [Some(&stale), Some(&failed), Some(&TableStatus::NotFetched), None] {
+            assert_eq!(focused_detail(status, Some(RELOADING_DETAIL)), Some((RELOADING_DETAIL.to_string(), false)), "{status:?}");
         }
-        assert_eq!(focused_detail(Some(&stale), false), Some(("RELOAD FAILED, THE TABLE IS AS IT WAS: the address lists no charts now".to_string(), true)));
-        assert_eq!(focused_detail(Some(&failed), false), Some(("LOAD FAILED: address: HTTP 404 Not Found".to_string(), true)));
+        assert_eq!(focused_detail(Some(&stale), None), Some(("RELOAD FAILED, THE TABLE IS AS IT WAS: the address lists no charts now".to_string(), true)));
+        assert_eq!(focused_detail(Some(&failed), None), Some(("LOAD FAILED: address: HTTP 404 Not Found".to_string(), true)));
         let unowned = TableStatus::Loaded { name: "T".into(), entries: 3, levels: 2, owned: 0, origin: TableOrigin::File, stale: None };
-        assert!(focused_detail(Some(&unowned), false).is_some_and(|(detail, is_problem)| detail.contains("NONE OF THIS TABLE'S CHARTS") && !is_problem));
-        assert_eq!(focused_detail(None, false), None);
+        assert!(focused_detail(Some(&unowned), None).is_some_and(|(detail, is_problem)| detail.contains("NONE OF THIS TABLE'S CHARTS") && !is_problem));
+        assert_eq!(focused_detail(Some(&TableStatus::NotFetched), None), Some((NOT_FETCHED_DETAIL.to_string(), false)), "a table not fetched yet is a problem");
+        assert_eq!(focused_detail(None, None), None);
         rbms_render::font::use_embedded_fonts_only();
-        assert_eq!(rbms_render::fit_text(RELOADING_DETAIL, DETAIL_SCALE, PANEL_W), RELOADING_DETAIL, "what is said of a table on its way is cut short");
+        for detail in [RELOADING_DETAIL, FETCHING_DETAIL, READING_DETAIL, NOT_FETCHED_DETAIL] {
+            assert_eq!(rbms_render::fit_text(detail, DETAIL_SCALE, PANEL_W), detail, "what is said under the list is cut short");
+            assert!(detail.chars().count() <= DETAIL_LINE_CHARS, "what is said of a table on its way is broken over two lines: {detail}");
+        }
         for note in RELOAD_NOTE {
             assert_eq!(rbms_render::fit_text(note, NOTE_SCALE, PANEL_W), note, "a line of the note along the bottom is cut short");
         }
+    }
+
+    /// A table that is not in the song list is one of three things, and its row says which: it has
+    /// not been fetched yet, it is on its way, or its fetch failed. Each draws a row of its own and
+    /// a line of its own under the list.
+    #[test]
+    fn a_table_never_fetched_one_on_its_way_and_one_that_failed_draw_rows_of_their_own() {
+        const BODY: &[u8] = br#"[{"md5":"1111","level":"1"},{"md5":"2222","level":"2"},{"md5":"3333","level":"2"}]"#;
+        let (kept, dead) = ("https://tables.test/states/insane1/", "https://tables.test/states/unreachable/");
+        let (waiting, arriving) = ("https://tables.test/states/satellite/", "https://tables.test/states/stella/");
+        let mut app = app();
+        let mut addresses = Addresses::of(&app);
+        addresses.tables.serve(kept, "Insane BMS", BODY);
+        addresses.tables.serve(arriving, "Stella", BODY);
+        addresses.register(&mut app, kept);
+        crate::notify::exclusive(|| addresses.register(&mut app, dead));
+        addresses.registered.extend([waiting, arriving].map(str::to_string));
+        app.shared.config.library.tables.push(TableSource { name: String::new(), location: waiting.to_string() });
+        read_and_match(&addresses.store(), &app.shared.config.library.tables[2], &rbms_table::Md5Index::new(std::iter::empty()));
+
+        let open = addresses.tables.hold();
+        let mut state = TablesState::new();
+        state.text_input = Some(TextEdit::from_text(arriving));
+        state.url_entry_key(&mut app.shared, &press(KeyCode::Enter));
+        assert_eq!(state.sel, 3);
+
+        let tables = app.shared.config.library.tables.clone();
+        let said_of = |app: &crate::App, row: usize| {
+            let status = table_status(&tables[row].location);
+            let arriving = table_is_fetching(&app.shared, &tables[row].location).then(|| on_its_way(&tables[row], status.as_ref()));
+            let summary = arriving.map_or_else(|| status.as_ref().map(status_summary).expect("the row has a status").0, |(summary, _)| summary.to_string());
+            (summary, focused_detail(status.as_ref(), arriving.map(|(_, detail)| detail)).map(|(detail, _)| detail))
+        };
+        assert_eq!(said_of(&app, 1).0, "LOAD FAILED");
+        assert!(said_of(&app, 1).1.is_some_and(|detail| detail.starts_with("LOAD FAILED: ")));
+        assert_eq!(said_of(&app, 2), (NOT_FETCHED.to_string(), Some(NOT_FETCHED_DETAIL.to_string())));
+        assert_eq!(said_of(&app, 3), (FETCHING.to_string(), Some(FETCHING_DETAIL.to_string())));
+
+        let loaded = drawn(&mut app, 0, "tables-state-loaded");
+        let failed = drawn(&mut app, 1, "tables-state-failed");
+        let not_fetched = drawn(&mut app, 2, "tables-state-not-fetched-yet");
+        let fetching = drawn(&mut app, 3, "tables-state-fetching");
+        let frames = [loaded, failed, not_fetched, fetching];
+        for (at, frame) in frames.iter().enumerate() {
+            assert!(frames[at + 1..].iter().all(|other| other != frame), "two of the states draw the same frame: {frames:?}");
+        }
+
+        drop(open);
+        addresses.wait_for_fetches(&mut app, &mut state);
+        assert_eq!(said_of(&app, 3).0, "0 OF 3 CHARTS OWNED  -  2 LEVELS");
+        drawn(&mut app, 3, "tables-state-arrived");
+        app.shared.config.library.tables.clear();
     }
 
     /// What a row says is on the screen: how long ago its copy was fetched, that the table is on
@@ -1133,7 +1367,7 @@ mod tests {
         register(&mut app, &file);
         app.shared.config.library.tables.push(TableSource { name: String::new(), location: old.to_string() });
         let nothing_owned = rbms_table::Md5Index::new(std::iter::empty());
-        crate::tablesrc::load_and_match(&addresses.store(), crate::tablesrc::LoadPolicy::SavedFirst, &app.shared.config.library.tables[3], &nothing_owned);
+        read_and_match(&addresses.store(), &app.shared.config.library.tables[3], &nothing_owned);
         assert_eq!(addresses.tables.asked(), 2, "the table with an old copy was read from the copy");
 
         let loaded = drawn(&mut app, 0, "tables-loaded");
@@ -1146,7 +1380,7 @@ mod tests {
         let reloading = drawn(&mut app, 1, "tables-reloading");
         addresses.tables.take_down(satellite);
         drop(open);
-        addresses.wait_for_reloads(&mut app, &mut state);
+        addresses.wait_for_fetches(&mut app, &mut state);
         let failed = drawn(&mut app, 1, "tables-reload-failed");
         assert_ne!(reloading, failed, "a reload that is out and one that failed draw the same row");
         assert_ne!(loaded, failed);
@@ -1156,7 +1390,7 @@ mod tests {
         let on_its_way_again = drawn(&mut app, 1, "tables-reloading-after-a-failure");
         assert_ne!(on_its_way_again, failed, "a table on its way again is drawn as one whose reload failed");
         drop(open);
-        addresses.wait_for_reloads(&mut app, &mut state);
+        addresses.wait_for_fetches(&mut app, &mut state);
         app.shared.config.library.tables.clear();
     }
 }

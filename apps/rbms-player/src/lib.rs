@@ -126,7 +126,7 @@ use skin_screen::{SkinScene, SkinScreens};
 use skin_select::SkinLibrary;
 use stage::{Canvas, CourseResultState, FrameCtx, KeyInput, LoadingState, SelectState, Stage, StageId, Transition};
 use syssound::{SYSTEM_SOUND_GAIN, SystemSound, SystemSoundSet};
-use tablesrc::{TableLevels, fetch_and_match};
+use tablesrc::TableLevels;
 use textedit::{TextEdit, edit_key};
 use timing::{SoakLogger, SoakSnapshot, TIMING_CSV_ENV, TimingProbe, TimingSample, env_path, us_to_millis};
 use toast::ToastQueue;
@@ -193,7 +193,9 @@ struct LaunchOptions {
     /// built-in note field, so a run started with it draws its play screens with that field
     /// whatever skin document is chosen for them.
     skin_path: Option<String>,
-    /// `--table`: a difficulty table added to the library for this run.
+    /// `--table`: a difficulty table added to the library for this run. It is a source like any
+    /// the player registered: the scan at startup reads it from the copy kept of it, and when it
+    /// has none the song list fetches it once it is up. Nothing waits for its address.
     table_url: Option<String>,
     /// `--keyconfig`: a key config file to use instead of the one in the config directory.
     keyconfig_path: Option<String>,
@@ -557,6 +559,8 @@ enum Hot {
     PlayMenuRow(usize),
     /// A tab of the play menu's strip of modes, by its place on the strip.
     PlayMenuMode(usize),
+    /// A row of the practice panel, by its place in the panel.
+    PracticeRow(usize),
     RankingRow(usize),
     ModalClose,
     ModalReplay,
@@ -630,6 +634,9 @@ struct AppShared {
     pad: Option<PadState>,
     table_names: Vec<String>,
     table_levels: Vec<TableLevels>,
+    /// The difficulty tables being fetched beside the frame loop, which whichever screen is up
+    /// takes as they land. A fetch outlives the screen that started it, so it is kept here.
+    table_fetches: tablesrc::TableFetches,
     select_view: SelectView,
     select_items: Vec<SelectItem>,
     /// Incremental song search: `searching` opens the box (`/`), `search` is the live query (filters
@@ -929,6 +936,7 @@ impl App {
                 pad,
                 table_names,
                 table_levels,
+                table_fetches: tablesrc::TableFetches::default(),
                 select_view: SelectView::Root,
                 select_items: Vec::new(),
                 search: String::new(),

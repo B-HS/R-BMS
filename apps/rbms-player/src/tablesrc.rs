@@ -4,27 +4,34 @@
 //!
 //! A table at an address is fetched once and kept ([`TableStore`]): every later run reads the copy
 //! and asks the network nothing, so the song list does not wait on somebody else's server each time
-//! the player is started. What the address serves now is fetched again only when the player asks
-//! for it ([`start_reload`]), on a worker beside the frame loop; what the worker comes back with is
-//! taken by whichever screen is up ([`apply_finished_reloads`]). A table registered as a file on
-//! this machine is read from that file every time and has no copy.
+//! the player is started. A table registered as a file on this machine is read from that file every
+//! time and has no copy.
 //!
-//! What became of each source — loaded, where from and when, or failed and why — is kept here per
-//! location ([`table_status`]) for the table manager to show beside the source, so a table that did
-//! not load says so where the user registered it instead of only being missing from the song list.
+//! Nothing that reaches the network is waited for by a screen. Reading the library again reads the
+//! copies and the files and nothing else ([`read_and_match_all`]); a table at an address that has no
+//! copy is left out, and fetched once the song list is up ([`start_first_fetches`]). A table being
+//! registered ([`register_table`]) and one the player asks for again ([`reload_tables`]) are fetched
+//! the same way: on a worker beside the frame loop ([`TableFetches`]), and what the worker comes
+//! back with is taken by whichever screen is up ([`apply_finished_fetches`]).
+//!
+//! What became of each source — loaded, where from and when, not fetched yet, or failed and why — is
+//! kept here per location ([`table_status`]) for the table manager to show beside the source, so a
+//! table that did not load says so where the user registered it instead of only being missing from
+//! the song list.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, TryRecvError};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::thread::JoinHandle;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rbms_config::TableSource;
 use rbms_library::Library;
 use rbms_table::{DifficultyTable, Md5Index, SavedTable, TableError};
 
-use crate::{AppShared, SelectView};
+use crate::{AppShared, SelectItem, SelectView};
 
 /// One difficulty table matched against the library: `(level label, indices of the owned charts)`
 /// per level, in the table's own level order. A level none of whose charts are owned is there with
@@ -40,7 +47,8 @@ const UNLOADED_TABLE: &str = "TABLE";
 /// How many sources are loaded at once. Each is a handful of http requests that mostly wait, so
 /// a fetch of several tables takes as long as the slowest rather than all of them one after
 /// another; the cap is what keeps a long list from opening a connection per entry at the same
-/// moment.
+/// moment. It holds across everything one player has out at a time, however many times fetches
+/// were started.
 const MAX_PARALLEL_LOADS: usize = 8;
 
 /// The folder beside the settings file the copies of fetched tables are kept in.
@@ -103,6 +111,9 @@ pub(crate) enum TableStatus {
     },
     /// The table could not be read; the step, the address and the reason, in a line.
     Failed { reason: String },
+    /// The table is at an address and there is no copy of it to read: it has not been fetched yet,
+    /// or what was kept of it no longer reads as a table. It is no folder until it has arrived.
+    NotFetched,
 }
 
 /// The process-wide record of each source's last load, by location. Loads finish on worker threads
@@ -118,12 +129,25 @@ fn record_status(location: &str, status: TableStatus) {
     }
 }
 
+/// Note that the table at `location` has no copy to read, unless a fetch of it has failed in this
+/// run already. That failure is what goes on being shown beside the source, and it is what keeps a
+/// table whose address does not answer from being fetched again each time the library is read:
+/// only a table that is [`TableStatus::NotFetched`] is fetched by itself.
+fn record_not_fetched(location: &str) {
+    if let Ok(mut statuses) = statuses().lock()
+        && !matches!(statuses.get(location), Some(TableStatus::Failed { .. }))
+    {
+        statuses.insert(location.to_string(), TableStatus::NotFetched);
+    }
+}
+
 /// What became of the last load of the source at `location`, if it has been loaded this run.
 pub(crate) fn table_status(location: &str) -> Option<TableStatus> {
     statuses().lock().ok()?.get(location).cloned()
 }
 
 /// Whether the last load of the source at `location` failed.
+#[cfg(test)]
 pub(crate) fn table_load_failed(location: &str) -> bool {
     matches!(table_status(location), Some(TableStatus::Failed { .. }))
 }
@@ -145,7 +169,7 @@ fn url_hash(s: &str) -> String {
 }
 
 /// Whether a source is an address to fetch rather than a file on this machine.
-fn is_address(location: &str) -> bool {
+pub(crate) fn is_address(location: &str) -> bool {
     location.starts_with("http://") || location.starts_with("https://")
 }
 
@@ -273,19 +297,12 @@ impl TableStore {
         written.is_ok()
     }
 
-    /// Drop the copy of a table that has been removed from the list, wherever it is kept.
-    ///
-    /// A reload of that table that is still out is told first, so the copy it would have kept on
-    /// arriving is never written: a table removed while it is being fetched leaves nothing behind,
-    /// whether or not a screen is up to take what the reload comes back with.
+    /// Drop the copy of a table that has been removed from the list, wherever it is kept. A fetch
+    /// of that table that is still out has to be told first ([`TableFetches::forget`]), or it keeps
+    /// the table again when it arrives; [`forget_table`] does both in that order.
     pub(crate) fn forget(&self, location: &str) {
         if !is_address(location) {
             return;
-        }
-        if let Ok(jobs) = reload_jobs().lock() {
-            for job in jobs.iter().filter(|job| job.folder == self.folder && job.pending.contains(location)) {
-                held(&job.removed).insert(location.to_string());
-            }
         }
         let _ = std::fs::remove_file(self.copy_path(location));
         let _ = std::fs::remove_file(self.legacy_path(location));
@@ -345,37 +362,26 @@ fn fetch_failure_reason(location: &str, error: &rbms_table::TableError) -> Strin
     }
 }
 
-/// Whether a table at an address is read from the copy kept of it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum LoadPolicy {
-    /// Read the copy and ask the network nothing; fetch only a table that has no copy. This is
-    /// every load the player did not ask for: starting up, and reading the library again.
-    SavedFirst,
-    /// Fetch what the address serves now, and keep that: a table being registered.
-    Fetch,
-}
-
 /// A table that was read, and where from.
 struct TableLoad {
     table: DifficultyTable,
     origin: TableOrigin,
 }
 
-/// Load a table from a `location`: an http(s) URL (read from its copy, or fetched and kept) or a
-/// local `data.json` body file.
-fn load_table_source(store: &TableStore, policy: LoadPolicy, location: &str) -> Result<TableLoad, TableSourceError> {
+/// The table the `data.json` body file at `location` on this machine holds now.
+fn read_table_file(location: &str) -> Result<TableLoad, TableSourceError> {
+    let bytes = std::fs::read(location)?;
+    Ok(TableLoad { table: DifficultyTable::parse_body(&bytes, None)?, origin: TableOrigin::File })
+}
+
+/// Read the table at `location` without asking the network anything: a file on this machine from
+/// the file, and a table at an http(s) address from the copy kept of it. `None` is a table at an
+/// address that has no copy, which is not a failure: it has only not been fetched yet.
+fn read_table_source(store: &TableStore, location: &str) -> Result<Option<TableLoad>, TableSourceError> {
     if !is_address(location) {
-        let bytes = std::fs::read(location)?;
-        return Ok(TableLoad { table: DifficultyTable::parse_body(&bytes, None)?, origin: TableOrigin::File });
+        return read_table_file(location).map(Some);
     }
-    if policy == LoadPolicy::SavedFirst
-        && let Some(saved) = store.saved(location)
-    {
-        return Ok(TableLoad { table: saved.table, origin: TableOrigin::Address { fetched_at: saved.fetched_at } });
-    }
-    let table = (store.outside.fetch)(location)?;
-    let fetched_at = store.save(location, &table);
-    Ok(TableLoad { table, origin: TableOrigin::Address { fetched_at: Some(fetched_at) } })
+    Ok(store.saved(location).map(|saved| TableLoad { table: saved.table, origin: TableOrigin::Address { fetched_at: saved.fetched_at } }))
 }
 
 /// Display name for a loaded table: the user's source name if there is one, else the table's own
@@ -406,17 +412,24 @@ fn match_and_record(src: &TableSource, load: &TableLoad, library: &Md5Index) -> 
     (name, lv)
 }
 
-/// Load one table source and match it against the library's md5s, indexed once for every table.
+/// Read one table source without asking the network ([`read_table_source`]) and match it against
+/// the library's md5s, indexed once for every table.
 ///
-/// Taking the index rather than the library is what lets a load run on a worker thread: the browser
-/// keeps reading the library it has while the http request is out.
+/// Taking the index rather than the library is what lets a read run on a worker thread: the browser
+/// keeps reading the library it has meanwhile.
 ///
-/// A source that cannot be loaded still answers, with no levels, and its failure is reported once
-/// here: as a notification, and as the status the table manager shows beside the source.
-pub(crate) fn load_and_match(store: &TableStore, policy: LoadPolicy, src: &TableSource, library: &Md5Index) -> (String, TableLevels) {
+/// A source that cannot be read still answers, with no levels, and its failure is reported once
+/// here: as a notification, and as the status the table manager shows beside the source. A table at
+/// an address that has no copy answers with no levels too, and is noted as not fetched yet rather
+/// than as a failure; nothing is said of it here, since fetching it is what happens next.
+pub(crate) fn read_and_match(store: &TableStore, src: &TableSource, library: &Md5Index) -> (String, TableLevels) {
     println!("loading table: {} ({})", src.name, src.location);
-    match load_table_source(store, policy, &src.location) {
-        Ok(load) => match_and_record(src, &load, library),
+    match read_table_source(store, &src.location) {
+        Ok(Some(load)) => match_and_record(src, &load, library),
+        Ok(None) => {
+            record_not_fetched(&src.location);
+            (fallback_source_name(src), Vec::new())
+        }
         Err(e) => {
             let reason = failure_reason(&src.location, &e);
             crate::notify::notify(crate::notify::Level::Warn, format!("table load failed ({}): {reason}", src.location));
@@ -426,18 +439,19 @@ pub(crate) fn load_and_match(store: &TableStore, policy: LoadPolicy, src: &Table
     }
 }
 
-/// Load every table source (one entry per source, aligned with `sources`). Returns parallel
+/// Read every table source (one entry per source, aligned with `sources`). Returns parallel
 /// `(display name, per-level owned-chart groups)` vecs.
 ///
-/// A table that has a copy is read from it, so a run in which every table has one asks the network
-/// nothing here. The ones that have none are fetched, and the sources are loaded side by side, a
-/// few at a time: each fetch is a table's worth of http requests, and one host that does not answer
-/// must not hold the others — or the song list they are all waited for with — behind its timeout.
-/// A source that fails keeps its slot, with no levels. The library is indexed once for all of them.
+/// Nothing here asks the network: a table that has a copy is read from it, a table file is read
+/// from the file, and a table at an address that has no copy keeps its slot with no levels until it
+/// has been fetched ([`start_first_fetches`]). So this takes as long as reading a few files does,
+/// whatever the servers the tables came from are doing. The sources are read side by side, a few at
+/// a time, and a source that fails keeps its slot, with no levels. The library is indexed once for
+/// all of them.
 ///
 /// `done` is raised as each source is finished, so the screen that started this off-thread can say
 /// how far through the list it is rather than showing a bar that never moves.
-pub(crate) fn fetch_and_match(store: &TableStore, sources: &[TableSource], library: &Library, done: &AtomicUsize) -> (Vec<String>, Vec<TableLevels>) {
+pub(crate) fn read_and_match_all(store: &TableStore, sources: &[TableSource], library: &Library, done: &AtomicUsize) -> (Vec<String>, Vec<TableLevels>) {
     let index = Md5Index::new(library.md5s());
     let index = &index;
     let mut names = Vec::with_capacity(sources.len());
@@ -448,7 +462,7 @@ pub(crate) fn fetch_and_match(store: &TableStore, sources: &[TableSource], libra
                 .iter()
                 .map(|src| {
                     scope.spawn(move || {
-                        let matched = load_and_match(store, LoadPolicy::SavedFirst, src, index);
+                        let matched = read_and_match(store, src, index);
                         done.fetch_add(1, Ordering::Relaxed);
                         matched
                     })
@@ -473,12 +487,47 @@ fn stopped_load(src: &TableSource, done: &AtomicUsize) -> (String, TableLevels) 
     (fallback_source_name(src), Vec::new())
 }
 
-/// What a reload of one source came to.
-enum ReloadOutcome {
+/// Why a table is being fetched, which is how its arrival and its failure are worded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FetchWhy {
+    /// The player asked for the table as its address serves it now.
+    Reload,
+    /// The table has no copy, and the song list fetches it the first time by itself.
+    First,
+    /// The table has just been registered.
+    Registered,
+}
+
+impl FetchWhy {
+    /// What a fetch that failed is called, ahead of the table's location and the reason.
+    fn failure(self) -> &'static str {
+        match self {
+            FetchWhy::Reload => "table reload failed",
+            FetchWhy::First => "table fetch failed",
+            FetchWhy::Registered => "table load failed",
+        }
+    }
+
+    /// The line that says how the whole of a fetch went. A table being registered is one table,
+    /// and what is said of that table when it lands is all there is to say. So is what is said of
+    /// each table of a first fetch that brought nothing: every one of them has said why it failed,
+    /// and an address that does not answer is asked again each time the player is started, so a line
+    /// counting the failures would be said over again on every start.
+    fn tally(self, updated: usize, failed: usize) -> Option<String> {
+        match self {
+            FetchWhy::Reload => Some(format!("difficulty tables reloaded: {updated} updated, {failed} failed")),
+            FetchWhy::First => (updated > 0).then(|| format!("difficulty tables fetched for the first time: {updated} added, {failed} failed")),
+            FetchWhy::Registered => None,
+        }
+    }
+}
+
+/// What a fetch of one source came to.
+enum FetchOutcome {
     /// The table as its address serves it now, or as its file reads now. It has been kept as the
     /// copy already when it has one.
     Fetched(TableLoad),
-    /// The reload failed and nothing was touched: the copy and the folder in the song list are
+    /// The fetch failed and nothing was touched: the copy and the folder in the song list are
     /// what they were.
     Kept { reason: String },
     /// The table was removed from the list while it was being fetched. Nothing was kept of what
@@ -486,112 +535,274 @@ enum ReloadOutcome {
     Removed,
 }
 
-/// One source of a reload, finished.
-struct ReloadDone {
+/// One source of a fetch, finished.
+struct FetchDone {
     location: String,
-    outcome: ReloadOutcome,
+    outcome: FetchOutcome,
 }
 
-/// A reload in flight: the sources it was asked for that have not answered yet, and how the ones
+/// How the whole of one fetch went, once its last table is in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FetchTally {
+    why: FetchWhy,
+    updated: usize,
+    failed: usize,
+}
+
+/// A fetch in flight: the sources it was asked for that have not answered yet, and how the ones
 /// that have came out.
-struct ReloadJob {
-    /// The table folder of the player that asked, which is what tells its reloads from another's.
-    folder: PathBuf,
-    rx: Receiver<ReloadDone>,
+struct FetchJob {
+    why: FetchWhy,
+    rx: Receiver<FetchDone>,
     pending: HashSet<String>,
-    /// The sources that were removed from the list while this reload was out. The worker reads it
+    /// The sources that were removed from the list while this fetch was out. The worker reads it
     /// before it keeps a table, and holds it while it does, so a copy is either written before its
     /// table is removed -- and dropped by the removal -- or not written at all.
     removed: Removed,
     updated: usize,
     failed: usize,
+    /// The thread the fetch runs on, waited for when the last of its tables has been taken. That
+    /// is a wait of no length -- the thread has nothing left to do but end -- and it is what makes
+    /// a fetch that is over a thread that is gone.
+    worker: Option<JoinHandle<()>>,
 }
 
-/// The locations removed from the list while a reload of them was out, shared between the reload
+/// The locations removed from the list while a fetch of them was out, shared between the fetch
 /// and its worker.
 type Removed = Arc<Mutex<HashSet<String>>>;
 
-/// What a lock holds, whether or not a thread stopped while holding it: a set of locations is whole
-/// after any insert that began.
+/// What a lock holds, whether or not a thread stopped while holding it: a set of locations and a
+/// count of free slots are whole after any change that began.
 fn held<T>(lock: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// Every reload in flight. A reload outlives the screen that asked for it — the table manager can
-/// be left, and the song list has no state of its own to keep one in — so they are kept here and
-/// taken by whichever screen is up when they land.
-fn reload_jobs() -> &'static Mutex<Vec<ReloadJob>> {
-    static JOBS: OnceLock<Mutex<Vec<ReloadJob>>> = OnceLock::new();
-    JOBS.get_or_init(|| Mutex::new(Vec::new()))
+/// How many more fetches may be out at this moment. Every fetch of one player takes a slot before
+/// it asks its address anything and gives it back when it has its answer, so the cap on how many
+/// are out at once ([`MAX_PARALLEL_LOADS`]) holds across fetches that were started separately: the
+/// first fetch of the tables that have no copy, a table registered meanwhile, a reload of them all.
+struct Slots {
+    free: Mutex<usize>,
+    freed: Condvar,
 }
 
-/// Fetch one source again. A table at an address is kept as the new copy when it arrives; one whose
+impl Slots {
+    fn of(count: usize) -> Slots {
+        Slots { free: Mutex::new(count), freed: Condvar::new() }
+    }
+
+    /// Wait for a slot and take it. It is given back when what this answers is dropped.
+    fn take(&self) -> Slot<'_> {
+        let mut free = held(&self.free);
+        while *free == 0 {
+            free = self.freed.wait(free).unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+        *free -= 1;
+        Slot(self)
+    }
+}
+
+/// One slot of [`Slots`], held by the fetch that took it.
+struct Slot<'a>(&'a Slots);
+
+impl Drop for Slot<'_> {
+    fn drop(&mut self) {
+        *held(&self.0.free) += 1;
+        self.0.freed.notify_one();
+    }
+}
+
+/// Fetch one source. A table at an address is kept as the new copy when it arrives; one whose
 /// address now lists nothing does not replace a copy that lists something, and one that was removed
-/// from the list while it was out (`removed`) is not kept at all.
-fn reload_one(store: &TableStore, src: &TableSource, removed: &Mutex<HashSet<String>>) -> ReloadOutcome {
-    println!("reloading table: {} ({})", src.name, src.location);
+/// from the list while it was out (`removed`) is not kept at all. A table that is a file is read
+/// from the file.
+fn fetch_one(store: &TableStore, src: &TableSource, removed: &Mutex<HashSet<String>>) -> FetchOutcome {
+    println!("fetching table: {} ({})", src.name, src.location);
     let location = src.location.as_str();
     if !is_address(location) {
-        return match load_table_source(store, LoadPolicy::Fetch, location) {
-            Ok(load) => ReloadOutcome::Fetched(load),
-            Err(error) => ReloadOutcome::Kept { reason: failure_reason(location, &error) },
+        return match read_table_file(location) {
+            Ok(load) => FetchOutcome::Fetched(load),
+            Err(error) => FetchOutcome::Kept { reason: failure_reason(location, &error) },
         };
     }
     match (store.outside.fetch)(location) {
         Ok(table) if table.entries.is_empty() && store.copy_of(location).is_some_and(|saved| !saved.table.entries.is_empty()) => {
-            ReloadOutcome::Kept { reason: LISTS_NOTHING_NOW.to_string() }
+            FetchOutcome::Kept { reason: LISTS_NOTHING_NOW.to_string() }
         }
         Ok(table) => {
             let removed = held(removed);
             if removed.contains(location) {
-                return ReloadOutcome::Removed;
+                return FetchOutcome::Removed;
             }
             let fetched_at = store.save(location, &table);
-            ReloadOutcome::Fetched(TableLoad { table, origin: TableOrigin::Address { fetched_at: Some(fetched_at) } })
+            FetchOutcome::Fetched(TableLoad { table, origin: TableOrigin::Address { fetched_at: Some(fetched_at) } })
         }
-        Err(error) => ReloadOutcome::Kept { reason: fetch_failure_reason(location, &error) },
+        Err(error) => FetchOutcome::Kept { reason: fetch_failure_reason(location, &error) },
     }
 }
 
-/// Start fetching `sources` again on a worker, and answer how many were started: a source that is
-/// being reloaded already is not started twice.
+/// Every fetch one player has out, and whether the tables that have no copy are due their first.
 ///
-/// Nothing waits for the worker. What it comes back with is taken by [`apply_finished_reloads`],
-/// which is also where the song list is brought up to date.
-pub(crate) fn start_reload(store: TableStore, sources: Vec<TableSource>) -> usize {
-    let Ok(mut jobs) = reload_jobs().lock() else {
-        return 0;
-    };
-    let mut pending = HashSet::new();
-    let fresh: Vec<TableSource> = sources
-        .into_iter()
-        .filter(|src| !jobs.iter().any(|job| job.folder == store.folder && job.pending.contains(&src.location)) && pending.insert(src.location.clone()))
-        .collect();
-    if fresh.is_empty() {
-        return 0;
+/// A fetch outlives the screen that asked for it -- the table manager can be left, and the song
+/// list is left for a chart -- so the fetches are kept with the state every screen shares and taken
+/// by whichever screen is up when they land. Each player has its own, so one player's fetches are
+/// never another's to wait for or to take.
+///
+/// Dropping this with fetches out waits for none of them: closing the player is not held up by an
+/// address that does not answer. A worker that arrives afterwards finds nobody to hand its table
+/// to; the copy it keeps is written whole and renamed into place, so being stopped partway leaves
+/// the earlier copy or none, never half of one.
+pub(crate) struct TableFetches {
+    jobs: Vec<FetchJob>,
+    slots: Arc<Slots>,
+    first_due: bool,
+}
+
+impl Default for TableFetches {
+    fn default() -> TableFetches {
+        TableFetches { jobs: Vec::new(), slots: Arc::new(Slots::of(MAX_PARALLEL_LOADS)), first_due: false }
     }
-    let started = fresh.len();
-    let (tx, rx) = std::sync::mpsc::channel();
-    let removed = Removed::default();
-    jobs.push(ReloadJob { folder: store.folder.clone(), rx, pending, removed: Arc::clone(&removed), updated: 0, failed: 0 });
-    drop(jobs);
-    std::thread::spawn(move || {
-        for batch in fresh.chunks(MAX_PARALLEL_LOADS) {
-            std::thread::scope(|scope| {
-                for src in batch {
-                    let (store, tx, removed) = (&store, tx.clone(), &removed);
-                    scope.spawn(move || {
-                        let _ = tx.send(ReloadDone { location: src.location.clone(), outcome: reload_one(store, src, removed) });
-                    });
-                }
-            });
+}
+
+impl TableFetches {
+    /// Whether a fetch of the source at `location` is out: asked for, and not yet taken by a
+    /// screen.
+    pub(crate) fn is_fetching(&self, location: &str) -> bool {
+        self.jobs.iter().any(|job| job.pending.contains(location))
+    }
+
+    /// Whether a fetch of the source at `location` is out that will be kept when it lands. One
+    /// whose table was removed meanwhile is out too, and is nothing to a table registered at the
+    /// same address since: that table needs a fetch of its own.
+    fn will_land(&self, location: &str) -> bool {
+        self.jobs.iter().any(|job| job.pending.contains(location) && !held(&job.removed).contains(location))
+    }
+
+    /// Start fetching `sources` on a worker, and answer how many were started: a source that is
+    /// being fetched already is not started twice.
+    ///
+    /// Nothing waits for the worker. What it comes back with is taken by
+    /// [`apply_finished_fetches`], which is also where the song list is brought up to date.
+    pub(crate) fn start(&mut self, store: TableStore, sources: Vec<TableSource>, why: FetchWhy) -> usize {
+        let mut pending = HashSet::new();
+        let fresh: Vec<TableSource> = sources.into_iter().filter(|src| !self.will_land(&src.location) && pending.insert(src.location.clone())).collect();
+        if fresh.is_empty() {
+            return 0;
         }
-    });
-    started
+        let started = fresh.len();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let removed = Removed::default();
+        let (slots, gone) = (Arc::clone(&self.slots), Arc::clone(&removed));
+        let worker = std::thread::spawn(move || {
+            for batch in fresh.chunks(MAX_PARALLEL_LOADS) {
+                std::thread::scope(|scope| {
+                    for src in batch {
+                        let (store, slots, gone, tx) = (&store, &slots, &gone, tx.clone());
+                        scope.spawn(move || {
+                            let outcome = {
+                                let _slot = slots.take();
+                                fetch_one(store, src, gone)
+                            };
+                            let _ = tx.send(FetchDone { location: src.location.clone(), outcome });
+                        });
+                    }
+                });
+            }
+        });
+        self.jobs.push(FetchJob { why, rx, pending, removed, updated: 0, failed: 0, worker: Some(worker) });
+        started
+    }
+
+    /// Tell every fetch of the source at `location` that is out that its table has been removed
+    /// from the list, so the copy it would have kept on arriving is never written: a table removed
+    /// while it is being fetched leaves nothing behind, whether or not a screen is up to take what
+    /// the fetch comes back with.
+    fn forget(&self, location: &str) {
+        for job in self.jobs.iter().filter(|job| job.pending.contains(location)) {
+            held(&job.removed).insert(location.to_string());
+        }
+    }
+
+    /// Note that the library has just been read again, so the tables that turned out to have no
+    /// copy are due their first fetch the next time the song list is up.
+    pub(crate) fn first_fetches_are_due(&mut self) {
+        self.first_due = true;
+    }
+
+    /// What has landed since the last look, with why each was fetched, and the tally of each fetch
+    /// that is now over: how many of its tables were updated and how many failed.
+    ///
+    /// `is_listed` says whether a location is still one of the player's tables. A table that was
+    /// removed while its fetch was out is in neither count -- it was not updated, and its fetch did
+    /// not fail -- and a fetch none of whose tables are left has no tally to give. What such a fetch
+    /// came back with is not the table's any more, whatever arrived: a table registered at the same
+    /// address since is brought up to date by the fetch that was started for it.
+    fn take_landed(&mut self, is_listed: &dyn Fn(&str) -> bool) -> (Vec<(FetchWhy, FetchDone)>, Vec<FetchTally>) {
+        let mut landed = Vec::new();
+        let mut finished = Vec::new();
+        for job in &mut self.jobs {
+            loop {
+                match job.rx.try_recv() {
+                    Ok(mut done) => {
+                        job.pending.remove(&done.location);
+                        if held(&job.removed).contains(&done.location) {
+                            done.outcome = FetchOutcome::Removed;
+                        }
+                        match done.outcome {
+                            FetchOutcome::Fetched(_) if is_listed(&done.location) => job.updated += 1,
+                            FetchOutcome::Kept { .. } if is_listed(&done.location) => job.failed += 1,
+                            FetchOutcome::Fetched(_) | FetchOutcome::Kept { .. } | FetchOutcome::Removed => {}
+                        }
+                        landed.push((job.why, done));
+                    }
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => {
+                        let removed = held(&job.removed);
+                        for location in job.pending.drain() {
+                            let outcome = if removed.contains(&location) {
+                                FetchOutcome::Removed
+                            } else {
+                                job.failed += usize::from(is_listed(&location));
+                                FetchOutcome::Kept { reason: LOADER_STOPPED.to_string() }
+                            };
+                            landed.push((job.why, FetchDone { location, outcome }));
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        self.jobs.retain_mut(|job| {
+            if !job.pending.is_empty() {
+                return true;
+            }
+            if let Some(worker) = job.worker.take() {
+                let _ = worker.join();
+            }
+            if job.updated + job.failed > 0 {
+                finished.push(FetchTally { why: job.why, updated: job.updated, failed: job.failed });
+            }
+            false
+        });
+        (landed, finished)
+    }
+}
+
+#[cfg(test)]
+impl TableFetches {
+    /// Whether nothing is out: every fetch that was started has been taken, and its thread is gone.
+    pub(crate) fn is_idle(&self) -> bool {
+        self.jobs.is_empty()
+    }
+}
+
+/// Whether the source at `location` of this player is being fetched right now.
+pub(crate) fn table_is_fetching(shared: &AppShared, location: &str) -> bool {
+    shared.table_fetches.is_fetching(location)
 }
 
 /// Fetch again the table at `which` of the player's list, or every table of it, and say so.
-pub(crate) fn reload_tables(shared: &AppShared, which: Option<usize>) {
+pub(crate) fn reload_tables(shared: &mut AppShared, which: Option<usize>) {
     let tables = &shared.config.library.tables;
     let sources: Vec<TableSource> = match which {
         Some(at) => tables.get(at).cloned().into_iter().collect(),
@@ -601,137 +812,136 @@ pub(crate) fn reload_tables(shared: &AppShared, which: Option<usize>) {
         crate::notify::notify(crate::notify::Level::Info, "no difficulty tables to reload");
         return;
     }
-    match start_reload(TableStore::beside(&shared.settings_path), sources) {
-        0 => crate::notify::notify(crate::notify::Level::Info, "the tables are being reloaded already"),
+    match shared.table_fetches.start(TableStore::beside(&shared.settings_path), sources, FetchWhy::Reload) {
+        0 => crate::notify::notify(crate::notify::Level::Info, "the tables are being fetched already"),
         started => crate::notify::notify(crate::notify::Level::Info, format!("reloading {started} difficulty table(s)")),
     }
 }
 
-/// Whether the source at `location` of the player whose settings are at `settings_path` is being
-/// reloaded right now: asked for, and not yet taken by a screen.
-pub(crate) fn table_is_reloading(settings_path: &Path, location: &str) -> bool {
-    let Ok(jobs) = reload_jobs().lock() else {
-        return false;
-    };
-    if jobs.is_empty() {
-        return false;
-    }
-    let folder = tables_folder(settings_path);
-    jobs.iter().any(|job| job.folder == folder && job.pending.contains(location))
-}
-
-/// What has landed of the reloads of one player since the last look, and the tally of each reload
-/// that is now over: how many of its tables were updated and how many failed.
+/// Start the first fetch of every table that has no copy, once after each time the library was
+/// read ([`TableFetches::first_fetches_are_due`]); every other call does nothing.
 ///
-/// `is_listed` says whether a location is still one of the player's tables. A table that was
-/// removed while its reload was out is in neither count -- it was not updated, and its reload did
-/// not fail -- and a reload none of whose tables are left has no tally to give.
-fn take_landed(settings_path: &Path, is_listed: &dyn Fn(&str) -> bool) -> (Vec<ReloadDone>, Vec<(usize, usize)>) {
-    let mut landed = Vec::new();
-    let mut finished = Vec::new();
-    let Ok(mut jobs) = reload_jobs().lock() else {
-        return (landed, finished);
-    };
-    if jobs.is_empty() {
-        return (landed, finished);
+/// The song list calls this each frame it is up, so the tables are fetched beside a list that is
+/// already there to be used rather than ahead of it. Only a table that is not fetched yet is
+/// started: one whose fetch has failed in this run stays failed until the player asks for it again
+/// or the player is started again, so an address that does not answer is asked once a run.
+pub(crate) fn start_first_fetches(shared: &mut AppShared) {
+    if !std::mem::take(&mut shared.table_fetches.first_due) {
+        return;
     }
-    let folder = tables_folder(settings_path);
-    for job in jobs.iter_mut().filter(|job| job.folder == folder) {
-        loop {
-            match job.rx.try_recv() {
-                Ok(done) => {
-                    job.pending.remove(&done.location);
-                    match done.outcome {
-                        ReloadOutcome::Fetched(_) if is_listed(&done.location) => job.updated += 1,
-                        ReloadOutcome::Kept { .. } if is_listed(&done.location) => job.failed += 1,
-                        ReloadOutcome::Fetched(_) | ReloadOutcome::Kept { .. } | ReloadOutcome::Removed => {}
-                    }
-                    landed.push(done);
-                }
-                Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Disconnected) => {
-                    job.failed += job.pending.iter().filter(|location| is_listed(location)).count();
-                    landed.extend(
-                        job.pending.drain().map(|location| ReloadDone { location, outcome: ReloadOutcome::Kept { reason: LOADER_STOPPED.to_string() } }),
-                    );
-                    break;
-                }
-            }
-        }
+    let sources: Vec<TableSource> =
+        shared.config.library.tables.iter().filter(|source| table_status(&source.location) == Some(TableStatus::NotFetched)).cloned().collect();
+    match shared.table_fetches.start(TableStore::beside(&shared.settings_path), sources, FetchWhy::First) {
+        0 => {}
+        started => crate::notify::notify(crate::notify::Level::Info, format!("fetching {started} difficulty table(s) for the first time")),
     }
-    jobs.retain(|job| {
-        let over = job.folder == folder && job.pending.is_empty();
-        if over && job.updated + job.failed > 0 {
-            finished.push((job.updated, job.failed));
-        }
-        !over
-    });
-    (landed, finished)
 }
 
-/// Take what the reloads in flight have come back with since the last frame, and answer whether
+/// Add `source` to the player's tables and start fetching it.
+///
+/// The source is a row of the list, and of the settings file, from here on, whatever becomes of its
+/// table: one that cannot be fetched is there to be looked at, fetched again or removed. Its table
+/// is fetched beside whichever screen is up, as it is when the player asks for it again, and is a
+/// folder of the song list from the frame it lands. A table registered as a file is read on the
+/// same worker rather than in the middle of a frame: a table file can be tens of thousands of
+/// entries.
+pub(crate) fn register_table(shared: &mut AppShared, source: TableSource) {
+    let at = shared.config.library.tables.len();
+    shared.config.library.tables.push(source.clone());
+    set_table_slot(shared, at, fallback_source_name(&source), Vec::new());
+    shared.save_settings();
+    if is_address(&source.location) {
+        record_status(&source.location, TableStatus::NotFetched);
+    }
+    shared.table_fetches.start(TableStore::beside(&shared.settings_path), vec![source], FetchWhy::Registered);
+}
+
+/// Let go of everything kept of the table at `location`, which has been removed from the list: what
+/// became of it, the copy of it, and whatever a fetch of it that is still out would have kept.
+pub(crate) fn forget_table(shared: &AppShared, location: &str) {
+    forget_table_status(location);
+    shared.table_fetches.forget(location);
+    TableStore::beside(&shared.settings_path).forget(location);
+}
+
+/// Take what the fetches in flight have come back with since the last frame, and answer whether
 /// anything was taken.
 ///
-/// A table that arrived is matched against the library as it is now and takes the place of the one
-/// in the song list, which is rebuilt where it stands. A reload that failed leaves the table, its
-/// copy and its folder as they were, and says why: beside the source in the table manager, and as a
-/// notification. When the last table of a reload is in, one line says how the whole of it went.
+/// A table that arrived is matched against the library as it is now -- which may not be the library
+/// its fetch was started beside -- and takes the place of the one in the song list, which is rebuilt
+/// where it stands. A fetch that failed leaves the table, its copy and its folder as they were, and
+/// says why: beside the source in the table manager, and as a notification. When the last table of
+/// a fetch is in, one line says how the whole of it went.
 ///
-/// A reload is asked for by location and answered by location. A table that was removed while its
-/// reload was out is simply not there to update, and is not counted in how the reload went; the
-/// copy the reload may have written of it is dropped. A location the list holds more than once --
-/// a settings file written by hand can -- is one table fetched once, and every row of it is
-/// brought up to date.
-pub(crate) fn apply_finished_reloads(shared: &mut AppShared) -> bool {
+/// A fetch is asked for by location and answered by location. A table that was removed while its
+/// fetch was out is simply not there to update, and is not counted in how the fetch went; the copy
+/// the fetch may have written of it is dropped. A location the list holds more than once -- a
+/// settings file written by hand can -- is one table fetched once, and every row of it is brought
+/// up to date.
+pub(crate) fn apply_finished_fetches(shared: &mut AppShared) -> bool {
     let tables = &shared.config.library.tables;
-    let (landed, finished) = take_landed(&shared.settings_path, &|location| tables.iter().any(|source| source.location == location));
+    let (landed, finished) = shared.table_fetches.take_landed(&|location| tables.iter().any(|source| source.location == location));
     if landed.is_empty() && finished.is_empty() {
         return false;
     }
     let store = TableStore::beside(&shared.settings_path);
     let index = Md5Index::new(shared.library.md5s());
-    let shown = shown_level(shared);
+    let place = ListPlace::of(shared);
     let mut list_changed = false;
-    for done in landed {
+    for (why, done) in landed {
         let rows: Vec<usize> =
             shared.config.library.tables.iter().enumerate().filter(|(_, source)| source.location == done.location).map(|(at, _)| at).collect();
-        if rows.is_empty() {
-            store.forget(&done.location);
-            continue;
-        }
         match done.outcome {
-            ReloadOutcome::Fetched(load) => {
-                for at in rows {
+            FetchOutcome::Removed => {}
+            FetchOutcome::Fetched(_) | FetchOutcome::Kept { .. } if rows.is_empty() => store.forget(&done.location),
+            FetchOutcome::Fetched(load) => {
+                for (nth, at) in rows.into_iter().enumerate() {
                     let (name, levels) = match_and_record(&shared.config.library.tables[at], &load, &index);
+                    if nth == 0 && why == FetchWhy::Registered {
+                        announce_registered(&name, &levels);
+                    }
                     set_table_slot(shared, at, name, levels);
                 }
                 list_changed = true;
             }
-            ReloadOutcome::Kept { reason } => {
-                crate::notify::notify(crate::notify::Level::Warn, format!("table reload failed ({}): {reason}", done.location));
+            FetchOutcome::Kept { reason } => {
+                crate::notify::notify(crate::notify::Level::Warn, format!("{} ({}): {reason}", why.failure(), done.location));
                 let kept = match table_status(&done.location) {
                     Some(TableStatus::Loaded { name, entries, levels, owned, origin, .. }) => {
                         TableStatus::Loaded { name, entries, levels, owned, origin, stale: Some(reason) }
                     }
-                    Some(TableStatus::Failed { .. }) | None => TableStatus::Failed { reason },
+                    Some(TableStatus::Failed { .. } | TableStatus::NotFetched) | None => TableStatus::Failed { reason },
                 };
                 record_status(&done.location, kept);
             }
-            ReloadOutcome::Removed => {}
         }
     }
     if list_changed {
-        show_the_list_again(shared, shown);
+        show_the_list_again(shared, &place);
     }
-    for (updated, failed) in finished {
-        let level = if failed == 0 { crate::notify::Level::Info } else { crate::notify::Level::Warn };
-        crate::notify::notify(level, format!("difficulty tables reloaded: {updated} updated, {failed} failed"));
+    for tally in finished {
+        let level = if tally.failed == 0 { crate::notify::Level::Info } else { crate::notify::Level::Warn };
+        if let Some(line) = tally.why.tally(tally.updated, tally.failed) {
+            crate::notify::notify(level, line);
+        }
     }
     true
 }
 
-/// Put a reloaded table in the slot of its source. The names and the levels are kept in the order
-/// of the sources; a slot that is not there yet is made.
+/// Say what became of a table that was registered and has arrived. Only one that became a folder is
+/// announced as added: saying so of one that was read and lists nothing is what makes a missing
+/// folder look like a bug in the song list.
+fn announce_registered(name: &str, levels: &TableLevels) {
+    if levels.is_empty() {
+        crate::notify::notify(crate::notify::Level::Warn, format!("table read, but it lists no charts and has no folder: {name}"));
+        return;
+    }
+    let owned: usize = levels.iter().map(|(_, charts)| charts.len()).sum();
+    crate::notify::notify(crate::notify::Level::Info, format!("table added: {name} ({owned} local charts)"));
+}
+
+/// Put a table in the slot of its source. The names and the levels are kept in the order of the
+/// sources; a slot that is not there yet is made.
 fn set_table_slot(shared: &mut AppShared, at: usize, name: String, levels: TableLevels) {
     if shared.table_names.len() <= at {
         shared.table_names.resize(at + 1, UNLOADED_TABLE.to_string());
@@ -753,26 +963,101 @@ fn shown_level(shared: &AppShared) -> Option<(usize, String)> {
     Some((table, name.clone()))
 }
 
-/// Rebuild the song list where it stands after a table under it changed. `shown` is the level it
-/// was looking into before the change ([`shown_level`]).
+/// The folder the cursor of the song list is on, as something that can be found again in a list
+/// that has been rebuilt around it.
+#[derive(Clone, PartialEq)]
+enum FocusedFolder {
+    /// A level of a table, by the table's place and the level's name: a table that arrives again
+    /// can have a level before this one that it did not have.
+    Level(usize, String),
+    /// Any other folder, by where it leads.
+    Leading(SelectView),
+}
+
+impl FocusedFolder {
+    /// What the row `item` of the song list is, when it is a folder.
+    fn of(shared: &AppShared, item: &SelectItem) -> Option<FocusedFolder> {
+        match item {
+            SelectItem::Song(_) => None,
+            SelectItem::Folder { target: SelectView::TableLevel(table, level), .. } => Some(
+                shared
+                    .table_levels
+                    .get(*table)
+                    .and_then(|levels| levels.get(*level))
+                    .map_or(FocusedFolder::Leading(SelectView::TableLevel(*table, *level)), |(name, _)| FocusedFolder::Level(*table, name.clone())),
+            ),
+            SelectItem::Folder { target, .. } => Some(FocusedFolder::Leading(*target)),
+        }
+    }
+}
+
+/// A place in the song list -- what it is looking into and the row its cursor is on -- kept as
+/// something that can be found again after the tables under the list have changed.
 ///
-/// A level is followed by its name: a reload can add a level before it or take one away, and the
-/// level at the same place in the reloaded table is then another level. A view into a level the
-/// table no longer has steps out to the table's levels, and a view into a table that has no levels
-/// left steps out to what is still there.
-fn show_the_list_again(shared: &mut AppShared, shown: Option<(usize, String)>) {
-    let levels_of = |table: usize| shared.table_levels.get(table).map_or(0, Vec::len);
-    let place_of = |table: usize| {
-        let (_, name) = shown.as_ref().filter(|(shown_table, _)| *shown_table == table)?;
-        shared.table_levels.get(table)?.iter().position(|(level, _)| level == name)
-    };
-    shared.select_view = match shared.select_view {
-        SelectView::TableLevels(table) | SelectView::TableLevel(table, _) if levels_of(table) == 0 => SelectView::Root,
-        SelectView::TableLevel(table, _) => place_of(table).map_or(SelectView::TableLevels(table), |level| SelectView::TableLevel(table, level)),
-        view => view,
-    };
+/// A level is kept by its name: a fetch can add a level before it or take one away, and the level
+/// at the same place in the table that arrived is then another level. A folder under the cursor is
+/// kept as the folder it is: a table that arrives for the first time is a folder the list did not
+/// have, put among the folders in the order of the sources, and every folder after it is one place
+/// further down than it was. A chart under the cursor is kept by its place in the list: a table
+/// arriving changes no list of charts but its own levels', and the browser lays its filter over the
+/// list after the tables have been put in, so a place found among the unfiltered charts would not
+/// be the chart's place in the list that is shown.
+///
+/// The place is the list's own while a table lands under it ([`apply_finished_fetches`]), and it is
+/// what the browser keeps of where a search was made from for as long as the search is on: a table
+/// that arrives meanwhile must not move what the search goes back to.
+pub(crate) struct ListPlace {
+    view: SelectView,
+    /// The level the list was looking into ([`shown_level`]).
+    shown: Option<(usize, String)>,
+    /// The folder the cursor was on, or `None` when it was on a chart or over an empty list.
+    focused: Option<FocusedFolder>,
+    sel: usize,
+}
+
+impl ListPlace {
+    /// Where the song list is now.
+    pub(crate) fn of(shared: &AppShared) -> ListPlace {
+        ListPlace {
+            view: shared.select_view,
+            shown: shown_level(shared),
+            focused: shared.select_items.get(shared.sel).and_then(|item| FocusedFolder::of(shared, item)),
+            sel: shared.sel,
+        }
+    }
+
+    /// What this place is looking into, as the tables stand now. A level the table no longer has is
+    /// the table's levels, and a table that has no levels left is what is still there: the top of
+    /// the library.
+    pub(crate) fn view(&self, shared: &AppShared) -> SelectView {
+        let levels_of = |table: usize| shared.table_levels.get(table).map_or(0, Vec::len);
+        let place_of = |table: usize| {
+            let (_, name) = self.shown.as_ref().filter(|(shown_table, _)| *shown_table == table)?;
+            shared.table_levels.get(table)?.iter().position(|(level, _)| level == name)
+        };
+        match self.view {
+            SelectView::TableLevels(table) | SelectView::TableLevel(table, _) if levels_of(table) == 0 => SelectView::Root,
+            SelectView::TableLevel(table, _) => place_of(table).map_or(SelectView::TableLevels(table), |level| SelectView::TableLevel(table, level)),
+            view => view,
+        }
+    }
+
+    /// The row of this place in the list as it is now, the list having been built over
+    /// [`ListPlace::view`]: the row of the folder the cursor was on, or the row the cursor was on
+    /// when it was on a chart or its folder is gone, held to the rows there are.
+    pub(crate) fn row(&self, shared: &AppShared) -> usize {
+        let found =
+            self.focused.as_ref().and_then(|focused| shared.select_items.iter().position(|item| FocusedFolder::of(shared, item).as_ref() == Some(focused)));
+        found.unwrap_or(self.sel).min(shared.select_items.len().saturating_sub(1))
+    }
+}
+
+/// Rebuild the song list where it stood after a table under it changed, `place` being where it
+/// stood before the change: looking into the same level, with the cursor on the folder it was on.
+fn show_the_list_again(shared: &mut AppShared, place: &ListPlace) {
+    shared.select_view = place.view(shared);
     shared.rebuild_select_items();
-    shared.sel = shared.sel.min(shared.select_items.len().saturating_sub(1));
+    shared.sel = place.row(shared);
 }
 
 /// What the tests put in place of the network and of the temporary folder.
@@ -832,12 +1117,15 @@ pub(crate) mod test_outside {
     /// What one address answers with: the name of its table, and the body.
     type Answer = (String, Vec<u8>);
 
-    /// Table addresses that live in a test: what each answers with, how often any was asked, and a
-    /// gate a test can shut to hold every answer back until it opens it.
+    /// Table addresses that live in a test: what each answers with, how often any was asked, how
+    /// many were being asked at one moment at the most, and a gate a test can shut to hold every
+    /// answer back until it opens it.
     #[derive(Clone, Default)]
     pub(crate) struct FakeTables {
         bodies: Arc<Mutex<HashMap<String, Answer>>>,
         asked: Arc<AtomicUsize>,
+        out: Arc<AtomicUsize>,
+        busiest: Arc<AtomicUsize>,
         gate: Arc<Mutex<Option<Receiver<()>>>>,
     }
 
@@ -864,11 +1152,26 @@ pub(crate) mod test_outside {
             open
         }
 
+        /// How many fetches were out at one moment at the most: asked for, and not yet answered.
+        pub(crate) fn busiest(&self) -> usize {
+            self.busiest.load(Ordering::Relaxed)
+        }
+
+        /// One fetch. It is counted as out before it is counted as asked, so by the time a test has
+        /// seen it asked for, it is in what [`FakeTables::busiest`] answers.
         fn fetch(&self, address: &str) -> Result<DifficultyTable, TableError> {
-            self.asked.fetch_add(1, Ordering::Relaxed);
+            let out = self.out.fetch_add(1, Ordering::SeqCst) + 1;
+            self.busiest.fetch_max(out, Ordering::SeqCst);
+            self.asked.fetch_add(1, Ordering::SeqCst);
             if let Some(shut) = self.gate.lock().expect("the gate").as_ref() {
                 let _ = shut.recv();
             }
+            let answer = self.answer(address);
+            self.out.fetch_sub(1, Ordering::SeqCst);
+            answer
+        }
+
+        fn answer(&self, address: &str) -> Result<DifficultyTable, TableError> {
             let (name, body) = self.bodies.lock().expect("the fake tables").get(address).cloned().ok_or_else(refused)?;
             let mut table = DifficultyTable::parse_body(&body, None)?;
             table.name = name;
@@ -896,7 +1199,7 @@ mod tests {
     #[test]
     fn a_local_source_that_is_not_there_reports_the_read_failure_by_type() {
         let missing = std::env::temp_dir().join(format!("rbms-no-such-table-{}.json", std::process::id()));
-        let error = match load_table_source(&nowhere(), LoadPolicy::SavedFirst, missing.to_str().expect("utf-8 temp path")) {
+        let error = match read_table_source(&nowhere(), missing.to_str().expect("utf-8 temp path")) {
             Ok(_) => panic!("a missing file is not a table"),
             Err(e) => e,
         };
@@ -908,7 +1211,7 @@ mod tests {
     fn a_local_source_that_is_not_json_reports_the_table_crates_own_error() {
         let path = std::env::temp_dir().join(format!("rbms-bad-table-{}.json", std::process::id()));
         std::fs::write(&path, b"not json").expect("write the fixture");
-        let error = match load_table_source(&nowhere(), LoadPolicy::SavedFirst, path.to_str().expect("utf-8 temp path")) {
+        let error = match read_table_source(&nowhere(), path.to_str().expect("utf-8 temp path")) {
             Ok(_) => panic!("a non-JSON body is not a table"),
             Err(e) => e,
         };
@@ -921,7 +1224,8 @@ mod tests {
     fn a_local_source_that_parses_matches_the_library_by_md5() {
         let path = std::env::temp_dir().join(format!("rbms-good-table-{}.json", std::process::id()));
         std::fs::write(&path, br#"[{"md5":"AABB","level":"1"}]"#).expect("write the fixture");
-        let load = load_table_source(&nowhere(), LoadPolicy::SavedFirst, path.to_str().expect("utf-8 temp path")).expect("a JSON body is a table");
+        let load =
+            read_table_source(&nowhere(), path.to_str().expect("utf-8 temp path")).expect("a JSON body is a table").expect("a file is read, not waited for");
         assert_eq!(load.origin, TableOrigin::File, "a file read off disk has no saved copy of itself");
         assert_eq!(load.table.match_levels(["aabb", "ccdd"].into_iter()), vec![("1".to_string(), vec![0])], "md5 matching is case-insensitive");
         let _ = std::fs::remove_file(&path);
@@ -969,7 +1273,7 @@ mod tests {
         let library = Library::from_songs(vec![entry("aaaa"), entry("bbbb"), entry("cccc"), entry("DDDD")]);
         let source = TableSource { name: "MINE".into(), location: path.to_string_lossy().to_string() };
 
-        let (name, levels) = load_and_match(&nowhere(), LoadPolicy::SavedFirst, &source, &library_md5s(&library));
+        let (name, levels) = read_and_match(&nowhere(), &source, &library_md5s(&library));
         assert_eq!(name, "MINE");
         assert_eq!(levels, vec![("1".to_string(), vec![1]), ("2".to_string(), vec![3])], "levels carry positions in the library's own order");
         let _ = std::fs::remove_file(&path);
@@ -983,7 +1287,7 @@ mod tests {
             TableSource { name: "two".into(), location: "/no/such/two.json".into() },
         ];
         let done = AtomicUsize::new(0);
-        let (names, levels) = fetch_and_match(&nowhere(), &sources, &library, &done);
+        let (names, levels) = read_and_match_all(&nowhere(), &sources, &library, &done);
         assert_eq!(done.load(Ordering::Relaxed), 2, "a source that failed is still one the screen no longer waits for");
         assert_eq!(names.len(), 2);
         assert_eq!(levels.len(), 2);
@@ -997,10 +1301,7 @@ mod tests {
         std::fs::write(&path, br#"[{"md5":"BBBB","level":"1"}]"#).expect("write the fixture");
         let library = Library::from_songs(vec![entry("aaaa"), entry("bbbb")]);
         let source = TableSource { name: "MINE".into(), location: path.to_string_lossy().to_string() };
-        assert_eq!(
-            load_and_match(&nowhere(), LoadPolicy::SavedFirst, &source, &library_md5s(&library)),
-            ("MINE".to_string(), vec![("1".to_string(), vec![1])])
-        );
+        assert_eq!(read_and_match(&nowhere(), &source, &library_md5s(&library)), ("MINE".to_string(), vec![("1".to_string(), vec![1])]));
         let _ = std::fs::remove_file(&path);
     }
 
@@ -1008,7 +1309,7 @@ mod tests {
     fn a_source_that_cannot_be_loaded_keeps_its_slot_with_no_levels() {
         let library = Library::from_songs(vec![entry("aaaa")]);
         let source = TableSource { name: "gone".into(), location: "/no/such/table.json".into() };
-        let (name, levels) = load_and_match(&nowhere(), LoadPolicy::SavedFirst, &source, &library_md5s(&library));
+        let (name, levels) = read_and_match(&nowhere(), &source, &library_md5s(&library));
         assert_eq!(name, "GONE", "the source name still labels the row");
         assert!(levels.is_empty(), "a failed load must not drop the row and misalign the parallel vecs");
     }
@@ -1064,7 +1365,7 @@ mod tests {
         let source = body.source("");
         let library = Library::from_songs(vec![entry("aaaa"), entry("bbbb")]);
 
-        let (name, levels) = load_and_match(&nowhere(), LoadPolicy::SavedFirst, &source, &library_md5s(&library));
+        let (name, levels) = read_and_match(&nowhere(), &source, &library_md5s(&library));
         assert_eq!(name, UNNAMED_TABLE);
         assert_eq!(levels, vec![("1".to_string(), Vec::new()), ("2".to_string(), Vec::new())]);
         assert_eq!(
@@ -1082,14 +1383,14 @@ mod tests {
         let library = Library::from_songs(vec![entry("aaaa"), entry("bbbb")]);
         assert_eq!(table_status(&source.location), None, "nothing is known of a source that has not been loaded");
 
-        load_and_match(&nowhere(), LoadPolicy::SavedFirst, &source, &library_md5s(&library));
+        read_and_match(&nowhere(), &source, &library_md5s(&library));
         assert_eq!(
             table_status(&source.location),
             Some(TableStatus::Loaded { name: "MINE".to_string(), entries: 2, levels: 2, owned: 1, origin: TableOrigin::File, stale: None })
         );
 
         std::fs::write(&body.0, b"<html>not a table</html>").expect("rewrite the fixture");
-        load_and_match(&nowhere(), LoadPolicy::SavedFirst, &source, &library_md5s(&library));
+        read_and_match(&nowhere(), &source, &library_md5s(&library));
         let Some(TableStatus::Failed { reason }) = table_status(&source.location) else {
             panic!("the later failure replaces the earlier success");
         };
@@ -1123,7 +1424,7 @@ mod tests {
         sources.insert(2, TableSource { name: "gone".into(), location: "/no/such/side-by-side.json".into() });
 
         let done = AtomicUsize::new(0);
-        let (names, levels) = fetch_and_match(&nowhere(), &sources, &library, &done);
+        let (names, levels) = read_and_match_all(&nowhere(), &sources, &library, &done);
         assert_eq!(done.load(Ordering::Relaxed), sources.len());
         let expected: Vec<String> = sources.iter().map(|source| source.name.to_ascii_uppercase()).collect();
         assert_eq!(names, expected);
@@ -1175,12 +1476,12 @@ mod tests {
         TableSource { name: String::new(), location: address.to_string() }
     }
 
-    /// Wait for the reloads of the player whose settings are at `settings`, and answer everything
-    /// they came back with and the tally of each.
-    fn landed(settings: &Path) -> (Vec<ReloadDone>, Vec<(usize, usize)>) {
+    /// Take what `fetches` come back with until nothing of them is out, and answer all of it and
+    /// the tally of each fetch.
+    fn landed(fetches: &mut TableFetches) -> (Vec<(FetchWhy, FetchDone)>, Vec<FetchTally>) {
         let (mut done, mut tallies) = (Vec::new(), Vec::new());
-        while tallies.is_empty() {
-            let (more, finished) = take_landed(settings, &|_| true);
+        while !fetches.is_idle() {
+            let (more, finished) = fetches.take_landed(&|_| true);
             done.extend(more);
             tallies.extend(finished);
             std::thread::yield_now();
@@ -1188,8 +1489,30 @@ mod tests {
         (done, tallies)
     }
 
-    /// The first load of a table at an address fetches it and keeps it; that copy is the whole of
-    /// it, with where and when it came from.
+    /// Fetch `sources` the way a screen asks for them, on a player of this test's own, and wait
+    /// for all of it.
+    fn fetched(store: &TableStore, sources: Vec<TableSource>, why: FetchWhy) -> (Vec<(FetchWhy, FetchDone)>, Vec<FetchTally>) {
+        let mut fetches = TableFetches::default();
+        fetches.start(store.clone(), sources, why);
+        landed(&mut fetches)
+    }
+
+    /// The name of the table each fetch came back with, or how it came back with none.
+    fn arrivals(done: &[(FetchWhy, FetchDone)]) -> Vec<(&str, String)> {
+        done.iter()
+            .map(|(_, done)| {
+                let came_to = match &done.outcome {
+                    FetchOutcome::Fetched(load) => load.table.name.clone(),
+                    FetchOutcome::Kept { reason } => format!("kept: {reason}"),
+                    FetchOutcome::Removed => "removed".to_string(),
+                };
+                (done.location.as_str(), came_to)
+            })
+            .collect()
+    }
+
+    /// A table at an address that is fetched is kept; that copy is the whole of it, with where and
+    /// when it came from, and the next read of the table is the copy.
     #[test]
     fn a_table_that_is_fetched_is_kept_as_a_copy_beside_the_settings() {
         let address = "https://tables.test/kept/";
@@ -1199,15 +1522,21 @@ mod tests {
         let store = home.store(&tables);
         let before = unix_now();
 
-        let (name, levels) = load_and_match(&store, LoadPolicy::SavedFirst, &at(address), &library_md5s(&two_charts()));
-        assert_eq!((name.as_str(), tables.asked()), ("KEPT", 1));
-        assert_eq!(levels, vec![("1".to_string(), vec![1]), ("2".to_string(), vec![0])]);
+        let (done, tallies) = fetched(&store, vec![at(address)], FetchWhy::First);
+        assert_eq!((arrivals(&done), tables.asked()), (vec![(address, "Kept".to_string())], 1));
+        assert_eq!(tallies, vec![FetchTally { why: FetchWhy::First, updated: 1, failed: 0 }]);
 
         let copy = home.0.join(TABLES_FOLDER).join(format!("{}.{COPY_EXTENSION}", url_hash(address)));
         let saved = SavedTable::read(&copy).expect("the copy is in the table folder beside the settings, named after the address");
         assert_eq!((saved.table.name.as_str(), saved.table.entries.len(), saved.source.as_str()), ("Kept", 2, address));
         let fetched_at = saved.fetched_at.expect("the copy says when it was fetched");
         assert!(fetched_at >= before, "the copy is dated before it was fetched");
+        let left_over: Vec<_> = std::fs::read_dir(home.0.join(TABLES_FOLDER)).expect("the table folder").flatten().map(|file| file.file_name()).collect();
+        assert_eq!(left_over.len(), 1, "the copy is written whole and renamed into place, with nothing left beside it: {left_over:?}");
+
+        let (name, levels) = read_and_match(&store, &at(address), &library_md5s(&two_charts()));
+        assert_eq!((name.as_str(), tables.asked()), ("KEPT", 1), "the table that was kept is read from the copy");
+        assert_eq!(levels, vec![("1".to_string(), vec![1]), ("2".to_string(), vec![0])]);
         assert_eq!(
             table_status(address),
             Some(TableStatus::Loaded {
@@ -1219,8 +1548,6 @@ mod tests {
                 stale: None
             })
         );
-        let left_over: Vec<_> = std::fs::read_dir(home.0.join(TABLES_FOLDER)).expect("the table folder").flatten().map(|file| file.file_name()).collect();
-        assert_eq!(left_over.len(), 1, "the copy is written whole and renamed into place, with nothing left beside it: {left_over:?}");
         forget_table_status(address);
     }
 
@@ -1234,18 +1561,19 @@ mod tests {
         tables.serve(address, "First", ONE_LEVEL);
         let store = home.store(&tables);
         let library = library_md5s(&two_charts());
-        load_and_match(&store, LoadPolicy::SavedFirst, &at(address), &library);
-        let first = table_status(address);
+        fetched(&store, vec![at(address)], FetchWhy::First);
         assert_eq!(tables.asked(), 1);
+        read_and_match(&store, &at(address), &library);
+        let first = table_status(address);
 
         tables.serve(address, "Second", TWO_LEVELS);
-        let (name, levels) = load_and_match(&store, LoadPolicy::SavedFirst, &at(address), &library);
+        let (name, levels) = read_and_match(&store, &at(address), &library);
         assert_eq!(tables.asked(), 1, "a table that has a copy was fetched");
         assert_eq!((name.as_str(), levels.len()), ("FIRST", 1), "the table is the copy, not what the address serves now");
         assert_eq!(table_status(address), first, "the copy still says when it was fetched");
 
         tables.take_down(address);
-        let (name, levels) = load_and_match(&store, LoadPolicy::SavedFirst, &at(address), &library);
+        let (name, levels) = read_and_match(&store, &at(address), &library);
         assert_eq!((name.as_str(), levels, tables.asked()), ("FIRST", vec![("1".to_string(), vec![1])], 1), "the copy is all a load needs");
         forget_table_status(address);
     }
@@ -1263,7 +1591,7 @@ mod tests {
         }
 
         let done = AtomicUsize::new(0);
-        let (names, levels) = fetch_and_match(&store, &sources, &two_charts(), &done);
+        let (names, levels) = read_and_match_all(&store, &sources, &two_charts(), &done);
         assert_eq!(tables.asked(), 0, "a run in which every table has a copy asked the network");
         assert_eq!(done.load(Ordering::Relaxed), sources.len());
         assert_eq!(names, (0..sources.len()).map(|i| format!("T{i}")).collect::<Vec<_>>());
@@ -1276,28 +1604,70 @@ mod tests {
         }
     }
 
-    /// Only the tables that have no copy are fetched: one newly registered among ones that were
-    /// fetched before costs one fetch.
+    /// The same step with a table that has no copy among ones that have: nothing is asked of the
+    /// network for it either, although its address would answer. It keeps its slot with no levels,
+    /// it is counted as finished, and what is remembered of it is that it has not been fetched --
+    /// not that anything failed, and nothing is said.
     #[test]
-    fn only_a_table_with_no_copy_is_fetched_among_ones_that_have_one() {
-        let home = Home::of("one-new");
+    fn a_table_with_no_copy_is_left_out_of_the_read_and_nothing_is_asked_of_its_address() {
+        crate::notify::exclusive(|| {
+            let home = Home::of("one-new");
+            let tables = test_outside::FakeTables::default();
+            let store = home.store(&tables);
+            let sources = [at("https://tables.test/one-new/old/"), at("https://tables.test/one-new/new/")];
+            store.keep_for_tests(&sources[0].location, "old", ONE_LEVEL, Some(1));
+            tables.serve(&sources[1].location, "new", TWO_LEVELS);
+
+            let done = AtomicUsize::new(0);
+            let (names, levels) = read_and_match_all(&store, &sources, &two_charts(), &done);
+            assert_eq!(tables.asked(), 0, "reading the library asked the address of a table that has no copy");
+            assert_eq!((names, done.load(Ordering::Relaxed)), (vec!["OLD".to_string(), UNLOADED_TABLE.to_string()], 2));
+            assert_eq!((levels[0].len(), levels[1].len()), (1, 0), "the table with no copy has no levels, and holds up none of the others");
+            assert_eq!(table_status(&sources[1].location), Some(TableStatus::NotFetched));
+            assert!(!table_load_failed(&sources[1].location), "a table that has not been fetched yet is reported as one that failed");
+            assert!(!store.has_copy_file(&sources[1].location));
+            read_and_match(&store, &sources[1], &library_md5s(&two_charts()));
+            let mut said = Vec::new();
+            crate::notify::drain(&mut said);
+            assert!(said.is_empty(), "a table that is only not fetched yet was reported: {said:?}");
+            sources.iter().for_each(|source| forget_table_status(&source.location));
+        });
+    }
+
+    /// A table whose fetch failed in this run is not put back among the ones that are due a fetch
+    /// when the library is read again: the failure stays, and with it the reason. A table that is a
+    /// file is read again every time, whatever it came to before.
+    #[test]
+    fn a_table_whose_fetch_failed_this_run_stays_failed_when_the_library_is_read_again() {
+        let address = "https://tables.test/stays-failed/";
+        let home = Home::of("stays-failed");
         let tables = test_outside::FakeTables::default();
         let store = home.store(&tables);
-        let sources = [at("https://tables.test/one-new/old/"), at("https://tables.test/one-new/new/")];
-        store.keep_for_tests(&sources[0].location, "old", ONE_LEVEL, Some(1));
-        tables.serve(&sources[1].location, "new", TWO_LEVELS);
+        let failed = TableStatus::Failed { reason: "address: no answer".into() };
+        record_status(address, failed.clone());
 
-        let (names, levels) = fetch_and_match(&store, &sources, &two_charts(), &AtomicUsize::new(0));
-        assert_eq!((names, tables.asked()), (vec!["OLD".to_string(), "NEW".to_string()], 1));
-        assert_eq!(levels[1].len(), 2);
-        assert!(store.has_copy_file(&sources[1].location), "the table that was fetched now has a copy too");
-        sources.iter().for_each(|source| forget_table_status(&source.location));
+        let (_, levels) = read_and_match(&store, &at(address), &library_md5s(&two_charts()));
+        assert!(levels.is_empty());
+        assert_eq!(table_status(address), Some(failed), "reading the library again forgot that the fetch had failed");
+        assert_eq!(tables.asked(), 0);
+
+        forget_table_status(address);
+        read_and_match(&store, &at(address), &library_md5s(&two_charts()));
+        assert_eq!(table_status(address), Some(TableStatus::NotFetched), "a table nothing is known of is one that has not been fetched");
+
+        let body = BodyFile::written("stays-failed", ONE_LEVEL);
+        record_status(&body.source("mine").location, TableStatus::Failed { reason: "file: gone".into() });
+        read_and_match(&store, &body.source("mine"), &library_md5s(&two_charts()));
+        assert!(!table_load_failed(&body.source("mine").location), "a table file that reads now is still shown as failed");
+        forget_table_status(address);
+        forget_table_status(&body.source("mine").location);
     }
 
     /// A copy that does not read as one — cut short by a run that was stopped, or damaged since — is
-    /// no copy: the table is fetched again and the copy replaced.
+    /// no copy: the table reads as one that has not been fetched, never as half a table, and the
+    /// fetch that follows replaces the damage.
     #[test]
-    fn a_damaged_copy_is_fetched_again_and_replaced() {
+    fn a_damaged_copy_is_no_table_and_is_replaced_by_the_fetch_that_follows() {
         let address = "https://tables.test/damaged/";
         let home = Home::of("damaged");
         let tables = test_outside::FakeTables::default();
@@ -1306,26 +1676,13 @@ mod tests {
         std::fs::create_dir_all(&store.folder).expect("the table folder");
         std::fs::write(store.copy_path(address), br#"{"name":"Whole","symbol":"*","level_order":["1"],"entr"#).expect("write half a copy");
 
-        let (name, levels) = load_and_match(&store, LoadPolicy::SavedFirst, &at(address), &library_md5s(&two_charts()));
-        assert_eq!((name.as_str(), levels.len(), tables.asked()), ("WHOLE", 1, 1), "half a copy was read as a table, or not fetched again");
+        let (_, levels) = read_and_match(&store, &at(address), &library_md5s(&two_charts()));
+        assert!(levels.is_empty(), "half a copy was read as a table");
+        assert_eq!((table_status(address), tables.asked()), (Some(TableStatus::NotFetched), 0));
+
+        let (done, _) = fetched(&store, vec![at(address)], FetchWhy::First);
+        assert_eq!((arrivals(&done), tables.asked()), (vec![(address, "Whole".to_string())], 1));
         assert_eq!(store.copy_name(address).as_deref(), Some("Whole"), "the damaged copy was left in place");
-        forget_table_status(address);
-    }
-
-    /// With half a copy and no server there is no table, and the row says the fetch failed: the
-    /// damage is not shown as a table.
-    #[test]
-    fn a_damaged_copy_with_no_server_is_a_failed_load_rather_than_half_a_table() {
-        let address = "https://tables.test/damaged-offline/";
-        let home = Home::of("damaged-offline");
-        let tables = test_outside::FakeTables::default();
-        let store = home.store(&tables);
-        std::fs::create_dir_all(&store.folder).expect("the table folder");
-        std::fs::write(store.copy_path(address), b"not a copy").expect("write the damage");
-
-        let (_, levels) = crate::notify::exclusive(|| load_and_match(&store, LoadPolicy::SavedFirst, &at(address), &library_md5s(&two_charts())));
-        assert!(levels.is_empty());
-        assert!(table_load_failed(address));
         forget_table_status(address);
     }
 
@@ -1342,8 +1699,14 @@ mod tests {
         let json = SavedTable::json_of(&other, "https://tables.test/somebody-else/", Some(1)).expect("a table is JSON");
         crate::write_atomic(&store.copy_path(address), &json).expect("write the other table's copy");
 
-        let (name, levels) = load_and_match(&store, LoadPolicy::SavedFirst, &at(address), &library_md5s(&two_charts()));
-        assert_eq!((name.as_str(), levels.len(), tables.asked()), ("MINE", 1, 1));
+        let (_, levels) = read_and_match(&store, &at(address), &library_md5s(&two_charts()));
+        assert!(levels.is_empty(), "another address's copy was read as this table");
+        assert_eq!(table_status(address), Some(TableStatus::NotFetched));
+
+        let (done, _) = fetched(&store, vec![at(address)], FetchWhy::First);
+        assert_eq!((arrivals(&done), tables.asked()), (vec![(address, "Mine".to_string())], 1));
+        let (name, levels) = read_and_match(&store, &at(address), &library_md5s(&two_charts()));
+        assert_eq!((name.as_str(), levels.len()), ("MINE", 1));
         forget_table_status(address);
     }
 
@@ -1366,20 +1729,20 @@ mod tests {
             .expect("after the epoch")
             .as_secs();
 
-        let (name, levels) = load_and_match(&store, LoadPolicy::SavedFirst, &at(address), &library_md5s(&two_charts()));
+        let (name, levels) = read_and_match(&store, &at(address), &library_md5s(&two_charts()));
         assert_eq!((name.as_str(), tables.asked()), ("EARLIER", 0), "a table with an earlier copy was fetched");
         assert_eq!(levels, vec![("2".to_string(), vec![0]), ("1".to_string(), vec![1])], "the order the earlier copy kept");
         assert!(!legacy.exists(), "the earlier copy is moved, not copied");
         let moved = SavedTable::read(&store.copy_path(address)).expect("the copy is in the store now");
         assert_eq!((moved.source.as_str(), moved.fetched_at), (address, Some(written)), "the moved copy names its address and is dated by its file");
 
-        load_and_match(&store, LoadPolicy::SavedFirst, &at(address), &library_md5s(&two_charts()));
+        read_and_match(&store, &at(address), &library_md5s(&two_charts()));
         assert_eq!(tables.asked(), 0, "the moved copy is read like any other afterwards");
         forget_table_status(address);
     }
 
     /// Registering a table fetches what its address serves now, whatever copy happens to be lying
-    /// about, and a registration that fails keeps nothing.
+    /// about. A table being registered is one table, so its fetch has no tally to give.
     #[test]
     fn registering_a_table_fetches_it_whatever_copy_is_lying_about() {
         let address = "https://tables.test/registered/";
@@ -1389,15 +1752,15 @@ mod tests {
         store.keep_for_tests(address, "Lying about", ONE_LEVEL, Some(1));
         tables.serve(address, "Served", TWO_LEVELS);
 
-        let (name, levels) = load_and_match(&store, LoadPolicy::Fetch, &at(address), &library_md5s(&two_charts()));
-        assert_eq!((name.as_str(), levels.len(), tables.asked()), ("SERVED", 2, 1));
+        let (done, tallies) = fetched(&store, vec![at(address)], FetchWhy::Registered);
+        assert_eq!((arrivals(&done), tables.asked()), (vec![(address, "Served".to_string())], 1));
         assert_eq!(store.copy_name(address).as_deref(), Some("Served"));
-        forget_table_status(address);
+        assert_eq!(tallies.iter().filter_map(|tally| tally.why.tally(tally.updated, tally.failed)).count(), 0, "a registration was summed up like a reload");
     }
 
     /// A reload fetches the table again on a worker, replaces the copy, and hands the table back
-    /// for the frame loop to take. While it is out the source reads as being reloaded, and it is
-    /// not started a second time.
+    /// for the frame loop to take. While it is out the source reads as being fetched, and it is
+    /// not started a second time. The fetches of one player are nothing to another.
     #[test]
     fn a_reload_fetches_the_table_again_and_replaces_the_copy() {
         let address = "https://tables.test/reloaded/";
@@ -1408,16 +1771,20 @@ mod tests {
         tables.serve(address, "After", TWO_LEVELS);
 
         let open = tables.hold();
-        assert_eq!(start_reload(store.clone(), vec![at(address)]), 1);
-        assert!(table_is_reloading(&home.settings(), address));
-        assert_eq!(start_reload(store.clone(), vec![at(address)]), 0, "a table already on its way was started again");
-        assert!(!table_is_reloading(Path::new("/some/other/player/settings.ron"), address), "another player's table reads as being reloaded");
+        let mut fetches = TableFetches::default();
+        assert_eq!(fetches.start(store.clone(), vec![at(address)], FetchWhy::Reload), 1);
+        assert!(fetches.is_fetching(address));
+        assert_eq!(fetches.start(store.clone(), vec![at(address)], FetchWhy::Reload), 0, "a table already on its way was started again");
+        assert_eq!(fetches.start(store.clone(), vec![at(address)], FetchWhy::First), 0, "whatever it is fetched for, it is fetched once");
+        let another = TableFetches::default();
+        assert!(!another.is_fetching(address) && another.is_idle(), "another player's table reads as being fetched");
         drop(open);
 
-        let (done, tallies) = landed(&home.settings());
-        assert_eq!(tallies, vec![(1, 0)]);
-        assert!(matches!(&done[..], [ReloadDone { location, outcome: ReloadOutcome::Fetched(load) }] if location == address && load.table.name == "After"));
-        assert!(!table_is_reloading(&home.settings(), address));
+        let (done, tallies) = landed(&mut fetches);
+        assert_eq!(tallies, vec![FetchTally { why: FetchWhy::Reload, updated: 1, failed: 0 }]);
+        assert_eq!(arrivals(&done), vec![(address, "After".to_string())]);
+        assert!(done.iter().all(|(why, _)| *why == FetchWhy::Reload));
+        assert!(!fetches.is_fetching(address));
         assert_eq!((store.copy_name(address).as_deref(), tables.asked()), (Some("After"), 1));
         let saved = store.copy_of(address).expect("the new copy");
         assert!(saved.fetched_at.is_some_and(|at| at > 1), "the new copy is dated by the reload");
@@ -1436,18 +1803,12 @@ mod tests {
         store.keep_for_tests(emptied, "Emptied", ONE_LEVEL, Some(1));
         tables.serve(emptied, "Emptied", b"[]");
 
-        assert_eq!(start_reload(store.clone(), vec![at(down), at(emptied)]), 2);
-        let (done, tallies) = landed(&home.settings());
-        assert_eq!(tallies, vec![(0, 2)]);
-        let reason_of = |address: &str| {
-            done.iter().find(|done| done.location == address).map(|done| match &done.outcome {
-                ReloadOutcome::Kept { reason } => reason.clone(),
-                ReloadOutcome::Fetched(_) => "fetched".to_string(),
-                ReloadOutcome::Removed => "removed".to_string(),
-            })
-        };
-        assert_eq!(reason_of(down), Some(test_outside::refused().to_string()), "the fetch's own failure is the reason");
-        assert_eq!(reason_of(emptied).as_deref(), Some(LISTS_NOTHING_NOW), "a table that lists nothing now replaced a copy that lists something");
+        let (done, tallies) = fetched(&store, vec![at(down), at(emptied)], FetchWhy::Reload);
+        assert_eq!(tallies, vec![FetchTally { why: FetchWhy::Reload, updated: 0, failed: 2 }]);
+        let came_to = arrivals(&done);
+        let reason_of = |address: &str| came_to.iter().find(|(location, _)| *location == address).map(|(_, came_to)| came_to.clone());
+        assert_eq!(reason_of(down), Some(format!("kept: {}", test_outside::refused())), "the fetch's own failure is the reason");
+        assert_eq!(reason_of(emptied), Some(format!("kept: {LISTS_NOTHING_NOW}")), "a table that lists nothing now replaced a copy that lists something");
         for address in [down, emptied] {
             let saved = store.copy_of(address).expect("the copy is still there");
             assert_eq!((saved.table.entries.len(), saved.fetched_at), (1, Some(1)), "{address}: the copy was touched");
@@ -1464,11 +1825,10 @@ mod tests {
         let body = BodyFile::written("reload-file", ONE_LEVEL);
         std::fs::write(&body.0, TWO_LEVELS).expect("rewrite the fixture");
 
-        assert_eq!(start_reload(store.clone(), vec![body.source("mine")]), 1);
-        let (done, tallies) = landed(&home.settings());
-        assert_eq!(tallies, vec![(1, 0)]);
+        let (done, tallies) = fetched(&store, vec![body.source("mine")], FetchWhy::Reload);
+        assert_eq!(tallies, vec![FetchTally { why: FetchWhy::Reload, updated: 1, failed: 0 }]);
         assert!(
-            matches!(&done[..], [ReloadDone { outcome: ReloadOutcome::Fetched(load), .. }] if load.origin == TableOrigin::File && load.table.entries.len() == 2)
+            matches!(&done[..], [(_, FetchDone { outcome: FetchOutcome::Fetched(load), .. })] if load.origin == TableOrigin::File && load.table.entries.len() == 2)
         );
         assert_eq!(tables.asked(), 0);
         assert!(!store.folder.exists(), "a copy was written of a table that is a file");
@@ -1493,11 +1853,11 @@ mod tests {
         assert!(body.0.exists(), "removing a table registered as a file deleted the file");
     }
 
-    /// A table removed while its reload is out is never kept: the worker that fetched it writes no
-    /// copy, with no screen up to clear one away, and its reload has no tally of a table that is
+    /// A table removed while its fetch is out is never kept: the worker that fetched it writes no
+    /// copy, with no screen up to clear one away, and its fetch has no tally of a table that is
     /// neither updated nor failed.
     #[test]
-    fn a_table_removed_while_its_reload_is_out_is_not_kept_by_the_worker() {
+    fn a_table_removed_while_its_fetch_is_out_is_not_kept_by_the_worker() {
         let home = Home::of("reload-removed");
         let tables = test_outside::FakeTables::default();
         let store = home.store(&tables);
@@ -1508,33 +1868,96 @@ mod tests {
         }
 
         let open = tables.hold();
-        assert_eq!(start_reload(store.clone(), vec![at(gone), at(stays)]), 2);
+        let mut fetches = TableFetches::default();
+        assert_eq!(fetches.start(store.clone(), vec![at(gone), at(stays)], FetchWhy::Reload), 2);
+        fetches.forget(gone);
         store.forget(gone);
         assert!(!store.has_copy_file(gone));
         drop(open);
         let is_listed = |location: &str| location == stays;
         let (mut done, mut tallies) = (Vec::new(), Vec::new());
-        while table_is_reloading(&home.settings(), stays) || table_is_reloading(&home.settings(), gone) {
-            let (more, finished) = take_landed(&home.settings(), &is_listed);
+        while !fetches.is_idle() {
+            let (more, finished) = fetches.take_landed(&is_listed);
             done.extend(more);
             tallies.extend(finished);
             std::thread::yield_now();
         }
-        assert_eq!(tallies, vec![(1, 0)], "a table that was removed is counted in how its reload went");
-        assert!(done.iter().any(|done| done.location == gone && matches!(done.outcome, ReloadOutcome::Removed)), "the worker kept a table that was removed");
+        assert_eq!(tallies, vec![FetchTally { why: FetchWhy::Reload, updated: 1, failed: 0 }], "a table that was removed is counted in how its fetch went");
+        assert!(arrivals(&done).contains(&(gone, "removed".to_string())), "the worker kept a table that was removed");
         assert!(!store.has_copy_file(gone), "the worker wrote a copy of a table that was removed while it was out");
-        assert_eq!(store.copy_name(stays).as_deref(), Some("After"), "removing one table held another's reload back");
+        assert_eq!(store.copy_name(stays).as_deref(), Some("After"), "removing one table held another's fetch back");
 
         let open = tables.hold();
-        assert_eq!(start_reload(store.clone(), vec![at(gone)]), 1);
+        assert_eq!(fetches.start(store.clone(), vec![at(gone)], FetchWhy::First), 1);
+        fetches.forget(gone);
         store.forget(gone);
         drop(open);
-        while table_is_reloading(&home.settings(), gone) {
-            let (_, finished) = take_landed(&home.settings(), &|_| false);
-            assert!(finished.is_empty(), "a reload none of whose tables are left says how it went: {finished:?}");
+        while !fetches.is_idle() {
+            let (_, finished) = fetches.take_landed(&|_| false);
+            assert!(finished.is_empty(), "a fetch none of whose tables are left says how it went: {finished:?}");
             std::thread::yield_now();
         }
         assert!(!store.has_copy_file(gone));
+    }
+
+    /// A table removed while its fetch is out and registered again before that fetch is back is a
+    /// new table at the same address: it is fetched for itself, the fetch of the table that was
+    /// removed comes to nothing whatever arrives, and the copy that is left is the new table's.
+    #[test]
+    fn a_table_registered_again_while_the_fetch_of_the_one_removed_is_out_is_fetched_for_itself() {
+        let address = "https://tables.test/again/";
+        let home = Home::of("again");
+        let tables = test_outside::FakeTables::default();
+        tables.serve(address, "Again", ONE_LEVEL);
+        let store = home.store(&tables);
+
+        let open = tables.hold();
+        let mut fetches = TableFetches::default();
+        assert_eq!(fetches.start(store.clone(), vec![at(address)], FetchWhy::First), 1);
+        fetches.forget(address);
+        store.forget(address);
+        assert_eq!(fetches.start(store.clone(), vec![at(address)], FetchWhy::Registered), 1, "the table registered again waits on a fetch that keeps nothing");
+        assert_eq!(fetches.start(store.clone(), vec![at(address)], FetchWhy::Reload), 0, "the table registered again is fetched twice over");
+        drop(open);
+
+        let (done, tallies) = landed(&mut fetches);
+        let by_why =
+            |why: FetchWhy| done.iter().filter(|(of, _)| *of == why).map(|(_, done)| matches!(done.outcome, FetchOutcome::Fetched(_))).collect::<Vec<_>>();
+        assert_eq!((by_why(FetchWhy::First), by_why(FetchWhy::Registered)), (vec![false], vec![true]));
+        assert!(done.iter().any(|(why, done)| *why == FetchWhy::First && matches!(done.outcome, FetchOutcome::Removed)));
+        assert_eq!(tallies, vec![FetchTally { why: FetchWhy::Registered, updated: 1, failed: 0 }], "the fetch of the removed table is counted");
+        assert_eq!((tables.asked(), store.copy_name(address).as_deref()), (2, Some("Again")));
+    }
+
+    /// However many times fetches are started, no more than the cap are out at one moment: the
+    /// tables of a second fetch wait for the first one's to come back, and every one of them is
+    /// fetched in the end. A fetch that is over is a worker that is gone.
+    #[test]
+    fn fetches_started_separately_share_the_cap_on_how_many_are_out_at_once() {
+        const EACH: usize = MAX_PARALLEL_LOADS - 2;
+        let home = Home::of("cap");
+        let tables = test_outside::FakeTables::default();
+        let store = home.store(&tables);
+        let sources = |batch: &str| (0..EACH).map(|i| at(&format!("https://tables.test/cap/{batch}/{i}/"))).collect::<Vec<_>>();
+        for source in sources("first").iter().chain(&sources("second")) {
+            tables.serve(&source.location, "Capped", ONE_LEVEL);
+        }
+
+        let open = tables.hold();
+        let mut fetches = TableFetches::default();
+        assert_eq!(fetches.start(store.clone(), sources("first"), FetchWhy::First), EACH);
+        assert_eq!(fetches.start(store.clone(), sources("second"), FetchWhy::Reload), EACH);
+        while tables.asked() < MAX_PARALLEL_LOADS {
+            std::thread::yield_now();
+        }
+        drop(open);
+        let (done, tallies) = landed(&mut fetches);
+
+        assert_eq!(tables.busiest(), MAX_PARALLEL_LOADS, "more tables were being fetched at one moment than the cap allows");
+        assert_eq!((done.len(), tables.asked()), (EACH * 2, EACH * 2), "a table that waited for a slot was never fetched");
+        assert!(done.iter().all(|(_, done)| matches!(done.outcome, FetchOutcome::Fetched(_))));
+        assert_eq!(tallies.len(), 2);
+        assert!(fetches.is_idle(), "a fetch that is over is still held");
     }
 
     #[test]

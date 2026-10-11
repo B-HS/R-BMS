@@ -7,23 +7,32 @@
 //! play, so decision 12 keeps it out of the score book and off the IR: [`practice_block_reason`]
 //! is the single predicate both gates ask.
 //!
-//! The editing rules are the reference implementation's, taken from `PracticeConfiguration.java`
-//! element by element: the step sizes (plain, turbo, turbo on an analog control), the rounding of
-//! the two time bounds, and the pop'n rule that caps the starting gauge once a survival gauge is
-//! selected. They are reproduced exactly, including the asymmetry that only an increase of START
-//! TIME pushes END TIME along with it.
+//! What a row may hold is the reference implementation's, taken from `PracticeConfiguration.java`
+//! element by element: the two ends of every number, the rounding of the two time bounds, the
+//! shortest slice they may enclose, and the pop'n rule that caps the starting gauge once a survival
+//! gauge is selected -- including the asymmetry that only an increase of START TIME pushes END TIME
+//! along with it.
+//!
+//! How a number is moved is not the reference's. Its panel is worked from the keys and the
+//! turntable of a controller, in steps sized for that (a tenth of a second, five of TOTAL, five
+//! percent of the speed, and coarser ones with a turbo key held). This panel is worked from the
+//! keyboard and the mouse, and a row that holds a number is set as such a row is on every built-in
+//! screen ([`crate::number_row`]): counted in whole steps of the smallest change it shows
+//! ([`PracticePanel::number`]) and put on a step by a key, a slider or a typed figure
+//! ([`PracticePanel::set_number`]). Whatever step it is put on, it is held to what the row may
+//! hold, so a number that runs into another -- an END TIME brought down onto START TIME -- stops at
+//! the nearest value it may have. A START TIME dragged along its slider pushes END TIME only while
+//! it is past it ([`PracticePanel::drag_number`]), where the reference's keys push it for good.
 //!
 //! The property is remembered per chart in `practice.ron`, keyed by chart md5 — the key the score
 //! book and the favourites already use, so a rescan or a moved file keeps the settings. The
 //! reference keys the same file by SHA-256; the key differs, the contents do not.
-//!
-//! Every item here is reached from the screens the integration branch wires up, so until those
-//! call sites land the module carries its own `dead_code` allowance, as its sibling branches do.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use rbms_chart::shuffle::NoteOption;
+use rbms_config::{NO_UNIT, NumberSpec};
 use rbms_judge::gauge::GaugeIndex;
 use rbms_judge::gauge_tables::{GaugeSetId, element_of};
 use rbms_model::{Mode, Model};
@@ -31,6 +40,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::format::gauge_name;
 use crate::notify::{Level, notify};
+use crate::number_row::NumberValue;
 use crate::write_atomic;
 
 /// Name of the file the per-chart practice properties are kept in, next to `scores.ron`.
@@ -42,19 +52,15 @@ pub(crate) const PRACTICE_BLOCK_REASON: &str = "practice";
 
 /// Milliseconds per second, the unit the reference edits and displays practice times in.
 const MS_PER_SECOND: i32 = 1_000;
-/// Milliseconds per minute, for the `mm:ss.d` readout.
-const MS_PER_MINUTE: i32 = 60_000;
 /// Microseconds per millisecond: the property is authored in ms, the play clock runs in us.
 const US_PER_MS: i64 = 1_000;
 
-/// Step both time bounds move by on a plain press (`PracticeConfiguration.java:536,550`).
-const TIME_STEP_MS: i32 = 100;
-/// Step they move by while turbo is held on a digital control (`:536`).
-const TIME_STEP_TURBO_MS: i32 = 2_500;
-/// Step they move by while turbo is held on an analog control, which reports far more often (`:536`).
-const TIME_STEP_TURBO_ANALOG_MS: i32 = 1_000;
-/// Granularity both bounds are rounded down to (`:533,547,548`).
+/// Granularity both bounds are rounded down to (`PracticeConfiguration.java:533,547,548`) and
+/// shown to (`:543-544`), which makes it the smallest change either of them takes.
 const TIME_ROUND_MS: i32 = 100;
+/// How many of those make one second, and how many places after the point that is written to.
+const TIME_STEPS_PER_SECOND: i64 = (MS_PER_SECOND / TIME_ROUND_MS) as i64;
+const TIME_DECIMALS: u8 = 1;
 /// Earliest START TIME (`:534`).
 const START_TIME_MIN_MS: i32 = 0;
 /// How far short of the last timeline START TIME may reach (`:533`).
@@ -70,40 +76,31 @@ const DEFAULT_GAUGE_TYPE: u8 = 2;
 const DEFAULT_START_GAUGE: i32 = 20;
 /// Lowest starting gauge the panel offers (`:583`).
 const GAUGE_VALUE_MIN: i32 = 1;
-/// GAUGE VALUE step on a plain press and while turbo is held (`:580`).
-const GAUGE_VALUE_STEP: i32 = 1;
-const GAUGE_VALUE_STEP_TURBO: i32 = 10;
 /// First survival gauge. On a pop'n chart, selecting this or anything past it caps the starting
 /// gauge (`:565`).
 const PMS_SURVIVAL_GAUGE_INDEX: u8 = 3;
 /// The cap that rule applies (`:566`).
 const PMS_START_GAUGE_CAP: i32 = 100;
 
-/// JUDGERANK bounds and steps (`:589-595`).
+/// JUDGERANK bounds (`:589-595`).
 const JUDGE_RATE_MIN: i32 = 1;
 const JUDGE_RATE_MAX: i32 = 400;
-const JUDGE_RATE_STEP: i32 = 1;
-const JUDGE_RATE_STEP_TURBO: i32 = 25;
 /// JUDGERANK of a chart played as authored (`:686`).
 const JUDGE_RATE_UNMODIFIED: i32 = 100;
 
-/// TOTAL bounds and steps, digital and analog (`:597-603`).
+/// TOTAL bounds (`:597-603`).
 const TOTAL_MIN: f64 = 10.0;
 const TOTAL_MAX: f64 = 5_000.0;
-const TOTAL_STEP: f64 = 5.0;
-const TOTAL_STEP_TURBO: f64 = 25.0;
-const TOTAL_STEP_ANALOG: f64 = 1.0;
-const TOTAL_STEP_ANALOG_TURBO: f64 = 20.0;
 /// TOTAL that means "take the chart's own" (`:70`).
 const TOTAL_FROM_CHART: f64 = 0.0;
+/// Where the slider of TOTAL and its arrows end. A chart's own TOTAL is some hundreds, so a slider
+/// run over the whole of what the row may hold would have every chart's in its first few pixels;
+/// past this the row is typed into.
+const TOTAL_SLIDER_MAX: i64 = 1_000;
 
-/// FREQUENCY bounds and steps (`:605-611`).
+/// FREQUENCY bounds (`:605-611`).
 const FREQ_MIN: i32 = 50;
 const FREQ_MAX: i32 = 200;
-const FREQ_STEP: i32 = 5;
-const FREQ_STEP_TURBO: i32 = 25;
-const FREQ_STEP_ANALOG: i32 = 1;
-const FREQ_STEP_ANALOG_TURBO: i32 = 10;
 const FREQ_UNMODIFIED: i32 = 100;
 
 /// Whether a practice run may end because the gauge emptied. It may not: the point of practising a
@@ -118,14 +115,54 @@ fn round_down_to(value: i32, base: i32) -> i32 {
     value / base * base
 }
 
-/// Step the two time bounds move by for this press (`PracticeConfiguration.java:536`). Turbo on an
-/// analog control moves less per press because such a control reports many presses per turn.
-fn time_step_ms(turbo: bool, analog: bool) -> i32 {
-    match (turbo, analog) {
-        (true, true) => TIME_STEP_TURBO_ANALOG_MS,
-        (true, false) => TIME_STEP_TURBO_MS,
-        (false, _) => TIME_STEP_MS,
-    }
+/// The latest START TIME of a chart whose last timeline is at `last_tl_ms`
+/// (`PracticeConfiguration.java:533`). A chart shorter than [`START_TIME_TAIL_MS`] starts at its
+/// beginning and nowhere else: the reference works out a ceiling before zero for one and lets START
+/// TIME follow it there, which asks for a slice that begins before the chart does.
+fn max_start_ms(last_tl_ms: i32) -> i32 {
+    round_down_to(last_tl_ms - START_TIME_TAIL_MS, TIME_ROUND_MS).max(START_TIME_MIN_MS)
+}
+
+/// The latest END TIME of a chart whose last timeline is at `last_tl_ms` (`:547`).
+fn max_end_ms(last_tl_ms: i32) -> i32 {
+    round_down_to(last_tl_ms + END_TIME_TAIL_MS, TIME_ROUND_MS)
+}
+
+/// The earliest END TIME of a slice that starts at `start_ms` (`:548`).
+fn min_end_ms(start_ms: i32) -> i32 {
+    round_down_to(start_ms + MIN_PLAY_SPAN_MS, TIME_ROUND_MS)
+}
+
+/// The most the gauge a property names can start at: the top of that gauge on its table (`:582`).
+fn max_start_gauge(p: &PracticeProperty) -> i32 {
+    (element_of(p.gauge_set(), p.gauge_index()).max as i32).max(GAUGE_VALUE_MIN)
+}
+
+/// The step of a time row a time in milliseconds stands on, counted in [`TIME_ROUND_MS`]. A time
+/// between two steps stands on the earlier one, which is how it is shown.
+fn time_steps(ms: i32) -> i64 {
+    i64::from(ms / TIME_ROUND_MS)
+}
+
+/// The time in milliseconds a step of a time row stands for.
+fn time_of_steps(steps: i64) -> i32 {
+    i32::try_from(steps.saturating_mul(i64::from(TIME_ROUND_MS))).unwrap_or(if steps < 0 { i32::MIN } else { i32::MAX })
+}
+
+/// How a time row is counted between `min_ms` and `max_ms`: in tenths of a second, written as
+/// minutes and seconds (`:543-544`).
+fn time_spec(min_ms: i32, max_ms: i32) -> NumberSpec {
+    NumberSpec::fine(time_steps(min_ms), time_steps(max_ms), TIME_STEPS_PER_SECOND, TIME_DECIMALS, NO_UNIT).as_clock()
+}
+
+/// How a row of whole numbers from `min` to `max` is counted.
+fn whole_spec(min: i32, max: i32) -> NumberSpec {
+    NumberSpec::whole(i64::from(min), i64::from(max), NO_UNIT)
+}
+
+/// A step of a row of whole numbers as the value it stands for, held to what a property stores.
+fn value_of_steps(steps: i64) -> i32 {
+    i32::try_from(steps).unwrap_or(if steps < 0 { i32::MIN } else { i32::MAX })
 }
 
 /// The gauge tables, as tokens stable enough to write to a file.
@@ -183,12 +220,6 @@ fn options_for(mode: Mode) -> &'static [NoteOption] {
 pub(crate) fn last_timeline_ms(model: &Model) -> i32 {
     let last_us = model.timelines.last().map_or(0, |tl| tl.time_us);
     i32::try_from(last_us / US_PER_MS).unwrap_or(i32::MAX)
-}
-
-/// `mm:ss.d`, the readout the reference's two time rows use
-/// (`PracticeConfiguration.java:543-544`).
-pub(crate) fn format_practice_time(ms: i32) -> String {
-    format!("{:2}:{:02}.{:1}", ms / MS_PER_MINUTE, (ms / MS_PER_SECOND) % 60, (ms / TIME_ROUND_MS) % 10)
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -272,13 +303,10 @@ impl PracticeProperty {
         if !options_for(mode).contains(&self.option()) {
             self.random = NoteOption::Off.label().to_string();
         }
-        let max_start = round_down_to(last_timeline_ms - START_TIME_TAIL_MS, TIME_ROUND_MS);
-        self.start_ms = self.start_ms.clamp(START_TIME_MIN_MS, max_start.max(START_TIME_MIN_MS));
-        let max_end = round_down_to(last_timeline_ms + END_TIME_TAIL_MS, TIME_ROUND_MS);
-        let min_end = round_down_to(self.start_ms + MIN_PLAY_SPAN_MS, TIME_ROUND_MS);
-        self.end_ms = self.end_ms.clamp(min_end, max_end.max(min_end));
-        let gauge_max = element_of(self.gauge_set(), self.gauge_index()).max as i32;
-        self.start_gauge = self.start_gauge.clamp(GAUGE_VALUE_MIN, gauge_max.max(GAUGE_VALUE_MIN));
+        self.start_ms = self.start_ms.clamp(START_TIME_MIN_MS, max_start_ms(last_timeline_ms));
+        let min_end = min_end_ms(self.start_ms);
+        self.end_ms = self.end_ms.clamp(min_end, max_end_ms(last_timeline_ms).max(min_end));
+        self.start_gauge = self.start_gauge.clamp(GAUGE_VALUE_MIN, max_start_gauge(self));
         cap_pms_start_gauge(self, mode);
         self.judge_rate = self.judge_rate.clamp(JUDGE_RATE_MIN, JUDGE_RATE_MAX);
         self.freq = self.freq.clamp(FREQ_MIN, FREQ_MAX);
@@ -296,32 +324,38 @@ fn cap_pms_start_gauge(p: &mut PracticeProperty, mode: Mode) {
     }
 }
 
-/// Move START TIME one step (`PracticeConfiguration.java:531-543`).
+/// Put START TIME on `start_ms`, held between the beginning of the chart and the latest a slice may
+/// start (`PracticeConfiguration.java:531-543`).
 ///
-/// Only an increase drags END TIME along, and that drag is a plain `max` with no rounding — the
+/// Only an increase drags END TIME along, and that drag is a plain `max` with no rounding -- the
 /// reference rounds the two bounds where it derives them, not where it pushes one with the other.
-pub(crate) fn clamp_start(p: &mut PracticeProperty, last_tl_ms: i32, turbo: bool, analog: bool, inc: bool) {
-    let max_start = round_down_to(last_tl_ms - START_TIME_TAIL_MS, TIME_ROUND_MS);
-    let change = time_step_ms(turbo, analog);
-    if inc {
-        p.start_ms = (p.start_ms + change).min(max_start);
+pub(crate) fn set_start_ms(p: &mut PracticeProperty, last_tl_ms: i32, start_ms: i32) {
+    let before = p.start_ms;
+    p.start_ms = start_ms.clamp(START_TIME_MIN_MS, max_start_ms(last_tl_ms));
+    if p.start_ms > before {
         p.end_ms = p.end_ms.max(p.start_ms + MIN_PLAY_SPAN_MS);
-    } else {
-        p.start_ms = (p.start_ms - change).max(START_TIME_MIN_MS);
     }
 }
 
-/// Move END TIME one step (`PracticeConfiguration.java:545-557`). Both of its bounds are rounded
-/// down, the lower one off the current START TIME.
-pub(crate) fn clamp_end(p: &mut PracticeProperty, last_tl_ms: i32, turbo: bool, analog: bool, inc: bool) {
-    let max_end = round_down_to(last_tl_ms + END_TIME_TAIL_MS, TIME_ROUND_MS);
-    let min_end = round_down_to(p.start_ms + MIN_PLAY_SPAN_MS, TIME_ROUND_MS);
-    let change = time_step_ms(turbo, analog);
-    if inc {
-        p.end_ms = (p.end_ms + change).min(max_end);
-    } else {
-        p.end_ms = (p.end_ms - change).max(min_end);
-    }
+/// Put START TIME on `start_ms` while its slider is being dragged, END TIME having stood on
+/// `end_before_ms` when the slider was taken hold of.
+///
+/// A drag passes over every place between where it began and where it is let go of, and a pointer
+/// that overshoots is brought back. So END TIME is not pushed for good by a START TIME that is only
+/// passing: for as long as the slider is held it stands where it stood, or a slice's shortest span
+/// past START TIME when that is later, and comes back as START TIME does. What it is left on when
+/// the slider is let go of is what a key or a typed figure putting START TIME there would leave.
+pub(crate) fn drag_start_ms(p: &mut PracticeProperty, last_tl_ms: i32, start_ms: i32, end_before_ms: i32) {
+    p.start_ms = start_ms.clamp(START_TIME_MIN_MS, max_start_ms(last_tl_ms));
+    p.end_ms = end_before_ms.max(p.start_ms + MIN_PLAY_SPAN_MS);
+}
+
+/// Put END TIME on `end_ms`, held between the shortest slice START TIME leaves room for and the
+/// latest a slice may end (`PracticeConfiguration.java:545-557`). Both of those are rounded down,
+/// the lower one off the current START TIME.
+pub(crate) fn set_end_ms(p: &mut PracticeProperty, last_tl_ms: i32, end_ms: i32) {
+    let min_end = min_end_ms(p.start_ms);
+    p.end_ms = end_ms.clamp(min_end, max_end_ms(last_tl_ms).max(min_end));
 }
 
 /// Cycle the gauge, wrapping both ways, and apply the pop'n cap the new selection may trigger
@@ -343,50 +377,25 @@ pub(crate) fn cycle_gauge_set(p: &mut PracticeProperty, inc: bool) {
     p.start_gauge = element_of(next, p.gauge_index()).init as i32;
 }
 
-/// Move GAUGE VALUE one step (`PracticeConfiguration.java:580-587`). Turbo from the very bottom
-/// jumps to one whole step rather than to `1 + step`, which is what makes the bottom of the range
-/// reachable in both directions.
-pub(crate) fn adjust_gauge_value(p: &mut PracticeProperty, turbo: bool, inc: bool) {
-    let change = if turbo { GAUGE_VALUE_STEP_TURBO } else { GAUGE_VALUE_STEP };
-    let max = (element_of(p.gauge_set(), p.gauge_index()).max as i32).max(GAUGE_VALUE_MIN);
-    if inc && turbo && p.start_gauge == GAUGE_VALUE_MIN {
-        p.start_gauge = change.min(max);
-    } else {
-        p.start_gauge = (p.start_gauge + if inc { change } else { -change }).clamp(GAUGE_VALUE_MIN, max);
-    }
+/// Put GAUGE VALUE on `start_gauge`, held between one and the top of the selected gauge
+/// (`PracticeConfiguration.java:580-587`).
+pub(crate) fn set_start_gauge(p: &mut PracticeProperty, start_gauge: i32) {
+    p.start_gauge = start_gauge.clamp(GAUGE_VALUE_MIN, max_start_gauge(p));
 }
 
-/// Move JUDGERANK one step (`PracticeConfiguration.java:588-596`), with the same bottom-of-range
-/// turbo jump as GAUGE VALUE.
-pub(crate) fn adjust_judge_rate(p: &mut PracticeProperty, turbo: bool, inc: bool) {
-    let change = if turbo { JUDGE_RATE_STEP_TURBO } else { JUDGE_RATE_STEP };
-    if inc && turbo && p.judge_rate == JUDGE_RATE_MIN {
-        p.judge_rate = change.min(JUDGE_RATE_MAX);
-    } else {
-        p.judge_rate = (p.judge_rate + if inc { change } else { -change }).clamp(JUDGE_RATE_MIN, JUDGE_RATE_MAX);
-    }
+/// Put JUDGERANK on `judge_rate`, held to its two ends (`PracticeConfiguration.java:588-596`).
+pub(crate) fn set_judge_rate(p: &mut PracticeProperty, judge_rate: i32) {
+    p.judge_rate = judge_rate.clamp(JUDGE_RATE_MIN, JUDGE_RATE_MAX);
 }
 
-/// Move TOTAL one step (`PracticeConfiguration.java:597-603`).
-pub(crate) fn adjust_total(p: &mut PracticeProperty, turbo: bool, analog: bool, inc: bool) {
-    let change = match (turbo, analog) {
-        (true, true) => TOTAL_STEP_ANALOG_TURBO,
-        (true, false) => TOTAL_STEP_TURBO,
-        (false, true) => TOTAL_STEP_ANALOG,
-        (false, false) => TOTAL_STEP,
-    };
-    p.total = (p.total + if inc { change } else { -change }).clamp(TOTAL_MIN, TOTAL_MAX);
+/// Put TOTAL on `total`, held to its two ends (`PracticeConfiguration.java:597-603`).
+pub(crate) fn set_total(p: &mut PracticeProperty, total: f64) {
+    p.total = total.clamp(TOTAL_MIN, TOTAL_MAX);
 }
 
-/// Move FREQUENCY one step (`PracticeConfiguration.java:604-611`).
-pub(crate) fn adjust_freq(p: &mut PracticeProperty, turbo: bool, analog: bool, inc: bool) {
-    let change = match (turbo, analog) {
-        (true, true) => FREQ_STEP_ANALOG_TURBO,
-        (true, false) => FREQ_STEP_TURBO,
-        (false, true) => FREQ_STEP_ANALOG,
-        (false, false) => FREQ_STEP,
-    };
-    p.freq = (p.freq + if inc { change } else { -change }).clamp(FREQ_MIN, FREQ_MAX);
+/// Put FREQUENCY on `freq`, held to its two ends (`PracticeConfiguration.java:604-611`).
+pub(crate) fn set_freq(p: &mut PracticeProperty, freq: i32) {
+    p.freq = freq.clamp(FREQ_MIN, FREQ_MAX);
 }
 
 /// Cycle the note shuffle over the ones this mode may use
@@ -402,6 +411,9 @@ pub(crate) fn cycle_option(p: &mut PracticeProperty, mode: Mode, inc: bool) {
 /// One editable row of the practice panel. The reference's OPTION-2P, OPTION-DP and GRAPHTYPE rows
 /// are absent: this engine applies one shuffle to the whole chart and draws one result graph, so
 /// those rows would edit values nothing reads.
+///
+/// Six of the rows hold a number ([`PracticePanel::number`]) and three a choice out of a ring
+/// ([`PracticePanel::cycle`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PracticeElement {
     StartTime,
@@ -529,20 +541,21 @@ fn scale_time_us(value: i64, numerator: i64, denominator: i64) -> i64 {
     scaled.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64
 }
 
-/// The practice screen: the property being edited, the chart it belongs to, and which half of the
-/// screen is up.
+/// The practice screen's model: the property being edited, the chart it belongs to, and which half
+/// of the screen is up.
 #[derive(Debug, Clone)]
 pub(crate) struct PracticePanel {
     /// The property under edit, saved back under [`PracticePanel::chart_key`] when the screen closes.
     pub(crate) property: PracticeProperty,
+    /// The property this chart is practised under the first time, which is what the key that
+    /// resets a row puts the row back to.
+    fresh: PracticeProperty,
     /// Chart md5 the property is remembered under.
     chart_key: String,
     /// Mode of the chart, which decides the pop'n cap and the shuffle list.
     mode: Mode,
     /// Time of the chart's last timeline, which both time bounds are measured against.
     last_timeline_ms: i32,
-    /// Focused row.
-    cursor: usize,
     /// Panel or a running slice.
     phase: PracticePhase,
 }
@@ -550,12 +563,15 @@ pub(crate) struct PracticePanel {
 impl PracticePanel {
     /// Open the panel on a chart, starting from the property last saved for it.
     pub(crate) fn new(chart_key: String, mode: Mode, last_timeline_ms: i32, saved: Option<PracticeProperty>, chart_total: f64) -> PracticePanel {
-        let mut property = saved.unwrap_or_else(|| PracticeProperty::for_chart(mode, last_timeline_ms));
+        let mut fresh = PracticeProperty::for_chart(mode, last_timeline_ms);
+        fresh.sanitise(mode, last_timeline_ms);
+        fresh.total = chart_total.clamp(TOTAL_MIN, TOTAL_MAX);
+        let mut property = saved.unwrap_or_else(|| fresh.clone());
         property.sanitise(mode, last_timeline_ms);
         if property.total == TOTAL_FROM_CHART {
-            property.total = chart_total.clamp(TOTAL_MIN, TOTAL_MAX);
+            property.total = fresh.total;
         }
-        PracticePanel { property, chart_key, mode, last_timeline_ms, cursor: 0, phase: PracticePhase::Panel }
+        PracticePanel { property, fresh, chart_key, mode, last_timeline_ms, phase: PracticePhase::Panel }
     }
 
     /// Chart md5 this panel edits.
@@ -569,47 +585,126 @@ impl PracticePanel {
         self.phase
     }
 
-    /// Focused row.
-    pub(crate) fn focused(&self) -> PracticeElement {
-        PracticeElement::ALL[self.cursor.min(PracticeElement::ALL.len() - 1)]
+    /// The number one row holds: how the row is counted, the step it stands on and the step a
+    /// fresh panel on this chart has it on. `None` for a row that holds a choice.
+    ///
+    /// The ends of a row are what the chart and the other rows leave it. START TIME ends two
+    /// seconds short of the chart's last timeline and END TIME a second past it; GAUGE VALUE ends at
+    /// the top of the gauge that is selected, on the table that is selected. END TIME is counted
+    /// from the earliest a slice can end at all, so its slider keeps its scale while START TIME
+    /// moves, and is held above START TIME where it is set ([`PracticePanel::set_number`]).
+    ///
+    /// The slider of TOTAL and its arrows end at [`TOTAL_SLIDER_MAX`], short of what the row may
+    /// hold, so that a place along the slider is a TOTAL a chart could have; a figure typed into the
+    /// row reaches the rest.
+    pub(crate) fn number(&self, element: PracticeElement) -> Option<NumberValue> {
+        let (p, fresh) = (&self.property, &self.fresh);
+        let (spec, steps, shipped) = match element {
+            PracticeElement::StartTime => {
+                (time_spec(START_TIME_MIN_MS, max_start_ms(self.last_timeline_ms)), time_steps(p.start_ms), time_steps(fresh.start_ms))
+            }
+            PracticeElement::EndTime => {
+                (time_spec(min_end_ms(START_TIME_MIN_MS), max_end_ms(self.last_timeline_ms)), time_steps(p.end_ms), time_steps(fresh.end_ms))
+            }
+            PracticeElement::GaugeValue => (whole_spec(GAUGE_VALUE_MIN, max_start_gauge(p)), i64::from(p.start_gauge), i64::from(fresh.start_gauge)),
+            PracticeElement::JudgeRank => (whole_spec(JUDGE_RATE_MIN, JUDGE_RATE_MAX), i64::from(p.judge_rate), i64::from(fresh.judge_rate)),
+            PracticeElement::Total => (whole_spec(TOTAL_MIN as i32, TOTAL_MAX as i32), p.total as i64, fresh.total as i64),
+            PracticeElement::Freq => (whole_spec(FREQ_MIN, FREQ_MAX), i64::from(p.freq), i64::from(fresh.freq)),
+            PracticeElement::GaugeType | PracticeElement::GaugeCategory | PracticeElement::Random => return None,
+        };
+        let value = NumberValue::of(spec, steps, spec.clamp(shipped));
+        Some(if element == PracticeElement::Total { value.with_slider_to(TOTAL_SLIDER_MAX) } else { value })
     }
 
-    /// Move the focus, wrapping at both ends so the list is a ring like every other panel here.
-    pub(crate) fn move_cursor(&mut self, down: bool) {
-        let count = PracticeElement::ALL.len();
-        let step = if down { 1 } else { count - 1 };
-        self.cursor = (self.cursor + step) % count;
+    /// Put one row that holds a number on the step `steps`, held to what the row may hold now, and
+    /// answer whether that changed the property. A row that holds a choice is left as it is.
+    ///
+    /// A row asked for the step it already stands on is not written: what it holds may be finer
+    /// than its steps -- a chart's own TOTAL with a fraction, a time from a file edited by hand --
+    /// and a slider that was only pressed, or a figure typed as it stood, must not round it.
+    pub(crate) fn set_number(&mut self, element: PracticeElement, steps: i64) -> bool {
+        if self.number(element).is_some_and(|number| number.steps == steps) {
+            return false;
+        }
+        let before = self.property.clone();
+        let p = &mut self.property;
+        match element {
+            PracticeElement::StartTime => set_start_ms(p, self.last_timeline_ms, time_of_steps(steps)),
+            PracticeElement::EndTime => set_end_ms(p, self.last_timeline_ms, time_of_steps(steps)),
+            PracticeElement::GaugeValue => set_start_gauge(p, value_of_steps(steps)),
+            PracticeElement::JudgeRank => set_judge_rate(p, value_of_steps(steps)),
+            PracticeElement::Total => set_total(p, steps as f64),
+            PracticeElement::Freq => set_freq(p, value_of_steps(steps)),
+            PracticeElement::GaugeType | PracticeElement::GaugeCategory | PracticeElement::Random => {}
+        }
+        self.property != before
     }
 
-    /// Edit the focused row one step. `analog` says the press came from a control that reports
-    /// continuously, which shortens the turbo step of the rows that take one.
-    pub(crate) fn adjust(&mut self, inc: bool, turbo: bool, analog: bool) {
-        match self.focused() {
-            PracticeElement::StartTime => clamp_start(&mut self.property, self.last_timeline_ms, turbo, analog, inc),
-            PracticeElement::EndTime => clamp_end(&mut self.property, self.last_timeline_ms, turbo, analog, inc),
+    /// Carry one row that holds a number to the step `steps` along its slider, `taken` being the
+    /// property as it was when the slider was taken hold of, and answer whether that changed the
+    /// property. It is [`PracticePanel::set_number`], but for what a row pushes out of its way: a
+    /// START TIME carried past END TIME pushes it only for as long as it is past it
+    /// ([`drag_start_ms`]).
+    pub(crate) fn drag_number(&mut self, element: PracticeElement, steps: i64, taken: &PracticeProperty) -> bool {
+        if element != PracticeElement::StartTime {
+            return self.set_number(element, steps);
+        }
+        if self.number(element).is_some_and(|number| number.steps == steps) {
+            return false;
+        }
+        let before = self.property.clone();
+        drag_start_ms(&mut self.property, self.last_timeline_ms, time_of_steps(steps), taken.end_ms);
+        self.property != before
+    }
+
+    /// Put one row that holds a number back to what a fresh panel on this chart has it on, held to
+    /// what the row may hold now, and answer whether that changed the property. TOTAL goes back to
+    /// the chart's own to the fraction, which a step of the row cannot say.
+    pub(crate) fn reset_number(&mut self, element: PracticeElement) -> bool {
+        let before = self.property.clone();
+        let (p, fresh) = (&mut self.property, &self.fresh);
+        match element {
+            PracticeElement::StartTime => set_start_ms(p, self.last_timeline_ms, fresh.start_ms),
+            PracticeElement::EndTime => set_end_ms(p, self.last_timeline_ms, fresh.end_ms),
+            PracticeElement::GaugeValue => set_start_gauge(p, fresh.start_gauge),
+            PracticeElement::JudgeRank => set_judge_rate(p, fresh.judge_rate),
+            PracticeElement::Total => set_total(p, fresh.total),
+            PracticeElement::Freq => set_freq(p, fresh.freq),
+            PracticeElement::GaugeType | PracticeElement::GaugeCategory | PracticeElement::Random => {}
+        }
+        self.property != before
+    }
+
+    /// Move one row that holds a choice to the next of its ring, or to the one before, and answer
+    /// whether the row is such a row. A row that holds a number is left as it is.
+    pub(crate) fn cycle(&mut self, element: PracticeElement, inc: bool) -> bool {
+        match element {
             PracticeElement::GaugeType => cycle_gauge_type(&mut self.property, self.mode, inc),
             PracticeElement::GaugeCategory => cycle_gauge_set(&mut self.property, inc),
-            PracticeElement::GaugeValue => adjust_gauge_value(&mut self.property, turbo, inc),
-            PracticeElement::JudgeRank => adjust_judge_rate(&mut self.property, turbo, inc),
-            PracticeElement::Total => adjust_total(&mut self.property, turbo, analog, inc),
-            PracticeElement::Freq => adjust_freq(&mut self.property, turbo, analog, inc),
             PracticeElement::Random => cycle_option(&mut self.property, self.mode, inc),
+            PracticeElement::StartTime
+            | PracticeElement::EndTime
+            | PracticeElement::GaugeValue
+            | PracticeElement::JudgeRank
+            | PracticeElement::Total
+            | PracticeElement::Freq => return false,
         }
+        true
     }
 
-    /// Value drawn on the right of a row.
+    /// Value drawn on the right of a row: the choice by name, or the number as its row writes it.
     pub(crate) fn value_text(&self, element: PracticeElement) -> String {
         let p = &self.property;
         match element {
-            PracticeElement::StartTime => format_practice_time(p.start_ms),
-            PracticeElement::EndTime => format_practice_time(p.end_ms),
             PracticeElement::GaugeType => gauge_index_name(p.gauge_index()).to_string(),
             PracticeElement::GaugeCategory => gauge_set_token(p.gauge_set()).to_string(),
-            PracticeElement::GaugeValue => p.start_gauge.to_string(),
-            PracticeElement::JudgeRank => p.judge_rate.to_string(),
-            PracticeElement::Total => (p.total as i32).to_string(),
-            PracticeElement::Freq => p.freq.to_string(),
             PracticeElement::Random => p.option().label().to_string(),
+            PracticeElement::StartTime
+            | PracticeElement::EndTime
+            | PracticeElement::GaugeValue
+            | PracticeElement::JudgeRank
+            | PracticeElement::Total
+            | PracticeElement::Freq => self.number(element).map(|number| number.spec.text(number.steps)).unwrap_or_default(),
         }
     }
 

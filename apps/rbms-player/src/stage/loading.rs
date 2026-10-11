@@ -1,11 +1,14 @@
 //! The LOADING screen: the frame that is shown while something the player asked for is being read
 //! off disk or off the network.
 //!
-//! Everything slow the app does passes through here — the folder scan, a chart's keysounds and
-//! background images, and fetching a difficulty table that is being registered — so that none of it
-//! happens on the frame loop with the window frozen. A table that is fetched again is the one slow
-//! thing that does not: that runs beside whichever screen asked ([`crate::tablesrc::start_reload`]). Each task says what step it is on and how far through it is, and
-//! each carries a cancel the Escape key sets, so leaving does not leave a worker behind.
+//! Everything slow the app waits for passes through here — the folder scan, and a chart's keysounds
+//! and background images — so that none of it happens on the frame loop with the window frozen.
+//! Fetching a difficulty table is the one slow thing that does not, because nothing waits for it: a
+//! table that has no copy yet, one that is being registered and one that is fetched again all run
+//! beside whichever screen is up ([`crate::tablesrc::TableFetches`]), and the scan here reads only
+//! the copies and the table files that are on this machine. Each task says what step it is on and
+//! how far through it is, and each carries a cancel the Escape key sets, so leaving does not leave
+//! a worker behind.
 //!
 //! The screen is always the built-in one. A chart picked in the browser is shown by the decide
 //! scene while its files decode ([`crate::stage::decide`]) when a skin draws that scene, and comes
@@ -15,8 +18,8 @@
 //! A chart whose play screen a skin draws does not wait here at all. The reference's play screen
 //! has a loading state of its own (`BMSPlayer.STATE_PRELOAD`), which the skin draws, so the chart
 //! goes to the play screen as soon as it is parsed and the decodes go with it
-//! ([`ChartAssets::enter_preloading`], [`ChartLoads`]). Only the folder scan, a table fetch and a
-//! chart with no play skin are waited for on this screen.
+//! ([`ChartAssets::enter_preloading`], [`ChartLoads`]). Only the folder scan and a chart with no
+//! play skin are waited for on this screen.
 #![allow(clippy::wildcard_imports)]
 
 use std::sync::Arc;
@@ -25,7 +28,7 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 
 use crate::app_play::{LoadedChart, PendingChart};
 use crate::stage::{Canvas, FrameCtx, KeyInput, PlayState, Stage, StageHandler, Transition};
-use crate::tablesrc::{LoadPolicy, TableStore, load_and_match};
+use crate::tablesrc::{TableStore, read_and_match_all};
 use crate::*;
 
 /// Width and height of the progress bar under the heading.
@@ -46,9 +49,6 @@ const DOTS_MAX: u64 = 4;
 /// How much of a chart title the LOADING line shows.
 const TITLE_CHARS: usize = 30;
 
-/// How much of a table's location the FETCHING line shows.
-const LOCATION_CHARS: usize = 56;
-
 /// How far the table-matching half of a background scan has got. The chart walk keeps its own
 /// counters inside the library scan it is driving, so only what happens after it lives here.
 #[derive(Default)]
@@ -60,9 +60,10 @@ pub(crate) struct ScanProgress {
 /// Which half of a background scan is running: the chart walk into the song database, or the
 /// difficulty-table match against the library that walk produced.
 ///
-/// They are two steps rather than one worker because only the first can be stopped — a table that
-/// has no copy yet is an http fetch already in flight — and because the screen names them
-/// separately. `tables` is where the match reads the copies of the tables from.
+/// They are two steps rather than one worker because the screen names them separately, and
+/// because only the first is worth stopping: the match reads the copies of the tables and the table
+/// files off this machine and asks no address anything, so it is over in the time it takes to read
+/// them. `tables` is where the match reads the copies from.
 pub(crate) enum ScanStep {
     Walking { scan: crate::library::LibraryScan, sources: Vec<TableSource>, tables: TableStore },
     Matching { rx: Receiver<ScanOutcome> },
@@ -329,22 +330,11 @@ impl ChartAssets {
     }
 }
 
-/// A difficulty table being fetched before it joins the library.
-///
-/// The fetch is an http request, which can take seconds or hang on an unreachable host, so it does
-/// not happen on the frame loop. `cancel` is what Escape sets: the request itself cannot be taken
-/// back, but its result is dropped rather than pushed into a library the user has moved on from.
-pub(crate) struct TableAdd {
-    source: TableSource,
-    rx: Receiver<(String, TableLevels)>,
-    cancel: Arc<AtomicBool>,
-}
-
 /// What this LOADING frame is waiting to do.
 ///
 /// `Song` reads and parses a chart; `Assets` waits for the files that chart named; `Scan`
-/// (re)scans the song folders and re-matches the difficulty tables; `Table` fetches one table that
-/// is being added. Only `Song` still blocks, so the LOADING frame is presented before it starts.
+/// (re)scans the song folders and re-matches the difficulty tables that can be read off this
+/// machine. Only `Song` still blocks, so the LOADING frame is presented before it starts.
 pub(crate) enum LoadingTask {
     /// Load the library chart at this index and enter Play.
     Song(usize),
@@ -352,8 +342,6 @@ pub(crate) enum LoadingTask {
     Scan { step: ScanStep, progress: Arc<ScanProgress> },
     /// Decode what a parsed chart named, then enter Play.
     Assets(Box<ChartAssets>),
-    /// Fetch one difficulty table, then return to the table manager.
-    Table(Box<TableAdd>),
 }
 
 /// The LOADING screen's own state: what it is waiting for, and whether it has been on screen for a
@@ -398,27 +386,6 @@ impl LoadingState {
         LoadingState::scan(shared.config.library.folders.clone(), shared.config.library.tables.clone(), songdb_path(&shared.settings_path), full)
     }
 
-    /// Fetch one difficulty table off-thread and match it against the library that is loaded now.
-    /// A table at an address is fetched as the address serves it now, and kept as its copy.
-    ///
-    /// The md5s are indexed here rather than shared, so the worker does not hold the library the
-    /// browser is reading from.
-    pub(crate) fn table(shared: &AppShared, source: TableSource) -> LoadingState {
-        let library = rbms_table::Md5Index::new(shared.library.md5s());
-        let tables = TableStore::beside(&shared.settings_path);
-        let cancel = Arc::new(AtomicBool::new(false));
-        let (tx, rx) = std::sync::mpsc::channel();
-        let job = source.clone();
-        let abandoned = cancel.clone();
-        std::thread::spawn(move || {
-            let matched = load_and_match(&tables, LoadPolicy::Fetch, &job, &library);
-            if !abandoned.load(Ordering::Relaxed) {
-                let _ = tx.send(matched);
-            }
-        });
-        LoadingState { task: LoadingTask::Table(Box::new(TableAdd { source, rx, cancel })), drawn: false }
-    }
-
     /// Whether keysounds are still decoding, which is what holds an audio-settings reopen back.
     pub(crate) fn keysounds_pending(&self) -> bool {
         matches!(&self.task, LoadingTask::Assets(assets) if assets.loads.keysounds_pending())
@@ -433,10 +400,15 @@ impl LoadingState {
 
     /// Apply a finished background scan: swap in the merged library/tables and return to the
     /// (rebuilt) select screen.
+    ///
+    /// A table at an address that has no copy was not read and has no folder yet. Those are due
+    /// their first fetch from here on, which the song list starts once it is up
+    /// ([`crate::tablesrc::start_first_fetches`]); the scan itself waited for none of them.
     fn apply_scan(shared: &mut AppShared, out: ScanOutcome) -> Transition {
         shared.library = out.library;
         shared.table_names = out.names;
         shared.table_levels = out.levels;
+        shared.table_fetches.first_fetches_are_due();
         shared.select_view = SelectView::Root;
         shared.sel = 0;
         shared.rebuild_select_items();
@@ -474,43 +446,16 @@ impl LoadingState {
     }
 
     /// Match every configured difficulty table against the library the walk just produced, off the
-    /// frame loop because a table that has no copy yet is an http fetch. One that has is read from
-    /// the copy, so a run in which every table has been fetched before waits on no server here.
+    /// frame loop because a table is read and parsed for it: a table file, or the copy kept of a
+    /// table at an address. No address is asked anything, so this waits on no server; a table that
+    /// has no copy keeps its slot with no levels until it has been fetched beside the song list.
     fn spawn_table_match(library: Library, sources: Vec<TableSource>, tables: TableStore, progress: Arc<ScanProgress>) -> Receiver<ScanOutcome> {
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            let (names, levels) = fetch_and_match(&tables, &sources, &library, &progress.tables);
+            let (names, levels) = read_and_match_all(&tables, &sources, &library, &progress.tables);
             let _ = tx.send(ScanOutcome { library, names, levels });
         });
         rx
-    }
-
-    /// A table fetch is running; add it to the library the frame it lands. A source whose table
-    /// could not be fetched still takes its slot, with the failure already reported by the loader,
-    /// so the row is there to look at and remove rather than silently missing. Only a table that
-    /// became a folder is announced as added: saying so of one that failed, or of one that was read
-    /// and lists nothing, is what makes a missing folder look like a bug in the song list.
-    fn poll_table(shared: &mut AppShared, add: &TableAdd) -> Transition {
-        match add.rx.try_recv() {
-            Ok((name, levels)) => {
-                let owned: usize = levels.iter().map(|(_, charts)| charts.len()).sum();
-                shared.config.library.tables.push(add.source.clone());
-                shared.table_names.push(name.clone());
-                shared.table_levels.push(levels);
-                shared.save_settings();
-                if crate::tablesrc::table_load_failed(&add.source.location) {
-                    return Transition::Back;
-                }
-                if shared.table_levels.last().is_some_and(Vec::is_empty) {
-                    notify(Level::Warn, format!("table read, but it lists no charts and has no folder: {name}"));
-                } else {
-                    notify(Level::Info, format!("table added: {name} ({owned} local charts)"));
-                }
-                Transition::Back
-            }
-            Err(TryRecvError::Disconnected) => Transition::Back,
-            Err(TryRecvError::Empty) => Transition::Stay,
-        }
     }
 
     /// Perform the queued chart load (one frame after the LOADING screen is shown) then wait on
@@ -530,12 +475,16 @@ impl LoadingState {
     /// empty, and routing through the usual exit would quit on the empty library — surprising
     /// mid-load. Any half-loaded play state is dropped with this screen, and every worker this
     /// screen started is told to stop.
+    ///
+    /// The table match is not something to cancel. The walk it follows is finished, the match
+    /// itself reads a few files and is over in a moment, and leaving in the middle of it would throw
+    /// away the library that was just read and every table with it for the rest of the run. Escape
+    /// there is let pass, and the screen hands on to the song list by itself.
     fn cancel(&mut self, shared: &mut AppShared) -> Transition {
         match &self.task {
             LoadingTask::Assets(assets) => assets.stop(),
             LoadingTask::Scan { step: ScanStep::Walking { scan, .. }, .. } => scan.cancel(),
-            LoadingTask::Scan { step: ScanStep::Matching { .. }, .. } => {}
-            LoadingTask::Table(add) => add.cancel.store(true, Ordering::Relaxed),
+            LoadingTask::Scan { step: ScanStep::Matching { .. }, .. } => return Transition::Stay,
             LoadingTask::Song(_) => {}
         }
         shared.release_play_audio();
@@ -568,7 +517,6 @@ impl LoadingState {
                 found => ("SCANNING", format!("{found} charts found")),
             },
             LoadingTask::Assets(assets) => assets.loads.heading(shared),
-            LoadingTask::Table(add) => ("FETCHING TABLE", add.source.location.chars().take(LOCATION_CHARS).collect()),
         }
     }
 
@@ -596,7 +544,6 @@ impl StageHandler for LoadingState {
     fn update(&mut self, ctx: &mut FrameCtx<'_>) -> Transition {
         let ready = match &mut self.task {
             LoadingTask::Scan { step, progress } => return LoadingState::poll_scan(ctx.shared, step, progress),
-            LoadingTask::Table(add) => return LoadingState::poll_table(ctx.shared, add),
             LoadingTask::Song(index) => {
                 let index = *index;
                 return if self.drawn { LoadingState::finish_song(ctx.shared, index) } else { Transition::Stay };
@@ -617,8 +564,8 @@ impl StageHandler for LoadingState {
     }
 
     /// The heading, the step under it and the progress bar: determinate for the decodes and the
-    /// table match, which know how many there are, and a ping-ponging sweep for the folder scan and
-    /// the fetch of a table being registered, which have no total to count toward.
+    /// table match, which know how many there are, and a ping-ponging sweep for the folder scan,
+    /// which has no total to count toward.
     fn draw(&mut self, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'_>) {
         canvas.clear_bga();
         if self.hands_on_to_a_play_skin(ctx.shared) {
@@ -638,7 +585,6 @@ impl StageHandler for LoadingState {
                 LoadingState::draw_determinate(canvas, bx, by, done, ctx.shared.config.library.tables.len(), "tables");
             }
             LoadingTask::Scan { .. } => LoadingState::draw_sweep(canvas, bx, by, ctx.shared.frame_count),
-            LoadingTask::Table(_) => LoadingState::draw_sweep(canvas, bx, by, ctx.shared.frame_count),
             LoadingTask::Song(_) => {}
         }
         self.drawn = true;
@@ -753,6 +699,149 @@ mod tests {
         };
         assert_eq!(scan.counts().found, 0, "an empty root walks nothing");
         let _ = std::fs::remove_file(&db);
+    }
+
+    /// Run a scan of no folders over `sources`, started the way the app starts one, and stay on
+    /// the LOADING screen until it hands back to the song list.
+    fn scanned(app: &mut crate::App, sources: Vec<TableSource>) {
+        let settings = app.shared.settings_path.clone();
+        std::fs::create_dir_all(settings.parent().expect("the settings file is in a folder")).expect("the settings folder");
+        let mut state = LoadingState::scan(Vec::new(), sources, songdb_path(&settings), false);
+        loop {
+            match state.update(&mut FrameCtx { shared: &mut app.shared, now: std::time::Instant::now(), dt: 0.0 }) {
+                Transition::Stay => std::thread::yield_now(),
+                Transition::Back => return,
+                _ => panic!("a scan hands back to the screen it was opened over"),
+            }
+        }
+    }
+
+    /// Run the song list's frames until nothing is being fetched any more.
+    fn landed(app: &mut crate::App, select: &mut SelectState) {
+        while !app.shared.table_fetches.is_idle() {
+            select.update(&mut FrameCtx { shared: &mut app.shared, now: std::time::Instant::now(), dt: 0.0 });
+            std::thread::yield_now();
+        }
+    }
+
+    /// Starting up, and reading the library again: the table step reads the copies and asks no
+    /// address anything, whether a table has a copy, has none, or is at an address that will never
+    /// answer. The song list is what fetches the ones with no copy, once, after the scan has handed
+    /// back; the one that answers is kept and is a folder, the one that does not says why once and
+    /// is left alone when the library is read again.
+    #[test]
+    fn the_table_step_asks_no_address_anything_and_the_song_list_fetches_what_has_no_copy() {
+        const BODY: &[u8] = br#"[{"md5":"1111","level":"1"}]"#;
+        crate::notify::exclusive(|| {
+            let (kept, new, dead) = ("https://tables.test/scan/kept/", "https://tables.test/scan/new/", "https://tables.test/scan/dead/");
+            let mut app = crate::stage::render_tests::app();
+            let tables = crate::tablesrc::test_outside::FakeTables::default();
+            let _installed = tables.install();
+            let store = TableStore::beside(&app.shared.settings_path);
+            [kept, new, dead].into_iter().for_each(|address| store.forget(address));
+            store.keep_for_tests(kept, "Kept", BODY, Some(1));
+            tables.serve(new, "New", BODY);
+            let sources: Vec<TableSource> = [kept, new, dead].map(|address| TableSource { name: String::new(), location: address.to_string() }).to_vec();
+            app.shared.config.library.tables = sources.clone();
+
+            scanned(&mut app, sources.clone());
+            assert_eq!(tables.asked(), 0, "the table step of a scan asked an address for its table");
+            assert_eq!(app.shared.table_names, vec!["KEPT".to_string(), "TABLE".to_string(), "TABLE".to_string()]);
+            assert_eq!(app.shared.table_levels.iter().map(Vec::len).collect::<Vec<_>>(), vec![1, 0, 0], "only the table that has a copy has levels yet");
+            assert!(app.shared.table_fetches.is_idle(), "the scan started a fetch of its own");
+            for address in [new, dead] {
+                assert_eq!(crate::tablesrc::table_status(address), Some(crate::tablesrc::TableStatus::NotFetched), "{address}");
+            }
+
+            let mut said = Vec::new();
+            crate::notify::drain(&mut said);
+            let mut select = SelectState::new();
+            select.update(&mut FrameCtx { shared: &mut app.shared, now: std::time::Instant::now(), dt: 0.0 });
+            landed(&mut app, &mut select);
+            assert_eq!(tables.asked(), 2, "each table that has no copy is fetched once, and the one that has is not fetched");
+            assert_eq!(app.shared.table_names[1], "NEW");
+            assert_eq!(app.shared.table_levels.iter().map(Vec::len).collect::<Vec<_>>(), vec![1, 1, 0]);
+            assert!(store.has_copy_file(new) && !store.has_copy_file(dead), "the table that arrived is kept, the other has nothing to keep");
+            assert!(crate::tablesrc::table_load_failed(dead), "the table that did not answer is not shown as failed");
+            crate::notify::drain(&mut said);
+            let count = |said: &[(Level, String)], start: &str| said.iter().filter(|(_, message)| message.starts_with(start)).count();
+            assert_eq!(count(&said, "fetching 2 difficulty table(s) for the first time"), 1, "{said:?}");
+            assert_eq!(count(&said, &format!("table fetch failed ({dead}): ")), 1, "{said:?}");
+            assert_eq!(count(&said, "difficulty tables fetched for the first time: 1 added, 1 failed"), 1, "{said:?}");
+
+            said.clear();
+            scanned(&mut app, sources);
+            select.update(&mut FrameCtx { shared: &mut app.shared, now: std::time::Instant::now(), dt: 0.0 });
+            landed(&mut app, &mut select);
+            assert_eq!(tables.asked(), 2, "reading the library again fetched a table: the one that failed, or the one that has a copy now");
+            assert_eq!(app.shared.table_names[1], "NEW", "the table that was fetched is not read from its copy");
+            assert!(crate::tablesrc::table_load_failed(dead), "reading the library again forgot that the table had failed");
+            crate::notify::drain(&mut said);
+            assert_eq!(count(&said, "table fetch failed") + count(&said, "difficulty tables fetched") + count(&said, "fetching"), 0, "{said:?}");
+
+            for address in [kept, new, dead] {
+                crate::tablesrc::forget_table_status(address);
+                store.forget(address);
+            }
+        });
+    }
+
+    /// A table named on the command line is a source like any the player registered: the scan the
+    /// app starts with reads it without asking its address anything, and the song list fetches it
+    /// when it has no copy.
+    #[test]
+    fn a_table_named_on_the_command_line_is_read_and_fetched_like_any_other() {
+        let address = "https://tables.test/scan/command-line/";
+        let tables = crate::tablesrc::test_outside::FakeTables::default();
+        let _installed = tables.install();
+        tables.serve(address, "Named", br#"[{"md5":"1111","level":"1"}]"#);
+        let home = std::env::temp_dir().join(format!("rbms-loading-command-line-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(home.join("songs")).expect("the test's folder is made");
+        let mut config = Config::default();
+        config.library.folders = vec![home.join("songs").to_string_lossy().into_owned()];
+        let launch = LaunchOptions { table_url: Some(address.to_string()), ..LaunchOptions::default() };
+        rbms_render::font::use_embedded_fonts_only();
+        let mut app = App::new(String::new(), config, launch, home.join("settings.ron"));
+
+        assert!(matches!(app.stage, Stage::Loading(_)), "an app with a folder to read starts by reading it");
+        loop {
+            match app.stage.update(&mut FrameCtx { shared: &mut app.shared, now: std::time::Instant::now(), dt: 0.0 }) {
+                Transition::Stay => std::thread::yield_now(),
+                Transition::Back => break,
+                _ => panic!("the scan the app starts with hands on to the song list"),
+            }
+        }
+        assert_eq!(tables.asked(), 0, "the scan at startup asked the address named on the command line");
+        assert_eq!(crate::tablesrc::table_status(address), Some(crate::tablesrc::TableStatus::NotFetched));
+
+        let mut select = SelectState::new();
+        select.update(&mut FrameCtx { shared: &mut app.shared, now: std::time::Instant::now(), dt: 0.0 });
+        landed(&mut app, &mut select);
+        assert_eq!((tables.asked(), app.shared.table_names.clone()), (1, vec!["NAMED".to_string()]));
+
+        crate::tablesrc::forget_table_status(address);
+        drop(app);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// Escape during the table step throws nothing away: the step reads a few files and is over
+    /// by itself, and what it read -- the library that was just walked, and every table that has a
+    /// copy -- is what the song list opens on. Leaving there used to cost the run its tables.
+    #[test]
+    fn escape_during_the_table_step_keeps_what_the_scan_read() {
+        let mut app = crate::stage::render_tests::app();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut state = LoadingState { task: LoadingTask::Scan { step: ScanStep::Matching { rx }, progress: Arc::new(ScanProgress::default()) }, drawn: false };
+        let escape = KeyInput { code: KeyCode::Escape, pressed: true, released: false, text: None };
+        let mut ctx = FrameCtx { shared: &mut app.shared, now: std::time::Instant::now(), dt: 0.0 };
+        assert!(matches!(state.handle_key(&mut ctx, escape), Transition::Stay), "escape left the table step, and its tables behind");
+        assert!(matches!(state.update(&mut ctx), Transition::Stay));
+
+        tx.send(ScanOutcome { library: Library::default(), names: vec!["READ".to_string()], levels: vec![vec![("1".to_string(), Vec::new())]] })
+            .expect("the screen is still waiting for the step");
+        assert!(matches!(state.update(&mut ctx), Transition::Back), "the step did not hand on to the song list when it finished");
+        assert_eq!(app.shared.table_names, vec!["READ".to_string()], "the tables the step read were thrown away");
     }
 
     /// The audio settings may not reopen the stream under a chart that is still filling its bank,

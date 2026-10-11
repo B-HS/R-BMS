@@ -437,8 +437,8 @@ fn check_shortcut(browser: &mut Browser, shortcut: Shortcut, code: KeyCode) {
             let location = table.to_string_lossy().into_owned();
             browser.app.shared.config.library.tables.push(rbms_config::TableSource { name: "mine".into(), location: location.clone() });
             assert!(matches!(browser.key(code), Transition::Stay), "{shortcut:?} left the browser");
-            assert!(crate::tablesrc::table_is_reloading(&browser.app.shared.settings_path, &location), "{shortcut:?} started nothing");
-            while crate::tablesrc::table_is_reloading(&browser.app.shared.settings_path, &location) {
+            assert!(crate::tablesrc::table_is_fetching(&browser.app.shared, &location), "{shortcut:?} started nothing");
+            while crate::tablesrc::table_is_fetching(&browser.app.shared, &location) {
                 browser.frame();
                 std::thread::yield_now();
             }

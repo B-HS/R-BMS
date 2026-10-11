@@ -23,18 +23,9 @@ fn round_down_truncates_toward_zero_on_both_sides_of_the_origin() {
 }
 
 #[test]
-fn the_time_step_is_the_plain_one_unless_turbo_is_held() {
-    assert_eq!(time_step_ms(false, false), 100);
-    assert_eq!(time_step_ms(false, true), 100, "an analog control alone changes nothing");
-    assert_eq!(time_step_ms(true, false), 2_500);
-    assert_eq!(time_step_ms(true, true), 1_000, "turbo on an analog control moves less per press");
-}
-
-#[test]
 fn start_time_stops_two_seconds_short_of_the_last_timeline_rounded_down() {
     let mut p = property(LONG_CHART_MS);
-    p.start_ms = LONG_CHART_MS;
-    clamp_start(&mut p, LONG_CHART_MS + 50, false, false, true);
+    set_start_ms(&mut p, LONG_CHART_MS + 50, LONG_CHART_MS);
     assert_eq!(p.start_ms, round_down_to(LONG_CHART_MS + 50 - 2_000, 100), "the ceiling is the rounded-down last timeline less two seconds");
     assert_eq!(p.start_ms, 178_000);
 }
@@ -43,7 +34,7 @@ fn start_time_stops_two_seconds_short_of_the_last_timeline_rounded_down() {
 fn start_time_stops_at_zero_going_down() {
     let mut p = property(LONG_CHART_MS);
     p.start_ms = 50;
-    clamp_start(&mut p, LONG_CHART_MS, false, false, false);
+    set_start_ms(&mut p, LONG_CHART_MS, -50);
     assert_eq!(p.start_ms, 0, "the floor is zero, not a negative step");
 }
 
@@ -52,7 +43,7 @@ fn raising_start_time_pushes_end_time_up_with_no_rounding() {
     let mut p = property(LONG_CHART_MS);
     p.start_ms = 2_550;
     p.end_ms = 3_000;
-    clamp_start(&mut p, LONG_CHART_MS, false, false, true);
+    set_start_ms(&mut p, LONG_CHART_MS, 2_650);
     assert_eq!(p.start_ms, 2_650);
     assert_eq!(p.end_ms, 3_650, "the push is a plain max of start plus one second, with no rounding of its own");
 }
@@ -62,31 +53,15 @@ fn lowering_start_time_leaves_end_time_where_it_was() {
     let mut p = property(LONG_CHART_MS);
     p.start_ms = 5_000;
     p.end_ms = 5_100;
-    clamp_start(&mut p, LONG_CHART_MS, false, false, false);
+    set_start_ms(&mut p, LONG_CHART_MS, 4_900);
     assert_eq!(p.start_ms, 4_900);
     assert_eq!(p.end_ms, 5_100, "only an increase drags the end along");
 }
 
 #[test]
-fn start_time_takes_the_turbo_and_analog_steps() {
-    let mut turbo = property(LONG_CHART_MS);
-    clamp_start(&mut turbo, LONG_CHART_MS, true, false, true);
-    assert_eq!(turbo.start_ms, 2_500);
-
-    let mut analog = property(LONG_CHART_MS);
-    clamp_start(&mut analog, LONG_CHART_MS, true, true, true);
-    assert_eq!(analog.start_ms, 1_000);
-
-    let mut plain = property(LONG_CHART_MS);
-    clamp_start(&mut plain, LONG_CHART_MS, false, false, true);
-    assert_eq!(plain.start_ms, 100);
-}
-
-#[test]
 fn end_time_reaches_one_second_past_the_last_timeline_rounded_down() {
     let mut p = property(LONG_CHART_MS);
-    p.end_ms = LONG_CHART_MS + 1_000;
-    clamp_end(&mut p, LONG_CHART_MS + 50, true, false, true);
+    set_end_ms(&mut p, LONG_CHART_MS + 50, i32::MAX);
     assert_eq!(p.end_ms, round_down_to(LONG_CHART_MS + 50 + 1_000, 100));
     assert_eq!(p.end_ms, 181_000);
 }
@@ -96,31 +71,27 @@ fn end_time_floors_on_the_rounded_down_start_plus_one_second() {
     let mut p = property(LONG_CHART_MS);
     p.start_ms = 2_550;
     p.end_ms = 3_600;
-    clamp_end(&mut p, LONG_CHART_MS, false, false, false);
-    assert_eq!(p.end_ms, 3_500, "one plain step down is still above the floor");
-    clamp_end(&mut p, LONG_CHART_MS, true, false, false);
+    set_end_ms(&mut p, LONG_CHART_MS, 3_500);
+    assert_eq!(p.end_ms, 3_500, "one step down is still above the floor");
+    set_end_ms(&mut p, LONG_CHART_MS, 0);
     assert_eq!(p.end_ms, round_down_to(2_550 + 1_000, 100), "the floor rounds down, unlike the push from START TIME");
     assert_eq!(p.end_ms, 3_500);
 }
 
+/// The reference works out a ceiling before zero for a chart shorter than two seconds and lets
+/// START TIME follow it there. Such a chart is practised from its beginning here.
 #[test]
-fn end_time_takes_the_turbo_and_analog_steps() {
-    let base = 60_000;
-    for (turbo, analog, want) in [(false, false, base + 100), (true, false, base + 2_500), (true, true, base + 1_000)] {
-        let mut p = property(LONG_CHART_MS);
-        p.end_ms = base;
-        clamp_end(&mut p, LONG_CHART_MS, turbo, analog, true);
-        assert_eq!(p.end_ms, want, "turbo={turbo} analog={analog}");
-    }
-}
-
-#[test]
-fn a_chart_shorter_than_the_start_time_tail_gives_a_ceiling_below_zero() {
+fn a_chart_shorter_than_the_start_time_tail_starts_at_its_beginning() {
     let mut p = property(500);
-    p.start_ms = 0;
-    clamp_start(&mut p, 500, false, false, true);
-    assert_eq!(p.start_ms, round_down_to(500 - 2_000, 100), "there is nowhere to start such a chart, and the reference says so with a negative ceiling");
-    assert_eq!(p.start_ms, -1_500);
+    set_start_ms(&mut p, 500, 100);
+    assert_eq!(p.start_ms, 0, "a slice began before or past the only place such a chart starts at");
+    set_end_ms(&mut p, 500, 0);
+    assert_eq!(p.end_ms, MIN_PLAY_SPAN_MS, "the shortest slice is a second, whatever the chart's length");
+    set_end_ms(&mut p, 500, i32::MAX);
+    assert_eq!(p.end_ms, 1_500);
+    let panel = PracticePanel::new("md5".to_string(), Mode::BEAT_7K, 500, None, 260.0);
+    let start = panel.number(PracticeElement::StartTime).expect("START TIME holds a number");
+    assert_eq!((start.spec.min, start.spec.max, start.steps), (0, 0, 0), "a row with nowhere to go has more than one step");
 }
 
 #[test]
@@ -166,78 +137,28 @@ fn the_popn_cap_leaves_a_groove_gauge_and_other_modes_alone() {
 fn the_gauge_value_clamps_to_the_selected_gauges_own_maximum() {
     let mut p = property(LONG_CHART_MS);
     let max = element_of(p.gauge_set(), p.gauge_index()).max as i32;
-    p.start_gauge = max;
-    adjust_gauge_value(&mut p, false, true);
+    set_start_gauge(&mut p, max + 1);
     assert_eq!(p.start_gauge, max, "the gauge's own maximum is the ceiling");
-    p.start_gauge = GAUGE_VALUE_MIN;
-    adjust_gauge_value(&mut p, false, false);
+    set_start_gauge(&mut p, GAUGE_VALUE_MIN - 1);
     assert_eq!(p.start_gauge, GAUGE_VALUE_MIN, "and one is the floor");
 }
 
 #[test]
-fn turbo_from_the_bottom_of_the_gauge_value_lands_on_one_whole_step() {
+fn the_judge_rate_the_total_and_the_frequency_hold_their_bounds() {
     let mut p = property(LONG_CHART_MS);
-    p.start_gauge = GAUGE_VALUE_MIN;
-    adjust_gauge_value(&mut p, true, true);
-    assert_eq!(p.start_gauge, GAUGE_VALUE_STEP_TURBO, "the bottom jumps to the step itself rather than to one past it");
-    adjust_gauge_value(&mut p, true, true);
-    assert_eq!(p.start_gauge, GAUGE_VALUE_STEP_TURBO * 2, "and moves by whole steps from there");
-}
-
-#[test]
-fn the_judge_rate_holds_its_bounds_and_jumps_from_the_bottom_on_turbo() {
-    let mut p = property(LONG_CHART_MS);
-    p.judge_rate = JUDGE_RATE_MAX;
-    adjust_judge_rate(&mut p, true, true);
+    set_judge_rate(&mut p, JUDGE_RATE_MAX + 1);
     assert_eq!(p.judge_rate, JUDGE_RATE_MAX);
-    p.judge_rate = JUDGE_RATE_MIN;
-    adjust_judge_rate(&mut p, false, false);
+    set_judge_rate(&mut p, JUDGE_RATE_MIN - 1);
     assert_eq!(p.judge_rate, JUDGE_RATE_MIN);
-    adjust_judge_rate(&mut p, true, true);
-    assert_eq!(p.judge_rate, JUDGE_RATE_STEP_TURBO);
-    adjust_judge_rate(&mut p, false, true);
-    assert_eq!(p.judge_rate, JUDGE_RATE_STEP_TURBO + JUDGE_RATE_STEP);
-}
 
-#[test]
-fn total_and_frequency_take_their_own_analog_steps() {
-    let mut p = property(LONG_CHART_MS);
-    p.total = 300.0;
-    adjust_total(&mut p, false, false, true);
-    assert_eq!(p.total, 305.0);
-    adjust_total(&mut p, true, false, true);
-    assert_eq!(p.total, 330.0);
-    adjust_total(&mut p, false, true, true);
-    assert_eq!(p.total, 331.0);
-    adjust_total(&mut p, true, true, true);
-    assert_eq!(p.total, 351.0);
-
-    p.freq = FREQ_UNMODIFIED;
-    adjust_freq(&mut p, false, false, true);
-    assert_eq!(p.freq, 105);
-    adjust_freq(&mut p, true, false, true);
-    assert_eq!(p.freq, 130);
-    adjust_freq(&mut p, false, true, true);
-    assert_eq!(p.freq, 131);
-    adjust_freq(&mut p, true, true, true);
-    assert_eq!(p.freq, 141);
-}
-
-#[test]
-fn total_and_frequency_hold_their_bounds() {
-    let mut p = property(LONG_CHART_MS);
-    p.total = TOTAL_MIN;
-    adjust_total(&mut p, true, false, false);
+    set_total(&mut p, TOTAL_MIN - 1.0);
     assert_eq!(p.total, TOTAL_MIN);
-    p.total = TOTAL_MAX;
-    adjust_total(&mut p, true, false, true);
+    set_total(&mut p, TOTAL_MAX + 1.0);
     assert_eq!(p.total, TOTAL_MAX);
 
-    p.freq = FREQ_MIN;
-    adjust_freq(&mut p, true, false, false);
+    set_freq(&mut p, FREQ_MIN - 1);
     assert_eq!(p.freq, FREQ_MIN);
-    p.freq = FREQ_MAX;
-    adjust_freq(&mut p, true, false, true);
+    set_freq(&mut p, FREQ_MAX + 1);
     assert_eq!(p.freq, FREQ_MAX);
 }
 
@@ -304,10 +225,17 @@ fn every_gauge_has_a_name_and_no_two_share_one() {
 
 #[test]
 fn practice_times_read_as_minutes_seconds_and_tenths() {
-    assert_eq!(format_practice_time(0), " 0:00.0");
-    assert_eq!(format_practice_time(1_500), " 0:01.5");
-    assert_eq!(format_practice_time(61_200), " 1:01.2");
-    assert_eq!(format_practice_time(600_000), "10:00.0");
+    let mut panel = long_panel();
+    for (ms, reads) in [(0, "0:00.0"), (1_500, "0:01.5"), (61_200, "1:01.2"), (61_250, "1:01.2"), (178_000, "2:58.0")] {
+        panel.property.start_ms = ms;
+        assert_eq!(panel.value_text(PracticeElement::StartTime), reads);
+    }
+    for (ms, reads) in [(1_000, "0:01.0"), (181_000, "3:01.0")] {
+        panel.property.end_ms = ms;
+        assert_eq!(panel.value_text(PracticeElement::EndTime), reads);
+    }
+    let hour = PracticePanel::new("md5".to_string(), Mode::BEAT_7K, 3_600_000, None, 260.0);
+    assert_eq!(hour.value_text(PracticeElement::EndTime), "60:01.0", "minutes past an hour are still minutes");
 }
 
 #[test]
@@ -362,7 +290,6 @@ fn a_fresh_panel_takes_the_whole_chart_and_the_charts_own_total() {
     assert_eq!(panel.property.total, 260.0, "an unset TOTAL takes the chart's own");
     assert_eq!(panel.property.judge_rate, JUDGE_RATE_UNMODIFIED);
     assert_eq!(panel.phase(), PracticePhase::Panel);
-    assert_eq!(panel.focused(), PracticeElement::StartTime);
     assert_eq!(panel.chart_key(), "md5");
 }
 
@@ -375,47 +302,320 @@ fn a_saved_property_wins_over_the_chart_defaults() {
     assert_eq!(panel.property.judge_rate, 75);
 }
 
-#[test]
-fn the_cursor_rings_round_the_rows_both_ways() {
+/// The rows that hold a number, and the change of the property one step of each is.
+const NUMBER_ROWS: [PracticeElement; 6] = [
+    PracticeElement::StartTime,
+    PracticeElement::EndTime,
+    PracticeElement::GaugeValue,
+    PracticeElement::JudgeRank,
+    PracticeElement::Total,
+    PracticeElement::Freq,
+];
+
+/// The rows that hold a choice out of a ring.
+const CHOICE_ROWS: [PracticeElement; 3] = [PracticeElement::GaugeType, PracticeElement::GaugeCategory, PracticeElement::Random];
+
+/// A panel on a long seven-key chart with every number clear of both its ends.
+fn long_panel() -> PracticePanel {
     let mut panel = PracticePanel::new("md5".to_string(), Mode::BEAT_7K, LONG_CHART_MS, None, 260.0);
-    panel.move_cursor(false);
-    assert_eq!(panel.focused(), PracticeElement::Random, "above the first row is the last");
-    panel.move_cursor(true);
-    assert_eq!(panel.focused(), PracticeElement::StartTime);
-    for _ in 0..PracticeElement::ALL.len() {
-        panel.move_cursor(true);
+    panel.property.start_ms = 20_000;
+    panel.property.end_ms = 40_000;
+    panel.property.start_gauge = 50;
+    panel
+}
+
+/// What one row holds, as the number the property stores for it.
+fn stored(panel: &PracticePanel, element: PracticeElement) -> f64 {
+    let p = &panel.property;
+    match element {
+        PracticeElement::StartTime => f64::from(p.start_ms),
+        PracticeElement::EndTime => f64::from(p.end_ms),
+        PracticeElement::GaugeValue => f64::from(p.start_gauge),
+        PracticeElement::JudgeRank => f64::from(p.judge_rate),
+        PracticeElement::Total => p.total,
+        PracticeElement::Freq => f64::from(p.freq),
+        PracticeElement::GaugeType => f64::from(p.gauge_type),
+        PracticeElement::GaugeCategory | PracticeElement::Random => f64::NAN,
     }
-    assert_eq!(panel.focused(), PracticeElement::StartTime, "a whole turn comes back to where it started");
+}
+
+/// How much of what the property stores one step of a row is: a tenth of a second of a time, and
+/// one of everything else.
+fn one_step_of(element: PracticeElement) -> f64 {
+    match element {
+        PracticeElement::StartTime | PracticeElement::EndTime => f64::from(TIME_ROUND_MS),
+        _ => 1.0,
+    }
 }
 
 #[test]
-fn every_row_has_a_label_a_value_and_an_edit_that_changes_something() {
-    for (at, element) in PracticeElement::ALL.iter().enumerate() {
+fn every_row_is_a_number_or_a_choice_and_has_a_label_and_a_value() {
+    let panel = long_panel();
+    for element in PracticeElement::ALL {
         assert!(!element.label().is_empty(), "{element:?} has no label");
-        let mut panel = PracticePanel::new("md5".to_string(), Mode::BEAT_7K, LONG_CHART_MS, None, 260.0);
-        panel.property.start_ms = 20_000;
-        panel.property.end_ms = 40_000;
-        while panel.focused() != *element {
-            panel.move_cursor(true);
-        }
-        let before = panel.value_text(*element);
-        panel.adjust(true, false, false);
-        assert_ne!(panel.value_text(*element), before, "row {at} ({element:?}) did not move");
+        assert!(!panel.value_text(element).is_empty(), "{element:?} reads as nothing");
+        assert_eq!(panel.number(element).is_some(), NUMBER_ROWS.contains(&element), "{element:?}");
+        assert_eq!(panel.number(element).is_none(), CHOICE_ROWS.contains(&element), "{element:?}");
+    }
+}
+
+/// Every row that holds a number is counted between the reference's two ends of it, in the
+/// smallest change the row shows: a tenth of a second of a time, one of the others.
+#[test]
+fn every_number_row_is_counted_in_its_smallest_change_between_its_two_ends() {
+    let panel = long_panel();
+    let ends = |element| panel.number(element).map(|value| (value.spec.min, value.spec.max, value.spec.per_one, value.spec.decimals, value.spec.clock));
+    assert_eq!(ends(PracticeElement::StartTime), Some((0, 1_780, 10, 1, true)), "from the chart's beginning to two seconds short of its last timeline");
+    assert_eq!(ends(PracticeElement::EndTime), Some((10, 1_810, 10, 1, true)), "from the shortest slice to a second past the last timeline");
+    assert_eq!(ends(PracticeElement::GaugeValue), Some((1, 100, 1, 0, false)));
+    assert_eq!(ends(PracticeElement::JudgeRank), Some((1, 400, 1, 0, false)));
+    assert_eq!(ends(PracticeElement::Total), Some((10, 5_000, 1, 0, false)));
+    assert_eq!(ends(PracticeElement::Freq), Some((50, 200, 1, 0, false)));
+    for element in NUMBER_ROWS {
+        let value = panel.number(element).expect("the row holds a number");
+        assert_eq!(
+            value.spec.shown(value.steps) * one_step_of(element) * value.spec.per_one as f64,
+            stored(&panel, element),
+            "{element:?} does not stand where it is stored"
+        );
+        let slider_ends_at = if element == PracticeElement::Total { TOTAL_SLIDER_MAX } else { value.spec.max };
+        assert_eq!(value.slider_max, slider_ends_at, "{element:?}: the slider does not end where it is meant to");
+        assert!(!value.locked, "{element:?} cannot be set");
+    }
+}
+
+/// The slider of TOTAL and its arrows end at a thousand, where the totals charts have end, and the
+/// row is stepped from where it stands once a typed figure has put it past that.
+#[test]
+fn total_is_stepped_as_far_as_its_slider_goes_and_from_where_it_stands_past_that() {
+    let mut panel = long_panel();
+    panel.set_number(PracticeElement::Total, 995);
+    let value = panel.number(PracticeElement::Total).expect("TOTAL holds a number");
+    assert_eq!((value.stepped(1, true), value.track().max), (TOTAL_SLIDER_MAX, TOTAL_SLIDER_MAX), "an arrow carried TOTAL past where its slider ends");
+    panel.set_number(PracticeElement::Total, 2_500);
+    let value = panel.number(PracticeElement::Total).expect("TOTAL holds a number");
+    assert_eq!((value.stepped(1, false), value.stepped(-1, true), value.fraction()), (2_501, 2_490, 1.0));
+}
+
+/// A row carried along its slider is put where the pointer says like any row, except that START
+/// TIME pushes END TIME only for as long as it is past it: END TIME is back where it stood when the
+/// slider was taken hold of as soon as START TIME is clear of it again. Set by a key or a typed
+/// figure, START TIME leaves END TIME where it pushed it, as the reference does.
+#[test]
+fn start_time_carried_along_its_slider_pushes_end_time_only_while_it_is_past_it() {
+    let mut panel = long_panel();
+    let taken = panel.property.clone();
+    assert_eq!((taken.start_ms, taken.end_ms), (20_000, 40_000));
+    assert!(panel.drag_number(PracticeElement::StartTime, 1_500, &taken));
+    assert_eq!((panel.property.start_ms, panel.property.end_ms), (150_000, 151_000), "START TIME passed END TIME instead of carrying it");
+    assert!(panel.drag_number(PracticeElement::StartTime, 395, &taken));
+    assert_eq!((panel.property.start_ms, panel.property.end_ms), (39_500, 40_500), "END TIME is less than a second past START TIME");
+    assert!(panel.drag_number(PracticeElement::StartTime, 390, &taken));
+    assert_eq!((panel.property.start_ms, panel.property.end_ms), (39_000, 40_000), "END TIME did not come back to where it stood");
+    assert!(panel.drag_number(PracticeElement::StartTime, 200, &taken));
+    assert_eq!(panel.property, taken, "a drag that came back to where it began left the property changed");
+    assert!(!panel.drag_number(PracticeElement::StartTime, 200, &taken), "a row carried to the step it stands on was written");
+    panel.drag_number(PracticeElement::StartTime, i64::MAX, &taken);
+    assert_eq!((panel.property.start_ms, panel.property.end_ms), (178_000, 179_000));
+    panel.drag_number(PracticeElement::StartTime, i64::MIN, &taken);
+    assert_eq!((panel.property.start_ms, panel.property.end_ms), (0, 40_000));
+
+    let mut keyed = long_panel();
+    keyed.set_number(PracticeElement::StartTime, 1_500);
+    keyed.set_number(PracticeElement::StartTime, 200);
+    assert_eq!((keyed.property.start_ms, keyed.property.end_ms), (20_000, 151_000), "a START TIME set by a key brought END TIME back");
+
+    for element in [PracticeElement::EndTime, PracticeElement::GaugeValue, PracticeElement::JudgeRank, PracticeElement::Total, PracticeElement::Freq] {
+        let (mut dragged, mut set) = (long_panel(), long_panel());
+        let steps = dragged.number(element).expect("the row holds a number").steps + 7;
+        assert_eq!(dragged.drag_number(element, steps, &taken), set.set_number(element, steps), "{element:?}");
+        assert_eq!(dragged.property, set.property, "{element:?} is carried somewhere else than it is set");
+    }
+}
+
+/// One step of a row is the smallest change the row shows and ten steps ten of them: the coarse
+/// steps of the reference's panel (five of TOTAL, five percent of the speed) are gone.
+#[test]
+fn one_step_of_every_number_row_is_its_smallest_change_and_ten_steps_ten_of_them() {
+    for element in NUMBER_ROWS {
+        let mut panel = long_panel();
+        let before = stored(&panel, element);
+        let value = panel.number(element).expect("the row holds a number");
+        assert!(panel.set_number(element, value.stepped(1, false)), "{element:?} did not move");
+        assert_eq!(stored(&panel, element), before + one_step_of(element), "{element:?}: one step is not the smallest change");
+        let value = panel.number(element).expect("the row holds a number");
+        assert!(panel.set_number(element, value.stepped(1, true)));
+        assert_eq!(stored(&panel, element), before + 11.0 * one_step_of(element), "{element:?}: a wide step is not ten");
+        let value = panel.number(element).expect("the row holds a number");
+        panel.set_number(element, value.stepped(-1, true));
+        let value = panel.number(element).expect("the row holds a number");
+        panel.set_number(element, value.stepped(-1, false));
+        assert_eq!(stored(&panel, element), before, "{element:?}: the way back is not the way there");
+    }
+}
+
+#[test]
+fn a_number_row_stops_at_both_its_ends() {
+    for element in NUMBER_ROWS {
+        let mut panel = long_panel();
+        let spec = panel.number(element).expect("the row holds a number").spec;
+        panel.set_number(element, i64::MAX);
+        assert_eq!(panel.number(element).map(|value| value.steps), Some(spec.max), "{element:?} went past its upper end");
+        let value = panel.number(element).expect("the row holds a number");
+        assert!(!panel.set_number(element, value.stepped(1, true)), "{element:?} moved past its upper end");
+    }
+    for element in [PracticeElement::StartTime, PracticeElement::GaugeValue, PracticeElement::JudgeRank, PracticeElement::Total, PracticeElement::Freq] {
+        let mut panel = long_panel();
+        let spec = panel.number(element).expect("the row holds a number").spec;
+        panel.set_number(element, i64::MIN);
+        assert_eq!(panel.number(element).map(|value| value.steps), Some(spec.min), "{element:?} went past its lower end");
+    }
+}
+
+/// END TIME is held a second above START TIME however far down it is put, and START TIME carries
+/// END TIME up with it rather than passing it.
+#[test]
+fn the_two_times_keep_a_second_between_them_wherever_they_are_put() {
+    let mut panel = long_panel();
+    assert!(panel.set_number(PracticeElement::EndTime, 0));
+    assert_eq!((panel.property.start_ms, panel.property.end_ms), (20_000, 21_000), "END TIME did not stop a second above START TIME");
+    let end = panel.number(PracticeElement::EndTime).expect("END TIME holds a number");
+    assert_eq!((end.steps, end.spec.min), (210, 10), "the row is counted from the earliest any slice ends, and stands above that");
+    assert!(!panel.set_number(PracticeElement::EndTime, end.stepped(-1, false)), "a step took END TIME below START TIME");
+    assert!(!panel.set_number(PracticeElement::EndTime, end.stepped(-1, true)));
+
+    assert!(panel.set_number(PracticeElement::StartTime, 300));
+    assert_eq!((panel.property.start_ms, panel.property.end_ms), (30_000, 31_000), "START TIME passed END TIME instead of carrying it");
+    assert!(panel.set_number(PracticeElement::StartTime, 100));
+    assert_eq!((panel.property.start_ms, panel.property.end_ms), (10_000, 31_000), "START TIME brought END TIME back down with it");
+
+    panel.set_number(PracticeElement::StartTime, i64::MAX);
+    assert_eq!((panel.property.start_ms, panel.property.end_ms), (178_000, 179_000), "the last place a slice starts leaves a second of it");
+    panel.set_number(PracticeElement::EndTime, i64::MAX);
+    assert_eq!(panel.property.end_ms, 181_000);
+}
+
+/// The top of GAUGE VALUE is the top of the gauge that is selected on the table that is selected,
+/// so it moves when either does.
+#[test]
+fn the_gauge_value_ends_where_the_selected_gauge_does() {
+    let mut panel = PracticePanel::new("md5".to_string(), Mode::POPN_9K, LONG_CHART_MS, None, 260.0);
+    let top = |panel: &PracticePanel| panel.number(PracticeElement::GaugeValue).map(|value| value.spec.max);
+    let groove = element_of(GaugeSetId::Pms, GaugeIndex::Normal).max as i64;
+    let survival = element_of(GaugeSetId::Pms, GaugeIndex::Hard).max as i64;
+    assert!(groove > survival, "the pop'n table tops its groove gauge above its survival gauge");
+    assert_eq!(top(&panel), Some(groove));
+    panel.set_number(PracticeElement::GaugeValue, i64::MAX);
+    assert_eq!(i64::from(panel.property.start_gauge), groove);
+    assert!(panel.cycle(PracticeElement::GaugeType, true));
+    assert_eq!(panel.property.gauge_index(), GaugeIndex::Hard);
+    assert_eq!((top(&panel), i64::from(panel.property.start_gauge)), (Some(survival), survival), "the starting amount was left above the new gauge's top");
+    panel.set_number(PracticeElement::GaugeValue, i64::MAX);
+    assert_eq!(i64::from(panel.property.start_gauge), survival);
+}
+
+/// A row asked for the step it stands on is not written, so a number finer than the row's steps
+/// is kept until the row is really moved.
+#[test]
+fn a_row_put_on_the_step_it_stands_on_keeps_what_it_holds() {
+    let mut panel = PracticePanel::new("md5".to_string(), Mode::BEAT_7K, LONG_CHART_MS, None, 260.5);
+    assert_eq!(panel.property.total, 260.5);
+    let total = panel.number(PracticeElement::Total).expect("TOTAL holds a number");
+    assert_eq!((total.steps, panel.value_text(PracticeElement::Total).as_str()), (260, "260"));
+    assert!(!panel.set_number(PracticeElement::Total, 260));
+    assert_eq!(panel.property.total, 260.5, "a TOTAL put where it stood lost its fraction");
+    assert!(panel.set_number(PracticeElement::Total, 261));
+    assert_eq!(panel.property.total, 261.0);
+
+    panel.property.start_ms = 20_050;
+    assert!(!panel.set_number(PracticeElement::StartTime, 200));
+    assert_eq!(panel.property.start_ms, 20_050);
+    assert!(panel.set_number(PracticeElement::StartTime, 201));
+    assert_eq!(panel.property.start_ms, 20_100);
+}
+
+/// The key that resets a row puts it back on what a fresh panel on this chart holds: the whole
+/// chart, the gauge amount and the judge width and speed a chart is first practised under, and the
+/// chart's own TOTAL to the fraction.
+#[test]
+fn a_reset_row_goes_back_to_what_a_fresh_panel_holds() {
+    let fresh = PracticePanel::new("md5".to_string(), Mode::BEAT_7K, LONG_CHART_MS, None, 260.5);
+    for element in NUMBER_ROWS {
+        let mut panel = fresh.clone();
+        assert_eq!(panel.number(element).map(|value| value.shipped), fresh.number(element).map(|value| value.steps), "{element:?}");
+        assert!(!panel.reset_number(element), "{element:?}: a fresh row was moved by being reset");
+        let value = panel.number(element).expect("the row holds a number");
+        let away = if value.steps == value.spec.max { value.steps - 30 } else { value.steps + 30 };
+        assert!(panel.set_number(element, away));
+        assert!(panel.reset_number(element), "{element:?} was not put back");
+        assert_eq!(panel.property, fresh.property, "{element:?}: the row is not back where a fresh panel has it, or another row moved");
+    }
+    for element in CHOICE_ROWS {
+        let mut panel = fresh.clone();
+        panel.cycle(element, true);
+        let moved = panel.property.clone();
+        assert!(!panel.reset_number(element), "{element:?} holds no number to put back");
+        assert_eq!(panel.property, moved);
+    }
+}
+
+/// A row that holds a choice is stepped round its ring and takes no number; a row that holds a
+/// number is not stepped round anything.
+#[test]
+fn a_choice_is_cycled_and_a_number_is_set_and_neither_takes_the_other() {
+    for element in CHOICE_ROWS {
+        let mut panel = long_panel();
+        let before = panel.value_text(element);
+        assert!(!panel.set_number(element, 3), "{element:?} took a number");
+        assert_eq!(panel.value_text(element), before);
+        assert!(panel.cycle(element, true));
+        assert_ne!(panel.value_text(element), before, "{element:?} did not move");
+        assert!(panel.cycle(element, false));
+        assert_eq!(panel.value_text(element), before, "{element:?}: the way back is not the way there");
+    }
+    for element in NUMBER_ROWS {
+        let mut panel = long_panel();
+        let before = panel.property.clone();
+        assert!(!panel.cycle(element, true), "{element:?} was cycled");
+        assert_eq!(panel.property, before);
     }
 }
 
 #[test]
 fn editing_a_row_leaves_every_other_row_alone() {
-    let mut panel = PracticePanel::new("md5".to_string(), Mode::BEAT_7K, LONG_CHART_MS, None, 260.0);
-    panel.property.start_ms = 20_000;
-    panel.property.end_ms = 40_000;
-    let before = panel.property.clone();
-    while panel.focused() != PracticeElement::JudgeRank {
-        panel.move_cursor(true);
+    for element in [PracticeElement::GaugeValue, PracticeElement::JudgeRank, PracticeElement::Total, PracticeElement::Freq, PracticeElement::EndTime] {
+        let mut panel = long_panel();
+        let before = panel.clone();
+        let value = panel.number(element).expect("the row holds a number");
+        assert!(panel.set_number(element, value.steps + 1));
+        for other in PracticeElement::ALL.into_iter().filter(|other| *other != element) {
+            assert_eq!(panel.value_text(other), before.value_text(other), "{element:?} moved {other:?}");
+        }
     }
-    panel.adjust(true, false, false);
-    assert_eq!(panel.property.judge_rate, before.judge_rate + JUDGE_RATE_STEP);
-    assert_eq!(PracticeProperty { judge_rate: before.judge_rate, ..panel.property.clone() }, before);
+}
+
+/// What a row is set to is what a slice is cut from and played under: the two times in
+/// microseconds, and the gauge amount, the judge width, the speed and TOTAL as they stand.
+#[test]
+fn what_the_rows_are_set_to_is_what_a_slice_is_started_with() {
+    let mut panel = long_panel();
+    for (element, steps) in [
+        (PracticeElement::StartTime, 123),
+        (PracticeElement::EndTime, 456),
+        (PracticeElement::GaugeValue, 40),
+        (PracticeElement::JudgeRank, 83),
+        (PracticeElement::Total, 317),
+        (PracticeElement::Freq, 73),
+    ] {
+        assert!(panel.set_number(element, steps), "{element:?}");
+    }
+    let session = panel.start();
+    assert_eq!((session.start_us, session.end_us), (12_300_000, 45_600_000));
+    assert_eq!(session.start_gauge, 40.0);
+    assert_eq!(session.judge_rate_percent, 83);
+    assert_eq!(session.total, Some(317.0));
+    assert_eq!(session.freq_percent, 73);
+    assert_eq!(PracticeClock::from_session(&session).chart_time_us(1_000_000), 12_300_000 + 730_000, "the speed did not reach the running clock");
 }
 
 #[test]

@@ -70,7 +70,7 @@ fn the_loading_screen_animates_between_frames() {
     assert_ne!(first, later, "the loading screen looks frozen");
 }
 
-/// A scan and a table fetch are different waits and say so, or a user watching an http request
+/// A scan and a chart being loaded are different waits and say so, or a user waiting for a chart
 /// would think the library was being walked again.
 #[test]
 fn each_kind_of_wait_paints_a_frame_of_its_own() {
@@ -79,10 +79,8 @@ fn each_kind_of_wait_paints_a_frame_of_its_own() {
     let _ = std::fs::remove_file(&scan_db);
     let scan = render(&mut app, Stage::Loading(LoadingState::scan(Vec::new(), Vec::new(), scan_db.clone(), false))).signature();
     let _ = std::fs::remove_file(&scan_db);
-    let source = rbms_config::TableSource { name: "table".into(), location: "/no/such/table.json".into() };
-    let fetching = LoadingState::table(&app.shared, source);
-    let table = render(&mut app, Stage::Loading(fetching)).signature();
-    assert_ne!(scan, table, "a scan and a table fetch look the same");
+    let chart = render(&mut app, Stage::Loading(LoadingState::song(0))).signature();
+    assert_ne!(scan, chart, "a scan and a chart load look the same");
 }
 
 #[test]

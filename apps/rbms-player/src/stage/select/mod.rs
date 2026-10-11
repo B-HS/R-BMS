@@ -75,6 +75,8 @@ mod skinned;
 #[cfg(test)]
 mod skinned_tests;
 #[cfg(test)]
+mod table_tests;
+#[cfg(test)]
 pub(super) mod tests;
 
 use filter::{FilterKey, FilterPanel, render_filter_panel};
@@ -159,9 +161,10 @@ pub(crate) struct SelectState {
     shift_held: bool,
     ctrl_held: bool,
     /// The search word as the search box edits it, and where the browser goes back to when the
-    /// search is left, which is also what says a search is on ([`search`]).
+    /// search is left, which is also what says a search is on ([`search`]). It is kept as a place
+    /// that outlasts a difficulty table arriving while the search is on.
     search_edit: ImeEdit,
-    search_resume: Option<(SelectView, usize)>,
+    search_resume: Option<crate::tablesrc::ListPlace>,
     filter: FilterPanel,
     /// The list generation, the filter and the ordering the rows on screen were built with. Every
     /// other screen rebuilds the list unfiltered, and the settings screen can move the favourites
@@ -926,7 +929,7 @@ impl SelectState {
     ///
     /// The reload of the difficulty tables only starts here: the tables are fetched beside the
     /// browser, which goes on being used, and what comes back is taken a frame at a time
-    /// ([`crate::tablesrc::apply_finished_reloads`]).
+    /// ([`crate::tablesrc::apply_finished_fetches`]).
     fn run_shortcut(&mut self, shared: &mut AppShared, shortcut: Shortcut) -> Transition {
         let skinned = skin_status(shared) == SkinStatus::Ready;
         if shortcut.screen() != ShortcutScreen::Browser || (shortcut.group() == ShortcutGroup::SkinBrowser && !skinned) {
@@ -1018,12 +1021,19 @@ impl StageHandler for SelectState {
     /// reads the reference's key table once a frame ([`SelectState::skin_input_frame`]) and keeps
     /// the skin's timers ([`SelectState::run_scene_timers`]), a browser waiting for its skin takes
     /// no input at all, and the built-in browser repeats a held turntable as it always has.
+    ///
+    /// The difficulty tables are fetched beside the browser and never ahead of it. The first frame
+    /// after the library has been read is where the tables that have no copy yet start being
+    /// fetched ([`crate::tablesrc::start_first_fetches`]), and every frame takes what any fetch has
+    /// come back with ([`crate::tablesrc::apply_finished_fetches`]): a table that arrives is a
+    /// folder from that frame, with the cursor left on the bar it was on.
     fn update(&mut self, ctx: &mut FrameCtx<'_>) -> Transition {
         let started = self.poll_replay_download(ctx.shared);
         if !matches!(started, Transition::Stay) {
             return started;
         }
-        crate::tablesrc::apply_finished_reloads(ctx.shared);
+        crate::tablesrc::start_first_fetches(ctx.shared);
+        crate::tablesrc::apply_finished_fetches(ctx.shared);
         let skin = skin_status(ctx.shared);
         if ctx.shared.skin_text_is_focused() {
             self.confirm_search(ctx.shared);

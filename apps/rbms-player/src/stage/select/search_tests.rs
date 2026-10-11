@@ -843,12 +843,12 @@ fn the_reload_key_fetches_every_table_again_beside_the_browser() {
 
             let open = tables.hold();
             assert!(matches!(stroke(&mut browser, KeyCode::F6, None), Transition::Stay), "skinned {skinned}: the reload left the browser");
-            assert!(crate::tablesrc::table_is_reloading(&browser.app.shared.settings_path, &up), "skinned {skinned}: the key started nothing");
+            assert!(crate::tablesrc::table_is_fetching(&browser.app.shared, &up), "skinned {skinned}: the key started nothing");
             assert!(matches!(browser.frame(), Transition::Stay), "skinned {skinned}: the browser stopped while the tables were out");
             browser.arrow(KeyCode::ArrowDown);
             assert_eq!(browser.app.shared.sel, 1, "skinned {skinned}: the list does not move while the tables are out");
             drop(open);
-            while [&up, &down].into_iter().any(|address| crate::tablesrc::table_is_reloading(&browser.app.shared.settings_path, address)) {
+            while [&up, &down].into_iter().any(|address| crate::tablesrc::table_is_fetching(&browser.app.shared, address)) {
                 browser.frame();
                 std::thread::yield_now();
             }
@@ -897,7 +897,7 @@ fn the_reload_key_is_read_under_the_box_and_the_typing_goes_on() {
         assert!(matches!(stroke(&mut browser, KeyCode::F6, None), Transition::Stay), "skinned {skinned}");
         assert!(browser.app.shared.searching, "skinned {skinned}: the reload ended the typing");
         assert_eq!(browser.app.shared.search, WORD, "skinned {skinned}: the reload changed the word");
-        while crate::tablesrc::table_is_reloading(&browser.app.shared.settings_path, &address) {
+        while crate::tablesrc::table_is_fetching(&browser.app.shared, &address) {
             browser.frame();
             std::thread::yield_now();
         }
@@ -913,6 +913,49 @@ fn the_reload_key_is_read_under_the_box_and_the_typing_goes_on() {
         assert_eq!(tables.asked(), 1, "skinned {skinned}: the key the reload shipped on, or a letter of the word, reloaded the tables");
 
         let store = crate::tablesrc::TableStore::beside(&browser.app.shared.settings_path);
+        store.forget(&address);
+        crate::tablesrc::forget_table_status(&address);
+    }
+}
+
+/// A table fetched for the first time that lands while the browser is on the list a search found
+/// leaves the search as it is: the word, the rows it found and the cursor on the row it was on. The
+/// table is in the library all the same, for when the search is left.
+#[test]
+fn a_table_that_arrives_for_the_first_time_leaves_a_search_as_it_is() {
+    for skinned in [true, false] {
+        let address = format!("https://tables.test/browser/arrives-under-a-search/{skinned}/");
+        let tables = crate::tablesrc::test_outside::FakeTables::default();
+        let _installed = tables.install();
+        tables.serve(&address, "Arrived", br#"[{"md5":"md5-alba","level":"1"}]"#);
+        let mut browser = browser(&format!("search-first-fetch-{skinned}"), skinned);
+        let store = crate::tablesrc::TableStore::beside(&browser.app.shared.settings_path);
+        let shared = &mut browser.app.shared;
+        shared.config.library.tables = vec![rbms_config::TableSource { name: String::new(), location: address.clone() }];
+        let (names, levels) =
+            crate::tablesrc::read_and_match_all(&store, &shared.config.library.tables, &shared.library, &std::sync::atomic::AtomicUsize::new(0));
+        (shared.table_names, shared.table_levels) = (names, levels);
+        shared.table_fetches.first_fetches_are_due();
+        let open = tables.hold();
+        type_a_search(&mut browser, WORD);
+        browser.arrow(KeyCode::ArrowDown);
+        browser.arrow(KeyCode::ArrowDown);
+        let (found, cursor) = (titles(&browser), browser.sel());
+        assert_eq!((found.len(), cursor), (TITLES.len(), 2), "skinned {skinned}");
+        assert!(crate::tablesrc::table_is_fetching(&browser.app.shared, &address), "skinned {skinned}: nothing is fetching the table under the search");
+        drop(open);
+
+        while !browser.app.shared.table_fetches.is_idle() {
+            browser.frame();
+            std::thread::yield_now();
+        }
+        browser.frame();
+        assert_eq!(tables.asked(), 1, "skinned {skinned}: the table with no copy was not fetched beside the search");
+        assert_eq!(browser.app.shared.table_names, vec!["ARRIVED".to_owned()], "skinned {skinned}");
+        assert_eq!(browser.app.shared.search, WORD, "skinned {skinned}: the table arriving changed the word");
+        assert!(browser.app.shared.select_view == SelectView::AllSongs, "skinned {skinned}: the table arriving took the browser off the list the search found");
+        assert_eq!((titles(&browser), browser.sel()), (found, cursor), "skinned {skinned}: the rows the search found, or the cursor, moved");
+
         store.forget(&address);
         crate::tablesrc::forget_table_status(&address);
     }
