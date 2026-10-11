@@ -32,7 +32,7 @@ local VERDICT = {
 
 local FOOTER = { hint_top = 1022, hint_fade = 200 }
 local HINTS = {
-    chart = "ENTER  CONTINUE        R  RETRY        N  NEXT CHART",
+    chart = "ENTER  CONTINUE        RETRY AND NEXT CHART  THEIR KEYS IN KEY CONFIG (R AND N AS SHIPPED)",
     course = "ENTER  CONTINUE",
     gauge = {
         { modes = { props.option.KEYS_7, props.option.KEYS_14, props.option.KEYS_9 }, text = "        KEY 6  GAUGE" },

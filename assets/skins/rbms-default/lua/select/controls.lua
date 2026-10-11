@@ -17,8 +17,8 @@ local LN_MODE_NAMES = { [0] = "LONG NOTE", "CHARGE NOTE", "HELL CHARGE NOTE" }
 local NO_NAME = "-"
 
 local HINT_ROWS = {
-    { top = 1016, text = "ENTER  PLAY        ESC  BACK        /  SEARCH        F2  FILTER        F3  SORT        F  FAVORITE" },
-    { top = 1046, text = "O  FOLDERS        T  TABLES        R  RECORDS        TAB  SETTINGS        F1  OPTIONS        H  ALL KEYS" },
+    { top = 1016, text = "ENTER  PLAY        ESC  BACK        UP DOWN  MOVE        H  ALL KEYS AS THEY ARE SET" },
+    { top = 1046, text = "SEARCH, FILTER, SORT, FOLDERS, TABLES, SETTINGS AND KEY CONFIG: SEE H FOR THE KEY OF EACH" },
 }
 local HINT_WIDTH = 1064
 

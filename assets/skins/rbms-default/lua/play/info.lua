@@ -25,6 +25,8 @@ local HEAD = {
     artist_gap = 24,
     stage_width = 200,
     stage = theme.type.label,
+    narrow_below = 480,
+    narrow_stage_width = 128,
 }
 local BGA = { inset = 24 }
 local SCORE = {
@@ -72,6 +74,8 @@ local TIMING = {
     legend_top = 86,
     graph_top = 106,
     column_room = 24,
+    caption_room = 8,
+    auto_on = 1,
 }
 local HIT_ERROR = {
     judgeWidthMillis = 150,
@@ -135,21 +139,24 @@ end
 
 local function head(s, view, main_state)
     local box = view.head
+    local narrow = box.w < HEAD.narrow_below
     parts.difficulty_rect(s, { x = box.x, top = box.top, w = HEAD.bar, h = box.h })
     local x = box.x + HEAD.bar + HEAD.gap
     local right = box.x + box.w
-    local stage_x = right - HEAD.stage_width
+    local baseline = box.top + box.h
+    local top = theme.text_top(baseline, HEAD.line)
+    local stage_width = narrow and HEAD.narrow_stage_width or HEAD.stage_width
+    local stage_box = { x = right - stage_width, top = narrow and top or box.top, w = stage_width }
+    local title_end = narrow and right or stage_box.x - HEAD.gap
     local title = { ref = props.text.FULLTITLE, size = HEAD.title, overflow = props.text_overflow.SHRINK }
     local in_course = props.option.MODE_COURSE
     s:text(title, { x = x, top = box.top, w = right - x }, { op = { -in_course }, color = theme.color.text })
-    s:text(title, { x = x, top = box.top, w = stage_x - HEAD.gap - x }, { op = { in_course }, color = theme.color.text })
+    s:text(title, { x = x, top = box.top, w = title_end - x }, { op = { in_course }, color = theme.color.text })
     for _, stage in ipairs(STAGE_LABELS) do
-        local label = { text = stage.label, size = HEAD.stage, align = "right" }
-        s:text(label, { x = stage_x, top = box.top, w = HEAD.stage_width }, { op = { stage.op }, color = theme.color.accent })
+        local label = { text = stage.label, size = narrow and HEAD.line or HEAD.stage, align = "right" }
+        s:text(label, stage_box, { op = { stage.op }, color = theme.color.accent })
     end
 
-    local baseline = box.top + box.h
-    local top = theme.text_top(baseline, HEAD.line)
     local level = { sprite = "num18", ref = props.number.PLAYLEVEL, known = main_state.number(props.number.PLAYLEVEL) }
     parts.by_difficulty(function(index, op, color, name)
         local shown = { op = { op }, color = color }
@@ -158,7 +165,8 @@ local function head(s, view, main_state)
         local placed = s:number(level, level_at, shown)
         local artist_x = level_at.x + placed.span + HEAD.artist_gap
         local artist = { x = artist_x, top = top, w = right - artist_x }
-        s:text({ ref = props.text.FULLARTIST, size = HEAD.line, overflow = props.text_overflow.SHRINK }, artist, { op = { op }, color = theme.color.sub })
+        local credited = { op = narrow and { op, -in_course } or { op }, color = theme.color.sub }
+        s:text({ ref = props.text.FULLARTIST, size = HEAD.line, overflow = props.text_overflow.SHRINK }, artist, credited)
     end)
 end
 
@@ -296,7 +304,11 @@ local function timing(s, view, main_state)
     parts.caption(s, "TIME LEFT", { x = at(1), top = box.top, w = column })
     time_left(s, main_state, at(1), baseline)
 
-    parts.caption(s, "TIMING", { x = at(2), top = box.top, w = column })
+    local adjusting = function()
+        return main_state.event_index(props.index.TIMING_AUTO_ADJUST) == TIMING.auto_on and "TIMING AUTO" or "TIMING"
+    end
+    local heading = { value = adjusting, size = theme.type.caption, overflow = props.text_overflow.SHRINK }
+    s:text(heading, { x = at(2), top = box.top, w = column - TIMING.caption_room }, { color = theme.color.muted })
     local offset = { sprite = TIMING.signed, ref = props.number.JUDGETIMING, digit = TIMING.signed_digits, saturate = true }
     s:number(offset, { x = at(2), baseline = baseline }, { color = theme.color.sub })
 

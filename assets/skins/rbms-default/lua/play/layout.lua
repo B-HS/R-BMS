@@ -13,6 +13,8 @@ layout.OPTION = {
     DETAIL_MILLISECONDS = 906,
     GRAPH_ON = 907,
     GRAPH_OFF = 908,
+    LANES_NORMAL = 909,
+    LANES_WIDE = 910,
 }
 
 layout.OPTION_NAME = {
@@ -20,16 +22,19 @@ layout.OPTION_NAME = {
     SCRATCH = "Scratch Side",
     DETAIL = "Judge Detail",
     GRAPH = "Score Graph",
+    LANES = "Lane Width",
 }
 
 layout.FIELD = { top = 0, height = 840, line = 8, keys_top = 848, keys_height = 64, gauge_top = 928, gauge_height = 24, foot_top = 968 }
 
-local LANE = { white = 58, black = 46, scratch = 100, button = 62, gap = 2 }
+local LANE = { white = 58, black = 46, scratch = 100, button = 62 }
+local LANE_GAP = 2
+local LANE_SCALE = { normal = 1, wide = 1.5 }
+local LANE_WIDTH = { [layout.OPTION.LANES_NORMAL] = "normal", [layout.OPTION.LANES_WIDE] = "wide" }
 local NOTE_HEIGHT = { beat = 16, button = 24 }
 local SCRATCH_SLOT = 0
 local SIDE_GAP = 8
 local PROGRESS_WIDTH = 4
-local DOUBLE_FOOT_TOP = 928
 
 local BEAT_KEYS = { "white", "black", "white", "black", "white", "black", "white" }
 local BUTTON_COLORS = { "white", "yellow", "green", "blue", "red", "blue", "green", "yellow", "white" }
@@ -52,44 +57,89 @@ local MODES = {
 }
 
 local SINGLE = {
-    field_end = 548,
-    graph = { x = 584, top = 120, w = 136, h = 720 },
-    head = { x = 744, top = 40, w = 1112, h = 56 },
-    bga = { x = 744, top = 120, w = 1112, h = 626 },
-    score = { x = 744, top = 770, w = 352, h = 198 },
-    counts = { x = 1128, top = 770, w = 352, h = 198 },
-    timing = { x = 1512, top = 770, w = 344, h = 198 },
-    without_graph = {
-        head = { x = 584, top = 40, w = 1272, h = 56 },
-        bga = { x = 584, top = 120, w = 1272, h = 626 },
-        score = { x = 584, top = 770, w = 408, h = 198 },
-        counts = { x = 1016, top = 770, w = 408, h = 198 },
-        timing = { x = 1448, top = 770, w = 408, h = 198 },
+    normal = {
+        field_end = 548,
+        graph = { x = 584, top = 120, w = 136, h = 720 },
+        head = { x = 744, top = 40, w = 1112, h = 56 },
+        bga = { x = 744, top = 120, w = 1112, h = 626 },
+        score = { x = 744, top = 770, w = 352, h = 198 },
+        counts = { x = 1128, top = 770, w = 352, h = 198 },
+        timing = { x = 1512, top = 770, w = 344, h = 198 },
+        without_graph = {
+            head = { x = 584, top = 40, w = 1272, h = 56 },
+            bga = { x = 584, top = 120, w = 1272, h = 626 },
+            score = { x = 584, top = 770, w = 408, h = 198 },
+            counts = { x = 1016, top = 770, w = 408, h = 198 },
+            timing = { x = 1448, top = 770, w = 408, h = 198 },
+        },
+    },
+    wide = {
+        field_end = 783,
+        graph = { x = 820, top = 120, w = 136, h = 720 },
+        head = { x = 980, top = 40, w = 876, h = 56 },
+        bga = { x = 980, top = 120, w = 876, h = 450 },
+        score = { x = 980, top = 594, w = 426, h = 198 },
+        counts = { x = 1430, top = 594, w = 426, h = 198 },
+        timing = { x = 980, top = 816, w = 876, h = 152 },
+        without_graph = {
+            head = { x = 820, top = 40, w = 1036, h = 56 },
+            bga = { x = 820, top = 120, w = 1036, h = 626 },
+            score = { x = 820, top = 770, w = 328, h = 198 },
+            counts = { x = 1172, top = 770, w = 328, h = 198 },
+            timing = { x = 1524, top = 770, w = 332, h = 198 },
+        },
     },
 }
 
 local NINE = {
-    field_end = 1247,
-    graph = { x = 1280, top = 120, w = 136, h = 720 },
-    head = { x = 64, top = 40, w = 576, h = 56 },
-    bga = { x = 64, top = 120, w = 576, h = 576 },
-    score = { x = 64, top = 720, w = 576, h = 120 },
-    counts = { x = 1448, top = 120, w = 408, h = 330 },
-    timing = { x = 1448, top = 474, w = 408, h = 366 },
-    without_graph = {
-        counts = { x = 1280, top = 120, w = 576, h = 330 },
-        timing = { x = 1280, top = 474, w = 576, h = 366 },
+    normal = {
+        field_end = 1247,
+        graph = { x = 1280, top = 120, w = 136, h = 720 },
+        head = { x = 64, top = 40, w = 576, h = 56 },
+        bga = { x = 64, top = 120, w = 576, h = 576 },
+        score = { x = 64, top = 720, w = 576, h = 120 },
+        counts = { x = 1448, top = 120, w = 408, h = 330 },
+        timing = { x = 1448, top = 474, w = 408, h = 366 },
+        without_graph = {
+            counts = { x = 1280, top = 120, w = 576, h = 330 },
+            timing = { x = 1280, top = 474, w = 576, h = 366 },
+        },
+    },
+    wide = {
+        field_end = 1387,
+        graph = { x = 1420, top = 120, w = 136, h = 720 },
+        head = { x = 64, top = 40, w = 440, h = 56 },
+        bga = { x = 64, top = 120, w = 440, h = 440 },
+        timing = { x = 64, top = 584, w = 440, h = 256 },
+        counts = { x = 1588, top = 120, w = 268, h = 330 },
+        score = { x = 1588, top = 474, w = 268, h = 366 },
+        without_graph = {
+            counts = { x = 1420, top = 120, w = 436, h = 330 },
+            score = { x = 1420, top = 474, w = 436, h = 366 },
+        },
     },
 }
 
 local DOUBLE = {
-    field_end = 548,
-    head = { x = 580, top = 40, w = 760, h = 56 },
-    bga = { x = 580, top = 120, w = 760, h = 428 },
-    gauge = { x = 580, top = 572, w = 760, h = 24 },
-    score = { x = 580, top = 620, w = 368, h = 220 },
-    counts = { x = 972, top = 620, w = 368, h = 220 },
-    timing = { x = 580, top = 864, w = 760, h = 152 },
+    normal = {
+        field_end = 548,
+        foot_top = 928,
+        head = { x = 580, top = 40, w = 760, h = 56 },
+        bga = { x = 580, top = 120, w = 760, h = 428 },
+        gauge = { x = 580, top = 572, w = 760, h = 24 },
+        score = { x = 580, top = 620, w = 368, h = 220 },
+        counts = { x = 972, top = 620, w = 368, h = 220 },
+        timing = { x = 580, top = 864, w = 760, h = 152 },
+    },
+    wide = {
+        field_end = 751,
+        foot_top = layout.FIELD.foot_top,
+        head = { x = 784, top = 40, w = 352, h = 56 },
+        bga = { x = 784, top = 120, w = 352, h = 264 },
+        score = { x = 784, top = 408, w = 352, h = 198 },
+        counts = { x = 784, top = 630, w = 352, h = 206 },
+        timing = { x = 784, top = 860, w = 352, h = 156 },
+    },
 }
 
 function layout.mode(keys)
@@ -117,15 +167,23 @@ local function side_kinds(mode, scratch_right)
     return kinds
 end
 
-local function field_width(mode)
-    local width = -LANE.gap
+local function round(value)
+    return math.floor(value + 0.5)
+end
+
+local function lane_width(kind, scale)
+    return round(LANE[kind] * scale)
+end
+
+local function field_width(mode, scale)
+    local width = -LANE_GAP
     for _, lane in ipairs(side_kinds(mode, false)) do
-        width = width + LANE[lane.kind] + LANE.gap
+        width = width + lane_width(lane.kind, scale) + LANE_GAP
     end
     return width
 end
 
-local function field_of(mode, side, x, scratch_right)
+local function field_of(mode, side, x, scratch_right, scale)
     local field = layout.FIELD
     local kinds = side_kinds(mode, scratch_right)
     local by_order = {}
@@ -135,13 +193,13 @@ local function field_of(mode, side, x, scratch_right)
     local cursor = x
     for _, lane in ipairs(by_order) do
         lane.x = cursor
-        lane.w = LANE[lane.kind]
+        lane.w = lane_width(lane.kind, scale)
         lane.side = side
         lane.note_height = mode.scratch and NOTE_HEIGHT.beat or NOTE_HEIGHT.button
         lane.shaded = lane.kind == "black" or (lane.kind == "button" and lane.order % 2 == 0)
-        cursor = cursor + lane.w + LANE.gap
+        cursor = cursor + lane.w + LANE_GAP
     end
-    return { side = side, x = x, top = field.top, w = cursor - LANE.gap - x, h = field.height, lanes = kinds, shown = by_order }
+    return { side = side, x = x, top = field.top, w = cursor - LANE_GAP - x, h = field.height, lanes = kinds, shown = by_order }
 end
 
 local function mirrored(box)
@@ -157,12 +215,13 @@ local function beside(field, on_right)
     return { x = x, top = field.top, w = PROGRESS_WIDTH, h = field.h }
 end
 
-local function single(mode, option)
-    local base = mode.scratch and SINGLE or NINE
+local function single(mode, option, lanes)
+    local base = (mode.scratch and SINGLE or NINE)[lanes]
+    local scale = LANE_SCALE[lanes]
     local flipped = mode.scratch and option[layout.OPTION_NAME.FIELD] == layout.OPTION.FIELD_RIGHT
     local scratch_right = option[layout.OPTION_NAME.SCRATCH] == layout.OPTION.SCRATCH_RIGHT
     local graphed = option[layout.OPTION_NAME.GRAPH] ~= layout.OPTION.GRAPH_OFF
-    local width = field_width(mode)
+    local width = field_width(mode, scale)
     local place = function(box)
         return flipped and mirrored(box) or box
     end
@@ -170,7 +229,7 @@ local function single(mode, option)
         return place(not graphed and base.without_graph[name] or base[name])
     end
     local field_box = place({ x = base.field_end - width, top = 0, w = width, h = 0 })
-    local field = field_of(mode, 0, field_box.x, scratch_right)
+    local field = field_of(mode, 0, field_box.x, scratch_right, scale)
     return {
         fields = { field },
         progress = { beside(field, not flipped) },
@@ -185,25 +244,29 @@ local function single(mode, option)
     }
 end
 
-local function double(mode)
-    local width = field_width(mode)
-    local first = field_of(mode, 0, DOUBLE.field_end - width, false)
-    local second = field_of(mode, 1, theme.width - DOUBLE.field_end, true)
+local function double(mode, lanes)
+    local base = DOUBLE[lanes]
+    local scale = LANE_SCALE[lanes]
+    local width = field_width(mode, scale)
+    local first = field_of(mode, 0, base.field_end - width, false, scale)
+    local second = field_of(mode, 1, theme.width - base.field_end, true, scale)
+    local foot_height = theme.height - base.foot_top
     return {
         fields = { first, second },
         progress = { beside(first, true), beside(second, false) },
-        gauge = DOUBLE.gauge,
-        foot = { under(first, DOUBLE_FOOT_TOP, theme.height - DOUBLE_FOOT_TOP), under(second, DOUBLE_FOOT_TOP, theme.height - DOUBLE_FOOT_TOP) },
-        head = DOUBLE.head,
-        bga = DOUBLE.bga,
-        score = DOUBLE.score,
-        counts = DOUBLE.counts,
-        timing = DOUBLE.timing,
+        gauge = base.gauge or under(first, layout.FIELD.gauge_top, layout.FIELD.gauge_height),
+        foot = { under(first, base.foot_top, foot_height), under(second, base.foot_top, foot_height) },
+        head = base.head,
+        bga = base.bga,
+        score = base.score,
+        counts = base.counts,
+        timing = base.timing,
     }
 end
 
 function layout.of(mode, option)
-    local view = mode.sides == 1 and single(mode, option) or double(mode)
+    local lanes = LANE_WIDTH[option[layout.OPTION_NAME.LANES]] or LANE_WIDTH[layout.OPTION.LANES_NORMAL]
+    local view = mode.sides == 1 and single(mode, option, lanes) or double(mode, lanes)
     view.mode = mode
     view.detail = option[layout.OPTION_NAME.DETAIL] or layout.OPTION.DETAIL_FAST_SLOW
     view.lanes = {}

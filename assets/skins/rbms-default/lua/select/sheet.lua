@@ -11,6 +11,11 @@ local CELL = { first = 96, pitch = 248, width = 224, key_top = 432, name_top = 4
 local EXTRA = { rule_top = 620, key_top = 648, name_top = 680, value_top = 716 }
 local UNAVAILABLE = "NOT AVAILABLE"
 local NO_NAME = "-"
+local HELD = {
+    off = "OFF",
+    off_action = "KEEP GREEN NUMBER IS OFF",
+    note = "NOTE DISPLAY TIME MOVES WHILE KEEP GREEN NUMBER IS ON (SETTINGS, PLAY TAB). ITS GREEN NUMBER IS THE ONE EVERY CHART STARTS AT",
+}
 
 local DOUBLE_NAMES = { [0] = "OFF", "FLIP", "BATTLE", "BATTLE AUTO-SC" }
 local FIX_NAMES = { [0] = "OFF", "START BPM", "MAX BPM", "MAIN BPM", "MIN BPM" }
@@ -29,6 +34,31 @@ local function judge_timing(main_state)
         end
         return string.format("%+d MS", value)
     end
+end
+
+local function display_time(main_state, action)
+    local held = function()
+        local duration = main_state.number(props.number.DURATION)
+        local green = main_state.number(props.number.DURATION_GREEN)
+        if ui.has_value(duration) and ui.has_value(green) then
+            return duration, green
+        end
+    end
+    local value = function()
+        local duration, green = held()
+        if duration == nil then
+            return HELD.off
+        end
+        return string.format("%d MS", duration)
+    end
+    local doing = function()
+        local duration, green = held()
+        if duration == nil then
+            return HELD.off_action
+        end
+        return string.format("GREEN %d   %s", green, action)
+    end
+    return { name = "NOTE DISPLAY TIME", value = value, action = doing }
 end
 
 local function sheets(main_state)
@@ -74,7 +104,7 @@ local function sheets(main_state)
         },
         {
             title = "DETAIL OPTIONS",
-            hold = "HOLD START AND SELECT, OR 5",
+            hold = "HOLD START AND SELECT, OR THE DETAIL OPTIONS KEY (5 AS SHIPPED)",
             option = props.option.PANEL3,
             on = props.timer.PANEL3_ON,
             off = props.timer.PANEL3_OFF,
@@ -82,12 +112,12 @@ local function sheets(main_state)
                 { name = "BGA", value = picked(props.index.BGA, BGA_NAMES), action = "NEXT" },
                 { name = "GAUGE AUTO SHIFT", value = picked(props.index.GAUGEAUTOSHIFT, SHIFT_NAMES), action = "NEXT" },
                 { name = "TIMING AUTO ADJUST", value = picked(props.index.TIMING_AUTO_ADJUST, SWITCH_NAMES), action = "SWITCH" },
-                { name = "NOTE DISPLAY TIME" },
+                display_time(main_state, "1 MS SHORTER"),
                 { name = "JUDGE TIMING", value = timing, action = "1 MS EARLIER" },
-                { name = "NOTE DISPLAY TIME" },
+                display_time(main_state, "1 MS LONGER"),
                 { name = "JUDGE TIMING", value = timing, action = "1 MS LATER" },
             },
-            note = "AN OPTION MARKED NOT AVAILABLE HAS NO SETTING IN R-BMS",
+            note = HELD.note,
         },
     }
 end
@@ -147,7 +177,13 @@ local function cell(s, page, index, entry)
     write(s, page, name, { x = x, top = CELL.name_top, w = CELL.width }, theme.color.sub)
     local shown = { value = entry.value, size = theme.type.body, overflow = props.text_overflow.SHRINK }
     write(s, page, shown, value, theme.color.text)
-    write(s, page, { text = entry.action, size = caption }, { x = x, top = CELL.action_top, w = CELL.width }, theme.color.muted)
+    local action = { size = caption, overflow = props.text_overflow.SHRINK }
+    if type(entry.action) == "function" then
+        action.value = entry.action
+    else
+        action.text = entry.action
+    end
+    write(s, page, action, { x = x, top = CELL.action_top, w = CELL.width }, theme.color.muted)
 end
 
 local function footing(s, page)

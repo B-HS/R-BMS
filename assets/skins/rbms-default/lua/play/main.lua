@@ -20,7 +20,7 @@ end
 
 local function properties(mode)
     local option, name = layout.OPTION, layout.OPTION_NAME
-    local list = {}
+    local list = { chosen(name.LANES, { name = "Normal", op = option.LANES_NORMAL }, { name = "Wide", op = option.LANES_WIDE }) }
     if mode.sides == 1 and mode.scratch then
         table.insert(list, chosen(name.FIELD, { name = "Left", op = option.FIELD_LEFT }, { name = "Right", op = option.FIELD_RIGHT }))
         table.insert(list, chosen(name.SCRATCH, { name = "Left", op = option.SCRATCH_LEFT }, { name = "Right", op = option.SCRATCH_RIGHT }))
