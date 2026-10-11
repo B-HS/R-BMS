@@ -14,9 +14,9 @@ generic "frontend" assumptions do not apply. Cargo workspace, edition 2024, rust
 ```bash
 cargo build --release -p rbms-player
 cargo build -p rbms-player --no-default-features   # without the `video` feature (no OpenH264)
-cargo test --workspace --no-fail-fast              # what CI runs
+cargo test --workspace --no-fail-fast --locked     # what CI runs
 cargo fmt --all --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 git diff --check
 
 cargo run --release -p rbms-player --          # source: remembered folder, RBMS_SONGS, or empty GUI
@@ -134,6 +134,7 @@ the configuration directory.
   "fixing" a surprising assertion.
 - The deterministic `CpuCanvas` backend makes rendering testable without a GPU; prefer it in tests.
 - Rust style (`rustfmt.toml`: `max_width = 160`): no `//` comments (only `//!` and `///` documentation, in English), no magic numbers (name the constant), no `#[allow]` or `unsafe`.
+- `Cargo.lock` is tracked and CI and release builds pass `--locked`. When a dependency changes, commit `Cargo.lock` with it and regenerate the tables of `THIRD-PARTY-NOTICES.md` (see `ci-release.md` section 2.1).
 - A wave or unit is committed only after the gate (fmt, clippy `-D warnings`, `cargo test --workspace --no-fail-fast`, `git diff --check`) passes; push, then check CI as described above.
 
 ## See also

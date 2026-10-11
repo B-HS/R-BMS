@@ -219,7 +219,7 @@ SQLite is in the public domain and needs no notice. The Rust wrapper crates `lib
 
 ## 5. Rust crate dependencies
 
-Every crate below is linked into `rbms-player` (normal dependencies of the release build for all target platforms, plus `lua-src`, which is a build dependency whose sources are compiled in). The license column is the SPDX expression from each crate's `Cargo.toml`. Where it offers a choice (`OR`), R-BMS uses the permissive option, so the combined work stays GPL-3.0-or-later compatible: for example `self_cell` is used under Apache-2.0 and `r-efi` under MIT. Crates that are only built for one platform are listed for completeness. The versions are those of the `Cargo.lock` on the machine where this file was generated. `Cargo.lock` is not tracked in git, so a CI release build can resolve newer compatible versions; regenerate this file before a release.
+Every crate below is linked into `rbms-player` (normal dependencies of the release build for all target platforms, plus `lua-src`, which is a build dependency whose sources are compiled in). The license column is the SPDX expression from each crate's `Cargo.toml`. Where it offers a choice (`OR`), R-BMS uses the permissive option, so the combined work stays GPL-3.0-or-later compatible: for example `self_cell` is used under Apache-2.0 and `r-efi` under MIT. Crates that are only built for one platform are listed for completeness. The versions are those of the `Cargo.lock` committed in this repository, which the CI and release builds use unchanged (`--locked`). When a dependency changes, commit `Cargo.lock` together with a regenerated copy of this file.
 
 Notes:
 
