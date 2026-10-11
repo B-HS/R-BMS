@@ -403,9 +403,20 @@ fn a_reason_names_files_from_the_documents_folder_down() {
     );
     assert_eq!(reason_beside("C:\\skins\\pack\\play7.luaskin: bad", Path::new("C:\\skins\\pack/play7.luaskin")), "play7.luaskin: bad");
     assert_eq!(reason_beside("/skins/other/play7.luaskin: bad", document), "/skins/other/play7.luaskin: bad");
-    assert_eq!(reason_beside("C:\\skins\\pack/play7.luaskin: bad", Path::new("\\\\?\\C:\\skins\\pack/play7.luaskin")), "play7.luaskin: bad");
     assert_eq!(reason_beside("play7.luaskin: bad", Path::new("play7.luaskin")), "play7.luaskin: bad");
     assert_eq!(first_line("one\tline\r\nand a traceback\n\tunder it"), "one line");
+}
+
+/// A document whose path was made canonical carries Windows' verbatim prefix, and the reason a
+/// loader gives spells the same folder without it: the folder is left out all the same.
+#[cfg(windows)]
+#[test]
+fn a_reason_leaves_out_the_folder_of_a_document_named_with_the_verbatim_prefix() {
+    let document = Path::new(r"\\?\C:\skins\pack\play7.luaskin");
+    assert_eq!(
+        reason_beside(r"C:\skins\pack\play7.luaskin (body pass): C:\skins\pack\lua\field.lua:3: bad", document),
+        r"play7.luaskin (body pass): lua\field.lua:3: bad"
+    );
 }
 
 /// A Lua skin whose program does not parse, so its header never answers.
