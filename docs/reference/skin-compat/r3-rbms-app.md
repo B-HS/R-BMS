@@ -1,6 +1,21 @@
 # R3 — R-BMS 앱(apps/rbms-player) 스킨 배선·화면 구성·입력 현황과 격차
 
-> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 8B(기본 스킨 화면 전부) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 8C(기본 스킨 내장·설치·기본 선택) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 8C 반영 사항 (2026-10-11)
+
+기본 스킨 팩의 내장·설치·기본 선택, 로드 실패 폴백 알림, 설정 행 표지와 스킨 설정의 기기 로컬화, 테스트 재편을 넣은 뒤의 상태다. 사용자용 설명은 `docs/skin.md` 에 새로 썼다.
+
+- (A) 내장: `apps/rbms-player/build.rs` 가 `assets/skins/rbms-default` 를 걸어(`*.luaskin`, `lua/`, `image/`, `font/`, `sound/`. `tools/` 와 점 파일 제외) 경로 바이트순 표를 만들고 파일별 SHA-256 을 빌드 때 계산한다. `src/assets/default_pack.rs` 가 그 표를 include 한다(65개 파일, 1,720,337 B). `font/Inter-Regular.ttf` 는 렌더러의 `rbms_render::font::BUNDLED_FONT` 를 가리켜 바이너리에 한 벌만 들어간다(두 파일이 달라지면 빌드 실패). §3.1 의 `embedded_sounds!`·`DEFAULT_SOUNDS`·`install_default_sounds` 서술은 이것으로 대체된다
+- (A) 설치: 실행 초입의 `install_default_pack(settings_path)` 이 `<설정 폴더>/skin/rbms-default/` 에 푼다(`skin.folder` 와 무관하게 고정). 기록 파일 `install-manifest.txt` 에 설치한 파일의 지문을 적는다. 규칙: 없는 파일은 쓴다 / 기록과 같은 구판은 새 판으로 바꾼다 / 사용자가 고친 파일은 둔다 / 이번 빌드가 더는 싣지 않고 손대지 않은 파일은 지운다. 기록이 이번 빌드와 같으면 설치본을 읽지 않는다(디버그 실측: 첫 설치 10~27ms, 변화 없을 때 0.3~0.5ms). 팩 안의 링크 폴더 너머로는 쓰지도 지우지도 않는다. 중단된 실행의 `*.rbms-partial` 은 다음 설치·갱신 때 치운다. 실패해도 경고 뒤 내장 화면으로 뜬다
+- (A) 팩 우선순위: `RBMS_SKIN_PACK` > `skin.pack` > 설치된 기본 팩(`skin_select.rs` 의 `wanted_pack`, `pack_in_effect`). PACK FOLDER 행은 지정이 없으면 `DEFAULT (<경로>)` 를 보인다. 사용자가 고른 팩에 없는 화면은 내장 화면이다(기본 팩으로 채우지 않는다. 사양 E9). 실행 옵션 `--skin file.ron` 으로 시작한 실행은 플레이 화면을 그 레이아웃의 내장 필드로 그린다(`SkinLibrary::plays_built_in`)
+- (A) 로드 실패: 문구는 `skin <파일> did not load, drawing the built-in screen: <이유>`. 팩의 `.luaskin` 이 헤더부터 읽히지 않으면 파일 판마다 한 번 알린다(`SkinLibrary::take_unreadable`). 팩 루트의 `.json`·`.json5` 헤더 실패는 알리지 않는다(스킨이 아닌 파일일 수 있다). 24키와 키 설정은 기본 팩에서도 내장 화면이다(테스트로 고정)
+- (A) 사운드: 스킨의 `sound/…` 와 시스템 사운드 폴더가 같은 설치본을 가리킨다(`skin_host/audio.rs` 의 `skin_roots` 가 `pack_in_effect` 를 쓴다)
+- (B) 설정 행 표지: `rbms_config::SETTINGS` 의 서술자에 `skinned`(영향 화면의 type 목록과 문구)가 생겼다. 그 화면에 문서가 정해져 있고 읽기에 실패하지 않았으면 라벨 옆에 표지를 쓰고 값을 흐리게 그린다(조정은 가능). "BUILT-IN SCREENS ONLY": 5KEYS LAYOUT, DISPLAY 의 SKIN 프리셋, WHITE NUMBER, JUDGE TEXT Y, RESULT GRAPHS. "SKIN OPTION COMES FIRST": SCRATCH SIDE. SCORE GRAPH 는 표지 없이 도움말만 고쳤다(선곡 위 기록 모달이 값을 읽는다). LIFT·LANE COVER·HIDDEN+·LEGACY NOTE·SPEED FIX·BGA·TARGET·SORT 는 스킨 경로가 읽는다. [99 §5] H11 은 이것으로 처리됐다
+- (B) 계정 동기화(`ir_sync.rs`): `skin` 그룹 전체(pack, folder, selected, custom, screen)가 기기 로컬이다. 올릴 때 빼고, 내려받은 값이 이 기기 값을 바꾸지 않는다
+- (B) `display.letterbox` 의 기본값이 켜짐이 됐다(`DEFAULT_LETTERBOX`). 파일에 적힌 값은 그대로 따르므로 기존 설치(이전 빌드가 false 를 적어 둠)는 꺼진 채다
+- (D) 테스트: 기본 팩의 저장소 게이트 테스트가 환경 변수 없이 항상 돈다 — `crates/rbms-skin/tests/default_pack.rs`(금지 API 를 Lua 토큰 단위로 검사, 아틀라스와 시트 정합), `apps/rbms-cli/src/skin_dump/tests.rs`(문서 9개 `--strict` 기준), `apps/rbms-player/src/stage/capture/`(화면별 한 프레임을 앱 경로로 그려 구조 단언. `RBMS_SKIN_CAPTURE_DIR` 이 있으면 `gate-*.png` 저장), 첫 실행 테스트. 환경 변수 테스트는 헤더 type 으로 문서를 찾고, 팩에 없는 기능은 이유를 출력하고 건너뛴다(헤더가 읽히지 않는 `.luaskin` 은 실패). 기본 팩과 ModernChic 양쪽에서 통과한다. 웨이브 8B 반영 사항의 "ModernChic 전용이라 기본 스킨에 실패"는 대체된다
+
 
 ## 웨이브 8B 반영 사항 (2026-10-11)
 

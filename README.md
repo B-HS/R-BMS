@@ -4,9 +4,11 @@
 
 **A BMS rhythm-game player in Rust — reference-accurate judgment, sample-clocked audio, wgpu rendering.**
 
-[Features](#features) · [Build](#build-and-run) · [Controls](#controls) · [Development](#development)
+[Features](#features) · [Build](#build-and-run) · [Skins](#skins) · [Controls](#controls) · [Development](#development)
 
 </div>
+
+Last updated 2026-10-11 · matches d4cd23f plus the wave 8C working tree (not yet committed).
 
 R-BMS reimplements the core PLAY loop of a GPL-3.0 reference implementation in Rust. Judgment windows, gauges and TOTAL scaling are cross-checked against the reference implementation's source, the play clock is the number of audio samples actually played, and every mode, skin, key map and setting is data, not code. It is a single native binary with no JVM and no runtime dependencies.
 
@@ -19,7 +21,7 @@ R-BMS reimplements the core PLAY loop of a GPL-3.0 reference implementation in R
 - **Song select** — recursive library scan, folders and difficulty tables (`data.json`), search and sort, `#PREVIEW` or autoplay preview, cover art, note density graph, local records with replay playback
 - **Result** — judge counts, FAST / SLOW, max combo, gauge, clear lamp, rank graph and delta against your best
 - **Replays** — saved per play, replayable with the same seed and options, analysis mode with seek, speed and per-note timing
-- **Skins and themes** — reference-format JSON skins (json5, sandboxed Lua expressions, per-screen selection and customisation from the SKIN tab), RON defaults for the play field and HUD, UI chrome colours from a RON theme, any TTF/OTF font with full Unicode fallback
+- **Skins and themes** — a built-in default skin for every screen (select, decide, play 5/7/9/10/14 keys, result, course result) from the first run; beatoraja-format Lua skins (`.luaskin`) and JSON skins load unmodified from a skin pack folder, with per-screen selection and customisation on the SKIN tab; mp4 (H.264) video sources; any TTF font with full Unicode fallback; built-in screens and a RON theme remain as the fallback
 - **Input** — every lane and control key rebindable in-app, conflict detection
 - **IR** — sign in, submit scores, browse rankings, sync settings, manage rivals and upload or replay ghosts, all from the in-game SETTINGS NETWORK tab and the song-select ranking panel
 - **Debug** — on-screen overlay with FPS, memory, audio clock and judge state
@@ -59,9 +61,21 @@ To register a library through the GUI, press `O`, select `+ ADD FOLDER`, press `
 
 Settings, key config, difficulty tables, local scores and replays live in `~/.config/rbms/` (`%USERPROFILE%\.config\rbms\` on Windows) and are created on first run.
 
-The first run installs the system sound set under `~/.config/rbms/skin/rbms-default/sound/` (the equivalent settings folder on Windows); existing files are never overwritten, and `tools/generate-sounds.py` in `assets/skins/rbms-default/` regenerates it. Screens are drawn by the built-in layouts: `assets/skins/*.ron` hold the play-field layouts, `theme.ron` the song-select layout and UI colours. A reference-format JSON/JSON5 skin document chosen in Settings → SKIN draws its screen on its own. Full Lua skin support and a new default skin are in progress; see `docs/plan/2026-10-09-lua-skin-compat.md`.
+Every start installs the default skin pack under `~/.config/rbms/skin/rbms-default/` (the equivalent settings folder on Windows) from a copy built into the binary; see [Skins](#skins).
 
-Options: `--interactive` `--auto` `--hispeed F` `--gauge NAME` `--lift F` `--sc-left` `--sc-auto` `--keys Z,S,X,...` `--skin file.ron` `--font file.ttf` `--table URL` `--keyconfig path.ron` `--replay file.ron` `--server URL` `--player ID`.
+Options: `--interactive` `--auto` `--hispeed F` `--gauge NAME` `--lift F` `--sc-left` `--sc-auto` `--keys Z,S,X,...` `--skin file.ron` (a built-in play-field layout; the play screens are then drawn by the built-in field instead of a skin) `--font file.ttf` `--table URL` `--keyconfig path.ron` `--replay file.ron` `--server URL` `--player ID`.
+
+## Skins
+
+The default skin `rbms-default` draws every screen from the first run, with no setup. Its files are copied to `~/.config/rbms/skin/rbms-default/` on each start: a file you changed is left alone, an untouched file is replaced when an update ships a new version, and a file you deleted comes back. If that folder cannot be written the player warns once and draws its built-in screens.
+
+To use another skin pack (a folder of beatoraja-format `.luaskin` files, for example one written for beatoraja; JSON skins work too):
+
+1. Press `Tab` on the song select to open SETTINGS and go to the SKIN tab.
+2. On `PACK FOLDER` press `Enter` and choose the pack's folder. Pressing the left arrow clears it and returns to the default skin. For one run only, set `RBMS_SKIN_PACK=/path/to/pack` instead.
+3. A screen the pack has no document for is drawn by the player's built-in screen, not by the default skin. The same tab lets you pick a different document per screen and change the options, files and offsets a document offers.
+
+Skins can read their own folder but cannot write into it, open files outside it, or reach the network. If a skin fails to load, the player says which file failed and draws the built-in screen. [docs/skin.md](docs/skin.md) (Korean) has the details: pack rules, the default skin, the Lua environment, the `rbms-cli skin-dump` checker and the known limits. Third-party notices for the bundled video decoder and font are in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
 ## Controls
 
@@ -97,15 +111,18 @@ Stack: Next.js 16 (App Router, Route Handlers, Cache Components), React 19, Tail
 ## Development
 
 ```sh
-cargo test --workspace
+cargo test --workspace --no-fail-fast
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo run -p rbms-render --example render_select   # headless render to PPM
+cargo run -p rbms-cli -- skin-dump assets/skins/rbms-default --strict --frames 120   # load and check a skin pack
 ```
 
-Workspace crates, bottom up: `rbms-model` (chart types) → `rbms-parser` (BMS lexer, `#RANDOM` / `#SWITCH`, MD5 + SHA-256) → `rbms-chart` (timing, lanes, shuffle, scroll) → `rbms-judge` (windows, algorithms, gauges, RON tables) → `rbms-audio` (cpal + symphonia, real-time mixer, interpolated clock) / `rbms-render` (`Renderer` trait, CPU reference canvas, skin renderer, fonts) / `rbms-skin` (JSON skin loader) / `rbms-ir` / `rbms-table` / `rbms-store` (scores, replays) / `rbms-library` (scan) / `rbms-config` (settings schema, descriptors) / `rbms-course` (course model and run state) → `rbms-play` (PlaySession) → `apps/rbms-player` (winit + wgpu, stage-based app). CI runs tests on Linux, macOS and Windows with fmt and clippy `-D warnings` gates.
+Rebuilding the default skin's images or sounds needs [uv](https://docs.astral.sh/uv/): `uv run assets/skins/rbms-default/tools/generate-images.py` (add `--check` to compare with the committed files) and `uv run assets/skins/rbms-default/tools/generate-sounds.py`. Builds and CI do not need uv.
+
+Workspace crates, bottom up: `rbms-model` (chart types) → `rbms-parser` (BMS lexer, `#RANDOM` / `#SWITCH`, MD5 + SHA-256) → `rbms-chart` (timing, lanes, shuffle, scroll) → `rbms-judge` (windows, algorithms, gauges, RON tables) → `rbms-audio` (cpal + symphonia, real-time mixer, interpolated clock) / `rbms-render` (`Renderer` trait, CPU reference canvas, skin renderer, fonts) / `rbms-skin` (skin model, Lua 5.2 runtime and loader) / `rbms-video` (H.264 movies for skins; OpenH264 built from source, `video` feature) / `rbms-ir` / `rbms-table` / `rbms-store` (scores, replays) / `rbms-library` (scan) / `rbms-config` (settings schema, descriptors) / `rbms-course` (course model and run state) → `rbms-play` (PlaySession) → `apps/rbms-player` (winit + wgpu, stage-based app); `apps/rbms-cli` is the headless inspector. CI runs `cargo test --workspace --no-fail-fast` on Linux, macOS and Windows with fmt and clippy `-D warnings` gates; after a push, check the three results with `gh run list --branch dev`.
 
 Architecture, the reference parity ledger, decisions and the improvement plan live in [docs/](docs/README.md) (Korean). Start with [docs/PROCESS.md](docs/PROCESS.md). Phase R (creating `prod`, first release/tag and signing or deployment credentials) is deliberately deferred until the maintainer supplies the required real keys.
 
 ## License
 
-[GPL-3.0-or-later](LICENSE). The play logic is a clean-room Rust port of a GPL-3.0 reference implementation.
+[GPL-3.0-or-later](LICENSE). The play logic is a clean-room Rust port of a GPL-3.0 reference implementation. Third-party licenses and notices for bundled software (OpenH264, Inter and the Rust dependencies) are in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).

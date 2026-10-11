@@ -1,22 +1,33 @@
 # Architecture
 
-rbms is a Rust port of the reference implementation's PLAY core: a BMS rhythm-game player. Cargo workspace, 14 library
+Last updated 2026-10-11 · matches d4cd23f plus the wave 8C working tree (not yet committed).
+
+rbms is a Rust port of the reference implementation's PLAY core: a BMS rhythm-game player. Cargo workspace, 15 library
 crates + 2 apps. The single source of truth for *behaviour* is the code + its tests; this document is
 the map.
 
 ## Crate dependency order (top → bottom)
 
-```
-apps/rbms-player ─► { rbms-config, rbms-library, rbms-play, rbms-render, rbms-audio, rbms-ir, rbms-judge, rbms-table, rbms-course }
-     rbms-config ─► rbms-store, rbms-judge, rbms-chart
-     rbms-play   ─► rbms-store, rbms-judge
-     rbms-library ─► rbms-chart ─► rbms-parser ─► rbms-model
-apps/rbms-cli (headless inspector) ─► rbms-parser, rbms-chart, rbms-config, rbms-library, rbms-store
-```
+Dependencies point down this table: a crate lists only the workspace crates it uses (`[dependencies]`, not dev-dependencies).
+
+| Crate | Depends on |
+|---|---|
+| `apps/rbms-player` | rbms-model, rbms-parser, rbms-chart, rbms-config, rbms-render, rbms-skin, rbms-video, rbms-judge, rbms-ir, rbms-play, rbms-audio, rbms-table, rbms-store, rbms-library, rbms-course |
+| `apps/rbms-cli` (headless inspector) | rbms-model, rbms-parser, rbms-chart, rbms-config, rbms-library, rbms-store, rbms-skin |
+| `rbms-config` | rbms-chart, rbms-judge, rbms-store, rbms-skin |
+| `rbms-render` | rbms-model, rbms-chart, rbms-skin (rbms-video only as a dev-dependency, for the movie tests) |
+| `rbms-play` | rbms-model, rbms-chart, rbms-judge, rbms-store |
+| `rbms-ir` | rbms-model, rbms-chart, rbms-judge |
+| `rbms-library` | rbms-model, rbms-parser, rbms-chart |
+| `rbms-chart` | rbms-model, rbms-parser |
+| `rbms-judge`, `rbms-skin`, `rbms-parser` | rbms-model |
+| `rbms-model`, `rbms-store`, `rbms-audio`, `rbms-table`, `rbms-course`, `rbms-video` | none |
 
 `rbms-store` sits at the bottom with `rbms-model`: it depends on serde/RON alone, which is what lets both the
 configuration crate and the play crate share it without a cycle. `rbms-table` deliberately does **not** depend on
 `rbms-library` — it takes an iterator of md5s, so the join runs in the app rather than inverting the layering.
+`rbms-skin` carries no rendering backend (geometry and colour are its own plain types), so the data and evaluation layers
+test without a GPU, a window or a canvas; `rbms-config` depends on it only for the skin-type and customisation vocabulary of `Config.skin`.
 
 | Crate | Role |
 |---|---|
@@ -25,16 +36,18 @@ configuration crate and the play crate share it without a cycle. `rbms-table` de
 | **rbms-chart** | `BmsSource` → fully-timed `Model`: `detect_mode`, measure→µs integration (BPM/STOP/SCROLL), LN/LNOBJ/mines, `note_density`, `scroll` (render offsets), `shuffle` (note options). |
 | **rbms-judge** | Stateful judge: reference windows (mode-aware), PG/GR/GD/BD/POOR/MISS, combo/EX/early-late, gauges (6 kinds), 空POOR, clear lamp. |
 | **rbms-audio** | RT-safe output: symphonia decode + cpal lock-free mixer. **Master clock = mixed sample count** (the timing-source fix vs the reference implementation). |
-| **rbms-render** | Backend-agnostic 2D: `Renderer` trait (`fill_rect`) → wgpu/CpuCanvas. Skin (RON fallback), playfield, HUD, result, select, key-bomb, the JSON skin object renderer (`skin_render`, 21 object kinds), multilingual font (cosmic-text), **UI theme** (`docs/theme.md`). |
+| **rbms-render** | Backend-agnostic 2D: `Renderer` trait (`fill_rect`, textured quads, clips, distance-field quads) → wgpu/CpuCanvas. The built-in screens (`Skin` RON field layout, playfield, HUD, result, select, key-bomb), the skin renderer `skin_render` (a compiled `SkinScreen` with a `prepare` then `draw` phase, `FrameData`, one module per object family, texture pool), multilingual TTF text (cosmic-text) and BMFont bitmap fonts (`bitmap_font`), **UI theme** (`docs/theme.md`). |
+| **rbms-skin** | Skin documents with no rendering attached: the `SkinDef` model, the two-pass `.luaskin` loader (and the JSON/json5 loader), the sandboxed Lua 5.2 runtime (`lua/`: environment, `require`, io write overlay, `os`, `luajava` facade, `main_state`, budget meter), the 968 property ids and timer ids, destination interpolation, and the `SkinHost` contract a game answers property ids through. |
+| **rbms-video** | Movie decoding for skins: a `VideoDecoder` trait, an H.264-in-MP4 implementation (OpenH264 built from source and linked statically, behind the `openh264` feature; with it off every `open` answers `Disabled`), and `VideoPlayer`, a worker thread that keeps a few frames queued ahead of the scene clock. |
 | **rbms-ir** | "IR-superset" score-server contract: `ScoreServer` trait + serde DTOs + HTTP/Null clients. |
 | **rbms-table** | BMS difficulty tables (header.json/data.json): fetch, md5-match, level grouping, disk cache. |
 | **rbms-store** | Local score persistence: SQLite `scoredb` (history, bests, profiles, replay GC) plus RON compatibility import/export (`scores.ron` + `replays/*.ron`), atomic writes, and judging-rule version stamps. Lamps travel as numeric ids so the judge engine stays out of the file layer. |
 | **rbms-library** | SQLite song database boundary: cancellable folder scan → `SongEntry`, lazy `ChartDetail`, and md5-indexed `Library` backed by `songdb`. Headless, so `rbms-cli scan` exercises it. |
-| **rbms-config** | One versioned configuration document (`Config` + `schema_version`), the migration that absorbs the pre-version `settings.ron`/`folders.ron`/`tables.ron`, and the settings **descriptor table** the settings screen is generated from. |
+| **rbms-config** | One versioned configuration document (`Config` + `schema_version`, currently 3), the migration that absorbs the pre-version `settings.ron`/`folders.ron`/`tables.ron`, the settings **descriptor table** the settings screen is generated from, and `Config.skin` (`SkinOptions`: skin pack folder, per-screen document, per-document customisation). |
 | **rbms-play** | Real-time play driver. `Player` advances over the song clock (scheduling and audible axes separately), emits keysound events, feeds judging, tracks beams/bombs; `PlaySession` is one whole run — judging + replay + calibration + analysis clock — emitting sound through a `SoundSink` so it can run with no audio device. |
 | **rbms-course** | Course domain: reference-compatible course loading/normalisation, constraints and trophies, and a continuous `CourseRun` that carries gauge, combo and totals across stages. |
-| **apps/rbms-player** | Native desktop app: winit event loop, wgpu renderer (`gpu.rs`), ten-stage machine (Select/Settings/KeyConfig/Tables/Folders/Loading/Play/Result/CourseResult/Practice), course and practice UI, and IR account/ranking UI. Built as a library with a three-line binary, so integration tests reach its types. |
-| **apps/rbms-cli** | Headless companion: a bare chart path prints metadata/hashes/counts, `scan <dir>` drives `rbms-library`, `config <settings.ron>` drives `rbms-config` (migration result, the copy it kept, then every settings row), `scores <scores.ron> [--md5 …]` queries `rbms-store`. It never depends on the player, so no window/audio stack is pulled into a CLI build. |
+| **apps/rbms-player** | Native desktop app: winit event loop, wgpu renderer (`gpu/`), eleven-stage machine (Select/Decide/Settings/KeyConfig/Tables/Folders/Loading/Play/Result/CourseResult/Practice), the skin plumbing (pack selection, compiled screens, the `SkinHost` implementation, the embedded default pack), course and practice UI, and IR account/ranking UI. Built as a library with a three-line binary, so integration tests reach its types. |
+| **apps/rbms-cli** | Headless companion: a bare chart path prints metadata/hashes/counts, `scan <dir>` drives `rbms-library`, `config <settings.ron>` drives `rbms-config` (migration result, the copy it kept, then every settings row), `scores <scores.ron> [--md5 …]` queries `rbms-store`, `skin-dump <pack|document>` loads skin documents through `rbms-skin` with no game and reports objects, warnings, swallowed Lua errors and per-frame cost (`--strict` makes it a gate; see `skin.md` §5). It never depends on the player, so no window/audio stack is pulled into a CLI build. |
 
 `rbms-library` owns SQLite `songdb`; `rbms-store` owns SQLite `scoredb` and imports legacy RON score history on first use. The RON formats remain the compatibility boundary for portable scores and replays rather than a second UI cache.
 
@@ -49,7 +62,28 @@ configuration crate and the play crate share it without a cycle. `rbms-table` de
    per frame: PlaySession state + rbms_chart::scroll offsets ─► rbms_render::render_playfield/hud/... ─► Gpu (wgpu)
 ```
 
-Everything drawn — notes, beams, text (cosmic-text), BGA frame — lowers to `Renderer::fill_rect` (plus one textured BGA pipeline in the wgpu backend).
+Everything drawn lowers to the `Renderer` primitives: `fill_rect` for the built-in screens, and for a skin additionally registered textures (`register_texture`, `release_texture`), `draw_textured_quad` (rotation, blend, filter), `draw_distance_field_quad` (bitmap fonts of type 1 and 2) and `push_clip` / `pop_clip`. Text is shaped with cosmic-text and rasterised into glyph atlases; a skin's BMFont pages and movie frames arrive as textures.
+
+### Screen flow and who draws it
+
+| From | To | When |
+|---|---|---|
+| Select | Decide | a chart is picked and a decide skin is drawable (`has_decide_scene`) |
+| Select | Loading | a chart is picked and there is no decide scene |
+| Decide | Play | the scene ends and a skin draws the play screen (its own PRELOAD waits for the decodes), or everything is already in |
+| Decide | Loading | the scene ends with files still decoding or the skin never drew |
+| Decide | Select | cancelled (Esc, or START with SELECT) |
+| Loading | Play | every keysound and image has decoded |
+| Play | Result | the run ends: cleared, failed or left |
+| Play | Play | in a course, the next stage starts without a result screen (only the first stage has a decide scene) |
+| Play | CourseResult | the last stage of a course ends, or the course fails |
+| Result | Select, Play | the player leaves, or runs the same chart again (R) or the next song (N) |
+| CourseResult | Select | the player leaves |
+
+- **Select → Decide → Play → Result.** Picking a chart in the browser opens `Decide` over it, but only when a decide skin is drawable; without one the chart goes straight to `Loading` as it always did. The chart parses when it is picked and its keysounds and images decode on the worker pool while the decide scene plays; a scene that ends early hands the outstanding decodes to `Loading` (or to the play skin's own loading state). Cancelling the decide scene (Esc, or START with SELECT) returns to the browser exactly as it was left. A chart named on the command line skips Select and Decide.
+- **Play** runs PRELOAD → READY → PLAY → FAILED or FINISHED → fade, then `Result` (`CourseResult` after the last stage of a course). Autoplay and replay runs follow the same path but are not persisted or submitted.
+- **Who draws each screen.** For every screen type (`SkinType`) the app asks `SkinLibrary` for a document: the one the player chose by hand, else the one the effective skin pack declares for that type, else none. A drawable document draws the screen alone; with none, the built-in screen (`render_select`, `render_playfield_view` + `render_hud`, `render_result`, …) draws it. Key config, 24-key play and a skin that fails to load always end up on the built-in screens. The effective pack is `RBMS_SKIN_PACK`, else `skin.pack` from the settings, else the installed default pack (`<config dir>/skin/rbms-default/`, written on every start from the copy embedded in the binary). `skin.md` documents the selection rules, the failure messages and the default pack.
+- **Scene clock.** Each skinned scene has a `SceneClock` (`scene_clock.rs`) that restarts at 0 when the scene starts, stops while a document is still being read, and is carried over `Transition::Open` / `Back`. Skin timers are microseconds against it; `input`, `scene` and `fadeout` from the document header drive `stage/scene_life.rs`.
 
 ## The realtime play loop
 
@@ -70,7 +104,7 @@ Everything drawn — notes, beams, text (cosmic-text), BGA frame — lowers to `
 ## Data-driven surfaces
 
 - **Modes** are data (`Mode` + an `[i8;18]` channel map) — a new key mode is a constant, never an engine branch.
-- **Skins** (`SkinConfig`, RON): note-field geometry, palettes, gauge thresholds, key-bomb, DP layout. Since 2026-09-17 a play document that declares a `note` object overrides the lane geometry (`Skin::with_document_lanes`); the RON is the fallback for documents without one.
+- **Built-in note-field layouts** (`SkinConfig`, RON, `assets/skins/{normal,wide}.ron`, or any file given to `--skin`): note-field geometry, palettes, gauge thresholds, key-bomb, DP layout. They draw the built-in play screen only (the fallback for 24-key play, for a play document that is missing or fails, and for a run started with `--skin file.ron`). A play skin document carries its own geometry in its `note` object.
 - **UI theme** (`ThemeConfig`, RON): menu/chrome colours — see `docs/theme.md`.
 - **Judge windows and gauges** are data: `rbms-judge/data/judge.ron` (six modes) and `data/gauge.ron` (`BEAT_7K`) are embedded with `include_str!` and can be overridden from disk. The in-code const tables stay for one release as the fallback *and* as the reference of a **parity guard test** that asserts the parsed data equals them field by field — the values Phase A matched to the reference cannot drift as the data path takes over.
 - **Candidate selection** is a policy value (`JudgeAlgorithm`: Combo / Duration / Lowest / Score) rather than a hard-coded loop; the default stays `Duration`, which is what this engine has always done (see `acknowledge/reference-divergences.md` C-D1).
@@ -78,22 +112,29 @@ Everything drawn — notes, beams, text (cosmic-text), BGA frame — lowers to `
 - **Configuration is one versioned document** (`settings.ron`, `schema_version`): play/judge/display/audio/network/library options in one `Config`. A pre-version file migrates on load and absorbs `folders.ron`/`tables.ron` **without deleting them**; a file from a newer schema is left untouched and the app starts on defaults, so a downgrade cannot destroy settings.
 - **Keymaps** (`KeyConfig`, RON), **skins**, **themes**, **difficulty tables** and **replays** stay their own files under the config dir (every file `#[serde(default)]`, parse-fail → `.ron.bak` + defaults). The config dir resolves `HOME` → `USERPROFILE` → `.` for cross-platform parity (Windows lands in `%USERPROFILE%\.config\rbms`); `config_dir_from` is unit-tested. Every write goes through `rbms_store::write_atomic` (temp + rename).
 
-### JSON skins (`rbms-skin` + `rbms-render::skin_render`)
+### Skins (`rbms-skin`, `rbms-render::skin_render`, `apps/rbms-player`)
 
-Since Phase E a screen can be driven by a reference-format JSON skin document instead of its built-in layout: `rbms-skin` loads the document (json5, sandboxed Lua expressions, skin-root file resolution), binds its timers and property ids to live `PlaySession`/app state, and `rbms-render::skin_render` draws it through the textured-quad, clip and rotation primitives of the `Renderer` trait (batched per draw order in the GPU backend). When no document is selected the built-in screens render exactly as before, which the golden signatures pin. Selection and customisation are persisted in `rbms-config` (`Config.skin`) and edited on the SKIN settings tab.
+A screen that has a skin is drawn by that skin alone; there is no mixing with the built-in layout. The system is specified in `docs/plan/2026-10-09-lua-skin-compat.md`. User-facing behaviour is in `skin.md`; this is where the pieces live.
 
-**Superseded on 2026-10-09:** the layered composition, replace units, hotspots, bundle-scoped options and the `steel-neon` bundles described in the next paragraph were removed (wave 1A of `docs/plan/2026-10-09-lua-skin-compat.md`). A selected skin document now draws its screen alone; otherwise the built-in screen draws. The paragraph is kept as history until the skin section is rewritten.
+| Layer | Holds |
+|---|---|
+| `rbms-skin` | `SkinDef` model; the loader (`loader.rs`, `loader/lua_skin.rs` two-pass `.luaskin` load, `loader/from_lua.rs` Lua table → model, JSON/json5 path, wildcard and random file selection, customisation merge); the Lua runtime (`lua/`); `property/host.rs` (`SkinHost`, `MapHost`); `dst.rs` interpolation; `timer.rs` (µs, OFF = `i64::MIN`); `resolve.rs` (skin-root-only paths) |
+| `rbms-render::skin_render` | `SkinScreen::prepare` then `draw`; `FrameData` (notes, gauge, bars, series, images, bga) supplied by the app; objects (`notes`, `gauge`, `judge`, `songlist/`, `covers`, `graphs/`, `text/`, `bga/`, `text_input`, `input/` for clicks and drags); `textures/` (a pool that decodes only the sources a placed destination references, per-screen budget `SKIN_TEXTURE_BUDGET_BYTES` = 1 GiB) |
+| `apps/rbms-player` | `skin_select.rs` (`SkinLibrary`: the effective pack, header scans with an mtime cache, per-screen document choice, loads and their failures, the SKIN tab rows), `skin_screen.rs` (compiled screens, texture decode, the scene hold while a document is read), `skin_screen/movies.rs`, `skin_host/` (`ScreenHost`, the `SkinHost` implementation, split into clusters by where a value comes from and routed by `ROUTES`), `scene_clock.rs`, `stage/scene_life.rs`, and `assets/default_pack.rs` with `build.rs` |
+| `rbms-video` | movie frames for a skin's video sources, one thread per open movie |
 
-The 2026-09-17 skin-system completion (spec `docs/plan/2026-09-17-skin-system-completion.md`, guide `docs/skin.md`) made a document able to own a whole screen: the loader assembles nested destinations (`NestedTracks` for note / judge / songlist), a `layered` document lists the native output groups it replaces (`replace`, gated per screen by `SkinScreen::replacement`), declares clickable regions (`hotspot` actions and `songlist.clickable` slots) and marks customisation rows as bundle-wide (`scope: 'bundle'`, stored in `SkinOptions.shared`). The renderer draws note fields, gauges, judge pop-ups, song lists, lane covers and seven graphs from per-frame `FrameExtra` state, timers are driven by `PlayTimers` / `ResultTimers`, and the default bundle `assets/skins/steel-neon-v3/` (installed as generation v3, older generations migrated) supplies object-level documents, generated art and the 22 system-sound stems.
+Frame order for a skinned scene: the stage settles the scene time, builds the screen's state, `ScreenHost` answers property ids from it, every object is prepared (conditions, then timer, then value functions, in declaration order), drawn, and finally clicks from the previous frame run. `skin_host` collects effects (events, audio, writes) in interior-mutable queues because `SkinHost` methods take `&self`; the stage takes them after the frame (`skin_requests`).
+
+The default pack is built into the binary: `build.rs` walks `assets/skins/rbms-default` into a sorted table with per-file SHA-256, and `install_default_pack` settles the installed folder against it on every start, keeping files the player changed (details in `skin.md` §3). Its images and sounds are generated by `tools/*.py` (`uv run`) and committed.
 
 ## App UI state machine (`Stage`)
 
-The ten screens: `Select` (song list: search `/`, sort `F3`, clickable bottom nav, IR ranking panel and course tab) · `Settings` (tab strip over the descriptor table, incl. a **NETWORK** tab that signs in and edits SERVER URL / PLAYER ID in place) · `KeyConfig` · `Tables` (difficulty-table manager) · `Folders` (multi-folder library manager) · `Loading` (determinate keysound-decode progress bar) · `Play` · `Result` · `CourseResult` · `Practice`.
+The eleven screens: `Select` (song list: search `/`, sort `F3`, IR ranking panel and course tab; with a skin, the skin's own bars, panels 1 to 3 on START / SELECT and buttons) · `Decide` (the scene between picking a chart and its run; exists only when a decide skin is drawable) · `Settings` (tab strip over the descriptor table, incl. a **SKIN** tab for the pack folder and per-screen documents and a **NETWORK** tab that signs in and edits SERVER URL / PLAYER ID in place) · `KeyConfig` · `Tables` (difficulty-table manager) · `Folders` (multi-folder library manager) · `Loading` (determinate keysound-decode progress bar) · `Play` · `Result` · `CourseResult` · `Practice`.
 
 How they are wired:
 
 - **`App = { shared: AppShared, stage: Stage, suspended: Vec<Stage> }`.** `AppShared` holds what outlives a screen change (config, library, scores, audio engine, GPU, skin, IR session, clocks, frame stats); each `Stage` variant holds only its own screen's state. That split is what lets `self.stage.update(&mut FrameCtx { shared: &mut self.shared, .. })` borrow-check — one struct holding both would not.
-- **Each screen implements `StageHandler`** (`update` / `draw` / `handle_key` / `handle_mouse` / `handle_mouse_drag` / `handle_scroll` / `handle_pad` / `on_enter` / `on_exit` / `debug_lines`). `Stage::handler()` / `Stage::view()` are the only two places that match on the variants — they hand back a `&mut dyn StageHandler`, and every dispatch method is a one-line call through it. The match is still exhaustive, so the compiler still catches a screen missing from any path; what it avoids is repeating an eight-arm match once per method. `Play` and `Select` are boxed so their size does not set every variant's.
+- **Each screen implements `StageHandler`** (`update` / `draw` / `handle_key` / `handle_mouse` / `handle_mouse_drag` / `handle_scroll` / `handle_pad` / `on_enter` / `on_exit` / `debug_lines`). `Stage::handler()` / `Stage::view()` are the only two places that match on the variants — they hand back a `&mut dyn StageHandler`, and every dispatch method is a one-line call through it. The match is still exhaustive, so the compiler still catches a screen missing from any path; what it avoids is repeating an eleven-arm match once per method. The large screens (`Select`, `Decide`, `Play`, `CourseResult`, `Practice`) are boxed so their size does not set every variant's; a test pins the size of `Stage`.
   (The Phase C spec §2.3 called for a per-method match and no trait object; the single-match-plus-`dyn` form keeps that spec's stated guarantee — the compiler catches a missing variant — with one match instead of seven.)
 - **One transition rule, in one place.** A screen returns `Transition::{Stay, Open, To, Back, Quit}` and `App::apply` runs `on_exit` → swap → `on_enter`. `Open` suspends the current screen and `Back` resumes it exactly as it was, which is how the settings screens return to the browser. The scattered `self.stage = Stage::X` assignments are gone.
 - **`on_exit`/`on_enter` carry the ordering contracts** a screen change has to honour — the select preview is torn down on the way out of the browser before anything else touches the audio engine.
@@ -103,17 +144,19 @@ How they are wired:
 
 ## Testing and the lint gate
 
-As of 2026-09-16, `cargo test --workspace` registers 3,040 tests (two real-audio tests are ignored) across the workspace, covering boundaries, malformed input, invariants,
-round-trips, and determinism. The deterministic render backend `CpuCanvas`
+As of wave 8C (2026-10-11), `cargo test --workspace --no-fail-fast` passes 4,878 tests with 0 failures (5 are ignored: four need an audio or graphics device, one waits five seconds), covering boundaries, malformed input, invariants,
+round-trips, and determinism. The count is not a contract; CI is the judge. The deterministic render backend `CpuCanvas`
 makes pixel-level rendering testable without a GPU — the player's screens are rendered onto a
 headless canvas in tests, and a whole run (replay included) reproduces through `NullSink` with no
 audio device.
+
+Skins are tested at three levels. `rbms-skin` and `rbms-render` test the loader, the Lua sandbox and every object against fixtures written for the tests. The default pack in the repository is held to a gate that needs no environment variable: a strict `skin-dump` of its nine documents, a draw of every screen it ships through the capture harness (`stage/capture/gate.rs`), a scan of its Lua for forbidden APIs and a check of each sprite sheet against its atlas (`crates/rbms-skin/tests/default_pack.rs`), and the install rules (`assets/default_pack/tests.rs`). A pack from outside the repository (ModernChic) is exercised only by opt-in tests that run when `RBMS_SKIN_PACK` names it; they pass on the default pack too, skipping what a pack does not carry. Built-in screens keep their golden signatures, so a change to a skin never moves them. `skin.md` §5 lists the harness environment variables.
 
 Lints are a gate, not a suggestion:
 
 - The workspace defines the lint set once (`[workspace.lints]`: `unsafe_code = "deny"`, clippy `all` at warn) and **every crate opts in** with `[lints] workspace = true`.
 - **Every crate root carries `#![forbid(unsafe_code)]`** — including the player, whose `bytemuck` derives turned out not to trip it. The single exception is `rbms-audio`'s `tests/rt_safety.rs`, which installs a counting global allocator to prove the mixer callback never allocates; that test crate root opts out with `#![allow(unsafe_code)]`.
-- CI runs `cargo fmt --all --check` and `cargo clippy --workspace --all-targets --all-features -- -D warnings` as **failing** steps (they were informational before), so a new warning cannot land.
+- CI runs `cargo fmt --all --check` and `cargo clippy --workspace --all-targets --all-features -- -D warnings` as **failing** steps (they were informational before), so a new warning cannot land. Its test job is `cargo test --workspace --no-fail-fast` on Ubuntu, macOS and Windows, so one run shows every failure on a platform; after a push, `gh run list --branch dev` and `gh run view <id>` show the three results (details in `ci-release.md`).
 - `rust-toolchain.toml` pins an exact toolchain version rather than tracking `stable`, so a new release cannot break the gate with a new lint until the pin is moved deliberately. The CI workflow installs the same version.
 
 ## See also
@@ -121,4 +164,5 @@ Lints are a gate, not a suggestion:
 - [`crates.md`](crates.md) — per-crate API reference.
 - [`development.md`](development.md) — build/run/test, app module layout, conventions.
 - [`theme.md`](theme.md) — the `theme.ron` UI-theme schema.
+- [`skin.md`](skin.md) — skins: pack selection, the default pack, the Lua environment, tools, known limits.
 - [`roadmap.md`](roadmap.md) — deferred work + pinned edge-case behaviours.
