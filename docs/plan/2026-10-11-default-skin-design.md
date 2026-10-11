@@ -1,6 +1,6 @@
 # 기본 스킨(rbms-default) 설계서
 
-> 최종 갱신 2026-10-11 · 상태: 전 화면 구현 완료(문서 9개: 결정, 선곡, 플레이 5/7/9/10/14키, 결과, 코스 결과)와 통합 반영(공통 승격, 6절의 최종 좌표, 통합에서 고친 엔진 결함 2건), 웨이브 9A 반영(판정 양식을 IIDX 식으로, 램프·난이도 색과 클리어 표기를 ModernChic 의 값으로, FAST/SLOW 기본 켬. 3.1절, 6.2~6.5절), 웨이브 10A 반영(Lane Width 옵션과 Wide 배치: 2.3절, 6.3 (가-2), 6.4절. 선곡 패널 3 의 NOTE DISPLAY TIME 칸, 플레이의 TIMING AUTO 표지, 안내 문구의 키 이름: 6.2, 6.3, 6.5절) · 대응 단위: 웨이브 8A W8-2a, 웨이브 8B W8-2b~2d 와 통합, 웨이브 10A 단위 A 와 통합, 웨이브 10C 단위 S 와 통합(정적 판정 줄, 판정 위 줄, Judge Position·Judge Display·Score Difference, 부위 불투명도 19개: 2.3절, 3.5절, 6.3·6.4절, 8.2~8.4절. 통합에서 반투명을 시트와 색에 굽고 건반 표시 바탕의 겹침을 없앴다)
+> 최종 갱신 2026-10-12 · 상태: 전 화면 구현 완료(문서 9개: 결정, 선곡, 플레이 5/7/9/10/14키, 결과, 코스 결과)와 통합 반영(공통 승격, 6절의 최종 좌표, 통합에서 고친 엔진 결함 2건), 웨이브 9A 반영(판정 양식을 IIDX 식으로, 램프·난이도 색과 클리어 표기를 ModernChic 의 값으로, FAST/SLOW 기본 켬. 3.1절, 6.2~6.5절), 웨이브 10A 반영(Lane Width 옵션과 Wide 배치: 2.3절, 6.3 (가-2), 6.4절. 선곡 패널 3 의 NOTE DISPLAY TIME 칸, 플레이의 TIMING AUTO 표지, 안내 문구의 키 이름: 6.2, 6.3, 6.5절) · 대응 단위: 웨이브 8A W8-2a, 웨이브 8B W8-2b~2d 와 통합, 웨이브 10A 단위 A 와 통합, 웨이브 10C 단위 S 와 통합(정적 판정 줄, 판정 위 줄, Judge Position·Judge Display·Score Difference, 부위 불투명도 19개: 2.3절, 3.5절, 6.3·6.4절, 8.2~8.4절. 통합에서 반투명을 시트와 색에 굽고 건반 표시 바탕의 겹침을 없앴다), 웨이브 10D(판정 줄 다시 놓기: 콤보를 글자 바로 뒤에 왼쪽 정렬로, 옅은 0 삭제, 모든 판정 글자와 위 줄의 왼쪽 끝 통일, 다섯 자리가 필드 안에 드는 크기 규칙. 엔진의 judge `numberAlign`: 3.5절, 5.2·5.3절, 6.3·6.4절, 7절, 8.4절)
 > 상위 사양: `docs/plan/2026-10-09-lua-skin-compat.md` §2(D1·D4·E9), §4.7, §6 웨이브 8
 > 조사 근거: `docs/reference/skin-compat/`(색인 `README.md`). `[b4 §4]` 같은 표기는 그 폴더의 보고서 절이다.
 > 이 문서와 `assets/skins/rbms-default/` 만 보고 화면을 고칠 수 있게 쓴다. 6절의 좌표는 전부 구현된 최종값이다.
@@ -16,7 +16,7 @@
 | 저작 해상도 | 1920x1080 |
 | 금지 API | luajava, 파일 쓰기(`io.open` 쓰기 모드, `main_state.file_write` 등), `os.date`. 읽기 전용 위치에서 동작해야 한다. 난수(`math.random`)도 쓰지 않는다(캡처 재현성) |
 | 폰트 | Inter Regular 한 벌(OFL). 스킨 폴더 `font/` 에 사본을 둔다(4.6절) |
-| 용량 | 이미지 합계 목표 6 MiB 이하. 내장 한도 10 MiB 에는 사운드 0.56 MiB 와 폰트 0.84 MiB 가 포함된다. 이미지 합계 127,610 B(125 KiB. 5.2절) |
+| 용량 | 이미지 합계 목표 6 MiB 이하. 내장 한도 10 MiB 에는 사운드 0.56 MiB 와 폰트 0.84 MiB 가 포함된다. 이미지 합계 107,822 B(105 KiB. 5.2절) |
 | 시트 크기 | 한 변 4096 초과 금지(생성 스크립트가 거부한다) |
 | 생성물 | PNG 와 아틀라스 Lua 는 저장소에 커밋한다. 빌드와 CI 는 uv 없이 돈다 |
 
@@ -209,7 +209,7 @@ Inter Regular 한 굵기만 있다. 굵기 대신 크기와 색으로 위계를 
 | 화면 닫기 | FADEOUT(타이머 2)에서 `bg` 색 덮개가 알파 0 → 255. 문서의 `fadeout` 안에 끝난다 |
 | 화면 열기 | 결정은 요소별 등장. 선곡·결과·플레이는 `parts.fade_from_black` 300ms |
 | 금지 | 무작위 값, 3초를 넘는 등장, 반복 깜박임(선택 표시의 맥동 `motion.pulse` 하나만 허용) |
-| 판정은 움직이지 않는다 | 플레이 필드의 판정 글자, 콤보 숫자, 그 위 줄(점수 차, FAST/SLOW·ms)은 판정이 난 프레임부터 같은 자리, 같은 크기, 같은 색, 같은 불투명도로 그려지고 500ms 뒤 프레임에 통째로 사라진다. 튀어나옴·확대·미끄러짐·깜빡임·색 돌림·페이드가 없다. 콤보가 올라가면 숫자만 바뀌고, 자릿수가 늘어도 글자와 숫자 칸의 자리는 그대로다(6.3절). 플레이 중 눈이 머무는 자리라 움직임이 노트를 읽는 데 방해가 되기 때문이다(웨이브 10C 의 사용자 요청) |
+| 판정은 움직이지 않는다 | 플레이 필드의 판정 글자, 콤보 숫자, 그 위 줄(점수 차, FAST/SLOW·ms)은 판정이 난 프레임부터 같은 자리, 같은 크기, 같은 색, 같은 불투명도로 그려지고 500ms 뒤 프레임에 통째로 사라진다. 튀어나옴·확대·미끄러짐·깜빡임·색 돌림·페이드가 없다. 콤보가 올라가면 숫자만 바뀌고, 자릿수가 늘어도 글자와 숫자의 첫 자리는 그대로이며 숫자는 오른쪽으로만 자란다(6.3절). 판정이 바뀌어도 글자의 왼쪽 끝은 같은 자리다. 플레이 중 눈이 머무는 자리라 움직임이 노트를 읽는 데 방해가 되기 때문이다(웨이브 10C 의 사용자 요청) |
 
 ## 4. 공통 Lua 모듈
 
@@ -380,10 +380,10 @@ id 규칙: 스킨 전체에서 종류가 달라도 id 가 겹치면 안 된다(�
 | `image/common.png` | 1024x161 | `num18`, `num24`, `num32`, `num44`, `num64`, `num96`(숫자 0~9 한 줄 10칸, 흰색), `snum24`, `snum32`(부호 있는 24칸: 12열 2행, 열 10 은 빈칸, 열 11 은 + 와 -), `block`(8x8 흰색) | 전부 | 39,312 B |
 | `image/decide.png` | 1024x112 | `num144`(레벨 숫자) | 결정 | 16,043 B |
 | `image/select.png` | 1024x479 | 23개. 막대 7종 `bar_song`, `bar_folder`, `bar_table`, `bar_course`, `bar_missing`, `bar_command`, `bar_search`(각 728x64. 반투명 면 rgb(92, 115, 160) 알파 26, missing 만 13. 왼쪽 x 20 에 종류 꼬리표 18px `muted`), 라벨 글자 `label_ln`, `label_random`, `label_mine`, `label_cn`, `label_hcn`(18px 흰색, 높이 17), `lamp_strip`(11칸 x 8x8, NO PLAY 부터 MAX. 폴더 분포 그래프의 원본), 색을 도는 램프 5종 `lamp_failed`(빨강, 빈 칸), `lamp_exhard`(호박, 빨강), `lamp_fullcombo`(호박, 청록, 흰색), `lamp_perfect`·`lamp_max`(호박, 자홍, 흰색. 한 칸 8x8 을 가로로 이었다), `meter`(512x4 흰색. 가로 graph 의 원본), `icon_settings`, `icon_volume`(32x32, 도형으로 그린다), `star_on`, `star_off`(24x24) | 선곡 | 15,660 B |
-| `image/play.png` | 1024x570 | 81개. 노트 6색 x 5종(`note_`, `long_`, `held_`, `hell_`, `hell_held_`), `hell_drain`, `mine`, 게이지 칸 36(`gauge_<종류>_<상태>`, 4x8), 판정 글자 5(크기 64, 색을 구운 한 장씩: `judge_pgreat`·`judge_great` 는 "GREAT", `judge_good`, `judge_bad`, `judge_poor`), 콤보 숫자 3(`combo_pgreat`, `combo_great`, `combo_good`. 판정 글자와 같은 색의 11칸 한 줄: 숫자 0~9 와 열한째 칸의 옅은 0. 열한째 칸은 알파를 40/255 로 낮춘 같은 색의 0 이고 judge 객체가 빈 자리에 그린다), `bomb`(128x128 8프레임, 평면 고리), `beam`(8x64 세로 알파 띠, 최대 알파 118. 둘레에 투명 1px 을 두른 10x66 으로 놓이고 좌표표는 안쪽 8x64 를 가리킨다), `pulse`(같은 띠의 최대 알파 71. 판정선의 리듬 띠), `bar_h`(256x4), `bar_v`(4x256) | 플레이 5종 | 37,578 B |
+| `image/play.png` | 1024x570 | 81개. 노트 6색 x 5종(`note_`, `long_`, `held_`, `hell_`, `hell_held_`), `hell_drain`, `mine`, 게이지 칸 36(`gauge_<종류>_<상태>`, 4x8), 판정 글자 5(크기 64, 색을 구운 한 장씩: `judge_pgreat`·`judge_great` 는 "GREAT", `judge_good`, `judge_bad`, `judge_poor`. 좌우를 잉크에 맞춰 잘라 칸의 왼쪽 끝이 곧 글자의 왼쪽 끝이다: 폭 GREAT 206, GOOD 185, POOR 173, BAD 123), 콤보 숫자 3(`combo_pgreat`, `combo_great`, `combo_good`. 판정 글자와 같은 색의 10칸 한 줄: 숫자 0~9), `bomb`(128x128 8프레임, 평면 고리), `beam`(8x64 세로 알파 띠, 최대 알파 118. 둘레에 투명 1px 을 두른 10x66 으로 놓이고 좌표표는 안쪽 8x64 를 가리킨다), `pulse`(같은 띠의 최대 알파 71. 판정선의 리듬 띠), `bar_h`(256x4), `bar_v`(4x256) | 플레이 5종 | 36,694 B |
 | `image/result.png` | 512x8 | `bar`(512x8 흰색. 판정 막대 graph 의 원본) | 결과, 코스 결과 | 113 B |
 
-합계 108,706 B(106 KiB). 아틀라스는 common 1,365 B, decide 293 B, select 2,042 B, play 6,666 B, result 213 B 다. 목표 6 MiB 와의 차이는 예비다. 판정 글자와 콤보 숫자는 `play` 시트에 색째로 굽고(콤보의 열한째 칸이 같은 색의 옅은 0 이어야 해서다. destination 의 색은 흰색이다), READY·FAILED·FULL COMBO·LOADING·FAST·SLOW, 랭크 글자와 클리어 이름은 TTF 다.
+합계 107,822 B(105 KiB). 아틀라스는 common 1,365 B, decide 293 B, select 2,042 B, play 6,665 B, result 213 B 다. 목표 6 MiB 와의 차이는 예비다. 판정 글자와 콤보 숫자는 `play` 시트에 색째로 굽고(destination 의 색은 흰색이다), READY·FAILED·FULL COMBO·LOADING·FAST·SLOW, 랭크 글자와 클리어 이름은 TTF 다.
 
 ### 5.3 생성 스크립트 `tools/generate-images.py`
 
@@ -393,9 +393,9 @@ id 규칙: 스킨 전체에서 종류가 달라도 id 가 겹치면 안 된다(�
 | 의존성 | PEP 723 인라인 메타. `requires-python = ">=3.11"`, `pillow==12.3.0` 하나(2026-10-11 PyPI 최신 안정판, 2026-07-01 배포). 버전을 고정한 것은 래스터 결과를 고정하기 위해서다 |
 | 폰트 | `font/Inter-Regular.ttf`(스킨 폴더 안의 것) |
 | 구조 | 파일 셋으로 나뉜다. `tools/generate-images.py`(진입점: 등록표 `SECTIONS`, 선반 배치, PNG·아틀라스 출력, `main`), `tools/sprites.py`(공통 그리기 헬퍼와 `Sprite`), `tools/sections/<구역>.py`(구역마다 하나. `build() -> list[Sprite]` 와 그 구역의 상수). 진입점이 `sections` 와 `sprites` 를 import 한다(스크립트 폴더가 import 경로에 있다). 진입점은 `sys.dont_write_bytecode` 를 켜므로 `__pycache__` 가 생기지 않는다 |
-| 공통 헬퍼(`sprites.py`) | `digit_strip(name, size)`(10칸 숫자 띠), `signed_digit_strip(name, size)`(24칸), `word(name, text, size, color)`(글자 한 덩이), `counter_strip(name, size, color, ghost_alpha)`(숫자 10칸 뒤에 알파를 `ghost_alpha` 로 낮춘 0 한 칸을 붙인 11칸 띠. judge 객체의 콤보용이다: 칸 수가 10 의 배수가 아니면 엔진이 11칸 묶음으로 읽고 빈 자리를 열한째 칸으로 채운다[b3 의 judge 절]), `block(name, w, h, color)`(단색 사각형), `tinted(mask, color)`(알파 마스크에 색), `guarded(sprite, margin)`(둘레에 투명 `margin` px 을 두르고 좌표표에는 안쪽 사각형만 적는다. 선형 보간으로 늘려 그리는 작은 그림이 시트에서 어디에 놓이든 가장자리가 같은 투명 픽셀과 섞이게 한다. `Sprite.margin`). 전부 `Sprite(name, image, divx, divy, meta)` 를 돌려준다. `palette(group)` 은 `lua/theme.lua` 의 `theme.<group>` 표에서 색을 읽어 `{ 이름: (r, g, b) }` 로 돌려준다(group 은 `color`, `tone`, `difficulty`, `judge`, `judge_word`, `timing`, `lamp`. 표에 적힌 순서를 지킨다) |
+| 공통 헬퍼(`sprites.py`) | `digit_strip(name, size, color)`(10칸 숫자 띠. 색을 주지 않으면 흰색이다. 콤보 숫자는 판정 색으로 굽는다), `signed_digit_strip(name, size)`(24칸), `word(name, text, size, color)`(글자 한 덩이), `block(name, w, h, color)`(단색 사각형), `tinted(mask, color)`(알파 마스크에 색), `guarded(sprite, margin)`(둘레에 투명 `margin` px 을 두르고 좌표표에는 안쪽 사각형만 적는다. 선형 보간으로 늘려 그리는 작은 그림이 시트에서 어디에 놓이든 가장자리가 같은 투명 픽셀과 섞이게 한다. `Sprite.margin`). 전부 `Sprite(name, image, divx, divy, meta)` 를 돌려준다. `palette(group)` 은 `lua/theme.lua` 의 `theme.<group>` 표에서 색을 읽어 `{ 이름: (r, g, b) }` 로 돌려준다(group 은 `color`, `tone`, `difficulty`, `judge`, `judge_word`, `timing`, `lamp`. 표에 적힌 순서를 지킨다) |
 | 색의 출처 | 시트에 굽는 색(선곡의 램프 띠·도는 램프와 꼬리표, 플레이의 노트·게이지 칸·지뢰·판정 글자·콤보 숫자)은 구역 파일에 다시 적지 않고 `palette` 로 `theme.lua` 에서 읽는다. 팔레트를 바꾸면 `theme.lua` 만 고치고 그 색을 굽는 구역을 다시 생성한다(`--check` 가 빠뜨린 구역을 알려 준다) |
-| 구역 파일 | 다섯 구역 모두 완성. 구역에만 필요한 그리기 함수(선곡의 아이콘, 플레이의 노트·폭발)는 그 구역 파일 안에 있다 |
+| 구역 파일 | 다섯 구역 모두 완성. 구역에만 필요한 그리기 함수(선곡의 아이콘, 플레이의 노트·폭발, 좌우를 잉크에 맞춰 자르는 판정 글자 `judge_word`)는 그 구역 파일 안에 있다 |
 | 배치 | 높이 내림차순, 이름순으로 정렬해 선반식으로 놓는다. 스프라이트 사이 2px. 시트 폭은 128~4096 의 2의 거듭제곱 중 정사각형 안에 들어가는 가장 작은 것 |
 | 출력 | `image/<구역>.png`(RGBA, 투명 픽셀도 RGB 는 흰색: 선형 보간 때 어두운 테두리가 생기지 않게)와 `lua/atlas/<구역>.lua`(이름순). 스프라이트가 없는 구역은 아무것도 쓰지 않는다 |
 | 결정성 | 같은 입력에서 바이트가 같다(8절에서 확인). 시각·난수·환경 변수에 의존하지 않는다. 다른 OS 나 다른 Pillow 판에서의 바이트 동일성은 보장하지 않으므로 CI 에서 다시 만들지 않는다 |
@@ -639,7 +639,7 @@ NOTE DISPLAY TIME 두 칸(웨이브 10A)은 number 312(이동 시간 ms)와 313(
 | 히든·리프트 커버 | 필드 폭, top 840, h 840 | hiddenCover(disapearLine 240, 리프트 연동), liftCover(disapearLine 232). 히든 수치 315 는 top 852, offsets 3·5. 리프트 수치 314 는 기준선 840 고정, op 272 |
 | 판정선 연출 | 판정선 자리 | 기본 `accent_dim`. 타이머 40 에 `accent` 가 가운데에서 400ms 펼쳐진다. 리듬 띠 (top 824, h 16) image `pulse`(반투명은 시트에 구움), 타이머 140, 알파 255 → 0(500ms) |
 | 폭발 | 레인 가운데, 중심 y 844, 128x128 | image `bomb` 8프레임, cycle 250, 가산. 타이머 50+(1회), 70+(누르는 동안) |
-| 판정 + 콤보 | 글자 윗선 top 560. 가로 자리는 아래 "판정 줄" | judge(index = 필드 번호, `shift = false`). 크기 64(필드 폭 480 미만은 48), 콤보 5자리 고정 칸. 타이머 46 에 키프레임 0 과 500 이 같은 값, `loop = -1`: 판정이 난 프레임부터 500ms 동안 그대로 서 있다가 사라진다(3.5절). PGREAT 와 GREAT 는 둘 다 "GREAT" 이고 색이 다르다(`theme.judge_word`: 하늘색, 노랑). GOOD·BAD·POOR 는 `theme.judge` 의 색. 헛침(여섯째)은 POOR 의 글자다. 콤보 숫자는 엔진이 PGREAT·GREAT·GOOD 에만 그리고 글자와 같은 색이다. 색은 시트에 구웠고 destination 의 색은 흰색이다. offsets 3·100·32 |
+| 판정 + 콤보 | 글자 윗선 top 560. 가로 자리는 아래 "판정 줄" | judge(index = 필드 번호, `shift = false`, `numberAlign = 1`). 크기는 64 에서 2씩 줄여 콤보 다섯 자리가 필드 안에 드는 가장 큰 값(7키 Normal 60, 5키 Normal 46, 그 밖은 64). 콤보는 글자 바로 뒤에서 왼쪽 정렬로 다섯 자리까지. 타이머 46 에 키프레임 0 과 500 이 같은 값, `loop = -1`: 판정이 난 프레임부터 500ms 동안 그대로 서 있다가 사라진다(3.5절). PGREAT 와 GREAT 는 둘 다 "GREAT" 이고 색이 다르다(`theme.judge_word`: 하늘색, 노랑). GOOD·BAD·POOR 는 `theme.judge` 의 색. 헛침(여섯째)은 POOR 의 글자다. 콤보 숫자는 엔진이 PGREAT·GREAT·GOOD 에만 그리고 글자와 같은 색이다. 색은 시트에 구웠고 destination 의 색은 흰색이다. offsets 3·100·32 |
 | 판정 위 줄 | top 520(판정 글자 바로 위), 크기 24. 가로 자리는 아래 "판정 줄" | 왼쪽 자리: 점수 차(Score Difference. Target = number 108, Best = 152). `snum24` 5자리(부호 + 4자리), `zeropadding = 1`, saturate: "+0003", "-0127", 넘치면 "+9999"·"-9999"(3.3절). 색 `text`. 조건은 타이머뿐이라 PGREAT 에도 뜬다. 오른쪽 자리: 판정 상세(Judge Detail). 905: "FAST"(op 1242, `theme.timing.fast` 파랑) / "SLOW"(op 1243, 빨강). 엔진은 이 옵션을 PGREAT 가 아닌 판정에만 켜고(레퍼런스 `getNowJudge > 1`), 오토플레이의 판정은 어긋남이 0 이라 뜨지 않는다. 906: number 525(`snum24` 4자리. 빠르면 +, 파랑. 느리면 -, 빨강. PGREAT 는 op 241 로 `sub`). 904: 그리지 않는다. 둘 다 타이머 46 에 0~500ms, `loop = -1`(판정 글자와 같은 프레임에 나오고 같은 프레임에 사라진다). offsets 3·100·33. DP 는 필드마다: 2P 는 1262/1263/261, 526, 타이머 47 |
 | 로딩 | top 400 | LOADING(크기 24) + 막대 (x+48, 444, w-96, 4) graph type 102, op 80 |
 | READY, FULL COMBO | top 400, 크기 44 | 타이머 40(0~600ms), 타이머 48(0~2000ms, 선은 top 456) |
@@ -658,25 +658,30 @@ NOTE DISPLAY TIME 두 칸(웨이브 10A)은 number 312(이동 시간 ms)와 313(
 | 발치(SP) | 3열. HI-SPEED(text 함수 `%d.%02d`, 크기 24), GREEN(313), COVER(14, op 270). 값 기준선 top + 44. AUTOPLAY(op 33)·REPLAY(op 84) top + 68 |
 | 스코어 그래프 | 캡션 top. 막대 3개(w 40, 간격 8, top + 28, h = 전체 - 168): 110(`accent`), 112(`sub`), 114(`theme.tone.yellow`). BEST(152)·TARGET(108) 줄: 막대 아래 16, 84 |
 
-판정 줄(웨이브 10C). 전부 정수 좌표이고 판정마다, 콤보마다 같다.
+판정 줄(웨이브 10C, 가로 자리는 웨이브 10D). 전부 정수 좌표다.
 
-| 항목 | 식 | 7키 Normal(필드 64, 484) | 5키 Normal(필드 172, 376. 크기 48) |
+| 항목 | 식 | 7키 Normal(필드 64, 484) | 5키 Normal(필드 172, 376) |
 | --- | --- | --- | --- |
-| 배율 `s` | 크기 / 64 | 1 | 0.75 |
-| 글자 폭 | `round(시트 폭 * s)`. GREAT 217, GOOD 197, POOR 184, BAD 137 | 217 | 163 |
-| 글자와 콤보 칸 사이 | `round(크기 * 0.25)` | 16 | 12 |
-| 콤보 한 칸 | `round(40 * s)` x `round(53 * s)` | 40 x 53 | 30 x 40 |
-| 묶음 폭 | GREAT 폭 + 사이 + 5칸 | 433 | 325 |
-| 묶음 왼쪽 끝 `L` | `round(필드 x + (필드 폭 - 묶음 폭) / 2)` | 90 | 198 |
-| PGREAT·GREAT·GOOD 의 글자 | x = `L`(왼쪽 끝 고정) | 90 | 198 |
-| 콤보 칸 | x = `L` + GREAT 폭 + 사이 부터 5칸. 오른쪽 정렬이고 빈 자리에는 옅은 0 | 323~523 | 373~523 |
-| BAD·POOR 의 글자(콤보 없음) | 필드 가운데: `round(필드 x + (필드 폭 - 글자 폭) / 2)` | BAD 238, POOR 214 | BAD 309, POOR 291 |
-| 위 줄(점수 차 + 상세) | 폭 = 점수 차 잉크 73 + 16 + 상세 자리 72 = 161. 왼쪽 끝 `round(필드 x + (필드 폭 - 161) / 2)`. 상세 자리는 그 뒤 89px 부터이고 글자·숫자는 왼쪽 정렬 | 점수 차 226~299, 상세 315~387 | 점수 차 280~353, 상세 369~441 |
-| 위 줄에 하나만 있을 때 | Score Difference = Off 면 상세가, Judge Detail = Off 면 점수 차가 필드 가운데 정렬 | - | - |
+| 크기 | 64, 62, 60, ... 가운데 콤보 다섯 자리의 오른쪽 끝이 필드 오른쪽 끝을 넘지 않는 가장 큰 값 | 60 | 46 |
+| 배율 `s` | 크기 / 64 | 0.9375 | 0.71875 |
+| 글자 폭 | `round(시트 폭 * s)`. 시트 폭은 잉크 폭이다: GREAT 206, GOOD 185, POOR 173, BAD 123 | GREAT 193, GOOD 173, POOR 162, BAD 115 | GREAT 148, GOOD 133, POOR 124, BAD 88 |
+| 글자와 콤보 사이 | `round(크기 * 0.25)` | 15 | 12 |
+| 콤보 한 칸 | `round(40 * s)` x `round(53 * s)` | 38 x 50 | 29 x 38 |
+| 가운데에 두는 묶음 | GREAT 폭 + 사이 + 3칸 | 322 | 247 |
+| 왼쪽 끝 `L` | `round(필드 x + (필드 폭 - 묶음 폭) / 2)` | 145 | 237 |
+| 판정 글자(여섯 칸 모두) | x = `L`. BAD·POOR·헛침도 같다 | 145 | 237 |
+| 콤보의 첫 자리 | x = `L` + 그 판정의 글자 폭 + 사이. 왼쪽 정렬이고 자릿수만큼만 그린다 | GREAT 353, GOOD 333 | GREAT 397, GOOD 382 |
+| 다섯 자리의 오른쪽 끝 | `L` + GREAT 폭 + 사이 + 5칸. 필드 오른쪽 끝(548) 이하 | 543 | 542 |
+| 위 줄(점수 차 + 상세) | 점수 차의 왼쪽 끝 = `L`(잉크 폭 73). 상세 자리는 `L` + 73 + 16 부터이고 글자·숫자는 왼쪽 정렬 | 점수 차 145~218, 상세 234 부터 | 점수 차 237~310, 상세 326 부터 |
+| 위 줄에 하나만 있을 때 | Score Difference = Off 면 상세가, Judge Detail = Off 면 점수 차가 `L` 에서 시작한다 | 145 | 237 |
 
-- 글자의 왼쪽 끝을 고정하고 콤보를 고정 폭 칸에 두었다. judge 객체의 콤보는 그리는 자리 수만큼의 폭 안에서 가운데로 모이므로(`skin_render/judge.rs` `draw_count`), 10칸 띠로는 자릿수가 늘 때마다 숫자가 반 칸씩 움직인다. 11칸 띠는 빈 자리를 열한째 칸(옅은 0)으로 채워 다섯 자리를 언제나 다 그리므로 숫자가 제 칸에서 움직이지 않는다. 옅은 0 은 꺼진 자리를 어둡게 남겨 두는 IIDX 의 판정 숫자와 같은 구성이고, 글자와 숫자 사이가 비어 보이지 않게 한다. 옅기는 `tools/sections/play.py` 의 `COMBO_GHOST_ALPHA`(40/255)이고 0 으로 하면 빈 자리가 된다.
+- 판정 글자의 왼쪽 끝은 판정 종류와 콤보에 상관없이 `L` 이고, 콤보는 그 판정의 글자 바로 뒤에서 왼쪽 정렬로 붙는다: `GREAT 7`, `GREAT 67`, `GREAT 648`, `GREAT 1234`. 자릿수가 늘면 숫자는 오른쪽으로만 자라고, 닿지 않은 자리에는 아무것도 그리지 않는다. `L` 은 "GREAT" 와 세 자리 콤보의 묶음이 필드 가운데에 오는 값이다(플레이 중 가장 오래 보이는 상태가 가운데에 온다). 넓은 레인, 5·9·10·14키, Field Side 에서도 그 필드의 x 와 폭으로 같은 식이다.
+- 원본 형식의 judge 는 콤보를 그리는 자리 수만큼의 폭 안에서 언제나 가운데로 모은다(원본 로더가 숫자의 `align` 을 2 로 고정한다). 그대로는 자릿수가 늘 때마다 첫 자리가 반 칸씩 움직이므로, 엔진에 judge 의 `numberAlign` 을 더해 왼쪽 정렬로 그린다(7절, [b3 의 "웨이브 10D 반영 사항"]). 웨이브 10C 는 11칸 띠의 옅은 0 으로 다섯 자리 칸을 언제나 다 그려 자리를 고정했는데(`GREAT 00067`), 사용자 결정으로 옅은 0 을 없애고 이 배치로 바꿨다.
+- 판정 글자의 스프라이트는 좌우를 잉크에 맞춰 잘랐다(`tools/sections/play.py` `judge_word`). 칸의 왼쪽 끝이 곧 잉크의 왼쪽 끝이어서 G·B·P 의 옆 여백 차이 없이 모든 판정이 같은 x 에서 시작하고, 위 줄의 왼쪽 끝과도 맞는다(위 줄의 `-` 부호는 제 칸 안에서 2px 안쪽에 놓인다).
+- 크기 규칙(`field.lua` `judge_row`): 64 에서 2씩 줄이며 다섯 자리의 오른쪽 끝이 필드를 넘지 않는 첫 값을 쓴다. 폭 484(7키·14키 Normal)는 60, 폭 376(5키·10키 Normal)은 46, 폭 559 이상(Wide 전부, 9키)은 64 다.
+- 숫자 칸은 폭이 같고 잉크가 칸 가운데에 있다. 그래서 글자와 첫 숫자 잉크의 사이는 첫 자리에 따라 조금 다르다(7키 Normal 에서 6 은 18px, 7 은 19px, 1 은 25px).
 - `shift = false` 다. 엔진의 `shift` 는 글자를 숫자 폭의 절반만큼 왼쪽으로 민다(자릿수가 늘면 글자가 움직인다).
-- 콤보 destination 의 x 는 엔진이 `w * digit / 2` 만큼 왼쪽으로 당기므로[b3 의 judge 절] 그만큼 더해 적는다: 글자 기준 x = GREAT 폭 + 사이 + `floor(칸 폭 * 5 / 2)`.
+- 콤보 destination 의 x 는 엔진이 `w * digit / 2` 만큼 왼쪽으로 당기므로[b3 의 judge 절] 그만큼 더해 적는다: 글자 기준 x = 그 판정의 글자 폭 + 사이 + `floor(칸 폭 * 5 / 2)`.
 - 세로 위치: 사용자가 정하는 Judge Position(100)이 글자·콤보·위 줄에 함께 걸린다. +100 이면 묶음 전체가 화면에서 100px 위로, -100 이면 100px 아래로 간다(창 크기와 무관하게 화면 픽셀이다. 엔진이 문서 단위로 바꿔 더한다). 콤보는 글자의 모서리 기준이라 글자를 따라간다.
 - Judge Display = Hide 면 이 표의 것을 하나도 넣지 않는다.
 
@@ -779,7 +784,7 @@ SP 와 다른 점
 | 커버 | 같은 slider·커버 정의를 두 필드에 한 번씩 배치 |
 | 발치 | 1P 발치에 HI-SPEED(1열)와 GREEN(2열)만, 2P 발치에 AUTOPLAY/REPLAY(위 행, 필드 x)와 COVER(3열, op 270)만 그린다. 같은 값은 한 번만 나온다. 자동 플레이·리플레이가 아니고 커버를 조작하지 않을 때 2P 발치는 빈다 |
 | 판정 위 줄 | 점수 차, FAST/SLOW 와 ms 숫자는 친 쪽 필드에만 뜬다(1P 는 op 1242/1243·number 525·타이머 46, 2P 는 1262/1263·526·47). 점수 차의 값은 두 필드가 같다(런 하나의 값이다) |
-| 판정 줄의 자리 | 필드마다 6.3절의 식 그대로(14키 1P 는 `L` 90, 2P 는 1398. 10키는 크기 48) |
+| 판정 줄의 자리 | 필드마다 6.3절의 식 그대로(14키 Normal 은 크기 60, 1P 의 `L` 145, 2P 는 1453. 10키 Normal 은 크기 46. Wide 는 크기 64) |
 | 옵션 | Lane Width, Judge Detail, Score Difference, Judge Display. Field Side, Scratch Side, Score Graph 없음(점수 영역에 TARGET 행이 들어간다) |
 | 오프셋 | Score Graph Opacity(114)가 없다. Judge Position 과 부위 불투명도는 두 필드에 같이 걸린다 |
 
@@ -885,6 +890,7 @@ SP 와 다른 점
 | image 의 `act`(id, Lua 함수), `mouseRect`, 슬라이더 드래그 | `skin_render/input.rs`, `dst.rs` | 검증됨 |
 | songlist | `skin_render/songlist/` | 검증됨 |
 | note, gauge, judge, bga, 커버, 오프셋 3·4·5·30·32·33 | `skin_render/notes.rs`, `gauge.rs`, `judge.rs`, `bga.rs`, `covers.rs` | 5/7/10/14키 검증됨 |
+| judge 의 `numberAlign`(콤보 숫자의 정렬. 원본에 없는 R-BMS 확장) | `crates/rbms-skin/src/model/objects.rs` `JudgeDef.number_align`, `skin_render/judge.rs` `draw_count` | 기본 스킨이 처음 쓴다(웨이브 10D). 0 = 오른쪽, 1 = 왼쪽, 그 밖 = 가운데이고 쓰지 않으면 원본대로 가운데다. 엔진 테스트와 캡처로 확인. 같은 문서를 beatoraja 로 열면 콤보가 가운데 정렬로 그려진다 |
 | gaugegraph, judgegraph type 1·2, timingdistributiongraph | `skin_render/graphs/` | 검증됨 |
 | 9키 문서(type 4) | `loader.rs` `PLAY_SKIN_MODES`, `apps/rbms-player/src/stage/play/mod.rs`(`mode_skin_type(shared.mode)`), `skin_host/play_timers.rs` `POPN_9K_KEYS` | 기본 스킨이 처음 쓴다. 캡처 하니스에 9키 런을 넣어 그리기까지 확인(`play9-play-09000ms`): 9레인이 가운데, 노트·키 빔·폭발·판정이 제 레인에 |
 | note 의 `dst2`, `expansionrate` | `skin_render/notes.rs` `fall_to`, `swell` | `dst2 = 168` 을 9키 문서가 쓰고 로드·그리기 확인. 놓친 노트가 하한까지 떨어지는 장면은 캡처로 보지 못했다(하니스의 9키 런은 자동 플레이다). `expansionrate` 는 기본값이라 쓰지 않는다 |
@@ -1001,8 +1007,8 @@ RBMS_SKIN_CAPTURE_DIR=<폴더> cargo test -p rbms-player --lib play_parts -- --n
 | 공통 | 글자가 읽히는가(최소 18). 요소가 겹치거나 잘리지 않는가. 값의 기준선이 맞는가. 등장·퇴장이 3.5절대로인가. 마지막 페이드 프레임이 `bg` 단색인가. 자릿수 상한을 넘는 값에서 아래 자리만 나오지 않는가(3.3절. 앱 캡처의 샘플 차트로는 볼 수 없으므로 시나리오 값을 바꿔 그린다) |
 | 결정 | 0ms 에 머리와 구분선만, 1500ms 에 전부, 3500ms 에 항목 구분선 자리의 `accent` 선과 옅은 덮개, 3950ms 에 단색. 긴 제목이 스테이지 그림(x 1280)을 넘지 않는가. 변속 곡에서 최소·줄표·최대가 붙어 있는가. 숫자의 잉크가 항목 이름의 x 에서 시작하는가 |
 | 선곡 | 가운데 막대가 top 520 에 있는가. 막대 종류·램프·레벨·라벨이 6.2절대로인가. 폴더·코스 막대에서 정보 영역이 바뀌는가. 그림 없는 곡에 "NO STAGE IMAGE" 가 뜨는가. 패널 1~3 의 칸이 건반 순서와 맞는가 |
-| 플레이(Lane Width = Wide) | 건반 표시 줄(y 880)에서 잰 레인 폭이 Normal 의 1.5 배인가(87, 69, 150, 93). 노트가 레인 폭을 꽉 채우고 가장자리가 한 픽셀에 끊기는가. 누르고 있는 LN 의 아래 끝이 판정선에 닿는가. 판정 글자의 잉크 가운데가 필드 가운데인가. 정보 영역의 상자가 서로, 필드와, 화면 끝과 겹치지 않는가(7키 Graph On 은 2단, 9키는 타이밍이 왼쪽, DP 는 게이지가 1P 필드 아래). 코스에서 좁은 곡 머리의 단계 글자가 2행 오른쪽에 있는가. Normal 의 캡처가 고치기 전과 바이트까지 같은가 |
-| 플레이 | 노트 아래 변이 판정선에 닿는가. 레인 수와 순서(스크래치 방향 옵션 포함). 판정 묶음(글자 + 콤보 5칸)이 필드 가운데인가. 게이지 50칸. DP 에서 두 필드가 대칭인가. 9키에서 9레인이 가운데인가. 손으로 친 캡처에서: 빠른 타에 파란 "FAST", 느린 타에 빨간 "SLOW" 가 판정 글자 위 줄의 오른쪽 자리에 뜨고 PGREAT 에는 뜨지 않는가. 같은 줄 왼쪽에 부호와 네 자리의 점수 차가 뜨고 스코어 그래프의 TARGET 숫자와 같은 값인가. PGREAT 의 "GREAT" 가 하늘색, GREAT 가 노랑인가. DP 에서 친 쪽 필드에만 뜨는가. 판정 수 표가 5행이고 분포 그래프 위에 범례가 있는가 |
+| 플레이(Lane Width = Wide) | 건반 표시 줄(y 880)에서 잰 레인 폭이 Normal 의 1.5 배인가(87, 69, 150, 93). 노트가 레인 폭을 꽉 채우고 가장자리가 한 픽셀에 끊기는가. 누르고 있는 LN 의 아래 끝이 판정선에 닿는가. 판정 글자와 세 자리 콤보의 묶음이 필드 가운데인가. 정보 영역의 상자가 서로, 필드와, 화면 끝과 겹치지 않는가(7키 Graph On 은 2단, 9키는 타이밍이 왼쪽, DP 는 게이지가 1P 필드 아래). 코스에서 좁은 곡 머리의 단계 글자가 2행 오른쪽에 있는가. Normal 의 캡처가 고치기 전과 바이트까지 같은가 |
+| 플레이 | 노트 아래 변이 판정선에 닿는가. 레인 수와 순서(스크래치 방향 옵션 포함). 판정 묶음(글자 + 콤보 세 자리)이 필드 가운데이고 콤보 다섯 자리가 필드 안인가. 판정이 바뀌어도 글자의 왼쪽 끝이 같은가. 게이지 50칸. DP 에서 두 필드가 대칭인가. 9키에서 9레인이 가운데인가. 손으로 친 캡처에서: 빠른 타에 파란 "FAST", 느린 타에 빨간 "SLOW" 가 판정 글자 위 줄의 오른쪽 자리에 뜨고 PGREAT 에는 뜨지 않는가. 같은 줄 왼쪽에 부호와 네 자리의 점수 차가 뜨고 스코어 그래프의 TARGET 숫자와 같은 값인가. PGREAT 의 "GREAT" 가 하늘색, GREAT 가 노랑인가. DP 에서 친 쪽 필드에만 뜨는가. 판정 수 표가 5행이고 분포 그래프 위에 범례가 있는가 |
 | 플레이(판정 줄과 부위. `play_parts.rs`) | `parts-frames-*` 11장에서 판정 줄이 같은 자리·크기·색인가(540ms 에는 없는가). 콤보 9·10·100 에서 글자가 같은 자리인가. Judge Position ±100 에서 묶음이 통째로 100px 움직이는가. `bare` 가 화면 바탕 위에 노트·키 빔·폭발·판정선·판정 줄만 남기는가. `without-<부위>` 마다 그 부위만 사라지고 가장자리·잔상이 없는가 |
 | 결과 | 클리어와 실패의 머리 글자·색. 랭크, 점수 차이의 부호, 판정 표 5행 15칸과 COMBO BREAK·EMPTY POOR, 그래프 4개와 그래프마다의 범례. 안내의 게이지 전환 문구가 키 수에 맞는가 |
 
@@ -1081,6 +1087,20 @@ RBMS_SKIN_CAPTURE_DIR=<폴더> cargo test -p rbms-player --lib play_parts -- --n
 | 메뉴 조작으로 만든 플레이 화면(웨이브 10C 통합) | `parts-menu-bare-before`·`-after`: 엔진이 치는 7키 런 9,000ms 에서 SKIN 메뉴의 키(행마다 Shift+← 네 번)로 Lane Background, Lane Divider, Key Display, Bar Line, Progress Bar, Score Graph, Song Header, Speed Display, Timing 을 0% 로 내린 앞뒤. 뒤 장은 `parts-play7-bare`(오프셋을 직접 적은 것)와 같은 구성이다 |
 | 엔진 게이트 | `cargo test -p rbms-skin --test default_pack` 4 통과. `cargo test -p rbms-player capture` 52 통과(새 게이트 넷 포함. 같은 웨이브의 엔진·메뉴 단위가 고친 작업 트리 위에서 돌렸다). 내장 화면의 골든은 건드리지 않았다 |
 
+웨이브 10D(판정 줄 다시 놓기. 2026-10-12). 위 웨이브 10C 표의 "콤보가 늘 때", "판정 위 줄"의 자리, "넓은 레인과 DP"의 크기와 그 앞 웨이브의 "판정 글자와 콤보" 줄은 이 표가 대신한다.
+
+| 확인 | 결과 |
+| --- | --- |
+| 고치기 전(HEAD 6bc9c41, 1920x1080) | `parts-judge-combo-009`·`-010`·`-100`: 글자 잉크 x 96~301 로 같고, 숫자 잉크의 왼쪽 끝이 487, 455, 415 로 자릿수마다 왼쪽으로 가며 글자와의 사이가 186, 154, 114px 이었다(리뷰 실측). 빈 자리에 옅은 0. BAD·POOR 는 필드 가운데(칸의 x 238, 214), 위 줄은 x 226 에서 시작해 글자의 왼쪽 끝과 130px 어긋났다 |
+| 콤보가 늘 때(7키 Normal) | `parts-judge-combo-00007`, `-00067`, `-00648`, `-01234`, `-12345`(코스의 이어받은 콤보로 시작해 한 타): "GREAT 7", "GREAT 67", "GREAT 648", "GREAT 1234", "GREAT 12345". 글자 잉크가 다섯 장 모두 x 145~337. 숫자 잉크의 왼쪽 끝 357, 356, 356, 363, 363(첫 자리 7, 6, 6, 1, 1 이 같은 칸 353~391 안), 오른쪽 끝 386, 424, 463, 502, 538 로 한 자리에 38~39px 씩 오른쪽으로만 자란다. 다섯 자리의 끝 538 은 필드 끝 548 안이다. 옅은 0 이 없다 |
+| 판정 다섯 가지(7키 Normal) | `parts-judge-on-the-beat`(PGREAT "GREAT 648"), `-great-fast`("GREAT 649"), `-great-slow`, `-good-fast`, `-good-slow`("GOOD 652"), `-bad-fast`("BAD"), `-missed`("POOR"): 글자 잉크의 왼쪽 끝이 일곱 장 모두 x 145. GOOD 의 숫자는 GOOD 뒤(x 336)에서 시작한다. 오른쪽 끝은 GREAT 337, GOOD 317, BAD 259, POOR 306 |
+| 위 줄 | 같은 캡처들: 점수 차의 잉크가 `+` 는 x 145, `-` 는 147 에서 시작하고 FAST·SLOW 는 x 234 에서 시작한다. `parts-line-detail-only`: "FAST" 가 x 145 부터. `parts-line-difference-only`: "-0001" 이 x 147 부터. `parts-judge-ms-*`(Milliseconds + Best): PGREAT "+0002 +0", GREAT "+0003 +40", GOOD "+0004 -100", BAD "+0004 +210", POOR "+0004 -290" 이 같은 자리(점수 차 x 145, ms 는 x 234 부터) |
+| 가만히 있는가 | `parts-frames-on-the-beat-000ms`~`496ms` 10장: 색 `84CEFF` 인 픽셀이 x 146~378, y 561~604, 2,012개로 모두 같고 `540ms` 에는 없다. `parts-frames-early-*`(색 `FFD633`): x 146~384, 2,141개로 10장이 같고 `540ms` 에 없다 |
+| 위치와 숨김 | `parts-position-up`(+100): 글자 y 461~504, `-down`(-100): y 661~704 로 기본(561~604)에서 정확히 100px, x 는 같다. `parts-position-hidden`: 판정 줄의 픽셀이 없다 |
+| 넓은 레인과 다른 모드 | `parts-judge-wide-*`(7키 Wide + Field Right, 필드 1137~1856): 크기 64, 글자 x 1326, 다섯 자리의 끝 1742. `parts-judge-play5-*`(필드 172~548): 크기 46, 글자 x 237, 다섯 자리의 끝 538, BAD·POOR 도 237. `parts-judge-play14-*`(친 2P 필드 1372~1856): 크기 60, 글자 x 1453, 다섯 자리의 끝 1846. `parts-judge-play14-wide-*`(1169~1888): 크기 64, 글자 x 1358, 다섯 자리의 끝 1774. 어느 것도 친 필드에만 뜬다 |
+| 게이트(`stage/capture/play_parts.rs`, 960x540) | `the_default_pack_writes_a_combo_behind_the_word_of_a_judgement_and_grows_it_to_the_right`(콤보 7, 67, 648, 1234, 12345: 글자가 픽셀까지 같고, 숫자의 첫 잉크가 첫 칸 안, 마지막 잉크가 그 자릿수의 칸 안, 필드 안), `the_default_pack_starts_every_judgement_and_the_line_over_it_on_one_column`(PGREAT·GREAT·GOOD·BAD·POOR 의 글자와 위 줄이 같은 열에서 1px 안), `the_default_pack_centres_a_judgement_on_every_field_and_keeps_its_combo_inside`(5·7·9·10·14키 x Normal·Wide 와 7키 Field Right: 필드마다 `numberAlign = 1`, 여섯 글자의 x 가 같음, 글자 + 세 자리가 가운데(좌우 차 1px 이하), 다섯 자리가 필드 안). 고치기 전의 팩에서는 셋 다 실패한다 |
+| 생성 스크립트 | `uv run tools/generate-images.py play` 로 play 시트만 다시 만들었다(37,578 → 36,694 B, 좌표표 6,666 → 6,665 B). 전체 `--check` 종료 코드 0(10개 파일 일치) |
+
 확인하지 못한 것
 
 | 화면 | 내용 |
@@ -1104,6 +1124,7 @@ RBMS_SKIN_CAPTURE_DIR=<폴더> cargo test -p rbms-player --lib play_parts -- --n
 | 웨이브 9A U4 | FAST/SLOW 기본 켬, IIDX 식 판정(글자·색·5행), ModernChic 의 램프·난이도 색과 클리어 표기, 손으로 치는 캡처 하니스 | 팩의 `lua/**`, `tools/**`, `image/{play,select}.png`, `lua/atlas/{play,select}.lua`, `apps/rbms-player/src/stage/capture/by_hand.rs`, 이 설계서 | 완료(웨이브 9A) |
 | 웨이브 10A 단위 A | Lane Width 옵션(Normal / Wide. 레인 1.5 배)과 Wide 의 배치, 좁은 곡 머리, 옵션을 바꿔 찍는 캡처와 게이트 | `lua/play/{layout,main,info}.lua`, `apps/rbms-player/src/stage/capture/play_rows.rs`(`capture.rs` 에는 mod 한 줄), 이 설계서 | 완료(웨이브 10A) |
 | 웨이브 10C 단위 S | 판정 줄을 정적으로(확대·미끄러짐·깜빡임·색 돌림·페이드 제거, 글자 왼쪽 끝 고정, 콤보 고정 칸), 판정 위 줄(점수 차 + FAST/SLOW), 옵션 Score Difference·Judge Display, 오프셋 Judge Position 과 부위 불투명도 19개, `ui` 의 `s:within`, 생성 스크립트의 `counter_strip`·`guarded`, 판정 줄·부위 캡처와 게이트 | 팩의 `lua/play/**`, `lua/{ui,theme}.lua`, `tools/{generate-images.py,sprites.py,sections/play.py}`, `image/play.png`, `lua/atlas/play.lua`, `apps/rbms-player/src/stage/capture/play_parts.rs`(`capture.rs` 에는 mod 한 줄), 이 설계서 | 완료(웨이브 10C) |
+| 웨이브 10D | 판정 줄 다시 놓기: 콤보를 글자 바로 뒤에 왼쪽 정렬로(옅은 0, 11칸 띠, `counter_strip` 삭제), 모든 판정 글자와 위 줄의 왼쪽 끝 `L`, 다섯 자리가 필드 안에 드는 크기 규칙, 좌우를 잉크에 맞춘 판정 글자. 엔진: judge 의 `numberAlign`. 하니스: 이어받은 콤보로 시작하는 런, 모드별 BAD 타 | 팩의 `lua/play/field.lua`, `tools/{sprites.py,sections/play.py}`, `image/play.png`, `lua/atlas/play.lua`, `crates/rbms-skin/src/model/objects.rs`, `crates/rbms-render/src/skin_render/{judge,draw}.rs`, `apps/rbms-player/src/stage/capture.rs`, `capture/{play_parts,by_hand}.rs`, 이 설계서 | 완료(웨이브 10D) |
 | 웨이브 10A 통합 | 선곡 패널 3 의 NOTE DISPLAY TIME 두 칸(이동 시간과 녹색 숫자, 꺼짐 표기), 플레이의 TIMING 표지(AUTO), 결과와 패널 3 의 안내 문구에서 옮길 수 있는 키 이름 정리. 엔진: 플레이 화면이 image index 75 를 답한다, 묶인 가림막 키를 누른 뒤 1.5초 동안 op 270(LANECOVER1_CHANGING)이 켜져 발치의 COVER 수치가 뜬다 | `lua/select/sheet.lua`, `lua/play/info.lua`, `lua/result/main.lua`, `apps/rbms-player/src/skin_host/play.rs`, `stage/play/mod.rs` | 완료(웨이브 10A) |
 
 통합에서 공통으로 올린 것: 값 없음 표지 검사(`ui.has_value`), 시트 조각을 graph·slider 의 원본으로 옮기는 것(`s:sprite_source`), 기준선·가운데 정렬의 글자 윗선(`theme.text_top`, `theme.centered_top`), 팔레트의 16진 문자열(`theme.hex`), 이름표(`theme.clear`, `rank_name`, `gauge_name`, `random_name`), 판정 6행(`parts.judges`), Stage Image 옵션(`parts.stage_image*`), `event_index` 이름 고르기(`parts.choice`), bpmgraph 정의(`parts.bpm_graph`), 그래프·숫자의 열거값(`props.judge_graph`, `back_texture`, `padding`, `graph_angle`, `slider_angle`, `filter`)과 화면 모듈에 흩어져 있던 속성 id(`props.option` 의 60·61·261·1262·1263, `props.number` 의 421·422, `props.index` 의 301·371), 생성 스크립트의 팔레트 읽기(`sprites.palette`).

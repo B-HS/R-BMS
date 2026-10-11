@@ -1,6 +1,12 @@
 # R2 — R-BMS 렌더 계층(crates/rbms-render, GPU 백엔드) 현황과 격차
 
-> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 10C(오프셋의 알파가 듣는 범위) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-12 · 대응 단계: 웨이브 10D(judge 의 `numberAlign`) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 10D 반영 사항 (2026-10-12)
+
+원본에 없는 필드 하나를 읽는다. 원본 쪽 서술과 이유는 `b3-play-objects.md` 의 같은 이름의 절.
+
+- (judge 의 숫자 정렬) `crates/rbms-skin/src/model/objects.rs` 의 `JudgeDef.number_align: Option<i32>`(문서의 `numberAlign`). `skin_render/judge.rs` 의 `build_judge` 가 `JudgeBody.count_align` 으로 옮기고(`None` 은 `ALIGN_CENTRED` = 2), `draw_count` 가 value 와 같은 `draw.rs` `digit_shift(step, blanks, align)` 로 빈 자리만큼 당긴다: 0 은 0, 1 은 `step * blanks`, 그 밖은 `step * 0.5 * blanks`. `pull_count_left` 와 `shift`(`arrange`)는 손대지 않았다. 테스트: `tests_play_objects.rs` 의 `a_count_the_document_aligns_starts_or_ends_on_the_places_it_reserves`(본체 단위), `a_documents_pop_up_aligns_its_count_the_way_the_document_says`(문서에서 그리기까지. 키를 쓰지 않은 옆 judge 는 가운데 그대로), `crates/rbms-skin/tests/skin_from_lua.rs` 의 `a_judge_reads_how_its_count_is_aligned_and_knows_when_it_was_not_said`(Lua 와 JSON)
 
 ## 웨이브 10C 반영 사항 (2026-10-11)
 

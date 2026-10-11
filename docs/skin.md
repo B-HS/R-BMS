@@ -1,6 +1,6 @@
 # 스킨 가이드
 
-최종 갱신 2026-10-11 · 대응 커밋: f60dcef 이후 웨이브 10C(판정 표시와 부위별 불투명도. 작업 트리 기준, 커밋 전)
+최종 갱신 2026-10-12 · 대응 커밋: 6bc9c41 이후 웨이브 10D(판정 글자 뒤에 붙는 콤보. 작업 트리 기준, 커밋 전)
 
 R-BMS 는 화면마다 스킨 문서 하나를 읽어 그 화면을 단독으로 그린다. 문서가 없거나 읽히지 않는 화면은 내장 화면이 그린다. 기본으로 설치되는 자작 스킨 `rbms-default` 가 첫 실행부터 선곡 · 결정 · 플레이 · 결과를 그리며, beatoraja 용으로 만든 외부 Lua 스킨(`.luaskin`)도 수정 없이 읽는다. 이 문서의 독자는 스킨을 쓰는 사용자와 스킨을 만드는 사람이다.
 
@@ -78,6 +78,7 @@ R-BMS 는 화면마다 스킨 문서 하나를 읽어 그 화면을 단독으로
 | 스킨 옵션이 앱 설정과 겹칠 때 | 스킨 옵션이 우선한다. 스킨이 그리는 화면에서 의미가 없어진 설정 행에는 표지를 붙인다(§2.5) |
 | 오프셋의 알파 | 사용자가 준 오프셋의 알파(a)는 그 destination 의 모든 프레임에 더해진다. beatoraja 는 색이 키프레임 사이에서 보간되는 동안에는 더하지 않아(`SkinObject.prepareColor`) 페이드하는 객체가 0% 에서도 번쩍인다. 오프셋이 0 이면 결과가 같다 |
 | note·judge 객체의 오프셋 알파 | note(노트 필드)와 judge(판정) 객체는 자기 destination 이 가리키는 오프셋의 알파만큼 전체가 흐려진다. beatoraja 는 이 두 객체의 색을 읽지 않아 알파 오프셋이 듣지 않는다. 마디선은 note 정의의 `group` destination 이 가리키는 오프셋을 따로 따른다. 선곡 휠(songlist) 객체는 원본대로다 |
+| judge 객체의 `numberAlign` | judge(판정) 객체에 `numberAlign` 을 쓰면 콤보 숫자를 그 값대로 정렬한다: 0 오른쪽, 1 왼쪽(첫 자리가 고정되고 오른쪽으로 자란다), 그 밖은 가운데. beatoraja 에는 없는 키이고 beatoraja 는 콤보를 언제나 가운데로 모은다. 키를 쓰지 않은 스킨은 beatoraja 와 같게 그려진다. 숫자 value 의 `align` 은 beatoraja 처럼 읽지 않는다 |
 | timingvisualizer 의 선 | 눈금자 위의 선도 그 객체의 destination 이 가리키는 오프셋의 알파만큼 흐려진다(beatoraja 는 선에 오프셋을 적용하지 않는다). 키프레임 색의 알파는 원본처럼 선에 적용하지 않는다 |
 
 ## 2. 스킨 팩 쓰기
@@ -263,7 +264,7 @@ SCORE GRAPH 는 스킨 선곡 위의 기록 모달이 읽으므로 표지 없이
 | --- | --- |
 | `decide.luaskin`, `select.luaskin`, `play5`, `play7`, `play9`, `play10`, `play14` `.luaskin`, `result.luaskin`, `courseresult.luaskin` | 화면 문서 9개. 한 줄짜리 진입 파일이다(`return require("lua.<화면>.main").build(...)`) |
 | `lua/` | 공통 모듈 `theme.lua`(색, 격자, 이름표), `props.lua`(속성 id 이름표), `ui.lua`(조립기), `motion.lua`(키프레임 프리셋), `parts.lua`(조합 부품), 화면 모듈 `lua/<화면>/`, 생성된 시트 좌표표 `lua/atlas/` |
-| `image/` | 생성된 시트 5장 `common`, `decide`, `select`, `play`, `result` `.png`. 합계 108,706 B |
+| `image/` | 생성된 시트 5장 `common`, `decide`, `select`, `play`, `result` `.png`. 합계 107,822 B |
 | `font/` | `Inter-Regular.ttf`, `Inter-OFL.txt` |
 | `sound/` | 시스템 사운드 22개 `.wav`. 스킨의 `sound/…` 와 시스템 사운드 폴더가 같은 설치본이다 |
 | `tools/` | 이미지와 사운드 생성 스크립트. 설치본에는 들어가지 않는다 |
@@ -314,10 +315,10 @@ Normal 은 이 행이 생기기 전의 화면과 같다. 내장 화면의 DISPLA
 
 | 요소 | 내용 |
 | --- | --- |
-| 판정 글자 | PGREAT 와 GREAT 는 둘 다 `GREAT` 로 쓰고 색으로 가른다(PGREAT 하늘색 `84CEFF`, GREAT 노랑 `FFD633`). GOOD·BAD·POOR 는 주황에서 붉은 주황으로 가는 각자의 색이다. 글자의 왼쪽 끝은 콤보 자릿수와 무관하게 같은 자리다 |
-| 콤보 | PGREAT·GREAT·GOOD 옆에 5자리 고정 칸으로 오른쪽 정렬된다. 빈 앞자리는 옅은 0 으로 채운다(`GREAT 00067`). 콤보가 끊기는 BAD·POOR 는 숫자 없이 글자만 필드 가운데에 뜬다 |
+| 판정 글자 | PGREAT 와 GREAT 는 둘 다 `GREAT` 로 쓰고 색으로 가른다(PGREAT 하늘색 `84CEFF`, GREAT 노랑 `FFD633`). GOOD·BAD·POOR 는 주황에서 붉은 주황으로 가는 각자의 색이다. 글자의 왼쪽 끝은 판정 종류와 콤보 자릿수에 상관없이 같은 자리다. 그 자리는 `GREAT` 와 세 자리 콤보의 묶음이 필드 가운데에 오는 곳이다 |
+| 콤보 | PGREAT·GREAT·GOOD 의 글자 바로 뒤에 붙는다: `GREAT 7`, `GREAT 67`, `GREAT 648`, `GREAT 1234`. 첫 자리는 제자리에 있고 자릿수가 늘면 오른쪽으로만 자란다. 앞자리 0 은 없다. 다섯 자리까지 필드 안에 들도록 좁은 필드에서는 글자가 조금 작다(크기 64 기준으로 7·14키 기본 폭은 60, 5·10키 기본 폭은 46, 넓은 레인과 9키는 64). 콤보가 끊기는 BAD·POOR 는 숫자 없이 글자만 같은 왼쪽 끝에서 뜬다 |
 | 위 줄 왼쪽: 점수 차 | Score Difference 가 Target 이면 목표(TARGET 설정, 스코어 그래프의 TARGET 과 같은 값) 대비 EX 점수 차, Best 이면 자기 최고 기록 대비 차를 부호와 네 자리로 쓴다(`+0003`, `-0125`. ±9999 에서 멈춘다). PGREAT 에도 뜬다. Off 면 없다 |
-| 위 줄 오른쪽: 타이밍 | Judge Detail 이 Fast-Slow 이면 PGREAT 가 아닌 판정에서 FAST(파랑) 또는 SLOW(빨강), Milliseconds 이면 어긋난 시간을 ms 로 쓴다(빠르면 `+`, PGREAT 는 회색). Off 면 없다. 둘 중 하나만 켜면 켠 쪽이 가운데에 온다 |
+| 위 줄 오른쪽: 타이밍 | Judge Detail 이 Fast-Slow 이면 PGREAT 가 아닌 판정에서 FAST(파랑) 또는 SLOW(빨강), Milliseconds 이면 어긋난 시간을 ms 로 쓴다(빠르면 `+`, PGREAT 는 회색). Off 면 없다. 위 줄의 왼쪽 끝은 판정 글자의 왼쪽 끝과 같고, 둘 중 하나만 켜면 켠 쪽이 그 왼쪽 끝에서 시작한다 |
 | 위치 | 오프셋 Judge Position(메뉴의 `JUDGE POSITION Y`). +면 판정 글자·콤보·위 줄이 함께 그 픽셀만큼 위로, -면 아래로 간다. 한 칸 1px, Shift 로 10px, 범위 ±2000, 0 키로 제자리. 좌표는 스킨의 1920x1080 기준이다 |
 | 숨김 | 옵션 Judge Display 를 Hide 로 두면 판정 글자·콤보·위 줄이 모두 그려지지 않는다 |
 

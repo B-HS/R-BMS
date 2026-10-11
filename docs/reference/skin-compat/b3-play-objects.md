@@ -1,6 +1,15 @@
 # B3. beatoraja 플레이 화면 전용 스킨 객체와 플레이 화면 수명주기
 
-> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 10C(note·judge·timingvisualizer 의 오프셋 알파) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-12 · 대응 단계: 웨이브 10D(judge 의 `numberAlign`) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 10D 반영 사항 (2026-10-12)
+
+본문 §6 은 원본(beatoraja)의 동작이고 그대로 맞다. 아래는 R-BMS 가 원본에 없는 필드 하나를 더한 곳이다. 구현 쪽 서술은 `r2-rbms-render.md` 의 같은 이름의 절.
+
+- §6.1·§6.2(judge 의 숫자 정렬): R-BMS 의 judge 객체는 `numberAlign` 을 읽는다(`JudgeDef.number_align`). 값은 value 의 `align` 과 같은 뜻이다: 0 은 자리 그대로(오른쪽 맞춤), 1 은 빈 자리만큼 당김(왼쪽 맞춤), 그 밖은 가운데. 이 키를 쓰지 않은 문서는 원본처럼 가운데 정렬이고, 0 을 쓴 것과 쓰지 않은 것을 구분한다. 원본은 숫자를 `SkinNumber(..., 2)` 로 만들어 value 의 `align` 을 읽지 않는다(`skin/json/JsonPlaySkinObjectLoader.java:258-259`). R-BMS 도 value 의 `align` 은 여전히 읽지 않는다: 기존 스킨의 value 정의에 `align` 이 적혀 있어도(기본 스킨의 `ui` 도 value 마다 `align` 을 적는다) 그림이 달라지지 않도록 judge 쪽의 새 키로 두었다
+- 로더의 `x -= w * digit / 2` 는 정렬과 무관하게 그대로다. `numberAlign = 1` 이면 첫 숫자의 왼쪽 끝 = 판정 이미지 왼쪽 변 + 숫자 dst.x - floor(w * digit / 2) 이고 자릿수가 늘면 오른쪽으로만 자란다. `shift` 도 그대로 숫자 폭의 절반만큼 글자를 민다
+- 원본은 이 키를 모른다. Lua 표의 모르는 키는 `LuaSkinLoader.fromLuaValue` 가 건너뛰고(클래스의 필드만 읽는다) JSON 은 `setIgnoreUnknownFields(true)` 다. 같은 문서를 원본으로 열면 콤보가 가운데 정렬로 그려진다
+- 이 키가 필요했던 이유: 원본 형식만으로는 "글자의 자리는 그대로 두고 숫자를 글자 바로 뒤에서 왼쪽 정렬"을 만들 수 없다. 가운데 정렬에서는 자릿수가 하나 늘 때마다 첫 숫자가 반 칸 왼쪽으로 가고, `shift = true` 는 글자를 같은 반 칸만큼 민다. 자릿수별 `offset` 으로 상쇄하는 식(`space` = 칸 폭, `offset[j].x` = -칸 폭 x j)은 수식으로는 왼쪽 정렬이 되지만 `offset` 이 화면 픽셀이라(§6.2, `SkinNumber.draw`) 창 크기가 스킨 크기와 다르면 어긋난다. 호스트는 현재 콤보와 지금 판정의 종류를 속성으로 답하지 않으므로(원본도 NUMBER_COMBO 104 뒤에 속성이 없다) judge 밖의 value 객체로도 그릴 수 없다
 
 ## 웨이브 10C 반영 사항 (2026-10-11)
 
