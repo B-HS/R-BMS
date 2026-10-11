@@ -31,6 +31,7 @@
 
 웨이브 9B 결과(2026-10-11, Workflow `wf_56291723-64d`, 5 에이전트: 설계·골격 → 미리보기 엔진 ∥ 메뉴 화면 → 리뷰 → 수정·문서. 리뷰 major 2·minor 7 전부 수정). 게이트: fmt·clippy·`cargo test --workspace --no-fail-fast --locked` 5,054 통과·0 실패·ignored 5, 골든 불변, 두 팩의 환경 변수 테스트와 GPU 사각형 비교 통과. 메인이 기본 스킨 7키(옵션 변경 뒤)와 ModernChic 선곡의 SKIN 메뉴 캡처를 확인.
 - M6: SKIN 은 Settings 에서 빠져 독립 화면(`stage/skin_menu.rs`, `Stage::SkinMenu`)이 됐다. 왼쪽에 팩·화면·문서·로드 상태·옵션·파일·오프셋 행, 오른쪽에 그 화면의 스킨을 예시 데이터로 그린 미리보기(`skin_preview.rs`, 사각형 그리기 어댑터 `rbms_render::RegionRenderer`). 값을 바꾸면 미리보기에 바로 반영된다. 들어가는 길: 선곡의 F12, 스킨의 SKIN 버튼(이벤트 14), Settings 탭 줄의 "SKIN MENU >" 단추. 설계 `docs/plan/2026-10-11-skin-menu.md`.
+- CI: 9B 푸시(`4d637fd`)에서 Windows 테스트 2건 실패 → 원인은 실패 문구에서 팩 폴더를 뺄 때 verbatim 접두사(`\\?\`) 철자를 찾지 못한 것(`skin_select.rs` 의 `reason_beside`). `569a995`·`c9e4269` 로 고쳐 run `c9e4269` 에서 세 OS 통과.
 - 남은 것: 키를 누르고 있어도 값이 반복되지 않는다(앱 전체 동작. Shift+좌우로 오프셋 열 칸). 옵션 변경과 장면 반복 때 2~3프레임 검게 보인다. 키 설정 화면은 미리보기가 없다. 실제 창 확인 항목은 `docs/quality-assurance/2026-10-11-default-skin-manual-check.md` §3.7.
 
 ---
