@@ -1,6 +1,22 @@
 # R3 — R-BMS 앱(apps/rbms-player) 스킨 배선·화면 구성·입력 현황과 격차
 
-> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 9B(SKIN 메뉴와 미리보기) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 10A(넓은 레인, 키 사용자 지정, 판정 자동 보정, 녹색 숫자 유지) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 10A 반영 사항 (2026-10-11)
+
+사용자가 요청한 플레이 기능 1~5(넓은 레인, 키 사용자 지정, 레인 커버 키, 판정 자동 보정, 녹색 숫자 유지)를 넣은 뒤의 상태다. 옵션의 정의와 단위는 `docs/play-options.md`, 기본 스킨 쪽은 설계서 2.3·6.2~6.5절. 본문과 아래 웨이브들의 키·조작 서술 가운데 이 절과 다른 것은 이 절로 읽는다.
+
+- (키) `keyconfig.rs` 의 `ControlAction` 은 20종이다: 기존 10종에 `CoverToggle`·`LiftToggle`·`HiddenToggle`·`GreenUp`·`GreenDown`·`KeepGreenToggle`·`OffsetUp`·`OffsetDown`·`AutoAdjustToggle`·`Fine` 이 더해졌다. 새 기본 키는 `cover_toggle = BACKSLASH` 하나이고 나머지는 미지정이다. `Fine`(미세 단계, 누르고 있는 동안)은 키가 없으면 레인·조작으로 쓰지 않는 Shift 가 그 역할을 한다(`AppShared::fine_pressed`. 이전의 `PlayState::fine_held` 와 하드코딩 판독은 삭제)
+- (키) `Shortcut` 29종(`ShortcutGroup`: Browser 9, Screens 5, SkinBrowser 8, Result 2, Replay 5)이 선곡 단축키, 화면 여는 키, 스킨 브라우저의 숫자 키, 결과의 다시 하기·다음 곡, 리플레이 분석 키를 사용자 지정으로 만든다. 조회는 `AppShared::shortcut_for(screen, code)`·`shortcut_key`·`is_shortcut`·`shortcut_held`. 고정 키는 Esc, Enter, 화살표, H(가이드)와 메뉴 내부 키다(`keyconfig::fixed_keys_of`). 본문 §7 의 "하드코딩 단축키" 표는 기본값 표로 읽는다
+- (키) 저장: `keyconfig.ron` 에 `shortcuts`(이름 → 키 단어. 없음 = 기본 키, 빈 문자열 = 미지정)와 `controls` 의 새 필드, 패드 블록의 `controls`(`ControlAction::config_key` 로 키)·`shortcuts`. 이전 파일은 그대로 읽히고 다시 쓰이지 않는다. 충돌은 같은 순간에 읽히는 둘만이다(`KeyConfig::clash`, `Bindable::read_with`). `collisions` 는 없어졌다
+- (키) 키 설정 화면(`stage/keyconfig.rs`, `keyconfig/table.rs`)은 묶음 머리와 키보드·컨트롤러 두 열의 표다. 진입은 선곡의 F5(`Shortcut::KeyConfig`)와 숫자 6(`RefKeyConfig`), Settings 의 F5 와 `KEY CONFIG >` 단추(`settings_view::key_config_link`), 스킨 이벤트 13. 선곡의 H 가이드(`stage/select/guide.rs`)는 3단이고 지금 설정된 키를 그린다
+- (플레이 조작) 실행 통로는 `PlayState::in_play_control(shared, action)` 하나(키와 패드 공통)이고 동작은 `AppShared::apply_control`. 묶인 가림막 키를 누르면 스킨 시계로 1.5초 동안 `OPTION_LANECOVER1_CHANGING`(270)이 켜진다(`stage/play/mod.rs` 의 `shade_is_changing`. 원본은 START·SELECT 를 누르고 있을 때만 켠다)
+- (판정 자동 보정) `judge.auto_offset`(행 이름 AUTO ADJUST)이 켜져 있으면 `PlaySession` 이 손으로 친 입력마다 `rbms_play::auto_adjust_step_ms`(`JudgeManager.java:697-703`, 부호 반대)만큼 오프셋을 움직이고, 플레이 화면이 그 값을 설정에 옮긴다(`keep_adjusted_offset`). 결과 화면의 평균 보정(`calibrated_offset`, `calibration_mean_us`)은 삭제됐다. 리플레이는 `ReplayJudge.offset_steps` 로 재현되고, IR 업로드는 입력 시각을 옮겨 한 오프셋으로 같은 판정이 나오게 한다(`ir_replay.rs` 의 `uploaded_time_us`. 서버는 리플레이의 `extra` 를 돌려주지 않는다)
+- (녹색 숫자 유지) `play.keep_green_number`·`play.duration_ms`(스키마 판은 그대로 4, 필드 추가)와 순수 계산 `rbms_config::speed`(`held_speed` 등). 플레이 화면은 곡 시작·매 프레임·커버 이동 때 `hold_green_number` 로 하이스피드를 다시 쓴다. 유지 중에는 런의 고정 속도 캐시(`PlayState::speed`)를 비운다. 기준 BPM 은 `BpmStats::held`
+- (스킨 값) 플레이 클러스터가 image index 75(판정 타이밍 자동 보정)를 답한다(`skin_host/play.rs`, `PlayLive::judge_timing_auto`). 선곡의 number 312·313 은 유지 모드일 때만 값이 있고(`ChartSettings::duration_ms`), 이벤트 59(`duration1p`)와 패널 3 의 4·6번 키가 그 값을 움직인다(`stage/select/events.rs` 의 `step_duration`, `panel.rs` 의 `duration_moves`). 본문과 웨이브 4 반영 사항의 "59 는 없는 이벤트", "패널 3 의 NOTE DISPLAY TIME 키는 움직일 값이 없다"는 대체된다. 유지 모드인지 자체를 알리는 속성은 플레이 화면에 없다(원본에 대응 id 가 없다)
+- (설정) `SETTING_COUNT` 87(PLAY 탭에 KEEP GREEN NUMBER, GREEN NUMBER). 키 설정은 이전부터 계정 블롭의 절반으로 동기화되므로 `shortcuts` 도 같은 통로로 간다
+- (기본 스킨) 플레이 문서 다섯의 첫 행 Lane Width: Normal(op 909) / Wide(910). 캡처 하니스 `stage/capture/play_rows.rs`(`RowsRun`)가 행을 바꾼 플레이 장면을 띄운다. `capture.rs` 의 `choose_in_skin` 은 `stage` 안에서 공유된다
+- (남은 것) 내장 화면(스킨 없는 선곡·결과)의 안내 문구는 출하 키 이름을 고정해 적는다(`stage/select/scene.rs`, `overlay.rs` 의 `TAB_MARK_HINT`, `crates/rbms-render/src/result.rs`, `select.rs`). 패드의 START/SELECT 는 완전히 해제할 수 없다(지우면 패드의 메뉴 버튼으로 돌아간다). 옵션 오버레이(F1)에는 새 행이 없다
 
 ## 웨이브 9B 반영 사항 (2026-10-11)
 

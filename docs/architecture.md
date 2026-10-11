@@ -1,6 +1,6 @@
 # Architecture
 
-Last updated 2026-10-11 · matches d4cd23f plus the wave 8C working tree (not yet committed).
+Last updated 2026-10-11 · matches 03e1dd8 plus the wave 10A working tree (not yet committed).
 
 rbms is a Rust port of the reference implementation's PLAY core: a BMS rhythm-game player. Cargo workspace, 15 library
 crates + 2 apps. The single source of truth for *behaviour* is the code + its tests; this document is
@@ -43,8 +43,8 @@ test without a GPU, a window or a canvas; `rbms-config` depends on it only for t
 | **rbms-table** | BMS difficulty tables (header.json/data.json): fetch, md5-match, level grouping, disk cache. |
 | **rbms-store** | Local score persistence: SQLite `scoredb` (history, bests, profiles, replay GC) plus RON compatibility import/export (`scores.ron` + `replays/*.ron`), atomic writes, and judging-rule version stamps. Lamps travel as numeric ids so the judge engine stays out of the file layer. |
 | **rbms-library** | SQLite song database boundary: cancellable folder scan → `SongEntry`, lazy `ChartDetail`, and md5-indexed `Library` backed by `songdb`. Headless, so `rbms-cli scan` exercises it. |
-| **rbms-config** | One versioned configuration document (`Config` + `schema_version`, currently 3), the migration that absorbs the pre-version `settings.ron`/`folders.ron`/`tables.ron`, the settings **descriptor table** the settings screen is generated from, and `Config.skin` (`SkinOptions`: skin pack folder, per-screen document, per-document customisation). |
-| **rbms-play** | Real-time play driver. `Player` advances over the song clock (scheduling and audible axes separately), emits keysound events, feeds judging, tracks beams/bombs; `PlaySession` is one whole run — judging + replay + calibration + analysis clock — emitting sound through a `SoundSink` so it can run with no audio device. |
+| **rbms-config** | One versioned configuration document (`Config` + `schema_version`, currently 4), the migration that absorbs the pre-version `settings.ron`/`folders.ron`/`tables.ron`, the settings **descriptor table** the settings screen is generated from, and `Config.skin` (`SkinOptions`: skin pack folder, per-screen document, per-document customisation). |
+| **rbms-play** | Real-time play driver. `Player` advances over the song clock (scheduling and audible axes separately), emits keysound events, feeds judging, tracks beams/bombs; `PlaySession` is one whole run — judging + replay + the judge offset that adjusts itself + analysis clock — emitting sound through a `SoundSink` so it can run with no audio device. |
 | **rbms-course** | Course domain: reference-compatible course loading/normalisation, constraints and trophies, and a continuous `CourseRun` that carries gauge, combo and totals across stages. |
 | **apps/rbms-player** | Native desktop app: winit event loop, wgpu renderer (`gpu/`), twelve-stage machine (Select/Decide/Settings/SkinMenu/KeyConfig/Tables/Folders/Loading/Play/Result/CourseResult/Practice), the skin plumbing (pack selection, compiled screens, the `SkinHost` implementation, the skin preview, the embedded default pack), course and practice UI, and IR account/ranking UI. Built as a library with a three-line binary, so integration tests reach its types. |
 | **apps/rbms-cli** | Headless companion: a bare chart path prints metadata/hashes/counts, `scan <dir>` drives `rbms-library`, `config <settings.ron>` drives `rbms-config` (migration result, the copy it kept, then every settings row), `scores <scores.ron> [--md5 …]` queries `rbms-store`, `skin-dump <pack|document>` loads skin documents through `rbms-skin` with no game and reports objects, warnings, swallowed Lua errors and per-frame cost (`--strict` makes it a gate; see `skin.md` §5). It never depends on the player, so no window/audio stack is pulled into a CLI build. |
@@ -144,7 +144,7 @@ How they are wired:
 
 ## Testing and the lint gate
 
-As of wave 8C (2026-10-11), `cargo test --workspace --no-fail-fast` passes 4,878 tests with 0 failures (5 are ignored: four need an audio or graphics device, one waits five seconds), covering boundaries, malformed input, invariants,
+As of wave 10A (2026-10-11), `cargo test --workspace --no-fail-fast` passes 5,157 tests with 0 failures (5 are ignored: four need an audio or graphics device, one waits five seconds), covering boundaries, malformed input, invariants,
 round-trips, and determinism. The count is not a contract; CI is the judge. The deterministic render backend `CpuCanvas`
 makes pixel-level rendering testable without a GPU — the player's screens are rendered onto a
 headless canvas in tests, and a whole run (replay included) reproduces through `NullSink` with no

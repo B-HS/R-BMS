@@ -8,21 +8,21 @@
 
 </div>
 
-Last updated 2026-10-11 · matches d4cd23f plus the wave 8C working tree (not yet committed).
+Last updated 2026-10-11 · matches 03e1dd8 plus the wave 10A working tree (not yet committed).
 
 R-BMS reimplements the core PLAY loop of a GPL-3.0 reference implementation in Rust. Judgment windows, gauges and TOTAL scaling are cross-checked against the reference implementation's source, the play clock is the number of audio samples actually played, and every mode, skin, key map and setting is data, not code. It is a single native binary with no JVM and no runtime dependencies.
 
 ## Features
 
 - **Play** — 5K / 7K / 9K (pop'n) / 10K / 14K auto-detected from the chart, normal and long notes with LN / CN / HCN, mines, BGA images, key beams and hit bombs
-- **Judgment** — reference implementation `JudgeProperty` windows per mode, `#RANK` / `#DEFEXRANK`, judge offset with one-play auto-calibration, judge width, FAST / SLOW, empty POOR handled like the reference implementation
+- **Judgment** — reference implementation `JudgeProperty` windows per mode, `#RANK` / `#DEFEXRANK`, judge offset with AUTO ADJUST (the offset follows your timing as each input lands, like the reference's judge timing auto adjust), judge width, FAST / SLOW, empty POOR handled like the reference implementation
 - **Gauges** — ASSISTED EASY / EASY / NORMAL / HARD / EX-HARD / HAZARD with TOTAL scaling, clear lamps, DJ LEVEL and EX score
-- **Options** — MIRROR / RANDOM / S-RANDOM / R-RANDOM / H-RANDOM / ALL-SCRATCH / ROTATE (seeded, DP sides independent), hi-speed with constant-speed mode and green number, lift, lane cover, scratch side and auto-scratch
+- **Options** — MIRROR / RANDOM / S-RANDOM / R-RANDOM / H-RANDOM / ALL-SCRATCH / ROTATE (seeded, DP sides independent), hi-speed with constant-speed mode and green number, KEEP GREEN NUMBER (the hi-speed is worked out for every chart from one green number, its tempo and the lane cover), lift, lane cover, HIDDEN+, scratch side and auto-scratch
 - **Song select** — recursive library scan, folders and difficulty tables (`data.json`), search and sort, `#PREVIEW` or autoplay preview, cover art, note density graph, local records with replay playback
 - **Result** — judge counts, FAST / SLOW, max combo, gauge, clear lamp, rank graph and delta against your best
 - **Replays** — saved per play, replayable with the same seed and options, analysis mode with seek, speed and per-note timing
-- **Skins and themes** — a built-in default skin for every screen (select, decide, play 5/7/9/10/14 keys, result, course result) from the first run; beatoraja-format Lua skins (`.luaskin`) and JSON skins load unmodified from a skin pack folder, with per-screen selection and customisation on the SKIN menu, which previews the skin as you change it; mp4 (H.264) video sources; any TTF font with full Unicode fallback; built-in screens and a RON theme remain as the fallback
-- **Input** — every lane and control key rebindable in-app, conflict detection
+- **Skins and themes** — a built-in default skin for every screen (select, decide, play 5/7/9/10/14 keys, result, course result) from the first run, with Normal and Wide (1.5x) lanes on the play screens; beatoraja-format Lua skins (`.luaskin`) and JSON skins load unmodified from a skin pack folder, with per-screen selection and customisation on the SKIN menu, which previews the skin as you change it; mp4 (H.264) video sources; any TTF font with full Unicode fallback; built-in screens and a RON theme remain as the fallback
+- **Input** — lanes, in-play controls, song-select shortcuts, the keys that open each screen, result and replay-analysis keys all rebindable in-app on keyboard and controller, with conflict detection per screen
 - **IR** — sign in, submit scores, browse rankings, sync settings, manage rivals and upload or replay ghosts, all from the in-game SETTINGS NETWORK tab and the song-select ranking panel
 - **Debug** — on-screen overlay with FPS, memory, audio clock and judge state
 
@@ -79,18 +79,30 @@ Skins can read their own folder but cannot write into it, open files outside it,
 
 ## Controls
 
+These are the shipped keys. Press `H` on the song select for the full list as it is set right now.
+
 | Key | Song select | Play |
 | --- | --- | --- |
-| ↑ ↓ | Move | Hi-speed |
+| ↑ ↓ | Move | Hi-speed (the held green number while KEEP GREEN NUMBER is on) |
 | → / Enter | Open / play | — |
 | ← / Esc | Back / quit | Leave (result if no notes remain) |
 | Tab | Settings | — |
+| F5 | Key config | — |
 | F12 | Skin menu (settings on the left, a live preview on the right) | — |
-| ← → (play) | — | Lane cover |
+| H | Every key as it is set | — |
+| → / ← (play) | — | Lane cover down (covers more) / up (covers less) |
+| `\` | — | Lane cover on / off (START twice does the same) |
 | [ ] | — | Lift |
+| Shift that plays no lane | — | Held: fine step for the covers and the held green number |
+| Mouse wheel, START + turntable | — | Lane cover |
+| START + keys / SELECT + keys | — | Hi-speed / green number by 1 ms of travel |
 | O / T / R / `/` / F3 | Folders / tables / records / search / sort | — |
 
-Default lanes follow the reference keyboard layout: 7K `Z S X D C F V` + `LShift` (scratch), 9K `Z S X D C F V G B`, 14K adds `M K , L . ; /` + `RShift`. START is `A` and SELECT is `W` on the keyboard (the standard Start / Select buttons on a controller). Everything is remappable in Settings → KEY CONFIG or `~/.config/rbms/keyconfig.ron`.
+Default lanes follow the reference keyboard layout: 7K `Z S X D C F V` + `LShift` (scratch), 9K `Z S X D C F V G B`, 14K adds `M K , L . ; /` + `RShift`. START is `A` and SELECT is `W` on the keyboard (the standard Start / Select buttons on a controller).
+
+**Key config** opens with `F5` on the song select, with `F5` or the `KEY CONFIG >` button in Settings, and with `6` on a skin's browser. It lists lanes, in-play controls, song-select shortcuts, the keys that open each screen, the number keys, result and replay-analysis keys, each with a keyboard cell and a controller cell. A key already read on the same screen is refused and the row says by what; `Esc`, `Enter`, the arrows and `H` stay fixed. Controls that ship without a key and can be given one: lift and HIDDEN+ on / off, HIDDEN+ up / down, green number up / down, KEEP GREEN NUMBER on / off, judge offset ±1 ms, AUTO ADJUST on / off, and the fine-step modifier. Bindings are saved to `~/.config/rbms/keyconfig.ron`; an older file loads as it is.
+
+**KEEP GREEN NUMBER** (Settings → PLAY, off by default) holds one green number across charts: the hi-speed is recalculated from the chart's tempo and the lane cover when a chart starts and whenever the cover moves. **AUTO ADJUST** (Settings → JUDGE) moves JUDGE OFFSET a little after each input that is more than 15 ms early or late; the play screen's TIMING figure shows it. Definitions, units and ranges are in [docs/play-options.md](docs/play-options.md) (Korean). Replays record every offset the run moved through (`judge.offset_steps`), so an adjusted run plays back as it was judged.
 
 ## Web (IR server + site)
 

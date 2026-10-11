@@ -1,6 +1,6 @@
 # 스킨 가이드
 
-최종 갱신 2026-10-11 · 대응 커밋: f8ed260 이후 웨이브 9B(SKIN 메뉴. 작업 트리 기준, 커밋 전)
+최종 갱신 2026-10-11 · 대응 커밋: 03e1dd8 이후 웨이브 10A(넓은 레인, 키 사용자 지정, 판정 자동 보정, 녹색 숫자 유지. 작업 트리 기준, 커밋 전)
 
 R-BMS 는 화면마다 스킨 문서 하나를 읽어 그 화면을 단독으로 그린다. 문서가 없거나 읽히지 않는 화면은 내장 화면이 그린다. 기본으로 설치되는 자작 스킨 `rbms-default` 가 첫 실행부터 선곡 · 결정 · 플레이 · 결과를 그리며, beatoraja 용으로 만든 외부 Lua 스킨(`.luaskin`)도 수정 없이 읽는다. 이 문서의 독자는 스킨을 쓰는 사용자와 스킨을 만드는 사람이다.
 
@@ -261,14 +261,26 @@ SKIN 메뉴의 옵션 행으로 고른다. 기본값은 먼저 적힌 쪽이고,
 | --- | --- |
 | decide | Stage Image: Show / Hide. Note Graph: Show / Hide |
 | select | Stage Image: Show / Hide |
-| play5, play7 | Field Side: Left / Right. Scratch Side: Left / Right. Judge Detail: Off / Fast-Slow / Milliseconds(기본 Fast-Slow). Score Graph: On / Off |
-| play9 | Judge Detail. Score Graph |
-| play10, play14 | Judge Detail |
+| play5, play7 | Lane Width: Normal / Wide. Field Side: Left / Right. Scratch Side: Left / Right. Judge Detail: Off / Fast-Slow / Milliseconds(기본 Fast-Slow). Score Graph: On / Off |
+| play9 | Lane Width. Judge Detail. Score Graph |
+| play10, play14 | Lane Width. Judge Detail |
 | result, courseresult | 없음 |
+
+Lane Width 는 다섯 플레이 문서의 첫 행이다. Wide 는 건반·스크래치·버튼 레인을 Normal 의 1.5 배로 넓힌다(1920 기준 흰 건반 58 → 87, 검은 건반 46 → 69, 스크래치 100 → 150, 9키 버튼 62 → 93. 레인 사이 2px 과 노트 두께는 그대로). 노트, 판정선, 레인 커버, 리프트, HIDDEN+, 판정 글자, 게이지, 발치의 HI-SPEED·GREEN 은 넓어진 필드를 따라간다. 필드 밖은 다시 놓인다.
+
+| 문서 | Wide 에서 달라지는 배치 |
+| --- | --- |
+| play7, play5 | Score Graph 가 On 이면 BGA 높이가 626 → 450 으로 줄고 점수·판정 수 아래에 타이밍이 한 줄 전체로 놓인다. Off 이면 Normal 과 같은 1단이다 |
+| play9 | BGA 가 440x440 으로 줄고 타이밍이 왼쪽 BGA 아래, 판정 수와 점수가 오른쪽에 놓인다 |
+| play10, play14 | 두 필드가 화면 가장자리 쪽으로 넓어지고(바깥 여백 64 → 32) 가운데 폭 352 에 정보가 한 단으로 쌓이며, 게이지가 1P 필드 아래로 내려간다 |
+
+Normal 은 이 행이 생기기 전의 화면과 같다. 내장 화면의 DISPLAY > SKIN 프리셋(NORMAL / WIDE)은 다른 설정이고 스킨이 그리는 화면에는 효과가 없다. 폭 480 미만의 곡 머리(Wide 의 9·10·14키)에서는 코스 단계 글자가 난이도 줄 오른쪽에 뜨고 코스 중 아티스트가 생략된다.
 
 Judge Detail 이 Fast-Slow 이면 PGREAT 가 아닌 판정에서 판정 글자 바로 위에 FAST(파랑) 또는 SLOW(빨강)가 뜨고, Milliseconds 이면 어긋난 시간이 ms 로 뜬다(빠르면 +). DP 는 친 쪽 필드에만 뜬다. Off 로 저장해 둔 설정은 그대로 Off 다.
 
-선곡의 사이드 메뉴(톱니와 스피커 아이콘)는 QUICK SETTINGS 6행과 VOLUME 3개를 연다. 패널 1~3(플레이 옵션, 보조 옵션, 세부 옵션)은 START(기본 A), SELECT(기본 W), 둘을 함께(또는 숫자 5)를 누르고 있는 동안 열려 있다(beatoraja 와 같다).
+선곡의 사이드 메뉴(톱니와 스피커 아이콘)는 QUICK SETTINGS 6행과 VOLUME 3개를 연다. 패널 1~3(플레이 옵션, 보조 옵션, 세부 옵션)은 START(기본 A), SELECT(기본 W), 둘을 함께(또는 상세 옵션 키. 기본 숫자 5)를 누르고 있는 동안 열려 있다(beatoraja 와 같다). 패널 3 의 4·6번 키 칸(NOTE DISPLAY TIME)은 KEEP GREEN NUMBER 가 켜져 있으면 유지 중인 이동 시간(ms)과 녹색 숫자를 보이고 1 ms 씩 바꾸며, 꺼져 있으면 `OFF` 와 `KEEP GREEN NUMBER IS OFF` 를 보인다. 플레이 화면의 TIMING 은 판정 오프셋이고 AUTO ADJUST 가 켜져 있으면 표지가 `TIMING AUTO` 가 된다. 이 옵션들의 뜻과 단위는 [play-options.md](./play-options.md)에 있다.
+
+바닥의 안내 문구는 바뀔 수 있는 키의 이름을 고정해 적지 않는다. 선곡 바닥은 `H`(지금 설정된 키 전체)를 가리키고, 결과 화면은 다시 하기·다음 곡의 키가 키 설정에 있음을 출하 키(R, N)와 함께 적는다.
 
 ### 3.5 이미지와 사운드를 다시 만드는 법
 

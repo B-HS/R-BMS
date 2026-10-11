@@ -1,6 +1,6 @@
 # Development guide
 
-Last updated 2026-10-11 · matches d4cd23f plus the wave 8C working tree (not yet committed).
+Last updated 2026-10-11 · matches 03e1dd8 plus the wave 10A working tree (not yet committed).
 
 For picking the project up in a fresh session.
 
@@ -56,7 +56,7 @@ cargo run --release -p rbms-player -- <chart.bms> --interactive
 | File | What |
 |---|---|
 | `settings.ron` | versioned `Config`: play, library folders and difficulty tables, display, network profiles and IR token |
-| `keyconfig.ron` | lane/control key bindings, including `controls.start` / `controls.select` (defaults A / W on the keyboard, the standard Start / Select buttons on a pad; an older file without them loads with the defaults) |
+| `keyconfig.ron` | lane, control and shortcut bindings for keyboard and pad. `controls` holds the 20 in-play controls (`start` / `select` default to A / W, `cover_toggle` to BACKSLASH; the ones added in wave 10A, `fine` among them, default to empty = unbound). `shortcuts` maps a shortcut's name to a key word (no entry = the shipped key, an empty string = unbound). An older file without these loads with the defaults and is not rewritten on load. The editor opens with F5 from the song select or Settings; what each control does is in [play-options.md](./play-options.md) |
 | `songdb.sqlite` | scanned song-library index and chart-detail cache |
 | `scoredb.sqlite` | one merged best per chart and full local play history |
 | `scores.ron.migrated` | a legacy `scores.ron` after its first successful import into `scoredb.sqlite` |
