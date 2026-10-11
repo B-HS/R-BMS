@@ -46,7 +46,7 @@ pub(super) const SLOT_ABOVE: usize = 0;
 pub(super) const SLOT_BELOW: usize = 2;
 
 /// Longest a test waits for the worker that reads the fixture's sheet.
-const COMPILE_WAIT: Duration = Duration::from_secs(20);
+pub(super) const COMPILE_WAIT: Duration = Duration::from_secs(20);
 
 /// The keys the default seven-key layout puts on each key index, and the key the tests bind to the
 /// turntable's other direction.
@@ -142,7 +142,7 @@ impl Browser {
 
     /// A browser over `songs` in title order, drawn by `document` over the fixture's sheet, or by
     /// nothing but itself when there is none. Its skin has not been read yet.
-    fn drawn_by(tag: &str, songs: Vec<SongEntry>, document: Option<String>) -> Browser {
+    pub(super) fn drawn_by(tag: &str, songs: Vec<SongEntry>, document: Option<String>) -> Browser {
         let settings = settings_of(tag);
         let mut config = Config::default();
         config.library.preview = false;
@@ -257,7 +257,7 @@ impl Browser {
     }
 
     /// One key of a controller going down on the lane `lane`.
-    fn pad(&mut self, lane: usize) -> Transition {
+    pub(super) fn pad(&mut self, lane: usize) -> Transition {
         let mut ctx = FrameCtx { shared: &mut self.app.shared, now: self.now, dt: 0.0 };
         self.state.handle_pad(&mut ctx, PadEvent::Lane { lane, dir: ScratchDir::Forward, press: true })
     }

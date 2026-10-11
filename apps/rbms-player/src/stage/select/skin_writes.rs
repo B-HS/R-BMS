@@ -5,11 +5,15 @@
 //! ([`crate::skin_host::writers`] says which write is whose). The browser owns the list and the
 //! search, so it carries these out itself; the queue's other requests -- the events its buttons run --
 //! are left where they are for whatever answers them.
+//!
+//! A search word a skin writes is put on show at once ([`SelectState::search_for`]), with no
+//! typing. That is not how the skin's search text is typed into -- the browser types the word itself
+//! and the text only draws it ([`super::search`]) -- but a writer of the skin's own may still hand a
+//! word over whole.
 
 use super::SelectState;
 use crate::skin_host::Cluster;
 use crate::skin_host::writers::{BrowserWrite, browser_write, scaled_index};
-use crate::textedit::TextEdit;
 use crate::{AppShared, SelectTab};
 
 impl SelectState {
@@ -46,21 +50,6 @@ impl SelectState {
                 }
             }
         }
-    }
-
-    /// Searches the library for a word the skin's search box confirmed (`MusicSelector.search`): the
-    /// browser's own search, opened if it is not, with the word typed into it. A word with nothing
-    /// in it is ignored.
-    fn search_for(&mut self, shared: &mut AppShared, word: &str) {
-        if word.trim().is_empty() {
-            return;
-        }
-        self.tab = SelectTab::Songs;
-        if !shared.searching {
-            self.start_search(shared);
-        }
-        self.search_edit = TextEdit::from_text(word);
-        self.apply_search(shared);
     }
 }
 

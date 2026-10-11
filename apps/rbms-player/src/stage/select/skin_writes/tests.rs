@@ -102,7 +102,8 @@ fn a_word_confirmed_in_the_skins_search_box_runs_the_browsers_own_search() {
 
     write_word(&mut app, "br");
     state.carry_out_skin_writes(&mut app.shared);
-    assert!(app.shared.searching, "the search box of the browser is open on the word");
+    assert!(!app.shared.searching, "the word was typed into the skin's box, so the application's search box is not opened for it");
+    assert!(state.search_is_on_show(&app.shared), "what the word found is on show");
     assert_eq!(app.shared.search, "br");
     assert!(app.shared.select_view == SelectView::AllSongs, "a search spans the whole library");
     assert_eq!(titles(&app), vec!["bravo".to_string()]);
@@ -124,7 +125,7 @@ fn a_word_confirmed_in_the_skins_search_box_runs_the_browsers_own_search() {
 
     let now = Instant::now();
     state.handle_key(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 }, super::super::tests::press(KeyCode::Escape));
-    assert!(!app.shared.searching, "the box closes the way a typed search closes");
+    assert!(!state.search_is_on(&app.shared), "Escape leaves a search on show the way it leaves a typed one");
     assert!(app.shared.select_view == SelectView::Root, "and the browser is back in the folder the first search was made from");
     assert_eq!(app.shared.select_items.len(), root_rows);
 }
@@ -143,6 +144,8 @@ fn the_browsers_frame_carries_out_what_the_skin_wrote() {
 const CAPTURE_DIR_ENV: &str = "RBMS_SKIN_CAPTURE_DIR";
 
 /// How far into its scene the pack's browser is drawn: past the opening, so the layout has settled.
+/// Every frame is drawn at this one moment, so what a pack animates on the scene's time -- a light
+/// running round a frame, say -- stands where it stood on the frame it is compared with.
 const PACK_SCENE: Duration = Duration::from_secs(5);
 
 /// Longest the pack's browser is waited for.
@@ -258,6 +261,7 @@ fn the_search_box_of_a_skin_pack_named_by_the_environment_is_typed_into() {
     app.shared.age_skin_scene(PACK_SCENE);
     let frame = |app: &mut crate::App, pixels: &mut HeadlessCanvas| {
         let mut canvas = Canvas::Headless(pixels);
+        app.shared.put_skin_scene_at(PACK_SCENE);
         render_on(app, browser(), &mut canvas);
         app.shared.finish_skin_frame(&mut canvas);
     };

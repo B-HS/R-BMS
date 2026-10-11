@@ -400,3 +400,14 @@ fn the_bounds_of_an_editable_text_come_from_the_last_prepared_frame() {
     assert!(!map.text_holds(TITLE, (100.0, 140.0)), "a title is no editable text");
     assert!(!map.text_holds(99, (100.0, 140.0)));
 }
+
+#[test]
+fn the_text_that_writes_somewhere_is_found_by_where_it_writes() {
+    let fixture = Fixture::new("writing");
+    assert_eq!(
+        fixture.screen.text_input_writing(SkinTextWriter::Id(STRING_SEARCHWORD)),
+        Some(SEARCH),
+        "the search box is the text that writes the search word"
+    );
+    assert_eq!(fixture.screen.text_input_writing(SkinTextWriter::Id(STRING_TITLE)), None, "nothing writes a title: a text that only reads it is not found");
+}

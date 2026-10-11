@@ -2,10 +2,16 @@
 //!
 //! A skin owns the whole screen, but some of the browser is the application's rather than the
 //! skin's, and a skin has nothing to say it with: the hint on a list with nothing in it, the IR
-//! ranking panel, the record modal, the filter panel, the search box (the skin's own search text
-//! shows nothing of what is typed on the keyboard), the course tab's mark and the key guide
-//! ([`super::guide`]). They are laid out for the fixed screen the application's own screens use and
-//! drawn scaled out to the skin's, on top of it.
+//! ranking panel, the record modal, the filter panel, the search box a word is typed into on a skin
+//! that has no search text of its own (one that has draws the word there instead), the mark of
+//! a search that is on show, the course tab's mark and the key guide ([`super::guide`]). They are
+//! laid out for the fixed screen the application's own screens use and drawn scaled out to the
+//! skin's, on top of it.
+//!
+//! The mark of a search on show is the one of these a skin may have a way to say: the reference
+//! files a search under a folder of its own, so a skin that draws the path of the open folders is
+//! where the list on show is named, and the mark is left out over one
+//! ([`skin_draws_the_open_folders`]).
 //!
 //! Every one of them is also something to click on. Each registers where it is among the frame's
 //! clickable regions, in the order it is drawn, so a press that lands on one is the application's and
@@ -16,12 +22,14 @@
 //! None of this is drawn for a browser no skin draws, which has all of it already.
 
 use rbms_render::{Color, Rect, Renderer, draw_text, draw_text_centered, draw_text_right, fit_text, select_layout, text_width, theme};
+use rbms_skin::property::generated::STRING_DIRECTORY;
 
 use super::SelectState;
 use super::filter::{filter_panel_rect, render_filter_panel};
 use super::guide::render_guide;
+use super::search::skin_search_text;
 use crate::ir_ranking_view::{PanelLine, render_ranking_panel_at};
-use crate::{AppShared, CH, CW, Hot, SelectScene, SelectTab};
+use crate::{AppShared, CH, CW, Hot, SKIN_TYPE_MUSIC_SELECT, SelectScene, SelectTab};
 
 /// Where the strip of the browser's own marks starts: its left edge, and the line its lowest mark
 /// stands on. It is in the part of ModernChic's browser nothing is drawn in, between the stage file
@@ -39,6 +47,11 @@ const SEARCH_LABEL: &str = "SEARCH";
 const SEARCH_PAD_X: f32 = 12.0;
 const SEARCH_LABEL_W: f32 = 88.0;
 const HITS_SCALE: f32 = 1.1;
+
+/// The mark of a search that is on show: what it says after the word, and the most room the word
+/// is given. It is set like the mark of the course tab.
+const SEARCH_MARK_HINT: &str = "ESC CLEARS";
+const SEARCH_MARK_WORD_W: f32 = 220.0;
 
 /// The mark of the course tab.
 pub(super) const TAB_MARK_H: f32 = 28.0;
@@ -116,6 +129,42 @@ fn draw_search_box<R: Renderer>(r: &mut R, bottom: f32, query: &str, hits: usize
     rect.y - STRIP_GAP
 }
 
+/// Whether the skin that draws the browser draws the path of the folders that are open: a text of
+/// its document that reads that path and has somewhere to be drawn. Such a skin names the list on
+/// show itself, so the application's mark of a search is not put over it.
+fn skin_draws_the_open_folders(shared: &AppShared) -> bool {
+    shared
+        .skins
+        .document(SKIN_TYPE_MUSIC_SELECT)
+        .is_some_and(|skin| skin.def.text.iter().any(|text| text.reference == STRING_DIRECTORY && skin.destinations.iter().any(|named| named.id == text.id)))
+}
+
+/// The mark that says the list on show is what a search found: the word, how many charts it found,
+/// and the key that leaves the search. It is a line to read and not a box to type into, so it is as
+/// small as the course tab's mark. Returns the line it stands on.
+fn draw_search_mark<R: Renderer>(r: &mut R, bottom: f32, word: &str, hits: usize) -> f32 {
+    let th = theme();
+    let word = fit_text(word, TAB_MARK_SCALE, SEARCH_MARK_WORD_W);
+    let found = format!("{hits} HITS");
+    let parts = [
+        (SEARCH_LABEL, TAB_MARK_SCALE, th.accent),
+        (word.as_str(), TAB_MARK_SCALE, th.text),
+        (found.as_str(), TAB_MARK_HINT_SCALE, th.text_dim),
+        (SEARCH_MARK_HINT, TAB_MARK_HINT_SCALE, th.text_muted),
+    ];
+    let gaps = TAB_MARK_GAP * (parts.len() - 1) as f32;
+    let width = TAB_MARK_PAD_X * 2.0 + gaps + parts.iter().map(|(text, scale, _)| text_width(text, *scale)).sum::<f32>();
+    let rect = Rect::new(STRIP_X, bottom - TAB_MARK_H, width, TAB_MARK_H);
+    r.fill_rect(rect, th.button_active);
+    outline(r, rect, HAIRLINE, th.focus);
+    let mut x = rect.x + TAB_MARK_PAD_X;
+    for (text, scale, color) in parts {
+        draw_text(r, x, centred_text_y(rect.y, rect.h, scale), scale, color, text);
+        x += text_width(text, scale) + TAB_MARK_GAP;
+    }
+    rect.y - STRIP_GAP
+}
+
 /// The mark that says the list on show is the course list, with the key that goes back.
 fn draw_course_mark<R: Renderer>(r: &mut R, bottom: f32) -> f32 {
     let th = theme();
@@ -138,18 +187,21 @@ impl SelectState {
     /// ranking, the guide, the record modal -- and registered in that order, which is what makes the
     /// one drawn on top the one a press lands on.
     ///
-    /// The search box is drawn for every search that is open except one being typed into the skin's
-    /// own search text, which draws what is typed itself. The skin's search text never shows the query
-    /// typed on the keyboard -- the host answers it with nothing -- so a skin that has one is no
-    /// reason to leave the box out: it is what the reference's search popup is.
+    /// The search box is drawn while a word is typed over a skin that has no search text of its
+    /// own: it is what the reference's search popup is. A skin that has one draws the word there,
+    /// and the box is not put beside it. Once the typing is over, whichever of the two it was in,
+    /// what the word found is on show and only the mark of it is drawn, and not even that over a
+    /// skin that names the list on show itself.
     pub(super) fn draw_skin_overlays<R: Renderer>(&self, r: &mut R, shared: &mut AppShared, view: &SelectScene, ranking: &[PanelLine]) {
         let mut hot: Vec<(Rect, Hot)> = Vec::new();
         if let Some((title, body)) = view.empty_hint {
             draw_empty_hint(r, title, body);
         }
         let mut bottom = STRIP_BOTTOM;
-        if shared.searching && !shared.skin_text_is_focused() {
+        if shared.searching && skin_search_text(shared).is_none() {
             bottom = draw_search_box(r, bottom, &self.search_display(), view.rows.len());
+        } else if self.search_is_on_show(shared) && self.tab == SelectTab::Songs && !skin_draws_the_open_folders(shared) {
+            bottom = draw_search_mark(r, bottom, shared.search.trim(), view.rows.len());
         }
         if self.tab == SelectTab::Courses {
             draw_course_mark(r, bottom);

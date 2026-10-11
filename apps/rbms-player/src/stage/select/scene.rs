@@ -29,6 +29,11 @@ const LAMP_UNPLAYABLE: Color = Color::rgb(70, 30, 30);
 const WELCOME_BODY: &str = "Add your music folder \u{2014} press O or click FOLDERS below";
 const WELCOME_BODY_SKINNED: &str = "Add your music folder \u{2014} press O   (H lists every key)";
 
+/// The built-in browser's guide line while a search word is typed, and over the list a word left on
+/// show.
+const SEARCH_TYPING_GUIDE: &str = "TYPE TO FILTER   \u{2191}\u{2193} MOVE   ENTER CONFIRM   ESC CANCEL";
+const SEARCH_ON_SHOW_GUIDE: &str = "\u{2191}\u{2193} MOVE   ENTER OPEN   / EDIT SEARCH   ESC CLEAR SEARCH";
+
 /// What a [`BarList`] was built from: the list's generation, how many records the score book
 /// holds, the tab on show, how often the course list and the chart facts have been read, the play
 /// mode the folders were counted under, and whether they were built for a skin to read.
@@ -264,14 +269,16 @@ impl SelectState {
         let guide = if self.esc_quit_armed() {
             "PRESS ESC AGAIN TO QUIT"
         } else if shared.searching {
-            "TYPE TO FILTER   BACKSPACE EDIT   ENTER OPEN   ESC CLEAR"
+            SEARCH_TYPING_GUIDE
+        } else if self.search_is_on_show(shared) {
+            SEARCH_ON_SHOW_GUIDE
         } else {
             "\u{2191}\u{2193} MOVE   ENTER OPEN   ESC BACK"
         };
         let filter = self.filter.summary(&shared.config);
         let empty_hint = if !rows.is_empty() {
             None
-        } else if shared.searching {
+        } else if self.search_is_on(shared) {
             Some(("NO RESULTS", "Try a different search  \u{00B7}  Esc to clear"))
         } else if filter.is_some() {
             Some(("NO CHARTS MATCH", "Press F2 to change the filter  \u{00B7}  Backspace there clears it"))
@@ -288,7 +295,7 @@ impl SelectState {
             detail,
             modal,
             score_graph: shared.config.display.score_graph,
-            search: shared.searching.then(|| self.search_display()),
+            search: if shared.searching { Some(self.search_display()) } else { self.search_is_on_show(shared).then(|| shared.search.clone()) },
             sort: shared.config.library.sort.label(),
             filter,
             empty_hint,

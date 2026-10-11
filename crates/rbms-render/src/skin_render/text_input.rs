@@ -164,6 +164,14 @@ impl SkinScreen {
         };
         Some(TextEntryStart { writer: input.writer?, shown: input.text.shown(frame).into_owned() })
     }
+
+    /// Which of this screen's objects is the editable text that writes to `writer`, the first of
+    /// them when there are several, or `None` when the screen has none. It is how a screen that
+    /// keeps a text of its own -- the browser and its search word -- finds the place the skin gave
+    /// that text, to draw what is typed there instead of in a box of the application's.
+    pub fn text_input_writing(&self, writer: SkinTextWriter) -> Option<usize> {
+        self.objects.iter().position(|object| matches!(&object.body, Body::TextInput(input) if input.writer == Some(writer)))
+    }
 }
 
 /// Draws an editable text: what it shows while nothing is being typed into it, and the line being

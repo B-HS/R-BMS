@@ -36,6 +36,12 @@
 //! anywhere else, confirms it and the text is written inside the next frame of its screen, where a
 //! writer that is a function of the skin can be called ([`crate::skin_host::writers`]).
 //!
+//! One editable text is not typed into that way: a text a screen keeps the word of itself, which is
+//! the browser's search text. The screen finds it ([`AppShared::skin_text_writing`]), takes the
+//! presses on it before the frame can ([`AppShared::take_skin_text_press`]) and hands the frame what
+//! is being typed ([`FrameData::entry`]), so the skin's text is where the word is drawn and the
+//! screen is where it is typed, under the one set of rules the screen has for it.
+//!
 //! A Lua skin is read on the first frame of the screen it draws rather than when it is chosen,
 //! because it builds its screen out of that screen's state: the frame hands the state it is drawn
 //! from to the library, which runs the skin against it, and the next frame takes the result in. A
@@ -98,7 +104,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use rbms_config::SkinCustomisation;
 use rbms_render::font::with_text_context;
 use rbms_render::skin_render::textures::{SkinTexturePool, TextureStats, referenced_movie_files, referenced_source_files};
-use rbms_render::skin_render::{PreparedFrame, SkinAction, SkinEvent, SkinInputMap, SkinPointer, SkinPointerButton, SkinWriter};
+use rbms_render::skin_render::{PreparedFrame, SkinAction, SkinEvent, SkinInputMap, SkinPointer, SkinPointerButton, SkinTextWriter, SkinWriter};
 use rbms_render::{Color, FrameData, Renderer, SkinAssets, SkinFrame, SkinImage, SkinScreen, SongBars, TextContext, with_render_ctx};
 use rbms_skin::dst::{LuaDrawEval, OffsetSource, SkinOffset};
 use rbms_skin::loader::{LoadedSkin, SKIN_TYPE_COURSE_RESULT, SKIN_TYPE_DECIDE, SKIN_TYPE_KEY_CONFIG, SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_RESULT};
@@ -1381,7 +1387,7 @@ impl AppShared {
             state: &host,
             lua: None,
             mouse: document_cursor(self.cursor, UI_SIZE, compiled.authored_size()),
-            data: FrameData { entry: typing.as_ref().map(TextSession::entry), ..inputs.data },
+            data: FrameData { entry: typing.as_ref().map(TextSession::entry).or(inputs.data.entry), ..inputs.data },
         };
         let actions = self.skin_screens.take_actions(screen);
         let writes = self.skin_screens.take_text_writes(screen);
@@ -1454,6 +1460,26 @@ impl AppShared {
         let (presses, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut input.actions).into_iter().partition(|(of, action)| is_bar_press(*of, action));
         input.actions = rest;
         presses.into_iter().map(|(_, action)| action).collect()
+    }
+
+    /// Which object of the document drawing `screen` is the editable text that writes the string
+    /// `id`, or `None` when no document is drawing the screen or it has no such text.
+    pub(crate) fn skin_text_writing(&self, screen: i32, id: i32) -> Option<usize> {
+        if !self.skin_document_is_enabled(screen) {
+            return None;
+        }
+        self.skin_screens.get(screen)?.text_input_writing(SkinTextWriter::Id(id))
+    }
+
+    /// Takes the presses on the editable text that is object `object` of `screen`'s document that are
+    /// waiting for its next frame, and answers whether there was one. They are the screen's to carry
+    /// out, like the presses on the bars of its song wheel: taken before the frame is made, they
+    /// start no typing here ([`SkinScreens::begin_typing`]).
+    pub(crate) fn take_skin_text_press(&mut self, screen: i32, object: usize) -> bool {
+        let input = self.skin_screens.input.get_mut();
+        let waiting = input.actions.len();
+        input.actions.retain(|(of, action)| *of != screen || *action != SkinAction::FocusText { object });
+        input.actions.len() != waiting
     }
 
     /// Whether an editable text of a skin is being typed into, which is when the keyboard is its and

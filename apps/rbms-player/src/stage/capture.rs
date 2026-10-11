@@ -73,8 +73,13 @@
 //! the skin's own times -- loading, ready, playing, and the fade or the failure that closes it --
 //! with the engine playing the chart, or nobody playing it, in between. Seven keys are walked the
 //! whole way; five, ten and fourteen are captured while they play.
+//!
+//! The browser's search is walked state by state in [`search`]: a word being typed, what it found
+//! left on show, and a word typed into the pack's own search text.
 
+mod by_hand;
 mod gate;
+mod search;
 
 use std::collections::BTreeMap;
 use std::ops::Range;
@@ -88,6 +93,7 @@ use rbms_library::{Library, SongEntry};
 use rbms_play::{NullSink, PlaySession, SessionClock, SessionOptions};
 use rbms_render::Renderer;
 use rbms_skin::loader::{SKIN_TYPE_COURSE_RESULT, SKIN_TYPE_DECIDE, SKIN_TYPE_KEY_CONFIG, SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_PLAY_7KEYS, SKIN_TYPE_RESULT};
+use rbms_skin::resolve::plain_path;
 use rbms_skin::timer::{MICROS_PER_MILLI, timer_id};
 use rbms_store::SCORE_LN_MODE_FROM_CHART;
 use rbms_store::scoredb::{ScoreDb, migrate_score_book};
@@ -106,6 +112,9 @@ use crate::{App, Config, LaunchOptions, SelectView, SortMode};
 
 /// Environment variable naming the folder captures are saved in. Nothing is saved without it.
 const CAPTURE_DIR_ENV: &str = "RBMS_SKIN_CAPTURE_DIR";
+
+/// The default pack's folder in the repository, from this package's own.
+const DEFAULT_PACK_FOLDER: &str = "../../assets/skins/rbms-default";
 
 /// Extension of a headless capture.
 const CAPTURE_EXTENSION: &str = "png";
@@ -126,6 +135,13 @@ const DOCUMENT_LOAD_TIMEOUT: Duration = Duration::from_secs(60);
 /// How long a frame that finds work still on the worker pool stands back for it. The frames a test
 /// draws are not paced, and on a window-less GPU one is over in tens of microseconds.
 const WORKER_PAUSE: Duration = Duration::from_millis(1);
+
+/// The default pack in the repository, spelled the way the application spells a folder it was told
+/// about.
+fn default_pack() -> PathBuf {
+    let folder = Path::new(env!("CARGO_MANIFEST_DIR")).join(DEFAULT_PACK_FOLDER);
+    plain_path(&folder.canonicalize().unwrap_or_else(|error| panic!("{} cannot be resolved: {error}", folder.display())))
+}
 
 /// The scene time of a frame drawn the moment its scene began.
 pub(super) const SCENE_START_US: i64 = 0;

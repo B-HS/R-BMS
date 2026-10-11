@@ -1110,11 +1110,11 @@ impl App {
         }
     }
 
-    /// Let the window take text through an input method exactly while an editable text of a skin is
-    /// being typed into, so Hangul and kana compose in it, and no longer: a chart being played reads
-    /// keys, not text.
+    /// Let the window take text through an input method exactly while a line is being typed into --
+    /// an editable text of a skin, or the browser's search word -- so Hangul and kana compose in it,
+    /// and no longer: a chart being played reads keys, not text.
     fn sync_ime(&mut self) {
-        let wanted = self.shared.skin_text_is_focused();
+        let wanted = self.shared.skin_text_is_focused() || self.stage.takes_composed_text(&self.shared);
         if let Some(window) = self.window.as_mut() {
             window.sync_ime(wanted);
         }
@@ -1299,7 +1299,7 @@ impl ApplicationHandler for App {
             }
             WindowEvent::MouseWheel { delta, .. } => self.dispatch_pointer(event_loop, PointerInput::from_wheel(delta)),
             WindowEvent::Focused(false) => self.shared.release_held_inputs(),
-            WindowEvent::Ime(ime) => self.shared.skin_text_ime(&ime),
+            WindowEvent::Ime(ime) => self.stage.handle_ime(&mut FrameCtx { shared: &mut self.shared, now: Instant::now(), dt: 0.0 }, &ime),
             WindowEvent::KeyboardInput { event, .. } => {
                 let PhysicalKey::Code(code) = event.physical_key else {
                     return;

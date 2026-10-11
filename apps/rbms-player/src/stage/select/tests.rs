@@ -551,7 +551,8 @@ fn the_list_does_not_move_while_start_or_select_is_held() {
     }
 }
 
-/// Whatever is open over the list keeps the controller away from it, like the keyboard.
+/// Whatever is open over the list keeps the controller away from it, like the keyboard. The search
+/// box is not over the list: a key of a controller ends the typing and is the list's.
 #[test]
 fn an_open_panel_keeps_the_controller_off_the_list() {
     let now = Instant::now();
@@ -572,7 +573,8 @@ fn an_open_panel_keeps_the_controller_off_the_list() {
     let mut state = SelectState::new();
     app.shared.searching = true;
     turn(&mut app, &mut state, ScratchDir::Forward, now);
-    assert_eq!(app.shared.sel, 0, "the search box was open");
+    assert!(!app.shared.searching, "a controller is no keyboard: its key ends a search word being typed");
+    assert_eq!(app.shared.sel, 1, "and then moves the list, which the search box does not cover");
 
     let mut app = three_songs();
     let mut state = SelectState::new();

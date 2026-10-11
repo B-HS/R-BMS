@@ -160,6 +160,9 @@ pub(crate) trait StageHandler {
         let _ = (ctx, lines);
         Transition::Stay
     }
+    /// What the window's input method reports while this screen is typed into: the text it is
+    /// composing and the text it commits. A screen that takes no composed text is unchanged.
+    fn handle_ime(&mut self, _ctx: &mut FrameCtx<'_>, _ime: &winit::event::Ime) {}
     /// One controller event, already debounced. A screen with no use for a controller is unchanged.
     fn handle_pad(&mut self, ctx: &mut FrameCtx<'_>, event: crate::gamepad::PadEvent) -> Transition {
         let _ = (ctx, event);
@@ -301,6 +304,21 @@ impl Stage {
             return Transition::Stay;
         }
         self.handler().handle_key(ctx, key)
+    }
+
+    /// Route what the window's input method reports: to the editable text of a skin that is being
+    /// typed into when there is one, and otherwise to the screen that is up.
+    pub(crate) fn handle_ime(&mut self, ctx: &mut FrameCtx<'_>, ime: &winit::event::Ime) {
+        if ctx.shared.skin_text_is_focused() {
+            ctx.shared.skin_text_ime(ime);
+        } else {
+            self.handler().handle_ime(ctx, ime);
+        }
+    }
+
+    /// Whether the screen that is up is typing a line an input method may compose into.
+    pub(crate) fn takes_composed_text(&self, shared: &AppShared) -> bool {
+        matches!(self, Stage::Select(_)) && shared.searching
     }
 
     /// Route one mouse event to the screen that is up, unless the option overlay is over it.

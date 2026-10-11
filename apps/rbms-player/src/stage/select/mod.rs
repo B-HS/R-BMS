@@ -18,6 +18,9 @@
 //! What is the application's rather than a skin's is drawn over the skin ([`overlay`]): the hint on
 //! an empty list, the ranking panel, the record modal, the filter panel, the search box and the key
 //! guide ([`guide`]), each of which takes the keys and the mouse before the skin does.
+//!
+//! The search is a state of its own ([`search`]): a word being typed takes the keys that are text
+//! and no others, and the list a word left on show is driven like any other list.
 #![allow(clippy::wildcard_imports)]
 
 use std::sync::mpsc::TryRecvError;
@@ -36,6 +39,7 @@ use crate::skin_host::select::{BrowserLent, CourseShown};
 use crate::skin_screen::SelectDraw;
 use crate::stage::result::SkinStatus;
 use crate::stage::{Canvas, FoldersState, FrameCtx, KeyInput, SettingsState, Stage, StageHandler, TablesState, Transition, is_left_press};
+use crate::textedit::ImeEdit;
 use crate::*;
 
 #[cfg(test)]
@@ -59,6 +63,9 @@ mod panel;
 mod panel_tests;
 mod preview;
 mod scene;
+mod search;
+#[cfg(test)]
+mod search_tests;
 mod skin_writes;
 mod skinned;
 #[cfg(test)]
@@ -76,14 +83,6 @@ use panel::PanelState;
 use preview::PreviewState;
 use scene::BarList;
 use skinned::{BarMark, WallClock, skin_status};
-
-/// What the search box draws where the next character will go.
-const SEARCH_CARET: &str = "_";
-
-/// Roughly how many characters the search box shows at once, so a query too long for it scrolls
-/// under the caret instead of hiding the end being edited. The renderer trims to the exact pixel
-/// width on top of this; this only decides which stretch of the query it is handed.
-const SEARCH_VISIBLE_CHARS: usize = 24;
 
 /// The key table the built-in browser reads its controller keys by, whatever mode is up: the
 /// reference's table for a layout with a turntable ([`keys`]). The keys that open the focused row
@@ -138,8 +137,9 @@ pub(crate) struct SelectState {
     /// because a key event only names the key that moved.
     shift_held: bool,
     ctrl_held: bool,
-    /// The search query being typed, and where the browser goes back to when the box closes.
-    search_edit: TextEdit,
+    /// The search word as the search box edits it, and where the browser goes back to when the
+    /// search is left, which is also what says a search is on ([`search`]).
+    search_edit: ImeEdit,
     search_resume: Option<(SelectView, usize)>,
     filter: FilterPanel,
     /// The list generation, the filter and the ordering the rows on screen were built with. Every
@@ -223,7 +223,7 @@ impl Default for SelectState {
             cached_key: None,
             shift_held: false,
             ctrl_held: false,
-            search_edit: TextEdit::new(),
+            search_edit: ImeEdit::default(),
             search_resume: None,
             filter: FilterPanel::default(),
             applied: None,
@@ -456,49 +456,6 @@ impl SelectState {
         let filter = self.filter.filter(&shared.config);
         shared.rebuild_select_items_with(filter);
         self.applied = Some((shared.select_gen, filter, shared.config.library.sort));
-    }
-
-    /// Open the search box (`/`). Search spans the whole library, so switch to the flat song list,
-    /// remembering the folder and the row it was opened from.
-    fn start_search(&mut self, shared: &mut AppShared) {
-        if !shared.searching {
-            self.search_resume = Some((shared.select_view, shared.sel));
-        }
-        shared.searching = true;
-        self.search_edit = TextEdit::new();
-        shared.search.clear();
-        shared.select_view = SelectView::AllSongs;
-        shared.sel = 0;
-        self.rebuild(shared);
-    }
-
-    /// Close the search box (Esc), clear the query and go back to the folder and the row the search
-    /// was opened from — a search is a detour, not a way of leaving the folder you were in.
-    fn exit_search(&mut self, shared: &mut AppShared) {
-        shared.searching = false;
-        self.search_edit = TextEdit::new();
-        shared.search.clear();
-        let (view, sel) = self.search_resume.take().unwrap_or((SelectView::AllSongs, 0));
-        shared.select_view = view;
-        shared.sel = 0;
-        self.rebuild(shared);
-        shared.sel = sel.min(shared.select_items.len().saturating_sub(1));
-    }
-
-    /// Take what has been typed into the query the list is filtered by.
-    fn apply_search(&mut self, shared: &mut AppShared) {
-        shared.search = self.search_edit.text().to_string();
-        shared.sel = 0;
-        self.rebuild(shared);
-    }
-
-    /// The stretch of the query the search box draws, with a caret standing where the next
-    /// character will go. A query longer than the box scrolls with the caret, so editing the start
-    /// of a long one is not done blind.
-    pub(super) fn search_display(&self) -> String {
-        let (shown, at) = self.search_edit.window(SEARCH_VISIBLE_CHARS);
-        let split = shown.char_indices().nth(at).map_or(shown.len(), |(byte, _)| byte);
-        format!("{}{SEARCH_CARET}{}", &shown[..split], &shown[split..])
     }
 
     /// Cycle the song-list sort order (F3), or step back through it (Shift+F3).
@@ -857,8 +814,15 @@ impl SelectState {
         Transition::Stay
     }
 
-    /// Go up one select level; at the root, quit.
+    /// Go up one select level; at the root, quit. A search is left before any folder is: the list
+    /// it runs over is the flat song list, and going back from a search goes to where the search
+    /// was made from rather than to the top of the library.
     fn select_back(&mut self, shared: &mut AppShared) -> Transition {
+        if self.search_is_on(shared) {
+            shared.play_system_sound(SystemSound::FolderClose);
+            self.exit_search(shared);
+            return Transition::Stay;
+        }
         match shared.select_view {
             SelectView::Root => return Transition::Quit,
             _ => shared.play_system_sound(SystemSound::FolderClose),
@@ -912,56 +876,13 @@ impl SelectState {
             _ => None,
         }
     }
-
-    /// Keys while the search box is open: everything that is not a control key types into the query.
-    fn search_key(&mut self, shared: &mut AppShared, key: &KeyInput<'_>) -> Transition {
-        match key.code {
-            KeyCode::Escape => self.exit_search(shared),
-            KeyCode::Backspace => {
-                self.search_edit.backspace();
-                self.apply_search(shared);
-            }
-            KeyCode::Delete => {
-                self.search_edit.delete();
-                self.apply_search(shared);
-            }
-            KeyCode::ArrowLeft => self.search_edit.left(),
-            KeyCode::ArrowRight => self.search_edit.right(),
-            KeyCode::Home => self.search_edit.home(),
-            KeyCode::End => self.search_edit.end(),
-            KeyCode::KeyV if self.ctrl_held => {
-                self.search_edit.paste();
-                self.apply_search(shared);
-            }
-            KeyCode::F3 => self.cycle_sort(shared),
-            KeyCode::ArrowUp => {
-                shared.sel = shared.sel.saturating_sub(1);
-                shared.print_selection();
-            }
-            KeyCode::ArrowDown => {
-                if shared.sel + 1 < shared.select_items.len() {
-                    shared.sel += 1;
-                }
-                shared.print_selection();
-            }
-            KeyCode::Enter | KeyCode::NumpadEnter => return self.select_enter(shared),
-            _ => {
-                if let Some(t) = key.text {
-                    self.search_edit.insert(t);
-                    if self.search_edit.text() != shared.search {
-                        self.apply_search(shared);
-                    }
-                }
-            }
-        }
-        Transition::Stay
-    }
 }
 
 impl StageHandler for SelectState {
-    /// The browser takes every key itself while something on it is being typed into or read: the
-    /// search box, the record modal, the filter panel. The option overlay opens on a shift key, and
-    /// a shift key held to type a capital letter belongs to the search box rather than to it.
+    /// The browser keeps the keys from the option overlay while something on it is being typed into
+    /// or read: the search box, the record modal, the filter panel, the key guide. The option
+    /// overlay opens on a shift key, and a shift key held to type a capital letter belongs to the
+    /// search box rather than to it. A list a search left on show is not one of these: it is a list.
     fn holds_keys(&self, ctx: &FrameCtx<'_>) -> bool {
         ctx.shared.searching || self.record_modal.is_some() || self.filter.is_open() || self.guide_open
     }
@@ -969,8 +890,12 @@ impl StageHandler for SelectState {
     /// Arriving back on the browser is when the course list is re-resolved: a scan that has just
     /// finished may have supplied the very charts a course was missing. A key still held from the
     /// screen that was left is not a press here.
+    ///
+    /// A screen that put the browser back at the top of the library -- a scan, the table manager --
+    /// took the list a search was on with it, so the search is dropped too.
     fn on_enter(&mut self, ctx: &mut FrameCtx<'_>) {
         SelectState::end_autoplay_run(ctx.shared);
+        self.drop_a_search_left_behind(ctx.shared);
         self.refresh_courses(ctx.shared);
         self.listening = false;
         self.guide_open = false;
@@ -986,7 +911,13 @@ impl StageHandler for SelectState {
             return started;
         }
         let skin = skin_status(ctx.shared);
+        if ctx.shared.skin_text_is_focused() {
+            self.confirm_search(ctx.shared);
+        }
         self.refresh_lent(ctx.shared);
+        if skin == SkinStatus::Ready {
+            self.follow_a_press_on_the_skins_search_text(ctx.shared);
+        }
         let asked = match skin {
             SkinStatus::Ready => match self.skin_input_frame(ctx) {
                 Transition::Stay => self.carry_out_skin_events(ctx.shared),
@@ -1027,8 +958,10 @@ impl StageHandler for SelectState {
     }
 
     /// The preview owns the shared output stream's preview namespace, so it is torn down before any
-    /// other screen can touch the engine.
+    /// other screen can touch the engine. A search word being typed is confirmed on the way out, so
+    /// the browser that is come back to is a list and not a box waiting for letters.
     fn on_exit(&mut self, ctx: &mut FrameCtx<'_>) {
+        self.confirm_search(ctx.shared);
         self.write_option_changes(ctx.shared);
         if self.preview_active() {
             self.stop_preview(ctx.shared);
@@ -1036,8 +969,8 @@ impl StageHandler for SelectState {
         SelectState::end_select_bgm(ctx.shared);
     }
 
-    /// Keys on the browser. While the search box is open, anything that is not a named shortcut —
-    /// letters, digits, space — types into the query.
+    /// Keys on the browser. While a search word is typed the keys that are text are the word's, and
+    /// the rest go on to do what they do on the list ([`SelectState::search_key`]).
     fn handle_key(&mut self, ctx: &mut FrameCtx<'_>, key: KeyInput<'_>) -> Transition {
         if matches!(key.code, KeyCode::ShiftLeft | KeyCode::ShiftRight) {
             if key.pressed {
@@ -1070,8 +1003,10 @@ impl StageHandler for SelectState {
         if self.filter_panel_input(ctx.shared, key.code) {
             return Transition::Stay;
         }
-        if ctx.shared.searching {
-            return self.search_key(ctx.shared, &key);
+        if ctx.shared.searching
+            && let Some(asked) = self.search_key(ctx, &key)
+        {
+            return asked;
         }
         if self.ranking_panel_input(ctx.shared, key.code) {
             return Transition::Stay;
@@ -1116,6 +1051,11 @@ impl StageHandler for SelectState {
         Transition::Stay
     }
 
+    /// The input method composes into the search word while one is typed, and nowhere else.
+    fn handle_ime(&mut self, ctx: &mut FrameCtx<'_>, ime: &winit::event::Ime) {
+        self.search_ime(ctx.shared, ime);
+    }
+
     /// A controller on the browser, with the panels closed: the turntable moves down and up the
     /// list, a white key opens the focused row and a black key goes up a folder — the first rows
     /// of the reference implementation's select key table (`b4-screens.md` section 3.5).
@@ -1126,7 +1066,13 @@ impl StageHandler for SelectState {
     /// That is the built-in browser. A browser a skin draws reads the whole table off the keys'
     /// state once a frame, so there a key going down is only noted for the frame that follows, and
     /// a browser waiting for its skin takes nothing.
+    ///
+    /// A key of a controller is no letter: one going down while a search word is typed ends the
+    /// typing, with what was typed left on show, before it does what it does.
     fn handle_pad(&mut self, ctx: &mut FrameCtx<'_>, event: PadEvent) -> Transition {
+        if matches!(event, PadEvent::Lane { press: true, .. } | PadEvent::Control(_)) {
+            self.confirm_search(ctx.shared);
+        }
         let PadEvent::Lane { lane, dir, press: true } = event else {
             return Transition::Stay;
         };
@@ -1185,7 +1131,7 @@ impl StageHandler for SelectState {
             Some(Hot::GuideClose) => self.guide_open = false,
             Some(Hot::OverlayPanel) => {}
             Some(Hot::NavSearch) => {
-                if ctx.shared.searching {
+                if self.search_is_on(ctx.shared) {
                     self.exit_search(ctx.shared);
                 } else {
                     self.start_search(ctx.shared);
@@ -1203,9 +1149,10 @@ impl StageHandler for SelectState {
     }
 
     /// The wheel of the mouse turns a skin's list, and waits for the frame that follows like the
-    /// keys do (`BarRenderer.input`). The built-in browser has no use for it.
+    /// keys do (`BarRenderer.input`). The built-in browser has no use for it. A search word being
+    /// typed does not take the wheel: it turns the list under the box.
     fn handle_scroll(&mut self, ctx: &mut FrameCtx<'_>, lines: f32) -> Transition {
-        if skin_status(ctx.shared) == SkinStatus::Ready && !self.keys_are_elsewhere(ctx) {
+        if skin_status(ctx.shared) == SkinStatus::Ready && !self.list_is_covered(ctx) {
             self.wheel_lines += lines;
         }
         Transition::Stay
@@ -1254,7 +1201,8 @@ impl StageHandler for SelectState {
             scroll: self.scroller.at(self.clock.millis_at(ctx.now)),
             ..SongBars::new(bars, cursor)
         };
-        let data = FrameData { bars: Some(&wheel), images, bga: BgaFrame::of(images.stagefile.or(images.banner)), ..FrameData::default() };
+        let entry = SelectState::search_entry(&self.search_edit, ctx.shared);
+        let data = FrameData { bars: Some(&wheel), images, bga: BgaFrame::of(images.stagefile.or(images.banner)), entry, ..FrameData::default() };
         let lent = BrowserLent {
             courses: &view.header,
             panel: self.panel.number(),

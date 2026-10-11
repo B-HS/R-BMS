@@ -22,13 +22,9 @@
 use rbms_render::SkinObjectKind;
 use rbms_skin::loader::SKIN_TYPE_PLAY_5KEYS;
 use rbms_skin::loader::{SKIN_TYPE_PLAY_9KEYS, SKIN_TYPE_PLAY_10KEYS, SKIN_TYPE_PLAY_14KEYS};
-use rbms_skin::resolve::plain_path;
 
 use super::*;
 use crate::stage::select::tests::entry;
-
-/// The default pack's folder in the repository, from this package's own.
-const DEFAULT_PACK_FOLDER: &str = "../../assets/skins/rbms-default";
 
 /// The file of the pack that says which colours it is drawn in.
 const THEME_FILE: &str = "lua/theme.lua";
@@ -52,12 +48,6 @@ const GATE_CHART: &str = DECIDE_SAMPLE_CHART;
 
 /// How many songs the browser is given to list.
 const GATE_SONGS: [&str; 5] = ["Aurora", "Borealis", "Cascade", "Drift", "Ember"];
-
-/// The default pack, spelled the way the application spells a folder it was told about.
-fn default_pack() -> PathBuf {
-    let folder = Path::new(env!("CARGO_MANIFEST_DIR")).join(DEFAULT_PACK_FOLDER);
-    plain_path(&folder.canonicalize().unwrap_or_else(|error| panic!("{} cannot be resolved: {error}", folder.display())))
-}
 
 /// The pack's background colour, read out of the file that defines the pack's colours so the gate
 /// follows the pack when its palette is changed.

@@ -23,6 +23,11 @@ use crate::{AppShared, SelectView};
 const ALL_SONGS_TITLE: &str = "ALL SONGS";
 const TABLE_LEVEL_PREFIX: &str = "LV";
 
+/// What the reference writes round the word of the folder it files a search under
+/// (`SearchWordBar`: `"Search : '" + text + "'"`).
+const SEARCH_TITLE_OPENS: &str = "Search : '";
+const SEARCH_TITLE_CLOSES: &str = "'";
+
 /// What the browser lends one frame of its skin beside the list itself.
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct BrowserLent<'a> {
@@ -87,10 +92,16 @@ impl AppShared {
     }
 
     /// The titles of the folders the browser has opened, outermost first (`BarManager.dir`).
+    ///
+    /// A search is a folder of its own to the reference, titled with the word (`SearchWordBar`), and
+    /// a list a search narrows is that folder: its title is what a skin that draws this path has to
+    /// say the list on show is what a word found, and which word.
     fn open_folders(&self) -> Vec<String> {
         let table = |index: usize| self.table_names.get(index).cloned().unwrap_or_default();
+        let word = self.search.trim();
         match self.select_view {
             SelectView::Root => Vec::new(),
+            SelectView::AllSongs if !word.is_empty() => vec![format!("{SEARCH_TITLE_OPENS}{word}{SEARCH_TITLE_CLOSES}")],
             SelectView::AllSongs => vec![ALL_SONGS_TITLE.to_string()],
             SelectView::TableLevels(index) => vec![table(index)],
             SelectView::TableLevel(index, level) => {

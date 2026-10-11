@@ -32,7 +32,7 @@ use crate::skin_host::Cluster;
 use crate::skin_host::writers::{BrowserWrite, browser_write};
 use crate::stage::result::SkinStatus;
 use crate::stage::scene_life::{SceneTimes, advance};
-use crate::stage::{FrameCtx, StageHandler, Transition};
+use crate::stage::{FrameCtx, Transition};
 use crate::{AppShared, KeyCode, SKIN_TYPE_MUSIC_SELECT, SelectItem, SelectTab, SelectView, SystemSound};
 
 /// The length of a scene that never ends on its own. The browser reads the `input` time of a
@@ -135,10 +135,22 @@ const RANKING_TIMERS: [(TimerId, RankingPhase); 3] =
     [(timer_id::IR_CONNECT_BEGIN, RankingPhase::Access), (timer_id::IR_CONNECT_SUCCESS, RankingPhase::Finish), (timer_id::IR_CONNECT_FAIL, RankingPhase::Fail)];
 
 impl SelectState {
-    /// Whether the keys are something else's right now: a box of the browser's being typed into or
-    /// read, the ranking panel, the option overlay, or an editable text of the skin.
+    /// Whether something is over the list that it must stand still under: a panel of the browser's
+    /// being read, the ranking panel, the option overlay, or an editable text of the skin being
+    /// typed into. A search word being typed is not one of these: the list moves under the box.
+    pub(super) fn list_is_covered(&self, ctx: &FrameCtx<'_>) -> bool {
+        self.record_modal.is_some()
+            || self.filter.is_open()
+            || self.guide_open
+            || self.ranking_open
+            || ctx.shared.options.is_open()
+            || ctx.shared.skin_text_is_focused()
+    }
+
+    /// Whether the keys of the key table are something else's right now: the list is covered, or a
+    /// search word is being typed, which is when the keys the lanes are on are letters.
     pub(super) fn keys_are_elsewhere(&self, ctx: &FrameCtx<'_>) -> bool {
-        self.holds_keys(ctx) || self.ranking_open || ctx.shared.options.is_open() || ctx.shared.skin_text_is_focused()
+        self.list_is_covered(ctx) || ctx.shared.searching
     }
 
     /// Notes that the key `index` went down on a browser a skin draws, for the frame that follows.
@@ -188,18 +200,22 @@ impl SelectState {
     }
 
     /// Whether an option panel is up or its keys are held, which is what puts it up on the frame
-    /// that follows.
+    /// that follows. While a search word is typed the keys that call a panel up are letters and a
+    /// digit of the word, and call nothing up.
     pub(super) fn panel_is_called_up(&self, shared: &AppShared) -> bool {
-        self.panel.is_open() || Panel::held(shared.start_pressed(), shared.select_pressed(), shared.keyconfig.held.is_down(DETAIL_PANEL_KEY)) != Panel::Closed
+        let held = Panel::held(shared.start_pressed(), shared.select_pressed(), shared.keyconfig.held.is_down(DETAIL_PANEL_KEY));
+        self.panel.is_open() || (!shared.searching && held != Panel::Closed)
     }
 
     /// Which way the list is being held this frame: by the keys of the key table that move it, or by
     /// an arrow of the keyboard, the down arrow with the key for the next bar and the up arrow with
     /// the key for the one before, the next winning over the one before (`BarRenderer.input`).
     /// `tapped` is an arrow that went down since the last frame, which counts as held for this one
-    /// so that a press shorter than a frame still moves the list.
-    fn list_hold(&mut self, shared: &AppShared, layout: KeyLayout, tapped: BarHold) -> BarHold {
-        let keys = self.keys.hold(layout);
+    /// so that a press shorter than a frame still moves the list. With no `layout` the keys of the
+    /// key table are not asked, which is how the list is held while they are letters of a search
+    /// word.
+    fn list_hold(&mut self, shared: &AppShared, layout: Option<KeyLayout>, tapped: BarHold) -> BarHold {
+        let keys = layout.map_or(BarHold::None, |layout| self.keys.hold(layout));
         let held = &shared.keyconfig.held;
         if keys == BarHold::Next || tapped == BarHold::Next || held.is_down(LIST_NEXT_KEY) {
             BarHold::Next
@@ -232,39 +248,51 @@ impl SelectState {
     /// One frame of input on a browser a skin draws (`MusicSelectInputProcessor.input`, then
     /// `Skin.mousePressed`).
     ///
-    /// On the first frame the browser listens again, and for as long as the keys are something
-    /// else's, the keys are only kept track of, so that what is held then is not a press later; a
-    /// panel is still put up for the keys that are held on that first frame, and taken down while
-    /// the keys are something else's. With an option panel called up the list stands still and the
-    /// panel takes the presses of its own keys ([`super::panel`]). Otherwise the wheel and the held
-    /// keys move the list and the keys under the cursor are read. A press on a bar is carried out
+    /// On the first frame the browser listens again, and for as long as the list is covered, the
+    /// keys are only kept track of, so that what is held then is not a press later; a panel is
+    /// still put up for the keys that are held on that first frame, and taken down while the keys
+    /// are something else's. With an option panel called up the list stands still and the panel
+    /// takes the presses of its own keys ([`super::panel`]). Otherwise the wheel and the held keys
+    /// move the list and the keys under the cursor are read. A press on a bar is carried out
     /// whichever of these the frame was.
+    ///
+    /// While a search word is typed the keys of the key table are letters of it: they are only kept
+    /// track of, call no panel up and start nothing, and the wheel and the two arrows go on moving
+    /// the list under the box.
     pub(super) fn skin_input_frame(&mut self, ctx: &mut FrameCtx<'_>) -> Transition {
         let now_ms = self.clock.millis_at(ctx.now);
         let tapped = std::mem::take(&mut self.arrow_tap);
         let presses = ctx.shared.take_skin_bar_presses(SKIN_TYPE_MUSIC_SELECT);
-        let elsewhere = self.keys_are_elsewhere(ctx);
+        let covered = self.list_is_covered(ctx);
         let shared = &mut *ctx.shared;
+        let typing = shared.searching;
         let held = Panel::held(shared.start_pressed(), shared.select_pressed(), shared.keyconfig.held.is_down(DETAIL_PANEL_KEY));
-        let panel = if elsewhere { Panel::Closed } else { held };
+        let panel = if covered || typing { Panel::Closed } else { held };
         self.show_panel(shared, panel);
-        if !std::mem::replace(&mut self.listening, true) || elsewhere {
+        if !std::mem::replace(&mut self.listening, true) || covered {
             self.keys = SelectKeys::settled(shared);
             self.wheel_lines = 0.0;
             self.scroller.reset_input(now_ms);
             return self.press_bars(shared, presses);
         }
         let layout = KeyLayout::of(shared.mode);
-        self.keys.read(shared);
+        if typing {
+            self.keys = SelectKeys::settled(shared);
+        } else {
+            self.keys.read(shared);
+        }
         if panel != Panel::Closed {
             self.scroller.reset_input(now_ms);
             self.panel_keys(shared, layout, panel, now_ms);
             return self.press_bars(shared, presses);
         }
         let wheel = self.take_wheel();
-        let hold = self.list_hold(shared, layout, tapped);
+        let hold = self.list_hold(shared, (!typing).then_some(layout), tapped);
         let moved = self.scroller.input(wheel, hold, now_ms);
         self.step_bars(shared, moved);
+        if typing {
+            return self.press_bars(shared, presses);
+        }
         match self.list_keys(shared, layout) {
             Transition::Stay => self.press_bars(shared, presses),
             asked => asked,
@@ -326,17 +354,16 @@ impl SelectState {
     }
 
     /// Go up one folder, or at the top of the list move the order on instead (`BarManager.close`).
-    /// A search is left the way its own key leaves it, and the course tab has nothing to close.
+    /// A search, typed or on show, is left the way a folder is, and the course tab has nothing to
+    /// close.
     fn close_bar(&mut self, shared: &mut AppShared) {
         if self.tab != SelectTab::Songs {
             return;
         }
-        if shared.searching {
-            self.exit_search(shared);
-        } else if shared.select_view == SelectView::Root {
-            self.sort_event(shared, true);
-        } else {
+        if self.search_is_on(shared) || shared.select_view != SelectView::Root {
             self.select_back(shared);
+        } else {
+            self.sort_event(shared, true);
         }
     }
 
