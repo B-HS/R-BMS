@@ -203,6 +203,9 @@ struct LaunchOptions {
     timing_csv: Option<String>,
     /// `RBMS_SKIN_PACK`: a skin pack folder drawn for this run, whatever the settings file names.
     skin_pack: Option<PathBuf>,
+    /// Whether the platform's controller layer is opened. A run of the player opens it; nothing
+    /// else has a device to read, and each layer that is opened keeps threads of its own alive.
+    controllers: bool,
 }
 
 /// Green number (note travel time in ms) for the active scroll mode: CONSTANT is fixed by hi-speed
@@ -902,7 +905,7 @@ impl App {
 
         let keyconfig_path = launch.keyconfig_path.clone().map(PathBuf::from).unwrap_or_else(|| config_dir.join("keyconfig.ron"));
         let keyconfig = KeyConfig::load(&keyconfig_path);
-        let pad = PadState::new(&keyconfig.pad);
+        let pad = if launch.controllers { PadState::new(&keyconfig.pad) } else { None };
         let skins = SkinLibrary::new(&settings_path, &config)
             .forcing_pack(launch.skin_pack.clone(), &config)
             .drawing_play_built_in(launch.skin_path.is_some(), &config);
@@ -1397,7 +1400,11 @@ pub fn run(args: impl Iterator<Item = String>) -> ExitCode {
         );
     }
 
-    let mut launch = LaunchOptions { skin_pack: skin_select::pack_from_environment(std::env::var_os(skin_select::SKIN_PACK_ENV)), ..LaunchOptions::default() };
+    let mut launch = LaunchOptions {
+        skin_pack: skin_select::pack_from_environment(std::env::var_os(skin_select::SKIN_PACK_ENV)),
+        controllers: true,
+        ..LaunchOptions::default()
+    };
     let mut chart: Option<String> = None;
     let mut args = args.skip(1);
     while let Some(a) = args.next() {
