@@ -13,6 +13,7 @@ A fresh session starts with [HANDOFF.md](HANDOFF.md) (the 2026-10-11 session sna
 | [development.md](development.md) | Build / run / test, persistence files, app module layout, conventions. |
 | [theme.md](theme.md) | The `theme.ron` UI-theme schema. |
 | [skin.md](skin.md) | Skins (Korean): supported formats and screens, using a skin pack, the default skin `rbms-default`, the Lua environment and budgets, `rbms-cli skin-dump`, known limits. Specification: `plan/2026-10-09-lua-skin-compat.md`; default skin design: `plan/2026-10-11-default-skin-design.md`. |
+| [play-options.md](play-options.md) | Play options (Korean): definitions, units and ranges of the scroll, cover and judge-timing options, their keys, AUTO ADJUST, KEEP GREEN NUMBER, and the PLAY menu (`F8`: the options on the left, a live play screen on the right, how to read the figures under it, what stays in Settings). Design: `plan/2026-10-11-play-menu.md`; the SKIN menu it is the twin of: `plan/2026-10-11-skin-menu.md`. |
 | [roadmap.md](roadmap.md) | Deferred work and intentional edge-case behaviours pinned by tests. |
 | [ci-release.md](ci-release.md) | CI matrix and the Phase R release boundary. `prod`, first release/tag and signing or deployment credentials remain unstarted. |
 | [plan/](plan/) | Phase A~G planning and specifications, research reports, and completed Phase G wiring instructions. Phase H is recorded in history; Phase R remains a future key-dependent release task. |

@@ -1,6 +1,24 @@
 # R3 — R-BMS 앱(apps/rbms-player) 스킨 배선·화면 구성·입력 현황과 격차
 
-> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 10A(넓은 레인, 키 사용자 지정, 판정 자동 보정, 녹색 숫자 유지) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 10B(PLAY 메뉴) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 10B 반영 사항 (2026-10-11)
+
+플레이 옵션을 Settings 에서 독립 화면 PLAY 메뉴로 옮기고(사용자 요청 6), 그 화면의 오른쪽에 고른 모드의 플레이 화면을 미리보게 한 뒤의 상태다. 설계서는 `docs/plan/2026-10-11-play-menu.md`, 사용자용 설명은 `docs/play-options.md` 7절. 본문과 아래 웨이브들의 "Settings 의 PLAY 탭·GAUGE 탭", "Stage 12개", "`SettingTab::ALL` 9개"는 이 절로 읽는다.
+
+- (Stage) `Stage::PlayMenu(Box<PlayMenuState>)`·`StageId::PlayMenu` 가 생겨 Stage 는 13개다(`stage/play_menu.rs`, 행의 규칙은 `stage/play_menu/rows.rs`). 왼쪽은 PREVIEW BPM 행과 `SettingTab::PLAY_MENU` 네 묶음(SPEED·LANE·JUDGE·CHART)의 행, LANE 묶음 끝에 미리보는 플레이 문서의 옵션(`SkinRow::Property`)이고, 오른쪽은 SKIN 메뉴와 같은 `PREVIEW_RECT` 의 미리보기다. 모드(7K 5K 14K 10K 9K)와 예시 BPM(100·120·150·180·200)은 `PlayMenuState` 에만 있고 저장되지 않으며 `config.skin.screen` 을 읽지도 바꾸지도 않는다
+- (공통 부품) SKIN 메뉴의 배치 상수, 탭 줄, 행 목록과 스크롤 막대, 휠·클릭 규칙, 정보 패널, 미리보기 자리의 상태 문구, 줄바꿈이 `stage/preview_menu.rs` 로 올라가 두 메뉴가 같은 코드를 쓴다(`ListWindow`·`ListEntry`·`RowLook::{Plain, ReadOnly, Heading}`·`draw_list`·`draw_tabs`·`draw_info_*`·`draw_preview`·`SHIFT_STEPS`). PLAY 메뉴 전용은 요약 다섯 칸(`InfoFigure`, `draw_info_figures`)과 그 아래의 커서 행(`draw_info_row_at`)이다. 웨이브 9B 반영 사항의 "`stage/skin_menu.rs` 한 파일" 서술은 이것으로 대체된다. SKIN 메뉴의 화면은 그대로다(추출 전후 캡처 비교)
+- (진입) 선곡의 `Shortcut::PlayMenu`(기본 F8, 설정 파일 키 `play_menu`, `ShortcutGroup::Screens` 는 6종이 되어 `Shortcut` 은 30종)와 Settings 의 같은 키·탭 띠의 `PLAY MENU >` 단추(`SKIN MENU >` 앞)가 `Transition::Open(PlayMenuState::stage())` 를 낸다. 스킨의 버튼은 없다: 원본에 플레이 옵션 화면을 여는 이벤트가 없고(화면을 바꾸는 이벤트는 13·14 뿐) 번호를 새로 정하지 않았다. Esc 는 `save_settings` 뒤 `Transition::Back`, `on_exit` 가 `SkinPreview::release`
+- (키) `KeyConfig::shortcut_key` 는 파일에 항목이 없는 단축키의 기본 키를 같은 화면의 다른 단축키가 파일에서 쓰고 있으면 `None` 으로 답한다(`shipped_key_unless_given_away`). 웨이브 10A 반영 사항의 "없음 = 기본 키"에 이 예외가 붙는다. 이전 `keyconfig.ron` 에서 F8 을 옮겨 둔 단축키가 PLAY MENU 에 가려지지 않는다
+- (설정 표) `SettingTab` 의 `Play`·`Gauge` 가 없어지고 `PlaySpeed`·`PlayLane`·`PlayJudge`·`PlayChart` 가 생겼다(`ALL` 11개, `SHOWN` 6개 = JUDGE DISPLAY INPUT NETWORK AUDIO SELECT, `PLAY_MENU` 4개). `SettingId`·`SETTING_COUNT`(87)·설정 파일·스키마 판(4)은 그대로다. 5KEYS LAYOUT 은 DISPLAY 탭, TOTAL 은 JUDGE 탭, SCRATCH SIDE 는 INPUT 탭에 남았다(경계 표는 설계서 §7). `rbms-cli config` 덤프의 묶음 머리는 `[PLAY SPEED]` 등이다
+- (설정 표) `adjust` 의 비율 행(LANE COVER, LIFT, HIDDEN+, JUDGE TEXT Y, PREVIEW VOLUME)은 값을 걸음 수로 세어 옮긴 뒤 한 걸음의 역수로 나눈다(`stepped_share`). f32 에 0.01 을 누적하던 이전 방식은 30 걸음 뒤 0.29999998 이 되어 흰색 숫자가 299 로 읽혔다. `JUDGE_OFFSET_STEP_MS` 는 1 이다(이전 5. 이 행을 보이는 화면은 PLAY 메뉴뿐이다)
+- (스킨 값) 플레이 클러스터의 number 14(`NUMBER_LANECOVER1`)·314(`NUMBER_LIFT1`)·315(`NUMBER_HIDDEN1`)는 `비율 * 1000` 을 반올림한다(`skin_host/play.rs`). 원본은 버림(`(int)(lanecover * 1000)`)이라 f32 값이 천분의 일에 조금 못 미칠 때 하나 작게 읽는다. 내장 HUD 의 흰색 숫자(`hud.rs`)는 이전부터 반올림이었다. 316(`NUMBER_LANECOVER2`)은 원본과 같은 버림 그대로다. `b3`·`b5` 의 14·314·315 서술에 이 차이가 붙는다
+- (미리보기) `SkinPreview` 는 대상 둘을 지원한다(`skin_preview/target.rs`): `PreviewTarget::Configured`(SKIN 메뉴, `config.skin.screen` 을 매 프레임 읽음)와 `PreviewTarget::Play(PlayTarget { screen, bpm })`(PLAY 메뉴, `of_play`·`show_play`). `PlayTarget::readout(&PlayOptions) -> SpeedReadout` 이 예시 BPM 에서의 하이스피드·이동 시간·녹색 숫자·흰색 숫자·범위 걸림을 `rbms_config::held_speed`·`travel_duration_ms`·`green_of_duration` 으로 내고, 메뉴의 행 값·요약과 예시의 스크롤이 이 한 곳을 쓴다
+- (예시 런) `stage/play/skin_preview.rs` 의 예시 차트는 `SampleTempo::Shipped`(150 → 180, SKIN 메뉴)와 `SampleTempo::Steady(bpm)`(한 템포, 30~999 로 묶음, PLAY 메뉴)다. `SampleEnding::BeginsAgain`(PLAY 메뉴)인 런은 마지막 노트 1초 뒤 장면을 떠나지 않고 세션·피드만 새로 만들어 차트 처음부터 다시 돌고(`due_run`·`begin_run`), 예시 BPM 이나 GAUGE 가 바뀌면 같은 진행 비율까지 즉시 재생한 새 세션으로 이어 간다(READY·페이드·Lua 다시 읽기 없음). 그 런은 AUTOPLAY 행이면 `PlayKind::Autoplay`, TARGET 행은 `target::resolve`(기록·IR·라이벌 없이 노트 수만)로 정한 타깃을 `PlayLive`·`Standing` 에 넘긴다(`PlaySample::told`). `SampleEnding::Closes`(SKIN 메뉴)는 이전 그대로 손 플레이·타깃 0 이다
+- (예시 런) 예시 세션은 `config.judge` 를 읽지도 쓰지도 않는다(판정 오프셋 0, 자동 보정 없음, 오디오 없음). `LaneSettings.constant_on` 은 실제 플레이 화면처럼 `false` 고정이고 CONSTANT 는 노트 필드(`FieldChart`)·이동 시간·`SettingsView` 로 전달된다. RANDOM 은 예시 차트의 배치에 적용하지 않는다
+- (스킨 옵션) `SkinLibrary` 에 화면을 인자로 받는 통로가 생겼다: `rows_for`·`line_for`·`step_for`·`reset_property_for`·`needs_reload_for`·`request_for`(`skin_select.rs`). 기존 `rows`·`line`·`step` 은 `config.skin.screen` 으로 위임한다. PLAY 메뉴의 스킨 옵션 행은 SKIN 메뉴의 같은 행과 같은 곳(`skin.custom[문서].properties`)을 읽고 쓴다
+- (기본 스킨) 선곡 패널 3 의 주석과 바닥 안내 문구가 PLAY 메뉴를 가리킨다(`lua/select/sheet.lua` 의 `HELD.note`, `lua/select/controls.lua` 의 `HINT_ROWS`). 사이드 메뉴에는 PLAY OPTIONS 행이 없다(위 진입 항목의 이유)
+- (남은 것) Settings 경계에서 5KEYS LAYOUT(이전 PLAY 탭)과 TOTAL(이전 GAUGE 탭)을 PLAY 메뉴가 아니라 Settings 에 둔 것은 설계서 §7 의 판단이고 메인의 승인이 남아 있다. LANE OPTION 은 이전처럼 어디에도 보이지 않는다(`unbuilt_row`). 예시 차트가 한 템포라 HI-SPEED FIX 의 네 값은 미리보기에서 구별되지 않는다
 
 ## 웨이브 10A 반영 사항 (2026-10-11)
 

@@ -35,6 +35,7 @@
 | GPU 대 CPU | 같은 그리기 목록의 GPU 출력과 CpuCanvas 가 2/255 이내 | `apps/rbms-player/src/gpu/pixel_tests.rs` (이 기기의 Metal 에서 실제 실행) |
 | 동영상 | ModernChic mp4 8개를 끝까지 디코드해 프레임 수 일치, 시스템 디코더와 화소 대조 일치, 1080p 프레임당 6~8 ms | `crates/rbms-video` 테스트 (release 92초) |
 | 외부 팩 | `RBMS_SKIN_PACK` 으로 기본 팩과 ModernChic 각각을 준 전체 테스트가 통과(ModernChic 은 키 설정 문서만 원본 결함) | `cargo test --workspace --no-fail-fast` |
+| PLAY 메뉴(웨이브 10B) | 행·조작·요약·저장·자원 해제와 미리보기의 반영(§3.9 의 머리말). 캡처를 PNG 로 열어 유지 켬의 BPM 100·150·200, 유지 끔, 가림막 전후, Wide, 14키, 문서 없음, 스크롤 끝, ModernChic 7키, Settings 를 확인 | `apps/rbms-player/src/stage/play_menu/tests.rs`, `stage/settings/play_tests.rs`, `skin_preview/tests.rs`, `stage/play/skin_preview/tests.rs`, `skin_preview/target.rs` |
 
 ## 3. 사람만 확인할 수 있는 것
 
@@ -110,9 +111,22 @@
 - [ ] **H2 키 설정 화면.** 방법: 선곡에서 F5, Settings 에서 F5 와 `KEY CONFIG >` 단추(클릭)로 각각 연다. 레인, PLAY 묶음의 조작(LANE COVER ON/OFF, FINE STEP 포함), SELECT·SCREENS·숫자 키·RESULT·REPLAY ANALYSIS 묶음에서 하나씩 Enter 로 바인딩한다. 이미 쓰는 키를 주어 본다. Delete, Backspace, 맨 아래 전체 복원(Enter 두 번)을 쓴다. 컨트롤러 칸에서 실제 패드 버튼과 턴테이블 축을 준다. 기대: `PRESS...` 대기 뒤 누른 키·버튼이 칸에 뜬다. 같은 화면에서 읽히는 것끼리는 거절되고 무엇이 그 키를 쓰는지 빨간 문구가 뜬다. Esc 로 나갔다 다시 열어도 그대로이고 앱을 다시 켜도 그대로다.
 - [ ] **H3 옮긴 키가 실제로 동작한다.** 방법: 검색(/), 정렬(F3), 스킨 메뉴(F12), 다시 하기(R)를 다른 키로 옮기고 각 화면에서 누른다. 선곡에서 H 를 연다. 기대: 옛 키는 아무 일도 하지 않고 새 키가 동작한다. H 가이드가 새 키를 보여 준다. 검색어를 치는 중에는 글자 키가 검색어로 들어간다.
 - [ ] **H4 레인 커버 조작.** 방법: 플레이 중 → ←, `\`(켬·끔), START 두 번, START + 턴테이블, 마우스 휠, Shift(레인이 아닌 쪽)를 누른 채 → ← 를 쓴다. 커버를 끈 상태에서 → 를 누른다. 기대: → 가 더 가리고 ← 가 덜 가린다. 커버 끝에 흰 숫자(왼쪽)와 녹색 숫자(오른쪽)가 따라 움직인다. 꺼진 상태에서 값을 바꾸면 발치에 COVER 수치가 잠깐 뜬다. Shift 를 누르면 더 잘게 움직인다.
-- [ ] **H5 판정 자동 보정.** 방법: Settings > JUDGE 에서 AUTO ADJUST 를 켜고 일부러 조금 빠르게(또는 느리게) 친다. 곡을 끝까지 치고, 다른 판은 중간에 Esc 로 나가고, 또 다른 판은 폐점한다. 방금 친 판의 리플레이를 재생한다. 기대: 플레이 화면의 표지가 `TIMING AUTO` 이고 숫자가 칠 때마다 조금씩 움직인다(빠르게 치면 +). 세 경우 모두 Settings 의 JUDGE OFFSET 에 마지막 값이 남는다. 리플레이의 판정 수가 원래 판과 같다. 오토플레이와 리플레이에서는 숫자가 움직이지 않는다.
-- [ ] **H6 녹색 숫자 유지.** 방법: Settings > PLAY 에서 KEEP GREEN NUMBER 를 켜고 GREEN NUMBER 를 정한 뒤 BPM 이 다른 곡 둘을 레인 커버·리프트를 켠 채 플레이한다. 플레이 중 커버를 움직이고 켜고 끈다. ↑ ↓ 와 SELECT + 건반을 눌러 본다. 변속이 있는 곡과 HI-SPEED FIX 를 바꾼 경우도 본다. 선곡에서 패널 3(START+SELECT)의 4·6번 키를 누르고 있는다. 기대: 두 곡 모두 발치의 GREEN 이 정한 숫자이고 HI-SPEED 만 다르다. 커버를 움직여도 GREEN 은 그대로이고 HI-SPEED 가 바뀐다. ↑ ↓ 는 GREEN 을 10 씩(Shift 로 1 씩), SELECT + 건반은 이동 시간을 1 ms 씩 바꾸고 다음 곡에도 남는다. 패널 3 의 NOTE DISPLAY TIME 칸이 이동 시간과 녹색 숫자를 보이고, 꺼져 있으면 `OFF` 다. 노트가 실제로 같은 시간 동안 보이는지 눈으로 느낀다.
+- [ ] **H5 판정 자동 보정.** 방법: PLAY 메뉴(F8) > JUDGE 에서 AUTO ADJUST 를 켜고 일부러 조금 빠르게(또는 느리게) 친다. 곡을 끝까지 치고, 다른 판은 중간에 Esc 로 나가고, 또 다른 판은 폐점한다. 방금 친 판의 리플레이를 재생한다. 기대: 플레이 화면의 표지가 `TIMING AUTO` 이고 숫자가 칠 때마다 조금씩 움직인다(빠르게 치면 +). 세 경우 모두 PLAY 메뉴의 JUDGE OFFSET 에 마지막 값이 남는다. 리플레이의 판정 수가 원래 판과 같다. 오토플레이와 리플레이에서는 숫자가 움직이지 않는다.
+- [ ] **H6 녹색 숫자 유지.** 방법: PLAY 메뉴(F8) > SPEED 에서 KEEP GREEN NUMBER 를 켜고 GREEN NUMBER 를 정한 뒤 BPM 이 다른 곡 둘을 레인 커버·리프트를 켠 채 플레이한다. 플레이 중 커버를 움직이고 켜고 끈다. ↑ ↓ 와 SELECT + 건반을 눌러 본다. 변속이 있는 곡과 HI-SPEED FIX 를 바꾼 경우도 본다. 선곡에서 패널 3(START+SELECT)의 4·6번 키를 누르고 있는다. 기대: 두 곡 모두 발치의 GREEN 이 정한 숫자이고 HI-SPEED 만 다르다. 커버를 움직여도 GREEN 은 그대로이고 HI-SPEED 가 바뀐다. ↑ ↓ 는 GREEN 을 10 씩(Shift 로 1 씩), SELECT + 건반은 이동 시간을 1 ms 씩 바꾸고 다음 곡에도 남는다. 패널 3 의 NOTE DISPLAY TIME 칸이 이동 시간과 녹색 숫자를 보이고, 꺼져 있으면 `OFF` 다. 노트가 실제로 같은 시간 동안 보이는지 눈으로 느낀다.
 - [ ] **H7 이전 설정 파일.** 방법: 이 판을 설치하기 전의 `settings.ron`, `keyconfig.ron`, 리플레이 파일을 그대로 둔 채 실행한다. 기대: 키와 설정이 이전과 같고 `.bak` 이 생기지 않는다. KEEP GREEN NUMBER 는 꺼져 있다. 이전 리플레이가 이전과 같은 결과로 재생된다.
+
+### 3.9 웨이브 10B: PLAY 메뉴
+
+자동 검사는 헤드리스로 확인했다: 행 목록과 묶음, 읽기 전용 전환, 단위, Shift 열 칸과 범위 끝, 0 기본값, 클릭·오른쪽 클릭·휠, 키로 올린 레인 커버 1~100% 의 흰색 숫자가 비율의 10 배임, 요약이 `rbms_config::held_speed` 등과 같음, 유지 켬·끔에서 노트 낙하 시간의 픽셀 측정, 예시 판정이 판정 오프셋과 무관함, 차트가 돌아도 장면이 이어짐, 모드·BPM 이 저장되지 않음, Esc 뒤 설정 파일 왕복, 떠난 뒤 텍스처 0, Settings 에 PLAY 메뉴의 행이 없음, 이전 `keyconfig.ron` 에서 F8 을 다른 단축키가 쓰고 있으면 PLAY MENU 가 미지정으로 읽힘. 아래는 실제 창에서만 드러나는 것이다. 화면의 뜻은 `docs/play-options.md` 7절.
+
+- [ ] **I1 들어가고 나가기.** 방법: 선곡에서 F8, SETTINGS(Tab)에서 F8 과 탭 띠의 `PLAY MENU >` 단추(클릭)로 각각 연다. Esc 로 나간다. 검색어를 치는 중에 F8 을 눌러 본다. macOS 노트북은 fn + F8 이다. 기대: 세 길 모두 PLAY 메뉴가 열리고 Esc 는 왔던 화면으로 돌아간다(SETTINGS 는 보던 탭 그대로). SETTINGS 의 탭은 JUDGE DISPLAY INPUT NETWORK AUDIO SELECT 여섯이고 `PLAY MENU >`, `SKIN MENU >`, `KEY CONFIG >` 단추가 서로 겹치지 않는다. 선곡으로 돌아온 첫 순간에 화면이 검게 비거나 선곡 스킨의 여는 연출이 다시 나오지 않는다.
+- [ ] **I2 녹색 숫자 유지를 눈으로 보기.** 방법: KEEP GREEN NUMBER 를 켜고 GREEN NUMBER 를 정한 뒤 PREVIEW BPM 을 100 → 150 → 200 으로 바꾼다. 다음에는 끄고 같은 순서로 바꾼다. 기대: 켠 동안에는 노트가 내려오는 시간과 미리보기·요약의 GREEN 이 그대로이고 HI-SPEED 만 바뀐다(HI-SPEED 행은 흐리고 `AUTO`). 끈 동안에는 HI-SPEED 가 그대로이고 노트 속도와 GREEN 이 바뀐다(GREEN NUMBER 행이 흐리고 `AUTO`). BPM 을 바꿀 때 검은 화면이나 READY 가 끼지 않고 콤보·점수가 이어진다.
+- [ ] **I3 가림막과 숫자.** 방법: LANE COVER 를 → 로 한 칸씩, Shift + → 로 열 칸씩 올린다. LIFT ON·LIFT, HIDDEN+ ON·HIDDEN+ 도 같게 한다. 기대: 행의 `30% (WHITE 300)`, 요약의 WHITE, 미리보기 스킨의 커버 숫자가 모두 같은 값이다(299 처럼 하나 모자라지 않는다). 리프트 15% 의 스킨 숫자는 150 이다. 가림막과 판정선이 그 프레임부터 움직인다. 0 키가 그 행을 기본값으로 되돌린다.
+- [ ] **I4 나머지 행.** 방법: SPEED FIX 를 CONSTANT 로, GAUGE 를 하나씩, TARGET 을 하나씩, AUTOPLAY, JUDGE OFFSET, AUTO ADJUST, LEGACY NOTE 를 바꾼다. 기대: CONSTANT 는 요약의 BPM 칸이 `120 (CONSTANT)` 이다. GAUGE 는 게이지 색이 바뀌고 진행 위치가 유지된다. TARGET 은 점수 그래프의 타깃 막대와 `TARGET +n` 이 바뀐다. AUTOPLAY 는 표지가 켜지고 꺼진다. JUDGE OFFSET 은 TIMING 숫자가 1 ms 씩(Shift 10 ms) 바뀌고 예시 판정은 그대로다. RANDOM·SCRATCH AUTO·AUTO REPLAY·ESCAPE 는 미리보기가 그대로인 것이 정상이다.
+- [ ] **I5 모드와 스킨 옵션.** 방법: Tab 과 모드 띠의 클릭으로 7K 5K 14K 10K 9K 를 돈다. LANE 묶음의 LANE WIDTH 를 WIDE 로 바꾸고 SKIN 메뉴(F12)의 같은 행을 본다. ModernChic 을 팩으로 고른 뒤에도 연다. 기대: 모드마다 그 키 수의 플레이 화면이 그려지고 스킨 옵션 행이 그 문서의 것으로 바뀐다. LANE WIDTH 는 두 메뉴에서 같은 값이고 실제 플레이에도 같다. 문서가 없는 모드(ModernChic 의 9K 등)는 미리보기 자리에 `NO SKIN DOCUMENT FOR THIS SCREEN` 이 나오고 행은 그대로 조절된다. 모드와 PREVIEW BPM 은 메뉴를 다시 열면 7K·150 이다.
+- [ ] **I6 마우스와 긴 목록.** 방법: 행을 왼쪽·오른쪽 클릭하고, 목록 위에서 휠을 돌리고, 미리보기와 묶음 이름을 클릭한다. PageUp·PageDown 을 쓴다. 창을 4:3, 21:9, 1920x1080 으로 바꾼다. 기대: 왼쪽 클릭은 한 칸 앞으로, 오른쪽 클릭은 뒤로 간다. 휠은 목록만 움직인다. 미리보기와 묶음 이름은 반응하지 않는다. 어느 창 크기에서도 글자가 잘리거나 겹치지 않고 미리보기가 16:9 로 그려진다.
+- [ ] **I7 실제 플레이와 같은가.** 방법: PLAY 메뉴에서 유지 켬·커버 25%·리프트 20%·녹색 350 을 정하고 BPM 100 의 미리보기 숫자를 적은 뒤, BPM 100 인 곡을 플레이한다. 기대: 플레이 화면의 HI-SPEED·GREEN·커버·리프트 숫자가 미리보기와 같다. 메뉴에서 바꾼 값이 F1 오버레이와 선곡 패널 1~3 에도 같은 값으로 보인다.
+- [ ] **I8 이전 키 설정.** 방법: 이 판 전의 `keyconfig.ron` 에서 선곡 단축키 하나(예: FOLDERS)를 F8 로 옮겨 둔 채 실행한다. 기대: F8 은 옮겨 둔 단축키로 동작한다. 키 설정 화면과 H 가이드에서 PLAY MENU 가 키 없음으로 나오고, SETTINGS 안내 줄이 `- PLAY` 이며 단추로는 열린다. 다른 키를 주면 그 키로 열린다.
 
 ## 4. 기록
 
