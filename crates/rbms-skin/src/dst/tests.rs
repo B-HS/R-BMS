@@ -295,17 +295,51 @@ fn an_alpha_offset_applies_to_a_track_whose_colour_never_changes() {
     assert_eq!(resolved.color, SkinColor::rgba(u8::MAX, u8::MAX, u8::MAX, 100));
 }
 
+/// An alpha offset shifts every frame of a track whose colour changes, between its keyframes as on
+/// them. The reference leaves it out between keyframes; an object that fades would flash there.
 #[test]
-fn an_alpha_offset_is_dropped_while_a_changing_colour_interpolates() {
+fn an_alpha_offset_applies_while_a_changing_colour_interpolates() {
     const OFFSET_ID: i32 = 2;
     let state = FakeState::default().with_offset(OFFSET_ID, SkinOffset { a: 50.0, ..SkinOffset::default() });
     let track = DestinationTrack { offsets: vec![OFFSET_ID], ..coloured_track(SkinColor::rgba(0, 0, 0, 0), SkinColor::rgba(100, 200, 40, 200)) };
 
     let midway = resolve(&track, us(500), &TimerState::new(), &state, None).expect("it draws");
-    assert_eq!(midway.color.a, 100, "the reference's interpolating path returns before it applies the offset");
+    assert_eq!(midway.color, SkinColor::rgba(50, 100, 20, 150), "the colour is interpolated and its alpha shifted");
 
     let at_keyframe = resolve(&track, us(SPAN_MS), &TimerState::new(), &state, None).expect("it draws");
     assert_eq!(at_keyframe.color.a, 250, "resting on a keyframe applies it");
+
+    let stepped = DestinationTrack { acc: Acc::Step, ..track };
+    let held = resolve(&stepped, us(500), &TimerState::new(), &state, None).expect("it draws");
+    assert_eq!(held.color.a, 50, "a track that holds its keyframes is shifted while it holds one");
+}
+
+/// An offset that takes everything away leaves nothing of a fading object on any frame of the fade.
+#[test]
+fn an_alpha_offset_of_the_whole_range_hides_every_frame_of_a_fade() {
+    const OFFSET_ID: i32 = 2;
+    let state = FakeState::default().with_offset(OFFSET_ID, SkinOffset { a: -f32::from(u8::MAX), ..SkinOffset::default() });
+    let fade = coloured_track(SkinColor::rgba(u8::MAX, u8::MAX, u8::MAX, u8::MAX), SkinColor::rgba(u8::MAX, u8::MAX, u8::MAX, 0));
+    let track = DestinationTrack { offsets: vec![OFFSET_ID], ..fade };
+    for at in [0, 1, 250, 500, 999, SPAN_MS] {
+        let seen = resolve(&track, us(at), &TimerState::new(), &state, None).expect("it draws");
+        assert_eq!(seen.color.a, 0, "{at} ms into the fade");
+    }
+}
+
+/// Each alpha offset is clamped as it is applied, in the order the track names them, so what one
+/// took below nothing is not owed by the next (`SkinObject.prepareColor`, which clamps inside its
+/// loop).
+#[test]
+fn alpha_offsets_are_clamped_one_by_one_in_the_order_they_are_named() {
+    const FIRST: i32 = 2;
+    const SECOND: i32 = 3;
+    let shade = SkinColor::rgba(0, 0, 0, 100);
+    let state = FakeState::default()
+        .with_offset(FIRST, SkinOffset { a: -200.0, ..SkinOffset::default() })
+        .with_offset(SECOND, SkinOffset { a: 60.0, ..SkinOffset::default() });
+    let track = DestinationTrack { offsets: vec![FIRST, SECOND], ..coloured_track(shade, shade) };
+    assert_eq!(resolve(&track, us(0), &TimerState::new(), &state, None).expect("it draws").color.a, 60);
 }
 
 #[test]
@@ -540,7 +574,7 @@ fn an_off_timer_hides_an_object_whose_conditions_hold() {
 }
 
 #[test]
-fn a_step_track_holds_its_colour_and_drops_the_alpha_offset() {
+fn a_step_track_holds_its_colour_and_takes_the_alpha_offset_with_it() {
     const OFFSET_ID: i32 = 2;
     let state = FakeState::default().with_offset(OFFSET_ID, SkinOffset { a: 50.0, ..SkinOffset::default() });
     let mut track = coloured_track(SkinColor::rgba(0, 0, 0, 10), SkinColor::rgba(100, 200, 40, 200));
@@ -548,7 +582,7 @@ fn a_step_track_holds_its_colour_and_drops_the_alpha_offset() {
     track.offsets = vec![OFFSET_ID];
 
     let midway = resolve(&track, us(500), &TimerState::new(), &state, None).expect("it draws");
-    assert_eq!(midway.color, SkinColor::rgba(0, 0, 0, 10), "a step track holds the keyframe it is on");
+    assert_eq!(midway.color, SkinColor::rgba(0, 0, 0, 60), "a step track holds the keyframe it is on, shifted like any other frame");
     assert_eq!(midway.rect.x, 0.0, "and holds its region with it");
 }
 

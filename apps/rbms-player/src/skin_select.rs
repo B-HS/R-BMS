@@ -37,8 +37,8 @@ use std::time::SystemTime;
 use rbms_config::{Config, DEFAULT_SKIN_FOLDER, DEFAULT_VALUE, NONE_VALUE, SkinCustomisation, skin_document_label};
 use rbms_skin::dst::SkinOffset;
 use rbms_skin::loader::{
-    LoadedSkin, ParserKind, SkinHeader, SkinLoadOptions, SkinUserConfig, is_lua_skin, is_supported_skin_type, load_header, load_skin_with_host,
-    selected_option, skin_type_mode,
+    LoadedSkin, ParserKind, SkinHeader, SkinLoadOptions, SkinUserConfig, automatic_offsets, is_lua_skin, is_supported_skin_type, load_header,
+    load_skin_with_host, selected_option, skin_type_mode,
 };
 use rbms_skin::model::{OffsetDef, PropertyDef};
 use rbms_skin::property::{DefaultState, SkinHost};
@@ -86,6 +86,23 @@ const OFFSET_ALPHA_LIMIT: f32 = 255.0;
 
 /// The value an offset row is put back to.
 const OFFSET_RESET: f32 = 0.0;
+
+/// How many steps a wide step of an offset row is: a place or a size runs over thousands of pixels.
+const OFFSET_WIDE_STEPS: usize = 10;
+
+/// One left/right step on an opacity row, the opacity an offset of nothing leaves a part at, and
+/// the two ends of the row, all in percent: the whole alpha range taken away, and the whole of it
+/// added.
+const OPACITY_STEP_PERCENT: i32 = 5;
+const OPACITY_FULL_PERCENT: i32 = 100;
+const OPACITY_NONE_PERCENT: i32 = 0;
+const OPACITY_MOST_PERCENT: i32 = 200;
+
+/// How many steps a wide step of an opacity row is: a quarter of the way.
+const OPACITY_WIDE_STEPS: usize = 5;
+
+/// What an opacity is written with after it.
+const OPACITY_UNIT: &str = "%";
 
 /// Separator between a customisation row's category and its own name.
 const CATEGORY_SEPARATOR: &str = " > ";
@@ -195,6 +212,70 @@ impl OffsetAxis {
             OffsetAxis::A => OFFSET_ALPHA_LIMIT,
         }
     }
+}
+
+/// Whether an offset is an opacity: one the document lets the player move along its alpha and along
+/// nothing else. The destinations that name it are then faded by it and neither moved nor turned,
+/// so its one row is shown as how opaque they are left rather than as a number added to an alpha.
+///
+/// It is told by the axes alone, whatever the document calls the offset.
+fn is_opacity(def: &OffsetDef) -> bool {
+    OffsetAxis::ALL.into_iter().all(|axis| axis.allowed(def) == (axis == OffsetAxis::A))
+}
+
+/// The opacity an alpha offset leaves an opaque part at, in whole percent: none of it at an offset
+/// that takes the whole alpha range away and all of it at an offset of nothing.
+///
+/// An offset that adds alpha reads past a hundred, to two hundred for the whole range added. An
+/// opaque part has nothing to gain from one, but a skin may name such an offset on a part it
+/// draws with no alpha of its own -- a shade laid over a lane, which the offset brings up -- and
+/// that offset is an alpha alone like any opacity. So the row runs both ways from a hundred.
+pub(crate) fn opacity_percent(alpha: f32) -> i32 {
+    let percent = OPACITY_FULL_PERCENT as f32 + alpha * OPACITY_FULL_PERCENT as f32 / OFFSET_ALPHA_LIMIT;
+    (percent.round() as i32).clamp(OPACITY_NONE_PERCENT, OPACITY_MOST_PERCENT)
+}
+
+/// The alpha offset an opacity of `percent` is stored as, in the whole units an offset is stored
+/// in: nothing at a hundred, the whole alpha range taken away at none, and the whole of it added
+/// at two hundred.
+pub(crate) fn opacity_alpha(percent: i32) -> f32 {
+    let percent = percent.clamp(OPACITY_NONE_PERCENT, OPACITY_MOST_PERCENT);
+    ((percent - OPACITY_FULL_PERCENT) as f32 * OFFSET_ALPHA_LIMIT / OPACITY_FULL_PERCENT as f32).round()
+}
+
+/// What an opacity row reads for the alpha offset stored under it: the opacity it comes to, and
+/// after it the alpha itself while it is one that adds. A skin that has an offset brought up
+/// rather than taken down says in the offset's own name what number does what, and that number
+/// is the alpha.
+fn opacity_value(alpha: f32) -> String {
+    let percent = opacity_percent(alpha);
+    let added = alpha.clamp(-OFFSET_ALPHA_LIMIT, OFFSET_ALPHA_LIMIT).round() as i32;
+    if added > 0 { format!("{percent}{OPACITY_UNIT} ({added:+})") } else { format!("{percent}{OPACITY_UNIT}") }
+}
+
+/// The opacity one step from `percent` in the direction of `delta`, on the steps an opacity row
+/// moves by. An opacity between two steps -- one a settings file was written with by hand -- goes
+/// to the nearest step that way rather than a whole step past where it stands.
+fn stepped_opacity(percent: i32, delta: i32) -> i32 {
+    let below = percent.div_euclid(OPACITY_STEP_PERCENT) * OPACITY_STEP_PERCENT;
+    let on_a_step = below == percent;
+    let from = if delta < 0 && !on_a_step { below + OPACITY_STEP_PERCENT } else { below };
+    (from + delta * OPACITY_STEP_PERCENT).clamp(OPACITY_NONE_PERCENT, OPACITY_MOST_PERCENT)
+}
+
+/// What kind of row a customisation row is, which is what a menu says of it and how far a wide step
+/// of it goes.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum SkinRowKind {
+    /// A list of named options.
+    Property,
+    /// A slot filled by one of a document's files.
+    File,
+    /// One axis of an offset that moves, resizes, turns or fades the destinations that name it,
+    /// shown as the number that is added.
+    Offset(OffsetAxis),
+    /// The one row of an offset that only fades, shown as how opaque it leaves its destinations.
+    Opacity,
 }
 
 /// One customisation row the chosen document declares, addressed by its position in the document's
@@ -684,7 +765,8 @@ impl SkinLibrary {
     }
 
     /// The customisation rows the skin menu shows, top to bottom, in the order the chosen document
-    /// declares them: its properties, its file slots, then one row per axis it lets the player nudge.
+    /// declares them: its properties, its file slots, one row per axis it lets the player nudge, and
+    /// then its opacities.
     pub(crate) fn rows(&self, config: &Config) -> Vec<SkinRow> {
         self.rows_for(config, config.skin.screen)
     }
@@ -692,18 +774,65 @@ impl SkinLibrary {
     /// The customisation rows of the document one screen is to be drawn with, whichever screen the
     /// skin menu happens to be configuring: what the play menu lists the options of the play screen
     /// it previews from.
+    ///
+    /// Each kind is listed in the order the document declares it. The opacities come after every
+    /// other offset wherever the document declared them, so the rows that move and resize are read
+    /// together and the rows that fade are read together.
     pub(crate) fn rows_for(&self, config: &Config, screen: i32) -> Vec<SkinRow> {
         let Some(header) = self.header_of(config, screen) else {
             return Vec::new();
         };
         let properties = (0..header.properties.len()).map(SkinRow::Property);
         let files = (0..header.custom_files.len()).map(SkinRow::File);
-        let offsets = header
-            .offsets
-            .iter()
-            .enumerate()
-            .flat_map(|(at, def)| OffsetAxis::ALL.into_iter().filter(move |axis| axis.allowed(def)).map(move |axis| SkinRow::Offset(at, axis)));
-        properties.chain(files).chain(offsets).collect()
+        let axes = |fading: bool| {
+            header
+                .offsets
+                .iter()
+                .enumerate()
+                .filter(move |(_, def)| is_opacity(def) == fading)
+                .flat_map(|(at, def)| OffsetAxis::ALL.into_iter().filter(move |axis| axis.allowed(def)).map(move |axis| SkinRow::Offset(at, axis)))
+        };
+        properties.chain(files).chain(axes(false)).chain(axes(true)).collect()
+    }
+
+    /// What kind of row one customisation row of the document one screen is to be drawn with is, or
+    /// `None` for a row whose declaration is no longer there.
+    pub(crate) fn kind_for(&self, config: &Config, screen: i32, row: SkinRow) -> Option<SkinRowKind> {
+        let header = self.header_of(config, screen)?;
+        match row {
+            SkinRow::Property(at) => header.properties.get(at).map(|_| SkinRowKind::Property),
+            SkinRow::File(at) => header.custom_files.get(at).map(|_| SkinRowKind::File),
+            SkinRow::Offset(at, axis) => {
+                let def = header.offsets.get(at)?;
+                Some(if is_opacity(def) { SkinRowKind::Opacity } else { SkinRowKind::Offset(axis) })
+            }
+        }
+    }
+
+    /// Whether one customisation row of the document one screen is to be drawn with is of an offset
+    /// the game adds to every play skin rather than one the document declares. A header lists the
+    /// offsets it declares first and the ones every play skin has after them.
+    pub(crate) fn is_automatic_for(&self, config: &Config, screen: i32, row: SkinRow) -> bool {
+        let SkinRow::Offset(at, _) = row else {
+            return false;
+        };
+        self.header_of(config, screen)
+            .is_some_and(|header| at < header.offsets.len() && at >= header.offsets.len().saturating_sub(automatic_offsets(header.skin_type).len()))
+    }
+
+    /// What kind of row one customisation row of the chosen document is.
+    pub(crate) fn kind(&self, config: &Config, row: SkinRow) -> Option<SkinRowKind> {
+        self.kind_for(config, config.skin.screen, row)
+    }
+
+    /// How many steps a wide step of one customisation row is: ten for an offset, a quarter of the
+    /// way for an opacity, and one for a row that is cycled.
+    pub(crate) fn wide_steps_for(&self, config: &Config, screen: i32, row: SkinRow) -> usize {
+        match self.kind_for(config, screen, row) {
+            Some(SkinRowKind::Offset(_)) => OFFSET_WIDE_STEPS,
+            Some(SkinRowKind::Opacity) => OPACITY_WIDE_STEPS,
+            Some(SkinRowKind::Property | SkinRowKind::File) | None => 1,
+        }
     }
 
     /// The label and value of one customisation row.
@@ -734,6 +863,9 @@ impl SkinLibrary {
             SkinRow::Offset(at, axis) => match header.offsets.get(at) {
                 Some(def) => {
                     let nudge = stored.and_then(|entry| entry.offsets.get(&def.id).copied()).unwrap_or_default();
+                    if is_opacity(def) {
+                        return (labelled(&def.category, &def.name), opacity_value(nudge.a));
+                    }
                     (format!("{} {}", labelled(&def.category, &def.name), axis.label()), format!("{:+}", axis.get(nudge) as i32))
                 }
                 None => missing_row(),
@@ -788,15 +920,19 @@ impl SkinLibrary {
                 true
             }
             SkinRow::Offset(at, axis) => {
-                let Some(id) = header.offsets.get(at).map(|def| def.id) else {
+                let Some((id, fading)) = header.offsets.get(at).map(|def| (def.id, is_opacity(def))) else {
                     return false;
                 };
-                let stored = config.skin.customise(&path).offsets.entry(id).or_default();
-                let next = (axis.get(*stored) + delta as f32 * OFFSET_STEP).clamp(-axis.limit(), axis.limit());
-                if (next - axis.get(*stored)).abs() < f32::EPSILON {
+                let held = config.skin.customisation(&path).and_then(|entry| entry.offsets.get(&id).copied()).unwrap_or_default();
+                let next = if fading {
+                    opacity_alpha(stepped_opacity(opacity_percent(held.a), delta.signum()))
+                } else {
+                    (axis.get(held) + delta as f32 * OFFSET_STEP).clamp(-axis.limit(), axis.limit())
+                };
+                if (next - axis.get(held)).abs() < f32::EPSILON {
                     return false;
                 }
-                axis.set(stored, next);
+                axis.set(config.skin.customise(&path).offsets.entry(id).or_default(), next);
                 true
             }
         }
@@ -826,14 +962,22 @@ impl SkinLibrary {
 
     /// Put one customisation row back to what the document's author chose, and report whether it
     /// moved. Only an offset row has a value the player types a key to zero; the rest are cycled.
+    /// An opacity is an offset like any other and goes back to no offset at all, which is the whole
+    /// of its opacity.
     pub(crate) fn reset_row(&mut self, config: &mut Config, row: SkinRow) -> bool {
+        self.reset_row_for(config, config.skin.screen, row)
+    }
+
+    /// [`SkinLibrary::reset_row`] for a row of the document one screen is to be drawn with,
+    /// whichever screen the skin menu is configuring.
+    pub(crate) fn reset_row_for(&mut self, config: &mut Config, screen: i32, row: SkinRow) -> bool {
         let SkinRow::Offset(at, axis) = row else {
             return false;
         };
-        let Some(path) = self.document_path(config, config.skin.screen).map(str::to_owned) else {
+        let Some(path) = self.document_path(config, screen).map(str::to_owned) else {
             return false;
         };
-        let Some(id) = self.chosen(config).and_then(|header| header.offsets.get(at)).map(|def| def.id) else {
+        let Some(id) = self.header_of(config, screen).and_then(|header| header.offsets.get(at)).map(|def| def.id) else {
             return false;
         };
         let nudged = config.skin.customisation(&path).and_then(|entry| entry.offsets.get(&id).copied()).unwrap_or_default();

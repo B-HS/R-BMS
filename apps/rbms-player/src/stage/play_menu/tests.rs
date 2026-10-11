@@ -19,7 +19,7 @@ use rbms_config::{
 use rbms_render::{Rect, fit_text, text_width};
 use rbms_skin::loader::SKIN_TYPE_MUSIC_SELECT;
 
-use super::rows::{GROUP_PREVIEW, holds_a_number};
+use super::rows::{Fold, GROUP_PREVIEW, GROUP_SKIN, declared, holds_a_number};
 use super::*;
 use crate::keyconfig::Shortcut;
 use crate::skin_preview::{PreviewAbsence, PreviewStatus, PreviewTarget};
@@ -283,6 +283,14 @@ fn rows_without_skin_options() -> Vec<Row> {
     rows
 }
 
+/// How many entries the offsets of the play skin of `screen` add to the end of the list while both
+/// of their folds are closed: the name of their group and a row for each fold the skin declares
+/// something for, or nothing at all for a skin that declares no offset.
+fn closed_skin_group(menu: &Menu, screen: i32) -> usize {
+    let folds = Fold::ALL.into_iter().filter(|fold| !folded(&menu.app.shared, screen, *fold).is_empty()).count();
+    if folds == 0 { 0 } else { folds + 1 }
+}
+
 /// The figures of a summary as one line of words: each under its name with what follows it, and
 /// what is said under them after the last.
 fn said(readout: &SpeedReadout, constant: bool) -> String {
@@ -397,28 +405,42 @@ fn the_shipped_pack_is_previewed_on_the_mode_and_the_tempo_on_show() {
 }
 
 /// Over the shipped pack the options its play skin declares are listed at the end of the LANE
-/// group, the ones of the mode on the strip, and the cursor stays on its row of the table when the
-/// mode -- and with it the options above that row -- changes.
+/// group, the ones of the mode on the strip, with the offsets it declares to move a part of its
+/// own after them and neither a file slot, an opacity nor an offset every play skin has among
+/// them; and the cursor stays on its row of the table when the mode -- and with it the rows above
+/// that row -- changes.
 #[test]
 fn the_options_of_the_previewed_play_skin_are_listed_under_the_lane_rows() {
     let mut menu = Menu::over(app_with_shipped_pack("options"));
     let seven_keys = PREVIEW_MODES[0].0;
-    let declared = menu.app.shared.skins.rows_for(&menu.app.shared.config, seven_keys);
-    assert!(!declared.is_empty(), "the shipped play skin declares no option");
+    let shared = &menu.app.shared;
+    let all = shared.skins.rows_for(&shared.config, seven_keys);
+    assert!(!all.is_empty(), "the shipped play skin declares no option");
     let after_lane = menu.at(Row::Setting(SettingId::LaneCoverFineStep)) + 1;
     let before_judge = menu.at(Row::Group("JUDGE"));
     let listed: Vec<Row> = menu.state.rows[after_lane..before_judge].to_vec();
-    assert_eq!(listed, declared.iter().copied().filter(|row| matches!(row, SkinRow::Property(_))).map(Row::Skin).collect::<Vec<_>>());
-    assert!(listed.iter().all(|row| matches!(row, Row::Skin(SkinRow::Property(_)))), "a file slot or an offset is listed: {listed:?}");
-    assert_eq!(menu.state.rows.len(), rows_without_skin_options().len() + listed.len());
+    let is_listed_here = |row: &SkinRow| match shared.skins.kind_for(&shared.config, seven_keys, *row) {
+        Some(SkinRowKind::Property) => true,
+        Some(SkinRowKind::Offset(_)) => !shared.skins.is_automatic_for(&shared.config, seven_keys, *row),
+        _ => false,
+    };
+    assert_eq!(listed, all.iter().copied().filter(is_listed_here).map(Row::Skin).collect::<Vec<_>>());
+    assert_eq!(listed, declared(shared, seven_keys).into_iter().map(Row::Skin).collect::<Vec<_>>());
+    let options = listed.iter().take_while(|row| matches!(row, Row::Skin(SkinRow::Property(_)))).count();
+    assert!(listed[options..].iter().all(|row| matches!(row, Row::Skin(SkinRow::Offset(_, _)))), "an option is listed after an offset: {listed:?}");
+    assert_eq!(menu.state.rows.len(), rows_without_skin_options().len() + listed.len() + closed_skin_group(&menu, seven_keys));
     assert_eq!(menu.line(menu.skin_option(LANE_WIDTH_OPTION)).value, "NORMAL");
 
     menu.focus_setting(SettingId::JudgeOffset);
     for place in (1..PREVIEW_MODES.len()).chain([0]) {
         menu.key(KeyCode::Tab);
         let screen = PREVIEW_MODES[place].0;
-        let options = menu.app.shared.skins.rows_for(&menu.app.shared.config, screen).into_iter().filter(|row| matches!(row, SkinRow::Property(_))).count();
-        assert_eq!(menu.state.rows.len(), rows_without_skin_options().len() + options, "the list is not the one of mode {place}");
+        let own = declared(&menu.app.shared, screen).len();
+        assert_eq!(
+            menu.state.rows.len(),
+            rows_without_skin_options().len() + own + closed_skin_group(&menu, screen),
+            "the list is not the one of mode {place}"
+        );
         assert_eq!(menu.state.focused(), Some(Row::Setting(SettingId::JudgeOffset)), "the cursor left its row when the mode moved to {place}");
         assert!(menu.state.top <= menu.state.sel && menu.state.sel < menu.state.top + VISIBLE_ROWS, "the cursor is off the screen in mode {place}");
     }
@@ -624,8 +646,8 @@ fn the_green_number_and_the_speed_change_places_with_the_switch_that_holds_one()
     assert_eq!((menu.look(SettingId::HiSpeed), menu.look(SettingId::GreenNumber)), (RowLook::Plain, RowLook::ReadOnly));
     assert_eq!(menu.value(SettingId::HiSpeed), "2.00x");
     assert_eq!(menu.value(SettingId::GreenNumber), "480 (800 MS) AUTO", "what a speed of two comes to at 150 beats a minute");
-    assert!(help(&menu.app.shared.config.play, Row::Setting(SettingId::GreenNumber)).contains("Turn KEEP GREEN NUMBER on"));
-    assert_eq!(help(&menu.app.shared.config.play, Row::Setting(SettingId::HiSpeed)), descriptor(SettingId::HiSpeed).help);
+    assert!(help(&menu.app.shared.config.play, Row::Setting(SettingId::GreenNumber), None).contains("Turn KEEP GREEN NUMBER on"));
+    assert_eq!(help(&menu.app.shared.config.play, Row::Setting(SettingId::HiSpeed), None), descriptor(SettingId::HiSpeed).help);
     untouched(&mut menu, SettingId::GreenNumber);
     menu.focus_setting(SettingId::HiSpeed);
     menu.key(KeyCode::ArrowRight);
@@ -643,8 +665,8 @@ fn the_green_number_and_the_speed_change_places_with_the_switch_that_holds_one()
     assert_eq!((menu.look(SettingId::HiSpeed), menu.look(SettingId::GreenNumber)), (RowLook::ReadOnly, RowLook::Plain));
     assert_eq!(menu.value(SettingId::GreenNumber), "300 (500 MS)");
     assert_eq!(menu.value(SettingId::HiSpeed), "3.20x AUTO", "the speed that holds 500 ms at 150 beats a minute");
-    assert!(help(&menu.app.shared.config.play, Row::Setting(SettingId::HiSpeed)).contains("Turn KEEP GREEN NUMBER off"));
-    assert_eq!(help(&menu.app.shared.config.play, Row::Setting(SettingId::GreenNumber)), descriptor(SettingId::GreenNumber).help);
+    assert!(help(&menu.app.shared.config.play, Row::Setting(SettingId::HiSpeed), None).contains("Turn KEEP GREEN NUMBER off"));
+    assert_eq!(help(&menu.app.shared.config.play, Row::Setting(SettingId::GreenNumber), None), descriptor(SettingId::GreenNumber).help);
     untouched(&mut menu, SettingId::HiSpeed);
     assert!((menu.app.shared.config.play.hispeed - 2.25).abs() < f64::EPSILON, "the stored speed was written while a number is held");
     menu.focus_setting(SettingId::GreenNumber);
@@ -978,7 +1000,7 @@ fn what_the_menu_writes_fits_where_it_is_written() {
             let needed = text_width(&label, LABEL_SCALE) + LABEL_GAP + text_width(&value, VALUE_SCALE);
             let named_by_a_skin = matches!(row, Row::Skin(_));
             assert!(named_by_a_skin || needed <= row_room(), "{case}: {label} with {value} needs {needed} of {}", row_room());
-            let said = help(&menu.app.shared.config.play, row);
+            let said = menu.state.help_of(&menu.app.shared, row);
             assert!(!said.is_empty(), "{case}: nothing is said of {label}");
             assert_eq!(fit_text(said, INFO_SCALE, INFO_RECT.w - INFO_PAD * 2.0), said, "{case}: what is said of {label} is cut short");
         }
@@ -1265,3 +1287,5 @@ fn the_menu_over_the_pack_the_environment_names_can_be_captured() {
     (0..OPENING_BPM).for_each(|_| drop(menu.key(KeyCode::ArrowLeft)));
     assert_ne!(menu.capture_at("play-menu-pack-7k-held-100", RUN_SECONDS), PreviewStatus::Loading);
 }
+
+mod skin_offsets;

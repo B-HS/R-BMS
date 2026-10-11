@@ -11,7 +11,7 @@
 
 use std::cell::RefCell;
 
-use rbms_skin::dst::SkinRect;
+use rbms_skin::dst::{SkinRect, shifted_alpha};
 use rbms_skin::model::SkinDef;
 
 use super::super::SkinFrame;
@@ -189,6 +189,23 @@ pub(super) fn stroke_color(line: Rgba, age: usize) -> Color {
     Color { r: line[0], g: line[1], b: line[2], a: (alpha * f32::from(u8::MAX)) as u8 }
 }
 
+/// A line's colour at the share of its alpha the offsets the object's destination names leave it,
+/// `whole` being what they leave of an opaque alpha.
+///
+/// The reference draws the lines in their own colour whatever the destination's is, so an alpha
+/// offset the visualizer names fades its ruler and leaves its lines. Here the lines fade with the
+/// ruler they are drawn over, by the offsets alone: the colour a document writes its keyframes
+/// with is still not a line's, so a ruler written half transparent has its lines whole. With no
+/// offset set a line is as the reference draws it.
+fn shown_through(line: Color, whole: u8) -> Color {
+    Color { a: ((u16::from(line.a) * u16::from(whole)) / u16::from(u8::MAX)) as u8, ..line }
+}
+
+/// What the offsets an object's destination names leave of an opaque alpha on this frame.
+fn offset_share(place: &Placement<'_>, frame: &SkinFrame<'_>) -> u8 {
+    shifted_alpha(u8::MAX, place.object.track.offsets.iter().filter_map(|id| frame.state.offset(*id)).map(|offset| offset.a))
+}
+
 /// Where the line for a hit that came `error` milliseconds early is drawn, `age` places from the
 /// oldest of a hundred, on a ruler drawn over `plot`; `None` for a hit beyond the ruler or a line
 /// that has no height.
@@ -254,9 +271,10 @@ pub(crate) fn draw_timing_visualizer<R: Renderer>(
     let whole = SkinRect::new(0.0, 0.0, stripe_w as f32, stripe_h as f32);
     let errors = recent.errors();
     let first_age = RECENT_JUDGES - errors.len();
+    let share = offset_share(place, frame);
     for (at, error) in errors.iter().enumerate() {
         let age = first_age + at;
-        let color = stroke_color(body.line, age);
+        let color = shown_through(stroke_color(body.line, age), share);
         let Some(line) = stroke_rect(body, plot, *error, age).filter(|_| color.a > 0).and_then(|line| document_rect_of(place, line)) else {
             continue;
         };

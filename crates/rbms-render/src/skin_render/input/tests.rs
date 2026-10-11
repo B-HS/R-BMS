@@ -307,16 +307,20 @@ impl Drop for Fixture {
 
 impl Fixture {
     fn new(tag: &str) -> Fixture {
+        let source = INPUT_SKIN.replace("VOLUME_RATE", &RATE_MASTERVOLUME.to_string()).replace("PROGRESS_RATE", &RATE_MUSIC_PROGRESS.to_string());
+        Fixture::of(tag, &source, MapHost::new())
+    }
+
+    /// The skin `source` loaded and built, to be drawn against `host`.
+    fn of(tag: &str, source: &str, host: MapHost) -> Fixture {
         crate::font::use_embedded_fonts_only();
         let root = std::env::temp_dir().join(format!("rbms-render-skin-input-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).expect("the scratch folder is writable");
         std::fs::write(root.join("panel.tex"), []).expect("the source file is writable");
-        let source = INPUT_SKIN.replace("VOLUME_RATE", &RATE_MASTERVOLUME.to_string()).replace("PROGRESS_RATE", &RATE_MUSIC_PROGRESS.to_string());
         let entry = root.join("input.luaskin");
         std::fs::write(&entry, source).expect("the skin is writable");
 
-        let host = MapHost::new();
         let user = SkinUserConfig::default();
         let load = SkinLoadOptions { rng_seed: Some(1), ..SkinLoadOptions::new(&root, &user, rbms_model::Mode::BEAT_7K) };
         let skin = load_lua_skin(&entry, &LuaSkinOptions { load, budget: LuaBudget::default() }, &host).expect("the fixture loads");
@@ -403,4 +407,50 @@ fn a_built_screen_gives_each_slider_the_writer_the_reference_would() {
 
     assert_eq!(fixture.drag((50.0, 20.0)), Vec::new(), "a drag over a button moves nothing");
     assert_eq!(writer(&fixture.press((50.0, 110.0))).1, 0.25, "a press on the travel sets the slider as a drag does");
+}
+
+/// The offset the faded button names, and the alpha shift that takes all of an opaque object's
+/// alpha away.
+const FADE_OFFSET: i32 = 70;
+const WHOLE_SHIFT: f32 = -255.0;
+
+/// A skin with one button, whose destination names an offset.
+const FADED_BUTTON_SKIN: &str = r#"
+return {
+    type = 6, name = "faded", w = 1280, h = 720,
+    source = { { id = 0, path = "panel.tex" } },
+    image = { { id = "faded", src = 0, x = 0, y = 0, w = 16, h = 16, act = 19 } },
+    destination = { { id = "faded", offset = 70, dst = { { x = 0, y = 0, w = 100, h = 40 } } } },
+}
+"#;
+
+/// An object an offset has taken all of the alpha of is not drawn, and is still there to be
+/// pressed: the reference leaves a transparent object out of the batch when it draws
+/// (`SkinObject.draw`) and offers a press to every object its last `prepare` left standing
+/// (`Skin.mousePressed`), and alpha is no part of `prepare`. A skin puts a button with no alpha
+/// over a part of a picture to make that part pressable, and a player's opacity must not be what
+/// tells such a button from one it faded.
+#[test]
+fn an_object_with_no_alpha_left_is_not_drawn_and_still_takes_a_press() {
+    let faded = |shift: f32| {
+        let mut host = MapHost::new();
+        host.offsets.insert(FADE_OFFSET, rbms_skin::dst::SkinOffset { a: shift, ..Default::default() });
+        Fixture::of(&format!("faded-{}", shift as i32), FADED_BUTTON_SKIN, host)
+    };
+    let drawn = |fixture: &Fixture| {
+        let timers = TimerState::new();
+        let mut canvas = CpuCanvas::new(SCREEN.0, SCREEN.1);
+        let mut text = TextContext::embedded_only();
+        let mut ctx = crate::ctx::RenderCtx::new(crate::theme::theme(), &mut text);
+        let frame = SkinFrame { now_us: 0, timers: &timers, state: &fixture.host, lua: None, mouse: None, data: FrameData::default() };
+        fixture.screen.draw_prepared(&mut ctx, &mut canvas, &frame, &fixture.prepare(None))
+    };
+
+    let opaque = faded(0.0);
+    assert_eq!(drawn(&opaque), 1, "the button is not drawn with the offset at nothing");
+    assert_eq!(ran(&opaque.press((50.0, 20.0))), (SkinEvent::Id(LOWER_EVENT), 1));
+
+    let gone = faded(WHOLE_SHIFT);
+    assert_eq!(drawn(&gone), 0, "a button with no alpha left is drawn");
+    assert_eq!(ran(&gone.press((50.0, 20.0))), (SkinEvent::Id(LOWER_EVENT), 1), "and is no longer there to be pressed");
 }

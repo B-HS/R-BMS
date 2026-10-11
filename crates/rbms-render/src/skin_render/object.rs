@@ -14,7 +14,7 @@
 
 use std::borrow::Cow;
 
-use rbms_skin::dst::{DestinationTrack, DrawStateSource, Keyframe, LuaDrawEval, LuaFnId, Resolved, SkinColor, SkinRect, TimerRef, prepare};
+use rbms_skin::dst::{DestinationTrack, DrawStateSource, Keyframe, LuaDrawEval, LuaFnId, Resolved, SkinColor, SkinRect, TimerRef, prepare, shifted_alpha};
 use rbms_skin::loader::{LoadedSkin, StretchKind};
 use rbms_skin::model::{FloatValueDef, GraphDef, ImageDef, PropertyRef, SliderDef, SourceKind, ValueDef};
 use rbms_skin::property::SkinHost;
@@ -276,10 +276,19 @@ impl SkinObject {
     /// An object that places itself answers [`SELF_PLACED_COLOR`] whatever its keyframes say, so
     /// its parts are drawn in their own colours and the transparent keyframe it starts from does
     /// not hide them.
+    ///
+    /// A note field and a judgement pop-up answer that colour with its alpha shifted by the offsets
+    /// their own destination names ([`Body::fades_as_one`]), which is the one thing of the
+    /// destination their parts are then drawn through. With no offset set that is the colour as it
+    /// stands.
     fn place(&self, frame: &SkinFrame<'_>) -> Option<Resolved> {
         let mut placed = place_part(&self.track, frame)?;
         if self.body.places_itself() {
             placed.color = SELF_PLACED_COLOR;
+        }
+        if self.body.fades_as_one() {
+            let shifts = self.track.offsets.iter().filter_map(|id| frame.state.offset(*id)).map(|offset| offset.a);
+            placed.color.a = shifted_alpha(SELF_PLACED_COLOR.a, shifts);
         }
         Some(placed)
     }
@@ -365,6 +374,20 @@ impl Body {
     /// judgement pop-up and the song wheel.
     pub(crate) fn places_itself(&self) -> bool {
         matches!(self, Body::Note(_) | Body::Judge(_) | Body::SongList(_))
+    }
+
+    /// Whether a self-placed object is faded as a whole by the alpha of the offsets its own
+    /// destination names: the note field and the judgement pop-up.
+    ///
+    /// The reference reads no colour of such an object at all, so an alpha offset one names does
+    /// nothing there. A player who takes a part of a play screen down with the offset its skin
+    /// declares expects the notes and the judgement to go with theirs as every other object does,
+    /// so here the two are faded by it: the field's batch and each part of the pop-up are drawn
+    /// at that share of their own alpha, and at none of it they are left out of the frame. The
+    /// song wheel is left as the reference has it; each of its parts has a destination of its own
+    /// to name an offset in.
+    pub(crate) fn fades_as_one(&self) -> bool {
+        matches!(self, Body::Note(_) | Body::Judge(_))
     }
 }
 

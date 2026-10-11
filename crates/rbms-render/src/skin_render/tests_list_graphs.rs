@@ -155,6 +155,9 @@ struct Fixture<'a> {
     wheel_dst: Option<&'a str>,
     /// The document's one `judgegraph` record.
     judge_graph: Option<&'a str>,
+    /// Members every graph's destination is written with before its keyframes, each followed by a
+    /// comma: an offset it names.
+    graph_members: Option<&'a str>,
 }
 
 /// A browser document carrying a fifteen-slot wheel, a plain button and one of every graph, so
@@ -193,16 +196,17 @@ fn write_document(scratch: &Scratch, fixture: Fixture<'_>) -> PathBuf {
             "destination": [
                 {{ "id": "wheel", "dst": [{{ {wheel_dst} }}] }},
                 {{ "id": "button", "dst": [{{ "x": 10, "y": 20, "w": 40, "h": 12 }}] }},
-                {{ "id": "gauge-graph", "dst": [{{ "x": 200, "y": 100, "w": 60, "h": 40 }}] }},
-                {{ "id": "judge-graph", "dst": [{{ "x": 200, "y": 60, "w": 60, "h": 30 }}] }},
-                {{ "id": "bpm-graph", "dst": [{{ "x": 200, "y": 20, "w": 60, "h": 30 }}] }},
-                {{ "id": "timing-dist", "dst": [{{ "x": 130, "y": 100, "w": 60, "h": 40 }}] }},
-                {{ "id": "ruler", "dst": [{{ "x": 130, "y": 20, "w": 60, "h": 30 }}] }},
-                {{ "id": "errors", "dst": [{{ "x": 60, "y": 20, "w": 60, "h": 30 }}] }}
+                {{ "id": "gauge-graph", {graph_members} "dst": [{{ "x": 200, "y": 100, "w": 60, "h": 40 }}] }},
+                {{ "id": "judge-graph", {graph_members} "dst": [{{ "x": 200, "y": 60, "w": 60, "h": 30 }}] }},
+                {{ "id": "bpm-graph", {graph_members} "dst": [{{ "x": 200, "y": 20, "w": 60, "h": 30 }}] }},
+                {{ "id": "timing-dist", {graph_members} "dst": [{{ "x": 130, "y": 100, "w": 60, "h": 40 }}] }},
+                {{ "id": "ruler", {graph_members} "dst": [{{ "x": 130, "y": 20, "w": 60, "h": 30 }}] }},
+                {{ "id": "errors", {graph_members} "dst": [{{ "x": 60, "y": 20, "w": 60, "h": 30 }}] }}
             ]
         }}"#,
         clickable = clickable.join(","),
         judge_graph = fixture.judge_graph.unwrap_or(r#"{ "id": "judge-graph" }"#),
+        graph_members = fixture.graph_members.unwrap_or_default(),
         wheel_dst = fixture.wheel_dst.map_or_else(|| format!(r#""x": 0, "y": 0, "w": 120, "h": {DOC_H}"#), str::to_owned),
         listoff = slot_list("bars", 0, BAR_W, (40, 60, 200)),
         liston = slot_list("bars", 0, FOCUS_W, (240, 60, 60)),
@@ -670,5 +674,6 @@ fn a_wheel_with_no_slots_resolves_to_nothing_and_says_so() {
 }
 
 mod graph_limits;
+mod graph_opacity;
 mod graph_pixels;
 mod visualizer_pixels;

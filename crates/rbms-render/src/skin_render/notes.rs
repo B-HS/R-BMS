@@ -854,6 +854,9 @@ struct Field<'a> {
     line: f64,
     /// The sum of the note object's offsets, in output pixels.
     nudge: SkinRect,
+    /// The share of its own opacity everything in the field is drawn at: the alpha the note
+    /// object's destination came to once its offsets were added, over a full one.
+    opacity: f32,
     constant: Option<ConstantScroll>,
 }
 
@@ -861,15 +864,24 @@ impl Field<'_> {
     /// Draws one note image at `(x, y, w, h)` with the batch at `alpha`, answering whether anything
     /// reached the screen.
     ///
-    /// The batch is white, alpha blended and unfiltered while the notes are drawn, whatever the
-    /// note object's own destination says (`sprite.setColor(Color.WHITE)`, `setBlend(0)`,
-    /// `setType(TYPE_NORMAL)`).
+    /// The batch is white, alpha blended and unfiltered while the notes are drawn, whatever colour,
+    /// blend and filter the note object's own destination names (`sprite.setColor(Color.WHITE)`,
+    /// `setBlend(0)`, `setType(TYPE_NORMAL)`).
+    ///
+    /// The destination's alpha is the one thing of it the batch keeps ([`Field::opacity`]). The
+    /// reference drops that too, so an alpha offset named by a note object does nothing there;
+    /// here it fades the field as it fades any other object, which is what lets a player take the
+    /// notes down with the offset a skin declares for them. A field with no alpha left draws no
+    /// note at all.
     fn put<R: Renderer>(&self, r: &mut R, image: &NoteImage, at: (f32, f32, f32, f32), alpha: f32) -> bool {
         let (x, y, w, h) = at;
+        if self.opacity <= 0.0 {
+            return false;
+        }
         let Some((dst, mirrored, flipped)) = self.out.quad(x, y, w, h) else {
             return false;
         };
-        let alpha = (alpha.clamp(0.0, 1.0) * f32::from(u8::MAX)) as u8;
+        let alpha = (alpha.clamp(0.0, 1.0) * self.opacity * f32::from(u8::MAX)) as u8;
         match image {
             NoteImage::Sprite(sprite) => {
                 let frame = self.frame;
@@ -1122,8 +1134,8 @@ impl Field<'_> {
             for judge in (0..JUDGE_AREA_WINDOWS).rev() {
                 let inner = if judge > 0 { windows[judge - 1] } else { 0 };
                 let (y, h) = ((self.line + inner as f64 * rate) as f32, ((windows[judge] - inner) as f64 * rate) as f32);
-                if let Some((dst, ..)) = self.out.quad(lane.region.x, y, lane.region.w, h) {
-                    r.fill_rect(dst, JUDGE_AREA_COLORS[judge]);
+                if let Some((dst, ..)) = self.out.quad(lane.region.x, y, lane.region.w, h).filter(|_| self.opacity > 0.0) {
+                    r.fill_rect(dst, faded(JUDGE_AREA_COLORS[judge], (self.opacity * f32::from(u8::MAX)) as u8));
                     drawn = true;
                 }
             }
@@ -1174,7 +1186,8 @@ pub(crate) fn draw_note<R: Renderer>(
     let (ceiling, line) = field_rows(first, notes.lift);
     let rxhs = (ceiling - line) * f64::from(hispeed) * speed;
     let nudge = out.scaled(note_nudge(place, frame));
-    let field = Field { out, frame, body, notes, lanes, rxhs, ceiling, line, nudge, constant };
+    let opacity = f32::from(place.tint.a) / f32::from(u8::MAX);
+    let field = Field { out, frame, body, notes, lanes, rxhs, ceiling, line, nudge, opacity, constant };
 
     let mut drawn = false;
     if let Some(area) = &notes.show.judge_area {

@@ -9,7 +9,10 @@
 //! The rows are the settings a player changes from one sitting to the next: how fast the notes
 //! scroll and what the lane is covered with, when a press counts, and how a chart is dealt out.
 //! They are the same fields the settings screen has always written, in the same settings file, and
-//! with them the options the play skin of the previewed mode declares ([`rows`]).
+//! with them the options and the offsets of the play skin of the previewed mode ([`rows`]): how
+//! wide the lanes are, where the judgement is written, how opaque each part of the screen is.
+//! Those are the document's own and are stored where the skin menu stores them, so either menu
+//! reads what the other wrote.
 //!
 //! Two values of this screen are not settings and are stored nowhere: the mode on the strip of tabs
 //! and the tempo of the sample chart. They choose what the options are shown on ([`PlayTarget`]).
@@ -33,18 +36,22 @@ use winit::keyboard::KeyCode;
 
 use crate::skin_preview::target::SpeedReadout;
 use crate::skin_preview::{PlayTarget, SkinPreview};
-use crate::skin_select::SkinRow;
+use crate::skin_select::{SkinRow, SkinRowKind};
 use crate::stage::preview_menu::{
     INFO_ROW_UNDER_FIGURES_Y, InfoFigure, LIST_RECT, ListEntry, ListWindow, NEXT_TAB, PREVIOUS_TAB, ROW_STEP_BACK, ROW_STEP_FORWARD, RowLook, VISIBLE_ROWS,
     click_step, contains, draw_head, draw_hint, draw_info_figures, draw_info_panel, draw_info_row_at, draw_list, draw_preview, draw_tabs, fitted_value,
     last_top, revealed_top, shift_after, stepped_tab, wheel_scrolled,
 };
+use crate::stage::skin_menu::automatic_offset_help;
 use crate::stage::{Canvas, FrameCtx, KeyInput, Stage, StageHandler, Transition, is_left_press};
 use crate::{AppShared, Hot};
 
 mod rows;
 
-use rows::{BPM_UNIT, Line, PREVIEW_BPM_LABEL, Row, bpm_value, help, hispeed_figure, is_read_only, listed, reset_setting, setting_value, step_setting};
+use rows::{
+    BPM_UNIT, Fold, Folds, Line, PREVIEW_BPM_LABEL, Row, bpm_value, fold_value, folded, help, hispeed_figure, is_read_only, listed, reset_setting,
+    setting_value, step_setting,
+};
 
 /// The screen's title.
 const TITLE: &str = "PLAY";
@@ -85,16 +92,18 @@ const COVER_OFF_MARK: &str = "(COVER OFF)";
 const LIMIT_NOTE: &str = "HI-SPEED IS AT THE END OF ITS RANGE: NO SPEED HOLDS THIS GREEN NUMBER AT THIS TEMPO";
 
 /// The keys of the screen, written along its foot.
-const HINT: &str = "UP DOWN MOVE   LEFT RIGHT CHANGE   SHIFT x10   ENTER NEXT   0 DEFAULT   TAB MODE   WHEEL SCROLL   RIGHT CLICK STEP BACK   ESC SAVE/BACK";
+const HINT: &str =
+    "UP DOWN MOVE   LEFT RIGHT CHANGE   SHIFT x10, OPACITY 25%   ENTER NEXT   0 DEFAULT   TAB MODE   WHEEL SCROLL   RIGHT CLICK BACK   ESC SAVE/BACK";
 
 /// The play menu's own state: the preview on its right, the mode and the tempo it is shown on, the
 /// rows it lists and where the cursor and the list are, and the modifier that turns the key for the
 /// next mode into the key for the one before and one step of a number into ten.
 ///
-/// `rows` is rebuilt when `dirty` says the list may have changed, which is when the mode moved: the
-/// options of the play skin are another document's. What each row reads is worked out as it is
-/// drawn. `top` is the first entry on show: the cursor is brought back onto the screen by every key
-/// that moves it or the row under it, and the wheel moves the list alone.
+/// `rows` is rebuilt when `dirty` says the list may have changed, which is when the mode moved --
+/// the options and the offsets of the play skin are another document's -- and when a fold was
+/// opened or closed. What each row reads is worked out as it is drawn. `top` is the first entry on
+/// show: the cursor is brought back onto the screen by every key that moves it or the row under
+/// it, and the wheel moves the list alone.
 pub(crate) struct PlayMenuState {
     preview: SkinPreview,
     shift_held: bool,
@@ -106,6 +115,8 @@ pub(crate) struct PlayMenuState {
     top: usize,
     rows: Vec<Row>,
     dirty: bool,
+    /// Which folds of the play skin's offsets have their rows on show.
+    folds: Folds,
     /// The part of a line the wheel has turned that has not moved the list yet.
     wheel_lines: f32,
 }
@@ -122,6 +133,7 @@ impl PlayMenuState {
             top: 0,
             rows: Vec::new(),
             dirty: true,
+            folds: Folds::default(),
             wheel_lines: 0.0,
         }
     }
@@ -166,13 +178,13 @@ impl PlayMenuState {
 
     /// Read the list again, keeping the cursor on the row it was on.
     ///
-    /// The tempo row and a row of the settings table are followed to wherever they now are, since
-    /// the options of the play skin come and go above them; an option of a skin is held by its
-    /// place, because the option at that place of another document is the nearest thing to it.
+    /// The tempo row, a row of the settings table and a fold are followed to wherever they now are,
+    /// since the rows of the play skin come and go above them; a row of a skin is held by its
+    /// place, because the row at that place of another document is the nearest thing to it.
     fn refresh(&mut self, shared: &AppShared) {
         let focused = self.focused();
-        self.rows = listed(shared, self.target().screen);
-        if let Some(row @ (Row::PreviewBpm | Row::Setting(_))) = focused
+        self.rows = listed(shared, self.target().screen, self.folds);
+        if let Some(row @ (Row::PreviewBpm | Row::Setting(_) | Row::Fold(_))) = focused
             && let Some(at) = self.rows.iter().position(|entry| *entry == row)
         {
             self.sel = at;
@@ -214,6 +226,19 @@ impl PlayMenuState {
         self.top = revealed_top(self.sel, self.top, self.rows.len());
     }
 
+    /// Scroll the list just far enough to have the rows of a fold that was opened on show under
+    /// it: all of them when there is room for them, and as many as fit under the fold on the first
+    /// line when there is not. A fold that showed nothing new when it was opened would read as one
+    /// that did nothing.
+    fn reveal_fold(&mut self, fold: Fold) {
+        let Some(at) = self.rows.iter().position(|row| *row == Row::Fold(fold)) else {
+            return;
+        };
+        let held = self.rows[at + 1..].iter().take_while(|row| matches!(row, Row::Skin(_))).count();
+        self.top = revealed_top(at + held, self.top, self.rows.len());
+        self.top = revealed_top(at, self.top, self.rows.len());
+    }
+
     /// Move the cursor to the row at `at`, or past a group's name to the next row in the direction
     /// `towards`, and bring it onto the screen.
     fn focus(&mut self, at: usize, towards: i32) {
@@ -230,11 +255,12 @@ impl PlayMenuState {
     }
 
     /// Apply one left/right step to a row, and tell the preview when a setting moved. A row that
-    /// holds a number is stepped ten times over when `wide` asks; any other row once. A row whose
-    /// value is worked out from the others is left as it is.
+    /// holds a number is stepped ten times over when `wide` asks, an opacity a quarter of the way,
+    /// and any other row once. A row whose value is worked out from the others is left as it is.
     ///
     /// The tempo of the sample chart is no setting: the preview is shown another target, and is not
-    /// told a setting moved.
+    /// told a setting moved. Neither is a fold, which shows or hides its rows whichever way it is
+    /// stepped.
     fn step(&mut self, ctx: &mut FrameCtx<'_>, row: Row, delta: i32, wide: bool) {
         if is_read_only(&ctx.shared.config.play, row) {
             return;
@@ -246,17 +272,33 @@ impl PlayMenuState {
                 false
             }
             Row::Setting(id) => step_setting(&mut ctx.shared.config, id, delta, wide),
-            Row::Skin(option) => {
-                let moved = ctx.shared.skins.step_for(&mut ctx.shared.config, self.target().screen, option, delta);
-                if moved {
-                    self.reread_skin(ctx.shared);
+            Row::Skin(skin_row) => self.step_skin_row(ctx.shared, skin_row, delta, wide),
+            Row::Fold(fold) => {
+                self.folds.toggle(fold);
+                self.refresh(ctx.shared);
+                self.reveal_cursor();
+                if self.folds.is_open(fold) {
+                    self.reveal_fold(fold);
                 }
-                moved
+                false
             }
         };
         if moved {
             self.preview.settings_changed(ctx.shared);
         }
+    }
+
+    /// Step a row of the previewed play skin, and report whether it moved. An option changes what
+    /// is drawn, so its document is read again; an offset is read where it is stored by every
+    /// frame, so the frame after the step shows it with nothing read again.
+    fn step_skin_row(&self, shared: &mut AppShared, row: SkinRow, delta: i32, wide: bool) -> bool {
+        let screen = self.target().screen;
+        let steps = if wide { shared.skins.wide_steps_for(&shared.config, screen, row) } else { 1 };
+        let moved = (0..steps).filter(|_| shared.skins.step_for(&mut shared.config, screen, row, delta)).count() > 0;
+        if moved {
+            self.reread_skin(shared);
+        }
+        moved
     }
 
     /// Step the row under the cursor, with the row on show.
@@ -268,8 +310,9 @@ impl PlayMenuState {
     }
 
     /// Put the row under the cursor back to what it ships as: a setting to what a fresh
-    /// configuration holds, the tempo to the one the menu opens on, and an option of the skin to
-    /// the item its author chose. A row whose value is worked out from the others is left as it is.
+    /// configuration holds, the tempo to the one the menu opens on, an option of the skin to the
+    /// item its author chose, and an offset of it to none -- which for an opacity is all of it. A
+    /// row whose value is worked out from the others is left as it is, and so is a fold.
     fn reset_focused(&mut self, ctx: &mut FrameCtx<'_>) {
         self.reveal_cursor();
         let Some(row) = self.focused().filter(|row| !is_read_only(&ctx.shared.config.play, *row)) else {
@@ -288,7 +331,8 @@ impl PlayMenuState {
                 }
                 moved
             }
-            Row::Group(_) | Row::Skin(_) => false,
+            Row::Skin(offset @ SkinRow::Offset(_, _)) => ctx.shared.skins.reset_row_for(&mut ctx.shared.config, self.target().screen, offset),
+            Row::Group(_) | Row::Skin(SkinRow::File(_)) | Row::Fold(_) => false,
         };
         if moved {
             self.preview.settings_changed(ctx.shared);
@@ -306,6 +350,26 @@ impl PlayMenuState {
                 let (label, value) = shared.skins.line_for(&shared.config, self.target().screen, option);
                 Line { label, value, look }
             }
+            Row::Fold(fold) => {
+                let held = folded(shared, self.target().screen, fold).len();
+                Line { label: fold.label().to_string(), value: fold_value(self.folds.is_open(fold), held), look }
+            }
+        }
+    }
+
+    /// What is said of one row under the preview. An offset the game adds to every play skin is
+    /// said as the skin menu says one.
+    fn help_of(&self, shared: &AppShared, row: Row) -> &'static str {
+        let screen = self.target().screen;
+        let kind = match row {
+            Row::Skin(skin_row) => shared.skins.kind_for(&shared.config, screen, skin_row),
+            _ => None,
+        };
+        match (row, kind) {
+            (Row::Skin(skin_row), Some(SkinRowKind::Offset(axis))) if shared.skins.is_automatic_for(&shared.config, screen, skin_row) => {
+                automatic_offset_help(axis)
+            }
+            _ => help(&shared.config.play, row, kind),
         }
     }
 
@@ -354,7 +418,7 @@ impl PlayMenuState {
         draw_info_figures(canvas, &summary(readout, shared.config.play.constant_speed), summary_note(readout));
         if let Some(row) = self.focused() {
             let line = self.line(shared, readout, row);
-            draw_info_row_at(canvas, INFO_ROW_UNDER_FIGURES_Y, &line.label, &line.value, help(&shared.config.play, row));
+            draw_info_row_at(canvas, INFO_ROW_UNDER_FIGURES_Y, &line.label, &line.value, self.help_of(shared, row));
         }
     }
 }

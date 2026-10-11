@@ -217,6 +217,10 @@ pub(crate) fn draw_object<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, objec
 /// invert-destination read no source alpha at all, so an object fading out under one of those would
 /// otherwise keep darkening the screen at `a: 0`.
 ///
+/// A note field is the one object that goes on: the alpha its destination came to fades its notes
+/// ([`notes::draw_note`]), and the measure lines it draws are images with destinations of their
+/// own, which a field with no alpha left still draws.
+///
 /// `index` is the object's place among its screen's objects, which is how an editable text finds out
 /// that it is the one being typed into.
 pub(crate) fn draw_resolved<R: Renderer>(
@@ -228,7 +232,7 @@ pub(crate) fn draw_resolved<R: Renderer>(
     frame: &SkinFrame<'_>,
     resolved: &Resolved,
 ) -> bool {
-    if resolved.color.a == 0 {
+    if resolved.color.a == 0 && !matches!(object.body, Body::Note(_)) {
         return false;
     }
 

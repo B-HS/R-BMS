@@ -34,8 +34,28 @@ local function properties(mode)
         },
         def = "Fast-Slow",
     })
+    table.insert(list, {
+        name = name.DIFFERENCE,
+        item = {
+            { name = "Target", op = option.DIFFERENCE_TARGET },
+            { name = "Best", op = option.DIFFERENCE_BEST },
+            { name = "Off", op = option.DIFFERENCE_OFF },
+        },
+        def = "Target",
+    })
+    table.insert(list, parts.shown_or_hidden(name.JUDGE, option.JUDGE_SHOW, option.JUDGE_HIDE))
     if mode.sides == 1 then
         table.insert(list, chosen(name.GRAPH, { name = "On", op = option.GRAPH_ON }, { name = "Off", op = option.GRAPH_OFF }))
+    end
+    return list
+end
+
+local function offsets(mode)
+    local list = { { name = layout.JUDGE_POSITION.name, id = layout.JUDGE_POSITION.id, y = true } }
+    for _, row in ipairs(layout.PART_ROWS) do
+        if mode.sides == 1 or not row.single_only then
+            table.insert(list, { name = row.name, id = row.id, a = true })
+        end
     end
     return list
 end
@@ -56,6 +76,7 @@ function play.header(mode)
         finishmargin = TIME.finishmargin,
         judgetimer = BOMB_UP_TO_GREAT,
         property = properties(mode),
+        offset = offsets(mode),
     }
 end
 

@@ -8,10 +8,10 @@ local field = {}
 local TRANSPARENT = 0
 local SIDE_TIMER_STRIDE = 10
 
-local KEYS = { release = 120, lit_alpha = 230 }
-local BEAM = { height = 280, alpha = 200, release = 120 }
+local KEYS = { release = 120, lit_share = 0.9 }
+local BEAM = { height = 280, release = 120 }
 local BOMB = { side = 128, cycle = 250 }
-local LINE = { open = 400, pulse_height = 16, pulse_alpha = 120, pulse_fade = 500, beat = 1000 }
+local LINE = { open = 400, pulse_height = 16, pulse_fade = 500, beat = 1000 }
 local SECTION_LINE = 2
 
 local NOTE_IMAGES = {
@@ -29,27 +29,39 @@ local NOTE_IMAGES = {
 
 local JUDGE = {
     top = 560,
-    detail_top = 520,
     size = { wide = 64, narrow = 48 },
     wide_from = 480,
     gap_share = 0.25,
     digits = 5,
-    pop = 0.15,
-    pop_time = 60,
-    hold = 440,
-    gone = 500,
+    shown = 500,
     with_count = 3,
     slots = {
-        { word = "judge_pgreat", count = "combo_pgreat", cycle = theme.judge_cycle.flash },
-        { word = "judge_great", count = "combo_great", cycle = theme.judge_cycle.blink },
-        { word = "judge_good", count = "combo_good", cycle = theme.judge_cycle.blink },
-        { word = "judge_bad", count = "combo_good", cycle = theme.judge_cycle.blink },
-        { word = "judge_poor", count = "combo_good", cycle = theme.judge_cycle.blink },
-        { word = "judge_poor", count = "combo_good", cycle = theme.judge_cycle.blink },
+        { word = "judge_pgreat", count = "combo_pgreat" },
+        { word = "judge_great", count = "combo_great" },
+        { word = "judge_good", count = "combo_good" },
+        { word = "judge_bad", count = "combo_good" },
+        { word = "judge_poor", count = "combo_good" },
+        { word = "judge_poor", count = "combo_good" },
     },
 }
 
-local DETAIL = { size = 24, sprite = "snum24", digits = 4, fast = theme.timing.fast, slow = theme.timing.slow, even = theme.color.sub }
+local ABOVE = {
+    top = 520,
+    size = 24,
+    sprite = "snum24",
+    gap = 16,
+    word_width = 72,
+    difference_digits = 5,
+    difference = theme.color.text,
+    timing_digits = 4,
+    fast = theme.timing.fast,
+    slow = theme.timing.slow,
+    even = theme.color.sub,
+    refs = {
+        [layout.OPTION.DIFFERENCE_TARGET] = props.number.DIFF_EXSCORE,
+        [layout.OPTION.DIFFERENCE_BEST] = props.number.DIFF_HIGHSCORE,
+    },
+}
 
 local COVER = {
     edge = 2,
@@ -70,6 +82,10 @@ local NOTICE = {
     combo = { size = theme.type.heading, slide = 300, hold = 1700, gone = 2000, rule_drop = 56, rule_height = 2 },
 }
 
+local function round(value)
+    return math.floor(value + 0.5)
+end
+
 local function lane_timer(base, lane)
     return base + lane.slot + lane.side * SIDE_TIMER_STRIDE
 end
@@ -78,30 +94,56 @@ local function lane_box(lane, top, height)
     return { x = lane.x, top = top, w = lane.w, h = height }
 end
 
-local function lanes_under(s, view)
-    local grid = layout.FIELD
+local function lane_faces(s, view)
     for _, side in ipairs(view.fields) do
-        s:rect({ x = side.x, top = side.top, w = side.w, h = side.h + grid.line + grid.keys_height }, theme.color.line)
         for _, lane in ipairs(side.shown) do
             s:rect(lane_box(lane, side.top, side.h), lane.shaded and theme.color.bg or theme.color.panel)
-            s:rect(lane_box(lane, grid.keys_top, grid.keys_height), theme.color.raised)
         end
     end
 end
 
-local function key_lights(s, view)
+local function seams(side, top, height, each)
+    for index = 1, #side.shown - 1 do
+        local lane = side.shown[index]
+        local seam = lane.x + lane.w
+        each({ x = seam, top = top, w = side.shown[index + 1].x - seam, h = height })
+    end
+end
+
+local function lane_dividers(s, view)
+    for _, side in ipairs(view.fields) do
+        seams(side, side.top, side.h, function(gap)
+            s:rect(gap, theme.color.line)
+        end)
+    end
+end
+
+local function key_display(s, view)
+    local grid = layout.FIELD
+    for _, side in ipairs(view.fields) do
+        s:rect({ x = side.x, top = side.top + side.h, w = side.w, h = grid.line }, theme.color.line)
+        seams(side, grid.keys_top, grid.keys_height, function(gap)
+            s:rect(gap, theme.color.line)
+        end)
+    end
+    for _, lane in ipairs(view.lanes) do
+        local key = lane_box(lane, grid.keys_top, grid.keys_height)
+        local lit = theme.mix(lane.tint, theme.color.raised, KEYS.lit_share)
+        s:rect(key, theme.color.raised)
+        s:rect(key, lit, { timer = lane_timer(props.timer.KEYON_1P, lane) })
+        local releasing = { { time = 0 }, { time = KEYS.release, a = TRANSPARENT } }
+        s:rect(key, lit, { timer = lane_timer(props.timer.KEYOFF_1P, lane), keys = releasing, loop = props.loop.ONCE })
+    end
+end
+
+local function key_beams(s, view)
     local grid = layout.FIELD
     local lifted = props.offset.LIFT
     for _, lane in ipairs(view.lanes) do
-        local on = lane_timer(props.timer.KEYON_1P, lane)
-        local off = lane_timer(props.timer.KEYOFF_1P, lane)
-        local key = lane_box(lane, grid.keys_top, grid.keys_height)
-        s:rect(key, lane.tint, { timer = on, a = KEYS.lit_alpha })
-        s:rect(key, lane.tint, { timer = off, keys = { { time = 0, a = KEYS.lit_alpha }, { time = KEYS.release, a = TRANSPARENT } }, loop = props.loop.ONCE })
         local beam = lane_box(lane, grid.top + grid.height - BEAM.height, BEAM.height)
-        s:image("beam", beam, { color = lane.tint, a = BEAM.alpha, timer = on, offset = lifted })
-        local fading = { { time = 0, a = BEAM.alpha }, { time = BEAM.release, a = TRANSPARENT } }
-        s:image("beam", beam, { color = lane.tint, timer = off, offset = lifted, keys = fading, loop = props.loop.ONCE })
+        s:image("beam", beam, { color = lane.tint, timer = lane_timer(props.timer.KEYON_1P, lane), offset = lifted })
+        local fading = { { time = 0 }, { time = BEAM.release, a = TRANSPARENT } }
+        s:image("beam", beam, { color = lane.tint, timer = lane_timer(props.timer.KEYOFF_1P, lane), offset = lifted, keys = fading, loop = props.loop.ONCE })
     end
 end
 
@@ -123,14 +165,18 @@ local function note_field(s, view)
         def.dst[index] = { x = lane.x, y = theme.height - grid.top - grid.height, w = lane.w, h = grid.height }
         def.size[index] = lane.note_height
     end
-    for index, side in ipairs(view.fields) do
-        local rule = { x = side.x, top = grid.top + grid.height - SECTION_LINE, w = side.w, h = SECTION_LINE }
-        def.group[index] = s:dst(line_id, rule, { color = theme.color.line, offset = props.offset.LIFT })
-    end
+    s:within(layout.PART.BAR_LINE, function()
+        for index, side in ipairs(view.fields) do
+            local rule = { x = side.x, top = grid.top + grid.height - SECTION_LINE, w = side.w, h = SECTION_LINE }
+            def.group[index] = s:dst(line_id, rule, { color = theme.color.line, offset = props.offset.LIFT })
+        end
+    end)
     if not view.mode.scratch then
         def.dst2 = theme.height - grid.keys_top - grid.keys_height
     end
-    s:single("note", def, nil, { offset = props.offset.NOTES_1P })
+    s:within(layout.PART.NOTE, function()
+        s:single("note", def, nil, { offset = props.offset.NOTES_1P })
+    end)
 end
 
 local function judge_line(s, view)
@@ -142,8 +188,8 @@ local function judge_line(s, view)
         local opening = { { time = 0, x = side.x + side.w / 2, w = 0 }, { time = LINE.open } }
         s:rect(line, theme.color.accent, { timer = props.timer.READY, keys = opening, acc = props.acc.DECELERATE, offset = lifted })
         local pulse = { x = side.x, top = line.top - LINE.pulse_height, w = side.w, h = LINE.pulse_height }
-        local beating = { { time = 0, a = LINE.pulse_alpha }, { time = LINE.pulse_fade, a = TRANSPARENT }, { time = LINE.beat, a = TRANSPARENT } }
-        s:image("beam", pulse, { color = theme.color.accent, timer = props.timer.RHYTHM, keys = beating, loop = 0, offset = lifted })
+        local beating = { { time = 0 }, { time = LINE.pulse_fade, a = TRANSPARENT }, { time = LINE.beat, a = TRANSPARENT } }
+        s:image("pulse", pulse, { color = theme.color.accent, timer = props.timer.RHYTHM, keys = beating, loop = 0, offset = lifted })
     end
 end
 
@@ -195,81 +241,80 @@ local function bombs(s, view)
     end
 end
 
-local function popping(box)
-    local grow_w, grow_h = box.w * JUDGE.pop, box.h * JUDGE.pop
-    return {
-        { time = 0, dx = -grow_w / 2, dtop = -grow_h / 2, dw = grow_w, dh = grow_h },
-        { time = JUDGE.pop_time },
-        { time = JUDGE.hold },
-        { time = JUDGE.gone, a = TRANSPARENT },
-    }
-end
-
-local function beside_popping(word)
-    return {
-        { time = 0, dx = word.w * JUDGE.pop, dtop = -word.h * JUDGE.pop / 2 },
-        { time = JUDGE.pop_time },
-        { time = JUDGE.hold },
-        { time = JUDGE.gone, a = TRANSPARENT },
-    }
-end
-
 local function judge_of(s, side)
     local size = side.w >= JUDGE.wide_from and JUDGE.size.wide or JUDGE.size.narrow
     local timer = props.timer.JUDGE_1P + side.side
-    local offsets = { props.offset.LIFT, props.offset.JUDGE_1P }
-    local gap = size * JUDGE.gap_share
-    local middle = side.x + side.w / 2
-    local def = { index = side.side, shift = true, images = {}, numbers = {} }
+    local offsets = { props.offset.LIFT, layout.JUDGE_POSITION.id, props.offset.JUDGE_1P }
+    local shown = { timer = timer, keys = { { time = 0 }, { time = JUDGE.shown } }, loop = props.loop.ONCE, offsets = offsets, filter = props.filter.LINEAR }
+    local widest = s:sprite(JUDGE.slots[1].word)
+    local scale = size / widest.size
+    local digit = s:sprite(JUDGE.slots[1].count)
+    local place = { w = round(digit.cell_w * scale), h = round(digit.cell_h * scale) }
+    local count_x = round(widest.cell_w * scale) + round(size * JUDGE.gap_share)
+    local left = round(side.x + (side.w - count_x - place.w * JUDGE.digits) / 2)
+    local def = { index = side.side, shift = false, images = {}, numbers = {} }
     local counts = {}
     for slot, entry in ipairs(JUDGE.slots) do
         local sprite = s:sprite(entry.word)
-        local strip = s:sprite(entry.count)
-        local scale = size / sprite.size
-        local width, height = sprite.cell_w * scale, sprite.cell_h * scale
-        local left = slot <= JUDGE.with_count and middle - (width + gap) / 2 or middle - width / 2
-        local word = { x = left, top = JUDGE.top - sprite.pad * scale, w = width, h = height }
-        local shared = { timer = timer, loop = props.loop.ONCE, offsets = offsets, filter = props.filter.LINEAR }
-        local word_id = s:define_image(entry.word, { cycle = entry.cycle })
-        def.images[slot] = s:dst(word_id, word, ui.merge(shared, { keys = popping(word) }))
-        local count = { id = "num." .. entry.count .. "." .. side.side, sprite = entry.count, ref = props.number.COMBO, cycle = entry.cycle }
+        local width, height = round(sprite.cell_w * scale), round(sprite.cell_h * scale)
+        local x = slot <= JUDGE.with_count and left or round(side.x + (side.w - width) / 2)
+        local word = { x = x, top = JUDGE.top - sprite.pad * scale, w = width, h = height }
+        def.images[slot] = s:dst(s:define_image(entry.word), word, shown)
+        local count = { id = "num." .. entry.count .. "." .. side.side, sprite = entry.count, ref = props.number.COMBO }
         counts[entry.count] = counts[entry.count] or s:define_number(count, JUDGE.digits)
-        local cell = { x = width + gap, top = height - strip.cell_h * scale, w = strip.cell_w * scale, h = strip.cell_h * scale }
-        def.numbers[slot] = s:dst(counts[entry.count], cell, ui.merge(shared, { keys = beside_popping(word) }), word)
+        local cell = { x = count_x + math.floor(place.w * JUDGE.digits / 2), top = height - place.h, w = place.w, h = place.h }
+        def.numbers[slot] = s:dst(counts[entry.count], cell, shown, word)
     end
     local id = s:object("judge", def)
     s:place(id, nil, {})
 end
 
-local function detail_of(s, view, side)
+local function above_of(s, view, side)
     local option = layout.OPTION
     local first = side.side == 0
-    local timer = props.timer.JUDGE_1P + side.side
     local perfect = first and props.option.JUDGE_1P_PERFECT or props.option.JUDGE_2P_PERFECT
     local early = first and props.option.JUDGE_1P_EARLY or props.option.JUDGE_2P_EARLY
     local late = first and props.option.JUDGE_1P_LATE or props.option.JUDGE_2P_LATE
-    local offsets = { props.offset.LIFT, props.offset.JUDGEDETAIL_1P }
-    local shown = { { time = 0 }, { time = JUDGE.gone } }
-    local box = { x = side.x, top = JUDGE.detail_top, w = side.w }
     local placed = function(op, color)
-        return { op = op, color = color, timer = timer, keys = shown, loop = props.loop.ONCE, offsets = offsets }
+        return {
+            op = op,
+            color = color,
+            timer = props.timer.JUDGE_1P + side.side,
+            keys = { { time = 0 }, { time = JUDGE.shown } },
+            loop = props.loop.ONCE,
+            offsets = { props.offset.LIFT, layout.JUDGE_POSITION.id, props.offset.JUDGEDETAIL_1P },
+        }
+    end
+    local ref = ABOVE.refs[view.difference]
+    local difference = { sprite = ABOVE.sprite, ref = ref, digit = ABOVE.difference_digits, zeropadding = props.padding.ZEROS, saturate = true }
+    local whole = { x = side.x, top = ABOVE.top, w = side.w }
+    local slot, align = whole, "center"
+    if ref ~= nil and view.detail ~= option.DETAIL_OFF then
+        local span = s:number_box(difference, whole).span
+        local left = round(side.x + (side.w - span - ABOVE.gap - ABOVE.word_width) / 2)
+        s:number(difference, { x = left, top = ABOVE.top }, placed(nil, ABOVE.difference))
+        slot, align = { x = left + span + ABOVE.gap, top = ABOVE.top, w = ABOVE.word_width }, "left"
+    elseif ref ~= nil then
+        s:number(ui.merge(difference, { align = align }), whole, placed(nil, ABOVE.difference))
     end
     if view.detail == option.DETAIL_FAST_SLOW then
-        s:text({ text = "FAST", size = DETAIL.size, align = "center" }, box, placed({ early }, DETAIL.fast))
-        s:text({ text = "SLOW", size = DETAIL.size, align = "center" }, box, placed({ late }, DETAIL.slow))
+        s:text({ text = "FAST", size = ABOVE.size, align = align }, slot, placed({ early }, ABOVE.fast))
+        s:text({ text = "SLOW", size = ABOVE.size, align = align }, slot, placed({ late }, ABOVE.slow))
     elseif view.detail == option.DETAIL_MILLISECONDS then
-        local ref = props.number.JUDGE_1P_DURATION + side.side
-        local spec = { sprite = DETAIL.sprite, ref = ref, digit = DETAIL.digits, saturate = true, align = "center" }
-        s:number(spec, box, placed({ perfect }, DETAIL.even))
-        s:number(spec, box, placed({ early }, DETAIL.fast))
-        s:number(spec, box, placed({ late }, DETAIL.slow))
+        local timing = { sprite = ABOVE.sprite, ref = props.number.JUDGE_1P_DURATION + side.side, digit = ABOVE.timing_digits, saturate = true, align = align }
+        s:number(timing, slot, placed({ perfect }, ABOVE.even))
+        s:number(timing, slot, placed({ early }, ABOVE.fast))
+        s:number(timing, slot, placed({ late }, ABOVE.slow))
     end
 end
 
 local function judges(s, view)
+    if not view.judge_shown then
+        return
+    end
     for _, side in ipairs(view.fields) do
         judge_of(s, side)
-        detail_of(s, view, side)
+        above_of(s, view, side)
     end
 end
 
@@ -311,16 +356,24 @@ local function notices(s, view)
     end
 end
 
+local function part(s, id, build, view)
+    s:within(id, function()
+        build(s, view)
+    end)
+end
+
 function field.under(s, view)
-    lanes_under(s, view)
-    key_lights(s, view)
+    part(s, layout.PART.LANE_BACKGROUND, lane_faces, view)
+    part(s, layout.PART.LANE_DIVIDER, lane_dividers, view)
+    part(s, layout.PART.KEY_DISPLAY, key_display, view)
+    part(s, layout.PART.KEY_BEAM, key_beams, view)
     note_field(s, view)
 end
 
 function field.over(s, view)
-    covers(s, view)
-    judge_line(s, view)
-    bombs(s, view)
+    part(s, layout.PART.LANE_COVER, covers, view)
+    part(s, layout.PART.JUDGE_LINE, judge_line, view)
+    part(s, layout.PART.BOMB, bombs, view)
     judges(s, view)
     notices(s, view)
 end

@@ -95,7 +95,8 @@ def atlas_text(section: str, placed: list[Placed], width: int, height: int) -> s
     ]
     for entry in sorted(placed, key=lambda entry: entry.sprite.name):
         sprite = entry.sprite
-        fields = {'x': entry.x, 'y': entry.y, 'w': sprite.image.width, 'h': sprite.image.height, 'divx': sprite.divx, 'divy': sprite.divy} | sprite.meta
+        inner = {'x': entry.x + sprite.margin, 'y': entry.y + sprite.margin, 'w': sprite.image.width - sprite.margin * 2, 'h': sprite.image.height - sprite.margin * 2}
+        fields = inner | {'divx': sprite.divx, 'divy': sprite.divy} | sprite.meta
         body = ', '.join(f'{key} = {lua_value(value)}' for key, value in fields.items())
         lines.append(f'        {sprite.name} = {{ {body} }},')
     lines += ['    },', '}', '']

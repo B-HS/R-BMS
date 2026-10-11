@@ -822,3 +822,54 @@ fn a_distance_field_font_is_laid_out_and_loaded_like_a_plain_one() {
     assert_eq!(frame(&screen, &mut text, &mut canvas, "A"), 1);
     assert_eq!(ink_of(&canvas, WHITE), boxed(ANCHOR_X, TOP_ROW, INK_A), "its glyphs sit where a plain font's do");
 }
+
+/// The offset the fading line names, the shift that takes half of its alpha away and the one that
+/// takes all of it.
+const FADE_OFFSET: i32 = 9_001;
+const HALF_SHIFT: f32 = -128.0;
+const WHOLE_SHIFT: f32 = -255.0;
+
+/// How bright the brightest pixel of white ink is at half its alpha: over the backdrop where the
+/// line's shadow does not reach, and a little brighter over the shadow, which has lightened the
+/// backdrop under it first.
+const HALF_INK: std::ops::RangeInclusive<u8> = 174..=184;
+
+/// A line drawn from a bitmap font is drawn at the alpha the offsets its destination names leave
+/// it, its shadow with it: opaque with none set, the backdrop showing through by half at half, and
+/// not at all with none left.
+#[test]
+fn a_bitmap_line_fades_with_the_offset_its_destination_names() {
+    let mut canvas = stage();
+    let (mut text, families, _face, _pages) = engine(&mut canvas);
+    let mut object = constant("AB", &families, ROOMY, |def| (def.shadow_offset_x, def.shadow_offset_y) = (2.0, 2.0));
+    object.track.offsets.push(FADE_OFFSET);
+    let mut at = |shift: f32| {
+        let mut host = MapHost::new();
+        host.offsets.insert(FADE_OFFSET, rbms_skin::dst::SkinOffset { a: shift, ..Default::default() });
+        let timers = TimerState::new();
+        let frame = SkinFrame { now_us: 0, timers: &timers, state: &host, lua: None, mouse: None, data: FrameData::default() };
+        let viewport = SkinViewport::new((STAGE.0 as f32, STAGE.1 as f32), (STAGE.0 as f32, STAGE.1 as f32));
+        canvas.clear(BACKDROP);
+        let drawn = {
+            let mut ctx = RenderCtx::new(Theme::default(), &mut text);
+            draw_object(&mut ctx, &mut canvas, &object, &viewport, &frame)
+        };
+        let brightest = (0..STAGE.1).flat_map(|y| (0..STAGE.0).map(move |x| (x, y))).map(|(x, y)| canvas.pixel_at(x, y).r).max().unwrap_or_default();
+        let darkest = (0..STAGE.1).flat_map(|y| (0..STAGE.0).map(move |x| (x, y))).map(|(x, y)| canvas.pixel_at(x, y).r).min().unwrap_or_default();
+        (drawn, bounds(&canvas, |pixel| pixel != BACKDROP), brightest, darkest)
+    };
+
+    let (drawn, opaque, brightest, _) = at(0.0);
+    assert!(drawn && opaque.is_some(), "the line is not drawn with the offset at nothing");
+    assert_eq!(brightest, u8::MAX, "white ink is opaque where a glyph is solid");
+
+    let (drawn, half, brightest, darkest) = at(HALF_SHIFT);
+    assert!(drawn, "the line is not drawn at half its alpha");
+    assert!(HALF_INK.contains(&brightest), "at half its alpha the brightest ink came to {brightest}");
+    assert_eq!(half, opaque, "the faded line and its shadow are where the opaque ones were");
+    assert_eq!(darkest, BACKDROP.r, "a shadow at half brightness and half alpha comes to no darker than the backdrop it is over");
+
+    let (drawn, gone, _, _) = at(WHOLE_SHIFT);
+    assert!(!drawn, "a line with no alpha left is drawn");
+    assert_eq!(gone, None, "and something of it or of its shadow reached the canvas");
+}

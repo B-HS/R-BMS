@@ -811,3 +811,201 @@ fn a_document_outside_the_skin_folder_is_refused() {
 fn skin_screen_label_exists(screen: i32) -> bool {
     usize::try_from(screen).is_ok_and(|at| at < SKIN_SCREEN_LABELS.len())
 }
+
+/// A fixture with the fading play document written into the skin folder and chosen for the
+/// seven-key play screen, which the skin menu is configuring.
+fn fading_fixture(tag: &str) -> (Fixture, String) {
+    let mut fixture = Fixture::new(tag);
+    let path = write_fading_play(&skin_root(&fixture.settings, &fixture.config)).to_string_lossy().into_owned();
+    fixture.config.skin.screen = PLAY_7KEYS;
+    fixture.config.skin.select(PLAY_7KEYS, Some(path.clone()));
+    fixture.skins.rescan(&fixture.settings, &fixture.config);
+    (fixture, path)
+}
+
+/// The row of the open screen's document whose label is exactly `label`.
+fn row_called(fixture: &Fixture, label: &str) -> SkinRow {
+    let rows = fixture.rows();
+    let found = rows.iter().copied().find(|row| fixture.line(*row).0 == label);
+    found.unwrap_or_else(|| panic!("no row is called {label} among {:?}", rows.iter().map(|row| fixture.line(*row).0).collect::<Vec<_>>()))
+}
+
+/// The alpha stored for one offset of a document, or nothing when none is stored.
+fn stored_alpha(fixture: &Fixture, path: &str, id: i32) -> Option<f32> {
+    fixture.config.skin.customisation(path).and_then(|entry| entry.offsets.get(&id)).map(|offset| offset.a)
+}
+
+/// An opacity and the alpha offset it is stored as are the two the format's contract names: all of
+/// the opacity is an offset of nothing, none of it takes the whole alpha range away, and between
+/// them the offset is `round((percent - 100) * 255 / 100)`. Every whole percent comes back from
+/// the offset it was stored as, so no step of a row lands beside the one it was asked for.
+#[test]
+fn an_opacity_and_the_alpha_offset_it_is_stored_as_agree_on_every_percent() {
+    assert_eq!((opacity_alpha(100), opacity_alpha(0), opacity_alpha(50), opacity_alpha(200)), (0.0, -255.0, -128.0, 255.0));
+    assert_eq!((opacity_percent(0.0), opacity_percent(-255.0), opacity_percent(255.0)), (100, 0, 200));
+    for percent in 0..=200 {
+        let alpha = opacity_alpha(percent);
+        assert_eq!(alpha, ((percent - 100) as f32 * 255.0 / 100.0).round(), "{percent}% is not stored as the contract's offset");
+        assert_eq!(alpha.fract(), 0.0, "{percent}% is stored as a part of an alpha");
+        assert!((-OFFSET_ALPHA_LIMIT..=OFFSET_ALPHA_LIMIT).contains(&alpha), "{percent}% is stored outside the alpha range");
+        assert_eq!(opacity_percent(alpha), percent, "{percent}% stored as {alpha} does not read back");
+    }
+    assert_eq!((opacity_alpha(240), opacity_alpha(-3)), (255.0, -255.0), "an opacity outside its range is not held to it");
+    assert_eq!((opacity_percent(900.0), opacity_percent(-900.0)), (200, 0), "an offset outside the alpha range reads outside the row's");
+    assert_eq!(opacity_percent(128.0), 150, "an offset that adds half the alpha range reads half as much again");
+}
+
+/// An offset the document lets the player move along its alpha and nothing else is one row, called
+/// what the document calls it and read in percent. The opacities are listed together after every
+/// other offset, wherever the document declared them. An offset that fades and also moves keeps a
+/// row for each axis, its alpha read as the number that is added.
+#[test]
+fn an_offset_of_alpha_alone_is_one_row_read_as_an_opacity() {
+    let (fixture, _) = fading_fixture("opacity-rows");
+    let labels: Vec<String> = fixture.rows().iter().map(|row| fixture.line(*row).0).collect();
+    let own_places = ["MARK PLACE X", "MARK PLACE Y", "GLOW Y", "GLOW ALPHA"];
+    let opacities = [FADING_GROUND_ROW, FADING_LINE_ROW, FADING_JUDGE_LINE_ROW, FADING_NOTES_ROW, FADING_PANEL_ROW];
+    assert_eq!(opacities.len(), FADING_OPACITIES);
+    assert_eq!(&labels[..own_places.len()], own_places, "the offsets that move are not listed first, in the order they are declared");
+    assert_eq!(labels.len(), own_places.len() + AUTOMATIC_OFFSET_ROWS + opacities.len());
+    assert_eq!(&labels[labels.len() - opacities.len()..], opacities, "the opacities are not listed last, each under the name the document gave it");
+
+    for label in opacities {
+        let row = row_called(&fixture, label);
+        assert!(matches!(row, SkinRow::Offset(_, OffsetAxis::A)), "{label} is {row:?}");
+        assert_eq!(fixture.line(row).1, "100%", "{label} does not open at all of its opacity");
+        assert_eq!(fixture.skins.kind(&fixture.config, row), Some(SkinRowKind::Opacity));
+    }
+    let glow = row_called(&fixture, "GLOW ALPHA");
+    assert_eq!(fixture.line(glow).1, "+0", "the alpha of an offset that also moves is not read as the number added");
+    assert_eq!(fixture.skins.kind(&fixture.config, glow), Some(SkinRowKind::Offset(OffsetAxis::A)));
+    let judge_alpha = row_called(&fixture, "JUDGE OFFSET ALPHA");
+    assert_eq!(fixture.skins.kind(&fixture.config, judge_alpha), Some(SkinRowKind::Offset(OffsetAxis::A)), "the judgement offset moves as well as fades");
+    assert_eq!(fixture.skins.kind(&fixture.config, SkinRow::Offset(99, OffsetAxis::A)), None, "a row the document does not declare has a kind");
+}
+
+/// An opacity row moves five percent a step from none of it, through the skin's own at a hundred,
+/// to the whole alpha range added at two hundred, stops at both ends, and is put back to a
+/// hundred. What is stored is the alpha offset the format reads, under the offset's id, and
+/// nothing has the document read again.
+#[test]
+fn an_opacity_row_steps_by_five_percent_and_is_stored_as_an_alpha_offset() {
+    let (mut fixture, path) = fading_fixture("opacity-step");
+    fixture.skins.reload(&fixture.config);
+    let row = row_called(&fixture, FADING_GROUND_ROW);
+
+    assert_eq!(stored_alpha(&fixture, &path, FADING_GROUND_OPACITY), None, "a row nobody stepped has something stored");
+    let mut above = Vec::new();
+    while fixture.skins.step(&mut fixture.config, row, 1) {
+        let value = fixture.line(row).1;
+        let (percent, added) = value.split_once("% (").expect("an opacity that adds reads its percent and then the alpha it adds");
+        let percent: i32 = percent.parse().expect("an opacity is a whole percent");
+        assert_eq!(added, format!("{:+})", opacity_alpha(percent) as i32), "{value} does not name the alpha it stands for");
+        assert_eq!(stored_alpha(&fixture, &path, FADING_GROUND_OPACITY), Some(opacity_alpha(percent)));
+        above.push(percent);
+    }
+    assert_eq!(fixture.line(row).1, "200% (+255)");
+    assert_eq!(above, (21..=40).map(|step| step * 5).collect::<Vec<_>>(), "the row did not walk every fifth percent up to two hundred");
+    assert_eq!(stored_alpha(&fixture, &path, FADING_GROUND_OPACITY), Some(255.0), "two hundred percent is the whole alpha range added");
+    assert!(fixture.skins.reset_row(&mut fixture.config, row));
+    assert_eq!(fixture.line(row).1, "100%");
+
+    assert!(fixture.skins.step(&mut fixture.config, row, -1));
+    assert_eq!(fixture.line(row).1, "95%");
+    assert_eq!(stored_alpha(&fixture, &path, FADING_GROUND_OPACITY), Some(-13.0), "95% is round(-5 * 255 / 100)");
+    assert!(!fixture.skins.needs_reload(&fixture.config), "an opacity asked for a reload it does not need");
+
+    let mut seen = vec![95];
+    while fixture.skins.step(&mut fixture.config, row, -1) {
+        let percent: i32 = fixture.line(row).1.trim_end_matches('%').parse().expect("an opacity is a whole percent");
+        assert_eq!(stored_alpha(&fixture, &path, FADING_GROUND_OPACITY), Some(opacity_alpha(percent)));
+        seen.push(percent);
+    }
+    assert_eq!(seen, (0..=19).rev().map(|step| step * 5).collect::<Vec<_>>(), "the row did not walk every fifth percent down to none");
+    assert_eq!(stored_alpha(&fixture, &path, FADING_GROUND_OPACITY), Some(-255.0), "none of the opacity is the whole alpha range taken away");
+
+    for expected in (1..=20).map(|step| step * 5) {
+        assert!(fixture.skins.step(&mut fixture.config, row, 1));
+        assert_eq!(fixture.line(row).1, format!("{expected}%"), "a step up from {}% landed beside its own", expected - 5);
+    }
+    assert_eq!(stored_alpha(&fixture, &path, FADING_GROUND_OPACITY), Some(0.0));
+
+    for _ in 0..7 {
+        fixture.skins.step(&mut fixture.config, row, -1);
+    }
+    assert_eq!(fixture.line(row).1, "65%");
+    assert!(fixture.skins.reset_row(&mut fixture.config, row));
+    assert_eq!(
+        (fixture.line(row).1.as_str(), stored_alpha(&fixture, &path, FADING_GROUND_OPACITY)),
+        ("100%", Some(0.0)),
+        "the row was not put back to all of it"
+    );
+    assert!(!fixture.skins.reset_row(&mut fixture.config, row), "an opacity already at a hundred still reported a move");
+
+    let other = row_called(&fixture, FADING_NOTES_ROW);
+    assert_eq!(fixture.line(other).1, "100%", "one opacity moved another");
+}
+
+/// A wide step of an opacity is a quarter of the way and one of any other offset is ten steps, and
+/// a row that is cycled has no wide step.
+#[test]
+fn a_wide_step_is_a_quarter_of_an_opacity_and_ten_of_an_offset() {
+    let (fixture, _) = fading_fixture("opacity-wide");
+    let wide = |row: SkinRow| fixture.skins.wide_steps_for(&fixture.config, PLAY_7KEYS, row);
+    assert_eq!(wide(row_called(&fixture, FADING_GROUND_ROW)) as i32 * OPACITY_STEP_PERCENT, 25);
+    assert_eq!(wide(row_called(&fixture, "MARK PLACE X")), 10);
+    assert_eq!(wide(row_called(&fixture, "GLOW ALPHA")), 10, "the alpha of an offset that also moves is stepped as a number");
+    assert_eq!(wide(SkinRow::Property(0)), 1);
+}
+
+/// The offsets a settings file already holds are read as they were written: an alpha offset that
+/// was stored before there was an opacity row is the opacity it comes to, one that stands between
+/// two steps is shown to the nearest percent and stepped to the nearest step that way, and an
+/// offset that moves reads as the number it always was. Writing the file and reading it back
+/// changes none of it.
+#[test]
+fn the_offsets_a_settings_file_holds_are_read_as_they_were_written() {
+    let (mut fixture, path) = fading_fixture("opacity-file");
+    let held = [
+        (FADING_GROUND_OPACITY, SkinOffset { a: -128.0, ..SkinOffset::default() }),
+        (FADING_NOTES_OPACITY, SkinOffset { a: -100.0, ..SkinOffset::default() }),
+        (FADING_MARK_PLACE, SkinOffset { x: 12.0, y: -7.0, ..SkinOffset::default() }),
+        (FADING_PANEL_OPACITY, SkinOffset { a: 200.0, ..SkinOffset::default() }),
+        (FADING_GLOW, SkinOffset { y: 3.0, a: -40.0, ..SkinOffset::default() }),
+        (JUDGE_OFFSET, SkinOffset { y: 30.0, a: -20.0, ..SkinOffset::default() }),
+    ];
+    for (id, offset) in held {
+        fixture.config.skin.customise(&path).offsets.insert(id, offset);
+    }
+    rbms_config::save(&fixture.config, &fixture.settings).expect("the settings file is written");
+    let written = std::fs::read_to_string(&fixture.settings).expect("the settings file reads");
+    assert!(written.contains("a: -128"), "the opacity is not written as the alpha offset it is: {written}");
+    let restored = rbms_config::load(&fixture.settings).expect("the settings file reads back").config;
+    assert_eq!(restored.skin, fixture.config.skin, "the offsets did not survive the file");
+    fixture.config = restored;
+
+    let read = |fixture: &Fixture, label: &str| fixture.line(row_called(fixture, label)).1;
+    assert_eq!(read(&fixture, FADING_GROUND_ROW), "50%");
+    assert_eq!(read(&fixture, FADING_NOTES_ROW), "61%", "an offset of -100 leaves 60.8 percent");
+    assert_eq!(
+        read(&fixture, FADING_PANEL_ROW),
+        "178% (+200)",
+        "an offset that adds alpha, as a skin's shade over a lane is brought up with, reads past a hundred, with the alpha that is stored"
+    );
+    assert_eq!(stored_alpha(&fixture, &path, FADING_PANEL_OPACITY), Some(200.0), "reading an offset rewrote it");
+    assert_eq!((read(&fixture, "MARK PLACE X"), read(&fixture, "MARK PLACE Y")), ("+12".to_string(), "-7".to_string()));
+    assert_eq!((read(&fixture, "GLOW Y"), read(&fixture, "GLOW ALPHA")), ("+3".to_string(), "-40".to_string()));
+    assert_eq!((read(&fixture, "JUDGE OFFSET Y"), read(&fixture, "JUDGE OFFSET ALPHA")), ("+30".to_string(), "-20".to_string()));
+
+    let notes = row_called(&fixture, FADING_NOTES_ROW);
+    assert!(fixture.skins.step(&mut fixture.config, notes, 1));
+    assert_eq!(fixture.line(notes).1, "65%", "a step up from between two steps did not land on the next one");
+    fixture.config.skin.customise(&path).offsets.insert(FADING_NOTES_OPACITY, SkinOffset { a: -100.0, ..SkinOffset::default() });
+    assert!(fixture.skins.step(&mut fixture.config, notes, -1));
+    assert_eq!(fixture.line(notes).1, "60%", "a step down from between two steps did not land on the one below");
+    assert_eq!(stored_alpha(&fixture, &path, FADING_GROUND_OPACITY), Some(-128.0), "stepping one opacity rewrote another");
+    assert_eq!(
+        fixture.config.skin.customisation(&path).and_then(|entry| entry.offsets.get(&FADING_MARK_PLACE)).map(|offset| (offset.x, offset.y)),
+        Some((12.0, -7.0))
+    );
+}

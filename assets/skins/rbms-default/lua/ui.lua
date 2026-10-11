@@ -33,7 +33,7 @@ local OBJECT_LISTS = {
 }
 local TEXT_ALIGN = { left = props.text_align.LEFT, center = props.text_align.CENTER, right = props.text_align.RIGHT }
 local NUMBER_ALIGN = { left = props.number_align.LEFT, center = props.number_align.CENTER, right = props.number_align.RIGHT }
-local DESTINATION_FIELDS = { "timer", "loop", "op", "draw", "blend", "filter", "center", "offset", "offsets", "stretch" }
+local DESTINATION_FIELDS = { "timer", "loop", "op", "draw", "blend", "filter", "center", "stretch" }
 local IMAGE_FIELDS = { "timer", "cycle", "len", "ref", "act", "click" }
 
 local function round(value)
@@ -168,9 +168,30 @@ function Builder:sprite_source(name)
     return { src = sprite.src, x = sprite.x, y = sprite.y, w = sprite.w, h = sprite.h, divx = sprite.divx, divy = sprite.divy }
 end
 
+function Builder:within(part, build)
+    local outer = self.part
+    self.part = part
+    build()
+    self.part = outer
+end
+
+local function offsets_of(opts, part)
+    local ids = {}
+    for _, id in ipairs(opts.offsets or {}) do
+        table.insert(ids, id)
+    end
+    if opts.offset ~= nil then
+        table.insert(ids, opts.offset)
+    end
+    if part ~= nil then
+        table.insert(ids, part)
+    end
+    return #ids > 0 and ids or nil
+end
+
 function Builder:dst(id, box, opts, parent)
     opts = opts or {}
-    local destination = { id = id }
+    local destination = { id = id, offsets = offsets_of(opts, self.part) }
     for _, field in ipairs(DESTINATION_FIELDS) do
         destination[field] = opts[field]
     end

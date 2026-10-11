@@ -15,6 +15,11 @@ layout.OPTION = {
     GRAPH_OFF = 908,
     LANES_NORMAL = 909,
     LANES_WIDE = 910,
+    DIFFERENCE_TARGET = 911,
+    DIFFERENCE_BEST = 912,
+    DIFFERENCE_OFF = 913,
+    JUDGE_SHOW = 914,
+    JUDGE_HIDE = 915,
 }
 
 layout.OPTION_NAME = {
@@ -23,6 +28,54 @@ layout.OPTION_NAME = {
     DETAIL = "Judge Detail",
     GRAPH = "Score Graph",
     LANES = "Lane Width",
+    DIFFERENCE = "Score Difference",
+    JUDGE = "Judge Display",
+}
+
+layout.JUDGE_POSITION = { name = "Judge Position", id = 100 }
+
+layout.PART = {
+    LANE_BACKGROUND = 101,
+    LANE_DIVIDER = 102,
+    JUDGE_LINE = 103,
+    KEY_BEAM = 104,
+    KEY_DISPLAY = 105,
+    BOMB = 106,
+    NOTE = 107,
+    BAR_LINE = 108,
+    LANE_COVER = 109,
+    GAUGE = 110,
+    PROGRESS_BAR = 111,
+    SONG_HEADER = 112,
+    BGA = 113,
+    SCORE_GRAPH = 114,
+    SCORE = 115,
+    JUDGE_COUNT = 116,
+    TIMING = 117,
+    DISTRIBUTION_GRAPH = 118,
+    SPEED_DISPLAY = 119,
+}
+
+layout.PART_ROWS = {
+    { name = "Lane Background Opacity", id = layout.PART.LANE_BACKGROUND },
+    { name = "Lane Divider Opacity", id = layout.PART.LANE_DIVIDER },
+    { name = "Judge Line Opacity", id = layout.PART.JUDGE_LINE },
+    { name = "Key Beam Opacity", id = layout.PART.KEY_BEAM },
+    { name = "Key Display Opacity", id = layout.PART.KEY_DISPLAY },
+    { name = "Bomb Opacity", id = layout.PART.BOMB },
+    { name = "Note Opacity", id = layout.PART.NOTE },
+    { name = "Bar Line Opacity", id = layout.PART.BAR_LINE },
+    { name = "Lane Cover Opacity", id = layout.PART.LANE_COVER },
+    { name = "Gauge Opacity", id = layout.PART.GAUGE },
+    { name = "Progress Bar Opacity", id = layout.PART.PROGRESS_BAR },
+    { name = "Song Header Opacity", id = layout.PART.SONG_HEADER },
+    { name = "BGA Opacity", id = layout.PART.BGA },
+    { name = "Score Graph Opacity", id = layout.PART.SCORE_GRAPH, single_only = true },
+    { name = "Score Opacity", id = layout.PART.SCORE },
+    { name = "Judge Count Opacity", id = layout.PART.JUDGE_COUNT },
+    { name = "Timing Opacity", id = layout.PART.TIMING },
+    { name = "Distribution Graph Opacity", id = layout.PART.DISTRIBUTION_GRAPH },
+    { name = "Speed Display Opacity", id = layout.PART.SPEED_DISPLAY },
 }
 
 layout.FIELD = { top = 0, height = 840, line = 8, keys_top = 848, keys_height = 64, gauge_top = 928, gauge_height = 24, foot_top = 968 }
@@ -269,6 +322,8 @@ function layout.of(mode, option)
     local view = mode.sides == 1 and single(mode, option, lanes) or double(mode, lanes)
     view.mode = mode
     view.detail = option[layout.OPTION_NAME.DETAIL] or layout.OPTION.DETAIL_FAST_SLOW
+    view.difference = option[layout.OPTION_NAME.DIFFERENCE] or layout.OPTION.DIFFERENCE_TARGET
+    view.judge_shown = option[layout.OPTION_NAME.JUDGE] ~= layout.OPTION.JUDGE_HIDE
     view.lanes = {}
     for _, field in ipairs(view.fields) do
         for _, lane in ipairs(field.lanes) do

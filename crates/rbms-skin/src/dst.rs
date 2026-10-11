@@ -478,19 +478,26 @@ fn apply_offset(rect: &mut SkinRect, offset: &SkinOffset, relative: bool) {
     rect.h += offset.h;
 }
 
-/// The colour every keyframe shares, if they all share one.
-///
-/// The reference caches that case and it is the only fixed-value cache with an observable effect:
-/// it applies the offsets' alpha where the interpolating path drops them
-/// (`SkinObject.java:480-518`).
-fn uniform_color(frames: &[Keyframe]) -> Option<SkinColor> {
-    let first = frames.first()?.color;
-    frames.iter().all(|frame| frame.color == first).then_some(first)
-}
-
 /// Shifts an alpha by an offset's, in 0..=255 units, clamped like the reference's 0..=1 clamp.
+///
+/// Every offset a track names shifts the alpha of every frame of it. The reference shifts it only
+/// while the colour is the same at every keyframe or the instant rests on one, and leaves it out
+/// while a changing colour is between two keyframes (`SkinObject.prepareColor`, which returns
+/// before its offset loop on that path). An object that fades would then flash at its unshifted
+/// alpha between its keyframes, so an offset that takes a part of a screen down to nothing would
+/// not hide whatever of that part fades in or out. Nothing can be authored against that: the
+/// shift is zero until a player sets one. It is applied on every path here.
 fn offset_alpha(alpha: u8, shift: f32) -> u8 {
     (f32::from(alpha) + shift).clamp(0.0, f32::from(u8::MAX)).round() as u8
+}
+
+/// An alpha shifted by each of `shifts` in turn, each in 0..=255 units and each held within the
+/// range as it is added, which is what the offsets a destination names do to its alpha
+/// ([`resolve`]). It is here for an object whose alpha is not its keyframes': one that places
+/// itself is drawn through a colour of its own and takes the offsets its destination names all the
+/// same.
+pub fn shifted_alpha(alpha: u8, shifts: impl IntoIterator<Item = f32>) -> u8 {
+    shifts.into_iter().fold(alpha, offset_alpha)
 }
 
 /// Where a destination is on this frame, or `None` when its timer is off or its animation has not
@@ -553,17 +560,8 @@ pub fn resolve(track: &DestinationTrack, now_us: i64, timers: &TimerState, offse
     });
     let clip = clip.filter(|clip| clip.w > 0.0 && clip.h > 0.0);
 
-    let uniform = uniform_color(&track.frames);
-    let mut color = match uniform {
-        Some(color) => color,
-        None if interpolated => lerp_color(frame.color, track.frames[index + 1].color, rate),
-        None => frame.color,
-    };
-    if uniform.is_some() || rate == 0.0 {
-        for offset in &applied {
-            color.a = offset_alpha(color.a, offset.a);
-        }
-    }
+    let mut color = if interpolated { lerp_color(frame.color, track.frames[index + 1].color, rate) } else { frame.color };
+    color.a = shifted_alpha(color.a, applied.iter().map(|offset| offset.a));
 
     let mut angle_deg = if interpolated { (frame.angle_deg + (track.frames[index + 1].angle_deg - frame.angle_deg) * rate).trunc() } else { frame.angle_deg };
     for offset in &applied {

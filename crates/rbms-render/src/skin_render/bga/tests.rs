@@ -7,9 +7,9 @@
 //! ground is a grey nothing here draws in, so a pixel the object left alone is plain to see.
 
 use rbms_model::{Mode, TimeLine};
-use rbms_skin::dst::{DestinationTrack, Keyframe, SkinColor, SkinRect};
+use rbms_skin::dst::{DestinationTrack, Keyframe, SkinColor, SkinOffset, SkinRect};
 use rbms_skin::loader::StretchKind;
-use rbms_skin::property::DefaultState;
+use rbms_skin::property::{DefaultState, MapHost};
 use rbms_skin::timer::TimerState;
 
 use super::super::draw::draw_object;
@@ -561,4 +561,37 @@ fn a_playhead_over_a_model_reads_each_timelines_picture_and_layer_in_millisecond
     assert_eq!(head.pick(), playing(None, None), "a timeline with no picture installed one");
     head.prepare(1_999);
     assert_eq!(head.pick(), playing(Some(3), Some(4)), "1_999_999 microseconds is 1_999 whole milliseconds");
+}
+
+/// The offset the fading background names, the shift that takes half of its alpha away and the one
+/// that takes all of it.
+const FADE_OFFSET: i32 = 9_001;
+const HALF_SHIFT: f32 = -128.0;
+const WHOLE_SHIFT: f32 = -255.0;
+
+/// A background is drawn at the alpha the offsets its destination names leave it, its picture and
+/// its layer alike, and not at all with none left.
+#[test]
+fn a_background_fades_with_the_offset_its_destination_names() {
+    let mut fading = placed(SIDE, 255, -1);
+    fading.track.offsets.push(FADE_OFFSET);
+    let mut canvas = CpuCanvas::new(SIDE, SIDE);
+    let base = texture(&mut canvas, "base", &flat(SIDE, SIDE, RED), SIDE, SIDE);
+    let bga = || BgaFrame::playing(Some(base), None, BgaExpand::Full);
+    let mut at = |shift: f32| {
+        let mut host = MapHost::new();
+        host.offsets.insert(FADE_OFFSET, SkinOffset { a: shift, ..SkinOffset::default() });
+        let timers = TimerState::new();
+        let frame = SkinFrame { now_us: 0, timers: &timers, state: &host, lua: None, mouse: None, data: FrameData { bga: bga(), ..FrameData::default() } };
+        let viewport = SkinViewport::new((SIDE as f32, SIDE as f32), (SIDE as f32, SIDE as f32));
+        canvas.clear(GROUND);
+        let drawn = with_render_ctx(|ctx| draw_object(ctx, &mut canvas, &fading, &viewport, &frame));
+        (drawn, pixel(&canvas, 150, 150))
+    };
+
+    assert_eq!(at(0.0), (true, RED), "an offset of nothing leaves the picture opaque");
+    let (drawn, half) = at(HALF_SHIFT);
+    assert!(drawn, "the picture is not drawn at half its alpha");
+    assert!((224..=230).contains(&half[0]) && (98..=104).contains(&half[1]), "red at half over the ground came to {half:?}");
+    assert_eq!(at(WHOLE_SHIFT), (false, ground()), "a background with no alpha left is drawn");
 }

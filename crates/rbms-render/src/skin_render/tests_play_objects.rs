@@ -1230,4 +1230,144 @@ mod pop_ups_and_covers {
         assert_eq!(document.draw(&host, &timers, both, JUDGED_AT_MS + 501), 2, "and both are gone once their timers have played out");
         assert_eq!(document.draw(&covering(0.0, None), &timers, both, JUDGED_AT_MS + 501), 0, "as are the covers with no lift and no hidden modifier");
     }
+
+    /// How the play screen's own objects take the alpha a player's offset leaves them: the gauge, a
+    /// cover, and the judgement pop-up with its word and its count.
+    mod opacity {
+        use rbms_skin::property::generated::FLOAT_GROOVEGAUGE_1P;
+
+        use super::super::{TEST_GAUGE, distinct_gauge, part_column, playing};
+        use super::*;
+
+        /// The offset every object of these tests names.
+        const PART: i32 = 9_001;
+
+        /// The shift that takes half of an opaque object's alpha away, the alpha that leaves, and
+        /// the shift that takes all of it.
+        const HALF_SHIFT: f32 = -128.0;
+        const HALF_ALPHA: u8 = 127;
+        const WHOLE_SHIFT: f32 = -255.0;
+
+        /// `object` with its own destination naming the offset.
+        fn part(mut object: SkinObject) -> SkinObject {
+            object.track.offsets.push(PART);
+            object
+        }
+
+        /// `host` answering the offset with an alpha shift of `shift`.
+        fn shifted(mut host: MapHost, shift: f32) -> MapHost {
+            host.offsets.insert(PART, SkinOffset { a: shift, ..SkinOffset::default() });
+            host
+        }
+
+        /// What the canvas shows where `ink` is drawn over black at `alpha`.
+        fn over_black(ink: Color, alpha: u8) -> Color {
+            let dim = |channel: u8| ((u32::from(channel) * u32::from(alpha)) / u32::from(u8::MAX)) as u8;
+            Color { r: dim(ink.r), g: dim(ink.g), b: dim(ink.b), a: u8::MAX }
+        }
+
+        #[test]
+        fn a_gauge_fades_with_the_offset_its_destination_names() {
+            let rect = SkinRect::new(100.0, 100.0, 500.0, 20.0);
+            let mut canvas = CpuCanvas::new(CANVAS.0, CANVAS.1);
+            let bar = part(object(rect, Body::Gauge(distinct_gauge(&mut canvas))));
+            let mut host = MapHost::new();
+            host.floats.insert(FLOAT_GROOVEGAUGE_1P, TEST_GAUGE);
+            let row = (CANVAS.1 as f32 - (rect.y + rect.h / 2.0)) as u32;
+            let columns = [part_column(rect, 1), part_column(rect, 20), part_column(rect, 50)];
+
+            canvas.clear(Color::BLACK);
+            assert!(show_still(&mut canvas, &bar, &shifted(host.clone(), 0.0), playing(0)), "the gauge drew nothing at all");
+            let opaque = columns.map(|column| canvas.pixel_at(column, row));
+            assert!(opaque.iter().all(|pixel| *pixel != Color::BLACK), "a part of the gauge is not on the canvas: {opaque:?}");
+
+            canvas.clear(Color::BLACK);
+            assert!(show_still(&mut canvas, &bar, &shifted(host.clone(), HALF_SHIFT), playing(0)));
+            assert_eq!(columns.map(|column| canvas.pixel_at(column, row)), opaque.map(|pixel| over_black(pixel, HALF_ALPHA)), "every part is at half");
+
+            canvas.clear(Color::BLACK);
+            assert!(!show_still(&mut canvas, &bar, &shifted(host, WHOLE_SHIFT), playing(0)), "a gauge with no alpha left is drawn");
+            assert_eq!(columns.map(|column| canvas.pixel_at(column, row)), [Color::BLACK; 3]);
+        }
+
+        #[test]
+        fn a_cover_fades_with_the_offset_its_destination_names() {
+            let mut canvas = CpuCanvas::new(CANVAS.0, CANVAS.1);
+            let color = shade(210);
+            let on_screen = SkinRect::new(200.0, 100.0, 300.0, 200.0);
+            let cover = part(cover_over(on_screen, Body::LiftCover(cover_body(&mut canvas, color, -1.0, false))));
+            let row = row_above(150.0);
+
+            canvas.clear(Color::BLACK);
+            assert!(show_still(&mut canvas, &cover, &shifted(covering(0.0, None), 0.0), FrameData::default()));
+            assert_eq!(canvas.pixel_at(COVER_COLUMN, row), color);
+
+            canvas.clear(Color::BLACK);
+            assert!(show_still(&mut canvas, &cover, &shifted(covering(0.0, None), HALF_SHIFT), FrameData::default()));
+            assert_eq!(canvas.pixel_at(COVER_COLUMN, row), over_black(color, HALF_ALPHA));
+
+            canvas.clear(Color::BLACK);
+            assert!(!show_still(&mut canvas, &cover, &shifted(covering(0.0, None), WHOLE_SHIFT), FrameData::default()));
+            assert_eq!(rows_of(&canvas, COVER_COLUMN, color), None);
+        }
+
+        /// The pop-up's own destination places nothing, but the alpha it comes to fades the word and
+        /// the count together, so one offset named by the pop-up takes both down.
+        #[test]
+        fn a_pop_up_fades_its_word_and_its_count_with_the_offset_its_own_destination_names() {
+            const JUDGEMENT: usize = 1;
+            const COMBO: i32 = 7;
+            let mut canvas = CpuCanvas::new(CANVAS.0, CANVAS.1);
+            let pop_up = part(popped(pop_up(&mut canvas, 6, 1, false)));
+            let word_at = (WORD_RECT.x as u32 + 1, POP_UP_ROW);
+            let digit = shade(digit_shade(COMBO as u8));
+            let seen = |canvas: &CpuCanvas, color: Color| columns_of(canvas, POP_UP_ROW, color).map(|(left, _)| left);
+
+            canvas.clear(Color::BLACK);
+            assert!(show_still(&mut canvas, &pop_up, &shifted(MapHost::new(), 0.0), judged(JUDGEMENT, COMBO)));
+            assert_eq!(canvas.pixel_at(word_at.0, word_at.1), word_shade(JUDGEMENT));
+            let count_column = seen(&canvas, digit).expect("the count is on the canvas");
+
+            canvas.clear(Color::BLACK);
+            assert!(show_still(&mut canvas, &pop_up, &shifted(MapHost::new(), HALF_SHIFT), judged(JUDGEMENT, COMBO)));
+            assert_eq!(canvas.pixel_at(word_at.0, word_at.1), over_black(word_shade(JUDGEMENT), HALF_ALPHA), "the word is at half");
+            assert_eq!(canvas.pixel_at(count_column, POP_UP_ROW), over_black(digit, HALF_ALPHA), "and so is the count, where it was");
+
+            canvas.clear(Color::BLACK);
+            assert!(!show_still(&mut canvas, &pop_up, &shifted(MapHost::new(), WHOLE_SHIFT), judged(JUDGEMENT, COMBO)), "a pop-up with no alpha left is drawn");
+            assert_eq!((word_on_show(&canvas), seen(&canvas, digit)), (None, None));
+        }
+
+        /// An offset named by the word's own destination fades the word and leaves the count, and
+        /// one named by the count's leaves the word: each part answers for its own destination.
+        #[test]
+        fn a_part_of_a_pop_up_fades_with_the_offset_its_own_destination_names() {
+            const JUDGEMENT: usize = 0;
+            const COMBO: i32 = 3;
+            let digit = shade(digit_shade(COMBO as u8));
+            let mut canvas = CpuCanvas::new(CANVAS.0, CANVAS.1);
+            let mut body = pop_up(&mut canvas, 6, 1, false);
+            body.words[JUDGEMENT].as_mut().expect("the word is there").track.offsets.push(PART);
+            let word_faded = popped(body);
+            let mut body = pop_up(&mut canvas, 6, 1, false);
+            body.counts[JUDGEMENT].as_mut().expect("the count is there").part.track.offsets.push(PART);
+            let count_faded = popped(body);
+            let word_at = (WORD_RECT.x as u32 + 1, POP_UP_ROW);
+
+            canvas.clear(Color::BLACK);
+            assert!(show_still(&mut canvas, &word_faded, &shifted(MapHost::new(), HALF_SHIFT), judged(JUDGEMENT, COMBO)));
+            assert_eq!(canvas.pixel_at(word_at.0, word_at.1), over_black(word_shade(JUDGEMENT), HALF_ALPHA));
+            assert!(columns_of(&canvas, POP_UP_ROW, digit).is_some(), "the count went with the word");
+
+            canvas.clear(Color::BLACK);
+            assert!(show_still(&mut canvas, &word_faded, &shifted(MapHost::new(), WHOLE_SHIFT), judged(JUDGEMENT, COMBO)), "the count is still drawn");
+            assert_eq!(word_on_show(&canvas), None, "a word with no alpha left is drawn");
+            assert!(columns_of(&canvas, POP_UP_ROW, digit).is_some());
+
+            canvas.clear(Color::BLACK);
+            assert!(show_still(&mut canvas, &count_faded, &shifted(MapHost::new(), WHOLE_SHIFT), judged(JUDGEMENT, COMBO)), "the word is still drawn");
+            assert_eq!(word_on_show(&canvas), Some(word_shade(JUDGEMENT)));
+            assert_eq!(columns_of(&canvas, POP_UP_ROW, digit), None, "a count with no alpha left is drawn");
+        }
+    }
 }

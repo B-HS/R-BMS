@@ -1016,3 +1016,121 @@ fn a_published_play_skin_is_moved_and_shrunk_whole_by_the_offset_set_on_the_skin
     };
     assert!(at_rest != moved, "the whole-screen offset left the pack's play screen where it was");
 }
+
+/// An app whose skin pack is the fading play document of the skin menu's fixtures: a seven-key play
+/// skin made of flat parts, each of which names an offset of its own.
+fn fading_play_app(tag: &str) -> crate::App {
+    rbms_render::font::use_embedded_fonts_only();
+    let home = std::env::temp_dir().join(format!("rbms-skin-screen-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    let document = crate::skin_select::fixtures::write_fading_play(&home.join("pack"));
+    let mut config = crate::Config::default();
+    config.skin.pack = document.parent().map(|pack| pack.to_string_lossy().into_owned());
+    let mut app = crate::App::new(String::new(), config, crate::LaunchOptions::default(), home.join("settings.ron"));
+    let settings = app.shared.settings_path.clone();
+    app.shared.skins.rescan(&settings, &app.shared.config);
+    app.shared.config.skin.screen = SKIN_TYPE_PLAY_7KEYS;
+    app
+}
+
+/// Presses the skin menu's row called `label` of the seven-key play skin of `app`, `presses` times
+/// to the right when positive and to the left when not.
+fn step_play_row(app: &mut crate::App, label: &str, presses: i32) {
+    let rows = app.shared.skins.rows(&app.shared.config);
+    let row = rows
+        .iter()
+        .copied()
+        .find(|row| app.shared.skins.line(&app.shared.config, *row).0 == label)
+        .unwrap_or_else(|| panic!("the skin menu has no row called {label}"));
+    for _ in 0..presses.abs() {
+        assert!(app.shared.skins.step(&mut app.shared.config, row, presses.signum()), "{label} did not move");
+    }
+}
+
+/// The screen pixel in the middle of a part of the fading play document, which is authored at the
+/// size it is drawn at: a document measures up from its foot and a screen down from its top.
+fn middle_of(part: crate::skin_select::fixtures::PartRect) -> (u32, u32) {
+    let (x, y, w, h) = part;
+    ((x + w / 2) as u32, (UI_SIZE.1 as i32 - (y + h / 2)) as u32)
+}
+
+/// The colour a part of the fading play document is tinted, opaque.
+fn tint_of(color: (u8, u8, u8)) -> crate::Color {
+    crate::Color::rgb(color.0, color.1, color.2)
+}
+
+/// What a part tinted `color` comes to over black at `alpha`, by the canvas's own arithmetic.
+fn over_black(color: (u8, u8, u8), alpha: u32) -> crate::Color {
+    let dim = |channel: u8| (u32::from(channel) * alpha / u32::from(u8::MAX)) as u8;
+    crate::Color::rgb(dim(color.0), dim(color.1), dim(color.2))
+}
+
+/// An opacity and a nudge set on the skin menu's rows are what the very next frame of the play
+/// screen is drawn with, and the document is not read again for either: a frame reads the offsets
+/// where they are stored. An opacity fades the part that names it and no other, down to nothing.
+///
+/// A nudge of the judgement offset every play skin has moves what names it up the screen when it is
+/// positive and down when it is negative, and to the right when it is positive across: the document
+/// measures up from its foot, and the offset is added in the document's own direction.
+#[test]
+fn an_opacity_and_a_nudge_set_on_the_skin_tab_are_drawn_with_on_the_next_frame() {
+    use crate::skin_select::fixtures::{FADING_GROUND, FADING_GROUND_ROW, FADING_JUDGE_PART, FADING_PANEL, FADING_PANEL_ROW};
+    const HALF_ALPHA: u32 = 127;
+    const HALF_STEPS: i32 = 10;
+    const RAISED: i32 = 30;
+    const ACROSS: i32 = 100;
+    let black = crate::Color::rgb(0, 0, 0);
+    let screen = SKIN_TYPE_PLAY_7KEYS;
+    let mut app = fading_play_app("fading-play");
+    let shown = unplayed_run();
+    let mut pixels = crate::stage::HeadlessCanvas::new(UI_SIZE.0, UI_SIZE.1);
+    let began = Instant::now();
+    while !play_frame(&mut app, &mut pixels, &shown) {
+        assert!(began.elapsed() < DECODE_WAIT, "the play skin never drew: {:?}", app.shared.skin_failure(screen));
+        std::thread::sleep(DECODE_FRAME_PAUSE);
+    }
+    let build = app.shared.skins.build_of(screen);
+    let ground_at = (70, middle_of(FADING_GROUND.0).1);
+    let panel_at = (500, 620);
+    let judge_at = middle_of(FADING_JUDGE_PART.0);
+    assert_eq!(pixels.pixel_at(ground_at.0, ground_at.1), tint_of(FADING_GROUND.1), "the ground is not where the skin put it");
+    assert_eq!(pixels.pixel_at(panel_at.0, panel_at.1), tint_of(FADING_PANEL.1));
+    assert_eq!(pixels.pixel_at(judge_at.0, judge_at.1), tint_of(FADING_JUDGE_PART.1));
+
+    step_play_row(&mut app, FADING_GROUND_ROW, -HALF_STEPS);
+    assert!(play_frame(&mut app, &mut pixels, &shown), "the frame after an opacity moved was not drawn");
+    assert_eq!(pixels.pixel_at(ground_at.0, ground_at.1), over_black(FADING_GROUND.1, HALF_ALPHA), "the ground is not at half on the next frame");
+    assert_eq!(pixels.pixel_at(panel_at.0, panel_at.1), tint_of(FADING_PANEL.1), "an opacity faded a part that does not name it");
+    assert_eq!(app.shared.skins.build_of(screen), build, "an opacity had the document read again");
+
+    step_play_row(&mut app, FADING_GROUND_ROW, -HALF_STEPS);
+    assert!(play_frame(&mut app, &mut pixels, &shown));
+    assert_eq!(pixels.pixel_at(ground_at.0, ground_at.1), black, "a ground with none of its opacity left is drawn");
+    step_play_row(&mut app, FADING_PANEL_ROW, -2 * HALF_STEPS);
+    assert!(play_frame(&mut app, &mut pixels, &shown));
+    assert_eq!(pixels.pixel_at(panel_at.0, panel_at.1), black, "a panel with none of its opacity left is drawn");
+    assert_eq!(pixels.pixel_at(judge_at.0, judge_at.1), tint_of(FADING_JUDGE_PART.1), "what stands on the panel went with it");
+
+    step_play_row(&mut app, "JUDGE OFFSET Y", RAISED);
+    assert!(play_frame(&mut app, &mut pixels, &shown));
+    assert_eq!(
+        pixels.pixel_at(judge_at.0, judge_at.1 - RAISED as u32),
+        tint_of(FADING_JUDGE_PART.1),
+        "a positive Y did not raise what names the judgement offset"
+    );
+    assert_eq!(pixels.pixel_at(judge_at.0, judge_at.1 + FADING_JUDGE_PART.0.3 as u32 / 2 - 1), black, "it was also left where it had been");
+
+    step_play_row(&mut app, "JUDGE OFFSET Y", -2 * RAISED);
+    assert!(play_frame(&mut app, &mut pixels, &shown));
+    assert_eq!(pixels.pixel_at(judge_at.0, judge_at.1 + RAISED as u32), tint_of(FADING_JUDGE_PART.1), "a negative Y did not lower it");
+    assert_eq!(pixels.pixel_at(judge_at.0, judge_at.1 - RAISED as u32), black);
+
+    step_play_row(&mut app, "JUDGE OFFSET X", ACROSS);
+    assert!(play_frame(&mut app, &mut pixels, &shown));
+    assert_eq!(
+        pixels.pixel_at(judge_at.0 + ACROSS as u32, judge_at.1 + RAISED as u32),
+        tint_of(FADING_JUDGE_PART.1),
+        "a positive X did not move it to the right"
+    );
+    assert_eq!(app.shared.skins.build_of(screen), build, "a nudge had the document read again");
+}

@@ -55,13 +55,10 @@ theme.judge = {
     poor = { 242, 82, 0 },
 }
 
-theme.judge_flash = {
-    blue = { 107, 166, 245 },
-    pink = { 244, 125, 167 },
-    mint = { 187, 245, 208 },
+theme.judge_word = {
+    pgreat = { 132, 206, 255 },
+    great = { 255, 214, 51 },
 }
-
-theme.judge_cycle = { flash = 120, blink = 80 }
 
 theme.timing = {
     fast = { 3, 169, 255 },

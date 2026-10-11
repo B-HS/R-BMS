@@ -331,7 +331,8 @@ fn the_rows_the_counter_the_hint_and_the_status_fit_where_they_are_written() {
     assert!(INFO_LOADED_Y + INFO_LOADED_LINES as f32 * INFO_LINE_PITCH <= INFO_ROW_Y, "what loaded runs into the row under it");
     let hint = text_width(HINT, HINT_SCALE);
     assert!(hint <= CW as f32 - MARGIN * 2.0, "the line of keys is {hint} wide");
-    for help in [PROPERTY_HELP, FILE_HELP, OFFSET_PLACE_HELP, OFFSET_ANGLE_HELP, OFFSET_ALPHA_HELP, PICKER_NOTE] {
+    let said = [PROPERTY_HELP, FILE_HELP, OFFSET_PLACE_HELP, OFFSET_ANGLE_HELP, OFFSET_ALPHA_HELP, OPACITY_HELP, AUTOMATIC_PLACE_HELP, AUTOMATIC_ALPHA_HELP];
+    for help in said.into_iter().chain([PICKER_NOTE]) {
         assert!(text_width(help, INFO_SCALE) <= INFO_RECT.w - INFO_PAD * 2.0, "{help}");
     }
     for id in FIXED_ROWS {
@@ -459,7 +460,7 @@ fn a_reason_that_comes_with_a_traceback_is_written_on_the_lines_it_is_given() {
 #[test]
 fn what_is_said_of_an_offset_row_goes_with_its_axis() {
     rbms_render::font::use_embedded_fonts_only();
-    let help = |axis| row_help(SettingRow::Skin(SkinRow::Offset(0, axis)));
+    let help = |axis| skin_row_help(SkinRowKind::Offset(axis));
     for axis in [OffsetAxis::R, OffsetAxis::A] {
         assert!(!help(axis).to_ascii_lowercase().contains("pixel"), "{axis:?} is said to be in pixels: {}", help(axis));
     }
@@ -471,6 +472,9 @@ fn what_is_said_of_an_offset_row_goes_with_its_axis() {
     for axis in OffsetAxis::ALL {
         assert_eq!(fit_text(help(axis), INFO_SCALE, INFO_RECT.w - INFO_PAD * 2.0), help(axis), "what is said of {axis:?} is cut short");
     }
+    let opacity = skin_row_help(SkinRowKind::Opacity);
+    assert!(opacity.contains("0%") && opacity.contains("100%") && !opacity.contains("255"), "an opacity is not said in percent: {opacity}");
+    assert_eq!(fit_text(opacity, INFO_SCALE, INFO_RECT.w - INFO_PAD * 2.0), opacity, "what is said of an opacity is cut short");
 }
 
 /// The first wait for a document is said in the preview's place. A scene that ends and begins again
@@ -1244,6 +1248,10 @@ const CAPTURED_SCREENS: [(i32, &str, f32); 9] = [
     (SKIN_TYPE_COURSE_RESULT, "course", RESULT_SECONDS),
 ];
 
+/// What the list calls the row that moves a whole play screen across, which every play skin has
+/// after whatever offsets it declares itself.
+const WHOLE_OFFSET_X_ROW: &str = "ALL OFFSET(%) X";
+
 /// How far a capture moves a scene on at a time without drawing it, in seconds: short enough that a
 /// sample run is handed its chart a note at a time.
 const CAPTURE_STEP_SECONDS: f32 = 0.05;
@@ -1294,7 +1302,8 @@ fn the_menu_over_the_shipped_pack_can_be_captured() {
     menu.capture_at("skin-menu-shipped-7k-option-after", WHERE_IT_STANDS);
     menu.key(KeyCode::ArrowLeft);
 
-    let whole = SettingRow::Skin(SkinRow::Offset(0, OffsetAxis::X));
+    let whole_at = menu.labels().iter().position(|label| label == WHOLE_OFFSET_X_ROW).expect("a play skin has the offset of the whole screen");
+    let whole = menu.state.rows[whole_at];
     menu.focus(whole);
     menu.key(KeyCode::ShiftLeft);
     menu.key(KeyCode::ArrowRight);
@@ -1397,3 +1406,5 @@ fn the_menu_over_the_pack_the_environment_names_can_be_captured() {
     large.choose(SKIN_TYPE_MUSIC_SELECT);
     large.capture_at("skin-menu-pack-select", LIST_SECONDS);
 }
+
+mod opacity;

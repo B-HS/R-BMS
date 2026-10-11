@@ -21,6 +21,7 @@ OPAQUE = 255
 WHITE = (255, 255, 255)
 DIGITS = '0123456789'
 DIGIT_COUNT = 10
+COUNTER_COLUMNS = DIGIT_COUNT + 1
 DIGIT_SIDE_RATIO = 0.04
 MIN_DIGIT_SIDE = 1
 SIGNED_COLUMNS = 12
@@ -38,6 +39,7 @@ class Sprite:
     divx: int = 1
     divy: int = 1
     meta: dict[str, int | list[int]] = field(default_factory=dict)
+    margin: int = 0
 
 
 @cache
@@ -58,6 +60,13 @@ def tinted(mask: Image.Image, color: tuple[int, int, int] = WHITE) -> Image.Imag
     image = Image.new('RGBA', mask.size, (*color, 0))
     image.putalpha(mask)
     return image
+
+
+def guarded(sprite: Sprite, margin: int) -> Sprite:
+    width, height = sprite.image.size
+    image = Image.new('RGBA', (width + margin * 2, height + margin * 2), (*WHITE, 0))
+    image.paste(sprite.image, (margin, margin))
+    return Sprite(sprite.name, image, sprite.divx, sprite.divy, sprite.meta, margin)
 
 
 def glyph_rows(size: int, glyphs: str) -> tuple[int, int]:
@@ -107,19 +116,6 @@ def signed_digit_strip(name: str, size: int) -> Sprite:
     return Sprite(name, tinted(mask), SIGNED_COLUMNS, SIGNED_ROWS, digit_meta(size))
 
 
-def stacked(frames: list[Image.Image]) -> Image.Image:
-    width, height = frames[0].size
-    image = Image.new('RGBA', (width, height * len(frames)), (*WHITE, 0))
-    for row, frame in enumerate(frames):
-        image.paste(frame, (0, row * height))
-    return image
-
-
-def shades_of(mask: Image.Image, colors: tuple[Rgb | None, ...]) -> Image.Image:
-    blank = Image.new('RGBA', mask.size, (*WHITE, 0))
-    return stacked([blank if color is None else tinted(mask, color) for color in colors])
-
-
 def digit_mask(size: int) -> Image.Image:
     width, height, baseline = digit_cell(size, DIGITS)
     mask = Image.new('L', (width * DIGIT_COUNT, height), 0)
@@ -133,8 +129,14 @@ def digit_strip(name: str, size: int) -> Sprite:
     return Sprite(name, tinted(digit_mask(size)), DIGIT_COUNT, 1, digit_meta(size))
 
 
-def digit_frames(name: str, size: int, colors: tuple[Rgb | None, ...]) -> Sprite:
-    return Sprite(name, shades_of(digit_mask(size), colors), DIGIT_COUNT, len(colors), digit_meta(size))
+def counter_strip(name: str, size: int, color: Rgb, ghost_alpha: int) -> Sprite:
+    width, height, _ = digit_cell(size, DIGITS)
+    digits = digit_mask(size)
+    ghost = digits.crop((0, 0, width, height)).point(lambda level: level * ghost_alpha // OPAQUE)
+    mask = Image.new('L', (width * COUNTER_COLUMNS, height), 0)
+    mask.paste(digits, (0, 0))
+    mask.paste(ghost, (width * DIGIT_COUNT, 0))
+    return Sprite(name, tinted(mask, color), COUNTER_COLUMNS, 1, digit_meta(size))
 
 
 def word_mask(text: str, size: int) -> Image.Image:
@@ -148,10 +150,6 @@ def word_mask(text: str, size: int) -> Image.Image:
 
 def word(name: str, text: str, size: int, color: tuple[int, int, int] = WHITE) -> Sprite:
     return Sprite(name, tinted(word_mask(text, size), color), 1, 1, {'size': size, 'pad': GLYPH_PAD})
-
-
-def word_frames(name: str, text: str, size: int, colors: tuple[Rgb | None, ...]) -> Sprite:
-    return Sprite(name, shades_of(word_mask(text, size), colors), 1, len(colors), {'size': size, 'pad': GLYPH_PAD})
 
 
 def block(name: str, width: int, height: int, color: tuple[int, int, int] = WHITE) -> Sprite:

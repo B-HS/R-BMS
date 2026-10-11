@@ -36,7 +36,7 @@ use super::text::Fonts;
 use super::textures::Source;
 use super::{SkinAssets, SkinFrame};
 use crate::ctx::RenderCtx;
-use crate::{BlendMode, Renderer};
+use crate::{BlendMode, Color, Renderer};
 
 /// How many words and counts one pop-up keeps: one for each of the six judgements, and a seventh
 /// for a perfect great on a full gauge (`SkinJudge`'s two arrays). A document that lists more has
@@ -414,15 +414,27 @@ pub(crate) fn prepare_judge(body: &JudgeBody, frame: &SkinFrame<'_>) -> bool {
 }
 
 /// The same placement over one of the pop-up's own parts, tinted and turned the way that part's
-/// destination asked.
+/// destination asked, at the share of its opacity the pop-up's own destination leaves it
+/// ([`part_alpha`]).
 fn part_placement<'a>(part: &'a SkinObject, resolved: &Resolved, place: &Placement<'a>) -> Placement<'a> {
+    let tint: Color = resolved.color.into();
     Placement {
         object: part,
         blend: BlendMode::from_skin_blend(part.track.blend),
-        tint: resolved.color.into(),
+        tint: Color { a: part_alpha(tint.a, place.tint.a), ..tint },
         angle_deg: resolved.angle_deg,
         viewport: place.viewport,
     }
+}
+
+/// The alpha a part of the pop-up is drawn at: its own, scaled by the pop-up's.
+///
+/// The pop-up's own destination places and tints nothing in the reference, so an alpha offset it
+/// names does nothing there. Here its alpha fades the word and the count together, as it would
+/// fade any other object, so a skin can declare one offset for the whole pop-up. A destination
+/// with no offset is opaque and leaves each part at its own alpha.
+fn part_alpha(own: u8, whole: u8) -> u8 {
+    ((u16::from(own) * u16::from(whole)) / u16::from(u8::MAX)) as u8
 }
 
 /// A length measured in screen pixels as the document length that lands on it.

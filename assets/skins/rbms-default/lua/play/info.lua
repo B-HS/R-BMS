@@ -2,6 +2,7 @@ local theme = require("lua.theme")
 local props = require("lua.props")
 local ui = require("lua.ui")
 local parts = require("lua.parts")
+local layout = require("lua.play.layout")
 
 local info = {}
 
@@ -315,7 +316,10 @@ local function timing(s, view, main_state)
     local strip = { x = box.x, top = box.top + TIMING.strip_top, w = box.w, h = TIMING.strip_height }
     parts.panel(s, strip)
     s:object("hiterrorvisualizer", ui.merge(HIT_ERROR, { width = box.w }), strip)
+end
 
+local function distribution(s, view)
+    local box = view.timing
     local legend = view.mode.scratch and parts.judge_graph_legend.beat or parts.judge_graph_legend.popn
     parts.legend(s, box.x + box.w, box.top + TIMING.legend_top, legend)
     local graph = { x = box.x, top = box.top + TIMING.graph_top, w = box.w, h = box.h - TIMING.graph_top }
@@ -430,15 +434,24 @@ local function pace(s, view, main_state)
 end
 
 function info.build(s, view, main_state)
-    head(s, view, main_state)
-    bga(s, view)
-    score(s, view, main_state)
-    counts(s, view, main_state)
-    timing(s, view, main_state)
-    gauge(s, view)
-    foot(s, view, main_state)
-    progress(s, view)
-    pace(s, view, main_state)
+    local sections = {
+        { layout.PART.SONG_HEADER, head },
+        { layout.PART.BGA, bga },
+        { layout.PART.SCORE, score },
+        { layout.PART.JUDGE_COUNT, counts },
+        { layout.PART.TIMING, timing },
+        { layout.PART.DISTRIBUTION_GRAPH, distribution },
+        { layout.PART.GAUGE, gauge },
+        { layout.PART.SPEED_DISPLAY, foot },
+        { layout.PART.PROGRESS_BAR, progress },
+        { layout.PART.SCORE_GRAPH, pace },
+    }
+    for _, section in ipairs(sections) do
+        local part, build = table.unpack(section)
+        s:within(part, function()
+            build(s, view, main_state)
+        end)
+    end
 end
 
 return info

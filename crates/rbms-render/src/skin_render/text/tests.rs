@@ -352,3 +352,47 @@ fn a_text_whose_font_did_not_load_keeps_its_stand_in() {
     assert!(drawn.pixels() == expected.pixels(), "pixel for pixel, with no shadow");
     assert_eq!(drawn.live_texture_count(), 0, "drawn as fills, with no texture of its own");
 }
+
+/// The offset the fading line names, the shift that takes half of its alpha away and the one that
+/// takes all of it.
+const FADE_OFFSET: i32 = 9_001;
+const HALF_SHIFT: f32 = -128.0;
+const WHOLE_SHIFT: f32 = -255.0;
+
+/// How bright the brightest pixel of white ink is over the backdrop at half its alpha, give or
+/// take the rounding of one blend.
+const HALF_INK: std::ops::RangeInclusive<u8> = 174..=180;
+
+/// A line of text is drawn at the alpha the offsets its destination names leave it: opaque with
+/// none set, the backdrop showing through by half at half, and not at all with none left.
+#[test]
+fn a_line_fades_with_the_offset_its_destination_names() {
+    let (mut text, families) = engine();
+    let mut object = constant("FADE", &families, ROOMY, |_| {});
+    object.track.offsets.push(FADE_OFFSET);
+    let mut at = |shift: f32| {
+        let mut host = MapHost::new();
+        host.offsets.insert(FADE_OFFSET, rbms_skin::dst::SkinOffset { a: shift, ..Default::default() });
+        let mut canvas = stage();
+        let drawn = paint(&mut text, &mut canvas, &object, &host);
+        let brightest = (0..STAGE.1).flat_map(|y| (0..STAGE.0).map(move |x| (x, y))).map(|(x, y)| canvas.pixel_at(x, y).r).max().unwrap_or_default();
+        (drawn, ink(&canvas), brightest)
+    };
+
+    let (drawn, opaque, brightest) = at(0.0);
+    assert!(drawn && opaque.is_some(), "the line is not drawn with the offset at nothing");
+    assert_eq!(brightest, u8::MAX, "white ink is opaque where a glyph is solid");
+
+    let (drawn, half, brightest) = at(HALF_SHIFT);
+    assert!(drawn, "the line is not drawn at half its alpha");
+    assert!(HALF_INK.contains(&brightest), "at half its alpha the brightest ink came to {brightest}");
+    let (opaque, half) = (opaque.expect("the line has ink"), half.expect("the faded line has ink"));
+    assert!(
+        (half.0 - opaque.0).abs() <= PIXEL && (half.2 - opaque.2).abs() <= PIXEL,
+        "the faded line is where the opaque one was: {half:?} against {opaque:?}"
+    );
+
+    let (drawn, gone, _) = at(WHOLE_SHIFT);
+    assert!(!drawn, "a line with no alpha left is drawn");
+    assert_eq!(gone, None, "and something of it reached the canvas");
+}

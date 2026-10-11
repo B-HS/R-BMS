@@ -732,3 +732,104 @@ fn the_duration_and_the_fixed_speed_follow_the_reference_expressions() {
     assert_eq!(playing(&timelines, 1_000).current_duration_ms(), 500);
     assert_eq!(LaneNotes::new(&timelines[1..], 0, 90.0).tempo(), (90.0, 1.0), "before the first timeline the chart's opening tempo is in force");
 }
+
+/// The shift that takes half of the field's alpha away, the alpha that leaves, and the shift that
+/// takes all of it.
+const HALF_SHIFT: f32 = -128.0;
+const HALF_ALPHA: u8 = 127;
+const WHOLE_SHIFT: f32 = -255.0;
+
+/// What the canvas shows where `ink` is drawn over black at `alpha`.
+fn over_black(ink: Color, alpha: u8) -> Color {
+    let dim = |channel: u8| ((u32::from(channel) * u32::from(alpha)) / u32::from(u8::MAX)) as u8;
+    Color { r: dim(ink.r), g: dim(ink.g), b: dim(ink.b), a: u8::MAX }
+}
+
+/// A host whose one offset shifts the alpha of whatever names it.
+fn fading(shift: f32) -> Host {
+    Host { nudge: Some(SkinOffset { a: shift, ..SkinOffset::default() }) }
+}
+
+/// The alpha of an offset the note object's destination names fades every note of the field: a
+/// plain note, a mine, and each part of a long note. With all of it taken away no note is drawn.
+#[test]
+fn the_note_objects_alpha_offset_fades_every_kind_of_note() {
+    let timelines = chart(vec![both_at_half()]);
+    let size = (CANVAS.0 as f32, CANVAS.1 as f32);
+    let mut canvas = CpuCanvas::new(CANVAS.0, CANVAS.1);
+    let object = note_object(field(&mut canvas));
+    let notes = playing(&timelines, 500);
+    let row = 205;
+
+    assert!(draw_with(&mut canvas, &object, &notes, &fading(0.0), size));
+    assert_eq!((pixel(&canvas, middle(0), row), pixel(&canvas, middle(1), row)), (shade(NOTE_RED), shade(MINE_RED)), "an offset of nothing leaves them opaque");
+
+    assert!(draw_with(&mut canvas, &object, &notes, &fading(HALF_SHIFT), size));
+    assert_eq!(pixel(&canvas, middle(0), row), over_black(shade(NOTE_RED), HALF_ALPHA), "the note is at half");
+    assert_eq!(pixel(&canvas, middle(1), row), over_black(shade(MINE_RED), HALF_ALPHA), "and so is the mine");
+
+    assert!(!draw_with(&mut canvas, &object, &notes, &fading(WHOLE_SHIFT), size), "a field with no alpha left drew a note");
+    assert_eq!((span(&canvas, middle(0), shade(NOTE_RED)), span(&canvas, middle(1), shade(MINE_RED))), (None, None));
+}
+
+/// A timeline half a measure in with a plain note in lane zero and a mine in lane one.
+fn both_at_half() -> TimeLine {
+    with(with(at(1_000, 0.5), 0, NoteKind::Normal), 1, NoteKind::Mine { damage: 1.0 })
+}
+
+/// A long note is faded part by part with the rest of the field.
+#[test]
+fn the_note_objects_alpha_offset_fades_a_long_note() {
+    let timelines = long_chart(LnKind::Ln, 2_000, 1.0);
+    let size = (CANVAS.0 as f32, CANVAS.1 as f32);
+    let mut canvas = CpuCanvas::new(CANVAS.0, CANVAS.1);
+    let object = note_object(field(&mut canvas));
+    let notes = playing(&timelines, 500);
+    let lit = |canvas: &CpuCanvas| (0..CANVAS.1).map(|up| u32::from(pixel(canvas, middle(0), up).r)).sum::<u32>();
+
+    assert!(draw_with(&mut canvas, &object, &notes, &fading(0.0), size));
+    let opaque = lit(&canvas);
+    assert!(opaque > 0, "the long note is not on the canvas");
+
+    assert!(draw_with(&mut canvas, &object, &notes, &fading(HALF_SHIFT), size));
+    let half = lit(&canvas);
+    assert!(half * 2 <= opaque && half * 2 + opaque / 20 >= opaque, "at half the alpha a long note is half as bright: {half} of {opaque}");
+
+    assert!(!draw_with(&mut canvas, &object, &notes, &fading(WHOLE_SHIFT), size));
+    assert_eq!(lit(&canvas), 0);
+}
+
+/// A measure line is an image with a destination of its own: the note object's alpha does not fade
+/// it, and an offset its own destination names does, whatever the notes are at.
+#[test]
+fn a_measure_line_fades_with_its_own_destination_and_not_with_the_notes() {
+    let mut second = note_at(1_000, 0.5, 0);
+    second.section_line = true;
+    let timelines = chart(vec![second]);
+    let size = (CANVAS.0 as f32, CANVAS.1 as f32);
+    let notes = playing(&timelines, 500);
+    let mut canvas = CpuCanvas::new(CANVAS.0, CANVAS.1);
+    let mut body = field(&mut canvas);
+    body.section_lines = vec![line(&mut canvas, "section", SECTION_RED)];
+    let notes_fade = note_object(body);
+    let line_row = 200;
+    let note_row = 205;
+
+    assert!(draw_with(&mut canvas, &notes_fade, &notes, &fading(WHOLE_SHIFT), size), "the line is drawn by a field whose notes are gone");
+    assert_eq!(pixel(&canvas, middle(1), line_row), shade(SECTION_RED), "at its own alpha");
+    assert_eq!(span(&canvas, middle(0), shade(NOTE_RED)), None, "with no note over it");
+
+    let mut body = field(&mut canvas);
+    let mut faded_line = line(&mut canvas, "section", SECTION_RED);
+    faded_line.object.track.offsets.push(NUDGE_OFFSET);
+    body.section_lines = vec![faded_line];
+    let line_fades = SkinObject { track: still(SkinRect::default()), stretch: StretchKind::from_id(-1), body: Body::Note(body) };
+
+    assert!(draw_with(&mut canvas, &line_fades, &notes, &fading(HALF_SHIFT), size));
+    assert_eq!(pixel(&canvas, middle(1), line_row), over_black(shade(SECTION_RED), HALF_ALPHA), "the line is at half");
+    assert_eq!(pixel(&canvas, middle(0), note_row), shade(NOTE_RED), "and the notes, whose object names no offset, are opaque");
+
+    assert!(draw_with(&mut canvas, &line_fades, &notes, &fading(WHOLE_SHIFT), size));
+    assert_eq!(span(&canvas, middle(1), shade(SECTION_RED)), None, "a line with no alpha left is drawn");
+    assert_eq!(pixel(&canvas, middle(0), note_row), shade(NOTE_RED));
+}

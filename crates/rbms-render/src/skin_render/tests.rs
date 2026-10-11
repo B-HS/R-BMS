@@ -1462,3 +1462,5 @@ fn filtering_is_decided_by_the_size_on_screen() {
     );
     assert!(pure_in(SkinRect::new(4.0, 4.0, 4.0, 4.0), 0, 8), "and a document that asked for no filtering gets none at any size");
 }
+
+mod opacity;

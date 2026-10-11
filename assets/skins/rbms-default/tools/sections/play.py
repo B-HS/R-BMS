@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from PIL import Image, ImageDraw
 
-from sprites import OPAQUE, WHITE, Rgb, Sprite, block, digit_frames, palette, tinted, word_frames
+from sprites import OPAQUE, WHITE, Rgb, Sprite, block, counter_strip, guarded, palette, tinted, word
 
 SURFACE = palette('color')
 TONE = palette('tone')
 JUDGE = palette('judge')
-FLASH = tuple(palette('judge_flash').values())
+JUDGE_WORD = palette('judge_word')
 LAMP = palette('lamp')
 
 BACKGROUND: Rgb = SURFACE['bg']
@@ -43,14 +43,15 @@ GAUGE_AHEAD_SHARE = 0.25
 GAUGE_TIP_WHITE_SHARE = 0.5
 
 JUDGE_WORD_SIZE = 64
-JUDGE_WORDS: tuple[tuple[str, str, tuple[Rgb | None, ...]], ...] = (
-    ('pgreat', 'GREAT', FLASH),
-    ('great', 'GREAT', (JUDGE['great'], None)),
-    ('good', 'GOOD', (JUDGE['good'], None)),
-    ('bad', 'BAD', (JUDGE['bad'], None)),
-    ('poor', 'POOR', (JUDGE['poor'], None)),
+JUDGE_WORDS: tuple[tuple[str, str, Rgb], ...] = (
+    ('pgreat', 'GREAT', JUDGE_WORD['pgreat']),
+    ('great', 'GREAT', JUDGE_WORD['great']),
+    ('good', 'GOOD', JUDGE['good']),
+    ('bad', 'BAD', JUDGE['bad']),
+    ('poor', 'POOR', JUDGE['poor']),
 )
 COMBO_JUDGES = 3
+COMBO_GHOST_ALPHA = 40
 
 BOMB_FRAMES = 8
 BOMB_SIDE = 128
@@ -60,8 +61,10 @@ BOMB_WIDTHS = (10.0, 2.0)
 BOMB_ALPHAS = (255, 70)
 
 BEAM_SIZE = (8, 64)
-BEAM_ALPHA = 150
+BEAM_ALPHA = 118
+PULSE_ALPHA = 71
 BEAM_CURVE = 2
+BEAM_GUARD = 1
 
 BAR_LENGTH = 256
 BAR_THICKNESS = 4
@@ -158,19 +161,19 @@ def bomb(name: str) -> Sprite:
     return Sprite(name, tinted(mask), BOMB_FRAMES, 1)
 
 
-def beam(name: str) -> Sprite:
+def beam(name: str, alpha: int) -> Sprite:
     width, height = BEAM_SIZE
     mask = Image.new('L', BEAM_SIZE, 0)
     for row in range(height):
         share = (row + 1) / height
-        mask.paste(round(BEAM_ALPHA * share**BEAM_CURVE), (0, row, width, row + 1))
-    return Sprite(name, tinted(mask))
+        mask.paste(round(alpha * share**BEAM_CURVE), (0, row, width, row + 1))
+    return guarded(Sprite(name, tinted(mask)), BEAM_GUARD)
 
 
 def build() -> list[Sprite]:
     sprites = notes() + gauge()
-    sprites += [word_frames(f'judge_{name}', text, JUDGE_WORD_SIZE, colors) for name, text, colors in JUDGE_WORDS]
-    sprites += [digit_frames(f'combo_{name}', JUDGE_WORD_SIZE, colors) for name, _, colors in JUDGE_WORDS[:COMBO_JUDGES]]
-    sprites += [bomb('bomb'), beam('beam')]
+    sprites += [word(f'judge_{name}', text, JUDGE_WORD_SIZE, color) for name, text, color in JUDGE_WORDS]
+    sprites += [counter_strip(f'combo_{name}', JUDGE_WORD_SIZE, color, COMBO_GHOST_ALPHA) for name, _, color in JUDGE_WORDS[:COMBO_JUDGES]]
+    sprites += [bomb('bomb'), beam('beam', BEAM_ALPHA), beam('pulse', PULSE_ALPHA)]
     sprites += [block('bar_h', BAR_LENGTH, BAR_THICKNESS), block('bar_v', BAR_THICKNESS, BAR_LENGTH)]
     return sprites

@@ -16,12 +16,16 @@
 //! as late, on one field of a single run and on the field the press was made on of a double one. One
 //! more draws the pack [`SKIN_PACK_ENV`] names at full size for a person to look at, as it comes and
 //! with the rows that turn its timing words and its timing figures on.
+//!
+//! What a run by hand is made of -- running the scene on to a moment of the chart, a key going down
+//! and coming up at one -- is here once, and the sibling module that sets a pack's field up before
+//! playing it by hand uses the same.
 
 use super::*;
 
 /// The size the frames the default pack is held to are drawn at, 16 to 9 like the pack and half of
 /// its size: small enough to draw quickly, large enough for the words over the field to be told apart.
-const HELD_SIZE: (u32, u32) = (960, 540);
+pub(super) const HELD_SIZE: (u32, u32) = (960, 540);
 
 /// The tempo of the chart played by hand and how long one of its measures lasts at it.
 const HAND_BPM: u32 = 120;
@@ -34,24 +38,25 @@ const HAND_FIRST_MEASURE: u32 = 1;
 const HAND_LAST_MEASURE: u32 = 40;
 
 /// How long a key stays down, in milliseconds.
-const HAND_HOLD_MS: i64 = 60;
+pub(super) const HAND_HOLD_MS: i64 = 60;
 
 /// How long after a note its frame is drawn: past everything a skin plays on the lane for a press
 /// (its flash and its key beam) and inside the time its judgement stays up.
 const HAND_SHOWN_AFTER_MS: i64 = 350;
 
-/// How far apart the two frames of one stroke are drawn, for a skin whose judgement blinks: one of
-/// the two has the word.
+/// How far apart the two frames of one stroke are drawn. A skin whose judgement blinks has its word
+/// on one of the two; one that holds its judgement still, as the default pack does, draws the two
+/// alike.
 const HAND_BLINK_APART_MS: i64 = 40;
 
 /// How far off the beat a press takes a GREAT and a GOOD, in milliseconds: inside the second and the
 /// third of the widest and the narrowest sets of windows a seven-key chart is judged with.
-const GREAT_OFF_MS: i64 = 40;
-const GOOD_OFF_MS: i64 = 100;
+pub(super) const GREAT_OFF_MS: i64 = 40;
+pub(super) const GOOD_OFF_MS: i64 = 100;
 
 /// The channels the first key of each side is written on.
-const FIRST_SIDE_KEY: &str = "11";
-const SECOND_SIDE_KEY: &str = "21";
+pub(super) const FIRST_SIDE_KEY: &str = "11";
+pub(super) const SECOND_SIDE_KEY: &str = "21";
 
 /// The judgements of a run, in the order the engine counts them.
 const GREAT: usize = 1;
@@ -93,7 +98,7 @@ fn note_ms(index: usize) -> i64 {
 }
 
 /// The lane the chart's first note is on.
-fn played_lane(model: &rbms_model::Model) -> Result<usize, String> {
+pub(super) fn played_lane(model: &rbms_model::Model) -> Result<usize, String> {
     model.timelines.iter().find_map(|timeline| timeline.notes.iter().position(Option::is_some)).ok_or_else(|| "the chart played by hand has no note".to_owned())
 }
 
@@ -108,7 +113,7 @@ fn run_of(app: &mut App) -> Result<&mut PlaySession, String> {
 /// Run the play screen on to `to_ms` of the chart without drawing it, in steps of [`PLAY_STEP_MS`]
 /// and a last one that lands on the moment. Where the chart stands is the harness's own count, not
 /// what a frame read off the clock.
-fn run_to(app: &mut App, clocks: &mut PlayClocks, to_ms: i64) -> Result<(), String> {
+pub(super) fn run_to(app: &mut App, clocks: &mut PlayClocks, to_ms: i64) -> Result<(), String> {
     loop {
         let at_ms = clocks.song.map_or(0, |song| song.as_millis() as i64);
         let left = to_ms - at_ms;
@@ -119,16 +124,29 @@ fn run_to(app: &mut App, clocks: &mut PlayClocks, to_ms: i64) -> Result<(), Stri
     }
 }
 
-/// Play one stroke of the note at `at_ms` on `lane`: down its lead ahead of the note, up
-/// [`HAND_HOLD_MS`] later.
-fn strike(app: &mut App, clocks: &mut PlayClocks, lane: usize, at_ms: i64, stroke: Stroke) -> Result<(), String> {
-    let down_ms = at_ms - stroke.lead_ms;
+/// Put the key of `lane` down at `down_ms` of the chart. A press is handed to the run with the
+/// moment of the chart it is made at, so the judgement it takes is decided by that moment and by
+/// nothing a clock says.
+pub(super) fn press(app: &mut App, clocks: &mut PlayClocks, lane: usize, down_ms: i64) -> Result<(), String> {
     run_to(app, clocks, down_ms)?;
     run_of(app)?.press(lane, down_ms * MICROS_PER_MILLI, &mut NullSink);
+    Ok(())
+}
+
+/// Let the key of `lane` that went down at `down_ms` up again, [`HAND_HOLD_MS`] later.
+pub(super) fn release(app: &mut App, clocks: &mut PlayClocks, lane: usize, down_ms: i64) -> Result<(), String> {
     let up_ms = down_ms + HAND_HOLD_MS;
     run_to(app, clocks, up_ms)?;
     run_of(app)?.release(lane, up_ms * MICROS_PER_MILLI);
     Ok(())
+}
+
+/// Play one stroke of the note at `at_ms` on `lane`: down its lead ahead of the note, up
+/// [`HAND_HOLD_MS`] later.
+fn strike(app: &mut App, clocks: &mut PlayClocks, lane: usize, at_ms: i64, stroke: Stroke) -> Result<(), String> {
+    let down_ms = at_ms - stroke.lead_ms;
+    press(app, clocks, lane, down_ms)?;
+    release(app, clocks, lane, down_ms)
 }
 
 /// A pack's play scene entered for a chart played by hand, walked until the chart plays.

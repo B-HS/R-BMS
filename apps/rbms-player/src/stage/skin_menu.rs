@@ -34,12 +34,12 @@ use crate::dialog::{DialogHandle, DialogState, pick_skin_pack_folder};
 use crate::settings_ui::SettingRow;
 use crate::settings_view::SettingsLine;
 use crate::skin_preview::SkinPreview;
-use crate::skin_select::{OffsetAxis, SkinRow};
+use crate::skin_select::{OffsetAxis, SkinRow, SkinRowKind};
 use crate::stage::preview_menu::{
     LABEL_GAP, LABEL_SCALE, LIST_RECT, ListEntry, ListWindow, NEXT_TAB as NEXT_SCREEN, ONE_STEP, PREVIOUS_TAB as PREVIOUS_SCREEN, ROW_STEP_BACK,
-    ROW_STEP_FORWARD, RowLook, SHIFT_STEPS, UTF8_MAX_BYTES, VALUE_SCALE, VISIBLE_ROWS, click_step, contains, draw_head, draw_hint, draw_info_lead,
-    draw_info_note, draw_info_panel, draw_info_row, draw_list, draw_preview, draw_tabs, fitted_value, last_top, revealed_top, row_room, shift_after,
-    stepped_tab, wheel_scrolled,
+    ROW_STEP_FORWARD, RowLook, UTF8_MAX_BYTES, VALUE_SCALE, VISIBLE_ROWS, click_step, contains, draw_head, draw_hint, draw_info_lead, draw_info_note,
+    draw_info_panel, draw_info_row, draw_list, draw_preview, draw_tabs, fitted_value, last_top, revealed_top, row_room, shift_after, stepped_tab,
+    wheel_scrolled,
 };
 use crate::stage::{Canvas, FrameCtx, KeyInput, Stage, StageHandler, Transition, is_left_press};
 use crate::{AppShared, Hot};
@@ -75,7 +75,7 @@ const TITLE: &str = "SKIN";
 
 /// The keys of the screen, written along its foot.
 const HINT: &str =
-    "UP DOWN MOVE   LEFT RIGHT CHANGE   SHIFT OFFSET x10   ENTER RUN   0 RESET OFFSET   TAB SCREEN   WHEEL SCROLL   RIGHT CLICK STEP BACK   ESC SAVE/BACK";
+    "UP DOWN MOVE   LEFT RIGHT CHANGE   SHIFT OFFSET x10, OPACITY 25%   ENTER RUN   0 RESET   TAB SCREEN   WHEEL SCROLL   RIGHT CLICK BACK   ESC SAVE";
 
 /// What is written under the preview in place of the row under the cursor while the folder picker is
 /// up.
@@ -86,12 +86,19 @@ const PICKER_NOTE: &str = "CHOOSE THE PACK FOLDER IN THE WINDOW THAT OPENED";
 ///
 /// An offset is said by its axis. A place and a size are counted in pixels of the screen, except for
 /// the one offset that moves a whole play screen, which is a share of it; a row is not told which
-/// offset it is of, so both are said.
+/// offset it is of, so both are said. An offset the player may move along its alpha alone is an
+/// opacity, and is said as one: it reads in percent, a hundred being no offset at all.
 const PROPERTY_HELP: &str = "An option this skin declares";
 const FILE_HELP: &str = "A file slot this skin declares: which of its files is used";
 const OFFSET_PLACE_HELP: &str = "An offset of this skin, in pixels - in percent when it is of the whole screen. 0 puts it back";
 const OFFSET_ANGLE_HELP: &str = "An offset of this skin: a turn, in degrees. 0 puts it back";
-const OFFSET_ALPHA_HELP: &str = "An offset of this skin: added to the opacity, which runs to 255. 0 puts it back";
+const OFFSET_ALPHA_HELP: &str = "An offset of this skin: added to the opacity, from -255 (gone) to +255. 0 puts it back";
+const OPACITY_HELP: &str = "How opaque this part is: 0% hides it, 100% is the skin's own, more only adds to a translucent part. 0 key resets";
+
+/// What is said of a row of an offset the game adds to every play skin, which no document declares:
+/// a row of that name in a skin's own list would be read as the skin's.
+const AUTOMATIC_PLACE_HELP: &str = "An offset the game adds to every play skin, in pixels - in percent for the whole screen. 0 puts it back";
+const AUTOMATIC_ALPHA_HELP: &str = "An offset the game adds to every play skin: added to the opacity, from -255 (gone) to +255. 0 puts it back";
 
 /// The skin menu's own state: the rows it lists and where the cursor and the list are, the folder
 /// picker while it is up, the preview on its right, and the modifier that turns the key for the next
@@ -196,10 +203,16 @@ impl SkinMenuState {
     }
 
     /// Apply one left/right step to a row, and tell the preview when it moved something. An offset
-    /// row is stepped `steps` times over; any other row once, whatever is asked.
-    fn step(&mut self, ctx: &mut FrameCtx<'_>, row: SettingRow, delta: i32, steps: usize) {
+    /// row is stepped as many times over as a wide step of it is when `wide` asks -- ten for a place,
+    /// a size or a turn, a quarter of the way for an opacity -- and any other row once, whatever is
+    /// asked.
+    fn step(&mut self, ctx: &mut FrameCtx<'_>, row: SettingRow, delta: i32, wide: bool) {
         let moved = match row {
-            SettingRow::Skin(row @ SkinRow::Offset(_, _)) => (0..steps).filter(|_| ctx.shared.step_skin_row(row, delta)).count() > 0,
+            SettingRow::Skin(row @ SkinRow::Offset(_, _)) => {
+                let shared = &mut *ctx.shared;
+                let steps = if wide { shared.skins.wide_steps_for(&shared.config, shared.config.skin.screen, row) } else { usize::from(ONE_STEP) };
+                (0..steps).filter(|_| shared.step_skin_row(row, delta)).count() > 0
+            }
             SettingRow::Skin(row) => SkinMenuState::step_document_row(ctx.shared, row, delta),
             SettingRow::Fixed(id) => match adjust(&mut ctx.shared.config, id, delta) {
                 AdjustOutcome::Action(action) => self.run_action(ctx.shared, action, delta),
@@ -329,9 +342,9 @@ impl SkinMenuState {
             KeyCode::ArrowDown => self.focus(self.sel + 1),
             KeyCode::PageUp => self.focus(self.sel.saturating_sub(VISIBLE_ROWS)),
             KeyCode::PageDown => self.focus(self.sel + VISIBLE_ROWS),
-            KeyCode::ArrowLeft => self.step_focused(ctx, ROW_STEP_BACK, self.arrow_steps()),
-            KeyCode::ArrowRight => self.step_focused(ctx, ROW_STEP_FORWARD, self.arrow_steps()),
-            KeyCode::Enter | KeyCode::NumpadEnter => self.step_focused(ctx, ROW_STEP_FORWARD, usize::from(ONE_STEP)),
+            KeyCode::ArrowLeft => self.step_focused(ctx, ROW_STEP_BACK, self.shift_held),
+            KeyCode::ArrowRight => self.step_focused(ctx, ROW_STEP_FORWARD, self.shift_held),
+            KeyCode::Enter | KeyCode::NumpadEnter => self.step_focused(ctx, ROW_STEP_FORWARD, false),
             KeyCode::Digit0 | KeyCode::Numpad0 => {
                 self.reveal_cursor();
                 self.reset_focused_row(ctx);
@@ -341,17 +354,13 @@ impl SkinMenuState {
         Transition::Stay
     }
 
-    /// How many steps a press of an arrow asks for: more with Shift held. An offset runs over
-    /// thousands of steps, and a preview is where it is set by eye.
-    fn arrow_steps(&self) -> usize {
-        usize::from(if self.shift_held { SHIFT_STEPS } else { ONE_STEP })
-    }
-
-    /// Step the row under the cursor, with the row on show.
-    fn step_focused(&mut self, ctx: &mut FrameCtx<'_>, delta: i32, steps: usize) {
+    /// Step the row under the cursor, with the row on show. A press of an arrow with Shift held
+    /// asks for a wide step: an offset runs over thousands of steps, and a preview is where it is
+    /// set by eye.
+    fn step_focused(&mut self, ctx: &mut FrameCtx<'_>, delta: i32, wide: bool) {
         self.reveal_cursor();
         if let Some(row) = self.focused() {
-            self.step(ctx, row, delta, steps);
+            self.step(ctx, row, delta, wide);
         }
     }
 
@@ -373,7 +382,7 @@ impl SkinMenuState {
 
     /// Draw what is said under the preview: what loaded, in full, and the row under the cursor with
     /// its label and value in full and what the row is for.
-    fn draw_info(&self, canvas: &mut Canvas<'_>) {
+    fn draw_info(&self, shared: &AppShared, canvas: &mut Canvas<'_>) {
         draw_info_panel(canvas);
         if let Some(loaded) = self.loaded_line() {
             draw_info_lead(canvas, &loaded.label, &loaded.value);
@@ -383,7 +392,7 @@ impl SkinMenuState {
             return;
         }
         if let (Some(row), Some(line)) = (self.focused(), self.lines.get(self.sel)) {
-            draw_info_row(canvas, &line.label, &line.value, row_help(row));
+            draw_info_row(canvas, &line.label, &line.value, row_help(shared, row));
         }
     }
 }
@@ -398,15 +407,43 @@ fn pack_value_room(label: &str) -> f32 {
     row_room() - text_width(label, LABEL_SCALE) - LABEL_GAP
 }
 
-/// What is said of one row under the preview.
-fn row_help(row: SettingRow) -> &'static str {
-    match row {
-        SettingRow::Fixed(id) => descriptor(id).help,
-        SettingRow::Skin(SkinRow::Property(_)) => PROPERTY_HELP,
-        SettingRow::Skin(SkinRow::File(_)) => FILE_HELP,
-        SettingRow::Skin(SkinRow::Offset(_, OffsetAxis::X | OffsetAxis::Y | OffsetAxis::W | OffsetAxis::H)) => OFFSET_PLACE_HELP,
-        SettingRow::Skin(SkinRow::Offset(_, OffsetAxis::R)) => OFFSET_ANGLE_HELP,
-        SettingRow::Skin(SkinRow::Offset(_, OffsetAxis::A)) => OFFSET_ALPHA_HELP,
+/// What is said of one row under the preview. A row of the chosen document is said by the kind of
+/// row the document makes it, and a row of an offset the game adds to every play skin as that; one
+/// whose declaration is no longer there is said by what it was listed as.
+fn row_help(shared: &AppShared, row: SettingRow) -> &'static str {
+    let listed = match row {
+        SettingRow::Fixed(id) => return descriptor(id).help,
+        SettingRow::Skin(listed) => listed,
+    };
+    let kind = shared.skins.kind(&shared.config, listed).unwrap_or(match listed {
+        SkinRow::Property(_) => SkinRowKind::Property,
+        SkinRow::File(_) => SkinRowKind::File,
+        SkinRow::Offset(_, axis) => SkinRowKind::Offset(axis),
+    });
+    match kind {
+        SkinRowKind::Offset(axis) if shared.skins.is_automatic_for(&shared.config, shared.config.skin.screen, listed) => automatic_offset_help(axis),
+        _ => skin_row_help(kind),
+    }
+}
+
+/// What is said of one axis of an offset the game adds to every play skin.
+pub(crate) fn automatic_offset_help(axis: OffsetAxis) -> &'static str {
+    match axis {
+        OffsetAxis::X | OffsetAxis::Y | OffsetAxis::W | OffsetAxis::H => AUTOMATIC_PLACE_HELP,
+        OffsetAxis::R => OFFSET_ANGLE_HELP,
+        OffsetAxis::A => AUTOMATIC_ALPHA_HELP,
+    }
+}
+
+/// What is said of a row a skin document declares, by the kind of row it is.
+pub(crate) fn skin_row_help(kind: SkinRowKind) -> &'static str {
+    match kind {
+        SkinRowKind::Property => PROPERTY_HELP,
+        SkinRowKind::File => FILE_HELP,
+        SkinRowKind::Offset(OffsetAxis::X | OffsetAxis::Y | OffsetAxis::W | OffsetAxis::H) => OFFSET_PLACE_HELP,
+        SkinRowKind::Offset(OffsetAxis::R) => OFFSET_ANGLE_HELP,
+        SkinRowKind::Offset(OffsetAxis::A) => OFFSET_ALPHA_HELP,
+        SkinRowKind::Opacity => OPACITY_HELP,
     }
 }
 
@@ -486,7 +523,7 @@ impl StageHandler for SkinMenuState {
             Some(Hot::SkinMenuRow(index)) => {
                 if let Some(row) = self.rows.get(index).copied() {
                     self.sel = index;
-                    self.step(ctx, row, delta, usize::from(ONE_STEP));
+                    self.step(ctx, row, delta, false);
                 }
             }
             Some(Hot::SkinMenuKind(index)) if is_left_press(button, pressed) => {
@@ -532,7 +569,7 @@ impl StageHandler for SkinMenuState {
         let chosen = kind_index(ctx.shared.config.skin.screen);
         draw_tabs(ctx.shared, canvas, SCREEN_KINDS.iter().map(|(_, name)| *name), chosen, Hot::SkinMenuKind);
         self.draw_rows(ctx.shared, canvas);
-        self.draw_info(canvas);
+        self.draw_info(ctx.shared, canvas);
         draw_preview(&mut self.preview, ctx, canvas);
         draw_hint(canvas, HINT);
     }

@@ -65,6 +65,12 @@ struct Rig {
 impl Rig {
     /// A document whose two records are written out in full, on a canvas `scale` times its size.
     fn new(tag: &str, scale: u32) -> Rig {
+        Rig::with_ruler_members(tag, scale, "")
+    }
+
+    /// [`Rig::new`] with `members` written after the others of the first ruler's one keyframe, each
+    /// led by a comma: an alpha of its own.
+    fn with_ruler_members(tag: &str, scale: u32, members: &str) -> Rig {
         let scratch = Scratch::new(tag);
         let body = format!(
             r#"{{
@@ -78,7 +84,7 @@ impl Rig {
                     "PGColor": "0000FFFF", "GRColor": "00FF00FF", "GDColor": "FFFF00FF", "BDColor": "FF0000FF", "PRColor": "808080FF"
                 }}],
                 "destination": [
-                    {{ "id": "ruler", "dst": [{{ "x": {RULER_X}, "y": {RULER_Y}, "w": {RECORD_W}, "h": {RULER_H} }}] }},
+                    {{ "id": "ruler", "dst": [{{ "x": {RULER_X}, "y": {RULER_Y}, "w": {RECORD_W}, "h": {RULER_H}{members} }}] }},
                     {{ "id": "ruler", "dst": [{{ "x": {MIRROR_X}, "y": {MIRROR_Y}, "w": -{RECORD_W}, "h": {RULER_H} }}] }},
                     {{ "id": "errors", "dst": [{{ "x": {STRIP_X}, "y": {STRIP_Y}, "w": {RECORD_W}, "h": {STRIP_H} }}] }}
                 ]
@@ -150,6 +156,20 @@ fn the_ruler_shows_each_window_and_a_hit_that_came_early_is_a_green_line_to_the_
     assert!((1..=4).contains(&older.r), "a hundredth fainter, so a trace of the yellow shows through: {older:?}");
     assert_eq!((rig.ruler(early + 1, 5), rig.ruler(early - 1, 5)), (GOOD, GREAT), "and a line is one pixel wide");
     assert_eq!((rig.ruler(early, 0), rig.ruler(early, 19)), (Color::rgb(0, 255, 0), Color::rgb(0, 255, 0)), "from the top of the ruler to its foot");
+}
+
+/// The reference draws a line in the record's own colour whatever colour the ruler's destination
+/// is written with, so a ruler a document writes half transparent has its lines at their whole
+/// alpha over it.
+#[test]
+fn a_ruler_written_half_transparent_keeps_its_lines_at_the_alpha_of_the_record() {
+    let mut rig = Rig::with_ruler_members("vis-faint-ruler", 1, r#", "a": 128"#);
+    let hits = [(20_i64, 1_u8)];
+    assert_eq!(rig.draw(Some(RecentHits::new(&hits).with_judge_area(WINDOWS))), 3, "the ruler, its mirrored copy and the strip");
+
+    let ground = rig.ruler(MIDDLE + 12, 5);
+    assert!((120..=136).contains(&ground.g) && ground.r == 0 && ground.b == 0, "the ruler itself is at half its alpha over black: {ground:?}");
+    assert_eq!(rig.ruler(MIDDLE + 20, 5), Color::rgb(0, 255, 0), "the line of the newest hit is not faded by the alpha of the ruler's keyframe");
 }
 
 #[test]
