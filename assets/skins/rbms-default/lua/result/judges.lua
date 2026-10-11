@@ -18,6 +18,7 @@ local TABLE = {
     slow = { offset = 392, w = 96 },
     bar = { offset = 520, top = 14, h = 10, sprite = "bar", least = 2, grow_at = 500, grow = 500 },
     total = { rule = 260, baseline = 283, label = "TOTAL EXCL. PGREAT" },
+    aside = { label_width = 112, gap = 12 },
     notes = { label = "TOTAL NOTES", sprite = "num18", gap = 8, label_width = 160 },
 }
 
@@ -60,19 +61,24 @@ local function heading(s, main_state, left, top, course)
     end
 end
 
-local function count(s, main_state, ref, box, baseline, color)
-    local value = main_state.number(ref)
+local function count(s, main_state, refs, box, baseline, color, align)
+    local value = parts.sum(main_state, refs)
     if not ui.has_value(value) then
         return
     end
-    local spec = { sprite = TABLE.sprite, ref = ref, known = value, fit = box.w, align = "right" }
+    local spec = { sprite = TABLE.sprite, known = value, fit = box.w, align = align or "right" }
+    if #refs == 1 then
+        spec.ref = refs[1]
+    else
+        spec.value = parts.tally(main_state, refs, ui.digit_count(value))
+    end
     s:number(spec, { x = box.x, w = box.w, baseline = baseline }, layout.appear(layout.order.judges, { color = color }))
 end
 
-local function share_of(main_state, ref, least)
+local function share_of(main_state, refs, least)
     return function()
         local notes = main_state.number(props.number.TOTALNOTES)
-        local judged = main_state.number(ref)
+        local judged = parts.sum(main_state, refs)
         if not ui.has_value(notes) or not ui.has_value(judged) or notes <= 0 or judged <= 0 then
             return 0
         end
@@ -102,6 +108,22 @@ local function row(s, main_state, left, top, entry)
     bar(s, main_state, left, top, entry)
 end
 
+local function breaks(s, main_state, left, top)
+    local order = layout.order.judges
+    local baseline = top + TABLE.baseline
+    local size = theme.type.caption
+    local name = { x = left.x, top = theme.text_top(baseline, size), w = TABLE.name_width }
+    local broken = parts.combo_break
+    s:text({ text = broken.name, size = size }, name, layout.appear(order, { color = theme.color.sub }))
+    count(s, main_state, broken.count, cell(left, TABLE.count), baseline, theme.color.text)
+    local empty = parts.empty_poor
+    local x = left.x + TABLE.bar.offset
+    local label = { x = x, top = theme.text_top(baseline, size), w = TABLE.aside.label_width }
+    s:text({ text = empty.name, size = size }, label, layout.appear(order, { color = theme.color.sub }))
+    local figure = { x = x + TABLE.aside.label_width + TABLE.aside.gap, w = TABLE.count.w }
+    count(s, main_state, empty.count, figure, baseline, theme.color.sub, "left")
+end
+
 local function totals(s, main_state, left, top)
     local order = layout.order.judges
     local fast = cell(left, TABLE.fast)
@@ -112,8 +134,8 @@ local function totals(s, main_state, left, top)
     local size = theme.type.caption
     local label = { x = left.x, top = theme.text_top(baseline, size), w = fast.x - left.x }
     s:text({ text = TABLE.total.label, size = size, overflow = props.text_overflow.SHRINK }, label, layout.appear(order, { color = theme.color.muted }))
-    count(s, main_state, props.number.TOTAL_EARLY, fast, baseline, theme.color.text)
-    count(s, main_state, props.number.TOTAL_LATE, slow, baseline, theme.color.text)
+    count(s, main_state, { props.number.TOTAL_EARLY }, fast, baseline, theme.color.text)
+    count(s, main_state, { props.number.TOTAL_LATE }, slow, baseline, theme.color.text)
 end
 
 function judges.build(s, main_state, course)
@@ -124,6 +146,7 @@ function judges.build(s, main_state, course)
     for index, entry in ipairs(parts.judges) do
         row(s, main_state, left, top + TABLE.first_row + (index - 1) * TABLE.pitch, entry)
     end
+    breaks(s, main_state, left, top + TABLE.first_row + #parts.judges * TABLE.pitch)
     totals(s, main_state, left, top)
 end
 

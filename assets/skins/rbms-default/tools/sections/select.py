@@ -33,7 +33,15 @@ LABELS = (
 )
 
 LAMP_CELL = 8
-LAMP_COLORS = tuple(palette('lamp').values())
+LAMP = palette('lamp')
+LAMP_COLORS = tuple(LAMP.values())
+LAMP_FRAMES: dict[str, tuple[str | None, ...]] = {
+    'failed': ('failed', None),
+    'exhard': ('normal', 'failed'),
+    'fullcombo': ('normal', 'fullcombo', 'hard'),
+    'perfect': ('normal', 'assist', 'hard'),
+    'max': ('normal', 'assist', 'hard'),
+}
 
 METER_SIZE = (512, 4)
 
@@ -80,6 +88,14 @@ def lamp_strip(name: str) -> Sprite:
     for column, color in enumerate(LAMP_COLORS):
         image.paste((*color, OPAQUE), (column * LAMP_CELL, 0, (column + 1) * LAMP_CELL, LAMP_CELL))
     return Sprite(name, image, len(LAMP_COLORS), 1)
+
+
+def lamp_frames(name: str, frames: tuple[str | None, ...]) -> Sprite:
+    image = Image.new('RGBA', (LAMP_CELL * len(frames), LAMP_CELL), (*WHITE, 0))
+    for column, lamp in enumerate(frames):
+        if lamp is not None:
+            image.paste((*LAMP[lamp], OPAQUE), (column * LAMP_CELL, 0, (column + 1) * LAMP_CELL, LAMP_CELL))
+    return Sprite(name, image, len(frames), 1)
 
 
 def smooth(side: int, paint) -> Image.Image:
@@ -141,6 +157,7 @@ def build() -> list[Sprite]:
     sprites = [bar(name, tag, alpha) for name, tag, alpha in BARS]
     sprites += [word(name, text, LABEL_SIZE) for name, text in LABELS]
     sprites.append(lamp_strip('lamp_strip'))
+    sprites += [lamp_frames(f'lamp_{name}', frames) for name, frames in LAMP_FRAMES.items()]
     sprites.append(block('meter', *METER_SIZE))
     sprites.append(Sprite('icon_settings', smooth(ICON_SIDE, paint_gear)))
     sprites.append(Sprite('icon_volume', smooth(ICON_SIDE, paint_speaker)))

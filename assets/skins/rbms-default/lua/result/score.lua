@@ -114,7 +114,7 @@ local function diff_color(delta, better)
     if delta * better > 0 then
         return theme.color.accent
     end
-    return theme.judge.bad
+    return theme.tone.orange
 end
 
 local function figure(s, main_state, column, row, item)

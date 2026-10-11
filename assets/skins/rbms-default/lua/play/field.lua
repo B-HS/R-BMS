@@ -1,7 +1,6 @@
 local theme = require("lua.theme")
 local props = require("lua.props")
 local ui = require("lua.ui")
-local parts = require("lua.parts")
 local layout = require("lua.play.layout")
 
 local field = {}
@@ -39,12 +38,18 @@ local JUDGE = {
     pop_time = 60,
     hold = 440,
     gone = 500,
-    words = { "judge_pgreat", "judge_great", "judge_good", "judge_bad", "judge_poor", "judge_miss" },
     with_count = 3,
-    count_sprite = "num64",
+    slots = {
+        { word = "judge_pgreat", count = "combo_pgreat", cycle = theme.judge_cycle.flash },
+        { word = "judge_great", count = "combo_great", cycle = theme.judge_cycle.blink },
+        { word = "judge_good", count = "combo_good", cycle = theme.judge_cycle.blink },
+        { word = "judge_bad", count = "combo_good", cycle = theme.judge_cycle.blink },
+        { word = "judge_poor", count = "combo_good", cycle = theme.judge_cycle.blink },
+        { word = "judge_poor", count = "combo_good", cycle = theme.judge_cycle.blink },
+    },
 }
 
-local DETAIL = { size = 24, sprite = "snum24", digits = 4, fast = theme.judge.pgreat, slow = theme.judge.bad }
+local DETAIL = { size = 24, sprite = "snum24", digits = 4, fast = theme.timing.fast, slow = theme.timing.slow, even = theme.color.sub }
 
 local COVER = {
     edge = 2,
@@ -52,7 +57,7 @@ local COVER = {
     value_rise = 12,
     value_sprite = "num18",
     value_digits = 4,
-    green = theme.difficulty[1],
+    green = theme.tone.green,
     green_digits = 4,
     lift_rise = 8,
     hidden_drop = 12,
@@ -190,22 +195,22 @@ local function bombs(s, view)
     end
 end
 
-local function popping(box, color)
+local function popping(box)
     local grow_w, grow_h = box.w * JUDGE.pop, box.h * JUDGE.pop
     return {
-        { time = 0, dx = -grow_w / 2, dtop = -grow_h / 2, dw = grow_w, dh = grow_h, color = color },
-        { time = JUDGE.pop_time, color = color },
-        { time = JUDGE.hold, color = color },
-        { time = JUDGE.gone, color = color, a = TRANSPARENT },
+        { time = 0, dx = -grow_w / 2, dtop = -grow_h / 2, dw = grow_w, dh = grow_h },
+        { time = JUDGE.pop_time },
+        { time = JUDGE.hold },
+        { time = JUDGE.gone, a = TRANSPARENT },
     }
 end
 
-local function beside_popping(word, color)
+local function beside_popping(word)
     return {
-        { time = 0, dx = word.w * JUDGE.pop, dtop = -word.h * JUDGE.pop / 2, color = color },
-        { time = JUDGE.pop_time, color = color },
-        { time = JUDGE.hold, color = color },
-        { time = JUDGE.gone, color = color, a = TRANSPARENT },
+        { time = 0, dx = word.w * JUDGE.pop, dtop = -word.h * JUDGE.pop / 2 },
+        { time = JUDGE.pop_time },
+        { time = JUDGE.hold },
+        { time = JUDGE.gone, a = TRANSPARENT },
     }
 end
 
@@ -213,22 +218,24 @@ local function judge_of(s, side)
     local size = side.w >= JUDGE.wide_from and JUDGE.size.wide or JUDGE.size.narrow
     local timer = props.timer.JUDGE_1P + side.side
     local offsets = { props.offset.LIFT, props.offset.JUDGE_1P }
-    local strip = s:sprite(JUDGE.count_sprite)
-    local scale = size / strip.size
     local gap = size * JUDGE.gap_share
-    local count_id = s:define_number({ id = "num.combo." .. side.side, sprite = JUDGE.count_sprite, ref = props.number.COMBO }, JUDGE.digits)
     local middle = side.x + side.w / 2
     local def = { index = side.side, shift = true, images = {}, numbers = {} }
-    for slot, name in ipairs(JUDGE.words) do
-        local sprite = s:sprite(name)
-        local color = parts.judges[slot].color
-        local width, height = sprite.w * scale, sprite.h * scale
+    local counts = {}
+    for slot, entry in ipairs(JUDGE.slots) do
+        local sprite = s:sprite(entry.word)
+        local strip = s:sprite(entry.count)
+        local scale = size / sprite.size
+        local width, height = sprite.cell_w * scale, sprite.cell_h * scale
         local left = slot <= JUDGE.with_count and middle - (width + gap) / 2 or middle - width / 2
         local word = { x = left, top = JUDGE.top - sprite.pad * scale, w = width, h = height }
         local shared = { timer = timer, loop = props.loop.ONCE, offsets = offsets, filter = props.filter.LINEAR }
-        def.images[slot] = s:dst(s:define_image(name), word, ui.merge(shared, { keys = popping(word, color) }))
+        local word_id = s:define_image(entry.word, { cycle = entry.cycle })
+        def.images[slot] = s:dst(word_id, word, ui.merge(shared, { keys = popping(word) }))
+        local count = { id = "num." .. entry.count .. "." .. side.side, sprite = entry.count, ref = props.number.COMBO, cycle = entry.cycle }
+        counts[entry.count] = counts[entry.count] or s:define_number(count, JUDGE.digits)
         local cell = { x = width + gap, top = height - strip.cell_h * scale, w = strip.cell_w * scale, h = strip.cell_h * scale }
-        def.numbers[slot] = s:dst(count_id, cell, ui.merge(shared, { keys = beside_popping(word, color) }), word)
+        def.numbers[slot] = s:dst(counts[entry.count], cell, ui.merge(shared, { keys = beside_popping(word) }), word)
     end
     local id = s:object("judge", def)
     s:place(id, nil, {})
@@ -253,7 +260,7 @@ local function detail_of(s, view, side)
     elseif view.detail == option.DETAIL_MILLISECONDS then
         local ref = props.number.JUDGE_1P_DURATION + side.side
         local spec = { sprite = DETAIL.sprite, ref = ref, digit = DETAIL.digits, saturate = true, align = "center" }
-        s:number(spec, box, placed({ perfect }, theme.judge.pgreat))
+        s:number(spec, box, placed({ perfect }, DETAIL.even))
         s:number(spec, box, placed({ early }, DETAIL.fast))
         s:number(spec, box, placed({ late }, DETAIL.slow))
     end

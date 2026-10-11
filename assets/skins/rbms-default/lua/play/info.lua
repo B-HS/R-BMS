@@ -48,12 +48,11 @@ local COUNTS = {
     head = 26,
     rise = 20,
     most_pitch = 36,
-    rows = 6,
     count = "num24",
     split = "num18",
     count_share = 0.52,
     fast_share = 0.76,
-    miss_digits = 4,
+    unbounded_digits = 4,
 }
 local OPAQUE = 255
 local TIMING = {
@@ -70,7 +69,8 @@ local TIMING = {
     seconds_gap = 13,
     strip_top = 64,
     strip_height = 16,
-    graph_top = 92,
+    legend_top = 86,
+    graph_top = 106,
     column_room = 24,
 }
 local HIT_ERROR = {
@@ -99,7 +99,7 @@ local FOOT = {
     value_baseline = 44,
     sprite = "num24",
     size = theme.type.label,
-    green = theme.difficulty[1],
+    green = theme.tone.green,
     green_digits = 4,
     cover_digits = 4,
     status_top = 68,
@@ -117,7 +117,7 @@ local PACE = {
     bars = {
         { type = props.rate.SCORE_RATE, color = theme.color.accent },
         { type = props.rate.BESTSCORE_RATE_NOW, color = theme.color.sub, label = "BEST", diff = props.number.DIFF_HIGHSCORE },
-        { type = props.rate.TARGETSCORE_RATE_NOW, color = theme.difficulty[3], label = "TARGET", diff = props.number.DIFF_EXSCORE },
+        { type = props.rate.TARGETSCORE_RATE_NOW, color = theme.tone.yellow, label = "TARGET", diff = props.number.DIFF_EXSCORE },
     },
 }
 
@@ -240,7 +240,7 @@ local function counts(s, view, main_state)
     local box = view.counts
     local total = main_state.number(props.number.TOTALNOTES)
     local digits = ui.digit_count(ui.has_value(total) and total or 0)
-    local pitch = math.min(COUNTS.most_pitch, math.floor((box.h - COUNTS.head) / COUNTS.rows))
+    local pitch = math.min(COUNTS.most_pitch, math.floor((box.h - COUNTS.head) / #parts.judges))
     local count_end = box.x + math.floor(box.w * COUNTS.count_share)
     local fast_end = box.x + math.floor(box.w * COUNTS.fast_share)
     local slow_end = box.x + box.w
@@ -252,11 +252,12 @@ local function counts(s, view, main_state)
     for index, row in ipairs(parts.judges) do
         local baseline = box.top + COUNTS.head + COUNTS.rise + (index - 1) * pitch
         s:text({ text = row.name, size = size }, { x = box.x, top = theme.text_top(baseline, size), w = box.w }, { color = row.color })
-        local sized = function(sprite, ref, width)
-            if row.empty then
-                return { sprite = sprite, ref = ref, digit = COUNTS.miss_digits, saturate = true, align = "right" }
+        local sized = function(sprite, refs, width)
+            if row.unbounded then
+                local places = math.max(digits, COUNTS.unbounded_digits)
+                return { sprite = sprite, value = parts.tally(main_state, refs, places), digit = places, align = "right", fit = width }
             end
-            return { sprite = sprite, ref = ref, digit = digits, align = "right", fit = width }
+            return { sprite = sprite, ref = refs[1], digit = digits, align = "right", fit = width }
         end
         local count_width = count_end - box.x - theme.grid.unit * 10
         s:number(sized(COUNTS.count, row.count, count_width), { x = box.x, baseline = baseline, w = count_end - box.x }, { color = theme.color.text })
@@ -303,6 +304,8 @@ local function timing(s, view, main_state)
     parts.panel(s, strip)
     s:object("hiterrorvisualizer", ui.merge(HIT_ERROR, { width = box.w }), strip)
 
+    local legend = view.mode.scratch and parts.judge_graph_legend.beat or parts.judge_graph_legend.popn
+    parts.legend(s, box.x + box.w, box.top + TIMING.legend_top, legend)
     local graph = { x = box.x, top = box.top + TIMING.graph_top, w = box.w, h = box.h - TIMING.graph_top }
     parts.panel(s, graph)
     s:object("judgegraph", { type = props.judge_graph.JUDGES, backTexOff = props.back_texture.OFF }, graph)

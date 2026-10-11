@@ -19,13 +19,23 @@ theme.color = {
     white = { 255, 255, 255 },
 }
 
+theme.tone = {
+    red = { 240, 86, 76 },
+    orange = { 240, 136, 90 },
+    yellow = { 242, 179, 61 },
+    green = { 89, 209, 133 },
+    blue = { 86, 140, 245 },
+    violet = { 178, 107, 240 },
+    rose = { 194, 69, 94 },
+}
+
 theme.difficulty = {
-    [0] = { 138, 151, 168 },
-    [1] = { 89, 209, 133 },
-    [2] = { 86, 140, 245 },
-    [3] = { 242, 179, 61 },
-    [4] = { 240, 86, 76 },
-    [5] = { 178, 107, 240 },
+    [0] = { 195, 195, 195 },
+    [1] = { 6, 255, 0 },
+    [2] = { 18, 210, 215 },
+    [3] = { 255, 192, 0 },
+    [4] = { 255, 0, 0 },
+    [5] = { 168, 64, 170 },
 }
 
 theme.difficulty_name = {
@@ -38,40 +48,54 @@ theme.difficulty_name = {
 }
 
 theme.judge = {
-    pgreat = { 127, 227, 255 },
-    great = { 139, 212, 95 },
-    good = { 242, 201, 76 },
-    bad = { 240, 136, 90 },
-    poor = { 240, 86, 76 },
-    miss = { 194, 69, 94 },
+    pgreat = { 107, 166, 245 },
+    great = { 246, 171, 34 },
+    good = { 249, 178, 31 },
+    bad = { 251, 129, 22 },
+    poor = { 242, 82, 0 },
+}
+
+theme.judge_flash = {
+    blue = { 107, 166, 245 },
+    pink = { 244, 125, 167 },
+    mint = { 187, 245, 208 },
+}
+
+theme.judge_cycle = { flash = 120, blink = 80 }
+
+theme.timing = {
+    fast = { 3, 169, 255 },
+    slow = { 255, 69, 3 },
 }
 
 theme.lamp = {
     noplay = { 58, 69, 86 },
-    failed = { 176, 65, 62 },
-    assist = { 178, 107, 240 },
-    light_assist = { 214, 140, 240 },
-    easy = { 89, 209, 133 },
-    normal = { 86, 140, 245 },
-    hard = { 240, 242, 245 },
-    exhard = { 242, 179, 61 },
-    fullcombo = { 76, 224, 208 },
-    perfect = { 255, 224, 138 },
-    max = { 255, 92, 168 },
+    failed = { 255, 0, 0 },
+    assist = { 255, 99, 253 },
+    light_assist = { 101, 99, 255 },
+    easy = { 0, 255, 36 },
+    normal = { 255, 187, 0 },
+    hard = { 223, 223, 223 },
+    exhard = { 255, 110, 110 },
+    fullcombo = { 0, 223, 255 },
+    perfect = { 244, 153, 242 },
+    max = { 234, 243, 0 },
 }
 
+theme.lamp_cycle = 50
+
 theme.clear = {
-    [0] = { name = "NO PLAY", color = theme.lamp.noplay, text = theme.color.muted },
-    [1] = { name = "FAILED", color = theme.lamp.failed },
-    [2] = { name = "ASSIST EASY", color = theme.lamp.assist },
-    [3] = { name = "LIGHT ASSIST EASY", color = theme.lamp.light_assist },
-    [4] = { name = "EASY", color = theme.lamp.easy },
-    [5] = { name = "NORMAL", color = theme.lamp.normal },
-    [6] = { name = "HARD", color = theme.lamp.hard },
-    [7] = { name = "EX HARD", color = theme.lamp.exhard },
-    [8] = { name = "FULL COMBO", color = theme.lamp.fullcombo },
-    [9] = { name = "PERFECT", color = theme.lamp.perfect },
-    [10] = { name = "MAX", color = theme.lamp.max },
+    [0] = { key = "noplay", name = "NO PLAY", color = theme.lamp.noplay, text = theme.color.muted },
+    [1] = { key = "failed", name = "FAILED", color = theme.lamp.failed },
+    [2] = { key = "assist", name = "ASSIST CLEAR", color = theme.lamp.assist },
+    [3] = { key = "light_assist", name = "LIGHT ASSIST CLEAR", color = theme.lamp.light_assist },
+    [4] = { key = "easy", name = "EASY CLEAR", color = theme.lamp.easy },
+    [5] = { key = "normal", name = "CLEAR", color = theme.lamp.normal },
+    [6] = { key = "hard", name = "HARD CLEAR", color = theme.lamp.hard },
+    [7] = { key = "exhard", name = "EX HARD CLEAR", color = theme.lamp.exhard },
+    [8] = { key = "fullcombo", name = "FULL COMBO", color = theme.lamp.fullcombo },
+    [9] = { key = "perfect", name = "PERFECT", color = theme.lamp.perfect },
+    [10] = { key = "max", name = "MAX", color = theme.lamp.max },
 }
 theme.clear_last = 10
 
@@ -102,10 +126,10 @@ theme.random_name = {
 
 theme.bpm_line = {
     main = theme.color.accent,
-    min = theme.difficulty[2],
-    max = theme.judge.poor,
-    other = theme.difficulty[3],
-    stop = theme.difficulty[5],
+    min = theme.tone.blue,
+    max = theme.tone.red,
+    other = theme.tone.yellow,
+    stop = theme.tone.violet,
     transition = theme.color.muted,
     width = 2,
 }
@@ -168,6 +192,14 @@ end
 
 function theme.clear_text(entry)
     return entry.text or entry.color
+end
+
+function theme.mix(color, toward, share)
+    local mixed = {}
+    for channel = 1, 3 do
+        mixed[channel] = math.floor(toward[channel] + (color[channel] - toward[channel]) * share + 0.5)
+    end
+    return mixed
 end
 
 function theme.hex(color, alpha)

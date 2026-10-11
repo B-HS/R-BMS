@@ -12,7 +12,7 @@ local FRAME_KINDS = { props.option.FOLDERBAR, props.option.SONGBAR, props.option
 local BAR_SET = "set.bar"
 local BAR_SPRITES = { "bar_song", "bar_folder", "bar_table", "bar_course", "bar_missing", "bar_command", "bar_search" }
 
-local LAMP = { x = 0, width = 8 }
+local LAMP = { x = 0, width = 8, sprite = "lamp_" }
 
 local LEVEL = { x = 16, digits = 3, sprite = "num24", id = "num.bar.level", kinds = 7 }
 local TROPHY = { x = 104, side = 16 }
@@ -37,7 +37,7 @@ local LABEL = { right = 714, pitch = 20 }
 local LABELS = {
     { sprite = "label_ln", color = theme.color.accent, row = 0 },
     { sprite = "label_random", color = theme.color.sub, row = 1 },
-    { sprite = "label_mine", color = theme.judge.poor, row = -1 },
+    { sprite = "label_mine", color = theme.tone.red, row = -1 },
     { sprite = "label_cn", color = theme.color.accent, row = 0 },
     { sprite = "label_hcn", color = theme.color.accent, row = 0 },
 }
@@ -126,7 +126,13 @@ local function lamps(s)
     local box = { x = LAMP.x, top = 0, w = LAMP.width, h = WHEEL.bar_height }
     local placed = {}
     for index = 0, theme.clear_last do
-        placed[index + 1] = s:dst(block, box, { color = theme.clear[index].color }, parent)
+        local lamp = theme.clear[index]
+        local frames = LAMP.sprite .. lamp.key
+        if s.sprites[frames] then
+            placed[index + 1] = s:dst(s:define_image(frames, { cycle = theme.lamp_cycle }), box, nil, parent)
+        else
+            placed[index + 1] = s:dst(block, box, { color = lamp.color }, parent)
+        end
     end
     return placed
 end

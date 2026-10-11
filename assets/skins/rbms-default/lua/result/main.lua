@@ -63,7 +63,7 @@ local function verdict(s, left, text_x, course)
     local bar = { x = left.x, top = area.top, w = HEAD.bar_width, h = area.h }
     local outcomes = {
         { op = props.option.RESULT_CLEAR, word = words.cleared, color = theme.color.accent },
-        { op = props.option.RESULT_FAIL, word = words.failed, color = theme.judge.poor },
+        { op = props.option.RESULT_FAIL, word = words.failed, color = theme.tone.red },
     }
     for _, outcome in ipairs(outcomes) do
         s:text({ text = outcome.word, size = size }, box, layout.appear(order, { op = { outcome.op }, color = outcome.color }))

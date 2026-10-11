@@ -285,6 +285,7 @@ function Builder:define_number(spec, digits)
     value.padding = spec.padding or props.padding.NONE
     value.zeropadding = spec.zeropadding or 0
     value.space = spec.space or 0
+    value.cycle = spec.cycle
     if spec.value ~= nil then
         value.value = spec.value
     elseif spec.saturate then

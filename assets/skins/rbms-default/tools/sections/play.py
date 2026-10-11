@@ -2,24 +2,25 @@ from __future__ import annotations
 
 from PIL import Image, ImageDraw
 
-from sprites import OPAQUE, WHITE, Rgb, Sprite, block, palette, tinted, word
+from sprites import OPAQUE, WHITE, Rgb, Sprite, block, digit_frames, palette, tinted, word_frames
 
 SURFACE = palette('color')
-LEVEL = palette('difficulty')
+TONE = palette('tone')
 JUDGE = palette('judge')
+FLASH = tuple(palette('judge_flash').values())
 LAMP = palette('lamp')
 
 BACKGROUND: Rgb = SURFACE['bg']
 UNLIT: Rgb = SURFACE['line']
-DRAIN: Rgb = JUDGE['miss']
+DRAIN: Rgb = TONE['rose']
 
 NOTE_COLORS: dict[str, Rgb] = {
     'white': SURFACE['text'],
     'cyan': SURFACE['accent'],
-    'red': LEVEL['4'],
-    'yellow': LEVEL['3'],
-    'green': LEVEL['1'],
-    'blue': LEVEL['2'],
+    'red': TONE['red'],
+    'yellow': TONE['yellow'],
+    'green': TONE['green'],
+    'blue': TONE['blue'],
 }
 NOTE_SIZE = (4, 8)
 NOTE_FOOT_ROWS = 1
@@ -34,15 +35,22 @@ MINE_SIZE = (4, 8)
 MINE_EDGE_ROWS = 2
 MINE_FILL_ALPHA = 130
 
-GAUGE_COLORS: tuple[Rgb, ...] = (LAMP['assist'], LAMP['easy'], LAMP['normal'], LAMP['hard'], LAMP['exhard'], JUDGE['poor'])
+GAUGE_COLORS: tuple[Rgb, ...] = (LAMP['assist'], LAMP['easy'], LAMP['normal'], LAMP['hard'], LAMP['exhard'], TONE['red'])
 GAUGE_NODE_SIZE = (4, 8)
 GAUGE_GAP_COLUMNS = 1
 GAUGE_BELOW_BORDER_SHARE = 0.55
 GAUGE_AHEAD_SHARE = 0.25
 GAUGE_TIP_WHITE_SHARE = 0.5
 
-JUDGE_WORDS = ('PGREAT', 'GREAT', 'GOOD', 'BAD', 'POOR', 'MISS')
 JUDGE_WORD_SIZE = 64
+JUDGE_WORDS: tuple[tuple[str, str, tuple[Rgb | None, ...]], ...] = (
+    ('pgreat', 'GREAT', FLASH),
+    ('great', 'GREAT', (JUDGE['great'], None)),
+    ('good', 'GOOD', (JUDGE['good'], None)),
+    ('bad', 'BAD', (JUDGE['bad'], None)),
+    ('poor', 'POOR', (JUDGE['poor'], None)),
+)
+COMBO_JUDGES = 3
 
 BOMB_FRAMES = 8
 BOMB_SIDE = 128
@@ -161,7 +169,8 @@ def beam(name: str) -> Sprite:
 
 def build() -> list[Sprite]:
     sprites = notes() + gauge()
-    sprites += [word(f'judge_{text.lower()}', text, JUDGE_WORD_SIZE) for text in JUDGE_WORDS]
+    sprites += [word_frames(f'judge_{name}', text, JUDGE_WORD_SIZE, colors) for name, text, colors in JUDGE_WORDS]
+    sprites += [digit_frames(f'combo_{name}', JUDGE_WORD_SIZE, colors) for name, _, colors in JUDGE_WORDS[:COMBO_JUDGES]]
     sprites += [bomb('bomb'), beam('beam')]
     sprites += [block('bar_h', BAR_LENGTH, BAR_THICKNESS), block('bar_v', BAR_THICKNESS, BAR_LENGTH)]
     return sprites

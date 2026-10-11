@@ -219,6 +219,7 @@ props.number = {
     TOTAL_EARLY = 423,
     TOTAL_LATE = 424,
     COMBOBREAK = 425,
+    POOR_PLUS_MISS = 426,
     TARGET_SCORE = 121,
     HIGHSCORE = 150,
     DIFF_HIGHSCORE = 152,

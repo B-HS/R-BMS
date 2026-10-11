@@ -274,7 +274,7 @@ local function judges(s)
         local top = JUDGES.top + (index - 1) * JUDGES.pitch
         local size = theme.type.caption
         s:text({ text = row.name, size = size }, { x = JUDGES.x, top = top, w = JUDGES.width }, { color = row.color, op = { ON_CHART } })
-        local spec = { sprite = JUDGES.sprite, ref = row.count, digit = JUDGES.digits, saturate = true, align = "right" }
+        local spec = { sprite = JUDGES.sprite, ref = row.count[1], digit = JUDGES.digits, saturate = true, align = "right" }
         local baseline = top + theme.cap_height(size)
         s:number(spec, { x = JUDGES.x, baseline = baseline, w = JUDGES.width }, kit.arriving({ color = theme.color.text, op = { ON_CHART, -UNPLAYED } }))
         local dash = { x = JUDGES.x, top = top, w = JUDGES.width }

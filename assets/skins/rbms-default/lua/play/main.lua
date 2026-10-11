@@ -28,11 +28,11 @@ local function properties(mode)
     table.insert(list, {
         name = name.DETAIL,
         item = {
-            { name = "Off", op = option.DETAIL_OFF },
             { name = "Fast-Slow", op = option.DETAIL_FAST_SLOW },
             { name = "Milliseconds", op = option.DETAIL_MILLISECONDS },
+            { name = "Off", op = option.DETAIL_OFF },
         },
-        def = "Off",
+        def = "Fast-Slow",
     })
     if mode.sides == 1 then
         table.insert(list, chosen(name.GRAPH, { name = "On", op = option.GRAPH_ON }, { name = "Off", op = option.GRAPH_OFF }))
@@ -64,7 +64,7 @@ local function failed(s)
     local timer = props.timer.FAILED
     s:rect(whole, theme.color.bg, { timer = timer, keys = { { time = 0, a = 0 }, { time = FAILED.cover_fade, a = FAILED.cover_alpha } } })
     local word = { x = 0, top = (theme.height - theme.cap_height(FAILED.size)) / 2, w = theme.width }
-    local falling = motion.slide_in(FAILED.at, FAILED.slide, 0, -theme.time.slide_distance, { timer = timer, color = theme.judge.poor })
+    local falling = motion.slide_in(FAILED.at, FAILED.slide, 0, -theme.time.slide_distance, { timer = timer, color = theme.tone.red })
     s:text({ text = "FAILED", size = FAILED.size, align = "center" }, word, falling)
 end
 

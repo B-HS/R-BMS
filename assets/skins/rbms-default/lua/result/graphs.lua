@@ -8,6 +8,7 @@ local graphs = {}
 
 local CAPTION_GAP = 28
 local OPAQUE = 255
+local BAND_SHARE = 0.1
 
 local GAUGE = {
     caption_top = 136,
@@ -35,7 +36,7 @@ local GAUGE_COLORS = {
     borderlineColor = theme.hex(theme.color.accent),
     grooveClearAndHardLineColor = theme.hex(theme.lamp.hard),
     exHardLineColor = theme.hex(theme.lamp.exhard),
-    hazardLineColor = theme.hex(theme.judge.poor),
+    hazardLineColor = theme.hex(theme.tone.red),
 }
 
 local TIMELINE = { caption_top = 446, height = 130, tempo_offset = 192, tempo_width = 80 }
@@ -50,23 +51,7 @@ local BPM_LINE = {
     width = theme.bpm_line.width,
 }
 
-local LEGEND = { chip = 10, chip_gap = 6, chip_drop = 2, item_gap = 20 }
-local KIND_LEGEND = {
-    beat = {
-        { "PG", 25, { 0, 136, 255 } },
-        { "GR", 25, { 0, 255, 136 } },
-        { "GD", 27, { 255, 255, 0 } },
-        { "BD", 26, { 255, 136, 0 } },
-        { "PR", 24, { 255, 0, 0 } },
-    },
-    popn = {
-        { "PG", 25, { 255, 94, 176 } },
-        { "GR", 25, { 255, 190, 50 } },
-        { "GD", 27, { 220, 70, 60 } },
-        { "BD", 26, { 108, 198, 255 } },
-        { "PR", 24, { 108, 198, 255 } },
-    },
-}
+local KIND_LEGEND = parts.judge_graph_legend
 local SIDE_LEGEND = {
     beat = {
         { "PG", 25, { 68, 255, 68 } },
@@ -79,6 +64,10 @@ local SIDE_LEGEND = {
         { "SLOW", 54, { 255, 136, 0 } },
     },
 }
+
+local function band(judge)
+    return theme.hex(theme.mix(KIND_LEGEND.beat[judge][3], theme.color.panel, BAND_SHARE), OPAQUE)
+end
 
 local TIMING = {
     caption_top = 810,
@@ -98,11 +87,11 @@ local TIMING_COLORS = {
     graphColor = theme.hex(theme.color.text, OPAQUE),
     averageColor = theme.hex(theme.color.accent, OPAQUE),
     devColor = theme.hex(theme.color.muted, OPAQUE),
-    PGColor = "1b3037ff",
-    GRColor = "1f2e18ff",
-    GDColor = "322a14ff",
-    BDColor = "322017ff",
-    PRColor = "321615ff",
+    PGColor = band(1),
+    GRColor = band(2),
+    GDColor = band(3),
+    BDColor = band(4),
+    PRColor = band(5),
     drawAverage = 1,
     drawDev = 1,
 }
@@ -155,22 +144,10 @@ local function gauge(s, main_state, right, height)
     return box
 end
 
-local function legend_items(s, right, top, items, op)
-    local size = theme.type.caption
-    local x = right.x + right.w
-    for index = #items, 1, -1 do
-        local label, width, color = table.unpack(items[index])
-        local label_x = x - width
-        local chip = { x = label_x - LEGEND.chip_gap - LEGEND.chip, top = top + LEGEND.chip_drop, w = LEGEND.chip, h = LEGEND.chip }
-        s:text({ text = label, size = size }, { x = label_x, top = top, w = width }, appear({ op = { op }, color = theme.color.muted }))
-        s:rect(chip, color, appear({ op = { op } }))
-        x = chip.x - LEGEND.item_gap
-    end
-end
-
 local function legend(s, right, top, table_of)
-    legend_items(s, right, top, table_of.beat, -props.option.KEYS_9)
-    legend_items(s, right, top, table_of.popn, props.option.KEYS_9)
+    local edge = right.x + right.w
+    parts.legend(s, edge, top, table_of.beat, appear({ op = { -props.option.KEYS_9 } }))
+    parts.legend(s, edge, top, table_of.popn, appear({ op = { props.option.KEYS_9 } }))
 end
 
 local function timeline(s, right)

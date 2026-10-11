@@ -97,15 +97,6 @@ def digit_meta(size: int) -> dict[str, int | list[int]]:
     return {'size': size, 'pad': GLYPH_PAD, 'ink': [ink_width(size, glyph) for glyph in DIGITS]}
 
 
-def digit_strip(name: str, size: int) -> Sprite:
-    width, height, baseline = digit_cell(size, DIGITS)
-    mask = Image.new('L', (width * DIGIT_COUNT, height), 0)
-    draw = ImageDraw.Draw(mask)
-    for column, glyph in enumerate(DIGITS):
-        draw_digit(draw, size, glyph, column * width, width, baseline)
-    return Sprite(name, tinted(mask), DIGIT_COUNT, 1, digit_meta(size))
-
-
 def signed_digit_strip(name: str, size: int) -> Sprite:
     width, height, baseline = digit_cell(size, DIGITS + ''.join(SIGN_MARKS))
     mask = Image.new('L', (width * SIGNED_COLUMNS, height * SIGNED_ROWS), 0)
@@ -116,13 +107,51 @@ def signed_digit_strip(name: str, size: int) -> Sprite:
     return Sprite(name, tinted(mask), SIGNED_COLUMNS, SIGNED_ROWS, digit_meta(size))
 
 
-def word(name: str, text: str, size: int, color: tuple[int, int, int] = WHITE) -> Sprite:
+def stacked(frames: list[Image.Image]) -> Image.Image:
+    width, height = frames[0].size
+    image = Image.new('RGBA', (width, height * len(frames)), (*WHITE, 0))
+    for row, frame in enumerate(frames):
+        image.paste(frame, (0, row * height))
+    return image
+
+
+def shades_of(mask: Image.Image, colors: tuple[Rgb | None, ...]) -> Image.Image:
+    blank = Image.new('RGBA', mask.size, (*WHITE, 0))
+    return stacked([blank if color is None else tinted(mask, color) for color in colors])
+
+
+def digit_mask(size: int) -> Image.Image:
+    width, height, baseline = digit_cell(size, DIGITS)
+    mask = Image.new('L', (width * DIGIT_COUNT, height), 0)
+    draw = ImageDraw.Draw(mask)
+    for column, glyph in enumerate(DIGITS):
+        draw_digit(draw, size, glyph, column * width, width, baseline)
+    return mask
+
+
+def digit_strip(name: str, size: int) -> Sprite:
+    return Sprite(name, tinted(digit_mask(size)), DIGIT_COUNT, 1, digit_meta(size))
+
+
+def digit_frames(name: str, size: int, colors: tuple[Rgb | None, ...]) -> Sprite:
+    return Sprite(name, shades_of(digit_mask(size), colors), DIGIT_COUNT, len(colors), digit_meta(size))
+
+
+def word_mask(text: str, size: int) -> Image.Image:
     font = font_at(size)
     top, bottom = glyph_rows(size, text)
     width = math.ceil(font.getlength(text)) + GLYPH_PAD * 2
     mask = Image.new('L', (width, bottom - top + GLYPH_PAD * 2), 0)
     ImageDraw.Draw(mask).text((GLYPH_PAD, GLYPH_PAD - top), text, font=font, fill=OPAQUE, anchor='ls')
-    return Sprite(name, tinted(mask, color), 1, 1, {'size': size, 'pad': GLYPH_PAD})
+    return mask
+
+
+def word(name: str, text: str, size: int, color: tuple[int, int, int] = WHITE) -> Sprite:
+    return Sprite(name, tinted(word_mask(text, size), color), 1, 1, {'size': size, 'pad': GLYPH_PAD})
+
+
+def word_frames(name: str, text: str, size: int, colors: tuple[Rgb | None, ...]) -> Sprite:
+    return Sprite(name, shades_of(word_mask(text, size), colors), 1, len(colors), {'size': size, 'pad': GLYPH_PAD})
 
 
 def block(name: str, width: int, height: int, color: tuple[int, int, int] = WHITE) -> Sprite:

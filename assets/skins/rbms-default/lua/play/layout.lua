@@ -34,13 +34,13 @@ local DOUBLE_FOOT_TOP = 928
 local BEAT_KEYS = { "white", "black", "white", "black", "white", "black", "white" }
 local BUTTON_COLORS = { "white", "yellow", "green", "blue", "red", "blue", "green", "yellow", "white" }
 local KIND_COLOR = { white = "white", black = "cyan", scratch = "red" }
-local KIND_TINT = { white = theme.color.text, black = theme.color.accent, scratch = theme.judge.poor }
+local KIND_TINT = { white = theme.color.text, black = theme.color.accent, scratch = theme.tone.red }
 local BUTTON_TINT = {
     white = theme.color.text,
-    yellow = theme.difficulty[3],
-    green = theme.difficulty[1],
-    blue = theme.difficulty[2],
-    red = theme.judge.poor,
+    yellow = theme.tone.yellow,
+    green = theme.tone.green,
+    blue = theme.tone.blue,
+    red = theme.tone.red,
 }
 
 local MODES = {
@@ -205,7 +205,7 @@ end
 function layout.of(mode, option)
     local view = mode.sides == 1 and single(mode, option) or double(mode)
     view.mode = mode
-    view.detail = option[layout.OPTION_NAME.DETAIL] or layout.OPTION.DETAIL_OFF
+    view.detail = option[layout.OPTION_NAME.DETAIL] or layout.OPTION.DETAIL_FAST_SLOW
     view.lanes = {}
     for _, field in ipairs(view.fields) do
         for _, lane in ipairs(field.lanes) do
