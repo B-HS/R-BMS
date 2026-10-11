@@ -4,8 +4,32 @@
 > 새 세션은 **이 문서부터** 읽는다. 현재 상태·아키텍처·실행법·할 일의 SSOT. (ai-process.md 원칙 1·14)
 > 베이스 룰: 프로젝트 작업 환경의 `AGENTS.md`와 llm-rules 전문(`ai-process`·`common`·`comments`·`git`·`security`)을 따른다. Rust 프로젝트에는 TS/JS 전용 규칙을 적용하지 않으며, 공통 원칙(문서는 `docs/`에 기록·정확한 이름·근본 해결·공식 문서 확인·검증 후 진행)은 그대로 적용한다.
 > 위치: 저장소 루트(2026-10-09 기준 `/Users/hyunseokbyun/development/R-BMS`). 빌드 `cargo build`, 테스트 `cargo test --workspace`(2026-09-17 스킨 시스템 K5 게이트 실측 3,181 통과·0 실패; 실제 오디오 장치 테스트 등 ignored 3건). lint 는 이제 게이트다 — `cargo fmt --all --check` 와 `cargo clippy --workspace --all-targets --all-features -- -D warnings` 가 CI 필수 통과 조건이고 툴체인은 `rust-toolchain.toml` 로 `1.95.0` 고정. 실행 정본은 `README.md`다.
-> git: **dev(작업)/prod(배포) 브랜치 모델**(CI는 dev, 릴리스는 prod → `docs/ci-release.md`). **커밋 메시지에 co-author(Claude) 넣지 않음**(사용자 명시 지시), 작성자 `Hyunseok Byun <gumyoincirno@gmail.com>`. `target`·`Cargo.lock`·라이브러리 차트 커밋 금지(.gitignore).
+> git: **dev(작업)/prod(배포) 브랜치 모델**(CI는 dev, 릴리스는 prod → `docs/ci-release.md`). **커밋 메시지에 co-author(Claude) 넣지 않음**(사용자 명시 지시), 작성자 `Hyunseok Byun <gumyoincirno@gmail.com>`. `target`·라이브러리 차트 커밋 금지(.gitignore). `Cargo.lock` 은 2026-10-11 부터 추적한다(D12).
 > 다음 할 일(로드맵)은 **`docs/roadmap.md`**, 백엔드 설계는 **`docs/backend/`**, 배포/CI는 **`docs/ci-release.md`**.
+
+---
+
+## 현재 작업 — 첫 실행 피드백 처리와 SKIN 메뉴 (2026-10-11)
+
+> 사용자 지시(2026-10-11, 웨이브 8 완료 뒤 실제로 실행해 보고): 결정 4건(D11~D14, `docs/acknowledge/2026-10-09-lua-skin-compat-decisions.md`)과 문제 4건, 요청 1건. 운용은 아래 스킨 작업과 같다: 위임은 Workflow 전용, 모델은 Opus(high 이하)와 Sonnet(xhigh 이하)만, 웨이브가 게이트를 통과하면 커밋·푸시하고 `gh run list` 로 CI 를 확인한다.
+
+- [x] M1. 검색할 때 설정·보조 옵션이 먹지 않는 문제 — 검색 결과 목록은 일반 목록과 똑같이 조작되고, 검색어를 치는 중에는 글자 키만 검색어가 갖는다. 스킨에 검색 칸이 있으면 단축키도 그 칸에 포커스를 준다(앱 검색 상자와의 이원화 제거).
+- [x] M2. 등록한 난이도표 URL 이 폴더에 나오지 않는 문제 — 실제 주소로 재현해 받기·해석·목록의 어느 단계에서 끊기는지 찾아 고친다. 실패하면 이유를 알린다.
+- [x] M3. 곡 이름 글자 깨짐 — 파서의 인코딩 판정(Shift_JIS 고정 → UTF-8·Shift_JIS·EUC-KR 판정)과 실제 앱의 글꼴 폴백을 함께 조사해 고친다. 파서 판을 올려 다시 읽게 한다.
+- [x] M4. FAST/SLOW 가 보이지 않는 문제 — 원인 확정 뒤 기본 스킨에서 기본으로 보이게 한다.
+- [x] M5. 결정 반영 — 레터박스 마이그레이션(D11), `Cargo.lock` 추적과 `--locked`(D12), 기본 스킨의 판정을 IIDX 대로·램프 색 등은 ModernChic 값대로(D13).
+- [ ] M6. SKIN 메뉴 — SKIN 을 설정 화면에서 빼 별도 화면으로 만든다. 왼쪽에 스킨 설정값(팩, 화면, 옵션·파일·오프셋), 오른쪽에 그 화면의 스킨 미리보기를 두고 값을 바꾸면 미리보기에 바로 반영한다.
+- [ ] M7. 검증·문서 — 게이트, CI, 캡처 확인, `docs/skin.md` 와 조사 문서 갱신.
+
+웨이브 9A 결과(2026-10-11, Workflow `wf_8f0628bd-66a`, 7 에이전트, 리뷰 major 5·minor 5 전부 수정). 게이트: fmt·clippy·`cargo test --workspace --no-fail-fast --locked` 4,964 통과·0 실패·ignored 5, 골든 불변, 두 팩의 환경 변수 테스트 통과. 메인이 검색 중 선곡과 SLOW 가 뜬 플레이 캡처를 확인.
+- M1 원인: `searching` 플래그 하나가 "치는 중"과 "결과 표시 중"을 겸해 검색이 걸린 내내 입력이 막혔다. 세 상태로 나누고 검색어를 선곡 화면이 갖게 했다(스킨 검색 칸은 표시만). IME 조합 지원.
+- M2 원인: 표 받기가 등록 주소를 JSON 으로만 읽어 표준 형식의 HTML 페이지 주소가 실패했고, 실패한 표가 숨겨진 채 "table added" 가 떴다. 실제 주소로 확인: 이름 "発狂BMS難易度表", 1,035 항목, 26 레벨. 사용자 설정의 `library.tables` 는 비어 있어 업데이트 뒤 주소를 다시 등록해야 한다.
+- M3 원인: 파서가 UTF-8 이 아니면 전부 Shift_JIS 로 읽었다. 사용자 라이브러리에서 문제 파일 15개(EUC-KR 13, BOM + Shift_JIS 2). 한자가 간체 글꼴로 그려지던 것도 고쳤다. 다음 실행에서 전체 재스캔.
+- M4 원인: 기본 스킨의 Judge Detail 기본값이 Off 였다(엔진은 정상). 기본값을 Fast-Slow 로.
+- M5: 스키마 4(레터박스), `Cargo.lock` 추적과 `--locked`(릴리스의 version 잡이 `cargo update --workspace` 로 잠금 파일도 올린다), 기본 스킨의 판정을 IIDX 식으로(PGREAT 는 "GREAT" 가 색을 돌며 번쩍임, 판정 수 표 5행 + 결과에 COMBO BREAK·EMPTY POOR)·램프와 난이도 색, 클리어 표기를 ModernChic 값으로.
+- 확인 못 한 것: 사용자 라이브러리 볼륨(`/Volumes/SSD`)이 수정 단계에서 분리돼 있어 BOM 규칙 변경 뒤의 전수 비교는 다시 돌리지 못했다. 실제 창의 IME 동작.
+
+M6 은 별도 Workflow(웨이브 9B).
 
 ---
 

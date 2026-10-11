@@ -56,7 +56,7 @@ R-BMS 는 화면마다 스킨 문서 하나를 읽어 그 화면을 단독으로
 | E3 | 기존 키보드 단축키를 유지하고 START(기본 A), SELECT(기본 W)를 새로 둔다. 옵션 패널 1은 START, 패널 2는 SELECT, 패널 3은 둘을 함께(또는 숫자 5) 누르고 있는 동안 열린다 | 패드의 표준 Start/Select 버튼에도 묶인다 |
 | E4 | 내장 play/select/result 화면이 폴백으로 남는다 | 문서가 없는 화면, 로드 실패, 24키 |
 | E5 | 스킨 폰트에 없는 글자(한글, 일본어 등)는 앱의 다국어 폰트로 그린다. beatoraja 는 사각형으로 그린다 | |
-| E6 | 기본 창 1280x720. DISPLAY 탭에 RESOLUTION(1280x720, 1600x900, 1920x1080, 2560x1440, 3840x2160)과 WINDOW MODE(WINDOWED, BORDERLESS)가 있다. 16:9 가 아니면 레터박스. BORDERLESS 는 항상 비율을 맞추고, 일반 창은 LETTERBOX 설정을 따른다. 새 설치의 LETTERBOX 기본값은 켬이다 | 이미 저장된 설정 파일에 값이 있으면 그 값을 따른다 |
+| E6 | 기본 창 1280x720. DISPLAY 탭에 RESOLUTION(1280x720, 1600x900, 1920x1080, 2560x1440, 3840x2160)과 WINDOW MODE(WINDOWED, BORDERLESS)가 있다. 16:9 가 아니면 레터박스. BORDERLESS 는 항상 비율을 맞추고, 일반 창은 LETTERBOX 설정을 따른다. LETTERBOX 기본값은 켬이다 | 설정 판 3 이하의 파일은 읽을 때 LETTERBOX 를 한 번 켠다(그 판은 고르지 않은 기본값도 꺼짐으로 적었다. 원본은 `settings.ron.v3.bak`). 판 4 부터는 적힌 값을 따른다. 계정 동기화로 내려받은 이전 판 설정에도 같은 규칙을 쓴다 |
 | E7 | 그리기와 타이밍은 beatoraja 체크아웃(HEAD `8320241d`) 그대로다. 입력 결함만 원작 의도로 고쳤다(luajava `Input.Keys` 의 UP 19, DOWN 20, LEFT 21, RIGHT 22) | |
 | E8 | 스킨의 IR 타이머 172~174 와 관련 옵션은 실제 IR 상태를 답한다. 랭킹 목록 값(380~399 등)의 스킨 연결은 후속이다 | §6 |
 | E9 | 9키는 기본 스킨에 문서가 있다. ModernChic 같은 9키 문서가 없는 팩에서는 9키만 내장 필드다 | |
@@ -72,6 +72,7 @@ R-BMS 는 화면마다 스킨 문서 하나를 읽어 그 화면을 단독으로
 | 클릭 | 스킨 클릭은 직전 프레임의 입력 맵으로 판정해 다음 프레임에 실행한다 |
 | 리플레이 | R-BMS 는 플레이마다 자동 저장하므로 스킨의 슬롯 저장 이벤트는 무동작이다. 슬롯 1 은 이번 플레이의 자동 저장 결과다 |
 | 선곡 입력 잠금 | 선곡의 STARTINPUT 은 입력 잠금이 아니다 |
+| 곡 검색 | 검색 상자는 하나다. 스킨에 검색 칸(검색어를 쓰는 editable text, ref 30)이 있으면 `/`, 숫자 0, 칸 클릭이 모두 그 칸에 치게 하고 앱의 검색 상자는 뜨지 않는다. 칸이 없는 스킨과 내장 화면에서는 앱의 검색 상자가 뜬다. 어느 쪽이든 글자마다 목록이 좁혀지고(beatoraja 는 확정할 때 한 번), 한글·가나는 입력기로 조합된다. 치는 중에는 글자·편집 키만 검색어가 갖는다: ↑↓·휠·F3·F9·스킨 버튼은 그대로 동작하고, F1·F2·F4·F12·Tab 과 패드 버튼은 입력을 확정한 뒤 동작한다. Enter 는 확정(곡 시작은 한 번 더), Esc 는 취소. 확정한 결과 목록은 일반 목록과 같게 조작되고 Esc 로 검색을 연 폴더와 행으로 돌아간다. 폴더 경로(text 1000)는 beatoraja 의 검색 폴더처럼 `Search : '검색어' > ` 가 된다. 경로를 그리지 않는 스킨에는 앱이 `SEARCH <검색어> N HITS` 표식을 덧그린다 |
 | 스킨 옵션이 앱 설정과 겹칠 때 | 스킨 옵션이 우선한다. 스킨이 그리는 화면에서 의미가 없어진 설정 행에는 표지를 붙인다(§2.5) |
 
 ## 2. 스킨 팩 쓰기
@@ -211,16 +212,18 @@ SCORE GRAPH 는 스킨 선곡 위의 기록 모달이 읽으므로 표지 없이
 
 ### 3.4 사용자 옵션
 
-SKIN 탭의 옵션 행으로 고른다. 기본값은 먼저 적힌 쪽이다. 파일 행(filepath)은 없다(자산 변종을 두지 않았다).
+SKIN 탭의 옵션 행으로 고른다. 기본값은 먼저 적힌 쪽이고, Judge Detail 만 Fast-Slow 가 기본이다. 파일 행(filepath)은 없다(자산 변종을 두지 않았다).
 
 | 문서 | 옵션 |
 | --- | --- |
 | decide | Stage Image: Show / Hide. Note Graph: Show / Hide |
 | select | Stage Image: Show / Hide |
-| play5, play7 | Field Side: Left / Right. Scratch Side: Left / Right. Judge Detail: Off / Fast-Slow / Milliseconds. Score Graph: On / Off |
+| play5, play7 | Field Side: Left / Right. Scratch Side: Left / Right. Judge Detail: Off / Fast-Slow / Milliseconds(기본 Fast-Slow). Score Graph: On / Off |
 | play9 | Judge Detail. Score Graph |
 | play10, play14 | Judge Detail |
 | result, courseresult | 없음 |
+
+Judge Detail 이 Fast-Slow 이면 PGREAT 가 아닌 판정에서 판정 글자 바로 위에 FAST(파랑) 또는 SLOW(빨강)가 뜨고, Milliseconds 이면 어긋난 시간이 ms 로 뜬다(빠르면 +). DP 는 친 쪽 필드에만 뜬다. Off 로 저장해 둔 설정은 그대로 Off 다.
 
 선곡의 사이드 메뉴(톱니와 스피커 아이콘)는 QUICK SETTINGS 6행과 VOLUME 3개를 연다. 패널 1~3(플레이 옵션, 보조 옵션, 세부 옵션)은 START(기본 A), SELECT(기본 W), 둘을 함께(또는 숫자 5)를 누르고 있는 동안 열려 있다(beatoraja 와 같다).
 
@@ -368,14 +371,16 @@ RBMS_SKIN_PACK=$PWD/assets/skins/rbms-default RBMS_SKIN_CAPTURE_DIR=<폴더> \
 | 선곡 | 종류별 노트 수(350~353), 밀도(360~365), 주 BPM(92)은 빈칸이다 | songdb 열 추가와 전체 재스캔이 필요해 별도 작업(D9) |
 | 선곡 | 표 이름·표 레벨(text 1001~1003, op 1008)은 선곡에서 빈칸이다. 결정 화면에서는 채워진다 | 미지원 |
 | 선곡 | 패널 2의 BPM GUIDE, JUDGE AREA, MARK NOTE, NO MINE 과 패널 3의 일부 수치는 대응하는 설정이 없어 `NOT AVAILABLE` 이다 | |
-| 선곡 | 앱이 스킨 위에 덧그리는 것과 스킨의 정합: `/` 검색 상자가 스킨의 검색 칸과 따로 뜬다, IR 랭킹 패널이 정보 영역 오른쪽 124px 을 덮지 못한다, 옵션 오버레이가 반투명이라 뒤가 비친다, 토스트가 목록 아래쪽 막대를 덮는다 | 스킨으로 고칠 수 없는 앱 단위 작업 |
+| 선곡 | 앱이 스킨 위에 덧그리는 것과 스킨의 정합: IR 랭킹 패널이 정보 영역 오른쪽 124px 을 덮지 못한다, 옵션 오버레이가 반투명이라 뒤가 비친다, 토스트가 목록 아래쪽 막대를 덮는다 | 스킨으로 고칠 수 없는 앱 단위 작업 |
 | 선곡 | 판정 알고리즘이 Score 일 때 QUICK SETTINGS 의 해당 행이 움직이지 않고 `SCORE (SET IN SETTINGS)` 로 알린다 | 번호 체계가 beatoraja 와 같다 |
 | 플레이 | 미스 레이어 분리, BACKBMP·배너, 키별 판정 이미지 인덱스, bgaExpand 설정, 오토플레이 중 숫자키 배속, PMS 의 박자 확대는 원천 데이터가 없어 빠졌다 | |
 | 플레이 | 곡(BMS)의 BGA 동영상은 그리지 않는다. 스킨의 동영상 source 만 디코드한다 | 같은 디코더로 후속(웨이브 9) |
 | 결과 | 다시 하기, 다음 곡이 가능한지 알리는 속성이 없어 불가능한 런에서도 R, N 안내가 나온다. judgegraph 는 색 지정을 받지 않는다(엔진 고정 팔레트) | |
 | 화면 | 24키 문서, type 9 스킨 설정 화면, skinpreview, `filter != 0` 전용 bilinear 셰이더는 없다 | 웨이브 9 |
 | 설정 | 스킨 선택·옵션(`skin` 그룹 전체)은 기기 로컬이다. 계정 동기화로 올리거나 내려받지 않는다. 문서 절대 경로가 키라서 기기 간에 옮길 수 없다 | 팩 이름 기준 키로 바꾸는 별도 작업이 필요하다 |
-| 설정 | 새 설치의 LETTERBOX 기본값만 켬이다. 이미 저장된 설정 파일은 대부분 꺼짐으로 적혀 있어 그대로 꺼져 있다 | 켜려면 스키마 버전을 올리는 마이그레이션이 필요하다. 사양의 "명시적 값은 유지"와 충돌해 결정 대기 |
+| 설정 | 판 3 이하의 설정 파일에서 일부러 꺼 둔 LETTERBOX 도 업데이트 뒤 한 번 켜진다 | 그 판은 고른 값과 기본값을 구별해 적지 않았다. 다시 끄면 유지된다 |
+| 선곡 | 곡 검색어를 치는 중에는 마우스로 다른 곳을 눌러도 입력이 끝나지 않는다(beatoraja 는 확정한다). 키를 누르고 있어도 글자가 반복되지 않는다 | Enter 로 확정, Esc 로 취소 |
+| 곡 정보 | 짧은 한글만 든 EUC-KR 차트 일부(모든 바이트가 반각 가나 범위인 경우)와 Shift_JIS 파일에 다른 인코딩 한 줄이 섞인 차트는 반각 가나로 보일 수 있다 | 인코딩은 파일 전체에 한 번 판정하고 동점은 Shift_JIS 다(`crates/rbms-parser/src/encoding.rs`) |
 | 확인 | 한글·일본어 제목의 폭, 기준선, 축소는 캡처로 확인하지 못했다(하니스에는 번들 Inter 하나뿐이고 실제 앱은 시스템 글꼴을 쓴다) | 수동 점검 항목에 포함 |
 | 확인 | 실제 GPU 창에서의 첫 실행, 마우스 조작, 소리, 1280x720 창은 사람이 확인해야 한다 | `docs/quality-assurance/2026-10-11-default-skin-manual-check.md` |
 | 확인 | Windows 와 Linux 에서의 결과는 푸시 뒤 CI 로 확인한다 | `docs/ci-release.md` |
