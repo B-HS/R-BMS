@@ -382,7 +382,7 @@ fn a_failure_is_said_on_one_line_and_shortly_where_there_is_little_room() {
     assert!(whole.contains('\n'), "the fixture's failure is one line, so nothing is being left out: {whole:?}");
     let loaded = fixture.skins.info(&fixture.config);
     assert!(loaded.contains("no such asset") && !loaded.chars().any(char::is_control), "{loaded:?}");
-    assert!(loaded.contains(&*pack.to_string_lossy()), "the LOADED row does not say where the document is: {loaded}");
+    assert!(loaded.contains(&*plain_path(&pack).to_string_lossy()), "the LOADED row does not say where the document is: {loaded}");
 
     let short = fixture.skins.failure_line(&fixture.config, DECIDE).expect("a failed read has a line");
     assert!(short.starts_with("decide.luaskin") && short.contains("no such asset"), "{short}");
@@ -403,6 +403,7 @@ fn a_reason_names_files_from_the_documents_folder_down() {
     );
     assert_eq!(reason_beside("C:\\skins\\pack\\play7.luaskin: bad", Path::new("C:\\skins\\pack/play7.luaskin")), "play7.luaskin: bad");
     assert_eq!(reason_beside("/skins/other/play7.luaskin: bad", document), "/skins/other/play7.luaskin: bad");
+    assert_eq!(reason_beside("C:\\skins\\pack/play7.luaskin: bad", Path::new("\\\\?\\C:\\skins\\pack/play7.luaskin")), "play7.luaskin: bad");
     assert_eq!(reason_beside("play7.luaskin: bad", Path::new("play7.luaskin")), "play7.luaskin: bad");
     assert_eq!(first_line("one\tline\r\nand a traceback\n\tunder it"), "one line");
 }

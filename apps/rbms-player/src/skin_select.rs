@@ -1123,11 +1123,18 @@ pub(crate) fn pack_in_effect(forced: Option<&Path>, config: &Config, settings_pa
 
 /// A reason a document could not be read, with the folder the document is in left out of every path
 /// in it: the document is named by its file's name, and a file it loads from its folder down.
+///
+/// The folder is looked for as the document's path spells it and without Windows' verbatim prefix
+/// ([`plain_path`]): a path that was made canonical carries the prefix there, and the reason a
+/// loader gives spells the same folder without it.
 fn reason_beside(reason: &str, document: &Path) -> String {
-    let Some(folder) = document.parent().map(|folder| folder.to_string_lossy().into_owned()).filter(|folder| !folder.is_empty()) else {
+    let Some(folder) = document.parent().filter(|folder| !folder.as_os_str().is_empty()) else {
         return reason.to_owned();
     };
-    PATH_SEPARATORS.iter().fold(reason.to_owned(), |reason, separator| reason.replace(&format!("{folder}{separator}"), ""))
+    let spellings = [folder.to_string_lossy().into_owned(), plain_path(folder).to_string_lossy().into_owned()];
+    spellings
+        .iter()
+        .fold(reason.to_owned(), |reason, folder| PATH_SEPARATORS.iter().fold(reason, |reason, separator| reason.replace(&format!("{folder}{separator}"), "")))
 }
 
 /// The first line of a reason, which is the part of it that is said on screen, with nothing in it a
