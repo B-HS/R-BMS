@@ -18,8 +18,8 @@
 - [x] M3. 곡 이름 글자 깨짐 — 파서의 인코딩 판정(Shift_JIS 고정 → UTF-8·Shift_JIS·EUC-KR 판정)과 실제 앱의 글꼴 폴백을 함께 조사해 고친다. 파서 판을 올려 다시 읽게 한다.
 - [x] M4. FAST/SLOW 가 보이지 않는 문제 — 원인 확정 뒤 기본 스킨에서 기본으로 보이게 한다.
 - [x] M5. 결정 반영 — 레터박스 마이그레이션(D11), `Cargo.lock` 추적과 `--locked`(D12), 기본 스킨의 판정을 IIDX 대로·램프 색 등은 ModernChic 값대로(D13).
-- [ ] M6. SKIN 메뉴 — SKIN 을 설정 화면에서 빼 별도 화면으로 만든다. 왼쪽에 스킨 설정값(팩, 화면, 옵션·파일·오프셋), 오른쪽에 그 화면의 스킨 미리보기를 두고 값을 바꾸면 미리보기에 바로 반영한다.
-- [ ] M7. 검증·문서 — 게이트, CI, 캡처 확인, `docs/skin.md` 와 조사 문서 갱신.
+- [x] M6. SKIN 메뉴 — SKIN 을 설정 화면에서 빼 별도 화면으로 만든다. 왼쪽에 스킨 설정값(팩, 화면, 옵션·파일·오프셋), 오른쪽에 그 화면의 스킨 미리보기를 두고 값을 바꾸면 미리보기에 바로 반영한다.
+- [x] M7. 검증·문서 — 게이트, CI, 캡처 확인, `docs/skin.md` 와 조사 문서 갱신.
 
 웨이브 9A 결과(2026-10-11, Workflow `wf_8f0628bd-66a`, 7 에이전트, 리뷰 major 5·minor 5 전부 수정). 게이트: fmt·clippy·`cargo test --workspace --no-fail-fast --locked` 4,964 통과·0 실패·ignored 5, 골든 불변, 두 팩의 환경 변수 테스트 통과. 메인이 검색 중 선곡과 SLOW 가 뜬 플레이 캡처를 확인.
 - M1 원인: `searching` 플래그 하나가 "치는 중"과 "결과 표시 중"을 겸해 검색이 걸린 내내 입력이 막혔다. 세 상태로 나누고 검색어를 선곡 화면이 갖게 했다(스킨 검색 칸은 표시만). IME 조합 지원.
@@ -29,7 +29,9 @@
 - M5: 스키마 4(레터박스), `Cargo.lock` 추적과 `--locked`(릴리스의 version 잡이 `cargo update --workspace` 로 잠금 파일도 올린다), 기본 스킨의 판정을 IIDX 식으로(PGREAT 는 "GREAT" 가 색을 돌며 번쩍임, 판정 수 표 5행 + 결과에 COMBO BREAK·EMPTY POOR)·램프와 난이도 색, 클리어 표기를 ModernChic 값으로.
 - 확인 못 한 것: 사용자 라이브러리 볼륨(`/Volumes/SSD`)이 수정 단계에서 분리돼 있어 BOM 규칙 변경 뒤의 전수 비교는 다시 돌리지 못했다. 실제 창의 IME 동작.
 
-M6 은 별도 Workflow(웨이브 9B).
+웨이브 9B 결과(2026-10-11, Workflow `wf_56291723-64d`, 5 에이전트: 설계·골격 → 미리보기 엔진 ∥ 메뉴 화면 → 리뷰 → 수정·문서. 리뷰 major 2·minor 7 전부 수정). 게이트: fmt·clippy·`cargo test --workspace --no-fail-fast --locked` 5,054 통과·0 실패·ignored 5, 골든 불변, 두 팩의 환경 변수 테스트와 GPU 사각형 비교 통과. 메인이 기본 스킨 7키(옵션 변경 뒤)와 ModernChic 선곡의 SKIN 메뉴 캡처를 확인.
+- M6: SKIN 은 Settings 에서 빠져 독립 화면(`stage/skin_menu.rs`, `Stage::SkinMenu`)이 됐다. 왼쪽에 팩·화면·문서·로드 상태·옵션·파일·오프셋 행, 오른쪽에 그 화면의 스킨을 예시 데이터로 그린 미리보기(`skin_preview.rs`, 사각형 그리기 어댑터 `rbms_render::RegionRenderer`). 값을 바꾸면 미리보기에 바로 반영된다. 들어가는 길: 선곡의 F12, 스킨의 SKIN 버튼(이벤트 14), Settings 탭 줄의 "SKIN MENU >" 단추. 설계 `docs/plan/2026-10-11-skin-menu.md`.
+- 남은 것: 키를 누르고 있어도 값이 반복되지 않는다(앱 전체 동작. Shift+좌우로 오프셋 열 칸). 옵션 변경과 장면 반복 때 2~3프레임 검게 보인다. 키 설정 화면은 미리보기가 없다. 실제 창 확인 항목은 `docs/quality-assurance/2026-10-11-default-skin-manual-check.md` §3.7.
 
 ---
 

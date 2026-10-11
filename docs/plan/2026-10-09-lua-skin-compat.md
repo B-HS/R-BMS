@@ -1,6 +1,6 @@
 # beatoraja 형식 Lua 스킨 완전 호환과 기본 스킨 교체 — 사양
 
-> 최종 갱신 2026-10-11 · 상태: 웨이브 1~8 구현 완료(각 웨이브 아래 진행 기록), 웨이브 9 는 별도 지시 · 기준 커밋 `9ce92bb` · 체크리스트 `docs/PROCESS.md` L1~L7
+> 최종 갱신 2026-10-11 · 상태: 웨이브 1~8 구현 완료(각 웨이브 아래 진행 기록), 웨이브 9 는 별도 지시(9A 실행 피드백, 9B SKIN 메뉴는 완료. 9B 설계서 `docs/plan/2026-10-11-skin-menu.md`) · 기준 커밋 `9ce92bb` · 체크리스트 `docs/PROCESS.md` L1~L7
 > 조사 근거: `docs/reference/skin-compat/`(색인 `README.md`). 이 문서의 `[b3 §5]` 같은 표기는 그 폴더의 보고서 절이다.
 > 결정 기록: `docs/acknowledge/2026-10-09-lua-skin-compat-decisions.md`
 
@@ -129,7 +129,7 @@
 | RESULT (7) | 타이머 150/151/152 첫 프레임, `input` 동안 입력 잠금, FADEOUT 뒤 전환. 키 0~3 OK, 5 게이지 종류 전환, 리플레이 슬롯 [b4 §5] |
 | COURSERESULT (15) | 스킨 화면. 결과 헬퍼 재사용 [b4 §6] |
 | CONFIG (8) | 내장 키 설정 유지. 스킨은 헤더만 인식 |
-| SKINCONFIG (9) | SKIN 탭 유지. type 9 Stage 는 후속 |
+| SKINCONFIG (9) | 내장 SKIN 메뉴(웨이브 9B 에서 Settings 의 SKIN 탭을 독립 화면으로 옮겼다. 왼쪽 설정 행, 오른쪽 미리보기). type 9 문서를 그리는 Stage 는 후속 |
 | 직접 실행(명령줄 차트·리플레이) | Play(PRELOAD) → Result → 종료 또는 선곡 |
 
 스킨이 없을 때(내장 폴백) Stage 는 헤더 시간값을 0 으로 본 같은 상태기계를 탄다(즉시 전환). 뷰 모델은 새 호스트 모델에서 내장 뷰(`SelectView`/`HudView`/`ResultView`)로 내려 변환한다 [99 P4].
@@ -141,7 +141,7 @@ R-BMS 고유 규칙
 - 플레이 탈출은 R-BMS 방식(Esc 홀드/두 번) 유지. FAILED/FINISHED 중 Esc 는 연출 건너뛰기 [99 H13].
 - 결과: R = REPLAY_SAME, N(다음 곡)은 고유 유지. 입력 잠금은 둘 다에 적용 [99 H8].
 - 선곡: 곡 목록은 원형 인덱스. 막대 0개면 songlist 를 그리지 않고 시스템 안내를 띄운다 [99 M2·H1]. 미리듣기 재생 중에는 선택 BGM 을 멈춘다 [99 H14].
-- 스킨 버튼 대응: 13 → 키 설정, 14 → SKIN 탭, PRACTICE → Practice Stage, AUTOPLAY → 오토플레이 시작, REPLAY1~4 → 최근 리플레이 4개(없으면 무동작), 90 → 즐겨찾기 토글 [99 H3·H4].
+- 스킨 버튼 대응: 13 → 키 설정, 14 → SKIN 메뉴(웨이브 9B 이전에는 Settings 의 SKIN 탭), PRACTICE → Practice Stage, AUTOPLAY → 오토플레이 시작, REPLAY1~4 → 최근 리플레이 4개(없으면 무동작), 90 → 즐겨찾기 토글 [99 H3·H4].
 - 스크래치 방향 등 스킨 옵션과 앱 설정이 겹치면 스킨 옵션이 우선하고 앱 설정 행은 숨긴다. 스킨 화면에서 의미 없는 설정 행(`five_key_layout`, `judge_text_y`, `show_white_number`, `score_graph`, `result_graphs`)은 "내장 폴백 전용"으로 표시한다 [99 H10·H11].
 
 ### 4.6 렌더
@@ -438,6 +438,8 @@ R-BMS 고유 규칙
 ### 웨이브 9 — 후속(이번 범위 밖, 별도 지시)
 
 IR 랭킹·라이벌의 스킨 연결, type 9 스킨 설정 Stage, customTimers/customEvents, 24키 문서, `filter != 0` 전용 bilinear 셰이더, skinpreview, 같은 디코더로 BGA 동영상, 선곡 화면의 종류별 노트 수·밀도·주 BPM(songdb 열 추가와 `PARSER_VERSION` 상승에 따른 전체 재스캔. D9).
+
+별도 지시로 끝난 것: 9A(실행 피드백 처리, 결정 D11~D14), 9B(SKIN 메뉴: 스킨 설정을 Settings 에서 빼 독립 화면으로 만들고 오른쪽에 예시 데이터로 움직이는 미리보기를 둠. 설계와 검증은 `docs/plan/2026-10-11-skin-menu.md`, 사용자 설명은 `docs/skin.md` §2.2).
 
 ## 7. 검증
 

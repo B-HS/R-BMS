@@ -21,7 +21,7 @@ R-BMS reimplements the core PLAY loop of a GPL-3.0 reference implementation in R
 - **Song select** — recursive library scan, folders and difficulty tables (`data.json`), search and sort, `#PREVIEW` or autoplay preview, cover art, note density graph, local records with replay playback
 - **Result** — judge counts, FAST / SLOW, max combo, gauge, clear lamp, rank graph and delta against your best
 - **Replays** — saved per play, replayable with the same seed and options, analysis mode with seek, speed and per-note timing
-- **Skins and themes** — a built-in default skin for every screen (select, decide, play 5/7/9/10/14 keys, result, course result) from the first run; beatoraja-format Lua skins (`.luaskin`) and JSON skins load unmodified from a skin pack folder, with per-screen selection and customisation on the SKIN tab; mp4 (H.264) video sources; any TTF font with full Unicode fallback; built-in screens and a RON theme remain as the fallback
+- **Skins and themes** — a built-in default skin for every screen (select, decide, play 5/7/9/10/14 keys, result, course result) from the first run; beatoraja-format Lua skins (`.luaskin`) and JSON skins load unmodified from a skin pack folder, with per-screen selection and customisation on the SKIN menu, which previews the skin as you change it; mp4 (H.264) video sources; any TTF font with full Unicode fallback; built-in screens and a RON theme remain as the fallback
 - **Input** — every lane and control key rebindable in-app, conflict detection
 - **IR** — sign in, submit scores, browse rankings, sync settings, manage rivals and upload or replay ghosts, all from the in-game SETTINGS NETWORK tab and the song-select ranking panel
 - **Debug** — on-screen overlay with FPS, memory, audio clock and judge state
@@ -71,9 +71,9 @@ The default skin `rbms-default` draws every screen from the first run, with no s
 
 To use another skin pack (a folder of beatoraja-format `.luaskin` files, for example one written for beatoraja; JSON skins work too):
 
-1. Press `Tab` on the song select to open SETTINGS and go to the SKIN tab.
+1. Press `F12` on the song select to open the SKIN menu (the SKIN button of a skin opens it too, and so does `F12` or the `SKIN MENU >` button in SETTINGS). The settings are listed on the left; the right half draws the skin of the screen being configured with sample data, live.
 2. On `PACK FOLDER` press `Enter` and choose the pack's folder. Pressing the left arrow clears it and returns to the default skin. For one run only, set `RBMS_SKIN_PACK=/path/to/pack` instead.
-3. A screen the pack has no document for is drawn by the player's built-in screen, not by the default skin. The same tab lets you pick a different document per screen and change the options, files and offsets a document offers.
+3. `Tab` (or a click on the strip above the preview) changes the screen. A screen the pack has no document for is drawn by the player's built-in screen, not by the default skin, and the preview says so. The same menu lets you pick a different document per screen and change the options, files and offsets a document offers; the preview follows each change. `Esc` saves and goes back.
 
 Skins can read their own folder but cannot write into it, open files outside it, or reach the network. If a skin fails to load, the player says which file failed and draws the built-in screen. [docs/skin.md](docs/skin.md) (Korean) has the details: pack rules, the default skin, the Lua environment, the `rbms-cli skin-dump` checker and the known limits. Third-party notices for the bundled video decoder and font are in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
@@ -85,6 +85,7 @@ Skins can read their own folder but cannot write into it, open files outside it,
 | → / Enter | Open / play | — |
 | ← / Esc | Back / quit | Leave (result if no notes remain) |
 | Tab | Settings | — |
+| F12 | Skin menu (settings on the left, a live preview on the right) | — |
 | ← → (play) | — | Lane cover |
 | [ ] | — | Lift |
 | O / T / R / `/` / F3 | Folders / tables / records / search / sort | — |

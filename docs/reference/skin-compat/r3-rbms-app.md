@@ -1,6 +1,17 @@
 # R3 — R-BMS 앱(apps/rbms-player) 스킨 배선·화면 구성·입력 현황과 격차
 
-> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 9A(실행 피드백: 검색, 표, 인코딩, FAST/SLOW) 반영 ·설치·기본 선택) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 9B(SKIN 메뉴와 미리보기) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 9B 반영 사항 (2026-10-11)
+
+스킨 설정이 Settings 의 SKIN 탭에서 독립 화면 SKIN 메뉴로 옮겨졌다. 설계서는 `docs/plan/2026-10-11-skin-menu.md`. 본문과 아래 웨이브들의 "SKIN 탭"은 전부 SKIN 메뉴로 읽는다.
+
+- (Stage) `Stage::SkinMenu(Box<SkinMenuState>)`·`StageId::SkinMenu` 가 생겨 Stage 는 12개다(`stage/skin_menu.rs`). 왼쪽은 `settings_rows(SettingTab::Skin)` 의 행 목록(고정 6행 + 문서의 옵션·파일·오프셋), 오른쪽은 `PREVIEW_RECT`(424,84,832,468) 안의 미리보기다. §1 의 Stage 표와 §4 의 "SKIN 탭" 서술은 이것으로 대체된다. `SettingTab::Skin` 과 `SETTINGS` 의 행 6개, 설정 파일의 `skin` 그룹은 그대로이고(`SettingTab::ALL` 9개 유지), Settings 화면은 `SettingTab::SHOWN`(8개)으로 탭 띠를 그린다
+- (진입) 이벤트 14(`BUTTON_SKINSELECT` → `SelectEvent::SkinConfig`)와 선곡의 F12(`SKIN_MENU_KEY`, 내장 선곡 포함), Settings 의 F12 와 탭 띠 끝 `SKIN MENU >` 단추가 `Transition::Open(SkinMenuState::stage())` 를 낸다. 웨이브 5 반영 사항(W5-3b)의 "F12 → 설정 SKIN 탭"은 대체된다. Esc 는 `save_settings` 뒤 `Transition::Back`
+- (미리보기) `skin_preview.rs` 의 `SkinPreview`(`update`·`draw(rect)`·`settings_changed`·`release`·`waits_in_the_dark`)가 `config.skin.screen` 의 문서를 예시 상태로 그린다. 프레임은 `skin_screen/preview.rs` 의 `AppShared::draw_skin_preview` 가 `with_skin_frame` 과 같은 부품으로 만들되 시스템 값은 예시(`PLAYER`, 기록 없음, IR 오프라인), `HostCall` 은 버리고(무음, 이벤트·쓰기 없음), 입력 지도를 남기지 않고, `rbms_render::RegionRenderer`(`skin_preview/region.rs` 의 `with_region`)로 사각형 안에만 그린다. 오프셋 환산과 `host.window` 는 창 전체 크기다. 예시 상태는 화면 모듈의 자식에 있다: `stage/select/skin_preview.rs`, `stage/play/skin_preview.rs`(적어 둔 손으로 연주하는 `PlaySession`), `stage/result/skin_preview.rs`, `skin_preview/decide.rs`
+- (장면) 미리보기는 `begin_skin_scene` 이 아니라 `begin_skin_preview_scene(screen)` 으로 장면을 시작한다: 타이머와 장면 시계만 되돌리고 그 화면의 Lua 문서만 만료시키며(`SkinLibrary::expire_scripted_for`), 주차된 화면을 풀지 않고 스킨 소리를 끊지 않는다. 그래서 메뉴 아래에 주차된 선곡 화면은 컴파일된 채 남아 돌아간 첫 프레임에 그려진다. 미리본 화면을 떠날 때와 메뉴를 떠날 때는 그 화면의 Lua 문서를 버린다(`drop_scripted_for`). 장면의 시각은 미리보기가 `dt` 로 직접 센다
+- (라이브러리) `SkinLibrary::info` 는 실패 이유의 첫 줄만 답한다(스택 트레이스 제외). `failure_line`(문서 폴더 경로를 뺀 한 줄), `pack_trouble`(문서가 없는 화면에 대해: 팩 폴더 없음, 또는 헤더가 읽히지 않는 팩의 Lua 스킨과 이유), `pack_value` 의 `(MISSING) ` 표지가 생겼다. `read_and_compile_skin` 은 실패 알림 문구를 인자로 받아 미리보기에서는 `skin <파일> did not load: <이유>` 로 알린다
+- (자원) 화면 종류를 바꾸면 이전 종류의 컴파일된 화면·텍스처·동영상이 다음 `finish_skin_frame` 에 놓인다. 화면 종류 300회 전환 뒤 텍스처는 한 화면분, 메뉴를 떠난 뒤 텍스처 0·동영상 0(리뷰 실측)
 
 ## 웨이브 9A 반영 사항 (2026-10-11)
 
