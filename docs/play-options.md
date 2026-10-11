@@ -1,7 +1,7 @@
 # 플레이 옵션
 
-> 최종 갱신 2026-10-11 · 웨이브 10B(PLAY 메뉴. 작업 트리 기준, 커밋 전) 기준
-> 대상: 플레이 중 스크롤·가림막·판정 타이밍을 정하는 옵션과 그 키, 그 옵션을 바꾸는 화면인 PLAY 메뉴(7절). 스킨이 그리는 옵션(Lane Width 등)은 [skin.md](./skin.md) 3.4절, 구현 위치는 [crates.md](./crates.md)를 본다. PLAY 메뉴의 설계는 [plan/2026-10-11-play-menu.md](./plan/2026-10-11-play-menu.md).
+> 최종 갱신 2026-10-11 · 웨이브 10C(판정 표시와 부위별 불투명도. 작업 트리 기준, 커밋 전) 기준
+> 대상: 플레이 중 스크롤·가림막·판정 타이밍을 정하는 옵션과 그 키, 그 옵션을 바꾸는 화면인 PLAY 메뉴(7절), 기본 스킨의 판정 표시(8절). 스킨이 그리는 옵션(Lane Width 등)과 부위별 불투명도는 [skin.md](./skin.md) 3.4절, 구현 위치는 [crates.md](./crates.md)를 본다. PLAY 메뉴의 설계는 [plan/2026-10-11-play-menu.md](./plan/2026-10-11-play-menu.md).
 > beatoraja 원본의 같은 기능이 기준이다. 다르게 한 곳은 "원본과 다른 점" 열에 이유를 적는다.
 
 ## 1. 용어
@@ -104,14 +104,20 @@
 | LANE | LANE COVER | `30% (WHITE 300)`: 비율과 흰색 숫자 | 1% / 10% |
 | LANE | LIFT, HIDDEN+ | `15%` | 1% / 10% |
 | LANE | COVER FINE STEP | `0.0010 (WHITE 1.0)`: 비율과 그 한 칸이 흰색 숫자로 얼마인지 | 0.0001 / 0.0010 |
-| LANE | 미리보는 플레이 스킨 문서가 선언한 옵션(기본 스킨: Lane Width, Field Side, Scratch Side, Judge Detail, Score Graph) | 항목 이름 | 한 항목. 그 문서의 커스터마이즈(`skin.custom`)에 저장되고 문서를 다시 읽는다. SKIN 메뉴의 같은 행과 같은 값이다. 파일 칸과 오프셋은 SKIN 메뉴에만 있다 |
+| LANE | 미리보는 플레이 스킨 문서가 선언한 옵션(기본 스킨: Lane Width, Field Side, Scratch Side, Judge Detail, Score Difference, Judge Display, Score Graph) | 항목 이름 | 한 항목. 그 문서의 커스터마이즈(`skin.custom`)에 저장되고 문서를 다시 읽는다. SKIN 메뉴의 같은 행과 같은 값이다. 파일 칸은 SKIN 메뉴에만 있다 |
+| LANE | 그 문서가 선언한 위치·크기 오프셋(기본 스킨: `JUDGE POSITION Y`). 옵션 바로 뒤 | `+0` | 1 / 10(픽셀. 각도 축은 도). 범위 ±2000. 문서를 다시 읽지 않고 다음 프레임의 미리보기에 반영된다. SKIN 메뉴의 같은 행과 같은 값이다 |
 | JUDGE | JUDGE OFFSET | `+5 MS` | 1 ms / 10 ms |
 | JUDGE | AUTO ADJUST | `ON` / `OFF` | 뒤집기 |
 | CHART | RANDOM, GAUGE, TARGET, ESCAPE | 항목 이름 | 한 항목 |
 | CHART | LEGACY NOTE, AUTOPLAY, SCRATCH AUTO, AUTO REPLAY | `ON` / `OFF` | 뒤집기 |
+| SKIN | 접이 `OPACITY` | `HIDDEN (19)` / `SHOWN (19)`: 접힘 여부와 든 행 수 | Enter·← →·클릭으로 펴고 접는다. 펴면 그 문서의 불투명도 행이 바로 아래에 나온다(기본 스킨 7키 19행, 14키 18행) |
+| SKIN | 불투명도 행(접이를 폈을 때. 기본 스킨: `LANE BACKGROUND OPACITY` 등) | `100%` | 5% / 25%. 0% 면 그 부위가 사라진다. 0 키로 100%. 100% 를 넘으면 `105% (+13)` 처럼 더해지는 알파가 붙는다(`docs/skin.md` 2.2절) |
+| SKIN | 접이 `POSITION AND SIZE` | `HIDDEN (15)` / `SHOWN (15)` | 엔진이 모든 플레이 스킨에 붙이는 오프셋 네 개의 행(`ALL OFFSET(%) X` … `JUDGE DETAIL OFFSET ALPHA`). 1 / 10 |
 
 - KEEP GREEN NUMBER 가 켜져 있으면 GREEN NUMBER 가 조절 대상이고 HI-SPEED 는 예시 BPM 에서 계산된 값을 보이는 읽기 전용 행이다(범위 끝에 걸리면 `20.00x (LIMIT) AUTO`). 꺼져 있으면 반대로 HI-SPEED 가 조절 대상이고 GREEN NUMBER 는 그 속도가 예시 BPM 에서 내는 녹색 숫자와 이동 시간을 보인다. 읽기 전용 행은 이름과 값이 모두 흐리고 값 뒤에 `AUTO` 가 붙으며, 좌우·Enter·0·클릭에 움직이지 않고, 정보 패널이 이유를 말한다. 유지 중에는 저장된 HI-SPEED 가 쓰이지 않으므로 보이지 않는다(끄면 다시 보인다).
 - LANE COVER·LIFT·HIDDEN+ 는 1% 격자 위에서 움직인다(`rbms_config::adjust` 가 값을 걸음 수로 세어 옮긴다). 30% 는 흰색 숫자 300 이고, 플레이 중 미세 단계로 격자 밖에 둔 값(30.5% 등)에서 한 칸 움직이면 가장 가까운 격자에서 한 칸 간 값이 된다.
+- SKIN 묶음은 목록의 마지막 묶음이고 두 접이는 닫힌 채로 열린다(접이 상태는 저장되지 않는다). 접이를 펴면 든 행이 화면에 들어오도록 목록이 스크롤된다: 다 들어가면 전부, 넘치면 접이 행이 목록 첫 줄에 온다. 스킨이 불투명도나 엔진 오프셋을 갖지 않으면 그 접이는 없고, 둘 다 없으면 묶음도 없다. 불투명도와 오프셋은 SKIN 메뉴의 같은 행과 같은 곳(그 문서의 `skin.custom` 오프셋)에 저장된다.
+- 이름이 비슷한 세 가지는 다른 값이다. JUDGE 묶음의 `JUDGE OFFSET`(ms)은 판정 타이밍이다. LANE 묶음의 `JUDGE POSITION Y` 는 기본 스킨이 판정 글자·콤보·위 줄을 함께 옮기는 오프셋이다(8절). 접이 안의 `JUDGE OFFSET X/Y/W/H/ALPHA` 와 `JUDGE DETAIL OFFSET …` 은 엔진이 스킨과 무관하게 붙이는 오프셋으로, 판정 글자와 그 위 줄을 따로 옮긴다.
 - LANE OPTION 은 아직 플레이에 적용되지 않아 어디에도 보이지 않는다(값은 저장·복원된다).
 - 큰 단계가 범위를 넘으면 범위 끝까지만 간다(HI-SPEED 는 0.25~19.75 처럼 한 칸씩 갈 수 있는 데까지).
 - JUDGE OFFSET 의 한 칸은 선곡 패널 3·플레이 중 키와 같은 1 ms 다(SETTINGS 의 옛 행은 5 ms 였다). 표의 걸음(`JUDGE_OFFSET_STEP_MS`)이 1 이고 PLAY 메뉴도 다른 숫자 행처럼 `adjust` 를 탄다.
@@ -123,9 +129,9 @@
 | ↑ ↓ | 행 커서 이동. 묶음 이름은 건너뛴다. 목록은 17칸씩 보이고 넘치면 스크롤 막대와 `현재 / 전체`(묶음 이름을 포함한 칸 수)가 나온다 |
 | PageUp PageDown | 한 화면(17칸)씩 |
 | ← → | 커서 행의 값을 한 칸 |
-| Shift + ← → | 숫자 행이면 열 칸. 켬·끔과 목록 행, 스킨 옵션 행, PREVIEW BPM 은 한 칸 그대로다 |
-| Enter | → 한 칸과 같다. 화면을 떠나지 않는다 |
-| 0 (숫자 줄, 넘패드) | 커서 행을 기본값으로(새 설정 파일의 값. PREVIEW BPM 은 150, 스킨 옵션은 문서의 기본 항목) |
+| Shift + ← → | 숫자 행과 스킨 오프셋 행이면 열 칸, 불투명도 행이면 25%. 켬·끔과 목록 행, 스킨 옵션 행, PREVIEW BPM, 접이는 한 칸 그대로다 |
+| Enter | → 한 칸과 같다. 접이 행에서는 펴거나 접는다. 화면을 떠나지 않는다 |
+| 0 (숫자 줄, 넘패드) | 커서 행을 기본값으로(새 설정 파일의 값. PREVIEW BPM 은 150, 스킨 옵션은 문서의 기본 항목, 스킨 오프셋은 0, 불투명도는 100%). 접이는 움직이지 않는다 |
 | Tab / Shift+Tab | 미리보기 위 모드 띠(7K 5K 14K 10K 9K)에서 다음 / 이전 |
 | 행 왼쪽 클릭 / 오른쪽 클릭 | 그 행으로 커서를 옮기고 한 칸 앞으로 / 뒤로 |
 | 모드 띠의 탭 왼쪽 클릭 | 그 모드로 |
@@ -161,7 +167,8 @@
 | --- | --- |
 | KEEP GREEN NUMBER, GREEN NUMBER, HI-SPEED, SPEED FIX | 노트가 내려오는 속도와 스킨의 HI-SPEED·GREEN 숫자 |
 | LANE COVER·LIFT·HIDDEN+ 와 각 ON 행 | 가림막의 위치와 스킨의 숫자(커버 300, 리프트 150 등) |
-| 스킨 옵션(Lane Width 등) | 문서를 다시 읽어 그린다(잠깐 어두워졌다가 같은 위치에서 이어 간다) |
+| 스킨 옵션(Lane Width, Judge Display 등) | 문서를 다시 읽어 그린다(잠깐 어두워졌다가 같은 위치에서 이어 간다) |
+| 스킨 오프셋(JUDGE POSITION Y 등)과 불투명도 | 문서를 다시 읽지 않는다. 값이 바뀐 다음 프레임부터 그 위치·그 진하기로 그린다 |
 | JUDGE OFFSET, AUTO ADJUST | 스킨의 TIMING 숫자와 `TIMING AUTO` 표지. 예시 판정은 달라지지 않는다 |
 | GAUGE | 게이지의 종류와 색 |
 | TARGET | 점수 그래프의 타깃 막대와 `TARGET +n`. 기록·IR·라이벌 없이 예시 차트의 노트 수만으로 정한 타깃이다(MY BEST·IR·RIVAL 은 MAX 로 떨어진다) |
@@ -187,3 +194,19 @@
 | DISPLAY 의 나머지, NETWORK, AUDIO, SELECT | — | 그대로 |
 
 SETTINGS 의 탭은 JUDGE, DISPLAY, INPUT, NETWORK, AUDIO, SELECT 여섯이다(PLAY 탭과 GAUGE 탭은 없어졌다). 플레이 직전의 빠른 옵션(F1 오버레이)과 선곡의 옵션 패널 1~3 은 그대로이고 같은 값을 고친다. `rbms-cli config` 덤프는 PLAY 메뉴의 묶음을 `[PLAY SPEED]`, `[PLAY LANE]`, `[PLAY JUDGE]`, `[PLAY CHART]` 로 적는다.
+
+## 8. 판정 표시(기본 스킨)
+
+기본 스킨의 플레이 화면이 판정을 보이는 방식이다. 판정·점수 계산은 달라지지 않고 표시만의 설정이다. 조절하는 행은 PLAY 메뉴의 LANE 묶음과 SKIN 메뉴에 같은 값으로 있다.
+
+| 항목 | 동작 | 행 |
+| --- | --- | --- |
+| 정적 표시 | 판정 글자와 콤보는 판정이 난 프레임부터 0.5초 동안 같은 자리·크기·색으로 서 있다가 한 번에 사라진다. 튀어나오거나 커지거나 깜빡이거나 서서히 사라지지 않는다. 콤보가 올라가도 글자의 자리는 그대로이고 숫자만 바뀐다(5자리 고정 칸, 빈 앞자리는 옅은 0) | 없음(항상) |
+| 위 줄 왼쪽: 점수 차 | 목표 대비 EX 점수 차를 부호와 네 자리로 쓴다(`+0003`, `-0125`). 스코어 그래프의 `TARGET` 숫자와 같은 값이고 CHART 묶음의 TARGET 이 목표를 정한다. PGREAT 에도 뜬다 | `SCORE DIFFERENCE`: TARGET(기본) / BEST(자기 최고 기록 대비) / OFF |
+| 위 줄 오른쪽: FAST/SLOW | PGREAT 가 아닌 판정이 빨랐으면 FAST(파랑), 늦었으면 SLOW(빨강) | `JUDGE DETAIL`: FAST-SLOW(기본) / MILLISECONDS(어긋난 시간을 ms 로. 빠르면 `+`) / OFF |
+| 위치 | 판정 글자·콤보·위 줄을 함께 옮긴다. + 는 위, - 는 아래. 한 칸 1px, Shift 로 10px, 0 키로 제자리. 스킨 좌표(1920x1080 기준)다 | `JUDGE POSITION Y`: -2000 ~ +2000, 기본 +0 |
+| 숨김 | 판정 글자·콤보·위 줄을 그리지 않는다 | `JUDGE DISPLAY`: SHOW(기본) / HIDE |
+
+- DP 는 친 쪽 필드에만 뜬다. BAD·POOR 는 콤보 없이 글자만 필드 가운데에 뜬다.
+- 다른 스킨 팩은 자기 판정 객체와 자기 옵션을 쓴다(ModernChic 의 판정 연출은 그대로다). 위 행들은 기본 스킨 문서가 선언한 것이라 다른 팩에서는 나오지 않는다.
+- 레인 면·선·건반 표시 같은 부위를 지워 노트와 판정만 남기는 법은 `docs/skin.md` 3.4.2절(부위별 불투명도)에 있다.

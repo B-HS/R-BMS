@@ -1,6 +1,21 @@
 # R3 — R-BMS 앱(apps/rbms-player) 스킨 배선·화면 구성·입력 현황과 격차
 
-> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 10B(PLAY 메뉴) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 10C(판정 표시와 부위별 불투명도) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 10C 반영 사항 (2026-10-11)
+
+기본 스킨의 판정 줄을 정적으로 바꾸고, 판정 위 줄(목표 대비 점수 차 + FAST/SLOW), 판정 위치·숨김, 부위별 불투명도를 넣은 뒤의 상태다(사용자 요청 2, 4, 5, 6). 사용자용 설명은 `docs/skin.md` 2.2·3.4.1·3.4.2절과 `docs/play-options.md` 7·8절, 기본 스킨 쪽은 설계서 2.3·3.5·6.3절, 메뉴는 `docs/plan/2026-10-11-skin-menu.md` §4.1 과 `2026-10-11-play-menu.md` §4.1. 아래 웨이브 10B 절의 "LANE 묶음 끝에 미리보는 플레이 문서의 옵션", "파일 칸과 오프셋은 SKIN 메뉴의 것"은 이 절로 읽는다.
+
+- (행의 종류) `skin_select.rs` 에 `SkinRowKind { Property, File, Offset(OffsetAxis), Opacity }` 와 `SkinLibrary::kind_for(config, screen, row)`·`kind` 가 생겼다. 알파 축만 허용한 오프셋(`is_opacity`: 여섯 축 가운데 `a` 만 참)이 `Opacity` 다. 이름이 아니라 축 구성으로 판정한다. `SkinRow` 는 그대로다(불투명도 행도 `SkinRow::Offset(at, OffsetAxis::A)`)
+- (불투명도 행) 표시는 문서가 준 이름(축 이름 없음)과 퍼센트다: `opacity_percent(a) = round(100 + a * 100 / 255)` 를 0~200 으로 묶고, 100 을 넘으면 `105% (+13)` 처럼 저장 알파를 붙인다(`opacity_value`). 걸음은 5%(`stepped_opacity`. 격자 밖의 값은 그 방향의 가장 가까운 격자로), 저장은 `opacity_alpha(pct) = round((pct - 100) * 255 / 100)` 를 그 오프셋의 `a` 에. 저장 형식·스키마 판은 그대로다. 범위가 200% 까지인 것은 ModernChic 의 알파 전용 오프셋 다섯(알파 0 의 덮개에 양수를 더하는 `明るさ 0~255`) 때문이다
+- (행 순서와 큰 걸음) `rows_for` 는 옵션, 파일, 불투명도가 아닌 오프셋의 축별 행, 불투명도 행 순이다(불투명도는 선언 위치와 무관하게 끝). `wide_steps_for` 가 Shift 의 걸음 수를 답한다: 오프셋 10, 불투명도 5(= 25%), 그 밖 1. 끝에 닿아 움직이지 않은 걸음은 빈 항목을 저장하지 않는다. `reset_row_for(config, screen, row)` 가 생겼다(불투명도는 오프셋 0 = 100%)
+- (엔진 오프셋) `SkinLibrary::is_automatic_for(config, screen, row)`: 헤더 오프셋 목록의 끝 `rbms_skin::loader::automatic_offsets(type).len()` 개(All offset(%), Notes offset, Judge offset, Judge Detail offset)의 행이면 참. 두 메뉴가 이 행의 도움말을 `automatic_offset_help(axis)`(`An offset the game adds to every play skin …`)로 쓴다
+- (SKIN 메뉴) `stage/skin_menu.rs`: Shift 는 `wide_steps_for` 를 따르고, 도움말은 `skin_row_help(kind)`(불투명도는 `OPACITY_HELP`)다. 바닥 안내 문구가 `… SHIFT OFFSET x10, OPACITY 25%   ENTER RUN   0 RESET …` 로 바뀌었다. 목록에 묶음 머리는 없다(행 모델이 Settings 와 같은 `settings_rows`)
+- (PLAY 메뉴) `stage/play_menu/rows.rs`: `Row::Fold(Fold)` 와 `Folds` 가 생겼다. LANE 묶음 끝에는 스킨의 옵션과 스킨이 선언한 위치·크기 오프셋의 축별 행(`declared`. 기본 스킨: `JUDGE POSITION Y`)이 오고, 목록 끝의 SKIN 묶음(`GROUP_SKIN`)에 접이 둘이 있다: `OPACITY`(불투명도 행), `POSITION AND SIZE`(엔진 오프셋의 행만). 접이는 `HIDDEN (n)` / `SHOWN (n)` 한 행이고 Enter·← →·클릭으로 편다. 편 직후 든 행이 화면에 들어오게 스크롤한다(`PlayMenuState::reveal_fold`). 접이 상태는 저장하지 않는다. 오프셋·불투명도는 SKIN 메뉴와 같은 곳(`skin.custom[문서].offsets`)에 읽고 쓴다(`step_for`, `reset_row_for`)
+- (미리보기) 오프셋은 프레임마다 저장값에서 읽으므로 두 메뉴 모두 문서를 다시 읽지 않고 다음 프레임에 반영된다(`build_of` 불변). 옵션(Judge Display 등)은 이전처럼 문서를 다시 읽는다
+- (기본 스킨) 플레이 문서 다섯의 헤더: 옵션에 Score Difference(Target 911 / Best 912 / Off 913)와 Judge Display(Show 914 / Hide 915), 오프셋에 Judge Position(id 100, y 축)과 불투명도 19개(id 101~119, 알파 축. DP 문서는 Score Graph 를 뺀 18개). 판정 줄은 타이머 46·47 에 키프레임 0 과 500ms 가 같은 값인 정적 표시이고(`lua/play/field.lua` 의 `judge_of`, `above_of`), 부위는 `ui` 의 `s:within(id, build)` 로 destination 의 `offsets` 끝에 붙는다. 부위의 반투명은 destination 알파가 아니라 시트(`beam`, `pulse`)와 색(`theme.mix`)에 구웠다(더해지는 알파가 중간값에서 어긋나지 않게)
+- (캡처 하니스) `stage/capture/play_parts.rs`(`FieldRun`: 행과 오프셋을 정해 플레이 장면에 들어가 손으로 치거나 엔진에 맡긴다. 게이트 다섯과 캡처 둘). 손으로 치는 런의 부품(`run_to`, `press`, `release`, `played_lane`, 상수)은 `stage/capture/by_hand.rs` 에 한 번 있고 두 모듈이 같이 쓴다. `take_off_with_the_skin_menu` 는 플레이 중인 앱의 설정 위에서 `SkinMenuState` 를 화면으로 올리지 않고 키만 넣어 부위를 내린다(메뉴가 쓰는 곳과 플레이가 읽는 곳의 일치를 게이트로 지킨다)
+- (남은 것) SKIN 메뉴의 묶음 머리와 머리 단위 이동, 불투명도의 1% 미세 걸음은 없다. 알파 0 으로 사라진 객체도 클릭은 받는다(원본 규칙). 판정 줄의 콤보 빈 자리에 옅은 0 이 보이는 것(`COMBO_GHOST_ALPHA`)은 사용자 확인이 남아 있다
 
 ## 웨이브 10B 반영 사항 (2026-10-11)
 

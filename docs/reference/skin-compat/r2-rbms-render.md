@@ -1,6 +1,15 @@
 # R2 — R-BMS 렌더 계층(crates/rbms-render, GPU 백엔드) 현황과 격차
 
-> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 9B(사각형 안에 그리기, 화면 전체 오프셋 다시 읽기) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-11 · 대응 단계: 웨이브 10C(오프셋의 알파가 듣는 범위) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 10C 반영 사항 (2026-10-11)
+
+사용자가 스킨의 오프셋으로 부위의 불투명도를 0% 까지 내릴 수 있게 하면서, 오프셋의 알파가 듣지 않던 세 곳을 고쳤다. 셋 다 원본과 다르게 한 것이고, 오프셋이 0 이면(사용자가 건드리지 않으면) 원본과 같은 그림이다. 원본 쪽 서술은 `b2-object-model.md`·`b3-play-objects.md` 의 같은 이름의 절.
+
+- (보간 중의 알파 오프셋) `crates/rbms-skin/src/dst.rs` 의 `resolve` 는 track 이 가리키는 모든 오프셋의 알파를 모든 프레임에 더한다(`shifted_alpha(alpha, shifts)`, 0~255 로 묶어 가며 차례로). 이전에는 원본(`SkinObject.prepareColor`)처럼 색이 키프레임 사이에서 보간되는 동안(`rate != 0`)에는 더하지 않았다(`uniform_color` 분기. 삭제). 그 상태로는 페이드하는 객체(폭발, 키 빔, 알림)가 키프레임 사이에서 오프셋 없는 알파로 번쩍였다
+- (note·judge) `skin_render/object.rs` 의 `Body::fades_as_one`(note, judge)인 객체는 `SkinObject::place` 가 `SELF_PLACED_COLOR` 의 알파를 자기 track 의 오프셋들로 옮긴 색을 답한다. `notes.rs` 는 필드의 배치 전체(노트, LN, 지뢰)를 그 알파로 그리고 마디선류는 note 정의의 `group` destination 이 가리키는 오프셋의 알파를 따로 따른다. `judge.rs` 는 글자와 콤보 숫자 각 부분에 그 알파를 곱한다. 알파 0 이면 그리지 않는다. 원본은 두 객체의 색을 읽지 않는다. songlist 는 원본대로다(휠의 부품마다 자기 destination 이 있다)
+- (timingvisualizer) `skin_render/graphs/timing_vis.rs`: 눈금자 위의 선은 객체의 track 이 가리키는 오프셋들이 불투명 알파에서 남기는 몫(`offset_share` = `shifted_alpha(255, …)`)만큼 흐려진다(`shown_through`). 키프레임 색의 알파는 원본처럼 선에 적용하지 않는다(눈금자 텍스처만 받는다. 키프레임 알파 128·오프셋 0 인 눈금자의 선은 제 색 그대로다). 원본은 선에 오프셋도 적용하지 않는다
+- (그대로인 것) image, 참조 이미지, number, float, slider, graph, gauge, 커버, bga, TTF·비트맵 text, gaugegraph·judgegraph·bpmgraph·timingdistributiongraph·hiterrorvisualizer 는 이전부터 `Placement.tint`(resolve 의 색)를 통해 오프셋의 알파를 받았다. 종류마다 오프셋 0 / -128 / -255 의 픽셀 테스트가 생겼다(`skin_render/tests/opacity.rs`, `tests_list_graphs/graph_opacity.rs`, `notes/tests.rs`, `tests_play_objects.rs`, `text/tests.rs`, `text/bitmap/tests.rs`, `bga/tests.rs`). 알파 0 의 객체는 그리지 않지만 클릭은 받는다(`input/tests.rs`. 원본 규칙)
 
 ## 웨이브 9B 반영 사항 (2026-10-11)
 

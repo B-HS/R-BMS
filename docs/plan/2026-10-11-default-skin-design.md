@@ -1,6 +1,6 @@
 # 기본 스킨(rbms-default) 설계서
 
-> 최종 갱신 2026-10-11 · 상태: 전 화면 구현 완료(문서 9개: 결정, 선곡, 플레이 5/7/9/10/14키, 결과, 코스 결과)와 통합 반영(공통 승격, 6절의 최종 좌표, 통합에서 고친 엔진 결함 2건), 웨이브 9A 반영(판정 양식을 IIDX 식으로, 램프·난이도 색과 클리어 표기를 ModernChic 의 값으로, FAST/SLOW 기본 켬. 3.1절, 6.2~6.5절), 웨이브 10A 반영(Lane Width 옵션과 Wide 배치: 2.3절, 6.3 (가-2), 6.4절. 선곡 패널 3 의 NOTE DISPLAY TIME 칸, 플레이의 TIMING AUTO 표지, 안내 문구의 키 이름: 6.2, 6.3, 6.5절) · 대응 단위: 웨이브 8A W8-2a, 웨이브 8B W8-2b~2d 와 통합, 웨이브 10A 단위 A 와 통합
+> 최종 갱신 2026-10-11 · 상태: 전 화면 구현 완료(문서 9개: 결정, 선곡, 플레이 5/7/9/10/14키, 결과, 코스 결과)와 통합 반영(공통 승격, 6절의 최종 좌표, 통합에서 고친 엔진 결함 2건), 웨이브 9A 반영(판정 양식을 IIDX 식으로, 램프·난이도 색과 클리어 표기를 ModernChic 의 값으로, FAST/SLOW 기본 켬. 3.1절, 6.2~6.5절), 웨이브 10A 반영(Lane Width 옵션과 Wide 배치: 2.3절, 6.3 (가-2), 6.4절. 선곡 패널 3 의 NOTE DISPLAY TIME 칸, 플레이의 TIMING AUTO 표지, 안내 문구의 키 이름: 6.2, 6.3, 6.5절) · 대응 단위: 웨이브 8A W8-2a, 웨이브 8B W8-2b~2d 와 통합, 웨이브 10A 단위 A 와 통합, 웨이브 10C 단위 S 와 통합(정적 판정 줄, 판정 위 줄, Judge Position·Judge Display·Score Difference, 부위 불투명도 19개: 2.3절, 3.5절, 6.3·6.4절, 8.2~8.4절. 통합에서 반투명을 시트와 색에 굽고 건반 표시 바탕의 겹침을 없앴다)
 > 상위 사양: `docs/plan/2026-10-09-lua-skin-compat.md` §2(D1·D4·E9), §4.7, §6 웨이브 8
 > 조사 근거: `docs/reference/skin-compat/`(색인 `README.md`). `[b4 §4]` 같은 표기는 그 폴더의 보고서 절이다.
 > 이 문서와 `assets/skins/rbms-default/` 만 보고 화면을 고칠 수 있게 쓴다. 6절의 좌표는 전부 구현된 최종값이다.
@@ -64,16 +64,47 @@
 
 ### 2.3 문서별 헤더
 
-공통: `w = 1920`, `h = 1080`, `author = "R-BMS"`, `name = "R-BMS Default (<화면>)"`. 시간 단위는 ms. 플레이의 자동 오프셋 4개(10 All offset(%), 30 Notes offset, 32 Judge offset, 33 Judge Detail offset)는 엔진이 헤더에 붙이므로 문서가 선언하지 않는다(`loader.rs` `AUTOMATIC_OFFSETS`). 사용자 옵션의 op 는 문서마다 900 부터 쓴다(문서 사이에 겹쳐도 된다). 파일 슬롯(filepath)은 어느 문서에도 없다(자산 변종을 두지 않는다).
+공통: `w = 1920`, `h = 1080`, `author = "R-BMS"`, `name = "R-BMS Default (<화면>)"`. 시간 단위는 ms. 플레이의 자동 오프셋 4개(10 All offset(%), 30 Notes offset, 32 Judge offset, 33 Judge Detail offset)는 엔진이 헤더에 붙이므로 문서가 선언하지 않는다(`loader.rs` `AUTOMATIC_OFFSETS`). 플레이 문서가 스스로 선언하는 오프셋은 아래 "플레이 문서의 선언 오프셋" 표의 20개(DP 는 19개)이고 id 는 100~119 다(엔진이 쓰는 1~5, 10, 30, 32, 33, 50, 51 과 겹치지 않고 유효 범위 1~199 안이다). 사용자 옵션의 op 는 문서마다 900 부터 쓴다(문서 사이에 겹쳐도 된다). 파일 슬롯(filepath)은 어느 문서에도 없다(자산 변종을 두지 않는다).
 
 | 문서 | input | scene | fadeout | 플레이 전용 | 사용자 옵션(property): 항목(op), 기본값 먼저 | 선언 오프셋 |
 | --- | --- | --- | --- | --- | --- | --- |
 | decide | 300 | 3200 | 800 | - | Stage Image: Show(900)/Hide(901). Note Graph: Show(902)/Hide(903) | 없음 |
 | select | 300 | 0 | 0 | - | Stage Image: Show(900)/Hide(901). 결정과 같은 옵션이고 정의는 `parts.stage_image` 한 곳에 있다 | 없음 |
-| play5, play7 | 500 | 0 | 600 | loadend 1500, playstart 1000, close 1500, finishmargin 1000, judgetimer 1 | Lane Width: Normal(909)/Wide(910). Field Side: Left(900)/Right(901). Scratch Side: Left(902)/Right(903). Judge Detail: Fast-Slow(905)/Milliseconds(906)/Off(904). Score Graph: On(907)/Off(908) | 자동 4개만 |
-| play9 | 500 | 0 | 600 | 위와 같음 | Lane Width(909/910), Judge Detail(905/906/904), Score Graph(907/908). 필드는 가운데 고정 | 자동 4개만 |
-| play10, play14 | 500 | 0 | 600 | 위와 같음 | Lane Width(909/910), Judge Detail(905/906/904). 스크래치는 바깥쪽 고정, 그래프 없음 | 자동 4개만 |
+| play5, play7 | 500 | 0 | 600 | loadend 1500, playstart 1000, close 1500, finishmargin 1000, judgetimer 1 | Lane Width: Normal(909)/Wide(910). Field Side: Left(900)/Right(901). Scratch Side: Left(902)/Right(903). Judge Detail: Fast-Slow(905)/Milliseconds(906)/Off(904). Score Difference: Target(911)/Best(912)/Off(913). Judge Display: Show(914)/Hide(915). Score Graph: On(907)/Off(908) | 100~119 의 20개 + 자동 4개 |
+| play9 | 500 | 0 | 600 | 위와 같음 | Lane Width(909/910), Judge Detail(905/906/904), Score Difference(911/912/913), Judge Display(914/915), Score Graph(907/908). 필드는 가운데 고정 | 같음 |
+| play10, play14 | 500 | 0 | 600 | 위와 같음 | Lane Width(909/910), Judge Detail(905/906/904), Score Difference(911/912/913), Judge Display(914/915). 스크래치는 바깥쪽 고정, 그래프 없음 | 114(Score Graph Opacity)를 뺀 19개 + 자동 4개 |
 | result, courseresult | 500 | 3600000 | 500 | - | 없음 | 없음 |
+
+플레이 문서의 선언 오프셋(웨이브 10C. `lua/play/layout.lua` 의 `JUDGE_POSITION`, `PART`, `PART_ROWS`. 헤더에는 이 순서로 놓이고 자동 4개가 그 뒤에 붙는다)
+
+| id | 이름 | 축 | 걸리는 것(6.3절의 부위 표) |
+| --- | --- | --- | --- |
+| 100 | Judge Position | y | 판정 글자·콤보와 그 위 줄(점수 차, FAST/SLOW 또는 ms). 값은 화면 픽셀이고 +면 위, -면 아래 |
+| 101 | Lane Background Opacity | a | 레인 면 |
+| 102 | Lane Divider Opacity | a | 레인 사이의 2px 선 |
+| 103 | Judge Line Opacity | a | 판정선과 그 연출(펼쳐지는 선, 리듬 띠) |
+| 104 | Key Beam Opacity | a | 건반을 누를 때 레인에 서는 빛 기둥 |
+| 105 | Key Display Opacity | a | 발치의 건반 표시(바탕, 건반 면, 눌림 빛) |
+| 106 | Bomb Opacity | a | 폭발 |
+| 107 | Note Opacity | a | 노트·LN·지뢰(note 객체) |
+| 108 | Bar Line Opacity | a | 마디선 |
+| 109 | Lane Cover Opacity | a | 레인 커버·히든·리프트의 면과 커버 끝의 강조선·수치 |
+| 110 | Gauge Opacity | a | 게이지 막대와 수치 |
+| 111 | Progress Bar Opacity | a | 필드 옆 진행 막대 |
+| 112 | Song Header Opacity | a | 곡 머리 |
+| 113 | BGA Opacity | a | BGA 면, BGA, 스테이지 그림, "NO BGA"·"BGA OFF" |
+| 114 | Score Graph Opacity | a | 스코어 그래프(SP 문서만 선언한다) |
+| 115 | Score Opacity | a | 점수 영역 |
+| 116 | Judge Count Opacity | a | 판정 수 표 |
+| 117 | Timing Opacity | a | BPM·남은 시간·TIMING 과 히트 에러 띠 |
+| 118 | Distribution Graph Opacity | a | 분포 그래프와 그 범례 |
+| 119 | Speed Display Opacity | a | 발치의 HI-SPEED·GREEN·COVER 와 AUTOPLAY·REPLAY 표지 |
+
+- 불투명도 오프셋은 알파 축만 가진 오프셋이다. 사용자가 보는 값은 0~100%(기본 100)이고 저장되는 알파는 형식 계약대로 더해지는 값이다: 100% = 0, 0% = -255, 그 사이는 `round((pct - 100) * 255 / 100)`. 메뉴는 이름이 아니라 축 구성(알파뿐)으로 이 행을 알아보고 이름은 문서가 준 그대로 쓴다.
+- 더해지는 값이므로 0% 와 100% 만 모든 것에 똑같이 듣는다. 그 사이에서는 알파 255 인 destination 이 pct% 가 된다. 그래서 부위의 destination 은 키프레임 알파를 255 로 두고 반투명은 그림과 색에 굽는다(웨이브 10C 통합): 키 빔의 진하기는 시트의 `beam`(최대 알파 118), 리듬 띠는 시트의 `pulse`(최대 알파 71), 건반 눌림 빛은 `theme.mix(레인 색, raised, 0.9)` 의 불투명 색이다. 처음에는 destination 알파(키 빔 200, 눌림 230, 리듬 띠 120)로 냈는데, 같은 양이 빠져 50% 에서 키 빔이 약 35% 로 보이고 20% 이하에서 사라졌다. 한 부위 안에서 겹쳐 그리는 것도 중간값을 어긋나게 하므로 건반 표시의 바탕은 건반 면과 겹치지 않게 놓는다(6.3절). 남은 어긋남은 판정선(어두운 바탕 선 위에 밝은 선이 겹쳐 50% 에서 약 58%)과 가산 합성인 폭발, 페이드 도중의 프레임(알파가 내려가는 키프레임에 같은 양이 더 빠져 일찍 0 에 닿는다)이다. 0% 에서는 페이드 중인 것까지 전부 그려지지 않는다(8.4절).
+- 부위에 속하지 않는 것(항상 100%): 화면 바탕, LOADING·READY·FULL COMBO 알림, 폐점 덮개와 "FAILED", 열고 닫는 덮개. 판정 글자·콤보와 그 위 줄은 불투명도가 아니라 Judge Display 가 맡는다(엔진의 Judge offset·Judge Detail offset 의 알파 축은 그대로 듣는다).
+- 한 destination 이 부위 하나에만 속한다. `ui` 의 `s:within(id, build)` 가 `build` 안에서 만들어지는 모든 destination(note 의 `group`, judge 의 `images`·`numbers` 같은 중첩 destination 포함)의 `offsets` 끝에 그 id 를 붙인다(4.3절).
+- Judge Position 은 엔진의 자동 오프셋 대신 따로 선언했다. 자동 오프셋은 둘(32 는 판정 글자, 33 은 그 위 줄)이라 한 값으로 두 줄을 함께 옮길 수 없기 때문이다. 부호는 맞다(오프셋의 y 는 화면 위쪽이 +다). 32 와 33 도 전과 같이 걸려 있어 각 줄을 따로 미세 조정할 수 있고, 세 값은 더해진다. 리프트(3)도 전과 같이 판정 줄을 올린다.
 
 근거와 주의
 - 결정: `nowtime > input` 에 STARTINPUT(타이머 1), `nowtime > scene` 에 FADEOUT(타이머 2), FADEOUT 경과 > `fadeout` 에 플레이로 넘어간다[b4 §4, `apps/rbms-player/src/stage/decide.rs`]. scene + fadeout = 4000 은 캡처 하니스의 마지막 시각 3950ms 보다 길어야 해서 정했다(`stage/capture.rs` `DECIDE_SHOTS_MS`).
@@ -82,6 +113,7 @@
 - 스크래치 방향과 필드 좌우처럼 앱 설정과 겹치는 옵션은 스킨 옵션이 우선한다(사양 §4.5).
 - Lane Width 는 다섯 플레이 문서 모두의 첫 행이다(웨이브 10A). Wide 는 건반·스크래치·버튼 레인의 폭이 Normal 의 1.5 배이고(레인 사이 2px 은 그대로), 필드 밖 영역은 6.3·6.4절의 Wide 표대로 다시 놓인다. 내장 화면의 DISPLAY > SKIN 프리셋(NORMAL/WIDE)과는 다른 설정이고, 스킨이 그리는 플레이 화면의 레인 폭은 이 행만 바꾼다. 기본값 Normal 은 이 행이 생기기 전의 화면과 픽셀까지 같다(8.4절).
 - Judge Detail 의 기본값은 Fast-Slow 다(웨이브 9A. 그 전에는 Off 여서 첫 실행에서 FAST/SLOW 가 한 번도 뜨지 않았다). 옵션을 한 번도 건드리지 않은 사용자는 저장된 값이 없으므로 새 기본값을 따르고, Off 를 고른 사용자의 선택은 그대로다. op 번호는 바꾸지 않았다.
+- Score Difference 와 Judge Display 는 웨이브 10C 에서 더했다. Score Difference 는 판정 글자 위 줄의 왼쪽 자리에 무엇을 쓸지다: Target(기본)은 PLAY 메뉴의 TARGET 이 정한 목표 대비 EX 점수 차(number 108. 스코어 그래프의 TARGET 숫자와 같은 값), Best 는 자기 최고 기록 대비(152. 그래프의 BEST 숫자와 같은 값), Off 는 쓰지 않는다. Judge Detail 은 같은 줄의 오른쪽 자리다. Judge Display 가 Hide 면 judge 객체와 그 위 줄을 문서에 넣지 않는다(판정 글자·콤보·점수 차·FAST/SLOW 가 전부 그려지지 않는다). 행의 순서는 Lane Width, Field Side, Scratch Side, Judge Detail, Score Difference, Judge Display, Score Graph 다.
 
 ## 3. 시각 규칙
 
@@ -106,7 +138,8 @@
 | 묶음 | 값 |
 | --- | --- |
 | 난이도 `theme.difficulty[0..5]` | UNKNOWN `C3C3C3`, BEGINNER `06FF00`, NORMAL `12D2D7`, HYPER `FFC000`, ANOTHER `FF0000`, INSANE `A840AA`. ModernChic 의 난이도 기본색(`Root/customnumber.lua` `diffRGB`, `Play/lua/require/common.lua` `setRGB`)이다. INSANE 만 두 곳의 값이 다르고(148,44,150 과 168,64,170) 어두운 바탕에서 글자로 읽히는 플레이 쪽 값을 쓴다 |
-| 판정 `theme.judge` | PGREAT `6BA6F5`, GREAT `F6AB22`, GOOD `F9B21F`, BAD `FB8116`, POOR `F25200`. PGREAT 의 필드 글자는 한 색이 아니라 `theme.judge_flash` 의 세 색(파랑 `6BA6F5`, 분홍 `F47DA7`, 민트 `BBF5D0`)을 돈다. 값은 ModernChic 의 판정 시트(`Play/parts/common/judge/#default.png`. IIDX 양식)에서 글자 면의 평균색을 잰 것이다(PGREAT 세 프레임과 POOR 는 면 전체, GREAT·GOOD·BAD 는 윗부분). GREAT 과 GOOD 이 거의 같은 금색인 것도 그 시트 그대로다. 여섯째 판정(헛침)은 색이 따로 없다: IIDX 처럼 POOR 다 |
+| 판정 `theme.judge` | PGREAT `6BA6F5`, GREAT `F6AB22`, GOOD `F9B21F`, BAD `FB8116`, POOR `F25200`. 판정 수 표의 이름, 히트 에러 띠, 결과 화면이 쓴다. 값은 ModernChic 의 판정 시트(`Play/parts/common/judge/#default.png`. IIDX 양식)에서 글자 면의 평균색을 잰 것이다(PGREAT 와 POOR 는 면 전체, GREAT·GOOD·BAD 는 윗부분). GREAT 과 GOOD 이 거의 같은 금색인 것도 그 시트 그대로다. 여섯째 판정(헛침)은 색이 따로 없다: IIDX 처럼 POOR 다 |
+| 필드의 판정 글자 `theme.judge_word` | PGREAT `84CEFF`(밝은 하늘색), GREAT `FFD633`(노랑). 필드 위의 판정 글자와 콤보 숫자에만 쓴다(웨이브 10C). 둘 다 "GREAT" 라고 쓰므로 색 하나로 갈려야 해서 `theme.judge` 의 값보다 밝고 서로 먼 자체 값을 골랐다. GOOD·BAD·POOR 의 필드 글자는 `theme.judge` 의 색 그대로다. 글자는 움직이지도 깜빡이지도 색을 돌지도 않는다(3.5절) |
 | 빠름·느림 `theme.timing` | FAST `03A9FF`, SLOW `FF4503`. ModernChic 의 FAST·SLOW 글자(`Play/parts/sp_hw/system.png` 의 1590,410 과 1590,430)의 색이고 IIDX 의 파랑·빨강과 같다 |
 | 램프 `theme.lamp` | NO PLAY `3A4556`, FAILED `FF0000`, ASSIST `FF63FD`, LIGHT ASSIST `6563FF`, EASY `00FF24`, NORMAL `FFBB00`, HARD `DFDFDF`, EX HARD `FF6E6E`, FULL COMBO `00DFFF`, PERFECT `F499F2`, MAX `EAF300`. ModernChic 의 곡 막대 램프(`Select/parts/songbar.png`)에서 읽었다. 그 스킨에서 NO PLAY 는 램프를 그리지 않으므로 꺼진 색(자체 값)을 두고, 여러 색을 도는 램프는 막대에서 그 프레임들을 그대로 돌린다(6.2절). 한 색만 쓸 수 있는 자리(폴더 정보의 칩, 분포 띠, 결과의 CLEAR 글자)에 놓는 대표색은 EX HARD 가 폴더 현황판의 Lua 값(`Select/lua/musicdisplay.lua` 의 255,110,110), FULL COMBO 가 그 램프에만 있는 프레임(청록), PERFECT 와 MAX 가 결과 화면 글자(`Result/parts/system.png` 의 clearType)의 분홍과 노랑이다(막대 램프는 둘이 같은 그림이라 갈리지 않는다) |
 | 자체 신호색 `theme.tone` | red `F0564C`, orange `F0885A`, yellow `F2B33D`, green `59D185`, blue `568CF5`, violet `B26BF0`, rose `C2455E`. 난이도·판정·램프의 뜻과 무관하게 쓰는 색(노트와 건반 표시, 스크래치, 지뢰, GREEN 숫자, TARGET 막대, BPM 선, "FAILED"·"STAGE FAILED" 글자, 나빠진 차의 색, MINE 라벨, 해저드 게이지)은 여기서 고른다. 웨이브 9A 에서 난이도·판정 색을 바꾸면서 이 쓰임들이 따라 바뀌지 않게 갈라냈고 값은 그 전의 것 그대로다 |
@@ -176,6 +209,7 @@ Inter Regular 한 굵기만 있다. 굵기 대신 크기와 색으로 위계를 
 | 화면 닫기 | FADEOUT(타이머 2)에서 `bg` 색 덮개가 알파 0 → 255. 문서의 `fadeout` 안에 끝난다 |
 | 화면 열기 | 결정은 요소별 등장. 선곡·결과·플레이는 `parts.fade_from_black` 300ms |
 | 금지 | 무작위 값, 3초를 넘는 등장, 반복 깜박임(선택 표시의 맥동 `motion.pulse` 하나만 허용) |
+| 판정은 움직이지 않는다 | 플레이 필드의 판정 글자, 콤보 숫자, 그 위 줄(점수 차, FAST/SLOW·ms)은 판정이 난 프레임부터 같은 자리, 같은 크기, 같은 색, 같은 불투명도로 그려지고 500ms 뒤 프레임에 통째로 사라진다. 튀어나옴·확대·미끄러짐·깜빡임·색 돌림·페이드가 없다. 콤보가 올라가면 숫자만 바뀌고, 자릿수가 늘어도 글자와 숫자 칸의 자리는 그대로다(6.3절). 플레이 중 눈이 머무는 자리라 움직임이 노트를 읽는 데 방해가 되기 때문이다(웨이브 10C 의 사용자 요청) |
 
 ## 4. 공통 Lua 모듈
 
@@ -210,7 +244,7 @@ end
 
 | 파일 | 맡는 것 | 다른 모듈 의존 |
 | --- | --- | --- |
-| `lua/theme.lua` | 색, 글자 크기, 격자, 시간, 폰트 경로, 이름표(`difficulty_name`, `clear`: 클리어 0~10 의 열쇠·이름·램프 색·글자색, `rank_name`, `gauge_name`, `random_name`), 판정 글자의 순환 주기 `judge_cycle`(PGREAT 120ms, 그 밖 80ms)와 램프의 순환 주기 `lamp_cycle`(50ms), BPM 선의 색 묶음 `bpm_line`. 순수 데이터와 `theme.column`, `theme.content_width`, `theme.cap_height`, `theme.text_top(baseline, size)`(기준선에서 글자 윗선), `theme.centered_top(box, size)`(상자 가운데에 놓을 글자의 윗선), `theme.clear_text(entry)`(클리어 이름의 글자색. NO PLAY 만 `muted`), `theme.mix(color, toward, share)`(두 색을 섞은 색), `theme.hex(color, alpha)`(그래프 객체가 받는 `rrggbb`·`rrggbbaa` 문자열) | 없음 |
+| `lua/theme.lua` | 색, 글자 크기, 격자, 시간, 폰트 경로, 이름표(`difficulty_name`, `clear`: 클리어 0~10 의 열쇠·이름·램프 색·글자색, `rank_name`, `gauge_name`, `random_name`), 판정 글자의 색 `judge_word`(PGREAT 하늘색, GREAT 노랑. 판정 줄은 정적이라 순환 주기는 없다), 램프의 순환 주기 `lamp_cycle`(50ms), BPM 선의 색 묶음 `bpm_line`. 순수 데이터와 `theme.column`, `theme.content_width`, `theme.cap_height`, `theme.text_top(baseline, size)`(기준선에서 글자 윗선), `theme.centered_top(box, size)`(상자 가운데에 놓을 글자의 윗선), `theme.clear_text(entry)`(클리어 이름의 글자색. NO PLAY 만 `muted`), `theme.mix(color, toward, share)`(두 색을 섞은 색), `theme.hex(color, alpha)`(그래프 객체가 받는 `rrggbb`·`rrggbbaa` 문자열) | 없음 |
 | `lua/props.lua` | beatoraja 속성 id 의 이름표(매직넘버 금지). `skin_type`, `image`(참조 이미지 -100~-111), `timer`, `option`, `number`, `text`, `event`, `index`(이미지 인덱스), `rate`(슬라이더·그래프 type), `offset`, `blend`, `stretch`, `acc`, `text_align`, `text_overflow`, `number_align`, `loop`, `filter`, `padding`(value 의 0 채움), `graph_angle`(graph 가 자라는 방향), `slider_angle`, `judge_graph`(judgegraph 의 type), `back_texture`(judgegraph 의 backTexOff), `no_value`(숫자 속성의 "값 없음" 표지 둘). 이름은 beatoraja `SkinProperty` 의 상수 이름에서 접두사를 뗀 것이고, `stretch` 의 이름만 엔진의 `StretchKind`(`crates/rbms-skin/src/loader/stretch.rs`)를 따른다(레퍼런스의 이름이 `KEEP_ASPECT_RATIO_FIT_INNER` 꼴로 길다) | 없음 |
 | `lua/ui.lua` | 스킨 테이블 조립기. 설계 좌표 변환, id 발급, 객체 정의와 배치 | theme, props |
 | `lua/motion.lua` | 키프레임 프리셋 | theme, props, ui |
@@ -229,7 +263,8 @@ end
 | `a` | 알파 0~255. 기본 255 |
 | `keys` | 키프레임 목록. 각 키는 `time` 과 함께 절댓값 `x`, `top`, `w`, `h`, `a`, `color`, `angle` 또는 기준 상자에 더하는 `dx`, `dtop`, `dw`, `dh` 를 가진다. 생략한 값은 **기준 상자의 값**이다(앞 키프레임을 물려받지 않는다) |
 | `acc` | 보간 곡선 `props.acc.*`. 객체 전체에 하나 |
-| `timer`, `loop`, `op`, `draw`, `blend`, `filter`, `center`, `offset`, `offsets`, `stretch` | beatoraja destination 필드 그대로. `timer`·`draw` 는 Lua 함수도 된다 |
+| `timer`, `loop`, `op`, `draw`, `blend`, `filter`, `center`, `stretch` | beatoraja destination 필드 그대로. `timer`·`draw` 는 Lua 함수도 된다 |
+| `offset`, `offsets` | 오프셋 id 하나 또는 여럿. `ui` 는 둘을 `offsets` 한 배열로 합쳐 낸다(`offsets`, `offset`, 그리고 `s:within` 이 정한 부위 id 순. 레퍼런스의 `offsets + [offset]` 과 같은 집합이다) |
 | `hover` | 마우스가 올라와 있을 때만 그리는 영역(`mouseRect`). 상자 왼쪽 위 기준의 `{ x, top, w, h }` |
 | `def` | `s:image` 전용. 이미지 정의에 넣을 `id`, `timer`, `cycle`, `len`, `ref`, `act`, `click` |
 
@@ -256,6 +291,7 @@ end
 | `s:single(key, def, box, opts)` | "note", "gauge", "bga", "songlist" | 하나만 있는 객체를 넣고 배치한다. `box` 가 없으면 키프레임 없는 destination(note, songlist) |
 | `s:dst(id, box, opts, parent)` | - | 스킨에 넣지 않고 destination 테이블만 만든다. songlist 의 `liston`·`text`, note 의 `group`, judge 의 `images` 처럼 객체 안에 들어가는 destination 용. `parent` 상자를 주면 그 상자 기준의 상대 좌표로 뒤집는다(막대 안의 글자 등) |
 | `s:place(id, box, opts)` | - | 이미 정의된 id 를 배치한다 |
+| `s:within(part, build)` | 오프셋 id, 인자 없는 함수 | `build()` 를 부르는 동안 `s:dst` 가 만드는 모든 destination 의 `offsets` 끝에 `part` 를 붙인다(배치 함수 전부와 중첩 destination 이 `s:dst` 를 거친다). 플레이 화면이 부위별 불투명도 오프셋을 거는 데 쓴다(2.3절). 겹쳐 부르면 안쪽 것만 붙고, 끝나면 바깥 것으로 돌아간다 |
 | `s:finish()` | - | 빈 목록을 지우고 스킨 테이블을 돌려준다 |
 
 id 규칙: 스킨 전체에서 종류가 달라도 id 가 겹치면 안 된다(엔진이 목록을 차례로 찾는다). 그래서 종류 접두사를 붙인다.
@@ -344,10 +380,10 @@ id 규칙: 스킨 전체에서 종류가 달라도 id 가 겹치면 안 된다(�
 | `image/common.png` | 1024x161 | `num18`, `num24`, `num32`, `num44`, `num64`, `num96`(숫자 0~9 한 줄 10칸, 흰색), `snum24`, `snum32`(부호 있는 24칸: 12열 2행, 열 10 은 빈칸, 열 11 은 + 와 -), `block`(8x8 흰색) | 전부 | 39,312 B |
 | `image/decide.png` | 1024x112 | `num144`(레벨 숫자) | 결정 | 16,043 B |
 | `image/select.png` | 1024x479 | 23개. 막대 7종 `bar_song`, `bar_folder`, `bar_table`, `bar_course`, `bar_missing`, `bar_command`, `bar_search`(각 728x64. 반투명 면 rgb(92, 115, 160) 알파 26, missing 만 13. 왼쪽 x 20 에 종류 꼬리표 18px `muted`), 라벨 글자 `label_ln`, `label_random`, `label_mine`, `label_cn`, `label_hcn`(18px 흰색, 높이 17), `lamp_strip`(11칸 x 8x8, NO PLAY 부터 MAX. 폴더 분포 그래프의 원본), 색을 도는 램프 5종 `lamp_failed`(빨강, 빈 칸), `lamp_exhard`(호박, 빨강), `lamp_fullcombo`(호박, 청록, 흰색), `lamp_perfect`·`lamp_max`(호박, 자홍, 흰색. 한 칸 8x8 을 가로로 이었다), `meter`(512x4 흰색. 가로 graph 의 원본), `icon_settings`, `icon_volume`(32x32, 도형으로 그린다), `star_on`, `star_off`(24x24) | 선곡 | 15,660 B |
-| `image/play.png` | 1024x608 | 80개. 노트 6색 x 5종(`note_`, `long_`, `held_`, `hell_`, `hell_held_`), `hell_drain`, `mine`, 게이지 칸 36(`gauge_<종류>_<상태>`, 4x8), 판정 글자 5(크기 64, 색을 구워 세로로 쌓은 프레임: `judge_pgreat` 는 "GREAT" 세 색 3프레임, `judge_great`·`judge_good`·`judge_bad`·`judge_poor` 는 글자와 빈 칸 2프레임), 콤보 숫자 3(`combo_pgreat` 10칸 x 3줄, `combo_great`·`combo_good` 10칸 x 2줄. 판정 글자와 같은 색·같은 프레임 수), `bomb`(128x128 8프레임, 평면 고리), `beam`(8x64 세로 알파 띠), `bar_h`(256x4), `bar_v`(4x256) | 플레이 5종 | 56,482 B |
+| `image/play.png` | 1024x570 | 81개. 노트 6색 x 5종(`note_`, `long_`, `held_`, `hell_`, `hell_held_`), `hell_drain`, `mine`, 게이지 칸 36(`gauge_<종류>_<상태>`, 4x8), 판정 글자 5(크기 64, 색을 구운 한 장씩: `judge_pgreat`·`judge_great` 는 "GREAT", `judge_good`, `judge_bad`, `judge_poor`), 콤보 숫자 3(`combo_pgreat`, `combo_great`, `combo_good`. 판정 글자와 같은 색의 11칸 한 줄: 숫자 0~9 와 열한째 칸의 옅은 0. 열한째 칸은 알파를 40/255 로 낮춘 같은 색의 0 이고 judge 객체가 빈 자리에 그린다), `bomb`(128x128 8프레임, 평면 고리), `beam`(8x64 세로 알파 띠, 최대 알파 118. 둘레에 투명 1px 을 두른 10x66 으로 놓이고 좌표표는 안쪽 8x64 를 가리킨다), `pulse`(같은 띠의 최대 알파 71. 판정선의 리듬 띠), `bar_h`(256x4), `bar_v`(4x256) | 플레이 5종 | 37,578 B |
 | `image/result.png` | 512x8 | `bar`(512x8 흰색. 판정 막대 graph 의 원본) | 결과, 코스 결과 | 113 B |
 
-합계 127,610 B(125 KiB). 아틀라스는 common 1,365 B, decide 293 B, select 2,042 B, play 6,599 B, result 213 B 다. 목표 6 MiB 와의 차이는 예비다. 판정 글자와 콤보 숫자는 색이 프레임마다 달라 `play` 시트에 색째로 굽고(destination 의 색은 흰색이다), READY·FAILED·FULL COMBO·LOADING·FAST·SLOW, 랭크 글자와 클리어 이름은 TTF 다.
+합계 108,706 B(106 KiB). 아틀라스는 common 1,365 B, decide 293 B, select 2,042 B, play 6,666 B, result 213 B 다. 목표 6 MiB 와의 차이는 예비다. 판정 글자와 콤보 숫자는 `play` 시트에 색째로 굽고(콤보의 열한째 칸이 같은 색의 옅은 0 이어야 해서다. destination 의 색은 흰색이다), READY·FAILED·FULL COMBO·LOADING·FAST·SLOW, 랭크 글자와 클리어 이름은 TTF 다.
 
 ### 5.3 생성 스크립트 `tools/generate-images.py`
 
@@ -357,7 +393,7 @@ id 규칙: 스킨 전체에서 종류가 달라도 id 가 겹치면 안 된다(�
 | 의존성 | PEP 723 인라인 메타. `requires-python = ">=3.11"`, `pillow==12.3.0` 하나(2026-10-11 PyPI 최신 안정판, 2026-07-01 배포). 버전을 고정한 것은 래스터 결과를 고정하기 위해서다 |
 | 폰트 | `font/Inter-Regular.ttf`(스킨 폴더 안의 것) |
 | 구조 | 파일 셋으로 나뉜다. `tools/generate-images.py`(진입점: 등록표 `SECTIONS`, 선반 배치, PNG·아틀라스 출력, `main`), `tools/sprites.py`(공통 그리기 헬퍼와 `Sprite`), `tools/sections/<구역>.py`(구역마다 하나. `build() -> list[Sprite]` 와 그 구역의 상수). 진입점이 `sections` 와 `sprites` 를 import 한다(스크립트 폴더가 import 경로에 있다). 진입점은 `sys.dont_write_bytecode` 를 켜므로 `__pycache__` 가 생기지 않는다 |
-| 공통 헬퍼(`sprites.py`) | `digit_strip(name, size)`(10칸 숫자 띠), `signed_digit_strip(name, size)`(24칸), `word(name, text, size, color)`(글자 한 덩이), `word_frames(name, text, size, colors)`·`digit_frames(name, size, colors)`(같은 글자·숫자 띠를 색마다 한 줄씩 세로로 쌓은 프레임. 색 자리에 `None` 을 주면 빈 줄이다), `block(name, w, h, color)`(단색 사각형), `tinted(mask, color)`(알파 마스크에 색). 전부 `Sprite(name, image, divx, divy, meta)` 를 돌려준다. `palette(group)` 은 `lua/theme.lua` 의 `theme.<group>` 표에서 색을 읽어 `{ 이름: (r, g, b) }` 로 돌려준다(group 은 `color`, `tone`, `difficulty`, `judge`, `judge_flash`, `timing`, `lamp`. 표에 적힌 순서를 지킨다) |
+| 공통 헬퍼(`sprites.py`) | `digit_strip(name, size)`(10칸 숫자 띠), `signed_digit_strip(name, size)`(24칸), `word(name, text, size, color)`(글자 한 덩이), `counter_strip(name, size, color, ghost_alpha)`(숫자 10칸 뒤에 알파를 `ghost_alpha` 로 낮춘 0 한 칸을 붙인 11칸 띠. judge 객체의 콤보용이다: 칸 수가 10 의 배수가 아니면 엔진이 11칸 묶음으로 읽고 빈 자리를 열한째 칸으로 채운다[b3 의 judge 절]), `block(name, w, h, color)`(단색 사각형), `tinted(mask, color)`(알파 마스크에 색), `guarded(sprite, margin)`(둘레에 투명 `margin` px 을 두르고 좌표표에는 안쪽 사각형만 적는다. 선형 보간으로 늘려 그리는 작은 그림이 시트에서 어디에 놓이든 가장자리가 같은 투명 픽셀과 섞이게 한다. `Sprite.margin`). 전부 `Sprite(name, image, divx, divy, meta)` 를 돌려준다. `palette(group)` 은 `lua/theme.lua` 의 `theme.<group>` 표에서 색을 읽어 `{ 이름: (r, g, b) }` 로 돌려준다(group 은 `color`, `tone`, `difficulty`, `judge`, `judge_word`, `timing`, `lamp`. 표에 적힌 순서를 지킨다) |
 | 색의 출처 | 시트에 굽는 색(선곡의 램프 띠·도는 램프와 꼬리표, 플레이의 노트·게이지 칸·지뢰·판정 글자·콤보 숫자)은 구역 파일에 다시 적지 않고 `palette` 로 `theme.lua` 에서 읽는다. 팔레트를 바꾸면 `theme.lua` 만 고치고 그 색을 굽는 구역을 다시 생성한다(`--check` 가 빠뜨린 구역을 알려 준다) |
 | 구역 파일 | 다섯 구역 모두 완성. 구역에만 필요한 그리기 함수(선곡의 아이콘, 플레이의 노트·폭발)는 그 구역 파일 안에 있다 |
 | 배치 | 높이 내림차순, 이름순으로 정렬해 선반식으로 놓는다. 스프라이트 사이 2px. 시트 폭은 128~4096 의 2의 거듭제곱 중 정사각형 안에 들어가는 가장 작은 것 |
@@ -526,7 +562,7 @@ NOTE DISPLAY TIME 두 칸(웨이브 10A)은 number 312(이동 시간 ms)와 313(
 
 ### 6.3 플레이 SP(type 0, 1, 4) — 구현 완료
 
-구현: `play5.luaskin`, `play7.luaskin`, `play9.luaskin`, `lua/play/main.lua`(조립과 헤더), `layout.lua`(모드와 영역 계산), `field.lua`(필드 안의 것), `info.lua`(정보 영역). `play.build(spec)` 하나를 다섯 문서가 매개변수만 바꿔 부른다. 문서는 `return require("lua.play.main").build({ keys = 7 })` 꼴이다. destination 은 play5 198, play7 214, play9 222 개이고 프레임마다 부르는 Lua 함수는 12개다.
+구현: `play5.luaskin`, `play7.luaskin`, `play9.luaskin`, `lua/play/main.lua`(조립과 헤더), `layout.lua`(모드와 영역 계산, 옵션·오프셋의 id), `field.lua`(필드 안의 것), `info.lua`(정보 영역). `play.build(spec)` 하나를 다섯 문서가 매개변수만 바꿔 부른다. 문서는 `return require("lua.play.main").build({ keys = 7 })` 꼴이다. destination 은 play5 204, play7 222, play9 231 개이고 프레임마다 부르는 Lua 함수는 14개다(기본 옵션. 웨이브 10C 에서 레인 구분선을 레인 사이마다 하나씩으로 나누고 점수 차 숫자를 더해 늘었다).
 
 `spec` 에서 정해지는 것
 
@@ -545,7 +581,8 @@ NOTE DISPLAY TIME 두 칸(웨이브 10A)은 number 312(이동 시간 ms)와 313(
 | 영역 | 7키 | 5키 | 9키 |
 | --- | --- | --- | --- |
 | 필드(레인) | 64, 0, 484, 840 | 172, 0, 376, 840 | 673, 0, 574, 840 |
-| 필드 바탕(`line` 색, 건반 표시까지) | 64, 0, 484, 912 | 172, 0, 376, 912 | 673, 0, 574, 912 |
+| 레인 구분선(`line` 색, 레인 사이마다 2px) | top 0, h 840 | 같음 | 같음 |
+| 건반 표시 바탕(`line` 색) | 64, 840, 484, 72 | 172, 840, 376, 72 | 673, 840, 574, 72 |
 | 판정선(offset 3) | 64, 840, 484, 8 | 172, 840, 376, 8 | 673, 840, 574, 8 |
 | 건반 표시 | 레인별, top 848, h 64 | 같음 | 같음 |
 | 게이지 막대 | 64, 928, 400, 24 (칸 8px) | 172, 928, 300, 24 (칸 6px) | 673, 928, 500, 24 (칸 10px) |
@@ -595,15 +632,15 @@ NOTE DISPLAY TIME 두 칸(웨이브 10A)은 number 312(이동 시간 ms)와 313(
 
 | 요소 | 위치 | 객체 |
 | --- | --- | --- |
-| 키 빔 | 레인 폭, top 560, h 280 | image `beam`, 타이머 100+ (뗌 120+ 에 120ms 페이드), offset 3 |
-| 건반 눌림 | 건반 표시 자리 | 레인 색 사각형, 알파 230 |
+| 키 빔 | 레인 폭, top 560, h 280 | image `beam`(반투명은 시트에 구움. destination 알파 255), 타이머 100+ (뗌 120+ 에 120ms 페이드 255 → 0), offset 3 |
+| 건반 눌림 | 건반 표시 자리 | 레인 색과 `raised` 를 9 : 1 로 섞은 불투명 사각형(전의 "레인 색, 알파 230"과 같은 색이 난다). 뗌에 120ms 페이드 |
 | note | dst y 240, h 840. `group` 은 2px(top 838) | 구식 명명 10종 + mine, offset 30. 9키만 `dst2 = 168` |
 | 레인 커버 | 필드 폭, top -840, h 840 | slider type 4, angle 2, range 840. 아래 변에 강조선 2px 과 수치 14(왼쪽)·313(오른쪽, 녹색), op 271, offset 4 |
 | 히든·리프트 커버 | 필드 폭, top 840, h 840 | hiddenCover(disapearLine 240, 리프트 연동), liftCover(disapearLine 232). 히든 수치 315 는 top 852, offsets 3·5. 리프트 수치 314 는 기준선 840 고정, op 272 |
-| 판정선 연출 | 판정선 자리 | 기본 `accent_dim`. 타이머 40 에 `accent` 가 가운데에서 400ms 펼쳐진다. 리듬 띠 (top 824, h 16) 타이머 140, 알파 120 → 0 |
+| 판정선 연출 | 판정선 자리 | 기본 `accent_dim`. 타이머 40 에 `accent` 가 가운데에서 400ms 펼쳐진다. 리듬 띠 (top 824, h 16) image `pulse`(반투명은 시트에 구움), 타이머 140, 알파 255 → 0(500ms) |
 | 폭발 | 레인 가운데, 중심 y 844, 128x128 | image `bomb` 8프레임, cycle 250, 가산. 타이머 50+(1회), 70+(누르는 동안) |
-| 판정 + 콤보 | 필드 가운데, 글자 윗선 top 560 | judge(index = 필드 번호, shift). 크기 64(필드 폭 480 미만은 48), 간격 16(12), 콤보 5자리. 60ms 동안 1.15배 → 1배, 440~500ms 페이드. IIDX 양식(ModernChic 의 판정 시트와 `sp/judge.lua` 의 값): PGREAT 는 "GREAT" 가 세 색을 주기 120ms 로 돌고, GREAT·GOOD·BAD·POOR 는 제 색의 글자가 주기 80ms 로 깜빡인다(글자 40ms, 빈 칸 40ms). 헛침(여섯째)은 POOR 의 글자다. 콤보 숫자는 엔진이 PGREAT·GREAT·GOOD 에만 그리고 글자와 같은 색·같은 주기로 돈다. 색은 시트에 구웠고 destination 의 색은 흰색이다. 프레임은 타이머 없이 장면 시간으로 돈다(레퍼런스와 같다) |
-| 판정 상세 | 필드 가운데, top 520(판정 글자 바로 위), 크기 24 | 기본 905: "FAST"(op 1242, `theme.timing.fast` 파랑) / "SLOW"(op 1243, 빨강). 엔진은 이 옵션을 PGREAT 가 아닌 판정에만 켜고(레퍼런스 `getNowJudge > 1`), 오토플레이의 판정은 어긋남이 0 이라 뜨지 않는다. 906: number 525(`snum24`. 빠르면 +, 파랑. 느리면 -, 빨강. PGREAT 는 op 241 로 `sub`). 904: 그리지 않는다. 타이머 46 에 0~500ms(판정 글자와 같이 나오고 깜빡이지 않는다. ModernChic `sp/assist.lua` 의 조건·시간과 같다). DP 는 필드마다: 2P 는 1262/1263/261, 526, 타이머 47 |
+| 판정 + 콤보 | 글자 윗선 top 560. 가로 자리는 아래 "판정 줄" | judge(index = 필드 번호, `shift = false`). 크기 64(필드 폭 480 미만은 48), 콤보 5자리 고정 칸. 타이머 46 에 키프레임 0 과 500 이 같은 값, `loop = -1`: 판정이 난 프레임부터 500ms 동안 그대로 서 있다가 사라진다(3.5절). PGREAT 와 GREAT 는 둘 다 "GREAT" 이고 색이 다르다(`theme.judge_word`: 하늘색, 노랑). GOOD·BAD·POOR 는 `theme.judge` 의 색. 헛침(여섯째)은 POOR 의 글자다. 콤보 숫자는 엔진이 PGREAT·GREAT·GOOD 에만 그리고 글자와 같은 색이다. 색은 시트에 구웠고 destination 의 색은 흰색이다. offsets 3·100·32 |
+| 판정 위 줄 | top 520(판정 글자 바로 위), 크기 24. 가로 자리는 아래 "판정 줄" | 왼쪽 자리: 점수 차(Score Difference. Target = number 108, Best = 152). `snum24` 5자리(부호 + 4자리), `zeropadding = 1`, saturate: "+0003", "-0127", 넘치면 "+9999"·"-9999"(3.3절). 색 `text`. 조건은 타이머뿐이라 PGREAT 에도 뜬다. 오른쪽 자리: 판정 상세(Judge Detail). 905: "FAST"(op 1242, `theme.timing.fast` 파랑) / "SLOW"(op 1243, 빨강). 엔진은 이 옵션을 PGREAT 가 아닌 판정에만 켜고(레퍼런스 `getNowJudge > 1`), 오토플레이의 판정은 어긋남이 0 이라 뜨지 않는다. 906: number 525(`snum24` 4자리. 빠르면 +, 파랑. 느리면 -, 빨강. PGREAT 는 op 241 로 `sub`). 904: 그리지 않는다. 둘 다 타이머 46 에 0~500ms, `loop = -1`(판정 글자와 같은 프레임에 나오고 같은 프레임에 사라진다). offsets 3·100·33. DP 는 필드마다: 2P 는 1262/1263/261, 526, 타이머 47 |
 | 로딩 | top 400 | LOADING(크기 24) + 막대 (x+48, 444, w-96, 4) graph type 102, op 80 |
 | READY, FULL COMBO | top 400, 크기 44 | 타이머 40(0~600ms), 타이머 48(0~2000ms, 선은 top 456) |
 | 폐점 | 화면 전체 | 타이머 3: 덮개 알파 0 → 200(400ms), FAILED 크기 96, 윗선 top 505 |
@@ -621,6 +658,56 @@ NOTE DISPLAY TIME 두 칸(웨이브 10A)은 number 312(이동 시간 ms)와 313(
 | 발치(SP) | 3열. HI-SPEED(text 함수 `%d.%02d`, 크기 24), GREEN(313), COVER(14, op 270). 값 기준선 top + 44. AUTOPLAY(op 33)·REPLAY(op 84) top + 68 |
 | 스코어 그래프 | 캡션 top. 막대 3개(w 40, 간격 8, top + 28, h = 전체 - 168): 110(`accent`), 112(`sub`), 114(`theme.tone.yellow`). BEST(152)·TARGET(108) 줄: 막대 아래 16, 84 |
 
+판정 줄(웨이브 10C). 전부 정수 좌표이고 판정마다, 콤보마다 같다.
+
+| 항목 | 식 | 7키 Normal(필드 64, 484) | 5키 Normal(필드 172, 376. 크기 48) |
+| --- | --- | --- | --- |
+| 배율 `s` | 크기 / 64 | 1 | 0.75 |
+| 글자 폭 | `round(시트 폭 * s)`. GREAT 217, GOOD 197, POOR 184, BAD 137 | 217 | 163 |
+| 글자와 콤보 칸 사이 | `round(크기 * 0.25)` | 16 | 12 |
+| 콤보 한 칸 | `round(40 * s)` x `round(53 * s)` | 40 x 53 | 30 x 40 |
+| 묶음 폭 | GREAT 폭 + 사이 + 5칸 | 433 | 325 |
+| 묶음 왼쪽 끝 `L` | `round(필드 x + (필드 폭 - 묶음 폭) / 2)` | 90 | 198 |
+| PGREAT·GREAT·GOOD 의 글자 | x = `L`(왼쪽 끝 고정) | 90 | 198 |
+| 콤보 칸 | x = `L` + GREAT 폭 + 사이 부터 5칸. 오른쪽 정렬이고 빈 자리에는 옅은 0 | 323~523 | 373~523 |
+| BAD·POOR 의 글자(콤보 없음) | 필드 가운데: `round(필드 x + (필드 폭 - 글자 폭) / 2)` | BAD 238, POOR 214 | BAD 309, POOR 291 |
+| 위 줄(점수 차 + 상세) | 폭 = 점수 차 잉크 73 + 16 + 상세 자리 72 = 161. 왼쪽 끝 `round(필드 x + (필드 폭 - 161) / 2)`. 상세 자리는 그 뒤 89px 부터이고 글자·숫자는 왼쪽 정렬 | 점수 차 226~299, 상세 315~387 | 점수 차 280~353, 상세 369~441 |
+| 위 줄에 하나만 있을 때 | Score Difference = Off 면 상세가, Judge Detail = Off 면 점수 차가 필드 가운데 정렬 | - | - |
+
+- 글자의 왼쪽 끝을 고정하고 콤보를 고정 폭 칸에 두었다. judge 객체의 콤보는 그리는 자리 수만큼의 폭 안에서 가운데로 모이므로(`skin_render/judge.rs` `draw_count`), 10칸 띠로는 자릿수가 늘 때마다 숫자가 반 칸씩 움직인다. 11칸 띠는 빈 자리를 열한째 칸(옅은 0)으로 채워 다섯 자리를 언제나 다 그리므로 숫자가 제 칸에서 움직이지 않는다. 옅은 0 은 꺼진 자리를 어둡게 남겨 두는 IIDX 의 판정 숫자와 같은 구성이고, 글자와 숫자 사이가 비어 보이지 않게 한다. 옅기는 `tools/sections/play.py` 의 `COMBO_GHOST_ALPHA`(40/255)이고 0 으로 하면 빈 자리가 된다.
+- `shift = false` 다. 엔진의 `shift` 는 글자를 숫자 폭의 절반만큼 왼쪽으로 민다(자릿수가 늘면 글자가 움직인다).
+- 콤보 destination 의 x 는 엔진이 `w * digit / 2` 만큼 왼쪽으로 당기므로[b3 의 judge 절] 그만큼 더해 적는다: 글자 기준 x = GREAT 폭 + 사이 + `floor(칸 폭 * 5 / 2)`.
+- 세로 위치: 사용자가 정하는 Judge Position(100)이 글자·콤보·위 줄에 함께 걸린다. +100 이면 묶음 전체가 화면에서 100px 위로, -100 이면 100px 아래로 간다(창 크기와 무관하게 화면 픽셀이다. 엔진이 문서 단위로 바꿔 더한다). 콤보는 글자의 모서리 기준이라 글자를 따라간다.
+- Judge Display = Hide 면 이 표의 것을 하나도 넣지 않는다.
+
+부위(웨이브 10C. 2.3절의 불투명도 오프셋이 걸리는 단위)
+
+| 부위(오프셋 id) | `field.lua`·`info.lua` 의 함수 | 들어 있는 것 |
+| --- | --- | --- |
+| Lane Background(101) | `lane_faces` | 레인마다 면 하나(`bg` 또는 `panel`) |
+| Lane Divider(102) | `lane_dividers` | 이웃한 레인 사이의 2px `line` 사각형 |
+| Judge Line(103) | `judge_line` | 판정선(`accent_dim`), READY 에 펼쳐지는 `accent` 선, 리듬 띠 |
+| Key Beam(104) | `key_beams` | 레인마다 누르는 동안의 빔과 뗀 뒤 120ms 페이드 빔 |
+| Key Display(105) | `key_display` | 건반 표시 바탕(판정선 자리의 띠 840~848 과 건반 사이의 2px 선 848~912. 건반 면 밑에는 깔지 않는다), 레인마다 건반 면, 눌림 빛과 뗀 뒤 페이드 |
+| Bomb(106) | `bombs` | 레인마다 폭발 둘(치는 순간, 누르는 동안) |
+| Note(107) | `note_field` 의 note | note 객체 하나(전 레인의 노트·LN·지뢰) |
+| Bar Line(108) | `note_field` 의 `group` | 필드마다 마디선 destination |
+| Lane Cover(109) | `covers` | 레인 커버(slider), 히든·리프트 커버, 커버 끝의 강조선, 커버 수치와 녹색 숫자, 리프트·히든 수치 |
+| Gauge(110) | `gauge` | gauge 객체와 수치(정수, 점, 소수) |
+| Progress Bar(111) | `progress` | 필드 옆 4px 진행 막대(바탕과 채움) |
+| Song Header(112) | `head` | 난이도 막대, 제목, 난이도 이름·레벨·아티스트, 단계 글자 |
+| BGA(113) | `bga` | `panel` 면, bga, 스테이지 그림, "NO BGA"·"BGA OFF" |
+| Score Graph(114) | `pace` | 캡션, 막대 3개와 바탕, BEST·TARGET 줄 |
+| Score(115) | `score` | EX SCORE, RATE, MAX COMBO, (TARGET) |
+| Judge Count(116) | `counts` | 머리행과 5행 |
+| Timing(117) | `timing` | BPM, TIME LEFT, TIMING 과 히트 에러 띠 |
+| Distribution Graph(118) | `distribution` | 범례, 그래프 바탕, judgegraph, bpmgraph |
+| Speed Display(119) | `foot` | HI-SPEED, GREEN, COVER, AUTOPLAY·REPLAY |
+
+- 기본값(전부 100%)의 화면은 부위를 나누기 전과 같다. 나누면서 바뀐 것은 필드 바탕 하나(64, 0, 484, 912 의 `line` 사각형 한 장)를 레인 사이의 선(레인 구분선)과 건반 표시 바탕으로 쪼갠 것뿐이고, 같은 픽셀에 같은 색이 놓인다. 통합에서 건반 표시 바탕을 한 번 더 쪼갰다(판정선 자리의 띠와 건반 사이의 선. `field.lua` 의 `seams` 가 레인 구분선과 같은 틈을 낸다): 건반 면 밑에 바탕이 깔려 있으면 50% 에서 두 겹이 비쳐 89% 로 보였다. 반투명을 시트와 색에 구운 것(2.3절)까지 합쳐 100% 의 화면은 키 빔·리듬 띠·눌림 빛에서 채널 값 2 이내로만 달라졌다(8.4절).
+- BAD·POOR 를 가운데에 둔 것은 의도다. 이 둘은 콤보 칸이 없어서 묶음의 왼쪽 끝에 두면 필드 왼쪽에 치우친 글자 하나만 남는다. 판정 종류마다 자리는 고정이고(같은 판정은 언제나 같은 자리), PGREAT·GREAT·GOOD 와 BAD·POOR 사이에서만 글자의 시작 열이 다르다(7키 148px, 124px). 세로 자리와 높이는 같다.
+- 사용자의 예 "레인 선, 레인 배경, 몇몇 UI 를 0%, 노트·폭발·판정선은 100%": 101·102 와 원하는 UI 부위를 0% 로 두면 필드가 화면 바탕(`bg`) 위에 노트, 키 빔, 폭발, 판정선, 판정 글자만 남는다(8.4절).
+
 (나) 객체
 
 | 객체 | 종류 | 주요 필드 | 자산 |
@@ -628,15 +715,16 @@ NOTE DISPLAY TIME 두 칸(웨이브 10A)은 number 312(이동 시간 ms)와 313(
 | 노트 필드 | note | `note`, `lnstart`, `lnend`, `lnbody`, `lnactive`, `hcnstart`, `hcnend`, `hcnbody`, `hcnactive`, `hcndamage`, `hcnreactive`, `mine` 을 레인 수만큼(구식 명명으로 통일. LN 10종 배열은 전부 `lnend` 길이 이상이어야 한다[b3 §3.2]). `size` 는 레인마다 16(9키 24). `dst` 는 레인 사각형. `group` 은 마디선(2px, `line`). destination 에 `offset = 30` | `play` 의 노트 |
 | 9키 전용 | note | `dst2 = 168`(놓친 노트가 떨어지는 하한 = 건반 표시의 아래 변). `expansionrate` 는 기본 { 100, 100 } | - |
 | 게이지 | gauge | `nodes` 6종 x 6상태(36칸 규칙[b3 §5]), `parts = 50`, `type = 0`, `range = 3`, `cycle = 33` | `play` 의 `gauge_<종류>_<상태>` |
-| 판정 | judge(index 0) | `images` 6개(타이머 46, `loop = -1`. image 는 `cycle` 120 또는 80 이고 여섯째는 다섯째와 같은 image), `numbers` 6개(콤보. value 도 같은 `cycle`. 넷째부터는 엔진이 그리지 않는다), `shift = true` | `play` 의 `judge_*`, `combo_*` |
+| 판정 | judge(index 0) | `images` 6개(타이머 46, `loop = -1`, 키프레임 0·500 이 같은 값. image 는 한 칸이고 여섯째는 다섯째와 같은 image), `numbers` 6개(콤보. value 는 11칸 띠, `digit = 5`. 넷째부터는 엔진이 그리지 않는다), `shift = false`. Judge Display = Hide 면 없다 | `play` 의 `judge_*`, `combo_*` |
 | BGA | bga | op { 171, 41 } | - |
 | 커버 | slider(type 4), liftCover, hiddenCover | `disapearLine` = 판정선 | `img.block` |
-| 폭발, 키 빔 | image(타이머 50~59, 70~79, 100~109) | 폭발 `cycle = 250`, blend 2 | `play` 의 `bomb`, `beam` |
+| 폭발, 키 빔, 리듬 띠 | image(타이머 50~59, 70~79, 100~109, 140) | 폭발 `cycle = 250`, blend 2 | `play` 의 `bomb`, `beam`, `pulse` |
 | 그래프 | graph(type 101, 102, 110, 112, 114), judgegraph(type 1), bpmgraph(`parts.bpm_graph()`), hiterrorvisualizer(색은 `theme.hex` 로 팔레트에서) | - | `play` 의 `bar_h`, `bar_v` |
-| 숫자 | value | 위 표의 ref | `common` |
+| 숫자 | value | 위 표의 ref. 점수 차(108 또는 152)는 `snum24`, `zeropadding = 1` | `common` |
 | 글자 | text(ref 12, 16), 난이도 부품, READY·FAILED·FULL COMBO·LOADING·FAST·SLOW | - | 폰트 |
+| 오프셋 | 헤더의 `offset` | 2.3절의 20개. destination 마다 `offsets` 에 부위 id 하나 | - |
 
-(다) 애니메이션: 장면 시작 덮개 300ms. PRELOAD 동안 로딩 막대. READY(타이머 40)에 판정선이 가운데에서 양쪽으로 400ms 펼쳐지고 "READY" 가 600ms 뒤 사라진다. 판정 글자는 타이머 46 에 60ms 동안 1.15배에서 1배로 줄고 500ms 에 사라지며 그동안 색이 돌거나 깜빡인다(위 표). FAST·SLOW 는 같은 500ms 동안 가만히 떠 있다. 리듬 타이머(140)에 판정선 위 띠가 알파 120 → 0. 게이지 최대(타이머 44)에 게이지 숫자가 `accent`.
+(다) 애니메이션: 장면 시작 덮개 300ms. PRELOAD 동안 로딩 막대. READY(타이머 40)에 판정선이 가운데에서 양쪽으로 400ms 펼쳐지고 "READY" 가 600ms 뒤 사라진다. 판정 글자·콤보와 그 위 줄은 타이머 46 에 500ms 동안 가만히 서 있다가 사라진다(움직임·깜빡임·색 돌림·페이드 없음. 3.5절). 리듬 타이머(140)에 판정선 위 띠가 알파 120 → 0. 게이지 최대(타이머 44)에 게이지 숫자가 `accent`.
 
 (라) 입력: 클릭 가능한 객체 없음. 레인 커버·하이스피드 조작은 엔진이 한다.
 
@@ -644,7 +732,7 @@ NOTE DISPLAY TIME 두 칸(웨이브 10A)은 number 312(이동 시간 ms)와 313(
 
 ### 6.4 플레이 DP(type 2, 3) — 구현 완료
 
-구현: `play14.luaskin`, `play10.luaskin`. 같은 `play.build(spec)` 를 `{ keys = 14 }`, `{ keys = 10 }` 으로 부른다. 필드가 둘이고 가운데에 정보가 놓인다. 필드의 안쪽 변은 548 과 1372 로 고정이다. destination 은 play10 258, play14 290 개이고 프레임마다 부르는 Lua 함수는 13개다.
+구현: `play14.luaskin`, `play10.luaskin`. 같은 `play.build(spec)` 를 `{ keys = 14 }`, `{ keys = 10 }` 으로 부른다. 필드가 둘이고 가운데에 정보가 놓인다. 필드의 안쪽 변은 548 과 1372 로 고정이다. destination 은 play10 270, play14 306 개이고 프레임마다 부르는 Lua 함수는 16개다(기본 옵션).
 
 | 영역 | 14키 | 10키 |
 | --- | --- | --- |
@@ -690,8 +778,10 @@ SP 와 다른 점
 | 타이머 | 2P 쪽은 60~69(폭발), 80~89(홀드), 110~119(키 온) |
 | 커버 | 같은 slider·커버 정의를 두 필드에 한 번씩 배치 |
 | 발치 | 1P 발치에 HI-SPEED(1열)와 GREEN(2열)만, 2P 발치에 AUTOPLAY/REPLAY(위 행, 필드 x)와 COVER(3열, op 270)만 그린다. 같은 값은 한 번만 나온다. 자동 플레이·리플레이가 아니고 커버를 조작하지 않을 때 2P 발치는 빈다 |
-| 판정 상세 | FAST/SLOW 와 ms 숫자는 친 쪽 필드에만 뜬다(1P 는 op 1242/1243·number 525·타이머 46, 2P 는 1262/1263·526·47) |
-| 옵션 | Lane Width 와 Judge Detail. Field Side, Scratch Side, Score Graph 없음(점수 영역에 TARGET 행이 들어간다) |
+| 판정 위 줄 | 점수 차, FAST/SLOW 와 ms 숫자는 친 쪽 필드에만 뜬다(1P 는 op 1242/1243·number 525·타이머 46, 2P 는 1262/1263·526·47). 점수 차의 값은 두 필드가 같다(런 하나의 값이다) |
+| 판정 줄의 자리 | 필드마다 6.3절의 식 그대로(14키 1P 는 `L` 90, 2P 는 1398. 10키는 크기 48) |
+| 옵션 | Lane Width, Judge Detail, Score Difference, Judge Display. Field Side, Scratch Side, Score Graph 없음(점수 영역에 TARGET 행이 들어간다) |
+| 오프셋 | Score Graph Opacity(114)가 없다. Judge Position 과 부위 불투명도는 두 필드에 같이 걸린다 |
 
 ### 6.5 결과(type 7) — 구현 완료
 
@@ -868,7 +958,7 @@ RBMS_SKIN_PACK=$PWD/assets/skins/rbms-default RBMS_SKIN_CAPTURE_DIR=<폴더> \
 | 결과 | `the_result_scene_of_a_skin_pack_named_by_the_environment_is_captured_for` | `result-clear-*`, `result-fail-*`: 0·1000·3000ms, 페이드, `menu2`(왼쪽 화살표를 누른 뒤. 메뉴가 둘인 스킨을 위한 프레임이고 기본 스킨에서는 3000ms 와 같은 화면이다) |
 | 코스 결과 | `the_course_result_scene_of_a_skin_pack_named_by_the_environment_is_captured_for` | `course-result-clear-*`, `course-result-fail-*`: 같은 구성 |
 | 팩 전체 | `a_skin_pack_named_by_the_environment_is_captured_one_document_a_screen` | `pack-select`, `pack-play7` 과 GPU 판 |
-| 손으로 친 플레이 | `the_play_scene_of_a_skin_pack_named_by_the_environment_is_captured_as_it_is_played_by_hand`(`stage/capture/by_hand.rs`) | `play7-hand-<선택>-<타>-a`, `-b` 와 `play14-hand-…`. 하니스가 노트 한 개씩을 정해진 만큼 빠르게·늦게 직접 친다(누름을 차트 시각과 함께 런에 넘긴다. 실제 시계로 재지 않으므로 어느 기계에서나 같은 판정이 나온다): `great-fast`(40ms 빠름), `great-slow`, `good-fast`(100ms), `good-slow`, `on-the-beat`. `<선택>` 은 `default`(팩의 기본값), `words`(Judge Detail 을 Fast-Slow 로. ModernChic 은 判定タイミング 을 表示 로), `figures`(Milliseconds / +-ms). `-b` 는 `-a` 의 40ms 뒤라 깜빡이는 판정 글자가 둘 중 하나에는 있다. 14키는 2P 쪽 건반을 친다 |
+| 손으로 친 플레이 | `the_play_scene_of_a_skin_pack_named_by_the_environment_is_captured_as_it_is_played_by_hand`(`stage/capture/by_hand.rs`) | `play7-hand-<선택>-<타>-a`, `-b` 와 `play14-hand-…`. 하니스가 노트 한 개씩을 정해진 만큼 빠르게·늦게 직접 친다(누름을 차트 시각과 함께 런에 넘긴다. 실제 시계로 재지 않으므로 어느 기계에서나 같은 판정이 나온다): `great-fast`(40ms 빠름), `great-slow`, `good-fast`(100ms), `good-slow`, `on-the-beat`. `<선택>` 은 `default`(팩의 기본값), `words`(Judge Detail 을 Fast-Slow 로. ModernChic 은 判定タイミング 을 表示 로), `figures`(Milliseconds / +-ms). `-b` 는 `-a` 의 40ms 뒤라 판정 글자가 깜빡이는 스킨은 둘 중 하나에 글자가 있다(기본 스킨은 웨이브 10C 부터 두 장이 같다). 14키는 2P 쪽 건반을 친다 |
 
 옵션 행을 바꾼 플레이 화면은 기본 팩만 찍는다(`stage/capture/play_rows.rs`). `RBMS_SKIN_PACK` 없이 `RBMS_SKIN_CAPTURE_DIR` 만 준다.
 
@@ -881,6 +971,22 @@ RBMS_SKIN_CAPTURE_DIR=<폴더> cargo test -p rbms-player --lib play_rows -- --te
 | `the_play_scene_of_the_default_pack_is_captured_with_its_rows_switched` | `RBMS_SKIN_CAPTURE_DIR` 이 있을 때만 그린다. 1920x1080 42장: `rows-<문서>[-<행>-<항목>…][-covers][-course][-fail]-<순간>`. 기본값 16장(5·7·9·10·14키의 `play`, 7키의 `loading`·`ready`·`held`·`fullcombo`, 7키 Field Side Right + Scratch Side Right + Score Graph Off, 9키 Score Graph Off, 7키 커버 3종, 7키 폐점, 7·9·14키 코스 마지막 스테이지)과 Lane Width = Wide 26장(다섯 문서의 `play`, 7·14키의 `loading`·`ready`·`held`·`fullcombo`, 7키의 Graph Off / Field Right / Scratch Right / 셋 다, 5키 Field Right + Scratch Right, 9키 Graph Off, 7·9·14키 커버 3종, 7·14키 폐점, 9·14키 코스). `held` 는 차트 7,500ms(LN 을 누르고 있는 순간), `play` 는 9,000ms, 커버는 레인 커버 30%·리프트 15%·히든 10% |
 | `the_default_pack_draws_every_play_scene_with_lanes_half_as_wide_again_when_its_row_says_so` | 어디서나 돈다(640x360). 다섯 문서를 Normal 과 Wide 로 컴파일해: 실패·경고 없음, note 의 레인마다 Wide 폭 x 2 = Normal 폭 x 3, 레인의 y·h 는 같음, Wide 의 레인이 화면 안이고 서로 겹치지 않음, Wide 로 3초까지 플레이해 그려짐 |
 | `the_default_pack_keeps_the_pictures_and_the_gauge_clear_of_wide_lanes_however_its_rows_are_switched` | 어디서나 돈다. Wide 에서 문서가 가진 나머지 행의 모든 조합(5·7키 8가지, 9키 2가지, 10·14키 1가지)을 컴파일해: 실패·경고 없음, bga 와 gauge 가 화면 안이고 어느 레인과도, 서로도 겹치지 않음 |
+
+판정 줄과 부위 불투명도는 `stage/capture/play_parts.rs` 가 맡는다(웨이브 10C). 행은 `play_rows.rs` 와 같은 통로로, 오프셋은 SKIN 메뉴가 저장하는 자리(`config.skin.customise(문서).offsets[id]`)에 이름으로 찾아 넣는다. 오프셋은 프레임마다 저장된 값에서 읽히므로 런 도중에 바꿔 같은 순간을 다시 그릴 수 있다. 런은 하니스가 박자마다 한 타씩 직접 치거나(120 BPM, 4분음표마다 노트 하나. 누름을 차트 시각과 함께 넘긴다) 엔진이 친다.
+
+```
+RBMS_SKIN_CAPTURE_DIR=<폴더> cargo test -p rbms-player --lib play_parts -- --nocapture
+```
+
+| 테스트 | 하는 일 |
+| --- | --- |
+| `the_default_pack_holds_a_judgement_still_for_as_long_as_it_is_shown` | 어디서나 돈다(960x540). 필드 위의 것을 불투명도 0% 로 치워 판정 줄만 남기고, 누른 프레임과 그 뒤 0·16·32·48·64·80·96·250·440·496ms 의 필드(레인 열 x 판정선 위)가 픽셀까지 같은지, 잉크 상자가 같은지, 540ms 에는 아무것도 없는지 본다. 위 줄 없이(Score Difference Off, Judge Detail Off, PGREAT) 한 번, 기본값으로(40ms 빠른 GREAT. 점수 차와 FAST 가 뜬다) 한 번 |
+| `the_default_pack_keeps_the_word_of_a_judgement_in_place_as_its_combo_grows` | 어디서나 돈다. 박자에 맞춰 100타를 쳐 콤보 9, 10, 100 의 프레임에서 판정 줄의 잉크 상자가 같고 글자의 열(문서의 judge 첫 image 가 놓인 열)이 픽셀까지 같은지 본다 |
+| `the_default_pack_moves_its_judgement_by_its_position_and_hides_it_when_told_to` | 어디서나 돈다. Judge Position +100 이면 잉크 상자가 위로 정확히 100px, -100 이면 아래로 100px 이고 좌우·크기는 그대로인지, Judge Display Hide 면 잉크가 없는지 본다 |
+| `the_default_pack_draws_nothing_of_a_part_at_no_opacity` | 어디서나 돈다. 커버 3종을 켜고 Judge Display Hide, 모든 부위 0% 로: 건반을 뗀 뒤 40ms(키 빔·눌림 빛이 페이드 중)와 건반을 누르고 있는 프레임 전체가 한 색인지 본다. 이어서 부위 하나만 100% 로 되돌린 프레임이 한 색이 아닌지를 문서가 선언한 부위마다 본다(부위마다 제 오프셋으로만 사라진다). 한 destination 이라도 부위에 걸리지 않았거나 엔진이 0% 에서 무엇을 남기면 실패한다 |
+| `the_keys_of_the_skin_menu_take_the_parts_of_the_default_pack_off_the_field` | 어디서나 돈다(웨이브 10C 통합). 손으로 치는 7키 런에 SKIN 메뉴를 열어(런의 앱 설정 위에서, 화면은 바꾸지 않고) 키만으로 문서의 모든 부위를 내린다: 행까지 ↓, Shift+← 네 번, 행이 `0%` 인지 확인, 끝에 Esc. 그 뒤 건반을 누르고 있는 프레임 전체가 한 색인지, 저장된 오프셋이 부위마다 a = -255 인지, Esc 가 쓴 설정 파일을 다시 읽은 값이 같은지 본다. 메뉴가 쓰는 곳과 플레이가 읽는 곳이 어긋나면 실패한다 |
+| `the_play_field_of_the_default_pack_is_captured_with_its_judgement_and_its_parts_set` | `RBMS_SKIN_CAPTURE_DIR` 이 있을 때만 그린다. 1920x1080 135장(통합에서 `parts-play7-half-<부위>` 19장과 SKIN 메뉴 키로 부위를 내린 `parts-menu-bare-<before\|after>` 2장을 더했다. 아래 설명의 114장에 더해진다). `parts-frames-<on-the-beat\|early>-<ms>`(판정 뒤 11프레임), `parts-judge[-ms\|-wide\|-play5\|-play14\|-play14-wide]-<combo-009\|combo-010\|combo-100\|great-fast\|great-slow\|good-fast\|good-slow\|missed\|on-the-beat>`, `parts-line-<behind\|detail-only\|difference-only>`, `parts-position-<up\|down\|hidden>`, `parts-play7-<whole\|bare\|without-<부위>\|half>`(엔진이 치는 런의 9,000ms. `bare` 는 사용자의 예, `without-*` 은 부위 하나만 0%, `half` 는 전부 50%), `parts-<play7-covers\|play7-wide\|play9\|play14\|play14-wide>-<whole\|bare>` |
+| `a_judgement_of_a_skin_pack_named_by_the_environment_is_captured_frame_by_frame` | `RBMS_SKIN_PACK` 이 있을 때만. 그 팩의 7키 판정을 같은 11프레임으로 찍는다(`pack-judgement-*`). 고치기 전 팩이나 다른 팩의 판정 움직임을 나란히 보는 용도다 |
 
 필터를 여럿 줄 때는 `--` 뒤에 적는다: `cargo test -p rbms-player --lib -- <이름 1> <이름 2> --nocapture --test-threads=1`. 캡처는 결정적이다(같은 팩으로 두 번 찍은 80장이 픽셀까지 같다. `pack-*` 의 진행 막대와 맥동만 실행 시각을 탄다).
 
@@ -896,7 +1002,8 @@ RBMS_SKIN_CAPTURE_DIR=<폴더> cargo test -p rbms-player --lib play_rows -- --te
 | 결정 | 0ms 에 머리와 구분선만, 1500ms 에 전부, 3500ms 에 항목 구분선 자리의 `accent` 선과 옅은 덮개, 3950ms 에 단색. 긴 제목이 스테이지 그림(x 1280)을 넘지 않는가. 변속 곡에서 최소·줄표·최대가 붙어 있는가. 숫자의 잉크가 항목 이름의 x 에서 시작하는가 |
 | 선곡 | 가운데 막대가 top 520 에 있는가. 막대 종류·램프·레벨·라벨이 6.2절대로인가. 폴더·코스 막대에서 정보 영역이 바뀌는가. 그림 없는 곡에 "NO STAGE IMAGE" 가 뜨는가. 패널 1~3 의 칸이 건반 순서와 맞는가 |
 | 플레이(Lane Width = Wide) | 건반 표시 줄(y 880)에서 잰 레인 폭이 Normal 의 1.5 배인가(87, 69, 150, 93). 노트가 레인 폭을 꽉 채우고 가장자리가 한 픽셀에 끊기는가. 누르고 있는 LN 의 아래 끝이 판정선에 닿는가. 판정 글자의 잉크 가운데가 필드 가운데인가. 정보 영역의 상자가 서로, 필드와, 화면 끝과 겹치지 않는가(7키 Graph On 은 2단, 9키는 타이밍이 왼쪽, DP 는 게이지가 1P 필드 아래). 코스에서 좁은 곡 머리의 단계 글자가 2행 오른쪽에 있는가. Normal 의 캡처가 고치기 전과 바이트까지 같은가 |
-| 플레이 | 노트 아래 변이 판정선에 닿는가. 레인 수와 순서(스크래치 방향 옵션 포함). 판정 글자와 콤보가 필드 가운데인가. 게이지 50칸. DP 에서 두 필드가 대칭인가. 9키에서 9레인이 가운데인가. 손으로 친 캡처에서: 빠른 타에 파란 "FAST", 느린 타에 빨간 "SLOW" 가 판정 글자 위에 뜨고 PGREAT 에는 뜨지 않는가. PGREAT 의 "GREAT" 가 `-a`·`-b` 에서 다른 색인가. DP 에서 친 쪽 필드에만 뜨는가. 판정 수 표가 5행이고 분포 그래프 위에 범례가 있는가 |
+| 플레이 | 노트 아래 변이 판정선에 닿는가. 레인 수와 순서(스크래치 방향 옵션 포함). 판정 묶음(글자 + 콤보 5칸)이 필드 가운데인가. 게이지 50칸. DP 에서 두 필드가 대칭인가. 9키에서 9레인이 가운데인가. 손으로 친 캡처에서: 빠른 타에 파란 "FAST", 느린 타에 빨간 "SLOW" 가 판정 글자 위 줄의 오른쪽 자리에 뜨고 PGREAT 에는 뜨지 않는가. 같은 줄 왼쪽에 부호와 네 자리의 점수 차가 뜨고 스코어 그래프의 TARGET 숫자와 같은 값인가. PGREAT 의 "GREAT" 가 하늘색, GREAT 가 노랑인가. DP 에서 친 쪽 필드에만 뜨는가. 판정 수 표가 5행이고 분포 그래프 위에 범례가 있는가 |
+| 플레이(판정 줄과 부위. `play_parts.rs`) | `parts-frames-*` 11장에서 판정 줄이 같은 자리·크기·색인가(540ms 에는 없는가). 콤보 9·10·100 에서 글자가 같은 자리인가. Judge Position ±100 에서 묶음이 통째로 100px 움직이는가. `bare` 가 화면 바탕 위에 노트·키 빔·폭발·판정선·판정 줄만 남기는가. `without-<부위>` 마다 그 부위만 사라지고 가장자리·잔상이 없는가 |
 | 결과 | 클리어와 실패의 머리 글자·색. 랭크, 점수 차이의 부호, 판정 표 5행 15칸과 COMBO BREAK·EMPTY POOR, 그래프 4개와 그래프마다의 범례. 안내의 게이지 전환 문구가 키 수에 맞는가 |
 
 ### 8.4 실제로 확인한 것
@@ -956,10 +1063,29 @@ RBMS_SKIN_CAPTURE_DIR=<폴더> cargo test -p rbms-player --lib play_rows -- --te
 | 생성 스크립트 | 시트는 고치지 않았다. 전체 `--check` 종료 코드 0(10개 파일 일치) |
 | 엔진 게이트 | `cargo test -p rbms-skin --test default_pack` 4 통과. `cargo test -p rbms-player capture` 42 통과(새 게이트 둘 포함). `cargo clippy -p rbms-player --all-targets -- -D warnings` 통과. 내장 화면의 골든은 건드리지 않았다 |
 
+웨이브 10C(정적인 판정, 판정 위 줄, 판정 위치와 숨김, 부위별 불투명도. 2026-10-11)
+
+| 확인 | 결과 |
+| --- | --- |
+| 고치기 전에 무엇이 움직였나 | HEAD 의 팩을 사본으로 꺼내 `a_judgement_of_a_skin_pack_named_by_the_environment_is_captured_frame_by_frame` 로 판정 뒤 11프레임을 찍었다. PGREAT: 0ms 에 글자가 1.15배로 크고 숫자가 오른쪽으로 밀려 있다가 48~64ms 에 제 크기·제 자리가 되고, 프레임마다 분홍·민트·파랑으로 색이 바뀌고, 496ms 에 거의 투명하다(페이드). GREAT: 같은 확대에 더해 440ms 프레임에서 글자와 숫자가 꺼져 있다(깜빡임). 콤보의 자릿수가 늘면 `shift` 로 글자가 왼쪽으로 반 칸씩 밀린다. 움직임은 전부 스킨의 키프레임(`popping`, `beside_popping`), 시트의 프레임(`cycle` 120·80), `shift = true` 였고 엔진의 judge 객체가 스스로 넣는 움직임은 없다(`skin_render/judge.rs` 는 각 destination 을 그대로 놓는다) |
+| 판정이 가만히 있는가(1920x1080 실측) | `parts-frames-on-the-beat-000ms`~`496ms` 10장 모두: 글자 잉크(색 `84CEFF` 인 픽셀) x 97, y 561, 205 x 47, 2,661픽셀. 콤보 "1" 의 잉크 x 495, y 561, 16 x 47, 287픽셀. 점수 차 "+0001" 의 윗선 y 520. 540ms 프레임에는 판정 줄의 픽셀이 없다. `parts-frames-early-*`(40ms 빠른 GREAT, 색 `FFD633`): 글자가 같은 x 97, y 561, 205 x 47, 2,661픽셀이고 "FAST" 는 x 316, y 520, 57 x 17 로 10장이 같다 |
+| 콤보가 늘 때 | `parts-judge-combo-009`, `-010`, `-100`: 글자 잉크가 세 장 모두 x 97, y 561, 205 x 47, 2,661픽셀. 숫자의 오른쪽 끝은 9 가 x 517, 10 과 100 이 517 로 같은 칸이고 왼쪽으로만 자리가 늘어난다(잉크 x 488, 455, 415). 빈 자리에는 옅은 0 |
+| 판정 위 줄 | `parts-judge-*`: 박자에 맞춘 PGREAT 는 점수 차만(+0002, +0003, +0022), 40ms 빠른 GREAT 는 "+0021 FAST"(FAST 파랑), 40ms 늦은 GREAT "+0020 SLOW"(빨강), GOOD "+0019 FAST"·"+0017 SLOW", 놓친 노트 "POOR"(가운데) 위에 "+0015 SLOW". 같은 프레임의 스코어 그래프 TARGET 숫자가 +21, +20 으로 같다. `parts-line-behind`(GOOD 70타 뒤): "-0125 FAST". `parts-judge-ms-*`(Milliseconds + Best): "+0201 +40", "+0202 -100", PGREAT "+0204 +0"(`sub`). `parts-line-detail-only`: FAST 가 필드 가운데(x 278~334). `parts-line-difference-only`: 점수 차가 필드 가운데 |
+| 위치와 숨김 | `parts-position-up`(Judge Position +100): 글자 y 461, 위 줄 y 420 으로 기본(561, 520)에서 정확히 100px 위, x 와 크기는 같다. `parts-position-down`(-100): y 661, 620. `parts-position-hidden`(Judge Display Hide): 필드에 판정 줄의 픽셀이 없다. 레인 커버 30%·리프트 15%·히든 10% 의 캡처(`parts-play7-covers-whole`)에서 판정 줄은 리프트만큼 올라가 있고 커버 수치(300·360, 150, 100)와 겹치지 않는다 |
+| 부위 불투명도(7키, 엔진이 치는 런 9,000ms) | `parts-play7-whole`: 고치기 전과 같은 화면. `parts-play7-bare`(레인 배경·구분선·건반 표시·마디선·진행 막대·스코어 그래프·곡 머리·발치·타이밍 0%): 필드 자리가 화면 바탕 `0C0F14` 이고 그 위에 노트, 키 빔, 폭발, 판정선, 판정 줄만 있다(레인 면 자리 (120, 300), 구분선 (165, 300), 건반 표시 (120, 880) 가 전부 `0C0F14`). `parts-play7-without-<부위>` 19장: 부위마다 그것만 사라지고 다른 부위와 그 가장자리는 그대로다. `parts-play7-half`(전부 50%): 노트 `F1F4F8` → (127, 131, 136), 판정선 → (51, 132, 160), 분포 그래프 막대 (0, 136, 255) → (7, 77, 140), 곡 머리의 난이도 막대 → (133, 103, 10) 으로 note·graph·judgegraph 같은 특수 객체도 중간값을 받는다 |
+| 넓은 레인과 DP | `parts-judge-wide-*`(Wide + Field Right): 판정 묶음이 넓은 필드 가운데, 크기 64. `parts-judge-play5-*`: 크기 48. `parts-judge-play14-*`, `-wide-*`: 친 2P 필드에만 판정 줄이 뜬다. `parts-play7-wide`, `parts-play9`, `parts-play14`, `parts-play14-wide` 의 `bare`: 어느 문서에서도 레인 면·선·건반 표시가 남지 않는다. 14키 `whole`: 두 필드의 판정 묶음이 각 필드 가운데(1P 콤보 132, 2P 134 는 각 필드가 마지막으로 판정된 때의 콤보다) |
+| 덤프(`--strict --frames 120`) | 문서 9개 load ok, 경고 0, pcall 0, 함수 실패 0, 예산 초과 0, 팩 폴더 73 files unchanged. destination: play5 204, play7 222, play9 231, play10 270, play14 306(나머지는 그대로. 통합에서 건반 표시 바탕을 쪼갠 뒤에는 play5 209, play7 229, play9 239, play10 280, play14 320). 헤더: play5·7 옵션 7 + 오프셋 20(+ 자동 4), play9 옵션 5 + 20, play10·14 옵션 4 + 19. 쓰기 권한을 뺀 사본에서도 같다 |
+| 기본값의 화면이 그대로인가 | HEAD 의 팩과 고친 팩을 같은 하니스·같은 차트로 찍어 비교했다(1920x1080). 판정이 없는 프레임: `early-540ms` 는 화면 전체가 픽셀까지 같고, `on-the-beat-540ms` 는 리듬 띠의 맨 아래 한 줄(y 839)에서 채널 값 1 차이뿐이다(리듬 띠는 실행 시각을 탄다. 8.2절). 판정이 떠 있는 프레임 9장(`on-the-beat` 의 0·16·64·96·250·440ms, `early` 의 0·96·250ms)은 판정 줄의 자리(x 64~548, y 500~620) 밖이 같거나 같은 한 줄의 1 차이다: 노트, 키 빔과 그 페이드, 건반 눌림, 폭발, 판정선, 게이지, 정보 영역이 그대로다. 처음 비교에서는 리듬 띠의 왼쪽 끝 30px 이 달랐다: 판정 프레임을 줄이면서 시트의 배치가 바뀌어 `beam` 이 시트 왼쪽 끝(x 0)에 놓였고, 필드 폭으로 늘려 그릴 때 왼쪽 가장자리가 투명 픽셀과 섞이지 않게 된 것이다. `beam` 에 투명 둘레 1px 을 둘러(`guarded`) 놓이는 자리와 무관하게 전과 같은 가장자리가 되게 했다 |
+| 생성 스크립트 | `uv run tools/generate-images.py play` 로 play 시트만 다시 만들었다(56,482 → 37,530 B). 전체 `--check` 종료 코드 0(10개 파일 일치) |
+| 부위의 중간값(웨이브 10C 통합. `parts-play7-<whole\|without-<부위>\|half-<부위>>` 의 (half - without) / (whole - without) 중앙값) | 반투명을 굽기 전: Key Beam 0.35(20% 이하에서 사라짐), Key Display 0.89, Judge Line 0.58, 나머지 13개 부위 0.48~0.51. 구운 뒤: Key Beam 0.48, Key Display 0.48, Judge Line 0.58(겹친 두 선. 그대로 둠), BGA 0.51, 분포 그래프 0.51, 게이지 0.49, 판정 수 0.49, 레인 구분선 0.48, 노트 0.50, 진행 막대 0.48, 스코어 그래프 0.51, 점수 0.50, 곡 머리 0.50, 발치 0.49, 타이밍 0.49. 폭발은 가산이라 밝은 자리에서 1.00(포화), 어두운 자리에서 0.48. 100% 의 화면은 굽기 전과 채널 값 2 이내(`parts-play7-whole` 15,519픽셀이 키 빔 자리 x 274~547, y 591~839 에서 최대 2, 9키는 건반 눌림 자리까지 최대 2, `parts-judge-on-the-beat` 는 리듬 띠 884픽셀이 최대 1) |
+| 메뉴 조작으로 만든 플레이 화면(웨이브 10C 통합) | `parts-menu-bare-before`·`-after`: 엔진이 치는 7키 런 9,000ms 에서 SKIN 메뉴의 키(행마다 Shift+← 네 번)로 Lane Background, Lane Divider, Key Display, Bar Line, Progress Bar, Score Graph, Song Header, Speed Display, Timing 을 0% 로 내린 앞뒤. 뒤 장은 `parts-play7-bare`(오프셋을 직접 적은 것)와 같은 구성이다 |
+| 엔진 게이트 | `cargo test -p rbms-skin --test default_pack` 4 통과. `cargo test -p rbms-player capture` 52 통과(새 게이트 넷 포함. 같은 웨이브의 엔진·메뉴 단위가 고친 작업 트리 위에서 돌렸다). 내장 화면의 골든은 건드리지 않았다 |
+
 확인하지 못한 것
 
 | 화면 | 내용 |
 | --- | --- |
+| 플레이(웨이브 10C) | 실제 BGA 가 있는 차트에서 BGA Opacity 의 중간값(하니스의 차트에는 BGA 가 없어 면과 "NO BGA" 로만 봤다), 커버 3종의 중간값, BAD 의 필드 글자, 콤보 10,000 이상, SKIN 메뉴(F12)에서 불투명도 행을 움직이는 조작과 그 미리보기(메뉴 단위의 일이다), 실제 창(1280x720)에서의 판정 줄. Judge Position 을 크게 옮긴 때의 겹침은 계산으로만 봤다: 약 -210 아래로 내리면 판정선·리프트·히든 수치의 자리(y 820~852)에 닿고, 레인 커버를 판정 줄 높이(기본 위치에서 커버 62~73%)까지 내리면 커버 끝의 수치와 겹친다. 사용자가 정한 위치이므로 그대로 둔다 |
 | 공통 | 한글·일본어 제목의 폭·기준선·축소(하니스의 글꼴이 Inter 뿐이다. 7절 보완 9). 실제 창(1280x720)에서의 모습 |
 | 선곡 | 호버 강조, 버튼·리플레이 칸·막대 클릭, 스크롤·볼륨 슬라이더 드래그, 검색 칸 클릭 입력, 리플레이가 있는 슬롯과 선택 밑줄, 즐겨찾기 켜진 별, 코스 트로피, 9버튼 배치의 시트, 스크롤 중 가림 경계에서 막대가 잘리는 모습, MINE 과 RANDOM 이 같이 붙은 곡과 CN·HCN 라벨, 사이드 메뉴의 소리. 검색 오버레이의 캡처는 곡이 바뀐 직후(타이머 11 의 0ms)라 곡 정보가 아직 투명한 프레임이다. "SCORE (SET IN SETTINGS)" 와 옵션 시트의 등장·퇴장 중간은 팩 사본으로만 봤다 |
 | 플레이(Wide) | 실제 창과 실제 BGA(그림·동영상)가 있는 차트에서의 모습, 4자리 판정 수·5자리 EX SCORE·10분 이상의 남은 시간이 좁아진 상자(9키 Graph On 의 판정 수 268, 7키 Graph Off 의 타이밍 332)에 들어가는 모습(숫자는 `fit` 으로 줄어들게 되어 있고 폭은 계산으로만 확인했다), Milliseconds·Fast-Slow 판정 상세(손으로 치는 하니스는 Normal 로만 돈다. 필드 폭에서 가운데를 잡는 같은 코드다), SKIN 메뉴(F12)의 미리보기에서 행을 바꾸는 조작 |
@@ -977,6 +1103,7 @@ RBMS_SKIN_CAPTURE_DIR=<폴더> cargo test -p rbms-player --lib play_rows -- --te
 | 통합 | 엔진 결함 2건 수정(7절), 공통 승격(4절), 화면 사이 일관성(3.1절의 판정 색 순서와 MAX 램프 색, 6절 머리말), 이 설계서의 최종 좌표, 게이트와 캡처 전체(8.4절) | 공통 파일 전부와 이 설계서 | 완료(웨이브 8B) |
 | 웨이브 9A U4 | FAST/SLOW 기본 켬, IIDX 식 판정(글자·색·5행), ModernChic 의 램프·난이도 색과 클리어 표기, 손으로 치는 캡처 하니스 | 팩의 `lua/**`, `tools/**`, `image/{play,select}.png`, `lua/atlas/{play,select}.lua`, `apps/rbms-player/src/stage/capture/by_hand.rs`, 이 설계서 | 완료(웨이브 9A) |
 | 웨이브 10A 단위 A | Lane Width 옵션(Normal / Wide. 레인 1.5 배)과 Wide 의 배치, 좁은 곡 머리, 옵션을 바꿔 찍는 캡처와 게이트 | `lua/play/{layout,main,info}.lua`, `apps/rbms-player/src/stage/capture/play_rows.rs`(`capture.rs` 에는 mod 한 줄), 이 설계서 | 완료(웨이브 10A) |
+| 웨이브 10C 단위 S | 판정 줄을 정적으로(확대·미끄러짐·깜빡임·색 돌림·페이드 제거, 글자 왼쪽 끝 고정, 콤보 고정 칸), 판정 위 줄(점수 차 + FAST/SLOW), 옵션 Score Difference·Judge Display, 오프셋 Judge Position 과 부위 불투명도 19개, `ui` 의 `s:within`, 생성 스크립트의 `counter_strip`·`guarded`, 판정 줄·부위 캡처와 게이트 | 팩의 `lua/play/**`, `lua/{ui,theme}.lua`, `tools/{generate-images.py,sprites.py,sections/play.py}`, `image/play.png`, `lua/atlas/play.lua`, `apps/rbms-player/src/stage/capture/play_parts.rs`(`capture.rs` 에는 mod 한 줄), 이 설계서 | 완료(웨이브 10C) |
 | 웨이브 10A 통합 | 선곡 패널 3 의 NOTE DISPLAY TIME 두 칸(이동 시간과 녹색 숫자, 꺼짐 표기), 플레이의 TIMING 표지(AUTO), 결과와 패널 3 의 안내 문구에서 옮길 수 있는 키 이름 정리. 엔진: 플레이 화면이 image index 75 를 답한다, 묶인 가림막 키를 누른 뒤 1.5초 동안 op 270(LANECOVER1_CHANGING)이 켜져 발치의 COVER 수치가 뜬다 | `lua/select/sheet.lua`, `lua/play/info.lua`, `lua/result/main.lua`, `apps/rbms-player/src/skin_host/play.rs`, `stage/play/mod.rs` | 완료(웨이브 10A) |
 
 통합에서 공통으로 올린 것: 값 없음 표지 검사(`ui.has_value`), 시트 조각을 graph·slider 의 원본으로 옮기는 것(`s:sprite_source`), 기준선·가운데 정렬의 글자 윗선(`theme.text_top`, `theme.centered_top`), 팔레트의 16진 문자열(`theme.hex`), 이름표(`theme.clear`, `rank_name`, `gauge_name`, `random_name`), 판정 6행(`parts.judges`), Stage Image 옵션(`parts.stage_image*`), `event_index` 이름 고르기(`parts.choice`), bpmgraph 정의(`parts.bpm_graph`), 그래프·숫자의 열거값(`props.judge_graph`, `back_texture`, `padding`, `graph_angle`, `slider_angle`, `filter`)과 화면 모듈에 흩어져 있던 속성 id(`props.option` 의 60·61·261·1262·1263, `props.number` 의 421·422, `props.index` 의 301·371), 생성 스크립트의 팔레트 읽기(`sprites.palette`).

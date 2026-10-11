@@ -1,6 +1,6 @@
 # 스킨 가이드
 
-최종 갱신 2026-10-11 · 대응 커밋: 7da861a 이후 웨이브 10B(PLAY 메뉴. 작업 트리 기준, 커밋 전)
+최종 갱신 2026-10-11 · 대응 커밋: f60dcef 이후 웨이브 10C(판정 표시와 부위별 불투명도. 작업 트리 기준, 커밋 전)
 
 R-BMS 는 화면마다 스킨 문서 하나를 읽어 그 화면을 단독으로 그린다. 문서가 없거나 읽히지 않는 화면은 내장 화면이 그린다. 기본으로 설치되는 자작 스킨 `rbms-default` 가 첫 실행부터 선곡 · 결정 · 플레이 · 결과를 그리며, beatoraja 용으로 만든 외부 Lua 스킨(`.luaskin`)도 수정 없이 읽는다. 이 문서의 독자는 스킨을 쓰는 사용자와 스킨을 만드는 사람이다.
 
@@ -11,7 +11,7 @@ R-BMS 는 화면마다 스킨 문서 하나를 읽어 그 화면을 단독으로
 | `docs/acknowledge/2026-10-09-lua-skin-compat-decisions.md` | 사용자 결정 D1~D10과 기각한 대안 |
 | `docs/reference/skin-compat/README.md` | 조사 보고서 색인(beatoraja 의 스킨 엔진 계약, 속성 id 표 등) |
 | `docs/plan/2026-10-11-skin-menu.md` | SKIN 메뉴 설계서(배치, 조작, 미리보기 엔진, 경계 API) |
-| `docs/play-options.md` | 플레이 옵션의 정의와 PLAY 메뉴(7절. 플레이 스킨의 옵션을 플레이 화면 미리보기를 보며 바꾸는 화면) |
+| `docs/play-options.md` | 플레이 옵션의 정의와 PLAY 메뉴(7절. 플레이 스킨의 옵션·오프셋·불투명도를 플레이 화면 미리보기를 보며 바꾸는 화면), 기본 스킨의 판정 표시(8절) |
 | `docs/theme.md` | 내장 화면의 색 테마 `theme.ron` |
 
 ## 1. 개요
@@ -76,6 +76,9 @@ R-BMS 는 화면마다 스킨 문서 하나를 읽어 그 화면을 단독으로
 | 선곡 입력 잠금 | 선곡의 STARTINPUT 은 입력 잠금이 아니다 |
 | 곡 검색 | 검색 상자는 하나다. 스킨에 검색 칸(검색어를 쓰는 editable text, ref 30)이 있으면 `/`, 숫자 0, 칸 클릭이 모두 그 칸에 치게 하고 앱의 검색 상자는 뜨지 않는다. 칸이 없는 스킨과 내장 화면에서는 앱의 검색 상자가 뜬다. 어느 쪽이든 글자마다 목록이 좁혀지고(beatoraja 는 확정할 때 한 번), 한글·가나는 입력기로 조합된다. 치는 중에는 글자·편집 키만 검색어가 갖는다: ↑↓·휠·F3·F9·스킨 버튼은 그대로 동작하고, F1·F2·F4·F8·F12·Tab 과 패드 버튼은 입력을 확정한 뒤 동작한다. Enter 는 확정(곡 시작은 한 번 더), Esc 는 취소. 확정한 결과 목록은 일반 목록과 같게 조작되고 Esc 로 검색을 연 폴더와 행으로 돌아간다. 폴더 경로(text 1000)는 beatoraja 의 검색 폴더처럼 `Search : '검색어' > ` 가 된다. 경로를 그리지 않는 스킨에는 앱이 `SEARCH <검색어> N HITS` 표식을 덧그린다 |
 | 스킨 옵션이 앱 설정과 겹칠 때 | 스킨 옵션이 우선한다. 스킨이 그리는 화면에서 의미가 없어진 설정 행에는 표지를 붙인다(§2.5) |
+| 오프셋의 알파 | 사용자가 준 오프셋의 알파(a)는 그 destination 의 모든 프레임에 더해진다. beatoraja 는 색이 키프레임 사이에서 보간되는 동안에는 더하지 않아(`SkinObject.prepareColor`) 페이드하는 객체가 0% 에서도 번쩍인다. 오프셋이 0 이면 결과가 같다 |
+| note·judge 객체의 오프셋 알파 | note(노트 필드)와 judge(판정) 객체는 자기 destination 이 가리키는 오프셋의 알파만큼 전체가 흐려진다. beatoraja 는 이 두 객체의 색을 읽지 않아 알파 오프셋이 듣지 않는다. 마디선은 note 정의의 `group` destination 이 가리키는 오프셋을 따로 따른다. 선곡 휠(songlist) 객체는 원본대로다 |
+| timingvisualizer 의 선 | 눈금자 위의 선도 그 객체의 destination 이 가리키는 오프셋의 알파만큼 흐려진다(beatoraja 는 선에 오프셋을 적용하지 않는다). 키프레임 색의 알파는 원본처럼 선에 적용하지 않는다 |
 
 ## 2. 스킨 팩 쓰기
 
@@ -114,9 +117,9 @@ PACK FOLDER 행의 표시: 환경 변수가 있으면 `<경로> (RBMS_SKIN_PACK)
 | ↑ ↓ | 행 커서 이동. 행이 17개를 넘으면 목록이 스크롤되고 오른쪽 아래에 `현재 / 전체` 가 나온다 |
 | PageUp PageDown | 한 화면(17행)씩 이동 |
 | ← → | 커서 행의 값을 한 칸 |
-| Shift + ← → | 커서가 오프셋 행이면 열 칸. 다른 행은 한 칸 그대로다 |
+| Shift + ← → | 커서가 오프셋 행이면 열 칸, 불투명도 행이면 25%. 다른 행은 한 칸 그대로다 |
 | Enter | → 한 칸과 같다. PACK FOLDER 는 폴더 선택 창, RELOAD·RESET 은 실행. 화면을 떠나지 않는다 |
-| 0 (숫자 줄, 넘패드) | 커서가 오프셋 행이면 0 으로 되돌린다 |
+| 0 (숫자 줄, 넘패드) | 커서가 오프셋 행이면 0 으로, 불투명도 행이면 100% 로 되돌린다 |
 | Tab / Shift+Tab | 미리보기 위 화면 띠(7K 5K 14K 10K 9K SELECT DECIDE RESULT COURSE KEYS)에서 다음 / 이전 화면. 띠에 없는 화면(24키 등)은 SCREEN 행의 ← → 로 간다 |
 | 행 왼쪽 클릭 | 그 행으로 커서를 옮기고 한 칸 앞으로 |
 | 행 오른쪽 클릭 | 그 행으로 커서를 옮기고 한 칸 뒤로(잘못 누른 클릭을 되돌린다. RELOAD·RESET 은 실행하지 않는다) |
@@ -134,18 +137,35 @@ PACK FOLDER 행의 표시: 환경 변수가 있으면 `<경로> (RBMS_SKIN_PACK)
 | LOADED | 읽은 문서의 크기, 파서, Lua 여부, 경고 수, 작성자. 못 읽었으면 이유의 첫 줄(Lua 의 스택 트레이스는 싣지 않는다), 내장 화면이면 `BUILT-IN SCREEN`. 문서가 없는 까닭이 팩에 있으면 뒤에 붙는다: `BUILT-IN SCREEN - THE PACK FOLDER IS NOT THERE`, `BUILT-IN SCREEN - <파일> DID NOT READ (header pass): <이유>` |
 | 문서의 옵션 행 | 문서 헤더의 `property` 마다 한 행. 이름은 `<분류> > <이름>`. 값을 바꾸면 문서를 다시 읽는다 |
 | 문서의 파일 행 | 헤더의 `filepath` 마다 한 행. 패턴에 맞는 파일 중에서 고른다. 값을 바꾸면 문서를 다시 읽는다 |
-| 문서의 오프셋 행 | 헤더의 `offset` 마다 허용된 축별로 X, Y, W, H, ANGLE, ALPHA 행. 위치와 크기는 ±2000(픽셀. 플레이 화면 전체를 옮기는 오프셋만 퍼센트), 각도 ±360(도), 알파 ±255. 오프셋은 저장값을 바로 읽으므로 다시 읽지 않는다. 포커스한 오프셋 행은 숫자 0 키로 0 으로 되돌린다 |
+| 문서의 오프셋 행 | 헤더의 `offset` 마다 허용된 축별로 X, Y, W, H, ANGLE, ALPHA 행. 위치와 크기는 ±2000(픽셀. 플레이 화면 전체를 옮기는 오프셋만 퍼센트), 각도 ±360(도), 알파 ±255(-255 면 사라진다). 한 칸 1, Shift 로 10. 오프셋은 저장값을 바로 읽으므로 문서를 다시 읽지 않고 다음 프레임의 미리보기에 반영된다. 포커스한 오프셋 행은 숫자 0 키로 0 으로 되돌린다. 스킨이 선언한 오프셋이 먼저, 엔진이 모든 플레이 스킨에 붙이는 오프셋(All offset(%), Notes offset, Judge offset, Judge Detail offset)이 그 뒤에 나오고, 엔진 오프셋 행은 설명이 `An offset the game adds to every play skin …` 으로 시작한다 |
+| 문서의 불투명도 행 | 알파 축만 허용한 오프셋(`a = true` 하나뿐)은 축 이름 없이 스킨이 준 이름 그대로 한 행이 되고 값을 퍼센트로 읽는다. 100% 가 스킨 그대로(저장값 a = 0), 0% 가 숨김(a = -255)이고 그 사이는 `round((퍼센트 - 100) * 255 / 100)` 이다. 한 칸 5%, Shift 로 25%, 0 키로 100%. 이름이 아니라 축 구성으로 판정한다. 불투명도 행은 스킨이 선언한 위치와 관계없이 다른 오프셋 행 뒤(RELOAD 앞)에 모여 나온다. 아래 주의 참고 |
 | RELOAD | 폴더를 다시 훑고 문서를 다시 읽는다 |
 | RESET | 이 문서에서 한 모든 선택을 버린다 |
+
+행 순서는 고정 행(PACK FOLDER, SCREEN, SKIN, LOADED), 옵션, 파일, 스킨이 선언한 위치·크기 오프셋, 엔진 오프셋, 불투명도, RELOAD, RESET 이다. 목록에 묶음 머리는 없다. PageDown 두 번이면 7키 기본 스킨의 불투명도 행에 닿는다.
+
+불투명도 행 주의
+
+| 항목 | 내용 |
+| --- | --- |
+| 범위 | 0% ~ 200%. 100% 를 넘으면 값 뒤에 더해지는 알파가 붙는다(`105% (+13)`, `200% (+255)`). 형식상 오프셋의 알파는 "더해지는 값"이어서, 원래 불투명한 부위는 100% 위에서 달라지지 않는다. 스킨이 반투명하게(또는 알파 0 의 덮개로) 그려 둔 부위만 진해진다. ModernChic 의 밝기 다섯 행(`明るさ 0~255`)이 이 방식이라 범위를 100% 에서 끊지 않았다 |
+| 걸음 | 5% 와 25% 뿐이다(저장 알파로 약 13 과 64). 더 잔 값이 필요하면 `settings.ron` 의 해당 오프셋 `a` 를 직접 적는다. 5% 격자 밖의 저장값은 그대로 읽히고(a = -100 은 `61%`), 한 칸 움직이면 그 방향의 가장 가까운 격자로 간다 |
+| 중간값 | 더하는 방식이라 0% 와 100% 만 모든 destination 에 똑같이 듣는다. 스킨이 한 부위를 여러 겹으로 겹쳐 그렸거나 destination 알파를 255 보다 낮게 준 곳은 중간값에서 퍼센트와 눈에 보이는 진하기가 어긋난다. 스킨 제작자는 반투명을 destination 알파가 아니라 그림에 구워 두면 어긋나지 않는다(기본 스킨이 그렇게 한다) |
+| 클릭 | 0% 로 사라진 객체도 클릭은 받는다(beatoraja 의 규칙. 투명 버튼을 쓰는 스킨이 있다) |
+
+스킨 제작자를 위한 규칙: 헤더의 `offset` 항목에 `a = true` 만 두면(`x`, `y`, `w`, `h`, `r` 없음) 두 메뉴가 그 오프셋을 퍼센트 행으로 보인다. 그 오프셋을 부위의 모든 destination 에 `offset`(또는 `offsets`)으로 걸면 사용자가 그 부위의 불투명도를 0~100% 로 조절한다. 다른 축을 함께 허용한 오프셋의 ALPHA 행은 더해지는 원시 값(-255 ~ +255)으로 남는다.
 
 SKIN 메뉴와 PLAY 메뉴
 
 | 항목 | SKIN 메뉴(F12) | PLAY 메뉴(F8, `docs/play-options.md` 7절) |
 | --- | --- | --- |
-| 왼쪽 행 | 팩 폴더, 화면별 문서, 그 문서의 옵션·파일·오프셋 | 플레이 옵션(속도, 가림막, 판정 오프셋, 차트)과 미리보는 플레이 문서의 옵션 |
+| 왼쪽 행 | 팩 폴더, 화면별 문서, 그 문서의 옵션·파일·오프셋·불투명도 | 플레이 옵션(속도, 가림막, 판정 오프셋, 차트)과 미리보는 플레이 문서의 옵션·오프셋·불투명도 |
 | 오른쪽 미리보기 | SCREEN 행이 가리키는 화면(플레이, 선곡, 결정, 결과 등). 예시 차트는 150 → 180 BPM 이고 끝나면 장면을 다시 시작한다 | 모드 띠가 고른 플레이 화면. 예시 차트는 PREVIEW BPM 의 한 템포이고 끝나지 않고 되풀이된다 |
-| 플레이 문서의 옵션(기본 스킨: Lane Width, Field Side, Scratch Side, Judge Detail, Score Graph) | 옵션 행 | LANE 묶음의 끝에 같은 행. 두 메뉴가 같은 값을 읽고 쓴다(그 문서의 `skin.custom`). 어느 쪽에서 바꿔도 다른 쪽에 그대로 보인다 |
-| 파일 행, 오프셋 행, 문서 고르기 | 있다 | 없다 |
+| 플레이 문서의 옵션(기본 스킨: Lane Width, Field Side, Scratch Side, Judge Detail, Score Difference, Judge Display, Score Graph) | 옵션 행 | LANE 묶음의 끝에 같은 행. 두 메뉴가 같은 값을 읽고 쓴다(그 문서의 `skin.custom`). 어느 쪽에서 바꿔도 다른 쪽에 그대로 보인다 |
+| 스킨이 선언한 위치·크기 오프셋(기본 스킨: JUDGE POSITION Y) | 오프셋 행 | LANE 묶음에서 옵션 바로 뒤에 같은 행. 접지 않고 항상 보인다 |
+| 불투명도 행(기본 스킨: 7키 19개) | 목록 끝에 모인 행 | 목록 끝 SKIN 묶음의 접이 `OPACITY`. 닫힌 채로 열리고 Enter·← →·클릭으로 편다 |
+| 엔진 오프셋(All offset(%), Notes offset, Judge offset, Judge Detail offset. 15행) | 오프셋 행 | SKIN 묶음의 접이 `POSITION AND SIZE` |
+| 파일 행, 문서 고르기 | 있다 | 없다 |
 | 고른 화면·모드 | `skin.screen` 에 저장된다 | 저장되지 않는다. `skin.screen` 을 읽지도 바꾸지도 않는다 |
 | 화면 부품 | `apps/rbms-player/src/stage/preview_menu.rs` 의 같은 코드(배치, 탭 띠, 행 목록과 스크롤, 정보 패널, 미리보기 자리의 상태 문구, 클릭·휠 규칙) | 같다 |
 
@@ -243,7 +263,7 @@ SCORE GRAPH 는 스킨 선곡 위의 기록 모달이 읽으므로 표지 없이
 | --- | --- |
 | `decide.luaskin`, `select.luaskin`, `play5`, `play7`, `play9`, `play10`, `play14` `.luaskin`, `result.luaskin`, `courseresult.luaskin` | 화면 문서 9개. 한 줄짜리 진입 파일이다(`return require("lua.<화면>.main").build(...)`) |
 | `lua/` | 공통 모듈 `theme.lua`(색, 격자, 이름표), `props.lua`(속성 id 이름표), `ui.lua`(조립기), `motion.lua`(키프레임 프리셋), `parts.lua`(조합 부품), 화면 모듈 `lua/<화면>/`, 생성된 시트 좌표표 `lua/atlas/` |
-| `image/` | 생성된 시트 5장 `common`, `decide`, `select`, `play`, `result` `.png`. 합계 93,069 B |
+| `image/` | 생성된 시트 5장 `common`, `decide`, `select`, `play`, `result` `.png`. 합계 108,706 B |
 | `font/` | `Inter-Regular.ttf`, `Inter-OFL.txt` |
 | `sound/` | 시스템 사운드 22개 `.wav`. 스킨의 `sound/…` 와 시스템 사운드 폴더가 같은 설치본이다 |
 | `tools/` | 이미지와 사운드 생성 스크립트. 설치본에는 들어가지 않는다 |
@@ -267,15 +287,15 @@ SCORE GRAPH 는 스킨 선곡 위의 기록 모달이 읽으므로 표지 없이
 
 ### 3.4 사용자 옵션
 
-SKIN 메뉴의 옵션 행으로 고른다. 플레이 문서의 옵션은 PLAY 메뉴(선곡에서 F8)의 LANE 묶음에도 같은 행으로 나오고, 어느 쪽에서 바꿔도 같은 곳(그 문서의 `skin.custom`)에 저장된다(`docs/play-options.md` 7절). 기본값은 먼저 적힌 쪽이고, Judge Detail 만 Fast-Slow 가 기본이다. 파일 행(filepath)은 없다(자산 변종을 두지 않았다).
+SKIN 메뉴의 옵션 행으로 고른다. 플레이 문서의 옵션은 PLAY 메뉴(선곡에서 F8)의 LANE 묶음에도 같은 행으로 나오고, 어느 쪽에서 바꿔도 같은 곳(그 문서의 `skin.custom`)에 저장된다(`docs/play-options.md` 7절). 기본값은 먼저 적힌 쪽이다. 파일 행(filepath)은 없다(자산 변종을 두지 않았다). 플레이 문서의 오프셋과 부위별 불투명도는 §3.4.1, §3.4.2 에 있다.
 
 | 문서 | 옵션 |
 | --- | --- |
 | decide | Stage Image: Show / Hide. Note Graph: Show / Hide |
 | select | Stage Image: Show / Hide |
-| play5, play7 | Lane Width: Normal / Wide. Field Side: Left / Right. Scratch Side: Left / Right. Judge Detail: Off / Fast-Slow / Milliseconds(기본 Fast-Slow). Score Graph: On / Off |
-| play9 | Lane Width. Judge Detail. Score Graph |
-| play10, play14 | Lane Width. Judge Detail |
+| play5, play7 | Lane Width: Normal / Wide. Field Side: Left / Right. Scratch Side: Left / Right. Judge Detail: Fast-Slow / Milliseconds / Off. Score Difference: Target / Best / Off. Judge Display: Show / Hide. Score Graph: On / Off |
+| play9 | Lane Width. Judge Detail. Score Difference. Judge Display. Score Graph |
+| play10, play14 | Lane Width. Judge Detail. Score Difference. Judge Display |
 | result, courseresult | 없음 |
 
 Lane Width 는 다섯 플레이 문서의 첫 행이다. Wide 는 건반·스크래치·버튼 레인을 Normal 의 1.5 배로 넓힌다(1920 기준 흰 건반 58 → 87, 검은 건반 46 → 69, 스크래치 100 → 150, 9키 버튼 62 → 93. 레인 사이 2px 과 노트 두께는 그대로). 노트, 판정선, 레인 커버, 리프트, HIDDEN+, 판정 글자, 게이지, 발치의 HI-SPEED·GREEN 은 넓어진 필드를 따라간다. 필드 밖은 다시 놓인다.
@@ -288,7 +308,52 @@ Lane Width 는 다섯 플레이 문서의 첫 행이다. Wide 는 건반·스크
 
 Normal 은 이 행이 생기기 전의 화면과 같다. 내장 화면의 DISPLAY > SKIN 프리셋(NORMAL / WIDE)은 다른 설정이고 스킨이 그리는 화면에는 효과가 없다. 폭 480 미만의 곡 머리(Wide 의 9·10·14키)에서는 코스 단계 글자가 난이도 줄 오른쪽에 뜨고 코스 중 아티스트가 생략된다.
 
-Judge Detail 이 Fast-Slow 이면 PGREAT 가 아닌 판정에서 판정 글자 바로 위에 FAST(파랑) 또는 SLOW(빨강)가 뜨고, Milliseconds 이면 어긋난 시간이 ms 로 뜬다(빠르면 +). DP 는 친 쪽 필드에만 뜬다. Off 로 저장해 둔 설정은 그대로 Off 다.
+#### 3.4.1 판정 표시
+
+판정 글자와 콤보는 움직이지 않는다. 판정이 난 프레임부터 0.5초 동안 같은 자리·크기·색으로 서 있다가 한 번에 사라진다(튀어나오기, 확대, 깜빡임, 색 돌림, 페이드가 없다). 다음 판정이 그 전에 나면 그 자리에서 바뀐다.
+
+| 요소 | 내용 |
+| --- | --- |
+| 판정 글자 | PGREAT 와 GREAT 는 둘 다 `GREAT` 로 쓰고 색으로 가른다(PGREAT 하늘색 `84CEFF`, GREAT 노랑 `FFD633`). GOOD·BAD·POOR 는 주황에서 붉은 주황으로 가는 각자의 색이다. 글자의 왼쪽 끝은 콤보 자릿수와 무관하게 같은 자리다 |
+| 콤보 | PGREAT·GREAT·GOOD 옆에 5자리 고정 칸으로 오른쪽 정렬된다. 빈 앞자리는 옅은 0 으로 채운다(`GREAT 00067`). 콤보가 끊기는 BAD·POOR 는 숫자 없이 글자만 필드 가운데에 뜬다 |
+| 위 줄 왼쪽: 점수 차 | Score Difference 가 Target 이면 목표(TARGET 설정, 스코어 그래프의 TARGET 과 같은 값) 대비 EX 점수 차, Best 이면 자기 최고 기록 대비 차를 부호와 네 자리로 쓴다(`+0003`, `-0125`. ±9999 에서 멈춘다). PGREAT 에도 뜬다. Off 면 없다 |
+| 위 줄 오른쪽: 타이밍 | Judge Detail 이 Fast-Slow 이면 PGREAT 가 아닌 판정에서 FAST(파랑) 또는 SLOW(빨강), Milliseconds 이면 어긋난 시간을 ms 로 쓴다(빠르면 `+`, PGREAT 는 회색). Off 면 없다. 둘 중 하나만 켜면 켠 쪽이 가운데에 온다 |
+| 위치 | 오프셋 Judge Position(메뉴의 `JUDGE POSITION Y`). +면 판정 글자·콤보·위 줄이 함께 그 픽셀만큼 위로, -면 아래로 간다. 한 칸 1px, Shift 로 10px, 범위 ±2000, 0 키로 제자리. 좌표는 스킨의 1920x1080 기준이다 |
+| 숨김 | 옵션 Judge Display 를 Hide 로 두면 판정 글자·콤보·위 줄이 모두 그려지지 않는다 |
+
+DP 는 친 쪽 필드에만 뜬다. 엔진 오프셋 Judge offset(판정 글자와 콤보)과 Judge Detail offset(위 줄)은 따로 남아 있고 Judge Position 과 더해진다. Judge Position 을 약 -210 아래로 내리면 판정선·리프트 수치 자리에 닿는다.
+
+#### 3.4.2 부위별 불투명도
+
+플레이 문서는 화면의 부위마다 불투명도 오프셋을 하나씩 선언한다(알파 축만 가진 오프셋. §2.2 의 불투명도 행). SKIN 메뉴에서는 목록 끝에, PLAY 메뉴에서는 SKIN 묶음의 접이 `OPACITY` 안에 `100%` 로 나온다. 0% 면 그 부위가 완전히 사라진다.
+
+| 오프셋 이름(id) | 덮는 것 |
+| --- | --- |
+| Lane Background Opacity(101) | 레인 면 |
+| Lane Divider Opacity(102) | 레인 사이 세로선 |
+| Judge Line Opacity(103) | 판정선과 그 위의 리듬 띠 |
+| Key Beam Opacity(104) | 키를 누를 때 레인에 서는 빛 기둥 |
+| Key Display Opacity(105) | 필드 아래 건반 표시와 눌림 |
+| Bomb Opacity(106) | 판정 폭발 |
+| Note Opacity(107) | 노트, 롱노트, 지뢰 |
+| Bar Line Opacity(108) | 마디선 |
+| Lane Cover Opacity(109) | 레인 커버·리프트·HIDDEN+ 의 면과 그 수치 |
+| Gauge Opacity(110) | 게이지와 게이지 숫자 |
+| Progress Bar Opacity(111) | 필드 옆 진행 막대 |
+| Song Header Opacity(112) | 곡 머리(제목, 아티스트, 난이도) |
+| BGA Opacity(113) | BGA 와 그 틀 |
+| Score Graph Opacity(114) | 스코어 그래프(SP 문서만. DP 문서에는 이 행이 없다) |
+| Score Opacity(115) | 점수 패널 |
+| Judge Count Opacity(116) | 판정 수 패널 |
+| Timing Opacity(117) | 타이밍 패널 |
+| Distribution Graph Opacity(118) | 타이밍 분포 그래프 |
+| Speed Display Opacity(119) | 필드 발치의 HI-SPEED·GREEN 표시와 상태 글자 |
+
+판정 글자·콤보·위 줄은 불투명도 부위가 아니다(Judge Display 로 숨긴다). LOADING·READY·FULL COMBO 알림, 폐점 덮개와 FAILED, 화면 바탕, 장면 페이드는 어느 부위에도 속하지 않아 항상 100% 다.
+
+예: 노트와 판정만 남기기. SKIN 메뉴(F12)에서 7K 탭을 고르고 Lane Background, Lane Divider, Key Display, Bar Line, Progress Bar, Score Graph, Song Header, Speed Display, Timing 행에서 각각 Shift+← 를 네 번 눌러 0% 로 둔다. Note, Bomb, Judge Line, Key Beam 은 100% 그대로 둔다. 검은 바탕에 노트·키 빔·폭발·판정선·판정 글자만 남는다. 미리보기가 누를 때마다 따라 바뀌고, Esc 로 저장하면 다음 플레이부터 같은 화면이다. 한 행을 되돌리려면 그 행에서 0 키, 전부 되돌리려면 RESET 이다.
+
+중간값: 판정선(Judge Line)은 어두운 바탕 선 위에 밝은 선을 겹쳐 그리므로 50% 에서 약 58% 로 보인다. 폭발(Bomb)은 가산 합성이라 밝은 곳에서는 50% 로 낮춰도 차이가 작다. 나머지 부위는 50% 에서 48~51% 다(1920x1080 캡처 실측).
 
 선곡의 사이드 메뉴(톱니와 스피커 아이콘)는 QUICK SETTINGS 6행과 VOLUME 3개를 연다. 패널 1~3(플레이 옵션, 보조 옵션, 세부 옵션)은 START(기본 A), SELECT(기본 W), 둘을 함께(또는 상세 옵션 키. 기본 숫자 5)를 누르고 있는 동안 열려 있다(beatoraja 와 같다). 패널 3 의 4·6번 키 칸(NOTE DISPLAY TIME)은 KEEP GREEN NUMBER 가 켜져 있으면 유지 중인 이동 시간(ms)과 녹색 숫자를 보이고 1 ms 씩 바꾸며, 꺼져 있으면 `OFF` 와 `KEEP GREEN NUMBER IS OFF` 를 보인다. 플레이 화면의 TIMING 은 판정 오프셋이고 AUTO ADJUST 가 켜져 있으면 표지가 `TIMING AUTO` 가 된다. 이 옵션들의 뜻과 단위는 [play-options.md](./play-options.md)에 있다.
 
