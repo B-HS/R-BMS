@@ -149,8 +149,9 @@ pub const JUDGE_OFFSET_MIN_MS: i32 = -200;
 /// Latest judge offset the JUDGE OFFSET row can hold.
 pub const JUDGE_OFFSET_MAX_MS: i32 = 200;
 
-/// One left/right step on the JUDGE OFFSET row.
-pub const JUDGE_OFFSET_STEP_MS: i32 = 5;
+/// One left/right step on the JUDGE OFFSET row: a millisecond, which is the step the browser's own
+/// panel and the keys of a run move the offset by.
+pub const JUDGE_OFFSET_STEP_MS: i32 = 1;
 
 /// Narrowest judge windows the JUDGE WIDTH row can ask for, as a percentage of the chart's own.
 pub const JUDGE_RATE_MIN_PERCENT: i32 = 50;
@@ -425,7 +426,8 @@ impl Config {
     }
 }
 
-/// The PLAY and GAUGE tabs: how the chart is dealt out and how the gauge treats it.
+/// The play options: how the chart is dealt out, how its notes scroll and how the gauge treats it.
+/// Most of them are rows of the play menu.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PlayOptions {

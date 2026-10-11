@@ -1,7 +1,7 @@
 //! The stages the app can be in and the state each one owns.
 //!
-//! A stage is one screen of the player: song select, the settings screens, the skin menu, the decide
-//! scene, loading, play and result. [`Stage`] is what [`crate::App`] dispatches on; everything that outlives a stage change
+//! A stage is one screen of the player: song select, the settings screens, the skin menu, the play
+//! menu, the decide scene, loading, play and result. [`Stage`] is what [`crate::App`] dispatches on; everything that outlives a stage change
 //! lives in [`crate::AppShared`] instead. Each screen implements [`StageHandler`], so the frame
 //! loop and the window-event handler are a dispatch each rather than one long match per concern.
 
@@ -22,7 +22,9 @@ pub(crate) mod folders;
 pub(crate) mod keyconfig;
 pub(crate) mod loading;
 pub(crate) mod play;
+pub(crate) mod play_menu;
 pub(crate) mod practice;
+pub(crate) mod preview_menu;
 #[cfg(test)]
 mod render_tests;
 #[cfg(test)]
@@ -51,6 +53,7 @@ pub(crate) use folders::FoldersState;
 pub(crate) use keyconfig::KeyConfigState;
 pub(crate) use loading::{KeysoundLoad, LoadingState};
 pub(crate) use play::PlayState;
+pub(crate) use play_menu::PlayMenuState;
 pub(crate) use practice::PracticeState;
 pub(crate) use result::ResultState;
 pub(crate) use select::SelectState;
@@ -62,12 +65,13 @@ pub(crate) use tables::TablesState;
 ///
 /// `Play`, `Select` and `Decide` are boxed: the session with its decoded BGA images, the browser
 /// with its cached scene, and the decide scene with everything it shows of its chart would otherwise
-/// set the size of every other variant and make each stage change a large memcpy. `SkinMenu` is
-/// boxed for the same reason: it holds the skin preview and whatever that is shown.
+/// set the size of every other variant and make each stage change a large memcpy. `SkinMenu` and
+/// `PlayMenu` are boxed for the same reason: each holds a skin preview and whatever that is shown.
 pub(crate) enum Stage {
     Select(Box<SelectState>),
     Settings(SettingsState),
     SkinMenu(Box<SkinMenuState>),
+    PlayMenu(Box<PlayMenuState>),
     KeyConfig(KeyConfigState),
     Tables(TablesState),
     Folders(FoldersState),
@@ -87,6 +91,7 @@ pub(crate) enum StageId {
     Select,
     Settings,
     SkinMenu,
+    PlayMenu,
     KeyConfig,
     Tables,
     Folders,
@@ -201,6 +206,7 @@ impl StageId {
             StageId::Select => "Select",
             StageId::Settings => "Settings",
             StageId::SkinMenu => "SkinMenu",
+            StageId::PlayMenu => "PlayMenu",
             StageId::KeyConfig => "KeyConfig",
             StageId::Tables => "Tables",
             StageId::Folders => "Folders",
@@ -215,10 +221,11 @@ impl StageId {
 
     /// Every screen, for the tests that have to cover all of them.
     #[cfg(test)]
-    pub(crate) const ALL: [StageId; 12] = [
+    pub(crate) const ALL: [StageId; 13] = [
         StageId::Select,
         StageId::Settings,
         StageId::SkinMenu,
+        StageId::PlayMenu,
         StageId::KeyConfig,
         StageId::Tables,
         StageId::Folders,
@@ -237,6 +244,7 @@ impl Stage {
             Stage::Select(_) => StageId::Select,
             Stage::Settings(_) => StageId::Settings,
             Stage::SkinMenu(_) => StageId::SkinMenu,
+            Stage::PlayMenu(_) => StageId::PlayMenu,
             Stage::KeyConfig(_) => StageId::KeyConfig,
             Stage::Tables(_) => StageId::Tables,
             Stage::Folders(_) => StageId::Folders,
@@ -255,6 +263,7 @@ impl Stage {
             Stage::Select(s) => s.as_mut(),
             Stage::Settings(s) => s,
             Stage::SkinMenu(s) => s.as_mut(),
+            Stage::PlayMenu(s) => s.as_mut(),
             Stage::KeyConfig(s) => s,
             Stage::Tables(s) => s,
             Stage::Folders(s) => s,
@@ -272,6 +281,7 @@ impl Stage {
             Stage::Select(s) => s.as_ref(),
             Stage::Settings(s) => s,
             Stage::SkinMenu(s) => s.as_ref(),
+            Stage::PlayMenu(s) => s.as_ref(),
             Stage::KeyConfig(s) => s,
             Stage::Tables(s) => s,
             Stage::Folders(s) => s,

@@ -21,13 +21,13 @@ use crate::stage::{Canvas, HeadlessCanvas, StageId};
 /// reads. Nothing is saved without it.
 const CAPTURE_DIR_ENV: &str = "RBMS_SKIN_CAPTURE_DIR";
 
-fn ctx(app: &mut App) -> FrameCtx<'_> {
+pub(super) fn ctx(app: &mut App) -> FrameCtx<'_> {
     FrameCtx { shared: &mut app.shared, now: std::time::Instant::now(), dt: 0.0 }
 }
 
 /// An app whose settings file is in a folder of this test's own, so a screen that writes it on the
 /// way out writes nothing another test reads.
-fn app_in(tag: &str) -> App {
+pub(super) fn app_in(tag: &str) -> App {
     let mut app = app();
     let root = std::env::temp_dir().join(format!("rbms-settings-skin-link-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
@@ -40,7 +40,7 @@ fn app_in(tag: &str) -> App {
 
 /// Draw the screen that is up onto a headless canvas, with the app's clickable regions rebuilt for
 /// the frame.
-fn draw(app: &mut App) -> HeadlessCanvas {
+pub(super) fn draw(app: &mut App) -> HeadlessCanvas {
     let mut pixels = HeadlessCanvas::new(CW, CH);
     let mut canvas = Canvas::Headless(&mut pixels);
     app.shared.hot.clear();
@@ -50,7 +50,7 @@ fn draw(app: &mut App) -> HeadlessCanvas {
 }
 
 /// Hand one key to the screen that is up and make the change of screen it asks for.
-fn key(app: &mut App, code: KeyCode) {
+pub(super) fn key(app: &mut App, code: KeyCode) {
     let now = std::time::Instant::now();
     let asked = app.stage.handle_key(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 }, press(code));
     app.switch(asked);
@@ -58,7 +58,7 @@ fn key(app: &mut App, code: KeyCode) {
 
 /// Press the left button in the middle of what the frame drawn last made clickable for `hot`, and
 /// make the change of screen that asks for.
-fn click(app: &mut App, hot: Hot) {
+pub(super) fn click(app: &mut App, hot: Hot) {
     let (rect, _) = *app.shared.hot.iter().find(|(_, entry)| *entry == hot).unwrap_or_else(|| panic!("{hot:?} is not on the screen"));
     let at = (rect.x + rect.w * 0.5, rect.y + rect.h * 0.5);
     let now = std::time::Instant::now();
@@ -68,15 +68,15 @@ fn click(app: &mut App, hot: Hot) {
 }
 
 /// The tab the settings screen that is up is on.
-fn open_tab(app: &App) -> SettingTab {
+pub(super) fn open_tab(app: &App) -> SettingTab {
     match &app.stage {
         Stage::Settings(state) => state.current_tab(),
         other => panic!("{other:?} is up, not the settings screen"),
     }
 }
 
-/// The strip has a tab for every group of rows but the skin menu's, and Tab walks them all and
-/// comes back round without ever landing on that one.
+/// The strip has a tab for every group of rows but the two menus', and Tab walks them all and comes
+/// back round without ever landing on one of those.
 #[test]
 fn the_tab_strip_has_no_skin_tab_and_tab_walks_the_tabs_it_has() {
     let mut app = app_in("strip");
@@ -84,7 +84,7 @@ fn the_tab_strip_has_no_skin_tab_and_tab_walks_the_tabs_it_has() {
     draw(&mut app);
     let tabs = app.shared.hot.iter().filter(|(_, hot)| matches!(hot, Hot::SettingTab(_))).count();
     assert_eq!(tabs, SettingTab::SHOWN.len());
-    assert!(!SettingTab::SHOWN.contains(&SettingTab::Skin));
+    assert!(!SettingTab::SHOWN.contains(&SettingTab::Skin) && SettingTab::PLAY_MENU.iter().all(|group| !SettingTab::SHOWN.contains(group)));
 
     let mut walked = vec![open_tab(&app)];
     for _ in 1..SettingTab::SHOWN.len() {
@@ -157,15 +157,18 @@ fn the_button_on_the_tab_strip_opens_the_skin_menu() {
     assert_eq!(app.stage.id(), StageId::Settings);
 }
 
-/// Every drawn row, every tab and the button are clickable, and nothing else is.
+/// How many buttons the tab strip ends with: one to the play menu and one to the skin menu.
+const MENU_LINKS: usize = 2;
+
+/// Every drawn row, every tab and the two buttons are clickable, and nothing else is.
 #[test]
-fn every_row_every_tab_and_the_button_are_clickable() {
+fn every_row_every_tab_and_the_two_buttons_are_clickable() {
     let mut app = app_in("regions");
     for tab in SettingTab::SHOWN {
         let rows = app.shared.settings_rows(tab).len();
         app.stage = Stage::Settings(SettingsState::on_tab(tab));
         draw(&mut app);
-        assert_eq!(app.shared.hot.len(), rows.min(visible_rows()) + SettingTab::SHOWN.len() + 1, "{tab:?}");
+        assert_eq!(app.shared.hot.len(), rows.min(visible_rows()) + SettingTab::SHOWN.len() + MENU_LINKS, "{tab:?}");
     }
 }
 
@@ -207,7 +210,7 @@ fn the_way_to_the_skin_menu_is_shut_while_an_editor_or_a_list_is_open() {
 #[test]
 fn the_hint_names_the_key_that_opens_the_menu() {
     assert_eq!(SKIN_MENU_KEY, KeyCode::F12);
-    let hint = settings_hint(crate::keyconfig::key_name(SKIN_MENU_KEY), "F5");
+    let hint = settings_hint("F8", crate::keyconfig::key_name(SKIN_MENU_KEY), "F5");
     assert!(hint.contains("F12 SKINS"), "{hint}");
 }
 

@@ -39,7 +39,8 @@ use crate::skin_host::select::{BrowserLent, CourseShown};
 use crate::skin_screen::SelectDraw;
 use crate::stage::result::SkinStatus;
 use crate::stage::{
-    Canvas, FoldersState, FrameCtx, KeyConfigState, KeyInput, SettingsState, SkinMenuState, Stage, StageHandler, TablesState, Transition, is_left_press,
+    Canvas, FoldersState, FrameCtx, KeyConfigState, KeyInput, PlayMenuState, SettingsState, SkinMenuState, Stage, StageHandler, TablesState, Transition,
+    is_left_press,
 };
 use crate::textedit::ImeEdit;
 use crate::*;
@@ -100,6 +101,12 @@ const BUILT_IN_KEY_LAYOUT: KeyLayout = KeyLayout::Beat;
 /// with (`MusicSelector.input`), which on a skin's browser runs the same event the skin's own button
 /// does. The key that is read is the one the key configuration holds; this is where it starts.
 pub(crate) const SKIN_MENU_KEY: KeyCode = KeyCode::F12;
+
+/// The key the play menu ships on, on the built-in browser and on one a skin draws alike
+/// ([`Shortcut::PlayMenu`]). The reference has no screen of the kind and so no key for it; this is
+/// a function key the browser read nothing from, beside the ones that open its other screens. The
+/// key that is read is the one the key configuration holds; this is where it starts.
+pub(crate) const PLAY_MENU_KEY: KeyCode = KeyCode::F8;
 
 /// The key the ranking panel closes on by itself, beside the keys that go back
 /// ([`crate::ir_ranking_view::panel_action`]): the one its shortcut ships on. Once the shortcut has
@@ -912,8 +919,10 @@ impl SelectState {
     /// filter, `2` the order, `3` the long note mode, `4` moves the replay slot on, `6` opens the key
     /// configuration, `0` opens the search and `F9` stars the chart (`MusicSelectInputProcessor.java:71-110`,
     /// `MusicSelector.java:296`). On such a browser the skin menu and the key configuration are
-    /// opened by running the events the skin's own buttons run (13 and 14). The option overlay's two
-    /// keys and the key held for the detail panel are read where those are, not here.
+    /// opened by running the events the skin's own buttons run (13 and 14). The play menu is opened
+    /// the same way on either browser: the reference has no event that opens a screen of its kind,
+    /// so there is none for a skin's button to run. The option overlay's two keys and the key held
+    /// for the detail panel are read where those are, not here.
     fn run_shortcut(&mut self, shared: &mut AppShared, shortcut: Shortcut) -> Transition {
         let skinned = skin_status(shared) == SkinStatus::Ready;
         if shortcut.screen() != ShortcutScreen::Browser || (shortcut.group() == ShortcutGroup::SkinBrowser && !skinned) {
@@ -936,6 +945,7 @@ impl SelectState {
             Shortcut::Settings => return Transition::Open(Stage::Settings(SettingsState::new())),
             Shortcut::SkinMenu if skinned => return self.run_event(shared, BUTTON_SKINSELECT, 0),
             Shortcut::SkinMenu => return Transition::Open(SkinMenuState::stage()),
+            Shortcut::PlayMenu => return Transition::Open(PlayMenuState::stage()),
             Shortcut::KeyConfig => return Transition::Open(Stage::KeyConfig(KeyConfigState::new())),
             Shortcut::RefKeyConfig => return self.run_event(shared, BUTTON_KEYCONFIG, 0),
             Shortcut::Folders => return Transition::Open(Stage::Folders(FoldersState::new())),

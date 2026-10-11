@@ -412,6 +412,7 @@ fn check_shortcut(browser: &mut Browser, shortcut: Shortcut, code: KeyCode) {
             assert!(browser.app.shared.favorites.contains(FIRST_CHART_MD5), "{shortcut:?}");
         }
         Shortcut::SkinMenu => assert!(matches!(browser.key(code), Transition::Open(Stage::SkinMenu(_))), "{shortcut:?}"),
+        Shortcut::PlayMenu => assert!(matches!(browser.key(code), Transition::Open(Stage::PlayMenu(_))), "{shortcut:?}"),
         Shortcut::KeyConfig | Shortcut::RefKeyConfig => assert!(matches!(browser.key(code), Transition::Open(Stage::KeyConfig(_))), "{shortcut:?}"),
         Shortcut::OptionsPin | Shortcut::OptionsHold => {
             let mut ctx = FrameCtx { shared: &mut browser.app.shared, now: browser.now, dt: 0.0 };
@@ -498,7 +499,7 @@ fn the_guide_key_is_not_a_key_anything_else_takes() {
 /// from none and the guide shows it so.
 #[test]
 fn a_moved_shortcut_is_read_from_its_new_key_and_the_guide_names_it() {
-    let free = [KeyCode::F6, KeyCode::F7, KeyCode::F8, KeyCode::F10, KeyCode::F11, KeyCode::Insert, KeyCode::Home, KeyCode::End, KeyCode::Backquote];
+    let free = [KeyCode::F6, KeyCode::F7, KeyCode::F10, KeyCode::F11, KeyCode::Insert, KeyCode::Home, KeyCode::End, KeyCode::Backquote];
     let moved: Vec<Shortcut> = Shortcut::ALL
         .into_iter()
         .filter(|shortcut| shortcut.screen() == ShortcutScreen::Browser && !matches!(shortcut, Shortcut::OptionsPin | Shortcut::OptionsHold))

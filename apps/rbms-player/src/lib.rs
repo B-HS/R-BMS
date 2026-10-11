@@ -541,12 +541,18 @@ enum Hot {
     SettingTab(usize),
     SettingRow(usize),
     RivalRow(usize),
+    /// The button on the settings screen's tab strip that opens the play menu.
+    PlayMenuLink,
     /// The button on the settings screen's tab strip that opens the skin menu.
     SkinMenuLink,
     /// A row of the skin menu's list, by its place in the whole list.
     SkinMenuRow(usize),
     /// A tab of the skin menu's strip of screens, by its place on the strip.
     SkinMenuKind(usize),
+    /// A row of the play menu's list, by its place in the whole list.
+    PlayMenuRow(usize),
+    /// A tab of the play menu's strip of modes, by its place on the strip.
+    PlayMenuMode(usize),
     RankingRow(usize),
     ModalClose,
     ModalReplay,

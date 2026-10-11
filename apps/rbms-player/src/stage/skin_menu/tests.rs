@@ -12,15 +12,30 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use rbms_render::{Color, Rect, fit_text};
 use rbms_skin::loader::{SKIN_TYPE_PLAY_24KEYS, is_supported_skin_type};
 
 use super::*;
 use crate::pointer::PointerInput;
-use crate::skin_preview::PreviewAbsence;
+use crate::skin_preview::{PreviewAbsence, PreviewStatus};
 use crate::skin_select::{OffsetAxis, SKIN_PACK_ENV, SkinLibrary, fixtures, pack_from_environment};
+use crate::stage::preview_menu::{
+    COLUMN_GAP, COLUMNS_TOP, COUNTER_RISE, HINT_GAP, HINT_SCALE, HINT_Y, INFO_LEAD_LINES as INFO_LOADED_LINES, INFO_LEAD_Y as INFO_LOADED_Y, INFO_LINE_PITCH,
+    INFO_PAD, INFO_RECT, INFO_ROW_Y, INFO_SCALE, INFO_VALUE_LINES, MARGIN, PREVIEW_BORDER, PREVIEW_RECT, ROW_PAD, SCROLL_BAR_ROOM, STATUS_DETAIL_LINES,
+    STATUS_DETAIL_PITCH, STATUS_DETAIL_SCALE, STATUS_PAD, STATUS_SCALE, TAB_H as KIND_TAB_H, TAB_SCALE as KIND_SCALE, TAB_STRIP_Y as KIND_STRIP_Y, TITLE_Y,
+    VALUE_MAX_SHARE, row_rect, scroll_thumb, scroll_track, status_detail_lines, tab_rect, tab_width, wrapped,
+};
 use crate::stage::render_tests::{FRAME_DT, app};
 use crate::stage::{HeadlessCanvas, StageId};
-use crate::{App, CH};
+use crate::{App, CH, CW};
+
+/// How wide one tab of the strip of screens is.
+const KIND_TAB_W: f32 = tab_width(SCREEN_KINDS.len());
+
+/// Where the tab at one place of the strip of screens is drawn.
+fn kind_rect(at: usize) -> Rect {
+    tab_rect(at, SCREEN_KINDS.len())
+}
 
 /// Environment variable naming the folder captures are saved in, the one the screen capture harness
 /// reads. Nothing is saved without it.

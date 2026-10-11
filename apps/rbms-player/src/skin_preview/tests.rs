@@ -19,12 +19,14 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use rbms_config::{DEFAULT_SKIN_FOLDER, SettingId};
+use rbms_render::skin_render::frame::first_lane_rect;
 use rbms_render::{Color, FrameData, Rect, Renderer};
 use rbms_skin::loader::{
     SKIN_TYPE_COURSE_RESULT, SKIN_TYPE_DECIDE, SKIN_TYPE_KEY_CONFIG, SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_PLAY_5KEYS, SKIN_TYPE_PLAY_7KEYS, SKIN_TYPE_PLAY_9KEYS,
     SKIN_TYPE_PLAY_10KEYS, SKIN_TYPE_PLAY_14KEYS, SKIN_TYPE_PLAY_24KEYS, SKIN_TYPE_RESULT, SKIN_TYPE_SKIN_SELECT,
 };
 use rbms_skin::resolve::plain_path;
+use rbms_skin::timer::timer_id;
 
 use super::*;
 use crate::gpu::Gpu;
@@ -306,6 +308,70 @@ fn a_released_preview_begins_again_when_it_is_next_brought_up_to_date() {
     bench.preview.release(&mut bench.app.shared);
     assert_eq!(*bench.preview.status(), PreviewStatus::Loading);
     assert_eq!(bench.frame(NO_TIME), PreviewStatus::Absent(PreviewAbsence::NoDocument));
+}
+
+/// A preview made for a play screen shows it whatever screen the skin menu is configuring, takes
+/// another tempo up under the scene on show with the run as far through its chart as it was, takes
+/// another mode as a scene of its own, and is still of what it was told after it was released.
+#[test]
+fn a_preview_of_a_play_target_follows_what_it_is_told_and_not_the_settings() {
+    const SLOW: PlayTarget = PlayTarget { screen: SKIN_TYPE_PLAY_7KEYS, bpm: 100 };
+    const FAST: PlayTarget = PlayTarget { screen: SKIN_TYPE_PLAY_7KEYS, bpm: 200 };
+    const WELL_INTO_THE_CHART_MS: i64 = 12_000;
+    let mut bench = Bench::new("play-target", Some(&shipped_pack()));
+    bench.app.shared.config.skin.screen = SKIN_TYPE_MUSIC_SELECT;
+    let settings = bench.app.shared.config.clone();
+    bench.preview = SkinPreview::of_play(SLOW);
+    assert_eq!(bench.preview.target(), PreviewTarget::Play(SLOW));
+    assert_eq!(bench.settle(), PreviewStatus::Drawn);
+    assert!(bench.preview.play_sample().is_some() && bench.preview.select_sample().is_none(), "the preview followed the screen being configured");
+    assert_eq!(bench.preview.tempo, SampleTempo::Steady(SLOW.bpm));
+    assert_eq!(bench.frame_at(WELL_INTO_THE_CHART_MS), PreviewStatus::Drawn);
+    assert!(bench.preview.scene_us() > 0);
+
+    bench.preview.show_play(SLOW);
+    bench.update(NO_TIME);
+    assert!(bench.preview.scene_us() > 0, "naming the target on show began its scene again");
+
+    let (scene_us, (_, slow_ms, slow_combo, ..)) = (bench.preview.scene_us(), run_of(&bench).standing());
+    assert!(slow_combo > 0, "nothing was played {WELL_INTO_THE_CHART_MS} ms in");
+    bench.preview.show_play(FAST);
+    bench.update(NO_TIME);
+    assert_eq!((bench.preview.scene_us(), bench.preview.tempo), (scene_us, SampleTempo::Steady(FAST.bpm)), "another tempo began the scene again");
+    assert_eq!(*bench.preview.status(), PreviewStatus::Drawn, "another tempo took the frame away");
+    assert_eq!(bench.frame(NO_TIME), PreviewStatus::Drawn, "the frame after another tempo was named is not a frame of the skin");
+    let (phase, fast_ms, fast_combo, ..) = run_of(&bench).standing();
+    assert!((run_of(&bench).session().model().init_bpm - f64::from(FAST.bpm)).abs() < f64::EPSILON, "the run is not on a chart at the tempo named");
+    assert_eq!(phase, PlayPhase::Play);
+    let twice = FAST.bpm / SLOW.bpm;
+    assert!(
+        (fast_ms * i64::from(twice)).abs_diff(slow_ms) <= u64::from(twice),
+        "the run at twice the tempo is not half as far in: {slow_ms} ms then {fast_ms} ms"
+    );
+    assert!(fast_combo.abs_diff(slow_combo) <= 1, "the run taken up had a combo of {fast_combo} where the one before had {slow_combo}");
+
+    let five_keys = PlayTarget { screen: SKIN_TYPE_PLAY_5KEYS, bpm: FAST.bpm };
+    bench.preview.show_play(five_keys);
+    assert_eq!(bench.settle(), PreviewStatus::Drawn);
+    assert_eq!(bench.preview.screen, Some(SKIN_TYPE_PLAY_5KEYS));
+
+    bench.preview.release(&mut bench.app.shared);
+    assert_eq!(bench.preview.target(), PreviewTarget::Play(five_keys), "a released preview forgot what it shows");
+    assert_eq!(bench.settle(), PreviewStatus::Drawn, "a released preview did not begin again on its target");
+    assert_eq!(bench.app.shared.config, settings, "a preview of a play target changed a setting");
+}
+
+/// A preview asked for a play screen no sample chart is written for, or one the pack has no
+/// document for, says so in the words a preview of the skin menu says it in.
+#[test]
+fn a_play_target_with_nothing_to_draw_says_so() {
+    let mut bench = Bench::new("play-target-absent", Some(&shipped_pack()));
+    bench.preview = SkinPreview::of_play(PlayTarget { screen: SKIN_TYPE_PLAY_24KEYS, bpm: 150 });
+    assert_eq!(bench.settle(), PreviewStatus::Absent(PreviewAbsence::NoDocument));
+
+    let mut bare = Bench::new("play-target-bare", None);
+    bare.preview = SkinPreview::of_play(PlayTarget { screen: SKIN_TYPE_PLAY_7KEYS, bpm: 150 });
+    assert_eq!(bare.settle(), PreviewStatus::Absent(PreviewAbsence::NoDocument));
 }
 
 /// A preview released before it was ever brought up to date has nothing to let go of.
@@ -952,4 +1018,619 @@ fn a_skin_pack_named_by_the_environment_is_previewed_one_screen_at_a_time() {
         assert_ne!(status, PreviewStatus::Loading);
         println!("{name}: {status:?} {:?} {:?}", status.message(), status.detail());
     }
+}
+
+/// The play screens the play menu previews, each with the name its captures are saved under.
+const PLAY_MODES: [(i32, &str); 5] =
+    [(SKIN_TYPE_PLAY_7KEYS, "7k"), (SKIN_TYPE_PLAY_5KEYS, "5k"), (SKIN_TYPE_PLAY_14KEYS, "14k"), (SKIN_TYPE_PLAY_10KEYS, "10k"), (SKIN_TYPE_PLAY_9KEYS, "9k")];
+
+/// The target the play menu opens on.
+const SEVEN_KEYS: PlayTarget = PlayTarget { screen: SKIN_TYPE_PLAY_7KEYS, bpm: OPENING_BPM };
+
+/// The seven key screen on a sample chart at `bpm`.
+fn seven_keys_at(bpm: u32) -> PlayTarget {
+    PlayTarget { bpm, ..SEVEN_KEYS }
+}
+
+/// The tempos the sample chart is written at where a test compares one with another: a slow one,
+/// the one the menu opens on and one twice the slow one.
+const SLOW_BPM: u32 = 100;
+const OPENING_BPM: u32 = 150;
+const FAST_BPM: u32 = 200;
+const FAST_OVER_SLOW: f64 = 2.0;
+
+/// The lane cover, the lift and the hidden cover a test switches on, as shares of the lane.
+const COVER: f32 = 0.3;
+const LIFT: f32 = 0.15;
+const HIDDEN: f32 = 0.1;
+
+/// How far a place read off a document may be from where it is expected, in pixels.
+const PLACE_TOLERANCE: f32 = 1.0;
+
+const MILLIS_PER_SECOND: f32 = 1_000.0;
+
+/// How many steps of a scene a sample run is given to leave its loading and its ready states.
+const STEPS_TO_START: usize = 400;
+
+/// A moment of the sample chart with notes on their way down and a run behind it, in milliseconds
+/// of the chart.
+const MID_CHART_MS: i64 = 7_000;
+
+/// How far two measured times may be apart and still be the same time, as a share of the larger:
+/// a note's place is read to the pixel, of a lane a few hundred high.
+const MEASURE_TOLERANCE: f64 = 0.04;
+
+/// How far a row read off a frame may be from where it is worked out to be, in pixels, and how far
+/// the first row a lift changes may be: the judgement line is drawn over the top of the lift, a few
+/// rows thick.
+const ROW_TOLERANCE: f32 = 3.0;
+const LIFTED_LINE_TOLERANCE: f32 = 6.0;
+
+/// How bright every channel of a pixel of a white note is at the least, and how many rows the
+/// thinnest note covers.
+const NOTE_BRIGHTNESS: u8 = 200;
+const THINNEST_NOTE_ROWS: u32 = 3;
+
+/// The part of the lane a note is looked for in, as shares of the lane above its judgement line:
+/// under a lane cover of three tenths, and over where a skin writes its judgements.
+const WATCHED_FROM: f32 = 0.68;
+const WATCHED_TO: f32 = 0.38;
+
+/// Where in the lane a note is read the first time and the second, as shares of the lane above its
+/// judgement line, and how much of the lane the note before it has to be behind.
+const READ_HIGH: f64 = 0.62;
+const READ_LOW: f64 = 0.44;
+const NOTE_APART: f64 = 0.3;
+
+/// Where the shipped play skin draws its gauge, as a share of the screen from its top.
+const GAUGE_ROW: f32 = 940.0 / 1080.0;
+
+/// A bench whose preview is of `target`, drawn until a frame of the shipped pack is on show.
+fn play_bench(tag: &str, target: PlayTarget) -> Bench {
+    let mut bench = Bench::new(tag, Some(&shipped_pack()));
+    bench.preview = SkinPreview::of_play(target);
+    assert_eq!(bench.settle(), PreviewStatus::Drawn, "{:?}", bench.app.shared.skin_failure(target.screen));
+    bench
+}
+
+/// The sample run on show.
+fn run_of(bench: &Bench) -> &PlaySample {
+    bench.preview.play_sample().expect("a play screen is previewed from a sample run")
+}
+
+/// Where the sample chart stands, in milliseconds.
+fn chart_ms(bench: &Bench) -> i64 {
+    run_of(bench).standing().1
+}
+
+/// Tell the preview that a setting moved, as the menu does after it wrote one.
+fn told(bench: &mut Bench) {
+    bench.preview.settings_changed(&mut bench.app.shared);
+}
+
+/// Move the scene on without drawing until the sample chart is playing.
+fn start_playing(bench: &mut Bench) {
+    for _ in 0..STEPS_TO_START {
+        if run_of(bench).standing().0 == PlayPhase::Play {
+            return;
+        }
+        bench.update(STEP_SECONDS);
+    }
+    panic!("the sample run never began to play: {:?}", run_of(bench).standing());
+}
+
+/// Move the scene `millis` on without drawing and draw it there.
+fn frame_after(bench: &mut Bench, millis: i64) -> PreviewStatus {
+    bench.frame_at(bench.preview.scene_us() / MICROS_PER_MILLI + millis)
+}
+
+/// Draw the frame of the pass of the chart that is playing at `millis` of the chart.
+fn chart_frame(bench: &mut Bench, millis: i64) -> PreviewStatus {
+    start_playing(bench);
+    let ahead = millis - chart_ms(bench);
+    assert!(ahead >= 0, "the chart is already {} ms in", chart_ms(bench));
+    frame_after(bench, ahead)
+}
+
+/// One pixel of the last frame.
+fn pixel(bench: &Bench, x: u32, y: u32) -> [u8; 3] {
+    let at = ((y * bench.size.0 + x) * 4) as usize;
+    [bench.pixels.rgba()[at], bench.pixels.rgba()[at + 1], bench.pixels.rgba()[at + 2]]
+}
+
+/// Lane zero of a previewed play screen as it lands in the test's rectangle: the column down its
+/// middle, how wide it is, and the rows of its top and of its judgement line with no lift under it.
+struct LaneSeen {
+    column: u32,
+    left: f32,
+    width: f32,
+    ceiling: f32,
+    line: f32,
+}
+
+impl LaneSeen {
+    fn of(bench: &Bench, screen: i32) -> LaneSeen {
+        let skin = bench.app.shared.skins.document(screen).expect("the play screen's document is read");
+        let lane = first_lane_rect(skin).expect("a play skin places its note field");
+        let (across, down) = (RECT.w / skin.def.w as f32, RECT.h / skin.def.h as f32);
+        LaneSeen {
+            column: (RECT.x + (lane.x + lane.w / 2.0) * across) as u32,
+            left: RECT.x + lane.x * across,
+            width: lane.w * across,
+            ceiling: RECT.y + (skin.def.h as f32 - lane.y - lane.h) * down,
+            line: RECT.y + (skin.def.h as f32 - lane.y) * down,
+        }
+    }
+
+    fn height(&self) -> f32 {
+        self.line - self.ceiling
+    }
+
+    /// The row `share` of the lane above its judgement line.
+    fn row(&self, share: f32) -> f32 {
+        self.line - self.height() * share
+    }
+
+    /// The colours down the middle of the lane, from its top to its judgement line.
+    fn column_of(&self, bench: &Bench) -> Vec<[u8; 3]> {
+        (self.ceiling as u32..self.line as u32).map(|row| pixel(bench, self.column, row)).collect()
+    }
+
+    /// The row under the lowest note in the watched part of the lane, or `None` with no note there.
+    fn note_foot(&self, bench: &Bench) -> Option<u32> {
+        let bright = |row: u32| pixel(bench, self.column, row).iter().all(|channel| *channel >= NOTE_BRIGHTNESS);
+        let foot = (self.row(WATCHED_FROM) as u32..self.row(WATCHED_TO) as u32).rev().find(|row| bright(*row))?;
+        (foot + 1 - THINNEST_NOTE_ROWS..=foot).all(bright).then_some(foot + 1)
+    }
+}
+
+/// The rows of the lane, counted from its top, that are not the colour they are in `before`: the
+/// first and the last of them, or `None` when the lane is as it was.
+fn changed_rows(before: &[[u8; 3]], now: &[[u8; 3]]) -> Option<(usize, usize)> {
+    let changed = |row: &usize| before[*row] != now[*row];
+    Some(((0..before.len()).find(changed)?, (0..before.len()).rev().find(changed)?))
+}
+
+/// When each plain note of lane zero of the chart on show is played, in milliseconds.
+fn lane_zero_notes_ms(bench: &Bench) -> Vec<f64> {
+    let lines = &run_of(bench).session().model().timelines;
+    lines.iter().filter(|line| line.notes.first().is_some_and(Option::is_some)).map(|line| line.time_us as f64 / MICROS_PER_MILLI as f64).collect()
+}
+
+/// How long a note takes to come down the whole of lane zero as the preview draws it, in
+/// milliseconds, read off two frames: one note is found in the lane at two moments of the chart,
+/// and the lane's height is divided by how fast it fell between them.
+///
+/// The note is one with nothing close under it, and the two moments are where the figures of
+/// `target` put it at two heights of the lane: a run drawn at another speed has no note there, or
+/// has one that fell another distance.
+fn measured_fall_ms(bench: &mut Bench, target: PlayTarget) -> f64 {
+    start_playing(bench);
+    assert_eq!(bench.frame(NO_TIME), PreviewStatus::Drawn);
+    let play = bench.app.shared.config.play.clone();
+    let readout = target.readout(&play);
+    let open = 1.0 - if readout.cover_on { f64::from(play.cover) } else { 0.0 };
+    let fall_ms = f64::from(readout.duration_ms) / open;
+    let lane = LaneSeen::of(bench, target.screen);
+    let notes = lane_zero_notes_ms(bench);
+    let mut chosen = None;
+    for _ in 0..STEPS_TO_START * 2 {
+        let now = chart_ms(bench) as f64;
+        chosen = (0..notes.len()).find(|at| notes[*at] - READ_HIGH * fall_ms > now && (*at == 0 || notes[*at] - notes[*at - 1] >= NOTE_APART * fall_ms));
+        if chosen.is_some() {
+            break;
+        }
+        bench.update(STEP_SECONDS);
+    }
+    let note_ms = notes[chosen.expect("no note of the sample chart can be told from the one before it")];
+    let mut read = |share: f64| {
+        let ahead = (note_ms - share * fall_ms) as i64 - chart_ms(bench);
+        assert_eq!(frame_after(bench, ahead), PreviewStatus::Drawn);
+        let foot = lane.note_foot(bench).unwrap_or_else(|| panic!("no note is {share} of the way up the lane {} ms before it is played", share * fall_ms));
+        (chart_ms(bench) as f64, f64::from(foot))
+    };
+    let (high_ms, high_row) = read(READ_HIGH);
+    let (low_ms, low_row) = read(READ_LOW);
+    f64::from(lane.height()) * (low_ms - high_ms) / (low_row - high_row)
+}
+
+/// Whether two times in milliseconds are the same as far as a frame can tell.
+fn same_time(one: f64, other: f64) -> bool {
+    (one - other).abs() <= one.max(other) * MEASURE_TOLERANCE
+}
+
+/// Every mode the play menu offers is previewed: a frame of its play screen lands in the rectangle
+/// and nowhere else, with its chart playing.
+#[test]
+fn the_play_menus_preview_draws_every_mode_it_offers() {
+    for (screen, name) in PLAY_MODES {
+        let mut bench = play_bench(&format!("mode-{name}"), PlayTarget { screen, ..SEVEN_KEYS });
+        assert_eq!(chart_frame(&mut bench, MID_CHART_MS), PreviewStatus::Drawn, "{name}");
+        assert_eq!(bench.app.shared.skin_warnings(screen), &[] as &[String], "{name} did not compile whole");
+        let (outside, inside) = drawn_on(bench.pixels.rgba(), bench.size, SAME_SIZE, 0);
+        let (left, top, right, bottom) = rect_pixels(SAME_SIZE);
+        assert_eq!(outside, 0, "{name} drew outside its rectangle");
+        assert_eq!(inside, ((right - left) * (bottom - top)) as usize, "{name} left part of its rectangle as the menu cleared it");
+        let (phase, _, combo, ..) = run_of(&bench).standing();
+        assert!(phase == PlayPhase::Play && combo > 0, "{name}: {:?}", run_of(&bench).standing());
+        bench.save(&format!("play-preview-{name}-default"));
+    }
+}
+
+/// With a green number held, a note comes down the lane in the same time at every tempo the menu
+/// names, which is the time the menu writes beside it, and the speed that holds it differs.
+#[test]
+fn a_held_green_number_brings_a_note_down_in_the_same_time_at_every_tempo() {
+    let mut bench = play_bench("held", seven_keys_at(SLOW_BPM));
+    let play = &mut bench.app.shared.config.play;
+    (play.keep_green_number, play.enable_cover) = (true, false);
+    told(&mut bench);
+    let mut speeds = Vec::new();
+    for bpm in [SLOW_BPM, OPENING_BPM, FAST_BPM] {
+        let target = seven_keys_at(bpm);
+        bench.preview.show_play(target);
+        let fell = measured_fall_ms(&mut bench, target);
+        let readout = target.readout(&bench.app.shared.config.play);
+        assert!(readout.held && readout.duration_ms == bench.app.shared.config.play.duration_ms, "{readout:?}");
+        assert!(same_time(fell, f64::from(readout.duration_ms)), "at {bpm} a note fell in {fell} ms and the number held is {} ms", readout.duration_ms);
+        speeds.push(readout.hispeed);
+        bench.save(&format!("play-preview-7k-held-{bpm}"));
+    }
+    assert!(speeds.windows(2).all(|pair| pair[0] > pair[1]), "the speed that holds the number did not fall as the tempo rose: {speeds:?}");
+}
+
+/// With nothing held the speed is the stored one, so a note comes down in half the time at twice
+/// the tempo, and in the time the menu writes beside it at each.
+#[test]
+fn a_stored_speed_brings_a_note_down_faster_at_a_faster_tempo() {
+    const STORED_SPEED: f64 = 3.0;
+    let mut bench = play_bench("stored", seven_keys_at(SLOW_BPM));
+    let play = &mut bench.app.shared.config.play;
+    (play.keep_green_number, play.enable_cover, play.hispeed) = (false, false, STORED_SPEED);
+    told(&mut bench);
+    let mut fell = Vec::new();
+    for bpm in [SLOW_BPM, FAST_BPM] {
+        let target = seven_keys_at(bpm);
+        bench.preview.show_play(target);
+        let measured = measured_fall_ms(&mut bench, target);
+        let readout = target.readout(&bench.app.shared.config.play);
+        assert!(!readout.held && (readout.hispeed - STORED_SPEED).abs() < f64::EPSILON, "{readout:?}");
+        assert!(same_time(measured, f64::from(readout.duration_ms)), "at {bpm} a note fell in {measured} ms and its target reads {} ms", readout.duration_ms);
+        fell.push(measured);
+        bench.save(&format!("play-preview-7k-stored-{bpm}"));
+    }
+    assert!(same_time(fell[0], fell[1] * FAST_OVER_SLOW), "twice the tempo did not halve the fall: {fell:?}");
+}
+
+/// Under CONSTANT the field scrolls at one tempo of its own, so a note comes down in the same time
+/// whatever the chart's tempo is, held number or stored speed.
+#[test]
+fn under_constant_a_note_comes_down_in_the_same_time_at_every_tempo() {
+    let mut bench = play_bench("constant", seven_keys_at(SLOW_BPM));
+    let play = &mut bench.app.shared.config.play;
+    (play.constant_speed, play.enable_cover) = (true, false);
+    for keep_green_number in [false, true] {
+        bench.app.shared.config.play.keep_green_number = keep_green_number;
+        told(&mut bench);
+        let mut fell = Vec::new();
+        for bpm in [SLOW_BPM, FAST_BPM] {
+            let target = seven_keys_at(bpm);
+            bench.preview.show_play(target);
+            let measured = measured_fall_ms(&mut bench, target);
+            let readout = target.readout(&bench.app.shared.config.play);
+            assert!(same_time(measured, f64::from(readout.duration_ms)), "held {keep_green_number} at {bpm}: {measured} ms against {}", readout.duration_ms);
+            fell.push(measured);
+        }
+        assert!(same_time(fell[0], fell[1]), "held {keep_green_number}: the tempo moved the fall under CONSTANT: {fell:?}");
+    }
+    bench.save("play-preview-7k-constant");
+}
+
+/// A lane cover leaves a held green number what it was: the note falls slower, and what the cover
+/// leaves of the lane is crossed in the time that is held. Under a stored speed the note falls as
+/// fast as it did, and is on show for less.
+#[test]
+fn a_lane_cover_slows_a_held_note_and_leaves_a_stored_speed_alone() {
+    let target = SEVEN_KEYS;
+    let mut bench = play_bench("covered", target);
+    for keep_green_number in [true, false] {
+        let play = &mut bench.app.shared.config.play;
+        (play.keep_green_number, play.enable_cover, play.cover) = (keep_green_number, false, COVER);
+        told(&mut bench);
+        let open = measured_fall_ms(&mut bench, target);
+        bench.app.shared.config.play.enable_cover = true;
+        told(&mut bench);
+        let covered = measured_fall_ms(&mut bench, target);
+        let readout = target.readout(&bench.app.shared.config.play);
+        let on_show = covered * f64::from(1.0 - COVER);
+        assert!(
+            same_time(on_show, f64::from(readout.duration_ms)),
+            "held {keep_green_number}: a note is on show for {on_show} ms against {}",
+            readout.duration_ms
+        );
+        if keep_green_number {
+            assert!(same_time(on_show, open), "the cover moved the time that is held: {open} ms open, {on_show} ms under it");
+        } else {
+            assert!(same_time(covered, open), "the cover moved a stored speed: {open} ms open, {covered} ms under it");
+        }
+    }
+}
+
+/// The lane cover, the lift and the hidden cover are drawn where the settings put them on the frame
+/// after they move, each only while it is switched on, and the lane is as it was once they are off.
+/// The lane is read in the chart's first measure, which is empty, so nothing else is in it.
+#[test]
+fn the_covers_and_the_lift_are_drawn_where_the_settings_put_them() {
+    const BEFORE_THE_FIRST_NOTE_MS: i64 = 500;
+    let mut bench = play_bench("covers", SEVEN_KEYS);
+    let play = &mut bench.app.shared.config.play;
+    (play.enable_cover, play.enable_lift, play.enable_hidden) = (false, false, false);
+    (play.cover, play.lift, play.hidden) = (COVER, LIFT, HIDDEN);
+    told(&mut bench);
+    assert_eq!(chart_frame(&mut bench, BEFORE_THE_FIRST_NOTE_MS), PreviewStatus::Drawn);
+    let lane = LaneSeen::of(&bench, SEVEN_KEYS.screen);
+    let (bare, bare_frame) = (lane.column_of(&bench), bench.pixels.pixel_checksum());
+    let rows = |share: f32| lane.height() * share;
+    let drawn = |bench: &mut Bench, set: fn(&mut rbms_config::PlayOptions, bool)| {
+        set(&mut bench.app.shared.config.play, true);
+        told(bench);
+        assert_eq!(bench.frame(NO_TIME), PreviewStatus::Drawn, "a cover cost a frame");
+        let changed = changed_rows(&bare, &lane.column_of(bench)).expect("a cover that is switched on changed nothing of the lane");
+        set(&mut bench.app.shared.config.play, false);
+        told(bench);
+        assert_eq!(bench.frame(NO_TIME), PreviewStatus::Drawn);
+        assert_eq!(bench.pixels.pixel_checksum(), bare_frame, "a cover that is switched off left something behind");
+        (changed.0 as f32, changed.1 as f32)
+    };
+
+    let (cover_top, cover_foot) = drawn(&mut bench, |play, on| play.enable_cover = on);
+    assert!(cover_top <= ROW_TOLERANCE && (cover_foot - rows(COVER)).abs() <= ROW_TOLERANCE, "the lane cover is over rows {cover_top} to {cover_foot}");
+    let (hidden_top, hidden_foot) = drawn(&mut bench, |play, on| play.enable_hidden = on);
+    assert!(
+        (hidden_top - rows(1.0 - HIDDEN)).abs() <= ROW_TOLERANCE && (hidden_foot - rows(1.0)).abs() <= ROW_TOLERANCE,
+        "the hidden cover is over rows {hidden_top} to {hidden_foot}"
+    );
+    let (lift_top, _) = drawn(&mut bench, |play, on| play.enable_lift = on);
+    assert!((lift_top - rows(1.0 - LIFT)).abs() <= LIFTED_LINE_TOLERANCE, "the lift begins at row {lift_top} of {}", lane.height());
+
+    let play = &mut bench.app.shared.config.play;
+    (play.enable_cover, play.enable_lift, play.enable_hidden) = (true, true, true);
+    told(&mut bench);
+    assert_eq!(chart_frame(&mut bench, MID_CHART_MS), PreviewStatus::Drawn);
+    bench.save("play-preview-7k-cover30-lift15-hidden10");
+}
+
+/// The run goes on for as long as the menu is up: past the end of its chart the scene neither ends
+/// nor is read again, a run of the chart is begun afresh with nothing of the last one left on, and
+/// the combo and the judgements move again. Nothing is sounded and no setting is touched, the judge
+/// offset least of all, though it is set to move by itself.
+#[test]
+fn the_play_menus_preview_goes_on_past_the_end_of_its_chart() {
+    const PASSES: usize = 2;
+    const DRAWN_EVERY: usize = 40;
+    const PLAYERS_OFFSET_MS: i32 = 7;
+    let mut bench = play_bench("endless", seven_keys_at(FAST_BPM));
+    bench.app.shared.config.judge.auto_offset = true;
+    bench.app.shared.config.judge.offset_ms = PLAYERS_OFFSET_MS;
+    told(&mut bench);
+    let settings = bench.app.shared.config.clone();
+    start_playing(&mut bench);
+    let notes = run_of(&bench).session().summary().total_notes;
+    let play_time_ms = run_of(&bench).session().play_time_ms();
+    let steps = (play_time_ms as f32 / (STEP_SECONDS * MILLIS_PER_SECOND)) as usize * (PASSES + 1);
+    let (mut passes, mut last_ms, mut last_combo) = (0, 0, 0);
+    for step in 0..steps {
+        let scene_us = bench.preview.scene_us();
+        let full_combo_was_on = bench.app.shared.skin_timers.is_on(timer_id::FULLCOMBO_1P);
+        bench.update(STEP_SECONDS);
+        assert_eq!(*bench.preview.status(), PreviewStatus::Drawn, "the scene was begun again {step} steps in");
+        assert!(bench.preview.scene_us() > scene_us, "the scene stood still or went back {step} steps in");
+        let (phase, now_ms, combo, ..) = run_of(&bench).standing();
+        assert_eq!(phase, PlayPhase::Play, "the scene left its playing state {step} steps in");
+        if now_ms < last_ms {
+            passes += 1;
+            assert_eq!(last_combo, notes, "the run before was begun again before its last note");
+            assert!(full_combo_was_on, "the run before never showed its full combo");
+            assert_eq!(combo, 0, "the run that began again is not a new one");
+            let timers = &bench.app.shared.skin_timers;
+            assert!(!timers.is_on(timer_id::FULLCOMBO_1P) && !timers.is_on(timer_id::ENDOFNOTE_1P), "what the run before came to is still on show");
+            assert!(timers.is_on(timer_id::PLAY) && bench.preview.scene_us() - timers.value_us(timer_id::PLAY) < MICROS_PER_SECOND as i64);
+        }
+        (last_ms, last_combo) = (now_ms, combo);
+        if step % DRAWN_EVERY == 0 {
+            assert_eq!(bench.frame(NO_TIME), PreviewStatus::Drawn, "{step} steps in");
+        }
+    }
+    assert!(passes >= PASSES, "the chart came round {passes} times in {steps} steps");
+    assert!(last_combo > 0 && bench.app.shared.skin_timers.is_on(timer_id::JUDGE_1P), "nothing is judged in the run that began again");
+    assert_eq!(bench.app.shared.config, settings, "the preview changed a setting");
+    assert!(bench.app.shared.audio.is_none(), "a sample run opened the output stream");
+}
+
+/// What a run of the sample chart at `offset_ms` of judge offset, self adjusting or not, has
+/// tallied a set way into its chart: its judgements, and its early and late hits.
+fn tally_under(tag: &str, offset_ms: i32, auto_offset: bool) -> ([u32; 6], u32, u32) {
+    const TALLIED_AT_MS: i64 = 12_000;
+    let mut bench = play_bench(tag, seven_keys_at(FAST_BPM));
+    bench.app.shared.config.judge.offset_ms = offset_ms;
+    bench.app.shared.config.judge.auto_offset = auto_offset;
+    told(&mut bench);
+    start_playing(&mut bench);
+    while chart_ms(&bench) < TALLIED_AT_MS {
+        bench.update(STEP_SECONDS);
+    }
+    assert_eq!(bench.frame(NO_TIME), PreviewStatus::Drawn);
+    assert_eq!(
+        (bench.app.shared.config.judge.offset_ms, bench.app.shared.config.judge.auto_offset),
+        (offset_ms, auto_offset),
+        "the run moved the judge offset"
+    );
+    let summary = run_of(&bench).session().summary();
+    (summary.counts, summary.fast, summary.slow)
+}
+
+/// The sample hand is judged the same whatever the player's judge offset is and whether or not it
+/// adjusts itself: the offset is the player's own, and a sample run neither reads nor moves it.
+#[test]
+fn the_sample_run_is_judged_the_same_under_any_judge_offset() {
+    const OFFSET_MS: i32 = 50;
+    let early = tally_under("offset-early", OFFSET_MS, true);
+    let late = tally_under("offset-late", -OFFSET_MS, false);
+    assert!(early.0.iter().sum::<u32>() > 0 && early.1 > 0 && early.2 > 0, "nothing was tallied: {early:?}");
+    assert_eq!(early, late, "the judge offset reached the sample run");
+}
+
+/// Another gauge is shown from the frame after it is named: the run is on it, as far through its
+/// chart and on the combo it had, and the scene goes on.
+#[test]
+fn another_gauge_is_taken_up_where_the_run_stands() {
+    use rbms_judge::GaugeKind;
+    use rbms_judge::gauge::GaugeIndex;
+    let mut bench = play_bench("gauge", SEVEN_KEYS);
+    assert_eq!(chart_frame(&mut bench, MID_CHART_MS), PreviewStatus::Drawn);
+    let gauge_row = |bench: &Bench| {
+        let (left, _, right, _) = rect_pixels(SAME_SIZE);
+        (left..right).map(|x| pixel(bench, x, (RECT.y + RECT.h * GAUGE_ROW) as u32)).collect::<Vec<_>>()
+    };
+    let on_gauge = |bench: &Bench| run_of(bench).session().judge().gauge.selected_index();
+    let (scene_us, (_, before_ms, combo, score, _), normal_row) = (bench.preview.scene_us(), run_of(&bench).standing(), gauge_row(&bench));
+    assert_eq!(on_gauge(&bench), GaugeIndex::Normal);
+    bench.save("play-preview-7k-gauge-normal");
+
+    bench.app.shared.config.play.gauge = GaugeKind::Hard;
+    told(&mut bench);
+    assert_eq!(bench.frame(NO_TIME), PreviewStatus::Drawn, "another gauge cost a frame");
+    assert_eq!(on_gauge(&bench), GaugeIndex::Hard, "the run is not on the gauge that was named");
+    let (phase, now_ms, now_combo, now_score, _) = run_of(&bench).standing();
+    assert_eq!((phase, now_ms, now_combo, now_score), (PlayPhase::Play, before_ms, combo, score), "the run on the new gauge is not where the one before was");
+    assert_eq!(bench.preview.scene_us(), scene_us, "another gauge moved the scene");
+    assert_ne!(gauge_row(&bench), normal_row, "the gauge is drawn as it was");
+    bench.save("play-preview-7k-gauge-hard");
+}
+
+/// Step the option called `name` of the document `screen` is drawn with and tell the preview, the
+/// way the play menu does for a row of the previewed skin: the stored choice, the read the library
+/// is asked for, then the word that something moved.
+fn step_play_skin_option(bench: &mut Bench, screen: i32, name: &str) {
+    let shared = &mut bench.app.shared;
+    let header = shared.skins.header_of(&shared.config, screen).expect("the play screen has a document");
+    let at = header.properties.iter().position(|property| property.name == name).unwrap_or_else(|| panic!("the play skin has no option called {name}"));
+    let configured = std::mem::replace(&mut shared.config.skin.screen, screen);
+    assert!(shared.step_skin_row(SkinRow::Property(at), 1), "{name} did not move");
+    shared.config.skin.screen = configured;
+    if shared.skins.needs_reload_for(&shared.config, screen) {
+        shared.skins.request_for(&shared.config, screen);
+    }
+    told(bench);
+}
+
+/// An option of the previewed skin has its document read again under the scene as it stands: the
+/// lanes are drawn as wide as the option says, the run goes on from where it was and is judged as
+/// before, and a run begun afresh afterwards is fed the document that was read again.
+#[test]
+fn an_option_of_the_play_skin_is_shown_without_the_run_beginning_again() {
+    const WIDE: f32 = 1.5;
+    const A_FEW_NOTES_ON_MS: i64 = 2_000;
+    let screen = SEVEN_KEYS.screen;
+    let mut bench = play_bench("skin-option", SEVEN_KEYS);
+    assert_eq!(chart_frame(&mut bench, MID_CHART_MS), PreviewStatus::Drawn);
+    let (narrow, build, scene_us, before_ms) =
+        (LaneSeen::of(&bench, screen), bench.app.shared.skins.build_of(screen), bench.preview.scene_us(), chart_ms(&bench));
+
+    step_play_skin_option(&mut bench, screen, "Lane Width");
+    assert_eq!(*bench.preview.status(), PreviewStatus::Loading);
+    assert!(bench.preview.waits_in_the_dark(), "a document read again for an option is said to be loading over the frame it had");
+    assert_eq!(bench.settle(), PreviewStatus::Drawn, "{:?}", bench.app.shared.skin_failure(screen));
+    assert_ne!(bench.app.shared.skins.build_of(screen), build, "the option did not have the document read again");
+    assert_eq!((bench.preview.scene_us(), chart_ms(&bench)), (scene_us, before_ms), "the run did not carry on from where it stood");
+    let wide = LaneSeen::of(&bench, screen);
+    assert!((wide.width - narrow.width * WIDE).abs() <= PLACE_TOLERANCE, "the lane is {} wide where it was {}", wide.width, narrow.width);
+    bench.save("play-preview-7k-wide");
+
+    bench.app.shared.config.play.gauge = rbms_judge::GaugeKind::Hard;
+    told(&mut bench);
+    let swapped_us = bench.preview.scene_us();
+    assert_eq!(frame_after(&mut bench, A_FEW_NOTES_ON_MS), PreviewStatus::Drawn);
+    let timers = &bench.app.shared.skin_timers;
+    assert!(timers.is_on(timer_id::JUDGE_1P) && timers.value_us(timer_id::JUDGE_1P) > swapped_us, "the run begun afresh is not judged on the skin's timers");
+
+    step_play_skin_option(&mut bench, screen, "Scratch Side");
+    assert_eq!(bench.settle(), PreviewStatus::Drawn, "{:?}", bench.app.shared.skin_failure(screen));
+    let moved = LaneSeen::of(&bench, screen);
+    assert!((moved.left - wide.left).abs() > PLACE_TOLERANCE, "the turntable changed sides and the first key stayed where it was");
+    assert_eq!(run_of(&bench).standing().0, PlayPhase::Play);
+    bench.save("play-preview-7k-wide-scratch-right");
+}
+
+/// Leaving the play menu leaves the screen it was opened over as it was -- the read it was compiled
+/// from, its textures, a frame on the first frame back -- and nothing of the previewed play screen.
+#[test]
+fn leaving_the_play_menu_leaves_only_the_screen_under_it() {
+    let mut bench = Bench::new("play-left", Some(&shipped_pack()));
+    let build = decide_screen_drawn_for_real(&mut bench);
+    let textures = bench.app.shared.skin_screens.texture_stats().count;
+    let underneath = bench.app.shared.suspend_skin_scene();
+
+    bench.preview = SkinPreview::of_play(SEVEN_KEYS);
+    assert_eq!(bench.settle(), PreviewStatus::Drawn);
+    assert_eq!(chart_frame(&mut bench, MID_CHART_MS), PreviewStatus::Drawn);
+    assert!(bench.app.shared.skin_screens.texture_stats().count > textures, "the preview drew from no texture of its own");
+
+    bench.preview.release(&mut bench.app.shared);
+    bench.app.shared.resume_skin_scene(underneath);
+    assert!(bench.preview.play_sample().is_none(), "the sample run outlived the preview");
+    let chart = ChartMeta::default();
+    let mut canvas = Canvas::Headless(&mut bench.pixels);
+    bench.app.shared.prepare_skin(&mut canvas, SKIN_TYPE_DECIDE);
+    assert_eq!(bench.app.shared.skins.build_of(SKIN_TYPE_DECIDE), build, "the screen gone back to was read again");
+    assert!(
+        bench.app.shared.draw_decide_skin(&mut canvas, &DecideDraw { chart: &chart, progress: 0.0, data: FrameData::default() }),
+        "the first frame back drew no skin"
+    );
+    bench.app.shared.finish_skin_frame(&mut canvas);
+    assert!(!bench.app.shared.has_compiled_skin(SEVEN_KEYS.screen), "the previewed play screen outlived the menu");
+    assert!(bench.app.shared.skins.needs_reload_for(&bench.app.shared.config, SEVEN_KEYS.screen), "the skin read for the preview was left for the play screen");
+    assert_eq!(bench.app.shared.skin_screens.texture_stats().count, textures, "the preview's textures stayed uploaded");
+    assert_eq!(bench.app.shared.skin_screens.movies_playing(), 0);
+}
+
+/// With a pack named by the environment, its seven key play screen is previewed the way the play
+/// menu previews it and taken through the settings the menu moves, a capture at each: a held number
+/// at two tempos, a stored speed, the covers, CONSTANT and another gauge. A pack with no document
+/// for the screen has nothing to show.
+#[test]
+fn a_skin_pack_named_by_the_environment_is_previewed_as_the_play_menu_shows_it() {
+    const SETTLED_AFTER_MS: i64 = 1_500;
+    let Some(pack) = pack_from_environment(std::env::var_os(SKIN_PACK_ENV)) else {
+        return;
+    };
+    let mut bench = Bench::new("pack-play-menu", Some(&pack));
+    bench.preview = SkinPreview::of_play(seven_keys_at(SLOW_BPM));
+    let first = bench.settle();
+    println!("play menu preview of the pack: {first:?} {:?}", first.detail());
+    if !first.is_drawn() {
+        return;
+    }
+    assert_eq!(chart_frame(&mut bench, MID_CHART_MS), PreviewStatus::Drawn);
+    let scene_us = bench.preview.scene_us();
+    let shown = |bench: &mut Bench, name: &str, set: &dyn Fn(&mut Config)| {
+        set(&mut bench.app.shared.config);
+        told(bench);
+        assert_eq!(bench.frame(NO_TIME), PreviewStatus::Drawn, "{name} cost a frame");
+        assert_eq!(frame_after(bench, SETTLED_AFTER_MS), PreviewStatus::Drawn, "{name}");
+        assert_eq!(drawn_on(bench.pixels.rgba(), bench.size, SAME_SIZE, 0).0, 0, "{name} drew outside its rectangle");
+        bench.save(&format!("play-preview-pack-7k-{name}"));
+    };
+    shown(&mut bench, "held-100", &|config| config.play.keep_green_number = true);
+    bench.preview.show_play(seven_keys_at(FAST_BPM));
+    shown(&mut bench, "held-200", &|_| {});
+    shown(&mut bench, "stored-200", &|config| config.play.keep_green_number = false);
+    shown(&mut bench, "covers", &|config| {
+        let play = &mut config.play;
+        (play.enable_cover, play.enable_lift, play.enable_hidden) = (true, true, true);
+        (play.cover, play.lift, play.hidden) = (COVER, LIFT, HIDDEN);
+    });
+    shown(&mut bench, "constant", &|config| config.play.constant_speed = true);
+    shown(&mut bench, "gauge-hard", &|config| config.play.gauge = rbms_judge::GaugeKind::Hard);
+    assert!(bench.preview.scene_us() > scene_us && run_of(&bench).standing().0 == PlayPhase::Play, "the scene began again on the way");
 }

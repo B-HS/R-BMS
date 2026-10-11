@@ -1,4 +1,4 @@
-//! The three play-option vocabularies the PLAY tab gained for the option overlay: which tempo the
+//! The three play-option vocabularies the play options gained for the option overlay: which tempo the
 //! green number is pinned to, what is done to the lanes as a whole, and how leaving a run mid-song
 //! is confirmed.
 //!

@@ -1,6 +1,6 @@
-//! The settings screen as data plus one draw call: the tab strip with the button to the skin menu
-//! at its end, the (scrolling) row list, the in-place editor, the network status line, and the
-//! inline rival list.
+//! The settings screen as data plus one draw call: the tab strip with the buttons to the play menu
+//! and the skin menu at its end, the (scrolling) row list, the in-place editor, the network status
+//! line, and the inline rival list.
 //!
 //! Extracted from the frame loop so the screen can be rendered headless in tests and so a tab with
 //! more rows than fit on screen scrolls instead of drawing off the bottom.
@@ -52,16 +52,20 @@ const NOTE_GAP: f32 = 16.0;
 /// Widest a row's value is drawn, as a share of the panel.
 const VALUE_MAX_SHARE: f32 = 0.6;
 
-/// Keyboard hint under the title: the keys of the screen that are its own, then the two that open
-/// the skin menu and the key editor from it, each named by the key it is on.
+/// Keyboard hint under the title: the keys of the screen that are its own, then the three that open
+/// the play menu, the skin menu and the key editor from it, each named by the key it is on.
 const SETTINGS_HINT_OWN: &str = "TAB SWITCH   UP DOWN MOVE   LEFT RIGHT CHANGE   ENTER OPEN   ESC BACK";
 
-/// The hint under the title, naming `skin_menu` and `key_config` as the keys that open the skin menu
-/// and the key editor. They are the keys the key configuration holds, so the hint follows a key the
-/// player moved.
-pub(crate) fn settings_hint(skin_menu: &str, key_config: &str) -> String {
-    format!("{SETTINGS_HINT_OWN}   {skin_menu} SKINS   {key_config} KEYS")
+/// The hint under the title, naming `play_menu`, `skin_menu` and `key_config` as the keys that open
+/// the play menu, the skin menu and the key editor. They are the keys the key configuration holds,
+/// so the hint follows a key the player moved.
+pub(crate) fn settings_hint(play_menu: &str, skin_menu: &str, key_config: &str) -> String {
+    format!("{SETTINGS_HINT_OWN}   {play_menu} PLAY   {skin_menu} SKINS   {key_config} KEYS")
 }
+
+/// What the first of the two buttons at the right end of the tab strip reads: it opens the play
+/// menu, where the options of a sitting are listed beside a preview of what they do.
+pub(crate) const PLAY_MENU_LINK: &str = "PLAY MENU >";
 
 /// What the button at the right end of the tab strip reads: it opens the skin menu, where the skin
 /// settings are listed beside a preview of what they do.
@@ -123,6 +127,8 @@ pub(crate) struct RivalsScene {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum SettingsHot {
     Tab(usize),
+    /// The button near the right end of the tab strip that opens the play menu.
+    PlayMenuLink,
     /// The button at the right end of the tab strip that opens the skin menu.
     SkinMenuLink,
     /// The button beside it that opens the key editor.
@@ -171,9 +177,19 @@ fn tab_width(name: &str) -> f32 {
     text_width(name, TAB_SCALE) + TAB_PAD
 }
 
+/// Where the button to the play menu is: on the tab strip, a gap before where the button to the
+/// skin menu stands against the panel's edge, and never over a tab. `tabs_end` is where the strip
+/// is free from, which with a font wider than the one the strip was laid out for is past where the
+/// button would otherwise begin.
+fn play_menu_link_rect(x0: f32, tabs_end: f32) -> Rect {
+    let w = tab_width(PLAY_MENU_LINK);
+    Rect::new((x0 + PANEL_W - tab_width(SKIN_MENU_LINK) - TAB_GAP - w).max(tabs_end), TABS_Y, w, TAB_H)
+}
+
 /// Where the button to the skin menu is: at the right end of the tab strip, against the panel's
-/// edge, and never over a tab. `tabs_end` is where the strip is free from, which with a font wider
-/// than the one the strip was laid out for is past where the button would otherwise begin.
+/// edge, and never over what is before it. `tabs_end` is where the strip is free from -- past the
+/// button to the play menu -- which with a font wider than the one the strip was laid out for is
+/// past where the button would otherwise begin.
 fn skin_menu_link_rect(x0: f32, tabs_end: f32) -> Rect {
     let w = tab_width(SKIN_MENU_LINK);
     Rect::new((x0 + PANEL_W - w).max(tabs_end), TABS_Y, w, TAB_H)
@@ -212,14 +228,17 @@ pub(crate) fn render_settings<R: Renderer>(r: &mut R, scene: &SettingsScene) -> 
         hot.push((rect, SettingsHot::Tab(index)));
         tx += w + TAB_GAP;
     }
-    let link = skin_menu_link_rect(x0, tx);
-    r.fill_rect(link, th.panel_hi);
-    draw_text(r, link.x + TAB_PAD * 0.5, TABS_Y + TAB_TEXT_Y, TAB_SCALE, th.accent, SKIN_MENU_LINK);
-    hot.push((link, SettingsHot::SkinMenuLink));
-    let keys = key_config_link_rect(x0);
-    r.fill_rect(keys, th.panel_hi);
-    draw_text(r, keys.x + TAB_PAD * 0.5, keys.y + TAB_TEXT_Y, TAB_SCALE, th.accent, KEY_CONFIG_LINK);
-    hot.push((keys, SettingsHot::KeyConfigLink));
+    let play = play_menu_link_rect(x0, tx);
+    let links = [
+        (play, PLAY_MENU_LINK, SettingsHot::PlayMenuLink),
+        (skin_menu_link_rect(x0, play.x + play.w + TAB_GAP), SKIN_MENU_LINK, SettingsHot::SkinMenuLink),
+        (key_config_link_rect(x0), KEY_CONFIG_LINK, SettingsHot::KeyConfigLink),
+    ];
+    for (rect, name, link) in links {
+        r.fill_rect(rect, th.panel_hi);
+        draw_text(r, rect.x + TAB_PAD * 0.5, rect.y + TAB_TEXT_Y, TAB_SCALE, th.accent, name);
+        hot.push((rect, link));
+    }
 
     let start = scroll_start(scene.rows.len(), scene.sel);
     for (slot, index) in (start..(start + visible_rows()).min(scene.rows.len())).enumerate() {
@@ -314,11 +333,11 @@ mod tests {
 
     fn network_scene(sel: usize) -> SettingsScene {
         SettingsScene {
-            tabs: vec!["PLAY", "GAUGE", "JUDGE", "DISPLAY", "INPUT", "NETWORK"],
-            tab: 5,
+            tabs: vec!["JUDGE", "DISPLAY", "INPUT", "NETWORK"],
+            tab: 3,
             rows: network_rows(),
             sel,
-            hint: settings_hint("F12", "F5"),
+            hint: settings_hint("F8", "F12", "F5"),
             editor: None,
             status: "logged in as dj".to_string(),
             rivals: None,
@@ -335,43 +354,47 @@ mod tests {
     }
 
     /// The strip is the tabs the screen shows, laid out left to right from the panel's own left
-    /// edge, and the button to the skin menu against the panel's right edge. Tabs that ran under the
-    /// button, or a button that ran off the panel, could neither be read nor clicked.
+    /// edge, then the button to the play menu, and the button to the skin menu against the panel's
+    /// right edge. Tabs that ran under a button, a button under the other, or a button that ran off
+    /// the panel, could neither be read nor clicked.
     #[test]
-    fn the_tabs_and_the_button_to_the_skin_menu_share_the_strip_without_meeting() {
+    fn the_tabs_and_the_two_buttons_share_the_strip_without_meeting() {
         rbms_render::font::use_embedded_fonts_only();
         let x0 = (CANVAS_W - PANEL_W) * 0.5;
         let tabs: f32 = SettingTab::SHOWN.iter().map(|tab| tab_width(tab.label()) + TAB_GAP).sum();
-        let link = skin_menu_link_rect(x0, x0 + tabs);
-        assert!(x0 + tabs <= link.x, "the tabs are {tabs} wide and run under the button, which starts {} into the panel", link.x - x0);
+        let play = play_menu_link_rect(x0, x0 + tabs);
+        let skin = skin_menu_link_rect(x0, play.x + play.w + TAB_GAP);
+        assert!(x0 + tabs <= play.x, "the tabs are {tabs} wide and run under the button to the play menu, which starts {} into the panel", play.x - x0);
+        assert!((skin.x - (play.x + play.w + TAB_GAP)).abs() < f32::EPSILON, "the two buttons are not a gap apart: {play:?} and {skin:?}");
         assert!(
-            (link.x + link.w - (x0 + PANEL_W)).abs() < f32::EPSILON,
-            "the button is not against the panel's edge: the tabs pushed it {} past it",
-            link.x + link.w - x0 - PANEL_W
+            (skin.x + skin.w - (x0 + PANEL_W)).abs() < f32::EPSILON,
+            "the button to the skin menu is not against the panel's edge: what is before it pushed it {} past it",
+            skin.x + skin.w - x0 - PANEL_W
         );
     }
 
-    /// With a font wider than the one the strip was laid out for, the button gives way rather than
-    /// being drawn over the last tabs, where a press meant for a tab would open the menu.
+    /// With a font wider than the one the strip was laid out for, each button gives way rather than
+    /// being drawn over what is before it, where a press meant for a tab would open a menu.
     #[test]
-    fn the_button_gives_way_to_tabs_that_reach_it() {
+    fn a_button_gives_way_to_what_reaches_it() {
         rbms_render::font::use_embedded_fonts_only();
         let x0 = (CANVAS_W - PANEL_W) * 0.5;
         let reached = x0 + PANEL_W - TAB_GAP;
+        assert!((play_menu_link_rect(x0, reached).x - reached).abs() < f32::EPSILON);
         assert!((skin_menu_link_rect(x0, reached).x - reached).abs() < f32::EPSILON);
     }
 
     /// The hint under the title names every key of the screen on one line of the panel.
     #[test]
-    fn the_hint_names_the_key_to_the_skin_menu_and_fits_the_panel() {
+    fn the_hint_names_the_keys_to_the_other_screens_and_fits_the_panel() {
         rbms_render::font::use_embedded_fonts_only();
-        let hint = settings_hint("F12", "F5");
-        assert!(hint.contains("F12 SKINS") && hint.contains("F5 KEYS"), "{hint}");
+        let hint = settings_hint("F8", "F12", "F5");
+        assert!(hint.contains("F8 PLAY") && hint.contains("F12 SKINS") && hint.contains("F5 KEYS"), "{hint}");
         let room = key_config_link_rect((CANVAS_W - PANEL_W) * 0.5).x - (CANVAS_W - PANEL_W) * 0.5 - TAB_GAP;
         let width = text_width(&hint, HINT_SCALE);
         assert!(width <= room, "the hint is {width} wide and the room beside the button {room}");
-        let longest = settings_hint("BACKSPACE", "RBRACKET");
-        assert!(text_width(&longest, HINT_SCALE) <= PANEL_W, "a hint naming two long keys runs off the panel");
+        let longest = settings_hint("BACKSPACE", "BACKSLASH", "RBRACKET");
+        assert!(text_width(&longest, HINT_SCALE) <= PANEL_W, "a hint naming three long keys runs off the panel");
     }
 
     #[test]
@@ -387,9 +410,10 @@ mod tests {
         let hot = render_settings(&mut canvas, &scene);
         let tabs = hot.iter().filter(|(_, h)| matches!(h, SettingsHot::Tab(_))).count();
         let rows = hot.iter().filter(|(_, h)| matches!(h, SettingsHot::Row(_))).count();
-        let links = hot.iter().filter(|(_, h)| matches!(h, SettingsHot::SkinMenuLink)).count();
         assert_eq!(tabs, scene.tabs.len());
-        assert_eq!(links, 1, "the button to the skin menu is not clickable");
+        for link in [SettingsHot::PlayMenuLink, SettingsHot::SkinMenuLink, SettingsHot::KeyConfigLink] {
+            assert_eq!(hot.iter().filter(|(_, h)| *h == link).count(), 1, "{link:?} is not clickable once");
+        }
         assert_eq!(rows, visible_rows(), "only the rows that fit are clickable");
         assert_ne!(canvas.signature_hash(8, 8), CpuCanvas::new(1280, 720).signature_hash(8, 8));
     }
@@ -456,11 +480,11 @@ mod tests {
     /// Two rows of the DISPLAY tab with the cursor on the second, and `note` beside the first.
     fn noted_scene(note: Option<&'static str>) -> SettingsScene {
         SettingsScene {
-            tabs: vec!["PLAY", "DISPLAY"],
+            tabs: vec!["JUDGE", "DISPLAY"],
             tab: 1,
             rows: vec![SettingsLine { note, ..SettingsLine::bare("JUDGE TEXT Y", "0%") }, SettingsLine::bare("LETTERBOX", "ON")],
             sel: 1,
-            hint: settings_hint("F12", "F5"),
+            hint: settings_hint("F8", "F12", "F5"),
             editor: None,
             status: String::new(),
             rivals: None,

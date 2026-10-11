@@ -119,6 +119,27 @@ fn save_then_load_round_trips_on_disk() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The rows the play menu lists are written where the settings screen wrote them: every one of them
+/// stepped away from what it ships as survives a save and a restart, under the schema the file was
+/// already on.
+#[test]
+fn every_row_of_the_play_menu_survives_a_save_and_a_restart() {
+    let dir = temp_dir("play-menu");
+    let path = dir.join("settings.ron");
+    let mut c = Config::default();
+    for tab in SettingTab::PLAY_MENU {
+        for id in tab_rows(tab, &c) {
+            assert_eq!(adjust(&mut c, id, 1), AdjustOutcome::Changed, "{id:?} steps");
+        }
+    }
+    assert_ne!(c.play, Config::default().play);
+    save(&c, &path).expect("save");
+    let outcome = load(&path).expect("the saved file loads");
+    assert_eq!(outcome.config, c, "a row of the play menu did not come back as it was written");
+    assert_eq!(outcome.migrated_from, None, "moving a row to another screen changed the schema of the file");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn load_absorbs_the_legacy_sibling_lists_of_a_versionless_file() {
     let dir = temp_dir("siblings");

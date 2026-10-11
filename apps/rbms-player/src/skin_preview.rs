@@ -9,9 +9,19 @@
 //!
 //! # What is previewed
 //!
-//! The screen whose skin the menu is configuring, which is the one stored value the SCREEN row has
-//! always moved (`config.skin.screen`). The preview reads it rather than being handed it, so the
-//! rows on the left and the frame on the right cannot be about two different screens.
+//! One of two things, which the preview is made for and keeps ([`PreviewTarget`]).
+//!
+//! The skin menu's preview ([`SkinPreview::new`]) shows the screen whose skin the menu is
+//! configuring, which is the one stored value the SCREEN row has always moved
+//! (`config.skin.screen`). The preview reads it rather than being handed it, so the rows on the left
+//! and the frame on the right cannot be about two different screens.
+//!
+//! The play menu's preview ([`SkinPreview::of_play`]) shows the play screen and the tempo the menu
+//! names ([`PlayTarget`]), whatever `config.skin.screen` holds, and is told when the menu names
+//! another ([`SkinPreview::show_play`]). Neither the mode nor the tempo is a setting: they choose the
+//! sample the play options are shown on, and nothing of them is stored. The sample chart of such a
+//! preview holds its one tempo throughout, so the figures the menu writes beside it
+//! ([`PlayTarget::readout`]) are the ones the run in the rectangle is drawn at.
 //!
 //! # What the preview owns, and what it borrows
 //!
@@ -34,6 +44,7 @@
 //! | once a frame, from the menu's `update` | [`SkinPreview::update`] | menu |
 //! | once a frame, from the menu's `draw`, after its own clear | [`SkinPreview::draw`] | menu |
 //! | after a setting was changed and the library was told | [`SkinPreview::settings_changed`] | menu |
+//! | when the play menu names another mode or tempo | [`SkinPreview::show_play`] | play menu |
 //! | from the menu's `on_exit` | [`SkinPreview::release`] | menu |
 //!
 //! `update` and `draw` may be called on a preview that was released: it begins again.
@@ -50,6 +61,13 @@
 //! A scene that has a length -- a chart that ends, a result that fades -- begins again when it is
 //! over, as a scene: its timers are cleared and a Lua skin is read again, as it is each time the
 //! screen it draws is entered.
+//!
+//! The play menu's preview is the exception, because it is looked at while a value is being moved
+//! and a scene that began again would take the notes away for as long as its skin takes to come
+//! back. Its sample run has no end: a moment after the chart's last note a run of it is begun afresh
+//! under the same scene ([`SampleEnding::BeginsAgain`]). Another tempo named by the menu and another
+//! gauge named by the settings are taken up the same way, part of the way through the chart, so the
+//! frame after either is a frame of the same scene with notes in it.
 //!
 //! # Waiting in the dark
 //!
@@ -74,6 +92,7 @@
 //! an event, a value written back -- is carried out.
 
 pub(crate) mod region;
+pub(crate) mod target;
 
 mod decide;
 
@@ -85,11 +104,12 @@ use rbms_skin::property::generated::OFFSET_ALL;
 
 use crate::AppShared;
 use crate::skin_screen::preview::{PreviewDrawn, PreviewFrame};
-use crate::stage::play::skin_preview::PlaySample;
+use crate::stage::play::skin_preview::{PlaySample, SampleEnding, SampleTempo};
 use crate::stage::result::skin_preview::{CourseSample, ResultSample};
 use crate::stage::select::skin_preview::SelectSample;
 use crate::stage::{Canvas, FrameCtx};
 use decide::DecideSample;
+pub(crate) use target::{PlayTarget, PreviewTarget};
 
 /// What the preview says while a document is on its way.
 const LOADING_MESSAGE: &str = "LOADING THE SKIN";
@@ -215,14 +235,26 @@ enum Sample {
 
 impl Sample {
     /// The sample state of `screen` at its first moment, or `None` for a screen the preview has
-    /// none for: the key configuration, and any play screen no sample chart is written for.
-    fn of(screen: i32, config: &Config) -> Option<Sample> {
+    /// none for: the key configuration, and any play screen no sample chart is written for. A play
+    /// screen's sample chart is written at `tempo` and its run ends as `ending` says; no other
+    /// screen's reads either.
+    fn of(screen: i32, config: &Config, tempo: SampleTempo, ending: SampleEnding) -> Option<Sample> {
         match screen {
             SKIN_TYPE_MUSIC_SELECT => Some(Sample::Select(Box::new(SelectSample::new()))),
             SKIN_TYPE_DECIDE => DecideSample::new().map(|sample| Sample::Decide(Box::new(sample))),
             SKIN_TYPE_RESULT => ResultSample::new(config).map(|sample| Sample::Result(Box::new(sample))),
             SKIN_TYPE_COURSE_RESULT => CourseSample::new(config).map(|sample| Sample::CourseResult(Box::new(sample))),
-            play => PlaySample::new(play, config).map(|sample| Sample::Play(Box::new(sample))),
+            play => PlaySample::at_tempo(play, config, tempo).map(|sample| Sample::Play(Box::new(sample.ending(ending)))),
+        }
+    }
+
+    /// Have the sample go on at `tempo` under the scene as it stands. `false` when it cannot and a
+    /// scene has to be begun for the tempo: a run that closes, and every screen that is no play
+    /// screen.
+    fn show_tempo(&mut self, tempo: SampleTempo) -> bool {
+        match self {
+            Sample::Play(sample) => sample.show_tempo(tempo),
+            Sample::Select(_) | Sample::Decide(_) | Sample::Result(_) | Sample::CourseResult(_) => false,
         }
     }
 
@@ -285,9 +317,14 @@ fn one_line(reason: &str) -> String {
 
 /// The preview of one screen's skin. See the module's own notes for who calls what, and when.
 pub(crate) struct SkinPreview {
+    /// What the preview shows: the screen the skin menu is configuring, or the play screen and the
+    /// tempo the play menu names. It outlives a [`SkinPreview::release`].
+    target: PreviewTarget,
     /// The screen the preview was last brought up to date for, or `None` before its first
     /// [`SkinPreview::update`] and after a [`SkinPreview::release`].
     screen: Option<i32>,
+    /// The tempo the sample chart of the scene on show was written at.
+    tempo: SampleTempo,
     /// What the last [`SkinPreview::draw`] left in its rectangle.
     status: PreviewStatus,
     /// The sample state the screen is drawn from, when the preview has one for it and the screen
@@ -320,10 +357,25 @@ impl Default for SkinPreview {
 }
 
 impl SkinPreview {
-    /// A preview of nothing yet: its first [`SkinPreview::update`] finds out which screen it shows.
+    /// A preview of the screen the skin menu is configuring ([`PreviewTarget::Configured`]), which
+    /// its first [`SkinPreview::update`] reads from the settings, as every one after it does.
     pub(crate) fn new() -> SkinPreview {
+        SkinPreview::of(PreviewTarget::Configured)
+    }
+
+    /// A preview of the play screen and the tempo `target` names ([`PreviewTarget::Play`]). It
+    /// never reads `config.skin.screen`, and shows `target` until it is handed another
+    /// ([`SkinPreview::show_play`]).
+    pub(crate) fn of_play(target: PlayTarget) -> SkinPreview {
+        SkinPreview::of(PreviewTarget::Play(target))
+    }
+
+    /// A preview of `target` that has read nothing yet.
+    fn of(target: PreviewTarget) -> SkinPreview {
         SkinPreview {
+            target,
             screen: None,
+            tempo: SampleTempo::Shipped,
             status: PreviewStatus::Loading,
             sample: None,
             now_us: SCENE_START_US,
@@ -336,28 +388,80 @@ impl SkinPreview {
         }
     }
 
+    /// What the preview shows.
+    pub(crate) fn target(&self) -> PreviewTarget {
+        self.target
+    }
+
+    /// Show another play screen, or the same one at another tempo.
+    ///
+    /// The preview is of `target` from the [`SkinPreview::update`] that follows. A screen that is
+    /// not the one on show begins a scene of its own there, and what was read for the screen shown
+    /// before is let go of as it is when the skin menu's SCREEN row moves. Another tempo for the
+    /// screen on show does not: the sample run is begun afresh on a chart written at it, as far
+    /// through as the run had come, under the scene as it stands, so the frame that follows is drawn
+    /// and nothing is read again. Naming the target that is on show does nothing.
+    ///
+    /// A preview made for the skin menu becomes a preview of `target` and stops following
+    /// `config.skin.screen`.
+    pub(crate) fn show_play(&mut self, target: PlayTarget) {
+        self.target = PreviewTarget::Play(target);
+    }
+
+    /// The screen the preview is to show on this frame, and the tempo its sample chart is written
+    /// at.
+    fn wanted(&self, config: &Config) -> (i32, SampleTempo) {
+        match self.target {
+            PreviewTarget::Configured => (config.skin.screen, SampleTempo::Shipped),
+            PreviewTarget::Play(play) => (play.screen, SampleTempo::Steady(play.bpm)),
+        }
+    }
+
+    /// How the sample run of a play screen ends: the skin menu's closes, so every state a play skin
+    /// draws comes round, and the play menu's begins again, so notes keep coming down while a value
+    /// is moved.
+    fn ending(&self) -> SampleEnding {
+        match self.target {
+            PreviewTarget::Configured => SampleEnding::Closes,
+            PreviewTarget::Play(_) => SampleEnding::BeginsAgain,
+        }
+    }
+
+    /// Whether the scene on show goes on at `tempo`: it is the tempo the scene has, or the sample
+    /// takes it up where it stands ([`Sample::show_tempo`]). A screen with nothing to draw has no
+    /// chart to be at a tempo, and goes on saying so.
+    fn takes_tempo(&mut self, tempo: SampleTempo) -> bool {
+        let taken = self.tempo == tempo || self.sample.as_mut().is_none_or(|sample| sample.show_tempo(tempo));
+        if taken {
+            self.tempo = tempo;
+        }
+        taken
+    }
+
     /// Begin the scene of `screen` at its first moment: every timer off, the clocks at nothing, the
-    /// Lua skin read for the screen due to be read again, and the sample state made afresh. A
-    /// screen with no document, or one this build draws no skin for, is given no sample state.
+    /// Lua skin read for the screen due to be read again, and the sample state made afresh with a
+    /// play screen's chart written at `tempo`. A screen with no document, or one this build draws no
+    /// skin for, is given no sample state.
     ///
     /// What was read for the screen previewed before, when it was another, is let go of. A screen
     /// that stays compiled into the new scene -- a document that is only data is not read again --
     /// settles the offset of the whole screen afresh on the scene's first frame, as a screen compiled
     /// for the scene would.
-    fn begin_scene(&mut self, shared: &mut AppShared, screen: i32) {
+    fn begin_scene(&mut self, shared: &mut AppShared, screen: i32, tempo: SampleTempo) {
         if let Some(previous) = self.screen.filter(|previous| *previous != screen) {
             shared.end_skin_preview_of(previous);
         }
         shared.begin_skin_preview_scene(screen);
         shared.resettle_skin_preview_whole_offset(screen);
         self.screen = Some(screen);
+        self.tempo = tempo;
         self.now_us = SCENE_START_US;
         self.status = PreviewStatus::Loading;
         self.document = shared.skins.document_path(&shared.config, screen).map(str::to_owned);
         self.seen = None;
         self.whole = None;
         let drawable = self.document.is_some() && is_supported_skin_type(screen);
-        self.sample = if drawable { Sample::of(screen, &shared.config) } else { None };
+        self.sample = if drawable { Sample::of(screen, &shared.config, tempo, self.ending()) } else { None };
         shared.set_skin_scene_clock(self.now_us);
     }
 
@@ -368,23 +472,26 @@ impl SkinPreview {
 
     /// Bring the preview up to this frame, before it is drawn.
     ///
-    /// The screen previewed is `config.skin.screen`. When it is not the one the preview was last
-    /// brought up to date for, the preview begins again for it: a new scene, with the sample state
-    /// at its first moment, and whatever was compiled or playing for the screen before is let go of
-    /// by the frame that follows. So it does when the screen is drawn with another document than the
-    /// one its scene was begun for. Otherwise the sample state moves on by `ctx.dt` seconds; a scene
-    /// that is waiting for its document does not move.
+    /// The screen previewed is the one the preview's target names: `config.skin.screen`, or the
+    /// play screen the play menu chose ([`PreviewTarget`]). When it is not the one the preview was
+    /// last brought up to date for, the preview begins again for it: a new scene, with the sample
+    /// state at its first moment, and whatever was compiled or playing for the screen before is let
+    /// go of by the frame that follows. So it does when the screen is drawn with another document
+    /// than the one its scene was begun for. Otherwise the sample state moves on by `ctx.dt`
+    /// seconds; a scene that is waiting for its document does not move. Another tempo named by the
+    /// play menu is handed to the sample run, which takes it up under the scene as it stands
+    /// ([`SkinPreview::takes_tempo`]).
     ///
     /// Called once a frame from the menu's `update`, whether or not anything changed.
     pub(crate) fn update(&mut self, ctx: &mut FrameCtx<'_>) {
         let shared = &mut *ctx.shared;
-        let screen = shared.config.skin.screen;
+        let (screen, tempo) = self.wanted(&shared.config);
         let step = ctx.dt.clamp(0.0, LONGEST_STEP_SECONDS);
         self.waited_seconds = if self.status == PreviewStatus::Loading { self.waited_seconds + step } else { 0.0 };
-        if self.screen != Some(screen) || !self.document_stands(shared, screen) {
+        if self.screen != Some(screen) || !self.document_stands(shared, screen) || !self.takes_tempo(tempo) {
             self.announced = false;
             self.on_show = false;
-            self.begin_scene(shared, screen);
+            self.begin_scene(shared, screen, tempo);
         } else if self.status.is_drawn() {
             self.now_us += (f64::from(step) * MICROS_PER_SECOND) as i64;
         }
@@ -392,7 +499,7 @@ impl SkinPreview {
         let ready = shared.skin_preview_is_ready(screen);
         let over = self.sample.as_mut().is_some_and(|sample| sample.step(shared, self.now_us, ready) == SampleStep::Over);
         if over {
-            self.begin_scene(shared, screen);
+            self.begin_scene(shared, screen, tempo);
         }
     }
 
@@ -417,9 +524,9 @@ impl SkinPreview {
         let screen = match self.screen {
             Some(screen) => screen,
             None => {
-                let screen = shared.config.skin.screen;
+                let (screen, tempo) = self.wanted(&shared.config);
                 self.on_show = false;
-                self.begin_scene(shared, screen);
+                self.begin_scene(shared, screen, tempo);
                 screen
             }
         };
@@ -506,7 +613,12 @@ impl SkinPreview {
         &self.status
     }
 
-    /// Take in that the menu changed a skin setting: any row of its list, the screen included.
+    /// Take in that the menu changed a setting: any row of its list, the skin menu's screen
+    /// included. The play menu calls it after any of its rows moved, a play option as much as a skin
+    /// option of the previewed document: the option is read again like any other, and a play option
+    /// asks nothing here because the sample run reads the play options where they are stored on
+    /// every frame. A mode or a tempo of the play menu is not a setting and is not told here
+    /// ([`SkinPreview::show_play`]).
     ///
     /// The menu calls this after it has changed the stored choice and, where the change calls for
     /// the document to be read again -- an option, a file slot, the document, the pack folder, a
@@ -524,7 +636,8 @@ impl SkinPreview {
     /// looked ([`DocumentState`]), so being told twice of one change, or of a change that asks
     /// nothing of the preview, does nothing.
     pub(crate) fn settings_changed(&mut self, shared: &mut AppShared) {
-        let Some(screen) = self.screen.filter(|screen| *screen == shared.config.skin.screen) else {
+        let wanted = self.wanted(&shared.config).0;
+        let Some(screen) = self.screen.filter(|screen| *screen == wanted) else {
             return;
         };
         if !self.document_stands(shared, screen) {
@@ -549,7 +662,7 @@ impl SkinPreview {
         if let Some(screen) = self.screen.take() {
             shared.end_skin_preview_of(screen);
         }
-        *self = SkinPreview::new();
+        *self = SkinPreview::of(self.target);
     }
 
     /// The sample run on show, when the screen previewed is a play screen.

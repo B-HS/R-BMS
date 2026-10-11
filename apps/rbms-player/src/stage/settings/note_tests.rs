@@ -26,11 +26,11 @@ const DEFAULT_PACK: &str = "../../assets/skins/rbms-default";
 /// Every row that carries a note while the shipped pack draws the screens, with the tab it is on and
 /// what is said beside it.
 const NOTED_ROWS: [(SettingTab, SettingId, &str); 6] = [
-    (SettingTab::Play, SettingId::FiveKeyLayout, BUILT_IN_ONLY_NOTE),
     (SettingTab::Display, SettingId::Skin, BUILT_IN_ONLY_NOTE),
     (SettingTab::Display, SettingId::ResultGraphs, BUILT_IN_ONLY_NOTE),
     (SettingTab::Display, SettingId::WhiteNumber, BUILT_IN_ONLY_NOTE),
     (SettingTab::Display, SettingId::JudgeTextY, BUILT_IN_ONLY_NOTE),
+    (SettingTab::Display, SettingId::FiveKeyLayout, BUILT_IN_ONLY_NOTE),
     (SettingTab::Input, SettingId::ScratchSide, SKIN_OPTION_NOTE),
 ];
 
@@ -153,7 +153,7 @@ fn the_annotated_tabs_draw_and_can_be_captured() {
         assert!(pixels.painted_pixels() > 0, "{tab:?} drew nothing");
         save(&format!("{}-{}-focused", tab.label().to_ascii_lowercase(), descriptor_slug(id)), &pixels);
     }
-    for tab in [SettingTab::Play, SettingTab::Display, SettingTab::Input] {
+    for tab in [SettingTab::Display, SettingTab::Input] {
         let mut resting = screen_on(&mut app, tab, None);
         let pixels = draw(&mut app, &mut resting);
         assert!(pixels.painted_pixels() > 0, "{tab:?} drew nothing");

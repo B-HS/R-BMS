@@ -54,7 +54,9 @@ const EX_GAUGES: [i32; 6] = [0, 1, 4, 5, 7, 8];
 const HISPEED_SCALE: f32 = 100.0;
 const HISPEED_DIGITS_MODULUS: i32 = 100;
 
-/// What a lane figure (cover, lift, hidden) is multiplied by to read it as a whole number.
+/// What a lane figure (cover, lift, hidden) is multiplied by to read it as a whole number. Each of
+/// the three is read to the nearest thousandth: a share that was stepped to by additions can stand
+/// a hair short of the thousandth it is, and cutting it would show one under what was set.
 const LANE_FIGURE_SCALE: f32 = 1000.0;
 const LANE_FIGURE_SCALE_WIDE: f64 = 1000.0;
 
@@ -240,9 +242,9 @@ impl ClusterState for PlayState<'_> {
             NUMBER_DURATION => shown.current_duration(),
             NUMBER_DURATION_GREEN => shown.current_duration().wrapping_mul(GREEN_NUMERATOR) / GREEN_DENOMINATOR,
             NUMBER_DURATION_LANECOVER_ON..=NUMBER_MAXBPM_DURATION_GREEN_LANECOVER_OFF => shown.duration_at(id),
-            NUMBER_LANECOVER1 => (lanes.lane_cover * LANE_FIGURE_SCALE) as i32,
-            NUMBER_LIFT1 => (lanes.lift * LANE_FIGURE_SCALE) as i32,
-            NUMBER_HIDDEN1 => (lanes.hidden * LANE_FIGURE_SCALE) as i32,
+            NUMBER_LANECOVER1 => (lanes.lane_cover * LANE_FIGURE_SCALE).round() as i32,
+            NUMBER_LIFT1 => (lanes.lift * LANE_FIGURE_SCALE).round() as i32,
+            NUMBER_HIDDEN1 => (lanes.hidden * LANE_FIGURE_SCALE).round() as i32,
             NUMBER_LANECOVER2 => ((1.0 - f64::from(lanes.lift)) * f64::from(lanes.lane_cover) * LANE_FIGURE_SCALE_WIDE) as i32,
             NUMBER_NOWBPM => live.scroll.now_bpm as i32,
             NUMBER_PLAYTIME_MINUTE => shown.played_ms() / MILLIS_PER_MINUTE,

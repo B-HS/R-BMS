@@ -98,6 +98,7 @@ impl WhileTyping {
             | Shortcut::Ranking
             | Shortcut::Settings
             | Shortcut::SkinMenu
+            | Shortcut::PlayMenu
             | Shortcut::KeyConfig
             | Shortcut::RefKeyConfig
             | Shortcut::Folders

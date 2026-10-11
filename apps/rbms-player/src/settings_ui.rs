@@ -1,4 +1,4 @@
-//! What the settings screen and the skin menu need from the rest of the app: the value of a row
+//! What the settings screen and the two menus beside it need from the rest of the app: the value of a row
 //! once the running program has had its say, the AUDIO tab's status line, the two audio steps that
 //! need something only the program can enumerate, and the steps of the skin rows, which only the
 //! skin library can take.
@@ -680,18 +680,16 @@ mod tests {
         pixels.painted_pixels()
     }
 
-    /// The two rows of a held green number sit with the speed rows of the PLAY tab, under the row
-    /// that names the tempo it is held at, and the row that lets the judge offset adjust itself
-    /// sits under the offset it moves. Each reads the value it holds, and both tabs draw.
+    /// The two rows of a held green number lead the speed rows the play menu lists, the switch
+    /// first and the number it holds under it, and the row that lets the judge offset adjust itself
+    /// sits under the offset it moves. Each reads the value it holds, and the tabs of the settings
+    /// screen that lost rows to the play menu still draw.
     #[test]
     fn the_rows_of_a_held_green_number_and_of_an_adjusting_offset_are_where_a_player_looks_for_them() {
         let mut shared = shared();
-        let play = tab_rows(SettingTab::Play, &shared.config);
-        let on_play = |id: SettingId| play.iter().position(|row| *row == id).unwrap_or_else(|| panic!("{id:?} is not on the PLAY tab"));
-        assert_eq!(on_play(SettingId::KeepGreenNumber), on_play(SettingId::FixHiSpeed) + 1);
-        assert_eq!(on_play(SettingId::GreenNumber), on_play(SettingId::KeepGreenNumber) + 1);
-        let judge = tab_rows(SettingTab::Judge, &shared.config);
-        assert_eq!(&judge[..2], [SettingId::JudgeOffset, SettingId::AutoCal]);
+        let speed = tab_rows(SettingTab::PlaySpeed, &shared.config);
+        assert_eq!(&speed[..3], [SettingId::KeepGreenNumber, SettingId::GreenNumber, SettingId::HiSpeed]);
+        assert_eq!(tab_rows(SettingTab::PlayJudge, &shared.config), [SettingId::JudgeOffset, SettingId::AutoCal]);
 
         assert_eq!(adjust(&mut shared.config, SettingId::KeepGreenNumber, 1), AdjustOutcome::Changed);
         for _ in 0..10 {
@@ -704,8 +702,8 @@ mod tests {
         assert_eq!(shared.setting_line(SettingId::AutoCal), ("AUTO ADJUST", "ON".to_string()));
         assert_eq!(shared.setting_line(SettingId::JudgeOffset), ("JUDGE OFFSET", "+6 MS".to_string()));
 
-        assert!(drawn_tab(&shared.config, SettingTab::Play, "settings-play-tab") > 0, "the PLAY tab drew nothing");
         assert!(drawn_tab(&shared.config, SettingTab::Judge, "settings-judge-tab") > 0, "the JUDGE tab drew nothing");
+        assert!(drawn_tab(&shared.config, SettingTab::Display, "settings-display-tab") > 0, "the DISPLAY tab drew nothing");
     }
 
     #[test]

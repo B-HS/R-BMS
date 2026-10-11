@@ -914,6 +914,31 @@ fn a_word_that_names_no_key_reads_the_shipped_key() {
     assert_eq!(edited.shortcut_key(Shortcut::SkinMenu), None, "an empty word is the player taking the key away");
 }
 
+/// A file written before a shortcut existed has no word for it. When the player had already put
+/// another shortcut of the same screen on the key the new one ships on, the player's choice keeps
+/// the key and the new shortcut is read from none, which the key editor shows as a row to fill in:
+/// a key the file names is never taken over by one it does not.
+#[test]
+fn a_shortcut_the_file_says_nothing_of_leaves_its_shipped_key_to_the_shortcut_the_player_put_there() {
+    let shipped = Shortcut::PlayMenu.default_key();
+    let word = key_name(shipped);
+    let older: KeyConfig = ron::from_str(&format!(r#"(shortcuts: {{"folders": "{word}"}})"#)).expect("the file parses");
+    assert_eq!(older.shortcut_key(Shortcut::Folders), Some(shipped));
+    assert_eq!(older.shortcut_key(Shortcut::PlayMenu), None, "a shortcut the file has no word for took a key the player gave another");
+    assert_eq!(older.shortcut_on(ShortcutScreen::Browser, shipped), Some(Shortcut::Folders));
+    assert!(collisions(&older, Mode::BEAT_7K).is_empty(), "two shortcuts of one screen are read from one key");
+
+    let elsewhere: KeyConfig = ron::from_str(&format!(r#"(shortcuts: {{"replay_pause": "{word}"}})"#)).expect("the file parses");
+    assert_eq!(elsewhere.shortcut_key(Shortcut::PlayMenu), Some(shipped), "a shortcut of another screen, which is never read with it, took the key away");
+
+    let mut restored = older.clone();
+    restored.restore(Mode::BEAT_7K, shortcut(Shortcut::PlayMenu));
+    assert_eq!(restored.shortcut_key(Shortcut::PlayMenu), None, "putting a shortcut back took the key from the one the player put there");
+    restored.restore(Mode::BEAT_7K, shortcut(Shortcut::Folders));
+    assert_eq!(restored.shortcut_key(Shortcut::PlayMenu), Some(shipped), "the key is not the shortcut's again once the other left it");
+    assert_eq!(restored.shortcut_key(Shortcut::Folders), Some(Shortcut::Folders.default_key()));
+}
+
 /// The shortcuts and the controls are stored under names that do not change with what the rows are
 /// called on screen, each name is used once, and the ten controls an older pad block names keep the
 /// names it knows them by.

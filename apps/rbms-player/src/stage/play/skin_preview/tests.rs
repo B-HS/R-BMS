@@ -67,6 +67,53 @@ fn the_sample_scrolls_at_the_speed_a_run_of_it_would_start_at() {
     assert_eq!(travel_duration_ms(tempo, sample.shown_hispeed(&config), None), config.play.duration_ms);
 }
 
+/// A sample written at one tempo holds it from its first note to its last in every mode, with the
+/// notes the shipped sample has, and is drawn at the speed the play menu writes beside it: the
+/// figures of a target come from the same functions the sample's own speed does.
+#[test]
+fn a_steady_sample_holds_its_tempo_and_scrolls_at_the_speed_its_target_reads() {
+    use crate::skin_preview::PlayTarget;
+    use rbms_skin::loader::SKIN_TYPE_PLAY_7KEYS;
+    const TEMPOS: [u32; 3] = [100, 150, 200];
+    for mode in Mode::ALL {
+        let shipped = sample_model(*mode).expect("the mode has a sample chart");
+        for bpm in TEMPOS {
+            let steady = sample_model_at(*mode, SampleTempo::Steady(bpm)).expect("the mode has a sample chart");
+            assert!((steady.init_bpm - f64::from(bpm)).abs() < f64::EPSILON, "{} opens at {}", mode.name, steady.init_bpm);
+            assert!(steady.timelines.iter().all(|line| (line.bpm - f64::from(bpm)).abs() < f64::EPSILON), "{} changes its tempo", mode.name);
+            assert_eq!(kinds(&steady, |_| true), kinds(&shipped, |_| true), "{} at {bpm} has other notes than the shipped sample", mode.name);
+        }
+    }
+
+    let mut config = Config::default();
+    config.play.hispeed = 3.25;
+    config.play.cover = 0.3;
+    for bpm in TEMPOS {
+        let target = PlayTarget { screen: SKIN_TYPE_PLAY_7KEYS, bpm };
+        let sample = PlaySample::at_tempo(target.screen, &config, SampleTempo::Steady(bpm)).expect("seven keys have a sample");
+        for (keep_green_number, constant_speed) in [(false, false), (true, false), (false, true), (true, true)] {
+            config.play.keep_green_number = keep_green_number;
+            config.play.constant_speed = constant_speed;
+            let readout = target.readout(&config.play);
+            assert!(
+                (sample.shown_hispeed(&config) - readout.hispeed).abs() < f64::EPSILON,
+                "{bpm} held {keep_green_number} constant {constant_speed}: the sample scrolls at {} and its target reads {}",
+                sample.shown_hispeed(&config),
+                readout.hispeed
+            );
+            assert_eq!(readout.held, keep_green_number);
+            if keep_green_number {
+                assert_eq!(sample.bpm.held(&config.play), Some(readout.bpm), "the tempo the number is held at");
+                assert_eq!(readout.duration_ms, config.play.duration_ms);
+            }
+        }
+    }
+    assert!((steady_scroll_bpm(&config.play, 0) - f64::from(STEADY_BPM_MIN)).abs() > f64::EPSILON, "CONSTANT is still on, so the chart's tempo is not asked");
+    config.play.constant_speed = false;
+    assert!((steady_scroll_bpm(&config.play, 0) - f64::from(STEADY_BPM_MIN)).abs() < f64::EPSILON, "a tempo of nothing is not held to the slowest");
+    assert!((steady_scroll_bpm(&config.play, u32::MAX) - f64::from(STEADY_BPM_MAX)).abs() < f64::EPSILON);
+}
+
 /// The run reaches its end with every note judged, on a combo that never broke, with more than one
 /// judgement given and both early and late hits, whatever gauge the player has chosen.
 #[test]
@@ -97,4 +144,58 @@ fn a_stage_of_a_course_begins_on_what_the_one_before_left() {
     assert_eq!(session.judge().combo, CARRIED.combo);
     assert_eq!(session.judge().gauge.selected_index(), GaugeIndex::Class);
     assert!((session.judge().gauge.value() - CARRIED.gauge).abs() < f32::EPSILON);
+}
+
+/// A run that closes is at one tempo and on one gauge for the whole of its scene. A run that begins
+/// again takes another tempo and another gauge where it stands, and has nothing to take up while
+/// neither moved.
+#[test]
+fn only_a_run_that_begins_again_takes_another_tempo_or_gauge() {
+    use rbms_skin::loader::SKIN_TYPE_PLAY_7KEYS;
+    const SLOW: SampleTempo = SampleTempo::Steady(100);
+    const FAST: SampleTempo = SampleTempo::Steady(200);
+    let config = Config::default();
+    let another_gauge = rbms_config::PlayOptions { gauge: GaugeKind::Hard, ..config.play.clone() };
+    let sample = || PlaySample::at_tempo(SKIN_TYPE_PLAY_7KEYS, &config, SLOW).expect("seven keys have a sample");
+
+    let mut closing = sample();
+    assert!(!closing.show_tempo(FAST), "a run that closes took another tempo");
+    assert_eq!(closing.due_run(&another_gauge), None, "a run that closes is due to begin again");
+
+    let mut going_on = sample().ending(SampleEnding::BeginsAgain);
+    assert_eq!(going_on.due_run(&config.play), None, "a run with nothing new to take up is due to begin again");
+    assert_eq!(going_on.due_run(&another_gauge), Some(RunStart::Carried));
+    assert!(going_on.show_tempo(SLOW) && going_on.due_run(&config.play).is_none(), "the tempo the run is at began it again");
+    assert!(going_on.show_tempo(FAST));
+    assert_eq!(going_on.due_run(&config.play), Some(RunStart::Carried));
+
+    going_on.chart_us = (going_on.session.play_time_ms() - TIME_MARGIN_MS + BEGIN_AGAIN_AFTER_MS + 1) * MICROS_PER_MILLI;
+    assert_eq!(going_on.due_run(&config.play), Some(RunStart::Top), "a run past its last note is not begun at the top");
+    const { assert!(BEGIN_AGAIN_AFTER_MS < TIME_MARGIN_MS, "a run that begins again would be told its chart ran out first") };
+}
+
+/// A run shown for the play options is told as the AUTOPLAY and TARGET rows have it, and a run
+/// shown for its skin is one played by hand with nothing to pace against whatever they hold.
+#[test]
+fn only_a_run_shown_for_the_play_options_follows_the_autoplay_and_target_rows() {
+    use rbms_config::ScoreTarget;
+    use rbms_skin::loader::SKIN_TYPE_PLAY_7KEYS;
+    let by_hand = Config { play: rbms_config::PlayOptions { autoplay: false, ..Config::default().play }, ..Config::default() };
+    let mut moved = by_hand.clone();
+    moved.play.autoplay = true;
+    moved.judge.target = ScoreTarget::Max;
+    let sample = || PlaySample::at_tempo(SKIN_TYPE_PLAY_7KEYS, &by_hand, SampleTempo::Steady(150)).expect("seven keys have a sample");
+
+    let for_its_skin = sample();
+    assert!(matches!(for_its_skin.told(&by_hand), (PlayKind::Play, 0)));
+    assert!(matches!(for_its_skin.told(&moved), (PlayKind::Play, 0)), "a run shown for its skin followed a play option");
+
+    let for_the_options = sample().ending(SampleEnding::BeginsAgain);
+    let ceiling = for_the_options.session.judge().total_notes() * 2;
+    assert!(matches!(for_the_options.told(&moved), (PlayKind::Autoplay, target) if target == ceiling), "the ceiling of the chart is not the target");
+    let (kind, target) =
+        for_the_options.told(&Config { judge: rbms_config::JudgeOptions { target: ScoreTarget::RateAaa, ..by_hand.judge.clone() }, ..by_hand.clone() });
+    assert!(matches!(kind, PlayKind::Play), "a run nobody asked the game to play is told as one it plays");
+    assert!(target > 0 && target < ceiling, "a rate under the ceiling is paced at {target} of {ceiling}");
+    assert_eq!(for_the_options.held_against(&moved, 0).target_score, ceiling, "the timers are told another target than the figures");
 }

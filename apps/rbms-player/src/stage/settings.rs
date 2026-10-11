@@ -2,14 +2,16 @@
 //! the inline rival list. The rows themselves are described in `rbms_config::SETTINGS`; this file
 //! owns the screen's state and routes keys and clicks into them by name.
 //!
-//! The skin settings are not on this screen. They are the skin menu's
-//! ([`crate::stage::SkinMenuState`]), which lists them beside a preview of what they do; this screen
-//! shows the tabs of [`SettingTab::SHOWN`] and a way there: the key that opens the menu from the song
-//! browser ([`Shortcut::SkinMenu`]), and the button at the end of the tab strip. The key editor is
-//! reached the same two ways: the key that opens it from the browser ([`Shortcut::KeyConfig`]), and
-//! the button above the other one. That button is not one of the regions a frame registers
-//! ([`Hot`]): it is where the screen's layout says it is ([`key_config_link`]), and a press is
-//! tested against that.
+//! The skin settings are not on this screen, and neither are the options of a sitting -- how fast the
+//! notes scroll, what the lane is covered with, when a press counts and how a chart is dealt out.
+//! They are the skin menu's ([`crate::stage::SkinMenuState`]) and the play menu's
+//! ([`crate::stage::PlayMenuState`]), each of which lists its rows beside a preview of what they do.
+//! This screen shows the tabs of [`SettingTab::SHOWN`] and a way to either menu: the key that opens it
+//! from the song browser ([`Shortcut::PlayMenu`], [`Shortcut::SkinMenu`]), and its button at the end
+//! of the tab strip. The key editor is reached the same two ways: the key that opens it from the
+//! browser ([`Shortcut::KeyConfig`]), and the button above the other two. That button is not one of
+//! the regions a frame registers ([`Hot`]): it is where the screen's layout says it is
+//! ([`key_config_link`]), and a press is tested against that.
 #![allow(clippy::wildcard_imports)]
 
 use crate::dialog::{DialogHandle, DialogState};
@@ -18,7 +20,7 @@ use crate::ir_session::{AuthAction, GUEST_PLAYER_ID};
 use crate::keyconfig::Shortcut;
 use crate::settings_ui::{SettingRow, audio_status_text, is_network_row, step_audio_device};
 use crate::settings_view::{RivalsScene, SettingsLine, SettingsScene, key_config_link, settings_hint};
-use crate::stage::{Canvas, FrameCtx, KeyConfigState, KeyInput, SkinMenuState, Stage, StageHandler, Transition, is_left_press};
+use crate::stage::{Canvas, FrameCtx, KeyConfigState, KeyInput, PlayMenuState, SkinMenuState, Stage, StageHandler, Transition, is_left_press};
 use rbms_config::{AdjustOutcome, SettingId, SettingTab, adjust, step_skin};
 
 use crate::*;
@@ -480,6 +482,7 @@ impl SettingsState {
             rows: self.lines.clone(),
             sel: self.sel.min(self.lines.len().saturating_sub(1)),
             hint: settings_hint(
+                shared.shortcut_key(Shortcut::PlayMenu).map_or(NO_KEY, key_name),
                 shared.shortcut_key(Shortcut::SkinMenu).map_or(NO_KEY, key_name),
                 shared.shortcut_key(Shortcut::KeyConfig).map_or(NO_KEY, key_name),
             ),
@@ -531,6 +534,7 @@ impl SettingsState {
                     return self.step(ctx, row, ROW_STEP_FORWARD);
                 }
             }
+            code if ctx.shared.is_shortcut(Shortcut::PlayMenu, code) => return Transition::Open(PlayMenuState::stage()),
             code if ctx.shared.is_shortcut(Shortcut::SkinMenu, code) => return Transition::Open(SkinMenuState::stage()),
             code if ctx.shared.is_shortcut(Shortcut::KeyConfig, code) => return Transition::Open(Stage::KeyConfig(KeyConfigState::new())),
             _ => {}
@@ -542,7 +546,7 @@ impl SettingsState {
 impl StageHandler for SettingsState {
     /// Re-read the host's output device list on the way in, so the AUDIO DEVICE row cycles through
     /// what is plugged in now, and build the rows the open tab shows. Coming back from the skin menu
-    /// is an entry too, so what is said beside a row follows what was chosen there.
+    /// or the play menu is an entry too, so what is said beside a row follows what was chosen there.
     fn on_enter(&mut self, ctx: &mut FrameCtx<'_>) {
         self.audio_devices = rbms_audio::output_device_names();
         self.refresh(ctx.shared);
@@ -601,14 +605,15 @@ impl StageHandler for SettingsState {
             return if self.is_busy() { Transition::Stay } else { Transition::Open(Stage::KeyConfig(KeyConfigState::new())) };
         }
         match ctx.shared.hit_test(at) {
-            Some(Hot::SettingTab(_) | Hot::SettingRow(_) | Hot::SkinMenuLink) if self.rivals_open || self.profiles_open => {}
+            Some(Hot::SettingTab(_) | Hot::SettingRow(_) | Hot::PlayMenuLink | Hot::SkinMenuLink) if self.rivals_open || self.profiles_open => {}
             Some(Hot::SettingTab(ti)) => {
                 self.cancel_text_edit();
                 self.tab = ti.min(SettingTab::SHOWN.len() - 1);
                 self.sel = 0;
                 self.dirty = true;
             }
-            Some(Hot::SkinMenuLink) if self.text_input.is_some() => {}
+            Some(Hot::PlayMenuLink | Hot::SkinMenuLink) if self.text_input.is_some() => {}
+            Some(Hot::PlayMenuLink) => return Transition::Open(PlayMenuState::stage()),
             Some(Hot::SkinMenuLink) => return Transition::Open(SkinMenuState::stage()),
             Some(Hot::SettingRow(i)) => {
                 if let Some(row) = self.rows.get(i).copied() {
@@ -632,6 +637,7 @@ impl StageHandler for SettingsState {
         ctx.shared.hot.extend(hot.into_iter().filter_map(|(rect, h)| {
             let mapped = match h {
                 SettingsHot::Tab(i) => Hot::SettingTab(i),
+                SettingsHot::PlayMenuLink => Hot::PlayMenuLink,
                 SettingsHot::SkinMenuLink => Hot::SkinMenuLink,
                 SettingsHot::KeyConfigLink => return None,
                 SettingsHot::Row(i) => Hot::SettingRow(i),
@@ -644,6 +650,8 @@ impl StageHandler for SettingsState {
 
 #[cfg(test)]
 mod note_tests;
+#[cfg(test)]
+mod play_tests;
 #[cfg(test)]
 mod skin_tests;
 
@@ -776,22 +784,28 @@ mod tests {
         assert!(matches!(state.handle_mouse(&mut ctx(&mut app), at, MouseButton::Left, true), Transition::Stay), "the button under an editor");
     }
 
-    /// The keys that open the skin menu and the key editor from this screen are the ones the key
-    /// configuration holds, and the hint under the title names them as they are now.
+    /// The keys that open the play menu, the skin menu and the key editor from this screen are the
+    /// ones the key configuration holds, and the hint under the title names them as they are now.
     #[test]
     fn the_keys_to_the_other_screens_are_read_from_the_key_configuration() {
         use crate::keyconfig::Bindable;
         let mut app = app();
         let mut state = SettingsState::new();
         let mode = app.shared.mode;
-        assert!(state.scene(&app.shared).hint.contains("F12 SKINS   F5 KEYS"), "{}", state.scene(&app.shared).hint);
+        assert!(state.scene(&app.shared).hint.contains("F8 PLAY   F12 SKINS   F5 KEYS"), "{}", state.scene(&app.shared).hint);
+        assert!(matches!(state.handle_key(&mut ctx(&mut app), press(KeyCode::F8)), Transition::Open(Stage::PlayMenu(_))), "the key the play menu ships on");
         app.shared.keyconfig.bind(mode, Bindable::Shortcut(Shortcut::KeyConfig), Some(KeyCode::F6));
         app.shared.keyconfig.bind(mode, Bindable::Shortcut(Shortcut::SkinMenu), Some(KeyCode::F7));
+        app.shared.keyconfig.bind(mode, Bindable::Shortcut(Shortcut::PlayMenu), Some(KeyCode::F10));
         assert!(matches!(state.handle_key(&mut ctx(&mut app), press(KeyCode::F5)), Transition::Stay), "the key the editor shipped on still opens it");
         assert!(matches!(state.handle_key(&mut ctx(&mut app), press(KeyCode::F12)), Transition::Stay), "the key the menu shipped on still opens it");
+        assert!(matches!(state.handle_key(&mut ctx(&mut app), press(KeyCode::F8)), Transition::Stay), "the key the play menu shipped on still opens it");
         assert!(matches!(state.handle_key(&mut ctx(&mut app), press(KeyCode::F6)), Transition::Open(Stage::KeyConfig(_))));
         assert!(matches!(state.handle_key(&mut ctx(&mut app), press(KeyCode::F7)), Transition::Open(Stage::SkinMenu(_))));
-        assert!(state.scene(&app.shared).hint.contains("F7 SKINS   F6 KEYS"), "{}", state.scene(&app.shared).hint);
+        assert!(matches!(state.handle_key(&mut ctx(&mut app), press(KeyCode::F10)), Transition::Open(Stage::PlayMenu(_))));
+        assert!(state.scene(&app.shared).hint.contains("F10 PLAY   F7 SKINS   F6 KEYS"), "{}", state.scene(&app.shared).hint);
+        app.shared.keyconfig.bind(mode, Bindable::Shortcut(Shortcut::PlayMenu), None);
+        assert!(state.scene(&app.shared).hint.contains("- PLAY"), "a menu left without a key is not named as one: {}", state.scene(&app.shared).hint);
     }
 
     /// The screen draws the button to the key editor where a press is tested for it, at the size the

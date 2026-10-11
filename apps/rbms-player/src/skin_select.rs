@@ -34,7 +34,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use rbms_config::{Config, DEFAULT_SKIN_FOLDER, DEFAULT_VALUE, NONE_VALUE, skin_document_label};
+use rbms_config::{Config, DEFAULT_SKIN_FOLDER, DEFAULT_VALUE, NONE_VALUE, SkinCustomisation, skin_document_label};
 use rbms_skin::dst::SkinOffset;
 use rbms_skin::loader::{
     LoadedSkin, ParserKind, SkinHeader, SkinLoadOptions, SkinUserConfig, is_lua_skin, is_supported_skin_type, load_header, load_skin_with_host,
@@ -686,7 +686,14 @@ impl SkinLibrary {
     /// The customisation rows the skin menu shows, top to bottom, in the order the chosen document
     /// declares them: its properties, its file slots, then one row per axis it lets the player nudge.
     pub(crate) fn rows(&self, config: &Config) -> Vec<SkinRow> {
-        let Some(header) = self.chosen(config) else {
+        self.rows_for(config, config.skin.screen)
+    }
+
+    /// The customisation rows of the document one screen is to be drawn with, whichever screen the
+    /// skin menu happens to be configuring: what the play menu lists the options of the play screen
+    /// it previews from.
+    pub(crate) fn rows_for(&self, config: &Config, screen: i32) -> Vec<SkinRow> {
+        let Some(header) = self.header_of(config, screen) else {
             return Vec::new();
         };
         let properties = (0..header.properties.len()).map(SkinRow::Property);
@@ -701,10 +708,15 @@ impl SkinLibrary {
 
     /// The label and value of one customisation row.
     pub(crate) fn line(&self, config: &Config, row: SkinRow) -> (String, String) {
-        let Some(header) = self.chosen(config) else {
+        self.line_for(config, config.skin.screen, row)
+    }
+
+    /// The label and value of one customisation row of the document one screen is to be drawn with.
+    pub(crate) fn line_for(&self, config: &Config, screen: i32, row: SkinRow) -> (String, String) {
+        let Some(header) = self.header_of(config, screen) else {
             return missing_row();
         };
-        let stored = self.document_path(config, config.skin.screen).and_then(|path| config.skin.customisation(path));
+        let stored = self.document_path(config, screen).and_then(|path| config.skin.customisation(path));
         match row {
             SkinRow::Property(at) => match header.properties.get(at) {
                 Some(property) => (
@@ -734,10 +746,17 @@ impl SkinLibrary {
     /// A property or a file changes what is drawn and which files are read, so the document has to
     /// be read again; an offset is read live out of the stored choices, so it does not.
     pub(crate) fn step(&mut self, config: &mut Config, row: SkinRow, delta: i32) -> bool {
-        let Some(path) = self.document_path(config, config.skin.screen).map(str::to_owned) else {
+        self.step_for(config, config.skin.screen, row, delta)
+    }
+
+    /// Step one customisation row of the document one screen is to be drawn with, and report
+    /// whether anything moved. The choice is stored for that document, and the screen the skin menu
+    /// is configuring is neither read nor changed.
+    pub(crate) fn step_for(&mut self, config: &mut Config, screen: i32, row: SkinRow, delta: i32) -> bool {
+        let Some(path) = self.document_path(config, screen).map(str::to_owned) else {
             return false;
         };
-        let Some(header) = self.chosen(config) else {
+        let Some(header) = self.header_of(config, screen) else {
             return false;
         };
         match row {
@@ -751,7 +770,7 @@ impl SkinLibrary {
                     return false;
                 };
                 config.skin.customise(&path).properties.insert(property.name.clone(), item.op);
-                self.stale.insert(config.skin.screen);
+                self.stale.insert(screen);
                 true
             }
             SkinRow::File(at) => {
@@ -765,7 +784,7 @@ impl SkinLibrary {
                     return false;
                 };
                 config.skin.customise(&path).filepaths.insert(file.name.clone(), name.clone());
-                self.stale.insert(config.skin.screen);
+                self.stale.insert(screen);
                 true
             }
             SkinRow::Offset(at, axis) => {
@@ -781,6 +800,28 @@ impl SkinLibrary {
                 true
             }
         }
+    }
+
+    /// Drop the choice made for one option of the document one screen is to be drawn with, so the
+    /// option is back on the item its author chose, and report whether there was a choice to drop.
+    ///
+    /// An option changes what is drawn, so the document has to be read again.
+    pub(crate) fn reset_property_for(&mut self, config: &mut Config, screen: i32, at: usize) -> bool {
+        let Some(path) = self.document_path(config, screen).map(str::to_owned) else {
+            return false;
+        };
+        let Some(name) = self.header_of(config, screen).and_then(|header| header.properties.get(at)).map(|property| property.name.clone()) else {
+            return false;
+        };
+        if config.skin.customisation(&path).is_none_or(|entry| !entry.properties.contains_key(&name)) {
+            return false;
+        }
+        config.skin.customise(&path).properties.remove(&name);
+        if config.skin.customisation(&path).is_some_and(|entry| *entry == SkinCustomisation::default()) {
+            config.skin.forget(&path);
+        }
+        self.stale.insert(screen);
+        true
     }
 
     /// Put one customisation row back to what the document's author chose, and report whether it

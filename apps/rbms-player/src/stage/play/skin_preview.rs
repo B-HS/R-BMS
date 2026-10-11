@@ -7,11 +7,31 @@
 //! outside this one can reach. Nothing here is the play screen itself: no sound is scheduled, no key
 //! is read, no score is kept, and the run starts over when it ends.
 //!
+//! # How it ends
+//!
+//! One of two ways, which the run is made for ([`SampleEnding`]). A run shown for its skin closes as
+//! a run does -- the last note, the margin after it, the fade -- and its scene is over, so the
+//! preview begins the scene again and every state a skin draws comes round. A run shown for the play
+//! options never closes: a moment after its last note a run of the chart is begun afresh under the
+//! scene as it stands, so notes keep coming down and nothing is read again.
+//!
+//! Such a run is begun afresh the same way when the caller names another tempo
+//! ([`PlaySample::show_tempo`]) and when the GAUGE row names another gauge, which a run is on from
+//! its first note. Those two carry on from the same share of the way through the chart: the new run
+//! is played by the same hand up to there at once, so the notes on show, the combo and the score are
+//! the ones a run on the new terms would have reached.
+//!
 //! # The chart
 //!
 //! The chart is written here, for the mode the previewed screen draws ([`sample_model`]): a little
 //! over twenty seconds of plain notes, a long note every few measures, the turntable where the mode
 //! has one, and one change of tempo. It names no sound, no picture and nobody's song.
+//!
+//! A caller that previews the play options rather than a skin asks for the same notes at one tempo
+//! of its choosing instead ([`SampleTempo::Steady`], [`PlaySample::at_tempo`]): with one tempo from
+//! the first measure to the last, the tempo a held green number is held against is that tempo
+//! whichever of a chart's tempos the player has named, and what is on show can be read against one
+//! number.
 //!
 //! # Who plays it
 //!
@@ -25,7 +45,8 @@
 //! The chart stands where the play timer says it does, on the time the preview counts for itself.
 //! The song clock, which is the sound system's, is never read.
 
-use rbms_config::{Config, HeldTravel, held_speed};
+use rbms_config::{Config, HeldTravel, PlayOptions, held_speed};
+use rbms_judge::GaugeKind;
 use rbms_judge::gauge::GaugeIndex;
 use rbms_model::{Mode, Model, NoteKind};
 use rbms_play::{NullSink, PlaySession, SessionClock, SessionOptions};
@@ -33,22 +54,23 @@ use rbms_render::skin_render::frame::{BgaExpand, GaugeScale, LaneNotes, first_la
 use rbms_render::skin_render::graphs::{NoteDistribution, PlayCursor};
 use rbms_render::{BgaFrame, FrameData, FrameSeries, GaugeFrame};
 use rbms_skin::loader::skin_type_mode;
-use rbms_skin::timer::{TimerState, timer_id};
+use rbms_skin::timer::{TimerId, TimerState, timer_id};
 use rbms_store::{Replay, ReplayEvent, ReplayJudge};
 
 use super::field::FieldChart;
-use super::scene::{PlayScene, PlayTimes, RunEnd, SceneFacts, SceneStep};
+use super::scene::{PlayScene, PlayTimes, RunEnd, SceneFacts, SceneStep, TIME_MARGIN_MS};
 use super::skin::{SkinFeed, Standing};
 use super::{BpmStats, LOADED, MICROS_PER_MILLI, whole_ms};
 use crate::AppShared;
 use crate::skin_host::options::SettingsView;
 use crate::skin_host::play::{LaneSettings, PlayClock, PlayKind, PlayLive, PlayPhase, PlayShown, Scroll, travel_region_ms};
-use crate::skin_host::play_timers::{FieldOffsets, PlayingFrame};
+use crate::skin_host::play_timers::{FieldOffsets, PlayingFrame, SceneEvent};
 use crate::skin_preview::SampleStep;
 use crate::skin_screen::PlayDraw;
 use crate::skin_screen::preview::{PreviewDrawn, PreviewFrame, PreviewScene};
 use crate::stage::Canvas;
 use crate::stage::result::judge_area;
+use crate::target::{self, TargetContext};
 
 /// What the sample chart says of itself. All of it is invented.
 const SAMPLE_TITLE: &str = "SAMPLE TRACK 01";
@@ -62,6 +84,72 @@ const TEMPO_CHANGE_MEASURE: u32 = 8;
 
 /// The channel a chart states a change of tempo on, as a whole tempo in two hexadecimal digits.
 const TEMPO_CHANNEL: &str = "03";
+
+/// The slowest and the fastest tempo a sample chart of one tempo is written at. A tempo outside
+/// them is held to the nearer: a chart slower than the first would take minutes to cross the lane
+/// once, and the second is the largest a chart file states in three digits.
+const STEADY_BPM_MIN: u32 = 30;
+const STEADY_BPM_MAX: u32 = 999;
+
+/// The tempo a sample chart is written at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SampleTempo {
+    /// The tempo the skin menu's sample has always had: it opens at one tempo and changes to
+    /// another part of the way through, so a skin's tempo figures have something to show.
+    Shipped,
+    /// One tempo from the first measure to the last, in beats a minute.
+    Steady(u32),
+}
+
+impl SampleTempo {
+    /// The tempo the chart opens at, and the one it changes to when it changes.
+    fn stated(self) -> (u32, Option<u32>) {
+        match self {
+            SampleTempo::Shipped => (OPENING_BPM, Some(SECOND_BPM)),
+            SampleTempo::Steady(bpm) => (bpm.clamp(STEADY_BPM_MIN, STEADY_BPM_MAX), None),
+        }
+    }
+}
+
+/// What a sample run does once its chart is over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SampleEnding {
+    /// The run closes as a run does and its scene is over with it.
+    Closes,
+    /// A run of the chart is begun afresh under the scene as it stands, and the scene goes on.
+    BeginsAgain,
+}
+
+/// How long after its last note a run that begins again goes on first, in milliseconds: long enough
+/// for what the last note set off to be seen, and well short of the margin a run closes after.
+const BEGIN_AGAIN_AFTER_MS: i64 = 1_000;
+
+/// The timers a run leaves on that say what it came to: its last note gone by, its full combo, the
+/// ranks and the scores it reached, and the judgement and the combo last on show. A run begun at the
+/// top of its chart has come to none of it yet.
+const RUN_OUTCOME_TIMERS: [TimerId; 13] = [
+    timer_id::ENDOFNOTE_1P,
+    timer_id::FULLCOMBO_1P,
+    timer_id::SCORE_A,
+    timer_id::SCORE_AA,
+    timer_id::SCORE_AAA,
+    timer_id::SCORE_BEST,
+    timer_id::SCORE_TARGET,
+    timer_id::JUDGE_1P,
+    timer_id::JUDGE_2P,
+    timer_id::JUDGE_3P,
+    timer_id::COMBO_1P,
+    timer_id::COMBO_2P,
+    timer_id::COMBO_3P,
+];
+
+/// The tempo the scroll of a sample chart that holds `bpm` throughout is worked out at under
+/// `play`: its own, and the one tempo the field scrolls at while CONSTANT is on
+/// ([`super::field::CONSTANT_BPM`]). It is the tempo [`BpmStats::held`] answers for such a chart
+/// while a green number is held, and the one the note field travels at either way.
+pub(crate) fn steady_scroll_bpm(play: &PlayOptions, bpm: u32) -> f64 {
+    if play.constant_speed { super::field::CONSTANT_BPM } else { f64::from(SampleTempo::Steady(bpm).stated().0) }
+}
 
 /// The measures of the sample chart that hold notes: the first is left empty, so nothing is on the
 /// judgement line the moment the chart starts.
@@ -126,10 +214,13 @@ const SAMPLE_SIDES: [(Mode, &[SampleSide]); 5] = [
     (Mode::BEAT_14K, &[SEVEN_KEYS_FIRST, SEVEN_KEYS_SECOND]),
 ];
 
-/// The sample chart as a chart file would state it, on `sides`.
-fn sample_chart(sides: &[SampleSide]) -> String {
-    let mut chart = format!("#PLAYER 1\n#GENRE {SAMPLE_GENRE}\n#TITLE {SAMPLE_TITLE}\n#ARTIST {SAMPLE_ARTIST}\n#BPM {OPENING_BPM}\n{SAMPLE_HEADER}");
-    chart.push_str(&format!("#{TEMPO_CHANGE_MEASURE:03}{TEMPO_CHANNEL}:{SECOND_BPM:02X}\n"));
+/// The sample chart as a chart file would state it, on `sides` and at `tempo`.
+fn sample_chart(sides: &[SampleSide], tempo: SampleTempo) -> String {
+    let (opening_bpm, second_bpm) = tempo.stated();
+    let mut chart = format!("#PLAYER 1\n#GENRE {SAMPLE_GENRE}\n#TITLE {SAMPLE_TITLE}\n#ARTIST {SAMPLE_ARTIST}\n#BPM {opening_bpm}\n{SAMPLE_HEADER}");
+    if let Some(second_bpm) = second_bpm {
+        chart.push_str(&format!("#{TEMPO_CHANGE_MEASURE:03}{TEMPO_CHANNEL}:{second_bpm:02X}\n"));
+    }
     for measure in FIRST_MEASURE..=LAST_MEASURE {
         let has_long_note = measure % LONG_NOTE_EVERY == LONG_NOTE_MEASURE;
         for side in sides {
@@ -158,8 +249,14 @@ fn sample_chart(sides: &[SampleSide]) -> String {
 
 /// The sample chart for a run of `mode`, or `None` for a mode no sample is written for.
 pub(crate) fn sample_model(mode: Mode) -> Option<Model> {
+    sample_model_at(mode, SampleTempo::Shipped)
+}
+
+/// The sample chart for a run of `mode` written at `tempo`, or `None` for a mode no sample is
+/// written for.
+fn sample_model_at(mode: Mode, tempo: SampleTempo) -> Option<Model> {
     let (_, sides) = SAMPLE_SIDES.iter().find(|(written, _)| *written == mode)?;
-    let source = rbms_parser::parse_with(sample_chart(sides).as_bytes(), Default::default());
+    let source = rbms_parser::parse_with(sample_chart(sides, tempo).as_bytes(), Default::default());
     Some(rbms_chart::to_model(&source, mode))
 }
 
@@ -307,15 +404,29 @@ fn sample_session(model: Model, config: &Config, carried: Option<Carried>) -> Pl
 const PLAYED_THROUGH_STEP_US: i64 = 10_000;
 const PLAYED_THROUGH_MARGIN_US: i64 = 1_000_000;
 
+/// Play `session` from where it stands up to `chart_us` at once, a step of the engine at a time.
+fn play_through(session: &mut PlaySession, chart_us: i64) {
+    for frame in 0..=chart_us / PLAYED_THROUGH_STEP_US {
+        session.tick(SessionClock::at(frame * PLAYED_THROUGH_STEP_US), &mut NullSink);
+    }
+}
+
 /// The sample chart of `mode` played from its first moment to past its end, for the screens that
 /// show a run that is over. `None` for a mode no sample is written for.
 pub(crate) fn played_sample(mode: Mode, config: &Config, carried: Option<Carried>) -> Option<PlaySession> {
     let mut session = sample_session(sample_model(mode)?, config, carried);
     let run_us = session.play_time_ms() * MICROS_PER_MILLI + PLAYED_THROUGH_MARGIN_US;
-    for frame in 0..=run_us / PLAYED_THROUGH_STEP_US {
-        session.tick(SessionClock::at(frame * PLAYED_THROUGH_STEP_US), &mut NullSink);
-    }
+    play_through(&mut session, run_us);
     Some(session)
+}
+
+/// Where a run that takes the place of another begins.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RunStart {
+    /// At the top of its chart.
+    Top,
+    /// As far through its chart as the run it takes the place of had come.
+    Carried,
 }
 
 /// A sample run on a play screen: the run, the scene it is walked through, and what the skin that
@@ -331,16 +442,63 @@ pub(crate) struct PlaySample {
     field: Option<FieldChart>,
     /// Where the chart stood on the last frame the run moved on.
     chart_us: i64,
+    /// What the run does once its chart is over.
+    ending: SampleEnding,
+    /// The tempo the chart of the run on show is written at, and the one its caller last named.
+    tempo: SampleTempo,
+    asked: SampleTempo,
+    /// The gauge the run on show was begun on.
+    gauge: GaugeKind,
 }
 
 impl PlaySample {
-    /// A run of the sample chart for the play screen `screen`, at its loading state. `None` when the
-    /// screen is no play screen a sample is written for.
+    /// A run of the sample chart the skin menu shows for the play screen `screen`, at its loading
+    /// state. `None` when the screen is no play screen a sample is written for.
+    #[cfg(test)]
     pub(crate) fn new(screen: i32, config: &Config) -> Option<PlaySample> {
-        let session = sample_session(sample_model(skin_type_mode(screen)?)?, config, None);
+        PlaySample::at_tempo(screen, config, SampleTempo::Shipped)
+    }
+
+    /// A run of the sample chart for the play screen `screen` written at `tempo`, at its loading
+    /// state. `None` when the screen is no play screen a sample is written for.
+    ///
+    /// The notes, the hand that plays them and everything the run is drawn from are the same at any
+    /// tempo; a chart at a slower tempo takes longer to play through. The run closes when its chart
+    /// is over ([`SampleEnding::Closes`]) unless it is told otherwise ([`PlaySample::ending`]).
+    pub(crate) fn at_tempo(screen: i32, config: &Config, tempo: SampleTempo) -> Option<PlaySample> {
+        let session = sample_session(sample_model_at(skin_type_mode(screen)?, tempo)?, config, None);
         let feed = Box::new(SkinFeed::new(&session, false));
         let bpm = BpmStats::of(session.model());
-        Some(PlaySample { screen, session, scene: PlayScene::loading(), feed, bpm, field: None, chart_us: CHART_START_US })
+        Some(PlaySample {
+            screen,
+            session,
+            scene: PlayScene::loading(),
+            feed,
+            bpm,
+            field: None,
+            chart_us: CHART_START_US,
+            ending: SampleEnding::Closes,
+            tempo,
+            asked: tempo,
+            gauge: config.play.gauge,
+        })
+    }
+
+    /// The same run, ending as `ending` says.
+    pub(crate) fn ending(self, ending: SampleEnding) -> PlaySample {
+        PlaySample { ending, ..self }
+    }
+
+    /// Have the run go on at `tempo`: the step that follows begins a run of the chart written at
+    /// it, as far through as this one has come, under the scene as it stands
+    /// ([`PlaySample::step`]). `false` for a run that closes, which is at one tempo for the whole of
+    /// its scene and takes no other.
+    pub(crate) fn show_tempo(&mut self, tempo: SampleTempo) -> bool {
+        if self.ending == SampleEnding::Closes {
+            return false;
+        }
+        self.asked = tempo;
+        true
     }
 
     /// The scroll speed the sample is shown at, which is the one a run of this chart would start
@@ -367,9 +525,92 @@ impl PlaySample {
         if timers.is_on(timer_id::PLAY) { whole_ms(now_us - timers.value_us(timer_id::PLAY)) * MICROS_PER_MILLI } else { CHART_START_US }
     }
 
+    /// Who the run is told to be played by, and the score it is paced against.
+    ///
+    /// A run shown for the play options follows the two rows that say so: AUTOPLAY makes it a run
+    /// the game plays itself, and TARGET is settled on the sample chart as a run of it would settle
+    /// it, with no record and no rival to measure against. A run shown for its skin is one played
+    /// by hand with nothing to pace against, whatever those rows hold.
+    fn told(&self, config: &Config) -> (PlayKind, u32) {
+        if self.ending == SampleEnding::Closes {
+            return (PlayKind::Play, 0);
+        }
+        let kind = if config.play.autoplay { PlayKind::Autoplay } else { PlayKind::Play };
+        let context = TargetContext { total_notes: self.session.judge().total_notes(), ..TargetContext::default() };
+        (kind, target::resolve(config.judge.target, &context).ex)
+    }
+
+    /// The scores the run is held against at `now_us`, as the skin's timers read them: no best of
+    /// the player's, and the target the run is paced against.
+    fn held_against(&self, config: &Config, now_us: i64) -> Standing {
+        Standing { now_us, best_score: 0, target_score: self.told(config).1, carried_combo: 0 }
+    }
+
     /// Which lanes the hand has down, in lane order.
     fn lanes_down(&self) -> Vec<bool> {
         self.session.beam_on().iter().zip(self.session.beam_off()).map(|(on, off)| on > off).collect()
+    }
+
+    /// Where a run is to take the place of the one on show on this frame, for a run that begins
+    /// again: at the top once the chart's last note is a moment behind, and where this one stands
+    /// when another tempo was asked for or `play` names another gauge. `None` while the run on show
+    /// goes on, which is always for a run that closes.
+    fn due_run(&self, play: &PlayOptions) -> Option<RunStart> {
+        if self.ending == SampleEnding::Closes {
+            return None;
+        }
+        let last_note_ms = self.session.play_time_ms() - TIME_MARGIN_MS;
+        if whole_ms(self.chart_us) > last_note_ms + BEGIN_AGAIN_AFTER_MS {
+            return Some(RunStart::Top);
+        }
+        (self.asked != self.tempo || play.gauge != self.gauge).then_some(RunStart::Carried)
+    }
+
+    /// Begin a run of the chart in place of the one on show, written at the tempo asked for and on
+    /// the gauge the settings name, with the scene left as it is: no state of it is gone back to and
+    /// nothing of the skin is read again.
+    ///
+    /// A run that takes over part of the way through is played up to there at once by the hand
+    /// that plays it, so its notes, its combo, its score and its gauge are the ones it would have
+    /// had. What it did on the way is taken in without a word: the feed's first look at a run tells
+    /// nothing, and the driver it is told to is not judging yet. Then the lanes' timers are put out
+    /// and the bar lines behind the run counted, as for a run moved about in its chart, and the play
+    /// timer is started where the run stands. A run begun at the top has the timers that say what a
+    /// run came to put out as well.
+    ///
+    /// A scene that is not playing yet has none of that to do: the run waits at the top of its
+    /// chart for the scene to start it.
+    fn begin_run(&mut self, shared: &mut AppShared, now_us: i64, ready: bool, start: RunStart) {
+        let Some(model) = skin_type_mode(self.screen).and_then(|mode| sample_model_at(mode, self.asked)) else {
+            return;
+        };
+        let (was_ms, is_ms) = (rbms_play::last_note_time_ms(self.session.model()), rbms_play::last_note_time_ms(&model));
+        let from_us = match start {
+            RunStart::Carried if self.scene.is_playing() && was_ms > 0 => (self.chart_us as f64 * is_ms as f64 / was_ms as f64) as i64,
+            RunStart::Carried | RunStart::Top => CHART_START_US,
+        };
+        self.session = sample_session(model, &shared.config, None);
+        play_through(&mut self.session, from_us);
+        *self.feed = SkinFeed::new(&self.session, false);
+        self.bpm = BpmStats::of(self.session.model());
+        self.field = None;
+        self.chart_us = from_us;
+        self.tempo = self.asked;
+        self.gauge = shared.config.play.gauge;
+        if !self.scene.is_playing() {
+            return;
+        }
+        let skin = shared.skins.document(self.screen).filter(|_| ready);
+        self.feed.adopt_skin(&self.session, skin, false);
+        let standing = self.held_against(&shared.config, now_us);
+        let timers = &mut shared.skin_timers;
+        self.feed.driver_mut().apply(timers, now_us, SceneEvent::Seeked { chart_us: from_us });
+        let down = self.lanes_down();
+        self.feed.frame(timers, &self.session, &down, standing);
+        self.feed.driver_mut().apply(timers, now_us, SceneEvent::Started { start_offset_us: from_us });
+        if from_us == CHART_START_US {
+            RUN_OUTCOME_TIMERS.into_iter().for_each(|timer| timers.off(timer));
+        }
     }
 
     /// Move the run on to `now_us` on the preview's own time. `ready` is whether the skin that draws
@@ -382,9 +623,16 @@ impl PlaySample {
     ///
     /// What the skin asks of its timers is taken in from the first read of it the run is drawn with,
     /// as the play screen takes it in, and a read that is not yet the one to be drawn is not asked.
+    ///
+    /// A run that begins again ([`SampleEnding::BeginsAgain`]) never tells its scene that the chart
+    /// ran out: before the scene is asked, a run that is due takes the place of the one on show
+    /// ([`PlaySample::due_run`]), so the scene only ever sees a chart that is playing.
     pub(crate) fn step(&mut self, shared: &mut AppShared, now_us: i64, ready: bool) -> SampleStep {
         if !ready && self.scene.phase() != PlayPhase::Preload {
             return SampleStep::Running;
+        }
+        if let Some(start) = self.due_run(&shared.config.play) {
+            self.begin_run(shared, now_us, ready, start);
         }
         let skin = shared.skins.document(self.screen).filter(|_| ready);
         self.feed.adopt_skin(&self.session, skin, false);
@@ -416,7 +664,7 @@ impl PlaySample {
         };
         let step = self.scene.step(self.feed.driver_mut(), &mut shared.skin_timers, &facts);
         let down = self.lanes_down();
-        let standing = Standing { now_us, best_score: 0, target_score: 0, carried_combo: 0 };
+        let standing = self.held_against(&shared.config, now_us);
         self.feed.frame(&mut shared.skin_timers, &self.session, &down, standing);
         if matches!(step, SceneStep::Leave(_)) { SampleStep::Over } else { SampleStep::Running }
     }
@@ -451,7 +699,15 @@ impl PlaySample {
     /// the one a run of this chart would start at ([`PlaySample::shown_hispeed`]). The chart has no
     /// background, so the skin's is the black of a chart without one.
     ///
-    /// The run is shown as one played by hand, which is what the screen being previewed is for.
+    /// CONSTANT reaches the skin the way it reaches it from the play screen: the note field is
+    /// handed the chart made over for it ([`FieldChart`]), the travel time is worked out at the
+    /// field's one tempo, and the option is told as the assist it is ([`SettingsView::of_config`]).
+    /// The lane settings' own flag of that name is the reference's lane renderer option, which this
+    /// player has not, and stays off here as it does there.
+    ///
+    /// A run shown for its skin is shown as one played by hand, which is what the screen being
+    /// previewed is for. A run shown for the play options is told as the AUTOPLAY and TARGET rows
+    /// have it ([`PlaySample::told`]); the hand that plays it is the written one either way.
     pub(crate) fn draw(&mut self, shared: &AppShared, canvas: &mut Canvas<'_>, at: PreviewFrame) -> PreviewDrawn {
         self.ensure_field(&shared.config);
         let play = &shared.config.play;
@@ -460,11 +716,12 @@ impl PlaySample {
         let (bpm, scroll) = self.tempo_at(chart_us);
         let travel = self.field.as_ref().and_then(FieldChart::tempo).unwrap_or((bpm, scroll));
         let hispeed = self.shown_hispeed(&shared.config) as f32;
+        let (kind, target_score) = self.told(&shared.config);
         let live = PlayLive {
             phase: self.scene.phase(),
-            kind: PlayKind::Play,
+            kind,
             best_score: 0,
-            target_score: 0,
+            target_score,
             judgements: self.feed.trace().sides(),
             lanes: LaneSettings {
                 hispeed,
@@ -543,6 +800,12 @@ impl PlaySample {
     pub(crate) fn standing(&self) -> (PlayPhase, i64, u32, u32, f32) {
         let judge = self.session.judge();
         (self.scene.phase(), whole_ms(self.chart_us), judge.combo, judge.ex_score, judge.gauge.value())
+    }
+
+    /// The run on show, for the tests that read its chart, its gauge and its tally.
+    #[cfg(test)]
+    pub(crate) fn session(&self) -> &PlaySession {
+        &self.session
     }
 }
 

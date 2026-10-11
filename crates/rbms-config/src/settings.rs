@@ -361,12 +361,22 @@ impl SettingId {
     }
 }
 
-/// The groups the rows are listed in. The settings screen shows all but one of them as the tabs of
-/// its strip ([`SettingTab::SHOWN`]); [`SettingTab::Skin`] is the group the skin menu lists.
+/// The groups the rows are listed in, and the screen that lists each.
+///
+/// The settings screen shows the groups of [`SettingTab::SHOWN`] as the tabs of its strip. The play
+/// menu lists the four of [`SettingTab::PLAY_MENU`] one under another, beside a preview of what
+/// they do: they are the rows a player changes from one sitting to the next. [`SettingTab::Skin`]
+/// is the group the skin menu lists.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SettingTab {
-    Play,
-    Gauge,
+    /// How fast the notes scroll, on the play menu.
+    PlaySpeed,
+    /// What the lane is covered with, on the play menu.
+    PlayLane,
+    /// When a press counts, on the play menu.
+    PlayJudge,
+    /// How a chart is dealt out and played, on the play menu.
+    PlayChart,
     Judge,
     Display,
     Skin,
@@ -377,10 +387,12 @@ pub enum SettingTab {
 }
 
 impl SettingTab {
-    /// Every group of rows, in the order they are listed.
-    pub const ALL: [SettingTab; 9] = [
-        SettingTab::Play,
-        SettingTab::Gauge,
+    /// Every group of rows, in the order the table lists them.
+    pub const ALL: [SettingTab; 11] = [
+        SettingTab::PlaySpeed,
+        SettingTab::PlayLane,
+        SettingTab::PlayJudge,
+        SettingTab::PlayChart,
         SettingTab::Judge,
         SettingTab::Display,
         SettingTab::Skin,
@@ -390,25 +402,21 @@ impl SettingTab {
         SettingTab::Select,
     ];
 
-    /// The tabs the settings screen shows on its tab strip, left to right: every tab but
-    /// [`SettingTab::Skin`], whose rows are listed by the skin menu instead.
-    pub const SHOWN: [SettingTab; 8] = [
-        SettingTab::Play,
-        SettingTab::Gauge,
-        SettingTab::Judge,
-        SettingTab::Display,
-        SettingTab::Input,
-        SettingTab::Network,
-        SettingTab::Audio,
-        SettingTab::Select,
-    ];
+    /// The tabs the settings screen shows on its tab strip, left to right: every group but the
+    /// play menu's and the skin menu's.
+    pub const SHOWN: [SettingTab; 6] = [SettingTab::Judge, SettingTab::Display, SettingTab::Input, SettingTab::Network, SettingTab::Audio, SettingTab::Select];
 
-    /// Name shown on the tab strip.
+    /// The groups the play menu lists, top to bottom.
+    pub const PLAY_MENU: [SettingTab; 4] = [SettingTab::PlaySpeed, SettingTab::PlayLane, SettingTab::PlayJudge, SettingTab::PlayChart];
+
+    /// Name shown on the tab strip, or over the group on the play menu. A group of the play menu
+    /// may share its name with a tab of the settings screen: the two are never listed together.
     pub fn label(self) -> &'static str {
         match self {
-            SettingTab::Play => "PLAY",
-            SettingTab::Gauge => "GAUGE",
-            SettingTab::Judge => "JUDGE",
+            SettingTab::PlaySpeed => "SPEED",
+            SettingTab::PlayLane => "LANE",
+            SettingTab::PlayJudge | SettingTab::Judge => "JUDGE",
+            SettingTab::PlayChart => "CHART",
             SettingTab::Display => "DISPLAY",
             SettingTab::Skin => "SKIN",
             SettingTab::Input => "INPUT",
@@ -499,85 +507,121 @@ fn always(_config: &Config) -> bool {
     true
 }
 
-/// Every row of the settings screen, tab by tab and top to bottom within a tab.
+/// Every row, group by group in the order of [`SettingTab::ALL`] and top to bottom within a group.
 pub const SETTINGS: &[SettingDescriptor] = &[
-    row(SettingId::Autoplay, SettingTab::Play, "AUTOPLAY", SettingKind::Toggle, "Let the game play the chart itself"),
-    row(
-        SettingId::HiSpeed,
-        SettingTab::Play,
-        "HI-SPEED",
-        SettingKind::FloatRange { min: HISPEED_MIN, max: HISPEED_MAX, step: HISPEED_STEP, decimals: HISPEED_DECIMALS, unit: NO_UNIT },
-        "How fast the notes scroll; one press moves it by HI-SPEED STEP. Worked out for every chart while KEEP GREEN NUMBER is on",
-    ),
-    row(
-        SettingId::HiSpeedStep,
-        SettingTab::Play,
-        "HI-SPEED STEP",
-        SettingKind::FloatRange { min: HISPEED_STEP_MIN, max: HISPEED_STEP_MAX, step: HISPEED_STEP_STEP, decimals: HISPEED_DECIMALS, unit: NO_UNIT },
-        "How far one HI-SPEED press moves the scroll",
-    ),
-    row(
-        SettingId::SpeedFix,
-        SettingTab::Play,
-        "SPEED FIX",
-        SettingKind::Cycle { values: SPEED_FIX_LABELS },
-        "Whether the scroll speed follows the chart's tempo changes",
-    ),
-    row(
-        SettingId::FixHiSpeed,
-        SettingTab::Play,
-        "HI-SPEED FIX",
-        SettingKind::Cycle { values: HISPEED_FIX_LABELS },
-        "Which tempo the note travel time is held constant against",
-    ),
     row(
         SettingId::KeepGreenNumber,
-        SettingTab::Play,
+        SettingTab::PlaySpeed,
         "KEEP GREEN NUMBER",
         SettingKind::Toggle,
         "Start every chart at the speed that shows GREEN NUMBER, whatever its tempo and lane cover; HI-SPEED FIX names the tempo (MAIN while it is OFF)",
     ),
     row(
         SettingId::GreenNumber,
-        SettingTab::Play,
+        SettingTab::PlaySpeed,
         "GREEN NUMBER",
         SettingKind::IntRange { min: GREEN_NUMBER_MIN, max: GREEN_NUMBER_MAX, step: GREEN_NUMBER_ROW_STEP, unit: NO_UNIT },
         "The green number KEEP GREEN NUMBER holds: three fifths of the milliseconds a note is on show",
     ),
-    row(SettingId::Random, SettingTab::Play, "RANDOM", SettingKind::Cycle { values: RANDOM_LABELS }, "How the lanes are shuffled"),
-    unbuilt_row(
-        SettingId::LaneOption,
-        SettingTab::Play,
-        "LANE OPTION",
-        SettingKind::Cycle { values: LANE_OPTION_LABELS },
-        "What is done to the sides of the chart as a whole",
-    ),
-    row(SettingId::LegacyNote, SettingTab::Play, "LEGACY NOTE", SettingKind::Toggle, "Draw long notes as plain notes"),
-    row(SettingId::FiveKeyLayout, SettingTab::Play, "5KEYS LAYOUT", SettingKind::Toggle, "Give a five-key chart its own lane widths")
-        .unread_by_skins(FIVE_KEY_SCREENS, BUILT_IN_ONLY_NOTE),
-    row(SettingId::AutoReplay, SettingTab::Play, "AUTO REPLAY", SettingKind::Toggle, "Save a replay of every run"),
-    row(SettingId::PlayEscapeMode, SettingTab::Play, "ESCAPE", SettingKind::Cycle { values: PLAY_ESCAPE_LABELS }, "What Escape has to be to abandon a run"),
-    row(SettingId::Gauge, SettingTab::Gauge, "GAUGE", SettingKind::Cycle { values: GAUGE_LABELS }, "Which gauge the run is cleared on"),
     row(
-        SettingId::Total,
-        SettingTab::Gauge,
-        "TOTAL",
-        SettingKind::FloatRange { min: TOTAL_FROM_CHART, max: TOTAL_MAX, step: TOTAL_STEP, decimals: TOTAL_DECIMALS, unit: NO_UNIT },
-        "Override the chart's own gauge total",
+        SettingId::HiSpeed,
+        SettingTab::PlaySpeed,
+        "HI-SPEED",
+        SettingKind::FloatRange { min: HISPEED_MIN, max: HISPEED_MAX, step: HISPEED_STEP, decimals: HISPEED_DECIMALS, unit: NO_UNIT },
+        "How fast the notes scroll; one press moves it by HI-SPEED STEP. Worked out for every chart while KEEP GREEN NUMBER is on",
+    ),
+    row(
+        SettingId::HiSpeedStep,
+        SettingTab::PlaySpeed,
+        "HI-SPEED STEP",
+        SettingKind::FloatRange { min: HISPEED_STEP_MIN, max: HISPEED_STEP_MAX, step: HISPEED_STEP_STEP, decimals: HISPEED_DECIMALS, unit: NO_UNIT },
+        "How far one HI-SPEED press moves the scroll",
+    ),
+    row(
+        SettingId::FixHiSpeed,
+        SettingTab::PlaySpeed,
+        "HI-SPEED FIX",
+        SettingKind::Cycle { values: HISPEED_FIX_LABELS },
+        "Which tempo the note travel time is held constant against",
+    ),
+    row(
+        SettingId::SpeedFix,
+        SettingTab::PlaySpeed,
+        "SPEED FIX",
+        SettingKind::Cycle { values: SPEED_FIX_LABELS },
+        "Whether the scroll speed follows the chart's tempo changes",
+    ),
+    row(SettingId::EnableCover, SettingTab::PlayLane, "LANE COVER ON", SettingKind::Toggle, "Apply the LANE COVER height"),
+    row(
+        SettingId::LaneCover,
+        SettingTab::PlayLane,
+        "LANE COVER",
+        SettingKind::Percent { min: LANE_SHADE_MIN, max: LANE_SHADE_MAX, step: LANE_SHADE_STEP },
+        "Hide the top of the lane",
+    ),
+    row(SettingId::EnableLift, SettingTab::PlayLane, "LIFT ON", SettingKind::Toggle, "Apply the LIFT height"),
+    row(
+        SettingId::Lift,
+        SettingTab::PlayLane,
+        "LIFT",
+        SettingKind::Percent { min: LANE_SHADE_MIN, max: LANE_SHADE_MAX, step: LANE_SHADE_STEP },
+        "Raise the judge line up the lane",
+    ),
+    row(SettingId::EnableHidden, SettingTab::PlayLane, "HIDDEN+ ON", SettingKind::Toggle, "Apply the HIDDEN+ height"),
+    row(
+        SettingId::Hidden,
+        SettingTab::PlayLane,
+        "HIDDEN+",
+        SettingKind::Percent { min: LANE_SHADE_MIN, max: LANE_SHADE_MAX, step: LANE_SHADE_STEP },
+        "Hide the bottom of the lane above the judge line",
+    ),
+    row(
+        SettingId::LaneCoverFineStep,
+        SettingTab::PlayLane,
+        "COVER FINE STEP",
+        SettingKind::FloatRange {
+            min: LANE_SHADE_FINE_STEP_MIN as f64,
+            max: LANE_SHADE_FINE_STEP_MAX as f64,
+            step: LANE_SHADE_FINE_STEP_STEP as f64,
+            decimals: LANE_SHADE_FINE_DECIMALS,
+            unit: NO_UNIT,
+        },
+        "How far one fine cover press moves the shade",
     ),
     row(
         SettingId::JudgeOffset,
-        SettingTab::Judge,
+        SettingTab::PlayJudge,
         "JUDGE OFFSET",
         SettingKind::IntRange { min: JUDGE_OFFSET_MIN_MS, max: JUDGE_OFFSET_MAX_MS, step: JUDGE_OFFSET_STEP_MS, unit: MILLISECOND_UNIT },
         "Shift every judgement earlier or later",
     ),
     row(
         SettingId::AutoCal,
-        SettingTab::Judge,
+        SettingTab::PlayJudge,
         "AUTO ADJUST",
         SettingKind::Toggle,
         "Move JUDGE OFFSET a little after every hit that lands early or late, so the two even out as you play",
+    ),
+    row(SettingId::Random, SettingTab::PlayChart, "RANDOM", SettingKind::Cycle { values: RANDOM_LABELS }, "How the lanes are shuffled"),
+    unbuilt_row(
+        SettingId::LaneOption,
+        SettingTab::PlayChart,
+        "LANE OPTION",
+        SettingKind::Cycle { values: LANE_OPTION_LABELS },
+        "What is done to the sides of the chart as a whole",
+    ),
+    row(SettingId::Gauge, SettingTab::PlayChart, "GAUGE", SettingKind::Cycle { values: GAUGE_LABELS }, "Which gauge the run is cleared on"),
+    row(SettingId::LegacyNote, SettingTab::PlayChart, "LEGACY NOTE", SettingKind::Toggle, "Draw long notes as plain notes"),
+    row(SettingId::Target, SettingTab::PlayChart, "TARGET", SettingKind::Cycle { values: TARGET_LABELS }, "What the run is paced against"),
+    row(SettingId::Autoplay, SettingTab::PlayChart, "AUTOPLAY", SettingKind::Toggle, "Let the game play the chart itself"),
+    row(SettingId::ScratchAuto, SettingTab::PlayChart, "SCRATCH AUTO", SettingKind::Toggle, "Let the game play the scratch lane"),
+    row(SettingId::AutoReplay, SettingTab::PlayChart, "AUTO REPLAY", SettingKind::Toggle, "Save a replay of every run"),
+    row(
+        SettingId::PlayEscapeMode,
+        SettingTab::PlayChart,
+        "ESCAPE",
+        SettingKind::Cycle { values: PLAY_ESCAPE_LABELS },
+        "What Escape has to be to abandon a run",
     ),
     row(
         SettingId::JudgeAlgorithm,
@@ -621,7 +665,13 @@ pub const SETTINGS: &[SettingDescriptor] = &[
         SettingKind::Cycle { values: BOTTOM_SHIFTABLE_LABELS },
         "The floor an auto-shift may drop the gauge to",
     ),
-    row(SettingId::Target, SettingTab::Judge, "TARGET", SettingKind::Cycle { values: TARGET_LABELS }, "What the run is paced against"),
+    row(
+        SettingId::Total,
+        SettingTab::Judge,
+        "TOTAL",
+        SettingKind::FloatRange { min: TOTAL_FROM_CHART, max: TOTAL_MAX, step: TOTAL_STEP, decimals: TOTAL_DECIMALS, unit: NO_UNIT },
+        "Override the chart's own gauge total",
+    ),
     host_row(SettingId::Skin, SettingTab::Display, "SKIN", SettingKind::Cycle { values: SKIN_LABELS }, "Which bundled skin the play screen uses")
         .unread_by_skins(PLAY_SCREENS, BUILT_IN_ONLY_NOTE),
     row(SettingId::Font, SettingTab::Display, "FONT", SettingKind::FilePick, "Font the screens are drawn with"),
@@ -636,43 +686,6 @@ pub const SETTINGS: &[SettingDescriptor] = &[
         .unread_by_skins(RESULT_SCREENS, BUILT_IN_ONLY_NOTE),
     row(SettingId::ReplayAnalysis, SettingTab::Display, "REPLAY ANALYSIS", SettingKind::Toggle, "Allow stepping and slowing a replay"),
     row(SettingId::Preview, SettingTab::Display, "PREVIEW", SettingKind::Toggle, "Play the focused song on the song list"),
-    row(
-        SettingId::Lift,
-        SettingTab::Display,
-        "LIFT",
-        SettingKind::Percent { min: LANE_SHADE_MIN, max: LANE_SHADE_MAX, step: LANE_SHADE_STEP },
-        "Raise the judge line up the lane",
-    ),
-    row(SettingId::EnableLift, SettingTab::Display, "LIFT ON", SettingKind::Toggle, "Apply the LIFT height"),
-    row(
-        SettingId::LaneCover,
-        SettingTab::Display,
-        "LANE COVER",
-        SettingKind::Percent { min: LANE_SHADE_MIN, max: LANE_SHADE_MAX, step: LANE_SHADE_STEP },
-        "Hide the top of the lane",
-    ),
-    row(SettingId::EnableCover, SettingTab::Display, "LANE COVER ON", SettingKind::Toggle, "Apply the LANE COVER height"),
-    row(
-        SettingId::Hidden,
-        SettingTab::Display,
-        "HIDDEN+",
-        SettingKind::Percent { min: LANE_SHADE_MIN, max: LANE_SHADE_MAX, step: LANE_SHADE_STEP },
-        "Hide the bottom of the lane above the judge line",
-    ),
-    row(SettingId::EnableHidden, SettingTab::Display, "HIDDEN+ ON", SettingKind::Toggle, "Apply the HIDDEN+ height"),
-    row(
-        SettingId::LaneCoverFineStep,
-        SettingTab::Display,
-        "COVER FINE STEP",
-        SettingKind::FloatRange {
-            min: LANE_SHADE_FINE_STEP_MIN as f64,
-            max: LANE_SHADE_FINE_STEP_MAX as f64,
-            step: LANE_SHADE_FINE_STEP_STEP as f64,
-            decimals: LANE_SHADE_FINE_DECIMALS,
-            unit: NO_UNIT,
-        },
-        "How far one fine cover press moves the shade",
-    ),
     row(SettingId::WhiteNumber, SettingTab::Display, "WHITE NUMBER", SettingKind::Toggle, "Show the travel time to the bottom of the cover")
         .unread_by_skins(PLAY_SCREENS, BUILT_IN_ONLY_NOTE),
     row(
@@ -683,6 +696,8 @@ pub const SETTINGS: &[SettingDescriptor] = &[
         "Where the judgement text sits, or 0 for the skin's own place",
     )
     .unread_by_skins(PLAY_SCREENS, BUILT_IN_ONLY_NOTE),
+    row(SettingId::FiveKeyLayout, SettingTab::Display, "5KEYS LAYOUT", SettingKind::Toggle, "Give a five-key chart its own lane widths")
+        .unread_by_skins(FIVE_KEY_SCREENS, BUILT_IN_ONLY_NOTE),
     row(
         SettingId::Letterbox,
         SettingTab::Display,
@@ -720,7 +735,6 @@ pub const SETTINGS: &[SettingDescriptor] = &[
         "Which side the scratch lane is drawn on",
     )
     .unread_by_skins(SCRATCH_SCREENS, SKIN_OPTION_NOTE),
-    row(SettingId::ScratchAuto, SettingTab::Input, "SCRATCH AUTO", SettingKind::Toggle, "Let the game play the scratch lane"),
     row(SettingId::KeyConfig, SettingTab::Input, "KEY CONFIG", SettingKind::Action, "Open the key editor"),
     row(
         SettingId::ServerUrl,
@@ -1072,6 +1086,18 @@ fn toggle(slot: &mut bool) -> AdjustOutcome {
     AdjustOutcome::Changed
 }
 
+/// A share of one moved `delta` steps of `step` along the grid those steps make from nothing.
+///
+/// The share is counted in whole steps, moved, and divided back by how many steps make one, so a
+/// row stepped a hundred times holds the nearest value there is to each hundredth. Adding the step
+/// to what the row holds instead lets each addition's rounding pile up, and the row comes to stand
+/// a hair short of the percent it shows, which a figure cut from it in thousandths then reads one
+/// low.
+fn stepped_share(share: f32, delta: i32, step: f32) -> f32 {
+    let steps_in_one = (1.0 / step).round();
+    ((share * steps_in_one).round() + delta as f32) / steps_in_one
+}
+
 fn stepped(at: usize, len: usize, delta: i32) -> usize {
     if len == 0 {
         return 0;
@@ -1129,11 +1155,11 @@ pub fn adjust(config: &mut Config, id: SettingId, delta: i32) -> AdjustOutcome {
             store(&mut config.play.gauge, next)
         }
         SettingId::Lift => {
-            let next = (config.play.lift + delta as f32 * LANE_SHADE_STEP).clamp(LANE_SHADE_MIN, LANE_SHADE_MAX);
+            let next = stepped_share(config.play.lift, delta, LANE_SHADE_STEP).clamp(LANE_SHADE_MIN, LANE_SHADE_MAX);
             store(&mut config.play.lift, next)
         }
         SettingId::LaneCover => {
-            let next = (config.play.cover + delta as f32 * LANE_SHADE_STEP).clamp(LANE_SHADE_MIN, LANE_SHADE_MAX);
+            let next = stepped_share(config.play.cover, delta, LANE_SHADE_STEP).clamp(LANE_SHADE_MIN, LANE_SHADE_MAX);
             store(&mut config.play.cover, next)
         }
         SettingId::ScratchSide => toggle(&mut config.play.scratch_left),
@@ -1209,7 +1235,7 @@ pub fn adjust(config: &mut Config, id: SettingId, delta: i32) -> AdjustOutcome {
         }
         SettingId::FavoriteOnly => toggle(&mut config.library.favorite_only),
         SettingId::Hidden => {
-            let next = (config.play.hidden + delta as f32 * LANE_SHADE_STEP).clamp(LANE_SHADE_MIN, LANE_SHADE_MAX);
+            let next = stepped_share(config.play.hidden, delta, LANE_SHADE_STEP).clamp(LANE_SHADE_MIN, LANE_SHADE_MAX);
             store(&mut config.play.hidden, next)
         }
         SettingId::LaneCoverFineStep => {
@@ -1217,7 +1243,7 @@ pub fn adjust(config: &mut Config, id: SettingId, delta: i32) -> AdjustOutcome {
             store(&mut config.play.lanecover_step_fine, next)
         }
         SettingId::JudgeTextY => {
-            let next = (config.display.judge_text_y + delta as f32 * JUDGE_TEXT_Y_STEP).clamp(JUDGE_TEXT_Y_MIN, JUDGE_TEXT_Y_MAX);
+            let next = stepped_share(config.display.judge_text_y, delta, JUDGE_TEXT_Y_STEP).clamp(JUDGE_TEXT_Y_MIN, JUDGE_TEXT_Y_MAX);
             store(&mut config.display.judge_text_y, next)
         }
         SettingId::Sort => {
@@ -1225,7 +1251,7 @@ pub fn adjust(config: &mut Config, id: SettingId, delta: i32) -> AdjustOutcome {
             store(&mut config.library.sort, SortMode::SELECTABLE[at])
         }
         SettingId::PreviewVolume => {
-            let next = (config.library.preview_volume + delta as f32 * PREVIEW_VOLUME_STEP).clamp(PREVIEW_VOLUME_MIN, PREVIEW_VOLUME_MAX);
+            let next = stepped_share(config.library.preview_volume, delta, PREVIEW_VOLUME_STEP).clamp(PREVIEW_VOLUME_MIN, PREVIEW_VOLUME_MAX);
             store(&mut config.library.preview_volume, next)
         }
         SettingId::PreviewFade => {
@@ -1345,7 +1371,7 @@ mod tests {
     fn a_row_nothing_acts_on_yet_is_not_offered() {
         let config = Config::default();
         assert!(!(descriptor(SettingId::LaneOption).visible)(&config), "LANE OPTION is offered but nothing applies it to a run");
-        assert!(!tab_rows(SettingTab::Play, &config).contains(&SettingId::LaneOption));
+        assert!(!tab_rows(SettingTab::PlayChart, &config).contains(&SettingId::LaneOption));
         assert_eq!(display_value(&config, SettingId::LaneOption), OFF_VALUE, "the value still reads back for the file it is stored in");
     }
 
@@ -1360,11 +1386,11 @@ mod tests {
         assert_eq!(
             skinned,
             vec![
-                (SettingId::FiveKeyLayout, FIVE_KEY_SCREENS, BUILT_IN_ONLY_NOTE),
                 (SettingId::Skin, PLAY_SCREENS, BUILT_IN_ONLY_NOTE),
                 (SettingId::ResultGraphs, RESULT_SCREENS, BUILT_IN_ONLY_NOTE),
                 (SettingId::WhiteNumber, PLAY_SCREENS, BUILT_IN_ONLY_NOTE),
                 (SettingId::JudgeTextY, PLAY_SCREENS, BUILT_IN_ONLY_NOTE),
+                (SettingId::FiveKeyLayout, FIVE_KEY_SCREENS, BUILT_IN_ONLY_NOTE),
                 (SettingId::ScratchSide, SCRATCH_SCREENS, SKIN_OPTION_NOTE),
             ]
         );
@@ -1414,23 +1440,58 @@ mod tests {
         }
     }
 
+    /// A name is one tab of the strip, or one heading of the play menu: no two groups that are
+    /// listed together share one. A group of the play menu may be called what a tab of the settings
+    /// screen is, since no screen lists both.
     #[test]
-    fn every_tab_has_its_own_name() {
-        let mut names: Vec<&str> = SettingTab::ALL.iter().map(|tab| tab.label()).collect();
-        let count = names.len();
-        names.sort_unstable();
-        names.dedup();
-        assert_eq!(names.len(), count);
-        assert_eq!(SettingTab::ALL.map(SettingTab::label).to_vec(), vec!["PLAY", "GAUGE", "JUDGE", "DISPLAY", "SKIN", "INPUT", "NETWORK", "AUDIO", "SELECT"]);
+    fn every_group_has_its_own_name_among_the_groups_it_is_listed_with() {
+        let listed_together: [&[SettingTab]; 3] = [&SettingTab::SHOWN, &SettingTab::PLAY_MENU, &[SettingTab::Skin]];
+        for groups in listed_together {
+            let mut names: Vec<&str> = groups.iter().map(|tab| tab.label()).collect();
+            let count = names.len();
+            names.sort_unstable();
+            names.dedup();
+            assert_eq!(names.len(), count, "{groups:?}");
+        }
+        assert_eq!(
+            SettingTab::ALL.map(SettingTab::label).to_vec(),
+            vec!["SPEED", "LANE", "JUDGE", "CHART", "JUDGE", "DISPLAY", "SKIN", "INPUT", "NETWORK", "AUDIO", "SELECT"]
+        );
     }
 
-    /// The settings screen shows every tab but the one the skin menu lists, in the order of the
-    /// whole list, so a tab added to one is not forgotten in the other.
+    /// The settings screen shows every group but the ones the play menu and the skin menu list, in
+    /// the order of the whole list, so a group added to one is not forgotten in the other.
     #[test]
-    fn the_shown_tabs_are_every_tab_but_the_skin_menus_in_the_same_order() {
-        let expected: Vec<SettingTab> = SettingTab::ALL.into_iter().filter(|tab| *tab != SettingTab::Skin).collect();
+    fn the_shown_tabs_are_every_tab_but_the_two_menus_in_the_same_order() {
+        let expected: Vec<SettingTab> = SettingTab::ALL.into_iter().filter(|tab| *tab != SettingTab::Skin && !SettingTab::PLAY_MENU.contains(tab)).collect();
         assert_eq!(SettingTab::SHOWN.to_vec(), expected);
-        assert_eq!(SettingTab::SHOWN.map(SettingTab::label).to_vec(), vec!["PLAY", "GAUGE", "JUDGE", "DISPLAY", "INPUT", "NETWORK", "AUDIO", "SELECT"]);
+        assert_eq!(SettingTab::SHOWN.map(SettingTab::label).to_vec(), vec!["JUDGE", "DISPLAY", "INPUT", "NETWORK", "AUDIO", "SELECT"]);
+    }
+
+    /// The play menu lists four groups, which are the first four of the whole list, and every
+    /// group is listed by exactly one screen.
+    #[test]
+    fn the_play_menus_groups_are_its_own_and_every_group_has_one_screen() {
+        assert_eq!(SettingTab::PLAY_MENU.to_vec(), SettingTab::ALL[..SettingTab::PLAY_MENU.len()].to_vec());
+        assert_eq!(SettingTab::PLAY_MENU.map(SettingTab::label).to_vec(), vec!["SPEED", "LANE", "JUDGE", "CHART"]);
+        for tab in SettingTab::ALL {
+            let screens = [SettingTab::SHOWN.contains(&tab), SettingTab::PLAY_MENU.contains(&tab), tab == SettingTab::Skin];
+            assert_eq!(screens.iter().filter(|listed| **listed).count(), 1, "{tab:?}");
+        }
+    }
+
+    /// The rows a player changes from one sitting to the next are the play menu's, and the rules a
+    /// press is judged by and the layout of the built-in field stay on the settings screen.
+    #[test]
+    fn the_rows_of_a_sitting_are_the_play_menus_and_the_rules_are_the_settings_screens() {
+        for id in [SettingId::HiSpeed, SettingId::GreenNumber, SettingId::LaneCover, SettingId::JudgeOffset, SettingId::Gauge, SettingId::ScratchAuto] {
+            assert!(SettingTab::PLAY_MENU.contains(&tab_of(id)), "{id:?} is on {:?}", tab_of(id));
+        }
+        assert_eq!(tab_of(SettingId::Total), SettingTab::Judge);
+        assert_eq!(tab_of(SettingId::JudgeAlgorithm), SettingTab::Judge);
+        assert_eq!(tab_of(SettingId::FiveKeyLayout), SettingTab::Display);
+        assert_eq!(tab_of(SettingId::WhiteNumber), SettingTab::Display);
+        assert_eq!(tab_of(SettingId::ScratchSide), SettingTab::Input);
     }
 
     #[test]
@@ -1500,6 +1561,28 @@ mod tests {
                     adjust(&mut config, id, direction);
                     let value = ranged_value(&config, id);
                     assert!(value >= min && value <= max, "{id:?} left [{min}, {max}] at {value}");
+                }
+            }
+        }
+    }
+
+    /// A share of the lane stepped a hundredth at a time stands on the hundredths: a hundred steps up
+    /// from nothing pass through every whole percent, and each reads as ten times it in thousandths,
+    /// which is what a skin shows the lane cover, the lift and the hidden cover as.
+    #[test]
+    fn a_share_stepped_from_nothing_stands_on_every_whole_percent() {
+        const THOUSANDTHS: f32 = 1000.0;
+        for id in [SettingId::LaneCover, SettingId::Lift, SettingId::Hidden] {
+            for wide in [1, 10] {
+                let mut config = Config::default();
+                for _ in 0..STRESS_STEPS {
+                    adjust(&mut config, id, -1);
+                }
+                for percent in (wide..=100).step_by(wide as usize) {
+                    assert_eq!(adjust(&mut config, id, wide), AdjustOutcome::Changed, "{id:?} stopped short of {percent}%");
+                    let share = ranged_value(&config, id) as f32;
+                    assert_eq!((share * THOUSANDTHS) as i32, percent * 10, "{id:?} at {percent}% in steps of {wide} holds {share}");
+                    assert_eq!(display_value(&config, id), format!("{percent}%"));
                 }
             }
         }
@@ -1786,28 +1869,38 @@ mod tests {
     fn every_tab_keeps_the_order_the_screen_lists_it_in() {
         let config = Config::default();
         assert_eq!(
-            tab_rows(SettingTab::Play, &config),
+            tab_rows(SettingTab::PlaySpeed, &config),
+            vec![SettingId::KeepGreenNumber, SettingId::GreenNumber, SettingId::HiSpeed, SettingId::HiSpeedStep, SettingId::FixHiSpeed, SettingId::SpeedFix,]
+        );
+        assert_eq!(
+            tab_rows(SettingTab::PlayLane, &config),
             vec![
-                SettingId::Autoplay,
-                SettingId::HiSpeed,
-                SettingId::HiSpeedStep,
-                SettingId::SpeedFix,
-                SettingId::FixHiSpeed,
-                SettingId::KeepGreenNumber,
-                SettingId::GreenNumber,
+                SettingId::EnableCover,
+                SettingId::LaneCover,
+                SettingId::EnableLift,
+                SettingId::Lift,
+                SettingId::EnableHidden,
+                SettingId::Hidden,
+                SettingId::LaneCoverFineStep,
+            ]
+        );
+        assert_eq!(tab_rows(SettingTab::PlayJudge, &config), vec![SettingId::JudgeOffset, SettingId::AutoCal]);
+        assert_eq!(
+            tab_rows(SettingTab::PlayChart, &config),
+            vec![
                 SettingId::Random,
+                SettingId::Gauge,
                 SettingId::LegacyNote,
-                SettingId::FiveKeyLayout,
+                SettingId::Target,
+                SettingId::Autoplay,
+                SettingId::ScratchAuto,
                 SettingId::AutoReplay,
                 SettingId::PlayEscapeMode,
             ]
         );
-        assert_eq!(tab_rows(SettingTab::Gauge, &config), vec![SettingId::Gauge, SettingId::Total]);
         assert_eq!(
             tab_rows(SettingTab::Judge, &config),
             vec![
-                SettingId::JudgeOffset,
-                SettingId::AutoCal,
                 SettingId::JudgeAlgorithm,
                 SettingId::JudgeWidthKeyPGreat,
                 SettingId::JudgeWidthKeyGreat,
@@ -1820,7 +1913,7 @@ mod tests {
                 SettingId::GaugeSet,
                 SettingId::GaugeAutoShift,
                 SettingId::BottomShiftableGauge,
-                SettingId::Target,
+                SettingId::Total,
             ]
         );
         assert_eq!(
@@ -1832,15 +1925,9 @@ mod tests {
                 SettingId::ResultGraphs,
                 SettingId::ReplayAnalysis,
                 SettingId::Preview,
-                SettingId::Lift,
-                SettingId::EnableLift,
-                SettingId::LaneCover,
-                SettingId::EnableCover,
-                SettingId::Hidden,
-                SettingId::EnableHidden,
-                SettingId::LaneCoverFineStep,
                 SettingId::WhiteNumber,
                 SettingId::JudgeTextY,
+                SettingId::FiveKeyLayout,
                 SettingId::Letterbox,
                 SettingId::WindowResolution,
                 SettingId::WindowMode,
@@ -1849,7 +1936,7 @@ mod tests {
             ]
         );
         assert_eq!(tab_rows(SettingTab::Select, &config), vec![SettingId::Sort, SettingId::FavoriteOnly, SettingId::PreviewVolume, SettingId::PreviewFade]);
-        assert_eq!(tab_rows(SettingTab::Input, &config), vec![SettingId::ScratchSide, SettingId::ScratchAuto, SettingId::KeyConfig]);
+        assert_eq!(tab_rows(SettingTab::Input, &config), vec![SettingId::ScratchSide, SettingId::KeyConfig]);
         assert_eq!(
             tab_rows(SettingTab::Network, &config),
             vec![

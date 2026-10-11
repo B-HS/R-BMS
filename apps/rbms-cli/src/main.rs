@@ -27,6 +27,9 @@ const USAGE: &str = "usage:\n  \
 /// Exit code for a usage error, matching the code the bare chart mode has always returned.
 const EXIT_USAGE: u8 = 2;
 
+/// What the groups of rows the play menu lists are printed under, before each group's own name.
+const PLAY_MENU_HEADING: &str = "PLAY";
+
 fn main() -> ExitCode {
     run(std::env::args())
 }
@@ -205,6 +208,12 @@ fn migration_lines(outcome: &LoadOutcome) -> Vec<String> {
     lines
 }
 
+/// What a group of settings rows is printed under: its own name, with the play menu's name before
+/// the groups that menu lists, two of which are called what a tab of the settings screen is.
+fn tab_heading(tab: SettingTab) -> String {
+    if SettingTab::PLAY_MENU.contains(&tab) { format!("{PLAY_MENU_HEADING} {}", tab.label()) } else { tab.label().to_string() }
+}
+
 /// Every settings row of one tab as `label = value`, read straight out of the document.
 fn tab_lines(config: &Config, tab: SettingTab) -> Vec<String> {
     tab_rows(tab, config).into_iter().map(|id| format!("  {:<22} {}", descriptor(id).label, display_value(config, id))).collect()
@@ -226,7 +235,7 @@ fn config_command(path: &Path) -> ExitCode {
         println!("{line}");
     }
     for tab in SettingTab::ALL {
-        println!("[{}]", tab.label());
+        println!("[{}]", tab_heading(tab));
         for line in tab_lines(&outcome.config, tab) {
             println!("{line}");
         }
@@ -377,6 +386,17 @@ mod tests {
         }
         let offered: usize = SettingTab::ALL.iter().map(|tab| rbms_config::tab_rows(*tab, &config).len()).sum();
         assert_eq!(rows, offered, "every row the settings table offers is printed exactly once");
+    }
+
+    /// Every group is printed under a heading of its own, the play menu's under that menu's name.
+    #[test]
+    fn every_settings_group_is_printed_under_its_own_heading() {
+        let mut headings: Vec<String> = SettingTab::ALL.into_iter().map(tab_heading).collect();
+        assert_eq!(headings[..SettingTab::PLAY_MENU.len()], ["PLAY SPEED", "PLAY LANE", "PLAY JUDGE", "PLAY CHART"]);
+        let count = headings.len();
+        headings.sort_unstable();
+        headings.dedup();
+        assert_eq!(headings.len(), count, "two groups are printed under one heading");
     }
 
     #[test]

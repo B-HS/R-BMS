@@ -13,7 +13,7 @@
 //! skin's own names for its options are longer than a column this narrow.
 //!
 //! The right half is not this screen's. [`SkinPreview`] draws it and says what is there, and this
-//! screen says where it goes ([`PREVIEW_RECT`]), fills the rectangle when no frame of a skin is in
+//! screen says where it goes ([`crate::stage::preview_menu::PREVIEW_RECT`]), fills the rectangle when no frame of a skin is in
 //! it -- with what the preview says of it, or with nothing at all for a wait the preview asks to be
 //! left dark -- and tells the preview when a setting moved. The preview takes no press of the mouse:
 //! a button of a previewed skin does nothing.
@@ -22,7 +22,7 @@
 //! over the screen it was asked for from, which Escape goes back to.
 
 use rbms_config::{AdjustOutcome, SettingId, SettingTab, adjust, descriptor};
-use rbms_render::{Color, Rect, Renderer, draw_text, draw_text_centered, draw_text_right, fit_text, text_width, theme};
+use rbms_render::{Renderer, text_width, theme};
 use rbms_skin::loader::{
     SKIN_TYPE_COURSE_RESULT, SKIN_TYPE_DECIDE, SKIN_TYPE_KEY_CONFIG, SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_PLAY_5KEYS, SKIN_TYPE_PLAY_7KEYS, SKIN_TYPE_PLAY_9KEYS,
     SKIN_TYPE_PLAY_10KEYS, SKIN_TYPE_PLAY_14KEYS, SKIN_TYPE_RESULT,
@@ -33,80 +33,16 @@ use winit::keyboard::KeyCode;
 use crate::dialog::{DialogHandle, DialogState, pick_skin_pack_folder};
 use crate::settings_ui::SettingRow;
 use crate::settings_view::SettingsLine;
-use crate::skin_preview::region::with_region;
-use crate::skin_preview::{PreviewStatus, SkinPreview};
+use crate::skin_preview::SkinPreview;
 use crate::skin_select::{OffsetAxis, SkinRow};
+use crate::stage::preview_menu::{
+    LABEL_GAP, LABEL_SCALE, LIST_RECT, ListEntry, ListWindow, NEXT_TAB as NEXT_SCREEN, ONE_STEP, PREVIOUS_TAB as PREVIOUS_SCREEN, ROW_STEP_BACK,
+    ROW_STEP_FORWARD, RowLook, SHIFT_STEPS, UTF8_MAX_BYTES, VALUE_SCALE, VISIBLE_ROWS, click_step, contains, draw_head, draw_hint, draw_info_lead,
+    draw_info_note, draw_info_panel, draw_info_row, draw_list, draw_preview, draw_tabs, fitted_value, last_top, revealed_top, row_room, shift_after,
+    stepped_tab, wheel_scrolled,
+};
 use crate::stage::{Canvas, FrameCtx, KeyInput, Stage, StageHandler, Transition, is_left_press};
-use crate::{AppShared, CW, Hot};
-
-/// The room kept between the screen's edges and everything on it.
-const MARGIN: f32 = 24.0;
-
-/// The gap between the list on the left and the preview on the right.
-const COLUMN_GAP: f32 = 16.0;
-
-/// Where the title is written, and how large.
-const TITLE_Y: f32 = 16.0;
-const TITLE_SCALE: f32 = 2.4;
-
-/// Where the name of the screen being configured is written, beside the title.
-const SCREEN_NAME_X: f32 = 132.0;
-const SCREEN_NAME_Y: f32 = 26.0;
-const SCREEN_NAME_SCALE: f32 = 1.6;
-
-/// The top of the two columns, under the head.
-const COLUMNS_TOP: f32 = 84.0;
-
-/// The preview: as large as the screen leaves room for at the shape of a screen, against the right
-/// edge. Sixteen by nine, on whole pixels at the size the screen is laid out for.
-const PREVIEW_W: f32 = 832.0;
-const PREVIEW_H: f32 = 468.0;
-
-/// Where the preview goes, in the space this screen is laid out in.
-pub(crate) const PREVIEW_RECT: Rect = Rect { x: CW as f32 - MARGIN - PREVIEW_W, y: COLUMNS_TOP, w: PREVIEW_W, h: PREVIEW_H };
-
-/// The list of settings: from the left margin to the gap before the preview, and down to the hint.
-pub(crate) const LIST_RECT: Rect = Rect { x: MARGIN, y: COLUMNS_TOP, w: PREVIEW_RECT.x - COLUMN_GAP - MARGIN, h: HINT_Y - HINT_GAP - COLUMNS_TOP };
-
-/// What is said under the preview: about the document being drawn and the row under the cursor.
-pub(crate) const INFO_RECT: Rect =
-    Rect { x: PREVIEW_RECT.x, y: COLUMNS_TOP + PREVIEW_H + INFO_GAP, w: PREVIEW_W, h: HINT_Y - HINT_GAP - (COLUMNS_TOP + PREVIEW_H + INFO_GAP) };
-
-/// The gap between the preview and what is said under it.
-const INFO_GAP: f32 = 12.0;
-
-/// Where the line of keys is written at the foot of the screen, how large, and the room above it.
-const HINT_Y: f32 = 688.0;
-const HINT_SCALE: f32 = 1.2;
-const HINT_GAP: f32 = 12.0;
-
-/// How thick the line round the preview is.
-const PREVIEW_BORDER: f32 = 2.0;
-
-/// The status written in the preview's place: how large its heading and what follows it are, and
-/// how far the heading is above the first line of what follows.
-const STATUS_SCALE: f32 = 1.8;
-const STATUS_DETAIL_SCALE: f32 = 1.2;
-const STATUS_LINE_GAP: f32 = 36.0;
-
-/// How many lines what follows the heading is written over -- a reason a skin did not load is a
-/// sentence with a file's name in it -- and how far one of them is from the next.
-const STATUS_DETAIL_LINES: usize = 3;
-const STATUS_DETAIL_PITCH: f32 = 18.0;
-
-/// How far the detail's text is kept from the preview's own edges.
-const STATUS_PAD: f32 = 24.0;
-
-/// The strip of screens above the preview: where it is, how tall, and the gap between two tabs. The
-/// tabs share its width evenly.
-const KIND_STRIP_Y: f32 = 24.0;
-const KIND_TAB_H: f32 = 32.0;
-const KIND_TAB_GAP: f32 = 6.0;
-const KIND_TAB_W: f32 = (PREVIEW_W - KIND_TAB_GAP * (SCREEN_KINDS.len() - 1) as f32) / SCREEN_KINDS.len() as f32;
-
-/// How large a tab's name is written, and how far below the tab's top.
-const KIND_SCALE: f32 = 1.5;
-const KIND_TEXT_Y: f32 = 8.0;
+use crate::{AppShared, Hot};
 
 /// The screens the strip offers, left to right, each with the short name on its tab: every screen
 /// this build draws with a skin, the play screens first. A screen a document can declare and nothing
@@ -124,28 +60,6 @@ const SCREEN_KINDS: [(i32, &str); 10] = [
     (SKIN_TYPE_KEY_CONFIG, "KEYS"),
 ];
 
-/// The rows of the list: how far they are kept from the list's own edges, how far one is from the
-/// next, how tall one is, and how many are on show at once.
-const LIST_PAD: f32 = 4.0;
-const ROW_PITCH: f32 = 33.0;
-const ROW_H: f32 = 29.0;
-const VISIBLE_ROWS: usize = 17;
-
-/// How far a row's label and value are kept from the row's own edges, and how far below its top
-/// each is written.
-const ROW_PAD: f32 = 10.0;
-const LABEL_TEXT_Y: f32 = 9.0;
-const VALUE_TEXT_Y: f32 = 8.0;
-
-/// How large a row's label and its value are written.
-const LABEL_SCALE: f32 = 1.3;
-const VALUE_SCALE: f32 = 1.4;
-
-/// The widest a row's value is drawn, as a share of the row, and the room kept between the label and
-/// it. The label has what the value leaves.
-const VALUE_MAX_SHARE: f32 = 0.55;
-const LABEL_GAP: f32 = 12.0;
-
 /// The most of the room a path is given that what is written before it may take and still be kept
 /// when the path is too long: that it is the default pack, that it is missing.
 const PATH_LEAD_MAX_SHARE: f32 = 0.6;
@@ -155,57 +69,6 @@ const PATH_SEPARATORS: [char; 2] = ['/', '\\'];
 
 /// What stands for the part of a path that was left out.
 const PATH_GAP: &str = "\u{2026}";
-
-/// The most bytes one character is written in, which is the buffer a character is measured from.
-const UTF8_MAX_BYTES: usize = 4;
-
-/// The scroll bar along the list's right edge: how wide it is, how far inside the edge, and the
-/// shortest its thumb is drawn.
-const SCROLL_BAR_W: f32 = 5.0;
-const SCROLL_BAR_INSET: f32 = 3.0;
-const SCROLL_THUMB_MIN_H: f32 = 16.0;
-
-/// The room the scroll bar takes from the rows.
-const SCROLL_BAR_ROOM: f32 = SCROLL_BAR_W + SCROLL_BAR_INSET * 2.0;
-
-/// Where the cursor's place in the list is written, measured up from the list's foot, and how large.
-const COUNTER_RISE: f32 = 20.0;
-const COUNTER_SCALE: f32 = 1.2;
-
-/// What is said under the preview: how far it is kept from the panel's edges, how large it is
-/// written, how far one line is from the next, and where what loaded and the row under the cursor
-/// begin, measured down from the panel's top.
-const INFO_PAD: f32 = 16.0;
-const INFO_SCALE: f32 = 1.3;
-const INFO_LINE_PITCH: f32 = 17.0;
-const INFO_LOADED_Y: f32 = 8.0;
-const INFO_ROW_Y: f32 = 46.0;
-
-/// How many lines the LOADED value is written over under the preview, and how many the value of the
-/// row under the cursor is when it does not fit beside its label.
-const INFO_LOADED_LINES: usize = 2;
-const INFO_VALUE_LINES: usize = 2;
-
-/// The room kept between the heading of a line under the preview and what follows it.
-const INFO_HEADING_GAP: f32 = 12.0;
-
-/// One step to the right on a row, which is what the right arrow, Enter and a press of the left
-/// button all ask for, and one step to the left, which the left arrow and a press of the right
-/// button ask for.
-const ROW_STEP_FORWARD: i32 = 1;
-const ROW_STEP_BACK: i32 = -1;
-
-/// How many steps one press of an arrow moves an offset row by, and by how many with Shift held: an
-/// offset runs over thousands of steps, and a preview is where it is set by eye.
-const ONE_STEP: usize = 1;
-const SHIFT_STEPS: usize = 10;
-
-/// One step along the strip of screens: forwards, and back.
-const NEXT_SCREEN: i32 = 1;
-const PREVIOUS_SCREEN: i32 = -1;
-
-/// The most rows one turn of the wheel moves the list by, whatever the device reports.
-const WHEEL_ROWS_MAX: f32 = 64.0;
 
 /// The screen's title.
 const TITLE: &str = "SKIN";
@@ -291,7 +154,7 @@ impl SkinMenuState {
             self.sel = at;
         }
         self.sel = self.sel.min(self.rows.len().saturating_sub(1));
-        self.top = self.top.min(self.last_top());
+        self.top = self.top.min(last_top(self.rows.len()));
         self.dirty = false;
     }
 
@@ -313,19 +176,9 @@ impl SkinMenuState {
         self.lines.get(at)
     }
 
-    /// The furthest the list can be scrolled: the last screenful.
-    fn last_top(&self) -> usize {
-        self.rows.len().saturating_sub(VISIBLE_ROWS)
-    }
-
     /// Scroll the list just far enough to have the cursor's row on show.
     fn reveal_cursor(&mut self) {
-        if self.sel < self.top {
-            self.top = self.sel;
-        } else if self.sel >= self.top + VISIBLE_ROWS {
-            self.top = self.sel + 1 - VISIBLE_ROWS;
-        }
-        self.top = self.top.min(self.last_top());
+        self.top = revealed_top(self.sel, self.top, self.rows.len());
     }
 
     /// Move the cursor to a row and bring it onto the screen.
@@ -460,8 +313,7 @@ impl SkinMenuState {
     /// Move the screen being configured one along the strip of screens, round its ends. From a
     /// screen the strip does not offer, either direction lands on the strip's first.
     fn step_screen(&mut self, ctx: &mut FrameCtx<'_>, delta: i32) {
-        let count = SCREEN_KINDS.len() as i32;
-        let next = kind_index(ctx.shared.config.skin.screen).map_or(0, |at| (at as i32 + delta).rem_euclid(count) as usize);
+        let next = stepped_tab(kind_index(ctx.shared.config.skin.screen), SCREEN_KINDS.len(), delta);
         self.choose_screen(ctx, SCREEN_KINDS[next].0);
     }
 
@@ -479,7 +331,7 @@ impl SkinMenuState {
             KeyCode::PageDown => self.focus(self.sel + VISIBLE_ROWS),
             KeyCode::ArrowLeft => self.step_focused(ctx, ROW_STEP_BACK, self.arrow_steps()),
             KeyCode::ArrowRight => self.step_focused(ctx, ROW_STEP_FORWARD, self.arrow_steps()),
-            KeyCode::Enter | KeyCode::NumpadEnter => self.step_focused(ctx, ROW_STEP_FORWARD, ONE_STEP),
+            KeyCode::Enter | KeyCode::NumpadEnter => self.step_focused(ctx, ROW_STEP_FORWARD, usize::from(ONE_STEP)),
             KeyCode::Digit0 | KeyCode::Numpad0 => {
                 self.reveal_cursor();
                 self.reset_focused_row(ctx);
@@ -489,9 +341,10 @@ impl SkinMenuState {
         Transition::Stay
     }
 
-    /// How many steps a press of an arrow asks for: more with Shift held.
+    /// How many steps a press of an arrow asks for: more with Shift held. An offset runs over
+    /// thousands of steps, and a preview is where it is set by eye.
     fn arrow_steps(&self) -> usize {
-        if self.shift_held { SHIFT_STEPS } else { ONE_STEP }
+        usize::from(if self.shift_held { SHIFT_STEPS } else { ONE_STEP })
     }
 
     /// Step the row under the cursor, with the row on show.
@@ -502,127 +355,36 @@ impl SkinMenuState {
         }
     }
 
-    /// Draw the head: the title, and the name of the screen being configured beside it.
-    fn draw_head(shared: &AppShared, canvas: &mut Canvas<'_>) {
-        let colors = theme();
-        draw_text(canvas, MARGIN, TITLE_Y, TITLE_SCALE, colors.text, TITLE);
-        let screen_name = shared.setting_line(SettingId::SkinScreen).1;
-        let room = LIST_RECT.x + LIST_RECT.w - SCREEN_NAME_X;
-        draw_text(canvas, SCREEN_NAME_X, SCREEN_NAME_Y, SCREEN_NAME_SCALE, Color::YELLOW, &fit_text(&screen_name, SCREEN_NAME_SCALE, room));
-    }
-
-    /// Draw the strip of screens over the preview, the one being configured lit, and record each tab
-    /// as clickable.
-    fn draw_kinds(shared: &mut AppShared, canvas: &mut Canvas<'_>) {
-        let colors = theme();
-        let chosen = kind_index(shared.config.skin.screen);
-        for (at, (_, name)) in SCREEN_KINDS.iter().enumerate() {
-            let on = chosen == Some(at);
-            let rect = kind_rect(at);
-            canvas.fill_rect(rect, if on { colors.button } else { colors.panel });
-            draw_text_centered(canvas, rect.x + rect.w * 0.5, rect.y + KIND_TEXT_Y, KIND_SCALE, if on { Color::YELLOW } else { colors.text_dim }, name);
-            shared.hot.push((rect, Hot::SkinMenuKind(at)));
-        }
-    }
-
-    /// Draw the rows on show, the cursor's lit, with the scroll bar and the cursor's place in the
-    /// list when there are more rows than fit, and record each drawn row as clickable. A value too
-    /// long for its row is cut short at its end, except the pack folder's, which is a path: it keeps
-    /// its end ([`fit_path`]) and has all the room its row's short label leaves.
-    fn draw_list(&self, shared: &mut AppShared, canvas: &mut Canvas<'_>) {
-        let colors = theme();
-        canvas.fill_rect(LIST_RECT, colors.panel);
-        let shown = self.top..(self.top + VISIBLE_ROWS).min(self.lines.len());
-        for (slot, index) in shown.enumerate() {
+    /// Draw the rows on show ([`draw_list`]). A value too long for its row is cut short at its end,
+    /// except the pack folder's, which is a path: it keeps its end ([`fit_path`]) and has all the
+    /// room its row's short label leaves.
+    fn draw_rows(&self, shared: &mut AppShared, canvas: &mut Canvas<'_>) {
+        let list = ListWindow { len: self.lines.len(), sel: self.sel, top: self.top };
+        let entry = |index: usize| {
             let SettingsLine { label, value, .. } = &self.lines[index];
-            let on = index == self.sel;
-            let rect = row_rect(slot);
-            if on {
-                canvas.fill_rect(rect, colors.button);
-            }
-            let room = rect.w - ROW_PAD * 2.0;
             let value = match self.rows.get(index) {
                 Some(SettingRow::Fixed(SettingId::SkinPack)) => fit_path(value, VALUE_SCALE, pack_value_room(label)),
-                _ => fit_text(value, VALUE_SCALE, room * VALUE_MAX_SHARE),
+                _ => fitted_value(value),
             };
-            let label = fit_text(label, LABEL_SCALE, room - text_width(&value, VALUE_SCALE) - LABEL_GAP);
-            draw_text(canvas, rect.x + ROW_PAD, rect.y + LABEL_TEXT_Y, LABEL_SCALE, if on { colors.text } else { colors.text_dim }, &label);
-            draw_text_right(canvas, rect.x + rect.w - ROW_PAD, rect.y + VALUE_TEXT_Y, VALUE_SCALE, if on { Color::YELLOW } else { colors.text }, &value);
-            shared.hot.push((rect, Hot::SkinMenuRow(index)));
-        }
-        if self.lines.len() <= VISIBLE_ROWS {
-            return;
-        }
-        canvas.fill_rect(scroll_track(), colors.panel_hi);
-        canvas.fill_rect(scroll_thumb(self.top, self.lines.len()), colors.text_muted);
-        let counter = format!("{} / {}", self.sel + 1, self.lines.len());
-        draw_text_right(canvas, LIST_RECT.x + LIST_RECT.w - ROW_PAD, LIST_RECT.y + LIST_RECT.h - COUNTER_RISE, COUNTER_SCALE, colors.text_muted, &counter);
+            ListEntry { label, value, look: RowLook::Plain }
+        };
+        draw_list(shared, canvas, list, entry, Hot::SkinMenuRow);
     }
 
     /// Draw what is said under the preview: what loaded, in full, and the row under the cursor with
-    /// its label and value in full and what the row is for. A value that does not fit beside its
-    /// label -- a folder's path -- is written under it, over as many lines as it is given.
+    /// its label and value in full and what the row is for.
     fn draw_info(&self, canvas: &mut Canvas<'_>) {
-        let colors = theme();
-        canvas.fill_rect(INFO_RECT, colors.panel);
-        let left = INFO_RECT.x + INFO_PAD;
-        let room = INFO_RECT.w - INFO_PAD * 2.0;
-
+        draw_info_panel(canvas);
         if let Some(loaded) = self.loaded_line() {
-            draw_text(canvas, left, INFO_RECT.y + INFO_LOADED_Y, INFO_SCALE, colors.text_muted, &loaded.label);
-            let indent = text_width(&loaded.label, INFO_SCALE) + INFO_HEADING_GAP;
-            for (at, line) in wrapped(&loaded.value, INFO_SCALE, room - indent, INFO_LOADED_LINES).iter().enumerate() {
-                draw_text(canvas, left + indent, INFO_RECT.y + INFO_LOADED_Y + at as f32 * INFO_LINE_PITCH, INFO_SCALE, colors.text_dim, line);
-            }
+            draw_info_lead(canvas, &loaded.label, &loaded.value);
         }
-
         if self.pack_picker.is_some() {
-            draw_text(canvas, left, INFO_RECT.y + INFO_ROW_Y, INFO_SCALE, colors.accent, PICKER_NOTE);
+            draw_info_note(canvas, PICKER_NOTE);
             return;
         }
-        let (Some(row), Some(line)) = (self.focused(), self.lines.get(self.sel)) else {
-            return;
-        };
-        let label = fit_text(&line.label, INFO_SCALE, room);
-        let mut y = INFO_RECT.y + INFO_ROW_Y;
-        draw_text(canvas, left, y, INFO_SCALE, colors.text, &label);
-        if text_width(&label, INFO_SCALE) + INFO_HEADING_GAP + text_width(&line.value, INFO_SCALE) <= room {
-            draw_text_right(canvas, left + room, y, INFO_SCALE, Color::YELLOW, &line.value);
-            y += INFO_LINE_PITCH;
-        } else {
-            y += INFO_LINE_PITCH;
-            for part in wrapped(&line.value, INFO_SCALE, room, INFO_VALUE_LINES) {
-                draw_text(canvas, left, y, INFO_SCALE, Color::YELLOW, &part);
-                y += INFO_LINE_PITCH;
-            }
+        if let (Some(row), Some(line)) = (self.focused(), self.lines.get(self.sel)) {
+            draw_info_row(canvas, &line.label, &line.value, row_help(row));
         }
-        draw_text(canvas, left, y, INFO_SCALE, colors.text_muted, &fit_text(row_help(row), INFO_SCALE, room));
-    }
-
-    /// Fill the preview's rectangle and write `status` in it, for a frame the preview drew nothing
-    /// on: a heading, and under it what follows from it or why, over as many lines as it is given.
-    ///
-    /// The fill goes through the region a frame of a skin would have been drawn in, so it covers the
-    /// very pixels that frame covers: the preview is put on whole pixels of the target, which at a
-    /// window that is not a whole multiple of this screen's size is not where the rectangle's own
-    /// edges fall.
-    fn draw_status(canvas: &mut Canvas<'_>, status: &PreviewStatus) {
-        let colors = theme();
-        with_region(canvas, PREVIEW_RECT, |region| region.clear(colors.panel));
-        let middle = (PREVIEW_RECT.x + PREVIEW_RECT.w * 0.5, PREVIEW_RECT.y + PREVIEW_RECT.h * 0.5);
-        if let Some(message) = status.message() {
-            draw_text_centered(canvas, middle.0, middle.1 - STATUS_LINE_GAP, STATUS_SCALE, colors.text, message);
-        }
-        for (at, line) in status_detail_lines(status).iter().enumerate() {
-            draw_text_centered(canvas, middle.0, middle.1 + at as f32 * STATUS_DETAIL_PITCH, STATUS_DETAIL_SCALE, colors.text_muted, line);
-        }
-    }
-
-    /// Leave the preview's rectangle dark, for a wait the preview asks not to be written over
-    /// ([`SkinPreview::waits_in_the_dark`]). The fill covers the pixels a frame of a skin covers, as
-    /// the status panel's does.
-    fn draw_dark(canvas: &mut Canvas<'_>) {
-        with_region(canvas, PREVIEW_RECT, |region| region.clear(Color::BLACK));
     }
 }
 
@@ -631,40 +393,9 @@ fn kind_index(screen: i32) -> Option<usize> {
     SCREEN_KINDS.iter().position(|(kind, _)| *kind == screen)
 }
 
-/// Where the tab at one place of the strip of screens is drawn.
-fn kind_rect(at: usize) -> Rect {
-    Rect::new(PREVIEW_RECT.x + at as f32 * (KIND_TAB_W + KIND_TAB_GAP), KIND_STRIP_Y, KIND_TAB_W, KIND_TAB_H)
-}
-
 /// The room the pack folder's value is written in: all of its row but its label, written whole.
 fn pack_value_room(label: &str) -> f32 {
-    row_rect(0).w - ROW_PAD * 2.0 - text_width(label, LABEL_SCALE) - LABEL_GAP
-}
-
-/// Where the row in one slot of the list is drawn, the first slot being the top one on show.
-fn row_rect(slot: usize) -> Rect {
-    Rect::new(LIST_RECT.x + LIST_PAD, LIST_RECT.y + LIST_PAD + slot as f32 * ROW_PITCH, LIST_RECT.w - LIST_PAD - SCROLL_BAR_ROOM, ROW_H)
-}
-
-/// The whole length the scroll bar's thumb travels, which is drawn under it so the thumb's own
-/// length reads against something.
-fn scroll_track() -> Rect {
-    Rect::new(LIST_RECT.x + LIST_RECT.w - SCROLL_BAR_INSET - SCROLL_BAR_W, LIST_RECT.y + LIST_PAD, SCROLL_BAR_W, VISIBLE_ROWS as f32 * ROW_PITCH)
-}
-
-/// Where the scroll bar's thumb is for a list of `len` rows whose first row on show is `top`: as
-/// much of the bar as the rows on show are of the list, and as far down it as the list is scrolled.
-fn scroll_thumb(top: usize, len: usize) -> Rect {
-    let track = scroll_track();
-    let rows = len.max(1) as f32;
-    let height = (track.h * VISIBLE_ROWS as f32 / rows).clamp(SCROLL_THUMB_MIN_H.min(track.h), track.h);
-    let travel = len.saturating_sub(VISIBLE_ROWS).max(1) as f32;
-    Rect::new(track.x, track.y + (track.h - height) * (top as f32 / travel).min(1.0), track.w, height)
-}
-
-/// Whether a point of the screen is inside a rectangle of it.
-fn contains(rect: Rect, at: (f32, f32)) -> bool {
-    at.0 >= rect.x && at.0 < rect.x + rect.w && at.1 >= rect.y && at.1 < rect.y + rect.h
+    row_room() - text_width(label, LABEL_SCALE) - LABEL_GAP
 }
 
 /// What is said of one row under the preview.
@@ -677,12 +408,6 @@ fn row_help(row: SettingRow) -> &'static str {
         SettingRow::Skin(SkinRow::Offset(_, OffsetAxis::R)) => OFFSET_ANGLE_HELP,
         SettingRow::Skin(SkinRow::Offset(_, OffsetAxis::A)) => OFFSET_ALPHA_HELP,
     }
-}
-
-/// What is written under a status's heading in the preview's place, broken over the lines it is
-/// given.
-fn status_detail_lines(status: &PreviewStatus) -> Vec<String> {
-    status.detail().map_or_else(Vec::new, |detail| wrapped(detail, STATUS_DETAIL_SCALE, PREVIEW_RECT.w - STATUS_PAD * 2.0, STATUS_DETAIL_LINES))
 }
 
 /// A value that holds a path, cut to `width` at `scale` by leaving out the beginning of the path
@@ -710,48 +435,6 @@ fn fit_path(value: &str, scale: f32, width: f32) -> String {
     format!("{lead}{PATH_GAP}{}", &value[tail..])
 }
 
-/// `text` broken into at most `lines` lines no wider than `width` at `scale`: at a space where a line
-/// has one, and anywhere where it has none. What does not fit the last line is cut short.
-///
-/// A break `text` brings with it is not one of them: a line feed, a tab or any other control
-/// character is read as a space, so what is written never runs to more lines than it was given.
-fn wrapped(text: &str, scale: f32, width: f32, lines: usize) -> Vec<String> {
-    let text: String = text.chars().map(|ch| if ch.is_control() { ' ' } else { ch }).collect();
-    let mut out = Vec::new();
-    let mut rest = text.trim();
-    while !rest.is_empty() && out.len() < lines {
-        let cut = if out.len() + 1 == lines { rest.len() } else { line_break(rest, scale, width) };
-        if cut == 0 || cut >= rest.len() {
-            out.push(fit_text(rest, scale, width));
-            break;
-        }
-        out.push(rest[..cut].trim_end().to_string());
-        rest = rest[cut..].trim_start();
-    }
-    out
-}
-
-/// Where the first line of `text` ends when it is broken to `width` at `scale`, as an offset into
-/// it: the last space before it runs past the width, the character it runs past the width on when
-/// there was no space, and its end when all of it fits.
-///
-/// The width is the sum of the characters' own, as `fit_text` measures a line it cuts short.
-fn line_break(text: &str, scale: f32, width: f32) -> usize {
-    let mut used = 0.0;
-    let mut space = None;
-    let mut buffer = [0u8; UTF8_MAX_BYTES];
-    for (at, ch) in text.char_indices() {
-        used += text_width(ch.encode_utf8(&mut buffer), scale);
-        if used > width {
-            return space.unwrap_or(at);
-        }
-        if ch == ' ' {
-            space = Some(at);
-        }
-    }
-    text.len()
-}
-
 impl StageHandler for SkinMenuState {
     /// Walk the skin folder on the way in, so a document dropped into it while the game was running
     /// is offered, read the document of the screen being configured if it is not the one that was
@@ -776,8 +459,8 @@ impl StageHandler for SkinMenuState {
     /// ignored while the native folder picker is up: it has the keyboard, and the screen behind it
     /// must not act on what is typed there.
     fn handle_key(&mut self, ctx: &mut FrameCtx<'_>, key: KeyInput<'_>) -> Transition {
-        if matches!(key.code, KeyCode::ShiftLeft | KeyCode::ShiftRight) {
-            self.shift_held = key.pressed || (self.shift_held && !key.released);
+        if let Some(held) = shift_after(self.shift_held, &key) {
+            self.shift_held = held;
             return Transition::Stay;
         }
         if !key.pressed || self.pack_picker.is_some() {
@@ -792,10 +475,8 @@ impl StageHandler for SkinMenuState {
     /// A press of the left button on a tab of the strip configures that screen. A press anywhere
     /// else -- the preview included -- does nothing.
     fn handle_mouse(&mut self, ctx: &mut FrameCtx<'_>, at: (f32, f32), button: MouseButton, pressed: bool) -> Transition {
-        let delta = match button {
-            MouseButton::Left => ROW_STEP_FORWARD,
-            MouseButton::Right => ROW_STEP_BACK,
-            _ => return Transition::Stay,
+        let Some(delta) = click_step(button) else {
+            return Transition::Stay;
         };
         if !pressed || self.pack_picker.is_some() {
             return Transition::Stay;
@@ -805,7 +486,7 @@ impl StageHandler for SkinMenuState {
             Some(Hot::SkinMenuRow(index)) => {
                 if let Some(row) = self.rows.get(index).copied() {
                     self.sel = index;
-                    self.step(ctx, row, delta, ONE_STEP);
+                    self.step(ctx, row, delta, usize::from(ONE_STEP));
                 }
             }
             Some(Hot::SkinMenuKind(index)) if is_left_press(button, pressed) => {
@@ -825,11 +506,7 @@ impl StageHandler for SkinMenuState {
             return Transition::Stay;
         }
         self.ensure_rows(ctx.shared);
-        self.wheel_lines = (self.wheel_lines + lines).clamp(-WHEEL_ROWS_MAX, WHEEL_ROWS_MAX);
-        let whole = self.wheel_lines.trunc();
-        self.wheel_lines -= whole;
-        let last = self.last_top();
-        self.top = if whole < 0.0 { self.top.saturating_sub((-whole) as usize) } else { (self.top + whole as usize).min(last) };
+        self.top = wheel_scrolled(&mut self.wheel_lines, self.top, self.rows.len(), lines);
         Transition::Stay
     }
 
@@ -849,29 +526,15 @@ impl StageHandler for SkinMenuState {
             self.dirty = true;
         }
         self.ensure_rows(ctx.shared);
-        let colors = theme();
         canvas.clear_bga();
-        canvas.clear(colors.bg);
-        SkinMenuState::draw_head(ctx.shared, canvas);
-        SkinMenuState::draw_kinds(ctx.shared, canvas);
-        self.draw_list(ctx.shared, canvas);
+        canvas.clear(theme().bg);
+        draw_head(canvas, TITLE, &ctx.shared.setting_line(SettingId::SkinScreen).1);
+        let chosen = kind_index(ctx.shared.config.skin.screen);
+        draw_tabs(ctx.shared, canvas, SCREEN_KINDS.iter().map(|(_, name)| *name), chosen, Hot::SkinMenuKind);
+        self.draw_rows(ctx.shared, canvas);
         self.draw_info(canvas);
-
-        let border = Rect::new(
-            PREVIEW_RECT.x - PREVIEW_BORDER,
-            PREVIEW_RECT.y - PREVIEW_BORDER,
-            PREVIEW_RECT.w + PREVIEW_BORDER * 2.0,
-            PREVIEW_RECT.h + PREVIEW_BORDER * 2.0,
-        );
-        canvas.fill_rect(border, colors.divider);
-        self.preview.draw(ctx, canvas, PREVIEW_RECT);
-        if self.preview.waits_in_the_dark() {
-            SkinMenuState::draw_dark(canvas);
-        } else if !self.preview.status().is_drawn() {
-            SkinMenuState::draw_status(canvas, self.preview.status());
-        }
-
-        draw_text(canvas, MARGIN, HINT_Y, HINT_SCALE, colors.text_muted, HINT);
+        draw_preview(&mut self.preview, ctx, canvas);
+        draw_hint(canvas, HINT);
     }
 
     /// The browser's lines, and what the preview last left in its rectangle.

@@ -261,6 +261,20 @@ fn the_lane_figures_are_read_in_thousandths_of_the_share_each_is_set_to_whether_
     assert_eq!(state.integer(NUMBER_LANECOVER2), Some(224), "the lift is a float widened to a double, so (1 - 0.1) * 0.25 * 1000 falls just short of 225");
 }
 
+/// A share thirty additions of a hundredth came to stands a hair short of three tenths, and still
+/// reads as the three hundred it was set to.
+#[test]
+fn a_lane_figure_a_hair_short_of_its_thousandth_reads_as_that_thousandth() {
+    let short = (0..30).fold(0.0_f32, |share, _| share + 0.01);
+    assert!(short < 0.3, "thirty hundredths added up came to {short}, which is not short of three tenths");
+    let shown = shown_with(PlayLive { lanes: LaneSettings { lane_cover: short, lift: short, hidden: short, ..live().lanes }, ..live() });
+    let state = state(&shown);
+
+    assert_eq!(state.integer(NUMBER_LANECOVER1), Some(300));
+    assert_eq!(state.integer(NUMBER_LIFT1), Some(300));
+    assert_eq!(state.integer(NUMBER_HIDDEN1), Some(300));
+}
+
 #[test]
 fn the_duration_is_the_travel_time_under_the_cover_and_the_green_number_three_fifths_of_it() {
     let state_with = |cover_on: bool| {

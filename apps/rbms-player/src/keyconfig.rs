@@ -665,6 +665,7 @@ pub enum Shortcut {
     OptionsHold,
     Settings,
     SkinMenu,
+    PlayMenu,
     KeyConfig,
     Folders,
     Tables,
@@ -687,7 +688,7 @@ pub enum Shortcut {
 
 impl Shortcut {
     /// Every shortcut, group by group, in the order the key editor and the key guide list them.
-    pub const ALL: [Shortcut; 29] = [
+    pub const ALL: [Shortcut; 30] = [
         Shortcut::Search,
         Shortcut::Filter,
         Shortcut::Sort,
@@ -699,6 +700,7 @@ impl Shortcut {
         Shortcut::OptionsHold,
         Shortcut::Settings,
         Shortcut::SkinMenu,
+        Shortcut::PlayMenu,
         Shortcut::KeyConfig,
         Shortcut::Folders,
         Shortcut::Tables,
@@ -730,7 +732,7 @@ impl Shortcut {
             | Shortcut::Ranking
             | Shortcut::OptionsPin
             | Shortcut::OptionsHold => ShortcutGroup::Browser,
-            Shortcut::Settings | Shortcut::SkinMenu | Shortcut::KeyConfig | Shortcut::Folders | Shortcut::Tables => ShortcutGroup::Screens,
+            Shortcut::Settings | Shortcut::SkinMenu | Shortcut::PlayMenu | Shortcut::KeyConfig | Shortcut::Folders | Shortcut::Tables => ShortcutGroup::Screens,
             Shortcut::RefMode
             | Shortcut::RefSort
             | Shortcut::RefLnMode
@@ -767,6 +769,7 @@ impl Shortcut {
             Shortcut::OptionsHold => "OPTIONS OVERLAY (HOLD)",
             Shortcut::Settings => "SETTINGS (SHIFT: COURSE LIST)",
             Shortcut::SkinMenu => "SKIN MENU",
+            Shortcut::PlayMenu => "PLAY MENU",
             Shortcut::KeyConfig => "KEY CONFIG",
             Shortcut::Folders => "MUSIC FOLDERS",
             Shortcut::Tables => "DIFFICULTY TABLES",
@@ -802,6 +805,7 @@ impl Shortcut {
             Shortcut::OptionsHold => "options_hold",
             Shortcut::Settings => "settings",
             Shortcut::SkinMenu => "skin_menu",
+            Shortcut::PlayMenu => "play_menu",
             Shortcut::KeyConfig => "key_config",
             Shortcut::Folders => "folders",
             Shortcut::Tables => "tables",
@@ -823,8 +827,8 @@ impl Shortcut {
         }
     }
 
-    /// The key the shortcut ships on. Every one of them but the key to the key editor is the key
-    /// the application read for it before any of them could be changed.
+    /// The key the shortcut ships on. Every one of them but the keys to the key editor and to the
+    /// play menu is the key the application read for it before any of them could be changed.
     pub fn default_key(self) -> KeyCode {
         match self {
             Shortcut::Search => KeyCode::Slash,
@@ -838,6 +842,7 @@ impl Shortcut {
             Shortcut::OptionsHold => crate::app_options::HOLD_KEY,
             Shortcut::Settings => KeyCode::Tab,
             Shortcut::SkinMenu => crate::stage::select::SKIN_MENU_KEY,
+            Shortcut::PlayMenu => crate::stage::select::PLAY_MENU_KEY,
             Shortcut::KeyConfig => KeyCode::F5,
             Shortcut::Folders => KeyCode::KeyO,
             Shortcut::Tables => KeyCode::KeyT,
@@ -1180,12 +1185,29 @@ impl KeyConfig {
     /// The key a shortcut is read from: the one the player gave it, none when they took its key
     /// away, and otherwise the one it ships on. A word the file holds that names no key is treated
     /// as the shipped key, so a hand-edited file cannot leave a screen with no way into it.
+    ///
+    /// A shortcut the file says nothing of does not take its shipped key from a shortcut the player
+    /// put there ([`KeyConfig::shipped_key_unless_given_away`]).
     pub fn shortcut_key(&self, shortcut: Shortcut) -> Option<KeyCode> {
         match self.shortcuts.get(shortcut.config_key()) {
-            None => Some(shortcut.default_key()),
+            None => self.shipped_key_unless_given_away(shortcut),
             Some(token) if token.is_empty() => None,
             Some(token) => Some(key_from_name(token).unwrap_or_else(|| shortcut.default_key())),
         }
+    }
+
+    /// The key a shortcut ships on, or `None` when the file gives that very key to another shortcut
+    /// read on the same screen.
+    ///
+    /// A file written before a shortcut existed has no word for it, and the player may long since
+    /// have moved another shortcut onto the key the new one ships on. A key the file names is the
+    /// player's choice and keeps its shortcut; the new one is left without a key, which the key
+    /// editor shows as a row to fill in, rather than quietly reading the key first.
+    fn shipped_key_unless_given_away(&self, shortcut: Shortcut) -> Option<KeyCode> {
+        let shipped = shortcut.default_key();
+        let given_to = |other: Shortcut| self.shortcuts.get(other.config_key()).and_then(|token| key_from_name(token)) == Some(shipped);
+        let given_away = Shortcut::ALL.into_iter().any(|other| other != shortcut && other.screen() == shortcut.screen() && given_to(other));
+        (!given_away).then_some(shipped)
     }
 
     /// The shortcut `screen` reads from `code`, if one is on it.

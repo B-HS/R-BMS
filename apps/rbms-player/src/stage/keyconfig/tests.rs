@@ -162,7 +162,7 @@ fn the_page_keys_jump_from_group_to_group() {
 /// control of a run and each shortcut.
 #[test]
 fn enter_then_a_key_binds_every_kind_of_row() {
-    let free = [KeyCode::F6, KeyCode::F7, KeyCode::F8, KeyCode::F10, KeyCode::F11, KeyCode::Insert, KeyCode::Home, KeyCode::End];
+    let free = [KeyCode::F6, KeyCode::F7, KeyCode::F10, KeyCode::F11, KeyCode::Insert, KeyCode::Home, KeyCode::End];
     let mode = Mode::BEAT_7K;
     for (index, target) in Bindable::all(mode).into_iter().enumerate() {
         let mut app = app(&format!("bind-{index}"));
