@@ -1,18 +1,18 @@
 # Lua 스킨 완전 호환과 기본 스킨 교체 (2026-10-09 ~ 2026-10-11)
 
-> 최종 갱신 2026-10-11 · 대응 커밋 `36c52a5` ~ `d0af473`(브랜치 `dev`) · 사양 `docs/plan/2026-10-09-lua-skin-compat.md` · 결정 `docs/acknowledge/2026-10-09-lua-skin-compat-decisions.md`
+> 최종 갱신 2026-10-11 · 대응 커밋 `36c52a5` ~ `d4f2ca4`(브랜치 `dev`) · 사양 `docs/plan/2026-10-09-lua-skin-compat.md` · 결정 `docs/acknowledge/2026-10-09-lua-skin-compat-decisions.md`
 
 ## 무엇을 했나
 
 | 단계 | 내용 | 끝 커밋 |
 | --- | --- | --- |
-| 조사(L1) | 외부 스킨 ModernChic, beatoraja 스킨 엔진, R-BMS 현황의 격차 조사. 보고서 16개를 `docs/reference/skin-compat/` 에 저장 | `36c52a5` |
-| 웨이브 1A·1B | 구 번들 3세대와 혼합 합성 삭제, Lua 5.2 전환, 타이머 µs, 장면 시계, 창 크기와 해상도 설정, 캡처 하니스 | `6e5bb37` |
-| 웨이브 2A·2B | Lua 런타임(격리, 쓰기 오버레이, 예산), 2패스 로더, `SkinHost`, `rbms-cli skin-dump`, 스킨 팩 지정 | `032a435` |
-| 웨이브 3A·3B | 공통 그리기 의미론, 텍스처 관리자, 결정 화면 | `1fe0123` |
+| 조사(L1) | 외부 스킨 ModernChic, beatoraja 스킨 엔진, R-BMS 현황의 격차 조사. 보고서 16개를 `docs/reference/skin-compat/` 에 저장 | `fcf912d` |
+| 웨이브 1A·1B | 구 번들 3세대와 혼합 합성 삭제, Lua 5.2 전환, 타이머 µs, 장면 시계, 창 크기와 해상도 설정, 캡처 하니스 | `3c6f244` |
+| 웨이브 2A·2B | Lua 런타임(격리, 쓰기 오버레이, 예산), 2패스 로더, `SkinHost`, `rbms-cli skin-dump`, 스킨 팩 지정 | `992dea6` |
+| 웨이브 3A·3B | 공통 그리기 의미론, 텍스처 관리자, 결정 화면 | `c864c49` |
 | 웨이브 4 | 결과와 코스 결과 | `6b95bfd` |
-| 웨이브 5 | 선곡 | `721d196` |
-| 웨이브 6 | 플레이 SP·DP | `3566189` |
+| 웨이브 5 | 선곡 | `0006d24` |
+| 웨이브 6 | 플레이 SP·DP | `e604ea9` |
 | 웨이브 7A·7B | 비트맵 폰트, mp4 동영상 source(`crates/rbms-video`) | `2aae20a` |
 | CI 복구 | 웨이브 1B~7B 동안 확인하지 않은 세 OS 의 테스트 실패 수정 | `366cf32` |
 | 웨이브 8A | 선곡 키 표의 NEXT_REPLAY 제거(D8), 기본 스킨 설계서와 골격 | `039ced3` |
