@@ -923,6 +923,10 @@ impl SelectState {
     /// the same way on either browser: the reference has no event that opens a screen of its kind,
     /// so there is none for a skin's button to run. The option overlay's two keys and the key held
     /// for the detail panel are read where those are, not here.
+    ///
+    /// The reload of the difficulty tables only starts here: the tables are fetched beside the
+    /// browser, which goes on being used, and what comes back is taken a frame at a time
+    /// ([`crate::tablesrc::apply_finished_reloads`]).
     fn run_shortcut(&mut self, shared: &mut AppShared, shortcut: Shortcut) -> Transition {
         let skinned = skin_status(shared) == SkinStatus::Ready;
         if shortcut.screen() != ShortcutScreen::Browser || (shortcut.group() == ShortcutGroup::SkinBrowser && !skinned) {
@@ -938,6 +942,7 @@ impl SelectState {
             Shortcut::Favourite | Shortcut::RefFavourite => shared.toggle_focused_favorite(),
             Shortcut::Records => self.open_record_modal(shared),
             Shortcut::Ranking => self.toggle_ranking_panel(shared),
+            Shortcut::ReloadTables => crate::tablesrc::reload_tables(shared, None),
             Shortcut::Settings if self.shift_held => {
                 self.tab = self.tab.next();
                 self.refresh_courses(shared);
@@ -1018,6 +1023,7 @@ impl StageHandler for SelectState {
         if !matches!(started, Transition::Stay) {
             return started;
         }
+        crate::tablesrc::apply_finished_reloads(ctx.shared);
         let skin = skin_status(ctx.shared);
         if ctx.shared.skin_text_is_focused() {
             self.confirm_search(ctx.shared);

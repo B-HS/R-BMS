@@ -69,7 +69,8 @@ const SEARCH_VISIBLE_CHARS: usize = 24;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum WhileTyping {
     /// It reorders, filters or marks the list under the box, and the typing goes on: the order, the
-    /// star, the mode filter, the long note mode and the replay slot.
+    /// star, the mode filter, the long note mode and the replay slot. So does the reload of the
+    /// difficulty tables, which runs beside the browser and opens nothing.
     UnderTheBox,
     /// It ends the typing and is then the list's, because what it does is put a panel over the list
     /// or leave it for another screen.
@@ -91,7 +92,8 @@ impl WhileTyping {
             | Shortcut::RefFavourite
             | Shortcut::RefMode
             | Shortcut::RefLnMode
-            | Shortcut::RefReplay => WhileTyping::UnderTheBox,
+            | Shortcut::RefReplay
+            | Shortcut::ReloadTables => WhileTyping::UnderTheBox,
             Shortcut::Filter
             | Shortcut::Practice
             | Shortcut::Records

@@ -939,6 +939,39 @@ fn a_shortcut_the_file_says_nothing_of_leaves_its_shipped_key_to_the_shortcut_th
     assert_eq!(restored.shortcut_key(Shortcut::Folders), Some(Shortcut::Folders.default_key()));
 }
 
+/// The key that fetches the difficulty tables again is a shortcut of the browser like the others. A
+/// key config written before it existed reads as it always did and leaves the reload on the key it
+/// ships on -- unless the player had put another shortcut of the browser there, which keeps it. The
+/// file gains nothing until the player moves the reload.
+#[test]
+fn a_key_config_written_before_the_table_reload_reads_as_it_did() {
+    let shipped = Shortcut::ReloadTables.default_key();
+    assert_eq!((shipped, Shortcut::ReloadTables.config_key(), Shortcut::ReloadTables.label()), (KeyCode::F6, "reload_tables", "RELOAD DIFFICULTY TABLES"));
+    assert_eq!((Shortcut::ReloadTables.group(), Shortcut::ReloadTables.screen()), (crate::keyconfig::ShortcutGroup::Browser, ShortcutScreen::Browser));
+    assert!(Shortcut::ReloadTables.takes_a_pad(), "a controller can be given the reload");
+
+    let earlier = r#"(lanes: {"7k": ["LSHIFT", "Z", "S", "X", "D", "C", "F", "V"]}, shortcuts: {"tables": "F7", "folders": ""})"#;
+    let older: KeyConfig = ron::from_str(earlier).expect("an earlier file parses");
+    assert_eq!(older.shortcut_key(Shortcut::Tables), Some(KeyCode::F7), "what the file says is read as before");
+    assert_eq!(older.shortcut_key(Shortcut::Folders), None);
+    assert_eq!(older.shortcut_key(Shortcut::ReloadTables), Some(shipped), "a file with no word for the reload leaves it on the key it ships on");
+    assert_eq!(older.shortcut_on(ShortcutScreen::Browser, shipped), Some(Shortcut::ReloadTables));
+    assert!(collisions(&older, Mode::BEAT_7K).is_empty());
+
+    let taken: KeyConfig = ron::from_str(r#"(shortcuts: {"filter": "F6"})"#).expect("the file parses");
+    assert_eq!(taken.shortcut_key(Shortcut::Filter), Some(shipped));
+    assert_eq!(taken.shortcut_key(Shortcut::ReloadTables), None, "the reload took a key the player had given another shortcut of the browser");
+    assert_eq!(taken.shortcut_on(ShortcutScreen::Browser, shipped), Some(Shortcut::Filter));
+
+    let written = ron::ser::to_string(&older).expect("the key config is written");
+    assert!(!written.contains("reload_tables"), "a reload nobody moved was written to the file: {written}");
+    let mut moved = older.clone();
+    moved.bind(Mode::BEAT_7K, shortcut(Shortcut::ReloadTables), Some(KeyCode::F10));
+    let back: KeyConfig = ron::from_str(&ron::ser::to_string(&moved).expect("the key config is written")).expect("it reads back");
+    assert_eq!(back.shortcut_key(Shortcut::ReloadTables), Some(KeyCode::F10));
+    assert_eq!(back.shortcut_key(Shortcut::Tables), Some(KeyCode::F7));
+}
+
 /// The shortcuts and the controls are stored under names that do not change with what the rows are
 /// called on screen, each name is used once, and the ten controls an older pad block names keep the
 /// names it knows them by.

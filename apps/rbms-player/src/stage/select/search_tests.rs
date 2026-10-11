@@ -819,6 +819,105 @@ fn a_shortcut_moved_onto_a_key_that_is_not_text_is_read_under_the_box() {
     }
 }
 
+/// The key that fetches the difficulty tables again starts the fetch and leaves the browser as it
+/// is: the fetch runs beside it. When the tables land, the folder of each in the song list is the
+/// new table's without the browser having been left, and one line says how the reload went. A table
+/// that did not answer keeps the folder it had.
+#[test]
+fn the_reload_key_fetches_every_table_again_beside_the_browser() {
+    crate::notify::exclusive(|| {
+        for skinned in [true, false] {
+            let (up, down) = (format!("https://tables.test/browser/{skinned}/up/"), format!("https://tables.test/browser/{skinned}/down/"));
+            let tables = crate::tablesrc::test_outside::FakeTables::default();
+            let _installed = tables.install();
+            let mut browser = browser(&format!("search-reload-{skinned}"), skinned);
+            let store = crate::tablesrc::TableStore::beside(&browser.app.shared.settings_path);
+            let shared = &mut browser.app.shared;
+            shared.config.library.tables = [&up, &down].map(|address| rbms_config::TableSource { name: String::new(), location: address.clone() }).to_vec();
+            shared.table_names = vec!["UP".to_owned(), "DOWN".to_owned()];
+            shared.table_levels = vec![vec![("1".to_owned(), vec![0])], vec![("1".to_owned(), vec![1])]];
+            shared.select_view = SelectView::Root;
+            shared.rebuild_select_items();
+            browser.frame();
+            tables.serve(&up, "Up", br#"[{"md5":"md5-alba","level":"1"},{"md5":"md5-alder","level":"2"},{"md5":"md5-alpha","level":"2"}]"#);
+
+            let open = tables.hold();
+            assert!(matches!(stroke(&mut browser, KeyCode::F6, None), Transition::Stay), "skinned {skinned}: the reload left the browser");
+            assert!(crate::tablesrc::table_is_reloading(&browser.app.shared.settings_path, &up), "skinned {skinned}: the key started nothing");
+            assert!(matches!(browser.frame(), Transition::Stay), "skinned {skinned}: the browser stopped while the tables were out");
+            browser.arrow(KeyCode::ArrowDown);
+            assert_eq!(browser.app.shared.sel, 1, "skinned {skinned}: the list does not move while the tables are out");
+            drop(open);
+            while [&up, &down].into_iter().any(|address| crate::tablesrc::table_is_reloading(&browser.app.shared.settings_path, address)) {
+                browser.frame();
+                std::thread::yield_now();
+            }
+
+            let shared = &browser.app.shared;
+            assert_eq!(tables.asked(), 2, "skinned {skinned}: each table is fetched once");
+            assert_eq!(shared.table_levels[0], vec![("1".to_owned(), vec![0]), ("2".to_owned(), vec![1, 2])], "skinned {skinned}: the table that answered");
+            assert_eq!(shared.table_levels[1], vec![("1".to_owned(), vec![1])], "skinned {skinned}: the table that did not answer changed");
+            assert!(shared.select_view == SelectView::Root, "skinned {skinned}: the reload moved the browser");
+            let labels: Vec<&str> = shared
+                .select_items
+                .iter()
+                .filter_map(|item| match item {
+                    SelectItem::Folder { label, .. } => Some(label.as_str()),
+                    SelectItem::Song(_) => None,
+                })
+                .collect();
+            assert_eq!(labels, vec!["ALL SONGS (4)", "UP (3)", "DOWN (1)"], "skinned {skinned}: the song list is not the reloaded tables'");
+            assert!(
+                store.has_copy_file(&up) && !store.has_copy_file(&down),
+                "skinned {skinned}: the table that arrived is kept, the other has nothing to keep"
+            );
+
+            let mut said = Vec::new();
+            crate::notify::drain(&mut said);
+            assert!(said.iter().any(|(_, message)| message == "difficulty tables reloaded: 1 updated, 1 failed"), "skinned {skinned}: {said:?}");
+            store.forget(&up);
+            [&up, &down].into_iter().for_each(|address| crate::tablesrc::forget_table_status(address));
+        }
+    });
+}
+
+/// Under a search box the reload key is read like the keys that reorder the list: it does what it
+/// does and the typing goes on. Moved onto a letter it is a letter of the word.
+#[test]
+fn the_reload_key_is_read_under_the_box_and_the_typing_goes_on() {
+    for skinned in [true, false] {
+        let address = format!("https://tables.test/browser/typing/{skinned}/");
+        let tables = crate::tablesrc::test_outside::FakeTables::default();
+        let _installed = tables.install();
+        tables.serve(&address, "Typed", br#"[{"md5":"md5-alba","level":"1"}]"#);
+        let mut browser = browser(&format!("search-reload-typing-{skinned}"), skinned);
+        browser.app.shared.config.library.tables = vec![rbms_config::TableSource { name: String::new(), location: address.clone() }];
+        type_a_search(&mut browser, WORD);
+
+        assert!(matches!(stroke(&mut browser, KeyCode::F6, None), Transition::Stay), "skinned {skinned}");
+        assert!(browser.app.shared.searching, "skinned {skinned}: the reload ended the typing");
+        assert_eq!(browser.app.shared.search, WORD, "skinned {skinned}: the reload changed the word");
+        while crate::tablesrc::table_is_reloading(&browser.app.shared.settings_path, &address) {
+            browser.frame();
+            std::thread::yield_now();
+        }
+        assert_eq!(tables.asked(), 1, "skinned {skinned}: the key was not read under the box");
+        assert_eq!(browser.app.shared.table_names, vec!["TYPED".to_owned()], "skinned {skinned}");
+        assert!(browser.app.shared.searching && browser.app.shared.search == WORD, "skinned {skinned}: the tables landing ended the search");
+        assert_eq!(titles(&browser).len(), TITLES.len(), "skinned {skinned}: the list under the box is no longer what the word finds");
+
+        move_shortcut(&mut browser, Shortcut::ReloadTables, KeyCode::KeyG);
+        stroke(&mut browser, KeyCode::KeyG, Some("g"));
+        assert_eq!(browser.app.shared.search, format!("{WORD}g"), "skinned {skinned}: a letter the reload was moved onto did not reach the word");
+        stroke(&mut browser, KeyCode::F6, None);
+        assert_eq!(tables.asked(), 1, "skinned {skinned}: the key the reload shipped on, or a letter of the word, reloaded the tables");
+
+        let store = crate::tablesrc::TableStore::beside(&browser.app.shared.settings_path);
+        store.forget(&address);
+        crate::tablesrc::forget_table_status(&address);
+    }
+}
+
 /// A controller button bound to a shortcut does what the key does, ends the typing of a word first
 /// as any key of a controller does, and is nothing while a panel that takes every key is up.
 #[test]

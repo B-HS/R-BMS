@@ -2,8 +2,9 @@
 //! off disk or off the network.
 //!
 //! Everything slow the app does passes through here — the folder scan, a chart's keysounds and
-//! background images, and fetching a difficulty table — so that none of it happens on the frame
-//! loop with the window frozen. Each task says what step it is on and how far through it is, and
+//! background images, and fetching a difficulty table that is being registered — so that none of it
+//! happens on the frame loop with the window frozen. A table that is fetched again is the one slow
+//! thing that does not: that runs beside whichever screen asked ([`crate::tablesrc::start_reload`]). Each task says what step it is on and how far through it is, and
 //! each carries a cancel the Escape key sets, so leaving does not leave a worker behind.
 //!
 //! The screen is always the built-in one. A chart picked in the browser is shown by the decide
@@ -24,7 +25,7 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 
 use crate::app_play::{LoadedChart, PendingChart};
 use crate::stage::{Canvas, FrameCtx, KeyInput, PlayState, Stage, StageHandler, Transition};
-use crate::tablesrc::load_and_match_md5s;
+use crate::tablesrc::{LoadPolicy, TableStore, load_and_match};
 use crate::*;
 
 /// Width and height of the progress bar under the heading.
@@ -59,10 +60,11 @@ pub(crate) struct ScanProgress {
 /// Which half of a background scan is running: the chart walk into the song database, or the
 /// difficulty-table match against the library that walk produced.
 ///
-/// They are two steps rather than one worker because only the first can be stopped — a table match
-/// is an http fetch already in flight — and because the screen names them separately.
+/// They are two steps rather than one worker because only the first can be stopped — a table that
+/// has no copy yet is an http fetch already in flight — and because the screen names them
+/// separately. `tables` is where the match reads the copies of the tables from.
 pub(crate) enum ScanStep {
-    Walking { scan: crate::library::LibraryScan, sources: Vec<TableSource> },
+    Walking { scan: crate::library::LibraryScan, sources: Vec<TableSource>, tables: TableStore },
     Matching { rx: Receiver<ScanOutcome> },
 }
 
@@ -380,9 +382,14 @@ impl LoadingState {
 
     /// Rescan every library folder off-thread into the song database (then re-match tables),
     /// landing back on Select. Used at startup and after the folder list changes.
+    ///
+    /// The song database is kept beside the settings file, and so are the copies of the tables, so
+    /// where the one is says where the others are.
     pub(crate) fn scan(dirs: Vec<String>, sources: Vec<TableSource>, db_path: PathBuf, full: bool) -> LoadingState {
+        let tables = TableStore::beside(&db_path);
         let scan = crate::library::spawn_scan(db_path, dirs, full);
-        LoadingState { task: LoadingTask::Scan { step: ScanStep::Walking { scan, sources }, progress: Arc::new(ScanProgress::default()) }, drawn: false }
+        let step = ScanStep::Walking { scan, sources, tables };
+        LoadingState { task: LoadingTask::Scan { step, progress: Arc::new(ScanProgress::default()) }, drawn: false }
     }
 
     /// Rescan the folder list as it stands now.
@@ -392,17 +399,19 @@ impl LoadingState {
     }
 
     /// Fetch one difficulty table off-thread and match it against the library that is loaded now.
+    /// A table at an address is fetched as the address serves it now, and kept as its copy.
     ///
-    /// The md5s are copied out here rather than shared, so the worker does not hold the library the
+    /// The md5s are indexed here rather than shared, so the worker does not hold the library the
     /// browser is reading from.
     pub(crate) fn table(shared: &AppShared, source: TableSource) -> LoadingState {
-        let md5s: Vec<String> = shared.library.md5s().map(str::to_string).collect();
+        let library = rbms_table::Md5Index::new(shared.library.md5s());
+        let tables = TableStore::beside(&shared.settings_path);
         let cancel = Arc::new(AtomicBool::new(false));
         let (tx, rx) = std::sync::mpsc::channel();
         let job = source.clone();
         let abandoned = cancel.clone();
         std::thread::spawn(move || {
-            let matched = load_and_match_md5s(&job, &md5s);
+            let matched = load_and_match(&tables, LoadPolicy::Fetch, &job, &library);
             if !abandoned.load(Ordering::Relaxed) {
                 let _ = tx.send(matched);
             }
@@ -440,7 +449,7 @@ impl LoadingState {
     /// animating the LOADING screen.
     fn poll_scan(shared: &mut AppShared, step: &mut ScanStep, progress: &Arc<ScanProgress>) -> Transition {
         match step {
-            ScanStep::Walking { scan, sources } => {
+            ScanStep::Walking { scan, sources, tables } => {
                 let Some(report) = scan.poll() else {
                     return Transition::Stay;
                 };
@@ -452,7 +461,8 @@ impl LoadingState {
                 } else if report.upserted > 0 || report.removed > 0 {
                     notify(Level::Info, format!("library: {} chart(s) read, {} dropped", report.upserted, report.removed));
                 }
-                *step = ScanStep::Matching { rx: LoadingState::spawn_table_match(report.library, std::mem::take(sources), Arc::clone(progress)) };
+                *step =
+                    ScanStep::Matching { rx: LoadingState::spawn_table_match(report.library, std::mem::take(sources), tables.clone(), Arc::clone(progress)) };
                 Transition::Stay
             }
             ScanStep::Matching { rx } => match rx.try_recv() {
@@ -464,11 +474,12 @@ impl LoadingState {
     }
 
     /// Match every configured difficulty table against the library the walk just produced, off the
-    /// frame loop because each source is an http fetch.
-    fn spawn_table_match(library: Library, sources: Vec<TableSource>, progress: Arc<ScanProgress>) -> Receiver<ScanOutcome> {
+    /// frame loop because a table that has no copy yet is an http fetch. One that has is read from
+    /// the copy, so a run in which every table has been fetched before waits on no server here.
+    fn spawn_table_match(library: Library, sources: Vec<TableSource>, tables: TableStore, progress: Arc<ScanProgress>) -> Receiver<ScanOutcome> {
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            let (names, levels) = fetch_and_match(&sources, &library, &progress.tables);
+            let (names, levels) = fetch_and_match(&tables, &sources, &library, &progress.tables);
             let _ = tx.send(ScanOutcome { library, names, levels });
         });
         rx
@@ -607,7 +618,7 @@ impl StageHandler for LoadingState {
 
     /// The heading, the step under it and the progress bar: determinate for the decodes and the
     /// table match, which know how many there are, and a ping-ponging sweep for the folder scan and
-    /// the http fetch, which have no total to count toward.
+    /// the fetch of a table being registered, which have no total to count toward.
     fn draw(&mut self, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'_>) {
         canvas.clear_bga();
         if self.hands_on_to_a_play_skin(ctx.shared) {

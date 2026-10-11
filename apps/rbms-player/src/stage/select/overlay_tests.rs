@@ -431,6 +431,23 @@ fn check_shortcut(browser: &mut Browser, shortcut: Shortcut, code: KeyCode) {
         Shortcut::RefReplay => {
             browser.key(code);
         }
+        Shortcut::ReloadTables => {
+            let table = browser.app.shared.settings_path.with_file_name("reloaded-by-its-key.json");
+            std::fs::write(&table, br#"[{"md5":"none","level":"1"}]"#).expect("the table file is written");
+            let location = table.to_string_lossy().into_owned();
+            browser.app.shared.config.library.tables.push(rbms_config::TableSource { name: "mine".into(), location: location.clone() });
+            assert!(matches!(browser.key(code), Transition::Stay), "{shortcut:?} left the browser");
+            assert!(crate::tablesrc::table_is_reloading(&browser.app.shared.settings_path, &location), "{shortcut:?} started nothing");
+            while crate::tablesrc::table_is_reloading(&browser.app.shared.settings_path, &location) {
+                browser.frame();
+                std::thread::yield_now();
+            }
+            assert_eq!(browser.app.shared.table_names.last().map(String::as_str), Some("MINE"), "{shortcut:?} did not bring the table in");
+            browser.app.shared.config.library.tables.pop();
+            browser.app.shared.table_names.pop();
+            browser.app.shared.table_levels.pop();
+            crate::tablesrc::forget_table_status(&location);
+        }
         Shortcut::RefDetail => {
             browser.app.shared.note_key(&press(code));
             browser.frame();

@@ -1,27 +1,18 @@
 #![forbid(unsafe_code)]
 
 use std::collections::HashMap;
-use std::path::Path;
 
 mod dto;
 mod error;
 mod fetch;
 mod html;
+mod saved;
 pub use dto::{TableEntry, TableHeader};
 pub use error::{TableError, TableStage};
+pub use saved::SavedTable;
 
 /// The mark some editors put in front of a UTF-8 file, which is not JSON.
 const UTF8_BOM: &[u8] = b"\xEF\xBB\xBF";
-
-/// On-disk cache envelope: the resolved header metadata plus the body, so an offline reload
-/// preserves the table's name/symbol/level order rather than re-deriving them.
-#[derive(serde::Serialize, serde::Deserialize)]
-struct CachedTable {
-    name: String,
-    symbol: String,
-    level_order: Vec<String>,
-    entries: Vec<TableEntry>,
-}
 
 /// A BMS difficulty table resolved into header metadata plus body entries, browsable by
 /// level. Built from a `header.json` (+ its `data_url`) or directly from a body `data.json`.
@@ -33,13 +24,28 @@ pub struct DifficultyTable {
     /// Body items that were left out because they name no chart: not an object, or an object with
     /// neither an `md5` nor a `sha256`.
     pub skipped: usize,
+    /// The header's `course` field as the table wrote it, when it has one. Nothing reads the courses
+    /// of a table yet; they are carried so the copy kept of a table is the whole of it.
+    pub course: Option<serde_json::Value>,
 }
 
-/// What [`DifficultyTable::fetch_cached`] came back with: the table, and — when it is the copy kept
-/// from an earlier fetch rather than what the address serves now — why this fetch failed.
-pub struct TableLoad {
-    pub table: DifficultyTable,
-    pub stale: Option<TableError>,
+/// The md5 of every chart of a library, each with the positions it is at. A library is indexed
+/// once and every table is matched against the index, rather than each table going through the
+/// library for itself.
+pub struct Md5Index {
+    by_md5: HashMap<String, Vec<usize>>,
+}
+
+impl Md5Index {
+    /// Index `library_md5s`, which yields the md5 of every library chart in library order (case
+    /// insensitive). The positions handed back by a match are positions in that iteration.
+    pub fn new<'a>(library_md5s: impl Iterator<Item = &'a str>) -> Md5Index {
+        let mut by_md5: HashMap<String, Vec<usize>> = HashMap::new();
+        for (i, md5) in library_md5s.enumerate() {
+            by_md5.entry(md5.to_ascii_lowercase()).or_default().push(i);
+        }
+        Md5Index { by_md5 }
+    }
 }
 
 /// One item of a body: an entry, or whatever else was written where an entry belongs.
@@ -96,12 +102,12 @@ impl DifficultyTable {
     /// it is derived from the entries with a numeric-aware sort (so "10" follows "9", and
     /// non-numeric levels like "???" sort last).
     pub fn from_parts(header: Option<TableHeader>, entries: Vec<TableEntry>) -> DifficultyTable {
-        let (name, symbol, level_order) = match header {
-            Some(h) => (h.name.unwrap_or_default(), h.symbol.unwrap_or_else(|| "*".into()), h.level_order.unwrap_or_default()),
-            None => (String::new(), "*".into(), Vec::new()),
+        let (name, symbol, level_order, course) = match header {
+            Some(h) => (h.name.unwrap_or_default(), h.symbol.unwrap_or_else(|| "*".into()), h.level_order.unwrap_or_default(), h.course),
+            None => (String::new(), "*".into(), Vec::new(), None),
         };
         let level_order = if level_order.is_empty() { derive_level_order(&entries) } else { level_order };
-        DifficultyTable { name, symbol, level_order, entries, skipped: 0 }
+        DifficultyTable { name, symbol, level_order, entries, skipped: 0, course }
     }
 
     /// This table, recording how many body items were left out of it.
@@ -126,46 +132,6 @@ impl DifficultyTable {
         let client = fetch::build_client().map_err(|e| e.at(TableStage::Address, url))?;
         let deadline = std::time::Instant::now() + fetch::LOAD_TIMEOUT;
         fetch::fetch_with(url, &mut |address| fetch::http_get(&client, address, deadline))
-    }
-
-    /// Fetch a table, caching the resolved body to `cache_path`; on a failed fetch, fall
-    /// back to that cache so a previously-seen table still works offline. The fetch failure is
-    /// handed back either way: as the error when there is no usable copy, and beside the copy when
-    /// there is one.
-    pub fn fetch_cached(url: &str, cache_path: &Path) -> Result<TableLoad, TableError> {
-        match DifficultyTable::fetch(url) {
-            Ok(table) => {
-                if !table.entries.is_empty() {
-                    let cached = CachedTable {
-                        name: table.name.clone(),
-                        symbol: table.symbol.clone(),
-                        level_order: table.level_order.clone(),
-                        entries: table.entries.clone(),
-                    };
-                    if let Ok(json) = serde_json::to_vec(&cached) {
-                        let _ = std::fs::write(cache_path, json);
-                    }
-                }
-                Ok(TableLoad { table, stale: None })
-            }
-            Err(fetch) => match DifficultyTable::read_cache(cache_path) {
-                Some(table) => Ok(TableLoad { table, stale: Some(fetch) }),
-                None => Err(fetch),
-            },
-        }
-    }
-
-    /// The copy an earlier fetch kept at `cache_path`, if there is a readable one.
-    fn read_cache(cache_path: &Path) -> Option<DifficultyTable> {
-        let bytes = std::fs::read(cache_path).ok()?;
-        let cached: CachedTable = serde_json::from_slice(&bytes).ok()?;
-        Some(DifficultyTable {
-            level_order: if cached.level_order.is_empty() { derive_level_order(&cached.entries) } else { cached.level_order },
-            name: cached.name,
-            symbol: cached.symbol,
-            entries: cached.entries,
-            skipped: 0,
-        })
     }
 
     /// Entries grouped by level in `level_order`, as `(level, [entry index])`. Empty levels
@@ -198,10 +164,13 @@ impl DifficultyTable {
     /// not the library's, so a table whose charts are not owned yet still shows as the folders it
     /// is made of rather than as nothing at all.
     pub fn match_levels<'a>(&self, library_md5s: impl Iterator<Item = &'a str>) -> Vec<(String, Vec<usize>)> {
-        let mut by_md5: HashMap<String, Vec<usize>> = HashMap::new();
-        for (i, md5) in library_md5s.enumerate() {
-            by_md5.entry(md5.to_ascii_lowercase()).or_default().push(i);
-        }
+        self.match_levels_in(&Md5Index::new(library_md5s))
+    }
+
+    /// [`DifficultyTable::match_levels`] against a library that has been indexed already, which is
+    /// how several tables are matched against one library without each indexing it again.
+    pub fn match_levels_in(&self, library: &Md5Index) -> Vec<(String, Vec<usize>)> {
+        let by_md5 = &library.by_md5;
         let mut out = Vec::new();
         for (level, entry_idxs) in self.by_level() {
             let mut idxs = Vec::new();
@@ -221,7 +190,7 @@ impl DifficultyTable {
     }
 }
 
-fn derive_level_order(entries: &[TableEntry]) -> Vec<String> {
+pub(crate) fn derive_level_order(entries: &[TableEntry]) -> Vec<String> {
     let mut levels: Vec<String> = entries.iter().map(|e| e.level.clone()).collect();
     levels.sort_by_key(|l| level_key(l));
     levels.dedup_by(|a, b| level_key(a) == level_key(b));
@@ -271,6 +240,7 @@ mod tests {
             name: Some("Insane".into()),
             symbol: Some("★".into()),
             data_url: vec!["data.json".into()],
+            course: None,
             level_order: Some(vec!["1".into(), "2".into(), "3".into(), "10".into(), "???".into()]),
         };
         let t = DifficultyTable::parse_body(BODY, Some(header)).unwrap();
@@ -424,7 +394,7 @@ mod tests {
 
     #[test]
     fn by_level_groups_follow_level_order_then_extras_first_seen() {
-        let header = TableHeader { name: None, symbol: None, data_url: Vec::new(), level_order: Some(vec!["1".into(), "2".into()]) };
+        let header = TableHeader { name: None, symbol: None, data_url: Vec::new(), course: None, level_order: Some(vec!["1".into(), "2".into()]) };
         let entries = vec![entry("a", "3"), entry("b", "x"), entry("c", "1"), entry("d", "3")];
         let t = DifficultyTable::from_parts(Some(header), entries);
         let g = t.by_level();
@@ -433,7 +403,7 @@ mod tests {
 
     #[test]
     fn by_level_drops_listed_levels_with_no_entries() {
-        let header = TableHeader { name: None, symbol: None, data_url: Vec::new(), level_order: Some(vec!["1".into(), "2".into(), "3".into()]) };
+        let header = TableHeader { name: None, symbol: None, data_url: Vec::new(), course: None, level_order: Some(vec!["1".into(), "2".into(), "3".into()]) };
         let entries = vec![entry("a", "2")];
         let t = DifficultyTable::from_parts(Some(header), entries);
         assert_eq!(levels_of(&t.by_level()), vec!["2"], "only the non-empty listed level remains");
@@ -441,7 +411,7 @@ mod tests {
 
     #[test]
     fn by_level_extra_level_accumulates_all_its_entries() {
-        let header = TableHeader { name: None, symbol: None, data_url: Vec::new(), level_order: Some(vec!["1".into()]) };
+        let header = TableHeader { name: None, symbol: None, data_url: Vec::new(), course: None, level_order: Some(vec!["1".into()]) };
         let entries = vec![entry("a", "99"), entry("b", "99"), entry("c", "1"), entry("d", "99")];
         let t = DifficultyTable::from_parts(Some(header), entries);
         let g = t.by_level();
@@ -451,7 +421,7 @@ mod tests {
 
     #[test]
     fn by_level_duplicate_levels_in_level_order_only_first_slot_is_filled() {
-        let header = TableHeader { name: None, symbol: None, data_url: Vec::new(), level_order: Some(vec!["1".into(), "1".into()]) };
+        let header = TableHeader { name: None, symbol: None, data_url: Vec::new(), course: None, level_order: Some(vec!["1".into(), "1".into()]) };
         let entries = vec![entry("a", "1")];
         let t = DifficultyTable::from_parts(Some(header), entries);
         let g = t.by_level();
@@ -469,7 +439,7 @@ mod tests {
 
     #[test]
     fn from_parts_header_with_all_none_fields_uses_defaults() {
-        let header = TableHeader { name: None, symbol: None, data_url: Vec::new(), level_order: None };
+        let header = TableHeader { name: None, symbol: None, data_url: Vec::new(), course: None, level_order: None };
         let t = DifficultyTable::from_parts(Some(header), vec![entry("a", "2"), entry("b", "1")]);
         assert_eq!(t.name, "", "missing name -> empty");
         assert_eq!(t.symbol, "*", "missing symbol -> '*'");
@@ -478,7 +448,7 @@ mod tests {
 
     #[test]
     fn from_parts_empty_symbol_string_is_preserved_not_defaulted() {
-        let header = TableHeader { name: Some("".into()), symbol: Some("".into()), data_url: Vec::new(), level_order: None };
+        let header = TableHeader { name: Some("".into()), symbol: Some("".into()), data_url: Vec::new(), course: None, level_order: None };
         let t = DifficultyTable::from_parts(Some(header), vec![entry("a", "1")]);
         assert_eq!(t.symbol, "", "explicit empty symbol is NOT replaced by '*'");
         assert_eq!(t.name, "");
@@ -486,14 +456,14 @@ mod tests {
 
     #[test]
     fn from_parts_explicit_empty_level_order_is_derived() {
-        let header = TableHeader { name: None, symbol: Some("X".into()), data_url: Vec::new(), level_order: Some(vec![]) };
+        let header = TableHeader { name: None, symbol: Some("X".into()), data_url: Vec::new(), course: None, level_order: Some(vec![]) };
         let t = DifficultyTable::from_parts(Some(header), vec![entry("a", "3"), entry("b", "1")]);
         assert_eq!(t.level_order, vec!["1", "3"], "empty level_order is derived from entries");
     }
 
     #[test]
     fn from_parts_non_empty_level_order_is_used_verbatim_even_if_unsorted() {
-        let header = TableHeader { name: None, symbol: None, data_url: Vec::new(), level_order: Some(vec!["10".into(), "1".into(), "5".into()]) };
+        let header = TableHeader { name: None, symbol: None, data_url: Vec::new(), course: None, level_order: Some(vec!["10".into(), "1".into(), "5".into()]) };
         let t = DifficultyTable::from_parts(Some(header), vec![entry("a", "1")]);
         assert_eq!(t.level_order, vec!["10", "1", "5"], "explicit order preserved as-is, not re-sorted");
     }
@@ -665,7 +635,7 @@ mod tests {
 
     #[test]
     fn header_overrides_name_and_symbol_over_derived_defaults() {
-        let header = TableHeader { name: Some("My Table".into()), symbol: Some("▼".into()), data_url: Vec::new(), level_order: None };
+        let header = TableHeader { name: Some("My Table".into()), symbol: Some("▼".into()), data_url: Vec::new(), course: None, level_order: None };
         let t = DifficultyTable::parse_body(br#"[{"md5":"a","level":"1"}]"#, Some(header)).unwrap();
         assert_eq!(t.name, "My Table");
         assert_eq!(t.symbol, "▼");
@@ -750,7 +720,7 @@ mod tests {
 
     #[test]
     fn match_levels_follows_the_header_level_order_then_the_extras() {
-        let header = TableHeader { name: None, symbol: None, data_url: Vec::new(), level_order: Some(vec!["2".into(), "1".into()]) };
+        let header = TableHeader { name: None, symbol: None, data_url: Vec::new(), course: None, level_order: Some(vec!["2".into(), "1".into()]) };
         let entries = vec![entry("aa", "1"), entry("bb", "2"), entry("cc", "99"), entry("dd", "3")];
         let t = DifficultyTable::from_parts(Some(header), entries);
         let out = matched(&t, &["cc", "aa", "bb"]);
@@ -758,27 +728,23 @@ mod tests {
         assert_eq!(out[3], ("3".to_string(), Vec::new()), "the unowned level is there and empty");
     }
 
-    /// An address no request can be made to, so the fallback is exercised without a network.
-    const UNREACHABLE: &str = "not an address";
+    /// Several tables are matched against one library, which is indexed for all of them once.
+    #[test]
+    fn a_library_indexed_once_matches_every_table_as_matching_it_afresh_does() {
+        let library = ["bb", "AA", "zz", "cc", "ee", "aa"];
+        let index = Md5Index::new(library.iter().copied());
+        let one = DifficultyTable::parse_body(BODY, None).unwrap();
+        let other = DifficultyTable::from_parts(None, vec![entry("ZZ", "7"), entry("nope", "8")]);
+        assert_eq!(one.match_levels_in(&index), matched(&one, &library));
+        assert_eq!(other.match_levels_in(&index), vec![("7".to_string(), vec![2]), ("8".to_string(), Vec::new())]);
+    }
 
     #[test]
-    fn a_fetch_that_fails_falls_back_to_the_saved_copy_and_says_why_it_had_to() {
-        let cache = std::env::temp_dir().join(format!("rbms-table-cache-test-{}.json", std::process::id()));
-        let saved = CachedTable { name: "Saved".into(), symbol: "s".into(), level_order: Vec::new(), entries: vec![entry("aa", "2"), entry("bb", "1")] };
-        std::fs::write(&cache, serde_json::to_vec(&saved).unwrap()).unwrap();
-
-        let load = DifficultyTable::fetch_cached(UNREACHABLE, &cache).unwrap_or_else(|e| panic!("the saved copy is a table: {e}"));
-        assert_eq!(load.table.name, "Saved");
-        assert_eq!(load.table.level_order, vec!["1", "2"], "a copy saved without an order derives one");
-        let why = load.stale.expect("a table read from the saved copy says the fetch failed").to_string();
-        assert!(why.starts_with(&format!("address {UNREACHABLE}: ")), "the reason is the fetch's own failure: {why}");
-
-        std::fs::write(&cache, b"not a saved table").unwrap();
-        let error = DifficultyTable::fetch_cached(UNREACHABLE, &cache).err().expect("an unreadable copy is no copy").to_string();
-        assert!(error.starts_with(&format!("address {UNREACHABLE}: ")), "with no usable copy the failure is the fetch's, not the cache's: {error}");
-
-        std::fs::remove_file(&cache).unwrap();
-        assert!(DifficultyTable::fetch_cached(UNREACHABLE, &cache).is_err(), "no copy at all");
+    fn the_courses_a_header_lists_are_carried_with_the_table() {
+        let header = parse_header(br#"{"name":"N","data_url":"d.json","course":[[{"name":"c","md5":["aa"]}]]}"#).unwrap();
+        let table = DifficultyTable::from_parts(Some(header), vec![entry("aa", "1")]);
+        assert_eq!(table.course, Some(serde_json::json!([[{ "name": "c", "md5": ["aa"] }]])));
+        assert_eq!(DifficultyTable::from_parts(None, Vec::new()).course, None, "a table with no header has no courses");
     }
 
     #[test]

@@ -661,6 +661,8 @@ pub enum Shortcut {
     Favourite,
     Records,
     Ranking,
+    /// Fetch every registered difficulty table again, beside the browser.
+    ReloadTables,
     OptionsPin,
     OptionsHold,
     Settings,
@@ -688,7 +690,7 @@ pub enum Shortcut {
 
 impl Shortcut {
     /// Every shortcut, group by group, in the order the key editor and the key guide list them.
-    pub const ALL: [Shortcut; 30] = [
+    pub const ALL: [Shortcut; 31] = [
         Shortcut::Search,
         Shortcut::Filter,
         Shortcut::Sort,
@@ -696,6 +698,7 @@ impl Shortcut {
         Shortcut::Favourite,
         Shortcut::Records,
         Shortcut::Ranking,
+        Shortcut::ReloadTables,
         Shortcut::OptionsPin,
         Shortcut::OptionsHold,
         Shortcut::Settings,
@@ -730,6 +733,7 @@ impl Shortcut {
             | Shortcut::Favourite
             | Shortcut::Records
             | Shortcut::Ranking
+            | Shortcut::ReloadTables
             | Shortcut::OptionsPin
             | Shortcut::OptionsHold => ShortcutGroup::Browser,
             Shortcut::Settings | Shortcut::SkinMenu | Shortcut::PlayMenu | Shortcut::KeyConfig | Shortcut::Folders | Shortcut::Tables => ShortcutGroup::Screens,
@@ -765,6 +769,7 @@ impl Shortcut {
             Shortcut::Favourite => "FAVOURITE",
             Shortcut::Records => "RECORDS OF THE CHART",
             Shortcut::Ranking => "IR RANKING",
+            Shortcut::ReloadTables => "RELOAD DIFFICULTY TABLES",
             Shortcut::OptionsPin => "OPTIONS OVERLAY (PIN)",
             Shortcut::OptionsHold => "OPTIONS OVERLAY (HOLD)",
             Shortcut::Settings => "SETTINGS (SHIFT: COURSE LIST)",
@@ -801,6 +806,7 @@ impl Shortcut {
             Shortcut::Favourite => "favourite",
             Shortcut::Records => "records",
             Shortcut::Ranking => "ranking",
+            Shortcut::ReloadTables => "reload_tables",
             Shortcut::OptionsPin => "options_pin",
             Shortcut::OptionsHold => "options_hold",
             Shortcut::Settings => "settings",
@@ -828,7 +834,9 @@ impl Shortcut {
     }
 
     /// The key the shortcut ships on. Every one of them but the keys to the key editor and to the
-    /// play menu is the key the application read for it before any of them could be changed.
+    /// play menu, and the key that reloads the tables, is the key the application read for it before
+    /// any of them could be changed. The reload ships on a function key the browser read nothing
+    /// from, next to the one the key editor is on.
     pub fn default_key(self) -> KeyCode {
         match self {
             Shortcut::Search => KeyCode::Slash,
@@ -838,6 +846,7 @@ impl Shortcut {
             Shortcut::Favourite => KeyCode::KeyF,
             Shortcut::Records => KeyCode::KeyR,
             Shortcut::Ranking => KeyCode::KeyI,
+            Shortcut::ReloadTables => KeyCode::F6,
             Shortcut::OptionsPin => crate::app_options::TOGGLE_KEY,
             Shortcut::OptionsHold => crate::app_options::HOLD_KEY,
             Shortcut::Settings => KeyCode::Tab,

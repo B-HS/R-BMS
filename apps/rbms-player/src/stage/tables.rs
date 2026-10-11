@@ -8,11 +8,20 @@
 //! Each source says what became of its table: how many of its charts the library has, or that it
 //! could not be loaded and why. A table that failed is not a folder in the song list, so this is
 //! the screen that has to account for it.
+//!
+//! A table at an address is fetched once and read from the copy kept of it after that, so the row
+//! also says how long ago that copy was fetched, and points its age out once it is old. Nothing
+//! fetches a table again by itself: R does, for the table under the cursor, and A for every table.
+//! Those run beside the screen, which goes on being used while the row says the table is on its
+//! way.
 #![allow(clippy::wildcard_imports)]
 
 use crate::dialog::{DialogHandle, DialogState};
 use crate::stage::{Canvas, FrameCtx, KeyInput, LoadingState, Stage, StageHandler, Transition};
-use crate::tablesrc::{TableStatus, forget_table_status, table_status};
+use crate::tablesrc::{
+    COPY_OLD_AFTER_DAYS, TableOrigin, TableStatus, TableStore, apply_finished_reloads, copy_age, copy_age_days, forget_table_status, reload_tables,
+    table_is_reloading, table_status, unix_now,
+};
 use crate::*;
 
 /// Width of the table list panel.
@@ -52,6 +61,32 @@ const STATUS_SCALE: f32 = 1.2;
 const STATUS_DY: f32 = 12.0;
 const STATUS_GAP: f32 = 24.0;
 
+/// The room between the age of a copy and the rest of the status it stands at the end of.
+const SAVED_GAP: f32 = 18.0;
+
+/// The keys of the list, under the title.
+const LIST_KEYS: &str = "UP DOWN MOVE   ENTER SELECT   R RELOAD   A RELOAD ALL   D REMOVE   ESC BACK";
+
+/// What the row of a table that is being fetched again says in place of its status, and what is
+/// said under the list of the table under the cursor while it is: whatever its last reload came
+/// to is not what is happening to it now.
+const RELOADING: &str = "RELOADING...";
+const RELOADING_DETAIL: &str = "FETCHING THE TABLE AGAIN - IT STAYS AS IT IS UNTIL THE NEW ONE ARRIVES";
+
+/// What is said of a copy before how long ago it was fetched, and all that is said of one that
+/// does not record when that was.
+const SAVED_UNDATED: &str = "SAVED";
+
+/// What reloading is, along the bottom of the screen: where the lines end above the bottom edge,
+/// their pitch and their scale.
+const RELOAD_NOTE: [&str; 2] = [
+    "A TABLE AT AN ADDRESS IS FETCHED ONCE AND READ FROM ITS SAVED COPY AFTER THAT - THE ROW SHOWS HOW LONG AGO THE COPY WAS FETCHED.",
+    "R FETCHES THE TABLE UNDER THE CURSOR AGAIN, A EVERY TABLE. A TABLE REGISTERED AS A FILE IS READ FROM THE FILE AGAIN.",
+];
+const NOTE_BOTTOM: f32 = 40.0;
+const NOTE_PITCH: f32 = 20.0;
+const NOTE_SCALE: f32 = 1.1;
+
 /// The lines under the list that spell out the focused source's status: where they start below the
 /// last row, their pitch and scale, and how much of a long reason they carry.
 const DETAIL_GAP: f32 = 12.0;
@@ -77,21 +112,57 @@ fn status_summary(status: &TableStatus) -> (String, bool) {
     match status {
         TableStatus::Loaded { entries: 0, stale: None, .. } => ("NO CHARTS LISTED".to_string(), true),
         TableStatus::Loaded { entries, levels, owned, stale: None, .. } => (format!("{owned} OF {entries} CHARTS OWNED  -  {levels} LEVELS"), false),
-        TableStatus::Loaded { entries, owned, stale: Some(_), .. } => (format!("SAVED COPY  -  {owned} OF {entries} CHARTS OWNED"), true),
+        TableStatus::Loaded { entries, owned, stale: Some(_), .. } => (format!("RELOAD FAILED  -  {owned} OF {entries} CHARTS OWNED"), true),
         TableStatus::Failed { .. } => ("LOAD FAILED".to_string(), true),
     }
 }
 
 /// What there is to say about a source beyond its row, when there is anything: why it failed, why
-/// it was not refreshed, that it lists nothing, or that none of its charts are in the library.
+/// its reload left it as it was, that it lists nothing, or that none of its charts are in the
+/// library.
 fn status_detail(status: &TableStatus) -> Option<String> {
     match status {
         TableStatus::Failed { reason } => Some(format!("LOAD FAILED: {reason}")),
-        TableStatus::Loaded { stale: Some(reason), .. } => Some(format!("NOT REFRESHED: {reason}")),
+        TableStatus::Loaded { stale: Some(reason), .. } => Some(format!("RELOAD FAILED, THE TABLE IS AS IT WAS: {reason}")),
         TableStatus::Loaded { entries: 0, .. } => Some("THE TABLE WAS READ BUT LISTS NO CHARTS - IT HAS NO FOLDER IN THE SONG LIST".to_string()),
         TableStatus::Loaded { owned: 0, .. } => Some("NONE OF THIS TABLE'S CHARTS ARE IN THE LIBRARY YET - ITS FOLDER IS EMPTY".to_string()),
         TableStatus::Loaded { .. } => None,
     }
+}
+
+/// How long ago the copy of a table was fetched, as the end of its row says it, and whether the
+/// copy is old enough for that to be pointed out. `None` for a table that has no copy: one read
+/// from a file, or one that did not load.
+fn saved_note(status: &TableStatus, now: u64) -> Option<(String, bool)> {
+    match status {
+        TableStatus::Loaded { origin: TableOrigin::Address { fetched_at: Some(at) }, .. } => {
+            Some((format!("{SAVED_UNDATED} {}", copy_age(*at, now)), copy_age_days(*at, now) > COPY_OLD_AFTER_DAYS))
+        }
+        TableStatus::Loaded { origin: TableOrigin::Address { fetched_at: None }, .. } => Some((SAVED_UNDATED.to_string(), false)),
+        TableStatus::Loaded { origin: TableOrigin::File, .. } | TableStatus::Failed { .. } => None,
+    }
+}
+
+/// What is said under the list of the source under the cursor, and whether it reports a problem:
+/// that the table is being fetched again while it is, and otherwise what there is to say of what
+/// became of it ([`status_detail`]). A reload that is out says nothing of the one that failed
+/// before it, which is not what is happening to the table now.
+fn focused_detail(status: Option<&TableStatus>, reloading: bool) -> Option<(String, bool)> {
+    if reloading {
+        return Some((RELOADING_DETAIL.to_string(), false));
+    }
+    let status = status?;
+    status_detail(status).map(|detail| (detail, !matches!(status, TableStatus::Loaded { stale: None, .. })))
+}
+
+/// The line that says how old an old copy is and how to replace it, for the source under the
+/// cursor.
+fn old_copy_note(status: &TableStatus, now: u64) -> Option<String> {
+    let TableStatus::Loaded { origin: TableOrigin::Address { fetched_at: Some(at) }, .. } = status else {
+        return None;
+    };
+    let days = copy_age_days(*at, now);
+    (days > COPY_OLD_AFTER_DAYS).then(|| format!("THE SAVED COPY IS {days} DAYS OLD - R FETCHES THE TABLE AGAIN"))
 }
 
 /// The table manager's own state: which row is focused, the URL being typed when the "+ ADD TABLE
@@ -136,6 +207,7 @@ impl TablesState {
         if idx < shared.config.library.tables.len() {
             let removed = shared.config.library.tables.remove(idx);
             forget_table_status(&removed.location);
+            TableStore::beside(&shared.settings_path).forget(&removed.location);
             if idx < shared.table_names.len() {
                 shared.table_names.remove(idx);
             }
@@ -208,9 +280,11 @@ impl TablesState {
 }
 
 impl StageHandler for TablesState {
-    /// Collect the file picker's answer once the user has given one. The picker runs beside the
-    /// frame loop, so this is where an added table actually lands.
+    /// Take the tables a reload has come back with, and collect the file picker's answer once the
+    /// user has given one. Both run beside the frame loop, so this is where a reloaded table and an
+    /// added one actually land.
     fn update(&mut self, ctx: &mut FrameCtx<'_>) -> Transition {
+        apply_finished_reloads(ctx.shared);
         let Some(picker) = self.picker.as_ref() else {
             return Transition::Stay;
         };
@@ -226,8 +300,9 @@ impl StageHandler for TablesState {
     }
 
     /// Table-manager input. In URL-text mode, type the URL (Enter adds, Esc cancels); otherwise
-    /// navigate, add (URL/file), remove (D), or leave (Esc — rebuilds the browse list). Keys are
-    /// ignored while the native picker is up, which owns the keyboard itself.
+    /// navigate, add (URL/file), reload (R the table under the cursor, A every table), remove (D),
+    /// or leave (Esc — rebuilds the browse list). Keys are ignored while the native picker is up,
+    /// which owns the keyboard itself. A reload goes on after the screen is left.
     fn handle_key(&mut self, ctx: &mut FrameCtx<'_>, key: KeyInput<'_>) -> Transition {
         if matches!(key.code, KeyCode::ControlLeft | KeyCode::ControlRight | KeyCode::SuperLeft | KeyCode::SuperRight) {
             self.paste_held = key.pressed;
@@ -252,6 +327,8 @@ impl StageHandler for TablesState {
             KeyCode::ArrowUp => self.sel = self.sel.saturating_sub(1),
             KeyCode::ArrowDown => self.sel = (self.sel + 1).min(n.saturating_sub(1)),
             KeyCode::KeyD | KeyCode::Delete if self.sel < ctx.shared.config.library.tables.len() => self.remove_table_source(ctx.shared, self.sel),
+            KeyCode::KeyR if self.sel < ctx.shared.config.library.tables.len() => reload_tables(ctx.shared, Some(self.sel)),
+            KeyCode::KeyA => reload_tables(ctx.shared, None),
             KeyCode::Enter | KeyCode::NumpadEnter => {
                 if self.sel == add_url {
                     self.text_input = Some(TextEdit::new());
@@ -278,7 +355,9 @@ impl StageHandler for TablesState {
             draw_text(canvas, x0, 84.0, 1.4, Color::YELLOW, "PICK A TABLE FILE IN THE OPEN DIALOG");
             return;
         }
-        draw_text(canvas, x0, 84.0, 1.3, th.text_muted, "UP DOWN MOVE   ENTER SELECT   D REMOVE   ESC BACK");
+        draw_text(canvas, x0, 84.0, 1.3, th.text_muted, LIST_KEYS);
+        let now = unix_now();
+        let settings_path = &ctx.shared.settings_path;
         let tables = &ctx.shared.config.library.tables;
         let add_url = tables.len();
         let row_count = tables.len() + 2;
@@ -299,28 +378,49 @@ impl StageHandler for TablesState {
             } else {
                 th.text_dim
             };
-            let mut label_w = PANEL_W - ROW_PAD_X * 2.0;
-            if let Some((summary, is_problem)) = status.as_ref().map(status_summary) {
-                label_w -= text_width(&summary, STATUS_SCALE) + STATUS_GAP;
-                let status_col = match (is_problem, on) {
+            let mut status_right = x0 + PANEL_W - ROW_PAD_X;
+            if let Some((saved, is_old)) = status.as_ref().and_then(|status| saved_note(status, now)) {
+                let saved_col = match (is_old, on) {
                     (true, _) => th.warn,
                     (false, true) => th.text,
                     (false, false) => th.text_muted,
                 };
-                draw_text_right(canvas, x0 + PANEL_W - ROW_PAD_X, y + STATUS_DY, STATUS_SCALE, status_col, &summary);
+                draw_text_right(canvas, status_right, y + STATUS_DY, STATUS_SCALE, saved_col, &saved);
+                status_right -= text_width(&saved, STATUS_SCALE) + SAVED_GAP;
             }
+            let reloading = tables.get(i).is_some_and(|source| table_is_reloading(settings_path, &source.location));
+            let summary = if reloading { Some((RELOADING.to_string(), false)) } else { status.as_ref().map(status_summary) };
+            if let Some((summary, is_problem)) = summary {
+                let status_col = match (reloading, is_problem, on) {
+                    (true, ..) => Color::YELLOW,
+                    (false, true, _) => th.warn,
+                    (false, false, true) => th.text,
+                    (false, false, false) => th.text_muted,
+                };
+                draw_text_right(canvas, status_right, y + STATUS_DY, STATUS_SCALE, status_col, &summary);
+                status_right -= text_width(&summary, STATUS_SCALE) + STATUS_GAP;
+            }
+            let label_w = status_right - (x0 + ROW_PAD_X);
             draw_text(canvas, x0 + ROW_PAD_X, y + ROW_TEXT_DY, ROW_TEXT_SCALE, col, &rbms_render::fit_text(&label, ROW_TEXT_SCALE, label_w));
         }
         let focused = tables.get(self.sel).and_then(|source| table_status(&source.location));
-        if let Some(detail) = focused.as_ref().and_then(status_detail) {
-            let is_problem = !matches!(focused, Some(TableStatus::Loaded { stale: None, .. }));
+        let focused_reloading = tables.get(self.sel).is_some_and(|source| table_is_reloading(settings_path, &source.location));
+        let mut line_top = ROW_TOP + row_count as f32 * ROW_PITCH + DETAIL_GAP;
+        if let Some((detail, is_problem)) = focused_detail(focused.as_ref(), focused_reloading) {
             let detail: Vec<char> = detail.chars().collect();
-            let top = ROW_TOP + row_count as f32 * ROW_PITCH + DETAIL_GAP;
-            for (line, chars) in detail.chunks(DETAIL_LINE_CHARS).take(DETAIL_MAX_LINES).enumerate() {
+            for chars in detail.chunks(DETAIL_LINE_CHARS).take(DETAIL_MAX_LINES) {
                 let text: String = chars.iter().collect();
                 let fitted = rbms_render::fit_text(&text, DETAIL_SCALE, PANEL_W);
-                draw_text(canvas, x0, top + line as f32 * DETAIL_PITCH, DETAIL_SCALE, if is_problem { th.warn } else { th.text_muted }, &fitted);
+                draw_text(canvas, x0, line_top, DETAIL_SCALE, if is_problem { th.warn } else { th.text_muted }, &fitted);
+                line_top += DETAIL_PITCH;
             }
+        }
+        if let Some(note) = focused.as_ref().filter(|_| !focused_reloading).and_then(|status| old_copy_note(status, now)) {
+            draw_text(canvas, x0, line_top, DETAIL_SCALE, th.warn, &rbms_render::fit_text(&note, DETAIL_SCALE, PANEL_W));
+        }
+        let note_top = CH as f32 - NOTE_BOTTOM - NOTE_PITCH * (RELOAD_NOTE.len() - 1) as f32;
+        for (line, note) in RELOAD_NOTE.iter().enumerate() {
+            draw_text(canvas, x0, note_top + line as f32 * NOTE_PITCH, NOTE_SCALE, th.text_muted, &rbms_render::fit_text(note, NOTE_SCALE, PANEL_W));
         }
     }
 }
@@ -577,7 +677,7 @@ mod tests {
 
     #[test]
     fn a_source_is_labelled_by_the_users_name_then_the_tables_own_then_only_its_location() {
-        let loaded = TableStatus::Loaded { name: "\u{767a}\u{72c2}".to_string(), entries: 9, levels: 3, owned: 4, stale: None };
+        let loaded = TableStatus::Loaded { name: "\u{767a}\u{72c2}".to_string(), entries: 9, levels: 3, owned: 4, origin: TableOrigin::File, stale: None };
         let unnamed = TableSource { name: String::new(), location: "https://tables.test/t/".into() };
         assert_eq!(source_label(&unnamed, None), "https://tables.test/t/");
         assert_eq!(source_label(&unnamed, Some(&loaded)), "\u{767a}\u{72c2}  -  https://tables.test/t/");
@@ -588,13 +688,20 @@ mod tests {
 
     #[test]
     fn each_status_reads_differently_at_a_glance_and_in_full() {
-        let fresh = TableStatus::Loaded { name: "T".into(), entries: 1035, levels: 26, owned: 1035, stale: None };
+        let fresh = TableStatus::Loaded { name: "T".into(), entries: 1035, levels: 26, owned: 1035, origin: TableOrigin::File, stale: None };
         assert_eq!(status_summary(&fresh), ("1035 OF 1035 CHARTS OWNED  -  26 LEVELS".to_string(), false));
         assert_eq!(status_detail(&fresh), None, "a table that loaded and is owned needs no more said");
 
-        let stale = TableStatus::Loaded { name: "T".into(), entries: 10, levels: 2, owned: 3, stale: Some("address: HTTP 503 Service Unavailable".into()) };
-        assert_eq!(status_summary(&stale), ("SAVED COPY  -  3 OF 10 CHARTS OWNED".to_string(), true));
-        assert_eq!(status_detail(&stale).as_deref(), Some("NOT REFRESHED: address: HTTP 503 Service Unavailable"));
+        let stale = TableStatus::Loaded {
+            name: "T".into(),
+            entries: 10,
+            levels: 2,
+            owned: 3,
+            origin: TableOrigin::Address { fetched_at: Some(0) },
+            stale: Some("address: HTTP 503 Service Unavailable".into()),
+        };
+        assert_eq!(status_summary(&stale), ("RELOAD FAILED  -  3 OF 10 CHARTS OWNED".to_string(), true));
+        assert_eq!(status_detail(&stale).as_deref(), Some("RELOAD FAILED, THE TABLE IS AS IT WAS: address: HTTP 503 Service Unavailable"));
 
         let failed = TableStatus::Failed { reason: "header https://tables.test/t/header.json: HTTP 404 Not Found".into() };
         assert_eq!(status_detail(&failed).as_deref(), Some("LOAD FAILED: header https://tables.test/t/header.json: HTTP 404 Not Found"));
@@ -608,7 +715,9 @@ mod tests {
         app.shared.config.library.tables.push(TableSource { name: "one".into(), location: file.location() });
         let unknown = crate::stage::render_tests::render(&mut app, Stage::Tables(TablesState::new())).pixel_checksum();
 
-        crate::tablesrc::load_and_match_md5s(&app.shared.config.library.tables[0], &[]);
+        let nothing_owned = rbms_table::Md5Index::new(std::iter::empty());
+        let store = TableStore::beside(&app.shared.settings_path);
+        crate::tablesrc::load_and_match(&store, crate::tablesrc::LoadPolicy::SavedFirst, &app.shared.config.library.tables[0], &nothing_owned);
         let failed = crate::stage::render_tests::render(&mut app, Stage::Tables(TablesState::new())).pixel_checksum();
         assert_ne!(unknown, failed, "the failure is not on the screen");
     }
@@ -623,5 +732,431 @@ mod tests {
         state.update(&mut ctx(&mut app));
         assert!(state.picker.is_none(), "the screen stops waiting once it has an answer");
         assert!(app.shared.config.library.tables.is_empty());
+    }
+
+    /// The addresses of one test, and the copies they leave beside its app's settings, which are
+    /// dropped when the test is over. A table at an address is fetched from here and nowhere else.
+    struct Addresses {
+        tables: crate::tablesrc::test_outside::FakeTables,
+        settings: std::path::PathBuf,
+        registered: Vec<String>,
+        _installed: crate::tablesrc::test_outside::Installed,
+    }
+
+    impl Addresses {
+        fn of(app: &crate::App) -> Addresses {
+            let tables = crate::tablesrc::test_outside::FakeTables::default();
+            let installed = tables.install();
+            Addresses { tables, settings: app.shared.settings_path.clone(), registered: Vec::new(), _installed: installed }
+        }
+
+        fn store(&self) -> TableStore {
+            TableStore::beside(&self.settings)
+        }
+
+        /// Register the table at `address` the way typing its URL does, and stay on the LOADING
+        /// screen until it hands back.
+        fn register(&mut self, app: &mut crate::App, address: &str) {
+            self.registered.push(address.to_string());
+            let mut state = TablesState::new();
+            state.text_input = Some(TextEdit::from_text(address));
+            let Transition::Open(Stage::Loading(mut loading)) = state.url_entry_key(&app.shared, &press(KeyCode::Enter)) else {
+                panic!("a typed address was not sent to the loading screen");
+            };
+            loop {
+                match loading.update(&mut ctx(app)) {
+                    Transition::Stay => std::thread::yield_now(),
+                    Transition::Back => return,
+                    _ => panic!("the loading screen left for somewhere other than the table manager"),
+                }
+            }
+        }
+
+        /// Run the table manager's frames until nothing of this app's is being reloaded any more.
+        fn wait_for_reloads(&self, app: &mut crate::App, state: &mut TablesState) {
+            while app.shared.config.library.tables.iter().any(|source| table_is_reloading(&self.settings, &source.location))
+                || self.registered.iter().any(|address| table_is_reloading(&self.settings, address))
+            {
+                state.update(&mut ctx(app));
+                std::thread::yield_now();
+            }
+        }
+    }
+
+    impl Drop for Addresses {
+        fn drop(&mut self) {
+            let store = self.store();
+            for address in &self.registered {
+                forget_table_status(address);
+                store.forget(address);
+            }
+        }
+    }
+
+    const ONE_LEVEL: &[u8] = br#"[{"md5":"1111","level":"1"}]"#;
+    const TWO_LEVELS: &[u8] = br#"[{"md5":"1111","level":"1"},{"md5":"2222","level":"2"}]"#;
+
+    /// A table registered by its address is fetched once and kept: the row says which day the copy
+    /// is from, and removing the table drops the copy with it.
+    #[test]
+    fn a_table_registered_by_address_is_kept_and_its_copy_goes_when_it_is_removed() {
+        let address = "https://tables.test/manager/kept/";
+        let mut app = app();
+        let mut addresses = Addresses::of(&app);
+        addresses.tables.serve(address, "Kept", TWO_LEVELS);
+        addresses.register(&mut app, address);
+
+        assert_eq!(addresses.tables.asked(), 1);
+        assert!(addresses.store().has_copy_file(address), "a fetched table was not kept");
+        let status = table_status(address).expect("the load is remembered");
+        let now = unix_now();
+        let (saved, is_old) = saved_note(&status, now).expect("a table at an address says how long ago its copy was fetched");
+        assert_eq!((saved, is_old), ("SAVED JUST NOW".to_string(), false), "a copy fetched just now is not said to be, or is old");
+        assert_eq!(old_copy_note(&status, now), None);
+        let written = ron::ser::to_string(&app.shared.config.library.tables).expect("the sources are written");
+        assert_eq!(written, format!(r#"[(name:"",location:"{address}")]"#), "what the settings file holds of a table is its name and its address, as before");
+        let earlier: Vec<TableSource> =
+            ron::from_str(r#"[(name: "mine", location: "https://tables.test/manager/earlier/")]"#).expect("an earlier settings entry reads");
+        assert_eq!((earlier[0].name.as_str(), earlier[0].location.as_str()), ("mine", "https://tables.test/manager/earlier/"));
+
+        let mut state = TablesState::new();
+        state.handle_key(&mut ctx(&mut app), press(KeyCode::KeyD));
+        assert!(app.shared.config.library.tables.is_empty());
+        assert!(!addresses.store().has_copy_file(address), "the copy of a removed table was left behind");
+    }
+
+    /// R fetches the table under the cursor again without leaving the screen. While it is out the
+    /// row says so; when it lands the copy, the row and the folder in the song list are the new
+    /// table's, and one line says how the reload went.
+    #[test]
+    fn r_fetches_the_table_under_the_cursor_again_and_the_song_list_follows() {
+        crate::notify::exclusive(|| {
+            let address = "https://tables.test/manager/reloaded/";
+            let mut app = app();
+            let mut addresses = Addresses::of(&app);
+            addresses.tables.serve(address, "Before", ONE_LEVEL);
+            addresses.register(&mut app, address);
+            assert_eq!(folders(&mut app, SelectView::TableLevels(0)), vec!["LV 1 (0)"]);
+
+            addresses.tables.serve(address, "After", TWO_LEVELS);
+            let mut state = TablesState::new();
+            let open = addresses.tables.hold();
+            assert!(matches!(state.handle_key(&mut ctx(&mut app), press(KeyCode::KeyR)), Transition::Stay), "a reload left the screen");
+            assert!(table_is_reloading(&app.shared.settings_path, address), "the row has nothing to say the table is on its way");
+            assert!(matches!(state.update(&mut ctx(&mut app)), Transition::Stay), "the screen stopped while the table was out");
+            assert_eq!(app.shared.table_names, vec!["BEFORE".to_string()], "the table changed before the reload came back");
+            state.handle_key(&mut ctx(&mut app), press(KeyCode::KeyR));
+            drop(open);
+            addresses.wait_for_reloads(&mut app, &mut state);
+
+            assert_eq!(addresses.tables.asked(), 2, "one registration and one reload; a second R while it was out is not a second fetch");
+            assert_eq!(app.shared.table_names, vec!["AFTER".to_string()]);
+            assert_eq!(folders(&mut app, SelectView::TableLevels(0)), vec!["LV 1 (0)", "LV 2 (0)"], "the folder is the reloaded table's");
+            assert_eq!(addresses.store().copy_name(address).as_deref(), Some("After"), "the copy was not replaced");
+            assert_eq!(table_status(address).as_ref().map(status_summary), Some(("0 OF 2 CHARTS OWNED  -  2 LEVELS".to_string(), false)));
+            let mut said = Vec::new();
+            crate::notify::drain(&mut said);
+            assert!(said.iter().any(|(_, message)| message == "difficulty tables reloaded: 1 updated, 0 failed"), "nothing said how the reload went: {said:?}");
+        });
+    }
+
+    /// A reload that fails changes nothing but what the row says: the table, its folder and its
+    /// copy are the ones from before, and the reason is on the row and in a notification.
+    #[test]
+    fn a_reload_that_fails_keeps_the_table_and_says_why() {
+        crate::notify::exclusive(|| {
+            let address = "https://tables.test/manager/down/";
+            let mut app = app();
+            let mut addresses = Addresses::of(&app);
+            addresses.tables.serve(address, "Kept", TWO_LEVELS);
+            addresses.register(&mut app, address);
+            let before = table_status(address);
+
+            addresses.tables.take_down(address);
+            let mut state = TablesState::new();
+            state.handle_key(&mut ctx(&mut app), press(KeyCode::KeyR));
+            addresses.wait_for_reloads(&mut app, &mut state);
+
+            assert_eq!(app.shared.table_names, vec!["KEPT".to_string()]);
+            assert_eq!(folders(&mut app, SelectView::TableLevels(0)), vec!["LV 1 (0)", "LV 2 (0)"], "the folder of a table whose reload failed changed");
+            assert_eq!(addresses.store().copy_name(address).as_deref(), Some("Kept"));
+            let status = table_status(address).expect("the table is still loaded");
+            assert_eq!(status_summary(&status), ("RELOAD FAILED  -  0 OF 2 CHARTS OWNED".to_string(), true));
+            assert!(status_detail(&status).is_some_and(|detail| detail.starts_with("RELOAD FAILED, THE TABLE IS AS IT WAS: ")), "the row does not say why");
+            let now = unix_now();
+            assert_eq!(saved_note(&status, now), before.as_ref().and_then(|before| saved_note(before, now)), "the copy's age changed");
+            let mut said = Vec::new();
+            crate::notify::drain(&mut said);
+            assert!(
+                said.iter().any(|(level, message)| *level == Level::Warn && message.starts_with(&format!("table reload failed ({address}): "))),
+                "{said:?}"
+            );
+            assert!(said.iter().any(|(level, message)| *level == Level::Warn && message == "difficulty tables reloaded: 0 updated, 1 failed"), "{said:?}");
+
+            addresses.tables.serve(address, "Back", ONE_LEVEL);
+            state.handle_key(&mut ctx(&mut app), press(KeyCode::KeyR));
+            addresses.wait_for_reloads(&mut app, &mut state);
+            assert_eq!(
+                table_status(address).as_ref().map(status_summary),
+                Some(("0 OF 1 CHARTS OWNED  -  1 LEVELS".to_string(), false)),
+                "a later reload clears it"
+            );
+        });
+    }
+
+    /// A fetches every table again: the ones at an address from their addresses and the one that is
+    /// a file from its file, and the tally counts each.
+    #[test]
+    fn a_fetches_every_table_again_and_reads_a_table_file_again() {
+        crate::notify::exclusive(|| {
+            let (up, down) = ("https://tables.test/manager/all/up/", "https://tables.test/manager/all/down/");
+            let file = TableFile::written("reload-all", ONE_LEVEL);
+            let mut app = app();
+            let mut addresses = Addresses::of(&app);
+            addresses.tables.serve(up, "Up", ONE_LEVEL);
+            addresses.tables.serve(down, "Down", ONE_LEVEL);
+            addresses.register(&mut app, up);
+            addresses.register(&mut app, down);
+            register(&mut app, &file);
+            assert_eq!(addresses.tables.asked(), 2);
+
+            addresses.tables.serve(up, "Up", TWO_LEVELS);
+            addresses.tables.take_down(down);
+            std::fs::write(&file.0, TWO_LEVELS).expect("rewrite the table file");
+            let mut state = TablesState::new();
+            state.sel = TablesState::row_count(&app.shared) - 1;
+            state.handle_key(&mut ctx(&mut app), press(KeyCode::KeyA));
+            addresses.wait_for_reloads(&mut app, &mut state);
+
+            assert_eq!(addresses.tables.asked(), 4, "each table at an address is fetched once more, and the file is not fetched at all");
+            let levels: Vec<usize> = app.shared.table_levels.iter().map(Vec::len).collect();
+            assert_eq!(levels, vec![2, 1, 2], "the table that answered and the file are new, the one that did not answer is as it was");
+            let mut said = Vec::new();
+            crate::notify::drain(&mut said);
+            assert!(said.iter().any(|(_, message)| message == "difficulty tables reloaded: 2 updated, 1 failed"), "{said:?}");
+
+            state.handle_key(&mut ctx(&mut app), press(KeyCode::KeyR));
+            assert_eq!(addresses.tables.asked(), 4, "R on a row that is not a table reloaded something");
+        });
+    }
+
+    /// A table removed while its reload is out is not brought back by the reload landing, the copy
+    /// the reload wrote of it is dropped, and nothing counts it as a table that was updated.
+    #[test]
+    fn a_table_removed_while_its_reload_is_out_stays_removed() {
+        crate::notify::exclusive(|| {
+            let address = "https://tables.test/manager/removed-meanwhile/";
+            let mut app = app();
+            let mut addresses = Addresses::of(&app);
+            addresses.tables.serve(address, "Going", ONE_LEVEL);
+            addresses.register(&mut app, address);
+
+            let mut state = TablesState::new();
+            let open = addresses.tables.hold();
+            state.handle_key(&mut ctx(&mut app), press(KeyCode::KeyR));
+            state.handle_key(&mut ctx(&mut app), press(KeyCode::KeyD));
+            let mut said = Vec::new();
+            crate::notify::drain(&mut said);
+            drop(open);
+            addresses.wait_for_reloads(&mut app, &mut state);
+
+            assert!(app.shared.config.library.tables.is_empty() && app.shared.table_names.is_empty() && app.shared.table_levels.is_empty());
+            assert!(!addresses.store().has_copy_file(address), "the reload left a copy of a table that is no longer registered");
+            crate::notify::drain(&mut said);
+            assert!(
+                said.iter().all(|(_, message)| !message.starts_with("difficulty tables reloaded:")),
+                "a table that was removed was counted in how its reload went: {said:?}"
+            );
+        });
+    }
+
+    /// A settings file written by hand can list one address twice. Both rows are the same table,
+    /// so a reload that fetched it once brings both up to date.
+    #[test]
+    fn a_reload_updates_every_row_that_names_the_address_it_fetched() {
+        let address = "https://tables.test/manager/twice/";
+        let mut app = app();
+        let mut addresses = Addresses::of(&app);
+        addresses.tables.serve(address, "Twice", ONE_LEVEL);
+        addresses.register(&mut app, address);
+        app.shared.config.library.tables.push(TableSource { name: "again".into(), location: address.to_string() });
+        app.shared.table_names.push("AGAIN".to_string());
+        let first = app.shared.table_levels[0].clone();
+        app.shared.table_levels.push(first);
+
+        addresses.tables.serve(address, "Twice", TWO_LEVELS);
+        let mut state = TablesState::new();
+        state.handle_key(&mut ctx(&mut app), press(KeyCode::KeyA));
+        addresses.wait_for_reloads(&mut app, &mut state);
+
+        assert_eq!(addresses.tables.asked(), 2, "one registration and one reload: an address listed twice is fetched once");
+        let levels: Vec<usize> = app.shared.table_levels.iter().map(Vec::len).collect();
+        assert_eq!(levels, vec![2, 2], "a row that names the reloaded address was left as it was");
+        assert_eq!(app.shared.table_names, vec!["TWICE".to_string(), "AGAIN".to_string()], "each row keeps the name its source gives it");
+        app.shared.config.library.tables.clear();
+    }
+
+    /// The song list looking into a level of a table follows that level by its name when a reload
+    /// moves it, and steps out to the table's levels when the reloaded table no longer has it.
+    #[test]
+    fn a_level_being_looked_at_is_followed_by_name_through_a_reload() {
+        const LEVELS_1_2_3: &[u8] = br#"[{"md5":"1111","level":"1"},{"md5":"2222","level":"2"},{"md5":"3333","level":"3"}]"#;
+        const LEVELS_0_1_2: &[u8] = br#"[{"md5":"0000","level":"0"},{"md5":"1111","level":"1"},{"md5":"2222","level":"2"}]"#;
+        const LEVELS_0_1: &[u8] = br#"[{"md5":"0000","level":"0"},{"md5":"1111","level":"1"}]"#;
+        let address = "https://tables.test/manager/followed/";
+        let mut app = app();
+        let mut addresses = Addresses::of(&app);
+        addresses.tables.serve(address, "Followed", LEVELS_1_2_3);
+        addresses.register(&mut app, address);
+        let names = |app: &crate::App| app.shared.table_levels[0].iter().map(|(name, _)| name.clone()).collect::<Vec<_>>();
+        assert_eq!(names(&app), vec!["1", "2", "3"]);
+
+        app.shared.select_view = SelectView::TableLevel(0, 1);
+        app.shared.rebuild_select_items();
+        addresses.tables.serve(address, "Followed", LEVELS_0_1_2);
+        let mut state = TablesState::new();
+        state.handle_key(&mut ctx(&mut app), press(KeyCode::KeyR));
+        addresses.wait_for_reloads(&mut app, &mut state);
+        assert_eq!(names(&app), vec!["0", "1", "2"]);
+        assert!(app.shared.select_view == SelectView::TableLevel(0, 2), "the list is no longer looking into level 2, which moved one place down");
+
+        addresses.tables.serve(address, "Followed", LEVELS_0_1);
+        state.handle_key(&mut ctx(&mut app), press(KeyCode::KeyR));
+        addresses.wait_for_reloads(&mut app, &mut state);
+        assert_eq!(names(&app), vec!["0", "1"]);
+        assert!(app.shared.select_view == SelectView::TableLevels(0), "a level the table no longer has is still being looked into");
+
+        app.shared.select_view = SelectView::TableLevel(0, 0);
+        addresses.tables.serve(address, "Followed", LEVELS_1_2_3);
+        state.handle_key(&mut ctx(&mut app), press(KeyCode::KeyR));
+        addresses.wait_for_reloads(&mut app, &mut state);
+        assert!(
+            app.shared.select_view == SelectView::TableLevels(0),
+            "the list went on looking into the first level, which is another level now that level 0 is gone"
+        );
+    }
+
+    /// The age of a copy is pointed out once the copy is old, and not before; a table that is a
+    /// file has no copy to age.
+    #[test]
+    fn the_age_of_a_copy_is_pointed_out_once_the_copy_is_old() {
+        const DAY: u64 = 86_400;
+        let now = 1_760_227_200 + 3600;
+        let loaded = |origin| TableStatus::Loaded { name: "T".into(), entries: 2, levels: 1, owned: 1, origin, stale: None };
+        let fresh = loaded(TableOrigin::Address { fetched_at: Some(now - COPY_OLD_AFTER_DAYS * DAY) });
+        assert_eq!(saved_note(&fresh, now), Some(("SAVED 30 DAYS AGO".to_string(), false)), "a copy exactly at the limit is not old yet");
+        assert_eq!(old_copy_note(&fresh, now), None);
+
+        let old = loaded(TableOrigin::Address { fetched_at: Some(now - 45 * DAY) });
+        assert_eq!(saved_note(&old, now), Some(("SAVED 45 DAYS AGO".to_string(), true)));
+        let hours_old = loaded(TableOrigin::Address { fetched_at: Some(now - 3 * 3600) });
+        assert_eq!(saved_note(&hours_old, now), Some(("SAVED 3 HOURS AGO".to_string(), false)), "an age is counted in the zone of whoever reads it");
+        assert_eq!(old_copy_note(&old, now).as_deref(), Some("THE SAVED COPY IS 45 DAYS OLD - R FETCHES THE TABLE AGAIN"));
+
+        let undated = loaded(TableOrigin::Address { fetched_at: None });
+        assert_eq!(saved_note(&undated, now), Some(("SAVED".to_string(), false)), "a copy that does not say when it is from is not called old");
+        assert_eq!(saved_note(&loaded(TableOrigin::File), now), None);
+        assert_eq!(saved_note(&TableStatus::Failed { reason: "x".into() }, now), None);
+    }
+
+    /// Where the frames below are saved for a person to open, when this names a folder: the
+    /// variable the capture harness reads.
+    const CAPTURE_DIR_ENV: &str = "RBMS_SKIN_CAPTURE_DIR";
+
+    /// A full HD window, which the captures are also drawn for beside the size the screen is laid
+    /// out for.
+    const LARGE: (u32, u32) = (1920, 1080);
+
+    /// Draw the table manager with the cursor on the row `sel`, and answer what was drawn at the
+    /// size the screen is laid out for. With a capture folder named, the frame is saved there as
+    /// `<name>-<size>.png` at that size and at full HD.
+    fn drawn(app: &mut crate::App, sel: usize, name: &str) -> u64 {
+        let focused = || Stage::Tables(TablesState { sel, ..TablesState::default() });
+        let pixels = crate::stage::render_tests::render(app, focused());
+        if let Some(folder) = std::env::var_os(CAPTURE_DIR_ENV) {
+            let folder = std::path::PathBuf::from(folder);
+            std::fs::create_dir_all(&folder).expect("the capture folder can be created");
+            let mut large = crate::stage::HeadlessCanvas::new(LARGE.0, LARGE.1);
+            crate::stage::render_tests::render_into(app, focused(), &mut large);
+            for (frame, size) in [(&pixels, (CW, CH)), (&large, LARGE)] {
+                let file = folder.join(format!("{name}-{}x{}.png", size.0, size.1));
+                image::save_buffer(file, frame.rgba(), size.0, size.1, image::ExtendedColorType::Rgba8).expect("the capture is written");
+            }
+        }
+        pixels.pixel_checksum()
+    }
+
+    /// What is said under the list of a table that is being fetched again is that it is, whatever
+    /// its last reload came to: a reason it failed before is not what is happening to it now.
+    #[test]
+    fn a_table_on_its_way_says_so_under_the_list_and_not_why_it_failed_before() {
+        let stale = TableStatus::Loaded {
+            name: "T".into(),
+            entries: 10,
+            levels: 2,
+            owned: 3,
+            origin: TableOrigin::Address { fetched_at: Some(0) },
+            stale: Some("the address lists no charts now".into()),
+        };
+        let failed = TableStatus::Failed { reason: "address: HTTP 404 Not Found".into() };
+        for status in [Some(&stale), Some(&failed), None] {
+            assert_eq!(focused_detail(status, true), Some((RELOADING_DETAIL.to_string(), false)), "{status:?}");
+        }
+        assert_eq!(focused_detail(Some(&stale), false), Some(("RELOAD FAILED, THE TABLE IS AS IT WAS: the address lists no charts now".to_string(), true)));
+        assert_eq!(focused_detail(Some(&failed), false), Some(("LOAD FAILED: address: HTTP 404 Not Found".to_string(), true)));
+        let unowned = TableStatus::Loaded { name: "T".into(), entries: 3, levels: 2, owned: 0, origin: TableOrigin::File, stale: None };
+        assert!(focused_detail(Some(&unowned), false).is_some_and(|(detail, is_problem)| detail.contains("NONE OF THIS TABLE'S CHARTS") && !is_problem));
+        assert_eq!(focused_detail(None, false), None);
+        rbms_render::font::use_embedded_fonts_only();
+        assert_eq!(rbms_render::fit_text(RELOADING_DETAIL, DETAIL_SCALE, PANEL_W), RELOADING_DETAIL, "what is said of a table on its way is cut short");
+        for note in RELOAD_NOTE {
+            assert_eq!(rbms_render::fit_text(note, NOTE_SCALE, PANEL_W), note, "a line of the note along the bottom is cut short");
+        }
+    }
+
+    /// What a row says is on the screen: how long ago its copy was fetched, that the table is on
+    /// its way, that its reload failed, and that its copy is old each draw a frame of their own.
+    #[test]
+    fn the_rows_of_the_table_manager_draw_what_became_of_each_table() {
+        const DAY: u64 = 86_400;
+        const BODY: &[u8] = br#"[{"md5":"1111","level":"1"},{"md5":"2222","level":"2"},{"md5":"3333","level":"2"}]"#;
+        let (insane, satellite, old) = ("https://tables.test/drawn/insane1/", "https://tables.test/drawn/satellite/", "https://tables.test/drawn/old/");
+        let file = TableFile::written("drawn-rows", BODY);
+        let mut app = app();
+        let mut addresses = Addresses::of(&app);
+        addresses.tables.serve(insane, "Insane BMS", BODY);
+        addresses.tables.serve(satellite, "Satellite", BODY);
+        addresses.registered.push(old.to_string());
+        addresses.store().keep_for_tests(old, "Stella", BODY, Some(unix_now() - 45 * DAY));
+        addresses.register(&mut app, insane);
+        addresses.register(&mut app, satellite);
+        register(&mut app, &file);
+        app.shared.config.library.tables.push(TableSource { name: String::new(), location: old.to_string() });
+        let nothing_owned = rbms_table::Md5Index::new(std::iter::empty());
+        crate::tablesrc::load_and_match(&addresses.store(), crate::tablesrc::LoadPolicy::SavedFirst, &app.shared.config.library.tables[3], &nothing_owned);
+        assert_eq!(addresses.tables.asked(), 2, "the table with an old copy was read from the copy");
+
+        let loaded = drawn(&mut app, 0, "tables-loaded");
+        let old_focused = drawn(&mut app, 3, "tables-old-copy");
+        assert_ne!(loaded, old_focused);
+
+        let open = addresses.tables.hold();
+        let mut state = TablesState { sel: 1, ..TablesState::default() };
+        state.handle_key(&mut ctx(&mut app), press(KeyCode::KeyA));
+        let reloading = drawn(&mut app, 1, "tables-reloading");
+        addresses.tables.take_down(satellite);
+        drop(open);
+        addresses.wait_for_reloads(&mut app, &mut state);
+        let failed = drawn(&mut app, 1, "tables-reload-failed");
+        assert_ne!(reloading, failed, "a reload that is out and one that failed draw the same row");
+        assert_ne!(loaded, failed);
+
+        let open = addresses.tables.hold();
+        state.handle_key(&mut ctx(&mut app), press(KeyCode::KeyR));
+        let on_its_way_again = drawn(&mut app, 1, "tables-reloading-after-a-failure");
+        assert_ne!(on_its_way_again, failed, "a table on its way again is drawn as one whose reload failed");
+        drop(open);
+        addresses.wait_for_reloads(&mut app, &mut state);
+        app.shared.config.library.tables.clear();
     }
 }

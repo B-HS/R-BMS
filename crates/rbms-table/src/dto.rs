@@ -48,6 +48,10 @@ pub struct TableHeader {
     pub data_url: Vec<String>,
     #[serde(default, deserialize_with = "lenient_optional_text_list")]
     pub level_order: Option<Vec<String>>,
+    /// The courses the table lists, as it wrote them. They are kept rather than read: nothing plays
+    /// a table's courses yet, and the copy saved of a table has to be the whole of it.
+    #[serde(default)]
+    pub course: Option<Value>,
 }
 
 /// A JSON scalar as the text a table means by it: `12` and `"12"` are the same level.
