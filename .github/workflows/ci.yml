@@ -18,11 +18,10 @@ jobs:
   test:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # Longer than the slowest job so far (57 minutes on ubuntu, before the suite was sped up), so
-    # a slow run still ends with its list of failures instead of being cancelled without one. A
-    # job past it is hung, and is stopped rather than left to run to the six hour default. Lower
-    # it once a run of the faster suite has shown how long that takes.
-    timeout-minutes: 90
+    # Recent passing runs took 3 to 8 minutes per job (slowest: windows, 8.3 minutes). 30 minutes
+    # leaves room for a cold cache, which compiles every dependency again, and still stops a hung
+    # job long before the six hour default. Raise it if a run on an empty cache nears it.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -56,7 +55,7 @@ jobs:
   lint:
     name: fmt + clippy
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Install Linux build deps

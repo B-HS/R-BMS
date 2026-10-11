@@ -72,6 +72,8 @@ jobs:
         with:
           targets: aarch64-apple-darwin, x86_64-apple-darwin
       - uses: Swatinem/rust-cache@v2
+      # rbms-player's default `video` feature is on, so this build includes the OpenH264 movie decoder
+      # (compiled from source by the cc crate; no extra install step).
       - name: Build universal binary
         run: |
           set -euo pipefail
@@ -87,9 +89,10 @@ jobs:
           # still clear Gatekeeper quarantine on first run (see docs/ci-release.md §5).
           codesign --force --sign - --timestamp=none dist/rbms-player
           codesign --verify --verbose dist/rbms-player || true
-          cp LICENSE dist/ 2>/dev/null || true
-          cp README.md dist/ 2>/dev/null || true
-          cd dist && tar -czf rbms-macos-universal.tar.gz rbms-player $(ls LICENSE README.md 2>/dev/null || true)
+          # LICENSE and THIRD-PARTY-NOTICES.md must ship with the binary (OpenH264 BSD-2, Inter OFL and the
+          # other notices); a missing file fails the job instead of producing an archive without them.
+          cp LICENSE README.md THIRD-PARTY-NOTICES.md dist/
+          cd dist && tar -czf rbms-macos-universal.tar.gz rbms-player LICENSE README.md THIRD-PARTY-NOTICES.md
           shasum -a 256 rbms-macos-universal.tar.gz rbms-player > rbms-macos-universal.sha256
       - uses: actions/upload-artifact@v4
         with:
@@ -115,8 +118,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Copy-Item target/release/rbms-player.exe dist/
-          if (Test-Path LICENSE)  { Copy-Item LICENSE  dist/ }
-          if (Test-Path README.md){ Copy-Item README.md dist/ }
+          Copy-Item LICENSE, README.md, THIRD-PARTY-NOTICES.md dist/ -ErrorAction Stop
           Compress-Archive -Path dist/* -DestinationPath rbms-windows-x64.zip -Force
           # SHA-256 of the artifacts (would feed the backend client_build allowlist; see docs/backend).
           (Get-FileHash rbms-windows-x64.zip -Algorithm SHA256).Hash | Out-File -Encoding ascii rbms-windows-x64.sha256

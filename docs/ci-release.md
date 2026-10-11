@@ -7,12 +7,14 @@
 ## 1. CI (`.github/workflows/ci.yml`)
 
 - 트리거: `dev`·`prod`의 push와 두 브랜치를 대상으로 한 pull request.
-- `test` 잡: Ubuntu, macOS, Windows 매트릭스에서 `cargo build --workspace`, `cargo test --workspace`를 실행합니다. 테스트 수는 고정 계약이 아니지만, 마지막 로컬 Phase H 실행은 3,040개를 등록하고 exit 0이었습니다.
+- `test` 잡: Ubuntu, macOS, Windows 매트릭스에서 `cargo build --workspace`, `cargo test --workspace --no-fail-fast`를 실행합니다. 테스트 수는 고정 계약이 아니며(웨이브 8B 게이트 기준 4,815개 통과), 숫자 대신 CI 결과로 판단합니다.
 - Linux 의존성: `libasound2-dev`, `libgtk-3-dev`, `libudev-dev`, `libxkbcommon-dev`, `libwayland-dev`, `libx11-dev`, `libxrandr-dev`, `libxi-dev`, `libxcursor-dev`를 설치합니다. 이는 cpal(ALSA), gilrs(udev), winit(X11/Wayland), rfd(GTK3) 링크 요구를 덮습니다.
 - `lint` 잡: Ubuntu에서 Rust 1.95.0과 `rustfmt`, `clippy`를 설치한 뒤 `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`를 실행합니다. 둘 다 실패 시 CI를 실패시키는 게이트입니다.
 - 캐시: 모든 잡은 `Swatinem/rust-cache@v2`를 사용합니다. CI 툴체인은 `rust-toolchain.toml`과 같은 1.95.0으로 고정됩니다.
+- 제한 시간(`timeout-minutes`): `test` 30분, `lint` 15분. 2026-10-10 dev 의 통과 실행 4건(`38084893496`, `38078567755`, `38077937158`, `38091651597`)에서 `test` 잡은 2.8~8.3분(가장 느린 쪽은 Windows), `lint` 잡은 1.1~1.5분이었습니다. 제한은 가장 느린 실측의 약 3.6배이며, 캐시가 빈 첫 실행에서 모든 의존성을 다시 컴파일하는 시간과 멈춘 잡을 기본 6시간까지 두지 않는 것 사이의 값입니다. 빈 캐시 실행의 소요는 측정하지 못했으므로, 그런 실행이 30분에 가까워지면 올립니다.
+- OpenH264(동영상): `openh264-sys2` 가 C 소스를 `cc` 로 컴파일하므로 세 OS 모두 추가 설치 단계가 없습니다. x86_64 에서는 `nasm` 이 있으면 어셈블리를 쓰고 없거나 실패하면 어셈블리 없이 C 로만 빌드합니다(빌드는 실패하지 않음).
 
-마지막 확인된 CI 실행은 `35055642686`이며 Ubuntu·macOS·Windows test와 fmt/clippy 잡이 모두 성공했습니다. 로컬에서 마지막으로 확인한 관련 명령은 `cargo test --workspace` exit 0(실제 오디오 장치 테스트 2건 ignored), `cargo build --release -p rbms-player` exit 0, fmt와 clippy 게이트 exit 0입니다.
+마지막으로 확인한 통과 CI 실행은 `38084893496`(웨이브 8A 결과 커밋)이며 Ubuntu·macOS·Windows test와 fmt/clippy 잡이 모두 성공했습니다. 푸시 뒤에는 `gh run list --branch dev` 와 `gh run view` 로 세 OS 의 결과를 직접 확인합니다.
 
 ## 2. 릴리스 워크플로 (`.github/workflows/release.yml`)
 
@@ -26,7 +28,28 @@
 
 - macOS: `aarch64-apple-darwin`과 `x86_64-apple-darwin` release binary를 빌드하고 `lipo`로 합친 뒤 ad-hoc `codesign` 합니다. `rbms-macos-universal.tar.gz`와 SHA-256 파일을 만듭니다.
 - Windows: `rbms-player.exe`를 `rbms-windows-x64.zip`으로 묶고 SHA-256 파일을 만듭니다.
-- publish: 두 플랫폼 아카이브와 체크섬을 `softprops/action-gh-release@v2`로 GitHub Release에 첨부합니다. `LICENSE`와 `README.md`는 산출물에 존재할 때 함께 복사하며, 현재 루트 `LICENSE`는 존재합니다.
+- publish: 두 플랫폼 아카이브와 체크섬을 `softprops/action-gh-release@v2`로 GitHub Release에 첨부합니다.
+- 동영상: 두 빌드 모두 `rbms-player` 의 기본 피처 `video` 를 켠 채(`--no-default-features` 없이) 빌드하므로 OpenH264 가 바이너리에 정적으로 들어갑니다(결정 D10). 소스 빌드라 Cisco 가 배포하는 바이너리를 내려받지 않습니다.
+
+## 2.1 배포 묶음과 제3자 고지
+
+두 아카이브의 내용은 같은 세 문서와 실행 파일입니다.
+
+| 파일 | macOS (`rbms-macos-universal.tar.gz`) | Windows (`rbms-windows-x64.zip`) |
+| --- | --- | --- |
+| 실행 파일 | `rbms-player` | `rbms-player.exe` |
+| `LICENSE` | O | O |
+| `README.md` | O | O |
+| `THIRD-PARTY-NOTICES.md` | O | O |
+
+- 세 문서 중 하나라도 저장소 루트에 없으면 패키징 단계가 실패합니다(예전에는 없으면 조용히 건너뛰었습니다). 고지 없는 아카이브가 게시되지 않게 하려는 의도입니다.
+- 기본 스킨(`assets/skins/rbms-default`)은 바이너리에 내장되므로 아카이브에 스킨 폴더를 따로 넣지 않습니다.
+- `THIRD-PARTY-NOTICES.md` 는 영어이며 다음을 담습니다. OpenH264(Cisco, BSD-2-Clause)의 저작권 표시와 라이선스 전문 및 "소스에서 빌드해 정적으로 링크했다"는 사실, `openh264` 바인딩과 `re_mp4` 의 라이선스, Inter 글꼴의 SIL OFL 1.1 전문, 바이너리에 컴파일되어 들어가는 Lua 5.2.4 와 SQLite, 링크되는 모든 Rust 크레이트의 이름·버전·라이선스(직접 의존 표와 라이선스별 전체 목록), 그리고 그 크레이트들의 라이선스 전문(7절). 7절은 Apache-2.0 을 선택지로 주는 크레이트를 Apache-2.0 으로 받아 전문 한 벌로 덮고, 나머지 크레이트는 패키지에 실린 라이선스 파일을 저작권 표시와 함께 싣습니다(같은 본문은 한 번). 패키지에 라이선스 파일이 없는 크레이트는 7.3 절에 이름·저자·저장소로 적습니다.
+- 갱신 시점: 의존성을 추가·삭제하거나 버전을 올렸을 때, 번들 글꼴·네이티브 소스·제3자 자산이 바뀌었을 때, 그리고 릴리스 전. 6절의 스크립트(`python3 -I gen-notices.py`, 내부에서 `cargo metadata --locked` 실행)로 5절의 표와 7절 전체를 다시 만듭니다. 스크립트는 로컬 레지스트리의 패키지에서 라이선스 파일을 읽으므로 먼저 `cargo fetch --locked` 가 되어 있어야 하고, 본문은 행 끝 공백만 지우고 그대로 싣습니다.
+- 새 라이선스가 GPL-3.0-or-later 와 호환되는지 확인합니다. 현재 의존에서는 `OR` 선택지가 있는 크레이트(`self_cell` 의 Apache-2.0 OR GPL-2.0-only, `r-efi` 의 LGPL-2.1-or-later 선택지)를 허용 쪽 라이선스로 쓰며, `symphonia` 13개는 MPL-2.0 입니다(MPL-2.0 3.3 절로 결합 가능, 소스는 crates.io 에서 변경 없이 받을 수 있음).
+- `Cargo.lock` 은 git 에 추적되지 않으므로(`.gitignore`) CI 릴리스 빌드는 호환 범위의 더 새로운 버전을 해석할 수 있습니다. 고지 파일의 버전은 생성한 기기의 `Cargo.lock` 기준이며, 릴리스 직전에 다시 만듭니다.
+
+macOS 유니버설 빌드의 `x86_64-apple-darwin` 쪽 OpenH264 는 Apple Silicon 러너에서 교차 컴파일되며, 이 경로는 아직 확인되지 않았습니다(로컬에 해당 타깃이 없어 시도하지 않았고, 실제 릴리스 실행에서 처음 확인됩니다). `nasm` 이 없는 러너에서는 어셈블리 없이 C 로 빌드되어 Intel Mac 의 디코드가 느릴 수 있습니다.
 
 릴리스 빌드 잡은 현재 CI와 달리 `dtolnay/rust-toolchain@stable`을 사용합니다. Phase R에서 첫 실제 릴리스를 수행하기 전에 이 차이를 의도적으로 유지할지, CI와 같은 고정 버전으로 맞출지 확인합니다.
 
