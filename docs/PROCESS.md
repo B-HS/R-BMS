@@ -37,8 +37,9 @@
   - [x] 웨이브 8A — 선곡 키 표의 NEXT_REPLAY 제거(D8, 숫자 4 만 슬롯을 넘김)와 기본 스킨 설계서 `docs/plan/2026-10-11-default-skin-design.md`·골격(`assets/skins/rbms-default/`: 공통 Lua, 이미지 생성 스크립트, 결정 화면). Workflow `wf_38f63f0c-00f`(4 에이전트), 리뷰 major 4·minor 9 처리. 게이트: 테스트 4,812 통과·0 실패, 골든 불변. 메인이 결정 화면 캡처를 직접 확인. ModernChic Lua 136개와 대조해 복사 없음(D1).
   - [x] 웨이브 8B — 선곡, 플레이 SP(5/7/9)·DP(10/14), 결과·코스 결과 문서와 통합. Workflow `wf_57262b5f-803`(10 에이전트), 화면별 리뷰 major 7·minor 21 처리. 게이트: 테스트 4,815 통과·0 실패, 골든 불변. 문서 9개 덤프 `--strict` 통과, 캡처 80장(메인이 선곡·플레이 7/9/14키·결과 확인), 이미지 93 KiB. 엔진 수정 2건(5·10키 결과의 턴테이블 역할, 선곡 op 190~195). 9키 스킨 플레이가 처음 그려짐.
   - [x] 웨이브 8C — 기본 스킨 내장(`apps/rbms-player/build.rs`)·설치(`install-manifest.txt`)·기본 선택, 로드 실패 알림과 24키 폴백, 설정 행 표지·`skin` 그룹 기기 로컬화·레터박스 기본값, 제3자 고지와 릴리스 묶음, 기본 팩 게이트 테스트와 환경 변수 테스트 일반화, 문서(`docs/skin.md` 재작성, architecture·crates·development·README·HANDOFF, 수동 확인 목록). Workflow `wf_04db2a8b-10f`(7 에이전트), 리뷰 major 1·minor 12 중 10건 수정·3건 보류(사양 웨이브 8C 기록). 게이트: 테스트 4,878 통과·0 실패, 골든 불변. 깨끗한 HOME 의 첫 실행이 기본 스킨으로 그려짐을 메인이 캡처로 확인.
-- [ ] L6. 검증 — 웨이브마다 게이트(fmt, clippy `--all-targets --all-features -D warnings`, `cargo test --workspace`, `git diff --check`)와 캡처를 메인이 직접 확인한다. 최종으로 덤프 도구의 pcall 실패 0 과 화면별 캡처를 `m2`~`m5` 레이아웃과 대조한다.
-- [ ] L7. 문서·이력 — 웨이브마다 조사 문서(`r1`~`r3`, `00-synthesis`)와 이 체크리스트를 갱신하고, 마지막에 `docs/skin.md`·history·QA·HANDOFF 를 정리한다.
+- [x] L6. 검증 — 최종(2026-10-11): 로컬 게이트 통과(테스트 4,878 통과·0 실패), CI run `38099911787`(`d0af473`)에서 세 OS 전부 통과, ModernChic 덤프 9/10 load ok·pcall 0(keyconfig 는 원본 결함), 웨이브 8 뒤 다시 찍은 ModernChic 선곡·플레이·결과 캡처가 웨이브 7B 최종본과 픽셀 동일, 기본 스킨 문서 9개 `--strict` 통과와 화면 캡처 확인. 실제 창 확인은 사용자 절차(`docs/quality-assurance/2026-10-11-default-skin-manual-check.md`).
+- [x] L7. 문서·이력 — `docs/skin.md` 재작성, architecture·crates·development·README·HANDOFF 갱신, 수동 확인 목록, 이력 `docs/history/2026-10-11-lua-skin-compat.md`. 조사 문서는 웨이브마다 상단 반영 사항으로 갱신했다.
+- 사용자 결정 대기(이력 문서의 표): 기존 설치의 레터박스 마이그레이션, `Cargo.lock` 추적과 `--locked`, 고지 파일의 Apache-2.0 선택 표기, 내장 화면 테마 색 재조정. 웨이브 9 는 별도 지시가 있을 때 시작한다.
 
 ---
 
