@@ -59,7 +59,7 @@ cargo run --release -p rbms-player -- C:\path\to\chart.bms --interactive
 
 To register a library through the GUI, press `O`, select `+ ADD FOLDER`, press `Enter` to choose the folder, then press `Esc` to save and rescan.
 
-Settings, key config, difficulty tables, local scores and replays live in `~/.config/rbms/` (`%USERPROFILE%\.config\rbms\` on Windows) and are created on first run.
+Settings, key config, difficulty tables (the list in `settings.ron`, and the saved copy of each fetched table in `tables/`), local scores and replays live in `~/.config/rbms/` (`%USERPROFILE%\.config\rbms\` on Windows) and are created on first run.
 
 Every start installs the default skin pack under `~/.config/rbms/skin/rbms-default/` (the equivalent settings folder on Windows) from a copy built into the binary; see [Skins](#skins).
 
@@ -73,7 +73,7 @@ To use another skin pack (a folder of beatoraja-format `.luaskin` files, for exa
 
 1. Press `F12` on the song select to open the SKIN menu (the SKIN button of a skin opens it too, and so does `F12` or the `SKIN MENU >` button in SETTINGS). The settings are listed on the left; the right half draws the skin of the screen being configured with sample data, live.
 2. On `PACK FOLDER` press `Enter` and choose the pack's folder. Pressing the left arrow clears it and returns to the default skin. For one run only, set `RBMS_SKIN_PACK=/path/to/pack` instead.
-3. `Tab` (or a click on the strip above the preview) changes the screen. A screen the pack has no document for is drawn by the player's built-in screen, not by the default skin, and the preview says so. The same menu lets you pick a different document per screen and change the options, files and offsets a document offers; the preview follows each change. An offset a skin lets you move along its alpha alone is listed as an opacity in percent (5% a step, 25% with `Shift`, `0` for 100%): on the default play skin, taking Lane Background, Lane Divider and the readouts you do not want to 0% leaves the notes, the key beams, the bombs and the judge line on a black field. `Esc` saves and goes back.
+3. `Tab` (or a click on the strip above the preview) changes the screen. A screen the pack has no document for is drawn by the player's built-in screen, not by the default skin, and the preview says so. The same menu lets you pick a different document per screen and change the options, files and offsets a document offers; the preview follows each change. An offset a skin lets you move along its alpha alone is listed as an opacity in percent (a slider from 0% to 100%, 1% a step, 10% with `Shift`, `0` for 100%; see [Number rows](#number-rows)): on the default play skin, taking Lane Background, Lane Divider and the readouts you do not want to 0% leaves the notes, the key beams, the bombs and the judge line on a black field. `Esc` saves and goes back.
 
 Skins can read their own folder but cannot write into it, open files outside it, or reach the network. If a skin fails to load, the player says which file failed and draws the built-in screen. [docs/skin.md](docs/skin.md) (Korean) has the details: pack rules, the default skin, the Lua environment, the `rbms-cli skin-dump` checker and the known limits. Third-party notices for the bundled video decoder and font are in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
@@ -88,6 +88,7 @@ These are the shipped keys. Press `H` on the song select for the full list as it
 | ← / Esc | Back / quit | Leave (result if no notes remain) |
 | Tab | Settings | — |
 | F5 | Key config | — |
+| F6 | Fetch every difficulty table again (see [Difficulty tables](#difficulty-tables)) | — |
 | F8 | Play menu (play options on the left, a live play screen on the right) | — |
 | F12 | Skin menu (settings on the left, a live preview on the right) | — |
 | H | Every key as it is set | — |
@@ -103,9 +104,36 @@ Default lanes follow the reference keyboard layout: 7K `Z S X D C F V` + `LShift
 
 **Key config** opens with `F5` on the song select, with `F5` or the `KEY CONFIG >` button in Settings, and with `6` on a skin's browser. It lists lanes, in-play controls, song-select shortcuts, the keys that open each screen, the number keys, result and replay-analysis keys, each with a keyboard cell and a controller cell. A key already read on the same screen is refused and the row says by what; `Esc`, `Enter`, the arrows and `H` stay fixed. Controls that ship without a key and can be given one: lift and HIDDEN+ on / off, HIDDEN+ up / down, green number up / down, KEEP GREEN NUMBER on / off, judge offset ±1 ms, AUTO ADJUST on / off, and the fine-step modifier. Bindings are saved to `~/.config/rbms/keyconfig.ron`; an older file loads as it is.
 
-**Play menu** opens with `F8` on the song select (the key can be moved in the key config) and with the same key or the `PLAY MENU >` button in Settings. The options a player changes from one sitting to the next are listed on the left in groups (SPEED, LANE, JUDGE, CHART, with the options and offsets the play skin declares at the end of LANE, such as Lane Width, Judge Display and Judge Position, and a SKIN group whose OPACITY and POSITION AND SIZE rows unfold the skin's per-part opacities and the offsets every play skin has); the right half draws a play screen of the chosen mode with its skin on a sample chart that never stops, and every change shows from the next frame. `Tab` changes the mode (7K 5K 14K 10K 9K) and the PREVIEW BPM row the tempo of the sample chart; neither is stored. Under the preview, five figures say what the options come to at that tempo: BPM, HI-SPEED, TRAVEL (ms), GREEN and WHITE. `Shift` moves a number ten steps and an opacity 25%, `0` puts the row back to its default, a right click steps back, and `Esc` saves and goes back. On the default skin the judgement is drawn still: the word and the combo stay in place for half a second with the difference to the target score (`+0003`) and FAST / SLOW on the line above. JUDGE POSITION Y moves all of it up (+) or down (-) in pixels, JUDGE DISPLAY hides it, and SCORE DIFFERENCE and JUDGE DETAIL choose what the line above says. Settings keeps the rules (judge algorithm and windows, gauge set, TOTAL) and everything that is not a play option; the option overlay (`F1`) and the option panels of the song select are unchanged.
+**Play menu** opens with `F8` on the song select (the key can be moved in the key config) and with the same key or the `PLAY MENU >` button in Settings. The options a player changes from one sitting to the next are listed on the left in groups (SPEED, LANE, JUDGE, CHART, with the options and offsets the play skin declares at the end of LANE, such as Lane Width, Judge Display and Judge Position, and a SKIN group whose OPACITY and POSITION AND SIZE rows unfold the skin's per-part opacities and the offsets every play skin has); the right half draws a play screen of the chosen mode with its skin on a sample chart that never stops, and every change shows from the next frame. `Tab` changes the mode (7K 5K 14K 10K 9K) and the PREVIEW BPM row the tempo of the sample chart; neither is stored. Under the preview, five figures say what the options come to at that tempo: BPM, HI-SPEED, TRAVEL (ms), GREEN and WHITE. A row that holds a number has a slider and can be typed into (see [Number rows](#number-rows)); `0` puts the row back to its default, a right click steps back, and `Esc` saves and goes back. On the default skin the judgement is drawn still: the word and the combo stay in place for half a second with the difference to the target score (`+0003`) and FAST / SLOW on the line above. JUDGE POSITION Y moves all of it up (+) or down (-) in pixels, JUDGE DISPLAY hides it, and SCORE DIFFERENCE and JUDGE DETAIL choose what the line above says. Settings keeps the rules (judge algorithm and windows, gauge set, TOTAL) and everything that is not a play option; the option overlay (`F1`) and the option panels of the song select are unchanged.
 
 **KEEP GREEN NUMBER** (play menu → SPEED, off by default) holds one green number across charts: the hi-speed is recalculated from the chart's tempo and the lane cover when a chart starts and whenever the cover moves. With it on, stepping PREVIEW BPM in the play menu leaves the note travel time and the green number where they are and moves the hi-speed figure; with it off the hi-speed stays and the note speed changes. **AUTO ADJUST** (play menu → JUDGE) moves JUDGE OFFSET a little after each input that is more than 15 ms early or late; the play screen's TIMING figure shows it. Definitions, units and ranges are in [docs/play-options.md](docs/play-options.md) (Korean). Replays record every offset the run moved through (`judge.offset_steps`), so an adjusted run plays back as it was judged.
+
+### Number rows
+
+Every row that holds a number in the play menu, the skin menu and Settings is set the same three ways.
+
+| Input | What it does |
+| --- | --- |
+| `←` `→` | One step of the smallest change the row holds: 0.01 for HI-SPEED, 0.1% for the lane cover, lift and HIDDEN+ (one white number), 1 ms for JUDGE OFFSET and PREVIEW FADE, 1% for volumes, judge widths and opacities, 1 for an offset, TOTAL, GREEN NUMBER and POLYPHONY. `Shift` makes it ten steps. |
+| Drag the slider | A press on the track puts the row there, and it follows the pointer until the button comes back up, even off the row. A press on the knob takes hold of it without moving the row. The preview follows from the next frame and the settings file is written once, on release. The wheel never moves a slider; it scrolls the list. |
+| `Enter`, or a click on the number | Type the number in place. The current value is selected, so the first digit replaces it. `Enter` sets it (held to the row's range and rounded to its step), `Esc` cancels the typing only, and `↑` `↓` `Tab` set it and move on. A unit typed after the number (`%`, `ms`, `x`, `px`) is ignored; anything that is not a number is refused and the row says `NOT A NUMBER`. |
+| `0` | Back to the default. A right click steps once back. |
+
+A position or size offset runs over ±2000, more than its slider has places for, so use the arrows or type the number to set one exactly. An opacity's slider and arrows stop at 100%; typing goes up to 200%, which adds alpha and only matters to a skin that lights a part it draws fully transparent. A row that is worked out from the others (HI-SPEED while KEEP GREEN NUMBER is on) is drawn faint and cannot be set. The option panels of the song select, the in-play keys and the practice panel keep their own key steps.
+
+## Difficulty tables
+
+Press `T` on the song select to open the table manager, choose `+ ADD TABLE (URL)` and enter the address of a table's page (or `+ ADD TABLE (FILE)` for a `data.json` on disk). Each table that loads becomes a folder on the song select with its levels inside.
+
+A table at an address is downloaded once. The player keeps a copy in `~/.config/rbms/tables/` and every later start, and every library rescan, reads that copy without touching the network, so MATCHING TABLES no longer waits on the table's server. The copy is not refreshed by itself:
+
+| Key | Where | What it does |
+| --- | --- | --- |
+| `R` | Table manager | Fetch the table under the cursor again |
+| `A` | Table manager | Fetch every table again |
+| `F6` | Song select | Fetch every table again (the key can be moved in the key config) |
+
+A reload runs in the background: the screen stays usable, the row reads `RELOADING...`, and when the table arrives its folder changes in place and a notification says `difficulty tables reloaded: N updated, M failed`. If a reload fails, or the address now answers with an empty table, the saved copy and the folder stay as they were and the row says `RELOAD FAILED` with the reason. Each row shows how long ago its copy was fetched (`SAVED 3 DAYS AGO`); after 30 days the age is drawn in the warning colour. Removing a table (`D`) deletes its copy. A table registered as a file has no copy and is read from the file each time. A table that has never been fetched successfully has no copy, so the player tries it again on every start until it loads or is removed.
 
 ## Web (IR server + site)
 

@@ -1,6 +1,6 @@
 # 플레이 옵션
 
-> 최종 갱신 2026-10-12 · 웨이브 10D(판정 글자 뒤에 붙는 콤보. 작업 트리 기준, 커밋 전) 기준
+> 최종 갱신 2026-10-12 · 웨이브 11(숫자 행의 슬라이더와 직접 입력, 난이도표 다시 받기 키. 작업 트리 기준, 커밋 전) 기준
 > 대상: 플레이 중 스크롤·가림막·판정 타이밍을 정하는 옵션과 그 키, 그 옵션을 바꾸는 화면인 PLAY 메뉴(7절), 기본 스킨의 판정 표시(8절). 스킨이 그리는 옵션(Lane Width 등)과 부위별 불투명도는 [skin.md](./skin.md) 3.4절, 구현 위치는 [crates.md](./crates.md)를 본다. PLAY 메뉴의 설계는 [plan/2026-10-11-play-menu.md](./plan/2026-10-11-play-menu.md).
 > beatoraja 원본의 같은 기능이 기준이다. 다르게 한 곳은 "원본과 다른 점" 열에 이유를 적는다.
 
@@ -53,11 +53,12 @@
 | 항목 | 내용 |
 | --- | --- |
 | 키 설정 화면을 여는 길 | 선곡에서 `F5`, Settings 의 `KEY CONFIG >` 단추 또는 `F5`, 스킨 브라우저의 숫자 `6` |
-| 사용자 지정 범위 | 레인과 스크래치 역방향, 플레이 조작 20종, 선곡 단축키 9종, 화면 여는 키 6종(PLAY 메뉴 `F8` 포함), 스킨 브라우저 숫자 키 8종, 결과 2종, 리플레이 분석 5종. 키보드와 컨트롤러 둘 다(옵션 오버레이 두 키와 상세 패널 홀드 키는 키보드 전용) |
+| 사용자 지정 범위 | 레인과 스크래치 역방향, 플레이 조작 20종, 선곡 단축키 10종(난이도표 다시 받기 `F6` 포함), 화면 여는 키 6종(PLAY 메뉴 `F8` 포함), 스킨 브라우저 숫자 키 8종, 결과 2종, 리플레이 분석 5종. 키보드와 컨트롤러 둘 다(옵션 오버레이 두 키와 상세 패널 홀드 키는 키보드 전용) |
 | 고정 키 | `Esc`, `Enter`, 화살표, `H`(키 안내)와 각 메뉴 안의 키 |
 | 레인 커버 조작 | `RIGHT` = 더 가림(LANE COVER DOWN), `LEFT` = 덜 가림(LANE COVER UP), `BACKSLASH` = 켬·끔. 커버가 꺼져 있을 때 값을 바꾸면 발치의 COVER 수치가 1.5초 동안 뜬다 |
 | 미세 단계 | FINE STEP 키를 누르고 있는 동안 가림막은 미세 단계로, 유지 중인 녹색 숫자는 ±1 로 움직인다. 키를 주지 않았으면 레인으로 쓰지 않는 Shift 가 그 역할을 한다(7키 기본 배치에서는 오른쪽 Shift) |
 | 지금 설정된 키 보기 | 선곡에서 `H` |
+| 난이도표 다시 받기 | 선곡에서 `F6`(RELOAD DIFFICULTY TABLES, 설정 파일 키 `reload_tables`, 키 설정 화면에서 바꿀 수 있고 패드에도 줄 수 있다). 등록한 표를 전부 다시 받는다. 검색어를 치는 중에는 듣지 않는다. 표 하나만 받으려면 Tables 화면(`T`)에서 `R`, 전부는 `A`. 저장과 다시 받기의 규칙은 `README.md` 의 Difficulty tables 절 |
 | 저장 | `~/.config/rbms/keyconfig.ron`. 이전 파일은 그대로 읽히고 없는 항목은 기본 키로 채워진다. 단, 파일에 없는 단축키의 기본 키를 같은 화면의 다른 단축키가 파일에서 이미 쓰고 있으면 그 단축키는 미지정으로 읽힌다(사용자가 고른 키가 이긴다. 예: FOLDERS 를 `F8` 로 옮겨 둔 파일에서 PLAY MENU 는 키 없음으로 나오고 키 설정 화면에서 새로 지정한다) |
 
 ## 6. 구현 위치
@@ -70,7 +71,7 @@
 | 플레이 중 조작 | `apps/rbms-player/src/stage/play/controls.rs`, `apps/rbms-player/src/app_input.rs`(`apply_control`, `fine_pressed`) |
 | 조작과 단축키의 종류, 저장 형식 | `apps/rbms-player/src/keyconfig.rs`(`ControlAction`, `Shortcut`, `ControlBinds`) |
 | IR 리플레이 변환 | `apps/rbms-player/src/ir_replay.rs`(`uploaded_time_us`) |
-| PLAY 메뉴(행 목록, 조작, 정보 패널) | `apps/rbms-player/src/stage/play_menu.rs`, `stage/play_menu/rows.rs`(행의 종류, 표시 꼬리, 읽기 전용, 큰 단계, 기본값 복원) |
+| PLAY 메뉴(행 목록, 조작, 정보 패널) | `apps/rbms-player/src/stage/play_menu.rs`, `stage/play_menu/rows.rs`(숫자 행의 값과 목록 표시, 행의 종류, 표시 꼬리, 읽기 전용, 큰 단계, 기본값 복원). 숫자 행의 공통 부품은 `apps/rbms-player/src/number_row.rs`, 걸음 모델은 `crates/rbms-config/src/number.rs`·`settings.rs`(`number_spec`) |
 | PLAY 메뉴와 SKIN 메뉴가 같이 쓰는 그리기·스크롤 부품 | `apps/rbms-player/src/stage/preview_menu.rs` |
 | 미리보기의 대상과 계산 요약 | `apps/rbms-player/src/skin_preview/target.rs`(`PlayTarget`, `SpeedReadout`, `PlayTarget::readout`) |
 | 행이 속한 묶음 | `crates/rbms-config/src/settings.rs`(`SettingTab::PLAY_MENU` = `PlaySpeed`·`PlayLane`·`PlayJudge`·`PlayChart`, `SettingTab::SHOWN` = Settings 의 탭 6개) |
@@ -95,32 +96,32 @@
 | --- | --- | --- | --- |
 | PREVIEW | PREVIEW BPM | `150 BPM` | 100·120·150·180·200 을 돈다. 설정이 아니다(7.4) |
 | SPEED | KEEP GREEN NUMBER | `ON` / `OFF` | 뒤집기 |
-| SPEED | GREEN NUMBER | `300 (500 MS)`: 녹색 숫자와 이동 시간. 읽기 전용일 때 `480 (800 MS) AUTO` | 1 / 10 |
-| SPEED | HI-SPEED | `2.00x`. 읽기 전용일 때 `2.24x AUTO` | HI-SPEED STEP / 그 열 배 |
-| SPEED | HI-SPEED STEP | `0.25x` | 0.01 / 0.10 |
+| SPEED | GREEN NUMBER | 목록 `300`, 정보 패널 `300 (500 MS)`: 녹색 숫자와 이동 시간. 읽기 전용일 때 정보 패널 `480 (800 MS) AUTO` | 1 / 10. 범위 1~6000 |
+| SPEED | HI-SPEED | `2.00x`. 읽기 전용일 때 정보 패널 `2.24x AUTO` | 0.01 / 0.10. 범위 0.01~20.00. HI-SPEED STEP 은 플레이 중 키와 선곡 옵션 패널의 걸음이고 이 메뉴의 한 칸이 아니다 |
+| SPEED | HI-SPEED STEP | `0.25x` | 0.01 / 0.10. 범위 0.01~1.00 |
 | SPEED | HI-SPEED FIX | OFF·START·MAX·MAIN·MIN | 한 항목 |
 | SPEED | SPEED FIX | FLOATING·CONSTANT | 뒤집기 |
 | LANE | LANE COVER ON, LIFT ON, HIDDEN+ ON | `ON` / `OFF` | 뒤집기 |
-| LANE | LANE COVER | `30% (WHITE 300)`: 비율과 흰색 숫자 | 1% / 10% |
-| LANE | LIFT, HIDDEN+ | `15%` | 1% / 10% |
-| LANE | COVER FINE STEP | `0.0010 (WHITE 1.0)`: 비율과 그 한 칸이 흰색 숫자로 얼마인지 | 0.0001 / 0.0010 |
+| LANE | LANE COVER | 목록 `30.0%`, 정보 패널 `30.0% (WHITE 300)`: 비율과 흰색 숫자 | 0.1%(흰색 숫자 1) / 1%. 범위 0~100% |
+| LANE | LIFT, HIDDEN+ | `15.0%` | 0.1% / 1%. 범위 0~100% |
+| LANE | COVER FINE STEP | 목록 `0.0010`, 정보 패널 `0.0010 (WHITE 1.0)`: 비율과 그 한 칸이 흰색 숫자로 얼마인지 | 0.0001 / 0.0010. 범위 0.0001~0.0100 |
 | LANE | 미리보는 플레이 스킨 문서가 선언한 옵션(기본 스킨: Lane Width, Field Side, Scratch Side, Judge Detail, Score Difference, Judge Display, Score Graph) | 항목 이름 | 한 항목. 그 문서의 커스터마이즈(`skin.custom`)에 저장되고 문서를 다시 읽는다. SKIN 메뉴의 같은 행과 같은 값이다. 파일 칸은 SKIN 메뉴에만 있다 |
 | LANE | 그 문서가 선언한 위치·크기 오프셋(기본 스킨: `JUDGE POSITION Y`). 옵션 바로 뒤 | `+0` | 1 / 10(픽셀. 각도 축은 도). 범위 ±2000. 문서를 다시 읽지 않고 다음 프레임의 미리보기에 반영된다. SKIN 메뉴의 같은 행과 같은 값이다 |
-| JUDGE | JUDGE OFFSET | `+5 MS` | 1 ms / 10 ms |
+| JUDGE | JUDGE OFFSET | `+5 MS` | 1 ms / 10 ms. 범위 -200~+200 ms |
 | JUDGE | AUTO ADJUST | `ON` / `OFF` | 뒤집기 |
 | CHART | RANDOM, GAUGE, TARGET, ESCAPE | 항목 이름 | 한 항목 |
 | CHART | LEGACY NOTE, AUTOPLAY, SCRATCH AUTO, AUTO REPLAY | `ON` / `OFF` | 뒤집기 |
 | SKIN | 접이 `OPACITY` | `HIDDEN (19)` / `SHOWN (19)`: 접힘 여부와 든 행 수 | Enter·← →·클릭으로 펴고 접는다. 펴면 그 문서의 불투명도 행이 바로 아래에 나온다(기본 스킨 7키 19행, 14키 18행) |
-| SKIN | 불투명도 행(접이를 폈을 때. 기본 스킨: `LANE BACKGROUND OPACITY` 등) | `100%` | 5% / 25%. 0% 면 그 부위가 사라진다. 0 키로 100%. 100% 를 넘으면 `105% (+13)` 처럼 더해지는 알파가 붙는다(`docs/skin.md` 2.2절) |
+| SKIN | 불투명도 행(접이를 폈을 때. 기본 스킨: `LANE BACKGROUND OPACITY` 등) | `100%` | 1% / 10%. 슬라이더와 ← → 는 0~100%. 0% 면 그 부위가 사라진다. 0 키로 100%. 직접 입력만 200% 까지 받는다(알파 0 의 덮개를 밝히는 스킨용. `docs/skin.md` 2.2절의 불투명도 행 주의) |
 | SKIN | 접이 `POSITION AND SIZE` | `HIDDEN (15)` / `SHOWN (15)` | 엔진이 모든 플레이 스킨에 붙이는 오프셋 네 개의 행(`ALL OFFSET(%) X` … `JUDGE DETAIL OFFSET ALPHA`). 1 / 10 |
 
-- KEEP GREEN NUMBER 가 켜져 있으면 GREEN NUMBER 가 조절 대상이고 HI-SPEED 는 예시 BPM 에서 계산된 값을 보이는 읽기 전용 행이다(범위 끝에 걸리면 `20.00x (LIMIT) AUTO`). 꺼져 있으면 반대로 HI-SPEED 가 조절 대상이고 GREEN NUMBER 는 그 속도가 예시 BPM 에서 내는 녹색 숫자와 이동 시간을 보인다. 읽기 전용 행은 이름과 값이 모두 흐리고 값 뒤에 `AUTO` 가 붙으며, 좌우·Enter·0·클릭에 움직이지 않고, 정보 패널이 이유를 말한다. 유지 중에는 저장된 HI-SPEED 가 쓰이지 않으므로 보이지 않는다(끄면 다시 보인다).
-- LANE COVER·LIFT·HIDDEN+ 는 1% 격자 위에서 움직인다(`rbms_config::adjust` 가 값을 걸음 수로 세어 옮긴다). 30% 는 흰색 숫자 300 이고, 플레이 중 미세 단계로 격자 밖에 둔 값(30.5% 등)에서 한 칸 움직이면 가장 가까운 격자에서 한 칸 간 값이 된다.
+- KEEP GREEN NUMBER 가 켜져 있으면 GREEN NUMBER 가 조절 대상이고 HI-SPEED 는 예시 BPM 에서 계산된 값을 보이는 읽기 전용 행이다(범위 끝에 걸리면 정보 패널에 `20.00x (LIMIT) AUTO`). 꺼져 있으면 반대로 HI-SPEED 가 조절 대상이고 GREEN NUMBER 는 그 속도가 예시 BPM 에서 내는 녹색 숫자와 이동 시간을 보인다. 읽기 전용 행은 이름·값·슬라이더가 모두 흐리고(슬라이더는 계산된 값의 자리에 선다), 좌우·Enter·0·클릭·끌기·직접 입력에 움직이지 않으며, 정보 패널이 값 뒤에 `AUTO` 를 붙이고 이유를 말한다. 유지 중에는 저장된 HI-SPEED 가 쓰이지 않으므로 보이지 않는다(끄면 다시 보인다).
+- LANE COVER·LIFT·HIDDEN+ 는 0.1% 격자 위에서 움직인다(`rbms_config::set_number_steps` 가 값을 걸음 수로 세어 `걸음 / 1000` 을 저장한다. 더해 가지 않으므로 천 번 옮겨도 오차가 쌓이지 않는다). 30.0% 는 흰색 숫자 300 이고 한 칸이 흰색 숫자 1 이다. 저장값은 스킨이 천분율로 잘라 읽어도 한 칸 모자라게 읽히지 않는 쪽으로 고른다(25.1% 는 250 이 아니라 251). 플레이 중 미세 단계로 격자 밖에 둔 값은 가장 가까운 칸으로 읽히고, 한 칸 움직이면 거기서 한 칸 간 값이 된다. 선곡 옵션 패널과 스킨 이벤트의 한 칸은 전과 같은 1% 다(`rbms_config::adjust`).
 - SKIN 묶음은 목록의 마지막 묶음이고 두 접이는 닫힌 채로 열린다(접이 상태는 저장되지 않는다). 접이를 펴면 든 행이 화면에 들어오도록 목록이 스크롤된다: 다 들어가면 전부, 넘치면 접이 행이 목록 첫 줄에 온다. 스킨이 불투명도나 엔진 오프셋을 갖지 않으면 그 접이는 없고, 둘 다 없으면 묶음도 없다. 불투명도와 오프셋은 SKIN 메뉴의 같은 행과 같은 곳(그 문서의 `skin.custom` 오프셋)에 저장된다.
 - 이름이 비슷한 세 가지는 다른 값이다. JUDGE 묶음의 `JUDGE OFFSET`(ms)은 판정 타이밍이다. LANE 묶음의 `JUDGE POSITION Y` 는 기본 스킨이 판정 글자·콤보·위 줄을 함께 옮기는 오프셋이다(8절). 접이 안의 `JUDGE OFFSET X/Y/W/H/ALPHA` 와 `JUDGE DETAIL OFFSET …` 은 엔진이 스킨과 무관하게 붙이는 오프셋으로, 판정 글자와 그 위 줄을 따로 옮긴다.
 - LANE OPTION 은 아직 플레이에 적용되지 않아 어디에도 보이지 않는다(값은 저장·복원된다).
-- 큰 단계가 범위를 넘으면 범위 끝까지만 간다(HI-SPEED 는 0.25~19.75 처럼 한 칸씩 갈 수 있는 데까지).
-- JUDGE OFFSET 의 한 칸은 선곡 패널 3·플레이 중 키와 같은 1 ms 다(SETTINGS 의 옛 행은 5 ms 였다). 표의 걸음(`JUDGE_OFFSET_STEP_MS`)이 1 이고 PLAY 메뉴도 다른 숫자 행처럼 `adjust` 를 탄다.
+- 큰 단계가 범위를 넘으면 범위 끝까지만 간다(HI-SPEED 는 0.01~20.00).
+- JUDGE OFFSET 의 한 칸은 선곡 패널 3·플레이 중 키와 같은 1 ms 다(SETTINGS 의 옛 행은 5 ms 였다).
 
 ### 7.3 조작
 
@@ -128,15 +129,28 @@
 | --- | --- |
 | ↑ ↓ | 행 커서 이동. 묶음 이름은 건너뛴다. 목록은 17칸씩 보이고 넘치면 스크롤 막대와 `현재 / 전체`(묶음 이름을 포함한 칸 수)가 나온다 |
 | PageUp PageDown | 한 화면(17칸)씩 |
-| ← → | 커서 행의 값을 한 칸 |
-| Shift + ← → | 숫자 행과 스킨 오프셋 행이면 열 칸, 불투명도 행이면 25%. 켬·끔과 목록 행, 스킨 옵션 행, PREVIEW BPM, 접이는 한 칸 그대로다 |
-| Enter | → 한 칸과 같다. 접이 행에서는 펴거나 접는다. 화면을 떠나지 않는다 |
+| ← → | 커서 행의 값을 한 칸. 숫자 행은 가장 잔 단위 한 칸이다 |
+| Shift + ← → | 숫자 행(설정 행, 스킨 오프셋, 불투명도)이면 열 칸. 켬·끔과 목록 행, 스킨 옵션 행, PREVIEW BPM, 접이는 한 칸 그대로다 |
+| Enter | 숫자 행에서는 숫자를 직접 친다(아래). 그 밖의 행에서는 → 한 칸과 같고, 접이 행에서는 펴거나 접는다. 화면을 떠나지 않는다 |
 | 0 (숫자 줄, 넘패드) | 커서 행을 기본값으로(새 설정 파일의 값. PREVIEW BPM 은 150, 스킨 옵션은 문서의 기본 항목, 스킨 오프셋은 0, 불투명도는 100%). 접이는 움직이지 않는다 |
 | Tab / Shift+Tab | 미리보기 위 모드 띠(7K 5K 14K 10K 9K)에서 다음 / 이전 |
-| 행 왼쪽 클릭 / 오른쪽 클릭 | 그 행으로 커서를 옮기고 한 칸 앞으로 / 뒤로 |
+| 행 왼쪽 클릭 / 오른쪽 클릭 | 그 행으로 커서를 옮기고 한 칸 앞으로 / 뒤로. 숫자 행은 이름 쪽을 왼쪽 클릭하면 한 칸 앞으로, 행 어디든 오른쪽 클릭하면 한 칸 뒤로다 |
 | 모드 띠의 탭 왼쪽 클릭 | 그 모드로 |
-| 휠 | 포인터가 목록 위일 때 목록을 스크롤한다(커서는 그대로) |
+| 휠 | 포인터가 목록 위일 때 목록을 스크롤한다(커서는 그대로). 슬라이더 위에서도 스크롤만 하고 값은 바뀌지 않는다 |
+| 숫자 행의 ← → | 그 행의 가장 잔 단위 한 칸(7.2 표). Shift 를 누르고 있으면 열 칸. 범위 끝에서 멈춘다 |
+| 숫자 행의 Enter, 또는 숫자 글자 클릭 | 그 자리에서 숫자를 친다. 지금 값이 채워져 있고 전체가 선택되어 있어 첫 글자가 값을 갈아 쓴다(← → Home End 로 선택을 풀고 고친다). 받는 글자는 숫자·부호·소수점이고 단위(%, ms, x, px)는 쳐도 버린다. 퍼센트 행은 퍼센트 수를 친다 |
+| 입력 중 Enter | 확정. 범위를 벗어나면 끝값, 가장 잔 단위로 반올림. 숫자가 아니면(빈 칸, `-`, `1.2.3`) 값을 바꾸지 않고 행에 1.5초 동안 `NOT A NUMBER` 를 보인다. 지금 값과 같은 수를 확정하면 저장값을 건드리지 않는다 |
+| 입력 중 Esc | 입력만 취소한다(메뉴를 떠나지 않는다). 그 다음 Esc 가 저장하고 나간다 |
+| 입력 중 ↑ ↓ PageUp PageDown Tab, 마우스 누름 | 친 값을 확정한 뒤 그 조작을 한다. 그 밖의 키는 입력이 삼킨다(0 키는 숫자 0 이다) |
+| 슬라이더 누름·끌기 | 트랙을 누르면 누른 곳의 값으로 가고, 버튼을 뗄 때까지 포인터를 따라간다(포인터가 행·목록 밖으로 나가도 이어진다. 슬라이더 끝을 넘으면 슬라이더의 끝값). 손잡이를 누르면 값은 그대로이고, 잡은 자리를 기준으로 포인터가 움직인 만큼만 따라온다(누르기만 하고 떼면 아무것도 바뀌지 않는다). 끄는 동안 미리보기가 다음 프레임부터 따라오고, 설정 파일은 버튼을 뗄 때 한 번 쓴다. 끄는 중에 키를 누르면 끌기가 거기서 끝난다(값은 그대로 저장된다) |
 | 미리보기와 묶음 이름 위의 클릭 | 아무 일도 없다 |
+
+세 화면(PLAY 메뉴, SKIN 메뉴, SETTINGS) 밖의 숫자 조정은 키만 받고 걸음도 그대로다. 플레이 중 조작과 맞춘 걸음이거나 원본의 걸음이기 때문이다.
+
+| 곳 | 걸음 | 까닭 |
+| --- | --- | --- |
+| 선곡의 옵션 패널 1~3, 스킨 이벤트, 플레이 중 키 | HI-SPEED 는 HI-SPEED STEP(기본 0.25), 가림막 1%(미세 단계 키를 누르면 COVER FINE STEP), 판정 오프셋 1 ms | 플레이 중 한 번 누름으로 움직이는 폭이다. 잔 값은 PLAY 메뉴에서 맞춘다(`rbms_config::adjust` 가 이 걸음을 갖고, 세 화면은 `set_number_steps` 통로를 탄다) |
+| 연습 패널(Practice) | 구간 100 ms, TOTAL 5(터보 25, 아날로그 1), 재생 속도 5%(터보 25%, 아날로그 1%) | 원본 `PracticeConfiguration` 의 걸음이다. 슬라이더와 직접 입력은 없다 |
 
 ### 7.4 미리보기와 정보 패널
 
