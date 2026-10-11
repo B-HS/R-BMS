@@ -1,10 +1,10 @@
-//! The SKIN tab: the documents found on disk, the one each screen is drawn with, and the
+//! The rows of the skin menu: the documents found on disk, the one each screen is drawn with, and the
 //! customisation rows the chosen document declares.
 //!
 //! A document declares its own rows — a list of named options, a file slot filled from a wildcard,
-//! a nudge applied to one destination — so the SKIN tab cannot be a fixed table the way every other
-//! tab is. The six rows that are always there (the pack folder, the screen, the document, what
-//! loaded, reload and reset) stay in `rbms_config::SETTINGS` with the rest of the screen; the rows
+//! a nudge applied to one destination — so the skin menu cannot be a fixed table the way a tab of the
+//! settings screen is. The six rows that are always there (the pack folder, the screen, the document, what
+//! loaded, reload and reset) stay in `rbms_config::SETTINGS` with the settings screen's own; the rows
 //! below them are built here from the chosen document's header and are addressed by [`SkinRow`].
 //!
 //! Only the header is read to build the rows, which is one parse and one directory scan per
@@ -105,8 +105,24 @@ const LUA_INFO: &str = "LUA";
 /// Shown on the LOADED row for a Lua skin that is read when the screen it draws next opens.
 const WAITING_INFO: &str = "READ WHEN ITS SCREEN OPENS";
 
+/// What a path is cut at, on any platform: a reason may spell a path either way.
+const PATH_SEPARATORS: [char; 2] = ['/', '\\'];
+
 /// What the SKIN row puts before the name of a document the pack chose rather than the player.
 const PACK_DOCUMENT_PREFIX: &str = "PACK: ";
+
+/// What the PACK FOLDER row puts before a folder that is not on the disk. It goes first because a
+/// row that has no room for a whole path gives up part of the path, not what comes before it.
+const MISSING_PACK_PREFIX: &str = "(MISSING) ";
+
+/// What is said of a pack whose folder is not on the disk, which is why no screen is drawn with it.
+const MISSING_PACK_NOTE: &str = "THE PACK FOLDER IS NOT THERE";
+
+/// What is said, between its file's name and why, of a Lua skin of the pack that could not be read
+/// far enough to say which screen it draws. The reason a loader gives begins with the file and the
+/// pass that failed, so with the file's name taken off its front it reads on from here:
+/// `decide.luaskin DID NOT READ (header pass): ...`.
+const UNREAD_SKIN_NOTE: &str = " DID NOT READ";
 
 /// One axis of a skin offset, which a document says one by one whether the player may nudge.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -211,9 +227,9 @@ impl SkinRead<'static> {
     }
 }
 
-/// The documents on disk, and the one being drawn for the screen the SKIN tab is configuring.
+/// The documents on disk, and the one being drawn for the screen the skin menu is configuring.
 ///
-/// The folder is walked once when the settings screen opens rather than every frame, so a folder on
+/// The folder is walked once when the skin menu opens rather than every frame, so a folder on
 /// a slow disk costs one pause rather than a stutter per row.
 pub(crate) struct SkinLibrary {
     /// The settings file, beside which the skins' own writes are kept.
@@ -232,6 +248,12 @@ pub(crate) struct SkinLibrary {
     default_pack: Option<PathBuf>,
     /// The pack in effect when the folders were last walked.
     pack: Option<PathBuf>,
+    /// Whether that pack's folder was not on the disk when it was walked.
+    pack_missing: bool,
+    /// The Lua skins directly in that pack whose header could not be read when it was walked: the
+    /// file, and the first line of why. No screen is drawn with one, so a screen the pack has no
+    /// document for may be a screen one of these was written for.
+    pack_unread: Vec<(PathBuf, String)>,
     /// Every document found under the root and in the pack, by screen and then by name.
     documents: Vec<SkinHeader>,
     /// The pack's document for each screen it has one for.
@@ -244,7 +266,7 @@ pub(crate) struct SkinLibrary {
     /// The document each screen is drawn with, once it has been read whole.
     ///
     /// One entry per screen rather than one for the whole library, because the screens outlive the
-    /// tab that chose them: the browser is drawn with its own document while a run is being
+    /// menu that chose them: the browser is drawn with its own document while a run is being
     /// configured on another.
     loaded: BTreeMap<i32, LoadedDocument>,
     /// Why one screen's chosen document is not being drawn, when it is not, with the document that
@@ -320,7 +342,7 @@ struct CachedHeader {
 /// Every header read so far, by the path it was found under.
 ///
 /// Reading a Lua skin's header runs its program, and a pack is a dozen of them; the folder is
-/// walked again every time the settings screen opens. A header is therefore read once per version
+/// walked again every time the skin menu opens. A header is therefore read once per version
 /// of its file. What the header says about the files beside it -- the candidates of a file slot --
 /// is as old as the read, which is why asking for a reload starts from nothing.
 #[derive(Default)]
@@ -395,7 +417,7 @@ impl HeaderCache {
 impl SkinLibrary {
     /// A library rooted where the configuration says, with the skin folder not walked yet. The pack
     /// the configuration names is read at once, because the screens it draws do not wait for the
-    /// settings screen to be opened.
+    /// skin menu to be opened.
     pub(crate) fn new(settings_path: &Path, config: &Config) -> SkinLibrary {
         let mut library = SkinLibrary {
             settings_path: settings_path.to_path_buf(),
@@ -404,6 +426,8 @@ impl SkinLibrary {
             built_in_play: false,
             default_pack: installed_default_pack(settings_path),
             pack: None,
+            pack_missing: false,
+            pack_unread: Vec::new(),
             documents: Vec::new(),
             pack_documents: BTreeMap::new(),
             pack_paths: BTreeSet::new(),
@@ -497,12 +521,14 @@ impl SkinLibrary {
 
     /// What the PACK FOLDER row shows: the pack in effect, and where it came from when it is not the
     /// one the row stores. A row that stores nothing says that the default pack is drawn and then
-    /// where it is -- in that order, because a value too long for its row loses its end -- or that
-    /// there is no pack when the default one is not installed.
+    /// where it is -- in that order, because a value too long for its row gives up part of its path
+    /// -- or that there is no pack when the default one is not installed. A named folder that is not
+    /// on the disk is marked as missing, ahead of its path for the same reason.
     pub(crate) fn pack_value(&self, config: &Config) -> String {
+        let missing = if self.pack_missing && !self.pack_moved(config) { MISSING_PACK_PREFIX } else { "" };
         match (self.forced_pack.as_deref(), config.skin.pack_folder(), self.default_pack.as_deref()) {
-            (Some(forced), _, _) => format!("{} ({SKIN_PACK_ENV})", forced.display()),
-            (None, Some(pack), _) => pack.to_owned(),
+            (Some(forced), _, _) => format!("{missing}{} ({SKIN_PACK_ENV})", forced.display()),
+            (None, Some(pack), _) => format!("{missing}{pack}"),
             (None, None, Some(default)) => format!("{DEFAULT_VALUE} ({})", default.display()),
             (None, None, None) => NONE_VALUE.to_string(),
         }
@@ -510,7 +536,7 @@ impl SkinLibrary {
 
     /// Walk the skin folder and the pack again and read the header of every document in them.
     ///
-    /// Called when the settings screen opens, so a skin dropped into the folder while the game is
+    /// Called when the skin menu opens, so a skin dropped into the folder while the game is
     /// running is found without a restart. A header whose file has not changed is not read again.
     pub(crate) fn rescan(&mut self, settings_path: &Path, config: &Config) {
         self.settings_path = settings_path.to_path_buf();
@@ -544,6 +570,8 @@ impl SkinLibrary {
     /// screen reads it and reports why it failed itself, and the one failure is said once.
     fn read_pack(&mut self, config: &Config) -> Vec<SkinHeader> {
         self.pack = self.wanted_pack(config).map(Path::to_path_buf);
+        self.pack_missing = self.pack.as_deref().is_some_and(|pack| !pack.is_dir());
+        self.pack_unread.clear();
         let mut found = match self.pack.clone() {
             Some(pack) => self.headers.scan(&pack, PACK_SCAN_DEPTH),
             None => Vec::new(),
@@ -553,6 +581,7 @@ impl SkinLibrary {
         if let Some(pack) = self.pack.as_deref() {
             for (path, version, reason) in self.headers.unreadable_in(pack) {
                 self.pack_paths.insert(plain_path(path));
+                self.pack_unread.push((path.to_path_buf(), reason.to_owned()));
                 let chosen_by_hand = config.skin.selected.values().any(|chosen| same_document(Path::new(chosen), path));
                 if !chosen_by_hand && self.reported.get(path) != Some(&version) {
                     self.reported.insert(path.to_path_buf(), version);
@@ -583,7 +612,7 @@ impl SkinLibrary {
         }
     }
 
-    /// The documents that declare the screen the tab is configuring, in the order the row cycles.
+    /// The documents that declare the screen the menu is configuring, in the order the row cycles.
     fn candidates(&self, config: &Config) -> Vec<&SkinHeader> {
         self.documents.iter().filter(|header| header.skin_type == config.skin.screen).collect()
     }
@@ -619,13 +648,21 @@ impl SkinLibrary {
 
     /// What the LOADED row shows: the size, parser and warning count of the document being drawn,
     /// or why the built-in screen is being drawn instead.
+    ///
+    /// A document that could not be read is answered with the first line of why. The rest of what a
+    /// Lua skin says as it fails is a traceback, which is no part of a line on a screen. A screen
+    /// with no document says so, and what is wrong with the pack when something is
+    /// ([`SkinLibrary::pack_trouble`]).
     pub(crate) fn info(&self, config: &Config) -> String {
         let screen = config.skin.screen;
         let Some(path) = self.document_path(config, screen) else {
-            return BUILT_IN_INFO.to_string();
+            return match self.pack_trouble(config, screen) {
+                Some(trouble) => format!("{BUILT_IN_INFO} - {trouble}"),
+                None => BUILT_IN_INFO.to_string(),
+            };
         };
         if let Some(failure) = self.errors.get(&screen).filter(|failure| failure.path == path) {
-            return failure.reason.clone();
+            return first_line(&failure.reason);
         }
         if !is_supported_skin_type(screen) {
             return UNSUPPORTED_INFO.to_string();
@@ -646,7 +683,7 @@ impl SkinLibrary {
         format!("{}X{} - {}{} - {} WARNINGS{}", skin.def.w, skin.def.h, parser, lua, skin.warnings.len(), author)
     }
 
-    /// The customisation rows the SKIN tab shows, top to bottom, in the order the chosen document
+    /// The customisation rows the skin menu shows, top to bottom, in the order the chosen document
     /// declares them: its properties, its file slots, then one row per axis it lets the player nudge.
     pub(crate) fn rows(&self, config: &Config) -> Vec<SkinRow> {
         let Some(header) = self.chosen(config) else {
@@ -809,8 +846,8 @@ impl SkinLibrary {
         self.needs_reload_for(config, config.skin.screen)
     }
 
-    /// The same question asked about a screen other than the one the tab is configuring, which is
-    /// how a screen the player walks into gets its document read without the tab being opened.
+    /// The same question asked about a screen other than the one the menu is configuring, which is
+    /// how a screen the player walks into gets its document read without the menu being opened.
     ///
     /// A Lua skin that is already waiting for its screen has been asked for and is not asked for
     /// again.
@@ -837,7 +874,7 @@ impl SkinLibrary {
         self.request_for(config, config.skin.screen);
     }
 
-    /// Ask for one screen's document, whichever screen the tab happens to be configuring.
+    /// Ask for one screen's document, whichever screen the menu happens to be configuring.
     ///
     /// A document that is only data is read here and now, with no game behind it. A Lua skin is left
     /// waiting: it is read by [`SkinLibrary::read_waiting`] on the first frame of the screen it
@@ -929,6 +966,43 @@ impl SkinLibrary {
         self.errors.get(&screen).is_some_and(|failure| chosen == Some(failure.path.as_str()))
     }
 
+    /// Why the document `screen` is to be drawn with could not be read, short enough to be read where
+    /// there is little room: the first line of the reason, with the folder the document is in left
+    /// out of every path in it. So it begins with the document's file name, and a file the document
+    /// loads is named from the document's folder down. `None` unless [`SkinLibrary::has_failed`].
+    pub(crate) fn failure_line(&self, config: &Config, screen: i32) -> Option<String> {
+        let chosen = self.document_path(config, screen)?;
+        let failure = self.errors.get(&screen).filter(|failure| failure.path == chosen)?;
+        Some(reason_beside(&first_line(&failure.reason), Path::new(&failure.path)))
+    }
+
+    /// What is wrong with the pack in effect that may be why `screen` has no document: its folder is
+    /// not on the disk, or a Lua skin in it could not be read far enough to say which screen it
+    /// draws -- the first such file by name, why with the pack's folder left out of it, and how many
+    /// more there are. `None` when the
+    /// screen has a document, when it is a play screen this run leaves to the built-in note field,
+    /// or when nothing is wrong with the pack.
+    pub(crate) fn pack_trouble(&self, config: &Config, screen: i32) -> Option<String> {
+        if self.plays_built_in(screen) || self.document_path(config, screen).is_some() || self.pack_moved(config) {
+            return None;
+        }
+        if self.pack_missing {
+            return Some(MISSING_PACK_NOTE.to_string());
+        }
+        let (file, reason) = self.pack_unread.iter().min_by_key(|(file, _)| file_name_key(file))?;
+        let name = file.file_name().map_or_else(|| file.to_string_lossy(), |name| name.to_string_lossy());
+        let reason = reason_beside(reason, file);
+        let said = match reason.strip_prefix(name.as_ref()) {
+            Some(after_the_name) => format!(" {}", after_the_name.trim_start()),
+            None => format!(": {reason}"),
+        };
+        let more = match self.pack_unread.len() - 1 {
+            0 => String::new(),
+            more => format!(" (AND {more} MORE)"),
+        };
+        Some(format!("{name}{UNREAD_SKIN_NOTE}{said}{more}"))
+    }
+
     /// Why one screen's document could not be read.
     #[cfg(test)]
     pub(crate) fn failure(&self, screen: i32) -> Option<&str> {
@@ -950,6 +1024,24 @@ impl SkinLibrary {
     pub(crate) fn expire_scripted(&mut self) {
         let scripted = self.loaded.iter().filter(|(_, entry)| entry.skin.parser == ParserKind::Lua).map(|(screen, _)| *screen);
         self.stale.extend(scripted);
+    }
+
+    /// Mark the Lua skin read for one screen as needing to be read again, and no other screen's:
+    /// what [`SkinLibrary::expire_scripted`] does for every screen, for the one screen whose state a
+    /// read was made against and is no longer the state it is drawn from.
+    pub(crate) fn expire_scripted_for(&mut self, screen: i32) {
+        if self.loaded.get(&screen).is_some_and(|entry| entry.skin.parser == ParserKind::Lua) {
+            self.stale.insert(screen);
+        }
+    }
+
+    /// Let go of the Lua skin read for one screen, interpreter and all, so whatever draws the screen
+    /// next reads it against its own state. A document that is only data holds no state and is kept,
+    /// and so is a failure: a skin that could not be read is not read again for being looked at.
+    pub(crate) fn drop_scripted_for(&mut self, screen: i32) {
+        if self.loaded.get(&screen).is_some_and(|entry| entry.skin.parser == ParserKind::Lua) {
+            self.forget_read(screen);
+        }
     }
 
     /// Forget everything one screen's last read left behind.
@@ -1029,9 +1121,20 @@ pub(crate) fn pack_in_effect(forced: Option<&Path>, config: &Config, settings_pa
     }
 }
 
-/// The first line of a reason, which is the part of it that is said once on screen.
+/// A reason a document could not be read, with the folder the document is in left out of every path
+/// in it: the document is named by its file's name, and a file it loads from its folder down.
+fn reason_beside(reason: &str, document: &Path) -> String {
+    let Some(folder) = document.parent().map(|folder| folder.to_string_lossy().into_owned()).filter(|folder| !folder.is_empty()) else {
+        return reason.to_owned();
+    };
+    PATH_SEPARATORS.iter().fold(reason.to_owned(), |reason, separator| reason.replace(&format!("{folder}{separator}"), ""))
+}
+
+/// The first line of a reason, which is the part of it that is said on screen, with nothing in it a
+/// line cannot be written with: a tab or any other control character is a space.
 fn first_line(reason: &str) -> String {
-    reason.lines().next().unwrap_or_default().to_owned()
+    let line = reason.lines().next().unwrap_or_default();
+    line.chars().map(|ch| if ch.is_control() { ' ' } else { ch }).collect::<String>().trim().to_owned()
 }
 
 /// The pack an environment names, or `None` for a variable that is unset or blank.
@@ -1074,7 +1177,7 @@ fn is_document(path: &Path) -> bool {
         .is_some_and(|extension| DOCUMENT_EXTENSIONS.iter().any(|known| extension.eq_ignore_ascii_case(known)))
 }
 
-/// What the SKIN tab shows for a row whose declaration is no longer there, which is what a document
+/// What the skin menu shows for a row whose declaration is no longer there, which is what a document
 /// edited between two runs leaves behind.
 fn missing_row() -> (String, String) {
     (NONE_VALUE.to_string(), NONE_VALUE.to_string())

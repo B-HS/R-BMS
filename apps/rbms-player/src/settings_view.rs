@@ -1,5 +1,6 @@
-//! The settings screen as data plus one draw call: the tab strip, the (scrolling) row list, the
-//! in-place editor, the network status line, and the inline rival list.
+//! The settings screen as data plus one draw call: the tab strip with the button to the skin menu
+//! at its end, the (scrolling) row list, the in-place editor, the network status line, and the
+//! inline rival list.
 //!
 //! Extracted from the frame loop so the screen can be rendered headless in tests and so a tab with
 //! more rows than fit on screen scrolls instead of drawing off the bottom.
@@ -13,8 +14,9 @@ const TITLE_Y: f32 = 36.0;
 const HINT_Y: f32 = 78.0;
 const TABS_Y: f32 = 104.0;
 const TAB_H: f32 = 34.0;
-const TAB_GAP: f32 = 8.0;
-const TAB_PAD: f32 = 28.0;
+const TAB_GAP: f32 = 5.0;
+const TAB_PAD: f32 = 20.0;
+const TAB_TEXT_Y: f32 = 8.0;
 const ROWS_TOP: f32 = 160.0;
 const ROW_PITCH: f32 = 50.0;
 const ROW_H: f32 = 42.0;
@@ -51,7 +53,11 @@ const NOTE_GAP: f32 = 16.0;
 const VALUE_MAX_SHARE: f32 = 0.6;
 
 /// Keyboard hint under the title.
-pub(crate) const SETTINGS_HINT: &str = "TAB SWITCH   UP DOWN MOVE   LEFT RIGHT CHANGE   ENTER OPEN   ESC SAVE/BACK";
+pub(crate) const SETTINGS_HINT: &str = "TAB SWITCH   UP DOWN MOVE   LEFT RIGHT CHANGE   ENTER OPEN   F12 SKIN MENU   ESC SAVE/BACK";
+
+/// What the button at the right end of the tab strip reads: it opens the skin menu, where the skin
+/// settings are listed beside a preview of what they do.
+pub(crate) const SKIN_MENU_LINK: &str = "SKIN MENU >";
 
 /// Keyboard hint inside the inline rival list.
 pub(crate) const RIVALS_HINT: &str = "UP DOWN MOVE   ENTER ADD   D REMOVE   ESC SAVE/CLOSE";
@@ -103,6 +109,8 @@ pub(crate) struct RivalsScene {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum SettingsHot {
     Tab(usize),
+    /// The button at the right end of the tab strip that opens the skin menu.
+    SkinMenuLink,
     Row(usize),
     RivalRow(usize),
 }
@@ -142,6 +150,19 @@ fn note_span(x0: f32, label: &str, value: &str) -> (f32, f32) {
     (left, right - left)
 }
 
+/// How wide a tab of the strip is drawn for the name on it.
+fn tab_width(name: &str) -> f32 {
+    text_width(name, TAB_SCALE) + TAB_PAD
+}
+
+/// Where the button to the skin menu is: at the right end of the tab strip, against the panel's
+/// edge, and never over a tab. `tabs_end` is where the strip is free from, which with a font wider
+/// than the one the strip was laid out for is past where the button would otherwise begin.
+fn skin_menu_link_rect(x0: f32, tabs_end: f32) -> Rect {
+    let w = tab_width(SKIN_MENU_LINK);
+    Rect::new((x0 + PANEL_W - w).max(tabs_end), TABS_Y, w, TAB_H)
+}
+
 /// Draw the screen and return its clickable regions.
 pub(crate) fn render_settings<R: Renderer>(r: &mut R, scene: &SettingsScene) -> Vec<(Rect, SettingsHot)> {
     let th = theme();
@@ -154,13 +175,17 @@ pub(crate) fn render_settings<R: Renderer>(r: &mut R, scene: &SettingsScene) -> 
     let mut tx = x0;
     for (index, name) in scene.tabs.iter().enumerate() {
         let on = index == scene.tab;
-        let w = text_width(name, TAB_SCALE) + TAB_PAD;
+        let w = tab_width(name);
         let rect = Rect::new(tx, TABS_Y, w, TAB_H);
         r.fill_rect(rect, if on { th.button } else { th.panel });
-        draw_text(r, tx + TAB_PAD * 0.5, TABS_Y + 8.0, TAB_SCALE, if on { Color::YELLOW } else { th.text_dim }, name);
+        draw_text(r, tx + TAB_PAD * 0.5, TABS_Y + TAB_TEXT_Y, TAB_SCALE, if on { Color::YELLOW } else { th.text_dim }, name);
         hot.push((rect, SettingsHot::Tab(index)));
         tx += w + TAB_GAP;
     }
+    let link = skin_menu_link_rect(x0, tx);
+    r.fill_rect(link, th.panel_hi);
+    draw_text(r, link.x + TAB_PAD * 0.5, TABS_Y + TAB_TEXT_Y, TAB_SCALE, th.accent, SKIN_MENU_LINK);
+    hot.push((link, SettingsHot::SkinMenuLink));
 
     let start = scroll_start(scene.rows.len(), scene.sel);
     for (slot, index) in (start..(start + visible_rows()).min(scene.rows.len())).enumerate() {
@@ -274,15 +299,40 @@ mod tests {
         assert_eq!(scroll_start(scene.rows.len(), last), scene.rows.len() - visible_rows());
     }
 
-    /// The tab strip grew a ninth tab. It is laid out left to right from the panel's own left edge,
-    /// so a strip wider than the canvas would draw the last tab off the screen, where it could
-    /// neither be read nor clicked.
+    /// The strip is the tabs the screen shows, laid out left to right from the panel's own left
+    /// edge, and the button to the skin menu against the panel's right edge. Tabs that ran under the
+    /// button, or a button that ran off the panel, could neither be read nor clicked.
     #[test]
-    fn the_whole_tab_strip_is_drawn_on_the_screen() {
+    fn the_tabs_and_the_button_to_the_skin_menu_share_the_strip_without_meeting() {
         rbms_render::font::use_embedded_fonts_only();
         let x0 = (CANVAS_W - PANEL_W) * 0.5;
-        let width: f32 = SettingTab::ALL.iter().map(|tab| text_width(tab.label(), TAB_SCALE) + TAB_PAD + TAB_GAP).sum();
-        assert!(x0 + width - TAB_GAP <= CANVAS_W, "the tab strip is {width} wide and runs off the {CANVAS_W} wide screen");
+        let tabs: f32 = SettingTab::SHOWN.iter().map(|tab| tab_width(tab.label()) + TAB_GAP).sum();
+        let link = skin_menu_link_rect(x0, x0 + tabs);
+        assert!(x0 + tabs <= link.x, "the tabs are {tabs} wide and run under the button, which starts {} into the panel", link.x - x0);
+        assert!(
+            (link.x + link.w - (x0 + PANEL_W)).abs() < f32::EPSILON,
+            "the button is not against the panel's edge: the tabs pushed it {} past it",
+            link.x + link.w - x0 - PANEL_W
+        );
+    }
+
+    /// With a font wider than the one the strip was laid out for, the button gives way rather than
+    /// being drawn over the last tabs, where a press meant for a tab would open the menu.
+    #[test]
+    fn the_button_gives_way_to_tabs_that_reach_it() {
+        rbms_render::font::use_embedded_fonts_only();
+        let x0 = (CANVAS_W - PANEL_W) * 0.5;
+        let reached = x0 + PANEL_W - TAB_GAP;
+        assert!((skin_menu_link_rect(x0, reached).x - reached).abs() < f32::EPSILON);
+    }
+
+    /// The hint under the title names every key of the screen on one line of the panel.
+    #[test]
+    fn the_hint_names_the_key_to_the_skin_menu_and_fits_the_panel() {
+        rbms_render::font::use_embedded_fonts_only();
+        assert!(SETTINGS_HINT.contains("F12 SKIN MENU"), "{SETTINGS_HINT}");
+        let width = text_width(SETTINGS_HINT, HINT_SCALE);
+        assert!(width <= PANEL_W, "the hint is {width} wide and the panel {PANEL_W}");
     }
 
     #[test]
@@ -298,7 +348,9 @@ mod tests {
         let hot = render_settings(&mut canvas, &scene);
         let tabs = hot.iter().filter(|(_, h)| matches!(h, SettingsHot::Tab(_))).count();
         let rows = hot.iter().filter(|(_, h)| matches!(h, SettingsHot::Row(_))).count();
+        let links = hot.iter().filter(|(_, h)| matches!(h, SettingsHot::SkinMenuLink)).count();
         assert_eq!(tabs, scene.tabs.len());
+        assert_eq!(links, 1, "the button to the skin menu is not clickable");
         assert_eq!(rows, visible_rows(), "only the rows that fit are clickable");
         assert_ne!(canvas.signature_hash(8, 8), CpuCanvas::new(1280, 720).signature_hash(8, 8));
     }

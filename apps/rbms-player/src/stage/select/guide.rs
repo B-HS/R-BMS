@@ -15,9 +15,9 @@ use rbms_play::ScratchDir;
 use rbms_render::{Color, Rect, Renderer, draw_text, draw_text_right, fit_text, theme};
 use winit::keyboard::KeyCode;
 
-use super::SelectState;
 use super::keys::{KeyLayout, SelectKey};
 use super::skinned::DETAIL_PANEL_KEY;
+use super::{SKIN_MENU_KEY, SelectState};
 use crate::app_options::{HOLD_KEY, TOGGLE_KEY};
 use crate::keyconfig::{ControlAction, key_index_of, key_name};
 use crate::{AppShared, CH, CW, Hot};
@@ -36,7 +36,7 @@ pub(super) struct Shortcut {
 
 /// The browser's own keys, in the order the guide lists them. A key a skin's browser takes for
 /// something else -- the number keys, which are the reference's -- is not here.
-pub(super) const BROWSER_SHORTCUTS: [Shortcut; 15] = [
+pub(super) const BROWSER_SHORTCUTS: [Shortcut; 16] = [
     Shortcut { keys: &[KeyCode::ArrowUp, KeyCode::ArrowDown], does: "MOVE THE LIST" },
     Shortcut { keys: &[KeyCode::Enter], does: "OPEN A FOLDER OR PLAY THE CHART" },
     Shortcut { keys: &[KeyCode::Escape], does: "BACK ONE FOLDER - TWICE AT THE TOP QUITS" },
@@ -48,6 +48,7 @@ pub(super) const BROWSER_SHORTCUTS: [Shortcut; 15] = [
     Shortcut { keys: &[KeyCode::F3], does: "SORT ORDER - WITH SHIFT BACKWARDS" },
     Shortcut { keys: &[KeyCode::F4], does: "PRACTICE" },
     Shortcut { keys: &[KeyCode::Tab], does: "SETTINGS - WITH SHIFT THE COURSE LIST" },
+    Shortcut { keys: &[SKIN_MENU_KEY], does: "SKIN MENU" },
     Shortcut { keys: &[KeyCode::KeyI], does: "IR RANKING" },
     Shortcut { keys: &[KeyCode::KeyF], does: "FAVOURITE" },
     Shortcut { keys: &[TOGGLE_KEY, HOLD_KEY], does: "OPTIONS OVERLAY" },
@@ -107,6 +108,7 @@ pub(super) fn shortcut_label(code: KeyCode) -> &'static str {
         KeyCode::F2 => "F2",
         KeyCode::F3 => "F3",
         KeyCode::F4 => "F4",
+        KeyCode::F12 => "F12",
         KeyCode::Tab => "TAB",
         KeyCode::Slash => "/",
         KeyCode::Enter => "ENTER",

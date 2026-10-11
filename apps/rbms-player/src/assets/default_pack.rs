@@ -116,7 +116,7 @@ impl PackInstall {
 }
 
 /// Where the default pack is installed: always below the default skin folder beside the settings
-/// file, whichever folder the SKIN tab is looking for documents in.
+/// file, whichever folder the skin menu is looking for documents in.
 pub(crate) fn default_pack_directory(settings_path: &Path) -> PathBuf {
     settings_path.parent().unwrap_or(Path::new(".")).join(DEFAULT_SKIN_FOLDER).join(DEFAULT_SKIN_DIRECTORY)
 }

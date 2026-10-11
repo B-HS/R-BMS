@@ -5,7 +5,7 @@
 //! queue of a browser a skin is drawing, the way a button of the skin does.
 
 use rbms_chart::shuffle::NoteOption;
-use rbms_config::{Config, FixHiSpeed, JUDGE_OFFSET_MAX_MS, JUDGE_OFFSET_MIN_MS, LaneOption, ScoreTarget, SettingTab};
+use rbms_config::{Config, FixHiSpeed, JUDGE_OFFSET_MAX_MS, JUDGE_OFFSET_MIN_MS, LaneOption, ScoreTarget};
 use rbms_judge::JudgeAlgorithm;
 use rbms_judge::gauge::{GaugeAutoShift, GaugeKind};
 use rbms_judge::ln::LnMode;
@@ -326,15 +326,12 @@ fn an_event_with_nothing_behind_it_does_nothing() {
 }
 
 /// The key configuration button opens the key configuration and the skin configuration button the
-/// skin tab of the settings, each over the browser.
+/// skin menu, each over the browser.
 #[test]
 fn the_configuration_buttons_open_the_screens_this_player_keeps_them_on() {
     let (mut app, mut state) = browsing();
     assert!(matches!(state.run_event(&mut app.shared, BUTTON_KEYCONFIG, NO_ARGUMENT), Transition::Open(Stage::KeyConfig(_))));
-    match state.run_event(&mut app.shared, BUTTON_SKINSELECT, NO_ARGUMENT) {
-        Transition::Open(Stage::Settings(settings)) => assert_eq!(settings.current_tab(), SettingTab::Skin),
-        _ => panic!("the skin configuration button did not open the settings"),
-    }
+    assert!(matches!(state.run_event(&mut app.shared, BUTTON_SKINSELECT, NO_ARGUMENT), Transition::Open(Stage::SkinMenu(_))));
 }
 
 /// Play starts the chart under the cursor and practice opens the practice screen on it; neither
@@ -513,21 +510,20 @@ fn an_event_closes_the_record_modal_instead_of_running() {
 fn the_keys_for_the_configuration_screens_open_them_on_a_skins_browser() {
     let mut browser = Browser::three_songs("events-keys");
     assert!(matches!(browser.key(KeyCode::Digit6), Transition::Open(Stage::KeyConfig(_))));
-    match browser.key(KeyCode::F12) {
-        Transition::Open(Stage::Settings(settings)) => assert_eq!(settings.current_tab(), SettingTab::Skin),
-        _ => panic!("F12 did not open the settings"),
-    }
+    assert!(matches!(browser.key(SKIN_MENU_KEY), Transition::Open(Stage::SkinMenu(_))));
 }
 
-/// On a browser no skin draws neither key is anything, and no event is taken from the queue.
+/// On a browser no skin draws the key for the key configuration is nothing, and no event is taken
+/// from the queue. The key for the skin menu opens it there too: it is the one way into the menu a
+/// browser with no skin, and so no button for it, has.
 #[test]
 fn a_browser_no_skin_draws_runs_no_event() {
     let (mut app, mut state) = browsing();
     let now = Instant::now();
-    for code in [KeyCode::Digit6, KeyCode::F12] {
-        let asked = state.handle_key(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 }, super::tests::press(code));
-        assert!(matches!(asked, Transition::Stay), "{code:?} left a browser no skin draws");
-    }
+    let asked = state.handle_key(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 }, super::tests::press(KeyCode::Digit6));
+    assert!(matches!(asked, Transition::Stay), "the key for the key configuration left a browser no skin draws");
+    let asked = state.handle_key(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 }, super::tests::press(SKIN_MENU_KEY));
+    assert!(matches!(asked, Transition::Open(Stage::SkinMenu(_))), "the key for the skin menu did not open it on a browser no skin draws");
     app.shared.skin_requests().push(Cluster::Options, ClusterRequest::Event { id: BUTTON_GAUGE_1P, arg1: NEXT, arg2: 0 });
     state.update(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 });
     assert_eq!(app.shared.config.play.gauge, GaugeKind::Normal);

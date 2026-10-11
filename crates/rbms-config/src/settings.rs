@@ -106,7 +106,7 @@ pub const BUILT_IN_ONLY_NOTE: &str = "BUILT-IN SCREENS ONLY";
 
 /// Said beside a row a skin settles with an option of its own, while a skin draws one of the
 /// screens the row is for: the row still holds for the built-in screens, and on the skin's the
-/// option the SKIN tab lists for that skin is what counts.
+/// option the skin menu lists for that skin is what counts.
 pub const SKIN_OPTION_NOTE: &str = "SKIN OPTION COMES FIRST";
 
 /// Every play screen the built-in note field draws, as the `SkinType` ids their documents declare.
@@ -353,7 +353,8 @@ impl SettingId {
     }
 }
 
-/// The tabs the rows are grouped into, in the order the tab strip shows them.
+/// The groups the rows are listed in. The settings screen shows all but one of them as the tabs of
+/// its strip ([`SettingTab::SHOWN`]); [`SettingTab::Skin`] is the group the skin menu lists.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SettingTab {
     Play,
@@ -368,13 +369,26 @@ pub enum SettingTab {
 }
 
 impl SettingTab {
-    /// Every tab, left to right.
+    /// Every group of rows, in the order they are listed.
     pub const ALL: [SettingTab; 9] = [
         SettingTab::Play,
         SettingTab::Gauge,
         SettingTab::Judge,
         SettingTab::Display,
         SettingTab::Skin,
+        SettingTab::Input,
+        SettingTab::Network,
+        SettingTab::Audio,
+        SettingTab::Select,
+    ];
+
+    /// The tabs the settings screen shows on its tab strip, left to right: every tab but
+    /// [`SettingTab::Skin`], whose rows are listed by the skin menu instead.
+    pub const SHOWN: [SettingTab; 8] = [
+        SettingTab::Play,
+        SettingTab::Gauge,
+        SettingTab::Judge,
+        SettingTab::Display,
         SettingTab::Input,
         SettingTab::Network,
         SettingTab::Audio,
@@ -1373,6 +1387,15 @@ mod tests {
         names.dedup();
         assert_eq!(names.len(), count);
         assert_eq!(SettingTab::ALL.map(SettingTab::label).to_vec(), vec!["PLAY", "GAUGE", "JUDGE", "DISPLAY", "SKIN", "INPUT", "NETWORK", "AUDIO", "SELECT"]);
+    }
+
+    /// The settings screen shows every tab but the one the skin menu lists, in the order of the
+    /// whole list, so a tab added to one is not forgotten in the other.
+    #[test]
+    fn the_shown_tabs_are_every_tab_but_the_skin_menus_in_the_same_order() {
+        let expected: Vec<SettingTab> = SettingTab::ALL.into_iter().filter(|tab| *tab != SettingTab::Skin).collect();
+        assert_eq!(SettingTab::SHOWN.to_vec(), expected);
+        assert_eq!(SettingTab::SHOWN.map(SettingTab::label).to_vec(), vec!["PLAY", "GAUGE", "JUDGE", "DISPLAY", "INPUT", "NETWORK", "AUDIO", "SELECT"]);
     }
 
     #[test]

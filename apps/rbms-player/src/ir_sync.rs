@@ -32,10 +32,10 @@ pub(crate) struct SyncPayload {
 /// Fields that describe *this machine or this session*, not the player's preferences, and are
 /// therefore never uploaded and never overwritten by a download: the bearer token and the identity
 /// it belongs to, the server it was issued by, and the local file paths — the song folders, the
-/// difficulty tables and everything the SKIN tab stores among them, since all of it is paths into
+/// difficulty tables and everything the skin menu stores among them, since all of it is paths into
 /// this machine's disk.
 ///
-/// The SKIN tab is local as a whole. The pack folder and the skin folder are paths, the document
+/// The skin menu is local as a whole. The pack folder and the skin folder are paths, the document
 /// each screen is drawn with is an absolute path, and what was chosen inside a document is keyed by
 /// that same path: on another machine the keys name files that are not there, and a screen pointed
 /// at one would fall back to the built-in drawing with a read failure. The screen the tab was last
@@ -279,7 +279,7 @@ mod tests {
         c
     }
 
-    /// The settings another machine uploaded before the SKIN tab was kept local, as an account may
+    /// The settings another machine uploaded before the skin menu was kept local, as an account may
     /// still hold them: its own skin folder, a document chosen for two screens, and choices stored
     /// under those documents' paths.
     fn remote_skin_settings() -> Config {
@@ -327,7 +327,7 @@ mod tests {
         assert_eq!(sanitised.skin.folder, None, "the skin folder is a folder on this machine's disk");
         assert_eq!(sanitised.skin.document(SKIN_TYPE_MUSIC_SELECT), None, "a screen's document is a path on this machine's disk");
         assert_eq!(sanitised.skin.customisation(LOCAL_DOCUMENT), None, "the choices made in a document are stored under its path");
-        assert_eq!(sanitised.skin, rbms_config::SkinOptions::default(), "nothing the SKIN tab stores goes up");
+        assert_eq!(sanitised.skin, rbms_config::SkinOptions::default(), "nothing the skin menu stores goes up");
         assert_eq!(sanitised.network.player_id, Config::default().network.player_id);
         assert!((sanitised.play.hispeed - 4.5).abs() < 1e-9, "the play preferences do go up");
         assert_eq!(sanitised.judge.judge_rate_key, [90; JUDGE_WIDTH_TIER_COUNT]);
@@ -373,7 +373,7 @@ mod tests {
         assert_eq!(merged.skin.document(SKIN_TYPE_RESULT), None, "a screen this machine leaves to its pack took another machine's document");
         assert_eq!(merged.skin.user_config(LOCAL_DOCUMENT).properties.get(STORED_PROPERTY), Some(&LOCAL_PROPERTY_OPTION));
         assert_eq!(merged.skin.customisation(REMOTE_DOCUMENT), None, "choices came down for a document that is not on this machine");
-        assert_eq!(merged.skin, local.skin, "the SKIN tab is this machine's as a whole");
+        assert_eq!(merged.skin, local.skin, "the skin menu is this machine's as a whole");
     }
 
     #[test]

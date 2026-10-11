@@ -86,6 +86,7 @@ mod scoredb_store;
 mod settings_ui;
 mod settings_view;
 pub mod skin_host;
+mod skin_preview;
 mod skin_screen;
 mod skin_select;
 mod stage;
@@ -548,6 +549,12 @@ enum Hot {
     SettingTab(usize),
     SettingRow(usize),
     RivalRow(usize),
+    /// The button on the settings screen's tab strip that opens the skin menu.
+    SkinMenuLink,
+    /// A row of the skin menu's list, by its place in the whole list.
+    SkinMenuRow(usize),
+    /// A tab of the skin menu's strip of screens, by its place on the strip.
+    SkinMenuKind(usize),
     RankingRow(usize),
     ModalClose,
     ModalReplay,
@@ -687,7 +694,7 @@ struct AppShared {
     schedule_poll_us: i64,
     skin: Skin,
     skin_cfg: SkinConfig,
-    /// The skin documents on disk and the one each screen is drawn with, which the SKIN tab edits.
+    /// The skin documents on disk and the one each screen is drawn with, which the skin menu edits.
     /// Held here rather than on the settings screen because the document outlives the screen that
     /// chose it: every other screen draws with it.
     skins: SkinLibrary,

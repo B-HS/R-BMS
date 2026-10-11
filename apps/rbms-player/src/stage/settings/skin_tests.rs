@@ -1,259 +1,227 @@
-//! The SKIN tab of the settings screen, drawn headless.
+//! What the settings screen still has to do with skins: nothing but the way to the skin menu.
 //!
-//! It is the one tab whose rows the settings table does not fix: a chosen document declares its
-//! own, so what is asserted here is that the document's rows reach the screen, are clickable, and
-//! redraw when they move.
+//! The skin settings were a tab of this screen and are now the skin menu's
+//! ([`crate::stage::SkinMenuState`]), whose own tests hold what each of its rows does. What is held
+//! here is that the tab is gone from the strip, that the key and the button in its place open the
+//! menu over this screen, and that the menu comes back to it.
+//!
+//! With [`CAPTURE_DIR_ENV`] naming a folder, every tab is also saved there as `settings-<tab>.png`,
+//! which is how the strip with its button is looked at.
+
+use std::path::PathBuf;
 
 use super::tests::press;
 use super::*;
-use crate::settings_view::visible_rows;
-use crate::skin_select::{OffsetAxis, SkinRow, fixtures};
+use crate::settings_view::{SETTINGS_HINT, visible_rows};
 use crate::stage::render_tests::app;
-use crate::stage::{Canvas, HeadlessCanvas};
+use crate::stage::{Canvas, HeadlessCanvas, StageId};
 
-/// A settings screen on the SKIN tab of an app whose skin folder holds the fixture documents,
-/// already entered so the folder has been walked.
-///
-/// Each test names its own folder: the documents are written fresh every time, and the tests
-/// run beside one another.
-fn skin_screen(app: &mut App, tag: &str) -> SettingsState {
-    let root = std::env::temp_dir().join(format!("rbms-skin-tab-{tag}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
-    std::fs::create_dir_all(&root).expect("the fixture folder is writable");
-    app.shared.settings_path = root.join("settings.ron");
-    let folder = fixtures::write(&app.shared.settings_path);
-    app.shared.config.skin.folder = Some(folder.to_string_lossy().into_owned());
-    app.shared.config.skin.screen = fixtures::MUSIC_SELECT;
-    let mut state = SettingsState::on_tab(SettingTab::Skin);
-    state.on_enter(&mut ctx(app));
-    state
-}
+/// Environment variable naming the folder captures are saved in, the one the screen capture harness
+/// reads. Nothing is saved without it.
+const CAPTURE_DIR_ENV: &str = "RBMS_SKIN_CAPTURE_DIR";
 
 fn ctx(app: &mut App) -> FrameCtx<'_> {
     FrameCtx { shared: &mut app.shared, now: std::time::Instant::now(), dt: 0.0 }
 }
 
-/// Draw the screen onto a headless canvas and answer the pixels, with the app's hot regions
-/// rebuilt for the frame.
-fn draw(app: &mut App, state: &mut SettingsState) -> HeadlessCanvas {
+/// An app whose settings file is in a folder of this test's own, so a screen that writes it on the
+/// way out writes nothing another test reads.
+fn app_in(tag: &str) -> App {
+    let mut app = app();
+    let root = std::env::temp_dir().join(format!("rbms-settings-skin-link-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("the fixture folder is writable");
+    app.shared.settings_path = root.join("settings.ron");
+    app.shared.config.skin = rbms_config::SkinOptions::default();
+    app.shared.skins = crate::skin_select::SkinLibrary::new(&app.shared.settings_path, &app.shared.config);
+    app
+}
+
+/// Draw the screen that is up onto a headless canvas, with the app's clickable regions rebuilt for
+/// the frame.
+fn draw(app: &mut App) -> HeadlessCanvas {
     let mut pixels = HeadlessCanvas::new(CW, CH);
     let mut canvas = Canvas::Headless(&mut pixels);
     app.shared.hot.clear();
-    state.draw(&mut ctx(app), &mut canvas);
+    let now = std::time::Instant::now();
+    app.stage.draw(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 }, &mut canvas);
     pixels
 }
 
-/// Put the cursor on one row of the open tab.
-fn focus(state: &mut SettingsState, row: SettingRow) {
-    state.sel = state.rows.iter().position(|entry| *entry == row).unwrap_or_else(|| panic!("{row:?} is not on the open tab"));
+/// Hand one key to the screen that is up and make the change of screen it asks for.
+fn key(app: &mut App, code: KeyCode) {
+    let now = std::time::Instant::now();
+    let asked = app.stage.handle_key(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 }, press(code));
+    app.switch(asked);
 }
 
-/// The labels of the rows the screen is showing.
-fn labels(state: &SettingsState) -> Vec<String> {
-    state.lines.iter().map(|line| line.label.clone()).collect()
+/// Press the left button in the middle of what the frame drawn last made clickable for `hot`, and
+/// make the change of screen that asks for.
+fn click(app: &mut App, hot: Hot) {
+    let (rect, _) = *app.shared.hot.iter().find(|(_, entry)| *entry == hot).unwrap_or_else(|| panic!("{hot:?} is not on the screen"));
+    let at = (rect.x + rect.w * 0.5, rect.y + rect.h * 0.5);
+    let now = std::time::Instant::now();
+    let input = crate::pointer::PointerInput::Button { button: MouseButton::Left, pressed: true };
+    let asked = app.stage.handle_pointer(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 }, at, input);
+    app.switch(asked);
 }
 
-/// The value the screen is showing for one row.
-fn value_of(state: &SettingsState, row: SettingRow) -> String {
-    let at = state.rows.iter().position(|entry| *entry == row).unwrap_or_else(|| panic!("{row:?} is not on the open tab"));
-    state.lines[at].value.clone()
-}
-
-/// Until a document is chosen the SKIN tab is only the six rows the table declares; choosing
-/// one adds the rows that document declares, between the document row and the actions.
-#[test]
-fn choosing_a_document_adds_the_rows_it_declares_between_the_row_and_the_actions() {
-    let mut app = app();
-    let mut state = skin_screen(&mut app, "rows");
-    assert_eq!(
-        state.rows,
-        vec![
-            SettingRow::Fixed(SettingId::SkinPack),
-            SettingRow::Fixed(SettingId::SkinScreen),
-            SettingRow::Fixed(SettingId::SkinDocument),
-            SettingRow::Fixed(SettingId::SkinInfo),
-            SettingRow::Fixed(SettingId::SkinReload),
-            SettingRow::Fixed(SettingId::SkinReset),
-        ]
-    );
-
-    focus(&mut state, SettingRow::Fixed(SettingId::SkinDocument));
-    state.row_key(&mut ctx(&mut app), &press(KeyCode::ArrowRight));
-    state.refresh(&app.shared);
-
-    let shown = labels(&state);
-    assert!(shown.contains(&fixtures::BROWSER_PROPERTY_LABEL.to_string()), "the document's own rows are not on the screen: {shown:?}");
-    let property = shown.iter().position(|label| label == fixtures::BROWSER_PROPERTY_LABEL).expect("the property row is listed");
-    let reload = shown.iter().position(|label| label == "RELOAD").expect("the reload row is listed");
-    let document = shown.iter().position(|label| label == "SKIN").expect("the document row is listed");
-    assert!(document < property && property < reload, "the document's rows are not between the document row and the actions");
-    assert_eq!(value_of(&state, SettingRow::Fixed(SettingId::SkinInfo)), "1920X1080 - JSON - 0 WARNINGS - dj", "the document was not read");
-}
-
-/// The rows a document declares are drawn, are clickable, and change what is on screen when
-/// they move — which is what a row wired to the wrong document, or to nothing, would not do.
-#[test]
-fn the_skin_tabs_own_rows_are_drawn_and_redraw_when_one_moves() {
-    let mut app = app();
-    let mut state = skin_screen(&mut app, "draw");
-    let bare = draw(&mut app, &mut state);
-    assert!(bare.painted_pixels() > 0, "the SKIN tab drew nothing");
-
-    focus(&mut state, SettingRow::Fixed(SettingId::SkinDocument));
-    state.row_key(&mut ctx(&mut app), &press(KeyCode::ArrowRight));
-    state.refresh(&app.shared);
-
-    let chosen = draw(&mut app, &mut state);
-    assert_ne!(bare.signature(), chosen.signature(), "choosing a document did not change the screen");
-    assert_eq!(app.shared.hot.len(), state.rows.len().min(visible_rows()) + SettingTab::ALL.len(), "every drawn row and every tab is clickable");
-
-    let property = SettingRow::Skin(
-        state
-            .rows
-            .iter()
-            .find_map(|row| match row {
-                SettingRow::Skin(skin) => Some(*skin),
-                SettingRow::Fixed(_) => None,
-            })
-            .expect("the document declares a row"),
-    );
-    focus(&mut state, property);
-    let before = value_of(&state, property);
-    state.row_key(&mut ctx(&mut app), &press(KeyCode::ArrowRight));
-    state.refresh(&app.shared);
-    assert_ne!(value_of(&state, property), before, "stepping the document's own row changed nothing");
-    assert_ne!(chosen.pixel_checksum(), draw(&mut app, &mut state).pixel_checksum(), "the moved row was not redrawn");
-}
-
-/// Everything the SKIN tab edits goes into the settings file and comes back out of it, so the next
-/// launch draws the screen with the document and the choices the player left it on.
-#[test]
-fn what_the_tab_edits_survives_the_settings_file() {
-    let mut app = app();
-    let mut state = skin_screen(&mut app, "persist");
-    focus(&mut state, SettingRow::Fixed(SettingId::SkinDocument));
-    state.row_key(&mut ctx(&mut app), &press(KeyCode::ArrowRight));
-    state.refresh(&app.shared);
-
-    for row in [SettingRow::Skin(SkinRow::Property(0)), SettingRow::Skin(SkinRow::File(0)), SettingRow::Skin(SkinRow::Offset(0, OffsetAxis::Y))] {
-        focus(&mut state, row);
-        state.row_key(&mut ctx(&mut app), &press(KeyCode::ArrowRight));
+/// The tab the settings screen that is up is on.
+fn open_tab(app: &App) -> SettingTab {
+    match &app.stage {
+        Stage::Settings(state) => state.current_tab(),
+        other => panic!("{other:?} is up, not the settings screen"),
     }
-    state.refresh(&app.shared);
-    let shown = state.lines.clone();
-
-    state.row_key(&mut ctx(&mut app), &press(KeyCode::Escape));
-    let restored = rbms_config::load(&app.shared.settings_path).expect("the file the screen wrote reads back").config;
-    assert_eq!(restored.skin, app.shared.config.skin, "the skin group did not survive the file");
-
-    let mut next = crate::stage::render_tests::app();
-    next.shared.settings_path = app.shared.settings_path.clone();
-    next.shared.config = restored;
-    let mut reopened = SettingsState::on_tab(SettingTab::Skin);
-    reopened.on_enter(&mut ctx(&mut next));
-    assert_eq!(reopened.lines, shown, "the reopened screen does not show what the last one left");
 }
 
-/// An offset row is the one row kind zeroed rather than cycled, and the key that does it is the
-/// same one on the number row and the keypad.
+/// The strip has a tab for every group of rows but the skin menu's, and Tab walks them all and
+/// comes back round without ever landing on that one.
 #[test]
-fn the_zero_key_puts_an_offset_row_back_to_the_authors_placement() {
-    let mut app = app();
-    let mut state = skin_screen(&mut app, "zero");
-    focus(&mut state, SettingRow::Fixed(SettingId::SkinDocument));
-    state.row_key(&mut ctx(&mut app), &press(KeyCode::ArrowRight));
-    state.refresh(&app.shared);
+fn the_tab_strip_has_no_skin_tab_and_tab_walks_the_tabs_it_has() {
+    let mut app = app_in("strip");
+    app.switch(Transition::Open(Stage::Settings(SettingsState::new())));
+    draw(&mut app);
+    let tabs = app.shared.hot.iter().filter(|(_, hot)| matches!(hot, Hot::SettingTab(_))).count();
+    assert_eq!(tabs, SettingTab::SHOWN.len());
+    assert!(!SettingTab::SHOWN.contains(&SettingTab::Skin));
 
-    let offset =
-        *state.rows.iter().find(|row| matches!(row, SettingRow::Skin(crate::skin_select::SkinRow::Offset(_, _)))).expect("the document declares an offset row");
-    focus(&mut state, offset);
-    for _ in 0..3 {
-        state.row_key(&mut ctx(&mut app), &press(KeyCode::ArrowRight));
+    let mut walked = vec![open_tab(&app)];
+    for _ in 1..SettingTab::SHOWN.len() {
+        key(&mut app, KeyCode::Tab);
+        walked.push(open_tab(&app));
     }
-    state.refresh(&app.shared);
-    assert_eq!(value_of(&state, offset), "+3");
+    assert_eq!(walked, SettingTab::SHOWN.to_vec());
+    key(&mut app, KeyCode::Tab);
+    assert_eq!(open_tab(&app), SettingTab::SHOWN[0], "Tab does not come back round to the first tab");
 
-    state.row_key(&mut ctx(&mut app), &press(KeyCode::Digit0));
-    state.refresh(&app.shared);
-    assert_eq!(value_of(&state, offset), "+0");
+    for (place, tab) in SettingTab::SHOWN.iter().enumerate() {
+        draw(&mut app);
+        click(&mut app, Hot::SettingTab(place));
+        assert_eq!(open_tab(&app), *tab, "a press on the tab at place {place}");
+    }
 }
 
-/// RESET drops the choices made in the document and writes the settings file, so the next
-/// launch starts on what the author shipped rather than on what was reset away.
+/// No tab lists a row of the skin menu's, and a screen asked to open on the tab that is gone opens
+/// on its first.
 #[test]
-fn reset_drops_the_choices_and_the_file_no_longer_holds_them() {
-    let mut app = app();
-    let mut state = skin_screen(&mut app, "reset");
-    focus(&mut state, SettingRow::Fixed(SettingId::SkinDocument));
-    state.row_key(&mut ctx(&mut app), &press(KeyCode::ArrowRight));
-    state.refresh(&app.shared);
-
-    let property = *state.rows.iter().find(|row| matches!(row, SettingRow::Skin(_))).expect("the document declares a row");
-    focus(&mut state, property);
-    state.row_key(&mut ctx(&mut app), &press(KeyCode::ArrowRight));
-    state.refresh(&app.shared);
-    let moved = value_of(&state, property);
-    assert!(!app.shared.config.skin.custom.is_empty(), "the choice was never stored");
-
-    focus(&mut state, SettingRow::Fixed(SettingId::SkinReset));
-    state.row_key(&mut ctx(&mut app), &press(KeyCode::Enter));
-    state.refresh(&app.shared);
-    assert!(app.shared.config.skin.custom.is_empty(), "the choices survived the reset");
-    assert_ne!(value_of(&state, property), moved, "the row still shows what was reset away");
-
-    let written = std::fs::read_to_string(&app.shared.settings_path).expect("the settings file was written");
-    assert!(written.contains("skin:"), "the settings file does not hold the skin group");
+fn no_tab_lists_a_row_of_the_skin_menus() {
+    let mut app = app_in("rows");
+    let skin_rows = app.shared.settings_rows(SettingTab::Skin);
+    assert!(!skin_rows.is_empty());
+    for tab in SettingTab::SHOWN {
+        let mut state = SettingsState::on_tab(tab);
+        state.on_enter(&mut ctx(&mut app));
+        assert_eq!(state.current_tab(), tab);
+        assert!(state.rows.iter().all(|row| !skin_rows.contains(row)), "{tab:?} lists a row of the skin menu's");
+    }
+    assert_eq!(SettingsState::on_tab(SettingTab::Skin).current_tab(), SettingTab::SHOWN[0]);
+    let display = app.shared.settings_rows(SettingTab::Display);
+    assert!(display.contains(&SettingRow::Fixed(SettingId::Skin)), "the layout of the built-in note field left the DISPLAY tab");
 }
 
-/// A folder holding one Lua skin for the song browser, which is a skin pack of one document.
-fn lua_pack(app: &App) -> std::path::PathBuf {
-    let pack = app.shared.settings_path.parent().expect("the settings file has a folder").join("pack");
-    std::fs::create_dir_all(&pack).expect("the pack folder is writable");
-    std::fs::write(pack.join("browser.luaskin"), "return { type = 5, name = 'Wheel', author = 'dj', w = 1920, h = 1080, destination = {} }")
-        .expect("the skin is written");
-    pack
-}
-
-/// The PACK FOLDER row opens a folder picker beside the frame loop. The folder that comes back is
-/// the pack every screen takes its document from: it is shown on the row, written to the settings
-/// file, and its Lua skin is what the SKIN row then names for the screen. Stepping the row left
-/// names no pack again.
+/// The key opens the skin menu over the settings screen, from whichever tab is open, and Escape on
+/// the menu comes back to the settings screen on the tab and the row it was left on.
 #[test]
-fn the_pack_folder_row_takes_a_picked_folder_and_offers_its_lua_skins() {
-    let mut app = app();
-    let mut state = skin_screen(&mut app, "pack");
-    let pack = lua_pack(&app);
-    assert_eq!(value_of(&state, SettingRow::Fixed(SettingId::SkinPack)), "(none)");
-    assert_eq!(value_of(&state, SettingRow::Fixed(SettingId::SkinDocument)), "DEFAULT");
+fn the_key_opens_the_skin_menu_and_escape_comes_back_to_the_settings() {
+    let mut app = app_in("key");
+    app.switch(Transition::Open(Stage::Settings(SettingsState::on_tab(SettingTab::Display))));
+    key(&mut app, KeyCode::ArrowDown);
+    key(&mut app, KeyCode::ArrowDown);
+    let before = draw(&mut app).pixel_checksum();
 
-    let (tx, handle) = crate::dialog::handle_for_tests();
-    state.pack_picker = Some(handle);
-    state.update(&mut ctx(&mut app));
-    assert!(state.pack_picker.is_some(), "the screen gave up on a picker nobody has answered");
-    tx.send(Some(pack.clone())).expect("the handle is still held");
-    state.update(&mut ctx(&mut app));
-    assert!(state.pack_picker.is_none());
-    state.refresh(&app.shared);
+    key(&mut app, SKIN_MENU_KEY);
+    assert_eq!(app.stage.id(), StageId::SkinMenu, "the key did not open the skin menu");
+    assert_eq!(app.suspended.len(), 2, "the settings screen and the browser are not both parked under the menu");
 
-    assert_eq!(value_of(&state, SettingRow::Fixed(SettingId::SkinPack)), pack.to_string_lossy());
-    assert_eq!(value_of(&state, SettingRow::Fixed(SettingId::SkinDocument)), "PACK: Wheel", "the pack's Lua skin does not draw the screen it declares");
-    assert_eq!(value_of(&state, SettingRow::Fixed(SettingId::SkinInfo)), "READ WHEN ITS SCREEN OPENS", "a Lua skin was read with no screen to read it against");
-    let restored = rbms_config::load(&app.shared.settings_path).expect("the file the screen wrote reads back").config;
-    assert_eq!(restored.skin.pack_folder(), Some(pack.to_string_lossy().as_ref()), "the pack did not reach the settings file");
+    key(&mut app, KeyCode::Escape);
+    assert_eq!(app.stage.id(), StageId::Settings, "the menu did not come back to the settings screen");
+    assert_eq!(open_tab(&app), SettingTab::Display, "the settings screen came back on another tab");
+    assert_eq!(draw(&mut app).pixel_checksum(), before, "the settings screen came back looking different");
 
-    focus(&mut state, SettingRow::Fixed(SettingId::SkinDocument));
-    state.row_key(&mut ctx(&mut app), &press(KeyCode::ArrowRight));
-    state.refresh(&app.shared);
-    assert_eq!(value_of(&state, SettingRow::Fixed(SettingId::SkinDocument)), "Browser", "the row does not step from the pack's skin to the folder's document");
-    state.row_key(&mut ctx(&mut app), &press(KeyCode::ArrowRight));
-    state.refresh(&app.shared);
-    assert_eq!(value_of(&state, SettingRow::Fixed(SettingId::SkinDocument)), "Wheel", "the pack's Lua skin cannot be chosen by hand");
-    app.shared.config.skin.select(fixtures::MUSIC_SELECT, None);
+    key(&mut app, KeyCode::Escape);
+    assert_eq!(app.stage.id(), StageId::Select);
+    assert!(app.suspended.is_empty());
+}
 
-    focus(&mut state, SettingRow::Fixed(SettingId::SkinPack));
-    state.row_key(&mut ctx(&mut app), &press(KeyCode::ArrowLeft));
-    state.refresh(&app.shared);
-    assert_eq!(value_of(&state, SettingRow::Fixed(SettingId::SkinPack)), "(none)");
-    assert_eq!(value_of(&state, SettingRow::Fixed(SettingId::SkinDocument)), "DEFAULT", "a pack that is no longer named still draws a screen");
-    assert!(is_skin_action_row(SettingId::SkinPack), "Enter on the row leaves the screen instead of opening the picker");
+/// The button at the end of the tab strip opens the skin menu the way the key does.
+#[test]
+fn the_button_on_the_tab_strip_opens_the_skin_menu() {
+    let mut app = app_in("button");
+    app.switch(Transition::Open(Stage::Settings(SettingsState::new())));
+    draw(&mut app);
+    assert_eq!(app.shared.hot.iter().filter(|(_, hot)| *hot == Hot::SkinMenuLink).count(), 1, "the button is not on the screen once");
+    click(&mut app, Hot::SkinMenuLink);
+    assert_eq!(app.stage.id(), StageId::SkinMenu, "the button did not open the skin menu");
+    key(&mut app, KeyCode::Escape);
+    assert_eq!(app.stage.id(), StageId::Settings);
+}
+
+/// Every drawn row, every tab and the button are clickable, and nothing else is.
+#[test]
+fn every_row_every_tab_and_the_button_are_clickable() {
+    let mut app = app_in("regions");
+    for tab in SettingTab::SHOWN {
+        let rows = app.shared.settings_rows(tab).len();
+        app.stage = Stage::Settings(SettingsState::on_tab(tab));
+        draw(&mut app);
+        assert_eq!(app.shared.hot.len(), rows.min(visible_rows()) + SettingTab::SHOWN.len() + 1, "{tab:?}");
+    }
+}
+
+/// While a line is being typed into a row, or one of the inline lists is up, the key and the button
+/// are that editor's or that list's and open nothing.
+#[test]
+fn the_way_to_the_skin_menu_is_shut_while_an_editor_or_a_list_is_open() {
+    let mut app = app_in("shut");
+    let mut editing = SettingsState::on_tab(SettingTab::Network);
+    editing.on_enter(&mut ctx(&mut app));
+    editing.sel = editing.rows.iter().position(|row| *row == SettingRow::Fixed(SettingId::Email)).expect("the NETWORK tab has an EMAIL row");
+    editing.row_key(&mut ctx(&mut app), &press(KeyCode::Enter));
+    assert!(editing.text_input.is_some(), "the fixture needs a row being typed into");
+    assert!(matches!(editing.handle_key(&mut ctx(&mut app), press(SKIN_MENU_KEY)), Transition::Stay), "the key opened the menu from under an editor");
+    assert!(editing.text_input.is_some(), "the key closed the editor");
+    app.stage = Stage::Settings(editing);
+    draw(&mut app);
+    click(&mut app, Hot::SkinMenuLink);
+    assert_eq!(app.stage.id(), StageId::Settings, "the button opened the menu from under an editor");
+    assert!(matches!(&app.stage, Stage::Settings(state) if state.text_input.is_some()), "the button closed the editor");
+
+    for list in [SettingId::Rivals, SettingId::IrProfiles] {
+        let mut state = SettingsState::on_tab(SettingTab::Network);
+        state.on_enter(&mut ctx(&mut app));
+        state.sel = state.rows.iter().position(|row| *row == SettingRow::Fixed(list)).unwrap_or_else(|| panic!("the NETWORK tab has no {list:?} row"));
+        state.row_key(&mut ctx(&mut app), &press(KeyCode::Enter));
+        assert!(state.rivals_open || state.profiles_open, "{list:?} did not open its list");
+        assert!(matches!(state.handle_key(&mut ctx(&mut app), press(SKIN_MENU_KEY)), Transition::Stay), "the key opened the menu from under {list:?}");
+
+        app.stage = Stage::Settings(state);
+        draw(&mut app);
+        click(&mut app, Hot::SkinMenuLink);
+        assert_eq!(app.stage.id(), StageId::Settings, "the button opened the menu from under {list:?}");
+    }
+}
+
+/// The hint under the title names the key, and the key is the one that opens the menu from the song
+/// browser.
+#[test]
+fn the_hint_names_the_key_that_opens_the_menu() {
+    assert_eq!(SKIN_MENU_KEY, KeyCode::F12);
+    assert!(SETTINGS_HINT.contains("F12 SKIN MENU"), "{SETTINGS_HINT}");
+}
+
+/// Every tab of the screen, drawn and saved for a person to look at when a capture folder was named.
+#[test]
+fn every_tab_draws_and_can_be_captured() {
+    let mut app = app_in("capture");
+    for tab in SettingTab::SHOWN {
+        app.stage = Stage::Settings(SettingsState::on_tab(tab));
+        let pixels = draw(&mut app);
+        assert!(pixels.painted_pixels() > 0, "{tab:?} drew nothing");
+        let Some(folder) = std::env::var_os(CAPTURE_DIR_ENV).map(PathBuf::from) else {
+            continue;
+        };
+        std::fs::create_dir_all(&folder).expect("the capture folder can be created");
+        let path = folder.join(format!("settings-{}.png", tab.label().to_ascii_lowercase()));
+        image::save_buffer(&path, pixels.rgba(), CW, CH, image::ExtendedColorType::Rgba8).expect("the capture is written");
+    }
 }

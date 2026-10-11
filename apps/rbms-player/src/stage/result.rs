@@ -1048,5 +1048,6 @@ impl StageHandler for ResultState {
     }
 }
 
+pub(crate) mod skin_preview;
 #[cfg(test)]
 mod tests;

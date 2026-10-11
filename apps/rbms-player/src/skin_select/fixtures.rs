@@ -1,4 +1,4 @@
-//! Skin documents written into a temporary folder, shared by the tests of the SKIN tab and by the
+//! Skin documents written into a temporary folder, shared by the tests of the skin menu and by the
 //! settings screen's own render tests so both drive the same document rather than two that drifted
 //! apart.
 

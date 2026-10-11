@@ -86,11 +86,11 @@ fn failures_said() -> Vec<String> {
 /// part of it a line on screen has room for is the part the player needs.
 #[test]
 fn the_failure_message_names_the_skin_and_the_fallback_before_the_reason() {
-    let message = skin_failure_message(Some("/skins/pack/decide.luaskin"), "/skins/pack/decide.luaskin: unexpected symbol");
+    let message = skin_failure_message(Some("/skins/pack/decide.luaskin"), SKIN_FAILURE_NOTE, "/skins/pack/decide.luaskin: unexpected symbol");
     assert_eq!(message, "skin decide.luaskin did not load, drawing the built-in screen: /skins/pack/decide.luaskin: unexpected symbol");
-    assert!(skin_failure_message(None, "why").starts_with(&format!("skin {SKIN_FAILURE_UNNAMED}{SKIN_FAILURE_NOTE}")));
+    assert!(skin_failure_message(None, SKIN_FAILURE_NOTE, "why").starts_with(&format!("skin {SKIN_FAILURE_UNNAMED}{SKIN_FAILURE_NOTE}")));
 
-    let long = skin_failure_message(Some(LONGEST_DEFAULT_DOCUMENT), &"reason ".repeat(TOAST_TEXT_CHARS));
+    let long = skin_failure_message(Some(LONGEST_DEFAULT_DOCUMENT), SKIN_FAILURE_NOTE, &"reason ".repeat(TOAST_TEXT_CHARS));
     let on_screen: String = long.chars().take(TOAST_TEXT_CHARS).collect();
     assert!(on_screen.contains("courseresult.luaskin") && on_screen.contains(SKIN_FAILURE_NOTE.trim_end()), "{on_screen:?}");
 }
@@ -221,7 +221,7 @@ fn a_run_started_with_a_note_field_layout_is_played_on_the_built_in_field() {
     }
 }
 
-/// The configuration with the SKIN tab on the seven-key play screen.
+/// The configuration with the skin menu on the seven-key play screen.
 fn play_tab(config: &crate::Config) -> crate::Config {
     let mut config = config.clone();
     config.skin.screen = rbms_skin::loader::SKIN_TYPE_PLAY_7KEYS;

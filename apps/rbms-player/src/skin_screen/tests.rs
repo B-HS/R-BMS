@@ -423,14 +423,14 @@ end
 return skin
 "#;
 
-/// What the SKIN tab calls the offset every play skin has for moving the whole screen, which it
+/// What the skin menu calls the offset every play skin has for moving the whole screen, which it
 /// shows in capitals like every row.
 const WHOLE_OFFSET_ROW: &str = "ALL OFFSET(%)";
 
 /// A chart for the whole-offset skin's play screen to be drawn over.
 const WHOLE_CHART: &[u8] = b"#PLAYER 1\n#BPM 120\n#WAV01 a.wav\n#00111:01\n";
 
-/// Presses the SKIN tab's rows for the whole-screen offset of the seven-key play skin of `app`:
+/// Presses the skin menu's rows for the whole-screen offset of the seven-key play skin of `app`:
 /// each step is an axis and how many presses, to the right when positive and to the left when not.
 fn step_whole_offset(app: &mut crate::App, steps: &[(crate::skin_select::OffsetAxis, i32)]) {
     app.shared.config.skin.screen = SKIN_TYPE_PLAY_7KEYS;
@@ -443,7 +443,7 @@ fn step_whole_offset(app: &mut crate::App, steps: &[(crate::skin_select::OffsetA
                 matches!(row, crate::skin_select::SkinRow::Offset(_, on) if on == axis)
                     && app.shared.skins.line(&app.shared.config, *row).0.contains(WHOLE_OFFSET_ROW)
             })
-            .unwrap_or_else(|| panic!("the SKIN tab has no {axis:?} row for the whole-screen offset among {rows:?}"));
+            .unwrap_or_else(|| panic!("the skin menu has no {axis:?} row for the whole-screen offset among {rows:?}"));
         for _ in 0..presses.abs() {
             assert!(app.shared.skins.step(&mut app.shared.config, row, presses.signum()), "the row did not move");
         }
@@ -467,7 +467,7 @@ fn play_frame(app: &mut crate::App, pixels: &mut crate::stage::HeadlessCanvas, s
 }
 
 /// Draws the play screen of the whole-offset skin after the player stepped the rows of its
-/// whole-screen offset on the SKIN tab by `steps`.
+/// whole-screen offset on the skin menu by `steps`.
 fn whole_play_frame(tag: &str, steps: &[(crate::skin_select::OffsetAxis, i32)]) -> crate::stage::HeadlessCanvas {
     let (mut app, _) = app_with_pack_skin(tag, WHOLE_PLAY_FILE, WHOLE_PLAY);
     let settings = app.shared.settings_path.clone();
@@ -484,7 +484,7 @@ fn whole_play_frame(tag: &str, steps: &[(crate::skin_select::OffsetAxis, i32)]) 
     pixels
 }
 
-/// What the player sets on the SKIN tab's whole-screen offset rows moves and grows everything the
+/// What the player sets on the skin menu's whole-screen offset rows moves and grows everything the
 /// play skin draws (`Skin.ensureRenderer`): X and Y are a share of the screen, with Y going up, and
 /// W and H stretch the screen away from its bottom left corner. What the moved screen no longer
 /// covers is left black.
@@ -963,7 +963,7 @@ const PACK_WHOLE_STEPS: [(crate::skin_select::OffsetAxis, i32); 4] = [
 ];
 
 /// One frame of the published pack's seven-key play screen, a few seconds into its scene, with the
-/// whole-screen offset the SKIN tab was stepped to; `None` when the pack's play skin never drew.
+/// whole-screen offset the skin menu was stepped to; `None` when the pack's play skin never drew.
 fn pack_play_frame(pack: &Path, tag: &str, steps: &[(crate::skin_select::OffsetAxis, i32)]) -> Option<Vec<u8>> {
     rbms_render::font::use_embedded_fonts_only();
     let home = std::env::temp_dir().join(format!("rbms-skin-screen-pack-{tag}-{}", std::process::id()));
@@ -997,7 +997,7 @@ fn pack_play_frame(pack: &Path, tag: &str, steps: &[(crate::skin_select::OffsetA
     Some(pixels.rgba().to_vec())
 }
 
-/// A published play skin is drawn whole under the offset the SKIN tab's rows were stepped to: the
+/// A published play skin is drawn whole under the offset the skin menu's rows were stepped to: the
 /// frame it draws at rest and the one it draws moved and shrunk are saved side by side for a person
 /// to look at, and are not the same frame.
 ///

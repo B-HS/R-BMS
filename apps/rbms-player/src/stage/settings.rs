@@ -1,6 +1,11 @@
 //! The settings screen: the tabbed row list, the in-place text editor the NETWORK rows use, and
 //! the inline rival list. The rows themselves are described in `rbms_config::SETTINGS`; this file
 //! owns the screen's state and routes keys and clicks into them by name.
+//!
+//! The skin settings are not on this screen. They are the skin menu's
+//! ([`crate::stage::SkinMenuState`]), which lists them beside a preview of what they do; this screen
+//! shows the tabs of [`SettingTab::SHOWN`] and a way there: the key that opens the menu from the song
+//! browser ([`SKIN_MENU_KEY`]), and the button at the end of the tab strip.
 #![allow(clippy::wildcard_imports)]
 
 use crate::dialog::{DialogHandle, DialogState};
@@ -8,8 +13,8 @@ use crate::ir_panel::*;
 use crate::ir_session::{AuthAction, GUEST_PLAYER_ID};
 use crate::settings_ui::{SettingRow, audio_status_text, is_network_row, step_audio_device};
 use crate::settings_view::{RivalsScene, SettingsLine, SettingsScene};
-use crate::skin_select::SkinRow;
-use crate::stage::{Canvas, FrameCtx, KeyConfigState, KeyInput, Stage, StageHandler, Transition, is_left_press};
+use crate::stage::select::SKIN_MENU_KEY;
+use crate::stage::{Canvas, FrameCtx, KeyConfigState, KeyInput, SkinMenuState, Stage, StageHandler, Transition, is_left_press};
 use rbms_config::{AdjustOutcome, SettingId, SettingTab, adjust, step_skin};
 
 use crate::*;
@@ -49,8 +54,6 @@ pub(crate) struct SettingsState {
     audio_devices: Vec<String>,
     /// The system sound folder picker while it is up, on the same terms as the font picker below.
     sound_picker: Option<DialogHandle>,
-    /// The skin pack folder picker while it is up, on the same terms again.
-    pack_picker: Option<DialogHandle>,
     /// The font picker while it is up. It runs beside the frame loop, so the screen keeps drawing
     /// while the user is in front of it and the answer is collected in `update`.
     font_picker: Option<DialogHandle>,
@@ -61,13 +64,14 @@ pub(crate) struct SettingsState {
 
 impl SettingsState {
     pub(crate) fn new() -> SettingsState {
-        SettingsState::on_tab(SettingTab::ALL[0])
+        SettingsState::on_tab(SettingTab::SHOWN[0])
     }
 
-    /// A settings screen opened straight onto one tab.
+    /// A settings screen opened straight onto one tab. A tab the screen does not show opens it on
+    /// its first.
     pub(crate) fn on_tab(tab: SettingTab) -> SettingsState {
         SettingsState {
-            tab: SettingTab::ALL.iter().position(|entry| *entry == tab).unwrap_or_default(),
+            tab: SettingTab::SHOWN.iter().position(|entry| *entry == tab).unwrap_or_default(),
             sel: 0,
             text_input: None,
             text_secret: false,
@@ -79,7 +83,6 @@ impl SettingsState {
             profiles_sel: 0,
             audio_devices: Vec::new(),
             sound_picker: None,
-            pack_picker: None,
             font_picker: None,
             rows: Vec::new(),
             lines: Vec::new(),
@@ -89,7 +92,7 @@ impl SettingsState {
 
     /// The open tab.
     pub(crate) fn current_tab(&self) -> SettingTab {
-        SettingTab::ALL[self.tab.min(SettingTab::ALL.len() - 1)]
+        SettingTab::SHOWN[self.tab.min(SettingTab::SHOWN.len() - 1)]
     }
 
     /// Re-read the open tab's rows and their values.
@@ -112,7 +115,7 @@ impl SettingsState {
         self.rows.get(self.sel).copied()
     }
 
-    /// The descriptor-table row the cursor is on, or `None` when it is on a skin document's own.
+    /// The descriptor-table row the cursor is on.
     fn focused_fixed(&self) -> Option<SettingId> {
         match self.focused() {
             Some(SettingRow::Fixed(id)) => Some(id),
@@ -129,11 +132,11 @@ impl SettingsState {
     }
 
     /// Apply one left/right step to a row. A row the configuration document cannot step on its own
-    /// comes back as an action this screen runs.
+    /// comes back as an action this screen runs. A row a skin document declares is the skin menu's,
+    /// and no tab of this screen lists one.
     fn step(&mut self, ctx: &mut FrameCtx<'_>, row: SettingRow, delta: i32) -> Transition {
-        let id = match row {
-            SettingRow::Fixed(id) => id,
-            SettingRow::Skin(row) => return self.step_skin(ctx, row, delta),
+        let SettingRow::Fixed(id) = row else {
+            return Transition::Stay;
         };
         let outcome = adjust(&mut ctx.shared.config, id, delta);
         if let AdjustOutcome::Action(action) = outcome {
@@ -141,9 +144,6 @@ impl SettingsState {
         }
         if outcome == AdjustOutcome::Changed {
             self.dirty = true;
-            if id == SettingId::SkinScreen {
-                ctx.shared.reload_skin();
-            }
         }
         match id {
             SettingId::MasterVolume | SettingId::KeyVolume | SettingId::BgmVolume | SettingId::SystemVolume => ctx.shared.apply_audio_gains(),
@@ -154,8 +154,9 @@ impl SettingsState {
     }
 
     /// A row that opens a screen or a picker, steps something only this process can enumerate, or
-    /// reaches the score server. Stepping left runs nothing but the two rows that have a meaningful
-    /// other direction: the font, which resets, and the skin, which cycles either way.
+    /// reaches the score server. Stepping left runs nothing but the rows that have a meaningful
+    /// other direction: the font and the sound folder, which reset, and the device, which cycles
+    /// either way.
     fn run_action(&mut self, ctx: &mut FrameCtx<'_>, id: SettingId, delta: i32) -> Transition {
         self.dirty = true;
         match id {
@@ -189,32 +190,6 @@ impl SettingsState {
             SettingId::GuideSe => {
                 ctx.shared.syssound.set_guide_enabled(ctx.shared.config.audio.guide_se);
             }
-            SettingId::SkinPack => {
-                if delta < 0 {
-                    ctx.shared.set_skin_pack(None);
-                    ctx.shared.save_settings();
-                } else if self.pack_picker.is_none() {
-                    self.pack_picker = Some(crate::dialog::pick_skin_pack_folder());
-                }
-            }
-            SettingId::SkinDocument => {
-                if ctx.shared.cycle_skin_document(delta) {
-                    ctx.shared.reload_skin();
-                }
-            }
-            SettingId::SkinReload => {
-                if delta > 0 {
-                    ctx.shared.rescan_skins_afresh();
-                    ctx.shared.reload_skin();
-                    ctx.shared.save_settings();
-                }
-            }
-            SettingId::SkinReset => {
-                if delta > 0 {
-                    ctx.shared.reset_skin_document();
-                    ctx.shared.save_settings();
-                }
-            }
             _ => {
                 if delta > 0 {
                     self.enter_network_row(ctx.shared, id);
@@ -224,35 +199,6 @@ impl SettingsState {
         Transition::Stay
     }
 
-    /// Step one of the chosen document's own customisation rows.
-    ///
-    /// A property or a file changes what is drawn, so the document is read again; an offset is read
-    /// live out of the stored choices and needs no reload.
-    fn step_skin(&mut self, ctx: &mut FrameCtx<'_>, row: SkinRow, delta: i32) -> Transition {
-        if ctx.shared.step_skin_row(row, delta) {
-            self.dirty = true;
-            if ctx.shared.skin_reload_pending() {
-                ctx.shared.reload_skin();
-            }
-        }
-        Transition::Stay
-    }
-
-    /// Put the focused offset row back to what the document's author chose, which is the one row
-    /// kind with a value a key can zero rather than cycle.
-    fn reset_focused_row(&mut self, ctx: &mut FrameCtx<'_>) {
-        let Some(SettingRow::Skin(row)) = self.focused() else {
-            return;
-        };
-        if ctx.shared.reset_skin_row(row) {
-            self.dirty = true;
-        }
-    }
-
-    /// Collect the font picker's answer once the user has given one, and load what they chose.
-    ///
-    /// The picker runs beside the frame loop, so this is where a chosen font actually lands. A
-    /// dismissed picker leaves the font alone.
     /// Collect the sound folder picker's answer, and read the set it names.
     fn poll_sound_picker(&mut self, shared: &mut AppShared) {
         let Some(picker) = self.sound_picker.as_ref() else {
@@ -270,24 +216,10 @@ impl SettingsState {
         self.dirty = true;
     }
 
-    /// Collect the skin pack picker's answer: the folder becomes the pack every screen takes its
-    /// document from, and is written out so the next run starts with it.
-    fn poll_pack_picker(&mut self, shared: &mut AppShared) {
-        let Some(picker) = self.pack_picker.as_ref() else {
-            return;
-        };
-        match picker.poll() {
-            DialogState::Open => return,
-            DialogState::Picked(path) => {
-                self.pack_picker = None;
-                shared.set_skin_pack(Some(path.to_string_lossy().into_owned()));
-                shared.save_settings();
-            }
-            DialogState::Dismissed => self.pack_picker = None,
-        }
-        self.dirty = true;
-    }
-
+    /// Collect the font picker's answer once the user has given one, and load what they chose.
+    ///
+    /// The picker runs beside the frame loop, so this is where a chosen font actually lands. A
+    /// dismissed picker leaves the font alone.
     fn poll_font_picker(&mut self, shared: &mut AppShared) {
         let Some(picker) = self.font_picker.as_ref() else {
             return;
@@ -530,8 +462,8 @@ impl SettingsState {
             self.rivals_open.then(|| RivalsScene { rows: rival_rows(&shared.config.network.rivals), sel: self.rivals_sel, editor: inline_editor })
         };
         SettingsScene {
-            tabs: SettingTab::ALL.iter().map(|tab| tab.label()).collect(),
-            tab: self.tab.min(SettingTab::ALL.len() - 1),
+            tabs: SettingTab::SHOWN.iter().map(|tab| tab.label()).collect(),
+            tab: self.tab.min(SettingTab::SHOWN.len() - 1),
             rows: self.lines.clone(),
             sel: self.sel.min(self.lines.len().saturating_sub(1)),
             editor,
@@ -549,10 +481,11 @@ impl SettingsState {
                 return Transition::Back;
             }
             KeyCode::Tab => {
-                self.tab = (self.tab + 1) % SettingTab::ALL.len();
+                self.tab = (self.tab + 1) % SettingTab::SHOWN.len();
                 self.sel = 0;
                 self.dirty = true;
             }
+            SKIN_MENU_KEY => return Transition::Open(SkinMenuState::stage()),
             KeyCode::Enter | KeyCode::NumpadEnter => {
                 let Some(row) = focused else {
                     return Transition::Stay;
@@ -563,7 +496,7 @@ impl SettingsState {
                 match id {
                     SettingId::KeyConfig => return Transition::Open(Stage::KeyConfig(KeyConfigState::new())),
                     SettingId::Font => return self.run_action(ctx, SettingId::Font, ROW_STEP_FORWARD),
-                    _ if is_network_row(id) || is_skin_action_row(id) => return self.step(ctx, row, ROW_STEP_FORWARD),
+                    _ if is_network_row(id) => return self.step(ctx, row, ROW_STEP_FORWARD),
                     _ => {
                         ctx.shared.save_settings();
                         return Transition::Back;
@@ -582,29 +515,18 @@ impl SettingsState {
                     return self.step(ctx, row, ROW_STEP_FORWARD);
                 }
             }
-            KeyCode::Digit0 | KeyCode::Numpad0 => self.reset_focused_row(ctx),
             _ => {}
         }
         Transition::Stay
     }
 }
 
-/// Whether Enter on this row runs something rather than leaving the screen: the pack folder row,
-/// the two SKIN actions, and the document row, which Enter steps the way the right arrow does.
-fn is_skin_action_row(id: SettingId) -> bool {
-    matches!(id, SettingId::SkinPack | SettingId::SkinDocument | SettingId::SkinReload | SettingId::SkinReset)
-}
-
 impl StageHandler for SettingsState {
     /// Re-read the host's output device list on the way in, so the AUDIO DEVICE row cycles through
-    /// what is plugged in now; walk the skin folder, so a document dropped into it while the game
-    /// was running is offered; and build the rows the first tab shows.
+    /// what is plugged in now, and build the rows the open tab shows. Coming back from the skin menu
+    /// is an entry too, so what is said beside a row follows what was chosen there.
     fn on_enter(&mut self, ctx: &mut FrameCtx<'_>) {
         self.audio_devices = rbms_audio::output_device_names();
-        ctx.shared.rescan_skins();
-        if ctx.shared.skin_reload_pending() {
-            ctx.shared.reload_skin();
-        }
         self.refresh(ctx.shared);
     }
 
@@ -616,7 +538,6 @@ impl StageHandler for SettingsState {
     fn update(&mut self, ctx: &mut FrameCtx<'_>) -> Transition {
         self.poll_font_picker(ctx.shared);
         self.poll_sound_picker(ctx.shared);
-        self.poll_pack_picker(ctx.shared);
         let rows = rival_rows(&ctx.shared.config.network.rivals).len();
         self.rivals_sel = self.rivals_sel.min(rows.saturating_sub(1));
         if self.rows.contains(&SettingRow::Fixed(SettingId::Account)) {
@@ -658,13 +579,15 @@ impl StageHandler for SettingsState {
         }
         self.ensure_rows(ctx.shared);
         match ctx.shared.hit_test(at) {
-            Some(Hot::SettingTab(_) | Hot::SettingRow(_)) if self.rivals_open || self.profiles_open => {}
+            Some(Hot::SettingTab(_) | Hot::SettingRow(_) | Hot::SkinMenuLink) if self.rivals_open || self.profiles_open => {}
             Some(Hot::SettingTab(ti)) => {
                 self.cancel_text_edit();
-                self.tab = ti.min(SettingTab::ALL.len() - 1);
+                self.tab = ti.min(SettingTab::SHOWN.len() - 1);
                 self.sel = 0;
                 self.dirty = true;
             }
+            Some(Hot::SkinMenuLink) if self.text_input.is_some() => {}
+            Some(Hot::SkinMenuLink) => return Transition::Open(SkinMenuState::stage()),
             Some(Hot::SettingRow(i)) => {
                 if let Some(row) = self.rows.get(i).copied() {
                     self.cancel_text_edit();
@@ -687,6 +610,7 @@ impl StageHandler for SettingsState {
         ctx.shared.hot.extend(hot.into_iter().map(|(rect, h)| {
             let mapped = match h {
                 SettingsHot::Tab(i) => Hot::SettingTab(i),
+                SettingsHot::SkinMenuLink => Hot::SkinMenuLink,
                 SettingsHot::Row(i) => Hot::SettingRow(i),
                 SettingsHot::RivalRow(i) => Hot::RivalRow(i),
             };

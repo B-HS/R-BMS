@@ -1,4 +1,4 @@
-//! What the SKIN tab reads out of a skin folder: which documents are in it, which of them draws
+//! What the skin menu reads out of a skin folder: which documents are in it, which of them draws
 //! each screen, and what stepping one of a document's own customisation rows stores.
 
 use super::fixtures::*;
@@ -51,7 +51,7 @@ struct Fixture {
 
 impl Fixture {
     /// A settings file with a skin folder beside it holding the fixture documents, already
-    /// scanned, with the SKIN tab on the browser screen.
+    /// scanned, with the skin menu on the browser screen.
     fn new(tag: &str) -> Fixture {
         let root = std::env::temp_dir().join(format!("rbms-skin-select-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
@@ -363,6 +363,121 @@ fn a_lua_skin_that_cannot_be_read_says_why_once_and_is_not_run_again() {
 
     fixture.skins.reload(&fixture.config);
     assert!(fixture.skins.is_waiting(DECIDE), "asking for a reload did not ask for the skin again");
+}
+
+/// What a failed read is said with where it is said on one line: the LOADED row has the first line of
+/// the reason and none of the traceback under it, and the short form begins with the document's
+/// file name and leaves the pack's folder out of every path.
+#[test]
+fn a_failure_is_said_on_one_line_and_shortly_where_there_is_little_room() {
+    let mut fixture = Fixture::new("lua-broken-line");
+    let pack = one_document_pack(&fixture.settings, "broken", "decide.luaskin", BROKEN_DECIDE);
+    fixture.name_pack(&pack);
+    fixture.config.skin.screen = DECIDE;
+    assert_eq!(fixture.skins.failure_line(&fixture.config, DECIDE), None, "a skin that has not been read has a failure to say");
+    fixture.skins.request_for(&fixture.config, DECIDE);
+    fixture.read_waiting(DECIDE, &DefaultState);
+
+    let whole = fixture.skins.failure(DECIDE).expect("the read failed").to_owned();
+    assert!(whole.contains('\n'), "the fixture's failure is one line, so nothing is being left out: {whole:?}");
+    let loaded = fixture.skins.info(&fixture.config);
+    assert!(loaded.contains("no such asset") && !loaded.chars().any(char::is_control), "{loaded:?}");
+    assert!(loaded.contains(&*pack.to_string_lossy()), "the LOADED row does not say where the document is: {loaded}");
+
+    let short = fixture.skins.failure_line(&fixture.config, DECIDE).expect("a failed read has a line");
+    assert!(short.starts_with("decide.luaskin") && short.contains("no such asset"), "{short}");
+    assert!(!short.contains(&*pack.to_string_lossy()) && !short.chars().any(char::is_control), "{short:?}");
+
+    fixture.config.skin.select(DECIDE, Some(fixture.settings.with_file_name("elsewhere.json").to_string_lossy().into_owned()));
+    assert_eq!(fixture.skins.failure_line(&fixture.config, DECIDE), None, "a failure was said of a document that is no longer chosen");
+}
+
+/// A reason is cut down by leaving out the folder its document is in, wherever it comes up and
+/// whichever way the path is spelled; a document with no folder leaves the reason as it is.
+#[test]
+fn a_reason_names_files_from_the_documents_folder_down() {
+    let document = Path::new("/skins/pack/play7.luaskin");
+    assert_eq!(
+        reason_beside("/skins/pack/play7.luaskin (body pass): /skins/pack/lua/play/field.lua:120: attempt to index a nil value", document),
+        "play7.luaskin (body pass): lua/play/field.lua:120: attempt to index a nil value"
+    );
+    assert_eq!(reason_beside("C:\\skins\\pack\\play7.luaskin: bad", Path::new("C:\\skins\\pack/play7.luaskin")), "play7.luaskin: bad");
+    assert_eq!(reason_beside("/skins/other/play7.luaskin: bad", document), "/skins/other/play7.luaskin: bad");
+    assert_eq!(reason_beside("play7.luaskin: bad", Path::new("play7.luaskin")), "play7.luaskin: bad");
+    assert_eq!(first_line("one\tline\r\nand a traceback\n\tunder it"), "one line");
+}
+
+/// A Lua skin whose program does not parse, so its header never answers.
+const UNPARSED_SKIN: &str = "return { type = 6, name = 'Unparsed' w = 1280 }";
+
+/// A pack that may be why a screen has no document says so: a folder that is not on the disk, and a
+/// Lua skin whose header does not answer -- the first by file name, with how many more there are.
+/// A screen that has a document, and a pack with nothing wrong with it, say nothing.
+#[test]
+fn what_is_wrong_with_the_pack_is_said_of_a_screen_it_leaves_without_a_document() {
+    let mut fixture = Fixture::new("pack-trouble");
+    fixture.config.skin.screen = DECIDE;
+    assert_eq!(fixture.skins.pack_trouble(&fixture.config, DECIDE), None, "a run with no pack has something wrong with its pack");
+    assert_eq!(fixture.skins.info(&fixture.config), BUILT_IN_INFO);
+
+    let missing = fixture.settings.with_file_name("no-such-pack");
+    fixture.name_pack(&missing);
+    assert_eq!(fixture.skins.pack_trouble(&fixture.config, DECIDE).as_deref(), Some(MISSING_PACK_NOTE));
+    assert_eq!(fixture.skins.info(&fixture.config), format!("{BUILT_IN_INFO} - {MISSING_PACK_NOTE}"));
+    assert_eq!(fixture.skins.pack_value(&fixture.config), format!("{MISSING_PACK_PREFIX}{}", missing.to_string_lossy()));
+
+    let pack = one_document_pack(&fixture.settings, "half-broken", "result.luaskin", UNPARSED_SKIN);
+    std::fs::write(pack.join("decide.luaskin"), UNPARSED_SKIN).expect("the skin is written");
+    std::fs::write(pack.join("select.json"), r#"{ "type": 5, "name": "Plain", "w": 1280, "h": 720, "destination": [] }"#).expect("the document is written");
+    fixture.name_pack(&pack);
+    assert_eq!(fixture.skins.pack_value(&fixture.config), pack.to_string_lossy(), "a pack that is there is marked as missing");
+    let trouble = fixture.skins.pack_trouble(&fixture.config, DECIDE).expect("a pack with skins that do not parse has something wrong with it");
+    assert!(trouble.starts_with(&format!("decide.luaskin{UNREAD_SKIN_NOTE} (header pass): decide.luaskin:1:")), "{trouble}");
+    assert!(trouble.ends_with("(AND 1 MORE)") && !trouble.contains(&*pack.to_string_lossy()), "{trouble}");
+    assert_eq!(fixture.skins.info(&fixture.config), format!("{BUILT_IN_INFO} - {trouble}"));
+    assert_eq!(fixture.skins.pack_trouble(&fixture.config, MUSIC_SELECT), None, "a screen the pack has a document for was said to have none");
+
+    std::fs::write(pack.join("decide.luaskin"), "return { type = 6, name = 'Mended', w = 1280, h = 720 }").expect("the skin is written");
+    std::fs::remove_file(pack.join("result.luaskin")).expect("the skin is removed");
+    assert!(fixture.skins.pack_trouble(&fixture.config, DECIDE).is_some(), "the pack was walked again without being asked");
+    fixture.skins.rescan_afresh(&fixture.settings, &fixture.config);
+    assert_eq!(fixture.skins.pack_trouble(&fixture.config, DECIDE), None);
+    assert_eq!(document_name(&fixture, DECIDE).as_deref(), Some("decide.luaskin"), "the mended skin does not draw the screen it declares");
+}
+
+/// One screen's Lua skin is made due to be read again, or let go of outright, without any other
+/// screen's being touched; a document that is only data is neither, because it holds no state.
+#[test]
+fn one_screens_lua_skin_is_expired_or_dropped_alone() {
+    let mut fixture = Fixture::new("one-screen");
+    let pack = copied_pack(&fixture.settings, "pack");
+    std::fs::write(pack.join("decide.json"), PLAIN_DECIDE).expect("the document is written");
+    fixture.name_pack(&pack);
+    for screen in [PLAY_7KEYS, COURSE_RESULT, DECIDE] {
+        fixture.skins.request_for(&fixture.config, screen);
+        fixture.read_waiting(screen, &DefaultState);
+        assert!(fixture.skins.document(screen).is_some(), "screen {screen}: {:?}", fixture.skins.failure(screen));
+        assert!(!fixture.skins.needs_reload_for(&fixture.config, screen));
+    }
+
+    fixture.skins.expire_scripted_for(PLAY_7KEYS);
+    assert!(fixture.skins.needs_reload_for(&fixture.config, PLAY_7KEYS), "the Lua skin was not made due");
+    assert!(fixture.skins.document(PLAY_7KEYS).is_some(), "a skin that is due was let go of before it was read again");
+    assert!(!fixture.skins.needs_reload_for(&fixture.config, COURSE_RESULT), "another screen's skin was made due with it");
+
+    fixture.skins.drop_scripted_for(COURSE_RESULT);
+    assert!(fixture.skins.document(COURSE_RESULT).is_none() && fixture.skins.build_of(COURSE_RESULT).is_none(), "the Lua skin was kept");
+    assert!(fixture.skins.needs_reload_for(&fixture.config, COURSE_RESULT));
+    assert!(fixture.skins.document(PLAY_7KEYS).is_some(), "another screen's skin was let go of with it");
+
+    for touch in [SkinLibrary::expire_scripted_for, SkinLibrary::drop_scripted_for] {
+        touch(&mut fixture.skins, DECIDE);
+        assert!(
+            fixture.skins.document(DECIDE).is_some() && !fixture.skins.needs_reload_for(&fixture.config, DECIDE),
+            "a document that is only data was touched"
+        );
+        touch(&mut fixture.skins, MUSIC_SELECT);
+    }
 }
 
 /// A failure belongs to the document that failed, not to the screen: naming another pack gives the

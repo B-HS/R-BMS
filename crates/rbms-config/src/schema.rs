@@ -191,7 +191,7 @@ pub const DEFAULT_SKIN: &str = "NORMAL";
 /// [`UNCHOSEN_LETTERBOX_SCHEMA_VERSION`] that states the row either way is read as it states it.
 pub const DEFAULT_LETTERBOX: bool = true;
 
-/// Every screen a skin document can declare, named for the SKIN tab, indexed by the `SkinType` id
+/// Every screen a skin document can declare, named for the skin menu, indexed by the `SkinType` id
 /// the document writes in its `type` field (`SkinType.java`).
 ///
 /// Screens this build draws no skin for are listed too. A player whose document declares one then
@@ -219,7 +219,7 @@ pub const SKIN_SCREEN_LABELS: &[&str] = &[
     "PLAY 24KEYS BATTLE",
 ];
 
-/// The screen the SKIN tab starts on, which is the seven-key play screen.
+/// The screen the skin menu starts on, which is the seven-key play screen.
 pub const DEFAULT_SKIN_SCREEN: i32 = 0;
 
 /// Directory documents are looked for in when the row names none, relative to the settings file.
@@ -254,7 +254,7 @@ impl OffsetSource for SkinCustomisation {
     }
 }
 
-/// The SKIN tab: where documents are looked for, which screen is being configured, the document
+/// The skin menu: where documents are looked for, which screen is being configured, the document
 /// each screen is drawn with, and what the player chose inside each one.
 ///
 /// A screen with no entry in `selected` is drawn with the pack's document for it, and by the built-in
@@ -269,7 +269,7 @@ pub struct SkinOptions {
     /// The skin pack: one folder holding a document for each screen. Every screen with no entry in
     /// `selected` is drawn with the document of the pack that declares it. `None` names no pack.
     pub pack: Option<String>,
-    /// The screen the SKIN tab is configuring, as a `SkinType` id.
+    /// The screen the skin menu is configuring, as a `SkinType` id.
     pub screen: i32,
     /// Document each screen is drawn with, keyed by its `SkinType` id.
     pub selected: BTreeMap<i32, String>,

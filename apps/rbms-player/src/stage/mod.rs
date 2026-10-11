@@ -1,7 +1,7 @@
 //! The stages the app can be in and the state each one owns.
 //!
-//! A stage is one screen of the player: song select, the settings screens, the decide scene,
-//! loading, play and result. [`Stage`] is what [`crate::App`] dispatches on; everything that outlives a stage change
+//! A stage is one screen of the player: song select, the settings screens, the skin menu, the decide
+//! scene, loading, play and result. [`Stage`] is what [`crate::App`] dispatches on; everything that outlives a stage change
 //! lives in [`crate::AppShared`] instead. Each screen implements [`StageHandler`], so the frame
 //! loop and the window-event handler are a dispatch each rather than one long match per concern.
 
@@ -39,6 +39,7 @@ pub(crate) mod result;
 pub(crate) mod scene_life;
 pub(crate) mod select;
 pub(crate) mod settings;
+pub(crate) mod skin_menu;
 pub(crate) mod tables;
 
 pub(crate) use canvas::Canvas;
@@ -54,16 +55,19 @@ pub(crate) use practice::PracticeState;
 pub(crate) use result::ResultState;
 pub(crate) use select::SelectState;
 pub(crate) use settings::SettingsState;
+pub(crate) use skin_menu::SkinMenuState;
 pub(crate) use tables::TablesState;
 
 /// Which screen the app is currently running, together with the state that screen owns.
 ///
 /// `Play`, `Select` and `Decide` are boxed: the session with its decoded BGA images, the browser
 /// with its cached scene, and the decide scene with everything it shows of its chart would otherwise
-/// set the size of every other variant and make each stage change a large memcpy.
+/// set the size of every other variant and make each stage change a large memcpy. `SkinMenu` is
+/// boxed for the same reason: it holds the skin preview and whatever that is shown.
 pub(crate) enum Stage {
     Select(Box<SelectState>),
     Settings(SettingsState),
+    SkinMenu(Box<SkinMenuState>),
     KeyConfig(KeyConfigState),
     Tables(TablesState),
     Folders(FoldersState),
@@ -82,6 +86,7 @@ pub(crate) enum Stage {
 pub(crate) enum StageId {
     Select,
     Settings,
+    SkinMenu,
     KeyConfig,
     Tables,
     Folders,
@@ -195,6 +200,7 @@ impl StageId {
         match self {
             StageId::Select => "Select",
             StageId::Settings => "Settings",
+            StageId::SkinMenu => "SkinMenu",
             StageId::KeyConfig => "KeyConfig",
             StageId::Tables => "Tables",
             StageId::Folders => "Folders",
@@ -209,9 +215,10 @@ impl StageId {
 
     /// Every screen, for the tests that have to cover all of them.
     #[cfg(test)]
-    pub(crate) const ALL: [StageId; 11] = [
+    pub(crate) const ALL: [StageId; 12] = [
         StageId::Select,
         StageId::Settings,
+        StageId::SkinMenu,
         StageId::KeyConfig,
         StageId::Tables,
         StageId::Folders,
@@ -229,6 +236,7 @@ impl Stage {
         match self {
             Stage::Select(_) => StageId::Select,
             Stage::Settings(_) => StageId::Settings,
+            Stage::SkinMenu(_) => StageId::SkinMenu,
             Stage::KeyConfig(_) => StageId::KeyConfig,
             Stage::Tables(_) => StageId::Tables,
             Stage::Folders(_) => StageId::Folders,
@@ -246,6 +254,7 @@ impl Stage {
         match self {
             Stage::Select(s) => s.as_mut(),
             Stage::Settings(s) => s,
+            Stage::SkinMenu(s) => s.as_mut(),
             Stage::KeyConfig(s) => s,
             Stage::Tables(s) => s,
             Stage::Folders(s) => s,
@@ -262,6 +271,7 @@ impl Stage {
         match self {
             Stage::Select(s) => s.as_ref(),
             Stage::Settings(s) => s,
+            Stage::SkinMenu(s) => s.as_ref(),
             Stage::KeyConfig(s) => s,
             Stage::Tables(s) => s,
             Stage::Folders(s) => s,

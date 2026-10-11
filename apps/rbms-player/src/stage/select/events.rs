@@ -24,12 +24,12 @@
 //! keys alone.
 //!
 //! The buttons that leave the browser go where this player keeps the same thing: the key
-//! configuration (13) is its own screen, the skin configuration (14) is the skin tab of the settings
-//! screen, practice (315) is the practice screen, and the four replay slots (19, 316 to 318) are the
-//! four newest replays saved of the chart under the cursor. Autoplay (16) plays the chart once by
+//! configuration (13) is its own screen, the skin configuration (14) is the skin menu, practice
+//! (315) is the practice screen, and the four replay slots (19, 316 to 318) are the four newest
+//! replays saved of the chart under the cursor. Autoplay (16) plays the chart once by
 //! itself, whatever the autoplay setting says, without touching the setting.
 
-use rbms_config::{AdjustOutcome, Config, JUDGE_OFFSET_MAX_MS, JUDGE_OFFSET_MIN_MS, SettingId, SettingTab, adjust};
+use rbms_config::{AdjustOutcome, Config, JUDGE_OFFSET_MAX_MS, JUDGE_OFFSET_MIN_MS, SettingId, adjust};
 use rbms_judge::JudgeAlgorithm;
 use rbms_skin::property::generated::*;
 use rbms_store::ScoreBook;
@@ -38,7 +38,7 @@ use super::SelectState;
 use super::skinned::FocusedBar;
 use crate::skin_host::options::{JUDGE_ALGORITHMS_NUMBERED, OPTION_GENERAL, random_option_index};
 use crate::skin_host::{Cluster, ClusterRequest};
-use crate::stage::{KeyConfigState, SettingsState, Stage, Transition};
+use crate::stage::{KeyConfigState, SkinMenuState, Stage, Transition};
 use crate::{AppShared, SelectTab, SystemSound};
 
 /// The events that step a setting and that the reference numbers without a constant of their own
@@ -186,7 +186,7 @@ pub(super) enum SelectEvent {
     LnMode,
     /// `keyconfig`: the key configuration screen.
     KeyConfig,
-    /// `skinconfig`: the skin tab of the settings screen.
+    /// `skinconfig`: the skin menu.
     SkinConfig,
     /// `play`, `autoplay` and `practice`: start what is under the cursor.
     Play,
@@ -284,7 +284,7 @@ impl SelectState {
             Some(SelectEvent::Sort) => self.sort_event(shared, forward),
             Some(SelectEvent::LnMode) => self.ln_mode_event(shared, forward),
             Some(SelectEvent::KeyConfig) => return Transition::Open(Stage::KeyConfig(KeyConfigState::new())),
-            Some(SelectEvent::SkinConfig) => return Transition::Open(Stage::Settings(SettingsState::on_tab(SettingTab::Skin))),
+            Some(SelectEvent::SkinConfig) => return Transition::Open(SkinMenuState::stage()),
             Some(SelectEvent::Play) => return self.play_focused(shared),
             Some(SelectEvent::Autoplay) => return self.start_autoplay(shared),
             Some(SelectEvent::Practice) => return self.practise_focused(shared),

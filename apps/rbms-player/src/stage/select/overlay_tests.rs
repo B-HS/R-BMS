@@ -9,11 +9,11 @@ use rbms_render::{Color, Rect, Renderer, theme};
 use winit::event::MouseButton;
 use winit::keyboard::KeyCode;
 
-use super::SelectState;
 use super::guide::{BROWSER_SHORTCUTS, GUIDE_KEY, browser_rows, key_rows, panel_rows, shortcut_label};
 use super::overlay::{HINT_H, HINT_Y, SEARCH_H, STRIP_BOTTOM, STRIP_X, TAB_MARK_H};
 use super::skinned_tests::{Browser, SLOT_ABOVE, SLOT_BELOW, slot_middle, starts_a_chart, wheel_document};
 use super::tests::{app, entry, press, record};
+use super::{SKIN_MENU_KEY, SelectState};
 use crate::app_options::{HOLD_KEY, TOGGLE_KEY, options_key};
 use crate::ir_ranking_view::panel_action;
 use crate::keyconfig::{ControlAction, KeyConfig, default_keys_for_mode};
@@ -414,6 +414,7 @@ fn every_key_the_guide_lists_does_what_it_says() {
                     browser.key(*code);
                     assert!(browser.app.shared.favorites.contains(FIRST_CHART_MD5), "{code:?}");
                 }
+                code if code == SKIN_MENU_KEY => assert!(matches!(browser.key(code), Transition::Open(Stage::SkinMenu(_))), "{code:?}"),
                 code if code == GUIDE_KEY => {
                     browser.key(code);
                     assert!(browser.state.guide_open, "{code:?}");

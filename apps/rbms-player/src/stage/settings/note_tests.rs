@@ -50,7 +50,7 @@ fn bare_app(tag: &str) -> App {
     app
 }
 
-/// The same app with the pack this repository ships named on the PACK FOLDER row.
+/// The same app with the pack this repository ships named as its pack folder.
 fn app_with_shipped_pack(tag: &str) -> App {
     let mut app = bare_app(tag);
     let pack = Path::new(env!("CARGO_MANIFEST_DIR")).join(DEFAULT_PACK);
@@ -98,7 +98,7 @@ fn the_shipped_pack_annotates_every_row_its_screens_do_not_read() {
         assert_eq!(state.lines.len(), state.rows.len(), "{tab:?} has a row with no line");
         assert_eq!(state.lines[row_at(&state, id)].note, Some(note), "{id:?}");
     }
-    for tab in SettingTab::ALL {
+    for tab in SettingTab::SHOWN {
         let state = screen_on(&mut app, tab, None);
         let noted: Vec<SettingRow> = state.rows.iter().zip(&state.lines).filter(|(_, line)| line.note.is_some()).map(|(row, _)| *row).collect();
         let expected: Vec<SettingRow> = NOTED_ROWS.iter().filter(|(on, _, _)| *on == tab).map(|(_, id, _)| SettingRow::Fixed(*id)).collect();
@@ -109,14 +109,14 @@ fn the_shipped_pack_annotates_every_row_its_screens_do_not_read() {
 #[test]
 fn a_configuration_with_no_skin_shows_every_row_bare() {
     let mut app = bare_app("bare");
-    for tab in SettingTab::ALL {
+    for tab in SettingTab::SHOWN {
         let state = screen_on(&mut app, tab, None);
         assert!(state.lines.iter().all(|line| line.note.is_none()), "{tab:?} says something beside a row with no skin drawing anything");
     }
 }
 
-/// The notes follow the pack as it is named and taken away again on the SKIN tab, without the
-/// settings screen being left: the rows are rebuilt the next time a tab is opened.
+/// The notes follow the pack as it is named and taken away again in the skin menu: the rows are
+/// rebuilt the next time the settings screen is entered, which coming back from the menu is.
 #[test]
 fn the_notes_come_and_go_with_the_pack() {
     let mut app = app_with_shipped_pack("follows");
@@ -153,7 +153,7 @@ fn the_annotated_tabs_draw_and_can_be_captured() {
         assert!(pixels.painted_pixels() > 0, "{tab:?} drew nothing");
         save(&format!("{}-{}-focused", tab.label().to_ascii_lowercase(), descriptor_slug(id)), &pixels);
     }
-    for tab in [SettingTab::Play, SettingTab::Display, SettingTab::Input, SettingTab::Skin] {
+    for tab in [SettingTab::Play, SettingTab::Display, SettingTab::Input] {
         let mut resting = screen_on(&mut app, tab, None);
         let pixels = draw(&mut app, &mut resting);
         assert!(pixels.painted_pixels() > 0, "{tab:?} drew nothing");

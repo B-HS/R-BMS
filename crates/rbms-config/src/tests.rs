@@ -305,7 +305,7 @@ fn the_loader_is_handed_the_choices_made_for_the_document_it_is_loading() {
 }
 
 /// A hand-edited file naming a screen no `SkinType` declares is pulled back onto one that does,
-/// rather than leaving the SKIN tab pointing at a row it cannot show.
+/// rather than leaving the skin menu pointing at a row it cannot show.
 #[test]
 fn a_hand_edited_skin_group_is_pulled_back_onto_a_screen_that_exists() {
     let mut c = Config::default();
@@ -567,7 +567,7 @@ fn a_bundled_skin_document_migrates_to_the_built_in_screens_and_keeps_what_the_p
     assert_eq!(config.schema_version, CURRENT_SCHEMA_VERSION);
     assert_eq!(config.display.skin, DEFAULT_SKIN, "the preset that switched the retired bundle on was kept");
     assert!((config.play.hispeed - 3.5).abs() < 1e-9, "the rest of the document did not come across");
-    assert_eq!(config.skin.screen, MUSIC_SELECT_SCREEN, "the screen the SKIN tab was left on moved");
+    assert_eq!(config.skin.screen, MUSIC_SELECT_SCREEN, "the screen the skin menu was left on moved");
 
     assert_eq!(config.skin.document(DEFAULT_SKIN_SCREEN), None, "a screen still points at the retired bundle's current generation");
     assert_eq!(config.skin.document(MUSIC_SELECT_SCREEN), None, "a screen still points at the retired bundle's first generation");

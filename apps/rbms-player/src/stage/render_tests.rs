@@ -20,7 +20,8 @@ use rbms_store::SCORE_LN_MODE_FROM_CHART;
 
 use crate::settings_view::visible_rows;
 use crate::stage::{
-    Canvas, FoldersState, FrameCtx, HeadlessCanvas, KeyConfigState, LoadingState, PlayState, ResultState, SelectState, SettingsState, Stage, TablesState,
+    Canvas, FoldersState, FrameCtx, HeadlessCanvas, KeyConfigState, LoadingState, PlayState, ResultState, SelectState, SettingsState, SkinMenuState, Stage,
+    TablesState,
 };
 use crate::stage::{KeyInput, StageId, Transition};
 use crate::{App, CH, CW, Color, Config, KeyCode, LaunchOptions};
@@ -83,6 +84,9 @@ pub(super) fn result_state() -> ResultState {
     })
 }
 
+/// How many buttons to the skin menu the settings screen's tab strip ends with.
+const SKIN_MENU_LINKS: usize = 1;
+
 /// The frame length the snapshots are drawn at, so a screen that animates draws one frame's worth.
 pub(super) const FRAME_DT: f32 = 1.0 / 60.0;
 
@@ -118,6 +122,7 @@ pub(super) fn every_stage() -> Vec<(&'static str, Stage)> {
     vec![
         ("Select", Stage::Select(Box::new(SelectState::new()))),
         ("Settings", Stage::Settings(SettingsState::new())),
+        ("SkinMenu", SkinMenuState::stage()),
         ("KeyConfig", Stage::KeyConfig(KeyConfigState::new())),
         ("Tables", Stage::Tables(TablesState::new())),
         ("Folders", Stage::Folders(FoldersState::new())),
@@ -163,7 +168,7 @@ fn only_the_screens_with_clickable_rows_record_hot_regions() {
     let mut app = app();
     for (name, stage) in every_stage() {
         render(&mut app, stage);
-        let clickable = matches!(name, "Select" | "Settings");
+        let clickable = matches!(name, "Select" | "Settings" | "SkinMenu");
         assert_eq!(!app.shared.hot.is_empty(), clickable, "{name} hot regions");
     }
 }
@@ -267,7 +272,8 @@ fn the_judge_tab_paints_its_own_rows() {
 
     let judge = render(&mut app, Stage::Settings(SettingsState::on_tab(SettingTab::Judge)));
     assert!(judge.painted_pixels() > 0, "the JUDGE tab drew nothing");
-    assert_eq!(app.shared.hot.len(), rows.len().min(visible) + SettingTab::ALL.len(), "every visible JUDGE row and every tab is clickable");
+    let strip = SettingTab::SHOWN.len() + SKIN_MENU_LINKS;
+    assert_eq!(app.shared.hot.len(), rows.len().min(visible) + strip, "every visible JUDGE row, every tab and the button to the skin menu is clickable");
 
     let play = render(&mut app, Stage::Settings(SettingsState::on_tab(SettingTab::Play)));
     assert_ne!(judge.signature(), play.signature(), "the JUDGE tab renders the same frame as the PLAY tab");

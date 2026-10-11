@@ -138,6 +138,7 @@ use crate::stage::canvas::UI_SIZE;
 use crate::stage::{Canvas, KeyInput};
 
 pub(crate) mod movies;
+pub(crate) mod preview;
 
 use movies::MoviePlayers;
 
@@ -209,17 +210,22 @@ struct BuiltScreen {
 /// happened, and what the player is looking at instead.
 const SKIN_FAILURE_NOTE: &str = " did not load, drawing the built-in screen: ";
 
+/// The same for a document read for the skin preview, where nothing is drawn in its place: the
+/// preview's own rectangle says so.
+const PREVIEW_FAILURE_NOTE: &str = " did not load: ";
+
 /// What a document that could not be read is called when its path names no file.
 const SKIN_FAILURE_UNNAMED: &str = "document";
 
 /// The one message about a document that could not be read.
 ///
-/// The document's file name and what is drawn in its place come first, because a message on screen
-/// is cut to a line (`crate::toast::TOAST_TEXT_CHARS`) and a reason that quotes a path is longer
-/// than that. The whole reason follows and reaches the terminal uncut.
-fn skin_failure_message(document: Option<&str>, reason: &str) -> String {
+/// The document's file name and `note` -- what happened, and what is drawn in its place -- come
+/// first, because a message on screen is cut to a line (`crate::toast::TOAST_TEXT_CHARS`) and a
+/// reason that quotes a path is longer than that. The whole reason follows and reaches the terminal
+/// uncut.
+fn skin_failure_message(document: Option<&str>, note: &str, reason: &str) -> String {
     let name = document.and_then(|path| Path::new(path).file_name()).map(|name| name.to_string_lossy().into_owned());
-    format!("skin {}{SKIN_FAILURE_NOTE}{reason}", name.as_deref().unwrap_or(SKIN_FAILURE_UNNAMED))
+    format!("skin {}{note}{reason}", name.as_deref().unwrap_or(SKIN_FAILURE_UNNAMED))
 }
 
 /// The nudges one document is drawn with: what the player chose inside it, or nothing at all for a
@@ -1167,19 +1173,20 @@ impl AppShared {
     /// document that is on its way, and set going again on the frame the document is compiled.
     pub(crate) fn prepare_skin(&mut self, canvas: &mut Canvas<'_>, screen: i32) {
         self.skin_screens.mark_prepared(screen);
-        self.read_and_compile_skin(canvas, screen);
+        self.read_and_compile_skin(canvas, screen, SKIN_FAILURE_NOTE);
         self.hold_scene_while_loading(screen);
     }
 
-    /// The reading and compiling half of [`AppShared::prepare_skin`].
-    fn read_and_compile_skin(&mut self, canvas: &mut Canvas<'_>, screen: i32) {
+    /// The reading and compiling half of [`AppShared::prepare_skin`]. `failure_note` is what the
+    /// message about a document that could not be read says between its name and its reason.
+    fn read_and_compile_skin(&mut self, canvas: &mut Canvas<'_>, screen: i32, failure_note: &str) {
         if self.skins.pack_moved(&self.config) {
             self.rescan_skins();
         }
         self.skins.drop_moved(&self.config);
         self.skin_screens.release_dropped(canvas, &self.skins);
         for (document, reason) in self.skins.take_unreadable() {
-            notify(Level::Warn, skin_failure_message(Some(&document.to_string_lossy()), &reason));
+            notify(Level::Warn, skin_failure_message(Some(&document.to_string_lossy()), failure_note, &reason));
         }
         if !self.skin_document_is_enabled(screen) {
             return;
@@ -1189,7 +1196,7 @@ impl AppShared {
         }
         self.skins.adopt(screen);
         if let Some(reason) = self.skins.take_failure(screen) {
-            notify(Level::Warn, skin_failure_message(self.skins.document_path(&self.config, screen), &reason));
+            notify(Level::Warn, skin_failure_message(self.skins.document_path(&self.config, screen), failure_note, &reason));
         }
         let skins = &self.skins;
         let screens = &mut self.skin_screens;

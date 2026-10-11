@@ -496,6 +496,19 @@ impl SkinScreen {
         drawn
     }
 
+    /// Forgets the whole-screen offset the first drawn frame settled, so the next frame drawn reads
+    /// `OFFSET_ALL` from its host again.
+    ///
+    /// A screen a run is played on never asks for this: the reference keeps the transform for as
+    /// long as it keeps the skin, and so does a screen here. It is for a host that shows a skin
+    /// while the offset is being set, which has no other way to show what the new value does short
+    /// of compiling the screen again.
+    pub fn forget_whole_offset(&mut self) {
+        if let Some(settled) = self.whole.as_mut() {
+            settled.take();
+        }
+    }
+
     /// Makes one whole frame, both stages back to back, and answers how many objects were drawn.
     ///
     /// Every object is prepared before the first one is drawn, as [`SkinScreen::prepare`] and

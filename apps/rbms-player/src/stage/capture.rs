@@ -985,7 +985,7 @@ const BITMAP_FONT_ON: &str = "有効";
 /// How far into the decide scene the bitmap font capture is taken: the settled layout.
 const DECIDE_FONT_SHOT_MS: i64 = 1500;
 
-/// Make the choice a player makes on the SKIN tab: in the document the pack draws `screen` with,
+/// Make the choice a player makes on the skin menu: in the document the pack draws `screen` with,
 /// switch the row called `row` to the item whose name starts with `item`. Answers whether the
 /// document offers such a row and such an item.
 fn choose_in_skin(app: &mut App, screen: i32, row: &str, item: &str) -> bool {

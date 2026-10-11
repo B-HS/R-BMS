@@ -37,6 +37,7 @@ mod scene;
 #[cfg(test)]
 mod screen_tests;
 mod skin;
+pub(crate) mod skin_preview;
 #[cfg(test)]
 mod tests;
 mod trace;

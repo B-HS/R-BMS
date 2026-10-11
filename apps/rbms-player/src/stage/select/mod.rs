@@ -38,7 +38,7 @@ use crate::skin_host::chart::ChartState;
 use crate::skin_host::select::{BrowserLent, CourseShown};
 use crate::skin_screen::SelectDraw;
 use crate::stage::result::SkinStatus;
-use crate::stage::{Canvas, FoldersState, FrameCtx, KeyInput, SettingsState, Stage, StageHandler, TablesState, Transition, is_left_press};
+use crate::stage::{Canvas, FoldersState, FrameCtx, KeyInput, SettingsState, SkinMenuState, Stage, StageHandler, TablesState, Transition, is_left_press};
 use crate::textedit::ImeEdit;
 use crate::*;
 
@@ -66,6 +66,7 @@ mod scene;
 mod search;
 #[cfg(test)]
 mod search_tests;
+pub(crate) mod skin_preview;
 mod skin_writes;
 mod skinned;
 #[cfg(test)]
@@ -91,6 +92,12 @@ use skinned::{BarMark, WallClock, skin_status};
 /// folder are the ones that carry `FOLDER_CLOSE`. A browser a skin draws reads the whole table, by
 /// the mode that is up.
 const BUILT_IN_KEY_LAYOUT: KeyLayout = KeyLayout::Beat;
+
+/// The key that opens the skin menu, on the built-in browser and on one a skin draws alike. It is the
+/// key the reference's browser opens its skin configuration with (`MusicSelector.input`), which on
+/// a skin's browser runs the same event the skin's own button does. No lane can be bound to a
+/// function key, and no other shortcut of the browser is on this one.
+pub(super) const SKIN_MENU_KEY: KeyCode = KeyCode::F12;
 
 /// How long a turntable direction is held before the list starts to repeat, and how often it moves
 /// after that: the two times a skin's wheel slides by (`scrolldurationlow` and `scrolldurationhigh`
@@ -859,15 +866,15 @@ impl SelectState {
     /// things only such a browser has: the screens the reference's browser opens from its own keys,
     /// and the option panels. Answers what the key asked for, or `None` when it is not one of these.
     ///
-    /// `6` opens the key configuration and `F12` the skin settings, which are the events 13 and 14
-    /// (`MusicSelector.input`). While an option panel is called up the keys that move through the
+    /// `6` opens the key configuration and [`SKIN_MENU_KEY`] the skin menu, which are the events 13
+    /// and 14 (`MusicSelector.input`). While an option panel is called up the keys that move through the
     /// list and start what is under the cursor are the panel's and do nothing to the list: the
     /// reference reads none of them with a panel up, and the two arrows that move the cursor scroll
     /// the first panel's target instead ([`panel`]).
     fn skin_screen_key(&mut self, shared: &mut AppShared, code: KeyCode) -> Option<Transition> {
         match code {
             KeyCode::Digit6 => Some(self.run_event(shared, BUTTON_KEYCONFIG, 0)),
-            KeyCode::F12 => Some(self.run_event(shared, BUTTON_SKINSELECT, 0)),
+            SKIN_MENU_KEY => Some(self.run_event(shared, BUTTON_SKINSELECT, 0)),
             KeyCode::ArrowUp | KeyCode::ArrowDown | KeyCode::ArrowLeft | KeyCode::ArrowRight | KeyCode::Enter | KeyCode::NumpadEnter
                 if self.panel_is_called_up(shared) =>
             {
@@ -1039,6 +1046,7 @@ impl StageHandler for SelectState {
             }
             KeyCode::KeyF => ctx.shared.toggle_focused_favorite(),
             KeyCode::Tab => return Transition::Open(Stage::Settings(SettingsState::new())),
+            SKIN_MENU_KEY => return Transition::Open(SkinMenuState::stage()),
             KeyCode::KeyO => return Transition::Open(Stage::Folders(FoldersState::new())),
             KeyCode::KeyT => return Transition::Open(Stage::Tables(TablesState::new())),
             KeyCode::KeyR => self.open_record_modal(ctx.shared),

@@ -1,8 +1,9 @@
-//! What the settings screen needs from the rest of the app: the value of a row once the running
-//! program has had its say, the AUDIO tab's status line, and the two audio steps that need
-//! something only the program can enumerate.
+//! What the settings screen and the skin menu need from the rest of the app: the value of a row
+//! once the running program has had its say, the AUDIO tab's status line, the two audio steps that
+//! need something only the program can enumerate, and the steps of the skin rows, which only the
+//! skin library can take.
 //!
-//! The rows themselves — their tabs, labels, kinds and ranges — are described once in
+//! The rows themselves — their groups, labels, kinds and ranges — are described once in
 //! `rbms_config::SETTINGS`. This file only adds what the configuration document cannot know: the
 //! live account, the password held in memory, a skin forced on the command line, and which screens
 //! a skin is set to draw, which is what decides whether a row only the built-in screens read is
@@ -22,12 +23,12 @@ use crate::*;
 /// The row the skin document's own customisation rows are listed directly above.
 const SKIN_CUSTOM_ANCHOR: SettingId = SettingId::SkinReload;
 
-/// One row of the settings screen.
+/// One row of the settings screen or of the skin menu.
 ///
-/// Every tab but SKIN is exactly the descriptor table's rows. A skin document declares its own
-/// customisation rows, so the SKIN tab has [`SettingRow::Skin`] entries between the document row and
-/// the actions under it, and the screen addresses a row by what it is rather than by an index into
-/// one flat list.
+/// Every tab of the settings screen is exactly the descriptor table's rows. A skin document declares
+/// its own customisation rows, so the group the skin menu lists ([`SettingTab::Skin`]) has
+/// [`SettingRow::Skin`] entries between the document row and the actions under it, and a screen
+/// addresses a row by what it is rather than by an index into one flat list.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum SettingRow {
     /// A row of `rbms_config::SETTINGS`.
@@ -113,9 +114,10 @@ impl AppShared {
         (label, value)
     }
 
-    /// The rows one tab shows, top to bottom.
+    /// The rows of one group, top to bottom: what a tab of the settings screen shows, or, for
+    /// [`SettingTab::Skin`], what the skin menu lists.
     ///
-    /// The SKIN tab is the only one whose length is not fixed: the chosen document's own
+    /// The skin group is the only one whose length is not fixed: the chosen document's own
     /// customisation rows sit between the document row and the actions under it.
     pub(crate) fn settings_rows(&self, tab: SettingTab) -> Vec<SettingRow> {
         let fixed = tab_rows(tab, &self.config);
@@ -130,7 +132,7 @@ impl AppShared {
         rows
     }
 
-    /// Label and value of one row of the settings screen.
+    /// Label and value of one row, of the settings screen or of the skin menu.
     pub(crate) fn settings_line(&self, row: SettingRow) -> (String, String) {
         match row {
             SettingRow::Fixed(id) => {
@@ -183,7 +185,8 @@ impl AppShared {
         self.skins.reset_row(&mut self.config, row)
     }
 
-    /// Step the SKIN row through the built-in screen and every document that draws this screen.
+    /// Step the skin menu's SKIN row through the built-in screen and every document that draws the
+    /// screen being configured.
     pub(crate) fn cycle_skin_document(&mut self, delta: i32) -> bool {
         self.skins.cycle_document(&mut self.config, delta)
     }
