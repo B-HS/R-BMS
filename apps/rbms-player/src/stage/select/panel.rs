@@ -17,9 +17,14 @@
 //! do ([`press_act`]): the first panel steps the random options, the gauge, the double option and
 //! the fixed tempo by their events and scrolls the target with the turntable and the mouse wheel;
 //! the second flips the assists; the third steps the background animation, the gauge auto shift and
-//! the judge timing. What this player has no setting for is taken and does nothing: of the seven
-//! assists only the constant speed and the legacy notes are settings here, and the third panel's two
-//! keys for the note display time have no number to move.
+//! the judge timing, and moves the note display time while its two keys are held. What this player
+//! has no setting for is taken and does nothing: of the seven assists only the constant speed and
+//! the legacy notes are settings here.
+//!
+//! The note display time is the travel time a held green number is held at
+//! ([`super::events::step_duration`]). Its keys repeat as the reference's do: a step when a key
+//! first goes down, another once the long wait is over and one at every short wait after, ten times
+//! as far once more than fifty of them have gone by (`MusicSelectInputProcessor.java:259-281`).
 //!
 //! The sounds are the reference's: a panel opening sounds once when a panel key goes down with none
 //! held before, and a panel closing once when the last of them comes up, so going from one panel to
@@ -100,6 +105,8 @@ pub(super) enum PanelAct {
     Assist(AssistSwitch),
     /// The sound of the target moving one place.
     Scratch,
+    /// Run the event of the note display time with these two arguments.
+    Duration { arg1: i32, arg2: i32 },
 }
 
 /// What a press of the key carrying `role` asks of the panel it belongs to, or `None` for a role no
@@ -139,6 +146,25 @@ pub(super) fn target_acts(moved: i32) -> Vec<PanelAct> {
     (0..moved.unsigned_abs()).flat_map(|_| [PanelAct::Setting { event: SettingEvent::Target, arg1 }, PanelAct::Scratch]).collect()
 }
 
+/// How many repeats of a held note display time key go by before a repeat moves it further
+/// (`countChangeDuration > 50`), and how far such a repeat moves it, in milliseconds.
+const DURATION_FAST_AFTER_REPEATS: u32 = 50;
+const DURATION_FAST_STEP_MS: i32 = 10;
+
+/// The second argument of a note display time event that names no step of its own, which moves it
+/// a millisecond.
+const DURATION_PLAIN_STEP: i32 = 0;
+
+/// Which of the third panel's two note display time keys is held.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum DurationHold {
+    /// `DURATION_DOWN`, which wins when both are down.
+    Down,
+    /// `DURATION_UP`.
+    Up,
+    Neither,
+}
+
 /// Which way the keys that scroll the target are held.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum TargetHold {
@@ -161,11 +187,16 @@ pub(super) struct PanelState {
     /// The wall clock's millisecond a held target key next moves the target at, or zero when none
     /// has been held for a while (`duration`).
     target_repeat_at_ms: i64,
+    /// The wall clock's millisecond a held note display time key next moves it at, or zero while
+    /// neither is held (`timeChangeDuration`), and how many times one has repeated since it went
+    /// down (`countChangeDuration`).
+    duration_repeat_at_ms: i64,
+    duration_repeats: u32,
 }
 
 impl Default for PanelState {
     fn default() -> PanelState {
-        PanelState { open: Panel::Closed, key_pressed: false, key_released: false, target_repeat_at_ms: 0 }
+        PanelState { open: Panel::Closed, key_pressed: false, key_released: false, target_repeat_at_ms: 0, duration_repeat_at_ms: 0, duration_repeats: 0 }
     }
 }
 
@@ -231,6 +262,36 @@ impl PanelState {
     }
 }
 
+impl PanelState {
+    /// What the held note display time keys ask for this frame: the event's two arguments, or
+    /// `None` on a frame that moves nothing (`MusicSelectInputProcessor.java:259-281`).
+    ///
+    /// A key that has just gone down moves the time at once and waits the long wait; held past it,
+    /// it moves the time again at every short wait, and by ten once fifty repeats have gone by. With
+    /// neither key held the wait and the count are forgotten.
+    fn duration_moves(&mut self, hold: DurationHold, now_ms: i64) -> Option<(i32, i32)> {
+        let arg1 = match hold {
+            DurationHold::Down => PREVIOUS,
+            DurationHold::Up => NEXT,
+            DurationHold::Neither => {
+                self.duration_repeat_at_ms = 0;
+                self.duration_repeats = 0;
+                return None;
+            }
+        };
+        if self.duration_repeat_at_ms == 0 {
+            self.duration_repeat_at_ms = now_ms + i64::from(SCROLL_DURATION_LOW_MS);
+            return Some((arg1, DURATION_PLAIN_STEP));
+        }
+        if now_ms <= self.duration_repeat_at_ms {
+            return None;
+        }
+        self.duration_repeats = self.duration_repeats.saturating_add(1);
+        self.duration_repeat_at_ms = now_ms + i64::from(SCROLL_DURATION_HIGH_MS);
+        Some((arg1, if self.duration_repeats > DURATION_FAST_AFTER_REPEATS { DURATION_FAST_STEP_MS } else { DURATION_PLAIN_STEP }))
+    }
+}
+
 impl SelectState {
     /// Put up the panel the held keys call up, or take down the one that is up
     /// (`MusicSelector.setPanelState`), with the sound of a panel opening or closing when the keys
@@ -259,7 +320,8 @@ impl SelectState {
     }
 
     /// One frame of the keys of the panel that is up: the presses the panel takes, in the order the
-    /// reference asks about them, and on the first panel the scroll of the target.
+    /// reference asks about them, on the first panel the scroll of the target, and on the third the
+    /// note display time its two keys move while they are held.
     pub(super) fn panel_keys(&mut self, shared: &mut AppShared, layout: KeyLayout, panel: Panel, now_ms: i64) {
         let mut acts: Vec<PanelAct> = self.keys.panel_presses(layout, panel).into_iter().filter_map(press_act).collect();
         if panel == Panel::Play {
@@ -273,6 +335,16 @@ impl SelectState {
             };
             let wheel = self.take_wheel();
             acts.extend(target_acts(self.panel.target_moves(wheel, hold, now_ms)));
+        }
+        if panel == Panel::Detail {
+            let hold = if self.keys.pressed(layout, SelectKey::DurationDown, false) {
+                DurationHold::Down
+            } else if self.keys.pressed(layout, SelectKey::DurationUp, false) {
+                DurationHold::Up
+            } else {
+                DurationHold::Neither
+            };
+            acts.extend(self.panel.duration_moves(hold, now_ms).map(|(arg1, arg2)| PanelAct::Duration { arg1, arg2 }));
         }
         for act in acts {
             self.run_panel_act(shared, act);
@@ -291,6 +363,7 @@ impl SelectState {
                 }
             }
             PanelAct::Scratch => shared.play_system_sound(SystemSound::Scratch),
+            PanelAct::Duration { arg1, arg2 } => self.run_duration_event(shared, arg1, arg2),
         }
     }
 }
@@ -438,6 +511,31 @@ mod tests {
         let later = start + i64::from(SCROLL_DURATION_LOW_MS) + 100;
         assert_eq!(panel.target_moves(0, TargetHold::Neither, later), 0);
         assert_eq!(panel.target_moves(0, TargetHold::Down, later + 10), -1, "the wait was forgotten once it came due with no key held");
+    }
+
+    /// A held note display time key moves it at once, again after the long wait, then at every
+    /// short one, and ten times as far after fifty repeats. Letting go forgets the wait and the
+    /// count, so the next press moves it at once and by one.
+    #[test]
+    fn a_held_note_display_time_key_repeats_and_then_moves_ten_times_as_far() {
+        let low = i64::from(SCROLL_DURATION_LOW_MS);
+        let high = i64::from(SCROLL_DURATION_HIGH_MS);
+        let mut now = 1_000_000;
+        let mut panel = PanelState::default();
+        assert_eq!(panel.duration_moves(DurationHold::Up, now), Some((NEXT, DURATION_PLAIN_STEP)));
+        assert_eq!(panel.duration_moves(DurationHold::Up, now + low), None, "the wait has to be over, not just reached");
+        now += low + 1;
+        assert_eq!(panel.duration_moves(DurationHold::Up, now), Some((NEXT, DURATION_PLAIN_STEP)));
+        assert_eq!(panel.duration_moves(DurationHold::Up, now + high), None);
+        for repeat in 2..=DURATION_FAST_AFTER_REPEATS {
+            now += high + 1;
+            assert_eq!(panel.duration_moves(DurationHold::Up, now), Some((NEXT, DURATION_PLAIN_STEP)), "repeat {repeat}");
+        }
+        now += high + 1;
+        assert_eq!(panel.duration_moves(DurationHold::Up, now), Some((NEXT, DURATION_FAST_STEP_MS)), "the fifty-first repeat");
+
+        assert_eq!(panel.duration_moves(DurationHold::Neither, now + 1), None);
+        assert_eq!(panel.duration_moves(DurationHold::Down, now + 2), Some((PREVIOUS, DURATION_PLAIN_STEP)), "let go and pressed again");
     }
 
     #[test]

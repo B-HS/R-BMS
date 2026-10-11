@@ -58,7 +58,8 @@ struct ChartRun {
 }
 
 /// Turn the finished run into the result screen: the on-screen summary, the local score record,
-/// the saved replay, the auto-calibration step and the IR submission.
+/// the saved replay and the IR submission. The judge offset a run adjusted is already in the settings
+/// by now: it is kept as each input moves it ([`PlayState::keep_adjusted_offset`]).
 ///
 /// The deltas on the summary compare against the records that existed *before* this play — this
 /// run's own record is pushed further down — so "previous" is the newest stored play and "best"
@@ -93,8 +94,7 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
         && saves_replay(assist)
         && !play.recorded_events().is_empty();
     let recorded_events = save_replay.then(|| play.recorded_events().to_vec());
-    let calibration_mean_us = play.calibration_mean_us();
-    let calibration_samples = play.calibration_samples();
+    let recorded_offset_steps = play.recorded_offset_steps();
     let instrumentation = play.instrumentation();
     let record = play.record();
     let tempo = tempo_points(&play.model().timelines);
@@ -234,6 +234,7 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
                 gauge_set: gauge_set_token(judge_setup.gauge_set).to_string(),
                 gauge_auto_shift: gauge_auto_shift_token(judge_setup.gauge_auto_shift).to_string(),
                 bottom_shiftable_gauge: gauge_token(judge_setup.bottom_shiftable_gauge).to_string(),
+                offset_steps: recorded_offset_steps,
             },
             events,
         };
@@ -265,18 +266,6 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
             crate::scoredb_store::record_finished_play(db, &log, scores_count);
         }
         shared.scores.push(crate::scoredb_store::record_of(&log));
-    }
-
-    if let (true, true, true, Some(mean_us)) = (shared.config.judge.auto_offset, !shared.run_plays_itself(), shared.replay.is_none(), calibration_mean_us) {
-        let new_offset = calibrated_offset(shared.config.judge.offset_ms, mean_us);
-        println!(
-            "auto-cal: avg {:+} ms over {} hits → judge offset {} ms (was {})",
-            mean_us / 1000,
-            calibration_samples,
-            new_offset,
-            shared.config.judge.offset_ms
-        );
-        shared.config.judge.offset_ms = new_offset;
     }
 
     match block_reason {

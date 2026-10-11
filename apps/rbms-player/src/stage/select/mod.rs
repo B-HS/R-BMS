@@ -33,12 +33,14 @@ use rbms_skin::property::generated::{BUTTON_KEYCONFIG, BUTTON_SKINSELECT};
 use crate::ir_ext::PrimaryProfileDirection;
 use crate::ir_ranking_view::{PanelAction, PanelLine, offline_lines, panel_action, panel_lines, profile_line};
 use crate::ir_replay::from_ir_replay;
-use crate::keyconfig::{SCRATCH_BACKWARD_INDEX, SCRATCH_FORWARD_INDEX, key_index_of};
+use crate::keyconfig::{SCRATCH_BACKWARD_INDEX, SCRATCH_FORWARD_INDEX, Shortcut, ShortcutGroup, ShortcutScreen, key_index_of};
 use crate::skin_host::chart::ChartState;
 use crate::skin_host::select::{BrowserLent, CourseShown};
 use crate::skin_screen::SelectDraw;
 use crate::stage::result::SkinStatus;
-use crate::stage::{Canvas, FoldersState, FrameCtx, KeyInput, SettingsState, SkinMenuState, Stage, StageHandler, TablesState, Transition, is_left_press};
+use crate::stage::{
+    Canvas, FoldersState, FrameCtx, KeyConfigState, KeyInput, SettingsState, SkinMenuState, Stage, StageHandler, TablesState, Transition, is_left_press,
+};
 use crate::textedit::ImeEdit;
 use crate::*;
 
@@ -93,11 +95,16 @@ use skinned::{BarMark, WallClock, skin_status};
 /// the mode that is up.
 const BUILT_IN_KEY_LAYOUT: KeyLayout = KeyLayout::Beat;
 
-/// The key that opens the skin menu, on the built-in browser and on one a skin draws alike. It is the
-/// key the reference's browser opens its skin configuration with (`MusicSelector.input`), which on
-/// a skin's browser runs the same event the skin's own button does. No lane can be bound to a
-/// function key, and no other shortcut of the browser is on this one.
-pub(super) const SKIN_MENU_KEY: KeyCode = KeyCode::F12;
+/// The key the skin menu ships on, on the built-in browser and on one a skin draws alike
+/// ([`Shortcut::SkinMenu`]). It is the key the reference's browser opens its skin configuration
+/// with (`MusicSelector.input`), which on a skin's browser runs the same event the skin's own button
+/// does. The key that is read is the one the key configuration holds; this is where it starts.
+pub(crate) const SKIN_MENU_KEY: KeyCode = KeyCode::F12;
+
+/// The key the ranking panel closes on by itself, beside the keys that go back
+/// ([`crate::ir_ranking_view::panel_action`]): the one its shortcut ships on. Once the shortcut has
+/// been moved the panel closes on the key it was moved to, and this one is whatever else it is.
+const RANKING_PANEL_SHIPPED_KEY: KeyCode = KeyCode::KeyI;
 
 /// How long a turntable direction is held before the list starts to repeat, and how often it moves
 /// after that: the two times a skin's wheel slides by (`scrolldurationlow` and `scrolldurationhigh`
@@ -494,7 +501,21 @@ impl SelectState {
     }
 
     /// Keys while the filter panel is up. Returns whether the panel consumed the key.
+    ///
+    /// The panel closes on the key that opened it, which is the key the key configuration gives the
+    /// filter. The key the filter ships on is one the panel closes on by itself, so once the filter
+    /// has been moved off it that key is taken and does nothing, like any key the panel has no use
+    /// for.
     fn filter_panel_input(&mut self, shared: &mut AppShared, code: KeyCode) -> bool {
+        if self.filter.is_open() {
+            if shared.is_shortcut(Shortcut::Filter, code) {
+                self.toggle_filter_panel();
+                return true;
+            }
+            if code == Shortcut::Filter.default_key() {
+                return true;
+            }
+        }
         match self.filter.handle_key(shared, code) {
             FilterKey::Ignored => false,
             FilterKey::Consumed => true,
@@ -676,7 +697,9 @@ impl SelectState {
         if !self.ranking_open {
             return false;
         }
-        let Some(action) = panel_action(code) else {
+        let own = shared.is_shortcut(Shortcut::Ranking, code);
+        let action = if own { Some(PanelAction::Close) } else { panel_action(code).filter(|_| code != RANKING_PANEL_SHIPPED_KEY) };
+        let Some(action) = action else {
             return false;
         };
         let lines = self.ranking_lines(shared);
@@ -866,15 +889,13 @@ impl SelectState {
     /// things only such a browser has: the screens the reference's browser opens from its own keys,
     /// and the option panels. Answers what the key asked for, or `None` when it is not one of these.
     ///
-    /// `6` opens the key configuration and [`SKIN_MENU_KEY`] the skin menu, which are the events 13
-    /// and 14 (`MusicSelector.input`). While an option panel is called up the keys that move through the
-    /// list and start what is under the cursor are the panel's and do nothing to the list: the
-    /// reference reads none of them with a panel up, and the two arrows that move the cursor scroll
-    /// the first panel's target instead ([`panel`]).
+    /// While an option panel is called up the keys that move through the list and start what is
+    /// under the cursor are the panel's and do nothing to the list: the reference reads none of
+    /// them with a panel up, and the two arrows that move the cursor scroll the first panel's target
+    /// instead ([`panel`]). The screens the reference's browser opens from its own keys are
+    /// shortcuts like any other ([`SelectState::run_shortcut`]).
     fn skin_screen_key(&mut self, shared: &mut AppShared, code: KeyCode) -> Option<Transition> {
         match code {
-            KeyCode::Digit6 => Some(self.run_event(shared, BUTTON_KEYCONFIG, 0)),
-            SKIN_MENU_KEY => Some(self.run_event(shared, BUTTON_SKINSELECT, 0)),
             KeyCode::ArrowUp | KeyCode::ArrowDown | KeyCode::ArrowLeft | KeyCode::ArrowRight | KeyCode::Enter | KeyCode::NumpadEnter
                 if self.panel_is_called_up(shared) =>
             {
@@ -882,6 +903,76 @@ impl SelectState {
             }
             _ => None,
         }
+    }
+
+    /// Carry out one shortcut of the browser, whichever key or controller element it was read from.
+    ///
+    /// Each does what the key it ships on always did. The second set -- the reference's number keys
+    /// -- is read on a browser a skin draws and nowhere else, as it always was: `1` steps the mode
+    /// filter, `2` the order, `3` the long note mode, `4` moves the replay slot on, `6` opens the key
+    /// configuration, `0` opens the search and `F9` stars the chart (`MusicSelectInputProcessor.java:71-110`,
+    /// `MusicSelector.java:296`). On such a browser the skin menu and the key configuration are
+    /// opened by running the events the skin's own buttons run (13 and 14). The option overlay's two
+    /// keys and the key held for the detail panel are read where those are, not here.
+    fn run_shortcut(&mut self, shared: &mut AppShared, shortcut: Shortcut) -> Transition {
+        let skinned = skin_status(shared) == SkinStatus::Ready;
+        if shortcut.screen() != ShortcutScreen::Browser || (shortcut.group() == ShortcutGroup::SkinBrowser && !skinned) {
+            return Transition::Stay;
+        }
+        match shortcut {
+            Shortcut::Search | Shortcut::RefSearch => self.start_search(shared),
+            Shortcut::Filter => self.toggle_filter_panel(),
+            Shortcut::Sort if self.shift_held => self.cycle_sort_back(shared),
+            Shortcut::Sort => self.cycle_sort(shared),
+            Shortcut::RefSort => self.sort_event(shared, true),
+            Shortcut::Practice => return self.start_practice(shared),
+            Shortcut::Favourite | Shortcut::RefFavourite => shared.toggle_focused_favorite(),
+            Shortcut::Records => self.open_record_modal(shared),
+            Shortcut::Ranking => self.toggle_ranking_panel(shared),
+            Shortcut::Settings if self.shift_held => {
+                self.tab = self.tab.next();
+                self.refresh_courses(shared);
+            }
+            Shortcut::Settings => return Transition::Open(Stage::Settings(SettingsState::new())),
+            Shortcut::SkinMenu if skinned => return self.run_event(shared, BUTTON_SKINSELECT, 0),
+            Shortcut::SkinMenu => return Transition::Open(SkinMenuState::stage()),
+            Shortcut::KeyConfig => return Transition::Open(Stage::KeyConfig(KeyConfigState::new())),
+            Shortcut::RefKeyConfig => return self.run_event(shared, BUTTON_KEYCONFIG, 0),
+            Shortcut::Folders => return Transition::Open(Stage::Folders(FoldersState::new())),
+            Shortcut::Tables => return Transition::Open(Stage::Tables(TablesState::new())),
+            Shortcut::RefMode => self.mode_event(shared, true),
+            Shortcut::RefLnMode => self.ln_mode_event(shared, true),
+            Shortcut::RefReplay => self.next_replay(shared),
+            Shortcut::OptionsPin
+            | Shortcut::OptionsHold
+            | Shortcut::RefDetail
+            | Shortcut::Retry
+            | Shortcut::NextSong
+            | Shortcut::ReplayPause
+            | Shortcut::ReplayFaster
+            | Shortcut::ReplaySlower
+            | Shortcut::ReplayForward
+            | Shortcut::ReplayBack => {}
+        }
+        Transition::Stay
+    }
+
+    /// One shortcut from a controller. It does what the key does, on the terms a key would: nothing
+    /// while the skin is still being read or while something that takes every key is over the list,
+    /// except that the filter panel closes on its own shortcut as it does on its key.
+    fn pad_shortcut(&mut self, ctx: &mut FrameCtx<'_>, shortcut: Shortcut) -> Transition {
+        if skin_status(ctx.shared) == SkinStatus::Reading {
+            return Transition::Stay;
+        }
+        if self.filter.is_open() && shortcut == Shortcut::Filter {
+            self.toggle_filter_panel();
+            return Transition::Stay;
+        }
+        if self.holds_keys(ctx) || ctx.shared.options.is_open() || ctx.shared.skin_text_is_focused() {
+            return Transition::Stay;
+        }
+        self.esc_quit_at = None;
+        self.run_shortcut(ctx.shared, shortcut)
     }
 }
 
@@ -978,6 +1069,10 @@ impl StageHandler for SelectState {
 
     /// Keys on the browser. While a search word is typed the keys that are text are the word's, and
     /// the rest go on to do what they do on the list ([`SelectState::search_key`]).
+    ///
+    /// The keys that move through the list, open what is under the cursor and go back are the
+    /// browser's own and fixed. Every other key is looked up in the key configuration
+    /// ([`Shortcut`]), so a shortcut the player moved is read from where they moved it.
     fn handle_key(&mut self, ctx: &mut FrameCtx<'_>, key: KeyInput<'_>) -> Transition {
         if matches!(key.code, KeyCode::ShiftLeft | KeyCode::ShiftRight) {
             if key.pressed {
@@ -1035,26 +1130,14 @@ impl StageHandler for SelectState {
         }
         match key.code {
             KeyCode::Escape | KeyCode::ArrowLeft => return self.select_escape(ctx.shared),
-            KeyCode::Slash => self.start_search(ctx.shared),
-            KeyCode::F3 if self.shift_held => self.cycle_sort_back(ctx.shared),
-            KeyCode::F3 => self.cycle_sort(ctx.shared),
-            KeyCode::F2 => self.toggle_filter_panel(),
-            KeyCode::F4 => return self.start_practice(ctx.shared),
-            KeyCode::Tab if self.shift_held => {
-                self.tab = self.tab.next();
-                self.refresh_courses(ctx.shared);
-            }
-            KeyCode::KeyF => ctx.shared.toggle_focused_favorite(),
-            KeyCode::Tab => return Transition::Open(Stage::Settings(SettingsState::new())),
-            SKIN_MENU_KEY => return Transition::Open(SkinMenuState::stage()),
-            KeyCode::KeyO => return Transition::Open(Stage::Folders(FoldersState::new())),
-            KeyCode::KeyT => return Transition::Open(Stage::Tables(TablesState::new())),
-            KeyCode::KeyR => self.open_record_modal(ctx.shared),
-            KeyCode::KeyI => self.toggle_ranking_panel(ctx.shared),
             KeyCode::ArrowUp => self.step_cursor(ctx.shared, false),
             KeyCode::ArrowDown => self.step_cursor(ctx.shared, true),
             KeyCode::Enter | KeyCode::NumpadEnter | KeyCode::ArrowRight => return self.select_enter(ctx.shared),
-            _ => {}
+            code => {
+                if let Some(shortcut) = ctx.shared.shortcut_for(ShortcutScreen::Browser, code) {
+                    return self.run_shortcut(ctx.shared, shortcut);
+                }
+            }
         }
         Transition::Stay
     }
@@ -1078,8 +1161,11 @@ impl StageHandler for SelectState {
     /// A key of a controller is no letter: one going down while a search word is typed ends the
     /// typing, with what was typed left on show, before it does what it does.
     fn handle_pad(&mut self, ctx: &mut FrameCtx<'_>, event: PadEvent) -> Transition {
-        if matches!(event, PadEvent::Lane { press: true, .. } | PadEvent::Control(_)) {
+        if matches!(event, PadEvent::Lane { press: true, .. } | PadEvent::Control(_) | PadEvent::Shortcut(_)) {
             self.confirm_search(ctx.shared);
+        }
+        if let PadEvent::Shortcut(shortcut) = event {
+            return self.pad_shortcut(ctx, shortcut);
         }
         let PadEvent::Lane { lane, dir, press: true } = event else {
             return Transition::Stay;

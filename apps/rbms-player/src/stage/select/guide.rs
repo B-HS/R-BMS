@@ -6,54 +6,45 @@
 //! ([`GUIDE_KEY`]) puts it up and the same key, Escape or Enter takes it down, and while it is up it
 //! takes every key and every press of the mouse.
 //!
-//! What it lists is read rather than written out. The browser's own keys are the table below, each
-//! entry holding the keys themselves so the text drawn is the key that is bound; START, SELECT and
-//! the keys of the reference's key table are read from the key configuration and from that table
-//! ([`KeyLayout::indices_of`]), so a key that was rebound is the key the guide names.
+//! What it lists is read rather than written out. Every key that can be rebound is asked of the key
+//! configuration as the guide is drawn: the browser's shortcuts and the keys to its screens
+//! ([`Shortcut`]), START, SELECT and the controls of a run ([`ControlAction`]), and the keys of the
+//! reference's key table ([`KeyLayout::indices_of`]). A key the player moved is the key the guide
+//! names, and one they left without a key is shown as having none. The few keys no screen lets go of
+//! ([`FIXED_KEYS`]) are the only ones written down here.
 
 use rbms_play::ScratchDir;
 use rbms_render::{Color, Rect, Renderer, draw_text, draw_text_right, fit_text, theme};
 use winit::keyboard::KeyCode;
 
+use super::SelectState;
 use super::keys::{KeyLayout, SelectKey};
-use super::skinned::DETAIL_PANEL_KEY;
-use super::{SKIN_MENU_KEY, SelectState};
-use crate::app_options::{HOLD_KEY, TOGGLE_KEY};
-use crate::keyconfig::{ControlAction, key_index_of, key_name};
+pub(super) use crate::keyconfig::GUIDE_KEY;
+use crate::keyconfig::{ControlAction, Shortcut, ShortcutGroup, key_index_of, key_name};
 use crate::{AppShared, CH, CW, Hot};
 
-/// The key that puts the guide up and takes it down.
-pub(super) const GUIDE_KEY: KeyCode = KeyCode::KeyH;
-
-/// What a key that has no name in the key configuration's own vocabulary is called on the guide.
+/// What a key that is bound to nothing is called on the guide.
 const UNBOUND: &str = "-";
 
-/// One of the browser's own keys, as the guide lists it: the keys that are named, and what they do.
-pub(super) struct Shortcut {
+/// One of the browser's keys that cannot be rebound, as the guide lists it.
+pub(super) struct FixedKey {
     pub(super) keys: &'static [KeyCode],
     pub(super) does: &'static str,
 }
 
-/// The browser's own keys, in the order the guide lists them. A key a skin's browser takes for
-/// something else -- the number keys, which are the reference's -- is not here.
-pub(super) const BROWSER_SHORTCUTS: [Shortcut; 16] = [
-    Shortcut { keys: &[KeyCode::ArrowUp, KeyCode::ArrowDown], does: "MOVE THE LIST" },
-    Shortcut { keys: &[KeyCode::Enter], does: "OPEN A FOLDER OR PLAY THE CHART" },
-    Shortcut { keys: &[KeyCode::Escape], does: "BACK ONE FOLDER - TWICE AT THE TOP QUITS" },
-    Shortcut { keys: &[KeyCode::KeyO], does: "MUSIC FOLDERS" },
-    Shortcut { keys: &[KeyCode::KeyT], does: "DIFFICULTY TABLES" },
-    Shortcut { keys: &[KeyCode::KeyR], does: "RECORDS OF THE CHART" },
-    Shortcut { keys: &[KeyCode::Slash], does: "SEARCH" },
-    Shortcut { keys: &[KeyCode::F2], does: "FILTER" },
-    Shortcut { keys: &[KeyCode::F3], does: "SORT ORDER - WITH SHIFT BACKWARDS" },
-    Shortcut { keys: &[KeyCode::F4], does: "PRACTICE" },
-    Shortcut { keys: &[KeyCode::Tab], does: "SETTINGS - WITH SHIFT THE COURSE LIST" },
-    Shortcut { keys: &[SKIN_MENU_KEY], does: "SKIN MENU" },
-    Shortcut { keys: &[KeyCode::KeyI], does: "IR RANKING" },
-    Shortcut { keys: &[KeyCode::KeyF], does: "FAVOURITE" },
-    Shortcut { keys: &[TOGGLE_KEY, HOLD_KEY], does: "OPTIONS OVERLAY" },
-    Shortcut { keys: &[GUIDE_KEY], does: "THIS GUIDE" },
+/// The keys of the browser that are its own and fixed: the ones that move through the list, open
+/// what is under the cursor and go back.
+pub(super) const FIXED_KEYS: [FixedKey; 3] = [
+    FixedKey { keys: &[KeyCode::ArrowUp, KeyCode::ArrowDown], does: "MOVE THE LIST" },
+    FixedKey { keys: &[KeyCode::Enter], does: "OPEN A FOLDER / PLAY" },
+    FixedKey { keys: &[KeyCode::Escape], does: "BACK - TWICE QUITS" },
 ];
+
+/// What the guide's own key does, on the last line of the browser's keys.
+const GUIDE_DOES: &str = "THIS GUIDE";
+
+/// What the two keys of the option overlay do, which the guide lists on one line.
+const OPTIONS_DOES: &str = "OPTIONS OVERLAY";
 
 /// What each role of the reference's key table is called on the guide, in the order they are listed.
 const KEY_ROLES: [(SelectKey, &str); 7] = [
@@ -66,16 +57,43 @@ const KEY_ROLES: [(SelectKey, &str); 7] = [
     (SelectKey::Down, "PREVIOUS BAR"),
 ];
 
+/// The controls of a run the guide lists two to a line: the pair of keys, the one that lessens
+/// first, and what the pair moves.
+const CONTROL_PAIRS: [(ControlAction, ControlAction, &str); 6] = [
+    (ControlAction::HiSpeedDown, ControlAction::HiSpeedUp, "HI-SPEED DOWN / UP"),
+    (ControlAction::CoverDown, ControlAction::CoverUp, "LANE COVER LESS / MORE"),
+    (ControlAction::LiftDown, ControlAction::LiftUp, "LIFT DOWN / UP"),
+    (ControlAction::HiddenDown, ControlAction::HiddenUp, "HIDDEN+ LESS / MORE"),
+    (ControlAction::GreenDown, ControlAction::GreenUp, "GREEN NUMBER DOWN / UP"),
+    (ControlAction::OffsetDown, ControlAction::OffsetUp, "JUDGE OFFSET -1 / +1 MS"),
+];
+
+/// The controls of a run the guide lists one to a line.
+const CONTROL_SWITCHES: [(ControlAction, &str); 5] = [
+    (ControlAction::CoverToggle, "LANE COVER ON/OFF"),
+    (ControlAction::LiftToggle, "LIFT ON/OFF"),
+    (ControlAction::HiddenToggle, "HIDDEN+ ON/OFF"),
+    (ControlAction::KeepGreenToggle, "KEEP GREEN NUMBER"),
+    (ControlAction::AutoAdjustToggle, "AUTO ADJUST"),
+];
+
+/// The line of the modifier held for the finer step, and what it is called while it has no key of
+/// its own: the shift that plays no lane ([`AppShared::fine_pressed`]).
+const FINE_DOES: &str = "HOLD: FINE STEP";
+const FINE_UNSET_KEY: &str = "SHIFT (NO LANE)";
+
 /// The panel's width and the room it keeps round what it lists.
-const GUIDE_W: f32 = 880.0;
-const PAD_X: f32 = 28.0;
+const GUIDE_W: f32 = 1232.0;
+const PAD_X: f32 = 24.0;
 const TITLE_Y: f32 = 16.0;
-const FIRST_SECTION_Y: f32 = 64.0;
-const SECTION_H: f32 = 32.0;
-const ROW_PITCH: f32 = 26.0;
-const BOTTOM_PAD: f32 = 44.0;
-const COLUMN_GAP: f32 = 32.0;
-const KEY_COLUMN_W: f32 = 132.0;
+const FIRST_SECTION_Y: f32 = 60.0;
+const SECTION_H: f32 = 30.0;
+const SECTION_GAP: f32 = 12.0;
+const ROW_PITCH: f32 = 24.0;
+const BOTTOM_PAD: f32 = 20.0;
+const COLUMN_GAP: f32 = 28.0;
+const COLUMN_COUNT: usize = 3;
+const KEY_COLUMN_W: f32 = 148.0;
 const KEY_COLUMN_GAP: f32 = 8.0;
 
 /// The rule under a column's heading and the one along the top of the panel: how far above the first
@@ -88,7 +106,7 @@ const HINT_DROP: f32 = 8.0;
 
 /// The text sizes of the panel.
 const TITLE_SCALE: f32 = 2.0;
-const SECTION_SCALE: f32 = 1.3;
+const SECTION_SCALE: f32 = 1.2;
 const ROW_SCALE: f32 = 1.2;
 const HINT_SCALE: f32 = 1.0;
 
@@ -96,25 +114,27 @@ const HINT_SCALE: f32 = 1.0;
 const BACKDROP_ALPHA: u8 = 150;
 
 const GUIDE_TITLE: &str = "R-BMS KEYS";
-const BROWSER_SECTION: &str = "BROWSER";
+const BROWSER_SECTION: &str = "SELECT";
+const SCREENS_SECTION: &str = "SCREENS";
+const NUMBERS_SECTION: &str = "NUMBER KEYS";
 const PANELS_SECTION: &str = "OPTION PANELS";
 const KEYS_SECTION: &str = "KEYS 1-7 AND THE TURNTABLE";
+const PLAY_SECTION: &str = "IN PLAY";
+const COMBINATIONS_SECTION: &str = "IN PLAY, HELD TOGETHER";
 
-/// What a key is called on the guide: the name the key configuration gives it where it has one, and
-/// the name printed on the key for the ones it has not.
+/// What a key is called on the guide: the word the key configuration has for it, with the two the
+/// guide writes shorter and the one key no configuration names.
 pub(super) fn shortcut_label(code: KeyCode) -> &'static str {
     match code {
-        KeyCode::F1 => "F1",
-        KeyCode::F2 => "F2",
-        KeyCode::F3 => "F3",
-        KeyCode::F4 => "F4",
-        KeyCode::F12 => "F12",
-        KeyCode::Tab => "TAB",
         KeyCode::Slash => "/",
-        KeyCode::Enter => "ENTER",
         KeyCode::Escape => "ESC",
         other => key_name(other),
     }
+}
+
+/// What a key that may be bound to nothing is called.
+fn bound_label(code: Option<KeyCode>) -> &'static str {
+    code.map_or(UNBOUND, shortcut_label)
 }
 
 /// The keys of one entry, as one string.
@@ -135,33 +155,76 @@ impl GuideRow {
     }
 }
 
+/// One heading of the guide and the lines under it.
+pub(super) struct Section {
+    pub(super) heading: &'static str,
+    pub(super) rows: Vec<GuideRow>,
+}
+
+/// What a shortcut is called on the guide, where a line is shorter than a row of the key editor.
+fn shortcut_does(shortcut: Shortcut) -> &'static str {
+    match shortcut {
+        Shortcut::Sort => "SORT (SHIFT: BACKWARDS)",
+        Shortcut::Records => "RECORDS",
+        Shortcut::Settings => "SETTINGS (SHIFT: COURSES)",
+        Shortcut::RefDetail => "HOLD: DETAIL OPTIONS",
+        other => other.label(),
+    }
+}
+
 /// The key of the keyboard bound to the key index `index` of the reference's table in the mode that
 /// is up, or [`UNBOUND`] for an index no key of the keyboard is on.
 fn index_label(shared: &AppShared, index: usize) -> &'static str {
     let forward = shared.active_keys.iter().find(|(_, lane)| key_index_of(shared.mode, *lane, ScratchDir::Forward) == Some(index)).map(|(code, _)| *code);
     let backward =
         shared.active_reverse_keys.iter().find(|(_, lane)| key_index_of(shared.mode, *lane, ScratchDir::Backward) == Some(index)).map(|(code, _)| *code);
-    forward.or(backward).map_or(UNBOUND, shortcut_label)
+    bound_label(forward.or(backward))
 }
 
 /// The key a control is read from right now, or [`UNBOUND`].
 fn control_label(shared: &AppShared, action: ControlAction) -> &'static str {
-    shared.control_key_in_force(action).map_or(UNBOUND, shortcut_label)
+    bound_label(shared.control_key_in_force(action))
 }
 
-/// The lines of the browser's own keys.
-pub(super) fn browser_rows() -> Vec<GuideRow> {
-    BROWSER_SHORTCUTS.iter().map(|shortcut| GuideRow::new(keys_label(shortcut.keys), shortcut.does)).collect()
+/// The lines of one group of shortcuts, each with the key it is on now.
+fn group_rows(shared: &AppShared, group: ShortcutGroup) -> Vec<GuideRow> {
+    Shortcut::ALL
+        .into_iter()
+        .filter(|shortcut| shortcut.group() == group && !matches!(shortcut, Shortcut::OptionsPin | Shortcut::OptionsHold))
+        .map(|shortcut| GuideRow::new(bound_label(shared.shortcut_key(shortcut)), shortcut_does(shortcut)))
+        .collect()
+}
+
+/// The lines of the browser's own keys: the fixed ones, its shortcuts as they are bound, the two
+/// keys of the option overlay on one line, and the guide's.
+pub(super) fn browser_rows(shared: &AppShared) -> Vec<GuideRow> {
+    let fixed = FIXED_KEYS.iter().map(|fixed| GuideRow::new(keys_label(fixed.keys), fixed.does));
+    let options = format!("{} {}", bound_label(shared.shortcut_key(Shortcut::OptionsPin)), bound_label(shared.shortcut_key(Shortcut::OptionsHold)));
+    fixed
+        .chain(group_rows(shared, ShortcutGroup::Browser))
+        .chain([GuideRow::new(options, OPTIONS_DOES), GuideRow::new(shortcut_label(GUIDE_KEY), GUIDE_DOES)])
+        .collect()
+}
+
+/// The lines of the keys that open a screen from the browser.
+pub(super) fn screen_rows(shared: &AppShared) -> Vec<GuideRow> {
+    group_rows(shared, ShortcutGroup::Screens)
+}
+
+/// The lines of the reference's number keys, which a browser a skin draws reads.
+pub(super) fn number_rows(shared: &AppShared) -> Vec<GuideRow> {
+    group_rows(shared, ShortcutGroup::SkinBrowser)
 }
 
 /// The lines of the three option panels: the keys held for each, as they are bound now.
 pub(super) fn panel_rows(shared: &AppShared) -> Vec<GuideRow> {
     let start = control_label(shared, ControlAction::Start);
     let select = control_label(shared, ControlAction::Select);
+    let detail = bound_label(shared.shortcut_key(Shortcut::RefDetail));
     vec![
         GuideRow::new(start, "HOLD FOR THE PLAY OPTIONS"),
         GuideRow::new(select, "HOLD FOR THE ASSIST OPTIONS"),
-        GuideRow::new(format!("{start} + {select} / {}", shortcut_label(DETAIL_PANEL_KEY)), "HOLD FOR THE DETAIL OPTIONS"),
+        GuideRow::new(format!("{start} + {select} / {detail}"), "HOLD FOR THE DETAIL OPTIONS"),
     ]
 }
 
@@ -178,56 +241,101 @@ pub(super) fn key_rows(shared: &AppShared) -> Vec<GuideRow> {
         .collect()
 }
 
-/// How far the right column reaches below the first heading: the option panels, a gap, and the keys
-/// under a heading of their own.
-fn right_column_extent(options: usize, keys: usize) -> f32 {
-    options as f32 * ROW_PITCH + ROW_PITCH * 0.5 + SECTION_H + keys as f32 * ROW_PITCH
+/// The lines of the controls of a run, as they are bound now: the ones that come in pairs two to a
+/// line, then each switch, then the modifier held for the finer step.
+pub(super) fn play_rows(shared: &AppShared) -> Vec<GuideRow> {
+    let pairs =
+        CONTROL_PAIRS.iter().map(|(less, more, does)| GuideRow::new(format!("{} {}", control_label(shared, *less), control_label(shared, *more)), *does));
+    let switches = CONTROL_SWITCHES.iter().map(|(action, does)| GuideRow::new(control_label(shared, *action), *does));
+    let fine = shared.control_key_in_force(ControlAction::Fine).map_or(FINE_UNSET_KEY, shortcut_label);
+    pairs.chain(switches).chain([GuideRow::new(fine, FINE_DOES)]).collect()
+}
+
+/// The lines of what START and SELECT do in a run with the keys held beside them
+/// (`ControlInputProcessor.input`), named by the keys they are bound to now.
+pub(super) fn combination_rows(shared: &AppShared) -> Vec<GuideRow> {
+    let start = control_label(shared, ControlAction::Start);
+    let select = control_label(shared, ControlAction::Select);
+    vec![
+        GuideRow::new(format!("{start} + KEYS"), "HI-SPEED"),
+        GuideRow::new(format!("{start} + TURNTABLE"), "LANE COVER"),
+        GuideRow::new(format!("{start} TWICE"), "LANE COVER ON/OFF"),
+        GuideRow::new(format!("{select} + KEYS"), "GREEN NUMBER BY 1 MS"),
+        GuideRow::new(format!("{start} + {select}"), "LIFT OR HIDDEN+ TURNS"),
+        GuideRow::new("MOUSE WHEEL", "LANE COVER"),
+        GuideRow::new(shortcut_label(KeyCode::Escape), "STOP THE CHART"),
+    ]
+}
+
+/// Everything the guide lists, column by column.
+pub(super) fn columns(shared: &AppShared) -> [Vec<Section>; COLUMN_COUNT] {
+    [
+        vec![Section { heading: BROWSER_SECTION, rows: browser_rows(shared) }, Section { heading: SCREENS_SECTION, rows: screen_rows(shared) }],
+        vec![
+            Section { heading: NUMBERS_SECTION, rows: number_rows(shared) },
+            Section { heading: PANELS_SECTION, rows: panel_rows(shared) },
+            Section { heading: KEYS_SECTION, rows: key_rows(shared) },
+        ],
+        vec![Section { heading: PLAY_SECTION, rows: play_rows(shared) }, Section { heading: COMBINATIONS_SECTION, rows: combination_rows(shared) }],
+    ]
+}
+
+/// How far a column reaches below where the first heading starts.
+fn column_extent(sections: &[Section]) -> f32 {
+    let gaps = sections.len().saturating_sub(1) as f32 * SECTION_GAP;
+    sections.iter().map(|section| SECTION_H + section.rows.len() as f32 * ROW_PITCH).sum::<f32>() + gaps
 }
 
 /// Where the panel is: centred on the screen the application lays itself out for, and tall enough
-/// for the longer of its two columns.
-fn guide_rect(browser_rows: usize, options: usize, keys: usize) -> Rect {
-    let left = browser_rows as f32 * ROW_PITCH;
-    let height = FIRST_SECTION_Y + SECTION_H + left.max(right_column_extent(options, keys)) + BOTTOM_PAD;
+/// for the longest of its columns.
+pub(super) fn guide_rect(columns: &[Vec<Section>]) -> Rect {
+    let tallest = columns.iter().map(|sections| column_extent(sections)).fold(0.0, f32::max);
+    let height = FIRST_SECTION_Y + tallest + BOTTOM_PAD;
     Rect::new((CW as f32 - GUIDE_W) * 0.5, (CH as f32 - height) * 0.5, GUIDE_W, height)
 }
 
-/// Draws one column: its heading, then a line for each row, the keys in a column of their own.
-fn draw_column<R: Renderer>(r: &mut R, x: f32, y: f32, width: f32, heading: &str, rows: &[GuideRow]) {
+/// Draws one section: its heading, then a line for each row, the keys in a column of their own.
+/// Answers where the section ends.
+fn draw_section<R: Renderer>(r: &mut R, x: f32, y: f32, width: f32, section: &Section) -> f32 {
     let th = theme();
-    draw_text(r, x, y, SECTION_SCALE, th.accent, heading);
+    draw_text(r, x, y, SECTION_SCALE, th.accent, section.heading);
     r.fill_rect(Rect::new(x, y + SECTION_H - HEADING_RULE_RISE, width, RULE_THICKNESS), th.divider);
     let does_width = width - KEY_COLUMN_W;
-    for (index, row) in rows.iter().enumerate() {
+    for (index, row) in section.rows.iter().enumerate() {
         let row_y = y + SECTION_H + index as f32 * ROW_PITCH;
         draw_text(r, x, row_y, ROW_SCALE, th.focus, &fit_text(&row.keys, ROW_SCALE, KEY_COLUMN_W - KEY_COLUMN_GAP));
         draw_text(r, x + KEY_COLUMN_W, row_y, ROW_SCALE, th.text, &fit_text(&row.does, ROW_SCALE, does_width));
     }
+    y + SECTION_H + section.rows.len() as f32 * ROW_PITCH
 }
 
 /// Draw the guide over the screen, and answer what a press on it hits: everything on the screen is
 /// the guide's to close it, and the panel itself takes a press without closing it.
 pub(super) fn render_guide<R: Renderer>(r: &mut R, shared: &AppShared) -> Vec<(Rect, Hot)> {
     let th = theme();
-    let browser = browser_rows();
-    let options = panel_rows(shared);
-    let keys = key_rows(shared);
+    let columns = columns(shared);
     let screen = Rect::new(0.0, 0.0, CW as f32, CH as f32);
-    let panel = guide_rect(browser.len(), options.len(), keys.len());
+    let panel = guide_rect(&columns);
     r.fill_rect(screen, Color { r: 0, g: 0, b: 0, a: BACKDROP_ALPHA });
     r.fill_rect(panel, th.panel_hi);
     r.fill_rect(Rect::new(panel.x, panel.y, panel.w, RULE_THICKNESS), th.focus);
     draw_text(r, panel.x + PAD_X, panel.y + TITLE_Y, TITLE_SCALE, th.text, GUIDE_TITLE);
-    let hint = format!("{} OR ESC CLOSES", shortcut_label(GUIDE_KEY));
+    let hint = format!(
+        "{} OR ESC CLOSES     EVERY KEY BUT THE ARROWS, ENTER, ESC AND {} IS SET IN KEY CONFIG ({})",
+        shortcut_label(GUIDE_KEY),
+        shortcut_label(GUIDE_KEY),
+        bound_label(shared.shortcut_key(Shortcut::KeyConfig))
+    );
     draw_text_right(r, panel.x + panel.w - PAD_X, panel.y + TITLE_Y + HINT_DROP, HINT_SCALE, th.text_muted, &hint);
 
-    let column_w = (panel.w - PAD_X * 2.0 - COLUMN_GAP) * 0.5;
-    let top = panel.y + FIRST_SECTION_Y;
-    draw_column(r, panel.x + PAD_X, top, column_w, BROWSER_SECTION, &browser);
-    let right_x = panel.x + PAD_X + column_w + COLUMN_GAP;
-    draw_column(r, right_x, top, column_w, PANELS_SECTION, &options);
-    let keys_top = top + SECTION_H + options.len() as f32 * ROW_PITCH + ROW_PITCH * 0.5;
-    draw_column(r, right_x, keys_top, column_w, KEYS_SECTION, &keys);
+    let column_w = (panel.w - PAD_X * 2.0 - COLUMN_GAP * (COLUMN_COUNT - 1) as f32) / COLUMN_COUNT as f32;
+    for (index, sections) in columns.iter().enumerate() {
+        let x = panel.x + PAD_X + index as f32 * (column_w + COLUMN_GAP);
+        let mut y = panel.y + FIRST_SECTION_Y;
+        for section in sections {
+            y = draw_section(r, x, y, column_w, section) + SECTION_GAP;
+        }
+    }
     vec![(screen, Hot::GuideClose), (panel, Hot::OverlayPanel)]
 }
 

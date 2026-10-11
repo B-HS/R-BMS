@@ -19,10 +19,10 @@ pub use record::{
 };
 
 pub use session::{
-    ANALYSIS_RATE_MAX, ANALYSIS_RATE_MIN, ANALYSIS_RATE_STEP, ANALYSIS_SEEK_STEP_US, GAUGE_SAMPLE_INTERVAL_US, GAUGE_SERIES_CAPACITY, JUDGE_KIND_COUNT,
-    JudgeSetup, KEY_LANE_KIND, KEYSOUND_GAIN, KEYSOUND_PAN, KEYSOUND_PITCH, LANE_KIND_COUNT, NullSink, PlayInstrumentation, PlaySession, PlaySummary,
-    SCRATCH_LANE_KIND, SessionClock, SessionOptions, SoundRequest, SoundSink, SoundTime, TIMED_JUDGE_LIMIT, TIMING_HIST_BIN_US, TIMING_HIST_BINS,
-    TIMING_HIST_RANGE_US, TimingMark,
+    ANALYSIS_RATE_MAX, ANALYSIS_RATE_MIN, ANALYSIS_RATE_STEP, ANALYSIS_SEEK_STEP_US, AUTO_ADJUST_OFFSET_MAX_MS, AUTO_ADJUST_OFFSET_MIN_MS,
+    GAUGE_SAMPLE_INTERVAL_US, GAUGE_SERIES_CAPACITY, JUDGE_KIND_COUNT, JudgeSetup, KEY_LANE_KIND, KEYSOUND_GAIN, KEYSOUND_PAN, KEYSOUND_PITCH, LANE_KIND_COUNT,
+    NullSink, PlayInstrumentation, PlaySession, PlaySummary, SCRATCH_LANE_KIND, SessionClock, SessionOptions, SoundRequest, SoundSink, SoundTime,
+    TIMED_JUDGE_LIMIT, TIMING_HIST_BIN_US, TIMING_HIST_BINS, TIMING_HIST_RANGE_US, TimingMark, auto_adjust_step_ms,
 };
 
 /// Which output bus a keysound belongs to. `rbms-play` does not depend on `rbms-audio`, so it

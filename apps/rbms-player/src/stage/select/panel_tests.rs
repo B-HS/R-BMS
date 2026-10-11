@@ -283,7 +283,7 @@ fn the_keys_of_the_second_panel_flip_the_assists_there_are() {
 
 /// The third panel's rows: key one is the background animation, two the gauge auto shift, three the
 /// automatic judge timing, and five and seven the judge timing down and up a millisecond. Keys four
-/// and six are the note display time, which this player has no number for.
+/// and six are the note display time, which there is none of while no green number is held.
 #[test]
 fn the_keys_of_the_third_panel_step_the_detail_options() {
     let both: &[KeyCode] = &[START, SELECT];
@@ -296,6 +296,39 @@ fn the_keys_of_the_third_panel_step_the_detail_options() {
         assert!(changes_nothing(&format!("panel3-{name}"), both, key), "key {name} of the third panel changed a setting");
     }
     assert_eq!(tapped("panel3-detail-key", &[DETAIL_KEY], KEY_FIVE).judge.offset_ms, -1, "the detail key's panel is the same panel");
+}
+
+/// With a green number held, keys four and six of the third panel move the travel time it is held
+/// at, down and up a millisecond (`DURATION_DOWN`, `DURATION_UP`), and a key that stays down
+/// repeats, which no other key of a panel does.
+#[test]
+fn the_third_panel_moves_the_held_travel_time_while_its_keys_are_held() {
+    let shipped = rbms_config::DEFAULT_DURATION_MS;
+    let held_with = |tag: &str| {
+        let mut browser = holding(tag, &[START, SELECT]);
+        browser.app.shared.config.play.keep_green_number = true;
+        browser
+    };
+    let duration = |browser: &Browser| browser.app.shared.config.play.duration_ms;
+
+    let mut browser = held_with("panel3-duration-up");
+    browser.hold(KEY_SIX);
+    browser.frame_after(SHORT_STEP);
+    assert_eq!(duration(&browser), shipped + 1, "DURATION_UP moves it at once");
+    browser.frame_after(SHORT_STEP);
+    assert_eq!(duration(&browser), shipped + 1, "a held key waits before it repeats");
+    browser.frame_after(PAST_THE_FIRST_REPEAT);
+    assert_eq!(duration(&browser), shipped + 2, "and then repeats");
+    browser.let_go(KEY_SIX);
+    browser.frame_after(SHORT_STEP);
+    assert_eq!(duration(&browser), shipped + 2);
+
+    let mut browser = held_with("panel3-duration-down");
+    browser.hold(KEY_FOUR);
+    browser.frame_after(SHORT_STEP);
+    assert_eq!(duration(&browser), shipped - 1, "DURATION_DOWN");
+    assert_eq!(browser.sel(), 0, "a key of the panel moved the list");
+    assert!((browser.app.shared.config.play.hispeed - Config::default().play.hispeed).abs() < f64::EPSILON, "the speed is worked out when a chart starts");
 }
 
 /// A key held on a panel is one press: the option moves once however long it is held.

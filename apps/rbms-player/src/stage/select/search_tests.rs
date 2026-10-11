@@ -22,6 +22,7 @@ use super::skinned_tests::{
 };
 use super::tests::{entry, press, release};
 use super::*;
+use crate::keyconfig::Bindable;
 use crate::pointer::PointerInput;
 use crate::skin_host::{Cluster, ClusterRequest};
 use crate::stage::capture::skin_folder_of;
@@ -743,4 +744,108 @@ fn what_an_input_method_composes_is_drawn_in_the_skins_search_text() {
     browser.frame_after(SHORT_STEP);
     assert_ne!(text_pixels(&browser), caret_only, "what is being composed is not drawn in the skin's search text");
     assert!(browser.app.shared.search.is_empty());
+}
+
+/// One controller event on the browser.
+fn pad_event(browser: &mut Browser, event: PadEvent) -> Transition {
+    browser.state.handle_pad(&mut FrameCtx { shared: &mut browser.app.shared, now: browser.now, dt: 0.0 }, event)
+}
+
+/// Give `shortcut` the key `code` in the browser's key configuration.
+fn move_shortcut(browser: &mut Browser, shortcut: Shortcut, code: KeyCode) {
+    let mode = browser.app.shared.mode;
+    browser.app.shared.keyconfig.bind(mode, Bindable::Shortcut(shortcut), Some(code));
+}
+
+/// The rule that a key which is text is the word's holds for a shortcut the player moved: one put on
+/// a letter types that letter while a word is typed and does what it does once the typing is over,
+/// and the key it shipped on is nothing any more.
+#[test]
+fn a_shortcut_moved_onto_a_letter_is_a_letter_of_the_word_while_one_is_typed() {
+    for skinned in [true, false] {
+        let mut browser = browser(&format!("search-moved-letter-{skinned}"), skinned);
+        move_shortcut(&mut browser, Shortcut::Sort, KeyCode::KeyG);
+        move_shortcut(&mut browser, Shortcut::Folders, KeyCode::KeyP);
+        type_a_search(&mut browser, "a");
+        let order = browser.app.shared.config.library.sort;
+
+        assert!(matches!(stroke(&mut browser, KeyCode::KeyG, Some("g")), Transition::Stay), "skinned {skinned}");
+        assert!(matches!(stroke(&mut browser, KeyCode::KeyP, Some("p")), Transition::Stay), "skinned {skinned}: a letter left the browser");
+        assert!(browser.app.shared.searching, "skinned {skinned}: a letter ended the typing");
+        assert_eq!(browser.app.shared.search, "agp", "skinned {skinned}: the letters did not reach the word");
+        assert_eq!(browser.app.shared.config.library.sort, order, "skinned {skinned}: a letter of the word reordered the list");
+
+        stroke(&mut browser, KeyCode::F3, None);
+        assert_eq!(browser.app.shared.config.library.sort, order, "skinned {skinned}: the key the order shipped on still steps it");
+        assert!(browser.app.shared.searching);
+
+        stroke(&mut browser, KeyCode::Escape, None);
+        stroke(&mut browser, KeyCode::KeyG, Some("g"));
+        assert_ne!(browser.app.shared.config.library.sort, order, "skinned {skinned}: the moved key does not step the order on a list");
+        assert!(matches!(stroke(&mut browser, KeyCode::KeyP, Some("p")), Transition::Open(Stage::Folders(_))), "skinned {skinned}");
+    }
+}
+
+/// A shortcut moved onto a key that is not text is read under the box by the rule its job falls
+/// under: one that reorders the list does so and the typing goes on, and one that opens something
+/// ends the typing first and then opens it.
+#[test]
+fn a_shortcut_moved_onto_a_key_that_is_not_text_is_read_under_the_box() {
+    for skinned in [true, false] {
+        let mut browser = browser(&format!("search-moved-other-{skinned}"), skinned);
+        move_shortcut(&mut browser, Shortcut::Sort, KeyCode::F7);
+        move_shortcut(&mut browser, Shortcut::Filter, KeyCode::F6);
+        move_shortcut(&mut browser, Shortcut::Folders, KeyCode::Insert);
+        type_a_search(&mut browser, WORD);
+        let order = browser.app.shared.config.library.sort;
+
+        stroke(&mut browser, KeyCode::F7, None);
+        assert_ne!(browser.app.shared.config.library.sort, order, "skinned {skinned}: the moved order key does nothing under the box");
+        assert!(browser.app.shared.searching, "skinned {skinned}: reordering ended the typing");
+
+        stroke(&mut browser, KeyCode::F2, None);
+        assert!(browser.app.shared.searching && !browser.state.filter.is_open(), "skinned {skinned}: the key the filter shipped on still opens it");
+        stroke(&mut browser, KeyCode::F6, None);
+        assert!(!browser.app.shared.searching, "skinned {skinned}: the filter opened over a box still being typed into");
+        assert!(browser.state.filter.is_open(), "skinned {skinned}: the moved filter key did not open the panel");
+        assert_eq!(browser.app.shared.search, WORD, "skinned {skinned}: what was typed was not left on show");
+        stroke(&mut browser, KeyCode::F6, None);
+        assert!(!browser.state.filter.is_open(), "skinned {skinned}: the panel did not close on the key that opened it");
+
+        stroke(&mut browser, KeyCode::Slash, Some("/"));
+        assert!(browser.app.shared.searching);
+        assert!(matches!(stroke(&mut browser, KeyCode::Insert, None), Transition::Open(Stage::Folders(_))), "skinned {skinned}");
+        assert!(!browser.app.shared.searching, "skinned {skinned}: the browser was left with the box still open");
+    }
+}
+
+/// A controller button bound to a shortcut does what the key does, ends the typing of a word first
+/// as any key of a controller does, and is nothing while a panel that takes every key is up.
+#[test]
+fn a_controller_button_bound_to_a_shortcut_does_what_its_key_does() {
+    for skinned in [true, false] {
+        let mut browser = browser(&format!("search-pad-shortcut-{skinned}"), skinned);
+        let order = browser.app.shared.config.library.sort;
+        assert!(matches!(pad_event(&mut browser, PadEvent::Shortcut(Shortcut::Sort)), Transition::Stay));
+        assert_ne!(browser.app.shared.config.library.sort, order, "skinned {skinned}");
+        assert!(matches!(pad_event(&mut browser, PadEvent::Shortcut(Shortcut::Folders)), Transition::Open(Stage::Folders(_))), "skinned {skinned}");
+        assert!(matches!(pad_event(&mut browser, PadEvent::Shortcut(Shortcut::KeyConfig)), Transition::Open(Stage::KeyConfig(_))), "skinned {skinned}");
+        assert!(
+            matches!(pad_event(&mut browser, PadEvent::Shortcut(Shortcut::Retry)), Transition::Stay),
+            "skinned {skinned}: a result key acted on the browser"
+        );
+
+        type_a_search(&mut browser, WORD);
+        assert!(matches!(pad_event(&mut browser, PadEvent::Shortcut(Shortcut::Tables)), Transition::Open(Stage::Tables(_))), "skinned {skinned}");
+        assert!(!browser.app.shared.searching, "skinned {skinned}: a controller button left the box open");
+
+        pad_event(&mut browser, PadEvent::Shortcut(Shortcut::Filter));
+        assert!(browser.state.filter.is_open(), "skinned {skinned}");
+        assert!(
+            matches!(pad_event(&mut browser, PadEvent::Shortcut(Shortcut::Folders)), Transition::Stay),
+            "skinned {skinned}: a button reached the list under the panel"
+        );
+        pad_event(&mut browser, PadEvent::Shortcut(Shortcut::Filter));
+        assert!(!browser.state.filter.is_open(), "skinned {skinned}: the panel did not close on its own button");
+    }
 }

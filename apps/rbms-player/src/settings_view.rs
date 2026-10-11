@@ -52,12 +52,24 @@ const NOTE_GAP: f32 = 16.0;
 /// Widest a row's value is drawn, as a share of the panel.
 const VALUE_MAX_SHARE: f32 = 0.6;
 
-/// Keyboard hint under the title.
-pub(crate) const SETTINGS_HINT: &str = "TAB SWITCH   UP DOWN MOVE   LEFT RIGHT CHANGE   ENTER OPEN   F12 SKIN MENU   ESC SAVE/BACK";
+/// Keyboard hint under the title: the keys of the screen that are its own, then the two that open
+/// the skin menu and the key editor from it, each named by the key it is on.
+const SETTINGS_HINT_OWN: &str = "TAB SWITCH   UP DOWN MOVE   LEFT RIGHT CHANGE   ENTER OPEN   ESC BACK";
+
+/// The hint under the title, naming `skin_menu` and `key_config` as the keys that open the skin menu
+/// and the key editor. They are the keys the key configuration holds, so the hint follows a key the
+/// player moved.
+pub(crate) fn settings_hint(skin_menu: &str, key_config: &str) -> String {
+    format!("{SETTINGS_HINT_OWN}   {skin_menu} SKINS   {key_config} KEYS")
+}
 
 /// What the button at the right end of the tab strip reads: it opens the skin menu, where the skin
 /// settings are listed beside a preview of what they do.
 pub(crate) const SKIN_MENU_LINK: &str = "SKIN MENU >";
+
+/// What the button beside it reads: it opens the key editor, where every key and every controller
+/// button the application reads is listed and can be changed.
+pub(crate) const KEY_CONFIG_LINK: &str = "KEY CONFIG >";
 
 /// Keyboard hint inside the inline rival list.
 pub(crate) const RIVALS_HINT: &str = "UP DOWN MOVE   ENTER ADD   D REMOVE   ESC SAVE/CLOSE";
@@ -90,6 +102,8 @@ pub(crate) struct SettingsScene {
     pub(crate) tab: usize,
     pub(crate) rows: Vec<SettingsLine>,
     pub(crate) sel: usize,
+    /// The keyboard hint under the title ([`settings_hint`]).
+    pub(crate) hint: String,
     /// Text being typed into the focused row, already masked when the row is a secret.
     pub(crate) editor: Option<String>,
     /// Last network result or error, shown under the rows.
@@ -111,6 +125,8 @@ pub(crate) enum SettingsHot {
     Tab(usize),
     /// The button at the right end of the tab strip that opens the skin menu.
     SkinMenuLink,
+    /// The button beside it that opens the key editor.
+    KeyConfigLink,
     Row(usize),
     RivalRow(usize),
 }
@@ -163,6 +179,20 @@ fn skin_menu_link_rect(x0: f32, tabs_end: f32) -> Rect {
     Rect::new((x0 + PANEL_W - w).max(tabs_end), TABS_Y, w, TAB_H)
 }
 
+/// Where the button to the key editor is: above the button to the skin menu, against the panel's
+/// right edge on the line of the title. The strip itself has no room left for a second button, and
+/// up there nothing else is drawn that far right.
+fn key_config_link_rect(x0: f32) -> Rect {
+    let w = tab_width(KEY_CONFIG_LINK);
+    Rect::new(x0 + PANEL_W - w, TABS_Y - TAB_H - TAB_GAP, w, TAB_H)
+}
+
+/// Where the button to the key editor is on the screen as [`render_settings`] lays it out, for the
+/// screen to test a press against.
+pub(crate) fn key_config_link() -> Rect {
+    key_config_link_rect((CANVAS_W - PANEL_W) * 0.5)
+}
+
 /// Draw the screen and return its clickable regions.
 pub(crate) fn render_settings<R: Renderer>(r: &mut R, scene: &SettingsScene) -> Vec<(Rect, SettingsHot)> {
     let th = theme();
@@ -170,7 +200,7 @@ pub(crate) fn render_settings<R: Renderer>(r: &mut R, scene: &SettingsScene) -> 
     let x0 = (CANVAS_W - PANEL_W) * 0.5;
     r.clear(th.bg);
     draw_text(r, x0, TITLE_Y, TITLE_SCALE, th.text, "SETTINGS");
-    draw_text(r, x0, HINT_Y, HINT_SCALE, th.text_muted, SETTINGS_HINT);
+    draw_text(r, x0, HINT_Y, HINT_SCALE, th.text_muted, &fit_text(&scene.hint, HINT_SCALE, PANEL_W - tab_width(KEY_CONFIG_LINK) - TAB_GAP));
 
     let mut tx = x0;
     for (index, name) in scene.tabs.iter().enumerate() {
@@ -186,6 +216,10 @@ pub(crate) fn render_settings<R: Renderer>(r: &mut R, scene: &SettingsScene) -> 
     r.fill_rect(link, th.panel_hi);
     draw_text(r, link.x + TAB_PAD * 0.5, TABS_Y + TAB_TEXT_Y, TAB_SCALE, th.accent, SKIN_MENU_LINK);
     hot.push((link, SettingsHot::SkinMenuLink));
+    let keys = key_config_link_rect(x0);
+    r.fill_rect(keys, th.panel_hi);
+    draw_text(r, keys.x + TAB_PAD * 0.5, keys.y + TAB_TEXT_Y, TAB_SCALE, th.accent, KEY_CONFIG_LINK);
+    hot.push((keys, SettingsHot::KeyConfigLink));
 
     let start = scroll_start(scene.rows.len(), scene.sel);
     for (slot, index) in (start..(start + visible_rows()).min(scene.rows.len())).enumerate() {
@@ -284,6 +318,7 @@ mod tests {
             tab: 5,
             rows: network_rows(),
             sel,
+            hint: settings_hint("F12", "F5"),
             editor: None,
             status: "logged in as dj".to_string(),
             rivals: None,
@@ -330,9 +365,13 @@ mod tests {
     #[test]
     fn the_hint_names_the_key_to_the_skin_menu_and_fits_the_panel() {
         rbms_render::font::use_embedded_fonts_only();
-        assert!(SETTINGS_HINT.contains("F12 SKIN MENU"), "{SETTINGS_HINT}");
-        let width = text_width(SETTINGS_HINT, HINT_SCALE);
-        assert!(width <= PANEL_W, "the hint is {width} wide and the panel {PANEL_W}");
+        let hint = settings_hint("F12", "F5");
+        assert!(hint.contains("F12 SKINS") && hint.contains("F5 KEYS"), "{hint}");
+        let room = key_config_link_rect((CANVAS_W - PANEL_W) * 0.5).x - (CANVAS_W - PANEL_W) * 0.5 - TAB_GAP;
+        let width = text_width(&hint, HINT_SCALE);
+        assert!(width <= room, "the hint is {width} wide and the room beside the button {room}");
+        let longest = settings_hint("BACKSPACE", "RBRACKET");
+        assert!(text_width(&longest, HINT_SCALE) <= PANEL_W, "a hint naming two long keys runs off the panel");
     }
 
     #[test]
@@ -421,6 +460,7 @@ mod tests {
             tab: 1,
             rows: vec![SettingsLine { note, ..SettingsLine::bare("JUDGE TEXT Y", "0%") }, SettingsLine::bare("LETTERBOX", "ON")],
             sel: 1,
+            hint: settings_hint("F12", "F5"),
             editor: None,
             status: String::new(),
             rivals: None,

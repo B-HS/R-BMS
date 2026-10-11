@@ -262,3 +262,116 @@ fn a_run_that_plays_itself_keeps_its_speed_under_start_and_a_key() {
     tap(&mut state, &mut app, START_KEY, now + FRAME);
     assert!(app.shared.config.play.enable_cover, "the lane cover could not be switched on a run that plays itself");
 }
+
+/// The tempo of the chart these tests play.
+const CHART_BPM: f64 = 120.0;
+
+/// How far apart two travel times may read and still be the one, for the rounding they are cut
+/// with, in milliseconds.
+const TRAVEL_ROUNDING_MS: i32 = 1;
+
+/// How long a note is on show on the chart of these tests at the speed and under the cover the
+/// settings hold, in milliseconds.
+fn travel_ms(app: &App) -> i32 {
+    let play = &app.shared.config.play;
+    rbms_config::travel_duration_ms(CHART_BPM, play.hispeed, play.enable_cover.then_some(play.cover))
+}
+
+/// An app whose run pins its speed to a tempo, under a lane cover that is on.
+fn pinned_app(tag: &str) -> App {
+    let mut app = app(tag);
+    app.shared.config.play.fix_hispeed = FixHiSpeed::MainBpm;
+    app.shared.config.play.enable_cover = true;
+    app.shared.config.play.cover = 0.2;
+    app
+}
+
+/// A pinned run holds the travel time it had before the cover moved, and that has to be so for the
+/// very first thing the player does to the cover, by the wheel or by START twice, and not only from
+/// the second on: what the run holds is settled before the cover is touched.
+#[test]
+fn the_first_move_of_the_cover_holds_the_travel_time_a_pinned_run_had_before_it() {
+    let mut wheeled = pinned_app("first-wheel");
+    let mut state = state();
+    let (before, speed) = (travel_ms(&wheeled), wheeled.shared.config.play.hispeed);
+    state.wheel_cover(&mut wheeled.shared, -20.0);
+    assert!(wheeled.shared.config.play.cover > 0.2, "the wheel did not move the cover");
+    assert!(
+        (travel_ms(&wheeled) - before).abs() <= TRAVEL_ROUNDING_MS,
+        "the first notch of the wheel moved the travel time from {before} to {}",
+        travel_ms(&wheeled)
+    );
+    assert!(wheeled.shared.config.play.hispeed < speed, "the speed is what should have moved");
+
+    let mut tapped = pinned_app("first-double-tap");
+    let mut state = state_pinned();
+    let (before, speed) = (travel_ms(&tapped), tapped.shared.config.play.hispeed);
+    let after = tap(&mut state, &mut tapped, START_KEY, Instant::now());
+    tap(&mut state, &mut tapped, START_KEY, after + Duration::from_millis(100));
+    assert!(!tapped.shared.config.play.enable_cover, "START twice did not switch the lane cover off");
+    assert!((travel_ms(&tapped) - before).abs() <= TRAVEL_ROUNDING_MS, "switching the cover off moved the travel time from {before} to {}", travel_ms(&tapped));
+    assert!(tapped.shared.config.play.hispeed > speed);
+}
+
+/// On a run that holds its green number the held keys move the number that is held: START and a
+/// key by the number's own step, SELECT and a key by a millisecond of travel. START twice and
+/// START with the turntable move the cover as they always do, and the speed follows so the number
+/// stays. What is left is what the settings hold for the next chart.
+#[test]
+fn a_run_that_holds_its_green_number_reads_the_held_keys_as_moves_of_that_number() {
+    use rbms_config::{GREEN_NUMBER_STEP, green_of_duration};
+    let mut app = app("held-green");
+    app.shared.config.play.keep_green_number = true;
+    let mut state = state();
+    state.hold_green_number(&mut app.shared);
+    let start = app.shared.config.play.duration_ms;
+    assert_eq!(travel_ms(&app), start, "the run did not start at the travel time the settings hold");
+    let (slower, faster) = (lane_key(&app, FIRST_KEY_LANE, ScratchDir::Forward), lane_key(&app, SECOND_KEY_LANE, ScratchDir::Forward));
+    let mut now = Instant::now();
+
+    hold(&mut app, START_KEY, true);
+    state.held_controls(&mut app.shared, now);
+    state.held_controls(&mut app.shared, now + FRAME);
+    now = tap(&mut state, &mut app, faster, now + FRAME * 2);
+    let quicker = app.shared.config.play.duration_ms;
+    assert_eq!(green_of_duration(quicker), green_of_duration(start) - GREEN_NUMBER_STEP, "START and the faster key did not take a step off the number");
+    assert_eq!(travel_ms(&app), quicker, "the speed did not follow the number");
+    now = tap(&mut state, &mut app, slower, now);
+    assert_eq!(app.shared.config.play.duration_ms, start, "START and the slower key did not put the step back");
+    hold(&mut app, START_KEY, false);
+    state.held_controls(&mut app.shared, now);
+
+    hold(&mut app, SELECT_KEY, true);
+    state.held_controls(&mut app.shared, now + FRAME);
+    state.held_controls(&mut app.shared, now + FRAME * 2);
+    now = tap(&mut state, &mut app, faster, now + FRAME * 3);
+    assert_eq!(app.shared.config.play.duration_ms, start + 1, "SELECT and a key did not add a millisecond of travel");
+    assert_eq!(travel_ms(&app), start + 1);
+    hold(&mut app, SELECT_KEY, false);
+    state.held_controls(&mut app.shared, now);
+    let held = start + 1;
+
+    let much_later = now + Duration::from_secs(5);
+    let after = tap(&mut state, &mut app, START_KEY, much_later);
+    let uncovered = app.shared.config.play.hispeed;
+    app.shared.config.play.cover = 0.25;
+    tap(&mut state, &mut app, START_KEY, after + Duration::from_millis(100));
+    assert!(app.shared.config.play.enable_cover, "START twice did not switch the lane cover on");
+    assert!((travel_ms(&app) - held).abs() <= TRAVEL_ROUNDING_MS, "switching the cover on moved the number: {} against {held}", travel_ms(&app));
+    assert!(app.shared.config.play.hispeed < uncovered, "a covered lane with the same number is a slower scroll");
+
+    let turn = lane_key(&app, TURNTABLE_LANE, ScratchDir::Forward);
+    let covered = app.shared.config.play.hispeed;
+    let mut now = after + Duration::from_secs(5);
+    hold(&mut app, START_KEY, true);
+    state.held_controls(&mut app.shared, now);
+    hold(&mut app, turn, true);
+    for _ in 0..10 {
+        now += PAST_A_STEP;
+        state.held_controls(&mut app.shared, now);
+    }
+    assert!(app.shared.config.play.cover > 0.25, "START and the turntable did not move the cover");
+    assert!((travel_ms(&app) - held).abs() <= TRAVEL_ROUNDING_MS, "moving the cover moved the number: {} against {held}", travel_ms(&app));
+    assert!(app.shared.config.play.hispeed < covered);
+    assert_eq!(app.shared.config.play.duration_ms, held, "the travel time the settings hold moved with the cover");
+}

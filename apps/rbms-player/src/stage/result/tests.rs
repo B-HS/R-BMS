@@ -1113,3 +1113,68 @@ fn the_target_and_the_run_again_offer_are_carried_onto_the_screen() {
     let paced = paint(&mut app, &mut ResultState::new(view()).paced_by(extras));
     assert_ne!(bare, paced, "the target and the run-again hint are not drawn");
 }
+
+/// The run-again and the next-chart key are read from where the key configuration has them: a scene
+/// told of a moved key acts on it and not on the key it shipped on, a key taken away acts on
+/// nothing, and the built-in screen reads the same two keys.
+#[test]
+fn the_run_again_keys_are_read_from_where_the_key_configuration_has_them() {
+    use crate::keyconfig::{Bindable, Shortcut};
+
+    let (mut scene, mut timers) = listening();
+    scene.listen_for(Some(KeyCode::F6), None);
+    scene.key(&press(KeyCode::KeyR));
+    scene.key(&press(KeyCode::KeyN));
+    assert_eq!(scene.step(&mut timers, at_ms(WHILE_LISTENING_MS), IDLE), None);
+    assert!(!timers.is_on(timer_id::FADEOUT), "a key the scene no longer listens on closed it");
+    scene.key(&press(KeyCode::F6));
+    assert_eq!(scene.step(&mut timers, at_ms(WHILE_LISTENING_MS), IDLE), None);
+    assert!(timers.is_on(timer_id::FADEOUT), "the moved run-again key did not act");
+    scene.key(&release(KeyCode::F6));
+    assert_eq!(fade_out(&mut scene, &mut timers, IDLE), Some(Leave::RunAgain));
+
+    let mut app = app_with_result_skin("broken-moved-keys", BROKEN_SKIN);
+    let mut pixels = HeadlessCanvas::new(CW, CH);
+    enter(&mut app, state());
+    for _ in 0..SKIN_FRAMES {
+        frame(&mut app, &mut pixels);
+        if result(&app).stage.skin == SkinStatus::Gone {
+            break;
+        }
+    }
+    assert_eq!(result(&app).stage.skin, SkinStatus::Gone);
+    let mode = app.shared.mode;
+    app.shared.keyconfig.bind(mode, Bindable::Shortcut(Shortcut::Retry), Some(KeyCode::F6));
+    assert!(matches!(key(&mut app, press(KeyCode::KeyR)), Transition::Stay), "the key the run-again shipped on still starts a run");
+    assert!(matches!(key(&mut app, press(KeyCode::F6)), Transition::To(Stage::Loading(_))), "the moved run-again key did not act on the built-in screen");
+}
+
+/// A controller button bound to the run-again shortcut does what its key does: through the scene
+/// on a skin's screen, where it waits for the scene to listen, and at once on the built-in one.
+#[test]
+fn a_controller_button_bound_to_run_again_does_what_its_key_does() {
+    use crate::gamepad::PadEvent;
+    use crate::keyconfig::Shortcut;
+
+    let (mut scene, mut timers) = listening();
+    scene.ask(Shortcut::Search);
+    assert_eq!(scene.step(&mut timers, at_ms(WHILE_LISTENING_MS), IDLE), None);
+    assert!(!timers.is_on(timer_id::FADEOUT), "a shortcut of another screen closed the result");
+    scene.ask(Shortcut::NextSong);
+    assert_eq!(scene.step(&mut timers, at_ms(WHILE_LISTENING_MS), IDLE), None);
+    assert!(timers.is_on(timer_id::FADEOUT), "the button did not act");
+    assert_eq!(fade_out(&mut scene, &mut timers, IDLE), Some(Leave::FollowOn));
+
+    let mut app = app_with_result_skin("broken-pad", BROKEN_SKIN);
+    let mut pixels = HeadlessCanvas::new(CW, CH);
+    enter(&mut app, state());
+    for _ in 0..SKIN_FRAMES {
+        frame(&mut app, &mut pixels);
+        if result(&app).stage.skin == SkinStatus::Gone {
+            break;
+        }
+    }
+    let now = Instant::now();
+    let asked = app.stage.handle_pad(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 }, PadEvent::Shortcut(Shortcut::Retry));
+    assert!(matches!(asked, Transition::To(Stage::Loading(_))), "the button did not act on the built-in screen");
+}

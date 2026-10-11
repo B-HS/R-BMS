@@ -44,7 +44,7 @@ use winit::keyboard::KeyCode;
 
 use crate::app_result::{following_song, next_song, offers_retry, retry};
 use crate::ir_ranking::RankingState;
-use crate::keyconfig::KEY_INDEX_COUNT;
+use crate::keyconfig::{KEY_INDEX_COUNT, Shortcut, ShortcutScreen};
 use crate::skin_host::options::{PlayedOptions, random_option_index};
 use crate::skin_host::overview::ChartOverview;
 use crate::skin_host::result::snapshot::{PreviousScore, REPLAY_SLOT_COUNT, ReplaySlot, ResultInput, ResultSnapshot};
@@ -268,11 +268,16 @@ pub(crate) struct Scene {
     enter: bool,
     /// The same for Escape.
     escape: bool,
-    /// The same for R, this player's run-again key.
+    /// The same for this player's run-again key, which ships on R.
     run_again: bool,
-    /// The same for N, this player's next-chart key.
+    /// The same for this player's next-chart key, which ships on N.
     follow_on: bool,
-    /// Where R or N said the scene leaves for, which the fade does not change.
+    /// The keys the two above are read from: the ones the key configuration holds for
+    /// [`Shortcut::Retry`] and [`Shortcut::NextSong`], or none for one left without a key.
+    run_again_key: Option<KeyCode>,
+    follow_on_key: Option<KeyCode>,
+    /// Where the run-again or the next-chart key said the scene leaves for, which the fade does not
+    /// change.
     chosen: Option<Leave>,
     /// The gauge the graph and the gauge bar show (`AbstractResult.gaugeType`).
     pub(crate) gauge_type: usize,
@@ -303,9 +308,29 @@ impl Scene {
             escape: false,
             run_again: false,
             follow_on: false,
+            run_again_key: Some(Shortcut::Retry.default_key()),
+            follow_on_key: Some(Shortcut::NextSong.default_key()),
             chosen: None,
             gauge_type: DEFAULT_GAUGE_TYPE,
             next_gauge,
+        }
+    }
+
+    /// Read the run-again and the next-chart key from where the key configuration has them now. A
+    /// scene nobody has told listens on the keys the two ship on.
+    pub(crate) fn listen_for(&mut self, run_again: Option<KeyCode>, follow_on: Option<KeyCode>) {
+        self.run_again_key = run_again;
+        self.follow_on_key = follow_on;
+    }
+
+    /// Take the run-again or the next-chart shortcut from a controller button, which is a press
+    /// with no letting go: it waits as a key held down waits, and acts once the scene listens. Any
+    /// other shortcut is not this scene's.
+    pub(crate) fn ask(&mut self, shortcut: Shortcut) {
+        match shortcut {
+            Shortcut::Retry => self.run_again = true,
+            Shortcut::NextSong => self.follow_on = true,
+            _ => {}
         }
     }
 
@@ -326,8 +351,8 @@ impl Scene {
         let waiting = match key.code {
             KeyCode::Enter | KeyCode::NumpadEnter => &mut self.enter,
             KeyCode::Escape => &mut self.escape,
-            KeyCode::KeyR => &mut self.run_again,
-            KeyCode::KeyN => &mut self.follow_on,
+            code if self.run_again_key == Some(code) => &mut self.run_again,
+            code if self.follow_on_key == Some(code) => &mut self.follow_on,
             _ => return,
         };
         if key.pressed {
@@ -894,9 +919,11 @@ impl ResultState {
         }
         match key.code {
             KeyCode::Escape | KeyCode::Enter | KeyCode::NumpadEnter => ctx.shared.leave_play(),
-            KeyCode::KeyR if offers_retry(ctx.shared) => retry(ctx.shared),
-            KeyCode::KeyN if offers_retry(ctx.shared) => next_song(ctx.shared),
-            _ => Transition::Stay,
+            code => match ctx.shared.shortcut_for(ShortcutScreen::Result, code) {
+                Some(Shortcut::Retry) if offers_retry(ctx.shared) => retry(ctx.shared),
+                Some(Shortcut::NextSong) if offers_retry(ctx.shared) => next_song(ctx.shared),
+                _ => Transition::Stay,
+            },
         }
     }
 
@@ -1011,9 +1038,28 @@ impl StageHandler for ResultState {
             SkinStatus::Gone => ResultState::built_in_key(ctx, &key),
             SkinStatus::Reading if key.pressed && key.code == KeyCode::Escape => ctx.shared.leave_play(),
             SkinStatus::Reading | SkinStatus::Ready => {
+                self.stage.scene.listen_for(ctx.shared.shortcut_key(Shortcut::Retry), ctx.shared.shortcut_key(Shortcut::NextSong));
                 self.stage.scene.key(&key);
                 Transition::Stay
             }
+        }
+    }
+
+    /// A controller button bound to the run-again or the next-chart shortcut does what its key
+    /// does: at once on the built-in screen, through the scene on a skin's, and nothing while the
+    /// skin is still being read.
+    fn handle_pad(&mut self, ctx: &mut FrameCtx<'_>, event: crate::gamepad::PadEvent) -> Transition {
+        let crate::gamepad::PadEvent::Shortcut(shortcut) = event else {
+            return Transition::Stay;
+        };
+        match (self.stage.skin, shortcut) {
+            (SkinStatus::Gone, Shortcut::Retry) if offers_retry(ctx.shared) => retry(ctx.shared),
+            (SkinStatus::Gone, Shortcut::NextSong) if offers_retry(ctx.shared) => next_song(ctx.shared),
+            (SkinStatus::Ready, _) => {
+                self.stage.scene.ask(shortcut);
+                Transition::Stay
+            }
+            _ => Transition::Stay,
         }
     }
 

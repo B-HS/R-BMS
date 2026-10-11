@@ -1,7 +1,7 @@
 use crate::gamepad::{ANALOG_THRESHOLD_RANGE, AXIS_DEADZONE_RANGE, AnalogMode, DEBOUNCE_MS_RANGE, PadBinding, PadConfig};
 use crate::keyconfig::{
-    ControlAction, HeldKeys, KEY_INDEX_COUNT, KeyConfig, SCRATCH_BACKWARD_INDEX, SCRATCH_FORWARD_INDEX, default_keys_for_mode, key_from_name, key_index_of,
-    key_name, mode_config_key,
+    Bindable, Clash, ControlAction, GUIDE_KEY, HeldKeys, KEY_INDEX_COUNT, KeyConfig, SCRATCH_BACKWARD_INDEX, SCRATCH_FORWARD_INDEX, Shortcut, ShortcutScreen,
+    UNNAMED_KEY, belongs_to_a_typed_line, clash_among, default_keys_for_mode, fixed_keys_of, key_from_name, key_index_of, key_name, mode_config_key,
 };
 use rbms_model::Mode;
 use rbms_play::ScratchDir;
@@ -10,6 +10,13 @@ use winit::keyboard::KeyCode;
 
 /// An app whose key config is the one this test wrote, so the reverse binding it sets really is the
 /// one the input path resolves against.
+/// The keys of `mode` that two things read at the same moment both have, which is what the key
+/// editor draws in red.
+fn collisions(keys: &KeyConfig, mode: Mode) -> std::collections::HashSet<KeyCode> {
+    let bound = keys.bound_keys(mode);
+    bound.iter().filter_map(|(target, key)| key.filter(|code| clash_among(bound.iter().copied(), *target, *code).is_some())).collect()
+}
+
 fn shared_with(keyconfig: &KeyConfig) -> crate::AppShared {
     let dir = std::env::temp_dir().join(format!("rbms-keyconfig-tests-{}-{:?}", std::process::id(), std::thread::current().id()));
     std::fs::create_dir_all(&dir).expect("a temp directory for the key config");
@@ -77,10 +84,24 @@ fn default_config_has_every_mode_and_control() {
     }
 }
 
-/// The controls a fresh key config leaves unbound. Every key a default layout could spare is
-/// already taken by a lane or another control, so the hidden band is picked in the key editor
-/// rather than shipped on a key that would shadow something else.
-const UNBOUND_BY_DEFAULT: [ControlAction; 2] = [ControlAction::HiddenUp, ControlAction::HiddenDown];
+/// The controls a fresh key config leaves unbound: the hidden band, and every control that was
+/// added after the ones a run cannot do without. Each is a key a player asks for in the key editor
+/// rather than one shipped where a stray press in a run would move something. The modifier for the
+/// finer step is among them because no one key is free on every shipped layout: unbound, it is the
+/// shift that plays no lane.
+const UNBOUND_BY_DEFAULT: [ControlAction; 11] = [
+    ControlAction::HiddenUp,
+    ControlAction::HiddenDown,
+    ControlAction::LiftToggle,
+    ControlAction::HiddenToggle,
+    ControlAction::GreenUp,
+    ControlAction::GreenDown,
+    ControlAction::KeepGreenToggle,
+    ControlAction::OffsetUp,
+    ControlAction::OffsetDown,
+    ControlAction::AutoAdjustToggle,
+    ControlAction::Fine,
+];
 
 #[test]
 fn rebinding_a_control_round_trips_via_ron() {
@@ -115,7 +136,7 @@ fn lane_keys_backfills_short_and_invalid_rows() {
 fn collisions_flags_key_shared_by_control_and_lane() {
     let mut kc = KeyConfig::default();
     kc.set_control(ControlAction::CoverUp, KeyCode::KeyZ);
-    let dup = kc.collisions(Mode::BEAT_7K);
+    let dup = collisions(&kc, Mode::BEAT_7K);
     assert!(dup.contains(&KeyCode::KeyZ), "shared key reported as a collision");
     assert!(!dup.contains(&KeyCode::ArrowDown), "an unshared key is not a collision");
 }
@@ -131,7 +152,7 @@ fn key_from_name_is_case_insensitive() {
 
 #[test]
 fn key_from_name_unknown_token_is_none() {
-    for bad in ["", "BOGUS", "F13", "  ", "AA", "KEYA", "ENTER", "ESCAPE"] {
+    for bad in ["", "BOGUS", "F13", "  ", "AA", "KEYA", "RETURN", "ESCAPE"] {
         assert_eq!(key_from_name(bad), None, "{bad:?} is not a known key token");
     }
 }
@@ -214,8 +235,8 @@ fn key_name_round_trips_through_key_from_name_for_every_token() {
 
 #[test]
 fn key_name_unmapped_code_is_question_mark() {
-    assert_eq!(key_name(KeyCode::Enter), "?", "a code with no token gets the sentinel");
-    assert_eq!(key_from_name(key_name(KeyCode::Enter)), None, "and the sentinel does not round-trip back to a code");
+    assert_eq!(key_name(KeyCode::Escape), "?", "a code with no token gets the sentinel");
+    assert_eq!(key_from_name(key_name(KeyCode::Escape)), None, "and the sentinel does not round-trip back to a code");
 }
 
 #[test]
@@ -309,7 +330,7 @@ fn lane_keys_returned_in_ascending_lane_order() {
 fn collisions_empty_when_no_key_shared() {
     let kc = KeyConfig::default();
     for &mode in Mode::ALL {
-        assert!(kc.collisions(mode).is_empty(), "{} arrow/bracket controls never share a key with a letter/shift lane", mode.name);
+        assert!(collisions(&kc, mode).is_empty(), "{} arrow/bracket controls never share a key with a letter/shift lane", mode.name);
     }
 }
 
@@ -318,7 +339,7 @@ fn collisions_detects_two_controls_sharing_a_key() {
     let mut kc = KeyConfig::default();
     kc.set_control(ControlAction::HiSpeedUp, KeyCode::KeyP);
     kc.set_control(ControlAction::HiSpeedDown, KeyCode::KeyP);
-    let dup = kc.collisions(Mode::BEAT_7K);
+    let dup = collisions(&kc, Mode::BEAT_7K);
     assert!(dup.contains(&KeyCode::KeyP), "two controls on the same key collide");
 }
 
@@ -327,7 +348,7 @@ fn collisions_detects_two_lanes_sharing_a_key() {
     let mut kc = KeyConfig::default();
     kc.set_lane(Mode::BEAT_7K, 0, KeyCode::KeyP);
     kc.set_lane(Mode::BEAT_7K, 1, KeyCode::KeyP);
-    let dup = kc.collisions(Mode::BEAT_7K);
+    let dup = collisions(&kc, Mode::BEAT_7K);
     assert!(dup.contains(&KeyCode::KeyP), "two lanes on the same key collide");
 }
 
@@ -365,7 +386,7 @@ fn control_token_matches_default_strings() {
 
 #[test]
 fn control_action_all_has_distinct_nonempty_labels() {
-    assert_eq!(ControlAction::ALL.len(), 10);
+    assert_eq!(ControlAction::ALL.len(), 20);
     let mut labels: Vec<&str> = ControlAction::ALL.iter().map(|a| a.label()).collect();
     for l in &labels {
         assert!(!l.is_empty(), "label non-empty");
@@ -480,11 +501,11 @@ fn a_reverse_key_collides_with_the_lane_and_control_keys() {
     let scratch = (0..mode.key).find(|&lane| mode.is_scratch(lane)).expect("7K has a scratch lane");
     let lane_key = kc.lane_keys(mode)[0].0;
     kc.set_scratch_reverse(mode, scratch, lane_key);
-    assert!(kc.collisions(mode).contains(&lane_key), "a reverse key that shadows a lane is flagged");
+    assert!(collisions(&kc, mode).contains(&lane_key), "a reverse key that shadows a lane is flagged");
 
     let mut kc = KeyConfig::default();
     kc.set_scratch_reverse(mode, scratch, KeyCode::KeyQ);
-    assert!(!kc.collisions(mode).contains(&KeyCode::KeyQ), "a reverse key of its own is not a collision");
+    assert!(!collisions(&kc, mode).contains(&KeyCode::KeyQ), "a reverse key of its own is not a collision");
 }
 
 /// The reverse map is a second field, so a config written before it existed still parses and a
@@ -591,7 +612,7 @@ fn the_shipped_start_and_select_keys_collide_with_nothing() {
         let code = kc.control_key(action).expect("shipped bound");
         assert!(panel_action(code).is_none(), "{action:?} is a key the ranking panel reads");
         for &mode in Mode::ALL {
-            assert!(kc.collisions(mode).is_empty(), "{} has a shared key once {action:?} is counted", mode.name);
+            assert!(collisions(&kc, mode).is_empty(), "{} has a shared key once {action:?} is counted", mode.name);
             assert!(default_keys_for_mode(mode).iter().all(|(lane_key, _)| *lane_key != code), "{action:?} sits on a default {} lane", mode.name);
         }
     }
@@ -658,17 +679,18 @@ fn a_rebound_start_survives_the_file_and_the_held_keys_do_not() {
 fn start_and_select_collide_like_any_other_control() {
     let mut kc = KeyConfig::default();
     kc.set_control(ControlAction::Start, KeyCode::KeyZ);
-    assert!(kc.collisions(Mode::BEAT_7K).contains(&KeyCode::KeyZ), "START on a lane key is flagged");
+    assert!(collisions(&kc, Mode::BEAT_7K).contains(&KeyCode::KeyZ), "START on a lane key is flagged");
 
     let mut kc = KeyConfig::default();
     kc.set_control(ControlAction::Select, KeyCode::KeyA);
-    assert!(kc.collisions(Mode::BEAT_7K).contains(&KeyCode::KeyA), "SELECT on START's key is flagged");
+    assert!(collisions(&kc, Mode::BEAT_7K).contains(&KeyCode::KeyA), "SELECT on START's key is flagged");
 }
 
 #[test]
 fn start_and_select_are_the_controls_that_give_way_to_a_lane() {
     for action in ControlAction::ALL {
-        assert_eq!(action.yields_to_lanes(), matches!(action, ControlAction::Start | ControlAction::Select), "{action:?}");
+        let yields = matches!(action, ControlAction::Start | ControlAction::Select | ControlAction::CoverToggle);
+        assert_eq!(action.yields_to_lanes(), yields, "{action:?}");
     }
 }
 
@@ -763,5 +785,315 @@ fn no_mode_hands_out_an_index_past_the_last_one() {
                 }
             }
         }
+    }
+}
+
+/// A key config as the application wrote it before the shortcuts and the newer controls could be
+/// bound: its lanes, the ten controls it knew, and a pad block that names its controls by the words
+/// they were then drawn with.
+const FILE_FROM_BEFORE_SHORTCUTS: &str = r#"(
+    lanes: {"7K": ["Q", "S", "X", "D", "C", "F", "V", "LSHIFT"]},
+    scratch_reverse: {"7K": ["", "", "", "", "", "", "", "LCTRL"]},
+    controls: (
+        hispeed_up: "EQUAL", hispeed_down: "MINUS", cover_up: "RIGHT", cover_down: "LEFT",
+        lift_up: "RBRACKET", lift_down: "LBRACKET", hidden_up: "", hidden_down: "",
+        start: "A", select: "W",
+    ),
+    pad: (controls: {"COVER UP": Button(4), "HIDDEN+ DOWN": Button(5), "START": Button(9)}),
+)"#;
+
+fn shortcut(of: Shortcut) -> Bindable {
+    Bindable::Shortcut(of)
+}
+
+fn control(of: ControlAction) -> Bindable {
+    Bindable::Control(of)
+}
+
+/// Every key a shortcut or a control ships on has a word in the file, so a config that is written
+/// out reads back onto the same keys, and so do the function keys and the editing keys a player can
+/// now give one.
+#[test]
+fn every_key_that_ships_and_every_key_that_was_added_has_a_word_in_the_file() {
+    let shipped = Shortcut::ALL.into_iter().map(Shortcut::default_key);
+    let added = [
+        KeyCode::F1,
+        KeyCode::F5,
+        KeyCode::F12,
+        KeyCode::Tab,
+        KeyCode::Enter,
+        KeyCode::Backspace,
+        KeyCode::Delete,
+        KeyCode::Insert,
+        KeyCode::Home,
+        KeyCode::End,
+        KeyCode::Backquote,
+        KeyCode::AltLeft,
+        KeyCode::AltRight,
+        KeyCode::Numpad0,
+        KeyCode::Numpad9,
+    ];
+    for code in shipped.chain(added) {
+        assert_ne!(key_name(code), UNNAMED_KEY, "{code:?} has no word");
+        assert_eq!(key_from_name(key_name(code)), Some(code), "{code:?} does not read back");
+    }
+}
+
+/// A fresh config and a file written before the shortcuts could be moved read every shortcut from
+/// the key it ships on, the newer controls where they ship, and everything the file did hold as it
+/// held it.
+#[test]
+fn a_file_from_before_the_shortcuts_reads_every_key_where_it_always_was() {
+    let older: KeyConfig = ron::from_str(FILE_FROM_BEFORE_SHORTCUTS).expect("a config from before the shortcuts parses");
+    for keys in [&KeyConfig::default(), &older] {
+        for shortcut in Shortcut::ALL {
+            assert_eq!(keys.shortcut_key(shortcut), Some(shortcut.default_key()), "{shortcut:?}");
+        }
+        assert_eq!(keys.control_key(ControlAction::CoverToggle), Some(KeyCode::Backslash));
+        for action in [ControlAction::LiftToggle, ControlAction::GreenUp, ControlAction::OffsetDown, ControlAction::AutoAdjustToggle] {
+            assert_eq!(keys.control_key(action), None, "{action:?} ships with no key");
+        }
+    }
+    assert!(older.shortcuts.is_empty(), "reading an older file stored a shortcut nobody moved");
+    assert_eq!(older.control_key(ControlAction::HiSpeedUp), Some(KeyCode::Equal), "a control the file moved was put back");
+    assert_eq!(older.control_key(ControlAction::CoverUp), Some(KeyCode::ArrowRight));
+    assert_eq!(older.lane_keys(Mode::BEAT_7K)[0], (KeyCode::KeyQ, 0), "a lane the file moved was put back");
+    assert_eq!(older.scratch_reverse_keys(Mode::BEAT_7K), vec![(KeyCode::ControlLeft, 7)]);
+    assert_eq!(older.pad.control_binding(ControlAction::CoverUp), Some(PadBinding::Button(4)), "the pad block's own word for the control is not read");
+    assert_eq!(older.pad.control_binding(ControlAction::HiddenDown), Some(PadBinding::Button(5)));
+    assert_eq!(older.pad.control_binding(ControlAction::Start), Some(PadBinding::Button(9)));
+}
+
+/// The same file read from disk is not mistaken for a broken one, and what the new version writes
+/// reads back the same.
+#[test]
+fn a_file_from_before_the_shortcuts_loads_from_disk_and_survives_being_written_again() {
+    let dir = std::env::temp_dir().join(format!("rbms_kc_before_shortcuts_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("keyconfig.ron");
+    std::fs::write(&path, FILE_FROM_BEFORE_SHORTCUTS).unwrap();
+    let loaded = KeyConfig::load(&path);
+    assert!(!path.with_extension("ron.bak").exists(), "the older file was backed up as if it were broken");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), FILE_FROM_BEFORE_SHORTCUTS, "the older file was rewritten on load");
+    assert_eq!(loaded.control_key(ControlAction::HiSpeedUp), Some(KeyCode::Equal));
+
+    loaded.save(&path);
+    let again = KeyConfig::load(&path);
+    assert_eq!(again.bound_keys(Mode::BEAT_7K), loaded.bound_keys(Mode::BEAT_7K));
+    assert_eq!(again.pad, loaded.pad);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A shortcut the player moved is written out and read back on its new key, one left without a key
+/// stays without one, and one put back on its shipped key is no longer stored at all.
+#[test]
+fn a_moved_shortcut_survives_the_file_and_one_left_without_a_key_stays_without() {
+    let mode = Mode::BEAT_7K;
+    let mut keys = KeyConfig::default();
+    keys.bind(mode, shortcut(Shortcut::Search), Some(KeyCode::F6));
+    keys.bind(mode, shortcut(Shortcut::Folders), None);
+    keys.bind(mode, shortcut(Shortcut::Tables), Some(KeyCode::F7));
+    keys.restore(mode, shortcut(Shortcut::Tables));
+    let text = ron::ser::to_string_pretty(&keys, ron::ser::PrettyConfig::default()).unwrap();
+    let back: KeyConfig = ron::from_str(&text).unwrap();
+    assert_eq!(back.shortcut_key(Shortcut::Search), Some(KeyCode::F6));
+    assert_eq!(back.shortcut_on(ShortcutScreen::Browser, KeyCode::F6), Some(Shortcut::Search));
+    assert_eq!(back.shortcut_on(ShortcutScreen::Browser, KeyCode::Slash), None, "the key the search shipped on still opens it");
+    assert_eq!(back.shortcut_key(Shortcut::Folders), None);
+    assert_eq!(back.shortcut_key(Shortcut::Tables), Some(Shortcut::Tables.default_key()));
+    assert!(!back.shortcuts.contains_key(Shortcut::Tables.config_key()), "a shortcut on its shipped key is stored");
+}
+
+/// A word in the file that names no key leaves the shortcut on the key it ships on, so a hand-edited
+/// file cannot take away the way into a screen.
+#[test]
+fn a_word_that_names_no_key_reads_the_shipped_key() {
+    let edited: KeyConfig = ron::from_str(r#"(shortcuts: {"settings": "NO SUCH KEY", "skin_menu": ""})"#).expect("the file parses");
+    assert_eq!(edited.shortcut_key(Shortcut::Settings), Some(Shortcut::Settings.default_key()));
+    assert_eq!(edited.shortcut_key(Shortcut::SkinMenu), None, "an empty word is the player taking the key away");
+}
+
+/// The shortcuts and the controls are stored under names that do not change with what the rows are
+/// called on screen, each name is used once, and the ten controls an older pad block names keep the
+/// names it knows them by.
+#[test]
+fn the_names_in_the_file_are_stable_and_distinct() {
+    let older = [
+        (ControlAction::HiSpeedUp, "HI-SPEED UP"),
+        (ControlAction::HiSpeedDown, "HI-SPEED DOWN"),
+        (ControlAction::CoverUp, "COVER UP"),
+        (ControlAction::CoverDown, "COVER DOWN"),
+        (ControlAction::LiftUp, "LIFT UP"),
+        (ControlAction::LiftDown, "LIFT DOWN"),
+        (ControlAction::HiddenUp, "HIDDEN+ UP"),
+        (ControlAction::HiddenDown, "HIDDEN+ DOWN"),
+        (ControlAction::Start, "START"),
+        (ControlAction::Select, "SELECT"),
+    ];
+    for (action, name) in older {
+        assert_eq!(action.config_key(), name, "{action:?}");
+    }
+    let controls: std::collections::HashSet<&str> = ControlAction::ALL.into_iter().map(ControlAction::config_key).collect();
+    assert_eq!(controls.len(), ControlAction::ALL.len());
+    let shortcuts: std::collections::HashSet<&str> = Shortcut::ALL.into_iter().map(Shortcut::config_key).collect();
+    assert_eq!(shortcuts.len(), Shortcut::ALL.len());
+}
+
+/// The rows of the lane cover say which way the cover moves and what that does: the amount going up
+/// is the cover coming down over more of the field.
+#[test]
+fn the_cover_rows_say_which_way_the_cover_moves() {
+    assert_eq!(ControlAction::CoverUp.label(), "LANE COVER DOWN (COVER MORE)");
+    assert_eq!(ControlAction::CoverDown.label(), "LANE COVER UP (COVER LESS)");
+    assert_eq!(ControlAction::CoverToggle.label(), "LANE COVER ON/OFF");
+}
+
+/// Two things read on one screen cannot share a key, and two things read on different screens can.
+#[test]
+fn a_key_is_refused_only_to_something_read_with_what_already_has_it() {
+    let mode = Mode::BEAT_7K;
+    let keys = KeyConfig::default();
+    let refused = [
+        (shortcut(Shortcut::Search), KeyCode::F2, shortcut(Shortcut::Filter), "two shortcuts of the browser"),
+        (shortcut(Shortcut::Search), KeyCode::Digit1, shortcut(Shortcut::RefMode), "a shortcut and a number key of the browser"),
+        (shortcut(Shortcut::Search), KeyCode::KeyA, control(ControlAction::Start), "a shortcut of the browser and START"),
+        (control(ControlAction::Select), KeyCode::KeyO, shortcut(Shortcut::Folders), "SELECT and a shortcut of the browser"),
+        (shortcut(Shortcut::Retry), KeyCode::KeyN, shortcut(Shortcut::NextSong), "the two keys of the result"),
+        (shortcut(Shortcut::ReplayPause), KeyCode::ArrowUp, control(ControlAction::HiSpeedUp), "a replay key and a control of a run"),
+        (control(ControlAction::HiSpeedUp), KeyCode::Space, shortcut(Shortcut::ReplayPause), "a control of a run and a replay key"),
+        (control(ControlAction::CoverToggle), KeyCode::ArrowLeft, control(ControlAction::CoverDown), "two controls of a run"),
+        (control(ControlAction::CoverToggle), KeyCode::KeyZ, Bindable::Lane(0), "a control and a lane"),
+        (Bindable::Lane(0), KeyCode::KeyF, Bindable::Lane(5), "two lanes"),
+        (Bindable::ScratchReverse(7), KeyCode::Backslash, control(ControlAction::CoverToggle), "a reverse key and a control"),
+    ];
+    for (target, code, holder, what) in refused {
+        assert_eq!(keys.clash(mode, target, code), Some(Clash::With(holder)), "{what}");
+    }
+    let allowed = [
+        (shortcut(Shortcut::Search), KeyCode::BracketLeft, "a shortcut of the browser and a control of a run"),
+        (shortcut(Shortcut::Retry), KeyCode::KeyR, "a result key on the key a browser shortcut has"),
+        (shortcut(Shortcut::Retry), KeyCode::Slash, "a result key and a browser shortcut"),
+        (shortcut(Shortcut::ReplayPause), KeyCode::KeyZ, "a replay key and a lane, which a replay does not read"),
+        (control(ControlAction::HiSpeedUp), KeyCode::F2, "a control of a run and a browser shortcut"),
+        (control(ControlAction::HiSpeedUp), KeyCode::ArrowUp, "a control and the key it already has"),
+        (Bindable::Lane(0), KeyCode::Slash, "a lane and a browser shortcut"),
+    ];
+    for (target, code, what) in allowed {
+        assert_eq!(keys.clash(mode, target, code), None, "{what}");
+    }
+}
+
+/// The keys a screen keeps for itself cannot be given to anything it reads, and can be given to what
+/// another screen reads.
+#[test]
+fn a_screens_fixed_keys_cannot_be_given_to_what_it_reads() {
+    let mode = Mode::BEAT_7K;
+    let keys = KeyConfig::default();
+    assert!(fixed_keys_of(ShortcutScreen::Browser).contains(&GUIDE_KEY), "the guide key is the browser's own");
+    for screen in [ShortcutScreen::Browser, ShortcutScreen::Result, ShortcutScreen::Replay] {
+        let read_there = Shortcut::ALL.into_iter().find(|shortcut| shortcut.screen() == screen).expect("every screen reads a shortcut");
+        for code in fixed_keys_of(screen) {
+            assert_eq!(keys.clash(mode, shortcut(read_there), *code), Some(Clash::Fixed), "{read_there:?} onto {code:?}");
+        }
+    }
+    assert_eq!(keys.clash(mode, shortcut(Shortcut::ReplayPause), KeyCode::Enter), None, "Enter is not the replay's");
+    assert_eq!(keys.clash(mode, control(ControlAction::CoverToggle), KeyCode::Enter), None, "Enter is not a run's");
+    assert_eq!(keys.clash(mode, control(ControlAction::CoverToggle), KeyCode::Escape), Some(Clash::Fixed));
+    assert_eq!(keys.clash(mode, Bindable::Lane(0), KeyCode::Escape), Some(Clash::Fixed));
+}
+
+/// As shipped nothing clashes in any mode, so a fresh install opens the key editor with no row in
+/// red.
+#[test]
+fn the_shipped_keys_clash_with_nothing_in_any_mode() {
+    let keys = KeyConfig::default();
+    for &mode in Mode::ALL {
+        for (target, key) in keys.bound_keys(mode) {
+            let Some(code) = key else { continue };
+            assert_eq!(keys.clash(mode, target, code), None, "{} {target:?} on {code:?}", mode.name);
+        }
+    }
+}
+
+/// A shortcut of the browser on a key that also plays a lane is not refused -- the shipped layout
+/// has one -- and the editor is told which lane it is.
+#[test]
+fn a_browser_shortcut_on_a_lane_key_is_named_rather_than_refused() {
+    let keys = KeyConfig::default();
+    assert_eq!(keys.lane_sharing(Mode::BEAT_7K, shortcut(Shortcut::Favourite)), Some(5), "F stars a chart and plays key six");
+    assert_eq!(keys.lane_sharing(Mode::BEAT_7K, shortcut(Shortcut::OptionsHold)), Some(7), "left shift holds the overlay and is the turntable");
+    assert_eq!(keys.lane_sharing(Mode::BEAT_7K, shortcut(Shortcut::Search)), None);
+    assert_eq!(keys.lane_sharing(Mode::BEAT_7K, shortcut(Shortcut::Retry)), None, "the result does not read the lanes as the browser does");
+    assert_eq!(keys.lane_sharing(Mode::BEAT_7K, control(ControlAction::Start)), None);
+}
+
+/// Taking a key away leaves a control or a shortcut with none, and puts a lane back on the key it
+/// ships with, since a lane is never left unhittable.
+#[test]
+fn clearing_leaves_a_control_unbound_and_a_lane_on_its_shipped_key() {
+    let mode = Mode::BEAT_7K;
+    let mut keys = KeyConfig::default();
+    keys.set_lane(mode, 2, KeyCode::KeyP);
+    keys.bind(mode, Bindable::Lane(2), None);
+    assert_eq!(keys.lane_keys(mode)[2], (KeyCode::KeyX, 2));
+    keys.bind(mode, control(ControlAction::CoverUp), None);
+    assert_eq!(keys.control_key(ControlAction::CoverUp), None);
+    keys.set_scratch_reverse(mode, 7, KeyCode::ControlLeft);
+    keys.bind(mode, Bindable::ScratchReverse(7), None);
+    assert!(keys.scratch_reverse_keys(mode).is_empty());
+}
+
+/// Restoring puts one row back on the key it ships with, and restoring everything puts every key
+/// and every controller binding back while leaving the controller's own tuning alone.
+#[test]
+fn restoring_puts_a_row_or_everything_back_as_shipped() {
+    let mode = Mode::BEAT_7K;
+    let mut keys = KeyConfig::default();
+    keys.bind(mode, control(ControlAction::CoverUp), Some(KeyCode::KeyP));
+    keys.bind(mode, control(ControlAction::LiftToggle), Some(KeyCode::KeyU));
+    keys.bind(mode, Bindable::Lane(0), Some(KeyCode::KeyQ));
+    keys.bind(mode, shortcut(Shortcut::Search), Some(KeyCode::F6));
+    keys.pad.set_lane(mode, 0, Some(PadBinding::Button(1)));
+    keys.pad.set_shortcut(Shortcut::Search, Some(PadBinding::Button(2)));
+    keys.pad.debounce_ms = 40;
+
+    keys.restore(mode, control(ControlAction::CoverUp));
+    assert_eq!(keys.control_key(ControlAction::CoverUp), Some(KeyCode::ArrowRight));
+    keys.restore(mode, control(ControlAction::LiftToggle));
+    assert_eq!(keys.control_key(ControlAction::LiftToggle), None, "a control that ships with no key is restored to none");
+    keys.restore(mode, Bindable::Lane(0));
+    assert_eq!(keys.lane_keys(mode)[0], (KeyCode::KeyZ, 0));
+
+    keys.bind(mode, control(ControlAction::CoverUp), Some(KeyCode::KeyP));
+    keys.restore_everything();
+    let shipped = KeyConfig::default();
+    assert_eq!(keys.bound_keys(mode), shipped.bound_keys(mode));
+    assert_eq!(keys.pad.lane_binding(mode, 0), None);
+    assert_eq!(keys.pad.shortcut_binding(Shortcut::Search), None);
+    assert_eq!(keys.pad.debounce_ms, 40, "the controller's tuning was thrown away with its bindings");
+}
+
+/// A key the file has no word for is not bound: the row keeps what it had.
+#[test]
+fn a_key_with_no_word_is_not_bound() {
+    let mode = Mode::BEAT_7K;
+    let mut keys = KeyConfig::default();
+    for target in [control(ControlAction::CoverUp), Bindable::Lane(0), shortcut(Shortcut::Search)] {
+        let before = keys.bound_keys(mode);
+        keys.bind(mode, target, Some(KeyCode::F13));
+        assert_eq!(keys.bound_keys(mode), before, "{target:?}");
+    }
+}
+
+/// The keys that put a character on a line or edit it are the line's while one is typed; the keys
+/// a shortcut can be read from under a search box are the rest.
+#[test]
+fn the_keys_of_a_typed_line_are_the_ones_that_type_and_edit() {
+    for code in [KeyCode::KeyF, KeyCode::Digit0, KeyCode::Slash, KeyCode::Space, KeyCode::Numpad3, KeyCode::Backspace, KeyCode::Delete, KeyCode::ArrowLeft] {
+        assert!(belongs_to_a_typed_line(code), "{code:?}");
+    }
+    for code in [KeyCode::F2, KeyCode::F12, KeyCode::Tab, KeyCode::Insert, KeyCode::ShiftLeft, KeyCode::ArrowUp, KeyCode::Enter, KeyCode::Escape] {
+        assert!(!belongs_to_a_typed_line(code), "{code:?}");
     }
 }

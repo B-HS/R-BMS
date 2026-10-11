@@ -12,8 +12,9 @@ use std::path::PathBuf;
 
 use super::tests::press;
 use super::*;
-use crate::settings_view::{SETTINGS_HINT, visible_rows};
+use crate::settings_view::{settings_hint, visible_rows};
 use crate::stage::render_tests::app;
+use crate::stage::select::SKIN_MENU_KEY;
 use crate::stage::{Canvas, HeadlessCanvas, StageId};
 
 /// Environment variable naming the folder captures are saved in, the one the screen capture harness
@@ -206,7 +207,8 @@ fn the_way_to_the_skin_menu_is_shut_while_an_editor_or_a_list_is_open() {
 #[test]
 fn the_hint_names_the_key_that_opens_the_menu() {
     assert_eq!(SKIN_MENU_KEY, KeyCode::F12);
-    assert!(SETTINGS_HINT.contains("F12 SKIN MENU"), "{SETTINGS_HINT}");
+    let hint = settings_hint(crate::keyconfig::key_name(SKIN_MENU_KEY), "F5");
+    assert!(hint.contains("F12 SKINS"), "{hint}");
 }
 
 /// Every tab of the screen, drawn and saved for a person to look at when a capture folder was named.

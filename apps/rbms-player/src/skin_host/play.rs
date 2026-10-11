@@ -8,7 +8,7 @@
 //!
 //! What these clusters answer: options 32-33, 40-43, 82, 84, 241, 261, 361, 270-273, 400, 1080,
 //! 1240, 1242-1243, 1262-1263 and 1362-1363; numbers 10, 12, 14, 160-164, 310-313, 314-316, 525-527
-//! and 1312-1327; floats 310; rates 4-6 and 101; image indices 40, 42-43, 54-55 and 301-308.
+//! and 1312-1327; floats 310; rates 4-6 and 101; image indices 40, 42-43, 54-55, 75 and 301-308.
 //! The loading options (80-81) and the loading progress are cluster M's, the score and the gauge
 //! ranges are cluster B's ([`ScoreState::of_play`](super::score::ScoreState::of_play)). The
 //! offsets the lift, the cover and the hidden band move objects by belong to the timer driver
@@ -34,7 +34,7 @@
 
 use rbms_skin::property::generated::*;
 
-use super::ClusterState;
+use super::{ClusterState, INDEX_TIMING_AUTO_ADJUST};
 
 pub mod shown;
 
@@ -266,6 +266,7 @@ impl ClusterState for PlayState<'_> {
             BUTTON_RANDOM_2P => played.random_2p,
             BUTTON_DPOPTION => played.double_option,
             BUTTON_HSFIX => live.lanes.fix_hispeed,
+            INDEX_TIMING_AUTO_ADJUST => i32::from(live.judge_timing_auto),
             BUTTON_ASSIST_EXJUDGE => i32::from(played.custom_judge),
             BUTTON_ASSIST_CONSTANT => i32::from(played.constant_scroll),
             BUTTON_ASSIST_JUDGEAREA => i32::from(played.judge_area),

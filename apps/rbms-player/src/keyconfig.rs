@@ -69,8 +69,117 @@ pub fn key_from_name(s: &str) -> Option<KeyCode> {
         "PAGEUP" => PageUp,
         "PAGEDOWN" => PageDown,
         "BACKSLASH" => Backslash,
+        "BACKQUOTE" => Backquote,
+        "TAB" => Tab,
+        "ENTER" => Enter,
+        "BACKSPACE" => Backspace,
+        "DELETE" => Delete,
+        "INSERT" => Insert,
+        "HOME" => Home,
+        "END" => End,
+        "LALT" | "ALT" => AltLeft,
+        "RALT" => AltRight,
+        "F1" => F1,
+        "F2" => F2,
+        "F3" => F3,
+        "F4" => F4,
+        "F5" => F5,
+        "F6" => F6,
+        "F7" => F7,
+        "F8" => F8,
+        "F9" => F9,
+        "F10" => F10,
+        "F11" => F11,
+        "F12" => F12,
+        "NUM0" => Numpad0,
+        "NUM1" => Numpad1,
+        "NUM2" => Numpad2,
+        "NUM3" => Numpad3,
+        "NUM4" => Numpad4,
+        "NUM5" => Numpad5,
+        "NUM6" => Numpad6,
+        "NUM7" => Numpad7,
+        "NUM8" => Numpad8,
+        "NUM9" => Numpad9,
         _ => return None,
     })
+}
+
+/// What [`key_name`] answers for a key the key config file has no word for. Such a key cannot be
+/// bound: the word would not read back as a key.
+pub const UNNAMED_KEY: &str = "?";
+
+/// Whether a key puts a character on a line that is being typed: a letter, a digit, a mark, the
+/// space bar or a digit of the number pad. While a search word is typed these are the word's
+/// whatever is bound to them, and every other key is free to be a shortcut.
+pub fn types_a_character(code: KeyCode) -> bool {
+    use KeyCode::*;
+    matches!(
+        code,
+        KeyA | KeyB
+            | KeyC
+            | KeyD
+            | KeyE
+            | KeyF
+            | KeyG
+            | KeyH
+            | KeyI
+            | KeyJ
+            | KeyK
+            | KeyL
+            | KeyM
+            | KeyN
+            | KeyO
+            | KeyP
+            | KeyQ
+            | KeyR
+            | KeyS
+            | KeyT
+            | KeyU
+            | KeyV
+            | KeyW
+            | KeyX
+            | KeyY
+            | KeyZ
+            | Digit0
+            | Digit1
+            | Digit2
+            | Digit3
+            | Digit4
+            | Digit5
+            | Digit6
+            | Digit7
+            | Digit8
+            | Digit9
+            | Numpad0
+            | Numpad1
+            | Numpad2
+            | Numpad3
+            | Numpad4
+            | Numpad5
+            | Numpad6
+            | Numpad7
+            | Numpad8
+            | Numpad9
+            | Space
+            | Comma
+            | Period
+            | Slash
+            | Semicolon
+            | Quote
+            | BracketLeft
+            | BracketRight
+            | Minus
+            | Equal
+            | Backslash
+            | Backquote
+    )
+}
+
+/// Whether a key is the line's while a line is being typed: one that types a character, or one of
+/// the keys a line is edited with. A shortcut on such a key is not read under a search box.
+pub fn belongs_to_a_typed_line(code: KeyCode) -> bool {
+    types_a_character(code) || matches!(code, KeyCode::Backspace | KeyCode::Delete | KeyCode::Home | KeyCode::End | KeyCode::ArrowLeft | KeyCode::ArrowRight)
 }
 
 /// Short display token for a key — the inverse of `key_from_name`, so configs round-trip.
@@ -134,7 +243,39 @@ pub fn key_name(code: KeyCode) -> &'static str {
         PageUp => "PAGEUP",
         PageDown => "PAGEDOWN",
         Backslash => "BACKSLASH",
-        _ => "?",
+        Backquote => "BACKQUOTE",
+        Tab => "TAB",
+        Enter => "ENTER",
+        Backspace => "BACKSPACE",
+        Delete => "DELETE",
+        Insert => "INSERT",
+        Home => "HOME",
+        End => "END",
+        AltLeft => "LALT",
+        AltRight => "RALT",
+        F1 => "F1",
+        F2 => "F2",
+        F3 => "F3",
+        F4 => "F4",
+        F5 => "F5",
+        F6 => "F6",
+        F7 => "F7",
+        F8 => "F8",
+        F9 => "F9",
+        F10 => "F10",
+        F11 => "F11",
+        F12 => "F12",
+        Numpad0 => "NUM0",
+        Numpad1 => "NUM1",
+        Numpad2 => "NUM2",
+        Numpad3 => "NUM3",
+        Numpad4 => "NUM4",
+        Numpad5 => "NUM5",
+        Numpad6 => "NUM6",
+        Numpad7 => "NUM7",
+        Numpad8 => "NUM8",
+        Numpad9 => "NUM9",
+        _ => UNNAMED_KEY,
     }
 }
 
@@ -195,61 +336,150 @@ pub fn mode_config_key(mode: Mode) -> &'static str {
     }
 }
 
-/// A non-lane control whose key is user-configurable.
+/// A non-lane control of a run whose key is user-configurable.
 ///
-/// The in-play controls move a run's scroll speed and lane shades. START and SELECT are the two
-/// menu buttons of the reference implementation: they are read as held states (see
-/// [`HeldKeys`]) rather than fired once, and the screens combine them with the lane keys.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+/// The in-play controls move a run's scroll speed and lane shades, switch each shade on and off,
+/// and move what the run is judged and scrolled by. START and SELECT are the two menu buttons of
+/// the reference implementation: they are read as held states (see [`HeldKeys`]) rather than fired
+/// once, and the screens combine them with the lane keys.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum ControlAction {
     HiSpeedUp,
     HiSpeedDown,
     CoverUp,
     CoverDown,
+    CoverToggle,
     LiftUp,
     LiftDown,
+    LiftToggle,
     HiddenUp,
     HiddenDown,
+    HiddenToggle,
+    GreenUp,
+    GreenDown,
+    KeepGreenToggle,
+    OffsetUp,
+    OffsetDown,
+    AutoAdjustToggle,
+    Fine,
     Start,
     Select,
 }
 
 impl ControlAction {
-    pub const ALL: [ControlAction; 10] = [
+    /// Every control, in the order the key editor and the key guide list them.
+    pub const ALL: [ControlAction; 20] = [
         ControlAction::HiSpeedUp,
         ControlAction::HiSpeedDown,
         ControlAction::CoverUp,
         ControlAction::CoverDown,
+        ControlAction::CoverToggle,
         ControlAction::LiftUp,
         ControlAction::LiftDown,
+        ControlAction::LiftToggle,
         ControlAction::HiddenUp,
         ControlAction::HiddenDown,
+        ControlAction::HiddenToggle,
+        ControlAction::GreenUp,
+        ControlAction::GreenDown,
+        ControlAction::KeepGreenToggle,
+        ControlAction::OffsetUp,
+        ControlAction::OffsetDown,
+        ControlAction::AutoAdjustToggle,
+        ControlAction::Fine,
         ControlAction::Start,
         ControlAction::Select,
     ];
 
+    /// What the control is called on screen.
+    ///
+    /// The lane cover comes down from the top of the field, so the amount going up is the cover
+    /// coming down: the two cover rows say which way the cover moves and what that does. The lift
+    /// raises the judgment line and the hidden cover grows upwards from it, and their rows say so
+    /// the same way.
     pub fn label(self) -> &'static str {
         match self {
             ControlAction::HiSpeedUp => "HI-SPEED UP",
             ControlAction::HiSpeedDown => "HI-SPEED DOWN",
-            ControlAction::CoverUp => "COVER UP",
-            ControlAction::CoverDown => "COVER DOWN",
-            ControlAction::LiftUp => "LIFT UP",
-            ControlAction::LiftDown => "LIFT DOWN",
-            ControlAction::HiddenUp => "HIDDEN+ UP",
-            ControlAction::HiddenDown => "HIDDEN+ DOWN",
+            ControlAction::CoverUp => "LANE COVER DOWN (COVER MORE)",
+            ControlAction::CoverDown => "LANE COVER UP (COVER LESS)",
+            ControlAction::CoverToggle => "LANE COVER ON/OFF",
+            ControlAction::LiftUp => "LIFT UP (RAISE THE LINE)",
+            ControlAction::LiftDown => "LIFT DOWN (LOWER THE LINE)",
+            ControlAction::LiftToggle => "LIFT ON/OFF",
+            ControlAction::HiddenUp => "HIDDEN+ UP (COVER MORE)",
+            ControlAction::HiddenDown => "HIDDEN+ DOWN (COVER LESS)",
+            ControlAction::HiddenToggle => "HIDDEN+ ON/OFF",
+            ControlAction::GreenUp => "GREEN NUMBER UP (SLOWER)",
+            ControlAction::GreenDown => "GREEN NUMBER DOWN (FASTER)",
+            ControlAction::KeepGreenToggle => "KEEP GREEN NUMBER ON/OFF",
+            ControlAction::OffsetUp => "JUDGE OFFSET +1 MS (HITTING EARLY)",
+            ControlAction::OffsetDown => "JUDGE OFFSET -1 MS (HITTING LATE)",
+            ControlAction::AutoAdjustToggle => "AUTO ADJUST ON/OFF",
+            ControlAction::Fine => "FINE STEP WHILE HELD (UNSET: SHIFT)",
             ControlAction::Start => "START",
             ControlAction::Select => "SELECT",
         }
     }
 
+    /// The name the control is stored under in the pad block of the key config file.
+    ///
+    /// It is not the name on screen: the first ten are the words a file written before the rows
+    /// were renamed already holds, and they must keep meaning the same controls.
+    pub fn config_key(self) -> &'static str {
+        match self {
+            ControlAction::HiSpeedUp => "HI-SPEED UP",
+            ControlAction::HiSpeedDown => "HI-SPEED DOWN",
+            ControlAction::CoverUp => "COVER UP",
+            ControlAction::CoverDown => "COVER DOWN",
+            ControlAction::CoverToggle => "COVER TOGGLE",
+            ControlAction::LiftUp => "LIFT UP",
+            ControlAction::LiftDown => "LIFT DOWN",
+            ControlAction::LiftToggle => "LIFT TOGGLE",
+            ControlAction::HiddenUp => "HIDDEN+ UP",
+            ControlAction::HiddenDown => "HIDDEN+ DOWN",
+            ControlAction::HiddenToggle => "HIDDEN+ TOGGLE",
+            ControlAction::GreenUp => "GREEN UP",
+            ControlAction::GreenDown => "GREEN DOWN",
+            ControlAction::KeepGreenToggle => "KEEP GREEN TOGGLE",
+            ControlAction::OffsetUp => "JUDGE OFFSET UP",
+            ControlAction::OffsetDown => "JUDGE OFFSET DOWN",
+            ControlAction::AutoAdjustToggle => "AUTO ADJUST TOGGLE",
+            ControlAction::Fine => "FINE STEP",
+            ControlAction::Start => "START",
+            ControlAction::Select => "SELECT",
+        }
+    }
+
+    /// Whether the control moves or switches the lane cover, the lift or the hidden cover.
+    pub fn moves_a_shade(self) -> bool {
+        matches!(
+            self,
+            ControlAction::CoverUp
+                | ControlAction::CoverDown
+                | ControlAction::CoverToggle
+                | ControlAction::LiftUp
+                | ControlAction::LiftDown
+                | ControlAction::LiftToggle
+                | ControlAction::HiddenUp
+                | ControlAction::HiddenDown
+                | ControlAction::HiddenToggle
+        )
+    }
+
+    /// Whether this is one of the two menu buttons, which the song browser reads as well as a run.
+    pub fn is_menu_button(self) -> bool {
+        matches!(self, ControlAction::Start | ControlAction::Select)
+    }
+
     /// Whether a key that also plays a lane keeps playing it instead of acting as this control.
     ///
-    /// START and SELECT ship bound to letters that a key config written before they existed may
-    /// already have given to a lane; the lane has to win, or loading an old file would silently
-    /// kill a column. The older controls are resolved before lanes, as they always were.
+    /// START, SELECT and the lane cover switch ship bound to keys that a key config written before
+    /// they existed may already have given to a lane; the lane has to win, or loading an old file
+    /// would silently kill a column. The older controls are resolved before lanes, as they always
+    /// were.
     pub fn yields_to_lanes(self) -> bool {
-        matches!(self, ControlAction::Start | ControlAction::Select)
+        matches!(self, ControlAction::Start | ControlAction::Select | ControlAction::CoverToggle)
     }
 }
 
@@ -263,8 +493,8 @@ pub struct ControlBinds {
     pub cover_down: String,
     pub lift_up: String,
     pub lift_down: String,
-    /// The hidden band has no shipped binding: every key a default layout could spare is already
-    /// taken, so it starts unbound and is picked in the key editor.
+    /// The hidden band has no shipped binding, so it starts unbound and is picked in the key
+    /// editor.
     pub hidden_up: String,
     pub hidden_down: String,
     /// START and SELECT. The reference implementation ships them on Q and W
@@ -272,6 +502,21 @@ pub struct ControlBinds {
     /// panel's previous-profile key, and a held START must not also page that panel.
     pub start: String,
     pub select: String,
+    /// The lane cover on or off, which START pressed twice also does.
+    pub cover_toggle: String,
+    /// The controls below ship unbound: each is a key a player asks for, not one a run needs.
+    pub lift_toggle: String,
+    pub hidden_toggle: String,
+    pub green_up: String,
+    pub green_down: String,
+    pub keep_green_toggle: String,
+    pub offset_up: String,
+    pub offset_down: String,
+    pub auto_adjust_toggle: String,
+    /// The key held for the finer step of the covers and of a held green number. It ships unbound
+    /// because no one key is free on every shipped layout: left without a key, the modifier is a
+    /// shift key that plays no lane and runs no control ([`crate::AppShared::fine_pressed`]).
+    pub fine: String,
 }
 
 impl Default for ControlBinds {
@@ -287,6 +532,16 @@ impl Default for ControlBinds {
             hidden_down: String::new(),
             start: DEFAULT_START_KEY.into(),
             select: DEFAULT_SELECT_KEY.into(),
+            cover_toggle: DEFAULT_COVER_TOGGLE_KEY.into(),
+            lift_toggle: String::new(),
+            hidden_toggle: String::new(),
+            green_up: String::new(),
+            green_down: String::new(),
+            keep_green_toggle: String::new(),
+            offset_up: String::new(),
+            offset_down: String::new(),
+            auto_adjust_toggle: String::new(),
+            fine: String::new(),
         }
     }
 }
@@ -297,6 +552,10 @@ pub const DEFAULT_START_KEY: &str = "A";
 /// The key token SELECT ships bound to, which is the reference implementation's own.
 pub const DEFAULT_SELECT_KEY: &str = "W";
 
+/// The key token the lane cover switch ships bound to: the key beside the two the lift ships on,
+/// and one no shipped layout plays a lane or reads a control from.
+pub const DEFAULT_COVER_TOGGLE_KEY: &str = "BACKSLASH";
+
 impl ControlBinds {
     fn slot(&mut self, action: ControlAction) -> &mut String {
         match action {
@@ -304,10 +563,20 @@ impl ControlBinds {
             ControlAction::HiSpeedDown => &mut self.hispeed_down,
             ControlAction::CoverUp => &mut self.cover_up,
             ControlAction::CoverDown => &mut self.cover_down,
+            ControlAction::CoverToggle => &mut self.cover_toggle,
             ControlAction::LiftUp => &mut self.lift_up,
             ControlAction::LiftDown => &mut self.lift_down,
+            ControlAction::LiftToggle => &mut self.lift_toggle,
             ControlAction::HiddenUp => &mut self.hidden_up,
             ControlAction::HiddenDown => &mut self.hidden_down,
+            ControlAction::HiddenToggle => &mut self.hidden_toggle,
+            ControlAction::GreenUp => &mut self.green_up,
+            ControlAction::GreenDown => &mut self.green_down,
+            ControlAction::KeepGreenToggle => &mut self.keep_green_toggle,
+            ControlAction::OffsetUp => &mut self.offset_up,
+            ControlAction::OffsetDown => &mut self.offset_down,
+            ControlAction::AutoAdjustToggle => &mut self.auto_adjust_toggle,
+            ControlAction::Fine => &mut self.fine,
             ControlAction::Start => &mut self.start,
             ControlAction::Select => &mut self.select,
         }
@@ -319,14 +588,385 @@ impl ControlBinds {
             ControlAction::HiSpeedDown => &self.hispeed_down,
             ControlAction::CoverUp => &self.cover_up,
             ControlAction::CoverDown => &self.cover_down,
+            ControlAction::CoverToggle => &self.cover_toggle,
             ControlAction::LiftUp => &self.lift_up,
             ControlAction::LiftDown => &self.lift_down,
+            ControlAction::LiftToggle => &self.lift_toggle,
             ControlAction::HiddenUp => &self.hidden_up,
             ControlAction::HiddenDown => &self.hidden_down,
+            ControlAction::HiddenToggle => &self.hidden_toggle,
+            ControlAction::GreenUp => &self.green_up,
+            ControlAction::GreenDown => &self.green_down,
+            ControlAction::KeepGreenToggle => &self.keep_green_toggle,
+            ControlAction::OffsetUp => &self.offset_up,
+            ControlAction::OffsetDown => &self.offset_down,
+            ControlAction::AutoAdjustToggle => &self.auto_adjust_toggle,
+            ControlAction::Fine => &self.fine,
             ControlAction::Start => &self.start,
             ControlAction::Select => &self.select,
         }
     }
+}
+
+/// Which screen reads a shortcut, which is what decides the keys it may not share.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum ShortcutScreen {
+    /// The song browser, whichever of the built-in one and a skin's draws it.
+    Browser,
+    /// The result of a run.
+    Result,
+    /// A replay being played back under analysis.
+    Replay,
+}
+
+/// The headings the key editor and the key guide list the shortcuts under.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum ShortcutGroup {
+    Browser,
+    Screens,
+    SkinBrowser,
+    Result,
+    Replay,
+}
+
+impl ShortcutGroup {
+    pub const ALL: [ShortcutGroup; 5] =
+        [ShortcutGroup::Browser, ShortcutGroup::Screens, ShortcutGroup::SkinBrowser, ShortcutGroup::Result, ShortcutGroup::Replay];
+
+    pub fn title(self) -> &'static str {
+        match self {
+            ShortcutGroup::Browser => "SELECT",
+            ShortcutGroup::Screens => "SCREENS (OPENED FROM SELECT)",
+            ShortcutGroup::SkinBrowser => "SELECT - NUMBER KEYS OF A SKIN'S BROWSER",
+            ShortcutGroup::Result => "RESULT",
+            ShortcutGroup::Replay => "REPLAY ANALYSIS",
+        }
+    }
+}
+
+/// A key of the application's own, outside a run's controls, whose key is user-configurable: the
+/// shortcuts of the song browser, the keys that open its screens, the two ways on from a result,
+/// and the transport of a replay under analysis.
+///
+/// The second browser group is the reference implementation's number keys
+/// (`MusicSelectInputProcessor.java:71-110`, `MusicSelector.java:296`), which only a browser a skin
+/// draws reads. They are entries of their own rather than second keys of the entries above them
+/// because that is what they are in the browser: a second set, read on one kind of browser only.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Shortcut {
+    Search,
+    Filter,
+    Sort,
+    Practice,
+    Favourite,
+    Records,
+    Ranking,
+    OptionsPin,
+    OptionsHold,
+    Settings,
+    SkinMenu,
+    KeyConfig,
+    Folders,
+    Tables,
+    RefMode,
+    RefSort,
+    RefLnMode,
+    RefReplay,
+    RefDetail,
+    RefKeyConfig,
+    RefSearch,
+    RefFavourite,
+    Retry,
+    NextSong,
+    ReplayPause,
+    ReplayFaster,
+    ReplaySlower,
+    ReplayForward,
+    ReplayBack,
+}
+
+impl Shortcut {
+    /// Every shortcut, group by group, in the order the key editor and the key guide list them.
+    pub const ALL: [Shortcut; 29] = [
+        Shortcut::Search,
+        Shortcut::Filter,
+        Shortcut::Sort,
+        Shortcut::Practice,
+        Shortcut::Favourite,
+        Shortcut::Records,
+        Shortcut::Ranking,
+        Shortcut::OptionsPin,
+        Shortcut::OptionsHold,
+        Shortcut::Settings,
+        Shortcut::SkinMenu,
+        Shortcut::KeyConfig,
+        Shortcut::Folders,
+        Shortcut::Tables,
+        Shortcut::RefMode,
+        Shortcut::RefSort,
+        Shortcut::RefLnMode,
+        Shortcut::RefReplay,
+        Shortcut::RefDetail,
+        Shortcut::RefKeyConfig,
+        Shortcut::RefSearch,
+        Shortcut::RefFavourite,
+        Shortcut::Retry,
+        Shortcut::NextSong,
+        Shortcut::ReplayPause,
+        Shortcut::ReplayFaster,
+        Shortcut::ReplaySlower,
+        Shortcut::ReplayForward,
+        Shortcut::ReplayBack,
+    ];
+
+    pub fn group(self) -> ShortcutGroup {
+        match self {
+            Shortcut::Search
+            | Shortcut::Filter
+            | Shortcut::Sort
+            | Shortcut::Practice
+            | Shortcut::Favourite
+            | Shortcut::Records
+            | Shortcut::Ranking
+            | Shortcut::OptionsPin
+            | Shortcut::OptionsHold => ShortcutGroup::Browser,
+            Shortcut::Settings | Shortcut::SkinMenu | Shortcut::KeyConfig | Shortcut::Folders | Shortcut::Tables => ShortcutGroup::Screens,
+            Shortcut::RefMode
+            | Shortcut::RefSort
+            | Shortcut::RefLnMode
+            | Shortcut::RefReplay
+            | Shortcut::RefDetail
+            | Shortcut::RefKeyConfig
+            | Shortcut::RefSearch
+            | Shortcut::RefFavourite => ShortcutGroup::SkinBrowser,
+            Shortcut::Retry | Shortcut::NextSong => ShortcutGroup::Result,
+            Shortcut::ReplayPause | Shortcut::ReplayFaster | Shortcut::ReplaySlower | Shortcut::ReplayForward | Shortcut::ReplayBack => ShortcutGroup::Replay,
+        }
+    }
+
+    /// The screen that reads it.
+    pub fn screen(self) -> ShortcutScreen {
+        match self.group() {
+            ShortcutGroup::Browser | ShortcutGroup::Screens | ShortcutGroup::SkinBrowser => ShortcutScreen::Browser,
+            ShortcutGroup::Result => ShortcutScreen::Result,
+            ShortcutGroup::Replay => ShortcutScreen::Replay,
+        }
+    }
+
+    /// What the shortcut is called in the key editor.
+    pub fn label(self) -> &'static str {
+        match self {
+            Shortcut::Search => "SEARCH",
+            Shortcut::Filter => "FILTER PANEL",
+            Shortcut::Sort => "SORT ORDER (SHIFT: BACKWARDS)",
+            Shortcut::Practice => "PRACTICE",
+            Shortcut::Favourite => "FAVOURITE",
+            Shortcut::Records => "RECORDS OF THE CHART",
+            Shortcut::Ranking => "IR RANKING",
+            Shortcut::OptionsPin => "OPTIONS OVERLAY (PIN)",
+            Shortcut::OptionsHold => "OPTIONS OVERLAY (HOLD)",
+            Shortcut::Settings => "SETTINGS (SHIFT: COURSE LIST)",
+            Shortcut::SkinMenu => "SKIN MENU",
+            Shortcut::KeyConfig => "KEY CONFIG",
+            Shortcut::Folders => "MUSIC FOLDERS",
+            Shortcut::Tables => "DIFFICULTY TABLES",
+            Shortcut::RefMode => "MODE FILTER",
+            Shortcut::RefSort => "SORT ORDER",
+            Shortcut::RefLnMode => "LONG NOTE MODE",
+            Shortcut::RefReplay => "REPLAY SLOT",
+            Shortcut::RefDetail => "DETAIL OPTIONS (HOLD)",
+            Shortcut::RefKeyConfig => "KEY CONFIG",
+            Shortcut::RefSearch => "SEARCH",
+            Shortcut::RefFavourite => "FAVOURITE",
+            Shortcut::Retry => "PLAY THE CHART AGAIN",
+            Shortcut::NextSong => "NEXT SONG",
+            Shortcut::ReplayPause => "PAUSE / RESUME",
+            Shortcut::ReplayFaster => "PLAYBACK RATE UP",
+            Shortcut::ReplaySlower => "PLAYBACK RATE DOWN",
+            Shortcut::ReplayForward => "SEEK FORWARD",
+            Shortcut::ReplayBack => "SEEK BACK",
+        }
+    }
+
+    /// The name the shortcut is stored under in the key config file.
+    pub fn config_key(self) -> &'static str {
+        match self {
+            Shortcut::Search => "search",
+            Shortcut::Filter => "filter",
+            Shortcut::Sort => "sort",
+            Shortcut::Practice => "practice",
+            Shortcut::Favourite => "favourite",
+            Shortcut::Records => "records",
+            Shortcut::Ranking => "ranking",
+            Shortcut::OptionsPin => "options_pin",
+            Shortcut::OptionsHold => "options_hold",
+            Shortcut::Settings => "settings",
+            Shortcut::SkinMenu => "skin_menu",
+            Shortcut::KeyConfig => "key_config",
+            Shortcut::Folders => "folders",
+            Shortcut::Tables => "tables",
+            Shortcut::RefMode => "number_mode",
+            Shortcut::RefSort => "number_sort",
+            Shortcut::RefLnMode => "number_ln_mode",
+            Shortcut::RefReplay => "number_replay",
+            Shortcut::RefDetail => "number_detail",
+            Shortcut::RefKeyConfig => "number_key_config",
+            Shortcut::RefSearch => "number_search",
+            Shortcut::RefFavourite => "number_favourite",
+            Shortcut::Retry => "result_retry",
+            Shortcut::NextSong => "result_next",
+            Shortcut::ReplayPause => "replay_pause",
+            Shortcut::ReplayFaster => "replay_faster",
+            Shortcut::ReplaySlower => "replay_slower",
+            Shortcut::ReplayForward => "replay_forward",
+            Shortcut::ReplayBack => "replay_back",
+        }
+    }
+
+    /// The key the shortcut ships on. Every one of them but the key to the key editor is the key
+    /// the application read for it before any of them could be changed.
+    pub fn default_key(self) -> KeyCode {
+        match self {
+            Shortcut::Search => KeyCode::Slash,
+            Shortcut::Filter => KeyCode::F2,
+            Shortcut::Sort => KeyCode::F3,
+            Shortcut::Practice => KeyCode::F4,
+            Shortcut::Favourite => KeyCode::KeyF,
+            Shortcut::Records => KeyCode::KeyR,
+            Shortcut::Ranking => KeyCode::KeyI,
+            Shortcut::OptionsPin => crate::app_options::TOGGLE_KEY,
+            Shortcut::OptionsHold => crate::app_options::HOLD_KEY,
+            Shortcut::Settings => KeyCode::Tab,
+            Shortcut::SkinMenu => crate::stage::select::SKIN_MENU_KEY,
+            Shortcut::KeyConfig => KeyCode::F5,
+            Shortcut::Folders => KeyCode::KeyO,
+            Shortcut::Tables => KeyCode::KeyT,
+            Shortcut::RefMode => KeyCode::Digit1,
+            Shortcut::RefSort => KeyCode::Digit2,
+            Shortcut::RefLnMode => KeyCode::Digit3,
+            Shortcut::RefReplay => KeyCode::Digit4,
+            Shortcut::RefDetail => KeyCode::Digit5,
+            Shortcut::RefKeyConfig => KeyCode::Digit6,
+            Shortcut::RefSearch => KeyCode::Digit0,
+            Shortcut::RefFavourite => KeyCode::F9,
+            Shortcut::Retry => KeyCode::KeyR,
+            Shortcut::NextSong => KeyCode::KeyN,
+            Shortcut::ReplayPause => KeyCode::Space,
+            Shortcut::ReplayFaster => KeyCode::Equal,
+            Shortcut::ReplaySlower => KeyCode::Minus,
+            Shortcut::ReplayForward => KeyCode::PageUp,
+            Shortcut::ReplayBack => KeyCode::PageDown,
+        }
+    }
+
+    /// Whether a controller can be given this shortcut. The three that are read as a key held down
+    /// and let go -- the option overlay's two keys and the detail panel's -- are the keyboard's
+    /// alone: the overlay is driven by key events, and a controller has START and SELECT for the
+    /// panel.
+    pub fn takes_a_pad(self) -> bool {
+        !matches!(self, Shortcut::OptionsPin | Shortcut::OptionsHold | Shortcut::RefDetail)
+    }
+}
+
+/// The keys a screen reads for itself and that nothing on it can be rebound onto: the ones that
+/// move through a list, confirm and cancel, and on the browser the key to the guide that lists
+/// every other key, which the skin's footer names.
+pub fn fixed_keys_of(screen: ShortcutScreen) -> &'static [KeyCode] {
+    match screen {
+        ShortcutScreen::Browser => {
+            &[KeyCode::Escape, KeyCode::Enter, KeyCode::NumpadEnter, KeyCode::ArrowUp, KeyCode::ArrowDown, KeyCode::ArrowLeft, KeyCode::ArrowRight, GUIDE_KEY]
+        }
+        ShortcutScreen::Result => &[KeyCode::Escape, KeyCode::Enter, KeyCode::NumpadEnter],
+        ShortcutScreen::Replay => &[KeyCode::Escape],
+    }
+}
+
+/// The key that puts the browser's key guide up and takes it down. It is not rebound: the guide is
+/// where every key that can be is listed, and a skin's footer has to be able to name the way to it.
+pub const GUIDE_KEY: KeyCode = KeyCode::KeyH;
+
+/// One thing a key or a controller element can be bound to, for the key editor and the rules that
+/// keep two of them off one key.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Bindable {
+    Lane(usize),
+    /// The second key a scratch lane may be spun backwards with.
+    ScratchReverse(usize),
+    Control(ControlAction),
+    Shortcut(Shortcut),
+}
+
+impl Bindable {
+    /// What it is called in a message of the key editor.
+    pub fn label(self, mode: Mode) -> String {
+        match self {
+            Bindable::Lane(lane) if mode.is_scratch(lane) => format!("SCRATCH {}", lane + 1),
+            Bindable::Lane(lane) => format!("LANE {}", lane + 1),
+            Bindable::ScratchReverse(lane) => format!("SCRATCH {} REVERSE", lane + 1),
+            Bindable::Control(action) => action.label().to_string(),
+            Bindable::Shortcut(shortcut) => shortcut.label().to_string(),
+        }
+    }
+
+    /// Whether the two are read at the same moment on some screen, which is when one key for both
+    /// would do both at once or leave one of them dead.
+    ///
+    /// A run reads its lanes and its controls together, and a replay under analysis reads its
+    /// transport beside the controls. The browser reads its shortcuts beside START and SELECT. A
+    /// lane key is read on the browser too, as a key of the reference's key table, but there it
+    /// only ever adds to what a shortcut does and the shipped layout already shares one, so that
+    /// pair is not refused ([`KeyConfig::lane_sharing`] names it instead).
+    pub fn read_with(self, other: Bindable) -> bool {
+        use Bindable::{Control, Lane, ScratchReverse, Shortcut};
+        match (self, other) {
+            (Lane(_) | ScratchReverse(_) | Control(_), Lane(_) | ScratchReverse(_) | Control(_)) => true,
+            (Shortcut(shortcut), Control(action)) | (Control(action), Shortcut(shortcut)) => match shortcut.screen() {
+                ShortcutScreen::Browser => action.is_menu_button(),
+                ShortcutScreen::Replay => true,
+                ShortcutScreen::Result => false,
+            },
+            (Shortcut(one), Shortcut(two)) => one.screen() == two.screen(),
+            (Shortcut(_), Lane(_) | ScratchReverse(_)) | (Lane(_) | ScratchReverse(_), Shortcut(_)) => false,
+        }
+    }
+
+    /// The keys the screen that reads this keeps for itself, which it cannot be bound to: Escape
+    /// for a lane or a control of a run, and for a shortcut the fixed keys of its screen
+    /// ([`fixed_keys_of`]).
+    pub fn fixed_keys(self) -> &'static [KeyCode] {
+        match self {
+            Bindable::Shortcut(shortcut) => fixed_keys_of(shortcut.screen()),
+            Bindable::Lane(_) | Bindable::ScratchReverse(_) | Bindable::Control(_) => &[KeyCode::Escape],
+        }
+    }
+
+    /// Everything that can be bound for `mode`, in the order the key editor lists it.
+    pub fn all(mode: Mode) -> Vec<Bindable> {
+        let lanes = (0..mode.key).map(Bindable::Lane);
+        let reverse = (0..mode.key).filter(|&lane| mode.is_scratch(lane)).map(Bindable::ScratchReverse);
+        let controls = ControlAction::ALL.into_iter().map(Bindable::Control);
+        let shortcuts = Shortcut::ALL.into_iter().map(Bindable::Shortcut);
+        lanes.chain(reverse).chain(controls).chain(shortcuts).collect()
+    }
+}
+
+/// Why a key cannot be given to something.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Clash {
+    /// Something read at the same moment already has the key.
+    With(Bindable),
+    /// The screen reads the key for itself.
+    Fixed,
+}
+
+/// Why `code` cannot be given to `target`, if it cannot, among everything in `bound` with the key
+/// each has: the screen that reads `target` keeps the key for itself, or something read at the same
+/// moment already has it ([`Bindable::read_with`]). What `target` itself has is never a clash.
+pub fn clash_among(bound: impl IntoIterator<Item = (Bindable, Option<KeyCode>)>, target: Bindable, code: KeyCode) -> Option<Clash> {
+    if target.fixed_keys().contains(&code) {
+        return Some(Clash::Fixed);
+    }
+    bound.into_iter().find(|(other, key)| *other != target && *key == Some(code) && target.read_with(*other)).map(|(other, _)| Clash::With(other))
 }
 
 /// How many key indices the screens ask about. The reference implementation numbers the keys of a
@@ -410,6 +1050,11 @@ impl HeldKeys {
 /// and a key config written before a controller was readable still loads, filling it with a table
 /// that binds nothing.
 ///
+/// `shortcuts` holds the application's own keys, by [`Shortcut::config_key`], and only the ones the
+/// player has moved: a shortcut with no entry reads the key it ships on, and one with an empty
+/// entry reads none. A key config written before the shortcuts could be moved has no such map and
+/// so reads every one of them where it always was.
+///
 /// `held` is not configuration. It sits beside the bindings because a held key only means
 /// something read against them, and it is skipped by the file.
 #[derive(Clone, Serialize, Deserialize)]
@@ -418,6 +1063,7 @@ pub struct KeyConfig {
     pub lanes: BTreeMap<String, Vec<String>>,
     pub scratch_reverse: BTreeMap<String, Vec<String>>,
     pub controls: ControlBinds,
+    pub shortcuts: BTreeMap<String, String>,
     pub pad: PadConfig,
     #[serde(skip)]
     pub held: HeldKeys,
@@ -435,8 +1081,24 @@ impl Default for KeyConfig {
             }
             lanes.insert(mode_config_key(mode).to_string(), row);
         }
-        KeyConfig { lanes, scratch_reverse: BTreeMap::new(), controls: ControlBinds::default(), pad: PadConfig::default(), held: HeldKeys::default() }
+        KeyConfig {
+            lanes,
+            scratch_reverse: BTreeMap::new(),
+            controls: ControlBinds::default(),
+            shortcuts: BTreeMap::new(),
+            pad: PadConfig::default(),
+            held: HeldKeys::default(),
+        }
     }
+}
+
+/// Write one lane's word into a per-mode row, growing the row to fit.
+fn set_token(rows: &mut BTreeMap<String, Vec<String>>, mode: Mode, lane: usize, token: String) {
+    let row = rows.entry(mode_config_key(mode).to_string()).or_insert_with(|| vec![String::new(); mode.key]);
+    if row.len() <= lane {
+        row.resize(lane + 1, String::new());
+    }
+    row[lane] = token;
 }
 
 impl KeyConfig {
@@ -501,6 +1163,7 @@ impl KeyConfig {
     }
 
     /// Current reverse-spin key token shown for a mode's scratch lane (empty string if unbound).
+    #[cfg(test)]
     pub fn scratch_reverse_token(&self, mode: Mode, lane: usize) -> String {
         self.scratch_reverse.get(mode_config_key(mode)).and_then(|row| row.get(lane)).cloned().unwrap_or_default()
     }
@@ -509,28 +1172,117 @@ impl KeyConfig {
         key_from_name(self.controls.token(action))
     }
 
-    /// Keys bound to more than one action for `mode` (across all controls + that mode's lanes),
-    /// so the editor can flag conflicts. Control-first input resolution means a collided lane
-    /// would otherwise be silently unplayable.
-    pub fn collisions(&self, mode: Mode) -> std::collections::HashSet<KeyCode> {
-        let mut seen = std::collections::HashSet::new();
-        let mut dup = std::collections::HashSet::new();
-        let all = ControlAction::ALL
-            .into_iter()
-            .filter_map(|a| self.control_key(a))
-            .chain(self.lane_keys(mode).into_iter().map(|(k, _)| k))
-            .chain(self.scratch_reverse_keys(mode).into_iter().map(|(k, _)| k));
-        for code in all {
-            if !seen.insert(code) {
-                dup.insert(code);
-            }
-        }
-        dup
-    }
-
     /// Rebind a control action; the change is in memory until `save`.
     pub fn set_control(&mut self, action: ControlAction, code: KeyCode) {
         *self.controls.slot(action) = key_name(code).to_string();
+    }
+
+    /// The key a shortcut is read from: the one the player gave it, none when they took its key
+    /// away, and otherwise the one it ships on. A word the file holds that names no key is treated
+    /// as the shipped key, so a hand-edited file cannot leave a screen with no way into it.
+    pub fn shortcut_key(&self, shortcut: Shortcut) -> Option<KeyCode> {
+        match self.shortcuts.get(shortcut.config_key()) {
+            None => Some(shortcut.default_key()),
+            Some(token) if token.is_empty() => None,
+            Some(token) => Some(key_from_name(token).unwrap_or_else(|| shortcut.default_key())),
+        }
+    }
+
+    /// The shortcut `screen` reads from `code`, if one is on it.
+    pub fn shortcut_on(&self, screen: ShortcutScreen, code: KeyCode) -> Option<Shortcut> {
+        Shortcut::ALL.into_iter().find(|shortcut| shortcut.screen() == screen && self.shortcut_key(*shortcut) == Some(code))
+    }
+
+    /// The key something ships on, or `None` for what ships with no key.
+    pub fn default_key_of(mode: Mode, target: Bindable) -> Option<KeyCode> {
+        match target {
+            Bindable::Lane(lane) => default_keys_for_mode(mode).into_iter().find(|(_, bound)| *bound == lane).map(|(code, _)| code),
+            Bindable::ScratchReverse(_) => None,
+            Bindable::Control(action) => key_from_name(ControlBinds::default().token(action)),
+            Bindable::Shortcut(shortcut) => Some(shortcut.default_key()),
+        }
+    }
+
+    /// Give something a key, or with `None` take its key away.
+    ///
+    /// A lane cannot be left without one -- [`KeyConfig::lane_keys`] fills an empty lane from the
+    /// shipped layout so that no column is ever unhittable -- so taking a lane's key away puts its
+    /// shipped key back. A key the file has no word for is not bound at all.
+    pub fn bind(&mut self, mode: Mode, target: Bindable, code: Option<KeyCode>) {
+        let token = match code {
+            Some(code) if key_name(code) == UNNAMED_KEY => return,
+            Some(code) => key_name(code).to_string(),
+            None => String::new(),
+        };
+        match (target, code) {
+            (Bindable::Lane(lane), Some(code)) => self.set_lane(mode, lane, code),
+            (Bindable::ScratchReverse(lane), Some(code)) => self.set_scratch_reverse(mode, lane, code),
+            (Bindable::Control(action), Some(code)) => self.set_control(action, code),
+            (Bindable::Lane(lane), None) => set_token(&mut self.lanes, mode, lane, token),
+            (Bindable::ScratchReverse(lane), None) => set_token(&mut self.scratch_reverse, mode, lane, token),
+            (Bindable::Control(action), None) => *self.controls.slot(action) = token,
+            (Bindable::Shortcut(shortcut), _) => {
+                self.shortcuts.insert(shortcut.config_key().to_string(), token);
+            }
+        }
+    }
+
+    /// Put something back on the key it ships on.
+    pub fn restore(&mut self, mode: Mode, target: Bindable) {
+        match target {
+            Bindable::Shortcut(shortcut) => {
+                self.shortcuts.remove(shortcut.config_key());
+            }
+            _ => self.bind(mode, target, KeyConfig::default_key_of(mode, target)),
+        }
+    }
+
+    /// Everything that can be bound for `mode`, with the key each is read from right now.
+    pub fn bound_keys(&self, mode: Mode) -> Vec<(Bindable, Option<KeyCode>)> {
+        let lanes = self.lane_keys(mode);
+        let reverse = self.scratch_reverse_keys(mode);
+        let on = |keys: &[(KeyCode, usize)], lane: usize| keys.iter().find(|(_, bound)| *bound == lane).map(|(code, _)| *code);
+        Bindable::all(mode)
+            .into_iter()
+            .map(|target| {
+                let key = match target {
+                    Bindable::Lane(lane) => on(&lanes, lane),
+                    Bindable::ScratchReverse(lane) => on(&reverse, lane),
+                    Bindable::Control(action) => self.control_key(action),
+                    Bindable::Shortcut(shortcut) => self.shortcut_key(shortcut),
+                };
+                (target, key)
+            })
+            .collect()
+    }
+
+    /// Why `code` cannot be given to `target` in `mode`, if it cannot ([`clash_among`]).
+    pub fn clash(&self, mode: Mode, target: Bindable, code: KeyCode) -> Option<Clash> {
+        clash_among(self.bound_keys(mode), target, code)
+    }
+
+    /// The lane of `mode` that is on the same key as a shortcut of the browser, if one is. The two
+    /// are not kept apart ([`Bindable::read_with`]); the key editor says so beside the row.
+    pub fn lane_sharing(&self, mode: Mode, target: Bindable) -> Option<usize> {
+        let Bindable::Shortcut(shortcut) = target else {
+            return None;
+        };
+        if shortcut.screen() != ShortcutScreen::Browser {
+            return None;
+        }
+        let code = self.shortcut_key(shortcut)?;
+        self.lane_keys(mode).into_iter().chain(self.scratch_reverse_keys(mode)).find(|(key, _)| *key == code).map(|(_, lane)| lane)
+    }
+
+    /// Put every key and every controller binding back as shipped, leaving the controller's own
+    /// tuning (which device, the debounce, the turntable algorithm) as the player set it.
+    pub fn restore_everything(&mut self) {
+        let shipped = KeyConfig::default();
+        self.lanes = shipped.lanes;
+        self.scratch_reverse = shipped.scratch_reverse;
+        self.controls = shipped.controls;
+        self.shortcuts = shipped.shortcuts;
+        self.pad.restore_bindings();
     }
 
     /// Rebind one lane of a mode; grows the mode's row to fit if needed.
@@ -547,6 +1299,7 @@ impl KeyConfig {
         self.lanes.get(mode_config_key(mode)).and_then(|row| row.get(lane)).cloned().unwrap_or_default()
     }
 
+    #[cfg(test)]
     pub fn control_token(&self, action: ControlAction) -> &str {
         self.controls.token(action)
     }

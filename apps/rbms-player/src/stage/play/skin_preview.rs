@@ -25,7 +25,7 @@
 //! The chart stands where the play timer says it does, on the time the preview counts for itself.
 //! The song clock, which is the sound system's, is never read.
 
-use rbms_config::Config;
+use rbms_config::{Config, HeldTravel, held_speed};
 use rbms_judge::gauge::GaugeIndex;
 use rbms_model::{Mode, Model, NoteKind};
 use rbms_play::{NullSink, PlaySession, SessionClock, SessionOptions};
@@ -343,6 +343,15 @@ impl PlaySample {
         Some(PlaySample { screen, session, scene: PlayScene::loading(), feed, bpm, field: None, chart_us: CHART_START_US })
     }
 
+    /// The scroll speed the sample is shown at, which is the one a run of this chart would start
+    /// at: the one the settings hold, or, while a green number is held from chart to chart, the one
+    /// that holds it on this chart under the lane cover as it stands.
+    fn shown_hispeed(&self, config: &Config) -> f64 {
+        let play = &config.play;
+        let held = self.bpm.held(play).and_then(|bpm| held_speed(&HeldTravel::of(play, bpm)));
+        held.map_or(play.hispeed, |held| held.hispeed)
+    }
+
     /// The tempo and the scroll in force at `chart_us`: those of the last timeline it has reached,
     /// and the chart's opening tempo before the first.
     fn tempo_at(&self, chart_us: i64) -> (f64, f64) {
@@ -438,8 +447,9 @@ impl PlaySample {
     /// hands its own: the property clusters from a [`PlayShown`], the note field from the chart and
     /// the trace of what became of each note, the judge object from the last judgement of each
     /// region, and the offsets the lift and the covers move objects by from the document's own
-    /// first lane. The scroll speed, the covers and the lift are the player's own settings. The
-    /// chart has no background, so the skin's is the black of a chart without one.
+    /// first lane. The covers and the lift are the player's own settings, and the scroll speed is
+    /// the one a run of this chart would start at ([`PlaySample::shown_hispeed`]). The chart has no
+    /// background, so the skin's is the black of a chart without one.
     ///
     /// The run is shown as one played by hand, which is what the screen being previewed is for.
     pub(crate) fn draw(&mut self, shared: &AppShared, canvas: &mut Canvas<'_>, at: PreviewFrame) -> PreviewDrawn {
@@ -449,7 +459,7 @@ impl PlaySample {
         let chart_us = PlaySample::drawn_chart_us(&shared.skin_timers, at.now_us);
         let (bpm, scroll) = self.tempo_at(chart_us);
         let travel = self.field.as_ref().and_then(FieldChart::tempo).unwrap_or((bpm, scroll));
-        let hispeed = play.hispeed as f32;
+        let hispeed = self.shown_hispeed(&shared.config) as f32;
         let live = PlayLive {
             phase: self.scene.phase(),
             kind: PlayKind::Play,
@@ -476,6 +486,7 @@ impl PlaySample {
             },
             clock: PlayClock::of(&shared.skin_timers, at.now_us),
             judge_timing_ms: shared.config.judge.offset_ms,
+            judge_timing_auto: shared.config.judge.auto_offset,
             bga_on: shared.config.display.bga,
             cover_keys_held: false,
             long_note_mode: settings.played.long_note_mode,

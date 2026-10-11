@@ -15,6 +15,20 @@
 //! | START and SELECT together | which of the lift and the hidden cover the turntable moves |
 //! | the wheel | the cover the player is on |
 //!
+//! Beside them stand the controls a key or a controller element can be given outright, which the
+//! reference has no keys for ([`crate::keyconfig::ControlAction`]): each shade on or off, the travel
+//! time SELECT with a key moves ([`PlayState::green_control`]), the judge offset, the two rows
+//! that keep a green number and let the offset adjust itself, and the modifier held for the finer
+//! step of a cover or of a held green number ([`crate::AppShared::fine_pressed`]). Each of the others
+//! does what the row or the held combination of the same name does.
+//!
+//! A run that holds its green number from chart to chart (the KEEP GREEN NUMBER row) reads the same
+//! keys and does one thing differently ([`PlayState::held_green_control`]): its speed is never set
+//! by hand, so the speed keys move the number that is held instead, and whatever moves the lane
+//! cover moves the speed under it. SELECT with a key moves the same number a millisecond of travel
+//! at a time. What is held is the configuration's own value, so it is what the next chart starts
+//! from.
+//!
 //! Which cover "the cover the player is on" is follows the reference's rule
 //! (`ControlInputProcessor.setCoverValue`): the lane cover while it is on or while the lift and the
 //! hidden cover are both off, else the lift while it is on and the hidden cover is off or the lift is
@@ -29,10 +43,10 @@
 
 use std::time::{Duration, Instant};
 
-use rbms_config::{LANE_SHADE_MAX, LANE_SHADE_MIN, LANE_SHADE_STEP};
+use rbms_config::{GREEN_NUMBER_FINE_STEP, GREEN_NUMBER_STEP, LANE_SHADE_MAX, LANE_SHADE_MIN, LANE_SHADE_STEP, duration_stepped, duration_stepped_by_green};
 
 use super::PlayState;
-use crate::app_input::FixedSpeed;
+use crate::app_input::{ControlContext, FixedSpeed};
 use crate::keyconfig::{KEY_INDEX_COUNT, SCRATCH_BACKWARD_INDEX, SCRATCH_FORWARD_INDEX};
 use crate::{AppShared, ControlAction};
 
@@ -54,6 +68,11 @@ const WHEEL_STEP: f32 = 0.005;
 /// How far one press moves the travel time a pinned speed holds, in milliseconds
 /// (`ControlInputProcessor.java:106`, `:111`).
 const DURATION_STEP_MS: f64 = 1.0;
+
+/// Which way one press of a speed key moves a held green number: a faster scroll is a smaller
+/// number, and a slower one a larger.
+const FASTER: i32 = -1;
+const SLOWER: i32 = 1;
 
 /// What a held key does with START or SELECT, by key index (`ControlInputProcessor`'s `keybinds`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -168,6 +187,7 @@ impl PlayState {
     /// switches the lane cover, and is not itself the first of another pair.
     fn start_tapped(&mut self, shared: &mut AppShared, now: Instant) {
         if self.controls.start_tapped.is_some_and(|first| now.duration_since(first) < START_DOUBLE_TAP) {
+            self.run_speed(shared);
             shared.config.play.enable_cover = !shared.config.play.enable_cover;
             self.controls.start_tapped = None;
             self.follow_cover(shared);
@@ -214,7 +234,12 @@ impl PlayState {
     }
 
     /// Move the cover the player is on by `by` of the field (`setCoverValue`).
+    ///
+    /// What the run's speed is held to is settled before the cover moves, so the travel time a
+    /// pinned run keeps is the one it had under the cover as it was, not under the one it is given
+    /// here.
     pub(super) fn move_cover(&mut self, shared: &mut AppShared, by: f32) {
+        self.run_speed(shared);
         let play = &mut shared.config.play;
         if play.enable_cover || (!play.enable_lift && !play.enable_hidden) {
             play.cover = moved(play.cover, by);
@@ -235,8 +260,12 @@ impl PlayState {
     }
 
     /// Keep a pinned travel time where it was after the lane cover moved, by moving the speed
-    /// (`LaneRenderer.java:212-215`).
+    /// (`LaneRenderer.java:212-215`). A run that holds its green number from chart to chart does the
+    /// same from the number the configuration holds.
     fn follow_cover(&mut self, shared: &mut AppShared) {
+        if self.hold_green_number(shared) {
+            return;
+        }
         if let Some(fixed) = self.run_speed(shared).fixed {
             shared.retarget_hispeed(fixed);
         }
@@ -244,8 +273,16 @@ impl PlayState {
 
     /// Move the travel time a pinned speed holds by `by_ms`, and the speed with it
     /// (`LaneRenderer.setDuration`). A run that pins its speed to no tempo has no travel time to
-    /// hold, and nothing moves.
+    /// hold, and nothing moves. On a run that holds its green number the travel time is the
+    /// configuration's own, as it is in the reference (`PlayConfig.setDuration`), and stays moved
+    /// for the charts after this one.
     fn move_duration(&mut self, shared: &mut AppShared, by_ms: f64) {
+        if self.held_tempo(shared).is_some() {
+            let play = &mut shared.config.play;
+            play.duration_ms = duration_stepped(play.duration_ms, by_ms as i32);
+            self.hold_green_number(shared);
+            return;
+        }
         let speed = self.run_speed(shared);
         let Some(fixed) = speed.fixed else {
             return;
@@ -257,7 +294,60 @@ impl PlayState {
         shared.retarget_hispeed(held);
         self.speed = Some(super::RunSpeed { fixed: Some(held), ..speed });
     }
+
+    /// One of the two controls that move the green number a millisecond of travel at a time, and
+    /// whether `action` was one of them. They do what SELECT with a key does
+    /// ([`PlayState::move_duration`]) from a key of their own: on a run that holds its green number
+    /// they move the number that is held, on a run pinned to a tempo the travel time it is pinned
+    /// to, and on a run with a free speed there is no travel time to move. A course that locks the
+    /// speed locks them too.
+    pub(super) fn green_control(&mut self, shared: &mut AppShared, action: ControlAction) -> bool {
+        let by_ms = match action {
+            ControlAction::GreenUp => DURATION_STEP_MS,
+            ControlAction::GreenDown => -DURATION_STEP_MS,
+            _ => return false,
+        };
+        if !shared.course_locks_speed() {
+            self.move_duration(shared, by_ms);
+        }
+        true
+    }
+
+    /// One in-play control on a run that holds its green number, and whether this run is one.
+    ///
+    /// The speed of such a run is worked out, not set, so the two speed controls move the number
+    /// that is held: a faster scroll is a smaller green number and a slower one a larger, by
+    /// [`GREEN_NUMBER_STEP`] a press and by [`GREEN_NUMBER_FINE_STEP`] with the fine modifier down.
+    /// The reference moves the speed alone here (`LaneRenderer.changeHispeed`) and leaves the travel
+    /// time it stores where it was, so its next cover move or its next chart puts the speed back;
+    /// here the press is the player choosing a new number, and it is kept. Every other control does
+    /// what it always does, and the speed is then put where the number wants it under the lane as
+    /// the control left it.
+    pub(super) fn held_green_control(&mut self, shared: &mut AppShared, action: ControlAction) -> bool {
+        if self.held_tempo(shared).is_none() {
+            return false;
+        }
+        match action {
+            ControlAction::HiSpeedUp => self.step_held_green(shared, FASTER),
+            ControlAction::HiSpeedDown => self.step_held_green(shared, SLOWER),
+            _ => {
+                let ctx = ControlContext { fine: shared.fine_pressed(), base_hispeed: shared.config.play.hispeed, fixed: None };
+                shared.apply_control(action, &ctx);
+            }
+        }
+        self.hold_green_number(shared);
+        true
+    }
+
+    /// Move the held green number one step: down for a faster scroll, up for a slower one.
+    fn step_held_green(&mut self, shared: &mut AppShared, direction: i32) {
+        let step = if shared.fine_pressed() { GREEN_NUMBER_FINE_STEP } else { GREEN_NUMBER_STEP };
+        let play = &mut shared.config.play;
+        play.duration_ms = duration_stepped_by_green(play.duration_ms, direction * step);
+    }
 }
 
+#[cfg(test)]
+mod key_tests;
 #[cfg(test)]
 mod tests;

@@ -79,6 +79,7 @@
 
 mod by_hand;
 mod gate;
+mod play_rows;
 mod search;
 
 use std::collections::BTreeMap;
@@ -988,7 +989,7 @@ const DECIDE_FONT_SHOT_MS: i64 = 1500;
 /// Make the choice a player makes on the skin menu: in the document the pack draws `screen` with,
 /// switch the row called `row` to the item whose name starts with `item`. Answers whether the
 /// document offers such a row and such an item.
-fn choose_in_skin(app: &mut App, screen: i32, row: &str, item: &str) -> bool {
+pub(super) fn choose_in_skin(app: &mut App, screen: i32, row: &str, item: &str) -> bool {
     let chosen = app.shared.skins.header_of(&app.shared.config, screen).and_then(|header| {
         let offered = header.properties.iter().find(|offered| offered.name == row)?;
         offered.item.iter().find(|offered| offered.name.starts_with(item)).map(|item| item.op)
@@ -1389,6 +1390,10 @@ const BROWSER_PANELS_GONE: &str = "select-panels-gone";
 const BROWSER_STEP_KEYS: [KeyCode; 2] = [KeyCode::KeyZ, KeyCode::KeyX];
 const BROWSER_PANEL_STEPPED: &str = "select-panel1-stepped";
 
+/// The name the detail options are saved under once more with the green number kept from chart to
+/// chart, which is when their two keys for the note display time have a time to move.
+const BROWSER_PANEL_KEEPING: &str = "select-panel3-keeping";
+
 /// The folder of sample charts that ships with the repository, named from this crate's folder.
 const BROWSER_SAMPLE_FOLDER: &str = "../../samples/preview-demo";
 
@@ -1594,8 +1599,9 @@ fn capture_browser_view(app: &mut App, pixels: &mut HeadlessCanvas, size: (u32, 
     Ok(saved)
 }
 
-/// Capture the browser that is up with each of its option panels in turn, the first of them once
-/// more after two of its keys were pressed, and the browser after the last has gone. Answers the
+/// Capture the browser that is up with each of its option panels in turn, the last of them once
+/// more with the green number kept, the first once more after two of its keys were pressed, and the
+/// browser after the last has gone. Answers the
 /// names saved, or why the browser stopped drawing.
 ///
 /// A panel is called up the way a player calls it up: its keys go down, the browser runs a frame
@@ -1621,6 +1627,22 @@ fn capture_browser_panels(app: &mut App, pixels: &mut HeadlessCanvas, size: (u32
         browser_frame_at(app, at_ms, pixels, deadline)?;
         at_ms += BROWSER_PANEL_SETTLE_MS;
     }
+
+    app.shared.config.play.keep_green_number = true;
+    for key in [BROWSER_START_KEY, BROWSER_SELECT_KEY] {
+        app.shared.note_key(&key_down(key));
+    }
+    browser_frame_at(app, at_ms, pixels, deadline)?;
+    at_ms += BROWSER_PANEL_SETTLE_MS;
+    browser_frame_at(app, at_ms, pixels, deadline)?;
+    save(BROWSER_PANEL_KEEPING, CAPTURE_EXTENSION, size, pixels.rgba());
+    saved.push(BROWSER_PANEL_KEEPING.to_owned());
+    for key in [BROWSER_START_KEY, BROWSER_SELECT_KEY] {
+        app.shared.note_key(&key_up(key));
+    }
+    app.shared.config.play.keep_green_number = false;
+    browser_frame_at(app, at_ms, pixels, deadline)?;
+    at_ms += BROWSER_PANEL_SETTLE_MS;
 
     app.shared.note_key(&key_down(BROWSER_START_KEY));
     browser_frame_at(app, at_ms, pixels, deadline)?;

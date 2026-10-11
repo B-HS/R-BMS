@@ -12,7 +12,7 @@ use rbms_skin::timer::{TIMER_OFF, TimerState};
 use super::*;
 use crate::skin_host::options::PlayedOptions;
 use crate::skin_host::score::GaugeReading;
-use crate::skin_host::{Cluster, IdSpace, ROUTES, ScreenHost, clusters_of};
+use crate::skin_host::{Cluster, INDEX_TIMING_AUTO_ADJUST, IdSpace, ROUTES, ScreenHost, clusters_of};
 
 /// Four notes on one key lane at 2.0, 2.5, 3.0 and 3.5 seconds, judged at the mode's stock widths.
 const CHART: &[u8] = b"#BPM 120\r\n#RANK 3\r\n#WAV01 a.wav\r\n#00111:01010101\r\n";
@@ -66,6 +66,7 @@ fn live() -> PlayLive {
         scroll: Scroll { now_bpm: 150.0, main_bpm: 120.0, min_bpm: 60.0, max_bpm: 240.0, region_ms: travel_region_ms(150.0, 2.0, 1.0) },
         clock: PlayClock { now_us: FRAME_US, started_us: PLAY_STARTED_US },
         judge_timing_ms: -12,
+        judge_timing_auto: true,
         bga_on: true,
         cover_keys_held: false,
         long_note_mode: 1,
@@ -369,6 +370,7 @@ fn the_images_that_show_what_was_chosen_read_the_options_the_run_was_laid_out_wi
         (BUTTON_RANDOM_2P, 3),
         (BUTTON_DPOPTION, 1),
         (BUTTON_HSFIX, 3),
+        (INDEX_TIMING_AUTO_ADJUST, 1),
         (BUTTON_ASSIST_EXJUDGE, 1),
         (BUTTON_ASSIST_CONSTANT, 0),
         (BUTTON_ASSIST_JUDGEAREA, 0),

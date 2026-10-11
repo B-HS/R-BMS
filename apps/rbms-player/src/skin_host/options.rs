@@ -25,7 +25,8 @@
 //! `PlayerConfig` and `PlayConfig` hold it ([`SettingsView`], from [`SettingsView::of_config`]): the
 //! gauge, the random and double options, the fixed tempo, the background animation, the assists, the
 //! long note mode, the lane covers, the judge algorithm, the gauge auto shift and its floor, the
-//! target, the judge timing, the hi-speed and the guide sound. What the configuration of this player
+//! target, the judge timing, the hi-speed, the guide sound and, while the green number is held from
+//! chart to chart, the note travel time that holds it. What the configuration of this player
 //! has no setting for -- the 7 to 9 conversion, the extra note depth, the mine mode, the judge area,
 //! the processed note mark, the BPM guide, the replay auto-save conditions, the constant, the
 //! automatic hi-speed adjustment -- reads as absent, not as off: the reference always has a value
@@ -36,14 +37,17 @@
 //! overlay changed.
 //!
 //! The browser also answers the ids of the settings' names (the target's, and the ones before and
-//! after it in the list) and the numbers of the hi-speed and the judge timing.
+//! after it in the list) and the numbers of the hi-speed, the judge timing and the held travel time
+//! with its green number (312 and 313). The reference always has a travel time to show there; this
+//! player stores one that means anything only while KEEP GREEN NUMBER is on, and shows none while
+//! it is off.
 //!
 //! A cluster that has no snapshot answers nothing, so the ids fall through to whatever else can.
 
 use std::borrow::Cow;
 
 use rbms_chart::shuffle::NoteOption;
-use rbms_config::{Config, FixHiSpeed, ScoreTarget};
+use rbms_config::{Config, FixHiSpeed, ScoreTarget, green_of_duration};
 use rbms_judge::JudgeAlgorithm;
 use rbms_judge::gauge::{GaugeIndex, GaugeKind};
 use rbms_skin::property::generated::*;
@@ -118,6 +122,10 @@ pub struct ChartSettings {
     pub fix_hispeed: i32,
     /// The scroll speed (`PlayConfig.getHispeed`).
     pub hispeed: f32,
+    /// The note travel time the next run holds, in milliseconds (`PlayConfig.getDuration`), while
+    /// the green number is held from chart to chart. `None` while it is not: the speed above is
+    /// then what the next run scrolls at, and there is no travel time to show.
+    pub duration_ms: Option<i32>,
 }
 
 /// The configuration as the reference's `PlayerConfig` and `PlayConfig` show it, in its numbering.
@@ -189,6 +197,7 @@ impl SettingsView {
             chart: Some(ChartSettings {
                 fix_hispeed: FixHiSpeed::ALL.iter().position(|choice| *choice == play.fix_hispeed).map_or(IMAGE_INDEX_ABSENT, index_number),
                 hispeed: play.hispeed as f32,
+                duration_ms: play.keep_green_number.then_some(play.duration_ms),
             }),
         }
     }
@@ -287,16 +296,19 @@ impl SettingsView {
         })
     }
 
-    /// The number under `id`: the judge timing and the scroll speed in the three ways it is read
-    /// (`createHispeedProperty`).
+    /// The number under `id`: the judge timing, the scroll speed in the three ways it is read
+    /// (`createHispeedProperty`) and the held travel time with the green number it reads as
+    /// (`IntegerPropertyFactory.duration`, `duration_green`).
     fn integer(&self, id: i32) -> Option<i32> {
         let hispeed = |read: fn(f32) -> i32| self.chart.map_or(INTEGER_ABSENT, |chart| read(chart.hispeed));
+        let duration = self.chart.and_then(|chart| chart.duration_ms);
         Some(match id {
             NUMBER_JUDGETIMING => self.judge_timing,
             NUMBER_HISPEED_LR2 => hispeed(|speed| (speed * HISPEED_LR2_SCALE) as i32),
             NUMBER_HISPEED => hispeed(|speed| speed as i32),
             NUMBER_HISPEED_AFTERDOT => hispeed(|speed| (speed * HISPEED_LR2_SCALE) as i32 % HISPEED_LR2_SCALE as i32),
-            NUMBER_DURATION | NUMBER_DURATION_GREEN => INTEGER_ABSENT,
+            NUMBER_DURATION => duration.unwrap_or(INTEGER_ABSENT),
+            NUMBER_DURATION_GREEN => duration.map_or(INTEGER_ABSENT, green_of_duration),
             _ => return None,
         })
     }

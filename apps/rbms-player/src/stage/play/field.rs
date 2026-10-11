@@ -28,7 +28,7 @@ mod tests;
 
 /// The tempo a field scrolls at under CONSTANT: the one at which a note crosses the field in
 /// [`CONSTANT_GREEN_BASE_MS`] at a hi-speed of one.
-const CONSTANT_BPM: f64 = LANE_TRAVEL_BASE_MS / CONSTANT_GREEN_BASE_MS;
+pub(super) const CONSTANT_BPM: f64 = LANE_TRAVEL_BASE_MS / CONSTANT_GREEN_BASE_MS;
 
 /// The scroll rate of a field under CONSTANT: the chart's own rates do not apply.
 const CONSTANT_SCROLL: f64 = 1.0;

@@ -6,9 +6,9 @@
 use super::assets::THEME_TEMPLATE;
 use super::judge_setup::{is_custom_judge, judge_setup_of};
 use super::{
-    ROOT_ESC_CONFIRM, SortMode, assisted_lamp, build_hash, bundled_skin, calibrated_offset, clear_type_from_id, clear_type_id, client_platform,
-    compute_build_hash, config_dir_from, default_total_for_mode, esc_confirms_quit, exit_code, fmt_datetime, green_number_for, ir_submission_block_reason,
-    resumed_clock_us, saves_replay, sound_folder_path, updates_score, write_atomic,
+    ROOT_ESC_CONFIRM, SortMode, assisted_lamp, build_hash, bundled_skin, clear_type_from_id, clear_type_id, client_platform, compute_build_hash,
+    config_dir_from, default_total_for_mode, esc_confirms_quit, exit_code, fmt_datetime, green_number_for, ir_submission_block_reason, resumed_clock_us,
+    saves_replay, sound_folder_path, updates_score, write_atomic,
 };
 use rbms_chart::{default_total, default_total_keyboard};
 use rbms_config::{Config, JUDGE_RATE_MAX_PERCENT, LN_MARGIN_DEFAULT_PERCENT, LN_MARGIN_MAX_PERCENT, LN_MARGIN_MIN_PERCENT, UNMODIFIED_JUDGE_RATES};
@@ -77,41 +77,6 @@ fn client_platform_is_os_arch() {
     let p = client_platform();
     assert!(p.contains('-'), "platform tag is OS-ARCH");
     assert_eq!(p, format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH));
-}
-
-#[test]
-fn calibrated_offset_recenters_from_mean() {
-    assert_eq!(calibrated_offset(0, 60_000), 60, "60ms-early avg -> +60ms offset");
-    assert_eq!(calibrated_offset(0, -40_000), -40);
-    assert_eq!(calibrated_offset(60, 0), 60, "no error -> no change");
-    assert_eq!(calibrated_offset(0, 0), 0);
-    assert_eq!(calibrated_offset(190, 50_000), 200, "clamped to +200");
-}
-
-#[test]
-fn calibration_converges_in_one_run() {
-    let bias_us: i64 = 60_000;
-    let offset0 = 0;
-    let mean_run1 = bias_us - offset0 as i64 * 1000;
-    let offset1 = calibrated_offset(offset0, mean_run1);
-    let mean_run2 = bias_us - offset1 as i64 * 1000;
-    assert!(mean_run2.abs() <= 1_000, "after one calibration the residual error is ~0 (was {mean_run2}us)");
-}
-
-#[test]
-fn calibrated_offset_clamps_both_ends() {
-    assert_eq!(calibrated_offset(-190, -50_000), -200, "clamped to -200");
-    assert_eq!(calibrated_offset(190, 50_000), 200, "clamped to +200");
-    assert_eq!(calibrated_offset(200, 1_000_000), 200, "never exceeds +200");
-    assert_eq!(calibrated_offset(-200, -1_000_000), -200, "never below -200");
-}
-
-#[test]
-fn calibrated_offset_rounds_to_nearest_ms() {
-    assert_eq!(calibrated_offset(0, 1_400), 1, "1.4ms rounds to 1");
-    assert_eq!(calibrated_offset(0, 1_600), 2, "1.6ms rounds to 2");
-    assert_eq!(calibrated_offset(0, -1_600), -2, "-1.6ms rounds to -2");
-    assert_eq!(calibrated_offset(0, 499), 0, "sub-half-ms rounds to 0");
 }
 
 #[test]

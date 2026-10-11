@@ -370,14 +370,6 @@ fn client_platform() -> String {
     format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH)
 }
 
-/// Auto-calibration: the new judge offset (ms) given the run's mean timing error. The offset
-/// is held constant during a run (so judging is consistent and replays reproduce); the mean
-/// error then recentres timing for the NEXT run, converging in ~one play. `mean_us` > 0 = the
-/// player was early (FAST), so the offset increases to compensate.
-fn calibrated_offset(current_ms: i32, mean_us: i64) -> i32 {
-    (current_ms + (mean_us as f64 / 1000.0).round() as i32).clamp(-200, 200)
-}
-
 /// One editable row in the key-config screen.
 enum KcRow {
     ModeSelect,

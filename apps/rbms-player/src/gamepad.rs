@@ -36,7 +36,7 @@ use rbms_model::Mode;
 use rbms_play::ScratchDir;
 use serde::{Deserialize, Serialize};
 
-use crate::keyconfig::{ControlAction, mode_config_key};
+use crate::keyconfig::{Bindable, ControlAction, Shortcut, mode_config_key};
 use crate::notify::{Level, notify};
 
 pub use analog::*;
@@ -163,9 +163,12 @@ pub struct PadConfig {
     /// The binding each scratch lane is spun backwards with, shaped like `lanes`. A turntable
     /// needs no entry here: it drives both directions from the forward slot.
     pub scratch_reverse: BTreeMap<String, Vec<Option<PadBinding>>>,
-    /// Control bindings the player has set, keyed by [`ControlAction::label`]. A control with no
-    /// entry reads its default (see [`PadConfig::control_binding`]).
+    /// Control bindings the player has set, keyed by [`ControlAction::config_key`]. A control with
+    /// no entry reads its default (see [`PadConfig::control_binding`]).
     pub controls: BTreeMap<String, PadBinding>,
+    /// Shortcut bindings the player has set, keyed by [`Shortcut::config_key`]. None ships bound,
+    /// and a key config written before a controller could be given one reads none.
+    pub shortcuts: BTreeMap<String, PadBinding>,
     pub debounce_ms: u32,
     pub analog_mode: AnalogMode,
     pub analog_threshold: u32,
@@ -180,6 +183,7 @@ impl Default for PadConfig {
             lanes: BTreeMap::new(),
             scratch_reverse: BTreeMap::new(),
             controls: BTreeMap::new(),
+            shortcuts: BTreeMap::new(),
             debounce_ms: DEFAULT_DEBOUNCE_MS,
             analog_mode: AnalogMode::default(),
             analog_threshold: DEFAULT_ANALOG_THRESHOLD,
@@ -233,35 +237,66 @@ impl PadConfig {
     /// which is the standard menu button for START and SELECT and nothing for the rest. A key
     /// config written before START and SELECT existed therefore reads them on those buttons.
     pub fn control_binding(&self, action: ControlAction) -> Option<PadBinding> {
-        self.controls.get(action.label()).copied().or_else(|| default_control_binding(action))
+        self.controls.get(action.config_key()).copied().or_else(|| default_control_binding(action))
     }
 
     /// Bind a control, or with `None` drop the player's binding so it reads its default again.
     pub fn set_control(&mut self, action: ControlAction, binding: Option<PadBinding>) {
         match binding {
             Some(binding) => {
-                self.controls.insert(action.label().to_string(), binding);
+                self.controls.insert(action.config_key().to_string(), binding);
             }
             None => {
-                self.controls.remove(action.label());
+                self.controls.remove(action.config_key());
             }
         }
     }
 
-    /// Bindings that fire more than one thing at once for `mode`, so the editor can flag them the
-    /// way it flags a shared key.
-    pub fn collisions(&self, mode: Mode) -> std::collections::HashSet<PadBinding> {
-        let mut seen = std::collections::HashSet::new();
-        let mut dup = std::collections::HashSet::new();
-        let lanes = (0..mode.key).filter_map(|lane| self.lane_binding(mode, lane));
-        let reverse = (0..mode.key).filter(|&lane| mode.is_scratch(lane)).filter_map(|lane| self.scratch_reverse_binding(mode, lane));
-        let controls = ControlAction::ALL.into_iter().filter_map(|action| self.control_binding(action));
-        for binding in lanes.chain(reverse).chain(controls) {
-            if !seen.insert(binding) {
-                dup.insert(binding);
+    /// What a shortcut is bound to on the controller, which is nothing until the player binds it,
+    /// and nothing ever for a shortcut a controller cannot be given ([`Shortcut::takes_a_pad`]).
+    pub fn shortcut_binding(&self, shortcut: Shortcut) -> Option<PadBinding> {
+        self.shortcuts.get(shortcut.config_key()).copied().filter(|_| shortcut.takes_a_pad())
+    }
+
+    /// Bind a shortcut, or with `None` unbind it.
+    pub fn set_shortcut(&mut self, shortcut: Shortcut, binding: Option<PadBinding>) {
+        match binding {
+            Some(binding) if shortcut.takes_a_pad() => {
+                self.shortcuts.insert(shortcut.config_key().to_string(), binding);
+            }
+            Some(_) | None => {
+                self.shortcuts.remove(shortcut.config_key());
             }
         }
-        dup
+    }
+
+    /// What something is bound to on the controller, for the mode being edited.
+    pub fn binding_of(&self, mode: Mode, target: Bindable) -> Option<PadBinding> {
+        match target {
+            Bindable::Lane(lane) => self.lane_binding(mode, lane),
+            Bindable::ScratchReverse(lane) => self.scratch_reverse_binding(mode, lane),
+            Bindable::Control(action) => self.control_binding(action),
+            Bindable::Shortcut(shortcut) => self.shortcut_binding(shortcut),
+        }
+    }
+
+    /// Bind something on the controller, or with `None` take the player's binding away. START and
+    /// SELECT then read the pad's own menu buttons again, as they do in a fresh key config.
+    pub fn bind(&mut self, mode: Mode, target: Bindable, binding: Option<PadBinding>) {
+        match target {
+            Bindable::Lane(lane) => self.set_lane(mode, lane, binding),
+            Bindable::ScratchReverse(lane) => self.set_scratch_reverse(mode, lane, binding),
+            Bindable::Control(action) => self.set_control(action, binding),
+            Bindable::Shortcut(shortcut) => self.set_shortcut(shortcut, binding),
+        }
+    }
+
+    /// Drop every binding the player made, leaving the tuning of the controller itself alone.
+    pub fn restore_bindings(&mut self) {
+        self.lanes.clear();
+        self.scratch_reverse.clear();
+        self.controls.clear();
+        self.shortcuts.clear();
     }
 
     /// The axes this config reads as turntables for `mode`, in lane order.
@@ -311,6 +346,14 @@ impl PadConfig {
                 Some(PadBinding::AnalogScratch { .. }) | None => {}
             }
         }
+        for shortcut in Shortcut::ALL {
+            match self.shortcut_binding(shortcut) {
+                Some(PadBinding::Button(code)) => plan.push((PadElement::Button(code), PadTarget::Shortcut(shortcut))),
+                Some(PadBinding::Standard(button)) => plan.push((PadElement::Standard(button), PadTarget::Shortcut(shortcut))),
+                Some(PadBinding::Axis { axis, positive }) => plan.push((PadElement::AxisDir { axis, positive }, PadTarget::Shortcut(shortcut))),
+                Some(PadBinding::AnalogScratch { .. }) | None => {}
+            }
+        }
         plan
     }
 }
@@ -337,6 +380,7 @@ enum PadElement {
 enum PadTarget {
     Lane { lane: usize, dir: ScratchDir },
     Control(ControlAction),
+    Shortcut(Shortcut),
 }
 
 impl PadTarget {
@@ -349,12 +393,13 @@ impl PadTarget {
 ///
 /// A lane carries its spin direction because rbms models a scratch as one lane spun two ways,
 /// where the reference models it as two separate lane assignments. A control carries no state: it
-/// fires on the press, like the key that does the same job. What is still held afterwards is read
-/// back with [`PadState::held`].
+/// fires on the press, like the key that does the same job, and so does a shortcut. What is still
+/// held afterwards is read back with [`PadState::held`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PadEvent {
     Lane { lane: usize, dir: ScratchDir, press: bool },
     Control(ControlAction),
+    Shortcut(Shortcut),
 }
 
 /// One element's accepted state and when it last changed.
@@ -475,6 +520,7 @@ impl PadMapper {
                 match target {
                     PadTarget::Lane { lane, dir } => Some(PadEvent::Lane { lane, dir, press: pressed }),
                     PadTarget::Control(action) => pressed.then_some(PadEvent::Control(action)),
+                    PadTarget::Shortcut(shortcut) => pressed.then_some(PadEvent::Shortcut(shortcut)),
                 }
             })
             .collect()
@@ -495,6 +541,7 @@ impl PadMapper {
             let event = match target {
                 PadTarget::Lane { lane, dir } => PadEvent::Lane { lane, dir, press: true },
                 PadTarget::Control(action) => PadEvent::Control(action),
+                PadTarget::Shortcut(shortcut) => PadEvent::Shortcut(shortcut),
             };
             if !held.contains(&event) {
                 held.push(event);

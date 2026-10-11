@@ -47,6 +47,29 @@ pub const REPLAY_LEGACY_GAUGE_AUTO_SHIFT: &str = "NONE";
 /// Auto-shift floor a replay recorded before it was written down was played under.
 pub const REPLAY_LEGACY_BOTTOM_SHIFTABLE_GAUGE: &str = "assist";
 
+/// A judge offset that came into force part of the way through a run: every input from the one at
+/// `from_event` on was judged `offset_ms` away from the instant it arrived.
+///
+/// A run played with the judge offset adjusting itself moves the offset after an input lands, so
+/// one number for the whole run cannot say what each input was judged at. The steps are in the order
+/// they happened, and `from_event` counts the recorded inputs, presses and releases alike.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ReplayOffsetStep {
+    pub from_event: usize,
+    pub offset_ms: i32,
+}
+
+impl ReplayOffsetStep {
+    /// The judge offset the recorded input at `index` was judged at, in milliseconds: the one the
+    /// last of `steps` at or before it brought in. `None` for an input no step reaches, which is
+    /// every input of a run judged at one offset throughout.
+    pub fn in_force_at(steps: &[ReplayOffsetStep], index: usize) -> Option<i32> {
+        let reached = steps.partition_point(|step| step.from_event <= index);
+        reached.checked_sub(1).and_then(|last| steps.get(last)).map(|step| step.offset_ms)
+    }
+}
+
 /// The JUDGE settings a run was played under, recorded so playback reproduces the judgements the
 /// run actually got rather than the ones the current settings would give.
 ///
@@ -74,6 +97,10 @@ pub struct ReplayJudge {
     pub gauge_auto_shift: String,
     /// The floor the per-frame auto-shift could drop the selection to.
     pub bottom_shiftable_gauge: String,
+    /// The judge offsets the run moved through, for a run whose offset moved while it was played.
+    /// Empty for a run judged at the replay's one `offset_ms` from first input to last, which is
+    /// every replay written before the offset could move.
+    pub offset_steps: Vec<ReplayOffsetStep>,
 }
 
 impl Default for ReplayJudge {
@@ -87,6 +114,7 @@ impl Default for ReplayJudge {
             gauge_set: REPLAY_LEGACY_GAUGE_SET.to_string(),
             gauge_auto_shift: REPLAY_LEGACY_GAUGE_AUTO_SHIFT.to_string(),
             bottom_shiftable_gauge: REPLAY_LEGACY_BOTTOM_SHIFTABLE_GAUGE.to_string(),
+            offset_steps: Vec::new(),
         }
     }
 }

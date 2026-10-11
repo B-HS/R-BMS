@@ -26,10 +26,14 @@
 //! and Escape throws the search away. A word with nothing in it is no search, so confirming one is
 //! the same as cancelling.
 //!
-//! Every other key is the list's. The ones that move or reorder it ([`KEYS_OF_THE_LIST`]) do so
-//! under the box, and the typing goes on. The ones that put something over the list or leave it for
-//! another screen ([`KEYS_THAT_OPEN`], and the key that pins the option overlay) end the typing
-//! first, with what was typed left on show, and then do what they do on any list. The mouse and the
+//! Every other key is the list's. The ones that move or reorder it (the two arrows, and the
+//! shortcuts [`WhileTyping::UnderTheBox`] names) do so under the box, and the typing goes on. The
+//! ones that put something over the list or leave it for another screen ([`WhileTyping::Opens`], and
+//! the key that pins the option overlay) end the typing first, with what was typed left on show, and
+//! then do what they do on any list. Which key each of them is on is the key configuration's to
+//! say, and a shortcut the player has put on a key that types a character or edits the line is not
+//! read while a word is typed: there the key is the word's
+//! ([`crate::keyconfig::belongs_to_a_typed_line`]). The mouse and the
 //! buttons of a skin are not the keyboard's and work as they always do; a key of a controller ends
 //! the typing and does what it does, and so does leaving the browser for any other screen.
 //!
@@ -46,7 +50,8 @@ use rbms_skin::property::generated::STRING_SEARCHWORD;
 use winit::event::Ime;
 
 use super::SelectState;
-use crate::app_options::{TOGGLE_KEY, options_key};
+use crate::app_options::options_key;
+use crate::keyconfig::{Shortcut, ShortcutScreen, belongs_to_a_typed_line};
 use crate::stage::{FrameCtx, KeyInput, StageId, Transition};
 use crate::textedit::{ImeEdit, edit_key};
 use crate::{AppShared, KeyCode, SelectTab, SelectView};
@@ -59,14 +64,59 @@ const SEARCH_CARET: &str = "_";
 /// width on top of this; this only decides which stretch of the query it is handed.
 const SEARCH_VISIBLE_CHARS: usize = 24;
 
-/// The keys that move or reorder the list under a word being typed, without ending the typing: the
-/// two arrows that move the cursor, the sort key, and the key a skin's browser stars a chart with.
-const KEYS_OF_THE_LIST: [KeyCode; 4] = [KeyCode::ArrowUp, KeyCode::ArrowDown, KeyCode::F3, KeyCode::F9];
+/// What a shortcut of the browser comes to while a search word is typed, when it is on a key that
+/// is not the word's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WhileTyping {
+    /// It reorders, filters or marks the list under the box, and the typing goes on: the order, the
+    /// star, the mode filter, the long note mode and the replay slot.
+    UnderTheBox,
+    /// It ends the typing and is then the list's, because what it does is put a panel over the list
+    /// or leave it for another screen.
+    Opens,
+    /// It ends the typing and pins the option overlay, which the browser kept the key from while the
+    /// box had the keyboard.
+    PinsTheOverlay,
+    /// It does nothing: the search is open already, and the keys that are read as held are not
+    /// asked about under a box.
+    Nothing,
+}
 
-/// The keys that end the typing and are then the list's, because what they do is put a panel over
-/// the list or leave it for another screen: the filter panel, practice, the skin settings, and the
-/// settings screen or the course list.
-const KEYS_THAT_OPEN: [KeyCode; 4] = [KeyCode::F2, KeyCode::F4, KeyCode::F12, KeyCode::Tab];
+impl WhileTyping {
+    fn of(shortcut: Shortcut) -> WhileTyping {
+        match shortcut {
+            Shortcut::Sort
+            | Shortcut::RefSort
+            | Shortcut::Favourite
+            | Shortcut::RefFavourite
+            | Shortcut::RefMode
+            | Shortcut::RefLnMode
+            | Shortcut::RefReplay => WhileTyping::UnderTheBox,
+            Shortcut::Filter
+            | Shortcut::Practice
+            | Shortcut::Records
+            | Shortcut::Ranking
+            | Shortcut::Settings
+            | Shortcut::SkinMenu
+            | Shortcut::KeyConfig
+            | Shortcut::RefKeyConfig
+            | Shortcut::Folders
+            | Shortcut::Tables => WhileTyping::Opens,
+            Shortcut::OptionsPin => WhileTyping::PinsTheOverlay,
+            Shortcut::Search
+            | Shortcut::RefSearch
+            | Shortcut::OptionsHold
+            | Shortcut::RefDetail
+            | Shortcut::Retry
+            | Shortcut::NextSong
+            | Shortcut::ReplayPause
+            | Shortcut::ReplayFaster
+            | Shortcut::ReplaySlower
+            | Shortcut::ReplayForward
+            | Shortcut::ReplayBack => WhileTyping::Nothing,
+        }
+    }
+}
 
 /// Which object of the skin that is drawing the browser is its search text: the editable text that
 /// writes the search word. `None` on the built-in browser and on a skin that has none, which is
@@ -220,32 +270,40 @@ impl SelectState {
     /// One key going down while a word is typed. Answers what the key came to when it was the
     /// word's, and `None` for a key that is the list's and goes on to do what it does there.
     ///
-    /// Enter confirms and Escape cancels. The keys of [`KEYS_OF_THE_LIST`] are the list's and leave
-    /// the typing as it is; the keys of [`KEYS_THAT_OPEN`] end the typing first. The key that pins
-    /// the option overlay ends the typing too and is handed to the overlay, which the browser kept
-    /// it from while the box had the keyboard. Everything else edits the word, or is a key with no
-    /// character on it and does nothing.
+    /// Enter confirms and Escape cancels, and the two arrows that move the cursor move it under the
+    /// box. A key that types a character or edits the line is the word's, whatever shortcut the key
+    /// configuration has put on it. Any other key is looked up there: a shortcut of
+    /// [`WhileTyping::UnderTheBox`] is the list's and leaves the typing as it is, one of
+    /// [`WhileTyping::Opens`] ends the typing first, and the key that pins the option overlay ends
+    /// the typing too and is handed to the overlay. Everything else does nothing.
     pub(super) fn search_key(&mut self, ctx: &mut FrameCtx<'_>, key: &KeyInput<'_>) -> Option<Transition> {
         match key.code {
             KeyCode::Escape => self.exit_search(ctx.shared),
             KeyCode::Enter | KeyCode::NumpadEnter => self.confirm_search(ctx.shared),
-            TOGGLE_KEY => {
-                self.confirm_search(ctx.shared);
-                options_key(ctx, StageId::Select, false, key);
-            }
-            code if KEYS_OF_THE_LIST.contains(&code) => return None,
-            code if KEYS_THAT_OPEN.contains(&code) => {
-                self.confirm_search(ctx.shared);
-                return None;
-            }
-            _ => {
-                edit_key(self.search_edit.line_mut(), key, self.ctrl_held);
-                self.cached_key = None;
-                if self.search_edit.line().text() != ctx.shared.search {
-                    self.apply_search(ctx.shared);
+            KeyCode::ArrowUp | KeyCode::ArrowDown => return None,
+            code if belongs_to_a_typed_line(code) => self.type_into_search(ctx.shared, key),
+            code => match ctx.shared.shortcut_for(ShortcutScreen::Browser, code).map(WhileTyping::of) {
+                Some(WhileTyping::UnderTheBox) => return None,
+                Some(WhileTyping::Opens) => {
+                    self.confirm_search(ctx.shared);
+                    return None;
                 }
-            }
+                Some(WhileTyping::PinsTheOverlay) => {
+                    self.confirm_search(ctx.shared);
+                    options_key(ctx, StageId::Select, false, key);
+                }
+                Some(WhileTyping::Nothing) | None => self.type_into_search(ctx.shared, key),
+            },
         }
         Some(Transition::Stay)
+    }
+
+    /// Hand one key to the line being typed, and narrow the list by what it left.
+    fn type_into_search(&mut self, shared: &mut AppShared, key: &KeyInput<'_>) {
+        edit_key(self.search_edit.line_mut(), key, self.ctrl_held);
+        self.cached_key = None;
+        if self.search_edit.line().text() != shared.search {
+            self.apply_search(shared);
+        }
     }
 }

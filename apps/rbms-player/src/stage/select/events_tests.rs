@@ -13,7 +13,7 @@ use rbms_library::Library;
 use rbms_skin::property::generated::*;
 use rbms_store::ScoreBook;
 
-use super::events::{SelectEvent, SettingEvent, event_of, replay_in_slot, step_setting};
+use super::events::{SelectEvent, SettingEvent, event_of, replay_in_slot, step_duration, step_setting};
 use super::skinned_tests::{Browser, SHORT_STEP, starts_a_chart};
 use super::tests::{app, entry, record};
 use super::*;
@@ -205,6 +205,41 @@ fn the_scroll_speed_and_the_judge_timing_step_and_stop_at_their_ends() {
     }
 }
 
+/// The note display time is the travel time a held green number is held at
+/// (`EventFactory.duration1p`): it moves a millisecond, or by the step the event's second argument
+/// names, stops at the ends of its range, and does not move at all while no green number is held.
+#[test]
+fn the_note_display_time_moves_only_while_a_green_number_is_held() {
+    use rbms_config::{DEFAULT_DURATION_MS, DURATION_MAX_MS, DURATION_MIN_MS};
+    const TEN_AT_A_TIME: i32 = 10;
+    let mut settings = Settings::new();
+    assert_eq!(event_of(EVENT_DURATION), Some(SelectEvent::Setting(SettingEvent::Duration)));
+    for arg1 in [NEXT, PREVIOUS] {
+        assert_eq!(settings.stepped(EVENT_DURATION, arg1).play.duration_ms, DEFAULT_DURATION_MS, "nothing is held, so nothing moves");
+    }
+    assert!(!settings.state.options_dirty, "an event that moved nothing left something to write");
+
+    let mut held = Config::default();
+    held.play.keep_green_number = true;
+    held.play.autoplay = false;
+    assert_eq!(settings.after(&held, EVENT_DURATION, NEXT).play.duration_ms, DEFAULT_DURATION_MS + 1);
+    assert_eq!(settings.after(&held, EVENT_DURATION, NO_ARGUMENT).play.duration_ms, DEFAULT_DURATION_MS + 1);
+    assert_eq!(settings.after(&held, EVENT_DURATION, PREVIOUS).play.duration_ms, DEFAULT_DURATION_MS - 1);
+    assert!(settings.state.options_dirty, "a moved travel time is written out with the other options");
+
+    let mut config = held.clone();
+    assert!(step_duration(&mut config, NEXT, TEN_AT_A_TIME));
+    assert_eq!(config.play.duration_ms, DEFAULT_DURATION_MS + TEN_AT_A_TIME, "the second argument is the step");
+    assert!(step_duration(&mut config, PREVIOUS, -TEN_AT_A_TIME), "a step that is not above zero is a millisecond");
+    assert_eq!(config.play.duration_ms, DEFAULT_DURATION_MS + TEN_AT_A_TIME - 1);
+    for (end, arg1) in [(DURATION_MAX_MS, NEXT), (DURATION_MIN_MS, PREVIOUS)] {
+        config.play.duration_ms = end;
+        assert!(!step_duration(&mut config, arg1, i32::MAX), "a travel time at its end was said to have moved");
+        assert_eq!(config.play.duration_ms, end);
+    }
+    assert!((config.play.hispeed - held.play.hispeed).abs() < f64::EPSILON, "the speed is worked out when a chart starts, not here");
+}
+
 /// The judge algorithm goes round the three the reference lists, and the fourth this player has is
 /// not a place the event steps from.
 #[test]
@@ -283,7 +318,6 @@ fn an_event_with_nothing_behind_it_does_nothing() {
         EVENT_DIFFICULTY,
         BUTTON_READTEXT,
         BUTTON_GAUGE_2P,
-        EVENT_DURATION,
         EVENT_BGA_EXPAND,
         BUTTON_RIVAL,
         BUTTON_FAVORITTE_SONG,

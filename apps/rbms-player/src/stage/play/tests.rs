@@ -368,16 +368,42 @@ fn changing_the_speed_by_hand_re_reads_the_travel_time_that_is_then_held() {
     assert!((held - chosen).abs() < GREEN_TOLERANCE_MS, "the run held {held} rather than the {chosen} the player chose");
 }
 
+/// Hold `code` down or let it go the way the window reports a key to the application.
+fn hold_key(app: &mut App, code: KeyCode, down: bool) {
+    app.shared.note_key(&key(code, down));
+}
+
+/// Whether the fine-step modifier reads as held with `code` alone down.
+fn fine_with(app: &mut App, code: KeyCode) -> bool {
+    hold_key(app, code, true);
+    let fine = app.shared.fine_pressed();
+    hold_key(app, code, false);
+    fine
+}
+
 /// The modifier must never take a key the chart needs: on the shipped seven-key layout the left
 /// shift is the turntable, so only the free one switches the step.
 #[test]
 fn a_shift_key_bound_to_a_lane_is_not_the_fine_modifier() {
-    let app = app();
+    let mut app = app();
     let scratch = app.shared.lane_input_for(KeyCode::ShiftLeft);
     assert!(scratch.is_some(), "the fixture layout binds the left shift to a lane");
-    assert!(!PlayState::is_fine_modifier(&app.shared, KeyCode::ShiftLeft), "a key that plays a lane keeps that job");
-    assert!(PlayState::is_fine_modifier(&app.shared, KeyCode::ShiftRight), "the free shift is the modifier");
-    assert!(!PlayState::is_fine_modifier(&app.shared, KeyCode::KeyQ), "and nothing else is");
+    assert!(!fine_with(&mut app, KeyCode::ShiftLeft), "a key that plays a lane keeps that job");
+    assert!(fine_with(&mut app, KeyCode::ShiftRight), "the free shift is the modifier");
+    assert!(!fine_with(&mut app, KeyCode::KeyQ), "and nothing else is");
+}
+
+/// Given a key of its own, the modifier is that key and no shift: the fallback is only for a
+/// player who never named one.
+#[test]
+fn the_fine_modifier_is_the_key_it_is_given_and_then_no_shift() {
+    let mut app = app();
+    app.shared.keyconfig.set_control(ControlAction::Fine, KeyCode::KeyQ);
+    assert!(fine_with(&mut app, KeyCode::KeyQ), "the key the control was given is the modifier");
+    assert!(!fine_with(&mut app, KeyCode::ShiftRight), "a shift is the modifier only while the control has no key");
+    let mut state = play_state();
+    let pressed = press_at(&mut state, &mut app, KeyCode::KeyQ, true, Instant::now());
+    assert!(matches!(pressed, Transition::Stay), "the modifier's key is the run's own and does nothing by itself");
 }
 
 /// Holding the modifier switches the lane shades to their finer step for as long as it is down.
@@ -385,14 +411,11 @@ fn a_shift_key_bound_to_a_lane_is_not_the_fine_modifier() {
 fn holding_the_modifier_switches_the_shades_to_the_finer_step() {
     let mut app = app();
     let mut state = play_state();
-    let now = Instant::now();
-    press_at(&mut state, &mut app, KeyCode::ShiftRight, true, now);
-    assert!(state.fine_held);
+    hold_key(&mut app, KeyCode::ShiftRight, true);
     app.shared.config.play.cover = 0.5;
     state.in_play_control(&mut app.shared, ControlAction::CoverUp);
     let fine = app.shared.config.play.cover - 0.5;
-    press_at(&mut state, &mut app, KeyCode::ShiftRight, false, now);
-    assert!(!state.fine_held);
+    hold_key(&mut app, KeyCode::ShiftRight, false);
     app.shared.config.play.cover = 0.5;
     state.in_play_control(&mut app.shared, ControlAction::CoverUp);
     let coarse = app.shared.config.play.cover - 0.5;

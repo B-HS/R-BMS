@@ -6,7 +6,7 @@
 //! owns it.
 #![allow(clippy::wildcard_imports)]
 
-use crate::keyconfig::{HeldKeys, key_index_of};
+use crate::keyconfig::{HeldKeys, Shortcut, ShortcutScreen, key_index_of};
 use crate::skin_host::HeldKeyQuery;
 use crate::*;
 
@@ -84,6 +84,16 @@ const STEP_UP: f32 = 1.0;
 
 /// One step in the decreasing direction.
 const STEP_DOWN: f32 = -1.0;
+
+/// How far one press of a judge offset key moves the offset, in milliseconds: the finest step the
+/// offset has, so a run can be nudged without leaving it.
+const OFFSET_KEY_STEP_MS: i32 = 1;
+
+/// One step forwards on a settings row, which is what flips a row that is on or off.
+const ROW_STEP: i32 = 1;
+
+/// The keys that are the fine-step modifier while the control has no key of its own.
+const FINE_FALLBACK_KEYS: [KeyCode; 2] = [KeyCode::ShiftLeft, KeyCode::ShiftRight];
 
 /// The keys of a keyboard as libGDX numbers them and as the window reports them: each `Input.Keys`
 /// code a skin can ask after, beside the physical key it stands for.
@@ -270,8 +280,46 @@ impl AppShared {
         self.control_held(ControlAction::Select)
     }
 
+    /// Whether the finer step of the covers and of a held green number is asked for: the key or
+    /// the controller element given to it is down, or, while it has no key, a shift key that plays
+    /// no lane and runs no control.
+    ///
+    /// The fallback is what the modifier always was. On the shipped single-play layouts the left
+    /// shift is the turntable and on the double-play ones the right is too, so no one key can ship
+    /// as the modifier for every mode; a shift that has no other job is the modifier until the
+    /// player names a key.
+    pub(crate) fn fine_pressed(&self) -> bool {
+        if self.control_held(ControlAction::Fine) {
+            return true;
+        }
+        self.keyconfig.control_key(ControlAction::Fine).is_none()
+            && FINE_FALLBACK_KEYS
+                .into_iter()
+                .any(|code| self.keyconfig.held.is_down(code) && self.lane_input_for(code).is_none() && self.control_for(code).is_none())
+    }
+
     fn control_held(&self, action: ControlAction) -> bool {
         self.control_key_in_force(action).is_some_and(|code| self.keyconfig.held.is_down(code)) || self.pad_held().contains(&PadEvent::Control(action))
+    }
+
+    /// The key a shortcut is read from right now, or `None` for one the player left without a key.
+    pub(crate) fn shortcut_key(&self, shortcut: Shortcut) -> Option<KeyCode> {
+        self.keyconfig.shortcut_key(shortcut)
+    }
+
+    /// The shortcut `screen` reads from `code`, if one is on it.
+    pub(crate) fn shortcut_for(&self, screen: ShortcutScreen, code: KeyCode) -> Option<Shortcut> {
+        self.keyconfig.shortcut_on(screen, code)
+    }
+
+    /// Whether `code` is the key of `shortcut` right now.
+    pub(crate) fn is_shortcut(&self, shortcut: Shortcut, code: KeyCode) -> bool {
+        self.shortcut_key(shortcut) == Some(code)
+    }
+
+    /// Whether the key of a shortcut that is read as held is down.
+    pub(crate) fn shortcut_held(&self, shortcut: Shortcut) -> bool {
+        self.shortcut_key(shortcut).is_some_and(|code| self.keyconfig.held.is_down(code))
     }
 
     /// Whether the key with the reference implementation's index `index` (`0..KEY_INDEX_COUNT`:
@@ -324,13 +372,28 @@ impl AppShared {
         if self.config.play.enable_lift { self.config.play.lift } else { LANE_SHADE_MIN }
     }
 
-    /// Apply an in-play control: hi-speed, lane cover (sudden), lift and the hidden band, clamped
-    /// to the ranges their settings rows declare, and answer what moved.
+    /// Apply an in-play control and answer what moved: hi-speed, lane cover (sudden), lift and the
+    /// hidden band, clamped to the ranges their settings rows declare; each shade on or off; and the
+    /// rows a run is judged and scrolled by.
     ///
     /// The hi-speed step is the one the HI-SPEED STEP row holds, so a player can trade reach for
     /// precision without leaving the chart, and the lane shades take the finer of their two steps
     /// while the modifier is down (`PlayConfig.java:87,91`).
+    ///
+    /// A course that locks the speed locks the shades and their switches with it
+    /// (`BMSPlayer.java:419-423`); the judge rows are not the speed's and stay the player's. The two
+    /// green number controls move a travel time only the run itself knows, so they are the play
+    /// screen's and move nothing here.
     pub(crate) fn apply_control(&mut self, action: ControlAction, ctx: &ControlContext) -> ControlEffect {
+        match action {
+            ControlAction::OffsetUp => return self.nudge_judge_offset(OFFSET_KEY_STEP_MS),
+            ControlAction::OffsetDown => return self.nudge_judge_offset(-OFFSET_KEY_STEP_MS),
+            ControlAction::AutoAdjustToggle => {
+                rbms_config::adjust(&mut self.config, rbms_config::SettingId::AutoCal, ROW_STEP);
+                return ControlEffect::None;
+            }
+            _ => {}
+        }
         if self.course_locks_speed() {
             return ControlEffect::None;
         }
@@ -346,12 +409,20 @@ impl AppShared {
                 self.config.play.cover = shaded(self.config.play.cover, step * STEP_DOWN);
                 ControlEffect::Shade
             }
+            ControlAction::CoverToggle => {
+                self.config.play.enable_cover = !self.config.play.enable_cover;
+                ControlEffect::Shade
+            }
             ControlAction::HiddenUp => {
                 self.config.play.hidden = shaded(self.config.play.hidden, step * STEP_UP);
                 ControlEffect::None
             }
             ControlAction::HiddenDown => {
                 self.config.play.hidden = shaded(self.config.play.hidden, step * STEP_DOWN);
+                ControlEffect::None
+            }
+            ControlAction::HiddenToggle => {
+                self.config.play.enable_hidden = !self.config.play.enable_hidden;
                 ControlEffect::None
             }
             ControlAction::LiftUp => {
@@ -364,8 +435,37 @@ impl AppShared {
                 self.rebuild_skin();
                 ControlEffect::None
             }
-            ControlAction::Start | ControlAction::Select => ControlEffect::None,
+            ControlAction::LiftToggle => {
+                self.config.play.enable_lift = !self.config.play.enable_lift;
+                self.rebuild_skin();
+                ControlEffect::None
+            }
+            ControlAction::KeepGreenToggle => {
+                rbms_config::adjust(&mut self.config, rbms_config::SettingId::KeepGreenNumber, ROW_STEP);
+                ControlEffect::None
+            }
+            ControlAction::GreenUp
+            | ControlAction::GreenDown
+            | ControlAction::OffsetUp
+            | ControlAction::OffsetDown
+            | ControlAction::AutoAdjustToggle
+            | ControlAction::Fine
+            | ControlAction::Start
+            | ControlAction::Select => ControlEffect::None,
         }
+    }
+
+    /// Move the judge offset by `by_ms`, inside the range its settings row declares.
+    ///
+    /// Only a run the player is playing moves it. A replay is judged at the offsets it was recorded
+    /// with and an autoplay hits nothing early or late, so on either the key would only leave the
+    /// player with an offset they never played at.
+    fn nudge_judge_offset(&mut self, by_ms: i32) -> ControlEffect {
+        if !self.run_plays_itself() && self.replay.is_none() {
+            let offset = &mut self.config.judge.offset_ms;
+            *offset = (*offset + by_ms).clamp(rbms_config::JUDGE_OFFSET_MIN_MS, rbms_config::JUDGE_OFFSET_MAX_MS);
+        }
+        ControlEffect::None
     }
 
     /// Move the scroll speed one step.
@@ -453,24 +553,6 @@ impl AppShared {
         cfg.five_key_layout = self.config.display.five_key_layout;
         self.result_palette = ResultPalette::from_skin(&cfg);
         self.skin = Skin::build(&cfg, self.mode, CW as f32, CH as f32);
-    }
-
-    /// Whether binding `code` to `row` (for `mode`) would collide with another action and so
-    /// silently break it (controls are resolved before lanes in play, so a shared key would
-    /// shadow the lane). Rebinding a row to its own current key is not a collision.
-    pub(crate) fn binding_collides(&self, mode: Mode, row: &KcRow, code: KeyCode) -> bool {
-        let taken_by_a_lane = |except: Option<usize>| self.keyconfig.lane_keys(mode).iter().any(|(k, l)| *k == code && Some(*l) != except);
-        let taken_by_a_reverse = |except: Option<usize>| self.keyconfig.scratch_reverse_keys(mode).iter().any(|(k, l)| *k == code && Some(*l) != except);
-        match row {
-            KcRow::Lane(lane) => self.control_for(code).is_some() || taken_by_a_lane(Some(*lane)) || taken_by_a_reverse(None),
-            KcRow::ScratchReverse(lane) => self.control_for(code).is_some() || taken_by_a_lane(None) || taken_by_a_reverse(Some(*lane)),
-            KcRow::Control(action) => {
-                taken_by_a_lane(None)
-                    || taken_by_a_reverse(None)
-                    || ControlAction::ALL.into_iter().any(|a| a != *action && self.keyconfig.control_key(a) == Some(code))
-            }
-            KcRow::ModeSelect | KcRow::PadDevice | KcRow::PadAnalogMode | KcRow::PadControl(_) | KcRow::PadLane(_) | KcRow::PadScratchReverse(_) => false,
-        }
     }
 
     /// md5 of the currently focused chart, if a song (not a folder) is focused.
@@ -943,15 +1025,17 @@ mod tests {
     /// both directions.
     #[test]
     fn the_editor_refuses_a_key_that_start_or_a_lane_already_has() {
+        use crate::keyconfig::{Bindable, Clash};
         let app = app();
         let mode = Mode::BEAT_7K;
-        let lane_key = KeyCode::KeyZ;
-        assert!(app.shared.binding_collides(mode, &KcRow::Control(ControlAction::Start), lane_key), "START onto a lane's key");
-        assert!(app.shared.binding_collides(mode, &KcRow::Control(ControlAction::Select), KeyCode::KeyA), "SELECT onto START's key");
-        assert!(app.shared.binding_collides(mode, &KcRow::Lane(0), KeyCode::KeyA), "a lane onto START's key");
-        assert!(app.shared.binding_collides(mode, &KcRow::ScratchReverse(7), KeyCode::KeyW), "a reverse key onto SELECT's key");
-        assert!(!app.shared.binding_collides(mode, &KcRow::Control(ControlAction::Start), KeyCode::KeyA), "START onto its own key");
-        assert!(!app.shared.binding_collides(mode, &KcRow::Control(ControlAction::Start), KeyCode::KeyP), "START onto a free key");
+        let keys = &app.shared.keyconfig;
+        let start = Bindable::Control(ControlAction::Start);
+        assert_eq!(keys.clash(mode, start, KeyCode::KeyZ), Some(Clash::With(Bindable::Lane(0))), "START onto a lane's key");
+        assert_eq!(keys.clash(mode, Bindable::Control(ControlAction::Select), KeyCode::KeyA), Some(Clash::With(start)), "SELECT onto START's key");
+        assert_eq!(keys.clash(mode, Bindable::Lane(0), KeyCode::KeyA), Some(Clash::With(start)), "a lane onto START's key");
+        assert!(keys.clash(mode, Bindable::ScratchReverse(7), KeyCode::KeyW).is_some(), "a reverse key onto SELECT's key");
+        assert_eq!(keys.clash(mode, start, KeyCode::KeyA), None, "START onto its own key");
+        assert_eq!(keys.clash(mode, start, KeyCode::KeyP), None, "START onto a free key");
     }
 
     /// The editor lists START and SELECT among the control rows, on the keyboard and on the pad, so

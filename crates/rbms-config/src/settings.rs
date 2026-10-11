@@ -34,6 +34,7 @@ use crate::schema::{
     PREVIEW_VOLUME_MIN, PREVIEW_VOLUME_STEP, SKIN_SCREEN_LABELS, TOTAL_FROM_CHART, TOTAL_STEP, skin_screen_label,
 };
 use crate::sort::SortMode;
+use crate::speed::{GREEN_NUMBER_MAX, GREEN_NUMBER_MIN, duration_stepped_by_green, green_of_duration};
 use crate::window::{WINDOW_MODE_LABELS, WINDOW_RESOLUTION_LABELS, WindowMode, WindowResolution};
 
 /// Value of a row that is on.
@@ -74,6 +75,9 @@ pub const PERCENT_SCALE: f32 = 100.0;
 
 /// TOTAL has no ceiling; the row only floors at [`TOTAL_FROM_CHART`], which means "use the chart's".
 pub const TOTAL_MAX: f64 = f64::INFINITY;
+
+/// One left/right step on the GREEN NUMBER row.
+pub const GREEN_NUMBER_ROW_STEP: i32 = 1;
 
 /// Decimals the HI-SPEED row shows.
 pub const HISPEED_DECIMALS: u8 = 2;
@@ -247,10 +251,12 @@ pub enum SettingId {
     AudioPolyphony,
     SoundFolder,
     GuideSe,
+    KeepGreenNumber,
+    GreenNumber,
 }
 
 /// Rows the settings screen has.
-pub const SETTING_COUNT: usize = 85;
+pub const SETTING_COUNT: usize = 87;
 
 impl SettingId {
     /// Every row, in declaration order.
@@ -340,6 +346,8 @@ impl SettingId {
         SettingId::AudioPolyphony,
         SettingId::SoundFolder,
         SettingId::GuideSe,
+        SettingId::KeepGreenNumber,
+        SettingId::GreenNumber,
     ];
 
     /// Position of the row in the whole settings list, which is also its index in [`SettingId::ALL`].
@@ -499,7 +507,7 @@ pub const SETTINGS: &[SettingDescriptor] = &[
         SettingTab::Play,
         "HI-SPEED",
         SettingKind::FloatRange { min: HISPEED_MIN, max: HISPEED_MAX, step: HISPEED_STEP, decimals: HISPEED_DECIMALS, unit: NO_UNIT },
-        "How fast the notes scroll; one press moves it by HI-SPEED STEP",
+        "How fast the notes scroll; one press moves it by HI-SPEED STEP. Worked out for every chart while KEEP GREEN NUMBER is on",
     ),
     row(
         SettingId::HiSpeedStep,
@@ -521,6 +529,20 @@ pub const SETTINGS: &[SettingDescriptor] = &[
         "HI-SPEED FIX",
         SettingKind::Cycle { values: HISPEED_FIX_LABELS },
         "Which tempo the note travel time is held constant against",
+    ),
+    row(
+        SettingId::KeepGreenNumber,
+        SettingTab::Play,
+        "KEEP GREEN NUMBER",
+        SettingKind::Toggle,
+        "Start every chart at the speed that shows GREEN NUMBER, whatever its tempo and lane cover; HI-SPEED FIX names the tempo (MAIN while it is OFF)",
+    ),
+    row(
+        SettingId::GreenNumber,
+        SettingTab::Play,
+        "GREEN NUMBER",
+        SettingKind::IntRange { min: GREEN_NUMBER_MIN, max: GREEN_NUMBER_MAX, step: GREEN_NUMBER_ROW_STEP, unit: NO_UNIT },
+        "The green number KEEP GREEN NUMBER holds: three fifths of the milliseconds a note is on show",
     ),
     row(SettingId::Random, SettingTab::Play, "RANDOM", SettingKind::Cycle { values: RANDOM_LABELS }, "How the lanes are shuffled"),
     unbuilt_row(
@@ -550,7 +572,13 @@ pub const SETTINGS: &[SettingDescriptor] = &[
         SettingKind::IntRange { min: JUDGE_OFFSET_MIN_MS, max: JUDGE_OFFSET_MAX_MS, step: JUDGE_OFFSET_STEP_MS, unit: MILLISECOND_UNIT },
         "Shift every judgement earlier or later",
     ),
-    row(SettingId::AutoCal, SettingTab::Judge, "AUTO CAL", SettingKind::Toggle, "Learn the judge offset from how you play"),
+    row(
+        SettingId::AutoCal,
+        SettingTab::Judge,
+        "AUTO ADJUST",
+        SettingKind::Toggle,
+        "Move JUDGE OFFSET a little after every hit that lands early or late, so the two even out as you play",
+    ),
     row(
         SettingId::JudgeAlgorithm,
         SettingTab::Judge,
@@ -934,6 +962,8 @@ pub fn display_value(config: &Config, id: SettingId) -> String {
         SettingId::HiSpeedStep => format!("{:.*}", HISPEED_DECIMALS as usize, config.play.hispeed_step),
         SettingId::SpeedFix => cycle_label(id, usize::from(config.play.constant_speed)),
         SettingId::FixHiSpeed => cycle_label(id, cycle_at(options::FixHiSpeed::ALL, config.play.fix_hispeed)),
+        SettingId::KeepGreenNumber => on_off(config.play.keep_green_number),
+        SettingId::GreenNumber => green_of_duration(config.play.duration_ms).to_string(),
         SettingId::Random => config.play.random.label().to_string(),
         SettingId::LaneOption => cycle_label(id, cycle_at(options::LaneOption::ALL, config.play.lane_option)),
         SettingId::LegacyNote => on_off(config.play.legacy_note),
@@ -1073,6 +1103,11 @@ pub fn adjust(config: &mut Config, id: SettingId, delta: i32) -> AdjustOutcome {
         SettingId::FixHiSpeed => {
             let at = stepped(cycle_at(options::FixHiSpeed::ALL, config.play.fix_hispeed), options::FIX_HISPEED_COUNT, delta);
             store(&mut config.play.fix_hispeed, options::FixHiSpeed::ALL[at])
+        }
+        SettingId::KeepGreenNumber => toggle(&mut config.play.keep_green_number),
+        SettingId::GreenNumber => {
+            let next = duration_stepped_by_green(config.play.duration_ms, delta.saturating_mul(GREEN_NUMBER_ROW_STEP));
+            store(&mut config.play.duration_ms, next)
         }
         SettingId::LaneOption => {
             let at = stepped(cycle_at(options::LaneOption::ALL, config.play.lane_option), options::LANE_OPTION_COUNT, delta);
@@ -1431,6 +1466,7 @@ mod tests {
             SettingId::HiSpeedStep => config.play.hispeed_step,
             SettingId::Total => config.play.total_override,
             SettingId::JudgeOffset => f64::from(config.judge.offset_ms),
+            SettingId::GreenNumber => f64::from(green_of_duration(config.play.duration_ms)),
             SettingId::LongNoteMargin => f64::from(config.judge.longnote_margin_rate),
             _ if judge_width_slot(id).is_some() => f64::from(judge_width(config, id).unwrap_or_default()),
             SettingId::AudioPolyphony => config.audio.polyphony as f64,
@@ -1674,6 +1710,8 @@ mod tests {
         assert_eq!(display_value(&config, SettingId::HiSpeedStep), "0.25");
         assert_eq!(display_value(&config, SettingId::SpeedFix), "FLOATING");
         assert_eq!(display_value(&config, SettingId::FixHiSpeed), "MAIN", "PlayConfig.java:43-49 ships MAINBPM");
+        assert_eq!(display_value(&config, SettingId::KeepGreenNumber), OFF_VALUE, "a file that never asked for it scrolls as it always did");
+        assert_eq!(display_value(&config, SettingId::GreenNumber), "300", "PlayConfig.java:24 ships a duration of 500");
         assert_eq!(display_value(&config, SettingId::LaneOption), "OFF");
         assert_eq!(display_value(&config, SettingId::PlayEscapeMode), "IMMEDIATE", "escaping a run stays the one press it has always been");
         assert_eq!(display_value(&config, SettingId::Hidden), "0%");
@@ -1711,6 +1749,19 @@ mod tests {
     }
 
     #[test]
+    fn the_green_number_row_steps_the_number_it_shows_and_stores_the_travel_time() {
+        let mut config = Config::default();
+        assert_eq!(adjust(&mut config, SettingId::GreenNumber, 1), AdjustOutcome::Changed);
+        assert_eq!(display_value(&config, SettingId::GreenNumber), "301");
+        assert_eq!(config.play.duration_ms, 502, "the shortest travel time that reads as 301");
+        assert_eq!(adjust(&mut config, SettingId::GreenNumber, -1), AdjustOutcome::Changed);
+        assert_eq!(config.play.duration_ms, crate::schema::DEFAULT_DURATION_MS);
+        config.play.duration_ms = crate::schema::DURATION_MAX_MS;
+        assert_eq!(adjust(&mut config, SettingId::GreenNumber, 1), AdjustOutcome::Unchanged, "the row stops at its end");
+        assert!((config.play.hispeed - crate::schema::DEFAULT_HISPEED).abs() < f64::EPSILON, "the row moves no speed by itself");
+    }
+
+    #[test]
     fn a_judge_offset_reads_with_its_sign_and_unit() {
         let mut config = Config::default();
         config.judge.offset_ms = -JUDGE_OFFSET_STEP_MS;
@@ -1742,6 +1793,8 @@ mod tests {
                 SettingId::HiSpeedStep,
                 SettingId::SpeedFix,
                 SettingId::FixHiSpeed,
+                SettingId::KeepGreenNumber,
+                SettingId::GreenNumber,
                 SettingId::Random,
                 SettingId::LegacyNote,
                 SettingId::FiveKeyLayout,

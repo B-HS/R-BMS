@@ -318,7 +318,7 @@ mod tests {
         (SettingId::SkinInfo, "LOADED", "BUILT-IN SCREEN"),
         (SettingId::SkinReload, "RELOAD", ">"),
         (SettingId::SkinReset, "RESET", ">"),
-        (SettingId::AutoCal, "AUTO CAL", "OFF"),
+        (SettingId::AutoCal, "AUTO ADJUST", "OFF"),
         (SettingId::AutoReplay, "AUTO REPLAY", "ON"),
         (SettingId::DebugMode, "DEBUG MODE", "OFF"),
         (SettingId::Font, "FONT", "DEFAULT"),
@@ -364,6 +364,8 @@ mod tests {
         (SettingId::AudioPolyphony, "POLYPHONY", "512"),
         (SettingId::SoundFolder, "SOUND FOLDER", "(none)"),
         (SettingId::GuideSe, "GUIDE SE", "OFF"),
+        (SettingId::KeepGreenNumber, "KEEP GREEN NUMBER", "OFF"),
+        (SettingId::GreenNumber, "GREEN NUMBER", "300"),
     ];
 
     /// An app with no library, no window and no server, so every row reads out of a fresh document.
@@ -654,6 +656,56 @@ mod tests {
     fn the_audio_status_reports_a_stream_that_never_opened() {
         assert_eq!(audio_status_text(None, true), AUDIO_UNAVAILABLE_STATUS);
         assert_eq!(audio_status_text(None, false), "", "before the first open attempt there is nothing to say");
+    }
+
+    /// Names the folder the frames of the settings screen are saved in, as it does for the captures
+    /// of a skin's screens. Nothing is saved without it.
+    const CAPTURE_DIR_ENV: &str = "RBMS_SKIN_CAPTURE_DIR";
+
+    /// Draw the settings screen on `tab` for `config`, and save the frame as `name` when a capture
+    /// folder was asked for. Answers how many pixels the frame painted.
+    fn drawn_tab(config: &Config, tab: SettingTab, name: &str) -> usize {
+        use crate::stage::{Canvas, FrameCtx, HeadlessCanvas, SettingsState, Stage};
+        rbms_render::font::use_embedded_fonts_only();
+        let dir = std::env::temp_dir().join(format!("rbms-settings-ui-drawn-{name}-{}", std::process::id()));
+        let mut app = crate::App::new(String::new(), config.clone(), LaunchOptions::default(), dir.join("settings.ron"));
+        app.stage = Stage::Settings(SettingsState::on_tab(tab));
+        let mut pixels = HeadlessCanvas::new(CW, CH);
+        app.stage.draw(&mut FrameCtx { shared: &mut app.shared, now: std::time::Instant::now(), dt: 0.0 }, &mut Canvas::Headless(&mut pixels));
+        if let Some(folder) = std::env::var_os(CAPTURE_DIR_ENV) {
+            let folder = std::path::Path::new(&folder);
+            std::fs::create_dir_all(folder).expect("the capture folder can be created");
+            image::save_buffer(folder.join(format!("{name}.png")), pixels.rgba(), CW, CH, image::ExtendedColorType::Rgba8).expect("the capture is written");
+        }
+        pixels.painted_pixels()
+    }
+
+    /// The two rows of a held green number sit with the speed rows of the PLAY tab, under the row
+    /// that names the tempo it is held at, and the row that lets the judge offset adjust itself
+    /// sits under the offset it moves. Each reads the value it holds, and both tabs draw.
+    #[test]
+    fn the_rows_of_a_held_green_number_and_of_an_adjusting_offset_are_where_a_player_looks_for_them() {
+        let mut shared = shared();
+        let play = tab_rows(SettingTab::Play, &shared.config);
+        let on_play = |id: SettingId| play.iter().position(|row| *row == id).unwrap_or_else(|| panic!("{id:?} is not on the PLAY tab"));
+        assert_eq!(on_play(SettingId::KeepGreenNumber), on_play(SettingId::FixHiSpeed) + 1);
+        assert_eq!(on_play(SettingId::GreenNumber), on_play(SettingId::KeepGreenNumber) + 1);
+        let judge = tab_rows(SettingTab::Judge, &shared.config);
+        assert_eq!(&judge[..2], [SettingId::JudgeOffset, SettingId::AutoCal]);
+
+        assert_eq!(adjust(&mut shared.config, SettingId::KeepGreenNumber, 1), AdjustOutcome::Changed);
+        for _ in 0..10 {
+            adjust(&mut shared.config, SettingId::GreenNumber, 1);
+        }
+        adjust(&mut shared.config, SettingId::AutoCal, 1);
+        shared.config.judge.offset_ms = 6;
+        assert_eq!(shared.setting_line(SettingId::KeepGreenNumber), ("KEEP GREEN NUMBER", "ON".to_string()));
+        assert_eq!(shared.setting_line(SettingId::GreenNumber), ("GREEN NUMBER", "310".to_string()));
+        assert_eq!(shared.setting_line(SettingId::AutoCal), ("AUTO ADJUST", "ON".to_string()));
+        assert_eq!(shared.setting_line(SettingId::JudgeOffset), ("JUDGE OFFSET", "+6 MS".to_string()));
+
+        assert!(drawn_tab(&shared.config, SettingTab::Play, "settings-play-tab") > 0, "the PLAY tab drew nothing");
+        assert!(drawn_tab(&shared.config, SettingTab::Judge, "settings-judge-tab") > 0, "the JUDGE tab drew nothing");
     }
 
     #[test]

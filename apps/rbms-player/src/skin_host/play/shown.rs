@@ -170,10 +170,14 @@ pub struct PlayLive {
     pub clock: PlayClock,
     /// The judge timing offset in milliseconds (`PlayerConfig.getJudgetiming`).
     pub judge_timing_ms: i32,
+    /// Whether the judge timing adjusts itself as inputs land
+    /// (`PlayerConfig.isNotesDisplayTimingAutoAdjust`).
+    pub judge_timing_auto: bool,
     /// Whether the background animation is on (`BMSResource.isBGAOn`).
     pub bga_on: bool,
     /// Whether START or SELECT is held, which is how the lane cover is being moved
-    /// (`InputProcessor.startPressed() || isSelectPressed()`).
+    /// (`InputProcessor.startPressed() || isSelectPressed()`), or a control of this player's own
+    /// has just moved a shade with neither held.
     pub cover_keys_held: bool,
     /// The long note mode the chart is played in, as the reference numbers it (0 long note, 1 charge
     /// note, 2 hell charge note).

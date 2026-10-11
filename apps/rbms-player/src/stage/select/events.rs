@@ -12,9 +12,14 @@
 //! and one below zero to the one before, round the ends, and the sound of a changed option is
 //! played where the reference plays it.
 //!
+//! The note display time (59) is the travel time a held green number is held at: it moves while the
+//! KEEP GREEN NUMBER row is on and does nothing while it is off, because the scroll speed is then
+//! what is stored and there is no travel time for the event to move. It is the one event that reads
+//! its second argument, which is how far it steps.
+//!
 //! What the reference keeps and this player has no setting for is left out of the table, and an id
-//! that is not in it does nothing at all: the difficulty filter (10), the note display time (59) and
-//! its automatic adjustment (342), the stretch of the background animation (73), the rival (79), the
+//! that is not in it does nothing at all: the difficulty filter (10), the automatic adjustment of the
+//! hi-speed fix to the tempo under the play head (342), the stretch of the background animation (73), the rival (79), the
 //! star on a whole song (89), the replay auto-save conditions (321 to 324), the chart replication
 //! mode (344), the extra note depth (350), the mine mode (351), the 7 to 9 conversion (360, 361) and
 //! the constant (400). What the reference hands to the machine's own programs does nothing either:
@@ -29,7 +34,7 @@
 //! replays saved of the chart under the cursor. Autoplay (16) plays the chart once by
 //! itself, whatever the autoplay setting says, without touching the setting.
 
-use rbms_config::{AdjustOutcome, Config, JUDGE_OFFSET_MAX_MS, JUDGE_OFFSET_MIN_MS, SettingId, adjust};
+use rbms_config::{AdjustOutcome, Config, JUDGE_OFFSET_MAX_MS, JUDGE_OFFSET_MIN_MS, SettingId, adjust, duration_stepped};
 use rbms_judge::JudgeAlgorithm;
 use rbms_skin::property::generated::*;
 use rbms_store::ScoreBook;
@@ -42,8 +47,9 @@ use crate::stage::{KeyConfigState, SkinMenuState, Stage, Transition};
 use crate::{AppShared, SelectTab, SystemSound};
 
 /// The events that step a setting and that the reference numbers without a constant of their own
-/// (`EventType.hispeed1p`, `notesdisplaytimingautoadjust`, `guidese`).
+/// (`EventType.hispeed1p`, `duration1p`, `notesdisplaytimingautoadjust`, `guidese`).
 const EVENT_HISPEED: i32 = 57;
+const EVENT_DURATION: i32 = 59;
 const EVENT_JUDGE_TIMING_AUTO: i32 = 75;
 const EVENT_GUIDE_SE: i32 = 343;
 
@@ -54,6 +60,10 @@ const EVENT_SONGBAR_SORT: i32 = 312;
 /// One step of a setting towards its next value and towards the one before.
 const STEP_NEXT: i32 = 1;
 const STEP_PREVIOUS: i32 = -1;
+
+/// How far the travel time moves when the event's second argument names no step
+/// (`EventFactory.duration1p`: `arg2 > 0 ? arg2 : 1`), in milliseconds.
+const DURATION_STEP_MS: i32 = 1;
 
 /// The step an event's first argument asks for (`arg1 >= 0`).
 const fn step_of(arg1: i32) -> i32 {
@@ -74,6 +84,9 @@ pub(super) enum SettingEvent {
     FixHiSpeed,
     /// `hispeed1p`: the scroll speed, one of its own steps at a time and held to its range.
     HiSpeed,
+    /// `duration1p`: the travel time a held green number is held at, a millisecond at a time or by
+    /// the step the event names, and held to its range.
+    Duration,
     /// `bga`: the background animation, which is shown or not here.
     Bga,
     /// `notesdisplaytiming`: the judge timing, one millisecond at a time and held to its range.
@@ -127,16 +140,37 @@ impl SettingEvent {
             SettingEvent::GuideSe => SettingId::GuideSe,
             SettingEvent::ScrollMode => SettingId::SpeedFix,
             SettingEvent::LongNoteMode => SettingId::LegacyNote,
-            SettingEvent::Random | SettingEvent::JudgeTiming | SettingEvent::JudgeAlgorithm => return None,
+            SettingEvent::Random | SettingEvent::JudgeTiming | SettingEvent::JudgeAlgorithm | SettingEvent::Duration => return None,
         })
     }
+}
+
+/// Move the travel time a held green number is held at the way the event's two arguments ask, and
+/// answer whether it moved (`EventFactory.duration1p`): towards a longer time for a first argument
+/// of zero or more and a shorter one below it, by the second argument when that is above zero and by
+/// a millisecond otherwise, stopping at the ends of its range.
+///
+/// Nothing moves while the green number is not being held. The reference has a travel time to move
+/// whatever its speed fix says, and shows it; this player shows none while the row is off
+/// ([`crate::skin_host::options::ChartSettings::duration_ms`]), and an event that moved a number
+/// nobody can see would only surprise the player who later switched the row on.
+pub(super) fn step_duration(config: &mut Config, arg1: i32, arg2: i32) -> bool {
+    if !config.play.keep_green_number {
+        return false;
+    }
+    let by = if arg2 > 0 { arg2 } else { DURATION_STEP_MS };
+    let next = duration_stepped(config.play.duration_ms, step_of(arg1).saturating_mul(by));
+    let moved = next != config.play.duration_ms;
+    config.play.duration_ms = next;
+    moved
 }
 
 /// Step the setting of `event` in `config` the way `arg1` asks, and answer whether it moved.
 ///
 /// Most settings are the rows of the settings screen and are stepped as a row is, which goes round
 /// the ends of a list the way the reference's `(value + 1) % count` and `(value + count - 1) % count`
-/// do. Three are not. The random option goes round in the order the reference numbers its options
+/// do. Four are not. The travel time of a held green number moves a millisecond here, where its
+/// event can name a longer step ([`step_duration`]). The random option goes round in the order the reference numbers its options
 /// (`Random.OPTION_GENERAL`), which is not the order of the row. The judge timing moves a
 /// millisecond where the row moves five, and stops at the ends of its range. The judge algorithm
 /// goes round the three the reference lists (`JudgeAlgorithm.defaultAlgorithm`), and from the one it
@@ -169,6 +203,7 @@ pub(super) fn step_setting(config: &mut Config, event: SettingEvent, arg1: i32) 
             config.judge.judge_algorithm = listed[(at + if step == STEP_NEXT { 1 } else { listed.len() - 1 }) % listed.len()];
             true
         }
+        SettingEvent::Duration => step_duration(config, arg1, DURATION_STEP_MS),
         _ => false,
     }
 }
@@ -220,6 +255,7 @@ const EVENTS: &[(i32, SelectEvent)] = &[
     (BUTTON_DPOPTION, SelectEvent::Setting(SettingEvent::DoubleOption)),
     (BUTTON_HSFIX, SelectEvent::Setting(SettingEvent::FixHiSpeed)),
     (EVENT_HISPEED, SelectEvent::Setting(SettingEvent::HiSpeed)),
+    (EVENT_DURATION, SelectEvent::Setting(SettingEvent::Duration)),
     (BUTTON_BGA, SelectEvent::Setting(SettingEvent::Bga)),
     (BUTTON_JUDGE_TIMING, SelectEvent::Setting(SettingEvent::JudgeTiming)),
     (EVENT_JUDGE_TIMING_AUTO, SelectEvent::Setting(SettingEvent::JudgeTimingAuto)),
@@ -264,10 +300,10 @@ impl SelectState {
             return Transition::Stay;
         }
         for request in events {
-            let ClusterRequest::Event { id, arg1, .. } = request else {
+            let ClusterRequest::Event { id, arg1, arg2 } = request else {
                 continue;
             };
-            let asked = self.run_event(shared, id, arg1);
+            let asked = self.run_event_stepping(shared, id, arg1, arg2);
             if !matches!(asked, Transition::Stay) {
                 return asked;
             }
@@ -277,8 +313,15 @@ impl SelectState {
 
     /// Run the event `id` with its first argument (`MainState.executeEvent`).
     pub(super) fn run_event(&mut self, shared: &mut AppShared, id: i32, arg1: i32) -> Transition {
+        self.run_event_stepping(shared, id, arg1, 0)
+    }
+
+    /// Run the event `id` with both its arguments (`MainState.executeEvent(e, arg1, arg2)`). The
+    /// second is the step of the one event that takes one, and is nothing to every other.
+    pub(super) fn run_event_stepping(&mut self, shared: &mut AppShared, id: i32, arg1: i32, arg2: i32) -> Transition {
         let forward = arg1 >= 0;
         match event_of(id) {
+            Some(SelectEvent::Setting(SettingEvent::Duration)) => self.run_duration_event(shared, arg1, arg2),
             Some(SelectEvent::Setting(event)) => self.run_setting_event(shared, event, arg1),
             Some(SelectEvent::Mode) => self.mode_event(shared, forward),
             Some(SelectEvent::Sort) => self.sort_event(shared, forward),
@@ -309,6 +352,7 @@ impl SelectState {
             event,
             SettingEvent::FixHiSpeed
                 | SettingEvent::HiSpeed
+                | SettingEvent::Duration
                 | SettingEvent::LaneCover
                 | SettingEvent::Lift
                 | SettingEvent::Hidden
@@ -327,6 +371,17 @@ impl SelectState {
         if event.sounds() {
             shared.play_system_sound(SystemSound::OptionChange);
         }
+    }
+
+    /// `duration1p` with its step: move the travel time a held green number is held at, with the
+    /// sound of a changed option when it moved. It has no place to go on a course whose charts are
+    /// not all there, like the other settings of the play under the cursor.
+    pub(super) fn run_duration_event(&mut self, shared: &mut AppShared, arg1: i32, arg2: i32) {
+        if !self.has_play_settings() || !step_duration(&mut shared.config, arg1, arg2) {
+            return;
+        }
+        self.options_dirty = true;
+        shared.play_system_sound(SystemSound::OptionChange);
     }
 
     /// Whether the bar under the cursor has play settings to step: anything but a course that cannot

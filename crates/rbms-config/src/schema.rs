@@ -74,6 +74,16 @@ pub const HISPEED_STEP_MAX: f64 = 1.0;
 /// One left/right step on the HI-SPEED STEP row.
 pub const HISPEED_STEP_STEP: f64 = 0.01;
 
+/// Shortest note travel time the GREEN NUMBER row can hold, in milliseconds (`PlayConfig.java:27`).
+pub const DURATION_MIN_MS: i32 = 1;
+
+/// Longest note travel time the GREEN NUMBER row can hold, in milliseconds (`PlayConfig.java:26`).
+pub const DURATION_MAX_MS: i32 = 10_000;
+
+/// Note travel time a fresh install holds, in milliseconds (`PlayConfig.java:24`): a green number
+/// of 300.
+pub const DEFAULT_DURATION_MS: i32 = 500;
+
 /// Smallest fraction of the lane the LIFT, LANE COVER and HIDDEN+ rows can hide.
 pub const LANE_SHADE_MIN: f32 = 0.0;
 
@@ -398,6 +408,7 @@ impl Config {
         self.schema_version = CURRENT_SCHEMA_VERSION;
         self.play.hispeed = self.play.hispeed.clamp(HISPEED_MIN, HISPEED_MAX);
         self.play.hispeed_step = self.play.hispeed_step.clamp(HISPEED_STEP_MIN, HISPEED_STEP_MAX);
+        self.play.duration_ms = self.play.duration_ms.clamp(DURATION_MIN_MS, DURATION_MAX_MS);
         self.play.lift = self.play.lift.clamp(LANE_SHADE_MIN, LANE_SHADE_MAX);
         self.play.cover = self.play.cover.clamp(LANE_SHADE_MIN, LANE_SHADE_MAX);
         self.play.hidden = self.play.hidden.clamp(LANE_SHADE_MIN, LANE_SHADE_MAX);
@@ -428,6 +439,16 @@ pub struct PlayOptions {
     /// across them.
     #[serde(with = "crate::options::fix_hispeed_token")]
     pub fix_hispeed: FixHiSpeed,
+    /// Hold the note travel time from one chart to the next. While it is on `duration_ms` is what
+    /// is stored and `hispeed` is worked out from it for every chart, at the tempo `fix_hispeed`
+    /// names and under the lane cover that is up, the way the reference does while its own speed
+    /// fix is on (`LaneRenderer.java:154, 206-215`). Off, `hispeed` is what is stored and
+    /// `duration_ms` is not read.
+    pub keep_green_number: bool,
+    /// The note travel time held while `keep_green_number` is on, in milliseconds
+    /// (`PlayConfig.duration`). The green number a skin shows is three fifths of it
+    /// ([`crate::speed::green_of_duration`]).
+    pub duration_ms: i32,
     #[serde(with = "note_option_token")]
     pub random: NoteOption,
     #[serde(with = "gauge_kind_token")]
@@ -467,6 +488,8 @@ impl Default for PlayOptions {
             hispeed_step: HISPEED_STEP,
             constant_speed: false,
             fix_hispeed: FixHiSpeed::default(),
+            keep_green_number: false,
+            duration_ms: DEFAULT_DURATION_MS,
             random: NoteOption::Off,
             gauge: GaugeKind::Normal,
             lane_option: LaneOption::default(),

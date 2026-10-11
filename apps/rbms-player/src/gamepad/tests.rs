@@ -8,6 +8,18 @@ const BUTTON: u32 = 589_825;
 const SCRATCH_LANE: usize = 7;
 const MS: i64 = 1_000;
 
+/// The bindings of `mode` that two things read at the same moment both have, which is what the key
+/// editor draws in red.
+fn collisions(cfg: &PadConfig, mode: Mode) -> std::collections::HashSet<PadBinding> {
+    let bound: Vec<(Bindable, Option<PadBinding>)> = Bindable::all(mode).into_iter().map(|target| (target, cfg.binding_of(mode, target))).collect();
+    bound
+        .iter()
+        .filter_map(|(target, binding)| {
+            binding.filter(|_| bound.iter().any(|(other, theirs)| other != target && theirs == binding && target.read_with(*other)))
+        })
+        .collect()
+}
+
 fn seven_key() -> Mode {
     Mode::BEAT_7K
 }
@@ -203,10 +215,10 @@ fn a_binding_bound_twice_is_reported_as_a_collision() {
     let shared = PadBinding::Button(BUTTON);
     let mut cfg = cfg_with_lane(0, shared);
     cfg.set_lane(seven_key(), 1, Some(PadBinding::Button(BUTTON + 1)));
-    assert!(cfg.collisions(seven_key()).is_empty());
+    assert!(collisions(&cfg, seven_key()).is_empty());
 
     cfg.set_control(ControlAction::CoverUp, Some(shared));
-    assert_eq!(cfg.collisions(seven_key()), std::iter::once(shared).collect());
+    assert_eq!(collisions(&cfg, seven_key()), std::iter::once(shared).collect());
 }
 
 #[test]
@@ -214,7 +226,7 @@ fn clearing_a_binding_leaves_the_lane_unbound() {
     let mut cfg = cfg_with_lane(0, PadBinding::Button(BUTTON));
     cfg.set_lane(seven_key(), 0, None);
     assert_eq!(cfg.lane_binding(seven_key(), 0), None);
-    assert!(cfg.collisions(seven_key()).is_empty());
+    assert!(collisions(&cfg, seven_key()).is_empty());
 }
 
 #[test]
@@ -419,7 +431,7 @@ fn start_and_select_read_the_standard_menu_buttons_until_rebound() {
     for action in ControlAction::ALL.into_iter().filter(|a| !matches!(a, ControlAction::Start | ControlAction::Select)) {
         assert_eq!(cfg.control_binding(action), None, "{action:?}");
     }
-    assert!(cfg.collisions(seven_key()).is_empty(), "and the two defaults share nothing");
+    assert!(collisions(&cfg, seven_key()).is_empty(), "and the two defaults share nothing");
 }
 
 /// A binding the player sets wins over the default, and clearing it brings the default back.
@@ -554,4 +566,88 @@ fn a_lane_beyond_the_running_mode_is_not_held() {
     mapper.resolve(0, &cfg, Mode::BEAT_14K, &snapshot_button(true));
     assert_eq!(mapper.held(&cfg, Mode::BEAT_14K).len(), 1);
     assert!(mapper.held(&cfg, Mode::BEAT_7K).is_empty());
+}
+
+/// A pad block written while the control rows were still called what they were is read by the names
+/// it holds, and a control bound now is stored under a name of the same kind rather than under what
+/// its row is called on screen.
+#[test]
+fn a_pad_block_from_before_the_rows_were_renamed_still_binds_its_controls() {
+    let older: PadConfig =
+        ron::from_str(r#"(controls: {"COVER UP": Button(4), "COVER DOWN": Button(5), "LIFT UP": Button(6)})"#).expect("an older pad block parses");
+    assert_eq!(older.control_binding(ControlAction::CoverUp), Some(PadBinding::Button(4)));
+    assert_eq!(older.control_binding(ControlAction::CoverDown), Some(PadBinding::Button(5)));
+    assert_eq!(older.control_binding(ControlAction::LiftUp), Some(PadBinding::Button(6)));
+    assert!(older.shortcuts.is_empty());
+
+    let mut cfg = PadConfig::default();
+    cfg.set_control(ControlAction::CoverToggle, Some(PadBinding::Button(BUTTON)));
+    assert_eq!(cfg.controls.keys().collect::<Vec<_>>(), ["COVER TOGGLE"]);
+    assert!(!cfg.controls.contains_key(ControlAction::CoverToggle.label()), "the binding is stored under the words on screen");
+}
+
+/// A shortcut bound to a button fires once on the press, like a control, and is held for as long as
+/// the button is.
+#[test]
+fn a_shortcut_on_a_button_fires_once_on_the_press() {
+    let mut cfg = quiet();
+    cfg.set_shortcut(Shortcut::Search, Some(PadBinding::Button(BUTTON)));
+    let mut mapper = PadMapper::new();
+    let mut snapshot = PadSnapshot::default();
+    snapshot.set_button(BUTTON, true);
+    assert_eq!(mapper.resolve(0, &cfg, seven_key(), &snapshot), vec![PadEvent::Shortcut(Shortcut::Search)]);
+    assert_eq!(mapper.resolve(MS, &cfg, seven_key(), &snapshot), Vec::new(), "a button that stays down fired again");
+    assert_eq!(mapper.held(&cfg, seven_key()), vec![PadEvent::Shortcut(Shortcut::Search)]);
+    snapshot.set_button(BUTTON, false);
+    assert_eq!(mapper.resolve(2 * MS, &cfg, seven_key(), &snapshot), Vec::new(), "letting go fired");
+    assert!(mapper.held(&cfg, seven_key()).is_empty());
+}
+
+/// The same button can open a screen from the browser and play a lane in a run: the two are never
+/// read at the same moment, so the editor does not flag them. Two shortcuts of one screen on one
+/// button are flagged.
+#[test]
+fn a_button_shared_across_screens_is_not_a_clash_and_one_shared_on_a_screen_is() {
+    let mut cfg = PadConfig::default();
+    cfg.set_lane(seven_key(), 0, Some(PadBinding::Button(BUTTON)));
+    cfg.set_shortcut(Shortcut::Folders, Some(PadBinding::Button(BUTTON)));
+    assert!(collisions(&cfg, seven_key()).is_empty());
+    cfg.set_shortcut(Shortcut::Tables, Some(PadBinding::Button(BUTTON)));
+    assert_eq!(collisions(&cfg, seven_key()), std::iter::once(PadBinding::Button(BUTTON)).collect());
+}
+
+/// The shortcuts that are read as a key held down are the keyboard's alone: a controller is not
+/// given one, whatever the file says.
+#[test]
+fn a_shortcut_the_keyboard_alone_reads_takes_no_button() {
+    let mut cfg = PadConfig::default();
+    for shortcut in [Shortcut::OptionsPin, Shortcut::OptionsHold, Shortcut::RefDetail] {
+        cfg.set_shortcut(shortcut, Some(PadBinding::Button(BUTTON)));
+        assert_eq!(cfg.shortcut_binding(shortcut), None, "{shortcut:?}");
+    }
+    let edited: PadConfig = ron::from_str(r#"(shortcuts: {"options_hold": Button(3), "search": Button(4)})"#).expect("the pad block parses");
+    assert_eq!(edited.shortcut_binding(Shortcut::OptionsHold), None);
+    assert_eq!(edited.shortcut_binding(Shortcut::Search), Some(PadBinding::Button(4)));
+}
+
+/// Every kind of thing is bound and read back through the one door the key editor uses.
+#[test]
+fn the_editor_binds_and_reads_every_kind_of_row_the_same_way() {
+    let mode = seven_key();
+    let mut cfg = PadConfig::default();
+    let rows = [Bindable::Lane(2), Bindable::ScratchReverse(SCRATCH_LANE), Bindable::Control(ControlAction::CoverToggle), Bindable::Shortcut(Shortcut::Sort)];
+    for (index, target) in rows.into_iter().enumerate() {
+        let binding = PadBinding::Button(BUTTON + index as u32);
+        cfg.bind(mode, target, Some(binding));
+        assert_eq!(cfg.binding_of(mode, target), Some(binding), "{target:?}");
+        cfg.bind(mode, target, None);
+        assert_eq!(cfg.binding_of(mode, target), None, "{target:?}");
+    }
+    cfg.bind(mode, Bindable::Control(ControlAction::Start), Some(PadBinding::Button(BUTTON)));
+    cfg.bind(mode, Bindable::Control(ControlAction::Start), None);
+    assert_eq!(
+        cfg.binding_of(mode, Bindable::Control(ControlAction::Start)),
+        Some(PadBinding::Standard(StandardButton::Start)),
+        "START goes back to the pad's own"
+    );
 }

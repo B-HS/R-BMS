@@ -1,29 +1,121 @@
-//! The key-config editor: the per-mode lane bindings and the in-play controls, rebound one row at
-//! a time. The mode being edited is remembered between visits, so it lives in [`AppShared`].
+//! The key-config editor: every key and every controller element the application reads, rebound one
+//! cell at a time. The mode whose lanes are being edited is remembered between visits, so it lives
+//! in [`AppShared`].
+//!
+//! The editor is a table ([`table`]). Each line is one thing that can be bound -- a lane, a control
+//! of a run, a shortcut of the browser, a key to a screen -- under the heading of the screen that
+//! reads it, with a column for the keyboard and one for the controller. The cursor is a line and a
+//! column: Enter binds the cell under it to whatever is pressed next, Delete takes its binding away
+//! and Backspace puts back the one it ships with. A key that something read at the same moment
+//! already has is refused and the line says what has it ([`crate::keyconfig::Bindable::read_with`]);
+//! a controller element is taken as it is and flagged, as it always was.
+//!
+//! The editor's own keys are fixed: they are what binds every other.
 #![allow(clippy::wildcard_imports)]
 
+mod table;
+#[cfg(test)]
+mod tests;
+
 use crate::gamepad::{AnalogMode, PadBinding};
+use crate::keyconfig::{Bindable, Clash, KeyConfig, UNNAMED_KEY};
 use crate::stage::{Canvas, FrameCtx, KeyInput, StageHandler, Transition};
 use crate::*;
+use rbms_render::fit_text;
+use table::{Bindings, Line, lines};
 
-/// Width of the editor panel.
-const PANEL_W: f32 = 760.0;
+/// The editor's panel: how wide it is, and where its columns end. A value is set against the right
+/// edge of its column.
+const PANEL_W: f32 = 1080.0;
+const KEYBOARD_RIGHT: f32 = 760.0;
+const COLUMN_W: f32 = 300.0;
+const CELL_PAD: f32 = 16.0;
 
-/// Vertical layout of the binding rows.
-const ROW_TOP: f32 = 112.0;
-const ROW_H: f32 = 28.0;
+/// Where the title, the two hint lines and the column headings stand.
+const TITLE_Y: f32 = 24.0;
+const TITLE_SCALE: f32 = 2.6;
+const HINT_Y: f32 = 66.0;
+const STATUS_Y: f32 = 88.0;
+const HINT_SCALE: f32 = 1.1;
+const COLUMNS_Y: f32 = 116.0;
+const COLUMNS_SCALE: f32 = 1.1;
+
+/// Vertical layout of the lines.
+const ROW_TOP: f32 = 138.0;
+const ROW_H: f32 = 24.0;
 const ROW_GAP: f32 = 2.0;
+const ROW_TEXT_Y: f32 = 6.0;
+const ROW_SCALE: f32 = 1.4;
+const HEADING_SCALE: f32 = 1.2;
+const HEADING_TEXT_Y: f32 = 8.0;
+const RULE_THICKNESS: f32 = 2.0;
 
-/// How many rows fit on screen at once.
-const VISIBLE_ROWS: usize = 17;
+/// How many lines fit on screen at once, and where the count of them stands.
+const VISIBLE_ROWS: usize = 21;
+const COUNTER_Y: f32 = 690.0;
+const COUNTER_SCALE: f32 = 1.1;
 
-/// The editor's own state: the focused row, whether the next key is being captured for it, and
-/// whether the last capture was refused as a collision.
+/// What an unbound cell and a cell being captured show.
+const UNBOUND: &str = "-";
+const CAPTURING: &str = "PRESS...";
+
+/// What the controller's device row shows when it listens to every controller.
+const ANY_DEVICE: &str = "ANY";
+
+/// One step forwards and one back, for the rows that are stepped rather than bound.
+const STEP_FORWARD: i32 = 1;
+const STEP_BACK: i32 = -1;
+
+const TITLE: &str = "KEY CONFIG";
+const KEYS_HINT: &str = "UP DOWN MOVE   LEFT RIGHT KEYBOARD / CONTROLLER   ENTER BIND   DEL CLEAR   BACKSPACE DEFAULT   TAB MODE   PGUP PGDN GROUP   ESC SAVE";
+const CAPTURE_KEY_HINT: &str = "PRESS THE KEY TO BIND   ESC CANCELS";
+const CAPTURE_PAD_HINT: &str = "PRESS A BUTTON OR MOVE AN AXIS OF THE CONTROLLER   ESC CANCELS";
+const ACTION_COLUMN: &str = "ACTION";
+const KEYBOARD_COLUMN: &str = "KEYBOARD";
+const PAD_COLUMN: &str = "CONTROLLER";
+const MODE_LABEL: &str = "EDIT MODE (LANES OF)";
+const PAD_DEVICE_LABEL: &str = "CONTROLLER DEVICE";
+const PAD_ANALOG_LABEL: &str = "TURNTABLE ALGORITHM";
+const RESTORE_LABEL: &str = "RESTORE EVERY KEY AND BUTTON";
+const RESTORE_VALUE: &str = "ENTER";
+const RESTORE_ARMED_VALUE: &str = "ENTER AGAIN";
+
+/// Which of a line's two cells the cursor is on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Column {
+    #[default]
+    Keyboard,
+    Pad,
+}
+
+/// What the editor has to say about the last thing that was asked of it, shown until the next key.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Notice {
+    #[default]
+    None,
+    /// The key was refused: something read at the same moment has it.
+    Taken(Bindable),
+    /// The key was refused: the screen that reads the row keeps it for itself.
+    Fixed,
+    /// The key was refused: the key config file has no word for it.
+    Unnamed,
+    /// The row is the keyboard's alone.
+    KeyboardOnly,
+    /// A lane was cleared, which puts the key it ships with back.
+    LaneKept,
+    /// Enter once more puts everything back as shipped.
+    RestoreArmed,
+    Restored,
+}
+
+/// The editor's own state: the focused cell, whether the next key or controller element is being
+/// captured for it, and what there is to say about the last request.
 #[derive(Default)]
 pub(crate) struct KeyConfigState {
     sel: usize,
+    column: Column,
     capturing: bool,
-    warn: bool,
+    notice: Notice,
 }
 
 impl KeyConfigState {
@@ -31,42 +123,157 @@ impl KeyConfigState {
         KeyConfigState::default()
     }
 
+    /// The line the cursor is on.
+    fn focused(&self, shared: &AppShared) -> Option<Line> {
+        lines(shared.kc_edit_mode).get(self.sel).copied()
+    }
+
+    /// The thing the cursor is on, when it is on one that can be bound.
+    fn focused_target(&self, shared: &AppShared) -> Option<Bindable> {
+        match self.focused(shared) {
+            Some(Line::Bind { target, .. }) => Some(target),
+            _ => None,
+        }
+    }
+
+    /// Move the cursor `delta` lines, passing over the headings and stopping at either end.
+    fn move_cursor(&mut self, shared: &AppShared, delta: i32) {
+        let all = lines(shared.kc_edit_mode);
+        let mut at = self.sel as i32;
+        loop {
+            at += delta;
+            match usize::try_from(at).ok().and_then(|index| all.get(index).map(|line| (index, *line))) {
+                Some((index, line)) if line.takes_the_cursor() => {
+                    self.sel = index;
+                    return;
+                }
+                Some(_) => {}
+                None => return,
+            }
+        }
+    }
+
+    /// Move the cursor to the first line of the group after the one it is in (`forward`), or of the
+    /// group before it.
+    fn jump_group(&mut self, shared: &AppShared, forward: bool) {
+        let all = lines(shared.kc_edit_mode);
+        let headings: Vec<usize> = all.iter().enumerate().filter(|(_, line)| matches!(line, Line::Heading(_))).map(|(index, _)| index).collect();
+        let own = headings.iter().rposition(|heading| *heading < self.sel);
+        let to = match (forward, own) {
+            (true, None) => headings.first().copied(),
+            (true, Some(at)) => headings.get(at + 1).copied(),
+            (false, Some(at)) if at > 0 => Some(headings[at - 1]),
+            (false, _) => None,
+        };
+        match to {
+            Some(heading) if heading + 1 < all.len() => self.sel = heading + 1,
+            Some(_) => {}
+            None if !forward => self.sel = 0,
+            None => {}
+        }
+    }
+
     fn cycle_edit_mode(&mut self, shared: &mut AppShared, d: i32) {
         let all = Mode::ALL;
         let cur = all.iter().position(|m| m.key == shared.kc_edit_mode.key).unwrap_or(0);
+        let focused = self.focused(shared);
         shared.kc_edit_mode = all[((cur as i32 + d).rem_euclid(all.len() as i32)) as usize];
-        let len = kc_rows(shared.kc_edit_mode).len();
-        if self.sel >= len {
-            self.sel = len - 1;
+        let rows = lines(shared.kc_edit_mode);
+        self.sel = focused.and_then(|line| rows.iter().position(|row| *row == line)).unwrap_or_else(|| self.sel.min(rows.len() - 1));
+        if !rows[self.sel].takes_the_cursor() {
+            self.move_cursor(shared, STEP_BACK);
         }
     }
 
-    /// Bind the captured key to the focused row unless it collides with another action.
+    /// Bind the captured key to the focused row unless something read at the same moment has it,
+    /// the row's screen keeps it, or the key config file has no word for it.
     fn capture(&mut self, shared: &mut AppShared, code: KeyCode) {
-        let rows = kc_rows(shared.kc_edit_mode);
-        if code != KeyCode::Escape
-            && let Some(row) = rows.get(self.sel)
-        {
-            if shared.binding_collides(shared.kc_edit_mode, row, code) {
-                self.warn = true;
-                self.capturing = false;
-                return;
-            }
-            match row {
-                KcRow::Control(a) => shared.keyconfig.set_control(*a, code),
-                KcRow::Lane(lane) => shared.keyconfig.set_lane(shared.kc_edit_mode, *lane, code),
-                KcRow::ScratchReverse(lane) => shared.keyconfig.set_scratch_reverse(shared.kc_edit_mode, *lane, code),
-                KcRow::ModeSelect | KcRow::PadDevice | KcRow::PadAnalogMode | KcRow::PadControl(_) | KcRow::PadLane(_) | KcRow::PadScratchReverse(_) => {}
-            }
-        }
-        self.warn = false;
         self.capturing = false;
+        let Some(target) = self.focused_target(shared).filter(|_| code != KeyCode::Escape) else {
+            return;
+        };
+        let mode = shared.kc_edit_mode;
+        self.notice = if key_name(code) == UNNAMED_KEY {
+            Notice::Unnamed
+        } else {
+            match shared.keyconfig.clash(mode, target, code) {
+                Some(Clash::With(other)) => Notice::Taken(other),
+                Some(Clash::Fixed) => Notice::Fixed,
+                None => {
+                    shared.keyconfig.bind(mode, target, Some(code));
+                    Notice::None
+                }
+            }
+        };
     }
-}
 
-impl KeyConfigState {
-    /// Step the controller a pad row binds against: the first entry is ANY, then every device gilrs
-    /// has opened.
+    /// Take the binding of the focused cell away. A lane is never without a key, so clearing one
+    /// puts the key it ships with back, and the editor says so.
+    fn clear(&mut self, shared: &mut AppShared) {
+        let Some(target) = self.focused_target(shared) else {
+            return;
+        };
+        let mode = shared.kc_edit_mode;
+        match self.column {
+            Column::Keyboard => {
+                shared.keyconfig.bind(mode, target, None);
+                if matches!(target, Bindable::Lane(_)) {
+                    self.notice = Notice::LaneKept;
+                }
+            }
+            Column::Pad => shared.keyconfig.pad.bind(mode, target, None),
+        }
+    }
+
+    /// Put the focused cell back on what it ships with: its key, or on the controller nothing but
+    /// the pad's own menu buttons for START and SELECT.
+    fn restore(&mut self, shared: &mut AppShared) {
+        let Some(target) = self.focused_target(shared) else {
+            return;
+        };
+        let mode = shared.kc_edit_mode;
+        match self.column {
+            Column::Keyboard => shared.keyconfig.restore(mode, target),
+            Column::Pad => shared.keyconfig.pad.bind(mode, target, None),
+        }
+    }
+
+    /// Enter on the focused line: arm a capture, step a row that is stepped, or ask for and then
+    /// carry out the restoring of everything.
+    fn enter(&mut self, shared: &mut AppShared) {
+        match self.focused(shared) {
+            Some(Line::Bind { pad: false, .. }) if self.column == Column::Pad => self.notice = Notice::KeyboardOnly,
+            Some(Line::Bind { .. }) => {
+                if self.column == Column::Pad {
+                    let AppShared { pad, keyconfig, .. } = shared;
+                    if let Some(state) = pad.as_mut() {
+                        state.drain(&keyconfig.pad);
+                    }
+                }
+                self.capturing = true;
+            }
+            Some(Line::Mode) => self.cycle_edit_mode(shared, STEP_FORWARD),
+            Some(Line::PadDevice) => self.cycle_pad_device(shared, STEP_FORWARD),
+            Some(Line::PadAnalog) => self.cycle_analog_mode(shared, STEP_FORWARD),
+            Some(Line::RestoreAll) => {}
+            Some(Line::Heading(_)) | None => {}
+        }
+    }
+
+    /// Left or right on the focused line: step a row that is stepped, or move between the keyboard's
+    /// cell and the controller's.
+    fn sideways(&mut self, shared: &mut AppShared, delta: i32) {
+        match self.focused(shared) {
+            Some(Line::Mode) => self.cycle_edit_mode(shared, delta),
+            Some(Line::PadDevice) => self.cycle_pad_device(shared, delta),
+            Some(Line::PadAnalog) => self.cycle_analog_mode(shared, delta),
+            Some(Line::Bind { .. }) => self.column = if delta > 0 { Column::Pad } else { Column::Keyboard },
+            Some(Line::RestoreAll | Line::Heading(_)) | None => {}
+        }
+    }
+
+    /// Step the controller the pad column binds against: the first entry is ANY, then every device
+    /// gilrs has opened.
     fn cycle_pad_device(&self, shared: &mut AppShared, delta: i32) {
         let mut names: Vec<Option<String>> = vec![None];
         names.extend(shared.pad.as_ref().map(PadState::device_names).unwrap_or_default().into_iter().map(Some));
@@ -83,11 +290,10 @@ impl KeyConfigState {
         shared.keyconfig.pad.analog_mode = all[next];
     }
 
-    /// Bind whatever the controller reports next to the focused pad row. Returns once a binding has
+    /// Bind whatever the controller reports next to the focused cell. Returns once a binding has
     /// landed; until then the capture stays armed and the next frame asks again.
     fn capture_pad(&mut self, ctx: &mut FrameCtx<'_>) {
-        let rows = kc_rows(ctx.shared.kc_edit_mode);
-        let Some(row) = rows.get(self.sel).filter(|row| is_pad_row(row)) else {
+        let Some(target) = self.focused_target(ctx.shared).filter(|_| self.column == Column::Pad) else {
             return;
         };
         let AppShared { pad, keyconfig, kc_edit_mode, .. } = ctx.shared;
@@ -97,30 +303,68 @@ impl KeyConfigState {
         let Some(binding) = state.take_capture(&keyconfig.pad) else {
             return;
         };
-        let binding = match row {
-            KcRow::PadLane(lane) if kc_edit_mode.is_scratch(*lane) && keyconfig.pad.analog_mode != AnalogMode::Off => {
+        let binding = match target {
+            Bindable::Lane(lane) if kc_edit_mode.is_scratch(lane) && keyconfig.pad.analog_mode != AnalogMode::Off => {
                 binding.as_analog_scratch().unwrap_or(binding)
             }
             _ => binding,
         };
-        match row {
-            KcRow::PadControl(action) => keyconfig.pad.set_control(*action, Some(binding)),
-            KcRow::PadLane(lane) => keyconfig.pad.set_lane(*kc_edit_mode, *lane, Some(binding)),
-            KcRow::PadScratchReverse(lane) => keyconfig.pad.set_scratch_reverse(*kc_edit_mode, *lane, Some(binding)),
-            _ => {}
-        }
+        keyconfig.pad.bind(*kc_edit_mode, target, Some(binding));
         self.capturing = false;
+    }
+
+    /// The first line drawn, which keeps the cursor in the middle of what is on screen.
+    fn first_visible(&self, count: usize) -> usize {
+        self.sel.saturating_sub(VISIBLE_ROWS / 2).min(count.saturating_sub(VISIBLE_ROWS.min(count)))
+    }
+
+    /// What the second hint line says: what was just refused or done, or what the editor knows about
+    /// the cell under the cursor -- what its binding clashes with, or the lane it shares a key with.
+    fn status(&self, shared: &AppShared, bound: &Bindings) -> (String, Color) {
+        let mode = shared.kc_edit_mode;
+        let warn = |text: String| (text, Color::RED);
+        match self.notice {
+            Notice::Taken(other) => return warn(format!("THAT KEY IS {} - PICK ANOTHER, OR CLEAR THAT ROW FIRST", other.label(mode))),
+            Notice::Fixed => return warn("THAT KEY IS FIXED ON THE SCREEN THIS ROW BELONGS TO - PICK ANOTHER".to_string()),
+            Notice::Unnamed => return warn("THAT KEY CANNOT BE BOUND - PICK ANOTHER".to_string()),
+            Notice::KeyboardOnly => return warn("THIS ROW IS READ FROM THE KEYBOARD ONLY".to_string()),
+            Notice::LaneKept => return ("A LANE ALWAYS HAS A KEY - IT IS BACK ON THE ONE IT SHIPS WITH".to_string(), Color::YELLOW),
+            Notice::RestoreArmed => {
+                return ("ENTER AGAIN PUTS EVERY KEY AND EVERY CONTROLLER BUTTON BACK AS SHIPPED - ANY OTHER KEY CANCELS".to_string(), Color::YELLOW);
+            }
+            Notice::Restored => return ("EVERY KEY AND EVERY CONTROLLER BUTTON IS BACK AS SHIPPED".to_string(), Color::YELLOW),
+            Notice::None => {}
+        }
+        let Some(target) = self.focused_target(shared) else {
+            return (String::new(), Color::YELLOW);
+        };
+        let clash = match self.column {
+            Column::Keyboard => bound.key_clash(target),
+            Column::Pad => bound.pad_clash(target).map(Clash::With),
+        };
+        match clash {
+            Some(Clash::With(other)) => warn(format!("SHARED WITH {} - ONE OF THE TWO WILL NOT WORK", other.label(mode))),
+            Some(Clash::Fixed) => warn("THIS KEY IS FIXED ON THE SCREEN THE ROW BELONGS TO - THE ROW WILL NOT WORK".to_string()),
+            None => match shared.keyconfig.lane_sharing(mode, target).filter(|_| self.column == Column::Keyboard) {
+                Some(lane) => (format!("ALSO {} - ON THE SONG SELECT BOTH ACT", Bindable::Lane(lane).label(mode)), Color::YELLOW),
+                None => (String::new(), Color::YELLOW),
+            },
+        }
     }
 }
 
-/// A pad binding as the editor draws it; an unbound row comes back blank, which the row renderer
-/// already draws as a dash.
+/// A key as the editor draws it: its word in the key config file, or a dash for none.
+fn key_token(code: Option<KeyCode>) -> String {
+    code.map_or(UNBOUND, key_name).to_string()
+}
+
+/// A pad binding as the editor draws it: a dash for none.
 fn pad_token(binding: Option<PadBinding>) -> String {
-    binding.map(PadBinding::label).unwrap_or_default()
+    binding.map_or_else(|| UNBOUND.to_string(), PadBinding::label)
 }
 
 impl StageHandler for KeyConfigState {
-    /// A pad row's capture arrives on the frame poll rather than as a window event, so it is
+    /// A controller cell's capture arrives on the frame poll rather than as a window event, so it is
     /// collected here instead of in `handle_key`.
     fn update(&mut self, ctx: &mut FrameCtx<'_>) -> Transition {
         if self.capturing {
@@ -130,15 +374,15 @@ impl StageHandler for KeyConfigState {
     }
 
     /// Key-config editor input. In capture mode the next key (except Esc) is bound to the focused
-    /// row unless it collides with another action; otherwise navigate, switch edit-mode, start a
-    /// rebind, or save and go back to the settings screen.
+    /// cell unless it is refused; otherwise the editor's own keys move the cursor, switch the mode
+    /// being edited, start a rebind, clear or restore a cell, or save and go back.
     fn handle_key(&mut self, ctx: &mut FrameCtx<'_>, key: KeyInput<'_>) -> Transition {
         if !key.pressed {
             return Transition::Stay;
         }
+        let armed = std::mem::take(&mut self.notice) == Notice::RestoreArmed;
         if self.capturing {
-            let rows = kc_rows(ctx.shared.kc_edit_mode);
-            if rows.get(self.sel).is_some_and(is_pad_row) {
+            if self.column == Column::Pad {
                 if key.code == KeyCode::Escape {
                     self.capturing = false;
                 }
@@ -147,33 +391,29 @@ impl StageHandler for KeyConfigState {
             self.capture(ctx.shared, key.code);
             return Transition::Stay;
         }
-        self.warn = false;
-        let rows = kc_rows(ctx.shared.kc_edit_mode);
         match key.code {
             KeyCode::Escape => {
                 ctx.shared.keyconfig.save(&ctx.shared.keyconfig_path);
                 return Transition::Back;
             }
-            KeyCode::ArrowUp => self.sel = self.sel.saturating_sub(1),
-            KeyCode::ArrowDown => self.sel = (self.sel + 1).min(rows.len().saturating_sub(1)),
-            KeyCode::ArrowLeft if matches!(rows.get(self.sel), Some(KcRow::ModeSelect)) => self.cycle_edit_mode(ctx.shared, -1),
-            KeyCode::ArrowRight if matches!(rows.get(self.sel), Some(KcRow::ModeSelect)) => self.cycle_edit_mode(ctx.shared, 1),
-            KeyCode::ArrowLeft if matches!(rows.get(self.sel), Some(KcRow::PadDevice)) => self.cycle_pad_device(ctx.shared, -1),
-            KeyCode::ArrowRight if matches!(rows.get(self.sel), Some(KcRow::PadDevice)) => self.cycle_pad_device(ctx.shared, 1),
-            KeyCode::ArrowLeft if matches!(rows.get(self.sel), Some(KcRow::PadAnalogMode)) => self.cycle_analog_mode(ctx.shared, -1),
-            KeyCode::ArrowRight if matches!(rows.get(self.sel), Some(KcRow::PadAnalogMode)) => self.cycle_analog_mode(ctx.shared, 1),
-            KeyCode::Enter | KeyCode::NumpadEnter => {
-                if matches!(rows.get(self.sel), Some(KcRow::Control(_) | KcRow::Lane(_) | KcRow::ScratchReverse(_))) {
-                    self.capturing = true;
-                }
-                if matches!(rows.get(self.sel), Some(KcRow::PadControl(_) | KcRow::PadLane(_) | KcRow::PadScratchReverse(_))) {
-                    let AppShared { pad, keyconfig, .. } = ctx.shared;
-                    if let Some(state) = pad.as_mut() {
-                        state.drain(&keyconfig.pad);
-                    }
-                    self.capturing = true;
+            KeyCode::ArrowUp => self.move_cursor(ctx.shared, STEP_BACK),
+            KeyCode::ArrowDown => self.move_cursor(ctx.shared, STEP_FORWARD),
+            KeyCode::PageUp => self.jump_group(ctx.shared, false),
+            KeyCode::PageDown => self.jump_group(ctx.shared, true),
+            KeyCode::ArrowLeft => self.sideways(ctx.shared, STEP_BACK),
+            KeyCode::ArrowRight => self.sideways(ctx.shared, STEP_FORWARD),
+            KeyCode::Tab => self.cycle_edit_mode(ctx.shared, STEP_FORWARD),
+            KeyCode::Delete => self.clear(ctx.shared),
+            KeyCode::Backspace => self.restore(ctx.shared),
+            KeyCode::Enter | KeyCode::NumpadEnter if self.focused(ctx.shared) == Some(Line::RestoreAll) => {
+                if armed {
+                    ctx.shared.keyconfig.restore_everything();
+                    self.notice = Notice::Restored;
+                } else {
+                    self.notice = Notice::RestoreArmed;
                 }
             }
+            KeyCode::Enter | KeyCode::NumpadEnter => self.enter(ctx.shared),
             _ => {}
         }
         Transition::Stay
@@ -183,162 +423,85 @@ impl StageHandler for KeyConfigState {
         let th = rbms_render::theme();
         canvas.clear_bga();
         ctx.shared.prepare_skin(canvas, SKIN_TYPE_KEY_CONFIG);
-        let bound: Vec<String> = (0..ctx.shared.kc_edit_mode.key).map(|lane| ctx.shared.keyconfig.lane_token(ctx.shared.kc_edit_mode, lane)).collect();
-        if ctx.shared.draw_keyconfig_skin(canvas, &bound) {
+        let edit_mode = ctx.shared.kc_edit_mode;
+        let lane_tokens: Vec<String> = (0..edit_mode.key).map(|lane| ctx.shared.keyconfig.lane_token(edit_mode, lane)).collect();
+        if ctx.shared.draw_keyconfig_skin(canvas, &lane_tokens) {
             return;
         }
         canvas.clear(th.bg);
+        let keys: &KeyConfig = &ctx.shared.keyconfig;
+        let bound = Bindings::read(keys, edit_mode);
         let x0 = (CW as f32 - PANEL_W) * 0.5;
-        draw_text(canvas, x0, 40.0, 3.0, th.text, "KEY CONFIG");
-        let (hint, hint_col) = if self.warn {
-            ("KEY ALREADY BOUND - TRY ANOTHER", Color::RED)
-        } else if self.capturing {
-            ("PRESS A KEY...   ESC CANCEL", Color::YELLOW)
-        } else {
-            ("UP DOWN MOVE   ENTER REBIND   LEFT RIGHT EDIT-MODE   ESC SAVE/BACK", th.text_muted)
+        let keyboard_right = x0 + KEYBOARD_RIGHT;
+        let pad_right = x0 + PANEL_W;
+        draw_text(canvas, x0, TITLE_Y, TITLE_SCALE, th.text, TITLE);
+        draw_text_right(canvas, pad_right, TITLE_Y + HEADING_TEXT_Y, ROW_SCALE, th.accent, mode_short(edit_mode));
+        let (hint, hint_col) = match (self.capturing, self.column) {
+            (true, Column::Keyboard) => (CAPTURE_KEY_HINT, Color::YELLOW),
+            (true, Column::Pad) => (CAPTURE_PAD_HINT, Color::YELLOW),
+            (false, _) => (KEYS_HINT, th.text_muted),
         };
-        draw_text(canvas, x0, 82.0, 1.3, hint_col, hint);
-        let edit_mode = ctx.shared.kc_edit_mode;
-        let dups = ctx.shared.keyconfig.collisions(edit_mode);
-        let pad_dups = ctx.shared.keyconfig.pad.collisions(edit_mode);
-        let rows = kc_rows(edit_mode);
-        let start = self.sel.saturating_sub(VISIBLE_ROWS / 2).min(rows.len().saturating_sub(VISIBLE_ROWS.min(rows.len())));
-        for (i, ridx) in (start..(start + VISIBLE_ROWS).min(rows.len())).enumerate() {
-            let y = ROW_TOP + i as f32 * (ROW_H + ROW_GAP);
-            let on = ridx == self.sel;
-            let (label, raw) = match &rows[ridx] {
-                KcRow::ModeSelect => ("EDIT MODE".to_string(), mode_short(edit_mode).to_string()),
-                KcRow::Control(a) => (a.label().to_string(), ctx.shared.keyconfig.control_token(*a).to_string()),
-                KcRow::Lane(lane) => {
-                    let name = if edit_mode.is_scratch(*lane) { format!("SCRATCH {}", lane + 1) } else { format!("LANE {}", lane + 1) };
-                    (name, ctx.shared.keyconfig.lane_token(edit_mode, *lane))
+        draw_text(canvas, x0, HINT_Y, HINT_SCALE, hint_col, &fit_text(hint, HINT_SCALE, PANEL_W));
+        let (status, status_col) = self.status(ctx.shared, &bound);
+        draw_text(canvas, x0, STATUS_Y, HINT_SCALE, status_col, &fit_text(&status, HINT_SCALE, PANEL_W));
+        draw_text(canvas, x0 + CELL_PAD, COLUMNS_Y, COLUMNS_SCALE, th.text_muted, ACTION_COLUMN);
+        draw_text_right(canvas, keyboard_right - CELL_PAD, COLUMNS_Y, COLUMNS_SCALE, th.text_muted, KEYBOARD_COLUMN);
+        draw_text_right(canvas, pad_right - CELL_PAD, COLUMNS_Y, COLUMNS_SCALE, th.text_muted, PAD_COLUMN);
+
+        let rows = lines(edit_mode);
+        let start = self.first_visible(rows.len());
+        for (slot, index) in (start..(start + VISIBLE_ROWS).min(rows.len())).enumerate() {
+            let y = ROW_TOP + slot as f32 * (ROW_H + ROW_GAP);
+            let on = index == self.sel;
+            let row_rect = Rect::new(x0, y, PANEL_W, ROW_H);
+            let label_col = if on { th.text } else { th.text_dim };
+            let value_col = if on { th.accent } else { th.text };
+            let label_and_value = |canvas: &mut Canvas<'_>, label: &str, value: &str, right: f32| {
+                canvas.fill_rect(row_rect, if on { th.button } else { th.panel });
+                draw_text(canvas, x0 + CELL_PAD, y + ROW_TEXT_Y, ROW_SCALE, label_col, label);
+                draw_text_right(canvas, right - CELL_PAD, y + ROW_TEXT_Y, ROW_SCALE, value_col, value);
+            };
+            match rows[index] {
+                Line::Heading(title) => {
+                    draw_text(canvas, x0, y + HEADING_TEXT_Y, HEADING_SCALE, th.accent, title);
+                    canvas.fill_rect(Rect::new(x0, y + ROW_H - RULE_THICKNESS, PANEL_W, RULE_THICKNESS), th.divider);
                 }
-                KcRow::ScratchReverse(lane) => (format!("SCRATCH {} REVERSE", lane + 1), ctx.shared.keyconfig.scratch_reverse_token(edit_mode, *lane)),
-                KcRow::PadDevice => ("PAD DEVICE".to_string(), ctx.shared.keyconfig.pad.device_name.clone().unwrap_or_else(|| "ANY".to_string())),
-                KcRow::PadAnalogMode => ("PAD ANALOG".to_string(), ctx.shared.keyconfig.pad.analog_mode.label().to_string()),
-                KcRow::PadControl(a) => (format!("PAD {}", a.label()), pad_token(ctx.shared.keyconfig.pad.control_binding(*a))),
-                KcRow::PadLane(lane) => {
-                    let name = if edit_mode.is_scratch(*lane) { format!("PAD SCRATCH {}", lane + 1) } else { format!("PAD LANE {}", lane + 1) };
-                    (name, pad_token(ctx.shared.keyconfig.pad.lane_binding(edit_mode, *lane)))
+                Line::Mode => label_and_value(canvas, MODE_LABEL, &format!("< {} >", mode_short(edit_mode)), keyboard_right),
+                Line::PadDevice => {
+                    label_and_value(canvas, PAD_DEVICE_LABEL, &format!("< {} >", keys.pad.device_name.as_deref().unwrap_or(ANY_DEVICE)), pad_right)
                 }
-                KcRow::PadScratchReverse(lane) => {
-                    (format!("PAD SCRATCH {} REVERSE", lane + 1), pad_token(ctx.shared.keyconfig.pad.scratch_reverse_binding(edit_mode, *lane)))
+                Line::PadAnalog => label_and_value(canvas, PAD_ANALOG_LABEL, &format!("< {} >", keys.pad.analog_mode.label()), pad_right),
+                Line::RestoreAll => {
+                    let value = if self.notice == Notice::RestoreArmed { RESTORE_ARMED_VALUE } else { RESTORE_VALUE };
+                    label_and_value(canvas, RESTORE_LABEL, value, keyboard_right);
                 }
-            };
-            let is_dup = match &rows[ridx] {
-                KcRow::ModeSelect | KcRow::PadDevice | KcRow::PadAnalogMode => false,
-                KcRow::PadControl(a) => ctx.shared.keyconfig.pad.control_binding(*a).is_some_and(|b| pad_dups.contains(&b)),
-                KcRow::PadLane(lane) => ctx.shared.keyconfig.pad.lane_binding(edit_mode, *lane).is_some_and(|b| pad_dups.contains(&b)),
-                KcRow::PadScratchReverse(lane) => ctx.shared.keyconfig.pad.scratch_reverse_binding(edit_mode, *lane).is_some_and(|b| pad_dups.contains(&b)),
-                _ => key_from_name(&raw).is_some_and(|k| dups.contains(&k)),
-            };
-            canvas.fill_rect(Rect::new(x0, y, PANEL_W, ROW_H), if on { th.button } else { th.panel });
-            draw_text(canvas, x0 + 16.0, y + 8.0, 1.6, if on { th.text } else { th.text_dim }, &label);
-            let value = if on && self.capturing {
-                "?".to_string()
-            } else if raw.is_empty() {
-                "-".to_string()
-            } else {
-                raw
-            };
-            let vcol = if on && self.capturing {
-                Color::YELLOW
-            } else if is_dup {
-                Color::RED
-            } else if on {
-                th.accent
-            } else {
-                th.text
-            };
-            draw_text_right(canvas, x0 + PANEL_W - 16.0, y + 8.0, 1.6, vcol, &value);
+                Line::Bind { target, pad: takes_a_pad } => {
+                    canvas.fill_rect(row_rect, if on { th.panel_hi } else { th.panel });
+                    draw_text(canvas, x0 + CELL_PAD, y + ROW_TEXT_Y, ROW_SCALE, label_col, &target.label(edit_mode));
+                    let cells = [
+                        (Column::Keyboard, keyboard_right, key_token(bound.key_of(target)), bound.key_clash(target).is_some()),
+                        (Column::Pad, pad_right, if takes_a_pad { pad_token(bound.pad_of(target)) } else { String::new() }, bound.pad_clash(target).is_some()),
+                    ];
+                    for (column, right, token, clashes) in cells {
+                        let focused = on && column == self.column;
+                        if focused {
+                            canvas.fill_rect(Rect::new(right - COLUMN_W, y, COLUMN_W, ROW_H), th.button);
+                        }
+                        let (text, color) = if focused && self.capturing {
+                            (CAPTURING.to_string(), Color::YELLOW)
+                        } else if clashes {
+                            (token, Color::RED)
+                        } else if focused {
+                            (token, th.accent)
+                        } else {
+                            (token, th.text)
+                        };
+                        draw_text_right(canvas, right - CELL_PAD, y + ROW_TEXT_Y, ROW_SCALE, color, &text);
+                    }
+                }
+            }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::keyconfig::ControlAction;
-    use crate::{App, Config, LaunchOptions};
-    use std::time::Instant;
-
-    fn app() -> App {
-        let dir = std::env::temp_dir().join(format!("rbms-keyconfig-stage-tests-{}-{:?}", std::process::id(), std::thread::current().id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("a temp dir");
-        App::new(String::new(), Config::default(), LaunchOptions::default(), dir.join("settings.ron"))
-    }
-
-    fn press(app: &mut App, state: &mut KeyConfigState, code: KeyCode) {
-        let key = KeyInput { code, pressed: true, released: false, text: None };
-        state.handle_key(&mut FrameCtx { shared: &mut app.shared, now: Instant::now(), dt: 0.0 }, key);
-    }
-
-    /// An editor focused on the keyboard row of `action`.
-    fn on_row(app: &App, action: ControlAction) -> KeyConfigState {
-        let sel = kc_rows(app.shared.kc_edit_mode).iter().position(|row| matches!(row, KcRow::Control(a) if *a == action)).expect("the row is listed");
-        KeyConfigState { sel, ..KeyConfigState::new() }
-    }
-
-    fn rebind(app: &mut App, state: &mut KeyConfigState, code: KeyCode) {
-        press(app, state, KeyCode::Enter);
-        assert!(state.capturing, "Enter did not arm the capture");
-        press(app, state, code);
-    }
-
-    /// START and SELECT are rebound like any other control: Enter on the row, then the key.
-    #[test]
-    fn start_and_select_are_rebound_from_their_rows() {
-        for (action, free_key) in [(ControlAction::Start, KeyCode::KeyP), (ControlAction::Select, KeyCode::KeyU)] {
-            let mut app = app();
-            let mut state = on_row(&app, action);
-            rebind(&mut app, &mut state, free_key);
-            assert_eq!(app.shared.keyconfig.control_key(action), Some(free_key), "{action:?}");
-            assert!(!state.capturing && !state.warn);
-        }
-    }
-
-    /// A key a lane, another control or the other menu button already has is refused, and the row
-    /// keeps the key it had.
-    #[test]
-    fn a_key_that_is_already_bound_is_refused_for_start_and_select() {
-        let taken = [
-            (ControlAction::Start, KeyCode::KeyZ, "a lane"),
-            (ControlAction::Start, KeyCode::ArrowUp, "a control"),
-            (ControlAction::Start, KeyCode::KeyW, "SELECT"),
-        ];
-        for (action, key, owner) in taken {
-            let mut app = app();
-            let before = app.shared.keyconfig.control_key(action);
-            let mut state = on_row(&app, action);
-            rebind(&mut app, &mut state, key);
-            assert!(state.warn, "{owner}'s key was accepted");
-            assert_eq!(app.shared.keyconfig.control_key(action), before, "{owner}'s key replaced the binding");
-        }
-    }
-
-    /// Both rows are on the keyboard list and the pad list of every mode, after the controls they
-    /// sit beside.
-    #[test]
-    fn the_rows_follow_the_older_controls_on_each_device() {
-        for &mode in Mode::ALL {
-            let rows = kc_rows(mode);
-            let control_positions: Vec<ControlAction> = rows
-                .iter()
-                .filter_map(|row| match row {
-                    KcRow::Control(action) => Some(*action),
-                    _ => None,
-                })
-                .collect();
-            assert_eq!(control_positions, ControlAction::ALL.to_vec(), "{} keyboard control rows", mode.name);
-            let pad_positions: Vec<ControlAction> = rows
-                .iter()
-                .filter_map(|row| match row {
-                    KcRow::PadControl(action) => Some(*action),
-                    _ => None,
-                })
-                .collect();
-            assert_eq!(pad_positions, ControlAction::ALL.to_vec(), "{} pad control rows", mode.name);
-        }
+        let counter = format!("{} / {}", self.sel + 1, rows.len());
+        draw_text_right(canvas, pad_right, COUNTER_Y, COUNTER_SCALE, th.text_muted, &counter);
     }
 }

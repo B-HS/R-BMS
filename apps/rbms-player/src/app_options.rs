@@ -20,6 +20,7 @@ use rbms_config::{AdjustOutcome, SettingId, adjust, descriptor, display_value};
 use rbms_render::{Color, Rect, Renderer, draw_text, draw_text_right, text_width, theme};
 use winit::keyboard::KeyCode;
 
+use crate::keyconfig::{Shortcut, key_name};
 use crate::stage::{Canvas, FrameCtx, KeyInput, StageId};
 use crate::{AppShared, CH, CW};
 
@@ -86,13 +87,19 @@ const HINT_SCALE: f32 = 1.1;
 /// Title of the panel.
 const OPTIONS_TITLE: &str = "OPTIONS";
 
-/// Keyboard hint along the bottom of the panel.
-const OPTIONS_HINT: &str = "UP DOWN MOVE   LEFT RIGHT CHANGE   F1 PIN   ESC CLOSE";
+/// Keyboard hint along the bottom of the panel, around the name of the key that pins it.
+const OPTIONS_HINT_BEFORE_PIN: &str = "UP DOWN MOVE   LEFT RIGHT CHANGE   ";
+const OPTIONS_HINT_AFTER_PIN: &str = " PIN   ESC CLOSE";
 
-/// The key held to keep the panel up, which closes it again when it is let go.
+/// What the hint names as the key that pins the panel when the player has left it without one.
+const NO_PIN_KEY: &str = "-";
+
+/// The key held to keep the panel up, which closes it again when it is let go, as it ships. The
+/// key that is read is the one the key configuration holds for [`Shortcut::OptionsHold`].
 pub(crate) const HOLD_KEY: KeyCode = KeyCode::ShiftLeft;
 
-/// The key that pins the panel open, for a player who would rather not hold one down.
+/// The key that pins the panel open, for a player who would rather not hold one down, as it ships
+/// ([`Shortcut::OptionsPin`]).
 pub(crate) const TOGGLE_KEY: KeyCode = KeyCode::F1;
 
 /// Whether the overlay is open, the row it is on, and whether a key is being held to keep it up.
@@ -165,7 +172,7 @@ pub(crate) fn options_key(ctx: &mut FrameCtx<'_>, stage: StageId, screen_holds_k
         return !screen_holds_keys && open_key(ctx, key);
     }
     if key.released {
-        if key.code == HOLD_KEY && ctx.shared.options.held {
+        if ctx.shared.is_shortcut(Shortcut::OptionsHold, key.code) && ctx.shared.options.held {
             close(ctx.shared);
         }
         return true;
@@ -174,7 +181,8 @@ pub(crate) fn options_key(ctx: &mut FrameCtx<'_>, stage: StageId, screen_holds_k
         return true;
     }
     match key.code {
-        KeyCode::Escape | TOGGLE_KEY => close(ctx.shared),
+        KeyCode::Escape => close(ctx.shared),
+        code if ctx.shared.is_shortcut(Shortcut::OptionsPin, code) => close(ctx.shared),
         KeyCode::ArrowUp => ctx.shared.options.move_row(ROW_STEP_BACK),
         KeyCode::ArrowDown => ctx.shared.options.move_row(ROW_STEP_FORWARD),
         KeyCode::ArrowLeft => step(ctx, ROW_STEP_BACK),
@@ -193,10 +201,12 @@ fn open_key(ctx: &mut FrameCtx<'_>, key: &KeyInput<'_>) -> bool {
     if !key.pressed {
         return false;
     }
-    match key.code {
-        HOLD_KEY => ctx.shared.options.open_panel(true),
-        TOGGLE_KEY => ctx.shared.options.open_panel(false),
-        _ => return false,
+    if ctx.shared.is_shortcut(Shortcut::OptionsHold, key.code) {
+        ctx.shared.options.open_panel(true);
+    } else if ctx.shared.is_shortcut(Shortcut::OptionsPin, key.code) {
+        ctx.shared.options.open_panel(false);
+    } else {
+        return false;
     }
     ctx.shared.play_system_sound(crate::SystemSound::OptionOpen);
     true
@@ -274,8 +284,10 @@ pub(crate) fn draw(stage: StageId, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'
         draw_text_right(canvas, value_right_x, row_y, ROW_SCALE, value_color, &value);
         ry += row_pitch;
     }
-    let hint_x = x + (panel.w - text_width(OPTIONS_HINT, HINT_SCALE)) * 0.5;
-    draw_text(canvas, hint_x, y + panel.h - HINT_H, HINT_SCALE, th.text_muted, OPTIONS_HINT);
+    let pin = ctx.shared.shortcut_key(Shortcut::OptionsPin).map_or(NO_PIN_KEY, key_name);
+    let hint = format!("{OPTIONS_HINT_BEFORE_PIN}{pin}{OPTIONS_HINT_AFTER_PIN}");
+    let hint_x = x + (panel.w - text_width(&hint, HINT_SCALE)) * 0.5;
+    draw_text(canvas, hint_x, y + panel.h - HINT_H, HINT_SCALE, th.text_muted, &hint);
 }
 
 #[cfg(test)]
@@ -601,5 +613,37 @@ mod tests {
         let typed = KeyInput { code: KeyCode::KeyA, pressed: true, released: false, text: Some("A") };
         app.stage.handle_key(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 }, typed);
         assert_eq!(app.shared.search, "A", "the letter after the shift key did not reach the search box");
+    }
+
+    /// The two keys that open the panel are the ones the key configuration holds for them: once they
+    /// are moved the keys they shipped on open nothing, the new ones do what the old ones did, and
+    /// with neither bound no key opens the panel at all.
+    #[test]
+    fn the_keys_that_open_the_panel_are_read_from_the_key_configuration() {
+        use crate::keyconfig::Bindable;
+        let mut app = app();
+        let mode = app.shared.mode;
+        app.shared.keyconfig.bind(mode, Bindable::Shortcut(Shortcut::OptionsPin), Some(KeyCode::F6));
+        app.shared.keyconfig.bind(mode, Bindable::Shortcut(Shortcut::OptionsHold), Some(KeyCode::F7));
+        for shipped in [TOGGLE_KEY, HOLD_KEY] {
+            assert!(!offer(&mut app, press(shipped)), "{shipped:?} is still taken");
+            assert!(!app.shared.options.is_open(), "{shipped:?} still opens the panel");
+        }
+
+        assert!(offer(&mut app, press(KeyCode::F6)));
+        assert!(app.shared.options.is_open(), "the moved pin key does not open the panel");
+        offer(&mut app, press(KeyCode::F6));
+        assert!(!app.shared.options.is_open(), "the moved pin key does not close it again");
+
+        offer(&mut app, press(KeyCode::F7));
+        assert!(app.shared.options.is_open(), "the moved hold key does not open the panel");
+        offer(&mut app, release(KeyCode::F7));
+        assert!(!app.shared.options.is_open(), "letting the moved hold key go leaves the panel up");
+
+        app.shared.keyconfig.bind(mode, Bindable::Shortcut(Shortcut::OptionsPin), None);
+        app.shared.keyconfig.bind(mode, Bindable::Shortcut(Shortcut::OptionsHold), None);
+        for code in [TOGGLE_KEY, HOLD_KEY, KeyCode::F6, KeyCode::F7] {
+            assert!(!offer(&mut app, press(code)) && !app.shared.options.is_open(), "{code:?} opens a panel that has no key");
+        }
     }
 }

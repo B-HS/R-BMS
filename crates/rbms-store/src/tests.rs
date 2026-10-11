@@ -399,6 +399,7 @@ fn sample_replay() -> Replay {
             gauge_set: "LR2".into(),
             gauge_auto_shift: "BESTCLEAR".into(),
             bottom_shiftable_gauge: "normal".into(),
+            offset_steps: vec![ReplayOffsetStep { from_event: 0, offset_ms: -12 }, ReplayOffsetStep { from_event: 2, offset_ms: -11 }],
         },
         events: vec![
             ReplayEvent { t: 0, lane: 0, press: true, backward: false },
@@ -491,6 +492,19 @@ fn empty_event_stream_round_trips() {
     let s = ron::ser::to_string_pretty(&r, ron::ser::PrettyConfig::default()).unwrap();
     let back: Replay = ron::from_str(&s).unwrap();
     assert!(back.events.is_empty(), "an empty replay is valid");
+}
+
+#[test]
+fn a_replay_written_before_the_offset_could_move_has_no_offset_steps() {
+    let s = r#"(
+        chart_path: "/c.bms", md5: "AA", mode: "BEAT-7K", random: "OFF", seed: 7, offset_ms: -4,
+        judge: (algorithm: "Combo", judge_rate_key: (100, 100, 100)),
+        events: []
+    )"#;
+    let r: Replay = ron::from_str(s).expect("a replay with no offset steps parses");
+    assert_eq!(r.offset_ms, -4);
+    assert!(r.judge.offset_steps.is_empty(), "the whole run was judged at the one offset");
+    assert!(ReplayJudge::default().offset_steps.is_empty());
 }
 
 #[test]

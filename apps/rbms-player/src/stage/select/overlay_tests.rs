@@ -9,14 +9,14 @@ use rbms_render::{Color, Rect, Renderer, theme};
 use winit::event::MouseButton;
 use winit::keyboard::KeyCode;
 
-use super::guide::{BROWSER_SHORTCUTS, GUIDE_KEY, browser_rows, key_rows, panel_rows, shortcut_label};
+use super::SelectState;
+use super::guide::{FIXED_KEYS, GUIDE_KEY, columns, key_rows, panel_rows, shortcut_label};
 use super::overlay::{HINT_H, HINT_Y, SEARCH_H, STRIP_BOTTOM, STRIP_X, TAB_MARK_H};
 use super::skinned_tests::{Browser, SLOT_ABOVE, SLOT_BELOW, slot_middle, starts_a_chart, wheel_document};
 use super::tests::{app, entry, press, record};
-use super::{SKIN_MENU_KEY, SelectState};
-use crate::app_options::{HOLD_KEY, TOGGLE_KEY, options_key};
+use crate::app_options::{TOGGLE_KEY, options_key};
 use crate::ir_ranking_view::panel_action;
-use crate::keyconfig::{ControlAction, KeyConfig, default_keys_for_mode};
+use crate::keyconfig::{ControlAction, KeyConfig, Shortcut, ShortcutGroup, ShortcutScreen, default_keys_for_mode};
 use crate::pointer::PointerInput;
 use crate::stage::select::filter::filter_panel_rect;
 use crate::stage::select::overlay::ranking_panel_rect;
@@ -86,8 +86,9 @@ fn browser_with_the_wheel_in_the_corner(tag: &str) -> (Browser, (f32, f32)) {
     (browser, (CORNER_WHEEL_X, slot_middle(SLOT_BELOW).1))
 }
 
-/// The middle of the corner wheel's bars across the screen, which no panel reaches.
-const CORNER_WHEEL_X: f32 = 100.0;
+/// A place on the corner wheel's bars across the screen that no panel reaches: the key guide is the
+/// widest of them and stops short of the screen's left edge.
+const CORNER_WHEEL_X: f32 = 12.0;
 
 /// How many pixels of a rectangle differ between `before`, the frame as it was drawn, and the frame
 /// as it stands now.
@@ -357,13 +358,97 @@ fn reset(browser: &mut Browser) {
     browser.frame();
 }
 
-/// Every key the guide lists does what it says on a browser a skin draws, and the guide leaves out
-/// none of the browser's own: a key put in the table without a case here fails.
+/// Press the key a shortcut of the browser is on and check that the browser did what the shortcut
+/// says, with `code` being whatever key the shortcut is on in this browser.
+fn check_shortcut(browser: &mut Browser, shortcut: Shortcut, code: KeyCode) {
+    match shortcut {
+        Shortcut::Folders => assert!(matches!(browser.key(code), Transition::Open(Stage::Folders(_))), "{shortcut:?}"),
+        Shortcut::Tables => assert!(matches!(browser.key(code), Transition::Open(Stage::Tables(_))), "{shortcut:?}"),
+        Shortcut::Records => {
+            browser.key(code);
+            assert!(browser.state.record_modal.is_some(), "{shortcut:?}");
+        }
+        Shortcut::Search | Shortcut::RefSearch => {
+            browser.key(code);
+            assert!(browser.app.shared.searching, "{shortcut:?}");
+        }
+        Shortcut::Filter => {
+            browser.key(code);
+            assert!(browser.state.filter.is_open(), "{shortcut:?}");
+            browser.key(code);
+            assert!(!browser.state.filter.is_open(), "{shortcut:?} did not close the panel it opened");
+        }
+        Shortcut::Sort => {
+            let before = browser.app.shared.config.library.sort;
+            browser.key(code);
+            assert_ne!(browser.app.shared.config.library.sort, before, "{shortcut:?}");
+            browser.key(KeyCode::ShiftRight);
+            browser.key(code);
+            assert_eq!(browser.app.shared.config.library.sort, before, "shift does not turn {shortcut:?} round");
+        }
+        Shortcut::RefSort => {
+            let before = browser.app.shared.config.library.sort;
+            browser.key(code);
+            assert_ne!(browser.app.shared.config.library.sort, before, "{shortcut:?}");
+        }
+        Shortcut::Practice => {
+            assert!(starts_a_chart(&browser.key(code)), "{shortcut:?}");
+            assert!(browser.app.shared.practice_requested, "{shortcut:?} did not ask for the practice panel");
+        }
+        Shortcut::Settings => {
+            assert!(matches!(browser.key(code), Transition::Open(Stage::Settings(_))), "{shortcut:?}");
+            browser.key(KeyCode::ShiftRight);
+            browser.key(code);
+            assert!(browser.state.tab == SelectTab::Courses, "shift does not make {shortcut:?} the course list");
+        }
+        Shortcut::Ranking => {
+            browser.key(code);
+            assert!(browser.state.ranking_open, "{shortcut:?}");
+            browser.key(code);
+            assert!(!browser.state.ranking_open, "{shortcut:?} did not close the panel it opened");
+        }
+        Shortcut::Favourite | Shortcut::RefFavourite => {
+            browser.key(code);
+            assert!(browser.app.shared.favorites.contains(FIRST_CHART_MD5), "{shortcut:?}");
+        }
+        Shortcut::SkinMenu => assert!(matches!(browser.key(code), Transition::Open(Stage::SkinMenu(_))), "{shortcut:?}"),
+        Shortcut::KeyConfig | Shortcut::RefKeyConfig => assert!(matches!(browser.key(code), Transition::Open(Stage::KeyConfig(_))), "{shortcut:?}"),
+        Shortcut::OptionsPin | Shortcut::OptionsHold => {
+            let mut ctx = FrameCtx { shared: &mut browser.app.shared, now: browser.now, dt: 0.0 };
+            assert!(options_key(&mut ctx, StageId::Select, false, &press(code)), "{shortcut:?}");
+            assert!(browser.app.shared.options.is_open(), "{shortcut:?}");
+        }
+        Shortcut::RefMode => {
+            browser.key(code);
+            assert!(browser.state.filter.filter(&browser.app.shared.config).mode.is_some(), "{shortcut:?}");
+        }
+        Shortcut::RefLnMode => {
+            let before = browser.app.shared.config.judge.ln_mode;
+            browser.key(code);
+            assert_ne!(browser.app.shared.config.judge.ln_mode, before, "{shortcut:?}");
+        }
+        Shortcut::RefReplay => {
+            browser.key(code);
+        }
+        Shortcut::RefDetail => {
+            browser.app.shared.note_key(&press(code));
+            browser.frame();
+            assert_eq!(browser.state.panel.number(), DETAIL_PANEL, "{shortcut:?}");
+        }
+        other => panic!("{other:?} is not a shortcut of the browser"),
+    }
+}
+
+/// The number of the detail panel, which is the third of the three.
+const DETAIL_PANEL: u8 = 3;
+
+/// Every key the guide lists does what it says on a browser a skin draws: the fixed keys, and every
+/// shortcut of the browser on the key it ships on. A shortcut added without a case here fails.
 #[test]
 fn every_key_the_guide_lists_does_what_it_says() {
     let mut browser = with_a_record("overlay-listed");
-    for shortcut in &BROWSER_SHORTCUTS {
-        for code in shortcut.keys {
+    for fixed in &FIXED_KEYS {
+        for code in fixed.keys {
             reset(&mut browser);
             match *code {
                 KeyCode::ArrowDown => assert_eq!(browser.arrow(*code), 1, "{code:?}"),
@@ -374,65 +459,22 @@ fn every_key_the_guide_lists_does_what_it_says() {
                     browser.key(*code);
                     assert!(browser.app.shared.select_view == SelectView::Root, "{code:?} did not go back a folder");
                 }
-                KeyCode::KeyO => assert!(matches!(browser.key(*code), Transition::Open(Stage::Folders(_))), "{code:?}"),
-                KeyCode::KeyT => assert!(matches!(browser.key(*code), Transition::Open(Stage::Tables(_))), "{code:?}"),
-                KeyCode::KeyR => {
-                    browser.key(*code);
-                    assert!(browser.state.record_modal.is_some(), "{code:?}");
-                }
-                KeyCode::Slash => {
-                    browser.key(*code);
-                    assert!(browser.app.shared.searching, "{code:?}");
-                }
-                KeyCode::F2 => {
-                    browser.key(*code);
-                    assert!(browser.state.filter.is_open(), "{code:?}");
-                }
-                KeyCode::F3 => {
-                    let before = browser.app.shared.config.library.sort;
-                    browser.key(*code);
-                    assert_ne!(browser.app.shared.config.library.sort, before, "{code:?}");
-                    browser.key(KeyCode::ShiftLeft);
-                    browser.key(*code);
-                    assert_eq!(browser.app.shared.config.library.sort, before, "shift does not turn {code:?} round");
-                }
-                KeyCode::F4 => {
-                    assert!(starts_a_chart(&browser.key(*code)), "{code:?}");
-                    assert!(browser.app.shared.practice_requested, "{code:?} did not ask for the practice panel");
-                }
-                KeyCode::Tab => {
-                    assert!(matches!(browser.key(*code), Transition::Open(Stage::Settings(_))), "{code:?}");
-                    browser.key(KeyCode::ShiftLeft);
-                    browser.key(*code);
-                    assert!(browser.state.tab == SelectTab::Courses, "shift does not make {code:?} the course list");
-                }
-                KeyCode::KeyI => {
-                    browser.key(*code);
-                    assert!(browser.state.ranking_open, "{code:?}");
-                }
-                KeyCode::KeyF => {
-                    browser.key(*code);
-                    assert!(browser.app.shared.favorites.contains(FIRST_CHART_MD5), "{code:?}");
-                }
-                code if code == SKIN_MENU_KEY => assert!(matches!(browser.key(code), Transition::Open(Stage::SkinMenu(_))), "{code:?}"),
-                code if code == GUIDE_KEY => {
-                    browser.key(code);
-                    assert!(browser.state.guide_open, "{code:?}");
-                }
-                code if code == TOGGLE_KEY || code == HOLD_KEY => {
-                    let mut ctx = FrameCtx { shared: &mut browser.app.shared, now: browser.now, dt: 0.0 };
-                    assert!(options_key(&mut ctx, StageId::Select, false, &press(code)), "{code:?}");
-                    assert!(browser.app.shared.options.is_open(), "{code:?}");
-                }
                 other => panic!("the guide lists {other:?}, which this test does not know how to press"),
             }
         }
     }
+    for shortcut in Shortcut::ALL.into_iter().filter(|shortcut| shortcut.screen() == ShortcutScreen::Browser) {
+        reset(&mut browser);
+        check_shortcut(&mut browser, shortcut, shortcut.default_key());
+    }
+    reset(&mut browser);
+    browser.key(GUIDE_KEY);
+    assert!(browser.state.guide_open, "the guide key");
 }
 
 /// The key that puts the guide up is nothing else's: not a lane or a control the player has by
-/// default in any mode, not a key of the reference's table the skinned browser reads, not a key of
-/// the ranking panel, and no two entries of the guide name the same key.
+/// default in any mode, not the key of any shortcut as shipped, not a key of the ranking panel, and
+/// no two shortcuts of the browser ship on one key.
 #[test]
 fn the_guide_key_is_not_a_key_anything_else_takes() {
     for mode in Mode::ALL.iter().copied() {
@@ -442,14 +484,98 @@ fn the_guide_key_is_not_a_key_anything_else_takes() {
     for action in ControlAction::ALL {
         assert_ne!(controls.control_key(action), Some(GUIDE_KEY), "{} is on the guide key", action.label());
     }
-    let reference_keys = [KeyCode::Digit0, KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit5, KeyCode::Digit6, KeyCode::F9, KeyCode::F12];
-    assert!(!reference_keys.contains(&GUIDE_KEY), "the skinned browser reads the guide key as one of the reference's");
     assert!(panel_action(GUIDE_KEY).is_none(), "the ranking panel takes the guide key");
 
-    let listed: Vec<KeyCode> = BROWSER_SHORTCUTS.iter().flat_map(|shortcut| shortcut.keys.iter().copied()).collect();
+    let listed: Vec<KeyCode> =
+        Shortcut::ALL.into_iter().filter(|shortcut| shortcut.screen() == ShortcutScreen::Browser).map(Shortcut::default_key).chain([GUIDE_KEY]).collect();
     for (at, code) in listed.iter().enumerate() {
-        assert!(!listed[at + 1..].contains(code), "{code:?} is listed twice");
+        assert!(!listed[at + 1..].contains(code), "{code:?} is shipped on twice");
     }
+}
+
+/// A shortcut the player moved is read from the key it was moved to and no longer from the key it
+/// shipped on, and the guide names the key it is on now. A shortcut left without a key is read
+/// from none and the guide shows it so.
+#[test]
+fn a_moved_shortcut_is_read_from_its_new_key_and_the_guide_names_it() {
+    let free = [KeyCode::F6, KeyCode::F7, KeyCode::F8, KeyCode::F10, KeyCode::F11, KeyCode::Insert, KeyCode::Home, KeyCode::End, KeyCode::Backquote];
+    let moved: Vec<Shortcut> = Shortcut::ALL
+        .into_iter()
+        .filter(|shortcut| shortcut.screen() == ShortcutScreen::Browser && !matches!(shortcut, Shortcut::OptionsPin | Shortcut::OptionsHold))
+        .collect();
+    for (index, shortcut) in moved.into_iter().enumerate() {
+        let to = free[index % free.len()];
+        let mut browser = with_a_record(&format!("overlay-moved-{index}"));
+        reset(&mut browser);
+        let mode = browser.app.shared.mode;
+        browser.app.shared.keyconfig.bind(mode, crate::keyconfig::Bindable::Shortcut(shortcut), Some(to));
+
+        let named = columns(&browser.app.shared)
+            .into_iter()
+            .flatten()
+            .flat_map(|section| section.rows)
+            .any(|row| row.keys.split(' ').any(|key| key == shortcut_label(to)));
+        assert!(named, "the guide does not name {to:?} once {shortcut:?} is on it");
+
+        let before = (
+            browser.app.shared.searching,
+            browser.state.filter.is_open(),
+            browser.app.shared.config.library.sort,
+            browser.state.record_modal,
+            browser.state.ranking_open,
+            browser.app.shared.favorites.contains(FIRST_CHART_MD5),
+            browser.app.shared.config.judge.ln_mode,
+        );
+        let asked = browser.key(shortcut.default_key());
+        browser.app.shared.note_key(&super::tests::release(shortcut.default_key()));
+        let after = (
+            browser.app.shared.searching,
+            browser.state.filter.is_open(),
+            browser.app.shared.config.library.sort,
+            browser.state.record_modal,
+            browser.state.ranking_open,
+            browser.app.shared.favorites.contains(FIRST_CHART_MD5),
+            browser.app.shared.config.judge.ln_mode,
+        );
+        assert!(matches!(asked, Transition::Stay) && before == after, "{shortcut:?} is still read from the key it shipped on");
+
+        check_shortcut(&mut browser, shortcut, to);
+    }
+
+    let mut browser = with_a_record("overlay-unbound");
+    reset(&mut browser);
+    let mode = browser.app.shared.mode;
+    browser.app.shared.keyconfig.bind(mode, crate::keyconfig::Bindable::Shortcut(Shortcut::Folders), None);
+    assert!(matches!(browser.key(Shortcut::Folders.default_key()), Transition::Stay), "a shortcut with no key was read from the one it shipped on");
+    let screens = super::guide::screen_rows(&browser.app.shared);
+    assert!(screens.iter().any(|row| row.keys == "-" && row.does == Shortcut::Folders.label()), "the guide does not show the shortcut as having no key");
+}
+
+/// The guide lists every shortcut of the browser, group by group, and the controls of a run, each
+/// with the key the key configuration holds for it.
+#[test]
+fn the_guide_lists_every_shortcut_of_the_browser_and_the_controls_of_a_run() {
+    let mut browser = Browser::three_songs("overlay-guide-whole");
+    let shared = &mut browser.app.shared;
+    let all: Vec<String> = columns(shared).into_iter().flatten().flat_map(|section| section.rows).map(|row| format!("{} = {}", row.keys, row.does)).collect();
+    for group in [ShortcutGroup::Browser, ShortcutGroup::Screens, ShortcutGroup::SkinBrowser] {
+        for shortcut in Shortcut::ALL.into_iter().filter(|shortcut| shortcut.group() == group) {
+            let key = shortcut_label(shortcut.default_key());
+            assert!(
+                all.iter().any(|line| line.split(" = ").next().is_some_and(|keys| keys.split(' ').any(|word| word == key))),
+                "{shortcut:?} ({key}) is not on the guide: {all:#?}"
+            );
+        }
+    }
+    assert!(all.contains(&"LEFT RIGHT = LANE COVER LESS / MORE".to_string()), "{all:#?}");
+    assert!(all.contains(&"BACKSLASH = LANE COVER ON/OFF".to_string()), "{all:#?}");
+    assert!(all.contains(&"A TWICE = LANE COVER ON/OFF".to_string()), "{all:#?}");
+
+    shared.keyconfig.set_control(ControlAction::CoverUp, KeyCode::KeyP);
+    shared.keyconfig.set_control(ControlAction::CoverToggle, KeyCode::KeyU);
+    let all: Vec<String> = columns(shared).into_iter().flatten().flat_map(|section| section.rows).map(|row| format!("{} = {}", row.keys, row.does)).collect();
+    assert!(all.contains(&"LEFT P = LANE COVER LESS / MORE".to_string()), "{all:#?}");
+    assert!(all.contains(&"U = LANE COVER ON/OFF".to_string()), "{all:#?}");
 }
 
 /// START, SELECT and the keys of the reference's table are read from the key configuration, so a key
@@ -502,7 +628,7 @@ fn the_guide_names_the_keys_as_they_are_bound() {
 #[test]
 fn every_line_of_the_guide_has_keys_and_words() {
     let browser = Browser::three_songs("overlay-guide-lines");
-    let rows = browser_rows().into_iter().chain(panel_rows(&browser.app.shared)).chain(key_rows(&browser.app.shared));
+    let rows = columns(&browser.app.shared).into_iter().flatten().flat_map(|section| section.rows);
     for row in rows {
         assert!(!row.keys.is_empty() && !row.does.is_empty(), "{row:?}");
     }
@@ -551,5 +677,50 @@ fn the_dot_and_the_debug_panel_move_off_a_skins_frame_and_only_there() {
         if skinned {
             assert_eq!(changed_in(&before, &browser.pixels, panel_area(panel_there)), 0, "the debug panel is over the skin's top frame");
         }
+    }
+}
+
+/// Names the folder the frames of the guide are saved in. Nothing is saved without it.
+const CAPTURE_DIR_ENV: &str = "RBMS_SKIN_CAPTURE_DIR";
+
+/// The two sizes the guide is drawn at by itself: the one it is laid out for, and a full HD window.
+const GUIDE_SIZES: [(u32, u32); 2] = [(CW, crate::CH), (1920, 1080)];
+
+/// Save a frame as `<name>.png` in the capture folder, when one was asked for.
+fn save_capture(pixels: &HeadlessCanvas, name: &str) {
+    if let Some(folder) = std::env::var_os(CAPTURE_DIR_ENV) {
+        let folder = std::path::Path::new(&folder);
+        std::fs::create_dir_all(folder).expect("the capture folder can be created");
+        let (width, height) = pixels.size();
+        image::save_buffer(folder.join(format!("{name}.png")), pixels.rgba(), width, height, image::ExtendedColorType::Rgba8).expect("the capture is written");
+    }
+}
+
+/// The guide fits the screen the application is laid out for with every line it lists, as shipped
+/// and with every key that can be moved put on the longest word a key has, and it draws at that
+/// size and at full HD.
+#[test]
+fn the_guide_fits_the_screen_and_draws_at_both_sizes() {
+    let mut browser = Browser::three_songs("overlay-guide-fits");
+    let panel = super::guide::guide_rect(&columns(&browser.app.shared));
+    assert!(panel.y >= 0.0 && panel.y + panel.h <= crate::CH as f32, "the guide is {} tall and runs off the screen", panel.h);
+    assert!(panel.x >= 0.0 && panel.x + panel.w <= CW as f32);
+
+    browser.key(GUIDE_KEY);
+    browser.frame();
+    save_capture(&browser.pixels, "guide-over-a-browser-1280x720");
+
+    let mode = browser.app.shared.mode;
+    browser.app.shared.keyconfig.bind(mode, crate::keyconfig::Bindable::Shortcut(Shortcut::Search), Some(KeyCode::F6));
+    browser.app.shared.keyconfig.bind(mode, crate::keyconfig::Bindable::Shortcut(Shortcut::Folders), None);
+    browser.app.shared.keyconfig.set_control(ControlAction::CoverUp, KeyCode::KeyP);
+    browser.app.shared.keyconfig.set_control(ControlAction::LiftToggle, KeyCode::F8);
+    for size in GUIDE_SIZES {
+        let mut pixels = HeadlessCanvas::new(size.0, size.1);
+        let mut canvas = Canvas::Headless(&mut pixels);
+        canvas.clear(Color::BLACK);
+        super::guide::render_guide(&mut canvas, &browser.app.shared);
+        assert!(pixels.painted_pixels() > 0);
+        save_capture(&pixels, &format!("guide-with-moved-keys-{}x{}", size.0, size.1));
     }
 }

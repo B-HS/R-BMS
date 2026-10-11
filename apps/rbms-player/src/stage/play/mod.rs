@@ -26,6 +26,14 @@
 //! - **CONSTANT and LEGACY NOTE** change what a skin's note field is shown and nothing of the run:
 //!   the field is handed the chart made over for them ([`field`]), so the same two settings move the
 //!   notes of a skin's field as they move the built-in one's.
+//! - **A held green number** (the KEEP GREEN NUMBER row): the run starts at the scroll speed that
+//!   shows the travel time the settings hold, at this chart's tempo and under the lane cover as it
+//!   stands, and is put back there whenever the cover moves ([`PlayState::hold_green_number`]). It
+//!   is the reference's own rule for a speed fixed to a tempo (`LaneRenderer.resetHispeed`); what is
+//!   this player's is that the row can be off, when the speed itself is what the settings hold.
+//! - **A judge offset that adjusts itself** (the AUTO ADJUST row) moves as each input of a run
+//!   played by hand lands, and what it has moved to is the settings' own value from that moment
+//!   ([`PlayState::keep_adjusted_offset`]).
 //! - **Leaving** is by Escape, on the terms of the ESCAPE setting, as it always was. While a run is
 //!   closing Escape skips what is left of the closing instead. A failed run played by hand starts
 //!   again at once on START or SELECT, as in the reference.
@@ -33,6 +41,8 @@
 
 mod controls;
 mod field;
+#[cfg(test)]
+mod hold_tests;
 mod scene;
 #[cfg(test)]
 mod screen_tests;
@@ -45,7 +55,7 @@ mod trace;
 use crate::app_input::{ControlContext, ControlEffect, FixedSpeed, green_for_hispeed};
 use crate::app_play::schedule_position_us;
 use crate::app_result::{enter_result, run_target};
-use crate::keyconfig::mode_config_key;
+use crate::keyconfig::{Shortcut, ShortcutScreen, mode_config_key};
 use crate::skin_host::options::SettingsView;
 use crate::skin_host::play::{LaneSettings, PlayClock, PlayKind, PlayLive, PlayPhase, PlayShown, Scroll, travel_region_ms};
 use crate::skin_host::play_timers::{CHART_PREVIEW, FieldOffsets, PlayingFrame, SceneEvent};
@@ -153,6 +163,21 @@ impl BpmStats {
             FixHiSpeed::MainBpm => Some(self.main),
         }
     }
+
+    /// The tempo a green number held from chart to chart is held at on this chart, or `None` while
+    /// the KEEP GREEN NUMBER row is off.
+    ///
+    /// It is the tempo the HI-SPEED FIX row names, and the one the most notes are played at while
+    /// that row names none, so a held green number always has a tempo to be held against. Under
+    /// CONSTANT the field scrolls at one tempo of its own whatever the chart's are
+    /// ([`field::CONSTANT_BPM`]), and that is the tempo the number is held at, so the number on show
+    /// is the one that was asked for.
+    pub(crate) fn held(&self, play: &rbms_config::PlayOptions) -> Option<f64> {
+        if !play.keep_green_number {
+            return None;
+        }
+        Some(if play.constant_speed { field::CONSTANT_BPM } else { self.target(play.fix_hispeed).unwrap_or(self.main) })
+    }
 }
 
 /// What this run's scroll speed is being held to.
@@ -200,8 +225,9 @@ pub(crate) struct PlayState {
     /// needs it. The screen is built before it can see them, so it is filled in on first use rather
     /// than in the constructor.
     speed: Option<RunSpeed>,
-    /// Whether a free modifier key is down, which is what asks a lane shade for its finer step.
-    fine_held: bool,
+    /// When a control of the run last moved or switched a shade, on the clock a skin is animated
+    /// against, for the figures a skin shows while a shade is being changed ([`shade_is_changing`]).
+    shade_moved_us: Option<i64>,
     /// The target this run is paced against, settled the first time the HUD needs it. It is fixed
     /// for the run: the records it is settled against are the ones that stood when the run started,
     /// which is what the result screen scores it against too.
@@ -287,7 +313,7 @@ impl PlayState {
             esc_pressed_at: None,
             bpm,
             speed: None,
-            fine_held: false,
+            shade_moved_us: None,
             pace_target: None,
             best_score: 0,
             practice: None,
@@ -399,15 +425,53 @@ impl PlayState {
         self.pace_target = Some(run_target(shared, &md5, total_notes, best));
     }
 
+    /// The tempo this run's green number is held at ([`BpmStats::held`]), or `None` for a run that
+    /// holds none: the KEEP GREEN NUMBER row is off, or the course in progress locks the speed.
+    fn held_tempo(&self, shared: &AppShared) -> Option<f64> {
+        if shared.course_locks_speed() {
+            return None;
+        }
+        self.bpm.held(&shared.config.play)
+    }
+
+    /// Put the scroll speed where the held green number wants it for this chart and the lane as it
+    /// stands, and answer whether this run holds one.
+    ///
+    /// The speed of such a run is never a value of its own: it is what the travel time, the tempo
+    /// and the lane cover come to ([`rbms_config::held_speed`]), worked out when the chart starts
+    /// and again whenever any of them has moved. A speed that would leave its range stands at the
+    /// end of it, and the figures a skin reads say what the travel time then really is.
+    ///
+    /// While the number is held the run has no pin of its own ([`PlayState::run_speed`]): whatever
+    /// one it read before is forgotten, so a run that stops holding its number reads its pin from
+    /// the speed the number left it at, and not from the one it had when something first asked.
+    fn hold_green_number(&mut self, shared: &mut AppShared) -> bool {
+        let Some(bpm) = self.held_tempo(shared) else {
+            return false;
+        };
+        shared.config.play.hold_travel_at(bpm);
+        self.speed = None;
+        true
+    }
+
     /// Apply one in-play control and keep a pinned green number in step with what it moved.
     ///
     /// Moving the speed itself re-reads the green number the run is now at, so the next lane-cover
     /// change holds the number the player just chose. Moving the cover holds the number and moves
     /// the speed instead, which is what keeps a covered field reading the same as an uncovered one
     /// (`LaneRenderer.java:212-215`).
+    ///
+    /// A run that holds its green number from chart to chart takes its controls another way
+    /// ([`PlayState::held_green_control`]).
     fn in_play_control(&mut self, shared: &mut AppShared, action: ControlAction) {
+        if action.moves_a_shade() && !shared.course_locks_speed() {
+            self.shade_moved_us = Some(shared.skin_now_us());
+        }
+        if self.green_control(shared, action) || self.held_green_control(shared, action) {
+            return;
+        }
         let speed = self.run_speed(shared);
-        let ctx = ControlContext { fine: self.fine_held, base_hispeed: speed.base, fixed: speed.fixed };
+        let ctx = ControlContext { fine: shared.fine_pressed(), base_hispeed: speed.base, fixed: speed.fixed };
         match shared.apply_control(action, &ctx) {
             ControlEffect::Speed => {
                 let refreshed =
@@ -423,20 +487,22 @@ impl PlayState {
         }
     }
 
-    /// Whether a key is free to act as the fine-step modifier for this run.
-    ///
-    /// A shift key is the modifier the option asks for, but on the shipped seven-key layout the left
-    /// one is the turntable. A key that plays a lane or runs a control is left to that job, so the
-    /// modifier never eats an input the chart needs.
-    fn is_fine_modifier(shared: &AppShared, code: KeyCode) -> bool {
-        matches!(code, KeyCode::ShiftLeft | KeyCode::ShiftRight) && shared.lane_input_for(code).is_none() && shared.control_for(code).is_none()
-    }
-
     /// Hand the running session the judge settings as they stand right now, so a JUDGE OFFSET or
-    /// AUTO CAL changed mid-song takes effect on the very next input rather than on the next chart.
+    /// AUTO ADJUST changed mid-song takes effect on the very next input rather than on the next
+    /// chart.
     fn sync_judge_settings(&mut self, shared: &AppShared) {
         self.session.set_judge_offset_us(shared.offset_us());
         self.session.set_auto_calibration(shared.config.judge.auto_offset);
+    }
+
+    /// Keep the judge offset an input of the player's just moved, while the offset adjusts itself.
+    ///
+    /// The reference writes each move straight into the player's configuration
+    /// (`JudgeManager.java:701`), so it stands however the run ends: finished, failed or abandoned.
+    /// Here the configuration is written out on each of those ways out of the screen, and what it
+    /// holds by then is what the last input left.
+    fn keep_adjusted_offset(&mut self, shared: &mut AppShared) {
+        shared.config.judge.offset_ms = self.session.judge_offset_ms();
     }
 
     /// Whether the run is over and the result is due: the song ended, or the gauge emptied under a
@@ -515,20 +581,36 @@ impl PlayState {
     }
 
     /// Handle an analysis-mode playback key (only while a replay analysis is active): pause/resume,
-    /// playback rate, and one seek step either way. Returns whether the key was an analysis control.
-    fn analysis_key(&mut self, shared: &AppShared, code: KeyCode) -> bool {
+    /// playback rate, and one seek step either way, each on the key the key configuration gives it.
+    /// Returns whether the key was an analysis control.
+    fn analysis_key(&mut self, shared: &mut AppShared, code: KeyCode) -> bool {
+        match shared.shortcut_for(ShortcutScreen::Replay, code) {
+            Some(shortcut) => self.analysis_shortcut(shared, shortcut),
+            None => {
+                self.sync_judge_settings(shared);
+                false
+            }
+        }
+    }
+
+    /// Carry out one control of a replay under analysis, from a key or from a controller. Returns
+    /// whether a replay is under analysis for it to act on; a seek is also told to the skin.
+    fn analysis_shortcut(&mut self, shared: &mut AppShared, shortcut: Shortcut) -> bool {
         self.sync_judge_settings(shared);
         if !self.session.analysis_enabled() {
             return false;
         }
         let play = &mut self.session;
-        match code {
-            KeyCode::Space => play.toggle_analysis_pause(),
-            KeyCode::Equal => play.adjust_analysis_rate(1),
-            KeyCode::Minus => play.adjust_analysis_rate(-1),
-            KeyCode::PageUp => play.seek(play.analysis_position_us() + ANALYSIS_SEEK_STEP_US),
-            KeyCode::PageDown => play.seek(play.analysis_position_us() - ANALYSIS_SEEK_STEP_US),
+        match shortcut {
+            Shortcut::ReplayPause => play.toggle_analysis_pause(),
+            Shortcut::ReplayFaster => play.adjust_analysis_rate(1),
+            Shortcut::ReplaySlower => play.adjust_analysis_rate(-1),
+            Shortcut::ReplayForward => play.seek(play.analysis_position_us() + ANALYSIS_SEEK_STEP_US),
+            Shortcut::ReplayBack => play.seek(play.analysis_position_us() - ANALYSIS_SEEK_STEP_US),
             _ => return false,
+        }
+        if matches!(shortcut, Shortcut::ReplayForward | Shortcut::ReplayBack) {
+            self.skin_seeked(shared);
         }
         true
     }
@@ -600,6 +682,7 @@ impl PlayState {
         } else {
             self.session.release_dir(lane, dir, raw);
         }
+        self.keep_adjusted_offset(shared);
         self.pump_skin(shared);
     }
 
@@ -794,8 +877,9 @@ impl PlayState {
             },
             clock: PlayClock::of(&shared.skin_timers, standing.now_us),
             judge_timing_ms: shared.config.judge.offset_ms,
+            judge_timing_auto: shared.config.judge.auto_offset,
             bga_on: shared.config.display.bga,
-            cover_keys_held: shared.start_pressed() || shared.select_pressed(),
+            cover_keys_held: shared.start_pressed() || shared.select_pressed() || shade_is_changing(self.shade_moved_us, standing.now_us),
             long_note_mode: settings.played.long_note_mode,
             played: settings.played,
             load_progress: self.load_progress(),
@@ -1177,15 +1261,37 @@ impl PlayState {
     }
 }
 
+/// How long after a control of the run moved or switched a shade a skin still shows the figures of
+/// the shades, in microseconds of its own clock.
+const SHADE_FIGURES_SHOWN_US: i64 = 1_500_000;
+
+/// Whether a shade moved recently enough that a skin shows the figures it shows while one is being
+/// changed (`OPTION_LANECOVER1_CHANGING`).
+///
+/// The reference shows them while START or SELECT is held, which is the only way it has of moving
+/// a shade. A key of its own moves one here with neither held, so its press stands in for the hold
+/// for a moment: without it a cover that is switched off moves with nothing on the screen to say so.
+///
+/// The two readings are held to being that close to each other, whichever is the later: a scene
+/// clock that was put back reads earlier than the move it follows.
+fn shade_is_changing(moved_us: Option<i64>, now_us: i64) -> bool {
+    moved_us.is_some_and(|moved_us| now_us.abs_diff(moved_us) < SHADE_FIGURES_SHOWN_US.unsigned_abs())
+}
+
 impl StageHandler for PlayState {
     /// A run a skin draws begins the reference's scene here: loading, or ready at once for a
     /// practice slice, with the skin asked for afresh, because a Lua skin builds its screen out of
     /// the chart it is read against. The stage picture a skin shows while it loads is decoded now,
     /// as the reference reads it when the chart is picked.
     ///
+    /// A run that holds its green number takes the speed that holds it for this chart before
+    /// anything is drawn (`LaneRenderer.java:154`), and keeps it there on every frame after
+    /// ([`StageHandler::update`]).
+    ///
     /// A run no skin draws starts as it always did, with the ready cue.
     fn on_enter(&mut self, ctx: &mut FrameCtx<'_>) {
         let shared = &mut *ctx.shared;
+        self.hold_green_number(shared);
         let Some(skin_type) = mode_skin_type(shared.mode).filter(|_| shared.has_play_scene()) else {
             shared.play_system_sound(SystemSound::PlayReady);
             return;
@@ -1208,6 +1314,7 @@ impl StageHandler for PlayState {
     }
 
     fn update(&mut self, ctx: &mut FrameCtx<'_>) -> Transition {
+        self.hold_green_number(ctx.shared);
         if self.scene.is_some() {
             return self.update_scene(ctx);
         }
@@ -1228,6 +1335,9 @@ impl StageHandler for PlayState {
         match event {
             crate::gamepad::PadEvent::Lane { lane, dir, press } => self.lane_input(ctx.shared, lane, dir, press),
             crate::gamepad::PadEvent::Control(action) => self.in_play_control(ctx.shared, action),
+            crate::gamepad::PadEvent::Shortcut(shortcut) => {
+                self.analysis_shortcut(ctx.shared, shortcut);
+            }
         }
         Transition::Stay
     }
@@ -1245,13 +1355,6 @@ impl StageHandler for PlayState {
     /// rather than discarding the run; otherwise it abandons the chart, in the way the ESCAPE
     /// setting asks for. A run a scene is run over has its own rules ([`PlayState::scene_escape`]).
     fn handle_key(&mut self, ctx: &mut FrameCtx<'_>, key: KeyInput<'_>) -> Transition {
-        if PlayState::is_fine_modifier(ctx.shared, key.code) {
-            if key.pressed {
-                self.fine_held = true;
-            } else if key.released {
-                self.fine_held = false;
-            }
-        }
         if key.code == KeyCode::Escape {
             if self.scene.is_some() {
                 return self.scene_escape(ctx, &key);
@@ -1262,9 +1365,6 @@ impl StageHandler for PlayState {
             return self.escape_key(ctx, &key);
         }
         if key.pressed && self.analysis_key(ctx.shared, key.code) {
-            if matches!(key.code, KeyCode::PageUp | KeyCode::PageDown) {
-                self.skin_seeked(ctx.shared);
-            }
             return Transition::Stay;
         }
         if key.pressed

@@ -27,7 +27,7 @@ use rbms_skin::timer::{TimerId, timer_id};
 use super::SelectState;
 use super::keys::{KeyLayout, Panel, SelectKey, SelectKeys};
 use crate::ir_ranking::RankingState;
-use crate::keyconfig::key_index_of;
+use crate::keyconfig::{Shortcut, key_index_of};
 use crate::skin_host::Cluster;
 use crate::skin_host::writers::{BrowserWrite, browser_write};
 use crate::stage::result::SkinStatus;
@@ -38,9 +38,6 @@ use crate::{AppShared, KeyCode, SKIN_TYPE_MUSIC_SELECT, SelectItem, SelectTab, S
 /// The length of a scene that never ends on its own. The browser reads the `input` time of a
 /// skin's header and neither its `scene` nor its `fadeout` (`MusicSelector.render`).
 const NO_SCENE_END_MS: i64 = i64::MAX;
-
-/// The key that calls up the detail panel by itself (`ControlKeys.NUM5`).
-pub(super) const DETAIL_PANEL_KEY: KeyCode = KeyCode::Digit5;
 
 /// The arrows of the keyboard that hold the list towards the next bar and towards the one before,
 /// beside the keys of the key table (`ControlKeys.DOWN` with `UP`, `ControlKeys.UP` with `DOWN`).
@@ -173,24 +170,16 @@ impl SelectState {
     /// The panel counts as called up from the moment its keys are held, which is a frame before it
     /// is drawn.
     ///
-    /// The keys the reference's browser has and this one had no use for do what the reference's do,
-    /// through what the browser already does for its own: `1` steps the mode filter, `2` the order
-    /// (as `F3` does), `3` the long note mode, `4` moves the replay slot on, `0` opens the search
-    /// (as `/` does) and `F9` stars the chart (as `F` does). The two arrows that move the cursor
-    /// are noted for the frame that follows, which reads them with the turntable
-    /// ([`SelectState::list_hold`]). Every other key is left to do what it always has.
+    /// The two arrows that move the cursor are noted for the frame that follows, which reads them
+    /// with the turntable ([`SelectState::list_hold`]). Every other key is left to do what it always
+    /// has: the reference's number keys among them, which are shortcuts of this browser
+    /// ([`SelectState::run_shortcut`]).
     pub(super) fn skinned_key(&mut self, ctx: &mut FrameCtx<'_>, code: KeyCode) -> bool {
         let lane = ctx.shared.lane_input_for(code).and_then(|(lane, dir)| key_index_of(ctx.shared.mode, lane, dir));
         if let Some(index) = lane {
             self.note_key_index(ctx, index);
         }
         match code {
-            KeyCode::Digit1 => self.mode_event(ctx.shared, true),
-            KeyCode::Digit2 => self.sort_event(ctx.shared, true),
-            KeyCode::Digit3 => self.ln_mode_event(ctx.shared, true),
-            KeyCode::Digit4 => self.next_replay(ctx.shared),
-            KeyCode::Digit0 => self.start_search(ctx.shared),
-            KeyCode::F9 => ctx.shared.toggle_focused_favorite(),
             KeyCode::ArrowDown | KeyCode::ArrowUp if !self.panel_is_called_up(ctx.shared) => {
                 self.arrow_tap = if code == LIST_NEXT_KEY { BarHold::Next } else { BarHold::Previous };
             }
@@ -201,9 +190,10 @@ impl SelectState {
 
     /// Whether an option panel is up or its keys are held, which is what puts it up on the frame
     /// that follows. While a search word is typed the keys that call a panel up are letters and a
-    /// digit of the word, and call nothing up.
+    /// digit of the word, and call nothing up. The key held for the detail panel by itself is the one
+    /// the key configuration gives it (`ControlKeys.NUM5` as shipped).
     pub(super) fn panel_is_called_up(&self, shared: &AppShared) -> bool {
-        let held = Panel::held(shared.start_pressed(), shared.select_pressed(), shared.keyconfig.held.is_down(DETAIL_PANEL_KEY));
+        let held = Panel::held(shared.start_pressed(), shared.select_pressed(), shared.shortcut_held(Shortcut::RefDetail));
         self.panel.is_open() || (!shared.searching && held != Panel::Closed)
     }
 
@@ -266,7 +256,7 @@ impl SelectState {
         let covered = self.list_is_covered(ctx);
         let shared = &mut *ctx.shared;
         let typing = shared.searching;
-        let held = Panel::held(shared.start_pressed(), shared.select_pressed(), shared.keyconfig.held.is_down(DETAIL_PANEL_KEY));
+        let held = Panel::held(shared.start_pressed(), shared.select_pressed(), shared.shortcut_held(Shortcut::RefDetail));
         let panel = if covered || typing { Panel::Closed } else { held };
         self.show_panel(shared, panel);
         if !std::mem::replace(&mut self.listening, true) || covered {

@@ -8,7 +8,7 @@ use rbms_ir::{ChartId, GaugeType, RandomOption, ReplayData};
 use rbms_judge::GaugeKind;
 
 use crate::ir_map::{gauge_from_name, gauge_token, ir_gauge, ir_random};
-use crate::replay::{REPLAY_JUDGE_WIDTH_TIER_COUNT, Replay, ReplayEvent, ReplayJudge};
+use crate::replay::{REPLAY_JUDGE_WIDTH_TIER_COUNT, Replay, ReplayEvent, ReplayJudge, ReplayOffsetStep};
 use crate::stage::StageId;
 
 /// Whether a finished replay download may still take over the app.
@@ -24,20 +24,46 @@ pub(crate) fn replay_download_is_applicable(stage: StageId) -> bool {
 /// opaquely and hands the tag back, so a future format can be told apart on download.
 pub(crate) const REPLAY_FORMAT: &str = "rbms-us-v1";
 
+/// Microseconds in a millisecond: the wire times inputs in the first and the judge offset in the
+/// second.
+const US_PER_MS: i64 = 1_000;
+
 /// Which of the three JUDGE WIDTH tiers the upload reports, the contract's `judge_rate` being one
 /// number rather than six.
 const UPLOADED_JUDGE_WIDTH_TIER: usize = 0;
 
+/// The time the recorded input at `index` is uploaded at, in microseconds.
+///
+/// The wire carries one judge offset for the whole run and has no place for the offsets a run
+/// moved through while its offset adjusted itself (the server keeps none of a replay's `extra`).
+/// So an input judged at another offset than the one the run ended at is uploaded moved by the
+/// difference: judged at the one offset the wire carries, it lands on the instant it was judged at
+/// when it was played. A run judged at one offset throughout is uploaded at the times it was
+/// played, as it always was.
+///
+/// The inputs keep their order, which is the order they are judged in, so one moved past its
+/// neighbour is still judged before it. What is not carried is when the run's own clock swept a
+/// note the player never reached: that clock is not moved by the offset, so an input uploaded
+/// later than it was played can find a note already swept that it reached in the run. It takes an
+/// input as late as the last window allows, by less than the offset moved.
+fn uploaded_time_us(replay: &Replay, index: usize, event: &ReplayEvent) -> i64 {
+    let judged_at_ms = ReplayOffsetStep::in_force_at(&replay.judge.offset_steps, index).unwrap_or(replay.offset_ms);
+    event.t + i64::from(judged_at_ms - replay.offset_ms) * US_PER_MS
+}
+
 /// Package a saved replay for upload. Everything the local file does not carry (scroll mode, LN
 /// mode, build hash) is supplied by the run that produced it, so the server can reproduce the run
 /// exactly; the judge widths come from the replay itself, which recorded the ones it was played
-/// under.
+/// under, and so do the offsets its inputs were judged at ([`uploaded_time_us`]).
 pub(crate) fn to_ir_replay(replay: &Replay, chart: &ChartId, constant: bool, lntype: i32, client_build_sha256: Option<String>) -> ReplayData {
-    let events: Vec<rbms_ir::ReplayEvent> = replay.events.iter().map(|e| rbms_ir::ReplayEvent { t_us: e.t, lane: e.lane as u32, press: e.press }).collect();
-    let duration_us = match (events.first(), events.last()) {
-        (Some(first), Some(last)) => last.t_us - first.t_us,
-        _ => 0,
+    let uploaded = |(index, event): (usize, &ReplayEvent)| rbms_ir::ReplayEvent {
+        t_us: uploaded_time_us(replay, index, event),
+        lane: event.lane as u32,
+        press: event.press,
     };
+    let events: Vec<rbms_ir::ReplayEvent> = replay.events.iter().enumerate().map(uploaded).collect();
+    let times = || events.iter().map(|event| event.t_us);
+    let duration_us = times().max().zip(times().min()).map_or(0, |(last, first)| last - first);
     ReplayData {
         format: REPLAY_FORMAT.to_string(),
         event_count: Some(events.len() as u32),
@@ -112,6 +138,8 @@ pub(crate) fn gauge_kind_from_ir(gauge: GaugeType) -> GaugeKind {
 
 #[cfg(test)]
 mod tests {
+    use rbms_play::{NullSink, PlaySession, PlaySummary, SessionClock, SessionOptions};
+
     use super::*;
 
     const ALL_RANDOM: [RandomOption; 9] = [
@@ -258,6 +286,90 @@ mod tests {
             let back = from_ir_replay(&data, &local.chart_path, &local.md5);
             assert_eq!(back.random, option.label(), "{option:?} survives the wire form");
         }
+    }
+
+    /// How finely the song clock of a hand-played run is stepped, how long it runs past the last
+    /// note and how long each press is held, in microseconds.
+    const CLOCK_STEP_US: i64 = 5_000;
+    const TAIL_US: i64 = 2_500_000;
+    const HOLD_US: i64 = 20_000;
+
+    /// How far ahead of its note the steady player of the adjusted run presses, in microseconds.
+    const EARLY_BY_US: i64 = 40_000;
+
+    /// The lane the adjusted run is played on.
+    const PLAYED_LANE: usize = 0;
+
+    /// Sixty-four notes on one lane, a quarter of a second apart, from two seconds in.
+    fn straight_chart() -> rbms_model::Model {
+        let measures: String = (1..=8).map(|measure| format!("#{measure:03}11:0101010101010101\r\n")).collect();
+        let chart = format!("#BPM 120\r\n#RANK 3\r\n#WAV01 a.wav\r\n{measures}");
+        rbms_chart::to_model(&rbms_parser::parse(chart.as_bytes()), rbms_model::Mode::BEAT_7K)
+    }
+
+    fn run_end_us() -> i64 {
+        PlaySession::new(straight_chart(), SessionOptions::default()).last_time_us() + TAIL_US
+    }
+
+    /// A run of [`straight_chart`] played [`EARLY_BY_US`] ahead of every note with the judge offset
+    /// adjusting itself: the replay the result screen saves of it, and what the run came to.
+    fn adjusted_run() -> (Replay, PlaySummary) {
+        let chart = straight_chart();
+        let notes = chart.timelines.iter().filter(|timeline| timeline.notes.first().is_some_and(Option::is_some));
+        let presses: Vec<i64> = notes.map(|timeline| timeline.time_us - EARLY_BY_US).collect();
+        let mut session = PlaySession::new(chart, SessionOptions { auto_calibration: true, ..SessionOptions::default() });
+        let mut song_us = 0;
+        while song_us <= run_end_us() {
+            if presses.contains(&song_us) {
+                session.press(PLAYED_LANE, song_us, &mut NullSink);
+            }
+            if presses.contains(&(song_us - HOLD_US)) {
+                session.release(PLAYED_LANE, song_us);
+            }
+            session.tick(SessionClock::at(song_us), &mut NullSink);
+            song_us += CLOCK_STEP_US;
+        }
+        let judge = ReplayJudge { offset_steps: session.recorded_offset_steps(), ..ReplayJudge::default() };
+        let replay = Replay { offset_ms: session.judge_offset_ms(), judge, events: session.recorded_events().to_vec(), ..sample() };
+        (replay, session.summary())
+    }
+
+    /// What `replay` comes to when it is played back the way the application plays one back: judged
+    /// at its one offset, and at its steps where it has them.
+    fn played_back(replay: Replay) -> PlaySummary {
+        let judge_offset_us = i64::from(replay.offset_ms) * US_PER_MS;
+        let mut session = PlaySession::new(straight_chart(), SessionOptions { replay: Some(replay), judge_offset_us, ..SessionOptions::default() });
+        let mut song_us = 0;
+        while song_us <= run_end_us() {
+            session.tick(SessionClock::at(song_us), &mut NullSink);
+            song_us += CLOCK_STEP_US;
+        }
+        session.summary()
+    }
+
+    #[test]
+    fn a_run_whose_offset_moved_plays_back_from_the_wire_as_it_was_judged() {
+        let (local, summary) = adjusted_run();
+        assert!(local.judge.offset_steps.len() > 2, "the run moved its offset as it went: {:?}", local.judge.offset_steps);
+        assert_eq!(played_back(local.clone()), summary, "the saved replay reproduces the run");
+
+        let flattened = Replay { judge: ReplayJudge::default(), ..local.clone() };
+        assert_ne!(played_back(flattened), summary, "the same inputs judged at the last offset alone are a different run");
+
+        let data = to_ir_replay(&local, &chart(), false, 0, None);
+        assert_eq!(data.offset_ms, local.offset_ms, "the wire carries the one offset the run ended at");
+        assert!(data.duration_us.is_some_and(|span| span >= 0), "the span of the uploaded inputs is never negative");
+        let back = from_ir_replay(&data, &local.chart_path, &local.md5);
+        assert!(back.judge.offset_steps.is_empty(), "the wire has no steps, so the download is judged at one offset");
+        assert_eq!(played_back(back), summary, "each input comes back where its own offset judged it");
+    }
+
+    #[test]
+    fn a_run_judged_at_one_offset_is_uploaded_at_the_times_it_was_played() {
+        let local = sample();
+        let data = to_ir_replay(&local, &chart(), false, 0, None);
+        let times: Vec<i64> = data.events.iter().map(|event| event.t_us).collect();
+        assert_eq!(times, local.events.iter().map(|event| event.t).collect::<Vec<_>>());
     }
 
     #[test]

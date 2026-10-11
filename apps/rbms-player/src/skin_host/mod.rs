@@ -342,6 +342,7 @@ pub const ROUTES: &[Route] = &[
     Route::one(IdSpace::Rate, RATE_MUSIC_PROGRESS_BAR, Cluster::Play),
     Route::band(IdSpace::ImageIndex, BUTTON_GAUGE_1P, BUTTON_RANDOM_2P, Cluster::Play),
     Route::band(IdSpace::ImageIndex, BUTTON_DPOPTION, BUTTON_HSFIX, Cluster::Play),
+    Route::one(IdSpace::ImageIndex, INDEX_TIMING_AUTO_ADJUST, Cluster::Play),
     Route::band(IdSpace::ImageIndex, BUTTON_ASSIST_EXJUDGE, BUTTON_LNMODE, Cluster::Play),
     Route::band(IdSpace::ImageIndex, VALUE_JUDGE_1P_SCRATCH, VALUE_JUDGE_2P_KEY9, Cluster::Play),
     Route::band(IdSpace::ImageIndex, VALUE_JUDGE_1P_KEY10, VALUE_JUDGE_2P_KEY99, Cluster::Play),

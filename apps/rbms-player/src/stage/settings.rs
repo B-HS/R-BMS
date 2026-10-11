@@ -5,15 +5,19 @@
 //! The skin settings are not on this screen. They are the skin menu's
 //! ([`crate::stage::SkinMenuState`]), which lists them beside a preview of what they do; this screen
 //! shows the tabs of [`SettingTab::SHOWN`] and a way there: the key that opens the menu from the song
-//! browser ([`SKIN_MENU_KEY`]), and the button at the end of the tab strip.
+//! browser ([`Shortcut::SkinMenu`]), and the button at the end of the tab strip. The key editor is
+//! reached the same two ways: the key that opens it from the browser ([`Shortcut::KeyConfig`]), and
+//! the button above the other one. That button is not one of the regions a frame registers
+//! ([`Hot`]): it is where the screen's layout says it is ([`key_config_link`]), and a press is
+//! tested against that.
 #![allow(clippy::wildcard_imports)]
 
 use crate::dialog::{DialogHandle, DialogState};
 use crate::ir_panel::*;
 use crate::ir_session::{AuthAction, GUEST_PLAYER_ID};
+use crate::keyconfig::Shortcut;
 use crate::settings_ui::{SettingRow, audio_status_text, is_network_row, step_audio_device};
-use crate::settings_view::{RivalsScene, SettingsLine, SettingsScene};
-use crate::stage::select::SKIN_MENU_KEY;
+use crate::settings_view::{RivalsScene, SettingsLine, SettingsScene, key_config_link, settings_hint};
 use crate::stage::{Canvas, FrameCtx, KeyConfigState, KeyInput, SkinMenuState, Stage, StageHandler, Transition, is_left_press};
 use rbms_config::{AdjustOutcome, SettingId, SettingTab, adjust, step_skin};
 
@@ -62,6 +66,9 @@ pub(crate) struct SettingsState {
     dirty: bool,
 }
 
+/// What the hint names as the key of a screen the player has left without one.
+const NO_KEY: &str = "-";
+
 impl SettingsState {
     pub(crate) fn new() -> SettingsState {
         SettingsState::on_tab(SettingTab::SHOWN[0])
@@ -88,6 +95,12 @@ impl SettingsState {
             lines: Vec::new(),
             dirty: true,
         }
+    }
+
+    /// Whether one of the lists drawn over the rows, or the in-place editor, has the screen: the
+    /// keys and the buttons that leave it for another screen stand down while one does.
+    fn is_busy(&self) -> bool {
+        self.rivals_open || self.profiles_open || self.text_input.is_some()
     }
 
     /// The open tab.
@@ -466,6 +479,10 @@ impl SettingsState {
             tab: self.tab.min(SettingTab::SHOWN.len() - 1),
             rows: self.lines.clone(),
             sel: self.sel.min(self.lines.len().saturating_sub(1)),
+            hint: settings_hint(
+                shared.shortcut_key(Shortcut::SkinMenu).map_or(NO_KEY, key_name),
+                shared.shortcut_key(Shortcut::KeyConfig).map_or(NO_KEY, key_name),
+            ),
             editor,
             status: self.audio_status_line(shared).unwrap_or_else(|| shared.net_status.clone()),
             rivals,
@@ -485,7 +502,6 @@ impl SettingsState {
                 self.sel = 0;
                 self.dirty = true;
             }
-            SKIN_MENU_KEY => return Transition::Open(SkinMenuState::stage()),
             KeyCode::Enter | KeyCode::NumpadEnter => {
                 let Some(row) = focused else {
                     return Transition::Stay;
@@ -515,6 +531,8 @@ impl SettingsState {
                     return self.step(ctx, row, ROW_STEP_FORWARD);
                 }
             }
+            code if ctx.shared.is_shortcut(Shortcut::SkinMenu, code) => return Transition::Open(SkinMenuState::stage()),
+            code if ctx.shared.is_shortcut(Shortcut::KeyConfig, code) => return Transition::Open(Stage::KeyConfig(KeyConfigState::new())),
             _ => {}
         }
         Transition::Stay
@@ -578,6 +596,10 @@ impl StageHandler for SettingsState {
             return Transition::Stay;
         }
         self.ensure_rows(ctx.shared);
+        let link = key_config_link();
+        if link.x <= at.0 && at.0 < link.x + link.w && link.y <= at.1 && at.1 < link.y + link.h {
+            return if self.is_busy() { Transition::Stay } else { Transition::Open(Stage::KeyConfig(KeyConfigState::new())) };
+        }
         match ctx.shared.hit_test(at) {
             Some(Hot::SettingTab(_) | Hot::SettingRow(_) | Hot::SkinMenuLink) if self.rivals_open || self.profiles_open => {}
             Some(Hot::SettingTab(ti)) => {
@@ -607,14 +629,15 @@ impl StageHandler for SettingsState {
         let scene = self.scene(ctx.shared);
         canvas.clear_bga();
         let hot = render_settings(canvas, &scene);
-        ctx.shared.hot.extend(hot.into_iter().map(|(rect, h)| {
+        ctx.shared.hot.extend(hot.into_iter().filter_map(|(rect, h)| {
             let mapped = match h {
                 SettingsHot::Tab(i) => Hot::SettingTab(i),
                 SettingsHot::SkinMenuLink => Hot::SkinMenuLink,
+                SettingsHot::KeyConfigLink => return None,
                 SettingsHot::Row(i) => Hot::SettingRow(i),
                 SettingsHot::RivalRow(i) => Hot::RivalRow(i),
             };
-            (rect, mapped)
+            Some((rect, mapped))
         }));
     }
 }
@@ -707,5 +730,92 @@ mod tests {
         state.update(&mut FrameCtx { shared: &mut app.shared, now: std::time::Instant::now(), dt: 0.0 });
         assert!(state.font_picker.is_none());
         assert_eq!(app.shared.config.display.font_path, None, "a font that could not be read was stored anyway");
+    }
+
+    /// Names the folder the frames of the settings screen are saved in. Nothing is saved without it.
+    const CAPTURE_DIR_ENV: &str = "RBMS_SKIN_CAPTURE_DIR";
+
+    /// The two sizes the screen is drawn at: the one it is laid out for, and a full HD window.
+    const DRAWN_SIZES: [(u32, u32); 2] = [(CW, CH), (1920, 1080)];
+
+    /// How far below the button a press is clear of it and of the tab strip under it, and how far
+    /// inside the button's corner a pixel is read, clear of its edge.
+    const BELOW_THE_BUTTON: f32 = 400.0;
+    const INSIDE_THE_BUTTON: f32 = 2.0;
+
+    fn ctx(app: &mut App) -> FrameCtx<'_> {
+        FrameCtx { shared: &mut app.shared, now: std::time::Instant::now(), dt: 0.0 }
+    }
+
+    /// The middle of the button to the key editor.
+    fn on_the_key_config_button() -> (f32, f32) {
+        let link = key_config_link();
+        (link.x + link.w * 0.5, link.y + link.h * 0.5)
+    }
+
+    /// The key editor opens from the button above the one to the skin menu and from the key that
+    /// opens it from the song browser, and from neither while a list or an editor has the screen.
+    #[test]
+    fn the_key_editor_opens_from_its_button_and_from_its_key() {
+        let mut app = app();
+        let mut state = SettingsState::new();
+        let at = on_the_key_config_button();
+        assert!(matches!(state.handle_mouse(&mut ctx(&mut app), at, MouseButton::Left, true), Transition::Open(Stage::KeyConfig(_))), "the button");
+        assert!(matches!(state.handle_mouse(&mut ctx(&mut app), at, MouseButton::Right, true), Transition::Stay), "another button of the mouse opened it");
+        assert!(
+            matches!(state.handle_mouse(&mut ctx(&mut app), (at.0, at.1 + BELOW_THE_BUTTON), MouseButton::Left, true), Transition::Stay),
+            "a press off the button"
+        );
+        assert!(matches!(state.handle_key(&mut ctx(&mut app), press(Shortcut::KeyConfig.default_key())), Transition::Open(Stage::KeyConfig(_))), "the key");
+
+        state.rivals_open = true;
+        assert!(matches!(state.handle_mouse(&mut ctx(&mut app), at, MouseButton::Left, true), Transition::Stay), "the button under the rival list");
+        assert!(matches!(state.handle_key(&mut ctx(&mut app), press(Shortcut::KeyConfig.default_key())), Transition::Stay), "the key under the rival list");
+        state.rivals_open = false;
+        state.text_input = Some(TextEdit::new());
+        assert!(matches!(state.handle_mouse(&mut ctx(&mut app), at, MouseButton::Left, true), Transition::Stay), "the button under an editor");
+    }
+
+    /// The keys that open the skin menu and the key editor from this screen are the ones the key
+    /// configuration holds, and the hint under the title names them as they are now.
+    #[test]
+    fn the_keys_to_the_other_screens_are_read_from_the_key_configuration() {
+        use crate::keyconfig::Bindable;
+        let mut app = app();
+        let mut state = SettingsState::new();
+        let mode = app.shared.mode;
+        assert!(state.scene(&app.shared).hint.contains("F12 SKINS   F5 KEYS"), "{}", state.scene(&app.shared).hint);
+        app.shared.keyconfig.bind(mode, Bindable::Shortcut(Shortcut::KeyConfig), Some(KeyCode::F6));
+        app.shared.keyconfig.bind(mode, Bindable::Shortcut(Shortcut::SkinMenu), Some(KeyCode::F7));
+        assert!(matches!(state.handle_key(&mut ctx(&mut app), press(KeyCode::F5)), Transition::Stay), "the key the editor shipped on still opens it");
+        assert!(matches!(state.handle_key(&mut ctx(&mut app), press(KeyCode::F12)), Transition::Stay), "the key the menu shipped on still opens it");
+        assert!(matches!(state.handle_key(&mut ctx(&mut app), press(KeyCode::F6)), Transition::Open(Stage::KeyConfig(_))));
+        assert!(matches!(state.handle_key(&mut ctx(&mut app), press(KeyCode::F7)), Transition::Open(Stage::SkinMenu(_))));
+        assert!(state.scene(&app.shared).hint.contains("F7 SKINS   F6 KEYS"), "{}", state.scene(&app.shared).hint);
+    }
+
+    /// The screen draws the button to the key editor where a press is tested for it, at the size the
+    /// screen is laid out for and at full HD.
+    #[test]
+    fn the_button_to_the_key_editor_is_drawn_where_it_is_pressed() {
+        use crate::stage::{Canvas, HeadlessCanvas};
+        use rbms_render::Renderer;
+        for size in DRAWN_SIZES {
+            let mut app = app();
+            let mut state = SettingsState::new();
+            let mut pixels = HeadlessCanvas::new(size.0, size.1);
+            state.draw(&mut ctx(&mut app), &mut Canvas::Headless(&mut pixels));
+            if let Some(folder) = std::env::var_os(CAPTURE_DIR_ENV) {
+                let folder = std::path::Path::new(&folder);
+                std::fs::create_dir_all(folder).expect("the capture folder can be created");
+                let file = folder.join(format!("settings-key-config-button-{}x{}.png", size.0, size.1));
+                image::save_buffer(file, pixels.rgba(), size.0, size.1, image::ExtendedColorType::Rgba8).expect("the capture is written");
+            }
+            let link = key_config_link();
+            let scale = size.0 as f32 / CW as f32;
+            let corner = pixels.pixel_at(((link.x + INSIDE_THE_BUTTON) * scale) as u32, ((link.y + INSIDE_THE_BUTTON) * scale) as u32);
+            assert_eq!(corner, rbms_render::theme().panel_hi, "the button is not drawn where a press is tested for it");
+            assert_eq!(pixels.size(), size);
+        }
     }
 }

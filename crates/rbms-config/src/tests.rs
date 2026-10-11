@@ -178,6 +178,8 @@ fn ron_round_trip_preserves_every_field() {
     c.play.auto_replay = false;
     c.play.hispeed_step = 0.05;
     c.play.fix_hispeed = FixHiSpeed::MinBpm;
+    c.play.keep_green_number = true;
+    c.play.duration_ms = 613;
     c.play.lane_option = LaneOption::BattleAutoScratch;
     c.play.legacy_note = true;
     c.play.enable_lift = true;
@@ -374,6 +376,8 @@ fn a_file_from_before_the_new_rows_loads_with_them_at_their_shipped_values() {
     assert!((c.play.hispeed - 3.0).abs() < 1e-9);
     assert!((c.play.hispeed_step - HISPEED_STEP).abs() < 1e-9);
     assert_eq!(c.play.fix_hispeed, FixHiSpeed::default());
+    assert!(!c.play.keep_green_number, "a file that never asked for a held green number scrolls by its stored speed, as it did");
+    assert_eq!(c.play.duration_ms, DEFAULT_DURATION_MS);
     assert_eq!(c.play.lane_option, LaneOption::Off);
     assert_eq!(c.play.play_escape, PlayEscape::Immediate);
     assert!(!c.play.legacy_note);
@@ -469,6 +473,7 @@ fn sanitise_pulls_a_hand_edited_document_back_into_range() {
     c.play.lift = 4.0;
     c.play.cover = -1.0;
     c.play.total_override = -50.0;
+    c.play.duration_ms = 0;
     c.judge.offset_ms = -9_000;
     c.judge.judge_rate_key = [4_000, 4_000, 4_000];
     c.judge.judge_rate_scratch = [-100, -100, -100];
@@ -480,6 +485,7 @@ fn sanitise_pulls_a_hand_edited_document_back_into_range() {
     assert!((c.play.lift - LANE_SHADE_MAX).abs() < 1e-6);
     assert!((c.play.cover - LANE_SHADE_MIN).abs() < 1e-6);
     assert!((c.play.total_override - TOTAL_FROM_CHART).abs() < 1e-9);
+    assert_eq!(c.play.duration_ms, DURATION_MIN_MS);
     assert_eq!(c.judge.offset_ms, JUDGE_OFFSET_MIN_MS);
     assert_eq!(c.judge.judge_rate_key, [JUDGE_RATE_MAX_PERCENT; JUDGE_WIDTH_TIER_COUNT]);
     assert_eq!(c.judge.judge_rate_scratch, [JUDGE_RATE_MIN_PERCENT; JUDGE_WIDTH_TIER_COUNT]);

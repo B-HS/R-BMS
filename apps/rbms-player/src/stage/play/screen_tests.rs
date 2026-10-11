@@ -28,6 +28,7 @@ use crate::stage::select::tests::{entry, press, release};
 use crate::stage::{DecideState, HeadlessCanvas, KeysoundLoad, LoadingState, Stage, StageId};
 use crate::{App, CH, CW, Config};
 
+mod default_pack_tests;
 mod run_tests;
 
 /// The fixture skin: a seven-key play skin with a note field, which paints the screen one colour

@@ -239,6 +239,23 @@ fn the_scroll_speed_is_read_three_ways_and_only_on_a_chart() {
     assert_eq!((state.integer(NUMBER_DURATION), state.integer(NUMBER_DURATION_GREEN)), (Some(INTEGER_ABSENT), Some(INTEGER_ABSENT)));
 }
 
+/// The browser shows the travel time the next run holds and the green number it reads as
+/// (`IntegerPropertyFactory.duration`, `duration_green`), while one is held. A folder has none.
+#[test]
+fn a_held_travel_time_and_its_green_number_are_read_only_while_one_is_held() {
+    let mut config = Config::default();
+    config.play.duration_ms = 502;
+    let off = settings(&config);
+    assert_eq!((off.integer(NUMBER_DURATION), off.integer(NUMBER_DURATION_GREEN)), (Some(INTEGER_ABSENT), Some(INTEGER_ABSENT)));
+
+    config.play.keep_green_number = true;
+    let view = SettingsView::of_config(&config);
+    let held = OptionsState::of_settings(view);
+    assert_eq!((held.integer(NUMBER_DURATION), held.integer(NUMBER_DURATION_GREEN)), (Some(502), Some(301)), "502 * 3 / 5, cut");
+    let folder = OptionsState::of_settings(view.without_chart());
+    assert_eq!((folder.integer(NUMBER_DURATION), folder.integer(NUMBER_DURATION_GREEN)), (Some(INTEGER_ABSENT), Some(INTEGER_ABSENT)));
+}
+
 #[test]
 fn the_target_and_the_ones_around_it_in_the_list_are_named_with_the_list_wrapping_round() {
     let name = |state: &OptionsState<'_>, id: i32| state.text(id).map(|text| text.into_owned());

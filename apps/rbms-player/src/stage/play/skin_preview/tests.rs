@@ -45,6 +45,28 @@ fn every_mode_a_play_screen_draws_has_a_sample_chart() {
     assert!(sample_model(Mode::KEYBOARD_24K).is_none());
 }
 
+/// The sample is shown at the speed a run of it would start at: the speed the settings hold, and,
+/// while a green number is held from chart to chart, the speed that holds it on the sample chart
+/// under the lane cover as it stands.
+#[test]
+fn the_sample_scrolls_at_the_speed_a_run_of_it_would_start_at() {
+    use rbms_config::travel_duration_ms;
+    use rbms_skin::loader::SKIN_TYPE_PLAY_7KEYS;
+    let mut config = Config::default();
+    config.play.hispeed = 3.25;
+    config.play.cover = 0.4;
+    let sample = PlaySample::new(SKIN_TYPE_PLAY_7KEYS, &config).expect("seven keys have a sample");
+    assert_eq!(sample.shown_hispeed(&config), 3.25, "nothing is held, so the speed is the settings' own");
+
+    config.play.keep_green_number = true;
+    let held = sample.shown_hispeed(&config);
+    let tempo = sample.bpm.held(&config.play).expect("a held number has a tempo");
+    assert_eq!(travel_duration_ms(tempo, held, Some(0.4)), config.play.duration_ms, "the sample is not shown at the travel time that is held");
+    config.play.enable_cover = false;
+    assert!(sample.shown_hispeed(&config) > held, "a lane with no cover over it scrolls faster for the same number");
+    assert_eq!(travel_duration_ms(tempo, sample.shown_hispeed(&config), None), config.play.duration_ms);
+}
+
 /// The run reaches its end with every note judged, on a combo that never broke, with more than one
 /// judgement given and both early and late hits, whatever gauge the player has chosen.
 #[test]
