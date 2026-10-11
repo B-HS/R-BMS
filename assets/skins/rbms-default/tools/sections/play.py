@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PIL import Image, ImageDraw
 
-from sprites import OPAQUE, WHITE, Rgb, Sprite, block, counter_strip, guarded, palette, tinted, word
+from sprites import OPAQUE, WHITE, Rgb, Sprite, block, digit_strip, guarded, palette, tinted, word
 
 SURFACE = palette('color')
 TONE = palette('tone')
@@ -51,7 +51,6 @@ JUDGE_WORDS: tuple[tuple[str, str, Rgb], ...] = (
     ('poor', 'POOR', JUDGE['poor']),
 )
 COMBO_JUDGES = 3
-COMBO_GHOST_ALPHA = 40
 
 BOMB_FRAMES = 8
 BOMB_SIDE = 128
@@ -170,10 +169,16 @@ def beam(name: str, alpha: int) -> Sprite:
     return guarded(Sprite(name, tinted(mask)), BEAM_GUARD)
 
 
+def judge_word(name: str, text: str, color: Rgb) -> Sprite:
+    sprite = word(name, text, JUDGE_WORD_SIZE, color)
+    left, _, right, _ = sprite.image.getchannel('A').getbbox()
+    return Sprite(name, sprite.image.crop((left, 0, right, sprite.image.height)), meta=sprite.meta)
+
+
 def build() -> list[Sprite]:
     sprites = notes() + gauge()
-    sprites += [word(f'judge_{name}', text, JUDGE_WORD_SIZE, color) for name, text, color in JUDGE_WORDS]
-    sprites += [counter_strip(f'combo_{name}', JUDGE_WORD_SIZE, color, COMBO_GHOST_ALPHA) for name, _, color in JUDGE_WORDS[:COMBO_JUDGES]]
+    sprites += [judge_word(f'judge_{name}', text, color) for name, text, color in JUDGE_WORDS]
+    sprites += [digit_strip(f'combo_{name}', JUDGE_WORD_SIZE, color) for name, _, color in JUDGE_WORDS[:COMBO_JUDGES]]
     sprites += [bomb('bomb'), beam('beam', BEAM_ALPHA), beam('pulse', PULSE_ALPHA)]
     sprites += [block('bar_h', BAR_LENGTH, BAR_THICKNESS), block('bar_v', BAR_THICKNESS, BAR_LENGTH)]
     return sprites

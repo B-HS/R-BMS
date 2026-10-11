@@ -14,7 +14,11 @@
 //!   on a full gauge shows the seventh image instead, and the first when the document has no seventh.
 //! - The count is the number at the same place in `numbers`, but only for the three judgements that
 //!   keep a combo. It counts the combo the run stood at when the region was last judged, whatever
-//!   property the document's own `ref` names, and it is always centred over its places.
+//!   property the document's own `ref` names, and it is centred over its places whatever `align`
+//!   its value names.
+//! - A document can lay the count over its places another way with the pop-up's own `numberAlign`,
+//!   which is read as a number's `align` is. The reference has no such field, and a document that
+//!   leaves it out is drawn as the reference draws it.
 //! - The count is placed against the word's own corner rather than the screen's, and the loader has
 //!   already pulled it left by half the places it reserves ([`pull_count_left`]).
 //! - With `shift` the word slides left by half the width of the digits on show, measured before the
@@ -29,7 +33,7 @@ use rbms_skin::loader::{LoadedSkin, StretchKind};
 use rbms_skin::model::{Destination, ImageDef, ValueDef};
 use rbms_skin::property::generated::FLOAT_GROOVEGAUGE_1P;
 
-use super::draw::{ImageSelect, Placement};
+use super::draw::{ImageSelect, Placement, digit_shift};
 use super::frame::JudgeHit;
 use super::object::{Body, ImageBody, MAX_PLACES, SkinObject, Sprite, image_sprite};
 use super::text::Fonts;
@@ -73,6 +77,10 @@ const GLYPH_ALTERNATE_ZERO: u32 = 10;
 /// The base a count is written in.
 const RADIX: u32 = 10;
 
+/// The `align` the reference builds every count with, whatever its value names: centred over the
+/// places it reserves (`JsonPlaySkinObjectLoader`).
+pub(crate) const ALIGN_CENTRED: i32 = 2;
+
 /// The share of a full gauge a host reports for one that is full.
 const FULL_GAUGE_SHARE: f32 = 1.0;
 
@@ -85,6 +93,9 @@ pub(crate) struct JudgeBody {
     /// The count beside it, by the same slot.
     pub(crate) counts: Vec<Option<JudgeCount>>,
     pub(crate) shift: bool,
+    /// How the count is laid over its places, as a number's `align` reads: the document's
+    /// `numberAlign`, or [`ALIGN_CENTRED`] for a document that names none.
+    pub(crate) count_align: i32,
     /// The judgement region the pop-up follows: the document's `index`, as it wrote it.
     pub(crate) region: i32,
 }
@@ -285,7 +296,7 @@ pub(crate) fn build_judge(
         words.push(tracks.images.get(slot).and_then(|named| builder.word(&named.track, &image.id)));
         counts.push(def.numbers.get(slot).zip(tracks.numbers.get(slot)).and_then(|(declared, named)| builder.count(&named.track, declared)));
     }
-    Some(Body::Judge(JudgeBody { words, counts, shift: def.shift, region: def.index }))
+    Some(Body::Judge(JudgeBody { words, counts, shift: def.shift, count_align: def.number_align.unwrap_or(ALIGN_CENTRED), region: def.index }))
 }
 
 /// What the region a pop-up follows last reported, or `None` while there is nothing to show for it.
@@ -442,12 +453,13 @@ fn document_length(screen: f32, scale: f32) -> f32 {
     if scale > 0.0 { screen / scale } else { 0.0 }
 }
 
-/// Draws the count, one place at a time, centred over the places it reserves (`SkinNumber.draw`
-/// with the `align` of two a judge's count is always built with).
+/// Draws the count, one place at a time, laid over the places it reserves as `align` says
+/// (`SkinNumber.draw`): centred for the `align` of two the reference builds every judge's count
+/// with, and pulled over its blank places or left where they fall for a document that asked.
 ///
 /// The per-place nudges are screen pixels, as they are for every number: the reference adds them to
 /// a destination it has already scaled to the screen.
-fn draw_count<R: Renderer>(r: &mut R, place: &Placement<'_>, shown: &ShownCount<'_>) -> bool {
+fn draw_count<R: Renderer>(r: &mut R, place: &Placement<'_>, shown: &ShownCount<'_>, align: i32) -> bool {
     if shown.at.color.a == 0 {
         return false;
     }
@@ -456,7 +468,7 @@ fn draw_count<R: Renderer>(r: &mut R, place: &Placement<'_>, shown: &ShownCount<
     let rect = shown.at.rect;
     let step = shown.step();
     let blanks = count.places - count.drawn_places(shown.combo);
-    let centring = step * 0.5 * blanks as f32;
+    let pulled = digit_shift(step, blanks as usize, align);
     let (scale_x, scale_y) = (place.viewport.scale_x(), place.viewport.scale_y());
     let mut drawn = false;
     for index in 0..count.places {
@@ -465,7 +477,7 @@ fn draw_count<R: Renderer>(r: &mut R, place: &Placement<'_>, shown: &ShownCount<
         };
         let (dx, dy, dw, dh) = count.offsets.get(index as usize).copied().unwrap_or_default();
         let at = SkinRect::new(
-            rect.x + step * index as f32 - centring + document_length(dx, scale_x),
+            rect.x + step * index as f32 - pulled + document_length(dx, scale_x),
             rect.y + document_length(dy, scale_y),
             rect.w + document_length(dw, scale_x),
             rect.h + document_length(dh, scale_y),
@@ -492,7 +504,7 @@ pub(crate) fn draw_judge<R: Renderer>(
     let Some(shown) = arrange(body, frame) else {
         return false;
     };
-    let mut drawn = shown.count.as_ref().is_some_and(|count| draw_count(r, place, count));
+    let mut drawn = shown.count.as_ref().is_some_and(|count| draw_count(r, place, count, body.count_align));
     if shown.at.color.a != 0 {
         let cell = shown.strip.animation_index(shown.strip.cells(), frame.now_us, frame.timers, frame.script());
         drawn |= part_placement(shown.word, &shown.at, place).cell(r, shown.strip, cell, shown.at.rect);

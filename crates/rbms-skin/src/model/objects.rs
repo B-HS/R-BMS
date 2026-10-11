@@ -548,6 +548,14 @@ pub struct JudgeDef {
     pub images: Vec<Destination>,
     pub numbers: Vec<Destination>,
     pub shift: bool,
+    /// How the count is laid over the places it reserves, read as a number's `align` is: zero is
+    /// flush right, one flush left and anything else centred.
+    ///
+    /// The reference has no such field and centres every count, whatever `align` its value names,
+    /// so a document that leaves this out is centred too. `None` is that document: any value a
+    /// document does name, the zero included, is kept apart from it.
+    #[serde(rename = "numberAlign")]
+    pub number_align: Option<i32>,
 }
 
 /// The song wheel: which row is centred and what each row draws.

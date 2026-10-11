@@ -54,6 +54,18 @@ const HAND_BLINK_APART_MS: i64 = 40;
 pub(super) const GREAT_OFF_MS: i64 = 40;
 pub(super) const GOOD_OFF_MS: i64 = 100;
 
+/// How far inside the early side of the window a BAD is taken in the press that takes one comes, in
+/// milliseconds.
+const BAD_INSIDE_MS: i64 = 10;
+
+/// How far ahead of the beat a press takes a BAD on a chart of `mode`, in milliseconds: just inside
+/// the early side of the window a BAD is taken in, which is past every window a GOOD is taken in.
+/// Five keys and seven keys are judged with windows that share no such moment, so each mode has
+/// its own.
+pub(super) fn bad_off_ms(mode: &rbms_model::Mode) -> i64 {
+    rbms_judge::JudgeProperty::for_mode(mode).note.bd.1 / MICROS_PER_MILLI - BAD_INSIDE_MS
+}
+
 /// The channels the first key of each side is written on.
 pub(super) const FIRST_SIDE_KEY: &str = "11";
 pub(super) const SECOND_SIDE_KEY: &str = "21";

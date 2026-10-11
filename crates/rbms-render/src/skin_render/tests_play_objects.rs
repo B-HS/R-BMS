@@ -381,7 +381,7 @@ mod pop_ups_and_covers {
     use super::super::draw::{ImageSelect, draw_object};
     use super::super::frame::{JUDGE_REGIONS, JudgeFrame, JudgeHit};
     use super::super::gauge::GAUGE_TYPES;
-    use super::super::judge::{JudgeBody, JudgeCount, pull_count_left};
+    use super::super::judge::{ALIGN_CENTRED, JudgeBody, JudgeCount, pull_count_left};
     use super::super::object::{Body, ImageBody, SkinObject, Sprite};
     use super::super::{FrameData, GaugeFrame, SkinAssets, SkinFrame, SkinImage, SkinObjectKind, SkinScreen, SkinViewport};
     use super::{CANVAS, GROOVE, digit_shade, digits, first_row_of, last_row_of, object, shade, solid, still, strip};
@@ -643,7 +643,7 @@ mod pop_ups_and_covers {
         let words = (0..slots).map(|slot| Some(judge_part(still(WORD_RECT), solid(canvas, &format!("word{slot}"), word_shade(slot))))).collect();
         let ten_digits = digits(canvas);
         let counts = (0..slots).map(|_| Some(judge_count(ten_digits, places))).collect();
-        JudgeBody { words, counts, shift, region: 0 }
+        JudgeBody { words, counts, shift, count_align: ALIGN_CENTRED, region: 0 }
     }
 
     /// The draw-list entry a pop-up is: an object that places itself and leaves everything to its parts.
@@ -782,6 +782,40 @@ mod pop_ups_and_covers {
             assert!(show_still(&mut canvas, &pop_up, &host, judged(judgement, 1984)));
             assert_eq!(count_on_show(&canvas, 0), (None, Vec::new()), "judgement {judgement} shows no digits");
             assert_eq!(columns_of(&canvas, POP_UP_ROW, word_shade(judgement)).map(|(left, _)| left), Some(WORD_RECT.x as u32), "and its word stays put");
+        }
+    }
+
+    /// The `align` values a document lays a count over its places with, as every number reads them.
+    const ALIGN_FLUSH_RIGHT: i32 = 0;
+    const ALIGN_FLUSH_LEFT: i32 = 1;
+
+    /// A pop-up whose document says how its count is aligned lays it over its places as any number is
+    /// laid: flush left starts every count on the first place it reserves and grows it to the right,
+    /// flush right ends every count on the last. The word is where it was put either way.
+    #[test]
+    fn a_count_the_document_aligns_starts_or_ends_on_the_places_it_reserves() {
+        const PLACES: u32 = 4;
+        let host = MapHost::new();
+        let place = COUNT_PLACE.0 as u32;
+        let first_place = COUNT_CENTRE - place * PLACES / 2;
+        let combos: [(i32, &[u8]); 4] = [(7, &[7]), (42, &[4, 2]), (305, &[3, 0, 5]), (1984, &[1, 9, 8, 4])];
+        for (combo, expected) in combos {
+            let blanks = PLACES - expected.len() as u32;
+            for (align, starts_at) in [(ALIGN_FLUSH_LEFT, first_place), (ALIGN_FLUSH_RIGHT, first_place + place * blanks)] {
+                let mut canvas = CpuCanvas::new(CANVAS.0, CANVAS.1);
+                let mut body = pop_up(&mut canvas, 6, PLACES as i32, false);
+                body.count_align = align;
+                assert!(show_still(&mut canvas, &popped(body), &host, judged(1, combo)));
+
+                let (first, read) = count_on_show(&canvas, WORD_RECT.x as u32 + WORD_RECT.w as u32);
+                assert_eq!(read, expected.to_vec(), "an align of {align} showing {combo}");
+                assert_eq!(first, Some(starts_at), "an align of {align} showing {combo}: where its first digit stands");
+                assert_eq!(
+                    columns_of(&canvas, POP_UP_ROW, word_shade(1)).map(|(left, _)| left),
+                    Some(WORD_RECT.x as u32),
+                    "and the word stays where it was put"
+                );
+            }
         }
     }
 
@@ -1149,6 +1183,11 @@ mod pop_ups_and_covers {
 
     impl PlayDocument {
         fn new(tag: &str) -> PlayDocument {
+            PlayDocument::of(tag, PLAY_DOCUMENT)
+        }
+
+        /// `document` written out in place of the fixture, with the fixture's sheets beside it.
+        fn of(tag: &str, document: &str) -> PlayDocument {
             crate::font::use_embedded_fonts_only();
             let root = std::env::temp_dir().join(format!("rbms-render-play-objects-{tag}-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&root);
@@ -1157,7 +1196,7 @@ mod pop_ups_and_covers {
                 std::fs::write(root.join(source), []).expect("the source file is writable");
             }
             let entry = root.join("play.json");
-            std::fs::write(&entry, PLAY_DOCUMENT).expect("the document is writable");
+            std::fs::write(&entry, document).expect("the document is writable");
 
             let user = SkinUserConfig::default();
             let options = SkinLoadOptions { rng_seed: Some(1), ..SkinLoadOptions::new(&root, &user, Mode::BEAT_7K) };
@@ -1229,6 +1268,45 @@ mod pop_ups_and_covers {
 
         assert_eq!(document.draw(&host, &timers, both, JUDGED_AT_MS + 501), 2, "and both are gone once their timers have played out");
         assert_eq!(document.draw(&covering(0.0, None), &timers, both, JUDGED_AT_MS + 501), 0, "as are the covers with no lift and no hidden modifier");
+    }
+
+    /// A document's `numberAlign` reaches the pop-up it is written on and no other. That pop-up starts
+    /// its count on the first of the places the loader pulled left, however many digits the combo
+    /// has; the pop-up beside it, which names none, keeps its count centred as the reference does.
+    #[test]
+    fn a_documents_pop_up_aligns_its_count_the_way_the_document_says() {
+        const RIGHT_WORD_X: u32 = 700;
+        const COUNT_X: u32 = 74;
+        const COUNT_PLACES: u32 = 6;
+        let aligned = PLAY_DOCUMENT.replace(r#""id": "right","#, r#""id": "right", "numberAlign": 1,"#);
+        assert_ne!(aligned, PLAY_DOCUMENT, "the fixture has the pop-up this test aligns");
+        let mut document = PlayDocument::of("aligned", &aligned);
+        let host = MapHost::new();
+        let mut timers = TimerState::new();
+        timers.set_on(JUDGE_TIMER, JUDGED_AT_MS * MICROS_PER_MILLI);
+        timers.set_on(TimerId(47), JUDGED_AT_MS * MICROS_PER_MILLI);
+        let place = COUNT_PLACE.0 as u32;
+        let row = row_above(WORD_RECT.y + 5.0);
+        let combos: [(i32, &[u8]); 3] = [(4, &[4]), (128, &[1, 2, 8]), (123_456, &[1, 2, 3, 4, 5, 6])];
+        for (combo, expected) in combos {
+            let hit = JudgeHit { judgement: 1, combo, at_us: JUDGED_AT_MS * MICROS_PER_MILLI };
+            assert_eq!(document.draw(&host, &timers, JudgeFrame::default().with_region(0, hit).with_region(1, hit), JUDGED_AT_MS + 100), 2);
+            let canvas = &document.canvas;
+            let digit_of = |column: u32| (0..10u8).find(|digit| canvas.pixel_at(column, row) == shade(digit_shade(*digit)));
+            let count_from = |from: u32| {
+                let first = (from..DOCUMENT_SIZE.0).find(|column| digit_of(*column).is_some());
+                (first, first.map(|first| (first..DOCUMENT_SIZE.0).step_by(place as usize).map_while(digit_of).collect::<Vec<u8>>()).unwrap_or_default())
+            };
+            let shown = place * expected.len() as u32;
+
+            let first_place = RIGHT_WORD_X + COUNT_X - place * COUNT_PLACES / 2;
+            assert_eq!(count_from(RIGHT_WORD_X), (Some(first_place), expected.to_vec()), "{combo}: flush left on the first place it reserves");
+            assert_eq!(
+                count_from(0),
+                (Some(WORD_RECT.x as u32 + COUNT_X - shown / 2), expected.to_vec()),
+                "{combo}: and the pop-up that names no alignment stays centred"
+            );
+        }
     }
 
     /// How the play screen's own objects take the alpha a player's offset leaves them: the gauge, a

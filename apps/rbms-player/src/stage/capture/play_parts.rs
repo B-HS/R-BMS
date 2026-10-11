@@ -12,7 +12,12 @@
 //!
 //! - a judgement is drawn alike on every frame from the one it is made on to the last one it is
 //!   shown on, and is gone after that: nothing of it moves, grows, fades or changes colour;
-//! - its word starts on the same column whether the combo beside it has one figure, two or three;
+//! - its word is drawn alike whatever combo is behind it, and the combo starts on the place right
+//!   behind the word and grows to the right, a place a figure, with nothing in the places it has not
+//!   reached;
+//! - every judgement a press can take starts on one column, and so does the line over it;
+//! - on every field of every document the word and a combo of three figures stand in the middle,
+//!   and a combo of five ends inside the field;
 //! - the offset that says where the judgement stands moves it up by as many pixels as it is set to
 //!   and down by as many when it is set below nothing, and the row that hides it leaves none of it;
 //! - with every part at no opacity and the judgement hidden a frame of a run that is being played is
@@ -22,8 +27,8 @@
 //!
 //! Two more draw for a person to look at, and only where [`CAPTURE_DIR_ENV`] names a folder. One
 //! draws the default pack at the size it is authored at: a judgement frame by frame, the judgements a
-//! press can take, the judgement moved and hidden, the field with parts taken off it, and the wider
-//! fields. The other draws the judgement of the pack [`SKIN_PACK_ENV`] names frame by frame, so what
+//! press can take and the combos one is drawn in front of, the judgement moved and hidden, the field
+//! with parts taken off it, and the wider fields. The other draws the judgement of the pack [`SKIN_PACK_ENV`] names frame by frame, so what
 //! another pack does with a judgement can be laid beside it.
 
 use rbms_config::SettingTab;
@@ -57,8 +62,24 @@ const JUDGEMENT_GONE_MS: i64 = 540;
 /// The moment after a press a frame of its judgement is drawn at for a person to look at.
 const JUDGEMENT_LOOKED_AT_MS: i64 = 200;
 
-/// The combos a judgement's word is held to the same place beside.
-const COUNTED_COMBOS: [usize; 3] = [9, 10, 100];
+/// The combos a judgement is drawn in front of: a figure more each, up to the five the pack keeps
+/// inside a field.
+const COUNTED_COMBOS: [u32; 5] = [7, 67, 648, 1_234, 12_345];
+
+/// The combo a run that is captured judgement by judgement begins with, so its first judgement is
+/// drawn in front of three figures.
+const COMBO_BEFORE_THE_JUDGEMENTS: u32 = 647;
+
+/// How many figures of a combo stand in the middle of a field with the word in front of them.
+const FIGURES_IN_THE_MIDDLE: i32 = 3;
+
+/// The `numberAlign` a pop-up starts its combo on the first place with.
+const COMBO_FLUSH_LEFT: i32 = 1;
+
+/// How far the left side of what is drawn may stand from the column the document starts it on, in
+/// pixels of a frame of [`HELD_SIZE`]: the white a sign or a letter leaves on its left in its own
+/// cell, which is under two pixels of the document.
+const EDGE_SLACK: u32 = 1;
 
 /// The rows of the pack's play documents that say what is written over the judgement and whether the
 /// judgement is drawn, each with an item of it.
@@ -69,6 +90,9 @@ const MILLISECONDS: (&str, &str) = ("Judge Detail", "Milliseconds");
 const HIDDEN_JUDGEMENT: (&str, &str) = ("Judge Display", "Hide");
 const WIDE_LANES: (&str, &str) = ("Lane Width", "Wide");
 const FIELD_ON_THE_RIGHT: (&str, &str) = ("Field Side", "Right");
+
+/// A row of a pack's play document and the item of it that is chosen.
+type RowChoice = (&'static str, &'static str);
 
 /// The offset of the pack's play documents that says where the judgement stands, and how far it is
 /// moved in the frames that hold it to that, in pixels of the screen.
@@ -160,8 +184,9 @@ enum Played<'a> {
 }
 
 /// What a run of the play field is entered with: the settings folder of its own app, the pack, the
-/// mode and who plays it, the size it is drawn at (the pack's own when `None`), and the rows and the
-/// offsets of the pack's document that are set before the document is read.
+/// mode and who plays it, the size it is drawn at (the pack's own when `None`), the rows and the
+/// offsets of the pack's document that are set before the document is read, and the combo the run
+/// begins with.
 struct FieldSetup<'a> {
     tag: &'a str,
     pack: &'a Path,
@@ -170,6 +195,28 @@ struct FieldSetup<'a> {
     size: Option<(u32, u32)>,
     rows: &'a [(&'a str, &'a str)],
     offsets: &'a [(&'a str, SkinOffset)],
+    carried: u32,
+}
+
+/// Where a document puts the pop-up of one field, in its own pixels from its left and its top: the
+/// column its first word starts on and the one that word ends before, the row the word's top is
+/// on, the column the first figure of a combo starts on, how wide a figure is and how many the
+/// combo has room for.
+#[derive(Clone, Copy, Debug)]
+struct JudgeLine {
+    word_left: i32,
+    word_right: i32,
+    word_top: i32,
+    first_figure: i32,
+    figure: i32,
+    figures: i32,
+}
+
+impl JudgeLine {
+    /// The column the combo's place `index` starts on, the first being place zero.
+    fn place(&self, index: i32) -> i32 {
+        self.first_figure + self.figure * index
+    }
 }
 
 /// A pack's play scene entered for one run and walked until its chart plays.
@@ -196,7 +243,8 @@ impl FieldRun {
         let model = chart_model(&text, &name, Some(setup.mode));
         let lane = by_hand::played_lane(&model)?;
         let chart = settings_of(&format!("{}-chart", setup.tag)).with_file_name(&name);
-        let EnteredPlay { mut app, screen, size, play_time_ms: _, arrived, _keysounds } = enter_play_scene(setup.pack, setup.tag, &chart, model, ending)?;
+        let EnteredPlay { mut app, screen, size, play_time_ms: _, arrived, _keysounds } =
+            enter_play_scene_carrying(setup.pack, setup.tag, &chart, model, ending, setup.carried)?;
         for (row, item) in setup.rows {
             if !choose_in_skin(&mut app, screen, row, item) {
                 return Err(format!("the document has no row {row:?} with an item {item:?}"));
@@ -297,15 +345,59 @@ impl FieldRun {
     /// The same for the field at `index` of a document that has `fields` of them.
     fn field_of(&self, index: usize, fields: usize) -> (Range<u32>, Range<u32>) {
         let skin = self.document();
-        let lanes = &skin.def.note.as_ref().expect("a play document has a note field").dst;
-        let side = lanes.chunks(lanes.len().div_ceil(fields).max(1)).nth(index).expect("the document has the field asked for");
+        let (left, right, line) = self.lanes_of(index, fields);
         let across = self.size.0 as f32 / skin.def.w.max(1) as f32;
         let down = self.size.1 as f32 / skin.def.h.max(1) as f32;
-        let left = side.iter().filter_map(|lane| lane.x).min().unwrap_or_default();
-        let right = side.iter().filter_map(|lane| Some(lane.x? + lane.w?)).max().unwrap_or_default();
-        let line = side.iter().filter_map(|lane| lane.y).max().unwrap_or_default();
         let columns = (left as f32 * across).ceil() as u32..(right as f32 * across).floor() as u32;
         (columns, 0..((skin.def.h - line) as f32 * down).floor() as u32)
+    }
+
+    /// The lanes of the field at `index` of a document that has `fields` of them, in the document's
+    /// own pixels: the column they start on, the one they end before, and how far above the foot of
+    /// the document their judgement line is.
+    fn lanes_of(&self, index: usize, fields: usize) -> (i32, i32, i32) {
+        let lanes = &self.document().def.note.as_ref().expect("a play document has a note field").dst;
+        let side = lanes.chunks(lanes.len().div_ceil(fields).max(1)).nth(index).expect("the document has the field asked for");
+        let left = side.iter().filter_map(|lane| lane.x).min().unwrap_or_default();
+        let right = side.iter().filter_map(|lane| Some(lane.x? + lane.w?)).max().unwrap_or_default();
+        (left, right, side.iter().filter_map(|lane| lane.y).max().unwrap_or_default())
+    }
+
+    /// The pop-up the document draws for the field at `index`.
+    fn pop_up(&self, index: usize) -> &rbms_skin::model::JudgeDef {
+        self.document().def.judge.iter().find(|judge| judge.index == index as i32).expect("the document has a pop-up for the field asked for")
+    }
+
+    /// Where the document puts the pop-up of the field at `index`. The combo is placed against the
+    /// word and pulled left by half the places it reserves, as the loader pulls it.
+    fn judge_line(&self, index: usize) -> JudgeLine {
+        let skin = self.document();
+        let judge = self.pop_up(index);
+        let word = judge.images.first().and_then(|word| word.dst.first()).expect("the document places a judgement");
+        let count = judge.numbers.first().expect("the document places a combo");
+        let place = count.dst.first().expect("the document places a combo");
+        let figures = skin.def.value.iter().find(|value| value.id == count.id).map(|value| value.digit).expect("the combo is a value of the document");
+        let (x, w) = (word.x.unwrap_or_default(), word.w.unwrap_or_default());
+        let figure = place.w.unwrap_or_default();
+        JudgeLine {
+            word_left: x,
+            word_right: x + w,
+            word_top: skin.def.h - word.y.unwrap_or_default() - word.h.unwrap_or_default(),
+            first_figure: x + place.x.unwrap_or_default() - figure * figures / 2,
+            figure,
+            figures,
+        }
+    }
+
+    /// The columns of the frame the document's columns from `left` up to `right` are drawn on.
+    fn columns(&self, left: i32, right: i32) -> Range<u32> {
+        let across = self.size.0 as f32 / self.document().def.w.max(1) as f32;
+        (left as f32 * across).floor() as u32..(right as f32 * across).ceil() as u32
+    }
+
+    /// The row of the frame the document's row `top`, counted from its top, is drawn on.
+    fn row(&self, top: i32) -> u32 {
+        (top as f32 * self.size.1 as f32 / self.document().def.h.max(1) as f32).floor() as u32
     }
 
     /// The pixels of `columns` and `rows` of the frame that was drawn last, row by row.
@@ -404,11 +496,16 @@ const AROUND_THE_JUDGEMENT: [&str; 8] = [
 /// A run of the default pack by hand on seven keys, drawn at [`HELD_SIZE`] with nothing over
 /// its lanes but its judgement, and with `rows` switched and `offsets` set.
 fn judged_run(tag: &str, strokes: usize, rows: &[(&str, &str)], offsets: &[(&str, SkinOffset)]) -> FieldRun {
+    judged_run_carrying(tag, strokes, 0, rows, offsets)
+}
+
+/// The same run, begun with a combo of `carried` already counted.
+fn judged_run_carrying(tag: &str, strokes: usize, carried: u32, rows: &[(&str, &str)], offsets: &[(&str, SkinOffset)]) -> FieldRun {
     let pack = default_pack();
     let cleared = AROUND_THE_JUDGEMENT.iter().map(|part| (*part, opacity(NO_OPACITY)));
     let offsets: Vec<(&str, SkinOffset)> = cleared.chain(offsets.iter().copied()).collect();
     let played = Played::ByHand { channel: FIRST_SIDE_KEY, strokes };
-    let setup = FieldSetup { tag, pack: &pack, mode: rbms_model::Mode::BEAT_7K, played, size: Some(HELD_SIZE), rows, offsets: &offsets };
+    let setup = FieldSetup { tag, pack: &pack, mode: rbms_model::Mode::BEAT_7K, played, size: Some(HELD_SIZE), rows, offsets: &offsets, carried };
     FieldRun::enter(&setup).unwrap_or_else(|reason| panic!("{tag}: not entered: {reason}"))
 }
 
@@ -435,36 +532,128 @@ fn the_default_pack_holds_a_judgement_still_for_as_long_as_it_is_shown() {
     }
 }
 
-/// The word of a judgement starts on the same column and is drawn alike whether the combo beside it
-/// has one figure, two or three, and the two of them take up the same box.
+/// The word of a judgement is drawn alike whatever combo is behind it, and the combo starts on the
+/// place right behind the word and grows to the right, a place a figure: nothing is drawn in a place
+/// the combo has not reached, and a combo of five figures ends inside the field.
 #[test]
-fn the_default_pack_keeps_the_word_of_a_judgement_in_place_as_its_combo_grows() {
-    let last = COUNTED_COMBOS[COUNTED_COMBOS.len() - 1];
-    let mut run = judged_run("parts-combo", last, &[NO_DIFFERENCE, NO_DETAIL], &[]);
-    let (columns, rows) = run.field();
-    let word = {
-        let skin = run.document();
-        let placed = skin.def.judge.first().and_then(|judge| judge.images.first()).and_then(|word| word.dst.first()).expect("the document places a judgement");
-        let across = run.size.0 as f32 / skin.def.w.max(1) as f32;
-        let (x, w) = (placed.x.unwrap_or_default() as f32, placed.w.unwrap_or_default() as f32);
-        (x * across).floor() as u32..((x + w) * across).ceil() as u32
-    };
-    let mut played = 0;
-    let mut seen: Vec<(usize, InkBox, Vec<crate::Color>)> = Vec::new();
+fn the_default_pack_writes_a_combo_behind_the_word_of_a_judgement_and_grows_it_to_the_right() {
+    let mut first_word: Option<Vec<crate::Color>> = None;
     for combo in COUNTED_COMBOS {
-        run.strike_up_to(played, combo - 1).unwrap_or_else(|reason| panic!("not played up to a combo of {combo}: {reason}"));
-        let down_ms = run.strike(combo - 1, 0).unwrap_or_else(|reason| panic!("the note of combo {combo} was not played: {reason}"));
-        played = combo;
+        let mut run = judged_run_carrying(&format!("parts-combo-{combo}"), 1, combo - 1, &[NO_DIFFERENCE, NO_DETAIL], &[]);
+        let (columns, rows) = run.field();
+        let line = run.judge_line(0);
+        let down_ms = run.strike(0, 0).unwrap_or_else(|reason| panic!("the note of combo {combo} was not played: {reason}"));
         run.draw_at(down_ms + JUDGEMENT_LOOKED_AT_MS).unwrap_or_else(|reason| panic!("combo {combo}: not drawn: {reason}"));
         let judge = play_screen(&run.app).unwrap_or_else(|reason| panic!("combo {combo}: {reason}")).session.judge();
-        assert_eq!(judge.combo as usize, combo, "the run stands at another combo than the notes played on the beat: {:?}", judge.counts);
-        let stood = run.ink(&columns, &rows).unwrap_or_else(|| panic!("combo {combo}: nothing is drawn over the field"));
-        seen.push((combo, stood, run.cut(&word, &rows)));
+        assert_eq!(judge.combo, combo, "the run stands at another combo than the one it began with and a note on the beat: {:?}", judge.counts);
+
+        let word = run.columns(line.word_left, line.word_right);
+        let drawn = run.cut(&word, &rows);
+        assert!(*first_word.get_or_insert_with(|| drawn.clone()) == drawn, "the word of the judgement is drawn otherwise in front of a combo of {combo}");
+
+        let figures = combo.to_string().len() as i32;
+        assert!(figures <= line.figures, "the pop-up has room for {} figures and not for a combo of {combo}", line.figures);
+        let place = |index: i32| run.columns(line.place(index), line.place(index + 1));
+        let behind = word.end..columns.end;
+        let ink = run.ink(&behind, &rows).unwrap_or_else(|| panic!("combo {combo}: nothing is drawn behind the word"));
+        assert!(place(0).contains(&ink.left), "combo {combo}: what is behind the word starts on column {}, outside its first place {:?}", ink.left, place(0));
+        assert!(
+            place(figures - 1).contains(&ink.right),
+            "combo {combo}: what is behind the word ends on column {}, outside the place of its last figure {:?}",
+            ink.right,
+            place(figures - 1)
+        );
+        assert!(ink.right < columns.end, "combo {combo}: its last figure is drawn past the field, on column {}", ink.right);
     }
-    let (_, first_box, first_word) = &seen[0];
-    for (combo, stood, drawn) in &seen[1..] {
-        assert_eq!(stood, first_box, "the judgement takes up another box at a combo of {combo} than at one of {}", COUNTED_COMBOS[0]);
-        assert!(drawn == first_word, "the word of the judgement is drawn otherwise at a combo of {combo} than at one of {}", COUNTED_COMBOS[0]);
+}
+
+/// Every judgement a press can take starts on one column of the field, the ones that break the
+/// combo among them, and the line over a judgement starts on that column too.
+#[test]
+fn the_default_pack_starts_every_judgement_and_the_line_over_it_on_one_column() {
+    let bad_off_ms = by_hand::bad_off_ms(&rbms_model::Mode::BEAT_7K);
+    let strokes: [(&str, usize, Option<i64>); 5] =
+        [("PGREAT", 0, Some(0)), ("GREAT", 1, Some(GREAT_OFF_MS)), ("GOOD", 2, Some(GOOD_OFF_MS)), ("BAD", 3, Some(bad_off_ms)), ("POOR", 4, None)];
+    let mut run = judged_run("parts-edge", strokes.len(), &[], &[]);
+    let (columns, rows) = run.field();
+    let line = run.judge_line(0);
+    let starts: Vec<Option<i32>> = run.pop_up(0).images.iter().map(|word| word.dst.first().and_then(|placed| placed.x)).collect();
+    assert!(starts.iter().all(|start| *start == Some(line.word_left)), "the words of the document start on different columns: {starts:?}");
+
+    let edge = run.columns(line.word_left, line.word_left).start;
+    let top = run.row(line.word_top);
+    let (over, beside) = (rows.start..top, top..rows.end);
+    for (index, (name, judgement, lead_ms)) in strokes.into_iter().enumerate() {
+        match lead_ms {
+            Some(lead_ms) => {
+                let down_ms = run.strike(index, lead_ms).unwrap_or_else(|reason| panic!("{name}: not played: {reason}"));
+                run.draw_at(down_ms + JUDGEMENT_LOOKED_AT_MS).unwrap_or_else(|reason| panic!("{name}: not drawn: {reason}"));
+            }
+            None => run.draw_at(beat_ms(index) + BEAT_MS - GOOD_OFF_MS - PLAY_STEP_MS).unwrap_or_else(|reason| panic!("{name}: not drawn: {reason}")),
+        }
+        let counts = play_screen(&run.app).unwrap_or_else(|reason| panic!("{name}: {reason}")).session.judge().counts;
+        assert_eq!(counts[judgement], 1, "{name}: the press took another judgement: {counts:?}");
+        let word = run.ink(&columns, &beside).unwrap_or_else(|| panic!("{name}: no judgement is drawn over the field"));
+        let above = run.ink(&columns, &over).unwrap_or_else(|| panic!("{name}: no line is drawn over the judgement"));
+        assert!(word.left.abs_diff(edge) <= EDGE_SLACK, "{name}: the judgement starts on column {}, away from column {edge}", word.left);
+        assert!(above.left.abs_diff(edge) <= EDGE_SLACK, "{name}: the line over the judgement starts on column {}, away from column {edge}", above.left);
+    }
+}
+
+/// On every field of every play document, at either width of its lanes and on either side of the
+/// screen, the pop-up starts its combo on the place behind the word, the word and a combo of
+/// [`FIGURES_IN_THE_MIDDLE`] figures stand in the middle of the field, and all the figures the combo
+/// has room for end inside it.
+#[test]
+fn the_default_pack_centres_a_judgement_on_every_field_and_keeps_its_combo_inside() {
+    use rbms_model::Mode;
+    let wide_on_the_right: [RowChoice; 2] = [WIDE_LANES, FIELD_ON_THE_RIGHT];
+    let layouts: [(&str, Mode, usize, &[RowChoice]); 12] = [
+        ("play5", Mode::BEAT_5K, 1, &[]),
+        ("play5-wide", Mode::BEAT_5K, 1, &[WIDE_LANES]),
+        ("play7", Mode::BEAT_7K, 1, &[]),
+        ("play7-wide", Mode::BEAT_7K, 1, &[WIDE_LANES]),
+        ("play7-right", Mode::BEAT_7K, 1, &[FIELD_ON_THE_RIGHT]),
+        ("play7-wide-right", Mode::BEAT_7K, 1, &wide_on_the_right),
+        ("play9", Mode::POPN_9K, 1, &[]),
+        ("play9-wide", Mode::POPN_9K, 1, &[WIDE_LANES]),
+        ("play10", Mode::BEAT_10K, 2, &[]),
+        ("play10-wide", Mode::BEAT_10K, 2, &[WIDE_LANES]),
+        ("play14", Mode::BEAT_14K, 2, &[]),
+        ("play14-wide", Mode::BEAT_14K, 2, &[WIDE_LANES]),
+    ];
+    let pack = default_pack();
+    for (label, mode, fields, rows) in layouts {
+        let played = Played::ByHand { channel: FIRST_SIDE_KEY, strokes: 1 };
+        let tag = format!("parts-fit-{label}");
+        let setup = FieldSetup { tag: &tag, pack: &pack, mode, played, size: Some(HELD_SIZE), rows, offsets: &[], carried: 0 };
+        let run = FieldRun::enter(&setup).unwrap_or_else(|reason| panic!("{label}: not entered: {reason}"));
+        assert_eq!(run.document().def.judge.len(), fields, "{label}: the document has another number of pop-ups than of fields");
+        for index in 0..fields {
+            let judge = run.pop_up(index);
+            let line = run.judge_line(index);
+            let (left, right, _) = run.lanes_of(index, fields);
+            assert_eq!(
+                (judge.number_align, judge.shift),
+                (Some(COMBO_FLUSH_LEFT), false),
+                "{label}, field {index}: the combo is not flush left behind a word that stays"
+            );
+            let starts: Vec<Option<i32>> = judge.images.iter().map(|word| word.dst.first().and_then(|placed| placed.x)).collect();
+            assert!(starts.iter().all(|start| *start == Some(line.word_left)), "{label}, field {index}: the words start on different columns: {starts:?}");
+            assert!(line.word_right <= line.place(0), "{label}, field {index}: the combo starts under the word: {line:?}");
+
+            let (before, after) = (line.word_left - left, right - line.place(FIGURES_IN_THE_MIDDLE));
+            assert!(
+                before >= 0 && (before - after).abs() <= 1,
+                "{label}, field {index}: {before} px before the word and {after} px behind three figures: {line:?}"
+            );
+            assert!(line.figures >= COUNTED_COMBOS.len() as i32, "{label}, field {index}: the combo has room for {} figures only", line.figures);
+            assert!(
+                line.place(line.figures) <= right,
+                "{label}, field {index}: the last figure ends on column {}, past the field's {right}",
+                line.place(line.figures)
+            );
+        }
     }
 }
 
@@ -510,8 +699,16 @@ fn the_default_pack_draws_nothing_of_a_part_at_no_opacity() {
     const HELD_NOTE: usize = BEATS_A_MEASURE - 1;
     let pack = default_pack();
     let played = Played::ByHand { channel: FIRST_SIDE_KEY, strokes: BEATS_A_MEASURE };
-    let setup =
-        FieldSetup { tag: "parts-none", pack: &pack, mode: rbms_model::Mode::BEAT_7K, played, size: Some(HELD_SIZE), rows: &[HIDDEN_JUDGEMENT], offsets: &[] };
+    let setup = FieldSetup {
+        tag: "parts-none",
+        pack: &pack,
+        mode: rbms_model::Mode::BEAT_7K,
+        played,
+        size: Some(HELD_SIZE),
+        rows: &[HIDDEN_JUDGEMENT],
+        offsets: &[],
+        carried: 0,
+    };
     let mut run = FieldRun::enter(&setup).unwrap_or_else(|reason| panic!("not entered: {reason}"));
     let play = &mut run.app.shared.config.play;
     (play.enable_cover, play.cover) = (true, PART_COVER);
@@ -546,8 +743,16 @@ fn the_default_pack_draws_nothing_of_a_part_at_no_opacity() {
 fn the_keys_of_the_skin_menu_take_the_parts_of_the_default_pack_off_the_field() {
     let pack = default_pack();
     let played = Played::ByHand { channel: FIRST_SIDE_KEY, strokes: BEATS_A_MEASURE };
-    let setup =
-        FieldSetup { tag: "parts-menu", pack: &pack, mode: rbms_model::Mode::BEAT_7K, played, size: Some(HELD_SIZE), rows: &[HIDDEN_JUDGEMENT], offsets: &[] };
+    let setup = FieldSetup {
+        tag: "parts-menu",
+        pack: &pack,
+        mode: rbms_model::Mode::BEAT_7K,
+        played,
+        size: Some(HELD_SIZE),
+        rows: &[HIDDEN_JUDGEMENT],
+        offsets: &[],
+        carried: 0,
+    };
     let mut run = FieldRun::enter(&setup).unwrap_or_else(|reason| panic!("not entered: {reason}"));
     let parts = run.parts();
     assert!(!parts.is_empty(), "the document declares no part to take off the screen");
@@ -584,7 +789,7 @@ fn file_name_of(part: &str) -> String {
 fn capture_a_judgement_frame_by_frame(pack: &Path, prefix: &str) -> Result<Vec<String>, String> {
     let strokes = [("on-the-beat", 0), ("early", GREAT_OFF_MS)];
     let played = Played::ByHand { channel: FIRST_SIDE_KEY, strokes: strokes.len() * BEATS_A_MEASURE };
-    let setup = FieldSetup { tag: prefix, pack, mode: rbms_model::Mode::BEAT_7K, played, size: None, rows: &[], offsets: &[] };
+    let setup = FieldSetup { tag: prefix, pack, mode: rbms_model::Mode::BEAT_7K, played, size: None, rows: &[], offsets: &[], carried: 0 };
     let mut run = FieldRun::enter(&setup)?;
     let mut saved = Vec::new();
     for (index, (judgement, lead_ms)) in strokes.into_iter().enumerate() {
@@ -607,34 +812,35 @@ fn capture_a_judgement_frame_by_frame(pack: &Path, prefix: &str) -> Result<Vec<S
     Ok(saved)
 }
 
-/// Draw the judgements a press can take on the default pack's field, each with the line over it, and
-/// the judgement beside combos of one figure, two and three: `<prefix>-<name>`.
+/// Draw the judgement of the default pack in front of each combo of [`COUNTED_COMBOS`], each in a run
+/// of its own that begins a note short of it (`<prefix>-combo-<combo>`), and then the judgements a
+/// press can take, each with the line over it, in a run that begins with
+/// [`COMBO_BEFORE_THE_JUDGEMENTS`]: `<prefix>-<name>`.
 fn capture_the_judgements(prefix: &str, mode: rbms_model::Mode, channel: &str, rows: &[(&str, &str)]) -> Result<Vec<String>, String> {
-    let last = COUNTED_COMBOS[COUNTED_COMBOS.len() - 1];
-    let strokes: [(&str, Option<i64>); 6] = [
+    let strokes: [(&str, Option<i64>); 7] = [
+        ("on-the-beat", Some(0)),
         ("great-fast", Some(GREAT_OFF_MS)),
         ("great-slow", Some(-GREAT_OFF_MS)),
         ("good-fast", Some(GOOD_OFF_MS)),
         ("good-slow", Some(-GOOD_OFF_MS)),
+        ("bad-fast", Some(by_hand::bad_off_ms(&mode))),
         ("missed", None),
-        ("on-the-beat", Some(0)),
     ];
     let pack = default_pack();
-    let played = Played::ByHand { channel, strokes: last + strokes.len() };
-    let mut run = FieldRun::enter(&FieldSetup { tag: prefix, pack: &pack, mode, played, size: None, rows, offsets: &[] })?;
     let mut saved = Vec::new();
-    let mut played = 0;
     for combo in COUNTED_COMBOS {
-        run.strike_up_to(played, combo - 1)?;
-        let down_ms = run.strike(combo - 1, 0)?;
-        played = combo;
+        let name = format!("{prefix}-combo-{combo:05}");
+        let played = Played::ByHand { channel, strokes: 1 };
+        let mut run = FieldRun::enter(&FieldSetup { tag: &name, pack: &pack, mode, played, size: None, rows, offsets: &[], carried: combo - 1 })?;
+        let down_ms = run.strike(0, 0)?;
         run.draw_at(down_ms + JUDGEMENT_LOOKED_AT_MS)?;
-        let name = format!("{prefix}-combo-{combo:03}");
         run.keep(&name);
         saved.push(name);
     }
-    for (index, (name, lead_ms)) in strokes.into_iter().enumerate() {
-        let note = last + index;
+    let played = Played::ByHand { channel, strokes: strokes.len() };
+    let setup = FieldSetup { tag: prefix, pack: &pack, mode, played, size: None, rows, offsets: &[], carried: COMBO_BEFORE_THE_JUDGEMENTS };
+    let mut run = FieldRun::enter(&setup)?;
+    for (note, (name, lead_ms)) in strokes.into_iter().enumerate() {
         match lead_ms {
             Some(lead_ms) => {
                 let down_ms = run.strike(note, lead_ms)?;
@@ -656,7 +862,7 @@ fn capture_the_judgements(prefix: &str, mode: rbms_model::Mode, channel: &str, r
 fn capture_a_judgement_with(prefix: &str, behind: usize, rows: &[(&str, &str)], offsets: &[(&str, SkinOffset)]) -> Result<Vec<String>, String> {
     let pack = default_pack();
     let played = Played::ByHand { channel: FIRST_SIDE_KEY, strokes: behind + 1 };
-    let mut run = FieldRun::enter(&FieldSetup { tag: prefix, pack: &pack, mode: rbms_model::Mode::BEAT_7K, played, size: None, rows, offsets })?;
+    let mut run = FieldRun::enter(&FieldSetup { tag: prefix, pack: &pack, mode: rbms_model::Mode::BEAT_7K, played, size: None, rows, offsets, carried: 0 })?;
     (0..behind).try_for_each(|note| run.strike(note, GOOD_OFF_MS).map(|_| ()))?;
     let down_ms = run.strike(behind, GREAT_OFF_MS)?;
     run.draw_at(down_ms + JUDGEMENT_LOOKED_AT_MS)?;
@@ -677,7 +883,8 @@ fn capture_the_parts(
     each: bool,
 ) -> Result<Vec<String>, String> {
     let pack = default_pack();
-    let mut run = FieldRun::enter(&FieldSetup { tag: prefix, pack: &pack, mode, played: Played::ByTheEngine { sides }, size: None, rows, offsets: &[] })?;
+    let setup = FieldSetup { tag: prefix, pack: &pack, mode, played: Played::ByTheEngine { sides }, size: None, rows, offsets: &[], carried: 0 };
+    let mut run = FieldRun::enter(&setup)?;
     if covered {
         let play = &mut run.app.shared.config.play;
         (play.enable_cover, play.cover) = (true, PART_COVER);
@@ -718,7 +925,8 @@ fn capture_the_parts(
 fn capture_a_field_bared_from_the_skin_menu(prefix: &str) -> Result<Vec<String>, String> {
     let pack = default_pack();
     let played = Played::ByTheEngine { sides: &[SEVEN_KEYS_FIRST] };
-    let mut run = FieldRun::enter(&FieldSetup { tag: prefix, pack: &pack, mode: rbms_model::Mode::BEAT_7K, played, size: None, rows: &[], offsets: &[] })?;
+    let setup = FieldSetup { tag: prefix, pack: &pack, mode: rbms_model::Mode::BEAT_7K, played, size: None, rows: &[], offsets: &[], carried: 0 };
+    let mut run = FieldRun::enter(&setup)?;
     run.draw_at(PLAYED_SHOT_MS)?;
     run.keep(&format!("{prefix}-before"));
     let screen = run.screen;

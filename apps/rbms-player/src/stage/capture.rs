@@ -2233,6 +2233,16 @@ struct EnteredPlay {
 /// the engine, or by nobody on a gauge that empties when `ending` is [`PlayEnding::Failure`]. Answers
 /// why the scene cannot be entered when the pack has no document for the mode.
 fn enter_play_scene(pack: &Path, tag: &str, chart: &Path, model: rbms_model::Model, ending: PlayEnding) -> Result<EnteredPlay, String> {
+    enter_play_scene_carrying(pack, tag, chart, model, ending, 0)
+}
+
+/// The gauge a stage of a course begins on when the stage before it left it full.
+const COURSE_STAGE_GAUGE: (rbms_judge::gauge::GaugeIndex, f32) = (rbms_judge::gauge::GaugeIndex::Class, 100.0);
+
+/// The same scene for a run that begins with a combo of `carried` already counted, the way a stage
+/// of a course begins with the combo of the stage before it: on the gauge of a course, which is the
+/// state a run takes a combo over with. A run that carries nothing is entered as any other.
+fn enter_play_scene_carrying(pack: &Path, tag: &str, chart: &Path, model: rbms_model::Model, ending: PlayEnding, carried: u32) -> Result<EnteredPlay, String> {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, AtomicUsize};
 
@@ -2252,7 +2262,8 @@ fn enter_play_scene(pack: &Path, tag: &str, chart: &Path, model: rbms_model::Mod
     app.shared.active_keys = app.shared.keyconfig.lane_keys(mode);
     app.shared.active_reverse_keys = app.shared.keyconfig.scratch_reverse_keys(mode);
     let play_time_ms = rbms_play::play_time_ms(&model, autoplay);
-    let session = PlaySession::new(model, SessionOptions { autoplay, gauge, ..SessionOptions::default() });
+    let initial_gauge = (carried > 0).then_some(COURSE_STAGE_GAUGE);
+    let session = PlaySession::new(model, SessionOptions { autoplay, gauge, initial_gauge, initial_combo: carried, ..SessionOptions::default() });
     let mut play = PlayState::new(session, std::collections::HashMap::new(), 0, SCORE_LN_MODE_FROM_CHART.to_string());
     let arrived = Arc::new(AtomicUsize::new(PLAY_LOADING_DONE));
     let (sender, rx) = std::sync::mpsc::channel();

@@ -720,3 +720,19 @@ fn a_lua_table_and_a_json_document_that_say_the_same_thing_are_the_same_document
     assert_eq!(converted.skin.destination[0].dst.len(), 2);
     assert_eq!(converted.skin.note.as_ref().map(|note| note.group.len()), Some(1));
 }
+
+/// A pop-up says how its count is laid over its places with `numberAlign`, a field the reference
+/// does not have. One that leaves it out is told apart from one that names any value, the zero
+/// included, so the count of every document written for the reference stays where the reference
+/// puts it. A Lua table and a JSON document read alike.
+#[test]
+fn a_judge_reads_how_its_count_is_aligned_and_knows_when_it_was_not_said() {
+    let converted = convert(r#"return { judge = { { id = "said", numberAlign = 1 }, { id = "zero", numberAlign = 0 }, { id = "unsaid", shift = true } } }"#);
+    let aligned: Vec<Option<i32>> = converted.skin.judge.iter().map(|judge| judge.number_align).collect();
+    assert_eq!(aligned, [Some(1), Some(0), None]);
+
+    let from_json: SkinDef =
+        serde_json::from_str(r#"{ "judge": [{ "id": "said", "numberAlign": 1 }, { "id": "zero", "numberAlign": 0 }, { "id": "unsaid", "shift": true }] }"#)
+            .expect("the JSON document should parse");
+    assert_eq!(from_json.judge.iter().map(|judge| judge.number_align).collect::<Vec<_>>(), aligned);
+}

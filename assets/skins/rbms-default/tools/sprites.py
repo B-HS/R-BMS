@@ -21,7 +21,6 @@ OPAQUE = 255
 WHITE = (255, 255, 255)
 DIGITS = '0123456789'
 DIGIT_COUNT = 10
-COUNTER_COLUMNS = DIGIT_COUNT + 1
 DIGIT_SIDE_RATIO = 0.04
 MIN_DIGIT_SIDE = 1
 SIGNED_COLUMNS = 12
@@ -125,18 +124,8 @@ def digit_mask(size: int) -> Image.Image:
     return mask
 
 
-def digit_strip(name: str, size: int) -> Sprite:
-    return Sprite(name, tinted(digit_mask(size)), DIGIT_COUNT, 1, digit_meta(size))
-
-
-def counter_strip(name: str, size: int, color: Rgb, ghost_alpha: int) -> Sprite:
-    width, height, _ = digit_cell(size, DIGITS)
-    digits = digit_mask(size)
-    ghost = digits.crop((0, 0, width, height)).point(lambda level: level * ghost_alpha // OPAQUE)
-    mask = Image.new('L', (width * COUNTER_COLUMNS, height), 0)
-    mask.paste(digits, (0, 0))
-    mask.paste(ghost, (width * DIGIT_COUNT, 0))
-    return Sprite(name, tinted(mask, color), COUNTER_COLUMNS, 1, digit_meta(size))
+def digit_strip(name: str, size: int, color: Rgb = WHITE) -> Sprite:
+    return Sprite(name, tinted(digit_mask(size), color), DIGIT_COUNT, 1, digit_meta(size))
 
 
 def word_mask(text: str, size: int) -> Image.Image:

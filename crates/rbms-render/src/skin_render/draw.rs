@@ -361,7 +361,7 @@ fn draw_movie<R: Renderer>(r: &mut R, place: &Placement<'_>, body: &MovieBody, r
 /// leaves the places where they fall, one moves the digits a whole slot per blank, and anything else
 /// half of one. Which way that is, and so which of the first two is left and which is right, is the
 /// caller's ([`DigitRun::shift_sign`]).
-fn digit_shift(step: f32, blanks: usize, align: i32) -> f32 {
+pub(super) fn digit_shift(step: f32, blanks: usize, align: i32) -> f32 {
     match align {
         ALIGN_IN_PLACE => 0.0,
         ALIGN_OVER_BLANKS => step * blanks as f32,

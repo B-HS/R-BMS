@@ -29,12 +29,11 @@ local NOTE_IMAGES = {
 
 local JUDGE = {
     top = 560,
-    size = { wide = 64, narrow = 48 },
-    wide_from = 480,
+    size = { largest = 64, smallest = 16, step = 2 },
     gap_share = 0.25,
     digits = 5,
+    centred_digits = 3,
     shown = 500,
-    with_count = 3,
     slots = {
         { word = "judge_pgreat", count = "combo_pgreat" },
         { word = "judge_great", count = "combo_great" },
@@ -241,35 +240,47 @@ local function bombs(s, view)
     end
 end
 
-local function judge_of(s, side)
-    local size = side.w >= JUDGE.wide_from and JUDGE.size.wide or JUDGE.size.narrow
+local function judge_row_at(s, side, size)
+    local widest = s:sprite(JUDGE.slots[1].word)
+    local digit = s:sprite(JUDGE.slots[1].count)
+    local scale = size / widest.size
+    local place = { w = round(digit.cell_w * scale), h = round(digit.cell_h * scale) }
+    local gap = round(size * JUDGE.gap_share)
+    local count_x = round(widest.cell_w * scale) + gap
+    local left = round(side.x + (side.w - count_x - place.w * JUDGE.centred_digits) / 2)
+    return { size = size, scale = scale, place = place, gap = gap, left = left, right = left + count_x + place.w * JUDGE.digits }
+end
+
+local function judge_row(s, side)
+    local row = judge_row_at(s, side, JUDGE.size.largest)
+    while row.right > side.x + side.w and row.size > JUDGE.size.smallest do
+        row = judge_row_at(s, side, row.size - JUDGE.size.step)
+    end
+    return row
+end
+
+local function judge_of(s, side, row)
     local timer = props.timer.JUDGE_1P + side.side
     local offsets = { props.offset.LIFT, layout.JUDGE_POSITION.id, props.offset.JUDGE_1P }
     local shown = { timer = timer, keys = { { time = 0 }, { time = JUDGE.shown } }, loop = props.loop.ONCE, offsets = offsets, filter = props.filter.LINEAR }
-    local widest = s:sprite(JUDGE.slots[1].word)
-    local scale = size / widest.size
-    local digit = s:sprite(JUDGE.slots[1].count)
-    local place = { w = round(digit.cell_w * scale), h = round(digit.cell_h * scale) }
-    local count_x = round(widest.cell_w * scale) + round(size * JUDGE.gap_share)
-    local left = round(side.x + (side.w - count_x - place.w * JUDGE.digits) / 2)
-    local def = { index = side.side, shift = false, images = {}, numbers = {} }
+    local place = row.place
+    local def = { index = side.side, shift = false, numberAlign = props.number_align.LEFT, images = {}, numbers = {} }
     local counts = {}
     for slot, entry in ipairs(JUDGE.slots) do
         local sprite = s:sprite(entry.word)
-        local width, height = round(sprite.cell_w * scale), round(sprite.cell_h * scale)
-        local x = slot <= JUDGE.with_count and left or round(side.x + (side.w - width) / 2)
-        local word = { x = x, top = JUDGE.top - sprite.pad * scale, w = width, h = height }
+        local width, height = round(sprite.cell_w * row.scale), round(sprite.cell_h * row.scale)
+        local word = { x = row.left, top = JUDGE.top - sprite.pad * row.scale, w = width, h = height }
         def.images[slot] = s:dst(s:define_image(entry.word), word, shown)
         local count = { id = "num." .. entry.count .. "." .. side.side, sprite = entry.count, ref = props.number.COMBO }
         counts[entry.count] = counts[entry.count] or s:define_number(count, JUDGE.digits)
-        local cell = { x = count_x + math.floor(place.w * JUDGE.digits / 2), top = height - place.h, w = place.w, h = place.h }
+        local cell = { x = width + row.gap + math.floor(place.w * JUDGE.digits / 2), top = height - place.h, w = place.w, h = place.h }
         def.numbers[slot] = s:dst(counts[entry.count], cell, shown, word)
     end
     local id = s:object("judge", def)
     s:place(id, nil, {})
 end
 
-local function above_of(s, view, side)
+local function above_of(s, view, side, row)
     local option = layout.OPTION
     local first = side.side == 0
     local perfect = first and props.option.JUDGE_1P_PERFECT or props.option.JUDGE_2P_PERFECT
@@ -286,22 +297,16 @@ local function above_of(s, view, side)
         }
     end
     local ref = ABOVE.refs[view.difference]
-    local difference = { sprite = ABOVE.sprite, ref = ref, digit = ABOVE.difference_digits, zeropadding = props.padding.ZEROS, saturate = true }
-    local whole = { x = side.x, top = ABOVE.top, w = side.w }
-    local slot, align = whole, "center"
-    if ref ~= nil and view.detail ~= option.DETAIL_OFF then
-        local span = s:number_box(difference, whole).span
-        local left = round(side.x + (side.w - span - ABOVE.gap - ABOVE.word_width) / 2)
-        s:number(difference, { x = left, top = ABOVE.top }, placed(nil, ABOVE.difference))
-        slot, align = { x = left + span + ABOVE.gap, top = ABOVE.top, w = ABOVE.word_width }, "left"
-    elseif ref ~= nil then
-        s:number(ui.merge(difference, { align = align }), whole, placed(nil, ABOVE.difference))
+    local slot = { x = row.left, top = ABOVE.top, w = ABOVE.word_width }
+    if ref ~= nil then
+        local difference = { sprite = ABOVE.sprite, ref = ref, digit = ABOVE.difference_digits, zeropadding = props.padding.ZEROS, saturate = true }
+        slot.x = slot.x + s:number(difference, slot, placed(nil, ABOVE.difference)).span + ABOVE.gap
     end
     if view.detail == option.DETAIL_FAST_SLOW then
-        s:text({ text = "FAST", size = ABOVE.size, align = align }, slot, placed({ early }, ABOVE.fast))
-        s:text({ text = "SLOW", size = ABOVE.size, align = align }, slot, placed({ late }, ABOVE.slow))
+        s:text({ text = "FAST", size = ABOVE.size }, slot, placed({ early }, ABOVE.fast))
+        s:text({ text = "SLOW", size = ABOVE.size }, slot, placed({ late }, ABOVE.slow))
     elseif view.detail == option.DETAIL_MILLISECONDS then
-        local timing = { sprite = ABOVE.sprite, ref = props.number.JUDGE_1P_DURATION + side.side, digit = ABOVE.timing_digits, saturate = true, align = align }
+        local timing = { sprite = ABOVE.sprite, ref = props.number.JUDGE_1P_DURATION + side.side, digit = ABOVE.timing_digits, saturate = true }
         s:number(timing, slot, placed({ perfect }, ABOVE.even))
         s:number(timing, slot, placed({ early }, ABOVE.fast))
         s:number(timing, slot, placed({ late }, ABOVE.slow))
@@ -313,8 +318,9 @@ local function judges(s, view)
         return
     end
     for _, side in ipairs(view.fields) do
-        judge_of(s, side)
-        above_of(s, view, side)
+        local row = judge_row(s, side)
+        judge_of(s, side, row)
+        above_of(s, view, side, row)
     end
 end
 
