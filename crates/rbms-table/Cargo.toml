@@ -9,6 +9,7 @@ rust-version.workspace = true
 serde = { workspace = true }
 serde_json = { workspace = true }
 reqwest = { workspace = true }
+encoding_rs = { workspace = true }
 thiserror = { workspace = true }
 
 [lints]

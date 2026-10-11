@@ -476,7 +476,9 @@ impl LoadingState {
 
     /// A table fetch is running; add it to the library the frame it lands. A source whose table
     /// could not be fetched still takes its slot, with the failure already reported by the loader,
-    /// so the row is there to look at and remove rather than silently missing.
+    /// so the row is there to look at and remove rather than silently missing. Only a table that
+    /// became a folder is announced as added: saying so of one that failed, or of one that was read
+    /// and lists nothing, is what makes a missing folder look like a bug in the song list.
     fn poll_table(shared: &mut AppShared, add: &TableAdd) -> Transition {
         match add.rx.try_recv() {
             Ok((name, levels)) => {
@@ -485,7 +487,14 @@ impl LoadingState {
                 shared.table_names.push(name.clone());
                 shared.table_levels.push(levels);
                 shared.save_settings();
-                notify(Level::Info, format!("table added: {name} ({owned} local charts)"));
+                if crate::tablesrc::table_load_failed(&add.source.location) {
+                    return Transition::Back;
+                }
+                if shared.table_levels.last().is_some_and(Vec::is_empty) {
+                    notify(Level::Warn, format!("table read, but it lists no charts and has no folder: {name}"));
+                } else {
+                    notify(Level::Info, format!("table added: {name} ({owned} local charts)"));
+                }
                 Transition::Back
             }
             Err(TryRecvError::Disconnected) => Transition::Back,

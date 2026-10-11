@@ -4,10 +4,15 @@
 //! Neither way of adding one stops the app: the file picker is a native panel the window keeps
 //! drawing behind, and the table itself — fetched from a URL or read off disk — is parsed and
 //! matched against the library on the LOADING screen rather than on the frame loop.
+//!
+//! Each source says what became of its table: how many of its charts the library has, or that it
+//! could not be loaded and why. A table that failed is not a folder in the song list, so this is
+//! the screen that has to account for it.
 #![allow(clippy::wildcard_imports)]
 
 use crate::dialog::{DialogHandle, DialogState};
 use crate::stage::{Canvas, FrameCtx, KeyInput, LoadingState, Stage, StageHandler, Transition};
+use crate::tablesrc::{TableStatus, forget_table_status, table_status};
 use crate::*;
 
 /// Width of the table list panel.
@@ -35,6 +40,59 @@ const DEFAULT_TABLE_NAME: &str = "table";
 const ROW_TOP: f32 = 124.0;
 const ROW_PITCH: f32 = 44.0;
 const ROW_H: f32 = 36.0;
+
+/// Inset of a row's text from the panel's edges, and how far below the row's top it sits.
+const ROW_PAD_X: f32 = 16.0;
+const ROW_TEXT_DY: f32 = 10.0;
+const ROW_TEXT_SCALE: f32 = 1.5;
+
+/// The status at the right edge of a source's row: its text scale, how far below the row's top it
+/// sits, and the room kept between it and the source's name.
+const STATUS_SCALE: f32 = 1.2;
+const STATUS_DY: f32 = 12.0;
+const STATUS_GAP: f32 = 24.0;
+
+/// The lines under the list that spell out the focused source's status: where they start below the
+/// last row, their pitch and scale, and how much of a long reason they carry.
+const DETAIL_GAP: f32 = 12.0;
+const DETAIL_PITCH: f32 = 22.0;
+const DETAIL_SCALE: f32 = 1.2;
+const DETAIL_LINE_CHARS: usize = 96;
+const DETAIL_MAX_LINES: usize = 3;
+
+/// What a source's row shows of it: the name the user gave it or, failing that, the name its table
+/// gave itself, then where it is loaded from.
+fn source_label(source: &TableSource, status: Option<&TableStatus>) -> String {
+    let own = source.name.trim();
+    let name = match status {
+        Some(TableStatus::Loaded { name, .. }) if own.is_empty() => name.as_str(),
+        _ => own,
+    };
+    let location: String = source.location.chars().take(LOCATION_CHARS).collect();
+    if name.is_empty() { location } else { format!("{name}  -  {location}") }
+}
+
+/// The few words at the right edge of a source's row, and whether they report a problem.
+fn status_summary(status: &TableStatus) -> (String, bool) {
+    match status {
+        TableStatus::Loaded { entries: 0, stale: None, .. } => ("NO CHARTS LISTED".to_string(), true),
+        TableStatus::Loaded { entries, levels, owned, stale: None, .. } => (format!("{owned} OF {entries} CHARTS OWNED  -  {levels} LEVELS"), false),
+        TableStatus::Loaded { entries, owned, stale: Some(_), .. } => (format!("SAVED COPY  -  {owned} OF {entries} CHARTS OWNED"), true),
+        TableStatus::Failed { .. } => ("LOAD FAILED".to_string(), true),
+    }
+}
+
+/// What there is to say about a source beyond its row, when there is anything: why it failed, why
+/// it was not refreshed, that it lists nothing, or that none of its charts are in the library.
+fn status_detail(status: &TableStatus) -> Option<String> {
+    match status {
+        TableStatus::Failed { reason } => Some(format!("LOAD FAILED: {reason}")),
+        TableStatus::Loaded { stale: Some(reason), .. } => Some(format!("NOT REFRESHED: {reason}")),
+        TableStatus::Loaded { entries: 0, .. } => Some("THE TABLE WAS READ BUT LISTS NO CHARTS - IT HAS NO FOLDER IN THE SONG LIST".to_string()),
+        TableStatus::Loaded { owned: 0, .. } => Some("NONE OF THIS TABLE'S CHARTS ARE IN THE LIBRARY YET - ITS FOLDER IS EMPTY".to_string()),
+        TableStatus::Loaded { .. } => None,
+    }
+}
 
 /// The table manager's own state: which row is focused, the URL being typed when the "+ ADD TABLE
 /// (URL)" row has been entered, the file picker while it is up, and whether a paste modifier is
@@ -76,7 +134,8 @@ impl TablesState {
 
     fn remove_table_source(&mut self, shared: &mut AppShared, idx: usize) {
         if idx < shared.config.library.tables.len() {
-            shared.config.library.tables.remove(idx);
+            let removed = shared.config.library.tables.remove(idx);
+            forget_table_status(&removed.location);
             if idx < shared.table_names.len() {
                 shared.table_names.remove(idx);
             }
@@ -222,18 +281,15 @@ impl StageHandler for TablesState {
         draw_text(canvas, x0, 84.0, 1.3, th.text_muted, "UP DOWN MOVE   ENTER SELECT   D REMOVE   ESC BACK");
         let tables = &ctx.shared.config.library.tables;
         let add_url = tables.len();
-        for i in 0..tables.len() + 2 {
+        let row_count = tables.len() + 2;
+        for i in 0..row_count {
             let y = ROW_TOP + i as f32 * ROW_PITCH;
             let on = i == self.sel;
-            let label = if i < tables.len() {
-                let s = &tables[i];
-                let nm = if s.name.is_ascii() && !s.name.trim().is_empty() { s.name.clone() } else { String::new() };
-                let loc: String = s.location.chars().take(LOCATION_CHARS).collect();
-                if nm.is_empty() { loc } else { format!("{nm}  -  {loc}") }
-            } else if i == add_url {
-                "+ ADD TABLE (URL)".to_string()
-            } else {
-                "+ ADD TABLE (FILE)".to_string()
+            let status = tables.get(i).and_then(|source| table_status(&source.location));
+            let label = match tables.get(i) {
+                Some(source) => source_label(source, status.as_ref()),
+                None if i == add_url => "+ ADD TABLE (URL)".to_string(),
+                None => "+ ADD TABLE (FILE)".to_string(),
             };
             canvas.fill_rect(Rect::new(x0, y, PANEL_W, ROW_H), if on { th.button } else { th.panel });
             let col = if i >= tables.len() {
@@ -243,7 +299,28 @@ impl StageHandler for TablesState {
             } else {
                 th.text_dim
             };
-            draw_text(canvas, x0 + 16.0, y + 10.0, 1.5, col, &label);
+            let mut label_w = PANEL_W - ROW_PAD_X * 2.0;
+            if let Some((summary, is_problem)) = status.as_ref().map(status_summary) {
+                label_w -= text_width(&summary, STATUS_SCALE) + STATUS_GAP;
+                let status_col = match (is_problem, on) {
+                    (true, _) => th.warn,
+                    (false, true) => th.text,
+                    (false, false) => th.text_muted,
+                };
+                draw_text_right(canvas, x0 + PANEL_W - ROW_PAD_X, y + STATUS_DY, STATUS_SCALE, status_col, &summary);
+            }
+            draw_text(canvas, x0 + ROW_PAD_X, y + ROW_TEXT_DY, ROW_TEXT_SCALE, col, &rbms_render::fit_text(&label, ROW_TEXT_SCALE, label_w));
+        }
+        let focused = tables.get(self.sel).and_then(|source| table_status(&source.location));
+        if let Some(detail) = focused.as_ref().and_then(status_detail) {
+            let is_problem = !matches!(focused, Some(TableStatus::Loaded { stale: None, .. }));
+            let detail: Vec<char> = detail.chars().collect();
+            let top = ROW_TOP + row_count as f32 * ROW_PITCH + DETAIL_GAP;
+            for (line, chars) in detail.chunks(DETAIL_LINE_CHARS).take(DETAIL_MAX_LINES).enumerate() {
+                let text: String = chars.iter().collect();
+                let fitted = rbms_render::fit_text(&text, DETAIL_SCALE, PANEL_W);
+                draw_text(canvas, x0, top + line as f32 * DETAIL_PITCH, DETAIL_SCALE, if is_problem { th.warn } else { th.text_muted }, &fitted);
+            }
         }
     }
 }
@@ -371,6 +448,169 @@ mod tests {
         let moved = state.add_picked_file(&app.shared, std::path::Path::new("/tables/one.json"));
         assert!(matches!(moved, Transition::Stay));
         assert_eq!(app.shared.config.library.tables.len(), 1);
+    }
+
+    /// A table file written for one test, removed when the test is over.
+    struct TableFile(std::path::PathBuf);
+
+    impl TableFile {
+        fn written(tag: &str, body: &[u8]) -> TableFile {
+            let path = std::env::temp_dir().join(format!("rbms-tables-{tag}-{}.json", std::process::id()));
+            std::fs::write(&path, body).expect("write the fixture");
+            TableFile(path)
+        }
+
+        fn location(&self) -> String {
+            self.0.to_string_lossy().to_string()
+        }
+    }
+
+    impl Drop for TableFile {
+        fn drop(&mut self) {
+            forget_table_status(&self.location());
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    /// Register `file` the way the picker does and stay on the LOADING screen it opens until the
+    /// table has been read and the screen hands back.
+    fn register(app: &mut crate::App, file: &TableFile) {
+        let mut state = TablesState::new();
+        let Transition::Open(Stage::Loading(mut loading)) = state.add_picked_file(&app.shared, &file.0) else {
+            panic!("a picked file was not sent to the loading screen");
+        };
+        loop {
+            match loading.update(&mut ctx(app)) {
+                Transition::Stay => std::thread::yield_now(),
+                Transition::Back => return,
+                _ => panic!("the loading screen left for somewhere other than the table manager"),
+            }
+        }
+    }
+
+    /// The folders of the song list as it stands, by label.
+    fn folders(app: &mut crate::App, view: SelectView) -> Vec<String> {
+        app.shared.select_view = view;
+        app.shared.rebuild_select_items();
+        app.shared
+            .select_items
+            .iter()
+            .map(|item| match item {
+                SelectItem::Folder { label, .. } => label.clone(),
+                SelectItem::Song(index) => format!("song {index}"),
+            })
+            .collect()
+    }
+
+    /// The report this was written for: a table was registered and no folder for it appeared. A
+    /// table that loads is a folder in the song list whether or not any of its charts are owned,
+    /// with its levels inside it in the table's order.
+    #[test]
+    fn a_registered_table_none_of_whose_charts_are_owned_is_still_a_folder_with_its_levels() {
+        let file = TableFile::written("unowned", br#"[{"md5":"1111","level":"2"},{"md5":"2222","level":"1"},{"md5":"3333","level":"2"}]"#);
+        let mut app = app();
+        register(&mut app, &file);
+
+        assert_eq!(app.shared.config.library.tables.len(), 1, "the source is in the settings");
+        let root = folders(&mut app, SelectView::Root);
+        assert_eq!(root.len(), 2, "the song list has the table's folder beside ALL SONGS: {root:?}");
+        assert!(root[1].ends_with(" (0)"), "the folder says nothing in it is owned: {}", root[1]);
+        assert_eq!(folders(&mut app, SelectView::TableLevels(0)), vec!["LV 1 (0)", "LV 2 (0)"], "the table's levels, in its order");
+        assert!(folders(&mut app, SelectView::TableLevel(0, 0)).is_empty(), "an unowned level opens onto an empty list");
+
+        let status = table_status(&file.location()).expect("the load is remembered");
+        assert_eq!(status_summary(&status), ("0 OF 3 CHARTS OWNED  -  2 LEVELS".to_string(), false));
+        assert!(status_detail(&status).is_some_and(|detail| detail.contains("NONE OF THIS TABLE'S CHARTS")), "the manager says why the folder is empty");
+    }
+
+    /// A table that could not be read is not a folder, so the table manager has to be where it is
+    /// accounted for — and nothing may announce it as added, which is what made the missing folder
+    /// read as a fault of the song list.
+    #[test]
+    fn a_table_that_could_not_be_read_keeps_its_row_says_why_and_is_not_announced_as_added() {
+        crate::notify::exclusive(|| {
+            let file = TableFile::written("unreadable", b"<!doctype html><html><head><title>not a table</title></head></html>");
+            let mut app = app();
+            register(&mut app, &file);
+
+            assert_eq!(app.shared.config.library.tables.len(), 1, "the row is there to look at and remove");
+            let mut said = Vec::new();
+            crate::notify::drain(&mut said);
+            assert!(said.iter().all(|(_, message)| !message.contains("table added")), "a table that was not read was announced as added: {said:?}");
+            assert_eq!(folders(&mut app, SelectView::Root).len(), 1, "a table that was not read is not a folder");
+
+            let status = table_status(&file.location()).expect("the failure is remembered");
+            assert_eq!(status_summary(&status), ("LOAD FAILED".to_string(), true));
+            assert!(status_detail(&status).is_some_and(|detail| detail.starts_with("LOAD FAILED: body parse:")), "the manager says what failed");
+
+            let mut state = TablesState::new();
+            state.remove_table_source(&mut app.shared, 0);
+            assert_eq!(table_status(&file.location()), None, "removing the source forgets what became of it");
+        });
+    }
+
+    /// A table that was read and lists nothing has no levels, so it is no folder either. That is the
+    /// shape of the first report again — registered, and nothing in the song list — so it is said
+    /// where the table was registered and in place of the announcement that it was added.
+    #[test]
+    fn a_table_that_lists_no_charts_says_so_instead_of_being_announced_as_added() {
+        crate::notify::exclusive(|| {
+            let file = TableFile::written("empty", b"[]");
+            let mut app = app();
+            register(&mut app, &file);
+
+            assert_eq!(app.shared.config.library.tables.len(), 1, "the row is there to look at and remove");
+            assert_eq!(folders(&mut app, SelectView::Root).len(), 1, "a table with no levels is not a folder");
+            let mut said = Vec::new();
+            crate::notify::drain(&mut said);
+            assert!(said.iter().all(|(_, message)| !message.starts_with("table added:")), "an empty table was announced like one with a folder: {said:?}");
+            assert!(
+                said.iter().any(|(level, message)| *level == crate::notify::Level::Warn && message.contains("lists no charts")),
+                "nothing said the table is empty: {said:?}"
+            );
+
+            let status = table_status(&file.location()).expect("the load is remembered");
+            assert_eq!(status_summary(&status), ("NO CHARTS LISTED".to_string(), true));
+            assert!(status_detail(&status).is_some_and(|detail| detail.contains("NO FOLDER")), "the manager says why there is no folder");
+        });
+    }
+
+    #[test]
+    fn a_source_is_labelled_by_the_users_name_then_the_tables_own_then_only_its_location() {
+        let loaded = TableStatus::Loaded { name: "\u{767a}\u{72c2}".to_string(), entries: 9, levels: 3, owned: 4, stale: None };
+        let unnamed = TableSource { name: String::new(), location: "https://tables.test/t/".into() };
+        assert_eq!(source_label(&unnamed, None), "https://tables.test/t/");
+        assert_eq!(source_label(&unnamed, Some(&loaded)), "\u{767a}\u{72c2}  -  https://tables.test/t/");
+        assert_eq!(source_label(&unnamed, Some(&TableStatus::Failed { reason: "x".into() })), "https://tables.test/t/");
+        let named = TableSource { name: "\u{7b2c}2".into(), location: "/tables/second.json".into() };
+        assert_eq!(source_label(&named, Some(&loaded)), "\u{7b2c}2  -  /tables/second.json", "a name in any script is a name");
+    }
+
+    #[test]
+    fn each_status_reads_differently_at_a_glance_and_in_full() {
+        let fresh = TableStatus::Loaded { name: "T".into(), entries: 1035, levels: 26, owned: 1035, stale: None };
+        assert_eq!(status_summary(&fresh), ("1035 OF 1035 CHARTS OWNED  -  26 LEVELS".to_string(), false));
+        assert_eq!(status_detail(&fresh), None, "a table that loaded and is owned needs no more said");
+
+        let stale = TableStatus::Loaded { name: "T".into(), entries: 10, levels: 2, owned: 3, stale: Some("address: HTTP 503 Service Unavailable".into()) };
+        assert_eq!(status_summary(&stale), ("SAVED COPY  -  3 OF 10 CHARTS OWNED".to_string(), true));
+        assert_eq!(status_detail(&stale).as_deref(), Some("NOT REFRESHED: address: HTTP 503 Service Unavailable"));
+
+        let failed = TableStatus::Failed { reason: "header https://tables.test/t/header.json: HTTP 404 Not Found".into() };
+        assert_eq!(status_detail(&failed).as_deref(), Some("LOAD FAILED: header https://tables.test/t/header.json: HTTP 404 Not Found"));
+    }
+
+    /// What became of a table is on the screen, not only in the functions that word it.
+    #[test]
+    fn a_source_whose_table_failed_is_drawn_differently_from_one_nothing_is_known_of() {
+        let file = TableFile::written("drawn", b"not a table");
+        let mut app = app();
+        app.shared.config.library.tables.push(TableSource { name: "one".into(), location: file.location() });
+        let unknown = crate::stage::render_tests::render(&mut app, Stage::Tables(TablesState::new())).pixel_checksum();
+
+        crate::tablesrc::load_and_match_md5s(&app.shared.config.library.tables[0], &[]);
+        let failed = crate::stage::render_tests::render(&mut app, Stage::Tables(TablesState::new())).pixel_checksum();
+        assert_ne!(unknown, failed, "the failure is not on the screen");
     }
 
     #[test]
