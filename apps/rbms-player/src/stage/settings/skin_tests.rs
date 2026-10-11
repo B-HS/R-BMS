@@ -50,13 +50,13 @@ fn focus(state: &mut SettingsState, row: SettingRow) {
 
 /// The labels of the rows the screen is showing.
 fn labels(state: &SettingsState) -> Vec<String> {
-    state.lines.iter().map(|(label, _)| label.clone()).collect()
+    state.lines.iter().map(|line| line.label.clone()).collect()
 }
 
 /// The value the screen is showing for one row.
 fn value_of(state: &SettingsState, row: SettingRow) -> String {
     let at = state.rows.iter().position(|entry| *entry == row).unwrap_or_else(|| panic!("{row:?} is not on the open tab"));
-    state.lines[at].1.clone()
+    state.lines[at].value.clone()
 }
 
 /// Until a document is chosen the SKIN tab is only the six rows the table declares; choosing
@@ -140,7 +140,7 @@ fn what_the_tab_edits_survives_the_settings_file() {
         state.row_key(&mut ctx(&mut app), &press(KeyCode::ArrowRight));
     }
     state.refresh(&app.shared);
-    let shown: Vec<(String, String)> = state.lines.clone();
+    let shown = state.lines.clone();
 
     state.row_key(&mut ctx(&mut app), &press(KeyCode::Escape));
     let restored = rbms_config::load(&app.shared.settings_path).expect("the file the screen wrote reads back").config;

@@ -4,7 +4,11 @@
 //! it to pass: with the variable unset the capture test returns at once, and the one test that
 //! always runs only checks the scenario files next door.
 //!
-//! With a pack named, each screen in [`SHOTS`] is taken through the whole path a frame takes:
+//! With a pack named, each screen in [`SHOTS`] is taken through the whole path a frame takes. The
+//! pack's document for a screen is the one whose header declares that screen's skin type, whatever
+//! the file is called, and a pack that has none, or whose documents offer no row or no image a shot
+//! chooses or presses, is reported and that shot passed over; the screens it does have are held to
+//! drawing. For each shot:
 //!
 //! 1. A scenario file (`tests/skin/external/<screen>.json`, a [`MapHost`] written out) stands in for
 //!    the game. Every option the reference declares reads as off unless the scenario turns it on,
@@ -40,7 +44,7 @@
 //! The pack is read only. A skin's writes go to an overlay in the temporary directory, and the
 //! pack's folder is compared before and after.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -58,7 +62,10 @@ use rbms_render::{
     Renderer, SkinAssets, SkinFrame, SkinImage, SkinObjectKind, SkinScreen, SongBars, TextContext, TextureId, TimingHistogram,
 };
 use rbms_skin::dst::{DrawCondition, TimerRef};
-use rbms_skin::loader::{LoadedSkin, SkinLoadOptions, SkinUserConfig, load_header, load_skin_with_host, parse_value};
+use rbms_skin::loader::{
+    LoadedSkin, SKIN_TYPE_COURSE_RESULT, SKIN_TYPE_DECIDE, SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_PLAY_5KEYS, SKIN_TYPE_PLAY_7KEYS, SKIN_TYPE_PLAY_10KEYS,
+    SKIN_TYPE_PLAY_14KEYS, SKIN_TYPE_RESULT, SkinLoadOptions, SkinUserConfig, load_header, load_skin_with_host, parse_value, skin_type_mode,
+};
 use rbms_skin::model::EventRef;
 use rbms_skin::property::{MapHost, PropertyKind};
 use rbms_skin::timer::{MICROS_PER_MILLI, TimerId, TimerState};
@@ -157,12 +164,6 @@ const PLAY_CHART_SEVEN: &[u8] = b"#00118:0000000100000000\r\n#00128:000000010000
 /// The lane of the play scenarios whose long note the player holds while the play head is inside
 /// it. The other long note of the chart is never held, so a frame shows both bodies.
 const PLAY_HELD_LANE: usize = 0;
-
-/// The entry files of the play screens that are not the seven-key one, each of which is drawn
-/// against the chart read as its own mode.
-const ENTRY_PLAY5: &str = "play5_hw.luaskin";
-const ENTRY_PLAY10: &str = "play10_hw.luaskin";
-const ENTRY_PLAY14: &str = "play14_hw.luaskin";
 
 /// The scene time the other play screens are drawn at: a second and a half into the chart, with
 /// the first long note under the play head.
@@ -462,8 +463,9 @@ struct Shot {
     name: &'static str,
     /// The stem of every capture.
     capture: &'static str,
-    /// The entry file, relative to the pack.
-    entry: &'static str,
+    /// The skin type of the document that draws the screen, which is how the pack's document for it
+    /// is found. A play screen is drawn against a chart read as its own mode.
+    screen: i32,
     /// The scene times that are drawn, in milliseconds and in order.
     times_ms: &'static [i64],
     extra: Extra,
@@ -542,7 +544,7 @@ const SHOTS: &[Shot] = &[
     Shot {
         name: "decide",
         capture: "decide",
-        entry: "decide.luaskin",
+        screen: SKIN_TYPE_DECIDE,
         times_ms: &[0, 500, 1_500, 3_000, 3_750],
         extra: Extra::None,
         switches: &[],
@@ -552,7 +554,7 @@ const SHOTS: &[Shot] = &[
     Shot {
         name: "result",
         capture: "result",
-        entry: "result.luaskin",
+        screen: SKIN_TYPE_RESULT,
         times_ms: &[0, 250, 500, 750, 1_500, 3_000],
         extra: Extra::Result,
         switches: &[],
@@ -562,7 +564,7 @@ const SHOTS: &[Shot] = &[
     Shot {
         name: "result",
         capture: "result_menu2",
-        entry: "result.luaskin",
+        screen: SKIN_TYPE_RESULT,
         times_ms: &[3_000, 3_250, 5_000],
         extra: Extra::Result,
         switches: &[],
@@ -572,7 +574,7 @@ const SHOTS: &[Shot] = &[
     Shot {
         name: "result",
         capture: "course",
-        entry: "course.luaskin",
+        screen: SKIN_TYPE_COURSE_RESULT,
         times_ms: &[0, 1_500, 3_000],
         extra: Extra::CourseResult,
         switches: &[],
@@ -582,7 +584,7 @@ const SHOTS: &[Shot] = &[
     Shot {
         name: "musicselect",
         capture: "musicselect",
-        entry: "musicselect.luaskin",
+        screen: SKIN_TYPE_MUSIC_SELECT,
         times_ms: &[0, 500, 1_500, 3_000],
         extra: Extra::Select,
         switches: &[],
@@ -592,7 +594,7 @@ const SHOTS: &[Shot] = &[
     Shot {
         name: "musicselect",
         capture: "musicselect_slide",
-        entry: "musicselect.luaskin",
+        screen: SKIN_TYPE_MUSIC_SELECT,
         times_ms: &[0, 3_000],
         extra: Extra::SelectSliding,
         switches: &[],
@@ -602,7 +604,7 @@ const SHOTS: &[Shot] = &[
     Shot {
         name: "play7_hw",
         capture: "play7_hw",
-        entry: "play7_hw.luaskin",
+        screen: SKIN_TYPE_PLAY_7KEYS,
         times_ms: &[0, 2_000, 4_000, 6_000],
         extra: Extra::Play,
         switches: &[Switch { at_ms: PLAY_LOADED_MS, option: OPTION_NOW_LOADING, on: false }, Switch { at_ms: PLAY_LOADED_MS, option: OPTION_LOADED, on: true }],
@@ -612,7 +614,7 @@ const SHOTS: &[Shot] = &[
     Shot {
         name: "play7_judge",
         capture: "play7_judge",
-        entry: "play7_hw.luaskin",
+        screen: SKIN_TYPE_PLAY_7KEYS,
         times_ms: &[5_100, 5_700, 6_320, 6_800],
         extra: Extra::Play,
         switches: &[],
@@ -622,7 +624,7 @@ const SHOTS: &[Shot] = &[
     Shot {
         name: "play7_visualizers",
         capture: "play7_visualizers",
-        entry: "play7_hw.luaskin",
+        screen: SKIN_TYPE_PLAY_7KEYS,
         times_ms: &[PLAY_RUNNING_MS],
         extra: Extra::Play,
         switches: &[],
@@ -632,7 +634,7 @@ const SHOTS: &[Shot] = &[
     Shot {
         name: "play7_cover",
         capture: "play7_cover",
-        entry: "play7_hw.luaskin",
+        screen: SKIN_TYPE_PLAY_7KEYS,
         times_ms: &[5_120],
         extra: Extra::Play,
         switches: &[],
@@ -642,7 +644,7 @@ const SHOTS: &[Shot] = &[
     Shot {
         name: "play7_bga",
         capture: "play7_bga",
-        entry: "play7_hw.luaskin",
+        screen: SKIN_TYPE_PLAY_7KEYS,
         times_ms: &[4_000, 5_000, 5_500, 6_000],
         extra: Extra::PlayBga,
         switches: &[],
@@ -652,7 +654,7 @@ const SHOTS: &[Shot] = &[
     Shot {
         name: "play5_hw",
         capture: "play5_hw",
-        entry: ENTRY_PLAY5,
+        screen: SKIN_TYPE_PLAY_5KEYS,
         times_ms: &[PLAY_RUNNING_MS],
         extra: Extra::Play,
         switches: &[],
@@ -662,7 +664,7 @@ const SHOTS: &[Shot] = &[
     Shot {
         name: "play14_hw",
         capture: "play14_hw",
-        entry: ENTRY_PLAY14,
+        screen: SKIN_TYPE_PLAY_14KEYS,
         times_ms: &[PLAY_RUNNING_MS],
         extra: Extra::Play,
         switches: &[],
@@ -672,7 +674,7 @@ const SHOTS: &[Shot] = &[
     Shot {
         name: "play10_hw",
         capture: "play10_hw",
-        entry: ENTRY_PLAY10,
+        screen: SKIN_TYPE_PLAY_10KEYS,
         times_ms: &[PLAY_RUNNING_MS],
         extra: Extra::Play,
         switches: &[],
@@ -682,7 +684,7 @@ const SHOTS: &[Shot] = &[
     Shot {
         name: "decide",
         capture: "decide_fnt",
-        entry: "decide.luaskin",
+        screen: SKIN_TYPE_DECIDE,
         times_ms: &[0, 1_500, 3_750],
         extra: Extra::None,
         switches: &[],
@@ -692,7 +694,7 @@ const SHOTS: &[Shot] = &[
     Shot {
         name: "result",
         capture: "result_fnt",
-        entry: "result.luaskin",
+        screen: SKIN_TYPE_RESULT,
         times_ms: &[0, 3_000],
         extra: Extra::Result,
         switches: &[],
@@ -702,7 +704,7 @@ const SHOTS: &[Shot] = &[
     Shot {
         name: "musicselect",
         capture: "musicselect_fnt",
-        entry: "musicselect.luaskin",
+        screen: SKIN_TYPE_MUSIC_SELECT,
         times_ms: &[0, 3_000],
         extra: Extra::Select,
         switches: &[],
@@ -712,7 +714,7 @@ const SHOTS: &[Shot] = &[
     Shot {
         name: "decide",
         capture: "decide_movie",
-        entry: "decide.luaskin",
+        screen: SKIN_TYPE_DECIDE,
         times_ms: &[0, 1_500, 3_000],
         extra: Extra::None,
         switches: &[],
@@ -722,7 +724,7 @@ const SHOTS: &[Shot] = &[
     Shot {
         name: "musicselect",
         capture: "musicselect_movie",
-        entry: "musicselect.luaskin",
+        screen: SKIN_TYPE_MUSIC_SELECT,
         times_ms: &[0, 1_500, 3_000],
         extra: Extra::Select,
         switches: &[],
@@ -732,7 +734,7 @@ const SHOTS: &[Shot] = &[
     Shot {
         name: "play7_nobga",
         capture: "play7_nobga",
-        entry: "play7_hw.luaskin",
+        screen: SKIN_TYPE_PLAY_7KEYS,
         times_ms: &[0, 6_000, 8_000],
         extra: Extra::Play,
         switches: &[Switch { at_ms: PLAY_LOADED_MS, option: OPTION_NOW_LOADING, on: false }, Switch { at_ms: PLAY_LOADED_MS, option: OPTION_LOADED, on: true }],
@@ -742,7 +744,7 @@ const SHOTS: &[Shot] = &[
     Shot {
         name: "play7_hw",
         capture: "play7_hw_fnt",
-        entry: "play7_hw.luaskin",
+        screen: SKIN_TYPE_PLAY_7KEYS,
         times_ms: &[0, 2_000, 6_000],
         extra: Extra::Play,
         switches: &[Switch { at_ms: PLAY_LOADED_MS, option: OPTION_NOW_LOADING, on: false }, Switch { at_ms: PLAY_LOADED_MS, option: OPTION_LOADED, on: true }],
@@ -751,14 +753,48 @@ const SHOTS: &[Shot] = &[
     },
 ];
 
-/// The mode a shot's chart is read as and its skin is loaded for, which the entry file says.
+/// The mode a shot's chart is read as and its skin is loaded for, which the screen says.
 fn mode_of(shot: &Shot) -> Mode {
-    match shot.entry {
-        ENTRY_PLAY5 => Mode::BEAT_5K,
-        ENTRY_PLAY10 => Mode::BEAT_10K,
-        ENTRY_PLAY14 => Mode::BEAT_14K,
-        _ => Mode::BEAT_7K,
+    skin_type_mode(shot.screen).unwrap_or(Mode::BEAT_7K)
+}
+
+/// The extensions of a skin document.
+const DOCUMENT_EXTENSIONS: [&str; 3] = ["luaskin", "json", "json5"];
+
+/// The extension only a skin is written under. A file with one of the others may be anything a
+/// pack keeps as data.
+const LUA_SKIN_EXTENSION: &str = "luaskin";
+
+/// The documents at the top of `pack` by the skin type their headers declare, the first by file
+/// name when several declare one. A data file that is not a document of a skin is left out; a Lua
+/// skin whose header does not load is a broken skin, not a file to pass over, and fails the test
+/// with what the loader said: a screen whose document stopped loading must not turn into a screen
+/// the pack is said to have no document for.
+fn documents_of(pack: &Path, overlay: &Path) -> BTreeMap<i32, PathBuf> {
+    let mut files: Vec<PathBuf> = std::fs::read_dir(pack)
+        .unwrap_or_else(|error| panic!("{} should be listable: {error}", pack.display()))
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.is_file() && path.extension().is_some_and(|extension| DOCUMENT_EXTENSIONS.iter().any(|known| extension.eq_ignore_ascii_case(known)))
+        })
+        .collect();
+    files.sort();
+    let user = SkinUserConfig::default();
+    let mut found = BTreeMap::new();
+    for path in files {
+        let options = SkinLoadOptions { rng_seed: Some(TEST_SEED), write_overlay: Some(overlay), ..SkinLoadOptions::new(pack, &user, Mode::BEAT_7K) };
+        match load_header(&path, options) {
+            Ok(header) => {
+                found.entry(header.skin_type).or_insert(path);
+            }
+            Err(error) if path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case(LUA_SKIN_EXTENSION)) => {
+                panic!("the header of {} should load: {error}", path.display())
+            }
+            Err(_) => {}
+        }
     }
+    found
 }
 
 /// The long note `lane` has under the play head, by the chart time of its head: the one a player
@@ -1359,39 +1395,50 @@ fn press(skin: &LoadedSkin, host: &MapHost, click: &Click) {
 
 /// The player's settings for one shot: the skin's own, but for the rows the shot chooses in. Which
 /// option id a choice comes to is read off the skin's header, which is where the skin numbers them.
-fn chosen(pack: &Path, overlay: &Path, shot: &Shot) -> SkinUserConfig {
+/// `None`, with the reason said, when the document offers no such row or no such item in it.
+fn chosen(pack: &Path, overlay: &Path, entry: &Path, shot: &Shot) -> Option<SkinUserConfig> {
     let mut user = SkinUserConfig::default();
     if shot.choices.is_empty() {
-        return user;
+        return Some(user);
     }
     let untouched = SkinUserConfig::default();
     let options = SkinLoadOptions { rng_seed: Some(TEST_SEED), write_overlay: Some(overlay), ..SkinLoadOptions::new(pack, &untouched, mode_of(shot)) };
-    let header = load_header(&pack.join(shot.entry), options).unwrap_or_else(|error| panic!("the header of {} should load: {error}", shot.entry));
+    let header = load_header(entry, options).unwrap_or_else(|error| panic!("the header of {} should load: {error}", entry.display()));
     for choice in shot.choices {
-        let row = header.properties.iter().find(|row| row.name == choice.row).unwrap_or_else(|| panic!("{} should offer a row {:?}", shot.entry, choice.row));
-        let item = row
-            .item
-            .iter()
-            .find(|item| item.name.starts_with(choice.item))
-            .unwrap_or_else(|| panic!("the row {:?} should offer {:?}", choice.row, choice.item));
+        let Some(row) = header.properties.iter().find(|row| row.name == choice.row) else {
+            println!("{}: {} offers no row {:?}", shot.capture, entry.display(), choice.row);
+            return None;
+        };
+        let Some(item) = row.item.iter().find(|item| item.name.starts_with(choice.item)) else {
+            println!("{}: the row {:?} offers no {:?}", shot.capture, choice.row, choice.item);
+            return None;
+        };
         println!("{}: {:?} is set to {:?} (option {})", shot.capture, row.name, item.name, item.op);
         user.properties.insert(row.name.clone(), item.op);
     }
-    user
+    Some(user)
 }
 
-/// Loads, builds and draws one screen of the pack, printing what it came to.
-fn capture(pack: &Path, overlay: &Path, capture_dir: Option<&Path>, shot: &Shot) {
-    let entry = pack.join(shot.entry);
+/// Loads, builds and draws one screen of the pack from its document `entry`, printing what it came
+/// to. A shot that presses an image the document does not declare, or chooses a row it does not offer,
+/// is said so of and not taken. Answers whether it was taken.
+fn capture(pack: &Path, overlay: &Path, capture_dir: Option<&Path>, entry: &Path, shot: &Shot) -> bool {
+    let file = entry.file_name().map_or_else(|| entry.display().to_string(), |name| name.to_string_lossy().into_owned());
     let mut host = scenario(shot.name);
     let scheduled = host.timers.clone();
     settle(&mut host, &scheduled, shot.switches, 0);
 
-    let user = chosen(pack, overlay, shot);
+    let Some(user) = chosen(pack, overlay, entry, shot) else {
+        return false;
+    };
     let options = SkinLoadOptions { rng_seed: Some(TEST_SEED), write_overlay: Some(overlay), ..SkinLoadOptions::new(pack, &user, mode_of(shot)) };
     let loading = Instant::now();
-    let skin = load_skin_with_host(&entry, options, &host).unwrap_or_else(|error| panic!("{} should load: {error}", shot.entry));
+    let skin = load_skin_with_host(entry, options, &host).unwrap_or_else(|error| panic!("{file} should load: {error}"));
     let loaded_in = loading.elapsed();
+    if let Some(click) = shot.clicks.iter().find(|click| !skin.def.image.iter().any(|image| image.id == click.image)) {
+        println!("{}: {file} declares no image {:?}, so the press this shot makes is not made", shot.capture, click.image);
+        return false;
+    }
 
     let declared_sources = skin.sources.len();
     let referenced = referenced_sources(&skin);
@@ -1585,6 +1632,7 @@ fn capture(pack: &Path, overlay: &Path, capture_dir: Option<&Path>, shot: &Shot)
     }
     drop(movies);
     screen.release(&mut canvas);
+    true
 }
 
 /// Draws each screen of the pack `RBMS_SKIN_PACK` names at a few scene times, and writes the frames
@@ -1603,9 +1651,23 @@ fn an_external_skin_pack_draws_through_the_skin_renderer() {
     let _ = std::fs::remove_dir_all(&overlay);
     let before = snapshot(&pack);
 
+    let documents = documents_of(&pack, &overlay);
+    let mut taken = 0;
+    let mut drawn = BTreeSet::new();
     for shot in SHOTS {
-        capture(&pack, &overlay, capture_dir.as_deref(), shot);
+        let Some(entry) = documents.get(&shot.screen) else {
+            println!("{}: the pack has no document of type {}", shot.capture, shot.screen);
+            continue;
+        };
+        if capture(&pack, &overlay, capture_dir.as_deref(), entry, shot) {
+            taken += 1;
+            drawn.insert(shot.screen);
+        }
     }
+    println!("{taken} of {} shots were taken", SHOTS.len());
+    assert!(taken > 0, "{} drew none of the shots", pack.display());
+    let shot_at: BTreeSet<i32> = SHOTS.iter().map(|shot| shot.screen).filter(|screen| documents.contains_key(screen)).collect();
+    assert_eq!(drawn, shot_at, "{} has a document for a screen none of whose shots was taken", pack.display());
 
     let written: Vec<PathBuf> = if overlay.is_dir() { snapshot(&overlay).into_keys().collect() } else { Vec::new() };
     println!("the skins wrote {} entries to their overlay: {written:?}", written.len());

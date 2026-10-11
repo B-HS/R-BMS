@@ -65,7 +65,7 @@ use rbms_audio::{AudioEngine, Bus, DecodedAudio, IdNamespace};
 use super::AudioRequest;
 use crate::AppShared;
 use crate::notify::{Level, notify};
-use crate::skin_select::skin_root;
+use crate::skin_select::{pack_in_effect, skin_root};
 
 /// Sample ids reserved for a skin's sounds, kept clear of chart keysounds ([`IdNamespace::PLAY`]),
 /// song-select previews ([`IdNamespace::PREVIEW`]) and system sounds
@@ -498,10 +498,11 @@ fn spawn_worker(epoch: Arc<AtomicU64>) -> Option<Worker> {
     Some(Worker { jobs, done })
 }
 
-/// The folders a skin may play files from: the pack the run draws, and the skin folder.
+/// The folders a skin may play files from: the pack the run draws, which is the installed default
+/// pack when the player named none, and the skin folder.
 fn skin_roots(shared: &AppShared) -> Vec<PathBuf> {
-    let pack = shared.launch.skin_pack.as_deref().or_else(|| shared.config.skin.pack_folder().map(Path::new));
-    pack.into_iter().map(Path::to_path_buf).chain(std::iter::once(skin_root(&shared.settings_path, &shared.config))).collect()
+    let pack = pack_in_effect(shared.launch.skin_pack.as_deref(), &shared.config, &shared.settings_path);
+    pack.into_iter().chain(std::iter::once(skin_root(&shared.settings_path, &shared.config))).collect()
 }
 
 /// Carries out one sound request a skin made during the frame that has just ended.

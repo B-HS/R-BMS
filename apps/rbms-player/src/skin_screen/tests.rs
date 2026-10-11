@@ -212,7 +212,7 @@ fn a_lua_skin_that_cannot_be_read_is_reported_once_and_leaves_the_built_in_scree
         let reasons: Vec<&String> =
             said.iter().map(|(_, message)| message).filter(|message| message.contains("no such asset") && message.contains(&home)).collect();
         assert_eq!(reasons.len(), 1, "the failure was not said exactly once: {reasons:?}");
-        assert!(reasons[0].ends_with(SKIN_FALLBACK_NOTE) && !reasons[0].contains('\n'), "{:?}", reasons[0]);
+        assert!(reasons[0].starts_with(&format!("skin {DECIDE_SKIN_FILE}{SKIN_FAILURE_NOTE}")) && !reasons[0].contains('\n'), "{:?}", reasons[0]);
 
         let overlay = crate::assets::skin_overlay_folder(&app.shared.settings_path, &document);
         assert_eq!(std::fs::read_to_string(overlay.join("runs.txt")).ok().as_deref(), Some("x"), "the skin's body did not run exactly once");

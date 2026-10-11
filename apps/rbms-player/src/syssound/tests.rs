@@ -288,7 +288,7 @@ fn gain_is_clamped_and_a_non_finite_gain_is_silent() {
 fn the_shipped_set_resolves_every_slot_once_it_is_installed() {
     let home = temp_dir("shipped");
     let settings = home.join("settings.ron");
-    assert!(crate::assets::install_default_sounds(&settings), "the shipped set did not install");
+    assert!(crate::assets::install_default_pack(&settings).is_complete(), "the shipped set did not install");
     let folder = crate::assets::default_sound_folder(&settings).expect("the installed set is found");
 
     let mut set = SystemSoundSet::load_optional(Some(&folder));

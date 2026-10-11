@@ -32,8 +32,14 @@ pub(crate) struct SyncPayload {
 /// Fields that describe *this machine or this session*, not the player's preferences, and are
 /// therefore never uploaded and never overwritten by a download: the bearer token and the identity
 /// it belongs to, the server it was issued by, and the local file paths — the song folders, the
-/// difficulty tables and the skin pack folder among them, since all three are paths into this
-/// machine's disk.
+/// difficulty tables and everything the SKIN tab stores among them, since all of it is paths into
+/// this machine's disk.
+///
+/// The SKIN tab is local as a whole. The pack folder and the skin folder are paths, the document
+/// each screen is drawn with is an absolute path, and what was chosen inside a document is keyed by
+/// that same path: on another machine the keys name files that are not there, and a screen pointed
+/// at one would fall back to the built-in drawing with a read failure. The screen the tab was last
+/// left on goes with them, being nothing but where this machine's cursor stood.
 fn keep_local(local: &Config, mut incoming: Config) -> Config {
     incoming.network.ir_token = local.network.ir_token.clone();
     incoming.network.ir_login_id = local.network.ir_login_id.clone();
@@ -44,7 +50,7 @@ fn keep_local(local: &Config, mut incoming: Config) -> Config {
     incoming.library.folders = local.library.folders.clone();
     incoming.library.tables = local.library.tables.clone();
     incoming.display.font_path = local.display.font_path.clone();
-    incoming.skin.pack = local.skin.pack.clone();
+    incoming.skin = local.skin.clone();
     incoming
 }
 
@@ -239,6 +245,17 @@ mod tests {
 
     use crate::{SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_RESULT};
 
+    /// The folder this machine looks for skin documents in, and a document it found there.
+    const LOCAL_SKIN_FOLDER: &str = "/local/skins";
+    const LOCAL_DOCUMENT: &str = "/local/skins/mine/select.luaskin";
+
+    /// The same two paths on the machine that uploaded the account's copy.
+    const REMOTE_SKIN_FOLDER: &str = "/their/skins";
+    const REMOTE_DOCUMENT: &str = "/their/skins/theirs/select.luaskin";
+
+    /// The option id this machine chose for [`STORED_PROPERTY`] in a document of its own.
+    const LOCAL_PROPERTY_OPTION: i32 = 912;
+
     fn local_settings() -> Config {
         let mut c = Config::default();
         c.play.hispeed = 4.5;
@@ -254,6 +271,24 @@ mod tests {
         c.library.tables = vec![TableSource { name: "mine".into(), location: "/local/table.json".into() }];
         c.display.font_path = Some("/local/font.ttf".into());
         c.skin.pack = Some("/local/skins/pack".into());
+        c.skin.folder = Some(LOCAL_SKIN_FOLDER.into());
+        c.skin.screen = SKIN_TYPE_RESULT;
+        c.skin.select(SKIN_TYPE_MUSIC_SELECT, Some(LOCAL_DOCUMENT.into()));
+        c.skin.customise(LOCAL_DOCUMENT).properties.insert(STORED_PROPERTY.into(), LOCAL_PROPERTY_OPTION);
+        c
+    }
+
+    /// The settings another machine uploaded before the SKIN tab was kept local, as an account may
+    /// still hold them: its own skin folder, a document chosen for two screens, and choices stored
+    /// under those documents' paths.
+    fn remote_skin_settings() -> Config {
+        let mut c = Config::default();
+        c.skin.pack = Some("/their/skins/pack".into());
+        c.skin.folder = Some(REMOTE_SKIN_FOLDER.into());
+        c.skin.screen = SKIN_TYPE_MUSIC_SELECT;
+        c.skin.select(SKIN_TYPE_MUSIC_SELECT, Some(REMOTE_DOCUMENT.into()));
+        c.skin.select(SKIN_TYPE_RESULT, Some(REMOTE_DOCUMENT.into()));
+        c.skin.customise(REMOTE_DOCUMENT).properties.insert(STORED_PROPERTY.into(), STORED_PROPERTY_OPTION);
         c
     }
 
@@ -288,6 +323,10 @@ mod tests {
         assert!(sanitised.library.tables.is_empty());
         assert_eq!(sanitised.display.font_path, None);
         assert_eq!(sanitised.skin.pack, None, "the skin pack is a folder on this machine's disk");
+        assert_eq!(sanitised.skin.folder, None, "the skin folder is a folder on this machine's disk");
+        assert_eq!(sanitised.skin.document(SKIN_TYPE_MUSIC_SELECT), None, "a screen's document is a path on this machine's disk");
+        assert_eq!(sanitised.skin.customisation(LOCAL_DOCUMENT), None, "the choices made in a document are stored under its path");
+        assert_eq!(sanitised.skin, rbms_config::SkinOptions::default(), "nothing the SKIN tab stores goes up");
         assert_eq!(sanitised.network.player_id, Config::default().network.player_id);
         assert!((sanitised.play.hispeed - 4.5).abs() < 1e-9, "the play preferences do go up");
         assert_eq!(sanitised.judge.judge_rate_key, [90; JUDGE_WIDTH_TIER_COUNT]);
@@ -297,6 +336,7 @@ mod tests {
         assert!(!blob.content.contains("/local/songs"), "the serialised blob cannot leak a local path");
         assert!(!blob.content.contains("/local/table.json"));
         assert!(!blob.content.contains("/local/skins/pack"), "the serialised blob cannot leak the skin pack folder");
+        assert!(!blob.content.contains(LOCAL_SKIN_FOLDER), "the serialised blob cannot leak the skin folder or a document under it");
     }
 
     #[test]
@@ -312,7 +352,7 @@ mod tests {
         remote.library.folders = vec!["/their/songs".into()];
         remote.library.tables = vec![TableSource { name: "theirs".into(), location: "/their/table.json".into() }];
         remote.display.font_path = Some("/their/font.ttf".into());
-        remote.skin.pack = Some("/their/skins/pack".into());
+        remote.skin = remote_skin_settings().skin;
 
         let merged = merge_downloaded(&local, remote);
         assert!((merged.play.hispeed - 1.25).abs() < 1e-9, "preferences come from the server");
@@ -327,6 +367,12 @@ mod tests {
         assert_eq!(merged.library.tables[0].location, "/local/table.json");
         assert_eq!(merged.display.font_path.as_deref(), Some("/local/font.ttf"));
         assert_eq!(merged.skin.pack.as_deref(), Some("/local/skins/pack"), "a downloaded pack folder does not replace this machine's");
+        assert_eq!(merged.skin.folder.as_deref(), Some(LOCAL_SKIN_FOLDER), "a downloaded skin folder does not replace this machine's");
+        assert_eq!(merged.skin.document(SKIN_TYPE_MUSIC_SELECT), Some(LOCAL_DOCUMENT), "a screen was pointed at another machine's file");
+        assert_eq!(merged.skin.document(SKIN_TYPE_RESULT), None, "a screen this machine leaves to its pack took another machine's document");
+        assert_eq!(merged.skin.user_config(LOCAL_DOCUMENT).properties.get(STORED_PROPERTY), Some(&LOCAL_PROPERTY_OPTION));
+        assert_eq!(merged.skin.customisation(REMOTE_DOCUMENT), None, "choices came down for a document that is not on this machine");
+        assert_eq!(merged.skin, local.skin, "the SKIN tab is this machine's as a whole");
     }
 
     #[test]
@@ -335,6 +381,34 @@ mod tests {
         remote.skin.pack = Some("/their/skins/pack".into());
         let merged = merge_downloaded(&Config::default(), remote);
         assert_eq!(merged.skin.pack, None, "another machine's pack folder was adopted");
+    }
+
+    /// A fresh install signing in to an account another machine filled in: every screen stays on
+    /// the skin this machine installed, rather than being pointed at files that are not here.
+    #[test]
+    fn a_download_onto_a_fresh_machine_brings_no_skin_choices() {
+        let merged = merge_downloaded(&Config::default(), remote_skin_settings());
+        assert_eq!(merged.skin, rbms_config::SkinOptions::default(), "another machine's skin choices were adopted");
+    }
+
+    /// The copy an account already holds was uploaded while the document paths still went up. It
+    /// comes down through the same route every blob does, and this machine's choices are what is
+    /// left standing; the next upload then replaces the stored paths with nothing.
+    #[test]
+    fn skin_paths_an_account_already_holds_do_not_reach_this_machine_and_are_not_sent_back() {
+        let held = build_blob(&payload_of(remote_skin_settings()), 1_000, None).unwrap();
+        assert!(held.content.contains(REMOTE_DOCUMENT), "the fixture is a blob that still carries a document path");
+        let downloaded = parse_blob(&held).expect("a blob at the current schema parses").settings;
+        assert_eq!(downloaded.skin.document(SKIN_TYPE_RESULT), Some(REMOTE_DOCUMENT), "the blob is read as it was written");
+
+        let local = local_settings();
+        let merged = merge_downloaded(&local, downloaded);
+        assert_eq!(merged.skin, local.skin, "a path another machine uploaded replaced this machine's");
+
+        let next = build_blob(&payload_of(sanitise_for_upload(&merged)), 2_000, Some(1_000)).unwrap();
+        assert!(!next.content.contains(REMOTE_DOCUMENT), "the other machine's path was uploaded again");
+        assert!(!next.content.contains(LOCAL_DOCUMENT), "this machine's path was uploaded");
+        assert_eq!(parse_blob(&next).expect("the next upload parses").settings.skin, rbms_config::SkinOptions::default());
     }
 
     #[test]
@@ -466,22 +540,28 @@ mod tests {
     fn a_blob_from_a_build_that_shipped_the_skin_bundle_comes_down_without_it() {
         let blob = blob_of_settings(&bundled_skin_settings(BUNDLED_SKIN_SCHEMA_VERSION));
         let payload = parse_blob(&blob).expect("a schema 2 blob is migrated, not read as the current schema");
-        let merged = merge_downloaded(&local_settings(), payload.settings);
+        let read = &payload.settings.skin;
+        assert_eq!(read.document(SKIN_TYPE_MUSIC_SELECT), None, "a screen is drawn alone by a document written to be layered");
+        assert_eq!(read.customisation(RETIRED_BUNDLE_DOCUMENT), None, "choices were kept for a document of the retired bundle");
+        assert_eq!(read.customisation(RETIRED_BUNDLE_UNSELECTED_DOCUMENT), None, "choices were kept for a retired document no screen used");
+        assert_eq!(read.document(SKIN_TYPE_RESULT), Some(PLAYER_DOCUMENT), "the player's own document was dropped by the migration");
+        assert_eq!(read.user_config(PLAYER_DOCUMENT).properties.get(STORED_PROPERTY), Some(&STORED_PROPERTY_OPTION));
 
+        let local = local_settings();
+        let merged = merge_downloaded(&local, payload.settings);
         assert_eq!(merged.schema_version, CURRENT_SCHEMA_VERSION);
         assert_eq!(merged.display.skin, rbms_config::DEFAULT_SKIN, "the download brought the retired preset back");
         assert!((merged.play.hispeed - 3.5).abs() < 1e-9, "the rest of the blob still loads");
-        assert_eq!(merged.skin.document(SKIN_TYPE_MUSIC_SELECT), None, "a screen is drawn alone by a document written to be layered");
-        assert_eq!(merged.skin.customisation(RETIRED_BUNDLE_DOCUMENT), None, "choices were kept for a document of the retired bundle");
-        assert_eq!(merged.skin.customisation(RETIRED_BUNDLE_UNSELECTED_DOCUMENT), None, "choices were kept for a retired document no screen used");
-        assert_eq!(merged.skin.document(SKIN_TYPE_RESULT), Some(PLAYER_DOCUMENT), "the player's own document was dropped");
-        assert_eq!(merged.skin.user_config(PLAYER_DOCUMENT).properties.get(STORED_PROPERTY), Some(&STORED_PROPERTY_OPTION));
+        assert_eq!(merged.skin, local.skin, "the documents another machine chose replaced this machine's");
 
         let stored = build_blob(&payload_of(sanitise_for_upload(&merged)), 1, None).unwrap();
         let again = parse_blob(&stored).expect("the copy this build uploads parses").settings;
         assert_eq!(again.display.skin, merged.display.skin);
-        let uploaded = rbms_config::SkinOptions { pack: None, ..merged.skin.clone() };
-        assert_eq!(again.skin, uploaded, "the next upload carries the retired bundle back to the account, or this machine's pack folder with it");
+        assert_eq!(
+            again.skin,
+            rbms_config::SkinOptions::default(),
+            "the next upload carries the retired bundle, or one of this machine's skin paths, to the account"
+        );
     }
 
     #[test]

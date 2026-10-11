@@ -37,6 +37,19 @@ const VALUE_SCALE: f32 = 2.0;
 const STATUS_SCALE: f32 = 1.2;
 const RIVAL_SCALE: f32 = 1.5;
 
+/// How far a row's label and value sit in from the row's own edges, and down from its top.
+const ROW_PAD: f32 = 20.0;
+const ROW_TEXT_Y: f32 = 13.0;
+
+/// The note beside a row: how large it is written, how far below the row's top, and how much room
+/// is left between it and the label before it and the value after it.
+const NOTE_SCALE: f32 = 1.2;
+const NOTE_Y: f32 = 18.0;
+const NOTE_GAP: f32 = 16.0;
+
+/// Widest a row's value is drawn, as a share of the panel.
+const VALUE_MAX_SHARE: f32 = 0.6;
+
 /// Keyboard hint under the title.
 pub(crate) const SETTINGS_HINT: &str = "TAB SWITCH   UP DOWN MOVE   LEFT RIGHT CHANGE   ENTER OPEN   ESC SAVE/BACK";
 
@@ -46,11 +59,30 @@ pub(crate) const RIVALS_HINT: &str = "UP DOWN MOVE   ENTER ADD   D REMOVE   ESC 
 /// Title of the inline rival list.
 pub(crate) const RIVALS_TITLE: &str = "RIVALS";
 
+/// One row of the settings screen as it is drawn.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub(crate) struct SettingsLine {
+    pub(crate) label: String,
+    pub(crate) value: String,
+    /// What is said beside the row, or `None` for a row shown bare. A note is written small between
+    /// the label and the value, a step brighter on the focused row so it reads against the
+    /// highlight, and the value of an annotated row is dimmed until the row is focused.
+    pub(crate) note: Option<&'static str>,
+}
+
+impl SettingsLine {
+    /// A row with nothing said beside it.
+    #[cfg(test)]
+    pub(crate) fn bare(label: &str, value: &str) -> SettingsLine {
+        SettingsLine { label: label.to_string(), value: value.to_string(), note: None }
+    }
+}
+
 /// Everything the settings screen draws this frame, assembled before the render pass.
 pub(crate) struct SettingsScene {
     pub(crate) tabs: Vec<&'static str>,
     pub(crate) tab: usize,
-    pub(crate) rows: Vec<(String, String)>,
+    pub(crate) rows: Vec<SettingsLine>,
     pub(crate) sel: usize,
     /// Text being typed into the focused row, already masked when the row is a secret.
     pub(crate) editor: Option<String>,
@@ -102,6 +134,14 @@ fn rivals_scroll_start(len: usize, sel: usize) -> usize {
     sel.saturating_sub(visible / 2).min(len - visible)
 }
 
+/// Where a row's note starts and how much room it has: what is left of the row between the label
+/// and the value as they are drawn, less a gap on either side.
+fn note_span(x0: f32, label: &str, value: &str) -> (f32, f32) {
+    let left = x0 + ROW_PAD + text_width(label, LABEL_SCALE) + NOTE_GAP;
+    let right = x0 + PANEL_W - ROW_PAD - text_width(value, VALUE_SCALE) - NOTE_GAP;
+    (left, right - left)
+}
+
 /// Draw the screen and return its clickable regions.
 pub(crate) fn render_settings<R: Renderer>(r: &mut R, scene: &SettingsScene) -> Vec<(Rect, SettingsHot)> {
     let th = theme();
@@ -124,12 +164,12 @@ pub(crate) fn render_settings<R: Renderer>(r: &mut R, scene: &SettingsScene) -> 
 
     let start = scroll_start(scene.rows.len(), scene.sel);
     for (slot, index) in (start..(start + visible_rows()).min(scene.rows.len())).enumerate() {
-        let (label, value) = &scene.rows[index];
+        let SettingsLine { label, value, note } = &scene.rows[index];
         let y = ROWS_TOP + slot as f32 * ROW_PITCH;
         let on = index == scene.sel;
         let rect = Rect::new(x0, y, PANEL_W, ROW_H);
         r.fill_rect(rect, if on { th.button } else { th.panel });
-        draw_text(r, x0 + 20.0, y + 13.0, LABEL_SCALE, if on { th.text } else { th.text_dim }, label);
+        draw_text(r, x0 + ROW_PAD, y + ROW_TEXT_Y, LABEL_SCALE, if on { th.text } else { th.text_dim }, label);
         let editing = on && scene.editor.is_some();
         let shown = match (&scene.editor, editing) {
             (Some(buffer), true) => buffer.clone(),
@@ -139,10 +179,19 @@ pub(crate) fn render_settings<R: Renderer>(r: &mut R, scene: &SettingsScene) -> 
             th.accent
         } else if on {
             Color::YELLOW
+        } else if note.is_some() {
+            th.text_dim
         } else {
             th.text
         };
-        draw_text_right(r, x0 + PANEL_W - 20.0, y + 13.0, VALUE_SCALE, color, &fit_text(&shown, VALUE_SCALE, PANEL_W * 0.6));
+        let fitted = fit_text(&shown, VALUE_SCALE, PANEL_W * VALUE_MAX_SHARE);
+        draw_text_right(r, x0 + PANEL_W - ROW_PAD, y + ROW_TEXT_Y, VALUE_SCALE, color, &fitted);
+        if let Some(note) = *note {
+            let (left, room) = note_span(x0, label, &fitted);
+            if room > 0.0 {
+                draw_text(r, left, y + NOTE_Y, NOTE_SCALE, if on { th.text_dim } else { th.text_muted }, &fit_text(note, NOTE_SCALE, room));
+            }
+        }
         hot.push((rect, SettingsHot::Row(index)));
     }
 
@@ -200,8 +249,8 @@ mod tests {
 
     /// Rows the NETWORK tab shows, taken from the settings table so the scene the tests render is
     /// the one the screen builds.
-    fn network_rows() -> Vec<(String, String)> {
-        tab_rows(SettingTab::Network, &Config::default()).into_iter().map(|id| (network_row_label(id).unwrap().to_string(), "value".to_string())).collect()
+    fn network_rows() -> Vec<SettingsLine> {
+        tab_rows(SettingTab::Network, &Config::default()).into_iter().map(|id| SettingsLine::bare(network_row_label(id).unwrap(), "value")).collect()
     }
 
     fn network_scene(sel: usize) -> SettingsScene {
@@ -277,6 +326,78 @@ mod tests {
             })
             .collect();
         assert_eq!(rivals, vec![0, 1]);
+    }
+
+    /// The values an annotated row can show, widest included: what a toggle reads, what a cycle
+    /// steps through, and the two ends of a percentage.
+    fn shown_values(id: rbms_config::SettingId) -> Vec<String> {
+        use rbms_config::{CUSTOM_VALUE, OFF_VALUE, ON_VALUE, PERCENT_SCALE, PERCENT_UNIT, SettingKind, descriptor};
+        match descriptor(id).kind {
+            SettingKind::Toggle => vec![ON_VALUE.to_string(), OFF_VALUE.to_string()],
+            SettingKind::Cycle { values } => values.iter().map(|value| (*value).to_string()).chain([CUSTOM_VALUE.to_string()]).collect(),
+            SettingKind::Percent { min, max, .. } => [min, max].iter().map(|end| format!("{}{PERCENT_UNIT}", (end * PERCENT_SCALE).round() as i32)).collect(),
+            other => panic!("{id:?} is annotated and is a {other:?}, whose values this test does not know how to list"),
+        }
+    }
+
+    /// A note is only worth writing whole: one cut short by the value beside it says less than no
+    /// note at all. Every row that can carry one has room for it next to the widest value it shows.
+    #[test]
+    fn every_note_fits_between_its_label_and_its_widest_value() {
+        rbms_render::font::use_embedded_fonts_only();
+        let x0 = (CANVAS_W - PANEL_W) * 0.5;
+        let mut annotated = 0;
+        for row in rbms_config::SETTINGS {
+            let Some(skinned) = row.skinned else {
+                continue;
+            };
+            annotated += 1;
+            for value in shown_values(row.id) {
+                let (left, room) = note_span(x0, row.label, &value);
+                let needed = text_width(skinned.note, NOTE_SCALE);
+                assert!(left > x0 && needed <= room, "{:?} showing {value}: the note needs {needed} and has {room}", row.id);
+                assert_eq!(fit_text(skinned.note, NOTE_SCALE, room), skinned.note, "{:?} showing {value}: the note is drawn cut short", row.id);
+            }
+        }
+        assert!(annotated > 0, "no row carries a note, so nothing was measured");
+    }
+
+    /// Two rows of the DISPLAY tab with the cursor on the second, and `note` beside the first.
+    fn noted_scene(note: Option<&'static str>) -> SettingsScene {
+        SettingsScene {
+            tabs: vec!["PLAY", "DISPLAY"],
+            tab: 1,
+            rows: vec![SettingsLine { note, ..SettingsLine::bare("JUDGE TEXT Y", "0%") }, SettingsLine::bare("LETTERBOX", "ON")],
+            sel: 1,
+            editor: None,
+            status: String::new(),
+            rivals: None,
+        }
+    }
+
+    /// Bytes one pixel of a drawn frame takes.
+    const RGBA_BYTES: usize = 4;
+
+    /// Every pixel of the screen drawn for `scene`.
+    fn drawn(scene: &SettingsScene) -> Vec<u8> {
+        rbms_render::font::use_embedded_fonts_only();
+        let mut canvas = CpuCanvas::new(1280, 720);
+        render_settings(&mut canvas, scene);
+        canvas.pixels().to_vec()
+    }
+
+    /// A note adds to its own row and to nothing else: the rows above and below it, the tab strip
+    /// and the title are drawn pixel for pixel as they are on a screen with no note at all.
+    #[test]
+    fn a_note_is_drawn_inside_the_row_it_belongs_to() {
+        let bare = drawn(&noted_scene(None));
+        let noted = drawn(&noted_scene(Some(rbms_config::BUILT_IN_ONLY_NOTE)));
+        assert!(bare != noted, "a row with a note is drawn the same as one without");
+
+        let row_bytes = CANVAS_W as usize * RGBA_BYTES;
+        let (top, bottom) = (ROWS_TOP as usize * row_bytes, (ROWS_TOP + ROW_H) as usize * row_bytes);
+        assert!(bare[..top] == noted[..top], "the note changed something above its row");
+        assert!(bare[bottom..] == noted[bottom..], "the note changed something below its row");
     }
 
     #[test]

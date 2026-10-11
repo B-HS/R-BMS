@@ -21,13 +21,17 @@
 //! it was set, so the time a document sees is the shot's plus however long the frame has been
 //! drawing.
 //!
-//! [`SKIN_PACK_ENV`] points the last test here at a skin pack somebody else wrote. It is the one test
-//! that draws files from outside the repository, and it passes without doing anything when the
-//! variable is not set. The test names the pack the way the PACK FOLDER row does, so each screen is
+//! [`SKIN_PACK_ENV`] points the tests here whose names say so at a skin pack somebody else wrote.
+//! They draw files from outside the repository, and each passes without doing anything when the
+//! variable is not set. A test names the pack the way the PACK FOLDER row does, so each screen is
 //! drawn with the document of the pack that declares it -- a Lua skin as readily as a document --
-//! read against the screen's own state and with a pinned seed. A screen whose skin cannot be read is
-//! reported and passed over rather than failed: which screens of a pack load is what the test is run
-//! to find out.
+//! read against the screen's own state and with a pinned seed. They are written to hold for any
+//! pack: a pack that has no document for a screen, or no movie, or a document with no row to choose
+//! one with, is reported and passed over, and so is a screen whose skin cannot be read in the first
+//! test below -- which screens of a pack load is what that test is run to find out.
+//!
+//! The same setup of each screen is what [`gate`] draws the default pack's screens with, which is in
+//! the repository and so is held to drawing them wherever the tests run, with no variable set.
 //!
 //! The decide scene is captured by a test of its own, because one frame says little about it: it is
 //! a scene that runs from its opening to its fade, shown for a chart. That test opens the scene for a
@@ -69,6 +73,8 @@
 //! the skin's own times -- loading, ready, playing, and the fade or the failure that closes it --
 //! with the engine playing the chart, or nobody playing it, in between. Seven keys are walked the
 //! whole way; five, ten and fourteen are captured while they play.
+
+mod gate;
 
 use std::collections::BTreeMap;
 use std::ops::Range;
@@ -327,6 +333,25 @@ const PACK_SCREENS: [PackScreen; 3] = [
     PackScreen { skin_type: SKIN_TYPE_PLAY_7KEYS, name: "pack-play7", stage: play },
 ];
 
+/// Why a capture of a screen is passed over rather than failed: the pack has no document for it. A
+/// pack is not obliged to draw every screen -- the default pack has none for the keyboard modes, and
+/// a pack written for another program has none for a mode this one adds.
+const NO_DOCUMENT: &str = "the pack has no document for this screen";
+
+/// What a capture of one screen of a pack came to, as the names it saved. A pack that has no document
+/// for the screen is reported and passed over, which is `None`; any other reason the screen did not
+/// draw fails the test, since a pack that has a document for a screen has to draw it.
+fn drawn_or_passed_over(label: &str, outcome: Result<Vec<String>, String>) -> Option<Vec<String>> {
+    match outcome {
+        Ok(saved) => Some(saved),
+        Err(reason) if reason == NO_DOCUMENT => {
+            println!("{label}: {NO_DOCUMENT}");
+            None
+        }
+        Err(reason) => panic!("{label}: not drawn: {reason}"),
+    }
+}
+
 fn browser() -> Stage {
     Stage::Select(Box::new(SelectState::new()))
 }
@@ -352,6 +377,10 @@ fn is_flat(pixels: &HeadlessCanvas, columns: Range<u32>, mut rows: Range<u32>) -
 }
 
 /// An app with `pack` named as its skin pack and walked, and every read of a skin pinned.
+///
+/// A Lua skin of the pack whose header does not load fails the test here with what the loader said.
+/// Such a skin declares no screen, so the screen it was written for would otherwise look like one
+/// the pack has no document for ([`NO_DOCUMENT`]) and be passed over.
 fn pack_app(pack: &Path, tag: &str) -> App {
     let settings = settings_of(tag);
     let mut config = Config::default();
@@ -359,6 +388,8 @@ fn pack_app(pack: &Path, tag: &str) -> App {
     let mut app = app_in(settings.clone(), config);
     app.shared.skins.pin_seed(Some(PACK_SEED));
     app.shared.skins.rescan(&settings, &app.shared.config);
+    let unreadable = app.shared.skins.take_unreadable();
+    assert!(unreadable.is_empty(), "{} holds Lua skins whose headers do not load: {unreadable:?}", pack.display());
     app.shared.skin_screens.wait_for_movie_frames(Some(MOVIE_FRAME_PATIENCE));
     app
 }
@@ -675,6 +706,35 @@ pub(super) fn scene_frame_at(app: &mut App, scene_ms: i64, canvas: &mut Canvas<'
     transition
 }
 
+/// Run the scene that is up a frame at a time, its clock at its beginning, until the pack's document
+/// for `screen` has compiled; or answer the first line of why it never will: it could not be read, or
+/// its files were not read in time.
+fn wait_for_scene_document(app: &mut App, screen: i32, canvas: &mut Canvas<'_>) -> Result<(), String> {
+    let deadline = Instant::now() + PACK_LOAD_TIMEOUT;
+    while !app.shared.has_compiled_skin(screen) {
+        scene_frame_at(app, 0, canvas);
+        if let Some(reason) = app.shared.skin_failure(screen) {
+            return Err(reason.lines().next().unwrap_or_default().to_owned());
+        }
+        if Instant::now() >= deadline {
+            return Err(format!("its files were not read within {} seconds", PACK_LOAD_TIMEOUT.as_secs()));
+        }
+    }
+    Ok(())
+}
+
+/// An app drawing with `pack` whose decide scene is up for the chart at `chart`, and the size the
+/// pack's decide document was authored at.
+fn decide_scene_app(pack: &Path, tag: &str, chart: &Path) -> Result<(App, (u32, u32)), String> {
+    let mut app = pack_app(pack, tag);
+    let size = authored_size(&app, SKIN_TYPE_DECIDE).ok_or_else(|| NO_DOCUMENT.to_owned())?;
+    let bytes = std::fs::read(chart).map_err(|error| format!("{} could not be read: {error}", chart.display()))?;
+    app.shared.chart_path = chart.to_string_lossy().into_owned();
+    let loaded = loaded_chart_for_tests(&bytes, &app.shared.chart_path);
+    app.stage = Stage::Decide(Box::new(DecideState::loaded(&app.shared, loaded)));
+    Ok((app, size))
+}
+
 /// Open the pack's decide scene for the chart at `chart` and save a frame at each of `shots_ms` as
 /// `<prefix>-<milliseconds>ms`. Answers the names saved, or why the scene never drew.
 ///
@@ -682,24 +742,10 @@ pub(super) fn scene_frame_at(app: &mut App, scene_ms: i64, canvas: &mut Canvas<'
 /// run just past the scene's input time and just past its length, so `STARTINPUT` and `FADEOUT` go
 /// on when the skin's own times say and a later frame shows a fade as far along as it would be.
 fn capture_decide_scene(pack: &Path, tag: &str, chart: &Path, prefix: &str, shots_ms: &[i64]) -> Result<Vec<String>, String> {
-    let mut app = pack_app(pack, tag);
-    let size = authored_size(&app, SKIN_TYPE_DECIDE).ok_or_else(|| "the pack has no document for this screen".to_owned())?;
-    let bytes = std::fs::read(chart).map_err(|error| format!("{} could not be read: {error}", chart.display()))?;
-    app.shared.chart_path = chart.to_string_lossy().into_owned();
-    let loaded = loaded_chart_for_tests(&bytes, &app.shared.chart_path);
-    app.stage = Stage::Decide(Box::new(DecideState::loaded(&app.shared, loaded)));
+    let (mut app, size) = decide_scene_app(pack, tag, chart)?;
 
     let mut pixels = HeadlessCanvas::new(size.0, size.1);
-    let deadline = Instant::now() + PACK_LOAD_TIMEOUT;
-    while !app.shared.has_compiled_skin(SKIN_TYPE_DECIDE) {
-        scene_frame_at(&mut app, 0, &mut Canvas::Headless(&mut pixels));
-        if let Some(reason) = app.shared.skin_failure(SKIN_TYPE_DECIDE) {
-            return Err(reason.lines().next().unwrap_or_default().to_owned());
-        }
-        if Instant::now() >= deadline {
-            return Err(format!("its files were not read within {} seconds", PACK_LOAD_TIMEOUT.as_secs()));
-        }
-    }
+    wait_for_scene_document(&mut app, SKIN_TYPE_DECIDE, &mut Canvas::Headless(&mut pixels))?;
 
     let times = SceneTimes::of_skin(app.shared.skins.document(SKIN_TYPE_DECIDE));
     let last = shots_ms.iter().copied().max().unwrap_or_default();
@@ -737,14 +783,14 @@ fn the_decide_scene_of_a_skin_pack_named_by_the_environment_is_captured_from_its
     let before = files_under(&pack);
 
     let sample = Path::new(env!("CARGO_MANIFEST_DIR")).join(DECIDE_SAMPLE_CHART);
-    let saved =
-        capture_decide_scene(&pack, "decide-sample", &sample, "decide", &DECIDE_SHOTS_MS).unwrap_or_else(|reason| panic!("decide: not drawn: {reason}"));
-    println!("decide: captured {}", saved.join(", "));
+    if let Some(saved) = drawn_or_passed_over("decide", capture_decide_scene(&pack, "decide-sample", &sample, "decide", &DECIDE_SHOTS_MS)) {
+        println!("decide: captured {}", saved.join(", "));
+    }
 
     let rich = write_rich_chart("decide-rich-chart");
-    let saved = capture_decide_scene(&pack, "decide-rich", &rich, "decide-rich", &DECIDE_RICH_SHOTS_MS)
-        .unwrap_or_else(|reason| panic!("decide-rich: not drawn: {reason}"));
-    println!("decide-rich: captured {}", saved.join(", "));
+    if let Some(saved) = drawn_or_passed_over("decide-rich", capture_decide_scene(&pack, "decide-rich", &rich, "decide-rich", &DECIDE_RICH_SHOTS_MS)) {
+        println!("decide-rich: captured {}", saved.join(", "));
+    }
 
     assert_eq!(files_under(&pack), before, "capturing the pack's decide scene changed its folder");
 }
@@ -1088,30 +1134,29 @@ fn finished_run(app: &mut App, chart: &Path, autoplay: bool) -> Result<Transitio
 /// so `STARTINPUT` goes on when the skin says, the other menu is asked for with the key the skin
 /// polls, and the fade is begun with the key that confirms.
 fn capture_result_scene(pack: &Path, tag: &str, chart: &Path, autoplay: bool, prefix: &str) -> Result<Vec<String>, String> {
+    let (mut app, size) = result_scene_app(pack, tag, chart, autoplay)?;
+    walk_result_scene(&mut app, SKIN_TYPE_RESULT, size, prefix)
+}
+
+/// An app drawing with `pack` whose result scene is up for a run of the chart at `chart`, played for
+/// the player when `autoplay` is set and by nobody otherwise, and the size the pack's result
+/// document was authored at.
+fn result_scene_app(pack: &Path, tag: &str, chart: &Path, autoplay: bool) -> Result<(App, (u32, u32)), String> {
     let mut app = pack_app(pack, tag);
-    let size = authored_size(&app, SKIN_TYPE_RESULT).ok_or_else(|| "the pack has no document for this screen".to_owned())?;
+    let size = authored_size(&app, SKIN_TYPE_RESULT).ok_or_else(|| NO_DOCUMENT.to_owned())?;
     let entered = finished_run(&mut app, chart, autoplay)?;
     if !matches!(entered, Transition::To(Stage::Result(_))) {
         return Err("the run did not reach the result screen".to_owned());
     }
     app.switch(entered);
-    walk_result_scene(&mut app, SKIN_TYPE_RESULT, size, prefix)
+    Ok((app, size))
 }
 
 /// Walk the score scene of `screen` -- the result or the course result -- that is up in `app`, which
 /// is the same scene on both, and save its frames as `<prefix>-<moment>`.
 fn walk_result_scene(app: &mut App, screen: i32, size: (u32, u32), prefix: &str) -> Result<Vec<String>, String> {
     let mut pixels = HeadlessCanvas::new(size.0, size.1);
-    let deadline = Instant::now() + PACK_LOAD_TIMEOUT;
-    while !app.shared.has_compiled_skin(screen) {
-        scene_frame_at(app, 0, &mut Canvas::Headless(&mut pixels));
-        if let Some(reason) = app.shared.skin_failure(screen) {
-            return Err(reason.lines().next().unwrap_or_default().to_owned());
-        }
-        if Instant::now() >= deadline {
-            return Err(format!("its files were not read within {} seconds", PACK_LOAD_TIMEOUT.as_secs()));
-        }
-    }
+    wait_for_scene_document(app, screen, &mut Canvas::Headless(&mut pixels))?;
 
     let times = SceneTimes::of_skin(app.shared.skins.document(screen));
     let mut saved = Vec::new();
@@ -1170,8 +1215,9 @@ fn the_result_scene_of_a_skin_pack_named_by_the_environment_is_captured_for_a_cl
     let chart = Path::new(env!("CARGO_MANIFEST_DIR")).join(RESULT_SAMPLE_CHART);
 
     for (autoplay, prefix) in [(true, "result-clear"), (false, "result-fail")] {
-        let saved = capture_result_scene(&pack, prefix, &chart, autoplay, prefix).unwrap_or_else(|reason| panic!("{prefix}: not drawn: {reason}"));
-        println!("{prefix}: captured {}", saved.join(", "));
+        if let Some(saved) = drawn_or_passed_over(prefix, capture_result_scene(&pack, prefix, &chart, autoplay, prefix)) {
+            println!("{prefix}: captured {}", saved.join(", "));
+        }
     }
     assert_eq!(files_under(&pack), before, "capturing the pack's result scene changed its folder");
 }
@@ -1256,12 +1302,20 @@ fn finished_course(app: &mut App, chart: &Path, stages: usize, failing: Option<u
 /// Run a course of the sample chart, open the pack's course result scene on what it left, and walk
 /// it as the result scene is walked, saving its frames as `<prefix>-<moment>`.
 fn capture_course_result_scene(pack: &Path, tag: &str, chart: &Path, failing: Option<usize>, prefix: &str) -> Result<Vec<String>, String> {
+    let (mut app, size) = course_result_scene_app(pack, tag, chart, failing)?;
+    walk_result_scene(&mut app, SKIN_TYPE_COURSE_RESULT, size, prefix)
+}
+
+/// An app drawing with `pack` whose course result scene is up for a course of [`COURSE_STAGES`]
+/// stages of the chart at `chart`, the stage `failing` given up on, and the size the pack's course
+/// result document was authored at.
+fn course_result_scene_app(pack: &Path, tag: &str, chart: &Path, failing: Option<usize>) -> Result<(App, (u32, u32)), String> {
     let mut app = pack_app(pack, tag);
-    let size = authored_size(&app, SKIN_TYPE_COURSE_RESULT).ok_or_else(|| "the pack has no document for this screen".to_owned())?;
+    let size = authored_size(&app, SKIN_TYPE_COURSE_RESULT).ok_or_else(|| NO_DOCUMENT.to_owned())?;
     let run = finished_course(&mut app, chart, COURSE_STAGES, failing)?;
     let state = CourseResultState::of(&run, &app.shared);
     app.switch(Transition::To(Stage::CourseResult(Box::new(state))));
-    walk_result_scene(&mut app, SKIN_TYPE_COURSE_RESULT, size, prefix)
+    Ok((app, size))
 }
 
 /// Captures the course result scene of a pack somebody else wrote for two courses of a chart that
@@ -1281,8 +1335,9 @@ fn the_course_result_scene_of_a_skin_pack_named_by_the_environment_is_captured_f
     let chart = Path::new(env!("CARGO_MANIFEST_DIR")).join(RESULT_SAMPLE_CHART);
 
     for (failing, prefix) in [(None, "course-result-clear"), (Some(COURSE_FAILED_STAGE), "course-result-fail")] {
-        let saved = capture_course_result_scene(&pack, prefix, &chart, failing, prefix).unwrap_or_else(|reason| panic!("{prefix}: not drawn: {reason}"));
-        println!("{prefix}: captured {}", saved.join(", "));
+        if let Some(saved) = drawn_or_passed_over(prefix, capture_course_result_scene(&pack, prefix, &chart, failing, prefix)) {
+            println!("{prefix}: captured {}", saved.join(", "));
+        }
     }
     assert_eq!(files_under(&pack), before, "capturing the pack's course result scene changed its folder");
 }
@@ -1423,7 +1478,11 @@ fn write_browse_charts(tag: &str) -> PathBuf {
 /// The browser's preview is switched off and the sound device is marked as one that would not
 /// open, so the frames that are walked never ask the machine for one.
 fn browse_app(pack: &Path, tag: &str) -> Result<App, String> {
-    let mut app = pack_app(pack, tag);
+    with_browse_library(pack_app(pack, tag), tag)
+}
+
+/// `app` with the library [`browse_app`] describes, whichever pack it draws with.
+fn with_browse_library(mut app: App, tag: &str) -> Result<App, String> {
     let charts = write_browse_charts(&format!("{tag}-charts"));
     let samples = Path::new(env!("CARGO_MANIFEST_DIR")).join(BROWSER_SAMPLE_FOLDER);
     let database = charts.with_file_name("songs.db");
@@ -1588,7 +1647,7 @@ fn browse_courses(library: &Library) -> Vec<Course> {
 /// Answers the names saved, or why the browser never drew.
 fn capture_browser(pack: &Path) -> Result<Vec<String>, String> {
     let mut app = browse_app(pack, "browser")?;
-    let size = authored_size(&app, SKIN_TYPE_MUSIC_SELECT).ok_or_else(|| "the pack has no document for this screen".to_owned())?;
+    let size = authored_size(&app, SKIN_TYPE_MUSIC_SELECT).ok_or_else(|| NO_DOCUMENT.to_owned())?;
     let mut pixels = HeadlessCanvas::new(size.0, size.1);
     let mut saved = Vec::new();
 
@@ -1648,10 +1707,68 @@ fn the_browser_of_a_skin_pack_named_by_the_environment_is_captured_over_a_scanne
     let samples = Path::new(env!("CARGO_MANIFEST_DIR")).join(BROWSER_SAMPLE_FOLDER);
     let before = (files_under(&pack), files_under(&samples));
 
-    let saved = capture_browser(&pack).unwrap_or_else(|reason| panic!("select: not drawn: {reason}"));
-    println!("select: captured {}", saved.join(", "));
+    if let Some(saved) = drawn_or_passed_over("select", capture_browser(&pack)) {
+        println!("select: captured {}", saved.join(", "));
+    }
 
     assert_eq!((files_under(&pack), files_under(&samples)), before, "capturing the pack's browser changed a folder it only reads");
+}
+
+/// What the first run's browser is saved under.
+const FIRST_RUN_BROWSER: &str = "first-run-select";
+
+/// An app as a first run has it: a settings folder with nothing in it but what a run installs
+/// there, and no pack named by the settings or by the environment. Every read of a skin is pinned.
+fn first_run_app(tag: &str) -> App {
+    let settings = settings_of(tag);
+    assert!(crate::assets::install_default_pack(&settings).is_complete(), "the default pack did not install");
+    let mut app = app_in(settings.clone(), Config::default());
+    app.shared.skins.pin_seed(Some(PACK_SEED));
+    app.shared.skins.rescan(&settings, &app.shared.config);
+    app.shared.skin_screens.wait_for_movie_frames(Some(MOVIE_FRAME_PATIENCE));
+    assert_eq!(app.shared.config.skin.pack_folder(), None, "the first run names a pack in its settings");
+    app
+}
+
+/// A first run draws its browser with the default pack's document, read out of the folder the run
+/// installed it into, and not with the built-in layout.
+///
+/// Runs on every machine: the pack is the one carried in the binary, and nothing names another.
+#[test]
+fn a_first_run_draws_the_browser_with_the_installed_default_pack() {
+    let mut app = first_run_app("first-run");
+    let installed = crate::assets::installed_default_pack(&app.shared.settings_path).expect("the default pack is installed");
+    let document = app.shared.skins.document_path(&app.shared.config, SKIN_TYPE_MUSIC_SELECT).map(PathBuf::from).expect("the first run has a browser document");
+    let found_in = document.parent().and_then(|folder| folder.canonicalize().ok());
+    assert_eq!(found_in, installed.canonicalize().ok(), "the browser is not drawn from the installed pack");
+
+    let mut pixels = HeadlessCanvas::new(UI_SIZE.0, UI_SIZE.1);
+    draw_until_settled(&mut app, SKIN_TYPE_MUSIC_SELECT, &mut Canvas::Headless(&mut pixels), browser).unwrap_or_else(|reason| panic!("first run: {reason}"));
+    assert!(app.shared.has_compiled_skin(SKIN_TYPE_MUSIC_SELECT), "the browser was drawn by its built-in layout");
+    assert!(!is_flat(&pixels, 0..UI_SIZE.0, 0..UI_SIZE.1), "the default pack's browser drew nothing");
+}
+
+/// The first run's browser over a library that was really scanned, saved at the size the document
+/// was authored at so a person can open it.
+///
+/// Opt-in, because walking the browser onto a chart is seconds of drawing: without
+/// [`CAPTURE_DIR_ENV`] this passes without drawing anything.
+#[test]
+fn the_browser_of_a_first_run_is_captured_over_a_scanned_library() {
+    if std::env::var_os(CAPTURE_DIR_ENV).is_none() {
+        return;
+    }
+    let mut app = with_browse_library(first_run_app("first-run-library"), "first-run-library").unwrap_or_else(|reason| panic!("first run: {reason}"));
+    let size = authored_size(&app, SKIN_TYPE_MUSIC_SELECT).expect("the default pack's browser says how large it is");
+    let mut pixels = HeadlessCanvas::new(size.0, size.1);
+    app.shared.select_view = SelectView::AllSongs;
+    app.shared.rebuild_select_items();
+    let focus = app.shared.library.songs().iter().position(|entry| entry.title == BROWSER_FOCUS_TITLE).expect("the scan found the chart that names pictures");
+    app.shared.sel = focus.checked_sub(1).expect("the chart that names pictures is not the first of the list");
+
+    let saved = capture_browser_view(&mut app, &mut pixels, size, FIRST_RUN_BROWSER, SelectState::new()).unwrap_or_else(|reason| panic!("first run: {reason}"));
+    println!("first run: captured {}", saved.join(", "));
+    assert_eq!(app.shared.skin_failure(SKIN_TYPE_MUSIC_SELECT), None);
 }
 
 /// The moment of the browser's scene every overlay is captured at, and where each is saved under.
@@ -1742,7 +1859,7 @@ fn wait_for_browser(app: &mut App, pixels: &mut HeadlessCanvas) -> Result<(), St
 /// as a new player has it and then after a search that found nothing.
 fn capture_browser_overlays(pack: &Path) -> Result<Vec<String>, String> {
     let mut app = browse_app(pack, "overlays")?;
-    let size = authored_size(&app, SKIN_TYPE_MUSIC_SELECT).ok_or_else(|| "the pack has no document for this screen".to_owned())?;
+    let size = authored_size(&app, SKIN_TYPE_MUSIC_SELECT).ok_or_else(|| NO_DOCUMENT.to_owned())?;
     let mut pixels = HeadlessCanvas::new(size.0, size.1);
     app.shared.select_view = SelectView::AllSongs;
     app.shared.rebuild_select_items();
@@ -1818,8 +1935,9 @@ fn the_overlays_the_application_draws_over_the_browser_of_a_skin_pack_named_by_t
     let samples = Path::new(env!("CARGO_MANIFEST_DIR")).join(BROWSER_SAMPLE_FOLDER);
     let before = (files_under(&pack), files_under(&samples));
 
-    let saved = capture_browser_overlays(&pack).unwrap_or_else(|reason| panic!("select overlays: not drawn: {reason}"));
-    println!("select overlays: captured {}", saved.join(", "));
+    if let Some(saved) = drawn_or_passed_over("select overlays", capture_browser_overlays(&pack)) {
+        println!("select overlays: captured {}", saved.join(", "));
+    }
 
     assert_eq!((files_under(&pack), files_under(&samples)), before, "capturing the pack's browser overlays changed a folder it only reads");
 }
@@ -2001,6 +2119,36 @@ impl PlayClocks {
     fn scene_ms(&self) -> u128 {
         self.scene.as_millis()
     }
+
+    /// Walk the play screen that is up from its loading until its chart plays: halfway through the
+    /// skin's load time, then past it with the last keysound arrived, halfway through the time
+    /// before the chart starts, and past that. `opening` is called with the moment's name --
+    /// `loading` and `ready` -- once the frame of each is drawn.
+    fn open(
+        &mut self,
+        app: &mut App,
+        pixels: &mut HeadlessCanvas,
+        arrived: &std::sync::atomic::AtomicUsize,
+        (loadend_ms, playstart_ms): (i64, i64),
+        mut opening: impl FnMut(&mut App, &HeadlessCanvas, &PlayClocks, &str) -> Result<(), String>,
+    ) -> Result<(), String> {
+        use crate::skin_host::play::PlayPhase;
+
+        self.play_on(app, loadend_ms / 2, &mut Canvas::Headless(pixels))?;
+        opening(app, pixels, self, "loading")?;
+        arrived.store(PLAY_LOADING_TOTAL, std::sync::atomic::Ordering::Relaxed);
+        self.play_on(app, loadend_ms / 2 + PLAY_STEP_MS, &mut Canvas::Headless(pixels))?;
+        if play_screen(app)?.phase() != Some(PlayPhase::Ready) {
+            return Err(format!("the chart is not ready after its load time: {:?}", play_screen(app)?.phase()));
+        }
+        self.play_on(app, playstart_ms / 2, &mut Canvas::Headless(pixels))?;
+        opening(app, pixels, self, "ready")?;
+        self.play_on(app, playstart_ms / 2 + PLAY_STEP_MS, &mut Canvas::Headless(pixels))?;
+        if play_screen(app)?.phase() != Some(PlayPhase::Play) {
+            return Err(format!("the chart is not playing after its start time: {:?}", play_screen(app)?.phase()));
+        }
+        Ok(())
+    }
 }
 
 /// What a frame of a captured run shows, in words, for whoever compares the capture with it.
@@ -2027,49 +2175,64 @@ fn play_report(app: &App, scene_ms: u128) -> Result<String, String> {
 /// microseconds since its movie was started.
 const MOVIES_REPORTED_AS: &str = ", movie frames on show at ";
 
-/// Enter the pack's play scene for one run and walk it, saving a frame at each moment the run asks
-/// for as `<prefix>-<moment>`. Answers what was saved, each with what the frame shows, or why the
-/// scene never drew.
-fn capture_play_scene(pack: &Path, run: PlayRun<'_>) -> Result<Vec<String>, String> {
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+/// A pack's play scene entered for one run: the app with the loading screen up, the skin type of the
+/// screen that draws the run's mode and the size the pack's document for it was authored at, how
+/// long the engine takes to play the chart, and what the loading bar is waiting on.
+struct EnteredPlay {
+    app: App,
+    screen: i32,
+    size: (u32, u32),
+    play_time_ms: i64,
+    /// How many of the [`PLAY_LOADING_TOTAL`] keysounds have arrived, which the harness moves.
+    arrived: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    /// The sending end of the keysound channel, kept so the loading screen is not told that the
+    /// decode ended.
+    _keysounds: std::sync::mpsc::Sender<(u32, rbms_audio::DecodedAudio)>,
+}
 
-    use crate::skin_host::play::PlayPhase;
+/// Enter the pack's play scene for a run of `model`, the chart being the file at `chart`: played by
+/// the engine, or by nobody on a gauge that empties when `ending` is [`PlayEnding::Failure`]. Answers
+/// why the scene cannot be entered when the pack has no document for the mode.
+fn enter_play_scene(pack: &Path, tag: &str, chart: &Path, model: rbms_model::Model, ending: PlayEnding) -> Result<EnteredPlay, String> {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicUsize};
+
     use crate::stage::KeysoundLoad;
     use crate::stage::loading::ChartLoads;
 
-    let mut app = pack_app(pack, run.tag);
-    let mode = run.model.mode;
+    let mut app = pack_app(pack, tag);
+    let mode = model.mode;
     let screen = rbms_skin::loader::mode_skin_type(mode).ok_or_else(|| "no play screen draws this mode".to_owned())?;
-    let size = authored_size(&app, screen).ok_or_else(|| "the pack has no document for this screen".to_owned())?;
-    let autoplay = run.ending != PlayEnding::Failure;
+    let size = authored_size(&app, screen).ok_or_else(|| NO_DOCUMENT.to_owned())?;
+    let autoplay = ending != PlayEnding::Failure;
     let gauge = if autoplay { rbms_judge::GaugeKind::Normal } else { rbms_judge::GaugeKind::Hard };
-    app.shared.chart_path = run.chart.to_string_lossy().into_owned();
+    app.shared.chart_path = chart.to_string_lossy().into_owned();
     app.shared.mode = mode;
     app.shared.config.play.autoplay = autoplay;
     app.shared.config.play.gauge = gauge;
     app.shared.active_keys = app.shared.keyconfig.lane_keys(mode);
     app.shared.active_reverse_keys = app.shared.keyconfig.scratch_reverse_keys(mode);
-    let play_time_ms = rbms_play::play_time_ms(&run.model, autoplay);
-    let session = PlaySession::new(run.model, SessionOptions { autoplay, gauge, ..SessionOptions::default() });
+    let play_time_ms = rbms_play::play_time_ms(&model, autoplay);
+    let session = PlaySession::new(model, SessionOptions { autoplay, gauge, ..SessionOptions::default() });
     let mut play = PlayState::new(session, std::collections::HashMap::new(), 0, SCORE_LN_MODE_FROM_CHART.to_string());
     let arrived = Arc::new(AtomicUsize::new(PLAY_LOADING_DONE));
-    let (_sender, rx) = std::sync::mpsc::channel();
+    let (sender, rx) = std::sync::mpsc::channel();
     let keysounds = KeysoundLoad { rx, progress: Arc::clone(&arrived), cancel: Arc::new(AtomicBool::new(false)), total: PLAY_LOADING_TOTAL };
     play.wait_for(ChartLoads::new(None, Some(keysounds)));
     app.switch(Transition::To(Stage::Play(Box::new(play))));
+    Ok(EnteredPlay { app, screen, size, play_time_ms, arrived, _keysounds: sender })
+}
+
+/// Enter the pack's play scene for one run and walk it, saving a frame at each moment the run asks
+/// for as `<prefix>-<moment>`. Answers what was saved, each with what the frame shows, or why the
+/// scene never drew.
+fn capture_play_scene(pack: &Path, run: PlayRun<'_>) -> Result<Vec<String>, String> {
+    use crate::skin_host::play::PlayPhase;
+
+    let EnteredPlay { mut app, screen, size, play_time_ms, arrived, _keysounds } = enter_play_scene(pack, run.tag, &run.chart, run.model, run.ending)?;
 
     let mut pixels = HeadlessCanvas::new(size.0, size.1);
-    let deadline = Instant::now() + PACK_LOAD_TIMEOUT;
-    while !app.shared.has_compiled_skin(screen) {
-        scene_frame_at(&mut app, 0, &mut Canvas::Headless(&mut pixels));
-        if let Some(reason) = app.shared.skin_failure(screen) {
-            return Err(reason.lines().next().unwrap_or_default().to_owned());
-        }
-        if Instant::now() >= deadline {
-            return Err(format!("its files were not read within {} seconds", PACK_LOAD_TIMEOUT.as_secs()));
-        }
-    }
+    wait_for_scene_document(&mut app, screen, &mut Canvas::Headless(&mut pixels))?;
     let mut clocks = PlayClocks::default();
     let skin = app.shared.skins.document(screen).ok_or_else(|| "the skin was let go of".to_owned())?;
     let (loadend_ms, playstart_ms, close_ms, fadeout_ms) =
@@ -2083,23 +2246,16 @@ fn capture_play_scene(pack: &Path, run: PlayRun<'_>) -> Result<Vec<String>, Stri
         Ok(())
     };
 
-    clocks.play_on(&mut app, loadend_ms / 2, &mut Canvas::Headless(&mut pixels))?;
-    if run.opening {
-        shoot(&mut app, &pixels, &clocks, "loading")?;
-    }
-    arrived.store(PLAY_LOADING_TOTAL, Ordering::Relaxed);
-    clocks.play_on(&mut app, loadend_ms / 2 + PLAY_STEP_MS, &mut Canvas::Headless(&mut pixels))?;
-    if play_screen(&app)?.phase() != Some(PlayPhase::Ready) {
-        return Err(format!("the chart is not ready after its load time: {:?}", play_screen(&app)?.phase()));
-    }
-    clocks.play_on(&mut app, playstart_ms / 2, &mut Canvas::Headless(&mut pixels))?;
-    if run.opening {
-        shoot(&mut app, &pixels, &clocks, "ready")?;
-    }
-    clocks.play_on(&mut app, playstart_ms / 2 + PLAY_STEP_MS, &mut Canvas::Headless(&mut pixels))?;
-    if play_screen(&app)?.phase() != Some(PlayPhase::Play) {
-        return Err(format!("the chart is not playing after its start time: {:?}", play_screen(&app)?.phase()));
-    }
+    let opening = run.opening;
+    clocks.open(
+        &mut app,
+        &mut pixels,
+        &arrived,
+        (loadend_ms, playstart_ms),
+        |app, pixels, clocks, moment| {
+            if opening { shoot(app, pixels, clocks, moment) } else { Ok(()) }
+        },
+    )?;
 
     for at_ms in run.shots_ms {
         let left_ms = at_ms - play_screen(&app)?.chart_ms();
@@ -2242,13 +2398,16 @@ fn the_play_scene_of_a_skin_pack_named_by_the_environment_is_captured_through_it
     ];
     for run in runs {
         let prefix = run.prefix;
-        let saved = capture_play_scene(&pack, run).unwrap_or_else(|reason| panic!("{prefix}: not drawn: {reason}"));
-        for line in saved {
+        for line in drawn_or_passed_over(prefix, capture_play_scene(&pack, run)).into_iter().flatten() {
             println!("{line}");
         }
     }
     assert_eq!(files_under(&pack), before, "capturing the pack's play scene changed its folder");
 }
+
+/// The extension of the movies a pack carries, which is how a pack with none is told from one whose
+/// documents merely offer no row to choose them with.
+const MOVIE_EXTENSION: &str = "mp4";
 
 /// The row a pack this was written against chooses what is behind its decide scene and its browser
 /// with, and what the name of the item that makes it a movie starts with.
@@ -2280,16 +2439,7 @@ fn movies_moved_on(on_show: &[Vec<i64>]) -> bool {
 /// Answers when the movie frames on show at each of the moments walked through were due, or why
 /// the scene never drew or its movie did not follow the clock back.
 fn walk_decide_movie(app: &mut App, canvas: &mut Canvas<'_>, mut shoot: impl FnMut(&str, &mut Canvas<'_>)) -> Result<Vec<Vec<i64>>, String> {
-    let deadline = Instant::now() + PACK_LOAD_TIMEOUT;
-    while !app.shared.has_compiled_skin(SKIN_TYPE_DECIDE) {
-        scene_frame_at(app, 0, canvas);
-        if let Some(reason) = app.shared.skin_failure(SKIN_TYPE_DECIDE) {
-            return Err(reason.lines().next().unwrap_or_default().to_owned());
-        }
-        if Instant::now() >= deadline {
-            return Err(format!("its files were not read within {} seconds", PACK_LOAD_TIMEOUT.as_secs()));
-        }
-    }
+    wait_for_scene_document(app, SKIN_TYPE_DECIDE, canvas)?;
     scene_frame_at(app, 0, canvas);
     let mut on_show = Vec::new();
     for at_ms in DECIDE_MOVIE_SHOTS_MS {
@@ -2319,7 +2469,10 @@ fn walk_decide_movie(app: &mut App, canvas: &mut Canvas<'_>, mut shoot: impl FnM
 /// a movie is uploaded to frame after frame.
 ///
 /// Opt-in like the captures above it, and for a build that decodes movies; one that does not says
-/// so and passes. The pack's folder has to be left as it was.
+/// so and passes, and so does a pack that carries no movie. A pack with movies is held to a movie
+/// behind its play scene, and to one behind each of the two screens whose documents offer the row to
+/// choose it; one whose documents do not is reported for that screen. The pack's folder has to be
+/// left as it was.
 #[test]
 fn the_movies_of_a_skin_pack_named_by_the_environment_are_captured_as_they_play() {
     let Some(pack) = crate::skin_select::pack_from_environment(std::env::var_os(SKIN_PACK_ENV)) else {
@@ -2331,6 +2484,10 @@ fn the_movies_of_a_skin_pack_named_by_the_environment_are_captured_as_they_play(
         return;
     }
     let before = files_under(&pack);
+    if !before.keys().any(|path| path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case(MOVIE_EXTENSION))) {
+        println!("movies: the pack carries no movie, so there is nothing to capture");
+        return;
+    }
     let sample = Path::new(env!("CARGO_MANIFEST_DIR")).join(DECIDE_SAMPLE_CHART);
     let choice = (MOVIE_BACKGROUND_ROW, MOVIE_BACKGROUND_ON);
 
@@ -2397,14 +2554,15 @@ fn the_movies_of_a_skin_pack_named_by_the_environment_are_captured_as_they_play(
         shots_ms: &PLAY_MOVIE_SHOTS_MS,
         ending: PlayEnding::StillPlaying,
     };
-    let saved = capture_play_scene(&pack, run).unwrap_or_else(|reason| panic!("play-movie: not drawn: {reason}"));
-    for line in &saved {
-        println!("{line}");
+    if let Some(saved) = drawn_or_passed_over("play-movie", capture_play_scene(&pack, run)) {
+        for line in &saved {
+            println!("{line}");
+        }
+        let playing: Vec<&str> = saved.iter().filter(|line| line.contains("-play-")).filter_map(|line| line.split(MOVIES_REPORTED_AS).nth(1)).collect();
+        assert_eq!(playing.len(), PLAY_MOVIE_SHOTS_MS.len(), "play-movie: a moment of the run was not captured: {saved:?}");
+        assert!(playing.iter().all(|frames| *frames != "[]"), "play-movie: a chart with no pictures was played with no movie behind it: {playing:?}");
+        assert!(playing.windows(2).all(|pair| pair[0] != pair[1]), "play-movie: the movie behind the run did not play: {playing:?}");
     }
-    let playing: Vec<&str> = saved.iter().filter(|line| line.contains("-play-")).filter_map(|line| line.split(MOVIES_REPORTED_AS).nth(1)).collect();
-    assert_eq!(playing.len(), PLAY_MOVIE_SHOTS_MS.len(), "play-movie: a moment of the run was not captured: {saved:?}");
-    assert!(playing.iter().all(|frames| *frames != "[]"), "play-movie: a chart with no pictures was played with no movie behind it: {playing:?}");
-    assert!(playing.windows(2).all(|pair| pair[0] != pair[1]), "play-movie: the movie behind the run did not play: {playing:?}");
 
     assert_eq!(files_under(&pack), before, "capturing the pack's movies changed its folder");
 }

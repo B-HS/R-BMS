@@ -221,7 +221,7 @@ fn system_sounds_come_from_the_configured_folder_or_else_the_installed_set() {
     let mut config = Config::default();
     assert_eq!(sound_folder_path(&settings, &config), None, "a set that was never installed was named");
 
-    assert!(super::install_default_sounds(&settings));
+    assert!(super::install_default_pack(&settings).is_complete());
     let installed = super::assets::default_sound_folder(&settings).expect("the installed set is found");
     for layout in ["NORMAL", "WIDE"] {
         config.display.skin = layout.to_string();

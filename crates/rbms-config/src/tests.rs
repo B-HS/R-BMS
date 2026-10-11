@@ -384,7 +384,7 @@ fn a_file_from_before_the_new_rows_loads_with_them_at_their_shipped_values() {
     assert!((c.play.lanecover_step_fine - DEFAULT_LANE_SHADE_FINE_STEP).abs() < 1e-9);
     assert!(c.display.result_graphs);
     assert!(!c.display.show_white_number);
-    assert!(!c.display.letterbox);
+    assert!(c.display.letterbox, "a file that never stated the row takes the shipped fit");
     assert_eq!(c.display.window_resolution, WindowResolution::Hd720);
     assert_eq!(c.display.window_mode, WindowMode::Windowed);
     assert!(!c.display.five_key_layout);
@@ -680,11 +680,39 @@ fn the_window_choices_are_stored_under_their_tokens_and_unknown_ones_fall_back()
 
 #[test]
 fn a_borderless_window_is_always_fitted_to_its_shape() {
-    let mut display = DisplayOptions::default();
+    let mut display = DisplayOptions { letterbox: false, ..DisplayOptions::default() };
     assert!(!display.fits_screen_shape(), "an ordinary window stretches unless LETTERBOX is on");
     display.letterbox = true;
     assert!(display.fits_screen_shape());
     display.letterbox = false;
     display.window_mode = WindowMode::Borderless;
     assert!(display.fits_screen_shape(), "a monitor that is not 16:9 would stretch the screen");
+}
+
+/// A skin is authored for one shape, so a fresh install keeps that shape inside an ordinary window
+/// instead of stretching it to whatever the window is.
+#[test]
+fn a_fresh_install_fits_the_screen_inside_an_ordinary_window() {
+    let display = DisplayOptions::default();
+    assert_eq!(display.window_mode, WindowMode::Windowed);
+    assert!(display.letterbox && DEFAULT_LETTERBOX);
+    assert!(display.fits_screen_shape());
+}
+
+/// The shipped fit is only what a file that says nothing gets. A player who switched LETTERBOX off
+/// keeps it off, and one who switched it on keeps it on, whatever this build ships.
+#[test]
+fn a_stored_letterbox_choice_outlives_the_shipped_one() {
+    let (off, _) = migrate(r#"(schema_version: 3, display: (letterbox: false))"#).expect("a current file parses");
+    assert!(!off.display.letterbox, "a stored OFF was overridden by the shipped default");
+    assert!(!off.display.fits_screen_shape());
+    let (on, _) = migrate(r#"(schema_version: 3, display: (letterbox: true))"#).expect("a current file parses");
+    assert!(on.display.letterbox);
+    let (silent, _) = migrate(r#"(schema_version: 3, display: (bga: false))"#).expect("a current file parses");
+    assert!(silent.display.letterbox, "a file that does not state the row takes the shipped fit");
+
+    let mut stored = Config::default();
+    stored.display.letterbox = false;
+    let (back, _) = migrate(&ron_of(&stored)).expect("the file this build writes parses");
+    assert!(!back.display.letterbox, "the file this build writes does not state the row it holds");
 }

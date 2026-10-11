@@ -7,7 +7,7 @@ use crate::dialog::{DialogHandle, DialogState};
 use crate::ir_panel::*;
 use crate::ir_session::{AuthAction, GUEST_PLAYER_ID};
 use crate::settings_ui::{SettingRow, audio_status_text, is_network_row, step_audio_device};
-use crate::settings_view::{RivalsScene, SettingsScene};
+use crate::settings_view::{RivalsScene, SettingsLine, SettingsScene};
 use crate::skin_select::SkinRow;
 use crate::stage::{Canvas, FrameCtx, KeyConfigState, KeyInput, Stage, StageHandler, Transition, is_left_press};
 use rbms_config::{AdjustOutcome, SettingId, SettingTab, adjust, step_skin};
@@ -23,8 +23,8 @@ const ROW_STEP_BACK: i32 = -1;
 /// The settings screen's own state: the open tab and row, the rows it is showing, the in-place
 /// editor, and the inline rival list.
 ///
-/// `lines` holds the labels and values of the open tab and is rebuilt only when `dirty` says
-/// something moved, so a screen sitting still costs no formatting. `audio_devices` is the host's
+/// `lines` holds the labels and values of the open tab, with what is said beside each, and is
+/// rebuilt only when `dirty` says something moved, so a screen sitting still costs no formatting. `audio_devices` is the host's
 /// output device list, re-read on every entry so the AUDIO DEVICE row cycles through what is
 /// plugged in now without enumerating on every keystroke.
 pub(crate) struct SettingsState {
@@ -55,7 +55,7 @@ pub(crate) struct SettingsState {
     /// while the user is in front of it and the answer is collected in `update`.
     font_picker: Option<DialogHandle>,
     rows: Vec<SettingRow>,
-    lines: Vec<(String, String)>,
+    lines: Vec<SettingsLine>,
     dirty: bool,
 }
 
@@ -95,7 +95,7 @@ impl SettingsState {
     /// Re-read the open tab's rows and their values.
     fn refresh(&mut self, shared: &AppShared) {
         self.rows = shared.settings_rows(self.current_tab());
-        self.lines = self.rows.iter().map(|&row| shared.settings_line(row)).collect();
+        self.lines = self.rows.iter().map(|&row| shared.settings_scene_line(row)).collect();
         self.sel = self.sel.min(self.rows.len().saturating_sub(1));
         self.dirty = false;
     }
@@ -172,7 +172,7 @@ impl SettingsState {
                 }
             }
             SettingId::Skin => {
-                ctx.shared.launch.skin_path = None;
+                ctx.shared.drop_launch_layout();
                 step_skin(&mut ctx.shared.config);
             }
             SettingId::AudioDevice => {
@@ -695,6 +695,8 @@ impl StageHandler for SettingsState {
     }
 }
 
+#[cfg(test)]
+mod note_tests;
 #[cfg(test)]
 mod skin_tests;
 

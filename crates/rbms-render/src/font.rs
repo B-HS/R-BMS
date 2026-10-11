@@ -18,7 +18,11 @@ pub(crate) use block::{CAP_CHARS, CLEAR_PIXEL, block_extent, slack};
 
 /// Bundled default UI font (Inter, SIL OFL 1.1). cosmic-text falls back to installed system
 /// fonts for scripts Inter lacks (CJK, Thai, Arabic, …), so any language renders.
-const BUNDLED_FONT: &[u8] = include_bytes!("../../../assets/fonts/Inter-Regular.ttf");
+///
+/// A static holding the bytes themselves rather than a constant or a reference to them, so a binary
+/// that names these bytes again -- the player ships the same file inside its default skin pack --
+/// points at this one copy instead of carrying its own.
+pub static BUNDLED_FONT: [u8; include_bytes!("../../../assets/fonts/Inter-Regular.ttf").len()] = *include_bytes!("../../../assets/fonts/Inter-Regular.ttf");
 
 /// Family requested when a font database somehow exposes no face at all; the generic name lets
 /// cosmic-text pick whatever it has rather than panicking.

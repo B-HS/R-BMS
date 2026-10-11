@@ -199,8 +199,22 @@ struct BuiltScreen {
     build: u64,
 }
 
-/// What follows the reason a document could not be read, in the one message that says so.
-const SKIN_FALLBACK_NOTE: &str = " - drawing the built-in screen";
+/// What the one message about a document that could not be read says before its reason: what
+/// happened, and what the player is looking at instead.
+const SKIN_FAILURE_NOTE: &str = " did not load, drawing the built-in screen: ";
+
+/// What a document that could not be read is called when its path names no file.
+const SKIN_FAILURE_UNNAMED: &str = "document";
+
+/// The one message about a document that could not be read.
+///
+/// The document's file name and what is drawn in its place come first, because a message on screen
+/// is cut to a line (`crate::toast::TOAST_TEXT_CHARS`) and a reason that quotes a path is longer
+/// than that. The whole reason follows and reaches the terminal uncut.
+fn skin_failure_message(document: Option<&str>, reason: &str) -> String {
+    let name = document.and_then(|path| Path::new(path).file_name()).map(|name| name.to_string_lossy().into_owned());
+    format!("skin {}{SKIN_FAILURE_NOTE}{reason}", name.as_deref().unwrap_or(SKIN_FAILURE_UNNAMED))
+}
 
 /// The nudges one document is drawn with: what the player chose inside it, or nothing at all for a
 /// document nobody has customised.
@@ -1133,6 +1147,9 @@ impl AppShared {
     /// A document no screen is drawn with any more is let go of first, whichever screen it drew: the
     /// pack was changed or taken away, or a settings file arrived that chooses differently.
     ///
+    /// A Lua skin of the pack that could not be read far enough to say which screen it draws is
+    /// reported here too, once, on whichever screen is drawn first after the pack was read.
+    ///
     /// A document that is only data is read here. A Lua skin is asked for here and read by the frame
     /// that follows, which is the first place the screen's state exists to read it against
     /// ([`AppShared::with_skin_frame`]); what that frame read is taken in on the next call. A
@@ -1155,6 +1172,9 @@ impl AppShared {
         }
         self.skins.drop_moved(&self.config);
         self.skin_screens.release_dropped(canvas, &self.skins);
+        for (document, reason) in self.skins.take_unreadable() {
+            notify(Level::Warn, skin_failure_message(Some(&document.to_string_lossy()), &reason));
+        }
         if !self.skin_document_is_enabled(screen) {
             return;
         }
@@ -1163,7 +1183,7 @@ impl AppShared {
         }
         self.skins.adopt(screen);
         if let Some(reason) = self.skins.take_failure(screen) {
-            notify(Level::Warn, format!("skin: {reason}{SKIN_FALLBACK_NOTE}"));
+            notify(Level::Warn, skin_failure_message(self.skins.document_path(&self.config, screen), &reason));
         }
         let skins = &self.skins;
         let screens = &mut self.skin_screens;
@@ -1669,6 +1689,8 @@ impl AppShared {
     }
 }
 
+#[cfg(test)]
+mod fallback_tests;
 #[cfg(test)]
 mod font_page_tests;
 #[cfg(test)]

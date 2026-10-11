@@ -13,6 +13,9 @@ use rbms_judge::GaugeKind;
 use rbms_judge::algorithm::JudgeAlgorithm;
 use rbms_judge::gauge::{BOTTOM_SHIFTABLE_GAUGES, GaugeAutoShift};
 use rbms_judge::ln::LnMode;
+use rbms_skin::loader::{
+    SKIN_TYPE_PLAY_5KEYS, SKIN_TYPE_PLAY_7KEYS, SKIN_TYPE_PLAY_9KEYS, SKIN_TYPE_PLAY_10KEYS, SKIN_TYPE_PLAY_14KEYS, SKIN_TYPE_PLAY_24KEYS, SKIN_TYPE_RESULT,
+};
 
 use crate::audio::{
     AUDIO_BUFFER_FRAMES_CHOICES, AUDIO_POLYPHONY_MAX_VOICES, AUDIO_POLYPHONY_MIN_VOICES, AUDIO_POLYPHONY_STEP_VOICES, AUDIO_SAMPLE_RATE_HZ_CHOICES,
@@ -96,6 +99,28 @@ pub const EMAIL_MAX_LEN: usize = 254;
 
 /// Longest password the row is meant to hold.
 pub const PASSWORD_MAX_LEN: usize = 128;
+
+/// Said beside a row that only the built-in screens read, while a skin draws one of the screens it
+/// is for.
+pub const BUILT_IN_ONLY_NOTE: &str = "BUILT-IN SCREENS ONLY";
+
+/// Said beside a row a skin settles with an option of its own, while a skin draws one of the
+/// screens the row is for: the row still holds for the built-in screens, and on the skin's the
+/// option the SKIN tab lists for that skin is what counts.
+pub const SKIN_OPTION_NOTE: &str = "SKIN OPTION COMES FIRST";
+
+/// Every play screen the built-in note field draws, as the `SkinType` ids their documents declare.
+const PLAY_SCREENS: &[i32] =
+    &[SKIN_TYPE_PLAY_7KEYS, SKIN_TYPE_PLAY_5KEYS, SKIN_TYPE_PLAY_14KEYS, SKIN_TYPE_PLAY_10KEYS, SKIN_TYPE_PLAY_9KEYS, SKIN_TYPE_PLAY_24KEYS];
+
+/// The play screens of the charts the 5KEYS LAYOUT row narrows.
+const FIVE_KEY_SCREENS: &[i32] = &[SKIN_TYPE_PLAY_5KEYS, SKIN_TYPE_PLAY_10KEYS];
+
+/// The play screens of the charts that have a scratch lane to put on one side.
+const SCRATCH_SCREENS: &[i32] = &[SKIN_TYPE_PLAY_7KEYS, SKIN_TYPE_PLAY_5KEYS, SKIN_TYPE_PLAY_14KEYS, SKIN_TYPE_PLAY_10KEYS];
+
+/// The screen a finished run is shown on.
+const RESULT_SCREENS: &[i32] = &[SKIN_TYPE_RESULT];
 
 /// Position of the PGREAT tier in a JUDGE WIDTH array.
 const PGREAT_TIER: usize = 0;
@@ -411,6 +436,29 @@ pub struct SettingDescriptor {
     pub host_value: bool,
     /// Whether the row is shown at all for this configuration.
     pub visible: fn(&Config) -> bool,
+    /// What becomes of the row on a screen a skin draws, or `None` for a row every screen reads
+    /// whichever way it is drawn.
+    pub skinned: Option<SkinnedRow>,
+}
+
+/// A row whose value only the built-in screens read: a skin that draws one of those screens lays it
+/// out by its own document and never asks for the row.
+///
+/// The row is kept and stays adjustable, because the built-in screens are still what a chart with
+/// no skin document for its mode is played on, and what a skin that cannot be read falls back to.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct SkinnedRow {
+    /// The screens whose built-in drawing reads the row, as `SkinType` ids.
+    pub screens: &'static [i32],
+    /// What the settings screen says beside the row while a skin draws one of those screens.
+    pub note: &'static str,
+}
+
+impl SettingDescriptor {
+    /// The same row, read by the built-in drawing of `screens` and by no skin that draws them.
+    const fn unread_by_skins(self, screens: &'static [i32], note: &'static str) -> SettingDescriptor {
+        SettingDescriptor { skinned: Some(SkinnedRow { screens, note }), ..self }
+    }
 }
 
 /// What one call to [`adjust`] did.
@@ -469,7 +517,8 @@ pub const SETTINGS: &[SettingDescriptor] = &[
         "What is done to the sides of the chart as a whole",
     ),
     row(SettingId::LegacyNote, SettingTab::Play, "LEGACY NOTE", SettingKind::Toggle, "Draw long notes as plain notes"),
-    row(SettingId::FiveKeyLayout, SettingTab::Play, "5KEYS LAYOUT", SettingKind::Toggle, "Give a five-key chart its own lane widths"),
+    row(SettingId::FiveKeyLayout, SettingTab::Play, "5KEYS LAYOUT", SettingKind::Toggle, "Give a five-key chart its own lane widths")
+        .unread_by_skins(FIVE_KEY_SCREENS, BUILT_IN_ONLY_NOTE),
     row(SettingId::AutoReplay, SettingTab::Play, "AUTO REPLAY", SettingKind::Toggle, "Save a replay of every run"),
     row(SettingId::PlayEscapeMode, SettingTab::Play, "ESCAPE", SettingKind::Cycle { values: PLAY_ESCAPE_LABELS }, "What Escape has to be to abandon a run"),
     row(SettingId::Gauge, SettingTab::Gauge, "GAUGE", SettingKind::Cycle { values: GAUGE_LABELS }, "Which gauge the run is cleared on"),
@@ -531,10 +580,18 @@ pub const SETTINGS: &[SettingDescriptor] = &[
         "The floor an auto-shift may drop the gauge to",
     ),
     row(SettingId::Target, SettingTab::Judge, "TARGET", SettingKind::Cycle { values: TARGET_LABELS }, "What the run is paced against"),
-    host_row(SettingId::Skin, SettingTab::Display, "SKIN", SettingKind::Cycle { values: SKIN_LABELS }, "Which bundled skin the play screen uses"),
+    host_row(SettingId::Skin, SettingTab::Display, "SKIN", SettingKind::Cycle { values: SKIN_LABELS }, "Which bundled skin the play screen uses")
+        .unread_by_skins(PLAY_SCREENS, BUILT_IN_ONLY_NOTE),
     row(SettingId::Font, SettingTab::Display, "FONT", SettingKind::FilePick, "Font the screens are drawn with"),
-    row(SettingId::ScoreGraph, SettingTab::Display, "SCORE GRAPH", SettingKind::Toggle, "Draw the score graph on the result screen"),
-    row(SettingId::ResultGraphs, SettingTab::Display, "RESULT GRAPHS", SettingKind::Toggle, "Draw the gauge and timing graphs on the result screen"),
+    row(
+        SettingId::ScoreGraph,
+        SettingTab::Display,
+        "SCORE GRAPH",
+        SettingKind::Toggle,
+        "Show score ranks and score deltas on the built-in screens and in record lists",
+    ),
+    row(SettingId::ResultGraphs, SettingTab::Display, "RESULT GRAPHS", SettingKind::Toggle, "Draw the gauge and timing graphs on the result screen")
+        .unread_by_skins(RESULT_SCREENS, BUILT_IN_ONLY_NOTE),
     row(SettingId::ReplayAnalysis, SettingTab::Display, "REPLAY ANALYSIS", SettingKind::Toggle, "Allow stepping and slowing a replay"),
     row(SettingId::Preview, SettingTab::Display, "PREVIEW", SettingKind::Toggle, "Play the focused song on the song list"),
     row(
@@ -574,14 +631,16 @@ pub const SETTINGS: &[SettingDescriptor] = &[
         },
         "How far one fine cover press moves the shade",
     ),
-    row(SettingId::WhiteNumber, SettingTab::Display, "WHITE NUMBER", SettingKind::Toggle, "Show the travel time to the bottom of the cover"),
+    row(SettingId::WhiteNumber, SettingTab::Display, "WHITE NUMBER", SettingKind::Toggle, "Show the travel time to the bottom of the cover")
+        .unread_by_skins(PLAY_SCREENS, BUILT_IN_ONLY_NOTE),
     row(
         SettingId::JudgeTextY,
         SettingTab::Display,
         "JUDGE TEXT Y",
         SettingKind::Percent { min: JUDGE_TEXT_Y_MIN, max: JUDGE_TEXT_Y_MAX, step: JUDGE_TEXT_Y_STEP },
         "Where the judgement text sits, or 0 for the skin's own place",
-    ),
+    )
+    .unread_by_skins(PLAY_SCREENS, BUILT_IN_ONLY_NOTE),
     row(
         SettingId::Letterbox,
         SettingTab::Display,
@@ -617,7 +676,8 @@ pub const SETTINGS: &[SettingDescriptor] = &[
         "SCRATCH SIDE",
         SettingKind::Cycle { values: SCRATCH_SIDE_LABELS },
         "Which side the scratch lane is drawn on",
-    ),
+    )
+    .unread_by_skins(SCRATCH_SCREENS, SKIN_OPTION_NOTE),
     row(SettingId::ScratchAuto, SettingTab::Input, "SCRATCH AUTO", SettingKind::Toggle, "Let the game play the scratch lane"),
     row(SettingId::KeyConfig, SettingTab::Input, "KEY CONFIG", SettingKind::Action, "Open the key editor"),
     row(
@@ -727,11 +787,11 @@ const fn judge_width_row(id: SettingId, label: &'static str) -> SettingDescripto
 }
 
 const fn row(id: SettingId, tab: SettingTab, label: &'static str, kind: SettingKind, help: &'static str) -> SettingDescriptor {
-    SettingDescriptor { id, tab, label, kind, help, host_value: false, visible: always }
+    SettingDescriptor { id, tab, label, kind, help, host_value: false, visible: always, skinned: None }
 }
 
 const fn host_row(id: SettingId, tab: SettingTab, label: &'static str, kind: SettingKind, help: &'static str) -> SettingDescriptor {
-    SettingDescriptor { id, tab, label, kind, help, host_value: true, visible: always }
+    SettingDescriptor { id, tab, label, kind, help, host_value: true, visible: always, skinned: None }
 }
 
 /// A row whose value nothing acts on yet.
@@ -741,7 +801,7 @@ const fn host_row(id: SettingId, tab: SettingTab, label: &'static str, kind: Set
 /// shown, because a row a player can move that changes nothing about the run reads as a chosen
 /// option rather than an unbuilt one. What is still missing for each is in the divergence ledger.
 const fn unbuilt_row(id: SettingId, tab: SettingTab, label: &'static str, kind: SettingKind, help: &'static str) -> SettingDescriptor {
-    SettingDescriptor { id, tab, label, kind, help, host_value: false, visible: never }
+    SettingDescriptor { id, tab, label, kind, help, host_value: false, visible: never, skinned: None }
 }
 
 fn never(_config: &Config) -> bool {
@@ -756,6 +816,17 @@ pub fn descriptor(id: SettingId) -> &'static SettingDescriptor {
 /// The rows a tab shows for this configuration, top to bottom.
 pub fn tab_rows(tab: SettingTab, config: &Config) -> Vec<SettingId> {
     SETTINGS.iter().filter(|row| row.tab == tab && (row.visible)(config)).map(|row| row.id).collect()
+}
+
+/// What the settings screen says beside one row, or `None` for a row that reads as it always has.
+///
+/// `drawn_by_skin` answers, for one `SkinType` id, whether a skin draws that screen. A row only the
+/// built-in screens read is annotated as soon as a skin draws any one of the screens it is for: the
+/// player can then walk into a screen the row does nothing on, which is what the note is there to
+/// say. While the built-in screens draw every one of them the row is shown bare.
+pub fn skinned_note(id: SettingId, drawn_by_skin: impl Fn(i32) -> bool) -> Option<&'static str> {
+    let skinned = descriptor(id).skinned?;
+    skinned.screens.iter().any(|screen| drawn_by_skin(*screen)).then_some(skinned.note)
 }
 
 /// The values a cycling row steps through, empty for a row of another kind.
@@ -1227,6 +1298,71 @@ mod tests {
         assert!(!(descriptor(SettingId::LaneOption).visible)(&config), "LANE OPTION is offered but nothing applies it to a run");
         assert!(!tab_rows(SettingTab::Play, &config).contains(&SettingId::LaneOption));
         assert_eq!(display_value(&config, SettingId::LaneOption), OFF_VALUE, "the value still reads back for the file it is stored in");
+    }
+
+    /// The rows a skin never reads on the screens it draws, each with the screens its built-in
+    /// drawing is for. SCORE GRAPH is deliberately not one of them: the record panel the browser
+    /// opens over a skin still shows or hides its rank by it, which is why its help line names the
+    /// record lists and promises nothing about a result screen a skin draws.
+    #[test]
+    fn the_rows_a_skin_does_not_read_are_the_built_in_layout_rows() {
+        let skinned: Vec<(SettingId, &[i32], &str)> =
+            SETTINGS.iter().filter_map(|row| row.skinned.map(|skinned| (row.id, skinned.screens, skinned.note))).collect();
+        assert_eq!(
+            skinned,
+            vec![
+                (SettingId::FiveKeyLayout, FIVE_KEY_SCREENS, BUILT_IN_ONLY_NOTE),
+                (SettingId::Skin, PLAY_SCREENS, BUILT_IN_ONLY_NOTE),
+                (SettingId::ResultGraphs, RESULT_SCREENS, BUILT_IN_ONLY_NOTE),
+                (SettingId::WhiteNumber, PLAY_SCREENS, BUILT_IN_ONLY_NOTE),
+                (SettingId::JudgeTextY, PLAY_SCREENS, BUILT_IN_ONLY_NOTE),
+                (SettingId::ScratchSide, SCRATCH_SCREENS, SKIN_OPTION_NOTE),
+            ]
+        );
+        let score_graph = descriptor(SettingId::ScoreGraph).help;
+        assert!(score_graph.contains("built-in screens") && score_graph.contains("record lists"), "{score_graph:?}");
+        for (id, screens, note) in skinned {
+            assert!(!screens.is_empty() && !note.is_empty(), "{id:?} names no screen or says nothing");
+            for screen in screens {
+                assert!(skin_screen_label(*screen).is_some(), "{id:?} names screen {screen}, which no skin document declares");
+            }
+        }
+    }
+
+    #[test]
+    fn a_row_is_bare_while_the_built_in_screens_draw_everything() {
+        for id in SettingId::ALL {
+            assert_eq!(skinned_note(id, |_| false), None, "{id:?} is annotated with no skin drawing anything");
+        }
+    }
+
+    #[test]
+    fn a_row_a_skin_does_not_read_says_so_once_a_skin_draws_one_of_its_screens() {
+        let seven_keys_only = |screen: i32| screen == SKIN_TYPE_PLAY_7KEYS;
+        assert_eq!(skinned_note(SettingId::JudgeTextY, seven_keys_only), Some(BUILT_IN_ONLY_NOTE));
+        assert_eq!(skinned_note(SettingId::WhiteNumber, seven_keys_only), Some(BUILT_IN_ONLY_NOTE));
+        assert_eq!(skinned_note(SettingId::Skin, seven_keys_only), Some(BUILT_IN_ONLY_NOTE));
+        assert_eq!(skinned_note(SettingId::ScratchSide, seven_keys_only), Some(SKIN_OPTION_NOTE), "the skin's own option is what its screen follows");
+        assert_eq!(skinned_note(SettingId::FiveKeyLayout, seven_keys_only), None, "a seven-key skin leaves the five-key field built in");
+        assert_eq!(skinned_note(SettingId::ResultGraphs, seven_keys_only), None, "the result screen is still the built-in one");
+
+        let result_only = |screen: i32| screen == SKIN_TYPE_RESULT;
+        assert_eq!(skinned_note(SettingId::ResultGraphs, result_only), Some(BUILT_IN_ONLY_NOTE));
+        assert_eq!(skinned_note(SettingId::JudgeTextY, result_only), None);
+
+        let nine_keys_only = |screen: i32| screen == SKIN_TYPE_PLAY_9KEYS;
+        assert_eq!(skinned_note(SettingId::ScratchSide, nine_keys_only), None, "a nine-key chart has no scratch lane to place");
+        assert_eq!(skinned_note(SettingId::WhiteNumber, nine_keys_only), Some(BUILT_IN_ONLY_NOTE));
+    }
+
+    #[test]
+    fn a_row_every_screen_reads_is_never_annotated() {
+        let everything = |_: i32| true;
+        for id in
+            [SettingId::HiSpeed, SettingId::LegacyNote, SettingId::Lift, SettingId::LaneCover, SettingId::Bga, SettingId::ScoreGraph, SettingId::Letterbox]
+        {
+            assert_eq!(skinned_note(id, everything), None, "{id:?} is read on a skin's screen too");
+        }
     }
 
     #[test]

@@ -4,14 +4,18 @@
 //!
 //! The rows themselves — their tabs, labels, kinds and ranges — are described once in
 //! `rbms_config::SETTINGS`. This file only adds what the configuration document cannot know: the
-//! live account, the password held in memory, and a skin forced on the command line. The device
-//! list the AUDIO DEVICE row cycles through comes from [`rbms_audio::output_device_names`], which
-//! owns the one thread the audio host may be questioned from.
+//! live account, the password held in memory, a skin forced on the command line, and which screens
+//! a skin is set to draw, which is what decides whether a row only the built-in screens read is
+//! annotated. The device list the AUDIO DEVICE row cycles through comes from
+//! [`rbms_audio::output_device_names`], which owns the one thread the audio host may be questioned
+//! from.
 #![allow(clippy::wildcard_imports)]
 use rbms_audio::{AudioOpenReport, Bus};
 
-use rbms_config::{AudioOptions, CUSTOM_VALUE, SettingId, SettingTab, cycle_device, descriptor, display_value, tab_rows};
+use rbms_config::{AudioOptions, CUSTOM_VALUE, SettingId, SettingTab, cycle_device, descriptor, display_value, skinned_note, tab_rows};
+use rbms_skin::loader::is_supported_skin_type;
 
+use crate::settings_view::SettingsLine;
 use crate::skin_select::SkinRow;
 use crate::*;
 
@@ -137,6 +141,38 @@ impl AppShared {
         }
     }
 
+    /// One row of the settings screen as it is drawn: its label, its value, and what is said
+    /// beside it.
+    pub(crate) fn settings_scene_line(&self, row: SettingRow) -> SettingsLine {
+        let (label, value) = self.settings_line(row);
+        SettingsLine { label, value, note: self.settings_note(row) }
+    }
+
+    /// What is said beside one row of the settings screen, or `None` for a row shown bare.
+    ///
+    /// A row only the built-in screens read is annotated while a skin is set to draw one of the
+    /// screens it is for, so a value that will change nothing there is not mistaken for one that
+    /// will. The row stays adjustable: a chart whose mode the skin has no document for is still
+    /// played on the built-in field, and so is every screen of a skin that cannot be read.
+    pub(crate) fn settings_note(&self, row: SettingRow) -> Option<&'static str> {
+        match row {
+            SettingRow::Fixed(id) => skinned_note(id, |screen| self.skin_is_set_to_draw(screen)),
+            SettingRow::Skin(_) => None,
+        }
+    }
+
+    /// Whether a skin is set to draw one screen: a document is chosen for it, by hand or by the
+    /// pack in effect, this build has a screen to draw it on, and the document has not been read
+    /// and found broken.
+    ///
+    /// This is what the configuration asks for, not what a frame ended up drawing: a document that
+    /// has not been read yet counts, because its screen has not been opened. One that was read and
+    /// failed does not, because the built-in screen is what is up until it is fixed or another is
+    /// chosen, and the rows that screen reads are in force.
+    fn skin_is_set_to_draw(&self, screen: i32) -> bool {
+        is_supported_skin_type(screen) && self.skins.document_path(&self.config, screen).is_some() && !self.skins.has_failed(&self.config, screen)
+    }
+
     /// Step one of the chosen document's customisation rows, and report whether it moved.
     pub(crate) fn step_skin_row(&mut self, row: SkinRow, delta: i32) -> bool {
         self.skins.step(&mut self.config, row, delta)
@@ -156,6 +192,14 @@ impl AppShared {
     pub(crate) fn reset_skin_document(&mut self) {
         self.skins.forget(&mut self.config);
         self.reload_skin();
+    }
+
+    /// Let go of the layout for the built-in note field the run was started with, which is what
+    /// choosing a bundled layout on the SKIN row of the DISPLAY tab does. The play screens go back
+    /// to the documents chosen for them.
+    pub(crate) fn drop_launch_layout(&mut self) {
+        self.launch.skin_path = None;
+        self.skins.set_built_in_play(false, &self.config);
     }
 
     /// Walk the skin folder and the pack again. A header whose file has not changed since it was
@@ -286,7 +330,7 @@ mod tests {
         (SettingId::LaneCoverFineStep, "COVER FINE STEP", "0.0010"),
         (SettingId::WhiteNumber, "WHITE NUMBER", "OFF"),
         (SettingId::JudgeTextY, "JUDGE TEXT Y", "0%"),
-        (SettingId::Letterbox, "LETTERBOX", "OFF"),
+        (SettingId::Letterbox, "LETTERBOX", "ON"),
         (SettingId::WindowResolution, "RESOLUTION", "1280x720"),
         (SettingId::WindowMode, "WINDOW MODE", "WINDOWED"),
         (SettingId::Sort, "SORT", "DEFAULT"),
@@ -378,6 +422,121 @@ mod tests {
         assert_eq!(shared.setting_line(SettingId::Skin).1, "NORMAL");
         shared.launch.skin_path = Some("custom.ron".to_string());
         assert_eq!(shared.setting_line(SettingId::Skin).1, CUSTOM_VALUE);
+    }
+
+    /// The `SkinType` ids the notes below are checked against.
+    const PLAY_7KEYS: i32 = rbms_skin::loader::SKIN_TYPE_PLAY_7KEYS;
+    const PLAY_5KEYS: i32 = rbms_skin::loader::SKIN_TYPE_PLAY_5KEYS;
+    const PLAY_24KEYS: i32 = rbms_skin::loader::SKIN_TYPE_PLAY_24KEYS;
+
+    /// The rows only the built-in screens read, each on the tab that lists it.
+    const BUILT_IN_LAYOUT_ROWS: [SettingId; 6] =
+        [SettingId::FiveKeyLayout, SettingId::Skin, SettingId::ResultGraphs, SettingId::WhiteNumber, SettingId::JudgeTextY, SettingId::ScratchSide];
+
+    /// Leave every screen to the built-in drawing, whatever skin the app under test started with:
+    /// no document chosen by hand, no pack named, and a settings folder that was never created, so
+    /// there is no skin installed beside it either.
+    fn without_skins(shared: &mut AppShared) {
+        let bare = std::env::temp_dir().join(format!("rbms-settings-ui-no-skin-{}-{:?}", std::process::id(), std::thread::current().id()));
+        let _ = std::fs::remove_dir_all(&bare);
+        shared.settings_path = bare.join("settings.ron");
+        shared.config.skin = rbms_config::SkinOptions::default();
+        shared.skins = crate::skin_select::SkinLibrary::new(&shared.settings_path, &shared.config);
+        let drawn: Vec<i32> = (0..).take(rbms_config::SKIN_SCREEN_LABELS.len()).filter(|screen| shared.skin_is_set_to_draw(*screen)).collect();
+        assert!(drawn.is_empty(), "the test cannot reach a configuration with no skin: screens {drawn:?} still have a document");
+    }
+
+    fn note_of(shared: &AppShared, id: SettingId) -> Option<&'static str> {
+        shared.settings_note(SettingRow::Fixed(id))
+    }
+
+    #[test]
+    fn no_row_is_annotated_while_the_built_in_screens_draw_everything() {
+        let mut shared = shared();
+        without_skins(&mut shared);
+        for id in SettingId::ALL {
+            assert_eq!(note_of(&shared, id), None, "{id:?}");
+        }
+    }
+
+    #[test]
+    fn a_built_in_layout_row_says_so_once_a_skin_is_set_to_draw_its_screen() {
+        let mut shared = shared();
+        without_skins(&mut shared);
+        shared.config.skin.select(PLAY_7KEYS, Some("/skins/mine/play7.luaskin".to_string()));
+        assert_eq!(note_of(&shared, SettingId::JudgeTextY), Some(rbms_config::BUILT_IN_ONLY_NOTE));
+        assert_eq!(note_of(&shared, SettingId::WhiteNumber), Some(rbms_config::BUILT_IN_ONLY_NOTE));
+        assert_eq!(note_of(&shared, SettingId::Skin), Some(rbms_config::BUILT_IN_ONLY_NOTE));
+        assert_eq!(note_of(&shared, SettingId::ScratchSide), Some(rbms_config::SKIN_OPTION_NOTE), "the skin's own option decides the side on its screen");
+        assert_eq!(note_of(&shared, SettingId::FiveKeyLayout), None, "a five-key chart is still played on the built-in field");
+        assert_eq!(note_of(&shared, SettingId::ResultGraphs), None, "the result screen is still the built-in one");
+
+        shared.config.skin.select(PLAY_5KEYS, Some("/skins/mine/play5.luaskin".to_string()));
+        shared.config.skin.select(crate::SKIN_TYPE_RESULT, Some("/skins/mine/result.luaskin".to_string()));
+        for id in BUILT_IN_LAYOUT_ROWS {
+            assert!(note_of(&shared, id).is_some(), "{id:?} is shown bare with a skin drawing every screen it is for");
+        }
+        for id in SettingId::ALL {
+            if !BUILT_IN_LAYOUT_ROWS.contains(&id) {
+                assert_eq!(note_of(&shared, id), None, "{id:?} is read on a skin's screen too");
+            }
+        }
+    }
+
+    /// A document that was read and could not be leaves its screen to the built-in drawing, so the
+    /// rows that drawing reads are shown bare again; choosing another document annotates them again.
+    #[test]
+    fn a_row_is_bare_again_while_the_chosen_document_has_failed_to_read() {
+        let mut shared = shared();
+        without_skins(&mut shared);
+        shared.config.skin.select(PLAY_7KEYS, Some("/skins/mine/play7.luaskin".to_string()));
+        assert_eq!(note_of(&shared, SettingId::JudgeTextY), Some(rbms_config::BUILT_IN_ONLY_NOTE), "a document nobody has read yet is set to draw");
+
+        shared.skins.reload_for(&shared.config, PLAY_7KEYS, crate::skin_select::SkinRead::unhosted(None));
+        assert!(shared.skins.failure(PLAY_7KEYS).is_some(), "the fixture needs a document that cannot be read");
+        for id in BUILT_IN_LAYOUT_ROWS {
+            assert_eq!(note_of(&shared, id), None, "{id:?} is annotated while the built-in screen is what is drawn");
+        }
+
+        shared.config.skin.select(PLAY_7KEYS, Some("/skins/mine/another.luaskin".to_string()));
+        assert_eq!(note_of(&shared, SettingId::JudgeTextY), Some(rbms_config::BUILT_IN_ONLY_NOTE), "a failure of a document that is no longer chosen");
+    }
+
+    /// The note changes how a row reads, never what it holds or whether it can be moved: a chart the
+    /// skin has no document for is played on the built-in field, which still follows the row.
+    #[test]
+    fn an_annotated_row_keeps_its_value_and_still_steps() {
+        let mut shared = shared();
+        without_skins(&mut shared);
+        let bare: Vec<(&str, String)> = BUILT_IN_LAYOUT_ROWS.iter().map(|id| shared.setting_line(*id)).collect();
+        shared.config.skin.select(PLAY_7KEYS, Some("/skins/mine/play7.luaskin".to_string()));
+        let annotated: Vec<(&str, String)> = BUILT_IN_LAYOUT_ROWS.iter().map(|id| shared.setting_line(*id)).collect();
+        assert_eq!(annotated, bare);
+        assert_eq!(adjust(&mut shared.config, SettingId::JudgeTextY, 1), AdjustOutcome::Changed);
+        assert_eq!(adjust(&mut shared.config, SettingId::ScratchSide, 1), AdjustOutcome::Changed);
+        assert_eq!(shared.setting_line(SettingId::ScratchSide).1, "LEFT");
+    }
+
+    /// A document for a screen this build has no screen for is never drawn, so it annotates nothing.
+    #[test]
+    fn a_document_for_a_screen_nothing_draws_annotates_no_row() {
+        let mut shared = shared();
+        without_skins(&mut shared);
+        let undrawn = rbms_skin::loader::SKIN_TYPE_PLAY_24KEYS_BATTLE;
+        assert!(!is_supported_skin_type(undrawn), "the fixture needs a screen type this build does not draw");
+        shared.config.skin.select(undrawn, Some("/skins/mine/battle.luaskin".to_string()));
+        shared.config.skin.select(PLAY_24KEYS, None);
+        for id in SettingId::ALL {
+            assert_eq!(note_of(&shared, id), None, "{id:?}");
+        }
+    }
+
+    /// A document's own customisation rows are the skin's, and are never annotated.
+    #[test]
+    fn a_skin_document_row_is_never_annotated() {
+        let mut shared = shared();
+        shared.config.skin.select(PLAY_7KEYS, Some("/skins/mine/play7.luaskin".to_string()));
+        assert_eq!(shared.settings_note(SettingRow::Skin(SkinRow::Property(0))), None);
     }
 
     #[test]

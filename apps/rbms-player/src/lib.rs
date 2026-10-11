@@ -98,7 +98,7 @@ mod toast;
 mod window_mode;
 use app_network::build_server;
 use app_play::schedule_poll_interval_us;
-pub(crate) use assets::{DecodedImage, bundled_skin, decode_bga_image, install_default_sounds, keysound_jobs, load_theme, resolve_file, spawn_keysound_decode};
+pub(crate) use assets::{DecodedImage, bundled_skin, decode_bga_image, install_default_pack, keysound_jobs, load_theme, resolve_file, spawn_keysound_decode};
 use course_ir::{UNRELEASED_COURSE_REASON, build_course_submission};
 use course_ui::{CourseEntry, CourseList, CourseOverrides, SelectTab, courses_dir, library_index, stage_label};
 use favorites::{Favorites, favorites_path};
@@ -187,7 +187,9 @@ enum PreviewMsg {
 struct LaunchOptions {
     /// `--keys`: lane bindings for this run, bypassing the key config file.
     keys_override: Option<Vec<(KeyCode, usize)>>,
-    /// `--skin`: a skin RON to load instead of the configured bundled skin.
+    /// `--skin`: a skin RON to load instead of the configured bundled skin. It lays out the
+    /// built-in note field, so a run started with it draws its play screens with that field
+    /// whatever skin document is chosen for them.
     skin_path: Option<String>,
     /// `--table`: a difficulty table added to the library for this run.
     table_url: Option<String>,
@@ -896,7 +898,9 @@ impl App {
         let keyconfig_path = launch.keyconfig_path.clone().map(PathBuf::from).unwrap_or_else(|| config_dir.join("keyconfig.ron"));
         let keyconfig = KeyConfig::load(&keyconfig_path);
         let pad = PadState::new(&keyconfig.pad);
-        let skins = SkinLibrary::new(&settings_path, &config).forcing_pack(launch.skin_pack.clone(), &config);
+        let skins = SkinLibrary::new(&settings_path, &config)
+            .forcing_pack(launch.skin_pack.clone(), &config)
+            .drawing_play_built_in(launch.skin_path.is_some(), &config);
 
         let mut app = App {
             stage,
@@ -1376,8 +1380,16 @@ pub fn run(args: impl Iterator<Item = String>) -> ExitCode {
         }
     };
 
-    if !install_default_sounds(&settings_path) {
-        notify(Level::Warn, format!("system sounds not installed beside {}", settings_path.display()));
+    let installed = install_default_pack(&settings_path);
+    if !installed.is_complete() {
+        notify(
+            Level::Warn,
+            format!(
+                "default skin not fully installed: {} files could not be written beside {}; a screen without its skin uses the built-in layout",
+                installed.failed,
+                settings_path.display()
+            ),
+        );
     }
 
     let mut launch = LaunchOptions { skin_pack: skin_select::pack_from_environment(std::env::var_os(skin_select::SKIN_PACK_ENV)), ..LaunchOptions::default() };

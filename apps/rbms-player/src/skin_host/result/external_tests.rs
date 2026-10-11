@@ -1,8 +1,9 @@
 //! The result screens of an external skin pack, read through a host that has a finished run on it.
 //!
-//! Runs only when `RBMS_SKIN_PACK` names a pack with a `result.luaskin` and a `course.luaskin`, and
-//! passes silently without it. The pack is read only: whatever a skin writes goes to an overlay in
-//! the temporary directory.
+//! Runs only when `RBMS_SKIN_PACK` names a pack, and passes silently without it. The pack's result
+//! and course result documents are found by the type their headers declare, whatever the files are
+//! called; a pack with neither is reported and passed over. The pack is read only: whatever a skin
+//! writes goes to an overlay in the temporary directory.
 
 use std::borrow::Cow;
 use std::cell::RefCell;
@@ -13,7 +14,7 @@ use rbms_judge::gauge::GaugeIndex;
 use rbms_model::Mode;
 use rbms_render::result::TargetView;
 use rbms_skin::dst::{DrawStateSource, LuaFnId, OffsetSource, SkinOffset};
-use rbms_skin::loader::{SkinLoadOptions, SkinUserConfig, load_skin_with_host};
+use rbms_skin::loader::{SKIN_TYPE_COURSE_RESULT, SKIN_TYPE_RESULT, SkinLoadOptions, SkinUserConfig, load_header, load_skin_with_host};
 use rbms_skin::lua::{LocalTime, LuaFnKind};
 use rbms_skin::property::generated::{STRING_COURSE1_TITLE, STRING_COURSE10_TITLE, STRING_IR_NAME, STRING_RANKING1_NAME, STRING_RANKING10_NAME};
 use rbms_skin::property::{AudioCommand, FLOAT_ABSENT, IMAGE_INDEX_ABSENT, INTEGER_ABSENT, ScoreSlot, ScoreSnapshot, SkinHost, StaticScreen, VolumeBus};
@@ -22,7 +23,7 @@ use rbms_skin::timer::TimerState;
 use super::snapshot::{FinishedRun, GaugeEnds, PreviousScore, ReplaySlot, ResultInput, ResultSnapshot, TimingFigures};
 use crate::skin_host::ResultScene;
 use crate::skin_host::ScreenHost;
-use crate::skin_host::chart::{ChartContents, ChartMeta, ChartState};
+use crate::skin_host::chart::{BpmRange, ChartContents, ChartMeta, ChartState};
 use crate::skin_host::ir::{IrLink, IrPhase};
 use crate::skin_host::options::PlayedOptions;
 use crate::skin_host::score::standing::{PointFamily, ScoreSheet};
@@ -30,8 +31,42 @@ use crate::skin_host::system::SystemState;
 
 const SKIN_PACK_ENV: &str = "RBMS_SKIN_PACK";
 
-/// The entry files of the result screens of a pack.
-const RESULT_SCREENS: [&str; 2] = ["result.luaskin", "course.luaskin"];
+/// The screens whose documents are read, by the skin type a header declares for them.
+const RESULT_SCREENS: [(&str, i32); 2] = [("result", SKIN_TYPE_RESULT), ("course result", SKIN_TYPE_COURSE_RESULT)];
+
+/// The extensions of a skin document.
+const DOCUMENT_EXTENSIONS: [&str; 3] = ["luaskin", "json", "json5"];
+
+/// The extension only a skin is written under. A file with one of the others may be anything a
+/// pack keeps as data.
+const LUA_SKIN_EXTENSION: &str = "luaskin";
+
+/// The document at the top of `pack` that declares itself to be of `skin_type`, the first by file
+/// name when several do.
+///
+/// A Lua skin whose header does not load fails the test with what the loader said, rather than
+/// being passed over: it may be the very document that was asked for.
+fn document_of_type(pack: &Path, skin_type: i32, user: &SkinUserConfig, overlay: &Path) -> Option<PathBuf> {
+    let mut found: Vec<PathBuf> = std::fs::read_dir(pack)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.is_file() && path.extension().is_some_and(|extension| DOCUMENT_EXTENSIONS.iter().any(|known| extension.eq_ignore_ascii_case(known)))
+        })
+        .collect();
+    found.sort();
+    found.into_iter().find(|path| {
+        let options = SkinLoadOptions { rng_seed: Some(TEST_SEED), write_overlay: Some(overlay), ..SkinLoadOptions::new(pack, user, Mode::BEAT_7K) };
+        match load_header(path, options) {
+            Ok(header) => header.skin_type == skin_type,
+            Err(error) if path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case(LUA_SKIN_EXTENSION)) => {
+                panic!("the header of {} should load: {error}", path.display())
+            }
+            Err(_) => false,
+        }
+    })
+}
 
 /// The clock the system cluster is given.
 const CLOCK: LocalTime = LocalTime { year: 2026, month: 10, day: 10, hour: 12, minute: 30, second: 45 };
@@ -83,6 +118,7 @@ fn chart() -> ChartMeta<'static> {
         mode: Some(Mode::BEAT_7K),
         judge: Some(2),
         notes: Some(10),
+        bpm: Some(BpmRange { min: 120, max: 180 }),
         total: Some(300.0),
         contents: ChartContents { stagefile: Some(true), ..ChartContents::default() },
         ..ChartMeta::default()
@@ -246,12 +282,19 @@ fn the_result_screens_of_an_external_pack_read_everything_through_the_host_witho
     host.ir.link = Some(IrLink::new(false, IrPhase::Offline));
 
     let spy = Spy { inner: &host, unanswered: RefCell::new(BTreeSet::new()) };
-    for name in RESULT_SCREENS {
+    for (name, skin_type) in RESULT_SCREENS {
         spy.unanswered.borrow_mut().clear();
-        let entry: &Path = &pack.join(name);
+        let Some(entry) = document_of_type(&pack, skin_type, &user, &overlay) else {
+            println!("{name}: the pack has no document of type {skin_type}");
+            continue;
+        };
+        let entry: &Path = &entry;
         let options = SkinLoadOptions { rng_seed: Some(TEST_SEED), write_overlay: Some(&overlay), ..SkinLoadOptions::new(&pack, &user, Mode::BEAT_7K) };
         let skin = load_skin_with_host(entry, options, &spy).unwrap_or_else(|error| panic!("{name} should load: {error}"));
-        let runtime = skin.runtime().expect("a Lua skin keeps its interpreter");
+        let Some(runtime) = skin.runtime() else {
+            println!("{name}: {} is not a Lua skin, so it has no function to call", entry.display());
+            continue;
+        };
 
         let mut called = 0;
         for _ in 0..FRAMES {

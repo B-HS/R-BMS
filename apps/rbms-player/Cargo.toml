@@ -49,5 +49,8 @@ memory-stats = "1.2.0"
 sha2 = { workspace = true }
 thiserror = { workspace = true }
 
+[build-dependencies]
+sha2 = { workspace = true }
+
 [lints]
 workspace = true

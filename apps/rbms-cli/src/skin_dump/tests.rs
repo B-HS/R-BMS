@@ -486,3 +486,51 @@ fn an_external_skin_pack_loads_every_screen_but_the_one_its_author_left_broken()
         assert_eq!(frames.frames_over_budget, 0, "{}: the budget cut a call off", document.file);
     }
 }
+
+/// The default skin pack's folder in the repository, from this package's own.
+const DEFAULT_PACK_FOLDER: &str = "../../assets/skins/rbms-default";
+
+/// The documents the default pack ships and the skin type each declares: the browser, the decide
+/// scene, play in five key modes, and the two result screens.
+const DEFAULT_PACK_DOCUMENTS: [(&str, i32); 9] = [
+    ("courseresult.luaskin", SKIN_TYPE_COURSE_RESULT),
+    ("decide.luaskin", SKIN_TYPE_DECIDE),
+    ("play10.luaskin", SKIN_TYPE_PLAY_10KEYS),
+    ("play14.luaskin", SKIN_TYPE_PLAY_14KEYS),
+    ("play5.luaskin", SKIN_TYPE_PLAY_5KEYS),
+    ("play7.luaskin", SKIN_TYPE_PLAY_7KEYS),
+    ("play9.luaskin", SKIN_TYPE_PLAY_9KEYS),
+    ("result.luaskin", SKIN_TYPE_RESULT),
+    ("select.luaskin", SKIN_TYPE_MUSIC_SELECT),
+];
+
+/// The pack the player draws when none is named is in the repository, so it is held to the strict
+/// gate on every machine and not only where a person points `RBMS_SKIN_PACK` at it: all nine
+/// documents load, each declares the screen its file is named for, not one error is caught by a
+/// skin's own `pcall`, not one function value fails, no call runs past the budget, nothing is said
+/// against a document while it loads, every file a document names is on disk, and the run leaves
+/// the folder as it found it. Nothing is told that it may fail: the judgement is `--strict`'s own.
+#[test]
+fn the_default_skin_pack_in_the_repository_dumps_clean_under_the_strict_gate() {
+    let pack = Path::new(env!("CARGO_MANIFEST_DIR")).join(DEFAULT_PACK_FOLDER);
+    let report = dump(&DumpArgs { frames: SCRATCH_FRAMES, ..dump_args(&pack) }).expect("the default pack dumps");
+    assert!(report.pack.unchanged(), "the dump changed the pack: {:?}", report.pack.changed);
+
+    let mut loaded: Vec<(&str, i32)> =
+        report.documents.iter().map(|document| (document.file.as_str(), document.header.as_ref().map_or(-1, |header| header.skin_type))).collect();
+    loaded.sort_unstable();
+    assert_eq!(loaded, DEFAULT_PACK_DOCUMENTS, "the pack ships other documents than it is held to, or one declares another screen");
+
+    let findings = gate::findings(&report, &[]);
+    assert!(findings.is_empty(), "the strict gate found:\n{}", findings.join("\n"));
+    for document in &report.documents {
+        let body = document.body.as_ref().expect("a document the gate passed has a body");
+        let file = &document.file;
+        assert!(body.diagnostics.warnings.is_empty(), "{file}: said against while it loaded: {:?}", body.diagnostics.warnings);
+        assert!(document.frames.is_some(), "{file}: no frame was run");
+        let missing: Vec<&str> =
+            body.files.sources.iter().chain(&body.files.fonts).filter(|declared| !declared.exists).map(|declared| declared.path.as_str()).collect();
+        assert!(missing.is_empty(), "{file}: names files that are not in the pack: {missing:?}");
+        assert!(body.files.sources_declared > 0 && body.files.fonts_declared > 0, "{file}: names no image or no font");
+    }
+}

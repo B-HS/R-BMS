@@ -180,6 +180,11 @@ pub const DEFAULT_HISPEED: f64 = 2.0;
 /// Skin a fresh install starts on.
 pub const DEFAULT_SKIN: &str = "NORMAL";
 
+/// Whether an ordinary window keeps the screen's own proportions on a fresh install, and for a
+/// settings file written before the LETTERBOX row existed. A file that states the row either way is
+/// read as it states it.
+pub const DEFAULT_LETTERBOX: bool = true;
+
 /// Every screen a skin document can declare, named for the SKIN tab, indexed by the `SkinType` id
 /// the document writes in its `type` field (`SkinType.java`).
 ///
@@ -564,6 +569,8 @@ pub struct DisplayOptions {
     /// [`JUDGE_TEXT_Y_FROM_SKIN`] to keep the skin's own placement.
     pub judge_text_y: f32,
     /// Fit the logical screen inside the window at its own aspect ratio rather than stretching it.
+    /// On unless a settings file says otherwise: a skin is authored for one shape, and a window of
+    /// another would draw it distorted.
     pub letterbox: bool,
     /// Inner size the window opens at, and is put back to when the mode returns to a window.
     #[serde(with = "crate::window::window_resolution_token")]
@@ -587,7 +594,7 @@ impl Default for DisplayOptions {
             replay_analysis: true,
             show_white_number: false,
             judge_text_y: JUDGE_TEXT_Y_FROM_SKIN,
-            letterbox: false,
+            letterbox: DEFAULT_LETTERBOX,
             window_resolution: WindowResolution::default(),
             window_mode: WindowMode::default(),
             five_key_layout: false,

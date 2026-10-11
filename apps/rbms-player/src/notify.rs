@@ -39,6 +39,9 @@ fn queue() -> &'static Mutex<VecDeque<(Level, String)>> {
 pub(crate) fn notify(level: Level, message: impl Into<String>) {
     let message = message.into();
     eprintln!("{message}");
+    if is_kept_out_of_the_queue() {
+        return;
+    }
     let Ok(mut queue) = queue().lock() else {
         return;
     };
@@ -56,6 +59,42 @@ pub(crate) fn drain(out: &mut Vec<(Level, String)>) {
     out.extend(queue.drain(..));
 }
 
+/// Whether the queue is held by a test on another thread, in which case what this thread reports is
+/// printed and not queued.
+#[cfg(test)]
+fn is_kept_out_of_the_queue() -> bool {
+    HOLDER.lock().is_ok_and(|holder| holder.is_some_and(|thread| thread != std::thread::current().id()))
+}
+
+/// Outside a test the queue is never held.
+#[cfg(not(test))]
+const fn is_kept_out_of_the_queue() -> bool {
+    false
+}
+
+/// The thread of the test that has the queue to itself, if one has.
+#[cfg(test)]
+static HOLDER: Mutex<Option<std::thread::ThreadId>> = Mutex::new(None);
+
+/// A test's hold on the queue, let go of when it is dropped, whether the test ended or panicked.
+#[cfg(test)]
+struct Hold;
+
+#[cfg(test)]
+impl Hold {
+    fn take() -> Hold {
+        *HOLDER.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(std::thread::current().id());
+        Hold
+    }
+}
+
+#[cfg(test)]
+impl Drop for Hold {
+    fn drop(&mut self) {
+        *HOLDER.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+    }
+}
+
 /// Throw away everything queued, so one test cannot see another's messages.
 #[cfg(test)]
 pub(crate) fn clear() {
@@ -67,14 +106,18 @@ pub(crate) fn clear() {
 /// Run `body` with the process-wide queue to itself, empty before and after.
 ///
 /// The bus is one queue for the whole process and the tests run side by side, so anything that
-/// reads it has to take its turn or it will see another test's message.
+/// reads it has to take its turn or it will see another test's message. A test that does not take
+/// its turn can still report -- what it says is printed -- but while another test holds the queue,
+/// what it says is not queued, so it cannot put a message in front of the test that holds it.
 #[cfg(test)]
 pub(crate) fn exclusive<T>(body: impl FnOnce() -> T) -> T {
     static GATE: Mutex<()> = Mutex::new(());
     let guard = GATE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let held = Hold::take();
     clear();
     let outcome = body();
     clear();
+    drop(held);
     drop(guard);
     outcome
 }

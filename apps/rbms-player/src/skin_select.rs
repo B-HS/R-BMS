@@ -18,6 +18,11 @@
 //! naming one -- on the PACK FOLDER row, or for one run with [`SKIN_PACK_ENV`] -- gives every screen
 //! the player has not chosen a document for by hand the pack's document that declares it.
 //!
+//! One pack is in effect at a time ([`pack_in_effect`]): the one the run was started with, else the
+//! one the row names, else the player's own default pack, which every run installs beside the
+//! settings file. A screen the pack in effect has no document for is drawn by its built-in layout;
+//! the default pack does not fill in for a pack the player chose.
+//!
 //! A document is read whole in one of two ways. One that is only data is read the moment it is
 //! asked for. A Lua skin builds its screen by reading the game while it runs (`load_lua_skin`), so
 //! it waits until the screen it draws is on its first frame and is read against that screen's own
@@ -39,11 +44,16 @@ use rbms_skin::model::{OffsetDef, PropertyDef};
 use rbms_skin::property::{DefaultState, SkinHost};
 use rbms_skin::resolve::{CustomFile, RANDOM_SELECTION, plain_path};
 
-use crate::assets::skin_overlay_folder;
+use crate::assets::{installed_default_pack, skin_overlay_folder};
 
 /// Environment variable naming a skin pack folder for this run only. It outranks the pack the
 /// settings file names and is never written back to it.
 pub(crate) const SKIN_PACK_ENV: &str = "RBMS_SKIN_PACK";
+
+/// The launch option that names a layout for the built-in note field. A run started with it draws
+/// its play screens with that field whatever document is chosen for them, and the SKIN row says so
+/// with this name.
+pub(crate) const LAUNCH_LAYOUT_FLAG: &str = "--skin";
 
 /// How deep under the skin folder documents are looked for: the folder itself, one directory per
 /// skin, and one more for the skins that group their variants in a subdirectory.
@@ -213,6 +223,13 @@ pub(crate) struct SkinLibrary {
     root: PathBuf,
     /// The pack this run was started with, which outranks the configured one.
     forced_pack: Option<PathBuf>,
+    /// Whether this run was started with a layout for the built-in note field
+    /// ([`LAUNCH_LAYOUT_FLAG`]), which leaves every play screen to that field: no document is
+    /// answered for one, whoever chose it.
+    built_in_play: bool,
+    /// The installed default pack, drawn when neither the run nor the configuration names one.
+    /// Looked for when the library is made and each time the folders are walked, not every frame.
+    default_pack: Option<PathBuf>,
     /// The pack in effect when the folders were last walked.
     pack: Option<PathBuf>,
     /// Every document found under the root and in the pack, by screen and then by name.
@@ -245,6 +262,12 @@ pub(crate) struct SkinLibrary {
     arrived: RefCell<BTreeMap<i32, Arrival>>,
     /// The failures nobody has been told about yet, by screen.
     unannounced: BTreeMap<i32, String>,
+    /// The Lua skins of the pack whose header could not be read, which is why no screen is drawn
+    /// with them, that nobody has been told about yet: the file, and the first line of why.
+    unreadable: Vec<(PathBuf, String)>,
+    /// The versions of the pack's unreadable skins that have been reported, so walking the folders
+    /// again says nothing more about a file nobody has changed.
+    reported: BTreeMap<PathBuf, Option<FileVersion>>,
     /// What every read is pinned with, or `None` to leave the draws to chance.
     seed: Option<u64>,
     /// Handed out to each read so a renderer that compiled a document notices it has been read
@@ -277,13 +300,21 @@ struct Arrival {
     outcome: Result<Box<LoadedSkin>, String>,
 }
 
+/// What tells one version of a document's file from the next: when it was last written, and how
+/// long it is.
+type FileVersion = (SystemTime, u64);
+
 /// What a document's header answered, and the file it was answered from.
 struct CachedHeader {
     /// The file's modification time and length when it was read. A file that cannot be stat'ed has
     /// neither and is never answered from memory.
-    stamp: Option<(SystemTime, u64)>,
+    stamp: Option<FileVersion>,
     /// The header, or `None` for a file that is not a skin this build can read.
     header: Option<SkinHeader>,
+    /// The first line of why the header could not be read, for a Lua skin: a file under that
+    /// extension is a skin and nothing else, so one that does not answer is broken rather than
+    /// something of the player's that happens to be in the folder.
+    failure: Option<String>,
 }
 
 /// Every header read so far, by the path it was found under.
@@ -308,9 +339,23 @@ impl HeaderCache {
         }
         self.reads += 1;
         let user = SkinUserConfig::default();
-        let header = load_header(path, SkinLoadOptions::new(root, &user, crate::MODE)).ok();
-        self.entries.insert(path.to_path_buf(), CachedHeader { stamp, header: header.clone() });
+        let read = load_header(path, SkinLoadOptions::new(root, &user, crate::MODE));
+        let failure = read.as_ref().err().filter(|_| is_lua_skin(path)).map(|error| first_line(&error.to_string()));
+        let header = read.ok();
+        self.entries.insert(path.to_path_buf(), CachedHeader { stamp, header: header.clone(), failure });
         header
+    }
+
+    /// The Lua skins directly in `folder` whose header could not be read, each with the version of
+    /// its file that was read and the first line of why.
+    fn unreadable_in(&self, folder: &Path) -> Vec<(&Path, Option<FileVersion>, &str)> {
+        let folder = plain_path(folder);
+        let directly_inside = |path: &Path| path.parent().is_some_and(|parent| plain_path(parent) == folder);
+        self.entries
+            .iter()
+            .filter(|(path, _)| directly_inside(path))
+            .filter_map(|(path, known)| Some((path.as_path(), known.stamp, known.failure.as_deref()?)))
+            .collect()
     }
 
     /// The header of every document under `root` that declares a screen, up to `max_depth` deep.
@@ -356,6 +401,8 @@ impl SkinLibrary {
             settings_path: settings_path.to_path_buf(),
             root: skin_root(settings_path, config),
             forced_pack: None,
+            built_in_play: false,
+            default_pack: installed_default_pack(settings_path),
             pack: None,
             documents: Vec::new(),
             pack_documents: BTreeMap::new(),
@@ -367,6 +414,8 @@ impl SkinLibrary {
             waiting: BTreeMap::new(),
             arrived: RefCell::new(BTreeMap::new()),
             unannounced: BTreeMap::new(),
+            unreadable: Vec::new(),
+            reported: BTreeMap::new(),
             seed: None,
             next_build: 0,
         };
@@ -380,6 +429,20 @@ impl SkinLibrary {
         self.forced_pack = pack;
         self.read_pack(config);
         self
+    }
+
+    /// The same library with every play screen left to the built-in note field when `forced`, which
+    /// is what a run started with a layout for that field asks for ([`LAUNCH_LAYOUT_FLAG`]).
+    pub(crate) fn drawing_play_built_in(mut self, forced: bool, config: &Config) -> SkinLibrary {
+        self.set_built_in_play(forced, config);
+        self
+    }
+
+    /// Leave every play screen to the built-in note field, or give them back to their documents.
+    /// What was read for a screen that is no longer drawn with its document is let go of.
+    pub(crate) fn set_built_in_play(&mut self, forced: bool, config: &Config) {
+        self.built_in_play = forced;
+        self.drop_moved(config);
     }
 
     /// Pin every read this library makes, for a test or a capture that has to come out the same each
@@ -406,24 +469,42 @@ impl SkinLibrary {
     }
 
     /// The path of the document one screen is to be drawn with: the one the player chose for it by
-    /// hand, and otherwise the pack's. `None` leaves the screen to its built-in layout.
+    /// hand, and otherwise the pack's. `None` leaves the screen to its built-in layout, which is
+    /// every play screen's answer in a run started with a layout for the built-in note field.
     pub(crate) fn document_path<'a>(&'a self, config: &'a Config, screen: i32) -> Option<&'a str> {
+        if self.plays_built_in(screen) {
+            return None;
+        }
         config.skin.document(screen).or_else(|| self.pack_documents.get(&screen).map(String::as_str))
+    }
+
+    /// Whether `screen` is a play screen this run draws with the built-in note field because it was
+    /// started with a layout for it.
+    fn plays_built_in(&self, screen: i32) -> bool {
+        self.built_in_play && skin_type_mode(screen).is_some()
     }
 
     /// Whether the pack that should be in effect is not the one the folders were last walked for:
     /// the PACK FOLDER row moved, or a settings file arrived from somewhere else.
     pub(crate) fn pack_moved(&self, config: &Config) -> bool {
-        wanted_pack(self.forced_pack.as_deref(), config) != self.pack.as_deref()
+        self.wanted_pack(config) != self.pack.as_deref()
+    }
+
+    /// The pack that should be in effect, with the default pack as it was last looked for.
+    fn wanted_pack<'a>(&'a self, config: &'a Config) -> Option<&'a Path> {
+        wanted_pack(self.forced_pack.as_deref(), config, self.default_pack.as_deref())
     }
 
     /// What the PACK FOLDER row shows: the pack in effect, and where it came from when it is not the
-    /// one the row stores.
+    /// one the row stores. A row that stores nothing says that the default pack is drawn and then
+    /// where it is -- in that order, because a value too long for its row loses its end -- or that
+    /// there is no pack when the default one is not installed.
     pub(crate) fn pack_value(&self, config: &Config) -> String {
-        match (self.forced_pack.as_deref(), config.skin.pack_folder()) {
-            (Some(forced), _) => format!("{} ({SKIN_PACK_ENV})", forced.display()),
-            (None, Some(pack)) => pack.to_owned(),
-            (None, None) => NONE_VALUE.to_string(),
+        match (self.forced_pack.as_deref(), config.skin.pack_folder(), self.default_pack.as_deref()) {
+            (Some(forced), _, _) => format!("{} ({SKIN_PACK_ENV})", forced.display()),
+            (None, Some(pack), _) => pack.to_owned(),
+            (None, None, Some(default)) => format!("{DEFAULT_VALUE} ({})", default.display()),
+            (None, None, None) => NONE_VALUE.to_string(),
         }
     }
 
@@ -434,6 +515,7 @@ impl SkinLibrary {
     pub(crate) fn rescan(&mut self, settings_path: &Path, config: &Config) {
         self.settings_path = settings_path.to_path_buf();
         self.root = skin_root(settings_path, config);
+        self.default_pack = installed_default_pack(settings_path);
         let mut documents = self.headers.scan(&self.root, SCAN_MAX_DEPTH);
         for header in self.read_pack(config) {
             if !documents.iter().any(|known| same_document(&known.path, &header.path)) {
@@ -455,14 +537,29 @@ impl SkinLibrary {
     /// Read the headers of the pack in effect and settle which of its documents draws each screen:
     /// the one that declares the screen, and the first by file name when several do. Answers the
     /// headers it read.
+    ///
+    /// A Lua skin of the pack whose header does not answer is one of the pack's files all the same,
+    /// read with the pack as its root when a screen names it. It is queued to be reported
+    /// ([`SkinLibrary::take_unreadable`]) unless the player chose it for a screen by hand: that
+    /// screen reads it and reports why it failed itself, and the one failure is said once.
     fn read_pack(&mut self, config: &Config) -> Vec<SkinHeader> {
-        self.pack = wanted_pack(self.forced_pack.as_deref(), config).map(Path::to_path_buf);
+        self.pack = self.wanted_pack(config).map(Path::to_path_buf);
         let mut found = match self.pack.clone() {
             Some(pack) => self.headers.scan(&pack, PACK_SCAN_DEPTH),
             None => Vec::new(),
         };
         found.sort_by_cached_key(|header| (file_name_key(&header.path), header.path.clone()));
         self.pack_paths = found.iter().map(|header| plain_path(&header.path)).collect();
+        if let Some(pack) = self.pack.as_deref() {
+            for (path, version, reason) in self.headers.unreadable_in(pack) {
+                self.pack_paths.insert(plain_path(path));
+                let chosen_by_hand = config.skin.selected.values().any(|chosen| same_document(Path::new(chosen), path));
+                if !chosen_by_hand && self.reported.get(path) != Some(&version) {
+                    self.reported.insert(path.to_path_buf(), version);
+                    self.unreadable.push((path.to_path_buf(), reason.to_owned()));
+                }
+            }
+        }
         self.pack_documents.clear();
         for header in &found {
             self.pack_documents.entry(header.skin_type).or_insert_with(|| header.path.to_string_lossy().into_owned());
@@ -503,9 +600,13 @@ impl SkinLibrary {
     }
 
     /// What the SKIN row shows: the document's own name, marked when the pack rather than the player
-    /// chose it, or the built-in screen.
+    /// chose it, or the built-in screen -- with the launch option that asked for it, on a play
+    /// screen of a run started with a layout for the built-in note field.
     pub(crate) fn document_value(&self, config: &Config) -> String {
         let by_hand = config.skin.document(config.skin.screen);
+        if self.plays_built_in(config.skin.screen) {
+            return format!("{DEFAULT_VALUE} ({LAUNCH_LAYOUT_FLAG})");
+        }
         let Some(path) = self.document_path(config, config.skin.screen) else {
             return DEFAULT_VALUE.to_string();
         };
@@ -811,6 +912,23 @@ impl SkinLibrary {
         self.unannounced.remove(&screen)
     }
 
+    /// The Lua skins of the pack in effect that could not be read far enough to say which screen
+    /// they draw, each with the first line of why, the first time this is asked after the pack was
+    /// read and nothing every time after. No screen is drawn with such a skin, so nothing else would
+    /// ever say that it is there and broken. One the player chose for a screen by hand is not among
+    /// them: the screen it was chosen for says so ([`SkinLibrary::take_failure`]).
+    pub(crate) fn take_unreadable(&mut self) -> Vec<(PathBuf, String)> {
+        std::mem::take(&mut self.unreadable)
+    }
+
+    /// Whether the document `screen` is to be drawn with was read and could not be, which leaves
+    /// the built-in screen drawing until the file is fixed or another is chosen. A failure of a
+    /// document the screen is no longer drawn with does not count.
+    pub(crate) fn has_failed(&self, config: &Config, screen: i32) -> bool {
+        let chosen = self.document_path(config, screen);
+        self.errors.get(&screen).is_some_and(|failure| chosen == Some(failure.path.as_str()))
+    }
+
     /// Why one screen's document could not be read.
     #[cfg(test)]
     pub(crate) fn failure(&self, screen: i32) -> Option<&str> {
@@ -889,17 +1007,31 @@ impl SkinLibrary {
                 self.loaded.insert(screen, LoadedDocument { skin, path, build });
             }
             Err(reason) => {
-                self.unannounced.insert(screen, reason.lines().next().unwrap_or_default().to_owned());
+                self.unannounced.insert(screen, first_line(&reason));
                 self.errors.insert(screen, ReadFailure { path, reason });
             }
         }
     }
 }
 
-/// The pack that should be in effect: the one the run was started with, and otherwise the one the
-/// configuration names.
-fn wanted_pack<'a>(forced: Option<&'a Path>, config: &'a Config) -> Option<&'a Path> {
-    forced.or_else(|| config.skin.pack_folder().map(Path::new))
+/// The pack that should be in effect: the one the run was started with, otherwise the one the
+/// configuration names, and otherwise the installed default pack.
+fn wanted_pack<'a>(forced: Option<&'a Path>, config: &'a Config, default: Option<&'a Path>) -> Option<&'a Path> {
+    forced.or_else(|| config.skin.pack_folder().map(Path::new)).or(default)
+}
+
+/// The pack a run draws, for a caller that holds no [`SkinLibrary`]: `forced` is the pack the run
+/// was started with, and the default pack is looked for beside `settings_path` when it is needed.
+pub(crate) fn pack_in_effect(forced: Option<&Path>, config: &Config, settings_path: &Path) -> Option<PathBuf> {
+    match wanted_pack(forced, config, None) {
+        Some(named) => Some(named.to_path_buf()),
+        None => installed_default_pack(settings_path),
+    }
+}
+
+/// The first line of a reason, which is the part of it that is said once on screen.
+fn first_line(reason: &str) -> String {
+    reason.lines().next().unwrap_or_default().to_owned()
 }
 
 /// The pack an environment names, or `None` for a variable that is unset or blank.
@@ -986,6 +1118,8 @@ fn stepped(at: Option<usize>, len: usize, delta: i32) -> Option<usize> {
     Some((at as i32 + delta).rem_euclid(len as i32) as usize)
 }
 
+#[cfg(test)]
+mod default_pack_tests;
 #[cfg(test)]
 pub(crate) mod fixtures;
 #[cfg(test)]

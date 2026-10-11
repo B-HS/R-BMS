@@ -402,7 +402,7 @@ fn a_folder_row_counts_only_the_charts_the_filter_leaves() {
 /// the turntable is lane 7.
 const WHITE_LANES: [usize; 4] = [0, 2, 4, 6];
 const BLACK_CLOSE_LANES: [usize; 2] = [1, 3];
-const NEXT_REPLAY_LANE: usize = 5;
+const KEY_SIX_LANE: usize = 5;
 const TURNTABLE_LANE: usize = 7;
 
 fn lane_event(lane: usize, dir: ScratchDir, press: bool) -> PadEvent {
@@ -490,13 +490,15 @@ fn a_black_key_goes_up_a_folder_and_does_nothing_at_the_root() {
     }
 }
 
-/// The key between them is the replay slot, which the browser does not have yet: it does nothing.
+/// The third black key, key six, has no part in browsing the built-in browser: the replay slot moves
+/// on with the number key `4` and not with a key of the pad (the reference's `NEXT_REPLAY` is on no
+/// key here), so a tap on it leaves the cursor, the view and the screen where they were.
 #[test]
-fn the_next_replay_key_does_nothing_yet() {
+fn key_six_of_the_pad_leaves_the_built_in_browser_where_it_was() {
     let mut app = three_songs();
     let mut state = SelectState::new();
     app.shared.sel = 1;
-    assert!(matches!(tap(&mut app, &mut state, NEXT_REPLAY_LANE), Transition::Stay));
+    assert!(matches!(tap(&mut app, &mut state, KEY_SIX_LANE), Transition::Stay));
     assert_eq!(app.shared.sel, 1);
     assert!(app.shared.select_view == SelectView::AllSongs);
 }

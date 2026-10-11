@@ -1,5 +1,7 @@
 use rbms_library::Library;
-use rbms_skin::property::generated::{BUTTON_LNMODE, RATE_MASTERVOLUME, RATE_MUSICSELECT_POSITION, STRING_SEARCHWORD};
+use rbms_skin::dst::SkinRect;
+use rbms_skin::loader::LoadedSkin;
+use rbms_skin::property::generated::{BUTTON_LNMODE, RATE_MASTERVOLUME, RATE_MUSICSELECT_POSITION, SLIDER_MUSICSELECT_POSITION, STRING_SEARCHWORD};
 
 use super::super::tests::{app, entry};
 use super::super::*;
@@ -146,14 +148,57 @@ const PACK_SCENE: Duration = Duration::from_secs(5);
 /// Longest the pack's browser is waited for.
 const PACK_LOAD_TIMEOUT: Duration = Duration::from_secs(180);
 
-/// The search box of a published browser skin, in the skin's own upward coordinates at the size it
-/// was authored at: ModernChic puts its search text at 50, 895 and gives it 418 by 30.
-const PACK_SEARCH_CENTER: (f32, f32) = (200.0, 910.0);
-
-/// How many songs the pack's browser is given, and the middle of its scrollbar's travel: ModernChic
-/// hangs the lamp from y = 873 and lets it fall 600, so halfway down is 573, at the lamp's x.
+/// How many songs the pack's browser is given.
 const PACK_SONGS: usize = 40;
-const PACK_SCROLLBAR_MIDDLE: (f32, f32) = (1875.0, 573.0);
+
+/// The slider angles a document declares its handle's travel with.
+const SLIDER_UP: i32 = 0;
+const SLIDER_RIGHT: i32 = 1;
+const SLIDER_DOWN: i32 = 2;
+
+/// The two objects of a browser document this test presses, found in the document and not by where
+/// one pack happens to draw them: the text that takes the search word, and the slider that moves
+/// the cursor. Each is where its destination ends up, in the document's own upward coordinates at
+/// the size it was authored at.
+struct PackControls {
+    search: Option<SkinRect>,
+    /// The scrollbar's handle where its travel starts, which way the travel runs, and how long it is.
+    scrollbar: Option<(SkinRect, i32, f32)>,
+}
+
+/// Where the destination of the object called `id` ends up.
+fn rect_of(skin: &LoadedSkin, id: &str) -> Option<SkinRect> {
+    skin.destinations.iter().find(|named| named.id == id).and_then(|named| named.track.frames.last()).map(|frame| frame.rect)
+}
+
+/// The search text and the scrollbar of `skin`, whichever of them it has. A text takes typing when
+/// the document says it is editable or gives it nowhere else to write, and names the search word.
+fn controls_of(skin: &LoadedSkin) -> PackControls {
+    let search = skin
+        .def
+        .text
+        .iter()
+        .find(|text| text.reference == STRING_SEARCHWORD && (text.editable || text.event.is_none()))
+        .and_then(|text| rect_of(skin, &text.id));
+    let scrollbar = skin
+        .def
+        .slider
+        .iter()
+        .find(|slider| slider.slider_type == SLIDER_MUSICSELECT_POSITION && slider.range > 0)
+        .and_then(|slider| Some((rect_of(skin, &slider.id)?, slider.angle, slider.range as f32)));
+    PackControls { search, scrollbar }
+}
+
+/// The point halfway along a scrollbar's travel, which a press writes half of the list for.
+fn halfway((rect, angle, range): (SkinRect, i32, f32)) -> (f32, f32) {
+    let (across_x, across_y, half) = (rect.x + rect.w / 2.0, rect.y + rect.h / 2.0, range / 2.0);
+    match angle {
+        SLIDER_UP => (across_x, rect.y + half),
+        SLIDER_RIGHT => (rect.x + half, across_y),
+        SLIDER_DOWN => (across_x, rect.y - half),
+        _ => (rect.x - half, across_y),
+    }
+}
 
 /// Saves a frame under the capture folder, when one was asked for.
 fn save_frame(name: &str, pixels: &crate::stage::HeadlessCanvas, size: (u32, u32)) {
@@ -166,8 +211,10 @@ fn save_frame(name: &str, pixels: &crate::stage::HeadlessCanvas, size: (u32, u32
 }
 
 /// A browser skin somebody else wrote, named by the environment, has its search box typed into on the
-/// real screen: pressed where the skin drew it, typed into, composed into, and drawn at each step.
-/// It passes without doing anything when no pack is named.
+/// real screen: pressed where the skin drew it, typed into, composed into, and drawn at each step;
+/// and its scrollbar pressed halfway along its travel. Where the two are is read out of the
+/// document, so any pack that has them is held to it; a pack that lacks one is reported and that
+/// part passed over. It passes without doing anything when no pack is named.
 #[test]
 fn the_search_box_of_a_skin_pack_named_by_the_environment_is_typed_into() {
     use crate::stage::capture::{app_in, settings_of};
@@ -215,50 +262,60 @@ fn the_search_box_of_a_skin_pack_named_by_the_environment_is_typed_into() {
         app.shared.finish_skin_frame(&mut canvas);
     };
     frame(&mut app, &mut pixels);
-    let search_box = |pixels: &HeadlessCanvas| -> Vec<crate::Color> {
-        let (left, top) = (50, size.1 - 895 - 30);
-        (top..top + 30).flat_map(|y| (left..left + 418).map(move |x| (x, y))).map(|(x, y)| pixels.pixel_at(x, y)).collect()
-    };
-    save_frame("typing-select-idle", &pixels, size);
-    let idle = search_box(&pixels);
-
+    let controls = controls_of(app.shared.skins.document(SKIN_TYPE_MUSIC_SELECT).expect("a browser that compiled has its document"));
     let ui = crate::stage::canvas::UI_SIZE;
-    let at = (PACK_SEARCH_CENTER.0 / size.0 as f32 * ui.0 as f32, (size.1 as f32 - PACK_SEARCH_CENTER.1) / size.1 as f32 * ui.1 as f32);
-    let press = crate::pointer::PointerInput::Button { button: MouseButton::Left, pressed: true };
-    assert!(app.shared.skin_pointer(at, press), "the skin's search box did not take the press");
-    frame(&mut app, &mut pixels);
-    frame(&mut app, &mut pixels);
-    assert!(app.shared.skin_text_is_focused(), "the press did not start any typing");
-    save_frame("typing-select-focused", &pixels, size);
-    let focused = search_box(&pixels);
-    assert_ne!(focused, idle, "an empty search box being typed into shows its caret");
-
-    for (code, text) in [(KeyCode::KeyA, "a"), (KeyCode::KeyB, "b"), (KeyCode::KeyC, "c")] {
-        assert!(app.shared.skin_text_key(&crate::stage::KeyInput { code, pressed: true, released: false, text: Some(text) }));
-    }
-    app.shared.skin_text_ime(&Ime::Preedit("한".to_string(), Some((0, "한".len()))));
-    frame(&mut app, &mut pixels);
-    save_frame("typing-select-composing", &pixels, size);
-    let composing = search_box(&pixels);
-    assert_ne!(composing, focused);
-
-    app.shared.skin_text_ime(&Ime::Preedit(String::new(), None));
-    app.shared.skin_text_ime(&Ime::Commit("한".to_string()));
-    frame(&mut app, &mut pixels);
-    save_frame("typing-select-typed", &pixels, size);
-    assert_ne!(search_box(&pixels), composing, "the committed syllable is no longer underlined");
-
-    assert!(app.shared.skin_text_key(&crate::stage::KeyInput { code: KeyCode::Enter, pressed: true, released: false, text: None }));
-    frame(&mut app, &mut pixels);
-    assert_eq!(
-        app.shared.skin_requests().take(Cluster::Select),
-        [ClusterRequest::WriteText { id: STRING_SEARCHWORD, value: "abc한".to_string() }],
-        "Enter writes what was typed to the browser"
-    );
-    assert_eq!(search_box(&pixels), idle, "the search word reads empty again once the typing is over");
-
     let ui_point = |(x, y): (f32, f32)| (x / size.0 as f32 * ui.0 as f32, (size.1 as f32 - y) / size.1 as f32 * ui.1 as f32);
-    assert!(app.shared.skin_pointer(ui_point(PACK_SCROLLBAR_MIDDLE), press), "the skin's scrollbar did not take the press");
+    let press = crate::pointer::PointerInput::Button { button: MouseButton::Left, pressed: true };
+
+    if let Some(search) = controls.search {
+        let search_box = |pixels: &HeadlessCanvas| -> Vec<crate::Color> {
+            let (left, top) = (search.x as u32, size.1.saturating_sub((search.y + search.h) as u32));
+            (top..top + search.h as u32).flat_map(|y| (left..left + search.w as u32).map(move |x| (x, y))).map(|(x, y)| pixels.pixel_at(x, y)).collect()
+        };
+        save_frame("typing-select-idle", &pixels, size);
+        let idle = search_box(&pixels);
+
+        let at = ui_point((search.x + search.w / 2.0, search.y + search.h / 2.0));
+        assert!(app.shared.skin_pointer(at, press), "the skin's search box did not take the press");
+        frame(&mut app, &mut pixels);
+        frame(&mut app, &mut pixels);
+        assert!(app.shared.skin_text_is_focused(), "the press did not start any typing");
+        save_frame("typing-select-focused", &pixels, size);
+        let focused = search_box(&pixels);
+        assert_ne!(focused, idle, "an empty search box being typed into shows its caret");
+
+        for (code, text) in [(KeyCode::KeyA, "a"), (KeyCode::KeyB, "b"), (KeyCode::KeyC, "c")] {
+            assert!(app.shared.skin_text_key(&crate::stage::KeyInput { code, pressed: true, released: false, text: Some(text) }));
+        }
+        app.shared.skin_text_ime(&Ime::Preedit("한".to_string(), Some((0, "한".len()))));
+        frame(&mut app, &mut pixels);
+        save_frame("typing-select-composing", &pixels, size);
+        let composing = search_box(&pixels);
+        assert_ne!(composing, focused);
+
+        app.shared.skin_text_ime(&Ime::Preedit(String::new(), None));
+        app.shared.skin_text_ime(&Ime::Commit("한".to_string()));
+        frame(&mut app, &mut pixels);
+        save_frame("typing-select-typed", &pixels, size);
+        assert_ne!(search_box(&pixels), composing, "the committed syllable is no longer underlined");
+
+        assert!(app.shared.skin_text_key(&crate::stage::KeyInput { code: KeyCode::Enter, pressed: true, released: false, text: None }));
+        frame(&mut app, &mut pixels);
+        assert_eq!(
+            app.shared.skin_requests().take(Cluster::Select),
+            [ClusterRequest::WriteText { id: STRING_SEARCHWORD, value: "abc한".to_string() }],
+            "Enter writes what was typed to the browser"
+        );
+        assert_eq!(search_box(&pixels), idle, "the search word reads empty again once the typing is over");
+    } else {
+        println!("the pack's browser has no search text to type into");
+    }
+
+    let Some(scrollbar) = controls.scrollbar else {
+        println!("the pack's browser has no scrollbar to press");
+        return;
+    };
+    assert!(app.shared.skin_pointer(ui_point(halfway(scrollbar)), press), "the skin's scrollbar did not take the press");
     frame(&mut app, &mut pixels);
     save_frame("scrollbar-select-middle", &pixels, size);
     let writes =

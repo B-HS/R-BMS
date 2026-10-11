@@ -1,22 +1,24 @@
 //! Everything the player reads off disk or out of the binary before a screen can use it: the
-//! built-in note-field layouts, the system sound set shipped inside the binary, the UI theme
-//! template, chart-relative file resolution, the keysound decode pool and the BGA image decode.
+//! built-in note-field layouts, the default skin pack shipped inside the binary ([`default_pack`]),
+//! the UI theme template, chart-relative file resolution, the keysound decode pool and the BGA image
+//! decode.
 
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::Receiver;
 use std::time::SystemTime;
 
-use rbms_config::DEFAULT_SKIN_FOLDER;
 use rbms_render::skin_render::frame::BgaPicture;
 use rbms_render::{SkinConfig, SkinImage};
 use rbms_video::{VideoDecoder, VideoError};
 use sha2::{Digest, Sha256};
 
+pub(crate) mod default_pack;
 #[cfg(test)]
 pub(crate) mod scripted_movie;
+
+pub(crate) use default_pack::{default_sound_folder, install_default_pack, installed_default_pack};
 
 /// A decode running on the worker pool: what has arrived, how far it has got, the cooperative
 /// cancel, and how many jobs there are in total.
@@ -31,16 +33,8 @@ const DECODE_THREADS_FALLBACK: usize = 4;
 pub(crate) const SKIN_NORMAL: &str = include_str!("../../../assets/skins/normal.ron");
 pub(crate) const SKIN_WIDE: &str = include_str!("../../../assets/skins/wide.ron");
 
-/// The folder the player's own skin is installed into, below the skin folder beside the settings
-/// file.
-const DEFAULT_SKIN_DIRECTORY: &str = "rbms-default";
-
-/// The folder inside [`DEFAULT_SKIN_DIRECTORY`] that holds the system sound set, read when the
-/// player configured no sound folder of their own.
-const DEFAULT_SOUND_DIRECTORY: &str = "sound";
-
 /// The folder beside the settings file that holds everything skins write, one folder per skin pack.
-const SKIN_DATA_FOLDER: &str = "skin-data";
+pub(crate) const SKIN_DATA_FOLDER: &str = "skin-data";
 
 /// What a pack whose folder has no usable name is called in its identifier.
 const SKIN_PACK_FALLBACK_NAME: &str = "skin";
@@ -55,80 +49,11 @@ const SKIN_PACK_NAME_FILLER: char = '_';
 /// the same folder name apart.
 const SKIN_PACK_DIGEST_BYTES: usize = 8;
 
-/// One file shipped inside the binary and written to disk on the first run.
-struct EmbeddedFile {
-    name: &'static str,
-    bytes: &'static [u8],
-}
-
-/// The shipped system sound for each stem, read out of `assets/skins/rbms-default/sound` at build
-/// time. Written as stems so the table cannot name a file under one spelling and embed another.
-macro_rules! embedded_sounds {
-    ($($stem:literal),* $(,)?) => {
-        &[$(EmbeddedFile {
-            name: concat!($stem, ".wav"),
-            bytes: include_bytes!(concat!("../../../assets/skins/rbms-default/sound/", $stem, ".wav")),
-        }),*]
-    };
-}
-
-/// Every system sound the player ships, one per stem of [`crate::syssound::SystemSound`].
-const DEFAULT_SOUNDS: &[EmbeddedFile] = embedded_sounds![
-    "scratch",
-    "f-open",
-    "f-close",
-    "o-change",
-    "o-open",
-    "o-close",
-    "playready",
-    "playstop",
-    "clear",
-    "fail",
-    "resultclose",
-    "course_clear",
-    "course_fail",
-    "course_close",
-    "guide-pg",
-    "guide-gr",
-    "guide-gd",
-    "guide-bd",
-    "guide-pr",
-    "guide-ms",
-    "select",
-    "decide",
-];
-
 /// One of the built-in note-field layouts by name ("WIDE" or NORMAL). Used when no external
 /// `--skin` is given.
 pub(crate) fn bundled_skin(name: &str) -> SkinConfig {
     let s = if name.eq_ignore_ascii_case("WIDE") { SKIN_WIDE } else { SKIN_NORMAL };
     ron::from_str(s).unwrap_or_default()
-}
-
-/// Where the shipped system sound set is installed: always below the default skin folder beside the
-/// settings file, whichever folder the SKIN tab is looking for documents in.
-fn default_sound_directory(settings_path: &Path) -> PathBuf {
-    settings_path.parent().unwrap_or(Path::new(".")).join(DEFAULT_SKIN_FOLDER).join(DEFAULT_SKIN_DIRECTORY).join(DEFAULT_SOUND_DIRECTORY)
-}
-
-/// Write every shipped system sound that is not on disk yet, and report whether the whole set is
-/// there afterwards.
-///
-/// A file that already exists is never written over, so a sound the player replaced stays replaced.
-/// Every sound is tried even after one fails, so a single unwritable file costs that one cue rather
-/// than the rest of the set. Nothing else under the skin folder is read, moved or removed.
-pub(crate) fn install_default_sounds(settings_path: &Path) -> bool {
-    let directory = default_sound_directory(settings_path);
-    let failed = DEFAULT_SOUNDS.iter().filter(|sound| !install_embedded_file(&directory.join(sound.name), sound.bytes)).count();
-    failed == 0
-}
-
-/// The installed system sound set, for a player who configured no folder of their own. `None` while
-/// the folder is not there, which leaves the set silent rather than naming a directory nothing can
-/// be read from.
-pub(crate) fn default_sound_folder(settings_path: &Path) -> Option<PathBuf> {
-    let directory = default_sound_directory(settings_path);
-    directory.is_dir().then_some(directory)
 }
 
 /// The name one skin pack's writes are filed under: the pack folder's own name, made safe for a file
@@ -149,8 +74,12 @@ pub(crate) fn skin_pack_identifier(pack: &Path) -> String {
         .collect();
     let name = if name.is_empty() { SKIN_PACK_FALLBACK_NAME.to_owned() } else { name };
     let digest = Sha256::digest(resolved.to_string_lossy().as_bytes());
-    let digest: String = digest.iter().take(SKIN_PACK_DIGEST_BYTES).map(|byte| format!("{byte:02x}")).collect();
-    format!("{name}-{digest}")
+    format!("{name}-{}", hex(&digest[..SKIN_PACK_DIGEST_BYTES]))
+}
+
+/// `bytes` in lowercase hexadecimal, two digits a byte.
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 /// Where the skin whose entry file is `document` writes: `skin-data/<pack identifier>` beside the
@@ -162,33 +91,6 @@ pub(crate) fn skin_pack_identifier(pack: &Path) -> String {
 pub(crate) fn skin_overlay_folder(settings_path: &Path, document: &Path) -> PathBuf {
     let pack = document.parent().unwrap_or(Path::new("."));
     settings_path.parent().unwrap_or(Path::new(".")).join(SKIN_DATA_FOLDER).join(skin_pack_identifier(pack))
-}
-
-/// Write one shipped file unless something is already at its path, and report whether a regular
-/// file is there afterwards.
-fn install_embedded_file(path: &Path, bytes: &[u8]) -> bool {
-    match std::fs::symlink_metadata(path) {
-        Ok(_) => return path.is_file(),
-        Err(error) if error.kind() != std::io::ErrorKind::NotFound => return false,
-        Err(_) => {}
-    }
-    let Some(parent) = path.parent() else {
-        return false;
-    };
-    if std::fs::create_dir_all(parent).is_err() {
-        return false;
-    }
-    let mut file = match std::fs::OpenOptions::new().write(true).create_new(true).open(path) {
-        Ok(file) => file,
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => return path.is_file(),
-        Err(_) => return false,
-    };
-    if file.write_all(bytes).is_ok() {
-        return true;
-    }
-    drop(file);
-    let _ = std::fs::remove_file(path);
-    false
 }
 
 /// A fully-populated, commented UI-theme template written to `~/.config/rbms/theme.ron` on first run
@@ -667,81 +569,6 @@ mod tests {
         assert_eq!(overlay, skin_overlay_folder(&settings, &pack.join("play7.luaskin")), "two documents of one pack write to different folders");
         assert_eq!(identifier, skin_pack_identifier(&pack.join("..").join("Modern Chic!")), "another spelling of the same folder is another pack");
         assert_ne!(identifier, skin_pack_identifier(&twin), "two packs with the same folder name share an overlay");
-        let _ = std::fs::remove_dir_all(&home);
-    }
-
-    /// A first run on an empty configuration folder writes the whole shipped sound set below the
-    /// default skin folder, one file per stem the player can raise, and that folder is then the one
-    /// read for a player who configured none.
-    #[test]
-    fn a_first_run_installs_every_shipped_sound_below_the_default_skin_folder() {
-        let home = temp_dir("sound-install");
-        let settings = home.join(".config/rbms/settings.ron");
-        assert_eq!(default_sound_folder(&settings), None, "a folder nothing was installed into was named as the sound set");
-
-        assert!(install_default_sounds(&settings));
-        let sounds = home.join(".config/rbms").join(DEFAULT_SKIN_FOLDER).join(DEFAULT_SKIN_DIRECTORY).join(DEFAULT_SOUND_DIRECTORY);
-        assert_eq!(default_sound_folder(&settings), Some(sounds.clone()));
-        assert_eq!(DEFAULT_SOUNDS.len(), crate::syssound::SYSTEM_SOUND_COUNT, "the shipped set and the set the player raises are different sizes");
-        for sound in crate::syssound::SystemSound::ALL {
-            let shipped = DEFAULT_SOUNDS.iter().find(|file| Path::new(file.name).file_stem().and_then(|stem| stem.to_str()) == Some(sound.file_stem()));
-            let shipped = shipped.unwrap_or_else(|| panic!("no sound is shipped for {sound:?}"));
-            let installed = std::fs::read(sounds.join(shipped.name)).unwrap_or_else(|error| panic!("{} was not installed: {error}", shipped.name));
-            assert_eq!(installed, shipped.bytes, "{} is not the file that was shipped", shipped.name);
-        }
-        let written = std::fs::read_dir(&sounds).expect("the sound folder lists").count();
-        assert_eq!(written, DEFAULT_SOUNDS.len(), "the install wrote something that is not a shipped sound");
-        assert!(!settings.exists(), "installing the sound set wrote a settings file");
-        let _ = std::fs::remove_dir_all(&home);
-    }
-
-    /// A later run finds the set already there and writes over none of it: a sound the player
-    /// replaced stays replaced, one they deleted comes back, and everything else under the skin
-    /// folder -- their own documents, a folder an earlier build installed -- is left exactly as it
-    /// was.
-    #[test]
-    fn a_later_run_repairs_the_sound_set_without_writing_over_anything() {
-        let home = temp_dir("sound-reinstall");
-        let settings = home.join(".config/rbms/settings.ron");
-        let skin_folder = home.join(".config/rbms").join(DEFAULT_SKIN_FOLDER);
-        let user_document = skin_folder.join("mine/select.json5");
-        let earlier_install = skin_folder.join("earlier-bundle/theme.ron");
-        for (path, text) in [(&user_document, "user document"), (&earlier_install, "earlier install")] {
-            std::fs::create_dir_all(path.parent().expect("the fixture has a folder")).expect("create the fixture folder");
-            std::fs::write(path, text).expect("write the fixture");
-        }
-        assert!(install_default_sounds(&settings));
-
-        let sounds = default_sound_folder(&settings).expect("the set was installed");
-        let replaced = sounds.join(DEFAULT_SOUNDS[0].name);
-        let deleted = sounds.join(DEFAULT_SOUNDS[1].name);
-        std::fs::write(&replaced, "the player's own sound").expect("replace a shipped sound");
-        std::fs::remove_file(&deleted).expect("delete a shipped sound");
-
-        assert!(install_default_sounds(&settings));
-        assert_eq!(std::fs::read_to_string(&replaced).expect("read the replaced sound"), "the player's own sound", "a replaced sound was written over");
-        assert_eq!(std::fs::read(&deleted).expect("read the repaired sound"), DEFAULT_SOUNDS[1].bytes, "a deleted sound did not come back");
-        assert_eq!(std::fs::read_to_string(&user_document).expect("read the user document"), "user document");
-        assert_eq!(std::fs::read_to_string(&earlier_install).expect("read the earlier install"), "earlier install");
-        let _ = std::fs::remove_dir_all(&home);
-    }
-
-    /// A skin folder that cannot be written into leaves the set silent rather than half installed,
-    /// and the next run installs it once the folder can be made.
-    #[test]
-    fn sound_installation_retries_after_an_unwritable_skin_folder() {
-        let home = temp_dir("sound-retry");
-        let settings = home.join("settings.ron");
-        let blocked = home.join(DEFAULT_SKIN_FOLDER);
-        std::fs::write(&blocked, "not a folder").expect("write the blocking file");
-
-        assert!(!install_default_sounds(&settings));
-        assert_eq!(default_sound_folder(&settings), None, "a set that could not be installed was named anyway");
-        assert_eq!(std::fs::read_to_string(&blocked).expect("read the blocking file"), "not a folder", "the install removed what was in its way");
-
-        std::fs::remove_file(&blocked).expect("remove the blocking file");
-        assert!(install_default_sounds(&settings));
-        assert!(default_sound_folder(&settings).is_some());
         let _ = std::fs::remove_dir_all(&home);
     }
 }
