@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use rbms_chart::shuffle::NoteOption;
 use rbms_config::{
     AudioOptions, CURRENT_SCHEMA_VERSION, Config, ConfigError, DEFAULT_PLAYER_ID, JUDGE_WIDTH_TIER_COUNT, LEGACY_FOLDERS_FILE, LEGACY_SCHEMA_VERSION,
-    LEGACY_TABLES_FILE, load, save,
+    LEGACY_TABLES_FILE, UNCHOSEN_LETTERBOX_SCHEMA_VERSION, load, save,
 };
 use rbms_judge::GaugeKind;
 
@@ -206,5 +206,42 @@ fn a_configuration_that_cannot_be_read_is_reported_rather_than_replaced_by_the_d
         other => panic!("expected a read error, got {other:?}"),
     }
     assert!(path.exists(), "the failing read leaves the directory's contents alone");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn stage_text(tag: &str, text: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("rbms_config_fixture_{tag}_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("scratch dir");
+    std::fs::write(dir.join("settings.ron"), text).expect("stage settings");
+    dir
+}
+
+#[test]
+fn an_older_install_gets_the_letterbox_once_and_a_later_choice_survives_the_next_launch() {
+    for (tag, stated) in [("letterbox_off", false), ("letterbox_on", true)] {
+        let dir = stage_text(tag, &format!("(schema_version: {UNCHOSEN_LETTERBOX_SCHEMA_VERSION}, display: (letterbox: {stated}))"));
+        let path = dir.join("settings.ron");
+        let outcome = load(&path).expect("the older file loads");
+        assert_eq!(outcome.migrated_from, Some(UNCHOSEN_LETTERBOX_SCHEMA_VERSION));
+        assert!(outcome.config.display.letterbox, "an older file stating {stated} was left off");
+        assert!(outcome.backup.is_some_and(|backup| backup.exists()), "the older file is kept aside");
+
+        let mut chosen = outcome.config;
+        chosen.display.letterbox = false;
+        save(&chosen, &path).expect("save");
+        let reloaded = load(&path).expect("the saved file loads");
+        assert_eq!(reloaded.migrated_from, None);
+        assert!(!reloaded.config.display.letterbox, "the player's OFF was turned back on at the next launch");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[test]
+fn a_file_without_a_schema_takes_the_letterbox_with_the_rest_of_its_migration() {
+    let dir = stage_text("letterbox_flat", "(bga: false)");
+    let outcome = load(&dir.join("settings.ron")).expect("the flat file loads");
+    assert_eq!(outcome.migrated_from, Some(LEGACY_SCHEMA_VERSION));
+    assert!(outcome.config.display.letterbox);
     let _ = std::fs::remove_dir_all(&dir);
 }

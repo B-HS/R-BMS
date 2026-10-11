@@ -646,7 +646,7 @@ pub const SETTINGS: &[SettingDescriptor] = &[
         SettingTab::Display,
         "LETTERBOX",
         SettingKind::Toggle,
-        "Keep the screen's aspect ratio inside the window; a borderless window always does",
+        "Keep the skin's own aspect ratio inside the window; off stretches it to the window. A borderless window always keeps it",
     ),
     row(
         SettingId::WindowResolution,

@@ -657,7 +657,8 @@ fn the_retired_preset_is_dropped_from_every_older_schema_and_a_current_file_is_l
 /// the way every earlier build did.
 #[test]
 fn a_file_from_before_the_window_rows_opens_the_shipped_window() {
-    let (config, from) = migrate(r#"(schema_version: 3, display: (skin: "WIDE", letterbox: true))"#).expect("a current-schema file without window keys parses");
+    let (config, from) = migrate(&format!(r#"(schema_version: {CURRENT_SCHEMA_VERSION}, display: (skin: "WIDE", letterbox: true))"#))
+        .expect("a current-schema file without window keys parses");
     assert_eq!(from, None, "adding the rows needed no new schema version");
     assert_eq!(config.display.window_resolution.size(), (1280, 720));
     assert_eq!(config.display.window_mode, WindowMode::Windowed);
@@ -672,8 +673,8 @@ fn the_window_choices_are_stored_under_their_tokens_and_unknown_ones_fall_back()
     let text = ron_of(&c);
     assert!(text.contains("\"2560x1440\"") && text.contains("\"BORDERLESS\""), "{text}");
 
-    let (config, _) =
-        migrate(r#"(schema_version: 3, display: (window_resolution: "7680x4320", window_mode: "EXCLUSIVE"))"#).expect("unknown tokens still parse");
+    let (config, _) = migrate(&format!(r#"(schema_version: {CURRENT_SCHEMA_VERSION}, display: (window_resolution: "7680x4320", window_mode: "EXCLUSIVE"))"#))
+        .expect("unknown tokens still parse");
     assert_eq!(config.display.window_resolution, WindowResolution::Hd720);
     assert_eq!(config.display.window_mode, WindowMode::Windowed);
 }
@@ -699,20 +700,44 @@ fn a_fresh_install_fits_the_screen_inside_an_ordinary_window() {
     assert!(display.fits_screen_shape());
 }
 
-/// The shipped fit is only what a file that says nothing gets. A player who switched LETTERBOX off
-/// keeps it off, and one who switched it on keeps it on, whatever this build ships.
+/// The shipped fit is only what a file that says nothing gets, and what a file of a schema that
+/// never let the player choose is moved to once. A player who switches LETTERBOX off under the
+/// current schema keeps it off, and one who switched it on keeps it on.
 #[test]
 fn a_stored_letterbox_choice_outlives_the_shipped_one() {
-    let (off, _) = migrate(r#"(schema_version: 3, display: (letterbox: false))"#).expect("a current file parses");
+    let (off, _) = migrate(&format!("(schema_version: {CURRENT_SCHEMA_VERSION}, display: (letterbox: false))")).expect("a current file parses");
     assert!(!off.display.letterbox, "a stored OFF was overridden by the shipped default");
     assert!(!off.display.fits_screen_shape());
-    let (on, _) = migrate(r#"(schema_version: 3, display: (letterbox: true))"#).expect("a current file parses");
+    let (on, _) = migrate(&format!("(schema_version: {CURRENT_SCHEMA_VERSION}, display: (letterbox: true))")).expect("a current file parses");
     assert!(on.display.letterbox);
-    let (silent, _) = migrate(r#"(schema_version: 3, display: (bga: false))"#).expect("a current file parses");
+    let (silent, _) = migrate(&format!("(schema_version: {CURRENT_SCHEMA_VERSION}, display: (bga: false))")).expect("a current file parses");
     assert!(silent.display.letterbox, "a file that does not state the row takes the shipped fit");
 
     let mut stored = Config::default();
     stored.display.letterbox = false;
     let (back, _) = migrate(&ron_of(&stored)).expect("the file this build writes parses");
     assert!(!back.display.letterbox, "the file this build writes does not state the row it holds");
+}
+
+/// Builds up to the one that introduced the shipped fit saved the whole configuration on every
+/// change, so `letterbox: false` in their files is the old default rather than a choice. Reading
+/// one turns the row on; the schema it is saved under afterwards keeps whatever the player does.
+#[test]
+fn an_older_schema_letterbox_is_turned_on_once_and_the_later_choice_sticks() {
+    for stated in ["false", "true"] {
+        let (config, from) =
+            migrate(&format!("(schema_version: {UNCHOSEN_LETTERBOX_SCHEMA_VERSION}, display: (letterbox: {stated}))")).expect("an older file migrates");
+        assert_eq!(from, Some(UNCHOSEN_LETTERBOX_SCHEMA_VERSION));
+        assert!(config.display.letterbox, "schema {UNCHOSEN_LETTERBOX_SCHEMA_VERSION} with letterbox {stated} was left off");
+        assert_eq!(config.schema_version, CURRENT_SCHEMA_VERSION);
+
+        let mut chosen = config;
+        chosen.display.letterbox = false;
+        let (kept, from) = migrate(&ron_of(&chosen)).expect("the migrated file parses");
+        assert_eq!(from, None);
+        assert!(!kept.display.letterbox, "the choice made after the migration was overridden by it");
+    }
+    let (flat, from) = migrate("(bga: false)").expect("a flat file migrates");
+    assert_eq!(from, Some(LEGACY_SCHEMA_VERSION));
+    assert!(flat.display.letterbox, "a file with no schema takes the shipped fit");
 }

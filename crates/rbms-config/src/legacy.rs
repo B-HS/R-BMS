@@ -6,8 +6,9 @@ use serde::Deserialize;
 use crate::audio::{AudioOptions, DEFAULT_BUS_VOLUME, DEFAULT_MASTER_VOLUME, DEFAULT_POLYPHONY_VOICES};
 use crate::gauge::gauge_from_name;
 use crate::schema::{
-    CURRENT_SCHEMA_VERSION, Config, DEFAULT_HISPEED, DEFAULT_PLAYER_ID, DEFAULT_SKIN, DEFAULT_SKIN_FOLDER, DisplayOptions, JUDGE_RATE_DEFAULT_PERCENT,
-    JudgeOptions, LANE_SHADE_MIN, LibraryOptions, NetworkOptions, PlayOptions, SkinOptions, TOTAL_FROM_CHART, TableSource,
+    CURRENT_SCHEMA_VERSION, Config, DEFAULT_HISPEED, DEFAULT_LETTERBOX, DEFAULT_PLAYER_ID, DEFAULT_SKIN, DEFAULT_SKIN_FOLDER, DisplayOptions,
+    JUDGE_RATE_DEFAULT_PERCENT, JudgeOptions, LANE_SHADE_MIN, LibraryOptions, NetworkOptions, PlayOptions, SkinOptions, TOTAL_FROM_CHART, TableSource,
+    UNCHOSEN_LETTERBOX_SCHEMA_VERSION,
 };
 
 /// File name of the pre-migration folder list, read once next to `settings.ron` when a version-less
@@ -290,5 +291,14 @@ impl Config {
         let folder = self.skin.folder.clone();
         self.skin.selected.retain(|_, path| !is_retired_bundle_document(folder.as_deref(), path));
         self.skin.custom.retain(|path, _| !is_retired_bundle_document(folder.as_deref(), path));
+    }
+
+    /// Apply the shipped LETTERBOX value to a configuration read from a schema in which the row was
+    /// never the player's choice (see [`UNCHOSEN_LETTERBOX_SCHEMA_VERSION`]). A newer schema is left
+    /// as it states the row, so a player who switches it off afterwards keeps it off.
+    pub fn restore_unchosen_letterbox(&mut self, from_schema: u32) {
+        if from_schema <= UNCHOSEN_LETTERBOX_SCHEMA_VERSION {
+            self.display.letterbox = DEFAULT_LETTERBOX;
+        }
     }
 }

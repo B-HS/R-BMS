@@ -162,6 +162,7 @@ pub(crate) fn parse_blob(blob: &SettingsBlob) -> Result<SyncPayload, String> {
     if schema_version <= BUNDLED_SKIN_SCHEMA_VERSION {
         payload.settings.retire_bundled_skin();
     }
+    payload.settings.restore_unchosen_letterbox(schema_version);
     payload.settings.sanitise();
     Ok(payload)
 }
@@ -239,7 +240,7 @@ pub(crate) fn sync_error_message(error: &IrError) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rbms_config::{JUDGE_WIDTH_TIER_COUNT, TableSource};
+    use rbms_config::{JUDGE_WIDTH_TIER_COUNT, TableSource, UNCHOSEN_LETTERBOX_SCHEMA_VERSION};
     use rbms_ir::SettingsConflict;
     use rbms_judge::GaugeKind;
 
@@ -481,6 +482,18 @@ mod tests {
         assert_eq!(payload.settings.judge.judge_rate_key, [80; JUDGE_WIDTH_TIER_COUNT], "downloading must not reset the width the account holds");
         assert_eq!(payload.settings.judge.judge_rate_scratch, [80; JUDGE_WIDTH_TIER_COUNT]);
         assert!((payload.settings.play.hispeed - 3.0).abs() < 1e-9, "the rest of the blob still loads");
+    }
+
+    #[test]
+    fn a_blob_from_a_schema_that_never_let_the_player_choose_turns_the_letterbox_on_and_a_current_one_keeps_its_own() {
+        for stated in ["false", "true"] {
+            let older = format!("(settings: (schema_version: {UNCHOSEN_LETTERBOX_SCHEMA_VERSION}, display: (letterbox: {stated})))");
+            let blob = SettingsBlob { name: SETTINGS_BLOB_NAME.into(), content: older, ..Default::default() };
+            assert!(parse_blob(&blob).expect("an older blob migrates").settings.display.letterbox, "an older blob stating {stated} stayed off");
+        }
+        let current = format!("(settings: (schema_version: {CURRENT_SCHEMA_VERSION}, display: (letterbox: false)))");
+        let blob = SettingsBlob { name: SETTINGS_BLOB_NAME.into(), content: current, ..Default::default() };
+        assert!(!parse_blob(&blob).expect("a current blob parses").settings.display.letterbox, "a choice stored under the current schema was overridden");
     }
 
     #[test]

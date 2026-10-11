@@ -17,12 +17,18 @@ use crate::window::{WindowMode, WindowResolution};
 
 /// Schema version this build writes. A file without a `schema_version` field is
 /// [`LEGACY_SCHEMA_VERSION`] and is migrated on load.
-pub const CURRENT_SCHEMA_VERSION: u32 = 3;
+pub const CURRENT_SCHEMA_VERSION: u32 = 4;
 
 /// Last schema written while the player shipped a skin bundle of its own: a DISPLAY preset named
 /// after it, the documents a first run selected out of its folder, the choices shared by every
 /// screen of a bundle and a flag recording the install. Reading it drops all four.
 pub const BUNDLED_SKIN_SCHEMA_VERSION: u32 = 2;
+
+/// Last schema whose files held a LETTERBOX value the player never chose. Those builds saved the
+/// whole configuration on every change, so a file states `letterbox: false` whether or not the row
+/// was ever touched, and a skin is authored for one shape that a window of another would distort.
+/// Reading such a file turns the row on once; a file of a later schema keeps what it states.
+pub const UNCHOSEN_LETTERBOX_SCHEMA_VERSION: u32 = 3;
 
 /// Schema that carried one JUDGE WIDTH percentage for every judge tier of both key and scratch
 /// lanes, before the per-tier rows split it into six.
@@ -181,8 +187,8 @@ pub const DEFAULT_HISPEED: f64 = 2.0;
 pub const DEFAULT_SKIN: &str = "NORMAL";
 
 /// Whether an ordinary window keeps the screen's own proportions on a fresh install, and for a
-/// settings file written before the LETTERBOX row existed. A file that states the row either way is
-/// read as it states it.
+/// settings file written before the LETTERBOX row existed. A file of a schema after
+/// [`UNCHOSEN_LETTERBOX_SCHEMA_VERSION`] that states the row either way is read as it states it.
 pub const DEFAULT_LETTERBOX: bool = true;
 
 /// Every screen a skin document can declare, named for the SKIN tab, indexed by the `SkinType` id
