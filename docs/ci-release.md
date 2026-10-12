@@ -52,7 +52,7 @@
 
 macOS 유니버설 빌드의 `x86_64-apple-darwin` 쪽 OpenH264 는 Apple Silicon 러너에서 교차 컴파일되며, 이 경로는 아직 확인되지 않았습니다(로컬에 해당 타깃이 없어 시도하지 않았고, 실제 릴리스 실행에서 처음 확인됩니다). `nasm` 이 없는 러너에서는 어셈블리 없이 C 로 빌드되어 Intel Mac 의 디코드가 느릴 수 있습니다.
 
-릴리스 빌드 잡은 현재 CI와 달리 `dtolnay/rust-toolchain@stable`을 사용합니다. Phase R에서 첫 실제 릴리스를 수행하기 전에 이 차이를 의도적으로 유지할지, CI와 같은 고정 버전으로 맞출지 확인합니다.
+릴리스 빌드 잡도 CI 와 같이 `dtolnay/rust-toolchain@master` 에 `toolchain: "1.95.0"` 을 줍니다(`rust-toolchain.toml` 과 같은 값. 올릴 때 세 곳을 함께 올립니다). 첫 릴리스 실행(2026-10-12, 태그 `v0.1.0`, run 38222704409)은 `@stable` 에 macOS 두 타깃을 설치했는데, cargo 는 `rust-toolchain.toml` 의 1.95.0 으로 빌드하므로 `x86_64-apple-darwin` 의 `core` 를 찾지 못해 실패했습니다(`error[E0463]: can't find crate for core`). 빌드에 쓰이는 툴체인에 타깃을 설치해야 합니다.
 
 ## 3. Phase R 전제와 보안 경계
 

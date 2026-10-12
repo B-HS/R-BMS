@@ -32,7 +32,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned to the same version as rust-toolchain.toml; bump both together. cargo follows that
+      # file whatever is installed here, so a target added to another toolchain is never used.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.95.0"
       - id: bump
         env:
           BUMP: ${{ github.event.inputs.bump || 'patch' }}
@@ -85,8 +89,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.version.outputs.tag || github.ref }}
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned to the same version as rust-toolchain.toml; bump both together. cargo follows that
+      # file whatever is installed here, so a target added to another toolchain is never used.
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: "1.95.0"
           targets: aarch64-apple-darwin, x86_64-apple-darwin
       - uses: Swatinem/rust-cache@v2
       # rbms-player's default `video` feature is on, so this build includes the OpenH264 movie decoder
@@ -175,7 +182,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.version.outputs.tag || github.ref }}
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned to the same version as rust-toolchain.toml; bump both together. cargo follows that
+      # file whatever is installed here, so a target added to another toolchain is never used.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.95.0"
       - uses: Swatinem/rust-cache@v2
       - name: Build
         run: cargo build --release --locked -p rbms-player
