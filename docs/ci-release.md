@@ -60,18 +60,18 @@ macOS 유니버설 빌드의 `x86_64-apple-darwin` 쪽 OpenH264 는 Apple Silico
 
 ### 3.1 macOS 서명·공증 시크릿
 
-등록 위치: GitHub 저장소 Settings → Secrets and variables → Actions → Repository secrets. 이름은 `release.yml` 의 `build-macos` 잡이 읽는 이름과 같아야 합니다.
+등록 위치: GitHub 저장소 Settings → Secrets and variables → Actions → Repository secrets. 이름은 `release.yml` 의 `build-macos` 잡이 읽는 이름과 같아야 합니다. 유지보수자의 다른 macOS 배포(TAIDE)가 쓰는 이름·방식과 같게 맞췄으므로 같은 값을 그대로 등록하면 됩니다.
 
 | 시크릿 이름 | 내용 | 쓰이는 단계 |
 | --- | --- | --- |
-| `MACOS_CERTIFICATE_P12_BASE64` | Developer ID Application 인증서와 개인 키를 내보낸 `.p12` 파일의 base64 문자열 | 서명 |
+| `MACOS_CERTIFICATE_P12` | Developer ID Application 인증서와 개인 키를 내보낸 `.p12` 파일의 base64 문자열(줄바꿈·공백이 섞여도 됨) | 서명 |
 | `MACOS_CERTIFICATE_PASSWORD` | 그 `.p12` 를 내보낼 때 정한 비밀번호 | 서명 |
-| `MACOS_SIGNING_IDENTITY` | 서명 주체 이름. `Developer ID Application: <이름> (<TEAM ID>)` 전체 문자열 | 서명 |
-| `APPLE_API_KEY_P8_BASE64` | App Store Connect API 키 파일(`AuthKey_<KEY ID>.p8`)의 base64 문자열 | 공증 |
-| `APPLE_API_KEY_ID` | 그 API 키의 Key ID | 공증 |
-| `APPLE_API_ISSUER_ID` | App Store Connect 의 Issuer ID | 공증 |
+| `APPLE_ID` | 공증에 쓰는 Apple 계정 이메일 | 공증 |
+| `APPLE_APP_SPECIFIC_PASSWORD` | 그 계정의 앱 전용 비밀번호(`xxxx-xxxx-xxxx-xxxx`) | 공증 |
+| `APPLE_TEAM_ID` | 10자리 Team ID | 공증 |
+| `APPLE_SIGNING_IDENTITY`(선택) | 서명 주체 이름을 직접 지정할 때만. 없으면 인증서에서 읽는다 | 서명 |
 
-- 앞의 셋만 있으면 Developer ID 서명(hardened runtime, 보안 타임스탬프)까지 하고 공증은 건너뜁니다. 여섯이 다 있으면 `notarytool` 로 공증까지 합니다.
+- 앞의 둘만 있으면 Developer ID 서명(hardened runtime, 보안 타임스탬프)까지 하고 공증은 건너뜁니다. 계정 셋까지 다 있으면 `notarytool` 로 공증합니다.
 - 인증서는 잡 안에서 만든 임시 키체인에만 들어가고 잡이 끝나면 키체인을 지웁니다. 키체인 비밀번호는 잡마다 새로 만들므로 시크릿이 아닙니다.
 - 배포물이 단독 실행 파일이라 공증 티켓을 붙일(staple) 수 없습니다. Gatekeeper 는 처음 실행할 때 온라인으로 티켓을 확인합니다.
 - 이 단계는 실제 자격 증명으로 실행해 본 적이 없습니다. 첫 릴리스 실행에서 확인합니다.
