@@ -20,7 +20,7 @@
 
 릴리스 워크플로는 다음 세 경로를 정의합니다.
 
-1. `prod` push: `version` 잡이 가장 최근 `v*.*.*` 태그에서 patch 버전을 올립니다. 태그가 없으면 `v0.0.0`에서 계산합니다. 루트 `Cargo.toml`의 첫 workspace 버전만 바꾸고, 추적되는 `Cargo.lock` 의 워크스페이스 크레이트 버전도 `cargo update --workspace` 로 함께 맞춘 뒤(외부 의존 버전은 바뀌지 않습니다. 이 단계가 없으면 아래 `--locked` 빌드가 실패합니다) `release: vX.Y.Z` 커밋과 태그를 같은 `prod` ref로 push합니다.
+1. `prod` push: `version` 잡이 가장 최근 `v*.*.*` 태그에서 patch 버전을 올립니다. 태그가 없으면 `v0.0.0`에서 계산합니다. 루트 `Cargo.toml`의 첫 workspace 버전만 바꾸고, 추적되는 `Cargo.lock` 의 워크스페이스 크레이트 버전도 `cargo update --workspace` 로 함께 맞춘 뒤(외부 의존 버전은 바뀌지 않습니다. 이 단계가 없으면 아래 `--locked` 빌드가 실패합니다) `release: vX.Y.Z` 커밋과 주석 태그(`git tag -a`)를 만들어 같은 `prod` ref 와 그 태그를 이름으로 push합니다(`--follow-tags` 는 주석 태그만 보내므로 태그를 직접 지정합니다. 뒤의 빌드 잡이 이 태그를 체크아웃합니다).
 2. 수동 dispatch: Actions의 `release`에서 patch, minor, major를 선택해 같은 버전·빌드 흐름을 실행합니다.
 3. 태그 push: `v*.*.*` 태그 push는 version 잡을 건너뛰고 그 태그 ref로 빌드합니다.
 
@@ -28,7 +28,8 @@
 
 - macOS: `aarch64-apple-darwin`과 `x86_64-apple-darwin` release binary를 `cargo build --release --locked` 로 빌드하고 `lipo`로 합친 뒤 ad-hoc `codesign` 합니다. `rbms-macos-universal.tar.gz`와 SHA-256 파일을 만듭니다.
 - Windows: `cargo build --release --locked` 로 빌드한 `rbms-player.exe`를 `rbms-windows-x64.zip`으로 묶고 SHA-256 파일을 만듭니다.
-- publish: 두 플랫폼 아카이브와 체크섬을 `softprops/action-gh-release@v2`로 GitHub Release에 첨부합니다.
+- 초안 릴리스: 두 플랫폼 아카이브와 체크섬을 `softprops/action-gh-release@v2`로 **초안(draft)** GitHub Release 에 첨부합니다(`draft: true`, 사용자 결정 2026-10-12). 어느 경로로 돌든 자동은 태그와 초안까지이고, 게시(publish)는 유지보수자가 GitHub 의 Releases 화면에서 릴리스 노트를 확인한 뒤 직접 합니다.
+- macOS 는 서명 시크릿이 등록돼 있으면 ad-hoc 대신 Developer ID 로 서명하고 공증합니다(3.1절).
 - 동영상: 두 빌드 모두 `rbms-player` 의 기본 피처 `video` 를 켠 채(`--no-default-features` 없이) 빌드하므로 OpenH264 가 바이너리에 정적으로 들어갑니다(결정 D10). 소스 빌드라 Cisco 가 배포하는 바이너리를 내려받지 않습니다.
 
 ## 2.1 배포 묶음과 제3자 고지

@@ -1,9 +1,10 @@
 name: release
 
 # 배포(prod) 브랜치 중심. 세 가지 경로:
-#  1) prod 머지     — `prod`에 push되면 patch 자동 bump → 빌드 → 릴리스.
+#  1) prod 머지     — `prod`에 push되면 patch 자동 bump → 태그 → 빌드 → 릴리스 초안(draft).
 #  2) 수동 bump     — Actions → "release" → Run workflow, bump(patch/minor/major) 선택.
-#  3) 수동 태그     — `v1.2.3` 태그 push → 그 태그로 빌드 → 릴리스.
+#  3) 수동 태그     — `v1.2.3` 태그 push → 그 태그로 빌드 → 릴리스 초안(draft).
+# 어느 경로든 태그와 초안까지만 자동이고, 게시(publish)는 사람이 GitHub 에서 한다.
 on:
   push:
     branches: [prod]
@@ -59,8 +60,10 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add Cargo.toml Cargo.lock
           git commit -m "release: $tag"
-          git tag "$tag"
-          git push origin "HEAD:${GITHUB_REF_NAME}" --follow-tags
+          # The tag is pushed by name: --follow-tags sends annotated tags only, and the builds below
+          # check this tag out, so it has to be on the remote whatever kind it is.
+          git tag -a "$tag" -m "release: $tag"
+          git push origin "HEAD:${GITHUB_REF_NAME}" "refs/tags/$tag"
           echo "version=$new" >> "$GITHUB_OUTPUT"
           echo "tag=$tag"     >> "$GITHUB_OUTPUT"
 
@@ -200,11 +203,14 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
-      - name: Publish GitHub Release
+      # Every run ends at a draft: the tag exists and the archives are attached, and a maintainer
+      # reads the notes and publishes it by hand.
+      - name: Create draft GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.version.outputs.tag || github.ref_name }}
           name: ${{ needs.version.outputs.tag || github.ref_name }}
+          draft: true
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |
