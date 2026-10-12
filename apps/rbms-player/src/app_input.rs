@@ -302,6 +302,14 @@ impl AppShared {
         self.control_key_in_force(action).is_some_and(|code| self.keyconfig.held.is_down(code)) || self.pad_held().contains(&PadEvent::Control(action))
     }
 
+    /// Whether a control that repeats while it is held is down: the key a press of it is read from
+    /// ([`AppShared::control_for`]), or the controller element it was given. A key two controls
+    /// were left on repeats the one its press runs and not the other.
+    pub(crate) fn control_repeating(&self, action: ControlAction) -> bool {
+        let key_down = self.control_key_in_force(action).is_some_and(|code| self.keyconfig.held.is_down(code) && self.control_for(code) == Some(action));
+        key_down || self.pad_held().contains(&PadEvent::Control(action))
+    }
+
     /// The key a shortcut is read from right now, or `None` for one the player left without a key.
     pub(crate) fn shortcut_key(&self, shortcut: Shortcut) -> Option<KeyCode> {
         self.keyconfig.shortcut_key(shortcut)
@@ -327,10 +335,22 @@ impl AppShared {
     /// the keyboard or the controller, in the mode that is up. See [`key_index_of`] for how a lane
     /// maps to an index.
     pub(crate) fn key_index_pressed(&self, index: usize) -> bool {
-        let keyboard =
-            self.keyconfig.held.iter().filter_map(|code| self.lane_input_for(code)).any(|(lane, dir)| key_index_of(self.mode, lane, dir) == Some(index));
-        keyboard
+        self.keyboard_index_pressed(index)
             || self.pad_held().into_iter().any(|event| matches!(event, PadEvent::Lane { lane, dir, .. } if key_index_of(self.mode, lane, dir) == Some(index)))
+    }
+
+    /// Whether the key with the index `index` is down on the keyboard, whatever the controller
+    /// holds: what a turntable's direction is read from beside a controller whose turntable is
+    /// counted in ticks ([`AppShared::take_turntable_ticks`]).
+    pub(crate) fn keyboard_index_pressed(&self, index: usize) -> bool {
+        self.keyconfig.held.iter().filter_map(|code| self.lane_input_for(code)).any(|(lane, dir)| key_index_of(self.mode, lane, dir) == Some(index))
+    }
+
+    /// How many ticks the controller's turntable has turned since this was last asked, forward
+    /// counted up, or `None` when there is no controller or its scratch is read as keys
+    /// ([`crate::gamepad::PadMapper::take_turn`]).
+    pub(crate) fn take_turntable_ticks(&mut self) -> Option<i32> {
+        self.pad.as_mut().and_then(crate::gamepad::PadState::take_turn)
     }
 
     /// One frame of controller input, or nothing when there is no controller.

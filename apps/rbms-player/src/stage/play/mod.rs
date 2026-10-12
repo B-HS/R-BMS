@@ -1350,6 +1350,7 @@ impl StageHandler for PlayState {
 
     fn update(&mut self, ctx: &mut FrameCtx<'_>) -> Transition {
         self.hold_green_number(ctx.shared);
+        self.repeat_held_keys(ctx.shared, ctx.now);
         if self.scene.is_some() {
             return self.update_scene(ctx);
         }

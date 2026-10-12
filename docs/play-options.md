@@ -1,6 +1,6 @@
 # 플레이 옵션
 
-> 최종 갱신 2026-10-12 · 웨이브 13(판정 오프셋을 원본의 노트 표시 타이밍으로: 1~3절, 7.4절. 기본 스킨의 판정선을 필드 맨 아래로: 8절. 작업 트리 기준, 커밋 전) 기준. 웨이브 12 는 연습 패널의 숫자 행(9절)
+> 최종 갱신 2026-10-12 · 웨이브 14(플레이 중 조작: START + 턴테이블의 1 단위 걸음과 리프트 조합, 판정 오프셋의 출하 키와 누름 반복, 스크래치 역방향 키의 출하: 2절의 "바꾸는 곳" 열, 5절. 작업 트리 기준, 커밋 전) 기준. 웨이브 13 은 판정 오프셋을 원본의 노트 표시 타이밍으로(1~3절, 7.4절), 기본 스킨의 판정선을 필드 맨 아래로(8절). 웨이브 12 는 연습 패널의 숫자 행(9절)
 > 대상: 플레이 중 스크롤·가림막·판정 타이밍을 정하는 옵션과 그 키, 그 옵션을 바꾸는 화면인 PLAY 메뉴(7절), 기본 스킨의 판정 표시(8절), 연습 패널(9절). 스킨이 그리는 옵션(Lane Width 등)과 부위별 불투명도는 [skin.md](./skin.md) 3.4절, 구현 위치는 [crates.md](./crates.md)를 본다. PLAY 메뉴의 설계는 [plan/2026-10-11-play-menu.md](./plan/2026-10-11-play-menu.md).
 > beatoraja 원본의 같은 기능이 기준이다. 다르게 한 곳은 "원본과 다른 점" 열에 이유를 적는다.
 
@@ -22,10 +22,10 @@
 | HI-SPEED FIX | 녹색 숫자를 계산할 때 기준으로 삼는 BPM | OFF / START / MAX / MAIN / MIN | MAIN | PLAY 메뉴 > SPEED, 선곡 패널 1 의 5번 키 | `PlayConfig.fixhispeed` | KEEP GREEN NUMBER 가 꺼져 있으면 한 판 안에서만 이동 시간을 묶는다(곡 사이에는 HI-SPEED 가 그대로). 원본은 OFF 가 아니면 곡 사이에도 묶는다. 그 역할은 아래 KEEP GREEN NUMBER 가 맡는다 |
 | KEEP GREEN NUMBER | 녹색 숫자를 곡과 곡 사이에 유지한다. 켜면 매 곡 시작과 매 프레임에 HI-SPEED 가 `240000 / 기준 BPM / 이동 시간 * (1 - 레인 커버)` 로 다시 계산된다 | 켬 / 끔 | 끔 | PLAY 메뉴 > SPEED, 플레이 중 KEEP GREEN NUMBER ON/OFF 키(출하 시 미지정) | `fixhispeed != OFF` 일 때의 `LaneRenderer.resetHispeed`, IIDX 의 FHS | 별도 스위치로 두었다. 기존 설정 파일은 끔으로 읽혀 이전과 같은 속도로 스크롤된다. HI-SPEED FIX 가 OFF 이면 기준 BPM 은 MAIN, CONSTANT 이면 120 이다 |
 | GREEN NUMBER | KEEP GREEN NUMBER 가 유지하는 목표 녹색 숫자 | 1~6000(이동 시간 1~10000 ms 로 저장), PLAY 메뉴의 행은 1씩(Shift 10) | 300(이동 시간 500 ms) | PLAY 메뉴 > SPEED, 플레이 중 하이스피드 키(±10, 미세 단계 ±1), SELECT + 건반 또는 GREEN NUMBER UP/DOWN 키(이동 시간 ±1 ms), 선곡 패널 3 의 4·6번 키(이동 시간 ±1 ms, 누르고 있으면 반복) | `PlayConfig.duration` | 원본의 하이스피드 키는 유지 모드에서 배율만 바꾸고 저장된 이동 시간은 그대로 둔다(다음 커버 이동이나 다음 곡에서 되돌아간다). 여기서는 키를 누른 것이 새 목표를 고른 것이므로 목표가 바뀌어 남는다 |
-| LANE COVER | 위에서 내려오는 가림막. 값이 커질수록 더 가린다 | 비율 0~1, 한 번에 0.01, 미세 단계 0.0001~0.01(기본 0.001) | 0, 켬 | PLAY 메뉴 > LANE, 플레이 중 `RIGHT`(더 가림)/`LEFT`(덜 가림), `BACKSLASH`(켬·끔), START + 턴테이블, START 두 번(켬·끔), 마우스 휠 | `PlayConfig.lanecover`, `enablelanecover`, IIDX 의 SUDDEN+ | 켬·끔 전용 키와 방향을 적은 행 이름을 더했다 |
-| LIFT | 판정선을 올린다 | 비율 0~1 | 0, 끔 | PLAY 메뉴 > LANE, 플레이 중 `RBRACKET`/`LBRACKET`, 켬·끔 키(출하 시 미지정) | `PlayConfig.lift`, IIDX 의 LIFT | 없음 |
+| LANE COVER | 위에서 내려오는 가림막. 값이 커질수록 더 가린다 | 비율 0~1, 지정 키는 한 번에 0.01, 미세 단계 0.0001~0.01(기본 0.001). START + 턴테이블은 흰색 숫자 1(0.001) | 0, 켬 | PLAY 메뉴 > LANE, 플레이 중 `RIGHT`(더 가림)/`LEFT`(덜 가림), `BACKSLASH`(켬·끔), START + 턴테이블(흰색 숫자 1씩, 5.2절), START 두 번(켬·끔), 마우스 휠 | `PlayConfig.lanecover`, `enablelanecover`, IIDX 의 SUDDEN+ | 켬·끔 전용 키와 방향을 적은 행 이름을 더했다. START + 턴테이블의 걸음과 반복, 녹색 숫자 유지는 5.2절 |
+| LIFT | 판정선을 올린다 | 비율 0~1. START + SELECT + 턴테이블은 1(0.001) | 0, 끔 | PLAY 메뉴 > LANE, 플레이 중 `RBRACKET`/`LBRACKET`, START + SELECT + 턴테이블(1씩, 5.2절), 켬·끔 키(출하 시 미지정) | `PlayConfig.lift`, IIDX 의 LIFT | 원본에는 리프트만 움직이는 조합이 없다(레인 커버를 꺼야 START + 턴테이블이 리프트로 간다). START + SELECT + 턴테이블을 더했다 |
 | HIDDEN+ | 판정선에서 위로 올라오는 가림막 | 비율 0~1 | 0, 끔 | PLAY 메뉴 > LANE, 플레이 중 올림·내림·켬·끔 키(출하 시 미지정) | `PlayConfig.hidden`, IIDX 의 HIDDEN+ | 없음 |
-| JUDGE OFFSET | 판정 오프셋 | -200~+200 ms, PLAY 메뉴의 행은 1 ms 씩(Shift 10 ms) | 0 | PLAY 메뉴 > JUDGE, 선곡 패널 3 의 5·7번 키(±1 ms), 플레이 중 JUDGE OFFSET ±1 MS 키(출하 시 미지정) | `PlayerConfig.judgetiming`(`LaneRenderer.java:300-301`) | 뜻과 부호는 같다. 범위만 좁다(원본 -500~+500 ms) |
+| JUDGE OFFSET | 판정 오프셋 | -200~+200 ms, PLAY 메뉴의 행은 1 ms 씩(Shift 10 ms) | 0 | PLAY 메뉴 > JUDGE, 선곡 패널 3 의 5·7번 키(±1 ms), 플레이 중 `9`(-1 ms)/`0`(+1 ms. 누르고 있으면 반복, 5.3절) | `PlayerConfig.judgetiming`(`LaneRenderer.java:300-301`) | 뜻과 부호는 같다. 범위만 좁다(원본 -500~+500 ms). 원본은 플레이 중에 바꾸는 키가 없다 |
 | AUTO ADJUST | 칠 때마다 JUDGE OFFSET 을 조금씩 움직인다 | 켬 / 끔 | 끔 | PLAY 메뉴 > JUDGE, 선곡 패널 3 의 3번 키, 플레이 중 AUTO ADJUST ON/OFF 키(출하 시 미지정) | `PlayerConfig.notesDisplayTimingAutoAdjust`(`JudgeManager.java:697-703`) | 없음(식과 부호가 같다) |
 
 ## 3. 판정 오프셋과 자동 보정(JUDGE OFFSET, AUTO ADJUST)
@@ -78,7 +78,7 @@ JUDGE OFFSET 은 노트 필드를 그리는 시각에만 더해진다. 원본이
 3. 리플레이를 볼 때 사용자의 JUDGE OFFSET 을 리플레이의 값으로 덮어쓰지 않는다(웨이브 12 까지는 덮어썼다).
 4. IR: 지금 친 판의 리플레이는 오프셋 0 과 입력 시각 그대로 올라간다. 웨이브 12 까지의 리플레이를 변환하면 전과 같이 각 입력의 시각을 `(그 입력의 오프셋 - 마지막 오프셋)` 만큼 옮긴다(`ir_replay::uploaded_time_us`). 점수 제출의 `options.offset_ms` 는 설정값(노트 표시 오프셋)이다.
 5. 설정 파일: 스키마 5. 스키마 4 이하의 파일과 계정에서 내려받은 설정은 읽을 때 `judge.offset_ms` 의 부호를 한 번 뒤집는다(`Config::sanitise`). 전의 +26(입력을 26 ms 늦게 판정)은 지금의 -26(노트를 26 ms 늦게 그림)이고, 눈에 보이는 노트와 PGREAT 사이의 간격이 그대로다. 이전 파일은 `settings.ron.v4.bak` 로 남는다.
-6. 키 설정의 행 이름: `JUDGE OFFSET +1 MS (HITTING LATE)`, `JUDGE OFFSET -1 MS (HITTING EARLY)`. 저장된 키 지정(`offset_up`·`offset_down`)은 그대로 숫자를 +1·-1 한다. 선곡 패널 3 의 5·7번 키도 원본과 같은 방향이다(5번 -1, 7번 +1). 기본 스킨은 그 두 칸의 동작 줄을 `NOTES 1 MS LATER`(5번), `NOTES 1 MS EARLIER`(7번)로 쓴다(웨이브 12 까지는 `1 MS EARLIER`·`1 MS LATER` 였다. 무엇이 옮겨지는지 적지 않아 PLAY 메뉴의 도움말과 반대로 읽혔다).
+6. 키 설정의 행 이름: `JUDGE OFFSET +1 MS (HITTING LATE)`, `JUDGE OFFSET -1 MS (HITTING EARLY)`. 저장된 키 지정(`offset_up`·`offset_down`)은 그대로 숫자를 +1·-1 한다. 웨이브 14 부터 두 키는 `0`·`9` 에 출하된다(5.3절). 선곡 패널 3 의 5·7번 키도 원본과 같은 방향이다(5번 -1, 7번 +1). 기본 스킨은 그 두 칸의 동작 줄을 `NOTES 1 MS LATER`(5번), `NOTES 1 MS EARLIER`(7번)로 쓴다(웨이브 12 까지는 `1 MS EARLIER`·`1 MS LATER` 였다. 무엇이 옮겨지는지 적지 않아 PLAY 메뉴의 도움말과 반대로 읽혔다).
 7. 같은 값을 가리키는 문구는 한 방향이다: PLAY 메뉴 도움말 `Draw the notes this many ms earlier (+) or later (-) than the song; raise it if you hit late, lower it if you hit early`, 키 설정의 `+1 MS (HITTING LATE)`·`-1 MS (HITTING EARLY)`, 선곡 패널 3 의 `NOTES 1 MS EARLIER`(+1)·`NOTES 1 MS LATER`(-1), 플레이 화면의 TIMING 숫자(설정값 그대로, 부호 포함), 자동 보정(늦게 치면 +). FAST/SLOW 는 입력이 노트의 시각(소리)보다 빨랐는지 늦었는지이고 오프셋과 무관하다.
 
 ## 4. 녹색 숫자 유지(KEEP GREEN NUMBER)
@@ -93,16 +93,96 @@ JUDGE OFFSET 은 노트 필드를 그리는 시각에만 더해진다. 원본이
 
 ## 5. 키
 
+### 5.1 키 설정
+
 | 항목 | 내용 |
 | --- | --- |
 | 키 설정 화면을 여는 길 | 선곡에서 `F5`, Settings 의 `KEY CONFIG >` 단추 또는 `F5`, 스킨 브라우저의 숫자 `6` |
 | 사용자 지정 범위 | 레인과 스크래치 역방향, 플레이 조작 20종, 선곡 단축키 10종(난이도표 다시 받기 `F6` 포함), 화면 여는 키 6종(PLAY 메뉴 `F8` 포함), 스킨 브라우저 숫자 키 8종, 결과 2종, 리플레이 분석 5종. 키보드와 컨트롤러 둘 다(옵션 오버레이 두 키와 상세 패널 홀드 키는 키보드 전용) |
 | 고정 키 | `Esc`, `Enter`, 화살표, `H`(키 안내)와 각 메뉴 안의 키 |
 | 레인 커버 조작 | `RIGHT` = 더 가림(LANE COVER DOWN), `LEFT` = 덜 가림(LANE COVER UP), `BACKSLASH` = 켬·끔. 커버가 꺼져 있을 때 값을 바꾸면 발치의 COVER 수치가 1.5초 동안 뜬다 |
-| 미세 단계 | FINE STEP 키를 누르고 있는 동안 가림막은 미세 단계로, 유지 중인 녹색 숫자는 ±1 로 움직인다. 키를 주지 않았으면 레인으로 쓰지 않는 Shift 가 그 역할을 한다(7키 기본 배치에서는 오른쪽 Shift) |
-| 지금 설정된 키 보기 | 선곡에서 `H` |
+| 미세 단계 | FINE STEP 키를 누르고 있는 동안 지정 키의 가림막은 미세 단계로, 유지 중인 녹색 숫자는 ±1 로 움직인다. 키를 주지 않았으면 레인으로 쓰지 않는 Shift 가 그 역할을 한다(7키 기본 배치에서는 오른쪽 Shift). START + 턴테이블의 걸음에는 관여하지 않는다(5.2절) |
+| 판정 오프셋 | `9` = -1 ms, `0` = +1 ms(5.3절) |
+| 스크래치 역방향 | 스크래치 레인마다 반대 방향 키가 하나 더 있다. 출하 키는 왼쪽 턴테이블 `LCTRL`, 10·14키의 오른쪽 턴테이블 `RCTRL`(5.4절). 선곡에서는 PREVIOUS BAR, 플레이에서는 스크래치의 반대 방향이고 START 와 함께 누르면 가림막을 올린다(5.2절) |
+| 지금 설정된 키 보기 | 선곡에서 `H`. 플레이 조작은 IN PLAY, START·SELECT 조합은 IN PLAY, HELD TOGETHER 묶음에 지금 지정된 키로 나온다. 그 묶음의 첫 줄(`LSHIFT LCTRL  THE TURNTABLE: DOWN / UP`)이 아래 줄들의 TURNTABLE 이 키보드의 어느 두 키이고 각각 가림막을 어느 쪽으로 움직이는지 알려 준다 |
 | 난이도표 다시 받기 | 선곡에서 `F6`(RELOAD DIFFICULTY TABLES, 설정 파일 키 `reload_tables`, 키 설정 화면에서 바꿀 수 있고 패드에도 줄 수 있다). 등록한 표를 전부 다시 받는다. 검색어를 치는 중에는 듣지 않는다. 표 하나만 받으려면 Tables 화면(`T`)에서 `R`, 전부는 `A`. 저장과 다시 받기의 규칙은 `README.md` 의 Difficulty tables 절 |
-| 저장 | `~/.config/rbms/keyconfig.ron`. 이전 파일은 그대로 읽히고 없는 항목은 기본 키로 채워진다. 단, 파일에 없는 단축키의 기본 키를 같은 화면의 다른 단축키가 파일에서 이미 쓰고 있으면 그 단축키는 미지정으로 읽힌다(사용자가 고른 키가 이긴다. 예: FOLDERS 를 `F8` 로 옮겨 둔 파일에서 PLAY MENU 는 키 없음으로 나오고 키 설정 화면에서 새로 지정한다) |
+| 저장 | `~/.config/rbms/keyconfig.ron`. 이전 파일은 그대로 읽히고 없는 항목은 기본 키로 채워진다. 단, 파일에 없는 단축키의 기본 키를 같은 화면의 다른 단축키가 파일에서 이미 쓰고 있으면 그 단축키는 미지정으로 읽힌다(사용자가 고른 키가 이긴다. 예: FOLDERS 를 `F8` 로 옮겨 둔 파일에서 PLAY MENU 는 키 없음으로 나오고 키 설정 화면에서 새로 지정한다). 나중에 출하 키가 생긴 것(판정 오프셋 두 키, 스크래치 역방향 키)의 규칙은 5.3절과 5.4절 |
+
+### 5.2 플레이 중 START·SELECT 조합
+
+스킨이 그리는 플레이 화면에서 프레임마다 읽는다(`stage/play/controls.rs`). 원본은 `ControlInputProcessor.input`. START 의 키보드 기본값은 `A`, SELECT 는 `W`, 턴테이블은 스크래치 레인의 두 키(7키 기본: 정방향 `LSHIFT`, 역방향 `LCTRL`. 5.4절)와 패드의 턴테이블이다. 9키에는 턴테이블이 없어 8·9번 건반(`G`·`B`)이 그 자리다.
+
+| 누른 것 | 동작 | 원본과 다른 점 |
+| --- | --- | --- |
+| START + 건반 | 하이스피드. 1·3·5·7번 건반은 느리게, 2·4·6번은 빠르게, 누를 때마다 한 번(HI-SPEED STEP). 녹색 숫자 유지 중이면 녹색 숫자 ±10 | 없음 |
+| START + 턴테이블 | 플레이어가 쓰고 있는 가림막을 흰색 숫자 1(레인의 0.1%)씩. 정방향(스크래치 키)은 내리고(더 가림) 역방향은 올린다. 한 번 누르면 1, 누르고 있으면 0.3초 뒤부터 반복(아래 표). 아날로그 턴테이블은 틱마다 1. 그동안 녹색 숫자는 그대로이고 하이스피드가 바뀐다 | 원본은 누른 첫 프레임부터 50 ms 마다 `lanecovermarginlow`(기본 0.001)씩 움직여 보통 길이의 누름(80~120 ms)이 2 가 된다. 여기서는 누름 한 번이 정확히 1 이고, 걸음은 COVER FINE STEP 과 무관하게 1 이다. 원본은 HI-SPEED FIX 가 OFF 이면 녹색 숫자를 놓는다 |
+| START + SELECT + 턴테이블 | 리프트를 1 씩. 정방향은 판정선을 내리고 역방향은 올린다(레인 커버와 같은 쪽: 정방향 = 아래로). 반복 규칙은 같다. 리프트는 녹색 숫자에 들어가지 않으므로 하이스피드도 그대로다(4절 4번) | 원본에 없는 조합이다. 원본은 START + SELECT 를 1초 누르면 곡을 끝내지만 이 플레이어에는 그 동작이 없다 |
+| START 두 번(0.5초 안) | 레인 커버 켬·끔 | SELECT 를 뗀 것은 START 를 누른 것으로 세지 않는다. 원본은 START 를 누른 채 SELECT 를 눌렀다 떼는 것도 한 번으로 세어, 리프트 조합을 쓰다가 레인 커버가 꺼질 수 있다 |
+| SELECT + 건반 | 고정된 이동 시간 ±1 ms(녹색 숫자 유지 중이면 유지 값) | 없음 |
+| SELECT + 턴테이블 | 같은 값을 50 ms 마다 1 ms | 없음(전과 같다) |
+| START + SELECT(누르는 순간) | 레인 커버가 꺼져 있고 리프트와 HIDDEN+ 가 둘 다 켜져 있을 때 START + 턴테이블이 움직일 쪽을 바꾼다 | 없음 |
+| 마우스 휠 | 쓰고 있는 가림막을 한 칸에 0.5%(흰색 숫자 5). 움직인 뒤 1.5초 동안 가림막 수치가 뜬다 | 수치 표시를 더했다(원본은 START·SELECT 를 누르고 있을 때만 뜬다) |
+
+"쓰고 있는 가림막"은 원본의 규칙이다(`setCoverValue`): 레인 커버가 켜져 있거나 리프트와 HIDDEN+ 가 둘 다 꺼져 있으면 레인 커버, 아니면 리프트가 켜져 있고 HIDDEN+ 가 꺼져 있거나 START + SELECT 가 리프트를 골랐으면 리프트, 그 밖에는 HIDDEN+. 리프트와 HIDDEN+ 는 레인 커버와 반대 부호로 움직인다.
+
+START + 턴테이블의 세부
+
+| 항목 | 동작 |
+| --- | --- |
+| 걸음 | PLAY 메뉴의 LANE COVER·LIFT 행과 같은 0.1% 격자 위의 한 칸(`rbms_config::move_number_steps`). 격자 밖에 있던 값은 가장 가까운 칸에서 한 칸 간다. 범위 끝(0, 1000)에서 멈춘다 |
+| 키를 누르고 있을 때 | 누른 순간 1. 0.3초 뒤부터 0.05초마다 1(초당 20). 1.5초부터 한 번에 4(초당 80), 3초부터 한 번에 10(초당 200). 0 에서 1000 까지 약 7.3초. 지연과 빠르기는 상수다(`controls/repeat.rs` 의 `REPEAT_DELAY`, `REPEAT_EVERY`, `SHADE_PACE`). 걸음 수는 누른 시간만으로 정해져 프레임 속도와 무관하다 |
+| 아날로그 턴테이블 | 돌린 틱 수만큼(원본의 `getAnalogDiff` 와 같은 틱). START 를 누르기 전에 돌린 것은 버린다. 아날로그 턴테이블이 있어도 키보드의 스크래치 키는 키로 읽는다 |
+| 녹색 숫자 | 레인 커버를 움직이는 동안 화면의 녹색 숫자가 그대로이고 하이스피드가 따라 바뀐다. KEEP GREEN NUMBER 가 켜져 있으면 유지 값으로, 꺼져 있고 HI-SPEED FIX 가 OFF 가 아니면 그 판이 고정한 이동 시간으로(둘 다 전과 같다), 둘 다 아니면(HI-SPEED FIX OFF) START 를 누른 채 처음 커버를 움직일 때의 녹색 숫자로 묶는다. CONSTANT 에서도 같다(필드의 고정 템포 120 기준의 숫자가 그대로다). 묶음은 START 를 뗀 뒤에도 그 판 동안 남는다: 다음에 START 를 누르고 턴테이블을 돌리면 같은 숫자로 이어 간다. 턴테이블이 아닌 것이 속도나 레인 커버를 움직였으면(START + 건반, 지정 키, 휠, 켬·끔, PLAY 메뉴) 그때의 숫자로 다시 묶는다 |
+| 하이스피드가 범위 끝일 때 | 0.01~20.00 을 넘어야 하면 범위 끝에 멈추고 녹색 숫자 표시는 실제 값을 보인다. 커버를 되돌리면 속도와 숫자도 되돌아온다. START 를 뗐다가 다시 눌러 되돌려도 같다(레인 커버를 1000 까지 내려 하이스피드가 0.01 이 된 뒤에도 원래 속도로 돌아온다). 범위 끝에 멈춘 채로 판을 끝내면 그 속도가 저장된다 |
+| 꺼져 있는 가림막 | 값은 움직이고 켬·끔은 그대로다(원본이 꺼진 레인 커버를 다루는 방식). START + SELECT + 턴테이블은 리프트가 꺼져 있어도 리프트의 값을 움직인다. 켜려면 켬·끔 키나 PLAY 메뉴를 쓴다 |
+| 화면 표시 | START 나 SELECT 를 누르고 있는 동안과 마지막으로 움직인 뒤 1.5초 동안 스킨의 "가림막을 바꾸는 중" 옵션(270)이 켜진다. 기본 스킨은 레인 커버 끝의 흰색 숫자와 녹색 숫자, 발치의 HI-SPEED·GREEN 과 바꾸는 동안만 뜨는 COVER·LIFT 를 보인다. 발치의 COVER·LIFT 는 가림막이 꺼져 있어도 뜨므로 꺼진 리프트를 START + SELECT + 턴테이블로 움직여도 값이 보인다. 판정선 아래의 리프트 수치는 리프트가 켜져 있을 때 항상 보인다 |
+| 대상이 아닌 판 | 오토플레이와 리플레이에서는 START + 건반과 마찬가지로 움직이지 않는다(START 두 번과 휠은 듣는다). 속도를 잠그는 코스에서는 아무것도 움직이지 않는다 |
+| 저장 | 설정의 `play.cover`·`play.lift`·`play.hispeed` 가 그 자리에서 바뀌고, 판이 끝나거나 나갈 때 파일에 쓴다 |
+
+가림막을 움직이는 조작의 걸음(흰색 숫자 기준)
+
+| 조작 | 한 번 | 누르고 있으면 | FINE STEP(또는 Shift)을 누른 채 |
+| --- | --- | --- | --- |
+| START + 턴테이블(레인 커버), START + SELECT + 턴테이블(리프트) | 1 | 0.3초 뒤부터 반복하고 빨라진다 | 그대로 1 |
+| 지정 키: LANE COVER(`RIGHT`/`LEFT`), LIFT(`RBRACKET`/`LBRACKET`), HIDDEN+(미지정) | 10(1%) | 반복하지 않는다 | COVER FINE STEP(기본 0.001 = 1. PLAY 메뉴에서 0.1~10) |
+| 마우스 휠 | 한 칸 5 | — | 그대로 5 |
+| PLAY 메뉴의 LANE COVER·LIFT·HIDDEN+ 행 | 1 | — | Shift 10 |
+
+실측(16 ms 프레임, 주입한 시계, 키를 누른 다음 프레임부터 뗄 때까지 프레임마다 읽음). "웨이브 13 까지" 열은 고치기 전 빌드에서 같은 방법으로 잰 값이다. 같은 동작을 고정하는 테스트는 `controls/turn_tests.rs`(누름 한 번 = 1, 반복 시각, 범위 끝)와 `controls/repeat.rs`(누른 시간별 걸음 수)다.
+
+| 누른 것 | 누른 시간 | 웨이브 13 까지 | 지금 |
+| --- | --- | --- | --- |
+| START + 스크래치 키 | 30 ms | 레인 커버 1 | 1 |
+| START + 스크래치 키 | 80~120 ms | 2 | 1 |
+| START + 스크래치 키 | 0.5초 / 1초 / 3초 | 8 / 16 / 47(끝까지 약 64초) | 5 / 15 / 145(끝까지 약 7.3초) |
+| START + SELECT + 스크래치 키 | 0.64초 | 아무것도 움직이지 않음 | 리프트 -8(판정선이 내려간다) |
+| `RIGHT` 한 번 / Shift + `RIGHT` 한 번 | — | 10 / 1 | 10 / 1(그대로) |
+| 휠 한 칸 | — | 5 | 5(그대로) |
+
+### 5.3 판정 오프셋 키
+
+| 항목 | 내용 |
+| --- | --- |
+| 출하 키 | `9` = JUDGE OFFSET -1 MS(빠르게 칠 때), `0` = JUDGE OFFSET +1 MS(늦게 칠 때). 숫자 줄의 오른쪽 끝, 리프트(`[` `]`)와 레인 커버 켬·끔(`\`) 위다. 출하 배치의 어느 모드도 숫자 키로 레인을 치지 않고, 플레이 조작·리플레이 분석 키·Esc 와 겹치지 않으며, 텐키 없는 키보드에도 있다. 선곡의 숫자 키(`0` 검색 등)는 플레이 화면에서 읽지 않는다. 키 설정 화면에서 바꾸거나 뗄 수 있고 패드에도 줄 수 있다 |
+| 누르고 있으면 | 누른 순간 1 ms. 0.3초 뒤부터 0.05초마다 1 ms(초당 20). 범위가 ±200 이라 빨라지지 않는다(`STEADY_PACE`). 범위 끝에서 멈춘다 |
+| 화면 | 스킨의 TIMING 숫자(number 12)가 다음 프레임에 새 값을 보이고, 노트도 그 프레임부터 새 자리로 그려진다(3.1절 6번). 기본 스킨은 TIMING 숫자를 항상 보인다. 알림(토스트)은 플레이를 가리므로 띄우지 않는다 |
+| 대상 | 손으로 치는 판(일반 플레이, 연습)에서만 바뀐다. 오토플레이와 리플레이에서는 키도 반복도 무시한다(전과 같은 규칙) |
+| 리플레이 | 오프셋은 판정을 옮기지 않으므로 기록할 것이 없다. 플레이 중에 바꿔도 리플레이는 `offset_ms: 0` 이고 `judge.offset_steps` 가 없다(3.3절 1번) |
+| AUTO ADJUST 와 함께 | 키로 바꾼 값에서 자동 보정이 이어 간다(입력마다 세션이 설정값을 다시 읽는다) |
+| AUTO ADJUST ON/OFF 키 | 출하 시 미지정으로 둔다. 실수로 눌리면 오프셋이 입력마다 움직이기 시작하고 화면에는 `TIMING AUTO` 표지만 남는다. 한 번 정하면 그대로 두는 값이라 PLAY 메뉴와 선곡 패널 3 에서 바꾼다 |
+| 기존 키 설정 파일 | 그대로 읽힌다. 웨이브 13 까지의 파일은 두 키를 빈 값으로 적어 두었는데, 그때는 출하 키가 없어 빈 값밖에 적을 수 없었으므로 그런 파일은 두 키를 `9`·`0` 에서 읽는다. 단, 그 파일이 `9` 나 `0` 을 플레이 중에 함께 읽는 다른 것(어느 모드든 레인·스크래치 역방향, 다른 조작, 리플레이 분석 키)에 주었으면 그 키는 사용자가 준 쪽에 남고 오프셋 키는 미지정으로 나온다(키 설정 화면에서 지정). 사용자가 오프셋 키에 직접 준 키는 그대로다 |
+| 파일 형식 | `keyconfig.ron` 에 `generation` 이 더해졌다(없으면 0 으로 읽는다. 1 = 판정 오프셋 두 키, 2 = 스크래치 역방향 키. 지금 판은 2). 출하 키가 나중에 생긴 것을 "그때는 키가 없었다"와 "사용자가 키를 뗐다"로 가르는 값이다. 키를 하나라도 바꾸면 그때 읽히던 키가 파일에 적히고 `generation` 이 지금 판이 되며, 그 뒤로는 뗀 키가 뗀 채로 남는다. 읽기만 한 파일은 다시 쓰지 않는다 |
+
+### 5.4 스크래치 역방향 키
+
+| 항목 | 내용 |
+| --- | --- |
+| 출하 키 | 스크래치 레인이 출하되는 Shift 옆의 Control: 5·7키와 10·14키의 왼쪽 턴테이블은 `LCTRL`, 10·14키의 오른쪽 턴테이블은 `RCTRL`. 9키에는 턴테이블이 없다. 원본의 키보드 기본값과 같다(`PlayModeConfig.KeyboardConfig.setKeyAssign`: `BEAT_7K -> { Z, S, X, D, C, F, V, SHIFT_LEFT, CONTROL_LEFT }`, 2P 는 `SHIFT_RIGHT, CONTROL_RIGHT`) |
+| 왜 출하하는가 | 키가 하나면 턴테이블이 한 방향으로만 돈다. START + 턴테이블이 레인 커버를 내리기만 하고, START + SELECT + 턴테이블이 리프트를 내리기만 해 기본값 0 인 리프트를 그 조합으로 올릴 수 없었다(웨이브 14 리뷰). 웨이브 13 까지는 미지정으로 출하했다 |
+| 하는 일 | 플레이: 스크래치 레인을 반대 방향으로 친다(차지 노트의 끝에서 방향이 갈린다). START 와 함께: 가림막을 올린다(정방향은 내린다). 선곡: PREVIOUS BAR(정방향은 NEXT BAR). 검색어·숫자·경로를 치는 동안의 Control(붙여넣기 등)은 전과 같이 글자 입력 쪽이 받는다 |
+| 기존 키 설정 파일 | 그대로 읽힌다. `generation` 이 2 보다 작은 파일에서 역방향 키가 빈 값인 스크래치 레인은 출하 키에서 읽는다. 스크래치 자체를 다른 키로 옮긴 파일(예: 7키 스크래치가 `1`)에도 `LCTRL` 이 붙는다. 단, 그 파일이 그 Control 키를 같은 모드의 레인·다른 역방향 칸, 플레이 조작(START·SELECT·FINE STEP 포함), 리플레이 분석 키에 주었으면 그 키는 사용자가 준 쪽에 남고 역방향은 미지정으로 나온다. 파일이 역방향에 직접 준 키는 그대로다. `scratch_reverse` 항목이 아예 없는 더 오래된 파일도 같은 규칙으로 읽는다 |
+| 떼기 | 키 설정 화면(`F5`)의 SCRATCH n REVERSE 행에서 `Del`. 한 번 뗀 키는 `generation` 과 함께 저장되어 다시 붙지 않는다. `Backspace` 는 출하 키로 되돌린다 |
+| 컨트롤러 | 패드의 역방향 지정은 전과 같다(아날로그 턴테이블은 두 방향을 스스로 낸다) |
 
 ## 6. 구현 위치
 
@@ -113,8 +193,9 @@ JUDGE OFFSET 은 노트 필드를 그리는 시각에만 더해진다. 원본이
 | 자동 보정의 한 걸음 | `crates/rbms-play/src/session.rs`(`auto_adjust_step_ms`, `PlaySession::judge_offset_ms`, `set_judge_offset_us`). 세션은 오프셋을 판정에 쓰지 않는다 |
 | 오프셋만큼 앞서 그리기 | `apps/rbms-player/src/stage/play/mod.rs`(`field_lead_us`, `drawn_chart_us`, `built_in_field_us`. 오프셋을 더하지 않은 플레이 타이머 시각은 `played_chart_us` 이고 BGA 가 이것을 읽는다), 미리보기는 `stage/play/skin_preview.rs`(`PlaySample::drawn_chart_us`) |
 | 오프셋의 측정과 캡처 | `apps/rbms-player/src/stage/play/timing_tests.rs`, `timing_capture_tests.rs`(`RBMS_SKIN_CAPTURE_DIR` 을 주면 PNG 저장), `crates/rbms-play/tests/auto_adjust.rs` |
-| 플레이 중 조작 | `apps/rbms-player/src/stage/play/controls.rs`, `apps/rbms-player/src/app_input.rs`(`apply_control`, `fine_pressed`) |
-| 조작과 단축키의 종류, 저장 형식 | `apps/rbms-player/src/keyconfig.rs`(`ControlAction`, `Shortcut`, `ControlBinds`) |
+| 플레이 중 조작 | `apps/rbms-player/src/stage/play/controls.rs`(`read_held`, `turn_shade`, `turn_lane_cover`, `TurnPin`, `repeat_held_keys`), 누름 반복은 `stage/play/controls/repeat.rs`(`HeldRepeat`, `Pace`), `apps/rbms-player/src/app_input.rs`(`apply_control`, `fine_pressed`, `control_repeating`, `take_turntable_ticks`), 아날로그 턴테이블의 틱은 `apps/rbms-player/src/gamepad.rs`(`PadMapper::take_turn`) |
+| 조작과 단축키의 종류, 저장 형식 | `apps/rbms-player/src/keyconfig.rs`(`ControlAction`, `Shortcut`, `ControlBinds`, `KeyConfig::generation`, `ControlAction::given_later`, `KeyConfig::control_key`) |
+| 플레이 중 조작의 측정과 캡처 | `apps/rbms-player/src/stage/play/controls/turn_tests.rs`, `controls/capture_tests.rs`(`RBMS_SKIN_CAPTURE_DIR` 을 주면 PNG 저장) |
 | IR 리플레이 변환 | `apps/rbms-player/src/ir_replay.rs`(`uploaded_time_us`) |
 | PLAY 메뉴(행 목록, 조작, 정보 패널) | `apps/rbms-player/src/stage/play_menu.rs`, `stage/play_menu/rows.rs`(숫자 행의 값과 목록 표시, 행의 종류, 표시 꼬리, 읽기 전용, 큰 단계, 기본값 복원). 숫자 행의 공통 부품은 `apps/rbms-player/src/number_row.rs`, 걸음 모델은 `crates/rbms-config/src/number.rs`·`settings.rs`(`number_spec`) |
 | PLAY 메뉴와 SKIN 메뉴가 같이 쓰는 그리기·스크롤 부품 | `apps/rbms-player/src/stage/preview_menu.rs` |

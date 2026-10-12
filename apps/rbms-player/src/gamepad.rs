@@ -463,6 +463,11 @@ impl PadSnapshot {
         self.axes.get(&code).copied().unwrap_or_default()
     }
 
+    /// Where an axis stands, or `None` for one the device has not reported yet.
+    pub fn axis_reading(&self, code: u32) -> Option<f32> {
+        self.axes.get(&code).copied()
+    }
+
     pub fn clear(&mut self) {
         self.buttons.clear();
         self.standard.clear();
@@ -477,6 +482,11 @@ pub struct PadMapper {
     gates: BTreeMap<PadElement, ButtonGate>,
     analog: BTreeMap<u32, AnalogScratch>,
     analog_shape: Option<(AnalogMode, u32)>,
+    /// Where each turntable stood when its travel was last counted.
+    turn_read: BTreeMap<u32, f32>,
+    /// How many ticks the turntables have travelled since the count was last taken, a tick towards
+    /// the plus end of an axis counted up ([`PadMapper::take_turn`]).
+    turned: i32,
 }
 
 impl PadMapper {
@@ -492,6 +502,7 @@ impl PadMapper {
             return Vec::new();
         }
         self.retune(cfg, mode);
+        self.count_turn(snapshot);
         let plan = cfg.plan(mode);
 
         let debounce = cfg.effective_debounce_ms();
@@ -556,6 +567,8 @@ impl PadMapper {
         let shape = (cfg.analog_mode, cfg.effective_analog_threshold());
         if self.analog_shape != Some(shape) {
             self.analog.clear();
+            self.turn_read.clear();
+            self.turned = 0;
             self.analog_shape = Some(shape);
         }
         if cfg.analog_mode == AnalogMode::Off {
@@ -564,6 +577,33 @@ impl PadMapper {
         for axis in cfg.analog_axes(mode) {
             self.analog.entry(axis).or_insert_with(|| AnalogScratch::new(shape.0, shape.1));
         }
+    }
+
+    /// Add what each turntable travelled since the last frame to the count, in the ticks the
+    /// reference counts a turn in (`BMSPlayerInputProcessor.getAnalogDiff`). An axis is counted from
+    /// its first reading on, so the jump from nothing to wherever the disc happens to stand is not
+    /// a turn.
+    fn count_turn(&mut self, snapshot: &PadSnapshot) {
+        for &axis in self.analog.keys() {
+            let Some(now) = snapshot.axis_reading(axis) else { continue };
+            if let Some(before) = self.turn_read.insert(axis, now) {
+                self.turned = self.turned.saturating_add(compute_analog_diff(before, now));
+            }
+        }
+    }
+
+    /// How many ticks the turntables have turned since this was last asked, a turn that holds the
+    /// scratch lane's forward direction counted up, or `None` when no axis is read as a turntable:
+    /// the lanes are then keys, and are read as held or not.
+    ///
+    /// It is what the reference moves a cover by while START is held
+    /// (`ControlInputProcessor.changeCoverValue`, for an analogue key). The reference drops a turn
+    /// older than 200 ms; here whoever reads it asks every frame, and drops what it has no use for.
+    pub fn take_turn(&mut self) -> Option<i32> {
+        if self.analog.is_empty() {
+            return None;
+        }
+        Some(std::mem::take(&mut self.turned))
     }
 
     fn read(&mut self, element: PadElement, deadzone: f32, snapshot: &PadSnapshot) -> bool {
@@ -649,6 +689,11 @@ impl PadState {
     /// What the controller is holding down right now, as of the last poll.
     pub fn held(&self, cfg: &PadConfig, mode: Mode) -> Vec<PadEvent> {
         self.mapper.held(cfg, mode)
+    }
+
+    /// How far the turntables have turned since this was last asked ([`PadMapper::take_turn`]).
+    pub fn take_turn(&mut self) -> Option<i32> {
+        self.mapper.take_turn()
     }
 
     /// The binding the player last produced, for the key editor's "press something" mode. Taking

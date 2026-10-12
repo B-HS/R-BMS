@@ -1,7 +1,8 @@
 use crate::gamepad::{ANALOG_THRESHOLD_RANGE, AXIS_DEADZONE_RANGE, AnalogMode, DEBOUNCE_MS_RANGE, PadBinding, PadConfig};
 use crate::keyconfig::{
     Bindable, Clash, ControlAction, GUIDE_KEY, HeldKeys, KEY_INDEX_COUNT, KeyConfig, SCRATCH_BACKWARD_INDEX, SCRATCH_FORWARD_INDEX, Shortcut, ShortcutScreen,
-    UNNAMED_KEY, belongs_to_a_typed_line, clash_among, default_keys_for_mode, fixed_keys_of, key_from_name, key_index_of, key_name, mode_config_key,
+    UNNAMED_KEY, belongs_to_a_typed_line, clash_among, default_keys_for_mode, default_reverse_keys_for_mode, fixed_keys_of, key_from_name, key_index_of,
+    key_name, mode_config_key,
 };
 use rbms_model::Mode;
 use rbms_play::ScratchDir;
@@ -44,14 +45,15 @@ fn a_reverse_key_dispatches_as_a_backward_spin_on_its_scratch_lane() {
     assert_eq!(shared.lane_input_for(KeyCode::F13), None, "an unbound key still plays no lane");
 }
 
-/// Without a reverse binding nothing changes: every bound key is a forward spin, which is what a
-/// key config written before the row existed asks for.
+/// A key of a lane is a forward spin whatever the reverse keys are, and the key the turntable's
+/// other direction ships on is a backward spin of its lane.
 #[test]
-fn every_key_is_a_forward_spin_until_a_reverse_key_is_bound() {
+fn every_lane_key_is_a_forward_spin_and_the_shipped_reverse_key_a_backward_one() {
     let shared = shared_with(&KeyConfig::default());
     for (code, lane) in KeyConfig::default().lane_keys(Mode::BEAT_7K) {
         assert_eq!(shared.lane_input_for(code), Some((lane, ScratchDir::Forward)), "{code:?}");
     }
+    assert_eq!(shared.lane_input_for(KeyCode::ControlLeft), Some((7, ScratchDir::Backward)));
 }
 
 #[test]
@@ -85,11 +87,12 @@ fn default_config_has_every_mode_and_control() {
 }
 
 /// The controls a fresh key config leaves unbound: the hidden band, and every control that was
-/// added after the ones a run cannot do without. Each is a key a player asks for in the key editor
-/// rather than one shipped where a stray press in a run would move something. The modifier for the
-/// finer step is among them because no one key is free on every shipped layout: unbound, it is the
-/// shift that plays no lane.
-const UNBOUND_BY_DEFAULT: [ControlAction; 11] = [
+/// added after the ones a run cannot do without, but for the two keys of the judge offset. Each is
+/// a key a player asks for in the key editor rather than one shipped where a stray press in a run
+/// would move something -- the switch that lets the offset adjust itself above all. The modifier
+/// for the finer step is among them because no one key is free on every shipped layout: unbound,
+/// it is the shift that plays no lane.
+const UNBOUND_BY_DEFAULT: [ControlAction; 9] = [
     ControlAction::HiddenUp,
     ControlAction::HiddenDown,
     ControlAction::LiftToggle,
@@ -97,8 +100,6 @@ const UNBOUND_BY_DEFAULT: [ControlAction; 11] = [
     ControlAction::GreenUp,
     ControlAction::GreenDown,
     ControlAction::KeepGreenToggle,
-    ControlAction::OffsetUp,
-    ControlAction::OffsetDown,
     ControlAction::AutoAdjustToggle,
     ControlAction::Fine,
 ];
@@ -467,17 +468,31 @@ fn load_malformed_file_backs_up_and_returns_defaults() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// A key config ships with no reverse-spin bindings, so a scratch lane is spun one way only —
-/// exactly what every config written before the row existed asks for.
+/// Every scratch lane ships with a key for its other direction, the reference's
+/// (`PlayModeConfig.KeyboardConfig.setKeyAssign`): the Control key beside the Shift key the lane
+/// itself ships on. With one key the turntable is spun one way only, which leaves a shade that is
+/// set with START and the turntable moving one way only. No other lane has one, and none of the
+/// keys is one anything else of its mode ships on.
 #[test]
-fn no_scratch_lane_is_bound_to_a_reverse_key_until_one_is_set() {
+fn every_scratch_lane_ships_with_a_key_for_its_other_direction() {
     let kc = KeyConfig::default();
+    assert_eq!(kc.scratch_reverse_keys(Mode::BEAT_5K), vec![(KeyCode::ControlLeft, 5)]);
+    assert_eq!(kc.scratch_reverse_keys(Mode::BEAT_7K), vec![(KeyCode::ControlLeft, 7)]);
+    assert_eq!(kc.scratch_reverse_keys(Mode::BEAT_10K), vec![(KeyCode::ControlLeft, 5), (KeyCode::ControlRight, 11)]);
+    assert_eq!(kc.scratch_reverse_keys(Mode::BEAT_14K), vec![(KeyCode::ControlLeft, 7), (KeyCode::ControlRight, 15)]);
+    assert!(kc.scratch_reverse_keys(Mode::POPN_9K).is_empty(), "a mode with no turntable has no other direction");
     for &mode in Mode::ALL {
-        assert!(kc.scratch_reverse_keys(mode).is_empty(), "{} ships with no reverse spin", mode.name);
-        for lane in 0..mode.key {
+        assert_eq!(kc.scratch_reverse_keys(mode), default_reverse_keys_for_mode(mode), "{}", mode.name);
+        assert!(collisions(&kc, mode).is_empty(), "{}", mode.name);
+        for lane in (0..mode.key).filter(|lane| !mode.is_scratch(*lane)) {
             assert!(kc.scratch_reverse_token(mode, lane).is_empty(), "{} lane {lane}", mode.name);
         }
+        for (code, lane) in default_reverse_keys_for_mode(mode) {
+            assert_eq!(KeyConfig::default_key_of(mode, Bindable::ScratchReverse(lane)), Some(code));
+            assert_eq!(kc.scratch_reverse_token(mode, lane), key_name(code));
+        }
     }
+    assert_eq!(kc.generation, crate::keyconfig::KEY_GENERATION);
 }
 
 /// A reverse binding is remembered per mode and per lane, and reads back as the key it was set to.
@@ -489,7 +504,7 @@ fn a_reverse_binding_is_kept_for_the_scratch_lane_it_was_set_on() {
     kc.set_scratch_reverse(mode, scratch, KeyCode::KeyQ);
     assert_eq!(kc.scratch_reverse_token(mode, scratch), "Q");
     assert_eq!(kc.scratch_reverse_keys(mode), vec![(KeyCode::KeyQ, scratch)]);
-    assert!(kc.scratch_reverse_keys(Mode::BEAT_5K).is_empty(), "a binding on one mode does not leak into another");
+    assert_eq!(kc.scratch_reverse_keys(Mode::BEAT_5K), default_reverse_keys_for_mode(Mode::BEAT_5K), "a binding on one mode does not leak into another");
 }
 
 /// A reverse key is a binding like any other: sharing it with a lane or a control is a collision the
@@ -521,7 +536,8 @@ fn the_reverse_map_survives_the_file_and_an_older_file_still_loads() {
     assert_eq!(back.scratch_reverse_keys(mode), vec![(KeyCode::KeyQ, scratch)]);
 
     let older: KeyConfig = ron::from_str(r#"(lanes: {"7K": ["Z"]}, controls: (hispeed_up: "UP"))"#).expect("a pre-reverse config parses");
-    assert!(older.scratch_reverse_keys(mode).is_empty());
+    assert!(older.scratch_reverse.is_empty(), "a file that holds no reverse keys was read as holding the shipped ones");
+    assert_eq!(older.scratch_reverse_keys(mode), default_reverse_keys_for_mode(mode), "a file from before the reverse keys reads them where they ship");
     assert_eq!(older.control_key(ControlAction::HiSpeedUp), Some(KeyCode::ArrowUp));
 }
 
@@ -850,9 +866,11 @@ fn a_file_from_before_the_shortcuts_reads_every_key_where_it_always_was() {
             assert_eq!(keys.shortcut_key(shortcut), Some(shortcut.default_key()), "{shortcut:?}");
         }
         assert_eq!(keys.control_key(ControlAction::CoverToggle), Some(KeyCode::Backslash));
-        for action in [ControlAction::LiftToggle, ControlAction::GreenUp, ControlAction::OffsetDown, ControlAction::AutoAdjustToggle] {
+        for action in [ControlAction::LiftToggle, ControlAction::GreenUp, ControlAction::KeepGreenToggle, ControlAction::AutoAdjustToggle] {
             assert_eq!(keys.control_key(action), None, "{action:?} ships with no key");
         }
+        assert_eq!(keys.control_key(ControlAction::OffsetDown), Some(KeyCode::Digit9));
+        assert_eq!(keys.control_key(ControlAction::OffsetUp), Some(KeyCode::Digit0));
     }
     assert!(older.shortcuts.is_empty(), "reading an older file stored a shortcut nobody moved");
     assert_eq!(older.control_key(ControlAction::HiSpeedUp), Some(KeyCode::Equal), "a control the file moved was put back");
@@ -1097,9 +1115,10 @@ fn clearing_leaves_a_control_unbound_and_a_lane_on_its_shipped_key() {
     assert_eq!(keys.lane_keys(mode)[2], (KeyCode::KeyX, 2));
     keys.bind(mode, control(ControlAction::CoverUp), None);
     assert_eq!(keys.control_key(ControlAction::CoverUp), None);
-    keys.set_scratch_reverse(mode, 7, KeyCode::ControlLeft);
     keys.bind(mode, Bindable::ScratchReverse(7), None);
-    assert!(keys.scratch_reverse_keys(mode).is_empty());
+    assert!(keys.scratch_reverse_keys(mode).is_empty(), "a reverse key that is taken away is left with none");
+    keys.restore(mode, Bindable::ScratchReverse(7));
+    assert_eq!(keys.scratch_reverse_keys(mode), vec![(KeyCode::ControlLeft, 7)]);
 }
 
 /// Restoring puts one row back on the key it ships with, and restoring everything puts every key
@@ -1154,4 +1173,258 @@ fn the_keys_of_a_typed_line_are_the_ones_that_type_and_edit() {
     for code in [KeyCode::F2, KeyCode::F12, KeyCode::Tab, KeyCode::Insert, KeyCode::ShiftLeft, KeyCode::ArrowUp, KeyCode::Enter, KeyCode::Escape] {
         assert!(!belongs_to_a_typed_line(code), "{code:?}");
     }
+}
+
+/// A key config as the application wrote it once the newer controls could be bound and before the
+/// judge offset shipped with keys: every control it knew, the two offset keys among them with none.
+const FILE_FROM_BEFORE_THE_OFFSET_KEYS: &str = r#"(
+    lanes: {"7K": ["Z", "S", "X", "D", "C", "F", "V", "LSHIFT"]},
+    scratch_reverse: {},
+    controls: (
+        hispeed_up: "UP", hispeed_down: "DOWN", cover_up: "RIGHT", cover_down: "LEFT",
+        lift_up: "RBRACKET", lift_down: "LBRACKET", hidden_up: "", hidden_down: "",
+        start: "A", select: "W", cover_toggle: "BACKSLASH", lift_toggle: "", hidden_toggle: "",
+        green_up: "", green_down: "", keep_green_toggle: "", offset_up: "", offset_down: "",
+        auto_adjust_toggle: "", fine: "",
+    ),
+    shortcuts: {},
+    pad: (),
+)"#;
+
+/// The same file with one line of its controls or its lanes put in place of another.
+fn offset_file_with(from: &str, to: &str) -> KeyConfig {
+    assert!(FILE_FROM_BEFORE_THE_OFFSET_KEYS.contains(from), "the file has no {from}");
+    ron::from_str(&FILE_FROM_BEFORE_THE_OFFSET_KEYS.replace(from, to)).expect("the edited file parses")
+}
+
+fn offset_keys(keys: &KeyConfig) -> (Option<KeyCode>, Option<KeyCode>) {
+    (keys.control_key(ControlAction::OffsetDown), keys.control_key(ControlAction::OffsetUp))
+}
+
+/// The judge offset ships on the two digits at the end of the number row, a millisecond down and a
+/// millisecond up, on keys nothing a run reads is shipped on in any mode. The switch that lets the
+/// offset adjust itself ships with no key.
+#[test]
+fn the_judge_offset_ships_on_two_keys_and_its_switch_on_none() {
+    let keys = KeyConfig::default();
+    assert_eq!(offset_keys(&keys), (Some(KeyCode::Digit9), Some(KeyCode::Digit0)));
+    assert_eq!((keys.control_token(ControlAction::OffsetDown), keys.control_token(ControlAction::OffsetUp)), ("9", "0"));
+    assert_eq!(keys.control_key(ControlAction::AutoAdjustToggle), None);
+    assert_eq!(keys.generation, crate::keyconfig::KEY_GENERATION);
+    for action in ControlAction::ALL {
+        if let Some((token, _)) = action.given_later() {
+            assert_eq!(keys.control_token(action), token, "{action:?} ships on another key than a file from before it is given");
+        }
+    }
+    for &mode in Mode::ALL {
+        assert!(collisions(&keys, mode).is_empty(), "{}", mode.name);
+        for code in [KeyCode::Digit9, KeyCode::Digit0] {
+            assert!(default_keys_for_mode(mode).iter().all(|(lane_key, _)| *lane_key != code), "{code:?} plays a lane of {}", mode.name);
+        }
+    }
+    for shortcut in Shortcut::ALL.into_iter().filter(|shortcut| shortcut.screen() == ShortcutScreen::Replay) {
+        assert!(![KeyCode::Digit9, KeyCode::Digit0].contains(&shortcut.default_key()), "{shortcut:?} ships on a key of the offset");
+    }
+}
+
+/// A key config written while the offset keys shipped with none holds them with none, and reads
+/// them on the keys they ship on now: there was nothing else that file could hold. So does a file
+/// from before the controls existed at all. Reading takes nothing from what the file does hold.
+#[test]
+fn a_key_config_from_before_the_offset_keys_reads_them_where_they_ship() {
+    let older: KeyConfig = ron::from_str(FILE_FROM_BEFORE_THE_OFFSET_KEYS).expect("a config from before the offset keys parses");
+    assert_eq!(older.generation, crate::keyconfig::FIRST_KEY_GENERATION, "a file that names no generation has taken none");
+    assert_eq!((older.control_token(ControlAction::OffsetDown), older.control_token(ControlAction::OffsetUp)), ("", ""));
+    assert_eq!(offset_keys(&older), (Some(KeyCode::Digit9), Some(KeyCode::Digit0)));
+    assert_eq!(older.control_key(ControlAction::AutoAdjustToggle), None);
+    assert_eq!(older.control_key(ControlAction::CoverToggle), Some(KeyCode::Backslash));
+    for &mode in Mode::ALL {
+        assert!(collisions(&older, mode).is_empty(), "{}", mode.name);
+    }
+
+    let oldest: KeyConfig = ron::from_str(FILE_FROM_BEFORE_SHORTCUTS).expect("a config from before the shortcuts parses");
+    assert_eq!(offset_keys(&oldest), (Some(KeyCode::Digit9), Some(KeyCode::Digit0)));
+    assert_eq!(oldest.control_key(ControlAction::HiSpeedUp), Some(KeyCode::Equal));
+}
+
+/// A key the file gives to something a run reads beside the offset keys stays with what the player
+/// gave it to, and the offset key that ships there is left with none: a lane of any mode, a reverse
+/// spin, another control, a key of a replay under analysis. The other offset key still ships.
+#[test]
+fn an_offset_key_does_not_take_a_key_the_player_gave_to_something_else() {
+    let lane = offset_file_with(r#""V", "LSHIFT"]"#, r#""9", "LSHIFT"]"#);
+    assert_eq!(offset_keys(&lane), (None, Some(KeyCode::Digit0)), "a lane on 9");
+    assert_eq!(lane.lane_keys(Mode::BEAT_7K)[6], (KeyCode::Digit9, 6));
+    assert!(collisions(&lane, Mode::BEAT_7K).is_empty());
+
+    let other_mode = offset_file_with(r#"lanes: {"#, r#"lanes: {"9K": ["Z", "S", "X", "D", "C", "F", "V", "G", "0"], "#);
+    assert_eq!(offset_keys(&other_mode), (Some(KeyCode::Digit9), None), "a lane of another mode on 0");
+
+    let reverse = offset_file_with("scratch_reverse: {}", r#"scratch_reverse: {"7K": ["", "", "", "", "", "", "", "0"]}"#);
+    assert_eq!(offset_keys(&reverse), (Some(KeyCode::Digit9), None), "a reverse spin on 0");
+
+    let control = offset_file_with(r#"lift_toggle: """#, r#"lift_toggle: "9""#);
+    assert_eq!(offset_keys(&control), (None, Some(KeyCode::Digit0)), "another control on 9");
+    assert_eq!(control.control_key(ControlAction::LiftToggle), Some(KeyCode::Digit9));
+
+    let replay = offset_file_with("shortcuts: {}", r#"shortcuts: {"replay_pause": "0", "search": "9"}"#);
+    assert_eq!(offset_keys(&replay), (Some(KeyCode::Digit9), None), "a key of a replay under analysis on 0, and a shortcut of the browser on 9");
+}
+
+/// A key the player gave an offset key in an older file is the key it keeps, and one the player
+/// swapped onto the other's shipped key leaves that other with none.
+#[test]
+fn an_offset_key_the_player_chose_in_an_older_file_is_kept() {
+    let chosen = offset_file_with(r#"offset_up: """#, r#"offset_up: "P""#);
+    assert_eq!(offset_keys(&chosen), (Some(KeyCode::Digit9), Some(KeyCode::KeyP)));
+    let swapped = offset_file_with(r#"offset_up: """#, r#"offset_up: "9""#);
+    assert_eq!(offset_keys(&swapped), (None, Some(KeyCode::Digit9)), "the key ships on 9, and the player put the other one there");
+}
+
+/// Once the configuration has taken the generation, a control left without a key stays without
+/// one: taking a key away in the key editor writes down what every newly shipped control was read
+/// from first, and what is written is what the file then says.
+#[test]
+fn an_offset_key_the_player_takes_away_stays_away() {
+    let mode = Mode::BEAT_7K;
+    let mut keys: KeyConfig = ron::from_str(FILE_FROM_BEFORE_THE_OFFSET_KEYS).expect("the file parses");
+    keys.bind(mode, control(ControlAction::OffsetUp), None);
+    assert_eq!(offset_keys(&keys), (Some(KeyCode::Digit9), None));
+    assert_eq!(keys.generation, crate::keyconfig::KEY_GENERATION);
+    assert_eq!(keys.control_token(ControlAction::OffsetDown), "9", "the key the other one was read from was not written down");
+
+    let written = ron::ser::to_string(&keys).expect("the key config is written");
+    let back: KeyConfig = ron::from_str(&written).expect("it reads back");
+    assert_eq!(back.generation, crate::keyconfig::KEY_GENERATION);
+    assert_eq!(offset_keys(&back), (Some(KeyCode::Digit9), None), "a key taken away came back with the file");
+
+    let mut fresh = KeyConfig::default();
+    fresh.bind(mode, control(ControlAction::OffsetDown), None);
+    let back: KeyConfig = ron::from_str(&ron::ser::to_string(&fresh).expect("the key config is written")).expect("it reads back");
+    assert_eq!(offset_keys(&back), (None, Some(KeyCode::Digit0)));
+}
+
+/// Giving something else a key in an older configuration settles the offset keys first, so the
+/// key editor refuses a key an offset key is on as it refuses any other, and a lane given a key
+/// afterwards takes it from nothing.
+#[test]
+fn changing_any_key_of_an_older_configuration_settles_the_offset_keys() {
+    let mode = Mode::BEAT_7K;
+    let mut keys: KeyConfig = ron::from_str(FILE_FROM_BEFORE_THE_OFFSET_KEYS).expect("the file parses");
+    assert_eq!(keys.clash(mode, Bindable::Lane(0), KeyCode::Digit9), Some(Clash::With(control(ControlAction::OffsetDown))));
+    keys.set_lane(mode, 0, KeyCode::KeyQ);
+    assert_eq!(keys.generation, crate::keyconfig::KEY_GENERATION);
+    assert_eq!((keys.control_token(ControlAction::OffsetDown), keys.control_token(ControlAction::OffsetUp)), ("9", "0"));
+
+    let mut given_away = offset_file_with(r#"lift_toggle: """#, r#"lift_toggle: "9""#);
+    given_away.set_control(ControlAction::LiftToggle, KeyCode::KeyU);
+    assert_eq!(offset_keys(&given_away), (None, Some(KeyCode::Digit0)), "an offset key that was left with none took the key the moment it was free");
+
+    let mut restored = offset_file_with(r#"lift_toggle: """#, r#"lift_toggle: "9""#);
+    restored.restore_everything();
+    assert_eq!(restored.bound_keys(mode), KeyConfig::default().bound_keys(mode));
+    assert_eq!(restored.generation, crate::keyconfig::KEY_GENERATION);
+}
+
+/// A key config from before the turntable's other direction shipped with a key holds none for it,
+/// as there was nothing else for it to hold, and reads it on the key it ships on now -- in every
+/// mode, and wherever the player put the turntable itself: a file that plays the scratch lane from
+/// a digit reads its other direction from the same Control key.
+#[test]
+fn a_key_config_from_before_the_reverse_keys_reads_them_where_they_ship() {
+    let older: KeyConfig = ron::from_str(FILE_FROM_BEFORE_THE_OFFSET_KEYS).expect("a config from before the reverse keys parses");
+    assert!(older.scratch_reverse.is_empty());
+    for &mode in Mode::ALL {
+        assert_eq!(older.scratch_reverse_keys(mode), default_reverse_keys_for_mode(mode), "{}", mode.name);
+        assert!(collisions(&older, mode).is_empty(), "{}", mode.name);
+    }
+
+    let moved = offset_file_with(r#""V", "LSHIFT"]"#, r#""V", "1"]"#);
+    assert_eq!(moved.lane_keys(Mode::BEAT_7K)[7], (KeyCode::Digit1, 7));
+    assert_eq!(moved.scratch_reverse_keys(Mode::BEAT_7K), vec![(KeyCode::ControlLeft, 7)], "a turntable moved to another key has no other direction");
+
+    let row_of_nothing = offset_file_with("scratch_reverse: {}", r#"scratch_reverse: {"7K": ["", "", "", "", "", "", "", ""]}"#);
+    assert_eq!(row_of_nothing.scratch_reverse_keys(Mode::BEAT_7K), vec![(KeyCode::ControlLeft, 7)]);
+
+    let second_generation = offset_file_with("shortcuts: {},", "shortcuts: {}, generation: 1,");
+    assert_eq!(second_generation.generation, crate::keyconfig::OFFSET_KEYS_GENERATION);
+    assert_eq!(second_generation.scratch_reverse_keys(Mode::BEAT_14K), default_reverse_keys_for_mode(Mode::BEAT_14K));
+}
+
+/// A reverse key the file holds is the one that is read, and a shipped one the file gives to
+/// something else a run reads stays with what the player gave it to: a lane, another control, a
+/// key of a replay under analysis. The reverse key of the other side still ships.
+#[test]
+fn a_reverse_key_does_not_take_a_key_the_player_gave_to_something_else() {
+    let chosen = offset_file_with("scratch_reverse: {}", r#"scratch_reverse: {"7K": ["", "", "", "", "", "", "", "Q"], "10K": ["", "", "", "", "", "RCTRL"]}"#);
+    assert_eq!(chosen.scratch_reverse_keys(Mode::BEAT_7K), vec![(KeyCode::KeyQ, 7)]);
+    assert_eq!(
+        chosen.scratch_reverse_keys(Mode::BEAT_10K),
+        vec![(KeyCode::ControlRight, 5)],
+        "a key the other side ships on, given to this side, was given twice"
+    );
+    assert_eq!(chosen.scratch_reverse_keys(Mode::BEAT_14K), default_reverse_keys_for_mode(Mode::BEAT_14K));
+
+    let lane = offset_file_with(r#""V", "LSHIFT"]"#, r#""LCTRL", "LSHIFT"]"#);
+    assert!(lane.scratch_reverse_keys(Mode::BEAT_7K).is_empty(), "a lane on the left Control key");
+    assert_eq!(lane.lane_keys(Mode::BEAT_7K)[6], (KeyCode::ControlLeft, 6));
+    assert_eq!(lane.scratch_reverse_keys(Mode::BEAT_14K), default_reverse_keys_for_mode(Mode::BEAT_14K), "a lane of one mode took the key from another");
+
+    let control = offset_file_with(r#"lift_toggle: """#, r#"lift_toggle: "RCTRL""#);
+    assert_eq!(control.scratch_reverse_keys(Mode::BEAT_14K), vec![(KeyCode::ControlLeft, 7)], "another control on the right Control key");
+    assert_eq!(control.control_key(ControlAction::LiftToggle), Some(KeyCode::ControlRight));
+
+    let fine = offset_file_with(r#"fine: """#, r#"fine: "LCTRL""#);
+    assert!(fine.scratch_reverse_keys(Mode::BEAT_7K).is_empty(), "the key held for the finer step on the left Control key");
+
+    let replay = offset_file_with("shortcuts: {}", r#"shortcuts: {"replay_pause": "LCTRL"}"#);
+    assert!(replay.scratch_reverse_keys(Mode::BEAT_5K).is_empty(), "a key of a replay under analysis on the left Control key");
+    for keys in [&lane, &control, &fine, &replay] {
+        for &mode in Mode::ALL {
+            assert!(collisions(keys, mode).is_empty(), "{}", mode.name);
+        }
+    }
+}
+
+/// Once the configuration has taken the generation a reverse key left with none stays with none:
+/// changing any key writes down what every reverse key was read from first, taking one away leaves
+/// it away through the file, and a key written down is refused to anything else as any key is.
+#[test]
+fn a_reverse_key_the_player_takes_away_stays_away() {
+    let mode = Mode::BEAT_14K;
+    let mut keys: KeyConfig = ron::from_str(FILE_FROM_BEFORE_THE_OFFSET_KEYS).expect("the file parses");
+    assert_eq!(keys.clash(mode, Bindable::Lane(0), KeyCode::ControlRight), Some(Clash::With(Bindable::ScratchReverse(15))));
+    keys.bind(mode, Bindable::ScratchReverse(7), None);
+    assert_eq!(keys.generation, crate::keyconfig::KEY_GENERATION);
+    assert_eq!(keys.scratch_reverse_keys(mode), vec![(KeyCode::ControlRight, 15)]);
+    assert_eq!(keys.scratch_reverse_token(mode, 15), "RCTRL", "the key the other side was read from was not written down");
+    assert_eq!(keys.scratch_reverse_token(Mode::BEAT_7K, 7), "LCTRL", "the key of another mode was not written down");
+
+    let back: KeyConfig = ron::from_str(&ron::ser::to_string(&keys).expect("the key config is written")).expect("it reads back");
+    assert_eq!(back.scratch_reverse_keys(mode), vec![(KeyCode::ControlRight, 15)], "a key taken away came back with the file");
+    assert_eq!(back.scratch_reverse_keys(Mode::BEAT_7K), vec![(KeyCode::ControlLeft, 7)]);
+
+    let mut given_away = offset_file_with(r#"lift_toggle: """#, r#"lift_toggle: "LCTRL""#);
+    given_away.set_control(ControlAction::LiftToggle, KeyCode::KeyU);
+    assert!(given_away.scratch_reverse_keys(Mode::BEAT_7K).is_empty(), "a reverse key that was left with none took the key the moment it was free");
+}
+
+/// The older file read from disk is not mistaken for a broken one and is not rewritten, and what
+/// the new version writes reads back the same.
+#[test]
+fn a_file_from_before_the_offset_keys_loads_from_disk_and_survives_being_written_again() {
+    let dir = std::env::temp_dir().join(format!("rbms_kc_before_offset_keys_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("keyconfig.ron");
+    std::fs::write(&path, FILE_FROM_BEFORE_THE_OFFSET_KEYS).unwrap();
+    let loaded = KeyConfig::load(&path);
+    assert!(!path.with_extension("ron.bak").exists(), "the older file was backed up as if it were broken");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), FILE_FROM_BEFORE_THE_OFFSET_KEYS, "the older file was rewritten on load");
+    assert_eq!(offset_keys(&loaded), (Some(KeyCode::Digit9), Some(KeyCode::Digit0)));
+
+    loaded.save(&path);
+    let again = KeyConfig::load(&path);
+    assert_eq!(again.bound_keys(Mode::BEAT_7K), loaded.bound_keys(Mode::BEAT_7K));
+    let _ = std::fs::remove_dir_all(&dir);
 }

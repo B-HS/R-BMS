@@ -16,7 +16,7 @@ use super::skinned_tests::{Browser, SLOT_ABOVE, SLOT_BELOW, slot_middle, starts_
 use super::tests::{app, entry, press, record};
 use crate::app_options::{TOGGLE_KEY, options_key};
 use crate::ir_ranking_view::panel_action;
-use crate::keyconfig::{ControlAction, KeyConfig, Shortcut, ShortcutGroup, ShortcutScreen, default_keys_for_mode};
+use crate::keyconfig::{Bindable, ControlAction, KeyConfig, Shortcut, ShortcutGroup, ShortcutScreen, default_keys_for_mode};
 use crate::pointer::PointerInput;
 use crate::stage::select::filter::filter_panel_rect;
 use crate::stage::select::overlay::ranking_panel_rect;
@@ -625,11 +625,15 @@ fn the_guide_names_the_keys_as_they_are_bound() {
     assert_eq!(keys_of(&seven, "PLAY IT BY ITSELF").as_deref(), Some("C"));
     assert_eq!(keys_of(&seven, "OPEN A FOLDER").as_deref(), Some("Z X C V"));
     assert_eq!(keys_of(&seven, "NEXT BAR").as_deref(), Some("LSHIFT"));
-    assert_eq!(keys_of(&seven, "PREVIOUS BAR").as_deref(), Some("-"), "no key spins the turntable the other way until one is bound");
+    assert_eq!(keys_of(&seven, "PREVIOUS BAR").as_deref(), Some("LCTRL"), "the turntable's other direction is not on the key it ships on");
 
-    shared.keyconfig.set_scratch_reverse(Mode::BEAT_7K, 7, KeyCode::ControlLeft);
+    shared.keyconfig.bind(Mode::BEAT_7K, Bindable::ScratchReverse(7), None);
     shared.active_reverse_keys = shared.keyconfig.scratch_reverse_keys(Mode::BEAT_7K);
-    assert_eq!(keys_of(&by_role(shared), "PREVIOUS BAR").as_deref(), Some("LCTRL"));
+    assert_eq!(keys_of(&by_role(shared), "PREVIOUS BAR").as_deref(), Some("-"), "a direction no key spins the turntable in is still named");
+
+    shared.keyconfig.set_scratch_reverse(Mode::BEAT_7K, 7, KeyCode::KeyQ);
+    shared.active_reverse_keys = shared.keyconfig.scratch_reverse_keys(Mode::BEAT_7K);
+    assert_eq!(keys_of(&by_role(shared), "PREVIOUS BAR").as_deref(), Some("Q"));
 
     shared.mode = Mode::POPN_9K;
     shared.active_keys = shared.keyconfig.lane_keys(Mode::POPN_9K);

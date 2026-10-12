@@ -323,6 +323,19 @@ pub fn default_keys_for_mode(mode: Mode) -> Vec<(KeyCode, usize)> {
     }
 }
 
+/// The key the other direction of each scratch lane of `mode` ships on, as `(key, lane)`: the
+/// Control key beside the Shift key the lane itself ships on, which is where the reference puts it
+/// (`PlayModeConfig.KeyboardConfig.setKeyAssign`). A turntable with one key is spun one way only,
+/// and so is a shade that is set by turning it with START held.
+pub fn default_reverse_keys_for_mode(mode: Mode) -> Vec<(KeyCode, usize)> {
+    let beside = |code: KeyCode| match code {
+        KeyCode::ShiftLeft => Some(KeyCode::ControlLeft),
+        KeyCode::ShiftRight => Some(KeyCode::ControlRight),
+        _ => None,
+    };
+    default_keys_for_mode(mode).into_iter().filter(|(_, lane)| mode.is_scratch(*lane)).filter_map(|(code, lane)| Some((beside(code)?, lane))).collect()
+}
+
 /// Stable, human-readable config-file key for a mode's lane bindings. Dispatches on the mode
 /// identity (name), not its lane count, so two modes can never collide on the same file key.
 pub fn mode_config_key(mode: Mode) -> &'static str {
@@ -481,6 +494,19 @@ impl ControlAction {
     pub fn yields_to_lanes(self) -> bool {
         matches!(self, ControlAction::Start | ControlAction::Select | ControlAction::CoverToggle)
     }
+
+    /// The key token a control was given after it had shipped without one, and the generation of
+    /// shipped keys ([`KEY_GENERATION`]) it was given it in, or `None` for a control that ships as
+    /// it first did. A key config that has taken an older generation was written while the control
+    /// shipped with no key, so its having none there is not the player's choice
+    /// ([`KeyConfig::control_key`]).
+    pub fn given_later(self) -> Option<(&'static str, u32)> {
+        match self {
+            ControlAction::OffsetUp => Some((DEFAULT_OFFSET_UP_KEY, OFFSET_KEYS_GENERATION)),
+            ControlAction::OffsetDown => Some((DEFAULT_OFFSET_DOWN_KEY, OFFSET_KEYS_GENERATION)),
+            _ => None,
+        }
+    }
 }
 
 /// User-configurable control key tokens.
@@ -504,14 +530,20 @@ pub struct ControlBinds {
     pub select: String,
     /// The lane cover on or off, which START pressed twice also does.
     pub cover_toggle: String,
-    /// The controls below ship unbound: each is a key a player asks for, not one a run needs.
+    /// The controls below ship unbound but for the two judge offset keys: each is a key a player
+    /// asks for, not one a run needs.
     pub lift_toggle: String,
     pub hidden_toggle: String,
     pub green_up: String,
     pub green_down: String,
     pub keep_green_toggle: String,
+    /// The judge offset a millisecond up and down. They shipped unbound until the offset became
+    /// where the notes are drawn, which a player sets while watching them; a key config from before
+    /// that takes the keys on the terms of [`KeyConfig::control_key`].
     pub offset_up: String,
     pub offset_down: String,
+    /// The switch that lets the offset adjust itself stays unbound: a stray press in a run would
+    /// leave the offset drifting with nothing but a caption to say so.
     pub auto_adjust_toggle: String,
     /// The key held for the finer step of the covers and of a held green number. It ships unbound
     /// because no one key is free on every shipped layout: left without a key, the modifier is a
@@ -538,8 +570,8 @@ impl Default for ControlBinds {
             green_up: String::new(),
             green_down: String::new(),
             keep_green_toggle: String::new(),
-            offset_up: String::new(),
-            offset_down: String::new(),
+            offset_up: DEFAULT_OFFSET_UP_KEY.into(),
+            offset_down: DEFAULT_OFFSET_DOWN_KEY.into(),
             auto_adjust_toggle: String::new(),
             fine: String::new(),
         }
@@ -555,6 +587,40 @@ pub const DEFAULT_SELECT_KEY: &str = "W";
 /// The key token the lane cover switch ships bound to: the key beside the two the lift ships on,
 /// and one no shipped layout plays a lane or reads a control from.
 pub const DEFAULT_COVER_TOGGLE_KEY: &str = "BACKSLASH";
+
+/// The key tokens the judge offset ships bound to, down and up: the two digits at the right end of
+/// the number row, beside the keys the lift and the lane cover switch ship on. No shipped layout
+/// plays a lane on a digit, no control and no key of a replay under analysis is read from one, and
+/// every keyboard has them.
+pub const DEFAULT_OFFSET_DOWN_KEY: &str = "9";
+pub const DEFAULT_OFFSET_UP_KEY: &str = "0";
+
+/// The generation of shipped keys a key config written before generations were counted has taken.
+pub const FIRST_KEY_GENERATION: u32 = 0;
+
+/// The generation the two judge offset keys first shipped bound in.
+pub const OFFSET_KEYS_GENERATION: u32 = 1;
+
+/// The generation the other direction of every scratch lane first shipped bound in
+/// ([`default_reverse_keys_for_mode`]).
+pub const REVERSE_KEYS_GENERATION: u32 = 2;
+
+/// The generation of shipped keys this build ships: how many times something that shipped without
+/// a key has been given one since a key config first held controls. A key config remembers the
+/// generation it has taken ([`KeyConfig::generation`]).
+pub const KEY_GENERATION: u32 = REVERSE_KEYS_GENERATION;
+
+/// What a key config file that does not say which generation it has taken is read as having taken.
+const fn first_key_generation() -> u32 {
+    FIRST_KEY_GENERATION
+}
+
+/// The reverse keys a key config file that holds none is read as holding: none, and not the ones a
+/// fresh configuration ships with. What such a file reads them from is settled against the keys it
+/// does hold ([`KeyConfig::scratch_reverse_keys`]).
+fn no_reverse_keys() -> BTreeMap<String, Vec<String>> {
+    BTreeMap::new()
+}
 
 impl ControlBinds {
     fn slot(&mut self, action: ControlAction) -> &mut String {
@@ -1056,8 +1122,9 @@ impl HeldKeys {
 /// built-in defaults.
 ///
 /// `scratch_reverse` is a second map rather than a second token inside `lanes` so a key config
-/// written before reverse spins existed keeps parsing byte for byte. It ships empty: a scratch lane
-/// with no reverse key behaves exactly as it did with one key.
+/// written before reverse spins existed keeps parsing byte for byte. It ships with the key each
+/// scratch lane's other direction is on ([`default_reverse_keys_for_mode`]); it shipped empty at
+/// first, and a file from then reads those keys by its `generation`.
 ///
 /// `pad` holds the same three things for a controller. It lives here rather than in the settings
 /// file because it is the same question the rest of this file answers — what plays which lane —
@@ -1069,16 +1136,25 @@ impl HeldKeys {
 /// entry reads none. A key config written before the shortcuts could be moved has no such map and
 /// so reads every one of them where it always was.
 ///
+/// `generation` is which generation of shipped keys the configuration has taken
+/// ([`KEY_GENERATION`]). A file written before a control or a reverse spin shipped with a key holds
+/// it with none, which was then the only thing it could hold; the generation is what tells that
+/// apart from a key the player took away. A file that does not hold it is one from before any were
+/// counted.
+///
 /// `held` is not configuration. It sits beside the bindings because a held key only means
 /// something read against them, and it is skipped by the file.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct KeyConfig {
     pub lanes: BTreeMap<String, Vec<String>>,
+    #[serde(default = "no_reverse_keys")]
     pub scratch_reverse: BTreeMap<String, Vec<String>>,
     pub controls: ControlBinds,
     pub shortcuts: BTreeMap<String, String>,
     pub pad: PadConfig,
+    #[serde(default = "first_key_generation")]
+    pub generation: u32,
     #[serde(skip)]
     pub held: HeldKeys,
 }
@@ -1086,6 +1162,7 @@ pub struct KeyConfig {
 impl Default for KeyConfig {
     fn default() -> Self {
         let mut lanes = BTreeMap::new();
+        let mut scratch_reverse = BTreeMap::new();
         for &mode in Mode::ALL {
             let mut row = vec![String::new(); mode.key];
             for (code, lane) in default_keys_for_mode(mode) {
@@ -1094,13 +1171,17 @@ impl Default for KeyConfig {
                 }
             }
             lanes.insert(mode_config_key(mode).to_string(), row);
+            for (code, lane) in default_reverse_keys_for_mode(mode) {
+                set_token(&mut scratch_reverse, mode, lane, key_name(code).to_string());
+            }
         }
         KeyConfig {
             lanes,
-            scratch_reverse: BTreeMap::new(),
+            scratch_reverse,
             controls: ControlBinds::default(),
             shortcuts: BTreeMap::new(),
             pad: PadConfig::default(),
+            generation: KEY_GENERATION,
             held: HeldKeys::default(),
         }
     }
@@ -1144,31 +1225,56 @@ impl KeyConfig {
         by_lane.into_iter().enumerate().filter_map(|(lane, code)| code.map(|c| (c, lane))).collect()
     }
 
-    /// The key each scratch lane of `mode` is spun backwards with, as `(key, lane)`. Only lanes the
-    /// user has actually bound appear: a scratch lane with no reverse key is spun one way only,
-    /// which is what every key config written before this existed asks for.
+    /// The key each scratch lane of `mode` is spun backwards with, as `(key, lane)`. A scratch lane
+    /// with no reverse key is left out, and is spun one way only.
+    ///
+    /// It is the key the configuration holds. A lane it holds none for reads the key its other
+    /// direction ships on when the configuration was written before that key shipped
+    /// ([`KeyConfig::reverse_key_given_later`]): the rule a control given a key later follows
+    /// ([`KeyConfig::control_key`]).
     pub fn scratch_reverse_keys(&self, mode: Mode) -> Vec<(KeyCode, usize)> {
-        let Some(row) = self.scratch_reverse.get(mode_config_key(mode)) else {
-            return Vec::new();
-        };
-        row.iter()
-            .enumerate()
-            .filter(|(lane, token)| *lane < mode.key && mode.is_scratch(*lane) && !token.is_empty())
-            .filter_map(|(lane, token)| match key_from_name(token) {
-                Some(code) => Some((code, lane)),
-                None => {
+        let row = self.scratch_reverse.get(mode_config_key(mode));
+        (0..mode.key)
+            .filter(|lane| mode.is_scratch(*lane))
+            .filter_map(|lane| {
+                let token = row.and_then(|row| row.get(lane)).map_or("", String::as_str);
+                if token.is_empty() {
+                    return self.reverse_key_given_later(mode, lane).map(|code| (code, lane));
+                }
+                let code = key_from_name(token);
+                if code.is_none() {
                     crate::notify::notify(
                         crate::notify::Level::Warn,
                         format!("keyconfig: mode {} scratch lane {lane} has unknown reverse key {token:?}; leaving it unbound", mode.name),
                     );
-                    None
                 }
+                code.map(|code| (code, lane))
             })
             .collect()
     }
 
+    /// The key a scratch lane the configuration holds no reverse key for is spun backwards with all
+    /// the same: the one its other direction ships on, when the configuration was written while it
+    /// shipped with none ([`REVERSE_KEYS_GENERATION`]) and gives that key to nothing else a run of
+    /// `mode` reads -- a lane or another reverse spin of that mode, a control, a key of a replay
+    /// under analysis. `None` once the configuration has taken the generation: a lane it then holds
+    /// no reverse key for is one the player took the key from.
+    ///
+    /// The lanes asked are the ones the file names. A lane it names no key for plays the key it
+    /// ships on, and no lane ships on a key a reverse spin ships on.
+    fn reverse_key_given_later(&self, mode: Mode, lane: usize) -> Option<KeyCode> {
+        if self.generation >= REVERSE_KEYS_GENERATION {
+            return None;
+        }
+        let (code, _) = default_reverse_keys_for_mode(mode).into_iter().find(|(_, shipped)| *shipped == lane)?;
+        let rows = [&self.lanes, &self.scratch_reverse].map(|rows| rows.get(mode_config_key(mode)));
+        let played = rows.into_iter().flatten().flatten().any(|token| key_from_name(token) == Some(code));
+        (!played && !self.reads_beside_the_lanes(None, code)).then_some(code)
+    }
+
     /// Rebind the reverse spin of one scratch lane; grows the mode's row to fit if needed.
     pub fn set_scratch_reverse(&mut self, mode: Mode, lane: usize, code: KeyCode) {
+        self.settle_shipped_keys();
         let row = self.scratch_reverse.entry(mode_config_key(mode).to_string()).or_insert_with(|| vec![String::new(); mode.key]);
         if row.len() <= lane {
             row.resize(lane + 1, String::new());
@@ -1176,18 +1282,81 @@ impl KeyConfig {
         row[lane] = key_name(code).to_string();
     }
 
-    /// Current reverse-spin key token shown for a mode's scratch lane (empty string if unbound).
-    #[cfg(test)]
-    pub fn scratch_reverse_token(&self, mode: Mode, lane: usize) -> String {
-        self.scratch_reverse.get(mode_config_key(mode)).and_then(|row| row.get(lane)).cloned().unwrap_or_default()
+    /// The reverse-spin key token the configuration holds for a mode's scratch lane (empty when it
+    /// holds none).
+    pub fn scratch_reverse_token(&self, mode: Mode, lane: usize) -> &str {
+        self.scratch_reverse.get(mode_config_key(mode)).and_then(|row| row.get(lane)).map_or("", String::as_str)
     }
 
+    /// The key a control is read from, or `None` for one that has none.
+    ///
+    /// It is the key the configuration holds, but for a control that shipped without a key when the
+    /// configuration was written and ships with one now ([`ControlAction::given_later`]). Such a
+    /// control reads the key it now ships on unless the player gave it another -- and unless the
+    /// configuration gives that very key to something a run reads beside it
+    /// ([`KeyConfig::takes_from`]), when it stays without a key, as a row of the key editor to fill
+    /// in: a key the file names is the player's choice. It is the rule a shortcut the file says
+    /// nothing of follows ([`KeyConfig::shortcut_key`]).
     pub fn control_key(&self, action: ControlAction) -> Option<KeyCode> {
-        key_from_name(self.controls.token(action))
+        let own = key_from_name(self.controls.token(action));
+        let Some((token, _)) = action.given_later().filter(|(_, since)| self.generation < *since) else {
+            return own;
+        };
+        let shipped = key_from_name(token);
+        match own {
+            Some(code) if Some(code) != shipped => Some(code),
+            _ => shipped.filter(|code| !self.takes_from(action, *code)),
+        }
+    }
+
+    /// Whether the configuration gives `code` to something a run reads beside `action`: a lane or a
+    /// reverse spin of any mode -- a control is read in every mode -- another control, or a key of a
+    /// replay under analysis. These are the keys the file itself names; the keys of two generations
+    /// are never the same key, so one given later is never taken by another that is.
+    fn takes_from(&self, action: ControlAction, code: KeyCode) -> bool {
+        let lane = self.lanes.values().chain(self.scratch_reverse.values()).flatten().any(|token| key_from_name(token) == Some(code));
+        lane || self.reads_beside_the_lanes(Some(action), code)
+    }
+
+    /// Whether the configuration gives `code` to something a run of any mode reads that is not a
+    /// lane: a control other than `asking`, or a key of a replay under analysis.
+    fn reads_beside_the_lanes(&self, asking: Option<ControlAction>, code: KeyCode) -> bool {
+        let names = |token: &str| key_from_name(token) == Some(code);
+        let control = ControlAction::ALL.into_iter().any(|other| Some(other) != asking && names(self.controls.token(other)));
+        let replay = Shortcut::ALL.into_iter().any(|shortcut| shortcut.screen() == ShortcutScreen::Replay && self.shortcut_key(shortcut) == Some(code));
+        control || replay
+    }
+
+    /// Write down the keys the controls and the reverse spins are read from and count the
+    /// configuration as having taken every generation of shipped keys. Whatever is about to change
+    /// a key does this first, so that what it changes is what the player sees: a control or a
+    /// reverse spin the player then leaves without a key stays without one, and a lane given a key
+    /// afterwards takes it from nothing behind the player's back.
+    fn settle_shipped_keys(&mut self) {
+        if self.generation >= KEY_GENERATION {
+            return;
+        }
+        for action in ControlAction::ALL.into_iter().filter(|action| action.given_later().is_some_and(|(_, since)| self.generation < since)) {
+            let token = self.control_key(action).map(key_name).unwrap_or_default();
+            *self.controls.slot(action) = token.to_string();
+        }
+        for &mode in Mode::ALL {
+            let given: Vec<(KeyCode, usize)> = default_reverse_keys_for_mode(mode)
+                .into_iter()
+                .filter_map(|(_, lane)| {
+                    self.scratch_reverse_token(mode, lane).is_empty().then(|| self.reverse_key_given_later(mode, lane)).flatten().map(|code| (code, lane))
+                })
+                .collect();
+            for (code, lane) in given {
+                set_token(&mut self.scratch_reverse, mode, lane, key_name(code).to_string());
+            }
+        }
+        self.generation = KEY_GENERATION;
     }
 
     /// Rebind a control action; the change is in memory until `save`.
     pub fn set_control(&mut self, action: ControlAction, code: KeyCode) {
+        self.settle_shipped_keys();
         *self.controls.slot(action) = key_name(code).to_string();
     }
 
@@ -1228,7 +1397,7 @@ impl KeyConfig {
     pub fn default_key_of(mode: Mode, target: Bindable) -> Option<KeyCode> {
         match target {
             Bindable::Lane(lane) => default_keys_for_mode(mode).into_iter().find(|(_, bound)| *bound == lane).map(|(code, _)| code),
-            Bindable::ScratchReverse(_) => None,
+            Bindable::ScratchReverse(lane) => default_reverse_keys_for_mode(mode).into_iter().find(|(_, bound)| *bound == lane).map(|(code, _)| code),
             Bindable::Control(action) => key_from_name(ControlBinds::default().token(action)),
             Bindable::Shortcut(shortcut) => Some(shortcut.default_key()),
         }
@@ -1240,6 +1409,7 @@ impl KeyConfig {
     /// shipped layout so that no column is ever unhittable -- so taking a lane's key away puts its
     /// shipped key back. A key the file has no word for is not bound at all.
     pub fn bind(&mut self, mode: Mode, target: Bindable, code: Option<KeyCode>) {
+        self.settle_shipped_keys();
         let token = match code {
             Some(code) if key_name(code) == UNNAMED_KEY => return,
             Some(code) => key_name(code).to_string(),
@@ -1313,11 +1483,13 @@ impl KeyConfig {
         self.scratch_reverse = shipped.scratch_reverse;
         self.controls = shipped.controls;
         self.shortcuts = shipped.shortcuts;
+        self.generation = shipped.generation;
         self.pad.restore_bindings();
     }
 
     /// Rebind one lane of a mode; grows the mode's row to fit if needed.
     pub fn set_lane(&mut self, mode: Mode, lane: usize, code: KeyCode) {
+        self.settle_shipped_keys();
         let row = self.lanes.entry(mode_config_key(mode).to_string()).or_insert_with(|| vec![String::new(); mode.key]);
         if row.len() <= lane {
             row.resize(lane + 1, String::new());

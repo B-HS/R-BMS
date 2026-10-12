@@ -651,3 +651,48 @@ fn the_editor_binds_and_reads_every_kind_of_row_the_same_way() {
         "START goes back to the pad's own"
     );
 }
+
+/// What one tick of a real turntable moves its axis by, a little under the most a tick can be
+/// (`BMControllerInputProcessor.java:81`).
+const HARDWARE_TICK: f32 = 0.00784;
+
+/// A turntable's travel is counted in ticks, forward up and backward down, from its first reading
+/// on, and taking the count empties it.
+#[test]
+fn a_turntable_counts_the_ticks_it_turned_since_they_were_last_taken() {
+    let cfg = PadConfig { analog_mode: AnalogMode::V2, ..cfg_with_lane(SCRATCH_LANE, PadBinding::AnalogScratch { axis: AXIS }) };
+    let mut mapper = PadMapper::new();
+    mapper.resolve(0, &cfg, seven_key(), &PadSnapshot::default());
+    assert_eq!(mapper.take_turn(), Some(0), "an axis the device has not reported has not turned");
+
+    let resting = 0.5;
+    let tick = HARDWARE_TICK;
+    mapper.resolve(MS, &cfg, seven_key(), &snapshot_axis(resting));
+    assert_eq!(mapper.take_turn(), Some(0), "where the disc stood when it was first read is not a turn");
+
+    mapper.resolve(2 * MS, &cfg, seven_key(), &snapshot_axis(resting + tick));
+    mapper.resolve(3 * MS, &cfg, seven_key(), &snapshot_axis(resting + tick * 3.0));
+    assert_eq!(mapper.take_turn(), Some(3), "three ticks forward over two frames");
+    assert_eq!(mapper.take_turn(), Some(0), "taking the count empties it");
+
+    mapper.resolve(4 * MS, &cfg, seven_key(), &snapshot_axis(resting + tick));
+    assert_eq!(mapper.take_turn(), Some(-2), "two ticks back");
+
+    mapper.resolve(5 * MS, &cfg, seven_key(), &snapshot_axis(resting + tick));
+    assert_eq!(mapper.take_turn(), Some(0), "a disc that stands still turns nothing");
+}
+
+/// A controller with no axis read as a turntable has no turn to count: its scratch is keys.
+#[test]
+fn a_controller_without_an_analog_turntable_has_no_turn() {
+    let mut mapper = PadMapper::new();
+    let keys = cfg_with_lane(SCRATCH_LANE, PadBinding::Button(BUTTON));
+    mapper.resolve(0, &keys, seven_key(), &snapshot_button(true));
+    assert_eq!(mapper.take_turn(), None);
+
+    let off = cfg_with_lane(SCRATCH_LANE, PadBinding::AnalogScratch { axis: AXIS });
+    assert_eq!(off.analog_mode, AnalogMode::Off);
+    mapper.resolve(MS, &off, seven_key(), &snapshot_axis(0.2));
+    mapper.resolve(2 * MS, &off, seven_key(), &snapshot_axis(0.4));
+    assert_eq!(mapper.take_turn(), None, "an axis read as two keys is not counted in ticks");
+}

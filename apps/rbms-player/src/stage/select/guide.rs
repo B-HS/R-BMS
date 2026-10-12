@@ -20,7 +20,7 @@ use winit::keyboard::KeyCode;
 use super::SelectState;
 use super::keys::{KeyLayout, SelectKey};
 pub(super) use crate::keyconfig::GUIDE_KEY;
-use crate::keyconfig::{ControlAction, Shortcut, ShortcutGroup, key_index_of, key_name};
+use crate::keyconfig::{ControlAction, SCRATCH_BACKWARD_INDEX, SCRATCH_FORWARD_INDEX, Shortcut, ShortcutGroup, key_index_of, key_name};
 use crate::{AppShared, CH, CW, Hot};
 
 /// What a key that is bound to nothing is called on the guide.
@@ -65,7 +65,7 @@ const CONTROL_PAIRS: [(ControlAction, ControlAction, &str); 6] = [
     (ControlAction::LiftDown, ControlAction::LiftUp, "LIFT DOWN / UP"),
     (ControlAction::HiddenDown, ControlAction::HiddenUp, "HIDDEN+ LESS / MORE"),
     (ControlAction::GreenDown, ControlAction::GreenUp, "GREEN NUMBER DOWN / UP"),
-    (ControlAction::OffsetDown, ControlAction::OffsetUp, "JUDGE OFFSET -1 / +1 MS"),
+    (ControlAction::OffsetDown, ControlAction::OffsetUp, "JUDGE OFFSET -1 / +1 MS (HOLD)"),
 ];
 
 /// The controls of a run the guide lists one to a line.
@@ -81,6 +81,10 @@ const CONTROL_SWITCHES: [(ControlAction, &str); 5] = [
 /// its own: the shift that plays no lane ([`AppShared::fine_pressed`]).
 const FINE_DOES: &str = "HOLD: FINE STEP";
 const FINE_UNSET_KEY: &str = "SHIFT (NO LANE)";
+
+/// What the line that names the turntable's two keys says of them: the first brings a lane cover
+/// and a lifted line down and the second takes them up, which is what they do with START held.
+const TURNTABLE_DOES: &str = "THE TURNTABLE: DOWN / UP";
 
 /// The panel's width and the room it keeps round what it lists.
 const GUIDE_W: f32 = 1232.0;
@@ -252,13 +256,18 @@ pub(super) fn play_rows(shared: &AppShared) -> Vec<GuideRow> {
 }
 
 /// The lines of what START and SELECT do in a run with the keys held beside them
-/// (`ControlInputProcessor.input`), named by the keys they are bound to now.
+/// (`ControlInputProcessor.input`, and the turntable with both, which is this player's own), named
+/// by the keys they are bound to now. The first line names the keys of the keyboard the lines
+/// after it call the turntable, and which way each moves a shade.
 pub(super) fn combination_rows(shared: &AppShared) -> Vec<GuideRow> {
     let start = control_label(shared, ControlAction::Start);
     let select = control_label(shared, ControlAction::Select);
+    let turntable = format!("{} {}", index_label(shared, SCRATCH_FORWARD_INDEX), index_label(shared, SCRATCH_BACKWARD_INDEX));
     vec![
+        GuideRow::new(turntable, TURNTABLE_DOES),
         GuideRow::new(format!("{start} + KEYS"), "HI-SPEED"),
-        GuideRow::new(format!("{start} + TURNTABLE"), "LANE COVER"),
+        GuideRow::new(format!("{start} + TURNTABLE"), "LANE COVER BY 1, GREEN KEPT"),
+        GuideRow::new(format!("{start}+{select} + TURNTABLE"), "LIFT BY 1"),
         GuideRow::new(format!("{start} TWICE"), "LANE COVER ON/OFF"),
         GuideRow::new(format!("{select} + KEYS"), "GREEN NUMBER BY 1 MS"),
         GuideRow::new(format!("{start} + {select}"), "LIFT OR HIDDEN+ TURNS"),

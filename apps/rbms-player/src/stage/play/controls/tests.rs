@@ -137,38 +137,36 @@ fn start_pressed_twice_quickly_switches_the_lane_cover() {
     assert!(!app.shared.config.play.enable_cover, "the press that came too late was not the first of a new pair");
 }
 
-/// START and the turntable moves the lane cover a fine step every fifty milliseconds, one way for
-/// each of its keys, and never by the coarser step: the reference forgets since when the turntable
-/// was held on every frame one of its two keys is up.
+/// START and the turntable moves the lane cover one of the white number a press, one way for each
+/// of its keys, whatever the COVER FINE STEP row holds: that row is the step of the bound keys with
+/// the modifier down. What a hold does is in `turn_tests.rs`.
 #[test]
-fn start_and_the_turntable_moves_the_cover_a_fine_step_at_a_time() {
+fn start_and_the_turntable_moves_the_cover_one_of_the_white_number() {
+    const WHITE_NUMBER_STEP: f32 = 0.001;
     let mut app = app("cover");
+    app.shared.config.play.lanecover_step_fine = rbms_config::LANE_SHADE_FINE_STEP_MAX;
     let mut state = state();
-    let fine = app.shared.config.play.lanecover_step_fine;
     let (up, down) = (lane_key(&app, TURNTABLE_LANE, ScratchDir::Forward), lane_key(&app, TURNTABLE_LANE, ScratchDir::Backward));
     let mut now = Instant::now();
     hold(&mut app, START_KEY, true);
     state.held_controls(&mut app.shared, now);
 
+    for presses in 1..=3 {
+        now = tap(&mut state, &mut app, up, now + FRAME);
+        let raised = app.shared.config.play.cover;
+        assert!((raised - WHITE_NUMBER_STEP * presses as f32).abs() < SHARE_TOLERANCE, "the cover stands at {raised} after {presses} presses");
+    }
     hold(&mut app, up, true);
-    let steps = 14;
-    for _ in 0..steps {
+    for _ in 0..4 {
         now += PAST_A_STEP;
         state.held_controls(&mut app.shared, now);
     }
-    assert!(PAST_A_STEP * steps > COARSE_STEP_AFTER, "the turntable is held for longer than the coarse step waits");
-    let raised = app.shared.config.play.cover;
-    assert!((raised - fine * steps as f32).abs() < SHARE_TOLERANCE, "the cover moved {raised} in {steps} fine steps of {fine}");
-
-    now += FRAME;
-    state.held_controls(&mut app.shared, now);
-    assert!((app.shared.config.play.cover - raised).abs() < SHARE_TOLERANCE, "the cover moved again before fifty milliseconds were up");
+    let held = app.shared.config.play.cover;
+    assert!((held - WHITE_NUMBER_STEP * 4.0).abs() < SHARE_TOLERANCE, "a key down for a quarter of a second repeated: {held}");
 
     hold(&mut app, up, false);
-    hold(&mut app, down, true);
-    now += PAST_A_STEP;
-    state.held_controls(&mut app.shared, now);
-    assert!((app.shared.config.play.cover - (raised - fine)).abs() < SHARE_TOLERANCE, "the turntable's other key did not move the cover back");
+    tap(&mut state, &mut app, down, now + FRAME);
+    assert!((app.shared.config.play.cover - WHITE_NUMBER_STEP * 3.0).abs() < SHARE_TOLERANCE, "the turntable's other key did not move the cover back");
 }
 
 /// The cover the turntable and the wheel move is the lane cover while it is on or nothing else is,

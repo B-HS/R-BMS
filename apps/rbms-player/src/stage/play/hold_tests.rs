@@ -86,7 +86,7 @@ fn holding() -> Config {
 }
 
 /// Put the play screen up for `state`, the way the application does when a chart is entered.
-fn enter(state: &mut PlayState, app: &mut App) {
+pub(super) fn enter(state: &mut PlayState, app: &mut App) {
     state.on_enter(&mut FrameCtx { shared: &mut app.shared, now: Instant::now(), dt: 0.0 });
 }
 
@@ -108,11 +108,11 @@ fn number(state: &mut PlayState, app: &App, id: i32) -> i32 {
 }
 
 /// The green number on show (`IntegerPropertyFactory.duration_green`).
-fn green(state: &mut PlayState, app: &App) -> i32 {
+pub(super) fn green(state: &mut PlayState, app: &App) -> i32 {
     number(state, app, NUMBER_DURATION_GREEN)
 }
 
-fn hispeed(app: &App) -> f64 {
+pub(super) fn hispeed(app: &App) -> f64 {
     app.shared.config.play.hispeed
 }
 
