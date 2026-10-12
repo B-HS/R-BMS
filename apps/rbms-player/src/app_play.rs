@@ -309,7 +309,6 @@ impl AppShared {
                 if !rp.md5.is_empty() && rp.md5 != decoded.md5 {
                     notify(Level::Warn, format!("warning: chart md5 mismatch (replay {} vs file {}); replay may desync", rp.md5, decoded.md5));
                 }
-                self.config.judge.offset_ms = rp.offset_ms;
                 self.config.play.scratch_auto = rp.scratch_auto;
                 self.config.play.gauge = gauge_from_name(&rp.gauge);
                 let random = NoteOption::from_str(&rp.random);

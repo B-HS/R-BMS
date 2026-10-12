@@ -17,7 +17,17 @@ use crate::window::{WindowMode, WindowResolution};
 
 /// Schema version this build writes. A file without a `schema_version` field is
 /// [`LEGACY_SCHEMA_VERSION`] and is migrated on load.
-pub const CURRENT_SCHEMA_VERSION: u32 = 4;
+pub const CURRENT_SCHEMA_VERSION: u32 = 5;
+
+/// Last schema whose JUDGE OFFSET was added to the instant an input was judged at: a positive
+/// offset judged every input that much later, for a player who presses early, and left the notes
+/// where the sound is. From the next schema on the offset is the reference's `judgetiming`
+/// (`LaneRenderer.java:300-301`): how far ahead of the song the notes are drawn, with the
+/// judgement left where the sound is. The two are the same distance between the note a player
+/// sees on the line and the input that is on time, counted from opposite ends, so a value read
+/// from such a schema is turned round once ([`Config::sanitise`]) and the notes and the judgement
+/// stay as far apart as the player had set them.
+pub const INPUT_JUDGE_OFFSET_SCHEMA_VERSION: u32 = 4;
 
 /// Last schema written while the player shipped a skin bundle of its own: a DISPLAY preset named
 /// after it, the documents a first run selected out of its folder, the choices shared by every
@@ -143,10 +153,10 @@ pub const PREVIEW_FADE_STEP_MS: u32 = 50;
 /// Hover-preview fade a fresh install holds.
 pub const DEFAULT_PREVIEW_FADE_MS: u32 = 200;
 
-/// Earliest judge offset the JUDGE OFFSET row can hold.
+/// Lowest judge offset the JUDGE OFFSET row can hold: the notes drawn this far behind the song.
 pub const JUDGE_OFFSET_MIN_MS: i32 = -200;
 
-/// Latest judge offset the JUDGE OFFSET row can hold.
+/// Highest judge offset the JUDGE OFFSET row can hold: the notes drawn this far ahead of the song.
 pub const JUDGE_OFFSET_MAX_MS: i32 = 200;
 
 /// One left/right step on the JUDGE OFFSET row: a millisecond, which is the step the browser's own
@@ -405,7 +415,16 @@ impl Config {
     /// Pull every value back into the range its settings row can produce and stamp the current
     /// schema version. Applied to whatever comes off disk or down from an account, so a
     /// hand-edited or foreign file can never drive the engine outside its supported ranges.
+    ///
+    /// The stamp is what makes a document one of this schema's, so the one value whose meaning
+    /// the schema changed is carried over here, off the version the document still states: a
+    /// JUDGE OFFSET from a schema that added it to the input
+    /// ([`INPUT_JUDGE_OFFSET_SCHEMA_VERSION`]) is turned round. Every reader ends here, the file
+    /// loader and an account download alike, and a document already stamped is left as it is.
     pub fn sanitise(&mut self) {
+        if self.schema_version <= INPUT_JUDGE_OFFSET_SCHEMA_VERSION {
+            self.judge.offset_ms = JudgeOptions::offset_drawn_ahead_for(self.judge.offset_ms);
+        }
         self.schema_version = CURRENT_SCHEMA_VERSION;
         self.play.hispeed = self.play.hispeed.clamp(HISPEED_MIN, HISPEED_MAX);
         self.play.hispeed_step = self.play.hispeed_step.clamp(HISPEED_STEP_MIN, HISPEED_STEP_MAX);
@@ -521,7 +540,13 @@ impl Default for PlayOptions {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct JudgeOptions {
+    /// JUDGE OFFSET: how many milliseconds ahead of the song the notes are drawn
+    /// (`PlayerConfig.judgetiming`). At +10 a note is on the judge line 10 ms before its sound and
+    /// before the instant a press of it is on time; neither of those moves. A player who presses
+    /// late raises it, one who presses early lowers it.
     pub offset_ms: i32,
+    /// AUTO ADJUST: let every input of a run played by hand move `offset_ms`
+    /// (`PlayerConfig.notesDisplayTimingAutoAdjust`).
     pub auto_offset: bool,
     /// `[PGREAT, GREAT, GOOD]` JUDGE WIDTH percentages for key lanes.
     pub judge_rate_key: [i32; JUDGE_WIDTH_TIER_COUNT],
@@ -564,6 +589,13 @@ impl Default for JudgeOptions {
 }
 
 impl JudgeOptions {
+    /// The JUDGE OFFSET that leaves the notes and the judgement as far apart as an offset of
+    /// `input_judged_later_ms` did on a schema that added it to the instant an input was judged at
+    /// ([`INPUT_JUDGE_OFFSET_SCHEMA_VERSION`]): the same distance the other way.
+    pub(crate) const fn offset_drawn_ahead_for(input_judged_later_ms: i32) -> i32 {
+        input_judged_later_ms.saturating_neg()
+    }
+
     /// Pull every value back into the range its row can produce.
     pub fn sanitise(&mut self) {
         self.offset_ms = self.offset_ms.clamp(JUDGE_OFFSET_MIN_MS, JUDGE_OFFSET_MAX_MS);

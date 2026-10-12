@@ -455,11 +455,13 @@ impl AppShared {
         }
     }
 
-    /// Move the judge offset by `by_ms`, inside the range its settings row declares.
+    /// Move the judge offset by `by_ms`, inside the range its settings row declares: the notes are
+    /// drawn that much further ahead of the song, which is the way to move them for a player who
+    /// presses late.
     ///
-    /// Only a run the player is playing moves it. A replay is judged at the offsets it was recorded
-    /// with and an autoplay hits nothing early or late, so on either the key would only leave the
-    /// player with an offset they never played at.
+    /// Only a run the player is playing moves it. A replay and an autoplay take no key of the
+    /// player's, so on either the key would only leave the player with an offset they never played
+    /// at.
     fn nudge_judge_offset(&mut self, by_ms: i32) -> ControlEffect {
         if !self.run_plays_itself() && self.replay.is_none() {
             let offset = &mut self.config.judge.offset_ms;
@@ -537,6 +539,7 @@ impl AppShared {
         self.save_settings();
     }
 
+    /// The judge offset in microseconds: how far ahead of the song the notes are drawn.
     pub(crate) fn offset_us(&self) -> i64 {
         self.config.judge.offset_ms as i64 * 1000
     }

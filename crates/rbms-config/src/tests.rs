@@ -145,8 +145,8 @@ fn a_single_judge_width_document_spreads_over_every_tier() {
     assert_eq!(from, Some(SINGLE_JUDGE_WIDTH_SCHEMA_VERSION));
     assert_eq!(config.judge.judge_rate_key, [80; JUDGE_WIDTH_TIER_COUNT]);
     assert_eq!(config.judge.judge_rate_scratch, [80; JUDGE_WIDTH_TIER_COUNT]);
-    assert_eq!(config.judge.offset_ms, -20, "the rest of the group comes across untouched");
-    assert!(config.judge.auto_offset);
+    assert_eq!(config.judge.offset_ms, 20, "the offset is carried over to the end it is counted from now");
+    assert!(config.judge.auto_offset, "the rest of the group comes across untouched");
     assert_eq!(config.judge.longnote_margin_rate, LN_MARGIN_DEFAULT_PERCENT, "a row that did not exist takes its shipped value");
     assert_eq!(config.schema_version, CURRENT_SCHEMA_VERSION);
 }

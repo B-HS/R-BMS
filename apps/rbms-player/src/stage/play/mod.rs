@@ -31,9 +31,11 @@
 //!   stands, and is put back there whenever the cover moves ([`PlayState::hold_green_number`]). It
 //!   is the reference's own rule for a speed fixed to a tempo (`LaneRenderer.resetHispeed`); what is
 //!   this player's is that the row can be off, when the speed itself is what the settings hold.
-//! - **A judge offset that adjusts itself** (the AUTO ADJUST row) moves as each input of a run
-//!   played by hand lands, and what it has moved to is the settings' own value from that moment
-//!   ([`PlayState::keep_adjusted_offset`]).
+//! - **The judge offset** (the JUDGE OFFSET row) is the reference's: the note field is drawn that
+//!   far ahead of the song, on a skin's field and on the built-in one alike
+//!   ([`PlayState::field_lead_us`]), and no input and no sound is moved by it. With the AUTO ADJUST
+//!   row on it moves as each input of a run played by hand lands, and what it has moved to is the
+//!   settings' own value from that moment ([`PlayState::keep_adjusted_offset`]).
 //! - **Leaving** is by Escape, on the terms of the ESCAPE setting, as it always was. While a run is
 //!   closing Escape skips what is left of the closing instead. A failed run played by hand starts
 //!   again at once on START or SELECT, as in the reference.
@@ -50,6 +52,10 @@ mod skin;
 pub(crate) mod skin_preview;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod timing_capture_tests;
+#[cfg(test)]
+mod timing_tests;
 mod trace;
 
 use crate::app_input::{ControlContext, ControlEffect, FixedSpeed, green_for_hispeed};
@@ -487,9 +493,9 @@ impl PlayState {
         }
     }
 
-    /// Hand the running session the judge settings as they stand right now, so a JUDGE OFFSET or
-    /// AUTO ADJUST changed mid-song takes effect on the very next input rather than on the next
-    /// chart.
+    /// Hand the running session the judge settings as they stand right now, so an offset that
+    /// adjusts itself goes on from a JUDGE OFFSET changed mid-song, and an AUTO ADJUST switched
+    /// mid-song takes effect on the very next input rather than on the next chart.
     fn sync_judge_settings(&mut self, shared: &AppShared) {
         self.session.set_judge_offset_us(shared.offset_us());
         self.session.set_auto_calibration(shared.config.judge.auto_offset);
@@ -498,11 +504,31 @@ impl PlayState {
     /// Keep the judge offset an input of the player's just moved, while the offset adjusts itself.
     ///
     /// The reference writes each move straight into the player's configuration
-    /// (`JudgeManager.java:701`), so it stands however the run ends: finished, failed or abandoned.
+    /// (`JudgeManager.java:701`), so it stands however the run ends: finished, failed or abandoned,
+    /// and the note field, which reads the configuration, is drawn by it from the next frame.
     /// Here the configuration is written out on each of those ways out of the screen, and what it
     /// holds by then is what the last input left.
     fn keep_adjusted_offset(&mut self, shared: &mut AppShared) {
         shared.config.judge.offset_ms = self.session.judge_offset_ms();
+    }
+
+    /// How far ahead of the song the note field is drawn, in microseconds of the chart: the judge
+    /// offset, which is the reference's `judgetiming` and is added to the time its field is drawn
+    /// at and to nothing else (`LaneRenderer.java:300-301`). At +10 ms a note is on the judge line
+    /// 10 ms before its sound and before the instant a press of it is on time.
+    ///
+    /// The offset is a length of the player's own time. A practice slice played slower or faster
+    /// goes through less or more of the chart in it, which is what the reference comes to by
+    /// stretching the chart instead of the clock (`BMSModelUtils.changeFrequency`).
+    fn field_lead_us(&self, shared: &AppShared) -> i64 {
+        let clock = self.practice_clock();
+        clock.chart_time_us(shared.offset_us()) - clock.chart_time_us(0)
+    }
+
+    /// Where the chart stands for the built-in field, which is drawn off the song clock: the song
+    /// position of this frame and the judge offset ahead of it.
+    fn built_in_field_us(&self, shared: &AppShared) -> i64 {
+        self.song_us + self.field_lead_us(shared)
     }
 
     /// Whether the run is over and the result is due: the song ended, or the gauge emptied under a
@@ -801,20 +827,17 @@ impl PlayState {
         reached.checked_sub(1).map_or((self.session.model().init_bpm, 1.0), |last| (timelines[last].bpm, timelines[last].scroll))
     }
 
-    /// Where the chart stands for the frame being drawn, in microseconds, as the reference's note
-    /// field works it out (`LaneRenderer.java:300-301`): what the play timer has run for, or the
-    /// chart preview's timer while only that is on, in whole milliseconds. Before either is on the
-    /// chart stands at its beginning, which for a practice slice is where the slice begins.
+    /// How far the chart has played by the frame being drawn, in microseconds: what the play timer
+    /// has run for, or the chart preview's timer while only that is on, in whole milliseconds.
+    /// Before either is on the chart stands at its beginning, which for a practice slice is where
+    /// the slice begins.
     ///
     /// The reference cuts the clock and the timer to milliseconds apart and takes one from the
     /// other, which is one steady step for it because its play timer stands still. The play timer
     /// here is set from the song clock every frame, so the two would be cut at places that drift
     /// against each other and the field would shake by up to a millisecond either way. What the
     /// timer has run for is cut once instead, which is the same step without the shake.
-    ///
-    /// The reference adds the player's judge timing here. This player applies that offset to the
-    /// input instead, so the field is drawn where the sound is.
-    fn drawn_chart_us(&self, shared: &AppShared) -> i64 {
+    fn played_chart_us(&self, shared: &AppShared) -> i64 {
         let timers = &shared.skin_timers;
         let now_us = shared.skin_now_us();
         let since = |timer| whole_ms(now_us - timers.value_us(timer)) * MICROS_PER_MILLI;
@@ -825,6 +848,18 @@ impl PlayState {
         } else {
             self.practice_clock().chart_time_us(0)
         }
+    }
+
+    /// Where the chart stands for the note field of the frame being drawn, in microseconds, as the
+    /// reference's field works it out (`LaneRenderer.java:300-301`): how far the chart has played
+    /// ([`PlayState::played_chart_us`]) and the judge offset ahead of it
+    /// ([`PlayState::field_lead_us`]). The tempo a skin is told is the one in force there, as it is
+    /// in the reference, whose field is what works its `nowbpm` out.
+    ///
+    /// Nothing else of the frame is ahead of the song. The background in particular changes when
+    /// the play timer reaches the change (`SkinBGA.java:42-44`).
+    fn drawn_chart_us(&self, shared: &AppShared) -> i64 {
+        self.played_chart_us(shared) + self.field_lead_us(shared)
     }
 
     /// How much of the chart's files are in, from nothing (0) to everything (1).
@@ -933,7 +968,7 @@ impl PlayState {
             canvas.release_bga_textures(&mut self.background_textures);
             return BgaFrame::blank(BgaExpand::default());
         }
-        let played_ms = if shared.skin_timers.is_on(timer_id::PLAY) { whole_ms(self.drawn_chart_us(shared)) } else { BEFORE_PLAY_MS };
+        let played_ms = if shared.skin_timers.is_on(timer_id::PLAY) { whole_ms(self.played_chart_us(shared)) } else { BEFORE_PLAY_MS };
         self.background.prepare(played_ms);
         canvas.bga_frame(&mut self.background_textures, self.background.pick(), BgaExpand::default(), &self.bga)
     }
@@ -1407,9 +1442,10 @@ impl StageHandler for PlayState {
             _ => canvas.clear_bga(),
         }
         let hispeed = ctx.shared.config.play.hispeed;
+        let field_us = self.built_in_field_us(ctx.shared);
         let (segment_bpm, scroll) = {
             let tls = &play.model().timelines;
-            let seg = tls.binary_search_by(|t| t.time_us.cmp(&song)).unwrap_or_else(|i| i.saturating_sub(1));
+            let seg = tls.binary_search_by(|t| t.time_us.cmp(&field_us)).unwrap_or_else(|i| i.saturating_sub(1));
             tls.get(seg).map(|t| (t.bpm, t.scroll)).unwrap_or((play.model().init_bpm, 1.0))
         };
         if has_document {
@@ -1468,7 +1504,7 @@ impl StageHandler for PlayState {
         };
         let playfield = PlayfieldView {
             timelines: &self.session.model().timelines,
-            microtime: song,
+            microtime: field_us,
             hispeed,
             beam_on: self.session.beam_on(),
             beam_off: self.session.beam_off(),

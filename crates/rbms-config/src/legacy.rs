@@ -130,7 +130,8 @@ impl From<LegacyV0> for Config {
                 ..PlayOptions::default()
             },
             judge: {
-                let mut judge = JudgeOptions { offset_ms: old.offset_ms, auto_offset: old.auto_offset, ..JudgeOptions::default() };
+                let offset_ms = JudgeOptions::offset_drawn_ahead_for(old.offset_ms);
+                let mut judge = JudgeOptions { offset_ms, auto_offset: old.auto_offset, ..JudgeOptions::default() };
                 judge.spread_uniform_judge_rate(old.judge_rate);
                 judge
             },

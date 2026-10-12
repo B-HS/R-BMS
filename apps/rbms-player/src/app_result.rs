@@ -25,6 +25,11 @@ const RESULT_TITLE_CHARS: usize = 48;
 /// Leading md5 characters a saved replay's filename is stemmed to.
 const REPLAY_STEM_MD5_CHARS: usize = 8;
 
+/// What a saved replay states of how far from its inputs the run was judged, in milliseconds:
+/// nothing. An input is judged at the instant it arrived, and the judge offset the run was played
+/// at moved only where its notes were drawn, which playback leaves to whoever watches it.
+const REPLAY_JUDGED_WHERE_PLAYED_MS: i32 = 0;
+
 /// How many tempo changes the result screen carries into a document's BPM graph. A chart that keeps
 /// changing tempo says as much as the graph can show long before this, and the screen holds the list
 /// for as long as it is on.
@@ -94,7 +99,6 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
         && saves_replay(assist)
         && !play.recorded_events().is_empty();
     let recorded_events = save_replay.then(|| play.recorded_events().to_vec());
-    let recorded_offset_steps = play.recorded_offset_steps();
     let instrumentation = play.instrumentation();
     let record = play.record();
     let tempo = tempo_points(&play.model().timelines);
@@ -222,7 +226,7 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
             mode: shared.mode.name.to_string(),
             random: shared.config.play.random.label().to_string(),
             seed: chart.seed,
-            offset_ms: shared.config.judge.offset_ms,
+            offset_ms: REPLAY_JUDGED_WHERE_PLAYED_MS,
             scratch_auto: shared.config.play.scratch_auto,
             gauge: gauge_token(shared.config.play.gauge).to_string(),
             judge: ReplayJudge {
@@ -234,7 +238,7 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
                 gauge_set: gauge_set_token(judge_setup.gauge_set).to_string(),
                 gauge_auto_shift: gauge_auto_shift_token(judge_setup.gauge_auto_shift).to_string(),
                 bottom_shiftable_gauge: gauge_token(judge_setup.bottom_shiftable_gauge).to_string(),
-                offset_steps: recorded_offset_steps,
+                offset_steps: Vec::new(),
             },
             events,
         };

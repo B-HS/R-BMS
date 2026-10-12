@@ -48,7 +48,7 @@ fn chart(bpm: u32) -> String {
     format!("#PLAYER 1\n#TITLE t\n#BPM {bpm}\n#WAV01 a.wav\n#00111:0101\n")
 }
 
-fn run_of(chart: &str, options: SessionOptions) -> PlayState {
+pub(super) fn run_of(chart: &str, options: SessionOptions) -> PlayState {
     let src = rbms_parser::parse_with(chart.as_bytes(), Default::default());
     let model = rbms_chart::to_model(&src, rbms_chart::detect_mode(&src, "t.bms"));
     PlayState::new(PlaySession::new(model, options), std::collections::HashMap::new(), 0, SCORE_LN_MODE_FROM_CHART.to_string())
@@ -58,14 +58,14 @@ fn run_at(bpm: u32) -> PlayState {
     run_of(&chart(bpm), SessionOptions::default())
 }
 
-/// A run of the chart at [`SLOW_BPM`] set up the way the application sets one up for `app`: judged
-/// at the offset the settings hold.
+/// A run of the chart at [`SLOW_BPM`] set up the way the application sets one up for `app`: at the
+/// judge offset the settings hold.
 fn run_judged_for(app: &App) -> PlayState {
     run_of(&chart(SLOW_BPM), SessionOptions { judge_offset_us: app.shared.offset_us(), ..SessionOptions::default() })
 }
 
 /// An app with no window, no audio and no server, played by hand on `config`.
-fn app_on(tag: &str, mut config: Config) -> App {
+pub(super) fn app_on(tag: &str, mut config: Config) -> App {
     let dir = std::env::temp_dir().join(format!("rbms-play-hold-tests-{tag}-{}-{:?}", std::process::id(), std::thread::current().id()));
     let _ = std::fs::remove_dir_all(&dir);
     config.play.autoplay = false;
@@ -368,13 +368,13 @@ fn a_course_that_locks_the_speed_holds_no_green_number() {
 }
 
 /// When this chart's notes fall.
-fn note_times(state: &PlayState) -> Vec<i64> {
+pub(super) fn note_times(state: &PlayState) -> Vec<i64> {
     state.session.model().timelines.iter().filter(|line| line.notes.iter().flatten().next().is_some()).map(|line| line.time_us).collect()
 }
 
 /// Put the song clock at `at_us` and hold it there, so a key read off it is read at that moment
 /// however long the machine takes over the lines in between.
-fn song_at(app: &mut App, at_us: i64) {
+pub(super) fn song_at(app: &mut App, at_us: i64) {
     app.shared.clock = Instant::now() + CLOCK_HELD_BACK;
     app.shared.song_us_last.set(at_us);
 }
@@ -406,19 +406,32 @@ fn a_run_adjusts_its_offset_inside_the_range_the_row_can_hold() {
     assert_eq!((rbms_play::AUTO_ADJUST_OFFSET_MIN_MS, rbms_play::AUTO_ADJUST_OFFSET_MAX_MS), (JUDGE_OFFSET_MIN_MS, JUDGE_OFFSET_MAX_MS));
 }
 
-/// An early input moves the offset for the inputs after it, the settings hold the move at once, and
-/// a skin's judge timing number shows it.
+/// An early input has the notes drawn later from then on: the settings hold the move at once, a
+/// skin's judge timing number shows it, and the note field is drawn by it on the next frame.
 #[test]
 fn an_early_key_moves_the_offset_the_settings_hold_and_a_skin_shows() {
     let mut app = app_on("adjust-on", adjusting(3));
     let mut state = run_judged_for(&app);
     let notes = note_times(&state);
-    strike(&mut state, &mut app, notes[0] - EARLY_BY_US - 3_000);
+    assert_eq!(state.field_lead_us(&app.shared), 3_000);
+    strike(&mut state, &mut app, notes[0] - EARLY_BY_US);
     assert_eq!(state.session.judge().total_judged(), 1, "the key did not reach the note");
-    assert_eq!(app.shared.config.judge.offset_ms, 4, "40 ms early is one millisecond later for the next input");
-    assert_eq!(number(&mut state, &app, NUMBER_JUDGETIMING), 4);
-    strike(&mut state, &mut app, notes[1] - EARLY_BY_US - 4_000);
-    assert_eq!(app.shared.config.judge.offset_ms, 5, "the second input was judged at the offset the first left");
+    assert_eq!(app.shared.config.judge.offset_ms, 2, "40 ms early is the notes one millisecond later (JudgeManager.java:701)");
+    assert_eq!(number(&mut state, &app, NUMBER_JUDGETIMING), 2);
+    assert_eq!(state.field_lead_us(&app.shared), 2_000, "the field is drawn by the offset the input left");
+    strike(&mut state, &mut app, notes[1] - EARLY_BY_US);
+    assert_eq!(app.shared.config.judge.offset_ms, 1, "the second input moved the offset the first left");
+}
+
+/// A late input has them drawn earlier.
+#[test]
+fn a_late_key_moves_the_offset_the_other_way() {
+    let mut app = app_on("adjust-late", adjusting(3));
+    let mut state = run_judged_for(&app);
+    let notes = note_times(&state);
+    strike(&mut state, &mut app, notes[0] + EARLY_BY_US);
+    assert_eq!(state.session.judge().total_judged(), 1, "the key did not reach the note");
+    assert_eq!(app.shared.config.judge.offset_ms, 4);
 }
 
 /// With the row off the same keys move nothing.
@@ -432,7 +445,6 @@ fn with_auto_adjust_off_the_offset_stays_where_the_player_set_it() {
     strike(&mut state, &mut app, notes[0] - EARLY_BY_US);
     assert_eq!(state.session.judge().total_judged(), 1);
     assert_eq!(app.shared.config.judge.offset_ms, 3);
-    assert!(state.session.recorded_offset_steps().is_empty());
 }
 
 /// A run the game plays, and one that reproduces a replay, take no key of the player's and so move
@@ -481,42 +493,44 @@ fn an_abandoned_run_leaves_its_offset_in_the_settings_file() {
     let mut state = run_judged_for(&app);
     let notes = note_times(&state);
     strike(&mut state, &mut app, notes[0] - EARLY_BY_US);
-    assert_eq!(app.shared.config.judge.offset_ms, 1);
+    assert_eq!(app.shared.config.judge.offset_ms, -1);
     let left = state.handle_key(
         &mut FrameCtx { shared: &mut app.shared, now: Instant::now(), dt: 0.0 },
         KeyInput { code: KeyCode::Escape, pressed: true, released: false, text: None },
     );
     assert!(!matches!(left, Transition::Stay), "Escape did not leave the run");
     let saved = rbms_config::load(&settings).expect("the settings file reads back").config;
-    assert_eq!(saved.judge.offset_ms, 1);
+    assert_eq!(saved.judge.offset_ms, -1);
     assert!(saved.judge.auto_offset);
 }
 
-/// A run that reaches its result, cleared or failed, writes the offset out too, and the replay it
-/// saves says what every input was judged at.
+/// A run that reaches its result, cleared or failed, writes the offset out too. The replay it saves
+/// states no offset, because every input was judged where it landed, and comes out as the run
+/// whatever the offset of whoever watches it is.
 #[test]
-fn a_run_that_reaches_its_result_saves_its_offset_and_a_replay_that_knows_every_step() {
+fn a_run_that_reaches_its_result_saves_its_offset_and_a_replay_judged_where_it_was_played() {
     let mut app = app_on("adjust-result", adjusting(0));
     let settings = app.shared.settings_path.clone();
     let mut state = run_judged_for(&app);
     let notes = note_times(&state);
     strike(&mut state, &mut app, notes[0] - EARLY_BY_US);
-    strike(&mut state, &mut app, notes[1] - EARLY_BY_US - 1_000);
-    assert_eq!(app.shared.config.judge.offset_ms, 2);
+    strike(&mut state, &mut app, notes[1] - EARLY_BY_US);
+    assert_eq!(app.shared.config.judge.offset_ms, -2);
     let summary = state.session.summary();
     assert!(matches!(enter_result(&mut state, &mut app.shared), Transition::To(Stage::Result(_))), "a finished run moves to the result screen");
-    assert_eq!(app.shared.config.judge.offset_ms, 2, "the result applied a second correction on top of the run's own");
-    assert_eq!(rbms_config::load(&settings).expect("the settings file reads back").config.judge.offset_ms, 2);
+    assert_eq!(app.shared.config.judge.offset_ms, -2, "the result applied a second correction on top of the run's own");
+    assert_eq!(rbms_config::load(&settings).expect("the settings file reads back").config.judge.offset_ms, -2);
 
     let saved = std::fs::read_dir(&app.shared.replay_dir).expect("the run saved a replay").filter_map(Result::ok).map(|entry| entry.path()).next();
     let replay = rbms_store::Replay::load(&saved.expect("one replay was saved")).expect("the replay reads back");
-    assert_eq!(replay.offset_ms, 2);
-    let steps: Vec<(usize, i32)> = replay.judge.offset_steps.iter().map(|step| (step.from_event, step.offset_ms)).collect();
-    assert_eq!(steps, [(0, 0), (1, 1), (3, 2)], "each press was judged at the offset the one before it left");
+    assert_eq!(replay.offset_ms, 0, "the inputs were judged where they landed");
+    assert!(replay.judge.offset_steps.is_empty(), "{:?}", replay.judge.offset_steps);
 
-    let options = SessionOptions { replay: Some(replay), judge_offset_us: 2_000, ..SessionOptions::default() };
-    let mut again = run_of(&chart(SLOW_BPM), options);
-    again.session.tick(rbms_play::SessionClock::at(notes[1] + HELD_FOR_US), &mut NullSink);
-    let reproduced = again.session.summary();
-    assert_eq!((reproduced.counts, reproduced.fast, reproduced.early), (summary.counts, summary.fast, summary.early), "the replay judged its inputs otherwise");
+    for watched_at_us in [0, -2_000, 120_000] {
+        let options = SessionOptions { replay: Some(replay.clone()), judge_offset_us: watched_at_us, ..SessionOptions::default() };
+        let mut again = run_of(&chart(SLOW_BPM), options);
+        again.session.tick(rbms_play::SessionClock::at(notes[1] + HELD_FOR_US), &mut NullSink);
+        let reproduced = again.session.summary();
+        assert_eq!((reproduced.counts, reproduced.fast, reproduced.early), (summary.counts, summary.fast, summary.early), "watched at {watched_at_us} us");
+    }
 }

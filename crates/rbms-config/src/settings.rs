@@ -595,14 +595,14 @@ pub const SETTINGS: &[SettingDescriptor] = &[
         SettingTab::PlayJudge,
         "JUDGE OFFSET",
         SettingKind::IntRange { min: JUDGE_OFFSET_MIN_MS, max: JUDGE_OFFSET_MAX_MS, step: JUDGE_OFFSET_STEP_MS, unit: MILLISECOND_UNIT },
-        "Shift every judgement earlier or later",
+        "Draw the notes this many ms earlier (+) or later (-) than the song; raise it if you hit late, lower it if you hit early",
     ),
     row(
         SettingId::AutoCal,
         SettingTab::PlayJudge,
         "AUTO ADJUST",
         SettingKind::Toggle,
-        "Move JUDGE OFFSET a little after every hit that lands early or late, so the two even out as you play",
+        "Move JUDGE OFFSET a little after every hit that lands early or late, so the notes come to where you hit them",
     ),
     row(SettingId::Random, SettingTab::PlayChart, "RANDOM", SettingKind::Cycle { values: RANDOM_LABELS }, "How the lanes are shuffled"),
     unbuilt_row(

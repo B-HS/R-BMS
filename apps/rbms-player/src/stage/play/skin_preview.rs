@@ -520,9 +520,13 @@ impl PlaySample {
 
     /// Where the chart stands for a frame drawn at `now_us`: what the play timer has run for, cut to
     /// whole milliseconds the way the play screen cuts it, and the chart's beginning before the
-    /// timer is on.
-    fn drawn_chart_us(timers: &TimerState, now_us: i64) -> i64 {
-        if timers.is_on(timer_id::PLAY) { whole_ms(now_us - timers.value_us(timer_id::PLAY)) * MICROS_PER_MILLI } else { CHART_START_US }
+    /// timer is on; and `lead_us` ahead of either, which is the player's judge offset. The field of
+    /// a run is drawn that far ahead of the song and the hand that plays this one presses where it
+    /// always does, so the JUDGE OFFSET row shows here as it does on a run: the notes reach the
+    /// line that much before they are taken.
+    fn drawn_chart_us(timers: &TimerState, now_us: i64, lead_us: i64) -> i64 {
+        let stands_at_us = if timers.is_on(timer_id::PLAY) { whole_ms(now_us - timers.value_us(timer_id::PLAY)) * MICROS_PER_MILLI } else { CHART_START_US };
+        stands_at_us + lead_us
     }
 
     /// Who the run is told to be played by, and the score it is paced against.
@@ -712,7 +716,7 @@ impl PlaySample {
         self.ensure_field(&shared.config);
         let play = &shared.config.play;
         let settings = SettingsView::of_config(&shared.config);
-        let chart_us = PlaySample::drawn_chart_us(&shared.skin_timers, at.now_us);
+        let chart_us = PlaySample::drawn_chart_us(&shared.skin_timers, at.now_us, shared.offset_us());
         let (bpm, scroll) = self.tempo_at(chart_us);
         let travel = self.field.as_ref().and_then(FieldChart::tempo).unwrap_or((bpm, scroll));
         let hispeed = self.shown_hispeed(&shared.config) as f32;

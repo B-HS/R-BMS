@@ -267,8 +267,8 @@ fn first_lane_key_at(app: &mut App, chart_ms: i64, pressed: bool) {
 }
 
 /// A player who presses every note forty milliseconds early, with AUTO ADJUST on, has the judge
-/// offset moved a millisecond by every press (`JudgeManager.java:697-703`), the settings hold it as
-/// it moves, and the pack's timing figure follows it.
+/// offset taken down a millisecond by every press (`JudgeManager.java:697-703`), which draws the
+/// notes that much later, the settings hold it as it moves, and the pack's timing figure follows it.
 #[test]
 fn the_default_pack_is_drawn_for_a_judge_offset_that_adjusted_itself() {
     let mut config = Config::default();
@@ -290,7 +290,7 @@ fn the_default_pack_is_drawn_for_a_judge_offset_that_adjusted_itself() {
         stay(&mut app, &mut pixels);
     }
     assert_eq!(play(&app).session.judge().total_judged(), u32::try_from(NOTES_PLAYED).expect("a small number"), "a press did not reach its note");
-    assert_eq!(app.shared.config.judge.offset_ms, NOTES_PLAYED, "every press forty milliseconds early is one millisecond of offset");
+    assert_eq!(app.shared.config.judge.offset_ms, -NOTES_PLAYED, "every press forty milliseconds early is one millisecond off the offset");
     walk_to(&mut app, &mut pixels, i64::from(NOTES_PLAYED) * MEASURE_MS + SHOWN_AFTER_MS);
     stay(&mut app, &mut pixels);
     save("adjusted-offset-forty-early", &pixels, size);

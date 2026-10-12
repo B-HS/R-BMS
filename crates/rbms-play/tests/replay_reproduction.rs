@@ -20,16 +20,22 @@ const STEP_US: i64 = 5_000;
 /// How long past the last note both runs keep stepping, so every unhit note is swept to a miss.
 const TAIL_US: i64 = 2_500_000;
 
-/// Judge offset both runs use, chosen non-zero so a reproduction that ignored it would show up.
+/// Judge offset both runs are set up with, chosen non-zero so a judgement that depended on it would
+/// show up: it moves where the notes are drawn and nothing of how an input is judged.
 const JUDGE_OFFSET_US: i64 = 12_000;
+
+/// How far from its inputs a replay recorded before that was judged, in milliseconds, for the test
+/// of one: far enough to move this chart's presses across a judge window.
+const RECORDED_OFFSET_MS: i32 = 40;
 
 /// Eight notes on lane 0 at 2.0 s .. 5.5 s, with an accompaniment channel so the run also books
 /// non-note sounds.
 const CHART: &[u8] = b"#BPM 120\r\n#RANK 3\r\n#WAV01 a.wav\r\n#WAV02 b.wav\r\n#00101:02\r\n#00111:01010101\r\n#00211:01010101\r\n";
 
-/// Presses covering the whole judgement range: dead on, slightly early, slightly late, far enough
-/// out to break the combo, plus one note left untouched so a miss is swept.
-const PRESSES_US: &[i64] = &[2_000_000, 2_515_000, 3_040_000, 3_500_000, 4_100_000, 4_500_000, 5_000_000];
+/// Presses covering the whole judgement range: dead on, early by enough to fall between the stock
+/// PGREAT window and a widened one, late, late by far more, plus one note left untouched so a miss
+/// is swept.
+const PRESSES_US: &[i64] = &[2_000_000, 2_475_000, 3_040_000, 3_500_000, 4_100_000, 4_500_000, 5_000_000];
 
 /// How long each press is held.
 const HOLD_US: i64 = 50_000;
@@ -98,7 +104,7 @@ fn replay_of(events: Vec<ReplayEvent>) -> Replay {
         mode: rbms_model::Mode::BEAT_7K.name.to_string(),
         random: String::new(),
         seed: 0,
-        offset_ms: (JUDGE_OFFSET_US / 1000) as i32,
+        offset_ms: 0,
         scratch_auto: false,
         gauge: String::new(),
         judge: Default::default(),
@@ -192,17 +198,32 @@ fn a_replay_run_records_nothing_of_its_own() {
     assert!(session.recorded_events().is_empty(), "reproducing a replay must not record a second one on top of it");
 }
 
-#[test]
-fn a_reproduction_is_judged_at_the_offset_the_run_used() {
-    let (played, recorded) = play_by_hand();
-    let mut session = PlaySession::new(model(), SessionOptions { replay: Some(replay_of(recorded)), ..options() });
-    session.set_judge_offset_us(JUDGE_OFFSET_US + 40_000);
+/// Run `session` from the start of the chart to its end.
+fn run_through(mut session: PlaySession) -> PlaySummary {
     let mut song_us = 0;
     while song_us <= end_us() {
         session.tick(SessionClock::at(song_us), &mut NullSink);
         song_us += STEP_US;
     }
-    assert_ne!(session.summary(), played, "judging the same inputs at a different offset must not come out identical");
+    session.summary()
+}
+
+#[test]
+fn a_reproduction_does_not_depend_on_the_offset_of_whoever_watches_it() {
+    let (played, recorded) = play_by_hand();
+    for watched_at_us in [0, JUDGE_OFFSET_US + 40_000, -150_000] {
+        let mut session = PlaySession::new(model(), SessionOptions { replay: Some(replay_of(recorded.clone())), ..options() });
+        session.set_judge_offset_us(watched_at_us);
+        assert_eq!(run_through(session), played, "watched at {watched_at_us} us the same inputs came out otherwise");
+    }
+}
+
+#[test]
+fn a_replay_that_states_an_offset_is_judged_that_far_from_its_inputs() {
+    let (played, recorded) = play_by_hand();
+    let stated = Replay { offset_ms: RECORDED_OFFSET_MS, ..replay_of(recorded) };
+    let session = PlaySession::new(model(), SessionOptions { replay: Some(stated), ..options() });
+    assert_ne!(run_through(session), played, "a replay recorded while the offset moved the judgement has to be judged at the offset it states");
 }
 
 #[test]

@@ -50,9 +50,11 @@ pub const REPLAY_LEGACY_BOTTOM_SHIFTABLE_GAUGE: &str = "assist";
 /// A judge offset that came into force part of the way through a run: every input from the one at
 /// `from_event` on was judged `offset_ms` away from the instant it arrived.
 ///
-/// A run played with the judge offset adjusting itself moves the offset after an input lands, so
-/// one number for the whole run cannot say what each input was judged at. The steps are in the order
-/// they happened, and `from_event` counts the recorded inputs, presses and releases alike.
+/// Only a run recorded while the judge offset moved the instant an input was judged at has any
+/// ([`Replay::offset_ms`]). Such a run, played with the offset adjusting itself, moved the offset
+/// after an input landed, so one number for the whole run cannot say what each input was judged
+/// at. The steps are in the order they happened, and `from_event` counts the recorded inputs,
+/// presses and releases alike.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ReplayOffsetStep {
@@ -97,9 +99,10 @@ pub struct ReplayJudge {
     pub gauge_auto_shift: String,
     /// The floor the per-frame auto-shift could drop the selection to.
     pub bottom_shiftable_gauge: String,
-    /// The judge offsets the run moved through, for a run whose offset moved while it was played.
-    /// Empty for a run judged at the replay's one `offset_ms` from first input to last, which is
-    /// every replay written before the offset could move.
+    /// The judge offsets the run moved through, for a run whose offset moved its judgement and
+    /// moved while it was played. Empty for a run judged at the replay's one `offset_ms` from first
+    /// input to last, which is every replay written before the offset could move and every one
+    /// written since it stopped moving the judgement.
     pub offset_steps: Vec<ReplayOffsetStep>,
 }
 
@@ -129,6 +132,14 @@ pub struct Replay {
     pub mode: String,
     pub random: String,
     pub seed: u64,
+    /// How far from the instant it was recorded at every input of the run was judged, in
+    /// milliseconds, and what playback judges it at again.
+    ///
+    /// The judge offset used to be exactly that, so a replay written then states the offset the
+    /// run was played at. It is now how far ahead of the song the notes are drawn, which moves no
+    /// judgement, so a replay written since states nothing here: its inputs are judged where they
+    /// are. One field reads both, and a build from before the change reproduces a newer file as
+    /// faithfully as an older one.
     pub offset_ms: i32,
     #[serde(default)]
     pub scratch_auto: bool,

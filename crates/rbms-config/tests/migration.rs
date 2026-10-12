@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 
 use rbms_chart::shuffle::NoteOption;
 use rbms_config::{
-    AudioOptions, CURRENT_SCHEMA_VERSION, Config, ConfigError, DEFAULT_PLAYER_ID, JUDGE_WIDTH_TIER_COUNT, LEGACY_FOLDERS_FILE, LEGACY_SCHEMA_VERSION,
-    LEGACY_TABLES_FILE, UNCHOSEN_LETTERBOX_SCHEMA_VERSION, load, save,
+    AudioOptions, CURRENT_SCHEMA_VERSION, Config, ConfigError, DEFAULT_PLAYER_ID, INPUT_JUDGE_OFFSET_SCHEMA_VERSION, JUDGE_OFFSET_MAX_MS, JUDGE_OFFSET_MIN_MS,
+    JUDGE_WIDTH_TIER_COUNT, LEGACY_FOLDERS_FILE, LEGACY_SCHEMA_VERSION, LEGACY_TABLES_FILE, UNCHOSEN_LETTERBOX_SCHEMA_VERSION, load, save,
 };
 use rbms_judge::GaugeKind;
 
@@ -59,7 +59,7 @@ fn every_flat_field_lands_in_its_group() {
     assert!((c.play.total_override - 320.0).abs() < 1e-9);
     assert!(!c.play.auto_replay);
 
-    assert_eq!(c.judge.offset_ms, -33);
+    assert_eq!(c.judge.offset_ms, 33, "a flat file's -33 judged every input 33 ms early, which is the notes 33 ms ahead");
     assert!(c.judge.auto_offset);
     assert_eq!(c.judge.judge_rate_key, [150; JUDGE_WIDTH_TIER_COUNT]);
     assert_eq!(c.judge.judge_rate_scratch, [150; JUDGE_WIDTH_TIER_COUNT]);
@@ -244,4 +244,61 @@ fn a_file_without_a_schema_takes_the_letterbox_with_the_rest_of_its_migration() 
     assert_eq!(outcome.migrated_from, Some(LEGACY_SCHEMA_VERSION));
     assert!(outcome.config.display.letterbox);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A JUDGE OFFSET from before it moved the notes is turned round once, on the launch that reads
+/// the older file, and the file that launch writes is read as it stands from then on: what the
+/// player sets afterwards is kept, and nothing is turned round a second time.
+#[test]
+fn an_older_judge_offset_is_turned_round_once_and_a_later_one_is_kept() {
+    for (tag, stated, carried) in [("offset-early", 26, -26), ("offset-late", -40, 40), ("offset-none", 0, 0)] {
+        let dir = stage_text(tag, &format!("(schema_version: {INPUT_JUDGE_OFFSET_SCHEMA_VERSION}, judge: (offset_ms: {stated}, auto_offset: true))"));
+        let path = dir.join("settings.ron");
+        let outcome = load(&path).expect("the older file loads");
+        assert_eq!(outcome.migrated_from, Some(INPUT_JUDGE_OFFSET_SCHEMA_VERSION));
+        assert_eq!(outcome.config.judge.offset_ms, carried, "an input judged {stated} ms later is the notes drawn {carried} ms ahead");
+        assert!(outcome.config.judge.auto_offset, "the switch beside it is left as it was");
+
+        save(&outcome.config, &path).expect("the migrated configuration saves");
+        let again = load(&path).expect("the saved file loads");
+        assert_eq!(again.migrated_from, None);
+        assert_eq!(again.config.judge.offset_ms, carried, "the offset was turned round a second time");
+
+        let mut set = again.config;
+        set.judge.offset_ms = 7;
+        save(&set, &path).expect("the player's own offset saves");
+        assert_eq!(load(&path).expect("the saved file loads").config.judge.offset_ms, 7);
+    }
+}
+
+/// Every schema before the change reads the same way, and an offset at an end of the range lands
+/// on the other end rather than outside it.
+#[test]
+fn every_schema_before_the_change_has_its_judge_offset_turned_round() {
+    for schema in 1..=INPUT_JUDGE_OFFSET_SCHEMA_VERSION {
+        for (stated, carried) in
+            [(15, -15), (JUDGE_OFFSET_MAX_MS, JUDGE_OFFSET_MIN_MS), (JUDGE_OFFSET_MIN_MS, JUDGE_OFFSET_MAX_MS), (i32::MIN, JUDGE_OFFSET_MAX_MS)]
+        {
+            let text = format!("(schema_version: {schema}, judge: (offset_ms: {stated}))");
+            let (config, from) = rbms_config::migrate(&text).expect("an older document migrates");
+            assert_eq!(from, Some(schema));
+            assert_eq!(config.judge.offset_ms, carried, "schema {schema} stating {stated}");
+        }
+    }
+    let current = format!("(schema_version: {CURRENT_SCHEMA_VERSION}, judge: (offset_ms: 15))");
+    assert_eq!(rbms_config::migrate(&current).expect("a current document parses").0.judge.offset_ms, 15);
+}
+
+/// An account download is parsed as the current schema and then sanitised, without going through
+/// the file loader. The offset is carried over there too, off the version the document states,
+/// and a second sanitise of the same configuration leaves it alone.
+#[test]
+fn a_document_parsed_outside_the_loader_has_its_offset_carried_over_when_it_is_sanitised() {
+    let text = format!("(schema_version: {INPUT_JUDGE_OFFSET_SCHEMA_VERSION}, judge: (offset_ms: 26))");
+    let mut downloaded: Config = ron::from_str(&text).expect("the document parses as the current schema");
+    assert_eq!(downloaded.schema_version, INPUT_JUDGE_OFFSET_SCHEMA_VERSION);
+    downloaded.sanitise();
+    assert_eq!((downloaded.schema_version, downloaded.judge.offset_ms), (CURRENT_SCHEMA_VERSION, -26));
+    downloaded.sanitise();
+    assert_eq!(downloaded.judge.offset_ms, -26);
 }

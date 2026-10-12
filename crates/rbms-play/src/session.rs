@@ -59,31 +59,30 @@ const AUTO_ADJUST_US_PER_STEP: i64 = 30_000;
 /// What the error is pushed away from zero by before that division, which rounds the quotient to
 /// the nearest whole millisecond (`mfast + 15000`, `mfast - 15000`).
 const AUTO_ADJUST_ROUNDING_US: i64 = 15_000;
-/// Earliest judge offset a run may adjust itself to, in milliseconds. The JUDGE OFFSET row's own
+/// Lowest judge offset a run may adjust itself to, in milliseconds. The JUDGE OFFSET row's own
 /// floor, pinned against it by the player rather than depending on the configuration crate here.
 pub const AUTO_ADJUST_OFFSET_MIN_MS: i32 = -200;
-/// Latest judge offset a run may adjust itself to, in milliseconds.
+/// Highest judge offset a run may adjust itself to, in milliseconds.
 pub const AUTO_ADJUST_OFFSET_MAX_MS: i32 = 200;
 /// Microseconds in one millisecond, the unit a judge offset is set, shown and recorded in.
 const US_PER_MS: i64 = 1_000;
 
 /// How far one judged input moves a judge offset that adjusts itself, in milliseconds: nothing for
 /// a judgement worse than GOOD or more than 150 ms out, and otherwise a thirtieth of the error
-/// rounded to the nearest whole millisecond, so an input within 15 ms of its note moves nothing.
-/// `delta_us` is how far ahead of the note the input was judged, early positive.
+/// rounded to the nearest whole millisecond and taken off the offset, so an input within 15 ms of
+/// its note moves nothing. `delta_us` is how far ahead of the note the input was judged, early
+/// positive.
 ///
-/// This is the reference's own step (`JudgeManager.java:697-703`) with its sign turned round. The
-/// reference adds its timing to the clock the notes are *drawn* by and so takes the step off it:
-/// an early player is shown the notes later. This player adds its offset to the instant an input
-/// is *judged* at and leaves the notes where the sound is, so the same early player has the step
-/// added: the next input is judged that much later, which is the same correction seen from the
-/// other side.
+/// This is the reference's own step, sign and all (`JudgeManager.java:697-703`:
+/// `judgetiming - (mfast +- 15000) / 30000`). The offset is how far ahead of the song the notes
+/// are drawn, so a player who presses early has it lowered: the notes are drawn later, and a
+/// player who follows them presses later.
 pub fn auto_adjust_step_ms(judge: Judge, delta_us: i64) -> i32 {
     if judge as usize > AUTO_ADJUST_WORST_JUDGE || !(-AUTO_ADJUST_MAX_ABS_DELTA_US..=AUTO_ADJUST_MAX_ABS_DELTA_US).contains(&delta_us) {
         return 0;
     }
     let pushed = if delta_us >= 0 { delta_us + AUTO_ADJUST_ROUNDING_US } else { delta_us - AUTO_ADJUST_ROUNDING_US };
-    (pushed / AUTO_ADJUST_US_PER_STEP) as i32
+    -((pushed / AUTO_ADJUST_US_PER_STEP) as i32)
 }
 
 /// The BGA frame shown before the chart's first BGA event.
@@ -156,7 +155,11 @@ pub struct SessionOptions {
     /// Play the chart from itself instead of from input.
     pub autoplay: bool,
     pub gauge: GaugeKind,
-    /// How far the judgement of an input is shifted from the instant it arrived.
+    /// The judge offset the run starts at: how far ahead of the song the notes are drawn, in
+    /// microseconds (`PlayerConfig.judgetiming`, which `LaneRenderer.java:300-301` adds to the time
+    /// the note field is drawn at and nothing else reads). It moves no judgement and no sound: an
+    /// input is judged at the instant it arrived. The session keeps it only because a run that
+    /// adjusts it does so as its inputs land ([`auto_adjust_step_ms`]).
     pub judge_offset_us: i64,
     /// JUDGE WIDTH as a percentage of the chart's own windows, applied to every widenable tier of
     /// both key and scratch lanes. The per-tier form lives in [`JudgeSetup`], which
@@ -267,7 +270,11 @@ struct Setup {
 struct ReplayTrack {
     events: Vec<ReplayEvent>,
     cursor: usize,
-    /// The judge offsets the recorded run moved through, in the order it did.
+    /// How far from the instant it was recorded at every input of the run was judged, in
+    /// microseconds: the replay's own `offset_ms`. Nothing for a run recorded since the judge
+    /// offset stopped moving the judgement, and what the run was played at for an older one.
+    judged_off_by_us: i64,
+    /// The same for a run that moved through several, in the order it did.
     offset_steps: Vec<ReplayOffsetStep>,
 }
 
@@ -285,34 +292,11 @@ impl ReplayTrack {
     }
 }
 
-/// The judge offset the recorded input at `index` was judged at, in microseconds: the one the last
-/// step at or before it brought in, and `fallback_us` for a run that recorded no step that early,
-/// which is every run judged at one offset throughout.
+/// How far from the instant it was recorded at the recorded input at `index` was judged, in
+/// microseconds: what the last step at or before it brought in, and `fallback_us` for a run that
+/// recorded no step that early, which is every run judged at one offset throughout.
 fn recorded_offset_us(steps: &[ReplayOffsetStep], index: usize, fallback_us: i64) -> i64 {
     ReplayOffsetStep::in_force_at(steps, index).map_or(fallback_us, |offset_ms| i64::from(offset_ms) * US_PER_MS)
-}
-
-/// The judge offset as a run played by hand moves it, kept so the replay can say what each input
-/// was judged at.
-#[derive(Debug, Default, Clone)]
-struct OffsetTrail {
-    /// The offset the run started at, in milliseconds.
-    start_ms: i32,
-    /// Every move since, with the recorded input it first applied to.
-    steps: Vec<ReplayOffsetStep>,
-    /// How many of those moves the run made by itself, as inputs landed.
-    adjusted: u32,
-}
-
-impl OffsetTrail {
-    /// What the replay records: nothing for a run judged at one offset throughout, and otherwise
-    /// the offset it started at followed by every move.
-    fn recorded(&self) -> Vec<ReplayOffsetStep> {
-        if self.steps.is_empty() {
-            return Vec::new();
-        }
-        std::iter::once(ReplayOffsetStep { from_event: 0, offset_ms: self.start_ms }).chain(self.steps.iter().copied()).collect()
-    }
 }
 
 /// Replay-analysis playback: a virtual clock the player can pause, slow down and scrub with.
@@ -565,7 +549,8 @@ pub struct PlaySession {
     auto_calibration: bool,
     replay: Option<ReplayTrack>,
     recording: Vec<ReplayEvent>,
-    offset_trail: OffsetTrail,
+    /// How many inputs moved the judge offset by themselves.
+    adjusted_inputs: u32,
     analysis: AnalysisState,
     marks: TimingMarks,
     instrumentation: PlayInstrumentation,
@@ -597,9 +582,14 @@ impl PlaySession {
             setup,
             judge_offset_us: options.judge_offset_us,
             auto_calibration: options.auto_calibration,
-            replay: options.replay.map(|replay| ReplayTrack { events: replay.events, cursor: 0, offset_steps: replay.judge.offset_steps }),
+            replay: options.replay.map(|replay| ReplayTrack {
+                events: replay.events,
+                cursor: 0,
+                judged_off_by_us: i64::from(replay.offset_ms) * US_PER_MS,
+                offset_steps: replay.judge.offset_steps,
+            }),
             recording: Vec::new(),
-            offset_trail: OffsetTrail { start_ms: (options.judge_offset_us / US_PER_MS) as i32, ..OffsetTrail::default() },
+            adjusted_inputs: 0,
             analysis: AnalysisState::new(options.analysis),
             marks: TimingMarks::default(),
             instrumentation: PlayInstrumentation::default(),
@@ -619,8 +609,9 @@ impl PlaySession {
         self.bga.advance(clock.audible_us);
     }
 
-    /// Take one lane press at the instant it arrived, recording it for the replay and judging it at
-    /// the configured offset. The keysound sounds now, not at the note's time.
+    /// Take one lane press, recording it for the replay and judging it at the instant it arrived:
+    /// the judge offset moves where the notes are drawn, never when an input counts. The keysound
+    /// sounds now, not at the note's time.
     pub fn press(&mut self, lane: usize, raw_us: i64, sink: &mut dyn SoundSink) -> Option<JudgeResult> {
         self.press_dir(lane, ScratchDir::Forward, raw_us, sink)
     }
@@ -629,8 +620,7 @@ impl PlaySession {
     /// and the direction is recorded with the input, so a back-spin reproduces as one.
     pub fn press_dir(&mut self, lane: usize, dir: ScratchDir, raw_us: i64, sink: &mut dyn SoundSink) -> Option<JudgeResult> {
         self.recording.push(ReplayEvent { t: raw_us, lane, press: true, backward: is_backward(dir) });
-        let judge_us = raw_us + self.judge_offset_us;
-        let result = self.player.press_dir(lane, dir, judge_us, |event| sink.play(immediate_sound(event)));
+        let result = self.player.press_dir(lane, dir, raw_us, |event| sink.play(immediate_sound(event)));
         if let Some(result) = result.as_ref() {
             let scratch = self.is_scratch(result.lane);
             self.instrumentation.record(result, scratch);
@@ -647,7 +637,7 @@ impl PlaySession {
     /// Take one lane release from one physical direction.
     pub fn release_dir(&mut self, lane: usize, dir: ScratchDir, raw_us: i64) -> Option<JudgeResult> {
         self.recording.push(ReplayEvent { t: raw_us, lane, press: false, backward: is_backward(dir) });
-        let result = self.player.release_dir(lane, dir, raw_us + self.judge_offset_us);
+        let result = self.player.release_dir(lane, dir, raw_us);
         if let Some(result) = result.as_ref() {
             let scratch = self.is_scratch(result.lane);
             self.instrumentation.record(result, scratch);
@@ -660,33 +650,19 @@ impl PlaySession {
     /// adjusts itself (`JudgeManager.java:697-703`, which runs for every judgement of a run in the
     /// reference's PLAY and PRACTICE modes and for none of an autoplay or a replay).
     ///
-    /// The input that was just judged keeps the offset it was judged at; the move applies from the
-    /// next one on. The offset stops at the ends of the range the JUDGE OFFSET row can hold.
+    /// The move is to where the notes are drawn from the next frame on, so the judgement of no
+    /// input depends on it and the replay has nothing of it to record. The offset stops at the
+    /// ends of the range the JUDGE OFFSET row can hold.
     fn auto_adjust(&mut self, result: &JudgeResult) {
         if !self.auto_calibration || self.setup.autoplay || self.replay.is_some() {
             return;
         }
         let step = auto_adjust_step_ms(result.judge, result.delta_us);
-        if step == 0 {
-            return;
-        }
         let next_ms = self.judge_offset_ms().saturating_add(step).clamp(AUTO_ADJUST_OFFSET_MIN_MS, AUTO_ADJUST_OFFSET_MAX_MS);
-        if self.move_judge_offset(i64::from(next_ms) * US_PER_MS) {
-            self.offset_trail.adjusted += 1;
+        if next_ms != self.judge_offset_ms() {
+            self.judge_offset_us = i64::from(next_ms) * US_PER_MS;
+            self.adjusted_inputs += 1;
         }
-    }
-
-    /// Bring a judge offset in for every input from the next recorded one on, noting the move for
-    /// the replay, and answer whether it differs from the one in force.
-    fn move_judge_offset(&mut self, offset_us: i64) -> bool {
-        if offset_us == self.judge_offset_us {
-            return false;
-        }
-        self.judge_offset_us = offset_us;
-        if self.replay.is_none() {
-            self.offset_trail.steps.push(ReplayOffsetStep { from_event: self.recording.len(), offset_ms: self.judge_offset_ms() });
-        }
-        true
     }
 
     /// Rebuild the judge state at an arbitrary song time by re-running the recorded inputs from the
@@ -704,9 +680,9 @@ impl PlaySession {
             return;
         }
         let target_us = target_us.max(0);
-        let fallback_us = self.judge_offset_us;
         let mut player = build_player(self.player.model().clone(), &self.setup);
-        let (events, steps) = self.replay.as_ref().map(|track| (track.events.clone(), track.offset_steps.clone())).unwrap_or_default();
+        let (events, steps, fallback_us) =
+            self.replay.as_ref().map(|track| (track.events.clone(), track.offset_steps.clone(), track.judged_off_by_us)).unwrap_or_default();
         let mut cursor = 0;
         let mut frame_us = 0;
         loop {
@@ -903,22 +879,17 @@ impl PlaySession {
         &self.recording
     }
 
-    /// Shift the judgement of later inputs, following a live change of the judge offset. The offset
-    /// is one the JUDGE OFFSET row can hold, a whole number of milliseconds, which is the unit the
-    /// replay records it in.
+    /// Follow a live change of the judge offset, so a run that adjusts it goes on from where the
+    /// player put it. The offset is one the JUDGE OFFSET row can hold, a whole number of
+    /// milliseconds.
     pub fn set_judge_offset_us(&mut self, offset_us: i64) {
-        self.move_judge_offset(offset_us);
+        self.judge_offset_us = offset_us;
     }
 
-    /// The judge offset in force for the next input, in whole milliseconds.
+    /// The judge offset as it stands, in whole milliseconds: how far ahead of the song the notes
+    /// are drawn ([`SessionOptions::judge_offset_us`]).
     pub fn judge_offset_ms(&self) -> i32 {
         (self.judge_offset_us / US_PER_MS) as i32
-    }
-
-    /// The judge offsets this run moved through, as its replay records them: empty for a run judged
-    /// at one offset from first input to last.
-    pub fn recorded_offset_steps(&self) -> Vec<ReplayOffsetStep> {
-        self.offset_trail.recorded()
     }
 
     /// Follow a live change of the setting that lets the judge offset adjust itself.
@@ -928,7 +899,7 @@ impl PlaySession {
 
     /// How many inputs moved the judge offset ([`auto_adjust_step_ms`]).
     pub fn adjusted_inputs(&self) -> u32 {
-        self.offset_trail.adjusted
+        self.adjusted_inputs
     }
 
     /// Whether the replay-analysis overlay and its playback controls are active.
@@ -1011,13 +982,15 @@ impl PlaySession {
         self.bga.current
     }
 
-    /// Reproduce every recorded input whose raw time the audible axis has reached, judging each at
-    /// the configured offset so the original run comes out identical.
+    /// Reproduce every recorded input whose raw time the audible axis has reached, judging each as
+    /// far from that time as the replay says it was judged, so the original run comes out
+    /// identical: at the time itself for a run recorded since the judge offset stopped moving the
+    /// judgement, and the recorded offset away for an older one. The judge offset in force now is
+    /// the viewer's and has no part in it.
     fn feed_replay(&mut self, audible_us: i64, sink: &mut dyn SoundSink) {
-        let fallback_us = self.judge_offset_us;
         while let Some((index, event)) = self.replay.as_mut().and_then(|track| track.next_due(audible_us)) {
             let dir = scratch_dir(event.backward);
-            let steps = self.replay.as_ref().map_or(&[][..], |track| track.offset_steps.as_slice());
+            let (steps, fallback_us) = self.replay.as_ref().map_or((&[][..], 0), |track| (track.offset_steps.as_slice(), track.judged_off_by_us));
             let judge_us = event.t + recorded_offset_us(steps, index, fallback_us);
             let result = if event.press {
                 self.player.press_dir(event.lane, dir, judge_us, |emitted| sink.play(immediate_sound(emitted)))
@@ -1358,7 +1331,7 @@ mod tests {
     }
 
     #[test]
-    fn a_press_is_judged_at_the_offset_while_its_keysound_stays_immediate() {
+    fn a_press_sounds_its_keysound_at_once_whatever_the_offset() {
         for offset_ms in [-200_i64, -30, 0, 30, 200] {
             let mut session = PlaySession::new(one_note(), SessionOptions { judge_offset_us: offset_ms * 1000, ..Default::default() });
             let mut sink = RecordingSink::default();
@@ -1370,18 +1343,49 @@ mod tests {
     }
 
     #[test]
-    fn the_offset_moves_which_note_a_press_lands_on() {
-        let hit_at = |offset_us: i64| {
+    fn the_offset_moves_the_judgement_of_no_input() {
+        let hit = |offset_us: i64, pressed_us: i64| {
             let mut session = PlaySession::new(one_note(), SessionOptions { judge_offset_us: offset_us, ..Default::default() });
-            session.press(0, 2_000_000, &mut NullSink).map(|result| result.delta_us)
+            session.press(0, pressed_us, &mut NullSink).map(|result| result.delta_us)
         };
-        assert_eq!(hit_at(0), Some(0), "an exact press on the note has no timing error");
-        assert_eq!(hit_at(30_000), Some(-30_000), "a +30ms offset judges the same press 30ms late");
-        assert_eq!(hit_at(-45_000), Some(45_000), "a -45ms offset judges it 45ms early");
+        for offset_us in [0, 30_000, -45_000, 200_000, -200_000] {
+            assert_eq!(hit(offset_us, 2_000_000), Some(0), "a press on the note has no timing error at {offset_us} us");
+            assert_eq!(hit(offset_us, 2_000_000 - 12_000), Some(12_000), "a press 12 ms ahead of the note is 12 ms early at {offset_us} us");
+        }
     }
 
     #[test]
-    fn an_input_is_recorded_at_the_instant_it_arrived_not_at_the_offset_judgement() {
+    fn a_replay_is_judged_as_far_from_its_inputs_as_it_says_whatever_the_offset_is_now() {
+        let judged = |recorded_ms: i32, steps: Vec<ReplayOffsetStep>, now_us: i64| {
+            let replay = Replay {
+                chart_path: String::new(),
+                md5: String::new(),
+                mode: String::new(),
+                random: String::new(),
+                seed: 0,
+                offset_ms: recorded_ms,
+                scratch_auto: false,
+                gauge: String::new(),
+                judge: rbms_store::ReplayJudge { offset_steps: steps, ..Default::default() },
+                events: vec![ReplayEvent { t: 2_000_000, lane: 0, press: true, backward: false }],
+            };
+            let mut session = PlaySession::new(one_note(), SessionOptions { replay: Some(replay), judge_offset_us: now_us, ..Default::default() });
+            session.tick(SessionClock::at(2_000_000), &mut NullSink);
+            session.recent_marks(1).first().map(|mark| mark.delta_us)
+        };
+        for now_us in [0, 90_000, -90_000] {
+            assert_eq!(judged(0, Vec::new(), now_us), Some(0), "a run recorded at no offset is judged where its inputs are");
+            assert_eq!(judged(30, Vec::new(), now_us), Some(-30_000), "a run recorded 30 ms off is judged 30 ms off");
+            assert_eq!(
+                judged(30, vec![ReplayOffsetStep { from_event: 0, offset_ms: -8 }], now_us),
+                Some(8_000),
+                "a step it recorded is what its input is judged at"
+            );
+        }
+    }
+
+    #[test]
+    fn an_input_is_recorded_at_the_instant_it_arrived() {
         let mut session = PlaySession::new(one_note(), SessionOptions { judge_offset_us: 30_000, ..Default::default() });
         session.press(0, 2_000_000, &mut NullSink);
         session.release(0, 2_050_000);
@@ -1453,22 +1457,22 @@ mod tests {
     }
 
     #[test]
-    fn the_offset_step_is_the_references_rounded_thirtieth_of_the_error() {
+    fn the_offset_step_is_the_references_rounded_thirtieth_of_the_error_taken_off() {
         use rbms_judge::Judge;
         let rows = [
             (0, 0),
             (14_999, 0),
-            (15_000, 1),
-            (44_999, 1),
-            (45_000, 2),
-            (74_999, 2),
-            (75_000, 3),
-            (135_000, 5),
-            (150_000, 5),
+            (15_000, -1),
+            (44_999, -1),
+            (45_000, -2),
+            (74_999, -2),
+            (75_000, -3),
+            (135_000, -5),
+            (150_000, -5),
             (-14_999, 0),
-            (-15_000, -1),
-            (-45_000, -2),
-            (-150_000, -5),
+            (-15_000, 1),
+            (-45_000, 2),
+            (-150_000, 5),
         ];
         for (delta_us, step) in rows {
             for judge in [Judge::PerfectGreat, Judge::Great, Judge::Good] {
@@ -1491,17 +1495,20 @@ mod tests {
     }
 
     #[test]
-    fn an_early_input_moves_the_offset_for_the_inputs_after_it() {
+    fn an_early_input_has_the_notes_drawn_later_from_then_on() {
         let mut session = PlaySession::new(one_note(), SessionOptions { auto_calibration: true, ..Default::default() });
         let hit = session.press(0, 2_000_000 - 20_000, &mut NullSink).expect("the note is hit");
-        assert_eq!(hit.delta_us, 20_000, "the input itself is judged at the offset it arrived under");
-        assert_eq!(session.judge_offset_ms(), 1, "20 ms early is one step later for the next input");
+        assert_eq!(hit.delta_us, 20_000, "the input is judged at the instant it arrived");
+        assert_eq!(session.judge_offset_ms(), -1, "20 ms early is the notes one millisecond later (JudgeManager.java:701)");
         assert_eq!(session.adjusted_inputs(), 1);
-        assert_eq!(
-            session.recorded_offset_steps(),
-            [ReplayOffsetStep { from_event: 0, offset_ms: 0 }, ReplayOffsetStep { from_event: 1, offset_ms: 1 }],
-            "the replay says the first input was judged at the offset the run began with"
-        );
+    }
+
+    #[test]
+    fn a_late_input_has_the_notes_drawn_earlier_from_then_on() {
+        let mut session = PlaySession::new(one_note(), SessionOptions { auto_calibration: true, ..Default::default() });
+        let hit = session.press(0, 2_000_000 + 20_000, &mut NullSink).expect("the note is hit");
+        assert_eq!(hit.delta_us, -20_000);
+        assert_eq!(session.judge_offset_ms(), 1);
     }
 
     #[test]
@@ -1510,19 +1517,16 @@ mod tests {
         session.press(0, 2_000_000 - 20_000, &mut NullSink);
         assert_eq!(session.judge_offset_ms(), 0);
         assert_eq!(session.adjusted_inputs(), 0);
-        assert!(session.recorded_offset_steps().is_empty(), "a run judged at one offset records no step");
     }
 
     #[test]
-    fn an_offset_changed_from_outside_is_recorded_from_the_next_input_on() {
-        let mut session = PlaySession::new(one_note(), SessionOptions { judge_offset_us: 3_000, ..Default::default() });
-        session.set_judge_offset_us(3_000);
-        assert!(session.recorded_offset_steps().is_empty(), "the offset it already has is no move");
-        session.press(0, 2_000_000, &mut NullSink);
+    fn an_offset_changed_from_outside_is_the_one_the_run_adjusts_from() {
+        let mut session = PlaySession::new(one_note(), SessionOptions { judge_offset_us: 3_000, auto_calibration: true, ..Default::default() });
         session.set_judge_offset_us(-7_000);
         assert_eq!(session.judge_offset_ms(), -7);
-        assert_eq!(session.recorded_offset_steps(), [ReplayOffsetStep { from_event: 0, offset_ms: 3 }, ReplayOffsetStep { from_event: 1, offset_ms: -7 }]);
         assert_eq!(session.adjusted_inputs(), 0, "the run moved nothing by itself");
+        session.press(0, 2_000_000 - 20_000, &mut NullSink);
+        assert_eq!(session.judge_offset_ms(), -8);
     }
 
     #[test]

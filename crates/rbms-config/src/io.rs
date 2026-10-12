@@ -5,7 +5,8 @@ use rbms_store::write_atomic;
 use crate::error::ConfigError;
 use crate::legacy::{LEGACY_FOLDERS_FILE, LEGACY_TABLES_FILE, LegacyV0, merge_legacy_lists};
 use crate::schema::{
-    BUNDLED_SKIN_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION, Config, LEGACY_SCHEMA_VERSION, SINGLE_JUDGE_WIDTH_SCHEMA_VERSION, UNCHOSEN_LETTERBOX_SCHEMA_VERSION,
+    BUNDLED_SKIN_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION, Config, INPUT_JUDGE_OFFSET_SCHEMA_VERSION, LEGACY_SCHEMA_VERSION, SINGLE_JUDGE_WIDTH_SCHEMA_VERSION,
+    UNCHOSEN_LETTERBOX_SCHEMA_VERSION,
 };
 
 /// Extension a configuration file that could not be parsed is moved aside under, so the next save
@@ -89,7 +90,9 @@ pub fn migrate(raw: &str) -> Result<(Config, Option<u32>), ConfigError> {
             config.judge.spread_uniform_judge_rate(ron::from_str::<SingleJudgeWidthProbe>(raw)?.judge.judge_rate);
             config
         }
-        BUNDLED_SKIN_SCHEMA_VERSION | UNCHOSEN_LETTERBOX_SCHEMA_VERSION | CURRENT_SCHEMA_VERSION => ron::from_str::<Config>(raw)?,
+        BUNDLED_SKIN_SCHEMA_VERSION | UNCHOSEN_LETTERBOX_SCHEMA_VERSION | INPUT_JUDGE_OFFSET_SCHEMA_VERSION | CURRENT_SCHEMA_VERSION => {
+            ron::from_str::<Config>(raw)?
+        }
         from => {
             return Err(ConfigError::Migrate { from, reason: format!("this build reads up to schema version {CURRENT_SCHEMA_VERSION}") });
         }
