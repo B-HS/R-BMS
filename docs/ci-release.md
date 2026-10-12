@@ -56,7 +56,25 @@ macOS 유니버설 빌드의 `x86_64-apple-darwin` 쪽 OpenH264 는 Apple Silico
 ## 3. Phase R 전제와 보안 경계
 
 - 워크플로의 `permissions: contents: write`와 기본 `GITHUB_TOKEN`은 버전 커밋·태그·GitHub Release 생성에 쓰입니다. 이 토큰만으로 macOS 공증이나 Windows Authenticode 서명은 되지 않습니다.
-- 현재 macOS 산출물은 ad-hoc 서명만 하며 공증하지 않습니다. Windows 산출물은 Authenticode 서명 단계가 없습니다. 외부 키, 인증서, 공증 자격 증명은 이 저장소나 문서에 넣지 않습니다.
+- macOS 산출물의 서명과 공증은 아래 시크릿이 저장소에 등록돼 있을 때만 수행합니다(2026-10-12 추가). 등록돼 있지 않으면 이전처럼 ad-hoc 서명만 하고 공증하지 않습니다. Windows 산출물은 Authenticode 서명 단계가 없습니다. 외부 키, 인증서, 공증 자격 증명의 값은 이 저장소나 문서에 넣지 않습니다.
+
+### 3.1 macOS 서명·공증 시크릿
+
+등록 위치: GitHub 저장소 Settings → Secrets and variables → Actions → Repository secrets. 이름은 `release.yml` 의 `build-macos` 잡이 읽는 이름과 같아야 합니다.
+
+| 시크릿 이름 | 내용 | 쓰이는 단계 |
+| --- | --- | --- |
+| `MACOS_CERTIFICATE_P12_BASE64` | Developer ID Application 인증서와 개인 키를 내보낸 `.p12` 파일의 base64 문자열 | 서명 |
+| `MACOS_CERTIFICATE_PASSWORD` | 그 `.p12` 를 내보낼 때 정한 비밀번호 | 서명 |
+| `MACOS_SIGNING_IDENTITY` | 서명 주체 이름. `Developer ID Application: <이름> (<TEAM ID>)` 전체 문자열 | 서명 |
+| `APPLE_API_KEY_P8_BASE64` | App Store Connect API 키 파일(`AuthKey_<KEY ID>.p8`)의 base64 문자열 | 공증 |
+| `APPLE_API_KEY_ID` | 그 API 키의 Key ID | 공증 |
+| `APPLE_API_ISSUER_ID` | App Store Connect 의 Issuer ID | 공증 |
+
+- 앞의 셋만 있으면 Developer ID 서명(hardened runtime, 보안 타임스탬프)까지 하고 공증은 건너뜁니다. 여섯이 다 있으면 `notarytool` 로 공증까지 합니다.
+- 인증서는 잡 안에서 만든 임시 키체인에만 들어가고 잡이 끝나면 키체인을 지웁니다. 키체인 비밀번호는 잡마다 새로 만들므로 시크릿이 아닙니다.
+- 배포물이 단독 실행 파일이라 공증 티켓을 붙일(staple) 수 없습니다. Gatekeeper 는 처음 실행할 때 온라인으로 티켓을 확인합니다.
+- 이 단계는 실제 자격 증명으로 실행해 본 적이 없습니다. 첫 릴리스 실행에서 확인합니다.
 - `prod` 보호 규칙이 자동 버전 커밋/태그 push를 막을 수 있습니다. Phase R에서 실제 보호 정책과 릴리스 주체를 확인한 뒤, 필요한 최소 예외 또는 수동 태그 경로를 선택합니다.
 - 첫 릴리스 버전은 루트 `Cargo.toml`의 현재 `0.1.0`과 일치하는 태그 전략을 정한 뒤 진행합니다. 워크플로를 시험하기 위해 `prod`, 태그 또는 외부 배포를 임의로 만들지 않습니다.
 
