@@ -33,6 +33,10 @@
 //! reads as its number alone, in the room its slider leaves; what the number comes to -- the white
 //! number of a cover, the travel time of a green number -- is said under the preview.
 //!
+//! A row of the play skin that other screens' skins declare under the same name -- the five play
+//! modes share most of theirs -- says so under the preview, and the key the skin menu has for it
+//! ([`APPLY_TO_ALL_KEY`]) puts the row's value onto those screens here too.
+//!
 //! The screen is opened over the screen it was asked for from, which Escape goes back to after the
 //! settings have been written out.
 
@@ -42,16 +46,17 @@ use rbms_skin::loader::{SKIN_TYPE_PLAY_5KEYS, SKIN_TYPE_PLAY_7KEYS, SKIN_TYPE_PL
 use winit::event::MouseButton;
 use winit::keyboard::KeyCode;
 
+use crate::notify::{Level, notify};
 use crate::number_row::{EDIT_HINT, EditKey, NumberInput, NumberValue, RowPart};
 use crate::skin_preview::target::SpeedReadout;
 use crate::skin_preview::{PlayTarget, SkinPreview};
 use crate::skin_select::{SkinRow, SkinRowKind};
 use crate::stage::preview_menu::{
     INFO_ROW_UNDER_FIGURES_Y, InfoFigure, LIST_RECT, ListEntry, ListWindow, NEXT_TAB, NumberCell, PREVIOUS_TAB, ROW_STEP_BACK, ROW_STEP_FORWARD, RowLook,
-    VISIBLE_ROWS, click_step, contains, draw_head, draw_hint, draw_info_figures, draw_info_panel, draw_info_row_at, draw_list, draw_preview, draw_tabs,
+    VISIBLE_ROWS, click_step, contains, draw_head, draw_hint, draw_info_figures, draw_info_panel, draw_info_row_noted, draw_list, draw_preview, draw_tabs,
     fitted_value, last_top, number_part_at, revealed_top, shift_after, stepped_tab, wheel_scrolled,
 };
-use crate::stage::skin_menu::automatic_offset_help;
+use crate::stage::skin_menu::{APPLY_TO_ALL_KEY, automatic_offset_help, shared_row_note};
 use crate::stage::{Canvas, FrameCtx, KeyInput, Stage, StageHandler, Transition, is_left_press};
 use crate::{AppShared, Hot};
 
@@ -101,8 +106,7 @@ const COVER_OFF_MARK: &str = "(COVER OFF)";
 const LIMIT_NOTE: &str = "HI-SPEED IS AT THE END OF ITS RANGE: NO SPEED HOLDS THIS GREEN NUMBER AT THIS TEMPO";
 
 /// The keys of the screen, written along its foot.
-const HINT: &str =
-    "UP DOWN MOVE   LEFT RIGHT CHANGE   SHIFT x10   ENTER NEXT OR TYPE   0 DEFAULT   DRAG A SLIDER   TAB MODE   WHEEL SCROLL   RIGHT CLICK BACK   ESC SAVE";
+const HINT: &str = "UP DOWN MOVE   LEFT RIGHT CHANGE   SHIFT x10   ENTER NEXT OR TYPE   0 DEFAULT   A ALL SCREENS   DRAG A SLIDER   TAB MODE   WHEEL SCROLL   RIGHT CLICK BACK   ESC SAVE";
 
 /// The play menu's own state: the preview on its right, the mode and the tempo it is shown on, the
 /// rows it lists and where the cursor and the list are, and the modifier that turns the key for the
@@ -434,11 +438,37 @@ impl PlayMenuState {
                 let shipped = ctx.shared.skins.number_for(&ctx.shared.config, screen, offset).map(|value| value.shipped);
                 shipped.is_some_and(|shipped| ctx.shared.skins.set_number_for(&mut ctx.shared.config, screen, offset, shipped))
             }
-            Row::Group(_) | Row::Skin(SkinRow::File(_)) | Row::Fold(_) => false,
+            Row::Group(_) | Row::Skin(SkinRow::File(_) | SkinRow::Export) | Row::Fold(_) => false,
         };
         if moved {
             self.preview.settings_changed(ctx.shared);
         }
+    }
+
+    /// Put the value of the row under the cursor onto every other screen whose skin declares the
+    /// same row -- the other play modes, which share most of their options, and any other screen
+    /// that names one the same -- and say how many took it, as the skin menu does for the same key.
+    /// A row that is not a skin's, or that no other screen declares, is left alone.
+    fn apply_focused_to_all(&mut self, ctx: &mut FrameCtx<'_>) {
+        self.reveal_cursor();
+        let Some(Row::Skin(row)) = self.focused() else {
+            return;
+        };
+        let Some(applied) = ctx.shared.skins.apply_to_peers(&mut ctx.shared.config, self.target().screen, row) else {
+            return;
+        };
+        ctx.shared.save_settings();
+        notify(Level::Info, applied.message());
+        self.preview.settings_changed(ctx.shared);
+    }
+
+    /// What is said of a row of the previewed play skin that other screens' skins declare too, or
+    /// `None` for any other row.
+    fn peers_note(&self, shared: &AppShared, row: Row) -> Option<String> {
+        let Row::Skin(row) = row else {
+            return None;
+        };
+        shared_row_note(shared.skins.peers_for(&shared.config, self.target().screen, row).len())
     }
 
     /// One entry of the list as it is written, in full.
@@ -495,6 +525,7 @@ impl PlayMenuState {
             KeyCode::ArrowRight => self.step_focused(ctx, ROW_STEP_FORWARD, self.shift_held),
             KeyCode::Enter | KeyCode::NumpadEnter => self.enter_focused(ctx),
             KeyCode::Digit0 | KeyCode::Numpad0 => self.reset_focused(ctx),
+            code if code == APPLY_TO_ALL_KEY => self.apply_focused_to_all(ctx),
             _ => {}
         }
         Transition::Stay
@@ -528,14 +559,15 @@ impl PlayMenuState {
     }
 
     /// Draw what is said under the preview: what the scroll comes to at the target on show, as a
-    /// row of figures, and the row under the cursor with its label and value in full and what the
-    /// row is for.
+    /// row of figures, and the row under the cursor with its label and value in full, what the
+    /// row is for, and for a row of the skin that other screens declare too, that they do.
     fn draw_info(&self, shared: &AppShared, canvas: &mut Canvas<'_>, readout: &SpeedReadout) {
         draw_info_panel(canvas);
         draw_info_figures(canvas, &summary(readout, shared.config.play.constant_speed), summary_note(readout));
         if let Some(row) = self.focused() {
             let line = self.line(shared, readout, row);
-            draw_info_row_at(canvas, INFO_ROW_UNDER_FIGURES_Y, &line.label, &line.value, self.help_of(shared, row));
+            let note = self.peers_note(shared, row);
+            draw_info_row_noted(canvas, INFO_ROW_UNDER_FIGURES_Y, &line.label, &line.value, self.help_of(shared, row), note.as_deref());
         }
     }
 }

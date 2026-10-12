@@ -36,6 +36,7 @@ use rbms_skin::dst::SkinOffset;
 
 use super::by_hand::{self, FIRST_SIDE_KEY, GOOD_OFF_MS, GREAT_OFF_MS, HAND_HOLD_MS, HELD_SIZE, SECOND_SIDE_KEY};
 use super::*;
+use crate::skin_select::export::{ExportProgress, export_pack};
 use crate::stage::{SkinMenuState, StageHandler};
 
 /// The tempo of a chart played a beat at a time, how long one of its beats lasts at it, and how many
@@ -775,6 +776,42 @@ fn the_keys_of_the_skin_menu_take_the_parts_of_the_default_pack_off_the_field() 
     }
     let written = rbms_config::load(&shared.settings_path).unwrap_or_else(|reason| panic!("the settings Escape wrote do not read back: {reason:?}"));
     assert_eq!(written.config.skin.customisation(document).map(|entry| &entry.offsets), Some(stored), "Escape did not write the parts out");
+}
+
+/// A pack that is exported with its parts faded and its judgement moved is drawn that way by a run
+/// that never saw the one that exported it: a fresh configuration that names the exported folder as
+/// its pack draws the frame the adjusted run drew, pixel for pixel, with nothing of the adjustments
+/// in its own settings. The offsets of a document are read on every frame, so this is the frame's
+/// own reading of what the pack gives and not only a menu's.
+#[test]
+fn a_run_that_names_an_exported_default_pack_draws_the_offsets_it_was_exported_with() {
+    let drawn_by = |tag: &str, pack: &Path, adjusted: bool| {
+        let played = Played::ByHand { channel: FIRST_SIDE_KEY, strokes: 1 };
+        let setup = FieldSetup { tag, pack, mode: rbms_model::Mode::BEAT_7K, played, size: Some(HELD_SIZE), rows: &[], offsets: &[], carried: 0 };
+        let mut run = FieldRun::enter(&setup).unwrap_or_else(|reason| panic!("{tag}: not entered: {reason}"));
+        if adjusted {
+            run.set_every_part(HALF_OPACITY).unwrap_or_else(|reason| panic!("{tag}: {reason}"));
+            run.set(JUDGE_POSITION, raised(JUDGEMENT_MOVED_BY)).unwrap_or_else(|reason| panic!("{tag}: {reason}"));
+        }
+        let down_ms = run.strike(0, GREAT_OFF_MS).unwrap_or_else(|reason| panic!("{tag}: not played: {reason}"));
+        run.draw_at(down_ms + JUDGEMENT_LOOKED_AT_MS).unwrap_or_else(|reason| panic!("{tag}: not drawn: {reason}"));
+        run
+    };
+    let pack = default_pack();
+    let shipped = drawn_by("exported-shipped", &pack, false);
+    let adjusted = drawn_by("exported-adjusted", &pack, true);
+    assert!(shipped.pixels.rgba() != adjusted.pixels.rgba(), "the offsets that were set change nothing of the frame they are looked for in");
+
+    let outbox = settings_of("exported-outbox").with_file_name("outbox");
+    std::fs::create_dir_all(&outbox).expect("the folder exported into is writable");
+    let shared = &adjusted.app.shared;
+    let request = shared.skins.export_request(&shared.config, &outbox).expect("there is a pack to export").expect("the adjustments are written out");
+    let exported = export_pack(&request, &ExportProgress::default()).unwrap_or_else(|reason| panic!("the pack was not exported: {reason:?}"));
+
+    let reopened = drawn_by("exported-reopened", &plain_path(&exported.folder), false);
+    assert!(reopened.app.shared.config.skin.custom.is_empty(), "what the pack gives was written into the player's own choices");
+    assert!(reopened.pixels.rgba() != shipped.pixels.rgba(), "a run that names the export is drawn as the pack was shipped, without what it was exported with");
+    assert!(reopened.pixels.rgba() == adjusted.pixels.rgba(), "a run that names the export is not drawn as the run that exported it was");
 }
 
 /// The lowercase name a capture of a part is saved under.

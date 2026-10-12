@@ -27,6 +27,12 @@
 //! asked for. A Lua skin builds its screen by reading the game while it runs (`load_lua_skin`), so
 //! it waits until the screen it draws is on its first frame and is read against that screen's own
 //! state; the library holds the request until then.
+//!
+//! A pack may come with adjustments of its own ([`adjustments`]): the choices somebody made in its
+//! documents before exporting it ([`export`]). They are read with the pack and laid under what the
+//! player stored for the same documents ([`SkinLibrary::customisation`]), so a row the player has
+//! not touched stands where the pack put it, and one the player moved stands where the player put
+//! it. Nothing of the pack's is ever written into the settings file.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -34,7 +40,9 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use rbms_config::{Config, DEFAULT_SKIN_FOLDER, DEFAULT_VALUE, NO_UNIT, NONE_VALUE, NumberSpec, SkinCustomisation, skin_document_label};
+use rbms_config::{
+    ACTION_VALUE, Config, DEFAULT_SKIN_FOLDER, DEFAULT_VALUE, NO_UNIT, NONE_VALUE, NumberSpec, SKIN_SCREEN_LABELS, SkinCustomisation, skin_document_label,
+};
 use rbms_skin::dst::SkinOffset;
 use rbms_skin::loader::{
     LoadedSkin, ParserKind, SkinHeader, SkinLoadOptions, SkinUserConfig, automatic_offsets, is_lua_skin, is_supported_skin_type, load_header,
@@ -46,6 +54,12 @@ use rbms_skin::resolve::{CustomFile, RANDOM_SELECTION, plain_path};
 
 use crate::assets::{installed_default_pack, skin_overlay_folder};
 use crate::number_row::NumberValue;
+
+pub(crate) mod adjustments;
+pub(crate) mod export;
+
+use adjustments::{ADJUSTMENTS_FILE, DocumentAdjustments};
+use export::{ExportLimits, ExportRequest};
 
 /// Environment variable naming a skin pack folder for this run only. It outranks the pack the
 /// settings file names and is never written back to it.
@@ -140,6 +154,12 @@ const MISSING_PACK_NOTE: &str = "THE PACK FOLDER IS NOT THERE";
 /// pass that failed, so with the file's name taken off its front it reads on from here:
 /// `decide.luaskin DID NOT READ (header pass): ...`.
 const UNREAD_SKIN_NOTE: &str = " DID NOT READ";
+
+/// What the EXPORT row is called.
+const EXPORT_LABEL: &str = "EXPORT";
+
+/// What separates a row's name from its value where the two are said on one line.
+const ROW_VALUE_SEPARATOR: &str = ": ";
 
 /// One axis of a skin offset, which a document says one by one whether the player may nudge.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -270,8 +290,9 @@ pub(crate) enum SkinRowKind {
     Opacity,
 }
 
-/// One customisation row the chosen document declares, addressed by its position in the document's
-/// own list so a document that is edited between two runs keeps the rows it still has.
+/// One row the skin library adds to a menu: a customisation row the chosen document declares,
+/// addressed by its position in the document's own list so a document that is edited between two
+/// runs keeps the rows it still has, or the one row that is the pack's rather than a document's.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum SkinRow {
     /// The `property[]` entry at this index: a list of named options, one of which is on.
@@ -280,6 +301,44 @@ pub(crate) enum SkinRow {
     File(usize),
     /// One axis of the `offset[]` entry at this index.
     Offset(usize, OffsetAxis),
+    /// The row that exports the pack in effect with the choices made in it. No document declares
+    /// it, and only the skin menu lists it ([`SkinLibrary::can_export`]).
+    Export,
+}
+
+/// What putting one row's value on the other screens that declare the row came to.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct AppliedToPeers {
+    /// The row and the value that was applied, as a menu writes them.
+    pub(crate) line: (String, String),
+    /// How many other screens now stand on the value.
+    pub(crate) applied: usize,
+    /// How many other screens declare the row and could not take the value: an option there has no
+    /// item of that name.
+    pub(crate) skipped: usize,
+}
+
+impl AppliedToPeers {
+    /// What is said of it, on one line.
+    pub(crate) fn message(&self) -> String {
+        let (label, value) = &self.line;
+        let screens = |count: usize| if count == 1 { "screen" } else { "screens" };
+        let skipped = match self.skipped {
+            0 => String::new(),
+            skipped => format!(" ({skipped} skipped: no item of that name)"),
+        };
+        format!("{label}{ROW_VALUE_SEPARATOR}{value} applied to {} other {}{skipped}", self.applied, screens(self.applied))
+    }
+}
+
+/// What a pack's own adjustments and the player's choices come to for one document, kept so that
+/// whatever draws a frame can borrow it.
+struct Effective {
+    /// What the player had stored for the document when this was worked out. While the settings
+    /// still hold exactly this, `merged` is what the document is drawn with.
+    own: Option<SkinCustomisation>,
+    /// The pack's adjustments with the player's choices laid over them.
+    merged: SkinCustomisation,
 }
 
 /// What a read of a whole document is made with, beyond the choices stored for it.
@@ -334,6 +393,12 @@ pub(crate) struct SkinLibrary {
     /// The documents that were found in the pack, which are the ones read with the pack as their
     /// root, each in its plain spelling ([`plain_path`]).
     pack_paths: BTreeSet<PathBuf>,
+    /// What the pack's own adjustments give each of its documents, by the document's path in its
+    /// plain spelling. Empty for a pack that came with none.
+    pack_given: BTreeMap<PathBuf, SkinCustomisation>,
+    /// What each document the pack gives something to is drawn with, by the path the settings
+    /// store its choices under ([`SkinLibrary::customisation`]).
+    effective: BTreeMap<String, Effective>,
     /// What every header read so far answered.
     headers: HeaderCache,
     /// The document each screen is drawn with, once it has been read whole.
@@ -504,6 +569,8 @@ impl SkinLibrary {
             documents: Vec::new(),
             pack_documents: BTreeMap::new(),
             pack_paths: BTreeSet::new(),
+            pack_given: BTreeMap::new(),
+            effective: BTreeMap::new(),
             headers: HeaderCache::default(),
             loaded: BTreeMap::new(),
             errors: BTreeMap::new(),
@@ -666,8 +733,97 @@ impl SkinLibrary {
         for header in &found {
             self.pack_documents.entry(header.skin_type).or_insert_with(|| header.path.to_string_lossy().into_owned());
         }
+        self.read_adjustments(&found);
         self.drop_moved(config);
         found
+    }
+
+    /// Read the adjustments the pack in effect came with, and settle what they give each of the
+    /// pack's documents, whose headers are `found`.
+    ///
+    /// A file that is there and cannot be used gives nothing, and is queued to be reported with the
+    /// pack's unreadable skins ([`SkinLibrary::take_unreadable`]), once for each version of it.
+    fn read_adjustments(&mut self, found: &[SkinHeader]) {
+        self.pack_given.clear();
+        let Some(pack) = self.pack.clone().filter(|_| !self.pack_missing) else {
+            return;
+        };
+        let file = pack.join(ADJUSTMENTS_FILE);
+        let read = match adjustments::read(&pack) {
+            Ok(Some(read)) => read,
+            Ok(None) => return,
+            Err(reason) => {
+                let version = std::fs::symlink_metadata(&file).ok().and_then(|found| Some((found.modified().ok()?, found.len())));
+                if self.reported.get(&file) != Some(&version) {
+                    self.reported.insert(file.clone(), version);
+                    self.unreadable.push((file, first_line(&reason)));
+                }
+                return;
+            }
+        };
+        for header in found {
+            let given =
+                adjustments::document_name(header).and_then(|name| read.documents.get(&name)).map(|document| adjustments::given_by(header, &pack, document));
+            if let Some(given) = given.filter(|given| *given != SkinCustomisation::default()) {
+                self.pack_given.insert(plain_path(&header.path), given);
+            }
+        }
+    }
+
+    /// What the pack's own adjustments give the document at `path`, or `None` for a document they
+    /// say nothing of.
+    fn given(&self, path: &str) -> Option<&SkinCustomisation> {
+        if self.pack_given.is_empty() {
+            return None;
+        }
+        self.pack_given.get(&plain_path(Path::new(path)))
+    }
+
+    /// What the document at `path` is drawn with: what the player chose inside it, over what the
+    /// pack's own adjustments give it. `None` for a document nothing is chosen in by either.
+    ///
+    /// A row the player stored a choice for stands on that choice; any other stands where the pack
+    /// put it. This is what a loader is handed, what the rows of a menu show, and what a frame
+    /// reads a document's offsets from. It is borrowed, as the stored choices themselves are, so
+    /// the two are worked into one whenever the library is handed the configuration to change or
+    /// to settle against ([`SkinLibrary::settle_effective`]) -- which a frame does before it draws.
+    /// Between two of those, a configuration changed behind the library's back reads as the
+    /// player's own choices alone.
+    pub(crate) fn customisation<'a>(&'a self, config: &'a Config, path: &str) -> Option<&'a SkinCustomisation> {
+        let own = config.skin.customisation(path);
+        let Some(given) = self.given(path) else {
+            return own;
+        };
+        match self.effective.get(path) {
+            Some(held) if held.own.as_ref() == own => Some(&held.merged),
+            _ => own.or(Some(given)),
+        }
+    }
+
+    /// [`SkinLibrary::customisation`] for the document one screen is to be drawn with.
+    pub(crate) fn customisation_for<'a>(&'a self, config: &'a Config, screen: i32) -> Option<&'a SkinCustomisation> {
+        self.customisation(config, self.document_path(config, screen)?)
+    }
+
+    /// Work what the pack gives and what the player chose into one, for every document the pack
+    /// gives something to that a screen may be drawn with. One that is still what it was worked
+    /// out from is left as it is, so calling this every frame costs a comparison a document.
+    fn settle_effective(&mut self, config: &Config) {
+        if self.pack_given.is_empty() {
+            self.effective.clear();
+            return;
+        }
+        let paths: BTreeSet<&String> = self.pack_documents.values().chain(config.skin.selected.values()).chain(config.skin.custom.keys()).collect();
+        let mut settled = BTreeMap::new();
+        for path in paths {
+            let Some(given) = self.pack_given.get(&plain_path(Path::new(path))) else {
+                continue;
+            };
+            let own = config.skin.customisation(path);
+            let held = self.effective.remove(path).filter(|held| held.own.as_ref() == own);
+            settled.insert(path.clone(), held.unwrap_or_else(|| Effective { own: own.cloned(), merged: merged(given, own) }));
+        }
+        self.effective = settled;
     }
 
     /// Forget what was read for every screen that is no longer drawn with the document that read
@@ -683,6 +839,7 @@ impl SkinLibrary {
         for screen in moved {
             self.forget_read(screen);
         }
+        self.settle_effective(config);
     }
 
     /// The documents that declare the screen the menu is configuring, in the order the row cycles.
@@ -798,6 +955,7 @@ impl SkinLibrary {
                 let def = header.offsets.get(at)?;
                 Some(if is_opacity(def) { SkinRowKind::Opacity } else { SkinRowKind::Offset(axis) })
             }
+            SkinRow::Export => None,
         }
     }
 
@@ -825,21 +983,24 @@ impl SkinLibrary {
     /// in whole percent. An offset stored between two units, or past the row's end, reads as the
     /// nearest step the row has.
     ///
-    /// The step the row ships on is no offset at all, which for an opacity is the whole of it, and
-    /// is where an opacity's slider and its arrows end: only a typed figure takes one further.
+    /// The step the row ships on is where the pack's own adjustments put it, and no offset at all
+    /// when they say nothing of it, which for an opacity is the whole of it. All of an opacity is
+    /// where its slider and its arrows end: only a typed figure takes one further.
     pub(crate) fn number_for(&self, config: &Config, screen: i32, row: SkinRow) -> Option<NumberValue> {
         let SkinRow::Offset(at, axis) = row else {
             return None;
         };
         let def = self.header_of(config, screen)?.offsets.get(at)?;
-        let stored = self.document_path(config, screen).and_then(|path| config.skin.customisation(path));
+        let stored = self.customisation_for(config, screen);
         let held = stored.and_then(|entry| entry.offsets.get(&def.id).copied()).unwrap_or_default();
+        let given = self.document_path(config, screen).and_then(|path| self.given(path)).and_then(|given| given.offsets.get(&def.id).copied());
+        let shipped = given.map_or(OFFSET_RESET, |given| axis.get(given));
         if is_opacity(def) {
-            let (steps, shipped) = (i64::from(opacity_percent(held.a)), i64::from(opacity_percent(OFFSET_RESET)));
+            let (steps, shipped) = (i64::from(opacity_percent(held.a)), i64::from(opacity_percent(shipped)));
             return Some(NumberValue::of(OPACITY_STEPS, steps, shipped).with_slider_to(i64::from(OPACITY_FULL_PERCENT)));
         }
         let spec = axis.steps();
-        Some(NumberValue::of(spec, spec.steps_of(f64::from(axis.get(held))), spec.steps_of(f64::from(OFFSET_RESET))))
+        Some(NumberValue::of(spec, spec.steps_of(f64::from(axis.get(held))), spec.steps_of(f64::from(shipped))))
     }
 
     /// [`SkinLibrary::number_for`] for a row of the chosen document.
@@ -853,7 +1014,8 @@ impl SkinLibrary {
     ///
     /// A row already on that step is left exactly as it is stored: an offset a settings file holds
     /// between two steps, or past the row's end, is not rewritten by setting the row to what it
-    /// already reads.
+    /// already reads. An offset the player had not stored begins from where the pack's own
+    /// adjustments have it, so moving one of its axes keeps the others where they stood.
     pub(crate) fn set_number_for(&mut self, config: &mut Config, screen: i32, row: SkinRow, steps: i64) -> bool {
         let SkinRow::Offset(at, axis) = row else {
             return false;
@@ -872,7 +1034,9 @@ impl SkinLibrary {
             return false;
         }
         let next = if fading { opacity_alpha(steps as i32) } else { steps as f32 };
-        axis.set(config.skin.customise(&path).offsets.entry(id).or_default(), next);
+        let standing = self.customisation(config, &path).and_then(|entry| entry.offsets.get(&id).copied()).unwrap_or_default();
+        axis.set(config.skin.customise(&path).offsets.entry(id).or_insert(standing), next);
+        self.settle_effective(config);
         true
     }
 
@@ -888,11 +1052,15 @@ impl SkinLibrary {
 
     /// The label and value of one customisation row of the document one screen is to be drawn with.
     pub(crate) fn line_for(&self, config: &Config, screen: i32, row: SkinRow) -> (String, String) {
+        if row == SkinRow::Export {
+            return export_row();
+        }
         let Some(header) = self.header_of(config, screen) else {
             return missing_row();
         };
-        let stored = self.document_path(config, screen).and_then(|path| config.skin.customisation(path));
+        let stored = self.customisation_for(config, screen);
         match row {
+            SkinRow::Export => export_row(),
             SkinRow::Property(at) => match header.properties.get(at) {
                 Some(property) => (
                     labelled(&property.category, &property.name),
@@ -942,20 +1110,21 @@ impl SkinLibrary {
                 let Some(property) = header.properties.get(at).cloned() else {
                     return false;
                 };
-                let current = config.skin.customisation(&path).and_then(|entry| entry.properties.get(&property.name).copied());
+                let current = self.customisation(config, &path).and_then(|entry| entry.properties.get(&property.name).copied());
                 let at = stepped(property.item.iter().position(|item| item.op == selected_option(&property, current)), property.item.len(), delta);
                 let Some(item) = at.and_then(|at| property.item.get(at)) else {
                     return false;
                 };
                 config.skin.customise(&path).properties.insert(property.name.clone(), item.op);
                 self.stale.insert(screen);
+                self.settle_effective(config);
                 true
             }
             SkinRow::File(at) => {
                 let Some(file) = header.custom_files.get(at).cloned() else {
                     return false;
                 };
-                let current = config.skin.customisation(&path).and_then(|entry| entry.filepaths.get(&file.name)).cloned();
+                let current = self.customisation(config, &path).and_then(|entry| entry.filepaths.get(&file.name)).cloned();
                 let chosen = current.unwrap_or_else(|| file_value(&file, None));
                 let at = stepped(file.candidates.iter().position(|name| *name == chosen), file.candidates.len(), delta);
                 let Some(name) = at.and_then(|at| file.candidates.get(at)) else {
@@ -963,17 +1132,20 @@ impl SkinLibrary {
                 };
                 config.skin.customise(&path).filepaths.insert(file.name.clone(), name.clone());
                 self.stale.insert(screen);
+                self.settle_effective(config);
                 true
             }
             SkinRow::Offset(_, _) => match self.number_for(config, screen, row) {
                 Some(value) => self.set_number_for(config, screen, row, value.stepped(delta, false)),
                 None => false,
             },
+            SkinRow::Export => false,
         }
     }
 
     /// Drop the choice made for one option of the document one screen is to be drawn with, so the
-    /// option is back on the item its author chose, and report whether there was a choice to drop.
+    /// option is back on the item the pack's own adjustments put it on, or the one its author chose
+    /// when they say nothing of it, and report whether there was a choice to drop.
     ///
     /// An option changes what is drawn, so the document has to be read again.
     pub(crate) fn reset_property_for(&mut self, config: &mut Config, screen: i32, at: usize) -> bool {
@@ -991,7 +1163,124 @@ impl SkinLibrary {
             config.skin.forget(&path);
         }
         self.stale.insert(screen);
+        self.settle_effective(config);
         true
+    }
+
+    /// Whether there is a pack to export: one is in effect and its folder is on the disk.
+    pub(crate) fn can_export(&self) -> bool {
+        self.pack.is_some() && !self.pack_missing
+    }
+
+    /// What exporting the pack in effect into `destination` is to do: copy the pack, and write into
+    /// the copy what each of its documents is drawn with here -- the player's choices over the
+    /// pack's own adjustments. `None` when there is no pack to export, and `Err` with why when the
+    /// choices cannot be written out.
+    ///
+    /// The documents are the ones the folders were last walked for, which the skin menu does on its
+    /// way in. A document chosen by hand from outside the pack is not the pack's and is not written
+    /// of.
+    pub(crate) fn export_request(&self, config: &Config, destination: &Path) -> Option<Result<ExportRequest, String>> {
+        let pack = self.pack.clone().filter(|_| self.can_export())?;
+        let mut documents: BTreeMap<String, DocumentAdjustments> = BTreeMap::new();
+        for header in self.documents.iter().filter(|header| self.pack_paths.contains(&plain_path(&header.path))) {
+            let chosen = self.customisation(config, &header.path.to_string_lossy());
+            let written = chosen.and_then(|chosen| adjustments::written_for(header, &pack, chosen));
+            if let (Some(name), Some(written)) = (adjustments::document_name(header), written) {
+                documents.insert(name, written);
+            }
+        }
+        Some(adjustments::text(documents).map(|adjustments| ExportRequest {
+            pack,
+            destination: destination.to_path_buf(),
+            adjustments,
+            limits: ExportLimits::default(),
+        }))
+    }
+
+    /// The other screens whose document declares the row `row` of the document `screen` is to be
+    /// drawn with: an option of the same name, or an offset of the same name that may be moved
+    /// along the same axis. Empty for a file slot, whose files are each document's own.
+    ///
+    /// Rows are matched by name and nothing else. Two documents of one pack that mean the same
+    /// thing by an option call it the same; nothing here ties them together, and each keeps its own
+    /// value until the player puts one on the others ([`SkinLibrary::apply_to_peers`]).
+    pub(crate) fn peers_for(&self, config: &Config, screen: i32, row: SkinRow) -> Vec<i32> {
+        let Some(header) = self.header_of(config, screen) else {
+            return Vec::new();
+        };
+        let others = || (0..SKIN_SCREEN_LABELS.len() as i32).filter(move |other| *other != screen);
+        match row {
+            SkinRow::Property(at) => {
+                let Some(property) = header.properties.get(at) else {
+                    return Vec::new();
+                };
+                others()
+                    .filter(|other| self.header_of(config, *other).is_some_and(|peer| peer.properties.iter().any(|entry| entry.name == property.name)))
+                    .collect()
+            }
+            SkinRow::Offset(at, axis) => {
+                let Some(def) = header.offsets.get(at) else {
+                    return Vec::new();
+                };
+                let declares = |peer: &SkinHeader| peer.offsets.iter().any(|entry| entry.name == def.name && axis.allowed(entry));
+                others().filter(|other| self.header_of(config, *other).is_some_and(declares)).collect()
+            }
+            SkinRow::File(_) | SkinRow::Export => Vec::new(),
+        }
+    }
+
+    /// Put the value one row of the document `screen` is to be drawn with stands on onto every
+    /// other screen that declares the row ([`SkinLibrary::peers_for`]), and answer what that came
+    /// to, or `None` for a row no other screen declares.
+    ///
+    /// An option is put on the item of the same name, and a screen whose option has no item of that
+    /// name is passed over. An offset is moved along the one axis the row is of. Each value is
+    /// stored as the player's own choice for that screen's document, which is read again when its
+    /// screen is next drawn.
+    pub(crate) fn apply_to_peers(&mut self, config: &mut Config, screen: i32, row: SkinRow) -> Option<AppliedToPeers> {
+        let peers = self.peers_for(config, screen, row);
+        if peers.is_empty() {
+            return None;
+        }
+        let header = self.header_of(config, screen)?.clone();
+        let stored = self.customisation_for(config, screen).cloned().unwrap_or_default();
+        let mut outcome = AppliedToPeers { line: self.line_for(config, screen, row), ..AppliedToPeers::default() };
+        for peer in peers {
+            let Some((path, declared)) = self.document_path(config, peer).map(str::to_owned).zip(self.header_of(config, peer).cloned()) else {
+                continue;
+            };
+            let taken = match row {
+                SkinRow::Property(at) => header.properties.get(at).is_some_and(|property| {
+                    let op = selected_option(property, stored.properties.get(&property.name).copied());
+                    let item = property.item.iter().find(|item| item.op == op);
+                    let theirs = declared.properties.iter().find(|entry| entry.name == property.name);
+                    let found = item.zip(theirs).and_then(|(item, theirs)| theirs.item.iter().find(|entry| entry.name == item.name));
+                    found.is_some_and(|found| {
+                        config.skin.customise(&path).properties.insert(property.name.clone(), found.op);
+                        true
+                    })
+                }),
+                SkinRow::Offset(at, axis) => header.offsets.get(at).is_some_and(|def| {
+                    let figure = axis.get(stored.offsets.get(&def.id).copied().unwrap_or_default());
+                    let theirs = declared.offsets.iter().find(|entry| entry.name == def.name && axis.allowed(entry));
+                    theirs.is_some_and(|theirs| {
+                        let standing = self.customisation(config, &path).and_then(|entry| entry.offsets.get(&theirs.id).copied()).unwrap_or_default();
+                        axis.set(config.skin.customise(&path).offsets.entry(theirs.id).or_insert(standing), figure);
+                        true
+                    })
+                }),
+                SkinRow::File(_) | SkinRow::Export => false,
+            };
+            if taken {
+                outcome.applied += 1;
+                self.stale.insert(peer);
+            } else {
+                outcome.skipped += 1;
+            }
+        }
+        self.settle_effective(config);
+        Some(outcome)
     }
 
     /// Step the SKIN row through leaving the screen alone -- which draws the pack's document for it,
@@ -1009,10 +1298,13 @@ impl SkinLibrary {
         }
         config.skin.select(config.skin.screen, chosen);
         self.stale.insert(config.skin.screen);
+        self.settle_effective(config);
         true
     }
 
-    /// Drop every choice made in the chosen document, and report whether there was one to drop.
+    /// Drop every choice the player made in the chosen document, and report whether there was one
+    /// to drop. The document is then drawn as the pack's own adjustments have it, or as its author
+    /// shipped it when the pack came with none.
     pub(crate) fn forget(&mut self, config: &mut Config) -> bool {
         let Some(path) = self.document_path(config, config.skin.screen).map(str::to_owned) else {
             return false;
@@ -1022,6 +1314,7 @@ impl SkinLibrary {
         }
         config.skin.forget(&path);
         self.stale.insert(config.skin.screen);
+        self.settle_effective(config);
         true
     }
 
@@ -1070,6 +1363,7 @@ impl SkinLibrary {
     /// waiting: it is read by [`SkinLibrary::read_waiting`] on the first frame of the screen it
     /// draws, against that screen's state.
     pub(crate) fn request_for(&mut self, config: &Config, screen: i32) {
+        self.settle_effective(config);
         self.forget_read(screen);
         let Some(path) = self.readable_path(config, screen) else {
             return;
@@ -1086,6 +1380,7 @@ impl SkinLibrary {
     /// the caller brings: what a test does in place of drawing the screen's first frame.
     #[cfg(test)]
     pub(crate) fn reload_for(&mut self, config: &Config, screen: i32, read: SkinRead<'_>) {
+        self.settle_effective(config);
         self.forget_read(screen);
         let Some(path) = self.readable_path(config, screen) else {
             return;
@@ -1269,11 +1564,13 @@ impl SkinLibrary {
     ///
     /// A document found in the pack may read the pack's folder and nothing above it; any other may
     /// read the skin folder ([`SkinLibrary::reading_root`]). Whatever the skin writes goes to the
-    /// overlay kept for its pack beside the settings file, never into the skin's own folder.
+    /// overlay kept for its pack beside the settings file, never into the skin's own folder. The
+    /// choices it is read with are the player's over the pack's own ([`SkinLibrary::customisation`]).
     fn read(&self, config: &Config, path: &str, screen: i32, read: SkinRead<'_>) -> Result<Box<LoadedSkin>, String> {
         let document = Path::new(path);
         let root = self.reading_root(document);
-        let user = config.skin.user_config(path);
+        let chosen = self.customisation(config, path).cloned().unwrap_or_default();
+        let user = SkinUserConfig { path: path.to_owned(), properties: chosen.properties, filepaths: chosen.filepaths, offsets: chosen.offsets };
         let overlay = skin_overlay_folder(&self.settings_path, document);
         let mode = skin_type_mode(screen).unwrap_or(crate::MODE);
         let options = SkinLoadOptions { rng_seed: read.seed, write_overlay: Some(&overlay), ..SkinLoadOptions::new(root, &user, mode) };
@@ -1391,6 +1688,25 @@ fn labelled(category: &str, name: &str) -> String {
     }
 }
 
+/// What the EXPORT row shows.
+fn export_row() -> (String, String) {
+    (EXPORT_LABEL.to_string(), ACTION_VALUE.to_string())
+}
+
+/// What a pack's own adjustments and the player's choices come to for one document: every row the
+/// player stored a choice for stands on it, and every other stands where the pack put it. An offset
+/// is one row for this, whichever of its axes the player moved: it is stored whole, begun from
+/// where the pack had it ([`SkinLibrary::set_number_for`]).
+fn merged(given: &SkinCustomisation, own: Option<&SkinCustomisation>) -> SkinCustomisation {
+    let mut merged = given.clone();
+    if let Some(own) = own {
+        merged.properties.extend(own.properties.iter().map(|(name, op)| (name.clone(), *op)));
+        merged.filepaths.extend(own.filepaths.iter().map(|(name, file)| (name.clone(), file.clone())));
+        merged.offsets.extend(own.offsets.iter().map(|(id, offset)| (*id, *offset)));
+    }
+    merged
+}
+
 /// The name of the option a customisation row is switched to.
 fn property_value(property: &PropertyDef, chosen: Option<i32>) -> String {
     let op = selected_option(property, chosen);
@@ -1420,6 +1736,8 @@ fn stepped(at: Option<usize>, len: usize, delta: i32) -> Option<usize> {
 
 #[cfg(test)]
 mod default_pack_tests;
+#[cfg(test)]
+mod export_tests;
 #[cfg(test)]
 pub(crate) mod fixtures;
 #[cfg(test)]

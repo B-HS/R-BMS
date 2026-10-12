@@ -189,3 +189,68 @@ pub(crate) fn write_fading_play(skin_folder: &Path) -> PathBuf {
     std::fs::write(&path, fading_play_document()).expect("the document is written");
     path
 }
+
+/// The adjustable pack's document for the song browser: two options, a file slot, an offset that
+/// moves along two axes, and one that only fades.
+pub(crate) const ADJUSTABLE_SELECT: &str = r#"{
+    "type": 5, "name": "Select", "w": 1280, "h": 720,
+    "property": [
+        { "name": "Theme", "item": [{ "name": "Dark", "op": 901 }, { "name": "Light", "op": 902 }], "def": "Dark" },
+        { "name": "Cover", "item": [{ "name": "On", "op": 903 }, { "name": "Off", "op": 904 }], "def": "On" }
+    ],
+    "filepath": [{ "name": "Background", "path": "bg/*.png", "def": "day.png" }],
+    "offset": [
+        { "name": "Judge", "id": 40, "x": true, "y": true },
+        { "name": "Panel Opacity", "id": 41, "a": true }
+    ],
+    "destination": []
+}"#;
+
+/// Its document for the decide screen, which declares the same option and the same opacity under
+/// numbers of its own.
+const ADJUSTABLE_DECIDE: &str = r#"{
+    "type": 6, "name": "Decide", "w": 1280, "h": 720,
+    "property": [{ "name": "Theme", "item": [{ "name": "Dark", "op": 911 }, { "name": "Light", "op": 912 }], "def": "Dark" }],
+    "offset": [{ "name": "Panel Opacity", "id": 51, "a": true }],
+    "destination": []
+}"#;
+
+/// Its document for the result screen, whose option of the same name has no item called Light, and
+/// whose offset of the same name moves along one axis only.
+const ADJUSTABLE_RESULT: &str = r#"{
+    "type": 7, "name": "Result", "w": 1280, "h": 720,
+    "property": [{ "name": "Theme", "item": [{ "name": "Dark", "op": 921 }, { "name": "Mono", "op": 922 }], "def": "Dark" }],
+    "offset": [{ "name": "Judge", "id": 60, "x": true }],
+    "destination": []
+}"#;
+
+/// The files of the fixture pack that are not documents, each with what is in it.
+pub(crate) const ADJUSTABLE_PACK_FILES: [(&str, &str); 5] =
+    [("bg/day.png", "day"), ("bg/night.png", "night"), ("lua/parts/util.lua", "return {}"), ("font/main.fnt", "font"), ("sound/open.wav", "sound")];
+
+/// What is in the fixture pack and is no part of an export: a hidden file, a hidden folder, and the
+/// record an installer keeps.
+pub(crate) const ADJUSTABLE_LEFT_OUT: [&str; 3] = [".thumbs", ".history/old.json", crate::assets::default_pack::MANIFEST_FILE];
+
+/// Write one file of a fixture, making the folders on the way to it.
+pub(crate) fn write_fixture_file(path: &Path, text: &str) {
+    std::fs::create_dir_all(path.parent().expect("a fixture file has a folder")).expect("the fixture folder is writable");
+    std::fs::write(path, text).expect("the fixture file is written");
+}
+
+/// Write the adjustable pack into `home/pack`, and answer its folder: a pack of three documents that
+/// declare an option and offsets under the same names, with the files they draw from and what an
+/// export leaves out.
+pub(crate) fn write_adjustable_pack(home: &Path) -> PathBuf {
+    let pack = home.join("pack");
+    for (name, text) in [("select.json", ADJUSTABLE_SELECT), ("decide.json", ADJUSTABLE_DECIDE), ("result.json", ADJUSTABLE_RESULT)] {
+        write_fixture_file(&pack.join(name), text);
+    }
+    for (name, text) in ADJUSTABLE_PACK_FILES {
+        write_fixture_file(&pack.join(name), text);
+    }
+    for name in ADJUSTABLE_LEFT_OUT {
+        write_fixture_file(&pack.join(name), "this machine's own");
+    }
+    pack
+}

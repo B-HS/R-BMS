@@ -281,11 +281,11 @@ impl Sample {
     }
 }
 
-/// The offset of the whole screen stored for the document `screen` is drawn with, which a compiled
-/// screen reads on the first frame it draws and keeps.
+/// The offset of the whole screen the document `screen` is drawn with stands on -- the player's own,
+/// or the one its pack came with -- which a compiled screen reads on the first frame it draws and
+/// keeps.
 fn stored_whole_offset(shared: &AppShared, screen: i32) -> Option<SkinOffset> {
-    let document = shared.skins.document_path(&shared.config, screen)?;
-    shared.config.skin.customisation(document)?.offset(OFFSET_ALL)
+    shared.skins.customisation_for(&shared.config, screen)?.offset(OFFSET_ALL)
 }
 
 /// How the document of the previewed screen stands with the library, as far as a preview has to do

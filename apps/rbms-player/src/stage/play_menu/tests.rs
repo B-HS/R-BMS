@@ -1352,4 +1352,5 @@ fn the_menu_over_the_pack_the_environment_names_can_be_captured() {
 }
 
 mod numbers;
+mod shared;
 mod skin_offsets;

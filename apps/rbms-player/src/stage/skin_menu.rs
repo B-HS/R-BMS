@@ -24,6 +24,17 @@
 //! because an offset is read where it is stored; and Enter, or a press on the number, opens it to be
 //! typed into. A drag writes the settings file once, when the button comes back up.
 //!
+//! Under the rows of the settings table is one that is the pack's: EXPORT, listed while there is a
+//! pack to export. It asks for a folder and writes a copy of the pack there with the choices made
+//! in its documents ([`crate::skin_select::export`]). The copy runs beside the frame loop: the
+//! screen keeps drawing and taking keys, says how far the copy has got under the preview, and
+//! Escape calls it off rather than leaving the menu.
+//!
+//! A row of the chosen document that other screens' documents declare too -- an option of the same
+//! name, an offset of the same name -- says so under the preview, and one key ([`APPLY_TO_ALL_KEY`])
+//! puts the value it stands on onto those screens. Nothing ties the screens together otherwise:
+//! each keeps its own value until that key is pressed.
+//!
 //! The screen is laid out in the fixed space every built-in screen is laid out in, and is opened
 //! over the screen it was asked for from, which Escape goes back to.
 
@@ -36,17 +47,19 @@ use rbms_skin::loader::{
 use winit::event::MouseButton;
 use winit::keyboard::KeyCode;
 
-use crate::dialog::{DialogHandle, DialogState, pick_skin_pack_folder};
+use crate::dialog::{DialogHandle, DialogState, pick_skin_export_folder, pick_skin_pack_folder};
+use crate::notify::{Level, notify};
 use crate::number_row::{EDIT_HINT, EditKey, NumberInput, RowPart};
 use crate::settings_ui::SettingRow;
 use crate::settings_view::SettingsLine;
 use crate::skin_preview::SkinPreview;
+use crate::skin_select::export::{ExportError, ExportJob, ExportStanding, Exported, megabytes};
 use crate::skin_select::{OffsetAxis, SkinRow, SkinRowKind};
 use crate::stage::preview_menu::{
-    LABEL_GAP, LABEL_SCALE, LIST_RECT, ListEntry, ListWindow, NEXT_TAB as NEXT_SCREEN, NumberCell, PREVIOUS_TAB as PREVIOUS_SCREEN, ROW_STEP_BACK,
+    INFO_ROW_Y, LABEL_GAP, LABEL_SCALE, LIST_RECT, ListEntry, ListWindow, NEXT_TAB as NEXT_SCREEN, NumberCell, PREVIOUS_TAB as PREVIOUS_SCREEN, ROW_STEP_BACK,
     ROW_STEP_FORWARD, RowLook, UTF8_MAX_BYTES, VALUE_SCALE, VISIBLE_ROWS, click_step, contains, draw_head, draw_hint, draw_info_lead, draw_info_note,
-    draw_info_panel, draw_info_row, draw_list, draw_preview, draw_tabs, fitted_value, last_top, number_part_at, revealed_top, row_room, shift_after,
-    stepped_tab, wheel_scrolled,
+    draw_info_panel, draw_info_row, draw_info_row_noted, draw_list, draw_preview, draw_tabs, fitted_value, last_top, number_part_at, revealed_top, row_room,
+    shift_after, stepped_tab, wheel_scrolled,
 };
 use crate::stage::{Canvas, FrameCtx, KeyInput, Stage, StageHandler, Transition, is_left_press};
 use crate::{AppShared, Hot};
@@ -81,12 +94,35 @@ const PATH_GAP: &str = "\u{2026}";
 const TITLE: &str = "SKIN";
 
 /// The keys of the screen, written along its foot.
-const HINT: &str =
-    "UP DOWN MOVE   LEFT RIGHT CHANGE   SHIFT x10   ENTER RUN OR TYPE   0 RESET   DRAG A SLIDER   TAB SCREEN   WHEEL SCROLL   RIGHT CLICK BACK   ESC SAVE";
+const HINT: &str = "UP DOWN MOVE   LEFT RIGHT CHANGE   SHIFT x10   ENTER RUN OR TYPE   0 RESET   A ALL SCREENS   DRAG A SLIDER   TAB SCREEN   WHEEL SCROLL   RIGHT CLICK BACK   ESC SAVE";
 
 /// What is written under the preview in place of the row under the cursor while the folder picker is
 /// up.
 const PICKER_NOTE: &str = "CHOOSE THE PACK FOLDER IN THE WINDOW THAT OPENED";
+
+/// What is written there while the picker for where an export goes is up.
+const EXPORT_PICKER_NOTE: &str = "CHOOSE WHERE TO EXPORT IN THE WINDOW THAT OPENED - A NEW FOLDER IS MADE THERE";
+
+/// The key that puts the value of the row under the cursor onto every other screen that declares
+/// the row. No other key of the menu is a letter, and a number being typed takes none.
+pub(crate) const APPLY_TO_ALL_KEY: KeyCode = KeyCode::KeyA;
+
+/// What is said of the EXPORT row.
+const EXPORT_HELP: &str = "Copy this pack, with the choices made in every screen, into a new folder to take elsewhere";
+
+/// What is said while an export is listing the pack and has nothing to count yet.
+const EXPORT_LISTING_NOTE: &str = "EXPORTING - LISTING THE PACK - ESC CANCELS";
+
+/// What is said under what an export or a key came to, which stays until the next key.
+const SAID_HELP: &str = "Any key or press clears this";
+
+/// The headings of what an export came to.
+const EXPORTED_HEADING: &str = "EXPORTED";
+const EXPORT_FAILED_HEADING: &str = "EXPORT FAILED";
+const EXPORT_CANCELLED_HEADING: &str = "EXPORT CANCELLED";
+
+/// The heading of what putting a row's value onto the other screens came to.
+const APPLIED_HEADING: &str = "APPLIED TO ALL SCREENS";
 
 /// What is said of a row the chosen document declares, by the kind of row it is: a row of the
 /// settings table says what it is for itself (`rbms_config::SettingDescriptor::help`).
@@ -139,6 +175,15 @@ pub(crate) struct SkinMenuState {
     wheel_lines: f32,
     /// Which row that holds a number is being typed into, and which is being dragged.
     numbers: NumberInput<SettingRow>,
+    /// The picker for the folder an export is made in, while it is up.
+    export_picker: Option<DialogHandle>,
+    /// What puts that picker up. The native one, except in a test.
+    open_export_picker: fn() -> DialogHandle,
+    /// The export that is running.
+    export: Option<ExportJob>,
+    /// What the last export, or the last value put onto the other screens, came to: a heading and
+    /// what is said under it. Said under the preview until the next key or press.
+    said: Option<(String, String)>,
 }
 
 impl SkinMenuState {
@@ -155,6 +200,10 @@ impl SkinMenuState {
             open_pack_picker: pick_skin_pack_folder,
             wheel_lines: 0.0,
             numbers: NumberInput::new(),
+            export_picker: None,
+            open_export_picker: pick_skin_export_folder,
+            export: None,
+            said: None,
         }
     }
 
@@ -166,13 +215,14 @@ impl SkinMenuState {
     /// Re-read the rows and their values, keeping the cursor on the row it was on.
     ///
     /// A row of the settings table is followed to wherever it now is, since the chosen document's own
-    /// rows come and go above the actions; a row of a document is held by its place, because the row
-    /// at that place of another document is the nearest thing to it.
+    /// rows come and go above the actions, and so is the EXPORT row under them; a row of a document
+    /// is held by its place, because the row at that place of another document is the nearest thing
+    /// to it.
     fn refresh(&mut self, shared: &AppShared) {
         let focused = self.focused();
-        self.rows = shared.settings_rows(SettingTab::Skin);
+        self.rows = listed_rows(shared);
         self.lines = self.rows.iter().map(|&row| shared.settings_scene_line(row)).collect();
-        if let Some(fixed @ SettingRow::Fixed(_)) = focused
+        if let Some(fixed @ (SettingRow::Fixed(_) | SettingRow::Skin(SkinRow::Export))) = focused
             && let Some(at) = self.rows.iter().position(|row| *row == fixed)
         {
             self.sel = at;
@@ -285,6 +335,12 @@ impl SkinMenuState {
             return;
         }
         let moved = match row {
+            SettingRow::Skin(SkinRow::Export) => {
+                if delta > 0 {
+                    self.ask_where_to_export();
+                }
+                false
+            }
             SettingRow::Skin(row) => SkinMenuState::step_document_row(ctx.shared, row, delta),
             SettingRow::Fixed(id) => match adjust(&mut ctx.shared.config, id, delta) {
                 AdjustOutcome::Action(action) => self.run_action(ctx.shared, action, delta),
@@ -386,6 +442,88 @@ impl SkinMenuState {
         }
     }
 
+    /// Put the picker for where an export goes up, unless it is up or an export is running: one
+    /// pack is exported at a time.
+    fn ask_where_to_export(&mut self) {
+        if self.export_picker.is_none() && self.export.is_none() {
+            self.said = None;
+            self.export_picker = Some((self.open_export_picker)());
+        }
+    }
+
+    /// Collect the export picker's answer, and begin the export into the folder it names.
+    fn poll_export_picker(&mut self, ctx: &mut FrameCtx<'_>) {
+        let Some(picker) = self.export_picker.as_ref() else {
+            return;
+        };
+        match picker.poll() {
+            DialogState::Open => {}
+            DialogState::Picked(folder) => {
+                self.export_picker = None;
+                match ctx.shared.skins.export_request(&ctx.shared.config, &folder) {
+                    Some(Ok(request)) => self.export = Some(ExportJob::begin(request)),
+                    Some(Err(reason)) => self.say_export(Err(reason)),
+                    None => {}
+                }
+            }
+            DialogState::Dismissed => self.export_picker = None,
+        }
+    }
+
+    /// Collect what the running export came to, once it has ended, and say it: under the preview,
+    /// and to whatever shows the program's messages.
+    fn poll_export(&mut self) {
+        let Some(outcome) = self.export.as_ref().and_then(ExportJob::poll) else {
+            return;
+        };
+        self.export = None;
+        match outcome {
+            Ok(exported) => self.say_export(Ok(exported)),
+            Err(ExportError::CalledOff) => {
+                notify(Level::Info, "skin export cancelled");
+                self.said = Some((EXPORT_CANCELLED_HEADING.to_string(), ExportError::CalledOff.to_string().to_ascii_uppercase()));
+            }
+            Err(error) => self.say_export(Err(error.to_string())),
+        }
+    }
+
+    /// Say what an export came to: the folder it wrote and how much is in it, or why it wrote none.
+    fn say_export(&mut self, outcome: Result<Exported, String>) {
+        match outcome {
+            Ok(exported) => {
+                let folder = exported.folder.to_string_lossy();
+                let links = match exported.links_skipped {
+                    0 => String::new(),
+                    links => format!(", {links} LINKS LEFT OUT"),
+                };
+                notify(Level::Info, format!("skin exported: {} files to {folder}", exported.files));
+                self.said = Some((format!("{EXPORTED_HEADING} {} FILES ({} MB{links}) TO", exported.files, megabytes(exported.bytes)), folder.into_owned()));
+            }
+            Err(reason) => {
+                notify(Level::Error, format!("skin export failed: {reason}"));
+                self.said = Some((EXPORT_FAILED_HEADING.to_string(), reason));
+            }
+        }
+    }
+
+    /// Put the value of the row under the cursor onto every other screen that declares the row, and
+    /// say how many took it. A row no other screen declares is left alone, and so is the one screen
+    /// being configured, which already stands on the value.
+    fn apply_focused_to_all(&mut self, ctx: &mut FrameCtx<'_>) {
+        self.reveal_cursor();
+        let Some(SettingRow::Skin(row)) = self.focused() else {
+            return;
+        };
+        let screen = ctx.shared.config.skin.screen;
+        let Some(applied) = ctx.shared.skins.apply_to_peers(&mut ctx.shared.config, screen, row) else {
+            return;
+        };
+        ctx.shared.save_settings();
+        notify(Level::Info, applied.message());
+        self.said = Some((APPLIED_HEADING.to_string(), applied.message().to_ascii_uppercase()));
+        self.settings_moved(ctx);
+    }
+
     /// Configure another screen: read the document chosen for it, and tell the preview.
     fn choose_screen(&mut self, ctx: &mut FrameCtx<'_>, screen: i32) {
         if ctx.shared.config.skin.screen == screen {
@@ -403,10 +541,15 @@ impl SkinMenuState {
         self.choose_screen(ctx, SCREEN_KINDS[next].0);
     }
 
-    /// Keys on the row list, once the modifier and the picker have had their say.
+    /// Keys on the row list, once the modifier and the picker have had their say. While an export
+    /// runs, Escape calls it off and the menu stays: leaving would abandon a copy half made.
     fn row_key(&mut self, ctx: &mut FrameCtx<'_>, code: KeyCode) -> Transition {
         match code {
             KeyCode::Escape => {
+                if let Some(export) = self.export.as_ref() {
+                    export.call_off();
+                    return Transition::Stay;
+                }
                 ctx.shared.save_settings();
                 return Transition::Back;
             }
@@ -422,6 +565,7 @@ impl SkinMenuState {
                 self.reveal_cursor();
                 self.reset_focused_row(ctx);
             }
+            code if code == APPLY_TO_ALL_KEY => self.apply_focused_to_all(ctx),
             _ => {}
         }
         Transition::Stay
@@ -488,9 +632,64 @@ impl SkinMenuState {
             draw_info_note(canvas, PICKER_NOTE);
             return;
         }
-        if let (Some(row), Some(line)) = (self.focused(), self.lines.get(self.sel)) {
-            draw_info_row(canvas, &line.label, &line.value, row_help(shared, row));
+        if self.export_picker.is_some() {
+            draw_info_note(canvas, EXPORT_PICKER_NOTE);
+            return;
         }
+        if let Some(export) = self.export.as_ref() {
+            draw_info_note(canvas, &export_note(export.standing()));
+            return;
+        }
+        if let Some((heading, detail)) = self.said.as_ref() {
+            draw_info_row(canvas, heading, detail, SAID_HELP);
+            return;
+        }
+        if let (Some(row), Some(line)) = (self.focused(), self.lines.get(self.sel)) {
+            draw_info_row_noted(canvas, INFO_ROW_Y, &line.label, &line.value, row_help(shared, row), peers_note(shared, row).as_deref());
+        }
+    }
+}
+
+/// The rows the menu lists: the settings table's, with the chosen document's own between them, and
+/// under them the row that exports the pack while there is one to export.
+fn listed_rows(shared: &AppShared) -> Vec<SettingRow> {
+    let mut rows = shared.settings_rows(SettingTab::Skin);
+    if shared.skins.can_export() {
+        rows.push(SettingRow::Skin(SkinRow::Export));
+    }
+    rows
+}
+
+/// What is said while an export runs: how many of the pack's files and how much of it are written.
+fn export_note(standing: ExportStanding) -> String {
+    if standing.files == 0 {
+        return EXPORT_LISTING_NOTE.to_string();
+    }
+    format!(
+        "EXPORTING {} / {} FILES - {} / {} MB - ESC CANCELS",
+        standing.files_done,
+        standing.files,
+        megabytes(standing.bytes_done),
+        megabytes(standing.bytes)
+    )
+}
+
+/// What is said of a row of the chosen document that other screens' documents declare too: how
+/// many, and the key that puts this row's value on them. `None` for a row that is this screen's
+/// alone.
+fn peers_note(shared: &AppShared, row: SettingRow) -> Option<String> {
+    let SettingRow::Skin(row) = row else {
+        return None;
+    };
+    shared_row_note(shared.skins.peers_for(&shared.config, shared.config.skin.screen, row).len())
+}
+
+/// What is said of a row that `peers` other screens declare too, or `None` when none does.
+pub(crate) fn shared_row_note(peers: usize) -> Option<String> {
+    match peers {
+        0 => None,
+        1 => Some("ALSO ON 1 OTHER SCREEN - A APPLIES THIS VALUE TO IT".to_string()),
+        peers => Some(format!("ALSO ON {peers} OTHER SCREENS - A APPLIES THIS VALUE TO THEM ALL")),
     }
 }
 
@@ -510,10 +709,11 @@ fn pack_value_room(label: &str) -> f32 {
 fn row_help(shared: &AppShared, row: SettingRow) -> &'static str {
     let listed = match row {
         SettingRow::Fixed(id) => return descriptor(id).help,
+        SettingRow::Skin(SkinRow::Export) => return EXPORT_HELP,
         SettingRow::Skin(listed) => listed,
     };
     let kind = shared.skins.kind(&shared.config, listed).unwrap_or(match listed {
-        SkinRow::Property(_) => SkinRowKind::Property,
+        SkinRow::Property(_) | SkinRow::Export => SkinRowKind::Property,
         SkinRow::File(_) => SkinRowKind::File,
         SkinRow::Offset(_, axis) => SkinRowKind::Offset(axis),
     });
@@ -582,15 +782,18 @@ impl StageHandler for SkinMenuState {
         self.reveal_cursor();
     }
 
-    /// Collect the folder picker's answer, and bring the preview up to this frame.
+    /// Collect the folder pickers' answers and what a running export has come to, and bring the
+    /// preview up to this frame.
     fn update(&mut self, ctx: &mut FrameCtx<'_>) -> Transition {
         self.poll_pack_picker(ctx);
+        self.poll_export_picker(ctx);
+        self.poll_export();
         self.preview.update(ctx);
         Transition::Stay
     }
 
     /// Escape writes the settings out and goes back to the screen the menu was opened over. Keys are
-    /// ignored while the native folder picker is up: it has the keyboard, and the screen behind it
+    /// ignored while a native folder picker is up: it has the keyboard, and the screen behind it
     /// must not act on what is typed there. A key pressed while a slider is being dragged ends the
     /// drag first: the key may move the cursor or the screen on, and the pointer must not go on
     /// carrying whatever row is then in that place.
@@ -599,9 +802,10 @@ impl StageHandler for SkinMenuState {
             self.shift_held = held;
             return Transition::Stay;
         }
-        if !key.pressed || self.pack_picker.is_some() {
+        if !key.pressed || self.pack_picker.is_some() || self.export_picker.is_some() {
             return Transition::Stay;
         }
+        self.said = None;
         self.ensure_rows(ctx.shared);
         self.end_drag(ctx);
         match self.numbers.edit_key(&key) {
@@ -637,9 +841,10 @@ impl StageHandler for SkinMenuState {
         let Some(delta) = click_step(button) else {
             return Transition::Stay;
         };
-        if self.pack_picker.is_some() {
+        if self.pack_picker.is_some() || self.export_picker.is_some() {
             return Transition::Stay;
         }
+        self.said = None;
         self.ensure_rows(ctx.shared);
         self.end_drag(ctx);
         self.commit_edit(ctx);
@@ -679,8 +884,12 @@ impl StageHandler for SkinMenuState {
         Transition::Stay
     }
 
-    /// Whatever the preview compiled or was playing goes with the screen.
+    /// Whatever the preview compiled or was playing goes with the screen, and an export that is
+    /// still running is called off: nobody would be left to say what it came to.
     fn on_exit(&mut self, ctx: &mut FrameCtx<'_>) {
+        if let Some(export) = self.export.take() {
+            export.call_off();
+        }
         self.preview.release(ctx.shared);
     }
 

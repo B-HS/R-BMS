@@ -1,4 +1,4 @@
-//! The three native pickers the app opens, in one place.
+//! The native pickers the app opens, in one place.
 //!
 //! They used to sit inline in the three screens that opened them, which meant the screen that owns
 //! the font row, the one that owns the folder list and the one that owns the table list each had a
@@ -31,6 +31,9 @@ const SOUND_FOLDER_TITLE: &str = "Select system sound folder";
 
 /// Title of the skin pack folder picker.
 const SKIN_PACK_TITLE: &str = "Select skin pack folder";
+
+/// Title of the picker for the folder an exported skin pack is written into.
+const SKIN_EXPORT_TITLE: &str = "Select folder to export the skin into";
 
 /// File extension the table picker offers.
 const TABLE_EXTENSION: &str = "json";
@@ -100,6 +103,11 @@ pub(crate) fn pick_skin_pack_folder() -> DialogHandle {
     open(|| pollster::block_on(rfd::AsyncFileDialog::new().set_title(SKIN_PACK_TITLE).pick_folder()))
 }
 
+/// Ask for the folder a copy of the skin pack in effect is exported into, as a new folder inside it.
+pub(crate) fn pick_skin_export_folder() -> DialogHandle {
+    open(|| pollster::block_on(rfd::AsyncFileDialog::new().set_title(SKIN_EXPORT_TITLE).pick_folder()))
+}
+
 /// Ask for a difficulty-table json to add to the library.
 pub(crate) fn pick_table_file() -> DialogHandle {
     open(|| pollster::block_on(rfd::AsyncFileDialog::new().set_title(TABLE_TITLE).add_filter(TABLE_EXTENSION, &[TABLE_EXTENSION]).pick_file()))
@@ -122,7 +130,7 @@ mod tests {
     /// offered json would silently stop finding fonts.
     #[test]
     fn each_picker_keeps_its_own_title() {
-        let titles = [FONT_TITLE, SONG_FOLDER_TITLE, TABLE_TITLE, SOUND_FOLDER_TITLE, SKIN_PACK_TITLE];
+        let titles = [FONT_TITLE, SONG_FOLDER_TITLE, TABLE_TITLE, SOUND_FOLDER_TITLE, SKIN_PACK_TITLE, SKIN_EXPORT_TITLE];
         for title in titles {
             assert!(!title.is_empty());
         }

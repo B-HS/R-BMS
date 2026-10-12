@@ -166,6 +166,7 @@ impl Menu {
     fn sized(mut app: App, size: (u32, u32)) -> Menu {
         let mut state = SkinMenuState::new();
         state.open_pack_picker = unanswered_picker;
+        state.open_export_picker = unanswered_picker;
         state.on_enter(&mut FrameCtx { shared: &mut app.shared, now: std::time::Instant::now(), dt: 0.0 });
         Menu { app, state, pixels: HeadlessCanvas::new(size.0, size.1), size }
     }
@@ -1459,4 +1460,5 @@ fn the_menu_over_the_pack_the_environment_names_can_be_captured() {
     large.capture_at("skin-menu-pack-select", LIST_SECONDS);
 }
 
+mod export;
 mod opacity;

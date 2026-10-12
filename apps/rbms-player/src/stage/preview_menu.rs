@@ -158,6 +158,10 @@ pub(crate) const INFO_ROW_Y: f32 = 46.0;
 pub(crate) const INFO_LEAD_LINES: usize = 2;
 pub(crate) const INFO_VALUE_LINES: usize = 2;
 
+/// How tall a line of what is said under the preview is drawn, which is the room its last line
+/// needs above the panel's foot.
+pub(crate) const INFO_LINE_HEIGHT: f32 = 14.0;
+
 /// The room kept between the heading of a line under the preview and what follows it.
 const INFO_HEADING_GAP: f32 = 12.0;
 
@@ -620,6 +624,14 @@ pub(crate) fn draw_info_row(canvas: &mut Canvas<'_>, label: &str, value: &str, h
 /// [`draw_info_row`] with the row begun `top` below the panel's top, for a panel whose lead is not
 /// the two lines of words that one is laid out under.
 pub(crate) fn draw_info_row_at(canvas: &mut Canvas<'_>, top: f32, label: &str, value: &str, help: &str) {
+    draw_info_row_noted(canvas, top, label, value, help, None);
+}
+
+/// [`draw_info_row_at`] with one more line under what the row is for: something to be said of this
+/// row in particular, written in the colour a note is. Where the panel has no room for both -- a
+/// value that took lines of its own -- the note is written and what the row is for is not, since
+/// that is said of every row of its kind and the note of this one alone.
+pub(crate) fn draw_info_row_noted(canvas: &mut Canvas<'_>, top: f32, label: &str, value: &str, help: &str, note: Option<&str>) {
     let colors = theme();
     let left = INFO_RECT.x + INFO_PAD;
     let room = INFO_RECT.w - INFO_PAD * 2.0;
@@ -636,7 +648,15 @@ pub(crate) fn draw_info_row_at(canvas: &mut Canvas<'_>, top: f32, label: &str, v
             y += INFO_LINE_PITCH;
         }
     }
-    draw_text(canvas, left, y, INFO_SCALE, colors.text_muted, &fit_text(help, INFO_SCALE, room));
+    let Some(note) = note else {
+        draw_text(canvas, left, y, INFO_SCALE, colors.text_muted, &fit_text(help, INFO_SCALE, room));
+        return;
+    };
+    if y + INFO_LINE_PITCH + INFO_LINE_HEIGHT <= INFO_RECT.y + INFO_RECT.h {
+        draw_text(canvas, left, y, INFO_SCALE, colors.text_muted, &fit_text(help, INFO_SCALE, room));
+        y += INFO_LINE_PITCH;
+    }
+    draw_text(canvas, left, y, INFO_SCALE, colors.accent, &fit_text(note, INFO_SCALE, room));
 }
 
 /// Fill the preview's rectangle and write `status` in it, for a frame the preview drew nothing

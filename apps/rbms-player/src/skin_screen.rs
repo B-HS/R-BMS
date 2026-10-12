@@ -1306,10 +1306,11 @@ impl AppShared {
         self.skin_screens.warnings(screen)
     }
 
-    /// The nudges the player made in the document one screen is drawn with on a target of `target`
-    /// pixels, held by the caller for the length of a frame.
+    /// The nudges the document one screen is drawn with stands on, on a target of `target` pixels,
+    /// held by the caller for the length of a frame: the player's own over the ones the pack came
+    /// with ([`SkinLibrary::customisation_for`]).
     pub(crate) fn skin_offsets(&self, screen: i32, target: (u32, u32)) -> DocumentOffsets<'_> {
-        let document = self.skins.document_path(&self.config, screen).and_then(|path| self.config.skin.customisation(path));
+        let document = self.skins.customisation_for(&self.config, screen);
         let authored = self.skin_screens.get(screen).map_or((0.0, 0.0), |compiled| compiled.authored_size());
         DocumentOffsets::drawn_at(document, authored, target)
     }
