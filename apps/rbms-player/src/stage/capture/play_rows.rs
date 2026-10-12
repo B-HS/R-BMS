@@ -5,12 +5,13 @@
 //! moves the screen to is read by neither: the rows a player switches on the skin menu are only ever
 //! read here.
 //!
-//! Two tests hold the pack to what its rows say on every machine, on frames drawn small. With the
+//! Three tests hold the pack to what its rows say on every machine, on frames drawn small. With the
 //! lane width switched to wide, every key mode still compiles with nothing said against it and plays,
-//! each lane is half as wide again as the lane it is by default, and no two lanes share a pixel. And
-//! whichever way the rows of a wide document are switched -- the side the field is on, the side the
+//! each lane is half as wide again as the lane it is by default, and no two lanes share a pixel.
+//! Whichever way the rows of a wide document are switched -- the side the field is on, the side the
 //! turntable is on, the score graph -- the pictures of a chart and the gauge stay on the screen and
-//! clear of the lanes.
+//! clear of the lanes. And whichever way the rows that move a field are switched, the field ends on
+//! the foot of its judgement line, with nothing of it drawn below.
 //!
 //! One more draws the same scenes at the size the pack is authored at for a person to look at, and
 //! only where [`CAPTURE_DIR_ENV`] names a folder: every key mode as it comes and with wide lanes, the
@@ -18,6 +19,7 @@
 //! and a run walked from its loading, through a long note that is held, to its full combo and to its
 //! failure.
 
+use rbms_skin::dst::SkinOffset;
 use rbms_skin::model::Animation;
 
 use super::*;
@@ -54,12 +56,32 @@ const CAPTURED_COURSE_STAGES: usize = 2;
 
 /// The shares of the field the three covers take in the captures that draw them.
 const CAPTURED_COVER: f32 = 0.3;
-const CAPTURED_LIFT: f32 = 0.15;
-const CAPTURED_HIDDEN: f32 = 0.1;
+const CAPTURED_LIFT: f32 = 0.2;
+const CAPTURED_HIDDEN: f32 = 0.2;
 
 /// The ids the pack's play documents place the pictures of a chart and the gauge under.
 const BGA_OBJECT: &str = "bga";
 const GAUGE_OBJECT: &str = "gauge";
+
+/// The parts of a field that are drawn on its lanes and stay where the document puts them, by the
+/// offsets that say how opaque each is: the faces of the lanes, the lines between them, the
+/// judgement line, the beams of the keys that are down, and the bombs.
+const LANE_FACES: &str = "Lane Background Opacity";
+const LANE_DIVIDERS: &str = "Lane Divider Opacity";
+const JUDGEMENT_LINE: &str = "Judge Line Opacity";
+const KEY_BEAMS: &str = "Key Beam Opacity";
+const BOMBS: &str = "Bomb Opacity";
+const PARTS_ON_THE_LANES: [&str; 5] = [LANE_FACES, LANE_DIVIDERS, JUDGEMENT_LINE, KEY_BEAMS, BOMBS];
+
+/// How far under a field a frame is held to showing nothing, in the pixels the document is
+/// authored in: the gap the document leaves before the gauge or the readouts under the field, short
+/// of the rows a round letter of a readout reaches over its line into on a frame drawn small.
+const CLEAR_UNDER_A_FIELD: i32 = 12;
+
+/// The offset the pack's play documents once declared for the keys they drew under a field. A
+/// settings file written then still holds a value under it, here the one that took the part away.
+const RETIRED_KEY_DISPLAY_OFFSET: i32 = 105;
+const RETIRED_KEY_DISPLAY_ALPHA: f32 = -255.0;
 
 /// One key mode of the pack's play documents: the name its captures are saved under, the title and
 /// the channels of the chart written for it, and the mode the chart is read in when its channels
@@ -177,6 +199,18 @@ impl RowsRun {
         destination.and_then(|destination| destination.dst.first()).and_then(Placed::of).unwrap_or_else(|| panic!("the document places no {id}"))
     }
 
+    /// The rectangles of every frame of every destination the document draws as the part whose
+    /// opacity the offset called `part` says.
+    fn part(&self, part: &str) -> Vec<Placed> {
+        let def = &self.document().def;
+        let id = def.offset.iter().find(|offset| offset.name == part).map(|offset| offset.id).unwrap_or_else(|| panic!("the document declares no {part}"));
+        def.destination
+            .iter()
+            .filter(|destination| destination.offsets.contains(&id))
+            .flat_map(|destination| destination.dst.iter().filter_map(Placed::of))
+            .collect()
+    }
+
     /// Walk the scene from its loading until its chart plays, handing `shoot` the name of each
     /// moment on the way once its frame is drawn.
     fn open(&mut self, mut shoot: impl FnMut(&str, &HeadlessCanvas)) -> Result<(), String> {
@@ -278,6 +312,88 @@ fn the_default_pack_keeps_the_pictures_and_the_gauge_clear_of_wide_lanes_however
                 }
             }
             assert!(!run.placed(BGA_OBJECT).overlaps(&run.placed(GAUGE_OBJECT)), "{label}: the pictures are drawn over the gauge");
+        }
+    }
+}
+
+/// Every way of switching the rows that move the lanes of a field: the lane width, and the sides
+/// the field and the turntable are on where the document offers them.
+fn field_row_sets(mode: &RowMode) -> Vec<Vec<(&'static str, &'static str)>> {
+    let moving: Vec<(&str, &str)> =
+        std::iter::once(WIDE).chain(mode.rows.iter().copied().filter(|row| [FIELD_ON_THE_RIGHT, SCRATCH_ON_THE_RIGHT].contains(row))).collect();
+    (0..1usize << moving.len()).map(|picked| moving.iter().enumerate().filter(|(index, _)| picked & (1 << index) != 0).map(|(_, row)| *row).collect()).collect()
+}
+
+/// However the rows that move a field are switched, every field of every key mode ends on the foot
+/// of its judgement line. The line lies across the whole field with its top where the lanes of the
+/// note field end, so a note comes to rest on it; the faces of the lanes and the lines between them
+/// end where the line does; and no part that is drawn on the lanes reaches below it. In a frame of
+/// the run as it plays, the rows right under each field are the ground of the screen. A value a
+/// settings file still holds for the keys the documents once drew under a field is read without a
+/// word and changes nothing.
+#[test]
+fn the_default_pack_ends_every_field_on_the_foot_of_its_judgement_line() {
+    for mode in ROW_MODES {
+        for rows in field_row_sets(mode) {
+            let label = label_of(mode, &rows);
+            let mut run = RowsRun::enter(&format!("rows-foot-{label}"), mode, &rows, Some(HELD_ROWS_SIZE), PlayEnding::StillPlaying, false)
+                .unwrap_or_else(|reason| panic!("{label}: not entered: {reason}"));
+            run.assert_clean(&label);
+            let lanes = run.lanes();
+            let lines = run.part(JUDGEMENT_LINE);
+            let (faces, dividers) = (run.part(LANE_FACES), run.part(LANE_DIVIDERS));
+            let on_the_lanes: Vec<Placed> = PARTS_ON_THE_LANES.iter().flat_map(|part| run.part(part)).collect();
+
+            let mut feet = Vec::new();
+            for (index, side) in lanes.chunks(lanes.len() / mode.sides.len()).enumerate() {
+                let left = side.iter().map(|lane| lane.x).min().unwrap_or_default();
+                let right = side.iter().map(|lane| lane.x + lane.w).max().unwrap_or_default();
+                let rest = side.iter().map(|lane| lane.y).max().unwrap_or_default();
+                let on_this_field = |placed: &&Placed| placed.x < right && left < placed.x + placed.w;
+                assert!(side.iter().all(|lane| lane.y == rest), "{label}: the lanes of field {index} do not end on one row");
+
+                let foot =
+                    lines.iter().filter(on_this_field).map(|line| line.y).min().unwrap_or_else(|| panic!("{label}: field {index} has no judgement line"));
+                assert!(foot < rest, "{label}: the judgement line of field {index} is not under its lanes: its foot is at {foot} and the lanes end at {rest}");
+                let across = Placed { x: left, y: foot, w: right - left, h: rest - foot };
+                assert!(lines.contains(&across), "{label}: no judgement line of field {index} lies at {across:?}");
+
+                let faces_here: Vec<&Placed> = faces.iter().filter(on_this_field).collect();
+                assert_eq!(faces_here.len(), side.len(), "{label}: field {index} does not have a face a lane");
+                for face in faces_here {
+                    assert_eq!(face.y, foot, "{label}: a lane face of field {index} at {face:?} does not end where the judgement line does");
+                }
+                for divider in dividers.iter().filter(on_this_field) {
+                    assert_eq!(divider.y, foot, "{label}: a line between lanes of field {index} at {divider:?} does not end where the judgement line does");
+                }
+                for placed in on_the_lanes.iter().filter(on_this_field) {
+                    assert!(placed.y >= foot, "{label}: {placed:?} is drawn below the judgement line of field {index}, whose foot is at {foot}");
+                }
+                feet.push((left, right, foot));
+            }
+
+            let document = run.app.shared.skins.document_path(&run.app.shared.config, run.screen).expect("a compiled screen has its document").to_owned();
+            let retired = SkinOffset { a: RETIRED_KEY_DISPLAY_ALPHA, ..SkinOffset::default() };
+            run.app.shared.config.skin.customise(&document).offsets.insert(RETIRED_KEY_DISPLAY_OFFSET, retired);
+            run.open(|_, _| {}).unwrap_or_else(|reason| panic!("{label}: not opened: {reason}"));
+            run.play_to(HELD_ROWS_CHART_MS).unwrap_or_else(|reason| panic!("{label}: not played: {reason}"));
+            run.assert_clean(&label);
+
+            let (width, height) = run.authored();
+            let (across, down) = (HELD_ROWS_SIZE.0 as f32 / width as f32, HELD_ROWS_SIZE.1 as f32 / height as f32);
+            let ground = run.pixels.pixel_at(0, 0);
+            for (left, right, foot) in feet {
+                let columns = (left as f32 * across).ceil() as u32..(right as f32 * across).floor() as u32;
+                let under = height - foot;
+                let rows = (under as f32 * down).ceil() as u32..((under + CLEAR_UNDER_A_FIELD) as f32 * down).floor() as u32;
+                assert!(!columns.is_empty() && !rows.is_empty(), "{label}: the frame has no rows under the field at {left}");
+                assert_eq!(
+                    run.pixels.pixel_at(columns.start, rows.start),
+                    ground,
+                    "{label}: the rows under the field at {left} are not the ground of the screen"
+                );
+                assert!(is_flat(&run.pixels, columns, rows), "{label}: something is drawn under the judgement line of the field at {left}");
+            }
         }
     }
 }

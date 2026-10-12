@@ -54,6 +54,7 @@ COMBO_JUDGES = 3
 
 BOMB_FRAMES = 8
 BOMB_SIDE = 128
+BOMB_ROWS = 68
 BOMB_OVERSAMPLE = 4
 BOMB_RADII = (16.0, 46.0)
 BOMB_WIDTHS = (10.0, 2.0)
@@ -148,7 +149,7 @@ def between(ends: tuple[float, float], share: float) -> float:
 def bomb(name: str) -> Sprite:
     side = BOMB_SIDE * BOMB_OVERSAMPLE
     middle = side / 2
-    mask = Image.new('L', (BOMB_SIDE * BOMB_FRAMES, BOMB_SIDE), 0)
+    mask = Image.new('L', (BOMB_SIDE * BOMB_FRAMES, BOMB_ROWS), 0)
     for frame in range(BOMB_FRAMES):
         share = frame / (BOMB_FRAMES - 1)
         radius = between(BOMB_RADII, share) * BOMB_OVERSAMPLE
@@ -156,7 +157,7 @@ def bomb(name: str) -> Sprite:
         ring = Image.new('L', (side, side), 0)
         bounds = (middle - radius, middle - radius, middle + radius, middle + radius)
         ImageDraw.Draw(ring).ellipse(bounds, outline=round(between(BOMB_ALPHAS, share)), width=width)
-        mask.paste(ring.resize((BOMB_SIDE, BOMB_SIDE), Image.Resampling.BOX), (frame * BOMB_SIDE, 0))
+        mask.paste(ring.resize((BOMB_SIDE, BOMB_SIDE), Image.Resampling.BOX).crop((0, 0, BOMB_SIDE, BOMB_ROWS)), (frame * BOMB_SIDE, 0))
     return Sprite(name, tinted(mask), BOMB_FRAMES, 1)
 
 

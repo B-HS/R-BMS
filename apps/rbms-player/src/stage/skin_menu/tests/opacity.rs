@@ -330,10 +330,9 @@ fn the_offset_rows_of_the_pack_the_environment_names_behave_as_their_kind_says()
 
 /// The rows of the shipped pack's seven-key play skin a player who wants nothing on the field but
 /// what is played takes down to nothing.
-const SHIPPED_BARE_ROWS: [&str; 9] = [
+const SHIPPED_BARE_ROWS: [&str; 8] = [
     "LANE BACKGROUND OPACITY",
     "LANE DIVIDER OPACITY",
-    "KEY DISPLAY OPACITY",
     "BAR LINE OPACITY",
     "PROGRESS BAR OPACITY",
     "SCORE GRAPH OPACITY",

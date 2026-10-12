@@ -113,10 +113,9 @@ const HALF_OPACITY: f32 = 50.0;
 
 /// The parts a player who wants nothing on the field but what is played takes off the screen: the
 /// faces of the lanes, the lines between them, and the readouts around the field.
-const BARE_FIELD_PARTS: [&str; 9] = [
+const BARE_FIELD_PARTS: [&str; 8] = [
     "Lane Background Opacity",
     "Lane Divider Opacity",
-    "Key Display Opacity",
     "Bar Line Opacity",
     "Progress Bar Opacity",
     "Score Graph Opacity",

@@ -39,7 +39,6 @@ layout.PART = {
     LANE_DIVIDER = 102,
     JUDGE_LINE = 103,
     KEY_BEAM = 104,
-    KEY_DISPLAY = 105,
     BOMB = 106,
     NOTE = 107,
     BAR_LINE = 108,
@@ -61,7 +60,6 @@ layout.PART_ROWS = {
     { name = "Lane Divider Opacity", id = layout.PART.LANE_DIVIDER },
     { name = "Judge Line Opacity", id = layout.PART.JUDGE_LINE },
     { name = "Key Beam Opacity", id = layout.PART.KEY_BEAM },
-    { name = "Key Display Opacity", id = layout.PART.KEY_DISPLAY },
     { name = "Bomb Opacity", id = layout.PART.BOMB },
     { name = "Note Opacity", id = layout.PART.NOTE },
     { name = "Bar Line Opacity", id = layout.PART.BAR_LINE },
@@ -78,7 +76,8 @@ layout.PART_ROWS = {
     { name = "Speed Display Opacity", id = layout.PART.SPEED_DISPLAY },
 }
 
-layout.FIELD = { top = 0, height = 840, line = 8, keys_top = 848, keys_height = 64, gauge_top = 928, gauge_height = 24, foot_top = 968 }
+layout.FIELD = { top = 0, height = 904, line = 8, gauge_top = 928, gauge_height = 24, foot_top = 968 }
+layout.FIELD.bottom = layout.FIELD.top + layout.FIELD.height + layout.FIELD.line
 
 local LANE = { white = 58, black = 46, scratch = 100, button = 62 }
 local LANE_GAP = 2
@@ -252,7 +251,7 @@ local function field_of(mode, side, x, scratch_right, scale)
         lane.shaded = lane.kind == "black" or (lane.kind == "button" and lane.order % 2 == 0)
         cursor = cursor + lane.w + LANE_GAP
     end
-    return { side = side, x = x, top = field.top, w = cursor - LANE_GAP - x, h = field.height, lanes = kinds, shown = by_order }
+    return { side = side, x = x, top = field.top, w = cursor - LANE_GAP - x, h = field.bottom - field.top, lanes = kinds, shown = by_order }
 end
 
 local function mirrored(box)

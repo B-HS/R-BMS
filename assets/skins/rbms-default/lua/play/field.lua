@@ -8,9 +8,8 @@ local field = {}
 local TRANSPARENT = 0
 local SIDE_TIMER_STRIDE = 10
 
-local KEYS = { release = 120, lit_share = 0.9 }
 local BEAM = { height = 280, release = 120 }
-local BOMB = { side = 128, cycle = 250 }
+local BOMB = { cycle = 250 }
 local LINE = { open = 400, pulse_height = 16, pulse_fade = 500, beat = 1000 }
 local SECTION_LINE = 2
 
@@ -28,7 +27,7 @@ local NOTE_IMAGES = {
 }
 
 local JUDGE = {
-    top = 560,
+    top = 624,
     size = { largest = 64, smallest = 16, step = 2 },
     gap_share = 0.25,
     digits = 5,
@@ -45,7 +44,7 @@ local JUDGE = {
 }
 
 local ABOVE = {
-    top = 520,
+    top = 584,
     size = 24,
     sprite = "snum24",
     gap = 16,
@@ -75,8 +74,8 @@ local COVER = {
 }
 
 local NOTICE = {
-    top = 400,
-    loading = { size = theme.type.label, bar_top = 444, bar_inset = 48, bar_height = 4 },
+    top = 464,
+    loading = { size = theme.type.label, bar_top = 508, bar_inset = 48, bar_height = 4 },
     ready = { size = theme.type.heading, fade = 100, hold = 500, gone = 600 },
     combo = { size = theme.type.heading, slide = 300, hold = 1700, gone = 2000, rule_drop = 56, rule_height = 2 },
 }
@@ -117,24 +116,6 @@ local function lane_dividers(s, view)
     end
 end
 
-local function key_display(s, view)
-    local grid = layout.FIELD
-    for _, side in ipairs(view.fields) do
-        s:rect({ x = side.x, top = side.top + side.h, w = side.w, h = grid.line }, theme.color.line)
-        seams(side, grid.keys_top, grid.keys_height, function(gap)
-            s:rect(gap, theme.color.line)
-        end)
-    end
-    for _, lane in ipairs(view.lanes) do
-        local key = lane_box(lane, grid.keys_top, grid.keys_height)
-        local lit = theme.mix(lane.tint, theme.color.raised, KEYS.lit_share)
-        s:rect(key, theme.color.raised)
-        s:rect(key, lit, { timer = lane_timer(props.timer.KEYON_1P, lane) })
-        local releasing = { { time = 0 }, { time = KEYS.release, a = TRANSPARENT } }
-        s:rect(key, lit, { timer = lane_timer(props.timer.KEYOFF_1P, lane), keys = releasing, loop = props.loop.ONCE })
-    end
-end
-
 local function key_beams(s, view)
     local grid = layout.FIELD
     local lifted = props.offset.LIFT
@@ -170,9 +151,6 @@ local function note_field(s, view)
             def.group[index] = s:dst(line_id, rule, { color = theme.color.line, offset = props.offset.LIFT })
         end
     end)
-    if not view.mode.scratch then
-        def.dst2 = theme.height - grid.keys_top - grid.keys_height
-    end
     s:within(layout.PART.NOTE, function()
         s:single("note", def, nil, { offset = props.offset.NOTES_1P })
     end)
@@ -199,7 +177,7 @@ end
 local function covers(s, view)
     local grid = layout.FIELD
     local block = s:sprite_source("block")
-    local foot = theme.height - grid.keys_top
+    local foot = theme.height - grid.bottom
     local line = theme.height - grid.top - grid.height
     local lane_cover = s:object("slider", ui.merge(block, { type = props.rate.LANECOVER, angle = props.slider_angle.DOWN, range = grid.height, changeable = false }))
     local hidden = s:object("hiddenCover", ui.merge(block, { disapearLine = line, isDisapearLineLinkLift = true }))
@@ -219,7 +197,7 @@ local function covers(s, view)
         local green = { ref = props.number.DURATION_GREEN, digit = COVER.green_digits, saturate = true, align = "right" }
         cover_number(s, green, inner, ui.merge(covered, { color = COVER.green }))
 
-        local lifted = { x = side.x + COVER.inset, baseline = grid.keys_top - COVER.lift_rise }
+        local lifted = { x = side.x + COVER.inset, baseline = grid.bottom - COVER.lift_rise }
         cover_number(s, { ref = props.number.LIFT1 }, lifted, { op = { props.option.LIFT1_ON }, color = theme.color.sub })
         local hid = { x = side.x + COVER.inset, top = grid.top + grid.height + COVER.hidden_drop }
         cover_number(s, { ref = props.number.HIDDEN1 }, hid, { offsets = { props.offset.LIFT, props.offset.HIDDEN_COVER }, color = theme.color.sub })
@@ -228,9 +206,9 @@ end
 
 local function bombs(s, view)
     local grid = layout.FIELD
-    local middle = grid.top + grid.height + grid.line / 2
+    local ring = s:sprite("bomb")
     for _, lane in ipairs(view.lanes) do
-        local box = { x = lane.x + (lane.w - BOMB.side) / 2, top = middle - BOMB.side / 2, w = BOMB.side, h = BOMB.side }
+        local box = { x = lane.x + (lane.w - ring.cell_w) / 2, top = grid.bottom - ring.cell_h }
         local hit = lane_timer(props.timer.BOMB_1P, lane)
         local hold = lane_timer(props.timer.HOLD_1P, lane)
         local shared = { color = lane.tint, blend = props.blend.ADD, offset = props.offset.LIFT }
@@ -371,7 +349,6 @@ end
 function field.under(s, view)
     part(s, layout.PART.LANE_BACKGROUND, lane_faces, view)
     part(s, layout.PART.LANE_DIVIDER, lane_dividers, view)
-    part(s, layout.PART.KEY_DISPLAY, key_display, view)
     part(s, layout.PART.KEY_BEAM, key_beams, view)
     note_field(s, view)
 end
