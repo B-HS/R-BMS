@@ -4,14 +4,12 @@ import math
 
 from PIL import Image, ImageDraw
 
-from sprites import OPAQUE, WHITE, Sprite, block, font_at, glyph_rows, palette, tinted, word
+from sprites import OPAQUE, WHITE, Rgb, Sprite, block, font_at, glyph_rows, palette, themes, tinted, word
 
 BAR_SIZE = (728, 64)
-BAR_FILL = (92, 115, 160)
 BAR_FILL_ALPHA = 26
 BAR_FAINT_ALPHA = 13
 BAR_TAG_SIZE = 18
-BAR_TAG_COLOR = palette('color')['muted']
 BAR_TAG_LEFT = 20
 BARS = (
     ('bar_song', '', BAR_FILL_ALPHA),
@@ -34,7 +32,6 @@ LABELS = (
 
 LAMP_CELL = 8
 LAMP = palette('lamp')
-LAMP_COLORS = tuple(LAMP.values())
 LAMP_FRAMES: dict[str, tuple[str | None, ...]] = {
     'failed': ('failed', None),
     'exhard': ('normal', 'failed'),
@@ -70,24 +67,25 @@ STAR_CENTER = (0.5, 0.53)
 QUARTER_TURN_BACK = -FULL_TURN / 4
 
 
-def bar(name: str, tag: str, alpha: int) -> Sprite:
+def bar(name: str, tag: str, alpha: int, surface: dict[str, Rgb]) -> Sprite:
     height = BAR_SIZE[1]
-    image = Image.new('RGBA', BAR_SIZE, (*BAR_FILL, alpha))
+    image = Image.new('RGBA', BAR_SIZE, (*surface['bar'], alpha))
     if tag:
         font = font_at(BAR_TAG_SIZE)
         top, bottom = glyph_rows(BAR_TAG_SIZE, tag)
         mask = Image.new('L', BAR_SIZE, 0)
         baseline = (height - (bottom - top)) // 2 - top
         ImageDraw.Draw(mask).text((BAR_TAG_LEFT, baseline), tag, font=font, fill=OPAQUE, anchor='ls')
-        image.paste(Image.new('RGBA', BAR_SIZE, (*BAR_TAG_COLOR, OPAQUE)), (0, 0), mask)
+        image.paste(Image.new('RGBA', BAR_SIZE, (*surface['muted'], OPAQUE)), (0, 0), mask)
     return Sprite(name, image)
 
 
-def lamp_strip(name: str) -> Sprite:
-    image = Image.new('RGBA', (LAMP_CELL * len(LAMP_COLORS), LAMP_CELL), (*WHITE, 0))
-    for column, color in enumerate(LAMP_COLORS):
+def lamp_strip(name: str, surface: dict[str, Rgb]) -> Sprite:
+    colors = (surface['lamp_off'], *LAMP.values())
+    image = Image.new('RGBA', (LAMP_CELL * len(colors), LAMP_CELL), (*WHITE, 0))
+    for column, color in enumerate(colors):
         image.paste((*color, OPAQUE), (column * LAMP_CELL, 0, (column + 1) * LAMP_CELL, LAMP_CELL))
-    return Sprite(name, image, len(LAMP_COLORS), 1)
+    return Sprite(name, image, len(colors), 1)
 
 
 def lamp_frames(name: str, frames: tuple[str | None, ...]) -> Sprite:
@@ -154,9 +152,9 @@ def paint_star_outline(draw: ImageDraw.ImageDraw, side: int) -> None:
 
 
 def build() -> list[Sprite]:
-    sprites = [bar(name, tag, alpha) for name, tag, alpha in BARS]
+    sprites = [bar(f'{name}{suffix}', tag, alpha, surface) for suffix, surface in themes().items() for name, tag, alpha in BARS]
     sprites += [word(name, text, LABEL_SIZE) for name, text in LABELS]
-    sprites.append(lamp_strip('lamp_strip'))
+    sprites += [lamp_strip(f'lamp_strip{suffix}', surface) for suffix, surface in themes().items()]
     sprites += [lamp_frames(f'lamp_{name}', frames) for name, frames in LAMP_FRAMES.items()]
     sprites.append(block('meter', *METER_SIZE))
     sprites.append(Sprite('icon_settings', smooth(ICON_SIDE, paint_gear)))

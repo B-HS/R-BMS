@@ -208,10 +208,10 @@ local function bombs(s, view)
     local grid = layout.FIELD
     local ring = s:sprite("bomb")
     for _, lane in ipairs(view.lanes) do
-        local box = { x = lane.x + (lane.w - ring.cell_w) / 2, top = grid.bottom - ring.cell_h }
+        local box = { x = lane.x + (lane.w - ring.cell_w) / 2, top = grid.top + grid.height + (grid.line - ring.cell_h) / 2 }
         local hit = lane_timer(props.timer.BOMB_1P, lane)
         local hold = lane_timer(props.timer.HOLD_1P, lane)
-        local shared = { color = lane.tint, blend = props.blend.ADD, offset = props.offset.LIFT }
+        local shared = { color = view.bomb_tint or lane.tint, blend = props.blend.ADD, offset = props.offset.LIFT }
         local once = { { time = 0 }, { time = BOMB.cycle - 1 } }
         s:image("bomb", box, ui.merge(shared, { timer = hit, keys = once, loop = props.loop.ONCE, def = { id = "img.bomb." .. hit, timer = hit, cycle = BOMB.cycle } }))
         s:image("bomb", box, ui.merge(shared, { timer = hold, def = { id = "img.bomb." .. hold, timer = hold, cycle = BOMB.cycle } }))

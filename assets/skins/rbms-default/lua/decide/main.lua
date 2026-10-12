@@ -48,10 +48,10 @@ function decide.header()
         input = TIME.input,
         scene = TIME.scene,
         fadeout = TIME.fadeout,
-        property = {
+        property = theme.properties({
             parts.stage_image_property(),
             parts.shown_or_hidden("Note Graph", OPTION.GRAPH_SHOW, OPTION.GRAPH_HIDE),
-        },
+        }),
     }
 end
 
@@ -186,6 +186,7 @@ function decide.build()
         return header
     end
     local main_state = require("main_state")
+    theme.apply(skin_config.option)
     local s = ui.new(header)
     s:atlas("common")
     s:atlas("decide")

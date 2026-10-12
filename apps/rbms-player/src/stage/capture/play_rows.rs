@@ -5,19 +5,22 @@
 //! moves the screen to is read by neither: the rows a player switches on the skin menu are only ever
 //! read here.
 //!
-//! Three tests hold the pack to what its rows say on every machine, on frames drawn small. With the
+//! Four tests hold the pack to what its rows say on every machine, on frames drawn small. With the
 //! lane width switched to wide, every key mode still compiles with nothing said against it and plays,
 //! each lane is half as wide again as the lane it is by default, and no two lanes share a pixel.
 //! Whichever way the rows of a wide document are switched -- the side the field is on, the side the
 //! turntable is on, the score graph -- the pictures of a chart and the gauge stay on the screen and
-//! clear of the lanes. And whichever way the rows that move a field are switched, the field ends on
-//! the foot of its judgement line, with nothing of it drawn below.
+//! clear of the lanes. Whichever way the rows that move a field are switched, the field ends on the
+//! foot of its judgement line, with nothing of it drawn below but the bombs, whose rings are whole
+//! and sit on the middle of the line. And whichever item a row of colours is switched to, every key
+//! mode that offers the row compiles with nothing said against it and plays, on a ground that is
+//! black unless the theme row says slate.
 //!
 //! One more draws the same scenes at the size the pack is authored at for a person to look at, and
 //! only where [`CAPTURE_DIR_ENV`] names a folder: every key mode as it comes and with wide lanes, the
 //! rows of a single field switched, the three covers of the field drawn, the last stage of a course,
-//! and a run walked from its loading, through a long note that is held, to its full combo and to its
-//! failure.
+//! a run walked from its loading, through a long note that is held, to its full combo and to its
+//! failure, and the rows of colours switched.
 
 use rbms_skin::dst::SkinOffset;
 use rbms_skin::model::Animation;
@@ -65,13 +68,17 @@ const GAUGE_OBJECT: &str = "gauge";
 
 /// The parts of a field that are drawn on its lanes and stay where the document puts them, by the
 /// offsets that say how opaque each is: the faces of the lanes, the lines between them, the
-/// judgement line, the beams of the keys that are down, and the bombs.
+/// judgement line, the beams of the keys that are down, and the bombs. All but the bombs end where
+/// the judgement line does.
 const LANE_FACES: &str = "Lane Background Opacity";
 const LANE_DIVIDERS: &str = "Lane Divider Opacity";
 const JUDGEMENT_LINE: &str = "Judge Line Opacity";
 const KEY_BEAMS: &str = "Key Beam Opacity";
 const BOMBS: &str = "Bomb Opacity";
-const PARTS_ON_THE_LANES: [&str; 5] = [LANE_FACES, LANE_DIVIDERS, JUDGEMENT_LINE, KEY_BEAMS, BOMBS];
+const PARTS_ENDING_ON_THE_LINE: [&str; 4] = [LANE_FACES, LANE_DIVIDERS, JUDGEMENT_LINE, KEY_BEAMS];
+
+/// The alpha an opacity offset holds when its part is taken away.
+const PART_TAKEN_AWAY: f32 = -255.0;
 
 /// How far under a field a frame is held to showing nothing, in the pixels the document is
 /// authored in: the gap the document leaves before the gauge or the readouts under the field, short
@@ -81,7 +88,36 @@ const CLEAR_UNDER_A_FIELD: i32 = 12;
 /// The offset the pack's play documents once declared for the keys they drew under a field. A
 /// settings file written then still holds a value under it, here the one that took the part away.
 const RETIRED_KEY_DISPLAY_OFFSET: i32 = 105;
-const RETIRED_KEY_DISPLAY_ALPHA: f32 = -255.0;
+
+/// The rows of the pack's play documents that say what its colours are, each with the items it
+/// offers, the one it comes with first: the theme of the faces and the letters, the colour of what
+/// is picked out, the colours of the notes of a field with a turntable, and the colour of the bombs.
+const THEME_ROW: &str = "Theme";
+const SLATE_THEME: &str = "Slate";
+const ACCENT_ROW: &str = "Accent";
+const NOTE_COLOURS_ROW: &str = "Note Colors";
+const BOMB_COLOUR_ROW: &str = "Bomb Color";
+const THEMES: [&str; 2] = ["Mono", SLATE_THEME];
+const ACCENTS: [&str; 5] = ["White", "Sky", "Amber", "Green", "Pink"];
+const NOTE_COLOURS: [&str; 5] = ["White-Blue", "White-Deep Blue", "White-Yellow", "White-Green", "Mono"];
+const BOMB_COLOURS: [&str; 2] = ["Note", "White"];
+
+/// The ground of the screen under each theme: black as the pack comes, and the dark slate the pack
+/// was first drawn on.
+const MONO_GROUND: crate::Color = crate::Color::rgb(0, 0, 0);
+const SLATE_GROUND: crate::Color = crate::Color::rgb(12, 15, 20);
+
+/// The rows of colours switched for a person to look at.
+const SKY_ACCENT: (&str, &str) = (ACCENT_ROW, "Sky");
+const SLATE_WITH_SKY: [(&str, &str); 2] = [(THEME_ROW, SLATE_THEME), SKY_ACCENT];
+const AMBER_ACCENT: (&str, &str) = (ACCENT_ROW, "Amber");
+const GREEN_ACCENT: (&str, &str) = (ACCENT_ROW, "Green");
+const PINK_ACCENT: (&str, &str) = (ACCENT_ROW, "Pink");
+const DEEP_BLUE_NOTES: (&str, &str) = (NOTE_COLOURS_ROW, "White-Deep Blue");
+const YELLOW_NOTES: (&str, &str) = (NOTE_COLOURS_ROW, "White-Yellow");
+const GREEN_NOTES: (&str, &str) = (NOTE_COLOURS_ROW, "White-Green");
+const MONO_NOTES: (&str, &str) = (NOTE_COLOURS_ROW, "Mono");
+const WHITE_BOMBS: (&str, &str) = (BOMB_COLOUR_ROW, "White");
 
 /// One key mode of the pack's play documents: the name its captures are saved under, the title and
 /// the channels of the chart written for it, and the mode the chart is read in when its channels
@@ -199,11 +235,17 @@ impl RowsRun {
         destination.and_then(|destination| destination.dst.first()).and_then(Placed::of).unwrap_or_else(|| panic!("the document places no {id}"))
     }
 
+    /// The id of the offset the document declares under the name `part`.
+    fn part_id(&self, part: &str) -> i32 {
+        let declared = self.document().def.offset.iter().find(|offset| offset.name == part);
+        declared.map(|offset| offset.id).unwrap_or_else(|| panic!("the document declares no {part}"))
+    }
+
     /// The rectangles of every frame of every destination the document draws as the part whose
     /// opacity the offset called `part` says.
     fn part(&self, part: &str) -> Vec<Placed> {
         let def = &self.document().def;
-        let id = def.offset.iter().find(|offset| offset.name == part).map(|offset| offset.id).unwrap_or_else(|| panic!("the document declares no {part}"));
+        let id = self.part_id(part);
         def.destination
             .iter()
             .filter(|destination| destination.offsets.contains(&id))
@@ -238,7 +280,7 @@ impl RowsRun {
 fn label_of(mode: &RowMode, rows: &[(&str, &str)]) -> String {
     let mut label = mode.name.to_owned();
     for (row, item) in rows {
-        label.push_str(&format!("-{}-{item}", row.replace(' ', "")));
+        label.push_str(&format!("-{}-{}", row.replace(' ', ""), item.replace(' ', "")));
     }
     label.to_ascii_lowercase()
 }
@@ -327,10 +369,11 @@ fn field_row_sets(mode: &RowMode) -> Vec<Vec<(&'static str, &'static str)>> {
 /// However the rows that move a field are switched, every field of every key mode ends on the foot
 /// of its judgement line. The line lies across the whole field with its top where the lanes of the
 /// note field end, so a note comes to rest on it; the faces of the lanes and the lines between them
-/// end where the line does; and no part that is drawn on the lanes reaches below it. In a frame of
-/// the run as it plays, the rows right under each field are the ground of the screen. A value a
-/// settings file still holds for the keys the documents once drew under a field is read without a
-/// word and changes nothing.
+/// end where the line does; and no part that is drawn on the lanes reaches below it but the bombs,
+/// each of which is a whole ring with its middle on the middle of the line. In a frame of the run as
+/// it plays with the bombs taken away, the rows right under each field are the ground of the screen.
+/// A value a settings file still holds for the keys the documents once drew under a field is read
+/// without a word and changes nothing.
 #[test]
 fn the_default_pack_ends_every_field_on_the_foot_of_its_judgement_line() {
     for mode in ROW_MODES {
@@ -342,7 +385,8 @@ fn the_default_pack_ends_every_field_on_the_foot_of_its_judgement_line() {
             let lanes = run.lanes();
             let lines = run.part(JUDGEMENT_LINE);
             let (faces, dividers) = (run.part(LANE_FACES), run.part(LANE_DIVIDERS));
-            let on_the_lanes: Vec<Placed> = PARTS_ON_THE_LANES.iter().flat_map(|part| run.part(part)).collect();
+            let on_the_lanes: Vec<Placed> = PARTS_ENDING_ON_THE_LINE.iter().flat_map(|part| run.part(part)).collect();
+            let (bombs, bomb_part) = (run.part(BOMBS), run.part_id(BOMBS));
 
             let mut feet = Vec::new();
             for (index, side) in lanes.chunks(lanes.len() / mode.sides.len()).enumerate() {
@@ -369,12 +413,20 @@ fn the_default_pack_ends_every_field_on_the_foot_of_its_judgement_line() {
                 for placed in on_the_lanes.iter().filter(on_this_field) {
                     assert!(placed.y >= foot, "{label}: {placed:?} is drawn below the judgement line of field {index}, whose foot is at {foot}");
                 }
+                let bombs_here: Vec<&Placed> = bombs.iter().filter(on_this_field).collect();
+                assert!(bombs_here.len() >= side.len(), "{label}: field {index} does not have a bomb a lane");
+                for bomb in bombs_here {
+                    assert_eq!(bomb.w, bomb.h, "{label}: the bomb at {bomb:?} of field {index} is not a whole ring");
+                    assert_eq!(bomb.y * 2 + bomb.h, foot + rest, "{label}: the bomb at {bomb:?} of field {index} is not on the middle of the judgement line");
+                }
                 feet.push((left, right, foot));
             }
 
             let document = run.app.shared.skins.document_path(&run.app.shared.config, run.screen).expect("a compiled screen has its document").to_owned();
-            let retired = SkinOffset { a: RETIRED_KEY_DISPLAY_ALPHA, ..SkinOffset::default() };
-            run.app.shared.config.skin.customise(&document).offsets.insert(RETIRED_KEY_DISPLAY_OFFSET, retired);
+            let taken_away = SkinOffset { a: PART_TAKEN_AWAY, ..SkinOffset::default() };
+            let offsets = &mut run.app.shared.config.skin.customise(&document).offsets;
+            offsets.insert(RETIRED_KEY_DISPLAY_OFFSET, taken_away);
+            offsets.insert(bomb_part, taken_away);
             run.open(|_, _| {}).unwrap_or_else(|reason| panic!("{label}: not opened: {reason}"));
             run.play_to(HELD_ROWS_CHART_MS).unwrap_or_else(|reason| panic!("{label}: not played: {reason}"));
             run.assert_clean(&label);
@@ -396,6 +448,43 @@ fn the_default_pack_ends_every_field_on_the_foot_of_its_judgement_line() {
             }
         }
     }
+}
+
+/// The rows of colours a document of `mode` offers, each with its items. The buttons of a field
+/// with no turntable keep the colours the mode gives them, so its document has no row for the notes.
+fn colour_rows(mode: &RowMode) -> Vec<(&'static str, &'static [&'static str])> {
+    let mut rows: Vec<(&str, &[&str])> = vec![(THEME_ROW, &THEMES), (ACCENT_ROW, &ACCENTS), (BOMB_COLOUR_ROW, &BOMB_COLOURS)];
+    if mode.mode != Some(rbms_model::Mode::POPN_9K) {
+        rows.push((NOTE_COLOURS_ROW, &NOTE_COLOURS));
+    }
+    rows
+}
+
+/// Whichever item a row of colours is switched to, every key mode that offers the row compiles
+/// with nothing said against it, plays and draws; and the ground of its screen is black, unless the
+/// theme row is switched to slate, when it is the slate the pack was first drawn on. A field with
+/// no turntable offers no row for the colours of its notes.
+#[test]
+fn the_default_pack_draws_every_play_scene_on_black_whichever_colours_its_rows_say_unless_the_theme_is_slate() {
+    for mode in ROW_MODES {
+        for (row, items) in colour_rows(mode) {
+            for item in items {
+                let rows = [(row, *item)];
+                let label = label_of(mode, &rows);
+                let mut run = RowsRun::enter(&format!("rows-colours-{label}"), mode, &rows, Some(HELD_ROWS_SIZE), PlayEnding::StillPlaying, false)
+                    .unwrap_or_else(|reason| panic!("{label}: not entered: {reason}"));
+                run.assert_clean(&label);
+                run.open(|_, _| {}).unwrap_or_else(|reason| panic!("{label}: not opened: {reason}"));
+                run.play_to(HELD_ROWS_CHART_MS).unwrap_or_else(|reason| panic!("{label}: not played: {reason}"));
+                run.assert_clean(&label);
+                assert!(!is_flat(&run.pixels, 0..HELD_ROWS_SIZE.0, 0..HELD_ROWS_SIZE.1), "{label}: the frame is one colour");
+                let ground = if rows[0] == (THEME_ROW, SLATE_THEME) { SLATE_GROUND } else { MONO_GROUND };
+                assert_eq!(run.pixels.pixel_at(0, 0), ground, "{label}: the ground of the screen is not the one its theme says");
+            }
+        }
+    }
+    let unoffered = RowsRun::enter("rows-colours-play9-notes", &NINE, &[MONO_NOTES], Some(HELD_ROWS_SIZE), PlayEnding::StillPlaying, false);
+    assert!(unoffered.is_err(), "a field with no turntable offers a row for the colours of its notes");
 }
 
 /// One scene the pack is captured with.
@@ -439,8 +528,9 @@ impl RowShot {
 }
 
 /// The scenes that are captured: first the ones every row is left as it comes in or that leave the
-/// lanes as they come, then the ones with wide lanes.
-const ROW_SHOTS: [RowShot; 30] = [
+/// lanes as they come, then the ones with wide lanes, then the ones with the rows of colours
+/// switched.
+const ROW_SHOTS: [RowShot; 46] = [
     RowShot::playing(&FIVE, &[]),
     RowShot::walked(&SEVEN, &[]),
     RowShot::playing(&NINE, &[]),
@@ -471,6 +561,22 @@ const ROW_SHOTS: [RowShot; 30] = [
     RowShot::failing(&FOURTEEN, &[WIDE]),
     RowShot::in_course(&NINE, &[WIDE]),
     RowShot::in_course(&FOURTEEN, &[WIDE]),
+    RowShot::walked(&SEVEN, &SLATE_WITH_SKY),
+    RowShot::covered(&SEVEN, &SLATE_WITH_SKY),
+    RowShot::failing(&SEVEN, &SLATE_WITH_SKY),
+    RowShot::playing(&NINE, &SLATE_WITH_SKY),
+    RowShot::playing(&FOURTEEN, &SLATE_WITH_SKY),
+    RowShot::walked(&SEVEN, &[SKY_ACCENT]),
+    RowShot::walked(&SEVEN, &[AMBER_ACCENT]),
+    RowShot::playing(&SEVEN, &[GREEN_ACCENT]),
+    RowShot::playing(&SEVEN, &[PINK_ACCENT]),
+    RowShot::covered(&SEVEN, &[AMBER_ACCENT]),
+    RowShot::walked(&SEVEN, &[DEEP_BLUE_NOTES]),
+    RowShot::walked(&SEVEN, &[YELLOW_NOTES]),
+    RowShot::walked(&SEVEN, &[GREEN_NOTES]),
+    RowShot::walked(&SEVEN, &[MONO_NOTES]),
+    RowShot::walked(&SEVEN, &[MONO_NOTES, WHITE_BOMBS]),
+    RowShot::walked(&FOURTEEN, &[YELLOW_NOTES, WHITE_BOMBS]),
 ];
 
 /// Draw one scene at the size its document is authored at and save its frames as

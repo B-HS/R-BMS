@@ -71,7 +71,7 @@ end
 local function bar_set(s)
     local images = {}
     for index, sprite in ipairs(BAR_SPRITES) do
-        images[index] = s:define_image(sprite)
+        images[index] = s:define_image(theme.sprite(sprite))
     end
     s:object("imageset", { id = BAR_SET, images = images })
 end
@@ -160,7 +160,7 @@ local function labels(s)
 end
 
 local function graph(s)
-    local strip = s:sprite("lamp_strip")
+    local strip = s:sprite(theme.sprite("lamp_strip"))
     s:object("graph", { id = GRAPH.id, src = strip.src, x = strip.x, y = strip.y, w = strip.w, h = strip.h, divx = strip.divx, divy = strip.divy, type = GRAPH.by_lamp })
     return s:dst(GRAPH.id, { x = GRAPH.x, top = GRAPH.top, w = GRAPH.width, h = GRAPH.height }, nil, bar_box())
 end

@@ -78,29 +78,21 @@ local TIMING = {
     caption_room = 8,
     auto_on = 1,
 }
-local HIT_ERROR = {
-    judgeWidthMillis = 150,
-    lineWidth = 2,
-    colorMode = 1,
-    hiterrorMode = 1,
-    emaMode = 1,
-    lineColor = theme.hex(theme.color.sub, OPAQUE),
-    centerColor = theme.hex(theme.color.muted, OPAQUE),
-    PGColor = theme.hex(theme.judge.pgreat, OPAQUE),
-    GRColor = theme.hex(theme.judge.great, OPAQUE),
-    GDColor = theme.hex(theme.judge.good, OPAQUE),
-    BDColor = theme.hex(theme.judge.bad, OPAQUE),
-    PRColor = theme.hex(theme.judge.poor, OPAQUE),
-    emaColor = theme.hex(theme.color.text, OPAQUE),
-    alpha = 0.1,
-    windowLength = 24,
-    transparent = 1,
-    drawDecay = 1,
+local HIT_ERROR = { judgeWidthMillis = 150, lineWidth = 2, colorMode = 1, hiterrorMode = 1, emaMode = 1, alpha = 0.1, windowLength = 24, transparent = 1, drawDecay = 1 }
+local HIT_ERROR_COLORS = {
+    lineColor = theme.color.sub,
+    centerColor = theme.color.muted,
+    PGColor = theme.judge.pgreat,
+    GRColor = theme.judge.great,
+    GDColor = theme.judge.good,
+    BDColor = theme.judge.bad,
+    PRColor = theme.judge.poor,
+    emaColor = theme.color.text,
 }
 local GAUGE = { parts = 50, number_room = 72, animation = 0, range = 3, cycle = 33, kinds = 6, states = 6, whole = "num24", tenth = "num18", whole_digits = 3, baseline = 21, dot = 2, dot_gap = 3 }
 local FOOT = {
-    columns = 3,
-    cover_column = 2,
+    columns = 4,
+    shade_column = 2,
     value_baseline = 44,
     sprite = "num24",
     size = theme.type.label,
@@ -315,7 +307,11 @@ local function timing(s, view, main_state)
 
     local strip = { x = box.x, top = box.top + TIMING.strip_top, w = box.w, h = TIMING.strip_height }
     parts.panel(s, strip)
-    s:object("hiterrorvisualizer", ui.merge(HIT_ERROR, { width = box.w }), strip)
+    local meter = ui.merge(HIT_ERROR, { width = box.w })
+    for field, color in pairs(HIT_ERROR_COLORS) do
+        meter[field] = theme.hex(color, OPAQUE)
+    end
+    s:object("hiterrorvisualizer", meter, strip)
 end
 
 local function distribution(s, view)
@@ -334,7 +330,7 @@ local function gauge(s, view)
     local nodes = {}
     for kind = 0, GAUGE.kinds - 1 do
         for state = 0, GAUGE.states - 1 do
-            table.insert(nodes, s:define_image("gauge_" .. kind .. "_" .. state))
+            table.insert(nodes, s:define_image(theme.sprite("gauge_" .. kind .. "_" .. state)))
         end
     end
     local bar = { x = box.x, top = box.top, w = part * GAUGE.parts, h = box.h }
@@ -379,11 +375,14 @@ local function foot_speed(s, box, main_state)
 end
 
 local function foot_state(s, box, status_top)
-    local column = foot_column(box, FOOT.cover_column)
     local changing = { op = { props.option.LANECOVER1_CHANGING } }
-    parts.caption(s, "COVER", column, changing)
-    local cover = { sprite = FOOT.sprite, ref = props.number.LANECOVER1, digit = FOOT.cover_digits }
-    s:number(cover, { x = column.x, baseline = box.top + FOOT.value_baseline }, ui.merge(changing, { color = theme.color.text }))
+    local shades = { { label = "COVER", ref = props.number.LANECOVER1 }, { label = "LIFT", ref = props.number.LIFT1 } }
+    for index, shade in ipairs(shades) do
+        local column = foot_column(box, FOOT.shade_column + index - 1)
+        parts.caption(s, shade.label, column, changing)
+        local figure = { sprite = FOOT.sprite, ref = shade.ref, digit = FOOT.cover_digits }
+        s:number(figure, { x = column.x, baseline = box.top + FOOT.value_baseline }, ui.merge(changing, { color = theme.color.text }))
+    end
 
     local status = { x = box.x, top = box.top + status_top, w = box.w }
     parts.caption(s, "AUTOPLAY", status, { op = { props.option.AUTOPLAY_ON }, color = theme.color.accent })

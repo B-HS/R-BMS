@@ -51,6 +51,7 @@ function result.header(course)
         input = TIME.input,
         scene = TIME.scene,
         fadeout = TIME.fadeout,
+        property = theme.properties(),
     }
 end
 
@@ -169,6 +170,7 @@ function result.build(spec)
         return header
     end
     local main_state = require("main_state")
+    theme.apply(skin_config.option)
     local s = ui.new(header)
     s:atlas("common")
     s:atlas("result")

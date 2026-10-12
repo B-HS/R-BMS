@@ -2,21 +2,22 @@ from __future__ import annotations
 
 from PIL import Image, ImageDraw
 
-from sprites import OPAQUE, WHITE, Rgb, Sprite, block, digit_strip, guarded, palette, tinted, word
+from sprites import OPAQUE, WHITE, Rgb, Sprite, block, digit_strip, guarded, palette, themes, tinted, word
 
-SURFACE = palette('color')
+NOTE = palette('note')
 TONE = palette('tone')
 JUDGE = palette('judge')
 JUDGE_WORD = palette('judge_word')
 LAMP = palette('lamp')
 
-BACKGROUND: Rgb = SURFACE['bg']
-UNLIT: Rgb = SURFACE['line']
+NOTE_SHADE: Rgb = NOTE['shade']
 DRAIN: Rgb = TONE['rose']
 
 NOTE_COLORS: dict[str, Rgb] = {
-    'white': SURFACE['text'],
-    'cyan': SURFACE['accent'],
+    'white': NOTE['white'],
+    'cyan': NOTE['cyan'],
+    'gray': NOTE['gray'],
+    'silver': NOTE['silver'],
     'red': TONE['red'],
     'yellow': TONE['yellow'],
     'green': TONE['green'],
@@ -54,7 +55,6 @@ COMBO_JUDGES = 3
 
 BOMB_FRAMES = 8
 BOMB_SIDE = 128
-BOMB_ROWS = 68
 BOMB_OVERSAMPLE = 4
 BOMB_RADII = (16.0, 46.0)
 BOMB_WIDTHS = (10.0, 2.0)
@@ -74,8 +74,8 @@ def mixed(color: Rgb, toward: Rgb, share: float) -> Rgb:
     return tuple(round(toward[channel] + (color[channel] - toward[channel]) * share) for channel in range(len(color)))
 
 
-def shaded(color: Rgb, share: float) -> Rgb:
-    return mixed(color, BACKGROUND, share)
+def shaded(color: Rgb, share: float, toward: Rgb = NOTE_SHADE) -> Rgb:
+    return mixed(color, toward, share)
 
 
 def filled(size: tuple[int, int], color: Rgb, alpha: int = OPAQUE) -> Image.Image:
@@ -127,19 +127,24 @@ def gauge_node(name: str, color: Rgb) -> Sprite:
     return Sprite(name, image)
 
 
-def gauge_states(color: Rgb) -> tuple[Rgb, ...]:
+def gauge_states(color: Rgb, surface: dict[str, Rgb]) -> tuple[Rgb, ...]:
     return (
         color,
-        shaded(color, GAUGE_BELOW_BORDER_SHARE),
-        shaded(color, GAUGE_AHEAD_SHARE),
-        UNLIT,
+        shaded(color, GAUGE_BELOW_BORDER_SHARE, surface['bg']),
+        shaded(color, GAUGE_AHEAD_SHARE, surface['bg']),
+        surface['line'],
         mixed(color, WHITE, GAUGE_TIP_WHITE_SHARE),
         color,
     )
 
 
 def gauge() -> list[Sprite]:
-    return [gauge_node(f'gauge_{kind}_{state}', shade) for kind, color in enumerate(GAUGE_COLORS) for state, shade in enumerate(gauge_states(color))]
+    return [
+        gauge_node(f'gauge_{kind}_{state}{suffix}', shade)
+        for suffix, surface in themes().items()
+        for kind, color in enumerate(GAUGE_COLORS)
+        for state, shade in enumerate(gauge_states(color, surface))
+    ]
 
 
 def between(ends: tuple[float, float], share: float) -> float:
@@ -149,7 +154,7 @@ def between(ends: tuple[float, float], share: float) -> float:
 def bomb(name: str) -> Sprite:
     side = BOMB_SIDE * BOMB_OVERSAMPLE
     middle = side / 2
-    mask = Image.new('L', (BOMB_SIDE * BOMB_FRAMES, BOMB_ROWS), 0)
+    mask = Image.new('L', (BOMB_SIDE * BOMB_FRAMES, BOMB_SIDE), 0)
     for frame in range(BOMB_FRAMES):
         share = frame / (BOMB_FRAMES - 1)
         radius = between(BOMB_RADII, share) * BOMB_OVERSAMPLE
@@ -157,7 +162,7 @@ def bomb(name: str) -> Sprite:
         ring = Image.new('L', (side, side), 0)
         bounds = (middle - radius, middle - radius, middle + radius, middle + radius)
         ImageDraw.Draw(ring).ellipse(bounds, outline=round(between(BOMB_ALPHAS, share)), width=width)
-        mask.paste(ring.resize((BOMB_SIDE, BOMB_SIDE), Image.Resampling.BOX).crop((0, 0, BOMB_SIDE, BOMB_ROWS)), (frame * BOMB_SIDE, 0))
+        mask.paste(ring.resize((BOMB_SIDE, BOMB_SIDE), Image.Resampling.BOX), (frame * BOMB_SIDE, 0))
     return Sprite(name, tinted(mask), BOMB_FRAMES, 1)
 
 

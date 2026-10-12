@@ -30,7 +30,8 @@ use crate::stage::select::tests::entry;
 const THEME_FILE: &str = "lua/theme.lua";
 
 /// What the line that gives the pack's background colour starts with. The colour follows as three
-/// numbers in braces.
+/// numbers in braces. The file gives one such line for each theme the pack offers, and the first is
+/// the theme the pack comes in.
 const BACKGROUND_LINE_START: &str = "bg = {";
 
 /// The size every frame of the gate is drawn at, 16 to 9 like the pack and a third of its size.

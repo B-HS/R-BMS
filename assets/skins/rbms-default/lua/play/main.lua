@@ -47,7 +47,15 @@ local function properties(mode)
     if mode.sides == 1 then
         table.insert(list, chosen(name.GRAPH, { name = "On", op = option.GRAPH_ON }, { name = "Off", op = option.GRAPH_OFF }))
     end
-    return list
+    if mode.scratch then
+        local sets = {}
+        for index, set in ipairs(layout.NOTE_SETS) do
+            sets[index] = { name = set.name, op = set.op }
+        end
+        table.insert(list, { name = name.NOTES, item = sets, def = sets[1].name })
+    end
+    table.insert(list, chosen(name.BOMB, { name = "Note", op = option.BOMB_NOTE }, { name = "White", op = option.BOMB_WHITE }))
+    return theme.properties(list)
 end
 
 local function offsets(mode)
@@ -96,10 +104,12 @@ function play.build(spec)
         return header
     end
     local main_state = require("main_state")
+    local option = skin_config.option or {}
+    theme.apply(option)
     local s = ui.new(header)
     s:atlas("common")
     s:atlas("play")
-    local view = layout.of(mode, skin_config.option or {})
+    local view = layout.of(mode, option)
     parts.backdrop(s)
     info.build(s, view, main_state)
     field.under(s, view)

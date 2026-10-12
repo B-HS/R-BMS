@@ -16,6 +16,8 @@ THEME_COLOR = re.compile(r'^\s*\[?(\w+)\]? = \{ (\d+), (\d+), (\d+) \},$', re.MU
 
 Rgb = tuple[int, int, int]
 
+THEME_SUFFIXES = {'mono': '', 'slate': '_slate'}
+
 GLYPH_PAD = 2
 OPAQUE = 255
 WHITE = (255, 255, 255)
@@ -53,6 +55,10 @@ def palette(group: str) -> dict[str, Rgb]:
     if not colors:
         raise SystemExit(f'{THEME_FILE.name} has no colors under theme.{group}')
     return colors
+
+
+def themes() -> dict[str, dict[str, Rgb]]:
+    return {suffix: palette(group) for group, suffix in THEME_SUFFIXES.items()}
 
 
 def tinted(mask: Image.Image, color: tuple[int, int, int] = WHITE) -> Image.Image:

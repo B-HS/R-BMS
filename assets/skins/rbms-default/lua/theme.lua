@@ -5,7 +5,19 @@ theme.author = "R-BMS"
 theme.width = 1920
 theme.height = 1080
 
-theme.color = {
+theme.mono = {
+    bg = { 0, 0, 0 },
+    panel = { 22, 22, 22 },
+    raised = { 38, 38, 38 },
+    line = { 60, 60, 60 },
+    text = { 242, 242, 242 },
+    sub = { 184, 184, 184 },
+    muted = { 128, 128, 128 },
+    bar = { 200, 200, 200 },
+    lamp_off = { 68, 68, 68 },
+}
+
+theme.slate = {
     bg = { 12, 15, 20 },
     panel = { 20, 25, 34 },
     raised = { 29, 36, 48 },
@@ -13,11 +25,70 @@ theme.color = {
     text = { 241, 244, 248 },
     sub = { 167, 178, 193 },
     muted = { 102, 115, 135 },
-    accent = { 76, 201, 240 },
-    accent_dim = { 31, 95, 120 },
-    black = { 0, 0, 0 },
-    white = { 255, 255, 255 },
+    bar = { 92, 115, 160 },
+    lamp_off = { 58, 69, 86 },
 }
+
+theme.accent = {
+    white = { 255, 255, 255 },
+    sky = { 76, 201, 240 },
+    amber = { 242, 179, 61 },
+    green = { 89, 209, 133 },
+    pink = { 240, 104, 158 },
+}
+
+theme.accent_dim = {
+    white = { 102, 102, 102 },
+    sky = { 31, 95, 120 },
+    amber = { 97, 72, 24 },
+    green = { 36, 84, 53 },
+    pink = { 96, 42, 63 },
+}
+
+theme.note = {
+    white = { 241, 244, 248 },
+    cyan = { 76, 201, 240 },
+    gray = { 140, 140, 140 },
+    silver = { 196, 196, 196 },
+    shade = { 12, 15, 20 },
+}
+
+theme.OPTION = {
+    THEME_MONO = 920,
+    THEME_SLATE = 921,
+    ACCENT_WHITE = 922,
+    ACCENT_SKY = 923,
+    ACCENT_AMBER = 924,
+    ACCENT_GREEN = 925,
+    ACCENT_PINK = 926,
+}
+
+theme.OPTION_NAME = { THEME = "Theme", ACCENT = "Accent" }
+
+local SURFACES = {
+    { name = "Mono", op = theme.OPTION.THEME_MONO, palette = theme.mono, suffix = "" },
+    { name = "Slate", op = theme.OPTION.THEME_SLATE, palette = theme.slate, suffix = "_slate" },
+}
+
+local ACCENTS = {
+    { name = "White", op = theme.OPTION.ACCENT_WHITE, key = "white" },
+    { name = "Sky", op = theme.OPTION.ACCENT_SKY, key = "sky" },
+    { name = "Amber", op = theme.OPTION.ACCENT_AMBER, key = "amber" },
+    { name = "Green", op = theme.OPTION.ACCENT_GREEN, key = "green" },
+    { name = "Pink", op = theme.OPTION.ACCENT_PINK, key = "pink" },
+}
+
+local function copied(color)
+    return { color[1], color[2], color[3] }
+end
+
+theme.color = { black = { 0, 0, 0 }, white = { 255, 255, 255 } }
+for name, color in pairs(SURFACES[1].palette) do
+    theme.color[name] = copied(color)
+end
+theme.color.accent = copied(theme.accent[ACCENTS[1].key])
+theme.color.accent_dim = copied(theme.accent_dim[ACCENTS[1].key])
+theme.sprite_suffix = SURFACES[1].suffix
 
 theme.tone = {
     red = { 240, 86, 76 },
@@ -66,7 +137,6 @@ theme.timing = {
 }
 
 theme.lamp = {
-    noplay = { 58, 69, 86 },
     failed = { 255, 0, 0 },
     assist = { 255, 99, 253 },
     light_assist = { 101, 99, 255 },
@@ -78,6 +148,8 @@ theme.lamp = {
     perfect = { 244, 153, 242 },
     max = { 234, 243, 0 },
 }
+
+theme.lamp.noplay = theme.color.lamp_off
 
 theme.lamp_cycle = 50
 
@@ -205,6 +277,52 @@ function theme.hex(color, alpha)
         return text
     end
     return text .. string.format("%02x", alpha)
+end
+
+local function chosen(rows, op)
+    for _, row in ipairs(rows) do
+        if row.op == op then
+            return row
+        end
+    end
+    return rows[1]
+end
+
+local function painted(target, color)
+    for channel = 1, 3 do
+        target[channel] = color[channel]
+    end
+end
+
+local function property(name, rows)
+    local items = {}
+    for index, row in ipairs(rows) do
+        items[index] = { name = row.name, op = row.op }
+    end
+    return { name = name, item = items, def = rows[1].name }
+end
+
+function theme.properties(list)
+    local rows = list or {}
+    table.insert(rows, property(theme.OPTION_NAME.THEME, SURFACES))
+    table.insert(rows, property(theme.OPTION_NAME.ACCENT, ACCENTS))
+    return rows
+end
+
+function theme.apply(option)
+    local picked = option or {}
+    local surface = chosen(SURFACES, picked[theme.OPTION_NAME.THEME])
+    for name, color in pairs(surface.palette) do
+        painted(theme.color[name], color)
+    end
+    local accent = chosen(ACCENTS, picked[theme.OPTION_NAME.ACCENT])
+    painted(theme.color.accent, theme.accent[accent.key])
+    painted(theme.color.accent_dim, theme.accent_dim[accent.key])
+    theme.sprite_suffix = surface.suffix
+end
+
+function theme.sprite(name)
+    return name .. theme.sprite_suffix
 end
 
 return theme

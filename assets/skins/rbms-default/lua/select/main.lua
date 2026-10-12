@@ -22,7 +22,7 @@ function screen.header()
         input = TIME.input,
         scene = 0,
         fadeout = 0,
-        property = { parts.stage_image_property() },
+        property = theme.properties({ parts.stage_image_property() }),
     }
 end
 
@@ -39,6 +39,7 @@ function screen.build()
         return header
     end
     local main_state = require("main_state")
+    theme.apply(skin_config.option)
     local s = ui.new(header)
     s:atlas("common")
     s:atlas("select")

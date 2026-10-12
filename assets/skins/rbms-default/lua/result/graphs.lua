@@ -21,22 +21,21 @@ local GAUGE = {
     dot_gap = 2,
     unit_gap = 3,
 }
-local GAUGE_GROUND = theme.hex(theme.color.panel)
 local GAUGE_COLORS = {
-    assistClearBGColor = GAUGE_GROUND,
-    assistAndEasyFailBGColor = GAUGE_GROUND,
-    grooveFailBGColor = GAUGE_GROUND,
-    grooveClearAndHardBGColor = GAUGE_GROUND,
-    exHardBGColor = GAUGE_GROUND,
-    hazardBGColor = GAUGE_GROUND,
-    borderColor = theme.hex(theme.color.raised),
-    assistClearLineColor = theme.hex(theme.lamp.assist),
-    assistAndEasyFailLineColor = theme.hex(theme.lamp.easy),
-    grooveFailLineColor = theme.hex(theme.lamp.normal),
-    borderlineColor = theme.hex(theme.color.accent),
-    grooveClearAndHardLineColor = theme.hex(theme.lamp.hard),
-    exHardLineColor = theme.hex(theme.lamp.exhard),
-    hazardLineColor = theme.hex(theme.tone.red),
+    assistClearBGColor = theme.color.panel,
+    assistAndEasyFailBGColor = theme.color.panel,
+    grooveFailBGColor = theme.color.panel,
+    grooveClearAndHardBGColor = theme.color.panel,
+    exHardBGColor = theme.color.panel,
+    hazardBGColor = theme.color.panel,
+    borderColor = theme.color.raised,
+    assistClearLineColor = theme.lamp.assist,
+    assistAndEasyFailLineColor = theme.lamp.easy,
+    grooveFailLineColor = theme.lamp.normal,
+    borderlineColor = theme.color.accent,
+    grooveClearAndHardLineColor = theme.lamp.hard,
+    exHardLineColor = theme.lamp.exhard,
+    hazardLineColor = theme.tone.red,
 }
 
 local TIMELINE = { caption_top = 446, height = 130, tempo_offset = 192, tempo_width = 80 }
@@ -65,10 +64,6 @@ local SIDE_LEGEND = {
     },
 }
 
-local function band(judge)
-    return theme.hex(theme.mix(KIND_LEGEND.beat[judge][3], theme.color.panel, BAND_SHARE), OPAQUE)
-end
-
 local TIMING = {
     caption_top = 810,
     height = 130,
@@ -83,18 +78,8 @@ local TIMING = {
     item_gap = 24,
     labels = { fast = { "AVG FAST", 90 }, slow = { "AVG SLOW", 97 }, even = { "AVG", 38 }, spread = { "SD", 25 } },
 }
-local TIMING_COLORS = {
-    graphColor = theme.hex(theme.color.text, OPAQUE),
-    averageColor = theme.hex(theme.color.accent, OPAQUE),
-    devColor = theme.hex(theme.color.muted, OPAQUE),
-    PGColor = band(1),
-    GRColor = band(2),
-    GDColor = band(3),
-    BDColor = band(4),
-    PRColor = band(5),
-    drawAverage = 1,
-    drawDev = 1,
-}
+local TIMING_LINES = { graphColor = theme.color.text, averageColor = theme.color.accent, devColor = theme.color.muted }
+local TIMING_BANDS = { "PGColor", "GRColor", "GDColor", "BDColor", "PRColor" }
 
 local STAGES = { caption_gap = 32, pitch = 36, size = theme.type.label, title_offset = 48, gauge_height = 386 }
 
@@ -140,7 +125,11 @@ local function gauge(s, main_state, right, height)
     s:text({ value = parts.choice(main_state, props.index.GAUGE_1P, theme.gauge_name, ""), size = size }, name, appear({ color = theme.color.text }))
     gauge_value(s, main_state, right, GAUGE.caption_top + theme.cap_height(size))
     local box = section(right, GAUGE, height)
-    s:object("gaugegraph", ui.merge(GAUGE_COLORS), box, appear())
+    local colors = {}
+    for field, color in pairs(GAUGE_COLORS) do
+        colors[field] = theme.hex(color)
+    end
+    s:object("gaugegraph", colors, box, appear())
     return box
 end
 
@@ -215,7 +204,14 @@ local function timing(s, main_state, right)
     timing_stats(s, main_state, right)
     local box = section(right, TIMING)
     parts.panel(s, box, appear())
-    s:object("timingdistributiongraph", ui.merge(TIMING_COLORS), box, appear())
+    local colors = { drawAverage = 1, drawDev = 1 }
+    for field, color in pairs(TIMING_LINES) do
+        colors[field] = theme.hex(color, OPAQUE)
+    end
+    for judge, field in ipairs(TIMING_BANDS) do
+        colors[field] = theme.hex(theme.mix(KIND_LEGEND.beat[judge][3], theme.color.panel, BAND_SHARE), OPAQUE)
+    end
+    s:object("timingdistributiongraph", colors, box, appear())
 end
 
 local function stages(s, right, top, titles)

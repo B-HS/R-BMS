@@ -20,6 +20,13 @@ layout.OPTION = {
     DIFFERENCE_OFF = 913,
     JUDGE_SHOW = 914,
     JUDGE_HIDE = 915,
+    NOTES_WHITE_BLUE = 930,
+    NOTES_WHITE_DEEP_BLUE = 931,
+    NOTES_WHITE_YELLOW = 932,
+    NOTES_WHITE_GREEN = 933,
+    NOTES_MONO = 934,
+    BOMB_NOTE = 935,
+    BOMB_WHITE = 936,
 }
 
 layout.OPTION_NAME = {
@@ -30,6 +37,16 @@ layout.OPTION_NAME = {
     LANES = "Lane Width",
     DIFFERENCE = "Score Difference",
     JUDGE = "Judge Display",
+    NOTES = "Note Colors",
+    BOMB = "Bomb Color",
+}
+
+layout.NOTE_SETS = {
+    { name = "White-Blue", op = layout.OPTION.NOTES_WHITE_BLUE, black = "cyan", scratch = "red" },
+    { name = "White-Deep Blue", op = layout.OPTION.NOTES_WHITE_DEEP_BLUE, black = "blue", scratch = "red" },
+    { name = "White-Yellow", op = layout.OPTION.NOTES_WHITE_YELLOW, black = "yellow", scratch = "red" },
+    { name = "White-Green", op = layout.OPTION.NOTES_WHITE_GREEN, black = "green", scratch = "red" },
+    { name = "Mono", op = layout.OPTION.NOTES_MONO, black = "gray", scratch = "silver" },
 }
 
 layout.JUDGE_POSITION = { name = "Judge Position", id = 100 }
@@ -90,10 +107,11 @@ local PROGRESS_WIDTH = 4
 
 local BEAT_KEYS = { "white", "black", "white", "black", "white", "black", "white" }
 local BUTTON_COLORS = { "white", "yellow", "green", "blue", "red", "blue", "green", "yellow", "white" }
-local KIND_COLOR = { white = "white", black = "cyan", scratch = "red" }
-local KIND_TINT = { white = theme.color.text, black = theme.color.accent, scratch = theme.tone.red }
-local BUTTON_TINT = {
-    white = theme.color.text,
+local NOTE_TINT = {
+    white = theme.note.white,
+    cyan = theme.note.cyan,
+    gray = theme.note.gray,
+    silver = theme.note.silver,
     yellow = theme.tone.yellow,
     green = theme.tone.green,
     blue = theme.tone.blue,
@@ -202,21 +220,32 @@ function layout.mode(keys)
     return mode
 end
 
-local function side_kinds(mode, scratch_right)
+local function side_kinds(mode, scratch_right, notes)
     local kinds = {}
     if not mode.scratch then
         for slot, color in ipairs(BUTTON_COLORS) do
-            kinds[slot] = { kind = "button", slot = slot, color = color, tint = BUTTON_TINT[color], order = slot }
+            kinds[slot] = { kind = "button", slot = slot, color = color, tint = NOTE_TINT[color], order = slot }
         end
         return kinds
     end
+    local colors = { white = "white", black = notes.black, scratch = notes.scratch }
     for slot = 1, mode.keys do
         local kind = BEAT_KEYS[slot]
-        kinds[slot] = { kind = kind, slot = slot, color = KIND_COLOR[kind], tint = KIND_TINT[kind], order = scratch_right and slot or slot + 1 }
+        kinds[slot] = { kind = kind, slot = slot, color = colors[kind], tint = NOTE_TINT[colors[kind]], order = scratch_right and slot or slot + 1 }
     end
-    local scratch = { kind = "scratch", slot = SCRATCH_SLOT, color = KIND_COLOR.scratch, tint = KIND_TINT.scratch, order = scratch_right and mode.keys + 1 or 1 }
+    local scratch = { kind = "scratch", slot = SCRATCH_SLOT, color = colors.scratch, tint = NOTE_TINT[colors.scratch], order = scratch_right and mode.keys + 1 or 1 }
     kinds[mode.keys + 1] = scratch
     return kinds
+end
+
+local function note_set(option)
+    local picked = option[layout.OPTION_NAME.NOTES]
+    for _, set in ipairs(layout.NOTE_SETS) do
+        if set.op == picked then
+            return set
+        end
+    end
+    return layout.NOTE_SETS[1]
 end
 
 local function round(value)
@@ -229,15 +258,15 @@ end
 
 local function field_width(mode, scale)
     local width = -LANE_GAP
-    for _, lane in ipairs(side_kinds(mode, false)) do
+    for _, lane in ipairs(side_kinds(mode, false, layout.NOTE_SETS[1])) do
         width = width + lane_width(lane.kind, scale) + LANE_GAP
     end
     return width
 end
 
-local function field_of(mode, side, x, scratch_right, scale)
+local function field_of(mode, side, x, scratch_right, scale, notes)
     local field = layout.FIELD
-    local kinds = side_kinds(mode, scratch_right)
+    local kinds = side_kinds(mode, scratch_right, notes)
     local by_order = {}
     for _, lane in ipairs(kinds) do
         by_order[lane.order] = lane
@@ -281,7 +310,7 @@ local function single(mode, option, lanes)
         return place(not graphed and base.without_graph[name] or base[name])
     end
     local field_box = place({ x = base.field_end - width, top = 0, w = width, h = 0 })
-    local field = field_of(mode, 0, field_box.x, scratch_right, scale)
+    local field = field_of(mode, 0, field_box.x, scratch_right, scale, note_set(option))
     return {
         fields = { field },
         progress = { beside(field, not flipped) },
@@ -296,12 +325,13 @@ local function single(mode, option, lanes)
     }
 end
 
-local function double(mode, lanes)
+local function double(mode, option, lanes)
     local base = DOUBLE[lanes]
     local scale = LANE_SCALE[lanes]
+    local notes = note_set(option)
     local width = field_width(mode, scale)
-    local first = field_of(mode, 0, base.field_end - width, false, scale)
-    local second = field_of(mode, 1, theme.width - base.field_end, true, scale)
+    local first = field_of(mode, 0, base.field_end - width, false, scale, notes)
+    local second = field_of(mode, 1, theme.width - base.field_end, true, scale, notes)
     local foot_height = theme.height - base.foot_top
     return {
         fields = { first, second },
@@ -318,11 +348,12 @@ end
 
 function layout.of(mode, option)
     local lanes = LANE_WIDTH[option[layout.OPTION_NAME.LANES]] or LANE_WIDTH[layout.OPTION.LANES_NORMAL]
-    local view = mode.sides == 1 and single(mode, option, lanes) or double(mode, lanes)
+    local view = mode.sides == 1 and single(mode, option, lanes) or double(mode, option, lanes)
     view.mode = mode
     view.detail = option[layout.OPTION_NAME.DETAIL] or layout.OPTION.DETAIL_FAST_SLOW
     view.difference = option[layout.OPTION_NAME.DIFFERENCE] or layout.OPTION.DIFFERENCE_TARGET
     view.judge_shown = option[layout.OPTION_NAME.JUDGE] ~= layout.OPTION.JUDGE_HIDE
+    view.bomb_tint = option[layout.OPTION_NAME.BOMB] == layout.OPTION.BOMB_WHITE and theme.note.white or nil
     view.lanes = {}
     for _, field in ipairs(view.fields) do
         for _, lane in ipairs(field.lanes) do
