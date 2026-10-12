@@ -1,6 +1,16 @@
 # B3. beatoraja 플레이 화면 전용 스킨 객체와 플레이 화면 수명주기
 
-> 최종 갱신 2026-10-12 · 대응 단계: 웨이브 10D(judge 의 `numberAlign`) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-12 · 대응 단계: 웨이브 13(판정 타이밍이 옮기는 것) 반영 · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 13 반영 사항 (2026-10-12)
+
+본문 §3.3(`:300-301` 의 식)과 §7(bga)은 원본의 동작이고 그대로 맞다. 아래는 R-BMS 가 그 동작을 따르게 된 곳과, 그 과정에서 원본을 다시 읽어 확인한 사실이다. 아래 웨이브 6 절의 (W6-3) "R-BMS 는 judgetiming 을 입력 쪽에 적용하므로 노트 필드 시각에는 더하지 않는다"는 이 절이 대체한다. 구현 쪽 서술은 `r3-rbms-app.md` 의 같은 이름의 절.
+
+- §3.3(노트 필드의 시각): `judgetiming` 을 읽는 곳은 `play/LaneRenderer.java:300-301` 한 곳뿐이다(`grep -rni judgetiming` 전수: 그 밖은 설정 `PlayerConfig`, 속성 `SkinProperty.NUMBER_JUDGETIMING = 12`, 선곡의 키, 자동 보정의 쓰기). `time = (TIMER_PLAY 가 켜져 있으면 time - timer(PLAY), 141 이 켜져 있으면 time - timer(141), 아니면 0) + judgetiming` 이므로 +N 이면 노트·마디선·`nowbpm` 이 N ms 앞선 차트 시각으로 그려지고, 차트가 시작하기 전에도 N ms 앞선 자리다. R-BMS 는 웨이브 13 부터 같다(`PlayState::drawn_chart_us`)
+- §3.3(판정과 소리): `JudgeManager` 는 `judgetiming` 을 판정에 읽지 않는다. 입력은 들어온 시각으로 판정되고 키음·BGM 도 그 값을 읽지 않는다. `JudgeManager.java:697-703` 은 쓰기만 한다: 자동 보정(`notesDisplayTimingAutoAdjust`)이 켜져 있고 PLAY 또는 PRACTICE 모드이며 판정이 GOOD 이상(`judge <= 2`), `|mfast| <= 150000` 일 때 `judgetiming -= (mfast >= 0 ? mfast + 15000 : mfast - 15000) / 30000`. 오토플레이와 리플레이에서는 움직이지 않는다. R-BMS 의 `rbms_play::auto_adjust_step_ms` 가 같은 식과 부호다
+- §3.3(노트가 사라지는 때): 일반 노트는 판정 상태와 무관하게 `tl.getMicroTime() >= microtime` 인 동안만 그려진다(`LaneRenderer.java:546`. `microtime` 이 위의 `judgetiming` 을 더한 시각이다. 친 노트도 판정선에 닿을 때까지 그려지고, `markprocessednote` 는 그 동안의 그림을 바꾼다). 미판정 노트는 `showpastnote` 가 꺼져 있으면 판정선 아래로 그려지지 않는다. 그래서 오프셋 +N 에서는 노트가 판정선에서 사라진 N ms 뒤에 오토플레이·리플레이의 판정(폭발, 키음)이 나고, -N 에서는 판정이 난 뒤에도 노트가 N ms 동안 판정선까지 내려온다. R-BMS 의 `skin_render/notes.rs`(`ahead`)와 내장 필드(`playfield.rs`)가 같은 규칙이다(기본 팩 캡처로 확인: +100 의 T-50 프레임에 그 줄이 없고 판정 전, -100 의 T+50 프레임에 판정 뒤의 줄이 판정선 위 약 56px)
+- §7(bga): `play/SkinBGA.java:42-44` 는 PRELOAD·PRACTICE·READY 에서 -1, 그 밖에는 `timer.getNowTime(TIMER_PLAY)` 를 `prepareBGA` 에 넘긴다. `judgetiming` 을 더하지 않으므로 BGA 는 오프셋과 무관하게 곡 시각에 넘어간다. R-BMS 는 `PlayState::played_chart_us` 가 이 시각이다
+- §11(범위와 키): `PlayerConfig.java:84-85` 의 범위는 -500~+500 이다. 선곡 패널 3 의 키는 `MusicSelectKeyProperty` 의 5번째가 NOTESDISPLAYTIMING_DOWN(-1), 7번째가 UP(+1) 이다. R-BMS 의 범위는 -200~+200 이고 키의 방향은 같다
 
 ## 웨이브 10D 반영 사항 (2026-10-12)
 

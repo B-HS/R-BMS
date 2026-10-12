@@ -1,6 +1,6 @@
 # 플레이 옵션
 
-> 최종 갱신 2026-10-12 · 웨이브 12(연습 패널의 숫자 행에 슬라이더와 직접 입력: 9절. 작업 트리 기준, 커밋 전) 기준
+> 최종 갱신 2026-10-12 · 웨이브 13(판정 오프셋을 원본의 노트 표시 타이밍으로: 1~3절, 7.4절. 기본 스킨의 판정선을 필드 맨 아래로: 8절. 작업 트리 기준, 커밋 전) 기준. 웨이브 12 는 연습 패널의 숫자 행(9절)
 > 대상: 플레이 중 스크롤·가림막·판정 타이밍을 정하는 옵션과 그 키, 그 옵션을 바꾸는 화면인 PLAY 메뉴(7절), 기본 스킨의 판정 표시(8절), 연습 패널(9절). 스킨이 그리는 옵션(Lane Width 등)과 부위별 불투명도는 [skin.md](./skin.md) 3.4절, 구현 위치는 [crates.md](./crates.md)를 본다. PLAY 메뉴의 설계는 [plan/2026-10-11-play-menu.md](./plan/2026-10-11-play-menu.md).
 > beatoraja 원본의 같은 기능이 기준이다. 다르게 한 곳은 "원본과 다른 점" 열에 이유를 적는다.
 
@@ -12,7 +12,7 @@
 | 녹색 숫자(green number) | 이동 시간의 3/5 를 버림한 값(`duration * 3 / 5`). IIDX 의 녹색 숫자, beatoraja 의 `duration_green`(스킨 number 313)과 같다. 이동 시간 500 ms = 녹색 300 |
 | 흰색 숫자(white number) | 레인 커버가 가린 비율의 1000 배를 반올림한 값(스킨 number 14). 커버 0.3 = 300. 리프트(314)와 HIDDEN+(315)의 숫자도 같은 방식이다 |
 | 하이스피드(hispeed) | 스크롤 배율. `이동 시간 = 240000 / BPM / hispeed * (1 - 커버)` |
-| 판정 오프셋(judge offset) | 입력이 판정되는 시각에 더하는 값. 단위 ms. 양수는 "빠르게 치는 사람"을 위한 보정이다(입력을 그만큼 늦게 친 것으로 본다) |
+| 판정 오프셋(judge offset) | 노트를 곡보다 얼마나 앞서 그릴지. 단위 ms. beatoraja 의 `judgetiming`(노트 표시 타이밍)과 같은 값이다. +10 이면 노트가 자기 소리와 판정 시각보다 10 ms 먼저 판정선에 닿는다. 소리와 입력이 판정되는 시각은 옮기지 않는다. 늦게 치는 사람은 올리고(+) 빠르게 치는 사람은 내린다(-). 자세한 것은 3절 |
 
 ## 2. 옵션 표
 
@@ -25,18 +25,61 @@
 | LANE COVER | 위에서 내려오는 가림막. 값이 커질수록 더 가린다 | 비율 0~1, 한 번에 0.01, 미세 단계 0.0001~0.01(기본 0.001) | 0, 켬 | PLAY 메뉴 > LANE, 플레이 중 `RIGHT`(더 가림)/`LEFT`(덜 가림), `BACKSLASH`(켬·끔), START + 턴테이블, START 두 번(켬·끔), 마우스 휠 | `PlayConfig.lanecover`, `enablelanecover`, IIDX 의 SUDDEN+ | 켬·끔 전용 키와 방향을 적은 행 이름을 더했다 |
 | LIFT | 판정선을 올린다 | 비율 0~1 | 0, 끔 | PLAY 메뉴 > LANE, 플레이 중 `RBRACKET`/`LBRACKET`, 켬·끔 키(출하 시 미지정) | `PlayConfig.lift`, IIDX 의 LIFT | 없음 |
 | HIDDEN+ | 판정선에서 위로 올라오는 가림막 | 비율 0~1 | 0, 끔 | PLAY 메뉴 > LANE, 플레이 중 올림·내림·켬·끔 키(출하 시 미지정) | `PlayConfig.hidden`, IIDX 의 HIDDEN+ | 없음 |
-| JUDGE OFFSET | 판정 오프셋 | -200~+200 ms, PLAY 메뉴의 행은 1 ms 씩(Shift 10 ms) | 0 | PLAY 메뉴 > JUDGE, 선곡 패널 3 의 5·7번 키(±1 ms), 플레이 중 JUDGE OFFSET ±1 MS 키(출하 시 미지정) | `PlayerConfig.judgetiming` | 원본은 값을 노트 표시 시계에 더한다(빠르게 치면 노트를 늦게 그린다). 여기서는 입력의 판정 시각에 더하므로 부호가 반대다: 빠르게 치는 사람은 + |
-| AUTO ADJUST | 칠 때마다 JUDGE OFFSET 을 조금씩 움직인다 | 켬 / 끔 | 끔 | PLAY 메뉴 > JUDGE, 선곡 패널 3 의 3번 키, 플레이 중 AUTO ADJUST ON/OFF 키(출하 시 미지정) | `PlayerConfig.notesDisplayTimingAutoAdjust`(`JudgeManager.java:697-703`) | 부호만 위와 같은 이유로 반대다 |
+| JUDGE OFFSET | 판정 오프셋 | -200~+200 ms, PLAY 메뉴의 행은 1 ms 씩(Shift 10 ms) | 0 | PLAY 메뉴 > JUDGE, 선곡 패널 3 의 5·7번 키(±1 ms), 플레이 중 JUDGE OFFSET ±1 MS 키(출하 시 미지정) | `PlayerConfig.judgetiming`(`LaneRenderer.java:300-301`) | 뜻과 부호는 같다. 범위만 좁다(원본 -500~+500 ms) |
+| AUTO ADJUST | 칠 때마다 JUDGE OFFSET 을 조금씩 움직인다 | 켬 / 끔 | 끔 | PLAY 메뉴 > JUDGE, 선곡 패널 3 의 3번 키, 플레이 중 AUTO ADJUST ON/OFF 키(출하 시 미지정) | `PlayerConfig.notesDisplayTimingAutoAdjust`(`JudgeManager.java:697-703`) | 없음(식과 부호가 같다) |
 
-## 3. 판정 자동 보정(AUTO ADJUST)
+## 3. 판정 오프셋과 자동 보정(JUDGE OFFSET, AUTO ADJUST)
+
+### 3.1 오프셋이 옮기는 것
+
+JUDGE OFFSET 은 노트 필드를 그리는 시각에만 더해진다. 원본이 `judgetiming` 을 읽는 곳은 `LaneRenderer.java:300-301` 한 줄뿐이고(`time = 플레이 타이머 + judgetiming`), `JudgeManager` 와 키음·BGM 은 그 값을 읽지 않는다. R-BMS 도 같다(웨이브 13 부터).
+
+| 오프셋이 +N ms 일 때 | 어디에 있나 |
+| --- | --- |
+| 노트의 소리, BGM, BGA(미스 레이어 포함), 스킨의 타이머 | 노트의 시각 T 그대로. BGA 는 플레이 타이머만 읽는다(`SkinBGA.java:42-44`, `PlayState::played_chart_us`) |
+| PGREAT 창의 가운데(입력이 판정되는 기준) | T 그대로. 입력은 들어온 시각에 판정된다 |
+| 손으로 친 노트의 키음 | 누른 순간 |
+| 노트와 마디선이 판정선에 닿아 그려지는 시각, 스킨이 읽는 현재 BPM(number 160) | T - N (N ms 먼저). 원본도 현재 BPM 을 필드가 그리는 시각에서 구한다 |
+
+1. 쓰임: 노트를 보고 쳤을 때 계속 SLOW 가 나면 올리고(+, 노트가 먼저 온다) 계속 FAST 가 나면 내린다(-, 노트가 늦게 온다). 화면의 표시 지연을 메우는 값이다.
+2. 박자에 맞춰 친 입력은 어느 값에서도 PGREAT 다. 오프셋은 소리와 판정 사이를 벌리지 않는다.
+3. 오토플레이와 리플레이도 노트는 보는 사람의 오프셋만큼 앞서 그려지고 판정(폭발, 판정 글자, 키음)은 T 에 난다. 노트는 판정 여부와 상관없이 필드의 시각이 노트에 닿을 때, 곧 판정선에 닿을 때 사라진다(`LaneRenderer.java:546`. 친 노트도 판정선까지는 그려진다). 그래서 +100 이면 노트가 판정선에서 사라진 뒤 100 ms 뒤에 판정이 나고, -100 이면 판정이 난 뒤에도 노트가 100 ms 동안 판정선까지 내려온다. 손으로 칠 때도 같다(원본과 같다. 캡처 `offset-plus-100-50ms-before-the-row`, `offset-minus-100-50ms-after-the-row`).
+4. 차트가 시작하기 전(로딩·READY)에도 필드는 오프셋만큼 앞선 자리로 그려진다(원본과 같다).
+5. 연습의 배속: 오프셋은 플레이어의 시간이다. 0.5 배속이면 차트 시간으로는 절반만큼 앞서 그린다(`PlayState::field_lead_us`).
+6. 값이 바뀌면 다음 프레임부터 노트의 자리가 그만큼 옮겨진다. 자동 보정은 입력 한 번에 1~5 ms 를 옮긴다.
+
+측정(150 BPM, 노트 T = 1600 ms, `apps/rbms-player/src/stage/play/timing_tests.rs`). 판정선에 닿는 시각은 곡 시계를 1 ms 씩 옮기며 필드가 그 노트를 판정선에 그리는 첫 시각, PGREAT 창은 1 ms 간격으로 눌러 PGREAT 가 난 구간이다. T 기준 ms.
+
+| 오프셋 | 소리 | 판정선에 닿음(웨이브 12 까지) | PGREAT 창(웨이브 12 까지) | 판정선에 닿음(지금) | PGREAT 창(지금) |
+| --- | --- | --- | --- | --- | --- |
+| 0 | 0 | 0 | -20~+20 | 0 | -20~+20 |
+| +30 | 0 | 0 | -50~-10 | -30 | -20~+20 |
+| -30 | 0 | 0 | +10~+50 | +30 | -20~+20 |
+| +100 | 0 | 0 | -120~-80 | -100 | -20~+20 |
+| -100 | 0 | 0 | +80~+120 | +100 | -20~+20 |
+
+"지금" 두 열과 소리 열은 웨이브 13 통합의 최종 트리에서 다시 잰 값이고(테스트 `the_offset_moves_the_note_on_the_line_and_neither_the_sound_nor_the_window` 가 다섯 오프셋에서 스킨 필드와 내장 필드 둘 다 이 값을 단언한다), "웨이브 12 까지" 열은 고치기 전 빌드에서 잰 값이다(-100 행은 리뷰의 측정). BGA 는 `timing_capture_tests.rs` 의 `the_default_pack_changes_the_background_with_the_song_at_every_offset` 가 오프셋 0·+100·-100 에서 그림이 넘어가는 시각 T 의 50 ms 전에는 아직 없고 50 ms 뒤에는 있음을 본다.
+
+웨이브 12 까지는 오프셋을 입력의 판정 시각에 더했다. 그래서 값을 줄수록 박자에 맞춰 친 입력이 FAST·SLOW 로 판정됐고, PGREAT 를 내려면 박자에서 그만큼 어긋나게 쳐야 했으며 그때 나는 키음도 곡에서 어긋났다. "판정 보정을 켜면 곡과 싱크가 안 맞는 느낌"의 원인이다.
+
+### 3.2 자동 보정(AUTO ADJUST)
 
 1. 대상은 손으로 치는 판(일반 플레이와 연습)뿐이다. 오토플레이와 리플레이에서는 오프셋이 움직이지 않는다.
-2. GOOD 이상의 판정이고 오차가 ±150 ms 이내인 입력마다 오프셋이 `(오차 ± 15 ms) / 30 ms` 를 0 쪽으로 버림한 만큼 움직인다. 오차가 ±15 ms 안이면 움직이지 않는다. 40 ms 빠르게 계속 치면 한 번에 +1 ms 씩 올라 +26 ms 에서 멈춘다(남는 오차 14 ms).
-3. 움직인 값은 그 입력의 다음 입력부터 적용된다. 범위 끝(±200 ms)에서 멈춘다.
-4. 값은 입력 직후 설정에 반영되고, 클리어·폐점·중간에 나가기 어느 쪽으로 끝나도 저장된다.
-5. 플레이 화면의 TIMING 숫자(스킨 number 12)가 현재 오프셋이다. 기본 스킨은 켜져 있는 동안 표지를 `TIMING AUTO` 로 쓴다(스킨 image index 75).
-6. 리플레이는 오프셋이 바뀐 이력을 `judge.offset_steps`(몇 번째 입력부터 몇 ms)에 기록해 같은 판정으로 재생·탐색된다. 이 필드가 없는 이전 리플레이는 한 오프셋으로 판정된다(이전과 같다).
-7. IR 에 올리는 리플레이는 오프셋 하나만 실을 수 있어, 각 입력의 시각을 `(그 입력의 오프셋 - 마지막 오프셋)` 만큼 옮겨 올린다. 받는 쪽이 마지막 오프셋 하나로 판정해도 같은 시각에 판정된다. 한계: 놓친 노트를 쓸어 내는 시계는 오프셋의 영향을 받지 않으므로, 마지막 판정 창 끝에 걸친 입력(창 끝에서 오프셋이 움직인 폭 이내)은 다르게 판정될 수 있다.
+2. GOOD 이상의 판정이고 오차가 ±150 ms 이내인 입력마다 오프셋에서 `(오차 ± 15 ms) / 30 ms` 를 0 쪽으로 버림한 값을 뺀다(오차는 빠르면 +. 원본의 식 `judgetiming - (mfast ± 15000) / 30000` 그대로). 빠르게 치면 내려가고(노트가 늦게 온다) 늦게 치면 올라간다. 오차가 ±15 ms 안이면 움직이지 않는다.
+3. 노트를 보고 40 ms 빠르게 치는 사람은 한 번에 -1 ms 씩 내려가 -26 ms 에서 멈춘다(남는 오차 14 ms). 노트가 늦게 오는 만큼 늦게 치게 되기 때문이다.
+4. 노트를 보지 않고 소리만 듣고 치는 사람은 노트의 자리가 바뀌어도 치는 시각이 그대로라 오차가 줄지 않고, 오프셋이 입력마다 계속 움직여 범위 끝(±200 ms)까지 간다. 원본의 규칙이 그렇다. 이런 경우에는 AUTO ADJUST 를 끄고 쓴다.
+5. 값은 입력 직후 설정에 반영되고 다음 프레임부터 그 값으로 그려진다. 클리어·폐점·중간에 나가기 어느 쪽으로 끝나도 저장된다.
+6. 플레이 화면의 TIMING 숫자(스킨 number 12)가 현재 오프셋이다. 기본 스킨은 켜져 있는 동안 표지를 `TIMING AUTO` 로 쓴다(스킨 image index 75).
+
+### 3.3 리플레이·IR·설정 파일
+
+1. 리플레이: 입력은 들어온 시각에 판정되므로 새로 저장되는 리플레이는 `offset_ms: 0` 이고 `judge.offset_steps` 가 없다. 재생은 보는 사람의 JUDGE OFFSET 과 무관하게 같은 판정이 나온다(오프셋은 노트를 그리는 자리만 옮긴다).
+2. 웨이브 12 까지의 리플레이: `offset_ms` 와 `judge.offset_steps` 는 "입력이 판정된 시각이 입력 시각에서 얼마나 떨어져 있었나"로 읽히고, 기록 당시와 같은 시각에 판정된다. 같은 필드를 같은 코드가 읽으므로 판 구분이 없다(새 리플레이는 그 값이 0 일 뿐이다). 그 빌드가 쓴 파일 셋(`crates/rbms-play/tests/fixtures/replay-wave12-*.ron`)이 그때의 집계 그대로 재생되는지 테스트가 본다.
+3. 리플레이를 볼 때 사용자의 JUDGE OFFSET 을 리플레이의 값으로 덮어쓰지 않는다(웨이브 12 까지는 덮어썼다).
+4. IR: 지금 친 판의 리플레이는 오프셋 0 과 입력 시각 그대로 올라간다. 웨이브 12 까지의 리플레이를 변환하면 전과 같이 각 입력의 시각을 `(그 입력의 오프셋 - 마지막 오프셋)` 만큼 옮긴다(`ir_replay::uploaded_time_us`). 점수 제출의 `options.offset_ms` 는 설정값(노트 표시 오프셋)이다.
+5. 설정 파일: 스키마 5. 스키마 4 이하의 파일과 계정에서 내려받은 설정은 읽을 때 `judge.offset_ms` 의 부호를 한 번 뒤집는다(`Config::sanitise`). 전의 +26(입력을 26 ms 늦게 판정)은 지금의 -26(노트를 26 ms 늦게 그림)이고, 눈에 보이는 노트와 PGREAT 사이의 간격이 그대로다. 이전 파일은 `settings.ron.v4.bak` 로 남는다.
+6. 키 설정의 행 이름: `JUDGE OFFSET +1 MS (HITTING LATE)`, `JUDGE OFFSET -1 MS (HITTING EARLY)`. 저장된 키 지정(`offset_up`·`offset_down`)은 그대로 숫자를 +1·-1 한다. 선곡 패널 3 의 5·7번 키도 원본과 같은 방향이다(5번 -1, 7번 +1). 기본 스킨은 그 두 칸의 동작 줄을 `NOTES 1 MS LATER`(5번), `NOTES 1 MS EARLIER`(7번)로 쓴다(웨이브 12 까지는 `1 MS EARLIER`·`1 MS LATER` 였다. 무엇이 옮겨지는지 적지 않아 PLAY 메뉴의 도움말과 반대로 읽혔다).
+7. 같은 값을 가리키는 문구는 한 방향이다: PLAY 메뉴 도움말 `Draw the notes this many ms earlier (+) or later (-) than the song; raise it if you hit late, lower it if you hit early`, 키 설정의 `+1 MS (HITTING LATE)`·`-1 MS (HITTING EARLY)`, 선곡 패널 3 의 `NOTES 1 MS EARLIER`(+1)·`NOTES 1 MS LATER`(-1), 플레이 화면의 TIMING 숫자(설정값 그대로, 부호 포함), 자동 보정(늦게 치면 +). FAST/SLOW 는 입력이 노트의 시각(소리)보다 빨랐는지 늦었는지이고 오프셋과 무관하다.
 
 ## 4. 녹색 숫자 유지(KEEP GREEN NUMBER)
 
@@ -67,7 +110,9 @@
 | --- | --- |
 | 이동 시간·녹색 숫자·유지 속도의 순수 계산 | `crates/rbms-config/src/speed.rs`(`held_speed`, `HeldTravel`, `HeldSpeed`, `green_of_duration`, `duration_of_green`, `duration_stepped`, `duration_stepped_by_green`, `travel_duration_ms`) |
 | 설정 필드 | `crates/rbms-config/src/schema.rs`(`PlayOptions.keep_green_number`, `duration_ms`, `JudgeOptions.offset_ms`, `auto_offset`) |
-| 자동 보정의 한 걸음 | `crates/rbms-play/src/session.rs`(`auto_adjust_step_ms`, `PlaySession::judge_offset_ms`, `recorded_offset_steps`) |
+| 자동 보정의 한 걸음 | `crates/rbms-play/src/session.rs`(`auto_adjust_step_ms`, `PlaySession::judge_offset_ms`, `set_judge_offset_us`). 세션은 오프셋을 판정에 쓰지 않는다 |
+| 오프셋만큼 앞서 그리기 | `apps/rbms-player/src/stage/play/mod.rs`(`field_lead_us`, `drawn_chart_us`, `built_in_field_us`. 오프셋을 더하지 않은 플레이 타이머 시각은 `played_chart_us` 이고 BGA 가 이것을 읽는다), 미리보기는 `stage/play/skin_preview.rs`(`PlaySample::drawn_chart_us`) |
+| 오프셋의 측정과 캡처 | `apps/rbms-player/src/stage/play/timing_tests.rs`, `timing_capture_tests.rs`(`RBMS_SKIN_CAPTURE_DIR` 을 주면 PNG 저장), `crates/rbms-play/tests/auto_adjust.rs` |
 | 플레이 중 조작 | `apps/rbms-player/src/stage/play/controls.rs`, `apps/rbms-player/src/app_input.rs`(`apply_control`, `fine_pressed`) |
 | 조작과 단축키의 종류, 저장 형식 | `apps/rbms-player/src/keyconfig.rs`(`ControlAction`, `Shortcut`, `ControlBinds`) |
 | IR 리플레이 변환 | `apps/rbms-player/src/ir_replay.rs`(`uploaded_time_us`) |
@@ -80,7 +125,7 @@
 
 ## 7. PLAY 메뉴
 
-플레이할 때마다 만지는 옵션은 SETTINGS 가 아니라 독립 화면인 PLAY 메뉴에 있다. 왼쪽이 묶음별 행 목록, 오른쪽이 고른 모드의 플레이 화면을 그 모드의 스킨으로 그린 미리보기이고, 값을 바꾸면 그 프레임부터 미리보기에 반영된다. 저장 위치와 형식은 그대로다(`settings.ron` 의 `play`·`judge` 그룹과 `skin.custom`. 이전 판의 설정 파일이 그대로 읽히고 스키마 판도 그대로다).
+플레이할 때마다 만지는 옵션은 SETTINGS 가 아니라 독립 화면인 PLAY 메뉴에 있다. 왼쪽이 묶음별 행 목록, 오른쪽이 고른 모드의 플레이 화면을 그 모드의 스킨으로 그린 미리보기이고, 값을 바꾸면 그 프레임부터 미리보기에 반영된다. 저장 위치와 형식은 그대로다(`settings.ron` 의 `play`·`judge` 그룹과 `skin.custom`. 이전 판의 설정 파일이 그대로 읽힌다. PLAY 메뉴 때문에 스키마 판이 오르지는 않았고, 판정 오프셋의 스키마 5 는 3.3절).
 
 ### 7.1 들어가고 나가는 길
 
@@ -112,7 +157,7 @@
 | JUDGE | AUTO ADJUST | `ON` / `OFF` | 뒤집기 |
 | CHART | RANDOM, GAUGE, TARGET, ESCAPE | 항목 이름 | 한 항목 |
 | CHART | LEGACY NOTE, AUTOPLAY, SCRATCH AUTO, AUTO REPLAY | `ON` / `OFF` | 뒤집기 |
-| SKIN | 접이 `OPACITY` | `HIDDEN (19)` / `SHOWN (19)`: 접힘 여부와 든 행 수 | Enter·← →·클릭으로 펴고 접는다. 펴면 그 문서의 불투명도 행이 바로 아래에 나온다(기본 스킨 7키 19행, 14키 18행) |
+| SKIN | 접이 `OPACITY` | `HIDDEN (18)` / `SHOWN (18)`: 접힘 여부와 든 행 수 | Enter·← →·클릭으로 펴고 접는다. 펴면 그 문서의 불투명도 행이 바로 아래에 나온다(기본 스킨 7키 18행, 14키 17행. 웨이브 13 에서 Key Display Opacity 행이 없어져 하나씩 줄었다) |
 | SKIN | 불투명도 행(접이를 폈을 때. 기본 스킨: `LANE BACKGROUND OPACITY` 등) | `100%` | 1% / 10%. 슬라이더와 ← → 는 0~100%. 0% 면 그 부위가 사라진다. 0 키로 100%. 직접 입력만 200% 까지 받는다(알파 0 의 덮개를 밝히는 스킨용. `docs/skin.md` 2.2절의 불투명도 행 주의) |
 | SKIN | 접이 `POSITION AND SIZE` | `HIDDEN (15)` / `SHOWN (15)` | 엔진이 모든 플레이 스킨에 붙이는 오프셋 네 개의 행(`ALL OFFSET(%) X` … `JUDGE DETAIL OFFSET ALPHA`). 1 / 10 |
 
@@ -162,7 +207,7 @@
 | 계산 | 플레이 화면과 같은 함수다(`rbms_config::held_speed`, `travel_duration_ms`, `green_of_duration`). 미리보기 스킨의 HI-SPEED·GREEN·레인 커버 숫자와 같은 값이 나온다 |
 | 정보 패널 아래 줄 | 커서 행의 이름·값 전문과 설명 |
 | 문서가 없는 모드, 읽기 실패 | 미리보기 자리에 이유를 글로 보인다(`NO SKIN DOCUMENT FOR THIS SCREEN` 등). 행은 그대로 조절된다 |
-| 예시 판정 | 사용자의 JUDGE OFFSET 을 읽지도 바꾸지도 않는다(AUTO ADJUST 가 켜져 있어도). 소리는 내지 않는다 |
+| 예시 판정 | 사용자의 JUDGE OFFSET 과 무관하고 그 값을 바꾸지도 않는다(AUTO ADJUST 가 켜져 있어도). 오프셋은 판정을 옮기지 않기 때문이다. 소리는 내지 않는다 |
 | 끊임없는 예시 | 차트가 끝나면 마지막 노트 약 1초 뒤 같은 화면에서 처음부터 다시 내려온다. PREVIEW BPM 과 GAUGE 를 바꾸면 로딩 없이 같은 진행 비율에서 그 템포·그 게이지로 이어 간다(콤보·점수 유지). 모드를 바꾸면 다른 스킨 문서이므로 새 장면이다 |
 
 요약 읽는 법
@@ -183,7 +228,7 @@
 | LANE COVER·LIFT·HIDDEN+ 와 각 ON 행 | 가림막의 위치와 스킨의 숫자(커버 300, 리프트 150 등) |
 | 스킨 옵션(Lane Width, Judge Display 등) | 문서를 다시 읽어 그린다(잠깐 어두워졌다가 같은 위치에서 이어 간다) |
 | 스킨 오프셋(JUDGE POSITION Y 등)과 불투명도 | 문서를 다시 읽지 않는다. 값이 바뀐 다음 프레임부터 그 위치·그 진하기로 그린다 |
-| JUDGE OFFSET, AUTO ADJUST | 스킨의 TIMING 숫자와 `TIMING AUTO` 표지. 예시 판정은 달라지지 않는다 |
+| JUDGE OFFSET, AUTO ADJUST | 노트가 오프셋만큼 앞서(음수면 늦게) 그려진다. 예시 손이 치는 시각은 그대로라 +면 노트가 판정선에서 사라진 뒤에 폭발과 판정 글자가 뜨고, -면 폭발이 뜬 뒤에도 노트가 판정선까지 내려온다. 스킨의 TIMING 숫자와 `TIMING AUTO` 표지도 따른다. 예시 판정은 달라지지 않는다 |
 | GAUGE | 게이지의 종류와 색 |
 | TARGET | 점수 그래프의 타깃 막대와 `TARGET +n`. 기록·IR·라이벌 없이 예시 차트의 노트 수만으로 정한 타깃이다(MY BEST·IR·RIVAL 은 MAX 로 떨어진다) |
 | AUTOPLAY | 스킨의 AUTOPLAY 표지. 예시 손(적어 둔 입력)은 그대로다 |
@@ -223,7 +268,8 @@ SETTINGS 의 탭은 JUDGE, DISPLAY, INPUT, NETWORK, AUDIO, SELECT 여섯이다(P
 
 - DP 는 친 쪽 필드에만 뜬다. BAD·POOR 는 콤보 없이 글자만 뜨고, 글자의 왼쪽 끝은 다른 판정과 같은 자리다(판정이 바뀌어도 글자가 좌우로 옮겨 다니지 않는다). 위 줄도 같은 왼쪽 끝에서 시작한다.
 - 다른 스킨 팩은 자기 판정 객체와 자기 옵션을 쓴다(ModernChic 의 판정 연출은 그대로다). 위 행들은 기본 스킨 문서가 선언한 것이라 다른 팩에서는 나오지 않는다.
-- 레인 면·선·건반 표시 같은 부위를 지워 노트와 판정만 남기는 법은 `docs/skin.md` 3.4.2절(부위별 불투명도)에 있다.
+- 레인 면·레인 구분선·마디선 같은 부위를 지워 노트와 판정만 남기는 법은 `docs/skin.md` 3.4.2절(부위별 불투명도)에 있다.
+- 판정선은 필드의 맨 아래에 붙어 있다(웨이브 13). 판정선 아래에 레인이 이어지던 건반 표시 칸은 없어졌고, 판정 글자와 위 줄은 필드와 함께 64px 내려왔다(판정선과의 거리는 전과 같다). 판정선을 올리려면 LIFT 를 쓴다. 좌표는 기본 스킨 설계서 6.3·6.4절.
 
 ## 9. 연습 패널(PRACTICE)
 

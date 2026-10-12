@@ -1,6 +1,6 @@
 # 스킨 가이드
 
-최종 갱신 2026-10-12 · 대응 커밋: 4e89c8b 이후 웨이브 11(숫자 행의 슬라이더와 직접 입력. 작업 트리 기준, 커밋 전)
+최종 갱신 2026-10-12 · 대응 커밋: 4e89c8b 이후 웨이브 13(기본 스킨의 판정선을 필드 맨 아래로: 3.4.1·3.4.2절. 노트 필드를 판정 오프셋만큼 앞서 그림: 1.2절. 작업 트리 기준, 커밋 전)
 
 R-BMS 는 화면마다 스킨 문서 하나를 읽어 그 화면을 단독으로 그린다. 문서가 없거나 읽히지 않는 화면은 내장 화면이 그린다. 기본으로 설치되는 자작 스킨 `rbms-default` 가 첫 실행부터 선곡 · 결정 · 플레이 · 결과를 그리며, beatoraja 용으로 만든 외부 Lua 스킨(`.luaskin`)도 수정 없이 읽는다. 이 문서의 독자는 스킨을 쓰는 사용자와 스킨을 만드는 사람이다.
 
@@ -46,6 +46,7 @@ R-BMS 는 화면마다 스킨 문서 하나를 읽어 그 화면을 단독으로
 | 본체가 만든 함수 값(draw, value, timer, act)을 매 프레임 부른다. 오류는 기본값(false, 0, 빈 문자열)으로 대신하고 재호출한다 | `crates/rbms-skin/src/lua/main_state.rs`, `skin_render/object.rs` |
 | 객체 종류: image, imageset, value, floatvalue, text, slider, graph, note, gauge, judge, songlist, 커버, bga, gaugegraph, judgegraph, bpmgraph, timingdistributiongraph, timingvisualizer, hiterrorvisualizer | `crates/rbms-render/src/skin_render/` |
 | 장면 수명(`input`, `scene`, `fadeout`), 플레이 상태기계(PRELOAD, READY, PLAY, FAILED, FINISHED), 타이머 번호, 오프셋 1~5 | `apps/rbms-player/src/stage/scene_life.rs`, `stage/play/`, `skin_host/play_timers.rs` |
+| 판정 타이밍(number 12, `judgetiming`)은 note 객체(노트 필드)를 그리는 시각에만 더해진다. +N 이면 노트와 마디선이 N ms 먼저 판정선에 닿고, 스킨이 읽는 현재 BPM(160)도 그 시각의 것이다. 판정, 소리, bga 객체, 타이머는 옮겨지지 않는다(웨이브 13. `LaneRenderer.java:300-301`, `SkinBGA.java:42-44`) | `apps/rbms-player/src/stage/play/mod.rs`(`drawn_chart_us`, `played_chart_us`), [play-options.md](./play-options.md) 3절 |
 
 ### 1.3 의도적으로 다른 점
 
@@ -171,7 +172,7 @@ SKIN 메뉴와 PLAY 메뉴
 | 오른쪽 미리보기 | SCREEN 행이 가리키는 화면(플레이, 선곡, 결정, 결과 등). 예시 차트는 150 → 180 BPM 이고 끝나면 장면을 다시 시작한다 | 모드 띠가 고른 플레이 화면. 예시 차트는 PREVIEW BPM 의 한 템포이고 끝나지 않고 되풀이된다 |
 | 플레이 문서의 옵션(기본 스킨: Lane Width, Field Side, Scratch Side, Judge Detail, Score Difference, Judge Display, Score Graph) | 옵션 행 | LANE 묶음의 끝에 같은 행. 두 메뉴가 같은 값을 읽고 쓴다(그 문서의 `skin.custom`). 어느 쪽에서 바꿔도 다른 쪽에 그대로 보인다 |
 | 스킨이 선언한 위치·크기 오프셋(기본 스킨: JUDGE POSITION Y) | 오프셋 행 | LANE 묶음에서 옵션 바로 뒤에 같은 행. 접지 않고 항상 보인다 |
-| 불투명도 행(기본 스킨: 7키 19개) | 목록 끝에 모인 행 | 목록 끝 SKIN 묶음의 접이 `OPACITY`. 닫힌 채로 열리고 Enter·← →·클릭으로 편다 |
+| 불투명도 행(기본 스킨: 7키 18개) | 목록 끝에 모인 행 | 목록 끝 SKIN 묶음의 접이 `OPACITY`. 닫힌 채로 열리고 Enter·← →·클릭으로 편다 |
 | 엔진 오프셋(All offset(%), Notes offset, Judge offset, Judge Detail offset. 15행) | 오프셋 행 | SKIN 묶음의 접이 `POSITION AND SIZE` |
 | 파일 행, 문서 고르기 | 있다 | 없다 |
 | 고른 화면·모드 | `skin.screen` 에 저장된다 | 저장되지 않는다. `skin.screen` 을 읽지도 바꾸지도 않는다 |
@@ -318,6 +319,8 @@ Normal 은 이 행이 생기기 전의 화면과 같다. 내장 화면의 DISPLA
 
 #### 3.4.1 판정 표시
 
+필드는 판정선에서 끝난다(웨이브 13). 1920x1080 기준으로 노트가 내려오는 영역이 y 0~904, 판정선이 904~912 이고, 판정선의 아래 변이 레인 면·레인 구분선·진행 막대의 아래 끝이다. 그 아래에는 레인이 없고 16px 뒤(928)에 게이지가 온다. 5·7·9·10·14키와 Lane Width Normal·Wide 가 같다. LIFT 를 켜면 판정선이 리프트만큼 올라가고 그 아래는 리프트 면이 필드 끝(912)까지 덮는다. 폭발은 판정선 가운데(908)에 중심을 두고 필드 아래 끝에서 끊긴다(위쪽 68행만 그린다. 온전한 고리는 게이지를 덮는다). 놓친 노트는 판정선 아래로 내려가지 않고 판정선에서 사라진다(9키도 같다). 좌표의 전부는 설계서 6.3·6.4절.
+
 판정 글자와 콤보는 움직이지 않는다. 판정이 난 프레임부터 0.5초 동안 같은 자리·크기·색으로 서 있다가 한 번에 사라진다(튀어나오기, 확대, 깜빡임, 색 돌림, 페이드가 없다). 다음 판정이 그 전에 나면 그 자리에서 바뀐다.
 
 | 요소 | 내용 |
@@ -341,7 +344,6 @@ DP 는 친 쪽 필드에만 뜬다. 엔진 오프셋 Judge offset(판정 글자�
 | Lane Divider Opacity(102) | 레인 사이 세로선 |
 | Judge Line Opacity(103) | 판정선과 그 위의 리듬 띠 |
 | Key Beam Opacity(104) | 키를 누를 때 레인에 서는 빛 기둥 |
-| Key Display Opacity(105) | 필드 아래 건반 표시와 눌림 |
 | Bomb Opacity(106) | 판정 폭발 |
 | Note Opacity(107) | 노트, 롱노트, 지뢰 |
 | Bar Line Opacity(108) | 마디선 |
@@ -357,13 +359,15 @@ DP 는 친 쪽 필드에만 뜬다. 엔진 오프셋 Judge offset(판정 글자�
 | Distribution Graph Opacity(118) | 타이밍 분포 그래프 |
 | Speed Display Opacity(119) | 필드 발치의 HI-SPEED·GREEN 표시와 상태 글자 |
 
+105 는 비어 있다. 판정선 아래에 있던 건반 표시(Key Display Opacity)의 번호이고, 그 부위는 없어졌다: 판정선이 필드의 맨 아래에 붙어 있고 그 아래에는 레인이 없다. 누른 건반은 Key Beam 이 알리고, 판정선을 올리려면 PLAY 메뉴의 LIFT 를 쓴다. 설정 파일에 남아 있는 105 의 값은 읽히기만 하고 아무것도 바꾸지 않는다.
+
 판정 글자·콤보·위 줄은 불투명도 부위가 아니다(Judge Display 로 숨긴다). LOADING·READY·FULL COMBO 알림, 폐점 덮개와 FAILED, 화면 바탕, 장면 페이드는 어느 부위에도 속하지 않아 항상 100% 다.
 
-예: 노트와 판정만 남기기. SKIN 메뉴(F12)에서 7K 탭을 고르고 Lane Background, Lane Divider, Key Display, Bar Line, Progress Bar, Score Graph, Song Header, Speed Display, Timing 행에서 각각 0% 로 둔다(슬라이더를 왼쪽 끝으로 끌거나, Enter 를 누르고 `0` 을 친 뒤 Enter, 또는 Shift+← 열 번). Note, Bomb, Judge Line, Key Beam 은 100% 그대로 둔다. 검은 바탕에 노트·키 빔·폭발·판정선·판정 글자만 남는다. 미리보기가 누를 때마다 따라 바뀌고, Esc 로 저장하면 다음 플레이부터 같은 화면이다. 한 행을 되돌리려면 그 행에서 0 키, 전부 되돌리려면 RESET 이다.
+예: 노트와 판정만 남기기. SKIN 메뉴(F12)에서 7K 탭을 고르고 Lane Background, Lane Divider, Bar Line, Progress Bar, Score Graph, Song Header, Speed Display, Timing 행에서 각각 0% 로 둔다(슬라이더를 왼쪽 끝으로 끌거나, Enter 를 누르고 `0` 을 친 뒤 Enter, 또는 Shift+← 열 번). Note, Bomb, Judge Line, Key Beam 은 100% 그대로 둔다. 검은 바탕에 노트·키 빔·폭발·판정선·판정 글자만 남는다. 미리보기가 누를 때마다 따라 바뀌고, Esc 로 저장하면 다음 플레이부터 같은 화면이다. 한 행을 되돌리려면 그 행에서 0 키, 전부 되돌리려면 RESET 이다.
 
 중간값: 판정선(Judge Line)은 어두운 바탕 선 위에 밝은 선을 겹쳐 그리므로 50% 에서 약 58% 로 보인다. 폭발(Bomb)은 가산 합성이라 밝은 곳에서는 50% 로 낮춰도 차이가 작다. 나머지 부위는 50% 에서 48~51% 다(1920x1080 캡처 실측).
 
-선곡의 사이드 메뉴(톱니와 스피커 아이콘)는 QUICK SETTINGS 6행과 VOLUME 3개를 연다. 패널 1~3(플레이 옵션, 보조 옵션, 세부 옵션)은 START(기본 A), SELECT(기본 W), 둘을 함께(또는 상세 옵션 키. 기본 숫자 5)를 누르고 있는 동안 열려 있다(beatoraja 와 같다). 패널 3 의 4·6번 키 칸(NOTE DISPLAY TIME)은 KEEP GREEN NUMBER 가 켜져 있으면 유지 중인 이동 시간(ms)과 녹색 숫자를 보이고 1 ms 씩 바꾸며, 꺼져 있으면 `OFF` 와 `KEEP GREEN NUMBER IS OFF` 를 보인다. 플레이 화면의 TIMING 은 판정 오프셋이고 AUTO ADJUST 가 켜져 있으면 표지가 `TIMING AUTO` 가 된다. 이 옵션들의 뜻과 단위는 [play-options.md](./play-options.md)에 있다.
+선곡의 사이드 메뉴(톱니와 스피커 아이콘)는 QUICK SETTINGS 6행과 VOLUME 3개를 연다. 패널 1~3(플레이 옵션, 보조 옵션, 세부 옵션)은 START(기본 A), SELECT(기본 W), 둘을 함께(또는 상세 옵션 키. 기본 숫자 5)를 누르고 있는 동안 열려 있다(beatoraja 와 같다). 패널 3 의 4·6번 키 칸(NOTE DISPLAY TIME)은 KEEP GREEN NUMBER 가 켜져 있으면 유지 중인 이동 시간(ms)과 녹색 숫자를 보이고 1 ms 씩 바꾸며, 꺼져 있으면 `OFF` 와 `KEEP GREEN NUMBER IS OFF` 를 보인다. 패널 3 의 5·7번 키 칸(JUDGE TIMING)은 판정 오프셋을 1 ms 씩 내리고 올리며, 동작 줄에 그 키가 노트를 어느 쪽으로 옮기는지를 쓴다(5번 `NOTES 1 MS LATER` = -1, 7번 `NOTES 1 MS EARLIER` = +1). 플레이 화면의 TIMING 은 판정 오프셋(설정값 그대로)이고 AUTO ADJUST 가 켜져 있으면 표지가 `TIMING AUTO` 가 된다. 이 옵션들의 뜻과 단위는 [play-options.md](./play-options.md)에 있다.
 
 바닥의 안내 문구는 바뀔 수 있는 키의 이름을 고정해 적지 않는다. 선곡 바닥은 `H`(지금 설정된 키 전체)를 가리키고, 결과 화면은 다시 하기·다음 곡의 키가 키 설정에 있음을 출하 키(R, N)와 함께 적는다.
 
