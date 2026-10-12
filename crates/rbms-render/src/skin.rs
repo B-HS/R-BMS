@@ -4,6 +4,7 @@ use rbms_model::{LnKind, Mode};
 use serde::Deserialize;
 use thiserror::Error;
 
+use crate::theme::{LINE, SURFACE};
 use crate::{Color, Rect};
 
 /// Where a two-field layout starts when nothing sits to its left, as a share of the screen width.
@@ -137,16 +138,16 @@ impl Default for SkinConfig {
             key_color_alt: [70, 130, 230],
             scratch_color: [230, 70, 70],
             mine_color: [70, 220, 120],
-            lane_bg: [18, 18, 24],
+            lane_bg: triple(SURFACE),
             lane_bg_alpha: 160,
             judge_line: [200, 40, 40],
             beam_color: [200, 220, 255],
             beam_alpha: 150,
             beam_height_frac: 1.0,
-            outline_color: [90, 90, 110],
+            outline_color: triple(Color::GRAY),
             outline_alpha: 200,
             layout_frame: false,
-            divider_color: [60, 60, 75],
+            divider_color: triple(LINE),
             divider_alpha: 150,
             bg: [0, 0, 0],
             bga: Some([905.0, 360.0, 350.0, 255.0]),
@@ -187,6 +188,10 @@ impl SkinConfig {
 
 fn col(c: [u8; 3]) -> Color {
     Color::rgb(c[0], c[1], c[2])
+}
+
+const fn triple(color: Color) -> [u8; 3] {
+    [color.r, color.g, color.b]
 }
 
 /// A resolved skin: per-lane geometry, colours and regions computed from a `SkinConfig`

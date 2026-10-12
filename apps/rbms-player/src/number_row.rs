@@ -30,7 +30,7 @@
 use std::time::{Duration, Instant};
 
 use rbms_config::NumberSpec;
-use rbms_render::{Color, Rect, Renderer, draw_text, draw_text_right, text_width, theme};
+use rbms_render::{Rect, Renderer, draw_text, draw_text_right, text_width, theme};
 use winit::keyboard::KeyCode;
 
 use crate::stage::KeyInput;
@@ -173,8 +173,8 @@ pub(crate) fn draw_slider<R: Renderer>(r: &mut R, area: Rect, fraction: f32, loo
     let rail = Rect::new(area.x, area.y + ((area.h - RAIL_H) * 0.5).round(), area.w, RAIL_H);
     let (rail_color, filled, grip) = match look {
         SliderLook::Plain => (colors.divider, colors.text_muted, colors.text_dim),
-        SliderLook::Focused => (colors.divider, colors.accent, Color::YELLOW),
-        SliderLook::Dragged => (colors.divider, Color::YELLOW, Color::YELLOW),
+        SliderLook::Focused => (colors.divider, colors.text_dim, colors.focus),
+        SliderLook::Dragged => (colors.divider, colors.focus, colors.focus),
         SliderLook::Locked => (colors.panel_hi, colors.panel_hi, colors.text_muted),
     };
     r.fill_rect(rail, rail_color);
@@ -196,12 +196,12 @@ pub(crate) fn draw_edit<R: Renderer>(r: &mut R, field: Rect, text_y: f32, scale:
     let (top, height) = (field.y + EDIT_BORDER + CARET_INSET, field.h - (EDIT_BORDER + CARET_INSET) * 2.0);
     if edit.is_all_selected() && !edit.text().is_empty() {
         r.fill_rect(Rect::new(left - SELECTION_PAD, top, text_width(edit.text(), scale) + SELECTION_PAD * 2.0, height), colors.button);
-        draw_text(r, left, text_y, scale, Color::YELLOW, edit.text());
+        draw_text(r, left, text_y, scale, colors.title_focus, edit.text());
         return;
     }
     draw_text(r, left, text_y, scale, colors.text, edit.text());
     let before: String = edit.text().chars().take(edit.caret()).collect();
-    r.fill_rect(Rect::new(left + text_width(&before, scale) + CARET_GAP, top, CARET_W, height), Color::YELLOW);
+    r.fill_rect(Rect::new(left + text_width(&before, scale) + CARET_GAP, top, CARET_W, height), colors.focus);
 }
 
 /// Write, with its right edge at `right`, what a row says in place of its number for a while after

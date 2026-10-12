@@ -270,7 +270,7 @@ fn a_course_bar_says_whether_it_is_complete_and_what_its_charts_are_made_of() {
 /// was then.
 fn row_as_it_was_drawn(shared: &AppShared, index: usize) -> SelectRow {
     let entry = &shared.library.songs()[index];
-    let lamp = shared.scores.best_clear_for_md5(&entry.md5).map(|clear| clear_label_color(clear_type_from_id(clear)).1).unwrap_or(Color::rgb(44, 44, 54));
+    let lamp = shared.scores.best_clear_for_md5(&entry.md5).map(|clear| clear_label_color(clear_type_from_id(clear)).1).unwrap_or(theme().lamp_default);
     let best = shared.scores.for_md5(&entry.md5).into_iter().max_by_key(|record| record.ex_score);
     SelectRow {
         folder: false,
@@ -335,7 +335,7 @@ fn the_built_in_rows_made_from_the_model_are_the_rows_the_browser_always_drew() 
     let Some(SelectItem::Folder { label, .. }) = app.shared.select_items.first() else {
         panic!("the root begins with a folder");
     };
-    assert_eq!(parts(row), (true, label.as_str(), "", Color::GRAY, "", Color::GRAY, Color::rgb(44, 44, 54), None, None, false));
+    assert_eq!(parts(row), (true, label.as_str(), "", Color::GRAY, "", Color::GRAY, theme().lamp_default, None, None, false));
 }
 
 /// The same for the course tab, whose rows are folders that carry the constraint badges as their
@@ -352,7 +352,7 @@ fn the_built_in_course_rows_made_from_the_model_are_the_rows_the_browser_always_
     assert_eq!(scene.rows.len(), drawn.len());
     for (row, was) in scene.rows.iter().zip(&drawn) {
         let badges = was.badges.join(" ");
-        let (difficulty, lamp) = if was.playable { (Color::WHITE, Color::rgb(44, 44, 54)) } else { (Color::RED, Color::rgb(70, 30, 30)) };
+        let (difficulty, lamp) = if was.playable { (Color::WHITE, theme().lamp_default) } else { (Color::RED, Color::rgb(70, 30, 30)) };
         assert_eq!(parts(row), (true, was.title.as_str(), "", Color::GRAY, badges.as_str(), difficulty, lamp, None, None, false));
     }
     assert!(matches!(&scene.detail, SelectDetail::Folder { label, count: 2 } if label == "WHOLE"), "the focused course names itself and its stages");

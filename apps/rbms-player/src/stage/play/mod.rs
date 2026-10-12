@@ -1096,22 +1096,23 @@ impl PlayState {
     /// recent per-note timing errors (ms early = cyan +, late = orange -).
     fn draw_analysis(&self, canvas: &mut Canvas<'_>, song: i64) {
         let play = &self.session;
+        let colors = theme();
         let total = play.last_time_us().max(1);
         let prog = (song as f32 / total as f32).clamp(0.0, 1.0);
         let bx = ANALYSIS_BAR_INSET;
         let bw = CW as f32 - ANALYSIS_BAR_INSET * 2.0;
         let by = CH as f32 - 14.0;
         canvas.fill_rect(Rect::new(0.0, CH as f32 - ANALYSIS_PANEL_H, CW as f32, ANALYSIS_PANEL_H), Color { r: 0, g: 0, b: 0, a: 170 });
-        canvas.fill_rect(Rect::new(bx, by, bw, 6.0), Color::rgb(40, 40, 52));
-        canvas.fill_rect(Rect::new(bx, by, bw * prog, 6.0), Color::rgb(90, 200, 230));
+        canvas.fill_rect(Rect::new(bx, by, bw, 6.0), colors.divider);
+        canvas.fill_rect(Rect::new(bx, by, bw * prog, 6.0), colors.good);
         canvas.fill_rect(Rect::new((bx + bw * prog - 1.5).max(bx), by - 3.0, 3.0, 12.0), Color::WHITE);
         let state = if play.analysis_paused() { "PAUSED".to_string() } else { format!("{:.2}x", play.analysis_rate()) };
-        draw_text(canvas, bx, CH as f32 - 66.0, 1.4, Color::YELLOW, &format!("ANALYSIS  {state}   {:.1} / {:.1} S", song as f32 / 1e6, total as f32 / 1e6));
-        draw_text_right(canvas, bx + bw, CH as f32 - 66.0, 1.1, Color::GRAY, "SPACE PAUSE  -/+ SPEED  PGUP/PGDN SEEK  ESC EXIT");
+        draw_text(canvas, bx, CH as f32 - 66.0, 1.4, colors.accent, &format!("ANALYSIS  {state}   {:.1} / {:.1} S", song as f32 / 1e6, total as f32 / 1e6));
+        draw_text_right(canvas, bx + bw, CH as f32 - 66.0, 1.1, colors.text_muted, "SPACE PAUSE  -/+ SPEED  PGUP/PGDN SEEK  ESC EXIT");
         let mut mx = bx;
         for mark in play.recent_marks(ANALYSIS_MARKS_SHOWN) {
             let col = if mark.delta_us > 0 {
-                Color::rgb(90, 210, 230)
+                Color::CYAN
             } else if mark.delta_us < 0 {
                 Color::ORANGE
             } else {

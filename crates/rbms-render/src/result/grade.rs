@@ -87,7 +87,7 @@ const RATE_TICK_FRACTION: f32 = 0.45;
 
 /// Colour of the fine step ticks: dark and part-transparent, so they read as scale marks over
 /// whichever band colour they fall on.
-const RATE_TICK_COLOR: Color = Color { r: 10, g: 10, b: 14, a: 120 };
+const RATE_TICK_COLOR: Color = Color { r: 0, g: 0, b: 0, a: 120 };
 
 /// [`draw_rank_bar`] with the twenty-seven steps of [`RATE_STEPS`] ticked over it, so a score can be
 /// read to the grade [`dj_rank_label`] names rather than only to its band.

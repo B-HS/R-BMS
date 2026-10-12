@@ -35,7 +35,7 @@ use rbms_render::skin_render::frame::{BarDistribution, BarKind, BarTrophy};
 use rbms_render::{
     Color, CoverState, DensityView, DetailView, HudView, PlayfieldView, RANK_BANDS, RecordRowView, RecordsView, Rect, Renderer, ResultPalette, ResultView,
     SelectDetail, SelectHot, SelectModal, SelectRow, SelectView as SelectScene, Skin, SkinConfig, StatCell, cover_rect, dj_rank, draw_text, draw_text_centered,
-    draw_text_right, ex_delta_label, render_key_bomb, render_lane_cover, render_playfield_view, render_result_with_palette, render_select, text_width,
+    draw_text_right, ex_delta_label, render_key_bomb, render_lane_cover, render_playfield_view, render_result_with_palette, render_select, text_width, theme,
 };
 pub(crate) use rbms_skin::loader::{SKIN_TYPE_DECIDE, SKIN_TYPE_KEY_CONFIG, SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_RESULT, mode_skin_type};
 use rbms_skin::timer::TimerState;
@@ -1230,8 +1230,9 @@ impl App {
         let ph = lines.len() as f32 * DEBUG_LINE_H + 12.0;
         let (panel_x, panel_y) = if over_skin { SKIN_DEBUG_ORIGIN } else { BUILT_IN_DEBUG_ORIGIN };
         canvas.fill_rect(Rect::new(panel_x, panel_y, DEBUG_PANEL_W, ph), Color { r: 0, g: 0, b: 0, a: 180 });
+        let colors = theme();
         for (i, l) in lines.iter().enumerate() {
-            let col = if i == 0 { Color::YELLOW } else { Color::rgb(120, 240, 140) };
+            let col = if i == 0 { colors.text } else { colors.text_dim };
             draw_text(canvas, panel_x + DEBUG_TEXT_INSET.0, panel_y + DEBUG_TEXT_INSET.1 + i as f32 * DEBUG_LINE_H, 1.2, col, l);
         }
     }

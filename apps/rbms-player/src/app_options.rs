@@ -277,7 +277,7 @@ pub(crate) fn draw(stage: StageId, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'
         if focused {
             canvas.fill_rect(Rect::new(x + PANEL_PAD_X * 0.5, row_y - 4.0, panel.w - PANEL_PAD_X, ROW_H), th.row_focus);
         }
-        let label_color = row_override.and_then(|layout| layout.label_color).unwrap_or(if focused { Color::YELLOW } else { th.text_dim });
+        let label_color = row_override.and_then(|layout| layout.label_color).unwrap_or(if focused { th.title_focus } else { th.text_dim });
         draw_text(canvas, label_x, row_y, ROW_SCALE, label_color, descriptor(id).label);
         let value = display_value(&ctx.shared.config, id);
         let value_color = row_override.and_then(|layout| layout.value_color).unwrap_or(th.text);

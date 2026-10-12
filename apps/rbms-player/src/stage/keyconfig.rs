@@ -322,32 +322,33 @@ impl KeyConfigState {
     /// the cell under the cursor -- what its binding clashes with, or the lane it shares a key with.
     fn status(&self, shared: &AppShared, bound: &Bindings) -> (String, Color) {
         let mode = shared.kc_edit_mode;
-        let warn = |text: String| (text, Color::RED);
+        let theme = rbms_render::theme();
+        let in_red = |text: String| (text, Color::RED);
         match self.notice {
-            Notice::Taken(other) => return warn(format!("THAT KEY IS {} - PICK ANOTHER, OR CLEAR THAT ROW FIRST", other.label(mode))),
-            Notice::Fixed => return warn("THAT KEY IS FIXED ON THE SCREEN THIS ROW BELONGS TO - PICK ANOTHER".to_string()),
-            Notice::Unnamed => return warn("THAT KEY CANNOT BE BOUND - PICK ANOTHER".to_string()),
-            Notice::KeyboardOnly => return warn("THIS ROW IS READ FROM THE KEYBOARD ONLY".to_string()),
-            Notice::LaneKept => return ("A LANE ALWAYS HAS A KEY - IT IS BACK ON THE ONE IT SHIPS WITH".to_string(), Color::YELLOW),
+            Notice::Taken(other) => return in_red(format!("THAT KEY IS {} - PICK ANOTHER, OR CLEAR THAT ROW FIRST", other.label(mode))),
+            Notice::Fixed => return in_red("THAT KEY IS FIXED ON THE SCREEN THIS ROW BELONGS TO - PICK ANOTHER".to_string()),
+            Notice::Unnamed => return in_red("THAT KEY CANNOT BE BOUND - PICK ANOTHER".to_string()),
+            Notice::KeyboardOnly => return in_red("THIS ROW IS READ FROM THE KEYBOARD ONLY".to_string()),
+            Notice::LaneKept => return ("A LANE ALWAYS HAS A KEY - IT IS BACK ON THE ONE IT SHIPS WITH".to_string(), theme.warn),
             Notice::RestoreArmed => {
-                return ("ENTER AGAIN PUTS EVERY KEY AND EVERY CONTROLLER BUTTON BACK AS SHIPPED - ANY OTHER KEY CANCELS".to_string(), Color::YELLOW);
+                return ("ENTER AGAIN PUTS EVERY KEY AND EVERY CONTROLLER BUTTON BACK AS SHIPPED - ANY OTHER KEY CANCELS".to_string(), theme.warn);
             }
-            Notice::Restored => return ("EVERY KEY AND EVERY CONTROLLER BUTTON IS BACK AS SHIPPED".to_string(), Color::YELLOW),
+            Notice::Restored => return ("EVERY KEY AND EVERY CONTROLLER BUTTON IS BACK AS SHIPPED".to_string(), theme.text_dim),
             Notice::None => {}
         }
         let Some(target) = self.focused_target(shared) else {
-            return (String::new(), Color::YELLOW);
+            return (String::new(), theme.text_dim);
         };
         let clash = match self.column {
             Column::Keyboard => bound.key_clash(target),
             Column::Pad => bound.pad_clash(target).map(Clash::With),
         };
         match clash {
-            Some(Clash::With(other)) => warn(format!("SHARED WITH {} - ONE OF THE TWO WILL NOT WORK", other.label(mode))),
-            Some(Clash::Fixed) => warn("THIS KEY IS FIXED ON THE SCREEN THE ROW BELONGS TO - THE ROW WILL NOT WORK".to_string()),
+            Some(Clash::With(other)) => in_red(format!("SHARED WITH {} - ONE OF THE TWO WILL NOT WORK", other.label(mode))),
+            Some(Clash::Fixed) => in_red("THIS KEY IS FIXED ON THE SCREEN THE ROW BELONGS TO - THE ROW WILL NOT WORK".to_string()),
             None => match shared.keyconfig.lane_sharing(mode, target).filter(|_| self.column == Column::Keyboard) {
-                Some(lane) => (format!("ALSO {} - ON THE SONG SELECT BOTH ACT", Bindable::Lane(lane).label(mode)), Color::YELLOW),
-                None => (String::new(), Color::YELLOW),
+                Some(lane) => (format!("ALSO {} - ON THE SONG SELECT BOTH ACT", Bindable::Lane(lane).label(mode)), theme.text_dim),
+                None => (String::new(), theme.text_dim),
             },
         }
     }
@@ -437,8 +438,8 @@ impl StageHandler for KeyConfigState {
         draw_text(canvas, x0, TITLE_Y, TITLE_SCALE, th.text, TITLE);
         draw_text_right(canvas, pad_right, TITLE_Y + HEADING_TEXT_Y, ROW_SCALE, th.accent, mode_short(edit_mode));
         let (hint, hint_col) = match (self.capturing, self.column) {
-            (true, Column::Keyboard) => (CAPTURE_KEY_HINT, Color::YELLOW),
-            (true, Column::Pad) => (CAPTURE_PAD_HINT, Color::YELLOW),
+            (true, Column::Keyboard) => (CAPTURE_KEY_HINT, th.accent),
+            (true, Column::Pad) => (CAPTURE_PAD_HINT, th.accent),
             (false, _) => (KEYS_HINT, th.text_muted),
         };
         draw_text(canvas, x0, HINT_Y, HINT_SCALE, hint_col, &fit_text(hint, HINT_SCALE, PANEL_W));
@@ -484,11 +485,12 @@ impl StageHandler for KeyConfigState {
                     ];
                     for (column, right, token, clashes) in cells {
                         let focused = on && column == self.column;
+                        let waiting = focused && self.capturing;
                         if focused {
-                            canvas.fill_rect(Rect::new(right - COLUMN_W, y, COLUMN_W, ROW_H), th.button);
+                            canvas.fill_rect(Rect::new(right - COLUMN_W, y, COLUMN_W, ROW_H), if waiting { th.focus } else { th.button });
                         }
-                        let (text, color) = if focused && self.capturing {
-                            (CAPTURING.to_string(), Color::YELLOW)
+                        let (text, color) = if waiting {
+                            (CAPTURING.to_string(), th.bg)
                         } else if clashes {
                             (token, Color::RED)
                         } else if focused {

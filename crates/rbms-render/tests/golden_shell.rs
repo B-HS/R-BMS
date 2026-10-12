@@ -6,7 +6,7 @@ use golden_harness::{check, golden_canvas, signature_of};
 use rbms_render::{Color, Renderer, ToastLevel, ToastView, render_toasts};
 
 const GOLDEN_BLANK: u64 = 0x988c_a956_1494_bf25;
-const GOLDEN_TOASTS: u64 = 0x6aa5_c041_4fcb_1504;
+const GOLDEN_TOASTS: u64 = 0x135c_d9f9_3d84_6c8f;
 const GOLDEN_LONG_TOAST: u64 = 0x654c_dedc_19f0_3f76;
 
 /// How many pixels a frame actually painted, which is what these goldens are about: an overlay is

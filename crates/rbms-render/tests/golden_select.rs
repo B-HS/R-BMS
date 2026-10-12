@@ -5,7 +5,7 @@ mod golden_harness;
 use golden_harness::{check, golden_canvas, signature_of};
 use rbms_render::{Color, CoverState, DensityView, DetailView, RecordRowView, RecordsView, SelectDetail, SelectRow, SelectView, StatCell, render_select};
 
-const GOLDEN_SELECT: u64 = 0x847f_0d97_0b87_9970;
+const GOLDEN_SELECT: u64 = 0xdca2_e6b0_4935_5413;
 
 fn select_view() -> SelectView {
     let row = |folder: bool, title: &str, mode: &'static str, level: &str, lamp: Color| SelectRow {

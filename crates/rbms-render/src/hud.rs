@@ -3,8 +3,6 @@ use crate::result::{KEY_LANE_KIND, LANE_KIND_COUNT, SCRATCH_LANE_KIND, lane_kind
 use crate::skin::Skin;
 use crate::{Color, Rect, Renderer};
 
-const CYAN: Color = Color::rgb(90, 210, 230);
-
 /// A judge-text position of this value means "wherever the skin puts it", so a player who has not
 /// moved the row keeps the placement the skin was authored with.
 const JUDGE_TEXT_FROM_SKIN: f32 = 0.0;
@@ -145,13 +143,13 @@ fn draw_score_graph<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, graph: &Sco
     };
     for (band, label) in [(6.0f32 / 9.0, "A"), (7.0 / 9.0, "AA"), (8.0 / 9.0, "AAA")] {
         let ly = y + h * (1.0 - band);
-        r.fill_rect(Rect::new(x, ly, w, 1.0), Color::rgb(74, 74, 92));
+        r.fill_rect(Rect::new(x, ly, w, 1.0), th.divider);
         ctx.draw_text(r, x + 4.0, ly + 2.0, 1.0, th.text_muted, label);
     }
     let (bar_w, gap) = (26.0, 12.0);
     let bx = x + (w - (bar_w * 2.0 + gap)) * 0.5;
     let cur_top = y + h * (1.0 - ratio(ex));
-    r.fill_rect(Rect::new(bx, cur_top, bar_w, (y + h) - cur_top), CYAN);
+    r.fill_rect(Rect::new(bx, cur_top, bar_w, (y + h) - cur_top), Color::CYAN);
     if let Some(b) = best {
         let bt = y + h * (1.0 - ratio(b));
         r.fill_rect(Rect::new(bx + bar_w + gap, bt, bar_w, (y + h) - bt), Color::GREEN);
@@ -159,7 +157,7 @@ fn draw_score_graph<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, graph: &Sco
         let (txt, col) = if d >= 0 { (format!("+{d}"), Color::GREEN) } else { (format!("{d}"), Color::rgb(230, 90, 70)) };
         ctx.draw_text_centered(r, x + w * 0.5, y - 18.0, 1.4, col, &format!("vs BEST {txt}"));
     }
-    ctx.draw_text_centered(r, bx + bar_w * 0.5, y + h + 2.0, 1.0, CYAN, "NOW");
+    ctx.draw_text_centered(r, bx + bar_w * 0.5, y + h + 2.0, 1.0, Color::CYAN, "NOW");
     if best.is_some() {
         ctx.draw_text_centered(r, bx + bar_w + gap + bar_w * 0.5, y + h + 2.0, 1.0, Color::GREEN, "BEST");
     }
@@ -189,7 +187,7 @@ pub fn render_hud_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, skin: &Sk
 
     let gy = jy + 10.0;
     let gh = skin.gauge_height;
-    r.fill_rect(Rect::new(field_x0, gy, field_w, gh), Color::rgb(28, 28, 36));
+    r.fill_rect(Rect::new(field_x0, gy, field_w, gh), th.panel_hi);
     let v = (hud.gauge / 100.0).clamp(0.0, 1.0);
     let gcol = if hud.gauge >= skin.gauge_clear_threshold {
         skin.gauge_color_clear
@@ -209,7 +207,7 @@ pub fn render_hud_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, skin: &Sk
         ctx.draw_text(r, 14.0, 48.0, 1.4, Color::GREEN, &format!("BEST {b}"));
     }
     if hud.green_number > 0.0 {
-        ctx.draw_text(r, 14.0, 72.0, 1.4, CYAN, &format!("GREEN {}", hud.green_number.round() as i32));
+        ctx.draw_text(r, 14.0, 72.0, 1.4, Color::CYAN, &format!("GREEN {}", hud.green_number.round() as i32));
     }
     if hud.white_number > 0.0 {
         ctx.draw_text(r, 14.0, 92.0, 1.4, Color::WHITE, &format!("WHITE {}", hud.white_number.round() as i32));
@@ -227,7 +225,7 @@ pub fn render_hud_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, skin: &Sk
         let j = j as usize;
         ctx.draw_text_centered(r, cx, (jy - judge_text_offset(skin, hud.judge_text_y)).max(top), 3.0, skin.judge_colors[j], &skin.judge_labels[j]);
         if (1..=3).contains(&j) {
-            let (txt, col) = if hud.last_fast { ("FAST", CYAN) } else { ("SLOW", Color::ORANGE) };
+            let (txt, col) = if hud.last_fast { ("FAST", Color::CYAN) } else { ("SLOW", Color::ORANGE) };
             ctx.draw_text_centered(r, cx, (jy - skin.fastslow_y_offset).max(top), 2.0, col, txt);
         }
     }
@@ -252,7 +250,7 @@ pub fn render_hud_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, skin: &Sk
         ty += 16.0;
     }
     ty += 8.0;
-    for (label, counts, color) in [("FAST", hud.fast, CYAN), ("SLOW", hud.slow, Color::ORANGE)] {
+    for (label, counts, color) in [("FAST", hud.fast, Color::CYAN), ("SLOW", hud.slow, Color::ORANGE)] {
         ctx.draw_text(r, tx, ty, 1.6, color, &format!("{label} {}", lane_kind_total(counts)));
         if counts[SCRATCH_LANE_KIND] > 0 {
             let split = format!("{}/{}", counts[KEY_LANE_KIND], counts[SCRATCH_LANE_KIND]);

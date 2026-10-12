@@ -65,7 +65,9 @@ impl Color {
     pub const GREEN: Color = Color::rgb(70, 220, 120);
     pub const YELLOW: Color = Color::rgb(230, 210, 70);
     pub const ORANGE: Color = Color::rgb(230, 150, 60);
-    pub const GRAY: Color = Color::rgb(90, 90, 100);
+    /// What an early hit is written in, and the bar of the run in progress.
+    pub const CYAN: Color = Color::rgb(90, 210, 230);
+    pub const GRAY: Color = Color::rgb(96, 96, 96);
     pub const LANE_BG: Color = Color::rgb(18, 18, 24);
     pub const JUDGE_LINE: Color = Color::rgb(200, 40, 40);
 }

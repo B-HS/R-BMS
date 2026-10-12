@@ -371,9 +371,25 @@ fn the_status_line_names_a_shared_lane_and_a_clash() {
     assert!(said.contains("HI-SPEED UP") && color == Color::RED, "{said}");
 }
 
+/// A notice that warns or asks is written in the warning colour, and one that only says how things
+/// stand is not, so the colour that means a caution is not worn by a confirmation.
+#[test]
+fn only_a_notice_that_warns_or_asks_is_written_in_the_warning_colour() {
+    let app = app("notice-colours");
+    let theme = rbms_render::theme();
+    let mut state = on(&app, Bindable::Shortcut(Shortcut::Favourite));
+    let bound = Bindings::read(&app.shared.keyconfig, app.shared.kc_edit_mode);
+    for (notice, colour) in
+        [(Notice::LaneKept, theme.warn), (Notice::RestoreArmed, theme.warn), (Notice::Restored, theme.text_dim), (Notice::None, theme.text_dim)]
+    {
+        state.notice = notice;
+        assert_eq!(state.status(&app.shared, &bound).1, colour, "{notice:?}");
+    }
+}
+
 /// The editor draws every state it has, at the size it is laid out for and at full HD: each group
 /// with the list scrolled to it, a capture waiting for its key, a key that was refused, and a clash
-/// a file brought in. The warnings are drawn in red and the waiting cell in yellow.
+/// a file brought in. The warnings are drawn in red and the waiting cell lit.
 #[test]
 fn every_state_of_the_editor_draws() {
     for size in CAPTURE_SIZES {
@@ -400,7 +416,8 @@ fn every_state_of_the_editor_draws() {
         let mut waiting = on(&app, Bindable::Control(ControlAction::LiftToggle));
         press(&mut app, &mut waiting, KeyCode::Enter);
         let frame = drawn(&mut app, &mut waiting, "keys-7-capture-waiting", size);
-        assert!(pixels_of(&frame, Color::YELLOW) > 0, "a waiting capture is not drawn in yellow");
+        let lit = rbms_render::theme().focus;
+        assert!(pixels_of(&frame, lit) > pixels_of(&plain, lit), "the cell of a waiting capture is not lit");
 
         let mut pad = KeyConfigState { column: Column::Pad, ..on(&app, Bindable::Lane(0)) };
         press(&mut app, &mut pad, KeyCode::Enter);

@@ -370,7 +370,7 @@ fn render_list<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &SelectView, 
         let cy = y + h * 0.5;
         if row.folder {
             let fitted = ctx.fit_text(&format!("\u{25B8} {}", row.title), 1.6, list.w - 120.0);
-            ctx.draw_text(r, list.x + 16.0, cy - 9.0, 1.6, Color::rgb(220, 220, 150), &fitted);
+            ctx.draw_text(r, list.x + 16.0, cy - 9.0, 1.6, th.text, &fitted);
             if let Some(n) = row.folder_count {
                 ctx.draw_text_right(r, list.x + list.w - 20.0, cy - 8.0, 1.3, th.text_dim, &format!("{n} CHARTS"));
             }
@@ -417,15 +417,15 @@ fn render_song_detail<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &Selec
     match d.cover {
         CoverState::Present => {}
         CoverState::Loading => {
-            r.fill_rect(cr, Color::rgb(16, 18, 28));
+            r.fill_rect(cr, th.panel);
             ctx.draw_text_centered(r, cr.x + cr.w * 0.5, cr.y + cr.h * 0.5 - 7.0, 1.2, th.text_dim, "LOADING");
         }
         CoverState::None => {
-            r.fill_rect(cr, Color::rgb(16, 18, 28));
-            ctx.draw_text_centered(r, cr.x + cr.w * 0.5, cr.y + cr.h * 0.5 - 7.0, 1.2, Color::rgb(70, 72, 88), "NO IMAGE");
+            r.fill_rect(cr, th.panel);
+            ctx.draw_text_centered(r, cr.x + cr.w * 0.5, cr.y + cr.h * 0.5 - 7.0, 1.2, th.text_muted, "NO IMAGE");
         }
     }
-    outline(r, cr, 2.0, Color::rgb(90, 96, 120));
+    outline(r, cr, 2.0, th.divider);
 
     let tx = detail.x + 192.0;
     let tw = detail.x + detail.w - 16.0 - tx;
@@ -485,7 +485,7 @@ fn render_song_detail<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &Selec
     let box_y = detail.y + 320.0;
     let box_h = 74.0;
     let box_rect = Rect::new(inner_x, box_y, inner_w, box_h);
-    r.fill_rect(box_rect, Color::rgb(10, 11, 17));
+    r.fill_rect(box_rect, th.bg);
     match &d.density {
         Some(dens) if !dens.bins.is_empty() && dens.peak > 0.0 => {
             ctx.draw_text_right(
@@ -501,7 +501,7 @@ fn render_song_detail<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, v: &Selec
             for (i, &b) in dens.bins.iter().enumerate() {
                 let bx = inner_x + i as f32 * step;
                 if i % 10 == 0 {
-                    r.fill_rect(Rect::new(bx, box_y, 1.0, box_h), Color::rgb(26, 28, 38));
+                    r.fill_rect(Rect::new(bx, box_y, 1.0, box_h), th.panel);
                 }
                 if b == 0 {
                     continue;
@@ -571,11 +571,11 @@ fn render_folder_detail<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, label: 
     let th = ctx.theme;
     let detail = th.select_layout.detail_rect;
     outline(r, detail, 1.0, th.divider);
-    r.fill_rect(Rect::new(detail.x, detail.y, detail.w, 6.0), Color::rgb(120, 130, 90));
+    r.fill_rect(Rect::new(detail.x, detail.y, detail.w, 6.0), th.text_muted);
     r.fill_rect(Rect::new(detail.x + 16.0, detail.y + 36.0, detail.w - 32.0, 120.0), select_panel_color(th.panel_hi, th.select_panel_alpha));
     ctx.draw_text(r, detail.x + 40.0, detail.y + 60.0, 2.4, th.text, "FOLDER");
     let fitted = ctx.fit_text(label, 1.6, detail.w - 80.0);
-    ctx.draw_text(r, detail.x + 40.0, detail.y + 108.0, 1.6, Color::rgb(210, 210, 150), &fitted);
+    ctx.draw_text(r, detail.x + 40.0, detail.y + 108.0, 1.6, th.text, &fitted);
     if count > 0 {
         ctx.draw_text(r, detail.x + 40.0, detail.y + 180.0, 1.4, th.text_dim, &format!("{count} CHARTS"));
     }
@@ -616,7 +616,7 @@ fn render_modal<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, modal: &SelectM
     let by = my + mh - 52.0;
     if modal.has_replay {
         let rect = Rect::new(mx + 20.0, by, 220.0, 36.0);
-        r.fill_rect(rect, Color::rgb(70, 120, 80));
+        r.fill_rect(rect, th.button);
         ctx.draw_text(r, mx + 36.0, by + 9.0, 1.6, th.text, "PLAY REPLAY");
         hot.push((rect, SelectHot::ModalReplay));
     } else {
@@ -624,7 +624,7 @@ fn render_modal<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, modal: &SelectM
     }
     ctx.draw_text(r, mx + 20.0, my + mh - 92.0, 1.1, th.text_dim, "UP DOWN PREV/NEXT   ENTER REPLAY   ESC CLOSE");
     let close = Rect::new(mx + mw - 120.0, by, 100.0, 36.0);
-    r.fill_rect(close, Color::rgb(90, 70, 80));
+    r.fill_rect(close, th.button_active);
     ctx.draw_text(r, mx + mw - 96.0, by + 9.0, 1.6, th.text, "CLOSE");
     hot.push((close, SelectHot::ModalClose));
 }

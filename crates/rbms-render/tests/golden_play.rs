@@ -10,9 +10,9 @@ use rbms_parser::parse;
 use rbms_render::playfield::LaneShade;
 use rbms_render::{Color, CpuCanvas, HudView, PlayfieldView, Renderer, Skin, SkinConfig, render_hud, render_lane_cover, render_playfield_view};
 
-const GOLDEN_HUD: u64 = 0x1781_093b_726e_d94a;
-const GOLDEN_FIVE_KEY_FIELD: u64 = 0xd202_a9cc_05f1_8e51;
-const GOLDEN_SEVEN_KEY_FIELD: u64 = 0xf15b_3ad8_9d56_8acd;
+const GOLDEN_HUD: u64 = 0xbda7_83f3_c745_bd55;
+const GOLDEN_FIVE_KEY_FIELD: u64 = 0x306d_3cba_1fe8_e7b4;
+const GOLDEN_SEVEN_KEY_FIELD: u64 = 0x8112_592e_1977_a293;
 
 /// A one-measure chart with every lane of a five-key layout filled, so the field golden is taken of
 /// notes rather than of an empty box.

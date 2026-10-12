@@ -267,7 +267,7 @@ pub fn render_result_with_palette_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &
                 let (t, c) = ex_delta_label(view.ex_score as i64 - pb as i64);
                 ctx.draw_text(r, 44.0, dy, 1.8, c, &format!("{t} vs BEST"));
                 if view.ex_score > pb {
-                    ctx.draw_text_right(r, 420.0, dy, 1.8, Color::YELLOW, "NEW RECORD");
+                    ctx.draw_text_right(r, 420.0, dy, 1.8, th.title_focus, "NEW RECORD");
                 }
             }
             None => ctx.draw_text(r, 44.0, dy, 1.8, th.text_muted, "FIRST PLAY"),
@@ -306,7 +306,7 @@ pub fn render_result_with_palette_ctx<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &
         y += 34.0;
     }
     y += 10.0;
-    ctx.draw_text(r, rx, y, 1.8, th.accent, &format!("FAST {}", lane_kind_total(view.fast)));
+    ctx.draw_text(r, rx, y, 1.8, Color::CYAN, &format!("FAST {}", lane_kind_total(view.fast)));
     ctx.draw_text(r, rx + 170.0, y, 1.8, Color::ORANGE, &format!("SLOW {}", lane_kind_total(view.slow)));
     ctx.draw_text_right(r, rr, y, 2.0, view.clear_color, &format!("GAUGE {}%", view.gauge.round() as i32));
 

@@ -524,7 +524,7 @@ impl LoadingState {
     fn draw_determinate(canvas: &mut Canvas<'_>, x: f32, y: f32, done: usize, total: usize, unit: &str) {
         let th = rbms_render::theme();
         let frac = if total > 0 { done as f32 / total as f32 } else { 1.0 };
-        canvas.fill_rect(Rect::new(x, y, BAR_W, BAR_H), Color::rgb(28, 28, 40));
+        canvas.fill_rect(Rect::new(x, y, BAR_W, BAR_H), th.panel_hi);
         canvas.fill_rect(Rect::new(x, y, BAR_W * frac, BAR_H), th.good);
         draw_text_centered(canvas, x + BAR_W * 0.5, y + 16.0, 1.2, th.text_dim, &format!("{done} / {total} {unit}"));
     }
@@ -533,7 +533,7 @@ impl LoadingState {
     /// scan of a large library reads as a frozen window.
     fn draw_sweep(canvas: &mut Canvas<'_>, x: f32, y: f32, frame: u64) {
         let th = rbms_render::theme();
-        canvas.fill_rect(Rect::new(x, y, BAR_W, BAR_H), Color::rgb(28, 28, 40));
+        canvas.fill_rect(Rect::new(x, y, BAR_W, BAR_H), th.panel_hi);
         let phase = (frame % SWEEP_PERIOD_FRAMES) as f32 / SWEEP_HALF_FRAMES;
         let t = if phase <= 1.0 { phase } else { 2.0 - phase };
         canvas.fill_rect(Rect::new(x + t * (BAR_W - SWEEP_W), y, SWEEP_W, BAR_H), th.good);

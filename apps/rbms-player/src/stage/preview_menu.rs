@@ -455,7 +455,7 @@ pub(crate) fn status_detail_lines(status: &PreviewStatus) -> Vec<String> {
 pub(crate) fn draw_head(canvas: &mut Canvas<'_>, title: &str, subtitle: &str) {
     let colors = theme();
     draw_text(canvas, MARGIN, TITLE_Y, TITLE_SCALE, colors.text, title);
-    draw_text(canvas, SUBTITLE_X, SUBTITLE_Y, SUBTITLE_SCALE, Color::YELLOW, &head_subtitle(subtitle));
+    draw_text(canvas, SUBTITLE_X, SUBTITLE_Y, SUBTITLE_SCALE, colors.text_dim, &head_subtitle(subtitle));
 }
 
 /// What is written beside the title for `subtitle`: all of it, or as much as the room over the list
@@ -479,7 +479,7 @@ pub(crate) fn draw_tabs<'a>(
         let on = chosen == Some(at);
         let rect = tab_rect(at, count);
         canvas.fill_rect(rect, if on { colors.button } else { colors.panel });
-        draw_text_centered(canvas, rect.x + rect.w * 0.5, rect.y + TAB_TEXT_Y, TAB_SCALE, if on { Color::YELLOW } else { colors.text_dim }, name);
+        draw_text_centered(canvas, rect.x + rect.w * 0.5, rect.y + TAB_TEXT_Y, TAB_SCALE, if on { colors.title_focus } else { colors.text_dim }, name);
         shared.hot.push((rect, hot(at)));
     }
 }
@@ -514,7 +514,7 @@ pub(crate) fn draw_list<'a>(shared: &mut AppShared, canvas: &mut Canvas<'_>, lis
         let (label_color, value_color) = match (look, on) {
             (RowLook::ReadOnly, true) => (colors.text_dim, colors.text_dim),
             (RowLook::ReadOnly, false) => (colors.text_muted, colors.text_muted),
-            (_, true) => (colors.text, Color::YELLOW),
+            (_, true) => (colors.text, colors.title_focus),
             (_, false) => (colors.text_dim, colors.text),
         };
         let Some(cell) = number else {
@@ -596,7 +596,7 @@ pub(crate) fn draw_info_figures(canvas: &mut Canvas<'_>, figures: &[InfoFigure],
     }
     if let Some(note) = note {
         let room = INFO_RECT.w - INFO_PAD * 2.0;
-        draw_text(canvas, INFO_RECT.x + INFO_PAD, INFO_RECT.y + FIGURE_NOTE_Y, FIGURE_NOTE_SCALE, Color::YELLOW, &fit_text(note, FIGURE_NOTE_SCALE, room));
+        draw_text(canvas, INFO_RECT.x + INFO_PAD, INFO_RECT.y + FIGURE_NOTE_Y, FIGURE_NOTE_SCALE, colors.warn, &fit_text(note, FIGURE_NOTE_SCALE, room));
     }
 }
 
@@ -639,12 +639,12 @@ pub(crate) fn draw_info_row_noted(canvas: &mut Canvas<'_>, top: f32, label: &str
     let mut y = INFO_RECT.y + top;
     draw_text(canvas, left, y, INFO_SCALE, colors.text, &label);
     if text_width(&label, INFO_SCALE) + INFO_HEADING_GAP + text_width(value, INFO_SCALE) <= room {
-        draw_text_right(canvas, left + room, y, INFO_SCALE, Color::YELLOW, value);
+        draw_text_right(canvas, left + room, y, INFO_SCALE, colors.title_focus, value);
         y += INFO_LINE_PITCH;
     } else {
         y += INFO_LINE_PITCH;
         for part in wrapped(value, INFO_SCALE, room, INFO_VALUE_LINES) {
-            draw_text(canvas, left, y, INFO_SCALE, Color::YELLOW, &part);
+            draw_text(canvas, left, y, INFO_SCALE, colors.title_focus, &part);
             y += INFO_LINE_PITCH;
         }
     }

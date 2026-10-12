@@ -40,7 +40,7 @@ fn main() {
     let pink = Color::rgb(230, 120, 200);
     let normal = Color::rgb(0, 192, 240);
     let hard = Color::WHITE;
-    let nolamp = Color::rgb(44, 44, 54);
+    let nolamp = rbms_render::theme().lamp_default;
 
     let n_bins = if std::env::args().any(|a| a == "long") { 900 } else { 130 };
     let half = n_bins as f64 / 2.0;

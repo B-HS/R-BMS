@@ -9,7 +9,7 @@
 //! with the parts every built-in screen draws such a row with ([`crate::number_row`]). Which part
 //! of such a row a press landed on is told from where the row was drawn ([`number_part_at`]).
 
-use rbms_render::{Color, Rect, Renderer, draw_text, draw_text_right, fit_text, text_width, theme};
+use rbms_render::{Rect, Renderer, draw_text, draw_text_right, fit_text, text_width, theme};
 
 use crate::number_row::{NumberEdit, NumberValue, RowPart, SliderLook, draw_edit, draw_refusal, draw_slider, row_part};
 
@@ -298,7 +298,7 @@ pub(crate) fn render_settings<R: Renderer>(r: &mut R, scene: &SettingsScene) -> 
         let w = tab_width(name);
         let rect = Rect::new(tx, TABS_Y, w, TAB_H);
         r.fill_rect(rect, if on { th.button } else { th.panel });
-        draw_text(r, tx + TAB_PAD * 0.5, TABS_Y + TAB_TEXT_Y, TAB_SCALE, if on { Color::YELLOW } else { th.text_dim }, name);
+        draw_text(r, tx + TAB_PAD * 0.5, TABS_Y + TAB_TEXT_Y, TAB_SCALE, if on { th.title_focus } else { th.text_dim }, name);
         hot.push((rect, SettingsHot::Tab(index)));
         tx += w + TAB_GAP;
     }
@@ -330,7 +330,7 @@ pub(crate) fn render_settings<R: Renderer>(r: &mut R, scene: &SettingsScene) -> 
         let color = if editing {
             th.accent
         } else if on {
-            Color::YELLOW
+            th.title_focus
         } else if note.is_some() {
             th.text_dim
         } else {
@@ -390,7 +390,7 @@ fn render_rivals<R: Renderer>(r: &mut R, scene: &RivalsScene) -> Vec<(Rect, Sett
         r.fill_rect(rect, if on { th.button } else { th.panel });
         let is_add = index + 1 == scene.rows.len();
         let color = if is_add {
-            Color::GREEN
+            th.accent
         } else if on {
             th.text
         } else {

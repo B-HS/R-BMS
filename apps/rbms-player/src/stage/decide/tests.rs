@@ -716,7 +716,7 @@ fn a_decide_skin_waited_for_past_the_limit_is_given_up_on_for_the_loading_screen
         assert!(matches!(frame(&mut app, &mut pixels), Transition::Stay), "the screen left while its skin was still within its wait");
     }
     assert!(!decide(&app).scene.begun, "a scene began without a skin to draw it");
-    assert_eq!(pixels.pixel_at(MIDDLE.0, MIDDLE.1), Color::BLACK, "something was drawn before the skin was in");
+    assert_eq!(pixels.lit_pixels(), 0, "something was drawn before the skin was in");
 
     app.shared.outlast_skin_wait();
     let leaving = (0..WAITING_FRAMES).map(|_| frame(&mut app, &mut pixels)).find(|transition| !matches!(transition, Transition::Stay));

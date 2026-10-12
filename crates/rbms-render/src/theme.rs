@@ -5,6 +5,12 @@
 //! rest of the defaults) and [`ThemeConfig::resolve`]d into a concrete [`Theme`]. The app calls
 //! [`set_theme`] once at startup; every renderer reads the current palette via [`theme`]. A future
 //! web front-end can author themes against this same schema — see `docs/theme.md`.
+//!
+//! The default palette is achromatic: a black ground, grey surfaces and lines, white and grey
+//! text, with a selection told by brightness alone. Its steps are the ones the default skin pack's
+//! Mono palette is built from, so the app's own menus and a skin's screens read as one set. A hue
+//! is left to what carries a meaning by it -- a judgement, a clear lamp, a level, a warning --
+//! and none of those is a field here but [`Theme::warn`].
 
 use std::cell::RefCell;
 
@@ -154,6 +160,49 @@ impl SelectLayoutConfig {
     }
 }
 
+/// The ground every screen is cleared to.
+const GROUND: Color = Color::rgb(0, 0, 0);
+
+/// A surface laid on the ground: a panel, a list row, the header bar, a lane's backdrop.
+pub(crate) const SURFACE: Color = Color::rgb(22, 22, 22);
+
+/// The surface of every other list row, a step off [`SURFACE`] so two rows are told apart.
+const SURFACE_ALTERNATE: Color = Color::rgb(30, 30, 30);
+
+/// A surface raised off [`SURFACE`]: a card over a list, a button at rest, a folder's row.
+const RAISED: Color = Color::rgb(38, 38, 38);
+
+/// A box that is switched on or being typed into, a step over [`RAISED`].
+const ENGAGED: Color = Color::rgb(50, 50, 50);
+
+/// A hairline, the fill of the list row under the cursor, and the rule between two lanes.
+pub(crate) const LINE: Color = Color::rgb(60, 60, 60);
+
+/// A clear lamp that has nothing to show.
+const LAMP_OFF: Color = Color::rgb(68, 68, 68);
+
+/// The fill of what is chosen: the row under a menu's cursor, the tab on show.
+const CHOSEN: Color = Color::rgb(80, 80, 80);
+
+/// A hint. A step lighter than the default skin pack's own, so it reads on a raised surface as
+/// well as it did before the palette lost its hue.
+const INK_MUTED: Color = Color::rgb(144, 144, 144);
+
+/// What is written beside what is read first.
+const INK_DIM: Color = Color::rgb(184, 184, 184);
+
+/// A filled bar, and the title of a list row that is not under the cursor.
+const BAR: Color = Color::rgb(200, 200, 200);
+
+/// What is read first.
+const INK: Color = Color::rgb(242, 242, 242);
+
+/// What is under the cursor, and the mark that says so.
+const LIT: Color = Color::rgb(255, 255, 255);
+
+/// A caution. The one default with a hue, because the hue is what it says.
+const CAUTION: Color = Color::rgb(230, 180, 60);
+
 /// The resolved UI palette. Fields are grouped by role so a theme reads top-to-bottom.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Theme {
@@ -177,12 +226,13 @@ pub struct Theme {
     pub text_dim: Color,
     /// Tertiary / muted hints.
     pub text_muted: Color,
-    /// Accent text (counts, sort label, links).
+    /// Accent text (counts, sort label, links, headings, a prompt the screen is waiting on).
     pub accent: Color,
-    /// Focus ring / selection rails.
+    /// Focus ring / selection rails, a caret, the grip of the slider under the cursor.
     pub focus: Color,
 
-    /// Focused row title.
+    /// What is written on the thing under the cursor: the focused row's title, the chosen tab's
+    /// name, the value of a menu's focused row.
     pub title_focus: Color,
     /// Unfocused row title.
     pub title_dim: Color,
@@ -202,9 +252,9 @@ pub struct Theme {
     /// Active/toggled button fill.
     pub button_active: Color,
 
-    /// Positive bar (progress, score graph current).
+    /// A filled bar that measures nothing but how far along something is: a load, a replay.
     pub good: Color,
-    /// Warning / pacemaker behind.
+    /// A caution: a stale copy, a table that failed to load, a setting held at its limit.
     pub warn: Color,
 }
 
@@ -214,27 +264,27 @@ impl Default for Theme {
             select_layout: SelectLayout::default(),
             options_layout: OptionsLayout::default(),
             select_panel_alpha: 255,
-            bg: Color::rgb(8, 8, 14),
-            topbar: Color::rgb(18, 18, 30),
-            panel: Color::rgb(14, 16, 26),
-            panel_hi: Color::rgb(22, 24, 36),
-            divider: Color::rgb(40, 42, 58),
-            text: Color::rgb(235, 235, 235),
-            text_dim: Color::rgb(170, 170, 185),
-            text_muted: Color::rgb(120, 124, 140),
-            accent: Color::rgb(120, 205, 235),
-            focus: Color::rgb(120, 200, 240),
-            title_focus: Color::rgb(244, 236, 156),
-            title_dim: Color::rgb(190, 186, 150),
-            row_even: Color::rgb(22, 24, 34),
-            row_odd: Color::rgb(27, 29, 42),
-            row_folder: Color::rgb(40, 44, 30),
-            row_focus: Color::rgb(50, 56, 82),
-            lamp_default: Color::rgb(44, 44, 54),
-            button: Color::rgb(70, 80, 120),
-            button_active: Color::rgb(40, 56, 80),
-            good: Color::rgb(90, 200, 230),
-            warn: Color::rgb(230, 180, 60),
+            bg: GROUND,
+            topbar: SURFACE,
+            panel: SURFACE,
+            panel_hi: RAISED,
+            divider: LINE,
+            text: INK,
+            text_dim: INK_DIM,
+            text_muted: INK_MUTED,
+            accent: LIT,
+            focus: LIT,
+            title_focus: LIT,
+            title_dim: BAR,
+            row_even: SURFACE,
+            row_odd: SURFACE_ALTERNATE,
+            row_folder: RAISED,
+            row_focus: LINE,
+            lamp_default: LAMP_OFF,
+            button: CHOSEN,
+            button_active: ENGAGED,
+            good: BAR,
+            warn: CAUTION,
         }
     }
 }
@@ -336,6 +386,52 @@ mod tests {
     fn empty_config_resolves_to_defaults() {
         let t = ThemeConfig::default().resolve();
         assert_eq!(t, Theme::default());
+    }
+
+    /// The palette has no hue of its own: every colour is a grey, the ground is black, and the one
+    /// colour that is not a grey is the caution, whose hue is what it says.
+    #[test]
+    fn the_default_palette_is_achromatic_but_for_the_caution() {
+        let t = Theme::default();
+        let greys = [
+            ("bg", t.bg),
+            ("topbar", t.topbar),
+            ("panel", t.panel),
+            ("panel_hi", t.panel_hi),
+            ("divider", t.divider),
+            ("text", t.text),
+            ("text_dim", t.text_dim),
+            ("text_muted", t.text_muted),
+            ("accent", t.accent),
+            ("focus", t.focus),
+            ("title_focus", t.title_focus),
+            ("title_dim", t.title_dim),
+            ("row_even", t.row_even),
+            ("row_odd", t.row_odd),
+            ("row_folder", t.row_folder),
+            ("row_focus", t.row_focus),
+            ("lamp_default", t.lamp_default),
+            ("button", t.button),
+            ("button_active", t.button_active),
+            ("good", t.good),
+        ];
+        for (name, color) in greys {
+            assert!(color.r == color.g && color.g == color.b && color.a == u8::MAX, "{name} is {color:?}");
+        }
+        assert_eq!(t.bg, Color::BLACK);
+        assert!(t.warn.r != t.warn.b, "the caution has lost the hue that makes it one");
+    }
+
+    /// A selection is told by brightness: what is chosen is lighter than what it is chosen among,
+    /// and what is written on it lighter than what is written beside it.
+    #[test]
+    fn what_is_chosen_is_lighter_than_what_is_not() {
+        let t = Theme::default();
+        let lighter = |a: Color, b: Color| a.r > b.r;
+        assert!(lighter(t.panel, t.bg) && lighter(t.panel_hi, t.panel) && lighter(t.button_active, t.panel_hi) && lighter(t.button, t.button_active));
+        assert!(lighter(t.row_focus, t.row_folder) && lighter(t.row_folder, t.row_odd) && lighter(t.row_odd, t.row_even));
+        assert!(lighter(t.title_focus, t.title_dim) && lighter(t.text, t.text_dim) && lighter(t.text_dim, t.text_muted));
+        assert!(lighter(t.text_muted, t.button), "a hint is not legible on the fill of what is chosen");
     }
 
     #[test]

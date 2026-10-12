@@ -1,7 +1,7 @@
 //! Everything the player reads off disk or out of the binary before a screen can use it: the
 //! built-in note-field layouts, the default skin pack shipped inside the binary ([`default_pack`]),
-//! the UI theme template, chart-relative file resolution, the keysound decode pool and the BGA image
-//! decode.
+//! the UI theme file ([`theme_file`]), chart-relative file resolution, the keysound decode pool and
+//! the BGA image decode.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -17,8 +17,10 @@ use sha2::{Digest, Sha256};
 pub(crate) mod default_pack;
 #[cfg(test)]
 pub(crate) mod scripted_movie;
+pub(crate) mod theme_file;
 
 pub(crate) use default_pack::{default_sound_folder, install_default_pack, installed_default_pack};
+pub(crate) use theme_file::load_theme;
 
 /// A decode running on the worker pool: what has arrived, how far it has got, the cooperative
 /// cancel, and how many jobs there are in total.
@@ -91,55 +93,6 @@ fn hex(bytes: &[u8]) -> String {
 pub(crate) fn skin_overlay_folder(settings_path: &Path, document: &Path) -> PathBuf {
     let pack = document.parent().unwrap_or(Path::new("."));
     settings_path.parent().unwrap_or(Path::new(".")).join(SKIN_DATA_FOLDER).join(skin_pack_identifier(pack))
-}
-
-/// A fully-populated, commented UI-theme template written to `~/.config/rbms/theme.ron` on first run
-/// so the palette is discoverable and editable. Each colour is `Some((r,g,b))`; omit a line to keep
-/// its default. The in-play note field is themed separately by the skin. See `docs/theme.md`.
-pub(crate) const THEME_TEMPLATE: &str = "\
-// rbms UI theme — colours for the song-select / result / menu chrome (0-255 per channel).
-// Omit any line to keep its default. The in-play note field is themed by the skin, not here.
-(
-    bg:            Some((8, 8, 14)),      // window background
-    topbar:        Some((18, 18, 30)),    // top header bar
-    panel:         Some((14, 16, 26)),    // panel fill
-    panel_hi:      Some((22, 24, 36)),    // raised panel / button
-    divider:       Some((40, 42, 58)),    // dividers / outlines
-    text:          Some((235, 235, 235)), // primary text
-    text_dim:      Some((170, 170, 185)), // secondary text
-    text_muted:    Some((120, 124, 140)), // muted hints
-    accent:        Some((120, 205, 235)), // accents / counts / sort label
-    focus:         Some((120, 200, 240)), // focus ring / selection rails
-    title_focus:   Some((244, 236, 156)), // focused row title
-    title_dim:     Some((190, 186, 150)), // unfocused row title
-    row_even:      Some((22, 24, 34)),
-    row_odd:       Some((27, 29, 42)),
-    row_folder:    Some((40, 44, 30)),
-    row_focus:     Some((50, 56, 82)),
-    lamp_default:  Some((44, 44, 54)),     // clear-lamp with no record yet
-    button:        Some((70, 80, 120)),    // selected tab / button fill
-    button_active: Some((40, 56, 80)),     // active/toggled button, search box
-    good:          Some((90, 200, 230)),   // progress / score-graph bars
-    warn:          Some((230, 180, 60)),
-)
-";
-
-/// Read the UI theme beside the settings file, writing the template there first when there is none
-/// to read.
-pub(crate) fn load_theme(settings_path: &Path) {
-    let path = settings_path.parent().map(|directory| directory.join("theme.ron")).unwrap_or_else(|| PathBuf::from("theme.ron"));
-    let src = match std::fs::read_to_string(&path) {
-        Ok(s) => s,
-        Err(_) => {
-            if let Some(dir) = path.parent() {
-                let _ = std::fs::create_dir_all(dir);
-            }
-            let _ = std::fs::write(&path, THEME_TEMPLATE);
-            THEME_TEMPLATE.to_string()
-        }
-    };
-    rbms_render::set_theme(rbms_render::ThemeConfig::parse(&src).resolve());
-    println!("theme: {}", path.display());
 }
 
 pub(crate) fn resolve_file(dir: &Path, name: &str, exts: &[&str]) -> Option<(PathBuf, String)> {

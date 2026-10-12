@@ -290,13 +290,13 @@ impl TablesState {
     /// The URL entry box, with the stretch of a long URL the caret is in and the caret itself.
     fn draw_url_entry(&self, canvas: &mut Canvas<'_>, edit: &TextEdit, x0: f32) {
         let th = rbms_render::theme();
-        draw_text(canvas, x0, 84.0, 1.4, Color::YELLOW, "TYPE TABLE URL  -  ENTER ADD  ESC CANCEL  CTRL+V PASTE");
+        draw_text(canvas, x0, 84.0, 1.4, th.accent, "TYPE TABLE URL  -  ENTER ADD  ESC CANCEL  CTRL+V PASTE");
         canvas.fill_rect(Rect::new(x0, 116.0, PANEL_W, 40.0), th.button_active);
         let (shown, caret) = edit.window(URL_ENTRY_CHARS);
         let text_x = x0 + 14.0;
         draw_text(canvas, text_x, 128.0, URL_ENTRY_SCALE, th.text, &shown);
         let before: String = shown.chars().take(caret).collect();
-        canvas.fill_rect(Rect::new(text_x + text_width(&before, URL_ENTRY_SCALE), 126.0, CARET_W, CARET_H), Color::YELLOW);
+        canvas.fill_rect(Rect::new(text_x + text_width(&before, URL_ENTRY_SCALE), 126.0, CARET_W, CARET_H), th.focus);
     }
 }
 
@@ -389,7 +389,7 @@ impl StageHandler for TablesState {
             return;
         }
         if self.picker.is_some() {
-            draw_text(canvas, x0, 84.0, 1.4, Color::YELLOW, "PICK A TABLE FILE IN THE OPEN DIALOG");
+            draw_text(canvas, x0, 84.0, 1.4, th.accent, "PICK A TABLE FILE IN THE OPEN DIALOG");
             return;
         }
         draw_text(canvas, x0, 84.0, 1.3, th.text_muted, LIST_KEYS);
@@ -409,7 +409,7 @@ impl StageHandler for TablesState {
             };
             canvas.fill_rect(Rect::new(x0, y, PANEL_W, ROW_H), if on { th.button } else { th.panel });
             let col = if i >= tables.len() {
-                Color::GREEN
+                th.accent
             } else if on {
                 th.text
             } else {
@@ -429,7 +429,7 @@ impl StageHandler for TablesState {
             let summary = arriving.map(|arriving| (arriving.to_string(), false)).or_else(|| status.as_ref().map(status_summary));
             if let Some((summary, is_problem)) = summary {
                 let status_col = match (arriving.is_some(), is_problem, on) {
-                    (true, ..) => Color::YELLOW,
+                    (true, ..) => th.accent,
                     (false, true, _) => th.warn,
                     (false, false, true) => th.text,
                     (false, false, false) => th.text_muted,

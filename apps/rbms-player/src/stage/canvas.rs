@@ -100,6 +100,13 @@ impl HeadlessCanvas {
         self.rgba().chunks_exact(4).filter(|p| p[3] != 0).count()
     }
 
+    /// How many pixels are anything but black. The built-in screens clear to black themselves, so
+    /// this, and not the colour of one pixel, is what tells a frame a screen drew on from one that
+    /// was left dark.
+    pub(crate) fn lit_pixels(&self) -> usize {
+        self.rgba().chunks_exact(4).filter(|pixel| pixel[..3] != [0, 0, 0]).count()
+    }
+
     /// An FNV-1a checksum over every rendered byte. Finer than [`HeadlessCanvas::signature`], which
     /// averages the frame into blocks: two frames that differ only in a digit are told apart here.
     pub(crate) fn pixel_checksum(&self) -> u64 {

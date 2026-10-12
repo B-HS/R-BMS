@@ -670,7 +670,7 @@ fn the_summary_is_what_the_configuration_crates_functions_come_to_at_every_tempo
 
     let figures = summary(&limited, true);
     assert_eq!(figures[3].color, Color::GREEN, "the green number is not written in green");
-    assert_eq!(figures[1].tag_color, Color::YELLOW, "a speed at the end of its range is not marked as the note under it is");
+    assert_eq!(figures[1].tag_color, theme().warn, "a speed at the end of its range is not marked as the note under it is");
 }
 
 /// KEEP GREEN NUMBER decides which of the two speed rows is set and which is shown: the one worked

@@ -104,7 +104,7 @@ impl StageHandler for FoldersState {
         let x0 = (CW as f32 - PANEL_W) * 0.5;
         draw_text(canvas, x0, 40.0, 3.0, th.text, "SONG FOLDERS");
         match self.picker.is_some() {
-            true => draw_text(canvas, x0, 84.0, 1.4, Color::YELLOW, "PICK A SONG FOLDER IN THE OPEN DIALOG"),
+            true => draw_text(canvas, x0, 84.0, 1.4, th.accent, "PICK A SONG FOLDER IN THE OPEN DIALOG"),
             false => draw_text(canvas, x0, 84.0, 1.3, th.text_muted, "UP DOWN MOVE   ENTER ADD FOLDER   D REMOVE   ESC SAVE/RESCAN"),
         }
         let folders = &ctx.shared.config.library.folders;
@@ -124,7 +124,7 @@ impl StageHandler for FoldersState {
             };
             canvas.fill_rect(Rect::new(x0, y, PANEL_W, ROW_H), if on { th.button } else { th.panel });
             let col = if i == add_row {
-                Color::GREEN
+                th.accent
             } else if on {
                 th.text
             } else {

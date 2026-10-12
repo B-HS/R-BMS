@@ -779,6 +779,7 @@ fn a_browser_waiting_for_its_skin_is_black_and_deaf_until_the_skin_is_given_up_o
     for (x, y) in samples {
         assert_eq!(browser.pixels.pixel_at(x, y), Color::BLACK, "something was drawn at {x},{y} while the skin was on its way");
     }
+    assert_eq!(browser.pixels.lit_pixels(), 0, "something was drawn while the skin was on its way");
 
     assert!(matches!(browser.key(KeyCode::ArrowDown), Transition::Stay));
     assert!(matches!(browser.key(KeyCode::Enter), Transition::Stay), "a chart was started on a black screen");

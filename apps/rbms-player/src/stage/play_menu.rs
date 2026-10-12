@@ -596,7 +596,7 @@ fn summary(readout: &SpeedReadout, constant: bool) -> [InfoFigure; 5] {
     [
         figure(FIGURE_BPM, (readout.bpm.round() as i64).to_string(), if constant { CONSTANT_MARK } else { "" }),
         InfoFigure {
-            tag_color: if readout.limited { Color::YELLOW } else { colors.accent },
+            tag_color: if readout.limited { colors.warn } else { colors.accent },
             ..figure(FIGURE_HISPEED, hispeed_figure(readout.hispeed), speed_tag)
         },
         InfoFigure { tag_color: colors.text_muted, ..figure(FIGURE_TRAVEL, readout.duration_ms.to_string(), TRAVEL_UNIT) },

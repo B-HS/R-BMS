@@ -18,9 +18,6 @@ use crate::*;
 /// `3600 * 24`).
 const NEW_FOR_SECS: i64 = 86_400;
 
-/// The colour of the lamp of a row nothing has been recorded on.
-const LAMP_UNLIT: Color = Color::rgb(44, 44, 54);
-
 /// The colour of the lamp of a course the library cannot supply every chart of.
 const LAMP_UNPLAYABLE: Color = Color::rgb(70, 30, 30);
 
@@ -110,7 +107,7 @@ fn row_of(bar: &SelectBar, score_graph: bool) -> SelectRow {
         mode_color: Color::GRAY,
         level: String::new(),
         difficulty_color: Color::GRAY,
-        lamp: LAMP_UNLIT,
+        lamp: theme().lamp_default,
         folder_count: None,
         dj_level: None,
         favorite: false,
@@ -120,7 +117,7 @@ fn row_of(bar: &SelectBar, score_graph: bool) -> SelectRow {
         return SelectRow {
             level: course.badges.join(" "),
             difficulty_color: if playable { Color::WHITE } else { Color::RED },
-            lamp: if playable { LAMP_UNLIT } else { LAMP_UNPLAYABLE },
+            lamp: if playable { theme().lamp_default } else { LAMP_UNPLAYABLE },
             ..opens
         };
     }
@@ -133,7 +130,7 @@ fn row_of(bar: &SelectBar, score_graph: bool) -> SelectRow {
         mode_color: mode_color(chart.mode),
         level: chart.level_text.clone(),
         difficulty_color: difficulty_color(chart.difficulty),
-        lamp: bar.lamp.map_or(LAMP_UNLIT, |clear| clear_label_color(clear_type_from_id(clear)).1),
+        lamp: bar.lamp.map_or(theme().lamp_default, |clear| clear_label_color(clear_type_from_id(clear)).1),
         dj_level: chart.best.filter(|_| score_graph).map(|best| RANK_BANDS[dj_rank(best.ex, best.max_ex)].0),
         favorite: chart.favorite,
         ..opens

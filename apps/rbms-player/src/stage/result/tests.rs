@@ -851,7 +851,7 @@ fn a_screen_waiting_for_its_skin_is_black_and_takes_escape_alone() {
     assert_eq!(result(&app).stage.skin, SkinStatus::Reading);
     assert!(matches!(frame(&mut app, &mut pixels), Transition::Stay));
     if result(&app).stage.skin == SkinStatus::Reading {
-        assert_eq!(pixels.pixel_at(GROUND_AT.0, GROUND_AT.1), Color::BLACK, "something was drawn before the skin was");
+        assert_eq!(pixels.lit_pixels(), 0, "something was drawn before the skin was");
     }
     assert!(matches!(key(&mut app, press(KeyCode::Enter)), Transition::Stay), "Enter left a screen whose scene had not begun");
     assert!(matches!(key(&mut app, press(KeyCode::KeyR)), Transition::Stay));

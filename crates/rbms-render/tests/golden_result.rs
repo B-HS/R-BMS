@@ -6,9 +6,9 @@ use golden_harness::{check, golden_canvas, signature_of};
 use rbms_render::result::{ResultExtras, TargetView};
 use rbms_render::{Color, ResultPalette, ResultView, SkinConfig, render_result, render_result_with_palette};
 
-const GOLDEN_RESULT: u64 = 0x6a90_2207_198b_e349;
-const GOLDEN_RESULT_SKIN: u64 = 0xdbfb_eda9_56a6_9aa8;
-const GOLDEN_RESULT_PACED: u64 = 0x5782_d81c_02bb_d1a9;
+const GOLDEN_RESULT: u64 = 0x59a0_f2e8_6f9d_3fd7;
+const GOLDEN_RESULT_SKIN: u64 = 0xbf12_849e_17ea_7366;
+const GOLDEN_RESULT_PACED: u64 = 0x6cf4_e076_079e_6f28;
 
 fn result_view() -> ResultView {
     ResultView {

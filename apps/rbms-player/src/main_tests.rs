@@ -3,7 +3,7 @@
 //! They live in their own module so the crate root stays a wiring file: the items under test are
 //! private to the root, and a child module still sees them through `super`.
 
-use super::assets::THEME_TEMPLATE;
+use super::assets::{SKIN_NORMAL, SKIN_WIDE};
 use super::judge_setup::{is_custom_judge, judge_setup_of};
 use super::{
     ROOT_ESC_CONFIRM, SortMode, assisted_lamp, build_hash, bundled_skin, clear_type_from_id, clear_type_id, client_platform, compute_build_hash,
@@ -27,13 +27,6 @@ fn config_dir_prefers_home_then_userprofile() {
     assert_eq!(cd(None, Some("C:/Users/u")), PathBuf::from("C:/Users/u").join(".config/rbms"), "USERPROFILE used when HOME unset (Windows)");
     assert_eq!(cd(Some("/h"), Some("C:/x")), PathBuf::from("/h").join(".config/rbms"), "HOME wins over USERPROFILE");
     assert_eq!(cd(None, None), PathBuf::from(".").join(".config/rbms"));
-}
-
-#[test]
-fn theme_template_is_valid_ron_and_matches_defaults() {
-    let parsed: Result<rbms_render::ThemeConfig, _> = ron::from_str(THEME_TEMPLATE);
-    assert!(parsed.is_ok(), "theme template must be valid RON: {parsed:?}");
-    assert_eq!(parsed.unwrap().resolve(), rbms_render::Theme::default(), "template values equal the defaults");
 }
 
 #[test]
@@ -206,6 +199,22 @@ fn bundled_skins_parse_for_both_names_and_match_wide_case_insensitively() {
     let _normal = bundled_skin("NORMAL");
     let _default = bundled_skin("anything-else");
     let _case = bundled_skin("wide");
+}
+
+/// The built-in note field is drawn from these files, so the greys of its lane backdrop, outline
+/// and dividers are the files' to give, not only the defaults of a file that leaves them out.
+#[test]
+fn the_note_field_layouts_that_ship_draw_the_lane_in_the_default_greys() {
+    let default = rbms_render::SkinConfig::default();
+    for (name, source) in [("normal", SKIN_NORMAL), ("wide", SKIN_WIDE), ("default", include_str!("../../../assets/skins/default.ron"))] {
+        let skin: rbms_render::SkinConfig = ron::from_str(source).unwrap_or_else(|error| panic!("{name}.ron does not parse: {error}"));
+        assert_eq!(skin.lane_bg, default.lane_bg, "{name}.ron lane_bg");
+        assert_eq!(skin.outline_color, default.outline_color, "{name}.ron outline_color");
+        assert_eq!(skin.divider_color, default.divider_color, "{name}.ron divider_color");
+    }
+    for grey in [default.lane_bg, default.outline_color, default.divider_color] {
+        assert!(grey.iter().all(|channel| *channel == grey[0]), "{grey:?} is not a grey");
+    }
 }
 
 #[test]

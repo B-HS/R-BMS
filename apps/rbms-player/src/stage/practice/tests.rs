@@ -839,9 +839,9 @@ fn the_rows_are_where_the_pointer_finds_them_at_every_size() {
             assert!(slider.x + slider.w <= number.x && number.x + number.w <= row.x + row.w, "{size:?} {element:?}: the slider and the number overlap");
             assert!(text_width(&screen.reads(element), ROW_SCALE) <= NUMBER_W, "{size:?} {element:?}: the number is wider than its room");
             let knob = knob_rect(slider, screen.state.panel().number(element).expect("the row holds a number").fraction());
-            assert_eq!(screen.pixel(middle(knob)), Color::YELLOW, "{size:?} {element:?}: the knob of the row under the cursor is not where the row says");
+            assert_eq!(screen.pixel(middle(knob)), theme().focus, "{size:?} {element:?}: the knob of the row under the cursor is not where the row says");
             let above = (knob.x + knob.w * 0.5, slider.y + 1.0);
-            assert_ne!(screen.pixel(above), Color::YELLOW, "{size:?} {element:?}: the knob is as tall as its row");
+            assert_ne!(screen.pixel(above), theme().focus, "{size:?} {element:?}: the knob is as tall as its row");
         }
         for hint in [HINT_KEYS, HINT_MOUSE, EDIT_HINT, EDIT_HINT_CLOCK] {
             assert!(text_width(hint, HINT_SCALE) <= CW as f32 - row_rect(0).x, "{size:?}: {hint:?} runs off the screen");
@@ -862,7 +862,7 @@ fn the_panel_is_drawn_with_its_sliders_and_captured() {
                 screen.slider_of(PracticeElement::EndTime),
                 screen.state.panel().number(PracticeElement::EndTime).map_or(0.0, |value| value.fraction())
             ))),
-            Color::YELLOW
+            theme().focus
         );
 
         let slider = screen.slider_of(PracticeElement::Freq);

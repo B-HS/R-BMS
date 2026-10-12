@@ -13,7 +13,7 @@
     key_color_alt: (70, 130, 230),
     scratch_color: (230, 70, 70),
     mine_color: (70, 220, 120),
-    lane_bg: (18, 18, 24),
+    lane_bg: (22, 22, 22),
     lane_bg_alpha: 160,
     judge_line: (200, 40, 40),
     beam_color: (200, 220, 255),

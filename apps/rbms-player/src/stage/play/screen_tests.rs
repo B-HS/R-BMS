@@ -804,7 +804,7 @@ fn a_later_stage_of_a_course_loads_on_the_play_screen_too() {
 
     assert!(matches!(crate::load_course_stage(&mut app.shared), Transition::To(Stage::Loading(_))));
     let waiting = crate::stage::render_tests::render(&mut app, Stage::Loading(LoadingState::song(0)));
-    assert_eq!(pixel(&waiting, LOADING_AT), Color::BLACK, "the built-in LOADING screen was drawn on the way to a skin's play screen");
+    assert_eq!(waiting.lit_pixels(), 0, "the built-in LOADING screen was drawn on the way to a skin's play screen");
     let (loading, _, _) = chart_still_loading();
     let entered = app.shared.enter_loaded_chart(loading);
     assert!(matches!(entered, Stage::Play(_)), "a later stage of a course went to the LOADING screen");
@@ -814,7 +814,7 @@ fn a_later_stage_of_a_course_loads_on_the_play_screen_too() {
     let mut plain = crate::stage::render_tests::app();
     with_the_chart_in_the_library(&mut plain);
     let built_in = crate::stage::render_tests::render(&mut plain, Stage::Loading(LoadingState::song(0)));
-    assert_ne!(pixel(&built_in, (CW / 2, CH / 2 - 30)), Color::BLACK, "without a play skin the LOADING screen is the built-in one");
+    assert!(built_in.lit_pixels() > 0, "without a play skin the LOADING screen is the built-in one");
 }
 
 /// A chart asked for practice still waits where it always did, because the practice panel is built

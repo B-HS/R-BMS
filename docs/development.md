@@ -62,7 +62,7 @@ cargo run --release -p rbms-player -- <chart.bms> --interactive
 | `scores.ron.migrated` | a legacy `scores.ron` after its first successful import into `scoredb.sqlite` |
 | `favorites.ron` | starred chart MD5 values |
 | `practice.ron` | per-chart practice properties |
-| `theme.ron` | editable UI-theme template written on first run (see `theme.md`) |
+| `theme.ron` | UI-theme file; a template that sets no colour is written on first run, and an untouched template of an earlier version is replaced (see `theme.md`) |
 | `replays/` | saved replays (`<md5[:8]>-<ms>.ron`) |
 | `courses/` | user course documents |
 | `skin/rbms-default/` | the default skin pack, written by every start from the copy embedded in the binary (`install-manifest.txt` records what was installed; a file the player edited is left alone). Other packs may sit beside it |
@@ -79,7 +79,7 @@ the frame loop, `ApplicationHandler` and `run`. Everything else hangs off it:
 | File | Holds |
 |---|---|
 | `lib.rs` | `App` / `AppShared`, consts, free helpers, the frame loop, `ApplicationHandler`, `run() -> ExitCode` |
-| `assets.rs`, `assets/default_pack.rs`, `assets/scripted_movie.rs` | built-in note-field layouts, skin pack identifiers and overlay folders, the `theme.ron` template, chart-relative file resolution, the keysound decode pool, BGA decode, the library scan; the embedded default pack and its install rules (`build.rs` makes the file table); movie stand-ins for tests |
+| `assets.rs`, `assets/default_pack.rs`, `assets/theme_file.rs`, `assets/scripted_movie.rs` | built-in note-field layouts, skin pack identifiers and overlay folders, the `theme.ron` template and how an earlier one is told from a player's own file (`theme_file.rs`), chart-relative file resolution, the keysound decode pool, BGA decode, the library scan; the embedded default pack and its install rules (`build.rs` makes the file table); movie stand-ins for tests |
 | `gpu/` | the wgpu instanced-quad renderer (`Gpu`, with `batch.rs` draw-call batching and `background.rs`), fallible so a machine with no adapter gets a message |
 | `stage/mod.rs` | `Stage`, `StageId`, `Transition`, `FrameCtx`, `KeyInput`, the `StageHandler` trait and its dispatch |
 | `stage/{select/,decide,settings,skin_menu,play_menu,keyconfig,tables,folders,loading,play/,result,practice,course_result}.rs` | one screen each, owning that screen's own state. `skin_menu.rs` is the skin settings with a live preview (`F12`); `play_menu.rs` (+ `play_menu/rows.rs`) is the play options with a live play screen (`F8`); `preview_menu.rs` is what the two draw and move the same way. `select/` is split into `mod.rs` (list, record modal, ranking panel and course tab), `keys.rs` (key tables), `panel.rs` and `events.rs` (option panels 1 to 3 and skin events), `skinned.rs` (the skin-drawn browser), `overlay.rs` and `guide.rs` (what the app draws over it), `preview.rs` (hover preview), `list.rs`, `filter.rs` and `scene.rs` (what the renderer is handed). `decide.rs` is the scene between picking a chart and its run; `scene_life.rs` its timing rules, shared with result. `play/` holds the state machine (PRELOAD, READY, PLAY, FAILED, FINISHED). `practice.rs` owns practice setup; `course_result.rs` renders the aggregate course result. `capture.rs` (+ `capture/gate.rs`) is the test-only capture harness. |
