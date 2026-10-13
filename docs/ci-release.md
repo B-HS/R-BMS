@@ -92,6 +92,17 @@ macOS 유니버설 빌드의 `x86_64-apple-darwin` 쪽 OpenH264 는 Apple Silico
 
 시크릿을 넣는 명령(값이 화면에 나오지 않습니다): `base64 -i certificate.p12 | gh secret set MACOS_CERTIFICATE_P12 --repo B-HS/R-BMS`
 
+### 3.3 로컬 선검증 스크립트 (`scripts/`)
+
+시크릿을 등록하기 전에 로컬 macOS 에서 같은 절차를 돌려 보는 스크립트입니다. 사용자의 다른 저장소 TAIDE 의 것을 가져와(2026-10-13, 사용자 지시) 이 저장소의 단계 이름에 맞추고 `--set-secret` 을 더했습니다. TAIDE 도 2026-08-28 첫 릴리스에서 같은 `error decoding base64 input stream` 을 겪고 이 스크립트를 만들었습니다.
+
+- `bash scripts/verify-signing-cert.sh <cert.p12 | base64.txt> [--set-secret]`: `.p12` 원본이면 임시 키체인에 넣어 암호와 서명 신원을 확인하고 secret 용 한 줄 base64 를 만듭니다. base64 텍스트 파일이면 먼저 형식을 엄격히 봅니다(base64 밖 문자 수, 길이가 4의 배수인가, 디코드 뒤 다시 인코드한 값이 같은가). 암호는 `CERT_PASSWORD` 환경 변수나 프롬프트로만 받습니다. `--set-secret` 을 주면 검증을 통과한 값과 암호를 `gh secret set` 으로 이 저장소의 `MACOS_CERTIFICATE_P12`, `MACOS_CERTIFICATE_PASSWORD` 에 바로 넣습니다(클립보드와 웹 화면을 거치지 않습니다. 붙여 넣은 값의 한 글자가 `.` 으로 바뀌어 릴리스가 세 번 실패한 일이 있습니다). 주지 않으면 TAIDE 와 같이 클립보드에 복사합니다.
+- `bash scripts/verify-notary-credentials.sh`: `APPLE_ID`, `APPLE_TEAM_ID`, 앱 암호(`NOTARY_PASSWORD`)를 환경 변수나 프롬프트로 받아 `xcrun notarytool history` 로 Apple 공증 서버에 실제로 로그인해 봅니다(제출 없음). 형식이 이상하면 경고하고, 실패하면 Apple 의 오류와 원인 후보를 냅니다.
+
+확인한 것(2026-10-13, 일회용 자체 서명 인증서와 가짜 `gh`·`pbcopy`): `.p12` 의 맞는 암호와 틀린 암호, 유효한 base64 파일, 한 글자가 `.` 으로 바뀐 파일(`base64 밖 문자 1`), 잘린 파일, `--set-secret` 이 넘기는 값이 클립보드 값과 같음, 사용법 출력. 실제 인증서와 실제 계정으로는 사용자가 돌립니다(에이전트는 키 파일을 읽지 않습니다).
+
+순서: 로컬 스크립트 둘 → `signing-check` 워크플로(3.2절, 등록된 값 확인) → 릴리스.
+
 ## 4. 사용자 실행 전제
 
 - macOS 아카이브는 압축 해제 후 `./rbms-player <곡폴더>`로 실행합니다. 공증되지 않은 배포물의 Gatekeeper 처리 방식은 실제 서명 상태와 배포 채널을 확인한 뒤 안내합니다.

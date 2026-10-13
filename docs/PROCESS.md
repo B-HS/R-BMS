@@ -133,7 +133,9 @@ R7 두 번째 실행(2026-10-12, 태그 `v0.1.0` 을 `00b91b1` 로 옮김, run 3
 
 R7 세 번째 실행(2026-10-13, 사용자가 시크릿을 다시 넣고 같은 실행의 실패한 잡을 재실행): 같은 자리에서 같은 문구로 실패. 값을 볼 수 없어 수동 점검 워크플로 `.github/workflows/signing-check.yml` 을 더했다(빌드 없이 1분, 값은 출력하지 않음. `docs/ci-release.md` 3.2절). 점검 결과(run 38342246354): 공백을 뺀 4,348바이트 가운데 base64 알파벳 밖 바이트가 정확히 하나이고, 그 값은 `.`(0x2e), 위치는 1,439번째 뒤다. 전체 길이가 4의 배수이므로 붙여 넣는 과정에서 한 글자가 `.` 으로 바뀐 것으로 본다(추정). 인증서 암호와 공증 계정은 그 앞 단계에서 멈춰 아직 확인되지 않았다. 다음: 붙여 넣지 않고 파이프로 넣는다(`base64 -i <파일>.p12 | gh secret set MACOS_CERTIFICATE_P12 --repo B-HS/R-BMS`) → `signing-check` 통과 확인 → `gh run rerun 38253353651 --failed`.
 
-진행: R7 은 시크릿 재등록 대기.
+사용자 지시(2026-10-13): (1) 서명 등 env 확인을 빌드 시작 전에 한다(빌드 뒤에 두어 오래 걸렸다) → `release.yml` 의 macOS 잡 첫 두 단계로 옮김(`287b80d`). 태그 `v0.1.0` 은 그 전 커밋이라 이번 실행에는 `signing-check` 로 대신한다. (2) 로컬에서도 미리 테스트한다, TAIDE 의 스크립트를 가져온다 → `scripts/verify-signing-cert.sh`(+ `--set-secret`), `scripts/verify-notary-credentials.sh`, `docs/ci-release.md` 3.3절. 일회용 인증서로 각 경로를 확인했다.
+
+진행: R7 은 사용자가 로컬 스크립트로 검증·등록한 뒤 `signing-check` → 릴리스 재실행.
 
 ---
 
