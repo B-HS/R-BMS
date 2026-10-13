@@ -86,6 +86,54 @@ jobs:
       APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
+      # The credentials are checked before anything is built, so a wrong secret stops the job in
+      # its first seconds instead of after the two release builds. With a Developer ID certificate:
+      # a temporary keychain holds it for this job only, and the identity is read off the
+      # certificate unless APPLE_SIGNING_IDENTITY names one. Only the shape of a bad value is
+      # reported, never the value (signing-check.yml runs the same checks on their own).
+      - name: Prepare the signing keychain
+        if: env.MACOS_CERTIFICATE_P12 != ''
+        run: |
+          set -euo pipefail
+          export LC_ALL=C
+          KEYCHAIN="$RUNNER_TEMP/rbms-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
+          # tolerate wrapped or pasted base64 (newlines, CR, spaces)
+          printf '%s' "$MACOS_CERTIFICATE_P12" | tr -d ' \t\r\n' > "$RUNNER_TEMP/certificate.b64"
+          OUTSIDE="$(tr -d 'A-Za-z0-9+/=' < "$RUNNER_TEMP/certificate.b64" | wc -c | tr -d ' ')"
+          if [ "$OUTSIDE" != "0" ] || ! base64 --decode < "$RUNNER_TEMP/certificate.b64" > "$RUNNER_TEMP/certificate.p12"; then
+            rm -f "$RUNNER_TEMP/certificate.b64" "$RUNNER_TEMP/certificate.p12"
+            echo "MACOS_CERTIFICATE_P12 is not the base64 text of a .p12 file ($OUTSIDE bytes outside the base64 alphabet)." >&2
+            echo "Set it with: base64 -i certificate.p12 | gh secret set MACOS_CERTIFICATE_P12" >&2
+            exit 1
+          fi
+          rm -f "$RUNNER_TEMP/certificate.b64"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          if ! security import "$RUNNER_TEMP/certificate.p12" -P "$MACOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN" > /dev/null; then
+            rm -f "$RUNNER_TEMP/certificate.p12"
+            echo "The certificate did not open with MACOS_CERTIFICATE_PASSWORD." >&2
+            exit 1
+          fi
+          rm -f "$RUNNER_TEMP/certificate.p12"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
+          security list-keychain -d user -s "$KEYCHAIN"
+          IDENTITY="$APPLE_SIGNING_IDENTITY"
+          if [ -z "$IDENTITY" ]; then
+            IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" | sed -n 's/.*"\(.*\)".*/\1/p' | head -1)"
+          fi
+          if [ -z "$IDENTITY" ]; then
+            echo "failed to derive a signing identity from MACOS_CERTIFICATE_P12" >&2
+            exit 1
+          fi
+          echo "SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+      - name: Check the notarisation account
+        if: env.MACOS_CERTIFICATE_P12 != '' && env.APPLE_ID != '' && env.APPLE_APP_SPECIFIC_PASSWORD != '' && env.APPLE_TEAM_ID != ''
+        run: |
+          set -euo pipefail
+          xcrun notarytool history --apple-id "$APPLE_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" --team-id "$APPLE_TEAM_ID" > /dev/null
+          echo "notarytool accepted the account"
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.version.outputs.tag || github.ref }}
@@ -108,33 +156,13 @@ jobs:
             target/aarch64-apple-darwin/release/rbms-player \
             target/x86_64-apple-darwin/release/rbms-player
           chmod +x dist/rbms-player
-      # With a Developer ID certificate: a temporary keychain holds it for this job only, and the
-      # binary is signed with the hardened runtime and a secure timestamp, which notarisation needs.
-      # The identity is read off the certificate unless APPLE_SIGNING_IDENTITY names one.
+      # The keychain prepared before the build holds the identity. The binary is signed with the
+      # hardened runtime and a secure timestamp, which notarisation needs.
       - name: Sign with Developer ID
         if: env.MACOS_CERTIFICATE_P12 != ''
         run: |
           set -euo pipefail
-          KEYCHAIN="$RUNNER_TEMP/rbms-signing.keychain-db"
-          KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
-          # tolerate wrapped or pasted base64 (newlines, CR, spaces)
-          printf '%s' "$MACOS_CERTIFICATE_P12" | tr -d ' \t\r\n' | base64 --decode > "$RUNNER_TEMP/certificate.p12"
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-          security import "$RUNNER_TEMP/certificate.p12" -P "$MACOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN" > /dev/null
-          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
-          security list-keychain -d user -s "$KEYCHAIN"
-          rm -f "$RUNNER_TEMP/certificate.p12"
-          IDENTITY="$APPLE_SIGNING_IDENTITY"
-          if [ -z "$IDENTITY" ]; then
-            IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" | sed -n 's/.*"\(.*\)".*/\1/p' | head -1)"
-          fi
-          if [ -z "$IDENTITY" ]; then
-            echo "failed to derive a signing identity from MACOS_CERTIFICATE_P12" >&2
-            exit 1
-          fi
-          codesign --force --options runtime --timestamp --sign "$IDENTITY" dist/rbms-player
+          codesign --force --options runtime --timestamp --sign "$SIGNING_IDENTITY" dist/rbms-player
           codesign --verify --strict --verbose=2 dist/rbms-player
       # Without one: lipo invalidates the per-arch ad-hoc signatures, so the universal binary is
       # re-signed ad-hoc to RUN on Apple Silicon (arm64 refuses unsigned code). Users then clear
@@ -154,8 +182,10 @@ jobs:
           set -euo pipefail
           ditto -c -k dist/rbms-player "$RUNNER_TEMP/rbms-player-notarise.zip"
           xcrun notarytool submit "$RUNNER_TEMP/rbms-player-notarise.zip" \
-            --apple-id "$APPLE_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
+            --apple-id "$APPLE_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait | tee "$RUNNER_TEMP/notarise.log"
           rm -f "$RUNNER_TEMP/rbms-player-notarise.zip"
+          # notarytool can end with exit code 0 on a rejected submission, so the status line decides.
+          grep -q 'status: Accepted' "$RUNNER_TEMP/notarise.log"
       - name: Package
         run: |
           set -euo pipefail

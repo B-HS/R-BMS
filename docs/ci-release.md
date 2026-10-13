@@ -30,6 +30,7 @@
 - Windows: `cargo build --release --locked` 로 빌드한 `rbms-player.exe`를 `rbms-windows-x64.zip`으로 묶고 SHA-256 파일을 만듭니다.
 - 초안 릴리스: 두 플랫폼 아카이브와 체크섬을 `softprops/action-gh-release@v2`로 **초안(draft)** GitHub Release 에 첨부합니다(`draft: true`, 사용자 결정 2026-10-12). 어느 경로로 돌든 자동은 태그와 초안까지이고, 게시(publish)는 유지보수자가 GitHub 의 Releases 화면에서 릴리스 노트를 확인한 뒤 직접 합니다.
 - macOS 는 서명 시크릿이 등록돼 있으면 ad-hoc 대신 Developer ID 로 서명하고 공증합니다(3.1절).
+- macOS 잡은 빌드보다 먼저 자격 증명을 확인합니다(사용자 지시 2026-10-13: 빌드 뒤에 확인하면 틀린 시크릿 하나에 10분 넘게 걸린다). 첫 두 단계가 인증서를 임시 키체인에 넣어 서명 신원을 정하고(`Prepare the signing keychain`), 공증 계정으로 로그인해 봅니다(`Check the notarisation account`). 어느 쪽이든 틀리면 체크아웃과 빌드 전에 잡이 멈춥니다. 빌드 뒤의 서명 단계는 준비된 키체인의 신원으로 `codesign` 만 하고, 공증 단계는 `notarytool` 의 종료 코드가 아니라 `status: Accepted` 줄로 통과를 판정합니다.
 - 동영상: 두 빌드 모두 `rbms-player` 의 기본 피처 `video` 를 켠 채(`--no-default-features` 없이) 빌드하므로 OpenH264 가 바이너리에 정적으로 들어갑니다(결정 D10). 소스 빌드라 Cisco 가 배포하는 바이너리를 내려받지 않습니다.
 
 ## 2.1 배포 묶음과 제3자 고지
