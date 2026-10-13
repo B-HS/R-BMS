@@ -1,0 +1,76 @@
+name: signing-check
+
+# Manual check of the macOS signing and notarisation secrets, without building anything.
+# Run it after changing a secret (Actions → "signing-check" → Run workflow). It says what is
+# wrong with a value without printing the value; the release workflow uses the same secrets.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 10
+    env:
+      MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      # The secret has to be the base64 text of the .p12 file. Only its shape is reported.
+      - name: Certificate is base64
+        run: |
+          set -euo pipefail
+          export LC_ALL=C
+          if [ -z "$MACOS_CERTIFICATE_P12" ]; then
+            echo "MACOS_CERTIFICATE_P12 is not set" >&2
+            exit 1
+          fi
+          printf '%s' "$MACOS_CERTIFICATE_P12" | tr -d ' \t\r\n' > "$RUNNER_TEMP/certificate.b64"
+          TOTAL="$(wc -c < "$RUNNER_TEMP/certificate.b64" | tr -d ' ')"
+          OUTSIDE="$(tr -d 'A-Za-z0-9+/=' < "$RUNNER_TEMP/certificate.b64" | wc -c | tr -d ' ')"
+          echo "bytes without whitespace: $TOTAL"
+          echo "bytes outside the base64 alphabet: $OUTSIDE"
+          if [ "$OUTSIDE" != "0" ] || ! base64 --decode < "$RUNNER_TEMP/certificate.b64" > "$RUNNER_TEMP/certificate.p12"; then
+            rm -f "$RUNNER_TEMP/certificate.b64" "$RUNNER_TEMP/certificate.p12"
+            echo "MACOS_CERTIFICATE_P12 is not the base64 text of a .p12 file." >&2
+            echo "Set it with: base64 -i certificate.p12 | gh secret set MACOS_CERTIFICATE_P12" >&2
+            exit 1
+          fi
+          rm -f "$RUNNER_TEMP/certificate.b64"
+          echo "decoded bytes: $(wc -c < "$RUNNER_TEMP/certificate.p12" | tr -d ' ')"
+      # A temporary keychain holds the certificate for this job only, as in the release workflow.
+      - name: Certificate opens and holds a Developer ID identity
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/rbms-signing-check.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          if ! security import "$RUNNER_TEMP/certificate.p12" -P "$MACOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN" > /dev/null; then
+            echo "The certificate did not open with MACOS_CERTIFICATE_PASSWORD." >&2
+            exit 1
+          fi
+          COUNT="$(security find-identity -v -p codesigning "$KEYCHAIN" | grep -c 'Developer ID Application' || true)"
+          echo "Developer ID Application identities: $COUNT"
+          if [ "$COUNT" = "0" ]; then
+            echo "The certificate holds no Developer ID Application identity (with its private key)." >&2
+            exit 1
+          fi
+      - name: Notarisation account signs in
+        run: |
+          set -euo pipefail
+          if [ -z "$APPLE_ID" ] || [ -z "$APPLE_APP_SPECIFIC_PASSWORD" ] || [ -z "$APPLE_TEAM_ID" ]; then
+            echo "APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD and APPLE_TEAM_ID must all be set" >&2
+            exit 1
+          fi
+          xcrun notarytool history --apple-id "$APPLE_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" --team-id "$APPLE_TEAM_ID" > /dev/null
+          echo "notarytool accepted the account"
+      - name: Remove the keychain and the certificate
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/rbms-signing-check.keychain-db" || true
+          rm -f "$RUNNER_TEMP/certificate.p12" "$RUNNER_TEMP/certificate.b64"

@@ -79,6 +79,18 @@ macOS 유니버설 빌드의 `x86_64-apple-darwin` 쪽 OpenH264 는 Apple Silico
 - `prod` 보호 규칙이 자동 버전 커밋/태그 push를 막을 수 있습니다. Phase R에서 실제 보호 정책과 릴리스 주체를 확인한 뒤, 필요한 최소 예외 또는 수동 태그 경로를 선택합니다.
 - 첫 릴리스 버전은 루트 `Cargo.toml`의 현재 `0.1.0`과 일치하는 태그 전략을 정한 뒤 진행합니다. 워크플로를 시험하기 위해 `prod`, 태그 또는 외부 배포를 임의로 만들지 않습니다.
 
+### 3.2 시크릿 점검 워크플로 (`.github/workflows/signing-check.yml`)
+
+시크릿을 바꾼 뒤 빌드 없이 값의 꼴만 확인하는 수동 워크플로입니다(Actions 의 `signing-check` → Run workflow, 또는 `gh workflow run signing-check.yml --ref dev`). macOS 러너에서 1분 안에 끝나며 값은 출력하지 않습니다.
+
+1. `MACOS_CERTIFICATE_P12` 가 base64 인가: 공백을 뺀 바이트 수, base64 알파벳 밖 바이트 수, 디코드한 바이트 수를 출력합니다.
+2. 인증서가 `MACOS_CERTIFICATE_PASSWORD` 로 열리고 `Developer ID Application` 신원(개인 키 포함)이 들어 있는가: 개수만 출력합니다.
+3. `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` 로 `notarytool` 이 로그인되는가(`notarytool history`).
+
+만든 이유: 릴리스 실행은 빌드에 10분 넘게 걸린 뒤에야 서명 단계에 닿습니다. 2026-10-12~13 의 두 번째·세 번째 실행(run 38253353651 과 그 재실행)이 `base64: stdin: (null): error decoding base64 input stream` 으로 실패했는데 그 문구로는 값의 어디가 틀렸는지 알 수 없었습니다. 같은 문구는 값에 따옴표가 붙었거나, `.p12` 의 원본 바이트나 파일 경로를 넣었을 때 납니다(로컬 `base64 --decode` 로 확인).
+
+시크릿을 넣는 명령(값이 화면에 나오지 않습니다): `base64 -i certificate.p12 | gh secret set MACOS_CERTIFICATE_P12 --repo B-HS/R-BMS`
+
 ## 4. 사용자 실행 전제
 
 - macOS 아카이브는 압축 해제 후 `./rbms-player <곡폴더>`로 실행합니다. 공증되지 않은 배포물의 Gatekeeper 처리 방식은 실제 서명 상태와 배포 채널을 확인한 뒤 안내합니다.
