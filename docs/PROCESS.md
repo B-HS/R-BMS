@@ -94,7 +94,7 @@ N5 는 별도 Workflow(웨이브 10B).
 - [x] R4. START + 스크래치로 레인 커버 1 씩, START + SELECT + 스크래치로 리프트 1 씩(녹색 숫자 유지).
 - [x] R5. 기본 스킨의 모노톤 팔레트(바탕 검정)와 색 조절 옵션.
 - [x] R6. 조절한 스킨 내보내기.
-- [ ] R7. 첫 릴리스 — 사용자 결정(2026-10-12): 웨이브 13 과 웨이브 14 가 끝난 뒤 릴리스 워크플로를 처음 돌린다(A). macOS 서명·공증 시크릿 다섯 개(`MACOS_CERTIFICATE_P12`, `MACOS_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`)는 사용자가 저장소에 등록했고 메인이 `gh secret list` 로 이름을 확인했다. 워크플로의 서명 단계는 커밋 `8736a20`(이름과 방식은 사용자의 다른 저장소 TAIDE 와 같음, `docs/ci-release.md` 3.1절). 원격에 `prod` 브랜치가 없으므로 실행 경로(prod 생성 뒤 푸시, 태그, 수동 실행)는 그때 사용자에게 확인한다. 릴리스는 공개 게시이므로 실행 직전에 한 번 더 확인받는다. Windows 서명은 나중에.
+- [x] R7. 첫 릴리스 — 사용자 결정(2026-10-12): 웨이브 13 과 웨이브 14 가 끝난 뒤 릴리스 워크플로를 처음 돌린다(A). macOS 서명·공증 시크릿 다섯 개(`MACOS_CERTIFICATE_P12`, `MACOS_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`)는 사용자가 저장소에 등록했고 메인이 `gh secret list` 로 이름을 확인했다. 워크플로의 서명 단계는 커밋 `8736a20`(이름과 방식은 사용자의 다른 저장소 TAIDE 와 같음, `docs/ci-release.md` 3.1절). 원격에 `prod` 브랜치가 없으므로 실행 경로(prod 생성 뒤 푸시, 태그, 수동 실행)는 그때 사용자에게 확인한다. 릴리스는 공개 게시이므로 실행 직전에 한 번 더 확인받는다. Windows 서명은 나중에.
 
 웨이브 13 결과(2026-10-12, Workflow `wf_0c18e724-696`, 4 에이전트. 세션이 한 번 꺼져 리뷰부터 재개했다. 리뷰 critical 1·minor 4 중 4건 수정). 게이트: fmt·clippy·`cargo test --workspace --no-fail-fast --locked` 5,448 통과·0 실패·ignored 5, 골든 불변, 두 팩의 환경 변수 테스트 통과. 메인이 판정선이 필드 맨 아래에 붙은 7키 캡처를 확인.
 - R2 원인(측정으로 확정): 원본은 judgetiming 을 노트 필드를 그리는 시각 한 곳에만 더하는데(`LaneRenderer.java:300-301`) R-BMS 는 입력의 판정 시각에 더하고 노트는 그대로 그렸다. 수정 전 +100 에서 PGREAT 창이 박자보다 80~120ms 앞이었다. 수정 뒤 측정(오프셋 0, ±30, ±100): 소리와 PGREAT 창(-20~+20)은 박자 그대로이고 노트가 판정선에 닿는 시각만 오프셋만큼 옮겨진다. 부호는 원본과 같다(+ 는 노트가 먼저 온다). 설정 스키마 5 가 이전 저장값의 부호를 한 번 뒤집어 읽는다. 자동 보정은 원본 식 그대로. BGA 는 오프셋을 타지 않는다. 기존 리플레이는 기록 당시와 같은 판정으로 재생된다(픽스처 3개).
@@ -135,7 +135,13 @@ R7 세 번째 실행(2026-10-13, 사용자가 시크릿을 다시 넣고 같은 
 
 사용자 지시(2026-10-13): (1) 서명 등 env 확인을 빌드 시작 전에 한다(빌드 뒤에 두어 오래 걸렸다) → `release.yml` 의 macOS 잡 첫 두 단계로 옮김(`287b80d`). 태그 `v0.1.0` 은 그 전 커밋이라 이번 실행에는 `signing-check` 로 대신한다. (2) 로컬에서도 미리 테스트한다, TAIDE 의 스크립트를 가져온다 → `scripts/verify-signing-cert.sh`(+ `--set-secret`), `scripts/verify-notary-credentials.sh`, `docs/ci-release.md` 3.3절. 일회용 인증서로 각 경로를 확인했다.
 
-진행: R7 은 사용자가 로컬 스크립트로 검증·등록한 뒤 `signing-check` → 릴리스 재실행.
+R7 결과(2026-10-14): 사용자가 인증서 시크릿을 다시 넣고(2026-10-13 18:23 UTC) Apple 개발자 계정의 계약 동의를 마친 뒤, `signing-check` 가 통과했다(run 38447294202: base64 밖 바이트 0, Developer ID 신원 1, 공증 계정 로그인. 직전 실행 38446854170 은 `HTTP 403. A required agreement is missing or has expired` 였고 동의가 반영되기까지 몇 분 걸렸다). 사용자가 릴리스 실행 38253353651 의 실패한 잡을 다시 돌려 전부 통과: 유니버설 빌드, Developer ID 서명, 공증 `status: Accepted`, 패키징, draft 생성. 태그 `v0.1.0` = `00b91b1`.
+- draft 릴리스 `v0.1.0` 의 파일 넷: `rbms-macos-universal.tar.gz`(23.0 MB), `rbms-windows-x64.zip`(12.3 MB)와 각각의 sha256.
+- 메인이 내려받아 확인: 두 아카이브의 SHA-256 이 첨부된 값과 같다. macOS 실행 파일은 `x86_64 arm64`, `codesign --verify --strict` 통과, 하드닝 런타임(`flags=0x10000(runtime)`), 서명 체인 Developer ID Application → Developer ID Certification Authority → Apple Root CA, 보안 타임스탬프. 두 아카이브 모두 실행 파일과 LICENSE, README.md, THIRD-PARTY-NOTICES.md 가 들어 있다.
+- 확인하지 못한 것: 다른 Mac 에서 내려받아 처음 실행할 때의 Gatekeeper 동작(단독 실행 파일은 공증 표를 붙일 수 없어 첫 실행 때 온라인으로 조회한다. `spctl --assess --type execute` 는 앱 번들이 아니라는 이유로 판정하지 않는다), Windows 실행(서명 없음. SmartScreen 경고가 뜬다), 빌드 전 점검으로 순서를 바꾼 워크플로(`287b80d`)의 실제 실행(다음 릴리스에서 처음 돈다).
+- 게시(publish)는 사용자가 한다(자동은 태그와 draft 까지).
+
+진행: 열린 작업 없음. 다음 릴리스부터는 `dev` 의 최신 워크플로(빌드 전 자격 증명 점검)가 쓰인다.
 
 ---
 

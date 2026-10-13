@@ -103,6 +103,8 @@ macOS 유니버설 빌드의 `x86_64-apple-darwin` 쪽 OpenH264 는 Apple Silico
 
 순서: 로컬 스크립트 둘 → `signing-check` 워크플로(3.2절, 등록된 값 확인) → 릴리스.
 
+첫 통과 실행(2026-10-14, 태그 `v0.1.0`, run 38253353651 의 네 번째 시도): Developer ID 서명과 공증(`status: Accepted`)이 통과해 draft 릴리스가 만들어졌습니다. 그 앞의 실패 셋은 순서대로 툴체인에 타깃 없음(2절 끝), 인증서 값의 한 글자, Apple 개발자 계정의 계약 미동의(`signing-check` 가 `HTTP 403. A required agreement is missing or has expired` 로 알림. 동의 뒤 반영까지 몇 분)였습니다. 내려받은 macOS 실행 파일은 `x86_64 arm64`, 하드닝 런타임, Developer ID 체인으로 확인했습니다. 단독 실행 파일이라 `spctl --assess --type execute` 는 "does not seem to be an app" 으로 판정하지 않으며, 이는 실패가 아닙니다.
+
 ## 4. 사용자 실행 전제
 
 - macOS 아카이브는 압축 해제 후 `./rbms-player <곡폴더>`로 실행합니다. 공증되지 않은 배포물의 Gatekeeper 처리 방식은 실제 서명 상태와 배포 채널을 확인한 뒤 안내합니다.
