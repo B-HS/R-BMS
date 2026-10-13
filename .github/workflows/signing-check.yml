@@ -34,6 +34,12 @@ jobs:
           OUTSIDE="$(tr -d 'A-Za-z0-9+/=' < "$RUNNER_TEMP/certificate.b64" | wc -c | tr -d ' ')"
           echo "bytes without whitespace: $TOTAL"
           echo "bytes outside the base64 alphabet: $OUTSIDE"
+          # A value that is nearly right (a stray quote, a prompt mark, an escaped newline) is told
+          # apart by what the stray bytes are and where the first one is. They are not key material.
+          if [ "$OUTSIDE" != "0" ] && [ "$OUTSIDE" -le 4 ]; then
+            echo "the stray bytes (hex): $(tr -d 'A-Za-z0-9+/=' < "$RUNNER_TEMP/certificate.b64" | od -An -tx1 | tr -s ' \n' ' ')"
+            echo "offset of the first: $(grep -abo '[^A-Za-z0-9+/=]' "$RUNNER_TEMP/certificate.b64" | head -1 | cut -d: -f1) of $TOTAL"
+          fi
           if [ "$OUTSIDE" != "0" ] || ! base64 --decode < "$RUNNER_TEMP/certificate.b64" > "$RUNNER_TEMP/certificate.p12"; then
             rm -f "$RUNNER_TEMP/certificate.b64" "$RUNNER_TEMP/certificate.p12"
             echo "MACOS_CERTIFICATE_P12 is not the base64 text of a .p12 file." >&2
