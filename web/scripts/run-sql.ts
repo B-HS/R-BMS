@@ -25,10 +25,17 @@ const affectedRows = (result: unknown) =>
 
 const isRowSet = (result: unknown): result is RowDataPacket[] => Array.isArray(result)
 
+const COUNT_TABLE_COLUMN_COUNT = 2
+
+const isCountTable = (rows: RowDataPacket[]) =>
+    rows.every((row) => Object.keys(row).length === COUNT_TABLE_COLUMN_COUNT && typeof row.target === 'string' && typeof row.row_count === 'number')
+
 const report = (result: unknown, index: number) => {
     if (isRowSet(result)) {
         console.log(`-- result ${index + 1}: ${result.length} row(s)`)
-        if (result.length > 0) console.table(result)
+        if (result.length === 0) return
+        if (isCountTable(result)) console.table(result)
+        else console.log(`   columns: ${Object.keys(result[0]).join(', ')} (contents are not printed: the Actions log is public)`)
         return
     }
     console.log(`-- statement ${index + 1}: ${affectedRows(result)} row(s) affected`)

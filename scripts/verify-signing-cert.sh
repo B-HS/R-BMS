@@ -86,9 +86,9 @@ if ! security import "$P12" -P "$PW" -A -t cert -f pkcs12 -k "$KEYCHAIN" >/dev/n
 fi
 echo "[2/3 통과] 임시 키체인 임포트 성공 (릴리스 워크플로의 'Prepare the signing keychain' 과 동일 절차)"
 
-IDENTITY="$(security find-identity -p codesigning "$KEYCHAIN" | sed -n 's/.*"\(.*\)".*/\1/p' | head -1)"
+IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" | sed -n 's/.*"\(.*\)".*/\1/p' | head -1)"
 if [ -z "$IDENTITY" ]; then
-    echo "[3/3 실패] codesigning 아이덴티티 없음 — 개인 키가 함께 든 Developer ID Application 인증서인지 확인"
+    echo "[3/3 실패] 유효한 codesigning 아이덴티티 없음 — 개인 키가 함께 든, 만료되지 않고 신뢰되는 Developer ID Application 인증서인지 확인"
     exit 1
 fi
 echo "[3/3 통과] 아이덴티티: $IDENTITY"

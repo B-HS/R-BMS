@@ -20,6 +20,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   # --- Auto version: prod push 또는 수동 dispatch. 태그 push 시엔 skip(이미 버전 확정). ---
   version:

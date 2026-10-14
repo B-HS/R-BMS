@@ -42,9 +42,20 @@ jobs:
           bun-version-file: web/package.json
       - name: Install
         run: bun install --frozen-lockfile
+      # db:status exits 0 = up to date, 1 = action needed (pending migration or baseline), 2 = failed.
+      - name: Status
+        if: inputs.action == 'status'
+        run: |
+          code=0
+          bun run db:status || code=$?
+          if [ "$code" -eq 1 ]; then
+            echo "::warning title=web-db status::Action needed (pending migration or baseline). Read the Result line above."
+          elif [ "$code" -ne 0 ]; then
+            exit "$code"
+          fi
       - name: Status before
-        if: inputs.action == 'status' || inputs.action == 'migrate'
-        run: bun run db:status || true
+        if: inputs.action == 'migrate'
+        run: bun run db:status || [ $? -eq 1 ]
       - name: Migrate
         if: inputs.action == 'migrate'
         run: bun run db:migrate

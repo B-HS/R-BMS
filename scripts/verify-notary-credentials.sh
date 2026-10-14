@@ -16,7 +16,7 @@ else
     read -r -p "APPLE_TEAM_ID (10자리, 예: ABCDE12345): " NOTARY_TEAM
 fi
 if [ -z "${NOTARY_PASSWORD:-}" ]; then
-    read -r -p "APPLE_APP_SPECIFIC_PASSWORD (형식 xxxx-xxxx-xxxx-xxxx): " NOTARY_PASSWORD
+    read -rs -p "APPLE_APP_SPECIFIC_PASSWORD (형식 xxxx-xxxx-xxxx-xxxx): " NOTARY_PASSWORD
     echo
 fi
 
