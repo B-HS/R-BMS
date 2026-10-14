@@ -134,7 +134,12 @@
   "clear": "Normal", "ex_score": 4800, "max_ex_score": 6000, "judge": { … },
   "max_combo": 900, "minbp": 12, "gauge_value": 42.0, "lntype": 1,
   "charts": [{"md5":"…","sha256":"…"}], "trophy": "bronzemedal",
+  "scratch_auto": false,    // 선택. 어느 스테이지든 SCRATCH AUTO 였으면 true
+  "assist": [],             // 선택. 스테이지들의 어시스트 태그 합(AUTO_SCRATCH, CUSTOM_JUDGE)
   "played_at": 1700000000000, "extra": {} }
+// scratch_auto/assist 는 단일 곡 options 와 같은 어휘이고 코스 전체로 접은 값이다. 어시스트가 없으면
+// 클라는 두 필드를 싣지 않아 본문이 전과 같고, 이 필드를 모르는 구버전 서버도 거절하지 않는다.
+// 서버는 어시스트 코스를 ranked=false 로 저장하고 코스 순위·베스트에 넣지 않는다.
 
 // ReplayData — POST /charts/{md5}/replays 본문 이자 GET /replays/{id} 응답
 { "api_version": 1, "id": null, "format": "rbms-us-v1",

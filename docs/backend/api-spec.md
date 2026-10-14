@@ -214,9 +214,18 @@
   "clear":"Normal", "ex_score":5000, "max_ex_score":5400, "judge":{…},
   "max_combo":3000, "gauge_value":42.0, "minbp":30,
   "charts":[{"md5":"…","sha256":"…"}, …],
-  "trophy":"bronze", "played_at":1700000000000, "extra":{} }
+  "trophy":"bronze", "played_at":1700000000000,
+  "scratch_auto":false,                     // 선택. 어느 스테이지든 SCRATCH AUTO 로 쳤으면 true (없으면 false)
+  "assist":[],                              // 선택. 스테이지들의 어시스트 태그 합(AUTO_SCRATCH·CUSTOM_JUDGE, 각각 한 번, 최대 16개·각 32자). 없으면 []
+  "extra":{} }
 // 201 SubmitResponse
+// 어시스트 코스 예: { "accepted":true, "ranked":false, "rank":null, "is_new_best":false,
+//                    "flags":["SCRATCH_AUTO","ASSIST"], "message":"recorded (unranked: scratch_auto,assist)" }
 ```
+규칙:
+- `scratch_auto`·`assist` 는 단일 곡 제출의 `options.scratch_auto`·`options.assist` 와 같은 어휘이고, 코스 전체로 접은 값이다(어느 스테이지가 어떤 어시스트였는지는 싣지 않는다: 서버는 코스 전체로 판정한다). 두 필드가 없는 옛 클라이언트 제출은 어시스트 없는 코스로 받는다. 클라이언트는 어시스트가 없으면 두 필드를 싣지 않는다.
+- **ranked 판정은 단일 곡과 같다**(`assistFlags`): `scratch_auto` 면 `SCRATCH_AUTO`, `assist≠∅` 면 `ASSIST` flag 를 붙이고 `ranked=false`. unranked 코스 결과는 `course_score` 에 `ranked=false` 로 남고 `extra` 에 `flags`·`scratch_auto`·`assist` 를 덧붙인다. `course_best` 를 갱신하지 않고 `rank` 는 `null` 이므로 코스 순위·코스 베스트에 나오지 않는다(단일 곡의 `chart_best` 와 같은 정책).
+- 멱등: 동일 `(player, course_hash, played_at)` 재전송은 기존 id 를 돌려주고, `ranked`·`flags` 는 이번 본문으로 다시 판정해 돌려준다.
 ### `GET /api/courses/{course_hash}/ranking?limit=&page=&rival_of=` → `ScoreRecord[]`
 ### `GET /api/courses/{course_hash}/best?player={id}` → `ScoreRecord | null` (레퍼런스 구현 getCoursePlayData 본인분)
 

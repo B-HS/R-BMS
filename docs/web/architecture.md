@@ -100,6 +100,7 @@ design.md §1-2 는 두 Surface의 **시각 토큰을 분리**한다. 라우트 
 > **주의 2 — better-auth 경로 충돌 없음.** better-auth 기본 경로는 `/api/auth/sign-in/email` · `/sign-up/email` · `/get-session` · `/sign-out` 이라 `register`/`login`/`me`/`token` 과 겹치지 않는다. 겹치더라도 Next 라우팅은 **정적 세그먼트 > 동적 > catch-all** 순으로 우선하므로 `app/api/auth/register/route.ts` 가 `[...all]` 보다 먼저 매칭된다.
 > **주의 3 — 세 라우트의 성공 응답 모양(클라가 실제로 읽는 필드).**
 > - `POST /api/scores` · `POST /api/courses` · `POST /api/courses/[courseHash]/scores` → `SubmitResponse` 8필드 전부: `accepted`·`rank`·`previous_best`·`message` + `ranked`·`flags`·`is_new_best`·`score_id`(`dto/score.ts submitResponseSchema`). `score_id` 는 리플레이를 스코어에 연결하는 키라 생략할 수 없다.
+> - `POST /api/courses` · `POST /api/courses/[courseHash]/scores` 본문의 선택 필드 `scratch_auto`(boolean)·`assist`(string[]) 는 코스 전체로 접은 어시스트다(단일 곡의 `options.scratch_auto`·`options.assist` 와 같은 어휘, 없으면 false·[]). 어시스트 코스는 단일 곡과 같이 `ranked=false` + `flags`(`SCRATCH_AUTO`·`ASSIST`), `rank=null`, `is_new_best=false` 이고 `course_best` 에 들어가지 않으므로 `/courses/[hash]` 순위 화면에 나오지 않는다(곡 순위 화면과 같은 "unranked 기록은 표시되지 않습니다" 안내). 스키마 변경 없이 `course_score.ranked`·`extra` 를 쓴다(api-spec §6).
 > - `PUT /api/players/[playerId]/settings/[name]` → 200 `{ updated_at }`(서버가 저장한 stamp, unix ms). 클라가 보낸 `updated_at` 은 무시되므로 이 값이 다음 조건부 쓰기의 낙관적 잠금 base 다. 잠금에서 밀리면 409 `{ conflict, server }`.
 > - `GET /api/replays/[replayId]` → `ReplayData` 전체. `gauge` 와 차트의 `md5`+`sha256` 을 포함해야 다운로드한 리플레이가 원래 런을 재현한다.
 >

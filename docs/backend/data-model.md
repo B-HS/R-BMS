@@ -112,7 +112,7 @@ session/account (better-auth)    difficulty_table 1─* table_course *─1 cours
 ### `course` / `course_chart` / `course_score`
 - `course`: `course_hash` PK · name · lntype · constraint json · trophy json · extra.
 - `course_chart`: course_hash + position **복합 PK** · chart_sha256(논리 chart 관계).
-- `course_score`: id PK · user_id · course_hash idx · clear · judge(early/late 동일 컬럼군) · ex_score · max_combo · gauge_value · minbp · trophy · played_at · `uniq(user_id, course_hash, played_at)`.
+- `course_score`: id PK · user_id · course_hash idx · clear · judge(early/late 동일 컬럼군) · ex_score · max_combo · gauge_value · minbp · trophy · ranked · played_at · extra · `uniq(user_id, course_hash, played_at)`. 어시스트 코스(`scratch_auto` 또는 `assist≠∅`)는 `ranked=false` 이고 `extra` 에 `flags`·`scratch_auto`·`assist` 를 담는다(별도 컬럼 없음, api-spec §6).
 - `course_best`: course_hash + user_id 복합 PK(랭킹 가속).
 
 ### `difficulty_table` / `table_folder` / `table_chart` / `table_course` (IRTableData)
