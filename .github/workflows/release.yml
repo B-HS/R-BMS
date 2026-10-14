@@ -243,6 +243,10 @@ jobs:
         with:
           toolchain: "1.95.0"
       - uses: Swatinem/rust-cache@v2
+      # The app icon: apps/rbms-player/build.rs links the resource this compiles into the exe.
+      - name: Compile the icon resource
+        shell: pwsh
+        run: ./scripts/windows-icon-resource.ps1
       - name: Build
         run: cargo build --release --locked -p rbms-player
       - name: Package

@@ -54,6 +54,13 @@ jobs:
           toolchain: "1.95.0"
       - uses: Swatinem/rust-cache@v2
 
+      # The release links the app icon into rbms-player.exe; compiling and linking it here too
+      # shows a broken resource on every push instead of on the release run.
+      - name: Compile the icon resource
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/windows-icon-resource.ps1
+
       - name: Build
         run: cargo build --workspace --locked
       # --no-fail-fast: every test binary runs even after one has failed, so one run shows every

@@ -14,6 +14,12 @@ EXECUTABLE="rbms-player"
 BUNDLE_ID="uk.hyuns.rbms"
 MINIMUM_MACOS="11.0"
 APP="$OUT/$APP_NAME.app"
+ICON_NAME="R-BMS"
+ICON="$(cd "$(dirname "$0")/.." && pwd)/assets/icon/$ICON_NAME.icns"
+if [ ! -f "$ICON" ]; then
+    echo "missing app icon $ICON (uv run assets/icon/tools/generate-icon.py)" >&2
+    exit 1
+fi
 
 if [ -e "$APP" ]; then
     echo "$APP already exists; give an empty output folder" >&2
@@ -22,6 +28,7 @@ fi
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BINARY" "$APP/Contents/MacOS/$EXECUTABLE"
 chmod +x "$APP/Contents/MacOS/$EXECUTABLE"
+cp "$ICON" "$APP/Contents/Resources/$ICON_NAME.icns"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -34,6 +41,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <string>$APP_NAME</string>
     <key>CFBundleExecutable</key>
     <string>$EXECUTABLE</string>
+    <key>CFBundleIconFile</key>
+    <string>$ICON_NAME</string>
     <key>CFBundleIdentifier</key>
     <string>$BUNDLE_ID</string>
     <key>CFBundleInfoDictionaryVersion</key>

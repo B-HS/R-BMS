@@ -5,9 +5,22 @@ use std::sync::Arc;
 
 use rbms_config::{DisplayOptions, WindowMode, WindowResolution};
 use winit::dpi::{LogicalSize, PhysicalSize};
-use winit::window::{Fullscreen, Window, WindowAttributes};
+use winit::window::{Fullscreen, Icon, Window, WindowAttributes};
 
 const WINDOW_TITLE: &str = "rbms";
+
+/// The app icon the window shows in its title bar and on the taskbar (Windows, Linux; macOS takes
+/// the bundle's `R-BMS.icns` and leaves a window's icon unused). Generated with the rest of the
+/// icon files by `assets/icon/tools/generate-icon.py`.
+const WINDOW_ICON_PNG: &[u8] = include_bytes!("../../../assets/icon/png/icon-256.png");
+
+/// The app icon decoded for the window, or none if the embedded picture cannot be read, which
+/// leaves the platform's default icon rather than keeping the window from opening.
+fn window_icon() -> Option<Icon> {
+    let rgba = image::load_from_memory(WINDOW_ICON_PNG).ok()?.to_rgba8();
+    let (width, height) = rgba.dimensions();
+    Icon::from_rgba(rgba.into_raw(), width, height).ok()
+}
 
 /// What the two rows decide about the window.
 type WindowRows = (WindowResolution, WindowMode);
@@ -36,6 +49,7 @@ pub(crate) fn window_attributes(display: &DisplayOptions) -> WindowAttributes {
         .with_title(WINDOW_TITLE)
         .with_inner_size(LogicalSize::new(width, height))
         .with_fullscreen(borderless_or_none(display.window_mode))
+        .with_window_icon(window_icon())
 }
 
 /// The steps from a window that matches `applied` to one that matches `wanted`.
@@ -102,6 +116,18 @@ mod tests {
     use super::*;
 
     const WINDOWED_HD: WindowRows = (WindowResolution::Hd720, WindowMode::Windowed);
+
+    /// The side of the picture the window icon is made from (`assets/icon/png/icon-256.png`).
+    const WINDOW_ICON_SIDE: u32 = 256;
+
+    /// The embedded app icon decodes into a window icon, so a window opens with it and not with the
+    /// platform's default.
+    #[test]
+    fn the_embedded_app_icon_becomes_a_window_icon() {
+        assert!(window_icon().is_some(), "the embedded icon is not a picture winit takes");
+        let picture = image::load_from_memory(WINDOW_ICON_PNG).expect("the embedded icon decodes");
+        assert_eq!((picture.width(), picture.height()), (WINDOW_ICON_SIDE, WINDOW_ICON_SIDE));
+    }
 
     #[test]
     fn rows_that_did_not_change_ask_for_nothing() {

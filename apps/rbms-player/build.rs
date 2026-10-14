@@ -97,12 +97,34 @@ fn shipped_files(pack: &Path) -> Vec<String> {
     found
 }
 
+/// The variable a release build names its compiled Windows resource (the app icon) in.
+const WINDOWS_RESOURCE_VARIABLE: &str = "RBMS_WINDOWS_RESOURCE";
+
+/// Links the compiled Windows resource a release build names into the player's executable, which
+/// gives `rbms-player.exe` the app icon in Explorer and on the taskbar. The release workflow
+/// compiles `assets/icon/rbms.rc` with the Windows SDK's `rc.exe` and names the `.res` it wrote;
+/// any other build names none and links nothing, so no build depends on the SDK tool. A name that
+/// does not lead to a file stops the build rather than shipping an executable without its icon.
+fn link_windows_resource() {
+    println!("cargo:rerun-if-env-changed={WINDOWS_RESOURCE_VARIABLE}");
+    let Some(resource) = std::env::var_os(WINDOWS_RESOURCE_VARIABLE).map(PathBuf::from) else {
+        return;
+    };
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+    assert!(target_os == "windows" && target_env == "msvc", "{WINDOWS_RESOURCE_VARIABLE} is set for a target that is not Windows MSVC");
+    assert!(resource.is_file(), "{WINDOWS_RESOURCE_VARIABLE} names {} which is not a file", resource.display());
+    println!("cargo:rerun-if-changed={}", resource.display());
+    println!("cargo:rustc-link-arg-bins={}", resource.display());
+}
+
 fn main() {
     let package = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo names the package folder"));
     let output = PathBuf::from(std::env::var_os("OUT_DIR").expect("cargo names the output folder"));
     let pack = package.join(PACK_FOLDER);
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed={}", pack.display());
+    link_windows_resource();
 
     let mut table = String::from("&[\n");
     for name in shipped_files(&pack) {
