@@ -1140,3 +1140,60 @@ S2 가 꼭 덮어야 할 경우:
 | bmson 차트의 md5 가 무엇으로 계산되는지 | `crates/rbms-library/src/scan.rs` 의 해당 부분을 읽지 않았다 |
 | 운영 사이트의 지금 응답 | 직접 요청하지 않았다. `/api/tables` 가 `[]` 라는 것은 다른 작업자가 받아 둔 응답이다 |
 | 웹과 클라이언트의 테스트가 지금 통과하는지 | 조사만 했고 테스트를 돌리지 않았다 |
+
+---
+
+## 13. 클라이언트 구현 결과 (웨이브 18 · 단위 C2, 2026-10-14)
+
+7절·8절의 클라이언트 쪽을 구현했다. 설계와 다르게 한 곳은 이유와 함께 표로 먼저 적고, 나머지는 위치만 적는다. 이 절이 7·8절과 다르면 이 절이 실제 코드다.
+
+### 13.1 설계와 달라진 곳
+
+| 설계 | 구현 | 이유 |
+|---|---|---|
+| 8.5 스키마 버전을 올리지 않는다 | `CURRENT_SCHEMA_VERSION = 6`. `NO_DEFAULT_SERVER_SCHEMA_VERSION = 5` | 서버 주소 기본값(Q4)을 기존 사용자에게 한 번 주려면 "이 파일의 `server_url: None` 은 선택이 아니다"를 파일의 스키마로 가려야 한다. 모든 빌드가 설정을 통째로 쓰므로 스키마 5 이하 파일의 `None` 은 손대지 않은 사람에게도 적혀 있다(레터박스의 `UNCHOSEN_LETTERBOX_SCHEMA_VERSION` 과 같은 사정). 6 부터의 `None` 은 사용자가 비운 것이라 지킨다. 대가: v0.1.0 은 스키마 6 파일을 읽지 않고 건드리지 않는다(`io.rs` 의 기존 규칙). 되돌리려면 `settings.ron.v5.bak` 을 쓴다 |
+| 8.6 서버 주소 기본값은 범위 밖 | `DEFAULT_SERVER_URL = "https://bms.hyuns.uk/api"`(클라이언트가 경로 앞에 붙이는 `/api` 포함). 새 설치는 `Config::first_run()`(설정 파일이 없을 때 `io::load` 가 쓰는 값), 스키마 5 이하 파일은 `Config::adopt_default_server` 가 비어 있을 때만 채운다 | 결정 Q4. `Config::default()` 는 그대로 서버 없음: 테스트 수천 개, 업로드 가림(`sanitise_for_upload`), 새 스키마 파일 거부 때의 대체값이 모두 이 값에서 출발하고, 거기에 주소가 있으면 연결 표시 스레드가 실제 서버에 요청한다 |
+| 7.5 저장본 형식 JSON(`user-folders/<해시>.json`) | RON(`user-folders/<해시>.ron`). 폴더마다 `id, name, description, updated_at, items` 만 둔다 | 플레이어 크레이트에 `serde_json` 의존성이 없고 새 의존성을 더하지 않는다. 설정과 같은 RON 으로 쓴다. `UserFolder` 의 `#[serde(flatten)]` 은 RON 에서 쓰지 않으려고 저장용 구조체를 따로 뒀다 |
+| 8.4 `include_bytes!` 를 `build.rs` 방식에 맞춘다 | `apps/rbms-player/src/tablesrc/seed.rs` 의 `include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../web/data/tables/insane1/…"))`. `build.rs` 는 고치지 않았다 | `include_bytes!` 가 읽는 파일은 컴파일러의 의존 정보에 들어가 파일이 바뀌면 다시 빌드된다. `build.rs` 의 `rerun-if-changed` 는 빌드 스크립트 자신이 읽는 파일을 위한 것이라 이 경우 할 일이 없다. 경로 꼴은 기본 스킨 표(`build.rs` 가 만드는 `include_bytes!`)와 같다. 세 OS CI 와 릴리스 빌드는 체크아웃 전체를 가지므로 `web/` 의 파일이 있다 |
+| 7.6 시작할 때 실패해도 알림 없음 | 그대로. 다만 `NoFolders`(404·`Unsupported`)는 로그인·F6·Tables 의 R 에서도 정보 한 줄만 낸다("the score server has no folders to load") | 옛 서버는 고장이 아니다 |
+| 7.4 결정 화면에 묶음·폴더 이름 | 하지 않았다(`stage/decide.rs` 는 `let … else` 라 컴파일이 안내하지 않고, 이 단위의 소유가 아니다). 사용자 폴더에서 고른 곡의 결정 화면은 표 이름·레벨이 빈칸이다(전체 곡에서 고른 곡과 같다) | 소유 범위 |
+
+### 13.2 위치
+
+| 일 | 위치 |
+|---|---|
+| 폴더 DTO, `is_path_safe_folder_id`(64자, `[A-Za-z0-9_-]`) | `crates/rbms-ir/src/dto/folder.rs` |
+| `ScoreServer::user_folders`/`user_folder`(기본 `Unsupported`), HTTP 구현(요청 30초, 응답 8MB 한도, 안전하지 않은 id 는 요청하지 않고 `NotFound`) | `crates/rbms-ir/src/lib.rs`, `http.rs`(`get_bounded`) |
+| `ServerCapabilities::folders` | `crates/rbms-ir/src/dto/system.rs` |
+| 차트 메타(M8): `ScoreSubmission::chart` 가 `SubmittedChart { id: ChartId(flatten), title, artist, level }`. 빈 값·정수가 아닌 레벨은 본문에서 빠진다. `ir_map::submitted_chart(model)` | `crates/rbms-ir/src/dto/score.rs`, `mapping.rs`, `apps/rbms-player/src/app_result.rs`(한 줄) |
+| 비로그인 제출 차단(M11): 토큰이 없으면 주 서버로 보내지 않고 결과에 `IR: SKIPPED (not logged in)` | `apps/rbms-player/src/app_ranking.rs` `spawn_score_submit` |
+| `DEFAULT_TABLES`, `table_address_key`, `LibraryOptions::seed_default_tables`, `seeded_default_tables` | `crates/rbms-config/src/tables.rs`, `schema.rs` |
+| 시작할 때 한 번 넣기와 저장본 심기(`TableStore::plant` — 이미 저장본이 있으면 두지 않는다) | `apps/rbms-player/src/tablesrc/seed.rs`, `lib.rs` `run` |
+| 스캔 없이 시작하는 실행(첫 실행 등)에서 저장본으로 표 읽기 | `apps/rbms-player/src/lib.rs` `App::new` |
+| 설정 동기화가 `seeded_default_tables` 를 이 컴퓨터 값으로 지킴 | `apps/rbms-player/src/ir_sync.rs` `keep_local` |
+| 폴더 받기·저장본·계정 따라가기·로그아웃 삭제 | `apps/rbms-player/src/user_folders.rs` |
+| 계기: 시작(조용히), 로그인 성공, F6, Tables 의 R·A, 스캔 뒤 다시 맞추기(네트워크 없음), 서버를 다시 만들 때 계정 따라가기 | `app_network.rs`, `stage/select/mod.rs`, `stage/tables.rs`, `stage/loading.rs` |
+| `SelectView::UserFolders`, `UserFolder(usize)`, 목록·머리글·스킨의 열린 폴더 이름(`["MY FOLDERS", 폴더 이름]`)·막대 종류(표와 같은 `Table`)·뒤로 가기 | `lib.rs`, `stage/select/list.rs`, `scene.rs`, `mod.rs`, `skin_host/select/bridge.rs` |
+| 자리 지키기: 보고 있던 폴더와 커서의 폴더를 id 로 다시 찾는다 | `tablesrc.rs` `ListPlace`, `FocusedFolder::UserFolder` |
+| Tables 화면의 `MY FOLDERS` 줄(맨 끝, 지울 수 없음) | `stage/tables.rs` |
+
+### 13.3 동작 요약
+
+- 뿌리: 표 줄들 다음에 `MY FOLDERS ({필터 뒤 가진 곡 합})`. 묶음 안: `{이름} ({보이는 곡}/{목록의 곡})`, 다 보이면 `{이름} ({수})`. 폴더 안: 라이브러리에 있는 곡만.
+- 받기: 색인 → 저장본과 `updated_at` 이 다른 폴더만 한 번에 4개씩 → 색인 순서로 새 저장본. 실패한 폴더는 저장본의 옛 내용(없으면 이번엔 빠짐). 401·403 은 목록에서 내리고 저장본은 둔다. 404 는 조용히 넘어간다.
+- 계정: `(server_url, 로그인 id)` 가 바뀌면 그 계정의 저장본을 올린다. 로그아웃은 받는 중인 일을 취소(쓰기 전 잠금 확인)하고 저장본을 지운다. 받는 도중 계정이 바뀐 결과는 버린다.
+- 서버를 믿지 않는다: 폴더 50개, 폴더당 2,000곡을 넘으면 버리고, 이름 64자·설명 255자로 자르며 제어 문자를 지우고, 16진 32자가 아닌 md5 는 버린다.
+- 기본 표: 새 설치와 기존 사용자 모두 한 번 들어가고(목록 맨 앞, 이름은 비워 표 자신의 이름), 저장본(`fetched_at` 없음 → Tables 화면에 `SAVED`)이 심겨 오프라인 첫 실행에도 26개 레벨 폴더가 보인다. 지우면 다시 들어가지 않고, `darksabun.club/table/archive/insane1` 을 이미 가진 사용자에게는 넣지 않는다. 다시 받기는 사본 주소에서 한다.
+
+### 13.4 검증
+
+`cargo test -p rbms-ir -p rbms-table -p rbms-config -p rbms-player --locked` 와 같은 범위의 clippy. 고정한 것: 스냅샷 파싱(1,035곡, 26레벨, 건너뜀 0), 운영 꼴(끝 슬래시 308, 루트 상대 `bmstable`, 절대·상대 `data_url`), 처음 실행의 등록과 저장본(네트워크 없음), 지운 뒤 재등록 없음, 원본 주소가 있을 때 건너뜀, 스키마 5 파일에서 올라오기, 설정 동기화가 표식을 지키기, 폴더 받기(색인, 바뀐 폴더만, 일부 실패, 404, 401, 로그아웃, 계정 바뀜, 다른 계정의 파일), 선곡의 MY FOLDERS 단계와 뒤로 가기, 자리 지키기(id), Tables 화면의 줄, 제출 본문의 차트 메타, 비로그인 제출 차단. 캡처는 `stage/select/user_folder_tests.rs`(`RBMS_SKIN_CAPTURE_DIR`).
+
+### 13.5 통합에서 고친 것 (웨이브 18 통합)
+
+| 항목 | 고친 것 |
+|---|---|
+| 보내지 않은 판의 `ir_submitted` | 주 서버가 기본 서버(`server_url`)이고 로그인하지 않은 판은 보내지 않는데도 `scorelog.ir_submitted` 가 1 로 적혔다. 이제 실제로 보낼 때만 1 이다(`AppShared::sends_to_primary_ir_server`: 기본 서버면 로그인했을 때, IR 프로필이면 언제나). 테스트 `record_tests::a_run_nobody_was_signed_in_to_send_is_kept_as_not_sent` |
+| 코스 제출 | 로그인하지 않았으면 코스도 주 서버로 보내지 않는다(전에는 guest 로 나가 401). 같은 판단(`sends_to_primary_ir_server`)을 쓴다 |
+| CI | 플레이어가 `web/data/tables/insane1/{header,data}.json` 을 실행 파일에 넣고 테스트가 읽으므로, `.github/workflows/ci.yml` 이 `web/**` 를 빼되 `web/data/tables/**` 는 다시 넣는다(`paths: ["**", "!web/**", "web/data/tables/**"]`). 전에는 `paths-ignore: web/**` 라 그 파일만 바뀐 커밋에서 세 OS 빌드·테스트가 돌지 않았다 |
+| 계약 테스트의 긴 JSON | `crates/rbms-ir/src/contract_tests/folders.rs` 의 응답 문자열을 `concat!` 으로 나눠 한 줄 160자 안에 둔다(내용은 같다) |

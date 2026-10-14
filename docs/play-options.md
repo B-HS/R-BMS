@@ -1,6 +1,6 @@
 # 플레이 옵션
 
-> 최종 갱신 2026-10-14 · 웨이브 16(기록이 저장되는 조건과 SCRATCH AUTO: 10절, 목표 점수와 TARGET FALLBACK·TARGET RATE: 11절, 리플레이를 본 뒤 설정이 그대로 남는 것: 10.2절. 작업 트리 기준, 커밋 전). 웨이브 14(플레이 중 조작: START + 턴테이블의 1 단위 걸음과 리프트 조합, 판정 오프셋의 출하 키와 누름 반복, 스크래치 역방향 키의 출하: 2절의 "바꾸는 곳" 열, 5절. 작업 트리 기준, 커밋 전) 기준. 웨이브 13 은 판정 오프셋을 원본의 노트 표시 타이밍으로(1~3절, 7.4절), 기본 스킨의 판정선을 필드 맨 아래로(8절). 웨이브 12 는 연습 패널의 숫자 행(9절)
+> 최종 갱신 2026-10-14 · 웨이브 18(SCRATCH AUTO 의 새 규칙과 모든 판의 저장·전송: 10절, 같은 배치로 다시 하기: 10.7절. 작업 트리 기준, 커밋 전). 웨이브 16(기록이 저장되는 조건과 SCRATCH AUTO: 10절, 목표 점수와 TARGET FALLBACK·TARGET RATE: 11절, 리플레이를 본 뒤 설정이 그대로 남는 것: 10.2절. 작업 트리 기준, 커밋 전). 웨이브 14(플레이 중 조작: START + 턴테이블의 1 단위 걸음과 리프트 조합, 판정 오프셋의 출하 키와 누름 반복, 스크래치 역방향 키의 출하: 2절의 "바꾸는 곳" 열, 5절. 작업 트리 기준, 커밋 전) 기준. 웨이브 13 은 판정 오프셋을 원본의 노트 표시 타이밍으로(1~3절, 7.4절), 기본 스킨의 판정선을 필드 맨 아래로(8절). 웨이브 12 는 연습 패널의 숫자 행(9절)
 > 대상: 플레이 중 스크롤·가림막·판정 타이밍을 정하는 옵션과 그 키, 그 옵션을 바꾸는 화면인 PLAY 메뉴(7절), 기본 스킨의 판정 표시(8절), 연습 패널(9절). 스킨이 그리는 옵션(Lane Width 등)과 부위별 불투명도는 [skin.md](./skin.md) 3.4절, 구현 위치는 [crates.md](./crates.md)를 본다. PLAY 메뉴의 설계는 [plan/2026-10-11-play-menu.md](./plan/2026-10-11-play-menu.md).
 > beatoraja 원본의 같은 기능이 기준이다. 다르게 한 곳은 "원본과 다른 점" 열에 이유를 적는다.
 
@@ -413,55 +413,99 @@ SETTINGS 의 탭은 JUDGE, DISPLAY, INPUT, NETWORK, AUDIO, SELECT 여섯이다(P
 
 ## 10. 기록 저장(어떤 판이 무엇을 남기나)
 
-> 웨이브 16(2026-10-14) 추가. "로그인하지 않으면 기록이 저장되지 않고 램프만 남는 것 같다"는 보고를 점검한 결과다. 결론: 기록 저장은 점수 서버 설정·로그인과 무관하다. 램프만 남는 것은 SCRATCH AUTO(또는 넓힌 판정 폭)를 켠 판이고, 원본과 같은 규칙이다(결정 12, `docs/acknowledge/2026-09-09-enhancement-decisions.md`).
+> 웨이브 16(2026-10-14) 추가, 웨이브 18(같은 날) 개정. 웨이브 16 은 "로그인하지 않으면 기록이 저장되지 않고 램프만 남는 것 같다"는 보고를 점검해, 기록 저장이 점수 서버 설정·로그인과 무관하고 램프만 남는 것은 SCRATCH AUTO 판이라는 것을 밝혔다. 웨이브 18 은 사용자의 결정(2026-10-14, 결정 12 와 "SC 의 점수는 빼고 저장"을 대신한다)대로 바꿨다: SCRATCH AUTO 의 턴테이블 노트는 초록으로 그려지고 아무 집계에도 들어가지 않으며, 사람이 친 판은 어시스트든 아니든 전부 저장되고 서버로 간다.
 
 ### 10.1 저장되는 곳
 
 | 곳 | 내용 | 읽는 화면 |
 | --- | --- | --- |
-| `scoredb.sqlite` 의 `scorelog` | 판마다 한 행. 판정 12칸(빠름·늦음), 노트 수, 콤보, BP, 램프, 게이지, 어시스트 단계, 배치와 시드, 날짜, 리플레이 파일 이름, 점수 서버에 보냈는지(`ir_submitted`) | 선곡의 기록 목록(R), 리플레이 슬롯 |
-| `scoredb.sqlite` 의 `score` | 차트(와 모드, LN 종류)마다 한 행인 최고 기록. 램프, 최고 EX 를 낸 판의 판정 12칸, 최대 콤보, 최소 BP, 플레이 횟수, 클리어 횟수, 마지막 날짜 | 스킨이 그리는 선곡의 EX SCORE·RATE·RANK·MAX COMBO·MISS COUNT·판정 막대·PLAY COUNT·CLEAR COUNT |
+| `scoredb.sqlite` 의 `scorelog` | 판마다 한 행. 판정 12칸(빠름·늦음), 노트 수, 콤보, BP, 램프, 게이지, 어시스트 단계, 판정 규칙 세대(`rule_version`), 배치와 시드, 날짜, 리플레이 파일 이름, 점수 서버에 보냈는지(`ir_submitted`) | 선곡의 기록 목록(R), 리플레이 슬롯 |
+| `scoredb.sqlite` 의 `score` | 차트(와 모드, LN 종류)마다 한 행인 최고 기록. 램프, 최고 EX 를 낸 판의 판정 12칸과 그 판의 노트 수, 최대 콤보, 최소 BP, 플레이 횟수, 클리어 횟수, 마지막 날짜 | 스킨이 그리는 선곡의 EX SCORE·RATE·RANK·MAX COMBO·MISS COUNT·판정 막대·PLAY COUNT·CLEAR COUNT |
 | `scoredb.sqlite` 의 `player_stat` | 날짜별 누적(플레이 횟수, 판정 수, 플레이 시간) | - |
-| `replays/<md5 앞 8자>-<시각>.ron` | 그 판의 입력 | 기록 목록의 리플레이, 결과 화면의 REPLAY |
-| 메모리의 기록 책(`ScoreBook`) | 시작할 때 `scorelog` 전체로 만들고 판이 끝날 때마다 한 행을 더한다 | 플레이 화면의 LOCAL BEST 목표와 스코어 그래프의 BEST, 결과 화면의 이전 최고, 내장 선곡 화면 |
+| `replays/<md5 앞 8자>-<시각>.ron` | 그 판의 입력과 SCRATCH AUTO·게이지·배치·시드·판정 설정 | 기록 목록의 리플레이, 결과 화면의 REPLAY |
+| 메모리의 기록 책(`ScoreBook`) | 시작할 때 `scorelog` 전체로 만들고 판이 끝날 때마다 한 행을 더한다. 행마다 최고 기록이 될 수 있는지를 어시스트 단계와 규칙 세대로 다시 읽는다(`rbms_store::sets_best`) | 플레이 화면의 LOCAL BEST 목표와 스코어 그래프의 BEST, 결과 화면의 이전 최고, 내장 선곡 화면 |
 
 ### 10.2 판의 종류별로 남는 것
 
+"사람이 친 판"은 오토플레이도 리플레이 보기도 연습도 아닌 판이다. 사람이 친 판은 어떤 설정이든 기록 목록의 행·날짜 통계·리플레이(AUTO REPLAY 켬)를 남기고 점수 서버로 간다(주 서버가 기본 서버(`SERVER URL`)면 로그인했을 때, 주 서버가 IR 프로필이면 언제나. 보내지 않은 판은 `ir_submitted` 만 0 이고 나머지는 같다. 기본 서버가 설정돼 있어도 로그인하지 않았으면 보내지 않으므로 0 이다(`AppShared::sends_to_primary_ir_server`). 나중에 로그인해도 지난 판을 다시 보내지 않는다).
+
 | 판 | 기록 목록의 행·날짜 통계 | 최고 기록(EX·판정·콤보·BP) | 램프·플레이 횟수 | 리플레이(AUTO REPLAY 켬) | 점수 서버 | 원본과 다른 점 |
 | --- | --- | --- | --- | --- | --- | --- |
-| 손으로 친 판(로그인 여부와 무관) | 남는다 | 더 좋은 값이면 갱신 | 더 높은 램프면 갱신, 횟수 +1 | 저장 | 서버가 설정돼 있을 때만 전송. 설정이 없으면 `ir_submitted` 만 0 이고 나머지 행은 같다 | 없음 |
+| 손으로 친 판(로그인 여부와 무관) | 남는다 | 더 좋은 값이면 갱신 | 더 높은 램프면 갱신, 횟수 +1 | 저장 | 전송 | 없음 |
 | FAILED 로 끝난 판 | 남는다 | EX 가 더 높으면 갱신(램프와 무관, `ScoreData.java:549`) | FAILED, 횟수 +1(클리어 횟수는 그대로) | 저장 | 전송 | 원본은 PG~BD 가 하나도 없는 판을 저장하지 않는다(`BMSPlayer.java:858-861`). 여기서는 FAILED 로 남는다 |
-| SCRATCH AUTO 를 켠 판(어시스트 1). 그 판의 턴테이블 레인에 노트가 하나라도 있을 때만 | 남는다(EX·판정·콤보·BP 전부) | 바뀌지 않는다 | LIGHT ASSIST CLEAR 로 낮춘 램프, 횟수 +1 | 저장 | 보내지 않는다 | 리플레이 저장만 다르다(D-D6). 나머지는 `ScoreData.update(newscore, false)` 그대로 |
-| SCRATCH AUTO 를 켰지만 턴테이블 노트가 없는 차트, 턴테이블이 없는 모드(9키) | 손으로 친 판과 같다 | 손으로 친 판과 같다 | 손으로 친 판과 같다 | 저장 | 전송 | 없음. 원본은 자동으로 친 레인에서 노트를 옮겼을 때만 어시스트를 올린다(`AutoplayModifier.modify`). 웨이브 16 통합 전에는 스위치만 보고 어시스트로 셌다 |
-| JUDGE WIDTH 나 LN MARGIN 을 100% 넘게 넓힌 판(어시스트 2) | 남는다 | 바뀌지 않는다 | ASSIST CLEAR 로 낮춘 램프, 횟수 +1 | 저장하지 않는다 | 보내지 않는다 | 없음(`BMSPlayer.java:208-214`) |
+| SCRATCH AUTO 를 켠 판(어시스트 1). 그 판의 턴테이블 레인에 노트가 하나라도 있을 때만 | 남는다. 턴테이블 노트를 뺀 집계 그대로(10.5) | 더 좋은 값이면 갱신. 손으로 친 판과 한 행을 같이 쓴다 | LIGHT ASSIST CLEAR 로 낮춘 램프, 횟수 +1 | 저장(`scratch_auto: true`) | 전송. `options.scratch_auto = true`, `options.assist = ["AUTO_SCRATCH"]` 를 싣는다. 서버가 그것으로 무엇을 할지는 서버의 일 | 원본은 턴테이블 노트를 배경음으로 옮기고(같다) 그 판을 최고 기록·리플레이·IR 에서 뺀다(`score = false`). 사용자의 결정으로 다른 판과 똑같이 남기고 보낸다. 램프를 낮추는 것은 원본대로 유지했다(사용자가 램프는 말하지 않았다) |
+| SCRATCH AUTO 를 켰지만 턴테이블 노트가 없는 차트, 턴테이블이 없는 모드(9키) | 손으로 친 판과 같다 | 손으로 친 판과 같다 | 손으로 친 판과 같다(램프를 낮추지 않는다) | 저장 | 전송 | 없음. 원본은 자동으로 친 레인에서 노트를 옮겼을 때만 어시스트를 올린다(`AutoplayModifier.modify`) |
+| JUDGE WIDTH 나 LN MARGIN 을 100% 넘게 넓힌 판(어시스트 2) | 남는다 | 바뀌지 않는다 | ASSIST CLEAR 로 낮춘 램프, 횟수 +1 | 저장 | 전송. `options.assist = ["CUSTOM_JUDGE"]`. AUTO UPLOAD REPLAY 로 리플레이를 올리는 것은 여섯 판정 폭이 한 값이고 LN MARGIN 이 기본일 때뿐이다: 올리는 형식이 폭 하나만 싣고 LN MARGIN 을 싣지 않아, 다른 판은 내려받으면 다른 판정으로 재생되기 때문이다(`ir_replay::wire_carries_judge`). 로컬 리플레이는 전부 싣는다 | 원본은 리플레이를 남기지 않고 보내지도 않는다(`BMSPlayer.java:208-214`). "서버로 저장되지 않는 기록은 없다"는 결정으로 남기고 보낸다. 최고 기록을 바꾸지 않는 것은 원본대로 유지했다: 넓힌 판정의 EX 는 같은 차트를 정상 판정으로 친 EX 와 같은 잣대가 아니고, 사용자는 이것을 말하지 않았다 |
 | 게이지 종류, GAUGE AUTO SHIFT | 위와 같다. 게이지는 램프만 정한다. 자동 전환된 판은 끝난 게이지로 적힌다 | - | - | - | - | 원본은 전환된 판의 게이지를 -1 로 적는다(`BMSPlayer.java:884`) |
-| 코스의 각 스테이지 | 그 차트의 판으로 위 규칙대로 남는다(`enter_result` 가 다음 스테이지로 넘어가기 전에 적는다) | 위와 같다 | 위와 같다 | 위와 같다 | 스테이지 점수는 위와 같고 코스 점수는 따로 | 스테이지 램프를 원본과 대조하는 일은 이 점검에서 하지 않았다(원본은 코스 중 스테이지 램프를 게이지로 정하지 않는다, `BMSPlayer.java:864-880`) |
-| AUTOPLAY | 남지 않는다 | - | - | - | 보내지 않는다 | 없음(`MusicResult.updateScoreDatabase` 가 PLAY 모드만 적는다) |
-| 리플레이 재생 | 남지 않는다 | - | - | - | 보내지 않는다 | 없음. 재생하는 동안 SCRATCH AUTO·GAUGE·RANDOM 은 리플레이에 적힌 값으로 돌지만 설정 파일에는 플레이어의 값이 적히고, 재생이 끝나면(선곡으로 돌아가거나 결정 화면에서 그만두면) 플레이어의 값으로 돌아온다. 웨이브 16 통합 전에는 리플레이 값이 그대로 남아 저장됐다: SCRATCH AUTO 로 친 리플레이를 한 번 보면 스위치가 켜진 채 남아 이후의 판이 최고 기록을 남기지 않았다 |
-| 연습 구간 | 남지 않는다 | - | - | - | 보내지 않는다 | 없음 |
+| 코스의 각 스테이지 | 그 차트의 판으로 위 규칙대로 남는다(`enter_result` 가 다음 스테이지로 넘어가기 전에 적는다) | 위와 같다 | 위와 같다 | 위와 같다 | 스테이지 점수는 위와 같다. 코스 점수는 SCRATCH AUTO 나 넓힌 판정으로 친 스테이지가 하나라도 있으면 보내지 않고 코스 최고 기록도 바꾸지 않는다: 코스 제출(`CourseSubmission`)에는 어시스트를 적을 칸이 없어 서버가 가릴 수 없다. 로그인하지 않았으면 코스도 보내지 않는다 | 스테이지 램프를 원본과 대조하는 일은 하지 않았다(원본은 코스 중 스테이지 램프를 게이지로 정하지 않는다, `BMSPlayer.java:864-880`) |
+| AUTOPLAY | 남지 않는다 | - | - | - | 보내지 않는다 | 없음(`MusicResult.updateScoreDatabase` 가 PLAY 모드만 적는다). 사람이 친 판이 아니다 |
+| 리플레이 재생 | 남지 않는다 | - | - | - | 보내지 않는다 | 없음. 재생하는 동안 SCRATCH AUTO·GAUGE·RANDOM 은 리플레이에 적힌 값으로 돌고 끝나면 플레이어의 값으로 돌아온다(웨이브 16) |
+| 연습 구간 | 남지 않는다 | - | - | - | 보내지 않는다 | 없음. 사람이 쳤지만 구간만 잘라 친 판이라 한 판의 기록이 아니다 |
 | 도중 포기(Esc) | 칠 노트가 남아 있으면 남지 않는다(선곡으로 돌아간다). 노트를 다 처리한 뒤의 Esc 는 결과 화면으로 가고 위 규칙대로 남는다 | - | - | - | - | 원본은 포기한 판도 친 노트가 있으면 FAILED 로 결과 화면에 가서 저장한다(`BMSPlayer.stopPlay`) |
 
-### 10.3 SCRATCH AUTO 로만 친 차트가 선곡에 보이는 모습
+### 10.3 최고 기록 한 행과 노트 수
 
-1. 램프(LIGHT ASSIST CLEAR)와 PLAY COUNT·CLEAR COUNT 는 채워진다.
-2. 최고 기록 행에 점수가 없다(`score.notes = 0`, `minbp` 미설정). 스킨 호스트는 원본의 `ScoreDataProperty` 대로 EX 0, RATE 1.0(100.00%)을 넘긴다. 기본 스킨은 웨이브 16 통합부터 이 경우의 RANK·EX SCORE·RATE·MAX COMBO·MISS COUNT·판정 수를 한 번도 치지 않은 차트처럼 `-` 로 그린다(`lua/select/info.lua` 의 `holds_score`: 판정 비율 number 85 가 값을 가질 때만 점수가 있다고 본다). 다른 스킨 팩은 원본처럼 0 과 100.00% 를 그릴 수 있다.
-3. 기록 목록(R)에는 그 판들이 EX 와 함께 전부 있고 리플레이도 재생된다.
-4. LOCAL BEST 목표와 스코어 그래프의 BEST 는 없는 것으로 읽힌다(어시스트 판은 최고 기록이 아니다). 결과 화면의 TARGET 도 같은 값으로 정한다. PLAY 메뉴의 SCRATCH AUTO 행은 정보 패널에 `WHILE ON: NO BEST SCORE, LAMP AND HISTORY ONLY` 를 쓴다. 웨이브 16 전에는 결과 화면만 어시스트 판을 포함한 이력의 최고 EX 를 LOCAL BEST 로 삼아 플레이 화면과 달랐다.
-5. 결과 화면은 오른쪽 위의 전송 줄(`IR: SKIPPED (scratch assist)`) 아래에 `SCRATCH AUTO ON: NO BEST SCORE, LAMP AND HISTORY ONLY` 를 노란 글자로 쓴다(넓힌 판정은 `WIDENED JUDGE: NO BEST SCORE, LAMP AND HISTORY ONLY`). 기본 스킨의 `SCORE NOT SAVED` 만으로는 어느 설정 때문인지 알 수 없고, 전송 줄은 점수 서버 이야기로 읽히기 때문이다. AUTOPLAY·리플레이 재생에는 쓰지 않는다.
+1. SCRATCH AUTO 판은 손으로 친 판과 한 행(`score`)을 같이 쓴다. 두 판의 노트 수가 다르다(턴테이블 노트만큼). 그래서 최고 기록 행의 노트 수는 그 행이 지닌 EX 를 낸 판의 것이다: 처음으로 최고 기록이 될 수 있는 판이 정하고, 그 뒤로는 EX 를 갱신한 판만 바꾼다(`merge_best`). RATE·RANK 는 언제나 같은 판의 EX 와 노트 수로 계산된다. 웨이브 18 전에는 최고 기록을 낼 수 있는 판마다 노트 수를 덮어써서, 노트 수가 다른 판이 섞이면 RATE 가 100% 를 넘을 수 있었다.
+2. EX 는 노트 수가 달라도 그대로 비교한다(사용자의 결정: 따로 두지 않는다). SCRATCH AUTO 판은 턴테이블 노트만큼 EX 상한이 낮으므로, 같은 실력이면 손으로 친 판의 EX 가 이긴다.
+3. 기록 목록(R)과 결과 화면은 판마다 그 판의 노트 수로 읽는다.
 
-### 10.4 구현 위치와 테스트
+### 10.4 웨이브 16 까지의 SCRATCH AUTO 판(사용자의 37판)
+
+1. 웨이브 16 까지의 SCRATCH AUTO 판은 턴테이블 노트를 사람 대신 PGREAT 로 쳐서 셌다. 노트 수·EX·콤보에 턴테이블이 들어 있어 새 규칙의 판과 비교할 수 없다. 사용자의 결정은 "없어져도 괜찮으니(램프만 있어도 됨) 잘 처리해 둔다"이다.
+2. 처리: 지우지도 고쳐 쓰지도 않는다. 새로 저장하는 판은 판정 규칙 세대 3(`SCORE_RULE_VERSION`)으로 적고, 기록 책은 행마다 `rbms_store::sets_best(어시스트, 세대)` 로 최고 기록이 될 수 있는지 읽는다: 어시스트 0 은 언제나, SCRATCH AUTO(어시스트 1)는 세대 3 부터만, 넓힌 판정(2)과 옮겨 온 기록의 알 수 없는 어시스트(-1)는 언제나 아니다. 세대 2 의 SCRATCH AUTO 행은 그래서 이력과 램프로만 남고 LOCAL BEST·스코어 그래프의 BEST·결과 화면의 이전 최고·선곡의 EX 에 들어가지 않는다. `score` 행은 그 판들이 애초에 점수를 남기지 않았으므로(웨이브 16 의 규칙) 고칠 것이 없다. 그래서 앱이 시작할 때 한 번 하는 마이그레이션은 필요 없다.
+3. 세대 3 은 SCRATCH AUTO 만 바꾼다. 손으로 친 세대 2 의 행은 지금과 같은 판정이라 "OLD RULE"(`is_stale_rule_version`, 세대 2 미만)로 표시하지 않는다. 세대 1 이하의 기준은 그대로다.
+4. 점수 서버로 소급 전송하지 않는다(재전송 경로가 없다).
+5. 사용자 DB 의 사본으로 잰 값(테스트 `a_players_own_database_reads_its_old_scratch_auto_rows_as_lamps_alone`, `#[ignore]` 라 `--ignored` 와 `RBMS_SCOREDB_COPY=<사본>` 으로 손으로 돌린다): 37판 모두 어시스트 1·세대 2, 29 차트. 이 빌드로 읽으면 LOCAL BEST 가 있는 차트 0, 램프가 있는 차트 29, 점수가 있는 최고 기록 행 0. 같은 사본에 새 규칙의 SCRATCH AUTO 판을 하나 적으면 그 판이 그 차트의 첫 최고 기록이 되고 램프는 그대로다.
+6. 웨이브 16 까지의 SCRATCH AUTO 리플레이를 지금 보면 새 규칙으로 재생된다(턴테이블이 세지 않는다). 그래서 그 판의 이력 행과 숫자가 다르다.
+
+### 10.5 SCRATCH AUTO 의 판정과 그리기
+
+| 항목 | 동작 | 원본과 다른 점 |
+| --- | --- | --- |
+| 판정에 들어가는 차트 | 배치(RANDOM 등)를 적용한 뒤 턴테이블 레인의 노트를 모두 뺀 차트. 판정·콤보·게이지·EX·판정 수·FAST/SLOW·BP·노트 수(만점의 기준)·진행률·스코어 그래프·스킨이 읽는 노트 수와 남은 노트 수가 모두 이 차트로 센다. RATE·랭크·최대 콤보도 같다(`rbms_play::Player::with_auto_lanes`) | 같다(`AutoplayModifier.modify` 가 `moveToBackground` 로 차트에서 뺀다) |
+| 그리기 | 뺀 노트는 필드에만 남아(`PlaySession::field_timelines`) 초록으로 그려진다. 일반 노트와 롱노트의 시작·끝은 `AUTO_LANE_NOTE`(#30E050), 롱노트 몸통은 `AUTO_LANE_LONG_BODY`(같은 초록, 불투명도 0xA0). 스킨이 고른 노트 그림의 자리(크기·위치)에 엔진이 그리므로 기본 팩과 남의 Lua 스킨(ModernChic 캡처)이 같다. 판정선에 닿으면 사라지고, PAST NOTES·처리된 노트 표시·팝픈의 떨어지는 노트에 해당하지 않는다. 내장 필드(스킨 없음)도 같은 색이다 | 원본은 그리지 않는다(배경음이 된다). 스킨 그림에 색을 곱하는 대신 단색으로 그린 이유: 그림 색에 곱하는 방식은 빨간 턴테이블 노트(기본 팩과 대부분의 스킨)를 검게 만들고, 그림의 알파로 색을 바꾸는 그리기는 지금 렌더러(GPU 셰이더)에 없다 |
+| 지뢰 | 턴테이블 레인의 지뢰는 판정에서도 그리기에서도 뺀다 | 같다(`moveToBackground` 는 지뢰를 배경음으로도 옮기지 않는다) |
+| 키음 | 각 노트 머리(롱노트는 시작)의 키음이 제 시각에 키 버스로 울린다. 롱노트 끝과 지뢰는 울리지 않는다(오토플레이와 같다) | 원본은 배경음(BGM 버스)으로 울린다. 키 음량을 따르게 키 버스에 두었다 |
+| 턴테이블 입력 | SCRATCH AUTO 가 켜져 있으면(그 차트에 턴테이블 노트가 없어도) 턴테이블 키의 누름·뗌을 판정에 넘기지 않는다. 공 POOR 도, 빔도, 키음도 없다. 리플레이에는 입력으로 적히지만 재생할 때도 같은 이유로 무시된다 | - |
+| TOTAL | 차트의 #TOTAL, 없으면 턴테이블을 포함한 원래 노트 수로 정한 기본값 그대로. 노트 하나가 올리는 게이지는 TOTAL 을 판정되는 노트 수로 나눈 값이다 | 같다(원본은 디코드할 때 TOTAL 을 정하고 모디파이어를 그 뒤에 적용한다) |
+| 턴테이블 노트만 있는 차트 | 판정되는 노트가 0 개라 BGM 만 있는 차트처럼 저절로 끝나지 않는다(Esc 로 나간다) | - |
+| 리플레이 | 리플레이의 `scratch_auto` 로 재생하면 같은 차트를 같이 빼므로 같은 결과(턴테이블이 초록이고 세지 않는 것 포함)가 나온다. 분석의 되감기(`seek`)도 필드의 차트에서 다시 빼서 같다 | - |
+
+### 10.6 선곡과 결과 화면
+
+1. 선곡: SCRATCH AUTO 로 친 차트도 EX SCORE·RATE·RANK·판정 막대가 채워진다(그 판의 노트 수 기준. 캡처 `select-recorded-scratch-auto.png`). 넓힌 판정으로만 친 차트는 램프와 횟수만 있고 점수는 `-` 다(`select-recorded-widened.png`. 기본 스킨의 `holds_score`, 웨이브 16).
+2. 결과 화면은 오른쪽 위에 `SCRATCH AUTO: TURNTABLE NOT COUNTED, LIGHT ASSIST LAMP`(넓힌 판정은 `WIDENED JUDGE: SENT AND KEPT, BUT NO BEST SCORE`)를 노란 글자로 쓴다. 스킨의 숫자만으로는 턴테이블이 빠진 것과 램프가 낮아진 것을 알 수 없기 때문이다. AUTOPLAY·리플레이 재생에는 쓰지 않는다(캡처 `result-recorded-scratch-auto.png`).
+3. LOCAL BEST 목표와 스코어 그래프의 BEST, 결과 화면의 이전 점수(스킨과 내장 화면의 이전 EX·이전 최고 EX)는 SCRATCH AUTO 판도 센다. 넓힌 판정의 판과 세대 2 의 SCRATCH AUTO 판은 세지 않는다.
+4. PLAY 메뉴의 SCRATCH AUTO 행 설명은 `Let the game play the scratch lane, drawn green; its notes are not counted`, 정보 패널의 덧말은 `WHILE ON: TURNTABLE NOT COUNTED, LIGHT ASSIST LAMP`(`stage/play_menu.rs`). 설정 화면의 JUDGE WIDTH·LN MARGIN 행 설명과 정보 패널은 넓힌 판정이 최고 기록만 바꾸지 않고 리플레이와 함께 남고 보내진다고 말한다.
+
+### 10.7 같은 배치로 다시 하기(파란 건반 + START)
+
+결과 화면에서 파란 건반을 하나라도 누른 채 START 를 누르면 같은 차트를 같은 시드와 같은 옵션으로 다시 시작한다(사용자 요청, 2026-10-14). 이 플레이어의 것이고 원본에는 없다.
+
+| 항목 | 내용 |
+| --- | --- |
+| 파란 건반 | 7키·14키: 2·4·6번(키 인덱스 1·3·5), 5키·10키: 2·4번(1·3), 9키: 4·6번(3·5. 팝픈 배치는 흰·노랑·초록·파랑·빨강·파랑·초록·노랑·흰), 24키: 없음. DP 는 양쪽 어느 파란 건반이든 된다 |
+| START | 키보드의 START 키(기본 `A`)나 패드의 START. 결과 화면이 열릴 때 이미 눌려 있던 START 는 누름으로 세지 않는다 |
+| 같은 배치 | 그 판의 시드를 다음 로드에 넘긴다(`Leave::RunSameLayout` → `retry_seed`). 옵션은 설정에 있는 그대로라 그 판과 같다. 7번 키(ReplaySame)와 달리 판의 종류를 가리지 않는다(넓힌 판정 판도 같은 배치) |
+| 파란 건반의 원래 역할 | 원본 표에서 확인(OK)인 파란 건반(7키의 2·4번 등)은 누를 때가 아니라 뗄 때 확인한다. START 를 옆에서 누를 시간을 주기 위해서다. 혼자 눌렀다 떼면 전처럼 선곡으로 간다. 6번 키(그래프 바꾸기)는 누를 때 그대로 바꾼다 |
+| START 만 | 아무것도 하지 않는다(지금 동작 그대로) |
+| 7번 키(ReplaySame)·5번 키(ReplayDifferent)·R·N | 그대로 |
+| 쓸 수 없는 곳 | 다시 할 수 없는 결과 화면(오토플레이, 리플레이 보기, 라이브러리에 없는 차트)에서는 R 과 같이 아무것도 하지 않는다. 코스는 스테이지마다 결과 화면이 없고(바로 다음 스테이지), 코스 결과 화면에는 이 조합이 없다. 연습은 결과 화면 없이 패널로 돌아간다 |
+| 내장 결과 화면 | 같은 조합을 읽는다. 바닥 안내 글자(`ENTER / ESC  SELECT    R  RETRY    N  NEXT SONG`)는 내장 화면의 골든을 바꾸지 않기 위해 고치지 않았다. 결과 화면에는 H 키 안내가 없다 |
+| 구현과 테스트 | `apps/rbms-player/src/stage/result.rs`(`blue_keys`, `Scene::step`, `ResultState::built_in_frame`, `leave`), 테스트 `stage/result/tests.rs`(`start_with_a_blue_key_held_runs_the_chart_again_laid_out_as_it_was` 등) |
+
+### 10.8 구현 위치와 테스트
 
 | 내용 | 위치 |
 | --- | --- |
-| 판이 끝날 때의 저장·전송·리플레이 | `apps/rbms-player/src/app_result.rs`(`enter_result`), 행으로 바꾸기는 `apps/rbms-player/src/scoredb_store.rs`(`play_log`, `record_finished_play`) |
-| 최고 기록에 합치는 규칙 | `crates/rbms-store/src/scoredb.rs`(`ScoreDb::record_play`, `merge_best`) |
-| 최고 기록을 갱신해도 되는 판인지 | `apps/rbms-player/src/lib.rs`(`updates_score`, `ir_submission_block_reason`, `saves_replay`, `assisted_lamp`) |
-| 선곡이 최고 기록을 읽어 스킨에 넘기는 곳 | `apps/rbms-player/src/stage/select/lent.rs`(`refresh_focused_records`), `apps/rbms-player/src/skin_host/select/bridge.rs`(`chart_records_shown`), `skin_host/select/shown.rs`(`BarRecord::of_best`) |
-| 결과 화면의 어시스트 안내 줄 | `apps/rbms-player/src/stage/result.rs`(`assist_note`, `ResultState::notice_lines`) |
-| 손으로 친 판을 끝까지 돌려 DB 를 읽는 테스트 | `apps/rbms-player/src/app_result/record_tests.rs`(로그인 없음, 로그인 있음, 다음 실행, SCRATCH AUTO, 턴테이블 노트가 없는 차트의 SCRATCH AUTO, AUTOPLAY, FAILED, 리플레이를 본 뒤의 설정) |
-| SCRATCH AUTO 가 어시스트인지 | `apps/rbms-player/src/app_result.rs`(`scratch_auto_played`). 결과 화면 쪽은 `stage/result.rs`(`ResultRun::of`) |
-| 리플레이가 바꾼 플레이 옵션을 보관하고 되돌리기 | `apps/rbms-player/src/app_play.rs`(`OwnPlayOptions`, `play_as_recorded`, `end_replay`, `settings_to_save`), 설정 저장은 `app_input.rs`(`save_settings`) |
-| 그 판 뒤의 선곡과 결과 화면(기본 스킨) | `apps/rbms-player/src/stage/select/recorded_tests.rs`, `apps/rbms-player/src/stage/result/tests.rs`. `RBMS_SKIN_CAPTURE_DIR` 을 주면 `select-recorded.png`, `select-recorded-scratch-auto.png`, `result-recorded-scratch-auto.png` 를 쓴다 |
+| 판이 끝날 때의 저장·전송·리플레이 | `apps/rbms-player/src/app_result.rs`(`enter_result`), 행으로 바꾸기는 `apps/rbms-player/src/scoredb_store.rs`(`play_log`, `record_finished_play`, `record_of`) |
+| 최고 기록에 합치는 규칙 | `crates/rbms-store/src/scoredb.rs`(`ScoreDb::record_play`, `merge_best`), 행이 최고 기록이 될 수 있는지 `crates/rbms-store/src/score.rs`(`sets_best`, `SCORE_RULE_VERSION`) |
+| 최고 기록을 갱신해도 되는 판, 보낼 판 | `apps/rbms-player/src/lib.rs`(`updates_score`, `ir_submission_block_reason`, `assisted_lamp`), 실제로 보내는지 `apps/rbms-player/src/app_ranking.rs`(`sends_to_primary_ir_server`), 코스를 막는 어시스트 `apps/rbms-player/src/app_result.rs`(`course_assist_reason`) |
+| 턴테이블을 판정에서 빼기 | `crates/rbms-play/src/lib.rs`(`Player::with_auto_lanes`, `take_auto_lanes`), `crates/rbms-play/src/session.rs`(`field_timelines`, `auto_lanes`, `has_auto_played_notes`), 테스트 `crates/rbms-play/tests/scratch_auto.rs`(스크래치 없는 차트와 같은 집계, 턴테이블 키, 키음, 리플레이와 되감기, DP, 9키) |
+| 초록 그리기 | `crates/rbms-render/src/skin_render/notes.rs`(`LaneNotes::auto_lanes`, `AUTO_LANE_NOTE`), 내장 필드 `crates/rbms-render/src/playfield.rs`. 플레이 화면은 `apps/rbms-player/src/stage/play/mod.rs` 에서 필드의 차트와 레인을 넘긴다 |
+| SCRATCH AUTO 가 어시스트인지 | `apps/rbms-player/src/app_result.rs`(`scratch_auto_played`: 세션이 노트를 뺐는지) |
+| 손으로 친 판을 끝까지 돌려 DB 를 읽는 테스트 | `apps/rbms-player/src/app_result/record_tests.rs`(로그인 없음, 로그인 있음, 서버는 있고 로그인하지 않음(`ir_submitted` 0), 다음 실행, SCRATCH AUTO 저장과 최고 기록, SCRATCH AUTO 전송 내용, SCRATCH AUTO 스테이지가 든 코스, 넓힌 판정, 세대 2 의 행과 결과 화면의 이전 점수, 턴테이블 노트가 없는 차트, AUTOPLAY, FAILED, 리플레이를 본 뒤의 설정, 사용자 DB 사본(`#[ignore]`, `RBMS_SCOREDB_COPY=<사본> cargo test -p rbms-player --lib -- --ignored a_players_own_database`)). 올릴 수 있는 판정 폭은 `ir_replay.rs` 의 `only_a_judge_the_wire_can_state_is_uploaded` |
+| 캡처 | `RBMS_SKIN_CAPTURE_DIR` 을 주면 `scratch-auto-play-rbms-default.png`(와 `RBMS_SKIN_PACK` 의 팩 이름), `result-recorded-scratch-auto.png`, `select-recorded-scratch-auto.png`, `select-recorded-widened.png` 를 쓴다(`stage/play/screen_tests/default_pack_tests.rs`, `stage/result/tests.rs`, `stage/select/recorded_tests.rs`) |
 
 ## 11. 목표 점수(TARGET, TARGET FALLBACK, TARGET RATE)
 
@@ -477,7 +521,7 @@ SETTINGS 의 탭은 JUDGE, DISPLAY, INPUT, NETWORK, AUDIO, SELECT 여섯이다(P
 | RATE A- ~ RATE MAX-(10종) | 이론 최대의 17/27 ~ 26/27(원본 `RANK A-` ~ `RANK MAX-`). 정수로만 나눠 올림 | 노트 수 | 아니오 |
 | RANK NEXT | 내 최고 기록 바로 위의 등급 경계(없으면 처음부터) | 노트 수, 로컬 기록 | 아니오 |
 | RATE CUSTOM | 이론 최대의 TARGET RATE 몫(올림). 이름은 `SCORE RATE 85%` | 노트 수, TARGET RATE | 아니오 |
-| LOCAL BEST | 이 차트의 로컬 최고 EX(같은 LN 종류). 어시스트 판(SCRATCH AUTO, 넓힌 판정 폭)은 최고 기록이 아니라서 세지 않는다(10절) | 로컬 기록 | 예: 처음 치는 차트, 어시스트로만 친 차트 |
+| LOCAL BEST | 이 차트의 로컬 최고 EX(같은 LN 종류). 넓힌 판정 폭의 판과 웨이브 16 까지의 SCRATCH AUTO 판은 최고 기록이 아니라서 세지 않는다. 웨이브 18 부터의 SCRATCH AUTO 판은 센다(10절) | 로컬 기록 | 예: 처음 치는 차트, 넓힌 판정이나 웨이브 16 까지의 SCRATCH AUTO 로만 친 차트 |
 | IR BEST | 점수 서버가 가진 내 최고 EX | 선곡 패널이 받아 둔 순위표 | 예: 서버 없음, 로그인 안 함, 아직 못 받음 |
 | RIVAL | 라이벌 가운데 가장 높은 점수. 이름은 `RIVAL <이름>` | 같은 순위표의 라이벌 줄 | 예: 라이벌이 그 차트를 안 쳤음 |
 
@@ -521,7 +565,8 @@ TARGET 과 두 행은 같은 묶음 하나에만 둘 수 있어서(`SETTINGS` �
 
 - 원인: 이 사용자는 모든 판을 SCRATCH AUTO 로 쳐서 어느 차트에도 로컬 최고가 없다(어시스트 판은 최고 기록이 아니다. 10절). 그래서 LOCAL BEST 는 늘 물러나고, 기본 스킨은 "TARGET" 이라는 고정 글자만 그려 무엇으로 물러났는지 알 수 없었다.
 - **재현되지 않은 것**: 코드의 어느 길도 LOCAL BEST 를 RATE AAA 로 바꾸지 않는다. 보고의 "AAA" 는 코드로 설명되지 않는다. 가능한 근거는 두 가지이고 모두 고쳤다. (1) 파일의 목표 글자가 알 수 없는 꼴이면 기본값 RATE AAA 로 읽혔다: 이제 라벨(`LOCAL BEST`, `local_best`)도 같은 목표로 읽는다. (2) 물러나는 값이 이제 기본으로 RATE AAA 이므로 같은 상황에서 화면이 RATE AAA 를 따르고, 그 이름을 이름표가 말한다.
-- 결과 화면의 TARGET 은 웨이브 16 의 앞 단위에서 플레이 화면과 같은 값(어시스트 제외, 같은 LN 종류의 최고)으로 맞췄다(10.3).
+- 결과 화면의 TARGET 은 웨이브 16 의 앞 단위에서 플레이 화면과 같은 값(어시스트 제외, 같은 LN 종류의 최고)으로 맞췄다(10.6).
+- 웨이브 18 부터는 SCRATCH AUTO 판도 최고 기록이 되므로, 이 사용자가 새로 치는 판은 LOCAL BEST 가 된다. 웨이브 16 까지의 23판은 그대로 세지 않는다(10.4).
 
 ### 11.5 원본의 목표 목록과 빠진 것
 

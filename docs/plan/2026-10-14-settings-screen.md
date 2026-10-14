@@ -1,6 +1,6 @@
 # SETTINGS 화면 — 묶음 레일, 종류별 행, 정보 패널 (웨이브 16 K3) 설계서
 
-> 작성 2026-10-14 · 상태: 구현 완료(작업 트리 기준, d12b22c 이후). 이 문서는 최종 구현을 적는다. 같은 날 웨이브 16 통합에서 패널이 입력 모드를 따르게 하고(10.1절) 넓힌 판정의 경고 문구를 고쳤다(10절).
+> 작성 2026-10-14 · 상태: 구현 완료(작업 트리 기준, d12b22c 이후). 이 문서는 최종 구현을 적는다. 같은 날 웨이브 16 통합에서 패널이 입력 모드를 따르게 하고(10.1절) 넓힌 판정의 경고 문구를 고쳤다(10절). 웨이브 18(같은 날)에 사용자 결정으로 스위치·선택 행의 `Enter` 를 SKIN·PLAY 메뉴처럼 다음 값으로 바꾸고(4절, 12절), 넓힌 판정의 문구를 새 저장 규칙에 맞췄다(10절).
 > 사용자 요청(원문): "Tab누르면 나오는 메뉴를 조금 더 UI/UX 좋게 고도화 못하나? 지금 너무 딱딱하고 불편해보여."
 > 관련 문서: 짝이 되는 두 메뉴의 설계 `docs/plan/2026-10-11-skin-menu.md`·`docs/plan/2026-10-11-play-menu.md`, 옵션 정의 `docs/play-options.md`, 색 `docs/theme.md`
 
@@ -129,7 +129,7 @@ TARGET 은 `SettingTab::PlayChart` 의 행이라 이 화면이 아니라 PLAY �
 | `PgUp` `PgDn` | 앞·뒤 소제목의 첫 행 | 새로 |
 | `Home` `End` | 묶음의 첫·마지막 행 | 새로 |
 | `←` `→` | 스위치 뒤집기, 선택 한 칸, 숫자 한 걸음(`Shift` 는 열 걸음). FONT 는 `→` 파일 고르기·`←` 기본, SOUND FOLDER 는 `→` 폴더 고르기·`←` 없음 | 같다 |
-| `Enter` | 숫자: 직접 입력. KEY CONFIG: 키 설정. FONT: 파일 고르기. NETWORK 의 행: 편집·실행·목록·스위치. 그 밖의 행: 저장하고 닫기 | 같다(§12) |
+| `Enter` | 숫자: 직접 입력. KEY CONFIG: 키 설정. FONT: 파일 고르기. SOUND FOLDER: 폴더 고르기. NETWORK 의 행: 편집·실행·목록·스위치. 스위치: 뒤집기. 선택: 다음 값. 어느 행에서도 화면을 닫지 않는다 | 웨이브 18 에 바뀜: 전에는 스위치·선택·SOUND FOLDER 에서 저장하고 닫았다(§12) |
 | `0` | 커서 행을 기본값으로 | 숫자 행만 듣던 것을 되돌릴 수 있는 행 전부로 |
 | `Shift`+`0` | 묶음 되돌리기 확인 | 새로 |
 | `Tab` / `Shift`+`Tab` | 다음 / 앞 묶음(끝에서 돈다) | `Shift`+`Tab` 이 새로 |
@@ -141,12 +141,12 @@ TARGET 은 `SettingTab::PlayChart` 의 행이라 이 화면이 아니라 PLAY �
 | 커서 행 | 안내의 앞부분 |
 | --- | --- |
 | 숫자 | `LEFT RIGHT 1 STEP   SHIFT x10   ENTER TYPE   0 DEFAULT   DRAG SLIDER` |
-| 스위치 | `LEFT RIGHT SWITCH   0 DEFAULT   ENTER SAVE AND CLOSE`(NETWORK 의 스위치는 `ENTER SWITCH`) |
-| 선택 | `LEFT RIGHT CHANGE   0 DEFAULT   ENTER SAVE AND CLOSE` |
+| 스위치 | `LEFT RIGHT SWITCH   ENTER SWITCH   0 DEFAULT` |
+| 선택 | `LEFT RIGHT CHANGE   ENTER NEXT   0 DEFAULT` |
 | 글자 | `ENTER EDIT` |
 | 동작 | `ENTER RUN`, KEY CONFIG 는 `ENTER OPEN`, RIVALS·IR PROFILES 는 `ENTER OPEN THE LIST`, ACCOUNT 는 `ENTER SHOW ITS STATE` |
 | FONT | `ENTER CHOOSE A FILE   0 DEFAULT` |
-| SOUND FOLDER | `RIGHT CHOOSE A FOLDER   0 NONE   ENTER SAVE AND CLOSE` |
+| SOUND FOLDER | `ENTER RIGHT CHOOSE A FOLDER   0 NONE` |
 
 뒤따르는 화면의 키: `UP DOWN MOVE   PGUP PGDN SECTION   TAB GROUP   SHIFT+0 RESET GROUP   F8 PLAY   F12 SKINS   F5 KEYS   ESC SAVE`. 숫자 입력 중, 글자 입력 중, 목록, 확인 판에서는 그때 듣는 키만 쓴다.
 
@@ -182,7 +182,7 @@ TARGET 은 `SettingTab::PlayChart` 의 행이라 이 화면이 아니라 PLAY �
 | LOGIN 은 PLAYER ID 와 PASSWORD, REGISTER 는 EMAIL 도. 비밀번호는 쓰고 나면 지운다. LOGOUT 은 PLAYER ID 를 guest 로 | `app_network.rs` `start_auth`·`finish_logout` |
 | 출력 장치·버퍼·샘플레이트·폴리포니는 출력을 다시 연다 | `settings.rs` `reopen`, `audio.rs` |
 
-판정 폭이 100% 를 넘는 행에 커서가 있으면 패널이 `warn` 색으로 경고한다(`OVER 100%: A RUN PLAYED LIKE THIS SETS NO BEST SCORE AND IS NOT SENT. ITS LAMP AND HISTORY ARE KEPT.`). 웨이브 16 통합 전의 문구는 `... IS NOT SCORED OR SENT.` 였는데, 실제로는 이력·램프·횟수가 남아 "기록이 저장되지 않는다"는 오해를 되풀이했다. 행 설명과 README 의 같은 문장도 함께 고쳤다.
+판정 폭이 100% 를 넘는 행에 커서가 있으면 패널이 `warn` 색으로 경고한다(`OVER 100%: A RUN PLAYED LIKE THIS SETS NO BEST SCORE. IT IS STILL KEPT, WITH ITS REPLAY, AND SENT.`). JUDGE WIDTH 여섯 행과 LN MARGIN 행의 설명(`catalog.rs`)도 같은 말이다(`no best score, ASSIST EASY at best; the run is still kept, with its replay, and sent`). 웨이브 18 전의 문구는 `... SETS NO BEST SCORE AND IS NOT SENT. ITS LAMP AND HISTORY ARE KEPT.` 였고, 사용자 결정(2026-10-14, 사람이 친 판은 모두 저장·전송)으로 넓힌 판정의 판도 리플레이와 함께 남고 보내지게 되어 고쳤다. 웨이브 16 통합 전의 문구는 `... IS NOT SCORED OR SENT.` 였는데, 실제로는 이력·램프·횟수가 남아 "기록이 저장되지 않는다"는 오해를 되풀이했다. 행 설명과 README 의 같은 문장도 함께 고쳤다.
 
 ### 10.1 입력 모드 중의 패널
 
@@ -205,7 +205,7 @@ TARGET 은 `SettingTab::PlayChart` 의 행이라 이 화면이 아니라 PLAY �
 
 | 항목 | 내용 |
 | --- | --- |
-| `Enter` | 스위치·선택·SOUND FOLDER 에서 `Enter` 는 전처럼 저장하고 닫는다. SKIN·PLAY 메뉴에서는 `Enter` 가 다음 값이라 두 화면과 다르다. 기존 동작 보존이 지시라 바꾸지 않았고, 바닥 안내가 `ENTER SAVE AND CLOSE` 라고 적는다. 메뉴와 맞출지는 사용자 결정으로 남긴다 |
+| `Enter` | 웨이브 18 에 고쳤다(사용자 결정 2026-10-14). 스위치는 뒤집고 선택은 다음 값으로 바꾸며(오른쪽 화살표와 같은 한 칸), SOUND FOLDER 는 폴더를 고른다. SKIN·PLAY 메뉴와 같다. 닫기는 `Esc` 만 한다. 숫자·KEY CONFIG·FONT·NETWORK 의 행은 전과 같다(LOGOUT 은 전처럼 확인 없이 바로 로그아웃한다). 구현: `stage/settings.rs` 의 `Enter` 가지가 `step(.., ROW_STEP_FORWARD, ..)` 로 가고, 바닥 안내는 `info::row_keys`. 테스트 `the_line_of_keys_says_what_the_row_under_the_cursor_hears` |
 | 저장 시점 | 전과 같다: `Esc`, 드래그를 놓을 때, 글자 확정, NETWORK 스위치, FONT. 묶음 되돌리기는 확정하면 쓴다 |
 | GUIDE SE | 고쳤다. 스위치를 바꿔도 가이드음 사용 여부가 시스템 사운드에 전달되지 않아 다음 실행이나 사운드 폴더를 다시 읽을 때까지 반영되지 않았다(`run_action` 의 닿지 않는 가지에만 `set_guide_enabled` 가 있었다). 이제 한 칸 움직인 뒤에 바로 전달한다 |
 | 판정·오디오·형식 | 판정 창과 알고리즘, 오디오 시계, 설정 파일·키 설정·기록 형식은 건드리지 않았다. 내장 화면의 골든 서명 중 이 화면의 것은 없다 |
