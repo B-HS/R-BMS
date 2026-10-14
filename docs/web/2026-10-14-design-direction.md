@@ -1,6 +1,9 @@
 # R-BMS 웹 디자인 기준 (웨이브 17A · 작업 A2)
 
-> 현재 상태: 조사·설계 완료, 구현 전. 이 문서는 다음 웨이브가 원본을 다시 읽지 않고 구현할 수 있도록 쓴 설계 기준입니다.
+> 최종 갱신 2026-10-14 · 대응 커밋 7095ef7
+
+> 현재 상태: 4.1절의 1차(골격·토큰·난이도표·폴더)는 웨이브 17B-1·17B-2 에서 구현됐고(d38b6fb, 711b518), 6절의 결정 10건은 모두 A안으로 채택됐습니다([../acknowledge/2026-10-14-web-decisions.md](../acknowledge/2026-10-14-web-decisions.md) M7, 현재 디자인 정본은 [../acknowledge/design.md](../acknowledge/design.md)). 4.2절의 2차 가운데 메타(`openGraph` 속성, `robots.ts`, `sitemap.ts`, `icon.svg`)와 난이도표 상세의 "폴더에 추가"는 끝났고, 나머지는 미착수입니다: 홈 대시보드 재구성, 차트·플레이어 페이지 재구성, 설정 구역화, 검색 필터의 머리 + 대화상자, 난이도표 한 곡 한 행 보기·카드 높이 선택, 폴더 끌어 옮기기·가상화, OG 이미지, Inter 글꼴 검토([tasks.md](./tasks.md) "남은 일"). 2.4절·5절이 말하는 운영 사이트의 결함(시험 계정, 영문 404, 제목 `rbms IR`)은 해소됐습니다([2026-10-14-audit.md](./2026-10-14-audit.md) 해소 현황). 아래 본문은 설계 당시의 기록이며, `web:` 로 적은 경로 중 `features/badge/lamp-badge`·`widgets/shell/nav-rail`·`widgets/shell/filter-panel` 은 지금 없습니다([components.md](./components.md) 3절에 대응 경로).
+> 이 문서는 다음 웨이브가 원본을 다시 읽지 않고 구현할 수 있도록 쓴 설계 기준이었습니다.
 > 작성일 2026-10-14. 이 문서는 새 문서이며 `docs/acknowledge/design.md`, `docs/web/components.md` 를 고치지 않았습니다. 두 문서와 달라지는 곳은 3.1절 표에 모았고, 채택 여부는 6절의 결정으로 남깁니다.
 > 근거 표기: `iidx:` 는 `/Users/hyunseokbyun/development/iidx-rank/src/` 아래, `web:` 은 `/Users/hyunseokbyun/development/R-BMS/web/src/` 아래 경로입니다. 뒤의 숫자는 줄 번호입니다.
 

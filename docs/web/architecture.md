@@ -1,6 +1,8 @@
 # rbms web — 아키텍처 설계 (W0)
 
-> **현재 구현 기준(2026-09-16):** W0~W2 작업은 완료됐습니다. 실제 라우트는 `web/src/app/{(app),(public),api}/`, 서버 경계는 `web/src/server/`가 정본입니다. 본문에 남은 "착수 시", "향후", 가정은 설계 이력으로만 읽고, 이 상태 블록과 §9를 우선합니다. 실제 운영 시크릿·배포 smoke test는 Phase R 보류입니다.
+> 최종 갱신 2026-10-14 · 대응 커밋 7095ef7
+
+> **현재 구현 기준:** W0~W2 와 웨이브 17B(웹 골격·폴더·발광 표)·20(SCRATCH AUTO 순위)까지 반영했습니다. 실제 라우트는 `web/src/app/{(app),(public),api,tables}/`, 서버 경계는 `web/src/server/`가 정본입니다. 본문에 남은 "착수 시", "향후", 가정은 설계 이력으로만 읽고, 이 상태 블록과 §9를 우선합니다. **운영 배포는 2026-10-14 에 끝났습니다**(https://bms.hyuns.uk, Vercel 프로젝트 `rbms-web`, 운영 DB 마이그레이션 0000~0002 적용, 시험 계정 삭제). 배포 설정은 §6-2, 운영 DB 작업은 §3-2 가 정본입니다. 2026-10-14 점검에서 나온 고장 12건의 해소 현황은 [2026-10-14-audit.md](./2026-10-14-audit.md) 맨 위 표입니다.
 
 > 근거: `docs/acknowledge/2026-09-09-enhancement-decisions.md` §웹·백엔드 단독 서버(W1~W8), `docs/backend/{PRD,api-spec,data-model,endpoint-tasks,compatibility,contract-freeze}.md`, `docs/reference/ir-api.md`, 실제 와이어 `crates/rbms-ir/src/{http.rs,dto.rs}`, `docs/acknowledge/design.md`.
 > 컨벤션: `~/.claude/convention/{common,frontend,fsd,query,security,backend,comments}.md`.
@@ -32,9 +34,9 @@
 
 ## 1. 라우트 맵 (App Router)
 
-### 1-1. 페이지 — 라우트 그룹 2개 = 디자인 Surface 2개
+### 1-1. 페이지 — 라우트 그룹 2개 (Surface 는 하나)
 
-design.md §1-2 는 두 Surface의 **시각 토큰을 분리**한다. 라우트 그룹의 `data-surface` 스코프로 그 경계를 적용한다.
+설계 당시에는 design.md §1-2 가 두 Surface(A 앱, B 공개)로 시각 토큰을 나눴으나, 2026-10-14 에 **Surface 하나로 합쳤다**(design-direction T1, [../acknowledge/design.md](../acknowledge/design.md) 1-2). 모든 화면이 루트 `app/layout.tsx` 의 `AppShell`(사이드바 + 본문 2열) 안에 있고 `data-surface` 스코프는 없다. `(app)`·`(public)` 은 폴더 정리용이며 두 그룹의 `layout.tsx` 는 삭제됐다. 아래 표의 Surface 열은 설계 이력이다.
 
 | 그룹 | 라우트 | 화면 | Surface | 인증 |
 |---|---|---|---|---|
@@ -47,15 +49,15 @@ design.md §1-2 는 두 Surface의 **시각 토큰을 분리**한다. 라우트 
 | `(app)` | `/players/[id]` | 플레이어 프로필(통계·최근 기록·라이벌) | A | 공개 읽기 |
 | `(app)` | `/leaderboards` | 종합 플레이어 랭킹 | A | 공개 읽기 |
 | `(app)` | `/tables` · `/tables/[id]` | 번들 표 카드 + IR 난이도표 | A | 공개 읽기 |
-| `(app)` | `/tables/insane1` | 発狂BMS難易度表 사본(카드 격자, 내 램프, `bmstable` 메타, noindex). 2026-10-14 웨이브 17B-2 | A | 공개 읽기(로그인 시 내 기록) |
+| `(app)` | `/tables/insane1` | 発狂BMS難易度表 사본(카드 격자, 내 램프, `bmstable` 메타 = `/tables/insane1/header.json`, noindex). 2026-10-14 웨이브 17B-2(711b518). 이 페이지의 주소 `https://bms.hyuns.uk/tables/insane1` 가 R-BMS 의 기본 등록 표 주소다 | A | 공개 읽기(로그인 시 내 기록) |
 | `(app)` | `/folders` · `/folders/[folderId]` | 내 폴더 목록과 명시 저장 편집. 2026-10-14 웨이브 17B-2 | A | **세션 필수**(proxy + `SessionGate`) |
 | `(app)` | `/courses/[hash]` | 코스 랭킹 | A | 공개 읽기 |
 | `(app)` | `/replays/[id]` | 리플레이 뷰어(µs 이벤트 타임라인) | A | 공개 읽기 |
 | `(app)` | `/settings` | 계정 설정(탭: 프로필 / API 토큰 / 동기화 blob / 라이벌) | A | **세션 필수** |
 | `(app)` | `/admin/builds` | 빌드 allowlist(FR-13) | A | **세션 + role=admin** |
 
-- `(app)` 루트의 미인증 처리: 공개 읽기 라우트는 통과, `/settings`·`/admin/*` 만 서버에서 세션 확인 후 `/login?next=` 로 redirect. **가정**: 미들웨어(`proxy.ts`/`middleware.ts`) 대신 각 세그먼트 `layout.tsx` 의 서버 세션 확인으로 게이팅한다(Vercel 미들웨어에서 DB 접속을 피하기 위함).
-- `(app)` 셸은 design.md §8-1 3열(사이드바 256px / 콘텐츠 fluid / 컨텍스트 패널 320px, gap 1px, 헤더 없음). 컨텍스트 패널은 이 제품에서 **필터 패널**(모드·레벨·랭프·기간·검색어)로 쓴다.
+- `(app)` 루트의 미인증 처리: 공개 읽기 라우트는 통과하고 `/settings`·`/admin/*`·`/folders/*` 만 보호한다. 두 겹이다. ① `web/src/proxy.ts`(Next 16 의 proxy, matcher `/settings/:path*`·`/admin/:path*`·`/folders/:path*`)가 better-auth 세션 쿠키가 없으면 `/login?next=` 로 진짜 리다이렉트한다(DB 접속 없음, 쿠키 존재만 본다). ② 각 세그먼트 `layout.tsx` 의 `SessionGate`(`widgets/auth/session-gate.tsx`)가 서버에서 세션을 다시 읽어 없으면 `redirect`, `/admin` 은 `role=admin` 이 아니면 `/` 로 보낸다(쿠키가 있어도 만료·위조면 여기서 막힌다). 2026-10-14 점검 당시의 "200 + meta refresh" 는 d38b6fb 에서 해소됐다.
+- 셸은 design.md §8-1 의 2열이다(사이드바 `16rem`, 접으면 `3rem`, 모바일 시트 `18rem` / 본문, 페이지마다 48px 머리 하나). 우측 컨텍스트 패널은 폴더 편집 화면(`folder-editor-workspace.tsx` 의 `곡 추가` aside, `xl` 이상)에서만 쓴다. 옛 3열(256px / fluid / 320px 필터 패널)과 `FilterPanel`·`NavRail` 은 d38b6fb 에서 사라졌다.
 
 ### 1-2. Route Handler 맵 — 네이티브(계약 동결분, raw JSON)
 
@@ -85,14 +87,14 @@ design.md §1-2 는 두 Surface의 **시각 토큰을 분리**한다. 라우트 
 | GET | `/api/players/[playerId]/scores` | `.../scores/route.ts` | 없음 | `player-scores:{id}` |
 | GET/PUT | `/api/players/[playerId]/settings/[name]` | `.../settings/[name]/route.ts` | Bearer·본인 | 없음(개인·비캐시) |
 | POST | `/api/courses` | `app/api/courses/route.ts` | Bearer | — |
-| POST | `/api/courses/meta` | `app/api/courses/meta/route.ts` | admin | — |
+| POST | `/api/courses/meta` | `app/api/courses/meta/route.ts` | admin 세션(`withAdmin`) | — |
 | GET | `/api/courses/[courseHash]` | `.../[courseHash]/route.ts` | 없음 | `course:{hash}` |
 | POST | `/api/courses/[courseHash]/scores` | `.../scores/route.ts` | Bearer | — |
 | GET | `/api/courses/[courseHash]/ranking` | `.../ranking/route.ts` | 없음 | `course-ranking:{hash}` |
 | GET | `/api/courses/[courseHash]/best` | `.../best/route.ts` | 없음 | `course-best:{hash}` |
 | GET/POST | `/api/tables` | `app/api/tables/route.ts` | GET 없음 / POST admin | `tables` |
 | GET | `/api/tables/[tableId]` | `.../[tableId]/route.ts` | 없음 | `table:{id}` |
-| GET/POST | `/api/admin/builds` | `app/api/admin/builds/route.ts` | admin(POST 는 CI 토큰도 허용) | `client-builds` |
+| GET/POST | `/api/admin/builds` | `app/api/admin/builds/route.ts` | admin 세션만(`withAdmin`). 릴리스 CI 는 아직 이 경로로 등록하지 않는다(KNOWN ISSUE) | `client-builds` |
 
 **클라 호출 대조(contract-freeze A 전수)**: `/health` `/scores` `/charts/{md5}/ranking?limit=` `/charts/{md5}/best?player=` `/players/{id}` `/players/{id}/rivals` `/courses` `/charts/{md5}/replays` `/courses/{hash}/ranking?limit=` `/replays/{id}` `/players/{id}/settings/{name}`(GET/PUT) `/auth/register` `/auth/login` — 14개 전부 위 표에 존재. 누락 없음.
 
@@ -140,7 +142,7 @@ design.md §1-2 는 두 Surface의 **시각 토큰을 분리**한다. 라우트 
 
 네이티브 클라이언트가 읽는 폴더 경로(봉투 없음, Bearer 또는 세션, 본인만, 캐시하지 않음): `GET /api/players/[playerId]/folders`(`{ folders: [...] }`)와 `GET /api/players/[playerId]/folders/[folderId]`(폴더 하나와 `items`). 응답 필드는 `docs/plan/2026-10-14-web-user-folders.md` §7.2 와 같고 `GET /api/health` 의 `capabilities.folders` 가 `true` 다. API 토큰으로는 **읽기만** 되고 편집(`/api/fe/me/folders…`)은 세션만 받는다.
 
-표준 BMS 표 형식(루트 `src/app/tables/[tableId]/`, 봉투 없음, 무인증, `Access-Control-Allow-Origin: *`): `GET /tables/insane1/header.json`(`data_url` 은 **요청 origin 의 절대 주소**, `mirror_of` 로 원본 보관본을 밝힘)과 `GET /tables/insane1/data.json`(스냅샷 배열 그대로. `ETag` 와 304 지원, `Cache-Control: public, max-age=3600, s-maxage=3600, stale-while-revalidate=86400`). 자료는 `web/data/tables/<id>/{header,data,source}.json` 을 **정적 import** 해서 쓰므로 DB 도 파일 추적 설정(`outputFileTracingIncludes`)도 필요 없다(서버 번들에 실린다). 표를 더하려면 폴더를 만들고 `table-snapshot.data.ts` 의 `RAW_SNAPSHOTS` 에 한 줄을 더한다. 사람이 보는 페이지(`/tables/insane1`, `bmstable` 메타는 `/tables/insane1/header.json` 루트 상대 경로)는 화면 웨이브의 몫이다.
+표준 BMS 표 형식(루트 `src/app/tables/[tableId]/`, 봉투 없음, 무인증, `Access-Control-Allow-Origin: *`): `GET /tables/insane1/header.json`(`data_url` 은 **요청 origin 의 절대 주소**, `mirror_of` 로 원본 보관본을 밝힘)과 `GET /tables/insane1/data.json`(스냅샷 배열 그대로. `ETag` 와 304 지원, `Cache-Control: public, max-age=3600, s-maxage=3600, stale-while-revalidate=86400`). 자료는 `web/data/tables/<id>/{header,data,source}.json` 을 **정적 import** 해서 쓰므로 DB 도 파일 추적 설정(`outputFileTracingIncludes`)도 필요 없다(서버 번들에 실린다). 표를 더하려면 폴더를 만들고 `table-snapshot.data.ts` 의 `RAW_SNAPSHOTS` 에 한 줄을 더한다. 사람이 보는 페이지 `/tables/insane1`(`bmstable` 메타는 `/tables/insane1/header.json` 루트 상대 경로)은 웨이브 17B-2 에서 구현됐다.
 
 내 기록 조회(`/records`)는 표의 md5 전부(1,035개)를 `IN` 한 번으로 묻고, 기록이 있는 곡만 `{ md5: { clear, ex_score, minbp, max_combo, total_notes, played_at, scratch_auto } }` 로 돌려준다(최대 약 150KB). 곡마다 일반 판 최고와 SCRATCH AUTO 판 최고 가운데 더 높은 것이고, 화면은 SCRATCH AUTO 쪽이면 A-SCR 표지를 붙인다(웨이브 20). 표 상세는 약 380KB(gzip 전)이고 공개 캐시(`s-maxage=3600`)다. `GET /api/fe/leaderboards/players` 는 `rank_points` 를 쓰지 않는다: `sort` 는 `cleared`(클리어한 차트 수, 기본)·`played`(플레이한 차트 수)·`plays`(제출 수)이고 옛 값 `rank_points`·`total_plays` 는 각각 `cleared`·`plays` 로 받는다. 항목에 `cleared_charts`·`played_charts` 가 더해진다(클리어 = `chart_best.clear >= Easy`).
 
@@ -152,7 +154,7 @@ design.md §1-2 는 두 Surface의 **시각 토큰을 분리**한다. 라우트 
 | 웹 FE | better-auth 세션 쿠키(HttpOnly·SameSite=Lax) | `withSession` HOF → `auth.api.getSession({ headers })` |
 | guest 제출 | 자격 없음 + `ALLOW_GUEST=true` | `POST /api/scores` 만 허용, 항상 `ranked=false` + `flags:["GUEST"]` |
 | admin | 세션 + `user.role='admin'` | `withAdmin` |
-| 릴리스 CI(빌드 등록) | 전용 admin `api_token` | `POST /api/admin/builds` |
+| 릴리스 CI(빌드 등록) | 미구현. `withAdmin` 이 세션만 받아 API 토큰으로는 등록할 수 없고 `release.yml` 도 호출하지 않는다 | `POST /api/admin/builds` |
 
 `GET /api/auth/me` 는 **Bearer 와 세션 둘 다** 수용한다(네이티브·FE 공용). 그 외 네이티브 경로는 Bearer, FE 경로는 세션.
 
@@ -163,15 +165,18 @@ design.md §1-2 는 두 Surface의 **시각 토큰을 분리**한다. 라우트 
 ```
 web/
   package.json  next.config.ts  tsconfig.json  drizzle.config.ts  components.json
-  bunfig.toml  .env.example
+  vercel.json  bunfig.toml  .env.example  AGENTS.md
+  data/tables/<id>/             표 스냅샷(header.json · data.json · source.json)
+  scripts/                      db-migration-status.ts · run-sql.ts · snapshot-table.ts · cleanup-test-accounts.{count,delete}.sql
   drizzle/                            drizzle-kit 산출 마이그레이션(커밋)
   src/
     app/                              ← FSD app 레이어 = Next App Router
-      layout.tsx                      html/body, 프로바이더, pre-paint 스크립트
-      (public)/layout.tsx             Surface B 셸
-        login/page.tsx  signup/page.tsx  guide/page.tsx
-      (app)/layout.tsx                Surface A 3열 셸
+      layout.tsx                      html/body, 프로바이더(next-themes 기본 다크), AppShell
+      error.tsx  global-error.tsx  not-found.tsx  robots.ts  sitemap.ts  icon.svg
+      (public)/                       login/page.tsx  signup/page.tsx  guide/page.tsx
+      (app)/                          (layout.tsx 없음)
         page.tsx  search/page.tsx
+        folders/page.tsx  folders/[folderId]/page.tsx  tables/insane1/page.tsx
         charts/[hash]/page.tsx
         players/[playerId]/page.tsx
         leaderboards/page.tsx
@@ -181,6 +186,8 @@ web/
         settings/page.tsx
         admin/builds/page.tsx
       api/…                           ← §1-2·§1-3 Route Handler (얇은 어댑터만)
+      tables/[tableId]/{header,data}.json   표준 BMS 표 형식 Route Handler (§1-3)
+    proxy.ts                          세션 쿠키 없는 /settings·/admin·/folders 요청을 /login 으로 (§1-1)
     widgets/                          비즈니스 로직(쿼리 훅·mutation·권한) 조립
     features/                         순수 UI(props+콜백)
     entities/                         데이터 계층
@@ -192,22 +199,22 @@ web/
     server/                           ← 서버 전용(클라 번들 반입 금지)
       route/                          Route Handler 팩토리(도메인별 핸들러 조립)
       service/
-        domain/{auth,score,chart,player,replay,setting,course,table,fe}/
-        shared/{storage,ratelimit,integrity}/
+        domain/{admin,auth,chart,course,fe,folder,player,replay,score,setting,system,table,table-snapshot}/
+        shared/{storage,integrity}/        (rate limit 은 lib/with-rate-limit.ts)
       dto/                            zod 스키마(입력·응답)
       db/  index.ts  schema.ts
       lib/  error-code.ts error-message.ts error.ts api-response.ts
             with-error-handling.ts with-api-token.ts with-session.ts
-            with-admin.ts with-rate-limit.ts env.ts auth.ts
+            with-session.ts(withSession · withAdmin) with-rate-limit.ts env.ts auth.ts
       compose/                        의존성 조립(도메인별 ServiceDb 구현)
-  tests/                              bun test (dto·service·lib·route)
-  mocks/                              MSW 핸들러(UI 선행 개발용)
+  tests/                              bun test (components · db · dto · lib · route · service · support)
 ```
 
 ### 2-1. Path alias (= 레이어, `fsd.md` §5)
 
 ```jsonc
 {
+  "@/*":         ["./src/*"],
   "@app/*":      ["./src/app/*"],
   "@widgets/*":  ["./src/widgets/*"],
   "@features/*": ["./src/features/*"],
@@ -217,9 +224,9 @@ web/
 }
 ```
 
-- 의존 방향: `app → widgets → features → entities → shared`. 역참조 금지, barrel(`index.ts`) 금지.
+- 의존 방향: `app → widgets → features → entities → shared`. 역참조 금지, barrel(`index.ts`) 금지. `pages` 레이어는 없다(Next App Router 가 `app` 에 통합). `entities/` 에는 `*.api.ts` 가 없고 `*.query.ts` 가 `shared/lib/fetch.ts` 의 `fetchEnvelope`·`fetchEnvelopePage`·`fetchRaw`·`fetchNoContent` 를 직접 쓴다(`clientFetch` 라는 이름의 함수는 없다).
 - `@server/*` 는 **`app/api/**` 와 서버 컴포넌트에서만** import 한다. `widgets`/`features`/`entities` 는 절대 import 하지 않는다(번들 유출 방지). 파일 상단 `import 'server-only'` 로 강제.
-- `entities/*.api.ts` 는 브라우저/서버 양쪽에서 도는 fetch 래퍼(`clientFetch`)만 둔다. Drizzle 은 `@server/db` 안에서만.
+- 브라우저/서버 양쪽에서 도는 fetch 래퍼는 `shared/lib/fetch.ts`(`fetchEnvelope` 등)에 있고 `entities/*.query.ts` 가 부른다(설계 당시의 `entities/*.api.ts` 는 만들지 않았다). Drizzle 은 `@server/db` 안에서만.
 
 ### 2-2. 계층 규칙 (backend.md 를 Route Handler 에 적용)
 
@@ -255,13 +262,13 @@ Route Handler (app/api/**/route.ts)
 - `drizzle.config.ts`: `schema: ['./src/server/db/schema.ts', './src/server/db/auth-schema.ts']`, `dialect: 'mysql'`, `out: './drizzle'`.
 - 흐름: `bunx @better-auth/cli generate` → `bun run db:generate` → `bun run db:migrate`. 산출 파일(`drizzle/*.sql` 과 **`drizzle/meta/`**)은 **커밋**한다. `meta/` 가 없으면 `db:migrate` 는 `Can't find meta/_journal.json` 으로 멈추고 `db:generate` 는 21개 테이블 전체를 다시 만든다(2026-10-14 까지 `.gitignore` 가 `/drizzle/meta` 를 막고 있었다. 이제 풀었다).
 - **`drizzle-kit push` 금지**(운영 DB 히스토리 유실). 로컬 실험도 generate/migrate 로 통일.
-- 현재 파일: `0000_smooth_cerebro`(21 테이블, 운영에 이미 적용됨) → `0001_user_folders`(`user_folder`, `user_folder_item` 과 FK 둘, 인덱스 셋).
+- 현재 파일(`web/drizzle/`, `meta/_journal.json` 과 스냅샷 3개도 커밋): `0000_smooth_cerebro`(21 테이블) → `0001_user_folders`(`user_folder`, `user_folder_item` 과 FK 둘, 인덱스 셋) → `0002_scratch_auto_bests`(`chart_best`·`course_best`·`course_score` 에 `scratch_auto` 열, `chart_best`·`course_best` 의 PK 를 `scratch_auto` 포함으로, `chart_best_rank_idx` 재생성). **셋 모두 운영 DB 에 적용됐다(2026-10-14, `web-db.yml` 의 `migrate`).** 저널 `when`: 0000 = 1788220800000, 0001 = 1791947162271, 0002 = 1791970074354 (단조 증가).
 - **저널 `when` 의 규칙**: 설치된 drizzle-orm 0.45.2 의 마이그레이터(`mysql-core/dialect.js` 의 `migrate`)는 `__drizzle_migrations` 에서 `created_at` 이 가장 큰 행 하나만 읽고, 저널 항목의 `when` 이 그 값보다 **큰** 항목만 실행한다(해시는 비교하지 않는다. `drizzle-kit migrate` 는 `drizzle-orm/mysql2/migrator` 를 그대로 부른다). 그래서 복원한 `0000` 의 `when` 은 운영에 적용된 값(2026-09-09 근처)보다 작은 **2026-09-01 00:00 UTC(`1788220800000`)** 로 두었다. 운영에서 `0000` 은 건너뛰고 `0001`(`when` = 생성 시각)만 실행된다. 새 마이그레이션은 `db:generate` 가 현재 시각으로 `when` 을 붙이므로 항상 더 크다.
 - **운영 DB 의 상태 확인**: `bun scripts/db-migration-status.ts`(환경 변수의 DB 로 접속, 읽기 전용 쿼리만. 해시 앞 8자·`created_at`·파일별 적용 여부·새 테이블의 존재만 출력하고 접속 정보와 자료는 출력하지 않는다). 종료 코드 0 = 최신, 1 = 할 일이 있음(마이그레이션 대기 또는 기준선 필요), 2 = 접속 실패.
 - **운영이 `push` 로 만들어져 `__drizzle_migrations` 가 없다면(기준선 절차)**: `db:migrate` 를 먼저 돌리면 `0000` 의 `CREATE TABLE` 이 "이미 있음" 으로 실패한다. 상태 스크립트가 이 경우를 알려 주면 ① `bun scripts/db-migration-status.ts --baseline-sql` 의 출력(`__drizzle_migrations` 테이블 생성과 `0000` 의 해시·`when` 한 행 삽입)을 DB 에 한 번 적용하고 ② 상태를 다시 확인한 뒤 ③ `bun run db:migrate` 를 돌린다. 이 절차는 로컬 MySQL 에서 `0000` 을 직접 적용해 만든 push 상태의 DB 로 확인했다.
-- **운영 DB 작업 워크플로(2026-10-14)**: `.github/workflows/web-db.yml`(수동 실행). 운영 `DATABASE_URL` 은 Vercel 에 Secret 형식으로 있어 `vercel env pull`·`vercel env run` 으로 받을 수 없으므로(확인: "2 Secret values cannot be pulled"), 저장소 시크릿 `WEB_DATABASE_URL` 로 둔다. 동작: `status`(상태 확인), `migrate`(상태 → 적용 → 상태), `cleanup-count`, `cleanup-delete`(세기 → 지우기 → 다시 세기). 값은 출력하지 않는다. 실행: `gh workflow run web-db.yml --ref dev -f action=<동작>`. SQL 파일은 `web/scripts/run-sql.ts`(`web/scripts/` 아래의 `.sql` 만, 여러 문장 허용)로 돈다. 운영 DB 가 GitHub 러너의 접속을 받지 않으면 같은 명령을 로컬에서 `DATABASE_URL` 을 환경에만 주고 실행한다.
+- **운영 DB 작업 워크플로(2026-10-14, 운영 DB 는 GitHub 러너에서 접속됨 — 확인됨. 결정 근거: [../acknowledge/2026-10-14-adr-production-db-operations.md](../acknowledge/2026-10-14-adr-production-db-operations.md))**: `.github/workflows/web-db.yml`(수동 실행). 운영 `DATABASE_URL` 은 Vercel 에 Secret 형식으로 있어 `vercel env pull`·`vercel env run` 으로 받을 수 없으므로(확인: "2 Secret values cannot be pulled"), 저장소 시크릿 `WEB_DATABASE_URL` 로 둔다. 동작: `status`(상태 확인), `migrate`(상태 → 적용 → 상태), `cleanup-count`, `cleanup-delete`(세기 → 지우기 → 다시 세기). 값은 출력하지 않는다. 실행: `gh workflow run web-db.yml --ref dev -f action=<동작>`. SQL 파일은 `web/scripts/run-sql.ts`(`web/scripts/` 아래의 `.sql` 만, 여러 문장 허용)로 돈다. (`web-db.yml` 의 `migrate`·`cleanup-delete` 는 실제로 돌렸고, 시험 계정 5개는 삭제됐다. 남은 데이터는 다른 사용자 점수 3건.) 운영 DB 가 러너의 접속을 받지 않게 되면 같은 명령을 로컬에서 `DATABASE_URL` 을 환경에만 주고 실행한다. 이 저장소에서 `.env` 계열은 읽지 않는다.
 - **적용 순서**: 마이그레이션을 **먼저** 운영 DB 에 적용하고 **그 다음** 웹을 배포한다. 새 테이블을 쓰는 코드가 먼저 나가면 폴더 경로가 500 을 낸다. 마이그레이션은 빌드에 포함하지 않는다(`DATABASE_URL` 은 사용자 PC 의 환경에만 준다).
-- 인덱스 우선 적용: `chart(uniq md5)`, `score uniq(user_id, chart_sha256, played_at)`(멱등), `score idx(chart_sha256, ranked, clear, ex_score)`, `chart_best PK(chart_sha256, user_id, scratch_auto)`(웨이브 20, 0002), `score idx(client_build_sha256)`.
+- 인덱스 우선 적용: `chart(uniq md5)`, `score uniq(user_id, chart_sha256, played_at)`(멱등), `score idx(chart_sha256, ranked, clear, ex_score)`, `chart_best PK(chart_sha256, user_id, scratch_auto)`(웨이브 20, 0002), `chart_best idx(chart_sha256, scratch_auto, clear, ex_score)`, `score idx(client_build_sha256)`.
 - 커넥션: `mysql2/promise` 풀 싱글톤(`src/server/db/index.ts`). Vercel Fluid Compute 특성상 인스턴스당 풀이 살아있으므로 `connectionLimit` 은 작게(**가정: 5**) 잡고 `enableKeepAlive: true`.
 
 ---
@@ -274,7 +281,7 @@ Route Handler (app/api/**/route.ts)
 - `database: drizzleAdapter(db, { provider: 'mysql' })`. 핸들러는 `app/api/auth/[...all]/route.ts` 에서 `toNextJsHandler(auth)` 로 GET/POST 노출.
 - `baseURL = BETTER_AUTH_URL`, 시크릿 = `BETTER_AUTH_SECRET`.
 - **IR 호환 래퍼**: `POST /api/auth/register` · `/api/auth/login` 은 better-auth 를 내부 호출(`auth.api.signUpEmail` / `signInEmail`)한 뒤, 응답을 클라가 기대하는 `AuthResponse { token, player: {id}, name }`(`dto.rs:311`)로 **변환**해 raw 로 돌려준다. 동시에 세션 쿠키도 함께 세팅해 웹에서 같은 엔드포인트를 재사용할 수 있게 한다.
-  - `AuthRequest { id, password, email?, name? }` 에서 `id` 는 로그인 id, `email` 은 optional. better-auth 는 email 을 필수로 요구하므로 **email 미제공 시 `{id}@local.invalid` 형태의 내부 합성 주소를 쓴다**(가정 — §7 오픈 질문).
+  - `AuthRequest { id, password, email, name? }` 에서 `id` 는 로그인 id. **가입(`accountSchema`)은 `email` 이 필수**(유효한 주소)이고 비밀번호는 8자 이상이다. 설계 당시의 `{id}@local.invalid` 합성 주소 가정은 폐기됐다(클라이언트도 이메일을 입력받는다). 로그인(`loginSchema`)은 `id`·`password` 만 쓴다.
   - 반환 `token` 은 세션 토큰이 아니라 **새로 발급한 `api_token`** 이다(네이티브 클라가 Bearer 로 재사용해야 하므로).
 
 ### 4-2. api_token (네이티브 Bearer)
@@ -299,12 +306,13 @@ Route Handler (app/api/**/route.ts)
 | `POST /api/scores` | 60/min/token |
 | `POST /api/charts/[hash]/replays` | 10/min/token |
 | `/api/fe/*` 공개 읽기, `/api/auth/get-session`·`sign-out` | 120/min/IP |
+| `POST /api/fe/auth/login` · `/register` | 5/min/IP (`/api/auth/*` 와 같은 버킷) |
 | 폴더 편집(만들기·고치기·지우기·순서·곡 넣고 빼기) | 60/min/사용자 |
 | 폴더에 표 가져오기 | 10/min/사용자 |
 | 폴더 읽기(웹·클라이언트) | 120/min/사용자 |
 | 표의 내 기록 조회 | 30/min/사용자 |
 
-- 구현: `withRateLimit(key, limit, windowMs)`. **v1 은 인스턴스 로컬 카운터(LRU)** — Vercel 멀티 인스턴스에서는 best-effort. 로그인/가입만 DB 카운터(`submission_audit` 와 별개의 경량 테이블 또는 better-auth 내장 rateLimit)로 보강한다. 전역 정확성이 필요해지면 Upstash Redis 도입(§7 오픈 질문).
+- 구현: `withRateLimit(key, limit, windowMs)`. **v1 은 인스턴스 로컬 카운터(LRU)** — Vercel 멀티 인스턴스에서는 best-effort. 로그인/가입을 DB 카운터로 보강하는 계획은 **구현하지 않았다**(KNOWN ISSUE: 가입·로그인 5/분도 인스턴스 로컬이라 Vercel 다중 인스턴스에서 한도가 인스턴스 수만큼 늘고 콜드스타트마다 초기화된다). 전역 정확성이 필요해지면 Upstash Redis 등 지속형 저장소나 Vercel Firewall 규칙을 도입한다(웹 2차 후보, 사용자 결정 필요).
 - IP 키(2026-10-14 웨이브 17B-2 리뷰): `getClientIp` 는 `X-Forwarded-For` 의 첫 값이다. Vercel 은 이 헤더를 덮어쓰고 바깥 IP 를 넘기지 않으므로(Vercel 문서 "Request headers", 스푸핑 방지) 운영에서는 클라이언트가 바꿀 수 없다. 다른 호스팅이나 Vercel 앞의 다른 프록시에서는 헤더를 바꿔 한도를 피할 수 있으므로(로컬에서 재현), 호스팅을 바꾸거나 지속형 한도로 옮길 때 신뢰하는 헤더를 하나로 고정한다.
 - 본문 크기: `POST /api/scores` 256KB(`content-length` 헤더 + 실제 스트림 바이트 수 둘 다 검사), 리플레이 `REPLAY_MAX_BYTES`(기본 4MB) 초과 시 `413 IR_PAYLOAD_TOO_LARGE`.
 
@@ -402,9 +410,9 @@ Route Handler (app/api/**/route.ts)
 |---|---|---|
 | `DATABASE_URL` | 조건부 | `mysql://user:pass@host:port/db`. 없으면 아래 5개 필수 |
 | `DB_HOST` `DB_PORT` `DB_USER` `DB_PASSWORD` `DB_NAME` | 조건부 | `DATABASE_URL` 미제공 시 조합해 URL 생성. **코드(`src/server/lib/env.ts`)가 정본** — 2026-09-09 결정 "env 키" 항목 |
-| `BETTER_AUTH_SECRET` | O | 세션 서명 |
-| `BETTER_AUTH_URL` | O | `https://bms.hyuns.uk` |
-| `NEXT_PUBLIC_APP_URL` | O | `https://bms.hyuns.uk` (클라 노출 가능한 값만) |
+| `BETTER_AUTH_SECRET` | 운영 필수(코드상 선택) | 세션 서명. 코드 스키마(`env.ts`)는 `.optional()` 이라 비워도 기동하고 조용히 잘못 동작한다(KNOWN ISSUE: 운영에서 필수로 검증하지 않음) |
+| `BETTER_AUTH_URL` | 운영 필수(코드상 기본 `http://localhost:3000`) | `https://bms.hyuns.uk` |
+| `NEXT_PUBLIC_APP_URL` | 운영 필수(코드상 기본 `http://localhost:3000`) | `https://bms.hyuns.uk` (클라 노출 가능한 값만) |
 | `ALLOW_GUEST` | X(기본 `false`) | guest 제출 허용 |
 | `REPLAY_MAX_BYTES` | X(기본 `4194304`) | 리플레이 상한 |
 | `REQUIRE_BUILD_HASH` | X(기본 `false`) | `client_build_sha256` 누락 시 거부 여부 |
@@ -429,7 +437,9 @@ Route Handler (app/api/**/route.ts)
 - `next.config.ts`는 `reactCompiler: true`, `cacheComponents: true`, `serverExternalPackages: ['mysql2']`, 보안 헤더를 설정했습니다.
 - **응답 크기 한도**: Vercel Functions 의 요청·응답 본문은 최대 4.5MB(`FUNCTION_PAYLOAD_TOO_LARGE`, 공식 문서 `functions/limitations` 2026-08-24 판). 폴더 하나(2,000곡)의 최악 응답은 제목·아티스트·메모가 전부 4바이트 문자로 꽉 찬 경우 약 3.9MB 로 한도 안이지만 여유가 작다. 실제 폴더는 곡당 약 140바이트(약 280KB)다. 표 상세는 약 380KB, 표준 표 `data.json` 은 약 400KB.
 
-#### 배포 설정(결정 U5·M10)
+#### 배포 설정(결정 U5·M10, 근거 [../acknowledge/2026-10-14-adr-vercel-git-deploy.md](../acknowledge/2026-10-14-adr-vercel-git-deploy.md)) — 2026-10-14 적용 완료
+
+> 확인한 것: `curl https://bms.hyuns.uk/api/version` 이 `{"api_version":1,"server":"0.1.0","commit":"7095ef7"}` 를 돌려줘(2026-10-14 관찰) Git 연동 배포이고 `dev` 의 최신 커밋이 운영에 올라 있다. 응답 헤더에 §4-5 의 보안 헤더와 CSP 가 모두 있다. 확인하지 못한 것: Vercel 대시보드 값(프로젝트 `rbms-web`(팀 b-hs-projects), Root `web`, Production `dev`, 환경 변수 6개 중 `DATABASE_URL`·`BETTER_AUTH_SECRET` 은 Secret)은 세션 인벤토리의 기록이며 이 문서 점검에서 Vercel 에 접근하지 않았다. 변경 없는 푸시가 `CANCELED` 로 기록되는지(`ignoreCommand`)도 대시보드에서만 본다.
 
 | 항목 | 값 |
 |---|---|
@@ -460,13 +470,13 @@ if [ "$VERCEL_ENV" != "production" ]; then exit 0; fi; git diff --quiet "$VERCEL
 | `REPLAY_MAX_BYTES` `REQUIRE_BUILD_HASH` `REPLAY_STORAGE` | 선택 | `REPLAY_STORAGE=blob` 은 미구현 |
 | `SERVER_VERSION` `SERVER_COMMIT` | 선택 | 비우면 `VERCEL_GIT_COMMIT_SHA` 앞 7자 |
 
-#### 사용자가 하는 일의 순서
+#### 최초 배포 절차(2026-10-14 에 이 순서로 끝냈다. 새 환경을 만들 때의 기록)
 
-1. (한 번) Vercel 프로젝트에 위 연결·Root Directory·Production Branch·시스템 환경 변수를 확인하고 환경 변수를 입력한다. 이미 CLI 업로드로 배포한 프로젝트라면 Git 연결부터 한다(`/api/version` 의 `commit` 이 `null` 이면 Git 연동 배포가 아니다).
-2. 운영 DB 에 대해 `DATABASE_URL=… bun scripts/db-migration-status.ts` 로 상태를 본다(3-2).
+1. Vercel 프로젝트에 위 연결·Root Directory·Production Branch·시스템 환경 변수를 확인하고 환경 변수를 입력한다. 이미 CLI 업로드로 배포한 프로젝트라면 Git 연결부터 한다(`/api/version` 의 `commit` 이 `null` 이면 Git 연동 배포가 아니다). `vercel link` 는 `web/.env.local` 을 자동 생성할 수 있으니(2026-10-14 에 한 번 생김, 사용자가 지움) 링크 뒤 확인하고 커밋하지 않는다(`.gitignore` 로 무시됨).
+2. 운영 DB 의 상태를 본다: `gh workflow run web-db.yml --ref dev -f action=status`(3-2).
 3. 상태가 "기준선 필요" 면 `--baseline-sql` 의 SQL 을 한 번 적용한다.
-4. `DATABASE_URL=… bun run db:migrate` 로 `0001` 을 적용하고, 상태가 "최신" 인지 다시 본다.
-5. 시험 데이터 정리(결정 Q6=A, 2026-10-14 웨이브 17B-2): `web/scripts/cleanup-test-accounts.count.sql` 을 먼저 실행해 대상(점검 문서 3-2 의 시험 계정 다섯 개와 그 제출·토큰·세션·폴더)을 세어 보고, 숫자가 맞을 때만 `cleanup-test-accounts.delete.sql`(한 트랜잭션)을 실행한 뒤 count 를 다시 실행해 0 을 본다. 0001 이 만든 `user_folder` 를 세므로 마이그레이션 뒤에 실행한다.
+4. `-f action=migrate` 로 `0001`·`0002` 를 적용하고, 상태가 "최신" 인지 본다.
+5. 시험 데이터 정리(결정 Q6=A, 완료): `-f action=cleanup-count` → 숫자 확인 → `-f action=cleanup-delete`(세기 → 한 트랜잭션으로 삭제 → 다시 세기, 0 확인). 대상은 점검 문서 3-2 의 시험 계정 다섯 개와 그 제출·토큰·세션·폴더. 0001 이 만든 `user_folder` 를 세므로 마이그레이션 뒤에 실행한다.
 6. 그 다음 `dev` 에 푸시해 배포한다. `curl https://bms.hyuns.uk/api/version` 의 `commit` 과 `curl -I https://bms.hyuns.uk/tables/insane1/header.json` 으로 확인한다.
 
 CI(`.github/workflows/web.yml`)는 `web/**` 이 바뀐 푸시·PR 에서 설치(`--frozen-lockfile`)·typecheck·lint·test·format:check·환경 변수 없는 build 를 돈다(`docs/ci-release.md` 6절).
@@ -480,10 +490,10 @@ CI(`.github/workflows/web.yml`)는 `web/**` 이 바뀐 푸시·PR 에서 설치(
 | FR-13 빌드 sha256 allowlist | `@server/service/shared/integrity/build-allowlist.ts` — `client_build` 조회(`'use cache'` + `cacheTag('client-builds')`). CI 등록은 `POST /api/admin/builds` |
 | FR-14 ranked 판정 | `@server/service/domain/score/ranked-policy.ts` — 순수 함수 `rankedPolicy({ options, buildTrust, isGuest, requireTrustedBuild }) => { ranked, flags }`. 입력만으로 결정되므로 DB 무관, 단위 테스트 대상 |
 | 빌드 신뢰도와 ranked | `UNKNOWN_BUILD` flag 는 항상 남기되, ranked 를 막는 것은 ① `untrusted`(allowlist 에 `trusted=false` 로 등록) ② `unknown` + `REQUIRE_BUILD_HASH=true` 두 경우다. 기본 배포(`REQUIRE_BUILD_HASH=false`)에서 미등록 빌드는 flag 만 남고 ranked 로 집계된다 — allowlist 등록 경로(`POST /api/admin/builds`)가 W2a 이므로, 그 전까지 랭킹이 통째로 비는 것을 막기 위함 |
-| flags 종류 | `AUTOPLAY` `SCRATCH_AUTO` `ASSIST` `JUDGE_WIDTH`(judge_rate>100) `TOTAL_OVERRIDE` `UNKNOWN_BUILD` `GUEST` `REPLAY_MISMATCH`(후속). `SCRATCH_AUTO` 와 `UNKNOWN_BUILD`(기본 설정) 는 표지일 뿐 ranked 를 막지 않는다(`rankBlockingFlags`) |
-| SCRATCH AUTO(웨이브 20) | 사용자 결정(2026-10-14): SCRATCH AUTO 판도 일반 판처럼 순위에 올리되 목록에서는 기본으로 숨기고 토글로 보인다. `chart_best`·`course_best` 를 `scratch_auto` 로 나눠 일반 판 최고와 SCRATCH AUTO 판 최고를 따로 남기고, 목록 질의는 `best-scope.ts` 의 `chartBestScope`·`courseBestScope` 로 "일반 판만" 또는 "플레이어마다 더 높은 쪽"을 고른다. 차트 순위·코스 순위·리더보드 화면에는 "SCRATCH AUTO 포함" 스위치가 있고 상태는 주소의 `include_scratch_auto=true` 로 남는다(쿼리 키에 포함). 목록의 SCRATCH AUTO 행에는 A-SCR 배지. 넓힌 판정(`CUSTOM_JUDGE`)은 그대로 unranked |
-| 클라 정책 정합 | 결정 #12(assist 정책)와 일치해야 한다. 클라가 이미 `score=false` 로 제출을 막는 케이스도 서버가 독립 재판정한다(신뢰하지 않음) |
-| FR-18 감사 로그 | `@server/service/domain/score/audit.ts` — 모든 제출(거부 포함) `submission_audit` insert. IP 는 `x-forwarded-for` 첫 값, UA 는 `user-agent` |
+| flags 종류 | `AUTOPLAY` `SCRATCH_AUTO` `ASSIST`(`AUTO_SCRATCH` 밖의 assist 태그) `JUDGE_WIDTH`(judge_rate>100) `TOTAL_OVERRIDE` `UNKNOWN_BUILD` `GUEST`(`ranked-policy.ts` 의 `SCORE_FLAG`) `REPLAY_MISMATCH`(후속, 코드에 없음). `SCRATCH_AUTO` 와 `UNKNOWN_BUILD`(기본 설정) 는 표지일 뿐 ranked 를 막지 않는다(`rankBlockingFlags`) |
+| SCRATCH AUTO(웨이브 20, 0b04629) | 사용자 결정(2026-10-14, 근거 [../acknowledge/2026-10-14-adr-scratch-auto-rule.md](../acknowledge/2026-10-14-adr-scratch-auto-rule.md)·[../acknowledge/2026-10-14-adr-scratch-auto-ranking-toggle.md](../acknowledge/2026-10-14-adr-scratch-auto-ranking-toggle.md)): SCRATCH AUTO 판도 일반 판처럼 순위에 올리되 목록에서는 기본으로 숨기고 토글로 보인다. `chart_best`·`course_best` 를 `scratch_auto` 로 나눠 일반 판 최고와 SCRATCH AUTO 판 최고를 따로 남기고, 목록 질의는 `best-scope.ts` 의 `chartBestScope`·`courseBestScope` 로 "일반 판만" 또는 "플레이어마다 더 높은 쪽"을 고른다. 차트 순위·코스 순위·리더보드 화면에는 "SCRATCH AUTO 포함" 스위치가 있고 상태는 주소의 `include_scratch_auto=true` 로 남는다(쿼리 키에 포함). 목록의 SCRATCH AUTO 행에는 A-SCR 배지. SCRATCH AUTO 판의 `rank` 는 그 판이 속한 목록(일반 판은 기본 목록, SCRATCH AUTO 판은 포함 목록) 기준이고 `previous_best`·`is_new_best` 는 그 판의 칸 기준이다(`score.service.ts` `submit`). 넓힌 판정(`options.assist` 의 `CUSTOM_JUDGE`)은 `ASSIST` flag 로 그대로 unranked |
+| 클라 정책 정합 | 옛 결정 #12("어시스트 판은 최고 기록이 아니다")는 2026-10-14 사용자 결정으로 **대체**됐다: 손으로 친 모든 판은 클라이언트가 저장·전송하고, SCRATCH AUTO 는 서버에서도 ranked 다. 넓힌 판정(클라이언트 어시스트 태그 `CUSTOM_JUDGE`)은 서버에서 `ASSIST` flag + unranked 이고 `chart_best`·순위에 들어가지 않는다(사용자 미확인 정책). SCRATCH AUTO 램프는 `LightAssistEasy` 로 유지(메인이 정함, 사용자 미확인). 서버는 클라이언트의 판단을 신뢰하지 않고 독립 재판정한다 |
+| FR-18 감사 로그 | `score.service.ts` 의 `submit` 이 `deps.db.insertAudit`(compose 구현)을 불러 `submission_audit` 에 insert 한다. IP 는 `x-forwarded-for` 첫 값, UA 는 `user-agent`. 별도 `audit.ts` 파일은 없다 |
 | best 갱신 | `chart_best` upsert(키 `(chart, user, scratch_auto)`). 비교 순서 **램프 > EX > BP(낮을수록)**. `ranked=false` 는 갱신 대상 제외 |
 | 멱등 | `score uniq(user_id, chart_sha256, played_at)` — 중복 시 기존 `score_id` 반환, 201 대신 200 |
 
@@ -497,12 +507,13 @@ CI(`.github/workflows/web.yml`)는 `web/**` 이 바뀐 푸시·PR 에서 설치(
 | lib | `bun test` | `createAppError`/STATUS_MAP, `api-response` 헬퍼, `getEnv` 검증 실패 케이스, 토큰 해시 |
 | service | `bun test` | `*ServiceDb` 를 인라인 객체로 대체(mocking 라이브러리 없음). best 갱신 규칙·멱등·EX/BP 유도·낙관적 잠금 충돌·`rankedPolicy` 전 flags |
 | Route Handler | `bun test` | 핸들러를 직접 import 해 **`new Request(url, {...})`** 로 호출하고 `Response` 를 검증. 인증 401/403, 404, 413, 429, envelope 유무, raw 응답 형태 |
-| 컴포넌트 | `bun test` + Testing Library | features 순수 UI 렌더·상호작용. 서버 상태는 MSW 로 목 |
+| 컴포넌트 | `bun test` + Testing Library + happy-dom | features 순수 UI 렌더·상호작용(`tests/components/`). 서버 상태는 목을 쓰지 않고 순수 함수·계약 테스트로 확인한다. `msw` 는 devDependency 로 설치만 돼 있고 쓰는 테스트가 없다(KNOWN ISSUE: 쓰지 않으면 `bun remove msw`) |
+| DB 질의 | `bun test` | `tests/db/scratch-auto-ranking.test.ts`(순위 질의 `best-scope.ts`), `tests/support/folder-memory-db.ts`(폴더 서비스용 메모리 DB) |
 | E2E | 후속(합의 필요) | Playwright. W0 범위 아님 |
 
 - 테스트 설명은 한국어. `describe`/`test`.
 - **계약 왕복 검증(수동, PRD §8)**: `rbms-player --server http://localhost:3000/api --player <id>` 로 submit → ranking 왕복. W1 완료 게이트.
-- 최소 기계 검증: `bunx tsc --noEmit` → `bunx prettier --check` → `bun test`.
+- 최소 기계 검증: `cd web && bun run verify`(= `next typegen && tsc --noEmit` → `eslint` → `bun test`) 와 `bun run format:check`, 필요하면 환경 변수 없는 `bun run build`. 테스트 수는 시점마다 달라 `bun test` 출력이 정본이다(2026-10-14 점검 208 통과·2 건너뜀, 17B-2 종료 395 통과·2 건너뜀).
 
 ---
 
@@ -522,16 +533,16 @@ CI(`.github/workflows/web.yml`)는 `web/**` 이 바뀐 푸시·PR 에서 설치(
 
 - `server-only` 패키지를 설치해 `@server/db`·`@server/compose`·`@server/service/read-cache` 상단에 `import 'server-only'` 를 붙였다. `bun test` 는 client 조건으로 해석하므로 `bunfig.toml` 의 `[test] preload` 로 `tests/lib/preload.ts`(`mock.module('server-only', …)`)를 로드한다.
 - `revalidateTag` 는 Next 16.3 에서 **2인자**(`revalidateTag(tag, profile)`)다. `@server/service/read-cache.ts` 의 `CACHE_PROFILE` 이 태그별 프로필을 고정한다.
-- `GET /api/health` · `GET /api/version` 은 응답 본문이 전부 빌드 타임 상수라 **정적 프리렌더(○)** 로 남긴다(§1-2 의 "항상 동적" 대비 의도적 이탈). 동적화하려면 `connection()` 이 필요한데, 그러면 Route Handler 를 `new Request()` 로 직접 호출하는 테스트(§8)가 Next 요청 컨텍스트 밖이라 실패한다.
+- `GET /api/health` · `GET /api/version` 은 2026-09-09 에는 정적 프리렌더(○)였으나 지금은 `await connection()` 으로 **동적**이다(`server/route/system.ts`). `/api/version` 의 `commit` 이 배포 시점 환경 변수(`VERCEL_GIT_COMMIT_SHA`)에 따라 달라지기 때문이다. `connection()` 은 Next 요청 컨텍스트 밖(`bun test` 에서 `new Request()` 로 직접 호출)에서는 실패하므로 두 라우트의 테스트는 서비스 함수(`getServerInfo`·`getVersionInfo`, `tests/service/system-info.test.ts`)를 대상으로 한다. 빌드 로그의 프리렌더 중단 오류 블록은 `withErrorHandling` 의 `unstable_rethrow` 로 사라졌다.
 - `user` PK 는 better-auth 생성 id, 로그인 id 는 `user.login_id`(uniq) 이며 `password_hash` 컬럼은 두지 않는다(OQ1 결정 반영). `/api/players/{id}` 는 `login_id` 로 해석한다.
 
 ## 10. 가정 목록 (사용자 회신 시 변경)
 
 1. `web/` 라이선스 = 레포 GPL-3.0(W8). contract-freeze 의 "별 MIT 레포" 전제는 W1 결정으로 폐기됨.
 2. better-auth `user.id`는 생성 id이고 로그인 id는 `user.login_id`다.
-3. email 미제공 계정은 `{id}@local.invalid` 합성 주소.
+3. (폐기) email 미제공 계정의 `{id}@local.invalid` 합성 주소는 쓰지 않는다. 가입은 email 필수.
 4. Vercel 리전 `icn1`, mysql2 풀 `connectionLimit: 5`.
 5. 리플레이 저장은 `REPLAY_STORAGE=db`와 `replay.data`(mediumtext)만 구현됐다. Vercel Blob 전환은 후속이다.
 6. 레이트리밋 v1 = 인스턴스 로컬(best-effort).
 7. `POST /api/courses` = 코스 **결과 제출**(클라 계약 우선), 메타 업서트는 `/api/courses/meta`.
-8. `(app)` 인증 게이팅은 미들웨어가 아닌 세그먼트 layout 에서 수행.
+8. (정정) `(app)` 인증 게이팅은 `proxy.ts`(쿠키 존재 확인)와 세그먼트 layout 의 `SessionGate`(서버 세션 확인) 두 겹으로 수행한다(§1-1).

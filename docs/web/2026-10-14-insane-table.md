@@ -1,6 +1,9 @@
 # 발광 난이도표(発狂BMS難易度表) 스냅샷과 사본·기본 등록 설계
 
+> 최종 갱신 2026-10-14 · 대응 커밋 7095ef7
+
 > 작성: 2026-10-14, 웨이브 17A 작업 A3. 조사와 설계이며 웹 소스(`web/src`)와 Rust 소스는 고치지 않았다.
+> **구현 결과(웨이브 17B~18, 2026-10-14): 이 문서의 추천안이 모두 그대로 채택·구현됐다.** 6절의 결정은 [../acknowledge/2026-10-14-web-decisions.md](../acknowledge/2026-10-14-web-decisions.md)(U2·U3·M1·M2·M5·Q1) 와 [../acknowledge/2026-10-14-adr-default-insane-table.md](../acknowledge/2026-10-14-adr-default-insane-table.md) 가 정본이다: 사본 주소 `https://bms.hyuns.uk/tables/insane1`(슬래시 없음, noindex, 출처·삭제 요청 문구 포함), 표는 DB 가 아니라 파일을 직접 서빙(7.2 의 A안), 클라이언트는 `seeded_default_tables` 표식과 실행 파일에 내장한 스냅샷으로 기본 등록(7.4 의 B안, 8b11a17). 서빙 코드: `web/src/server/service/domain/table-snapshot/`, `web/src/server/route/table-snapshot.ts`, 라우트 `web/src/app/tables/[tableId]/{header,data}.json`, 화면 `web/src/app/(app)/tables/insane1/page.tsx`. 응답 규칙은 [../backend/api-spec.md](../backend/api-spec.md) 7.1, 라우트는 [architecture.md](./architecture.md) 1-3. 본문은 조사 당시의 기록이다.
 > 만든 것: `web/data/tables/insane1/{header.json,data.json,source.json}`, `web/scripts/snapshot-table.ts`, 이 문서.
 > 관찰 시각: 2026-10-14 02:38~02:42 UTC. 모든 수치는 그 시각 `https://darksabun.club/table/archive/insane1/` 의 응답이다.
 
@@ -165,7 +168,7 @@ bun scripts/snapshot-table.ts <표 주소> <출력 폴더> --check   # 다시 �
 
 ### 4.4 이 구성이 다음 웨이브에 요구하는 것
 
-- `web/.prettierignore` 에 `data` 를 추가해야 한다. 현재 파일은 `.next node_modules bun.lock drizzle public` 이라서 `bun run format` 이 `data.json` 의 한 줄 형식을 펼쳐 버리고, `format:check` 와 `--check` 가 어긋난다. (이 워크플로는 기존 파일을 고치지 않아 건드리지 않았다. 확인: `prettier --check` 를 `data/` 에 돌리지는 않았고 `.prettierignore` 내용으로 판단했다.)
+- (완료: d38b6fb 가 `web/.prettierignore` 에 `data` 를 추가했다. 아래는 당시 요구) `web/.prettierignore` 에 `data` 를 추가해야 한다. 현재 파일은 `.next node_modules bun.lock drizzle public` 이라서 `bun run format` 이 `data.json` 의 한 줄 형식을 펼쳐 버리고, `format:check` 와 `--check` 가 어긋난다. (이 워크플로는 기존 파일을 고치지 않아 건드리지 않았다. 확인: `prettier --check` 를 `data/` 에 돌리지는 않았고 `.prettierignore` 내용으로 판단했다.)
 - `tsconfig.json` 의 `include` 가 `**/*.ts` 라서 `scripts/snapshot-table.ts` 도 `bun run typecheck` 와 `eslint` 대상이 된다. 단독으로는 통과했고 전체 `bun run typecheck` 는 돌리지 않았다.
 - JSON 을 `import` 해서 쓰려면 `resolveJsonModule`(이미 true)이면 된다. 400 KB 라 번들·함수 크기에 문제 없다. 파일은 `web/` 안이므로 Vercel 루트 디렉터리 `web/` 에 포함된다.
 - 갱신 절차: `bun scripts/snapshot-table.ts <주소> data/tables/insane1` -> `git diff` 로 곡 단위 변경 확인 -> 커밋. 보관본이라 변경이 없을 것으로 보지만 `--check` 를 CI 에 넣을 필요는 없다(원본 사이트가 내려가면 CI 가 깨진다).

@@ -1,5 +1,7 @@
 # UI Theme (`theme.ron`)
 
+Last updated 2026-10-14 · matches 7095ef7
+
 rbms separates three kinds of look-and-feel:
 
 | Concern | Owned by | File |
@@ -13,7 +15,7 @@ This document covers the native-player **theme** (the chrome).
 ## How it works
 
 - `rbms_render::theme::Theme` is the resolved palette — a flat struct of `Color`s grouped by role.
-- `rbms_render::theme::ThemeConfig` is its RON form: **every field is an optional `(r, g, b)` triple**. Missing fields inherit `Theme::default()`, so a theme file may set only the colours it cares about.
+- `rbms_render::theme::ThemeConfig` is its RON form: **every colour field is an optional `(r, g, b)` triple** (and three layout keys, below). Missing fields inherit `Theme::default()`, so a theme file may set only the colours it cares about.
 - At startup the app reads `~/.config/rbms/theme.ron`, calls `ThemeConfig::parse(..).resolve()`, and installs it with `rbms_render::set_theme(theme)` (`apps/rbms-player/src/assets/theme_file.rs`).
 - Every renderer reads the active palette via `rbms_render::theme()` (a cheap `Copy`), so changing the file and relaunching restyles the whole UI. A missing or broken file falls back to the built-in defaults — a bad theme can never brick the UI.
 
@@ -25,7 +27,7 @@ A hue is left only where the hue is the information (see "Colours that are not t
 
 ## Fields
 
-All values are `Some((r, g, b))`, 0–255 per channel. Omit a line to keep its default.
+All colour values are `Some((r, g, b))`, 0–255 per channel. Omit a line to keep its default. Three more keys are not colours and are described under "Layout fields" below.
 
 | Field | Default | Role |
 |---|---|---|
@@ -50,6 +52,16 @@ All values are `Some((r, g, b))`, 0–255 per channel. Omit a line to keep its d
 | `button_active` | `(50, 50, 50)` | active/toggled button, search box, secondary button |
 | `good` | `(200, 200, 200)` | progress bars (loading, replay analysis) |
 | `warn` | `(230, 180, 60)` | cautions: a stale table copy, a table that failed, a hi-speed at its limit, a key-config notice that warns or asks (a lane put back on its shipped key, the ask to restore everything) |
+
+### Layout fields
+
+`ThemeConfig` also accepts three keys that place things rather than colour them. Each is optional, a rectangle that does not lie inside the 1280×720 canvas (or a number that is out of range) is ignored and the default is kept, and the template the app writes does not show them (a test pins that they are the only keys it leaves out).
+
+| Key | Form | What it does |
+|---|---|---|
+| `select_layout` | `Some((list_rect: Some((x, y, w, h)), detail_rect: Some(…), cover_rect: Some(…), row_height: Some(f32), row_gap: Some(f32)))` | where the built-in song select puts its list, its detail panel and the cover art, and how tall a row is (defaults: list `(32, 60, 584, 600)`, detail `(632, 60, 616, 600)`, cover `(648, 78, 160, 160)`, row 36 with a gap of 4). A skin that draws the song select ignores it |
+| `select_panel_alpha` | `Some(0–255)` | opacity of the panels of the built-in song select (default 255) |
+| `options_layout` | `Some((rect: Some((x, y, w, h)), panel_alpha: Some(u8), row_overrides: Some([(index: n, y: …, label_x: …, value_right_x: …, label_color: Some((r, g, b)), value_color: Some((r, g, b)))])))` | the option overlay (`F1`, `apps/rbms-player/src/app_options.rs`): its rectangle, its opacity (default 235) and, for each of its 11 rows by index, a position or a colour |
 
 Field names and meanings are unchanged from earlier versions; a theme file written for them is read as before. Three fields are used in more places than they were:
 

@@ -1,6 +1,8 @@
 # rbms 백엔드 — PRD (Product Requirements)
 
-> 대상: rbms 전용 IR-슈퍼셋 백엔드. **역사 PRD + 구현 기준:** 핵심 요구는 `web/`에 구현됐습니다. 현재 계약·제약은 [api-spec.md](./api-spec.md)와 [endpoint-tasks.md](./endpoint-tasks.md), 실제 구현은 `web/src/`가 정본입니다. Phase R의 실제 키·배포 검증은 보류입니다.
+> 최종 갱신 2026-10-14 · 대응 커밋 7095ef7
+
+> 대상: rbms 전용 IR-슈퍼셋 백엔드. **역사 PRD + 구현 기준:** 핵심 요구는 `web/`에 구현됐습니다. 현재 계약·제약은 [api-spec.md](./api-spec.md)와 [endpoint-tasks.md](./endpoint-tasks.md), 실제 구현은 `web/src/`가 정본입니다. 운영 배포(https://bms.hyuns.uk)는 2026-10-14 에 끝났습니다(현재 상태는 [../web/architecture.md](../web/architecture.md) 6-2).
 
 ## 1. 배경 / 문제
 - rbms는 오프라인으로 완전 동작(로컬 `scores.ron`·`replays/`·`settings.ron`). 그러나 **기기 간 동기화·랭킹·라이벌·발광 표 연동**이 없다.
@@ -46,15 +48,15 @@
 | FR-11 | LR2IR 레거시 어댑터(`getrankingxml.cgi` 등) | P2 |
 | FR-12 | 리플레이 기반 스코어 검증(anti-cheat) | P3(후속) |
 | FR-13 | **클라 빌드 SHA-256 동봉·로깅·allowlist**(변조 탐지) | P0 |
-| FR-14 | **ranked 적격성 산출**(autoplay·assist·judge폭·total·미상빌드 → unranked+flags) | P0 |
+| FR-14 | **ranked 적격성 산출**(autoplay·assist·judge폭·total·미상빌드 → unranked+flags). SCRATCH AUTO 는 표지 flag 만 달고 ranked(2026-10-14 사용자 결정) | P0 |
 | FR-15 | **전체 플레이옵션 보존**(공평 평가 단일 출처) | P0 |
 | FR-16 | **µs 리플레이**(핵분석·재시뮬 입력) | P1 |
-| FR-17 | **FE 전용 조회**(검색·리더보드·최근피드·리플레이뷰어·통계) + envelope·CORS·세션 | P1 |
+| FR-17 | **FE 전용 조회**(검색·리더보드·최근피드·리플레이뷰어·통계) + envelope·세션(CORS 는 단일 오리진이라 구현하지 않음) | P1 |
 | FR-18 | 제출 감사 로그(`submission_audit`: build·ip·ua·flags) | P1 |
 
 ## 6. 비기능 요구 (NFR)
 - **호환**: 단일 클라이언트가 md5만(LR2 차트) / sha256만(레퍼런스 구현) 보내도 동작. 미지원 기능은 `capabilities`로 광고 → 클라가 UI 토글.
-- **성능**: 랭킹 조회 P95 < 150ms(상위 N 캐시), 제출 < 200ms. 차트당 best는 (chart, player) 유니크 인덱스로 O(1).
+- **성능**: 랭킹 조회 P95 < 150ms(상위 N 캐시), 제출 < 200ms. 차트당 best는 (chart, player, scratch_auto) 복합 PK 로 O(1).
 - **무결성**: 제출 멱등(같은 (player, sha256, played_at) 재전송 무중복). best는 항상 "더 좋은 결과만" 갱신(램프>EX>BP 순).
 - **보안**: 토큰 해시 저장, 비번 better-auth, rate-limit(제출/로그인), 제출 본문 크기 제한, 리플레이 크기 상한.
 - **전방호환**: `api_version`(현재 1) + 모든 DTO `extra`(free-form) 보존. 새 엔드포인트는 추가만, 기존 불변.

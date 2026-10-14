@@ -1,14 +1,157 @@
 # 기본 스킨 수동 확인 목록
 
-최종 갱신 2026-10-14 · 웨이브 18(SCRATCH AUTO 의 새 규칙, 같은 배치로 다시 하기, 설정 화면의 Enter, 기본 표와 MY FOLDERS: 3.17절을 더하고 3.16절 W1·W3·W8 을 고침. 작업 트리 기준, 커밋 전) · 웨이브 15(앱 자체 UI 의 무채색 팔레트와 `theme.ron` 템플릿: 3.14절 N9 를 고치고 3.15절을 더함. 3.11절 K7 의 색 표기를 고침. 작업 트리 기준, 커밋 전) · 대응 커밋: 103f196(웨이브 13) 이후 웨이브 14(플레이 중 START + 턴테이블과 판정 오프셋 키, 모노톤 기본 스킨과 색 옵션, 내보내기와 모든 화면에 적용: 3.14절. 3.13절 M3 을 그에 맞게 고침. 작업 트리 기준, 커밋 전). 웨이브 13(기본 스킨의 판정선을 필드 맨 아래로, 판정 오프셋이 노트만 옮김: 3.13절. 3.8절 H5·H7 과 3.10절 J4~J6 을 그에 맞게 고침. 작업 트리 기준, 커밋 전) · 대응 단계: `docs/PROCESS.md` L6(최종 검증)
+최종 갱신 2026-10-14 · 대응 커밋 7095ef7 · 대응 단계: `docs/PROCESS.md` L6(최종 검증). 3절은 웨이브 8C 부터 20 까지 기능마다 쌓였고(3.1~3.17절, 웨이브 10A~18 의 구현은 모두 커밋됐다), 아래 목록의 항목은 아직 하나도 사람이 실행해 체크하지 않았다(미체크 114줄, 실행 대상 ID 116개. N9 와 W8 은 다른 절로 옮긴 표지라 실행하지 않는다).
 
-자동 검사는 헤드리스 캔버스와 테스트 안의 앱으로 화면을 그린다. 실제 창(GPU, 마우스, 키보드, 소리, 시스템 글꼴, 다른 창 비율)에서만 드러나는 것은 사람이 확인해야 한다. 이 문서는 자동으로 확인된 것과 사람만 확인할 수 있는 것을 나누고, 후자를 체크박스로 추적한다. 체크하지 못한 항목이나 실패한 항목은 증상, 재현 조건, 확인한 날을 항목 아래에 적고, 결함이면 `docs/bug/` 에 따로 기록한다.
+자동 검사는 헤드리스 캔버스와 테스트 안의 앱으로 화면을 그린다. 실제 창(GPU, 마우스, 키보드, 소리, 시스템 글꼴, 다른 창 비율)에서만 드러나는 것은 사람이 확인해야 한다. 이 문서는 자동으로 확인된 것과 사람만 확인할 수 있는 것을 나누고, 후자를 체크박스로 추적한다. 체크하지 못한 항목이나 실패한 항목은 증상, 재현 조건, 확인한 날을 항목 아래에 적고, 결함이면 `docs/bug/` 에 따로 기록한다. 항목의 정본(방법·기대 결과 전문)은 3절이고, 아래 0절의 표는 찾기 위한 요약이다.
+
+## 0. 실제 창에서 확인할 것 (미체크 일람)
+
+### 0.1 먼저 확인할 것 (v0.1.3 게시 전후)
+
+릴리스 직전에 최소한으로 보는 목록이다. 앞의 둘은 사용자가 이미 기다리는 일이다.
+
+| 순서 | 항목 | 이유 |
+| --- | --- | --- |
+| 1 | W3 → X3: 로그인한 채 한 판을 쳐서 결과 화면에 `IR: RANK` 가 나오는지 | v0.1.2 의 400(큰 시드, `docs/bug/2026-10-14-score-submit-400-large-seed.md`)이 운영 서버에서 실제로 풀렸는지 본 사람이 없다 |
+| 2 | A1, A2: dmg 로 설치한 `R-BMS.app` 을 Finder 에서 열어 첫 실행·재실행 | 앱 번들 배포는 v0.1.2 부터이고 Finder 로 처음 열 때 붙을 수 있는 `-psn_...` 인자는 곡 경로로 읽지 않게 고쳤지만(단위 테스트만 있음) 실제 Finder 실행의 기록이 없다. 설정 폴더(`$HOME/.config/rbms/`)가 만들어지는지도 함께 본다 |
+| 3 | X1, X2, X4 | SCRATCH AUTO 새 규칙(초록 노트, 키음, 같은 배치 다시 하기)은 웨이브 18 의 사용자 요청 그대로이고 GPU·소리·컨트롤러에서만 확인된다 |
+| 4 | X7, X8, X9 | 웹 연동(기본 발광 표, 설정 스키마 6, MY FOLDERS)은 실제 서버가 필요하다 |
+| 5 | D1 | 번들 글꼴은 라틴뿐이라 한글·일본어 제목은 시스템 글꼴 폴백이 유일한 경로이고 자동 확인이 없다 |
+| 6 | B2 | 7키 한 곡의 선곡 → 결정 → 플레이 → 결과 전체 흐름 한 번 |
+| 7 | N3 | 아날로그 턴테이블 실기기(START + 디스크). 실기기 없이는 확인되지 않는다 |
+| 8 | Windows 확인(`docs/reference/windows-compat.md` 의 미체크 7항목) | Windows zip 을 게시하기 전. 아직 실제 Windows 에서 연 기록이 없다 |
+
+### 0.2 전체 표
+
+열: 절·ID / 무엇을 / 어떻게 / 기대 결과. 체크는 3절의 체크박스에 한다(이 표는 요약이므로 상태를 두지 않는다).
+
+| 절·ID | 무엇을 | 어떻게 | 기대 결과 |
+| --- | --- | --- | --- |
+| 3.1 A1 | 첫 실행 설치 | 빈 임시 HOME 으로 곡 폴더를 주고 실행, 종료 뒤 `$HOME/.config/rbms/skin/rbms-default/` 확인 | 선곡이 기본 스킨으로 그려진다. 문서 9, `lua/` 27, `image/` 5, `font/` 2, `sound/` 22, `install-manifest.txt` 가 있고 `tools/` 는 없다. 창이 뜨기까지 지연이 없다 |
+| 3.1 A2 | 재실행 | 같은 HOME 으로 다시 실행하고 `ls -l` | 설치 파일의 수정 시각이 안 바뀌고 경고 알림이 없다 |
+| 3.1 A3 | 고친 파일 보존과 지운 파일 복구 | `lua/theme.lua` 에 공백 줄을 더하고 `image/common.png` 를 지운 뒤 다시 실행 | `theme.lua` 는 그대로, `common.png` 는 다시 생기고 화면이 정상 |
+| 3.1 A4 | 쓰기 불가 | 설정 폴더를 읽기 전용으로(또는 `skin` 이름의 일반 파일을 만들어) 두고 실행 | `default skin not fully installed: N files could not be written beside …` 알림이 한 번 뜨고 내장 화면으로 그려지며 앱이 안 죽는다 |
+| 3.2 B1~B5 | 키 수별 전체 흐름(5/7/9/10/14키) | 선곡 → Enter → 결정 → 플레이 → 완주(또는 실패) → 결과 → Enter 로 선곡 복귀. 5키는 `samples/preview-demo` | 결정 약 3초 뒤 플레이, 판정·콤보·게이지 갱신, 실패 시 `FAILED` 와 어두워짐, 결과의 랭크·점수·판정 표·그래프 4개, 5·10키는 턴테이블로 게이지 그래프 전환, 멈춤·깜박임·검은 프레임 없음 |
+| 3.2 B6 | 코스 | Shift+Tab 으로 COURSE 탭, 2스테이지 이상 코스 시작 | 첫 스테이지만 결정 화면, 스테이지 사이 결과 없음, 마지막에 COURSE RESULT |
+| 3.3 C1 | 옵션 패널 1~3 | 선곡에서 A(START) 누른 채 → W(SELECT) → 둘 함께(또는 숫자 5) | 누르는 동안만 패널, 칸 7개와 값, 건반으로 바꾼 값이 플레이에 반영 |
+| 3.3 C2 | 사이드 메뉴와 볼륨 | 왼쪽 가장자리의 톱니와 스피커 클릭, 볼륨 슬라이더 드래그 | QUICK SETTINGS 6행 / VOLUME 3개, 한 번에 하나, 효과음, 실제 소리 크기가 바뀜 |
+| 3.3 C3 | 마우스 호버·클릭·드래그 | 버튼, 곡 막대, 스크롤 손잡이, 휠 | 호버 강조, 좌클릭 다음 / 우클릭 이전, 곡 막대 좌클릭 선택 / 우클릭 닫기, 스킨 밖 클릭 무반응 |
+| 3.3 C4 | 검색 | SEARCH 칸 클릭 또는 `/`, 한글·일본어 IME, 치는 중 F1·방향키, Enter, Esc | 스킨 검색 칸에 입력, 조합 글자 밑줄, 경로 줄 `Search : '검색어' >`, Esc 로 원래 폴더·행 복귀 |
+| 3.3 C5 | 기록 표시 | 기록 있는 곡 / 없는 곡 / 그림 없는 곡을 봄 | 랭크·판정 5행·숫자 6칸, 없으면 줄표와 NO PLAY, `NO STAGE IMAGE` |
+| 3.4 D1 | 한글·일본어 제목 | CJK 곡을 선곡 막대·곡 머리·결정·결과에서 봄 | 빈 사각형 없이 시스템 글꼴, 긴 제목은 폭에 맞게 줄고 겹치지 않음 |
+| 3.4 D2 | 1280x720 창 | 기본 창으로 모든 화면 | 18픽셀 글자가 읽히고 잘림 없음 |
+| 3.4 D3 | 다른 해상도·비율 | DISPLAY 탭 RESOLUTION 1920x1080/2560x1440, BORDERLESS, 창을 4:3·21:9 로, LETTERBOX 켬/끔 | 켬: 16:9 가 비율 유지로 가운데, 여백은 검정. 끔: 창에 맞게 늘어남. BORDERLESS 는 항상 비율 유지. 클릭 위치가 그려진 요소와 일치 |
+| 3.4 D4 | 새 설치의 LETTERBOX 기본값 | 빈 HOME 에서 DISPLAY 탭 | LETTERBOX ON (저장된 설정이 있으면 그 값) |
+| 3.5 E1 | 외부 팩으로 바꾸기 | F12 → SKIN 메뉴 → PACK FOLDER 에서 ModernChic 선택, 결정·플레이·결과 | 문서가 있는 화면은 ModernChic, 9키는 내장 필드, 키 설정을 열면 `keyconfig.luaskin` 실패 알림이 한 번 |
+| 3.5 E2 | 되돌리기 | PACK FOLDER 행에서 왼쪽 키로 비움, `RBMS_SKIN_PACK=<폴더>` 로도 실행 | `DEFAULT (<경로>)`, 모든 화면이 기본 스킨. 환경 변수로 쓰면 `(RBMS_SKIN_PACK)` 가 붙고 설정 파일은 불변 |
+| 3.5 E3 | 동영상이 있는 외부 스킨 | ModernChic 의 결정·선곡·플레이를 수 분 켜 둠 | 영상이 반복 재생되고 끊기지 않으며 느려지거나 메모리가 계속 늘지 않음 |
+| 3.5 E4 | 스킨 옵션과 오프셋 | SKIN 메뉴 7K 에서 옵션·오프셋을 바꾸고 Esc, 플레이, 오프셋 행에서 0 | 옵션이 미리보기와 실제 플레이에 같게 반영, 오프셋 즉시 반영, 0 키가 0 으로, RESET 이 모든 선택을 버림 |
+| 3.5 E5 | 로드 실패 알림 | 문법 오류(`return {{{`) `.luaskin` 팩을 PACK FOLDER 로 지정 | 미리보기에 `NO SKIN DOCUMENT FOR THIS SCREEN` 과 `DID NOT READ (header pass)`, Esc 후 `skin <파일> did not load…` 토스트 한 번과 내장 화면 |
+| 3.6 F1 | 소리 | 선곡 이동, 결정, 패널·사이드 메뉴 여닫기, 결과 효과음, SOUND FOLDER 비움 | 제때 나고 키음·BGM 이 끊기지 않음, 비우면 설치본 `sound/` 사용 |
+| 3.6 F2 | 내장 화면의 밝기(E10) | SETTINGS, KEY CONFIG, TABLES, FOLDERS, PRACTICE, 로딩 화면 | 모두 읽을 수 있음(어색하면 화면과 느낌을 기록) |
+| 3.6 F3 | 설정 행 표지 | 기본 스킨 상태에서 PLAY·DISPLAY·INPUT 탭의 표지 행 | `BUILT-IN SCREENS ONLY` / `SKIN OPTION COMES FIRST` 표지와 흐린 값, 값은 바뀜, 내장만 쓰는 구성에선 표지 없음 |
+| 3.6 F4 | 오버레이 | 선곡 위에서 H, F1, I, 토스트 | 뜨고 닫히며 스킨 위에서 읽힘(알려진 한계 3가지는 3.6절) |
+| 3.7 G1 | SKIN 메뉴 들어가고 나가기 | 선곡 F12, 사이드 메뉴 SKIN 행, SETTINGS 의 F12 와 `SKIN MENU >`, Esc | 네 길 모두 열리고 Esc 는 왔던 화면(SETTINGS 는 보던 탭), 복귀 순간 검은 화면이나 여는 연출 반복 없음 |
+| 3.7 G2 | 미리보기가 움직임 | 화면 띠를 Tab·클릭으로 7K 5K 14K 10K 9K SELECT DECIDE RESULT COURSE | 16:9 사각형에 스킨이 예시 데이터로 움직임, 제목 `SAMPLE …`, 소리 없음, 반복 때 `LOADING THE SKIN` 번쩍임 없음 |
+| 3.7 G3 | 값이 바로 반영 | 7K 의 Lane Width·Field Side·Judge Detail·Score Graph, 오프셋 행(←→, Shift, 0, 오른쪽 클릭) | 옵션은 잠깐 뒤 이어서 바뀌고 오프셋은 즉시, Shift 열 칸, 오른쪽 클릭 한 칸 뒤, UI 멈춤 없음 |
+| 3.7 G4 | 목록과 마우스 | ModernChic 7K(행 89개)를 ↑↓, PageUp/Down, 휠(목록 위·미리보기 위)로 | 스크롤 막대와 `현재 / 전체`, 커서 행이 항상 보임, 휠은 목록 위에서만, 일본어 옵션명이 시스템 글꼴로 |
+| 3.7 G5 | 폴더 선택 창 | PACK FOLDER 에서 Enter, 창이 떠 있는 동안 키·클릭, 폴더 선택 또는 취소 | 창이 떠 있는 동안 메뉴가 그려지되 반응 없음, 고르면 경로(앞을 `…` 로 줄임)와 미리보기 갱신, 취소는 무변화 |
+| 3.7 G6 | 없는 문서와 실패 | ModernChic 9K·KEYS·SCREEN 으로 PLAY 24KEYS, 없는 폴더를 `skin.pack` 에, `error("x")` 를 내는 `.luaskin` 팩 | 차례로 `NO SKIN DOCUMENT…`, `NO PREVIEW FOR THIS SCREEN`, `THE PACK FOLDER IS NOT THERE` + `(MISSING)`, `THE SKIN DID NOT LOAD`. 겹침·멈춤 없음 |
+| 3.7 G7 | 창 크기 | 1920x1080, BORDERLESS, 4:3 창(LETTERBOX 켬/끔)에서 메뉴 | 미리보기가 테두리 안에 꼭 맞음, LETTERBOX 끔이면 메뉴 전체와 미리보기가 같이 늘어남 |
+| 3.7 G8 | 동영상과 자원 | ModernChic 7K·SELECT 를 미리보고 화면 종류를 여러 번 바꾼 뒤 나감, DEBUG MODE 패널 | 동영상이 사각형 안에서 재생, `SKIN TEX` 가 화면 종류를 바꿀 때마다 한 화면분으로 돌아오고 계속 늘지 않음 |
+| 3.8 H1 | 넓은 레인 | F12 에서 7K Lane Width Wide 로 BGA 있는 곡 플레이. 5K·9K·10K·14K, Score Graph Off, Field Side Right 도 | 레인·노트·판정선·커버·판정 글자·게이지가 폭을 따라가고 BGA·점수·판정 수·타이밍·그래프가 안 겹침, Normal 로 되돌리면 이전과 같음 |
+| 3.8 H2 | 키 설정 화면 | 선곡 F5, Settings F5, `KEY CONFIG >`, 묶음마다 Enter 로 바인딩, 중복 키, Delete·Backspace, 전체 복원, 컨트롤러 버튼·턴테이블 축 | `PRESS...` 대기 뒤 키가 뜸, 같은 화면의 충돌은 거절되고 빨간 문구, 나갔다 다시 열거나 재실행해도 유지 |
+| 3.8 H3 | 옮긴 키가 동작 | 검색(/)·정렬(F3)·스킨 메뉴(F12)·다시 하기(R)를 다른 키로 옮기고 각 화면에서 누름 | 옛 키는 무반응, 새 키는 동작, H 가이드가 새 키를 보임, 검색어 입력 중엔 글자 키가 검색어로 |
+| 3.8 H4 | 레인 커버 조작 | 플레이 중 →←, `\`, START 두 번, START + 턴테이블, 휠, Shift + →← | → 가 더 가림 / ← 가 덜 가림, 흰·녹색 숫자가 따라감, 꺼진 상태에서 COVER 수치가 잠깐, Shift 는 더 잘게 |
+| 3.8 H5 | 판정 자동 보정 | F8 > JUDGE 에서 AUTO ADJUST 켜고 일부러 빠르게(또는 느리게) 침. 완주·Esc·폐점, 리플레이 재생 | `TIMING AUTO`, 빠르면 -, 늦으면 +, 세 경우 모두 JUDGE OFFSET 에 마지막 값, 리플레이 판정 수 일치, 오토플레이·리플레이에선 안 움직임 |
+| 3.8 H6 | 녹색 숫자 유지 | F8 > SPEED 에서 KEEP GREEN NUMBER, BPM 이 다른 곡 둘을 커버·리프트 켠 채. ↑↓, SELECT + 건반, 패널 3 의 4·6번 | 두 곡 모두 발치 GREEN 이 정한 숫자, 커버를 움직여도 GREEN 불변 / HI-SPEED 변동, ↑↓ 는 10(Shift 1), SELECT + 건반은 1 ms, 꺼져 있으면 패널 3 이 `OFF` |
+| 3.8 H7 | 이전 설정 파일 | 이 판 이전의 `settings.ron`, `keyconfig.ron`, 리플레이로 실행 | 키·설정이 이전과 같고 KEEP GREEN NUMBER 꺼짐, 이전 리플레이가 같은 결과로 재생 |
+| 3.9 I1 | PLAY 메뉴 들어가고 나가기 | 선곡 F8, SETTINGS 에서 F8 과 `PLAY MENU >`, 검색 중 F8, Esc | 세 길 모두 열리고 Esc 는 왔던 화면, SETTINGS 탭 6개와 세 단추가 안 겹침, 복귀 때 검은 화면 없음 |
+| 3.9 I2 | 녹색 숫자 유지를 눈으로 | KEEP GREEN NUMBER 켠/끈 채 PREVIEW BPM 을 100 → 150 → 200 | 켠 동안 낙하 시간·GREEN 고정 / HI-SPEED 만 바뀜(`AUTO`), 끄면 반대, BPM 을 바꿀 때 검은 화면·READY 없음 |
+| 3.9 I3 | 가림막과 숫자 | LANE COVER 를 →·Shift+→, LIFT·HIDDEN+ 도 같게, 0 키 | 정보 패널·요약·미리보기의 숫자가 모두 같은 값(`30.0% (WHITE 300)`), 리프트 15% 는 150, 0 키는 기본값 |
+| 3.9 I4 | 나머지 행 | SPEED FIX CONSTANT, GAUGE, TARGET, AUTOPLAY, JUDGE OFFSET, AUTO ADJUST, LEGACY NOTE 를 바꿈 | CONSTANT 는 BPM 칸 `120 (CONSTANT)`, GAUGE 색, TARGET 막대·`TARGET +n`, AUTOPLAY 표지, JUDGE OFFSET 은 1 ms(Shift 10 ms)씩이고 예시 판정은 그대로 |
+| 3.9 I5 | 모드와 스킨 옵션 | Tab·모드 띠 클릭으로 7K 5K 14K 10K 9K, LANE WIDTH 를 WIDE 로 하고 F12 의 같은 행, ModernChic 팩 | 모드마다 그 키 수 화면, LANE WIDTH 가 두 메뉴에서 같고 실제 플레이에도 같음, 문서 없는 모드는 `NO SKIN DOCUMENT…`, 다시 열면 7K·150 |
+| 3.9 I6 | 마우스와 긴 목록 | 행 좌우 클릭, 목록 위 휠, 미리보기·묶음 이름 클릭, PageUp/Down, 창 4:3·21:9·1920x1080 | 왼쪽 클릭 한 칸 앞 / 오른쪽 뒤, 휠은 목록만, 미리보기·묶음 이름 무반응, 글자가 안 잘리고 16:9 미리보기 |
+| 3.9 I7 | 실제 플레이와 같은가 | PLAY 메뉴에서 유지 켬·커버 25%·리프트 20%·녹색 350 을 정하고 BPM 100 곡 플레이 | HI-SPEED·GREEN·커버·리프트 숫자가 미리보기와 같고 F1 오버레이·패널 1~3 에도 같음 |
+| 3.9 I8 | 이전 키 설정 | `keyconfig.ron` 에서 FOLDERS 를 F8 로 옮겨 둔 채 실행 | F8 은 옮긴 단축키, PLAY MENU 는 키 없음(단추로는 열림), SETTINGS 안내 줄 `- PLAY`, 다른 키를 주면 그 키로 열림 |
+| 3.10 J1 | 판정이 가만히 있는가 | 7키 곡을 손으로(오토플레이로도 한 번) | 판정 글자·콤보가 튀거나 커지거나 깜빡이지 않고 같은 자리, 0.5초 뒤 한 번에 사라짐, PGREAT 하늘색 / GREAT 노랑, 콤보는 글자 바로 뒤(`GREAT 67`), 글자 크기 60 이 작은지 기록 |
+| 3.10 J2 | 판정 위 줄 | 일부러 빠르게·늦게, F8 의 TARGET, SCORE DIFFERENCE(BEST/OFF), JUDGE DETAIL(MILLISECONDS/OFF) | 판정 위 왼쪽 `+0003` 점수 차 / 오른쪽 FAST(파랑)·SLOW(빨강), 점수 차는 스코어 그래프의 TARGET 과 같음, 하나를 끄면 남은 쪽이 왼쪽 끝에서 시작 |
+| 3.10 J3 | 판정 위치와 숨김 | F8 의 JUDGE POSITION Y(→, Shift+→, 음수까지), JUDGE DISPLAY HIDE, F12 의 같은 행, 5·9·14키 | + 면 위로 - 면 아래로, 두 메뉴가 같은 값, HIDE 면 판정 줄 없음, 0 키는 제자리 |
+| 3.10 J4 | 노트와 판정만 남기기 | F12 에서 7K 불투명도 행(Lane Background, Lane Divider, Bar Line, Progress Bar, Score Graph, Song Header, Speed Display, Timing)을 0% 로 두고 Esc, 플레이 | 검은 바탕에 노트·키 빔·폭발·판정선·판정 글자(와 남긴 BGA·점수·판정 수·게이지)만, 잔상 없음, 재실행해도 유지, 0 키·RESET 으로 복귀 |
+| 3.10 J5 | 중간값 | Note, Key Beam, Lane Cover, BGA 를 50%·25%, Enter 후 `150` | 눈에 절반·4분의 1 쯤, 빔이 안 번쩍임, → 와 슬라이더는 100% 에서 멈춤, 직접 입력 `150% (+128)`, 0 키로 100% |
+| 3.10 J6 | PLAY 메뉴의 접이 | SKIN 묶음의 OPACITY 와 POSITION AND SIZE 를 Enter·클릭으로 폄 | 펴는 순간 든 행이 화면에 들어옴, `SHOWN (18)`(14K 는 17), SKIN 메뉴의 같은 행과 같은 값 |
+| 3.10 J7 | 외부 팩 | ModernChic 을 팩으로 고르고 SKIN 메뉴 7K 목록 끝, 플레이 | `明るさ` 다섯 행이 `100%`, → 와 슬라이더로는 안 올라가고 `150` 입력 시 `150% (+128)` 로 덮개가 밝아짐, ModernChic 판정 연출은 전과 같음 |
+| 3.11 K1 | 슬라이더 끌기 | PLAY 메뉴 LANE COVER 트랙을 누르고 끌기·행 밖으로 끌기, 손잡이만 잡았다 떼기. SKIN 메뉴 불투명도, SETTINGS 의 BGM VOL·POLYPHONY 도 | 트랙을 누르면 손잡이가 그 자리로 와서 따라옴, 행 밖에서도 이어지고 끝값에 머묾, 잡기만 하면 값 불변, 미리보기 끊김 없음, 볼륨은 소리가 바로 바뀜 |
+| 3.11 K2 | 끌기의 끝 | BGM VOL 을 끄는 중 창 밖에서 뗌, 초점을 옮겼다 돌아옴, POLYPHONY 를 끄는 중 Esc | 창 밖에서 떼어도 끌기가 끝남, 못 본 경우 다음 클릭·키에서 끝나 그때 값이 저장됨, Esc 후 재진입하면 끌던 값 / 오디오가 그 값으로 다시 열림 |
+| 3.11 K3 | 직접 입력 | 숫자 행에서 Enter 또는 글자 클릭, `42%`·`-5`·`999`·빈 칸·`1.2.3`, 입력 중 Esc·↑↓·Tab·다른 행 클릭, 한글 입력기·넘패드 | 현재 값이 선택된 채 채워짐, 단위 무시·범위 밖은 끝값, 숫자가 아니면 `NOT A NUMBER` 1.5초, Esc 는 입력만 취소, ↑↓·Tab·클릭은 확정 뒤 이동, 입력기가 켜져도 숫자가 들어감 |
+| 3.11 K4 | 가장 잔 단위와 Shift | HI-SPEED, LANE COVER, JUDGE OFFSET, 불투명도, 볼륨, JUDGE WIDTH, PREVIEW FADE, TOTAL 에서 →·Shift+→·0·오른쪽 클릭·키 누르고 있기 | 한 칸이 0.01 / 0.1% / 1 ms / 1% / 1% / 1% / 1 ms / 1, Shift 는 열 배, 0 은 기본값, 오른쪽 클릭은 한 칸 뒤, 누르고 있어도 반복 안 됨 |
+| 3.11 K5 | 읽기 전용 행과 휠 | KEEP GREEN NUMBER 를 켠 채 HI-SPEED 행 클릭·끌기·Enter, 슬라이더 위 휠 | HI-SPEED 행은 흐리고 어떤 조작에도 안 움직이며 입력 상자가 안 열림, 휠은 목록만 스크롤 |
+| 3.11 K6 | 표가 저장되는가 | Tables(T)에서 `+ ADD TABLE (URL)` 로 `https://darksabun.club/table/archive/insane1/` 등록, 앱을 끄고 Wi-Fi 를 끈 채 재실행 | 등록해도 LOADING 으로 안 넘어가고 `FETCHING...`, 도착하면 `~/.config/rbms/tables/` 에 `.json` 하나, 오프라인에서도 MATCHING TABLES 가 1초 안에 지나가고 `SAVED JUST NOW` 가 보임 |
+| 3.11 K7 | 다시 받기 | 네트워크를 켠 채 Tables 에서 R(여럿이면 A), 선곡에서 F6, 받는 중 조작 | 화면이 안 멈추고 흰 `RELOADING...` 과 `FETCHING THE TABLE AGAIN …`, 끝나면 `difficulty tables reloaded: N updated, M failed` 와 `SAVED JUST NOW`, 받는 중 재요청은 `the tables are being fetched already` 만 |
+| 3.11 K8 | 다시 받기 실패와 삭제 | 네트워크를 끊고 R, 표를 D 로 지움, R 직후 D | `RELOAD FAILED - …` 와 사유(폴더·레벨·`SAVED …` 는 그대로), 지운 표의 `.json` 이 사라지고 받는 중 지운 표는 되살아나지 않음 |
+| 3.11 K9 | 오래된 저장본 | `tables/` 저장본의 `"fetched_at"` 을 40일 전으로 고치고 실행 | `SAVED 40 DAYS AGO` 경고색, 커서를 올리면 `THE SAVED COPY IS 40 DAYS OLD - R FETCHES THE TABLE AGAIN`, 스스로 다시 받지 않음 |
+| 3.12 L1 | 응답 없는 표 주소로 시작 | Tables 에서 `https://10.255.255.1/table/` 등록 후 재실행 | MATCHING TABLES 가 바로 지나가 선곡이 뜸, 직후 `fetching 1 difficulty table(s) for the first time`, 약 15초 뒤 `table fetch failed (…)` 한 줄, 재스캔해도 다시 받지 않음, 행은 `LOAD FAILED`, R 로 재시도 |
+| 3.12 L2 | 표 폴더가 뒤늦게 나타남 | 표 하나의 `.json` 만 지우고 켜서 폴더 / 레벨 폴더 / ALL SONGS / 검색 중 상태에서 기다림 | 선곡이 기다리지 않고 뜨고 `difficulty tables fetched for the first time: 1 added, 0 failed` 와 함께 폴더가 등록 순서 자리에 나타나며 커서는 보던 폴더에 그대로, 목록이 안 깜빡이고 미리듣기가 안 끊김 |
+| 3.12 L3 | 새 등록 | Tables 에서 `+ ADD TABLE (URL)`·`(FILE)`, 틀린 주소, 받는 중 D | LOADING 으로 안 넘어가고 행이 바로 생김, 도착하면 `N OF M CHARTS OWNED - K LEVELS` 와 `table added: …`, 틀린 주소는 `LOAD FAILED`, 받는 중 지우면 파일이 안 생김 |
+| 3.12 L4 | 받는 중 종료 | L1 상태에서 15초 전에 창을 닫음 | 창이 바로 닫히고 `tables/` 에 반쯤 쓴 파일이나 임시 파일이 안 남음 |
+| 3.12 L5 | 연습 패널의 슬라이더 | 곡에서 F4, START TIME·END TIME·GAUGE VALUE·JUDGERANK·TOTAL·FREQUENCY 슬라이더를 누르기·끌기·행 밖과 창 밖으로, 전체 화면과 16:9 가 아닌 창 | 손잡이가 누른 자리로 오고 따라옴(레터박스에서도 어긋나지 않음), 끄는 행은 트랙 노랑 + 손잡이 흰 테두리, 잡기만 하면 값 불변, END TIME 은 START TIME + 1초에서 멈춤, TOTAL 슬라이더 끝은 1000 |
+| 3.12 L6 | START TIME 을 END TIME 너머로 | START 0:20.0 / END 0:40.0 에서 START 손잡이를 END 너머로 끌었다 돌아옴, Shift+→ 로 0:45.0 까지 올렸다 내림 | 끄는 동안 END 가 START + 1초로 밀렸다가 START 가 0:39.0 아래로 돌아오면 0:40.0 으로 복귀, 키로 올렸다 내리면 END 가 0:46.0 에 남음 |
+| 3.12 L7 | 연습 패널의 직접 입력 | START TIME 에 `90`·`1:30.5`·`2:5`·`1:75`, TOTAL 에 `3000`·`99999`·빈 칸·`-`, 입력 중 Esc·↑↓·Tab·Shift+Tab·클릭, 한글 입력기 | `90` → 1:30.0, `2:5` → 2:05.0, `1:75` → 2:15.0, TOTAL 3000 은 3000 / 99999 는 5000, 숫자가 아니면 `NOT A NUMBER`, Esc 는 입력만 취소(두 번째 Esc 가 선곡으로) |
+| 3.12 L8 | 연습 패널의 Enter 와 START 행 | 패널을 연 직후 Enter, START TIME·GAUGE TYPE 에서 Enter, START 행 좌우 클릭, 구간 뒤 재진입 | 커서가 맨 위 START 에서 Enter 가 구간 시작, 숫자 행 Enter 는 입력 상자, 고르기 행 Enter 는 시작, 값이 `practice.ron` 에 남고 구간 플레이가 패널 값과 같음 |
+| 3.13 M1 | 판정선이 필드 맨 아래 | 기본 스킨 7K(5K·9K·10K·14K, Wide·Field Right·Scratch Side Right), 창 1280x720 / 1920x1080 / 전체 / 비16:9 | 판정선(굵은 하늘색 띠)이 레인 맨 아래, 아래에 건반 표시가 없고 바로 게이지, 레인 색 줄이 안 남음, 노트가 판정선에서 사라짐 |
+| 3.13 M2 | LIFT 와 커버 | F8 > LANE 에서 LIFT 20%, LANE COVER 30%, HIDDEN+ 20% 로 플레이, `]` `[` 로 리프트 | 판정선이 리프트만큼 올라가고 그 아래는 리프트 면이 덮음(레인 안 비침), 리프트·히든·커버 수치와 녹색 숫자가 제 자리, 판정 글자·키 빔·폭발이 판정선을 따라 올라감 |
+| 3.13 M3 | 폭발의 모양 | 플레이 중 판정선 위 폭발 고리와 LN 누르는 동안의 폭발 | 판정선에 중심을 둔 온전한 원이고 아래 절반이 게이지 위에 비침(밀집 구간에서 게이지가 읽기 어려우면 기록) |
+| 3.13 M4 | 오프셋을 준 플레이의 소리·노트·판정 | JUDGE OFFSET 0 / +30 / -30 으로 한 판씩, +100·-100 은 오토플레이로 | 박자에 친 입력은 어느 값에서도 PGREAT 이고 키음이 곡과 어긋나지 않음, +30 은 노트가 먼저 / -30 은 늦게, TIMING 숫자가 `+30`·`-30` |
+| 3.13 M5 | 자기 손에 맞는 값 찾기 | 오프셋 0·AUTO ADJUST 끔으로 한 판 뒤 FAST·SLOW 수 확인, 키 설정(F5)의 `JUDGE OFFSET +1 MS`·`-1 MS` 키, 패널 3 의 5·7번 | 늦게 치면 값을 올려 FAST·SLOW 가 고르게, 패널 3 의 5번 `NOTES 1 MS LATER` / 7번 `NOTES 1 MS EARLIER`, 세 곳이 같은 방향을 말함 |
+| 3.13 M6 | 자동 보정 | AUTO ADJUST 를 켜고 보며 빠르게(다른 판은 늦게), 한 판은 소리만 듣고 침 | `TIMING AUTO`, 빠르면 숫자가 내려가고 늦으면 올라감, 보고 치면 몇십 타 안에 멈춤, 소리만 듣고 치면 한쪽으로 계속 감, 오토플레이·리플레이에선 불변 |
+| 3.13 M7 | 이전 설정과 이전 리플레이 | 이 판 전에 JUDGE OFFSET +26 으로 저장한 `settings.ron` 과 리플레이로 실행(계정 동기화 쓰면 다른 기기 설정도) | 처음 켰을 때 `-26` 으로 부호만 뒤집혀 보이고 치는 느낌은 같음, `settings.ron.v4.bak` 생성, 다시 켜도 안 뒤집힘, 이전 리플레이가 같은 판정 수로 재생, 리플레이를 보고 나와도 내 JUDGE OFFSET 불변 |
+| 3.13 M8 | BGA 와 오프셋 | BGA 가 박자에 맞춰 넘어가는 곡을 JUDGE OFFSET 0 / +200 / -200 으로 오토플레이 | BGA 가 넘어가는 순간이 세 값에서 모두 소리에 맞음, 노트만 앞서거나 늦음, 미스 레이어도 놓친 순간에 뜸 |
+| 3.13 M9 | PLAY 메뉴의 미리보기 | F8 > JUDGE 의 JUDGE OFFSET 을 Shift+→·← 로 ±100 까지 | 미리보기 노트 전체가 값만큼 아래(+)·위(-)로 옮겨지고 TIMING 숫자가 따라옴, 예시 판정은 그대로 |
+| 3.14 N1 | START + 턴테이블로 레인 커버 1 씩 | 7K 를 손으로 치며 커버를 켠 채 `A` 를 누르고 왼쪽 Shift·Ctrl 을 짧게 여러 번, Shift 3초 | Shift 한 번에 흰 숫자 +1 / Ctrl 한 번에 -1, 녹색 숫자 불변 / HI-SPEED 가 따라감, 누르고 있으면 0.3초 뒤부터 점점 빨라짐, `A` 를 떼면 약 1.5초 뒤 COVER·LIFT 수치가 사라짐 |
+| 3.14 N2 | START + SELECT + 턴테이블로 리프트 1 씩 | `A`+`W` 를 누른 채 왼쪽 Ctrl(올림)·Shift(내림), 리프트 꺼짐·켜짐, 3초 이상 | 꺼져 있어도 LIFT 수치가 1 씩 바뀜(켜지진 않음), 켜져 있으면 판정선이 1 씩, 커버·녹색 숫자·HI-SPEED 불변, `W` 만 떼도 커버가 안 꺼짐, `A` 두 번은 전처럼 커버 토글 |
+| 3.14 N3 | 실제 턴테이블(컨트롤러) | 아날로그 턴테이블 컨트롤러에서 START 를 누른 채 디스크를 천천히·빠르게, START + SELECT 도 | 틱마다 1 씩 움직이고 방향이 디스크와 맞음, START 전에 돌리던 것은 반영 안 됨 |
+| 3.14 N4 | 판정 오프셋 키 | 플레이 중 `0` 3번, `9` 3번, `0` 2초 누르기, 선곡에서 `0`(검색)·`9` | TIMING 이 +1 / -1 되고 노트 전체가 옮겨짐, 누르고 있으면 0.3초 뒤 초당 20 씩 ±200 에서 멈춤, 오토플레이·리플레이에선 불변, 선곡의 `0`·`9` 는 전과 같음 |
+| 3.14 N5 | 기존 키 설정 파일 | 이 판 이전의 `keyconfig.ron` 으로 실행해 선곡 `H`·`F5`, SCRATCH 8 REVERSE 를 Del 로 떼고 재실행 | 가이드에 `9 0  JUDGE OFFSET -1 / +1 MS (HOLD)` 와 `THE TURNTABLE: DOWN / UP`, 이미 다른 데 쓰던 키는 `-`, 뗀 키는 다시 켜도 `-`, 다른 키는 그대로 |
+| 3.14 N6 | 왼쪽 Ctrl 이 선곡에서 목록을 올림 | 기본 스킨 선곡에서 왼쪽 Ctrl, `/` 검색 중 Ctrl+V, Settings 글자 칸 Ctrl+V | 선곡에선 왼쪽 Shift 가 아래 / 왼쪽 Ctrl 이 위로 한 칸, 검색어·글자 칸에선 붙여넣기만 되고 목록이 안 움직임 |
+| 3.14 N7 | 모노톤 화면 | 설정을 비운 첫 실행으로 선곡 → 결정 → 플레이 → 결과, 밝기가 다른 모니터 둘과 밝고 어두운 방 | 바탕이 순수 검정이고 파란 기가 없음, 면 단계가 구분되고 작은 회색 글자가 읽힘, 노트·판정 색은 전과 같음, 선택한 곡이 흰 표시로 가려짐 |
+| 3.14 N8 | 색 옵션과 모든 화면에 적용 | F12 7K 에서 THEME 을 SLATE 로 + `A`, ACCENT 를 AMBER 로 + `A`, NOTE COLORS WHITE-YELLOW, BOMB COLOR WHITE 각각 `A`, Tab 으로 다른 화면, 실제 선곡 → 플레이 → 결과, F8 LANE 묶음에서도 | 행에 `ALSO ON 8 OTHER SCREENS - A APPLIES THIS VALUE TO THEM ALL`, `A` 뒤 `APPLIED TO 8 OTHER SCREENS`(NOTE COLORS 3, BOMB COLOR 4), 모든 미리보기와 실제 화면이 고른 색, THEME SLATE + ACCENT SKY 는 웨이브 13 까지의 화면과 같음 |
+| 3.14 N10 | 내보내기 | N8 상태에서 불투명도·JUDGE POSITION Y 도 바꾼 뒤 SKIN 메뉴 맨 아래 EXPORT, 폴더 선택, 같은 폴더로 한 번 더, 팩 폴더 자신, ModernChic 내보내다 Esc | 창 제목 `Select folder to export the skin into`, 창이 떠 있는 동안 메뉴가 안 멈춤, `rbms-default-export`(두 번째는 `-export-2`) 생성과 `EXPORTED 66 FILES (2 MB) TO <경로>`, 팩 폴더 안을 고르면 `EXPORT FAILED`, 진행 중 Esc 는 취소하고 반쯤 쓴 폴더가 안 남음 |
+| 3.14 N11 | 내보낸 팩을 새 설정에서 열기 | `HOME=$(mktemp -d)` 새 설정에서 PACK FOLDER 로 N10 폴더를 고르고 선곡 → 플레이 → 결과, 행 변경·0·RESET, 다른 OS 로 옮겨서도 | 모든 화면이 N8·N10 에서 맞춘 그대로, 메뉴 행이 같은 값, 0·RESET 은 내보낸 값으로 돌아감, `rbms-adjustments.ron` 에 사용자 이름이나 절대 경로가 없음 |
+| 3.14 N12 | 깨진 조절값 파일 | N10 폴더의 `rbms-adjustments.ron` 에서 괄호 하나를 지우고 그 폴더를 팩으로 | 알림이 한 번 뜨고 제작자 기본값(모노톤)으로 그려지며 앱이 안 죽음 |
+| 3.15 O1 | 메뉴와 스킨이 한 벌로 보이는가 | 선곡에서 F12, F8, F5, Tab, T, O 를 차례로, 밝기가 다른 모니터 둘, 어둡고 밝은 방 | 바탕이 순수 검정이고 파란·노란 기가 없음, 메뉴의 면이 스킨의 면과 같은 회색, 넘어갈 때 색온도가 안 바뀌어 보임 |
+| 3.15 O2 | 고른 것이 밝기만으로 가려지는가 | 각 메뉴에서 커서·탭 이동, 슬라이더 끌기, 숫자 입력, 키 대기 | 커서 행은 한 단계 밝은 면 + 흰 글자, 고른 탭은 밝은 면, 슬라이더 손잡이 흰색(끄는 동안 커짐), 숫자 칸 흰 테두리·캐럿, 키 대기 칸은 흰 면에 검은 `PRESS...`, 읽기 전용 행은 흐림 |
+| 3.15 O3 | 색이 남은 곳이 뜻이 있는 곳뿐인가 | Tables 의 틀린 주소·오래된 저장본, GREEN NUMBER 1, 키 충돌, 알림, `--skin assets/skins/normal.ron` 으로 내장 화면 | 색은 실패·오래됨·한계(호박), 키 충돌(빨강), 알림 경고(주황)·오류(빨강), GREEN 숫자, 판정 색, FAST/SLOW, 램프·난이도·모드 배지, 랭크, 점수 차, 그래프, 게이지, 서버 점에만 있음 |
+| 3.15 O4 | 기존 설정 폴더의 `theme.ron` | 처음 실행 전에 `~/.config/rbms/theme.ron` 을 복사해 두고 실행해 `theme:` 줄과 파일을 본 뒤 한 번 더 실행 | 안 고친 파일이면 첫 실행 줄 끝에 `(the template of an earlier version was replaced; the colours follow the defaults)` 가 붙고 새 템플릿(모든 색 줄이 `//`), 두 번째에는 문구·변경 없음, 한 값이라도 고친 파일이면 문구 없이 그대로 |
+| 3.15 O5 | 내장 플레이 화면의 레인 | 스킨 팩 없이 7K 곡을 플레이(NORMAL 과 WIDE) | 노트·빔·폭발·판정선은 전과 같고 점수 그래프 눈금선·게이지 빈 칸·레인 바탕·필드 테두리·구분선이 회색(22 / 96 / 60), 파란 기 없음 |
+| 3.16 W1 | 내 설정에 SCRATCH AUTO 가 켜져 있는지 | F8 > CHART 의 SCRATCH AUTO 행에 커서 | 정보 패널에 `WHILE ON: TURNTABLE NOT COUNTED, LIGHT ASSIST LAMP`. 켜 둘지는 취향 |
+| 3.16 W2 | 리플레이를 본 뒤에도 설정이 그대로인가 | SCRATCH AUTO 를 끈 채 예전 SCRATCH AUTO 판의 리플레이를 끝까지 보고 Esc, F8, 앱 재시작 | 재생 중 턴테이블이 자동으로 쳐지고, 돌아온 뒤 SCRATCH AUTO·GAUGE·RANDOM 이 재생 전 값이며 재시작 뒤에도 같음 |
+| 3.16 W3 | 로그인 없이 한 판을 친 뒤 | LOGOUT(또는 SERVER URL 비움)·SCRATCH AUTO 끔으로 7K 곡을 끝까지 침 | 결과에 `SCRATCH AUTO:` 줄이 없고 `IR: SKIPPED (not logged in)` 와 실패 알림 없음, 선곡의 RANK·EX SCORE·RATE·MAX COMBO·MISS COUNT·판정 막대가 채워지고 PLAY COUNT +1, 재시작해도 같음 |
+| 3.16 W4 | 어시스트로만 친 차트의 선곡 | SCRATCH AUTO 로만 쳤던 차트에 커서 | CLEAR 는 LIGHT ASSIST CLEAR, PLAY COUNT·CLEAR COUNT 는 숫자, RANK·EX SCORE·RATE·MAX COMBO·MISS COUNT·판정 수는 `-` |
+| 3.16 W5 | 다음 판의 LOCAL BEST 목표 | TARGET 을 LOCAL BEST 로 두고 W3 의 곡을 다시, 이어서 한 번도 손으로 치지 않은 곡을 침 | W3 곡은 범례 `LOCAL BEST`, 판정 위 숫자는 W3 EX 와의 차이, 결과 TARGET 도 같은 EX. 안 친 곡은 범례 `RATE AAA (NO RECORD)`, 패널 1 `LOCAL BEST (NO RECORD: AAA)` |
+| 3.16 W6 | TARGET FALLBACK 과 TARGET RATE | F8 > CHART 에서 TARGET FALLBACK 을 MAX / RATE A / RATE CUSTOM, TARGET RATE 70%, TARGET 을 IR BEST, TARGET RATE AA + FALLBACK RATE AAA 에 TARGET RATE 커서, 안 친 곡 플레이 | TARGET 행이 `LOCAL BEST > MAX`·`> A`·`> 70%`, 범례가 따라감, IR BEST 는 `IR BEST > LOCAL > AAA` 와 `NO IR SCORE: YOUR LOCAL BEST, THEN RATE AAA`, 마지막은 `NOT IN USE: NO TARGET IS RATE CUSTOM`, 실제 판의 범례·숫자·결과 TARGET 이 고른 fallback |
+| 3.16 W7 | 설정 화면(Tab)을 손으로 | Tab·Shift+Tab 묶음, PgUp/PgDn/Home/End, 휠, 라벨·스위치·칸·화살표 클릭, 오른쪽 클릭, 숫자·EMAIL·PASSWORD 입력 중, RIVALS 목록, Shift+0 확인 중의 오른쪽 패널. 1280x720 과 전체 화면 | 모든 묶음이 스크롤 없이 한 화면이고 잘린 글자 없음, 각 모드 중 패널 KEYS 가 그 모드의 키(`DIGITS TYPE A NUMBER`, `KEYS TYPE`, `D REMOVE`, `ENTER RESET THE GROUP`)이고 VALUE 가 치는 값(비밀번호는 가려짐), 바닥 안내와 패널이 같은 말 |
+| 3.17 X1 | 초록 턴테이블(GPU) | SCRATCH AUTO 를 켜고 턴테이블 노트·롱노트·지뢰가 있는 7K 를 기본 팩으로, 이어 ModernChic 으로, 14K 도 한 번 | 턴테이블 노트와 롱노트 시작·끝이 단색 초록(#30E050), 롱노트 몸통은 반투명 초록이고 판정선에서 사라짐, 지뢰는 안 보임, 키를 눌러도 빔·폭발·공 POOR·소리 없음, 판정 수·콤보·게이지가 턴테이블 노트에 안 움직임 |
+| 3.17 X2 | 턴테이블 키음 | X1 의 곡을 소리 장치로 듣고 KEY 음량을 내렸다 올림 | 턴테이블 노트의 키음이 제 박자에 한 번씩 울리고 KEY 음량을 따름 |
+| 3.17 X3 | SCRATCH AUTO 판의 기록과 전송 | 로그인한 채 X1 의 곡을 끝까지 치고 결과 화면·선곡의 점수·기록 목록(R)의 리플레이·웹(bms.hyuns.uk)을 봄 | 결과 오른쪽 위 `SCRATCH AUTO: TURNTABLE NOT COUNTED, LIGHT ASSIST LAMP`, 램프 LIGHT ASSIST CLEAR, 선곡의 EX·RATE·RANK 가 채워짐, 리플레이가 같은 결과로 재생, 서버에 SCRATCH AUTO 표시와 함께 판이 있음(순위 노출은 보이는 대로 기록) |
+| 3.17 X4 | 파란 건반 + START(실제 컨트롤러) | RANDOM 으로 한 판 친 뒤 결과 화면에서 2번(또는 4·6번) 건반을 누른 채 START, 5K·9K·14K 도, 파란 건반만 눌렀다 떼기, START 만 | 같은 곡이 같은 노트 배치로 바로 다시 시작, 7K 에서 2·4번만 눌렀다 떼면 선곡으로(뗄 때), 6번은 그래프만 바꿈, START 만으로는 무반응 |
+| 3.17 X5 | 설정 화면의 Enter | Tab 으로 열고 스위치 / 선택 / SOUND FOLDER / 숫자 / KEY CONFIG 행에서 차례로 Enter | 스위치는 뒤집힘, 선택은 다음 값, SOUND FOLDER 는 OS 폴더 고르기 창, 숫자는 직접 입력, KEY CONFIG 는 키 설정. 어느 Enter 도 화면을 안 닫고 Esc 만 저장하고 닫음. 바닥 안내가 `ENTER SWITCH`·`ENTER NEXT`·`ENTER RIGHT CHOOSE A FOLDER` |
+| 3.17 X6 | 내 기록 DB 가 이 빌드에서 어떻게 보이나 | 앱을 켜기 전에 설정 폴더의 `scoredb.sqlite` 를 복사해 두고(원하면 `RBMS_SCOREDB_COPY=<사본> cargo test -p rbms-player --lib --locked -- --ignored a_players_own_database --nocapture`), 앱에서 예전 SCRATCH AUTO 곡을 봄 | 그 곡들의 램프(LIGHT ASSIST CLEAR)와 횟수가 그대로이고 점수는 `-`, 새로 친 판이 첫 최고 기록, 결과 화면이 옛 판의 EX 를 이전 점수로 안 보임(웨이브 16·18 측정: 37판·29차트·LOCAL BEST 0·램프 29) |
+| 3.17 X7 | 첫 실행의 발광 표 | 설정 폴더를 옮겨 새 설치처럼 만든 뒤(끝나면 되돌림) 네트워크를 끊고 켬, 이어서 네트워크를 잇고 Tables(T)에서 그 표에 R | 선곡 뿌리에 ALL SONGS 와 발광 표(로그인 전이라 MY FOLDERS 없음), 표 안에 26개 레벨 폴더, Tables 에서 표 줄이 `SAVED`, R 뒤 `https://bms.hyuns.uk/tables/insane1` 에서 다시 받음, D 로 지우고 재시작해도 안 돌아옴 |
+| 3.17 X8 | 설정 파일 스키마 5 에서 6 으로 | 기존 설정 폴더로 이 빌드를 처음 켬 | `settings.ron.v5.bak` 생성, NETWORK 의 SERVER URL 이 비어 있었으면 `https://bms.hyuns.uk/api` 가 들어가고 있었으면 그대로, 비우고 재시작하면 비어 있는 채로 유지 |
+| 3.17 X9 | MY FOLDERS(실제 서버) | 웹에서 폴더 둘을 만들고 곡을 넣은 뒤 앱에서 로그인, F6·Tables 의 R, 웹에서 이름을 바꾼 뒤 F6, 로그아웃 | 선곡 뿌리에 `MY FOLDERS (n)`, 안에 `이름 (가진 곡/전체)`, 폴더 안엔 가진 곡만, F6 뒤 바뀐 이름, Tables 맨 끝 줄에 받은 시각, 로그아웃하면 줄이 사라지고 일본어 이름이 제대로 보임 |
+| Phase H AUDIO | 오디오 | 곡선택에서 프리뷰가 있는 곡과 없는 곡을 번갈아 포커스한 뒤 interactive 단일 차트로 레인 키를 누름. 차트 시작 직후 BGM·키음, 프리뷰 전환 반복 (`2026-09-16-phase-h-manual-checks.md`) | 키음이 눈에 띄는 지연 없이 들리고 BGM 시작이 차트 시작과 맞으며 프리뷰 전환·재생 중 클릭·팝·끊김 없음 |
+| Phase H Practice | 연습(F4) | LN 의 시작 또는 끝이 범위 경계를 넘고 범위 안에 BGA 변화가 있는 곡에서 START TIME·END TIME 을 경계 양쪽으로 설정해 Enter, 같은 설정으로 한 번 더 | 경계를 가로지르는 LN 의 시작·종료 판정이 유지, 범위 안 BGA 가 표시, 반복 실행에서 설정·BGA 가 누적되거나 사라지지 않음, 연습 결과는 로컬 기록과 IR 제출에 반영 안 됨 |
+| Phase H Course | 코스 진행 | Shift+Tab 으로 COURSE 탭, 2스테이지 이상 코스를 시작해 첫 스테이지를 비최대 게이지와 콤보로 끝내고 둘째 시작 상태와 COURSE RESULT 확인 | 둘째 스테이지의 초기 게이지·콤보가 첫 스테이지 종료 상태에서 이어지고 COURSE RESULT 집계가 실제 진행과 일치 |
+| Phase H Multi-IR | 다중 IR | SETTINGS NETWORK 에서 primary 와 추가 enabled 프로필을 준비하고 `I` 로 IR RANKING 을 열어 `Q`·`E` 로 primary 전환, 리플레이 있는 행을 선택해 재생 | 프로필 라벨과 랭킹이 같은 primary, 이전 서버의 늦은 응답이 새 랭킹을 안 덮어씀, 리플레이 다운로드·재생이 선택한 primary 서버를 사용, 추가 프로필만 있어도 점수 fan-out 상태가 수렴 |
+| Windows 7항목 | 실제 Windows 런타임 | `docs/reference/windows-compat.md` 의 미체크 7항목(GUI 렌더, 오디오, 입력, 파일 대화상자, CJK 폰트, HiDPI, 경로 해석)을 실제 Windows 에서 | 그 문서의 각 항목 설명을 따름 |
+
+이 표에서 뺀 것: N9, W8(다른 절로 옮긴 표지), `2026-09-17-skin-system/checklist.md` 3절의 미체크 4개(대체됨. 그 문서 머리 참조).
 
 ## 1. 준비
 
 | 항목 | 내용 |
 | --- | --- |
-| 빌드 | `cargo build --release -p rbms-player` (macOS arm64 에서 약 1분) |
+| 빌드 | `cargo build --release --locked -p rbms-player` (macOS arm64 에서 약 1분) |
 | 격리 실행 | `HOME=$(mktemp -d) ./target/release/rbms-player <곡 폴더>`. 사용자 설정을 건드리지 않는다. 설정 폴더는 `$HOME/.config/rbms/` 이다. 확인 중 같은 임시 폴더를 계속 쓰려면 `export TMPHOME=$(mktemp -d)` 로 정해 두고 `HOME=$TMPHOME` 로 준다 |
 | 곡 폴더 | 저장소의 `samples/preview-demo` 는 5키 차트뿐이다. 7키, 9키(PMS), 10키, 14키 차트는 직접 준비한다. 제목이 한글이거나 일본어인 차트, 스테이지 그림과 BGA 가 있는 차트, 이미 플레이 기록이 있는 곡과 없는 곡이 섞여 있으면 좋다 |
 | 외부 스킨 | `/Users/hyunseokbyun/Downloads/ModernChic` (읽기 전용으로만 쓴다. 팩 폴더에 아무것도 쓰지 않는다) |
@@ -194,7 +337,7 @@
 - [ ] **N7 모노톤 화면.** 방법: 설정을 비운 첫 실행으로 선곡 → 결정 → 플레이 → 결과를 돈다. 밝기가 다른 모니터 둘, 어두운 방과 밝은 방에서 본다. 기대: 바탕이 순수한 검정이고 면·선·글자에 파란 기가 없다. 면의 단계(바탕 / 패널 / 올라온 면)가 서로 구분되고 작은 회색 글자가 읽힌다. 노트·키 빔·폭발·판정 글자·FAST/SLOW·램프·난이도·게이지·그래프·GREEN 숫자는 전과 같은 색이다. 선택한 곡이 흰 표시로 분명히 가려진다. 단계가 묻히면 어느 화면의 무엇인지 기록한다.
 - [ ] **N8 색 옵션과 모든 화면에 적용.** 방법: SKIN 메뉴(F12)의 7K 탭에서 THEME 을 SLATE 로 바꾸고 `A`, ACCENT 를 AMBER 로 바꾸고 `A` 를 누른다. Tab 으로 다른 화면 탭을 돌아본다. NOTE COLORS 를 WHITE-YELLOW, BOMB COLOR 를 WHITE 로 바꾸고 각각 `A`. Esc 로 나가 실제로 선곡 → 플레이 → 결과를 돈다. PLAY 메뉴(F8)의 LANE 묶음에서도 같은 행과 `A` 를 써 본다. 기대: THEME·ACCENT 행에 커서를 두면 미리보기 아래에 `ALSO ON 8 OTHER SCREENS - A APPLIES THIS VALUE TO THEM ALL` 이 뜨고, `A` 뒤에 `APPLIED TO 8 OTHER SCREENS` 가 나온다(NOTE COLORS 3, BOMB COLOR 4). 모든 탭의 미리보기와 실제 화면이 고른 색이다. THEME SLATE + ACCENT SKY 는 웨이브 13 까지의 화면과 같다. ACCENT WHITE 에서 판정선과 흰 건반 노트가 같은 색인 것이 거슬리면 기록한다.
 - [ ] **N9 앱이 덧그리는 UI 의 색.** 웨이브 15 에서 (나)로 정해 앱 테마의 기본값을 무채색으로 바꿨다(D18). 확인 항목은 3.15절 O1~O5 다.
-- [ ] **N10 내보내기.** 방법: N8 의 상태에서 플레이 탭의 불투명도 몇 개와 JUDGE POSITION Y 도 바꾼 뒤 SKIN 메뉴 맨 아래 EXPORT 에서 Enter. 뜨는 창에서 바탕화면 같은 폴더를 고른다. 같은 폴더로 한 번 더 내보낸다. 팩 폴더 자신을 골라도 본다. 큰 팩(ModernChic)으로도 내보내며 진행 중에 Esc 를 눌러 본다. 기대: 창의 제목이 `Select folder to export the skin into` 다. 창이 떠 있는 동안 메뉴가 멈추지 않는다. 고른 폴더에 `rbms-default-export` 가 생기고(두 번째는 `-export-2`) 미리보기 아래에 `EXPORTED 74 FILES (2 MB) TO <경로>` 가 뜬다. 팩 폴더 안을 고르면 `EXPORT FAILED` 와 이유가 나온다. 진행 중 Esc 는 메뉴를 떠나지 않고 취소하며 반쯤 쓴 폴더가 남지 않는다. 원래 팩 폴더는 바뀌지 않는다.
+- [ ] **N10 내보내기.** 방법: N8 의 상태에서 플레이 탭의 불투명도 몇 개와 JUDGE POSITION Y 도 바꾼 뒤 SKIN 메뉴 맨 아래 EXPORT 에서 Enter. 뜨는 창에서 바탕화면 같은 폴더를 고른다. 같은 폴더로 한 번 더 내보낸다. 팩 폴더 자신을 골라도 본다. 큰 팩(ModernChic)으로도 내보내며 진행 중에 Esc 를 눌러 본다. 기대: 창의 제목이 `Select folder to export the skin into` 다. 창이 떠 있는 동안 메뉴가 멈추지 않는다. 고른 폴더에 `rbms-default-export` 가 생기고(두 번째는 `-export-2`) 미리보기 아래에 `EXPORTED 66 FILES (2 MB) TO <경로>` 가 뜬다(설치된 기본 팩 65개 + 조절값 파일 1개. 저장소의 `assets/skins/rbms-default` 를 `RBMS_SKIN_PACK` 으로 지정해 내보내면 `tools/` 8개가 더해져 74개다). 팩 폴더 안을 고르면 `EXPORT FAILED` 와 이유가 나온다. 진행 중 Esc 는 메뉴를 떠나지 않고 취소하며 반쯤 쓴 폴더가 남지 않는다. 원래 팩 폴더는 바뀌지 않는다.
 - [ ] **N11 내보낸 팩을 새 설정에서 열기.** 방법: `HOME=$(mktemp -d)` 로 새 설정을 만들어 실행하고 SKIN 메뉴의 PACK FOLDER 에서 N10 의 폴더를 고른다. 선곡 → 플레이 → 결과를 돈다. 행 하나를 바꾸고, 그 행에서 `0`, 그리고 RESET 을 눌러 본다. 다른 컴퓨터(다른 OS)로 폴더를 옮겨서도 해 본다. 기대: 모든 화면이 N8·N10 에서 맞춘 그대로다(색, 노트 색, 불투명도, 판정 위치까지). 메뉴의 행도 그 값을 보인다. 바꾼 행은 내 값으로 저장되고 `0` 과 RESET 은 스킨 제작자 기본값이 아니라 내보낸 값으로 돌아간다. 폴더 안의 `rbms-adjustments.ron` 을 문서 편집기로 열면 옵션 이름과 값이 읽히고 내 사용자 이름이나 절대 경로가 없다.
 - [ ] **N12 깨진 조절값 파일.** 방법: N10 의 폴더에서 `rbms-adjustments.ron` 의 괄호 하나를 지우고 그 폴더를 팩으로 연다. 기대: 알림이 한 번 뜨고 스킨은 제작자 기본값(모노톤)으로 그려진다. 앱이 죽지 않는다.
 

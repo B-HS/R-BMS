@@ -1,5 +1,7 @@
 # rbms 백엔드 — 호환성 매핑 & 출처
 
+> 최종 갱신 2026-10-14 · 대응 커밋 7095ef7
+
 > LR2IR(원조) · 레퍼런스 구현 IR(현대) ↔ rbms 슈퍼셋 필드 대응. 모든 매핑은 **원본 소스/실프로토콜 대조**(아래 출처).
 
 ## 1. 차트 키
@@ -98,7 +100,7 @@
 - `JudgeBreakdown`은 `epg…lms`, `avgjudge`, `empty_poor`를 보존합니다.
 - `ScoreSubmission`과 `PlayOptions`는 seed·judge algorithm·rule·skin·옵션·build hash/platform을 전송합니다.
 - `ReplayData.events`는 µs 구조(`{t_us,lane,press}[]`)이며 설정 get/put, replay download, register/login/whoami, rivals, course/page query를 지원합니다.
-- GUI 로그인, 랭킹, replay, settings 동기화도 플레이어에 연결됐습니다. 실제 배포 서버 왕복은 Phase R에서 키를 넣어 검증합니다.
+- GUI 로그인, 랭킹, replay, settings 동기화, 내 폴더 읽기, 점수 제출의 차트 메타(`chart.title/artist/level`)도 플레이어에 연결됐습니다. 운영 서버(https://bms.hyuns.uk)는 배포돼 있고, 실제 클라이언트의 점수 제출 왕복은 v0.1.2 의 400(큰 시드, 서버는 d733a8f 로 수리)으로 막혔다가 사용자 재확인 대기 중입니다.
 
 ## 9.5 rbms 전용(LR2IR·레퍼런스 구현에 없음)
 | 기능 | LR2IR | 레퍼런스 구현 | rbms |

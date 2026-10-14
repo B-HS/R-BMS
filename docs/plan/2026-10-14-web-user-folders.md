@@ -1,6 +1,8 @@
 # 사용자 폴더와 기본 난이도표 — 서버·클라이언트 계약 설계 (웨이브 17A · 작업 A4)
 
-> 작성 2026-10-14. 조사와 설계만 담는다. 구현은 다음 웨이브가 이 문서를 보고 한다.
+> 최종 갱신 2026-10-14 · 대응 커밋 7095ef7
+
+> 작성 2026-10-14. 조사와 설계를 담았고, 이제 구현됐다(서버 d38b6fb·711b518, 클라이언트 8b11a17, 결정 근거 [../acknowledge/2026-10-14-adr-user-folders.md](../acknowledge/2026-10-14-adr-user-folders.md)). 11절의 결정은 모두 A안으로 정해졌고([../acknowledge/2026-10-14-web-decisions.md](../acknowledge/2026-10-14-web-decisions.md) U4·M3~M5·Q3·Q4), 서버가 설계와 달라진 곳은 14절, 클라이언트가 달라진 곳은 13절이다. **본문 6절·7절의 API 표와 DTO 가 14절과 다르면 14절과 [../backend/api-spec.md](../backend/api-spec.md) 7.2 가 맞다.**
 > 같은 웨이브의 다른 문서: 웹 현황 점검(A1, `docs/web/2026-10-14-audit.md`), 웹 화면 설계(A2), 발광 난이도표 스냅샷과 사본 주소(A3, `docs/web/2026-10-14-insane-table.md`). A1 과 A3 는 이 문서를 다 쓴 뒤에 나타나 끝에서 대조했고, 맞춘 곳은 본문에 적었다. A2 의 문서는 끝까지 보이지 않아 대조하지 못했다.
 > A3 가 추천한 값(사용자 결정 전): 사본 주소 `https://bms.hyuns.uk/tables/insane1`(끝 슬래시 없음), 스냅샷 `web/data/tables/insane1/{header.json,data.json,source.json}`, 표 id `insane1`.
 > 줄 번호는 2026-10-14 `dev` 브랜치(`d12b22c`) 기준이다. 같은 시각에 다른 워크플로가 Rust 소스를 고치고 있으므로 구현 전에 심볼 이름으로 다시 찾는다.
@@ -1197,3 +1199,21 @@ S2 가 꼭 덮어야 할 경우:
 | 코스 제출 | 로그인하지 않았으면 코스도 주 서버로 보내지 않는다(전에는 guest 로 나가 401). 같은 판단(`sends_to_primary_ir_server`)을 쓴다 |
 | CI | 플레이어가 `web/data/tables/insane1/{header,data}.json` 을 실행 파일에 넣고 테스트가 읽으므로, `.github/workflows/ci.yml` 이 `web/**` 를 빼되 `web/data/tables/**` 는 다시 넣는다(`paths: ["**", "!web/**", "web/data/tables/**"]`). 전에는 `paths-ignore: web/**` 라 그 파일만 바뀐 커밋에서 세 OS 빌드·테스트가 돌지 않았다 |
 | 계약 테스트의 긴 JSON | `crates/rbms-ir/src/contract_tests/folders.rs` 의 응답 문자열을 `concat!` 으로 나눠 한 줄 160자 안에 둔다(내용은 같다) |
+
+---
+
+## 14. 서버 구현 결과 (웨이브 17B-1·17B-2, 2026-10-14)
+
+설계(5·6절)는 그대로 구현됐고 아래만 다르거나 더해졌다. 코드: `web/src/server/{dto/folder.ts,route/folder.ts,service/domain/folder/folder.service.ts,compose/folder.ts}`, 스키마 `web/src/server/db/schema.ts` 의 `userFolder`·`userFolderItem`, 마이그레이션 `web/drizzle/0001_user_folders.sql`(운영 적용 2026-10-14).
+
+| 설계 | 구현 | 이유 |
+|---|---|---|
+| 6.1 편집 API 12개 | 13개: `PUT /api/fe/me/folders/{folderId}/items` 가 더해졌다(곡 목록을 순서대로 통째로 바꾸는 **명시 저장**, 본문 `{ items, base_updated_at? }`) | 폴더 편집 화면이 변경마다 저장하지 않고 한 번에 저장한다(결정 M7). 순서 변경과 추가·삭제를 한 요청으로 보낸다 |
+| 6.4 에러 코드 3개 | 4개: `IR_FOLDER_CONFLICT`(409)가 더해졌다 | `PUT …/items` 의 `base_updated_at` 이 서버 `updated_at` 과 다르면 쓰지 않고 이 코드로 답한다. 다른 탭·기기에서 먼저 저장한 변경을 덮어쓰지 않으려는 낙관적 잠금 |
+| 6.7 rate limit | 폴더 편집 60/분/사용자(`folder-write`), 표 가져오기 10/분/사용자(`folder-import`), 읽기 120/분/사용자(`folder-read`, 웹·클라이언트 공통) | `web/src/server/lib/with-rate-limit.ts` 의 `RATE_LIMIT.FOLDER_*` |
+| 6.2 DTO 의 곡 사본 | 제목·아티스트는 서버가 정한다: 차트 행 → 번들 표 → 요청 순으로 빈 값을 건너뛰고, 제어 문자를 지우고 200자로 자른다 | 클라이언트가 보낸 값을 그대로 믿지 않는다 |
+| 한도 | 폴더 50, 폴더당 2,000곡, 전체 20,000곡, 요청당 500곡, 이름 64자, 설명 255자, 메모 100자 | `FOLDER_LIMIT` (`dto/folder.ts`) |
+| 공개 폴더 | `is_public` 열은 있지만 v1 은 항상 `false`(결정 Q3=A) | 공개 동작은 아직 없다 |
+| 비프로덕션 `details` | `IR_FOLDER_LIMIT_EXCEEDED` 의 `details` 는 비프로덕션에서만 나간다 | 6.4 의 설명 그대로 |
+
+KNOWN ISSUE(새 세션의 할 일, 웹 2차): 곡 목록(`PUT items`)과 이름·설명(`PATCH`)이 두 요청이라 한쪽만 실패할 수 있다(화면이 알린다). 2,000곡 폴더의 행 가상화·끌어 옮기기는 없다. 폴더 응답의 최악 크기는 약 3.9MB 로 Vercel 의 4.5MB 본문 한도에 여유가 작다([../web/architecture.md](../web/architecture.md) 6-2).

@@ -1,6 +1,8 @@
 # rbms 백엔드 — IR 슈퍼셋 서버 (docs/backend)
 
-> rbms 클라이언트(`rbms-ir`)가 호출하는 [`docs/reference/ir-api.md`](../reference/ir-api.md) 계약을 `web/`의 Next.js 서버로 구현한 문서 묶음이다. 실제 배포 키를 넣는 Phase R 전까지는 로컬 코드·테스트 정합성만 이 문서의 범위입니다.
+> 최종 갱신 2026-10-14 · 대응 커밋 7095ef7
+
+> rbms 클라이언트(`rbms-ir`)가 호출하는 [`docs/reference/ir-api.md`](../reference/ir-api.md) 계약을 `web/`의 Next.js 서버로 구현한 문서 묶음이다. 운영 서버(https://bms.hyuns.uk)는 2026-10-14 에 배포됐다. 코드와 문서가 다르면 코드가 맞다.
 > 설계 원칙: **LR2IR + 레퍼런스 구현 IR의 슈퍼셋** + rbms 고유 기능(설정 동기화·리플레이 서버 저장·캐퍼빌리티 탐색·전방호환 `extra`).
 > 스택: **Next.js Route Handler (Bun) + Drizzle(MySQL) + Zod + better-auth**. Hono 별도 서버 전제는 구현 전에 폐기됐습니다.
 
@@ -23,7 +25,8 @@ players     profile / rivals / recent                       (IRPlayerData)
 charts      ranking(md5·sha256) / best / meta / search       (LR2IR getrankingxml 슈퍼셋)
 scores      submit(전체옵션+빌드해시) / get(by player·chart)  (IRScoreData early·late 슈퍼셋)
 courses     submit / ranking / course meta                  (IRCourseData)
-tables      list / folders / courses                        (IRTableData)
+tables      list / folders / courses                        (IRTableData). 발광 난이도표는 파일 스냅샷으로 `/tables/insane1/{header,data}.json` 제공
+folders     내 폴더(웹 편집, 클라이언트 읽기)                  (rbms 추가)
 replays     upload / download (µs 정밀, score 연결)          (rbms 추가 — 핵분석)
 settings    get / put (settings·keyconfig·tables·임의 blob)  (rbms 추가)
 integrity   client build allowlist · ranked 판정 · 감사로그   (rbms 추가 — 변조/공정)

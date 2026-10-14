@@ -1,5 +1,7 @@
 # rbms 백엔드 — 데이터 모델 (Drizzle / MySQL)
 
+> 최종 갱신 2026-10-14 · 대응 커밋 7095ef7
+
 > 구현 정본은 `web/src/server/db/{schema,auth-schema}.ts`입니다. 테이블/컬럼은 **snake_case**, TS 필드는 **camelCase**, 모델 타입은 `$inferSelect`/`$inferInsert`에서 유도합니다. 시각은 `timestamp(fsp:3)` 또는 `bigint`(epoch ms)입니다. 설계 초안의 FK 표기는 일부가 **논리 관계**이며, 실제 `.references()`는 스키마 파일에 적힌 것만 존재합니다.
 
 ## ER 개요
@@ -9,6 +11,7 @@ user 1─* setting_blob           score —(option/seed/gauge/judge early·late 
 user *─* rival (self-ref)        course 1─* course_chart *─1 chart
 user 1─* course_score *─1 course difficulty_table 1─* table_folder 1─* table_chart *─1 chart
 session/account (better-auth)    difficulty_table 1─* table_course *─1 course
+user 1─* user_folder 1─* user_folder_item   (내 폴더, 마이그레이션 0001)
 ```
 
 ## 테이블
@@ -22,8 +25,8 @@ session/account (better-auth)    difficulty_table 1─* table_course *─1 cours
 | email | varchar(255) | better-auth 이메일 |
 | password_hash | 없음 | better-auth `account` 테이블이 소유 |
 | rank | varchar(32) default '' | 단위/등급(IRPlayerData.rank) |
-| rank_points | double default 0 | 산출 점수 |
-| total_plays | bigint default 0 | 누적(트리거/집계) |
+| rank_points | double default 0 | 산출 점수. **쓰는 코드가 없어 항상 0**(웹 순위는 쓰지 않는다) |
+| total_plays | bigint default 0 | **쓰는 코드가 없어 항상 0**. 응답의 `total_plays` 는 `score` 행 수를 세서 채운다 |
 | role | varchar(16) default 'user' | user/admin |
 | allow_guest_merge | boolean default false | — |
 | extra | json null | free-form |
@@ -65,7 +68,7 @@ session/account (better-auth)    difficulty_table 1─* table_course *─1 cours
 | gauge | tinyint | GaugeType(플레이 게이지 종류) |
 | option | int | 노트옵션 비트필드(레퍼런스 구현) |
 | random | varchar(16) · random_p2 varchar(16) null · scratch_left bool · scratch_auto bool |
-| seed | bigint | 셔플 시드(리플레이 재현) |
+| seed | bigint | 셔플 시드(참고용). 안전 정수(±2^53 미만)가 아닌 값은 서버가 0 으로 저장한다(`seedSchema`) |
 | hispeed | double · constant bool · green_number int null |
 | lift | float · lane_cover float |
 | assist int · judge_rate int default 100 · offset_ms int default 0 · auto_offset bool |
@@ -118,10 +121,16 @@ session/account (better-auth)    difficulty_table 1─* table_course *─1 cours
 - `score.scratch_auto` 는 0002 전부터 있던 열이고, 웨이브 20부터는 `options.scratch_auto` 이거나 `options.assist` 에 `AUTO_SCRATCH` 가 있는 판이면 true 로 적는다. 그래서 점수 행에는 새 열을 더하지 않았다.
 
 ### `difficulty_table` / `table_folder` / `table_chart` / `table_course` (IRTableData)
+- 서버가 큐레이션하는 IR 표용이다. 발광 난이도표(`insane1`)는 이 테이블이 아니라 파일 스냅샷(`web/data/tables/insane1/`)으로 제공한다: `table_chart.chart_sha256` 이 NOT NULL 이라 md5 만 있는 표 항목을 담지 못하기 때문이다(결정 U1, [../web/2026-10-14-insane-table.md](../web/2026-10-14-insane-table.md)). 운영 `GET /api/tables` 는 지금 `[]` 이다.
 - `difficulty_table`: id PK · name · url · extra.
 - `table_folder`: id PK · table_id(논리 difficulty_table 관계) · name · position.
 - `table_chart`: folder_id + chart_sha256 복합 PK.
 - `table_course`: table_id + course_hash 복합 PK.
+
+### `user_folder` / `user_folder_item` (내 폴더, 마이그레이션 `0001_user_folders`)
+- `user_folder`: `id` varchar(36) PK(`uf_` + 16진 30자) · `user_id` varchar(36) NOT NULL **FK → `user.id` ON DELETE CASCADE** · `name` varchar(64) · `description` varchar(255) default '' · `is_public` boolean default false(v1 은 항상 false, 결정 Q3) · `position` int · `item_count` int(저장된 곡 수 캐시) · `created_at` timestamp(3) · `updated_at` **bigint(epoch ms, 낙관적 잠금 기준)**. 인덱스 `uniq(user_id, name)`, `idx(user_id, position)`.
+- `user_folder_item`: `folder_id` varchar(36) **FK → `user_folder.id` ON DELETE CASCADE** + `md5` char(32) **복합 PK** · `sha256` char(64) null · `title` varchar(200) · `artist` varchar(200) · `note` varchar(100) · `position` int · `created_at`. 인덱스 `idx(folder_id, position)`, `idx(md5)`. 곡의 식별자는 md5 이고 제목·아티스트는 담을 때의 사본이다.
+- 한도(사용자당 폴더 50, 폴더당 2,000곡, 사용자 전체 20,000곡)와 API 는 [api-spec.md](./api-spec.md) 7.2 절, 설계 이유는 [../plan/2026-10-14-web-user-folders.md](../plan/2026-10-14-web-user-folders.md).
 
 ## 타입 유도 (예)
 ```ts
@@ -132,7 +141,7 @@ type ChartKey = Pick<typeof chart.$inferSelect, 'md5'|'sha256'>
 ```
 
 ## 마이그레이션
-- `drizzle.config.ts`(`schema:'./db/schema.ts'`, `dialect:'mysql'`) → `drizzle/`. 차트 키 교차 인덱스·best 복합 PK·멱등 유니크 키를 우선 적용.
+- `web/drizzle.config.ts`(`schema: ['./src/server/db/schema.ts', './src/server/db/auth-schema.ts']`, `dialect:'mysql'`, `out:'./drizzle'`) → `web/drizzle/`. 현재 파일 3개이고 `meta/` 도 커밋돼 있다: `0000_smooth_cerebro`(21 테이블, 저널 `when` 은 일부러 작은 2026-09-01 값) → `0001_user_folders`(폴더 두 테이블) → `0002_scratch_auto_bests`(`chart_best`·`course_best`·`course_score` 에 `scratch_auto` 열, `chart_best`·`course_best` 의 PK 에 `scratch_auto` 추가, `chart_best_rank_idx` 재생성). 운영 DB 에는 세 개가 모두 적용됐다(2026-10-14). 적용 절차, 저널 `when` 규칙, 기준선, 운영 DB 워크플로(`web-db.yml`)는 [../web/architecture.md](../web/architecture.md) 3-2 절이 정본이다. `drizzle-kit push` 는 쓰지 않는다.
 
 ## 설계 노트 (왜)
 - **best 분리 테이블**: 랭킹은 차트당 수천 history를 매번 정렬하지 않고 `chart_best`만 정렬 → P95<150ms(NFR).

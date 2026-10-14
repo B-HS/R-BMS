@@ -1,5 +1,7 @@
 # rbms web — 컴포넌트 / 디자인 토큰 매핑 (W0)
 
+> 최종 갱신 2026-10-14 · 대응 커밋 7095ef7
+
 > **구현 상태:** 이 문서는 W0 설계 기준입니다. W1/W2 UI 통합은 완료됐고, 현재 컴포넌트와 경로는 `web/src/{shared,entities,features,widgets,app}`가 정본입니다. 네이티브 `theme.ron` 편집·동기화는 웹 기능이 아니며 [../theme.md](../theme.md)의 경계를 따릅니다.
 
 > 근거: `docs/acknowledge/design.md` §1-2(두 Surface) · §8(레이아웃) · §10(컴포넌트 카탈로그) · §11(페이지 패턴) · §16(Tailwind v4 `@theme` 딜리버리) · §17(에이전트 프롬프트).
@@ -58,15 +60,15 @@ design.md §10 의 13개 주 아키타입 중 채택분. 전부 `features/`(순�
 | §10-1 Panel Card | `features/shell/panel-card` | 모든 블록의 유일한 표면 | border 0 · radius 0 · 인셋 12px 양축. 제목은 **`h2`** 로 렌더(§7-4 구현 기준) |
 | §10-2 Stat Tile | `features/shell/stat-tile` | KPI 셀(총 제출·플레이어 수·내 순위 등) | `border-0` 필수(shadcn `Item` 기본 border 제거, 268px 베이스라인 유지) |
 | §10-3 Data Table | `features/table/data-table` | 랭킹·검색결과·최근기록·토큰·빌드 | 컬럼 디스크립터 `{ key, label, width, align, cell }`. 우측 정렬 컬럼은 자동 `tabular-nums`(EX·BP·콤보·순위 전부 해당) |
-| §10-4 Series Chart | `widgets/chart/series-chart` | 제출 추이·EX 추이 | 높이 224px 고정. **애니메이션 금지**. 시리즈 색은 `--color-chart-1..5`, 다크 값 재바인딩(§4-4) |
-| §10-5 Status Badge | `features/badge/lamp-badge` 등 | 램프(11종)·ranked/unranked·flags·표 레벨 | radius 9999px(유일한 라운드). **램프 11종 → 시맨틱 색 매핑표는 §5** |
-| §10-6 Bar-Count List | `features/stats/lamp-distribution` | 플레이어 램프 분포·레벨 분포 | 바 폭 전이 0.24s |
+| §10-4 Series Chart | `widgets/chart/series-chart`(**만들지 않았다** — 제출 추이 차트는 홈에 없다. 홈 재구성은 웹 2차 후보) | 제출 추이·EX 추이 | 높이 224px 고정. **애니메이션 금지**. 시리즈 색은 `--color-chart-1..5`, 다크 값 재바인딩(§4-4) |
+| §10-5 Status Badge | `features/lamp/lamp-label`·`lamp-swatch`·`lamp-strip`, `features/badge/meta-badge`, `features/score/scratch-auto-badge`(A-SCR) 등(옛 `lamp-badge` 는 d38b6fb 에서 대체됨) | 램프(11종)·ranked/unranked·flags·표 레벨 | radius 9999px(유일한 라운드). **램프 11종 → 시맨틱 색 매핑표는 §5** |
+| §10-6 Bar-Count List | `features/stats/bar-count-list`, `features/lamp/lamp-distribution`·`lamp-stack-bar` | 플레이어 램프 분포·레벨 분포 | 바 폭 전이 0.24s |
 | §10-7 Trace Waterfall | `widgets/replay/replay-waterfall` | µs 리플레이 타임라인 | 절대 픽셀 상수. 자체 오버플로 |
-| §10-8 Attribute Tree | `features/inspect/attribute-tree` | 스코어 상세 `options`/`extra` 원시 JSON 인스펙터 | 재귀 key/value |
+| §10-8 Attribute Tree | `features/inspect/attribute-tree`(**만들지 않았다** — 스코어 상세 인스펙터 화면이 없다) | 스코어 상세 `options`/`extra` 원시 JSON 인스펙터 | 재귀 key/value |
 | §10-9 Form Dialog | `widgets/*/…-form-dialog` | 토큰 발급·빌드 등록·라이벌 추가 | 최대폭 672px(`sm:max-w-2xl`) |
 | §10-10 State Triad | `features/state/{empty,load-error,query-error}` | 빈/전송오류/조회오류 3상태 | **인라인 가드**, early return 금지. 순서: pending → 전송오류 → 조회오류 → empty → 결과 |
-| §10-11 Navigation Rail | `widgets/shell/nav-rail` | 좌측 256px 레일 | 항목 높이 36px, 트리거 32px, **우측 border 제거는 `group-data-[side=left]:border-r-0` 로**(변형 특이성 함정, §6-4) |
-| §10-12 Context Filter Panel | `widgets/shell/filter-panel` | 우측 320px 필터(모드·레벨·램프·기간·검색어·플레이어) | 전부 URL 직렬화 |
+| §10-11 Navigation Rail | `widgets/shell/shell-nav-menu`(+ `app-shell`·`shell-account-control`·`shell-theme-control`) | 좌측 256px 레일 | 항목 높이 36px, 트리거 32px, **우측 border 제거는 `group-data-[side=left]:border-r-0` 로**(변형 특이성 함정, §6-4) |
+| §10-12 Context Filter Panel | `features/filter/filter-bar`·`filter-field`·`scratch-auto-toggle`, 표는 `widgets/table/table-snapshot-sidebar`(우측 패널이 아니라 사이드바 슬롯 `shell-sidebar-portal`) | 우측 320px 필터(모드·레벨·램프·기간·검색어·플레이어) | 전부 URL 직렬화 |
 | §10-13 Pager | `features/table/pager` | offset 페이저(page/total 표기) | 비활성 = `opacity .5` + `pointer-events: none` |
 | §10-13 Confirm Action | `features/dialog/confirm-action` | 토큰 폐기·라이벌 삭제 | destructive 확인, 취소는 좌측 ghost |
 | §10-13 Column Toggle | `features/table/column-toggle` | 랭킹 표시 컬럼 선택 | `cols=` URL 파라미터 |

@@ -1,5 +1,7 @@
 # 웹 기반 계약 (웨이브 17B-1 통합, 17B-2 반영)
 
+> 최종 갱신 2026-10-14 · 대응 커밋 7095ef7 (웨이브 20 의 SCRATCH AUTO 순위는 6.6절에 반영돼 있고, 12절·14절의 테스트 수와 측정값은 각 웨이브 종료 시점의 기록이라 지금 값과 다를 수 있다)
+
 > 현재 상태: 토큰·골격·기존 화면(17B-1 U1)과 서버·폴더·표 제공(17B-1 U2) 위에 17B-2 가 발광 표 화면(U3)과 폴더 화면(U4)을 올렸고, 리뷰 발견을 고친 뒤 게이트와 화면 확인을 다시 통과했습니다. 17B-2 에서 바뀐 계약은 해당 절을 고쳤고, 새 화면·컴포넌트·쿼리 키·검증은 13절과 14절에 모았습니다.
 > 작성일 2026-10-14. 근거는 실제 파일과 로컬 실행(포트 3103, 임시 MySQL 8.4)의 응답이며, 두 단위의 보고와 달랐던 곳은 11절에 적었습니다. 문서와 파일이 다르면 파일이 맞습니다.
 > 결정의 정본은 `docs/acknowledge/2026-10-14-web-decisions.md` 입니다. Q2 는 발광 표 기본 보기가 카드 격자(A), Q3 은 폴더 v1 전부 비공개(A)로 정해졌습니다.
@@ -24,7 +26,7 @@
 | 인증 | `web/src/entities/auth.{type,query}.ts`, `web/src/widgets/auth/*`, `web/src/proxy.ts` | 3.4, 6.1절 |
 | 서버 | `web/src/server/{route,service/domain,compose,dto,lib}/*`, `web/src/app/api/**` | 6절 |
 | 표 스냅샷 | `web/data/tables/insane1/{header.json,data.json,source.json}` | 서버만 읽습니다 |
-| 마이그레이션 | `web/drizzle/{0000_*,0001_user_folders}.sql`, `web/drizzle/meta/*` | 커밋 대상 |
+| 마이그레이션 | `web/drizzle/{0000_smooth_cerebro,0001_user_folders,0002_scratch_auto_bests}.sql`, `web/drizzle/meta/*` | 커밋 대상. 셋 다 운영 DB 에 적용됨(2026-10-14) |
 
 ## 2. 토큰
 
@@ -389,6 +391,7 @@ FolderDetail  = FolderSummary + { "items":[{ "md5":"0077…","sha256":"…03e9",
 | OG 이미지, JSON-LD | 없음(텍스트 OG 만) | 2차 |
 | 기존 서버 컴포넌트의 자기 URL fetch 를 서비스 직접 호출로 | 새 화면(표·폴더)은 직접 호출. 기존 화면은 위험만 문서화(9절) | 별도 작업 |
 | 지속형 rate limit | 인스턴스 로컬(결정 M10). IP 헤더 전제는 9절 | 후속 |
+| 없는 상세 주소의 HTTP 상태 | 차트·플레이어·코스·리플레이의 없는 주소가 404 화면이지만 HTTP 200 (Suspense 안에서 `notFound()` 를 부르는 구조, 운영 확인 2026-10-14) | [2026-10-14-audit.md](./2026-10-14-audit.md) KNOWN ISSUE |
 
 ## 11. 통합에서 바뀐 것(두 단위의 보고와 달랐던 곳)
 

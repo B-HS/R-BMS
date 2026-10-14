@@ -1,13 +1,12 @@
 # Development guide
 
-Last updated 2026-10-11 · matches 03e1dd8 plus the wave 10A working tree (not yet committed).
+Last updated 2026-10-14 · matches 7095ef7
 
 For picking the project up in a fresh session.
 
 ## What this is
 
-A **Rust** BMS rhythm-game player — a port of the reference implementation's PLAY core. **Not** a web/TS project; any
-generic "frontend" assumptions do not apply. Cargo workspace, edition 2024, rust ≥ 1.95, GPL-3.0.
+A **Rust** BMS rhythm-game player — a port of the reference implementation's PLAY core — plus `web/`, the score server and website it talks to (Next.js, TypeScript, bun). The player is a Cargo workspace, edition 2024, rust ≥ 1.95 (the toolchain is pinned to 1.95.0), GPL-3.0; it has no web/TS code, so generic "frontend" assumptions do not apply to it. `web/` has its own rules in `web/AGENTS.md` (arrow functions, no `any`/`enum`/comments, FSD, TanStack Query, Zod at the boundary, no `useCallback`/`useMemo`) and its own gate, below.
 
 ## Build / run / test
 
@@ -29,7 +28,7 @@ cargo run --release -p rbms-player -- <chart.bms> --interactive
 .\target\release\rbms-player.exe <chart.bms> --auto
 ```
 
-- The wave 8C gate (2026-10-11) passed 4,878 tests with 0 failures and 5 ignored (four need an audio or graphics device, one waits five seconds); the number is not a contract. CI gates formatting and the clippy command above, and builds/tests on Linux, macOS, and Windows with `cargo test --workspace --no-fail-fast`, so one run lists every failure of a platform.
+- The wave 20 gate (2026-10-14) passed 5,671 Rust tests with 0 failures (a few are ignored: they need an audio or graphics device, wait five seconds, or read a copy of a player's own database) and 415 web tests; later commits added a few of each. The numbers are not a contract. CI gates formatting and the clippy command above, and builds/tests on Linux, macOS, and Windows with `cargo test --workspace --no-fail-fast`, so one run lists every failure of a platform.
 - **After every push, read the CI result.** `gh run list --branch dev --limit 3` shows the latest runs; `gh run view <id>` shows the three OS jobs and `gh run view <id> --log-failed` the failing output. A local pass is not evidence for the other two operating systems. Fix a failing run before the next unit of work (`docs/feedback/2026-10-11-ci-not-checked-after-push.md`).
 - The default Cargo features of `rbms-player` include `video`, which links OpenH264 (built from C source by `cc`; no extra install step on any OS). `--no-default-features` builds and tests the player without a codec. AUDIO, Practice, Course and Multi-IR have no completed hardware/server manual result; their required procedure is [quality-assurance/2026-09-16-phase-h-manual-checks.md](quality-assurance/2026-09-16-phase-h-manual-checks.md).
 - The first positional argument is a song folder or chart. With no positional argument, the player uses the remembered `songs_folder`, then `RBMS_SONGS`, otherwise opens an empty GUI. A single chart defaults to autoplay; use `--interactive` or `--auto` to choose explicitly. The execution source of truth is the repository `README.md`.
@@ -37,6 +36,26 @@ cargo run --release -p rbms-player -- <chart.bms> --interactive
 - The app reads/writes config under `~/.config/rbms/`. `config_dir()` resolves `HOME` then
   `USERPROFILE` (then `.`), so on Windows (where `HOME` is unset) config lands in
   `%USERPROFILE%\.config\rbms`.
+
+## The website (`web/`)
+
+```bash
+cd web
+bun install --frozen-lockfile
+cp .env.example .env.local   # then fill the values (DATABASE_URL, BETTER_AUTH_SECRET, BETTER_AUTH_URL, NEXT_PUBLIC_APP_URL)
+bun run db:migrate           # apply web/drizzle/*.sql; never `drizzle-kit push`
+bun run dev                  # http://localhost:3000
+bun run verify               # typecheck (next typegen + tsc) · eslint · bun test
+bun run format:check         # prettier
+bun run build                # next build; works with no environment variables
+bun run db:generate          # after a change to web/src/server/db/schema.ts: writes the next migration
+bun run db:status            # which migrations a database has
+```
+
+- The gate for a change under `web/` is `.github/workflows/web.yml` (install frozen, `verify`, `format:check`, a build). It does not run for a Rust-only change, and `ci.yml` does not run for a web-only one, except that `ci.yml` also runs when `web/data/tables/**` changes because the player embeds those files.
+- Production is Vercel (project `rbms-web`, root `web`, production branch `dev`); a push to `dev` that changes `web/` deploys. The production database is touched only through the manual `web-db.yml` workflow (status, migrate, count or delete the test accounts), using the repository secret `WEB_DATABASE_URL`; never read or write `.env*` files from an agent.
+- `web/data/tables/insane1/{header,data,source}.json` is the snapshot of the 発狂BMS難易度表 the site serves and the player carries (`include_bytes!`); `bun scripts/snapshot-table.ts <table-url> <output-dir>` (run in `web/`) writes `header.json`, `data.json` and `source.json` into the folder you name (here `data/tables/insane1`); with `--check` it writes nothing and only compares (exit 0 same, 1 different, 2 failed).
+- The wire contract with the player is tested on each side separately (`crates/rbms-ir` and `web/tests/dto/ir-contract.test.ts`). When the client changes what it sends, change both and run both gates.
 
 ## Environment variables
 
@@ -49,17 +68,22 @@ cargo run --release -p rbms-player -- <chart.bms> --interactive
 | `RBMS_REQUIRE_GPU` | the GPU pixel tests | makes a test that needs a graphics adapter fail instead of skipping when none comes up |
 | `RBMS_GOLDEN_UPDATE` | `rbms-render` golden tests | regenerates the built-in screen golden images |
 | `RBMS_TIMING_CSV`, `RBMS_SOAK_LOG` | the player | timing sample dump and periodic stability log (same as `--timing-csv`) |
+| `RBMS_SCOREDB_COPY` | one ignored player test | path of a copy of a player's own `scoredb.sqlite`; the test reads it with this build and reports how its rows are read (`cargo test -p rbms-player --lib -- --ignored a_players_own_database`). Never point it at the live file |
+| `RBMS_SKIN_EXPORT_DIR` | one skin-menu test | with `RBMS_SKIN_PACK`, a folder outside the repository the pack is exported into |
+| `RBMS_IR_E2E_URL` | `crates/rbms-ir/tests/e2e_local.rs` | base URL of a local score server for the end-to-end test; the test is skipped when it is unset |
 | `HOME`, `USERPROFILE` | the player | the config dir is `$HOME/.config/rbms`, else `%USERPROFILE%\.config\rbms`, else `./.config/rbms` |
 
 ## Persistence (`~/.config/rbms/`)
 
 | File | What |
 |---|---|
-| `settings.ron` | versioned `Config`: play, library folders and difficulty tables, display, network profiles and IR token |
+| `settings.ron` | versioned `Config` (schema 6): play, judge, library folders and difficulty tables (and `seeded_default_tables`, the default tables already given), display, audio, network (server address, the signed-in login id and bearer token, extra IR profiles), skin |
 | `keyconfig.ron` | lane, control and shortcut bindings for keyboard and pad. `controls` holds the 20 in-play controls (`start` / `select` default to A / W, `cover_toggle` to BACKSLASH; the ones added in wave 10A, `fine` among them, default to empty = unbound). `shortcuts` maps a shortcut's name to a key word (no entry = the shipped key, an empty string = unbound). An older file without these loads with the defaults and is not rewritten on load. The editor opens with F5 from the song select or Settings; what each control does is in [play-options.md](./play-options.md) |
 | `songdb.sqlite` | scanned song-library index and chart-detail cache |
-| `scoredb.sqlite` | one merged best per chart and full local play history |
+| `scoredb.sqlite` | one merged best per chart and full local play history (`scorelog` has a row for every run played by hand, with the judging-rule generation and the assist level; the best row is built only from runs that may set one) |
 | `scores.ron.migrated` | a legacy `scores.ron` after its first successful import into `scoredb.sqlite` |
+| `tables/` | the copy of each fetched difficulty table, `<hash of the address>.json`; the default table's copy is written the first time it is given |
+| `user-folders/` | the copy of the signed-in account's folders (`MY FOLDERS`), `<hash of the server and the login id>.ron`; deleted on sign-out |
 | `favorites.ron` | starred chart MD5 values |
 | `practice.ron` | per-chart practice properties |
 | `theme.ron` | UI-theme file; a template that sets no colour is written on first run, and an untouched template of an earlier version is replaced (see `theme.md`) |
@@ -87,6 +111,7 @@ the frame loop, `ApplicationHandler` and `run`. Everything else hangs off it:
 | `window_mode.rs` / `pointer.rs` / `textedit.rs` / `toast.rs` / `notify.rs` | window resolution and mode, mouse events as `PointerInput`, the single-line text editor, the notification bus and its on-screen strips |
 | `app_input.rs` / `app_network.rs` / `app_options.rs` / `app_play.rs` / `app_ranking.rs` / `app_result.rs` | `AppShared` methods by concern: keyboard and gamepad input, NETWORK tab and sync, option overlay, chart load / shared stream / song clock, IR ranking and result persistence or submission. |
 | `library.rs` / `scoredb_store.rs` / `practice.rs` / `course_ui.rs` / `course_ir.rs` | Phase G persistence and modes: SQLite song index, SQLite score import and history, per-chart practice properties and clock, course selection/constraints/results, and course IR submission. |
+| `target.rs` / `user_folders.rs` / `favorites.rs` / `tablesrc/seed.rs` / `judge_setup.rs` | what a run is paced against (TARGET, TARGET FALLBACK), the account's own folders (`MY FOLDERS`), starred charts, the default difficulty table, and how a run's judge settings are read and whether they count as an assist. |
 | `gamepad/` / `syssound.rs` / `ir_ext.rs` | Phase G device and network extensions: gilrs pad state and analog mapping, optional system-sound set, and primary plus additional IR profile fan-out. |
 | `format.rs` / `tablesrc.rs` / `settings_ui.rs` / `settings_view.rs` / `ir_*.rs` / `play_sink.rs` / `timing.rs` | display formatting, table loading, the settings rows the program owns, the settings renderer, IR panels/session/ranking/replay/sync, the `SoundSink` adapter, and the timing probe. |
 | `keyconfig.rs` | the winit `KeyCode` ↔ token map and the `keyconfig.ron` shape (the one persisted type still in the app, because it is the one that needs winit) |
@@ -129,7 +154,7 @@ the configuration directory.
 ## Conventions
 
 - **Commits: NEVER add a `Co-Authored-By:` line** (or any AI attribution). Description only.
-- Branches: `dev` = work. `prod` is the deployment branch that Phase R will create when the maintainer provides real release/signing or deployment credentials; do not create or push it as routine development work. The release workflow then auto-bumps and builds universal macOS / Windows artifacts.
+- Branches: `dev` = work, and it is the branch the website deploys from. Client releases are cut by hand from `dev` with `gh workflow run release.yml --ref dev -f bump=patch` (`release.yml` raises the version, tags it, builds and signs, and leaves a draft GitHub release); no `prod` branch is needed for a release (`origin` lists only `dev` and an old `feat/skin-followups` as of this commit). Do not publish a draft release: that is the maintainer's step. Details: `ci-release.md`.
 - Tests are edge-case heavy and pin some intentional/suspect behaviours — see `roadmap.md` before
   "fixing" a surprising assertion.
 - The deterministic `CpuCanvas` backend makes rendering testable without a GPU; prefer it in tests.

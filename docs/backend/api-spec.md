@@ -1,6 +1,8 @@
 # rbms 백엔드 — HTTP API 규격 (IR 슈퍼셋)
 
-> **현재 구현 기준(2026-09-16):** 이 문서는 `web/src/app/api`와 `web/src/server`를 따라 읽습니다. 초기 설계에 남은 `/api/settings/*`, `?envelope=1`, 외부 CORS, LR2IR 어댑터 설명은 아래의 구현 상태 표기를 우선합니다. 실제 키를 사용한 배포 검증은 Phase R 보류입니다.
+> 최종 갱신 2026-10-14 · 대응 커밋 7095ef7
+
+> **현재 구현 기준:** 이 문서는 `web/src/app/api`와 `web/src/server`를 따라 읽습니다. 코드와 다르면 코드(`web/src/server/dto/*.ts` 의 zod 스키마)가 맞습니다. 초기 설계에 남은 `/api/settings/*`, `?envelope=1`, 외부 CORS, LR2IR 어댑터 설명은 아래의 구현 상태 표기를 우선합니다. 운영 배포(https://bms.hyuns.uk, Vercel `rbms-web`, 운영 DB 마이그레이션 0000~0002 적용)는 2026-10-14 에 끝났습니다. 현재 배포 상태는 [../web/architecture.md](../web/architecture.md) 6-2 절이 정본입니다.
 
 > REST + JSON. 모든 시각은 **unix epoch ms**(레퍼런스 구현 IR은 초 단위 — [compatibility.md](./compatibility.md) 변환표). 차트 키는 **md5(32hex) 또는 sha256(64hex)** 둘 다 허용(`{hash}` 길이로 판별).
 > 인증: `Authorization: Bearer <token>`(선택). 미인증 제출은 서버 설정상 `guest` 허용 가능.
@@ -25,15 +27,15 @@
 | HTTP | 상황 | code(예) |
 |---|---|---|
 | 200/201 | 성공 | — |
-| 400 | DTO 검증 실패 | `VALIDATION_ERROR` |
+| 400 | DTO 검증 실패 / 지원하지 않는 `api_version` | `VALIDATION_ERROR` · `IR_API_VERSION_UNSUPPORTED` |
 | 401 | 토큰 없음/무효 | `UNAUTHORIZED` |
 | 403 | 권한 없음 | `FORBIDDEN` |
-| 404 | 리소스 없음 | `IR_CHART_NOT_FOUND`·`IR_PLAYER_NOT_FOUND`·`IR_SCORE_NOT_FOUND`·`IR_REPLAY_NOT_FOUND` |
-| 409 | 충돌(중복 계정) | `IR_ACCOUNT_EXISTS` |
+| 404 | 리소스 없음 | `IR_CHART_NOT_FOUND`·`IR_PLAYER_NOT_FOUND`·`IR_SCORE_NOT_FOUND`·`IR_REPLAY_NOT_FOUND`·`IR_SETTING_NOT_FOUND`·`IR_COURSE_NOT_FOUND`·`IR_TABLE_NOT_FOUND`·`IR_FOLDER_NOT_FOUND`(그 밖에 일반 `NOT_FOUND`) |
+| 409 | 충돌 | `IR_ACCOUNT_EXISTS`(중복 계정) · `IR_FOLDER_NAME_TAKEN` · `IR_FOLDER_LIMIT_EXCEEDED` · `IR_FOLDER_CONFLICT`(폴더 통째 저장의 `base_updated_at` 불일치). 설정 blob 의 낙관적 잠금 충돌은 에러 봉투가 아니라 `{ conflict, server }` 본문의 409 다(§9) |
 | 413 | 본문 초과(리플레이) | `IR_PAYLOAD_TOO_LARGE` |
 | 429 | rate-limit | `RATE_LIMITED` |
 | 503 | 미구성 서비스 | `SERVICE_NOT_CONFIGURED` |
-> 에러는 `lib/error-code.ts`·`error-message.ts`·`error.ts` 3파일 중앙화(컨벤션 §6). 도메인 접두사 `IR_*`.
+> 에러는 `web/src/server/lib/error-code.ts`·`error-message.ts`·`error.ts` 3파일 중앙화(컨벤션 §6). 도메인 접두사 `IR_*`. 코드 목록의 정본은 `error-code.ts` 다.
 
 ### 0.3 enum 표기 (variant 이름 그대로 JSON 문자열)
 - `ClearLamp`: `NoPlay|Failed|AssistEasy|LightAssistEasy|Easy|Normal|Hard|ExHard|FullCombo|Perfect|Max` (the reference implementation `ClearType` id 0-10).
@@ -49,14 +51,15 @@
 연결 표시(초록/빨강) + capability 탐색. **무인증**.
 ```jsonc
 // 200 ServerInfo
-{ "name": "my-ir", "version": "0.1.0", "ir_compat": "1",
+{ "name": "rbms-ir", "version": "0.1.0", "ir_compat": "superset-1",
   "capabilities": { "ranking": true, "player_best": true, "rivals": true,
                     "courses": true, "replays": true, "tables": true,
-                    "settings_sync": true, "accounts": true, "lr2ir_compat": false } }
+                    "settings_sync": true, "folders": true, "accounts": true, "lr2ir_compat": false } }
 ```
-> `capabilities`는 `rbms-ir`의 `ServerCapabilities` 슈퍼셋(여기 `settings_sync`·`accounts`·`lr2ir_compat` 추가). 클라가 모르는 키는 무시.
+> `capabilities`는 `rbms-ir`의 `ServerCapabilities` 슈퍼셋(여기 `settings_sync`·`folders`·`accounts`·`lr2ir_compat` 추가). 클라가 모르는 키는 무시. 값의 정본은 `web/src/server/service/domain/system/capabilities.ts` 의 `SERVER_CAPABILITIES` 다.
 
 ### `GET /api/version` → `{ "api_version": 1, "server": "0.1.0", "commit": "abc1234" }`
+`commit` 은 `SERVER_COMMIT` 또는 Vercel 의 `VERCEL_GIT_COMMIT_SHA` 앞 7자이고, 둘 다 없으면 `null` 이다(Git 연동 배포가 아니라는 신호). 운영 배포가 어느 커밋인지 보려면 `curl https://bms.hyuns.uk/api/version`.
 
 ---
 
@@ -64,32 +67,34 @@
 
 ### `POST /api/auth/register`
 ```jsonc
-// req  (IRAccount = {id, password, name} 슈퍼셋)
-{ "api_version":1, "id":"alice", "password":"…", "name":"Alice", "email": null, "extra":{} }
-// 201 → AuthResult
-{ "token":"<bearer>", "player": { "id":"alice", "name":"Alice", "rank":"", "total_plays":0, "rank_points":0.0, "extra":{} } }
-// 409 IR_ACCOUNT_EXISTS
+// req  (accountSchema) id: ^[a-zA-Z0-9_-]+$ 1~64자, "guest"(대소문자 무시) 예약. password 8자 이상. email 필수(유효한 주소). name 선택
+{ "api_version":1, "id":"alice", "password":"…", "email":"alice@example.com", "name":"Alice" }
+// 201 → AuthResponse (authResponseSchema). token 은 새로 발급한 api_token 이고 세션 쿠키도 함께 세팅된다
+{ "token":"<bearer>", "player": { "id":"alice" }, "name":"Alice" }
+// 409 IR_ACCOUNT_EXISTS (DB 오류 등 가입 실패 전부가 이 코드로 보인다: KNOWN ISSUE, 아래)
 ```
 ### `POST /api/auth/login`
 ```jsonc
-{ "api_version":1, "id":"alice", "password":"…" }   // → 200 AuthResult (위와 동일)
+{ "api_version":1, "id":"alice", "password":"…" }   // → 200 AuthResponse (위와 동일, 로그인마다 새 api_token 을 만든다)
 // 401 UNAUTHORIZED
 ```
 ### `GET /api/auth/me`  (Bearer)
 ```jsonc
-// 200 PlayerProfile (자기 자신, 비공개 필드 포함 가능)
-{ "id":"alice", "name":"Alice", "rank":"", "total_plays":1234, "rank_points":56.7, "email":null, "extra":{} }
+// 200 PlayerProfile (자기 자신). Bearer 또는 세션 둘 다 받는다
+{ "id":"alice", "name":"Alice", "total_plays":1234, "rank_points":56.7, "extra":{ "rank":"" } }
 ```
-### `POST /api/auth/token`  (Bearer) — API 토큰 발급/회전 → `{ "token":"…", "created_at":1700000000000 }`
-> better-auth 기반(컨벤션 §11). 레퍼런스 구현 `register`/`login`(IRConnection)에 1:1 대응. `guest` 제출은 토큰 없이 `player.id="guest"`(서버 설정 `allow_guest`).
+### `POST /api/auth/token`  (**세션**, Bearer 아님) — API 토큰 회전: 그 사용자의 기존 토큰을 전부 폐기하고 새로 발급한다 → `{ "token":"…", "created_at":1700000000000 }`. 본문 `{ "label"?: string }`. 웹 설정 화면은 폐기 없이 추가 발급하는 `POST /api/fe/tokens` 를 쓴다.
+> better-auth 기반(컨벤션 §11). 레퍼런스 구현 `register`/`login`(IRConnection)에 1:1 대응. `guest` 제출은 토큰 없이 `player.id="guest"`(서버 설정 `ALLOW_GUEST`, 운영 기본값 `false`). 웹 화면의 로그인·가입은 토큰을 만들지 않는 `/api/fe/auth/*`(§12)를 쓴다.
+>
+> KNOWN ISSUE: 가입 실패의 모든 원인(better-auth 오류, DB 오류 포함)이 `IR_ACCOUNT_EXISTS`(409)로 보인다(`web/src/server/service/domain/auth/auth.service.ts` 의 `signUp` 의 `.catch`). 고치는 방법: better-auth 오류 코드를 구분해 중복만 409, 나머지는 원인 그대로 던진다.
 
 ---
 
 ## 3. players — 프로필 / 라이벌 (IRPlayerData)
 
-### `GET /api/players/{id}` → `PlayerProfile`
+### `GET /api/players/{id}` → `PlayerProfile` (`playerProfileSchema`: `id`·`name`·`total_plays`·`rank_points`·`extra`. `id` 는 로그인 id 다. `total_plays` 는 그 사용자의 `score` 행 수를 센 값이고, `rank_points` 는 `user.rank_points` 열을 그대로 읽는데 이 열에 쓰는 코드가 없어 항상 0 이다. 웹 순위는 이 값을 쓰지 않는다)
 ```jsonc
-{ "id":"alice", "name":"Alice", "rank":"", "total_plays":1234, "rank_points":56.7, "extra":{} }
+{ "id":"alice", "name":"Alice", "total_plays":1234, "rank_points":56.7, "extra":{ "rank":"" } }
 // 404 IR_PLAYER_NOT_FOUND
 ```
 ### `GET /api/players/{id}/rivals` → `PlayerProfile[]`  (the reference implementation `getRivals`)
@@ -118,16 +123,18 @@
 ```jsonc
 { "api_version":1, "chart": ChartMeta }   // → 200 ChartMeta
 ```
+> 본문 64KB, 문자열은 DB 열 길이(제목류 255, `mode` 16, `url` 512), `extra` 16KB 상한(초과는 400/413). 이미 있는 차트는 **빈 필드만 채우고 값이 있는 필드를 덮어쓰지 않는다**(토큰 하나로 메타를 망가뜨릴 수 없다). 현재 클라이언트는 이 경로를 부르지 않고 `POST /api/scores` 의 `chart.title/artist/level` 로 메타를 올린다. `GET /api/charts?hash=` 는 쿼리 형태의 조회다(해시가 없으면 400).
 ### `GET /api/charts/{hash}/ranking?limit=50&page=1&rival_of={id}&lnmode=1&include_scratch_auto=false`
 ```jsonc
-// 200 ScoreRecord[]  (rbms 모드 raw 배열)
+// 200 ScoreRecord[]  (rbms 모드 raw 배열, scoreRecordSchema)
 [ { "player":{"id":"alice"}, "player_name":"Alice", "clear":"Hard",
-    "ex_score":1600, "max_ex_score":1624, "max_combo":812, "minbp":1, "rank":1,
+    "ex_score":1600, "max_combo":812, "minbp":1, "rank":1,
+    "played_at":1700000000000, "lntype":1, "option":0, "total_notes":812,
     "judge":{ "epg":700,"lpg":12,"egr":50,"lgr":14,"egd":5,"lgd":16,"ebd":1,"lbd":7,"epr":2,"lpr":3,"ems":0,"lms":2,
               "pgreat":712,"great":64,"good":21,"bad":8,"poor":5,"miss":2,"fast":30,"slow":40,"combobreak":15,"empty_poor":9 },
-    "gauge_value":86.0, "options": PlayOptions, "seed":12345, "replay_id":"rp_…",
-    "played_at":1700000000000, "extra":{} } ]
+    "extra":{ "replay_id":"rp_…" } } ]
 ```
+- `extra.replay_id`(리플레이가 연결된 판만)와 `extra.scratch_auto: true`(SCRATCH AUTO 판 행만)가 `extra` 에 실린다. 플레이 옵션·시드는 `ScoreRecord` 에 없다(`GET /api/scores/{id}` 상세에서 본다).
 - `rival_of={id}`: 그 플레이어의 라이벌만(+본인). `lnmode`: 0=LN,1=CN,2=HCN(레퍼런스 구현 `lntype`).
 - `include_scratch_auto`(`true`|`false`, 기본 `false`, 웨이브 20): 기본 목록은 일반 판 최고 기록(`chart_best.scratch_auto=false`)만이다. `true` 면 플레이어마다 일반 판 최고와 SCRATCH AUTO 판 최고 가운데 더 높은 것(램프 → EX → BP, 모두 같으면 일반 판) 한 행이다. SCRATCH AUTO 판 행은 `extra.scratch_auto: true` 를 단다. `rank` 는 그 목록 안의 순위다.
 - LR2IR 호환 필드(`pg=epg+lpg`, `gr=egr+lgr`, `notes`, `combo`, `minbp`)는 `judge`+상위 필드로 유도 가능.
@@ -144,9 +151,9 @@
 ```jsonc
 // req ScoreSubmission (rbms-ir 슈퍼셋 — early/late + full play context + integrity)
 { "api_version":1,
-  "chart": { "md5":"…", "sha256":"…" },
+  "chart": { "md5":"…", "sha256":"…", "title":"…", "artist":"…", "level":12 },   // title·artist·level 은 선택(아래)
   "player": { "id":"alice" },
-  "mode":"BEAT_7K", "lntype":1,
+  "mode":"BEAT_7K",
   "clear":"Hard",
   "ex_score":1488, "max_ex_score":1624,
   "judge": {
@@ -162,14 +169,14 @@
   // ── 플레이에 사용된 전체 옵션(공평 평가의 단일 출처). rbms PlaySettings/PlayerConfig 전수. ──
   "options": {
      "gauge":"Hard", "random":"Random", "random_p2":null, "option":1,   // option=레퍼런스 구현 노트옵션 비트필드
-     "lntype":1, "seed":12345, "scratch_left":false, "scratch_auto":false,
+     "lntype":1, "scratch_left":false, "scratch_auto":false,
      "hispeed":2.0, "constant":false, "green_number":300,               // 스크롤
      "lift":0.0, "lane_cover":0.0,                                      // 시야
      "judge_rate":100, "offset_ms":0, "auto_offset":false,             // 판정폭/오프셋 (난이도 영향!)
      "total_override":0.0,                                             // 0=차트값, >0=오버라이드 (게이지 영향!)
      "autoplay":false,                                                  // 오토플레이 여부 (랭킹 무효 트리거)
-     "assist":[], "input_device":"keyboard",
-     "judge_algorithm":"Combo", "rule":"BEAT", "skin":"NORMAL" },
+     "assist":[], "input_device":"keyboard" },
+  "seed":12345, "judge_algorithm":"Combo", "rule":"BEAT", "skin":"NORMAL",   // 최상위 필드(options 안이 아니다)
 
   // ── 무결성(클라이언트 변조 방지) ──
   "client":"rbms/0.1.0",                    // 클라 표시 버전
@@ -179,21 +186,24 @@
   "played_at":1700000000000,                // unix ms
   "extra":{} }
 
-// 201 SubmitResponse
+// 201 SubmitResponse (같은 판의 재전송은 200)
 { "accepted":true, "ranked":true, "rank":3, "previous_best":1400, "is_new_best":true,
   "score_id":"sc_…", "flags":[], "message":"saved" }
 // ranked=false 예: { "accepted":true, "ranked":false, "flags":["AUTOPLAY"], "message":"recorded (unranked: autoplay)" }
 // SCRATCH AUTO 예: { "accepted":true, "ranked":true, "rank":2, "flags":["SCRATCH_AUTO"], "message":"saved (scratch auto)" }
 ```
 규칙:
+- **`chart.title`·`chart.artist`·`chart.level`**(모두 선택, 결정 M8): 서버가 만든 차트 행의 제목·아티스트·레벨이 비어 있을 때만 채운다. 값이 이상하면 제출을 막지 않고 버린다(문자열은 앞뒤 공백을 떼고 255자로 자름, `level` 은 0~1000 정수만). `GET /api/charts/{hash}` 등은 그 `md5` 가 번들 표에 있으면 읽을 때 표의 제목·아티스트로 빈 값을 채워 응답한다(DB 는 고치지 않음).
+- **`seed`**(최상위, 선택): 클라이언트는 `u64` 로 보내고 예전 빌드는 시계의 나노초(2^53 초과)를 보냈다. 서버는 `Number.isSafeInteger` 가 아닌 값을 거절하지 않고 **0 으로 저장**한다(`seedSchema`, `web/src/server/dto/common.ts`. 리플레이 업로드의 `seed` 도 같다). 시드는 참고용이라 순위·무결성 판정에 쓰지 않는다. 이 규칙이 없던 d733a8f 이전 서버는 큰 시드의 제출을 400 으로 거절했다(v0.1.2 점수 제출 400 사고. 근거 [../acknowledge/2026-10-14-adr-layout-seed-range.md](../acknowledge/2026-10-14-adr-layout-seed-range.md)).
 - **멱등**: 동일 `(player, sha256||md5, played_at)` 재전송은 기존 score_id 반환(중복 생성 X).
 - **best 갱신**: 램프(우선) → EX → BP 순 비교, 더 좋을 때만 best 갱신. 모든 제출은 history로 누적(랭킹은 best 기준). **ranked=false는 best/랭킹 비반영**(기록·리플레이는 보존).
 - **SCRATCH AUTO**(웨이브 20, 사용자 결정 2026-10-14): `options.scratch_auto=true` 이거나 `options.assist` 에 `AUTO_SCRATCH` 가 있는 판은 `SCRATCH_AUTO` 표지 flag 를 달고 **ranked** 다. best 는 `(chart, user, scratch_auto)` 로 나눠 두므로 일반 판 최고와 SCRATCH AUTO 판 최고가 따로 남는다. `previous_best`·`is_new_best` 는 그 판의 칸(일반/SCRATCH AUTO) 기준이고, `rank` 는 그 판이 속한 목록(일반 판은 기본 목록, SCRATCH AUTO 판은 `include_scratch_auto=true` 목록)에서 이 판보다 좋은 기록의 수 + 1 이다. 같은 사용자의 더 좋은 다른 칸 최고 기록(예: 일반 판 800 이 있는데 SCRATCH AUTO 700 을 낸 경우)도 센다. `message` 는 `saved (scratch auto)`. `AUTO_SCRATCH` 밖의 어시스트 태그(`CUSTOM_JUDGE` 등)는 여전히 `ASSIST` 로 unranked 이고, 그때 `message` 의 사유에는 `scratch_auto` 를 넣지 않는다(`recorded (unranked: assist,judge_width)`).
+- **`ranked=false` 판의 저장**: 클라이언트는 손으로 친 모든 판(SCRATCH AUTO 판 포함, 사용자 결정 2026-10-14)을 보내고, 서버는 `score` 행으로 보존하되 `chart_best`·순위에는 올리지 않는다. 넓힌 판정 판은 클라이언트가 `ranked` 를 막지 않고 보내도 서버가 `ASSIST` 로 unranked 처리한다(최고 기록·순위 제외는 메인이 정한 정책이며 사용자 미확인).
 - EX/BP가 누락되면 `judge`에서 유도: `ex = (epg+lpg)*2 + egr+lgr`, `bp = ebd+lbd+epr+lpr+ems+lms`(레퍼런스 구현 minbp 정의는 BAD+POOR+MISS).
 - **`ranked` 적격성**(§11): autoplay·`AUTO_SCRATCH` 밖의 assist·judge_rate>100·total_override≠0·미인증 빌드해시 등 → `ranked=false` + `flags`. SCRATCH AUTO 는 표지만 단다. guest 제출도 unranked(설정) 또는 별도 게스트 보드.
 
 ### `GET /api/scores/{score_id}` → `ScoreRecord`(상세, judge·options·replay_id 포함)
-### `GET /api/players/{id}/scores?since=&limit=&mode=` → `ScoreRecord[]` (레퍼런스 구현 getPlayData(player, null) — 플레이어 전체)
+### `GET /api/players/{id}/scores?since=&limit=&page=&mode=` → `ScoreRecord[]` (레퍼런스 구현 getPlayData(player, null) — 플레이어 전체. `rank` 는 항상 `null`)
 
 ---
 
@@ -229,7 +239,7 @@
 //                          "flags":["SCRATCH_AUTO","ASSIST"], "message":"recorded (unranked: assist)" }
 ```
 규칙:
-- `scratch_auto`·`assist` 는 단일 곡 제출의 `options.scratch_auto`·`options.assist` 와 같은 어휘이고, 코스 전체로 접은 값이다(어느 스테이지가 어떤 어시스트였는지는 싣지 않는다: 서버는 코스 전체로 판정한다). 두 필드가 없는 옛 클라이언트 제출은 어시스트 없는 코스로 받는다. 클라이언트는 어시스트가 없으면 두 필드를 싣지 않는다.
+- (근거 [../acknowledge/2026-10-14-adr-assisted-course-submission.md](../acknowledge/2026-10-14-adr-assisted-course-submission.md)) `scratch_auto`·`assist` 는 단일 곡 제출의 `options.scratch_auto`·`options.assist` 와 같은 어휘이고, 코스 전체로 접은 값이다(어느 스테이지가 어떤 어시스트였는지는 싣지 않는다: 서버는 코스 전체로 판정한다). 두 필드가 없는 옛 클라이언트 제출은 어시스트 없는 코스로 받는다. 클라이언트는 어시스트가 없으면 두 필드를 싣지 않는다.
 - **ranked 판정은 단일 곡과 같다**(`assistFlags`, 웨이브 20): `scratch_auto` 이거나 `assist` 에 `AUTO_SCRATCH` 가 있으면 `SCRATCH_AUTO` 표지(ranked 를 막지 않는다), `AUTO_SCRATCH` 밖의 태그가 있으면 `ASSIST` flag 와 `ranked=false`. `course_score.scratch_auto` 에 SCRATCH AUTO 여부를 남기고, flag 가 하나라도 있으면 `extra` 에 `flags`·`scratch_auto`·`assist` 도 덧붙인다. SCRATCH AUTO 코스는 `course_best` 의 SCRATCH AUTO 칸을 갱신하고 `rank` 는 포함 목록 기준이다. unranked 코스는 `course_best` 를 갱신하지 않고 `rank` 는 `null` 이다.
 - 멱등: 동일 `(player, course_hash, played_at)` 재전송은 기존 id 를 돌려주고, `ranked`·`flags` 는 이번 본문으로 다시 판정해 돌려준다.
 ### `GET /api/courses/{course_hash}/ranking?limit=&page=&rival_of=&include_scratch_auto=false` → `ScoreRecord[]`
@@ -266,6 +276,8 @@ DB 의 IR 표(위)와 별개로, 저장소의 스냅샷(`web/data/tables/<id>/`)
 `/tables/{id}` 의 사람이 보는 페이지(`<meta name="bmstable" content="/tables/{id}/header.json">`)는 화면 웨이브가 만든다. 클라이언트(`rbms-table`)는 header 의 `data_url` 을 header 의 최종 주소 기준으로 풀고, 이 header 는 절대 주소를 내므로 끝 슬래시(운영은 `/x/` 를 308 로 `/x` 로 뗀다)에 영향받지 않는다. 정본 등록 주소는 `https://bms.hyuns.uk/tables/insane1`(슬래시 없음).
 
 ### 7.2 내 폴더 (웹에서 편집, R-BMS 는 읽기만)
+
+결정 근거: [../acknowledge/2026-10-14-adr-user-folders.md](../acknowledge/2026-10-14-adr-user-folders.md). 설계 전문: [../plan/2026-10-14-web-user-folders.md](../plan/2026-10-14-web-user-folders.md).
 
 사용자당 폴더 최대 50개, 폴더당 2,000곡, 사용자 전체 20,000곡, 이름 1~64자(NFC·앞뒤 공백 제거·제어 문자 불가), 설명 255자, 메모 100자. 곡의 식별자는 `md5`(소문자 16진 32자), `sha256` 은 알 때만. 폴더 id 는 `uf_` + 16진 30자.
 
@@ -347,7 +359,8 @@ DB 의 IR 표(위)와 별개로, 저장소의 스냅샷(`web/data/tables/<id>/`)
 ## 10. 인증·레이트리밋·CORS·페이지네이션 규약
 - **인증(이중)**: better-auth(컨벤션 §11) 기반 — (a) **네이티브 클라(rbms)** = `Authorization: Bearer <token>`(`/api/auth/token`), (b) **웹 FE** = better-auth **세션 쿠키**(`HttpOnly`·`SameSite`·CSRF). 보호 엔드포인트는 `withAuth`/`withAdmin` HOF. 제출은 토큰/세션의 player == 본문 `player.id` 강제(guest 제외).
 - **CORS**: Next 단일 오리진 배포이며 외부 웹 오리진을 지원하지 않으므로 CORS 미들웨어와 `ALLOWED_ORIGINS`는 없습니다. 네이티브 클라이언트에는 브라우저 CORS가 적용되지 않습니다.
-- **rate-limit**: 로그인 5/min/IP, 제출 60/min/token, 리플레이 업로드 10/min/token → 429 `RATE_LIMITED`.
+- **rate-limit**(정본 `web/src/server/lib/with-rate-limit.ts` 의 `RATE_LIMIT`, 초과 시 429 `RATE_LIMITED`): 로그인·가입(`/api/auth/*`, `/api/fe/auth/*` 같은 버킷) 5/min/IP, 점수 제출 60/min/token, 리플레이 업로드 10/min/token, `/api/fe/*` 공개 읽기와 `get-session`·`sign-out` 120/min/IP, 폴더 편집 60/min/사용자, 폴더에 표 가져오기 10/min/사용자, 폴더 읽기 120/min/사용자, 표의 내 기록 30/min/사용자. 한도는 인스턴스 로컬 메모리(`Map`)라 Vercel 다중 인스턴스에서는 best-effort 다(KNOWN ISSUE: 지속형 한도는 미착수, 웹 2차 후보).
+- **본문 크기**: `POST /api/scores` 256KB, `POST /api/charts` 64KB, 리플레이 `REPLAY_MAX_BYTES`(기본 4MB). 초과는 413 `IR_PAYLOAD_TOO_LARGE`.
 - **페이지네이션**: `?page`(1-base)·`limit`(기본/상한은 DTO별). 네이티브는 raw 배열, 웹 FE는 `/api/fe/*` envelope를 사용합니다.
 
 ---
@@ -406,12 +419,13 @@ DB 의 IR 표(위)와 별개로, 저장소의 스냅샷(`web/data/tables/<id>/`)
 ---
 
 ## 14. DTO 인덱스 (Zod 스키마로 구현 — `dto/`)
-- 입력: `accountSchema`·`loginSchema`·`scoreSubmissionSchema`·`courseSubmissionSchema`·`replayUploadSchema`·`settingPutSchema`·`rankingQuerySchema`·`chartUpsertSchema`·`chartSearchQuerySchema`·`clientBuildSchema`.
-- 응답: `serverInfoSchema`·`authResultSchema`·`playerProfileSchema`·`chartMetaSchema`·`scoreRecordSchema`·`submitResponseSchema`·`courseMetaSchema`·`tableDataSchema`·`replayMetaSchema`·`settingBlobSchema`.
+- 입력: `accountSchema`·`loginSchema`·`sessionLoginSchema`·`sessionRegisterSchema`·`scoreSubmissionSchema`(`submissionChartSchema`)·`courseSubmissionSchema`·`replayUploadSchema`·`settingPutSchema`·`rankingQuerySchema`·`bestQuerySchema`·`chartUpsertSchema`·`chartSearchQuerySchema`·`clientBuildSchema`·`folder*Schema`(`dto/folder.ts`)·`tableEntriesQuerySchema`.
+- 응답: `serverInfoSchema`·`authResponseSchema`·`playerProfileSchema`·`chartMetaSchema`·`scoreRecordSchema`·`submitResponseSchema`·`courseMetaSchema`·`tableDataSchema`·`settingBlobSchema`·`settingBlobResponseSchema`·`folderSummarySchema`·`folderDetailSchema`·`table*OutputSchema`(`dto/table-snapshot.ts`). 리플레이 목록 항목에는 별도 zod 스키마가 없다(서비스가 만든 객체를 그대로 돌려준다).
 - 핵심 공유 스키마:
   - `judgeBreakdownSchema`(early/late epg…lms + 합계 미러 + empty_poor + avgjudge).
   - `playOptionsSchema`(**플레이 전체 옵션** — gauge·random·random_p2·option·seed·hispeed·constant·lift·lane_cover·judge_rate·offset_ms·auto_offset·total_override·autoplay·scratch_left·scratch_auto·assist·input_device·judge_algorithm·rule·skin·lntype).
-  - 무결성: `client_build_sha256`(`z.string().length(64)`)·`client_platform`. 모든 스키마에 `.extra: z.record(z.any()).optional()`.
+  - 무결성: 점수 제출의 `client_build_sha256`·`client_platform` 은 선택(`nullish`, 형식 검사 없음)이고 없으면 `UNKNOWN_BUILD` 표지가 붙는다. 리플레이 업로드의 `client_build_sha256` 은 있으면 64자다. 대부분의 스키마에 `extra: z.record(z.string(), z.unknown()).default({})`.
+  - 공용 시드: `seedSchema`(안전 정수가 아니면 0).
 - 타입은 `z.infer<typeof …>`로 유도.
 
 > `rbms-ir`은 이 규격의 DTO·HTTP 확장을 구현했으며, GUI 로그인·랭킹·리플레이·settings 동기화도 완료됐습니다. 남은 실제 서버 배포 확인은 Phase R입니다.

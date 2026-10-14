@@ -17,7 +17,7 @@
 | 9 | 라이브러리 규모 | 사용자 값 미회신 → 계획 §2 Phase G 순서를 기본값(수천 곡 가정)으로 진행. 값 회신 시 재조정 |
 | 10 | bmson·`#SWITCH` | `#SWITCH/#CASE/#SKIP/#DEF`는 Phase A-core에 포함, bmson은 Phase G 별도 항목 |
 | 11 | 별도 런처 | 신설하지 않음. 인게임 환경설정으로 통합 |
-| 12 | 커스텀 판정·어시스트 기록 정책 | 레퍼런스 구현 정책 그대로 이식: 판정폭 rate>100 또는 LN 마진 rate>100 → assist=2·score=false(IR 제출·리플레이 저장·EX/BP/콤보 갱신 차단, 램프·플레이카운트는 갱신); assist>0 → FC/PERFECT/MAX 생략 + LightAssistEasy(id 3)/AssistEasy(id 2) 강등; AUTO SCRATCH=assist 1; autoplay/replay/practice는 기록·제출 제외 |
+| 12 | 커스텀 판정·어시스트 기록 정책 | 레퍼런스 구현 정책 그대로 이식: 판정폭 rate>100 또는 LN 마진 rate>100 → assist=2·score=false(IR 제출·리플레이 저장·EX/BP/콤보 갱신 차단, 램프·플레이카운트는 갱신); assist>0 → FC/PERFECT/MAX 생략 + LightAssistEasy(id 3)/AssistEasy(id 2) 강등; AUTO SCRATCH=assist 1; autoplay/replay/practice는 기록·제출 제외. 대체됨(일부, 2026-10-14): [2026-10-14-adr-scratch-auto-rule.md](2026-10-14-adr-scratch-auto-rule.md)(SCRATCH AUTO 판도 최고 기록 갱신), [2026-10-14-adr-save-and-send-every-played-run.md](2026-10-14-adr-save-and-send-every-played-run.md)(넓힌 판정 판도 IR 제출·리플레이 저장) |
 
 ## Phase A 중 확정된 세부 (2026-09-09)
 
@@ -85,5 +85,5 @@
 
 ## 마무리 순서 (사용자 지시, 2026-09-10)
 
-- 릴리스(prod 브랜치·보호·v0.1.0 태그·서명)는 **사용자가 자택 보관 키로 직접** 수행한다. 에이전트는 릴리스 단계를 착수하지 않는다.
+- 릴리스(prod 브랜치·보호·v0.1.0 태그·서명)는 **사용자가 자택 보관 키로 직접** 수행한다. 에이전트는 릴리스 단계를 착수하지 않는다. 대체됨: [2026-10-14-adr-release-policy.md](2026-10-14-adr-release-policy.md)
 - 각 Phase 에서 나온 **경미한 후속 항목은 Phase G 다음의 "H 경미 후속 일괄" 단계**에 모아 한 번에 처리한다(현재: 토스트·힌트 겹침, Phase B 실기 가청 확인).

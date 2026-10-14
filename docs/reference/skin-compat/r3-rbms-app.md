@@ -1,6 +1,15 @@
 # R3 — R-BMS 앱(apps/rbms-player) 스킨 배선·화면 구성·입력 현황과 격차
 
-> 최종 갱신 2026-10-14 · 대응 단계: 웨이브 18(SCRATCH AUTO 의 새 규칙과 초록 턴테이블, 사람이 친 판은 모두 저장·전송, 파란 건반 + START, 설정 화면의 Enter, 기본 발광 표와 MY FOLDERS, 설정 스키마 6) 반영. 웨이브 16(기록이 저장되는 조건과 SCRATCH AUTO, 목표 점수의 TARGET FALLBACK·TARGET RATE, SETTINGS 화면의 레일·종류별 행·정보 패널, 리플레이가 설정을 바꾸지 않음) · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+> 최종 갱신 2026-10-14 · 대응 커밋 7095ef7 · 대응 단계: 웨이브 19~20 과 릴리스 수정(아래 첫 절), 웨이브 18(SCRATCH AUTO 의 새 규칙과 초록 턴테이블, 사람이 친 판은 모두 저장·전송, 파란 건반 + START, 설정 화면의 Enter, 기본 발광 표와 MY FOLDERS, 설정 스키마 6) 반영. 웨이브 16(기록이 저장되는 조건과 SCRATCH AUTO, 목표 점수의 TARGET FALLBACK·TARGET RATE, SETTINGS 화면의 레일·종류별 행·정보 패널, 리플레이가 설정을 바꾸지 않음) · 본문은 작성 시점 서술이며, 아래 "웨이브 … 반영 사항"이 최신 것부터 우선한다 · 색인과 갱신 규칙은 [README.md](README.md)
+
+## 웨이브 19·20 과 릴리스 수정 반영 사항 (2026-10-14)
+
+웨이브 18 의 "남은 것"에 있던 코스의 어시스트 칸과, 점수 서버가 SCRATCH AUTO 판을 순위에 올리는 일의 클라이언트 쪽을 넣은 뒤의 상태다. 사용자용 규칙은 `docs/play-options.md` 10절, 서버와 데이터 흐름은 `docs/architecture.md` 의 "From a finished run to the website".
+
+- (코스, 웨이브 19) `rbms_ir::CourseSubmission` 에 선택 필드 `scratch_auto`·`assist` 가 생겼다. 어시스트 스테이지가 있어도 코스로 보내고(`course_ir.rs` `CourseAssist`, `build_course_submission`), 어시스트가 없는 코스는 두 필드를 싣지 않아 옛 서버가 읽던 본문과 같다. 아래 웨이브 18 절의 "(남은 것)" 마지막 문장은 이것으로 풀렸다.
+- (SCRATCH AUTO 순위, 웨이브 20) 서버가 `chart_best`·`course_best` 를 (사용자, 차트·코스, `scratch_auto`) 로 나눠 SCRATCH AUTO 판을 순위에 올린다(마이그레이션 `web/drizzle/0002_scratch_auto_bests.sql`). 클라이언트는 `rbms_ir::ScoreFlag::ScratchAuto` 를 순위를 막는 사유로 세지 않고 결과 화면에 `IR: RANK #n (SCRATCH AUTO)` 로 쓴다(`ir_outcome.rs` `SCRATCH_AUTO_RANK_MARK`). 곡 선택의 IR RANKING 패널은 SCRATCH AUTO 를 뺀 기본 목록을 받고 "포함" 토글은 웹에만 있다(게임 안 토글은 미착수).
+- (시드, 7095ef7) 새 판의 배치 시드는 `app_play.rs` 의 `fresh_layout_seed` 로 시계의 아래 53비트만 쓴다(`LAYOUT_SEED_MASK`, 0 이면 1). 시계의 나노초를 그대로 보낸 v0.1.2 까지는 서버의 정수 검사가 판을 400 으로 거절했다. 리플레이와 다시 하기의 시드는 기록된 그대로다.
+- (실행 인자, bfa0cca) 앱 번들을 Finder 로 처음 열면 macOS 가 `-psn_0_<번호>` 를 붙일 수 있어, `lib.rs` 의 `is_system_launch_arg` 가 그 접두사를 곡 경로로 읽지 않는다.
 
 ## 웨이브 18 반영 사항 (2026-10-14)
 
@@ -15,7 +24,7 @@
 - (기본 표와 폴더) `rbms_config::DEFAULT_TABLES`(발광 표 사본 `https://bms.hyuns.uk/tables/insane1`)를 한 번만 목록 맨 앞에 넣고 실행 파일에 넣은 사본(`tablesrc/seed.rs`, `web/data/tables/insane1`)을 저장본으로 심는다. 로그인하면 선곡 뿌리에 MY FOLDERS(`SelectView::UserFolders`·`UserFolder`, `user_folders.rs`), Tables 화면 맨 끝에 MY FOLDERS 줄. 스킨에는 열린 폴더 이름이 `["MY FOLDERS", 폴더 이름]` 으로 가고 막대 종류는 표와 같다(`skin_host/select/bridge.rs`).
 - (설정과 서버) 스키마 6, `DEFAULT_SERVER_URL` = `https://bms.hyuns.uk/api`. 새 설치는 `Config::first_run`, 스키마 5 이하에서 `server_url` 이 비어 있으면 한 번 채운다. 로그인하지 않았으면 단판·코스 모두 주 서버로 보내지 않는다(결과 `IR: SKIPPED (not logged in)`). CI 는 `web/data/tables/**` 가 바뀌면 Rust 테스트도 돈다(`.github/workflows/ci.yml` 의 `paths`).
 - (게이트와 측정) `app_result/record_tests.rs`(SCRATCH AUTO 저장과 최고 기록·전송 내용, 넓힌 판정, 세대 2 의 행과 이전 점수, 서버는 있고 로그인 안 함, SCRATCH AUTO 스테이지가 든 코스 등), `ir_replay.rs` `only_a_judge_the_wire_can_state_is_uploaded`, `stage/result/tests.rs` 의 파란 건반 셋, 설정 화면 Enter 둘, `user_folders/tests.rs` 11개, `crates/rbms-table/tests/insane_snapshot.rs`(1,035곡, 26레벨). 사용자 DB 사본은 `#[ignore]` 테스트 `a_players_own_database_reads_its_old_scratch_auto_rows_as_lamps_alone` 로 손으로 잰다(37판, 29차트, LOCAL BEST 0, 램프 29, 점수 있는 행 0).
-- (남은 것) 턴테이블 노트만 있는 차트의 SCRATCH AUTO 는 판정할 노트가 0 이라 저절로 끝나지 않는다(Esc). 그림 모양을 살린 초록은 셰이더 기능이 필요하다. 결정 화면은 사용자 폴더에서 고른 곡에 표 이름·레벨을 비운다. 코스를 서버로 보내려면 `CourseSubmission` 에 어시스트 칸이 필요하다(사용자 결정과 서버 계약).
+- (남은 것) 턴테이블 노트만 있는 차트의 SCRATCH AUTO 는 판정할 노트가 0 이라 저절로 끝나지 않는다(Esc). 그림 모양을 살린 초록은 셰이더 기능이 필요하다. 결정 화면은 사용자 폴더에서 고른 곡에 표 이름·레벨을 비운다. (코스의 어시스트 칸은 웨이브 19 에서 생겼다: 위 절.)
 
 ## 웨이브 16 반영 사항 (2026-10-14)
 

@@ -1,6 +1,8 @@
 # IR 계약 동결 기록 (2026-09-09)
 
-> **역사 상태:** 이 문서는 구현 전 동결 기록입니다. 2026-09-09에 `web/` 안의 Next.js Route Handler + Drizzle(MySQL) + Zod + better-auth 구현으로 전환됐습니다. 별도 MIT 레포와 Hono 부트스트랩 전제는 폐기됐고, 현재 정본은 [README.md](./README.md), [api-spec.md](./api-spec.md), [endpoint-tasks.md](./endpoint-tasks.md) 및 실제 `web/src/`입니다. Phase R의 실제 키·배포 검증은 아직 수행하지 않았습니다.
+> 최종 갱신 2026-10-14 · 대응 커밋 7095ef7 (동결 당시의 기록이라 본문은 그대로 두고 상태 줄만 갱신)
+
+> **역사 상태:** 이 문서는 구현 전 동결 기록입니다. 2026-09-09에 `web/` 안의 Next.js Route Handler + Drizzle(MySQL) + Zod + better-auth 구현으로 전환됐습니다. 별도 MIT 레포와 Hono 부트스트랩 전제는 폐기됐고, 현재 정본은 [README.md](./README.md), [api-spec.md](./api-spec.md), [endpoint-tasks.md](./endpoint-tasks.md) 및 실제 `web/src/`입니다. 운영 배포는 2026-10-14 에 끝났습니다(https://bms.hyuns.uk). 이후 추가된 경로(`/api/players/{id}/folders`, `include_scratch_auto`, 코스 제출의 `scratch_auto`·`assist` 등)는 이 동결 목록에 없고 [api-spec.md](./api-spec.md) 가 정본입니다.
 
 ## A. 클라가 실제 호출하는 경로 (검증: `crates/rbms-ir/src/http.rs`)
 `base = --server 값(trailing / 제거)`, 각 호출은 `{base}{path}`:
@@ -51,4 +53,4 @@ POST /auth/login
 5. 검증: `bun:test`(설명 한국어) + 실제 `rbms-player --server http://localhost:3000/api --player <id>`로 submit→ranking 왕복(PRD §8).
 
 ## 상태
-**완료(2026-09-09)** — 클라이언트 와이어 계약, raw IR/FE envelope 분리, `/api` base 규약을 `web/` 구현에 반영했습니다. `rbms-ir` 확장, GUI 로그인·랭킹·리플레이·settings 동기화도 완료됐습니다. 남은 범위는 실제 키를 투입하는 Phase R 배포 검증, LR2IR 어댑터, replay 재시뮬레이션 검증입니다.
+**완료(2026-09-09)** — 클라이언트 와이어 계약, raw IR/FE envelope 분리, `/api` base 규약을 `web/` 구현에 반영했습니다. `rbms-ir` 확장, GUI 로그인·랭킹·리플레이·settings 동기화도 완료됐습니다. 남은 범위는 LR2IR 어댑터와 replay 재시뮬레이션 검증, 실제 클라이언트 점수 제출 왕복의 사용자 확인입니다(Phase R 의 배포 자체는 2026-10-14 에 끝났습니다).

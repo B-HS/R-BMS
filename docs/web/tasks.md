@@ -1,6 +1,8 @@
-# rbms web — 구현 작업 분할 (W1 / W2)
+# rbms web — 구현 작업 분할 (W1 / W2) 과 웹 남은 일
 
-> **역사 작업 계획:** W1/W2의 체크 항목은 2026-09-09에 완료됐습니다. 현재 구현 상태와 미구현 경계는 [../backend/endpoint-tasks.md](../backend/endpoint-tasks.md), 실제 라우트는 `web/src/app/api/`가 정본입니다. Phase R의 실제 키·배포 검증은 이 계획의 완료와 별개로 보류합니다.
+> 최종 갱신 2026-10-14 · 대응 커밋 7095ef7
+
+> **역사 작업 계획 + 현재 남은 일:** W1/W2의 체크 항목은 2026-09-09에 완료됐고, 웨이브 17B~20 은 아래에 이어서 적었습니다. 새 세션이 이어서 할 웹 일은 맨 아래 "남은 일" 절이 정본입니다. 현재 구현 상태와 미구현 경계는 [../backend/endpoint-tasks.md](../backend/endpoint-tasks.md), 실제 라우트는 `web/src/app/api/`가 정본입니다. 운영 배포(Phase R)는 2026-10-14 에 끝났습니다.
 
 > 근거: `docs/web/architecture.md`(라우트·계층·캐시·env), `docs/web/components.md`(shadcn 목록·토큰), `docs/backend/endpoint-tasks.md`(엔드포인트 체크리스트), `docs/acknowledge/2026-09-09-enhancement-decisions.md`(W1~W8).
 > 원칙: **네 갈래 작업이 같은 파일을 쓰지 않는다.** 아래 "파일 소유권"은 배타적이며, 다른 작업의 소유 파일은 읽기만 한다.
@@ -234,9 +236,10 @@ cargo run -p rbms-player -- --server http://localhost:3000/api --player <id>
 - [x] 배포: `web/vercel.json` `ignoreCommand`, `.github/workflows/web.yml`, 문서
 - [ ] 서버 컴포넌트의 자기 URL fetch 를 서비스 직접 호출로(프런트 소유 — 모든 `*-content.tsx`, `entities/*.query.ts`, `shared/lib/fetch.ts`)
 - [x] `.github/workflows/ci.yml` 에 `paths-ignore: ["web/**"]`(web 만 바뀐 푸시에서 Rust 3 OS 빌드가 도는 낭비) — 웨이브 17B-1 통합에서 추가
-- [x] Q2~Q6 의 답이 정해졌다(`docs/acknowledge/2026-10-14-web-decisions.md` 3절): 발광 표는 카드 격자, 폴더는 v1 비공개, 운영 DB 마이그레이션은 사용자가 로컬에서 실행
+- [x] Q2~Q6 의 답이 정해졌다(`docs/acknowledge/2026-10-14-web-decisions.md` 3절): 발광 표는 카드 격자, 폴더는 v1 비공개. (운영 DB 마이그레이션은 처음엔 사용자 로컬 실행으로 정했으나 사용자가 "migrate 도 너가 처리" 로 바꿔 `web-db.yml` 워크플로로 메인이 실행했다 — 아래 웨이브 20 절)
 - [x] 웹 로그인·가입은 세션 전용 `POST /api/fe/auth/login`·`/api/fe/auth/register`(API 토큰을 만들지 않음). 게임용 `/api/auth/login`·`/register` 는 토큰을 발급한 채로 둔다
-- [ ] 지속형 rate limit(Upstash 등), 운영 시험 데이터 정리(Q6 답 A: 사용자가 지움)
+- [ ] 지속형 rate limit(Upstash 등) — 미착수, "남은 일" 로 이월
+- [x] 운영 시험 데이터 정리(Q6 답 A) — 2026-10-14 `web-db.yml` 의 `cleanup-delete` 로 삭제(아래)
 
 ## 웨이브 17B-2 — 발광 표 화면, 폴더 화면, 사이트 리뷰 (2026-10-14)
 
@@ -246,5 +249,27 @@ cargo run -p rbms-player -- --server http://localhost:3000/api --player <id>
 - [x] U4 폴더: `/folders`, `/folders/[folderId]`(명시 저장·충돌 409·미저장 경고·표에서 가져오기·검색 패널), `AddToFolderMenu`, 로그인·가입·로그아웃의 사용자 묶음 캐시 정리, `FormDialog`·`ConfirmAction` 포커스 복귀
 - [x] 리뷰 major 3건 수정: `useSessionUser` 의 하이드레이션 게이트(#418), 로그인 뒤 전체 이동(`next=/folders` 머묾), `ShellPage` 본문 자식 `shrink-0`(플레이어 패널 눌림)
 - [x] 리뷰 minor 수정: 발광 표 "내 진행" 기본 접힘과 중복 제거(사이드바 진행·복사 버튼), 진행 패널의 레벨 링크 제거, 레벨 칩 한 줄, 카드의 레벨 반복 제거, 라이트 `--muted-foreground` 대비, 보호 경로 로그아웃의 콘솔 404, 쓰지 않는 export·쿼리 키 제거, `.rbms-level-header` 모바일 층
-- [x] 운영 시험 데이터 정리 SQL: `web/scripts/cleanup-test-accounts.count.sql`(세기만), `.delete.sql`(한 트랜잭션). 실행은 사용자
+- [x] 운영 시험 데이터 정리 SQL: `web/scripts/cleanup-test-accounts.count.sql`(세기만), `.delete.sql`(한 트랜잭션). 실행은 `web-db.yml`(아래)
 - [ ] 2차: 계약 문서 10절의 표(한 곡 한 행 보기, 폴더 끌어 옮기기·내 램프, 큰 폴더 가상화, 저장 원자성, RSC 자료 줄이기 등)
+
+## 웨이브 18~20 과 운영 배포 (2026-10-14)
+
+근거: `docs/acknowledge/2026-10-14-web-decisions.md`, 사용자의 SCRATCH AUTO 규칙(같은 날), [architecture.md](./architecture.md) 3-2·6-2·7, [../backend/api-spec.md](../backend/api-spec.md) 5·6·12.
+
+- [x] 웨이브 18~19: SCRATCH AUTO 판 저장·전송, 어시스트 코스 전송(`ffdb7a3`)과 서버 저장(`12a756d`: 코스 제출의 `scratch_auto`·`assist`)
+- [x] 웨이브 20(0b04629, 클라이언트 cf40490): SCRATCH AUTO 판을 ranked 로 순위에 올리고 목록은 기본 숨김 + `include_scratch_auto` 토글. 마이그레이션 `0002_scratch_auto_bests`(`chart_best`·`course_best`·`course_score` 의 `scratch_auto`). 순위 질의는 `server/compose/best-scope.ts`
+- [x] 운영 DB: `.github/workflows/web-db.yml`·`web/scripts/run-sql.ts`(baff560). 저장소 시크릿 `WEB_DATABASE_URL`. `migrate` 로 0000~0002 적용(2026-10-14), `cleanup-delete` 로 시험 계정 5개 삭제
+- [x] Vercel: 프로젝트 `rbms-web`, Git `B-HS/R-BMS` 연결, Root `web`, Production Branch `dev`, `vercel.json` 의 `ignoreCommand`. 첫 Git 배포 완료. `https://bms.hyuns.uk/api/version` 의 `commit` 이 7095ef7(2026-10-14 관찰)
+- [x] d733a8f: 2^53 를 넘는 `seed` 를 거절하지 않고 0 으로 저장(`seedSchema`). v0.1.2 점수 제출 400 의 서버 쪽 수리. 클라이언트 쪽은 7095ef7(새 판 배치 시드를 2^53 미만으로)
+
+## 남은 일 (웹·서버, 새 세션이 이어서)
+
+우선순위 순. 각 항목의 근거는 괄호 안 문서.
+
+1. 사용자 확인 대기: 운영 서버에 한 판 쳐서 결과 화면에 `IR: RANK` 가 나오는지, 순위(`/leaderboards`)에 `bhs` 가 올라오는지. 안 오르면 `POST /api/scores` 의 400/401 원인을 본다(Vercel 로그). 계약 교차 테스트(다음 항목)가 재발 방지책이다
+2. 계약 교차 테스트: Rust 쪽이 실제 클라이언트가 만든 요청 본문(일반, SCRATCH AUTO, 코스, 리플레이 업로드)을 JSON 파일로 뽑고 웹 테스트가 서버 zod 스키마로 통과시킨다. 관련: `crates/rbms-ir/src/contract_tests/fixtures.rs`, `web/tests/dto/ir-contract.test.ts` ([../reference/ir-api.md](../reference/ir-api.md) 5절)
+3. 없는 상세 주소가 HTTP 200: 존재 확인을 Suspense 밖으로 옮기거나 `noindex` 로 충분하다고 결정 ([2026-10-14-audit.md](./2026-10-14-audit.md) KNOWN ISSUE)
+4. 웹 2차(사용자가 "나중에" 로 둔 것): 발광 표 한 곡 한 행 보기, 카드 높이 선택, 폴더 끌어 옮기기, 2,000곡 가상화, 표 RSC 자료 축소(`level`·`url_diff` 중복), 서버 컴포넌트 자기 URL fetch 제거(`web/src/shared/lib/fetch.ts`), 지속형 rate limit, OG 이미지, 홈 대시보드 재구성
+5. 소소한 서버 부채: 가입 실패 원인 구분(`auth.service.ts` 의 `signUp`), `BETTER_AUTH_SECRET`·`BETTER_AUTH_URL`·`NEXT_PUBLIC_APP_URL` 운영 필수 검증(`env.ts`), `release.yml` 이 `client_build` 를 등록하지 않음(admin 세션만 받는 `POST /api/admin/builds`), `user.rank_points` 열 미사용
+6. 클라이언트 쪽(웹 문서 밖이지만 서버와 짝): 게임 안 IR 순위 패널의 SCRATCH AUTO 포함 토글(서버는 `include_scratch_auto` 를 이미 받는다)
+7. 정책 확인 필요(메인이 정했고 사용자 미확인): 넓힌 판정 판은 저장·전송하지만 최고 기록·순위에서 제외, SCRATCH AUTO 램프는 `LightAssistEasy` 유지

@@ -1,166 +1,153 @@
-# HANDOFF — 2026-10-11 세션 스냅샷
+# HANDOFF — 2026-10-14 세션 스냅샷
 
-최종 갱신 2026-10-11 · 대응 커밋: d4cd23f 이후 웨이브 8C(작업 트리 기준, 커밋 전). 이전 스냅샷은 `docs/history/2026-10-09-handoff-snapshot.md`(구현 직전 상태), 그 앞은 `docs/history/2026-09-18-handoff-snapshot.md`. 이 문서는 항상 덮어쓴다.
+최종 갱신 2026-10-14 · 대응 커밋 `fb29d24`(release: v0.1.3) + 인수인계 문서 작업 트리. 이 문서는 항상 덮어쓴다. 이전 스냅샷: `docs/history/2026-10-11-handoff-snapshot.md`(웨이브 8C 시점), 그 앞 `docs/history/2026-10-09-handoff-snapshot.md`.
 
-새 세션의 진입점이다. 읽는 순서: 이 문서 → `docs/PROCESS.md` 상단 "현재 작업" 절 → 사양 `docs/plan/2026-10-09-lua-skin-compat.md` 의 해당 웨이브 표.
+복기 신뢰도: 2026-10-09 ~ 10-12(웨이브 1~13)는 대화가 두 번 압축되어 압축 요약·커밋·문서로 복기했다(중간). 2026-10-12 ~ 10-14(웨이브 14~20, 릴리스, 웹 배포, 인수인계)는 원문 기준(높음). 사실이 의심되면 이 문서보다 코드와 `git log` 를 믿는다.
 
 ## 1. 프로젝트 한 줄 정의
 
-R-BMS 는 레퍼런스 구현(beatoraja)의 PLAY 코어를 Rust 로 옮긴 BMS 리듬 게임 플레이어다(Cargo 워크스페이스 크레이트 15개 + 앱 2개, edition 2024, Rust 1.95.0, GPL-3.0-or-later, wgpu 렌더, 샘플 클럭 오디오).
+R-BMS 는 Rust 로 만든 BMS 리듬게임 플레이어(beatoraja 형식 Lua 스킨 호환 + 자작 모노톤 기본 스킨)와, 같은 저장소의 점수 서버 겸 웹사이트(`web/`, Next.js, https://bms.hyuns.uk)다.
 
 ## 2. 현재 목표
 
-| 단계 | 내용 |
-| --- | --- |
-| 최종 목표 | beatoraja 용 풀 Lua 스킨(ModernChic)을 수정 없이 읽어 같은 배치·타이밍으로 그리고, 첫 실행부터 자작 기본 스킨으로 선곡 → 결정 → 플레이 → 결과 전 화면이 그려진다(사양 §1) |
-| 현재 마일스톤 | L5 기본 스킨, 웨이브 8C(W8-1 설정 행 정리·기기 로컬 경로·레터박스, W8-3 내장·설치·릴리스·고지, W8-4 폴백, W8-5 테스트 재편, W8-6 문서) |
-| 직전 작업 | 8C 구현 단위 A(내장·설치·기본 선택·폴백), B(설정 행 표지·동기화·레터박스), C(제3자 고지·릴리스·CI 시간), D(게이트·일반화), 수정 단위(리뷰 13건 중 10건)가 작업 트리에 끝났고, 이 문서를 포함한 문서 단위(W8-6)가 끝났다. 커밋·푸시는 아직 하지 않았다 |
+- 최종 목표: 사용자가 실제로 쓰는 배포 가능한 BMS 플레이어 + 웹(순위, 발광 난이도표, 내 폴더). 사용자는 "새 세션에서 더 이상 구현하거나 버그가 없도록" 남은 일을 정확히 끝내길 원한다.
+- 현재 마일스톤: 클라이언트 `v0.1.3` draft 게시 직전, 웹 운영 배포 완료. 남은 것은 (1) 사용자의 실기 확인과 게시, (2) 이번 400 사고 같은 계약 결함을 막는 교차 테스트, (3) 문서 점검에서 나온 KNOWN ISSUE 수리, (4) 실제 창 QA.
+- 직전 작업: 점수 제출이 모든 판에서 `400 VALIDATION_ERROR` 로 거절되던 버그(시드 1.79e18 > 2^53)를 클라이언트·서버 양쪽에서 고치고(`7095ef7`), 웹 재배포, `v0.1.3` 릴리스(run 38563811699, 서명·공증·티켓 확인 완료, draft 본문 작성), 그리고 이 인수인계 문서 작업(문서 4묶음 점검, ADR 15건, test-debt, bug 기록).
 
 ## 3. 완료 / 진행 중 / 미착수
 
-### 3.1 완료 (커밋됨)
+### 3.1 완료(이번 세션, 커밋)
 
-| 범위 | 결과 | 주요 경로 |
-| --- | --- | --- |
-| L1~L2 조사·사양·결정 | 보고서 16개, 사양, 결정 D1~D10 | `docs/reference/skin-compat/`, `docs/plan/2026-10-09-lua-skin-compat.md`, `docs/acknowledge/2026-10-09-lua-skin-compat-decisions.md` |
-| 웨이브 1 철거와 기반 | 구 번들·혼합 합성 삭제, Lua 5.2, 타이머 µs, 장면 시계, GPU 논리 크기, 해상도 설정, START/SELECT, 캡처 하니스 | `crates/rbms-skin/`, `crates/rbms-render/src/skin_render/`, `apps/rbms-player/src/stage/capture.rs`, `scene_clock.rs` |
-| 웨이브 2 Lua 런타임과 로더 | 샌드박스 런타임, 2패스 로더, `SkinHost`, `skin-dump`, 스킨 팩 폴더 | `crates/rbms-skin/src/lua/`, `apps/rbms-cli/src/skin_dump/`, `apps/rbms-player/src/skin_select.rs` |
-| 웨이브 3~6 화면 | 결정(Decide Stage), 결과·코스 결과, 선곡, 플레이 5/7/10/14키 | `apps/rbms-player/src/stage/{decide,result,course_result}.rs`, `stage/select/`, `stage/play/`, `skin_host/` |
-| 웨이브 7 동영상·비트맵 폰트 | OpenH264 + `re_mp4` 디코더, `.fnt`, distance field | `crates/rbms-video/`, `crates/rbms-render/src/bitmap_font.rs` |
-| CI 복구 | 세 OS 통과(run `38077937158`), 이후 통과 run `38084893496` | `.github/workflows/ci.yml` |
-| 웨이브 8A | NEXT_REPLAY 제거(D8), 기본 스킨 설계서·골격·결정 화면 | `docs/plan/2026-10-11-default-skin-design.md`, `assets/skins/rbms-default/` |
-| 웨이브 8B | 기본 스킨 선곡·플레이 5/7/9/10/14키·결과·코스 결과, 엔진 수정 2건 | `assets/skins/rbms-default/`, `apps/rbms-player/src/stage/result.rs`, `stage/select/list.rs` |
+웨이브 단위 상세는 `docs/PROCESS.md`(현재 작업 절)와 `docs/history/2026-10-14-process-archive.md`, 결정은 `docs/acknowledge/README.md` 색인.
 
-### 3.2 진행 중: 웨이브 8C (작업 트리, 커밋 전)
+| 묶음 | 내용 | 주요 커밋 | 주요 파일 |
+| --- | --- | --- | --- |
+| 웨이브 13 | 판정선 필드 맨 아래, 판정 오프셋은 노트 표시만 옮김(설정 스키마 5) | 499993a, 6a4568f | `assets/skins/rbms-default/lua/play/*`, `apps/rbms-player/src/stage/play/mod.rs` |
+| 웨이브 14 | 판정 오프셋 키 9/0, START(+SELECT)+턴테이블 1 단위, 모노톤 기본 스킨·색 옵션, 스킨 내보내기, 스크래치 역방향 키 출하 | 8051f60, bc40ec7, 2613afa | `stage/play/controls*`, `keyconfig.rs`, `skin_select/{export,adjustments}.rs` |
+| 웨이브 15 | 앱 UI 무채색, 옛 `theme.ron` 템플릿 교체 | 4db1c53 | `crates/rbms-render/src/theme.rs`, `apps/rbms-player/src/assets/theme_file.rs` |
+| 첫 릴리스 | 툴체인 고정, 서명 시크릿 점검, 빌드 전 자격 증명 확인, 로컬 검증 스크립트 | 9dbb8ff, 39afc3a, 287b80d, 2ad01aa | `.github/workflows/{release,signing-check}.yml`, `scripts/verify-*.sh` |
+| 웨이브 16 | 기록 저장 점검(원인 SCRATCH AUTO), 리플레이가 설정을 덮던 결함, 목표 fallback, 설정 화면 재구성 | 4bed711 | `apps/rbms-player/src/target.rs`, `stage/settings*`, `crates/rbms-config/src/judge.rs` |
+| 웹 17A·17B | 점검·디자인·표 스냅샷·폴더 설계, 골격·폴더 API·표 제공·수리, 발광 표 페이지·내 폴더 화면 | 1e56fb4, d38b6fb, 711b518 | `web/src/**`, `web/drizzle/0001_user_folders.sql`, `web/data/tables/insane1/*` |
+| 웨이브 18 | SCRATCH AUTO 새 규칙(초록, 없는 노트, 저장·전송), 모든 판 저장·전송, 파란 건반+START, 설정 Enter, 기본 발광 표·MY FOLDERS·서버 주소 기본값·제출 차트 메타 | 8b11a17, 38153fc | `crates/rbms-play/src/session.rs`, `crates/rbms-store/src/score.rs`, `apps/rbms-player/src/{user_folders.rs,tablesrc/seed.rs}` |
+| 웨이브 19·20 | 어시스트 코스 전송, SCRATCH AUTO 순위 반영 + 목록 토글(마이그레이션 0002) | ffdb7a3, 12a756d, cf40490, 0b04629 | `apps/rbms-player/src/course_ir.rs`, `web/drizzle/0002_scratch_auto_bests.sql`, `web/src/server/compose/best-scope.ts` |
+| 웹 배포 | web-db 워크플로, 운영 DB 0000~0002 적용, 시험 계정 5개 삭제, Vercel Git 연결(Root web, Production dev), 첫 Git 배포 | baff560, d81eafc | `.github/workflows/web-db.yml`, `web/scripts/run-sql.ts` |
+| macOS 배포 형식 | `R-BMS.app` + dmg(공증 티켓 부착), Finder `-psn_` 인자 무시 | bfa0cca | `scripts/macos-app.sh`, `scripts/macos-notarize.sh`, `apps/rbms-player/src/lib.rs`(`is_system_launch_arg`) |
+| 400 버그 | 새 시드 2^53 미만(`fresh_layout_seed`), 서버 `seedSchema` 관대 | 7095ef7 | `apps/rbms-player/src/app_play.rs`, `web/src/server/dto/common.ts` |
+| 릴리스 | v0.1.1·v0.1.2 draft 는 결함으로 삭제, v0.1.3 draft 준비 | cdd27a6, c3937f4, fb29d24 | `docs/ci-release.md` 2.3 |
 
-| 단위 | 내용 | 경로 |
-| --- | --- | --- |
-| A 내장·설치 | `build.rs` 가 기본 팩(65개 파일, 1,720,337 B)을 표로 내장, `install_default_pack` 가 `<설정 폴더>/skin/rbms-default/` 에 `install-manifest.txt` 기준으로 설치·갱신, 기본 선택(`RBMS_SKIN_PACK` > `skin.pack` > 기본 팩), PACK FOLDER 행의 `DEFAULT (<경로>)` 표시, 실패 문구 `skin <파일> did not load, drawing the built-in screen: <이유>`, `BUNDLED_FONT` 를 `pub static` 으로 | `apps/rbms-player/build.rs`, `src/assets/default_pack.rs`, `src/skin_select.rs`, `src/skin_screen.rs`, `crates/rbms-render/src/font.rs` |
-| B 설정 | 스킨이 못 읽는 설정 행에 표지(`BUILT-IN SCREENS ONLY`, `SKIN OPTION COMES FIRST`), `skin` 그룹 전체 기기 로컬(계정 동기화 제외), `DEFAULT_LETTERBOX` = true | `crates/rbms-config/src/{settings,schema}.rs`, `apps/rbms-player/src/{settings_ui,settings_view,ir_sync}.rs`, `stage/settings.rs` |
-| C 고지·릴리스 | `THIRD-PARTY-NOTICES.md`(OpenH264 BSD-2, Inter OFL, Lua, SQLite, Rust 크레이트 목록과 전문), 릴리스 압축에 고지 동봉(없으면 실패), CI 제한 시간 test 90→30분 lint 20→15분 | `THIRD-PARTY-NOTICES.md`, `.github/workflows/{ci,release}.yml`, `docs/ci-release.md` |
-| D 게이트 | 환경 변수 없이 도는 기본 스킨 게이트(엄격 덤프, 9종 화면 그리기, 금지 API 스캔, 시트 대조), ModernChic 전용 테스트 일반화, `notify.rs` 테스트 보호 | `apps/rbms-cli/src/skin_dump/tests.rs`, `apps/rbms-player/src/stage/capture/gate.rs`, `crates/rbms-skin/tests/default_pack.rs`, `crates/rbms-render/tests/skin_external.rs` |
-| 수정 | 리뷰 13건 중 10건: 조용한 건너뛰기, 대소문자만 바뀐 이름, 팩 안 링크 폴더, `*.rbms-partial` 청소, 알림 2회, `--skin` 규칙, SCORE GRAPH 도움말, 표지 판정, 고지 7절, 금지 API 스캐너 | 위 경로들 |
-| 문서(W8-6) | `docs/skin.md` 재작성, `architecture.md`·`crates.md`·`development.md`·`README.md` 갱신, 이 문서, 구 문서 표지, 수동 확인 목록 | `docs/` |
+### 3.2 진행 중
 
-게이트 기록(수정 단위 시점): `cargo fmt --all --check` 통과, `cargo clippy --workspace --all-targets --all-features -- -D warnings` 통과, `cargo test --workspace --no-fail-fast` 4,878 통과·0 실패·5 ignored, 동영상 끈 구성 `cargo test -p rbms-player --no-default-features` 통과, 기본 팩과 ModernChic 을 `RBMS_SKIN_PACK` 으로 준 전체 테스트 통과, `skin-dump assets/skins/rbms-default --strict --frames 120` 통과. 이 기록은 각 단위 보고서의 값이며 메인이 통합 때 현재 트리에서 다시 확인한다.
+- 클라이언트 `v0.1.3` 게시 대기. draft 는 준비 완료(dmg·앱 `stapler validate` 통과, Gatekeeper `accepted, source=Notarized Developer ID`, `syspolicy_check` 통과, `CFBundleShortVersionString` 0.1.3, SHA-256 일치, 본문은 v0.1.0 대비 릴리스 노트). 다음 한 줄: 사용자가 v0.1.3 으로 한 판 쳐서 결과 화면에 `IR: RANK #n` 이 나오는지 확인 → 사용자가 GitHub Releases 에서 Publish.
+- 이 인수인계 문서 작업(작업 트리, 커밋 전). 바뀐 문서 목록은 `git status`. 커밋은 사용자 요청 시.
 
-### 3.3 미착수
+### 3.3 미착수(우선순위는 8절)
 
-| 항목 | 내용 | 경로 |
-| --- | --- | --- |
-| 8C 통합 | 메인의 게이트 재확인, 논리 단위 커밋·푸시, 푸시 뒤 세 OS CI 확인 | §8 |
-| L6 최종 검증 | 덤프 pcall 실패 0, 화면별 캡처를 `m2`~`m5` 레이아웃과 대조, 실제 GPU 창 확인 | `docs/PROCESS.md` L6, `docs/quality-assurance/2026-10-11-default-skin-manual-check.md` |
-| L7 마감 | 조사 문서·PROCESS·history 정리 | `docs/PROCESS.md` L7, `docs/reference/skin-compat/` |
-| 웨이브 9 | customTimers/customEvents, IR 랭킹 목록 연결, 24키 문서, type 9 스킨 설정 Stage, skinpreview, BGA 동영상, 종류별 노트 수·밀도·주 BPM, `filter != 0` 셰이더 | 사양 §6 웨이브 9 |
-| Phase R | `prod` 생성, 첫 릴리스, 서명. 실제 키가 필요해 사용자와 함께 한다. 이번 작업과 무관 | `docs/roadmap.md`, `docs/ci-release.md` |
-| `web/` IR 서버 | 이번 작업과 무관. 상태는 `docs/roadmap.md` 그대로 | `web/`, `docs/web/` |
+- 계약 교차 테스트(`docs/quality-assurance/2026-10-14-test-debt.md`).
+- 문서 점검에서 나온 KNOWN ISSUE(아래 8절 2~5).
+- 실제 창 QA 116개 ID(`docs/quality-assurance/2026-10-11-default-skin-manual-check.md` 맨 위 표, 먼저 볼 8개).
+- 웹 2차(`docs/web/tasks.md`): 한 곡 한 행 보기, 카드 높이, 폴더 끌어 옮기기·2,000곡 가상화, 표 RSC 자료 축소, OG 이미지, 홈 대시보드.
+- Windows 코드 서명(사용자: 나중에), 앱 아이콘(.icns), 설정 화면 컨트롤러 조작, SCRATCH AUTO 초록을 노트 그림 모양으로(GPU 셰이더), 턴테이블 노트만 있는 차트의 자동 종료, 게임 안 IR 순위 패널의 SCRATCH AUTO 토글.
+- 오래된 백로그(웨이브 9): IR 순위 스킨 연결, customTimers, 24K 문서, BGA 비디오, songdb 노트 종류 수(D9).
 
 ## 4. 의사결정 요약
 
-상세와 원문은 `docs/acknowledge/2026-10-09-lua-skin-compat-decisions.md`(D1~D10)와 사양 §2(E1~E10).
+정본은 `docs/acknowledge/README.md`(색인)와 각 ADR. 아래는 요지와 기각 이유.
 
-### 4.1 사용자 결정
+| 결정 | 채택 | 기각된 대안과 이유 | ADR |
+| --- | --- | --- | --- |
+| SCRATCH AUTO | 턴테이블 노트는 초록·판정에서 빠진 없는 노트, 최고 기록·이력·리플레이·전송, 램프 LIGHT ASSIST, 옛 37판은 램프만 | "SC 점수 빼고 별도 최고 기록 행" — 사용자가 재정리해 대체. 결정 12(어시스트는 램프만) — 사용자 "당연히 갱신" | `2026-10-14-adr-scratch-auto-rule.md` |
+| 저장·전송 | 사람이 친 판은 전부. 오토플레이·리플레이 보기·연습 제외. 넓힌 판정은 최고 기록·순위만 제외 | — | `…-save-and-send-every-played-run.md` |
+| 순위 | SCRATCH AUTO 도 순위, 목록 기본 숨김 + 토글 | 순위에서 빼기(A) — 사용자 B | `…-scratch-auto-ranking-toggle.md` |
+| 어시스트 코스 | 코스로도 전송, 서버는 단일 곡 정책 | 코스 전송 안 함 — 사용자 B | `…-assisted-course-submission.md` |
+| 목표 | TARGET FALLBACK(기본 RATE AAA), RATE CUSTOM | 조용히 MAX 로 물러나기 — 무엇을 쓰는지 알 수 없었음 | `…-score-target-fallback.md` |
+| 기본 표 | 스냅샷 커밋·사본 주소·실행 파일 내장·한 번 등록 | DB(table_chart) 저장 — sha256 필수라 md5 만인 표 불가. 원본 주소 등록 — 사용자가 사본 선택 | `…-default-insane-table.md` |
+| 폴더 | 전용 읽기 API, MY FOLDERS, v1 비공개 | 표준 표 주소로 읽기 — 비공개 자료를 주소 비밀에 기댐 | `…-user-folders.md` |
+| 운영 DB | web-db 워크플로 + `WEB_DATABASE_URL` | `vercel env pull/run` — Secret 은 못 받음. `!` 로 시크릿 입력 — 대화에 값이 남음 | `…-production-db-operations.md` |
+| Vercel | Git 연결, Production `dev`, Root `web`, Preview 없음 | `prod` 를 웹 운영 브랜치로 — 앱 릴리스 버전 올림 브랜치와 겹침 | `…-vercel-git-deploy.md` |
+| 릴리스 | 태그 + draft 자동, 게시는 사용자, 자격 증명은 빌드 전에 | 빌드 뒤 서명 점검 — 사용자 "오래걸리잖아" | `…-release-policy.md` |
+| macOS 배포 | `R-BMS.app` + dmg, 앱·dmg 모두 티켓 부착 | 맨 실행 파일 tar.gz — 티켓을 붙일 수 없어 Gatekeeper 차단(v0.1.1) | `…-macos-app-bundle-dmg.md` |
+| 시드 | 새 시드 2^53 미만, 서버는 범위 밖을 0 으로 | 서버만 고치기 — 정확한 시드를 잃음. 클라만 고치기 — 옛 빌드의 판 거절 | `…-layout-seed-range.md` |
+| 툴체인 | 릴리스도 1.95.0 고정 | `@stable` — 타깃이 다른 툴체인에 설치되어 실패 | `…-release-toolchain-pin.md` |
+| 그 이전 | D1~D18(스킨 호환), 웹 U1~U5·M1~M11·Q1~Q6 | 각 파일 참조 | `2026-10-09-lua-skin-compat-decisions.md`, `2026-10-14-web-decisions.md` |
 
-| # | 결정 | 기각한 대안 |
-| --- | --- | --- |
-| D1 | 기본 스킨은 자작. ModernChic 의 Lua·이미지·폰트·사운드를 저장소에 넣거나 개변하지 않고 배치만 참고 | ModernChic 개변판 포함(원작자 표기와 제3자 자산 정리 필요) |
-| D2 | beatoraja·ModernChic 이름 금지 규칙 폐지 | |
-| D3 | `steel-neon` 3세대와 혼합 합성 삭제, 스키마 버전으로 구 선택값 초기화 | 혼합 합성 유지 |
-| D4 | 기본 스킨은 영어 문구, 선곡 사이드 메뉴는 설정·볼륨 2패널, 캐릭터·음성·IR 메뉴·이력·인프레션·자산 변종·로테이션·버전 확인 제외 | |
-| D5 | mp4 동영상 포함, 디코더 의존성 승인(OpenH264 소스 빌드 + `re_mp4`) | FFmpeg 정적·시스템 링크, 사이드카, GStreamer, OS 기본 디코더, 순수 Rust H.264, symphonia |
-| D6 | 비교 기준은 캡처 없이 좌표 표 대조 | |
-| D7 | 웨이브가 게이트를 통과할 때마다 논리 단위로 커밋·푸시(이 작업에 한해) | |
-| D8 | 선곡의 건반 6(F)은 즐겨찾기만, NEXT_REPLAY 제거 | 둘 다 실행 |
-| D9 | 선곡의 종류별 노트 수·밀도·주 BPM 은 빈칸, 별도 작업 | 지금 songdb 열 추가와 전체 재스캔 |
-| D10 | 릴리스 바이너리에도 동영상 포함, OpenH264 BSD-2 고지 동봉 | |
+## 5. 사용자 방향성 & 작업 규칙
 
-### 4.2 메인이 정하고 고지한 기본값
+- 응답: 한국어 존댓말, 간결, 첫 줄은 행동이나 답, 매 응답에 현재 상태 한 줄, 번호 목록, 이모지·글자 그림 금지. 확인하지 못한 것은 그렇다고 말한다.
+- 세션 경계(새 세션, resume, compact, clear, prepare-new)와 새 실행 작업마다 다중 에이전트 workflow 사용 여부를 한 번 묻고 답을 기다린다(지적받은 적 있음). 선택은 승계하지 않는다.
+- workflow 를 쓰면: Workflow 도구만(Agent 단독 금지), Fable·Haiku 금지(이 프로젝트), Opus 는 effort high 까지, Sonnet 은 xhigh 까지, 모든 agent 에 model·effort 명시. 에이전트는 커밋·푸시하지 않는다.
+- 근본 원인을 고친다(증상 가리기 금지). 실제 측정·캡처·내려받은 산출물로 확인한 뒤 됐다고 한다.
+- Git: Conventional Commits, 한국어 설명, author 사용자 단독, AI 트레일러 금지, 선별 스테이징(`git add -A` 금지), force push 금지. 게이트 통과 뒤 논리 단위로 커밋·푸시하고 `gh run list --branch dev` 로 3 OS CI 와 web CI 를 확인한다.
+- Rust: `//` 주석 금지(`//!`·`///` 영어만), 매직넘버 금지, 새 `#[allow]` 금지, `unsafe`·`todo!()` 금지, rustfmt max_width 160, 새 의존성 금지, `--locked`.
+- 웹: `web/AGENTS.md`(arrow function, any·enum·주석 금지, FSD, TanStack Query + queryOptions + QUERY_KEY, Zod 경계 검증, useCallback·useMemo 금지).
+- 비밀: `.env`·`.env.*`·`secrets/`·키 파일을 읽거나 쓰거나 출력하지 않는다(훅이 막음). 시크릿 값이 대화에 남는 방법을 안내하지 않는다(별도 터미널의 `gh secret set` 이나 GitHub 웹). `vercel link` 는 `web/.env.local` 을 자동으로 만든다(사고 이력) — 쓰지 않는다.
+- 운영: 운영 사이트에는 읽기 요청만. 운영 DB 쓰기는 web-db 워크플로로, 파괴적 작업(삭제)은 개수를 보여 주고 승인 뒤.
+- 릴리스: 항상 태그 + draft 까지 자동, draft 본문은 사실을 확인해 정확히, 게시는 사용자. 결함이 든 draft 는 지우고 다음 패치 버전으로(v0.1.1, v0.1.2 선례).
+- 폴더 금지: `/Users/hyunseokbyun/Downloads/ModernChic` 와 `/Users/hyunseokbyun/development/beatoraja` 를 고치지 않는다. ModernChic 자산을 저장소에 복사하지 않는다(D1).
+- 사용자가 싫어한 것: 튀는 판정 애니메이션, 5 단위 걸음, 딱딱한 설정 화면, 빌드 뒤에 하는 시크릿 점검, 조사 결과 재탐색(조사 결과는 `docs/` 에 남긴다), 문서 미갱신.
 
-| # | 요지 |
-| --- | --- |
-| E1 | Lua 격리: `require`·`dofile`·io 읽기는 스킨 루트 안만, 쓰기는 `<설정 폴더>/skin-data/<식별자>/` 오버레이, 네트워크는 항상 실패 |
-| E2 | Settings·Tables·Folders·Practice·스캔 대기는 내장. IR 랭킹, 기록 모달, 필터, 옵션 오버레이(F1), 안내, 토스트, 디버그, 리플레이 분석 띠는 스킨 위 시스템 오버레이 |
-| E3 | 기존 단축키 유지 + START(A)/SELECT(W) 신설. Q 는 IR 랭킹이 쓴다 |
-| E4 | 내장 play/select/result 는 폴백으로 유지(스킨 로드 실패, 24키) |
-| E5 | 스킨 폰트에 없는 글자는 앱 다국어 폰트로 |
-| E6 | 기본 창 1280x720, 해상도·창 모드 설정, 16:9 가 아니면 레터박스(8C 에서 일반 창 기본값을 켬) |
-| E7 | 그리기·타이밍은 beatoraja HEAD `8320241d` 그대로, 입력 결함은 원작 의도로 교정 |
-| E8 | IR 타이머 172~174 와 옵션은 실제 값, 랭킹 목록 연결은 후속 |
-| E9 | 기본 스킨에 9키 포함, ModernChic 의 9키는 내장 폴백 |
-| E10 | 색 공간은 바이트 통과(비 sRGB 표면). 실제 창의 내장 화면이 전보다 어둡다 |
+## 6. 미해결 질문 / 사용자 확인 필요
 
-8C 에서 정한 기본값: 기본 스킨은 `skin.folder` 와 무관하게 `<설정 폴더>/skin/rbms-default/` 에 설치하고 팩을 지정하지 않으면 이 폴더를 쓴다. `skin.*` 전체는 기기 로컬. 일반 창 레터박스 기본 켬. 테마 색 재조정은 범위 밖.
+1. `v0.1.3` 으로 한 판 쳐서 결과 화면에 `IR: RANK #n` 이 나오는지(운영 서버 실제 저장 확인). 그 뒤 게시.
+2. 게시되지 않은 `v0.1.0` draft 를 지울지(산출물이 맨 실행 파일이라 게시하면 Gatekeeper 에 막힐 것으로 예상). 태그 v0.1.0~v0.1.3 은 남아 있다.
+3. 중도 포기(Esc, 칠 노트가 남음)한 판도 "무조건 저장"에 들어가는지. 지금은 결과 화면을 거치지 않아 이력·리플레이·전송이 없다(`apps/rbms-player/src/stage/play/mod.rs` 의 `leave_run`).
+4. 메인이 정한 정책의 확인: 넓힌 판정 판은 저장·전송하되 최고 기록·순위 제외, SCRATCH AUTO 램프는 LIGHT ASSIST 유지.
+5. 웹 rate limit 의 지속형 저장소(Vercel Firewall 규칙 / Upstash / 지금대로) — 사용자 결정.
+6. `user.rank_points`(항상 0) — 산식을 정할지, 응답에서 뺄지.
 
-## 5. 작업 규칙
+## 7. 환경 & 전제
 
-| 구분 | 규칙 |
-| --- | --- |
-| 위임 | Workflow 전용(Agent 단독 호출과 general-purpose 금지). 모델은 Opus effort high 이하, Sonnet effort xhigh 이하. 모든 `agent()` 에 `model` 과 `effort` 를 명시한다. 사양·판정·Git 은 메인이 직접 한다 |
-| workflow 선택 | 새 세션, resume, clear, compact, 이 문서 기반 재개에서는 workflow 사용 여부를 다시 묻는다. 이전 선택을 승계하지 않는다 |
-| 커밋·푸시 | 웨이브가 게이트를 통과하면 메인이 되돌릴 수 있는 논리 단위로 커밋하고 `origin/dev` 에 일반 push. Conventional Commits, 설명은 한국어, author 단독, AI 트레일러(Co-Authored-By 등) 금지, `git add -A` 금지(선별 스테이징), force push 금지. 하위 에이전트는 커밋하지 않는다 |
-| CI | 푸시 뒤 `gh run list --branch dev --limit 3` 으로 세 OS 결과를 확인하고, 실패하면 `gh run view <id> --log-failed` 로 원인을 찾아 다음 작업 전에 고친다. 로컬 통과는 CI 통과의 근거가 아니다 |
-| 조사 결과 | `docs/` 에 상세히 저장하고, 코드가 바뀌면 같은 단위에서 해당 절을 고친다(재탐색으로 토큰을 쓰지 않기 위함). 색인은 `docs/reference/skin-compat/README.md` |
-| 읽기 전용 | `/Users/hyunseokbyun/Downloads/ModernChic` 과 `/Users/hyunseokbyun/development/beatoraja` 는 읽기 전용이다. ModernChic 의 파일을 저장소에 넣지 않는다 |
-| UI | 실제 렌더(캡처)를 열어 확인한 뒤에만 됐다고 보고한다. 실제 GPU 창 확인은 사용자 절차다 |
-| Rust | `//` 주석 금지(`//!`·`///` 영어 문서 주석만), 매직넘버 상수화, `#[allow]`·`unsafe` 금지, `rustfmt.toml` 의 `max_width = 160` |
-| 보안 | `.env` 계열은 읽지도 쓰지도 않는다 |
-| 응답 | 한국어 존댓말로 간결하게. 첫 줄에 행동이나 답, 마지막에 다음 행동 하나 |
+- 저장소 `/Users/hyunseokbyun/development/R-BMS`, 기본 브랜치 `dev`, 원격 `B-HS/R-BMS`(공개). Rust 1.95.0(`rust-toolchain.toml`), 웹은 bun 1.4.0(`web/package.json` packageManager).
+- 게이트: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`, `cargo test --workspace --no-fail-fast --locked`(웨이브 20 기준 5,671 통과), 웹 `cd web && bun run verify && bun run format:check && bun run build`(415 통과), 기본 스킨 `cargo run -q -p rbms-cli --locked -- skin-dump assets/skins/rbms-default --strict --frames 120`, 생성 이미지 `uv run assets/skins/rbms-default/tools/generate-images.py --check`.
+- CI: `ci.yml`(Rust 3 OS + fmt/clippy, `web/**` 만 바뀐 푸시는 건너뜀, 표 스냅샷 변경은 돎), `web.yml`, `release.yml`(수동 `gh workflow run release.yml --ref dev -f bump=patch` 또는 `prod` 푸시·태그), `signing-check.yml`(시크릿만 확인), `web-db.yml`(`-f action=status|migrate|cleanup-count|cleanup-delete`).
+- 저장소 시크릿: `MACOS_CERTIFICATE_P12`, `MACOS_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`, `WEB_DATABASE_URL`. Apple 개발자 계약 동의가 끝나야 공증이 됨(2026-10-13 사례).
+- Vercel: 프로젝트 `rbms-web`(b-hs-projects), Git 연결, Root `web`, Production `dev`, `web/vercel.json` 의 ignoreCommand(프리뷰는 건너뜀, production 은 `web/` 이 바뀔 때만). 환경 변수 6개(`DATABASE_URL`·`BETTER_AUTH_SECRET` 은 Secret, `BETTER_AUTH_URL`·`ALLOW_GUEST`·`REPLAY_MAX_BYTES`·`NEXT_PUBLIC_APP_URL`). 로컬 Vercel CLI 는 `b-hs` 로그인, `web/.vercel` 링크(무시됨). 지금 배포는 `7095ef7`.
+- 운영 DB: 마이그레이션 0000~0002 적용(2026-10-14), 시험 계정 삭제, 다른 사용자 점수 3건. GitHub 러너에서 접속됨.
+- 사용자 실제 기록 DB: 옛 규칙(세대 2) SCRATCH AUTO 37판 → 램프·이력만.
+- 로컬에 `x86_64-apple-darwin` 타깃이 설치돼 있음(필요 없으면 `rustup target remove x86_64-apple-darwin`).
+- macOS 는 파일 시스템이 대소문자를 구분하지 않으므로 `docs/ARCHITECTURE.md` 를 따로 만들지 않는다. 아키텍처 정본은 `docs/architecture.md`.
 
-## 6. 미해결 · 사용자 확인 필요
+## 8. 다음 세션 TODO(우선순위)
 
-| # | 내용 | 출처 |
-| --- | --- | --- |
-| 1 | 실제 GPU 창에서 첫 실행 → 선곡 → 결정 → 플레이 → 결과, 마우스 조작, 소리, 1280x720 창, 한글·일본어 제목 확인 | `docs/quality-assurance/2026-10-11-default-skin-manual-check.md` |
-| 2 | 내장 화면의 밝기 변화(E10)에 따른 테마 색 재조정 여부. 사양은 범위 밖으로 두었고 실창 확인 뒤 별도 작업으로 정한다 | 사양 E10, 웨이브 1B 기록 |
-| 3 | 기존 사용자의 `letterbox: false` 를 한 번 켜는 스키마 4 마이그레이션 여부. 사양의 "명시적 값은 유지"와 충돌해 하지 않았다 | 8C 단위 B 위험 |
-| 4 | `Cargo.lock` 이 `.gitignore` 로 추적되지 않아 릴리스 빌드가 고지 파일의 버전과 다른 의존을 해석할 수 있다. 추적하고 `--locked` 를 쓸지 | 8C 단위 C 위험 |
-| 5 | 더는 싣지 않는 설치 파일을 지우는 동작(단위 A 의 지시 밖 판단)을 유지할지. 빼려면 `install_pack` 의 첫 번째 `for` 루프만 지운다 | 8C 단위 A·수정 |
-| 6 | `--skin` 규칙이 넓어졌다(팩과 손으로 고른 플레이 문서도 제치고 내장 필드). 원치 않으면 `SkinLibrary::plays_built_in` 에 "팩을 지정하지 않았을 때만" 조건을 넣는다. 내장 화면으로 가는 별도 설정 행은 없다 | 8C 수정 |
-| 7 | 고지 7.3절의 41개 크레이트는 패키지에 라이선스 파일이 없어 저작권 표시를 싣지 못했다. `cargo-about` 도입 여부, Apache-2.0 선택 문구 확인 | 8C 수정 |
-| 8 | macOS 러너에 `nasm` 이 없으면 x86_64 OpenH264 가 C 로만 빌드되어 느릴 수 있다(`brew install nasm` 단계). `x86_64-apple-darwin` 의 OpenH264 빌드는 첫 실제 릴리스에서야 확인된다 | 8C 단위 C |
-| 9 | 스킨 옵션을 기기 간에 옮기려면 팩 이름 기준 키로 바꾸는 별도 작업이 필요하다. 계정에 이미 올라간 다른 기기의 스킨 경로는 다음 업로드에서 빈 값으로 덮인다 | 8C 단위 B |
-| 10 | Windows·Linux 에서 확인하지 못한 것: `build.rs` 의 `include_bytes!` 경로, `note_tests.rs`(기본 팩을 읽음), 링크 폴더 테스트(`cfg(unix)`), 예산 초과 테스트의 5초 | 푸시 뒤 CI |
-| 11 | `skin_external` 은 ModernChic 에서 2분, 기본 팩에서 36초. 동영상 디코드 테스트는 디버그에서 10분 이상(release 92초). 모두 환경 변수 테스트라 CI 에는 영향이 없다 | 8C 단위 D |
-| 12 | 선곡 위 앱 오버레이와 스킨의 정합(검색 상자, 랭킹 패널 폭, 옵션 오버레이 비침, 토스트), customTimers, 선곡의 표 이름·레벨 | `docs/skin.md` §6, 설계서 §7 |
-
-## 7. 환경과 전제
-
-| 항목 | 내용 |
-| --- | --- |
-| 기기 | macOS arm64(Apple Silicon, Metal). JRE 없음(beatoraja 실행 불가) |
-| 경로 | 저장소 `/Users/hyunseokbyun/development/R-BMS`, 외부 스킨 `/Users/hyunseokbyun/Downloads/ModernChic`(476 MiB, 저장소 밖), 레퍼런스 체크아웃 `/Users/hyunseokbyun/development/beatoraja`(HEAD `8320241d`) |
-| 도구 | Rust 1.95.0(`rust-toolchain.toml`, rustfmt·clippy 포함), `uv`(이미지·사운드 생성), `gh`(CI 확인), `bun`(`web/`) |
-| 실행 | `./start.sh [곡 폴더 또는 차트] [옵션]`(gitignore 된 로컬 스크립트) 또는 `cargo run --release -p rbms-player -- <인자>`. 격리 실행: `HOME=<임시 폴더> ./target/release/rbms-player samples/preview-demo` |
-| 환경 변수 | `RBMS_SKIN_PACK`(이번 실행의 스킨 팩), `RBMS_SKIN_CAPTURE_DIR`(캡처 PNG 저장, 테스트), `RBMS_REQUIRE_GPU`(GPU 없으면 테스트 실패), `RBMS_SKIN_SEED`(무작위 고정), `RBMS_GOLDEN_UPDATE`(골든 재생성), `RBMS_SONGS`, `RBMS_TIMING_CSV`, `RBMS_SOAK_LOG`. 표는 `docs/development.md` |
-| Cargo 피처 | `rbms-player` 의 `video`(기본 켬). 끄면 동영상 자리가 비고 코덱이 컴파일되지 않는다 |
-| 설정 폴더 | `~/.config/rbms/`(Windows `%USERPROFILE%\.config\rbms\`): `settings.ron`, `skin/rbms-default/`, `skin-data/` 등 |
-
-## 8. 다음 할 일 (우선순위 순)
-
-1. **8C 통합 게이트와 커밋·푸시(메인).** `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --no-fail-fast`, `git diff --check` 를 한 번 확인한다(§3.2 의 기록이 현재 트리에 유효한지 `git status` 로 대조). 논리 단위로 선별 스테이징해 커밋한다. 후보 단위: 설정·동기화·레터박스(`crates/rbms-config/`, `settings_ui.rs`, `settings_view.rs`, `ir_sync.rs`), 기본 팩 내장·설치·폴백(`apps/rbms-player/build.rs`, `assets/default_pack.rs`, `skin_select.rs`, `skin_screen.rs`, `font.rs`), 테스트·게이트(`stage/capture/`, `crates/rbms-skin/tests/default_pack.rs`, `apps/rbms-cli/src/skin_dump/tests.rs`), 고지·릴리스·CI(`THIRD-PARTY-NOTICES.md`, `.github/workflows/`, `docs/ci-release.md`), 문서.
-2. **푸시 뒤 `gh run list --branch dev --limit 3`.** 세 OS 의 test 와 fmt+clippy 를 확인한다. §6-10 의 항목이 Windows·Linux 에서 걸리는지 본다.
-3. **조사 문서와 PROCESS 갱신(메인).** `docs/PROCESS.md` L5 웨이브 8C 체크, 사양 §6 웨이브 8C 완료 기록, 결정 문서에 §6 의 3~7번 결정, 조사 문서 `r3-rbms-app.md`(기본 팩 설치·선택·폴백), `r2-rbms-render.md`(`BUNDLED_FONT`), 색인의 갱신 이력.
-4. **L6 최종 검증.** `cargo run -p rbms-cli -- skin-dump <ModernChic 폴더> --strict --allow-failure keyconfig.luaskin`(keyconfig 만 원본 결함), 기본 팩의 `--strict --frames 120`, 캡처를 `m2`~`m5` 와 대조하고 사용자가 `docs/quality-assurance/2026-10-11-default-skin-manual-check.md` 를 수행한다.
-5. **L7 마감.** `docs/history/` 에 이번 작업 기록, 조사 문서 정리, 이 문서 갱신.
-6. **웨이브 9 후보**(사양 §6): customTimers/customEvents(`crates/rbms-render/src/skin_render/`, `skin_host/`), IR 랭킹·라이벌 연결(`skin_host/ir.rs`), 종류별 노트 수·밀도·주 BPM(songdb 열 추가, `PARSER_VERSION` 상승, 전체 재스캔), 24키 문서, 스킨 설정 Stage(type 9), skinpreview, BGA 동영상(`rbms-video` 재사용), 선곡 위 오버레이와 스킨의 정합.
+1. 사용자 확인 받기(6절 1~4). 그 답에 따라 3번(Esc 포기 판 저장)을 구현하거나 닫는다.
+2. 계약 교차 테스트 — 완료 조건: Rust 테스트가 실제 판에서 만든 요청 본문(일반, SCRATCH AUTO, 코스, 리플레이 업로드)을 JSON 파일로 뽑아 저장소에 두고(`crates/rbms-ir/src/contract_tests.rs` 근처), 웹 테스트(`web/tests/dto/ir-contract.test.ts`)가 그 파일들을 `scoreSubmissionSchema`·코스·리플레이 스키마로 통과시키며, 값 범위가 다른 필드(정수 범위, NaN·무한 → JSON null, u64, 음수) 목록이 테스트로 묶인다. 설계와 필드 표: `docs/quality-assurance/2026-10-14-test-debt.md`. 두 CI 가 통과해야 한다. 추가로 `web.yml` 에 MySQL 서비스를 붙여 `RBMS_DB_E2E=1` 테스트가 CI 에서 돌게 한다(같은 문서).
+3. 작은 코드 수리(각각 테스트나 확인 명령으로 닫는다):
+   - `.github/workflows/web-db.yml`: `status` 가 늘 성공으로 끝남(`|| true` 가 종료 코드 1·2 를 삼킴) → status 일 때는 그대로 실패시키거나 2 만 실패.
+   - `scripts/verify-notary-credentials.sh`: 앱 암호 입력이 보임 → `read -rs`.
+   - `scripts/verify-signing-cert.sh`: `find-identity` 에 `-v` 추가(CI 와 같게).
+   - `.github/workflows/release.yml`: `concurrency: { group: release, cancel-in-progress: false }`.
+   - `apps/rbms-player/src/scoredb_store.rs` 1~22행 모듈 문서가 낡음("not yet called … allow") → 현재 쓰임으로.
+   - `web/scripts/run-sql.ts`: 공개 저장소의 Actions 로그에 행을 그대로 찍음 → 개수만 찍도록 제한.
+4. 웹 KNOWN ISSUE(`docs/web/2026-10-14-audit.md` 해소 현황 표, `docs/web/tasks.md`):
+   - 없는 차트·플레이어·코스·리플레이 주소가 HTTP 200(404 화면 + noindex) → 존재 확인을 Suspense 밖에서 하고 `notFound()`(`web/src/shared/lib/fetch-query-or-not-found.ts`, `web/src/widgets/{chart,player,course,replay}/*-content.tsx`).
+   - 서버 컴포넌트가 자기 공개 URL 로 HTTP fetch(`web/src/shared/lib/fetch.ts` resolveOrigin) → read-cache 함수 직접 호출.
+   - 가입 실패가 모두 409(`web/src/server/service/domain/auth/auth.service.ts` signUp) → 중복만 409.
+   - 운영 필수 환경 변수가 optional(`web/src/server/lib/env.ts`) → production 첫 사용 시 필수 검증.
+   - 릴리스 CI 가 client_build 를 등록 못 함(`web/src/server/route/admin.ts` + `release.yml`) → 토큰 경로 또는 절차 문서화(지금 `UNKNOWN_BUILD` 는 순위를 막지 않는 표지).
+   - 폴더 저장이 두 요청(`web/src/server/route/folder.ts`) → 한 요청.
+   - `web/package.json` 의 쓰지 않는 `msw` 제거.
+   - 2^53 이상 시드의 옛 리플레이는 시드 0 으로 저장되어 재현이 다를 수 있음(옛 빌드는 게시된 적 없음, 영향 작음).
+5. 클라이언트 한계: 설정 화면 컨트롤러 조작(`apps/rbms-player/src/stage/settings.rs` 에 `handle_pad`), 게임 안 IR 순위 패널의 SCRATCH AUTO 토글, 턴테이블 노트만 있는 차트의 SCRATCH AUTO 자동 종료, 초록 노트를 그림 모양으로(`apps/rbms-player/src/gpu`).
+6. 실제 창 QA: `docs/quality-assurance/2026-10-11-default-skin-manual-check.md` 맨 위 "먼저 확인할 것" 8개 → 116개 표. 사용자가 실제로 쳐 보며 확인하는 일이라 결과를 받아 고친다.
+7. 웹 2차(`docs/web/tasks.md`), 앱 아이콘, Windows 서명(사용자가 원할 때), `docs/PROCESS.md` 의 "보존 이력" 블록 정리.
 
 ## 9. 문서 지도
 
-| 문서 | 한 줄 |
-| --- | --- |
-| `docs/PROCESS.md` | 현재·누적 작업 체크리스트(상단 "현재 작업"이 이 작업) |
-| `docs/skin.md` | 스킨 가이드: 지원 범위, 팩 쓰기, 기본 스킨, Lua 환경, 도구, 알려진 한계 |
-| `docs/plan/2026-10-09-lua-skin-compat.md` | 정본 사양과 웨이브별 진행·완료 기록 |
-| `docs/plan/2026-10-11-default-skin-design.md` | 기본 스킨 설계서(격자, 모듈 API, 화면별 좌표, 검증 기록) |
-| `docs/acknowledge/2026-10-09-lua-skin-compat-decisions.md` | 사용자 결정 D1~D10, 디코더 선정, 기각한 대안 |
-| `docs/reference/skin-compat/README.md` | 조사 보고서 색인(b1~b5 beatoraja 계약, m1~m6 외부 스킨, r1~r3 R-BMS 현황, v1~v2 실측) |
-| `docs/quality-assurance/2026-10-11-default-skin-manual-check.md` | 사람이 실제 창에서 확인할 목록 |
-| `docs/quality-assurance/2026-09-16-phase-h-manual-checks.md` | 오디오·연습·코스·다중 IR 수동 점검(아직 미수행) |
-| `docs/architecture.md`, `docs/crates.md`, `docs/development.md` | 구조·크레이트 레퍼런스·빌드와 개발 안내(영어) |
-| `docs/ci-release.md` | CI 매트릭스, 릴리스 워크플로, 배포 묶음과 제3자 고지, Phase R 경계 |
-| `docs/theme.md` | 내장 화면의 색 테마 `theme.ron` |
-| `docs/roadmap.md` | 남은 작업과 테스트가 고정한 의도적 동작 |
-| `docs/history/` | 변경 불가 이력과 스냅샷(`2026-10-09-handoff-snapshot.md` 포함) |
-| `docs/feedback/`, `docs/acknowledge/` | 지적 리포트(`2026-10-11-ci-not-checked-after-push.md` 등)와 결정·합의 |
-| `docs/plan/2026-09-17-*.md`, `docs/acknowledge/2026-09-17-skin-system-decisions.md` | 2026-10-09 폐기된 구 스킨 체제의 사양·결정(이력으로만) |
-| `THIRD-PARTY-NOTICES.md` (저장소 루트) | 제3자 고지(영어). 의존성이 바뀌면 갱신(`docs/ci-release.md` §2.1) |
+- `docs/HANDOFF.md` — 이 문서. 새 세션의 진입점.
+- `docs/PROCESS.md` — 진행 중 작업의 체크리스트와 웨이브별 결과(S1~S14). 완료 구간은 `docs/history/2026-10-14-process-archive.md`.
+- `docs/architecture.md` — 아키텍처 정본: 저장소 배치, 크레이트 의존, Stage, 플레이 → 기록 DB → 점수 서버 → 웹 흐름, 배포.
+- `docs/crates.md` — 크레이트별 공개 API·모듈·테스트.
+- `docs/development.md` — 개발 명령, 환경 변수, 영속 파일, web 명령.
+- `docs/play-options.md` — 플레이 옵션, 조작, 기록이 남는 조건(10절), 목표(11절).
+- `docs/skin.md` — 스킨 엔진, 기본 스킨, SKIN 메뉴, 내보내기.
+- `docs/theme.md` — 앱 UI 테마(`theme.ron`).
+- `docs/ci-release.md` — CI, 릴리스 흐름과 이력(v0.1.0~v0.1.3), 서명·공증, web-db, KNOWN ISSUE.
+- `docs/roadmap.md` — 오래된 로드맵(현재 정본 아님).
+- `docs/acknowledge/README.md` — 결정 색인(ADR 15건 + 이전 결정 파일의 상태).
+- `docs/plan/` — 설계서: `2026-10-14-settings-screen.md`, `2026-10-14-web-user-folders.md`, `2026-10-11-{play-menu,skin-menu,default-skin-design}.md`, `2026-10-09-lua-skin-compat.md` 등.
+- `docs/web/` — 웹: `architecture.md`, `components.md`, `tasks.md`(남은 일), `2026-10-14-audit.md`(점검과 해소 현황), `2026-10-14-design-direction.md`, `2026-10-14-insane-table.md`, `2026-10-14-foundation-contract.md`(화면·API 계약).
+- `docs/backend/` — 점수 서버 API 명세(`api-spec.md`), 데이터 모델, 호환성.
+- `docs/reference/` — 원본(beatoraja) 조사: `skin-compat/README.md` 색인과 보고서, `ir-api.md`(클라이언트 IR 와이어).
+- `docs/quality-assurance/` — `2026-10-11-default-skin-manual-check.md`(실제 창 QA 116개), `2026-10-14-test-debt.md`(테스트 부채와 교차 테스트 설계).
+- `docs/bug/2026-10-14-score-submit-400-large-seed.md` — 400 사고 기록.
+- `docs/feedback/` — 지적받은 것(CI 미확인 등). `docs/memory/` — 장기 기억(시험 곡 라이브러리).
+- `docs/history/` — 이전 스냅샷과 이력.

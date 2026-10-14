@@ -33,4 +33,4 @@ git tag v0.1.0 && git push origin v0.1.0           # version 잡 skip, build가 
 
 ## 상태
 
-**Phase R 대기** — 사용자 키와 최종 배포 결정을 받은 뒤 위 당시 옵션을 실제 원격·워크플로 상태와 재검증한다. 현재 dev-only이며, 이 문서의 과거 원격 SHA·CI 결과는 당시 관찰값이다.
+**Phase R 대기** — 사용자 키와 최종 배포 결정을 받은 뒤 위 당시 옵션을 실제 원격·워크플로 상태와 재검증한다. 현재 dev-only이며, 이 문서의 과거 원격 SHA·CI 결과는 당시 관찰값이다. 대체됨: [2026-10-14-adr-release-policy.md](2026-10-14-adr-release-policy.md)

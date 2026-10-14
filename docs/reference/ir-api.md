@@ -1,6 +1,8 @@
 # rbms IR-superset API 계약 — `rbms-ir` 클라이언트 정본
 
-> **상태(2026-09-16):** 현재 IR 계약과 구현된 경계의 정본입니다. 아래 JSON의 해시·시간·커밋 값은 **형식 예시**이며 현재 배포 식별자가 아닙니다. 알려진 클라이언트 갭은 본문에서 보존하고, 실제 수동 다중 IR/서버 QA는 [roadmap](../roadmap.md)의 미실시 항목입니다.
+> 최종 갱신 2026-10-14 · 대응 커밋 7095ef7
+
+> **상태:** 현재 IR 계약과 구현된 경계의 정본입니다. 서버는 https://bms.hyuns.uk 에 배포됐고(2026-10-14) 클라이언트 기본 서버 주소가 이 주소입니다. 아래 JSON의 해시·시간·커밋 값은 **형식 예시**이며 현재 배포 식별자가 아닙니다. 알려진 클라이언트 갭은 본문에서 보존하고, 실제 수동 다중 IR/서버 QA는 [roadmap](../roadmap.md)의 미실시 항목입니다. 필드 규칙이 코드와 다르면 서버 zod 스키마(`web/src/server/dto/`)와 `crates/rbms-ir/src/dto/` 가 맞습니다.
 
 > 이 문서는 **`crates/rbms-ir` 가 실제로 말하는 와이어 계약**이다. 서버 쪽 설계 정본은 [`docs/backend/`](../backend/README.md) 와 `web/src/server/{dto,route}`(zod 스키마 = 진실 소스), 라우트 매트릭스는 [`docs/web/architecture.md`](../web/architecture.md) §1-2 다.
 > 계약 원칙: **BMS IR(LR2IR/Mocha/Cinnamon 등)의 슈퍼셋**. MD5+SHA-256 양쪽 차트 id, early/late 판정 분해, µs 리플레이, 코스, 설정 동기화, capability 탐색, 그리고 모든 DTO의 `extra`(free-form)로 전방호환.
@@ -34,6 +36,8 @@
 | GET | `/players/{id}/settings/{name}` | Bearer, 본인 | — | 200 `SettingsBlob` | `get_settings` |
 | PUT | `/players/{id}/settings/{name}` | Bearer, 본인 | `SettingsPutRequest` | 200 `SettingsPutResponse`(`{ updated_at }`) | `put_settings` |
 | POST | `/courses` | Bearer | `CourseSubmission` | 201 `SubmitResponse`(중복 200) | `submit_course` |
+| GET | `/players/{id}/folders` | Bearer 또는 세션, 본인 | — | 200 `{ "folders": [FolderSummary] }`(`Cache-Control: private, no-store`) | `user_folders` |
+| GET | `/players/{id}/folders/{folderId}` | Bearer 또는 세션, 본인 | — | 200 `FolderSummary` + `items`(`md5`·`sha256`·`title`·`artist`·`note`) | `user_folder` |
 | GET | `/courses/{hash}/ranking?limit=&page=&lnmode=&rival_of=` | — | — | 200 `[ScoreRecord]` | `course_ranking`, `course_ranking_page` |
 
 쿼리 기본값·상한(서버 zod 스키마와 동일, 상수는 `dto::query`):
@@ -45,6 +49,8 @@
 | chart replays `limit` | 50 | `MAX_REPLAY_LIST_LIMIT` = 200 |
 | `lnmode` | 없음 | 0~2 |
 | `include_scratch_auto`(ranking·best, 웨이브 20) | `false` | `true`·`false` |
+
+폴더 두 경로의 필드·한도·오류는 [backend/api-spec.md](../backend/api-spec.md) 7.2 절이 정본이다(편집은 웹의 세션 경로만 한다. 클라이언트는 읽기만 하고, 응답은 `get_bounded` 로 크기·시간을 제한해 읽는다. `GET /health` 의 `capabilities.folders` 가 `true` 여야 서버가 지원한다).
 
 `include_scratch_auto` 를 빼면(클라이언트는 싣지 않는다) 일반 판 최고만의 기본 목록이다. `true` 면 플레이어마다 일반 판 최고와 SCRATCH AUTO 판 최고 가운데 더 높은 것이고, SCRATCH AUTO 판 행은 `extra.scratch_auto: true` 를 단다. 곡 선택의 IR RANKING 패널은 기본 목록을 쓴다.
 
@@ -64,13 +70,13 @@
 
 ```jsonc
 // ServerInfo — GET /health
-{ "name": "rbms-web", "version": "0.1.0", "ir_compat": "superset-1",
+{ "name": "rbms-ir", "version": "0.1.0", "ir_compat": "superset-1",
   "capabilities": { "ranking": true, "player_best": true, "rivals": true, "courses": true,
-                    "replays": true, "tables": true, "settings_sync": true,
+                    "replays": true, "tables": true, "settings_sync": true, "folders": true,
                     "accounts": true, "lr2ir_compat": false } }   // 블록·개별 플래그 모두 생략 시 false
 
 // VersionInfo — GET /version
-{ "api_version": 1, "server": "rbms-web", "commit": "c6f0885" }   // commit 은 null 가능
+{ "api_version": 1, "server": "0.1.0", "commit": "c6f0885" }   // commit 은 null 가능(Git 연동 배포가 아니면)
 
 // AuthRequest — POST /auth/{register,login}
 { "api_version": 1, "id": "gkn", "password": "…", "email": "gkn@example.com", "name": "gkn" }
@@ -90,7 +96,7 @@
 
 // ScoreSubmission — POST /scores
 { "api_version": 1,
-  "chart": { "md5": "…", "sha256": "…" },
+  "chart": { "md5": "…", "sha256": "…", "title": "…", "artist": "…", "level": 12 },   // title·artist·level 은 선택(`SubmittedChart`)
   "player": { "id": "guest" },
   "mode": "BEAT_7K",
   "clear": "Hard",                 // NoPlay|Failed|AssistEasy|LightAssistEasy|Easy|Normal|Hard|ExHard|FullCombo|Perfect|Max
@@ -106,7 +112,7 @@
                "hispeed": 3.0, "lift": 0.0, "lane_cover": 0.0, "total_override": 0.0,
                "autoplay": false, "auto_offset": false, "scratch_left": false, "green_number": 310.0 },
   "played_at": 1700000000000,      // unix ms. 음수면 400, 현재보다 5분 이상 미래면 400
-  "client": "rbms/0.1.0", "replay_id": null, "seed": 42,
+  "client": "rbms/0.1.0", "replay_id": null, "seed": 42,   // seed: 클라 u64. 서버는 2^53 를 넘는 값(옛 빌드의 나노초)을 거절하지 않고 0 으로 저장한다
   "judge_algorithm": "Duration", "rule": "", "skin": "NORMAL",
   "client_build_sha256": null, "client_platform": "macos-aarch64",
   "extra": {} }
@@ -217,8 +223,8 @@
 |---|---|---|
 | 401 | `Unauthorized(body)` | `UNAUTHORIZED` |
 | 403 | `Forbidden(body)` | `FORBIDDEN` |
-| 404 | `NotFound(body)` | `IR_CHART_NOT_FOUND` · `IR_PLAYER_NOT_FOUND` · `IR_REPLAY_NOT_FOUND` · `IR_SETTING_NOT_FOUND` · `IR_COURSE_NOT_FOUND` |
-| 409 | `Conflict(body)` | `IR_ACCOUNT_EXISTS` |
+| 404 | `NotFound(body)` | `IR_CHART_NOT_FOUND` · `IR_PLAYER_NOT_FOUND` · `IR_REPLAY_NOT_FOUND` · `IR_SETTING_NOT_FOUND` · `IR_COURSE_NOT_FOUND` · `IR_TABLE_NOT_FOUND` · `IR_FOLDER_NOT_FOUND` |
+| 409 | `Conflict(body)` | `IR_ACCOUNT_EXISTS` · `IR_FOLDER_NAME_TAKEN` · `IR_FOLDER_LIMIT_EXCEEDED` · `IR_FOLDER_CONFLICT`(폴더 편집은 웹 전용이라 클라이언트는 받지 않는다) |
 | 409 (settings PUT, 잠금 본문) | `SettingsConflict(server copy)` | — |
 | 413 | `PayloadTooLarge(body)` | `IR_PAYLOAD_TOO_LARGE` |
 | 429 | `RateLimited(body)` | `RATE_LIMITED` |
@@ -257,4 +263,5 @@
 - **리플레이의 `extra` 는 저장되지 않는다.** `replay` 테이블에 해당 컬럼이 없어 업로드 본문의 `extra` 가 버려지고 다운로드는 항상 `{}` 다. 나머지 필드는 전부 왕복한다(`tests/service/replay.test.ts` 가 업로드 본문 전체와 다운로드를 deep-equal 로 비교). 채우려면 컬럼 추가 + 마이그레이션이 필요하다.
 - **`gauge` 를 생략한 업로드는 `AssistEasy` 로 되돌아온다.** 컬럼이 `NOT NULL DEFAULT 0` 이라 "미지정"과 0번 게이지를 구분하지 못한다. 클라(`ir_replay::to_ir_replay`)는 항상 게이지를 보내므로 정상 경로에는 영향이 없다.
 - 경로·쿼리 percent-encoding 은 `url` 크레이트 신규 의존이 필요해 보류 중이다(현재는 URL-safe 식별자 전제).
-- 차트 메타 업서트(`POST /charts`), 난이도표(`/tables`), 코스 메타 업서트(`POST /courses/meta`), 스코어 단건 조회(`GET /scores/{id}`) 는 서버에 있으나 `rbms-ir` 클라이언트에는 아직 없다.
+- 차트 메타 업서트(`POST /charts`), 난이도표(`/tables`), 코스 메타 업서트(`POST /courses/meta`), 스코어 단건 조회(`GET /scores/{id}`) 는 서버에 있으나 `rbms-ir` 클라이언트에는 아직 없다. 차트 제목·아티스트·레벨은 `POST /charts` 대신 점수 제출의 `chart.title/artist/level` 로 올린다.
+- **계약 교차 테스트 공백(새 세션의 할 일)**: Rust 쪽 테스트(`contract_tests/fixtures.rs`)와 웹 쪽 테스트(`ir-contract.test.ts`)가 각자 손으로 쓴 예시 JSON 을 쓰고 둘이 공유하는 파일이 없다. 실제 클라이언트가 만든 요청 본문(일반 판, SCRATCH AUTO 판, 코스, 리플레이 업로드)을 Rust 테스트가 JSON 파일로 뽑고 웹 테스트가 서버 zod 스키마로 통과시키는 교차 테스트가 필요하다. v0.1.2 의 점수 제출 400(2^53 를 넘는 시드)이 이 공백에서 나왔다. 관련 파일: `crates/rbms-ir/src/contract_tests.rs`·`fixtures.rs`, `web/tests/dto/ir-contract.test.ts`.

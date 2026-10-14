@@ -1,5 +1,7 @@
 # R-BMS 웹 디자인 결정
 
+> 최종 갱신 2026-10-14 · 대응 커밋 7095ef7
+
 > 이 문서는 현재 `web/` 구현의 디자인 정본입니다. 외부 프로젝트의 디자인 명세를 복구하지 않으며, 토큰과 화면 규칙은 `web/src/app/globals.css`, 레이아웃과 provider는 `web/src/app/{layout,providers}.tsx`, 조합 규칙은 `docs/web/components.md`를 우선 근거로 합니다.
 
 ## 1. 범위와 Surface
@@ -84,6 +86,12 @@ Toaster와 모든 theme-aware 컴포넌트는 같은 `ThemeProvider` 하위에 �
 - 인증 카드는 셸 본문 가운데 `max-w-sm`, 문서(가이드)는 `max-w-3xl` 왼쪽 붙임입니다.
 
 ## 9. 상태 표현
+
+### 9-0. SCRATCH AUTO 표시 (웨이브 20, 2026-10-14)
+
+- SCRATCH AUTO 로 친 판의 행에는 `A-SCR` 배지(`features/score/scratch-auto-badge.tsx`, 텍스트 `A-SCR`, 툴팁 "SCRATCH AUTO 로 친 기록", 스크린리더용 설명 포함)를 붙입니다. 색을 더하지 않고 `text-muted-foreground` 외곽선 배지입니다.
+- 차트 순위·코스 순위·플레이어 종합 순위(`/leaderboards`)에는 "SCRATCH AUTO 포함" 스위치(`features/filter/scratch-auto-toggle.tsx`)가 있고 기본은 꺼짐입니다. 상태는 주소의 `include_scratch_auto=true` 로 남아 새로고침과 공유가 같은 화면을 냅니다. 차트·코스 순위 아래의 각주(`SCRATCH_AUTO_LIST_NOTE`)가 배지의 뜻을 알려 줍니다. 문구 상수는 `shared/constants/scratch-auto.ts` 입니다.
+- 발광 표의 내 기록(`features/table/table-chart-record.tsx`)과 리플레이 화면(`widgets/replay/replay-detail-panel.tsx`)도 SCRATCH AUTO 판이면 같은 배지를 붙입니다.
 
 - 데이터 로딩은 skeleton을 우선하며, 버튼은 진행 중 disabled 상태를 사용합니다.
 - 빈 결과, 전송 실패, 조회 실패는 서로 다른 메시지와 재시도 동작을 갖습니다.
