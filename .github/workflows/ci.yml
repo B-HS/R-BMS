@@ -1,11 +1,15 @@
 name: ci
 
-# dev = 작업 브랜치, prod = 배포 브랜치. PR/푸시마다 전 플랫폼 빌드·테스트.
+# dev = 작업 브랜치, prod = 배포 브랜치. PR/푸시마다 전 플랫폼 빌드·테스트. web/ 만 바뀐 변경은 web.yml 이 검증한다.
 on:
   push:
     branches: [dev, prod]
+    paths-ignore:
+      - "web/**"
   pull_request:
     branches: [dev, prod]
+    paths-ignore:
+      - "web/**"
 
 permissions:
   contents: read
