@@ -7,6 +7,7 @@ import {
     judgeBreakdownSchema,
     playOptionsSchema,
     playerIdSchema,
+    seedSchema,
 } from '@server/dto/common'
 
 export const API_VERSION = 1
@@ -48,7 +49,7 @@ export const scoreSubmissionSchema = z.object({
     played_at: z.number().int().min(0),
     client: z.string().default(''),
     replay_id: z.string().nullish().default(null),
-    seed: z.number().int().default(0),
+    seed: seedSchema.default(0),
     judge_algorithm: z.string().default(''),
     rule: z.string().default(''),
     skin: z.string().default(''),

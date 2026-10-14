@@ -59,6 +59,13 @@ export const playerIdSchema = z.object({
 
 export const extraSchema = z.record(z.string(), z.unknown()).default({})
 
+/**
+ * A chart layout seed as a client sends it. The seed is informational, so a value outside the range
+ * JavaScript and the database's signed BIGINT hold exactly (an older client sent the clock's
+ * nanoseconds, above 2^53) is stored as 0 instead of rejecting the whole submission.
+ */
+export const seedSchema = z.number().transform((value) => (Number.isSafeInteger(value) ? value : 0))
+
 export const includeScratchAutoSchema = z.stringbool({ truthy: ['true'], falsy: ['false'] }).default(false)
 
 export const judgeBreakdownSchema = z.object({

@@ -57,6 +57,11 @@ describe('replay 업로드/다운로드 왕복', () => {
         expect(JSON.stringify(downloaded?.events)).toBe(JSON.stringify(MICROSECOND_EVENTS))
     })
 
+    test('2^53 을 넘는 시드의 리플레이도 거절하지 않고 시드를 0 으로 받는다', () => {
+        const input = replayUploadSchema.parse({ format: 'rbms-replay-ron-v1', events: MICROSECOND_EVENTS, seed: 1_791_970_074_354_000_000 })
+        expect(input.seed).toBe(0)
+    })
+
     test('event_count 와 duration_us 를 이벤트에서 유도한다', async () => {
         const { service } = createService()
         const input = replayUploadSchema.parse({ format: 'rbms-replay-ron-v1', events: MICROSECOND_EVENTS })

@@ -174,6 +174,17 @@ describe('scoreSubmissionSchema (http.rs submission() 픽스처)', () => {
     test('clear 는 대소문자를 구분한다', () => {
         expect(scoreSubmissionSchema.safeParse({ ...submission, clear: 'hard' }).success).toBe(false)
     })
+
+    test('2^53 을 넘는 시드도 기록을 거절하지 않고 0 으로 받는다', () => {
+        const nanosecondSeed = 1_791_970_074_354_000_000
+        const parsed = scoreSubmissionSchema.parse({ ...submission, seed: nanosecondSeed })
+        expect(parsed.seed).toBe(0)
+        expect(parsed.ex_score).toBe(1488)
+    })
+
+    test('안전한 범위의 시드는 그대로 받는다', () => {
+        expect(scoreSubmissionSchema.parse({ ...submission, seed: 2 ** 53 - 1 }).seed).toBe(2 ** 53 - 1)
+    })
 })
 
 describe('scoreRecordSchema (랭킹 raw 배열 행)', () => {

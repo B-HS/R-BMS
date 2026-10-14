@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { chartIdSchema, extraSchema, gaugeTypeSchema, randomOptionSchema } from '@server/dto/common'
+import { chartIdSchema, extraSchema, gaugeTypeSchema, randomOptionSchema, seedSchema } from '@server/dto/common'
 
 const MAX_REPLAY_LIST_LIMIT = 200
 const DEFAULT_REPLAY_LIST_LIMIT = 50
@@ -18,7 +18,7 @@ export const replayUploadSchema = z.object({
     mode: z.string().default(''),
     random: randomOptionSchema.nullish().default(null),
     random_p2: randomOptionSchema.nullish().default(null),
-    seed: z.number().int().nullish().default(null),
+    seed: seedSchema.nullish().default(null),
     lntype: z.number().int().default(0),
     offset_ms: z.number().int().default(0),
     judge_rate: z.number().int().default(0),
