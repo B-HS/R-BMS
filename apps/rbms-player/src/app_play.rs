@@ -10,6 +10,19 @@ use crate::*;
 /// How much of the output device's name the debug overlay shows before it is cut.
 const DEVICE_NAME_OVERLAY_CHARS: usize = 20;
 
+/// The bits a fresh layout seed keeps. The seed travels to the score server in JSON, where a number
+/// above 2^53 is no longer an exact integer (and the server's check refused the whole run, 2026-10-14),
+/// so a new seed stays below it. A seed carried from a replay or a retry is used as it was recorded.
+const LAYOUT_SEED_MASK: u64 = (1 << 53) - 1;
+
+/// A new layout seed from the clock, kept inside [`LAYOUT_SEED_MASK`] and never zero.
+fn fresh_layout_seed(nanos_since_epoch: u128) -> u64 {
+    match nanos_since_epoch as u64 & LAYOUT_SEED_MASK {
+        0 => 1,
+        seed => seed,
+    }
+}
+
 /// The play options a replay is watched with in place of the player's: the SCRATCH AUTO, the gauge
 /// and the lane arrangement it was recorded under. The screens of the run read them from the
 /// settings, so the settings hold the replay's for as long as it plays, and the player's own are
@@ -389,7 +402,10 @@ impl AppShared {
             Some(recorded) => recorded,
             None => {
                 self.put_back_own_play_options();
-                (self.config.play.random, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1))
+                (
+                    self.config.play.random,
+                    fresh_layout_seed(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(1)),
+                )
             }
         };
         let seed = carried_seed.filter(|_| self.replay.is_none()).unwrap_or(seed);
@@ -1059,6 +1075,16 @@ pub(crate) fn loaded_chart_for_tests(bytes: &[u8], name: &str) -> LoadedChart {
 mod tests {
     use super::*;
     use crate::stage::StageHandler;
+
+    #[test]
+    fn a_fresh_layout_seed_fits_what_the_score_server_reads_exactly() {
+        let now = 1_791_970_074_354_123_456_u128;
+        let seed = fresh_layout_seed(now);
+        assert!(seed <= LAYOUT_SEED_MASK, "{seed} is above 2^53");
+        assert_ne!(seed, 0);
+        assert_ne!(fresh_layout_seed(now), fresh_layout_seed(now + 1), "two clocks one nanosecond apart gave the same seed");
+        assert_eq!(fresh_layout_seed(1 << 53), 1, "a clock whose kept bits are all zero still gives a seed");
+    }
 
     const BUFFER_US_512_AT_48K: i64 = 10_687;
 
