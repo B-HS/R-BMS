@@ -84,6 +84,7 @@ mod number_row;
 mod play_sink;
 mod pointer;
 mod practice;
+mod record_sync;
 mod scene_clock;
 mod scoredb_store;
 mod settings_ui;
@@ -772,6 +773,18 @@ struct AppShared {
     /// What the result screen reports about this run's submission. Kept here because the request
     /// outlives the screen that shows it.
     ir_status: IrStatus,
+    /// The play the submission in `submit_rx` was made for, so its answer is written down against
+    /// that play ([`app_ranking::LiveSubmit`]).
+    submit_log: Option<app_ranking::LiveSubmit>,
+    /// The records sync in flight ([`record_sync`]).
+    record_sync: Option<record_sync::RecordSyncRun>,
+    /// Plays to sync once the running sync ends: a run left mid-song while one was going.
+    record_sync_pending: Vec<i64>,
+    /// Where each play stands with the score server now set, keyed by `scorelog` id, for the record
+    /// screens. Read from the database when the server changes and kept up as answers come in.
+    record_sync_states: std::collections::HashMap<i64, rbms_store::scoredb::IrSyncRow>,
+    /// How fast a records sync sends: under the server's rate limits in the game, at once in a test.
+    record_sync_pacing: record_sync::SyncPacing,
     /// The wall clock the audio fallback and the timing probe read, restarted when a run begins. The
     /// skin does not read it: that is [`AppShared::scene_clock`].
     clock: Instant,
@@ -1024,6 +1037,11 @@ impl App {
                 profile_servers,
                 profile_submit_rx: None,
                 ir_status: IrStatus::Off,
+                submit_log: None,
+                record_sync: None,
+                record_sync_pending: Vec::new(),
+                record_sync_states: std::collections::HashMap::new(),
+                record_sync_pacing: record_sync::SyncPacing::GAME,
                 clock: Instant::now(),
                 booted: Instant::now(),
                 scene_clock: scene_clock::SceneClock::begun(Instant::now()),
@@ -1059,6 +1077,7 @@ impl App {
             },
         };
         user_folders::follow_account(&mut app.shared);
+        app.shared.reload_record_sync_states();
         app.shared.rebuild_select_items();
         app.shared.reload_skin();
         app

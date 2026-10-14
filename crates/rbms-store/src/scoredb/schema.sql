@@ -108,3 +108,29 @@ CREATE TABLE IF NOT EXISTS profile (
     name TEXT NOT NULL DEFAULT '',
     rank TEXT NOT NULL DEFAULT ''
 );
+
+CREATE TABLE IF NOT EXISTS play_submission (
+    log_id    INTEGER PRIMARY KEY,
+    body      TEXT NOT NULL,
+    played_as TEXT
+);
+
+CREATE TABLE IF NOT EXISTS ir_sync (
+    log_id          INTEGER NOT NULL,
+    server          TEXT NOT NULL,
+    login_id        TEXT NOT NULL DEFAULT '',
+    state           TEXT NOT NULL,
+    score_id        TEXT,
+    http_status     INTEGER,
+    error_code      TEXT,
+    error_field     TEXT,
+    error_reason    TEXT,
+    attempts        INTEGER NOT NULL DEFAULT 0,
+    last_attempt_at INTEGER NOT NULL DEFAULT 0,
+    replay_state    TEXT NOT NULL DEFAULT 'none',
+    replay_id       TEXT,
+    replay_error    TEXT,
+    PRIMARY KEY (log_id, server)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ir_sync_server_state ON ir_sync(server, state);

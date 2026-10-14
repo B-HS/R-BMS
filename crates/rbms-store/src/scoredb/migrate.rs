@@ -124,6 +124,7 @@ fn log_from_record(record: &ScoreRecord) -> PlayLog {
     let judge = JudgeCounts::all_late(record.counts);
     let key = chart_key(&record.md5, "");
     PlayLog {
+        id: 0,
         chart_key: key.clone(),
         mode: mode_id(&record.mode),
         ln_mode: record.ln_mode.clone(),

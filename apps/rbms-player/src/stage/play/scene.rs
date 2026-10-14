@@ -182,6 +182,12 @@ impl PlayScene {
         PlayScene { phase: PlayPhase::Ready, start_pressed_us: 0 }
     }
 
+    /// The scene of a run whose gauge has emptied and which is closing.
+    #[cfg(test)]
+    pub(crate) fn failed() -> PlayScene {
+        PlayScene { phase: PlayPhase::Failed, start_pressed_us: 0 }
+    }
+
     /// The state the scene is in.
     pub(crate) fn phase(&self) -> PlayPhase {
         self.phase

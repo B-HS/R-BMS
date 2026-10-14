@@ -293,6 +293,14 @@ mod tests {
     }
 
     #[test]
+    fn a_validation_error_names_its_field_on_the_result_line() {
+        let body = r#"{"success":false,"error":{"code":"VALIDATION_ERROR","message":"요청 형식이 올바르지 않습니다.","details":{"field":"judge","reason":"judge count exceeds total_notes"}}}"#;
+        let report = format_submit_outcome(&SubmitOutcome { submit: Err(IrError::Server(400, body.into())), replay: None });
+        assert_eq!(report.score, "IR ERROR: server error 400: VALIDATION_ERROR: judge (judge count e...");
+        assert!(report.failed);
+    }
+
+    #[test]
     fn replay_upload_success_and_failure_each_add_a_line() {
         let uploaded = SubmitOutcome { submit: Ok(accepted(Some(2))), replay: Some(Ok("rep-1".into())) };
         assert_eq!(reported(uploaded), vec!["IR: RANK #2".to_string(), "REPLAY UPLOADED".to_string()]);

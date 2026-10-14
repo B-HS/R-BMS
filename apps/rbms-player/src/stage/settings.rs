@@ -638,6 +638,7 @@ impl SettingsState {
             SettingId::Logout => shared.finish_logout(),
             SettingId::UploadSettings => shared.start_settings_upload(),
             SettingId::DownloadSettings => shared.start_settings_download(),
+            SettingId::SyncRecords => shared.sync_records_now(),
             SettingId::Rivals => {
                 self.rivals_open = true;
                 self.rivals_sel = 0;

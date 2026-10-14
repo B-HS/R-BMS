@@ -118,6 +118,7 @@ fn main() {
         index: 0,
         total: 3,
         has_replay: true,
+        ir_line: None,
     });
 
     let view = SelectView {

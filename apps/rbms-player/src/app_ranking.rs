@@ -6,14 +6,31 @@
 #![allow(clippy::wildcard_imports)]
 use std::sync::mpsc::TryRecvError;
 
-use rbms_ir::{ChartId, PlayerId, ReplayData, ScoreSubmission, SubmitJob, spawn_query, spawn_submit};
+use rbms_ir::{
+    ChartId, PlayerId, ReplayData, ScoreSubmission, SubmitJob, SubmitVerdict, UploadVerdict, spawn_query, spawn_submit, submit_verdict, upload_verdict,
+};
+use rbms_store::scoredb::ReplayState;
 
 use crate::ir_ext::PrimaryProfileDirection;
 use crate::ir_outcome::{IrReport, IrStatus, format_submit_outcome, short_error};
 use crate::ir_ranking::{RankingFetch, RankingState, accept_fetch, fetch_board};
 use crate::ir_replay::{replay_download_is_applicable, to_ir_replay, wire_carries_judge};
+use crate::record_sync::{RATE_LIMITED_DETAIL, ScoreOutcome, sync_row};
 use crate::stage::StageId;
 use crate::*;
+
+/// The play a submission on its way to the main server was made for, and where to write its answer
+/// down: the server and the account it was sent under, and what is to become of its replay when the
+/// server takes it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct LiveSubmit {
+    pub(crate) log_id: i64,
+    pub(crate) server: String,
+    pub(crate) login_id: String,
+    /// [`ReplayState::None`] for a run that kept no replay, [`ReplayState::Skipped`] for one the
+    /// upload cannot state the widths of, and [`ReplayState::Pending`] otherwise.
+    pub(crate) replay_plan: ReplayState,
+}
 
 /// Why a run was not sent to the main score server: nobody is signed in to it, and the server takes
 /// a score only from an account (a tokenless submission is refused 401). The run is kept locally.
@@ -104,11 +121,17 @@ impl AppShared {
     /// Nothing is sent while nobody is signed in: the server would refuse it, and every run would end
     /// on a failed submission. A player who has the server set and has not signed in -- which is
     /// every new install, the server being set by default -- sees the run skipped for that reason.
-    pub(crate) fn spawn_score_submit(&mut self, submission: ScoreSubmission, replay: Option<ReplayData>) {
+    ///
+    /// `played` names the stored play the run is and what its replay plan is, so the server's answer
+    /// is written down against it ([`AppShared::poll_submit`]); a run that was not stored has none.
+    pub(crate) fn spawn_score_submit(&mut self, submission: ScoreSubmission, replay: Option<ReplayData>, played: Option<(i64, ReplayState)>) {
+        self.submit_log = None;
         if !self.session.is_logged_in() {
             self.ir_status = IrStatus::Skipped(NOT_SIGNED_IN);
             return;
         }
+        self.submit_log =
+            played.and_then(|(log_id, replay_plan)| self.record_sync_target().map(|(server, login_id)| LiveSubmit { log_id, server, login_id, replay_plan }));
         self.ir_status = IrStatus::Sending;
         self.submit_rx = Some(spawn_submit(self.server.clone(), SubmitJob { submission, replay }));
     }
@@ -145,6 +168,7 @@ impl AppShared {
         }
         self.poll_submit();
         self.poll_profile_submits();
+        self.poll_record_sync();
     }
 
     fn poll_ranking(&mut self) {
@@ -212,9 +236,44 @@ impl AppShared {
             }
             Err(TryRecvError::Disconnected) => rbms_ir::SubmitOutcome { submit: Err(rbms_ir::IrError::Network("submit worker stopped".into())), replay: None },
         };
+        if let Some(live) = self.submit_log.take() {
+            self.write_live_outcome(&live, &outcome);
+        }
         if self.ir_status.accepts_report() {
             self.ir_status = IrStatus::Reported(format_submit_outcome(&outcome));
         }
+    }
+}
+
+impl AppShared {
+    /// Write down what the main server said of a run just played, as a records sync writes down what
+    /// it said of a play sent again, so the next sync sends the run only if the server does not hold
+    /// it. A failure that would stop a sync is a run to send again here.
+    pub(crate) fn write_live_outcome(&mut self, live: &LiveSubmit, outcome: &rbms_ir::SubmitOutcome) {
+        let score = match submit_verdict(&outcome.submit) {
+            SubmitVerdict::Accepted { score_id, already, replay_warranted } => {
+                let replay = match (&outcome.replay, live.replay_plan) {
+                    (Some(result), _) => match upload_verdict(result) {
+                        UploadVerdict::Uploaded { .. } => ReplayState::Uploaded,
+                        UploadVerdict::Rejected(_) => ReplayState::Rejected,
+                        UploadVerdict::RateLimited | UploadVerdict::Transient { .. } | UploadVerdict::StopSync { .. } => ReplayState::Failed,
+                    },
+                    (None, ReplayState::Pending) if !replay_warranted => ReplayState::Skipped,
+                    (None, plan) => plan,
+                };
+                ScoreOutcome::Accepted { score_id, already, replay }
+            }
+            SubmitVerdict::Rejected(rejection) => ScoreOutcome::Rejected(rejection),
+            SubmitVerdict::RateLimited => ScoreOutcome::Retry { detail: RATE_LIMITED_DETAIL.to_string() },
+            SubmitVerdict::Transient { detail } | SubmitVerdict::StopSync { detail } => ScoreOutcome::Retry { detail },
+        };
+        let mut row = sync_row(live.log_id, &live.server, &live.login_id, &score);
+        match &outcome.replay {
+            Some(Ok(id)) => row.replay_id = Some(id.clone()),
+            Some(Err(error)) => row.replay_error = Some(error.to_string()),
+            None => {}
+        }
+        self.write_sync_row(row);
     }
 }
 
@@ -250,12 +309,12 @@ mod tests {
         let mut shared = shared(Config::default());
         assert!(!shared.session.is_logged_in());
         let submission = crate::ir_ext::tests::submission();
-        shared.spawn_score_submit(submission.clone(), None);
+        shared.spawn_score_submit(submission.clone(), None, None);
         assert_eq!(shared.ir_status, IrStatus::Skipped(NOT_SIGNED_IN));
         assert!(shared.submit_rx.is_none(), "a guest run was handed to the submit worker");
 
         shared.session = crate::ir_session::AccountSession::restored(Some("token".into()), Some("dj".into()));
-        shared.spawn_score_submit(submission, None);
+        shared.spawn_score_submit(submission, None, None);
         assert_eq!(shared.ir_status, IrStatus::Sending, "a signed-in run is sent");
     }
 

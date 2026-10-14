@@ -92,6 +92,9 @@ pub struct ScoreSubmission {
     pub extra: HashMap<String, serde_json::Value>,
 }
 
+/// Key of the `extra` entry [`ScoreSubmission::mark_reconstructed`] writes.
+pub const RECONSTRUCTED_EXTRA_KEY: &str = "reconstructed";
+
 /// Lowest `played_at` the server's schema accepts (`z.number().int().min(0)`); a clock that
 /// reports a pre-epoch instant is clamped to it instead of drawing a 400.
 pub const MIN_PLAYED_AT_MS: i64 = 0;
@@ -101,6 +104,30 @@ pub const MIN_PLAYED_AT_MS: i64 = 0;
 pub const FALLBACK_GAUGE_VALUE: f32 = 0.0;
 
 impl ScoreSubmission {
+    /// The submission as the JSON body it is sent as, kept so the same run can be sent again later
+    /// exactly as it was played. `None` only when serialisation fails, which a submission built by
+    /// this crate's types never does.
+    pub fn to_json(&self) -> Option<String> {
+        serde_json::to_string(self).ok()
+    }
+
+    /// A submission read back from [`ScoreSubmission::to_json`], or `None` when the text is not one.
+    pub fn from_json(text: &str) -> Option<ScoreSubmission> {
+        serde_json::from_str(text).ok()
+    }
+
+    /// Say in `extra` that this submission was rebuilt from a local record of the run rather than
+    /// built when the run ended, so the server can tell a body that lacks what the record never kept
+    /// (fast/slow, the options, the build) from one that left them out.
+    pub fn mark_reconstructed(&mut self) {
+        self.extra.insert(RECONSTRUCTED_EXTRA_KEY.to_string(), serde_json::Value::Bool(true));
+    }
+
+    /// Whether [`ScoreSubmission::mark_reconstructed`] marked this submission.
+    pub fn is_reconstructed(&self) -> bool {
+        self.extra.get(RECONSTRUCTED_EXTRA_KEY).and_then(serde_json::Value::as_bool).unwrap_or(false)
+    }
+
     /// Bring the two fields whose server schema is narrower than the Rust type into range, so a
     /// value that would come back as a 400 `VALIDATION_ERROR` never leaves the client.
     pub fn clamp_to_server_bounds(&mut self) {
@@ -239,7 +266,17 @@ pub struct SubmitResponse {
     pub extra: HashMap<String, serde_json::Value>,
 }
 
+/// The `message` the server answers a submission with when it already holds the same run (same
+/// player, chart and moment): it keeps the score it has and answers with that score's id. A client
+/// counts such an answer as "already on the server" rather than as a new score.
+pub const DUPLICATE_SUBMISSION_MESSAGE: &str = "duplicate submission ignored";
+
 impl SubmitResponse {
+    /// Whether the server answered that it already held this run ([`DUPLICATE_SUBMISSION_MESSAGE`]).
+    pub fn is_duplicate(&self) -> bool {
+        self.message.as_deref().is_some_and(|message| message.trim() == DUPLICATE_SUBMISSION_MESSAGE)
+    }
+
     /// The flags this build recognises, in the order the server sent them.
     pub fn known_flags(&self) -> Vec<ScoreFlag> {
         self.flags.iter().filter_map(|flag| ScoreFlag::from_wire(flag)).collect()

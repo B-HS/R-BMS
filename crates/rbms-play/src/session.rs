@@ -541,6 +541,29 @@ pub struct PlaySummary {
     pub gauge_shifted: bool,
 }
 
+impl PlaySummary {
+    /// The summary of a run left before its end: every note it never reached counts as a late POOR
+    /// the player let pass, and the run is FAILED.
+    ///
+    /// Only what was left is added, so a long note judged at its head and still to be judged at its
+    /// end counts its end alone, and the POOR tier is the one a note let pass lands in. The score,
+    /// the combo, the gauge and the timings stay what the run reached. The reference adds what was
+    /// left to the bad-poor count alone (`BMSPlayer.java:909`); here the notes are counted too, so
+    /// the judgements that took a note add up to the chart's notes as a finished run's do.
+    pub fn left_unfinished(&self) -> PlaySummary {
+        let unreached = self.total_notes.saturating_sub(self.total_judged);
+        let poor = Judge::Poor as usize;
+        let mut left = *self;
+        left.counts[poor] += unreached;
+        left.late[poor] += unreached;
+        left.min_bp += unreached;
+        left.total_judged = self.total_judged.max(self.total_notes);
+        left.clear_lamp = ClearType::Failed;
+        left.failed = true;
+        left
+    }
+}
+
 /// One run of a chart: the judge state, the replay being reproduced or recorded, and the
 /// analysis clock. Sound is emitted through a [`SoundSink`], so a whole run can be reproduced with
 /// no audio device present.
@@ -1129,6 +1152,54 @@ mod tests {
             judge: Default::default(),
             events,
         }
+    }
+
+    /// A run that judged 40 of its 100 notes, every kind of judgement among them, and some 空POOR.
+    fn summary_of_a_run_left_at_forty_of_a_hundred() -> PlaySummary {
+        PlaySummary {
+            counts: [20, 10, 4, 3, 3, 5],
+            ex_score: 50,
+            max_ex_score: 200,
+            max_combo: 17,
+            total_notes: 100,
+            total_judged: 40,
+            fast: 6,
+            slow: 7,
+            early: [12, 4, 2, 1, 0, 3],
+            late: [8, 6, 2, 2, 3, 2],
+            avg_judge_us: -1_200,
+            empty_poor: 5,
+            gauge_value: 64.0,
+            clear_lamp: ClearType::Normal,
+            min_bp: 11,
+            failed: false,
+            finished_gauge: Some(GaugeKind::Normal),
+            gauge_shifted: false,
+        }
+    }
+
+    #[test]
+    fn a_run_left_unfinished_counts_every_unreached_note_as_a_late_poor_and_fails() {
+        let run = summary_of_a_run_left_at_forty_of_a_hundred();
+        let left = run.left_unfinished();
+        let poor = Judge::Poor as usize;
+        assert_eq!(left.counts[poor], run.counts[poor] + 60);
+        assert_eq!(left.late[poor], run.late[poor] + 60);
+        assert_eq!(left.early, run.early, "a note let pass is late");
+        assert_eq!(left.counts[..=poor].iter().sum::<u32>(), left.total_notes, "the judgements that took a note add up to the chart");
+        assert_eq!(left.counts[Judge::Miss as usize], run.counts[Judge::Miss as usize], "空POOR takes no note and gains none");
+        assert_eq!((left.min_bp, left.total_judged), (run.min_bp + 60, 100));
+        assert_eq!((left.clear_lamp, left.failed), (ClearType::Failed, true));
+        assert_eq!(left.left_unfinished(), left, "a run with nothing left is left as it is");
+    }
+
+    #[test]
+    fn a_run_left_unfinished_keeps_its_score_combo_and_gauge() {
+        let run = summary_of_a_run_left_at_forty_of_a_hundred();
+        let left = run.left_unfinished();
+        assert_eq!((left.ex_score, left.max_ex_score, left.max_combo, left.total_notes), (run.ex_score, run.max_ex_score, run.max_combo, run.total_notes));
+        assert_eq!((left.gauge_value, left.finished_gauge, left.gauge_shifted), (run.gauge_value, run.finished_gauge, run.gauge_shifted));
+        assert_eq!((left.fast, left.slow, left.avg_judge_us, left.empty_poor), (run.fast, run.slow, run.avg_judge_us, run.empty_poor));
     }
 
     /// A long note the chart states no flavour for, so LN MODE decides how many judged objects it is.

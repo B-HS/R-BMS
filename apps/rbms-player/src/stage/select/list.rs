@@ -765,6 +765,7 @@ pub(super) mod tests {
             rule_version: rbms_store::SCORE_RULE_VERSION,
             ln_mode: SCORE_LN_MODE_FROM_CHART.to_string(),
             assisted: false,
+            log_id: None,
         }
     }
 

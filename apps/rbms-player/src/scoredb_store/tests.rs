@@ -146,12 +146,12 @@ fn the_book_is_rebuilt_from_the_database_with_the_queries_the_screens_make() {
     let mut db = fresh();
     let summary = summary();
     let log = play_log(&finished(&summary, "abcd"));
-    assert!(record_finished_play(&mut db, &log, true), "the play records");
+    assert!(record_finished_play(&mut db, &log, true).is_some(), "the play records");
 
     let mut weaker = log.clone();
     weaker.judge = JudgeCounts::from_early_late([1, 0, 0, 0, 0, 0], [0; JUDGE_TIER_COUNT]);
     weaker.date = log.date + 60;
-    assert!(record_finished_play(&mut db, &weaker, true));
+    assert!(record_finished_play(&mut db, &weaker, true).is_some());
 
     let book = book_from_db(&db);
     assert_eq!(book.records().len(), 2);

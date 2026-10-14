@@ -265,6 +265,7 @@ impl SelectState {
                 index: ri,
                 total: recs.len(),
                 has_replay: r.replay_file.is_some(),
+                ir_line: shared.record_ir_line(r.log_id).map(|(line, kind)| (line, crate::ir_outcome::ir_line_color(kind))),
             })
         });
 

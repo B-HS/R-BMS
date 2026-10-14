@@ -16,9 +16,9 @@
 //! A database that will not open is reported and then ignored: the player runs without recording,
 //! which is what it did before there was a database, rather than refusing to start.
 //!
-//! The module is complete but not yet called: the call sites named in
-//! `docs/plan/phase-g-wiring/G2-scoredb.md` belong to the integration branch, and the allow below
-//! goes away with the first of them.
+//! The application opens the database at startup and reads the book from it (`App::new`), and the
+//! result screen writes every finished run through [`record_finished_play`]
+//! (`app_result::record_run`).
 
 use std::path::{Path, PathBuf};
 
@@ -141,6 +141,7 @@ pub(crate) struct FinishedPlay<'a> {
 /// One finished run as the row the database stores.
 pub(crate) fn play_log(play: &FinishedPlay<'_>) -> PlayLog {
     PlayLog {
+        id: 0,
         chart_key: chart_key(play.md5, play.sha256),
         mode: mode_id(play.mode.name),
         ln_mode: play.ln_mode.to_string(),
@@ -169,17 +170,18 @@ pub(crate) fn play_log(play: &FinishedPlay<'_>) -> PlayLog {
 }
 
 /// Record a finished run, reporting rather than propagating a write failure: a score that cannot be
-/// stored must not cost the player the result screen.
+/// stored must not cost the player the result screen. Returns the `scorelog` id the run was stored
+/// under, or `None` when it was not stored.
 ///
 /// `updates_best` is decision 12's score flag — `crate::updates_score` — and is passed rather than
 /// re-derived. The book reads the same answer back off the row ([`rbms_store::sets_best`] of its
 /// assist level and rule version, in [`record_of`]), so the two cannot disagree about one run.
-pub(crate) fn record_finished_play(db: &mut ScoreDb, log: &PlayLog, updates_best: bool) -> bool {
+pub(crate) fn record_finished_play(db: &mut ScoreDb, log: &PlayLog, updates_best: bool) -> Option<i64> {
     match db.record_play(log, updates_best) {
-        Ok(_) => true,
+        Ok(id) => Some(id),
         Err(e) => {
             notify(Level::Error, format!("score not recorded: {e}"));
-            false
+            None
         }
     }
 }
@@ -213,6 +215,7 @@ pub(crate) fn record_of(log: &PlayLog) -> ScoreRecord {
         rule_version: log.rule_version,
         ln_mode: log.ln_mode.clone(),
         assisted: !rbms_store::sets_best(log.assist, log.rule_version),
+        log_id: (log.id > 0).then_some(log.id),
     }
 }
 

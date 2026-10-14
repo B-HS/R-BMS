@@ -40,6 +40,7 @@ fn record(clear: u8, counts: [u32; 6]) -> ScoreRecord {
         rule_version: 0,
         ln_mode: SCORE_LN_MODE_FROM_CHART.to_owned(),
         assisted: false,
+        log_id: None,
     }
 }
 

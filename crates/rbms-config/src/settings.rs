@@ -243,6 +243,7 @@ pub enum SettingId {
     SyncSettings,
     UploadSettings,
     DownloadSettings,
+    SyncRecords,
     AutoUploadReplay,
     Rivals,
     IrProfiles,
@@ -261,7 +262,7 @@ pub enum SettingId {
 }
 
 /// Rows the settings screen has.
-pub const SETTING_COUNT: usize = 89;
+pub const SETTING_COUNT: usize = 90;
 
 impl SettingId {
     /// Every row, in declaration order.
@@ -340,6 +341,7 @@ impl SettingId {
         SettingId::SyncSettings,
         SettingId::UploadSettings,
         SettingId::DownloadSettings,
+        SettingId::SyncRecords,
         SettingId::AutoUploadReplay,
         SettingId::Rivals,
         SettingId::IrProfiles,
@@ -799,6 +801,7 @@ pub const SETTINGS: &[SettingDescriptor] = &[
     row(SettingId::SyncSettings, SettingTab::Network, "SYNC SETTINGS", SettingKind::Toggle, "Mirror settings and keys to the account"),
     row(SettingId::UploadSettings, SettingTab::Network, "UPLOAD SETTINGS NOW", SettingKind::Action, "Send the local settings to the account"),
     row(SettingId::DownloadSettings, SettingTab::Network, "DOWNLOAD SETTINGS NOW", SettingKind::Action, "Take the account's settings"),
+    row(SettingId::SyncRecords, SettingTab::Network, "SYNC RECORDS NOW", SettingKind::Action, "Send the runs the score server lacks"),
     row(SettingId::AutoUploadReplay, SettingTab::Network, "AUTO UPLOAD REPLAY", SettingKind::Toggle, "Send the replay after a ranked score"),
     row(SettingId::Rivals, SettingTab::Network, "RIVALS", SettingKind::Action, "Players shown next to you on the ranking"),
     row(SettingId::IrProfiles, SettingTab::Network, "IR PROFILES", SettingKind::Action, "Extra score servers this play is also sent to"),
@@ -1029,6 +1032,7 @@ pub fn display_value(config: &Config, id: SettingId) -> String {
         | SettingId::Logout
         | SettingId::UploadSettings
         | SettingId::DownloadSettings
+        | SettingId::SyncRecords
         | SettingId::SkinReload
         | SettingId::SkinReset => ACTION_VALUE.to_string(),
         SettingId::SkinPack => optional_text(config.skin.pack.as_deref()),
@@ -1358,6 +1362,7 @@ pub fn adjust(config: &mut Config, id: SettingId, delta: i32) -> AdjustOutcome {
         | SettingId::Logout
         | SettingId::UploadSettings
         | SettingId::DownloadSettings
+        | SettingId::SyncRecords
         | SettingId::Rivals
         | SettingId::IrProfiles
         | SettingId::SoundFolder
@@ -1915,6 +1920,7 @@ mod tests {
                 SettingId::Logout,
                 SettingId::UploadSettings,
                 SettingId::DownloadSettings,
+                SettingId::SyncRecords,
                 SettingId::Rivals,
                 SettingId::IrProfiles,
                 SettingId::AudioDevice,
@@ -2219,6 +2225,7 @@ mod tests {
                 SettingId::SyncSettings,
                 SettingId::UploadSettings,
                 SettingId::DownloadSettings,
+                SettingId::SyncRecords,
                 SettingId::AutoUploadReplay,
                 SettingId::Rivals,
                 SettingId::IrProfiles,

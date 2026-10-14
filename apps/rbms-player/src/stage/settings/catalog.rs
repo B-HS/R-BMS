@@ -54,13 +54,21 @@ const DISPLAY_SECTIONS: &[Section] = &[
 const INPUT_SECTIONS: &[Section] = &[Section { heading: "CONTROLS", rows: &[SettingId::ScratchSide, SettingId::KeyConfig] }];
 
 const NETWORK_SECTIONS: &[Section] = &[
-    Section { heading: "SERVER", rows: &[SettingId::ServerUrl, SettingId::PlayerId] },
     Section {
-        heading: "ACCOUNT",
-        rows: &[SettingId::Account, SettingId::Email, SettingId::Password, SettingId::Login, SettingId::Register, SettingId::Logout],
+        heading: "SERVER AND ACCOUNT",
+        rows: &[
+            SettingId::ServerUrl,
+            SettingId::PlayerId,
+            SettingId::Account,
+            SettingId::Email,
+            SettingId::Password,
+            SettingId::Login,
+            SettingId::Register,
+            SettingId::Logout,
+        ],
     },
     Section { heading: "SETTINGS SYNC", rows: &[SettingId::SyncSettings, SettingId::UploadSettings, SettingId::DownloadSettings] },
-    Section { heading: "SCORES", rows: &[SettingId::AutoUploadReplay, SettingId::Rivals, SettingId::IrProfiles] },
+    Section { heading: "SCORES", rows: &[SettingId::SyncRecords, SettingId::AutoUploadReplay, SettingId::Rivals, SettingId::IrProfiles] },
 ];
 
 const AUDIO_SECTIONS: &[Section] = &[
@@ -212,6 +220,9 @@ pub(crate) fn description(id: SettingId) -> &'static str {
         SettingId::SyncSettings => "Mirrors the settings and the key configuration of this machine to the account.",
         SettingId::UploadSettings => "Sends the settings and the key configuration of this machine to the account now.",
         SettingId::DownloadSettings => "Takes the settings and the key configuration the account holds and applies them to this machine now.",
+        SettingId::SyncRecords => {
+            "Sends every run kept on this machine that the score server has not taken yet, with its replay. It also runs at start and on sign-in while you are signed in."
+        }
         SettingId::AutoUploadReplay => "Sends the replay of a run to the score server after a score that was ranked.",
         SettingId::Rivals => "The players shown beside you on a ranking. ENTER opens the list to add and remove them.",
         SettingId::IrProfiles => "More score servers every run is also sent to. ENTER opens the list to add, switch off and remove them.",

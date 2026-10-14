@@ -6,6 +6,7 @@ pub mod http;
 #[cfg(feature = "mapping")]
 pub mod mapping;
 pub mod null;
+pub mod sync;
 pub mod worker;
 
 #[cfg(test)]
@@ -15,14 +16,16 @@ mod mock_http;
 
 pub use dto::{
     AuthRequest, AuthResponse, ChartId, ChartRankingQuery, ChartReplayQuery, ClearLamp, CourseSubmission, DEFAULT_PAGE, DEFAULT_PAGE_LIMIT,
-    FALLBACK_GAUGE_VALUE, GaugeType, JudgeBreakdown, MAX_PLAYER_SCORES_LIMIT, MAX_RANKING_LIMIT, MAX_REPLAY_LIST_LIMIT, MIN_PLAYED_AT_MS, PlayOptions,
-    PlayerId, PlayerProfile, PlayerScoresQuery, RandomOption, ReplayData, ReplayEvent, ReplayMeta, ReplayUploadResponse, RivalPutRequest, ScoreFlag,
-    ScoreRecord, ScoreSubmission, ServerCapabilities, ServerInfo, SettingsBlob, SettingsConflict, SettingsPutRequest, SettingsPutResponse, SettingsPutResult,
-    SubmitResponse, SubmittedChart, UserFolder, UserFolderIndex, UserFolderItem, UserFolderSummary, VersionInfo, is_path_safe_folder_id,
+    DUPLICATE_SUBMISSION_MESSAGE, FALLBACK_GAUGE_VALUE, GaugeType, JudgeBreakdown, MAX_PLAYER_SCORES_LIMIT, MAX_RANKING_LIMIT, MAX_REPLAY_LIST_LIMIT,
+    MIN_PLAYED_AT_MS, PlayOptions, PlayerId, PlayerProfile, PlayerScoresQuery, RECONSTRUCTED_EXTRA_KEY, RandomOption, ReplayData, ReplayEvent, ReplayMeta,
+    ReplayUploadResponse, RivalPutRequest, ScoreFlag, ScoreRecord, ScoreSubmission, ServerCapabilities, ServerInfo, SettingsBlob, SettingsConflict,
+    SettingsPutRequest, SettingsPutResponse, SettingsPutResult, SubmitResponse, SubmittedChart, UserFolder, UserFolderIndex, UserFolderItem, UserFolderSummary,
+    VersionInfo, is_path_safe_folder_id,
 };
-pub use error::{ErrorBody, ErrorEnvelope, IrError};
+pub use error::{ErrorBody, ErrorEnvelope, IrError, ServerReason};
 pub use http::HttpScoreServer;
 pub use null::NullScoreServer;
+pub use sync::{Rejection, SubmitVerdict, UploadVerdict, submit_verdict, upload_verdict};
 pub use worker::{SubmitJob, SubmitOutcome, is_replay_upload_warranted, spawn_query, spawn_submit};
 
 /// Current rbms IR-superset API version. Sent in every submission so the backend can

@@ -447,6 +447,7 @@ mod tests {
         (SettingId::SyncSettings, "SYNC SETTINGS", "OFF"),
         (SettingId::UploadSettings, "UPLOAD SETTINGS NOW", ">"),
         (SettingId::DownloadSettings, "DOWNLOAD SETTINGS NOW", ">"),
+        (SettingId::SyncRecords, "SYNC RECORDS NOW", ">"),
         (SettingId::AutoUploadReplay, "AUTO UPLOAD REPLAY", "ON"),
         (SettingId::Rivals, "RIVALS", "0"),
         (SettingId::IrProfiles, "IR PROFILES", "0"),

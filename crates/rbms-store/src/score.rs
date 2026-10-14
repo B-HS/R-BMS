@@ -97,6 +97,11 @@ pub struct ScoreRecord {
     /// before the field existed default to `false`.
     #[serde(default)]
     pub assisted: bool,
+    /// The `scorelog` row this record was read from or written as, which is how a screen showing the
+    /// record finds where the play stands with a score server. `None` for a record that never had a
+    /// row (one read from `scores.ron`), and never written to that file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub log_id: Option<i64>,
 }
 
 fn chart_ln_mode_key() -> String {

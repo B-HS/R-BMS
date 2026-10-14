@@ -17,6 +17,13 @@ pub(super) const LOG_COLUMNS: &str = "id, chart_key, mode, ln_mode, md5, sha256,
      notes, combo, minbp, avgjudge, gauge, gauge_value, assist, option, seed, random, playtime, date, state, rule_version, ir_submitted, \
      replay_file, title";
 
+/// [`LOG_COLUMNS`] read off the table aliased `alias`, each under its own name, so a statement that
+/// joins `scorelog` to another table with a column of the same name (`state`) still reads the row
+/// with [`log_from_row`]. Built from the one list, so the two never drift apart.
+pub(super) fn log_columns_of(alias: &str) -> String {
+    LOG_COLUMNS.split(',').map(str::trim).map(|column| format!("{alias}.{column} AS {column}")).collect::<Vec<_>>().join(", ")
+}
+
 /// Columns of one `score` row.
 pub(super) const BEST_COLUMNS: &str = "chart_key, mode, ln_mode, md5, sha256, clear, epg, lpg, egr, lgr, egd, lgd, ebd, lbd, epr, lpr, ems, lms, \
      notes, combo, minbp, avgjudge, playcount, clearcount, option, seed, random, date, state, gauge, assist, rule_version, replay_file";
@@ -76,6 +83,7 @@ pub(super) fn insert_log(conn: &Connection, log: &PlayLog) -> Result<i64, ScoreD
 /// One `scorelog` row as the play it recorded.
 pub(super) fn log_from_row(row: &Row<'_>) -> rusqlite::Result<PlayLog> {
     Ok(PlayLog {
+        id: row.get("id")?,
         chart_key: row.get("chart_key")?,
         mode: row.get("mode")?,
         ln_mode: row.get("ln_mode")?,

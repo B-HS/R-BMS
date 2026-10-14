@@ -73,7 +73,11 @@ impl AppShared {
     /// Swap in a server built from the current URL and the live session token, stopping the probe
     /// thread of the previous one. The song list shows the folders of whoever that server now knows
     /// the player as ([`crate::user_folders::follow_account`]).
+    ///
+    /// A records sync in flight is stopped, since what it sends would go to the server and account
+    /// it started with, and the states the record screens read are read again for the server now set.
     pub(crate) fn rebuild_server(&mut self) {
+        self.cancel_record_sync();
         self.server_probe_stop.store(true, Ordering::Relaxed);
         let built = build_server(&self.config, self.session.token().map(str::to_string));
         self.server = built.server;
@@ -82,6 +86,7 @@ impl AppShared {
         self.multi_ir = MultiIr::from_network(&self.config.network);
         self.profile_servers = self.multi_ir.build_servers_reusing(Some(self.server.clone()));
         self.reset_ranking();
+        self.reload_record_sync_states();
         crate::user_folders::follow_account(self);
     }
 
@@ -101,6 +106,7 @@ impl AppShared {
             SettingId::AutoUploadReplay => on_off(self.config.network.auto_upload_replay),
             SettingId::Rivals => self.config.network.rivals.len().to_string(),
             SettingId::IrProfiles => self.config.network.ir_profiles.len().to_string(),
+            SettingId::SyncRecords => self.sync_records_value().unwrap_or_else(|| ACTION_VALUE.to_string()),
             _ => ACTION_VALUE.to_string(),
         };
         Some((label, value))
@@ -159,7 +165,11 @@ impl AppShared {
     /// account id is rejected 401 by the server, so leaving the id behind would silently drop every
     /// score played after a logout. The account's own folders leave the song list, and the copy of
     /// them is deleted: nothing of an account that signed out is kept on the machine.
+    ///
+    /// A records sync in flight stops with the session: nothing more is sent for an account that
+    /// signed out.
     pub(crate) fn finish_logout(&mut self) {
+        self.cancel_record_sync();
         let folders_of = crate::user_folders::FolderAccount::of(self);
         let had_session = self.session.logout();
         self.password.clear();
@@ -303,6 +313,9 @@ impl AppShared {
                 }
                 self.net_status = self.session.status_text();
                 self.save_settings();
+                if succeeded {
+                    self.start_record_sync(crate::record_sync::SyncScope::All);
+                }
             }
             Err(TryRecvError::Empty) => self.auth_rx = Some((action, rx)),
             Err(TryRecvError::Disconnected) => {
@@ -318,12 +331,16 @@ impl AppShared {
         };
         match rx.try_recv() {
             Ok(result) => {
+                let confirmed = result.is_ok();
                 let dropped = self.session.finish_whoami(result);
                 if dropped {
                     self.rebuild_server();
                     self.save_settings();
                 }
                 self.net_status = self.session.status_text();
+                if confirmed {
+                    self.start_record_sync(crate::record_sync::SyncScope::All);
+                }
             }
             Err(TryRecvError::Empty) => self.whoami_rx = Some(rx),
             Err(TryRecvError::Disconnected) => {}

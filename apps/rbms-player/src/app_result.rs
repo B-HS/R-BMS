@@ -9,8 +9,10 @@
 use rbms_render::result::{ResultExtras, TargetView};
 
 use rbms_model::TimeLine;
+use rbms_store::scoredb::ReplayState;
 
 use crate::ir_ranking::RankingState;
+use crate::ir_replay::wire_carries_judge;
 use crate::ir_session::submission_player_id;
 use crate::keyconfig::mode_config_key;
 use crate::skin_host::result::snapshot::PreviousScore;
@@ -57,7 +59,6 @@ struct ChartRun {
     md5: String,
     sha256: String,
     title: String,
-    artist: String,
     init_bpm: f64,
     seed: u64,
 }
@@ -81,41 +82,30 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
     let play = &state.session;
     let summary = play.summary();
     let standing_combo = play.standing_combo();
-    let chart = ChartRun {
-        md5: play.model().md5.clone(),
-        sha256: play.model().sha256.clone(),
-        title: play.model().meta.title.clone(),
-        artist: play.model().meta.artist.clone(),
-        init_bpm: play.model().init_bpm,
-        seed: play.seed(),
-    };
-    let judge_setup = play.judge_setup();
-    let custom_judge = is_custom_judge(&judge_setup);
-    let scratch_auto = scratch_auto_played(play);
-    let assist = assist_level(scratch_auto, custom_judge);
+    let md5 = play.model().md5.clone();
+    let title = play.model().meta.title.clone();
+    let artist = play.model().meta.artist.clone();
     let practice = state.practice.is_some();
-    let last_time_us = play.last_time_us();
-    let save_replay =
-        !practice && shared.config.play.auto_replay && shared.replay.is_none() && !shared.run_plays_itself() && !play.recorded_events().is_empty();
-    let recorded_events = save_replay.then(|| play.recorded_events().to_vec());
     let instrumentation = play.instrumentation();
     let record = play.record();
     let tempo = tempo_points(&play.model().timelines);
 
-    let lamp = assisted_lamp(summary.clear_lamp, assist);
+    let scoring_history: Vec<_> = shared.scores.for_md5(&md5).into_iter().filter(|record| !record.assisted).collect();
+    let prev_ex = scoring_history.first().map(|r| r.ex_score);
+    let prev_best_ex = scoring_history.iter().map(|r| r.ex_score).max();
+    let previous = PreviousScore::of_book(&shared.scores, &md5, &state.ln_mode_key);
+    let standing_best_ex = shared.scores.best_ex_for_md5_in_ln_mode(&md5, &state.ln_mode_key);
+
+    let recorded = record_run(state, shared, &summary);
+    let lamp = recorded.lamp;
     let (label, color) = clear_label_color(lamp);
     println!(
         "RESULT [{label}]  EX {}/{}  combo {}/{}  gauge {:.1}%  PG/GR/GD/BD/POOR/MISS {:?}  empty-poor {}",
         summary.ex_score, summary.max_ex_score, summary.max_combo, summary.total_notes, summary.gauge_value, summary.counts, summary.empty_poor,
     );
-    let scoring_history: Vec<_> = shared.scores.for_md5(&chart.md5).into_iter().filter(|record| !record.assisted).collect();
-    let prev_ex = scoring_history.first().map(|r| r.ex_score);
-    let prev_best_ex = scoring_history.iter().map(|r| r.ex_score).max();
-    let previous = PreviousScore::of_book(&shared.scores, &chart.md5, &state.ln_mode_key);
-    let standing_best_ex = shared.scores.best_ex_for_md5_in_ln_mode(&chart.md5, &state.ln_mode_key);
     let view = ResultView {
-        title: chart.title.chars().take(RESULT_TITLE_CHARS).collect(),
-        artist: chart.artist.clone(),
+        title: title.chars().take(RESULT_TITLE_CHARS).collect(),
+        artist,
         mode_label: mode_config_key(shared.mode),
         counts: summary.counts,
         ex_score: summary.ex_score,
@@ -136,8 +126,96 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
         judge_dist: *instrumentation.judge_dist(),
     };
 
+    let block_reason = recorded.block_reason;
+    match block_reason {
+        Some(reason) => {
+            println!("score not submitted: {reason}");
+            shared.submit_rx = None;
+            shared.submit_log = None;
+            shared.ir_status = IrStatus::Skipped(reason);
+        }
+        None if !shared.has_primary_ir_server() => {
+            shared.submit_rx = None;
+            shared.submit_log = None;
+            shared.ir_status = IrStatus::Off;
+        }
+        None => {
+            let chart = recorded.sub.chart.id.clone();
+            let replay = recorded.recorded_replay.as_ref().and_then(|rp| shared.replay_upload_payload(rp, &chart, state.lntype));
+            shared.spawn_profile_submits(&recorded.sub);
+            if shared.multi_ir.legacy_index().is_some() {
+                let played = recorded.log_id.map(|log_id| (log_id, recorded.replay_plan));
+                shared.spawn_score_submit(recorded.sub, replay, played);
+            } else {
+                shared.ir_status = IrStatus::Sending;
+            }
+        }
+    }
+
+    shared.save_settings();
+    shared.dump_timing_csv();
+    if practice {
+        return Transition::Back;
+    }
+    keep_run_record(shared, record);
+    if shared.course_run.is_some() {
+        shared.course_assist = shared.course_assist.with_stage(recorded.scratch_auto, recorded.custom_judge);
+        return advance_course(shared, &summary, standing_combo, block_reason, lamp);
+    }
+    let paced_by = run_target(shared, &md5, summary.total_notes, standing_best_ex);
+    let target = TargetView { name: paced_by.name, ex: paced_by.ex };
+    let standing = RunStanding { replay_saved: recorded.replay_file.is_some(), lamp, previous, target: Some(target.clone()) };
+    let extras = ResultExtras { target: Some(target), run_again: offers_retry(shared) };
+    let run = ResultRun::of(&state.session, shared, standing);
+    Transition::To(Stage::Result(ResultState::new(view).paced_by(extras).cleared(lamp.is_cleared()).tempo(tempo).played(run)))
+}
+
+/// What a run that has just ended left behind once it was kept: the lamp it was awarded, the
+/// submission built for it, the history row and the replay it was stored as, and why it is not to
+/// be sent, if it is not.
+struct RecordedRun {
+    lamp: ClearType,
+    sub: ScoreSubmission,
+    /// The `scorelog` row the run was stored as; `None` for a run that is no record (autoplay, a
+    /// replay being watched, practice) or that could not be stored.
+    log_id: Option<i64>,
+    replay_file: Option<String>,
+    recorded_replay: Option<Replay>,
+    /// What is to become of the replay once the server takes the run ([`crate::app_ranking::LiveSubmit`]).
+    replay_plan: ReplayState,
+    block_reason: Option<&'static str>,
+    scratch_auto: bool,
+    custom_judge: bool,
+}
+
+/// Keep a run that has just ended, as `summary` says it went: build its submission, save its replay,
+/// and store it in the history with the submission it is to be sent as.
+///
+/// The local record is written for every real interactive run, so history and replays survive
+/// without a score server; autoplay, a replay being watched and practice are excluded. The book the
+/// screens read gains the run too, so it must be read for "what stood before" first.
+fn record_run(state: &PlayState, shared: &mut AppShared, summary: &rbms_play::PlaySummary) -> RecordedRun {
+    let play = &state.session;
+    let chart = ChartRun {
+        md5: play.model().md5.clone(),
+        sha256: play.model().sha256.clone(),
+        title: play.model().meta.title.clone(),
+        init_bpm: play.model().init_bpm,
+        seed: play.seed(),
+    };
+    let judge_setup = play.judge_setup();
+    let custom_judge = is_custom_judge(&judge_setup);
+    let scratch_auto = scratch_auto_played(play);
+    let assist = assist_level(scratch_auto, custom_judge);
+    let practice = state.practice.is_some();
+    let last_time_us = play.last_time_us();
+    let save_replay =
+        !practice && shared.config.play.auto_replay && shared.replay.is_none() && !shared.run_plays_itself() && !play.recorded_events().is_empty();
+    let recorded_events = save_replay.then(|| play.recorded_events().to_vec());
+    let lamp = assisted_lamp(summary.clear_lamp, assist);
+
     let assist_tags = assist_flags(scratch_auto, custom_judge);
-    let finished_gauge = reported_gauge(&summary, shared.config.play.gauge);
+    let finished_gauge = reported_gauge(summary, shared.config.play.gauge);
     let c = summary.counts;
     let played_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
     let sub = ScoreSubmission {
@@ -246,7 +324,13 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
         replay_file = Some(name);
         recorded_replay = Some(rp);
     }
+    let replay_plan = match &recorded_replay {
+        None => ReplayState::None,
+        Some(rp) if !wire_carries_judge(&rp.judge) => ReplayState::Skipped,
+        Some(_) => ReplayState::Pending,
+    };
 
+    let mut log_id = None;
     if shared.replay.is_none() && !shared.run_plays_itself() && !practice {
         let finished = crate::scoredb_store::FinishedPlay {
             md5: &chart.md5,
@@ -255,7 +339,7 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
             mode: shared.mode,
             ln_mode: &state.ln_mode_key,
             lamp,
-            summary: &summary,
+            summary,
             gauge: finished_gauge,
             random: shared.config.play.random,
             seed: chart.seed,
@@ -265,51 +349,55 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
             ir_submitted: block_reason.is_none() && shared.sends_to_primary_ir_server(),
             replay_file: replay_file.clone(),
         };
-        let log = crate::scoredb_store::play_log(&finished);
+        let mut log = crate::scoredb_store::play_log(&finished);
         if let Some(db) = shared.scoredb.as_mut() {
-            crate::scoredb_store::record_finished_play(db, &log, scores_count);
+            log_id = crate::scoredb_store::record_finished_play(db, &log, scores_count);
+            if let Some(id) = log_id {
+                keep_submission_body(db, id, &sub, shared.session.is_logged_in().then(|| shared.session.login_id()).flatten());
+            }
         }
+        log.id = log_id.unwrap_or_default();
         shared.scores.push(crate::scoredb_store::record_of(&log));
     }
 
-    match block_reason {
-        Some(reason) => {
-            println!("score not submitted: {reason}");
-            shared.submit_rx = None;
-            shared.ir_status = IrStatus::Skipped(reason);
-        }
-        None if !shared.has_primary_ir_server() => {
-            shared.submit_rx = None;
-            shared.ir_status = IrStatus::Off;
-        }
-        None => {
-            let chart = sub.chart.id.clone();
-            let replay = recorded_replay.as_ref().and_then(|rp| shared.replay_upload_payload(rp, &chart, state.lntype));
-            shared.spawn_profile_submits(&sub);
-            if shared.multi_ir.legacy_index().is_some() {
-                shared.spawn_score_submit(sub, replay);
-            } else {
-                shared.ir_status = IrStatus::Sending;
-            }
-        }
-    }
+    RecordedRun { lamp, sub, log_id, replay_file, recorded_replay, replay_plan, block_reason, scratch_auto, custom_judge }
+}
 
-    shared.save_settings();
-    shared.dump_timing_csv();
-    if practice {
-        return Transition::Back;
+/// Keep the submission a stored run is to be sent as, so a later records sync sends exactly what
+/// the result screen would have. A body that cannot be kept is reported and the run left as it is:
+/// a sync rebuilds a run that has none from its row.
+fn keep_submission_body(db: &mut rbms_store::scoredb::ScoreDb, log_id: i64, sub: &ScoreSubmission, played_as: Option<&str>) {
+    let mut kept = sub.clone();
+    kept.clamp_to_server_bounds();
+    let Some(body) = kept.to_json() else {
+        notify(Level::Warn, "submission of the run not kept: it does not serialise");
+        return;
+    };
+    if let Err(e) = db.put_submission(log_id, &body, played_as) {
+        notify(Level::Warn, format!("submission of the run not kept: {e}"));
     }
-    keep_run_record(shared, record);
-    if shared.course_run.is_some() {
-        shared.course_assist = shared.course_assist.with_stage(scratch_auto, custom_judge);
-        return advance_course(shared, &summary, standing_combo, block_reason, lamp);
+}
+
+/// What the message bus says of a run that was left before its end and kept.
+pub(crate) const LEFT_RUN_KEPT: &str = "run left mid-song kept as FAILED";
+
+/// Keep a run the player left before its end, as a FAILED run whose every note not reached was let
+/// pass ([`rbms_play::PlaySummary::left_unfinished`]), and send it.
+///
+/// No result screen is shown: Escape stays the key that leaves at once, and the run is in the
+/// history and on the server like any other. It is sent by a records sync of this one run rather
+/// than by the result screen's submission, which has no screen to report on here. The caller decides
+/// which runs are kept: one played by hand that judged at least one note.
+pub(crate) fn record_left_run(state: &PlayState, shared: &mut AppShared) {
+    let summary = state.session.summary().left_unfinished();
+    let recorded = record_run(state, shared, &summary);
+    if recorded.block_reason.is_none() && shared.has_primary_ir_server() {
+        shared.spawn_profile_submits(&recorded.sub);
     }
-    let paced_by = run_target(shared, &chart.md5, summary.total_notes, standing_best_ex);
-    let target = TargetView { name: paced_by.name, ex: paced_by.ex };
-    let standing = RunStanding { replay_saved: replay_file.is_some(), lamp, previous, target: Some(target.clone()) };
-    let extras = ResultExtras { target: Some(target), run_again: offers_retry(shared) };
-    let run = ResultRun::of(&state.session, shared, standing);
-    Transition::To(Stage::Result(ResultState::new(view).paced_by(extras).cleared(lamp.is_cleared()).tempo(tempo).played(run)))
+    if let Some(log_id) = recorded.log_id {
+        shared.start_record_sync(crate::record_sync::SyncScope::Logs(vec![log_id]));
+    }
+    notify(Level::Info, LEFT_RUN_KEPT);
 }
 
 /// Whether SCRATCH AUTO played any of a run: it took a note off a lane it plays, as the run had the

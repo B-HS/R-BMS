@@ -126,6 +126,7 @@ fn stored(md5: &str, ex_score: u32, max_combo: u32, counts: [u32; 6], clear: u8,
         rule_version: rbms_store::SCORE_RULE_VERSION,
         ln_mode: ln_mode.to_string(),
         assisted,
+        log_id: None,
     }
 }
 

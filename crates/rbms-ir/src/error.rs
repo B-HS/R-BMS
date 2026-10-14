@@ -48,6 +48,35 @@ impl ErrorEnvelope {
     }
 }
 
+/// What the server said a refused request was wrong with: its error code, and the request field and
+/// the reason when the envelope's `details` name them.
+///
+/// A production server keeps only `details.field` and `details.reason` and drops the rest, so these
+/// two are all a client can count on reading; each is kept only when it is a non-blank string.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ServerReason {
+    pub code: String,
+    pub field: Option<String>,
+    pub reason: Option<String>,
+}
+
+impl ErrorBody {
+    /// The code, field and reason of this failure.
+    pub fn server_reason(&self) -> ServerReason {
+        ServerReason { code: self.code.clone(), field: self.detail_text(DETAIL_FIELD_KEY), reason: self.detail_text(DETAIL_REASON_KEY) }
+    }
+
+    fn detail_text(&self, key: &str) -> Option<String> {
+        let text = self.details.as_ref()?.get(key)?.as_str()?.trim();
+        (!text.is_empty()).then(|| text.to_string())
+    }
+}
+
+/// Key of the request field a refusal names, inside the envelope's `details`.
+const DETAIL_FIELD_KEY: &str = "field";
+/// Key of the reason a refusal gives, inside the envelope's `details`.
+const DETAIL_REASON_KEY: &str = "reason";
+
 /// Every way an IR call can fail. The HTTP statuses the rbms IR server assigns meaning to get their
 /// own variant so callers can branch without re-parsing a status code; anything else stays in
 /// [`IrError::Server`]. Each carrying variant keeps the raw response body verbatim.
@@ -117,6 +146,11 @@ impl IrError {
         ErrorEnvelope::parse(self.detail()).map(|envelope| envelope.error.code)
     }
 
+    /// The code, field and reason the server gave, when the body was a failure envelope.
+    pub fn server_reason(&self) -> Option<ServerReason> {
+        ErrorEnvelope::parse(self.detail().trim()).map(|envelope| envelope.error.server_reason())
+    }
+
     /// True when the call failed because the client is signed out or not entitled — the app should
     /// send the player to the NETWORK login flow rather than retry.
     pub fn is_auth_failure(&self) -> bool {
@@ -141,7 +175,7 @@ fn readable_detail(raw: &str) -> String {
         return String::new();
     }
     let text = match ErrorEnvelope::parse(trimmed) {
-        Some(envelope) => format!("{} ({})", envelope.error.message, envelope.error.code),
+        Some(envelope) => envelope_text(&envelope.error),
         None => trimmed.to_string(),
     };
     if text.chars().count() <= ERROR_DETAIL_MAX_CHARS {
@@ -149,6 +183,18 @@ fn readable_detail(raw: &str) -> String {
     }
     let head: String = text.chars().take(ERROR_DETAIL_MAX_CHARS).collect();
     format!("{head}{TRUNCATION_SUFFIX}")
+}
+
+/// One line for a failure envelope: the code and the field it names, with the reason when there is
+/// one, so a refusal says what was wrong with the request; the message and the code when the
+/// envelope names no field.
+fn envelope_text(error: &ErrorBody) -> String {
+    let reason = error.server_reason();
+    match (reason.field, reason.reason) {
+        (Some(field), Some(why)) => format!("{}: {field} ({why})", reason.code),
+        (Some(field), None) => format!("{}: {field}", reason.code),
+        (None, _) => format!("{} ({})", error.message, reason.code),
+    }
 }
 
 fn write_labelled(f: &mut fmt::Formatter<'_>, label: &str, raw_detail: &str) -> fmt::Result {
@@ -332,6 +378,46 @@ mod tests {
         assert!(!envelope.success);
         assert_eq!(envelope.error.code, "VALIDATION_ERROR");
         assert_eq!(envelope.error.details.expect("details survive")["field"], "played_at");
+    }
+
+    const VALIDATION_MESSAGE: &str = "요청 형식이 올바르지 않습니다.";
+
+    fn validation_body(details: &str) -> String {
+        format!(r#"{{"success":false,"error":{{"code":"VALIDATION_ERROR","message":"{VALIDATION_MESSAGE}","details":{details}}}}}"#)
+    }
+
+    #[test]
+    fn a_validation_envelope_names_its_code_field_and_reason() {
+        let err = IrError::Server(400, validation_body(r#"{"field":"judge","reason":"judge count exceeds total_notes"}"#));
+        assert_eq!(err.to_string(), "server error 400: VALIDATION_ERROR: judge (judge count exceeds total_notes)");
+    }
+
+    #[test]
+    fn an_envelope_with_a_field_only_names_the_code_and_field() {
+        let err = IrError::Server(400, validation_body(r#"{"field":"played_at","issues":[{"path":["played_at"]}]}"#));
+        assert_eq!(err.to_string(), "server error 400: VALIDATION_ERROR: played_at");
+    }
+
+    #[test]
+    fn an_envelope_without_details_keeps_the_message_and_code() {
+        let err = IrError::Server(400, envelope_body("VALIDATION_ERROR", VALIDATION_MESSAGE));
+        assert_eq!(err.to_string(), "server error 400: 요청 형식이 올바르지 않습니다. (VALIDATION_ERROR)");
+        let blank = IrError::Server(400, validation_body(r#"{"field":"  ","reason":7}"#));
+        assert_eq!(blank.to_string(), "server error 400: 요청 형식이 올바르지 않습니다. (VALIDATION_ERROR)", "a blank or non-string detail is no field");
+    }
+
+    #[test]
+    fn server_reason_reads_code_field_and_reason_from_the_envelope() {
+        let err = IrError::Server(400, validation_body(r#"{"field":"judge","reason":"judge count exceeds total_notes"}"#));
+        let reason = err.server_reason().expect("an envelope");
+        assert_eq!(
+            reason,
+            ServerReason { code: "VALIDATION_ERROR".into(), field: Some("judge".into()), reason: Some("judge count exceeds total_notes".into()) }
+        );
+        let bare = IrError::RateLimited(envelope_body("RATE_LIMITED", "too many requests")).server_reason().expect("an envelope");
+        assert_eq!(bare, ServerReason { code: "RATE_LIMITED".into(), field: None, reason: None });
+        assert_eq!(IrError::Server(502, "<html>bad gateway</html>".into()).server_reason(), None);
+        assert_eq!(IrError::Network("reset".into()).server_reason(), None);
     }
 
     #[test]

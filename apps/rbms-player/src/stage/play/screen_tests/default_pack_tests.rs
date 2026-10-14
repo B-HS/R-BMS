@@ -326,6 +326,7 @@ fn record_of(md5: &str, ex: u32, total_notes: u32) -> rbms_store::ScoreRecord {
         rule_version: rbms_store::SCORE_RULE_VERSION,
         ln_mode: SCORE_LN_MODE_FROM_CHART.to_owned(),
         assisted: false,
+        log_id: None,
     }
 }
 

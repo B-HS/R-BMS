@@ -8,6 +8,9 @@
 //! * `score` — the merged bests of one chart, one row per `(chart_key, mode, ln_mode)`.
 //! * `scorelog` — one row per play, the history, the graphs and the replay retention plan read it.
 //! * `player_stat` — one row per day, the judgement counts and play time of that day accumulated.
+//! * `play_submission` and `ir_sync` — the submission body each play was finished with, and where
+//!   it stands with each score server it was sent to ([`SyncState`]). A play with no `ir_sync` row
+//!   for a server has never been confirmed there.
 //!
 //! The merge rules are the reference implementation's, element for element (`ScoreData.java:541-585`
 //! `update`, `PlayDataAccessor.java:195-265` `writeScoreData`): a higher lamp always wins, and the
@@ -33,6 +36,9 @@ mod migrate;
 mod replay_gc;
 mod rows;
 mod schema;
+mod sync;
+#[cfg(test)]
+mod sync_tests;
 #[cfg(test)]
 mod tests;
 
@@ -46,6 +52,7 @@ use rows::{BEST_COLUMNS, JUDGE_COLUMNS, LOG_COLUMNS, accumulate_day, insert_log,
 pub use migrate::{ASSIST_UNRECORDED, MigrationReport, SEED_UNRECORDED, migrate_score_book, open_with_import};
 pub use replay_gc::{DEFAULT_KEEP_RECENT_PER_CHART, DEFAULT_REPLAY_MAX_TOTAL_BYTES, ReplayGcPlan, ReplayPolicy};
 pub use schema::{GAUGE_UNKNOWN, MODE_UNKNOWN, RANDOM_OFF, SCORE_DB_SCHEMA_VERSION, gauge_id, gauge_token, mode_id, mode_name, random_id, random_token};
+pub use sync::{IrSyncRow, ReplayState, SKIPPED_OLD_SCRATCH_AUTO_RULE, SyncCandidate, SyncState};
 
 /// Everything that can go wrong reading or writing the score database.
 #[derive(Debug, thiserror::Error)]
@@ -164,6 +171,9 @@ impl JudgeCounts {
 /// live take the same path.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PlayLog {
+    /// The `scorelog` row id, read back with the row; 0 for a play that is not stored yet.
+    /// [`ScoreDb::record_play`] ignores it and returns the id the row is given.
+    pub id: i64,
     /// SHA-256 of the chart where one is known, its MD5 otherwise. Lowercase.
     pub chart_key: String,
     /// Play mode id, see [`mode_id`].
@@ -203,7 +213,8 @@ pub struct PlayLog {
     pub state: i32,
     /// Judging-rule generation the run was produced under ([`crate::SCORE_RULE_VERSION`]).
     pub rule_version: u32,
-    /// Whether the run reached a score server.
+    /// Whether the run was handed to a score server when it ended. Kept for reference only: it says
+    /// nothing of whether the server took the run, which `ir_sync` records ([`ScoreDb::put_sync_state`]).
     pub ir_submitted: bool,
     /// Basename of the saved replay, when one was recorded.
     pub replay_file: Option<String>,

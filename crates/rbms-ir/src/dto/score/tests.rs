@@ -524,3 +524,27 @@ fn clamping_a_course_submission_applies_the_same_two_bounds() {
     assert_eq!(cs.played_at, MIN_PLAYED_AT_MS);
     assert_eq!(cs.gauge_value, FALLBACK_GAUGE_VALUE);
 }
+
+#[test]
+fn is_duplicate_matches_the_server_message_exactly() {
+    let answer = |message: Option<&str>| SubmitResponse { accepted: true, message: message.map(str::to_owned), ..Default::default() };
+    assert!(answer(Some(DUPLICATE_SUBMISSION_MESSAGE)).is_duplicate());
+    assert!(answer(Some("  duplicate submission ignored \n")).is_duplicate(), "surrounding blanks are not part of the message");
+    assert!(!answer(Some("saved")).is_duplicate());
+    assert!(!answer(Some("Duplicate submission ignored")).is_duplicate(), "the match is exact");
+    assert!(!answer(Some("duplicate submission ignored (scratch auto)")).is_duplicate());
+    assert!(!answer(None).is_duplicate());
+}
+
+#[test]
+fn a_submission_round_trips_through_its_stored_json() {
+    let mut sub = submission_for_bounds();
+    assert!(!sub.is_reconstructed());
+    sub.mark_reconstructed();
+    assert!(sub.is_reconstructed());
+    assert_eq!(sub.extra.get(RECONSTRUCTED_EXTRA_KEY), Some(&json!(true)));
+    let text = sub.to_json().expect("a submission serialises");
+    let back = ScoreSubmission::from_json(&text).expect("the stored text reads back");
+    assert_eq!(back.to_json(), Some(text));
+    assert!(ScoreSubmission::from_json("{\"not\":\"a submission\"}").is_none());
+}

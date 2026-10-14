@@ -123,6 +123,9 @@ pub struct SelectModal {
     pub index: usize,
     pub total: usize,
     pub has_replay: bool,
+    /// Where the play stands with the score server, and the colour it is said in; `None` when no
+    /// score server is set up.
+    pub ir_line: Option<(String, Color)>,
 }
 
 /// Backend-agnostic song-select snapshot. The app assembles it each frame from its state; the GPU
@@ -581,6 +584,12 @@ fn render_folder_detail<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, label: 
     }
 }
 
+/// Where the record modal says how the play stands with the score server: under the judgements and
+/// above the key guide, across the modal's width.
+const MODAL_IR_LINE_Y: f32 = 340.0;
+const MODAL_IR_LINE_INSET: f32 = 20.0;
+const MODAL_IR_LINE_SCALE: f32 = 1.3;
+
 fn render_modal<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, modal: &SelectModal, hot: &mut Vec<(Rect, SelectHot)>) {
     let th = ctx.theme;
     r.fill_rect(Rect::new(0.0, 0.0, 1280.0, 720.0), Color { r: 0, g: 0, b: 0, a: 180 });
@@ -612,6 +621,10 @@ fn render_modal<R: Renderer>(ctx: &mut RenderCtx<'_>, r: &mut R, modal: &SelectM
     ctx.draw_text(r, rx, my + 228.0, 1.7, th.text_dim, &format!("EMPTY POOR  {}", modal.empty_poor));
     ctx.draw_text(r, rx, my + 258.0, 1.7, modal.clear_color, &format!("GAUGE  {}%", modal.gauge_value));
     ctx.draw_text(r, rx, my + 288.0, 1.3, th.text_dim, &format!("{} / {}", modal.index + 1, modal.total));
+    if let Some((line, color)) = &modal.ir_line {
+        let fitted = ctx.fit_text(line, MODAL_IR_LINE_SCALE, mw - MODAL_IR_LINE_INSET * 2.0);
+        ctx.draw_text(r, mx + MODAL_IR_LINE_INSET, my + MODAL_IR_LINE_Y, MODAL_IR_LINE_SCALE, *color, &fitted);
+    }
 
     let by = my + mh - 52.0;
     if modal.has_replay {

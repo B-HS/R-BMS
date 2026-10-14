@@ -20,6 +20,7 @@ fn rec(md5: &str, played_at: i64, ex: u32) -> ScoreRecord {
         rule_version: SCORE_RULE_VERSION,
         ln_mode: SCORE_LN_MODE_FROM_CHART.into(),
         assisted: false,
+        log_id: None,
     }
 }
 

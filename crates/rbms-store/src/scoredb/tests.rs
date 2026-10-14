@@ -6,6 +6,7 @@ use crate::{SCORE_LN_MODE_FROM_CHART, SCORE_RULE_VERSION, ScoreBook, ScoreRecord
 /// A play good enough to be a best: perfect on every note, no breaks.
 fn play(chart_key: &str, date: i64, pgreat: u32) -> PlayLog {
     PlayLog {
+        id: 0,
         chart_key: chart_key.into(),
         mode: mode_id("BEAT_7K"),
         ln_mode: SCORE_LN_MODE_FROM_CHART.into(),
@@ -336,12 +337,12 @@ fn history_is_newest_first_and_round_trips_every_field() {
     first.replay_file = Some("aa-10.ron".into());
     first.ir_submitted = true;
     first.judge = JudgeCounts::from_early_late([1, 2, 3, 4, 5, 6], [7, 8, 9, 10, 11, 12]);
-    db.record_play(&first, true).expect("one");
+    let first_id = db.record_play(&first, true).expect("one");
     db.record_play(&play("aa", 20, 50), true).expect("two");
     let history = db.history("aa", 10).expect("queried");
     assert_eq!(history.len(), 2);
     assert_eq!(history[0].date, 20, "newest first");
-    assert_eq!(history[1], first, "every field survives the round trip");
+    assert_eq!(history[1], PlayLog { id: first_id, ..first }, "every field survives the round trip");
     assert_eq!(db.history("aa", 1).expect("queried").len(), 1, "the limit is honoured");
 }
 
@@ -439,6 +440,7 @@ fn record(md5: &str, played_at_ms: i64, clear: u8, counts: [u32; 6], assisted: b
         rule_version: SCORE_RULE_VERSION,
         ln_mode: SCORE_LN_MODE_FROM_CHART.into(),
         assisted,
+        log_id: None,
     }
 }
 

@@ -737,3 +737,25 @@ fn every_group_and_state_of_the_screen_can_be_captured() {
         display.save("settings-state-row-a-skin-does-not-read");
     }
 }
+
+/// The SCORES section of the NETWORK group begins with the row that sends every run the score
+/// server does not hold yet.
+#[test]
+fn the_scores_section_starts_with_sync_records_now() {
+    let scores = catalog::sections(SettingTab::Network).iter().find(|section| section.heading == "SCORES").expect("the group has a SCORES section");
+    assert_eq!(scores.rows.first(), Some(&SettingId::SyncRecords));
+    let screen = screen_on("layout-sync-records", SettingTab::Network);
+    assert_eq!(value_of(&screen, SettingId::SyncRecords), rbms_config::ACTION_VALUE);
+}
+
+/// SYNC RECORDS NOW asks for an account the way the other account rows do, and sends nothing
+/// without one.
+#[test]
+fn sync_records_now_while_signed_out_says_log_in_first() {
+    let mut screen = screen_on("layout-sync-signed-out", SettingTab::Network);
+    screen.app.shared.config.network.server_url = Some("https://records.test".to_owned());
+    screen.focus(SettingId::SyncRecords);
+    screen.key(KeyCode::Enter);
+    assert_eq!(screen.app.shared.net_status, "log in first");
+    assert!(screen.app.shared.record_sync.is_none());
+}

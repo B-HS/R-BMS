@@ -594,6 +594,15 @@ impl PlayState {
     }
 
     /// Abandon the run: keep whatever the in-play controls changed, and go back to the browser.
+    ///
+    /// A run the player was playing by hand is kept and sent as a FAILED run whose notes not reached
+    /// were let pass ([`crate::app_result::record_left_run`]), straight on the way out: Escape is
+    /// still the key that leaves at once. A run left before any note was judged is no run and is not
+    /// kept, and neither is one the engine played, a replay being watched or practice. A chart with
+    /// nothing left to hit goes to its result screen instead, and so does a run that is already
+    /// closing, failed or finished: it ends as every closing run does, with the notes it did not
+    /// reach counted as the closing counted them, whichever key or hold took it out. A course left
+    /// part-way ends as it always did, without a record.
     fn leave_run(&mut self, ctx: &mut FrameCtx<'_>) -> Transition {
         self.esc_down_at = None;
         self.esc_pressed_at = None;
@@ -604,6 +613,12 @@ impl PlayState {
         }
         if ctx.shared.course_run.is_some() {
             return crate::end_course(ctx.shared);
+        }
+        if self.session.all_notes_resolved() || self.scene.as_ref().is_some_and(PlayScene::is_closing) {
+            return enter_result(self, ctx.shared);
+        }
+        if keeps_a_left_run(ctx.shared, &self.session) {
+            crate::app_result::record_left_run(self, ctx.shared);
         }
         ctx.shared.leave_play()
     }
@@ -1299,6 +1314,13 @@ impl PlayState {
         }
         self.escape_key(ctx, key)
     }
+}
+
+/// Whether a run left before its end is kept: one the player was playing by hand, that judged at
+/// least one note. A run left before anything was judged, or left with only empty POORs (and on
+/// nine keys BADs) to its name, took no note and is no run.
+pub(crate) fn keeps_a_left_run(shared: &AppShared, session: &PlaySession) -> bool {
+    !shared.run_plays_itself() && shared.replay.is_none() && session.summary().total_judged > 0
 }
 
 /// How long after a control of the run moved or switched a shade a skin still shows the figures of

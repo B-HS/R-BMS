@@ -156,6 +156,32 @@ fn a_finished_run_reaches_the_result_screen_under_every_escape_setting() {
     }
 }
 
+/// A hold of Escape that completes while the run is closing takes it to its result screen, as the
+/// press of the key does. It does not count the notes the run never reached as POORs the closing
+/// itself never counted, which a run left by the same hold a frame earlier would have.
+#[test]
+fn escape_held_through_a_closing_run_reaches_the_result_screen_with_the_notes_it_judged() {
+    let mut app = app();
+    app.shared.config.play.play_escape = PlayEscape::Hold;
+    let mut state = play_state();
+    let notes = note_times(&state);
+    hit(&mut state, 0, notes[0]);
+    let judged = state.session.summary().total_judged;
+    assert!(judged > 0 && !state.session.all_notes_resolved(), "the fixture run is left part-way");
+    let now = Instant::now();
+    press_at(&mut state, &mut app, KeyCode::Escape, true, now);
+    state.scene = Some(PlayScene::failed());
+    assert!(state.escape_hold_elapsed(now + ESC_HOLD), "the hold, begun while the run was playing, is up as it fails");
+
+    let moved = state.leave_run(&mut FrameCtx { shared: &mut app.shared, now: now + ESC_HOLD, dt: 0.0 });
+    assert!(matches!(moved, Transition::To(Stage::Result(_))), "a closing run is not abandoned");
+    let stored = app.shared.scoredb.as_ref().expect("the database").all_plays().expect("the history reads");
+    let [log] = stored.as_slice() else {
+        panic!("one run ended and {} rows were stored", stored.len());
+    };
+    assert_eq!(log.judge.total(), judged, "no note the run never reached was counted for it");
+}
+
 #[test]
 fn a_practice_slice_uses_absolute_chart_time_for_clock_schedule_and_end() {
     let mut panel = crate::practice::PracticePanel::new("md5".to_string(), Mode::BEAT_7K, 60_000, None, 300.0);
