@@ -148,6 +148,7 @@ describe('표 제목으로 읽을 때 보강', () => {
             minbp: 1,
             maxCombo: 1,
             playedAt: 1,
+            scratchAuto: false,
             chartSha256: SHA,
             chartMd5: MD5,
             title: '',

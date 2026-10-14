@@ -1,6 +1,7 @@
 import type { FC } from 'react'
 import Link from 'next/link'
 import { LampStrip } from '@features/lamp/lamp-strip'
+import { ScratchAutoBadge } from '@features/score/scratch-auto-badge'
 import { CLEAR_LAMP_LABEL, type ClearLamp } from '@shared/constants/clear-lamp'
 import { formatCount, formatDateTime } from '@shared/lib/format'
 
@@ -13,9 +14,10 @@ type ScoreRowProps = {
     exScore: number
     minBp: number
     playedAt: number
+    isScratchAuto?: boolean
 }
 
-export const ScoreRow: FC<ScoreRowProps> = ({ href, title, subtitle, subtitleHref, lamp, exScore, minBp, playedAt }) => (
+export const ScoreRow: FC<ScoreRowProps> = ({ href, title, subtitle, subtitleHref, lamp, exScore, minBp, playedAt, isScratchAuto = false }) => (
     <li className='border-border hover:bg-muted/50 relative flex min-h-10 items-stretch border-b'>
         <LampStrip lamp={lamp} />
         <div className='flex min-w-0 flex-1 items-center justify-between gap-3 px-3 py-1.5'>
@@ -33,7 +35,8 @@ export const ScoreRow: FC<ScoreRowProps> = ({ href, title, subtitle, subtitleHre
                 {subtitle && !subtitleHref && <span className='text-muted-foreground text-2xs truncate'>{subtitle}</span>}
             </div>
             <div className='flex shrink-0 flex-col items-end'>
-                <span className='text-xs'>
+                <span className='flex items-center gap-1 text-xs'>
+                    {isScratchAuto && <ScratchAutoBadge />}
                     {CLEAR_LAMP_LABEL[lamp]} <span className='font-medium tabular-nums'>{formatCount(exScore)}</span>
                 </span>
                 <span className='text-muted-foreground text-2xs tabular-nums'>

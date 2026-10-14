@@ -1,5 +1,5 @@
 import { compose } from '@server/compose'
-import { chartSearchQuerySchema, feedQuerySchema, playerLeaderboardQuerySchema, tokenCreateSchema } from '@server/dto/fe'
+import { chartLeaderboardQuerySchema, chartSearchQuerySchema, feedQuerySchema, playerLeaderboardQuerySchema, tokenCreateSchema } from '@server/dto/fe'
 import { paginatedResponse, successResponse } from '@server/lib/api-response'
 import { NextResponse } from 'next/server'
 import { createAppError } from '@server/lib/error'
@@ -48,12 +48,18 @@ export const createFeChartSearchRoute = () =>
 export const createFeChartLeaderboardRoute = () =>
     withPublicRead(async (request: Request, context: { params: Promise<{ hash: string }> }) => {
         const { hash } = await context.params
+        const query = parseSearchParams(request, chartLeaderboardQuerySchema)
         if (classifyChartHash(hash) === 'unknown') throw createAppError(ERROR_CODE.IR_CHART_NOT_FOUND, { hash })
         const resolved = await resolveChartSha256Cached(hash)
         if (!resolved) return envelope({ chart: null, ranking: [] })
         const [chart, ranking] = await Promise.all([
             getChartMetaCached(hash),
-            getChartRankingCached({ chartSha256: resolved.sha256, limit: LEADERBOARD_LIMIT, page: 1 }),
+            getChartRankingCached({
+                chartSha256: resolved.sha256,
+                limit: LEADERBOARD_LIMIT,
+                page: 1,
+                includeScratchAuto: query.include_scratch_auto,
+            }),
         ])
         return envelope({ chart, ranking })
     })

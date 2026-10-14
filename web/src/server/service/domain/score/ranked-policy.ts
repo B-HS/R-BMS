@@ -22,12 +22,29 @@ export type BuildTrust = (typeof BUILD_TRUST)[keyof typeof BUILD_TRUST]
 
 const NEUTRAL_JUDGE_RATE = 100
 
-export const assistFlags = ({ scratch_auto, assist }: Pick<PlayOptionsInput, 'scratch_auto' | 'assist'>) => [
-    ...(scratch_auto ? [SCORE_FLAG.SCRATCH_AUTO] : []),
-    ...(assist.length > 0 ? [SCORE_FLAG.ASSIST] : []),
+export const AUTO_SCRATCH_ASSIST_TAG = 'AUTO_SCRATCH'
+
+const RANK_NEUTRAL_FLAGS: ScoreFlag[] = [SCORE_FLAG.SCRATCH_AUTO, SCORE_FLAG.UNKNOWN_BUILD]
+
+type AssistOptions = Pick<PlayOptionsInput, 'scratch_auto' | 'assist'>
+
+export const isScratchAutoPlay = ({ scratch_auto, assist }: AssistOptions) => scratch_auto || assist.includes(AUTO_SCRATCH_ASSIST_TAG)
+
+export const assistFlags = (options: AssistOptions) => [
+    ...(isScratchAutoPlay(options) ? [SCORE_FLAG.SCRATCH_AUTO] : []),
+    ...(options.assist.some((tag) => tag !== AUTO_SCRATCH_ASSIST_TAG) ? [SCORE_FLAG.ASSIST] : []),
 ]
 
-export const submissionMessage = (ranked: boolean, flags: ScoreFlag[]) => (ranked ? 'saved' : `recorded (unranked: ${flags.join(',').toLowerCase()})`)
+export const rankBlockingFlags = (flags: ScoreFlag[]) => flags.filter((flag) => !RANK_NEUTRAL_FLAGS.includes(flag))
+
+export const submissionMessage = (ranked: boolean, flags: ScoreFlag[]) => {
+    if (!ranked)
+        return `recorded (unranked: ${flags
+            .filter((flag) => flag !== SCORE_FLAG.SCRATCH_AUTO)
+            .join(',')
+            .toLowerCase()})`
+    return flags.includes(SCORE_FLAG.SCRATCH_AUTO) ? 'saved (scratch auto)' : 'saved'
+}
 
 export type RankedPolicyInput = {
     options: PlayOptionsInput
@@ -45,6 +62,5 @@ export const rankedPolicy = ({ options, buildTrust, isGuest, requireTrustedBuild
     if (buildTrust !== BUILD_TRUST.TRUSTED) flags.push(SCORE_FLAG.UNKNOWN_BUILD)
     if (isGuest) flags.push(SCORE_FLAG.GUEST)
     const buildBlocksRank = buildTrust === BUILD_TRUST.UNTRUSTED || (buildTrust === BUILD_TRUST.UNKNOWN && requireTrustedBuild)
-    const rankBlockingFlags = flags.filter((flag) => flag !== SCORE_FLAG.UNKNOWN_BUILD)
-    return { ranked: rankBlockingFlags.length === 0 && !buildBlocksRank, flags }
+    return { ranked: rankBlockingFlags(flags).length === 0 && !buildBlocksRank, flags, scratchAuto: isScratchAutoPlay(options) }
 }

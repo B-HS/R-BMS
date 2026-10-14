@@ -76,7 +76,13 @@ export const createCourseRankingRoute = () =>
     withErrorHandling(async (request: Request, context: CourseContext) => {
         const query = parseSearchParams(request, rankingQuerySchema)
         const { courseHash } = await context.params
-        const rows = await getCourseRankingCached({ courseHash, limit: query.limit, page: query.page, rivalOf: query.rival_of })
+        const rows = await getCourseRankingCached({
+            courseHash,
+            limit: query.limit,
+            page: query.page,
+            rivalOf: query.rival_of,
+            includeScratchAuto: query.include_scratch_auto,
+        })
         return irRaw(rows)
     })
 
@@ -84,5 +90,5 @@ export const createCourseBestRoute = () =>
     withErrorHandling(async (request: Request, context: CourseContext) => {
         const query = parseSearchParams(request, bestQuerySchema)
         const { courseHash } = await context.params
-        return irRaw(await getCourseBestCached({ courseHash, loginId: query.player }))
+        return irRaw(await getCourseBestCached({ courseHash, loginId: query.player, includeScratchAuto: query.include_scratch_auto }))
     })

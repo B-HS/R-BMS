@@ -6,6 +6,7 @@ import { MIN_CLEAR_LAMP_ID } from '@server/dto/common'
 import { createFeService, type ActivityRow, type LeaderboardRow } from '@server/service/domain/fe/fe.service'
 import type { TableTextLookup } from '@server/service/domain/chart/chart.service'
 import { toChartRow } from '@server/compose/chart-row'
+import { chartBestScope } from '@server/compose/best-scope'
 import type { ScoreRankingRow } from '@server/service/domain/score/score.service'
 
 const activitySelection = {
@@ -17,6 +18,7 @@ const activitySelection = {
     minbp: score.minbp,
     maxCombo: score.maxCombo,
     playedAt: score.playedAt,
+    scratchAuto: score.scratchAuto,
     chartSha256: score.chartSha256,
     chartMd5: chart.md5,
     title: chart.title,
@@ -33,6 +35,7 @@ const toActivityRow = (row: {
     minbp: number
     maxCombo: number
     playedAt: number
+    scratchAuto: boolean
     chartSha256: string
     chartMd5: string | null
     title: string | null
@@ -56,32 +59,44 @@ const LIKE_WILDCARDS = /[\\%_]/g
 const escapeLike = (value: string) => value.replace(LIKE_WILDCARDS, (character) => `\\${character}`)
 
 export const composeFe = (db: Database, deps: { lookupTableText: TableTextLookup; searchTableMd5s: (query: string) => string[] }) => {
-    const playStats = db
-        .select({ userId: score.userId, plays: count().as('plays') })
-        .from(score)
-        .where(isNotNull(score.userId))
-        .groupBy(score.userId)
-        .as('play_stats')
+    const buildLeaderboardStats = (includeScratchAuto: boolean) => {
+        const playStats = db
+            .select({ userId: score.userId, plays: count().as('plays') })
+            .from(score)
+            .where(and(isNotNull(score.userId), includeScratchAuto ? undefined : eq(score.scratchAuto, false)))
+            .groupBy(score.userId)
+            .as('play_stats')
 
-    const bestStats = db
-        .select({
-            userId: chartBest.userId,
-            playedCharts: count().as('played_charts'),
-            clearedCharts: sql<string>`sum(case when ${chartBest.clear} >= ${MIN_CLEAR_LAMP_ID} then 1 else 0 end)`.as('cleared_charts'),
-        })
-        .from(chartBest)
-        .groupBy(chartBest.userId)
-        .as('best_stats')
+        const bestStats = db
+            .select({
+                userId: chartBest.userId,
+                playedCharts: sql<string>`count(distinct ${chartBest.chartSha256})`.as('played_charts'),
+                clearedCharts: sql<string>`count(distinct case when ${chartBest.clear} >= ${MIN_CLEAR_LAMP_ID} then ${chartBest.chartSha256} end)`.as(
+                    'cleared_charts',
+                ),
+            })
+            .from(chartBest)
+            .where(includeScratchAuto ? undefined : eq(chartBest.scratchAuto, false))
+            .groupBy(chartBest.userId)
+            .as('best_stats')
 
-    const leaderboardPlays = sql`coalesce(${playStats.plays}, 0)`.mapWith(Number)
-    const leaderboardCleared = sql`coalesce(${bestStats.clearedCharts}, 0)`.mapWith(Number)
-    const leaderboardPlayed = sql`coalesce(${bestStats.playedCharts}, 0)`.mapWith(Number)
+        const plays = sql`coalesce(${playStats.plays}, 0)`.mapWith(Number)
+        const cleared = sql`coalesce(${bestStats.clearedCharts}, 0)`.mapWith(Number)
+        const played = sql`coalesce(${bestStats.playedCharts}, 0)`.mapWith(Number)
 
-    const LEADERBOARD_ORDER = {
-        cleared: [desc(leaderboardCleared), desc(leaderboardPlayed)],
-        played: [desc(leaderboardPlayed), desc(leaderboardCleared)],
-        plays: [desc(leaderboardPlays), desc(leaderboardCleared)],
-    } as const
+        return {
+            playStats,
+            bestStats,
+            plays,
+            cleared,
+            played,
+            order: {
+                cleared: [desc(cleared), desc(played)],
+                played: [desc(played), desc(cleared)],
+                plays: [desc(plays), desc(cleared)],
+            },
+        }
+    }
 
     const feService = createFeService({
         lookupTableText: deps.lookupTableText,
@@ -118,7 +133,7 @@ export const composeFe = (db: Database, deps: { lookupTableText: TableTextLookup
                     .from(score)
                     .innerJoin(user, eq(user.id, score.userId))
                     .leftJoin(chart, eq(chart.sha256, score.chartSha256))
-                    .where(eq(score.ranked, true))
+                    .where(and(eq(score.ranked, true), eq(score.scratchAuto, false)))
                     .orderBy(desc(score.playedAt))
                     .limit(limit)
                 return rows.map(toActivityRow)
@@ -137,6 +152,7 @@ export const composeFe = (db: Database, deps: { lookupTableText: TableTextLookup
             },
 
             listPlayerLeaderboard: async (query): Promise<{ rows: LeaderboardRow[]; total: number }> => {
+                const stats = buildLeaderboardStats(query.include_scratch_auto)
                 const rows = await db
                     .select({
                         id: user.id,
@@ -146,14 +162,14 @@ export const composeFe = (db: Database, deps: { lookupTableText: TableTextLookup
                         rankPoints: user.rankPoints,
                         totalPlays: user.totalPlays,
                         role: user.role,
-                        plays: leaderboardPlays,
-                        clearedCharts: leaderboardCleared,
-                        playedCharts: leaderboardPlayed,
+                        plays: stats.plays,
+                        clearedCharts: stats.cleared,
+                        playedCharts: stats.played,
                     })
                     .from(user)
-                    .leftJoin(playStats, eq(playStats.userId, user.id))
-                    .leftJoin(bestStats, eq(bestStats.userId, user.id))
-                    .orderBy(...LEADERBOARD_ORDER[query.sort], asc(user.loginId))
+                    .leftJoin(stats.playStats, eq(stats.playStats.userId, user.id))
+                    .leftJoin(stats.bestStats, eq(stats.bestStats.userId, user.id))
+                    .orderBy(...stats.order[query.sort], asc(user.loginId))
                     .limit(query.limit)
                     .offset((query.page - 1) * query.limit)
                 const [total] = await db.select({ value: count() }).from(user)
@@ -162,11 +178,11 @@ export const composeFe = (db: Database, deps: { lookupTableText: TableTextLookup
 
             countLampsByUser: async (userId) => {
                 const rows = await db
-                    .select({ clear: chartBest.clear, value: count() })
+                    .select({ clear: chartBest.clear, scratchAuto: chartBest.scratchAuto, value: count() })
                     .from(chartBest)
-                    .where(eq(chartBest.userId, userId))
-                    .groupBy(chartBest.clear)
-                return rows.map((row) => ({ clear: row.clear, count: row.value }))
+                    .where(and(eq(chartBest.userId, userId), chartBestScope(db, true)))
+                    .groupBy(chartBest.clear, chartBest.scratchAuto)
+                return rows.map((row) => ({ clear: row.clear, scratchAuto: row.scratchAuto, count: row.value }))
             },
 
             summarise: async () => {
@@ -212,6 +228,7 @@ export const composeFe = (db: Database, deps: { lookupTableText: TableTextLookup
                 lntype: score.lntype,
                 option: score.option,
                 totalNotes: score.notes,
+                scratchAuto: score.scratchAuto,
                 pgreat: score.pgreat,
                 great: score.great,
                 good: score.good,
@@ -260,6 +277,7 @@ export const composeFe = (db: Database, deps: { lookupTableText: TableTextLookup
             lntype: row.lntype,
             option: row.option,
             totalNotes: row.totalNotes,
+            scratchAuto: row.scratchAuto,
             judge: {
                 pgreat: row.pgreat,
                 great: row.great,

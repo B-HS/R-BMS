@@ -4,6 +4,8 @@ import type { FC } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { FilterBar } from '@features/filter/filter-bar'
+import { ScratchAutoToggle } from '@features/filter/scratch-auto-toggle'
+import { PanelFootnote } from '@features/shell/panel-footnote'
 import { DataTable, type DataTableColumn } from '@features/table/data-table'
 import { Pager } from '@features/table/pager'
 import { EmptyState } from '@features/state/empty-state'
@@ -11,11 +13,12 @@ import { LoadErrorState } from '@features/state/load-error-state'
 import { TableSkeleton } from '@features/state/table-skeleton'
 import { SortSelect } from '@features/table/sort-select'
 import { usePlayerLeaderboard } from '@entities/stats.query'
-import type { PlayerLeaderboardRow } from '@entities/stats.type'
+import type { PlayerLeaderboardParams, PlayerLeaderboardRow } from '@entities/stats.type'
 import { cn } from '@shared/lib/cn'
 import { formatCount } from '@shared/lib/format'
 import { serializeSearchParams } from '@shared/lib/search-params'
 import { PLAYER_SORT_OPTIONS } from '@shared/constants/leaderboard'
+import { INCLUDE_SCRATCH_AUTO_PARAM } from '@shared/constants/scratch-auto'
 
 const PODIUM_SIZE = 3
 const SKELETON_ROWS = 10
@@ -48,8 +51,11 @@ const buildColumns = (rankOffset: number): DataTableColumn<PlayerLeaderboardRow>
     { key: 'total_plays', label: '제출 수', width: 96, align: 'right', hideBelow: 'sm', cell: (row) => formatCount(row.total_plays) },
 ]
 
+const LEADERBOARD_SCRATCH_AUTO_NOTE =
+    '클리어·플레이 곡·제출 수는 기본으로 SCRATCH AUTO 판을 빼고 셉니다. SCRATCH AUTO 포함을 켜면 곡마다 더 높은 기록으로 셉니다.'
+
 type PlayerLeaderboardPanelProps = {
-    params: { sort: string; page: number; limit: number }
+    params: PlayerLeaderboardParams
 }
 
 export const PlayerLeaderboardPanel: FC<PlayerLeaderboardPanelProps> = ({ params }) => {
@@ -62,7 +68,12 @@ export const PlayerLeaderboardPanel: FC<PlayerLeaderboardPanelProps> = ({ params
     const columns = buildColumns((params.page - 1) * params.limit)
 
     const push = (next: Record<string, string | number | undefined>) => {
-        const merged = serializeSearchParams({ sort: params.sort, page: params.page, ...next })
+        const merged = serializeSearchParams({
+            sort: params.sort,
+            page: params.page,
+            [INCLUDE_SCRATCH_AUTO_PARAM]: params.include_scratch_auto ? 'true' : undefined,
+            ...next,
+        })
         router.push(merged ? `${pathname}?${merged}` : pathname)
     }
 
@@ -70,6 +81,10 @@ export const PlayerLeaderboardPanel: FC<PlayerLeaderboardPanelProps> = ({ params
         <>
             <FilterBar label='정렬' summary={isLoading ? '불러오는 중' : `플레이어 ${formatCount(data?.pagination?.total ?? rows.length)}명`}>
                 <SortSelect label='정렬' value={params.sort} options={PLAYER_SORT_OPTIONS} onValueChange={(sort) => push({ sort, page: 1 })} />
+                <ScratchAutoToggle
+                    checked={params.include_scratch_auto}
+                    onCheckedChange={(checked) => push({ [INCLUDE_SCRATCH_AUTO_PARAM]: checked ? 'true' : undefined, page: 1 })}
+                />
             </FilterBar>
             {isLoading && (
                 <div className='bg-card p-3'>
@@ -86,6 +101,9 @@ export const PlayerLeaderboardPanel: FC<PlayerLeaderboardPanelProps> = ({ params
                     </div>
                 </div>
             )}
+            <div className='bg-card px-3 py-2'>
+                <PanelFootnote>{LEADERBOARD_SCRATCH_AUTO_NOTE}</PanelFootnote>
+            </div>
         </>
     )
 }

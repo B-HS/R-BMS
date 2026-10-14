@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { includeScratchAutoSchema } from '@server/dto/common'
 
 const MAX_PAGE_LIMIT = 100
 const DEFAULT_PAGE_LIMIT = 50
@@ -30,8 +31,13 @@ export const feedQuerySchema = z.object({
     limit: z.coerce.number().int().min(1).max(MAX_FEED_LIMIT).default(DEFAULT_FEED_LIMIT),
 })
 
+export const chartLeaderboardQuerySchema = z.object({
+    include_scratch_auto: includeScratchAutoSchema,
+})
+
 export const playerLeaderboardQuerySchema = z.object({
     sort: playerSortSchema.default('cleared'),
+    include_scratch_auto: includeScratchAutoSchema,
     page: z.coerce.number().int().min(1).default(1),
     limit: z.coerce.number().int().min(1).max(MAX_PAGE_LIMIT).default(DEFAULT_PAGE_LIMIT),
 })
@@ -54,5 +60,6 @@ export const tokenCreateSchema = z.object({
 export type ChartSearchQuery = z.infer<typeof chartSearchQuerySchema>
 export type FeedQuery = z.infer<typeof feedQuerySchema>
 export type PlayerLeaderboardQuery = z.infer<typeof playerLeaderboardQuerySchema>
+export type ChartLeaderboardQuery = z.infer<typeof chartLeaderboardQuerySchema>
 export type PlayerScoresQuery = z.infer<typeof playerScoresQuerySchema>
 export type RivalPutInput = z.infer<typeof rivalPutSchema>

@@ -67,6 +67,7 @@ export const createChartRankingRoute = () =>
             page: query.page,
             lnmode: query.lnmode,
             rivalOf: query.rival_of,
+            includeScratchAuto: query.include_scratch_auto,
         })
         return irRaw(rows)
     })
@@ -77,6 +78,11 @@ export const createChartBestRoute = () =>
         const query = parseSearchParams(request, bestQuerySchema)
         const resolved = await resolveKnownChart(hash)
         if (!resolved) return irRaw(null)
-        const record = await getChartBestCached({ chartSha256: resolved.sha256, loginId: query.player, lnmode: query.lnmode })
+        const record = await getChartBestCached({
+            chartSha256: resolved.sha256,
+            loginId: query.player,
+            lnmode: query.lnmode,
+            includeScratchAuto: query.include_scratch_auto,
+        })
         return irRaw(record)
     })

@@ -19,9 +19,9 @@ export const generateMetadata = async ({ params }: PageProps<'/courses/[courseHa
     })
 }
 
-const CourseDetailPage = ({ params }: PageProps<'/courses/[courseHash]'>) => (
+const CourseDetailPage = ({ params, searchParams }: PageProps<'/courses/[courseHash]'>) => (
     <Suspense fallback={<ShellPageLoading title='코스' />}>
-        <CourseDetailContent params={params} />
+        <CourseDetailContent params={params} searchParams={searchParams} />
     </Suspense>
 )
 

@@ -27,6 +27,10 @@ export type ChartMeta = {
     extra: Record<string, unknown>
 }
 
+export type ChartLeaderboardParams = {
+    include_scratch_auto: boolean
+}
+
 export type ChartLeaderboard = {
     chart: ChartMeta | null
     ranking: ScoreRecord[]

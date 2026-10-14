@@ -1,5 +1,13 @@
 import { z } from 'zod'
-import { chartIdSchema, clearLampSchema, extraSchema, judgeBreakdownSchema, playOptionsSchema, playerIdSchema } from '@server/dto/common'
+import {
+    chartIdSchema,
+    clearLampSchema,
+    extraSchema,
+    includeScratchAutoSchema,
+    judgeBreakdownSchema,
+    playOptionsSchema,
+    playerIdSchema,
+} from '@server/dto/common'
 
 export const API_VERSION = 1
 
@@ -81,11 +89,13 @@ export const rankingQuerySchema = z.object({
     page: z.coerce.number().int().min(1).default(1),
     rival_of: z.string().optional(),
     lnmode: z.coerce.number().int().min(0).max(2).optional(),
+    include_scratch_auto: includeScratchAutoSchema,
 })
 
 export const bestQuerySchema = z.object({
     player: z.string().min(1),
     lnmode: z.coerce.number().int().min(0).max(2).optional(),
+    include_scratch_auto: includeScratchAutoSchema,
 })
 
 export type ScoreSubmissionInput = z.infer<typeof scoreSubmissionSchema>

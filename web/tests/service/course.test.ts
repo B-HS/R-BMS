@@ -22,7 +22,9 @@ const submission = (overrides: Record<string, unknown> = {}) =>
 
 const createService = (options: { existingId?: string; best?: { clear: number; exScore: number; minbp: number } } = {}) => {
     const inserted: CourseScoreInsertRow[] = []
-    const bests: { courseScoreId: string; clear: number; exScore: number }[] = []
+    const bests: { courseScoreId: string; clear: number; exScore: number; scratchAuto: boolean }[] = []
+    const bestLookups: boolean[] = []
+    const rankScopes: boolean[] = []
     let counter = 0
     const service = createCourseService({
         newId: (prefix) => `${prefix}${(counter += 1)}`,
@@ -35,17 +37,23 @@ const createService = (options: { existingId?: string; best?: { clear: number; e
             insertCourseScore: async (row) => {
                 inserted.push(row)
             },
-            getCourseBest: async () => options.best ?? null,
-            upsertCourseBest: async (row) => {
-                bests.push({ courseScoreId: row.courseScoreId, clear: row.clear, exScore: row.exScore })
+            getCourseBest: async ({ scratchAuto }) => {
+                bestLookups.push(scratchAuto)
+                return options.best ?? null
             },
-            countBetterCourseBests: async () => 2,
+            upsertCourseBest: async (row) => {
+                bests.push({ courseScoreId: row.courseScoreId, clear: row.clear, exScore: row.exScore, scratchAuto: row.scratchAuto })
+            },
+            countBetterCourseBests: async ({ includeScratchAuto }) => {
+                rankScopes.push(includeScratchAuto)
+                return 2
+            },
             getCourseRanking: async () => [],
             getCourseBestByLoginId: async () => null,
             getRivalUserIds: async () => [],
         },
     })
-    return { service, inserted, bests }
+    return { service, inserted, bests, bestLookups, rankScopes }
 }
 
 describe('courseService.submit', () => {
@@ -95,22 +103,34 @@ describe('courseService.submit', () => {
         expect(bests).toHaveLength(1)
     })
 
-    test('SCRATCH AUTO 스테이지가 낀 코스는 단일 곡처럼 unranked 로 저장하고 베스트·순위에 넣지 않는다', async () => {
-        const { service, inserted, bests } = createService()
+    test('SCRATCH AUTO 스테이지가 낀 코스는 ranked 로 저장하고 SCRATCH AUTO 베스트와 포함 목록 순위에 넣는다', async () => {
+        const { service, inserted, bests, bestLookups, rankScopes } = createService()
         const result = await service.submit({
             input: submission({ scratch_auto: true, assist: ['AUTO_SCRATCH'], extra: { note: 'kept' } }),
             user: USER,
         })
         expect(result.duplicated).toBe(false)
         expect(result.response.accepted).toBe(true)
-        expect(result.response.ranked).toBe(false)
-        expect(result.response.flags).toEqual(['SCRATCH_AUTO', 'ASSIST'])
-        expect(result.response.rank).toBeNull()
-        expect(result.response.is_new_best).toBe(false)
-        expect(result.response.message).toBe('recorded (unranked: scratch_auto,assist)')
-        expect(inserted[0].ranked).toBe(false)
-        expect(inserted[0].extra).toEqual({ note: 'kept', flags: ['SCRATCH_AUTO', 'ASSIST'], scratch_auto: true, assist: ['AUTO_SCRATCH'] })
-        expect(bests).toHaveLength(0)
+        expect(result.response.ranked).toBe(true)
+        expect(result.response.flags).toEqual(['SCRATCH_AUTO'])
+        expect(result.response.rank).toBe(3)
+        expect(result.response.is_new_best).toBe(true)
+        expect(result.response.message).toBe('saved (scratch auto)')
+        expect(inserted[0].ranked).toBe(true)
+        expect(inserted[0].scratchAuto).toBe(true)
+        expect(inserted[0].extra).toEqual({ note: 'kept', flags: ['SCRATCH_AUTO'], scratch_auto: true, assist: ['AUTO_SCRATCH'] })
+        expect(bests).toEqual([{ courseScoreId: result.courseScoreId, clear: 5, exScore: 5000, scratchAuto: true }])
+        expect(bestLookups).toEqual([true])
+        expect(rankScopes).toEqual([true])
+    })
+
+    test('일반 코스 판은 일반 베스트와 기본 목록 순위를 쓴다', async () => {
+        const { service, inserted, bests, bestLookups, rankScopes } = createService()
+        await service.submit({ input: submission(), user: USER })
+        expect(inserted[0].scratchAuto).toBe(false)
+        expect(bests[0].scratchAuto).toBe(false)
+        expect(bestLookups).toEqual([false])
+        expect(rankScopes).toEqual([false])
     })
 
     test('넓힌 판정 스테이지가 낀 코스는 ASSIST 로 unranked 다', async () => {
@@ -121,11 +141,21 @@ describe('courseService.submit', () => {
         expect(inserted[0].extra).toEqual({ flags: ['ASSIST'], scratch_auto: false, assist: ['CUSTOM_JUDGE'] })
     })
 
-    test('어시스트 코스의 재전송도 unranked 와 flags 를 그대로 돌려준다', async () => {
-        const { service } = createService({ existingId: 'cs_existing' })
-        const result = await service.submit({ input: submission({ scratch_auto: true, assist: ['AUTO_SCRATCH'] }), user: USER })
+    test('SCRATCH AUTO 와 넓힌 판정이 함께 낀 코스는 unranked 이고 베스트에 넣지 않는다', async () => {
+        const { service, bests } = createService()
+        const result = await service.submit({ input: submission({ scratch_auto: true, assist: ['AUTO_SCRATCH', 'CUSTOM_JUDGE'] }), user: USER })
         expect(result.response.ranked).toBe(false)
         expect(result.response.flags).toEqual(['SCRATCH_AUTO', 'ASSIST'])
+        expect(result.response.rank).toBeNull()
+        expect(result.response.message).toBe('recorded (unranked: assist)')
+        expect(bests).toHaveLength(0)
+    })
+
+    test('SCRATCH AUTO 코스의 재전송도 ranked 와 flags 를 그대로 돌려준다', async () => {
+        const { service } = createService({ existingId: 'cs_existing' })
+        const result = await service.submit({ input: submission({ scratch_auto: true, assist: ['AUTO_SCRATCH'] }), user: USER })
+        expect(result.response.ranked).toBe(true)
+        expect(result.response.flags).toEqual(['SCRATCH_AUTO'])
     })
 
     test('어시스트 태그가 지나치게 많거나 길면 스키마가 거절한다', () => {

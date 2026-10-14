@@ -4,6 +4,7 @@ import type { SettingBlobKey } from '../../src/entities/setting.type'
 import { clientBuildListQueryOptions } from '../../src/entities/build.query'
 import { tableListQueryOptions } from '../../src/entities/table.query'
 import { courseRankingQueryOptions } from '../../src/entities/course.query'
+import { chartLeaderboardQueryOptions } from '../../src/entities/chart.query'
 
 const originalFetch = globalThis.fetch
 
@@ -45,9 +46,15 @@ describe('entities 쿼리가 실제 라우트 응답 형태를 따른다', () =>
         expect(calls[0]).toEndWith('/api/tables')
     })
 
-    test('코스 랭킹은 limit 을 쿼리스트링으로 보낸다', async () => {
+    test('코스 랭킹은 limit 과 SCRATCH AUTO 포함 여부를 쿼리스트링으로 보낸다', async () => {
         const calls = capture('[]')
-        await run<unknown[]>(courseRankingQueryOptions('ch 1', { limit: 25 }))
-        expect(calls[0]).toEndWith('/api/courses/ch%201/ranking?limit=25')
+        await run<unknown[]>(courseRankingQueryOptions('ch 1', { limit: 25, include_scratch_auto: true }))
+        expect(calls[0]).toEndWith('/api/courses/ch%201/ranking?limit=25&include_scratch_auto=true')
+    })
+
+    test('SCRATCH AUTO 포함 여부가 다르면 차트 순위 쿼리 키가 다르다', () => {
+        const excluded = chartLeaderboardQueryOptions('h', { include_scratch_auto: false }).queryKey
+        const included = chartLeaderboardQueryOptions('h', { include_scratch_auto: true }).queryKey
+        expect(excluded).not.toEqual(included)
     })
 })

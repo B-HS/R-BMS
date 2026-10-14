@@ -48,14 +48,16 @@ const submission = (overrides: Partial<Record<string, unknown>> = {}): ScoreSubm
 
 type Recorder = {
     inserted: ScoreInsertRow[]
-    bests: { scoreId: string; clear: number; exScore: number }[]
+    bests: { scoreId: string; clear: number; exScore: number; scratchAuto: boolean }[]
+    bestLookups: boolean[]
+    rankScopes: boolean[]
     audits: number
     auditUserAgents: (string | null)[]
     idempotencyLookups: number
 }
 
 const createStub = (options: { existingScoreId?: string | null; currentBest?: { clear: number; exScore: number; minbp: number } | null } = {}) => {
-    const recorder: Recorder = { inserted: [], bests: [], audits: 0, auditUserAgents: [], idempotencyLookups: 0 }
+    const recorder: Recorder = { inserted: [], bests: [], bestLookups: [], rankScopes: [], audits: 0, auditUserAgents: [], idempotencyLookups: 0 }
     const db: ScoreServiceDb = {
         findScoreIdByIdempotency: async () => {
             recorder.idempotencyLookups += 1
@@ -64,11 +66,17 @@ const createStub = (options: { existingScoreId?: string | null; currentBest?: { 
         insertScore: async (row) => {
             recorder.inserted.push(row)
         },
-        getChartBest: async () => options.currentBest ?? null,
-        upsertChartBest: async (row) => {
-            recorder.bests.push({ scoreId: row.scoreId, clear: row.clear, exScore: row.exScore })
+        getChartBest: async ({ scratchAuto }) => {
+            recorder.bestLookups.push(scratchAuto)
+            return options.currentBest ?? null
         },
-        countBetterBests: async () => 2,
+        upsertChartBest: async (row) => {
+            recorder.bests.push({ scoreId: row.scoreId, clear: row.clear, exScore: row.exScore, scratchAuto: row.scratchAuto })
+        },
+        countBetterBests: async ({ includeScratchAuto }) => {
+            recorder.rankScopes.push(includeScratchAuto)
+            return 2
+        },
         getRanking: async () => [],
         getBestByLoginId: async () => null,
         getScoreById: async () => null,
@@ -116,6 +124,85 @@ describe('scoreService.submit', () => {
         expect(recorder.inserted[0].exScore).toBe(1488)
         expect(recorder.inserted[0].clear).toBe(6)
         expect(recorder.audits).toBe(1)
+    })
+
+    test('SCRATCH AUTO 판은 ranked 로 저장되고 SCRATCH AUTO 베스트와 포함 목록 순위를 쓴다', async () => {
+        const { recorder, service } = createStub()
+        const result = await service.submit({
+            input: submission({ options: { scratch_auto: true, assist: ['AUTO_SCRATCH'] } }),
+            chartSha256: CHART_SHA,
+            chartMd5: null,
+            user: alice,
+            buildTrust: BUILD_TRUST.TRUSTED,
+            requireTrustedBuild: false,
+            ip: null,
+            userAgent: null,
+        })
+        expect(result.ranked).toBe(true)
+        expect(result.response.ranked).toBe(true)
+        expect(result.response.flags).toEqual(['SCRATCH_AUTO'])
+        expect(result.response.message).toBe('saved (scratch auto)')
+        expect(result.response.rank).toBe(3)
+        expect(result.response.is_new_best).toBe(true)
+        expect(recorder.inserted[0].ranked).toBe(true)
+        expect(recorder.inserted[0].scratchAuto).toBe(true)
+        expect(recorder.bestLookups).toEqual([true])
+        expect(recorder.bests).toEqual([{ scoreId: result.scoreId, clear: 6, exScore: 1488, scratchAuto: true }])
+        expect(recorder.rankScopes).toEqual([true])
+    })
+
+    test('일반 판은 일반 베스트와 기본 목록 순위를 쓴다', async () => {
+        const { recorder, service } = createStub()
+        await service.submit({
+            input: submission(),
+            chartSha256: CHART_SHA,
+            chartMd5: null,
+            user: alice,
+            buildTrust: BUILD_TRUST.TRUSTED,
+            requireTrustedBuild: false,
+            ip: null,
+            userAgent: null,
+        })
+        expect(recorder.inserted[0].scratchAuto).toBe(false)
+        expect(recorder.bestLookups).toEqual([false])
+        expect(recorder.bests[0].scratchAuto).toBe(false)
+        expect(recorder.rankScopes).toEqual([false])
+    })
+
+    test('넓힌 판정 판은 SCRATCH AUTO 와 함께여도 unranked 이고 베스트·순위가 없다', async () => {
+        const { recorder, service } = createStub()
+        const result = await service.submit({
+            input: submission({ options: { scratch_auto: true, assist: ['AUTO_SCRATCH', 'CUSTOM_JUDGE'], judge_rate: 120 } }),
+            chartSha256: CHART_SHA,
+            chartMd5: null,
+            user: alice,
+            buildTrust: BUILD_TRUST.TRUSTED,
+            requireTrustedBuild: false,
+            ip: null,
+            userAgent: null,
+        })
+        expect(result.response.ranked).toBe(false)
+        expect(result.response.rank).toBeNull()
+        expect(result.response.message).toBe('recorded (unranked: assist,judge_width)')
+        expect(recorder.bests).toHaveLength(0)
+        expect(recorder.rankScopes).toEqual([])
+    })
+
+    test('SCRATCH AUTO 판의 재전송은 포함 목록 순위를 돌려준다', async () => {
+        const { recorder, service } = createStub({ existingScoreId: 'sc_existing' })
+        const result = await service.submit({
+            input: submission({ options: { scratch_auto: true, assist: ['AUTO_SCRATCH'] } }),
+            chartSha256: CHART_SHA,
+            chartMd5: null,
+            user: alice,
+            buildTrust: BUILD_TRUST.TRUSTED,
+            requireTrustedBuild: false,
+            ip: null,
+            userAgent: null,
+        })
+        expect(result.response.rank).toBe(3)
+        expect(result.response.flags).toEqual(['SCRATCH_AUTO'])
+        expect(recorder.rankScopes).toEqual([true])
     })
 
     test('같은 (player, chart, played_at) 재전송은 기존 score_id 를 반환하고 새로 만들지 않는다', async () => {
@@ -276,7 +363,7 @@ describe('scoreService.submit', () => {
     test('응답 본문은 SubmitResponse 슈퍼셋 스키마를 그대로 만족한다', async () => {
         const { service } = createStub()
         const cases = await Promise.all(
-            [submission(), submission({ options: { assist: ['AUTO_SCRATCH'] } })].map((input) =>
+            [submission(), submission({ options: { assist: ['CUSTOM_JUDGE'] } })].map((input) =>
                 service.submit({
                     input,
                     chartSha256: CHART_SHA,

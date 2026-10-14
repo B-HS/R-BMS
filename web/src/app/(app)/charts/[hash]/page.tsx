@@ -10,7 +10,7 @@ import { ShellPageLoading } from '@widgets/shell/shell-page-loading'
 export const generateMetadata = async ({ params }: PageProps<'/charts/[hash]'>): Promise<Metadata> => {
     const { hash } = await params
     const leaderboard = await getQueryClient()
-        .fetchQuery(chartLeaderboardQueryOptions(hash))
+        .fetchQuery(chartLeaderboardQueryOptions(hash, { include_scratch_auto: false }))
         .catch(() => null)
     if (!leaderboard?.chart) return buildPageMetadata({ title: `차트 ${formatHash(hash)}`, index: false })
     return buildPageMetadata({
@@ -20,9 +20,9 @@ export const generateMetadata = async ({ params }: PageProps<'/charts/[hash]'>):
     })
 }
 
-const ChartDetailPage = ({ params }: PageProps<'/charts/[hash]'>) => (
+const ChartDetailPage = ({ params, searchParams }: PageProps<'/charts/[hash]'>) => (
     <Suspense fallback={<ShellPageLoading title='차트' />}>
-        <ChartDetailContent params={params} />
+        <ChartDetailContent params={params} searchParams={searchParams} />
     </Suspense>
 )
 

@@ -11,6 +11,8 @@ export const readNumberParam = (params: Record<string, string | string[] | undef
     return Number.isFinite(parsed) ? parsed : fallback
 }
 
+export const readBooleanParam = (params: Record<string, string | string[] | undefined>, key: string) => readParam(params, key) === 'true'
+
 export const readListParam = (params: Record<string, string | string[] | undefined>, key: string) => {
     const raw = readParam(params, key)
     if (!raw) return []

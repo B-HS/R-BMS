@@ -59,6 +59,8 @@ export const playerIdSchema = z.object({
 
 export const extraSchema = z.record(z.string(), z.unknown()).default({})
 
+export const includeScratchAutoSchema = z.stringbool({ truthy: ['true'], falsy: ['false'] }).default(false)
+
 export const judgeBreakdownSchema = z.object({
     pgreat: z.number().int().min(0),
     great: z.number().int().min(0),

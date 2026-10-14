@@ -18,6 +18,7 @@ export type BestRecordRow = {
     maxCombo: number
     totalNotes: number
     playedAt: number
+    scratchAuto: boolean
 }
 
 export type TableSnapshotServiceDb = {
@@ -137,6 +138,7 @@ export const toTableRecord = (row: BestRecordRow): TableRecordOutput => ({
     max_combo: row.maxCombo,
     total_notes: row.totalNotes,
     played_at: row.playedAt,
+    scratch_auto: row.scratchAuto,
 })
 
 export const createTableSnapshotService = (deps: TableSnapshotServiceDeps) => {

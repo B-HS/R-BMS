@@ -12,6 +12,7 @@ export type ActivityRow = {
     minbp: number
     maxCombo: number
     playedAt: number
+    scratchAuto: boolean
     chartSha256: string
     chartMd5: string | null
     title: string
@@ -21,6 +22,7 @@ export type ActivityRow = {
 
 export type LampCountRow = {
     clear: number
+    scratchAuto: boolean
     count: number
 }
 
@@ -53,6 +55,7 @@ const buildActivityItem = (row: ActivityRow) => ({
     minbp: row.minbp,
     max_combo: row.maxCombo,
     played_at: row.playedAt,
+    scratch_auto: row.scratchAuto,
     chart: { md5: row.chartMd5 ?? '', sha256: row.chartSha256, title: row.title, artist: row.artist, level: row.level },
 })
 
@@ -61,7 +64,11 @@ export const toActivityItem = (row: ActivityRow, lookupTableText?: TableTextLook
     return buildActivityItem({ ...row, title: text.title, artist: text.artist })
 }
 
-export const toLampDistribution = (rows: LampCountRow[]) => rows.map((row) => ({ clear: clearLampFromId(row.clear), count: row.count }))
+export const toLampDistribution = (rows: LampCountRow[]) =>
+    [...new Set(rows.map((row) => row.clear))].map((clear) => ({
+        clear: clearLampFromId(clear),
+        count: rows.filter((row) => row.clear === clear).reduce((sum, row) => sum + row.count, 0),
+    }))
 
 export const toLeaderboardItem = (row: LeaderboardRow) => ({
     ...toPlayerProfile(row, row.plays),
@@ -92,6 +99,7 @@ export const createFeService = (deps: { db: FeServiceDb; lookupTableText?: Table
             total_plays: params.totalPlays,
             cleared: lamps.filter((row) => row.clear >= MIN_CLEAR_LAMP_ID).reduce((sum, row) => sum + row.count, 0),
             lamps: toLampDistribution(lamps),
+            scratch_auto_charts: lamps.filter((row) => row.scratchAuto).reduce((sum, row) => sum + row.count, 0),
         }
     },
 

@@ -85,9 +85,10 @@ session/account (better-auth)    difficulty_table 1─* table_course *─1 cours
 - 인덱스: `uniq(user_id, chart_sha256, played_at)`(멱등), `idx(chart_sha256, ranked, clear, ex_score)`(랭킹은 ranked=true만), `idx(user_id, played_at)`, `idx(client_build_sha256)`.
 - EX/BP는 저장하되 `judge`에서 유도 가능(`ex=(epg+lpg)*2+egr+lgr`). 랭킹/best는 **ranked=true**만.
 
-### `chart_best` (랭킹 가속 — (chart, user) 최고 1행)
-| chart_sha256 + user_id **복합 PK** · score_id FK · clear · ex_score · minbp · max_combo · updated_at |
+### `chart_best` (랭킹 가속 — (chart, user, scratch_auto) 최고 1행)
+| chart_sha256 + user_id + scratch_auto **복합 PK** · score_id FK · clear · ex_score · minbp · max_combo · scratch_auto bool default false · updated_at |
 - best 갱신 규칙: 램프 > EX > (BP 낮을수록) 순. 랭킹 조회는 이 테이블 정렬.
+- 웨이브 20(마이그레이션 `0002_scratch_auto_bests`): SCRATCH AUTO 판도 ranked 이고, 한 사용자가 한 차트에 일반 판 최고(`scratch_auto=false`)와 SCRATCH AUTO 판 최고(`true`)를 따로 가진다. 기본 순위는 `scratch_auto=false` 행만, 포함 순위는 사용자마다 두 행 가운데 더 높은 것(모두 같으면 일반 판)만 읽는다(`web/src/server/compose/best-scope.ts`). 0002 이전 행은 기본값 false 로 일반 판이 된다. 인덱스 `chart_best_rank_idx` 는 `(chart_sha256, scratch_auto, clear, ex_score)`.
 
 ### `replay` (µs 정밀)
 | id varchar(36) PK · user_id varchar(36) · chart_sha256 idx · score_id null · format varchar(32) · mode/random/random_p2/seed/lntype/offset_ms/judge_rate/scratch_auto/constant/gauge(재현용) · client_build_sha256 char(64) · **event_count int · duration_us bigint** · size int · storage_key varchar(255) null · `data` mediumtext null · created_at |
@@ -112,8 +113,9 @@ session/account (better-auth)    difficulty_table 1─* table_course *─1 cours
 ### `course` / `course_chart` / `course_score`
 - `course`: `course_hash` PK · name · lntype · constraint json · trophy json · extra.
 - `course_chart`: course_hash + position **복합 PK** · chart_sha256(논리 chart 관계).
-- `course_score`: id PK · user_id · course_hash idx · clear · judge(early/late 동일 컬럼군) · ex_score · max_combo · gauge_value · minbp · trophy · ranked · played_at · extra · `uniq(user_id, course_hash, played_at)`. 어시스트 코스(`scratch_auto` 또는 `assist≠∅`)는 `ranked=false` 이고 `extra` 에 `flags`·`scratch_auto`·`assist` 를 담는다(별도 컬럼 없음, api-spec §6).
-- `course_best`: course_hash + user_id 복합 PK(랭킹 가속).
+- `course_score`: id PK · user_id · course_hash idx · clear · judge(early/late 동일 컬럼군) · ex_score · max_combo · gauge_value · minbp · trophy · scratch_auto bool default false · ranked · played_at · extra · `uniq(user_id, course_hash, played_at)`. `scratch_auto` 는 SCRATCH AUTO 스테이지가 낀 코스다(웨이브 20, 0002). 넓힌 판정 스테이지가 낀 코스(`assist` 에 `AUTO_SCRATCH` 밖의 태그)는 `ranked=false` 이다. flag 가 하나라도 있으면 `extra` 에 `flags`·`scratch_auto`·`assist` 를 담는다(api-spec §6).
+- `course_best`: course_hash + user_id + scratch_auto 복합 PK(랭킹 가속). `chart_best` 와 같이 일반 판 최고와 SCRATCH AUTO 판 최고를 따로 둔다(0002).
+- `score.scratch_auto` 는 0002 전부터 있던 열이고, 웨이브 20부터는 `options.scratch_auto` 이거나 `options.assist` 에 `AUTO_SCRATCH` 가 있는 판이면 true 로 적는다. 그래서 점수 행에는 새 열을 더하지 않았다.
 
 ### `difficulty_table` / `table_folder` / `table_chart` / `table_course` (IRTableData)
 - `difficulty_table`: id PK · name · url · extra.

@@ -2,6 +2,9 @@
 
 import type { FC } from 'react'
 import Link from 'next/link'
+import { usePathname, useRouter } from 'next/navigation'
+import { ScratchAutoToggle } from '@features/filter/scratch-auto-toggle'
+import { ScratchAutoBadge } from '@features/score/scratch-auto-badge'
 import { PanelCard } from '@features/shell/panel-card'
 import { PanelFootnote } from '@features/shell/panel-footnote'
 import { MetaBadge } from '@features/badge/meta-badge'
@@ -15,8 +18,10 @@ import { ShellPage } from '@widgets/shell/shell-page'
 import { ShellPageLoading } from '@widgets/shell/shell-page-loading'
 import { ApiError } from '@shared/lib/fetch'
 import { formatCount, formatDateTime, formatHash } from '@shared/lib/format'
+import { serializeSearchParams } from '@shared/lib/search-params'
+import { INCLUDE_SCRATCH_AUTO_PARAM, SCRATCH_AUTO_LIST_NOTE } from '@shared/constants/scratch-auto'
 import { useCourseMeta, useCourseRanking } from '@entities/course.query'
-import type { CourseChartRef } from '@entities/course.type'
+import type { CourseChartRef, CourseRankingParams } from '@entities/course.type'
 import type { ScoreRecord } from '@entities/score.type'
 
 const CHART_COLUMNS: DataTableColumn<CourseChartRef>[] = [
@@ -42,9 +47,12 @@ const RANKING_COLUMNS: DataTableColumn<ScoreRecord>[] = [
         label: '플레이어',
         flex: true,
         cell: (row) => (
-            <Link href={`/players/${encodeURIComponent(row.player.id)}`} className='font-medium hover:underline'>
-                {row.player_name}
-            </Link>
+            <span className='flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5'>
+                <Link href={`/players/${encodeURIComponent(row.player.id)}`} className='max-w-full truncate font-medium hover:underline'>
+                    {row.player_name}
+                </Link>
+                {row.extra.scratch_auto === true && <ScratchAutoBadge />}
+            </span>
         ),
     },
     { key: 'clear', label: '램프', width: 128, cell: (row) => <LampLabel lamp={row.clear} /> },
@@ -58,14 +66,21 @@ const NOT_FOUND_STATUS = 404
 
 type CourseDetailPanelProps = {
     courseHash: string
-    rankingParams: { limit: number }
+    rankingParams: CourseRankingParams
 }
 
 export const CourseDetailPanel: FC<CourseDetailPanelProps> = ({ courseHash, rankingParams }) => {
+    const router = useRouter()
+    const pathname = usePathname()
     const meta = useCourseMeta(courseHash)
     const ranking = useCourseRanking(courseHash, rankingParams)
 
     const rows = ranking.data ?? []
+
+    const handleScratchAutoChange = (checked: boolean) => {
+        const query = serializeSearchParams({ [INCLUDE_SCRATCH_AUTO_PARAM]: checked ? 'true' : undefined })
+        router.push(query ? `${pathname}?${query}` : pathname, { scroll: false })
+    }
 
     if (meta.isLoading) return <ShellPageLoading title={PAGE_TITLE} />
 
@@ -115,7 +130,10 @@ export const CourseDetailPanel: FC<CourseDetailPanelProps> = ({ courseHash, rank
                     ))}
                 </PanelCard>
             )}
-            <PanelCard title='순위' contentClassName='flex flex-col gap-2'>
+            <PanelCard
+                title='순위'
+                action={<ScratchAutoToggle checked={rankingParams.include_scratch_auto} onCheckedChange={handleScratchAutoChange} />}
+                contentClassName='flex flex-col gap-2'>
                 {ranking.isLoading && <TableSkeleton />}
                 {!ranking.isLoading && ranking.isError && (
                     <LoadErrorState title='순위를 불러오지 못했습니다' isRetrying={ranking.isFetching} onRetry={() => void ranking.refetch()} />
@@ -124,7 +142,7 @@ export const CourseDetailPanel: FC<CourseDetailPanelProps> = ({ courseHash, rank
                 {!ranking.isLoading && !ranking.isError && rows.length > 0 && (
                     <DataTable columns={RANKING_COLUMNS} rows={rows} rowKey={(row) => `${row.player.id}-${row.played_at}`} caption='코스 순위' />
                 )}
-                <PanelFootnote>순위에서 제외된(unranked) 기록은 표시되지 않습니다.</PanelFootnote>
+                <PanelFootnote>순위에서 제외된(unranked) 기록은 표시되지 않습니다. {SCRATCH_AUTO_LIST_NOTE}</PanelFootnote>
             </PanelCard>
         </ShellPage>
     )

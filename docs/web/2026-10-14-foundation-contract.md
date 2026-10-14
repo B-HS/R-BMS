@@ -241,11 +241,12 @@ export const metadata = {
 
 ```json
 {"success":true,"data":{"table_id":"insane1","records":{
-  "0077fe17f69a9db8922c16ac00df960f":{"clear":"Hard","ex_score":1550,"minbp":12,"max_combo":500,"total_notes":1200,"played_at":1791949770000}}}}
+  "0077fe17f69a9db8922c16ac00df960f":{"clear":"Hard","ex_score":1550,"minbp":12,"max_combo":500,"total_notes":1200,"played_at":1791949770000,"scratch_auto":false}}}}
 ```
 
 - `clear` 는 `ClearLamp` 문자열입니다. 랭크는 `getDjRank(ex_score, total_notes * 2)` 로 계산합니다. 1,035곡 전부에 기록이 있어도 200KB 안쪽이고 한 번의 호출입니다.
 - 세션이 없으면 401 이므로 비로그인에서는 부르지 않습니다(`useSessionUser().user` 가 `null` 이면 `enabled: false`).
+- `scratch_auto`(웨이브 20): 내 기록은 일반 판 최고와 SCRATCH AUTO 판 최고 가운데 더 높은 것이고, `true` 면 SCRATCH AUTO 판입니다. 표의 카드와 곡 창은 그때 A-SCR 을 붙입니다.
 - 내 기록은 `chart.md5` 로 맞춥니다(`chart_best` 기준). md5 하나에 대응하는 차트 행이 여럿(sha256 이 다름)이면 그중 한 건만 담기며 어느 것인지는 정해져 있지 않습니다.
 
 표준 형식(봉투 없음, `Access-Control-Allow-Origin: *`, `Cache-Control: public, max-age=3600, s-maxage=3600, stale-while-revalidate=86400`):
@@ -314,12 +315,23 @@ FolderDetail  = FolderSummary + { "items":[{ "md5":"0077…","sha256":"…03e9",
 - 차트 제목 보강: 제출이 만든 제목 없는 차트 행은 읽을 때 번들 표의 제목·아티스트로 채워집니다(`GET /api/charts/{hash}`, FE 리더보드, 검색, 활동 피드). 점수 제출 본문의 `chart` 에 `title`, `artist`, `level` 을 선택으로 실을 수 있고 제목 없는 행만 채워집니다.
 - `POST /api/charts` 는 빈 값만 채우는 방식(fill-only)이고 `POST /api/courses/meta` 는 관리자 세션 전용입니다.
 
+### 6.6 웨이브 20: SCRATCH AUTO 순위
+
+사용자 결정(2026-10-14): SCRATCH AUTO 판도 순위에 올리되 순위 목록에서는 기본으로 보이지 않고 토글을 켜면 보입니다. 넓힌 판정 판은 그대로 unranked 입니다.
+
+- 쿼리 `include_scratch_auto=true|false`(기본 `false`): `/api/fe/charts/{hash}/leaderboard`, `/api/charts/{hash}/ranking`·`/best`, `/api/courses/{hash}/ranking`·`/best`, `/api/fe/leaderboards/players`. 차트·코스 목록은 기본이 일반 판 최고, 켜면 플레이어마다 일반 판 최고와 SCRATCH AUTO 판 최고 가운데 더 높은 것입니다. 리더보드의 클리어·플레이 곡·제출 수는 기본이 일반 판만이고, 켜면 SCRATCH AUTO 판까지 셉니다.
+- 목록 행 `ScoreRecord.extra.scratch_auto: true` 가 SCRATCH AUTO 판입니다(없으면 일반 판). 활동 행(`/api/fe/players/{id}/recent`)은 `scratch_auto: boolean`, 통계(`/api/fe/players/{id}/stats`)는 `scratch_auto_charts`(더 높은 쪽이 SCRATCH AUTO 판인 곡 수)가 더해졌습니다. 홈의 최근 활동은 SCRATCH AUTO 판을 뺍니다.
+- 화면: 차트 순위(`chart-leaderboard-panel.tsx`, 순위 머리), 코스 순위(`course-detail-panel.tsx`, 순위 카드의 action), 리더보드(`player-leaderboard-panel.tsx`, 정렬 옆)에 `ScratchAutoToggle`(`@features/filter/scratch-auto-toggle`, shadcn `Switch`)이 있고, 상태는 주소의 `include_scratch_auto=true` 로 남습니다(`router.push`, 뒤로 가기로 돌아감). 서버 `*-content.tsx` 가 `readBooleanParam` 으로 읽어 같은 값으로 미리 채웁니다. SCRATCH AUTO 행에는 `ScratchAutoBadge`(`@features/score/scratch-auto-badge`, 무채색 outline "A-SCR")가 붙고 뜻은 각 목록의 각주(`SCRATCH_AUTO_LIST_NOTE`)로 알립니다. 문구 상수는 `@shared/constants/scratch-auto`.
+
 ## 7. 쿼리 키 규칙
 
 `QUERY_KEY`(`@shared/constants/query-key`)는 도메인 → 동작 → 파라미터 계층의 배열입니다. 파라미터 없는 키는 정적 배열, 있는 키는 함수입니다. 기존 `TABLE`(`['table', ...]`)은 DB 의 IR 표(`/api/tables`)용이라 섞지 않습니다. 아래가 17B-2 에서 실제로 들어간 키입니다.
 
 | 키 | 값 | 훅·옵션 |
 |---|---|---|
+| `CHART.RANKING(hash, params)` | `['chart', 'ranking', hash, { include_scratch_auto }]` | `chartLeaderboardQueryOptions(hash, params)`, `useChartLeaderboard(hash, params)`. 웨이브 20 에서 `params` 가 더해졌습니다 |
+| `COURSE.RANKING(courseHash, params)` | `['course', 'ranking', courseHash, { limit, include_scratch_auto }]` | `courseRankingQueryOptions`, `useCourseRanking` |
+| `LEADERBOARD.PLAYERS(params)` | `['leaderboard', 'players', { sort, page, limit, include_scratch_auto }]` | `playerLeaderboardQueryOptions`, `usePlayerLeaderboard` |
 | `TABLE_SNAPSHOT.RECORDS_ALL` | `['table-snapshot', 'records']` | 사용자 묶음 정리용 접두 |
 | `TABLE_SNAPSHOT.RECORDS(tableId, userId)` | `['table-snapshot', 'records', tableId, userId]` | `tableSnapshotRecordsQueryOptions(tableId, userId)`, `useGetTableSnapshotRecords(tableId, userId \| null)`(null 이면 꺼짐). `queryFn` 은 봉투를 벗긴 `records` 맵(md5 → 기록) |
 | `FOLDER.ALL` | `['folder']` | 곡이 들어가고 빠지는 변경의 무효화 |

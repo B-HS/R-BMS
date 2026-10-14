@@ -9,6 +9,11 @@ export type CourseTrophy = {
     smissrate: number
 }
 
+export type CourseRankingParams = {
+    limit: number
+    include_scratch_auto: boolean
+}
+
 export type CourseMeta = {
     course_hash: string
     name: string

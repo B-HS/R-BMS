@@ -5,6 +5,7 @@ import { chart, course, courseBest, courseChart, courseScore, rival } from '@ser
 import { newId } from '@server/lib/token'
 import { createCourseService } from '@server/service/domain/course/course.service'
 import type { ScoreRankingRow } from '@server/service/domain/score/score.service'
+import { courseBestScope } from '@server/compose/best-scope'
 
 const courseRankingSelection = {
     scoreId: courseScore.id,
@@ -15,6 +16,7 @@ const courseRankingSelection = {
     maxCombo: courseScore.maxCombo,
     minbp: courseScore.minbp,
     playedAt: courseScore.playedAt,
+    scratchAuto: courseScore.scratchAuto,
     epg: courseScore.epg,
     lpg: courseScore.lpg,
     egr: courseScore.egr,
@@ -38,6 +40,7 @@ type CourseRankingSelectionRow = {
     maxCombo: number
     minbp: number
     playedAt: number
+    scratchAuto: boolean
     epg: number
     lpg: number
     egr: number
@@ -64,6 +67,7 @@ const toCourseRankingRow = (row: CourseRankingSelectionRow): ScoreRankingRow => 
     lntype: 0,
     option: 0,
     totalNotes: 0,
+    scratchAuto: row.scratchAuto,
     judge: {
         pgreat: row.epg + row.lpg,
         great: row.egr + row.lgr,
@@ -150,11 +154,11 @@ export const composeCourse = (db: Database) => {
             insertCourseScore: async (row) => {
                 await db.insert(courseScore).values(row)
             },
-            getCourseBest: async ({ courseHash, userId }) => {
+            getCourseBest: async ({ courseHash, userId, scratchAuto }) => {
                 const [row] = await db
                     .select({ clear: courseBest.clear, exScore: courseBest.exScore, minbp: courseBest.minbp })
                     .from(courseBest)
-                    .where(and(eq(courseBest.courseHash, courseHash), eq(courseBest.userId, userId)))
+                    .where(and(eq(courseBest.courseHash, courseHash), eq(courseBest.userId, userId), eq(courseBest.scratchAuto, scratchAuto)))
                     .limit(1)
                 return row ?? null
             },
@@ -166,37 +170,44 @@ export const composeCourse = (db: Database) => {
                         set: { courseScoreId: row.courseScoreId, clear: row.clear, exScore: row.exScore, minbp: row.minbp, maxCombo: row.maxCombo },
                     })
             },
-            countBetterCourseBests: async ({ courseHash, clear, exScore }) => {
+            countBetterCourseBests: async ({ courseHash, clear, exScore, includeScratchAuto }) => {
                 const [row] = await db
                     .select({ value: count() })
                     .from(courseBest)
                     .where(
                         and(
                             eq(courseBest.courseHash, courseHash),
+                            courseBestScope(db, includeScratchAuto),
                             or(sql`${courseBest.clear} > ${clear}`, and(eq(courseBest.clear, clear), sql`${courseBest.exScore} > ${exScore}`)),
                         ),
                     )
                 return row?.value ?? 0
             },
-            getCourseRanking: async ({ courseHash, limit, offset, userIds }) => {
+            getCourseRanking: async ({ courseHash, limit, offset, userIds, includeScratchAuto }) => {
                 const rows = await db
                     .select(courseRankingSelection)
                     .from(courseBest)
                     .innerJoin(courseScore, eq(courseScore.id, courseBest.courseScoreId))
                     .innerJoin(user, eq(user.id, courseBest.userId))
-                    .where(and(eq(courseBest.courseHash, courseHash), userIds ? inArray(courseBest.userId, userIds) : undefined))
+                    .where(
+                        and(
+                            eq(courseBest.courseHash, courseHash),
+                            courseBestScope(db, includeScratchAuto),
+                            userIds ? inArray(courseBest.userId, userIds) : undefined,
+                        ),
+                    )
                     .orderBy(desc(courseBest.clear), desc(courseBest.exScore), asc(courseBest.minbp))
                     .limit(limit)
                     .offset(offset)
                 return rows.map(toCourseRankingRow)
             },
-            getCourseBestByLoginId: async ({ courseHash, loginId }) => {
+            getCourseBestByLoginId: async ({ courseHash, loginId, includeScratchAuto }) => {
                 const [row] = await db
                     .select(courseRankingSelection)
                     .from(courseBest)
                     .innerJoin(courseScore, eq(courseScore.id, courseBest.courseScoreId))
                     .innerJoin(user, eq(user.id, courseBest.userId))
-                    .where(and(eq(courseBest.courseHash, courseHash), eq(user.loginId, loginId)))
+                    .where(and(eq(courseBest.courseHash, courseHash), courseBestScope(db, includeScratchAuto), eq(user.loginId, loginId)))
                     .limit(1)
                 return row ? toCourseRankingRow(row) : null
             },

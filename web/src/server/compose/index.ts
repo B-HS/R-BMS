@@ -22,6 +22,7 @@ import { composeSetting } from '@server/compose/setting'
 import { composeFolder } from '@server/compose/folder'
 import { composeTable } from '@server/compose/table'
 import { composeTableSnapshot } from '@server/compose/table-snapshot'
+import { chartBestScope } from '@server/compose/best-scope'
 import type { JudgeBreakdownInput } from '@server/dto/common'
 
 type JudgeColumns = {
@@ -115,6 +116,7 @@ const rankingSelection = {
     option: score.option,
     totalNotes: score.notes,
     replayId: score.replayId,
+    scratchAuto: score.scratchAuto,
     ...judgeSelection,
 }
 
@@ -131,6 +133,7 @@ type RankingSelectionRow = JudgeColumns & {
     option: number
     totalNotes: number
     replayId: string | null
+    scratchAuto: boolean
 }
 
 const toRankingRow = (row: RankingSelectionRow): ScoreRankingRow => ({
@@ -146,6 +149,7 @@ const toRankingRow = (row: RankingSelectionRow): ScoreRankingRow => ({
     option: row.option,
     totalNotes: row.totalNotes,
     replayId: row.replayId,
+    scratchAuto: row.scratchAuto,
     judge: toJudgeBreakdown(row),
 })
 
@@ -225,11 +229,11 @@ const composeAll = () => {
             insertScore: async (row) => {
                 await db.insert(score).values(row)
             },
-            getChartBest: async ({ chartSha256, userId }) => {
+            getChartBest: async ({ chartSha256, userId, scratchAuto }) => {
                 const [row] = await db
                     .select({ clear: chartBest.clear, exScore: chartBest.exScore, minbp: chartBest.minbp })
                     .from(chartBest)
-                    .where(and(eq(chartBest.chartSha256, chartSha256), eq(chartBest.userId, userId)))
+                    .where(and(eq(chartBest.chartSha256, chartSha256), eq(chartBest.userId, userId), eq(chartBest.scratchAuto, scratchAuto)))
                     .limit(1)
                 return row ?? null
             },
@@ -241,19 +245,20 @@ const composeAll = () => {
                         set: { scoreId: row.scoreId, clear: row.clear, exScore: row.exScore, minbp: row.minbp, maxCombo: row.maxCombo },
                     })
             },
-            countBetterBests: async ({ chartSha256, clear, exScore }) => {
+            countBetterBests: async ({ chartSha256, clear, exScore, includeScratchAuto }) => {
                 const [row] = await db
                     .select({ value: count() })
                     .from(chartBest)
                     .where(
                         and(
                             eq(chartBest.chartSha256, chartSha256),
+                            chartBestScope(db, includeScratchAuto),
                             or(sql`${chartBest.clear} > ${clear}`, and(eq(chartBest.clear, clear), sql`${chartBest.exScore} > ${exScore}`)),
                         ),
                     )
                 return row?.value ?? 0
             },
-            getRanking: async ({ chartSha256, limit, offset, lnmode, userIds }) => {
+            getRanking: async ({ chartSha256, limit, offset, lnmode, userIds, includeScratchAuto }) => {
                 const rows = await db
                     .select(rankingSelection)
                     .from(chartBest)
@@ -262,6 +267,7 @@ const composeAll = () => {
                     .where(
                         and(
                             eq(chartBest.chartSha256, chartSha256),
+                            chartBestScope(db, includeScratchAuto),
                             lnmode === undefined ? undefined : eq(score.lntype, lnmode),
                             userIds ? inArray(chartBest.userId, userIds) : undefined,
                         ),
@@ -271,7 +277,7 @@ const composeAll = () => {
                     .offset(offset)
                 return rows.map(toRankingRow)
             },
-            getBestByLoginId: async ({ chartSha256, loginId, lnmode }) => {
+            getBestByLoginId: async ({ chartSha256, loginId, lnmode, includeScratchAuto }) => {
                 const [row] = await db
                     .select(rankingSelection)
                     .from(chartBest)
@@ -280,6 +286,7 @@ const composeAll = () => {
                     .where(
                         and(
                             eq(chartBest.chartSha256, chartSha256),
+                            chartBestScope(db, includeScratchAuto),
                             eq(user.loginId, loginId),
                             lnmode === undefined ? undefined : eq(score.lntype, lnmode),
                         ),

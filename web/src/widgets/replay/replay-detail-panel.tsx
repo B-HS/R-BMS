@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { PanelCard } from '@features/shell/panel-card'
 import { PanelFootnote } from '@features/shell/panel-footnote'
 import { MetaBadge } from '@features/badge/meta-badge'
+import { ScratchAutoBadge } from '@features/score/scratch-auto-badge'
 import { LoadErrorState } from '@features/state/load-error-state'
 import { NotFoundNotice } from '@features/state/not-found-notice'
 import { ShellPage } from '@widgets/shell/shell-page'
@@ -41,11 +42,12 @@ export const ReplayDetailPanel: FC<{ replayId: string }> = ({ replayId }) => {
     return (
         <ShellPage title={PAGE_TITLE} description={data.id}>
             <PanelCard title='리플레이' contentClassName='flex flex-col gap-2'>
-                <div className='flex flex-wrap gap-1'>
+                <div className='flex flex-wrap items-center gap-1'>
                     <MetaBadge>{data.mode}</MetaBadge>
                     <MetaBadge>{data.random}</MetaBadge>
                     <MetaBadge>seed {data.seed}</MetaBadge>
                     <MetaBadge>lntype {data.lntype}</MetaBadge>
+                    {data.scratch_auto && <ScratchAutoBadge />}
                 </div>
                 <dl className='flex flex-col text-xs'>
                     <div className={META_ROW_CLASS}>

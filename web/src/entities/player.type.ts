@@ -15,4 +15,5 @@ export type PlayerStats = {
     total_plays: number
     cleared: number
     lamps: { clear: ClearLamp; count: number }[]
+    scratch_auto_charts: number
 }

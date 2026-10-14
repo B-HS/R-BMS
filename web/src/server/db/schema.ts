@@ -146,14 +146,15 @@ export const chartBest = mysqlTable(
         exScore: int('ex_score').default(0).notNull(),
         minbp: int('minbp').default(0).notNull(),
         maxCombo: int('max_combo').default(0).notNull(),
+        scratchAuto: boolean('scratch_auto').default(false).notNull(),
         updatedAt: timestamp('updated_at', { fsp: 3 })
             .defaultNow()
             .$onUpdate(() => new Date())
             .notNull(),
     },
     (table) => [
-        primaryKey({ columns: [table.chartSha256, table.userId] }),
-        index('chart_best_rank_idx').on(table.chartSha256, table.clear, table.exScore),
+        primaryKey({ columns: [table.chartSha256, table.userId, table.scratchAuto] }),
+        index('chart_best_rank_idx').on(table.chartSha256, table.scratchAuto, table.clear, table.exScore),
     ],
 )
 
@@ -269,6 +270,7 @@ export const courseScore = mysqlTable(
         gaugeValue: float('gauge_value').default(0).notNull(),
         minbp: int('minbp').default(0).notNull(),
         trophy: varchar('trophy', { length: 32 }),
+        scratchAuto: boolean('scratch_auto').default(false).notNull(),
         ranked: boolean('ranked').default(true).notNull(),
         playedAt: bigint('played_at', { mode: 'number' }).notNull(),
         createdAt: timestamp('created_at', { fsp: 3 }).defaultNow().notNull(),
@@ -290,12 +292,13 @@ export const courseBest = mysqlTable(
         exScore: int('ex_score').default(0).notNull(),
         minbp: int('minbp').default(0).notNull(),
         maxCombo: int('max_combo').default(0).notNull(),
+        scratchAuto: boolean('scratch_auto').default(false).notNull(),
         updatedAt: timestamp('updated_at', { fsp: 3 })
             .defaultNow()
             .$onUpdate(() => new Date())
             .notNull(),
     },
-    (table) => [primaryKey({ columns: [table.courseHash, table.userId] })],
+    (table) => [primaryKey({ columns: [table.courseHash, table.userId, table.scratchAuto] })],
 )
 
 export const difficultyTable = mysqlTable('difficulty_table', {

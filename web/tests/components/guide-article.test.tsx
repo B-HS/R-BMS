@@ -29,8 +29,13 @@ describe('연동 가이드 문서', () => {
 
     test('랭킹 제외 조건을 결정 12 기준으로 담는다', () => {
         const html = markup()
-        for (const reason of ['autoplay', 'replay playback', 'widened judge', 'auto scratch', 'assist options', 'UNRANKED'])
-            expect(html).toContain(reason)
+        for (const reason of ['autoplay', 'replay playback', 'widened judge', 'assist options', 'UNRANKED']) expect(html).toContain(reason)
+    })
+
+    test('SCRATCH AUTO 판은 랭킹에 오르되 기본 목록에서 빠지고 토글로 보인다고 안내한다', () => {
+        const html = markup()
+        expect(html).not.toContain('UNRANKED: auto scratch')
+        for (const token of ['SCRATCH AUTO 포함', 'A-SCR', 'IR: RANK #&lt;순위&gt; (SCRATCH AUTO)']) expect(html).toContain(token)
     })
 
     test('어시스트 플레이는 제출 생략이 아니라 랭킹 제외로 안내한다', () => {

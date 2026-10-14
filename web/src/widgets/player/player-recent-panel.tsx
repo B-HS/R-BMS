@@ -34,11 +34,14 @@ export const PlayerRecentPanel: FC<{ playerId: string }> = ({ playerId }) => {
                             exScore={row.ex_score}
                             minBp={row.minbp}
                             playedAt={row.played_at}
+                            isScratchAuto={row.scratch_auto}
                         />
                     ))}
                 </ul>
             )}
-            <p className='text-muted-foreground px-3 py-2 text-xs'>순위 반영 여부와 무관하게 최근 제출 순으로 표시됩니다.</p>
+            <p className='text-muted-foreground px-3 py-2 text-xs'>
+                순위 반영 여부와 무관하게 최근 제출 순으로 표시됩니다. A-SCR 은 SCRATCH AUTO 로 친 기록입니다.
+            </p>
         </DashboardPanel>
     )
 }

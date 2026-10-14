@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { playOptionsSchema, type PlayOptionsInput } from '@server/dto/common'
-import { BUILD_TRUST, rankedPolicy } from '@server/service/domain/score/ranked-policy'
+import { BUILD_TRUST, assistFlags, isScratchAutoPlay, rankedPolicy, submissionMessage } from '@server/service/domain/score/ranked-policy'
 
 const cleanOptions = (overrides: Partial<PlayOptionsInput> = {}) =>
     playOptionsSchema.parse({
@@ -33,24 +33,55 @@ describe('rankedPolicy', () => {
         expect(result.flags).toEqual(['AUTOPLAY'])
     })
 
-    test('스크래치 오토는 SCRATCH_AUTO 로 unranked 다', () => {
+    test('SCRATCH AUTO 판은 SCRATCH_AUTO 표지를 달고 ranked 로 남는다', () => {
+        const result = rankedPolicy({
+            options: cleanOptions({ scratch_auto: true, assist: ['AUTO_SCRATCH'] }),
+            buildTrust: BUILD_TRUST.TRUSTED,
+            isGuest: false,
+            requireTrustedBuild: false,
+        })
+        expect(result.flags).toEqual(['SCRATCH_AUTO'])
+        expect(result.ranked).toBe(true)
+        expect(result.scratchAuto).toBe(true)
+        expect(submissionMessage(result.ranked, result.flags)).toBe('saved (scratch auto)')
+    })
+
+    test('assist 태그 없이 scratch_auto 만 보낸 옛 클라이언트 판도 SCRATCH AUTO 판으로 ranked 다', () => {
         const result = rankedPolicy({
             options: cleanOptions({ scratch_auto: true }),
             buildTrust: BUILD_TRUST.TRUSTED,
             isGuest: false,
             requireTrustedBuild: false,
         })
-        expect(result.flags).toEqual(['SCRATCH_AUTO'])
+        expect(result).toEqual({ ranked: true, flags: ['SCRATCH_AUTO'], scratchAuto: true })
     })
 
-    test('어시스트가 하나라도 있으면 ASSIST 로 unranked 다', () => {
+    test('AUTO_SCRATCH 태그만 와도 SCRATCH AUTO 판으로 본다', () => {
+        expect(isScratchAutoPlay({ scratch_auto: false, assist: ['AUTO_SCRATCH'] })).toBe(true)
+        expect(assistFlags({ scratch_auto: false, assist: ['AUTO_SCRATCH'] })).toEqual(['SCRATCH_AUTO'])
+    })
+
+    test('AUTO_SCRATCH 밖의 어시스트 태그가 있으면 ASSIST 로 unranked 다', () => {
         const result = rankedPolicy({
-            options: cleanOptions({ assist: ['AUTO_SCRATCH'] }),
+            options: cleanOptions({ assist: ['CUSTOM_JUDGE'], judge_rate: 120 }),
             buildTrust: BUILD_TRUST.TRUSTED,
             isGuest: false,
             requireTrustedBuild: false,
         })
-        expect(result.flags).toEqual(['ASSIST'])
+        expect(result.flags).toEqual(['ASSIST', 'JUDGE_WIDTH'])
+        expect(result.ranked).toBe(false)
+    })
+
+    test('SCRATCH AUTO 와 넓힌 판정을 함께 쓴 판은 넓힌 판정 때문에 unranked 이고 사유에 scratch_auto 를 넣지 않는다', () => {
+        const result = rankedPolicy({
+            options: cleanOptions({ scratch_auto: true, assist: ['AUTO_SCRATCH', 'CUSTOM_JUDGE'], judge_rate: 120 }),
+            buildTrust: BUILD_TRUST.TRUSTED,
+            isGuest: false,
+            requireTrustedBuild: false,
+        })
+        expect(result.flags).toEqual(['SCRATCH_AUTO', 'ASSIST', 'JUDGE_WIDTH'])
+        expect(result.ranked).toBe(false)
+        expect(submissionMessage(result.ranked, result.flags)).toBe('recorded (unranked: assist,judge_width)')
     })
 
     test('judge_rate 가 100 을 넘으면 JUDGE_WIDTH 로 unranked 다', () => {

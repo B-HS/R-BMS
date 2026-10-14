@@ -44,6 +44,9 @@
 | player scores `limit` / `page` | 50 / 1 | `MAX_PLAYER_SCORES_LIMIT` = 100 |
 | chart replays `limit` | 50 | `MAX_REPLAY_LIST_LIMIT` = 200 |
 | `lnmode` | 없음 | 0~2 |
+| `include_scratch_auto`(ranking·best, 웨이브 20) | `false` | `true`·`false` |
+
+`include_scratch_auto` 를 빼면(클라이언트는 싣지 않는다) 일반 판 최고만의 기본 목록이다. `true` 면 플레이어마다 일반 판 최고와 SCRATCH AUTO 판 최고 가운데 더 높은 것이고, SCRATCH AUTO 판 행은 `extra.scratch_auto: true` 를 단다. 곡 선택의 IR RANKING 패널은 기본 목록을 쓴다.
 
 미등록 차트의 ranking/replays 는 404 가 아니라 **빈 배열**, best 는 **`null`** 이다.
 
@@ -139,7 +142,9 @@
   "played_at": 1700000000000, "extra": {} }
 // scratch_auto/assist 는 단일 곡 options 와 같은 어휘이고 코스 전체로 접은 값이다. 어시스트가 없으면
 // 클라는 두 필드를 싣지 않아 본문이 전과 같고, 이 필드를 모르는 구버전 서버도 거절하지 않는다.
-// 서버는 어시스트 코스를 ranked=false 로 저장하고 코스 순위·베스트에 넣지 않는다.
+// 서버(웨이브 20)는 SCRATCH AUTO 만 낀 코스를 ranked=true + flags ["SCRATCH_AUTO"] 로 저장하고
+// SCRATCH AUTO 칸의 코스 베스트에 넣는다(rank 는 SCRATCH AUTO 포함 목록 기준). CUSTOM_JUDGE 가 낀 코스는
+// ranked=false + ASSIST 로 저장하고 코스 순위·베스트에 넣지 않는다.
 
 // ReplayData — POST /charts/{md5}/replays 본문 이자 GET /replays/{id} 응답
 { "api_version": 1, "id": null, "format": "rbms-us-v1",
@@ -193,7 +198,7 @@
 | 문자열 | `ScoreFlag` | 랭킹 차단 |
 |---|---|---|
 | `AUTOPLAY` | `Autoplay` | O |
-| `SCRATCH_AUTO` | `ScratchAuto` | O |
+| `SCRATCH_AUTO` | `ScratchAuto` | X (웨이브 20부터 표지만. SCRATCH AUTO 판은 ranked 이고 `rank` 는 SCRATCH AUTO 포함 목록 기준이며, 결과 화면은 `IR: RANK #n (SCRATCH AUTO)` 로 쓴다) |
 | `ASSIST` | `Assist` | O |
 | `JUDGE_WIDTH` | `JudgeWidth` | O |
 | `TOTAL_OVERRIDE` | `TotalOverride` | O |

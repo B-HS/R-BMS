@@ -72,6 +72,7 @@ describe('순위 항목의 replay_id', () => {
         lntype: 0,
         option: 0,
         totalNotes: 10,
+        scratchAuto: false,
         judge: null,
     }
 
@@ -82,5 +83,9 @@ describe('순위 항목의 replay_id', () => {
     test('붙지 않았거나 모르면 extra 는 비어 있다', () => {
         expect(toScoreRecord({ ...row, replayId: null }, 1).extra).toEqual({})
         expect(toScoreRecord(row, 1).extra).toEqual({})
+    })
+
+    test('SCRATCH AUTO 판은 extra.scratch_auto 로 알린다', () => {
+        expect(toScoreRecord({ ...row, scratchAuto: true, replayId: 'rp_2' }, 1).extra).toEqual({ replay_id: 'rp_2', scratch_auto: true })
     })
 })

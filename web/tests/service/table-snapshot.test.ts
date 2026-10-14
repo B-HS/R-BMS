@@ -174,8 +174,17 @@ describe('내 기록', () => {
         const asked: string[][] = []
         const service = createService(
             [
-                { md5: entries[0].md5, clear: 6, exScore: 1234, minbp: 7, maxCombo: 321, totalNotes: 800, playedAt: 1_760_000_000_000 },
-                { md5: '0'.repeat(32), clear: 4, exScore: 1, minbp: 1, maxCombo: 1, totalNotes: 1, playedAt: 1 },
+                {
+                    md5: entries[0].md5,
+                    clear: 6,
+                    exScore: 1234,
+                    minbp: 7,
+                    maxCombo: 321,
+                    totalNotes: 800,
+                    playedAt: 1_760_000_000_000,
+                    scratchAuto: true,
+                },
+                { md5: '0'.repeat(32), clear: 4, exScore: 1, minbp: 1, maxCombo: 1, totalNotes: 1, playedAt: 1, scratchAuto: false },
             ],
             (md5s) => asked.push(md5s),
         )
@@ -191,6 +200,7 @@ describe('내 기록', () => {
             max_combo: 321,
             total_notes: 800,
             played_at: 1_760_000_000_000,
+            scratch_auto: true,
         })
     })
 
@@ -209,6 +219,7 @@ describe('내 기록', () => {
             maxCombo: 99_999,
             totalNotes: 99_999,
             playedAt: 1_760_000_000_000,
+            scratchAuto: true,
         }))
         const records = await createService(rows).getRecords({ tableId: TABLE_ID, userId: 'user-1' })
         expect(JSON.stringify({ success: true, data: records }).length).toBeLessThan(200 * 1024)

@@ -7,7 +7,7 @@ export const QUERY_KEY = {
     CHART: {
         ALL: ['chart'],
         META: (hash: string) => ['chart', 'meta', hash],
-        RANKING: (hash: string) => ['chart', 'ranking', hash],
+        RANKING: (hash: string, params: Record<string, unknown>) => ['chart', 'ranking', hash, params],
         BEST: (hash: string, player: string) => ['chart', 'best', hash, player],
         SEARCH: (params: Record<string, unknown>) => ['chart', 'search', params],
         REPLAYS: (hash: string, params: Record<string, unknown>) => ['chart', 'replays', hash, params],

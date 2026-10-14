@@ -34,14 +34,14 @@ export const getChartMetaCached = async (hash: string) => {
     return compose().chartService.getMetaByHash(hash)
 }
 
-export const getChartRankingCached = async (params: { chartSha256: string; limit: number; page: number; lnmode?: number; rivalOf?: string }) => {
+export const getChartRankingCached = async (params: Parameters<Composed['scoreService']['getRanking']>[0]) => {
     'use cache'
     cacheLife('minutes')
     cacheTag(CACHE_TAG.chartRanking(params.chartSha256))
     return compose().scoreService.getRanking(params)
 }
 
-export const getChartBestCached = async (params: { chartSha256: string; loginId: string; lnmode?: number }) => {
+export const getChartBestCached = async (params: Parameters<Composed['scoreService']['getBest']>[0]) => {
     'use cache'
     cacheLife('minutes')
     cacheTag(CACHE_TAG.chartBest(params.chartSha256))
@@ -108,14 +108,14 @@ export const getCourseMetaCached = async (courseHash: string) => {
     return compose().courseService.getMeta(courseHash)
 }
 
-export const getCourseRankingCached = async (params: { courseHash: string; limit: number; page: number; rivalOf?: string }) => {
+export const getCourseRankingCached = async (params: Parameters<Composed['courseService']['getRanking']>[0]) => {
     'use cache'
     cacheLife('minutes')
     cacheTag(CACHE_TAG_EXT.courseRanking(params.courseHash))
     return compose().courseService.getRanking(params)
 }
 
-export const getCourseBestCached = async (params: { courseHash: string; loginId: string }) => {
+export const getCourseBestCached = async (params: Parameters<Composed['courseService']['getBest']>[0]) => {
     'use cache'
     cacheLife('minutes')
     cacheTag(CACHE_TAG_EXT.courseBest(params.courseHash))

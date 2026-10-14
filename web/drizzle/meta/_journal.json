@@ -15,6 +15,13 @@
       "when": 1791947162271,
       "tag": "0001_user_folders",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1791970074354,
+      "tag": "0002_scratch_auto_bests",
+      "breakpoints": true
     }
   ]
 }

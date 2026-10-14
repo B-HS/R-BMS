@@ -2,6 +2,9 @@
 
 import type { FC } from 'react'
 import Link from 'next/link'
+import { usePathname, useRouter } from 'next/navigation'
+import { ScratchAutoToggle } from '@features/filter/scratch-auto-toggle'
+import { ScratchAutoBadge } from '@features/score/scratch-auto-badge'
 import { PanelFootnote } from '@features/shell/panel-footnote'
 import { StatTile } from '@features/shell/stat-tile'
 import { DataTable, type DataTableColumn } from '@features/table/data-table'
@@ -13,11 +16,14 @@ import { ShellPage } from '@widgets/shell/shell-page'
 import { ShellPageLoading } from '@widgets/shell/shell-page-loading'
 import { AddToFolderMenu } from '@widgets/folder/add-to-folder-menu'
 import { useChartLeaderboard } from '@entities/chart.query'
+import type { ChartLeaderboardParams } from '@entities/chart.type'
 import type { ScoreRecord } from '@entities/score.type'
 import { CLEAR_LAMPS, CLEAR_LAMP_LABEL } from '@shared/constants/clear-lamp'
+import { INCLUDE_SCRATCH_AUTO_PARAM, SCRATCH_AUTO_LIST_NOTE } from '@shared/constants/scratch-auto'
 import { cn } from '@shared/lib/cn'
 import { getDjRank, getDjRankClassName } from '@shared/lib/dj-rank'
 import { formatChartTitle, formatCount, formatDateTime, formatHash, getMaxExScore } from '@shared/lib/format'
+import { serializeSearchParams } from '@shared/lib/search-params'
 import { Badge } from '@shared/ui/badge'
 import { CopyButton } from '@shared/ui/copy-button'
 
@@ -35,9 +41,12 @@ const COLUMNS: DataTableColumn<ScoreRecord>[] = [
         label: '플레이어',
         flex: true,
         cell: (row) => (
-            <Link href={`/players/${encodeURIComponent(row.player.id)}`} className='font-medium hover:underline'>
-                {row.player_name}
-            </Link>
+            <span className='flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5'>
+                <Link href={`/players/${encodeURIComponent(row.player.id)}`} className='max-w-full truncate font-medium hover:underline'>
+                    {row.player_name}
+                </Link>
+                {row.extra.scratch_auto === true && <ScratchAutoBadge />}
+            </span>
         ),
     },
     { key: 'clear', label: '램프', width: 128, cell: (row) => <LampLabel lamp={row.clear} /> },
@@ -82,11 +91,19 @@ type ChartTableMembership = {
 
 type ChartLeaderboardPanelProps = {
     hash: string
+    params: ChartLeaderboardParams
     tableMemberships: ChartTableMembership[]
 }
 
-export const ChartLeaderboardPanel: FC<ChartLeaderboardPanelProps> = ({ hash, tableMemberships }) => {
-    const { data, isLoading, isError, isFetching, refetch } = useChartLeaderboard(hash)
+export const ChartLeaderboardPanel: FC<ChartLeaderboardPanelProps> = ({ hash, params, tableMemberships }) => {
+    const router = useRouter()
+    const pathname = usePathname()
+    const { data, isLoading, isError, isFetching, refetch } = useChartLeaderboard(hash, params)
+
+    const handleScratchAutoChange = (checked: boolean) => {
+        const query = serializeSearchParams({ [INCLUDE_SCRATCH_AUTO_PARAM]: checked ? 'true' : undefined })
+        router.push(query ? `${pathname}?${query}` : pathname, { scroll: false })
+    }
 
     if (isLoading) return <ShellPageLoading title={PAGE_TITLE} />
 
@@ -198,9 +215,12 @@ export const ChartLeaderboardPanel: FC<ChartLeaderboardPanelProps> = ({ hash, ta
             </div>
 
             <section aria-labelledby='chart-ranking-heading' className='bg-card flex flex-col'>
-                <h2 id='chart-ranking-heading' className='flex h-9 items-center px-3 text-sm font-semibold'>
-                    순위
-                </h2>
+                <div className='flex min-h-9 flex-wrap items-center justify-between gap-2 px-3 py-1'>
+                    <h2 id='chart-ranking-heading' className='text-sm font-semibold'>
+                        순위
+                    </h2>
+                    <ScratchAutoToggle checked={params.include_scratch_auto} onCheckedChange={handleScratchAutoChange} />
+                </div>
                 {ranking.length === 0 && <EmptyState title='등록된 기록이 없습니다' description='R-BMS 로 이 차트를 플레이하면 여기에 올라옵니다.' />}
                 {ranking.length > 0 && (
                     <div className='px-1'>
@@ -208,7 +228,7 @@ export const ChartLeaderboardPanel: FC<ChartLeaderboardPanelProps> = ({ hash, ta
                     </div>
                 )}
                 <div className='px-3 py-2'>
-                    <PanelFootnote>순위에서 제외된(unranked) 기록은 표시되지 않습니다.</PanelFootnote>
+                    <PanelFootnote>순위에서 제외된(unranked) 기록은 표시되지 않습니다. {SCRATCH_AUTO_LIST_NOTE}</PanelFootnote>
                 </div>
             </section>
         </ShellPage>

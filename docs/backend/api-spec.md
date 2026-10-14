@@ -118,7 +118,7 @@
 ```jsonc
 { "api_version":1, "chart": ChartMeta }   // → 200 ChartMeta
 ```
-### `GET /api/charts/{hash}/ranking?limit=50&page=1&rival_of={id}&lnmode=1`
+### `GET /api/charts/{hash}/ranking?limit=50&page=1&rival_of={id}&lnmode=1&include_scratch_auto=false`
 ```jsonc
 // 200 ScoreRecord[]  (rbms 모드 raw 배열)
 [ { "player":{"id":"alice"}, "player_name":"Alice", "clear":"Hard",
@@ -129,9 +129,11 @@
     "played_at":1700000000000, "extra":{} } ]
 ```
 - `rival_of={id}`: 그 플레이어의 라이벌만(+본인). `lnmode`: 0=LN,1=CN,2=HCN(레퍼런스 구현 `lntype`).
+- `include_scratch_auto`(`true`|`false`, 기본 `false`, 웨이브 20): 기본 목록은 일반 판 최고 기록(`chart_best.scratch_auto=false`)만이다. `true` 면 플레이어마다 일반 판 최고와 SCRATCH AUTO 판 최고 가운데 더 높은 것(램프 → EX → BP, 모두 같으면 일반 판) 한 행이다. SCRATCH AUTO 판 행은 `extra.scratch_auto: true` 를 단다. `rank` 는 그 목록 안의 순위다.
 - LR2IR 호환 필드(`pg=epg+lpg`, `gr=egr+lgr`, `notes`, `combo`, `minbp`)는 `judge`+상위 필드로 유도 가능.
 
-### `GET /api/charts/{hash}/best?player={id}&lnmode=1` → `ScoreRecord | null`  (레퍼런스 구현 getPlayData 본인분)
+### `GET /api/charts/{hash}/best?player={id}&lnmode=1&include_scratch_auto=false` → `ScoreRecord | null`  (레퍼런스 구현 getPlayData 본인분)
+- `include_scratch_auto` 는 순위와 같다: 기본은 일반 판 최고, `true` 면 둘 중 더 높은 것. `rank` 도 같은 목록 기준이다.
 
 ---
 
@@ -181,12 +183,14 @@
 { "accepted":true, "ranked":true, "rank":3, "previous_best":1400, "is_new_best":true,
   "score_id":"sc_…", "flags":[], "message":"saved" }
 // ranked=false 예: { "accepted":true, "ranked":false, "flags":["AUTOPLAY"], "message":"recorded (unranked: autoplay)" }
+// SCRATCH AUTO 예: { "accepted":true, "ranked":true, "rank":2, "flags":["SCRATCH_AUTO"], "message":"saved (scratch auto)" }
 ```
 규칙:
 - **멱등**: 동일 `(player, sha256||md5, played_at)` 재전송은 기존 score_id 반환(중복 생성 X).
 - **best 갱신**: 램프(우선) → EX → BP 순 비교, 더 좋을 때만 best 갱신. 모든 제출은 history로 누적(랭킹은 best 기준). **ranked=false는 best/랭킹 비반영**(기록·리플레이는 보존).
+- **SCRATCH AUTO**(웨이브 20, 사용자 결정 2026-10-14): `options.scratch_auto=true` 이거나 `options.assist` 에 `AUTO_SCRATCH` 가 있는 판은 `SCRATCH_AUTO` 표지 flag 를 달고 **ranked** 다. best 는 `(chart, user, scratch_auto)` 로 나눠 두므로 일반 판 최고와 SCRATCH AUTO 판 최고가 따로 남는다. `previous_best`·`is_new_best` 는 그 판의 칸(일반/SCRATCH AUTO) 기준이고, `rank` 는 그 판이 속한 목록(일반 판은 기본 목록, SCRATCH AUTO 판은 `include_scratch_auto=true` 목록)에서 이 판보다 좋은 기록의 수 + 1 이다. 같은 사용자의 더 좋은 다른 칸 최고 기록(예: 일반 판 800 이 있는데 SCRATCH AUTO 700 을 낸 경우)도 센다. `message` 는 `saved (scratch auto)`. `AUTO_SCRATCH` 밖의 어시스트 태그(`CUSTOM_JUDGE` 등)는 여전히 `ASSIST` 로 unranked 이고, 그때 `message` 의 사유에는 `scratch_auto` 를 넣지 않는다(`recorded (unranked: assist,judge_width)`).
 - EX/BP가 누락되면 `judge`에서 유도: `ex = (epg+lpg)*2 + egr+lgr`, `bp = ebd+lbd+epr+lpr+ems+lms`(레퍼런스 구현 minbp 정의는 BAD+POOR+MISS).
-- **`ranked` 적격성**(§11): autoplay·scratch_auto·assist≠∅·judge_rate≠100·total_override≠0·미인증 빌드해시 등 → `ranked=false` + `flags`. guest 제출도 unranked(설정) 또는 별도 게스트 보드.
+- **`ranked` 적격성**(§11): autoplay·`AUTO_SCRATCH` 밖의 assist·judge_rate>100·total_override≠0·미인증 빌드해시 등 → `ranked=false` + `flags`. SCRATCH AUTO 는 표지만 단다. guest 제출도 unranked(설정) 또는 별도 게스트 보드.
 
 ### `GET /api/scores/{score_id}` → `ScoreRecord`(상세, judge·options·replay_id 포함)
 ### `GET /api/players/{id}/scores?since=&limit=&mode=` → `ScoreRecord[]` (레퍼런스 구현 getPlayData(player, null) — 플레이어 전체)
@@ -219,15 +223,18 @@
   "assist":[],                              // 선택. 스테이지들의 어시스트 태그 합(AUTO_SCRATCH·CUSTOM_JUDGE, 각각 한 번, 최대 16개·각 32자). 없으면 []
   "extra":{} }
 // 201 SubmitResponse
-// 어시스트 코스 예: { "accepted":true, "ranked":false, "rank":null, "is_new_best":false,
-//                    "flags":["SCRATCH_AUTO","ASSIST"], "message":"recorded (unranked: scratch_auto,assist)" }
+// SCRATCH AUTO 코스 예: { "accepted":true, "ranked":true, "rank":2, "is_new_best":true,
+//                        "flags":["SCRATCH_AUTO"], "message":"saved (scratch auto)" }
+// 넓힌 판정이 낀 코스 예: { "accepted":true, "ranked":false, "rank":null, "is_new_best":false,
+//                          "flags":["SCRATCH_AUTO","ASSIST"], "message":"recorded (unranked: assist)" }
 ```
 규칙:
 - `scratch_auto`·`assist` 는 단일 곡 제출의 `options.scratch_auto`·`options.assist` 와 같은 어휘이고, 코스 전체로 접은 값이다(어느 스테이지가 어떤 어시스트였는지는 싣지 않는다: 서버는 코스 전체로 판정한다). 두 필드가 없는 옛 클라이언트 제출은 어시스트 없는 코스로 받는다. 클라이언트는 어시스트가 없으면 두 필드를 싣지 않는다.
-- **ranked 판정은 단일 곡과 같다**(`assistFlags`): `scratch_auto` 면 `SCRATCH_AUTO`, `assist≠∅` 면 `ASSIST` flag 를 붙이고 `ranked=false`. unranked 코스 결과는 `course_score` 에 `ranked=false` 로 남고 `extra` 에 `flags`·`scratch_auto`·`assist` 를 덧붙인다. `course_best` 를 갱신하지 않고 `rank` 는 `null` 이므로 코스 순위·코스 베스트에 나오지 않는다(단일 곡의 `chart_best` 와 같은 정책).
+- **ranked 판정은 단일 곡과 같다**(`assistFlags`, 웨이브 20): `scratch_auto` 이거나 `assist` 에 `AUTO_SCRATCH` 가 있으면 `SCRATCH_AUTO` 표지(ranked 를 막지 않는다), `AUTO_SCRATCH` 밖의 태그가 있으면 `ASSIST` flag 와 `ranked=false`. `course_score.scratch_auto` 에 SCRATCH AUTO 여부를 남기고, flag 가 하나라도 있으면 `extra` 에 `flags`·`scratch_auto`·`assist` 도 덧붙인다. SCRATCH AUTO 코스는 `course_best` 의 SCRATCH AUTO 칸을 갱신하고 `rank` 는 포함 목록 기준이다. unranked 코스는 `course_best` 를 갱신하지 않고 `rank` 는 `null` 이다.
 - 멱등: 동일 `(player, course_hash, played_at)` 재전송은 기존 id 를 돌려주고, `ranked`·`flags` 는 이번 본문으로 다시 판정해 돌려준다.
-### `GET /api/courses/{course_hash}/ranking?limit=&page=&rival_of=` → `ScoreRecord[]`
-### `GET /api/courses/{course_hash}/best?player={id}` → `ScoreRecord | null` (레퍼런스 구현 getCoursePlayData 본인분)
+### `GET /api/courses/{course_hash}/ranking?limit=&page=&rival_of=&include_scratch_auto=false` → `ScoreRecord[]`
+### `GET /api/courses/{course_hash}/best?player={id}&include_scratch_auto=false` → `ScoreRecord | null` (레퍼런스 구현 getCoursePlayData 본인분)
+- `include_scratch_auto` 는 차트 순위·best 와 같은 뜻이다(기본은 일반 판만, `true` 면 플레이어마다 더 높은 쪽, SCRATCH AUTO 행은 `extra.scratch_auto: true`).
 
 ---
 
@@ -254,7 +261,7 @@ DB 의 IR 표(위)와 별개로, 저장소의 스냅샷(`web/data/tables/<id>/`)
 | `GET /api/fe/tables` | `[{ id, name, symbol, entry_count, level_count, last_update, original_url, source, levels:[{level,count}], standard_paths }]`(봉투) | 없음 |
 | `GET /api/fe/tables/{id}` | `{ table, levels:[{ level, entries:[{ md5, level, title, artist, url, url_diff, name_diff, comment }] }] }`(약 380KB, 공개 캐시 `s-maxage=3600`) | 없음 |
 | `GET /api/fe/tables/{id}/entries?q=&level=&page=&limit=` | 제목·아티스트·md5 앞 6자 이상으로 검색. `limit` 최대 100. 쪽 나누기 포함 | 없음 |
-| `GET /api/fe/tables/{id}/records` | `{ table_id, records:{ "<md5>": { clear, ex_score, minbp, max_combo, total_notes, played_at } } }` — 내 곡별 최고 기록(기록 있는 곡만, `chart.md5` 로 맞춤). `no-store` | 세션 |
+| `GET /api/fe/tables/{id}/records` | `{ table_id, records:{ "<md5>": { clear, ex_score, minbp, max_combo, total_notes, played_at, scratch_auto } } }` — 내 곡별 최고 기록(기록 있는 곡만, `chart.md5` 로 맞춤). 일반 판 최고와 SCRATCH AUTO 판 최고 가운데 더 높은 것이고 `scratch_auto` 가 어느 쪽인지 알린다. `no-store` | 세션 |
 
 `/tables/{id}` 의 사람이 보는 페이지(`<meta name="bmstable" content="/tables/{id}/header.json">`)는 화면 웨이브가 만든다. 클라이언트(`rbms-table`)는 header 의 `data_url` 을 header 의 최종 주소 기준으로 풀고, 이 header 는 절대 주소를 내므로 끝 슬래시(운영은 `/x/` 를 308 로 `/x` 로 뗀다)에 영향받지 않는다. 정본 등록 주소는 `https://bms.hyuns.uk/tables/insane1`(슬래시 없음).
 
@@ -357,7 +364,7 @@ DB 의 IR 표(위)와 별개로, 저장소의 스냅샷(`web/data/tables/<id>/`)
 - 관리: `GET/POST /api/admin/builds`(admin) — 빌드 해시 등록/조회/신뢰표시.
 
 ### 11.2 ranked 적격성 (자동 판정)
-서버가 제출 옵션으로 `ranked` 산출. **unranked 트리거(flags)**: `AUTOPLAY`(autoplay) · `SCRATCH_AUTO` · `ASSIST`(assist≠∅) · `JUDGE_WIDTH`(judge_rate≠100) · `TOTAL_OVERRIDE`(total_override≠0) · `UNKNOWN_BUILD` · `GUEST` · `REPLAY_MISMATCH`(검증 불일치). unranked도 **기록·리플레이는 보존**(연습/공유), best·랭킹만 제외.
+서버가 제출 옵션으로 `ranked` 산출. **unranked 트리거(flags)**: `AUTOPLAY`(autoplay) · `ASSIST`(`AUTO_SCRATCH` 밖의 assist 태그) · `JUDGE_WIDTH`(judge_rate>100) · `TOTAL_OVERRIDE`(total_override≠0) · `UNKNOWN_BUILD` · `GUEST` · `REPLAY_MISMATCH`(검증 불일치). unranked도 **기록·리플레이는 보존**(연습/공유), best·랭킹만 제외. **표지 flag**(ranked 를 막지 않음): `UNKNOWN_BUILD`(설정에 따라), `SCRATCH_AUTO`(웨이브 20부터. SCRATCH AUTO 판은 따로 센 best 로 `include_scratch_auto=true` 목록에 오른다).
 
 ### 11.3 µs 리플레이 검증 (FR-12, 후속 워커)
 - 제출 score를 `seed`+옵션으로 **재시뮬**해 EX/clear/판정분포 일치 확인 → `verified` 플래그(capability `verified_scores`).
@@ -372,6 +379,7 @@ DB 의 IR 표(위)와 별개로, 저장소의 스냅샷(`web/data/tables/<id>/`)
 > 네이티브 IR 위에 구현된 FE 조회 경로입니다. 모두 `/api/fe/*`이고 envelope를 고정으로 사용합니다.
 
 - `GET /api/fe/charts/search`, `/api/fe/charts/[hash]/leaderboard`, `/api/fe/activity/recent`, `/api/fe/leaderboards/players`, `/api/fe/players/[playerId]/{recent,stats}`, `/api/fe/stats/summary`.
+- SCRATCH AUTO 다루기(웨이브 20): `/api/fe/charts/[hash]/leaderboard?include_scratch_auto=true` 는 §4 차트 순위와 같은 포함 목록을 쓴다(기본 제외). `/api/fe/leaderboards/players?include_scratch_auto=true` 는 `cleared_charts`·`played_charts` 를 곡마다 두 칸 가운데 하나라도 있으면 세고 `total_plays` 에 SCRATCH AUTO 판을 더한다(기본은 일반 판만). `/api/fe/activity/recent` 는 SCRATCH AUTO 판을 늘 뺀다. `/api/fe/players/[playerId]/recent` 는 모든 판을 `scratch_auto` 와 함께 돌려준다. `/api/fe/players/[playerId]/stats` 의 `lamps`·`cleared` 는 곡마다 더 높은 쪽으로 세고 그중 SCRATCH AUTO 판인 곡 수를 `scratch_auto_charts` 로 준다.
 - `GET /api/fe/me/settings`, `GET|POST /api/fe/tokens`, `DELETE /api/fe/tokens/[tokenId]`은 세션 사용자 전용입니다.
 - `POST /api/fe/auth/login` `{ id, password }` 는 웹 로그인입니다. `/api/auth/login` 과 같은 자격 확인을 하고 세션 쿠키만 세팅합니다(API 토큰을 만들지 않음). 응답 `{ success:true, data:{ user:{ id, login_id, name, role } } }`, 실패 401 `UNAUTHORIZED`, 5/min/IP(`/api/auth/login` 과 같은 버킷).
 - `POST /api/fe/auth/register` `{ id, email, password, name? }` 는 웹 가입입니다. `/api/auth/register` 와 같은 검사(아이디 형식·예약어, 중복은 409 `IR_ACCOUNT_EXISTS`)를 하고 세션 쿠키만 세팅합니다. 응답은 로그인과 같은 꼴이고 201 입니다.

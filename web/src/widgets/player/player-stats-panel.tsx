@@ -38,7 +38,11 @@ export const PlayerStatsPanel: FC<{ playerId: string }> = ({ playerId }) => {
         <>
             <div className='grid grid-cols-2 gap-px md:grid-cols-3'>
                 <StatTile label='총 제출' value={formatCount(data.total_plays)} hint='스코어 제출 횟수' />
-                <StatTile label='클리어 차트' value={formatCount(data.cleared)} hint={`플레이한 차트 ${formatCount(playedCharts)}개 중`} />
+                <StatTile
+                    label='클리어 차트'
+                    value={formatCount(data.cleared)}
+                    hint={`플레이한 차트 ${formatCount(playedCharts)}개 중${data.scratch_auto_charts > 0 ? ` · SCRATCH AUTO 기록 ${formatCount(data.scratch_auto_charts)}곡 포함` : ''}`}
+                />
                 <StatTile label='클리어 비율' value={formatPercent(data.cleared, playedCharts)} hint='플레이한 차트 기준' />
             </div>
             <DashboardPanel title='램프 분포'>

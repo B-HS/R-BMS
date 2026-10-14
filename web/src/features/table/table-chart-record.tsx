@@ -1,6 +1,7 @@
 import type { FC } from 'react'
 import Link from 'next/link'
 import { LampLabel } from '@features/lamp/lamp-label'
+import { ScratchAutoBadge } from '@features/score/scratch-auto-badge'
 import type { TableSnapshotRecord } from '@entities/table-snapshot.type'
 import { cn } from '@shared/lib/cn'
 import { getDjRank, getDjRankClassName } from '@shared/lib/dj-rank'
@@ -50,7 +51,10 @@ export const TableChartRecord: FC<TableChartRecordProps> = ({ record, isSignedIn
     return (
         <div className={BOX_CLASS_NAME}>
             <div className='flex items-center justify-between gap-2'>
-                <LampLabel lamp={record.clear} className='text-sm font-medium' />
+                <span className='flex items-center gap-1.5'>
+                    <LampLabel lamp={record.clear} className='text-sm font-medium' />
+                    {record.scratch_auto && <ScratchAutoBadge />}
+                </span>
                 <span className={cn('text-sm tabular-nums', getDjRankClassName(record.ex_score, maxExScore))}>
                     {getDjRank(record.ex_score, maxExScore)}
                 </span>

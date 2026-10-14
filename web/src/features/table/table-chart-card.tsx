@@ -2,6 +2,7 @@ import type { FC } from 'react'
 import { LampStrip } from '@features/lamp/lamp-strip'
 import type { TableSnapshotEntry, TableSnapshotRecord } from '@entities/table-snapshot.type'
 import { CLEAR_LAMP_LABEL } from '@shared/constants/clear-lamp'
+import { SCRATCH_AUTO_BADGE_LABEL, SCRATCH_AUTO_BADGE_TITLE } from '@shared/constants/scratch-auto'
 import { cn } from '@shared/lib/cn'
 import { getDjRank, getDjRankClassName } from '@shared/lib/dj-rank'
 import { formatCount, getMaxExScore } from '@shared/lib/format'
@@ -25,7 +26,16 @@ export const TableChartCard: FC<TableChartCardProps> = ({ entry, symbol, record,
         <button
             type='button'
             aria-haspopup='dialog'
-            aria-label={[title, entry.artist, `${symbol}${entry.level}`, CLEAR_LAMP_LABEL[lamp], rank].filter(Boolean).join(' · ')}
+            aria-label={[
+                title,
+                entry.artist,
+                `${symbol}${entry.level}`,
+                CLEAR_LAMP_LABEL[lamp],
+                rank,
+                record?.scratch_auto && SCRATCH_AUTO_BADGE_TITLE,
+            ]
+                .filter(Boolean)
+                .join(' · ')}
             onClick={(event) => onOpen(entry, event.currentTarget)}
             className='bg-card hover:bg-muted/50 focus-visible:ring-ring flex h-14 w-full min-w-0 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset'>
             <LampStrip lamp={isRecordPending ? 'NoPlay' : lamp} />
@@ -40,6 +50,7 @@ export const TableChartCard: FC<TableChartCardProps> = ({ entry, symbol, record,
                         <span className='flex shrink-0 items-baseline gap-1 tabular-nums'>
                             <span>{formatCount(record.ex_score)}</span>
                             <span className={getDjRankClassName(record.ex_score, maxExScore)}>{rank}</span>
+                            {record.scratch_auto && <span className='text-muted-foreground'>{SCRATCH_AUTO_BADGE_LABEL}</span>}
                         </span>
                     )}
                 </span>

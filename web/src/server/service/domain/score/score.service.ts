@@ -21,27 +21,37 @@ export type ScoreRankingRow = {
     option: number
     totalNotes: number
     replayId?: string | null
+    scratchAuto: boolean
     judge: JudgeBreakdownInput | null
 }
+
+export type BestScope = { includeScratchAuto: boolean }
 
 export type ScoreInsertRow = ReturnType<typeof buildScoreRow>
 
 export type ScoreServiceDb = {
     findScoreIdByIdempotency: (params: { userId: string; chartSha256: string; playedAt: number }) => Promise<string | null>
     insertScore: (row: ScoreInsertRow) => Promise<void>
-    getChartBest: (params: { chartSha256: string; userId: string }) => Promise<{ clear: number; exScore: number; minbp: number } | null>
+    getChartBest: (params: {
+        chartSha256: string
+        userId: string
+        scratchAuto: boolean
+    }) => Promise<{ clear: number; exScore: number; minbp: number } | null>
     upsertChartBest: (row: {
         chartSha256: string
         userId: string
+        scratchAuto: boolean
         scoreId: string
         clear: number
         exScore: number
         minbp: number
         maxCombo: number
     }) => Promise<void>
-    countBetterBests: (params: { chartSha256: string; clear: number; exScore: number }) => Promise<number>
-    getRanking: (params: { chartSha256: string; limit: number; offset: number; lnmode?: number; userIds?: string[] }) => Promise<ScoreRankingRow[]>
-    getBestByLoginId: (params: { chartSha256: string; loginId: string; lnmode?: number }) => Promise<ScoreRankingRow | null>
+    countBetterBests: (params: BestScope & { chartSha256: string; clear: number; exScore: number }) => Promise<number>
+    getRanking: (
+        params: BestScope & { chartSha256: string; limit: number; offset: number; lnmode?: number; userIds?: string[] },
+    ) => Promise<ScoreRankingRow[]>
+    getBestByLoginId: (params: BestScope & { chartSha256: string; loginId: string; lnmode?: number }) => Promise<ScoreRankingRow | null>
     getScoreById: (scoreId: string) => Promise<ScoreRankingRow | null>
     getRivalUserIds: (loginId: string) => Promise<string[]>
     insertAudit: (row: {
@@ -74,6 +84,7 @@ export const buildScoreRow = (params: {
     exScore: number
     minbp: number
     ranked: boolean
+    scratchAuto: boolean
     flags: ScoreFlag[]
 }) => {
     const { input } = params
@@ -121,7 +132,7 @@ export const buildScoreRow = (params: {
         random: input.options.random,
         randomP2: input.options.random_p2 ?? null,
         scratchLeft: input.options.scratch_left,
-        scratchAuto: input.options.scratch_auto,
+        scratchAuto: params.scratchAuto,
         seed: input.seed,
         hispeed: input.options.hispeed,
         constant: input.options.constant,
@@ -163,7 +174,7 @@ export const toScoreRecord = (row: ScoreRankingRow, rank: number | null): ScoreR
     option: row.option,
     total_notes: row.totalNotes,
     judge: row.judge,
-    extra: row.replayId ? { replay_id: row.replayId } : {},
+    extra: { ...(row.replayId ? { replay_id: row.replayId } : {}), ...(row.scratchAuto ? { scratch_auto: true } : {}) },
 })
 
 export const isPlayedAtPlausible = (playedAt: number, now: number) => playedAt - now <= PLAYED_AT_FUTURE_TOLERANCE_MS
@@ -188,7 +199,7 @@ export const createScoreService = (deps: ScoreServiceDeps) => ({
     }) => {
         const { input, user } = params
         const isGuest = !user
-        const { ranked, flags } = rankedPolicy({
+        const { ranked, flags, scratchAuto } = rankedPolicy({
             options: input.options,
             buildTrust: params.buildTrust,
             isGuest,
@@ -197,12 +208,14 @@ export const createScoreService = (deps: ScoreServiceDeps) => ({
         const exScore = input.ex_score > 0 ? input.ex_score : deriveExScore(input.judge)
         const minbp = input.minbp > 0 ? input.minbp : deriveMinbp(input.judge)
         const clear = clearLampToId(input.clear)
+        const countRank = async () =>
+            (await deps.db.countBetterBests({ chartSha256: params.chartSha256, clear, exScore, includeScratchAuto: scratchAuto })) + 1
 
         const existingId = user
             ? await deps.db.findScoreIdByIdempotency({ userId: user.id, chartSha256: params.chartSha256, playedAt: input.played_at })
             : null
         if (existingId) {
-            const rank = user && ranked ? (await deps.db.countBetterBests({ chartSha256: params.chartSha256, clear, exScore })) + 1 : null
+            const rank = user && ranked ? await countRank() : null
             const response: SubmitResponseOutput = {
                 accepted: true,
                 rank,
@@ -217,7 +230,7 @@ export const createScoreService = (deps: ScoreServiceDeps) => ({
         }
 
         const scoreId = deps.newId('sc_')
-        const previous = user ? await deps.db.getChartBest({ chartSha256: params.chartSha256, userId: user.id }) : null
+        const previous = user ? await deps.db.getChartBest({ chartSha256: params.chartSha256, userId: user.id, scratchAuto }) : null
         await deps.db.insertScore(
             buildScoreRow({
                 id: scoreId,
@@ -229,6 +242,7 @@ export const createScoreService = (deps: ScoreServiceDeps) => ({
                 exScore,
                 minbp,
                 ranked,
+                scratchAuto,
                 flags,
             }),
         )
@@ -238,6 +252,7 @@ export const createScoreService = (deps: ScoreServiceDeps) => ({
             await deps.db.upsertChartBest({
                 chartSha256: params.chartSha256,
                 userId: user.id,
+                scratchAuto,
                 scoreId,
                 clear,
                 exScore,
@@ -246,7 +261,7 @@ export const createScoreService = (deps: ScoreServiceDeps) => ({
             })
         }
 
-        const rank = ranked && user ? (await deps.db.countBetterBests({ chartSha256: params.chartSha256, clear, exScore })) + 1 : null
+        const rank = ranked && user ? await countRank() : null
 
         await deps.db
             .insertAudit({
@@ -299,7 +314,7 @@ export const createScoreService = (deps: ScoreServiceDeps) => ({
         })
     },
 
-    getRanking: async (params: { chartSha256: string; limit: number; page: number; lnmode?: number; rivalOf?: string }) => {
+    getRanking: async (params: BestScope & { chartSha256: string; limit: number; page: number; lnmode?: number; rivalOf?: string }) => {
         const userIds = params.rivalOf ? await deps.db.getRivalUserIds(params.rivalOf) : undefined
         if (userIds && userIds.length === 0) return []
         const rows = await deps.db.getRanking({
@@ -308,15 +323,22 @@ export const createScoreService = (deps: ScoreServiceDeps) => ({
             offset: (params.page - 1) * params.limit,
             lnmode: params.lnmode,
             userIds,
+            includeScratchAuto: params.includeScratchAuto,
         })
         const base = (params.page - 1) * params.limit
         return rows.map((row, index) => toScoreRecord(row, base + index + 1))
     },
 
-    getBest: async (params: { chartSha256: string; loginId: string; lnmode?: number }) => {
+    getBest: async (params: BestScope & { chartSha256: string; loginId: string; lnmode?: number }) => {
         const row = await deps.db.getBestByLoginId(params)
         if (!row) return null
-        const rank = (await deps.db.countBetterBests({ chartSha256: params.chartSha256, clear: row.clear, exScore: row.exScore })) + 1
+        const rank =
+            (await deps.db.countBetterBests({
+                chartSha256: params.chartSha256,
+                clear: row.clear,
+                exScore: row.exScore,
+                includeScratchAuto: params.includeScratchAuto,
+            })) + 1
         return toScoreRecord(row, rank)
     },
 

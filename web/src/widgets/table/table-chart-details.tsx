@@ -37,7 +37,7 @@ const toWebUrl = (value: string) => {
 }
 
 export const TableChartDetails: FC<TableChartDetailsProps> = ({ entry, symbol, record, isSignedIn, isRecordPending, loginHref }) => {
-    const { data: leaderboard, isPending: isChartPending, isError: isChartError } = useChartLeaderboard(entry.md5)
+    const { data: leaderboard, isPending: isChartPending, isError: isChartError } = useChartLeaderboard(entry.md5, { include_scratch_auto: false })
     const bodyUrl = toWebUrl(entry.url)
     const diffUrl = toWebUrl(entry.url_diff)
     const isSameLink = bodyUrl !== null && bodyUrl === diffUrl

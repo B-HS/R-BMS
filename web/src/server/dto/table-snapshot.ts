@@ -85,6 +85,7 @@ export const tableRecordOutputSchema = z.object({
     max_combo: z.number().int(),
     total_notes: z.number().int(),
     played_at: z.number().int(),
+    scratch_auto: z.boolean(),
 })
 
 export const tableRecordsOutputSchema = z.object({

@@ -33,6 +33,7 @@ const record = (clear: TableSnapshotRecord['clear'], exScore: number, totalNotes
     max_combo: 500,
     total_notes: totalNotes,
     played_at: 1_791_949_770_000,
+    scratch_auto: false,
 })
 
 const LEVELS: TableSnapshotLevel[] = [

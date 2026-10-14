@@ -25,7 +25,15 @@ export type ActivityRow = {
     minbp: number
     max_combo: number
     played_at: number
+    scratch_auto: boolean
     chart: ActivityChartRef
+}
+
+export type PlayerLeaderboardParams = {
+    sort: string
+    page: number
+    limit: number
+    include_scratch_auto: boolean
 }
 
 export type PlayerLeaderboardRow = PlayerProfile & {
