@@ -1,15 +1,20 @@
 name: ci
 
 # dev = 작업 브랜치, prod = 배포 브랜치. PR/푸시마다 전 플랫폼 빌드·테스트. web/ 만 바뀐 변경은 web.yml 이 검증한다.
+# 단 web/data/tables/ 는 플레이어가 실행 파일에 넣고(tablesrc/seed.rs) 테스트가 읽으므로 여기서도 돈다.
 on:
   push:
     branches: [dev, prod]
-    paths-ignore:
-      - "web/**"
+    paths:
+      - "**"
+      - "!web/**"
+      - "web/data/tables/**"
   pull_request:
     branches: [dev, prod]
-    paths-ignore:
-      - "web/**"
+    paths:
+      - "**"
+      - "!web/**"
+      - "web/data/tables/**"
 
 permissions:
   contents: read
