@@ -26,6 +26,9 @@
 | [2026-10-14-adr-layout-seed-range.md](2026-10-14-adr-layout-seed-range.md) | 새 배치 시드는 2^53 미만, 서버는 범위 밖 시드를 0 으로 받아 판을 거절하지 않음. KNOWN ISSUE 1건 | 2026-10-14 | 유효 |
 | [2026-10-14-adr-release-toolchain-pin.md](2026-10-14-adr-release-toolchain-pin.md) | 릴리스 빌드 툴체인을 `rust-toolchain.toml` 과 같은 1.95.0(`dtolnay/rust-toolchain@master`)으로 | 2026-10-12 | 유효 |
 | [2026-10-14-adr-table-page-no-source-notice.md](2026-10-14-adr-table-page-no-source-notice.md) | 발광 표 페이지의 출처·삭제 요청 문구(요약, 맨 아래 문단)를 뺀다. 정보 패널의 출처 항목과 `source.json` 은 유지 | 2026-10-14 | 유효 |
+| [2026-10-14-adr-judge-count-consumed-notes.md](2026-10-14-adr-judge-count-consumed-notes.md) | 점수 제출의 판정 수 검사는 노트를 소비한 판정만(空POOR 제외, 9K 는 BAD 제외). 空POOR 400 사고의 수정 | 2026-10-14 | 유효 |
+| [2026-10-14-adr-record-sync.md](2026-10-14-adr-record-sync.md) | 로컬 이력 전체를 서버로 동기화(자동+수동, 리플레이 포함), 판별 서버 상태 기록, 거절 판은 다음에 다시, 옛 SCRATCH AUTO 제외, 서버는 같은 초 멱등 | 2026-10-14 | 유효 |
+| [2026-10-14-adr-abandoned-run-saved.md](2026-10-14-adr-abandoned-run-saved.md) | Esc 중도 포기 판도 FAILED 로 저장·전송(남은 노트는 놓침), 판정 없는 판·코스는 제외 | 2026-10-14 | 유효 |
 
 ## 그 전의 결정 파일
 
@@ -44,6 +47,6 @@
 
 ## 사용자에게 아직 확인받지 않은 메인의 결정
 
-- SCRATCH AUTO 판의 램프를 LIGHT ASSIST 로 둔다([SCRATCH AUTO 규칙](2026-10-14-adr-scratch-auto-rule.md)).
-- 넓힌 판정 판은 저장·전송하되 최고 기록·순위에서 뺀다([모든 판 저장·전송](2026-10-14-adr-save-and-send-every-played-run.md), [순위 토글](2026-10-14-adr-scratch-auto-ranking-toggle.md)).
-- `v0.1.0` draft(게시 안 됨)를 지울지는 사용자 미결정([릴리스 정책](2026-10-14-adr-release-policy.md)).
+- Esc 포기 판 중 판정이 없는 판은 남기지 않고, 코스 도중 포기는 지금처럼 기록하지 않는다([Esc 포기 판](2026-10-14-adr-abandoned-run-saved.md)).
+
+2026-10-14 에 확인받은 것: SCRATCH AUTO 램프 LIGHT ASSIST 유지, 넓힌 판정 판은 저장·전송하되 최고 기록·순위 제외(추천안 A). `v0.1.0` draft 는 둔다, `v0.1.3` draft 도 두고 다음은 `v0.1.4`.

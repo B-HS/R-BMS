@@ -217,7 +217,7 @@
 
 ## 3. 실패 응답과 에러 매핑
 
-실패는 항상 봉투다: `{"success": false, "error": {"code": "…", "message": "…", "details": { … }}}` (`details` 는 비프로덕션에서만).
+실패는 항상 봉투다: `{"success": false, "error": {"code": "…", "message": "…", "details": { … }}}` (`details` 는 비프로덕션에서는 그대로 나가고, 프로덕션에서는 문자열인 `field`·`reason` 만 나간다).
 
 | 상태 | `IrError` | 대표 `error.code` |
 |---|---|---|

@@ -203,7 +203,7 @@ export const metadata = {
 
 ## 6. 서버 API
 
-모든 FE 경로는 `{ success, data, pagination? }` 봉투와 snake_case 입니다. 에러는 `{ success: false, error: { code, message, details? } }` 이고 `details` 는 프로덕션에서 나가지 않습니다(그에 기대는 화면을 만들지 않습니다).
+모든 FE 경로는 `{ success, data, pagination? }` 봉투와 snake_case 입니다. 에러는 `{ success: false, error: { code, message, details? } }` 이고 `details` 는 프로덕션에서 문자열인 `field`·`reason` 만 나갑니다(그 밖의 값에 기대는 화면을 만들지 않습니다).
 
 ### 6.1 인증
 
@@ -299,7 +299,7 @@ FolderDetail  = FolderSummary + { "items":[{ "md5":"0077…","sha256":"…03e9",
 |---|---|---|
 | `IR_FOLDER_NOT_FOUND` | 404 | 폴더 없음 또는 남의 폴더 |
 | `IR_FOLDER_NAME_TAKEN` | 409 | 같은 이름의 폴더가 이미 있음 |
-| `IR_FOLDER_LIMIT_EXCEEDED` | 409 | 폴더·곡 개수 한도 초과(`details` 는 비프로덕션만) |
+| `IR_FOLDER_LIMIT_EXCEEDED` | 409 | 폴더·곡 개수 한도 초과(`details` 의 값은 비프로덕션만. 프로덕션에서는 문자열인 `field`·`reason` 만 나간다) |
 | `IR_FOLDER_CONFLICT` | 409 | `base_updated_at` 불일치 |
 | `IR_TABLE_NOT_FOUND` | 404 | 번들 표 id 없음 |
 | `IR_ACCOUNT_EXISTS` | 409 | 가입 아이디 중복 |

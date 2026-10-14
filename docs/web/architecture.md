@@ -495,7 +495,7 @@ CI(`.github/workflows/web.yml`)는 `web/**` 이 바뀐 푸시·PR 에서 설치(
 | 클라 정책 정합 | 옛 결정 #12("어시스트 판은 최고 기록이 아니다")는 2026-10-14 사용자 결정으로 **대체**됐다: 손으로 친 모든 판은 클라이언트가 저장·전송하고, SCRATCH AUTO 는 서버에서도 ranked 다. 넓힌 판정(클라이언트 어시스트 태그 `CUSTOM_JUDGE`)은 서버에서 `ASSIST` flag + unranked 이고 `chart_best`·순위에 들어가지 않는다(사용자 미확인 정책). SCRATCH AUTO 램프는 `LightAssistEasy` 로 유지(메인이 정함, 사용자 미확인). 서버는 클라이언트의 판단을 신뢰하지 않고 독립 재판정한다 |
 | FR-18 감사 로그 | `score.service.ts` 의 `submit` 이 `deps.db.insertAudit`(compose 구현)을 불러 `submission_audit` 에 insert 한다. IP 는 `x-forwarded-for` 첫 값, UA 는 `user-agent`. 별도 `audit.ts` 파일은 없다 |
 | best 갱신 | `chart_best` upsert(키 `(chart, user, scratch_auto)`). 비교 순서 **램프 > EX > BP(낮을수록)**. `ranked=false` 는 갱신 대상 제외 |
-| 멱등 | `score uniq(user_id, chart_sha256, played_at)` — 중복 시 기존 `score_id` 반환, 201 대신 200 |
+| 멱등 | 서비스가 같은 사용자·같은 차트에서 `played_at` 이 **같은 초**(`floor(played_at / 1000)` 이 같음)인 점수를 먼저 찾아(`findScoreIdByIdempotency`) 있으면 기존 `score_id` 를 돌려준다(201 대신 200, `message: "duplicate submission ignored"`). `score uniq(user_id, chart_sha256, played_at)` 색인은 정확히 같은 밀리초의 이중 삽입만 막는다. 기록 동기화가 기록 DB 의 초 단위 시각으로 다시 보낸 판을 중복 저장하지 않으려는 규칙이다 |
 
 ---
 

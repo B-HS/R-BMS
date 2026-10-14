@@ -11,7 +11,7 @@ R-BMS 는 Rust 로 만든 BMS 리듬게임 플레이어(beatoraja 형식 Lua 스
 ## 2. 현재 목표
 
 - 최종 목표: 사용자가 실제로 쓰는 배포 가능한 BMS 플레이어 + 웹(순위, 발광 난이도표, 내 폴더). 사용자는 "새 세션에서 더 이상 구현하거나 버그가 없도록" 남은 일을 정확히 끝내길 원한다.
-- 현재 마일스톤: 클라이언트 `v0.1.3` draft 게시 직전, 웹 운영 배포 완료. 남은 것은 (1) 사용자의 실기 확인과 게시, (2) 이번 400 사고 같은 계약 결함을 막는 교차 테스트, (3) 문서 점검에서 나온 KNOWN ISSUE 수리, (4) 실제 창 QA.
+- 현재 마일스톤: 클라이언트 `v0.1.3` draft 게시 직전, 웹 운영 배포 완료. 남은 것은 (1) 사용자의 실기 확인과 게시, (2) 문서 점검에서 나온 웹 KNOWN ISSUE 수리, (3) 실제 창 QA. 이번 400 사고 같은 계약 결함을 막는 교차 테스트와 작은 코드 수리는 S18(`docs/PROCESS.md`)에서 했다.
 - 직전 작업: 점수 제출이 모든 판에서 `400 VALIDATION_ERROR` 로 거절되던 버그(시드 1.79e18 > 2^53)를 클라이언트·서버 양쪽에서 고치고(`7095ef7`), 웹 재배포, `v0.1.3` 릴리스(run 38563811699, 서명·공증·티켓 확인 완료, draft 본문 작성), 그리고 이 인수인계 문서 작업(문서 4묶음 점검, ADR 15건, test-debt, bug 기록).
 
 ## 3. 완료 / 진행 중 / 미착수
@@ -42,8 +42,7 @@ R-BMS 는 Rust 로 만든 BMS 리듬게임 플레이어(beatoraja 형식 Lua 스
 
 ### 3.3 미착수(우선순위는 8절)
 
-- 계약 교차 테스트(`docs/quality-assurance/2026-10-14-test-debt.md`).
-- 문서 점검에서 나온 KNOWN ISSUE(아래 8절 2~5).
+- 문서 점검에서 나온 웹 KNOWN ISSUE(아래 8절 4~5). 계약 교차 테스트와 작은 코드 수리는 S18 에서 끝났다.
 - 실제 창 QA 116개 ID(`docs/quality-assurance/2026-10-11-default-skin-manual-check.md` 맨 위 표, 먼저 볼 8개).
 - 웹 2차(`docs/web/tasks.md`): 한 곡 한 행 보기, 카드 높이, 폴더 끌어 옮기기·2,000곡 가상화, 표 RSC 자료 축소, OG 이미지, 홈 대시보드.
 - Windows 코드 서명(사용자: 나중에), 앱 아이콘(.icns), 설정 화면 컨트롤러 조작, SCRATCH AUTO 초록을 노트 그림 모양으로(GPU 셰이더), 턴테이블 노트만 있는 차트의 자동 종료, 게임 안 IR 순위 패널의 SCRATCH AUTO 토글.
@@ -89,7 +88,7 @@ R-BMS 는 Rust 로 만든 BMS 리듬게임 플레이어(beatoraja 형식 Lua 스
 
 1. `v0.1.3` 으로 한 판 쳐서 결과 화면에 `IR: RANK #n` 이 나오는지(운영 서버 실제 저장 확인). 그 뒤 게시.
 2. 게시되지 않은 `v0.1.0` draft 를 지울지(산출물이 맨 실행 파일이라 게시하면 Gatekeeper 에 막힐 것으로 예상). 태그 v0.1.0~v0.1.3 은 남아 있다.
-3. 중도 포기(Esc, 칠 노트가 남음)한 판도 "무조건 저장"에 들어가는지. 지금은 결과 화면을 거치지 않아 이력·리플레이·전송이 없다(`apps/rbms-player/src/stage/play/mod.rs` 의 `leave_run`).
+3. (해소) 중도 포기(Esc, 칠 노트가 남음)한 판은 사용자 결정(2026-10-14)으로 저장·전송한다: 결과 화면 없이 FAILED, 남은 노트는 見逃し POOR(`apps/rbms-player/src/stage/play/mod.rs` 의 `leave_run`, `docs/play-options.md` 10.2).
 4. 메인이 정한 정책의 확인: 넓힌 판정 판은 저장·전송하되 최고 기록·순위 제외, SCRATCH AUTO 램프는 LIGHT ASSIST 유지.
 5. 웹 rate limit 의 지속형 저장소(Vercel Firewall 규칙 / Upstash / 지금대로) — 사용자 결정.
 6. `user.rank_points`(항상 0) — 산식을 정할지, 응답에서 뺄지.
@@ -108,15 +107,9 @@ R-BMS 는 Rust 로 만든 BMS 리듬게임 플레이어(beatoraja 형식 Lua 스
 
 ## 8. 다음 세션 TODO(우선순위)
 
-1. 사용자 확인 받기(6절 1~4). 그 답에 따라 3번(Esc 포기 판 저장)을 구현하거나 닫는다.
-2. 계약 교차 테스트 — 완료 조건: Rust 테스트가 실제 판에서 만든 요청 본문(일반, SCRATCH AUTO, 코스, 리플레이 업로드)을 JSON 파일로 뽑아 저장소에 두고(`crates/rbms-ir/src/contract_tests.rs` 근처), 웹 테스트(`web/tests/dto/ir-contract.test.ts`)가 그 파일들을 `scoreSubmissionSchema`·코스·리플레이 스키마로 통과시키며, 값 범위가 다른 필드(정수 범위, NaN·무한 → JSON null, u64, 음수) 목록이 테스트로 묶인다. 설계와 필드 표: `docs/quality-assurance/2026-10-14-test-debt.md`. 두 CI 가 통과해야 한다. 추가로 `web.yml` 에 MySQL 서비스를 붙여 `RBMS_DB_E2E=1` 테스트가 CI 에서 돌게 한다(같은 문서).
-3. 작은 코드 수리(각각 테스트나 확인 명령으로 닫는다):
-   - `.github/workflows/web-db.yml`: `status` 가 늘 성공으로 끝남(`|| true` 가 종료 코드 1·2 를 삼킴) → status 일 때는 그대로 실패시키거나 2 만 실패.
-   - `scripts/verify-notary-credentials.sh`: 앱 암호 입력이 보임 → `read -rs`.
-   - `scripts/verify-signing-cert.sh`: `find-identity` 에 `-v` 추가(CI 와 같게).
-   - `.github/workflows/release.yml`: `concurrency: { group: release, cancel-in-progress: false }`.
-   - `apps/rbms-player/src/scoredb_store.rs` 1~22행 모듈 문서가 낡음("not yet called … allow") → 현재 쓰임으로.
-   - `web/scripts/run-sql.ts`: 공개 저장소의 Actions 로그에 행을 그대로 찍음 → 개수만 찍도록 제한.
+1. 사용자 확인 받기(6절 1~2, 4~6). Esc 포기 판 저장(6절 3)은 사용자 결정으로 구현했다.
+2. (완료, S18-4) 계약 교차 테스트: `contract/client-requests/*.json` 14개, Rust 테스트 `apps/rbms-player/src/app_result/record_tests/contract_requests.rs`, 웹 테스트 `web/tests/dto/client-requests.test.ts`, `web.yml` 의 MySQL `db` 잡(`RBMS_DB_E2E=1`). 설계와 남은 것(반대 방향 계약 3.12)은 `docs/quality-assurance/2026-10-14-test-debt.md`.
+3. (완료, S18-3) 작은 코드 수리 여섯 건: `web-db.yml` status 종료 코드, `verify-notary-credentials.sh` 의 `read -rs`, `verify-signing-cert.sh` 의 `-v`, `release.yml` 의 `concurrency`, `scoredb_store.rs` 모듈 문서, `web/scripts/run-sql.ts` 의 개수만 출력. 내용은 `docs/ci-release.md` 6.1~6.2절.
 4. 웹 KNOWN ISSUE(`docs/web/2026-10-14-audit.md` 해소 현황 표, `docs/web/tasks.md`):
    - 없는 차트·플레이어·코스·리플레이 주소가 HTTP 200(404 화면 + noindex) → 존재 확인을 Suspense 밖에서 하고 `notFound()`(`web/src/shared/lib/fetch-query-or-not-found.ts`, `web/src/widgets/{chart,player,course,replay}/*-content.tsx`).
    - 서버 컴포넌트가 자기 공개 URL 로 HTTP fetch(`web/src/shared/lib/fetch.ts` resolveOrigin) → read-cache 함수 직접 호출.

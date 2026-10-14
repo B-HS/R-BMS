@@ -57,7 +57,7 @@
 ## 6. 비기능 요구 (NFR)
 - **호환**: 단일 클라이언트가 md5만(LR2 차트) / sha256만(레퍼런스 구현) 보내도 동작. 미지원 기능은 `capabilities`로 광고 → 클라가 UI 토글.
 - **성능**: 랭킹 조회 P95 < 150ms(상위 N 캐시), 제출 < 200ms. 차트당 best는 (chart, player, scratch_auto) 복합 PK 로 O(1).
-- **무결성**: 제출 멱등(같은 (player, sha256, played_at) 재전송 무중복). best는 항상 "더 좋은 결과만" 갱신(램프>EX>BP 순).
+- **무결성**: 제출 멱등(같은 (player, sha256) 에서 `played_at` 이 같은 초 안인 재전송 무중복). best는 항상 "더 좋은 결과만" 갱신(램프>EX>BP 순).
 - **보안**: 토큰 해시 저장, 비번 better-auth, rate-limit(제출/로그인), 제출 본문 크기 제한, 리플레이 크기 상한.
 - **전방호환**: `api_version`(현재 1) + 모든 DTO `extra`(free-form) 보존. 새 엔드포인트는 추가만, 기존 불변.
 - **관측**: 구조적 로그·에러 중앙화(`createAppError`)·`/health` 헬스.

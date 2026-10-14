@@ -13,7 +13,7 @@
 | 워크플로 | 파일 | 시작 | 하는 일 | 상세 |
 | --- | --- | --- | --- | --- |
 | ci | `.github/workflows/ci.yml` | `dev`·`prod` 푸시와 PR(`web/` 만 바뀐 변경 제외) | Rust 세 OS 빌드와 테스트, fmt + clippy | 1절 |
-| web | `.github/workflows/web.yml` | `web/**` 가 바뀐 `dev`·`prod` 푸시와 PR | 웹 typecheck, lint, test, format, build | 6절 |
+| web | `.github/workflows/web.yml` | `web/**` 나 `contract/**` 가 바뀐 `dev`·`prod` 푸시와 PR | 웹 typecheck, lint, test, format, build, MySQL 통합 테스트 | 6절 |
 | release | `.github/workflows/release.yml` | 수동 실행(실제로 쓰는 경로), `prod` 푸시, `v*.*.*` 태그 푸시 | 버전·태그, macOS 앱 번들과 dmg(서명·공증), Windows zip, draft Release | 2절 |
 | signing-check | `.github/workflows/signing-check.yml` | 수동 | 서명·공증 시크릿의 꼴과 로그인 점검(빌드 없음) | 3.2절 |
 | web-db | `.github/workflows/web-db.yml` | 수동 | 운영 DB 의 상태 확인, 마이그레이션, 시험 계정 정리 | 6.1절 |
@@ -39,7 +39,7 @@
 2. `prod` push: 같은 버전·빌드 흐름이 patch 로 돕니다. `prod` 브랜치는 만든 적이 없고(원격 브랜치는 `dev` 와 `feat/skin-followups`) 이 경로는 쓴 적이 없습니다.
 3. 태그 push: `v*.*.*` 태그 push는 version 잡을 건너뛰고 그 태그 ref로 빌드합니다. 첫 릴리스 `v0.1.0` 이 이 경로였습니다.
 
-실행 중에는 `dev` 에 푸시하지 않습니다. `version` 잡은 `git push origin HEAD:dev` 로 올리므로 그 사이 `dev` 가 앞서면 비빨리감기라 거절됩니다(강제 푸시는 쓰지 않습니다). 같은 이유로 실행이 끝나면 로컬에서 `git pull` 과 `git fetch --tags` 를 먼저 합니다.
+`release.yml` 은 최상위 `concurrency: { group: release, cancel-in-progress: false }` 라서 릴리스 실행은 한 번에 하나만 돕니다. 실행 중에 또 시작하면 앞 실행이 끝날 때까지 기다리고, 기다리는 실행이 둘이 되면 더 오래된 대기 실행이 취소됩니다(GitHub 동작). 실행 중에는 `dev` 에 푸시하지 않습니다. `version` 잡은 `git push origin HEAD:dev` 로 올리므로 그 사이 `dev` 가 앞서면 비빨리감기라 거절됩니다(강제 푸시는 쓰지 않습니다). 같은 이유로 실행이 끝나면 로컬에서 `git pull` 과 `git fetch --tags` 를 먼저 합니다.
 
 빌드와 게시 단계는 다음과 같습니다.
 
@@ -137,11 +137,11 @@
 
 시크릿을 등록하기 전에 로컬 macOS 에서 같은 절차를 돌려 보는 스크립트입니다. 사용자의 다른 저장소 TAIDE 의 것을 가져와(2026-10-13, 사용자 지시) 이 저장소의 단계 이름에 맞추고 `--set-secret` 을 더했습니다. TAIDE 도 2026-08-28 첫 릴리스에서 같은 `error decoding base64 input stream` 을 겪고 이 스크립트를 만들었습니다.
 
-- `bash scripts/verify-signing-cert.sh <cert.p12 | base64.txt> [--set-secret]`: `.p12` 원본이면 임시 키체인에 넣어 암호와 서명 신원을 확인하고 secret 용 한 줄 base64 를 만듭니다. base64 텍스트 파일이면 먼저 형식을 엄격히 봅니다(base64 밖 문자 수, 길이가 4의 배수인가, 디코드 뒤 다시 인코드한 값이 같은가). 암호는 `CERT_PASSWORD` 환경 변수나 프롬프트로만 받습니다. `--set-secret` 을 주면 검증을 통과한 값과 암호를 `gh secret set` 으로 이 저장소의 `MACOS_CERTIFICATE_P12`, `MACOS_CERTIFICATE_PASSWORD` 에 바로 넣습니다(클립보드와 웹 화면을 거치지 않습니다. 붙여 넣은 값의 한 글자가 `.` 으로 바뀌어 릴리스가 세 번 실패한 일이 있습니다). 주지 않으면 TAIDE 와 같이 클립보드에 복사합니다.
-- `bash scripts/verify-notary-credentials.sh`: `APPLE_ID`, `APPLE_TEAM_ID`, 앱 암호(`NOTARY_PASSWORD`)를 환경 변수나 프롬프트로 받아 `xcrun notarytool history` 로 Apple 공증 서버에 실제로 로그인해 봅니다(제출 없음). 형식이 이상하면 경고하고, 실패하면 Apple 의 오류와 원인 후보를 냅니다.
+- `bash scripts/verify-signing-cert.sh <cert.p12 | base64.txt> [--set-secret]`: `.p12` 원본이면 임시 키체인에 넣어 암호와 서명 신원을 확인하고 secret 용 한 줄 base64 를 만듭니다. base64 텍스트 파일이면 먼저 형식을 엄격히 봅니다(base64 밖 문자 수, 길이가 4의 배수인가, 디코드 뒤 다시 인코드한 값이 같은가). 암호는 `CERT_PASSWORD` 환경 변수나 프롬프트로만 받습니다. 서명 신원은 CI 와 같이 `security find-identity -v` 로 찾으므로 만료됐거나 신뢰되지 않는 신원은 통과하지 못합니다. `--set-secret` 을 주면 검증을 통과한 값과 암호를 `gh secret set` 으로 이 저장소의 `MACOS_CERTIFICATE_P12`, `MACOS_CERTIFICATE_PASSWORD` 에 바로 넣습니다(클립보드와 웹 화면을 거치지 않습니다. 붙여 넣은 값의 한 글자가 `.` 으로 바뀌어 릴리스가 세 번 실패한 일이 있습니다). 주지 않으면 TAIDE 와 같이 클립보드에 복사합니다.
+- `bash scripts/verify-notary-credentials.sh`: `APPLE_ID`, `APPLE_TEAM_ID`, 앱 암호(`NOTARY_PASSWORD`)를 환경 변수나 프롬프트로 받아(앱 암호 프롬프트는 입력이 화면에 나오지 않습니다) `xcrun notarytool history` 로 Apple 공증 서버에 실제로 로그인해 봅니다(제출 없음). 형식이 이상하면 경고하고, 실패하면 Apple 의 오류와 원인 후보를 냅니다.
 - 같은 폴더의 `macos-app.sh`(앱 번들 만들기: `bash scripts/macos-app.sh <rbms-player 바이너리> <버전> <빈 출력 폴더>`)와 `macos-notarize.sh`(`bash scripts/macos-notarize.sh <R-BMS.app | 파일.dmg>`, `APPLE_ID`·`APPLE_APP_SPECIFIC_PASSWORD`·`APPLE_TEAM_ID` 환경 변수)는 릴리스 워크플로가 부르는 스크립트이고 로컬에서도 같은 인자로 돌릴 수 있습니다. 인자 없이 실행하면 사용법을 내고 종료 코드 2 로 끝납니다.
 
-확인한 것(2026-10-13, 일회용 자체 서명 인증서와 가짜 `gh`·`pbcopy`): `.p12` 의 맞는 암호와 틀린 암호, 유효한 base64 파일, 한 글자가 `.` 으로 바뀐 파일(`base64 밖 문자 1`), 잘린 파일, `--set-secret` 이 넘기는 값이 클립보드 값과 같음, 사용법 출력. 실제 인증서와 실제 계정으로는 사용자가 돌립니다(에이전트는 키 파일을 읽지 않습니다). 2026-10-14 에 네 스크립트 모두 `bash -n` 구문 검사와 인자 없는 실행(사용법 출력)을 확인했습니다.
+확인한 것(2026-10-13, 일회용 자체 서명 인증서와 가짜 `gh`·`pbcopy`): `.p12` 의 맞는 암호와 틀린 암호, 유효한 base64 파일, 한 글자가 `.` 으로 바뀐 파일(`base64 밖 문자 1`), 잘린 파일, `--set-secret` 이 넘기는 값이 클립보드 값과 같음, 사용법 출력. 실제 인증서와 실제 계정으로는 사용자가 돌립니다(에이전트는 키 파일을 읽지 않습니다). 2026-10-14 에 네 스크립트 모두 `bash -n` 구문 검사와 인자 없는 실행(사용법 출력)을 확인했습니다. 같은 날 일회용 자체 서명 인증서로 `find-identity` 가 `-v` 없이는 신뢰되지 않는 신원(`CSSMERR_TP_NOT_TRUSTED`)을 내고 `-v` 를 주면 거르는 것과, `verify-signing-cert.sh` 가 그 인증서에서 `[3/3 실패]` 로 끝나는 것을 확인했습니다.
 
 순서: 로컬 스크립트 둘 → `signing-check` 워크플로(3.2절, 등록된 값 확인) → 릴리스.
 
@@ -161,11 +161,14 @@
 2. `v0.1.0` draft 의 처리(맨 실행 파일 산출물이라 게시하지 않는 쪽을 권하며, 지울지는 사용자 결정).
 3. Windows 코드 서명(사용자: 나중에)과 Windows 실제 실행 확인.
 4. 앱 아이콘(`.icns`)이 없어 앱이 기본 아이콘으로 보임(`scripts/macos-app.sh` 의 `Info.plist` 에 `CFBundleIconFile` 이 없음).
-5. 같은 400 류 사고를 막는 교차 테스트(`docs/quality-assurance/2026-10-14-test-debt.md` 2절).
+
+같은 400 류 사고를 막는 교차 테스트는 끝났다(`docs/quality-assurance/2026-10-14-test-debt.md` 2절, 6절의 `web.yml`).
 
 ## 6. 웹 (`web/`) CI 와 배포
 
-- `.github/workflows/web.yml`: `web/**` 또는 이 파일이 바뀐 `dev`·`prod` 푸시와 PR 에서 Ubuntu 한 잡(`verify`)이 `bun install --frozen-lockfile` → `bun run typecheck`(`next typegen && tsc --noEmit`) → `bun run lint` → `bun run test` → `bun run format:check` → `bun run build` 를 돈다. **빌드에는 환경 변수를 주지 않는다**(DB·시크릿 없이 성공해야 한다. `NEXT_TELEMETRY_DISABLED` 만 준다). 제한 시간 15분(최근 실행 1.2분). Bun 은 `web/package.json` 의 `packageManager`(`bun@1.4.0`)를 따른다. 같은 ref 의 이전 실행은 취소된다(`web-${{ github.ref }}`). MySQL 서비스가 없어 DB 를 쓰는 통합 테스트(`web/tests/db/`, `RBMS_DB_E2E=1` 필요)는 이 CI 에서 건너뛴다(테스트 부채 3.6).
+- `.github/workflows/web.yml`: `web/**`, `contract/**`(클라이언트 요청 계약 파일. 웹 테스트 `web/tests/dto/client-requests.test.ts` 가 읽는다) 또는 이 파일이 바뀐 `dev`·`prod` 푸시와 PR 에서 Ubuntu 잡 둘이 함께 돈다. 같은 ref 의 이전 실행은 취소된다(`web-${{ github.ref }}`). Bun 은 `web/package.json` 의 `packageManager`(`bun@1.4.0`)를 따른다.
+  - `verify`: `bun install --frozen-lockfile` → `bun run typecheck`(`next typegen && tsc --noEmit`) → `bun run lint` → `bun run test` → `bun run format:check` → `bun run build`. **빌드에는 환경 변수를 주지 않는다**(DB·시크릿 없이 성공해야 한다. `NEXT_TELEMETRY_DISABLED` 만 준다). 이 잡의 `bun run test` 에서는 `web/tests/db/` 가 `RBMS_DB_E2E` 가 없어 건너뛴다. 제한 시간 15분(최근 실행 1.2분).
+  - `db`: MySQL 서비스 컨테이너(`mysql:8.4.11`, `mysqladmin ping` 헬스체크가 통과한 뒤 시작)에 `bun install --frozen-lockfile` → `bun run db:migrate` → `bun run db:status`(최신이 아니면 실패) → `bun test tests/db` 를 돈다. 잡 환경 변수는 `DATABASE_URL=mysql://rbms:rbms@127.0.0.1:3306/rbms` 와 `RBMS_DB_E2E=1` 이다. 접속 값은 잡마다 새로 뜨고 사라지는 컨테이너의 것이라 시크릿이 아니다. 제한 시간 15분. 2026-10-14 에 같은 이미지·같은 순서를 로컬 Docker 로 돌려 마이그레이션 0000~0002 적용, `db:status` 최신, `bun test tests/db` 8개 통과를 확인했다. 그 전의 테스트는 판 일곱 개를 1~7밀리초 간격으로 넣어, 같은 초를 같은 판으로 보는 멱등 규칙에 걸려 7개가 실패했다(1 통과 7 실패). 판 사이를 1초로 벌려 고쳤다.
 - `ci.yml`(Rust 3 OS 빌드)의 두 트리거(push, pull_request)에는 `paths: ["**", "!web/**", "web/data/tables/**"]` 가 있어, `web/` 만 바뀐 푸시와 PR 에서는 Rust 빌드를 건너뛰고 이 워크플로만 돈다(웨이브 17B-1 통합에서 추가. 변경이 `web/` 밖의 파일을 하나라도 포함하면, 또는 `web/data/tables/` 를 건드리면 `ci.yml` 도 돈다). GitHub API 로 읽어 보니 `dev` 브랜치에 보호 규칙과 ruleset 이 없어, 필수 체크가 대기 상태로 남는 문제는 지금 없다. 나중에 브랜치 보호에서 `test` 나 `verify` 를 필수 체크로 삼으면, 경로 필터 때문에 해당 경로를 건드리지 않은 PR 에서 그 체크가 실행되지 않아 대기 상태로 남는다(GitHub 의 알려진 동작).
 - 배포는 Vercel 이 한다(프로젝트 `rbms-web`, Production Branch `dev`, Root Directory `web`, Git 연결 `B-HS/R-BMS`). `web/vercel.json` 의 `ignoreCommand`(`if [ "$VERCEL_ENV" != "production" ]; then exit 0; fi; git diff --quiet "$VERCEL_GIT_PREVIOUS_SHA" HEAD -- . || exit 1`)가 프로덕션이 아닌 빌드와 `web/` 이 바뀌지 않은 푸시를 건너뛴다. Vercel 위에서 이 명령이 실제로 어떻게 도는지는 아직 푸시로 확인하지 못했다(테스트 부채 3.7). 운영 DB 마이그레이션은 **배포보다 먼저** 적용한다(6.1절의 `web-db` 워크플로로 메인이 한다). 설정값, 환경 변수, 순서, 기준선 절차는 `docs/web/architecture.md` 3-2 와 6-2 가 정본이다.
 - 웹 CI 는 릴리스(`release.yml`)와 무관하다. 앱 릴리스 태그·`prod` 푸시가 웹을 배포하지 않는다(웹은 `dev` 푸시 기준).
@@ -176,14 +179,14 @@
 
 | 동작 | 실행되는 것 |
 | --- | --- |
-| `status` | `bun run db:status`(`web/scripts/db-migration-status.ts`, 읽기 전용). 뒤에 `\|\| true` 가 붙어 결과와 관계없이 잡이 성공으로 끝납니다. 로그의 `Result:` 줄을 읽어야 합니다(7절 KNOWN ISSUE) |
-| `migrate` | 상태(`\|\| true`) → `bun run db:migrate`(`drizzle-kit migrate`) → 상태. 마지막 상태가 최신이 아니면(종료 코드 1) 잡이 실패합니다 |
+| `status` | `bun run db:status`(`web/scripts/db-migration-status.ts`, 읽기 전용). 종료 코드 0(최신)은 성공, 1(할 일 있음: 대기 마이그레이션이나 기준선 필요)은 성공으로 끝내되 `::warning::` 주석을 달고, 2(접속 실패)는 잡을 실패시킵니다. 1 의 원인은 로그의 `Result:` 줄에 있습니다 |
+| `migrate` | 상태 → `bun run db:migrate`(`drizzle-kit migrate`) → 상태. 적용 전 상태는 종료 코드 1(대기 중이 정상)을 허용하고 2(접속 실패)에서 멈춥니다. 적용 뒤 상태가 최신이 아니면(종료 코드 1 이나 2) 잡이 실패합니다 |
 | `cleanup-count` | `bun scripts/run-sql.ts cleanup-test-accounts.count.sql`: 시험 계정 다섯 개와 그 자료의 개수를 셉니다 |
 | `cleanup-delete` | 세기 → `cleanup-test-accounts.delete.sql`(한 트랜잭션) → 다시 세기 |
 
 - 실행 이력(2026-10-14): `status` run 38548385742(0000 만 기록, 0001·0002 대기) → `migrate` 38548459519(`__drizzle_migrations` 3행, 최신) → `cleanup-count` 38548532538(계정 5, score 7, chart_best 3, replay 5, submission_audit 13, rival 1, setting_blob 3, api_token 11, session 10, account 5, 다른 사용자의 score 3) → `cleanup-delete` 38549827633(사용자 승인, 대상 전부 0, 다른 사용자의 score 3 그대로). 현재 운영 DB 는 마이그레이션 `0000_smooth_cerebro`, `0001_user_folders`, `0002_scratch_auto_bests` 가 적용됐습니다.
 - 순서: 새 마이그레이션이 있는 변경은 `migrate` 를 **먼저** 돌리고 그 다음 웹을 배포합니다. 새 테이블을 쓰는 코드가 먼저 나가면 해당 경로가 500 을 냅니다.
-- 이 저장소는 PUBLIC 이라 이 워크플로의 로그도 공개입니다. `run-sql.ts` 는 SELECT 결과 행을 그대로 `console.table` 로 출력하므로, 실제 사용자 정보를 고르는 SQL 을 `web/scripts/` 에 넣어 돌리지 않습니다(지금의 count 쿼리는 시험 계정의 `login_id`·`name`·`created_at` 과 개수만 냅니다).
+- 이 저장소는 PUBLIC 이라 이 워크플로의 로그도 공개입니다. `run-sql.ts` 는 SELECT 결과의 행 내용을 로그에 찍지 않고 행 수와 열 이름만 냅니다. 예외는 `target`(문자열)·`row_count`(숫자) 두 열만 가진 개수 표이고, 이것만 `console.table` 로 그대로 찍습니다. 그래도 개수 표의 `target` 에 사용자 정보를 담는 SQL 은 `web/scripts/` 에 넣어 돌리지 않습니다. count 쿼리의 첫 SELECT(시험 계정의 `id`·`login_id`·`name`·`created_at`)는 이제 행 수와 열 이름만 로그에 남고, 개수 표(두 번째 SELECT)가 결과입니다.
 - 시험 계정 목록은 SQL 파일에 고정된 다섯 아이디(`e2e-phase-i-18d38e33cabb`, `e2e-phase-i-18d391944f88`, `gui-e2e-871795`, `probe1`, `w2b2probe`)입니다. 이미 지웠으므로 다시 돌려도 0 개를 지울 뿐입니다. `crates/rbms-ir/tests/e2e_local.rs` 는 `RBMS_IR_E2E_URL` 을 주면 `e2e-phase-i-<무작위>` 계정을 새로 만드므로, 운영 주소로 돌리면 이 목록에 없는 계정이 남습니다(운영에는 돌리지 않습니다).
 
 ### 6.2 웹 보조 스크립트 (`web/scripts/`)
@@ -191,17 +194,13 @@
 | 파일 | 하는 일 | 쓰는 곳 |
 | --- | --- | --- |
 | `db-migration-status.ts` | 마이그레이션 파일(`drizzle/meta/_journal.json`)과 DB 의 `__drizzle_migrations` 를 비교해 파일별 적용 여부, 새 테이블 존재, 결과를 출력(접속 정보는 출력하지 않음). 종료 코드 0 = 최신, 1 = 할 일(대기 마이그레이션 또는 기준선 필요), 2 = 접속 실패. `--baseline-sql` 은 `push` 로 만든 DB 를 기준선으로 채택하는 SQL 을 출력 | `bun run db:status`, `web-db` |
-| `run-sql.ts` | `web/scripts/` 아래의 `.sql` 파일 하나를 여러 문장으로 실행하고 결과 행과 영향 행 수를 출력. 그 밖의 경로는 거절(종료 코드 2) | `web-db` 의 cleanup 동작 |
+| `run-sql.ts` | `web/scripts/` 아래의 `.sql` 파일 하나를 여러 문장으로 실행하고 SELECT 는 행 수와 열 이름(`target`·`row_count` 개수 표만 내용까지), 그 밖의 문장은 영향 행 수를 출력. 그 밖의 경로는 거절(종료 코드 2) | `web-db` 의 cleanup 동작 |
 | `cleanup-test-accounts.count.sql`, `cleanup-test-accounts.delete.sql` | 시험 계정 다섯 개와 딸린 자료를 세고 지움. `session`·`account`·`api_token`·`user_folder`·`user_folder_item` 은 `user` 삭제 시 외래 키가 연쇄 삭제하고, `score.user_id` 는 `set null` 이라 SQL 이 `score` 를 직접 지움 | `web-db` |
 | `snapshot-table.ts` | `bun scripts/snapshot-table.ts <표 주소> <출력 폴더> [--check]`: 난이도표 원본에서 `header.json`·`data.json`·`source.json` 을 받아 저장하거나(발광 표는 `web/data/tables/insane1/`) `--check` 로 저장본과 일치를 봄(종료 코드 0 = 같음, 1 = 다름, 2 = 실패) | 수동 |
 
 ## 7. KNOWN ISSUE (코드가 문서가 말하는 것과 다르게 동작하는 곳)
 
-새 세션의 할 일입니다. 모두 문서만 고친 이번 작업에서는 코드를 바꾸지 않았습니다.
+새 세션의 할 일입니다. 이전에 있던 워크플로·스크립트 결함 네 건(`web-db` 의 `status` 가 항상 성공, 공증 암호 프롬프트가 입력을 보여 줌, 서명 신원 검색에 `-v` 없음, `release.yml` 에 `concurrency` 없음)은 고쳤고 6.1절과 2절, 3절에 반영했습니다. 남은 둘은 사용자 결정 또는 클라이언트 한계라 이 문서의 수리 대상이 아닙니다.
 
-1. KNOWN ISSUE: `web-db.yml` 의 `status` 동작은 항상 성공으로 끝납니다. `Status before` 단계의 `bun run db:status || true` 가 종료 코드 1(할 일 있음)과 2(접속 실패)를 삼키고, `status` 동작에는 그 뒤에 실패할 단계가 없습니다. 접속 실패(`Failed: …`)도 초록으로 보입니다. 고치는 방법: `status` 동작일 때는 `|| true` 를 빼고 종료 코드 2 만 실패로 두거나, 단계에서 종료 코드를 출력하고 2 면 `exit 1`.
-2. KNOWN ISSUE: `scripts/verify-notary-credentials.sh` 는 앱 암호를 `read -r -p` 로 받아 입력이 화면에 보입니다(터미널 기록에 남음). 고치는 방법: `read -rs -p` 로 바꾸고 줄바꿈을 따로 출력.
-3. KNOWN ISSUE: `scripts/verify-signing-cert.sh` 의 `security find-identity -p codesigning` 에는 `-v` 가 없고 릴리스·`signing-check` 워크플로는 `-v`(유효한 신원만)를 씁니다. 만료됐거나 신뢰되지 않는 신원도 로컬 검증은 통과시킬 수 있습니다. 고치는 방법: 스크립트에 `-v` 를 더하고 같은 `sed` 로 이름을 뽑기.
-4. KNOWN ISSUE: `release.yml` 에 `concurrency` 가 없어 수동 실행을 겹쳐 하거나 실행 중에 `dev` 에 푸시하면 `version` 잡의 푸시가 거절되거나 같은 버전을 두 번 계산할 수 있습니다(문서는 "실행 중에 푸시하지 않는다" 로 막고 있음). 고치는 방법: 워크플로에 `concurrency: { group: release, cancel-in-progress: false }`.
-5. KNOWN ISSUE: 게시되지 않은 draft `v0.1.0` 의 산출물은 맨 실행 파일의 tar.gz 입니다. 게시하면 사용자는 v0.1.1 과 같은 Gatekeeper 차단을 만납니다. 고치는 방법: 사용자 결정으로 draft 를 지우거나(태그는 남음) 게시하지 않고 둡니다.
-6. KNOWN ISSUE: 서버가 2^53 이상의 시드를 0 으로 저장하므로, 그런 시드를 담은 옛 클라이언트의 RANDOM 리플레이는 다시 내려받아 재생하면 배치가 달라질 수 있습니다. 해당 빌드는 게시된 적이 없어 영향이 거의 없습니다(테스트 부채 3.8).
+1. KNOWN ISSUE: 게시되지 않은 draft `v0.1.0` 의 산출물은 맨 실행 파일의 tar.gz 입니다. 게시하면 사용자는 v0.1.1 과 같은 Gatekeeper 차단을 만납니다. 고치는 방법: 사용자 결정으로 draft 를 지우거나(태그는 남음) 게시하지 않고 둡니다.
+2. KNOWN ISSUE: 서버가 2^53 이상의 시드를 0 으로 저장하므로, 그런 시드를 담은 옛 클라이언트의 RANDOM 리플레이는 다시 내려받아 재생하면 배치가 달라질 수 있습니다. 해당 빌드는 게시된 적이 없어 영향이 거의 없습니다(테스트 부채 3.8).

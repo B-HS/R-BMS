@@ -32,7 +32,22 @@
 - [x] S14. macOS 배포 형식을 앱 번들 + dmg 로(2026-10-14). 사용자가 받은 v0.1.1 실행 파일이 "Apple could not verify ... free of malware" 로 막혔다. 같은 파일은 `spctl` 온라인 판정 `accepted, source=Notarized Developer ID` 였으나 `syspolicy_check distribution` 이 "Notary Ticket Missing"(단독 실행 파일에는 티켓을 붙일 수 없음). 사용자 결정(모두 추천안): `R-BMS.app` 을 `.dmg` 에 담아 앱과 dmg 모두 공증·티켓 부착, `v0.1.1` draft 를 지우고 `v0.1.2` 로. 커밋 `bfa0cca`(릴리스 워크플로와 `scripts/macos-app.sh`·`scripts/macos-notarize.sh`), 인자 수정(Finder 가 붙이는 `-psn_` 를 곡 경로로 읽지 않음). 릴리스 run 38559305840 전부 통과. 메인이 내려받아 확인: dmg SHA-256 일치, dmg 와 안의 `R-BMS.app` 모두 `stapler validate` 통과, Gatekeeper 판정 `accepted, source=Notarized Developer ID`, `syspolicy_check distribution` "passed all pre-distribution checks", `CFBundleShortVersionString` 0.1.2, `x86_64 arm64`, Windows zip SHA-256 일치. draft 본문은 v0.1.2 와 dmg 에 맞게 고친 릴리스 노트. 게시는 사용자.
 - [x] S15. 점수 제출 400(2026-10-14): v0.1.2 로 친 판의 결과 화면에 `IR ERROR: server error 400 … (VALIDATION_ERROR)`. 원인: 새 판 시드가 시계 나노초(약 1.79e18)인데 서버 Zod 4 `int()` 는 2^53 이하만 받음 → 모든 실제 판이 거절. 수정 `7095ef7`(클라 `fresh_layout_seed` 2^53 미만, 서버 `seedSchema` 범위 밖은 0), 웹 재배포 `7095ef7`, CI 통과. v0.1.2 draft 삭제. 기록 `docs/bug/2026-10-14-score-submit-400-large-seed.md`, ADR `docs/acknowledge/2026-10-14-adr-layout-seed-range.md`.
 - [ ] S16. v0.1.3 게시 — draft 준비 완료(run 38563811699, 버전 커밋 `fb29d24`, dmg·앱 티켓·Gatekeeper·syspolicy_check·SHA-256 확인, 본문 작성). 사용자가 한 판 쳐서 `IR: RANK` 확인 뒤 게시.
-- [ ] S17. 인수인계(2026-10-14, /prepare-new): 문서 4묶음 코드 대조(클라이언트·웹·릴리스 QA·결정 기록), ADR 15건과 색인 `docs/acknowledge/README.md`, `docs/quality-assurance/2026-10-14-test-debt.md`, `docs/bug/2026-10-14-score-submit-400-large-seed.md`, `docs/feedback/2026-10-14-preflight-before-build.md`, `docs/HANDOFF.md`(이전 것은 `docs/history/2026-10-11-handoff-snapshot.md`). 작업 트리, 커밋은 사용자 요청 시.
+- [x] S17. 인수인계(2026-10-14, /prepare-new): 문서 4묶음 코드 대조(클라이언트·웹·릴리스 QA·결정 기록), ADR 15건과 색인 `docs/acknowledge/README.md`, `docs/quality-assurance/2026-10-14-test-debt.md`, `docs/bug/2026-10-14-score-submit-400-large-seed.md`, `docs/feedback/2026-10-14-preflight-before-build.md`, `docs/HANDOFF.md`(이전 것은 `docs/history/2026-10-11-handoff-snapshot.md`). 커밋 `e2c5a38`.
+
+### S18. 점수 제출 400(空POOR) 수리, 기록 동기화, 계약 교차 테스트, v0.1.4 (2026-10-14 재개 세션)
+
+사용자 보고: SCRATCH AUTO 판 결과 화면에 `IR ERROR: server error 400 … (VALIDATION_ERROR)`, "거의 다 저장이 안 된다". 원인(Workflow `wf_8baf7eed-678` 조사, scratchpad 재현): 서버 `judgedNoteCount`(`web/src/server/service/domain/score/score.service.ts`)가 `miss`(클라이언트에서는 空POOR, 노트를 소비하지 않음)를 소비 판정으로 세고 `poor` 에서 `empty_poor` 를 빼서, 空POOR 가 見逃し POOR 보다 많은 판이 `judge count exceeds total_notes` 로 거절됨. SCRATCH AUTO 와 무관. 로컬 52판 중 37판 해당, 운영 순위와 예측 일치. 운영 배포는 `7095ef7`.
+
+사용자 결정(2026-10-14): (1) 판정 수 검사는 노트를 소비한 판정만 센다(9K 는 BAD 가 소비하지 않으면 뺀다). (2) 결과 화면에 오류 필드 표시. (3) v0.1.3 draft 는 두고 v0.1.4 로 낸다. (4) v0.1.0 draft 는 둔다. (5) Esc 중도 포기 판도 저장·전송(FAILED, 남은 노트는 놓침). (6) 넓힌 판정 판은 최고 기록·순위 제외, SCRATCH AUTO 램프 LIGHT ASSIST 유지. (7) 원문 "그냥 서버에 전체 보내서 실패하면 실패한거만 잘 처리해놔" — 로컬 이력 전체를 서버로 보내고, 실패한 판만 실패로 기록·표시·재시도. (8) 로그인·시작 시 자동 + 설정 화면 수동 버튼. (9) 리플레이도 함께. (10) 옛 규칙 SCRATCH AUTO(세대 2) 판은 보내지 않음. (11) 서버가 (사용자, 차트, played_at) 이 같은 제출을 이미 받은 것으로 처리, 로컬은 서버 수락 여부와 score_id 를 기록.
+
+- [x] S18-1. 서버: `judgedNoteCount` 의미 수정 + 실제 판 값 테스트, 같은 판 재제출의 멱등 처리(점수·리플레이), 거절 이유 기록 여부 점검.
+- [x] S18-2. 클라이언트: 오류 세부(field, reason) 표시, 판별 서버 수락 상태 기록(기록 DB), 로컬 기록 전체 동기화(자동 + 수동, 리플레이 포함, 세대 2 SCRATCH AUTO 제외, 실패 판 기록·표시), Esc 포기 판 저장·전송, `scoredb_store.rs` 모듈 문서.
+- [x] S18-3. 작은 수리 5건: `web-db.yml` status 종료 코드, `verify-notary-credentials.sh` `read -rs`, `verify-signing-cert.sh` `-v`, `release.yml` concurrency, `web/scripts/run-sql.ts` 개수만 출력.
+- [x] S18-4. 계약 교차 테스트: Rust 가 실제 판 경로로 만든 요청 본문(일반, 실패, SCRATCH AUTO, 空POOR>POOR, 넓힌 판정, 14K, 코스, 리플레이, 동기화 재제출)을 `contract/client-requests/*.json` 으로 뽑고 웹 테스트가 서버 스키마와 라우트 검사로 통과시킴. `web.yml` 에 MySQL 서비스 + `RBMS_DB_E2E=1`.
+결과(Workflow `wf_c8406f6e-8d8`, 8 에이전트: 설계 ∥ 작은 수리 → 서버 ∥ 클라이언트 → 계약 → 리뷰(발견 9건, 8건 수정·1건 부채) → 게이트). 게이트: fmt·clippy 통과, `cargo test --workspace` 5,758 통과·0 실패·ignored 6, 웹 verify 521 통과·skip 11, format, build, 스킨 덤프 `--strict`, 생성 이미지 `--check`. 커밋 `865643f`(서버), `258596c`(CI·스크립트), `5f4a9a2`(클라이언트), `e9aebae`(계약 테스트). 같은 날 사용자 지시로 발광 표 페이지의 출처·삭제 요청 문구 제거(`4a0872d`, 운영 반영 확인).
+- [ ] S18-5. 리뷰, 게이트, 커밋·푸시, 3 OS·웹 CI, 웹 배포 확인(운영 `/api/version`), 필요 시 운영 DB 마이그레이션(web-db).
+- [ ] S18-6. v0.1.4 릴리스 draft(산출물 확인, 본문 사실 확인). 게시는 사용자.
+- [ ] S18-7. 문서 갱신: ADR(판정 수 검사, 기록 동기화, Esc 포기 판), bug 기록, test-debt, HANDOFF, play-options, api-spec, README.
 
 다음 세션: `docs/HANDOFF.md` 8절의 순서(사용자 확인 → 계약 교차 테스트 → 작은 코드 수리 → 웹 KNOWN ISSUE → 클라이언트 한계 → 실제 창 QA → 웹 2차).
 

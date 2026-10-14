@@ -85,7 +85,7 @@ user 1─* user_folder 1─* user_folder_item   (내 폴더, 마이그레이션 
 | replay_id | varchar(36) null, 논리 replay 관계 |
 | played_at | bigint(epoch ms) idx · created_at |
 | extra | json |
-- 인덱스: `uniq(user_id, chart_sha256, played_at)`(멱등), `idx(chart_sha256, ranked, clear, ex_score)`(랭킹은 ranked=true만), `idx(user_id, played_at)`, `idx(client_build_sha256)`.
+- 인덱스: `uniq(user_id, chart_sha256, played_at)`(같은 밀리초의 이중 삽입을 막는다. 멱등 판정은 서비스가 같은 초 안의 `played_at` 을 먼저 찾아 하며, 규칙은 api-spec 의 멱등 항), `idx(chart_sha256, ranked, clear, ex_score)`(랭킹은 ranked=true만), `idx(user_id, played_at)`, `idx(client_build_sha256)`.
 - EX/BP는 저장하되 `judge`에서 유도 가능(`ex=(epg+lpg)*2+egr+lgr`). 랭킹/best는 **ranked=true**만.
 
 ### `chart_best` (랭킹 가속 — (chart, user, scratch_auto) 최고 1행)

@@ -1,6 +1,6 @@
 # 플레이 옵션
 
-> 최종 갱신 2026-10-14 · 대응 커밋 7095ef7. 반영한 웨이브(모두 커밋됨): 웨이브 20(점수 서버가 SCRATCH AUTO 판을 순위에 올리되 기본 목록에서는 숨긴다: 10.2절의 SCRATCH AUTO·코스 행. 결과 화면은 그 순위를 `IR: RANK #n (SCRATCH AUTO)` 로 쓴다), 웨이브 18(SCRATCH AUTO 의 새 규칙과 모든 판의 저장·전송: 10절, 같은 배치로 다시 하기: 10.7절), 웨이브 16(기록이 저장되는 조건과 SCRATCH AUTO: 10절, 목표 점수와 TARGET FALLBACK·TARGET RATE: 11절, 리플레이를 본 뒤 설정이 그대로 남는 것: 10.2절), 웨이브 14(플레이 중 조작: START + 턴테이블의 1 단위 걸음과 리프트 조합, 판정 오프셋의 출하 키와 누름 반복, 스크래치 역방향 키의 출하: 2절의 "바꾸는 곳" 열, 5절), 웨이브 13(판정 오프셋을 원본의 노트 표시 타이밍으로: 1~3절, 7.4절. 기본 스킨의 판정선을 필드 맨 아래로: 8절), 웨이브 12(연습 패널의 숫자 행: 9절)
+> 최종 갱신 2026-10-14 · 대응 커밋 7095ef7. 반영한 변경: 0.1.4 의 기록 동기화와 Esc 포기 판 저장(10.1·10.2·10.4·10.8절과 새 10.9절. 아직 커밋 전), 웨이브 20(점수 서버가 SCRATCH AUTO 판을 순위에 올리되 기본 목록에서는 숨긴다: 10.2절의 SCRATCH AUTO·코스 행. 결과 화면은 그 순위를 `IR: RANK #n (SCRATCH AUTO)` 로 쓴다), 웨이브 18(SCRATCH AUTO 의 새 규칙과 모든 판의 저장·전송: 10절, 같은 배치로 다시 하기: 10.7절), 웨이브 16(기록이 저장되는 조건과 SCRATCH AUTO: 10절, 목표 점수와 TARGET FALLBACK·TARGET RATE: 11절, 리플레이를 본 뒤 설정이 그대로 남는 것: 10.2절), 웨이브 14(플레이 중 조작: START + 턴테이블의 1 단위 걸음과 리프트 조합, 판정 오프셋의 출하 키와 누름 반복, 스크래치 역방향 키의 출하: 2절의 "바꾸는 곳" 열, 5절), 웨이브 13(판정 오프셋을 원본의 노트 표시 타이밍으로: 1~3절, 7.4절. 기본 스킨의 판정선을 필드 맨 아래로: 8절), 웨이브 12(연습 패널의 숫자 행: 9절)
 > 대상: 플레이 중 스크롤·가림막·판정 타이밍을 정하는 옵션과 그 키, 그 옵션을 바꾸는 화면인 PLAY 메뉴(7절), 기본 스킨의 판정 표시(8절), 연습 패널(9절). 스킨이 그리는 옵션(Lane Width 등)과 부위별 불투명도는 [skin.md](./skin.md) 3.4절, 구현 위치는 [crates.md](./crates.md)를 본다. PLAY 메뉴의 설계는 [plan/2026-10-11-play-menu.md](./plan/2026-10-11-play-menu.md).
 > beatoraja 원본의 같은 기능이 기준이다. 다르게 한 곳은 "원본과 다른 점" 열에 이유를 적는다.
 
@@ -419,15 +419,17 @@ SETTINGS 의 탭은 JUDGE, DISPLAY, INPUT, NETWORK, AUDIO, SELECT 여섯이다(P
 
 | 곳 | 내용 | 읽는 화면 |
 | --- | --- | --- |
-| `scoredb.sqlite` 의 `scorelog` | 판마다 한 행. 판정 12칸(빠름·늦음), 노트 수, 콤보, BP, 램프, 게이지, 어시스트 단계, 판정 규칙 세대(`rule_version`), 배치와 시드, 날짜, 리플레이 파일 이름, 점수 서버에 보냈는지(`ir_submitted`) | 선곡의 기록 목록(R), 리플레이 슬롯 |
+| `scoredb.sqlite` 의 `scorelog` | 판마다 한 행. 판정 12칸(빠름·늦음), 노트 수, 콤보, BP, 램프, 게이지, 어시스트 단계, 판정 규칙 세대(`rule_version`), 배치와 시드, 날짜, 리플레이 파일 이름, 판이 끝날 때 주 서버에 넘겼는지(`ir_submitted`. 참고용이다. 서버가 받았는지는 `ir_sync` 가 적고, 어떤 판단에도 이 값을 읽지 않는다) | 선곡의 기록 목록(R), 리플레이 슬롯 |
 | `scoredb.sqlite` 의 `score` | 차트(와 모드, LN 종류)마다 한 행인 최고 기록. 램프, 최고 EX 를 낸 판의 판정 12칸과 그 판의 노트 수, 최대 콤보, 최소 BP, 플레이 횟수, 클리어 횟수, 마지막 날짜 | 스킨이 그리는 선곡의 EX SCORE·RATE·RANK·MAX COMBO·MISS COUNT·판정 막대·PLAY COUNT·CLEAR COUNT |
 | `scoredb.sqlite` 의 `player_stat` | 날짜별 누적(플레이 횟수, 판정 수, 플레이 시간) | - |
 | `replays/<md5 앞 8자>-<시각>.ron` | 그 판의 입력과 SCRATCH AUTO·게이지·배치·시드·판정 설정 | 기록 목록의 리플레이, 결과 화면의 REPLAY |
+| `scoredb.sqlite` 의 `play_submission` | 판마다 한 행. 판이 끝날 때 만든 점수 제출 본문(JSON)과 그 판을 친 계정(게스트면 NULL). 0.1.4 부터 적는다. 그 전의 판은 행이 없고 동기화가 기록 행으로 본문을 다시 만든다(10.9) | - |
+| `scoredb.sqlite` 의 `ir_sync` | 판과 점수 서버마다 한 행. 서버가 그 판을 받았는지(`accepted`), 거절했는지(`rejected`, 오류 코드·필드·이유·HTTP 상태), 답을 못 받았는지(`retry`), 보내지 않았는지(`skipped`), 서버의 `score_id`, 보낸 횟수와 마지막 시각(밀리초), 리플레이 상태. 행이 없으면 "미확인"이다 | 선곡의 기록 상세(R)의 IR 줄 |
 | 메모리의 기록 책(`ScoreBook`) | 시작할 때 `scorelog` 전체로 만들고 판이 끝날 때마다 한 행을 더한다. 행마다 최고 기록이 될 수 있는지를 어시스트 단계와 규칙 세대로 다시 읽는다(`rbms_store::sets_best`) | 플레이 화면의 LOCAL BEST 목표와 스코어 그래프의 BEST, 결과 화면의 이전 최고, 내장 선곡 화면 |
 
 ### 10.2 판의 종류별로 남는 것
 
-"사람이 친 판"은 오토플레이도 리플레이 보기도 연습도 아닌 판이다. 사람이 친 판은 어떤 설정이든 기록 목록의 행·날짜 통계·리플레이(AUTO REPLAY 켬)를 남기고 점수 서버로 간다(주 서버가 기본 서버(`SERVER URL`)면 로그인했을 때, 주 서버가 IR 프로필이면 언제나. 보내지 않은 판은 `ir_submitted` 만 0 이고 나머지는 같다. 기본 서버가 설정돼 있어도 로그인하지 않았으면 보내지 않으므로 0 이다(`AppShared::sends_to_primary_ir_server`). 나중에 로그인해도 지난 판을 다시 보내지 않는다).
+"사람이 친 판"은 오토플레이도 리플레이 보기도 연습도 아닌 판이다. 사람이 친 판은 어떤 설정이든 기록 목록의 행·날짜 통계·리플레이(AUTO REPLAY 켬)를 남기고 점수 서버로 간다(주 서버가 기본 서버(`SERVER URL`)면 로그인했을 때, 주 서버가 IR 프로필이면 언제나. 보내지 않은 판은 `ir_submitted` 만 0 이고 나머지는 같다. 기본 서버가 설정돼 있어도 로그인하지 않았으면 보내지 않으므로 0 이다(`AppShared::sends_to_primary_ir_server`). 0.1.4 부터는 로그인하면(시작할 때 로그인 상태였으면 세션이 확인된 뒤) 서버가 아직 받지 않은 지난 판을 모두 보낸다: 10.9절의 기록 동기화).
 
 | 판 | 기록 목록의 행·날짜 통계 | 최고 기록(EX·판정·콤보·BP) | 램프·플레이 횟수 | 리플레이(AUTO REPLAY 켬) | 점수 서버 | 원본과 다른 점 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -441,7 +443,7 @@ SETTINGS 의 탭은 JUDGE, DISPLAY, INPUT, NETWORK, AUDIO, SELECT 여섯이다(P
 | AUTOPLAY | 남지 않는다 | - | - | - | 보내지 않는다 | 없음(`MusicResult.updateScoreDatabase` 가 PLAY 모드만 적는다). 사람이 친 판이 아니다 |
 | 리플레이 재생 | 남지 않는다 | - | - | - | 보내지 않는다 | 없음. 재생하는 동안 SCRATCH AUTO·GAUGE·RANDOM 은 리플레이에 적힌 값으로 돌고 끝나면 플레이어의 값으로 돌아온다(웨이브 16) |
 | 연습 구간 | 남지 않는다 | - | - | - | 보내지 않는다 | 없음. 사람이 쳤지만 구간만 잘라 친 판이라 한 판의 기록이 아니다 |
-| 도중 포기(Esc) | 칠 노트가 남아 있으면 남지 않는다(선곡으로 돌아간다). 노트를 다 처리한 뒤의 Esc 는 결과 화면으로 가고 위 규칙대로 남는다 | - | - | - | - | 원본은 포기한 판도 친 노트가 있으면 FAILED 로 결과 화면에 가서 저장한다(`BMSPlayer.stopPlay`). KNOWN ISSUE: 여기서는 `PlayState::leave_run` 이 결과 화면을 거치지 않아 로컬 기록·리플레이·전송이 모두 없다. 사용자의 "서버로 저장되지 않는 기록은 없다"(2026-10-14)가 이 판을 포함하는지는 확인하지 않았다(새 세션에서 사용자에게 물을 것) |
+| 도중 포기(Esc) | 사람이 친 판이고 노트를 하나라도 판정했으면 남는다. 결과 화면을 거치지 않고 곧장 선곡으로 간다(Esc 는 지금도 바로 나가는 키다). 남은 노트(아직 판정하지 않은 노트와 롱노트의 끝)는 모두 늦은 POOR(見逃し)로 세고 램프는 FAILED 다(`PlaySummary::left_unfinished`). 그래서 PG~POOR 합이 차트의 노트 수와 같다. 판정한 노트가 하나도 없는 판(시작하자마자 나간 판, 空POOR 나 9키의 BAD 만 있는 판)은 남지 않는다. 노트를 다 처리한 뒤의 Esc, 그리고 이미 실패·끝으로 닫히는 중인 판의 Esc(ESCAPE 가 길게 누르기일 때 누르는 도중 게이지가 바닥나 길게 누르기가 닫히는 중에 끝나는 경우도 같다)는 결과 화면으로 가고 위 규칙대로 남는다: 닫히는 판은 장면이 센 대로 남고 남은 노트를 見逃し POOR 로 더하지 않는다. 코스 도중의 Esc 는 지금처럼 코스를 끝내고 아무것도 남기지 않는다(이번 범위 밖) | EX 가 더 높으면 갱신(FAILED 판과 같다) | FAILED, 횟수 +1 | 나간 시점까지의 입력으로 저장 | 로그인했으면 그 판 하나만 기록 동기화로 곧장 보낸다(결과 화면이 없어 결과 화면의 전송은 쓰지 않는다). 게스트면 다음 로그인 때 동기화가 보낸다. IR 프로필로의 전송은 다른 판과 같다. 메시지 `run left mid-song kept as FAILED` 가 뜬다 | 원본(`BMSPlayer.stopPlay`)은 FAILED 로 바꿔 결과 화면을 거쳐 저장하고, 남은 노트는 판정 수에 넣지 않고 BP 에만 더한다(`BMSPlayer.java:909`). 여기서는 결과 화면을 거치지 않고(위) 남은 노트를 見逃し POOR 로 센다(사용자 결정 2026-10-14). 리플레이를 재생하면 남은 노트가 지나가 見逃し POOR 가 되므로 판정 수는 기록과 같지만, 재생은 곡 끝까지 가고 게이지는 기록과 다르게 끝날 수 있다(쉬운 게이지면 클리어로 끝날 수도 있다). 알려진 한계다 |
 
 ### 10.3 최고 기록 한 행과 노트 수
 
@@ -454,7 +456,7 @@ SETTINGS 의 탭은 JUDGE, DISPLAY, INPUT, NETWORK, AUDIO, SELECT 여섯이다(P
 1. 웨이브 16 까지의 SCRATCH AUTO 판은 턴테이블 노트를 사람 대신 PGREAT 로 쳐서 셌다. 노트 수·EX·콤보에 턴테이블이 들어 있어 새 규칙의 판과 비교할 수 없다. 사용자의 결정은 "없어져도 괜찮으니(램프만 있어도 됨) 잘 처리해 둔다"이다.
 2. 처리: 지우지도 고쳐 쓰지도 않는다. 새로 저장하는 판은 판정 규칙 세대 3(`SCORE_RULE_VERSION`)으로 적고, 기록 책은 행마다 `rbms_store::sets_best(어시스트, 세대)` 로 최고 기록이 될 수 있는지 읽는다: 어시스트 0 은 언제나, SCRATCH AUTO(어시스트 1)는 세대 3 부터만, 넓힌 판정(2)과 옮겨 온 기록의 알 수 없는 어시스트(-1)는 언제나 아니다. 세대 2 의 SCRATCH AUTO 행은 그래서 이력과 램프로만 남고 LOCAL BEST·스코어 그래프의 BEST·결과 화면의 이전 최고·선곡의 EX 에 들어가지 않는다. `score` 행은 그 판들이 애초에 점수를 남기지 않았으므로(웨이브 16 의 규칙) 고칠 것이 없다. 그래서 앱이 시작할 때 한 번 하는 마이그레이션은 필요 없다.
 3. 세대 3 은 SCRATCH AUTO 만 바꾼다. 손으로 친 세대 2 의 행은 지금과 같은 판정이라 "OLD RULE"(`is_stale_rule_version`, 세대 2 미만)로 표시하지 않는다. 세대 1 이하의 기준은 그대로다.
-4. 점수 서버로 소급 전송하지 않는다(재전송 경로가 없다).
+4. 세대 2 이하의 SCRATCH AUTO 판은 기록 동기화(10.9)에서도 보내지 않는다. 동기화는 그 판들에 `ir_sync` 행을 `skipped`·`OLD_SCRATCH_AUTO_RULE` 로 적어 기록 상세가 `IR: NOT SENT (OLD SCRATCH AUTO RULE)` 로 이유를 말하게 한다. `scores.ron` 에서 옮겨 온 판은 어시스트가 있었다는 것만 남아(`assist = -1`) SCRATCH AUTO 였는지 알 수 없으므로, 세대 2 이하의 그런 판도 같은 이유로 보내지 않는다(넓힌 판정이었던 옛 판이 섞여 있을 수 있고, 이 판들은 서버에서도 순위에 올리지 않을 판이라 보내지 않아도 잃는 것은 이력 한 줄이다).
 5. 사용자 DB 의 사본으로 잰 값(테스트 `a_players_own_database_reads_its_old_scratch_auto_rows_as_lamps_alone`, `#[ignore]` 라 `--ignored` 와 `RBMS_SCOREDB_COPY=<사본>` 으로 손으로 돌린다): 37판 모두 어시스트 1·세대 2, 29 차트. 이 빌드로 읽으면 LOCAL BEST 가 있는 차트 0, 램프가 있는 차트 29, 점수가 있는 최고 기록 행 0. 같은 사본에 새 규칙의 SCRATCH AUTO 판을 하나 적으면 그 판이 그 차트의 첫 최고 기록이 되고 램프는 그대로다.
 6. 웨이브 16 까지의 SCRATCH AUTO 리플레이를 지금 보면 새 규칙으로 재생된다(턴테이블이 세지 않는다). 그래서 그 판의 이력 행과 숫자가 다르다.
 
@@ -499,7 +501,9 @@ SETTINGS 의 탭은 JUDGE, DISPLAY, INPUT, NETWORK, AUDIO, SELECT 여섯이다(P
 
 | 내용 | 위치 |
 | --- | --- |
-| 판이 끝날 때의 저장·전송·리플레이 | `apps/rbms-player/src/app_result.rs`(`enter_result`), 행으로 바꾸기는 `apps/rbms-player/src/scoredb_store.rs`(`play_log`, `record_finished_play`, `record_of`) |
+| 판이 끝날 때의 저장·전송·리플레이 | `apps/rbms-player/src/app_result.rs`(`enter_result`, 저장은 `record_run`, 포기한 판은 `record_left_run`), 행으로 바꾸기는 `apps/rbms-player/src/scoredb_store.rs`(`play_log`, `record_finished_play`, `record_of`) |
+| Esc 포기 | `apps/rbms-player/src/stage/play/mod.rs`(`leave_run`, `keeps_a_left_run`), `crates/rbms-play/src/session.rs`(`PlaySummary::left_unfinished`), 테스트 `app_result/record_tests.rs`(`leaving_mid_song_keeps_a_failed_run_with_the_rest_as_poor`, `leaving_mid_song_signed_in_sends_the_run`, `leaving_before_any_note_is_judged_keeps_nothing`, `leaving_while_holding_a_long_note_counts_it_once`, `leaving_a_watched_replay_or_autoplay_keeps_nothing`, `leaving_mid_course_still_ends_the_course_unrecorded`), 닫히는 판 `stage/play/tests.rs`(`escape_held_through_a_closing_run_reaches_the_result_screen_with_the_notes_it_judged`), `session.rs` 의 `a_run_left_unfinished_*` |
+| 기록 동기화 | 10.9절의 마지막 표 |
 | 최고 기록에 합치는 규칙 | `crates/rbms-store/src/scoredb.rs`(`ScoreDb::record_play`, `merge_best`), 행이 최고 기록이 될 수 있는지 `crates/rbms-store/src/score.rs`(`sets_best`, `SCORE_RULE_VERSION`) |
 | 최고 기록을 갱신해도 되는 판, 보낼 판 | `apps/rbms-player/src/lib.rs`(`updates_score`, `ir_submission_block_reason`, `assisted_lamp`), 실제로 보내는지 `apps/rbms-player/src/app_ranking.rs`(`sends_to_primary_ir_server`), 코스의 어시스트와 코스 최고 기록 `apps/rbms-player/src/course_ir.rs`(`CourseAssist`, `course_updates_score`, `build_course_submission`) |
 | 턴테이블을 판정에서 빼기 | `crates/rbms-play/src/lib.rs`(`Player::with_auto_lanes`, `take_auto_lanes`), `crates/rbms-play/src/session.rs`(`field_timelines`, `auto_lanes`, `has_auto_played_notes`), 테스트 `crates/rbms-play/tests/scratch_auto.rs`(스크래치 없는 차트와 같은 집계, 턴테이블 키, 키음, 리플레이와 되감기, DP, 9키) |
@@ -507,6 +511,47 @@ SETTINGS 의 탭은 JUDGE, DISPLAY, INPUT, NETWORK, AUDIO, SELECT 여섯이다(P
 | SCRATCH AUTO 가 어시스트인지 | `apps/rbms-player/src/app_result.rs`(`scratch_auto_played`: 세션이 노트를 뺐는지) |
 | 손으로 친 판을 끝까지 돌려 DB 를 읽는 테스트 | `apps/rbms-player/src/app_result/record_tests.rs`(로그인 없음, 로그인 있음, 서버는 있고 로그인하지 않음(`ir_submitted` 0), 다음 실행, SCRATCH AUTO 저장과 최고 기록, SCRATCH AUTO 전송 내용, SCRATCH AUTO 스테이지가 든 코스와 넓힌 판정 스테이지가 든 코스(코스로 보내지고 어시스트가 실리는지, 코스 최고 기록), 넓힌 판정, 세대 2 의 행과 결과 화면의 이전 점수, 턴테이블 노트가 없는 차트, AUTOPLAY, FAILED, 리플레이를 본 뒤의 설정, 사용자 DB 사본(`#[ignore]`, `RBMS_SCOREDB_COPY=<사본> cargo test -p rbms-player --lib -- --ignored a_players_own_database`)). 올릴 수 있는 판정 폭은 `ir_replay.rs` 의 `only_a_judge_the_wire_can_state_is_uploaded` |
 | 캡처 | `RBMS_SKIN_CAPTURE_DIR` 을 주면 `scratch-auto-play-rbms-default.png`(와 `RBMS_SKIN_PACK` 의 팩 이름), `result-recorded-scratch-auto.png`, `select-recorded-scratch-auto.png`, `select-recorded-widened.png` 를 쓴다(`stage/play/screen_tests/default_pack_tests.rs`, `stage/result/tests.rs`, `stage/select/recorded_tests.rs`) |
+
+### 10.9 기록 동기화(SYNC RECORDS NOW)
+
+> 0.1.4(2026-10-14) 추가. 사용자 결정(2026-10-14): "그냥 서버에 전체 보내서 실패하면 실패한 거만 잘 처리해 놔". 서버 쪽 계약은 `docs/plan/2026-10-14-record-sync.md` 2절이다.
+
+이 기계에 남은 판 중 점수 서버가 아직 받지 않은 판을 모두 서버로 보낸다. 서버는 같은 사용자·차트·같은 1초 안의 `played_at` 을 같은 판으로 보고, 이미 가진 판은 `message: "duplicate submission ignored"` 와 기존 `score_id` 로 받는다(멱등). 그래서 이미 받은 판을 다시 보내도 해가 없고, 판별로 서버의 답을 `ir_sync` 에 적어 다음 동기화가 무엇을 보낼지 정한다. 옛 `ir_submitted` 는 "넘겼음"일 뿐이라 읽지 않는다. 0.1.3 까지의 판은 `ir_sync` 행이 없으므로 "미확인"이고 첫 동기화에서 한 번씩 간다.
+
+| 항목 | 동작 |
+| --- | --- |
+| 대상 | 기본 서버(`SERVER URL`)에서 `accepted` 가 아닌 판 전부(거절·일시 실패·건너뜀·미확인). 다른 계정으로 친 판(`play_submission.played_as` 가 다른 판)은 뺀다. 게스트로 친 판과 0.1.4 이전의 판(`played_as` NULL)은 처음 동기화하는 계정으로 간다. 세대 2 이하의 SCRATCH AUTO 판(옮겨 온 어시스트 판 포함)은 보내지 않는다(10.4). IR 프로필(`ir_profiles`)로는 동기화하지 않는다. 서버는 SERVER URL 의 앞뒤 공백과 끝의 `/` 를 뗀 문자열로 구별하므로, 서버를 바꾸면 상태가 따로 쌓인다 |
+| 순서 | 오래된 판부터(`date`, `id` 순). 점수를 다 보낸 뒤 리플레이를 올린다 |
+| 고르는 비용 | 보낼 판을 고르는 일(DB 조회와 곡 라이브러리 대조)은 프레임 스레드에서 한다. 잰 값(릴리스, 판마다 제출 본문 2.5KB, 따뜻한 캐시): 5천 판 25ms, 2만 판 100ms. 시작·로그인·버튼의 전체 동기화에서 한 번 든다. Esc 로 포기한 판 하나의 동기화는 그 판만 골라 0.1ms 안쪽이고 SCRATCH AUTO 표시와 상태 전체 읽기를 하지 않는다. 전체 동기화의 선정을 일꾼으로 옮기는 일은 하지 않았다(`docs/quality-assurance/2026-10-14-test-debt.md`) |
+| 언제 | 시작할 때 로그인 상태면 세션이 확인된 뒤(`whoami` 성공. 오프라인이면 하지 않는다), 로그인·가입에 성공했을 때, 설정 NETWORK 의 SCORES 묶음 첫 줄 `SYNC RECORDS NOW` 를 눌렀을 때, Esc 로 포기한 판이 남았을 때(그 판 하나). 게스트면 하지 않고, 수동 버튼은 `log in first`(서버가 없으면 `set SERVER URL first`)를 띄운다. 보내는 계정은 서버가 토큰의 주인으로 알려 준 login id(`whoami`·로그인 응답)뿐이다. 설정에 적은 PLAYER ID 는 대신 쓰지 않고(다르면 모든 판이 403 으로 거절된다), 토큰은 있는데 주인을 아직 모르면 수동 버튼은 `account not confirmed yet` 을 띄우고 자동 동기화는 하지 않는다. 이미 돌고 있으면 수동 버튼은 `records sync already running`, 포기한 판은 지금 동기화가 끝난 뒤 이어서 보낸다 |
+| 본문 | 판이 끝날 때 적어 둔 제출 본문(`play_submission.body`)을 그대로 보내고 `player.id` 만 동기화하는 계정으로 바꾼다. 본문이 없는 판(0.1.3 까지)은 기록 행으로 다시 만든다(아래 "재구성") |
+| 속도 | 백그라운드 스레드에서 보내 화면 프레임을 막지 않는다. 점수는 1.5초에 하나(분당 40, 서버 한도 60), 리플레이는 7.5초에 하나(분당 8, 서버 한도 10). 남는 몫은 동기화 중에 친 판의 몫이다(`record_sync.rs` 의 `SCORE_SEND_INTERVAL`, `REPLAY_SEND_INTERVAL`) |
+| 답의 분류(`rbms_ir::submit_verdict`) | 2xx 수락은 `accepted`(중복 응답이면 "이미 있음"으로 센다). 4xx(400·403·404·409·413 등)는 `rejected` 로 오류 코드·필드·이유·HTTP 상태를 적고 다음 동기화에서 다시 보낸다(서버 수정으로 받아질 수 있다). 429 는 60초 기다렸다 같은 판을 다시 보내고, 두 번 기다려도 429 면 그 판을 `retry` 로 적고 동기화를 멈춘다. 네트워크 오류·응답 해석 실패·5xx 는 `retry` 이고 세 번 연속이면 서버가 닿지 않는 것으로 보고 멈춘다. 401·서버 없음은 그 판을 `retry` 로 적고 멈춘다 |
+| 리플레이 | 수락된 판 중 로컬 리플레이 파일이 있고 AUTO UPLOAD REPLAY 가 켜져 있을 때 올린다. 서버의 `score_id` 를 실어 그 점수에 묶는다. 상태는 `pending`(아직 안 올림, 설정이 꺼져 있을 때 포함), `uploaded`, `failed`(일시 실패, 다음에 다시), `rejected`(다음에 다시), `skipped`(unranked 응답이거나 판정 폭을 와이어가 싣지 못하는 판, `ir_replay::wire_carries_judge`), `missing`(파일이 지워짐), `none`(리플레이 없음). 리플레이는 그 점수를 보낸 계정으로만 올린다 |
+| 결과 화면의 전송 | 판이 끝날 때의 전송도 같은 `ir_sync` 열을 쓴다(`AppShared::write_live_outcome`). 그 전송이 끝나기 전에 다음 판이 제출되면 앞 판의 답은 버려지고(전과 같다), 그 판은 행이 없어 다음 동기화가 보낸다(멱등이라 무해). 전송이 아직 들고 있는 판은 그 사이에 시작하는 동기화(버튼, 게스트였다가 로그인)의 대상에서 뺀다. 같은 판을 둘이 겹쳐 보내면 서버가 같은 밀리초의 둘째를 500 으로 거절할 수 있고, 나중에 적는 쪽이 리플레이 상태를 덮기 때문이다 |
+| 멈춤·취소 | 로그아웃과 서버를 다시 만들 때(로그인으로 토큰이 바뀔 때, SERVER URL 변경) 돌던 동기화를 취소한다. 이미 받은 답은 그대로 적혀 있다. 보내는 중인 요청은 끊지 않는다(요청 제한 시간 5초) |
+| 진행과 결과 | 상태 줄은 진행 중 `syncing records 12/340`·`syncing replays 3/80`, 끝나면 `records: 120 sent, 30 already on server, 5 rejected, 2 failed, 1 skipped; replays: 80 uploaded, 3 failed`(0 인 항목은 뺀다. 보낸 판이 없으면 `records: nothing sent`), 멈추면 `records sync stopped: not signed in (401)`·`records sync stopped: server unreachable`·`records sync stopped: rate limited`·`records sync cancelled` 다. 같은 줄이 메시지로도 뜬다(거절·실패·멈춤이 있으면 경고). 보낼 판이 없으면 수동 버튼만 `records: nothing to send` 를 띄우고 자동 동기화는 조용하다. SYNC RECORDS NOW 행의 값은 도는 동안 `SENDING 12/340`·`REPLAYS 3/80`, 아니면 `>` 다 |
+| 판별 이유 | 선곡의 기록 상세(R) 아래쪽 한 줄(56자에서 자른다): `IR: ON SERVER`(초록. 지금 로그인한 계정이 아닌 다른 계정으로 받은 판이면 `IR: ON SERVER (AS <계정>)`(회색)로 말한다. 행은 서버로만 나뉘어 쌓이기 때문이다), `IR: REJECTED VALIDATION_ERROR: judge (judge count exceed...`(빨강. 56자에서 자르므로 이유가 길면 이렇게 끝난다. 필드·이유가 없으면 `IR: REJECTED <코드>`, 코드도 없으면 `IR: REJECTED (HTTP 400)`), `IR: NOT SENT YET (WILL RETRY)`(노랑), `IR: NOT SENT (OLD SCRATCH AUTO RULE)`, `IR: NOT SENT (CHART NOT IN LIBRARY)`(노랑), 행이 없으면 `IR: NOT SENT YET`(로그인) 또는 `IR: NOT SENT (NOT SIGNED IN)`(게스트). 서버 URL 이 없으면 줄이 없다. 리플레이 상태는 줄에 넣지 않는다(모달 높이) |
+| 결과 화면의 오류 줄 | 서버의 오류 봉투에 `details.field` 가 있으면 `IR ERROR: server error 400: VALIDATION_ERROR: judge (judge count exceeds total_notes)` 처럼 코드·필드·이유를 쓴다(필드만 있으면 `코드: 필드`, 필드가 없으면 전처럼 `메시지 (코드)`). 결과 줄은 56자에서 `...` 로 자르므로 화면에는 `IR ERROR: server error 400: VALIDATION_ERROR: judge (judge count e...` 로 보인다. 운영 서버는 프로덕션에서 `details` 중 `field`·`reason` 만 내보낸다 |
+
+재구성(본문이 없는 판, `record_sync::rebuilt_submission`)과 그 한계:
+
+1. 기록 행에 있는 것: 판정 12칸, 노트 수, 콤보, BP, 램프, 게이지 종류와 값, 배치(RANDOM)와 시드, 어시스트 단계, 날짜(초), 리플레이 파일 이름. 아티스트·레벨은 곡 라이브러리에서 md5 로 찾는다(없으면 빈 값).
+2. 없는 것: fast/slow(0 으로 보낸다), 하이스피드·리프트·커버·녹색 숫자 같은 옵션, 판정 폭(어시스트 2 면 `CUSTOM_JUDGE` 태그로 이미 unranked), 빌드 해시와 플랫폼, 판정 알고리즘, 스킨. 본문의 `extra.reconstructed = true` 가 다시 만든 본문임을 말한다.
+3. 시각: 리플레이 파일 이름(`<md5 앞 8자>-<밀리초>.ron`)의 밀리초가 기록의 초와 같으면 그 밀리초, 아니면 `날짜 × 1000`. 서버는 같은 1초 안을 같은 판으로 보므로 이미 받은 판이 중복 저장되지 않는다(서버가 이 규칙을 배포한 뒤에만. 배포 순서는 계약 문서 2.3절).
+4. 어시스트: 1 이면 `scratch_auto = true` 와 `AUTO_SCRATCH`, 2 면 `CUSTOM_JUDGE`. RON 에서 옮겨 온 행의 알 수 없는 어시스트(-1)는 `UNRECORDED_ASSIST` 태그로 보내 서버가 unranked 로 받는다.
+5. LN 종류: 기록의 LN 키가 LN·CN·HCN 이면 그대로, 차트가 롱노트를 정한 판(`CHART`)은 LN(0)으로 보낸다. CN·HCN 을 선언한 차트의 옛 판은 서버에 LN 으로 적힌다(곡 라이브러리에 `#LNMODE` 가 없어 알 수 없다).
+6. sha256: `scores.ron` 에서 옮겨 온 행은 sha256 이 비어 있다. 라이브러리에서 md5 로 차트 파일을 찾아 다시 해시하고 md5 가 같으면 그 sha256 을 쓰고 기록 행에도 채운다(`backfill_sha256`). 차트가 라이브러리에 없으면 보내지 않고 `skipped`·`NO_CHART_HASH` 로 적어 다음 동기화에서 다시 본다.
+7. 운영 서버가 빌드 해시를 요구하도록 설정돼 있으면(`REQUIRE_BUILD_HASH`) 재구성한 판은 `client_build_sha256` 으로 거절돼 `rejected` 로 남는다. 운영 값은 확인하지 않았다.
+
+| 내용 | 위치 |
+| --- | --- |
+| 표와 쿼리 | `crates/rbms-store/src/scoredb/schema.sql`(`play_submission`, `ir_sync`. 스키마 세대는 1 그대로다: 표만 더하는 변경이라 0.1.3 으로 되돌려도 DB 가 열린다), `crates/rbms-store/src/scoredb/sync.rs`(`sync_candidates`, `replay_candidates`, `put_sync_state`, `put_replay_state`, `sync_states`, `mark_old_scratch_auto_skipped`, `backfill_sha256`, `put_submission`), 테스트 `scoredb/sync_tests.rs` |
+| 답의 분류와 오류 줄 | `crates/rbms-ir/src/sync.rs`(`submit_verdict`, `upload_verdict`), `crates/rbms-ir/src/error.rs`(`ServerReason`, `readable_detail`), `crates/rbms-ir/src/dto/score.rs`(`DUPLICATE_SUBMISSION_MESSAGE`, `mark_reconstructed`) |
+| 일꾼과 화면 | `apps/rbms-player/src/record_sync.rs`(`spawn_record_sync`, `rebuilt_submission`, `AppShared::start_record_sync`·`poll_record_sync`·`sync_records_now`·`record_ir_line`), 결과 화면 전송의 상태 `apps/rbms-player/src/app_ranking.rs`(`LiveSubmit`, `write_live_outcome`), 자동 시작 `app_network.rs`(`poll_auth`, `poll_whoami`), 버튼 `stage/settings.rs`·`stage/settings/catalog.rs`, 기록 상세 `stage/select/scene.rs` 와 `crates/rbms-render/src/select.rs`(`SelectModal::ir_line`) |
+| 테스트 | `apps/rbms-player/src/record_sync/tests.rs`(가짜 서버로 본문·재구성·시각·어시스트·sha256 채우기·리플레이·429·일시 실패·401·거절·취소·로그인과 시작 때의 자동 시작·게스트·로그아웃·이어 보내기·화면 줄·입력한 PLAYER ID 를 계정으로 쓰지 않음·결과 화면 전송 중인 판 빼기·이름 붙인 판의 동기화가 상태를 다시 읽지 않음·다른 계정으로 받은 판의 줄), `app_result/record_tests.rs`(`a_finished_run_stores_its_submission_body`, `a_live_submission_writes_its_sync_state`), `stage/settings/layout_tests.rs`(`the_scores_section_starts_with_sync_records_now`, `sync_records_now_while_signed_out_says_log_in_first`), `crates/rbms-ir/src/error.rs`·`sync.rs`, `crates/rbms-store/src/scoredb/sync_tests.rs` |
+
+설정 화면: NETWORK 묶음이 스크롤 없이 한 화면에 다 보이도록(설정 화면의 규칙이다, `layout_tests.rs` 의 `every_group_lists_its_rows_under_the_headings_of_its_sections`) 이 행을 더하면서 SERVER 와 ACCOUNT 두 머리를 `SERVER AND ACCOUNT` 하나로 합쳤다.
 
 ## 11. 목표 점수(TARGET, TARGET FALLBACK, TARGET RATE)
 
