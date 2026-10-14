@@ -186,7 +186,7 @@ export const metadata = {
 | `getMaxExScore(totalNotes)`, `formatChartTitle({title, sha256})`, `formatCount`, `formatHash`, `formatDateTime(ms)`, `formatPercent` | `@shared/lib/format` | 표시용. 제목이 비면 `제목 미등록 <sha 앞 8자…>`. 시각은 `Asia/Seoul` 고정 |
 | `readParam`, `readNumberParam`, `readListParam`, `serializeSearchParams`, `toggleListValue` | `@shared/lib/search-params` | 쿼리 문자열 |
 | `buildApiUrl(path, params?)`, `fetchEnvelope<T>`, `fetchEnvelopePage<T>`, `fetchRaw<T>`, `fetchNoContent`, `ApiError` | `@shared/lib/fetch` | 아래 참고 |
-| `forwardedCookieInit()` | `@shared/lib/server-request-init` | 서버 프리페치에서 세션 쿠키 전달 |
+| (삭제, S19) `forwardedCookieInit()` | — | 서버 프리페치는 이제 `@server/service/public-reads` 의 `read*` 를 직접 부르므로 쿠키를 자기 주소로 전달하지 않는다. `buildApiUrl` 도 origin 을 붙이지 않는다(브라우저 전용) |
 | `getQueryClient()`, `createQueryClient()` | `@shared/utils/get-query-client` | staleTime 60초, 변경 실패는 토스트(`meta: { suppressErrorToast: true }` 로 끔) |
 | `useIsMobile`, `useScrollThumb`, `useShellSidebarSlot`, `useUnsavedChangesWarning(isEnabled)` | `@shared/hooks/*` | `beforeunload` 경고는 폴더 편집의 미저장 상태에 씁니다 |
 | `LOGIN_PATH`, `NEXT_PARAM`, `DEFAULT_NEXT_PATH`, `PROTECTED_PATH_PREFIXES`, `buildLoginHref`, `isSameOriginPath` | `@shared/constants/auth-route` | 로그인 경로 |

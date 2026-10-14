@@ -22,6 +22,13 @@
       "when": 1791970074354,
       "tag": "0002_scratch_auto_bests",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1791999623784,
+      "tag": "0003_replay_user_quota",
+      "breakpoints": true
     }
   ]
 }

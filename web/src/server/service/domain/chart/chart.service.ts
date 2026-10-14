@@ -165,7 +165,7 @@ export const createChartService = (deps: { db: ChartServiceDb; lookupTableText?:
                 })
                 const filled = Object.keys(patch).length > 0
                 if (filled) await deps.db.upsert({ ...existing, ...patch, extra: (existing.extra as Record<string, unknown>) ?? {} })
-                return { sha256: existing.sha256, md5: patch.md5 ?? existing.md5, changed: filled }
+                return { sha256: existing.sha256, md5: patch.md5 ?? existing.md5, changed: filled, notes: existing.notes }
             }
             if (!params.sha256) return null
             await deps.db.upsert({
@@ -194,7 +194,7 @@ export const createChartService = (deps: { db: ChartServiceDb; lookupTableText?:
                 appendurl: null,
                 extra: {},
             })
-            return { sha256: params.sha256, md5: params.md5 || null, changed: true }
+            return { sha256: params.sha256, md5: params.md5 || null, changed: true, notes: params.notes }
         },
     }
 }

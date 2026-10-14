@@ -6,24 +6,21 @@ import { ERROR_CODE } from '@server/lib/error-code'
 import { withErrorHandling } from '@server/lib/with-error-handling'
 import { parseJsonBody, parseSearchParams } from '@server/lib/parse-request'
 import { withBearerOrSession } from '@server/lib/with-api-token'
-import { getPlayerProfileCached, getPlayerScoresCached, getRivalsCached, revalidateOnRivalChange } from '@server/service/read-cache'
+import { readPlayerProfile, readPlayerRivals } from '@server/service/public-reads'
+import { getPlayerScoresCached, revalidateOnRivalChange } from '@server/service/read-cache'
 
 type PlayerContext = { params: Promise<{ playerId: string }> }
 
 export const createPlayerProfileRoute = () =>
     withErrorHandling(async (_request: Request, context: PlayerContext) => {
         const { playerId } = await context.params
-        const profile = await getPlayerProfileCached(playerId)
-        if (!profile) throw createAppError(ERROR_CODE.IR_PLAYER_NOT_FOUND, { playerId })
-        return irRaw(profile)
+        return irRaw(await readPlayerProfile(playerId))
     })
 
 export const createPlayerRivalsRoute = () =>
     withErrorHandling(async (_request: Request, context: PlayerContext) => {
         const { playerId } = await context.params
-        const rivals = await getRivalsCached(playerId)
-        if (!rivals) throw createAppError(ERROR_CODE.IR_PLAYER_NOT_FOUND, { playerId })
-        return irRaw(rivals)
+        return irRaw(await readPlayerRivals(playerId))
     })
 
 export const createPlayerRivalsPutRoute = () =>

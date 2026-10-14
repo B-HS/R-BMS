@@ -2,8 +2,26 @@ import { clearLampToId } from '@server/dto/common'
 import type { CourseMetaInput, CourseSubmissionInput } from '@server/dto/course'
 import type { SubmitResponseOutput } from '@server/dto/score'
 import { deriveExScore, deriveMinbp, isBetterBest } from '@server/service/domain/score/best-policy'
-import { assistFlags, isScratchAutoPlay, rankBlockingFlags, submissionMessage, type ScoreFlag } from '@server/service/domain/score/ranked-policy'
-import { toScoreRecord, type BestScope, type ScoreRankingRow } from '@server/service/domain/score/score.service'
+import {
+    assistFlags,
+    buildTrustFlags,
+    isBuildBlockingRank,
+    isScratchAutoPlay,
+    rankBlockingFlags,
+    submissionMessage,
+    type BuildTrust,
+    type ScoreFlag,
+} from '@server/service/domain/score/ranked-policy'
+import {
+    isExScoreConsistent,
+    isJudgeCountConsistent,
+    LONG_NOTE_COUNT_MAX_FACTOR,
+    toScoreRecord,
+    type BestScope,
+    type ScoreRankedRow,
+    type ScoreRankingRow,
+    type SubmissionIntegrityFailure,
+} from '@server/service/domain/score/score.service'
 
 export type CourseChartRow = {
     position: number
@@ -67,7 +85,7 @@ export type CourseServiceDb = {
         userId: string
         scratchAuto: boolean
     }) => Promise<{ clear: number; exScore: number; minbp: number } | null>
-    upsertCourseBest: (row: {
+    upsertCourseBestIfBetter: (row: {
         courseHash: string
         userId: string
         scratchAuto: boolean
@@ -76,9 +94,9 @@ export type CourseServiceDb = {
         exScore: number
         minbp: number
         maxCombo: number
-    }) => Promise<void>
-    countBetterCourseBests: (params: BestScope & { courseHash: string; clear: number; exScore: number }) => Promise<number>
-    getCourseRanking: (params: BestScope & { courseHash: string; limit: number; offset: number; userIds?: string[] }) => Promise<ScoreRankingRow[]>
+    }) => Promise<boolean>
+    countBetterCourseBests: (params: BestScope & { courseHash: string; clear: number; exScore: number; minbp: number }) => Promise<number>
+    getCourseRanking: (params: BestScope & { courseHash: string; limit: number; offset: number; userIds?: string[] }) => Promise<ScoreRankedRow[]>
     getCourseBestByLoginId: (params: BestScope & { courseHash: string; loginId: string }) => Promise<ScoreRankingRow | null>
     getRivalUserIds: (loginId: string) => Promise<string[]>
 }
@@ -97,6 +115,22 @@ export const toCourseMeta = (row: CourseRow, charts: CourseChartRow[]): CourseMe
     trophy: (row.trophy as CourseMetaInput['trophy']) ?? [],
     extra: (row.extra as Record<string, unknown>) ?? {},
 })
+
+const COURSE_JUDGE_MODE = ''
+
+/**
+ * The first reason a course body can not be what a real run sends, or null. `knownCourseNotes` is the sum of the notes the
+ * server holds for every chart of the course, 0 when any of them is unknown, which leaves the judge counts without a bound.
+ */
+export const findCourseIntegrityFailure = (
+    input: Pick<CourseSubmissionInput, 'judge' | 'ex_score'>,
+    knownCourseNotes: number,
+): SubmissionIntegrityFailure | null => {
+    if (!isExScoreConsistent(input.judge, input.ex_score)) return { field: 'ex_score', reason: 'ex_score does not match the judge counts' }
+    if (!isJudgeCountConsistent(input.judge, knownCourseNotes * LONG_NOTE_COUNT_MAX_FACTOR, COURSE_JUDGE_MODE))
+        return { field: 'judge', reason: 'judge count exceeds the notes of the course' }
+    return null
+}
 
 export const buildCourseScoreRow = (params: {
     id: string
@@ -140,6 +174,8 @@ export const buildCourseScoreRow = (params: {
 }
 
 export const createCourseService = (deps: CourseServiceDeps) => ({
+    exists: async (courseHash: string) => (await deps.db.findCourse(courseHash)) !== null,
+
     getMeta: async (courseHash: string) => {
         const row = await deps.db.findCourse(courseHash)
         if (!row) return null
@@ -164,13 +200,18 @@ export const createCourseService = (deps: CourseServiceDeps) => ({
         return row ? toCourseMeta(row, await deps.db.findCourseCharts(meta.course_hash)) : null
     },
 
-    submit: async (params: { input: CourseSubmissionInput; user: { id: string; loginId: string } }) => {
+    submit: async (params: {
+        input: CourseSubmissionInput
+        user: { id: string; loginId: string }
+        buildTrust: BuildTrust
+        requireTrustedBuild: boolean
+    }) => {
         const { input, user } = params
         const exScore = input.ex_score > 0 ? input.ex_score : deriveExScore(input.judge)
         const minbp = input.minbp > 0 ? input.minbp : deriveMinbp(input.judge)
         const clear = clearLampToId(input.clear)
-        const flags = assistFlags(input)
-        const ranked = rankBlockingFlags(flags).length === 0
+        const flags = [...assistFlags(input), ...buildTrustFlags(params.buildTrust)]
+        const ranked = rankBlockingFlags(flags).length === 0 && !isBuildBlockingRank(params.buildTrust, params.requireTrustedBuild)
         const scratchAuto = isScratchAutoPlay(input)
 
         const existingId = await deps.db.findCourseScoreIdByIdempotency({
@@ -189,7 +230,7 @@ export const createCourseService = (deps: CourseServiceDeps) => ({
                 is_new_best: false,
                 score_id: existingId,
             }
-            return { courseScoreId: existingId, duplicated: true, response }
+            return { courseScoreId: existingId, duplicated: true, ranked, flags, response }
         }
 
         const courseScoreId = deps.newId('cs_')
@@ -198,9 +239,10 @@ export const createCourseService = (deps: CourseServiceDeps) => ({
             buildCourseScoreRow({ id: courseScoreId, userId: user.id, input, exScore, minbp, ranked, scratchAuto, flags }),
         )
 
-        const isNewBest = ranked && isBetterBest({ clear, exScore, minbp }, previous)
-        if (isNewBest) {
-            await deps.db.upsertCourseBest({
+        const isNewBest =
+            ranked &&
+            isBetterBest({ clear, exScore, minbp }, previous) &&
+            (await deps.db.upsertCourseBestIfBetter({
                 courseHash: input.course_hash,
                 userId: user.id,
                 scratchAuto,
@@ -209,11 +251,10 @@ export const createCourseService = (deps: CourseServiceDeps) => ({
                 exScore,
                 minbp,
                 maxCombo: input.max_combo,
-            })
-        }
+            }))
 
         const rank = ranked
-            ? (await deps.db.countBetterCourseBests({ courseHash: input.course_hash, clear, exScore, includeScratchAuto: scratchAuto })) + 1
+            ? (await deps.db.countBetterCourseBests({ courseHash: input.course_hash, clear, exScore, minbp, includeScratchAuto: scratchAuto })) + 1
             : null
 
         const response: SubmitResponseOutput = {
@@ -227,7 +268,7 @@ export const createCourseService = (deps: CourseServiceDeps) => ({
             score_id: courseScoreId,
         }
 
-        return { courseScoreId, duplicated: false, response }
+        return { courseScoreId, duplicated: false, ranked, flags, response }
     },
 
     getRanking: async (params: BestScope & { courseHash: string; limit: number; page: number; rivalOf?: string }) => {
@@ -240,8 +281,7 @@ export const createCourseService = (deps: CourseServiceDeps) => ({
             userIds,
             includeScratchAuto: params.includeScratchAuto,
         })
-        const base = (params.page - 1) * params.limit
-        return rows.map((row, index) => toScoreRecord(row, base + index + 1))
+        return rows.map((row) => toScoreRecord(row, row.rank))
     },
 
     getBest: async (params: BestScope & { courseHash: string; loginId: string }) => {
@@ -252,6 +292,7 @@ export const createCourseService = (deps: CourseServiceDeps) => ({
                 courseHash: params.courseHash,
                 clear: row.clear,
                 exScore: row.exScore,
+                minbp: row.minbp,
                 includeScratchAuto: params.includeScratchAuto,
             })) + 1
         return toScoreRecord(row, rank)

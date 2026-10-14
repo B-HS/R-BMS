@@ -1,6 +1,6 @@
 import { connection } from 'next/server'
 import { compose } from '@server/compose'
-import { SETTING_MAX_BYTES, settingPutSchema, type SettingPutOutput } from '@server/dto/setting'
+import { SETTING_MAX_BYTES, SETTING_NAME_MAX_LENGTH, settingNameSchema, settingPutSchema, type SettingPutOutput } from '@server/dto/setting'
 import { irRaw, successResponse } from '@server/lib/api-response'
 import { createAppError } from '@server/lib/error'
 import { ERROR_CODE } from '@server/lib/error-code'
@@ -8,6 +8,7 @@ import { parseLimitedJsonBody } from '@server/lib/parse-request'
 import { withBearerOrSession } from '@server/lib/with-api-token'
 import { withSession } from '@server/lib/with-session'
 import { withErrorHandling } from '@server/lib/with-error-handling'
+import { RATE_LIMIT, enforceUserRateLimit } from '@server/lib/with-rate-limit'
 import type { AuthUser } from '@server/lib/auth-context'
 
 type SettingContext = { params: Promise<{ playerId: string; name: string }> }
@@ -40,11 +41,16 @@ export const createSettingGetRoute = () =>
 export const createSettingPutRoute = () =>
     withErrorHandling(async (request: Request, context: SettingContext) =>
         withOwner(async (authedRequest, authedContext: SettingContext, user) => {
-            const { playerId, name } = await authedContext.params
+            const { playerId, name: rawName } = await authedContext.params
             requireOwner(user, playerId)
+            enforceUserRateLimit('setting-write', user.id, RATE_LIMIT.SETTING_WRITE)
+            const name = settingNameSchema.safeParse(rawName)
+            if (!name.success) throw createAppError(ERROR_CODE.VALIDATION_ERROR, { field: 'name', max: SETTING_NAME_MAX_LENGTH })
             const input = await parseLimitedJsonBody(authedRequest, settingPutSchema, SETTING_MAX_BYTES)
-            const result = await compose().settingService.put({ userId: user.id, name, input })
-            if (result.conflict) return irRaw({ conflict: true, server: result.server }, CONFLICT_STATUS)
+            const result = await compose().settingService.put({ userId: user.id, name: name.data, input })
+            if (result.status === 'conflict') return irRaw({ conflict: true, server: result.server }, CONFLICT_STATUS)
+            if (result.status === 'too_many_names')
+                throw createAppError(ERROR_CODE.IR_PAYLOAD_TOO_LARGE, { scope: 'setting_names', limit: result.limit })
             const stored: SettingPutOutput = { updated_at: result.updated_at }
             return irRaw(stored)
         })(request, context),

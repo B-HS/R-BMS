@@ -1,8 +1,9 @@
-import { and, asc, count, eq, inArray, max, sql } from 'drizzle-orm'
+import { and, asc, count, eq, inArray, max, sql, type SQL } from 'drizzle-orm'
+import { TransactionRollbackError } from 'drizzle-orm/errors'
 import type { Database } from '@server/db'
 import { chart, userFolder, userFolderItem } from '@server/db/schema'
 import { newId } from '@server/lib/token'
-import { createFolderService } from '@server/service/domain/folder/folder.service'
+import { createFolderService, nextStamp } from '@server/service/domain/folder/folder.service'
 import type { FolderItemRow, FolderRow } from '@server/service/domain/folder/folder.service'
 import type { TableSnapshotService } from '@server/service/domain/table-snapshot/table-snapshot.service'
 
@@ -34,6 +35,11 @@ export const composeFolder = (
     const countItems = async (tx: Pick<Database, 'select'>, folderId: string) => {
         const [row] = await tx.select({ value: count() }).from(userFolderItem).where(eq(userFolderItem.folderId, folderId))
         return row?.value ?? 0
+    }
+
+    const lockFolder = async (tx: Pick<Database, 'select'>, where: SQL | undefined) => {
+        const [folder] = await tx.select({ updatedAt: userFolder.updatedAt }).from(userFolder).where(where).for('update')
+        return folder
     }
 
     const toInsertRows = (folderId: string, items: ItemInsert[], startPosition: number) =>
@@ -145,20 +151,34 @@ export const composeFolder = (
                     }
                 }),
 
-            appendItems: async ({ folderId, items, updatedAt }) =>
-                db.transaction(async (tx) => {
-                    const [last] = await tx
-                        .select({ value: max(userFolderItem.position) })
-                        .from(userFolderItem)
-                        .where(eq(userFolderItem.folderId, folderId))
-                    await tx.insert(userFolderItem).values(toInsertRows(folderId, items, (last?.value ?? -1) + 1))
-                    const itemCount = await countItems(tx, folderId)
-                    await tx.update(userFolder).set({ itemCount, updatedAt }).where(eq(userFolder.id, folderId))
-                    return { itemCount }
-                }),
+            appendItems: async ({ folderId, items, updatedAt, maxItems }) => {
+                try {
+                    return await db.transaction(async (tx) => {
+                        const folder = await lockFolder(tx, eq(userFolder.id, folderId))
+                        if (!folder) return { status: 'missing' as const }
+                        const [last] = await tx
+                            .select({ value: max(userFolderItem.position) })
+                            .from(userFolderItem)
+                            .where(eq(userFolderItem.folderId, folderId))
+                        const [inserted] = await tx
+                            .insert(userFolderItem)
+                            .ignore()
+                            .values(toInsertRows(folderId, items, (last?.value ?? -1) + 1))
+                        const itemCount = await countItems(tx, folderId)
+                        if (itemCount > maxItems) return tx.rollback()
+                        const stamp = nextStamp(updatedAt, folder.updatedAt)
+                        await tx.update(userFolder).set({ itemCount, updatedAt: stamp }).where(eq(userFolder.id, folderId))
+                        return { status: 'added' as const, added: inserted.affectedRows, itemCount, updatedAt: stamp }
+                    })
+                } catch (error) {
+                    if (error instanceof TransactionRollbackError) return { status: 'folder_full' as const }
+                    throw error
+                }
+            },
 
             removeItems: async ({ folderId, md5s, updatedAt }) =>
                 db.transaction(async (tx) => {
+                    await lockFolder(tx, eq(userFolder.id, folderId))
                     const [result] = await tx
                         .delete(userFolderItem)
                         .where(and(eq(userFolderItem.folderId, folderId), inArray(userFolderItem.md5, md5s)))
@@ -169,6 +189,7 @@ export const composeFolder = (
 
             reorderItems: async ({ folderId, md5s, updatedAt }) =>
                 db.transaction(async (tx) => {
+                    await lockFolder(tx, eq(userFolder.id, folderId))
                     if (md5s.length > 0) {
                         const cases = sql.join(
                             md5s.map((md5, index) => sql`when ${md5} then ${index}`),
@@ -182,16 +203,37 @@ export const composeFolder = (
                     await tx.update(userFolder).set({ updatedAt }).where(eq(userFolder.id, folderId))
                 }),
 
-            replaceItems: async ({ folderId, items, updatedAt }) =>
-                db.transaction(async (tx) => {
-                    await tx.delete(userFolderItem).where(eq(userFolderItem.folderId, folderId))
-                    if (items.length > 0) await tx.insert(userFolderItem).values(toInsertRows(folderId, items, 0))
-                    await tx.update(userFolder).set({ itemCount: items.length, updatedAt }).where(eq(userFolder.id, folderId))
-                    return { itemCount: items.length }
-                }),
+            replaceItems: async ({ userId, folderId, items, updatedAt, baseUpdatedAt, meta }) => {
+                try {
+                    return await db.transaction(async (tx) => {
+                        const folder = await lockFolder(tx, and(eq(userFolder.id, folderId), eq(userFolder.userId, userId)))
+                        if (!folder) return { status: 'missing' as const }
+                        if (baseUpdatedAt !== undefined && folder.updatedAt !== baseUpdatedAt) {
+                            return { status: 'conflict' as const, serverUpdatedAt: folder.updatedAt }
+                        }
+                        const stamp = nextStamp(updatedAt, folder.updatedAt)
+                        await tx.delete(userFolderItem).where(eq(userFolderItem.folderId, folderId))
+                        if (items.length > 0) await tx.insert(userFolderItem).values(toInsertRows(folderId, items, 0))
+                        await tx
+                            .update(userFolder)
+                            .set({
+                                itemCount: items.length,
+                                updatedAt: stamp,
+                                ...(meta.name === undefined ? {} : { name: meta.name }),
+                                ...(meta.description === undefined ? {} : { description: meta.description }),
+                            })
+                            .where(eq(userFolder.id, folderId))
+                        return { status: 'replaced' as const, itemCount: items.length, updatedAt: stamp }
+                    })
+                } catch (error) {
+                    if (meta.name !== undefined && hasDuplicateEntryCode(error)) return { status: 'name_taken' as const }
+                    throw error
+                }
+            },
 
             updateItemNote: async ({ folderId, md5, note, updatedAt }) =>
                 db.transaction(async (tx) => {
+                    await lockFolder(tx, eq(userFolder.id, folderId))
                     const [result] = await tx
                         .update(userFolderItem)
                         .set({ note })

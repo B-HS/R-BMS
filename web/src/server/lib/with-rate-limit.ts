@@ -10,6 +10,7 @@ export const RATE_LIMIT = {
     FOLDER_IMPORT: { limit: 10, windowMs: 60_000 },
     FOLDER_READ: { limit: 120, windowMs: 60_000 },
     TABLE_RECORDS: { limit: 30, windowMs: 60_000 },
+    SETTING_WRITE: { limit: 30, windowMs: 60_000 },
 } as const
 
 const MAX_BUCKETS = 5000

@@ -38,6 +38,23 @@ export const parseEnv = (source: Record<string, string | undefined>) => {
     return result.data
 }
 
+const PRODUCTION_AUTH_ENV_KEYS = ['BETTER_AUTH_SECRET', 'BETTER_AUTH_URL', 'NEXT_PUBLIC_APP_URL'] as const
+
+/**
+ * The auth settings a production deployment must set itself. The schema keeps them optional or defaulted so a build with no
+ * environment still succeeds; this is checked when auth is first used instead.
+ */
+export const findMissingProductionAuthEnv = (source: Record<string, string | undefined>) => {
+    if (source.NODE_ENV !== 'production') return []
+    const present = withoutBlanks(source)
+    return PRODUCTION_AUTH_ENV_KEYS.filter((key) => !(key in present))
+}
+
+export const assertProductionAuthEnv = (source: Record<string, string | undefined> = process.env) => {
+    const missing = findMissingProductionAuthEnv(source)
+    if (missing.length > 0) throw new Error(`Missing required production environment variables: ${missing.join(', ')}`)
+}
+
 export const resolveDatabaseUrl = (env: Env) => {
     if (env.DATABASE_URL) return env.DATABASE_URL
     if (!env.DB_HOST || !env.DB_USER || !env.DB_NAME) return null

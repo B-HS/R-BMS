@@ -184,7 +184,11 @@ export const replay = mysqlTable(
         data: mediumtext('data'),
         createdAt: timestamp('created_at', { fsp: 3 }).defaultNow().notNull(),
     },
-    (table) => [index('replay_chart_idx').on(table.chartSha256), index('replay_score_idx').on(table.scoreId)],
+    (table) => [
+        index('replay_chart_idx').on(table.chartSha256),
+        index('replay_score_idx').on(table.scoreId),
+        index('replay_user_idx').on(table.userId),
+    ],
 )
 
 export const apiToken = mysqlTable(

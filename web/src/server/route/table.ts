@@ -6,16 +6,15 @@ import { ERROR_CODE } from '@server/lib/error-code'
 import { parseJsonBody } from '@server/lib/parse-request'
 import { withAdmin } from '@server/lib/with-session'
 import { withErrorHandling } from '@server/lib/with-error-handling'
-import { getTableCached, getTablesCached, revalidateOnTableUpsert } from '@server/service/read-cache'
+import { readTable, readTables } from '@server/service/public-reads'
+import { revalidateOnTableUpsert } from '@server/service/read-cache'
 
-export const createTableListRoute = () => withErrorHandling(async () => irRaw(await getTablesCached()))
+export const createTableListRoute = () => withErrorHandling(async () => irRaw(await readTables()))
 
 export const createTableDetailRoute = () =>
     withErrorHandling(async (_request: Request, context: { params: Promise<{ tableId: string }> }) => {
         const { tableId } = await context.params
-        const table = await getTableCached(tableId)
-        if (!table) throw createAppError(ERROR_CODE.IR_TABLE_NOT_FOUND, { tableId })
-        return irRaw(table)
+        return irRaw(await readTable(tableId))
     })
 
 export const createTableUpsertRoute = () =>

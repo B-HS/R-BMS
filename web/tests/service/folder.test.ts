@@ -288,6 +288,85 @@ describe('folderService.replaceItems', () => {
     })
 })
 
+describe('folderService.replaceItems 의 이름·설명 한 요청 저장', () => {
+    test('곡과 이름·설명이 같은 요청으로 바뀌고 응답의 updated_at 이 목록에도 그대로다', async () => {
+        const { service, createFolder } = createHarness()
+        const folder = await createFolder('old name')
+        const result = await service.replaceItems({
+            userId: OWNER,
+            folderId: folder.id,
+            input: folderItemsReplaceSchema.parse({
+                items: [itemOf(1)],
+                name: 'new name',
+                description: 'new description',
+                base_updated_at: folder.updated_at,
+            }),
+        })
+        expect(result).toMatchObject({ ok: true, value: { added: 1, item_count: 1 } })
+        const stamp = result.ok ? result.value.updated_at : -1
+        expect(await service.get({ userId: OWNER, folderId: folder.id })).toMatchObject({
+            name: 'new name',
+            description: 'new description',
+            updated_at: stamp,
+            items: [{ md5: md5Of(1) }],
+        })
+    })
+
+    test('이름이 다른 폴더와 겹치면 name_taken 이고 곡도 바뀌지 않는다', async () => {
+        const { service, createFolder } = createHarness()
+        await createFolder('taken')
+        const folder = await createFolder('mine')
+        await service.addItems({ userId: OWNER, folderId: folder.id, items: [itemOf(1), itemOf(2)] })
+        const before = await service.get({ userId: OWNER, folderId: folder.id })
+        const result = await service.replaceItems({
+            userId: OWNER,
+            folderId: folder.id,
+            input: folderItemsReplaceSchema.parse({ items: [itemOf(3)], name: 'Taken' }),
+        })
+        expect(result).toEqual({ ok: false, reason: 'name_taken' })
+        expect(await service.get({ userId: OWNER, folderId: folder.id })).toEqual(before)
+    })
+
+    test('이름과 설명을 보내지 않으면 그대로 두고 곡만 바꾼다', async () => {
+        const { service, createFolder } = createHarness()
+        const folder = await createFolder('keep me')
+        await service.replaceItems({ userId: OWNER, folderId: folder.id, input: folderItemsReplaceSchema.parse({ items: [itemOf(1)] }) })
+        expect(await service.get({ userId: OWNER, folderId: folder.id })).toMatchObject({ name: 'keep me', item_count: 1 })
+    })
+})
+
+describe('folderService.addItems 동시 요청', () => {
+    test('같은 곡을 동시에 넣으면 한쪽만 added 로 세고 다른 쪽은 skipped 이며 오류가 없다', async () => {
+        const { service, createFolder } = createHarness()
+        const folder = await createFolder()
+        const add = () => service.addItems({ userId: OWNER, folderId: folder.id, items: [itemOf(1)] })
+        const results = await Promise.all([add(), add()])
+        expect(results.every((result) => result.ok)).toBe(true)
+        const counted = results.flatMap((result) => (result.ok ? [result.value] : []))
+        expect(counted.map((value) => value.added).toSorted()).toEqual([0, 1])
+        expect(counted.map((value) => value.skipped).toSorted()).toEqual([0, 1])
+        expect((await service.get({ userId: OWNER, folderId: folder.id }))?.item_count).toBe(1)
+    })
+
+    test('동시에 들어온 두 요청이 합쳐서 폴더 한도를 넘으면 뒤에 처리된 쪽이 limit_exceeded 이다', async () => {
+        const { service, createFolder } = createHarness()
+        const folder = await createFolder()
+        const block = (offset: number) => Array.from({ length: FOLDER_LIMIT.ITEMS_PER_REQUEST }, (_, index) => itemOf(offset + index))
+        const fillTo = FOLDER_LIMIT.ITEMS_PER_FOLDER - FOLDER_LIMIT.ITEMS_PER_REQUEST
+        for (let start = 0; start < fillTo; start += FOLDER_LIMIT.ITEMS_PER_REQUEST) {
+            await service.addItems({ userId: OWNER, folderId: folder.id, items: block(start) })
+        }
+        const results = await Promise.all([
+            service.addItems({ userId: OWNER, folderId: folder.id, items: [itemOf(900_000), itemOf(900_001)] }),
+            service.addItems({ userId: OWNER, folderId: folder.id, items: block(800_000) }),
+        ])
+        const failed = results.filter((result) => !result.ok)
+        expect(failed).toHaveLength(1)
+        expect(failed[0]).toMatchObject({ reason: 'limit_exceeded', details: { scope: 'items_per_folder' } })
+        expect((await service.get({ userId: OWNER, folderId: folder.id }))?.item_count).toBeLessThanOrEqual(FOLDER_LIMIT.ITEMS_PER_FOLDER)
+    })
+})
+
 describe('folderService.importFromTable', () => {
     test('레벨을 고르면 그 레벨만, 안 고르면 전부 넣고 두 번째는 건너뛴다', async () => {
         const { service, createFolder } = createHarness()

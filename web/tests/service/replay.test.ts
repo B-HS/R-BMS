@@ -1,6 +1,12 @@
 import { describe, expect, test } from 'bun:test'
-import { replayUploadSchema } from '@server/dto/replay'
-import { createReplayService, measureDurationUs, type ReplayInsertRow, type ReplayRow } from '@server/service/domain/replay/replay.service'
+import { REPLAY_USER_QUOTA, replayUploadSchema } from '@server/dto/replay'
+import {
+    createReplayService,
+    findReplayQuotaExceeded,
+    measureDurationUs,
+    type ReplayInsertRow,
+    type ReplayRow,
+} from '@server/service/domain/replay/replay.service'
 import { createMysqlReplayStorage } from '@server/service/shared/storage/replay-storage'
 
 const CHART_SHA256 = 'a'.repeat(64)
@@ -14,7 +20,7 @@ const MICROSECOND_EVENTS = [
     { t_us: 9_007_199_254_740, lane: 7, press: true },
 ]
 
-const createStubDb = (linkedReplay: { id: string; eventCount: number } | null = null) => {
+const createStubDb = (linkedReplay: { id: string; eventCount: number } | null = null, usage = { count: 0, bytes: 0 }) => {
     const stored: ReplayInsertRow[] = []
     const links: { scoreId: string; userId: string; replayId: string }[] = []
     const linkedLookups: { scoreId: string; userId: string }[] = []
@@ -30,6 +36,7 @@ const createStubDb = (linkedReplay: { id: string; eventCount: number } | null = 
                 const row = stored.find((entry) => entry.id === id)
                 return row ? { ...row, loginId: 'alice', playerName: 'Alice', chartMd5: CHART_MD5, createdAt: CREATED_AT } : null
             },
+            replayExists: async (id: string) => stored.some((entry) => entry.id === id),
             listReplaysByChart: async ({ limit }: { chartSha256: string; userId?: string; limit: number }): Promise<ReplayRow[]> =>
                 stored.slice(0, limit).map((row) => ({ ...row, loginId: 'alice', playerName: 'Alice', chartMd5: CHART_MD5, createdAt: CREATED_AT })),
             linkScoreReplay: async (params: { scoreId: string; userId: string; replayId: string }) => {
@@ -39,12 +46,13 @@ const createStubDb = (linkedReplay: { id: string; eventCount: number } | null = 
                 linkedLookups.push(params)
                 return linkedReplay
             },
+            sumUserReplays: async () => usage,
         },
     }
 }
 
-const createService = (linkedReplay: { id: string; eventCount: number } | null = null) => {
-    const stub = createStubDb(linkedReplay)
+const createService = (linkedReplay: { id: string; eventCount: number } | null = null, usage = { count: 0, bytes: 0 }) => {
+    const stub = createStubDb(linkedReplay, usage)
     let counter = 0
     const service = createReplayService({
         db: stub.db,
@@ -54,11 +62,19 @@ const createService = (linkedReplay: { id: string; eventCount: number } | null =
     return { stub, service }
 }
 
+type ReplayService = ReturnType<typeof createService>['service']
+
+const uploadOk = async (service: ReplayService, params: Parameters<ReplayService['upload']>[0]) => {
+    const result = await service.upload(params)
+    if (result.quotaExceeded) throw new Error(`unexpected quota rejection: ${result.quotaExceeded.scope}`)
+    return result
+}
+
 describe('replay 업로드/다운로드 왕복', () => {
     test('µs 타임스탬프가 라운딩 없이 그대로 되돌아온다', async () => {
         const { service } = createService()
         const input = replayUploadSchema.parse({ format: 'rbms-replay-ron-v1', events: MICROSECOND_EVENTS, seed: 12345 })
-        const uploaded = await service.upload({ input, chartSha256: CHART_SHA256, userId: USER_ID })
+        const uploaded = await uploadOk(service, { input, chartSha256: CHART_SHA256, userId: USER_ID })
         const downloaded = await service.getById(uploaded.id)
         expect(JSON.stringify(downloaded?.events)).toBe(JSON.stringify(MICROSECOND_EVENTS))
     })
@@ -71,7 +87,7 @@ describe('replay 업로드/다운로드 왕복', () => {
     test('event_count 와 duration_us 를 이벤트에서 유도한다', async () => {
         const { service } = createService()
         const input = replayUploadSchema.parse({ format: 'rbms-replay-ron-v1', events: MICROSECOND_EVENTS })
-        const uploaded = await service.upload({ input, chartSha256: CHART_SHA256, userId: USER_ID })
+        const uploaded = await uploadOk(service, { input, chartSha256: CHART_SHA256, userId: USER_ID })
         expect(uploaded.event_count).toBe(3)
         const downloaded = await service.getById(uploaded.id)
         expect(downloaded?.duration_us).toBe(9_007_199_254_740 - 1_234_567)
@@ -80,14 +96,14 @@ describe('replay 업로드/다운로드 왕복', () => {
     test('score_id 가 오면 그 스코어에 리플레이를 연결한다', async () => {
         const { stub, service } = createService()
         const input = replayUploadSchema.parse({ format: 'f', events: [], score_id: 'sc_9' })
-        const uploaded = await service.upload({ input, chartSha256: CHART_SHA256, userId: USER_ID })
+        const uploaded = await uploadOk(service, { input, chartSha256: CHART_SHA256, userId: USER_ID })
         expect(stub.links).toEqual([{ scoreId: 'sc_9', userId: USER_ID, replayId: uploaded.id }])
     })
 
     test('같은 score_id 에 이미 연결된 리플레이가 있으면 새로 저장하지 않고 그 리플레이를 돌려준다', async () => {
         const { stub, service } = createService({ id: 'rp_old', eventCount: 7 })
         const input = replayUploadSchema.parse({ format: 'f', events: MICROSECOND_EVENTS, score_id: 'sc_9' })
-        const uploaded = await service.upload({ input, chartSha256: CHART_SHA256, userId: USER_ID })
+        const uploaded = await uploadOk(service, { input, chartSha256: CHART_SHA256, userId: USER_ID })
         expect(uploaded).toEqual({ id: 'rp_old', url: '/api/replays/rp_old', event_count: 7, created: false })
         expect(stub.linkedLookups).toEqual([{ scoreId: 'sc_9', userId: USER_ID }])
         expect(stub.stored).toHaveLength(0)
@@ -97,7 +113,7 @@ describe('replay 업로드/다운로드 왕복', () => {
     test('score_id 가 없으면 이미 있는 리플레이를 찾지 않고 새로 저장한다', async () => {
         const { stub, service } = createService({ id: 'rp_old', eventCount: 7 })
         const input = replayUploadSchema.parse({ format: 'f', events: MICROSECOND_EVENTS })
-        const uploaded = await service.upload({ input, chartSha256: CHART_SHA256, userId: USER_ID })
+        const uploaded = await uploadOk(service, { input, chartSha256: CHART_SHA256, userId: USER_ID })
         expect(stub.linkedLookups).toHaveLength(0)
         expect(uploaded.created).toBe(true)
         expect(stub.stored).toHaveLength(1)
@@ -106,7 +122,7 @@ describe('replay 업로드/다운로드 왕복', () => {
     test('연결된 리플레이가 없는 score_id 는 새로 저장하고 연결한다', async () => {
         const { stub, service } = createService()
         const input = replayUploadSchema.parse({ format: 'f', events: MICROSECOND_EVENTS, score_id: 'sc_new' })
-        const uploaded = await service.upload({ input, chartSha256: CHART_SHA256, userId: USER_ID })
+        const uploaded = await uploadOk(service, { input, chartSha256: CHART_SHA256, userId: USER_ID })
         expect(uploaded.created).toBe(true)
         expect(stub.links).toEqual([{ scoreId: 'sc_new', userId: USER_ID, replayId: uploaded.id }])
     })
@@ -136,7 +152,7 @@ describe('replay 업로드/다운로드 왕복', () => {
             extra: {},
         } as const
         const input = replayUploadSchema.parse(uploadedBody)
-        const uploaded = await service.upload({ input, chartSha256: CHART_SHA256, userId: USER_ID })
+        const uploaded = await uploadOk(service, { input, chartSha256: CHART_SHA256, userId: USER_ID })
         const downloaded = await service.getById(uploaded.id)
         expect(downloaded).toEqual({ ...uploadedBody, id: uploaded.id })
     })
@@ -144,7 +160,7 @@ describe('replay 업로드/다운로드 왕복', () => {
     test('게이지를 버리지 않고 차트의 md5 와 sha256 을 함께 돌려준다', async () => {
         const { service } = createService()
         const input = replayUploadSchema.parse({ format: 'rbms-us-v1', events: MICROSECOND_EVENTS, gauge: 'Hard' })
-        const uploaded = await service.upload({ input, chartSha256: CHART_SHA256, userId: USER_ID })
+        const uploaded = await uploadOk(service, { input, chartSha256: CHART_SHA256, userId: USER_ID })
         const downloaded = await service.getById(uploaded.id)
         expect(downloaded?.gauge).toBe('Hard')
         expect(downloaded?.chart).toEqual({ md5: CHART_MD5, sha256: CHART_SHA256 })
@@ -165,7 +181,7 @@ describe('replay 업로드/다운로드 왕복', () => {
             newId: (prefix) => `${prefix}${(counter += 1)}`,
         })
         const input = replayUploadSchema.parse({ format: 'f', events: [] })
-        const uploaded = await service.upload({ input, chartSha256: CHART_SHA256, userId: USER_ID })
+        const uploaded = await uploadOk(service, { input, chartSha256: CHART_SHA256, userId: USER_ID })
         expect((await service.getById(uploaded.id))?.chart).toEqual({ md5: '', sha256: CHART_SHA256 })
     })
 
@@ -177,7 +193,7 @@ describe('replay 업로드/다운로드 왕복', () => {
     test('목록은 events 없이 메타만 돌려준다', async () => {
         const { service } = createService()
         const input = replayUploadSchema.parse({ format: 'f', events: MICROSECOND_EVENTS })
-        await service.upload({ input, chartSha256: CHART_SHA256, userId: USER_ID })
+        await uploadOk(service, { input, chartSha256: CHART_SHA256, userId: USER_ID })
         const [meta] = await service.listByChart({ chartSha256: CHART_SHA256, limit: 10 })
         expect(meta.event_count).toBe(3)
         expect(Object.keys(meta)).not.toContain('events')
@@ -196,5 +212,50 @@ describe('measureDurationUs', () => {
                 { t_us: 120, lane: 1, press: true },
             ]),
         ).toBe(380)
+    })
+})
+
+describe('replay 사용자별 저장량 상한', () => {
+    const input = replayUploadSchema.parse({ format: 'f', events: MICROSECOND_EVENTS })
+
+    test('개수 상한에 이른 사용자의 새 업로드는 저장하지 않고 상한을 알려준다', async () => {
+        const { stub, service } = createService(null, { count: REPLAY_USER_QUOTA.COUNT_MAX, bytes: 0 })
+        const result = await service.upload({ input, chartSha256: CHART_SHA256, userId: USER_ID })
+        expect(result).toEqual({ quotaExceeded: { scope: 'replay_count', limit: REPLAY_USER_QUOTA.COUNT_MAX, current: REPLAY_USER_QUOTA.COUNT_MAX } })
+        expect(stub.stored).toHaveLength(0)
+    })
+
+    test('총 바이트 상한을 넘기는 업로드는 저장하지 않는다', async () => {
+        const nearlyFull = REPLAY_USER_QUOTA.TOTAL_BYTES_MAX - 10
+        const { stub, service } = createService(null, { count: 3, bytes: nearlyFull })
+        const result = await service.upload({ input, chartSha256: CHART_SHA256, userId: USER_ID })
+        expect(result).toEqual({ quotaExceeded: { scope: 'replay_bytes', limit: REPLAY_USER_QUOTA.TOTAL_BYTES_MAX, current: nearlyFull } })
+        expect(stub.stored).toHaveLength(0)
+    })
+
+    test('이미 연결된 리플레이를 다시 올리는 동기화는 상한에 걸리지 않는다', async () => {
+        const { service } = createService(
+            { id: 'rp_old', eventCount: 3 },
+            { count: REPLAY_USER_QUOTA.COUNT_MAX, bytes: REPLAY_USER_QUOTA.TOTAL_BYTES_MAX },
+        )
+        const linkedInput = replayUploadSchema.parse({ format: 'f', events: MICROSECOND_EVENTS, score_id: 'sc_9' })
+        expect(await service.upload({ input: linkedInput, chartSha256: CHART_SHA256, userId: USER_ID })).toMatchObject({
+            id: 'rp_old',
+            created: false,
+        })
+    })
+
+    test('저장 크기는 클라이언트가 말한 size 가 실제 길이보다 작아도 실제 길이 밑으로 내려가지 않는다', async () => {
+        const { stub, service } = createService()
+        const actual = JSON.stringify(MICROSECOND_EVENTS).length
+        const understated = replayUploadSchema.parse({ format: 'f', events: MICROSECOND_EVENTS, size: 1 })
+        const overstated = replayUploadSchema.parse({ format: 'f', events: MICROSECOND_EVENTS, size: actual + 100 })
+        await uploadOk(service, { input: understated, chartSha256: CHART_SHA256, userId: USER_ID })
+        await uploadOk(service, { input: overstated, chartSha256: CHART_SHA256, userId: USER_ID })
+        expect(stub.stored.map((row) => row.size)).toEqual([actual, actual + 100])
+    })
+
+    test('상한 이내이고 정확히 상한에 닿는 업로드는 저장한다', () => {
+        expect(findReplayQuotaExceeded({ count: REPLAY_USER_QUOTA.COUNT_MAX - 1, bytes: REPLAY_USER_QUOTA.TOTAL_BYTES_MAX - 50 }, 50)).toBeNull()
     })
 })

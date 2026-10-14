@@ -9,6 +9,7 @@ const PLAYED_AT_FUTURE_TOLERANCE_MS = 5 * 60 * 1000
 const USER_AGENT_MAX_LENGTH = 255
 const IDEMPOTENCY_WINDOW_MS = 1000
 const JUDGE_BAD_KEEPS_NOTE_MODES: ReadonlySet<string> = new Set(['POPN_9K'])
+export const LONG_NOTE_COUNT_MAX_FACTOR = 2
 
 export const DUPLICATE_SUBMISSION_MESSAGE = 'duplicate submission ignored'
 
@@ -29,6 +30,8 @@ export type ScoreRankingRow = {
     judge: JudgeBreakdownInput | null
 }
 
+export type ScoreRankedRow = ScoreRankingRow & { rank: number }
+
 export type BestScope = { includeScratchAuto: boolean }
 
 export type ScoreInsertRow = ReturnType<typeof buildScoreRow>
@@ -41,7 +44,11 @@ export type ScoreServiceDb = {
         userId: string
         scratchAuto: boolean
     }) => Promise<{ clear: number; exScore: number; minbp: number } | null>
-    upsertChartBest: (row: {
+    /**
+     * Makes this run the player's best only when it beats the stored one, as one atomic statement pair, and says whether it did.
+     * Two runs racing for the same row can not leave the weaker one behind.
+     */
+    upsertChartBestIfBetter: (row: {
         chartSha256: string
         userId: string
         scratchAuto: boolean
@@ -50,11 +57,11 @@ export type ScoreServiceDb = {
         exScore: number
         minbp: number
         maxCombo: number
-    }) => Promise<void>
-    countBetterBests: (params: BestScope & { chartSha256: string; clear: number; exScore: number }) => Promise<number>
+    }) => Promise<boolean>
+    countBetterBests: (params: BestScope & { chartSha256: string; clear: number; exScore: number; minbp: number; lnmode?: number }) => Promise<number>
     getRanking: (
         params: BestScope & { chartSha256: string; limit: number; offset: number; lnmode?: number; userIds?: string[] },
-    ) => Promise<ScoreRankingRow[]>
+    ) => Promise<ScoreRankedRow[]>
     getBestByLoginId: (params: BestScope & { chartSha256: string; loginId: string; lnmode?: number }) => Promise<ScoreRankingRow | null>
     getScoreById: (scoreId: string) => Promise<ScoreRankingRow | null>
     getRivalUserIds: (loginId: string) => Promise<string[]>
@@ -195,6 +202,43 @@ export const judgedNoteCount = (judge: JudgeBreakdownInput, mode: string) =>
 export const isJudgeCountConsistent = (judge: JudgeBreakdownInput, totalNotes: number, mode: string) =>
     totalNotes === 0 || judgedNoteCount(judge, mode) <= totalNotes
 
+/**
+ * A claimed EX score has to be the one the judge counts add up to (two per PGREAT, one per GREAT). Zero means the client
+ * sent none, and the server derives it from the counts.
+ */
+export const isExScoreConsistent = (judge: JudgeBreakdownInput, exScore: number) => exScore === 0 || exScore === deriveExScore(judge)
+
+/**
+ * A note count that is not above what the chart is known to hold. Long note modes count an end note as well, so a mode
+ * that counts both ends of every long note reaches twice the plain count and no more.
+ */
+export const isTotalNotesPlausible = (totalNotes: number, knownChartNotes: number) =>
+    knownChartNotes <= 0 || totalNotes <= knownChartNotes * LONG_NOTE_COUNT_MAX_FACTOR
+
+/**
+ * The note count the judge counts are held against: the client's own, or, when it sent none, what the server knows of the
+ * chart. Zero means nothing is known and the judge counts can not be held to any bound.
+ */
+export const effectiveTotalNotes = (totalNotes: number, knownChartNotes: number) => (totalNotes > 0 ? totalNotes : Math.max(knownChartNotes, 0))
+
+export type SubmissionIntegrityFailure = { field: string; reason: string }
+
+/**
+ * The first reason a score body can not be what a real play sends, or null. `knownChartNotes` is what the server holds for
+ * the chart, 0 when it holds nothing.
+ */
+export const findSubmissionIntegrityFailure = (
+    input: Pick<ScoreSubmissionInput, 'judge' | 'total_notes' | 'ex_score' | 'mode'>,
+    knownChartNotes: number,
+): SubmissionIntegrityFailure | null => {
+    if (!isExScoreConsistent(input.judge, input.ex_score)) return { field: 'ex_score', reason: 'ex_score does not match the judge counts' }
+    if (!isTotalNotesPlausible(input.total_notes, knownChartNotes))
+        return { field: 'total_notes', reason: 'total_notes exceeds what the chart holds' }
+    const total = effectiveTotalNotes(input.total_notes, knownChartNotes)
+    if (!isJudgeCountConsistent(input.judge, total, input.mode)) return { field: 'judge', reason: 'judge count exceeds total_notes' }
+    return null
+}
+
 const truncateUserAgent = (userAgent: string | null) => (userAgent === null ? null : userAgent.slice(0, USER_AGENT_MAX_LENGTH))
 
 export const createScoreService = (deps: ScoreServiceDeps) => ({
@@ -220,7 +264,7 @@ export const createScoreService = (deps: ScoreServiceDeps) => ({
         const minbp = input.minbp > 0 ? input.minbp : deriveMinbp(input.judge)
         const clear = clearLampToId(input.clear)
         const countRank = async () =>
-            (await deps.db.countBetterBests({ chartSha256: params.chartSha256, clear, exScore, includeScratchAuto: scratchAuto })) + 1
+            (await deps.db.countBetterBests({ chartSha256: params.chartSha256, clear, exScore, minbp, includeScratchAuto: scratchAuto })) + 1
 
         const playedAtFrom = Math.floor(input.played_at / IDEMPOTENCY_WINDOW_MS) * IDEMPOTENCY_WINDOW_MS
         const existingId = user
@@ -264,9 +308,11 @@ export const createScoreService = (deps: ScoreServiceDeps) => ({
             }),
         )
 
-        const isNewBest = Boolean(user) && ranked && isBetterBest({ clear, exScore, minbp }, previous)
-        if (user && isNewBest) {
-            await deps.db.upsertChartBest({
+        const isNewBest =
+            user !== null &&
+            ranked &&
+            isBetterBest({ clear, exScore, minbp }, previous) &&
+            (await deps.db.upsertChartBestIfBetter({
                 chartSha256: params.chartSha256,
                 userId: user.id,
                 scratchAuto,
@@ -275,8 +321,7 @@ export const createScoreService = (deps: ScoreServiceDeps) => ({
                 exScore,
                 minbp,
                 maxCombo: input.max_combo,
-            })
-        }
+            }))
 
         const rank = ranked && user ? await countRank() : null
 
@@ -331,6 +376,30 @@ export const createScoreService = (deps: ScoreServiceDeps) => ({
         })
     },
 
+    recordAcceptance: async (params: {
+        scoreId: string
+        userId: string
+        clientBuildSha256: string | null
+        clientPlatform: string | null
+        ip: string | null
+        userAgent: string | null
+        ranked: boolean
+        flags: ScoreFlag[]
+    }) => {
+        await deps.db.insertAudit({
+            id: deps.newId('au_'),
+            scoreId: params.scoreId,
+            userId: params.userId,
+            clientBuildSha256: params.clientBuildSha256,
+            clientPlatform: params.clientPlatform,
+            ip: params.ip,
+            userAgent: truncateUserAgent(params.userAgent),
+            accepted: true,
+            ranked: params.ranked,
+            flags: params.flags,
+        })
+    },
+
     getRanking: async (params: BestScope & { chartSha256: string; limit: number; page: number; lnmode?: number; rivalOf?: string }) => {
         const userIds = params.rivalOf ? await deps.db.getRivalUserIds(params.rivalOf) : undefined
         if (userIds && userIds.length === 0) return []
@@ -342,8 +411,7 @@ export const createScoreService = (deps: ScoreServiceDeps) => ({
             userIds,
             includeScratchAuto: params.includeScratchAuto,
         })
-        const base = (params.page - 1) * params.limit
-        return rows.map((row, index) => toScoreRecord(row, base + index + 1))
+        return rows.map((row) => toScoreRecord(row, row.rank))
     },
 
     getBest: async (params: BestScope & { chartSha256: string; loginId: string; lnmode?: number }) => {
@@ -354,6 +422,8 @@ export const createScoreService = (deps: ScoreServiceDeps) => ({
                 chartSha256: params.chartSha256,
                 clear: row.clear,
                 exScore: row.exScore,
+                minbp: row.minbp,
+                lnmode: params.lnmode,
                 includeScratchAuto: params.includeScratchAuto,
             })) + 1
         return toScoreRecord(row, rank)

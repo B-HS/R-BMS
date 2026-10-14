@@ -262,14 +262,29 @@ cargo run -p rbms-player -- --server http://localhost:3000/api --player <id>
 - [x] Vercel: 프로젝트 `rbms-web`, Git `B-HS/R-BMS` 연결, Root `web`, Production Branch `dev`, `vercel.json` 의 `ignoreCommand`. 첫 Git 배포 완료. `https://bms.hyuns.uk/api/version` 의 `commit` 이 7095ef7(2026-10-14 관찰)
 - [x] d733a8f: 2^53 를 넘는 `seed` 를 거절하지 않고 0 으로 저장(`seedSchema`). v0.1.2 점수 제출 400 의 서버 쪽 수리. 클라이언트 쪽은 7095ef7(새 판 배치 시드를 2^53 미만으로)
 
+## S19 서버 수리 (2026-10-15)
+
+근거: 감사 결과 `scratchpad/s19/round1.json`(영역 account 의 서버 쪽), [../backend/api-spec.md](../backend/api-spec.md) 2·4·5·6·7.2·8·9, [architecture.md](./architecture.md) 4·5-4·6-1.
+
+- [x] IR-1: `chart_best`·`course_best` 갱신을 조건부 문장 하나로(동시 제출이 낮은 판으로 덮지 못함). DB 테스트 `tests/db/best-race.test.ts`
+- [x] IR-4: EX·`total_notes`·판정 수 일관성 검사, 코스 제출에 단일 곡과 같은 rate limit·본문 크기·빌드 해시 정책·감사
+- [x] IR-5: 가입·로그인 오류 구분, 비밀번호 길이 상한 128, 운영 필수 환경 변수를 인증 첫 사용 시 검증
+- [x] IR-8 서버: `DELETE /api/auth/token/current`, 로그인·가입 때 요청에 실린 이전 토큰 폐기(만료는 강제하지 않음)
+- [x] IR-9: 서버 컴포넌트의 자기 URL fetch 제거 → `public-reads.ts` 직접 읽기
+- [x] IR-10: `proxy.ts` 로 없는 차트·플레이어·코스·리플레이 상세를 404 로
+- [x] IR-14: 순위 번호 정의 통일(공동 순위), 동점 정렬의 마지막 유일 키, `lnmode` 현재 동작 문서화(결정 대기: 테스트 부채 3.35)
+- [x] IR-15: 설정 낙관적 잠금 조건부 쓰기, 폴더 동시 추가 직렬화, 폴더 저장 한 요청, 설정 이름 16개·쓰기 30/min, 리플레이 사용자별 2,000개·512MiB. 마이그레이션 `0003_replay_user_quota`(운영 미적용: 적용 순서는 [architecture.md](./architecture.md) 3-2)
+- [x] 클라이언트 쪽 짝(Rust, 계정): 로그아웃 때 `DELETE /api/auth/token/current` 호출(`ScoreServer::revoke_current_token`, `app_network::revoke_token_in_background`), 로그인·가입 요청에 쓰던 토큰을 Bearer 로 싣기(`HttpScoreServer` 가 토큰이 있으면 모든 호출에 싣는다. 요청 헤더는 `http::tests` 가 확인)
+- [ ] 클라이언트 쪽 짝(Rust, 기록): 413(`details.scope`)·409 구분
+
 ## 남은 일 (웹·서버, 새 세션이 이어서)
 
 우선순위 순. 각 항목의 근거는 괄호 안 문서.
 
 1. 사용자 확인 대기: 운영 서버에 한 판 쳐서 결과 화면에 `IR: RANK` 가 나오는지, 순위(`/leaderboards`)에 `bhs` 가 올라오는지. 안 오르면 `POST /api/scores` 의 400/401 원인을 본다(Vercel 로그). 계약 교차 테스트(다음 항목)가 재발 방지책이다
 2. 계약 교차 테스트: Rust 쪽이 실제 클라이언트가 만든 요청 본문(일반, SCRATCH AUTO, 코스, 리플레이 업로드)을 JSON 파일로 뽑고 웹 테스트가 서버 zod 스키마로 통과시킨다. 관련: `crates/rbms-ir/src/contract_tests/fixtures.rs`, `web/tests/dto/ir-contract.test.ts` ([../reference/ir-api.md](../reference/ir-api.md) 5절)
-3. 없는 상세 주소가 HTTP 200: 존재 확인을 Suspense 밖으로 옮기거나 `noindex` 로 충분하다고 결정 ([2026-10-14-audit.md](./2026-10-14-audit.md) KNOWN ISSUE)
-4. 웹 2차(사용자가 "나중에" 로 둔 것): 발광 표 한 곡 한 행 보기, 카드 높이 선택, 폴더 끌어 옮기기, 2,000곡 가상화, 표 RSC 자료 축소(`level`·`url_diff` 중복), 서버 컴포넌트 자기 URL fetch 제거(`web/src/shared/lib/fetch.ts`), 지속형 rate limit, OG 이미지, 홈 대시보드 재구성
-5. 소소한 서버 부채: 가입 실패 원인 구분(`auth.service.ts` 의 `signUp`), `BETTER_AUTH_SECRET`·`BETTER_AUTH_URL`·`NEXT_PUBLIC_APP_URL` 운영 필수 검증(`env.ts`), `release.yml` 이 `client_build` 를 등록하지 않음(admin 세션만 받는 `POST /api/admin/builds`), `user.rank_points` 열 미사용
+3. (해소, S19) 없는 상세 주소가 HTTP 200: `proxy.ts` 가 존재를 확인해 404 로 재작성한다. 표 상세(`/tables/[id]`)는 아직 200 이다(번들 표라 보류). 배포 뒤 운영에서 읽기 전용 GET 으로 확인 ([architecture.md](./architecture.md) 5-4)
+4. 웹 2차(사용자가 "나중에" 로 둔 것): 발광 표 한 곡 한 행 보기, 카드 높이 선택, 폴더 끌어 옮기기, 2,000곡 가상화, 표 RSC 자료 축소(`level`·`url_diff` 중복), 지속형 rate limit(서버 컴포넌트 자기 URL fetch 는 S19 에서 제거), OG 이미지, 홈 대시보드 재구성
+5. 소소한 서버 부채: (해소, S19: 가입·로그인 실패 원인 구분 `auth.service.ts`, `BETTER_AUTH_SECRET`·`BETTER_AUTH_URL`·`NEXT_PUBLIC_APP_URL` 운영 필수 검증 `env.ts`) `release.yml` 이 `client_build` 를 등록하지 않음(admin 세션만 받는 `POST /api/admin/builds`), `user.rank_points` 열 미사용
 6. 클라이언트 쪽(웹 문서 밖이지만 서버와 짝): 게임 안 IR 순위 패널의 SCRATCH AUTO 포함 토글(서버는 `include_scratch_auto` 를 이미 받는다)
 7. 정책 확인 필요(메인이 정했고 사용자 미확인): 넓힌 판정 판은 저장·전송하지만 최고 기록·순위에서 제외, SCRATCH AUTO 램프는 `LightAssistEasy` 유지

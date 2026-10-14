@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { parseEnv, resolveDatabaseUrl } from '@server/lib/env'
+import { assertProductionAuthEnv, findMissingProductionAuthEnv, parseEnv, resolveDatabaseUrl } from '@server/lib/env'
 
 describe('parseEnv', () => {
     test('필수 값이 없어도 기본값으로 파싱한다', () => {
@@ -37,5 +37,36 @@ describe('resolveDatabaseUrl', () => {
 
     test('접속 정보가 부족하면 null 이다', () => {
         expect(resolveDatabaseUrl(parseEnv({}))).toBeNull()
+    })
+})
+
+describe('운영 필수 인증 환경 변수', () => {
+    const complete = {
+        NODE_ENV: 'production',
+        BETTER_AUTH_SECRET: 'x'.repeat(32),
+        BETTER_AUTH_URL: 'https://bms.example',
+        NEXT_PUBLIC_APP_URL: 'https://bms.example',
+    }
+
+    test('환경 변수가 하나도 없어도 파싱은 성공해 빌드가 막히지 않는다', () => {
+        expect(() => parseEnv({ NODE_ENV: 'production' })).not.toThrow()
+    })
+
+    test('production 에서 비어 있거나 빠진 키를 모두 모아 알려준다', () => {
+        expect(findMissingProductionAuthEnv({ NODE_ENV: 'production' })).toEqual(['BETTER_AUTH_SECRET', 'BETTER_AUTH_URL', 'NEXT_PUBLIC_APP_URL'])
+        expect(findMissingProductionAuthEnv({ ...complete, BETTER_AUTH_SECRET: '', BETTER_AUTH_URL: undefined })).toEqual([
+            'BETTER_AUTH_SECRET',
+            'BETTER_AUTH_URL',
+        ])
+        expect(() => assertProductionAuthEnv({ NODE_ENV: 'production', NEXT_PUBLIC_APP_URL: 'https://bms.example' })).toThrow(
+            'Missing required production environment variables: BETTER_AUTH_SECRET, BETTER_AUTH_URL',
+        )
+    })
+
+    test('모두 있으면 통과하고 development 와 test 는 요구하지 않는다', () => {
+        expect(() => assertProductionAuthEnv(complete)).not.toThrow()
+        expect(findMissingProductionAuthEnv({ NODE_ENV: 'development' })).toEqual([])
+        expect(findMissingProductionAuthEnv({ NODE_ENV: 'test' })).toEqual([])
+        expect(findMissingProductionAuthEnv({})).toEqual([])
     })
 })

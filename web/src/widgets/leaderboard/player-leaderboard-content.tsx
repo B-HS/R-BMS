@@ -5,6 +5,8 @@ import { getQueryClient } from '@shared/utils/get-query-client'
 import { readBooleanParam, readNumberParam, readParam } from '@shared/lib/search-params'
 import { DEFAULT_PLAYER_SORT } from '@shared/constants/leaderboard'
 import { INCLUDE_SCRATCH_AUTO_PARAM } from '@shared/constants/scratch-auto'
+import { playerLeaderboardQuerySchema } from '@server/dto/fe'
+import { parseQueryParams, readPlayerLeaderboard } from '@server/service/public-reads'
 
 const DEFAULT_LIMIT = 20
 
@@ -18,7 +20,10 @@ export const PlayerLeaderboardContent = async ({ searchParams }: { searchParams:
     }
 
     const queryClient = getQueryClient()
-    await queryClient.prefetchQuery(playerLeaderboardQueryOptions(params))
+    await queryClient.prefetchQuery({
+        ...playerLeaderboardQueryOptions(params),
+        queryFn: () => readPlayerLeaderboard(parseQueryParams(playerLeaderboardQuerySchema, params)),
+    })
 
     return (
         <HydrationBoundary state={dehydrate(queryClient)}>

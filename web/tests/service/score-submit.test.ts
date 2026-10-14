@@ -2,13 +2,19 @@ import { describe, expect, test } from 'bun:test'
 import { judgeBreakdownSchema } from '@server/dto/common'
 import { scoreSubmissionSchema, submitResponseSchema, type ScoreSubmissionInput } from '@server/dto/score'
 import { BUILD_TRUST } from '@server/service/domain/score/ranked-policy'
+import { isBetterBest } from '@server/service/domain/score/best-policy'
 import {
     createScoreService,
     DUPLICATE_SUBMISSION_MESSAGE,
+    effectiveTotalNotes,
+    findSubmissionIntegrityFailure,
+    isExScoreConsistent,
     isJudgeCountConsistent,
     isPlayedAtPlausible,
+    isTotalNotesPlausible,
     judgedNoteCount,
     type ScoreInsertRow,
+    type ScoreRankedRow,
     type ScoreServiceDb,
 } from '@server/service/domain/score/score.service'
 
@@ -58,7 +64,14 @@ type Recorder = {
     idempotencyWindows: { playedAtFrom: number; playedAtTo: number }[]
 }
 
-const createStub = (options: { existingScoreId?: string | null; currentBest?: { clear: number; exScore: number; minbp: number } | null } = {}) => {
+const createStub = (
+    options: {
+        existingScoreId?: string | null
+        currentBest?: { clear: number; exScore: number; minbp: number } | null
+        winsBest?: boolean
+        rankedRows?: ScoreRankedRow[]
+    } = {},
+) => {
     const recorder: Recorder = {
         inserted: [],
         bests: [],
@@ -82,14 +95,15 @@ const createStub = (options: { existingScoreId?: string | null; currentBest?: { 
             recorder.bestLookups.push(scratchAuto)
             return options.currentBest ?? null
         },
-        upsertChartBest: async (row) => {
+        upsertChartBestIfBetter: async (row) => {
             recorder.bests.push({ scoreId: row.scoreId, clear: row.clear, exScore: row.exScore, scratchAuto: row.scratchAuto })
+            return options.winsBest ?? true
         },
         countBetterBests: async ({ includeScratchAuto }) => {
             recorder.rankScopes.push(includeScratchAuto)
             return 2
         },
-        getRanking: async () => [],
+        getRanking: async () => options.rankedRows ?? [],
         getBestByLoginId: async () => null,
         getScoreById: async () => null,
         getRivalUserIds: async () => [],
@@ -433,6 +447,154 @@ describe('scoreService.submit', () => {
         })
         expect(recorder.inserted[0].exScore).toBe(1488)
         expect(recorder.inserted[0].minbp).toBe(15)
+    })
+})
+
+describe('최고 기록 경합 (IR-1)', () => {
+    const ranked = (overrides: Partial<ScoreRankedRow>): ScoreRankedRow => ({
+        scoreId: 'sc_1',
+        loginId: 'alice',
+        playerName: 'Alice',
+        clear: 6,
+        exScore: 1000,
+        maxCombo: 100,
+        minbp: 10,
+        playedAt: PLAYED_AT,
+        lntype: 0,
+        option: 0,
+        totalNotes: 812,
+        scratchAuto: false,
+        judge: null,
+        rank: 1,
+        ...overrides,
+    })
+
+    const submitAs = (service: ReturnType<typeof createStub>['service'], input: ScoreSubmissionInput) =>
+        service.submit({
+            input,
+            chartSha256: CHART_SHA,
+            chartMd5: null,
+            user: alice,
+            buildTrust: BUILD_TRUST.TRUSTED,
+            requireTrustedBuild: false,
+            ip: null,
+            userAgent: null,
+        })
+
+    test('DB 가 더 좋은 최고 기록이 이미 있다고 답하면 is_new_best 는 false 다', async () => {
+        const { service } = createStub({ winsBest: false })
+        const result = await submitAs(service, submission())
+        expect(result.response.is_new_best).toBe(false)
+        expect(result.response.ranked).toBe(true)
+    })
+
+    test('같은 차트에 동시에 들어온 두 판 중 높은 판만 최고 기록으로 남는다', async () => {
+        const stored: { exScore: number; clear: number; minbp: number; scoreId: string }[] = []
+        const sequence = { value: 0 }
+        let readsDone = 0
+        let release: () => void = () => undefined
+        const bothRead = new Promise<void>((resolve) => {
+            release = resolve
+        })
+        const db: ScoreServiceDb = {
+            findScoreIdByIdempotency: async () => null,
+            insertScore: async () => undefined,
+            getChartBest: async () => {
+                readsDone += 1
+                if (readsDone === 2) release()
+                await bothRead
+                return null
+            },
+            upsertChartBestIfBetter: async (row) => {
+                const [current] = stored
+                if (current && !isBetterBest(row, current)) return false
+                stored.splice(0, stored.length, { exScore: row.exScore, clear: row.clear, minbp: row.minbp, scoreId: row.scoreId })
+                return true
+            },
+            countBetterBests: async () => 0,
+            getRanking: async () => [],
+            getBestByLoginId: async () => null,
+            getScoreById: async () => null,
+            getRivalUserIds: async () => [],
+            insertAudit: async () => undefined,
+        }
+        const service = createScoreService({ db, newId: (prefix) => `${prefix}${++sequence.value}`, now: () => PLAYED_AT })
+        const high = submission({ ex_score: 1488 })
+        const low = submission({
+            ex_score: 1000,
+            judge: { pgreat: 400, great: 200, good: 21, bad: 8, poor: 5, miss: 2, fast: 0, slow: 0, combobreak: 0 },
+            played_at: PLAYED_AT + 5000,
+        })
+        const [highResult, lowResult] = await Promise.all([submitAs(service, high), submitAs(service, low)])
+        expect(stored).toHaveLength(1)
+        expect(stored[0].exScore).toBe(1488)
+        expect(highResult.response.is_new_best).toBe(true)
+        expect(lowResult.response.is_new_best).toBe(false)
+    })
+
+    test('getRanking 은 DB 가 센 공동 순위를 그대로 응답 순위로 쓴다', async () => {
+        const { service } = createStub({
+            rankedRows: [
+                ranked({ scoreId: 'sc_a', loginId: 'a', rank: 1 }),
+                ranked({ scoreId: 'sc_b', loginId: 'b', rank: 1 }),
+                ranked({ scoreId: 'sc_c', loginId: 'c', rank: 3 }),
+            ],
+        })
+        const rows = await service.getRanking({ chartSha256: CHART_SHA, limit: 50, page: 2, includeScratchAuto: false })
+        expect(rows.map((row) => row.rank)).toEqual([1, 1, 3])
+    })
+})
+
+describe('EX 점수와 노트 수 대조 (IR-4)', () => {
+    const judge = judgeBreakdownSchema.parse({
+        pgreat: 1,
+        great: 0,
+        good: 0,
+        bad: 0,
+        poor: 0,
+        miss: 0,
+        fast: 0,
+        slow: 0,
+        combobreak: 0,
+    })
+
+    test('EX 는 PGREAT 2점과 GREAT 1점의 합과 같아야 하고 0 은 서버가 유도한다', () => {
+        expect(isExScoreConsistent(judge, 2)).toBe(true)
+        expect(isExScoreConsistent(judge, 0)).toBe(true)
+        expect(isExScoreConsistent(judge, 999999)).toBe(false)
+        expect(isExScoreConsistent(judge, 3)).toBe(false)
+    })
+
+    test('early/late 로 나눠 보낸 PGREAT 도 같은 합으로 센다', () => {
+        const split = judgeBreakdownSchema.parse({ ...judge, pgreat: 4, epg: 3, lpg: 1, egr: 2, lgr: 1, great: 3 })
+        expect(isExScoreConsistent(split, 11)).toBe(true)
+        expect(isExScoreConsistent(split, 12)).toBe(false)
+    })
+
+    test('차트가 아는 노트 수의 두 배를 넘는 total_notes 는 거절하고 모르면 통과한다', () => {
+        expect(isTotalNotesPlausible(1000, 500)).toBe(true)
+        expect(isTotalNotesPlausible(1001, 500)).toBe(false)
+        expect(isTotalNotesPlausible(999999, 0)).toBe(true)
+    })
+
+    test('클라이언트가 total_notes 를 0 으로 보내면 차트의 노트 수로 판정 수를 가둔다', () => {
+        expect(effectiveTotalNotes(0, 500)).toBe(500)
+        expect(effectiveTotalNotes(300, 500)).toBe(300)
+        expect(effectiveTotalNotes(0, 0)).toBe(0)
+        const heavy = judgeBreakdownSchema.parse({ ...judge, pgreat: 600 })
+        expect(findSubmissionIntegrityFailure({ judge: heavy, total_notes: 0, ex_score: 1200, mode: 'BEAT_7K' }, 500)).toEqual({
+            field: 'judge',
+            reason: 'judge count exceeds total_notes',
+        })
+        expect(findSubmissionIntegrityFailure({ judge: heavy, total_notes: 0, ex_score: 1200, mode: 'BEAT_7K' }, 0)).toBeNull()
+    })
+
+    test('EX 가 판정과 어긋난 본문은 ex_score 필드로 거절한다', () => {
+        expect(findSubmissionIntegrityFailure({ judge, total_notes: 812, ex_score: 999999, mode: 'BEAT_7K' }, 812)).toEqual({
+            field: 'ex_score',
+            reason: 'ex_score does not match the judge counts',
+        })
+        expect(findSubmissionIntegrityFailure({ judge, total_notes: 812, ex_score: 2, mode: 'BEAT_7K' }, 812)).toBeNull()
     })
 })
 

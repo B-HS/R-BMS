@@ -5,6 +5,8 @@ import { fetchQueryOrNotFound } from '@shared/lib/fetch-query-or-not-found'
 import { getQueryClient } from '@shared/utils/get-query-client'
 import { readBooleanParam } from '@shared/lib/search-params'
 import { INCLUDE_SCRATCH_AUTO_PARAM } from '@shared/constants/scratch-auto'
+import { rankingQuerySchema } from '@server/dto/score'
+import { parseQueryParams, readCourseMeta, readCourseRanking } from '@server/service/public-reads'
 
 const RANKING_LIMIT = 50
 
@@ -19,8 +21,11 @@ export const CourseDetailContent = async ({ params, searchParams }: CourseDetail
 
     const queryClient = getQueryClient()
     await Promise.all([
-        fetchQueryOrNotFound(queryClient, courseMetaQueryOptions(courseHash)),
-        queryClient.prefetchQuery(courseRankingQueryOptions(courseHash, rankingParams)),
+        fetchQueryOrNotFound(queryClient, { ...courseMetaQueryOptions(courseHash), queryFn: () => readCourseMeta(courseHash) }),
+        queryClient.prefetchQuery({
+            ...courseRankingQueryOptions(courseHash, rankingParams),
+            queryFn: () => readCourseRanking(courseHash, parseQueryParams(rankingQuerySchema, rankingParams)),
+        }),
     ])
 
     return (

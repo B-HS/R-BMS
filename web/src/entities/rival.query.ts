@@ -3,10 +3,10 @@ import { QUERY_KEY } from '@shared/constants/query-key'
 import { buildApiUrl, fetchRaw } from '@shared/lib/fetch'
 import type { PlayerProfile } from '@entities/player.type'
 
-export const rivalListQueryOptions = (playerId: string, init?: RequestInit) =>
+export const rivalListQueryOptions = (playerId: string) =>
     queryOptions({
         queryKey: QUERY_KEY.PLAYER.RIVALS(playerId),
-        queryFn: () => fetchRaw<PlayerProfile[]>(buildApiUrl(`/players/${encodeURIComponent(playerId)}/rivals`), init),
+        queryFn: () => fetchRaw<PlayerProfile[]>(buildApiUrl(`/players/${encodeURIComponent(playerId)}/rivals`)),
     })
 
 export const useRivalList = (playerId: string) => useQuery(rivalListQueryOptions(playerId))

@@ -7,7 +7,7 @@ import { settingKeyListQueryOptions } from '@entities/setting.query'
 import { rivalListQueryOptions } from '@entities/rival.query'
 import { buildLoginHref } from '@shared/constants/auth-route'
 import { getQueryClient } from '@shared/utils/get-query-client'
-import { forwardedCookieInit } from '@shared/lib/server-request-init'
+import { readApiTokens, readPlayerRivals, readSettingKeys } from '@server/service/public-reads'
 
 const SETTINGS_PATH = '/settings'
 
@@ -16,11 +16,10 @@ export const SettingsContent = async () => {
     if (!user) redirect(buildLoginHref(SETTINGS_PATH))
 
     const queryClient = getQueryClient()
-    const init = await forwardedCookieInit()
     await Promise.all([
-        queryClient.prefetchQuery(apiTokenListQueryOptions(init)),
-        queryClient.prefetchQuery(settingKeyListQueryOptions(init)),
-        queryClient.prefetchQuery(rivalListQueryOptions(user.login_id, init)),
+        queryClient.prefetchQuery({ ...apiTokenListQueryOptions(), queryFn: () => readApiTokens(user.id) }),
+        queryClient.prefetchQuery({ ...settingKeyListQueryOptions(), queryFn: () => readSettingKeys(user.id) }),
+        queryClient.prefetchQuery({ ...rivalListQueryOptions(user.login_id), queryFn: () => readPlayerRivals(user.login_id) }),
     ])
 
     return (

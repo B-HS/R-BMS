@@ -24,12 +24,14 @@ export const parseJsonBody = async <T>(request: Request, schema: z.ZodType<T>): 
     return parsed.data
 }
 
-export const parseSearchParams = <T>(request: Request, schema: z.ZodType<T>): T => {
-    const params = Object.fromEntries(new URL(request.url).searchParams.entries())
+export const parseQueryObject = <T>(params: Record<string, string>, schema: z.ZodType<T>): T => {
     const parsed = schema.safeParse(params)
     if (!parsed.success) throw validationError(parsed.error.issues)
     return parsed.data
 }
+
+export const parseSearchParams = <T>(request: Request, schema: z.ZodType<T>): T =>
+    parseQueryObject(Object.fromEntries(new URL(request.url).searchParams.entries()), schema)
 
 export const guardBodySize = (request: Request, maxBytes: number) => {
     const length = Number(request.headers.get('content-length') ?? 0)

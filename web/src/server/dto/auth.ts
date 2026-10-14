@@ -1,7 +1,8 @@
 import { z } from 'zod'
 import { extraSchema, playerIdSchema } from '@server/dto/common'
 
-const MIN_PASSWORD_LENGTH = 8
+export const MIN_PASSWORD_LENGTH = 8
+export const MAX_PASSWORD_LENGTH = 128
 const MAX_LOGIN_ID_LENGTH = 64
 const LOGIN_ID_PATTERN = /^[a-zA-Z0-9_-]+$/
 const RESERVED_LOGIN_IDS = ['guest']
@@ -16,7 +17,7 @@ const loginIdSchema = z
 export const accountSchema = z.object({
     api_version: z.number().int().min(1).default(1),
     id: loginIdSchema,
-    password: z.string().min(MIN_PASSWORD_LENGTH),
+    password: z.string().min(MIN_PASSWORD_LENGTH).max(MAX_PASSWORD_LENGTH),
     email: z.email(),
     name: z.string().min(1).nullish().default(null),
 })
@@ -24,7 +25,7 @@ export const accountSchema = z.object({
 export const loginSchema = z.object({
     api_version: z.number().int().min(1).default(1),
     id: z.string().min(1).max(MAX_LOGIN_ID_LENGTH),
-    password: z.string().min(1),
+    password: z.string().min(1).max(MAX_PASSWORD_LENGTH),
     email: z.email().nullish().default(null),
     name: z.string().nullish().default(null),
 })

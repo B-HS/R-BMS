@@ -1,4 +1,4 @@
-import { and, eq, ne, notExists, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, lt, ne, notExists, or, sql } from 'drizzle-orm'
 import { alias, type MySqlColumn, type MySqlTable } from 'drizzle-orm/mysql-core'
 import type { Database } from '@server/db'
 import { chartBest, courseBest } from '@server/db/schema'
@@ -83,3 +83,45 @@ export const courseBestScope = (db: Database, includeScratchAuto: boolean) =>
         sibling: courseBestColumns(courseBestSibling),
         includeScratchAuto,
     })
+
+type BestScore = { clear: number; exScore: number; minbp: number }
+
+/**
+ * The stored best rows that a candidate run beats: a higher lamp, or the same lamp with a higher EX, or both the same with fewer BP.
+ * An UPDATE that carries this as its condition replaces a best only when the run really is better, whatever order two runs land in.
+ */
+export const isBeatenBy = (stored: Pick<BestColumns, 'clear' | 'exScore' | 'minbp'>, candidate: BestScore) =>
+    or(
+        lt(stored.clear, candidate.clear),
+        and(eq(stored.clear, candidate.clear), lt(stored.exScore, candidate.exScore)),
+        and(eq(stored.clear, candidate.clear), eq(stored.exScore, candidate.exScore), gt(stored.minbp, candidate.minbp)),
+    )
+
+/**
+ * The best rows that rank strictly ahead of a score: ties on lamp, EX and BP share one rank, so they do not count.
+ */
+export const isRankedAheadOf = (row: Pick<BestColumns, 'clear' | 'exScore' | 'minbp'>, score: BestScore) =>
+    or(
+        gt(row.clear, score.clear),
+        and(eq(row.clear, score.clear), gt(row.exScore, score.exScore)),
+        and(eq(row.clear, score.clear), eq(row.exScore, score.exScore), lt(row.minbp, score.minbp)),
+    )
+
+/**
+ * `RANK()` over the rows a list keeps: tied lamp, EX and BP share a rank and the next one skips, the same number a submit
+ * answer counts with {@link isRankedAheadOf}.
+ */
+export const rankInList = (row: Pick<BestColumns, 'clear' | 'exScore' | 'minbp'>) =>
+    sql<number>`rank() over (order by ${row.clear} desc, ${row.exScore} desc, ${row.minbp} asc)`.mapWith(Number)
+
+/**
+ * The full list order. Rows tied on lamp, EX and BP keep the order the earlier best came first, then by player, so a page
+ * boundary never repeats or skips a player.
+ */
+export const listOrder = (row: Pick<BestColumns, 'clear' | 'exScore' | 'minbp' | 'userId'> & { updatedAt: MySqlColumn }) => [
+    desc(row.clear),
+    desc(row.exScore),
+    asc(row.minbp),
+    asc(row.updatedAt),
+    asc(row.userId),
+]

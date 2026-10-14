@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm'
+import { and, count, desc, eq, sum } from 'drizzle-orm'
 import type { Database } from '@server/db'
 import { user } from '@server/db/auth-schema'
 import { chart, replay, score } from '@server/db/schema'
@@ -68,6 +68,10 @@ export const composeReplay = (db: Database) => {
                 const { data, ...rest } = row
                 return toReplayRow(rest, data)
             },
+            replayExists: async (id) => {
+                const [row] = await db.select({ id: replay.id }).from(replay).where(eq(replay.id, id)).limit(1)
+                return row !== undefined
+            },
             listReplaysByChart: async ({ chartSha256, userId, limit }) => {
                 const rows = await db
                     .select(replaySelection)
@@ -87,6 +91,13 @@ export const composeReplay = (db: Database) => {
                     .where(and(eq(score.id, scoreId), eq(score.userId, userId)))
                     .limit(1)
                 return row ?? null
+            },
+            sumUserReplays: async (userId) => {
+                const [row] = await db
+                    .select({ count: count(), bytes: sum(replay.size) })
+                    .from(replay)
+                    .where(eq(replay.userId, userId))
+                return { count: row?.count ?? 0, bytes: Number(row?.bytes ?? 0) }
             },
             linkScoreReplay: async ({ scoreId, userId, replayId }) => {
                 await db

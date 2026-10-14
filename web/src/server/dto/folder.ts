@@ -80,6 +80,8 @@ export const folderItemsOrderSchema = z.object({
 export const folderItemsReplaceSchema = z.object({
     items: z.array(folderItemInputSchema).max(FOLDER_LIMIT.ITEMS_PER_FOLDER),
     base_updated_at: z.number().int().min(0).optional(),
+    name: folderNameSchema.optional(),
+    description: singleLineText(FOLDER_LIMIT.DESCRIPTION_MAX).optional(),
 })
 
 export const folderItemNoteSchema = z.object({

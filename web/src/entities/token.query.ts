@@ -3,10 +3,10 @@ import { QUERY_KEY } from '@shared/constants/query-key'
 import { buildApiUrl, fetchEnvelope, fetchNoContent } from '@shared/lib/fetch'
 import type { ApiTokenRow, IssuedApiToken } from '@entities/token.type'
 
-export const apiTokenListQueryOptions = (init?: RequestInit) =>
+export const apiTokenListQueryOptions = () =>
     queryOptions({
         queryKey: QUERY_KEY.TOKEN.LIST,
-        queryFn: () => fetchEnvelope<ApiTokenRow[]>(buildApiUrl('/fe/tokens'), init),
+        queryFn: () => fetchEnvelope<ApiTokenRow[]>(buildApiUrl('/fe/tokens')),
     })
 
 export const useApiTokenList = () => useQuery(apiTokenListQueryOptions())

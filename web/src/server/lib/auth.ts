@@ -3,13 +3,14 @@ import { betterAuth } from 'better-auth'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
 import { getDb } from '@server/db'
 import * as authSchema from '@server/db/auth-schema'
-import { getEnv } from '@server/lib/env'
+import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from '@server/dto/auth'
+import { assertProductionAuthEnv, getEnv } from '@server/lib/env'
 
 const SESSION_EXPIRES_SECONDS = 60 * 60 * 24 * 30
 const SESSION_UPDATE_AGE_SECONDS = 60 * 60 * 24
-const MIN_PASSWORD_LENGTH = 8
 
 const createAuth = () => {
+    assertProductionAuthEnv()
     const env = getEnv()
     return betterAuth({
         appName: 'rbms',
@@ -17,7 +18,7 @@ const createAuth = () => {
         secret: env.BETTER_AUTH_SECRET,
         basePath: '/api/auth',
         database: drizzleAdapter(getDb(), { provider: 'mysql', schema: authSchema }),
-        emailAndPassword: { enabled: true, autoSignIn: true, minPasswordLength: MIN_PASSWORD_LENGTH },
+        emailAndPassword: { enabled: true, autoSignIn: true, minPasswordLength: MIN_PASSWORD_LENGTH, maxPasswordLength: MAX_PASSWORD_LENGTH },
         session: { expiresIn: SESSION_EXPIRES_SECONDS, updateAge: SESSION_UPDATE_AGE_SECONDS },
         user: {
             additionalFields: {

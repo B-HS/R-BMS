@@ -73,7 +73,12 @@ describe.skipIf(!hasDatabase)('SCRATCH AUTO 순위 (임시 MySQL)', () => {
         })
 
     const submitCourse = (login: PlayerLogin, play: Parameters<typeof coursePlay>[1]) =>
-        compose().courseService.submit({ input: coursePlay(login, play), user: { id: userId(login), loginId: login } })
+        compose().courseService.submit({
+            input: coursePlay(login, play),
+            user: { id: userId(login), loginId: login },
+            buildTrust: 'trusted',
+            requireTrustedBuild: false,
+        })
 
     const chartRanking = async (includeScratchAuto: boolean) =>
         (await compose().scoreService.getRanking({ chartSha256: CHART_SHA, limit: 50, page: 1, includeScratchAuto })).map((row) => ({
@@ -209,6 +214,8 @@ describe.skipIf(!hasDatabase)('SCRATCH AUTO 순위 (임시 MySQL)', () => {
                 assist: ['AUTO_SCRATCH', 'CUSTOM_JUDGE'],
             }),
             user: { id: userId('carol'), loginId: 'carol' },
+            buildTrust: 'trusted',
+            requireTrustedBuild: false,
         })
         expect([legacy.response.ranked, legacy.response.flags, legacy.response.rank]).toEqual([true, [], 1])
         expect([normal.response.rank, scratch.response.rank, scratch.response.flags]).toEqual([2, 1, ['SCRATCH_AUTO']])

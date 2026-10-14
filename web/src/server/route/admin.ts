@@ -4,14 +4,15 @@ import { irRaw, successResponse } from '@server/lib/api-response'
 import { parseJsonBody } from '@server/lib/parse-request'
 import { withAdmin } from '@server/lib/with-session'
 import { withErrorHandling } from '@server/lib/with-error-handling'
-import { getClientBuildsCached, revalidateOnBuildUpsert } from '@server/service/read-cache'
+import { readClientBuilds } from '@server/service/public-reads'
+import { revalidateOnBuildUpsert } from '@server/service/read-cache'
 
 const CREATED_STATUS = 201
 
 export const createAdminBuildListRoute = () =>
     withErrorHandling(async (request: Request, context: unknown) => {
         const { authService } = compose()
-        return withAdmin({ resolveSessionUser: authService.resolveSessionUser })(async () => irRaw(successResponse(await getClientBuildsCached())))(
+        return withAdmin({ resolveSessionUser: authService.resolveSessionUser })(async () => irRaw(successResponse(await readClientBuilds())))(
             request,
             context,
         )

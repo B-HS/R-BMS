@@ -3,6 +3,7 @@ import { POST as upsertChart } from '@app/api/charts/route'
 import { POST as upsertCourseMeta } from '@app/api/courses/meta/route'
 import { POST as register } from '@app/api/auth/register/route'
 import { POST as authHandlerPost } from '@app/api/auth/[...all]/route'
+import { MAX_PASSWORD_LENGTH } from '@server/dto/auth'
 import { CHART_UPSERT_MAX_BYTES } from '@server/dto/chart'
 
 const emptyContext = { params: Promise.resolve({}) }
@@ -47,6 +48,21 @@ describe('POST /api/auth/register 의 서버 검증', () => {
             expect(response.status).toBe(400)
             expect((await response.json()).error.code).toBe('VALIDATION_ERROR')
         }
+    })
+})
+
+describe('POST /api/auth/register 의 비밀번호 길이', () => {
+    test('better-auth 가 받는 최대 길이를 넘으면 가입 시도 전에 400 이다', async () => {
+        const response = await register(
+            new Request('http://localhost:3000/api/auth/register', {
+                method: 'POST',
+                body: JSON.stringify({ id: 'long_password', password: 'p'.repeat(MAX_PASSWORD_LENGTH + 1), email: 'a@example.com' }),
+                headers: json,
+            }),
+            emptyContext,
+        )
+        expect(response.status).toBe(400)
+        expect((await response.json()).error.code).toBe('VALIDATION_ERROR')
     })
 })
 

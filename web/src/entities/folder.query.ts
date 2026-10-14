@@ -79,14 +79,14 @@ export const useReorderFolders = () => {
     })
 }
 
-/** Replaces the whole ordered item list in one request; the server answers 409 when `baseUpdatedAt` is stale. */
+/** Replaces the whole ordered item list, and the name and description when given, in one request; the server answers 409 when `baseUpdatedAt` is stale. */
 export const useReplaceFolderItems = () => {
     const queryClient = useQueryClient()
     return useMutation({
-        mutationFn: (params: { folderId: string; items: FolderItemInput[]; baseUpdatedAt: number }) =>
+        mutationFn: (params: { folderId: string; items: FolderItemInput[]; baseUpdatedAt: number; meta?: Partial<FolderMetaInput> }) =>
             fetchEnvelope<FolderItemChange>(
                 buildApiUrl(`${folderPath(params.folderId)}/items`),
-                jsonInit('PUT', { items: params.items, base_updated_at: params.baseUpdatedAt }),
+                jsonInit('PUT', { items: params.items, base_updated_at: params.baseUpdatedAt, ...params.meta }),
             ),
         onSuccess: () => queryClient.invalidateQueries({ queryKey: QUERY_KEY.FOLDER.ALL }),
         meta: { suppressErrorToast: true },

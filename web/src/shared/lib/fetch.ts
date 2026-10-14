@@ -37,17 +37,8 @@ const failFromBody = (body: unknown, status: number) => {
 
 export const API_BASE_PATH = '/api'
 
-const DEFAULT_DEV_PORT = '3000'
-
-const resolveOrigin = () => {
-    if (typeof window !== 'undefined') return ''
-    if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL
-    if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`
-    return `http://localhost:${process.env.PORT ?? DEFAULT_DEV_PORT}`
-}
-
 export const buildApiUrl = (path: string, params?: Record<string, string | number | boolean | undefined | null>) => {
-    const base = path.startsWith('http') ? path : `${resolveOrigin()}${API_BASE_PATH}${path}`
+    const base = path.startsWith('http') ? path : `${API_BASE_PATH}${path}`
     if (!params) return base
     const search = new URLSearchParams()
     for (const [key, value] of Object.entries(params)) {

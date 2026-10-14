@@ -21,7 +21,7 @@ export const readSessionUser = async (): Promise<SessionUser | null> => {
     }
 }
 
-const ADMIN_ROLE = 'admin'
+export const ADMIN_ROLE = 'admin'
 
 type SessionGateProps = PropsWithChildren<{ next: string; requireAdmin?: boolean }>
 

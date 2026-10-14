@@ -1,5 +1,5 @@
 import 'server-only'
-import { and, asc, between, count, desc, eq, inArray, or, sql } from 'drizzle-orm'
+import { and, asc, between, count, eq, inArray, sql } from 'drizzle-orm'
 import { getDb } from '@server/db'
 import { user } from '@server/db/auth-schema'
 import { apiToken, chart, chartBest, clientBuild, rival, score, submissionAudit } from '@server/db/schema'
@@ -8,7 +8,7 @@ import { generateApiToken, hashApiToken, newId } from '@server/lib/token'
 import { createAuthService } from '@server/service/domain/auth/auth.service'
 import { createChartService } from '@server/service/domain/chart/chart.service'
 import { createPlayerService } from '@server/service/domain/player/player.service'
-import { createScoreService, type ScoreRankingRow } from '@server/service/domain/score/score.service'
+import { createScoreService, type ScoreRankedRow, type ScoreRankingRow } from '@server/service/domain/score/score.service'
 import { findSnapshotTextByMd5, getSnapshotTables } from '@server/service/domain/table-snapshot/table-snapshot.data'
 import { searchMd5sInTables } from '@server/service/domain/table-snapshot/table-snapshot.service'
 import { resolveBuildTrust } from '@server/service/shared/integrity/build-allowlist'
@@ -22,7 +22,7 @@ import { composeSetting } from '@server/compose/setting'
 import { composeFolder } from '@server/compose/folder'
 import { composeTable } from '@server/compose/table'
 import { composeTableSnapshot } from '@server/compose/table-snapshot'
-import { chartBestScope } from '@server/compose/best-scope'
+import { chartBestScope, isBeatenBy, isRankedAheadOf, listOrder, rankInList } from '@server/compose/best-scope'
 import type { JudgeBreakdownInput } from '@server/dto/common'
 
 type JudgeColumns = {
@@ -238,30 +238,37 @@ const composeAll = () => {
                     .limit(1)
                 return row ?? null
             },
-            upsertChartBest: async (row) => {
-                await db
-                    .insert(chartBest)
-                    .values(row)
-                    .onDuplicateKeyUpdate({
-                        set: { scoreId: row.scoreId, clear: row.clear, exScore: row.exScore, minbp: row.minbp, maxCombo: row.maxCombo },
-                    })
-            },
-            countBetterBests: async ({ chartSha256, clear, exScore, includeScratchAuto }) => {
-                const [row] = await db
-                    .select({ value: count() })
-                    .from(chartBest)
+            upsertChartBestIfBetter: async (row) => {
+                const [inserted] = await db.insert(chartBest).ignore().values(row)
+                if (inserted.affectedRows > 0) return true
+                const [replaced] = await db
+                    .update(chartBest)
+                    .set({ scoreId: row.scoreId, clear: row.clear, exScore: row.exScore, minbp: row.minbp, maxCombo: row.maxCombo })
                     .where(
                         and(
-                            eq(chartBest.chartSha256, chartSha256),
-                            chartBestScope(db, includeScratchAuto),
-                            or(sql`${chartBest.clear} > ${clear}`, and(eq(chartBest.clear, clear), sql`${chartBest.exScore} > ${exScore}`)),
+                            eq(chartBest.chartSha256, row.chartSha256),
+                            eq(chartBest.userId, row.userId),
+                            eq(chartBest.scratchAuto, row.scratchAuto),
+                            isBeatenBy(chartBest, row),
                         ),
                     )
+                return replaced.affectedRows > 0
+            },
+            countBetterBests: async ({ chartSha256, clear, exScore, minbp, lnmode, includeScratchAuto }) => {
+                const base = db.select({ value: count() }).from(chartBest).$dynamic()
+                const [row] = await (lnmode === undefined ? base : base.innerJoin(score, eq(score.id, chartBest.scoreId))).where(
+                    and(
+                        eq(chartBest.chartSha256, chartSha256),
+                        chartBestScope(db, includeScratchAuto),
+                        lnmode === undefined ? undefined : eq(score.lntype, lnmode),
+                        isRankedAheadOf(chartBest, { clear, exScore, minbp }),
+                    ),
+                )
                 return row?.value ?? 0
             },
-            getRanking: async ({ chartSha256, limit, offset, lnmode, userIds, includeScratchAuto }) => {
+            getRanking: async ({ chartSha256, limit, offset, lnmode, userIds, includeScratchAuto }): Promise<ScoreRankedRow[]> => {
                 const rows = await db
-                    .select(rankingSelection)
+                    .select({ ...rankingSelection, rank: rankInList(chartBest) })
                     .from(chartBest)
                     .innerJoin(score, eq(score.id, chartBest.scoreId))
                     .innerJoin(user, eq(user.id, chartBest.userId))
@@ -273,10 +280,10 @@ const composeAll = () => {
                             userIds ? inArray(chartBest.userId, userIds) : undefined,
                         ),
                     )
-                    .orderBy(desc(chartBest.clear), desc(chartBest.exScore), chartBest.minbp)
+                    .orderBy(...listOrder(chartBest))
                     .limit(limit)
                     .offset(offset)
-                return rows.map(toRankingRow)
+                return rows.map((row) => ({ ...toRankingRow(row), rank: row.rank }))
             },
             getBestByLoginId: async ({ chartSha256, loginId, lnmode, includeScratchAuto }) => {
                 const [row] = await db
@@ -360,6 +367,13 @@ const composeAll = () => {
             },
             revokeTokensForUser: async (userId) => {
                 await db.update(apiToken).set({ revoked: true }).where(eq(apiToken.userId, userId))
+            },
+            revokeTokenByHash: async (tokenHash) => {
+                const [result] = await db
+                    .update(apiToken)
+                    .set({ revoked: true })
+                    .where(and(eq(apiToken.tokenHash, tokenHash), eq(apiToken.revoked, false)))
+                return result.affectedRows > 0
             },
         },
     })

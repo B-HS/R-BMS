@@ -56,7 +56,7 @@
 | `(app)` | `/settings` | 계정 설정(탭: 프로필 / API 토큰 / 동기화 blob / 라이벌) | A | **세션 필수** |
 | `(app)` | `/admin/builds` | 빌드 allowlist(FR-13) | A | **세션 + role=admin** |
 
-- `(app)` 루트의 미인증 처리: 공개 읽기 라우트는 통과하고 `/settings`·`/admin/*`·`/folders/*` 만 보호한다. 두 겹이다. ① `web/src/proxy.ts`(Next 16 의 proxy, matcher `/settings/:path*`·`/admin/:path*`·`/folders/:path*`)가 better-auth 세션 쿠키가 없으면 `/login?next=` 로 진짜 리다이렉트한다(DB 접속 없음, 쿠키 존재만 본다). ② 각 세그먼트 `layout.tsx` 의 `SessionGate`(`widgets/auth/session-gate.tsx`)가 서버에서 세션을 다시 읽어 없으면 `redirect`, `/admin` 은 `role=admin` 이 아니면 `/` 로 보낸다(쿠키가 있어도 만료·위조면 여기서 막힌다). 2026-10-14 점검 당시의 "200 + meta refresh" 는 d38b6fb 에서 해소됐다.
+- `(app)` 루트의 미인증 처리: 공개 읽기 라우트는 통과하고 `/settings`·`/admin/*`·`/folders/*` 만 보호한다. 두 겹이다. ① `web/src/proxy.ts`(Next 16 의 proxy, matcher `/settings/:path*`·`/admin/:path*`·`/folders/:path*`)가 better-auth 세션 쿠키가 없으면 `/login?next=` 로 진짜 리다이렉트한다(세션 확인은 DB 접속 없이 쿠키 존재만 본다. S19 부터 같은 proxy 가 `/charts/[hash]`·`/players/[id]`·`/courses/[hash]`·`/replays/[id]` 의 존재도 DB 로 확인해 없으면 404 로 재작성한다. §5-4). ② 각 세그먼트 `layout.tsx` 의 `SessionGate`(`widgets/auth/session-gate.tsx`)가 서버에서 세션을 다시 읽어 없으면 `redirect`, `/admin` 은 `role=admin` 이 아니면 `/` 로 보낸다(쿠키가 있어도 만료·위조면 여기서 막힌다). 2026-10-14 점검 당시의 "200 + meta refresh" 는 d38b6fb 에서 해소됐다.
 - 셸은 design.md §8-1 의 2열이다(사이드바 `16rem`, 접으면 `3rem`, 모바일 시트 `18rem` / 본문, 페이지마다 48px 머리 하나). 우측 컨텍스트 패널은 폴더 편집 화면(`folder-editor-workspace.tsx` 의 `곡 추가` aside, `xl` 이상)에서만 쓴다. 옛 3열(256px / fluid / 320px 필터 패널)과 `FilterPanel`·`NavRail` 은 d38b6fb 에서 사라졌다.
 
 ### 1-2. Route Handler 맵 — 네이티브(계약 동결분, raw JSON)
@@ -72,6 +72,7 @@
 | GET/POST | `/api/auth/[...all]` | `app/api/auth/[...all]/route.ts` | better-auth 핸들러 | — |
 | GET | `/api/auth/me` | `app/api/auth/me/route.ts` | Bearer 또는 세션 | 없음 |
 | POST | `/api/auth/token` | `app/api/auth/token/route.ts` | 세션 | — |
+| DELETE | `/api/auth/token/current` | `app/api/auth/token/current/route.ts` | Bearer(폐기할 토큰 자신) | — |
 | POST | `/api/scores` | `app/api/scores/route.ts` | Bearer 또는 guest | — |
 | GET | `/api/scores/[scoreId]` | `app/api/scores/[scoreId]/route.ts` | 없음 | `score:{id}` |
 | GET | `/api/charts/[hash]` | `app/api/charts/[hash]/route.ts` | 없음 | `chart:{sha}` |
@@ -187,7 +188,7 @@ web/
         admin/builds/page.tsx
       api/…                           ← §1-2·§1-3 Route Handler (얇은 어댑터만)
       tables/[tableId]/{header,data}.json   표준 BMS 표 형식 Route Handler (§1-3)
-    proxy.ts                          세션 쿠키 없는 /settings·/admin·/folders 요청을 /login 으로 (§1-1)
+    proxy.ts                          세션 쿠키 없는 /settings·/admin·/folders 요청을 /login 으로 (§1-1), 없는 차트·플레이어·코스·리플레이 상세를 404 로 (§5-4)
     widgets/                          비즈니스 로직(쿼리 훅·mutation·권한) 조립
     features/                         순수 UI(props+콜백)
     entities/                         데이터 계층
@@ -290,7 +291,7 @@ Route Handler (app/api/**/route.ts)
 - 저장: `api_token.token_hash` = SHA-256(평문). 평문·역산 가능한 형태로 저장하지 않는다. 조회는 해시 룩업(uniq 인덱스).
 - 형식: `rbms_<32바이트 base64url>`. prefix 로 스캐너 탐지 용이.
 - 검증(`withApiToken`): `Authorization: Bearer` 파싱 → 해시 → `api_token where token_hash and revoked=false` → `user` 조인 → `last_used_at` 갱신(쓰기 부하 완화를 위해 **60초 이내 재갱신 생략**).
-- 폐기: `DELETE /api/fe/tokens/[tokenId]` → `revoked=true`.
+- 폐기: `DELETE /api/fe/tokens/[tokenId]`(세션) → `revoked=true`. 네이티브 클라이언트의 로그아웃은 `DELETE /api/auth/token/current`(Bearer 로 보낸 토큰 하나, 204)다. 로그인·가입 요청에 이전 토큰이 Bearer 로 실려 있으면 성공한 뒤 그 토큰도 폐기한다(S19). 같은 사용자의 다른 기기 토큰은 건드리지 않으며 만료는 강제하지 않는다(사용자 결정).
 - **better-auth `apiKey` 플러그인은 쓰지 않는다.** `data-model.md` 가 이미 `api_token` 을 정의했고, 클라가 기대하는 발급 응답 형태(`AuthResponse.token`)를 직접 통제해야 하기 때문. (플러그인 채택 여부는 §7 오픈 질문 아님 — 설계 확정.)
 
 ### 4-3. guest
@@ -303,7 +304,9 @@ Route Handler (app/api/**/route.ts)
 | 대상 | 한도 |
 |---|---|
 | `POST /api/auth/login` · `/register` | 5/min/IP |
-| `POST /api/scores` | 60/min/token |
+| `POST /api/scores` · 코스 제출 | 60/min/token |
+| `DELETE /api/auth/token/current` | 5/min/IP (로그인·가입과 다른 버킷) |
+| `PUT /api/players/[id]/settings/[name]` | 30/min/사용자 |
 | `POST /api/charts/[hash]/replays` | 10/min/token |
 | `/api/fe/*` 공개 읽기, `/api/auth/get-session`·`sign-out` | 120/min/IP |
 | `POST /api/fe/auth/login` · `/register` | 5/min/IP (`/api/auth/*` 와 같은 버킷) |
@@ -320,7 +323,7 @@ Route Handler (app/api/**/route.ts)
 
 - 비밀번호는 better-auth 위임. 토큰은 해시 저장. 시크릿은 `getEnv()` 경유만.
 - CORS: 같은 오리진(Next 단독 서버)이라 FE 용 CORS 불필요. 네이티브 클라는 브라우저가 아니라 CORS 무관. 따라서 **CORS 미들웨어를 두지 않는다**(api-spec §10 대비 이탈 — 단독 서버 구조의 결과). 외부 오리진 요구가 생기면 `ALLOWED_ORIGINS` 로 추가.
-- 제출 검증: 토큰 user.id == body `player.id`(guest 제외), `played_at` 합리 범위(서버시각 ±7일), `chart.sha256` 형식(소문자 16진수 64자), judge 합계 ≤ `total_notes` 일관성(`empty_poor` 제외, `total_notes=0` 인 구버전 제출은 예외).
+- 제출 검증: 토큰 user.id == body `player.id`(guest 제외), `played_at` 합리 범위(서버시각 ±7일), `chart.sha256` 형식(소문자 16진수 64자), `ex_score` == 판정에서 유도한 값, `total_notes` ≤ 서버가 아는 차트 노트 수의 2배, judge 합계 ≤ `total_notes` 일관성(`empty_poor` 제외, `total_notes=0` 인 구버전 제출은 서버가 아는 노트 수를 상한으로). 코스 제출도 같은 검사와 한도(60/min, 256KB, 빌드 해시 정책)를 받는다(api-spec §5·§6).
 - **보안 헤더**(`next.config.ts` 의 `headers`, 전 경로): `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy`(카메라·마이크·위치·결제·USB 끔). **CSP 는 프로덕션 빌드에만** 붙인다(`default-src 'self'`, `script-src`·`style-src` 에 `'unsafe-inline'`(Next 의 인라인 부트스트랩과 next-themes 스크립트가 nonce 없이 쓰임), `img-src 'self' data: blob:`, `font-src 'self' data:`, `connect-src 'self'`, `object-src 'none'`, `base-uri`·`form-action 'self'`, `frame-ancestors 'none'`). 지금 쓰는 자원은 전부 같은 출처라 깨지는 것이 없음을 프로덕션 빌드로 띄워 홈·검색·로그인에서 콘솔 위반 0건으로 확인했다. 외부 이미지·분석 스크립트를 더하면 CSP 도 함께 고친다. HSTS 는 Vercel 이 붙이는 값을 그대로 쓴다(`includeSubDomains`·`preload` 는 켜지 않았다).
 - **`/api/auth/[...all]`**: better-auth 의 기본 엔드포인트가 앱의 가입 검증과 레이트리밋을 우회하지 못하도록 **`GET /get-session` 과 `POST /sign-out` 만** 넘기고 나머지는 404 로 막는다(`route/auth.ts` 의 `ALLOWED_AUTH_HANDLER_ROUTES`). 가입·로그인은 앱의 `/api/auth/register`·`/login`(서버 측 `auth.api` 호출)만 쓴다. 필요한 경로가 늘면 그 배열에 더한다.
 - **가입 id**: 서버가 `^[a-zA-Z0-9_-]+$`(1~64자)와 예약어 `guest`(대소문자 무시) 거부를 검사한다. 로그인 스키마는 형식을 묻지 않는다(이미 있는 계정이 들어올 수 있도록).
@@ -395,7 +398,8 @@ Route Handler (app/api/**/route.ts)
 | `/replays/[id]` | `replayQueryOptions(id)` | — |
 | `/settings` | 없음(전부 세션 의존) | 전 영역 |
 
-- 서버 prefetch 는 현재 **자기 공개 URL 로 HTTP fetch** 한다(6-1 의 `NEXT_PUBLIC_APP_URL` 항목에 위험과 보류 사유).
+- **서버 prefetch 는 서비스 계층을 직접 읽는다**(S19, 이전 KNOWN ISSUE "자기 공개 URL 로 HTTP fetch" 해소). 위젯의 서버 컴포넌트와 `generateMetadata` 는 `entities` 의 `queryOptions` 에서 키만 가져오고 `queryFn` 은 `@server/service/public-reads.ts` 의 `read*` 로 바꿔 끼운다(`{ ...xQueryOptions(…), queryFn: () => readX(…) }`). `read*` 는 `read-cache.ts` 의 `*Cached` 를 부르고 FE·IR 라우트(`route/fe.ts`, `route/player.ts`, `route/course.ts`, `route/replay.ts`, `route/table.ts`)도 같은 함수를 쓰므로 SSR 과 HTTP 응답의 모양이 갈라지지 않는다. 그래서 SSR 이 `/api/fe/*` 의 IP 당 120/분 한도를 같이 쓰지 않고 공개 도메인 왕복도 없다. 쿼리 문자열이 거치던 검증은 `parseQueryParams(schema, params)` 가 같은 Zod 스키마로 다시 한다. `shared/lib/fetch.ts` 의 `buildApiUrl` 은 이제 origin 을 붙이지 않는다(브라우저 전용). 서버에서 실수로 `fetch` 하면 URL 오류로 드러나며, `tests/lib/ssr-no-self-fetch.test.ts` 가 서버 프리페치 호출마다 `queryFn` 이 바뀌는지 훑는다. 세션이 필요한 설정·관리자 화면도 같은 방식이다(쿠키 전달 헬퍼 `forwardedCookieInit` 은 없앴다). 요청 시점 데이터(`/`, `/tables`)는 `await connection()` 으로 빌드 중 실행을 막는다(아래 "빌드 시 DB 미접속 보장").
+- **없는 상세 페이지의 404 상태**(S19, 이전 KNOWN ISSUE "soft 404" 해소): Cache Components 에서는 `Suspense` 안의 `notFound()` 가 이미 200 을 보낸 뒤라 상태를 못 바꾼다(Next 문서 loading.md "Status Codes"). 그래서 `src/proxy.ts` 가 `/charts/[hash]`·`/players/[id]`·`/courses/[hash]`·`/replays/[id]` 에서 존재를 먼저 확인한다(`server/service/detail-existence.ts`: 차트는 해시 모양과 `findByHash`, 플레이어는 로그인 id, 코스는 `courseService.exists`, 리플레이는 `replayService.exists` — 리플레이 본문은 읽지 않는다). 없으면 `NextResponse.rewrite` 로 존재하지 않는 경로를 보여 앱의 `not-found` 화면을 진짜 404 로 낸다. 조회가 실패하면(DB 끊김 등) 판단하지 않고 통과시켜 멀쩡한 페이지를 404 로 만들지 않는다. 같은 조회는 페이지 안의 `fetchQueryOrNotFound` 가 한 번 더 한다(경합 대비). 표 상세(`/tables/[id]`)는 번들 표라 이번 범위에 넣지 않았다.
 - **차트 제목 보강(결정 M8)**: 제출이 만든 차트 행의 제목·아티스트가 비어 있어도, 그 `md5` 가 번들된 표에 있으면 **읽을 때** 표의 제목·아티스트로 채워 응답한다(DB 는 고치지 않는다 — 운영 DB 작업이 필요 없고 배포만으로 적용되며 표가 갱신되면 함께 바뀐다). 적용 범위: `GET /api/charts/[hash]`, FE 차트 리더보드의 `chart`, 차트 검색 결과, 홈·플레이어의 활동 항목. 차트 검색은 표 제목에 맞는 `md5`(최대 200개)를 `OR chart.md5 IN (…)` 으로 함께 묻는다. 레벨은 표의 레벨과 BMS `#PLAYLEVEL` 의 뜻이 달라 채우지 않는다. 앞으로는 클라이언트가 `POST /api/scores` 의 `chart.title`·`chart.artist`·`chart.level`(모두 선택, 긴 값은 자르고 이상한 값은 비움 — 제출을 막지 않는다)로 메타를 함께 올리면 공란인 행만 채운다. `read-cache` 의 `use cache` 항목은 `days` 단위라 배포 직후 옛 값이 남을 수 있다(태그 `chart:{hash}` 무효화나 만료로 갱신).
 - 서버에서는 **요청마다 `new QueryClient()`**. 클라이언트는 싱글톤(`get-query-client.ts`), `gcTime >= staleTime`(기본 `staleTime 60s`, `gcTime 10m`).
 - **빌드 시 DB 미접속 보장**: `cacheComponents` 가 켜지면 `'use cache'` 함수는 프리렌더 중 실행될 수 있다. 따라서 **DB 를 읽는 모든 페이지 영역은 `<Suspense>` 로 감싼다**(정적 셸만 프리렌더). `generateStaticParams` 를 쓰지 않고, `next build` 는 셸만 생성한다. 이 규칙은 §8 검증 게이트에서 확인한다.
@@ -410,9 +414,9 @@ Route Handler (app/api/**/route.ts)
 |---|---|---|
 | `DATABASE_URL` | 조건부 | `mysql://user:pass@host:port/db`. 없으면 아래 5개 필수 |
 | `DB_HOST` `DB_PORT` `DB_USER` `DB_PASSWORD` `DB_NAME` | 조건부 | `DATABASE_URL` 미제공 시 조합해 URL 생성. **코드(`src/server/lib/env.ts`)가 정본** — 2026-09-09 결정 "env 키" 항목 |
-| `BETTER_AUTH_SECRET` | 운영 필수(코드상 선택) | 세션 서명. 코드 스키마(`env.ts`)는 `.optional()` 이라 비워도 기동하고 조용히 잘못 동작한다(KNOWN ISSUE: 운영에서 필수로 검증하지 않음) |
-| `BETTER_AUTH_URL` | 운영 필수(코드상 기본 `http://localhost:3000`) | `https://bms.hyuns.uk` |
-| `NEXT_PUBLIC_APP_URL` | 운영 필수(코드상 기본 `http://localhost:3000`) | `https://bms.hyuns.uk` (클라 노출 가능한 값만) |
+| `BETTER_AUTH_SECRET` | 운영 필수 | 세션 서명. 스키마는 `.optional()` 이지만 `NODE_ENV=production` 에서 인증을 처음 쓸 때(`getAuth()`) `assertProductionAuthEnv()` 가 비었으면 던진다(S19) |
+| `BETTER_AUTH_URL` | 운영 필수(스키마 기본 `http://localhost:3000`) | `https://bms.hyuns.uk`. production 에서는 생략하면 위와 같이 던진다 |
+| `NEXT_PUBLIC_APP_URL` | 운영 필수(스키마 기본 `http://localhost:3000`) | `https://bms.hyuns.uk` (클라 노출 가능한 값만). production 에서는 생략하면 위와 같이 던진다. 서버 코드는 더 이상 이 값으로 자기 주소를 만들지 않는다 |
 | `ALLOW_GUEST` | X(기본 `false`) | guest 제출 허용 |
 | `REPLAY_MAX_BYTES` | X(기본 `4194304`) | 리플레이 상한 |
 | `REQUIRE_BUILD_HASH` | X(기본 `false`) | `client_build_sha256` 누락 시 거부 여부 |
@@ -425,7 +429,8 @@ Route Handler (app/api/**/route.ts)
 - **빈 문자열(`KEY=`)은 미설정으로 취급**한다(`.env` 스캐폴드가 빈 값을 담고 있어도 기본값이 적용된다).
 - `process.env` 직접 접근은 `env.ts` 안으로 한정. `NEXT_PUBLIC_*` 에는 시크릿을 넣지 않는다.
 - **환경 변수가 전혀 없어도 `bun run build` 가 성공한다**(CI 의 웹 잡이 그렇게 돈다). 요청 시점 API 를 쓰는 라우트가 빌드 중에도 실행되므로 `connection()`(또는 `request` 접근)이 `compose()` 보다 앞서야 한다(`/api/auth/me`, `/api/fe/me/settings` 에 적용). `withErrorHandling` 이 프리렌더 중단 신호를 다시 던지므로 빌드 로그에 오류 블록이 남지 않는다. 새 세션 라우트를 만들 때도 같은 순서를 지킨다.
-- `NEXT_PUBLIC_APP_URL` 은 **빌드 시점에 번들(서버와 클라이언트 모두)에 박힌다**. 서버 컴포넌트의 prefetch(`shared/lib/fetch.ts` 의 `resolveOrigin`)가 이 값으로 자기 공개 주소에 HTTP 로 다시 요청한다. 서버 쪽 호출은 Preview 에서 운영 데이터를 읽을 수 있고 `/api/fe/*` 의 IP 당 120/분 제한을 SSR 이 공유할 수 있다. 서비스 계층(`read-cache.ts` 의 `*Cached` 함수)을 직접 부르는 방식으로 바꾸려면 모든 `*-content.tsx` 와 `entities/*.query.ts` 를 고쳐야 하므로(프런트 소유) 이번 서버 웨이브에서는 구조를 유지하고 여기에 기록한다. Preview 배포는 `ignoreCommand` 로 만들지 않으므로(6-2) 운영 한 곳의 문제다.
+- `NEXT_PUBLIC_APP_URL` 은 **빌드 시점에 번들(서버와 클라이언트 모두)에 박힌다**. S19 이전에는 서버 컴포넌트의 prefetch 가 이 값으로 자기 공개 주소에 HTTP 로 다시 요청했지만(Preview 에서 운영 데이터를 읽고 `/api/fe/*` 의 IP 당 120/분 제한을 SSR 이 공유), 지금은 서비스 계층을 직접 읽는다(5-4). 이 값은 브라우저의 `authClient` baseURL 에만 쓰인다.
+- 운영 필수 변수 검사는 `env.ts` 의 `findMissingProductionAuthEnv`/`assertProductionAuthEnv` 다. `parseEnv` 에서 던지면 환경 변수 없는 `next build` 가 깨지므로(`tests/env.test.ts` 가 `parseEnv({ NODE_ENV: 'production' })` 의 성공을 고정한다) 인증을 처음 쓰는 시점에 검사한다. 누락한 키를 한 번에 모두 알린다.
 - `REPLAY_STORAGE=blob`은 compose가 즉시 실패시켜 잘못된 운영 구성을 드러냅니다. Vercel Blob 구현과 토큰 검증은 후속입니다.
 
 ### 6-2. Vercel

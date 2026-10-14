@@ -90,12 +90,12 @@ user 1─* user_folder 1─* user_folder_item   (내 폴더, 마이그레이션 
 
 ### `chart_best` (랭킹 가속 — (chart, user, scratch_auto) 최고 1행)
 | chart_sha256 + user_id + scratch_auto **복합 PK** · score_id FK · clear · ex_score · minbp · max_combo · scratch_auto bool default false · updated_at |
-- best 갱신 규칙: 램프 > EX > (BP 낮을수록) 순. 랭킹 조회는 이 테이블 정렬.
+- best 갱신 규칙: 램프 > EX > (BP 낮을수록) 순. 랭킹 조회는 이 테이블 정렬. 갱신은 `INSERT IGNORE` + `UPDATE … WHERE (저장된 값보다 좋음)` 문장 하나라 동시 제출이 낮은 판으로 덮지 못한다(S19, `compose/best-scope.ts` 의 `isBeatenBy`). 목록 정렬의 마지막 키는 `updated_at`, `user_id` 다(`listOrder`).
 - 웨이브 20(마이그레이션 `0002_scratch_auto_bests`): SCRATCH AUTO 판도 ranked 이고, 한 사용자가 한 차트에 일반 판 최고(`scratch_auto=false`)와 SCRATCH AUTO 판 최고(`true`)를 따로 가진다. 기본 순위는 `scratch_auto=false` 행만, 포함 순위는 사용자마다 두 행 가운데 더 높은 것(모두 같으면 일반 판)만 읽는다(`web/src/server/compose/best-scope.ts`). 0002 이전 행은 기본값 false 로 일반 판이 된다. 인덱스 `chart_best_rank_idx` 는 `(chart_sha256, scratch_auto, clear, ex_score)`.
 
 ### `replay` (µs 정밀)
 | id varchar(36) PK · user_id varchar(36) · chart_sha256 idx · score_id null · format varchar(32) · mode/random/random_p2/seed/lntype/offset_ms/judge_rate/scratch_auto/constant/gauge(재현용) · client_build_sha256 char(64) · **event_count int · duration_us bigint** · size int · storage_key varchar(255) null · `data` mediumtext null · created_at |
-- 현재 `REPLAY_STORAGE=db`는 events JSON을 `data`에 저장하고 `storage_key`는 null입니다. 외부 object storage와 `REPLAY_STORAGE=blob`은 미구현입니다. 상한은 `REPLAY_MAX_BYTES`입니다.
+- 현재 `REPLAY_STORAGE=db`는 events JSON을 `data`에 저장하고 `storage_key`는 null입니다. 외부 object storage와 `REPLAY_STORAGE=blob`은 미구현입니다. 한 건의 상한은 `REPLAY_MAX_BYTES`, 사용자별 합계 상한은 2,000개·512MiB(`REPLAY_USER_QUOTA`, S19)이며 합계는 `replay_user_idx(user_id)`(마이그레이션 `0003_replay_user_quota`)로 읽는다. `size` 는 실제 저장 길이보다 작게 기록되지 않는다.
 - **µs 보존**: 이벤트 타임스탬프 `t_us`(i64)를 라운딩 없이 저장 → 핵분석(등간격·반응속도·동시성)·재시뮬 가능.
 
 ### `client_build` (빌드 allowlist — 변조 탐지)
@@ -141,7 +141,7 @@ type ChartKey = Pick<typeof chart.$inferSelect, 'md5'|'sha256'>
 ```
 
 ## 마이그레이션
-- `web/drizzle.config.ts`(`schema: ['./src/server/db/schema.ts', './src/server/db/auth-schema.ts']`, `dialect:'mysql'`, `out:'./drizzle'`) → `web/drizzle/`. 현재 파일 3개이고 `meta/` 도 커밋돼 있다: `0000_smooth_cerebro`(21 테이블, 저널 `when` 은 일부러 작은 2026-09-01 값) → `0001_user_folders`(폴더 두 테이블) → `0002_scratch_auto_bests`(`chart_best`·`course_best`·`course_score` 에 `scratch_auto` 열, `chart_best`·`course_best` 의 PK 에 `scratch_auto` 추가, `chart_best_rank_idx` 재생성). 운영 DB 에는 세 개가 모두 적용됐다(2026-10-14). 적용 절차, 저널 `when` 규칙, 기준선, 운영 DB 워크플로(`web-db.yml`)는 [../web/architecture.md](../web/architecture.md) 3-2 절이 정본이다. `drizzle-kit push` 는 쓰지 않는다.
+- `web/drizzle.config.ts`(`schema: ['./src/server/db/schema.ts', './src/server/db/auth-schema.ts']`, `dialect:'mysql'`, `out:'./drizzle'`) → `web/drizzle/`. 현재 파일 4개이고 `meta/` 도 커밋돼 있다: `0000_smooth_cerebro`(21 테이블, 저널 `when` 은 일부러 작은 2026-09-01 값) → `0001_user_folders`(폴더 두 테이블) → `0002_scratch_auto_bests`(`chart_best`·`course_best`·`course_score` 에 `scratch_auto` 열, `chart_best`·`course_best` 의 PK 에 `scratch_auto` 추가, `chart_best_rank_idx` 재생성) → `0003_replay_user_quota`(`replay.user_id` 색인 `replay_user_idx`). 운영 DB 에는 앞의 세 개가 적용됐다(2026-10-14). 0003 은 아직 운영에 적용하지 않았다(S19, 적용은 메인의 `web-db.yml` 절차). 적용 절차, 저널 `when` 규칙, 기준선, 운영 DB 워크플로(`web-db.yml`)는 [../web/architecture.md](../web/architecture.md) 3-2 절이 정본이다. `drizzle-kit push` 는 쓰지 않는다.
 
 ## 설계 노트 (왜)
 - **best 분리 테이블**: 랭킹은 차트당 수천 history를 매번 정렬하지 않고 `chart_best`만 정렬 → P95<150ms(NFR).

@@ -67,10 +67,35 @@ export type FolderServiceDb = {
     }) => Promise<'updated' | 'name_taken' | 'missing'>
     deleteFolder: (params: { userId: string; folderId: string }) => Promise<boolean>
     reorderFolders: (params: { userId: string; folderIds: string[]; updatedAt: number }) => Promise<void>
-    appendItems: (params: { folderId: string; items: Omit<FolderItemRow, 'position'>[]; updatedAt: number }) => Promise<{ itemCount: number }>
+    /**
+     * Adds the items a folder does not hold yet as one unit with the folder row locked, so two adds at once neither collide on a
+     * song nor share a position. `added` counts the rows really written; a result that would pass `maxItems` writes nothing.
+     */
+    appendItems: (params: {
+        folderId: string
+        items: Omit<FolderItemRow, 'position'>[]
+        updatedAt: number
+        maxItems: number
+    }) => Promise<{ status: 'added'; added: number; itemCount: number; updatedAt: number } | { status: 'folder_full' } | { status: 'missing' }>
     removeItems: (params: { folderId: string; md5s: string[]; updatedAt: number }) => Promise<{ removed: number; itemCount: number }>
     reorderItems: (params: { folderId: string; md5s: string[]; updatedAt: number }) => Promise<void>
-    replaceItems: (params: { folderId: string; items: Omit<FolderItemRow, 'position'>[]; updatedAt: number }) => Promise<{ itemCount: number }>
+    /**
+     * Replaces the songs, and the name and description when given, as one unit with the folder row locked. A stale
+     * `baseUpdatedAt` is judged against the locked row, so a save made on an older copy never overwrites a newer one.
+     */
+    replaceItems: (params: {
+        userId: string
+        folderId: string
+        items: Omit<FolderItemRow, 'position'>[]
+        updatedAt: number
+        baseUpdatedAt?: number
+        meta: { name?: string; description?: string }
+    }) => Promise<
+        | { status: 'replaced'; itemCount: number; updatedAt: number }
+        | { status: 'conflict'; serverUpdatedAt: number }
+        | { status: 'name_taken' }
+        | { status: 'missing' }
+    >
     updateItemNote: (params: { folderId: string; md5: string; note: string; updatedAt: number }) => Promise<boolean>
     listFolderIdsContaining: (params: { userId: string; md5: string }) => Promise<string[]>
     findChartsByMd5: (md5s: string[]) => Promise<FolderChartText[]>
@@ -220,9 +245,31 @@ export const createFolderService = (deps: FolderServiceDeps) => {
                 updated_at: params.folder.updatedAt,
             })
         }
-        const updatedAt = nextStamp(deps.now(), params.folder.updatedAt)
-        const { itemCount } = await deps.db.appendItems({ folderId: params.folder.id, items: await buildNewItems(plan.fresh), updatedAt })
-        return succeed({ added: plan.fresh.length, removed: 0, skipped: plan.skipped, item_count: itemCount, updated_at: updatedAt })
+        const outcome = await deps.db.appendItems({
+            folderId: params.folder.id,
+            items: await buildNewItems(plan.fresh),
+            updatedAt: nextStamp(deps.now(), params.folder.updatedAt),
+            maxItems: FOLDER_LIMIT.ITEMS_PER_FOLDER,
+        })
+        if (outcome.status === 'missing') return fail<FolderItemChangeOutput>({ reason: 'not_found' })
+        if (outcome.status === 'folder_full') {
+            return fail<FolderItemChangeOutput>({
+                reason: 'limit_exceeded',
+                details: {
+                    scope: 'items_per_folder',
+                    limit: FOLDER_LIMIT.ITEMS_PER_FOLDER,
+                    current: params.folder.itemCount,
+                    requested: plan.fresh.length,
+                },
+            })
+        }
+        return succeed({
+            added: outcome.added,
+            removed: 0,
+            skipped: params.incoming.length - outcome.added,
+            item_count: outcome.itemCount,
+            updated_at: outcome.updatedAt,
+        })
     }
 
     const list = async (userId: string) => (await deps.db.listFolders(userId)).map(toFolderSummary)
@@ -342,15 +389,24 @@ export const createFolderService = (deps: FolderServiceDeps) => {
                     const made = created.get(input.md5)
                     return made ? [made] : []
                 })
-                const updatedAt = nextStamp(deps.now(), folder.updatedAt)
-                const { itemCount } = await deps.db.replaceItems({ folderId: folder.id, items, updatedAt })
+                const outcome = await deps.db.replaceItems({
+                    userId: params.userId,
+                    folderId: folder.id,
+                    items,
+                    updatedAt: nextStamp(deps.now(), folder.updatedAt),
+                    baseUpdatedAt: params.input.base_updated_at,
+                    meta: { name: params.input.name, description: params.input.description },
+                })
+                if (outcome.status === 'missing') return fail({ reason: 'not_found' })
+                if (outcome.status === 'name_taken') return fail({ reason: 'name_taken' })
+                if (outcome.status === 'conflict') return fail({ reason: 'conflict', details: { server_updated_at: outcome.serverUpdatedAt } })
                 const keptMd5s = new Set(requested.map((item) => item.md5))
                 return succeed({
                     added: fresh.length,
                     removed: existing.filter((item) => !keptMd5s.has(item.md5)).length,
                     skipped: params.input.items.length - requested.length,
-                    item_count: itemCount,
-                    updated_at: updatedAt,
+                    item_count: outcome.itemCount,
+                    updated_at: outcome.updatedAt,
                 })
             }),
 

@@ -21,7 +21,7 @@
 
 ## 현재 제약과 후속
 
-- KNOWN ISSUE(알려진 미해결): 인스턴스 로컬 rate limit(`with-rate-limit.ts` 의 `Map`)이라 Vercel 다중 인스턴스에서 best-effort 다. 서버 컴포넌트가 자기 공개 URL 로 HTTP fetch 해서 prefetch 한다(`shared/lib/fetch.ts` 의 `resolveOrigin`). `user.rank_points` 는 쓰는 코드가 없어 항상 0 이다. 가입 실패 원인 구분 없음(`IR_ACCOUNT_EXISTS` 로 뭉침). 웹 2차 후보와 함께 [../web/tasks.md](../web/tasks.md) 의 "남은 일"에 모았다.
+- KNOWN ISSUE(알려진 미해결): 인스턴스 로컬 rate limit(`with-rate-limit.ts` 의 `Map`)이라 Vercel 다중 인스턴스에서 best-effort 다. `user.rank_points` 는 쓰는 코드가 없어 항상 0 이다. (S19 에서 해소: 서버 컴포넌트의 자기 URL fetch, 가입·로그인 실패 원인 구분, 운영 필수 환경 변수 검증.) 웹 2차 후보와 함께 [../web/tasks.md](../web/tasks.md) 의 "남은 일"에 모았다.
 - 계약 교차 테스트(Rust 클라이언트가 만든 본문을 서버 zod 스키마로 검증) 공백. [../reference/ir-api.md](../reference/ir-api.md) 5절.
 
 - `REPLAY_STORAGE`는 환경 스키마에 `db | blob` 값을 허용하지만 compose는 **`db`만 구현**합니다. `blob`을 선택한 요청 경로에서 replay compose가 생성될 때 명시적으로 실패하며, Vercel Blob 저장소는 아직 구현되지 않았습니다.

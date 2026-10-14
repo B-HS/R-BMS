@@ -1,17 +1,14 @@
 import { Suspense } from 'react'
 import type { Metadata } from 'next'
-import { chartLeaderboardQueryOptions } from '@entities/chart.query'
 import { formatChartTitle, formatHash } from '@shared/lib/format'
 import { buildPageMetadata } from '@shared/lib/metadata'
-import { getQueryClient } from '@shared/utils/get-query-client'
+import { readChartLeaderboard } from '@server/service/public-reads'
 import { ChartDetailContent } from '@widgets/chart/chart-detail-content'
 import { ShellPageLoading } from '@widgets/shell/shell-page-loading'
 
 export const generateMetadata = async ({ params }: PageProps<'/charts/[hash]'>): Promise<Metadata> => {
     const { hash } = await params
-    const leaderboard = await getQueryClient()
-        .fetchQuery(chartLeaderboardQueryOptions(hash, { include_scratch_auto: false }))
-        .catch(() => null)
+    const leaderboard = await readChartLeaderboard(hash, { include_scratch_auto: false }).catch(() => null)
     if (!leaderboard?.chart) return buildPageMetadata({ title: `차트 ${formatHash(hash)}`, index: false })
     return buildPageMetadata({
         title: formatChartTitle(leaderboard.chart),

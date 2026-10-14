@@ -1,5 +1,5 @@
 import { gaugeTypeFromId, gaugeTypeToId } from '@server/dto/common'
-import type { ReplayEventInput, ReplayUploadInput } from '@server/dto/replay'
+import { REPLAY_USER_QUOTA, type ReplayEventInput, type ReplayUploadInput } from '@server/dto/replay'
 import type { ReplayStorage } from '@server/service/shared/storage/replay-storage'
 
 export type ReplayInsertRow = {
@@ -36,9 +36,11 @@ export type ReplayRow = ReplayInsertRow & {
 export type ReplayServiceDb = {
     insertReplay: (row: ReplayInsertRow) => Promise<void>
     findReplayById: (id: string) => Promise<ReplayRow | null>
+    replayExists: (id: string) => Promise<boolean>
     listReplaysByChart: (params: { chartSha256: string; userId?: string; limit: number }) => Promise<ReplayRow[]>
     linkScoreReplay: (params: { scoreId: string; userId: string; replayId: string }) => Promise<void>
     findLinkedReplay: (params: { scoreId: string; userId: string }) => Promise<{ id: string; eventCount: number } | null>
+    sumUserReplays: (userId: string) => Promise<{ count: number; bytes: number }>
 }
 
 export type ReplayServiceDeps = {
@@ -108,14 +110,26 @@ const parseEvents = (content: string | null): ReplayEventInput[] => {
     return Array.isArray(parsed) ? (parsed as ReplayEventInput[]) : []
 }
 
+export const findReplayQuotaExceeded = (usage: { count: number; bytes: number }, incomingBytes: number) => {
+    if (usage.count + 1 > REPLAY_USER_QUOTA.COUNT_MAX)
+        return { scope: 'replay_count' as const, limit: REPLAY_USER_QUOTA.COUNT_MAX, current: usage.count }
+    if (usage.bytes + incomingBytes > REPLAY_USER_QUOTA.TOTAL_BYTES_MAX) {
+        return { scope: 'replay_bytes' as const, limit: REPLAY_USER_QUOTA.TOTAL_BYTES_MAX, current: usage.bytes }
+    }
+    return null
+}
+
 export const createReplayService = (deps: ReplayServiceDeps) => ({
     upload: async (params: { input: ReplayUploadInput; chartSha256: string; userId: string }) => {
         const { input } = params
         const linked = input.score_id ? await deps.db.findLinkedReplay({ scoreId: input.score_id, userId: params.userId }) : null
         if (linked) return { id: linked.id, url: replayUrl(linked.id), event_count: linked.eventCount, created: false }
 
-        const id = deps.newId('rp_')
         const content = JSON.stringify(input.events)
+        const quotaExceeded = findReplayQuotaExceeded(await deps.db.sumUserReplays(params.userId), content.length)
+        if (quotaExceeded) return { quotaExceeded }
+
+        const id = deps.newId('rp_')
         const payload = await deps.storage.save({ id, content })
         const row: ReplayInsertRow = {
             id,
@@ -136,7 +150,7 @@ export const createReplayService = (deps: ReplayServiceDeps) => ({
             clientBuildSha256: input.client_build_sha256 ?? null,
             eventCount: input.event_count ?? input.events.length,
             durationUs: input.duration_us ?? measureDurationUs(input.events),
-            size: input.size ?? content.length,
+            size: Math.max(input.size ?? 0, content.length),
             storageKey: payload.storageKey,
             data: payload.inline,
         }
@@ -146,6 +160,8 @@ export const createReplayService = (deps: ReplayServiceDeps) => ({
         }
         return { id, url: replayUrl(id), event_count: row.eventCount, created: true }
     },
+
+    exists: async (id: string) => deps.db.replayExists(id),
 
     getById: async (id: string) => {
         const row = await deps.db.findReplayById(id)

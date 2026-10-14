@@ -1,11 +1,11 @@
-import { and, asc, count, desc, eq, inArray, or, sql } from 'drizzle-orm'
+import { and, asc, count, eq, inArray } from 'drizzle-orm'
 import type { Database } from '@server/db'
 import { user } from '@server/db/auth-schema'
 import { chart, course, courseBest, courseChart, courseScore, rival } from '@server/db/schema'
 import { newId } from '@server/lib/token'
 import { createCourseService } from '@server/service/domain/course/course.service'
-import type { ScoreRankingRow } from '@server/service/domain/score/score.service'
-import { courseBestScope } from '@server/compose/best-scope'
+import type { ScoreRankedRow, ScoreRankingRow } from '@server/service/domain/score/score.service'
+import { courseBestScope, isBeatenBy, isRankedAheadOf, listOrder, rankInList } from '@server/compose/best-scope'
 
 const courseRankingSelection = {
     scoreId: courseScore.id,
@@ -162,15 +162,23 @@ export const composeCourse = (db: Database) => {
                     .limit(1)
                 return row ?? null
             },
-            upsertCourseBest: async (row) => {
-                await db
-                    .insert(courseBest)
-                    .values(row)
-                    .onDuplicateKeyUpdate({
-                        set: { courseScoreId: row.courseScoreId, clear: row.clear, exScore: row.exScore, minbp: row.minbp, maxCombo: row.maxCombo },
-                    })
+            upsertCourseBestIfBetter: async (row) => {
+                const [inserted] = await db.insert(courseBest).ignore().values(row)
+                if (inserted.affectedRows > 0) return true
+                const [replaced] = await db
+                    .update(courseBest)
+                    .set({ courseScoreId: row.courseScoreId, clear: row.clear, exScore: row.exScore, minbp: row.minbp, maxCombo: row.maxCombo })
+                    .where(
+                        and(
+                            eq(courseBest.courseHash, row.courseHash),
+                            eq(courseBest.userId, row.userId),
+                            eq(courseBest.scratchAuto, row.scratchAuto),
+                            isBeatenBy(courseBest, row),
+                        ),
+                    )
+                return replaced.affectedRows > 0
             },
-            countBetterCourseBests: async ({ courseHash, clear, exScore, includeScratchAuto }) => {
+            countBetterCourseBests: async ({ courseHash, clear, exScore, minbp, includeScratchAuto }) => {
                 const [row] = await db
                     .select({ value: count() })
                     .from(courseBest)
@@ -178,14 +186,14 @@ export const composeCourse = (db: Database) => {
                         and(
                             eq(courseBest.courseHash, courseHash),
                             courseBestScope(db, includeScratchAuto),
-                            or(sql`${courseBest.clear} > ${clear}`, and(eq(courseBest.clear, clear), sql`${courseBest.exScore} > ${exScore}`)),
+                            isRankedAheadOf(courseBest, { clear, exScore, minbp }),
                         ),
                     )
                 return row?.value ?? 0
             },
-            getCourseRanking: async ({ courseHash, limit, offset, userIds, includeScratchAuto }) => {
+            getCourseRanking: async ({ courseHash, limit, offset, userIds, includeScratchAuto }): Promise<ScoreRankedRow[]> => {
                 const rows = await db
-                    .select(courseRankingSelection)
+                    .select({ ...courseRankingSelection, rank: rankInList(courseBest) })
                     .from(courseBest)
                     .innerJoin(courseScore, eq(courseScore.id, courseBest.courseScoreId))
                     .innerJoin(user, eq(user.id, courseBest.userId))
@@ -196,10 +204,10 @@ export const composeCourse = (db: Database) => {
                             userIds ? inArray(courseBest.userId, userIds) : undefined,
                         ),
                     )
-                    .orderBy(desc(courseBest.clear), desc(courseBest.exScore), asc(courseBest.minbp))
+                    .orderBy(...listOrder(courseBest))
                     .limit(limit)
                     .offset(offset)
-                return rows.map(toCourseRankingRow)
+                return rows.map((row) => ({ ...toCourseRankingRow(row), rank: row.rank }))
             },
             getCourseBestByLoginId: async ({ courseHash, loginId, includeScratchAuto }) => {
                 const [row] = await db

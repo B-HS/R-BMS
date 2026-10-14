@@ -28,7 +28,7 @@ import {
 import { useFolderLeaveGuard } from '@widgets/folder/use-folder-leave-guard'
 import { ShellPageHeader } from '@widgets/shell/shell-page-header'
 import { ShellSidebarPortal } from '@widgets/shell/shell-sidebar-portal'
-import { useDeleteFolder, useReplaceFolderItems, useUpdateFolder } from '@entities/folder.query'
+import { useDeleteFolder, useReplaceFolderItems } from '@entities/folder.query'
 import {
     FOLDER_ERROR_CODE,
     FOLDER_LIMIT,
@@ -78,7 +78,6 @@ export const FolderEditorWorkspace: FC<FolderEditorWorkspaceProps> = ({ folder, 
 
     const router = useRouter()
     const replaceItems = useReplaceFolderItems()
-    const updateFolder = useUpdateFolder()
     const deleteFolder = useDeleteFolder()
 
     const changes = countFolderDraftChanges(base, draft)
@@ -109,21 +108,17 @@ export const FolderEditorWorkspace: FC<FolderEditorWorkspaceProps> = ({ folder, 
         setSaveError('')
         setConflict(null)
         try {
+            const meta = {
+                ...(snapshot.name !== target.name ? { name: snapshot.name } : {}),
+                ...(snapshot.description !== target.description ? { description: snapshot.description } : {}),
+            }
             const change = await replaceItems.mutateAsync({
                 folderId: folder.id,
                 items: toReplaceItems(target, snapshot),
                 baseUpdatedAt: target.updated_at,
+                meta,
             })
-            const savedItems = { ...target, items: snapshot.items, updated_at: change.updated_at }
-            setBase(savedItems)
-            const metaInput = {
-                ...(snapshot.name !== target.name ? { name: snapshot.name } : {}),
-                ...(snapshot.description !== target.description ? { description: snapshot.description } : {}),
-            }
-            if (Object.keys(metaInput).length > 0) {
-                const summary = await updateFolder.mutateAsync({ folderId: folder.id, input: metaInput })
-                setBase({ ...savedItems, name: summary.name, description: summary.description, updated_at: summary.updated_at })
-            }
+            setBase({ ...target, name: snapshot.name, description: snapshot.description, items: snapshot.items, updated_at: change.updated_at })
             const fresh = await onReload()
             if (fresh) {
                 setBase(toFolderBase(fresh))

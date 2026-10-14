@@ -1,6 +1,8 @@
 import { z } from 'zod'
 import { chartIdSchema, extraSchema, gaugeTypeSchema, randomOptionSchema, seedSchema } from '@server/dto/common'
 
+export const REPLAY_USER_QUOTA = { COUNT_MAX: 2000, TOTAL_BYTES_MAX: 512 * 1024 * 1024 } as const
+
 const MAX_REPLAY_LIST_LIMIT = 200
 const DEFAULT_REPLAY_LIST_LIMIT = 50
 

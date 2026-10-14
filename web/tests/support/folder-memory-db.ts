@@ -72,12 +72,18 @@ export const createMemoryFolderDb = (charts: FolderChartText[] = []) => {
             }
         },
 
-        appendItems: async ({ folderId, items: added, updatedAt }) => {
+        appendItems: async ({ folderId, items: added, updatedAt, maxItems }) => {
+            const folder = folders.get(folderId)
+            if (!folder) return { status: 'missing' }
             const current = items.get(folderId) ?? []
+            const known = new Set(current.map((item) => item.md5))
+            const fresh = added.filter((item) => !known.has(item.md5))
+            if (current.length + fresh.length > maxItems) return { status: 'folder_full' }
             const start = current.length === 0 ? 0 : Math.max(...current.map((item) => item.position)) + 1
-            items.set(folderId, [...current, ...added.map((item, index) => ({ ...item, position: start + index }))])
-            touch(folderId, updatedAt)
-            return { itemCount: items.get(folderId)?.length ?? 0 }
+            items.set(folderId, [...current, ...fresh.map((item, index) => ({ ...item, position: start + index }))])
+            const stamp = Math.max(updatedAt, folder.updatedAt + 1)
+            touch(folderId, stamp)
+            return { status: 'added', added: fresh.length, itemCount: items.get(folderId)?.length ?? 0, updatedAt: stamp }
         },
 
         removeItems: async ({ folderId, md5s, updatedAt }) => {
@@ -100,13 +106,29 @@ export const createMemoryFolderDb = (charts: FolderChartText[] = []) => {
             touch(folderId, updatedAt)
         },
 
-        replaceItems: async ({ folderId, items: replacement, updatedAt }) => {
+        replaceItems: async ({ userId, folderId, items: replacement, updatedAt, baseUpdatedAt, meta }) => {
+            const folder = folders.get(folderId)
+            if (!folder || folder.userId !== userId) return { status: 'missing' }
+            if (baseUpdatedAt !== undefined && folder.updatedAt !== baseUpdatedAt) return { status: 'conflict', serverUpdatedAt: folder.updatedAt }
+            if (
+                meta.name !== undefined &&
+                ownedFolders(userId).some((other) => other.id !== folderId && other.name.toLowerCase() === meta.name?.toLowerCase())
+            ) {
+                return { status: 'name_taken' }
+            }
             items.set(
                 folderId,
                 replacement.map((item, index) => ({ ...item, position: index })),
             )
-            touch(folderId, updatedAt)
-            return { itemCount: replacement.length }
+            const stamp = Math.max(updatedAt, folder.updatedAt + 1)
+            folders.set(folderId, {
+                ...folder,
+                name: meta.name ?? folder.name,
+                description: meta.description ?? folder.description,
+                itemCount: replacement.length,
+                updatedAt: stamp,
+            })
+            return { status: 'replaced', itemCount: replacement.length, updatedAt: stamp }
         },
 
         updateItemNote: async ({ folderId, md5, note, updatedAt }) => {

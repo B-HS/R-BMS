@@ -1,0 +1,1 @@
+CREATE INDEX `replay_user_idx` ON `replay` (`user_id`);

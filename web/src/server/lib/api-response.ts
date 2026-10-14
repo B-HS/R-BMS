@@ -10,10 +10,15 @@ export type Pagination = {
 
 export const successResponse = <T>(data: T) => ({ success: true as const, data })
 
+export const toPagination = (pagination: Pagination) => ({
+    ...pagination,
+    totalPages: Math.max(1, Math.ceil(pagination.total / pagination.limit)),
+})
+
 export const paginatedResponse = <T>(data: T[], pagination: Pagination) => ({
     success: true as const,
     data,
-    pagination: { ...pagination, totalPages: Math.max(1, Math.ceil(pagination.total / pagination.limit)) },
+    pagination: toPagination(pagination),
 })
 
 const PRODUCTION_DETAIL_KEYS = ['field', 'reason'] as const

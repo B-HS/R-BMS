@@ -3,6 +3,8 @@ import { ChartSearchPanel } from '@widgets/search/chart-search-panel'
 import { chartSearchQueryOptions } from '@entities/chart.query'
 import { getQueryClient } from '@shared/utils/get-query-client'
 import { readNumberParam, readParam } from '@shared/lib/search-params'
+import { chartSearchQuerySchema } from '@server/dto/fe'
+import { parseQueryParams, readChartSearch } from '@server/service/public-reads'
 
 const DEFAULT_LIMIT = 20
 
@@ -18,7 +20,10 @@ export const ChartSearchContent = async ({ searchParams }: { searchParams: Promi
     }
 
     const queryClient = getQueryClient()
-    await queryClient.prefetchQuery(chartSearchQueryOptions(params))
+    await queryClient.prefetchQuery({
+        ...chartSearchQueryOptions(params),
+        queryFn: () => readChartSearch(parseQueryParams(chartSearchQuerySchema, params)),
+    })
 
     return (
         <HydrationBoundary state={dehydrate(queryClient)}>

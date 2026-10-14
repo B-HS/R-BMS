@@ -3,10 +3,10 @@ import { QUERY_KEY } from '@shared/constants/query-key'
 import { buildApiUrl, fetchEnvelope } from '@shared/lib/fetch'
 import type { ClientBuild, ClientBuildInput } from '@entities/build.type'
 
-export const clientBuildListQueryOptions = (init?: RequestInit) =>
+export const clientBuildListQueryOptions = () =>
     queryOptions({
         queryKey: QUERY_KEY.ADMIN.BUILDS,
-        queryFn: () => fetchEnvelope<ClientBuild[]>(buildApiUrl('/admin/builds'), init),
+        queryFn: () => fetchEnvelope<ClientBuild[]>(buildApiUrl('/admin/builds')),
     })
 
 export const useClientBuildList = () => useQuery(clientBuildListQueryOptions())

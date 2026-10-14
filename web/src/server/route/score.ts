@@ -10,7 +10,7 @@ import { withErrorHandling } from '@server/lib/with-error-handling'
 import { resolveOptionalApiTokenUser } from '@server/lib/with-api-token'
 import { parseBearerToken } from '@server/lib/token'
 import { RATE_LIMIT, consumeRateLimit, getClientIp } from '@server/lib/with-rate-limit'
-import { GUEST_PLAYER_ID, isJudgeCountConsistent, isPlayedAtPlausible } from '@server/service/domain/score/score.service'
+import { GUEST_PLAYER_ID, findSubmissionIntegrityFailure, isPlayedAtPlausible } from '@server/service/domain/score/score.service'
 import { getScoreCached, revalidateOnChartUpsert, revalidateOnScoreSubmit } from '@server/service/read-cache'
 
 const SUBMISSION_MAX_BYTES = 256 * 1024
@@ -68,9 +68,11 @@ export const createSubmitScoreRoute = () =>
             await auditRejection('chart-hash')
             throw createAppError(ERROR_CODE.VALIDATION_ERROR, { field: 'chart.sha256' })
         }
-        if (!isJudgeCountConsistent(input.judge, input.total_notes, input.mode)) {
-            await auditRejection('judge-total')
-            throw createAppError(ERROR_CODE.VALIDATION_ERROR, { field: 'judge', reason: 'judge count exceeds total_notes' })
+        const unknownChartNotes = 0
+        const claimFailure = findSubmissionIntegrityFailure(input, unknownChartNotes)
+        if (claimFailure) {
+            await auditRejection('integrity')
+            throw createAppError(ERROR_CODE.VALIDATION_ERROR, claimFailure)
         }
         if (env.REQUIRE_BUILD_HASH && !input.client_build_sha256) {
             await auditRejection('build-hash')
@@ -90,6 +92,11 @@ export const createSubmitScoreRoute = () =>
         if (!resolved) {
             await auditRejection('chart-unknown')
             throw createAppError(ERROR_CODE.IR_CHART_NOT_FOUND)
+        }
+        const chartFailure = findSubmissionIntegrityFailure(input, resolved.notes)
+        if (chartFailure) {
+            await auditRejection('integrity')
+            throw createAppError(ERROR_CODE.VALIDATION_ERROR, chartFailure)
         }
 
         const buildTrust = await resolveBuildTrust(input.client_build_sha256 ?? null)

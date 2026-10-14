@@ -3,6 +3,11 @@ import { extraSchema } from '@server/dto/common'
 
 export const SETTING_NAME_MAX_LENGTH = 64
 export const SETTING_MAX_BYTES = 256 * 1024
+export const SETTING_NAMES_PER_USER_MAX = 16
+
+const SETTING_NAME_PATTERN = /^[A-Za-z0-9_.-]+$/
+
+export const settingNameSchema = z.string().min(1).max(SETTING_NAME_MAX_LENGTH).regex(SETTING_NAME_PATTERN)
 
 export const settingPutSchema = z.object({
     api_version: z.number().int().min(1).default(1),

@@ -6,12 +6,15 @@ import { irRaw, successResponse } from '@server/lib/api-response'
 import { createAppError } from '@server/lib/error'
 import { ERROR_CODE } from '@server/lib/error-code'
 import { parseJsonBody } from '@server/lib/parse-request'
+import { parseBearerToken } from '@server/lib/token'
 import { withErrorHandling } from '@server/lib/with-error-handling'
 import { withBearerOrSession } from '@server/lib/with-api-token'
 import { withSession } from '@server/lib/with-session'
 import { RATE_LIMIT, consumeRateLimit, getClientIp, withRateLimit } from '@server/lib/with-rate-limit'
+import type { AuthService } from '@server/service/domain/auth/auth.service'
 
 const CREATED_STATUS = 201
+const NO_CONTENT_STATUS = 204
 
 const applySessionCookies = (response: Response, headers: Headers) => {
     const cookie = headers.get('set-cookie')
@@ -33,6 +36,7 @@ export const createRegisterRoute = () =>
             password: body.password,
             email: body.email,
             name: body.name ?? null,
+            previousToken: parseBearerToken(request),
         })
         return applySessionCookies(irRaw({ token: result.token, player: { id: result.loginId }, name: result.name }, CREATED_STATUS), result.headers)
     })
@@ -41,7 +45,7 @@ export const createLoginRoute = () =>
     withErrorHandling(async (request: Request) => {
         guardAuthRateLimit(request, 'auth-login')
         const body = await parseJsonBody(request, loginSchema)
-        const result = await compose().authService.login({ loginId: body.id, password: body.password })
+        const result = await compose().authService.login({ loginId: body.id, password: body.password, previousToken: parseBearerToken(request) })
         return applySessionCookies(irRaw({ token: result.token, player: { id: result.loginId }, name: result.name }), result.headers)
     })
 
@@ -87,6 +91,14 @@ export const createTokenRoute = () =>
             const token = await authService.rotateToken(user.id, parsed.success ? parsed.data.label : '')
             return irRaw({ token, created_at: Date.now() })
         })(request, context)
+    })
+
+export const createTokenRevokeCurrentRoute = (resolveAuthService: () => Pick<AuthService, 'revokeApiToken'> = () => compose().authService) =>
+    withErrorHandling(async (request: Request) => {
+        guardAuthRateLimit(request, 'auth-token-revoke')
+        const plain = parseBearerToken(request)
+        if (!plain || !(await resolveAuthService().revokeApiToken(plain))) throw createAppError(ERROR_CODE.UNAUTHORIZED)
+        return new NextResponse(null, { status: NO_CONTENT_STATUS })
     })
 
 const AUTH_BASE_PATH = '/api/auth'

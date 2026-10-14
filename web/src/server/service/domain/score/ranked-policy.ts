@@ -53,14 +53,22 @@ export type RankedPolicyInput = {
     requireTrustedBuild: boolean
 }
 
+export const buildTrustFlags = (buildTrust: BuildTrust): ScoreFlag[] => (buildTrust === BUILD_TRUST.TRUSTED ? [] : [SCORE_FLAG.UNKNOWN_BUILD])
+
+export const isBuildBlockingRank = (buildTrust: BuildTrust, requireTrustedBuild: boolean) =>
+    buildTrust === BUILD_TRUST.UNTRUSTED || (buildTrust === BUILD_TRUST.UNKNOWN && requireTrustedBuild)
+
 export const rankedPolicy = ({ options, buildTrust, isGuest, requireTrustedBuild }: RankedPolicyInput) => {
     const flags: ScoreFlag[] = []
     if (options.autoplay) flags.push(SCORE_FLAG.AUTOPLAY)
     flags.push(...assistFlags(options))
     if (options.judge_rate > NEUTRAL_JUDGE_RATE) flags.push(SCORE_FLAG.JUDGE_WIDTH)
     if (options.total_override > 0) flags.push(SCORE_FLAG.TOTAL_OVERRIDE)
-    if (buildTrust !== BUILD_TRUST.TRUSTED) flags.push(SCORE_FLAG.UNKNOWN_BUILD)
+    flags.push(...buildTrustFlags(buildTrust))
     if (isGuest) flags.push(SCORE_FLAG.GUEST)
-    const buildBlocksRank = buildTrust === BUILD_TRUST.UNTRUSTED || (buildTrust === BUILD_TRUST.UNKNOWN && requireTrustedBuild)
-    return { ranked: rankBlockingFlags(flags).length === 0 && !buildBlocksRank, flags, scratchAuto: isScratchAutoPlay(options) }
+    return {
+        ranked: rankBlockingFlags(flags).length === 0 && !isBuildBlockingRank(buildTrust, requireTrustedBuild),
+        flags,
+        scratchAuto: isScratchAutoPlay(options),
+    }
 }

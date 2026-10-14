@@ -11,7 +11,8 @@ import { withApiToken } from '@server/lib/with-api-token'
 import { withErrorHandling } from '@server/lib/with-error-handling'
 import { RATE_LIMIT, consumeRateLimit } from '@server/lib/with-rate-limit'
 import { classifyChartHash } from '@server/service/domain/chart/chart.service'
-import { getChartReplaysCached, getReplayCached, resolveChartSha256Cached, revalidateOnReplayUpload } from '@server/service/read-cache'
+import { readReplay } from '@server/service/public-reads'
+import { getChartReplaysCached, resolveChartSha256Cached, revalidateOnReplayUpload } from '@server/service/read-cache'
 
 type HashContext = { params: Promise<{ hash: string }> }
 
@@ -40,9 +41,10 @@ export const createReplayUploadRoute = () =>
             const { hash } = await authedContext.params
             const input = await parseLimitedJsonBody(authedRequest, replayUploadSchema, maxBytes)
             const chartSha256 = await resolveReplayChartSha256(hash, input)
-            const { created, ...body } = await replayService.upload({ input, chartSha256, userId: user.id })
-            if (created) revalidateOnReplayUpload({ chartSha256, loginId: user.loginId, scoreId: input.score_id ?? null })
-            return irRaw(body, created ? CREATED_STATUS : OK_STATUS)
+            const result = await replayService.upload({ input, chartSha256, userId: user.id })
+            if (result.quotaExceeded) throw createAppError(ERROR_CODE.IR_PAYLOAD_TOO_LARGE, result.quotaExceeded)
+            if (result.created) revalidateOnReplayUpload({ chartSha256, loginId: user.loginId, scoreId: input.score_id ?? null })
+            return irRaw({ id: result.id, url: result.url, event_count: result.event_count }, result.created ? CREATED_STATUS : OK_STATUS)
         })(request, context)
     })
 
@@ -61,7 +63,5 @@ export const createChartReplayListRoute = () =>
 export const createReplayDetailRoute = () =>
     withErrorHandling(async (_request: Request, context: { params: Promise<{ replayId: string }> }) => {
         const { replayId } = await context.params
-        const replay = await getReplayCached(replayId)
-        if (!replay) throw createAppError(ERROR_CODE.IR_REPLAY_NOT_FOUND, { replayId })
-        return irRaw(replay)
+        return irRaw(await readReplay(replayId))
     })

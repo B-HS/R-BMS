@@ -40,8 +40,9 @@
 | 403 | 권한 없음 | `FORBIDDEN` |
 | 404 | 리소스 없음 | `IR_CHART_NOT_FOUND`·`IR_PLAYER_NOT_FOUND`·`IR_SCORE_NOT_FOUND`·`IR_REPLAY_NOT_FOUND`·`IR_SETTING_NOT_FOUND`·`IR_COURSE_NOT_FOUND`·`IR_TABLE_NOT_FOUND`·`IR_FOLDER_NOT_FOUND`(그 밖에 일반 `NOT_FOUND`) |
 | 409 | 충돌 | `IR_ACCOUNT_EXISTS`(중복 계정) · `IR_FOLDER_NAME_TAKEN` · `IR_FOLDER_LIMIT_EXCEEDED` · `IR_FOLDER_CONFLICT`(폴더 통째 저장의 `base_updated_at` 불일치). 설정 blob 의 낙관적 잠금 충돌은 에러 봉투가 아니라 `{ conflict, server }` 본문의 409 다(§9) |
-| 413 | 본문 초과(리플레이) | `IR_PAYLOAD_TOO_LARGE` |
+| 413 | 본문 초과(점수·코스·설정·리플레이) 또는 저장 한도(리플레이 개수·총 바이트 §8, 설정 이름 수 §9) | `IR_PAYLOAD_TOO_LARGE` (비프로덕션 응답의 `details.scope` 가 `replay_count`·`replay_bytes`·`setting_names` 면 저장 한도다. 운영 응답은 `field`·`reason` 외의 `details` 를 싣지 않으므로 클라이언트는 413 한 가지로 다룬다) |
 | 429 | rate-limit | `RATE_LIMITED` |
+| 500 | 원인을 알 수 없는 서버 오류. 가입·로그인에서는 DB 끊김, 인증 설정 누락처럼 계정 문제가 아닌 실패가 여기로 온다 | `INTERNAL_ERROR` (원인은 서버 로그에만 남는다) |
 | 503 | 미구성 서비스 | `SERVICE_NOT_CONFIGURED` |
 > 에러는 `web/src/server/lib/error-code.ts`·`error-message.ts`·`error.ts` 3파일 중앙화(컨벤션 §6). 도메인 접두사 `IR_*`. 코드 목록의 정본은 `error-code.ts` 다.
 
@@ -75,26 +76,38 @@
 
 ### `POST /api/auth/register`
 ```jsonc
-// req  (accountSchema) id: ^[a-zA-Z0-9_-]+$ 1~64자, "guest"(대소문자 무시) 예약. password 8자 이상. email 필수(유효한 주소). name 선택
+// req  (accountSchema) id: ^[a-zA-Z0-9_-]+$ 1~64자, "guest"(대소문자 무시) 예약. password 8~128자. email 필수(유효한 주소). name 선택
 { "api_version":1, "id":"alice", "password":"…", "email":"alice@example.com", "name":"Alice" }
 // 201 → AuthResponse (authResponseSchema). token 은 새로 발급한 api_token 이고 세션 쿠키도 함께 세팅된다
 { "token":"<bearer>", "player": { "id":"alice" }, "name":"Alice" }
-// 409 IR_ACCOUNT_EXISTS (DB 오류 등 가입 실패 전부가 이 코드로 보인다: KNOWN ISSUE, 아래)
+// 409 IR_ACCOUNT_EXISTS — 아이디나 이메일이 이미 있을 때만(better-auth 의 USER_ALREADY_EXISTS*, 또는 사용자 생성 실패 직후 같은 아이디가 생겨 있을 때)
+// 400 VALIDATION_ERROR — 아이디 형식·예약어, 비밀번호 길이(8~128), 이메일 형식 (details.field)
+// 500 INTERNAL_ERROR — 그 밖의 모든 실패(DB 끊김, BETTER_AUTH_SECRET 누락 등). 409 로 바뀌지 않고 서버 로그에 원인이 남는다
 ```
+요청에 `Authorization: Bearer <이전 토큰>` 이 실려 있고 가입이 성공하면 그 이전 토큰은 같은 응답 안에서 폐기된다(아래 로그인과 같다).
 ### `POST /api/auth/login`
 ```jsonc
-{ "api_version":1, "id":"alice", "password":"…" }   // → 200 AuthResponse (위와 동일, 로그인마다 새 api_token 을 만든다)
-// 401 UNAUTHORIZED
+{ "api_version":1, "id":"alice", "password":"…" }   // password 1~128자 → 200 AuthResponse (위와 동일, 로그인마다 새 api_token 을 만든다)
+// 401 UNAUTHORIZED — 모르는 아이디, 틀린 비밀번호(better-auth INVALID_EMAIL_OR_PASSWORD)만. 그 밖의 실패는 500 INTERNAL_ERROR 다
 ```
+**이전 토큰 정리**(S19, 사용자 결정 2026-10-15): 요청의 `Authorization: Bearer <토큰>` 이 있고 로그인(또는 가입)이 성공하면 서버는 새 토큰을 발급한 뒤 그 토큰을 폐기한다. 같은 클라이언트가 로그아웃 없이 다시 로그인해도 쓰던 토큰이 쌓이지 않는다. 비밀번호가 틀린 요청은 아무 토큰도 건드리지 않고, 헤더가 없으면 아무것도 폐기하지 않는다. 같은 사용자의 다른 기기 토큰은 그대로다. 토큰 만료는 강제하지 않는다.
 ### `GET /api/auth/me`  (Bearer)
 ```jsonc
 // 200 PlayerProfile (자기 자신). Bearer 또는 세션 둘 다 받는다
 { "id":"alice", "name":"Alice", "total_plays":1234, "rank_points":56.7, "extra":{ "rank":"" } }
 ```
+### `DELETE /api/auth/token/current`  (Bearer) — 로그아웃: 보낸 토큰 하나를 폐기
+```jsonc
+// 204 (본문 없음). 그 토큰은 이후 모든 요청에서 401 이다. 같은 사용자의 다른 토큰은 그대로다
+// 401 UNAUTHORIZED — 헤더가 없거나, 모르는 토큰이거나, 이미 폐기된 토큰
+```
+클라이언트는 로그아웃할 때 일꾼 스레드에서 이 요청을 보내고, 성공·실패와 무관하게 로컬 토큰을 지운다(오프라인이어도 로그아웃은 끝난다). 한도는 `/api/auth/*` 와 같은 5/min/IP 이지만 로그인·가입과 다른 버킷이다.
 ### `POST /api/auth/token`  (**세션**, Bearer 아님) — API 토큰 회전: 그 사용자의 기존 토큰을 전부 폐기하고 새로 발급한다 → `{ "token":"…", "created_at":1700000000000 }`. 본문 `{ "label"?: string }`. 웹 설정 화면은 폐기 없이 추가 발급하는 `POST /api/fe/tokens` 를 쓴다.
 > better-auth 기반(컨벤션 §11). 레퍼런스 구현 `register`/`login`(IRConnection)에 1:1 대응. `guest` 제출은 토큰 없이 `player.id="guest"`(서버 설정 `ALLOW_GUEST`, 운영 기본값 `false`). 웹 화면의 로그인·가입은 토큰을 만들지 않는 `/api/fe/auth/*`(§12)를 쓴다.
 >
-> KNOWN ISSUE: 가입 실패의 모든 원인(better-auth 오류, DB 오류 포함)이 `IR_ACCOUNT_EXISTS`(409)로 보인다(`web/src/server/service/domain/auth/auth.service.ts` 의 `signUp` 의 `.catch`). 고치는 방법: better-auth 오류 코드를 구분해 중복만 409, 나머지는 원인 그대로 던진다.
+> **오류 구분**(S19, 이전 KNOWN ISSUE 해소): 서비스는 better-auth 가 던진 `APIError` 의 `body.code` 만 보고 분류한다(`AUTH_PROVIDER_ERROR_CODE`; 코드 이름이 바뀌면 `tests/service/auth-login.test.ts` 의 "better-auth 오류 코드 이름" 테스트가 실제 better-auth 로 실패한다). 알 수 없는 원인은 그대로 던져 `withErrorHandling` 이 로그에 남기고 500 으로 답한다.
+>
+> **운영 필수 환경 변수**(S19): `NODE_ENV=production` 에서 `BETTER_AUTH_SECRET`·`BETTER_AUTH_URL`·`NEXT_PUBLIC_APP_URL` 이 비어 있으면 인증을 처음 쓰는 순간(`getAuth()`) `Missing required production environment variables: …` 로 실패한다(누락한 키를 모두 알려 준다). 환경 변수 없이 `next build` 가 성공해야 하는 조건 때문에 `parseEnv` 에서는 검사하지 않는다(`tests/env.test.ts`).
 
 ---
 
@@ -145,6 +158,8 @@
 - `extra.replay_id`(리플레이가 연결된 판만)와 `extra.scratch_auto: true`(SCRATCH AUTO 판 행만)가 `extra` 에 실린다. 플레이 옵션·시드는 `ScoreRecord` 에 없다(`GET /api/scores/{id}` 상세에서 본다).
 - `rival_of={id}`: 그 플레이어의 라이벌만(+본인). `lnmode`: 0=LN,1=CN,2=HCN(레퍼런스 구현 `lntype`).
 - `include_scratch_auto`(`true`|`false`, 기본 `false`, 웨이브 20): 기본 목록은 일반 판 최고 기록(`chart_best.scratch_auto=false`)만이다. `true` 면 플레이어마다 일반 판 최고와 SCRATCH AUTO 판 최고 가운데 더 높은 것(램프 → EX → BP, 모두 같으면 일반 판) 한 행이다. SCRATCH AUTO 판 행은 `extra.scratch_auto: true` 를 단다. `rank` 는 그 목록 안의 순위다.
+- **순위 번호와 동점**(S19): 정렬은 램프 → EX → BP(적은 쪽이 위)이고, 램프·EX·BP 가 모두 같은 사람들은 **공동 순위**(`RANK()`: 1, 2, 2, 4)다. 같은 쪽 경계에서 동점자가 겹치거나 빠지지 않도록 마지막 정렬 키는 그 최고 기록을 먼저 세운 쪽이 앞(`chart_best.updated_at`), 그다음 사용자 id 다. 목록의 `rank`, 제출 응답의 `rank`, `GET /best` 의 `rank` 는 같은 정의다(이 판보다 램프·EX·BP 가 엄격히 좋은 최고 기록의 수 + 1). 원본(beatoraja `RankingData`)은 EX 만으로 정렬하고 동점을 같은 순위로 세는데, R-BMS 의 램프 우선 정렬은 의도한 설계라 그대로 두고 BP 를 순위에 넣었다.
+- **`lnmode` 필터의 뜻(현재 동작, 사용자 확인 대기)**: `chart_best` 의 키에는 LN 방식이 없어서 필터는 "최고 기록이 그 LN 방식으로 친 판인 플레이어"만 남기고, 순위는 그렇게 남은 사람들 안에서 센다. LN 방식별 최고 기록을 따로 두는 것(키 확장 + 마이그레이션)이나 파라미터 제거는 사용자 결정이 필요해 바꾸지 않았다. `GET /best?lnmode=` 도 같은 목록 기준으로 `rank` 를 센다.
 - LR2IR 호환 필드(`pg=epg+lpg`, `gr=egr+lgr`, `notes`, `combo`, `minbp`)는 `judge`+상위 필드로 유도 가능.
 
 ### `GET /api/charts/{hash}/best?player={id}&lnmode=1&include_scratch_auto=false` → `ScoreRecord | null`  (레퍼런스 구현 getPlayData 본인분)
@@ -204,8 +219,12 @@
 - **`chart.title`·`chart.artist`·`chart.level`**(모두 선택, 결정 M8): 서버가 만든 차트 행의 제목·아티스트·레벨이 비어 있을 때만 채운다. 값이 이상하면 제출을 막지 않고 버린다(문자열은 앞뒤 공백을 떼고 255자로 자름, `level` 은 0~1000 정수만). `GET /api/charts/{hash}` 등은 그 `md5` 가 번들 표에 있으면 읽을 때 표의 제목·아티스트로 빈 값을 채워 응답한다(DB 는 고치지 않음).
 - **`seed`**(최상위, 선택): 클라이언트는 `u64` 로 보내고 예전 빌드는 시계의 나노초(2^53 초과)를 보냈다. 서버는 `Number.isSafeInteger` 가 아닌 값을 거절하지 않고 **0 으로 저장**한다(`seedSchema`, `web/src/server/dto/common.ts`. 리플레이 업로드의 `seed` 도 같다). 시드는 참고용이라 순위·무결성 판정에 쓰지 않는다. 이 규칙이 없던 d733a8f 이전 서버는 큰 시드의 제출을 400 으로 거절했다(v0.1.2 점수 제출 400 사고. 근거 [../acknowledge/2026-10-14-adr-layout-seed-range.md](../acknowledge/2026-10-14-adr-layout-seed-range.md)).
 - **멱등**: 같은 사용자·같은 차트(sha256)에서 `played_at` 이 **같은 초**(`floor(played_at / 1000)` 이 같음)인 재전송은 기존 score_id 를 돌려주고 새로 만들지 않는다. 응답은 200, `message: "duplicate submission ignored"`(상수 `DUPLICATE_SUBMISSION_MESSAGE`. 클라이언트가 이 문자열로 "이미 있음"을 센다), `is_new_best: false`, `previous_best: null`. 초 단위로 넓힌 이유: 로컬 기록(`scorelog.date`)의 시각은 초 단위라, 리플레이 파일이 없는 옛 판을 다시 보내면 `played_at` 이 원래 밀리초와 다르다. 한 판은 1초보다 길어서 같은 사용자·차트의 서로 다른 두 판이 같은 초에 끝날 수 없다. 조회는 `score_idempotent_uniq(user_id, chart_sha256, played_at)` 의 범위 탐색이라 새 색인이 없고, 유일 색인은 그대로라 정확히 같은 밀리초의 동시 삽입은 DB 가 막는다. guest 제출은 멱등 조회를 하지 않는다.
-- **판정 수 검사**: 노트를 소비한 판정 `pgreat + great + good + bad + poor` 가 `total_notes` 를 넘으면 400 `VALIDATION_ERROR`(`details: { field: "judge", reason: "judge count exceeds total_notes" }`)다. `miss`(rbms 의 空POOR, 노트를 소비하지 않음)와 `empty_poor` 는 세지 않는다. `mode` 가 `POPN_9K` 면 BAD 도 노트를 소비하지 않으므로 뺀다(레퍼런스 `JudgeProperty.PMS` 의 `judgeVanish = {true,true,true,false,true,false}` — BAD 와 空POOR 만 노트를 지우지 않는다. rbms 의 `rbms-judge` `PMS.judge_vanish` 도 같다). `mode` 는 대소문자와 `-`/`_` 차이를 무시한다(`BEAT-7K` = `BEAT_7K`). `total_notes` 가 0 인 구버전 제출은 검사하지 않는다. 옛 식 `pgreat+great+good+bad+max(poor-empty_poor,0)+miss` 는 `miss` 를 노트 소비로 세어, 空POOR 가 見逃し POOR 보다 많은 완주 판을 거절했다(이 수리 전의 서버. 사용자 판 #52: total 1835 = PG~BD 1815 + POOR 20, miss 43 → 옛 식 1858 로 400).
-- **best 갱신**: 램프(우선) → EX → BP 순 비교, 더 좋을 때만 best 갱신. 모든 제출은 history로 누적(랭킹은 best 기준). **ranked=false는 best/랭킹 비반영**(기록·리플레이는 보존).
+- **본문 무결성 검사**(순서대로 첫 실패만 400 `VALIDATION_ERROR`, `details: { field, reason }`, 거절은 `submission_audit` 에 `accepted=false` 로 남는다):
+  1. `ex_score` 가 0 이 아니면 판정에서 유도한 값(`(epg+lpg 또는 pgreat) × 2 + (egr+lgr 또는 great)`)과 같아야 한다(`field: "ex_score"`). 0 이면 서버가 유도한다.
+  2. 서버가 그 차트의 노트 수를 알면(`chart.notes > 0`) `total_notes` 는 그 값의 2배(LN 끝 노트를 따로 세는 방식의 상한)를 넘을 수 없다(`field: "total_notes"`). 차트 행이 이 제출로 처음 만들어졌다면 첫 제출자가 정한 값이 기준이 된다는 한계가 있다.
+  3. 노트를 소비한 판정 `pgreat + great + good + bad + poor` 가 `total_notes` 를 넘으면 안 된다(`field: "judge"`). `total_notes` 가 0 인 구버전 제출은 서버가 아는 차트 노트 수를 상한으로 쓰고, 그것도 모르면 검사하지 않는다. `miss`(rbms 의 空POOR, 노트를 소비하지 않음)와 `empty_poor` 는 세지 않는다. `mode` 가 `POPN_9K` 면 BAD 도 노트를 소비하지 않으므로 뺀다(레퍼런스 `JudgeProperty.PMS` 의 `judgeVanish = {true,true,true,false,true,false}` — BAD 와 空POOR 만 노트를 지우지 않는다. rbms 의 `rbms-judge` `PMS.judge_vanish` 도 같다). `mode` 는 대소문자와 `-`/`_` 차이를 무시한다(`BEAT-7K` = `BEAT_7K`). 옛 식 `pgreat+great+good+bad+max(poor-empty_poor,0)+miss` 는 `miss` 를 노트 소비로 세어, 空POOR 가 見逃し POOR 보다 많은 완주 판을 거절했다(이 수리 전의 서버. 사용자 판 #52: total 1835 = PG~BD 1815 + POOR 20, miss 43 → 옛 식 1858 로 400).
+  이 검사는 정직한 클라이언트가 일관되게 계산한 값을 확인할 뿐이다. 판정 수와 맞는 EX 를 만든 위조는 막지 못한다(재시뮬 검증 §11.3 몫).
+- **best 갱신**: 램프(우선) → EX → BP 순 비교, 더 좋을 때만 best 갱신. 갱신은 조건부 문장 하나(`INSERT IGNORE` 로 행을 보장한 뒤 `UPDATE … WHERE (램프·EX·BP 가 저장된 값보다 좋음)` 의 `affectedRows`)라서 같은 사용자·차트의 두 제출이 동시에 와도 늦게 쓰는 쪽이 낮은 판이면 덮지 못하고, `is_new_best` 는 그 문장이 실제로 바꿨는지로 정한다. 코스 best 도 같다. 모든 제출은 history로 누적(랭킹은 best 기준). **ranked=false는 best/랭킹 비반영**(기록·리플레이는 보존).
 - **SCRATCH AUTO**(웨이브 20, 사용자 결정 2026-10-14): `options.scratch_auto=true` 이거나 `options.assist` 에 `AUTO_SCRATCH` 가 있는 판은 `SCRATCH_AUTO` 표지 flag 를 달고 **ranked** 다. best 는 `(chart, user, scratch_auto)` 로 나눠 두므로 일반 판 최고와 SCRATCH AUTO 판 최고가 따로 남는다. `previous_best`·`is_new_best` 는 그 판의 칸(일반/SCRATCH AUTO) 기준이고, `rank` 는 그 판이 속한 목록(일반 판은 기본 목록, SCRATCH AUTO 판은 `include_scratch_auto=true` 목록)에서 이 판보다 좋은 기록의 수 + 1 이다. 같은 사용자의 더 좋은 다른 칸 최고 기록(예: 일반 판 800 이 있는데 SCRATCH AUTO 700 을 낸 경우)도 센다. `message` 는 `saved (scratch auto)`. `AUTO_SCRATCH` 밖의 어시스트 태그(`CUSTOM_JUDGE` 등)는 여전히 `ASSIST` 로 unranked 이고, 그때 `message` 의 사유에는 `scratch_auto` 를 넣지 않는다(`recorded (unranked: assist,judge_width)`).
 - **`ranked=false` 판의 저장**: 클라이언트는 손으로 친 모든 판(SCRATCH AUTO 판 포함, 사용자 결정 2026-10-14)을 보내고, 서버는 `score` 행으로 보존하되 `chart_best`·순위에는 올리지 않는다. 넓힌 판정 판은 클라이언트가 `ranked` 를 막지 않고 보내도 서버가 `ASSIST` 로 unranked 처리한다(최고 기록·순위 제외는 메인이 정한 정책이며 사용자 미확인).
 - EX/BP가 누락되면 `judge`에서 유도: `ex = (epg+lpg)*2 + egr+lgr`, `bp = ebd+lbd+epr+lpr+ems+lms`(레퍼런스 구현 minbp 정의는 BAD+POOR+MISS).
@@ -238,6 +257,7 @@
   "max_combo":3000, "gauge_value":42.0, "minbp":30,
   "charts":[{"md5":"…","sha256":"…"}, …],
   "trophy":"bronze", "played_at":1700000000000,
+  "client_build_sha256":"<64hex>", "client_platform":"macos-universal",   // 선택. 점수 제출과 같은 빌드 신뢰 판정(아래)
   "scratch_auto":false,                     // 선택. 어느 스테이지든 SCRATCH AUTO 로 쳤으면 true (없으면 false)
   "assist":[],                              // 선택. 스테이지들의 어시스트 태그 합(AUTO_SCRATCH·CUSTOM_JUDGE, 각각 한 번, 최대 16개·각 32자). 없으면 []
   "extra":{} }
@@ -251,6 +271,8 @@
 - (근거 [../acknowledge/2026-10-14-adr-assisted-course-submission.md](../acknowledge/2026-10-14-adr-assisted-course-submission.md)) `scratch_auto`·`assist` 는 단일 곡 제출의 `options.scratch_auto`·`options.assist` 와 같은 어휘이고, 코스 전체로 접은 값이다(어느 스테이지가 어떤 어시스트였는지는 싣지 않는다: 서버는 코스 전체로 판정한다). 두 필드가 없는 옛 클라이언트 제출은 어시스트 없는 코스로 받는다. 클라이언트는 어시스트가 없으면 두 필드를 싣지 않는다.
 - **ranked 판정은 단일 곡과 같다**(`assistFlags`, 웨이브 20): `scratch_auto` 이거나 `assist` 에 `AUTO_SCRATCH` 가 있으면 `SCRATCH_AUTO` 표지(ranked 를 막지 않는다), `AUTO_SCRATCH` 밖의 태그가 있으면 `ASSIST` flag 와 `ranked=false`. `course_score.scratch_auto` 에 SCRATCH AUTO 여부를 남기고, flag 가 하나라도 있으면 `extra` 에 `flags`·`scratch_auto`·`assist` 도 덧붙인다. SCRATCH AUTO 코스는 `course_best` 의 SCRATCH AUTO 칸을 갱신하고 `rank` 는 포함 목록 기준이다. unranked 코스는 `course_best` 를 갱신하지 않고 `rank` 는 `null` 이다.
 - 멱등: 동일 `(player, course_hash, played_at)` 재전송은 기존 id 를 돌려주고, `ranked`·`flags` 는 이번 본문으로 다시 판정해 돌려준다.
+- **단일 곡과 같은 검사**(S19): 점수 제출 60/min/token 과 같은 한도(초과 시 429), 본문 256KB(초과 413), `charts` 최대 64개, `client_build_sha256`·`client_platform`(둘 다 선택)으로 빌드 신뢰를 판정한다. `REQUIRE_BUILD_HASH=true` 인데 해시가 없으면 400(`field: "client_build_sha256"`)이다. 알 수 없는 빌드는 `UNKNOWN_BUILD` flag 를 달고, 명시적 untrusted 빌드이거나 `REQUIRE_BUILD_HASH=true` 인 알 수 없는 빌드는 unranked 로 저장된다(§11.1). 본문 무결성은 `ex_score` 가 판정에서 유도한 값과 같아야 하고(`field: "ex_score"`), `charts` 의 모든 차트 노트 수를 서버가 알 때는 판정 수가 합계의 2배를 넘을 수 없다(`field: "judge"`). 본문 검증 거절과 수락 모두 `submission_audit` 에 남는다.
+- **코스 best 갱신과 순위**는 단일 곡과 같다: 조건부 문장 하나로 갱신하고, 목록·제출·`best` 의 `rank` 는 같은 공동 순위 정의다(§4).
 ### `GET /api/courses/{course_hash}/ranking?limit=&page=&rival_of=&include_scratch_auto=false` → `ScoreRecord[]`
 ### `GET /api/courses/{course_hash}/best?player={id}&include_scratch_auto=false` → `ScoreRecord | null` (레퍼런스 구현 getCoursePlayData 본인분)
 - `include_scratch_auto` 는 차트 순위·best 와 같은 뜻이다(기본은 일반 판만, `true` 면 플레이어마다 더 높은 쪽, SCRATCH AUTO 행은 `extra.scratch_auto: true`).
@@ -298,12 +320,14 @@ DB 의 IR 표(위)와 별개로, 저장소의 스냅샷(`web/data/tables/<id>/`)
 | PUT | `/api/fe/me/folders/order` | `{ folder_ids }` — 지금 폴더와 같은 집합이어야 한다(아니면 400) |
 | GET / PATCH / DELETE | `/api/fe/me/folders/{folderId}` | 상세(`items` 포함) / `{ name?, description? }` / 204 |
 | POST | `/api/fe/me/folders/{folderId}/items` | `{ items:[{ md5, sha256?, title?, artist?, note? }] }` 최대 500. 이미 든 곡은 `skipped` |
-| PUT | `/api/fe/me/folders/{folderId}/items` | **통째로 바꾸기**(명시 저장): `{ items:[…순서대로], base_updated_at? }`. `base_updated_at` 이 서버 `updated_at` 과 다르면 409 `IR_FOLDER_CONFLICT`(쓰지 않음) |
+| PUT | `/api/fe/me/folders/{folderId}/items` | **통째로 바꾸기**(명시 저장): `{ items:[…순서대로], base_updated_at?, name?, description? }`. `name`·`description` 을 주면 곡과 같은 트랜잭션에서 함께 바뀐다(화면의 저장 버튼 하나 = 요청 하나). `base_updated_at` 이 서버 `updated_at` 과 다르면 409 `IR_FOLDER_CONFLICT`, 이름이 겹치면 409 `IR_FOLDER_NAME_TAKEN` 이고 어느 쪽이든 아무것도 쓰지 않는다. 비교는 폴더 행을 잠근 트랜잭션 안에서 한다 |
 | POST | `/api/fe/me/folders/{folderId}/items/remove` | `{ md5s }` |
 | PUT | `/api/fe/me/folders/{folderId}/items/order` | `{ md5s }` — 같은 집합이어야 한다 |
 | PATCH | `/api/fe/me/folders/{folderId}/items/{md5}` | `{ note }` |
 | POST | `/api/fe/me/folders/{folderId}/import` | `{ table_id, levels? }` — 번들 표에서 서버가 곡을 읽어 넣는다 |
 | GET | `/api/fe/me/folders/containing/{md5}` | 그 곡이 든 내 폴더 id 배열 |
+
+동시 쓰기: 곡 넣기·빼기·순서·메모·통째로 바꾸기는 모두 폴더 행을 먼저 잠그고(`SELECT … FOR UPDATE`) 항목을 만진다. 같은 곡을 동시에 넣어도 500 이 아니라 한쪽만 `added` 로 세고 나머지는 `skipped` 이며(`INSERT IGNORE`), 폴더당 2,000곡 한도는 잠근 상태에서 다시 확인해 합쳐서 넘으면 뒤에 처리된 요청이 409 `IR_FOLDER_LIMIT_EXCEEDED` 가 된다. 사용자 전체 20,000곡 한도는 요청 앞에서 한 번 확인하는 최선 노력이다(서로 다른 폴더에 동시에 넣으면 한 요청 분량까지 넘을 수 있다).
 
 응답의 `FolderSummary` = `{ id, name, description, is_public, position, item_count, updated_at(unix ms) }`, `ItemChange` = `{ added, removed, skipped, item_count, updated_at }`. 곡의 제목·아티스트 사본은 서버가 정한다(차트 행 → 표 → 요청 순으로 빈 값을 건너뜀, 제어 문자 제거, 200자). 한도를 넘으면 아무것도 넣지 않고 409 `IR_FOLDER_LIMIT_EXCEEDED`(`details` 는 비프로덕션에서만), 같은 이름은 409 `IR_FOLDER_NAME_TAKEN`. `is_public` 은 항상 `false`(공개 동작은 아직 없다).
 
@@ -339,7 +363,9 @@ DB 의 IR 표(위)와 별개로, 저장소의 스냅샷(`web/data/tables/<id>/`)
 // 201 → { "id":"rp_…", "url":"/api/replays/rp_…", "event_count":1624 }
 // 200 → 같은 모양. 본문 score_id 에 이미 리플레이가 연결돼 있으면 새로 저장하지 않고 그 리플레이를 돌려준다(멱등)
 // 413 IR_PAYLOAD_TOO_LARGE (상한: env REPLAY_MAX_BYTES, 예 4MB)
+// 413 IR_PAYLOAD_TOO_LARGE (비프로덕션에서만 details.scope = replay_count / replay_bytes) — 사용자별 저장 한도(아래)
 ```
+> **사용자별 저장 한도**(S19, 메인이 정한 값 — 바꾸려면 `REPLAY_USER_QUOTA`): 사용자당 리플레이 2,000개, 저장 크기 합계 512MiB. 새 리플레이를 만들 때만 센다(이미 연결된 리플레이를 다시 올리는 멱등 200 은 세지 않는다). 확인과 저장 사이는 원자적이지 않아 동시에 올리면 한 건 분량까지 넘을 수 있다(업로드는 계정당 10/min 이다). `replay.size` 는 클라이언트가 보낸 `size` 와 실제 저장 길이 가운데 큰 값이다(작게 속여 한도를 피할 수 없다). `replay.user_id` 색인(`replay_user_idx`, 마이그레이션 0003)으로 합계를 읽는다.
 > **멱등**: `score_id` 가 있고 그 점수(같은 사용자)에 이미 `replay_id` 로 연결된 리플레이가 있으면 `replay` 행을 만들지 않고 200 으로 기존 `{ id, url, event_count }` 를 돌려준다(캐시 무효화도 하지 않는다). 기록 동기화가 같은 판의 리플레이를 다시 올려도 행이 쌓이지 않게 하기 위함이다. 먼저 `score_id` 의 점수가 있어야 연결이 생기므로 점수 제출(§5)이 앞선다. `score_id` 가 없는 업로드는 지금처럼 올릴 때마다 새 행이다. rate-limit(10/min/token)은 200 응답에도 한 번 센다.
 ### `GET /api/replays/{id}` → `ReplayData`(events µs 포함) — 다운로드(고스트·관전·**핵분석**·검증)
 ### `GET /api/charts/{hash}/replays?player={id}&limit=` → `ReplayMeta[]`(events 제외 목록)
@@ -362,7 +388,11 @@ DB 의 IR 표(위)와 별개로, 저장소의 스냅샷(`web/data/tables/<id>/`)
 { "api_version":1, "format":"ron", "content":"<문자열>", "base_updated_at":1700000000000, "extra":{} }
 // 200 → { "updated_at":1700000050000 }
 // 409 conflict: base_updated_at 가 서버 최신과 불일치 → { "conflict":true, "server": {GET 결과} }
+// 400 VALIDATION_ERROR (details.field "name"): 이름이 [A-Za-z0-9_.-]{1,64} 가 아님
+// 413 IR_PAYLOAD_TOO_LARGE (비프로덕션에서만 details.scope = "setting_names"): 사용자당 이름 16개를 넘는 새 이름(있던 이름은 고칠 수 있다)
+// 429 RATE_LIMITED: 사용자당 30/min
 ```
+> **낙관적 잠금은 DB 문장 하나가 정한다**(S19): `base_updated_at` 이 있으면 `UPDATE … WHERE updated_at = base`(base 0 이면 `INSERT IGNORE`)의 `affectedRows` 로 저장 여부를 정한다. 같은 base 로 동시에 온 두 PUT 은 정확히 하나만 200 이고 나머지는 409 와 서버 최신본을 받는다. 새 `updated_at` 은 `max(now, 저장된 값 + 1)` 이라 서버 시계가 뒤처져도 base 보다 크다. `base_updated_at` 이 없으면 마지막 쓰기가 이긴다(예전과 같다).
 > 현재 구현은 목록/삭제 `/api/settings/*`를 제공하지 않습니다. 이름별 get/put 경로가 네이티브 `rbms-ir` 계약이며, PUT은 저장한 `updated_at`을 200 응답으로 반환합니다. content는 클라 포맷(RON 포함)을 불투명 문자열로 보관하고, 충돌은 `base_updated_at` 기반입니다.
 
 ---
@@ -370,8 +400,8 @@ DB 의 IR 표(위)와 별개로, 저장소의 스냅샷(`web/data/tables/<id>/`)
 ## 10. 인증·레이트리밋·CORS·페이지네이션 규약
 - **인증(이중)**: better-auth(컨벤션 §11) 기반 — (a) **네이티브 클라(rbms)** = `Authorization: Bearer <token>`(`/api/auth/token`), (b) **웹 FE** = better-auth **세션 쿠키**(`HttpOnly`·`SameSite`·CSRF). 보호 엔드포인트는 `withAuth`/`withAdmin` HOF. 제출은 토큰/세션의 player == 본문 `player.id` 강제(guest 제외).
 - **CORS**: Next 단일 오리진 배포이며 외부 웹 오리진을 지원하지 않으므로 CORS 미들웨어와 `ALLOWED_ORIGINS`는 없습니다. 네이티브 클라이언트에는 브라우저 CORS가 적용되지 않습니다.
-- **rate-limit**(정본 `web/src/server/lib/with-rate-limit.ts` 의 `RATE_LIMIT`, 초과 시 429 `RATE_LIMITED`): 로그인·가입(`/api/auth/*`, `/api/fe/auth/*` 같은 버킷) 5/min/IP, 점수 제출 60/min/token, 리플레이 업로드 10/min/token, `/api/fe/*` 공개 읽기와 `get-session`·`sign-out` 120/min/IP, 폴더 편집 60/min/사용자, 폴더에 표 가져오기 10/min/사용자, 폴더 읽기 120/min/사용자, 표의 내 기록 30/min/사용자. 한도는 인스턴스 로컬 메모리(`Map`)라 Vercel 다중 인스턴스에서는 best-effort 다(KNOWN ISSUE: 지속형 한도는 미착수, 웹 2차 후보).
-- **본문 크기**: `POST /api/scores` 256KB, `POST /api/charts` 64KB, 리플레이 `REPLAY_MAX_BYTES`(기본 4MB). 초과는 413 `IR_PAYLOAD_TOO_LARGE`.
+- **rate-limit**(정본 `web/src/server/lib/with-rate-limit.ts` 의 `RATE_LIMIT`, 초과 시 429 `RATE_LIMITED`): 로그인·가입(`/api/auth/*`, `/api/fe/auth/*` 같은 버킷) 5/min/IP, 점수·코스 제출 60/min/token, 리플레이 업로드 10/min/token, 설정 PUT 30/min/사용자, 토큰 폐기(`DELETE /api/auth/token/current`) 5/min/IP, `/api/fe/*` 공개 읽기와 `get-session`·`sign-out` 120/min/IP, 폴더 편집 60/min/사용자, 폴더에 표 가져오기 10/min/사용자, 폴더 읽기 120/min/사용자, 표의 내 기록 30/min/사용자. 한도는 인스턴스 로컬 메모리(`Map`)라 Vercel 다중 인스턴스에서는 best-effort 다(KNOWN ISSUE: 지속형 한도는 미착수, 웹 2차 후보).
+- **본문 크기**: `POST /api/scores`·코스 제출 256KB, `POST /api/charts` 64KB, 설정 PUT 256KB, 리플레이 `REPLAY_MAX_BYTES`(기본 4MB). 초과는 413 `IR_PAYLOAD_TOO_LARGE`.
 - **페이지네이션**: `?page`(1-base)·`limit`(기본/상한은 DTO별). 네이티브는 raw 배열, 웹 FE는 `/api/fe/*` envelope를 사용합니다.
 
 ---

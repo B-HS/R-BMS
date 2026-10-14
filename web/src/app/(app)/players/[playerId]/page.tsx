@@ -1,16 +1,13 @@
 import { Suspense } from 'react'
 import type { Metadata } from 'next'
-import { playerQueryOptions } from '@entities/player.query'
 import { buildPageMetadata } from '@shared/lib/metadata'
-import { getQueryClient } from '@shared/utils/get-query-client'
+import { readPlayerProfile } from '@server/service/public-reads'
 import { PlayerDetailContent } from '@widgets/player/player-detail-content'
 import { ShellPageLoading } from '@widgets/shell/shell-page-loading'
 
 export const generateMetadata = async ({ params }: PageProps<'/players/[playerId]'>): Promise<Metadata> => {
     const { playerId } = await params
-    const player = await getQueryClient()
-        .fetchQuery(playerQueryOptions(playerId))
-        .catch(() => null)
+    const player = await readPlayerProfile(playerId).catch(() => null)
     if (!player) return buildPageMetadata({ title: '플레이어', index: false })
     return buildPageMetadata({
         title: player.name,
