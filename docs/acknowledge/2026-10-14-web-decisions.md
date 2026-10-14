@@ -18,7 +18,7 @@
 
 | 번호 | 결정 지점 | 정한 것 |
 | --- | --- | --- |
-| M1 | 사본 주소와 색인 | 정본은 `https://bms.hyuns.uk/tables/insane1`(슬래시 없음. 운영이 끝 슬래시를 308 로 떼므로 `bmstable` 메타는 루트 상대 경로로 쓴다). 사본 페이지는 `noindex`(원본이 NOINDEX). 출처 표기와 삭제 요청을 받는다는 문구를 넣는다(insane-table) |
+| M1 | 사본 주소와 색인 | 정본은 `https://bms.hyuns.uk/tables/insane1`(슬래시 없음. 운영이 끝 슬래시를 308 로 떼므로 `bmstable` 메타는 루트 상대 경로로 쓴다). 사본 페이지는 `noindex`(원본이 NOINDEX). 출처 표기와 삭제 요청을 받는다는 문구를 넣는다(insane-table). 대체됨(문구 부분): [2026-10-14-adr-table-page-no-source-notice.md](2026-10-14-adr-table-page-no-source-notice.md) |
 | M2 | 표 자료의 원본 | DB 에 넣지 않고 스냅샷 파일을 직접 읽어 내고, 내 기록은 `chart.md5` 로 보강한다. 기존 `table_chart` 는 sha256 이 필수라 이 표(전 곡 md5 만)를 담지 못한다(insane-table, audit) |
 | M3 | 폴더의 모델 | `user_folder`, `user_folder_item` 두 테이블. 곡 식별자는 md5 필수·sha256 선택. 한도는 폴더 50개, 폴더당 2,000곡, 전체 20,000곡, 이름 64자. 폴더 안의 묶음은 두지 않는다. `is_public` 컬럼은 만들어 두되 v1 의 동작은 사용자 결정(3절 Q3)을 따른다(user-folders) |
 | M4 | 폴더의 통로 | 편집은 `/api/fe/me/folders…`(세션), 클라이언트 읽기는 `/api/players/{id}/folders` 와 `/api/players/{id}/folders/{folderId}`(본인만) 의 전용 통로. 선곡에는 뿌리에 `MY FOLDERS` 한 줄 → 폴더 → 곡. 로그아웃하면 저장본을 지운다. 가지고 있지 않은 곡은 폴더 줄의 (가진 곡/전체)로만 보인다(user-folders) |
@@ -36,7 +36,7 @@
 
 | 번호 | 결정 지점 | 선택지 | 답 |
 | --- | --- | --- | --- |
-| Q1 | 원본 표의 운영자 | A. 출처와 삭제 요청 문구를 넣고 진행(연락은 사용자 판단) / B. 사본을 만들지 않고 원본 주소를 기본 등록 || A(2026-10-14) |
+| Q1 | 원본 표의 운영자 | A. 출처와 삭제 요청 문구를 넣고 진행(연락은 사용자 판단) / B. 사본을 만들지 않고 원본 주소를 기본 등록 || A(2026-10-14). 대체됨(문구 부분): [2026-10-14-adr-table-page-no-source-notice.md](2026-10-14-adr-table-page-no-source-notice.md) |
 | Q2 | 발광 표의 기본 보기 | A. 레벨별 카드 격자 + 상세 대화상자 / B. 한 곡 한 행의 표 || A(2026-10-14) |
 | Q3 | 폴더의 공개 | A. v1 은 전부 비공개 / B. 공개와 공유 주소를 연다 || A(2026-10-14) |
 | Q4 | 클라이언트의 서버 주소 기본값 | A. `https://bms.hyuns.uk` 로 둔다 / B. 지금대로 비워 둔다 || A(2026-10-14) |

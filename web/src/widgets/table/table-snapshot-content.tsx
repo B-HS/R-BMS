@@ -10,7 +10,6 @@ import { CopyButton } from '@shared/ui/copy-button'
 import { getSnapshotTable } from '@server/service/domain/table-snapshot/table-snapshot.data'
 import { groupTableByLevel } from '@server/service/domain/table-snapshot/table-snapshot.service'
 
-const TABLE_REMOVAL_CONTACT_URL = 'https://github.com/B-HS/R-BMS/issues'
 const SKELETON_PREVIEW_CARDS = 12
 
 export const TableSnapshotContent = ({ tableId }: { tableId: string }) => {
@@ -43,7 +42,7 @@ export const TableSnapshotContent = ({ tableId }: { tableId: string }) => {
                         previewCards={SKELETON_PREVIEW_CARDS}
                     />
                 }>
-                <TableSnapshotSession detail={detail} tableUrl={tableUrl} snapshotDate={snapshotDate} contactUrl={TABLE_REMOVAL_CONTACT_URL} />
+                <TableSnapshotSession detail={detail} tableUrl={tableUrl} snapshotDate={snapshotDate} />
             </Suspense>
         </ShellPage>
     )

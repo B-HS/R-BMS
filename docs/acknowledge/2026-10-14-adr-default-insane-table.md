@@ -11,7 +11,7 @@
 ## 결정
 
 1. 표를 저장소에 스냅샷(JSON)으로 커밋한다: `web/data/tables/insane1/{header,data,source}.json`. 다시 받는 스크립트 `web/scripts/snapshot-table.ts`(`--check` 로 일치 확인).
-2. 웹이 표준 BMS 표 형식(`/tables/insane1/header.json`, `/tables/insane1/data.json`)과 페이지(`/tables/insane1`)로 제공한다. DB(`table_chart`)에 넣지 않고 스냅샷 파일을 직접 읽는다. 정본 주소는 `https://bms.hyuns.uk/tables/insane1`(끝 슬래시 없음, `bmstable` 메타는 루트 상대 경로). 사본 페이지는 `noindex`, 출처 세 곳과 삭제 요청을 받는다는 문구를 넣는다. 기본 보기는 레벨별 카드 격자 + 상세 대화상자.
+2. 웹이 표준 BMS 표 형식(`/tables/insane1/header.json`, `/tables/insane1/data.json`)과 페이지(`/tables/insane1`)로 제공한다. DB(`table_chart`)에 넣지 않고 스냅샷 파일을 직접 읽는다. 정본 주소는 `https://bms.hyuns.uk/tables/insane1`(끝 슬래시 없음, `bmstable` 메타는 루트 상대 경로). 사본 페이지는 `noindex`, 출처 세 곳과 삭제 요청을 받는다는 문구를 넣는다(대체됨: [2026-10-14-adr-table-page-no-source-notice.md](2026-10-14-adr-table-page-no-source-notice.md), 문구는 2026-10-14 에 뺐다). 기본 보기는 레벨별 카드 격자 + 상세 대화상자.
 3. R-BMS 의 기본 등록 주소는 원본이 아니라 사본 `https://bms.hyuns.uk/tables/insane1` 이다(`crates/rbms-config/src/tables.rs` 의 `DEFAULT_TABLES`, id `insane1`, `same_as: ["darksabun.club/table/archive/insane1"]`).
 4. 스냅샷 두 파일을 실행 파일에 넣어(`include_bytes!`, `apps/rbms-player/src/tablesrc/seed.rs`) 저장본까지 심는다. 오프라인 첫 실행에도 표가 보인다.
 5. 한 번만 등록한다. 설정 `library.seeded_default_tables` 에 id 를 적고, 지운 표는 다시 넣지 않는다. 같은 표의 다른 주소(원본 주소, `http://`, 끝 슬래시, `/index.html`·`/header.json`·`/data.json` 붙은 꼴)가 이미 있으면 넣지 않고 id 만 적는다(`LibraryOptions::seed_default_tables`, `table_address_key`). 설정 스키마 6(`CURRENT_SCHEMA_VERSION = 6`).

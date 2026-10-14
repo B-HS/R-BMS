@@ -235,7 +235,6 @@ design.md §7-4의 랜드마크·텍스트 이중 인코딩은 현재 컴포넌�
 | `TableLevelSection` | `features/table/table-level-section.tsx` | `.rbms-level-header` 를 쓰는 접히는 묶음 |
 | `TableChartGrid` / `TableChartCard` | `features/table/*` | 1px 틈 격자, 5px 램프 띠 카드. 묶음 안에서는 레벨을 카드에 다시 쓰지 않음 |
 | `TableLevelJump` | `features/table/table-level-jump.tsx` | 레벨 칩 한 줄(모바일 가로 스크롤) |
-| `TableSourceNotice` | `features/table/table-source-notice.tsx` | 사본 표의 출처·삭제 요청 문안 |
 | `useIsHydrated` | `shared/hooks/use-is-hydrated.ts` | 서버 HTML 과 다른 값을 하이드레이션 뒤에만 쓰게 함(사이드바 슬롯, 세션) |
 | `useDialogFocusReturn` | `features/dialog/use-dialog-focus-return.ts` | 상태로 여는 대화상자의 포커스 복귀 |
 

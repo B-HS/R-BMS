@@ -11,7 +11,6 @@ import { TableFilterFields } from '@features/table/table-filter-fields'
 import { TableLevelJump } from '@features/table/table-level-jump'
 import { TableLevelSection } from '@features/table/table-level-section'
 import { TableProgressPanel } from '@features/table/table-progress-panel'
-import { TableSourceNotice } from '@features/table/table-source-notice'
 import { TableChartDialog } from '@widgets/table/table-chart-dialog'
 import { TableSnapshotSidebar } from '@widgets/table/table-snapshot-sidebar'
 import {
@@ -45,7 +44,6 @@ type TableSnapshotWorkspaceProps = {
     initialUserId: string | null
     tableUrl: string
     snapshotDate: string
-    contactUrl: string
 }
 
 const SEARCH_COMMIT_DELAY_MS = 250
@@ -64,7 +62,7 @@ const replaceAddress = (filter: TableFilterState, mode: 'push' | 'replace') => {
     else window.history.replaceState(null, '', url)
 }
 
-export const TableSnapshotWorkspace: FC<TableSnapshotWorkspaceProps> = ({ detail, initialUserId, tableUrl, snapshotDate, contactUrl }) => {
+export const TableSnapshotWorkspace: FC<TableSnapshotWorkspaceProps> = ({ detail, initialUserId, tableUrl, snapshotDate }) => {
     const searchParams = useSearchParams()
     const pathname = usePathname()
     const { user, isPending: isSessionPending } = useSessionUser()
@@ -180,17 +178,6 @@ export const TableSnapshotWorkspace: FC<TableSnapshotWorkspaceProps> = ({ detail
 
     return (
         <>
-            <TableSourceNotice
-                variant='summary'
-                name={table.name}
-                mirrorUrl={table.source.page_url}
-                originalUrl={table.original_url}
-                lastUpdate={table.last_update}
-                snapshotDate={snapshotDate}
-                entryCount={table.entry_count}
-                contactUrl={contactUrl}
-            />
-
             {overallLamps && (
                 <TableProgressPanel
                     lamps={overallLamps}
@@ -341,17 +328,6 @@ export const TableSnapshotWorkspace: FC<TableSnapshotWorkspaceProps> = ({ detail
                     </TableDeferredMount>
                 </TableLevelSection>
             ))}
-
-            <TableSourceNotice
-                variant='full'
-                name={table.name}
-                mirrorUrl={table.source.page_url}
-                originalUrl={table.original_url}
-                lastUpdate={table.last_update}
-                snapshotDate={snapshotDate}
-                entryCount={table.entry_count}
-                contactUrl={contactUrl}
-            />
 
             <TableSnapshotSidebar table={table} tableUrl={tableUrl} snapshotDate={snapshotDate} />
             <TableChartDialog

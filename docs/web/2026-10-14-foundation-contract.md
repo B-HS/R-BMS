@@ -443,7 +443,6 @@ FolderDetail  = FolderSummary + { "items":[{ "md5":"0077…","sha256":"…03e9",
 | `TableChartGrid` / `TableChartCard` | `features/table/table-chart-{grid,card}.tsx` | 1px 틈 격자와 빈칸 채움. 카드는 5px 램프 띠, 제목 2줄, 아티스트·EX·랭크 한 줄(레벨은 묶음 머리가 보이므로 카드에 쓰지 않고 `aria-label` 에만 넣음) |
 | `TableDeferredMount`, `TableLevelSkeleton` | `features/table/*` | 늦게 그리기, Suspense 대기 화면 |
 | `TableFilterFields` | `features/table/table-filter-fields.tsx` | `layout: 'inline' \| 'stacked'` 의 레벨·램프·정렬 필드 |
-| `TableSourceNotice` | `features/table/table-source-notice.tsx` | `variant: 'summary' \| 'full'` 의 출처 문안(보관본·원본·삭제 요청, 연락처 `https://github.com/B-HS/R-BMS/issues`) |
 | `TableExternalLink`, `formatUrlHost` | `features/table/*` | http(s) 만 링크, 새 탭, `noopener noreferrer` |
 | `TableSnapshotCard` | `features/table/table-snapshot-card.tsx` | `/tables` 의 번들 표 카드 |
 | `TableChartDialog` / `TableChartDetails` | `widgets/table/*` | 상세 대화상자(외부 링크, 코멘트, 내 기록, MD5 복사, `AddToFolderMenu`, 서버에 차트가 있을 때만 차트 순위 링크). 닫으면 포커스가 카드로 |

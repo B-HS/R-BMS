@@ -25,6 +25,7 @@
 | [2026-10-14-adr-macos-app-bundle-dmg.md](2026-10-14-adr-macos-app-bundle-dmg.md) | macOS 는 공증 티켓을 붙인 `R-BMS.app` + dmg. 맨 실행 파일은 티켓을 붙일 수 없어 기각 | 2026-10-14 | 유효 |
 | [2026-10-14-adr-layout-seed-range.md](2026-10-14-adr-layout-seed-range.md) | 새 배치 시드는 2^53 미만, 서버는 범위 밖 시드를 0 으로 받아 판을 거절하지 않음. KNOWN ISSUE 1건 | 2026-10-14 | 유효 |
 | [2026-10-14-adr-release-toolchain-pin.md](2026-10-14-adr-release-toolchain-pin.md) | 릴리스 빌드 툴체인을 `rust-toolchain.toml` 과 같은 1.95.0(`dtolnay/rust-toolchain@master`)으로 | 2026-10-12 | 유효 |
+| [2026-10-14-adr-table-page-no-source-notice.md](2026-10-14-adr-table-page-no-source-notice.md) | 발광 표 페이지의 출처·삭제 요청 문구(요약, 맨 아래 문단)를 뺀다. 정보 패널의 출처 항목과 `source.json` 은 유지 | 2026-10-14 | 유효 |
 
 ## 그 전의 결정 파일
 
