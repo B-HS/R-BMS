@@ -28,7 +28,9 @@ R-BMS reimplements the core PLAY loop of a GPL-3.0 reference implementation in R
 
 ## Build and run
 
-Requires Rust 1.95 or newer. The release workflow is present, but this repository has not completed its first `prod` release; do not assume a published binary is available.
+Prebuilt releases are on the GitHub Releases page. On macOS, open `R-BMS-macos-universal.dmg` and drag `R-BMS.app` to Applications; the app is signed and notarized. To pass a song folder from a terminal, run `/Applications/R-BMS.app/Contents/MacOS/rbms-player /path/to/songs`. On Windows, unzip `rbms-windows-x64.zip` and run `rbms-player.exe` (not code-signed yet, so SmartScreen asks once).
+
+Building from source requires Rust 1.95 or newer.
 
 ```sh
 cargo build --release -p rbms-player

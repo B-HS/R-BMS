@@ -156,44 +156,65 @@ jobs:
             target/aarch64-apple-darwin/release/rbms-player \
             target/x86_64-apple-darwin/release/rbms-player
           chmod +x dist/rbms-player
-      # The keychain prepared before the build holds the identity. The binary is signed with the
+      # The binary goes out inside an app bundle on a disk image. A bare executable cannot carry its
+      # notarisation ticket, so Gatekeeper had to look it up online and blocked a downloaded copy
+      # (2026-10-14, v0.1.1); an app and a disk image can have the ticket stapled to them.
+      - name: Make the app bundle
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          mkdir -p dist/app
+          bash scripts/macos-app.sh dist/rbms-player "$VERSION" dist/app
+      # The keychain prepared before the build holds the identity. The app is signed with the
       # hardened runtime and a secure timestamp, which notarisation needs.
       - name: Sign with Developer ID
         if: env.MACOS_CERTIFICATE_P12 != ''
         run: |
           set -euo pipefail
-          codesign --force --options runtime --timestamp --sign "$SIGNING_IDENTITY" dist/rbms-player
-          codesign --verify --strict --verbose=2 dist/rbms-player
-      # Without one: lipo invalidates the per-arch ad-hoc signatures, so the universal binary is
-      # re-signed ad-hoc to RUN on Apple Silicon (arm64 refuses unsigned code). Users then clear
-      # the Gatekeeper quarantine on first run (see docs/ci-release.md).
+          codesign --force --options runtime --timestamp --sign "$SIGNING_IDENTITY" dist/app/R-BMS.app
+          codesign --verify --deep --strict --verbose=2 dist/app/R-BMS.app
+      # Without one: lipo invalidates the per-arch ad-hoc signatures, so the app is re-signed ad-hoc to
+      # RUN on Apple Silicon (arm64 refuses unsigned code). Users then clear the Gatekeeper
+      # quarantine on first run (see docs/ci-release.md).
       - name: Sign ad-hoc
         if: env.MACOS_CERTIFICATE_P12 == ''
         run: |
           set -euo pipefail
-          codesign --force --sign - --timestamp=none dist/rbms-player
-          codesign --verify --verbose dist/rbms-player || true
-      # Notarisation needs the Developer ID signature above and all three account secrets. A bare
-      # executable cannot have the ticket stapled to it, so Gatekeeper looks the ticket up online
-      # the first time it runs.
-      - name: Notarise
+          codesign --force --sign - --timestamp=none dist/app/R-BMS.app
+          codesign --verify --verbose dist/app/R-BMS.app || true
+      # The app is notarised and its ticket stapled before it goes onto the disk image, so a copy
+      # dragged to Applications passes Gatekeeper offline too.
+      - name: Notarise the app
+        if: env.MACOS_CERTIFICATE_P12 != '' && env.APPLE_ID != '' && env.APPLE_APP_SPECIFIC_PASSWORD != '' && env.APPLE_TEAM_ID != ''
+        run: bash scripts/macos-notarize.sh dist/app/R-BMS.app
+      - name: Make the disk image
+        run: |
+          set -euo pipefail
+          # LICENSE and THIRD-PARTY-NOTICES.md must ship with the app (OpenH264 BSD-2, Inter OFL and the
+          # other notices); a missing file fails the job instead of producing an image without them.
+          STAGE="$RUNNER_TEMP/dmg"
+          mkdir -p "$STAGE"
+          ditto dist/app/R-BMS.app "$STAGE/R-BMS.app"
+          ln -s /Applications "$STAGE/Applications"
+          cp LICENSE README.md THIRD-PARTY-NOTICES.md "$STAGE/"
+          hdiutil create -volname "R-BMS" -srcfolder "$STAGE" -ov -format UDZO dist/R-BMS-macos-universal.dmg
+      - name: Sign and notarise the disk image
         if: env.MACOS_CERTIFICATE_P12 != '' && env.APPLE_ID != '' && env.APPLE_APP_SPECIFIC_PASSWORD != '' && env.APPLE_TEAM_ID != ''
         run: |
           set -euo pipefail
-          ditto -c -k dist/rbms-player "$RUNNER_TEMP/rbms-player-notarise.zip"
-          xcrun notarytool submit "$RUNNER_TEMP/rbms-player-notarise.zip" \
-            --apple-id "$APPLE_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait | tee "$RUNNER_TEMP/notarise.log"
-          rm -f "$RUNNER_TEMP/rbms-player-notarise.zip"
-          # notarytool can end with exit code 0 on a rejected submission, so the status line decides.
-          grep -q 'status: Accepted' "$RUNNER_TEMP/notarise.log"
-      - name: Package
+          codesign --force --timestamp --sign "$SIGNING_IDENTITY" dist/R-BMS-macos-universal.dmg
+          bash scripts/macos-notarize.sh dist/R-BMS-macos-universal.dmg
+      # Gatekeeper's own verdicts, as a downloaded copy would get them.
+      - name: Check what Gatekeeper says
+        if: env.MACOS_CERTIFICATE_P12 != '' && env.APPLE_ID != '' && env.APPLE_APP_SPECIFIC_PASSWORD != '' && env.APPLE_TEAM_ID != ''
         run: |
           set -euo pipefail
-          # LICENSE and THIRD-PARTY-NOTICES.md must ship with the binary (OpenH264 BSD-2, Inter OFL and the
-          # other notices); a missing file fails the job instead of producing an archive without them.
-          cp LICENSE README.md THIRD-PARTY-NOTICES.md dist/
-          cd dist && tar -czf rbms-macos-universal.tar.gz rbms-player LICENSE README.md THIRD-PARTY-NOTICES.md
-          shasum -a 256 rbms-macos-universal.tar.gz rbms-player > rbms-macos-universal.sha256
+          spctl --assess --type execute --verbose=4 dist/app/R-BMS.app
+          spctl --assess --type open --context context:primary-signature --verbose=4 dist/R-BMS-macos-universal.dmg
+      - name: Checksums
+        run: |
+          set -euo pipefail
+          cd dist && shasum -a 256 R-BMS-macos-universal.dmg > R-BMS-macos-universal.sha256
       - name: Remove the signing keychain
         if: always() && env.MACOS_CERTIFICATE_P12 != ''
         run: security delete-keychain "$RUNNER_TEMP/rbms-signing.keychain-db" || true
@@ -201,8 +222,8 @@ jobs:
         with:
           name: macos
           path: |
-            dist/rbms-macos-universal.tar.gz
-            dist/rbms-macos-universal.sha256
+            dist/R-BMS-macos-universal.dmg
+            dist/R-BMS-macos-universal.sha256
 
   build-windows:
     needs: [version]
@@ -255,7 +276,7 @@ jobs:
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |
-            artifacts/macos/rbms-macos-universal.tar.gz
-            artifacts/macos/rbms-macos-universal.sha256
+            artifacts/macos/R-BMS-macos-universal.dmg
+            artifacts/macos/R-BMS-macos-universal.sha256
             artifacts/windows/rbms-windows-x64.zip
             artifacts/windows/rbms-windows-x64.sha256

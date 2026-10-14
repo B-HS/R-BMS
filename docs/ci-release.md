@@ -26,7 +26,8 @@
 
 빌드와 게시 단계는 다음과 같습니다.
 
-- macOS: `aarch64-apple-darwin`과 `x86_64-apple-darwin` release binary를 `cargo build --release --locked` 로 빌드하고 `lipo`로 합친 뒤 ad-hoc `codesign` 합니다. `rbms-macos-universal.tar.gz`와 SHA-256 파일을 만듭니다.
+- macOS: `aarch64-apple-darwin`과 `x86_64-apple-darwin` release binary를 `cargo build --release --locked` 로 빌드하고 `lipo`로 합친 뒤, `scripts/macos-app.sh` 로 앱 번들 `R-BMS.app`(번들 ID `uk.hyuns.rbms`, 실행 파일 `Contents/MacOS/rbms-player`, 최소 macOS 11.0)을 만듭니다. 서명 시크릿이 있으면 앱을 Developer ID 로 서명하고 공증해 티켓을 붙이고(`scripts/macos-notarize.sh`), 앱과 `Applications` 링크와 세 문서를 담은 `R-BMS-macos-universal.dmg` 를 만들어 서명·공증·티켓 부착을 한 번 더 한 뒤 `spctl` 로 Gatekeeper 판정을 확인합니다. 시크릿이 없으면 ad-hoc 서명입니다. 결과물은 dmg 와 SHA-256 파일입니다.
+- 앱 번들로 바꾼 이유(2026-10-14, v0.1.1): 단독 실행 파일에는 공증 티켓을 붙일 수 없어 Gatekeeper 가 온라인 조회에 기댑니다. 공증이 통과한(`spctl` 의 온라인 판정 `accepted, source=Notarized Developer ID`) v0.1.1 의 실행 파일도 Chrome 으로 받은 압축을 푼 사용자 환경에서 "Apple could not verify" 로 막혔고, `syspolicy_check distribution` 은 "Notary Ticket Missing" 을 냈습니다. 앱과 dmg 에는 티켓을 붙일 수 있어 오프라인에서도 통과합니다. Finder 로 앱을 처음 열 때 macOS 가 붙일 수 있는 `-psn_...` 인자는 곡 경로로 읽지 않습니다(`apps/rbms-player/src/lib.rs` 의 `is_system_launch_arg`).
 - Windows: `cargo build --release --locked` 로 빌드한 `rbms-player.exe`를 `rbms-windows-x64.zip`으로 묶고 SHA-256 파일을 만듭니다.
 - 초안 릴리스: 두 플랫폼 아카이브와 체크섬을 `softprops/action-gh-release@v2`로 **초안(draft)** GitHub Release 에 첨부합니다(`draft: true`, 사용자 결정 2026-10-12). 어느 경로로 돌든 자동은 태그와 초안까지이고, 게시(publish)는 유지보수자가 GitHub 의 Releases 화면에서 릴리스 노트를 확인한 뒤 직접 합니다.
 - macOS 는 서명 시크릿이 등록돼 있으면 ad-hoc 대신 Developer ID 로 서명하고 공증합니다(3.1절).
@@ -35,11 +36,11 @@
 
 ## 2.1 배포 묶음과 제3자 고지
 
-두 아카이브의 내용은 같은 세 문서와 실행 파일입니다.
+두 배포물은 같은 세 문서와 실행 파일을 담습니다.
 
-| 파일 | macOS (`rbms-macos-universal.tar.gz`) | Windows (`rbms-windows-x64.zip`) |
+| 파일 | macOS (`R-BMS-macos-universal.dmg`) | Windows (`rbms-windows-x64.zip`) |
 | --- | --- | --- |
-| 실행 파일 | `rbms-player` | `rbms-player.exe` |
+| 실행 파일 | `R-BMS.app`(안의 `Contents/MacOS/rbms-player`) | `rbms-player.exe` |
 | `LICENSE` | O | O |
 | `README.md` | O | O |
 | `THIRD-PARTY-NOTICES.md` | O | O |
