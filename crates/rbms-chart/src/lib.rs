@@ -2,11 +2,14 @@
 
 use rbms_model::{LnKind, Micros, Mode, Model, ModelMeta, Note, NoteKind, TimeLine};
 
-pub use rbms_model::{VOLWAV_DEFAULT_PERCENT, chart_gain, default_total, default_total_for_mode, default_total_keyboard};
+pub use rbms_model::{VOLWAV_DEFAULT_PERCENT, chart_gain, count_playable_notes, default_total, default_total_for_mode, default_total_keyboard};
 use rbms_parser::BmsSource;
 
+mod long_note;
 pub mod scroll;
 pub mod shuffle;
+
+use long_note::{LnLane, LnPhase};
 
 const SECTION_EPS: f64 = 1e-7;
 
@@ -204,7 +207,7 @@ pub fn to_model_with_ln_mode(src: &BmsSource, mode: Mode, default_ln: LnKind) ->
     let mut exp_bpm: Vec<Option<f64>> = Vec::new();
     let mut exp_scroll: Vec<Option<f64>> = Vec::new();
     let mut exp_stop: Vec<Option<f64>> = Vec::new();
-    let mut ln_open: Vec<bool> = vec![false; lanes];
+    let mut ln_lanes: Vec<LnLane> = vec![LnLane::default(); lanes];
     let mut last_normal_tl: Vec<Option<usize>> = vec![None; lanes];
 
     for ev in &events {
@@ -223,11 +226,13 @@ pub fn to_model_with_ln_mode(src: &BmsSource, mode: Mode, default_ln: LnKind) ->
             exp_bpm: &mut exp_bpm,
             exp_scroll: &mut exp_scroll,
             exp_stop: &mut exp_stop,
-            ln_open: &mut ln_open,
+            ln_lanes: &mut ln_lanes,
             last_normal: &mut last_normal_tl,
         };
         apply_event(&ev.kind, idx, ln_kind, &mut targets);
     }
+
+    long_note::repair(&mut timelines, lanes);
 
     assign_times(&mut timelines, &exp_bpm, &exp_scroll, &exp_stop, src.headers.init_bpm);
 
@@ -264,12 +269,12 @@ struct EventTargets<'a> {
     exp_bpm: &'a mut [Option<f64>],
     exp_scroll: &'a mut [Option<f64>],
     exp_stop: &'a mut [Option<f64>],
-    ln_open: &'a mut [bool],
+    ln_lanes: &'a mut [LnLane],
     last_normal: &'a mut [Option<usize>],
 }
 
 fn apply_event(kind: &EvKind, idx: usize, ln_kind: LnKind, targets: &mut EventTargets<'_>) {
-    let EventTargets { timelines, exp_bpm, exp_scroll, exp_stop, ln_open, last_normal } = targets;
+    let EventTargets { timelines, exp_bpm, exp_scroll, exp_stop, ln_lanes, last_normal } = targets;
     let section = timelines[idx].section;
     match kind {
         EvKind::SectionLine => timelines[idx].section_line = true,
@@ -303,6 +308,7 @@ fn apply_event(kind: &EvKind, idx: usize, ln_kind: LnKind, targets: &mut EventTa
                         let mut end = Note::normal(*wav, 0, section);
                         end.kind = NoteKind::LongEnd { ln: ln_kind };
                         timelines[idx].notes[*lane] = Some(end);
+                        ln_lanes[*lane].last_tail = Some(idx);
                         true
                     }
                     _ => false,
@@ -318,15 +324,25 @@ fn apply_event(kind: &EvKind, idx: usize, ln_kind: LnKind, targets: &mut EventTa
             }
         }
         EvKind::Ln { lane, wav } => {
-            let mut n = Note::normal(*wav, 0, section);
-            if ln_open[*lane] {
-                n.kind = NoteKind::LongEnd { ln: ln_kind };
-                ln_open[*lane] = false;
-            } else {
-                n.kind = NoteKind::LongStart { ln: ln_kind };
-                ln_open[*lane] = true;
+            let state = &mut ln_lanes[*lane];
+            match state.phase {
+                LnPhase::Closed if state.last_tail == Some(idx) => state.phase = LnPhase::Swallowed,
+                LnPhase::Closed => {
+                    long_note::displace_normal_note(&mut timelines[idx], *lane, *wav);
+                    let mut head = Note::normal(*wav, 0, section);
+                    head.kind = NoteKind::LongStart { ln: ln_kind };
+                    timelines[idx].notes[*lane] = Some(head);
+                    state.phase = LnPhase::Open(idx);
+                }
+                LnPhase::Open(head_idx) => {
+                    long_note::clear_body(timelines, head_idx, idx, *lane);
+                    let mut tail = Note::normal(*wav, 0, section);
+                    tail.kind = NoteKind::LongEnd { ln: ln_kind };
+                    timelines[idx].notes[*lane] = Some(tail);
+                    *state = LnLane { phase: LnPhase::Closed, last_tail: Some(idx) };
+                }
+                LnPhase::Swallowed => state.phase = LnPhase::Closed,
             }
-            timelines[idx].notes[*lane] = Some(n);
         }
     }
 }
@@ -406,20 +422,6 @@ pub fn resolve_long_note_flavour(model: &mut Model, flavour: LnKind) {
             }
         }
     }
-}
-
-pub fn count_playable_notes(model: &Model) -> usize {
-    model
-        .timelines
-        .iter()
-        .flat_map(|tl| tl.notes.iter())
-        .flatten()
-        .filter(|n| match &n.kind {
-            NoteKind::Mine { .. } => false,
-            NoteKind::LongEnd { ln } => matches!(ln, LnKind::Cn | LnKind::Hcn),
-            _ => true,
-        })
-        .count()
 }
 
 /// Per-second note-distribution density, ported from the reference implementation's `SongInformation`

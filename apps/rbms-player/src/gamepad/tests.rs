@@ -696,3 +696,76 @@ fn a_controller_without_an_analog_turntable_has_no_turn() {
     mapper.resolve(2 * MS, &off, seven_key(), &snapshot_axis(0.4));
     assert_eq!(mapper.take_turn(), None, "an axis read as two keys is not counted in ticks");
 }
+
+fn button_change(pressed: bool) -> PadChange {
+    PadChange::Button { code: BUTTON, standard: None, pressed }
+}
+
+fn lane_zero(press: bool) -> PadEvent {
+    PadEvent::Lane { lane: 0, dir: ScratchDir::Forward, press }
+}
+
+/// A tap shorter than a frame used to vanish: the frame read the button once, saw it up as it had
+/// been, and played nothing. Each change is now played, at the instant it was stamped with.
+#[test]
+fn a_press_and_its_release_between_two_polls_are_both_played_each_at_its_own_instant() {
+    let cfg = cfg_with_lane(0, PadBinding::Button(BUTTON));
+    let mut mapper = PadMapper::new();
+    let mut snapshot = PadSnapshot::default();
+    let changes = [(MS * 3, button_change(true)), (MS * 7, button_change(false))];
+    let events = mapper.resolve_changes(&changes, MS * 16, &cfg, seven_key(), &mut snapshot);
+    assert_eq!(events, [(lane_zero(true), MS * 3), (lane_zero(false), MS * 7)]);
+    assert!(!snapshot.button(BUTTON), "the snapshot ends where the controller does");
+    assert!(mapper.resolve_changes(&[], MS * 32, &cfg, seven_key(), &mut snapshot).is_empty(), "nothing is played twice");
+}
+
+/// The debounce window is measured between the instants the changes happened at, not between
+/// frames: a release inside it is taken the instant it opens, if the button is still up then.
+#[test]
+fn a_release_inside_the_debounce_window_is_taken_the_instant_the_window_opens() {
+    let cfg = PadConfig { debounce_ms: DEFAULT_DEBOUNCE_MS, ..cfg_with_lane(0, PadBinding::Button(BUTTON)) };
+    let window_us = i64::from(DEFAULT_DEBOUNCE_MS) * MS;
+    let mut mapper = PadMapper::new();
+    let mut snapshot = PadSnapshot::default();
+    let changes = [(MS, button_change(true)), (MS * 4, button_change(false))];
+    let events = mapper.resolve_changes(&changes, MS * 10, &cfg, seven_key(), &mut snapshot);
+    assert_eq!(events, [(lane_zero(true), MS)], "the window has not opened by the end of this poll");
+    let events = mapper.resolve_changes(&[], MS * 40, &cfg, seven_key(), &mut snapshot);
+    assert_eq!(events, [(lane_zero(false), MS + window_us)], "taken where the window opened, not where the next poll fell");
+}
+
+/// A bounce the button undoes inside the window is never played at all.
+#[test]
+fn a_bounce_undone_inside_the_debounce_window_is_never_played() {
+    let cfg = PadConfig { debounce_ms: DEFAULT_DEBOUNCE_MS, ..cfg_with_lane(0, PadBinding::Button(BUTTON)) };
+    let mut mapper = PadMapper::new();
+    let mut snapshot = PadSnapshot::default();
+    let changes = [(MS, button_change(true)), (MS * 2, button_change(false)), (MS * 3, button_change(true))];
+    assert_eq!(mapper.resolve_changes(&changes, MS * 40, &cfg, seven_key(), &mut snapshot), [(lane_zero(true), MS)]);
+}
+
+/// A change arriving in a later poll, after one the window kept out, still lands in time order.
+#[test]
+fn a_change_the_window_kept_out_is_taken_before_a_later_change_of_another_element() {
+    const OTHER: u32 = BUTTON + 1;
+    let mut cfg = PadConfig { debounce_ms: DEFAULT_DEBOUNCE_MS, ..cfg_with_lane(0, PadBinding::Button(BUTTON)) };
+    cfg.set_lane(seven_key(), 1, Some(PadBinding::Button(OTHER)));
+    let window_us = i64::from(DEFAULT_DEBOUNCE_MS) * MS;
+    let mut mapper = PadMapper::new();
+    let mut snapshot = PadSnapshot::default();
+    let changes = [(0, button_change(true)), (MS * 2, button_change(false)), (MS * 30, PadChange::Button { code: OTHER, standard: None, pressed: true })];
+    let events = mapper.resolve_changes(&changes, MS * 40, &cfg, seven_key(), &mut snapshot);
+    assert_eq!(events, [(lane_zero(true), 0), (lane_zero(false), window_us), (PadEvent::Lane { lane: 1, dir: ScratchDir::Forward, press: true }, MS * 30)]);
+}
+
+/// gilrs stamps a change with the wall clock as it arrives; it is placed as far before now on the
+/// controller's own clock as the wall clock says it is old, never in the future and never before a
+/// change already handed out.
+#[test]
+fn a_stamped_change_is_placed_on_the_controller_clock_by_its_age() {
+    let wall_now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000);
+    let now_us = MS * 100;
+    assert_eq!(stamped_instant_us(wall_now - Duration::from_millis(7), wall_now, now_us, i64::MIN), MS * 93);
+    assert_eq!(stamped_instant_us(wall_now + Duration::from_millis(7), wall_now, now_us, i64::MIN), now_us, "a stamp ahead of the wall clock is now");
+    assert_eq!(stamped_instant_us(wall_now - Duration::from_millis(7), wall_now, now_us, MS * 95), MS * 95, "and none goes before the last one");
+}

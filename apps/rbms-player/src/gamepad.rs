@@ -22,6 +22,12 @@
 //! and [`PadState`] is the thin layer that fills that snapshot from gilrs. The mapping and both
 //! turntable algorithms are therefore testable with no controller plugged in.
 //!
+//! A button or a two-key axis is resolved change by change, each at the instant the controller
+//! layer stamped it ([`PadMapper::resolve_changes`]): a press and a release that both arrive
+//! between two frames are both played, each at its own time, and the debounce window is measured
+//! between those instants. Only a turntable is still read once a poll, since its state machines
+//! count readings rather than time.
+//!
 //! Wired into the frame loop by the integration branch; see `docs/plan/phase-g-wiring/G5-gamepad.md`.
 
 mod analog;
@@ -30,7 +36,7 @@ mod tests;
 
 use std::collections::BTreeMap;
 use std::ops::RangeInclusive;
-use std::time::Instant;
+use std::time::{Duration, Instant, SystemTime};
 
 use rbms_model::Mode;
 use rbms_play::ScratchDir;
@@ -387,6 +393,16 @@ impl PadTarget {
     fn lane(lane: usize, dir: ScratchDir) -> PadTarget {
         PadTarget::Lane { lane, dir }
     }
+
+    /// The event this target makes when its element changes to `pressed`. A control and a shortcut
+    /// fire only on the way down.
+    fn event(self, pressed: bool) -> Option<PadEvent> {
+        match self {
+            PadTarget::Lane { lane, dir } => Some(PadEvent::Lane { lane, dir, press: pressed }),
+            PadTarget::Control(action) => pressed.then_some(PadEvent::Control(action)),
+            PadTarget::Shortcut(shortcut) => pressed.then_some(PadEvent::Shortcut(shortcut)),
+        }
+    }
 }
 
 /// What a controller frame produced.
@@ -400,6 +416,29 @@ pub enum PadEvent {
     Lane { lane: usize, dir: ScratchDir, press: bool },
     Control(ControlAction),
     Shortcut(Shortcut),
+}
+
+/// One raw change the controller reported, before any mapping.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PadChange {
+    Button { code: u32, standard: Option<StandardButton>, pressed: bool },
+    Axis { code: u32, value: f32 },
+    Disconnected,
+}
+
+impl PadChange {
+    fn apply(self, snapshot: &mut PadSnapshot) {
+        match self {
+            PadChange::Button { code, standard, pressed } => {
+                snapshot.set_button(code, pressed);
+                if let Some(standard) = standard {
+                    snapshot.set_standard(standard, pressed);
+                }
+            }
+            PadChange::Axis { code, value } => snapshot.set_axis(code, value),
+            PadChange::Disconnected => snapshot.clear(),
+        }
+    }
 }
 
 /// One element's accepted state and when it last changed.
@@ -417,7 +456,12 @@ impl ButtonGate {
     /// Whether the debounce window has elapsed. Reference implementation
     /// `BMControllerInputProcessor.java:136`, inequality included.
     fn is_open(&self, now_us: i64, debounce_ms: u32) -> bool {
-        now_us >= self.changed_us.saturating_add(i64::from(debounce_ms) * US_PER_MS)
+        now_us >= self.opens_at(debounce_ms)
+    }
+
+    /// The first instant the debounce window has elapsed at.
+    fn opens_at(&self, debounce_ms: u32) -> i64 {
+        self.changed_us.saturating_add(i64::from(debounce_ms) * US_PER_MS)
     }
 
     fn set(&mut self, pressed: bool, now_us: i64) -> bool {
@@ -494,9 +538,12 @@ impl PadMapper {
         PadMapper::default()
     }
 
-    /// Resolve one frame. Every element the config listens to is read at most once, and only when
-    /// its debounce window is open — which is also what keeps a turntable's idle counter advancing
-    /// at the same rate the reference advances it.
+    /// Resolve one frame from a snapshot alone: every element the config listens to read at
+    /// `now_us`, at most once and only when its debounce window is open — which is also what keeps
+    /// a turntable's idle counter advancing at the same rate the reference advances it. The frame
+    /// loop resolves change by change instead ([`PadMapper::resolve_changes`]); this is what the
+    /// tests of the element rules drive.
+    #[cfg(test)]
     pub fn resolve(&mut self, now_us: i64, cfg: &PadConfig, mode: Mode, snapshot: &PadSnapshot) -> Vec<PadEvent> {
         if !cfg.enabled {
             return Vec::new();
@@ -504,40 +551,110 @@ impl PadMapper {
         self.retune(cfg, mode);
         self.count_turn(snapshot);
         let plan = cfg.plan(mode);
+        self.read_elements(now_us, cfg, &plan, snapshot, |_, _| true)
+    }
 
+    /// Resolve one poll of raw changes, each at the instant on the controller clock it happened at,
+    /// into the events they make, each with its own instant, earliest first. `snapshot` is brought
+    /// up to date on the way.
+    ///
+    /// A button or two-key axis direction is read change by change: a change the debounce window
+    /// keeps out is taken the instant the window opens, if the element still reads that way then,
+    /// and one a later change undid before that is never taken at all, which is what the window is
+    /// for. A press and its release inside one poll are therefore both played. A turntable is read
+    /// once, at `now_us`, after every change has been taken in.
+    pub fn resolve_changes(
+        &mut self,
+        changes: &[(i64, PadChange)],
+        now_us: i64,
+        cfg: &PadConfig,
+        mode: Mode,
+        snapshot: &mut PadSnapshot,
+    ) -> Vec<(PadEvent, i64)> {
+        if !cfg.enabled {
+            changes.iter().for_each(|(_, change)| change.apply(snapshot));
+            return Vec::new();
+        }
+        self.retune(cfg, mode);
+        let plan = cfg.plan(mode);
+        let mut events = Vec::new();
+        for &(at_us, change) in changes {
+            self.take_opened(at_us, cfg, &plan, snapshot, &mut events);
+            change.apply(snapshot);
+            let keys = self.read_elements(at_us, cfg, &plan, snapshot, |mapper, element| !mapper.is_turntable(element));
+            events.extend(keys.into_iter().map(|event| (event, at_us)));
+        }
+        self.take_opened(now_us, cfg, &plan, snapshot, &mut events);
+        self.count_turn(snapshot);
+        let turntables = self.read_elements(now_us, cfg, &plan, snapshot, |mapper, element| mapper.is_turntable(element));
+        events.extend(turntables.into_iter().map(|event| (event, now_us)));
+        events
+    }
+
+    /// Whether `element` is a direction of an axis read as a turntable.
+    fn is_turntable(&self, element: PadElement) -> bool {
+        matches!(element, PadElement::AxisDir { axis, .. } if self.analog.contains_key(&axis))
+    }
+
+    /// Read every element of `plan` that `wanted` keeps, at `at_us`: each at most once, and only
+    /// while its debounce window is open. What changed is handed back as the plan's events, in plan
+    /// order.
+    fn read_elements(
+        &mut self,
+        at_us: i64,
+        cfg: &PadConfig,
+        plan: &[(PadElement, PadTarget)],
+        snapshot: &PadSnapshot,
+        wanted: impl Fn(&PadMapper, PadElement) -> bool,
+    ) -> Vec<PadEvent> {
         let debounce = cfg.effective_debounce_ms();
         let deadzone = cfg.effective_axis_deadzone();
         let mut order: Vec<PadElement> = Vec::new();
-        for (element, _) in &plan {
-            if !order.contains(element) {
+        for (element, _) in plan {
+            if !order.contains(element) && wanted(self, *element) {
                 order.push(*element);
             }
         }
-
         let mut fired: BTreeMap<PadElement, bool> = BTreeMap::new();
         for element in order {
-            if !self.gates.get(&element).is_none_or(|gate| gate.is_open(now_us, debounce)) {
+            if !self.gates.get(&element).is_none_or(|gate| gate.is_open(at_us, debounce)) {
                 continue;
             }
             let raw = self.read(element, deadzone, snapshot);
-            if self.gates.entry(element).or_insert_with(ButtonGate::new).set(raw, now_us) {
+            if self.gates.entry(element).or_insert_with(ButtonGate::new).set(raw, at_us) {
                 fired.insert(element, raw);
             }
         }
-
-        plan.into_iter()
-            .filter_map(|(element, target)| {
-                let pressed = *fired.get(&element)?;
-                match target {
-                    PadTarget::Lane { lane, dir } => Some(PadEvent::Lane { lane, dir, press: pressed }),
-                    PadTarget::Control(action) => pressed.then_some(PadEvent::Control(action)),
-                    PadTarget::Shortcut(shortcut) => pressed.then_some(PadEvent::Shortcut(shortcut)),
-                }
-            })
-            .collect()
+        plan.iter().filter_map(|(element, target)| target.event(*fired.get(element)?)).collect()
     }
 
-    /// Everything the controller is holding down as of the last [`PadMapper::resolve`], as the
+    /// Take every key change the debounce window kept out and has opened for by `until_us`, at the
+    /// instant it opened, earliest first.
+    fn take_opened(&mut self, until_us: i64, cfg: &PadConfig, plan: &[(PadElement, PadTarget)], snapshot: &PadSnapshot, events: &mut Vec<(PadEvent, i64)>) {
+        let debounce = cfg.effective_debounce_ms();
+        let deadzone = cfg.effective_axis_deadzone();
+        let mut opened: Vec<(i64, PadElement, bool)> = Vec::new();
+        for (element, _) in plan {
+            if self.is_turntable(*element) || opened.iter().any(|(_, seen, _)| seen == element) {
+                continue;
+            }
+            let raw = self.read(*element, deadzone, snapshot);
+            let Some(gate) = self.gates.get(element).filter(|gate| gate.pressed != raw) else { continue };
+            let opens_us = gate.opens_at(debounce);
+            if opens_us <= until_us {
+                opened.push((opens_us, *element, raw));
+            }
+        }
+        opened.sort_by_key(|(opens_us, _, _)| *opens_us);
+        for (opens_us, element, raw) in opened {
+            if self.gates.entry(element).or_insert_with(ButtonGate::new).set(raw, opens_us) {
+                events
+                    .extend(plan.iter().filter(|(planned, _)| *planned == element).filter_map(|(_, target)| target.event(raw)).map(|event| (event, opens_us)));
+            }
+        }
+    }
+
+    /// Everything the controller is holding down as of the last [`PadMapper::resolve_changes`], as the
     /// events that put it there, each once. It reads the accepted (debounced) state of every
     /// element the config listens to, so a lane held by two elements stays held until both let go.
     pub fn held(&self, cfg: &PadConfig, mode: Mode) -> Vec<PadEvent> {
@@ -622,6 +739,15 @@ impl PadMapper {
     }
 }
 
+/// Where an event gilrs stamped at `stamped` happened on the controller clock: as long before
+/// `now_us` as the wall clock says it is old. The wall clock is not monotonic, so the instant is
+/// held between `earliest_us`, the last one handed out, and `now_us`.
+pub fn stamped_instant_us(stamped: SystemTime, wall_now: SystemTime, now_us: i64, earliest_us: i64) -> i64 {
+    let age_us = wall_now.duration_since(stamped).unwrap_or(Duration::ZERO).as_micros();
+    let at_us = now_us.saturating_sub(i64::try_from(age_us).unwrap_or(i64::MAX));
+    at_us.clamp(earliest_us.min(now_us), now_us)
+}
+
 /// The controller, and the snapshot of it a frame is resolved against.
 ///
 /// Held by the app for as long as it runs: the gilrs context is what knows a controller was
@@ -634,6 +760,8 @@ pub struct PadState {
     /// The controller's own clock. The debounce window is a difference between two of its
     /// readings, so it must not be the run clock, which is reset at the top of every chart.
     epoch: Instant,
+    /// The instant on that clock the last change was stamped at, which no later one goes before.
+    last_change_us: i64,
 }
 
 impl PadState {
@@ -654,7 +782,14 @@ impl PadState {
             return None;
         }
         match gilrs::GilrsBuilder::new().with_default_filters(false).build() {
-            Ok(gilrs) => Some(PadState { gilrs, snapshot: PadSnapshot::default(), mapper: PadMapper::new(), capture: None, epoch: Instant::now() }),
+            Ok(gilrs) => Some(PadState {
+                gilrs,
+                snapshot: PadSnapshot::default(),
+                mapper: PadMapper::new(),
+                capture: None,
+                epoch: Instant::now(),
+                last_change_us: i64::MIN,
+            }),
             Err(gilrs::Error::NotImplemented(_)) => None,
             Err(e) => {
                 notify(Level::Warn, format!("gamepad input unavailable ({e}); keyboard only"));
@@ -673,17 +808,15 @@ impl PadState {
         self.epoch.elapsed().as_micros() as i64
     }
 
-    /// One frame of controller input read against the controller's own clock, which is the call
-    /// the frame loop makes.
-    pub fn poll_now(&mut self, cfg: &PadConfig, mode: Mode) -> Vec<PadEvent> {
+    /// Everything the controller did since the last poll, each with the instant it happened at,
+    /// earliest first, already debounced. This is the call the frame loop makes: the instants are
+    /// the ones gilrs stamped each change with as it arrived, not the frame's, so a press is judged
+    /// at the moment it was made however late in its frame it is read.
+    pub fn poll_now(&mut self, cfg: &PadConfig, mode: Mode) -> Vec<(PadEvent, Instant)> {
         let now_us = self.now_us();
-        self.poll(now_us, cfg, mode)
-    }
-
-    /// One frame of controller input, already debounced.
-    pub fn poll(&mut self, now_us: i64, cfg: &PadConfig, mode: Mode) -> Vec<PadEvent> {
-        self.pump(cfg);
-        self.mapper.resolve(now_us, cfg, mode, &self.snapshot)
+        let changes = self.pump(cfg, now_us, SystemTime::now());
+        let events = self.mapper.resolve_changes(&changes, now_us, cfg, mode, &mut self.snapshot);
+        events.into_iter().map(|(event, at_us)| (event, self.epoch + Duration::from_micros(at_us.max(0) as u64))).collect()
     }
 
     /// What the controller is holding down right now, as of the last poll.
@@ -699,50 +832,57 @@ impl PadState {
     /// The binding the player last produced, for the key editor's "press something" mode. Taking
     /// it clears it, so the next binding captured is the next thing pressed.
     pub fn take_capture(&mut self, cfg: &PadConfig) -> Option<PadBinding> {
-        self.pump(cfg);
+        self.pump_into_snapshot(cfg);
         self.capture.take()
     }
 
     /// Drop whatever was pressed before capture mode was entered.
     pub fn drain(&mut self, cfg: &PadConfig) {
-        self.pump(cfg);
+        self.pump_into_snapshot(cfg);
         self.capture = None;
     }
 
-    fn pump(&mut self, cfg: &PadConfig) {
+    /// Take in what the controller did without playing any of it, for the key editor.
+    fn pump_into_snapshot(&mut self, cfg: &PadConfig) {
+        let changes = self.pump(cfg, self.now_us(), SystemTime::now());
+        changes.into_iter().for_each(|(_, change)| change.apply(&mut self.snapshot));
+    }
+
+    /// Every change gilrs has queued since the last pump, each at the instant it was stamped with
+    /// on the controller clock, noting the last thing pressed for the key editor on the way.
+    fn pump(&mut self, cfg: &PadConfig, now_us: i64, wall_now: SystemTime) -> Vec<(i64, PadChange)> {
+        let mut changes = Vec::new();
         while let Some(event) = self.gilrs.next_event() {
+            let at_us = stamped_instant_us(event.time, wall_now, now_us, self.last_change_us);
             if matches!(event.event, gilrs::EventType::Disconnected) {
-                self.snapshot.clear();
+                changes.push((at_us, PadChange::Disconnected));
                 continue;
             }
             if !self.accepts(cfg, event.id) {
                 continue;
             }
-            match event.event {
+            let change = match event.event {
                 gilrs::EventType::ButtonPressed(button, code) => {
                     let code = code.into_u32();
-                    self.snapshot.set_button(code, true);
-                    if let Some(standard) = StandardButton::from_gilrs(button) {
-                        self.snapshot.set_standard(standard, true);
-                    }
                     self.capture = Some(PadBinding::Button(code));
+                    PadChange::Button { code, standard: StandardButton::from_gilrs(button), pressed: true }
                 }
                 gilrs::EventType::ButtonReleased(button, code) => {
-                    self.snapshot.set_button(code.into_u32(), false);
-                    if let Some(standard) = StandardButton::from_gilrs(button) {
-                        self.snapshot.set_standard(standard, false);
-                    }
+                    PadChange::Button { code: code.into_u32(), standard: StandardButton::from_gilrs(button), pressed: false }
                 }
                 gilrs::EventType::AxisChanged(_, value, code) => {
                     let axis = code.into_u32();
-                    self.snapshot.set_axis(axis, value);
                     if value.abs() >= CAPTURE_AXIS_THRESHOLD {
                         self.capture = Some(PadBinding::Axis { axis, positive: value > 0.0 });
                     }
+                    PadChange::Axis { code: axis, value }
                 }
-                _ => {}
-            }
+                _ => continue,
+            };
+            self.last_change_us = at_us;
+            changes.push((at_us, change));
         }
+        changes
     }
 
     fn accepts(&self, cfg: &PadConfig, id: gilrs::GamepadId) -> bool {

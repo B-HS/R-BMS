@@ -240,7 +240,7 @@ pub(super) fn build(def: &SkinDef, id: &str, warnings: &mut Vec<String>) -> Opti
 /// Row zero is the foot of the graph, as it is for the line.
 fn paint_ground(size: (f32, f32), scale: GaugeScale, band: &Band) -> Pixmap {
     let (width, height) = size;
-    let mut ground = Pixmap::new(width as i32 as usize, height as i32 as usize);
+    let mut ground = Pixmap::upside_down(width as i32 as usize, height as i32 as usize);
     ground.fill(band.ground_below);
     ground.blend_rect(0, (height * scale.border / scale.max) as i32, width as i32, (height * (scale.max - scale.border) / scale.max) as i32, band.ground_above);
     ground
@@ -255,7 +255,7 @@ fn paint_ground(size: (f32, f32), scale: GaugeScale, band: &Band) -> Pixmap {
 /// ends, a white upright is drawn first.
 fn paint_line(size: (f32, f32), scale: GaugeScale, band: &Band, samples: &[f32], sections: &[usize]) -> Pixmap {
     let (width, height) = size;
-    let mut line = Pixmap::new(width as i32 as usize, height as i32 as usize);
+    let mut line = Pixmap::upside_down(width as i32 as usize, height as i32 as usize);
     let count = samples.len() as i32;
     let GaugeScale { max, border, .. } = scale;
     let column = |index: i32| (width * index as f32 / count as f32) as i32;

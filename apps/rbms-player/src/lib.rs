@@ -85,6 +85,7 @@ mod play_sink;
 mod pointer;
 mod practice;
 mod record_sync;
+mod save_worker;
 mod scene_clock;
 mod scoredb_store;
 mod settings_ui;
@@ -325,6 +326,28 @@ fn ir_submission_block_reason(autoplay: bool, replay: bool, practice: bool) -> O
 /// not in the chart it was judged on, so it is scored out of the notes it was played on.
 fn updates_score(autoplay: bool, replay: bool, custom_judge: bool, practice: bool) -> bool {
     ir_submission_block_reason(autoplay, replay, practice).is_none() && !custom_judge
+}
+
+/// The TOTAL a run is judged on in place of the chart's: the one a replay being watched recorded, or
+/// the one the player set ([`rbms_config::PlayConfig::total_override`]). [`rbms_store::REPLAY_CHART_TOTAL`]
+/// or less overrides nothing. A replay recorded before the TOTAL was written down was played on the
+/// chart's own, so a TOTAL set now never leaks into its playback.
+fn run_total_override(config: &Config, replay: Option<&Replay>) -> f64 {
+    replay.map_or(config.play.total_override, |replay| replay.judge.total_override)
+}
+
+/// Whether a TOTAL override moves the gauge at all.
+fn overrides_total(total_override: f64) -> bool {
+    total_override > rbms_store::REPLAY_CHART_TOTAL
+}
+
+/// Whether a run was eased the way that costs it its best: judged wider than its chart asks
+/// ([`is_custom_judge`], `BMSPlayer.java:208-214`), or on a TOTAL of the player's own, which moves
+/// the gauge as far as they like and so the lamp with it (the player's decision of 2026-10-15). The
+/// reference has no TOTAL setting; the run is treated as it treats a widened judge: an AssistEasy
+/// lamp at most, kept and sent, and never a best.
+fn judged_wider(setup: &rbms_play::JudgeSetup, total_override: f64) -> bool {
+    is_custom_judge(setup) || overrides_total(total_override)
 }
 
 /// The lamp a run at this assist level is awarded: the reference demotes any assisted clear to
@@ -785,6 +808,15 @@ struct AppShared {
     record_sync_states: std::collections::HashMap<i64, rbms_store::scoredb::IrSyncRow>,
     /// How fast a records sync sends: under the server's rate limits in the game, at once in a test.
     record_sync_pacing: record_sync::SyncPacing,
+    /// The build the score server last said it runs, which a refusal it gives is written down under
+    /// ([`record_sync::refusal_key`]). `None` until a sync has asked.
+    server_build: Option<String>,
+    /// Finished courses on their way to the main server, whose answers are still to come
+    /// ([`app_ranking::CourseSubmit`]).
+    course_submits: Vec<app_ranking::CourseSubmit>,
+    /// The thread file writes are handed to, so a save never stalls a frame on the disk
+    /// ([`save_worker`]).
+    saves: save_worker::SaveWorker,
     /// The wall clock the audio fallback and the timing probe read, restarted when a run begins. The
     /// skin does not read it: that is [`AppShared::scene_clock`].
     clock: Instant,
@@ -796,6 +828,10 @@ struct AppShared {
     /// ([`AppShared::stop_scene_clock`]).
     #[cfg(test)]
     scene_stopped_at: Option<Instant>,
+    /// Where a test has stopped the machine's side of the song clock read without a sound device
+    /// ([`AppShared::stop_clocks_at`]).
+    #[cfg(test)]
+    song_stopped_at: Option<Instant>,
     anchor_us: i64,
     /// Set once the audio output stream is found dead: the song position the audio clock last
     /// reported and the instant that was noticed, so `song_us` continues on the wall clock.
@@ -812,7 +848,8 @@ struct AppShared {
     scores: ScoreBook,
     scores_path: PathBuf,
     /// The durable store the book above is a read-through cache of. `None` when the database could
-    /// not be opened, in which case this run browses and plays but records nothing.
+    /// not be opened, in which case a run is kept on the side and read in the next time it opens
+    /// ([`scoredb_store::PENDING_RUNS_DIR`]).
     scoredb: Option<rbms_store::scoredb::ScoreDb>,
     /// Where saved replays live, and what the retention policy prunes.
     replay_dir: PathBuf,
@@ -893,12 +930,16 @@ impl App {
         let config_dir = settings_path.parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
         let (scoredb_path, scores_path, replay_dir) = scoredb_store::score_paths(&config_dir);
         let mut scoredb = scoredb_store::open_score_db(&scoredb_path, &scores_path);
+        if let Some(db) = scoredb.as_mut() {
+            scoredb_store::import_pending_runs(db, &scoredb_store::pending_runs_dir(&config_dir));
+        }
         let scores = match &scoredb {
             Some(db) => scoredb_store::book_from_db(db),
             None => ScoreBook::load(&scores_path),
         };
         if let Some(db) = scoredb.as_mut() {
-            scoredb_store::run_replay_gc(db, &replay_dir, &rbms_store::scoredb::ReplayPolicy::default());
+            let hold = scoredb_store::upload_hold(&config.network);
+            scoredb_store::run_replay_gc(db, &replay_dir, &rbms_store::scoredb::ReplayPolicy::default(), hold.as_ref());
         }
         let practice_book = practice::PracticeBook::load(&practice::practice_path(&settings_path));
         let favorites_path = favorites_path(&settings_path);
@@ -1042,11 +1083,16 @@ impl App {
                 record_sync_pending: Vec::new(),
                 record_sync_states: std::collections::HashMap::new(),
                 record_sync_pacing: record_sync::SyncPacing::GAME,
+                server_build: None,
+                course_submits: Vec::new(),
+                saves: save_worker::SaveWorker::for_this_build(),
                 clock: Instant::now(),
                 booted: Instant::now(),
                 scene_clock: scene_clock::SceneClock::begun(Instant::now()),
                 #[cfg(test)]
                 scene_stopped_at: None,
+                #[cfg(test)]
+                song_stopped_at: None,
                 anchor_us: 0,
                 audio_dead_at: std::cell::Cell::new(None),
                 song_us_last: std::cell::Cell::new(0),
@@ -1220,8 +1266,8 @@ impl App {
             self.shared.poll_audio_clock();
         }
 
-        for event in self.shared.poll_pad() {
-            let transition = self.stage.handle_pad(&mut FrameCtx { shared: &mut self.shared, now, dt: 0.0 }, event);
+        for (event, at) in self.shared.poll_pad() {
+            let transition = self.stage.handle_pad(&mut FrameCtx { shared: &mut self.shared, now: at, dt: 0.0 }, event);
             self.apply(transition, event_loop);
         }
 
@@ -1365,7 +1411,13 @@ impl ApplicationHandler for App {
                 self.dispatch_pointer(event_loop, input);
             }
             WindowEvent::MouseWheel { delta, .. } => self.dispatch_pointer(event_loop, PointerInput::from_wheel(delta)),
-            WindowEvent::Focused(false) => self.shared.release_held_inputs(),
+            WindowEvent::Focused(false) => {
+                let released = self.stage.release_keys_lost_with_focus(&mut FrameCtx { shared: &mut self.shared, now: Instant::now(), dt: 0.0 });
+                for transition in released {
+                    self.apply(transition, event_loop);
+                }
+                self.shared.release_held_inputs();
+            }
             WindowEvent::Ime(ime) => self.stage.handle_ime(&mut FrameCtx { shared: &mut self.shared, now: Instant::now(), dt: 0.0 }, &ime),
             WindowEvent::KeyboardInput { event, .. } => {
                 let PhysicalKey::Code(code) = event.physical_key else {
@@ -1389,6 +1441,13 @@ impl ApplicationHandler for App {
             }
             _ => {}
         }
+    }
+
+    /// Finish every write handed to the save thread. Quit in the macOS menu or the Dock ends the
+    /// process from inside the event loop, right after this, so [`run`] never gets back from the
+    /// loop to wait for them.
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        self.shared.finish_saves();
     }
 }
 
@@ -1549,7 +1608,9 @@ pub fn run(args: impl Iterator<Item = String>) -> ExitCode {
     };
     event_loop.set_control_flow(ControlFlow::Poll);
     let mut app = App::new(chart, config, launch, settings_path);
-    if let Err(e) = event_loop.run_app(&mut app) {
+    let ran = event_loop.run_app(&mut app);
+    app.shared.finish_saves();
+    if let Err(e) = ran {
         notify(Level::Error, format!("the window event loop stopped: {e}"));
         return ExitCode::FAILURE;
     }

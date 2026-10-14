@@ -16,7 +16,7 @@ use rbms_judge::{ClearType, GaugeKind, Judge, JudgeEngine, JudgeResult};
 use rbms_model::{Model, TimeLine};
 use rbms_store::{Replay, ReplayEvent, ReplayOffsetStep};
 
-use crate::record::{GaugeLogRecorder, PlayRecord, ScoreProgress, play_time_ms};
+use crate::record::{GAUGE_LOG_INTERVAL_MS, GaugeLogRecorder, PlayRecord, ScoreProgress, play_time_ms};
 use crate::{JUDGE_WIDTH_TIER_COUNT, PlayEvent, PlaySource, Player, UNMODIFIED_JUDGE_RATES, UNMODIFIED_RATE_PERCENT};
 
 /// Neutral per-voice parameters for a chart keysound: reference level, centred, unpitched. The
@@ -42,12 +42,11 @@ pub const ANALYSIS_RATE_STEP: f64 = 0.25;
 /// How far one analysis seek moves the virtual clock.
 pub const ANALYSIS_SEEK_STEP_US: i64 = 2_000_000;
 
-/// How finely a seek steps the engine clock while it replays the recorded inputs. A seek has no
-/// frames of its own, and everything the judge engine drives from time rather than from input —
-/// the miss sweep, mine damage, deferred long-note releases and the hell-charge gauge ticks — only
-/// advances when the clock does, so replaying the inputs against one jump to the target would
-/// rebuild a different run from the one being scrubbed.
-const SEEK_STEP_US: i64 = 5_000;
+/// How far apart on the song clock the run's gauge is sampled: the reference's half-second
+/// history (`BMSPlayer.java:628-633`), which [`GAUGE_SAMPLE_INTERVAL_US`] is a whole multiple of.
+const GAUGE_SAMPLE_STEP_US: i64 = GAUGE_LOG_INTERVAL_MS * US_PER_MS;
+
+const _: () = assert!(GAUGE_SAMPLE_INTERVAL_US % GAUGE_SAMPLE_STEP_US == 0, "the built-in series is sampled on the gauge log's own instants");
 
 /// Worst judgement an input may earn and still move a judge offset that adjusts itself: GOOD
 /// (`JudgeManager.java:700`, `judge <= 2`).
@@ -281,16 +280,19 @@ struct ReplayTrack {
 }
 
 impl ReplayTrack {
-    /// The next recorded input whose raw time has been reached, with its place among the recorded
-    /// inputs, consuming it.
-    fn next_due(&mut self, song_us: i64) -> Option<(usize, ReplayEvent)> {
+    /// The next recorded input whose judged instant has been reached, with that instant, consuming
+    /// it. The instant is the recorded one moved by the offset the replay says it was judged at
+    /// ([`recorded_offset_us`]), which is nothing for every run recorded since the offset stopped
+    /// moving the judgement; it is what decides when the input is due, so the engine is never
+    /// carried past the clock that brought it there.
+    fn next_due(&mut self, song_us: i64) -> Option<(ReplayEvent, i64)> {
         let event = *self.events.get(self.cursor)?;
-        if event.t > song_us {
+        let judge_us = event.t + recorded_offset_us(&self.offset_steps, self.cursor, self.judged_off_by_us);
+        if judge_us > song_us {
             return None;
         }
-        let index = self.cursor;
         self.cursor += 1;
-        Some((index, event))
+        Some((event, judge_us))
     }
 }
 
@@ -386,10 +388,11 @@ pub const TIMED_JUDGE_LIMIT: usize = 4;
 /// What the run looked like over time, for the graphs the result screen draws.
 ///
 /// The gauge series is sampled on the song clock rather than on frames, so it does not change shape
-/// with the frame rate. The two tallies count *inputs the player made*: the judge engine's own
-/// counts include the notes a miss sweep and an auto-played lane resolve, which never pass through
-/// here, so the two are related but not equal — and the histogram needs a timing error, which only
-/// a judged input has.
+/// with the frame rate. The two tallies count *judgments of the player's inputs*, each once: the
+/// judge engine's own counts include the notes a miss sweep and an auto-played lane resolve, which
+/// never pass through here, so the two are related but not equal — and the histogram needs a timing
+/// error, which only a judged input has. A plain long note is one judgment, at its end, however
+/// many inputs took it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlayInstrumentation {
     gauge_series: Vec<f32>,
@@ -452,16 +455,16 @@ impl PlayInstrumentation {
         (middle as i64 + offset).clamp(0, TIMING_HIST_BINS as i64 - 1) as usize
     }
 
-    fn record(&mut self, result: &JudgeResult, scratch: bool) {
-        self.timing_hist[PlayInstrumentation::bin_of(result.delta_us)] += 1;
-        if let Some(slot) = self.judge_dist.get_mut(result.judge as usize) {
+    fn record(&mut self, judge: Judge, delta_us: i64, scratch: bool) {
+        self.timing_hist[PlayInstrumentation::bin_of(delta_us)] += 1;
+        if let Some(slot) = self.judge_dist.get_mut(judge as usize) {
             *slot += 1;
         }
-        if (result.judge as usize) >= TIMED_JUDGE_LIMIT {
+        if (judge as usize) >= TIMED_JUDGE_LIMIT {
             return;
         }
         let kind = if scratch { SCRATCH_LANE_KIND } else { KEY_LANE_KIND };
-        let column = if result.fast { &mut self.fast } else { &mut self.slow };
+        let column = if delta_us >= 0 { &mut self.fast } else { &mut self.slow };
         column[kind] += 1;
     }
 
@@ -515,6 +518,8 @@ pub struct PlaySummary {
     pub counts: [u32; 6],
     pub ex_score: u32,
     pub max_ex_score: u32,
+    /// The longest combo within this chart (`ScoreData.combo`). A course stage counts no streak
+    /// carried in from the stage before ([`PlaySession::standing_max_combo`] does).
     pub max_combo: u32,
     pub total_notes: u32,
     /// Notes resolved so far; empty POOR consumes none, so this can trail `total_notes`.
@@ -524,12 +529,14 @@ pub struct PlaySummary {
     /// Per-judge early/late split, indexed the same way as `counts`.
     pub early: [u32; 6],
     pub late: [u32; 6],
-    /// Mean signed timing error over the run's actual hits.
+    /// Mean signed timing error over the run's actual hits: the lean, early positive. Not the
+    /// reference's `avgjudge` ([`crate::PlayRecord::avg_duration_us`] is).
     pub avg_judge_us: i64,
     pub empty_poor: u32,
     pub gauge_value: f32,
     pub clear_lamp: ClearType,
-    /// Bad + poor + miss, the reference implementation's minimum bad-poor count.
+    /// Bad + poor + miss so far. The notes a run never reached are not in it; what is recorded of
+    /// a run is [`PlaySummary::min_bp_with_unreached`].
     pub min_bp: u32,
     /// Whether the gauge emptied under a shift mode that does not rescue the play.
     pub failed: bool,
@@ -542,6 +549,15 @@ pub struct PlaySummary {
 }
 
 impl PlaySummary {
+    /// `ScoreData.minbp` as the reference records a run: bad, poor and empty poor, plus every note
+    /// the run never reached (`BMSPlayer.java:909`). A run the gauge ended early is charged for the
+    /// notes it did not get to, so dying at the start is never a better MISS COUNT than playing on.
+    /// A summary already [`left_unfinished`](Self::left_unfinished) has no note left unreached and is
+    /// charged nothing more.
+    pub fn min_bp_with_unreached(&self) -> u32 {
+        self.min_bp + self.total_notes.saturating_sub(self.total_judged)
+    }
+
     /// The summary of a run left before its end: every note it never reached counts as a late POOR
     /// the player let pass, and the run is FAILED.
     ///
@@ -583,6 +599,9 @@ pub struct PlaySession {
     /// Kept beside `instrumentation` rather than in it: that one is the built-in screen's and
     /// samples the selected gauge once a second.
     gauge_log: GaugeLogRecorder,
+    /// The next instant on the song clock the gauge is sampled at, a whole number of
+    /// [`GAUGE_SAMPLE_STEP_US`] from the start of the song.
+    next_sample_us: i64,
     bga: BgaTimeline,
 }
 
@@ -619,19 +638,57 @@ impl PlaySession {
             marks: TimingMarks::default(),
             instrumentation: PlayInstrumentation::default(),
             gauge_log,
+            next_sample_us: 0,
             bga,
         }
     }
 
     /// Advance one frame: reproduce any replay input the audible axis has reached, book the sounds
     /// that fall inside the schedule axis, judge up to the audible axis, then move the BGA on.
+    ///
+    /// Nothing the run is judged by depends on where the frames fall. Every input is judged at its
+    /// own instant with the clock settled up to it first, and the clock is settled one instant
+    /// after another ([`rbms_judge::JudgeEngine::update`]), so a replay comes out as the run it
+    /// recorded at any frame rate. The gauge history is sampled at its own instants on the song
+    /// clock for the same reason, rather than on the first frame past each.
     pub fn tick(&mut self, clock: SessionClock, sink: &mut dyn SoundSink) {
         self.feed_replay(clock.audible_us, sink);
         self.player.update_schedule(clock.scheduled_us, |event| sink.play(scheduled_sound(event)));
-        self.player.update_judge(clock.audible_us);
-        self.instrumentation.sample_gauge(clock.audible_us, self.player.judge().gauge.value());
-        self.gauge_log.frame(clock.audible_us, &self.player.judge().gauge, self.player.failed());
+        self.settle_until(clock.audible_us);
         self.bga.advance(clock.audible_us);
+    }
+
+    /// Settle the run up to `until_us`, stopping at every gauge sample instant on the way to take
+    /// the sample there.
+    fn settle_until(&mut self, until_us: i64) {
+        while self.next_sample_us <= until_us {
+            let at_us = self.next_sample_us;
+            self.settle_at(at_us);
+            let gauge = &self.player.judge().gauge;
+            self.instrumentation.sample_gauge(at_us, gauge.value());
+            self.gauge_log.frame(at_us, gauge, false);
+            self.next_sample_us += GAUGE_SAMPLE_STEP_US;
+        }
+        self.settle_at(until_us);
+    }
+
+    /// Settle the judge up to `at_us`, tally what the clock settled on the way, and close the
+    /// gauge history at the instant the run failed, if it has.
+    fn settle_at(&mut self, at_us: i64) {
+        let judged_before = self.player.judge().judged().len();
+        self.player.update_judge(at_us);
+        self.note_settled_judgments(judged_before);
+        if let Some(failed_at_us) = self.player.failed_at_us() {
+            self.gauge_log.frame(failed_at_us, &self.player.judge().gauge, true);
+        }
+    }
+
+    /// The instant a live input is judged and recorded at: the instant it arrived, or the instant
+    /// the run has already been settled up to when it arrived before that. The second only happens
+    /// to an input the host read late, and recording the instant it was judged at keeps the replay
+    /// reproducing it exactly.
+    fn input_instant(&self, raw_us: i64) -> i64 {
+        raw_us.max(self.player.judge().settled_us())
     }
 
     /// Take one lane press, recording it for the replay and judging it at the instant it arrived:
@@ -644,12 +701,12 @@ impl PlaySession {
     /// Take one lane press from one physical direction. A scratch lane has a key for each direction
     /// and the direction is recorded with the input, so a back-spin reproduces as one.
     pub fn press_dir(&mut self, lane: usize, dir: ScratchDir, raw_us: i64, sink: &mut dyn SoundSink) -> Option<JudgeResult> {
-        self.recording.push(ReplayEvent { t: raw_us, lane, press: true, backward: is_backward(dir) });
-        let result = self.player.press_dir(lane, dir, raw_us, |event| sink.play(immediate_sound(event)));
-        if let Some(result) = result.as_ref() {
-            let scratch = self.is_scratch(result.lane);
-            self.instrumentation.record(result, scratch);
-            self.auto_adjust(result);
+        let at_us = self.input_instant(raw_us);
+        self.settle_until(at_us);
+        self.recording.push(ReplayEvent { t: at_us, lane, press: true, backward: is_backward(dir) });
+        let result = self.player.press_dir(lane, dir, at_us, |event| sink.play(immediate_sound(event)));
+        if let Some(result) = result.filter(|result| result.counted) {
+            self.note_judgment(result.lane, result.judge, result.delta_us);
         }
         result
     }
@@ -661,14 +718,41 @@ impl PlaySession {
 
     /// Take one lane release from one physical direction.
     pub fn release_dir(&mut self, lane: usize, dir: ScratchDir, raw_us: i64) -> Option<JudgeResult> {
-        self.recording.push(ReplayEvent { t: raw_us, lane, press: false, backward: is_backward(dir) });
-        let result = self.player.release_dir(lane, dir, raw_us);
-        if let Some(result) = result.as_ref() {
-            let scratch = self.is_scratch(result.lane);
-            self.instrumentation.record(result, scratch);
-            self.auto_adjust(result);
+        let at_us = self.input_instant(raw_us);
+        self.settle_until(at_us);
+        self.recording.push(ReplayEvent { t: at_us, lane, press: false, backward: is_backward(dir) });
+        let result = self.player.release_dir(lane, dir, at_us);
+        if let Some(result) = result.filter(|result| result.counted) {
+            self.note_judgment(result.lane, result.judge, result.delta_us);
         }
         result
+    }
+
+    /// Tally one judgment the engine counted: into the result screen's distributions, and into the
+    /// offset a run that adjusts itself moves ([`auto_adjust`](Self::auto_adjust)).
+    fn note_judgment(&mut self, lane: usize, judge: Judge, delta_us: i64) {
+        let scratch = self.is_scratch(lane);
+        self.instrumentation.record(judge, delta_us, scratch);
+        self.auto_adjust(judge, delta_us);
+    }
+
+    /// Tally the timed judgments the clock settled by itself since the engine had counted
+    /// `judged_before`: a plain long note held through its end, or one whose early release the
+    /// margin confirmed. The engine counts them only now, so no input of the player's carried them
+    /// into the tallies when it landed. A run that plays itself makes no input, and a miss has no
+    /// timing to tally.
+    fn note_settled_judgments(&mut self, judged_before: usize) {
+        if self.setup.autoplay || self.player.judge().judged().len() == judged_before {
+            return;
+        }
+        let settled: Vec<_> = self.player.judge().judged()[judged_before..]
+            .iter()
+            .filter(|note| (note.judge as usize) < TIMED_JUDGE_LIMIT)
+            .map(|note| (note.lane, note.judge, note.delta_us))
+            .collect();
+        for (lane, judge, delta_us) in settled {
+            self.note_judgment(lane, judge, delta_us);
+        }
     }
 
     /// Move the judge offset by what one judged input of the player's asks for, while the offset
@@ -678,11 +762,11 @@ impl PlaySession {
     /// The move is to where the notes are drawn from the next frame on, so the judgement of no
     /// input depends on it and the replay has nothing of it to record. The offset stops at the
     /// ends of the range the JUDGE OFFSET row can hold.
-    fn auto_adjust(&mut self, result: &JudgeResult) {
+    fn auto_adjust(&mut self, judge: Judge, delta_us: i64) {
         if !self.auto_calibration || self.setup.autoplay || self.replay.is_some() {
             return;
         }
-        let step = auto_adjust_step_ms(result.judge, result.delta_us);
+        let step = auto_adjust_step_ms(judge, delta_us);
         let next_ms = self.judge_offset_ms().saturating_add(step).clamp(AUTO_ADJUST_OFFSET_MIN_MS, AUTO_ADJUST_OFFSET_MAX_MS);
         if next_ms != self.judge_offset_ms() {
             self.judge_offset_us = i64::from(next_ms) * US_PER_MS;
@@ -694,48 +778,27 @@ impl PlaySession {
     /// start, so scrubbing backwards is exactly as correct as scrubbing forwards. Only a replay run
     /// can be scrubbed.
     ///
-    /// The rebuild walks the clock forward in [`SEEK_STEP_US`] frames and feeds each input at the
-    /// frame that would have reached it, which is what [`tick`](Self::tick) does live: the inputs
-    /// due at a frame are judged before the frame's own sweep. Jumping straight to the target
-    /// instead would leave every time-driven judgement — the miss sweep, mine damage, a deferred
-    /// long-note release, the hell-charge ticks — to be settled in one step against whatever the
-    /// last recorded input left behind.
+    /// The rebuild is the run itself played again in one go, silently: each input judged at its own
+    /// instant with the clock settled up to it, then the clock settled to the target. Since nothing
+    /// in that depends on where frames fall, the rebuilt run is the one being scrubbed, gauge
+    /// history and tallies included.
     pub fn seek(&mut self, target_us: i64) {
         if self.replay.is_none() {
             return;
         }
         let target_us = target_us.max(0);
-        let mut player = build_player(self.player.field_model().clone(), &self.setup);
-        let (events, steps, fallback_us) =
-            self.replay.as_ref().map(|track| (track.events.clone(), track.offset_steps.clone(), track.judged_off_by_us)).unwrap_or_default();
-        let mut cursor = 0;
-        let mut frame_us = 0;
-        loop {
-            while let Some(event) = events.get(cursor).filter(|event| event.t <= frame_us) {
-                let dir = scratch_dir(event.backward);
-                let judge_us = event.t + recorded_offset_us(&steps, cursor, fallback_us);
-                if event.press {
-                    player.press_dir(event.lane, dir, judge_us, |_| {});
-                } else {
-                    player.release_dir(event.lane, dir, judge_us);
-                }
-                cursor += 1;
-            }
-            player.update(frame_us, |_| {});
-            if frame_us >= target_us {
-                break;
-            }
-            frame_us = (frame_us + SEEK_STEP_US).min(target_us);
-        }
-        self.player = player;
+        self.player = build_player(self.player.field_model().clone(), &self.setup);
         if let Some(track) = self.replay.as_mut() {
-            track.cursor = cursor;
+            track.cursor = 0;
         }
-        self.analysis.manual = true;
-        self.analysis.position_us = target_us;
         self.marks.clear();
         self.instrumentation.clear();
         self.gauge_log.clear();
+        self.next_sample_us = 0;
+        self.feed_replay(target_us, &mut NullSink);
+        self.settle_until(target_us);
+        self.analysis.manual = true;
+        self.analysis.position_us = target_us;
     }
 
     /// Whether the run is over and the result is due: every note has gone past and the tail silence
@@ -745,10 +808,12 @@ impl PlaySession {
     }
 
     /// Whether there is nothing left to hit, so leaving the field should show the result rather
-    /// than discard the run.
+    /// than discard the run. A chart with no note to judge (a background-only chart, or one whose
+    /// every note SCRATCH AUTO plays) has nothing left from the start, as the reference's
+    /// `getPastNotes() == getNotes()` reads it (`BMSPlayer.java:953-955`).
     pub fn all_notes_resolved(&self) -> bool {
         let judge = self.player.judge();
-        judge.total_notes() > 0 && judge.total_judged() >= judge.total_notes()
+        judge.total_judged() >= judge.total_notes()
     }
 
     /// Everything the result screen needs from this run, as plain values.
@@ -759,7 +824,7 @@ impl PlaySession {
             counts,
             ex_score: judge.ex_score,
             max_ex_score: judge.total_notes() * 2,
-            max_combo: judge.max_combo,
+            max_combo: judge.stage_max_combo,
             total_notes: judge.total_notes(),
             total_judged: judge.total_judged(),
             fast: judge.fast,
@@ -819,8 +884,30 @@ impl PlaySession {
         self.player.judge()
     }
 
+    /// The combo a course carries into its next stage: the streak the player sees, which a course
+    /// stage started at the one the stage before ended on (`JudgeManager.getCourseCombo`).
     pub fn standing_combo(&self) -> u32 {
         self.player.judge().combo
+    }
+
+    /// The lamp a course stands at once this stage is folded in, the stages before it having been
+    /// over `notes_before` notes and judged `counts_before` (`MusicResult.java:402-428`).
+    ///
+    /// The course is a full combo when its longest streak is every note it has been over, which a
+    /// stage's own full combo does not make it; MAX and PERFECT are read off the course's counts.
+    /// Short of that it is the gauge's lamp, and FAILED once the gauge is out. The chart's own lamp
+    /// is [`PlaySummary::clear_lamp`].
+    pub fn course_lamp(&self, notes_before: u32, counts_before: [u32; 6]) -> ClearType {
+        let judge = self.player.judge();
+        let counts: [u32; 6] = std::array::from_fn(|tier| counts_before[tier] + judge.counts[tier]);
+        let notes = notes_before + judge.total_notes();
+        rbms_judge::clear_lamp(judge.gauge.selected(), &counts, judge.max_combo, notes, notes)
+    }
+
+    /// The longest streak of the course so far, carried streak included
+    /// (`JudgeManager.getCourseMaxcombo`). The chart's own is [`PlaySummary::max_combo`].
+    pub fn standing_max_combo(&self) -> u32 {
+        self.player.judge().max_combo
     }
 
     /// Which note a press takes when several are in range.
@@ -1026,24 +1113,23 @@ impl PlaySession {
         self.bga.current
     }
 
-    /// Reproduce every recorded input whose raw time the audible axis has reached, judging each as
-    /// far from that time as the replay says it was judged, so the original run comes out
-    /// identical: at the time itself for a run recorded since the judge offset stopped moving the
-    /// judgement, and the recorded offset away for an older one. The judge offset in force now is
-    /// the viewer's and has no part in it.
+    /// Reproduce every recorded input the audible axis has reached, judging each as far from its
+    /// recorded time as the replay says it was judged, so the original run comes out identical: at
+    /// the time itself for a run recorded since the judge offset stopped moving the judgement, and
+    /// the recorded offset away for an older one. The judge offset in force now is the viewer's and
+    /// has no part in it. Each input settles the run up to its own instant first, as a live one
+    /// does.
     fn feed_replay(&mut self, audible_us: i64, sink: &mut dyn SoundSink) {
-        while let Some((index, event)) = self.replay.as_mut().and_then(|track| track.next_due(audible_us)) {
+        while let Some((event, judge_us)) = self.replay.as_mut().and_then(|track| track.next_due(audible_us)) {
             let dir = scratch_dir(event.backward);
-            let (steps, fallback_us) = self.replay.as_ref().map_or((&[][..], 0), |track| (track.offset_steps.as_slice(), track.judged_off_by_us));
-            let judge_us = event.t + recorded_offset_us(steps, index, fallback_us);
+            self.settle_until(judge_us);
             let result = if event.press {
                 self.player.press_dir(event.lane, dir, judge_us, |emitted| sink.play(immediate_sound(emitted)))
             } else {
                 self.player.release_dir(event.lane, dir, judge_us)
             };
-            if let Some(result) = result {
-                let scratch = self.is_scratch(result.lane);
-                self.instrumentation.record(&result, scratch);
+            if let Some(result) = result.filter(|result| result.counted) {
+                self.note_judgment(result.lane, result.judge, result.delta_us);
                 self.marks.push(TimingMark { lane: result.lane, delta_us: result.delta_us, judge: result.judge as u8 });
             }
         }
@@ -1320,7 +1406,110 @@ mod tests {
         assert_eq!(session.judge().gauge.selected_index(), GaugeIndex::Class);
         assert_eq!(summary.gauge_value, 72.0);
         assert_eq!(session.standing_combo(), 120);
-        assert_eq!(summary.max_combo, 120);
+        assert_eq!(session.standing_max_combo(), 120);
+        assert_eq!(summary.max_combo, 0, "the chart's own combo carries nothing in from the stage before");
+    }
+
+    /// Four notes a beat apart from the second measure on, on the first key lane.
+    const FOUR_NOTES: &[u8] = b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:01010101\r\n";
+
+    /// Where the four notes of [`FOUR_NOTES`] fall on the song clock, in microseconds.
+    const FOUR_NOTE_TIMES_US: [i64; 4] = [2_000_000, 2_500_000, 3_000_000, 3_500_000];
+
+    /// How long a key of the fixtures is held down, in microseconds.
+    const TAP_US: i64 = 10_000;
+
+    /// How long after the last note the fixtures press once more, in microseconds: inside the
+    /// empty-POOR window, outside every window of the note.
+    const LATE_PRESS_AFTER_LAST_NOTE_US: i64 = 100_000;
+
+    /// A course stage keeps the course's streak going for the player and for the next stage, and
+    /// records its own: the chart's max combo is its notes, and every note a PGREAT is a MAX
+    /// (`JudgeManager.java:668-676`, `BMSPlayer.java:868`).
+    #[test]
+    fn a_course_stage_reports_its_own_combo() {
+        let carried = 100;
+        let m = model(FOUR_NOTES);
+        let notes = rbms_chart::count_playable_notes(&m) as u32;
+        let options = SessionOptions { autoplay: true, initial_gauge: Some((GaugeIndex::Class, 80.0)), initial_combo: carried, ..Default::default() };
+        let mut session = PlaySession::new(m, options);
+        session.tick(SessionClock::at(session.last_time_us() + PLAY_TAIL_US), &mut NullSink);
+        let summary = session.summary();
+        assert_eq!(summary.counts[0], notes, "autoplay takes every note as a PGREAT");
+        assert_eq!(summary.max_combo, notes, "the chart's record holds its own combo");
+        assert_eq!(summary.clear_lamp, ClearType::Max);
+        assert_eq!(session.standing_combo(), carried + notes, "the course carries the whole streak on");
+        assert_eq!(session.standing_max_combo(), carried + notes);
+    }
+
+    /// A course is a full combo only while its streak has gone unbroken from its first note: a stage
+    /// that is a MAX of its own after a stage that broke the streak leaves the course on its gauge's
+    /// lamp, and one that carries an unbroken streak on is a MAX of the course.
+    #[test]
+    fn a_course_is_a_full_combo_only_while_its_streak_is_unbroken() {
+        let notes_before = 10;
+        let course = |carried: u32| {
+            let options = SessionOptions { autoplay: true, initial_gauge: Some((GaugeIndex::Class, 80.0)), initial_combo: carried, ..Default::default() };
+            let mut session = PlaySession::new(model(FOUR_NOTES), options);
+            session.tick(SessionClock::at(session.last_time_us() + PLAY_TAIL_US), &mut NullSink);
+            session
+        };
+        let unbroken = course(notes_before);
+        assert_eq!(unbroken.summary().clear_lamp, ClearType::Max);
+        assert_eq!(unbroken.course_lamp(notes_before, [notes_before, 0, 0, 0, 0, 0]), ClearType::Max);
+        let broken = course(0);
+        assert_eq!(broken.summary().clear_lamp, ClearType::Max, "the stage is a MAX of its own");
+        let lamp = broken.course_lamp(notes_before, [notes_before - 1, 0, 0, 0, 1, 0]);
+        assert!(lamp.is_cleared() && !matches!(lamp, ClearType::Max | ClearType::Perfect | ClearType::FullCombo), "{lamp:?}");
+    }
+
+    /// Play [`FOUR_NOTES`] in `mode`, every note a PGREAT, then press once more after the last note.
+    fn every_note_then_a_press_after_the_last(mode: Mode) -> PlaySummary {
+        let mut session = PlaySession::new(to_model(&parse(FOUR_NOTES), mode), SessionOptions::default());
+        let last = FOUR_NOTE_TIMES_US[FOUR_NOTE_TIMES_US.len() - 1];
+        for at in FOUR_NOTE_TIMES_US.into_iter().chain([last + LATE_PRESS_AFTER_LAST_NOTE_US]) {
+            session.press(0, at, &mut NullSink);
+            session.release(0, at + TAP_US);
+        }
+        session.tick(SessionClock::at(session.last_time_us() + PLAY_TAIL_US), &mut NullSink);
+        session.summary()
+    }
+
+    /// An empty POOR after the last note breaks the combo on five keys (`JudgeProperty.java:18`), so
+    /// the run is no full combo there, as the reference reads it off the combo standing at the end
+    /// (`BMSPlayer.java:868`). Seven keys keep the combo through an empty POOR, and the MAX.
+    #[test]
+    fn five_key_empty_poor_after_the_last_note_breaks_the_full_combo() {
+        let five = every_note_then_a_press_after_the_last(Mode::BEAT_5K);
+        assert_eq!((five.counts[0], five.empty_poor), (4, 1), "every note a PGREAT and one empty POOR: {:?}", five.counts);
+        assert_eq!(five.max_combo, 4, "the streak was as long as the chart");
+        assert_ne!(five.clear_lamp, ClearType::Max, "the combo standing at the end is broken");
+        assert!(five.clear_lamp.is_cleared() && five.clear_lamp != ClearType::FullCombo && five.clear_lamp != ClearType::Perfect);
+
+        let seven = every_note_then_a_press_after_the_last(Mode::BEAT_7K);
+        assert_eq!((seven.counts[0], seven.empty_poor), (4, 1));
+        assert_eq!(seven.clear_lamp, ClearType::Max, "seven keys keep the combo through an empty POOR");
+    }
+
+    /// A run the gauge ended is charged for every note it did not get to, as the reference records
+    /// it (`BMSPlayer.java:909`); the summary's own count is what was judged.
+    #[test]
+    fn a_failed_run_counts_unreached_notes_in_min_bp() {
+        let m =
+            model(b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:0101010101010101\r\n#00211:0101010101010101\r\n#00311:0101010101010101\r\n#00411:0101010101010101\r\n");
+        let mut session = PlaySession::new(m, SessionOptions { gauge: GaugeKind::ExHard, ..Default::default() });
+        let mut at = 0;
+        while !session.is_failed() && at < session.last_time_us() {
+            at += PLAY_TAIL_US / 10;
+            session.tick(SessionClock::at(at), &mut NullSink);
+        }
+        let summary = session.summary();
+        assert!(session.is_failed(), "the run never hit a note, so EX-HARD ran out");
+        assert!(summary.total_judged < summary.total_notes, "the run ended before the chart did: {summary:?}");
+        let bad_poor = summary.counts[3] + summary.counts[4] + summary.counts[5];
+        assert_eq!(summary.min_bp_with_unreached(), bad_poor + summary.total_notes - summary.total_judged);
+        assert_eq!(session.record().min_bp_with_unreached(), summary.min_bp_with_unreached());
+        assert_eq!(summary.left_unfinished().min_bp_with_unreached(), summary.min_bp_with_unreached(), "a run left is charged once");
     }
 
     #[test]
@@ -1443,6 +1632,9 @@ mod tests {
         }
     }
 
+    /// Far enough past a recorded input that it is due whatever offset its replay judged it at.
+    const RECORDED_OFFSETS_REACHED_US: i64 = 100_000;
+
     #[test]
     fn a_replay_is_judged_as_far_from_its_inputs_as_it_says_whatever_the_offset_is_now() {
         let judged = |recorded_ms: i32, steps: Vec<ReplayOffsetStep>, now_us: i64| {
@@ -1459,7 +1651,7 @@ mod tests {
                 events: vec![ReplayEvent { t: 2_000_000, lane: 0, press: true, backward: false }],
             };
             let mut session = PlaySession::new(one_note(), SessionOptions { replay: Some(replay), judge_offset_us: now_us, ..Default::default() });
-            session.tick(SessionClock::at(2_000_000), &mut NullSink);
+            session.tick(SessionClock::at(2_000_000 + RECORDED_OFFSETS_REACHED_US), &mut NullSink);
             session.recent_marks(1).first().map(|mark| mark.delta_us)
         };
         for now_us in [0, 90_000, -90_000] {
@@ -1732,6 +1924,13 @@ mod tests {
     }
 
     #[test]
+    fn a_chart_with_no_note_to_judge_has_nothing_left_to_hit_from_the_start() {
+        let session = PlaySession::new(model(b"#BPM 120\r\n#WAV01 a.wav\r\n#00101:01\r\n"), SessionOptions::default());
+        assert_eq!(session.judge().total_notes(), 0, "the chart is background sound alone");
+        assert!(session.all_notes_resolved(), "nothing is left to hit, so leaving it is ending it");
+    }
+
+    #[test]
     fn only_a_replay_run_can_be_scrubbed() {
         let mut session = PlaySession::new(one_note(), SessionOptions { analysis: true, ..Default::default() });
         session.seek(1_000_000);
@@ -1825,7 +2024,7 @@ mod tests {
     fn a_judgement_with_no_timing_reaches_neither_column() {
         let mut inst = PlayInstrumentation::default();
         for judge in [rbms_judge::Judge::Bad, rbms_judge::Judge::Poor, rbms_judge::Judge::Miss] {
-            inst.record(&JudgeResult { judge, lane: 0, note_index: 0, fast: true, delta_us: 1_000 }, false);
+            inst.record(judge, 1_000, false);
         }
         assert_eq!(inst.judge_dist().iter().sum::<u32>(), 3, "every judgement still reaches the distribution");
         assert_eq!(inst.fast()[KEY_LANE_KIND], 1, "the one judgement inside the timed range is counted");
@@ -1860,6 +2059,91 @@ mod tests {
         let inst = session.instrumentation();
         assert_eq!(inst.fast()[KEY_LANE_KIND], 1, "the replayed hit was not counted");
         assert_eq!(inst.fast().iter().chain(inst.slow().iter()).sum::<u32>(), session.judge().fast + session.judge().slow);
+    }
+
+    fn plain_long_note() -> Model {
+        model(b"#BPM 120\r\n#RANK 3\r\n#WAV01 a.wav\r\n#00151:01000001\r\n")
+    }
+
+    fn long_note_times(m: &Model) -> (i64, i64) {
+        let times: Vec<i64> = m.timelines.iter().flat_map(|t| t.notes[0].as_ref()).map(|n| n.time_us).collect();
+        (times[0], times[1])
+    }
+
+    /// How late the head is taken, and how early the end is let go, in the runs below. The head is
+    /// the worse of the two, which is the timing the note is judged with.
+    const LATE_HEAD_US: i64 = 40_000;
+    const EARLY_END_US: i64 = 30_000;
+
+    /// A plain long note is one judgment, at its end. The press that takes its head used to be
+    /// tallied as a judgment too, so the distribution, the FAST/SLOW split and the offset an
+    /// adjusting run moves all counted every long note twice.
+    #[test]
+    fn plain_long_notes_are_counted_once_by_instrumentation_and_auto_adjust() {
+        let m = plain_long_note();
+        let (head_us, end_us) = long_note_times(&m);
+        let mut session = PlaySession::new(m, SessionOptions { auto_calibration: true, ..Default::default() });
+        let head = session.press(0, head_us + LATE_HEAD_US, &mut NullSink).expect("the head is taken");
+        assert!(!head.counted, "the head only starts the hold");
+        assert_eq!(session.instrumentation().judge_dist().iter().sum::<u32>(), 0, "the head alone is no judgment");
+        assert_eq!((session.adjusted_inputs(), session.judge_offset_ms()), (0, 0), "and moves no offset");
+
+        let end = session.release(0, end_us - EARLY_END_US).expect("the release judges the note");
+        assert!(end.counted);
+        let inst = session.instrumentation();
+        assert_eq!(inst.judge_dist().iter().sum::<u32>(), 1, "one judgment in the distribution");
+        assert_eq!(inst.judge_dist()[end.judge as usize], 1);
+        assert_eq!(inst.timing_hist().iter().sum::<u32>(), 1);
+        assert_eq!(inst.fast().iter().chain(inst.slow().iter()).sum::<u32>(), session.judge().fast + session.judge().slow, "FAST/SLOW agree with the engine");
+        assert_eq!(session.adjusted_inputs(), 1, "the offset moved once, for the one judgment");
+        assert_eq!(session.judge_offset_ms(), auto_adjust_step_ms(end.judge, end.delta_us));
+    }
+
+    /// A long note held through its end is judged by the clock, with the timing of its head, and
+    /// that judgment is counted once as well: no input of the player's brought it back.
+    #[test]
+    fn a_plain_long_note_held_through_its_end_is_counted_once() {
+        let m = plain_long_note();
+        let (head_us, end_us) = long_note_times(&m);
+        let mut session = PlaySession::new(m, SessionOptions { auto_calibration: true, ..Default::default() });
+        session.press(0, head_us + LATE_HEAD_US, &mut NullSink);
+        for step in 0..=((end_us + 200_000) / 50_000) {
+            session.tick(SessionClock::at(step * 50_000), &mut NullSink);
+        }
+        let judge = session.judge();
+        assert_eq!(judge.counts.iter().sum::<u32>(), 1, "the engine counted the note once");
+        let inst = session.instrumentation();
+        assert_eq!(inst.judge_dist().iter().sum::<u32>(), 1);
+        assert_eq!(inst.fast().iter().chain(inst.slow().iter()).sum::<u32>(), judge.fast + judge.slow);
+        assert_eq!(session.adjusted_inputs(), 1);
+    }
+
+    /// A miss swept up by the clock has no timing and is nobody's input, so it is left out of the
+    /// tallies as before.
+    #[test]
+    fn a_long_note_swept_as_a_miss_reaches_no_tally() {
+        let m = plain_long_note();
+        let (_, end_us) = long_note_times(&m);
+        let mut session = PlaySession::new(m, SessionOptions { auto_calibration: true, ..Default::default() });
+        for step in 0..=((end_us + 1_000_000) / 100_000) {
+            session.tick(SessionClock::at(step * 100_000), &mut NullSink);
+        }
+        assert_eq!(session.judge().counts[Judge::Poor as usize], 1);
+        assert_eq!(session.instrumentation().judge_dist().iter().sum::<u32>(), 0);
+        assert_eq!(session.adjusted_inputs(), 0);
+    }
+
+    /// A run that plays itself makes no input, so none of its judgments are tallied or move the
+    /// offset, long notes included.
+    #[test]
+    fn an_autoplayed_long_note_is_not_tallied_as_an_input() {
+        let mut session = PlaySession::new(plain_long_note(), SessionOptions { autoplay: true, auto_calibration: true, ..Default::default() });
+        for step in 0..=60 {
+            session.tick(SessionClock::at(step * 100_000), &mut NullSink);
+        }
+        assert_eq!(session.judge().counts[0], 1, "the autoplay took the note");
+        assert_eq!(session.instrumentation().judge_dist().iter().sum::<u32>(), 0);
+        assert_eq!(session.adjusted_inputs(), 0);
     }
 
     #[test]
@@ -1898,7 +2182,8 @@ mod tests {
     }
 
     /// Scrubbing rebuilds the run from the recorded inputs, so what was measured before the seek
-    /// describes a run that no longer exists.
+    /// describes a run that no longer exists, and what is measured after it is the rebuilt run's up
+    /// to where the scrub landed.
     #[test]
     fn scrubbing_a_replay_throws_away_what_was_measured_before_it() {
         let at = PlaySession::new(one_note(), SessionOptions::default()).last_time_us();
@@ -1906,11 +2191,14 @@ mod tests {
         let options = SessionOptions { analysis: true, replay: Some(replay_of(events)), ..Default::default() };
         let mut session = PlaySession::new(one_note(), options);
         session.tick(SessionClock::at(at + 1), &mut NullSink);
-        assert!(session.instrumentation().judge_dist().iter().sum::<u32>() > 0, "the replayed input was measured");
+        let measured = session.instrumentation().judge_dist().iter().sum::<u32>();
+        assert!(measured > 0, "the replayed input was measured");
         session.seek(0);
         let inst = session.instrumentation();
-        assert!(inst.gauge_series().is_empty());
+        assert_eq!(inst.gauge_series().len(), 1, "the one sample at the start of the song");
         assert_eq!(inst.timing_hist().iter().sum::<u32>(), 0);
         assert_eq!(inst.judge_dist().iter().sum::<u32>(), 0);
+        session.seek(at + 1);
+        assert_eq!(session.instrumentation().judge_dist().iter().sum::<u32>(), measured, "scrubbing past the input measures it again, once");
     }
 }

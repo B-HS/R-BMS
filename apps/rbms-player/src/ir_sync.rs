@@ -35,6 +35,11 @@ pub(crate) struct SyncPayload {
 /// difficulty tables and everything the skin menu stores among them, since all of it is paths into
 /// this machine's disk.
 ///
+/// The extra score servers (`ir_profiles`) are the same thing several times over: each is a server
+/// with the bearer token issued by it. The list stays on this machine as a whole, so no token of
+/// theirs reaches the server's blob store and a download cannot swap the tokens held here for those
+/// of another machine.
+///
 /// Which of the tables every player is given this machine has given already goes with its table
 /// list: taken from another machine, it would put back a table removed here or never give one this
 /// machine has not had.
@@ -50,6 +55,7 @@ fn keep_local(local: &Config, mut incoming: Config) -> Config {
     incoming.network.ir_email = local.network.ir_email.clone();
     incoming.network.player_id = local.network.player_id.clone();
     incoming.network.server_url = local.network.server_url.clone();
+    incoming.network.ir_profiles = local.network.ir_profiles.clone();
     incoming.library.songs_folder = local.library.songs_folder.clone();
     incoming.library.folders = local.library.folders.clone();
     incoming.library.tables = local.library.tables.clone();
@@ -350,6 +356,77 @@ mod tests {
         assert!(!blob.content.contains("/local/table.json"));
         assert!(!blob.content.contains("/local/skins/pack"), "the serialised blob cannot leak the skin pack folder");
         assert!(!blob.content.contains(LOCAL_SKIN_FOLDER), "the serialised blob cannot leak the skin folder or a document under it");
+    }
+
+    /// The extra server profiles a machine holds, each with the token issued by its server.
+    const PROFILE_TOKEN: &str = "profile-secret-token";
+    const OTHER_MACHINE_PROFILE_TOKEN: &str = "other-machine-profile-token";
+
+    fn profile(name: &str, base_url: &str, token: &str) -> rbms_config::IrProfile {
+        rbms_config::IrProfile { name: name.into(), base_url: base_url.into(), token: Some(token.into()), enabled: true }
+    }
+
+    #[test]
+    fn the_extra_profile_tokens_never_leave_the_machine() {
+        let mut local = local_settings();
+        local.network.ir_profiles = vec![profile("EXTRA", "https://extra.example/api", PROFILE_TOKEN)];
+
+        let sanitised = sanitise_for_upload(&local);
+        assert!(sanitised.network.ir_profiles.is_empty(), "the extra servers are this machine's connections");
+
+        let blob = build_blob(&payload_of(sanitised), 1, None).unwrap();
+        assert!(!blob.content.contains(PROFILE_TOKEN), "the serialised blob leaked the token of an extra server");
+        assert!(!blob.content.contains("extra.example"), "the serialised blob names the extra server");
+        assert!(!blob.content.contains("secret-token"), "the serialised blob leaked the token of the main server");
+    }
+
+    /// Words that name a credential in a field of the configuration, and the fields that carry one
+    /// today: the main server's token and the token of each extra profile. A field this build gains
+    /// that names a credential fails the test below until `keep_local` keeps it off the wire.
+    const CREDENTIAL_WORDS: [&str; 3] = ["token", "secret", "password"];
+    const CREDENTIAL_FIELDS_KEPT_LOCAL: [&str; 2] = ["ir_token", "token"];
+
+    #[test]
+    fn a_field_of_the_configuration_that_names_a_credential_is_one_the_upload_blanks() {
+        let mut config = Config::default();
+        config.network.ir_profiles.push(rbms_config::IrProfile::default());
+        let text = ron::ser::to_string_pretty(&config, ron::ser::PrettyConfig::default()).unwrap();
+        let mut fields: Vec<&str> = text
+            .lines()
+            .filter_map(|line| line.trim().split_once(':').map(|(name, _)| name.trim()))
+            .filter(|name| CREDENTIAL_WORDS.iter().any(|word| name.contains(word)))
+            .collect();
+        fields.sort_unstable();
+        fields.dedup();
+        assert_eq!(fields, CREDENTIAL_FIELDS_KEPT_LOCAL, "a new credential field must be added to `keep_local` and to this list");
+    }
+
+    #[test]
+    fn a_download_keeps_the_extra_profiles_and_their_tokens_this_machine_holds() {
+        let mut local = local_settings();
+        local.network.ir_profiles = vec![profile("EXTRA", "https://extra.example/api", PROFILE_TOKEN)];
+        let mut remote = Config::default();
+        remote.network.ir_profiles =
+            vec![profile("EXTRA", "https://extra.example/api", OTHER_MACHINE_PROFILE_TOKEN), profile("THEIRS", "https://theirs.example/api", "x")];
+
+        let merged = merge_downloaded(&local, remote);
+        assert_eq!(merged.network.ir_profiles, local.network.ir_profiles, "a download replaced the profiles held here");
+        assert_eq!(merged.network.ir_profiles[0].token.as_deref(), Some(PROFILE_TOKEN));
+    }
+
+    #[test]
+    fn a_blob_an_account_already_holds_with_a_profile_token_does_not_bring_it_down_and_is_not_sent_back() {
+        let mut uploaded_before_the_fix = Config::default();
+        uploaded_before_the_fix.network.ir_profiles = vec![profile("EXTRA", "https://extra.example/api", OTHER_MACHINE_PROFILE_TOKEN)];
+        let held = build_blob(&payload_of(uploaded_before_the_fix), 1_000, None).unwrap();
+        assert!(held.content.contains(OTHER_MACHINE_PROFILE_TOKEN), "the fixture is a blob that still carries a profile token");
+
+        let local = local_settings();
+        let merged = merge_downloaded(&local, parse_blob(&held).expect("a current blob parses").settings);
+        assert!(merged.network.ir_profiles.is_empty(), "a token another machine uploaded came down");
+
+        let next = build_blob(&payload_of(sanitise_for_upload(&merged)), 2_000, Some(1_000)).unwrap();
+        assert!(!next.content.contains(OTHER_MACHINE_PROFILE_TOKEN), "the next upload carries the old token again");
     }
 
     #[test]

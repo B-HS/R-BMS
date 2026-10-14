@@ -175,6 +175,32 @@ fn a_library_scanned_before_euc_kr_was_read_is_read_again_and_keeps_what_is_not_
     assert!(!db.needs_full_rescan().expect("read the generation"), "the next scan is incremental again");
 }
 
+/// The generation that counted a normal note inside a long note's body and a head nothing closes.
+const UNSETTLED_LONG_NOTE_GENERATION: u32 = 2;
+
+#[test]
+fn a_library_scanned_before_long_notes_were_settled_is_read_again_and_gets_the_new_note_count() {
+    let fixture = Fixture::new("long-note-generation");
+    let source = fixture.write("song.bms", "#TITLE T\n#BPM 120\n#WAV01 a.wav\n#WAV02 b.wav\n#00151:01\n#00211:02\n#00251:01\n#00351:01\n");
+    let path = normalize(&source);
+    let mut db = db();
+    scan(&mut db, &ScanRequest::new(fixture.roots(), false));
+
+    let scanned = db.song(&path).expect("read the chart").expect("the chart is stored");
+    assert_eq!((scanned.notes, scanned.long_notes), (1, 1), "the note in the body and the head nothing closes are not counted");
+
+    let before_settling = SongRow { notes: 3, long_notes: 2, ..scanned };
+    db.upsert_batch(std::slice::from_ref(&before_settling)).expect("store the counts the old generation wrote");
+    db.set_parser_version(UNSETTLED_LONG_NOTE_GENERATION).expect("stamp the old generation");
+
+    let full = db.needs_full_rescan().expect("read the generation");
+    assert!(full, "rows the generation before long notes were settled wrote are not trusted by this one");
+    assert_eq!(scan(&mut db, &ScanRequest::new(fixture.roots(), full)), ScanOutcomeG::Completed { upserted: 1, removed: 0 });
+
+    let after = db.song(&path).expect("read the chart").expect("the chart is stored");
+    assert_eq!((after.notes, after.long_notes), (1, 1));
+}
+
 #[test]
 fn a_scan_cancelled_before_it_starts_reads_nothing_and_deletes_nothing() {
     let fixture = Fixture::new("cancel");

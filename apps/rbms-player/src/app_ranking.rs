@@ -6,8 +6,11 @@
 #![allow(clippy::wildcard_imports)]
 use std::sync::mpsc::TryRecvError;
 
+use std::sync::mpsc::Receiver;
+
 use rbms_ir::{
-    ChartId, PlayerId, ReplayData, ScoreSubmission, SubmitJob, SubmitVerdict, UploadVerdict, spawn_query, spawn_submit, submit_verdict, upload_verdict,
+    ChartId, CourseSubmission, IrError, PlayerId, ReplayData, ScoreSubmission, SubmitJob, SubmitResponse, SubmitVerdict, UploadVerdict, spawn_query,
+    spawn_submit, submit_verdict, upload_verdict,
 };
 use rbms_store::scoredb::ReplayState;
 
@@ -15,7 +18,7 @@ use crate::ir_ext::PrimaryProfileDirection;
 use crate::ir_outcome::{IrReport, IrStatus, format_submit_outcome, short_error};
 use crate::ir_ranking::{RankingFetch, RankingState, accept_fetch, fetch_board};
 use crate::ir_replay::{replay_download_is_applicable, to_ir_replay, wire_carries_judge};
-use crate::record_sync::{RATE_LIMITED_DETAIL, ScoreOutcome, sync_row};
+use crate::record_sync::{RATE_LIMITED_DETAIL, ScoreOutcome, course_outcome, course_sync_row, sync_row};
 use crate::stage::StageId;
 use crate::*;
 
@@ -31,6 +34,17 @@ pub(crate) struct LiveSubmit {
     /// upload cannot state the widths of, and [`ReplayState::Pending`] otherwise.
     pub(crate) replay_plan: ReplayState,
 }
+
+/// A finished course on its way to the main server: where its answer comes back, and the kept
+/// course and the server and account its answer is written down against, when it was kept and the
+/// main server is the one the records sync sends to.
+pub(crate) struct CourseSubmit {
+    rx: Receiver<Result<SubmitResponse, IrError>>,
+    kept: Option<(i64, String, String)>,
+}
+
+/// What the message bus says of a course the server holds now.
+pub(crate) const COURSE_SENT: &str = "course sent";
 
 /// Why a run was not sent to the main score server: nobody is signed in to it, and the server takes
 /// a score only from an account (a tokenless submission is refused 401). The run is kept locally.
@@ -55,7 +69,7 @@ impl AppShared {
         }
         let generation = self.ranking_generation;
         let md5 = chart.md5.clone();
-        let player = PlayerId { id: self.config.network.player_id.clone() };
+        let player = PlayerId { id: crate::ir_session::submission_player_id(&self.session) };
         let rivals = self.config.network.rivals.clone();
         self.ranking_cache.insert(md5.clone(), RankingState::Loading);
         let source = self.primary_ir_server();
@@ -168,7 +182,9 @@ impl AppShared {
         }
         self.poll_submit();
         self.poll_profile_submits();
+        self.poll_course_submits();
         self.poll_record_sync();
+        self.poll_saves();
     }
 
     fn poll_ranking(&mut self) {
@@ -267,13 +283,82 @@ impl AppShared {
             SubmitVerdict::RateLimited => ScoreOutcome::Retry { detail: RATE_LIMITED_DETAIL.to_string() },
             SubmitVerdict::Transient { detail } | SubmitVerdict::StopSync { detail } => ScoreOutcome::Retry { detail },
         };
-        let mut row = sync_row(live.log_id, &live.server, &live.login_id, &score);
+        let refused_under = self.refusal_key();
+        let mut row = sync_row(live.log_id, &live.server, &live.login_id, &score, &refused_under);
         match &outcome.replay {
             Some(Ok(id)) => row.replay_id = Some(id.clone()),
             Some(Err(error)) => row.replay_error = Some(error.to_string()),
             None => {}
         }
         self.write_sync_row(row);
+    }
+}
+
+impl AppShared {
+    /// Keep a finished course in the score database, and send it to the main server when somebody
+    /// is signed in to it. The course is kept whether or not it is sent now: a course the server does
+    /// not answer, or one finished signed out, is sent by a later records sync, exactly as it was
+    /// first sent, until the server holds it.
+    pub(crate) fn keep_and_send_course(&mut self, sub: CourseSubmission) {
+        let played_as = self.session.is_logged_in().then(|| self.session.login_id()).flatten().map(str::to_string);
+        let kept = match (sub.to_json(), self.scoredb.as_mut()) {
+            (Some(body), Some(db)) => match db.put_course(&sub.course_hash, sub.played_at, &body, played_as.as_deref()) {
+                Ok(id) => Some(id),
+                Err(e) => {
+                    notify(Level::Error, format!("course not kept: {e}"));
+                    None
+                }
+            },
+            (None, _) => {
+                notify(Level::Warn, "course not kept: it does not serialise");
+                None
+            }
+            (Some(_), None) => {
+                notify(Level::Error, "course not kept: score database not open");
+                None
+            }
+        };
+        if !self.sends_to_primary_ir_server() {
+            return;
+        }
+        let main_is_synced = self.multi_ir.primary_server().is_some() && self.multi_ir.primary_server() == self.multi_ir.legacy_index();
+        let kept = kept.filter(|_| main_is_synced).zip(self.record_sync_target()).map(|(id, (server, login_id))| (id, server, login_id));
+        let server = self.course_ir_server();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(server.submit_course(&sub));
+        });
+        self.course_submits.push(CourseSubmit { rx, kept });
+    }
+
+    /// Take the answers of the courses sent since the last frame: write each down against its kept
+    /// course, and say what became of it.
+    fn poll_course_submits(&mut self) {
+        let mut answered = Vec::new();
+        self.course_submits.retain(|submit| match submit.rx.try_recv() {
+            Ok(result) => {
+                answered.push((result, submit.kept.clone()));
+                false
+            }
+            Err(TryRecvError::Empty) => true,
+            Err(TryRecvError::Disconnected) => {
+                answered.push((Err(IrError::Network("course submit worker stopped".into())), submit.kept.clone()));
+                false
+            }
+        });
+        for (result, kept) in answered {
+            let outcome = course_outcome(&result);
+            match &outcome {
+                ScoreOutcome::Accepted { .. } => notify(Level::Info, COURSE_SENT),
+                ScoreOutcome::Rejected(rejection) => notify(Level::Warn, format!("course rejected: {}", rejection.detail)),
+                ScoreOutcome::Retry { detail } => notify(Level::Warn, format!("course not sent yet ({detail}): sent again on the next records sync")),
+                ScoreOutcome::Skipped { .. } => {}
+            }
+            if let Some((course_id, server, login_id)) = kept {
+                let row = course_sync_row(course_id, &server, &login_id, &outcome, &self.refusal_key());
+                self.write_course_sync_row(&row);
+            }
+        }
     }
 }
 

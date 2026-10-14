@@ -93,7 +93,13 @@ fn a_note_that_goes_by_unhit_is_reported_as_a_poor_in_its_lane() {
     let seen = trace.take_judgements(&engine);
     assert_eq!(seen.len(), lanes.len(), "not every missed note was reported: {seen:?}");
     assert!(seen.iter().all(|seen| seen.judge == Judge::Poor && seen.combo == 0));
-    assert_eq!(seen.iter().map(|seen| seen.lane).collect::<Vec<_>>(), lanes, "the misses are not reported in their own lanes, as the engine counted them");
+    let counted: Vec<usize> = engine.judged().iter().map(|judged| judged.lane).collect();
+    assert_eq!(seen.iter().map(|seen| seen.lane).collect::<Vec<_>>(), counted, "the misses are not reported in their own lanes, as the engine counted them");
+    let mut reported = counted;
+    reported.sort_unstable();
+    let mut every_lane = lanes.clone();
+    every_lane.sort_unstable();
+    assert_eq!(reported, every_lane, "the engine counts a miss for every note, each the instant it went past");
     assert!(lanes.iter().all(|lane| note_times(&engine, *lane).iter().all(|time_us| trace.state(*lane, *time_us) == MISSED_STATE)));
 }
 
@@ -378,4 +384,117 @@ fn the_tables_reach_the_end_of_the_chart_and_keep_their_length_over_a_reset() {
     let (by_judge, _) = trace.seconds();
     assert_eq!(by_judge.len(), CHART_SECONDS);
     assert_eq!(by_judge.iter().map(|row| row[UNJUDGED_CLASS]).sum::<u32>(), 3, "the notes were counted twice, or not again, after a reset");
+}
+
+/// The state the trace keeps of every note of `engine`, heads and ends, in the engine's order, and
+/// its tables of the chart's seconds.
+fn kept(trace: &RunTrace, engine: &JudgeEngine) -> (Vec<u8>, Vec<[u32; JUDGE_CLASSES]>, Vec<[u32; TIMING_CLASSES]>) {
+    let states =
+        engine.note_marks().map(|mark| if mark.long_end { trace.end_state(mark.lane, mark.time_us) } else { trace.state(mark.lane, mark.time_us) }).collect();
+    let (by_judge, by_timing) = trace.seconds();
+    (states, by_judge.to_vec(), by_timing.to_vec())
+}
+
+/// Frames of the runs below, in microseconds: a screen at sixty frames a second.
+const FRAME_US: i64 = 16_000;
+
+/// How far off its note each press of the runs below lands, by the note's place in its lane: on
+/// it, early, late, far enough early to take nothing, and well late.
+const PRESS_OFFSETS_US: [i64; 5] = [0, 30_000, -45_000, 400_000, -120_000];
+
+/// How long each long note of the runs below is held: let go well before its end, at it, and past.
+const HOLD_SHARES: [f64; 3] = [0.5, 1.0, 1.2];
+
+/// A chart of `measures` measures of eighth notes spread over five keys, with a long note in the
+/// sixth written as `lnmode` (1 plain, 2 charge, 3 hell charge).
+fn busy_chart(measures: usize, lnmode: u8) -> String {
+    let keys = ["11", "12", "13", "14", "15"];
+    let mut chart = format!("#PLAYER 1\n#BPM 150\n#LNTYPE 1\n#LNMODE {lnmode}\n#WAV01 a.wav\n");
+    for measure in 1..=measures {
+        for (key, channel) in keys.iter().enumerate() {
+            let cells: String = (0..8).map(|eighth| if (eighth + key + measure) % 3 == 0 { "01" } else { "00" }).collect();
+            chart.push_str(&format!("#{measure:03}{channel}:{cells}\n"));
+        }
+        chart.push_str(&format!("#{measure:03}56:0001000100\n"));
+    }
+    chart
+}
+
+/// Plays `engine` through frame by frame the way the player might, pressing every note with one of
+/// [`PRESS_OFFSETS_US`] and holding every long note for one of [`HOLD_SHARES`], and calls `frame`
+/// after each frame.
+fn play_through(engine: &mut JudgeEngine, mut frame: impl FnMut(&JudgeEngine)) {
+    let marks: Vec<_> = engine.note_marks().collect();
+    let mut inputs: Vec<(i64, usize, bool)> = Vec::new();
+    for (place, mark) in marks.iter().enumerate().filter(|(_, mark)| !mark.long_end) {
+        let press = mark.time_us - PRESS_OFFSETS_US[place % PRESS_OFFSETS_US.len()];
+        inputs.push((press, mark.lane, true));
+        let end = marks
+            .get(place + 1)
+            .filter(|end| end.long_end && end.lane == mark.lane)
+            .map_or(press + FRAME_US, |end| press + ((end.time_us - mark.time_us) as f64 * HOLD_SHARES[place % HOLD_SHARES.len()]) as i64);
+        inputs.push((end, mark.lane, false));
+    }
+    inputs.sort_by_key(|input| input.0);
+    let last = marks.iter().map(|mark| mark.time_us).max().unwrap_or_default() + WELL_PAST_US;
+    let mut next = 0;
+    let mut now = 0;
+    while now <= last {
+        while let Some(&(at, lane, press)) = inputs.get(next).filter(|input| input.0 <= now) {
+            if press {
+                engine.press(lane, at);
+            } else {
+                engine.release(lane, at);
+            }
+            next += 1;
+        }
+        engine.update(now);
+        frame(engine);
+        now += FRAME_US;
+    }
+}
+
+/// A trace walks every note once, at its first look, and from then on takes in the notes the engine
+/// names as touched: frame after frame of a whole run, judged or not, it keeps exactly what a trace
+/// walking every note would have.
+#[test]
+fn a_run_is_walked_once_and_followed_note_by_note_from_then_on() {
+    for lnmode in [1, 2, 3] {
+        let model = model_of(&busy_chart(6, lnmode));
+        let mut engine = JudgeEngine::from_model_for_mode(&model);
+        let mut trace = looking_at(&engine);
+        let mut frames = 0;
+        play_through(&mut engine, |engine| {
+            let seen = trace.take_judgements(engine);
+            let mut fresh = RunTrace::new();
+            fresh.take_judgements(engine);
+            assert_eq!(kept(&trace, engine), kept(&fresh, engine), "long note mode {lnmode}, frame {frames}: the trace fell out of step with the run");
+            assert!(seen.len() <= engine.judged().len());
+            frames += 1;
+        });
+        assert!(engine.total_judged() > 0 && frames > 0);
+        assert_eq!(trace.walks, 1, "long note mode {lnmode}: the trace walked the whole chart again during the run");
+    }
+}
+
+/// A trace that is shown another run of the chart, one that has touched fewer notes than it has
+/// read, walks that run whole again, as it does after it is reset.
+#[test]
+fn another_run_of_the_chart_is_walked_whole_again() {
+    let model = model_of(&busy_chart(2, 2));
+    let mut engine = JudgeEngine::from_model_for_mode(&model);
+    let mut trace = looking_at(&engine);
+    play_through(&mut engine, |engine| {
+        trace.take_judgements(engine);
+    });
+    let other = JudgeEngine::from_model_for_mode(&model);
+    trace.take_judgements(&other);
+    assert_eq!(trace.walks, 2);
+    let mut fresh = RunTrace::new();
+    fresh.take_judgements(&other);
+    assert_eq!(kept(&trace, &other), kept(&fresh, &other), "the other run was not taken in as it stands");
+
+    trace.reset();
+    trace.take_judgements(&other);
+    assert_eq!(trace.walks, 1, "a reset trace starts counting again and walks once");
 }

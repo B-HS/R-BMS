@@ -13,9 +13,15 @@
 //! far into the engine's judgements it has read, and [`RunTrace::take_judgements`] reports the ones
 //! counted since it was last asked, exactly as they came. It also keeps a copy of the state of every
 //! note, which is what the note field asks for and what the two graphs of a run in progress are
-//! counted from, at the cost of walking the chart's notes once a frame.
+//! counted from.
+//!
+//! That copy is taken whole once, the first time the trace looks at a run, and is kept up to date
+//! after that from the notes the engine names as touched since ([`JudgeEngine::touched`]): every
+//! judgement, counted or not, names the note it reached, so a frame costs as many notes as were
+//! judged in it rather than every note of the chart. An engine that has touched fewer notes than the
+//! trace has read is another run of the chart, and is taken in whole again.
 
-use rbms_judge::{Judge, JudgeEngine, LaneLongNote};
+use rbms_judge::{Judge, JudgeEngine, LaneLongNote, NoteAt, NoteMark};
 use rbms_render::skin_render::frame::{JudgeFrame, JudgeHit, LaneLong, NOTE_UNJUDGED, NoteStates};
 
 use crate::skin_host::play::{Judgement as ShownJudgement, PLAYER_SIDES};
@@ -53,6 +59,9 @@ struct Kept {
 struct LaneStates {
     heads: Vec<Kept>,
     ends: Vec<Kept>,
+    /// Where the end of each note is among `ends`, by the note's place among the lane's notes; none
+    /// for a note that has no end.
+    end_of: Vec<Option<usize>>,
 }
 
 /// Puts one note in its place in `list`, answering what was kept there before.
@@ -63,6 +72,14 @@ fn keep(list: &mut Vec<Kept>, index: usize, note: Kept) -> Option<Kept> {
             list.push(note);
             None
         }
+    }
+}
+
+/// Puts where a note's end is in its place in `list`, the way [`keep`] puts a note.
+fn keep_end(list: &mut Vec<Option<usize>>, index: usize, end: Option<usize>) {
+    match list.get_mut(index) {
+        Some(kept) => *kept = end,
+        None => list.push(end),
     }
 }
 
@@ -120,6 +137,8 @@ pub(crate) struct RunTrace {
     lanes: Vec<LaneStates>,
     /// How many of the engine's judgements the trace has read.
     judged: usize,
+    /// How many of the notes the engine names as touched the trace has read.
+    touched: usize,
     /// Whether the trace has seen the run at all. The first look only takes the run in.
     seen: bool,
     /// Whether a judgement of this run has left the combo at nothing.
@@ -133,6 +152,10 @@ pub(crate) struct RunTrace {
     sides: [Option<ShownJudgement>; PLAYER_SIDES],
     /// How the notes of each second of the chart stand.
     seconds: JudgedSeconds,
+    /// How many times the trace has walked every note of a run, for a test that tells a frame that
+    /// followed the notes it was told of from one that walked them all.
+    #[cfg(test)]
+    walks: usize,
 }
 
 impl RunTrace {
@@ -156,7 +179,12 @@ impl RunTrace {
     /// has read is another run of the chart -- a replay put somewhere else in it -- and is taken in
     /// the same way.
     pub(crate) fn take_judgements(&mut self, engine: &JudgeEngine) -> Vec<Seen> {
-        self.take_states(engine);
+        let touched = engine.touched();
+        let unread = touched.get(self.touched..).filter(|_| self.seen);
+        if !unread.is_some_and(|unread| unread.iter().all(|at| self.take_note(engine, *at))) {
+            self.take_states(engine);
+        }
+        self.touched = touched.len();
         let judged = engine.judged();
         let report = std::mem::replace(&mut self.seen, true) && self.judged <= judged.len();
         let unread = if report { &judged[self.judged..] } else { judged };
@@ -178,6 +206,10 @@ impl RunTrace {
     /// Takes in the state of every note as the engine has it now, and keeps the tables of the
     /// chart's seconds in step with the ones that changed.
     fn take_states(&mut self, engine: &JudgeEngine) {
+        #[cfg(test)]
+        {
+            self.walks += 1;
+        }
         let mut lane_now = usize::MAX;
         let (mut head, mut end) = (0, 0);
         for mark in engine.note_marks() {
@@ -190,20 +222,54 @@ impl RunTrace {
                 self.lanes.resize_with(mark.lane + 1, LaneStates::default);
             }
             let lane = &mut self.lanes[mark.lane];
-            let (list, index) = if mark.long_end { (&mut lane.ends, &mut end) } else { (&mut lane.heads, &mut head) };
-            let note = Kept { time_us: mark.time_us, state: mark.state, late: mark.play_time_us / MICROS_PER_MILLI < 0 };
-            let before = keep(list, *index, note);
-            *index += 1;
-            let counted = mark.charge || !mark.long_end;
-            if before == Some(note) || !counted {
-                continue;
-            }
-            if let Some(before) = before {
-                self.seconds.count(before, false);
-            }
-            self.seconds.count(note, true);
+            let index = if mark.long_end {
+                if let Some(slot) = head.checked_sub(1).and_then(|note| lane.end_of.get_mut(note)) {
+                    *slot = Some(end);
+                }
+                end += 1;
+                end - 1
+            } else {
+                keep_end(&mut lane.end_of, head, None);
+                head += 1;
+                head - 1
+            };
+            self.take_mark(mark, index);
         }
         self.close_lane(lane_now, head, end);
+    }
+
+    /// Takes in the state of the one note `at` names, as the engine has it now. Answers whether the
+    /// trace knew the note; one it does not know is left for a look at every note.
+    fn take_note(&mut self, engine: &JudgeEngine, at: NoteAt) -> bool {
+        let Some(lane) = self.lanes.get(at.lane) else {
+            return false;
+        };
+        let (head, end) = (Some(at.index).filter(|index| *index < lane.heads.len()), lane.end_of.get(at.index).copied().flatten());
+        let mut known = true;
+        for mark in engine.note_marks_at(at) {
+            match if mark.long_end { end } else { head } {
+                Some(index) => self.take_mark(mark, index),
+                None => known = false,
+            }
+        }
+        known
+    }
+
+    /// Keeps `mark` as the `index`th head or end of its lane, and moves its count in the tables of
+    /// the chart's seconds from the state it was kept in to the one it has now.
+    fn take_mark(&mut self, mark: NoteMark, index: usize) {
+        let lane = &mut self.lanes[mark.lane];
+        let list = if mark.long_end { &mut lane.ends } else { &mut lane.heads };
+        let note = Kept { time_us: mark.time_us, state: mark.state, late: mark.play_time_us / MICROS_PER_MILLI < 0 };
+        let before = keep(list, index, note);
+        let counted = mark.charge || !mark.long_end;
+        if before == Some(note) || !counted {
+            return;
+        }
+        if let Some(before) = before {
+            self.seconds.count(before, false);
+        }
+        self.seconds.count(note, true);
     }
 
     /// Drops whatever a lane kept past the notes it has now, for a chart that changed under the
@@ -212,6 +278,7 @@ impl RunTrace {
         if let Some(lane) = self.lanes.get_mut(lane) {
             lane.heads.truncate(heads);
             lane.ends.truncate(ends);
+            lane.end_of.truncate(heads);
         }
     }
 

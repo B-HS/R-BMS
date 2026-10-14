@@ -920,6 +920,13 @@ impl SkinLua {
         }
     }
 
+    /// Holds the wall clock of this skin's frames, or lets it run again ([`Meter::hold_frame_clock`]):
+    /// while it is held, how long the machine takes inside a frame's calls changes nothing of what
+    /// the frame answers.
+    pub fn hold_frame_clock(&self, held: bool) {
+        self.shared.meter.hold_frame_clock(held);
+    }
+
     /// What the calls of the frame now running have come to so far, or those of the last frame once
     /// it is over. Nothing before the first frame.
     pub fn frame_cost(&self) -> FrameCost {

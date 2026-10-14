@@ -159,6 +159,8 @@ struct Account {
     calls: Cell<u32>,
     /// Whether the running frame has already been counted as over budget.
     frame_counted: Cell<bool>,
+    /// Whether the wall clock is held for the calls of a frame ([`Meter::hold_frame_clock`]).
+    frame_clock_held: Cell<bool>,
     frames_over_budget: Cell<u64>,
 }
 
@@ -185,12 +187,18 @@ impl Account {
         self.frame_counted.set(false);
     }
 
-    /// Starts the clock of one call of a frame, against what the frame has left.
+    /// Starts the clock of one call of a frame, against what the frame has left. While the frame's
+    /// clock is held no clock is started, and the call is held to its instructions alone.
     fn begin_call(&self, instructions: u64) {
-        let now = Instant::now();
         self.calls.set(self.calls.get() + 1);
         self.instructions_left.set(instructions);
         self.exhausted.set(false);
+        if self.frame_clock_held.get() {
+            self.call_started.set(None);
+            self.deadline.set(None);
+            return;
+        }
+        let now = Instant::now();
         self.call_started.set(Some(now));
         self.deadline.set(now.checked_add(self.frame_time_left.get()));
     }
@@ -250,6 +258,8 @@ impl Account {
 ///   previous value instead of calling it. Each call it allows gets its own instruction allowance,
 ///   and [`Meter::end_call`] closes it. A frame's wall clock runs only between those two, so the
 ///   time the host spends drawing between two calls is not the skin's.
+/// - [`Meter::hold_frame_clock`] takes the wall clock out of a frame's account, for a host that has
+///   stopped its own clocks: the frame is then held to its calls and its instructions alone.
 /// - `Meter::charge` is how a library written in Rust accounts for work the hook cannot see: the
 ///   pattern matcher charges its steps, the file helpers the bytes they read.
 /// - [`Meter::frames_over_budget`] counts the frames in which at least one call was refused or cut
@@ -287,6 +297,18 @@ impl Meter {
     /// Starts metering one pass of the entry file.
     pub fn begin_load(&self) {
         self.account.begin_load(self.budget.load.max_instructions, self.budget.load.max_micros);
+    }
+
+    /// Holds the wall clock of every frame from here on, or lets it run again: while it is held, the
+    /// calls of a frame are held to their count and their instructions alone, and the time the
+    /// machine takes inside them is charged to nothing. Loading is metered as ever.
+    ///
+    /// It is for a host that stops its own clocks so a frame comes out the same however long the
+    /// machine takes over it -- a capture, a test that compares two frames pixel for pixel. With the
+    /// clock running, a machine held up inside one call spends what the frame has left, and the calls
+    /// after it answer the values of an earlier frame.
+    pub fn hold_frame_clock(&self, held: bool) {
+        self.account.frame_clock_held.set(held);
     }
 
     /// Starts metering one frame.
@@ -365,7 +387,8 @@ impl Meter {
     }
 
     /// Wall clock the calls of the running frame have spent inside Lua so far, or those of the last
-    /// frame once it is over. It stops at the frame's allowance, which is where the calls stop too.
+    /// frame once it is over. It stops at the frame's allowance, which is where the calls stop too, and
+    /// it is zero while the frame's clock is held.
     pub fn frame_spent(&self) -> Duration {
         if self.account.calls.get() == 0 {
             return Duration::ZERO;

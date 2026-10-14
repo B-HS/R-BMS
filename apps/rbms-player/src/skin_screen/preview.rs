@@ -30,7 +30,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rbms_render::{Color, FrameData, Rect, Renderer, SkinFrame};
 use rbms_skin::dst::{LuaDrawEval, OffsetSource};
-use rbms_skin::loader::LoadedSkin;
 
 use super::{DecideDraw, PlayDraw, ResultDraw};
 use super::{FrameInputs, PREVIEW_FAILURE_NOTE, PreparedDocument, SKIN_VERSION, is_result_screen, static_screen_of, window_size};
@@ -169,7 +168,7 @@ impl AppShared {
         let audio = &self.config.audio;
         SystemState {
             clock: rbms_skin::lua::local_time(unix_seconds),
-            uptime_ms: Some(u64::try_from(self.booted.elapsed().as_millis()).unwrap_or(u64::MAX)),
+            uptime_ms: Some(self.skin_uptime_ms()),
             fps: Some(self.fps),
             player_name: Some(SAMPLE_PLAYER_NAME),
             version: Some(SKIN_VERSION),
@@ -248,7 +247,7 @@ impl AppShared {
             return PreviewDrawn::Waiting;
         };
         let frame = SkinFrame { now_us, timers: &self.skin_timers, state: &host, lua: None, mouse: None, data: inputs.data };
-        let prepared = match self.skins.document(screen).and_then(LoadedSkin::runtime) {
+        let prepared = match self.skin_runtime(screen) {
             Some(runtime) => runtime.frame(&host, |bound| compiled.prepare(&SkinFrame { lua: Some(bound as &dyn LuaDrawEval), ..frame })),
             None => Ok(compiled.prepare(&frame)),
         };

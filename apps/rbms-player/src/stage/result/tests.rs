@@ -951,10 +951,12 @@ const SETTLED_MS: i64 = 3000;
 /// best like any other; a widened one does not.
 #[test]
 fn only_a_run_played_with_an_assist_on_is_told_what_it_did() {
-    assert_eq!(assist_note(false, false), None);
-    assert_eq!(assist_note(false, true), Some(SCRATCH_AUTO_NOTE));
-    assert_eq!(assist_note(true, false), Some(WIDENED_JUDGE_NOTE));
-    assert_eq!(assist_note(true, true), Some(WIDENED_JUDGE_NOTE));
+    assert_eq!(assist_note(false, false, false), None);
+    assert_eq!(assist_note(false, false, true), Some(SCRATCH_AUTO_NOTE));
+    assert_eq!(assist_note(true, false, false), Some(WIDENED_JUDGE_NOTE));
+    assert_eq!(assist_note(true, false, true), Some(WIDENED_JUDGE_NOTE));
+    assert_eq!(assist_note(false, true, false), Some(OWN_TOTAL_NOTE));
+    assert_eq!(assist_note(false, true, true), Some(OWN_TOTAL_NOTE), "a TOTAL of the player's own outweighs SCRATCH AUTO");
     for note in [SCRATCH_AUTO_NOTE, WIDENED_JUDGE_NOTE] {
         assert!(note.chars().count() <= crate::ir_outcome::IR_LINE_MAX_CHARS, "{note:?} is longer than a line of the built-in screen's column");
     }

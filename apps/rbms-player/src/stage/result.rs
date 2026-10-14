@@ -686,8 +686,9 @@ impl ResultRun {
         let setup = session.judge_setup();
         let stored = replay_saved || shared.replay.is_some() || shared.scores.for_md5(&chart.md5).iter().any(|past| past.replay_file.is_some());
         let custom_judge = is_custom_judge(&setup);
+        let own_total = crate::overrides_total(crate::run_total_override(&shared.config, shared.replay.as_ref()));
         let scratch_auto = crate::app_result::scratch_auto_played(session);
-        let updates_score = updates_score(shared.run_plays_itself(), shared.replay.is_some(), custom_judge, false);
+        let updates_score = updates_score(shared.run_plays_itself(), shared.replay.is_some(), custom_judge || own_total, false);
         let snapshot = ResultSnapshot::of(ResultInput {
             previous,
             target,
@@ -701,7 +702,7 @@ impl ResultRun {
             stagefile,
             seed: session.seed(),
             updates_score,
-            assist_note: assist_note(custom_judge, scratch_auto).filter(|_| played_by_hand),
+            assist_note: assist_note(custom_judge, own_total, scratch_auto).filter(|_| played_by_hand),
             replay: match (replay_saved, stored) {
                 (true, _) => ReplaySlot::Saved,
                 (false, true) => ReplaySlot::Exists,
@@ -828,11 +829,18 @@ struct SceneStage {
 const SCRATCH_AUTO_NOTE: &str = "SCRATCH AUTO: TURNTABLE NOT COUNTED, LIGHT ASSIST LAMP";
 const WIDENED_JUDGE_NOTE: &str = "WIDENED JUDGE: SENT AND KEPT, BUT NO BEST SCORE";
 
-/// Which of the two an assisted run is told, or `None` for a run with no assist on. With both on
-/// it is the stronger assist, which is the one the lamp is demoted by (`BMSPlayer.java:866`).
-fn assist_note(custom_judge: bool, scratch_auto: bool) -> Option<&'static str> {
+/// What the screen says of a run played on a TOTAL of the player's own, which is eased as a widened
+/// judge is (the player's decision of 2026-10-15): kept and sent, an assist lamp, no best score.
+const OWN_TOTAL_NOTE: &str = "OWN TOTAL: SENT AND KEPT, BUT NO BEST SCORE";
+
+/// Which of them an assisted run is told, or `None` for a run with no assist on. With more than one
+/// on it is the stronger assist, which is the one the lamp is demoted by (`BMSPlayer.java:866`).
+fn assist_note(custom_judge: bool, own_total: bool, scratch_auto: bool) -> Option<&'static str> {
     if custom_judge {
         return Some(WIDENED_JUDGE_NOTE);
+    }
+    if own_total {
+        return Some(OWN_TOTAL_NOTE);
     }
     scratch_auto.then_some(SCRATCH_AUTO_NOTE)
 }

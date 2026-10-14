@@ -163,6 +163,33 @@ pub struct Model {
     pub sha256: String,
 }
 
+impl NoteKind {
+    /// Whether the note counts toward the notes a run is judged on: the reference implementation's
+    /// `TimeLine.getTotalNotes`. A normal note counts, so does the head of a long note, and its tail
+    /// only for a charge note, where the release is a second judgment; a mine is not a note.
+    ///
+    /// A long note whose flavour is still [`LnKind::Undefined`] counts as a plain long note, so
+    /// resolve the flavour first when the player's LN MODE should decide it.
+    pub fn counts_as_playable_note(&self) -> bool {
+        match self {
+            NoteKind::Mine { .. } => false,
+            NoteKind::LongEnd { ln } => matches!(ln, LnKind::Cn | LnKind::Hcn),
+            NoteKind::Normal | NoteKind::LongStart { .. } => true,
+        }
+    }
+}
+
+/// The notes a run is judged on, which the gauge `#TOTAL` fallback, the song database and the result
+/// screen's denominator all count. This is the one definition of that number; every producer and
+/// consumer of it goes through [`NoteKind::counts_as_playable_note`].
+///
+/// It describes a model the decoder has normalised: every long-note head has its tail and nothing
+/// else sits between the two in their lane, which is what makes the judge engine's own total agree
+/// with this one.
+pub fn count_playable_notes(model: &Model) -> usize {
+    model.timelines.iter().flat_map(|tl| tl.notes.iter()).flatten().filter(|n| n.kind.counts_as_playable_note()).count()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

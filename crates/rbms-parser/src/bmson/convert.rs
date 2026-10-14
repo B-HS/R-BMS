@@ -303,19 +303,9 @@ impl Grid {
         }
     }
 
-    /// Notes the gauge counts, the same set `rbms_chart::count_playable_notes` reports: every note
-    /// but a mine, and a long-note tail only when the flavour makes the release a judgement.
+    /// Notes the gauge counts, the same set `rbms_model::count_playable_notes` reports.
     fn playable_notes(&self) -> usize {
-        self.timelines
-            .iter()
-            .flat_map(|tl| tl.notes.iter())
-            .flatten()
-            .filter(|n| match &n.kind {
-                NoteKind::Mine { .. } => false,
-                NoteKind::LongEnd { ln } => matches!(ln, LnKind::Cn | LnKind::Hcn),
-                _ => true,
-            })
-            .count()
+        self.timelines.iter().flat_map(|tl| tl.notes.iter()).flatten().filter(|n| n.kind.counts_as_playable_note()).count()
     }
 }
 

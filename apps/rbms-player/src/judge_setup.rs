@@ -109,6 +109,8 @@ mod tests {
             gauge_auto_shift: gauge_auto_shift_token(setup.gauge_auto_shift).to_string(),
             bottom_shiftable_gauge: gauge_token(setup.bottom_shiftable_gauge).to_string(),
             offset_steps: Vec::new(),
+            clock: rbms_store::REPLAY_EVENT_CLOCK.to_string(),
+            total_override: rbms_store::REPLAY_CHART_TOTAL,
         }
     }
 

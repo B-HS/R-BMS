@@ -494,7 +494,7 @@ fn ln_head_empty_poor_does_not_start_hold() {
     let r = e.press(0, 700_000).unwrap();
     assert_eq!(r.judge, Judge::Miss);
     assert_eq!(e.empty_poor, 1);
-    assert!(e.release(0, 1_600_000).is_none(), "empty poor must not arm a hold");
+    assert!(e.release(0, 800_000).is_none(), "empty poor must not arm a hold");
     let r2 = e.press(0, 1_000_000).unwrap();
     assert_eq!(r2.judge, Judge::PerfectGreat);
 }
@@ -689,7 +689,7 @@ fn from_model_popn_uses_popn_ln_end_window() {
     };
     let mut e = JudgeEngine::from_model(&model, JudgeWindows::POPN_NOTE);
     e.press(0, 1_000_000).unwrap();
-    let r = e.release(0, 1_730_000).unwrap();
+    let r = e.release(0, 1_470_000).unwrap();
     assert_eq!(r.judge, Judge::Great, "POPN ln_end classifies 130ms-early release as GR");
 }
 
@@ -871,6 +871,60 @@ fn mine_damage_stops_once_the_key_is_released() {
     e.release(0, 900_000);
     e.update(1_000_000);
     assert_eq!(e.gauge.value(), 20.0, "released before the mine, so no damage");
+}
+
+/// A mine reads the key as it stood the instant the mine went by. A press just after it, landing in
+/// the same frame as the mine, must not be charged for it, and a release just after it must be.
+#[test]
+fn a_mine_reads_the_key_as_it_stood_when_the_mine_went_by() {
+    use rbms_model::{Mode, NoteKind};
+    const MINE_US: i64 = 1_000_000;
+    const JUST_AFTER_US: i64 = MINE_US + 5_000;
+    const FRAME_END_US: i64 = MINE_US + 16_667;
+    let m = lane_model(Mode::BEAT_7K, vec![(0, MINE_US, NoteKind::Mine { damage: 5.0 })]);
+    let engine = || {
+        let mut e = JudgeEngine::from_model(&m, JudgeWindows::SEVENKEY_NOTE);
+        e.set_gauge(GaugeKind::Normal, 300.0);
+        e.update(MINE_US - 16_667);
+        e
+    };
+
+    let mut pressed_after = engine();
+    pressed_after.press(0, JUST_AFTER_US);
+    pressed_after.update(FRAME_END_US);
+    assert_eq!(pressed_after.gauge.value(), 20.0, "the key went down after the mine had gone by");
+
+    let mut released_after = engine();
+    released_after.press(0, MINE_US - 100_000);
+    released_after.release(0, JUST_AFTER_US);
+    released_after.update(FRAME_END_US);
+    assert_eq!(released_after.gauge.value(), 15.0, "the key was still down when the mine went by");
+}
+
+/// A release that is only a BAD, and a re-grab a few microseconds after it, come out the same
+/// whether or not a frame falls between the two: the margin is measured from the release, not from
+/// the frame that happens to see it.
+#[test]
+fn a_release_and_a_re_grab_judge_alike_whether_or_not_a_frame_falls_between_them() {
+    const RELEASE_US: i64 = 1_500_000;
+    const RE_GRAB_US: i64 = RELEASE_US + 4;
+    let run = |engine: fn() -> JudgeEngine, frame_between: bool| {
+        let mut e = engine();
+        e.press(0, 1_000_000);
+        e.release(0, RELEASE_US);
+        if frame_between {
+            e.update(RELEASE_US + 2);
+        }
+        e.press(0, RE_GRAB_US);
+        e.update(3_000_000);
+        (e.counts, e.combo, e.gauge.value())
+    };
+    let seven_key: fn() -> JudgeEngine = || ln(1_000_000, 2_000_000);
+    let popn: fn() -> JudgeEngine = || pms_charge(1_000_000, 2_000_000);
+    assert_eq!(run(seven_key, true), run(seven_key, false), "a 7K long note, whose margin is nothing");
+    assert_eq!(run(seven_key, false).0[Judge::Bad as usize], 1, "with no margin the early release is a BAD at once");
+    assert_eq!(run(popn, true), run(popn, false), "a pop'n charge note, rescued inside its 200ms margin");
+    assert_eq!(run(popn, false).0[Judge::Bad as usize], 0, "the re-grab rescues it");
 }
 
 #[test]
@@ -1080,9 +1134,14 @@ fn a_charge_note_release_that_is_late_or_good_confirms_at_once() {
     good.press(0, 1_000_000).unwrap();
     assert_eq!(good.release(0, 1_950_000).unwrap().judge, Judge::PerfectGreat, "judge < 3 is never deferred");
 
-    let mut late = pms_charge(1_000_000, 2_000_000);
+    let model = cn_model(rbms_model::LnKind::Cn, 1_000_000, 2_000_000);
+    let mut late = JudgeEngine::from_model(&model, JudgeWindows::SEVENKEY_NOTE);
     late.press(0, 1_000_000).unwrap();
-    assert_eq!(late.release(0, 2_250_000).unwrap().judge, Judge::Bad, "dmtime <= 0 is never deferred either");
+    assert_eq!(
+        late.release(0, 2_210_000).unwrap().judge,
+        Judge::Bad,
+        "dmtime <= 0 is never deferred either; a 7K end held 210ms late is still inside the note table's BAD, so it is not swept first"
+    );
     assert_eq!(late.counts[3], 1);
 }
 
@@ -1118,23 +1177,50 @@ fn hcn_expected_gauge() -> gauge::GrooveGauge {
 }
 
 #[test]
-fn a_held_hell_charge_note_pays_one_gauge_tick_per_frame_past_200ms() {
+fn a_held_hell_charge_note_pays_one_gauge_tick_for_every_200ms_held() {
     let mut e = hcn_engine(1_000_000, 3_000_000);
     e.update(900_000);
     e.press(0, 1_000_000).unwrap();
     e.update(1_000_000);
     let mut expected = hcn_expected_gauge();
     expected.update(Judge::PerfectGreat);
-    assert_eq!(e.gauge.value(), expected.value(), "100ms of the 200ms tick has accrued, so nothing has paid out yet");
-    for frame in 1..=9 {
-        e.update(1_000_000 + frame * 200_000);
+    assert_eq!(e.gauge.value(), expected.value(), "the balance starts at the press, so nothing has paid out yet");
+    e.update(1_200_000);
+    assert_eq!(e.gauge.value(), expected.value(), "a balance of exactly 200ms is not past the tick yet");
+    for tick in 1..=8 {
+        e.update(1_000_000 + tick * 200_000 + 1);
         expected.update_with_rate(Judge::Great, 0.5);
+        assert_eq!(e.gauge.value(), expected.value(), "JudgeManager.java:310-314 pays half a GREAT once the balance is past 200ms (tick {tick})");
     }
-    assert_eq!(e.gauge.value(), expected.value(), "JudgeManager.java:310-314 pays half a GREAT, at most once per frame");
+}
+
+/// The ticks run on the time the note was held, so it makes no difference how the clock got there:
+/// one call across the whole hold, a 60 Hz frame grid, or frames longer than a tick (where the
+/// reference, paying at most one per frame, would fall behind).
+#[test]
+fn hell_charge_ticks_are_the_same_however_the_clock_is_cut_up() {
+    const RELEASE_US: i64 = 2_870_000;
+    const SETTLED_US: i64 = 3_500_000;
+    let run = |frame_us: i64| {
+        let mut e = hcn_engine(1_000_000, 3_000_000);
+        e.press(0, 1_000_000).unwrap();
+        let mut now_us = 1_000_000;
+        while now_us + frame_us < RELEASE_US {
+            now_us += frame_us;
+            e.update(now_us);
+        }
+        e.release(0, RELEASE_US);
+        e.update(SETTLED_US);
+        (e.gauge.value(), e.counts)
+    };
+    let whole = run(SETTLED_US);
+    for frame_us in [1_000, 8_000, 16_667, 33_333, 250_000, 450_000] {
+        assert_eq!(run(frame_us), whole, "{frame_us}us frames");
+    }
 }
 
 #[test]
-fn a_dropped_hell_charge_note_takes_one_damage_tick_per_frame_past_200ms() {
+fn a_dropped_hell_charge_note_takes_one_damage_tick_for_every_200ms_let_go() {
     let mut e = hcn_engine(1_000_000, 3_000_000);
     e.update(900_000);
     e.press(0, 1_000_000).unwrap();
@@ -1291,7 +1377,7 @@ fn a_pms_bad_on_a_long_note_head_does_not_arm_a_hold() {
     let mut e = JudgeEngine::from_model_for_mode(&long_note_model(rbms_model::Mode::POPN_9K, 0, rbms_model::LnKind::Ln, 1_000_000, 2_000_000));
     assert_eq!(e.press(0, 850_000).unwrap().judge, Judge::Bad);
     assert_eq!(e.counts[3], 1, "JudgeManager.java:440 counts the head without consuming it");
-    assert!(e.release(0, 2_000_000).is_none(), "no hold was armed");
+    assert!(e.release(0, 900_000).is_none(), "no hold was armed");
     assert_eq!(e.press(0, 1_000_000).unwrap().judge, Judge::PerfectGreat, "the head survived and is still takeable");
     assert_eq!(e.release(0, 2_000_000).unwrap().judge, Judge::PerfectGreat);
     assert_eq!(e.counts[0], 1);
@@ -1519,4 +1605,211 @@ fn a_lane_names_the_long_note_it_holds_and_the_hell_charge_note_going_by() {
     );
     passing.update(3_100_000);
     assert_eq!(passing.long_note(0).passing, None, "the note has gone by");
+}
+
+/// The press that takes a plain long note's head reports how it was timed, but the note is judged
+/// once, at its end: only that judgment is counted. A charge note counts both its ends.
+#[test]
+fn only_the_end_of_a_plain_long_note_is_a_counted_judgment() {
+    let mut plain = ln(100_000, 600_000);
+    assert!(!plain.press(0, 100_000).unwrap().counted, "the head of a plain long note only starts the hold");
+    assert!(plain.release(0, 600_000).unwrap().counted, "its end is the judgment");
+    assert_eq!(plain.judged().len(), 1, "and the engine counted exactly one");
+
+    let mut charge = JudgeEngine::from_model_for_mode(&long_note_model(rbms_model::Mode::BEAT_7K, 0, rbms_model::LnKind::Cn, 100_000, 600_000));
+    assert!(charge.press(0, 100_000).unwrap().counted, "a charge note judges its head");
+    assert!(charge.release(0, 600_000).unwrap().counted, "and its end");
+    assert_eq!(charge.judged().len(), 2);
+
+    let mut tap = note(100_000);
+    assert!(tap.press(0, 100_000).unwrap().counted);
+    let mut empty = note(1_000_000);
+    assert!(empty.press(0, 700_000).unwrap().counted, "an empty POOR is counted");
+}
+
+/// Autoplay takes a note on the spot and presses no key: the lane's key state stays up, so a mine
+/// in the lane costs nothing, where a press made by hand would.
+#[test]
+fn auto_press_judges_the_note_without_putting_a_key_down() {
+    use rbms_model::{Mode, NoteKind};
+    let m = lane_model(Mode::BEAT_7K, vec![(0, 1_000_000, NoteKind::Normal), (0, 1_500_000, NoteKind::Mine { damage: 5.0 })]);
+    let build = || {
+        let mut e = JudgeEngine::from_model(&m, JudgeWindows::SEVENKEY_NOTE);
+        e.set_gauge(GaugeKind::Normal, 300.0);
+        e
+    };
+    let mut auto = build();
+    let r = auto.auto_press(0, 1_000_000).unwrap();
+    assert_eq!((r.judge, r.delta_us, r.counted), (Judge::PerfectGreat, 0, true));
+    assert_eq!(auto.counts[0], 1);
+    let gauge = auto.gauge.value();
+    auto.update(2_000_000);
+    assert_eq!(auto.gauge.value(), gauge, "the mine behind an autoplayed note found no key down");
+    assert!(auto.auto_press(0, 1_000_000).is_none(), "a note is taken once");
+
+    let mut hand = build();
+    hand.press(0, 1_000_000);
+    let gauge = hand.gauge.value();
+    hand.update(2_000_000);
+    assert!(hand.gauge.value() < gauge, "the key a hand left down still pays for the mine");
+}
+
+/// The end of an autoplayed charge note is judged PGREAT where the hand needs the other spin, and a
+/// release that names some other note's end is not that note's end.
+#[test]
+fn auto_release_ends_a_scratch_charge_note_and_only_its_own() {
+    let mut e = scratch_long(rbms_model::LnKind::Cn, 1_000_000, 2_000_000);
+    assert!(e.auto_press(SCRATCH_LANE, 1_000_000).unwrap().counted);
+    assert!(e.auto_release(SCRATCH_LANE, 1_990_000).is_none(), "not this note's end");
+    let end = e.auto_release(SCRATCH_LANE, 2_000_000).unwrap();
+    assert_eq!((end.judge, end.delta_us, end.counted), (Judge::PerfectGreat, 0, true));
+    assert_eq!(e.counts, [2, 0, 0, 0, 0, 0]);
+    assert!(e.auto_release(SCRATCH_LANE, 2_000_000).is_none(), "a resolved note holds nothing");
+
+    let mut by_hand = scratch_long(rbms_model::LnKind::Cn, 1_000_000, 2_000_000);
+    by_hand.press(SCRATCH_LANE, 1_000_000);
+    assert!(by_hand.release(SCRATCH_LANE, 2_000_000).is_none(), "the same release by hand is a spin the wrong way");
+}
+
+/// A plain long note ends with the judgment its head took, as when it is held to the end by hand.
+#[test]
+fn an_autoplayed_plain_long_note_is_one_perfect_judgment() {
+    let mut e = ln(100_000, 600_000);
+    let head = e.auto_press(0, 100_000).unwrap();
+    assert!(!head.counted, "the head only starts the hold");
+    assert_eq!(e.counts, [0; 6]);
+    assert!(e.auto_release(0, 600_000).unwrap().counted);
+    assert_eq!(e.counts, [1, 0, 0, 0, 0, 0]);
+}
+
+/// A hell-charge note gains gauge for a lane that is held, and an autoplayed lane is held without a
+/// key being down (`JudgeManager.java:289-293`).
+#[test]
+fn an_autoplayed_hell_charge_note_gains_gauge_without_a_key() {
+    let build = |autoplay: bool| {
+        let mut e = hcn_engine(1_000_000, 3_000_000);
+        e.set_autoplay(autoplay);
+        e.auto_press(0, 1_000_000);
+        e
+    };
+    let (mut auto, mut idle) = (build(true), build(false));
+    let before = (auto.gauge.value(), idle.gauge.value());
+    for frame in 0..=100 {
+        let now = 1_000_000 + frame * 16_667;
+        auto.update(now);
+        idle.update(now);
+    }
+    assert!(auto.gauge.value() > before.0, "the autoplayed hell-charge note paid out gauge");
+    assert!(idle.gauge.value() < before.1, "the same note with no key and no autoplay drains it");
+}
+
+/// Every note whose marks changed, whatever changed them, is among the notes the engine names as
+/// touched since: the ones a judgment took, a press that took none moved, a note that went by, a
+/// release, and the ones a long note mode gave a flavour to. A screen that keeps a copy of the marks
+/// can take in those notes alone and end up where a walk over the whole chart would.
+#[test]
+fn every_note_whose_marks_changed_is_named_as_touched() {
+    use ln::LnMode;
+    use rbms_model::{LnKind, Mode, NoteKind};
+    let notes = vec![
+        (0, 1_000_000, NoteKind::Normal),
+        (0, 2_000_000, NoteKind::Normal),
+        (1, 1_500_000, NoteKind::LongStart { ln: LnKind::Undefined }),
+        (1, 2_500_000, NoteKind::LongEnd { ln: LnKind::Undefined }),
+        (2, 3_000_000, NoteKind::LongStart { ln: LnKind::Hcn }),
+        (2, 4_000_000, NoteKind::LongEnd { ln: LnKind::Hcn }),
+        (3, 5_000_000, NoteKind::Normal),
+    ];
+    let mut e = JudgeEngine::from_model_for_mode(&lane_model(Mode::BEAT_7K, notes));
+    let steps: [fn(&mut JudgeEngine); 10] = [
+        |e| e.set_ln_mode(LnMode::ChargeNote),
+        |e| {
+            e.press(0, 700_000);
+        },
+        |e| {
+            e.press(0, 1_010_000);
+        },
+        |e| {
+            e.press(1, 1_500_000);
+        },
+        |e| {
+            e.release(1, 2_490_000);
+        },
+        |e| e.update(2_400_000),
+        |e| {
+            e.press(2, 3_000_000);
+        },
+        |e| e.update(3_500_000),
+        |e| {
+            e.release(2, 3_600_000);
+        },
+        |e| e.update(6_000_000),
+    ];
+    let all = [(0, 0), (0, 1), (1, 0), (2, 0), (3, 0)].map(|(lane, index)| NoteAt { lane, index });
+    let by_note = |e: &JudgeEngine| all.map(|at| e.note_marks_at(at).collect::<Vec<NoteMark>>());
+    let mut changed = Vec::new();
+    for (step, act) in steps.iter().enumerate() {
+        let (before, read) = (by_note(&e), e.touched().len());
+        act(&mut e);
+        let after = by_note(&e);
+        for (at, (then, now)) in all.iter().zip(before.iter().zip(&after)) {
+            if then != now {
+                changed.push((step, *at));
+                assert!(e.touched()[read..].contains(at), "step {step}: the marks of {at:?} went from {then:?} to {now:?} but it is not named as touched");
+            }
+        }
+    }
+    assert!(changed.contains(&(1, all[0])), "the press that took nothing moved the first note's play time: {changed:?}");
+    assert!(changed.contains(&(0, all[2])), "and the long note mode made the undefined long note a charge note: {changed:?}");
+    assert!(all.iter().all(|at| changed.iter().any(|(_, changed_at)| changed_at == at)), "every note changed at some step: {changed:?}");
+    let walked: Vec<NoteMark> = by_note(&e).into_iter().flatten().collect();
+    assert_eq!(walked, e.note_marks().collect::<Vec<NoteMark>>(), "the marks of every note one at a time are the marks of the chart");
+}
+
+/// A run that judges every note object once, as an autoplayed run does, adds to the engine's lists
+/// of judgments and touched notes without ever moving them: the room for them was made when the
+/// engine was built, not in the middle of play, where growing a list of a long chart is a copy of
+/// hundreds of kilobytes on the frame it happens in.
+#[test]
+fn a_run_that_judges_every_note_once_never_grows_the_engines_lists() {
+    use rbms_model::{LnKind, Mode, NoteKind};
+    const NOTES: i64 = 3_000;
+    const STEP_US: i64 = 50_000;
+    let mut notes: Vec<(usize, i64, NoteKind)> = (0..NOTES).map(|i| ((i % 7) as usize, 1_000_000 + i * STEP_US, NoteKind::Normal)).collect();
+    notes.push((7, 500_000, NoteKind::LongStart { ln: LnKind::Hcn }));
+    notes.push((7, 900_000, NoteKind::LongEnd { ln: LnKind::Hcn }));
+    let mut e = JudgeEngine::from_model_for_mode(&lane_model(Mode::BEAT_7K, notes));
+    let (judged, touched) = (e.judged().as_ptr(), e.touched().as_ptr());
+    e.update(1_000_000 + NOTES * STEP_US + 1_000_000);
+    assert_eq!(e.total_judged(), e.total_notes(), "every note went by and was judged");
+    assert_eq!(e.judged().as_ptr(), judged, "the list of judgments was grown during the run");
+    assert_eq!(e.touched().as_ptr(), touched, "the list of touched notes was grown during the run");
+}
+
+/// A chart whose long notes state no flavour, played as charge notes, judges each head and each end
+/// once, and the long note mode named every one of those notes as touched before play began: the
+/// lists still have room for every judgment of the run, so neither is grown in the middle of it.
+#[test]
+fn undefined_long_notes_played_as_charge_notes_never_grow_the_engines_lists() {
+    use ln::LnMode;
+    use rbms_model::{LnKind, Mode, NoteKind};
+    const LONG_NOTES: i64 = 1_000;
+    const STEP_US: i64 = 200_000;
+    const HOLD_US: i64 = 100_000;
+    const LANES: i64 = 7;
+    for mode in [LnMode::ChargeNote, LnMode::HellChargeNote] {
+        let notes: Vec<(usize, i64, NoteKind)> = (0..LONG_NOTES)
+            .flat_map(|i| {
+                let (lane, head_us) = ((i % LANES) as usize, 1_000_000 + i * STEP_US);
+                [(lane, head_us, NoteKind::LongStart { ln: LnKind::Undefined }), (lane, head_us + HOLD_US, NoteKind::LongEnd { ln: LnKind::Undefined })]
+            })
+            .collect();
+        let mut e = JudgeEngine::from_model_for_mode(&lane_model(Mode::BEAT_7K, notes));
+        e.set_ln_mode(mode);
+        let (judged, touched) = (e.judged().as_ptr(), e.touched().as_ptr());
+        e.update(1_000_000 + LONG_NOTES * STEP_US + 1_000_000);
+        assert_eq!(e.total_judged(), e.total_notes(), "{mode:?}: every head and end went by and was judged");
+        assert_eq!(e.judged().as_ptr(), judged, "{mode:?}: the list of judgments was grown during the run");
+        assert_eq!(e.touched().as_ptr(), touched, "{mode:?}: the list of touched notes was grown during the run");
+    }
 }

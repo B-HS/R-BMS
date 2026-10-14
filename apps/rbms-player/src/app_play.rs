@@ -447,8 +447,9 @@ impl AppShared {
         overview.total = model.meta.total;
         let cancel = Arc::new(AtomicBool::new(false));
         self.audio_dead_at.set(None);
-        if self.config.play.total_override > 0.0 {
-            model.meta.total = self.config.play.total_override;
+        let total_override = crate::run_total_override(&self.config, self.replay.as_ref());
+        if crate::overrides_total(total_override) {
+            model.meta.total = total_override;
         }
         self.mode = mode;
         self.active_keys = self.launch.keys_override.clone().unwrap_or_else(|| self.keyconfig.lane_keys(mode));
@@ -835,7 +836,7 @@ impl AppShared {
     /// keysounds finish decoding (or immediately when there are none). The skin's scene clock is
     /// not touched: it belongs to the scene, which the screen change into the run has restarted.
     pub(crate) fn start_play(&mut self) {
-        self.clock = Instant::now();
+        self.clock = self.song_instant();
         self.audio_dead_at.set(None);
         self.anchor_us = self.audio_clock_us();
         self.song_us_last.set(0);
@@ -869,9 +870,15 @@ impl AppShared {
     /// reported and nothing is scheduled. Play and the select preview both rebase the position by
     /// their own anchor, which is why the fallback covers both.
     pub(crate) fn audio_clocks(&self) -> (i64, i64) {
-        let now = Instant::now();
+        self.audio_clocks_at(self.song_instant())
+    }
+
+    /// [`audio_clocks`](Self::audio_clocks) as they stood at `now`, which may be an instant already
+    /// gone by: the audible position is a straight line through the last callback the engine
+    /// published, so it reads back to any instant on it.
+    fn audio_clocks_at(&self, now: Instant) -> (i64, i64) {
         let Some(audio) = self.audio.as_ref() else {
-            return (self.clock.elapsed().as_micros() as i64, 0);
+            return (now.saturating_duration_since(self.clock).as_micros() as i64, 0);
         };
         if audio.is_alive() {
             self.audio_dead_at.set(None);
@@ -888,6 +895,29 @@ impl AppShared {
             }
         };
         (resumed_clock_us(last, now.saturating_duration_since(at).as_micros() as i64), 0)
+    }
+
+    /// The instant the song clock is read at and started from: now.
+    ///
+    /// Everything that reads the song clock or starts it goes through here, so a test can stop the
+    /// machine's side of it the way it stops the scene clock's ([`AppShared::stop_clocks_at`]).
+    fn song_instant(&self) -> Instant {
+        #[cfg(test)]
+        if let Some(stopped) = self.song_stopped_at {
+            return stopped;
+        }
+        Instant::now()
+    }
+
+    /// Stop the machine's side of both clocks a frame is drawn against at `now`, for the captures
+    /// that count a run's time themselves: the scene clock, and the song clock as it is read
+    /// without a sound device. Until they are stopped somewhere else every read of either sees
+    /// `now`, so a frame that is handed `now` and stops them there before it runs is drawn at the
+    /// moment the capture asked for, however long the machine takes over its update and its draw.
+    #[cfg(test)]
+    pub(crate) fn stop_clocks_at(&mut self, now: Instant) {
+        self.stop_scene_clock_at(now);
+        self.song_stopped_at = Some(now);
     }
 
     pub(crate) fn audio_clock_us(&self) -> i64 {
@@ -912,8 +942,17 @@ impl AppShared {
         (value, lookahead)
     }
 
-    pub(crate) fn song_us(&self) -> i64 {
-        self.song_and_lookahead_us().0
+    /// The song position an input that happened at `at` is judged at: the audible axis read at that
+    /// instant rather than at the one the input is handled at, so whatever kept the frame thread
+    /// from handling it sooner is not added to its timing.
+    ///
+    /// It is clamped against the last position read, as every reading is, so the run never sees an
+    /// input earlier than a clock it has already gone past; that only binds on an input that was
+    /// read after a frame had already moved the song on beyond it.
+    pub(crate) fn song_us_at(&self, at: Instant) -> i64 {
+        let value = song_position_us(self.audio_clocks_at(at).0, self.anchor_us, self.song_us_last.get());
+        self.song_us_last.set(value);
+        value
     }
 
     /// Record one input on both clocks so the overlay and the CSV dump can compare the interpolated

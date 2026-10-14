@@ -1,9 +1,10 @@
 #![forbid(unsafe_code)]
 
 use rbms_judge::algorithm::JudgeAlgorithm;
-use rbms_judge::gauge::{GaugeAutoShift, GaugeIndex, GaugeShiftOutcome, clamp_bottom_shiftable};
+use rbms_judge::gauge::{GaugeAutoShift, GaugeIndex, clamp_bottom_shiftable};
 use rbms_judge::gauge_tables::GaugeSetId;
 use rbms_judge::ln::LnMode;
+use rbms_judge::matcher::GaugeShift;
 pub use rbms_judge::matcher::ScratchDir;
 use rbms_judge::windows::{JudgeWindowRule, JudgeWindowSet};
 use rbms_judge::{GaugeKind, JudgeEngine, JudgeResult};
@@ -213,7 +214,6 @@ pub struct Player {
     gauge_auto_shift: GaugeAutoShift,
     configured_gauge: GaugeKind,
     bottom_shiftable_gauge: GaugeKind,
-    failed: bool,
 }
 
 impl Player {
@@ -230,11 +230,12 @@ impl Player {
         let auto_lanes = if auto_lanes.len() == lanes { auto_lanes.to_vec() } else { vec![false; lanes] };
         let (model, auto) = take_auto_lanes(model, &auto_lanes);
         let mut judge = JudgeEngine::from_model_for_mode(&model);
+        judge.set_autoplay(autoplay);
         apply_window_set(&mut judge, &model, UNMODIFIED_JUDGE_RATES, UNMODIFIED_JUDGE_RATES);
         let bg = collect_bg(&model, auto.as_ref().map_or(&[][..], |auto| auto.heads.as_slice()));
         let heads = collect_note_heads(&model);
         let actions = collect_actions(&model);
-        Player {
+        let mut player = Player {
             model,
             judge,
             bg,
@@ -253,8 +254,15 @@ impl Player {
             gauge_auto_shift: GaugeAutoShift::default(),
             configured_gauge: GaugeKind::Normal,
             bottom_shiftable_gauge: GaugeKind::AssistEasy,
-            failed: false,
-        }
+        };
+        player.hand_gauge_shift_to_judge();
+        player
+    }
+
+    /// Tell the engine how the selected gauge may move, which it takes at every instant a gauge
+    /// changes and which ends the run the instant the gauge empties under NONE.
+    fn hand_gauge_shift_to_judge(&mut self) {
+        self.judge.set_gauge_shift(GaugeShift { mode: self.gauge_auto_shift, configured: self.configured_gauge, bottom: self.bottom_shiftable_gauge });
     }
 
     /// Apply a single user JUDGE WIDTH rate (percent; 100 = chart default) to PGREAT/GREAT/GOOD on
@@ -321,6 +329,7 @@ impl Player {
     /// How the selected gauge may move during play (`PlayerConfig.java:163-167`).
     pub fn set_gauge_auto_shift(&mut self, mode: GaugeAutoShift) {
         self.gauge_auto_shift = mode;
+        self.hand_gauge_shift_to_judge();
     }
 
     /// The gauge auto-shift mode in force.
@@ -332,6 +341,7 @@ impl Player {
     /// reference allows (`PlayerConfig.java:908`).
     pub fn set_bottom_shiftable_gauge(&mut self, kind: GaugeKind) {
         self.bottom_shiftable_gauge = clamp_bottom_shiftable(kind);
+        self.hand_gauge_shift_to_judge();
     }
 
     /// The auto-shift floor.
@@ -340,9 +350,15 @@ impl Player {
     }
 
     /// Whether the selected gauge emptied under a shift mode that does not rescue it
-    /// (`BMSPlayer.java:653-661`). The run keeps judging; ending it is the caller's decision.
+    /// (`BMSPlayer.java:653-661`). The engine stops judging at the instant it did, so a run that is
+    /// ended a frame later has taken nothing more; leaving the field is the caller's decision.
     pub fn failed(&self) -> bool {
-        self.failed
+        self.judge.failed()
+    }
+
+    /// The song time the gauge emptied at, when it did.
+    pub fn failed_at_us(&self) -> Option<i64> {
+        self.judge.failed_at_us()
     }
 
     /// Per-lane key-beam press timestamps (µs); `i64::MIN` means the beam is not held. Paired
@@ -389,8 +405,13 @@ impl Player {
     pub fn set_gauge(&mut self, kind: GaugeKind) {
         self.configured_gauge = kind;
         self.judge.set_gauge(kind, self.model.meta.total);
+        self.hand_gauge_shift_to_judge();
     }
 
+    /// Start a course stage where the stage before left the course: on its gauge, and with the combo
+    /// the player sees carried on from the streak it ended on (`JudgeManager.java:200-206`). The
+    /// stage's own combo starts at nothing, as it does in the reference, so the chart's record and
+    /// its full combo are its own.
     pub fn set_initial_state(&mut self, index: GaugeIndex, gauge_value: f32, initial_combo: u32) {
         self.judge.gauge.select(index);
         self.judge.gauge.set_value_at(index, gauge_value);
@@ -436,13 +457,16 @@ impl Player {
     /// Judge axis (the audio engine's `audible_us`, i.e. what the player is hearing right now).
     /// Runs the autoplay press/release judgments over its own `judge_cursor`, the key-beam timer and
     /// the miss sweep. Emits no sound: [`update_schedule`](Self::update_schedule) already reserved it.
+    ///
+    /// Each autoplay judgment is made at its own note's time, with the engine's clock settled up to
+    /// that instant first, so where the frames fall moves none of them.
     pub fn update_judge(&mut self, audible_us: i64) {
         while self.judge_cursor < self.actions.len() && self.actions[self.judge_cursor].0 <= audible_us {
             let (at, lane, ref kind) = self.actions[self.judge_cursor];
             if self.autoplay {
                 match kind {
                     AutoAction::Press { ln, .. } => {
-                        if let Some(jr) = self.judge.press(lane, at)
+                        if let Some(jr) = self.judge.auto_press(lane, at)
                             && (jr.judge as usize) <= 3
                         {
                             self.bomb[lane] = (at, jr.judge as u8);
@@ -454,7 +478,7 @@ impl Player {
                         }
                     }
                     AutoAction::Release => {
-                        if let Some(jr) = self.judge.release(lane, at)
+                        if let Some(jr) = self.judge.auto_release(lane, at)
                             && (jr.judge as usize) <= 3
                         {
                             self.bomb[lane] = (at, jr.judge as u8);
@@ -474,18 +498,6 @@ impl Player {
             }
         }
         self.judge.update(audible_us);
-        self.run_gauge_auto_shift();
-    }
-
-    /// One frame of gauge auto-shift, run after the frame's judgments exactly like the reference's
-    /// play loop (`BMSPlayer.java:638-672`). BEST CLEAR and SELECT TO UNDER re-pick every frame; the
-    /// other three only act once the selected gauge is empty, and only NONE ends the play there.
-    fn run_gauge_auto_shift(&mut self) {
-        if self.failed {
-            return;
-        }
-        let outcome = self.judge.gauge.auto_shift(self.gauge_auto_shift, self.configured_gauge, self.bottom_shiftable_gauge);
-        self.failed = outcome == GaugeShiftOutcome::Failed;
     }
 
     /// Both axes at one clock: [`update_schedule`](Self::update_schedule) then
@@ -608,6 +620,9 @@ mod tests {
         assert!(events.len() >= n, "emitted bg + note keysounds");
         assert_eq!(p.judge().counts[0], n as u32);
     }
+
+    /// One frame of a 60 fps play loop, which the hell-charge tick measures its step against.
+    const FRAME_US: i64 = 16_667;
 
     /// The turntable lane of a 7-key chart, as an auto-lane mask.
     fn scratch_only() -> Vec<bool> {
@@ -825,6 +840,94 @@ mod tests {
         let engine = simulate_autoplay(&m);
         assert_eq!(engine.counts[0], 1, "only the real note is judged (PGREAT)");
         assert_eq!(engine.counts.iter().sum::<u32>(), 1, "mines never produce a judgment");
+    }
+
+    /// A lane the autoplay has pressed is not a lane with a key down: the reference judges the note
+    /// on the spot and raises no key state, and a mine damages only a key that is down
+    /// (`JudgeManager.java:244, 251-257`). The mines sit in the very lane the note was in, which is
+    /// where a key left down would pay for them.
+    #[test]
+    fn autoplay_never_takes_mine_damage() {
+        let mined = model(b"#BPM 120\r\n#RANK 3\r\n#WAV01 a.wav\r\n#00111:01\r\n#001D1:00010101\r\n");
+        let clean = model(b"#BPM 120\r\n#RANK 3\r\n#WAV01 a.wav\r\n#00111:01\r\n");
+        for kind in [GaugeKind::Normal, GaugeKind::Hard, GaugeKind::ExHard] {
+            let finish = |m: &Model| {
+                let mut p = Player::new(m.clone(), true);
+                p.set_gauge(kind);
+                p.update(p.last_time_us() + 1_000_000, |_| {});
+                (p.judge().gauge.value(), p.failed())
+            };
+            let (mined_gauge, mined_failed) = finish(&mined);
+            let (clean_gauge, _) = finish(&clean);
+            assert_eq!(mined_gauge, clean_gauge, "{kind:?}: a mine in the autoplayed lane cost gauge");
+            assert!(!mined_failed, "{kind:?}: autoplay failed on a mine");
+        }
+    }
+
+    /// A key a person presses is down until they let go, and a mine under it hurts. The autoplay
+    /// fix leaves that alone.
+    #[test]
+    fn a_pressed_key_still_takes_mine_damage() {
+        let m = model(b"#BPM 120\r\n#RANK 3\r\n#WAV01 a.wav\r\n#00111:01\r\n#001D1:00010101\r\n");
+        let note_us = m.timelines.iter().find_map(|t| t.notes[0].as_ref()).map(|n| n.time_us).unwrap();
+        let mut p = Player::new(m, false);
+        p.set_gauge(GaugeKind::Hard);
+        p.press(0, note_us, |_| {});
+        let before = p.judge().gauge.value();
+        p.update(p.last_time_us() + 1_000_000, |_| {});
+        assert!(p.judge().gauge.value() < before, "a key held down through the mines took no damage");
+    }
+
+    /// The end of a charge note is judged on the spot by the autoplay, whichever lane it is in. A
+    /// scratch lane only lets a spin end the note when the spin comes from the other direction and
+    /// from outside the end window (`JudgeManager.java:501-508`), a rule for a key that is pressed.
+    #[test]
+    fn autoplay_resolves_scratch_charge_note_ends() {
+        for ln_mode in [LnMode::ChargeNote, LnMode::HellChargeNote] {
+            for channel in ["56", "51"] {
+                let mut m = model(format!("#BPM 120\r\n#RANK 3\r\n#WAV01 a.wav\r\n#001{channel}:01000001\r\n").as_bytes());
+                rbms_chart::resolve_long_note_flavour(&mut m, ln_mode.resolve());
+                let engine = simulate_autoplay(&m);
+                assert_eq!(engine.counts, [2, 0, 0, 0, 0, 0], "{ln_mode:?} on channel {channel}: head and end are both PGREAT");
+                assert_eq!(engine.clear_lamp(), rbms_judge::ClearType::Max, "{ln_mode:?} on channel {channel}");
+            }
+        }
+    }
+
+    /// Two charge notes one after the other in a scratch lane: a missed end used to leave the hold
+    /// in place, and the next head was swallowed by it.
+    #[test]
+    fn autoplay_takes_every_charge_note_of_a_scratch_lane() {
+        let mut m = model(b"#BPM 120\r\n#RANK 3\r\n#WAV01 a.wav\r\n#00156:0100010001000100\r\n");
+        rbms_chart::resolve_long_note_flavour(&mut m, LnMode::ChargeNote.resolve());
+        let engine = simulate_autoplay(&m);
+        assert_eq!(engine.counts, [4, 0, 0, 0, 0, 0]);
+        assert_eq!(engine.max_combo, 4);
+    }
+
+    /// The gauge a hell-charge note pays out is for a lane that is held, and the autoplay holds
+    /// every lane it has taken (`JudgeManager.java:289-293`) without a key being down.
+    #[test]
+    fn autoplay_hell_charge_notes_keep_paying_out_gauge() {
+        let chart = b"#BPM 120\r\n#RANK 3\r\n#TOTAL 20\r\n#WAV01 a.wav\r\n#00151:01\r\n#00351:01\r\n";
+        let gauge_of = |ln_mode: LnMode| {
+            let mut m = model(chart);
+            rbms_chart::resolve_long_note_flavour(&mut m, ln_mode.resolve());
+            let mut p = Player::new(m, true);
+            let end = p.last_time_us() + 1_000_000;
+            (0..=end).step_by(FRAME_US as usize).for_each(|now_us| p.update(now_us, |_| {}));
+            p.judge().gauge.value()
+        };
+        assert!(gauge_of(LnMode::HellChargeNote) > gauge_of(LnMode::ChargeNote), "an autoplayed hell-charge note paid out no gauge");
+    }
+
+    /// A normal note is judged by the autoplay whatever the lane holds, as in the reference
+    /// (`JudgeManager.java:253`); a long note starts only in a lane that holds none (`:259`).
+    #[test]
+    fn autoplay_judges_a_long_note_head_only_in_a_free_lane() {
+        let m = model(b"#BPM 120\r\n#RANK 3\r\n#WAV01 a.wav\r\n#00151:01000001\r\n#00251:01000001\r\n");
+        let engine = simulate_autoplay(&m);
+        assert_eq!(engine.counts, [2, 0, 0, 0, 0, 0], "two separate long notes are two PGREATs");
     }
 
     #[test]
@@ -1435,6 +1538,7 @@ mod judge_wiring_tests {
         assert_eq!(p.judge().gauge.value(), 72.0);
         assert_eq!(p.judge().combo, 120);
         assert_eq!(p.judge().max_combo, 120);
+        assert_eq!((p.judge().stage_combo, p.judge().stage_max_combo), (0, 0), "the stage's own combo starts at nothing");
     }
 
     #[test]

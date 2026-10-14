@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     BYTES_PER_PIXEL, BlendFactor, BlendMode, CHANNEL_MAX, Color, DISTANCE_FIELD_EDGE, DISTANCE_FIELD_SMOOTHING, DistanceFieldParams, DistanceFieldStyle,
-    QuadParams, Rect, Renderer, TextureFilter, TextureId, UvRect,
+    QuadParams, Rect, Renderer, TexelRect, TextureFilter, TextureId, UvRect,
 };
 
 /// Bits dropped from each averaged channel in [`CpuCanvas::block_signature`]. Quantizing to
@@ -458,6 +458,22 @@ impl Renderer for CpuCanvas {
         self.textures.push(Some(texture));
         self.keys.insert(key.to_string(), id);
         id
+    }
+
+    fn update_texture(&mut self, tex: TextureId, rgba: &[u8], region: TexelRect) -> bool {
+        let Some(Some(texture)) = self.textures.get_mut(tex.0 as usize) else {
+            return false;
+        };
+        let width = texture.width as usize;
+        if !region.fits((texture.width, texture.height)) || rgba.len() != texture.rgba.len() {
+            return false;
+        }
+        for row in region.y as usize..(region.y + region.height) as usize {
+            let start = (row * width + region.x as usize) * BYTES_PER_PIXEL;
+            let end = start + region.width as usize * BYTES_PER_PIXEL;
+            texture.rgba[start..end].copy_from_slice(&rgba[start..end]);
+        }
+        true
     }
 
     fn release_texture(&mut self, tex: TextureId) {

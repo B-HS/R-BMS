@@ -13,7 +13,7 @@
 
 use rbms_course::CourseRun;
 use rbms_ir::mapping::{assist_flags, ir_clear};
-use rbms_ir::{API_VERSION, ChartId, IrError, JudgeBreakdown, PlayerId, ScoreServer, SubmitResponse};
+use rbms_ir::{API_VERSION, ChartId, JudgeBreakdown, PlayerId};
 use rbms_judge::clear_type_from_id;
 
 /// Reason a course whose file is not marked for release is never submitted
@@ -114,18 +114,6 @@ pub(crate) fn build_course_submission(run: &CourseRun, player: &str, assist: Cou
 /// adds [`UNRELEASED_COURSE_REASON`] when the course file is not marked for release.
 pub(crate) fn course_block_reason(stage_reasons: &[Option<String>]) -> Option<String> {
     stage_reasons.iter().flatten().next().cloned()
-}
-
-/// Submit a course to one server.
-///
-/// A server that has no course endpoint answers [`IrError::Unsupported`], which is not a failure —
-/// it is an IR that predates courses. That answer becomes an unaccepted [`SubmitResponse`], so the
-/// result screen shows nothing rather than an error the player can do nothing about.
-pub(crate) fn submit(server: &dyn ScoreServer, sub: &rbms_ir::dto::CourseSubmission) -> Result<SubmitResponse, IrError> {
-    match server.submit_course(sub) {
-        Err(IrError::Unsupported) => Ok(SubmitResponse::default()),
-        other => other,
-    }
 }
 
 /// The long-note flavour the course itself demands (0 LN, 1 CN, 2 HCN), or [`DEFAULT_LNTYPE`] when

@@ -108,7 +108,7 @@ use rbms_render::skin_render::{PreparedFrame, SkinAction, SkinEvent, SkinInputMa
 use rbms_render::{Color, FrameData, Renderer, SkinAssets, SkinFrame, SkinImage, SkinScreen, SongBars, TextContext, with_render_ctx};
 use rbms_skin::dst::{LuaDrawEval, OffsetSource, SkinOffset};
 use rbms_skin::loader::{LoadedSkin, SKIN_TYPE_COURSE_RESULT, SKIN_TYPE_DECIDE, SKIN_TYPE_KEY_CONFIG, SKIN_TYPE_MUSIC_SELECT, SKIN_TYPE_RESULT};
-use rbms_skin::lua::BoundFrame;
+use rbms_skin::lua::{BoundFrame, SkinLua};
 use rbms_skin::property::generated::OFFSET_ALL;
 use rbms_skin::property::{HostCall, SkinHost, StaticScreen};
 use rbms_skin::timer::TimerState;
@@ -1077,13 +1077,41 @@ impl AppShared {
         Instant::now()
     }
 
+    /// How long the player has been up, read at the instant the scene clock is: the operating time a
+    /// document shows, which a frame drawn with the clocks stopped reads where they stopped.
+    fn skin_uptime_ms(&self) -> u64 {
+        u64::try_from(self.scene_instant().saturating_duration_since(self.booted).as_millis()).unwrap_or(u64::MAX)
+    }
+
+    /// The interpreter `screen`'s document runs its scripts in, when it has one, ready for a frame to
+    /// be bound in it.
+    ///
+    /// Its frame clock ([`SkinLua::hold_frame_clock`]) is held exactly while the scene clock is
+    /// stopped: a test that stopped the machine's side of the clocks has the time the machine takes
+    /// inside the skin's own calls charged to nothing as well, so no call of the frame is refused
+    /// and answered with an earlier frame's value because the machine was slow over the one before.
+    fn skin_runtime(&self, screen: i32) -> Option<&SkinLua> {
+        let runtime = self.skins.document(screen).and_then(LoadedSkin::runtime)?;
+        #[cfg(test)]
+        runtime.hold_frame_clock(self.scene_stopped_at.is_some());
+        Some(runtime)
+    }
+
     /// Stop the machine's side of the scene clock where it is, for the tests of what a scene does
     /// before and after one of its times: from here on the clock moves only when it is put
     /// somewhere or aged ([`AppShared::age_skin_scene`]), a scene that begins reads exactly zero,
     /// and the time the machine takes over a frame is no part of the scene.
     #[cfg(test)]
     pub(crate) fn stop_scene_clock(&mut self) {
-        self.scene_stopped_at = Some(Instant::now());
+        self.stop_scene_clock_at(Instant::now());
+    }
+
+    /// The same, the machine's side of the clock stopped at `at` rather than at now: a capture that
+    /// stops it again at the instant of each frame it draws has every read of the scene inside the
+    /// frame see that instant ([`AppShared::stop_clocks_at`]).
+    #[cfg(test)]
+    pub(crate) fn stop_scene_clock_at(&mut self, at: Instant) {
+        self.scene_stopped_at = Some(at);
     }
 
     /// Start a scene: every timer off and the scene clock back at zero
@@ -1407,7 +1435,7 @@ impl AppShared {
         };
         let actions = self.skin_screens.take_actions(screen);
         let writes = self.skin_screens.take_text_writes(screen);
-        let prepared = match self.skins.document(screen).and_then(LoadedSkin::runtime) {
+        let prepared = match self.skin_runtime(screen) {
             Some(runtime) => runtime.frame(&host, |bound| {
                 let live = SkinFrame { lua: Some(bound as &dyn LuaDrawEval), ..frame };
                 writes.iter().for_each(|write| writers::run_text_write(write, &host, Some(bound)));
@@ -1613,7 +1641,7 @@ impl AppShared {
         let audio = &self.config.audio;
         SystemState {
             clock: rbms_skin::lua::local_time(unix_seconds),
-            uptime_ms: Some(u64::try_from(self.booted.elapsed().as_millis()).unwrap_or(u64::MAX)),
+            uptime_ms: Some(self.skin_uptime_ms()),
             fps: Some(self.fps),
             player_name: Some(&self.config.network.player_id),
             version: Some(SKIN_VERSION),
@@ -1707,7 +1735,7 @@ impl AppShared {
     /// server is set up (`irname`, `irUserName`).
     fn skin_ir_names(&self) -> (String, String) {
         match self.primary_ir_profile() {
-            Some((service, ..)) => (service, submission_player_id(&self.session, &self.config.network.player_id)),
+            Some((service, ..)) => (service, submission_player_id(&self.session)),
             None => (String::new(), String::new()),
         }
     }

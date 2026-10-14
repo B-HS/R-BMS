@@ -25,7 +25,43 @@ pub const SCORE_LN_MODE_FROM_CHART: &str = "CHART";
 ///
 /// Version 3 changes SCRATCH AUTO alone ([`SCRATCH_AUTO_LEAVES_THE_TURNTABLE_RULE_VERSION`]): every
 /// other record of version 2 was judged as this build judges it.
-pub const SCORE_RULE_VERSION: u32 = 3;
+///
+/// Version 4 records a run as the reference does ([`REFERENCE_RECORD_RULE_VERSION`]): `avgjudge`
+/// is the mean distance of every note from its input, a run the gauge ended is charged for the notes
+/// it never reached, a course stage keeps its own combo, a full combo is the combo standing at the
+/// end, and a TOTAL the player set is an assist. The same generation is judged in event time and
+/// on charts tidied as the reference tidies them; see [`REFERENCE_RECORD_RULE_VERSION`].
+pub const SCORE_RULE_VERSION: u32 = 4;
+
+/// The first rule version whose records are what the reference records of a run
+/// (`BMSPlayer.java:863-930`).
+///
+/// * `avgjudge` is `ScoreData.avgjudge`: the mean distance of every note from its input, a note
+///   never hit counting a second. Before, it was the size of the mean signed offset of the hits
+///   alone, in which early and late cancel out, so an older value is no measure of the same thing
+///   and never competes with one of this version for a best.
+/// * `minbp` of a run the gauge ended counts the notes it never reached. An older record left them
+///   out, and they are added back from its counts wherever it is compared
+///   ([`crate::scoredb::charged_minbp`]).
+/// * `combo` of a course stage is the stage's own, and a full combo is the combo standing at the
+///   end. An older record keeps the combo and the lamp it was given.
+/// * A run played with a TOTAL of the player's own is assisted and sets no best. An older record
+///   of such a run cannot be told from any other.
+///
+/// A record of this version was also judged by the engine of the same release, which an older
+/// record was not:
+///
+/// * Every input is judged at the instant it carries, and what time alone settles (a note let
+///   pass, a release held over, a mine, a hell-charge tick) at the instant it falls due, so the
+///   frame rate no longer moves a judgement; a controller change is judged where the controller
+///   layer stamped it rather than at the next poll, up to a frame earlier; and a run stops being
+///   judged the instant its gauge empties. An older record differs only where a frame boundary
+///   decided it, and is compared as it stands.
+/// * A plain note inside a long note's body on its lane is background sound, and a long-note head
+///   that never ends is dropped, so some charts have fewer notes than they had (the song database's
+///   parser version 3). An older record keeps the note count and EX ceiling it was played on and is
+///   compared as it stands; only those charts can hold an older best scored out of more notes.
+pub const REFERENCE_RECORD_RULE_VERSION: u32 = 4;
 
 /// The first rule version this build judges a run played by hand exactly as it did then: the
 /// judge-parity pass, whose assisted lamps are demoted as this build demotes them.
@@ -180,6 +216,17 @@ impl ScoreBook {
     pub fn push(&mut self, record: ScoreRecord) {
         self.index.entry(record.md5.to_ascii_lowercase()).or_default().push(self.records.len());
         self.records.push(record);
+    }
+
+    /// Stop every record that names the replay `file` from offering it, the file being gone. Returns
+    /// how many records named it.
+    pub fn forget_replay(&mut self, file: &str) -> usize {
+        let mut forgotten = 0;
+        for record in self.records.iter_mut().filter(|record| record.replay_file.as_deref() == Some(file)) {
+            record.replay_file = None;
+            forgotten += 1;
+        }
+        forgotten
     }
 
     /// Rebuild the md5 lookup index from the record list. Called after a load.

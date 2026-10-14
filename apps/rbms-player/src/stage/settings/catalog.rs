@@ -208,7 +208,9 @@ pub(crate) fn description(id: SettingId) -> &'static str {
         }
         SettingId::KeyConfig => "Opens the key editor, where every key and controller button the player reads is listed and can be changed.",
         SettingId::ServerUrl => "The address of the score server. Left empty the player stays offline and nothing is sent.",
-        SettingId::PlayerId => "The id scores are sent under, and the id LOGIN and REGISTER sign in with. Empty is guest, and LOGOUT puts it back to guest.",
+        SettingId::PlayerId => {
+            "The id LOGIN and REGISTER sign in with. While signed in, scores and settings go to the account the token belongs to. Empty is guest, and LOGOUT puts it back to guest."
+        }
         SettingId::Account => "The account this player is signed in to. ENTER writes its state on the status line.",
         SettingId::Email => "The address REGISTER creates an account with. LOGIN does not need it.",
         SettingId::Password => {

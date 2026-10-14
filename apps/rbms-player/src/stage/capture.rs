@@ -106,7 +106,7 @@ use crate::app_result::enter_result;
 use crate::gpu::Gpu;
 use crate::skin_select::SKIN_PACK_ENV;
 use crate::stage::canvas::UI_SIZE;
-use crate::stage::render_tests::{FRAME_DT, app, play_state, render, render_on};
+use crate::stage::render_tests::{FRAME_DT, app, play_state, render};
 use crate::stage::scene_life::SceneTimes;
 use crate::stage::select::tests::record;
 use crate::stage::{Canvas, CourseResultState, DecideState, FrameCtx, HeadlessCanvas, KeyConfigState, KeyInput, PlayState, SelectState, Stage, Transition};
@@ -265,11 +265,49 @@ fn draw_until_compiled_on(app: &mut App, screen: i32, scene_us: i64, canvas: &mu
 }
 
 /// [`draw_at`] on either kind of target: the scene clock is put where the frame was asked for, and
-/// the frame is drawn the way the render snapshot tests draw one.
+/// the frame is drawn the way the render snapshot tests draw one, at a stopped instant
+/// ([`at_a_stopped_instant`]).
 fn draw_on(app: &mut App, stage: Stage, scene_us: i64, canvas: &mut Canvas<'_>) {
     let age = Duration::from_micros(u64::try_from(scene_us).expect("a scene has no time before it began"));
-    app.shared.put_skin_scene_at(age);
-    render_on(app, stage, canvas);
+    at_a_stopped_instant(app, |app, now| {
+        app.shared.put_skin_scene_at(age);
+        draw_stage_at(app, stage, canvas, now);
+    });
+}
+
+/// Run one frame of `app` at an instant the machine's clocks are stopped at, and let them run on
+/// afterwards as they ran before it.
+///
+/// The frame is handed the instant, and each clock it reads that was running -- the scene clock,
+/// the song clock as it is read without a sound device, and with the scene clock the clock the
+/// skin's scripts are metered by -- reads that instant from the frame's first read to its last. A
+/// scene put somewhere at the start of the frame is where its update and its draw see it, however
+/// long the machine takes over them. A clock a test has stopped itself is left where it stopped it.
+pub(super) fn at_a_stopped_instant<R>(app: &mut App, frame: impl FnOnce(&mut App, Instant) -> R) -> R {
+    let now = Instant::now();
+    let (scene_ran, song_ran) = (app.shared.scene_stopped_at.is_none(), app.shared.song_stopped_at.is_none());
+    if scene_ran {
+        app.shared.stop_scene_clock_at(now);
+    }
+    if song_ran {
+        app.shared.song_stopped_at = Some(now);
+    }
+    let answer = frame(app, now);
+    if scene_ran {
+        app.shared.scene_stopped_at = None;
+    }
+    if song_ran {
+        app.shared.song_stopped_at = None;
+    }
+    answer
+}
+
+/// Put `stage` up and draw it, the frame handed `now`: the draw [`crate::stage::render_tests::render_on`] makes, at an instant
+/// the caller chose.
+fn draw_stage_at(app: &mut App, stage: Stage, canvas: &mut Canvas<'_>, now: Instant) {
+    app.stage = stage;
+    app.shared.hot.clear();
+    app.stage.draw(&mut FrameCtx { shared: &mut app.shared, now, dt: FRAME_DT }, canvas);
 }
 
 /// Save a frame under the capture folder, when one was asked for.
@@ -433,22 +471,33 @@ fn authored_size(app: &App, screen: i32) -> Option<(u32, u32)> {
 ///
 /// A Lua skin is read on the screen's first frame, against the state that frame is drawn from, so a
 /// skin that cannot be read is known by the second frame and nothing is waited for.
+///
+/// Every frame is drawn at a stopped instant ([`at_a_stopped_instant`]), and the last is put at
+/// [`PACK_SCENE`] past where the scene stood on the frame before it -- the frame that found the
+/// document in -- rather than aged from where the running clock got to, so how long the machine
+/// took between the two is no part of the capture.
 fn draw_until_settled(app: &mut App, screen: i32, canvas: &mut Canvas<'_>, stage: fn() -> Stage) -> Result<(), String> {
     let deadline = Instant::now() + PACK_LOAD_TIMEOUT;
     draw_on(app, stage(), SCENE_START_US, canvas);
+    let mut stood = Duration::ZERO;
     loop {
         if let Some(reason) = app.shared.skin_failure(screen) {
             return Err(reason.lines().next().unwrap_or_default().to_owned());
         }
         if app.shared.has_compiled_skin(screen) {
-            app.shared.age_skin_scene(PACK_SCENE);
-            render_on(app, stage(), canvas);
+            at_a_stopped_instant(app, |app, now| {
+                app.shared.put_skin_scene_at(stood + PACK_SCENE);
+                draw_stage_at(app, stage(), canvas, now);
+            });
             return Ok(());
         }
         if Instant::now() >= deadline {
             return Err(format!("its files were not read within {} seconds", PACK_LOAD_TIMEOUT.as_secs()));
         }
-        render_on(app, stage(), canvas);
+        stood = at_a_stopped_instant(app, |app, now| {
+            draw_stage_at(app, stage(), canvas, now);
+            Duration::from_micros(u64::try_from(app.shared.skin_now_us()).unwrap_or_default())
+        });
     }
 }
 
@@ -712,16 +761,20 @@ fn write_rich_chart(tag: &str) -> PathBuf {
 
 /// One frame of the stage that is up with the scene clock put at `scene_ms`: its update and then its
 /// draw, which is the order the application runs them in. Answers what the update asked for.
+///
+/// The frame runs at a stopped instant ([`at_a_stopped_instant`]): its update and its draw both see
+/// the scene at `scene_ms`, however long the machine takes over them.
 pub(super) fn scene_frame_at(app: &mut App, scene_ms: i64, canvas: &mut Canvas<'_>) -> Transition {
     let age = Duration::from_millis(u64::try_from(scene_ms).expect("a scene has no time before it began"));
-    app.shared.put_skin_scene_at(age);
-    let now = Instant::now();
-    let transition = app.stage.update(&mut FrameCtx { shared: &mut app.shared, now, dt: FRAME_DT });
-    if matches!(transition, Transition::Stay) {
-        app.shared.hot.clear();
-        app.stage.draw(&mut FrameCtx { shared: &mut app.shared, now, dt: FRAME_DT }, canvas);
-    }
-    transition
+    at_a_stopped_instant(app, |app, now| {
+        app.shared.put_skin_scene_at(age);
+        let transition = app.stage.update(&mut FrameCtx { shared: &mut app.shared, now, dt: FRAME_DT });
+        if matches!(transition, Transition::Stay) {
+            app.shared.hot.clear();
+            app.stage.draw(&mut FrameCtx { shared: &mut app.shared, now, dt: FRAME_DT }, canvas);
+        }
+        transition
+    })
 }
 
 /// Run the scene that is up a frame at a time, its clock at its beginning, until the pack's document
@@ -2106,14 +2159,20 @@ fn play_screen(app: &App) -> Result<&PlayState, String> {
 ///
 /// The scene clock and the song clock are both real clocks, and a frame of a published skin takes a
 /// good part of a second to draw on a headless canvas -- and saving one takes as long again. So each
-/// frame of a captured run puts both clocks where this says they are before it runs: the run moves
-/// by what was asked for and by nothing else, whatever machine draws it.
+/// frame of a captured run stops the machine's side of both clocks at the instant it is handed
+/// ([`crate::AppShared::stop_clocks_at`]) and puts them where this says they are before it runs: every read
+/// of either inside the update and the draw sees that moment, so the run moves by what was asked for
+/// and by nothing else, whatever machine draws it and however long it takes over a frame.
 #[derive(Default)]
 struct PlayClocks {
     /// How long the scene has run.
     scene: Duration,
     /// How long the chart has played, once it has started.
     song: Option<Duration>,
+    /// How long the machine is made to take over every frame that is drawn: once between the frame
+    /// reading the time and its update, and once more between its update and its draw. Nothing sets
+    /// it but the tests that a frame is drawn alike however slow the machine drawing it is.
+    machine_stall: Duration,
 }
 
 impl PlayClocks {
@@ -2124,10 +2183,12 @@ impl PlayClocks {
         self.scene += by;
         self.song = self.song.map(|song| song + by);
         let now = Instant::now();
+        app.shared.stop_clocks_at(now);
         app.shared.put_skin_scene_at(self.scene);
         if let Some(song) = self.song {
             app.shared.clock = now.checked_sub(song).ok_or_else(|| "the process has not been up for as long as the run".to_owned())?;
         }
+        self.stall(canvas.is_some());
         let transition = app.stage.update(&mut FrameCtx { shared: &mut app.shared, now, dt: FRAME_DT });
         if !matches!(transition, Transition::Stay) {
             return Err(format!("the play screen left at {:?}", play_screen(app).map(|play| play.phase())));
@@ -2135,11 +2196,19 @@ impl PlayClocks {
         if self.song.is_none() && play_screen(app)?.phase() == Some(crate::skin_host::play::PlayPhase::Play) {
             self.song = Some(Duration::ZERO);
         }
+        self.stall(canvas.is_some());
         if let Some(canvas) = canvas {
             app.shared.hot.clear();
             app.stage.draw(&mut FrameCtx { shared: &mut app.shared, now, dt: FRAME_DT }, canvas);
         }
         Ok(())
+    }
+
+    /// Hold the machine up for [`PlayClocks::machine_stall`] inside a frame that is `drawn`.
+    fn stall(&self, drawn: bool) {
+        if drawn && !self.machine_stall.is_zero() {
+            std::thread::sleep(self.machine_stall);
+        }
     }
 
     /// Run the play screen on by `millis` in steps of [`PLAY_STEP_MS`], the way frames would carry

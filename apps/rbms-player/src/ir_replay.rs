@@ -88,16 +88,18 @@ pub(crate) fn to_ir_replay(replay: &Replay, chart: &ChartId, constant: bool, lnt
     }
 }
 
-/// Whether the upload states every judge width and the LN MARGIN a run was played under, so that
-/// the replay comes back from the wire judged as it was played ([`from_ir_replay`]).
+/// Whether the upload states every judge width, the LN MARGIN and the TOTAL a run was played under,
+/// so that the replay comes back from the wire judged as it was played ([`from_ir_replay`]).
 ///
-/// The wire carries one `judge_rate` and no LN MARGIN: a run whose six widths are one number and
-/// whose margin is the stock one is carried whole, and any other is not. Such a run is still kept
-/// and played back from its local file, which records all of them.
+/// The wire carries one `judge_rate`, no LN MARGIN and no TOTAL: a run whose six widths are one
+/// number, whose margin is the stock one and which was played on the chart's own TOTAL is carried
+/// whole, and any other is not. Such a run is still kept and played back from its local file, which
+/// records all of them.
 pub(crate) fn wire_carries_judge(judge: &ReplayJudge) -> bool {
     let uploaded = judge.judge_rate_key[UPLOADED_JUDGE_WIDTH_TIER];
     judge.judge_rate_key.iter().chain(&judge.judge_rate_scratch).all(|rate| *rate == uploaded)
         && judge.longnote_margin_rate == ReplayJudge::default().longnote_margin_rate
+        && !crate::overrides_total(judge.total_override)
 }
 
 /// Rebuild a locally playable replay from a downloaded one. `chart_path` and `md5` come from the
@@ -261,6 +263,7 @@ mod tests {
     #[test]
     fn only_a_judge_the_wire_can_state_is_uploaded() {
         const WIDENED_PERCENT: i32 = 150;
+        const OWN_TOTAL: f64 = 5_000.0;
         let uniform = |rate: i32| ReplayJudge {
             judge_rate_key: [rate; REPLAY_JUDGE_WIDTH_TIER_COUNT],
             judge_rate_scratch: [rate; REPLAY_JUDGE_WIDTH_TIER_COUNT],
@@ -269,15 +272,17 @@ mod tests {
         let carried_back = |judge: ReplayJudge| {
             let local = Replay { judge, ..sample() };
             let back = from_ir_replay(&to_ir_replay(&local, &chart(), false, 0, None), &local.chart_path, &local.md5).judge;
-            (back.judge_rate_key, back.judge_rate_scratch, back.longnote_margin_rate)
-                == (local.judge.judge_rate_key, local.judge.judge_rate_scratch, local.judge.longnote_margin_rate)
+            (back.judge_rate_key, back.judge_rate_scratch, back.longnote_margin_rate, back.total_override)
+                == (local.judge.judge_rate_key, local.judge.judge_rate_scratch, local.judge.longnote_margin_rate, local.judge.total_override)
         };
         let widened_margin = ReplayJudge { longnote_margin_rate: WIDENED_PERCENT, ..ReplayJudge::default() };
-        for judge in [ReplayJudge::default(), uniform(WIDENED_PERCENT), sample().judge, widened_margin] {
+        let own_total = ReplayJudge { total_override: OWN_TOTAL, ..ReplayJudge::default() };
+        for judge in [ReplayJudge::default(), uniform(WIDENED_PERCENT), sample().judge, widened_margin, own_total.clone()] {
             assert_eq!(wire_carries_judge(&judge), carried_back(judge.clone()), "{judge:?}");
         }
         assert!(wire_carries_judge(&uniform(WIDENED_PERCENT)), "a judge widened on every tier alike is carried");
         assert!(!wire_carries_judge(&sample().judge), "keys narrowed and the turntable left is not");
+        assert!(!wire_carries_judge(&own_total), "a TOTAL of the player's own is not, the wire having no place for it");
     }
 
     #[test]

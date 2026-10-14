@@ -8,9 +8,19 @@
 //! server's answer, written per play into `ir_sync`, that decides whether a play is sent again —
 //! never the old `ir_submitted` flag, which said only that a play was handed over.
 //!
-//! The sending happens on a worker thread, paced under the server's rate limits; the frame thread
-//! picks up what the worker reports once per frame ([`AppShared::poll_record_sync`]) and is the
-//! only one that touches the database.
+//! A finished course is kept and sent the same way ([`ScoreDb::course_candidates`]), after the
+//! plays.
+//!
+//! The picking and the sending happen on a worker thread, paced under the server's rate limits. The
+//! worker reads the database through a connection of its own that only reads, so picking the plays
+//! out of a history of tens of thousands never stalls a frame; the frame thread hands it what it
+//! asks of the library, picks up what it reports once per frame ([`AppShared::poll_record_sync`]),
+//! and is the only one that writes.
+//!
+//! A refusal is written down with the builds it was given under, this client's and the server's
+//! ([`refusal_key`]). The same play sent again by the same client to the same server would be
+//! refused again, so a sync started on its own (at launch, at sign-in) leaves it out until one of
+//! the two builds changes; SYNC RECORDS NOW sends every refusal again.
 //!
 //! A play stored before its submission body was kept is rebuilt from its row
 //! ([`rebuilt_submission`]): the row has the judgements, the lamp, the gauge and the shuffle, and
@@ -24,12 +34,13 @@ use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::time::{Duration, Instant};
 
 use rbms_ir::mapping::{AUTO_SCRATCH_FLAG, CUSTOM_JUDGE_FLAG};
-use rbms_ir::{ChartId, Rejection, SubmitVerdict, UploadVerdict, submit_verdict, upload_verdict};
-use rbms_store::SCRATCH_AUTO_ASSIST;
+use rbms_ir::{ChartId, CourseSubmission, IrError, Rejection, SubmitResponse, SubmitVerdict, UploadVerdict, submit_verdict, upload_verdict};
 use rbms_store::scoredb::{
-    IrSyncRow, JUDGE_BAD, JUDGE_GOOD, JUDGE_GREAT, JUDGE_MISS, JUDGE_PGREAT, JUDGE_POOR, JUDGE_TIER_COUNT, PlayLog, ReplayState, SKIPPED_OLD_SCRATCH_AUTO_RULE,
-    SyncCandidate, SyncState, UNSET_MINIMUM, gauge_token, mode_name, random_token,
+    CourseSyncRow, IrSyncRow, JUDGE_BAD, JUDGE_GOOD, JUDGE_GREAT, JUDGE_MISS, JUDGE_PGREAT, JUDGE_POOR, JUDGE_TIER_COUNT, KeptCourse, PlayLog, ReplayAnswer,
+    ReplayState, SKIPPED_OLD_SCRATCH_AUTO_RULE, ScoreDb, SyncCandidate, SyncState, SyncWalk, UNSET_MINIMUM, charged_minbp, gauge_token, mode_name,
+    random_token,
 };
+use rbms_store::{REFERENCE_RECORD_RULE_VERSION, SCRATCH_AUTO_ASSIST};
 
 use crate::ir_outcome::{IrLineKind, truncate};
 use crate::ir_replay::{to_ir_replay, wire_carries_judge};
@@ -81,6 +92,31 @@ const REPLAY_FILE_STAMP_SEPARATOR: char = '-';
 /// The client a rebuilt play is sent by: this build, which rebuilt it.
 const CLIENT_NAME: &str = concat!("rbms/", env!("CARGO_PKG_VERSION"));
 
+/// `error_code` of a course not sent because the server has no course endpoint. It is sent again
+/// on a later sync, which a server that has gained one takes.
+pub(crate) const SKIPPED_NO_COURSE_ENDPOINT: &str = "NO_COURSE_ENDPOINT";
+const NO_COURSE_ENDPOINT_REASON: &str = "server takes no courses";
+
+/// What separates the client's build from the server's in a [`refusal_key`].
+const REFUSAL_KEY_SEPARATOR: char = '|';
+
+/// The builds a refusal is written down under: this client's and the server's. A refusal under the
+/// same two would be given again, so a sync started on its own leaves such a play out
+/// ([`SyncWalk::refused_under`]). A server that does not say its build is the empty build: a
+/// refusal it gives is sent again only by hand or by another client build.
+pub(crate) fn refusal_key(client: &str, server: &str) -> String {
+    format!("{client}{REFUSAL_KEY_SEPARATOR}{server}")
+}
+
+/// The build a server says it runs: its commit, or its name and API generation when it names no
+/// commit, and nothing when it does not answer.
+pub(crate) fn server_build_of(server: &dyn ScoreServer) -> String {
+    match server.version() {
+        Ok(info) => info.commit.unwrap_or_else(|| format!("{}@{}", info.server, info.api_version)),
+        Err(_) => String::new(),
+    }
+}
+
 /// How fast a sync sends. The constants above in the game; nothing in the tests.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct SyncPacing {
@@ -107,10 +143,11 @@ pub(crate) struct ChartFacts {
     pub(crate) level: String,
 }
 
-/// Everything a worker needs to send: the plays and the replays, and how.
+/// Everything a worker needs to send: the plays, the courses and the replays, and how.
 pub(crate) struct SyncJob {
     pub(crate) login_id: String,
     pub(crate) scores: Vec<SyncCandidate>,
+    pub(crate) courses: Vec<KeptCourse>,
     pub(crate) replays: Vec<SyncCandidate>,
     pub(crate) upload_replays: bool,
     pub(crate) replay_dir: PathBuf,
@@ -135,13 +172,22 @@ pub(crate) enum SyncStop {
     Unreachable(String),
     RateLimited,
     Cancelled,
+    /// The worker could not read what to send.
+    Unreadable(String),
 }
 
 /// What the worker reports, in the order it happens.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum SyncEvent {
+    /// The worker picked what to send ([`spawn_planned_sync`]): the build the server said it runs,
+    /// and the charts (lower-case MD5s) whose library facts it waits for.
+    Picked {
+        server_build: String,
+        md5s: Vec<String>,
+    },
     Started {
         scores: usize,
+        courses: usize,
         replays: usize,
     },
     /// A play stored without its chart's SHA-256 has it now.
@@ -151,6 +197,11 @@ pub(crate) enum SyncEvent {
     },
     Score {
         log_id: i64,
+        outcome: ScoreOutcome,
+    },
+    /// What the server said of a kept course.
+    Course {
+        course_id: i64,
         outcome: ScoreOutcome,
     },
     /// The replay stage is about to send this many replays.
@@ -166,18 +217,6 @@ pub(crate) enum SyncEvent {
     Finished {
         stop: Option<SyncStop>,
     },
-}
-
-/// Send `job` on a worker thread, reporting over the returned channel. Setting `cancel` ends the
-/// sync at the next play or within [`SyncPacing::cancel_check`] of a wait; a request already on the
-/// wire is let finish.
-pub(crate) fn spawn_record_sync(server: Arc<dyn ScoreServer>, job: SyncJob, cancel: Arc<AtomicBool>) -> Receiver<SyncEvent> {
-    let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
-        let stop = run_record_sync(server.as_ref(), job, &cancel, &tx);
-        let _ = tx.send(SyncEvent::Finished { stop });
-    });
-    rx
 }
 
 /// Paces requests from the start of one to the start of the next, and waits so that a cancel is
@@ -220,9 +259,200 @@ impl Pacer<'_> {
     }
 }
 
+/// What a worker is to pick and send, read from the database by a connection of its own.
+pub(crate) struct SyncPlan {
+    /// The score database file the worker opens to read.
+    pub(crate) db_path: PathBuf,
+    /// The server, as `ir_sync` keys it.
+    pub(crate) server_key: String,
+    pub(crate) login_id: String,
+    pub(crate) scope: SyncScope,
+    /// Whether the player asked for the sync, which sends every refusal again.
+    pub(crate) by_hand: bool,
+    /// The play a result screen's submission is still carrying, which writes its own answer.
+    pub(crate) left_out: Option<i64>,
+    /// The newest play and course when the sync began: one stored after that is sent by whoever
+    /// stored it.
+    pub(crate) up_to: Option<i64>,
+    pub(crate) courses_up_to: Option<i64>,
+    /// This client's build ([`refusal_key`]).
+    pub(crate) client_build: String,
+    pub(crate) upload_replays: bool,
+    pub(crate) replay_dir: PathBuf,
+    pub(crate) pacing: SyncPacing,
+}
+
+/// Pick what `plan` names on a worker thread and send it ([`run_record_sync`]), reporting over the
+/// returned channel. The worker asks the server its build, reads the plays, courses and
+/// replays to send, reports them picked ([`SyncEvent::Picked`]) and waits on `charts` for what the
+/// library knows of their charts before it sends.
+pub(crate) fn spawn_planned_sync(
+    server: Arc<dyn ScoreServer>,
+    plan: SyncPlan,
+    cancel: Arc<AtomicBool>,
+    charts: Receiver<HashMap<String, ChartFacts>>,
+) -> Receiver<SyncEvent> {
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let stop = match pick(server.as_ref(), &plan, &tx) {
+            Ok((scores, courses, replays)) => match facts_from(&charts, &cancel, plan.pacing.cancel_check) {
+                Some(charts) => {
+                    let job = SyncJob {
+                        login_id: plan.login_id.clone(),
+                        scores,
+                        courses,
+                        replays,
+                        upload_replays: plan.upload_replays,
+                        replay_dir: plan.replay_dir.clone(),
+                        charts,
+                        pacing: plan.pacing,
+                    };
+                    run_record_sync(server.as_ref(), job, &cancel, &tx)
+                }
+                None => Some(SyncStop::Cancelled),
+            },
+            Err(e) => Some(SyncStop::Unreadable(e.to_string())),
+        };
+        let _ = tx.send(SyncEvent::Finished { stop });
+    });
+    rx
+}
+
+/// What a worker picked to send: plays, courses, replays.
+type Picked = (Vec<SyncCandidate>, Vec<KeptCourse>, Vec<SyncCandidate>);
+
+/// Ask the server its build, read what `plan` sends, and report it picked.
+fn pick(server: &dyn ScoreServer, plan: &SyncPlan, tx: &Sender<SyncEvent>) -> Result<Picked, rbms_store::scoredb::ScoreDbError> {
+    let server_build = server_build_of(server);
+    let refused_under = refusal_key(&plan.client_build, &server_build);
+    let db = ScoreDb::open_read_only(&plan.db_path)?;
+    let only = match &plan.scope {
+        SyncScope::All => None,
+        SyncScope::Logs(ids) => Some(ids.as_slice()),
+    };
+    let walk = SyncWalk {
+        server: &plan.server_key,
+        login_id: &plan.login_id,
+        only,
+        up_to: plan.up_to,
+        courses_up_to: plan.courses_up_to,
+        refused_under: (!plan.by_hand).then_some(refused_under.as_str()),
+    };
+    let mut scores = db.sync_candidates(&walk)?;
+    scores.retain(|candidate| Some(candidate.log.id) != plan.left_out);
+    let (courses, replays) = match plan.scope {
+        SyncScope::All => (db.course_candidates(&walk)?, if plan.upload_replays { db.replay_candidates(&walk)? } else { Vec::new() }),
+        SyncScope::Logs(_) => (Vec::new(), Vec::new()),
+    };
+    let md5s: HashSet<String> = scores.iter().chain(&replays).map(|candidate| candidate.log.md5.to_ascii_lowercase()).collect();
+    let _ = tx.send(SyncEvent::Picked { server_build, md5s: md5s.into_iter().collect() });
+    Ok((scores, courses, replays))
+}
+
+/// Wait for the library's facts the frame thread hands back, looking at the cancel flag as it
+/// waits. `None` when the sync was cancelled; a frame thread that went away hands nothing.
+fn facts_from(charts: &Receiver<HashMap<String, ChartFacts>>, cancel: &AtomicBool, check: Duration) -> Option<HashMap<String, ChartFacts>> {
+    loop {
+        if cancel.load(Ordering::Relaxed) {
+            return None;
+        }
+        match charts.recv_timeout(check) {
+            Ok(facts) => return Some(facts),
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => return Some(HashMap::new()),
+        }
+    }
+}
+
+/// What a course submission's answer means for the course, read as a play's is, but for a server
+/// that has no course endpoint: the course is not sent, and goes again on a later sync.
+pub(crate) fn course_outcome(result: &Result<SubmitResponse, IrError>) -> ScoreOutcome {
+    if matches!(result, Err(IrError::Unsupported)) {
+        return ScoreOutcome::Skipped { code: SKIPPED_NO_COURSE_ENDPOINT, reason: NO_COURSE_ENDPOINT_REASON };
+    }
+    match submit_verdict(result) {
+        SubmitVerdict::Accepted { score_id, already, .. } => ScoreOutcome::Accepted { score_id, already, replay: ReplayState::None },
+        SubmitVerdict::Rejected(rejection) => ScoreOutcome::Rejected(rejection),
+        SubmitVerdict::RateLimited => ScoreOutcome::Retry { detail: RATE_LIMITED_DETAIL.to_string() },
+        SubmitVerdict::Transient { detail } | SubmitVerdict::StopSync { detail } => ScoreOutcome::Retry { detail },
+    }
+}
+
+/// Send the kept courses, by the rules plays are sent by. Returns why the sync stopped, if it did.
+fn send_courses(
+    server: &dyn ScoreServer,
+    courses: Vec<KeptCourse>,
+    login_id: &str,
+    pacer: &mut Pacer<'_>,
+    pacing: &SyncPacing,
+    transient_in_a_row: &mut u32,
+    tx: &Sender<SyncEvent>,
+) -> Option<SyncStop> {
+    for course in courses {
+        if pacer.cancelled() {
+            return Some(SyncStop::Cancelled);
+        }
+        let course_id = course.id;
+        let report = |outcome: ScoreOutcome| {
+            let _ = tx.send(SyncEvent::Course { course_id, outcome });
+        };
+        let Some(mut submission) = CourseSubmission::from_json(&course.body) else {
+            report(ScoreOutcome::Skipped { code: SKIPPED_UNREADABLE_COURSE, reason: UNREADABLE_COURSE_REASON });
+            continue;
+        };
+        submission.player.id = login_id.to_string();
+        submission.clamp_to_server_bounds();
+        let mut waits = 0;
+        let result = loop {
+            if pacer.before_request(pacing.score_interval) {
+                return Some(SyncStop::Cancelled);
+            }
+            let result = server.submit_course(&submission);
+            if matches!(result, Err(IrError::RateLimited(_))) && waits < RATE_LIMIT_WAITS_PER_REQUEST {
+                waits += 1;
+                if pacer.wait(pacing.rate_limit_wait) {
+                    return Some(SyncStop::Cancelled);
+                }
+                continue;
+            }
+            break result;
+        };
+        let outcome = course_outcome(&result);
+        match submit_verdict(&result) {
+            SubmitVerdict::RateLimited => {
+                report(outcome);
+                return Some(SyncStop::RateLimited);
+            }
+            SubmitVerdict::StopSync { detail } if !matches!(result, Err(IrError::Unsupported)) => {
+                report(outcome);
+                return Some(SyncStop::Unauthorized(detail));
+            }
+            SubmitVerdict::Transient { detail } => {
+                *transient_in_a_row += 1;
+                report(outcome);
+                if *transient_in_a_row >= TRANSIENT_FAILURES_BEFORE_STOP {
+                    return Some(SyncStop::Unreachable(detail));
+                }
+            }
+            _ => {
+                *transient_in_a_row = 0;
+                report(outcome);
+            }
+        }
+    }
+    None
+}
+
+/// `error_code` of a kept course whose body no longer reads as a course submission.
+pub(crate) const SKIPPED_UNREADABLE_COURSE: &str = "UNREADABLE_COURSE";
+const UNREADABLE_COURSE_REASON: &str = "kept course body unreadable";
+
+/// Send `job`, reporting over `tx`: the plays, then the courses, then the replays. Setting `cancel`
+/// ends the sync at the next play or within [`SyncPacing::cancel_check`] of a wait; a request
+/// already on the wire is let finish. Returns why the sync stopped, if it did.
 fn run_record_sync(server: &dyn ScoreServer, job: SyncJob, cancel: &AtomicBool, tx: &Sender<SyncEvent>) -> Option<SyncStop> {
-    let SyncJob { login_id, scores, mut replays, upload_replays, replay_dir, charts, pacing } = job;
-    let _ = tx.send(SyncEvent::Started { scores: scores.len(), replays: replays.len() });
+    let SyncJob { login_id, scores, courses, mut replays, upload_replays, replay_dir, charts, pacing } = job;
+    let _ = tx.send(SyncEvent::Started { scores: scores.len(), courses: courses.len(), replays: replays.len() });
     let mut pacer = Pacer { last_start: None, cancel, check: pacing.cancel_check };
     let mut transient_in_a_row = 0;
     for candidate in scores {
@@ -295,6 +525,9 @@ fn run_record_sync(server: &dyn ScoreServer, job: SyncJob, cancel: &AtomicBool, 
             }
         };
         let _ = tx.send(SyncEvent::Score { log_id, outcome });
+    }
+    if let Some(stop) = send_courses(server, courses, &login_id, &mut pacer, &pacing, &mut transient_in_a_row, tx) {
+        return Some(stop);
     }
     if !upload_replays {
         return None;
@@ -479,13 +712,13 @@ pub(crate) fn rebuilt_submission(log: &PlayLog, facts: Option<&ChartFacts>) -> S
             lpr: log.judge.late[JUDGE_POOR],
             ems: log.judge.early[JUDGE_MISS],
             lms: log.judge.late[JUDGE_MISS],
-            avgjudge: if log.avgjudge == UNSET_MINIMUM { 0 } else { log.avgjudge },
+            avgjudge: rebuilt_avgjudge(log),
             empty_poor: counts[JUDGE_MISS],
         },
         max_combo: log.combo,
         total_notes: log.notes,
         passnotes: notes_taken.min(log.notes),
-        minbp: log.minbp,
+        minbp: u32::try_from(charged_minbp(log)).unwrap_or(u32::MAX),
         gauge_value: log.gauge_value,
         options: PlayOptions {
             gauge: ir_gauge(rbms_config::gauge_from_name(gauge_token(log.gauge))),
@@ -520,7 +753,19 @@ pub(crate) fn rebuilt_submission(log: &PlayLog, facts: Option<&ChartFacts>) -> S
         extra: Default::default(),
     };
     submission.mark_reconstructed();
+    submission.state_rule_version(log.rule_version);
     submission
+}
+
+/// The `avgjudge` a rebuilt play states: the row's own when the row holds the reference's
+/// (`REFERENCE_RECORD_RULE_VERSION` on), and nothing for an older row or one that never held any.
+/// An older row holds the size of its hits' mean signed offset, which says nothing of the mean note
+/// distance the field now carries, and the body names the row's rule version so a server can tell.
+fn rebuilt_avgjudge(log: &PlayLog) -> i64 {
+    if log.rule_version < REFERENCE_RECORD_RULE_VERSION || log.avgjudge == UNSET_MINIMUM {
+        return 0;
+    }
+    log.avgjudge
 }
 
 /// Which plays a sync sends.
@@ -542,6 +787,9 @@ pub(crate) struct SyncTally {
     pub(crate) skipped: usize,
     pub(crate) replays_uploaded: usize,
     pub(crate) replays_failed: usize,
+    pub(crate) courses_sent: usize,
+    pub(crate) courses_rejected: usize,
+    pub(crate) courses_failed: usize,
 }
 
 impl SyncTally {
@@ -552,6 +800,15 @@ impl SyncTally {
             ScoreOutcome::Rejected(_) => self.rejected += 1,
             ScoreOutcome::Retry { .. } => self.failed += 1,
             ScoreOutcome::Skipped { .. } => self.skipped += 1,
+        }
+    }
+
+    fn count_course(&mut self, outcome: &ScoreOutcome) {
+        match outcome {
+            ScoreOutcome::Accepted { .. } => self.courses_sent += 1,
+            ScoreOutcome::Rejected(_) => self.courses_rejected += 1,
+            ScoreOutcome::Retry { .. } => self.courses_failed += 1,
+            ScoreOutcome::Skipped { .. } => {}
         }
     }
 
@@ -568,7 +825,7 @@ impl SyncTally {
     }
 
     fn is_troubled(&self) -> bool {
-        self.rejected + self.failed + self.replays_failed > 0
+        self.rejected + self.failed + self.replays_failed + self.courses_rejected + self.courses_failed > 0
     }
 
     /// The status line of a sync that ran to its end: what happened to the plays and to the
@@ -586,19 +843,28 @@ impl SyncTally {
         .flatten()
         .collect();
         let replays: Vec<String> = [part(self.replays_uploaded, "uploaded"), part(self.replays_failed, "failed")].into_iter().flatten().collect();
+        let courses: Vec<String> =
+            [part(self.courses_sent, "sent"), part(self.courses_rejected, "rejected"), part(self.courses_failed, "failed")].into_iter().flatten().collect();
         let records = if records.is_empty() { NOTHING_SENT.to_string() } else { records.join(", ") };
-        match replays.is_empty() {
-            true => format!("records: {records}"),
-            false => format!("records: {records}; replays: {}", replays.join(", ")),
+        let mut line = format!("records: {records}");
+        if !courses.is_empty() {
+            line.push_str(&format!("; courses: {}", courses.join(", ")));
         }
+        if !replays.is_empty() {
+            line.push_str(&format!("; replays: {}", replays.join(", ")));
+        }
+        line
     }
 }
 
 /// What a sync that sent no play at all says of the plays.
 const NOTHING_SENT: &str = "nothing sent";
 
+/// What SYNC RECORDS NOW says when the walk found nothing the server lacks.
+pub(crate) const NOTHING_TO_SEND: &str = "records: nothing to send";
+
 /// What SYNC RECORDS NOW says while a token is held and the server has not yet named its owner.
-const ACCOUNT_NOT_CONFIRMED: &str = "account not confirmed yet";
+pub(crate) const ACCOUNT_NOT_CONFIRMED: &str = "account not confirmed yet";
 
 /// The status line of a sync that stopped before its end.
 pub(crate) fn stop_line(stop: &SyncStop) -> String {
@@ -607,6 +873,7 @@ pub(crate) fn stop_line(stop: &SyncStop) -> String {
         SyncStop::Unreachable(_) => "records sync stopped: server unreachable".to_string(),
         SyncStop::RateLimited => "records sync stopped: rate limited".to_string(),
         SyncStop::Cancelled => "records sync cancelled".to_string(),
+        SyncStop::Unreadable(detail) => format!("records sync not started: {}", truncate(detail)),
     }
 }
 
@@ -614,8 +881,17 @@ pub(crate) fn stop_line(stop: &SyncStop) -> String {
 pub(crate) struct RecordSyncRun {
     rx: Receiver<SyncEvent>,
     cancel: Arc<AtomicBool>,
+    /// Where the library's facts of the picked charts are handed back to the worker; taken once
+    /// they are.
+    charts: Option<Sender<HashMap<String, ChartFacts>>>,
     server_key: String,
     login_id: String,
+    /// The builds a refusal this sync is given is written down under, once the server said its own.
+    refused_under: String,
+    /// Whether the player asked for this sync.
+    by_hand: bool,
+    /// A sync started on its own that found nothing to send, which says nothing.
+    quiet: bool,
     scores_total: usize,
     replays_total: Option<usize>,
     replays_done: usize,
@@ -645,14 +921,14 @@ pub(crate) fn server_key(url: &str) -> String {
     url.trim().trim_end_matches('/').to_string()
 }
 
-/// The library's facts of the charts `logs` were made on, keyed by lower-case MD5.
-fn chart_facts(library: &Library, logs: &[&PlayLog]) -> HashMap<String, ChartFacts> {
-    let wanted: HashSet<String> = logs.iter().map(|log| log.md5.to_ascii_lowercase()).collect();
-    library
-        .songs()
-        .iter()
-        .filter(|song| wanted.contains(&song.md5.to_ascii_lowercase()))
-        .map(|song| (song.md5.to_ascii_lowercase(), ChartFacts { path: song.path.clone(), artist: song.artist.clone(), level: song.level.clone() }))
+/// The library's facts of the charts `md5s` name, keyed by lower-case MD5: one index lookup per
+/// chart, whatever the size of the library.
+fn chart_facts(library: &Library, md5s: &[String]) -> HashMap<String, ChartFacts> {
+    md5s.iter()
+        .filter_map(|md5| {
+            let song = library.indices_for_md5(md5).first().and_then(|&index| library.songs().get(index))?;
+            Some((md5.to_ascii_lowercase(), ChartFacts { path: song.path.clone(), artist: song.artist.clone(), level: song.level.clone() }))
+        })
         .collect()
 }
 
@@ -661,8 +937,9 @@ fn now_ms() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or_default()
 }
 
-/// One `ir_sync` row of what a server said of a play's score.
-pub(crate) fn sync_row(log_id: i64, server: &str, login_id: &str, outcome: &ScoreOutcome) -> IrSyncRow {
+/// One `ir_sync` row of what a server said of a play's score; a refusal is written down under
+/// `refused_under` ([`refusal_key`]).
+pub(crate) fn sync_row(log_id: i64, server: &str, login_id: &str, outcome: &ScoreOutcome, refused_under: &str) -> IrSyncRow {
     let base = |state| IrSyncRow { last_attempt_at_ms: now_ms(), ..IrSyncRow::new(log_id, server, login_id, state) };
     match outcome {
         ScoreOutcome::Accepted { score_id, replay, .. } => IrSyncRow { score_id: score_id.clone(), replay_state: *replay, ..base(SyncState::Accepted) },
@@ -671,6 +948,7 @@ pub(crate) fn sync_row(log_id: i64, server: &str, login_id: &str, outcome: &Scor
             error_code: rejection.code.clone(),
             error_field: rejection.field.clone(),
             error_reason: rejection.reason.clone().or_else(|| Some(rejection.detail.clone())),
+            refused_under: Some(refused_under.to_string()),
             ..base(SyncState::Rejected)
         },
         ScoreOutcome::Retry { detail } => IrSyncRow { error_reason: Some(detail.clone()), ..base(SyncState::Retry) },
@@ -680,7 +958,37 @@ pub(crate) fn sync_row(log_id: i64, server: &str, login_id: &str, outcome: &Scor
     }
 }
 
+/// One `course_sync` row of what a server said of a kept course, as [`sync_row`] writes a play's.
+pub(crate) fn course_sync_row(course_id: i64, server: &str, login_id: &str, outcome: &ScoreOutcome, refused_under: &str) -> CourseSyncRow {
+    let row = sync_row(course_id, server, login_id, outcome, refused_under);
+    CourseSyncRow {
+        score_id: row.score_id,
+        http_status: row.http_status,
+        error_code: row.error_code,
+        error_field: row.error_field,
+        error_reason: row.error_reason,
+        refused_under: row.refused_under,
+        last_attempt_at_ms: row.last_attempt_at_ms,
+        ..CourseSyncRow::new(course_id, server, login_id, row.state)
+    }
+}
+
 impl AppShared {
+    /// This client's build, as a refusal is written down under: the version and, when the
+    /// executable could be hashed, its hash.
+    pub(crate) fn client_build(&self) -> String {
+        match &self.build_sha256 {
+            Some(hash) => format!("{CLIENT_NAME}+{hash}"),
+            None => CLIENT_NAME.to_string(),
+        }
+    }
+
+    /// The builds a refusal given now is written down under: this client's, and the server's as the
+    /// last sync heard it.
+    pub(crate) fn refusal_key(&self) -> String {
+        refusal_key(&self.client_build(), self.server_build.as_deref().unwrap_or_default())
+    }
+
     /// The server records are synced to and the account they are sent under, when there is both.
     ///
     /// The account is the one the server named for the token ([`AccountSession::login_id`]) and no
@@ -697,7 +1005,8 @@ impl AppShared {
         Some((url, login_id.to_string()))
     }
 
-    /// SYNC RECORDS NOW: sync every play, saying why when it cannot and when there is nothing to send.
+    /// SYNC RECORDS NOW: sync every play, every refusal included, saying why when it cannot and
+    /// when there is nothing to send.
     pub(crate) fn sync_records_now(&mut self) {
         if self.config.network.server_url.is_none() {
             self.net_status = "set SERVER URL first".to_string();
@@ -715,22 +1024,26 @@ impl AppShared {
             self.net_status = "records sync already running".to_string();
             return;
         }
-        if !self.start_record_sync(SyncScope::All) {
-            self.net_status = "records: nothing to send".to_string();
-        }
+        self.start_sync(SyncScope::All, true);
     }
 
-    /// Start sending `scope` to the score server, unless nobody is signed in to it. A sync already
+    /// Start sending `scope` to the score server on its own, unless nobody is signed in to it. A
+    /// play the server refused under the builds the sync sends under is left out. A sync already
     /// running takes named plays after it ends, and a second full sync is not started. Returns
     /// whether a sync was started.
+    pub(crate) fn start_record_sync(&mut self, scope: SyncScope) -> bool {
+        self.start_sync(scope, false)
+    }
+
+    /// Start a sync of `scope`, `by_hand` when the player asked for it.
     ///
     /// The play a result screen's submission is still carrying is left out: that submission writes
     /// its own answer, and sending the same play twice at once would race the two answers.
     ///
-    /// Picking the plays is done here, on the frame thread. A full walk also marks the plays held
-    /// back for their SCRATCH AUTO rule and reads every answer back; a walk of named plays does
-    /// neither, since the answers the screens read are kept current as they are written.
-    pub(crate) fn start_record_sync(&mut self, scope: SyncScope) -> bool {
+    /// Nothing is read here: the worker picks the plays through a connection of its own
+    /// ([`spawn_planned_sync`]), so a history of any size costs the frame thread two lookups of the
+    /// newest ids.
+    fn start_sync(&mut self, scope: SyncScope, by_hand: bool) -> bool {
         let Some((server, login_id)) = self.record_sync_target() else {
             return false;
         };
@@ -740,58 +1053,53 @@ impl AppShared {
             }
             return false;
         }
-        let only = match &scope {
-            SyncScope::All => None,
-            SyncScope::Logs(ids) => Some(ids.as_slice()),
-        };
-        let handed_to_the_live_submit = self.submit_log.as_ref().map(|live| live.log_id);
-        let Some(db) = self.scoredb.as_mut() else {
+        let Some(db) = self.scoredb.as_ref() else {
             return false;
         };
-        let walks_everything = matches!(scope, SyncScope::All);
-        let picked = (|| {
-            if walks_everything {
-                db.mark_old_scratch_auto_skipped(&server, now_ms())?;
-            }
-            let mut scores = db.sync_candidates(&server, &login_id, only)?;
-            scores.retain(|candidate| Some(candidate.log.id) != handed_to_the_live_submit);
-            let replays = match scope {
-                SyncScope::All => db.replay_candidates(&server, &login_id)?,
-                SyncScope::Logs(_) => Vec::new(),
-            };
-            let states = if walks_everything { Some(db.sync_states(&server)?) } else { None };
-            Ok::<_, rbms_store::scoredb::ScoreDbError>((scores, replays, states))
-        })();
-        let (scores, replays, states) = match picked {
-            Ok(picked) => picked,
+        let newest = db.newest_play_id().and_then(|play| Ok((play, db.newest_course_id()?)));
+        let (up_to, courses_up_to) = match newest {
+            Ok(newest) => newest,
             Err(e) => {
                 notify(Level::Warn, format!("records sync not started: {e}"));
                 return false;
             }
         };
-        if let Some(states) = states {
-            self.record_sync_states = states;
-        }
-        let replays = if self.config.network.auto_upload_replay { replays } else { Vec::new() };
-        if scores.is_empty() && replays.is_empty() {
-            return false;
-        }
-        let logs: Vec<&PlayLog> = scores.iter().chain(&replays).map(|candidate| &candidate.log).collect();
-        let charts = chart_facts(&self.library, &logs);
-        let job = SyncJob {
+        let (db_path, _, _) = crate::scoredb_store::score_paths(self.settings_path.parent().unwrap_or_else(|| Path::new(".")));
+        let plan = SyncPlan {
+            db_path,
+            server_key: server.clone(),
             login_id: login_id.clone(),
-            scores,
-            replays,
+            scope,
+            by_hand,
+            left_out: self.submit_log.as_ref().map(|live| live.log_id),
+            up_to,
+            courses_up_to,
+            client_build: self.client_build(),
             upload_replays: self.config.network.auto_upload_replay,
             replay_dir: self.replay_dir.clone(),
-            charts,
             pacing: self.record_sync_pacing,
         };
-        let scores_total = job.scores.len();
         let cancel = Arc::new(AtomicBool::new(false));
-        let rx = spawn_record_sync(self.server.clone(), job, Arc::clone(&cancel));
-        self.record_sync =
-            Some(RecordSyncRun { rx, cancel, server_key: server, login_id, scores_total, replays_total: None, replays_done: 0, tally: SyncTally::default() });
+        let (charts_tx, charts_rx) = mpsc::channel();
+        let rx = spawn_planned_sync(self.server.clone(), plan, Arc::clone(&cancel), charts_rx);
+        let refused_under = self.refusal_key();
+        self.record_sync = Some(RecordSyncRun {
+            rx,
+            cancel,
+            charts: Some(charts_tx),
+            server_key: server,
+            login_id,
+            refused_under,
+            by_hand,
+            quiet: false,
+            scores_total: 0,
+            replays_total: None,
+            replays_done: 0,
+            tally: SyncTally::default(),
+        });
+        if by_hand {
+            self.net_status = "records: picking what to send".to_string();
+        }
         true
     }
 
@@ -830,14 +1138,25 @@ impl AppShared {
     }
 
     fn take_sync_event(&mut self, event: SyncEvent) {
+        let client_build = self.client_build();
         let Some(run) = self.record_sync.as_mut() else {
             return;
         };
-        let (server, login_id) = (run.server_key.clone(), run.login_id.clone());
+        let (server, login_id, refused_under) = (run.server_key.clone(), run.login_id.clone(), run.refused_under.clone());
         match event {
-            SyncEvent::Started { scores, .. } => {
+            SyncEvent::Picked { server_build, md5s } => {
+                run.refused_under = refusal_key(&client_build, &server_build);
+                if let Some(charts) = run.charts.take() {
+                    let _ = charts.send(chart_facts(&self.library, &md5s));
+                }
+                self.server_build = Some(server_build);
+            }
+            SyncEvent::Started { scores, courses, replays } => {
                 run.scores_total = scores;
-                self.net_status = run.progress_line();
+                run.quiet = !run.by_hand && scores + courses + replays == 0;
+                if !run.quiet {
+                    self.net_status = run.progress_line();
+                }
             }
             SyncEvent::Backfilled { log_id, sha256 } => {
                 if let Some(db) = self.scoredb.as_mut()
@@ -849,19 +1168,28 @@ impl AppShared {
             SyncEvent::Score { log_id, outcome } => {
                 run.tally.count_score(&outcome);
                 self.net_status = run.progress_line();
-                let row = sync_row(log_id, &server, &login_id, &outcome);
+                let row = sync_row(log_id, &server, &login_id, &outcome, &refused_under);
                 self.write_sync_row(row);
+            }
+            SyncEvent::Course { course_id, outcome } => {
+                run.tally.count_course(&outcome);
+                let row = course_sync_row(course_id, &server, &login_id, &outcome, &refused_under);
+                self.write_course_sync_row(&row);
             }
             SyncEvent::Replays { total } => {
                 run.replays_total = Some(total);
-                self.net_status = run.progress_line();
+                if !run.quiet {
+                    self.net_status = run.progress_line();
+                }
             }
             SyncEvent::Replay { log_id, state, replay_id, error } => {
                 run.tally.count_replay(state);
                 run.replays_done += 1;
                 self.net_status = run.progress_line();
+                let replay_refused_under = (state == ReplayState::Rejected).then_some(refused_under);
+                let answer = ReplayAnswer { state, replay_id: replay_id.as_deref(), error: error.as_deref(), refused_under: replay_refused_under.as_deref() };
                 if let Some(db) = self.scoredb.as_mut()
-                    && let Err(e) = db.put_replay_state(log_id, &server, state, replay_id.as_deref(), error.as_deref())
+                    && let Err(e) = db.put_replay_state(log_id, &server, &answer)
                 {
                     notify(Level::Warn, format!("replay state not kept: {e}"));
                 }
@@ -869,23 +1197,42 @@ impl AppShared {
                     row.replay_state = state;
                     row.replay_id = replay_id;
                     row.replay_error = error;
+                    row.replay_refused_under = replay_refused_under;
                 }
             }
             SyncEvent::Finished { stop } => {
-                let tally = run.tally;
+                let (tally, quiet, by_hand) = (run.tally, run.quiet, run.by_hand);
+                let found_nothing = run.scores_total == 0 && run.replays_total.unwrap_or_default() == 0 && tally == SyncTally::default();
                 self.record_sync = None;
-                let line = match &stop {
-                    Some(stop) => stop_line(stop),
-                    None => tally.summary(),
-                };
-                let level = if stop.is_some() || tally.is_troubled() { Level::Warn } else { Level::Info };
-                self.net_status = line.clone();
-                notify(level, line);
+                match &stop {
+                    Some(stop) => {
+                        let line = stop_line(stop);
+                        self.net_status = line.clone();
+                        notify(Level::Warn, line);
+                    }
+                    None if quiet => {}
+                    None if by_hand && found_nothing => self.net_status = NOTHING_TO_SEND.to_string(),
+                    None => {
+                        let line = tally.summary();
+                        let level = if tally.is_troubled() { Level::Warn } else { Level::Info };
+                        self.net_status = line.clone();
+                        notify(level, line);
+                    }
+                }
                 if stop.is_none() && !self.record_sync_pending.is_empty() {
                     let pending = std::mem::take(&mut self.record_sync_pending);
                     self.start_record_sync(SyncScope::Logs(pending));
                 }
             }
+        }
+    }
+
+    /// Write one course's answer to the database.
+    pub(crate) fn write_course_sync_row(&mut self, row: &CourseSyncRow) {
+        if let Some(db) = self.scoredb.as_mut()
+            && let Err(e) = db.put_course_sync_state(row)
+        {
+            notify(Level::Warn, format!("course sync state not kept: {e}"));
         }
     }
 

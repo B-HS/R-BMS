@@ -161,9 +161,11 @@ impl GaugeLog {
 /// The gauge history while it is still being written.
 ///
 /// It follows the reference's playing state: a sample is due whenever the series is no longer than
-/// the song time divided by the interval, at most one a frame, from the moment the song clock
-/// starts until the chart's play time has gone by or the gauge has failed the run
-/// (`BMSPlayer.java:625-635, 651-662, 679-687`).
+/// the song time divided by the interval, from the moment the song clock starts until the chart's
+/// play time has gone by or the gauge has failed the run (`BMSPlayer.java:625-635, 651-662,
+/// 679-687`). The reference takes one on the first frame past each interval, at most one a frame,
+/// so the value it records depends on where its frames fell; the session hands this the gauges at
+/// each interval's own instant instead, and the instant the run failed at.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct GaugeLogRecorder {
     log: GaugeLog,
@@ -177,21 +179,24 @@ impl GaugeLogRecorder {
         GaugeLogRecorder { log: GaugeLog::default(), play_time_ms, failed_at_ms: None, finished: false }
     }
 
-    /// One frame of the playing state at `song_us`, after the frame's judgements have reached the
-    /// gauges. `failed` is whether the run has just been ended by an empty gauge.
+    /// The playing state at `song_us`, with every judgement up to that instant in the gauges.
+    /// `failed` is whether the run was ended by an empty gauge at that very instant. An instant past
+    /// the play time is no longer the playing state, and ends the history instead.
     pub(crate) fn frame(&mut self, song_us: i64, gauge: &GrooveGauge, failed: bool) {
         if self.finished || self.failed_at_ms.is_some() || song_us < 0 {
             return;
         }
         let play_ms = millis(song_us);
+        if self.play_time_ms < play_ms {
+            self.finished = true;
+            return;
+        }
         if self.log.len() as i64 <= play_ms / GAUGE_LOG_INTERVAL_MS {
             for index in GaugeIndex::ALL {
                 self.log.samples[index.index()].push(gauge.value_at(index));
             }
         }
-        if self.play_time_ms < play_ms {
-            self.finished = true;
-        } else if failed {
+        if failed {
             self.failed_at_ms = Some(play_ms);
         }
     }
@@ -485,7 +490,7 @@ impl PlayRecord {
     /// run never reached (`BMSPlayer.java:909`). The summary's own `min_bp` leaves the unreached
     /// notes out.
     pub fn min_bp_with_unreached(&self) -> u32 {
-        self.summary.min_bp + self.summary.total_notes.saturating_sub(self.summary.total_judged)
+        self.summary.min_bp_with_unreached()
     }
 }
 

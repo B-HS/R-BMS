@@ -29,7 +29,7 @@ use super::super::SkinFrame;
 use super::super::draw::Placement;
 use super::super::object::Body;
 use super::pixmap::{Pixmap, Rgba, unit_color};
-use super::{Layer, Upload, draw_layer, next_serial, paintable, plot_of, reference_color};
+use super::{Layer, draw_layer, next_serial, paintable, plot_of, reference_color};
 use crate::ctx::RenderCtx;
 use crate::{Rect, Renderer};
 
@@ -342,7 +342,7 @@ pub(crate) fn draw_timing_distribution<R: Renderer>(
 
     let Drawn { layer, pixmap, .. } = &mut *drawn;
     let (width, height) = pixmap.size();
-    let Some(tex) = layer.texture_as(r, pixmap, Upload::FirstRowOnTop) else {
+    let Some(tex) = layer.texture(r, pixmap) else {
         return false;
     };
     draw_layer(r, place, tex, (width as u32, height as u32), width as u32, Rect::new(plot.x, plot.y, plot.w, plot.h))

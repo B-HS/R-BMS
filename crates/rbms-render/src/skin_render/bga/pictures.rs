@@ -15,6 +15,11 @@
 //! A layer and a picture of the same number are different textures for that reason, so each of the
 //! three roles keeps a texture of its own and hands the renderer new pixels only when the picture it
 //! is asked for changes.
+//!
+//! A chart's background can change pictures many times a second, so a change asks the allocator for
+//! nothing: each role keeps one canvas, made as large as a small picture's when the role is, that
+//! every picture it puts on a canvas or keys out is painted into in turn, and a picture drawn as it
+//! is goes to the renderer straight from its own pixels.
 
 use super::{BgaExpand, BgaFrame, BgaPick, BgaShow};
 use crate::{Renderer, TextureId};
@@ -57,25 +62,37 @@ impl BgaPicture<'_> {
     }
 }
 
+/// Bytes a picture's 256 x 256 canvas holds.
+const SMALL_CANVAS_BYTES: usize = (SMALL_PICTURE_EDGE * SMALL_PICTURE_EDGE) as usize * RGBA_BYTES;
+
 /// The picture on its 256 x 256 canvas when it is small enough to be put on one, as the pixels and
 /// the canvas's size; `None` for a picture that is drawn as it is (`BGImageProcessor.convert`).
 ///
 /// The picture lands `(256 - width) / 2` pixels across, rounded down, and at the top. Everything
 /// the picture does not cover is transparent black.
 pub fn on_small_canvas(picture: &BgaPicture<'_>) -> Option<(Vec<u8>, (u32, u32))> {
+    let mut canvas = Vec::new();
+    let size = put_on_small_canvas(picture, &mut canvas)?;
+    Some((canvas, size))
+}
+
+/// [`on_small_canvas`] painted into `canvas`, whatever it held, which keeps its allocation: the
+/// canvas's size, or `None`, and `canvas` untouched, for a picture that is drawn as it is.
+fn put_on_small_canvas(picture: &BgaPicture<'_>, canvas: &mut Vec<u8>) -> Option<(u32, u32)> {
     if !picture.is_whole() || picture.width.max(picture.height) > SMALL_PICTURE_EDGE {
         return None;
     }
     let side = SMALL_PICTURE_EDGE as usize;
     let (width, height) = (picture.width as usize, picture.height as usize);
     let across = (side - width) / 2;
-    let mut canvas = vec![0; side * side * RGBA_BYTES];
+    canvas.clear();
+    canvas.resize(SMALL_CANVAS_BYTES, 0);
     for row in 0..height {
         let from = row * width * RGBA_BYTES;
         let to = (row * side + across) * RGBA_BYTES;
         canvas[to..to + width * RGBA_BYTES].copy_from_slice(&picture.rgba[from..from + width * RGBA_BYTES]);
     }
-    Some((canvas, (SMALL_PICTURE_EDGE, SMALL_PICTURE_EDGE)))
+    Some((SMALL_PICTURE_EDGE, SMALL_PICTURE_EDGE))
 }
 
 /// Turns every pixel whose red, green and blue are all zero fully transparent (`layer.frag`),
@@ -97,9 +114,18 @@ struct Held {
 }
 
 /// The texture of one role, uploaded again only when the picture it shows changes.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct Slot {
     held: Option<Held>,
+    /// The canvas the role paints a picture into before it is uploaded: a small picture on its
+    /// 256 x 256 canvas, or a layer with its black keyed out. Kept from one picture to the next.
+    canvas: Vec<u8>,
+}
+
+impl Default for Slot {
+    fn default() -> Slot {
+        Slot { held: None, canvas: Vec::with_capacity(SMALL_CANVAS_BYTES) }
+    }
 }
 
 impl Slot {
@@ -111,11 +137,17 @@ impl Slot {
         if let Some(held) = self.held.filter(|held| held.generation == picture.generation && held.size == size && r.texture_size(held.tex).is_some()) {
             return Some(held.tex);
         }
-        let (mut rgba, (width, height)) = on_small_canvas(&picture).unwrap_or_else(|| (picture.rgba.to_vec(), size));
-        if layer {
-            key_out_black(&mut rgba);
+        let small = put_on_small_canvas(&picture, &mut self.canvas);
+        let (width, height) = small.unwrap_or(size);
+        if small.is_none() && layer {
+            self.canvas.clear();
+            self.canvas.extend_from_slice(picture.rgba);
         }
-        let tex = r.register_texture(key, &rgba, width, height);
+        if layer {
+            key_out_black(&mut self.canvas);
+        }
+        let rgba = if small.is_some() || layer { &self.canvas[..] } else { picture.rgba };
+        let tex = r.register_texture(key, rgba, width, height);
         self.held = Some(Held { generation: picture.generation, size, tex });
         r.texture_size(tex).map(|_| tex)
     }
@@ -156,5 +188,12 @@ impl BgaTextures {
         self.base.release(r);
         self.layer.release(r);
         self.miss.release(r);
+    }
+
+    /// Where each role's canvas is and how much it holds, the base's first, for a test that tells a
+    /// canvas painted again from one made anew.
+    #[cfg(test)]
+    pub(super) fn canvases(&self) -> [(usize, usize); 3] {
+        [&self.base, &self.layer, &self.miss].map(|slot| (slot.canvas.as_ptr() as usize, slot.canvas.capacity()))
     }
 }

@@ -145,8 +145,13 @@ impl Menu {
     /// One frame, as the application makes one: the screen is brought up to date and drawn, and the
     /// skin frame is finished.
     fn frame(&mut self) -> &HeadlessCanvas {
+        self.frame_at(std::time::Instant::now())
+    }
+
+    /// The same frame made at `now`, which is the time everything on it that is shown for a while
+    /// is judged by, however long ago the machine passed it.
+    fn frame_at(&mut self, now: std::time::Instant) -> &HeadlessCanvas {
         self.app.shared.hot.clear();
-        let now = std::time::Instant::now();
         self.state.update(&mut FrameCtx { shared: &mut self.app.shared, now, dt: FRAME_DT });
         let mut canvas = Canvas::Headless(&mut self.pixels);
         self.state.draw(&mut FrameCtx { shared: &mut self.app.shared, now, dt: FRAME_DT }, &mut canvas);
@@ -181,7 +186,12 @@ impl Menu {
     }
 
     fn key(&mut self, code: KeyCode) -> Transition {
-        self.state.handle_key(&mut FrameCtx { shared: &mut self.app.shared, now: std::time::Instant::now(), dt: 0.0 }, press(code))
+        self.key_at(code, std::time::Instant::now())
+    }
+
+    /// A key pressed at `now`.
+    fn key_at(&mut self, code: KeyCode, now: std::time::Instant) -> Transition {
+        self.state.handle_key(&mut FrameCtx { shared: &mut self.app.shared, now, dt: 0.0 }, press(code))
     }
 
     /// A key pressed with Shift held, and Shift let go of after it.

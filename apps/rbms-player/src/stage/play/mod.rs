@@ -45,6 +45,8 @@ mod controls;
 mod field;
 #[cfg(test)]
 mod hold_tests;
+#[cfg(test)]
+mod input_time_tests;
 mod scene;
 #[cfg(test)]
 mod screen_tests;
@@ -595,14 +597,19 @@ impl PlayState {
 
     /// Abandon the run: keep whatever the in-play controls changed, and go back to the browser.
     ///
-    /// A run the player was playing by hand is kept and sent as a FAILED run whose notes not reached
-    /// were let pass ([`crate::app_result::record_left_run`]), straight on the way out: Escape is
-    /// still the key that leaves at once. A run left before any note was judged is no run and is not
-    /// kept, and neither is one the engine played, a replay being watched or practice. A chart with
-    /// nothing left to hit goes to its result screen instead, and so does a run that is already
-    /// closing, failed or finished: it ends as every closing run does, with the notes it did not
-    /// reach counted as the closing counted them, whichever key or hold took it out. A course left
-    /// part-way ends as it always did, without a record.
+    /// A chart with nothing left to hit goes to its result screen instead, and so does a run that is
+    /// already closing, failed or finished: it ends as every closing run does, with the notes it did
+    /// not reach counted as the closing counted them, whichever key or hold took it out. That holds
+    /// for a course stage too, which then goes on to the next stage or the course's result as a stage
+    /// played to its end does.
+    ///
+    /// Otherwise a run the player was playing by hand is kept and sent as a FAILED run whose notes
+    /// not reached were let pass ([`crate::app_result::record_left_run`]), straight on the way out:
+    /// Escape is still the key that leaves at once. That is so however few notes the run judged,
+    /// none at all included (the player's decision of 2026-10-15). A course left part-way keeps the
+    /// stage it was left on that way and is kept and sent as a FAILED course with every stage it
+    /// played ([`crate::app_result::leave_course`]). Nothing is kept of a run the engine played, a
+    /// replay being watched or practice.
     fn leave_run(&mut self, ctx: &mut FrameCtx<'_>) -> Transition {
         self.esc_down_at = None;
         self.esc_pressed_at = None;
@@ -611,13 +618,13 @@ impl PlayState {
         if self.practice.is_some() {
             return Transition::Back;
         }
-        if ctx.shared.course_run.is_some() {
-            return crate::end_course(ctx.shared);
-        }
         if self.session.all_notes_resolved() || self.scene.as_ref().is_some_and(PlayScene::is_closing) {
             return enter_result(self, ctx.shared);
         }
-        if keeps_a_left_run(ctx.shared, &self.session) {
+        if ctx.shared.course_run.is_some() {
+            return crate::app_result::leave_course(self, ctx.shared);
+        }
+        if keeps_a_left_run(ctx.shared) {
             crate::app_result::record_left_run(self, ctx.shared);
         }
         ctx.shared.leave_play()
@@ -675,20 +682,21 @@ impl PlayState {
         self.background.prepare(BEFORE_PLAY_MS);
     }
 
-    /// The lane press/release path: judged against the live song clock, with the keysound played on
-    /// the raw input time so a judge offset never moves the sound.
+    /// The lane press/release path: judged against the song clock as it stood at `at`, the instant
+    /// the window handed the key over, with the keysound played on the raw input time so a judge
+    /// offset never moves the sound.
     ///
     /// Without an output stream the press still goes through the session, into a sink that drops
     /// it. The session is what records the replay, so skipping the call would leave a run with
     /// releases but no presses — a replay that cannot be played back.
-    fn lane_key(&mut self, shared: &mut AppShared, key: &KeyInput<'_>) {
+    fn lane_key(&mut self, shared: &mut AppShared, key: &KeyInput<'_>, at: Instant) {
         let Some((lane, dir)) = shared.lane_input_for(key.code) else {
             return;
         };
         if key.pressed {
-            self.lane_input(shared, lane, dir, true);
+            self.lane_input(shared, lane, dir, true, at);
         } else if key.released {
-            self.lane_input(shared, lane, dir, false);
+            self.lane_input(shared, lane, dir, false, at);
         }
     }
 
@@ -700,7 +708,11 @@ impl PlayState {
     /// before that is still a key that is down -- a skin lights its beam -- but the run never hears
     /// of it, and so never of its release either. Nor does it hear of a key coming up once the run
     /// is closing.
-    fn lane_input(&mut self, shared: &mut AppShared, lane: usize, dir: ScratchDir, press: bool) {
+    ///
+    /// `at` is when the input happened: the instant the window handed a key over, or the instant
+    /// the controller layer stamped a button with. It is read on the song clock as it stood then,
+    /// so the time the frame thread took to get round to the input is no part of its timing.
+    fn lane_input(&mut self, shared: &mut AppShared, lane: usize, dir: ScratchDir, press: bool, at: Instant) {
         self.note_held(lane, dir, press);
         if shared.run_plays_itself() || shared.replay.is_some() {
             return;
@@ -709,7 +721,7 @@ impl PlayState {
             return;
         }
         let clock = self.practice_clock();
-        let raw = clock.chart_time_us(shared.song_us());
+        let raw = clock.chart_time_us(shared.song_us_at(at));
         self.sync_judge_settings(shared);
         if press {
             let anchor = shared.anchor_us;
@@ -717,13 +729,12 @@ impl PlayState {
                 Some(audio) => self.session.press_dir(lane, dir, raw, &mut PlayAudioSink::new(audio, anchor, clock)),
                 None => self.session.press_dir(lane, dir, raw, &mut NullSink),
             };
-            let judged = hit.map(|r| r.judge);
             shared.push_timing_sample(raw, clock, hit.map(|r| r.delta_us));
-            if let Some(judge) = judged {
+            if let Some(judge) = hit.filter(|r| r.counted).map(|r| r.judge) {
                 shared.play_system_sound(crate::syssound::guide_for_judge(judge));
             }
-        } else {
-            self.session.release_dir(lane, dir, raw);
+        } else if let Some(judge) = self.session.release_dir(lane, dir, raw).filter(|r| r.counted).map(|r| r.judge) {
+            shared.play_system_sound(crate::syssound::guide_for_judge(judge));
         }
         self.keep_adjusted_offset(shared);
         self.pump_skin(shared);
@@ -1280,6 +1291,9 @@ impl PlayState {
     /// failed (`BMSPlayer.java:696-710`): START lays the chart out afresh on the same options, and
     /// SELECT keeps the layout the failed run was played on. `None` when there is no chart to start
     /// -- one that is not in the library -- and the failure closes as it would have.
+    ///
+    /// The failed run is kept and sent before the chart starts again
+    /// ([`crate::app_result::record_retried_run`]), as its result screen would have kept it.
     fn retry(&mut self, shared: &mut AppShared, same_layout: bool) -> Option<Transition> {
         shared.retry_seed = same_layout.then(|| self.session.seed());
         match crate::app_result::retry(shared) {
@@ -1288,6 +1302,7 @@ impl PlayState {
                 None
             }
             again => {
+                crate::app_result::record_retried_run(self, shared);
                 shared.save_settings();
                 Some(again)
             }
@@ -1316,11 +1331,11 @@ impl PlayState {
     }
 }
 
-/// Whether a run left before its end is kept: one the player was playing by hand, that judged at
-/// least one note. A run left before anything was judged, or left with only empty POORs (and on
-/// nine keys BADs) to its name, took no note and is no run.
-pub(crate) fn keeps_a_left_run(shared: &AppShared, session: &PlaySession) -> bool {
-    !shared.run_plays_itself() && shared.replay.is_none() && session.summary().total_judged > 0
+/// Whether a run left before its end is kept: every one the player was playing by hand, however
+/// little of it was judged (the player's decision of 2026-10-15). Only a run the engine played and a
+/// replay being watched are no record.
+pub(crate) fn keeps_a_left_run(shared: &AppShared) -> bool {
+    !shared.run_plays_itself() && shared.replay.is_none()
 }
 
 /// How long after a control of the run moved or switched a shade a skin still shows the figures of
@@ -1393,10 +1408,11 @@ impl StageHandler for PlayState {
 
     /// One controller event: a lane goes to the same path a key does, and a control action to the
     /// same one a bound key does. Controls are only ever emitted on the way down, so there is no
-    /// press gate here.
+    /// press gate here. The frame loop hands each event over with `ctx.now` set to the instant the
+    /// controller layer stamped it with, which is what a lane is judged at.
     fn handle_pad(&mut self, ctx: &mut FrameCtx<'_>, event: crate::gamepad::PadEvent) -> Transition {
         match event {
-            crate::gamepad::PadEvent::Lane { lane, dir, press } => self.lane_input(ctx.shared, lane, dir, press),
+            crate::gamepad::PadEvent::Lane { lane, dir, press } => self.lane_input(ctx.shared, lane, dir, press, ctx.now),
             crate::gamepad::PadEvent::Control(action) => self.in_play_control(ctx.shared, action),
             crate::gamepad::PadEvent::Shortcut(shortcut) => {
                 self.analysis_shortcut(ctx.shared, shortcut);
@@ -1436,7 +1452,7 @@ impl StageHandler for PlayState {
             self.in_play_control(ctx.shared, action);
             return Transition::Stay;
         }
-        self.lane_key(ctx.shared, &key);
+        self.lane_key(ctx.shared, &key, ctx.now);
         Transition::Stay
     }
 

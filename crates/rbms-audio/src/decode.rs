@@ -1,4 +1,5 @@
 use std::io::Cursor;
+use std::sync::Arc;
 
 use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::{CODEC_TYPE_NULL, DecoderOptions};
@@ -11,7 +12,9 @@ use symphonia::core::probe::Hint;
 use crate::AudioError;
 
 pub struct DecodedAudio {
-    pub samples: Vec<f32>,
+    /// Interleaved samples, already in the shared form the engine plays them from, so handing a
+    /// decode to the engine moves it rather than copies it.
+    pub samples: Arc<[f32]>,
     pub channels: u16,
     pub rate: u32,
 }
@@ -69,7 +72,7 @@ pub fn decode_bytes(bytes: Vec<u8>, ext: Option<&str>) -> Result<DecodedAudio, A
     if channels == 0 || samples.is_empty() {
         return Err(AudioError::Decode("empty audio".into()));
     }
-    Ok(DecodedAudio { samples, channels, rate })
+    Ok(DecodedAudio { samples: samples.into(), channels, rate })
 }
 
 #[cfg(test)]
@@ -226,7 +229,7 @@ mod tests {
         assert_eq!(dec.channels, 1);
         assert_eq!(dec.rate, 8000);
         assert!(!dec.samples.is_empty());
-        let sample = Arc::new(SampleData { pcm: dec.samples.into(), channels: dec.channels, rate: dec.rate });
+        let sample = Arc::new(SampleData { pcm: dec.samples, channels: dec.channels, rate: dec.rate });
         let mut mixer = Mixer::new(48000, 2, 16);
         mixer.apply(Command::Play { sample, gain: 0.85, pan: 0.0, pitch: 1.0, key: 0, at_frame: 0, bus: Bus::Bg });
         let mut out = vec![0.0f32; 4096];

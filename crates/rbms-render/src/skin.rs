@@ -408,6 +408,33 @@ impl Skin {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    /// A skin file written into the system's temporary folder for one test, under a name no other
+    /// test and no other run of these tests writes at the same time, and gone once the test is done
+    /// with it -- passed or not.
+    struct TempSkin(std::path::PathBuf);
+
+    impl TempSkin {
+        fn write(stem: &str, text: &str) -> TempSkin {
+            static NEXT: AtomicU32 = AtomicU32::new(0);
+            let name = format!("{stem}-{}-{}.ron", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed));
+            let path = std::env::temp_dir().join(name);
+            std::fs::write(&path, text).expect("the temporary folder is writable");
+            TempSkin(path)
+        }
+
+        /// The file's own name, which an error about it names.
+        fn file_name(&self) -> String {
+            self.0.file_name().expect("a temporary skin has a name").to_string_lossy().into_owned()
+        }
+    }
+
+    impl Drop for TempSkin {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
 
     #[test]
     fn ron_partial_fills_defaults() {
@@ -650,12 +677,10 @@ mod tests {
 
     #[test]
     fn loading_malformed_ron_reports_a_parse_error() {
-        let path = std::env::temp_dir().join("rbms-render-broken-skin.ron");
-        std::fs::write(&path, "(field_width: this is not ron").expect("write fixture");
-        let err = SkinConfig::load(&path).expect_err("malformed RON cannot load");
-        std::fs::remove_file(&path).ok();
+        let skin = TempSkin::write("rbms-render-broken-skin", "(field_width: this is not ron");
+        let err = SkinConfig::load(&skin.0).expect_err("malformed RON cannot load");
         assert!(matches!(err, SkinError::Parse { .. }), "bad syntax is a Parse error, got {err:?}");
-        assert!(err.to_string().contains("rbms-render-broken-skin.ron"), "the message names the file: {err}");
+        assert!(err.to_string().contains(&skin.file_name()), "the message names the file: {err}");
         assert!(std::error::Error::source(&err).is_some(), "the RON error is kept as the source");
     }
 
@@ -738,12 +763,25 @@ mod tests {
 
     #[test]
     fn loading_a_valid_skin_file_fills_the_unset_fields_with_defaults() {
-        let path = std::env::temp_dir().join("rbms-render-valid-skin.ron");
-        std::fs::write(&path, "(field_width: 0.5, lift: 0.25)").expect("write fixture");
-        let cfg = SkinConfig::load(&path).expect("a well-formed skin loads");
-        std::fs::remove_file(&path).ok();
+        let skin = TempSkin::write("rbms-render-valid-skin", "(field_width: 0.5, lift: 0.25)");
+        let cfg = SkinConfig::load(&skin.0).expect("a well-formed skin loads");
         assert_eq!(cfg.field_width, 0.5);
         assert_eq!(cfg.lift, 0.25);
         assert_eq!(cfg.note_height, SkinConfig::default().note_height, "unset fields keep their defaults");
+    }
+
+    /// Two skin files written for tests at once are two files, each named for the run that wrote
+    /// it, so runs of these tests side by side neither read nor delete each other's; and each is
+    /// gone once its test is done with it.
+    #[test]
+    fn a_temporary_skin_file_is_its_own_and_is_gone_once_its_test_is_done() {
+        let pid = std::process::id().to_string();
+        let first = TempSkin::write("rbms-render-own-skin", "()");
+        let second = TempSkin::write("rbms-render-own-skin", "()");
+        assert_ne!(first.0, second.0, "two tests write the one file");
+        assert!(first.file_name().contains(&pid) && second.file_name().contains(&pid), "a run writes under a name another run writes too");
+        let paths = [first.0.clone(), second.0.clone()];
+        drop((first, second));
+        assert!(paths.iter().all(|path| !path.exists()), "a temporary skin is left behind: {paths:?}");
     }
 }

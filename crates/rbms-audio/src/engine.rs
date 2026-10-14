@@ -452,10 +452,11 @@ impl AudioEngine {
     /// Insert an already-decoded sample into the keysound bank. Same effect as [`load`](Self::load)
     /// but skips the (CPU-heavy) symphonia decode, which the caller has already done — lets a host
     /// decode many keysounds in parallel off-thread, then insert the results here on one thread.
+    /// The samples are moved into the bank as they are, so inserting costs the same whatever their
+    /// length.
     pub fn insert_decoded(&mut self, id: u32, audio: DecodedAudio) {
         self.collect_retired();
-        let sd = SampleData { pcm: audio.samples.into(), channels: audio.channels, rate: audio.rate };
-        self.bank.insert(id, Arc::new(sd));
+        self.bank.insert(id, Arc::new(sample_data(audio)));
     }
 
     pub fn loaded(&self) -> usize {
@@ -921,6 +922,11 @@ fn open_first_rung(
     None
 }
 
+/// What the bank keeps of a decode: its samples as they are, not a copy of them.
+fn sample_data(audio: DecodedAudio) -> SampleData {
+    SampleData { pcm: audio.samples, channels: audio.channels, rate: audio.rate }
+}
+
 fn open_stream(device: &cpal::Device, config: &StreamConfig, sample_format: SampleFormat, max_voices: usize) -> Result<AudioEngine, AudioError> {
     let out_rate = config.sample_rate;
     let out_channels = config.channels;
@@ -1055,6 +1061,18 @@ mod tests {
             playback_ahead,
             buffer_frames,
         }
+    }
+
+    /// A keysound of a long sample is handed over from the thread that decoded it to the one that
+    /// inserts it, and the insert takes its samples as they are: a copy would cost the inserting
+    /// thread time in proportion to the sample's length.
+    #[test]
+    fn a_decoded_keysound_goes_into_the_bank_without_its_samples_being_copied() {
+        const SAMPLES: usize = 48_000;
+        let samples: Arc<[f32]> = vec![0.25; SAMPLES].into();
+        let kept = sample_data(DecodedAudio { samples: Arc::clone(&samples), channels: 2, rate: 48_000 });
+        assert!(Arc::ptr_eq(&kept.pcm, &samples), "the bank holds a copy of the decode's samples");
+        assert_eq!((kept.channels, kept.rate), (2, 48_000));
     }
 
     #[test]
@@ -1804,7 +1822,7 @@ mod tests {
 
         let (mut engine, report) = AudioEngine::open(&AudioOptions::default()).expect("audio device");
         let frames = (report.sample_rate / MS_PER_SECOND * EFFECT_MS) as usize;
-        engine.insert_decoded(EFFECT_ID, DecodedAudio { samples: vec![0.1; frames], channels: 1, rate: report.sample_rate });
+        engine.insert_decoded(EFFECT_ID, DecodedAudio { samples: vec![0.1; frames].into(), channels: 1, rate: report.sample_rate });
 
         engine.play_effect(Bus::System, EFFECT_ID, SILENT_GAIN, true);
         engine.play_effect(Bus::System, EFFECT_ID, SILENT_GAIN, true);

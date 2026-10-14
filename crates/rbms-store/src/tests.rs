@@ -221,9 +221,11 @@ fn rule_version_defaults_to_zero_for_a_pre_versioning_record() {
 
 #[test]
 fn current_rule_version_records_are_not_marked() {
-    assert_eq!(SCORE_RULE_VERSION, 3, "the current judging-rule generation");
+    assert_eq!(SCORE_RULE_VERSION, 4, "the current judging-rule generation");
+    assert_eq!(REFERENCE_RECORD_RULE_VERSION, SCORE_RULE_VERSION, "version 4 records a run as the reference does");
     assert!(!is_stale_rule_version(SCORE_RULE_VERSION));
-    assert!(!is_stale_rule_version(SCORE_RULE_VERSION - 1), "version 3 changed SCRATCH AUTO alone, so a record by hand of version 2 is not old");
+    assert!(!is_stale_rule_version(SCORE_RULE_VERSION - 1), "version 4 changed what a run records, not how a run by hand is judged or lamped");
+    assert!(!is_stale_rule_version(SCORE_RULE_VERSION - 2), "version 3 changed SCRATCH AUTO alone, so a record by hand of version 2 is not old");
     assert!(!is_stale_rule_version(SCORE_RULE_VERSION + 1), "a newer record is not marked as old");
 }
 
@@ -382,6 +384,9 @@ fn try_save_reports_a_path_that_cannot_be_written() {
     assert!(matches!(err, StoreError::Write(_)), "the failure is reported as a write error, got {err:?}");
 }
 
+/// The TOTAL the sample run was played on in place of the chart's.
+const SAMPLE_TOTAL_OVERRIDE: f64 = 480.0;
+
 fn sample_replay() -> Replay {
     Replay {
         chart_path: "/songs/a.bms".into(),
@@ -402,6 +407,8 @@ fn sample_replay() -> Replay {
             gauge_auto_shift: "BESTCLEAR".into(),
             bottom_shiftable_gauge: "normal".into(),
             offset_steps: vec![ReplayOffsetStep { from_event: 0, offset_ms: -12 }, ReplayOffsetStep { from_event: 2, offset_ms: -11 }],
+            clock: REPLAY_EVENT_CLOCK.into(),
+            total_override: SAMPLE_TOTAL_OVERRIDE,
         },
         events: vec![
             ReplayEvent { t: 0, lane: 0, press: true, backward: false },
@@ -438,6 +445,8 @@ fn a_replay_written_before_the_judge_rows_existed_reads_as_the_engines_old_behav
     assert_eq!(judge.gauge_set, REPLAY_LEGACY_GAUGE_SET);
     assert_eq!(judge.gauge_auto_shift, REPLAY_LEGACY_GAUGE_AUTO_SHIFT);
     assert_eq!(judge.bottom_shiftable_gauge, REPLAY_LEGACY_BOTTOM_SHIFTABLE_GAUGE);
+    assert_eq!(judge.clock, REPLAY_LEGACY_CLOCK, "a replay that does not say how its clock moved was judged frame by frame");
+    assert_eq!(judge.total_override, REPLAY_CHART_TOTAL, "a replay that does not state a TOTAL was played on the chart's own");
 }
 
 #[test]
@@ -554,7 +563,7 @@ fn replay_save_then_load_round_trips_on_disk() {
     let dir = std::env::temp_dir().join(format!("rbms_replay_io_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let path = dir.join("nested/r.ron");
-    sample_replay().save(&path);
+    sample_replay().try_save(&path).expect("the replay is written");
     assert!(path.exists());
     let back = Replay::load(&path).expect("saved replay loads back");
     assert_eq!(back.events.len(), 3);
@@ -571,6 +580,156 @@ fn write_atomic_writes_the_contents_and_leaves_no_temp_file() {
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "(hispeed: 1.0)");
     assert_eq!(std::fs::read_dir(path.parent().unwrap()).unwrap().count(), 1, "only the target file remains");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The bits of a Unix file mode that say who may read or write the file.
+#[cfg(unix)]
+const PERMISSION_BITS: u32 = 0o777;
+#[cfg(unix)]
+const OWNER_ONLY: u32 = 0o600;
+#[cfg(unix)]
+const OPEN_TO_OTHERS: u32 = 0o644;
+
+#[cfg(unix)]
+fn mode_of(path: &std::path::Path) -> u32 {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path).expect("the file is there").permissions().mode() & PERMISSION_BITS
+}
+
+#[cfg(unix)]
+fn open_to_others(path: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(OPEN_TO_OTHERS)).expect("opened");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_private_write_creates_a_file_only_its_owner_can_read() {
+    let dir = std::env::temp_dir().join(format!("rbms_store_private_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let path = dir.join("settings.ron");
+    write_atomic_private(&path, "(ir_token: Some(\"secret\"))").expect("written");
+    assert_eq!(std::fs::read_to_string(&path).expect("reads"), "(ir_token: Some(\"secret\"))");
+    assert_eq!(mode_of(&path), OWNER_ONLY, "a file with a token was left open to other users");
+    assert_eq!(std::fs::read_dir(&dir).expect("lists").count(), 1, "no temp file is left behind");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_private_write_closes_a_file_an_older_build_left_open() {
+    let dir = std::env::temp_dir().join(format!("rbms_store_private_replace_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let path = dir.join("settings.ron");
+    write_atomic(&path, "old").expect("written");
+    restrict_to_owner(&path).expect("restricted");
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(OPEN_TO_OTHERS)).expect("opened");
+    }
+    assert_eq!(mode_of(&path), OPEN_TO_OTHERS, "the fixture is a file other users can read");
+    write_atomic_private(&path, "new").expect("written");
+    assert_eq!(std::fs::read_to_string(&path).expect("reads"), "new");
+    assert_eq!(mode_of(&path), OWNER_ONLY, "the replaced file kept the mode of the one it replaced");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn restricting_a_file_closes_it_to_other_users_and_a_missing_file_is_an_error_the_caller_sees() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = std::env::temp_dir().join(format!("rbms_store_restrict_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("the folder");
+    let path = dir.join("settings.ron.v2.bak");
+    std::fs::write(&path, "backup").expect("written");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(OPEN_TO_OTHERS)).expect("opened");
+    restrict_to_owner(&path).expect("restricted");
+    assert_eq!(mode_of(&path), OWNER_ONLY);
+    assert_eq!(restrict_to_owner(&dir.join("absent")).expect_err("nothing to restrict").kind(), std::io::ErrorKind::NotFound);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A folder closed to everyone but its owner for reading and writing cannot be entered, and a link
+/// would carry the change to the file it points at: neither is a file to close.
+#[cfg(unix)]
+#[test]
+fn restricting_leaves_a_folder_and_a_link_as_they_are() {
+    use std::os::unix::fs::PermissionsExt;
+    const FOLDER_MODE: u32 = 0o755;
+    let dir = std::env::temp_dir().join(format!("rbms_store_restrict_kinds_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("the folder");
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(FOLDER_MODE)).expect("mode");
+    restrict_to_owner(&dir).expect("a folder is left alone");
+    assert_eq!(mode_of(&dir), FOLDER_MODE, "a folder was closed");
+
+    let target = dir.join("dotfiles-settings.ron");
+    std::fs::write(&target, "kept").expect("written");
+    open_to_others(&target);
+    let link = dir.join("settings.ron");
+    std::os::unix::fs::symlink(&target, &link).expect("linked");
+    restrict_to_owner(&link).expect("a link is left alone");
+    assert_eq!(mode_of(&target), OPEN_TO_OTHERS, "the file behind a link was changed");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// How many threads of one process write one file at once, and how many times each.
+const RACING_WRITERS: usize = 8;
+const WRITES_PER_WRITER: usize = 40;
+
+/// Two threads of one process saving the same file at once each write their own temp file: the
+/// target ends as one whole write, and no write fails over a temp file the other renamed away.
+#[test]
+fn threads_of_one_process_writing_one_file_never_share_a_temp_file() {
+    let dir = std::env::temp_dir().join(format!("rbms_store_atomic_race_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let path = dir.join("settings.ron");
+    let contents: Vec<String> = (0..RACING_WRITERS).map(|writer| format!("writer {writer} ").repeat(writer + 1)).collect();
+    let failures: usize = std::thread::scope(|scope| {
+        let handles: Vec<_> = contents
+            .iter()
+            .map(|text| {
+                let path = path.clone();
+                scope.spawn(move || (0..WRITES_PER_WRITER).filter(|_| write_atomic(&path, text).is_err()).count())
+            })
+            .collect();
+        handles.into_iter().map(|handle| handle.join().expect("a writer finishes")).sum()
+    });
+    assert_eq!(failures, 0, "no write lost its temp file to another thread");
+    let written = std::fs::read_to_string(&path).expect("the target is there");
+    assert!(contents.contains(&written), "the target is one whole write: {written:?}");
+    assert_eq!(std::fs::read_dir(&dir).expect("lists").count(), 1, "no temp file is left behind");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A staged write shows a directory it cannot write into when it is created, and leaves nothing
+/// behind when it is let go unfinished.
+#[test]
+fn a_staged_write_fails_where_its_file_cannot_be_created_and_cleans_up_when_dropped() {
+    let dir = std::env::temp_dir().join(format!("rbms_store_staged_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("the test folder");
+    let in_the_way = dir.join("replays");
+    std::fs::write(&in_the_way, "a file where the folder should be").expect("written");
+    assert!(StagedWrite::create(&in_the_way.join("r.ron")).is_err(), "a file in the way of the folder is seen at once");
+
+    let target = dir.join("kept/r.ron");
+    drop(StagedWrite::create(&target).expect("the folder is made"));
+    assert_eq!(std::fs::read_dir(dir.join("kept")).expect("lists").count(), 0, "an unfinished write leaves no temp file");
+    StagedWrite::create(&target).expect("staged").finish(b"whole").expect("finished");
+    assert_eq!(std::fs::read_to_string(&target).expect("reads"), "whole");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_book_forgets_a_replay_that_is_gone() {
+    let mut book = ScoreBook::default();
+    book.push(ScoreRecord { replay_file: Some("gone.ron".into()), ..rec("AA", 1, 5) });
+    book.push(ScoreRecord { replay_file: Some("kept.ron".into()), ..rec("AA", 2, 5) });
+    assert_eq!(book.forget_replay("gone.ron"), 1);
+    let files: Vec<Option<&str>> = book.for_md5("AA").iter().map(|record| record.replay_file.as_deref()).collect();
+    assert_eq!(files, [Some("kept.ron"), None]);
 }
 
 #[test]

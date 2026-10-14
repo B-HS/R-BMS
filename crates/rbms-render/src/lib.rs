@@ -255,6 +255,23 @@ impl UvRect {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TextureId(pub u32);
 
+/// A rectangle of a texture's own pixels, `width` x `height` from `(x, y)`, the first row on top.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TexelRect {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl TexelRect {
+    /// Whether the rectangle has pixels in it and lies inside a texture of `size`.
+    pub fn fits(&self, size: (u32, u32)) -> bool {
+        let inside = |start: u32, extent: u32, edge: u32| extent > 0 && start.checked_add(extent).is_some_and(|end| end <= edge);
+        inside(self.x, self.width, size.0) && inside(self.y, self.height, size.1)
+    }
+}
+
 /// Everything one textured quad needs beyond the texture itself.
 #[derive(Debug, Clone, Copy)]
 pub struct QuadParams {
@@ -427,6 +444,21 @@ pub trait Renderer {
     /// draw from it is skipped.
     fn register_texture(&mut self, key: &str, rgba: &[u8], width: u32, height: u32) -> TextureId;
 
+    /// Write `region` of a texture this backend already holds again, from the same region of
+    /// `rgba`, which is the whole texture's pixels laid out as [`Renderer::register_texture`] takes
+    /// them. The rest of the texture keeps what it held.
+    ///
+    /// This is how an image that changes a little at a time -- a column of a graph -- is kept up to
+    /// date without handing the backend every pixel of it again. Answers whether the region was
+    /// written. A backend that cannot write part of a texture answers `false`, which is what this
+    /// does by default, and so does any backend for a handle that names no texture, a region that is
+    /// empty or does not lie inside the texture, or pixels that are not exactly the texture's size;
+    /// a caller that is told `false` registers the whole image again.
+    fn update_texture(&mut self, tex: TextureId, rgba: &[u8], region: TexelRect) -> bool {
+        let _ = (tex, rgba, region);
+        false
+    }
+
     /// Drop a texture. An unknown or already released handle is ignored.
     fn release_texture(&mut self, tex: TextureId);
 
@@ -528,6 +560,10 @@ impl<R: Renderer> Renderer for ScaledRenderer<'_, R> {
 
     fn register_texture(&mut self, key: &str, rgba: &[u8], width: u32, height: u32) -> TextureId {
         self.inner.register_texture(key, rgba, width, height)
+    }
+
+    fn update_texture(&mut self, tex: TextureId, rgba: &[u8], region: TexelRect) -> bool {
+        self.inner.update_texture(tex, rgba, region)
     }
 
     fn release_texture(&mut self, tex: TextureId) {

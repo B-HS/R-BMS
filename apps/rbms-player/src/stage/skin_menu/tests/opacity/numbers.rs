@@ -200,10 +200,11 @@ fn an_opacity_is_typed_as_a_percent_and_held_to_its_range() {
     menu.key(KeyCode::Enter);
     menu.key(KeyCode::Backspace);
     menu.typed("-");
-    assert!(matches!(menu.key(KeyCode::Enter), Transition::Stay));
+    let refused_at = Instant::now();
+    assert!(matches!(menu.key_at(KeyCode::Enter, refused_at), Transition::Stay));
     assert_eq!(menu.app.shared.config, before, "what is not a number was stored");
-    assert!(menu.state.numbers.is_refused(row, Instant::now()), "the row does not say that what was typed is not a number");
-    assert!(!menu.state.numbers.is_refused(row, Instant::now() + REFUSAL_SHOWN_FOR), "the row goes on saying so");
+    assert!(menu.state.numbers.is_refused(row, refused_at), "the row does not say that what was typed is not a number");
+    assert!(!menu.state.numbers.is_refused(row, refused_at + REFUSAL_SHOWN_FOR), "the row goes on saying so");
 
     menu.frame();
     menu.click(menu.on_the_number_of(row));
@@ -395,9 +396,10 @@ fn the_number_rows_of_the_skin_menu_can_be_captured() {
         menu.key(KeyCode::Enter);
         menu.key(KeyCode::Enter);
         menu.key(KeyCode::Backspace);
-        menu.key(KeyCode::Enter);
-        menu.frame();
-        assert!(menu.state.numbers.is_refused(panel, Instant::now()));
+        let refused_at = Instant::now();
+        menu.key_at(KeyCode::Enter, refused_at);
+        menu.frame_at(refused_at);
+        assert!(menu.state.numbers.is_refused(panel, refused_at));
         menu.save("skin-menu-number-opacity-refused");
 
         let notes = menu.row_called(FADING_NOTES_ROW);

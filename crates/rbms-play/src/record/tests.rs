@@ -133,16 +133,23 @@ fn the_shadow_gauges_do_not_change_what_the_played_gauge_does() {
     assert_eq!(session.judge().counts, plain.judge().counts);
 }
 
+/// Every half second the song clock went past is sampled at its own instant, however far one frame
+/// jumped: the reference adds one sample a frame (`BMSPlayer.java:632`), which reads whatever the
+/// gauge was on whichever frame came next.
 #[test]
-fn a_frame_takes_at_most_one_sample_and_none_before_the_song_starts() {
+fn the_history_is_sampled_at_every_half_second_the_clock_went_past_and_none_before_the_song_starts() {
     let mut session = autoplay(eight_notes());
     session.tick(SessionClock::at(-FRAME_US), &mut NullSink);
     assert!(session.record().gauge_log.is_empty(), "the playing state has not begun before the song clock reaches zero");
     session.tick(SessionClock::at(3_000_000), &mut NullSink);
-    assert_eq!(session.record().gauge_log.len(), 1, "BMSPlayer.java:632 adds one sample a frame however far the clock jumped");
+    assert_eq!(session.record().gauge_log.len(), samples_by(3_000), "one jump to 3.0 s takes every sample from zero to there");
     session.tick(SessionClock::at(3_000_000 + FRAME_US), &mut NullSink);
     session.tick(SessionClock::at(3_000_000 + 2 * FRAME_US), &mut NullSink);
-    assert_eq!(session.record().gauge_log.len(), 3, "and catches up one frame at a time");
+    assert_eq!(session.record().gauge_log.len(), samples_by(3_000), "and frames inside the next interval add none");
+
+    let mut stepped = autoplay(eight_notes());
+    run(&mut stepped, &[], 3_000_000);
+    assert_eq!(session.record().gauge_log, stepped.record().gauge_log, "the samples are those of a run driven frame by frame");
 }
 
 #[test]
@@ -155,7 +162,12 @@ fn a_failed_run_stops_logging_and_is_padded_with_zeroes_to_the_end_of_the_chart(
         frame_us += FRAME_US;
         assert!(frame_us < play_time_ms * 1_000, "an unplayed HARD run fails long before the chart ends");
     }
-    let failed_at_ms = (frame_us - FRAME_US) / 1_000;
+    let failed_at_ms = session.record().failed_at_ms.expect("the run failed");
+    let seen_at_ms = (frame_us - FRAME_US) / 1_000;
+    assert!(
+        seen_at_ms - FRAME_US / 1_000 < failed_at_ms && failed_at_ms <= seen_at_ms,
+        "the failure is the instant the gauge emptied, inside the frame that saw it"
+    );
     let live = samples_by(failed_at_ms);
     for _ in 0..200 {
         session.tick(SessionClock::at(frame_us), &mut NullSink);
@@ -202,7 +214,7 @@ fn a_run_that_fails_a_chart_days_long_is_padded_for_a_day_and_has_no_table_of_se
         frame_us += FRAME_US;
         assert!(frame_us < day_ms * 1_000, "an unplayed HARD run fails in the opening bars");
     }
-    let failed_at_ms = (frame_us - FRAME_US) / 1_000;
+    let failed_at_ms = session.record().failed_at_ms.expect("the run failed");
 
     let record = session.record();
     let mut zeroes = 0;
@@ -435,5 +447,5 @@ fn scrubbing_a_replay_starts_the_gauge_history_again() {
     run(&mut session, &[], 1_000_000);
     assert_eq!(session.record().gauge_log.len(), samples_by(1_000));
     session.seek(500_000);
-    assert!(session.record().gauge_log.is_empty(), "the history belongs to the run the scrub just replaced");
+    assert_eq!(session.record().gauge_log.len(), samples_by(500), "the history is the rebuilt run's, up to where the scrub landed");
 }

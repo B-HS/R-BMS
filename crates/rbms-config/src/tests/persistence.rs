@@ -141,6 +141,109 @@ fn every_row_of_the_play_menu_survives_a_save_and_a_restart() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The bits of a Unix file mode that say who may read or write the file, and the two modes the tests
+/// tell apart.
+#[cfg(unix)]
+const PERMISSION_BITS: u32 = 0o777;
+#[cfg(unix)]
+const OWNER_ONLY: u32 = 0o600;
+#[cfg(unix)]
+const OPEN_TO_OTHERS: u32 = 0o644;
+
+#[cfg(unix)]
+fn mode_of(path: &std::path::Path) -> u32 {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path).expect("the file is there").permissions().mode() & PERMISSION_BITS
+}
+
+#[cfg(unix)]
+fn open_to_others(path: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(OPEN_TO_OTHERS)).expect("opened");
+}
+
+/// The file holds the bearer token, so a save leaves it to its owner, whether the file is new or
+/// replaces one an older build left open to other users.
+#[cfg(unix)]
+#[test]
+fn a_saved_configuration_is_readable_by_its_owner_alone() {
+    let dir = temp_dir("private-save");
+    let path = dir.join("settings.ron");
+    let mut config = Config::default();
+    config.network.ir_token = Some("secret-token".into());
+    save(&config, &path).expect("save");
+    assert_eq!(mode_of(&path), OWNER_ONLY, "a file with a bearer token was written open to other users");
+
+    open_to_others(&path);
+    save(&config, &path).expect("save over a file others could read");
+    assert_eq!(mode_of(&path), OWNER_ONLY, "a save kept the mode of the file it replaced");
+    assert_eq!(load(&path).expect("loads").config.network.ir_token.as_deref(), Some("secret-token"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The copy of a file a migration keeps holds whatever the file held, token included.
+#[cfg(unix)]
+#[test]
+fn the_copy_a_migration_keeps_is_readable_by_its_owner_alone() {
+    let dir = temp_dir("private-migration");
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let path = dir.join("settings.ron");
+    let flat = r#"(hispeed: 4.0, ir_token: Some("secret-token"))"#;
+    std::fs::write(&path, flat).expect("write");
+    open_to_others(&path);
+
+    let outcome = load(&path).expect("a v0 file loads");
+    let backup = outcome.backup.expect("the migration kept the original");
+    assert_eq!(std::fs::read_to_string(&backup).expect("reads"), flat, "the copy is the original");
+    assert_eq!(mode_of(&backup), OWNER_ONLY, "the copy of a file with a token was left open to other users");
+    assert_eq!(mode_of(&path), OWNER_ONLY, "loading closes the file an older build left open, before it is saved again");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A copy an older build made is never written again, so the load that finds it is what closes it.
+#[cfg(unix)]
+#[test]
+fn loading_closes_the_copies_an_older_build_left_open_to_other_users() {
+    let dir = temp_dir("private-old-copies");
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let path = dir.join("settings.ron");
+    save(&Config::default(), &path).expect("save");
+    let copies = [path.with_extension("ron.bak"), path.with_extension("ron.v2.bak"), path.with_extension("ron.v5.bak")];
+    for copy in &copies {
+        std::fs::write(copy, "(ir_token: Some(\"secret-token\"))").expect("write");
+        open_to_others(copy);
+    }
+    let unrelated = dir.join("keyconfig.ron");
+    std::fs::write(&unrelated, "()").expect("write");
+    open_to_others(&unrelated);
+    open_to_others(&path);
+
+    load(&path).expect("loads");
+
+    for copy in &copies {
+        assert_eq!(mode_of(copy), OWNER_ONLY, "{} was left open to other users", copy.display());
+    }
+    assert_eq!(mode_of(&path), OWNER_ONLY);
+    assert_eq!(mode_of(&unrelated), OPEN_TO_OTHERS, "a file that holds no credential is not this crate's to change");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The unreadable file moved aside is the file that held the token, whole.
+#[cfg(unix)]
+#[test]
+fn an_unreadable_file_moved_aside_is_closed_to_other_users() {
+    let dir = temp_dir("private-bad");
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let path = dir.join("settings.ron");
+    std::fs::write(&path, "ir_token: Some(\"secret-token\") definitely not ron )))").expect("write");
+    open_to_others(&path);
+
+    let outcome = load(&path).expect("a malformed file falls back");
+    let backup = outcome.backup.expect("the file was moved aside");
+    assert_eq!(mode_of(&backup), OWNER_ONLY);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn load_absorbs_the_legacy_sibling_lists_of_a_versionless_file() {
     let dir = temp_dir("siblings");

@@ -21,7 +21,7 @@ use rbms_skin::loader::{
     SKIN_TYPE_PLAY_24KEYS_DOUBLE,
 };
 
-use crate::{Color, DistanceFieldParams, QuadParams, Rect, Renderer, TextureId};
+use crate::{Color, DistanceFieldParams, QuadParams, Rect, Renderer, TexelRect, TextureId};
 
 /// What an offset's values are a hundredth of: a move of one is one percent of the screen, and a
 /// stretch of one makes the screen one percent larger.
@@ -123,6 +123,10 @@ impl<R: Renderer> Renderer for OffsetRenderer<'_, R> {
 
     fn register_texture(&mut self, key: &str, rgba: &[u8], width: u32, height: u32) -> TextureId {
         self.inner.register_texture(key, rgba, width, height)
+    }
+
+    fn update_texture(&mut self, tex: TextureId, rgba: &[u8], region: TexelRect) -> bool {
+        self.inner.update_texture(tex, rgba, region)
     }
 
     fn release_texture(&mut self, tex: TextureId) {

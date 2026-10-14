@@ -237,6 +237,13 @@ impl ScoreServer for HttpScoreServer {
         self.get("/auth/me")
     }
 
+    /// `DELETE /auth/token/current` with the configured token as the bearer: the server revokes that
+    /// one token and answers `204 No Content`, so there is no body to read.
+    fn revoke_current_token(&self) -> Result<(), IrError> {
+        let resp = self.send(self.client()?.delete(self.url("/auth/token/current")))?;
+        Self::succeeding(resp).map(drop)
+    }
+
     fn put_rivals(&self, player: &PlayerId, rivals: &[String]) -> Result<Vec<PlayerProfile>, IrError> {
         let body = RivalPutRequest { rivals: rivals.to_vec() };
         self.put(&format!("/players/{}/rivals", player.id), &body)
@@ -279,10 +286,10 @@ impl ScoreServer for HttpScoreServer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mock_http::{TEST_TIMEOUT, TestServer, no_content, ok, response};
+    use crate::mock_http::{GIVE_UP_AFTER, REPLY_WAIT, TestServer, no_content, ok, response};
     use std::net::TcpListener;
 
-    /// Delay the "slow server" case uses; must exceed `TEST_TIMEOUT`.
+    /// Delay the "slow server" case uses; must exceed `GIVE_UP_AFTER`.
     const SLOW_SERVER_DELAY: Duration = Duration::from_millis(1500);
     /// Delay the ignored default-constructor case uses; must exceed `REQUEST_TIMEOUT`.
     const UNREACHABLE_DELAY: Duration = Duration::from_secs(30);
@@ -453,7 +460,7 @@ mod tests {
     #[test]
     fn base_url_trailing_slash_does_not_double_the_path_separator() {
         let server = TestServer::spawn(vec![ok(r#"{"name":"n","version":"v","ir_compat":"c"}"#)]);
-        let client = HttpScoreServer::try_with_timeout(format!("{}/", server.base), None, TEST_TIMEOUT).expect("client builds");
+        let client = HttpScoreServer::try_with_timeout(format!("{}/", server.base), None, REPLY_WAIT).expect("client builds");
         client.health().expect("health succeeds");
         assert!(server.next_request().starts_with("GET /health HTTP/1.1"));
     }
@@ -607,9 +614,45 @@ mod tests {
     }
 
     #[test]
+    fn revoke_current_token_deletes_the_token_it_sends_and_reads_no_body() {
+        let server = TestServer::spawn(vec![no_content()]);
+        server.client_with_token("tok-123").revoke_current_token().expect("a 204 is a revoked token");
+        let req = server.next_request();
+        assert!(req.starts_with("DELETE /auth/token/current HTTP/1.1"), "got {req}");
+        assert!(req.to_lowercase().contains("authorization: bearer tok-123"), "the token to revoke is the bearer: {req}");
+    }
+
+    #[test]
+    fn revoke_current_token_of_a_token_the_server_no_longer_knows_is_unauthorized() {
+        let server = TestServer::spawn(vec![response("401 Unauthorized", r#"{"success":false,"error":{"code":"UNAUTHORIZED","message":"no"}}"#)]);
+        let err = server.client_with_token("gone").revoke_current_token().expect_err("an unknown token is refused");
+        let _ = server.next_request();
+        assert!(matches!(err, IrError::Unauthorized(_)), "got {err:?}");
+    }
+
+    #[test]
+    fn revoke_current_token_on_a_server_that_cannot_be_reached_is_a_network_error() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+        let addr = listener.local_addr().expect("local addr");
+        drop(listener);
+        let client = HttpScoreServer::try_with_timeout(format!("http://{addr}"), Some("tok".into()), REPLY_WAIT).expect("client builds");
+        assert!(matches!(client.revoke_current_token(), Err(IrError::Network(_))));
+    }
+
+    #[test]
+    fn a_login_made_with_the_old_token_in_hand_carries_it_so_the_server_can_retire_it() {
+        let server = TestServer::spawn(vec![ok(r#"{"token":"tok-new","player":{"id":"p1"},"name":"P1"}"#)]);
+        let client = HttpScoreServer::try_with_timeout(&server.base, Some("tok-old".into()), REPLY_WAIT).expect("client builds");
+        client.login(&auth_request()).expect("login succeeds");
+        let req = server.next_request();
+        assert!(req.starts_with("POST /auth/login HTTP/1.1"));
+        assert!(req.to_lowercase().contains("authorization: bearer tok-old"), "the server retires the token the login request carries: {req}");
+    }
+
+    #[test]
     fn requests_carry_the_bearer_token_when_configured() {
         let server = TestServer::spawn(vec![ok(r#"{"name":"n","version":"v","ir_compat":"c"}"#)]);
-        let client = HttpScoreServer::try_with_timeout(&server.base, Some("tok-123".into()), TEST_TIMEOUT).expect("client builds");
+        let client = HttpScoreServer::try_with_timeout(&server.base, Some("tok-123".into()), REPLY_WAIT).expect("client builds");
         client.health().expect("health succeeds");
         assert!(server.next_request().to_lowercase().contains("authorization: bearer tok-123"));
     }
@@ -670,7 +713,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
         let addr = listener.local_addr().expect("local addr");
         drop(listener);
-        let client = HttpScoreServer::try_with_timeout(format!("http://{addr}"), None, TEST_TIMEOUT).expect("client builds");
+        let client = HttpScoreServer::try_with_timeout(format!("http://{addr}"), None, REPLY_WAIT).expect("client builds");
         assert!(matches!(client.health(), Err(IrError::Network(_))));
     }
 
@@ -678,9 +721,24 @@ mod tests {
     fn a_server_slower_than_the_timeout_maps_to_network_error() {
         let server = TestServer::spawn_with_delay(vec![ok(r#"{"name":"n","version":"v","ir_compat":"c"}"#)], SLOW_SERVER_DELAY);
         let started = std::time::Instant::now();
-        let err = server.client().health().expect_err("a stalled server must not hang the call");
+        let err = server.client_giving_up_after(GIVE_UP_AFTER).health().expect_err("a stalled server must not hang the call");
         let _ = server.next_request();
         assert!(matches!(err, IrError::Network(_)), "got {err:?}");
         assert!(started.elapsed() < SLOW_SERVER_DELAY, "the call returned before the server replied");
+    }
+
+    /// A reply held up for longer than a client that is meant to give up waits, as a test runner
+    /// that stops the process for a moment holds one up, still reaches the client every other test
+    /// uses: only the tests of a timeout give up that soon.
+    #[test]
+    fn a_reply_held_up_past_the_give_up_budget_still_reaches_a_test_client() {
+        const HELD_UP_FOR: Duration = Duration::from_millis(400);
+        const _: () = assert!(HELD_UP_FOR.as_millis() > GIVE_UP_AFTER.as_millis() && HELD_UP_FOR.as_millis() < REPLY_WAIT.as_millis());
+        let server = TestServer::spawn_with_delay(vec![ok(r#"{"name":"n","version":"v","ir_compat":"c"}"#)], HELD_UP_FOR);
+        server.client().health().expect("a reply that comes after a short stall is read");
+        let _ = server.next_request();
+        let server = TestServer::spawn_with_delay(vec![ok(r#"{"name":"n","version":"v","ir_compat":"c"}"#)], HELD_UP_FOR);
+        server.client_with_token("tok-123").health().expect("a reply that comes after a short stall is read with a token too");
+        let _ = server.next_request();
     }
 }

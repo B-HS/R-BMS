@@ -22,7 +22,7 @@ use rbms_skin::loader::SKIN_TYPE_PLAY_7KEYS;
 use super::scene::{PlayTimes, elapsed_ms};
 use super::*;
 use crate::app_play::{LoadedChart, loaded_chart_for_tests};
-use crate::stage::capture::{app_in, settings_of};
+use crate::stage::capture::{app_in, at_a_stopped_instant, settings_of};
 use crate::stage::render_tests::FRAME_DT;
 use crate::stage::select::tests::{entry, press, release};
 use crate::stage::{DecideState, HeadlessCanvas, KeysoundLoad, LoadingState, Stage, StageId};
@@ -125,10 +125,16 @@ thread_local! {
 
 /// Put the scene clock and the song clock of `app` where the test's count says they are.
 fn pin(app: &mut App) {
+    pin_at(app, Instant::now());
+}
+
+/// The same, with the song clock counted back from `now`: the instant the clocks read, which is the
+/// one they are stopped at inside a frame.
+fn pin_at(app: &mut App, now: Instant) {
     let clocks = CLOCKS.get();
     app.shared.put_skin_scene_at(clocks.scene);
     if let Some(song) = clocks.song {
-        app.shared.clock = Instant::now().checked_sub(song).expect("the process has been up for longer than the time asked for");
+        app.shared.clock = now.checked_sub(song).expect("the process has been up for longer than the time asked for");
     }
 }
 
@@ -211,22 +217,24 @@ fn phase(app: &App) -> Option<PlayPhase> {
 /// One frame of whatever screen is up, as the application runs one: its update, and its draw
 /// unless the update asked to leave.
 ///
-/// The frame is run with both clocks where the test's count has them, and they are put back there
-/// once it is over, so the frame costs the run no time however long the machine takes over it. The
-/// chart's own clock is counted from the frame that leaves the chart playing.
+/// The frame is run at a stopped instant ([`at_a_stopped_instant`]) with both clocks where the
+/// test's count has them, and they are put back there once it is over: every read of either inside
+/// the frame sees the counted time, and the frame costs the run no time, however long the machine
+/// takes over it. The chart's own clock is counted from the frame that leaves the chart playing.
 fn frame(app: &mut App, pixels: &mut HeadlessCanvas) -> Transition {
-    pin(app);
-    let now = Instant::now();
-    let transition = app.stage.update(&mut FrameCtx { shared: &mut app.shared, now, dt: FRAME_DT });
-    if matches!(transition, Transition::Stay) {
-        app.stage.draw(&mut FrameCtx { shared: &mut app.shared, now, dt: FRAME_DT }, &mut Canvas::Headless(pixels));
-    }
-    let clocks = CLOCKS.get();
-    if clocks.song.is_none() && matches!(&app.stage, Stage::Play(state) if state.phase() == Some(PlayPhase::Play)) {
-        CLOCKS.set(Clocks { song: Some(Duration::ZERO), ..clocks });
-    }
-    pin(app);
-    transition
+    at_a_stopped_instant(app, |app, now| {
+        pin_at(app, now);
+        let transition = app.stage.update(&mut FrameCtx { shared: &mut app.shared, now, dt: FRAME_DT });
+        if matches!(transition, Transition::Stay) {
+            app.stage.draw(&mut FrameCtx { shared: &mut app.shared, now, dt: FRAME_DT }, &mut Canvas::Headless(pixels));
+        }
+        let clocks = CLOCKS.get();
+        if clocks.song.is_none() && matches!(&app.stage, Stage::Play(state) if state.phase() == Some(PlayPhase::Play)) {
+            CLOCKS.set(Clocks { song: Some(Duration::ZERO), ..clocks });
+        }
+        pin_at(app, now);
+        transition
+    })
 }
 
 /// The update of a frame alone, with the clocks left to run as they do, for the test that reads the
@@ -240,8 +248,9 @@ fn update(app: &mut App) {
 /// How long the machine has taken since `since`, in milliseconds rounded up, and one more for the
 /// two readings it is held against being whole milliseconds themselves.
 ///
-/// A frame pins both clocks before and after itself, so a clock read inside a frame or after it has
-/// run on from its pin by the time the machine took to get there, and by nothing else. Two readings
+/// A frame pins both clocks before and after itself and reads them stopped in between, so a clock
+/// read inside a frame is exactly where it was pinned, and one read after it has run on from its pin
+/// by the time the machine took to get there, and by nothing else. Two readings
 /// that should agree are therefore apart by no more than the time the machine has taken since the
 /// first frame either of them goes back to, and that is what they are held to: a machine that
 /// stalls is allowed its stall and nothing more.
@@ -291,9 +300,15 @@ fn started(app: &mut App, pixels: &mut HeadlessCanvas, play: PlayState) {
 }
 
 /// Send one key to the screen that is up, as the application does: the held-key set first.
+///
+/// The key is handed in at a stopped instant with both clocks where the test's count has them, as a
+/// frame is run ([`frame`]): whatever it starts is started at the counted time, which is the time the
+/// next frame is drawn at, and not at however much later the machine got to it.
 fn key(app: &mut App, key: KeyInput<'_>) -> Transition {
-    let now = Instant::now();
-    app.stage.handle_key(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 }, key)
+    at_a_stopped_instant(app, |app, now| {
+        pin_at(app, now);
+        app.stage.handle_key(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 }, key)
+    })
 }
 
 /// The canvas the fixture is drawn on.
@@ -596,6 +611,25 @@ fn start_or_select_starts_a_failed_run_again_at_once() {
         assert!(matches!(frame(&mut app, &mut pixels), Transition::To(Stage::Loading(_))), "{retry_key:?} did not start the chart again");
         assert_eq!(app.shared.retry_seed, keeps_layout.then_some(seed), "{retry_key:?} carried the wrong layout over");
     }
+}
+
+/// A failed run started again at once is kept first, FAILED, as its result screen would have kept
+/// it: the run never reaches that screen, and every run played by hand is kept and sent.
+#[test]
+fn a_failed_run_started_again_is_kept_first() {
+    let mut app = app_with_play_skin("retry-kept");
+    let mut pixels = canvas();
+    with_the_chart_in_the_library(&mut app);
+    started(&mut app, &mut pixels, unplayed());
+    stay_after(&mut app, &mut pixels, FIRST_NOTE_MS + MISS_AFTER_MS);
+    assert_eq!(phase(&app), Some(PlayPhase::Failed));
+    app.shared.note_key(&press(START_KEY));
+    assert!(matches!(frame(&mut app, &mut pixels), Transition::To(Stage::Loading(_))));
+    let plays = app.shared.scoredb.as_ref().expect("the score database").all_plays().expect("the history reads");
+    let [kept] = plays.as_slice() else {
+        panic!("one failed run was started again and {} rows were stored", plays.len());
+    };
+    assert_eq!(kept.clear, rbms_judge::clear_type_id(rbms_judge::ClearType::Failed));
 }
 
 /// A run that is not played by hand is not started again: START on a failed replay changes

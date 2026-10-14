@@ -34,6 +34,7 @@ mod pixmap;
 mod timing_dist;
 mod timing_vis;
 
+use std::ops::Range;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use rbms_skin::dst::SkinRect;
@@ -45,7 +46,7 @@ use super::object::Body;
 use super::text::Fonts;
 use super::textures::Source;
 use crate::font::BLOCK_MAX_PIXELS;
-use crate::{Rect, Renderer, TextureFilter, TextureId, UvRect};
+use crate::{Rect, Renderer, TexelRect, TextureFilter, TextureId, UvRect};
 use pixmap::{Pixmap, Rgba};
 
 pub use bpm::BpmTimeline;
@@ -192,36 +193,27 @@ fn document_rect_of(place: &Placement<'_>, placed: Rect) -> Option<SkinRect> {
         .then(|| SkinRect::new(placed.x / scale_x, place.viewport.document_y(placed.y + placed.h), placed.w / scale_x, placed.h / scale_y))
 }
 
-/// Which way up a pixmap is uploaded.
-///
-/// The reference draws most of its graph textures with a negative height, so the pixmap's first row
-/// lands on the foot of the rectangle; the one it draws like any other image keeps its first row on
-/// top.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Upload {
-    /// The pixmap's first row lands on the bottom of the rectangle.
-    FirstRowAtFoot,
-    /// The pixmap's first row lands on the top of the rectangle.
-    FirstRowOnTop,
-}
-
 /// One pixmap of a graph, kept uploaded as a texture of its own.
 ///
-/// The pixmap itself belongs to the graph, which paints it when its numbers change. A layer only
-/// knows whether what the renderer holds is still that pixmap: it uploads again when told the pixmap
-/// changed, and when the renderer does not know its texture (a graph drawn onto another renderer than
-/// the one it was uploaded to).
+/// The pixmap itself belongs to the graph, which paints it when its numbers change, and which way up
+/// it lands on its rectangle is the pixmap's own ([`Pixmap::upside_down`]). A layer only knows
+/// whether what the renderer holds is still that pixmap: it uploads all of it again when told the
+/// pixmap changed, and when the renderer does not know its texture (a graph drawn onto another
+/// renderer than the one it was uploaded to); and it writes only the columns it was told were
+/// painted again when nothing more than that changed.
 #[derive(Debug)]
 struct Layer {
     key: String,
     handle: Option<TextureId>,
     stale: bool,
+    /// The columns painted again since the texture was last brought up to date.
+    columns: Option<Range<usize>>,
 }
 
 impl Layer {
     /// A layer called `name` among the textures of the graph numbered `serial`.
     fn new(serial: u32, name: &str) -> Layer {
-        Layer { key: format!("rbms.skin.graph.{serial}.{name}"), handle: None, stale: true }
+        Layer { key: format!("rbms.skin.graph.{serial}.{name}"), handle: None, stale: true, columns: None }
     }
 
     /// Records that the pixmap was painted again, so the next [`Layer::texture`] uploads it.
@@ -229,25 +221,34 @@ impl Layer {
         self.stale = true;
     }
 
-    /// The texture holding `pixmap` with its first row at the foot, or `None` when the renderer
-    /// refused to hold it.
-    fn texture<R: Renderer>(&mut self, r: &mut R, pixmap: &Pixmap) -> Option<TextureId> {
-        self.texture_as(r, pixmap, Upload::FirstRowAtFoot)
+    /// Records that the pixmap's `columns` were painted again and nothing else, so the next
+    /// [`Layer::texture`] writes those columns alone.
+    fn mark_columns(&mut self, columns: Range<usize>) {
+        self.columns = Some(match self.columns.take() {
+            Some(before) => before.start.min(columns.start)..before.end.max(columns.end),
+            None => columns,
+        });
     }
 
-    /// The texture holding `pixmap` the way up `upload` names, or `None` when the renderer refused
-    /// to hold it.
-    fn texture_as<R: Renderer>(&mut self, r: &mut R, pixmap: &Pixmap, upload: Upload) -> Option<TextureId> {
+    /// The texture holding `pixmap`, or `None` when the renderer refused to hold it.
+    fn texture<R: Renderer>(&mut self, r: &mut R, pixmap: &Pixmap) -> Option<TextureId> {
         let (width, height) = pixmap.size();
         let size = (width as u32, height as u32);
-        let known = self.handle.and_then(|handle| r.texture_size(handle));
-        if self.stale || known != Some(size) {
-            self.handle = Some(match upload {
-                Upload::FirstRowAtFoot => r.register_texture(&self.key, &pixmap.bottom_up(), size.0, size.1),
-                Upload::FirstRowOnTop => r.register_texture(&self.key, pixmap.top_down(), size.0, size.1),
-            });
-            self.stale = false;
+        let known = self.handle.filter(|handle| r.texture_size(*handle) == Some(size));
+        let columns = self.columns.take().filter(|columns| !columns.is_empty());
+        let written = match (known, columns) {
+            (Some(_), _) if self.stale => false,
+            (Some(handle), Some(columns)) => {
+                let region = TexelRect { x: columns.start as u32, y: 0, width: columns.len() as u32, height: size.1 };
+                r.update_texture(handle, pixmap.texels(), region)
+            }
+            (Some(_), None) => true,
+            (None, _) => false,
+        };
+        if !written {
+            self.handle = Some(r.register_texture(&self.key, pixmap.texels(), size.0, size.1));
         }
+        self.stale = false;
         self.handle.filter(|handle| r.texture_size(*handle).is_some())
     }
 
@@ -257,6 +258,7 @@ impl Layer {
             r.release_texture(handle);
         }
         self.stale = true;
+        self.columns = None;
     }
 }
 
@@ -274,10 +276,13 @@ pub(crate) fn release<R: Renderer>(body: &Body, r: &mut R) {
     }
 }
 
-/// Draws the left `shown` columns of a texture of `size` pixels onto `dst`, a screen rectangle, the
-/// way an image of that size is drawn: fitted by the object's stretch mode, sampled with the filter
-/// its destination chose, tinted, blended and turned with the object. Answers whether anything was
-/// drawn.
+/// Draws the left `shown` columns of an image of `size` pixels held by `tex` onto `dst`, a screen
+/// rectangle, the way an image of that size is drawn: fitted by the object's stretch mode, sampled
+/// with the filter its destination chose, tinted, blended and turned with the object. Answers
+/// whether anything was drawn.
+///
+/// The texture is the image itself, or one row of it when every row of the image is that row: the
+/// texture is read at the same place across either way, and every row of it holds the same pixels.
 fn draw_layer<R: Renderer>(r: &mut R, place: &Placement<'_>, tex: TextureId, size: (u32, u32), shown: u32, dst: Rect) -> bool {
     if shown == 0 || !(dst.w > 0.0 && dst.h > 0.0) {
         return false;

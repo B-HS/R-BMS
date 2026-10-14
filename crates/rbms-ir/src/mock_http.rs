@@ -6,8 +6,12 @@ use std::time::Duration;
 
 use crate::HttpScoreServer;
 
-/// Per-request budget used by the tests; short enough that the timeout case stays fast.
-pub const TEST_TIMEOUT: Duration = Duration::from_millis(300);
+/// Per-request budget of a client that has to get its answer: long enough that a test runner
+/// holding the process up for a while does not turn a reply into a timeout.
+pub const REPLY_WAIT: Duration = Duration::from_secs(10);
+/// Per-request budget of a client that is meant to give up, for the tests of what a timeout does;
+/// short enough that those stay fast.
+pub const GIVE_UP_AFTER: Duration = Duration::from_millis(300);
 /// How long a test waits for the server thread to hand over a captured request.
 pub const CAPTURE_WAIT: Duration = Duration::from_secs(10);
 
@@ -47,12 +51,18 @@ impl TestServer {
         TestServer { base: format!("http://{addr}"), requests }
     }
 
+    /// A client of this server that waits [`REPLY_WAIT`] for each answer.
     pub fn client(&self) -> HttpScoreServer {
-        HttpScoreServer::try_with_timeout(&self.base, None, TEST_TIMEOUT).expect("client builds")
+        self.client_giving_up_after(REPLY_WAIT)
     }
 
     pub fn client_with_token(&self, token: &str) -> HttpScoreServer {
-        HttpScoreServer::try_with_timeout(&self.base, Some(token.to_string()), TEST_TIMEOUT).expect("client builds")
+        HttpScoreServer::try_with_timeout(&self.base, Some(token.to_string()), REPLY_WAIT).expect("client builds")
+    }
+
+    /// A client of this server that gives up on an answer after `timeout`.
+    pub fn client_giving_up_after(&self, timeout: Duration) -> HttpScoreServer {
+        HttpScoreServer::try_with_timeout(&self.base, None, timeout).expect("client builds")
     }
 
     pub fn next_request(&self) -> String {

@@ -15,7 +15,8 @@
 //! prove the comparison really happened.
 
 use rbms_render::{
-    BlendMode, Color, CpuCanvas, DistanceFieldParams, DistanceFieldStyle, QuadParams, Rect, Renderer, ScaledRenderer, TextureFilter, TextureId, UvRect,
+    BlendMode, Color, CpuCanvas, DistanceFieldParams, DistanceFieldStyle, QuadParams, Rect, Renderer, ScaledRenderer, TexelRect, TextureFilter, TextureId,
+    UvRect,
 };
 
 use super::Gpu;
@@ -308,6 +309,69 @@ fn a_target_of_another_size_reads_back_every_row_unpadded() {
     let last = pixels.len() - BYTES_PER_PIXEL as usize;
     assert_eq!(&pixels[last..], &[MIDTONE.r, MIDTONE.g, MIDTONE.b, u8::MAX], "and the last pixel is the last pixel drawn");
     assert_eq!(&pixels[..BYTES_PER_PIXEL as usize], &[BACKDROP.r, BACKDROP.g, BACKDROP.b, u8::MAX]);
+}
+
+/// Size of the strip the partial write test draws: rows of 300 bytes, which are not on the copy
+/// alignment, and a few of them.
+const STRIP_W: u32 = 75;
+const STRIP_H: u32 = 6;
+
+/// The columns of the strip the partial write test writes again.
+const STRIP_REGION: TexelRect = TexelRect { x: 40, y: 0, width: 5, height: STRIP_H };
+
+/// The colour the strip's rewritten columns are given.
+const REWRITTEN: [u8; 4] = [255, 0, 128, 255];
+
+/// A strip with a different colour in every texel, and the same strip with [`STRIP_REGION`] painted
+/// [`REWRITTEN`].
+fn strips() -> (Vec<u8>, Vec<u8>) {
+    let first: Vec<u8> = (0..STRIP_W * STRIP_H).flat_map(|i| [(i * 3) as u8, (i * 7) as u8, (i * 11) as u8, u8::MAX]).collect();
+    let mut second = first.clone();
+    for row in STRIP_REGION.y..STRIP_REGION.y + STRIP_REGION.height {
+        for column in STRIP_REGION.x..STRIP_REGION.x + STRIP_REGION.width {
+            let at = ((row * STRIP_W + column) * BYTES_PER_PIXEL) as usize;
+            second[at..at + BYTES_PER_PIXEL as usize].copy_from_slice(&REWRITTEN);
+        }
+    }
+    (first, second)
+}
+
+/// Register the first strip, write the region of the second over it, and draw it at its own size.
+fn paint_strip<R: Renderer>(r: &mut R) {
+    let (first, second) = strips();
+    let tex = r.register_texture("pixel_tests.strip", &first, STRIP_W, STRIP_H);
+    assert!(r.update_texture(tex, &second, STRIP_REGION), "a region inside the texture is written");
+    r.clear(BACKDROP);
+    r.draw_textured_quad(tex, QuadParams::new(Rect::new(0.0, 0.0, STRIP_W as f32, STRIP_H as f32)));
+}
+
+/// An image whose rows are off the copy alignment is uploaded with its rows packed tight, and a
+/// region of it written again lands where it lies and nowhere else, the same on both backends.
+#[test]
+fn a_texture_written_whole_and_then_in_part_is_drawn_alike_on_both_backends() {
+    let Some(mut gpu) = offscreen(WIDTH, HEIGHT) else {
+        return;
+    };
+    paint_strip(&mut gpu);
+    let from_gpu = gpu.capture().expect("an offscreen target reads back");
+    let mut cpu = CpuCanvas::new(WIDTH, HEIGHT);
+    paint_strip(&mut cpu);
+    assert_frames_agree(&from_gpu, cpu.pixels(), WIDTH, "a strip written in part");
+
+    let at = |x: u32, y: u32| {
+        let i = ((y * WIDTH + x) * BYTES_PER_PIXEL) as usize;
+        [from_gpu[i], from_gpu[i + 1], from_gpu[i + 2], from_gpu[i + 3]]
+    };
+    let (first, _) = strips();
+    let left = ((STRIP_W + STRIP_REGION.x - 1) * BYTES_PER_PIXEL) as usize;
+    assert_eq!(at(STRIP_REGION.x, 1), REWRITTEN, "the region took the new pixels");
+    assert_eq!(at(STRIP_REGION.x - 1, 1), [first[left], first[left + 1], first[left + 2], first[left + 3]], "and the column before it kept the old ones");
+
+    let tex = gpu.register_texture("pixel_tests.strip", &first, STRIP_W, STRIP_H);
+    let past = TexelRect { x: STRIP_W - 1, width: 2, ..STRIP_REGION };
+    assert!(!gpu.update_texture(tex, &first, past), "a region that runs off the texture is not written");
+    assert!(!gpu.update_texture(tex, &first[4..], STRIP_REGION), "nor are pixels that are not the texture's size");
+    assert!(!gpu.update_texture(TextureId(u32::MAX), &first, STRIP_REGION), "nor a handle that names no texture");
 }
 
 /// Edge of the distance field the field scenes draw from, in texels.

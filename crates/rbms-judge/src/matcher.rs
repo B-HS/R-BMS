@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::Judge;
 use crate::algorithm::{JudgeAlgorithm, NoteRef, NoteType, UNJUDGED_STATE};
-use crate::gauge::{ClearType, GaugeKind, GrooveGauge, clear_lamp};
+use crate::gauge::{ClearType, GaugeAutoShift, GaugeKind, GaugeShiftOutcome, GrooveGauge, clear_lamp};
 use crate::gauge_tables::GaugeSetId;
 use crate::ln::{HCN_GAUGE_TICK_RATE, HCN_GAUGE_TICK_US, LaneHold, LnMode};
 use crate::windows::{
@@ -93,6 +93,14 @@ pub struct NoteMark {
     pub play_time_us: i64,
 }
 
+/// One note of the chart, by its lane and its place among that lane's notes in chart order: the
+/// note whose head is the `index`th head [`JudgeEngine::note_marks`] gives for `lane`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NoteAt {
+    pub lane: usize,
+    pub index: usize,
+}
+
 /// One judgment as the engine counted it, in the order it was counted: what the reference hands its
 /// screen from `JudgeManager.updateMicro` each time it gets as far as counting one
 /// (`JudgeManager.java:652-692`).
@@ -157,8 +165,17 @@ struct Mine {
     damage: f64,
 }
 
-/// One judgment the frame sweep resolved. Collected while the lane is borrowed and applied once
-/// the borrow ends.
+/// How the selected gauge may move as a run is judged: the auto-shift mode, the gauge the player
+/// chose and the floor the selection may fall to ([`GrooveGauge::auto_shift`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GaugeShift {
+    pub mode: GaugeAutoShift,
+    pub configured: GaugeKind,
+    pub bottom: GaugeKind,
+}
+
+/// One judgment the clock resolved. Collected while the lane is borrowed and applied once the
+/// borrow ends.
 struct SweepEvent {
     lane: usize,
     note: usize,
@@ -185,10 +202,23 @@ pub struct JudgeResult {
     pub note_index: usize,
     pub fast: bool,
     pub delta_us: i64,
+    /// Whether the engine counted this as a judgment. A plain long note is judged once, at its end,
+    /// so the press that only takes its head into the hold reports how that head was timed without
+    /// counting anything (`JudgeManager.java:426-438`): the tallies, the sound and the offset
+    /// adjustment of a judgment belong to the end alone.
+    pub counted: bool,
 }
 
 fn worse(a: Judge, b: Judge) -> Judge {
     if a as usize >= b as usize { a } else { b }
+}
+
+/// The marks of `note`, in `lane`: its head's, and its end's when it is a long note.
+fn marks_of(lane: usize, note: &JNote) -> impl Iterator<Item = NoteMark> {
+    let charge = is_charge(note.ln);
+    let head = NoteMark { lane, time_us: note.head_us, long_end: false, charge, state: note.head_state, play_time_us: note.head_play_time_us };
+    let end = note.end_us.map(|end_us| NoteMark { lane, time_us: end_us, long_end: true, charge, state: note.end_state, play_time_us: note.end_play_time_us });
+    std::iter::once(head).chain(end)
 }
 
 /// Judged objects in `lanes`: a charge note's head and end each count, every other note counts once.
@@ -196,11 +226,25 @@ fn count_notes(lanes: &[Lane]) -> u32 {
     lanes.iter().flat_map(|l| l.notes.iter()).map(|n| if is_charge(n.ln) && n.end_us.is_some() { 2 } else { 1 }).sum()
 }
 
+/// Note objects in `lanes`, whatever they are judged as: a head, and an end for a long note. A run
+/// judges each of them at most once.
+fn count_objects(lanes: &[Lane]) -> usize {
+    lanes.iter().flat_map(|lane| lane.notes.iter()).map(|note| 1 + usize::from(note.end_us.is_some())).sum()
+}
+
 /// Stateful note-matching engine with LN support: per-lane time-sorted notes, a moving
 /// cursor, combo, EX score, per-judge counts and the nine groove gauges. `press` folds the lane's
 /// candidates through the selected [`JudgeAlgorithm`] (LN heads start a hold); `release` finalises
 /// or defers a held long note against the LN-end window; `update` confirms deferred releases, pays
 /// out hell-charge ticks, sweeps unhittable notes into 見逃し POOR and applies mine damage.
+///
+/// Time moves on in the order things happen rather than once per display frame. `update(t)` settles
+/// every time-driven judgment due at or before `t` at the very instant it falls due, one instant
+/// after another, and every input first settles the clock up to its own instant: a release and a
+/// re-grab, a mine and the key over it, and a hell-charge tick come out the same however the calls
+/// that brought the clock there were spaced. The reference advances all of these once per frame
+/// (`JudgeManager.update`), which makes a run depend on its frame rate; see
+/// `docs/acknowledge/reference-divergences.md`.
 ///
 /// Judge slots follow the reference implementation exactly: index 4 ([`Judge::Poor`]) is 見逃し POOR — a note that
 /// went by unhit — and index 5 ([`Judge::Miss`]) is 空POOR, a press that reached only the MS band
@@ -226,11 +270,30 @@ pub struct JudgeEngine {
     ln_mode: LnMode,
     gauge_set: GaugeSetId,
     gauge_total: f64,
-    /// The reference's `prevmtime` (`JudgeManager.java:100`), the previous frame clock the
-    /// hell-charge ticks measure their step against.
-    prev_update_us: i64,
+    /// The instant the clock has been settled up to: every time-driven judgment due at or before it
+    /// has been made, and a hell-charge tick balance has run up to it. The reference's
+    /// `prevmtime` (`JudgeManager.java:100`), kept per event rather than per frame.
+    settled_us: i64,
+    /// How the selected gauge may move, or `None` for an engine nothing shifts and nothing fails.
+    gauge_shift: Option<GaugeShift>,
+    /// The instant the selected gauge emptied under a shift mode that does not rescue the run. From
+    /// then on the run is over and the engine judges nothing more (`BMSPlayer.java:653-661, 694`).
+    failed_at_us: Option<i64>,
+    /// The reference's `autoplay` (`JudgeManager.java:289-293`): the run plays itself, so a
+    /// hell-charge note in hand always gains gauge although no key is down.
+    autoplay: bool,
+    /// The combo as the player sees it, carried across the stages of a course
+    /// (`JudgeManager.coursecombo`): a course stage starts it at the streak the stage before ended on.
     pub combo: u32,
+    /// The longest [`combo`](Self::combo), carried streak included (`JudgeManager.coursemaxcombo`).
     pub max_combo: u32,
+    /// The combo within this chart alone (`JudgeManager.combo`), which starts at nothing on every
+    /// course stage. A chart's own record and its full-combo lamp are read from it
+    /// (`BMSPlayer.java:868`); outside a course it is [`combo`](Self::combo).
+    pub stage_combo: u32,
+    /// The longest [`stage_combo`](Self::stage_combo) (`ScoreData.combo`), the max combo a chart's
+    /// record keeps.
+    pub stage_max_combo: u32,
     pub counts: [u32; 6],
     pub ex_score: u32,
     pub gauge: GrooveGauge,
@@ -246,7 +309,7 @@ pub struct JudgeEngine {
     /// Empty-poor (空POOR) tally, kept as a mirror of `counts[5]` for callers that read it by name.
     pub empty_poor: u32,
     /// Running sum and count of signed hit deltas (µs) for actual hits (press/release, not sweeps),
-    /// so `avg_judge_us()` yields the reference implementation's `IRScoreData.avgjudge` — the mean timing error.
+    /// so `avg_judge_us()` yields the run's mean timing offset.
     sum_delta_us: i64,
     timing_count: u32,
     total_notes: u32,
@@ -254,6 +317,13 @@ pub struct JudgeEngine {
     pass_notes: u32,
     /// Every judgment counted so far, oldest first. Nothing in the engine reads it back.
     judged: Vec<JudgedNote>,
+    /// Every note whose marks may have changed since the engine was built, oldest first, once for
+    /// each time. Nothing in the engine reads it back.
+    ///
+    /// Both lists are made room for a judgment of every note object when the engine is built, and
+    /// [`JudgeEngine::set_ln_mode`] makes room again past the notes it names here, so a run that
+    /// judges each object once never grows them, and moves them, in the middle of play.
+    touched: Vec<NoteAt>,
 }
 
 impl JudgeEngine {
@@ -295,6 +365,7 @@ impl JudgeEngine {
             })
             .collect();
         let total_notes = count_notes(&lanes);
+        let objects = count_objects(&lanes);
         let gauge_set = GaugeSetId::default();
         let gauge_total = DEFAULT_GAUGE_TOTAL;
         let gauge = GrooveGauge::new(gauge_set, GaugeKind::Normal, gauge_total, total_notes as usize);
@@ -318,9 +389,14 @@ impl JudgeEngine {
             ln_mode: LnMode::default(),
             gauge_set,
             gauge_total,
-            prev_update_us: 0,
+            settled_us: i64::MIN,
+            gauge_shift: None,
+            failed_at_us: None,
+            autoplay: false,
             combo: 0,
             max_combo: 0,
+            stage_combo: 0,
+            stage_max_combo: 0,
             counts: [0; 6],
             ex_score: 0,
             gauge,
@@ -335,7 +411,8 @@ impl JudgeEngine {
             timing_count: 0,
             total_notes,
             pass_notes: 0,
-            judged: Vec::new(),
+            judged: Vec::with_capacity(objects),
+            touched: Vec::with_capacity(objects),
         }
     }
 
@@ -512,10 +589,13 @@ impl JudgeEngine {
     pub fn set_ln_mode(&mut self, mode: LnMode) {
         self.ln_mode = mode;
         let resolved = mode.resolve();
-        for lane in self.lanes.iter_mut() {
-            for note in lane.notes.iter_mut() {
+        let flavoured = self.lanes.iter().flat_map(|lane| lane.notes.iter()).filter(|note| note.chart_ln == Some(LnKind::Undefined)).count();
+        self.touched.reserve(flavoured + count_objects(&self.lanes));
+        for (lane, notes) in self.lanes.iter_mut().enumerate() {
+            for (index, note) in notes.notes.iter_mut().enumerate() {
                 if note.chart_ln == Some(LnKind::Undefined) {
                     note.ln = Some(resolved);
+                    self.touched.push(NoteAt { lane, index });
                 }
             }
         }
@@ -534,6 +614,39 @@ impl JudgeEngine {
         self.longnote_margin_rate = rate_percent;
     }
 
+    /// Mark the run as one that plays itself. Autoplay is driven through [`auto_press`](Self::auto_press)
+    /// and [`auto_release`](Self::auto_release), which never raise a lane's key state, and this flag
+    /// is what keeps its hell-charge notes gaining gauge without one (`JudgeManager.java:289-293`).
+    pub fn set_autoplay(&mut self, autoplay: bool) {
+        self.autoplay = autoplay;
+    }
+
+    /// Let the selected gauge move as the run is judged, and end the run the instant it empties
+    /// under a mode that does not rescue it (`BMSPlayer.java:638-672`). The shift is taken after
+    /// every instant that changed a gauge and at the end of every [`update`](Self::update), not once
+    /// per frame, so where it lands does not depend on the frame rate either. An engine never given
+    /// one never shifts and never fails.
+    pub fn set_gauge_shift(&mut self, shift: GaugeShift) {
+        self.gauge_shift = Some(shift);
+    }
+
+    /// Whether the selected gauge emptied under a shift mode that does not rescue the run. A failed
+    /// engine takes no more input and settles no more time.
+    pub fn failed(&self) -> bool {
+        self.failed_at_us.is_some()
+    }
+
+    /// The instant the run failed at, on the clock the engine is driven on.
+    pub fn failed_at_us(&self) -> Option<i64> {
+        self.failed_at_us
+    }
+
+    /// The instant the clock has been settled up to ([`update`](Self::update)), or `i64::MIN`
+    /// before anything has moved it.
+    pub fn settled_us(&self) -> i64 {
+        self.settled_us
+    }
+
     pub fn total_notes(&self) -> u32 {
         self.total_notes
     }
@@ -548,27 +661,27 @@ impl JudgeEngine {
     }
 
     pub fn clear_lamp(&self) -> ClearType {
-        clear_lamp(self.gauge.selected(), &self.counts, self.max_combo, self.total_notes)
+        clear_lamp(self.gauge.selected(), &self.counts, self.stage_combo, self.pass_notes, self.total_notes)
     }
 
     /// Every judged object of the chart with the state and play time the run left on it, lane by
     /// lane in chart order. See [`NoteMark`].
     pub fn note_marks(&self) -> impl Iterator<Item = NoteMark> + '_ {
-        self.lanes.iter().enumerate().flat_map(|(lane, l)| {
-            l.notes.iter().flat_map(move |note| {
-                let charge = is_charge(note.ln);
-                let head = NoteMark { lane, time_us: note.head_us, long_end: false, charge, state: note.head_state, play_time_us: note.head_play_time_us };
-                let end = note.end_us.map(|end_us| NoteMark {
-                    lane,
-                    time_us: end_us,
-                    long_end: true,
-                    charge,
-                    state: note.end_state,
-                    play_time_us: note.end_play_time_us,
-                });
-                std::iter::once(head).chain(end)
-            })
-        })
+        self.lanes.iter().enumerate().flat_map(|(lane, l)| l.notes.iter().flat_map(move |note| marks_of(lane, note)))
+    }
+
+    /// The marks of one note, its head's and then its end's, as [`JudgeEngine::note_marks`] gives
+    /// them; nothing for a note the chart does not have.
+    pub fn note_marks_at(&self, at: NoteAt) -> impl Iterator<Item = NoteMark> + '_ {
+        self.lanes.get(at.lane).and_then(|lane| lane.notes.get(at.index)).into_iter().flat_map(move |note| marks_of(at.lane, note))
+    }
+
+    /// Every note whose marks may have changed since the engine was built, oldest first, named
+    /// once for each time something reached it: every judgment counted or not, and every note a
+    /// long note mode gave a flavour to. A screen that keeps a copy of [`JudgeEngine::note_marks`]
+    /// takes in the notes past the ones it has read rather than walking the whole chart again.
+    pub fn touched(&self) -> &[NoteAt] {
+        &self.touched
     }
 
     /// Every judgment the run has counted, in the order it counted them. See [`JudgedNote`].
@@ -591,7 +704,20 @@ impl JudgeEngine {
     /// Press a lane from one physical direction. On a scratch lane holding a charge note, spinning
     /// the other way ends it — the back-spin scratch of `JudgeManager.java:358-372` — while the
     /// same way is a re-grab that cancels a deferred release (`:373-375`).
+    ///
+    /// The clock is settled up to `press_us` first, so whatever fell due at or before that instant
+    /// has been judged by the time the press is. A failed run takes no press.
     pub fn press_dir(&mut self, lane: usize, dir: ScratchDir, press_us: i64) -> Option<JudgeResult> {
+        self.update(press_us);
+        if self.failed() {
+            return None;
+        }
+        let result = self.press_at(lane, dir, press_us);
+        self.shift_gauge(press_us);
+        result
+    }
+
+    fn press_at(&mut self, lane: usize, dir: ScratchDir, press_us: i64) -> Option<JudgeResult> {
         if let Some(h) = self.held.get_mut(lane) {
             *h = true;
         }
@@ -701,11 +827,13 @@ impl JudgeEngine {
             let note = &self.lanes[lane].notes[idx];
             (note.end_us.is_some(), is_charge(note.ln))
         };
+        let mut counted = true;
         if long {
             if vanish {
                 self.start_hold(lane, idx, dir, judge, delta_us);
             }
-            if charge || !vanish {
+            counted = charge || !vanish;
+            if counted {
                 self.update_micro(lane, idx, judge, delta_us, false, vanish);
             }
         } else {
@@ -714,7 +842,83 @@ impl JudgeEngine {
             }
             self.update_micro(lane, idx, judge, delta_us, false, vanish);
         }
-        Some(JudgeResult { judge, lane, note_index: idx, fast: delta_us >= 0, delta_us })
+        Some(JudgeResult { judge, lane, note_index: idx, fast: delta_us >= 0, delta_us, counted })
+    }
+
+    /// The autoplay hit on the note whose head sits at `at_us` (`JudgeManager.java:251-271`). The
+    /// reference does not press a key for it: it judges the note PGREAT on the spot, so the lane's
+    /// key state is left alone and a mine in that lane, which damages only a key that is down
+    /// (`JudgeManager.java:244`), costs nothing.
+    ///
+    /// A normal note is judged whatever else the lane holds. A long note is taken only by a lane
+    /// holding none (`:259`): a plain one starts its hold and is judged when it ends, a charge or
+    /// hell-charge note is judged at its head as well. A head that is not there, or was judged
+    /// already, answers `None`. Like a press, it settles the clock up to `at_us` first.
+    pub fn auto_press(&mut self, lane: usize, at_us: i64) -> Option<JudgeResult> {
+        self.update(at_us);
+        if self.failed() {
+            return None;
+        }
+        let result = self.auto_press_at(lane, at_us);
+        self.shift_gauge(at_us);
+        result
+    }
+
+    fn auto_press_at(&mut self, lane: usize, at_us: i64) -> Option<JudgeResult> {
+        let lane_notes = self.lanes.get(lane)?;
+        let idx = (lane_notes.cursor..lane_notes.notes.len())
+            .take_while(|&i| lane_notes.notes[i].head_us <= at_us)
+            .find(|&i| lane_notes.notes[i].head_us == at_us && !lane_notes.notes[i].judged && !lane_notes.notes[i].holding)?;
+        let (long, charge) = {
+            let note = &self.lanes[lane].notes[idx];
+            (note.end_us.is_some(), is_charge(note.ln))
+        };
+        let mut counted = true;
+        if long {
+            if self.holds[lane].note.is_some() {
+                return None;
+            }
+            self.start_hold(lane, idx, ScratchDir::Forward, Judge::PerfectGreat, AUTOPLAY_DELTA_US);
+            counted = charge;
+        } else {
+            self.lanes[lane].notes[idx].judged = true;
+        }
+        if counted {
+            self.update_micro(lane, idx, Judge::PerfectGreat, AUTOPLAY_DELTA_US, false, CONSUMES_THE_NOTE);
+        }
+        Some(JudgeResult { judge: Judge::PerfectGreat, lane, note_index: idx, fast: true, delta_us: AUTOPLAY_DELTA_US, counted })
+    }
+
+    /// The autoplay end of the long note whose end sits at `at_us` (`JudgeManager.java:272-283`).
+    /// A charge or hell-charge note is judged PGREAT on the spot, whichever way a scratch lane would
+    /// have had to spin to end it by hand: the back-spin rule belongs to a key that is pressed, and
+    /// autoplay presses none. A plain long note ends with the judgment its head took. A lane that
+    /// holds some other note, or none, answers `None`. It settles the clock up to `at_us` first.
+    pub fn auto_release(&mut self, lane: usize, at_us: i64) -> Option<JudgeResult> {
+        self.update(at_us);
+        if self.failed() {
+            return None;
+        }
+        let result = self.auto_release_at(lane, at_us);
+        self.shift_gauge(at_us);
+        result
+    }
+
+    fn auto_release_at(&mut self, lane: usize, at_us: i64) -> Option<JudgeResult> {
+        let idx = self.holds.get(lane)?.note?;
+        let (charge, end_us) = {
+            let note = &self.lanes[lane].notes[idx];
+            (is_charge(note.ln), note.end_us)
+        };
+        if end_us != Some(at_us) {
+            return None;
+        }
+        let (judge, delta_us) = if charge {
+            (Judge::PerfectGreat, AUTOPLAY_DELTA_US)
+        } else {
+            (self.holds[lane].start_judge.unwrap_or(Judge::PerfectGreat), self.holds[lane].start_delta_us)
+        };
+        Some(self.confirm_hold(lane, idx, judge, delta_us, charge))
     }
 
     /// Take a long note under this lane's control (`JudgeManager.java:428-437, 444-451`), which
@@ -739,8 +943,19 @@ impl JudgeEngine {
     /// mid-spin release from the direction that grabbed it and only from outside the end window
     /// (`JudgeManager.java:501-508`); a plain long note drops the second condition (`:526-532`).
     /// A release that came early and would only be a BAD is deferred rather than confirmed
-    /// (`:509-512`), so re-grabbing inside the margin rescues it.
+    /// (`:509-512`), so re-grabbing inside the margin rescues it. Like a press, a release settles
+    /// the clock up to its own instant first, and a failed run takes none.
     pub fn release_dir(&mut self, lane: usize, dir: ScratchDir, release_us: i64) -> Option<JudgeResult> {
+        self.update(release_us);
+        if self.failed() {
+            return None;
+        }
+        let result = self.release_at(lane, dir, release_us);
+        self.shift_gauge(release_us);
+        result
+    }
+
+    fn release_at(&mut self, lane: usize, dir: ScratchDir, release_us: i64) -> Option<JudgeResult> {
         if let Some(h) = self.held.get_mut(lane) {
             *h = false;
         }
@@ -793,7 +1008,7 @@ impl JudgeEngine {
     fn confirm_hold(&mut self, lane: usize, idx: usize, judge: Judge, delta_us: i64, on_end: bool) -> JudgeResult {
         self.finish_hold(lane, idx, judge, on_end);
         self.update_micro(lane, idx, judge, delta_us, on_end, CONSUMES_THE_NOTE);
-        JudgeResult { judge, lane, note_index: idx, fast: delta_us >= 0, delta_us }
+        JudgeResult { judge, lane, note_index: idx, fast: delta_us >= 0, delta_us, counted: true }
     }
 
     fn finish_hold(&mut self, lane: usize, idx: usize, judge: Judge, on_end: bool) {
@@ -806,21 +1021,116 @@ impl JudgeEngine {
         self.holds[lane].clear();
     }
 
-    /// Sweep notes that can no longer be hit (now past their latest BAD-late bound) into
-    /// 見逃し POOR, confirm deferred and over-held long notes, pay out hell-charge gauge ticks and
-    /// charge mine damage to lanes whose key is down.
+    /// Settle the clock up to `now_us`: sweep notes that can no longer be hit (now past their latest
+    /// BAD-late bound) into 見逃し POOR, confirm deferred and over-held long notes, pay out
+    /// hell-charge gauge ticks and charge mine damage to lanes whose key is down.
+    ///
+    /// Each of these is made at the instant it falls due, in the order they fall due, with the
+    /// state of the keys as it stood then, so one call to a far instant leaves the engine exactly
+    /// where any number of calls to the instants on the way would. A clock already settled past
+    /// `now_us` is left where it is, and a failed run settles nothing more.
     pub fn update(&mut self, now_us: i64) {
-        self.sweep_mines(now_us);
-        self.tick_hell_charges(now_us);
+        while !self.failed()
+            && let Some(at_us) = self.next_due_us(now_us)
+        {
+            self.settle_at(at_us);
+        }
+        if !self.failed() && now_us > self.settled_us {
+            self.run_hell_charges(now_us);
+            self.settled_us = now_us;
+        }
+        self.shift_gauge(now_us);
+    }
+
+    /// Everything that falls due at `at_us`, the next instant something does: the hell-charge
+    /// balances run up to it, then the mines it reaches, the hell-charge notes it enters or leaves,
+    /// and the long notes and misses it settles.
+    fn settle_at(&mut self, at_us: i64) {
+        self.run_hell_charges(at_us);
+        self.sweep_mines(at_us);
+        for lane in 0..self.lanes.len() {
+            self.advance_passing(lane, at_us);
+        }
         let mut events: Vec<SweepEvent> = Vec::new();
         for lane in 0..self.lanes.len() {
-            self.confirm_deferred(lane, now_us, &mut events);
-            self.sweep_lane(lane, now_us, &mut events);
+            self.confirm_deferred(lane, at_us, &mut events);
+            self.sweep_lane(lane, at_us, &mut events);
         }
         for e in events {
             self.update_micro(e.lane, e.note, e.judge, e.delta_us, e.on_end, CONSUMES_THE_NOTE);
         }
-        self.prev_update_us = now_us;
+        self.settled_us = at_us;
+        self.shift_gauge(at_us);
+    }
+
+    /// The first instant, no earlier than the settled clock and no later than `limit_us`, at which
+    /// something falls due: a mine, a hell-charge note's head or end, a hell-charge tick, a deferred
+    /// release outlasting its margin, a plain long note held past its end, or a note going past its
+    /// last chance to be hit.
+    ///
+    /// Something an input made due at the instant it landed — a release deferred by a margin of
+    /// nothing — falls due at that same instant, after the input, as the reference confirms it in
+    /// the frame that took the release. Every one of these is used up by
+    /// [`settle_at`](Self::settle_at), so settling an instant twice cannot find it due again.
+    fn next_due_us(&self, limit_us: i64) -> Option<i64> {
+        let earliest_us = self.settled_us;
+        let mut next: Option<i64> = None;
+        let mut consider = |due_us: i64| {
+            let due_us = due_us.max(earliest_us);
+            if due_us <= limit_us && next.is_none_or(|next_us| due_us < next_us) {
+                next = Some(due_us);
+            }
+        };
+        for lane in 0..self.lanes.len() {
+            if let Some(mine) = self.mines[lane].get(self.mine_cursor[lane]) {
+                consider(mine.time_us);
+            }
+            let notes = &self.lanes[lane];
+            if let Some(note) = notes.notes.get(notes.hcn_cursor) {
+                match (self.holds[lane].passing == Some(notes.hcn_cursor), note.end_us) {
+                    (true, Some(end_us)) => consider(end_us),
+                    _ => consider(note.head_us),
+                }
+            }
+            if let Some(direction) = self.hell_charge_direction(lane) {
+                let balance_us = self.holds[lane].passing_us;
+                let to_tick_us = if direction { HCN_GAUGE_TICK_US - balance_us } else { balance_us + HCN_GAUGE_TICK_US };
+                consider(self.settled_us.saturating_add(to_tick_us).saturating_add(1));
+            }
+            if let Some(idx) = self.holds[lane].note
+                && let Some(note) = notes.notes.get(idx)
+                && let Some(end_us) = note.end_us
+            {
+                if let Some(release_us) = self.holds[lane].release_us {
+                    consider(release_us.saturating_add(self.ln_margin(lane)));
+                }
+                if !is_charge(note.ln) {
+                    consider(end_us.saturating_add(1));
+                }
+            }
+            let miss_bound = self.note_window(lane).bd.0;
+            if let Some(note) = notes.notes.get(notes.cursor..).and_then(|ahead| ahead.iter().find(|note| !note.judged)) {
+                match (note.holding, note.end_us) {
+                    (false, _) => consider(note.head_us.saturating_sub(miss_bound).saturating_add(1)),
+                    (true, Some(end_us)) if is_charge(note.ln) => consider(end_us.saturating_sub(miss_bound).saturating_add(1)),
+                    (true, _) => {}
+                }
+            }
+        }
+        next
+    }
+
+    /// Take the auto-shift of the selected gauge at `at_us`, and fail the run there when it says so.
+    fn shift_gauge(&mut self, at_us: i64) {
+        if self.failed() {
+            return;
+        }
+        let Some(shift) = self.gauge_shift else {
+            return;
+        };
+        if self.gauge.auto_shift(shift.mode, shift.configured, shift.bottom) == GaugeShiftOutcome::Failed {
+            self.failed_at_us = Some(at_us);
+        }
     }
 
     fn sweep_mines(&mut self, now_us: i64) {
@@ -835,35 +1145,43 @@ impl JudgeEngine {
         }
     }
 
-    /// Hell-charge gauge ticks (`JudgeManager.java:305-336`). A note the play head is inside pays
-    /// out half a GREAT every 200 ms while it is held (or while its end already took a GOOD or
-    /// better) and half a BAD every 200 ms while it is not. At most one tick per frame, exactly as
-    /// the reference's single `if` allows. Counts, combo and EX score are untouched.
-    fn tick_hell_charges(&mut self, now_us: i64) {
-        let step_us = now_us - self.prev_update_us;
+    /// Whether the hell-charge note the play head is inside on `lane` is gaining gauge right now
+    /// (`true`) or draining it (`false`), or `None` when it pays nothing out: the lane is inside
+    /// none, or inside one nothing has judged yet (`JudgeManager.java:289-293, 300`). It gains while
+    /// the run plays itself, while the lane's key is down, or once its end took a GOOD or better.
+    fn hell_charge_direction(&self, lane: usize) -> Option<bool> {
+        let note = self.lanes[lane].notes.get(self.holds[lane].passing?)?;
+        if !(note.judged || note.holding) {
+            return None;
+        }
+        let held = self.held.get(lane).copied().unwrap_or(false);
+        Some(self.autoplay || held || matches!(note.end_judge, Some(j) if (j as usize) <= HCN_HELD_END_CODE))
+    }
+
+    /// Hell-charge gauge ticks (`JudgeManager.java:305-336`), from the settled clock up to `to_us`.
+    /// A note the play head is inside pays out half a GREAT for every 200 ms it is held (or after
+    /// its end already took a GOOD or better) and half a BAD for every 200 ms it is not. Counts,
+    /// combo and EX score are untouched.
+    ///
+    /// The balance runs on the time that went by, not on frames: [`update`](Self::update) stops at
+    /// every instant a tick falls due and at every instant the note or the key changes, so the
+    /// ticks are the same however the time was cut up. The reference pays at most one per frame.
+    fn run_hell_charges(&mut self, to_us: i64) {
         for lane in 0..self.lanes.len() {
-            self.advance_passing(lane, now_us);
-            let Some(idx) = self.holds[lane].passing else {
+            let Some(increasing) = self.hell_charge_direction(lane) else {
                 continue;
             };
-            let (started, end_judge) = {
-                let note = &self.lanes[lane].notes[idx];
-                (note.judged || note.holding, note.end_judge)
-            };
-            if !started {
-                continue;
-            }
-            let increasing = self.held.get(lane).copied().unwrap_or(false) || matches!(end_judge, Some(j) if (j as usize) <= HCN_HELD_END_CODE);
+            let step_us = to_us.saturating_sub(self.settled_us);
             self.holds[lane].increasing = increasing;
             if increasing {
                 self.holds[lane].passing_us += step_us;
-                if self.holds[lane].passing_us > HCN_GAUGE_TICK_US {
+                while self.holds[lane].passing_us > HCN_GAUGE_TICK_US {
                     self.gauge.update_with_rate(Judge::Great, HCN_GAUGE_TICK_RATE);
                     self.holds[lane].passing_us -= HCN_GAUGE_TICK_US;
                 }
             } else {
                 self.holds[lane].passing_us -= step_us;
-                if self.holds[lane].passing_us < -HCN_GAUGE_TICK_US {
+                while self.holds[lane].passing_us < -HCN_GAUGE_TICK_US {
                     self.gauge.update_with_rate(Judge::Bad, HCN_GAUGE_TICK_RATE);
                     self.holds[lane].passing_us += HCN_GAUGE_TICK_US;
                 }
@@ -977,6 +1295,7 @@ impl JudgeEngine {
     /// a note that already survived a judgment is consumed but not counted, which is what stops a
     /// pop'n BAD from tallying twice.
     fn update_micro(&mut self, lane: usize, idx: usize, judge: Judge, delta_us: i64, on_end: bool, vanish: bool) {
+        self.touched.push(NoteAt { lane, index: idx });
         let note = &mut self.lanes[lane].notes[idx];
         if vanish {
             self.pass_notes += 1;
@@ -1011,13 +1330,16 @@ impl JudgeEngine {
         }
         if self.prop.combo[i] && i < 5 {
             self.combo += 1;
+            self.stage_combo += 1;
         }
         if !self.prop.combo[i] {
             self.combo = 0;
+            self.stage_combo = 0;
         }
         self.gauge.update(judge);
         self.last_judge = Some(judge);
         self.max_combo = self.max_combo.max(self.combo);
+        self.stage_max_combo = self.stage_max_combo.max(self.stage_combo);
         self.empty_poor = self.counts[5];
     }
 
@@ -1046,8 +1368,12 @@ impl JudgeEngine {
         }
     }
 
-    /// Mean signed hit timing (µs) over actual hits — reference implementation `IRScoreData.avgjudge`. Positive =
-    /// early on average. Zero when nothing was timed.
+    /// Mean signed hit timing (µs) over actual hits: how far early (positive) or late the run leaned.
+    /// Zero when nothing was timed.
+    ///
+    /// Not the reference's `ScoreData.avgjudge`, which is the mean distance of every note from its
+    /// input with a note never hit counted at a second (`BMSPlayer.java:911-929`); the play crate
+    /// works that one out from the notes' marks (`rbms_play::PlayRecord::avg_duration_us`).
     pub fn avg_judge_us(&self) -> i64 {
         if self.timing_count == 0 { 0 } else { self.sum_delta_us / self.timing_count as i64 }
     }
@@ -1067,6 +1393,10 @@ const REMARK_SLACK_US: i64 = 100_000;
 /// long-note end, a deferred release, a 見逃し POOR sweep (`JudgeManager.java:517, 567, 573, 583,
 /// 596-618` all pass a literal `true`).
 const CONSUMES_THE_NOTE: bool = true;
+
+/// The timing error autoplay judges every note with: it hits each one dead on (`JudgeManager.java:256,
+/// 268, 280` pass a `mfast` of 0).
+const AUTOPLAY_DELTA_US: i64 = 0;
 
 /// Stock long-note margin rate (percent) — reference implementation `PlayerConfig.longnoteMarginRate` default.
 const DEFAULT_LONGNOTE_MARGIN_RATE: i32 = 100;
@@ -1190,8 +1520,10 @@ mod algorithm_selection_tests {
         assert_eq!(gate_late, JudgeProperty::SEVENKEYS.scratch.bd.0, "the scratch table widens the shared gate past the key table's own bands");
         let press_us = 1_000_000 + JudgeProperty::SEVENKEYS.note.bd.0.abs() + 5_000;
         assert!(1_000_000 - press_us > gate_late, "the press is still inside the shared candidate gate");
+        e.update(press_us);
+        let let_pass = e.counts;
         assert!(e.press(0, press_us).is_none(), "judge code 6: inside the gate, outside every window of this lane's table");
-        assert_eq!(e.counts, [0; 6], "a cancelled press tallies nothing at all");
+        assert_eq!(e.counts, let_pass, "a cancelled press tallies nothing at all");
     }
 
     #[test]

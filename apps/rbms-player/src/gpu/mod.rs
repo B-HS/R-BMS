@@ -24,9 +24,10 @@ pub(crate) use background::background_upload_needed;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use batch::{Batch, BatchKind, ColoredInstance, DistanceFieldInstance, DrawList, TexturedInstance, pad_rows_to_alignment, scissor_rect};
+use batch::{Batch, BatchKind, ColoredInstance, DistanceFieldInstance, DrawList, TexturedInstance, scissor_rect, whole_image};
 use rbms_render::{
-    BlendFactor, BlendMode, Color, DISTANCE_FIELD_EDGE, DISTANCE_FIELD_SMOOTHING, DistanceFieldParams, QuadParams, Rect, Renderer, TextureFilter, TextureId,
+    BlendFactor, BlendMode, Color, DISTANCE_FIELD_EDGE, DISTANCE_FIELD_SMOOTHING, DistanceFieldParams, QuadParams, Rect, Renderer, TexelRect, TextureFilter,
+    TextureId,
 };
 use winit::window::Window;
 
@@ -911,17 +912,25 @@ impl Gpu {
         rp.draw(0..6, entry.first..entry.first + entry.count);
     }
 
-    /// Hand `rgba` to the GPU under an existing handle, padding rows to the copy alignment.
+    /// Hand `rgba` to the GPU under an existing handle, all of it.
     fn upload(&self, texture: &wgpu::Texture, rgba: &[u8], width: u32, height: u32) {
         if width == 0 || height == 0 {
             return;
         }
-        let (data, bytes_per_row) = pad_rows_to_alignment(rgba, width, height);
+        self.write_region(texture, &whole_image(rgba, width, height), width, TexelRect { x: 0, y: 0, width, height });
+    }
+
+    /// Hand the GPU `region` of `rgba`, an image `width` pixels across with its rows packed tight,
+    /// into the same region of `texture`. The queue reads the rows straight out of `rgba`: nothing
+    /// outside the region is copied.
+    fn write_region(&self, texture: &wgpu::Texture, rgba: &[u8], width: u32, region: TexelRect) {
+        let bytes_per_row = width * batch::BYTES_PER_PIXEL;
+        let offset = u64::from(region.y) * u64::from(bytes_per_row) + u64::from(region.x * batch::BYTES_PER_PIXEL);
         self.queue.write_texture(
-            wgpu::TexelCopyTextureInfo { texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
-            &data,
-            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(bytes_per_row), rows_per_image: Some(height) },
-            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            wgpu::TexelCopyTextureInfo { texture, mip_level: 0, origin: wgpu::Origin3d { x: region.x, y: region.y, z: 0 }, aspect: wgpu::TextureAspect::All },
+            rgba,
+            wgpu::TexelCopyBufferLayout { offset, bytes_per_row: Some(bytes_per_row), rows_per_image: None },
+            wgpu::Extent3d { width: region.width, height: region.height, depth_or_array_layers: 1 },
         );
     }
 
@@ -1054,6 +1063,18 @@ impl Renderer for Gpu {
                 id
             }
         }
+    }
+
+    fn update_texture(&mut self, tex: TextureId, rgba: &[u8], region: TexelRect) -> bool {
+        let Some(Some(existing)) = self.textures.get(tex.0 as usize) else {
+            return false;
+        };
+        let whole = (existing.width as usize) * (existing.height as usize) * batch::BYTES_PER_PIXEL as usize;
+        if !region.fits((existing.width, existing.height)) || rgba.len() != whole {
+            return false;
+        }
+        self.write_region(&existing.texture, rgba, existing.width, region);
+        true
     }
 
     fn release_texture(&mut self, tex: TextureId) {

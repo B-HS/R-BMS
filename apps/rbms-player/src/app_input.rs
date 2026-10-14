@@ -255,6 +255,11 @@ impl AppShared {
         }
     }
 
+    /// Every key the window reported as down and has not reported released.
+    pub(crate) fn held_key_codes(&self) -> Vec<KeyCode> {
+        self.keyconfig.held.iter().collect()
+    }
+
     /// Let go of every key and mouse button the window reported as down.
     ///
     /// A window that loses focus is not told about what is released while it is away, so anything
@@ -353,11 +358,12 @@ impl AppShared {
         self.pad.as_mut().and_then(crate::gamepad::PadState::take_turn)
     }
 
-    /// One frame of controller input, or nothing when there is no controller.
+    /// Everything the controller did since the last frame, each with the instant it happened at,
+    /// or nothing when there is no controller.
     ///
     /// The two fields are taken apart rather than reached through `self`, because the poll needs
     /// the controller mutably and its bindings immutably at the same time.
-    pub(crate) fn poll_pad(&mut self) -> Vec<PadEvent> {
+    pub(crate) fn poll_pad(&mut self) -> Vec<(PadEvent, Instant)> {
         let AppShared { pad, keyconfig, mode, .. } = self;
         let Some(pad) = pad.as_mut() else {
             return Vec::new();
@@ -526,10 +532,13 @@ impl AppShared {
     /// The live [`AccountSession`] — not the configuration — owns the credential while the app
     /// runs, so it is folded back in here on the way to disk. Every other value the settings
     /// screen edits is already in `config`.
+    ///
+    /// The file is written on the save thread ([`crate::save_worker`]), so a save never stalls the
+    /// frame it was asked for on.
     pub(crate) fn save_settings(&mut self) {
         self.config.network.ir_token = self.session.token().map(str::to_string);
         self.config.network.ir_login_id = self.session.login_id().map(str::to_string);
-        save_config(&self.settings_to_save(), &self.settings_path);
+        self.saves.save_settings(self.settings_to_save().into_owned(), self.settings_path.clone());
     }
 
     /// Load a chosen UI font (TTF/OTF/TTC) live as the preferred family, and persist the path so it

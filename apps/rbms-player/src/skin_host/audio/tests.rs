@@ -111,7 +111,7 @@ impl EffectOutput for MixerOutput {
     }
 
     fn insert_decoded(&mut self, id: u32, audio: DecodedAudio) {
-        self.bank.insert(id, Arc::new(SampleData { pcm: audio.samples.into(), channels: audio.channels, rate: audio.rate }));
+        self.bank.insert(id, Arc::new(SampleData { pcm: audio.samples, channels: audio.channels, rate: audio.rate }));
     }
 
     fn play_effect(&mut self, id: u32, gain: f32, looped: bool) {
@@ -149,6 +149,22 @@ fn wait_until(sounds: &mut SkinSounds, out: &mut MixerOutput, what: &str, done: 
             return;
         }
         assert!(started.elapsed() < WAIT_LIMIT, "gave up waiting until {what}");
+        std::thread::sleep(WAIT_STEP);
+    }
+}
+
+/// Settles the sounds a frame at a time until what the message queue has said about files under
+/// `dir`, gathered over every frame, holds `heard`, and answers it. Panics when it never does.
+fn wait_to_be_told(sounds: &mut SkinSounds, out: &mut MixerOutput, dir: &Path, what: &str, heard: impl Fn(&[(Level, String)]) -> bool) -> Vec<(Level, String)> {
+    let started = Instant::now();
+    let mut told = Vec::new();
+    loop {
+        sounds.settle(out);
+        told.extend(told_about(dir));
+        if heard(&told) {
+            return told;
+        }
+        assert!(started.elapsed() < WAIT_LIMIT, "gave up waiting until {what}: {told:?}");
         std::thread::sleep(WAIT_STEP);
     }
 }
@@ -397,11 +413,11 @@ fn a_link_inside_the_skin_folder_that_leads_outside_it_is_refused_by_the_decoder
         let (mut sounds, mut out) = (SkinSounds::default(), MixerOutput::new(FULL_VOLUME));
 
         sounds.request(&mut out, &[skin], play(&link, FULL_VOLUME, false));
-        let_the_worker_finish(&mut sounds, &mut out);
+        wait_to_be_told(&mut sounds, &mut out, &dir, "the decoder refuses the link", |told| {
+            told.iter().any(|(level, message)| *level == Level::Warn && message.contains("outside the skin folder"))
+        });
         assert_eq!(out.voices(), 0);
         assert!(out.bank.is_empty(), "a file outside the folder must never reach the bank");
-        let told = told_about(&dir);
-        assert!(told.iter().any(|(level, message)| *level == Level::Warn && message.contains("outside the skin folder")), "got {told:?}");
     });
 }
 
@@ -414,14 +430,7 @@ fn a_file_that_is_not_there_is_reported_once_and_not_asked_for_again_until_it_is
         let (mut sounds, mut out) = (SkinSounds::default(), MixerOutput::new(FULL_VOLUME));
 
         sounds.request(&mut out, &roots, play(&wav, FULL_VOLUME, false));
-        let started = Instant::now();
-        let mut told = Vec::new();
-        while told.is_empty() {
-            sounds.settle(&mut out);
-            told = told_about(&dir);
-            assert!(started.elapsed() < WAIT_LIMIT, "the failure was never reported");
-            std::thread::sleep(WAIT_STEP);
-        }
+        let told = wait_to_be_told(&mut sounds, &mut out, &dir, "the failure is reported", |told| !told.is_empty());
         assert_eq!(told.len(), 1);
         assert!(told[0].1.contains("no such file"), "got {:?}", told[0]);
 

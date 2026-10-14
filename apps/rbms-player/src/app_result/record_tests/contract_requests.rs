@@ -511,8 +511,8 @@ fn a_run_left_mid_song() {
     assert!(summary.total_judged > 0 && summary.total_judged < summary.total_notes, "the fixture run is left part-way: {summary:?}");
     leave_by_escape(&mut shared, session);
     assert!(shared.submit_rx.is_none(), "a result screen sent the run");
-    let score = server.next("POST", "/scores");
     sync_finished(&mut shared);
+    let score = server.next("POST", "/scores");
     check_contract("score-abandoned", &score.body);
 }
 
@@ -534,8 +534,8 @@ fn a_run_the_records_sync_rebuilds_from_its_row() {
     let old = PlayLog { id: 0, ..log };
     shared.scoredb.as_mut().expect("the score database").record_play(&old, true).expect("the row writes without a body");
     assert!(shared.start_record_sync(crate::record_sync::SyncScope::All), "a sync started");
-    let score = server.next("POST", "/scores");
     sync_finished(&mut shared);
+    let score = server.next("POST", "/scores");
     check_contract("score-sync-resend", &score.body);
 }
 
@@ -554,7 +554,7 @@ fn an_autoplay_run() {
     shared.replay = None;
     let summary = session.summary();
     let ended = PlayState::new(session, std::collections::HashMap::new(), 0, SCORE_LN_MODE_FROM_CHART.to_owned());
-    let recorded = crate::app_result::record_run(&ended, &mut shared, &summary);
+    let recorded = crate::app_result::record_run(&ended, &mut shared, &summary, ended.session.record().avg_duration_us);
     assert_eq!(recorded.block_reason, Some("autoplay"), "an autoplay run is held back");
     let mut sub = recorded.sub;
     assert!(sub.options.autoplay);

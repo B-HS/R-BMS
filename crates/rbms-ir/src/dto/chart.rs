@@ -56,7 +56,12 @@ pub enum RandomOption {
 
 /// Per-judge tally. The `pgreat`..`miss` totals are the basic IR fields; `fast`/`slow`/`combobreak`
 /// and the `e*`/`l*` early/late split (the reference implementation's `IRScoreData` 12 fields, `epg`..`lms`), plus
-/// `avgjudge` (mean signed timing, µs) and rbms-only `empty_poor`, are the superset extras. The
+/// `avgjudge` and rbms-only `empty_poor`, are the superset extras. `avgjudge` is the reference's
+/// (`IRScoreData.avgjudge`, `BMSPlayer.java:911-930`): the mean distance of every note from its
+/// input in µs, a note never hit counting a second, so it is never negative and smaller is more
+/// accurate. A submission whose `extra` names no rule version
+/// ([`crate::dto::score::RULE_VERSION_EXTRA_KEY`]) predates that and sent the mean signed offset of
+/// its hits here. The
 /// split is additive: `epg + lpg == pgreat`, etc. Every superset field has a serde default so older
 /// (split-less) submissions still decode.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

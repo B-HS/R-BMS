@@ -19,7 +19,7 @@ use crate::skin_render::graphs::PlayCursor;
 use crate::skin_render::{
     BpmTimeline, FrameData, FrameSeries, GaugeFrame, GaugeHistory, NoteDistribution, SkinFrame, SkinObjectKind, SkinScreen, TimingHistogram,
 };
-use crate::{Color, CpuCanvas, QuadParams, Rect, Renderer, TextureId};
+use crate::{Color, CpuCanvas, QuadParams, Rect, Renderer, TexelRect, TextureId};
 
 pub(super) const CANVAS_W: u32 = 200;
 pub(super) const CANVAS_H: u32 = 160;
@@ -41,6 +41,9 @@ const BPM_H: u32 = 30;
 const FOOT: u32 = CANVAS_H - JUDGE_Y;
 
 const SECONDS: usize = 12;
+
+/// Pixels a second of the judgement graph takes across.
+const PITCH_PIXELS: u32 = 5;
 
 const WHITE: Color = Color::rgb(255, 255, 255);
 
@@ -87,12 +90,20 @@ impl Rig {
 
     /// Draws one frame at `now_ms` over a cleared canvas and answers how many objects reached it.
     fn draw(&mut self, series: FrameSeries<'_>, now_ms: i64) -> usize {
+        let mut canvas = std::mem::replace(&mut self.canvas, CpuCanvas::new(0, 0));
+        let reached = self.draw_on(&mut canvas, series, now_ms);
+        self.canvas = canvas;
+        reached
+    }
+
+    /// The same, on a renderer of the test's own.
+    fn draw_on<R: Renderer>(&mut self, r: &mut R, series: FrameSeries<'_>, now_ms: i64) -> usize {
         let state = Nothing;
         let data = FrameData { series, ..FrameData::default() };
         let frame = SkinFrame { now_us: now_ms * MICROS_PER_MILLI, timers: &self.timers, state: &state, lua: None, mouse: None, data };
-        self.canvas.clear(Color::BLACK);
+        r.clear(Color::BLACK);
         let mut ctx = RenderCtx::new(crate::theme::theme(), &mut self.text);
-        self.screen.draw(&mut ctx, &mut self.canvas, &frame)
+        self.screen.draw(&mut ctx, r, &frame)
     }
 
     /// The pixel `(x, row)` of the judgement graph's texture, `row` counted up from its foot.
@@ -181,6 +192,75 @@ impl Renderer for Counting {
         self.limit
     }
 }
+
+/// Records what a renderer is handed to hold: each image registered whole, by its size, and each
+/// region of a texture written again.
+struct Uploads {
+    inner: CpuCanvas,
+    whole: Vec<(u32, u32)>,
+    parts: Vec<TexelRect>,
+}
+
+impl Uploads {
+    fn new() -> Uploads {
+        Uploads { inner: CpuCanvas::new(CANVAS_W, CANVAS_H), whole: Vec::new(), parts: Vec::new() }
+    }
+
+    fn forget(&mut self) {
+        self.whole.clear();
+        self.parts.clear();
+    }
+}
+
+impl Renderer for Uploads {
+    fn size(&self) -> (u32, u32) {
+        self.inner.size()
+    }
+
+    fn clear(&mut self, color: Color) {
+        self.inner.clear(color);
+    }
+
+    fn fill_rect(&mut self, rect: Rect, color: Color) {
+        self.inner.fill_rect(rect, color);
+    }
+
+    fn register_texture(&mut self, key: &str, rgba: &[u8], width: u32, height: u32) -> TextureId {
+        self.whole.push((width, height));
+        self.inner.register_texture(key, rgba, width, height)
+    }
+
+    fn update_texture(&mut self, tex: TextureId, rgba: &[u8], region: TexelRect) -> bool {
+        let written = self.inner.update_texture(tex, rgba, region);
+        if written {
+            self.parts.push(region);
+        }
+        written
+    }
+
+    fn release_texture(&mut self, tex: TextureId) {
+        self.inner.release_texture(tex);
+    }
+
+    fn texture_size(&self, tex: TextureId) -> Option<(u32, u32)> {
+        self.inner.texture_size(tex)
+    }
+
+    fn draw_textured_quad(&mut self, tex: TextureId, params: QuadParams) {
+        self.inner.draw_textured_quad(tex, params);
+    }
+
+    fn push_clip(&mut self, rect: Rect) {
+        self.inner.push_clip(rect);
+    }
+
+    fn pop_clip(&mut self) {
+        self.inner.pop_clip();
+    }
+}
+
+/// Frames of a run drawn this far apart, in milliseconds: a screen at sixty frames a second.
+const FRAME_MS: i64 = 16;
 
 /// Twelve seconds in which the first holds two scratch notes, three key notes and a mine, and the
 /// fourth a scratch long note's end and body.
@@ -383,6 +463,48 @@ fn the_play_screen_draws_the_range_and_the_position_and_moves_them_every_50_ms()
     let on_result = FrameSeries { notes: Some(NoteDistribution { judgements: &rows, ..NoteDistribution::default() }), ..FrameSeries::default() };
     quiet_rig.draw(on_result, 500);
     assert_eq!(quiet_rig.judge(10, 20), Color::BLACK, "off the play screen there is no cursor");
+}
+
+/// A run in progress moves the cursor every 50 ms and changes the chips every 750 ms. Neither is
+/// handed to the renderer whole again for it: the cursor is one row, stretched, and the chips are
+/// written again in the columns of the seconds that changed. What reaches the screen is the same.
+#[test]
+fn a_run_in_progress_hands_the_renderer_a_row_of_cursor_and_the_columns_that_changed() {
+    let mut rig = Rig::new("dist-uploads", r#"{ "id": "judge-graph", "type": 1 }"#, r#"{ "id": "bpm-graph" }"#);
+    rig.timers.set_on(timer_id::PLAY, 0);
+    let mut uploads = Uploads::new();
+    let mut rows: [[u32; 6]; SECONDS] = quiet();
+    rows.iter_mut().for_each(|second| second[0] = 2);
+    let cursor = PlayCursor::default();
+
+    rig.draw_on(&mut uploads, playing(&rows, cursor), 0);
+    let ground = (JUDGE_W, JUDGE_H);
+    assert_eq!(uploads.whole, vec![ground, ground, (JUDGE_W, 1)], "the first frame uploads the ground, the chips and a cursor one row tall");
+    uploads.forget();
+
+    let mut frame_ms = 0;
+    while frame_ms < 2_000 {
+        frame_ms += FRAME_MS;
+        let second = (frame_ms / 1_000) as usize;
+        if rows[second][0] > 0 {
+            rows[second][0] -= 1;
+            rows[second][1] += 1;
+        }
+        rig.draw_on(&mut uploads, playing(&rows, cursor), frame_ms);
+    }
+    assert!(!uploads.whole.is_empty(), "the cursor moved");
+    assert!(uploads.whole.iter().all(|size| *size == (JUDGE_W, 1)), "and nothing but its one row was uploaded whole: {:?}", uploads.whole);
+    assert!(!uploads.parts.is_empty(), "the chips that changed were written");
+    for part in &uploads.parts {
+        assert!(part.width <= 2 * PITCH_PIXELS && part.height == JUDGE_H, "only the columns of the seconds that changed, the full height: {part:?}");
+    }
+
+    assert_eq!(uploads.inner.pixel_at(JUDGE_X + 1, FOOT - 1 - 5), rgb(0x0088ff), "the judged note of the first second is on the screen");
+    assert_eq!(uploads.inner.pixel_at(JUDGE_X + 6, FOOT - 1 - 5), rgb(0x0088ff), "and so is the second's");
+    assert_eq!(uploads.inner.pixel_at(JUDGE_X + 13, FOOT - 1), rgb(0x555555), "while the third second's notes are not judged yet");
+    let at_foot: Vec<u32> = (0..JUDGE_W).filter(|x| uploads.inner.pixel_at(JUDGE_X + x, FOOT - 1) == WHITE).collect();
+    assert_eq!(at_foot.len(), 3, "the cursor is three pixels wide at the foot of the graph: {at_foot:?}");
+    assert!(at_foot.iter().all(|x| uploads.inner.pixel_at(JUDGE_X + x, FOOT - JUDGE_H) == WHITE), "and runs up to its top");
 }
 
 #[test]

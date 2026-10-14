@@ -19,7 +19,7 @@ use super::super::draw::Placement;
 use super::super::object::Body;
 use super::pixmap::{Pixmap, Rgba, unit_color};
 use super::{
-    FIRST_UNRECORDED_JUDGE, Layer, RECENT_JUDGES, TIMING_JUDGE_AREAS, Upload, VISUALIZER_JUDGEMENTS, document_rect_of, next_serial, paintable, signed_plot_of,
+    FIRST_UNRECORDED_JUDGE, Layer, RECENT_JUDGES, TIMING_JUDGE_AREAS, VISUALIZER_JUDGEMENTS, document_rect_of, next_serial, paintable, signed_plot_of,
     visualizer_color, visualizer_line_width, visualizer_palette, visualizer_rate,
 };
 use crate::ctx::RenderCtx;
@@ -259,12 +259,12 @@ pub(crate) fn draw_timing_visualizer<R: Renderer>(
     }
     let Drawn { ruler, ruler_pixmap, stroke, stroke_pixmap, .. } = &mut *drawn;
     let (ruler_w, ruler_h) = ruler_pixmap.size();
-    let mut reached = match ruler.texture_as(r, ruler_pixmap, Upload::FirstRowOnTop) {
+    let mut reached = match ruler.texture(r, ruler_pixmap) {
         Some(tex) => place.texture(r, tex, (ruler_w as u32, ruler_h as u32), SkinRect::new(0.0, 0.0, ruler_w as f32, ruler_h as f32), rect),
         None => false,
     };
 
-    let Some(stripe) = stroke.texture_as(r, stroke_pixmap, Upload::FirstRowOnTop) else {
+    let Some(stripe) = stroke.texture(r, stroke_pixmap) else {
         return reached;
     };
     let (stripe_w, stripe_h) = stroke_pixmap.size();

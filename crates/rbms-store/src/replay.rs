@@ -47,6 +47,17 @@ pub const REPLAY_LEGACY_GAUGE_AUTO_SHIFT: &str = "NONE";
 /// Auto-shift floor a replay recorded before it was written down was played under.
 pub const REPLAY_LEGACY_BOTTOM_SHIFTABLE_GAUGE: &str = "assist";
 
+/// How the clock moved the time-driven judgements of a replay recorded before this was written
+/// down: once per display frame, so the misses, the long-note releases, the mines and the
+/// hell-charge ticks of the run it records fell where that machine's frames did, and playing it back
+/// can come out otherwise wherever an input and one of those met inside a frame.
+pub const REPLAY_LEGACY_CLOCK: &str = "FRAME";
+
+/// How the clock moves the time-driven judgements of a run now: each at the instant it falls due,
+/// with every input judged at its own instant after the clock has been settled up to it, so a
+/// replay comes out as the run it records at any frame rate.
+pub const REPLAY_EVENT_CLOCK: &str = "EVENT";
+
 /// A judge offset that came into force part of the way through a run: every input from the one at
 /// `from_event` on was judged `offset_ms` away from the instant it arrived.
 ///
@@ -77,7 +88,7 @@ impl ReplayOffsetStep {
 ///
 /// A replay written before these were recorded reads as the engine's pre-parity behaviour: the
 /// `Duration` algorithm at every window's stock width.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ReplayJudge {
     /// The reference implementation's `JudgeAlgorithm` constant name.
@@ -104,7 +115,21 @@ pub struct ReplayJudge {
     /// input to last, which is every replay written before the offset could move and every one
     /// written since it stopped moving the judgement.
     pub offset_steps: Vec<ReplayOffsetStep>,
+    /// How the run's clock moved its time-driven judgements: [`REPLAY_EVENT_CLOCK`] for a run that
+    /// reproduces exactly at any frame rate, [`REPLAY_LEGACY_CLOCK`] for one recorded before, which
+    /// is played back the same way and can differ from its own score where the frames of the
+    /// machine that recorded it decided something.
+    pub clock: String,
+    /// The TOTAL the player set in place of the chart's, which decides how far every judgement moves
+    /// the gauge, or [`REPLAY_CHART_TOTAL`] for a run played on the chart's own. Playback uses it
+    /// rather than the TOTAL set now, so a replay reproduces the gauge and the lamp the run had. A
+    /// replay written before it was recorded reads as played on the chart's own.
+    pub total_override: f64,
 }
+
+/// The [`ReplayJudge::total_override`] of a run played on the chart's own TOTAL: any value at or
+/// below it overrides nothing, as the setting reads.
+pub const REPLAY_CHART_TOTAL: f64 = 0.0;
 
 impl Default for ReplayJudge {
     fn default() -> Self {
@@ -118,6 +143,8 @@ impl Default for ReplayJudge {
             gauge_auto_shift: REPLAY_LEGACY_GAUGE_AUTO_SHIFT.to_string(),
             bottom_shiftable_gauge: REPLAY_LEGACY_BOTTOM_SHIFTABLE_GAUGE.to_string(),
             offset_steps: Vec::new(),
+            clock: REPLAY_LEGACY_CLOCK.to_string(),
+            total_override: REPLAY_CHART_TOTAL,
         }
     }
 }
@@ -159,17 +186,12 @@ impl Replay {
 
     /// Serialize and durably replace `path`, reporting why on failure.
     pub fn try_save(&self, path: &Path) -> Result<(), StoreError> {
-        let s = ron::ser::to_string_pretty(self, ron::ser::PrettyConfig::default())?;
+        let s = self.to_ron()?;
         write_atomic(path, &s).map_err(StoreError::Write)
     }
 
-    /// [`Replay::try_save`] for the fire-and-forget call site on the result screen: success and
-    /// failure are both reported on the console and neither interrupts play.
-    pub fn save(&self, path: &Path) {
-        match self.try_save(path) {
-            Ok(()) => println!("replay saved: {}", path.display()),
-            Err(StoreError::Write(e)) => eprintln!("replay write failed ({}): {e}", path.display()),
-            Err(e) => eprintln!("replay save failed: {e}"),
-        }
+    /// The replay as the RON document it is saved as.
+    pub fn to_ron(&self) -> Result<String, StoreError> {
+        Ok(ron::ser::to_string_pretty(self, ron::ser::PrettyConfig::default())?)
     }
 }

@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { clearLampToId } from '@server/dto/common'
 import { COURSE_ASSIST_TAG_MAX_LENGTH, COURSE_ASSIST_TAGS_MAX, COURSE_CHARTS_MAX, courseSubmissionSchema } from '@server/dto/course'
 import {
     createCourseService,
@@ -89,6 +90,23 @@ describe('courseService.submit', () => {
     test('기존 베스트가 더 좋으면 베스트를 갱신하지 않는다', async () => {
         const { service, bests } = createService({ best: { clear: 6, exScore: 5400, minbp: 10 } })
         await service.submit({ input: submission(), user: USER, ...TRUSTED })
+        expect(bests).toHaveLength(0)
+    })
+
+    test('FAILED 코스는 단일 곡 실패 판과 같이 저장하고 ranked 로 순위와 베스트 경쟁에 넣는다', async () => {
+        const { service, inserted, bests } = createService()
+        const result = await service.submit({ input: submission({ clear: 'Failed', ex_score: 1200, minbp: 900 }), user: USER, ...TRUSTED })
+        expect(result.response.accepted).toBe(true)
+        expect(result.response.ranked).toBe(true)
+        expect(result.response.rank).toBe(3)
+        expect(inserted[0].clear).toBe(clearLampToId('Failed'))
+        expect(bests).toHaveLength(1)
+    })
+
+    test('FAILED 코스는 더 높은 램프의 최고 기록을 밀어내지 않는다', async () => {
+        const { service, bests } = createService({ best: { clear: clearLampToId('Normal'), exScore: 100, minbp: 999 } })
+        const result = await service.submit({ input: submission({ clear: 'Failed', ex_score: 4000, minbp: 10 }), user: USER, ...TRUSTED })
+        expect(result.response.is_new_best).toBe(false)
         expect(bests).toHaveLength(0)
     })
 

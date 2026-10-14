@@ -7,7 +7,7 @@
 
 use super::*;
 use crate::app_result::reported_gauge;
-use crate::stage::KeyInput;
+use crate::stage::{KeyInput, Stage};
 use crate::{App, Config, LaunchOptions};
 use rbms_play::SessionOptions;
 
@@ -37,11 +37,15 @@ fn app() -> App {
     app
 }
 
-fn play_state() -> PlayState {
-    let src = rbms_parser::parse_with(CHART.as_bytes(), Default::default());
+fn state_of(chart: &str) -> PlayState {
+    let src = rbms_parser::parse_with(chart.as_bytes(), Default::default());
     let mode = rbms_chart::detect_mode(&src, "t.bms");
     let model = rbms_chart::to_model(&src, mode);
     PlayState::new(PlaySession::new(model, SessionOptions::default()), std::collections::HashMap::new(), 0, SCORE_LN_MODE_FROM_CHART.to_string())
+}
+
+fn play_state() -> PlayState {
+    state_of(CHART)
 }
 
 /// The same chart set up to reproduce `events` rather than to take input, which is what a replay
@@ -215,6 +219,47 @@ fn a_press_is_recorded_for_the_replay_even_with_no_output_device() {
     assert_eq!(events.len(), 2, "a run with no device still records what was played: {events:?}");
     assert!(events[0].press, "the press is recorded first");
     assert!(!events[1].press, "and the release after it — never a release on its own");
+}
+
+/// A one-measure 7-key chart whose first key holds one long note, from the second beat to the
+/// fourth of a 120 BPM measure.
+const LONG_NOTE_CHART: &str = "#PLAYER 1\n#TITLE t\n#BPM 120\n#WAV01 a.wav\n#00151:00010001\n";
+
+/// How long past the end of the long note the run is ticked, enough for every judgment to settle.
+const SETTLE_AFTER_US: i64 = 1_000_000;
+
+/// A window that loses focus is not told about the keys let go while it is away, so a long note
+/// held when the focus left would be held to its end and judged PGREAT by a key nobody is
+/// pressing. Losing focus lets go of every key that was down, through the path of a real key-up:
+/// the release reaches the session, which records it for the replay and judges the note as let go.
+#[test]
+fn losing_focus_releases_every_held_lane() {
+    let mut app = app();
+    let lane_key = app.shared.active_keys.first().map(|(code, _)| *code).expect("the default key config binds lane 0");
+    let state = state_of(LONG_NOTE_CHART);
+    let times = note_times(&state);
+    let (head_us, end_us) = (times[0], times[1]);
+    let mut stage = Stage::Play(Box::new(state));
+
+    let at = Instant::now();
+    app.shared.stop_clocks_at(at);
+    app.shared.clock = at.checked_sub(Duration::from_micros(head_us as u64)).expect("the process has been up for longer than the head's time");
+    let mut ctx = FrameCtx { shared: &mut app.shared, now: at, dt: 0.0 };
+    stage.handle_key(&mut ctx, key(lane_key, true));
+    assert_eq!(ctx.shared.held_key_codes(), [lane_key], "the lane's key is down");
+
+    let transitions = stage.release_keys_lost_with_focus(&mut ctx);
+    assert!(transitions.iter().all(|t| matches!(t, Transition::Stay)), "letting go of a key leaves nothing");
+    assert!(ctx.shared.held_key_codes().is_empty(), "every key reads as let go");
+
+    let Stage::Play(play) = &mut stage else {
+        unreachable!("the stage was built as a play screen");
+    };
+    assert_eq!(play.session.recorded_events().iter().map(|event| event.press).collect::<Vec<_>>(), [true, false], "the release reaches the replay");
+    play.session.tick(rbms_play::SessionClock::at(end_us + SETTLE_AFTER_US), &mut rbms_play::NullSink);
+    let counts = play.session.judge().counts;
+    assert_eq!(counts.iter().sum::<u32>(), 1, "the note is judged once");
+    assert_eq!(counts[rbms_judge::Judge::PerfectGreat as usize], 0, "a note let go of a second early is not held to its end: {counts:?}");
 }
 
 /// A run whose gauge is empty under GAUGE AUTO SHIFT = NONE is over: the reference moves to

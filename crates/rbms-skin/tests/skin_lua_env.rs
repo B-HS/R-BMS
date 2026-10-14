@@ -880,6 +880,43 @@ fn what_the_host_does_between_two_calls_is_not_charged_to_the_skin() {
     assert_eq!(runtime.diagnostics().frames_over_budget, 0);
 }
 
+/// A frame whose clock is held is charged nothing for how long the machine takes inside its calls:
+/// a call held up past the frame's whole allowance leaves the calls after it to run and answer
+/// afresh, frame after frame, where a frame with its clock running answers them from an earlier
+/// frame.
+#[test]
+fn a_frame_whose_clock_is_held_answers_afresh_however_long_the_machine_takes_inside_its_calls() {
+    let budget = LuaBudget { frame: FrameBudget { max_micros: SMALL_FRAME_MICROS, ..FrameBudget::default() }, ..LuaBudget::default() };
+    let runtime = runtime_with(budget);
+    let held_up = runtime
+        .lua()
+        .create_function(|_, ()| {
+            std::thread::sleep(HOST_WORK);
+            Ok(())
+        })
+        .expect("the stall is a function");
+    runtime.lua().globals().set("held_up", held_up).expect("the stall is a global");
+    let slow = runtime.register(function(&runtime, "return function() held_up() return 7 end"), LuaFnKind::Integer);
+    let after = runtime.register(function(&runtime, "ran = 0 return function() ran = ran + 1 return ran end"), LuaFnKind::Integer);
+    let frame = |expected: i32| {
+        runtime
+            .frame(&DefaultState, |frame| {
+                assert_eq!(frame.call_integer(slow), 7);
+                frame.call_integer(after) == expected
+            })
+            .expect("the frame binds")
+    };
+
+    runtime.hold_frame_clock(true);
+    assert!(frame(1), "a call after one the machine was held up in was not made");
+    assert!(frame(2), "the next frame answered from an earlier one");
+    assert_eq!(runtime.diagnostics().frames_over_budget, 0, "a frame whose clock is held went over its budget");
+
+    runtime.hold_frame_clock(false);
+    assert!(frame(2), "a frame whose clock runs made a call after one that spent its whole allowance");
+    assert_eq!(runtime.diagnostics().frames_over_budget, 1);
+}
+
 #[test]
 fn the_time_spent_inside_calls_adds_up_over_a_frame() {
     let budget =

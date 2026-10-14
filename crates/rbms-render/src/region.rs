@@ -11,7 +11,7 @@
 //! one [`Renderer::push_clip`] every backend already has, which is why the CPU canvas and the GPU
 //! draw a region alike.
 
-use crate::{Color, DistanceFieldParams, QuadParams, Rect, Renderer, TextureId};
+use crate::{Color, DistanceFieldParams, QuadParams, Rect, Renderer, TexelRect, TextureId};
 
 /// The fewest pixels a region is across or down. A rectangle with no extent still reports a size a
 /// screen can divide by.
@@ -104,6 +104,10 @@ impl<R: Renderer> Renderer for RegionRenderer<'_, R> {
 
     fn register_texture(&mut self, key: &str, rgba: &[u8], width: u32, height: u32) -> TextureId {
         self.inner.register_texture(key, rgba, width, height)
+    }
+
+    fn update_texture(&mut self, tex: TextureId, rgba: &[u8], region: TexelRect) -> bool {
+        self.inner.update_texture(tex, rgba, region)
     }
 
     fn release_texture(&mut self, tex: TextureId) {

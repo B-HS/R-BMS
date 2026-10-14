@@ -91,6 +91,9 @@ fn course_submission_round_trips_preserving_chart_order_and_count() {
         extra: HashMap::new(),
     };
     let back: CourseSubmission = serde_json::from_str(&serde_json::to_string(&cs).unwrap()).unwrap();
+    let kept = CourseSubmission::from_json(&cs.to_json().expect("serialises")).expect("the kept body reads back");
+    assert_eq!((kept.played_at, kept.charts.clone()), (cs.played_at, charts.clone()), "a course kept to be sent again is sent as it was");
+    assert!(CourseSubmission::from_json("not json").is_none());
     assert_eq!(back.charts.len(), 3, "count preserved");
     assert_eq!(back.charts, charts, "order preserved");
     assert_eq!(back.course_hash, "course-xyz");
@@ -547,4 +550,18 @@ fn a_submission_round_trips_through_its_stored_json() {
     let back = ScoreSubmission::from_json(&text).expect("the stored text reads back");
     assert_eq!(back.to_json(), Some(text));
     assert!(ScoreSubmission::from_json("{\"not\":\"a submission\"}").is_none());
+}
+
+/// The lean of a run and the rule generation it was recorded under ride in `extra`, which the server
+/// keeps whole, and read back as they were stated: a late lean is negative.
+#[test]
+fn the_mean_offset_and_the_rule_version_ride_in_extra() {
+    let mut sub = submission_for_bounds();
+    assert_eq!((sub.mean_offset(), sub.rule_version()), (None, None), "a body states neither until told");
+    sub.state_mean_offset(-14_655);
+    sub.state_rule_version(4);
+    assert_eq!(sub.extra.get(MEAN_OFFSET_EXTRA_KEY), Some(&json!(-14_655)));
+    assert_eq!(sub.extra.get(RULE_VERSION_EXTRA_KEY), Some(&json!(4)));
+    let back = ScoreSubmission::from_json(&sub.to_json().expect("a submission serialises")).expect("the stored text reads back");
+    assert_eq!((back.mean_offset(), back.rule_version()), (Some(-14_655), Some(4)));
 }

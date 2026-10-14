@@ -81,6 +81,12 @@ pub trait ScoreServer: Send + Sync {
     fn login(&self, _req: &AuthRequest) -> Result<AuthResponse, IrError> {
         Err(IrError::Unsupported)
     }
+    /// End the session of the configured bearer token on the server, so the token is refused from
+    /// then on. A token the server does not know, or has revoked already, fails with
+    /// [`IrError::Unauthorized`]: it is no longer accepted either way.
+    fn revoke_current_token(&self) -> Result<(), IrError> {
+        Err(IrError::Unsupported)
+    }
     /// Resolve the account behind the configured bearer token. Fails with
     /// [`IrError::Unauthorized`] when the token is missing or stale, which is how the app tells a
     /// live session from a saved-but-revoked one.

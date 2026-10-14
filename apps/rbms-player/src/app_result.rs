@@ -9,7 +9,8 @@
 use rbms_render::result::{ResultExtras, TargetView};
 
 use rbms_model::TimeLine;
-use rbms_store::scoredb::ReplayState;
+use rbms_store::StagedWrite;
+use rbms_store::scoredb::{KeptSubmission, PENDING_RUN_SUFFIX, PendingRun, ReplayState};
 
 use crate::ir_ranking::RankingState;
 use crate::ir_replay::wire_carries_judge;
@@ -24,7 +25,7 @@ use crate::*;
 /// How much of the chart title the result screen shows before it is cut.
 const RESULT_TITLE_CHARS: usize = 48;
 
-/// Leading md5 characters a saved replay's filename is stemmed to.
+/// Leading md5 characters a saved replay's filename is stemmed to, and a run kept on the side.
 const REPLAY_STEM_MD5_CHARS: usize = 8;
 
 /// What a saved replay states of how far from its inputs the run was judged, in milliseconds:
@@ -82,6 +83,7 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
     let play = &state.session;
     let summary = play.summary();
     let standing_combo = play.standing_combo();
+    let standing_max_combo = play.standing_max_combo();
     let md5 = play.model().md5.clone();
     let title = play.model().meta.title.clone();
     let artist = play.model().meta.artist.clone();
@@ -96,7 +98,7 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
     let previous = PreviousScore::of_book(&shared.scores, &md5, &state.ln_mode_key);
     let standing_best_ex = shared.scores.best_ex_for_md5_in_ln_mode(&md5, &state.ln_mode_key);
 
-    let recorded = record_run(state, shared, &summary);
+    let recorded = record_run(state, shared, &summary, record.avg_duration_us);
     let lamp = recorded.lamp;
     let (label, color) = clear_label_color(lamp);
     println!(
@@ -160,7 +162,13 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
     keep_run_record(shared, record);
     if shared.course_run.is_some() {
         shared.course_assist = shared.course_assist.with_stage(recorded.scratch_auto, recorded.custom_judge);
-        return advance_course(shared, &summary, standing_combo, block_reason, lamp);
+        let carried = CarriedCombo { standing: standing_combo, longest: standing_max_combo };
+        let course_lamp = course_lamp(shared, &state.session);
+        return match fold_course_stage(shared, &summary, carried, block_reason, course_lamp) {
+            Some(rbms_course::CourseStep::Next) => crate::load_course_stage(shared),
+            Some(rbms_course::CourseStep::Cleared | rbms_course::CourseStep::Failed) => finish_course(shared),
+            None => Transition::Back,
+        };
     }
     let paced_by = run_target(shared, &md5, summary.total_notes, standing_best_ex);
     let target = TargetView { name: paced_by.name, ex: paced_by.ex };
@@ -173,7 +181,7 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
 /// What a run that has just ended left behind once it was kept: the lamp it was awarded, the
 /// submission built for it, the history row and the replay it was stored as, and why it is not to
 /// be sent, if it is not.
-struct RecordedRun {
+pub(crate) struct RecordedRun {
     lamp: ClearType,
     sub: ScoreSubmission,
     /// The `scorelog` row the run was stored as; `None` for a run that is no record (autoplay, a
@@ -194,7 +202,18 @@ struct RecordedRun {
 /// The local record is written for every real interactive run, so history and replays survive
 /// without a score server; autoplay, a replay being watched and practice are excluded. The book the
 /// screens read gains the run too, so it must be read for "what stood before" first.
-fn record_run(state: &PlayState, shared: &mut AppShared, summary: &rbms_play::PlaySummary) -> RecordedRun {
+///
+/// What is recorded is the reference's record of the run (`BMSPlayer.java:863-930`): `avgjudge` is
+/// `avg_duration_us`, the mean distance of every note from its input with a note never hit counted
+/// at a second ([`rbms_play::PlayRecord::avg_duration_us`]), and the bad-poor count takes in every
+/// note the run never reached ([`rbms_play::PlaySummary::min_bp_with_unreached`]). How far the hits
+/// leaned, early or late, travels beside it in the submission's `extra`, with the rule generation
+/// the figures are of ([`ScoreSubmission::state_mean_offset`], [`ScoreSubmission::state_rule_version`]).
+///
+/// A run played on a TOTAL of the player's own is eased the way a widened judge eases it
+/// ([`crate::judged_wider`]): its lamp is an assist lamp and it sets no best, and its replay records
+/// the TOTAL so playback moves the gauge as the run did.
+fn record_run(state: &PlayState, shared: &mut AppShared, summary: &rbms_play::PlaySummary, avg_duration_us: i64) -> RecordedRun {
     let play = &state.session;
     let chart = ChartRun {
         md5: play.model().md5.clone(),
@@ -204,7 +223,8 @@ fn record_run(state: &PlayState, shared: &mut AppShared, summary: &rbms_play::Pl
         seed: play.seed(),
     };
     let judge_setup = play.judge_setup();
-    let custom_judge = is_custom_judge(&judge_setup);
+    let total_override = crate::run_total_override(&shared.config, shared.replay.as_ref());
+    let custom_judge = crate::judged_wider(&judge_setup, total_override);
     let scratch_auto = scratch_auto_played(play);
     let assist = assist_level(scratch_auto, custom_judge);
     let practice = state.practice.is_some();
@@ -218,10 +238,10 @@ fn record_run(state: &PlayState, shared: &mut AppShared, summary: &rbms_play::Pl
     let finished_gauge = reported_gauge(summary, shared.config.play.gauge);
     let c = summary.counts;
     let played_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
-    let sub = ScoreSubmission {
+    let mut sub = ScoreSubmission {
         api_version: API_VERSION,
         chart: ir_map::submitted_chart(play.model()),
-        player: PlayerId { id: submission_player_id(&shared.session, &shared.config.network.player_id) },
+        player: PlayerId { id: submission_player_id(&shared.session) },
         mode: shared.mode.name.to_string(),
         clear: ir_clear(lamp),
         ex_score: summary.ex_score,
@@ -248,13 +268,13 @@ fn record_run(state: &PlayState, shared: &mut AppShared, summary: &rbms_play::Pl
             lpr: summary.late[4],
             ems: summary.early[5],
             lms: summary.late[5],
-            avgjudge: summary.avg_judge_us,
+            avgjudge: wire_avgjudge(avg_duration_us),
             empty_poor: summary.empty_poor,
         },
         max_combo: summary.max_combo,
         total_notes: summary.total_notes,
         passnotes: summary.total_judged,
-        minbp: summary.min_bp,
+        minbp: summary.min_bp_with_unreached(),
         gauge_value: summary.gauge_value,
         options: PlayOptions {
             gauge: ir_gauge(finished_gauge),
@@ -271,7 +291,7 @@ fn record_run(state: &PlayState, shared: &mut AppShared, summary: &rbms_play::Pl
             hispeed: shared.config.play.hispeed,
             lift: shared.config.play.lift,
             lane_cover: shared.config.play.cover,
-            total_override: shared.config.play.total_override,
+            total_override,
             autoplay: shared.run_plays_itself(),
             auto_offset: shared.config.judge.auto_offset,
             scratch_left: shared.config.play.scratch_left,
@@ -288,15 +308,17 @@ fn record_run(state: &PlayState, shared: &mut AppShared, summary: &rbms_play::Pl
         client_platform: Some(client_platform()),
         extra: Default::default(),
     };
+    sub.state_mean_offset(summary.avg_judge_us);
+    sub.state_rule_version(rbms_store::SCORE_RULE_VERSION);
     let scores_count = updates_score(shared.run_plays_itself(), shared.replay.is_some(), custom_judge, practice);
     let block_reason = ir_submission_block_reason(shared.run_plays_itself(), shared.replay.is_some(), practice);
 
     let played_ms = played_at;
+    let stem: String = chart.md5.chars().take(REPLAY_STEM_MD5_CHARS).collect();
     let mut replay_file: Option<String> = None;
     let mut recorded_replay: Option<Replay> = None;
+    let mut staged_replay: Option<StagedWrite> = None;
     if let Some(events) = recorded_events {
-        let stem: String = chart.md5.chars().take(REPLAY_STEM_MD5_CHARS).collect();
-        let dir = shared.replay_dir.clone();
         let name = format!("{stem}-{played_ms}.ron");
         let rp = Replay {
             chart_path: shared.chart_path.clone(),
@@ -317,19 +339,21 @@ fn record_run(state: &PlayState, shared: &mut AppShared, summary: &rbms_play::Pl
                 gauge_auto_shift: gauge_auto_shift_token(judge_setup.gauge_auto_shift).to_string(),
                 bottom_shiftable_gauge: gauge_token(judge_setup.bottom_shiftable_gauge).to_string(),
                 offset_steps: Vec::new(),
+                clock: rbms_store::REPLAY_EVENT_CLOCK.to_string(),
+                total_override,
             },
             events,
         };
-        rp.save(&dir.join(&name));
-        replay_file = Some(name);
+        let path = shared.replay_dir.join(&name);
+        match StagedWrite::create(&path) {
+            Ok(staged) => {
+                staged_replay = Some(staged);
+                replay_file = Some(name);
+            }
+            Err(e) => notify(Level::Error, format!("replay not saved: {e} ({})", path.display())),
+        }
         recorded_replay = Some(rp);
     }
-    let replay_plan = match &recorded_replay {
-        None => ReplayState::None,
-        Some(rp) if !wire_carries_judge(&rp.judge) => ReplayState::Skipped,
-        Some(_) => ReplayState::Pending,
-    };
-
     let mut log_id = None;
     if shared.replay.is_none() && !shared.run_plays_itself() && !practice {
         let finished = crate::scoredb_store::FinishedPlay {
@@ -344,60 +368,160 @@ fn record_run(state: &PlayState, shared: &mut AppShared, summary: &rbms_play::Pl
             random: shared.config.play.random,
             seed: chart.seed,
             assist,
+            avg_duration_us,
             played_at_ms: played_ms,
             playtime_ms: crate::scoredb_store::playtime_ms(last_time_us),
             ir_submitted: block_reason.is_none() && shared.sends_to_primary_ir_server(),
             replay_file: replay_file.clone(),
         };
         let mut log = crate::scoredb_store::play_log(&finished);
-        if let Some(db) = shared.scoredb.as_mut() {
-            log_id = crate::scoredb_store::record_finished_play(db, &log, scores_count);
-            if let Some(id) = log_id {
-                keep_submission_body(db, id, &sub, shared.session.is_logged_in().then(|| shared.session.login_id()).flatten());
+        let body = submission_body(&sub);
+        let played_as = shared.session.is_logged_in().then(|| shared.session.login_id()).flatten().map(str::to_string);
+        let kept = body.as_deref().map(|body| KeptSubmission { body, played_as: played_as.as_deref() });
+        log_id = shared.scoredb.as_mut().and_then(|db| crate::scoredb_store::record_finished_play(db, &log, scores_count, kept));
+        if log_id.is_none() {
+            let run = PendingRun { log: log.clone(), updates_best: scores_count, body, played_as };
+            if !keep_on_the_side(shared, &run, &format!("{played_ms}-{stem}{PENDING_RUN_SUFFIX}")) {
+                staged_replay = None;
+                replay_file = None;
+                log.replay_file = None;
             }
         }
         log.id = log_id.unwrap_or_default();
         shared.scores.push(crate::scoredb_store::record_of(&log));
     }
+    let replay_plan = match (&recorded_replay, &replay_file) {
+        (None, _) | (_, None) => ReplayState::None,
+        (Some(rp), Some(_)) if !wire_carries_judge(&rp.judge) => ReplayState::Skipped,
+        (Some(_), Some(_)) => ReplayState::Pending,
+    };
+    if let (Some(staged), Some(file), Some(rp)) = (staged_replay, &replay_file, &recorded_replay) {
+        shared.saves.save_replay(file.clone(), rp.clone(), staged);
+    }
 
     RecordedRun { lamp, sub, log_id, replay_file, recorded_replay, replay_plan, block_reason, scratch_auto, custom_judge }
 }
 
-/// Keep the submission a stored run is to be sent as, so a later records sync sends exactly what
-/// the result screen would have. A body that cannot be kept is reported and the run left as it is:
-/// a sync rebuilds a run that has none from its row.
-fn keep_submission_body(db: &mut rbms_store::scoredb::ScoreDb, log_id: i64, sub: &ScoreSubmission, played_as: Option<&str>) {
+/// The submission a stored run is to be sent as, kept beside it so a later records sync sends
+/// exactly what the result screen would have. A body that does not serialise is reported and the
+/// run kept without one: a sync rebuilds a run that has none from its row.
+fn submission_body(sub: &ScoreSubmission) -> Option<String> {
     let mut kept = sub.clone();
     kept.clamp_to_server_bounds();
-    let Some(body) = kept.to_json() else {
+    let body = kept.to_json();
+    if body.is_none() {
         notify(Level::Warn, "submission of the run not kept: it does not serialise");
-        return;
-    };
-    if let Err(e) = db.put_submission(log_id, &body, played_as) {
-        notify(Level::Warn, format!("submission of the run not kept: {e}"));
     }
+    body
+}
+
+/// What the message bus says of a run the score database could not take, kept on the side.
+pub(crate) const RUN_KEPT_ON_THE_SIDE: &str = "score database not open: this run is kept on the side and goes into it when it opens";
+
+/// Keep a run the score database could not take in a file of its own, read in the next time the
+/// database opens ([`crate::scoredb_store::import_pending_runs`]), and say so: a run is never lost
+/// with the session. Returns whether the run was handed to the save thread; when it was not, the
+/// caller writes no replay for it and names none on its record, since no row will point at one.
+fn keep_on_the_side(shared: &AppShared, run: &PendingRun, name: &str) -> bool {
+    let dir = crate::scoredb_store::pending_runs_dir(shared.settings_path.parent().unwrap_or_else(|| Path::new(".")));
+    match run.to_ron() {
+        Ok(text) => {
+            let path = dir.join(name);
+            shared.saves.save_text(crate::save_worker::Saving::PendingRun { file: path.clone() }, path, text);
+            notify(Level::Error, RUN_KEPT_ON_THE_SIDE);
+            true
+        }
+        Err(e) => {
+            notify(Level::Error, format!("run not kept: {e}"));
+            false
+        }
+    }
+}
+
+/// The `avgjudge` a submission carries for a run whose mean note distance is `avg_duration_us`. A
+/// chart with no judged object has none ([`rbms_play::AVG_DURATION_ABSENT_US`]), which the wire
+/// states as nothing rather than as a number past every server column.
+fn wire_avgjudge(avg_duration_us: i64) -> i64 {
+    if avg_duration_us == rbms_play::AVG_DURATION_ABSENT_US { 0 } else { avg_duration_us }
 }
 
 /// What the message bus says of a run that was left before its end and kept.
 pub(crate) const LEFT_RUN_KEPT: &str = "run left mid-song kept as FAILED";
 
 /// Keep a run the player left before its end, as a FAILED run whose every note not reached was let
-/// pass ([`rbms_play::PlaySummary::left_unfinished`]), and send it.
+/// pass ([`rbms_play::PlaySummary::left_unfinished`]), and send it, and say so. Returns what was
+/// kept.
 ///
 /// No result screen is shown: Escape stays the key that leaves at once, and the run is in the
 /// history and on the server like any other. It is sent by a records sync of this one run rather
-/// than by the result screen's submission, which has no screen to report on here. The caller decides
-/// which runs are kept: one played by hand that judged at least one note.
-pub(crate) fn record_left_run(state: &PlayState, shared: &mut AppShared) {
+/// than by the result screen's submission, which has no screen to report on here. Every run the
+/// player played by hand is kept however few notes it judged, none at all included (the player's
+/// decision of 2026-10-15); the caller leaves out a run the engine played, a replay being watched and
+/// practice.
+pub(crate) fn record_left_run(state: &PlayState, shared: &mut AppShared) -> RecordedRun {
     let summary = state.session.summary().left_unfinished();
-    let recorded = record_run(state, shared, &summary);
+    let recorded = record_run(state, shared, &summary, state.session.record().avg_duration_us);
+    send_without_a_screen(shared, &recorded);
+    notify(Level::Info, LEFT_RUN_KEPT);
+    recorded
+}
+
+/// What the message bus says of a course left part-way, once its stages and the course are kept.
+pub(crate) const LEFT_COURSE_KEPT: &str = "course left part-way kept as FAILED";
+
+/// Leave a course part-way through a stage with notes still to come, which is what Escape does to
+/// one (the player's decision of 2026-10-15): the stage is kept and sent as a FAILED chart, as a
+/// single chart left part-way is ([`record_left_run`]), and the course is kept and sent as a FAILED
+/// course, the stages it finished and the one it was left on folded in. The stages it never reached
+/// are not played.
+///
+/// A course the engine played or one watched as a replay keeps nothing and simply ends, as before.
+/// No course result screen is shown: Escape still leaves at once.
+pub(crate) fn leave_course(state: &PlayState, shared: &mut AppShared) -> Transition {
+    if shared.run_plays_itself() || shared.replay.is_some() || state.practice.is_some() {
+        return crate::end_course(shared);
+    }
+    let summary = state.session.summary().left_unfinished();
+    let recorded = record_left_run(state, shared);
+    shared.course_assist = shared.course_assist.with_stage(recorded.scratch_auto, recorded.custom_judge);
+    let carried = CarriedCombo { standing: state.session.standing_combo(), longest: state.session.standing_max_combo() };
+    let course_lamp = course_lamp(shared, &state.session);
+    if fold_course_stage(shared, &summary, carried, recorded.block_reason, course_lamp).is_some() {
+        keep_finished_course(shared);
+        notify(Level::Info, LEFT_COURSE_KEPT);
+    }
+    crate::end_course(shared)
+}
+
+/// What the message bus says of a failed run that START or SELECT started again, once it is kept.
+pub(crate) const RETRIED_RUN_KEPT: &str = "failed run kept before starting again";
+
+/// Keep a run that failed and is being started again at once with START or SELECT
+/// (`BMSPlayer.java:696-710`), as the result screen would have kept it, and send it.
+///
+/// The run never reaches its result screen, so it is kept here on the way out, judged as it stood
+/// when it failed, and sent by a records sync of this one run as a run left mid-song is. Every run
+/// the player played by hand is kept and sent (the player's decision of 2026-10-14); a run the
+/// engine played, a replay being watched and practice keep nothing.
+pub(crate) fn record_retried_run(state: &PlayState, shared: &mut AppShared) {
+    if state.practice.is_some() || shared.run_plays_itself() || shared.replay.is_some() {
+        return;
+    }
+    let summary = state.session.summary();
+    let recorded = record_run(state, shared, &summary, state.session.record().avg_duration_us);
+    send_without_a_screen(shared, &recorded);
+    notify(Level::Info, RETRIED_RUN_KEPT);
+}
+
+/// Send a run that was kept with no result screen to report on: to the extra profiles at once, and
+/// to the main server by a records sync of this one run.
+fn send_without_a_screen(shared: &mut AppShared, recorded: &RecordedRun) {
     if recorded.block_reason.is_none() && shared.has_primary_ir_server() {
         shared.spawn_profile_submits(&recorded.sub);
     }
     if let Some(log_id) = recorded.log_id {
         shared.start_record_sync(crate::record_sync::SyncScope::Logs(vec![log_id]));
     }
-    notify(Level::Info, LEFT_RUN_KEPT);
 }
 
 /// Whether SCRATCH AUTO played any of a run: it took a note off a lane it plays, as the run had the
@@ -516,15 +640,38 @@ pub(crate) fn following_song(shared: &AppShared) -> Option<(usize, usize)> {
     })
 }
 
-/// Fold the stage that just ended into the course and go wherever it says: the next stage, or the
-/// course result screen.
-fn advance_course(
+/// The course's streak where a stage ended, which is not the chart's own: the combo the next stage
+/// starts from and the longest one of the course so far ([`PlaySession::standing_combo`],
+/// [`PlaySession::standing_max_combo`]).
+#[derive(Clone, Copy)]
+struct CarriedCombo {
+    standing: u32,
+    longest: u32,
+}
+
+/// The lamp the course stands at with the stage just played folded in, demoted by the assists its
+/// stages had so far as a single chart's is ([`PlaySession::course_lamp`], `MusicResult.java:402-428`).
+/// The stage's own lamp is the chart's record and says nothing of the course: a stage can be a MAX
+/// of its own after a stage that broke the course's streak.
+fn course_lamp(shared: &AppShared, session: &PlaySession) -> ClearType {
+    let (notes_before, counts_before) = shared.course_run.as_ref().map_or((0, [0; 6]), |run| (run.totals.notes, run.totals.counts));
+    let assist = assist_level(shared.course_assist.scratch_auto, shared.course_assist.custom_judge);
+    assisted_lamp(session.course_lamp(notes_before, counts_before), assist)
+}
+
+/// Fold the stage that just ended into the course, and answer where the course goes from here: the
+/// next stage, or its end. `None` when no course is being played.
+///
+/// The course's own combo is the streak carried from stage to stage (`JudgeManager.coursecombo`);
+/// the chart's record keeps the stage's own ([`rbms_play::PlaySummary::max_combo`]). `course_lamp`
+/// is the lamp the course stands at with this stage in ([`course_lamp`]).
+fn fold_course_stage(
     shared: &mut AppShared,
     summary: &rbms_play::PlaySummary,
-    standing_combo: u32,
+    carried: CarriedCombo,
     block_reason: Option<&'static str>,
-    lamp: ClearType,
-) -> Transition {
+    course_lamp: ClearType,
+) -> Option<rbms_course::CourseStep> {
     shared.course_stage_reasons.push(block_reason.map(str::to_string));
     let stage = rbms_course::StageResult {
         ex_score: summary.ex_score,
@@ -535,47 +682,53 @@ fn advance_course(
         fast: summary.fast,
         slow: summary.slow,
         combo_breaks: combo_breaks(&shared.mode, summary.counts),
-        max_combo: summary.max_combo,
-        combo_at_end: standing_combo,
+        max_combo: carried.longest,
+        combo_at_end: carried.standing,
         gauge_value: summary.gauge_value,
-        clear: clear_type_id(lamp),
+        clear: clear_type_id(course_lamp),
         survived: !summary.failed,
     };
-    let Some(run) = shared.course_run.as_mut() else {
-        return Transition::Back;
-    };
-    match run.advance(&stage) {
-        rbms_course::CourseStep::Next => crate::load_course_stage(shared),
-        rbms_course::CourseStep::Cleared | rbms_course::CourseStep::Failed => finish_course(shared),
-    }
+    shared.course_run.as_mut().map(|run| run.advance(&stage))
 }
 
-/// The course is over: submit it if every stage was submittable, then show the course result.
+/// The course is over: keep and send it if every stage was submittable, then show the course
+/// result.
 ///
 /// A stage played with an assist does not keep the course back: the submission states the assists
 /// the stages had ([`crate::course_ir::CourseAssist`]), as a single chart's does, and the course
 /// result reads from the same fold whether the course may set a best.
+///
+/// A course that may be sent is kept in the score database whether or not anybody is signed in, and
+/// sent until the server holds it ([`AppShared::keep_and_send_course`]), as a played chart is.
 fn finish_course(shared: &mut AppShared) -> Transition {
     let Some(run) = shared.course_run.as_ref() else {
         return Transition::Back;
+    };
+    let state = CourseResultState::of(run, shared);
+    keep_finished_course(shared);
+    Transition::To(Stage::CourseResult(Box::new(state)))
+}
+
+/// Keep and send the course that is over, cleared or failed, when every stage was submittable and
+/// the course is marked for release ([`AppShared::keep_and_send_course`]).
+fn keep_finished_course(shared: &mut AppShared) {
+    let Some(run) = shared.course_run.as_ref() else {
+        return;
     };
     let mut reasons = shared.course_stage_reasons.clone();
     if !run.course.release {
         reasons.push(Some(UNRELEASED_COURSE_REASON.to_string()));
     }
-    match crate::course_ir::course_block_reason(&reasons) {
-        Some(reason) => println!("course not submitted: {reason}"),
-        None if !shared.sends_to_primary_ir_server() => {}
-        None => {
-            let sub = build_course_submission(run, &submission_player_id(&shared.session, &shared.config.network.player_id), shared.course_assist);
-            let server = shared.course_ir_server();
-            std::thread::spawn(move || {
-                let _ = crate::course_ir::submit(server.as_ref(), &sub);
-            });
+    let submission = match crate::course_ir::course_block_reason(&reasons) {
+        Some(reason) => {
+            println!("course not submitted: {reason}");
+            None
         }
+        None => Some(build_course_submission(run, &submission_player_id(&shared.session), shared.course_assist)),
+    };
+    if let Some(sub) = submission {
+        shared.keep_and_send_course(sub);
     }
-    let state = CourseResultState::of(run, shared);
-    Transition::To(Stage::CourseResult(Box::new(state)))
 }
 
 /// Start a chart from the browser's list without going back through the browser, which is what both

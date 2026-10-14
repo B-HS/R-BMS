@@ -16,7 +16,10 @@ pub const SCHEMA_VERSION: u32 = 1;
 /// Generation 1 read every chart that was not UTF-8 as Shift_JIS. Generation 2 tells EUC-KR apart
 /// and reads past a UTF-8 mark in front of legacy text, which changes the stored titles, artists
 /// and file names of the charts written that way and nothing that scores are kept under.
-pub const PARSER_VERSION: u32 = 2;
+/// Generation 3 settles long notes the way the reference decoder does: a normal note inside a long
+/// note's body leaves the lane, and a long-note head the chart never closes is dropped. That changes
+/// the stored `notes`, `long_notes` and density of the charts that have either, and nothing else.
+pub const PARSER_VERSION: u32 = 3;
 
 /// Connection settings every open applies: the write-ahead log so a scan writing in one connection
 /// does not block the browser reading in another, and the foreign keys that make `song_detail`

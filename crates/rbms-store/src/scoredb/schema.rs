@@ -45,10 +45,30 @@ pub(super) fn migrate(conn: &mut Connection) -> Result<u32, ScoreDbError> {
     }
     let tx = conn.transaction()?;
     tx.execute_batch(SCHEMA_SQL)?;
+    add_missing_columns(&tx)?;
+    super::refold_reference_bests(&tx)?;
     tx.execute("INSERT OR REPLACE INTO meta(key, value) VALUES(?1, ?2)", (META_SCHEMA_VERSION, SCORE_DB_SCHEMA_VERSION.to_string()))?;
     tx.execute("INSERT OR IGNORE INTO meta(key, value) VALUES(?1, ?2)", (META_CREATED_AT, now_epoch_seconds().to_string()))?;
     tx.commit()?;
     Ok(SCORE_DB_SCHEMA_VERSION)
+}
+
+/// Columns added to a table after the table first shipped, with the declaration each is added
+/// under. `CREATE TABLE IF NOT EXISTS` leaves a table that predates one as it was, so the column is
+/// added to it here; the generation stays where it is, since a build that predates the column reads
+/// the table by name and never sees it.
+const ADDED_COLUMNS: &[(&str, &str, &str)] = &[("ir_sync", "refused_under", "TEXT"), ("ir_sync", "replay_refused_under", "TEXT")];
+
+/// Add every [`ADDED_COLUMNS`] entry its table does not have yet.
+fn add_missing_columns(conn: &Connection) -> Result<(), ScoreDbError> {
+    for (table, column, declaration) in ADDED_COLUMNS {
+        let mut stmt = conn.prepare(&format!("SELECT name FROM pragma_table_info('{table}')"))?;
+        let present = stmt.query_map([], |row| row.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        if !present.iter().any(|name| name == column) {
+            conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {declaration}"))?;
+        }
+    }
+    Ok(())
 }
 
 /// The generation stamped on the database, or `None` when it has never been migrated (no `meta`
@@ -74,7 +94,11 @@ pub const MODE_UNKNOWN: i32 = 0;
 /// Play mode names and the integer ids they are stored under. The ids are the reference
 /// implementation's `Mode` ids, read off the mode-id switch in `PlayerConfig.java:413-430`, so a
 /// database written here means the same thing as one written there.
-const MODE_IDS: &[(&str, i32)] = &[("BEAT_5K", 5), ("BEAT_7K", 7), ("POPN_9K", 9), ("BEAT_10K", 10), ("BEAT_14K", 14), ("KEYBOARD_24K", 25)];
+const MODE_IDS: &[(&str, i32)] = &[("BEAT_5K", 5), ("BEAT_7K", 7), ("POPN_9K", MODE_POPN_9K), ("BEAT_10K", 10), ("BEAT_14K", 14), ("KEYBOARD_24K", 25)];
+
+/// The id pop'n nine keys is stored under: the one mode whose BAD leaves its note to be judged
+/// again (`JudgeProperty.java:40`, `judgeVanish`), so a BAD there took no note.
+pub(super) const MODE_POPN_9K: i32 = 9;
 
 /// Gauge id for a token that is not one of the known ones.
 pub const GAUGE_UNKNOWN: i32 = 0;

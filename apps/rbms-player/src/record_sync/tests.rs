@@ -4,7 +4,7 @@
 use std::collections::VecDeque;
 use std::sync::Mutex;
 
-use rbms_ir::{CourseSubmission, IrError, PlayerProfile, ReplayData, ServerInfo, SubmitResponse};
+use rbms_ir::{CourseSubmission, IrError, PlayerProfile, ReplayData, ServerInfo, SubmitResponse, VersionInfo};
 use rbms_store::scoredb::{ASSIST_UNRECORDED, JudgeCounts, SEED_UNRECORDED, mode_id};
 
 use super::*;
@@ -27,6 +27,9 @@ const CANCEL_LOOK: Duration = Duration::from_millis(1);
 const NO_PACING: SyncPacing =
     SyncPacing { score_interval: Duration::ZERO, replay_interval: Duration::ZERO, rate_limit_wait: Duration::ZERO, cancel_check: CANCEL_LOOK };
 
+/// The status a server failing on its own side answers with.
+const SERVER_FAILURE_STATUS: u16 = 500;
+
 /// The play the player reported as #52: a finished run with more 空POOR than POORs let pass.
 const RUN_52_COUNTS: [u32; JUDGE_TIER_COUNT] = [1_500, 250, 50, 15, 20, 43];
 const RUN_52_NOTES: u32 = 1_835;
@@ -48,6 +51,13 @@ struct ScriptedServer {
     uploaded: Mutex<Vec<(ChartId, ReplayData)>>,
     /// Set when the first submission arrives, so a test can cancel a sync in the middle.
     on_submit: Mutex<Option<Arc<AtomicBool>>>,
+    /// The commit the server says it runs; `None` for a server that does not say.
+    commit: Mutex<Option<String>>,
+    /// Charts whose every submission the server fails on its side.
+    failing: Mutex<Vec<String>>,
+    /// Holds the server's answer to which build it runs until the test lets go, which is the first
+    /// thing a sync the app starts asks.
+    version_gate: Mutex<Option<Receiver<()>>>,
 }
 
 impl ScriptedServer {
@@ -85,6 +95,15 @@ impl ScoreServer for ScriptedServer {
     fn health(&self) -> Result<ServerInfo, IrError> {
         Err(IrError::Unsupported)
     }
+    fn version(&self) -> Result<VersionInfo, IrError> {
+        if let Some(gate) = self.version_gate.lock().expect("the version gate").take() {
+            let _ = gate.recv();
+        }
+        match self.commit.lock().expect("the commit").clone() {
+            Some(commit) => Ok(VersionInfo { api_version: rbms_ir::API_VERSION, server: "rbms-web".into(), commit: Some(commit) }),
+            None => Err(IrError::Unsupported),
+        }
+    }
     fn submit_score(&self, sub: &ScoreSubmission) -> Result<SubmitResponse, IrError> {
         let count = {
             let mut log = self.submitted.lock().expect("the submission log");
@@ -93,6 +112,9 @@ impl ScoreServer for ScriptedServer {
         };
         if let Some(cancel) = self.on_submit.lock().expect("the cancel hook").as_ref() {
             cancel.store(true, Ordering::Relaxed);
+        }
+        if self.failing.lock().expect("the failing charts").contains(&sub.chart.id.md5) {
+            return Err(IrError::Server(SERVER_FAILURE_STATUS, String::new()));
         }
         self.answers.lock().expect("the script").pop_front().unwrap_or_else(|| Ok(taken(&format!("sc_{count}"))))
     }
@@ -155,12 +177,23 @@ fn job(scores: Vec<SyncCandidate>) -> SyncJob {
     SyncJob {
         login_id: ACCOUNT_ID.into(),
         scores,
+        courses: Vec::new(),
         replays: Vec::new(),
         upload_replays: true,
         replay_dir: std::env::temp_dir(),
         charts: HashMap::new(),
         pacing: NO_PACING,
     }
+}
+
+/// Send `job` on a worker thread, as a sync the frame thread starts does once it has picked it.
+fn spawn_record_sync(server: Arc<dyn ScoreServer>, job: SyncJob, cancel: Arc<AtomicBool>) -> Receiver<SyncEvent> {
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let stop = run_record_sync(server.as_ref(), job, &cancel, &tx);
+        let _ = tx.send(SyncEvent::Finished { stop });
+    });
+    rx
 }
 
 /// Run `job` against `server` to its end and answer everything it reported.
@@ -219,7 +252,7 @@ fn saved_replay(dir: &Path, name: &str) {
         judge: Default::default(),
         events: vec![rbms_store::ReplayEvent { t: 1_000, lane: 1, press: true, backward: false }],
     };
-    replay.save(&dir.join(name));
+    replay.try_save(&dir.join(name)).expect("the replay is written");
 }
 
 #[test]
@@ -408,8 +441,8 @@ fn a_refused_play_is_written_down_with_its_reason_and_the_sync_goes_on() {
     let (_, ScoreOutcome::Rejected(rejection)) = &outcomes[0] else {
         panic!("the first play was not refused: {outcomes:?}");
     };
-    let row = sync_row(1, "s", ACCOUNT_ID, &outcomes[0].1);
-    assert_eq!((rejection.field.as_deref(), row.state), (Some("judge"), SyncState::Rejected));
+    let row = sync_row(1, "s", ACCOUNT_ID, &outcomes[0].1, "rbms/test|c1");
+    assert_eq!((rejection.field.as_deref(), row.state, row.refused_under.as_deref()), (Some("judge"), SyncState::Rejected, Some("rbms/test|c1")));
     assert_eq!(
         (row.http_status, row.error_code.as_deref(), row.error_field.as_deref(), row.error_reason.as_deref()),
         (Some(400), Some("VALIDATION_ERROR"), Some("judge"), Some("judge count exceeds total_notes"))
@@ -432,14 +465,17 @@ fn cancelling_ends_the_sync_between_runs() {
 
 #[test]
 fn the_summary_names_only_what_happened() {
-    let tally = SyncTally { sent: 120, already: 30, rejected: 5, failed: 2, skipped: 1, replays_uploaded: 80, replays_failed: 3 };
+    let tally = SyncTally { sent: 120, already: 30, rejected: 5, failed: 2, skipped: 1, replays_uploaded: 80, replays_failed: 3, ..SyncTally::default() };
     assert_eq!(tally.summary(), "records: 120 sent, 30 already on server, 5 rejected, 2 failed, 1 skipped; replays: 80 uploaded, 3 failed");
+    let courses = SyncTally { sent: 1, courses_sent: 2, courses_failed: 1, replays_uploaded: 1, ..SyncTally::default() };
+    assert_eq!(courses.summary(), "records: 1 sent; courses: 2 sent, 1 failed; replays: 1 uploaded");
     assert_eq!(SyncTally { sent: 2, ..SyncTally::default() }.summary(), "records: 2 sent");
     assert_eq!(SyncTally { replays_uploaded: 1, ..SyncTally::default() }.summary(), "records: nothing sent; replays: 1 uploaded");
     assert_eq!(stop_line(&SyncStop::RateLimited), "records sync stopped: rate limited");
     assert_eq!(stop_line(&SyncStop::Unreachable("x".into())), "records sync stopped: server unreachable");
     assert_eq!(stop_line(&SyncStop::Unauthorized("not signed in (401)".into())), "records sync stopped: not signed in (401)");
     assert_eq!(stop_line(&SyncStop::Cancelled), "records sync cancelled");
+    assert_eq!(stop_line(&SyncStop::Unreadable("locked".into())), "records sync not started: locked");
 }
 
 #[test]
@@ -524,6 +560,7 @@ fn a_sync_writes_every_answer_down_and_sends_only_what_the_server_lacks_next_tim
         ..play(0, "cc", 1, [1, 0, 0, 0, 0, 0], 1)
     };
     let old = store(&mut shared, &old_rule);
+    shared.reload_record_sync_states();
 
     assert!(shared.start_record_sync(SyncScope::All));
     poll_to_the_end(&mut shared);
@@ -536,13 +573,126 @@ fn a_sync_writes_every_answer_down_and_sends_only_what_the_server_lacks_next_tim
     assert_eq!(shared.record_sync_states, states, "the record screens read what was written");
     assert_eq!(shared.record_ir_line(Some(first)).map(|(line, _)| line).as_deref(), Some("IR: ON SERVER"));
 
-    assert!(shared.start_record_sync(SyncScope::All), "the refused play is sent again");
+    let status = shared.net_status.clone();
+    assert!(shared.start_record_sync(SyncScope::All));
+    poll_to_the_end(&mut shared);
+    assert_eq!(server.submitted().len(), 2, "a sync started on its own does not send a refusal the same builds gave again");
+    assert_eq!(shared.net_status, status, "and a sync that found nothing to send says nothing");
+
+    shared.sync_records_now();
     poll_to_the_end(&mut shared);
     let sent = server.submitted();
-    assert_eq!(sent.len(), 3, "the play the server holds is not sent again");
+    assert_eq!(sent.len(), 3, "by hand the refused play is sent again, and the play the server holds is not");
     assert_eq!(sent[2].chart.id.md5, "bb");
     assert_eq!(shared.record_sync_states[&second].state, SyncState::Accepted);
-    assert!(!shared.start_record_sync(SyncScope::All), "nothing is left to send");
+    shared.sync_records_now();
+    poll_to_the_end(&mut shared);
+    assert_eq!((server.submitted().len(), shared.net_status.as_str()), (3, NOTHING_TO_SEND), "nothing is left to send");
+}
+
+/// A server that names its build: a refusal it gave is not sent again on its own until the server
+/// or this client is another build.
+#[test]
+fn an_automatic_sync_does_not_resend_a_rejection_the_same_server_build_gave() {
+    let server = ScriptedServer::answering(vec![Err(judge_refusal())]);
+    *server.commit.lock().expect("the commit") = Some("c1".into());
+    let mut shared = signed_in("refused-same-build", Arc::clone(&server));
+    let refused = store(&mut shared, &play(0, "aa", PLAYED_SECOND, [1, 0, 0, 0, 0, 0], 1));
+    for _ in 0..2 {
+        assert!(shared.start_record_sync(SyncScope::All));
+        poll_to_the_end(&mut shared);
+    }
+    assert_eq!(server.submitted().len(), 1, "the second sync on its own left the refusal out");
+    let row = &shared.scoredb.as_ref().expect("the database").sync_states(&server_key(SERVER_URL)).expect("reads")[&refused];
+    assert_eq!(row.refused_under.as_deref(), Some(refusal_key(&shared.client_build(), "c1").as_str()));
+
+    *server.commit.lock().expect("the commit") = Some("c2".into());
+    assert!(shared.start_record_sync(SyncScope::All));
+    poll_to_the_end(&mut shared);
+    assert_eq!(server.submitted().len(), 2, "a new server build may take it, so it goes again");
+    assert_eq!(shared.record_sync_states[&refused].state, SyncState::Accepted);
+}
+
+#[test]
+fn a_new_client_build_resends_every_rejection() {
+    let server = ScriptedServer::answering(vec![Err(judge_refusal())]);
+    *server.commit.lock().expect("the commit") = Some("c1".into());
+    let mut shared = signed_in("refused-new-client", Arc::clone(&server));
+    store(&mut shared, &play(0, "aa", PLAYED_SECOND, [1, 0, 0, 0, 0, 0], 1));
+    shared.build_sha256 = Some("first-build".into());
+    assert!(shared.start_record_sync(SyncScope::All));
+    poll_to_the_end(&mut shared);
+    shared.build_sha256 = Some("next-build".into());
+    assert!(shared.start_record_sync(SyncScope::All));
+    poll_to_the_end(&mut shared);
+    assert_eq!(server.submitted().len(), 2, "another client build may send what the server takes");
+}
+
+#[test]
+fn a_rejected_replay_is_not_uploaded_again_by_an_automatic_sync() {
+    let server = ScriptedServer::answering(Vec::new());
+    *server.commit.lock().expect("the commit") = Some("c1".into());
+    *server.uploads_answers.lock().expect("the upload script") = vec![Err(IrError::PayloadTooLarge(String::new()))].into();
+    let mut shared = signed_in("replay-refused", Arc::clone(&server));
+    shared.config.network.auto_upload_replay = true;
+    saved_replay(&shared.replay_dir.clone(), "aa-1.ron");
+    let id = store(&mut shared, &PlayLog { replay_file: Some("aa-1.ron".into()), ..play(0, "aa", PLAYED_SECOND, [1, 0, 0, 0, 0, 0], 1) });
+    assert!(shared.start_record_sync(SyncScope::All));
+    poll_to_the_end(&mut shared);
+    assert_eq!(server.uploaded().len(), 1);
+    let row = &shared.scoredb.as_ref().expect("the database").sync_states(&server_key(SERVER_URL)).expect("reads")[&id];
+    assert_eq!((row.replay_state, row.http_status), (ReplayState::Rejected, None));
+    assert!(row.replay_refused_under.is_some(), "the refusal is written down under the builds");
+
+    assert!(shared.start_record_sync(SyncScope::All));
+    poll_to_the_end(&mut shared);
+    assert_eq!(server.uploaded().len(), 1, "a sync on its own does not upload a refused replay again");
+    shared.sync_records_now();
+    poll_to_the_end(&mut shared);
+    assert_eq!(server.uploaded().len(), 2, "by hand it goes again");
+    assert_eq!(shared.record_sync_states[&id].replay_state, ReplayState::Uploaded);
+}
+
+/// Three plays a server keeps failing on its own side stop a sync, but the next one sends the plays
+/// it has not been asked about before them, so the plays after them still go up.
+#[test]
+fn plays_that_always_fail_do_not_hold_back_the_plays_after_them() {
+    let server = ScriptedServer::answering(Vec::new());
+    *server.failing.lock().expect("the failing charts") = vec!["bad".into()];
+    let mut shared = signed_in("always-failing", Arc::clone(&server));
+    for second in 0..3 {
+        store(&mut shared, &play(0, "bad", PLAYED_SECOND + second, [1, 0, 0, 0, 0, 0], 1));
+    }
+    let good = store(&mut shared, &play(0, "good", PLAYED_SECOND + 10, [1, 0, 0, 0, 0, 0], 1));
+    assert!(shared.start_record_sync(SyncScope::All));
+    poll_to_the_end(&mut shared);
+    assert_eq!(shared.net_status, "records sync stopped: server unreachable");
+    assert!(!shared.record_sync_states.contains_key(&good), "the first sync stopped before the good play");
+
+    assert!(shared.start_record_sync(SyncScope::All));
+    poll_to_the_end(&mut shared);
+    assert_eq!(shared.record_sync_states[&good].state, SyncState::Accepted, "the good play went before the failing ones");
+}
+
+/// The frame thread picks nothing: a full sync is started before the worker has even asked the
+/// server its build, and a play stored meanwhile is left to whoever stored it.
+#[test]
+fn starting_a_full_sync_picks_nothing_on_the_frame_thread() {
+    let server = ScriptedServer::answering(Vec::new());
+    let (release, gate) = std::sync::mpsc::channel();
+    *server.version_gate.lock().expect("the version gate") = Some(gate);
+    let mut shared = signed_in("picked-elsewhere", Arc::clone(&server));
+    for second in 0..3 {
+        store(&mut shared, &play(0, "aa", PLAYED_SECOND + second, [1, 0, 0, 0, 0, 0], 1));
+    }
+    assert!(shared.start_record_sync(SyncScope::All), "the sync starts without waiting on anything");
+    shared.poll_record_sync();
+    assert!(shared.record_sync.as_ref().is_some_and(|run| run.scores_total == 0), "nothing was picked yet");
+    let later = store(&mut shared, &play(0, "zz", PLAYED_SECOND + 10, [1, 0, 0, 0, 0, 0], 1));
+    drop(release);
+    poll_to_the_end(&mut shared);
+    assert_eq!(server.submitted().iter().map(|sub| sub.chart.id.md5.as_str()).collect::<Vec<_>>(), ["aa", "aa", "aa"]);
+    assert!(!shared.record_sync_states.contains_key(&later), "the play stored after the sync began is not in it");
 }
 
 #[test]
@@ -645,7 +795,14 @@ fn the_sync_row_shows_its_progress_while_it_runs() {
         store(&mut shared, &play(0, "aa", PLAYED_SECOND + second, [1, 0, 0, 0, 0, 0], 1));
     }
     assert!(shared.start_record_sync(SyncScope::All));
-    assert_eq!(shared.network_setting_line(rbms_config::SettingId::SyncRecords).map(|(_, value)| value).as_deref(), Some("SENDING 0/2"));
+    let deadline = Instant::now() + SYNC_WAIT;
+    while shared.record_sync.as_ref().is_some_and(|run| run.scores_total == 0) {
+        assert!(Instant::now() < deadline, "the sync did not pick its plays");
+        shared.poll_record_sync();
+        std::thread::sleep(SYNC_POLL);
+    }
+    let value = shared.network_setting_line(rbms_config::SettingId::SyncRecords).map(|(_, value)| value).expect("the row has a value");
+    assert!(value.starts_with("SENDING ") && value.ends_with("/2"), "{value}");
     shared.cancel_record_sync();
 }
 
@@ -709,6 +866,9 @@ fn a_sync_of_named_plays_leaves_the_states_the_screens_read_as_they_are() {
     poll_to_the_end(&mut shared);
     assert_eq!(shared.record_sync_states.keys().copied().collect::<Vec<_>>(), [named], "the held-back play was not marked by a walk of one play");
 
-    assert!(!shared.start_record_sync(SyncScope::All), "nothing else is left to send");
-    assert_eq!(shared.record_sync_states[&old].error_code.as_deref(), Some(SKIPPED_OLD_SCRATCH_AUTO_RULE), "a full walk marks it");
+    assert!(shared.start_record_sync(SyncScope::All));
+    poll_to_the_end(&mut shared);
+    assert_eq!(server.submitted().len(), 1, "nothing else is left to send");
+    shared.reload_record_sync_states();
+    assert_eq!(shared.record_sync_states[&old].error_code.as_deref(), Some(SKIPPED_OLD_SCRATCH_AUTO_RULE), "reading the states names why it is held back");
 }

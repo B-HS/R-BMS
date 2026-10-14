@@ -82,12 +82,9 @@ impl FolderAccount {
     /// The account signed in now on the score server of the settings, or `None` when nobody is
     /// signed in to one.
     pub(crate) fn of(shared: &AppShared) -> Option<FolderAccount> {
-        if !shared.session.is_logged_in() {
-            return None;
-        }
+        let player_id = shared.session.signed_in_as()?;
         let server = shared.config.network.server_url.as_deref()?.trim().trim_end_matches('/');
-        let player_id = shared.session.login_id()?.trim();
-        (!server.is_empty() && !player_id.is_empty()).then(|| FolderAccount { server: server.to_string(), player_id: player_id.to_string() })
+        (!server.is_empty()).then(|| FolderAccount { server: server.to_string(), player_id: player_id.to_string() })
     }
 
     /// Where the copy of this account's folders is kept, for the settings file at `settings_path`.

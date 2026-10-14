@@ -9,6 +9,14 @@ fn first_note(m: &Model, lane: usize) -> &Note {
     m.timelines.iter().flat_map(|tl| tl.notes[lane].as_ref()).next().unwrap()
 }
 
+fn lane_kinds(m: &Model, lane: usize) -> Vec<NoteKind> {
+    m.timelines.iter().flat_map(|tl| tl.notes[lane].as_ref()).map(|n| n.kind.clone()).collect()
+}
+
+fn background_wavs(m: &Model) -> Vec<i32> {
+    m.timelines.iter().flat_map(|tl| tl.bgnotes.iter()).map(|n| n.wav).collect()
+}
+
 fn first_ln_kind(m: &Model, lane: usize) -> LnKind {
     m.timelines
         .iter()
@@ -221,13 +229,6 @@ fn mine_damage_is_the_raw_object_value_in_the_chart_base() {
 }
 
 #[test]
-fn probe_unterminated_ln_dangling_start() {
-    let m = model(b"#WAV01 a.wav\r\n#00151:01\r\n");
-    let kinds: Vec<NoteKind> = m.timelines.iter().flat_map(|tl| tl.notes[0].as_ref()).map(|n| n.kind.clone()).collect();
-    eprintln!("PROBE kinds={:?} playable={}", kinds, count_playable_notes(&m));
-}
-
-#[test]
 fn note_density_bins_normal_notes_per_second() {
     let m = model(b"#BPM 120\r\n#WAV01 a.wav\r\n#00011:01010101\r\n");
     let d = note_density(&m, 0.0);
@@ -259,11 +260,11 @@ fn note_density_bins_stop_at_last_note_not_trailing_bar_lines() {
 }
 
 #[test]
-fn note_density_dangling_long_note_head_still_counts() {
+fn note_density_ignores_an_unclosed_long_note_head() {
     let m = model(b"#BPM 120\r\n#WAV01 a.wav\r\n#00051:01\r\n");
     let d = note_density(&m, 0.0);
-    assert_eq!(d.bins[0], 1, "dangling LN head should contribute one note at its second");
-    assert_eq!(d.peak, 1.0);
+    assert_eq!(d.bins.iter().sum::<u32>(), 0, "a head without a tail is gone from the model, so the density sees nothing");
+    assert_eq!(d.peak, 0.0);
 }
 
 #[test]
@@ -444,8 +445,7 @@ fn section_rate_scales_measure_length() {
 fn lnobj_does_not_convert_an_ln_channel_start() {
     let m = model(b"#LNOBJ ZZ\r\n#WAVZZ a.wav\r\n#00151:01\r\n#00211:ZZ\r\n");
     let kinds: Vec<NoteKind> = m.timelines.iter().flat_map(|tl| tl.notes[0].as_ref()).map(|n| n.kind.clone()).collect();
-    assert!(matches!(kinds[0], NoteKind::LongStart { .. }), "the LN-channel head is untouched");
-    assert!(matches!(kinds[1], NoteKind::Normal), "LNOBJ with no tracked Normal stays Normal, got {:?}", kinds[1]);
+    assert_eq!(kinds, vec![NoteKind::Normal], "the unclosed LN-channel head is removed and the LNOBJ object with nothing to convert stays a note");
 }
 
 #[test]
@@ -474,32 +474,38 @@ fn lnobj_conversion_preserves_playable_count() {
 
 #[test]
 fn ln_channel_second_open_after_close_is_a_new_start() {
-    let m = model(b"#WAV01 a.wav\r\n#00151:010101\r\n");
-    let kinds: Vec<NoteKind> = m.timelines.iter().flat_map(|tl| tl.notes[0].as_ref()).map(|n| n.kind.clone()).collect();
-    assert_eq!(kinds.len(), 3);
-    assert!(matches!(kinds[0], NoteKind::LongStart { .. }));
-    assert!(matches!(kinds[1], NoteKind::LongEnd { .. }));
-    assert!(matches!(kinds[2], NoteKind::LongStart { .. }), "a re-open after close is a new LongStart");
-    assert_eq!(count_playable_notes(&m), 2, "two heads are playable, the single end is excluded");
+    let m = model(b"#WAV01 a.wav\r\n#00151:01010101\r\n");
+    assert_eq!(lane_kinds(&m, 0).len(), 4);
+    assert!(matches!(lane_kinds(&m, 0)[2], NoteKind::LongStart { .. }), "a re-open after close is a new LongStart");
+    assert_eq!(count_playable_notes(&m), 2, "two heads are playable, the two tails are not");
 }
 
 #[test]
-fn dangling_ln_start_counts_as_one_playable() {
+fn an_unclosed_long_note_head_is_removed() {
     let m = model(b"#WAV01 a.wav\r\n#00151:01\r\n");
-    let kinds: Vec<NoteKind> = m.timelines.iter().flat_map(|tl| tl.notes[0].as_ref()).map(|n| n.kind.clone()).collect();
-    assert_eq!(kinds.len(), 1);
-    assert!(matches!(kinds[0], NoteKind::LongStart { .. }));
+    assert!(lane_kinds(&m, 0).is_empty(), "a head the chart never closes is not a note");
+    assert_eq!(count_playable_notes(&m), 0);
+}
+
+#[test]
+fn an_odd_third_long_note_object_is_removed_and_the_pair_before_it_stays() {
+    let m = model(b"#WAV01 a.wav\r\n#00151:010101\r\n");
+    assert!(matches!(lane_kinds(&m, 0).as_slice(), [NoteKind::LongStart { .. }, NoteKind::LongEnd { .. }]));
     assert_eq!(count_playable_notes(&m), 1);
+}
+
+#[test]
+fn notes_after_an_unclosed_head_stay_playable() {
+    let m = model(b"#WAV01 a.wav\r\n#WAV02 b.wav\r\n#00151:01\r\n#00211:02\r\n#00311:02\r\n");
+    assert_eq!(lane_kinds(&m, 0), vec![NoteKind::Normal, NoteKind::Normal], "nothing closes the head, so nothing is inside a body");
+    assert_eq!(count_playable_notes(&m), 2);
 }
 
 #[test]
 fn ln_open_close_is_independent_per_lane() {
     let m = model(b"#WAV01 a.wav\r\n#00151:01\r\n#00153:0101\r\n");
-    let lane0: Vec<NoteKind> = m.timelines.iter().flat_map(|tl| tl.notes[0].as_ref()).map(|n| n.kind.clone()).collect();
-    let lane2: Vec<NoteKind> = m.timelines.iter().flat_map(|tl| tl.notes[2].as_ref()).map(|n| n.kind.clone()).collect();
-    assert!(matches!(lane0[0], NoteKind::LongStart { .. }), "lane 0 dangling head");
-    assert!(matches!(lane2[0], NoteKind::LongStart { .. }));
-    assert!(matches!(lane2[1], NoteKind::LongEnd { .. }), "lane 2 closes on its own toggle");
+    assert!(lane_kinds(&m, 0).is_empty(), "lane 0 has a head and no tail");
+    assert!(matches!(lane_kinds(&m, 2).as_slice(), [NoteKind::LongStart { .. }, NoteKind::LongEnd { .. }]), "lane 2 closes on its own toggle");
 }
 
 #[test]
@@ -687,4 +693,151 @@ fn note_density_of_a_chart_whose_tempo_puts_its_last_note_years_away_has_no_bins
     let d = note_density(&m, 0.0);
     assert!(d.bins.is_empty());
     assert_eq!((d.peak, d.avg, d.end), (0.0, 0.0, 0.0));
+}
+
+#[test]
+fn a_normal_note_inside_a_long_note_body_leaves_the_lane_and_plays_as_background() {
+    let m = model(b"#WAV01 a.wav\r\n#WAV02 b.wav\r\n#00151:01\r\n#00211:02\r\n#00351:01\r\n");
+    assert!(matches!(lane_kinds(&m, 0).as_slice(), [NoteKind::LongStart { .. }, NoteKind::LongEnd { .. }]));
+    assert_eq!(background_wavs(&m), vec![2], "the swept note keeps its sample as a background sound");
+    assert_eq!(count_playable_notes(&m), 1);
+}
+
+#[test]
+fn normal_notes_in_other_lanes_stay_while_a_long_note_is_held() {
+    let m = model(b"#WAV01 a.wav\r\n#WAV02 b.wav\r\n#00151:01\r\n#00213:02\r\n#00351:01\r\n");
+    assert_eq!(lane_kinds(&m, 2), vec![NoteKind::Normal]);
+    assert!(background_wavs(&m).is_empty());
+    assert_eq!(count_playable_notes(&m), 2);
+}
+
+#[test]
+fn a_mine_inside_a_long_note_body_is_dropped() {
+    let m = model(b"#WAV01 a.wav\r\n#WAVZZ a.wav\r\n#00151:01\r\n#002D1:ZZ\r\n#00351:01\r\n");
+    assert!(matches!(lane_kinds(&m, 0).as_slice(), [NoteKind::LongStart { .. }, NoteKind::LongEnd { .. }]));
+    assert!(background_wavs(&m).is_empty(), "a mine is not a sound");
+}
+
+#[test]
+fn a_normal_note_after_the_tail_stays() {
+    let m = model(b"#WAV01 a.wav\r\n#WAV02 b.wav\r\n#00151:01\r\n#00251:01\r\n#00311:02\r\n");
+    assert!(matches!(lane_kinds(&m, 0).as_slice(), [NoteKind::LongStart { .. }, NoteKind::LongEnd { .. }, NoteKind::Normal]));
+    assert!(background_wavs(&m).is_empty());
+}
+
+#[test]
+fn a_normal_note_on_the_head_tick_with_another_sample_plays_as_background() {
+    let m = model(b"#WAV01 a.wav\r\n#WAV02 b.wav\r\n#00111:02\r\n#00151:01\r\n#00251:01\r\n");
+    assert!(matches!(lane_kinds(&m, 0).as_slice(), [NoteKind::LongStart { .. }, NoteKind::LongEnd { .. }]));
+    assert_eq!(background_wavs(&m), vec![2]);
+}
+
+#[test]
+fn a_normal_note_on_the_head_tick_with_the_heads_own_sample_is_dropped() {
+    let m = model(b"#WAV01 a.wav\r\n#00111:01\r\n#00151:01\r\n#00251:01\r\n");
+    assert!(matches!(lane_kinds(&m, 0).as_slice(), [NoteKind::LongStart { .. }, NoteKind::LongEnd { .. }]));
+    assert!(background_wavs(&m).is_empty(), "the head plays that sample already");
+}
+
+#[test]
+fn a_normal_note_on_the_tail_tick_is_replaced_by_the_tail() {
+    let m = model(b"#WAV01 a.wav\r\n#WAV02 b.wav\r\n#00151:01\r\n#00211:02\r\n#00251:01\r\n");
+    assert!(matches!(lane_kinds(&m, 0).as_slice(), [NoteKind::LongStart { .. }, NoteKind::LongEnd { .. }]));
+    assert!(background_wavs(&m).is_empty());
+}
+
+#[test]
+fn a_normal_note_written_over_a_head_ends_the_long_note() {
+    let m = model(b"#WAV01 a.wav\r\n#WAV02 b.wav\r\n#00151:01\r\n#00111:02\r\n#00251:01\r\n");
+    assert_eq!(lane_kinds(&m, 0), vec![NoteKind::Normal], "the tail has lost its head and goes with it");
+    assert_eq!(count_playable_notes(&m), 1);
+}
+
+#[test]
+fn a_long_note_head_on_the_previous_tail_tick_is_swallowed_with_its_own_tail() {
+    let m = model(b"#WAV01 a.wav\r\n#00151:01\r\n#00251:01\r\n#00251:01\r\n#00351:01\r\n");
+    assert!(matches!(lane_kinds(&m, 0).as_slice(), [NoteKind::LongStart { .. }, NoteKind::LongEnd { .. }]), "the first long note stays, the second is gone");
+    assert_eq!(count_playable_notes(&m), 1);
+}
+
+#[test]
+fn a_long_note_pair_made_by_lnobj_inside_a_long_note_body_is_swept() {
+    let m = model(b"#LNOBJ ZZ\r\n#WAV01 a.wav\r\n#WAVZZ a.wav\r\n#00151:01\r\n#00211:01\r\n#00311:ZZ\r\n#00451:01\r\n");
+    assert!(matches!(lane_kinds(&m, 0).as_slice(), [NoteKind::LongStart { .. }, NoteKind::LongEnd { .. }]), "only the outer long note is left");
+    assert_eq!(count_playable_notes(&m), 1);
+}
+
+#[test]
+fn a_long_note_head_on_an_lnobj_tail_tick_is_swallowed() {
+    let m = model(b"#LNOBJ ZZ\r\n#WAV01 a.wav\r\n#WAVZZ a.wav\r\n#00111:01\r\n#00211:ZZ\r\n#00251:01\r\n#00351:01\r\n");
+    assert!(matches!(lane_kinds(&m, 0).as_slice(), [NoteKind::LongStart { .. }, NoteKind::LongEnd { .. }]), "the lnobj pair stays");
+    assert_eq!(count_playable_notes(&m), 1);
+}
+
+#[test]
+fn a_charge_note_chart_counts_each_pair_twice_after_the_sweep() {
+    let m = to_model(&parse(b"#LNMODE 2\r\n#WAV01 a.wav\r\n#WAV02 b.wav\r\n#00151:01\r\n#00211:02\r\n#00351:01\r\n"), Mode::BEAT_7K);
+    assert_eq!(count_playable_notes(&m), 2, "head and tail, and the note inside the body is not counted");
+}
+
+mod repair {
+    use super::*;
+    use crate::long_note::repair;
+
+    const START: NoteKind = NoteKind::LongStart { ln: LnKind::Ln };
+    const END: NoteKind = NoteKind::LongEnd { ln: LnKind::Ln };
+    const MINE: NoteKind = NoteKind::Mine { damage: 1.0 };
+
+    fn lane_of(kinds: &[NoteKind]) -> Vec<TimeLine> {
+        kinds
+            .iter()
+            .enumerate()
+            .map(|(i, kind)| {
+                let mut tl = TimeLine::empty(1, 0, i as f64, 120.0);
+                let mut note = Note::normal(i as i32 + 1, 0, i as f64);
+                note.kind = kind.clone();
+                tl.notes[0] = Some(note);
+                tl
+            })
+            .collect()
+    }
+
+    fn repaired(kinds: &[NoteKind]) -> (Vec<NoteKind>, Vec<i32>) {
+        let mut timelines = lane_of(kinds);
+        repair(&mut timelines, 1);
+        let left = timelines.iter().flat_map(|tl| tl.notes[0].as_ref()).map(|n| n.kind.clone()).collect();
+        let background = timelines.iter().flat_map(|tl| tl.bgnotes.iter()).map(|n| n.wav).collect();
+        (left, background)
+    }
+
+    #[test]
+    fn a_well_formed_lane_is_untouched() {
+        let kinds = [NoteKind::Normal, START, END, MINE, START, END];
+        assert_eq!(repaired(&kinds), (kinds.to_vec(), vec![]));
+    }
+
+    #[test]
+    fn a_tail_without_a_head_is_removed() {
+        assert_eq!(repaired(&[END, NoteKind::Normal, END]), (vec![NoteKind::Normal], vec![]));
+    }
+
+    #[test]
+    fn a_head_met_before_the_previous_one_closed_replaces_it() {
+        assert_eq!(repaired(&[START, START, END]), (vec![START, END], vec![]));
+    }
+
+    #[test]
+    fn the_last_unclosed_head_is_removed() {
+        assert_eq!(repaired(&[START, END, START]), (vec![START, END], vec![]));
+    }
+
+    #[test]
+    fn notes_after_an_unclosed_head_stay() {
+        assert_eq!(repaired(&[START, NoteKind::Normal, MINE]), (vec![NoteKind::Normal, MINE], vec![]));
+    }
+
+    #[test]
+    fn normal_notes_and_mines_between_a_head_and_its_tail_leave_the_lane() {
+        assert_eq!(repaired(&[START, NoteKind::Normal, MINE, END]), (vec![START, END], vec![2]));
+    }
 }

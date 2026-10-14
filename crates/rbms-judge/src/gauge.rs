@@ -553,15 +553,21 @@ impl GrooveGauge {
 }
 
 /// Resolve the clear lamp from the final gauge state and judge tally.
-pub fn clear_lamp(gauge: &Gauge, counts: &[u32; 6], max_combo: u32, total_notes: u32) -> ClearType {
+///
+/// A run is a full combo when the combo standing at its end is every note it got through
+/// (`BMSPlayer.java:868`, `judge.getPastNotes() == judge.getCombo()`), not when its longest streak
+/// is as long as the chart. The two part where a judgement that consumes no note breaks the combo
+/// after the last note: an empty POOR on five keys and in pop'n (`JudgeProperty.java:18,40`) leaves
+/// the combo short of the notes and the run with the gauge's lamp. `combo` is the chart's own, never
+/// a course's streak carried in from the stage before.
+pub fn clear_lamp(gauge: &Gauge, counts: &[u32; 6], combo: u32, pass_notes: u32, total_notes: u32) -> ClearType {
     if total_notes == 0 {
         return ClearType::NoPlay;
     }
     if !gauge.is_cleared() {
         return ClearType::Failed;
     }
-    let broke = counts[3] + counts[4] > 0;
-    if !broke && max_combo == total_notes {
+    if pass_notes > 0 && combo == pass_notes {
         if counts[1] == 0 && counts[2] == 0 {
             return ClearType::Max;
         }
@@ -990,13 +996,13 @@ mod gauge_tests {
     #[test]
     fn lamp_noplay_when_zero_notes() {
         let g = Gauge::new(GaugeKind::Normal, 200.0, 0);
-        assert_eq!(clear_lamp(&g, &[0; 6], 0, 0), ClearType::NoPlay);
+        assert_eq!(clear_lamp(&g, &[0; 6], 0, 0, 0), ClearType::NoPlay);
     }
 
     #[test]
     fn lamp_failed_when_not_cleared() {
         let g = cleared_normal_gauge();
-        assert_eq!(clear_lamp(&g, &[1, 0, 0, 0, 0, 0], 1, 1), ClearType::Failed);
+        assert_eq!(clear_lamp(&g, &[1, 0, 0, 0, 0, 0], 1, 1, 1), ClearType::Failed);
     }
 
     fn high_normal() -> Gauge {
@@ -1010,31 +1016,31 @@ mod gauge_tests {
     #[test]
     fn lamp_max_all_pg() {
         let g = high_normal();
-        assert_eq!(clear_lamp(&g, &[5, 0, 0, 0, 0, 0], 5, 5), ClearType::Max);
+        assert_eq!(clear_lamp(&g, &[5, 0, 0, 0, 0, 0], 5, 5, 5), ClearType::Max);
     }
 
     #[test]
     fn lamp_perfect_when_only_great_no_good() {
         let g = high_normal();
-        assert_eq!(clear_lamp(&g, &[4, 1, 0, 0, 0, 0], 5, 5), ClearType::Perfect);
+        assert_eq!(clear_lamp(&g, &[4, 1, 0, 0, 0, 0], 5, 5, 5), ClearType::Perfect);
     }
 
     #[test]
     fn lamp_fullcombo_when_good_present_no_break() {
         let g = high_normal();
-        assert_eq!(clear_lamp(&g, &[3, 1, 1, 0, 0, 0], 5, 5), ClearType::FullCombo);
+        assert_eq!(clear_lamp(&g, &[3, 1, 1, 0, 0, 0], 5, 5, 5), ClearType::FullCombo);
     }
 
     #[test]
     fn lamp_drops_to_gauge_kind_when_combo_broken() {
         let g = high_normal();
-        assert_eq!(clear_lamp(&g, &[4, 0, 0, 1, 0, 0], 4, 5), ClearType::Normal);
+        assert_eq!(clear_lamp(&g, &[4, 0, 0, 1, 0, 0], 4, 5, 5), ClearType::Normal);
     }
 
     #[test]
     fn lamp_drops_to_gauge_kind_when_combo_short() {
         let g = high_normal();
-        assert_eq!(clear_lamp(&g, &[4, 0, 0, 0, 0, 0], 4, 5), ClearType::Normal);
+        assert_eq!(clear_lamp(&g, &[4, 0, 0, 0, 1, 0], 3, 5, 5), ClearType::Normal);
     }
 
     #[test]
@@ -1053,22 +1059,33 @@ mod gauge_tests {
                 g.update(Judge::PerfectGreat);
             }
             assert!(g.is_cleared(), "{kind:?} should be cleared after many PG");
-            assert_eq!(clear_lamp(&g, &[3, 0, 0, 1, 0, 0], 3, 4), lamp, "{kind:?}");
+            assert_eq!(clear_lamp(&g, &[3, 0, 0, 1, 0, 0], 3, 4, 4), lamp, "{kind:?}");
         }
     }
 
     #[test]
     fn lamp_break_detected_via_bd_or_poor_but_not_empty_poor() {
         let g = high_normal();
-        assert_eq!(clear_lamp(&g, &[3, 0, 0, 1, 0, 0], 4, 4), ClearType::Normal);
-        assert_eq!(clear_lamp(&g, &[3, 0, 0, 0, 1, 0], 4, 4), ClearType::Normal);
-        assert_eq!(clear_lamp(&g, &[4, 0, 0, 0, 0, 1], 4, 4), ClearType::Max);
+        assert_eq!(clear_lamp(&g, &[3, 0, 0, 1, 0, 0], 3, 4, 4), ClearType::Normal);
+        assert_eq!(clear_lamp(&g, &[3, 0, 0, 0, 1, 0], 0, 4, 4), ClearType::Normal);
+        assert_eq!(clear_lamp(&g, &[4, 0, 0, 0, 0, 1], 4, 4, 4), ClearType::Max);
+    }
+
+    /// The lamp reads the combo standing at the end, as the reference does: a streak as long as the
+    /// chart that a judgement broke after the last note is no full combo, and a run whose combo
+    /// stands at every note it got through is one whatever else it was judged.
+    #[test]
+    fn lamp_reads_the_combo_standing_at_the_end_against_the_notes_got_through() {
+        let g = high_normal();
+        assert_eq!(clear_lamp(&g, &[5, 0, 0, 0, 0, 1], 0, 5, 5), ClearType::Normal, "an empty POOR after the last note broke the combo");
+        assert_eq!(clear_lamp(&g, &[5, 0, 0, 1, 0, 0], 5, 5, 5), ClearType::Max, "a BAD that consumed no note and broke no combo still counted");
+        assert_eq!(clear_lamp(&g, &[0; 6], 0, 0, 5), ClearType::Normal, "no note got through is no full combo");
     }
 
     #[test]
     fn lamp_max_requires_full_combo_count() {
         let g = high_normal();
-        assert_eq!(clear_lamp(&g, &[4, 0, 0, 0, 0, 0], 3, 4), ClearType::Normal);
+        assert_eq!(clear_lamp(&g, &[4, 0, 0, 0, 0, 0], 3, 4, 4), ClearType::Normal);
     }
 
     /// Drain a survival gauge toward `target` (approximately, stopping at or below it) using MISS.

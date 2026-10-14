@@ -10,10 +10,10 @@
     "client_build_sha256": null,
     "client_platform": null,
     "ex_score": 41,
-    "extra": { "reconstructed": true },
+    "extra": { "reconstructed": true, "rule_version": 4 },
     "gauge_value": 100.0,
     "judge": {
-        "avgjudge": 14655,
+        "avgjudge": 117968,
         "bad": 0,
         "combobreak": 3,
         "ebd": 0,

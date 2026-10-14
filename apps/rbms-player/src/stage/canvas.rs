@@ -13,7 +13,7 @@
 use std::collections::HashMap;
 
 use rbms_render::skin_render::frame::{BgaExpand, BgaFrame, BgaPick, BgaTextures};
-use rbms_render::{Color, DistanceFieldParams, QuadParams, Rect, Renderer, ScaledRenderer, TextureId, scale_between, scale_rect};
+use rbms_render::{Color, DistanceFieldParams, QuadParams, Rect, Renderer, ScaledRenderer, TexelRect, TextureId, scale_between, scale_rect};
 #[cfg(test)]
 use rbms_render::{CpuCanvas, TextureFilter};
 
@@ -137,6 +137,10 @@ impl Renderer for HeadlessCanvas {
 
     fn register_texture(&mut self, key: &str, rgba: &[u8], width: u32, height: u32) -> TextureId {
         self.pixels.register_texture(key, rgba, width, height)
+    }
+
+    fn update_texture(&mut self, tex: TextureId, rgba: &[u8], region: TexelRect) -> bool {
+        self.pixels.update_texture(tex, rgba, region)
     }
 
     fn release_texture(&mut self, tex: TextureId) {
@@ -312,6 +316,14 @@ impl Renderer for NativeCanvas<'_, '_> {
         }
     }
 
+    fn update_texture(&mut self, tex: TextureId, rgba: &[u8], region: TexelRect) -> bool {
+        match &mut *self.0 {
+            Canvas::Window(gpu) => gpu.update_texture(tex, rgba, region),
+            #[cfg(test)]
+            Canvas::Headless(canvas) => canvas.update_texture(tex, rgba, region),
+        }
+    }
+
     fn release_texture(&mut self, tex: TextureId) {
         match &mut *self.0 {
             Canvas::Window(gpu) => gpu.release_texture(tex),
@@ -384,6 +396,10 @@ impl Renderer for Canvas<'_> {
 
     fn register_texture(&mut self, key: &str, rgba: &[u8], width: u32, height: u32) -> TextureId {
         self.native().register_texture(key, rgba, width, height)
+    }
+
+    fn update_texture(&mut self, tex: TextureId, rgba: &[u8], region: TexelRect) -> bool {
+        self.native().update_texture(tex, rgba, region)
     }
 
     fn release_texture(&mut self, tex: TextureId) {

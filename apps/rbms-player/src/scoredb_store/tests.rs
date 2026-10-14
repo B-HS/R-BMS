@@ -35,6 +35,10 @@ fn summary() -> PlaySummary {
     }
 }
 
+/// The reference `avgjudge` the fixture run is recorded with: its notes' mean distance from their
+/// inputs.
+const AVG_DURATION_US: i64 = 9_800;
+
 fn finished<'a>(summary: &'a PlaySummary, md5: &'a str) -> FinishedPlay<'a> {
     FinishedPlay {
         md5,
@@ -48,6 +52,7 @@ fn finished<'a>(summary: &'a PlaySummary, md5: &'a str) -> FinishedPlay<'a> {
         random: NoteOption::Mirror,
         seed: 42,
         assist: 0,
+        avg_duration_us: AVG_DURATION_US,
         played_at_ms: 1_700_000_123_456,
         playtime_ms: 95_000,
         ir_submitted: true,
@@ -83,7 +88,7 @@ fn a_finished_run_becomes_the_row_the_database_stores() {
     assert_eq!(log.judge.ex_score(), summary.ex_score, "and it reproduces the EX the screen showed");
     assert_eq!(log.notes, 100);
     assert_eq!(log.minbp, 2);
-    assert_eq!(log.avgjudge, 4_200, "the mean timing error is stored as a magnitude");
+    assert_eq!(log.avgjudge, AVG_DURATION_US, "the reference avgjudge is stored, not the lean of the hits");
     assert_eq!(log.gauge, gauge_id("normal"));
     assert_eq!(log.random, random_id("MIRROR"));
     assert_eq!(log.date, 1_700_000_123, "the millisecond stamp becomes a second");
@@ -146,12 +151,12 @@ fn the_book_is_rebuilt_from_the_database_with_the_queries_the_screens_make() {
     let mut db = fresh();
     let summary = summary();
     let log = play_log(&finished(&summary, "abcd"));
-    assert!(record_finished_play(&mut db, &log, true).is_some(), "the play records");
+    assert!(record_finished_play(&mut db, &log, true, None).is_some(), "the play records");
 
     let mut weaker = log.clone();
     weaker.judge = JudgeCounts::from_early_late([1, 0, 0, 0, 0, 0], [0; JUDGE_TIER_COUNT]);
     weaker.date = log.date + 60;
-    assert!(record_finished_play(&mut db, &weaker, true).is_some());
+    assert!(record_finished_play(&mut db, &weaker, true, None).is_some());
 
     let book = book_from_db(&db);
     assert_eq!(book.records().len(), 2);
@@ -167,12 +172,12 @@ fn an_assisted_run_is_history_in_the_rebuilt_book_just_as_it_is_in_the_database(
     let mut db = fresh();
     let summary = summary();
     let clean = play_log(&finished(&summary, "abcd"));
-    record_finished_play(&mut db, &clean, true);
+    record_finished_play(&mut db, &clean, true, None);
     let mut assisted = clean.clone();
     assisted.assist = 2;
     assisted.date = clean.date + 60;
     assisted.judge = JudgeCounts::from_early_late([500, 0, 0, 0, 0, 0], [0; JUDGE_TIER_COUNT]);
-    record_finished_play(&mut db, &assisted, false);
+    record_finished_play(&mut db, &assisted, false, None);
 
     let book = book_from_db(&db);
     assert_eq!(book.best_ex_for_md5("abcd"), Some(summary.ex_score), "the assisted run is not a best in the book");
@@ -181,13 +186,26 @@ fn an_assisted_run_is_history_in_the_rebuilt_book_just_as_it_is_in_the_database(
     assert_eq!(best.playcount, 2, "both stores counted the play");
 }
 
+/// A run the gauge ended is stored with every note it never reached in its bad-poor count, as the
+/// reference records it (`BMSPlayer.java:909`), and a chart with nothing to judge stores no timing.
+#[test]
+fn a_run_that_did_not_reach_every_note_is_charged_for_the_rest() {
+    let mut failed = summary();
+    failed.total_judged = failed.total_notes - 30;
+    let log = play_log(&finished(&failed, "abcd"));
+    assert_eq!(log.minbp, failed.min_bp + 30);
+    let mut empty = finished(&failed, "abcd");
+    empty.avg_duration_us = rbms_play::AVG_DURATION_ABSENT_US;
+    assert_eq!(play_log(&empty).avgjudge, UNSET_MINIMUM);
+}
+
 #[test]
 fn a_run_with_no_recorded_timing_keeps_the_unset_marker_out_of_the_bests() {
     let mut db = fresh();
     let summary = summary();
     let mut log = play_log(&finished(&summary, "abcd"));
     log.avgjudge = UNSET_MINIMUM;
-    record_finished_play(&mut db, &log, true);
+    record_finished_play(&mut db, &log, true, None);
     let best = db.best("abcd", mode_id("BEAT_7K")).expect("queried").expect("exists");
     assert_eq!(best.avgjudge, UNSET_MINIMUM, "an unset timing never looks like the best timing");
     assert_eq!(best.judge.tier(JUDGE_PGREAT), summary.counts[JUDGE_PGREAT], "the rest of the run still set the best");
@@ -234,10 +252,10 @@ fn the_retention_run_deletes_the_files_it_planned_and_forgets_their_rows() {
         let mut log = play_log(&finished(&summary, "abcd"));
         log.date += i;
         log.replay_file = Some(name);
-        record_finished_play(&mut db, &log, true);
+        record_finished_play(&mut db, &log, true, None);
     }
     let policy = ReplayPolicy { keep_best_per_chart: false, keep_recent_per_chart: 2, max_total_bytes: 0 };
-    let plan = run_replay_gc(&mut db, &dir, &policy).expect("planned and applied");
+    let plan = run_replay_gc(&mut db, &dir, &policy, None).expect("planned and applied");
     assert_eq!(plan.delete, vec!["aa-0.ron".to_string(), "aa-1.ron".to_string()]);
     assert!(!dir.join("aa-0.ron").exists(), "the file is gone");
     assert!(dir.join("aa-2.ron").exists(), "the kept ones are not");
@@ -254,8 +272,8 @@ fn a_retention_run_with_nothing_to_delete_changes_nothing() {
     let summary = summary();
     let mut log = play_log(&finished(&summary, "abcd"));
     log.replay_file = None;
-    record_finished_play(&mut db, &log, true);
-    let plan = run_replay_gc(&mut db, &dir, &ReplayPolicy::default()).expect("planned");
+    record_finished_play(&mut db, &log, true, None);
+    let plan = run_replay_gc(&mut db, &dir, &ReplayPolicy::default(), None).expect("planned");
     assert!(plan.delete.is_empty());
     assert_eq!(plan.kept, 0);
     let _ = std::fs::remove_dir_all(&dir);

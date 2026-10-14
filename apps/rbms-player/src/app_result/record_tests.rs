@@ -21,7 +21,7 @@ use std::time::Duration;
 
 use rbms_config::ScoreTarget;
 use rbms_ir::{CourseSubmission, IrError, PlayerProfile, ReplayData, ServerInfo, SubmitResponse};
-use rbms_store::scoredb::{BestScore, PlayLog, chart_key, mode_id};
+use rbms_store::scoredb::{BestScore, PlayLog, ReplayState, SyncState, SyncWalk, chart_key, mode_id};
 
 use super::*;
 use crate::app_play::OwnPlayOptions;
@@ -254,6 +254,11 @@ fn recorded_key() -> String {
     chart_key(&recorded_model().md5, "")
 }
 
+/// A walk of every play to `server` under the test account, every refusal included.
+fn walk(server: &str) -> SyncWalk<'_> {
+    SyncWalk { server, login_id: ACCOUNT_ID, ..SyncWalk::default() }
+}
+
 /// Every row the score database holds of the recorded chart's plays, newest first, and its best.
 fn stored(shared: &AppShared) -> (Vec<PlayLog>, Option<BestScore>) {
     let db = shared.scoredb.as_ref().expect("the score database opened in the test's folder");
@@ -278,11 +283,16 @@ fn result_notices(entered: &Transition, shared: &AppShared) -> Vec<String> {
 }
 
 /// Hold a stored row to the run the engine reported: its judgements early and late, its EX, its
-/// combo, its bad-poor count, its note count and the lamp it was awarded.
+/// combo, its bad-poor count with every note it never reached (`BMSPlayer.java:909`), its note
+/// count and the lamp it was awarded.
 fn assert_log_is_the_run(log: &PlayLog, summary: &rbms_play::PlaySummary, lamp: ClearType) {
     assert_eq!((log.judge.early, log.judge.late), (summary.early, summary.late), "the judgements");
     assert_eq!(log.judge.ex_score(), summary.ex_score, "the EX score");
-    assert_eq!((log.combo, log.minbp, log.notes), (summary.max_combo, summary.min_bp, summary.total_notes), "the combo, the bad-poor count and the notes");
+    assert_eq!(
+        (log.combo, log.minbp, log.notes),
+        (summary.max_combo, summary.min_bp_with_unreached(), summary.total_notes),
+        "the combo, the bad-poor count and the notes"
+    );
     assert_eq!(log.clear, clear_type_id(lamp), "the lamp");
     assert!(log.date > 0, "the run has no date");
 }
@@ -559,7 +569,7 @@ fn a_scratch_auto_row_of_the_rule_before_sets_no_best_and_keeps_its_lamp() {
         combo: 17,
         assist: i32::from(LIGHT_ASSIST),
         date: 1,
-        rule_version: rbms_store::SCORE_RULE_VERSION - 1,
+        rule_version: rbms_store::SCRATCH_AUTO_LEAVES_THE_TURNTABLE_RULE_VERSION - 1,
         ..PlayLog::default()
     };
     shared.scoredb.as_mut().expect("the score database").record_play(&old, false).expect("the old row writes");
@@ -600,18 +610,121 @@ fn a_run_the_engine_played_stores_nothing() {
 
 /// A run that fails is a record like any other: it is a play and a row, its lamp is FAILED, and
 /// the EX it reached stands as the best until a run beats it (`ScoreData.update` compares the EX
-/// whatever the lamp).
+/// whatever the lamp). Its bad-poor count takes in every note the gauge left it short of, as the
+/// reference records it (`BMSPlayer.java:909`), so dying early is never the better MISS COUNT.
 #[test]
 fn a_run_that_fails_is_stored_with_the_score_it_reached() {
     let mut shared = signed_out("failed");
     shared.config.play.gauge = rbms_judge::GaugeKind::ExHard;
-    let (_, summary) = end_run(&mut shared, played_on(rbms_judge::GaugeKind::ExHard, &FAILING_OFFSETS_US, false));
+    let session = played_on(rbms_judge::GaugeKind::ExHard, &FAILING_OFFSETS_US, false);
+    assert!(session.is_failed(), "the fixture run runs out of gauge");
+    let (_, summary) = end_run(&mut shared, session);
     assert!(summary.ex_score > 0 && !summary.clear_lamp.is_cleared(), "the fixture run scores and fails: {summary:?}");
+    let unreached = summary.total_notes - summary.total_judged;
+    assert!(unreached > 0, "the gauge ended the run before the chart did: {summary:?}");
 
     let (logs, best) = stored(&shared);
     let best = best.expect("the chart has a best");
     assert_eq!(logs.len(), 1);
     assert_eq!((best.clear, best.ex_score(), best.playcount, best.clearcount), (clear_type_id(ClearType::Failed), summary.ex_score, 1, 0));
+    assert_eq!(logs[0].minbp, summary.min_bp + unreached, "the notes never reached are charged");
+    assert_eq!(best.minbp, i64::from(summary.min_bp + unreached));
+    let candidates = shared.scoredb.as_ref().expect("the database").sync_candidates(&walk("http://score-server.invalid")).expect("reads");
+    let body = candidates[0].body.as_deref().and_then(ScoreSubmission::from_json).expect("the body the run is to be sent with is kept");
+    assert_eq!((body.minbp, body.passnotes), (summary.min_bp + unreached, summary.total_judged));
+}
+
+/// What a run records of its timing is the reference's `avgjudge` (`BMSPlayer.java:911-930`): the
+/// mean distance of every note from its input, a note never hit counting a second. Hits early and
+/// late do not cancel out in it. How far the hits leaned rides beside it in the body, as does the
+/// rule generation that says which `avgjudge` it is, and a sync that rebuilds the run from its row
+/// sends the same `avgjudge` the result screen sent.
+#[test]
+fn a_stored_run_keeps_the_reference_average_duration() {
+    let mut shared = signed_out("avgjudge");
+    let session = played_by_hand(&HAND_OFFSETS_US, false);
+    let record = session.record();
+    assert!(record.avg_duration_us > record.summary.avg_judge_us.abs(), "early and late cancel out in the lean: {record:?}");
+    let (_, summary) = end_run(&mut shared, session);
+
+    let (logs, best) = stored(&shared);
+    let [log] = logs.as_slice() else {
+        panic!("one run was played and {} rows were stored", logs.len());
+    };
+    assert_eq!(log.avgjudge, record.avg_duration_us);
+    assert_eq!(best.map(|best| best.avgjudge), Some(record.avg_duration_us));
+    let candidates = shared.scoredb.as_ref().expect("the database").sync_candidates(&walk("http://score-server.invalid")).expect("reads");
+    let body = candidates[0].body.as_deref().and_then(ScoreSubmission::from_json).expect("the body the run is to be sent with is kept");
+    assert_eq!(body.judge.avgjudge, record.avg_duration_us);
+    assert_eq!(body.mean_offset(), Some(summary.avg_judge_us), "the lean rides beside it");
+    assert_eq!(body.rule_version(), Some(rbms_store::SCORE_RULE_VERSION));
+    let rebuilt = crate::record_sync::rebuilt_submission(log, None);
+    assert_eq!(rebuilt.judge.avgjudge, body.judge.avgjudge, "a rebuilt body sends what the result screen sent");
+    assert_eq!(rebuilt.rule_version(), Some(rbms_store::SCORE_RULE_VERSION));
+}
+
+/// The streak a course stage is started on, carried from the stage before.
+const CARRIED_COMBO: u32 = 100;
+
+/// A course stage's chart record is the stage's own (`JudgeManager.java:668-676`): its max combo is
+/// its own notes, not the course's streak carried into it, and a stage played without a break is
+/// the full combo it is, whatever the course carried in.
+#[test]
+fn a_course_stage_records_its_own_combo_and_full_combo() {
+    let mut shared = signed_out("course-stage-combo");
+    let model = recorded_model();
+    shared.course_run = Some(one_stage_course(model.md5.clone()));
+    let course_gauge = Some((rbms_judge::gauge::GaugeIndex::Class, COURSE_OPENING_GAUGE));
+    let options = SessionOptions { initial_gauge: course_gauge, initial_combo: CARRIED_COMBO, ..SessionOptions::default() };
+    let session = run_model_to_its_end(model.clone(), options, &inputs_by_hand(&model, &[Some(0)], false));
+    assert_eq!(session.standing_combo(), CARRIED_COMBO + session.summary().total_notes, "the course carries the whole streak on");
+    let (_, summary) = end_run(&mut shared, session);
+    assert_eq!(summary.counts[0], summary.total_notes, "every note on time is a PGREAT: {summary:?}");
+    let (logs, _) = stored(&shared);
+    let [log] = logs.as_slice() else {
+        panic!("one stage was played and {} rows were stored", logs.len());
+    };
+    assert_eq!(log.combo, summary.total_notes, "the stage's max combo is its own");
+    assert_eq!(log.clear, clear_type_id(ClearType::Max), "the stage is the MAX it was played as");
+}
+
+/// The TOTAL the run is played on in place of the chart's, well past what the chart asks.
+const OWN_TOTAL: f64 = 5_000.0;
+
+/// A run played on a TOTAL of the player's own is eased the way a widened judge eases it (the
+/// player's decision of 2026-10-15): it is kept and sent, its lamp is the assist lamp, it sets no
+/// best, and its replay records the TOTAL so playback moves the gauge as the run did.
+#[test]
+fn a_run_with_a_total_override_is_assisted_and_never_a_best() {
+    let mut shared = signed_out("own-total");
+    shared.config.play.total_override = OWN_TOTAL;
+    let model = recorded_model();
+    let (entered, summary) = end_run(&mut shared, played_by_hand(&HAND_OFFSETS_US, false));
+    assert!(summary.clear_lamp.is_cleared(), "the fixture run clears: {summary:?}");
+    let notices = result_notices(&entered, &shared);
+    assert!(notices.iter().any(|line| line.contains("OWN TOTAL") && line.contains("NO BEST SCORE")), "{notices:?}");
+
+    let (logs, best) = stored(&shared);
+    let [log] = logs.as_slice() else {
+        panic!("one run was played and {} rows were stored", logs.len());
+    };
+    assert_eq!(log.clear, clear_type_id(ClearType::AssistEasy), "the lamp is the assist lamp");
+    assert_eq!(log.assist, i32::from(rbms_ir::mapping::CUSTOM_JUDGE_ASSIST));
+    assert_eq!(best.map(|best| best.ex_score()), Some(0), "the run is no best score");
+    assert_eq!(shared.scores.best_ex_for_md5_in_ln_mode(&model.md5, SCORE_LN_MODE_FROM_CHART), None, "the run is no local best");
+
+    shared.config.play.total_override = OWN_TOTAL;
+    let session = played_by_hand(&HAND_OFFSETS_US, false);
+    shared.mode = session.model().mode;
+    shared.chart_path = RECORDED_CHART_NAME.to_owned();
+    let summary = session.summary();
+    let ended = PlayState::new(session, std::collections::HashMap::new(), 0, SCORE_LN_MODE_FROM_CHART.to_owned());
+    let recorded = record_run(&ended, &mut shared, &summary, ended.session.record().avg_duration_us);
+    assert_eq!(recorded.sub.options.total_override, OWN_TOTAL, "the submission says so, which the server ranks as unranked");
+    let replay = recorded.recorded_replay.expect("the run's replay is kept");
+    assert_eq!(replay.judge.total_override, OWN_TOTAL, "the replay records the TOTAL it was played on");
+    assert_eq!(recorded.replay_plan, ReplayState::Skipped, "the wire cannot state the TOTAL, so the replay is not uploaded");
+    assert_eq!(crate::run_total_override(&Config::default(), Some(&replay)), OWN_TOTAL, "playback takes the TOTAL the replay recorded");
 }
 
 /// A replay is watched with the SCRATCH AUTO, the gauge and the arrangement it was recorded under,
@@ -732,7 +845,7 @@ fn a_players_own_database_reads_its_old_scratch_auto_rows_as_lamps_alone() {
     };
     let lamp_before = shared.scores.best_clear_for_md5(&first.md5);
     let new_run = PlayLog { date: first.date + 1, rule_version: rbms_store::SCORE_RULE_VERSION, replay_file: None, ..first.clone() };
-    crate::scoredb_store::record_finished_play(shared.scoredb.as_mut().expect("the copy"), &new_run, true);
+    crate::scoredb_store::record_finished_play(shared.scoredb.as_mut().expect("the copy"), &new_run, true, None);
     shared.scores.push(crate::scoredb_store::record_of(&new_run));
     let best = shared.scoredb.as_ref().and_then(|db| db.best_in_ln_mode(&first.chart_key, first.mode, &first.ln_mode).ok().flatten()).expect("a best");
     println!("a new SCRATCH AUTO run on {}: best EX {} of {} notes, lamp {:?} -> {}", first.title, best.ex_score(), best.notes, lamp_before, best.clear);
@@ -799,7 +912,7 @@ fn leaving_mid_song_keeps_a_failed_run_with_the_rest_as_poor() {
     assert_eq!((log.judge.ex_score(), log.notes, log.minbp), (summary.ex_score, summary.total_notes, summary.min_bp + unreached));
     assert!(log.replay_file.is_some(), "the replay of what was played is kept");
     assert_eq!(best.map(|best| best.playcount), Some(1));
-    let candidates = shared.scoredb.as_ref().expect("the database").sync_candidates("http://score-server.invalid", ACCOUNT_ID, None).expect("reads");
+    let candidates = shared.scoredb.as_ref().expect("the database").sync_candidates(&walk("http://score-server.invalid")).expect("reads");
     let body = candidates[0].body.as_deref().and_then(ScoreSubmission::from_json).expect("the body the run is to be sent with is kept");
     assert_eq!((body.clear, body.judge.poor, body.passnotes), (rbms_ir::ClearLamp::Failed, summary.counts[4] + unreached, summary.total_notes));
     assert_eq!(shared.scores.for_md5(&model.md5)[0].log_id, Some(log.id), "the book knows the row");
@@ -832,14 +945,43 @@ fn leaving_mid_song_signed_in_sends_the_run() {
     assert_eq!(shared.record_sync_states[&logs[0].id].state, rbms_store::scoredb::SyncState::Accepted);
 }
 
-/// A run left before any note was judged is no run: nothing is stored.
+/// A run left before any note was judged is a run like any other the player left: it is kept as a
+/// FAILED run, every note of it a POOR let pass (the player's decision of 2026-10-15: every run
+/// played by hand is kept and sent, whatever was judged of it).
 #[test]
-fn leaving_before_any_note_is_judged_keeps_nothing() {
+fn leaving_before_any_note_is_judged_keeps_a_failed_run() {
     let mut shared = signed_out("left-at-once");
     let session = run_until(recorded_model(), SessionOptions::default(), &[], 0);
-    assert_eq!(session.summary().total_judged, 0);
+    let summary = session.summary();
+    assert_eq!(summary.total_judged, 0);
     leave_by_escape(&mut shared, session);
-    assert_eq!(stored(&shared), (Vec::new(), None));
+    let (logs, best) = stored(&shared);
+    let [log] = logs.as_slice() else {
+        panic!("one run was left and {} rows were stored", logs.len());
+    };
+    assert_eq!(log.clear, clear_type_id(ClearType::Failed));
+    assert_eq!((log.judge.tier(rbms_store::scoredb::JUDGE_POOR), log.minbp), (summary.total_notes, summary.total_notes), "every note is a POOR let pass");
+    assert_eq!(best.map(|best| best.playcount), Some(1));
+}
+
+/// A chart with no note to judge has nothing left to hit from the start: a turntable-only chart
+/// played on SCRATCH AUTO, which never ends by itself, is ended by Escape as a run played to its
+/// end, on its result screen, and not kept as a FAILED run (`BMSPlayer.java:953-958`: `getPastNotes()
+/// == getNotes()` finishes it).
+#[test]
+fn leaving_a_chart_with_no_note_to_judge_ends_it_on_its_result() {
+    let mut shared = signed_out("left-no-notes");
+    let model = rbms_chart::to_model(&rbms_parser::parse_with(b"#PLAYER 1\n#BPM 120\n#WAV01 a.wav\n#00116:01\n", Default::default()), Mode::BEAT_7K);
+    let auto_lanes = (0..Mode::BEAT_7K.key).map(|lane| Mode::BEAT_7K.is_scratch(lane)).collect();
+    let session = run_until(model, SessionOptions { auto_lanes, ..SessionOptions::default() }, &[], LEFT_AT_US);
+    assert_eq!(session.summary().total_notes, 0, "SCRATCH AUTO took the chart's only note");
+    let left = leave_by_escape(&mut shared, session);
+    assert!(matches!(left, Transition::To(Stage::Result(_))), "the run ended on its result screen");
+    let logs = shared.scoredb.as_ref().expect("the database").all_plays().expect("the history reads");
+    let [log] = logs.as_slice() else {
+        panic!("one run was played and {} rows were stored", logs.len());
+    };
+    assert_eq!(log.clear, clear_type_id(ClearType::NoPlay), "the run was judged as played, with no note to earn a lamp, and not left as FAILED");
 }
 
 /// A long note one end of which was still to be judged when the run was left counts that end once,
@@ -920,15 +1062,83 @@ fn leaving_a_watched_replay_or_autoplay_keeps_nothing() {
     assert_eq!(stored(&shared), (Vec::new(), None), "a replay being watched was kept");
 }
 
-/// A course left part-way ends as it always did: the course is over and nothing is stored.
+/// A course left part-way with notes still to come keeps everything that was played (the player's
+/// decision of 2026-10-15): the stage it was left on is kept as a FAILED chart, and the course is
+/// kept and sent as a FAILED course with the stage finished before it and the one left folded in,
+/// the course being over.
 #[test]
-fn leaving_mid_course_still_ends_the_course_unrecorded() {
-    let mut shared = signed_out("left-course");
-    shared.course_run = Some(one_stage_course(recorded_model().md5));
+fn leaving_mid_course_keeps_the_stage_and_a_failed_course() {
+    let server = Arc::new(AcceptingServer::default());
+    let (courses, sent) = channel();
+    *server.courses.lock().expect("the course log") = Some(courses);
+    let mut shared = signed_in("left-course", server.clone());
     let model = recorded_model();
+    let first = played_by_hand(&HAND_OFFSETS_US, false).summary();
+    let mut run = two_stage_course(model.md5.clone());
+    let finished_first = rbms_course::StageResult {
+        ex_score: first.ex_score,
+        max_ex_score: first.max_ex_score,
+        notes: first.total_notes,
+        counts: first.counts,
+        max_combo: first.max_combo,
+        gauge_value: first.gauge_value,
+        clear: clear_type_id(first.clear_lamp),
+        survived: true,
+        ..rbms_course::StageResult::default()
+    };
+    assert_eq!(run.advance(&finished_first), rbms_course::CourseStep::Next, "the first stage was cleared");
+    shared.course_run = Some(run);
+    shared.course_stage_reasons = vec![None];
+
     let session = run_until(model.clone(), SessionOptions::default(), &inputs_by_hand(&model, &HAND_OFFSETS_US, false), LEFT_AT_US);
-    leave_by_escape(&mut shared, session);
-    assert_eq!(stored(&shared), (Vec::new(), None));
+    let left = session.summary();
+    assert!(left.total_judged < left.total_notes, "the second stage is left part-way: {left:?}");
+    let leaving = leave_by_escape(&mut shared, session);
+    assert!(!matches!(leaving, Transition::To(Stage::Result(_) | Stage::CourseResult(_)) | Transition::Stay), "Escape still leaves at once");
+    assert!(shared.course_run.is_none(), "the course is over");
+
+    let (logs, _) = stored(&shared);
+    let [log] = logs.as_slice() else {
+        panic!("one stage was left and {} rows were stored", logs.len());
+    };
+    assert_eq!(log.clear, clear_type_id(ClearType::Failed), "the stage left part-way is a FAILED chart");
+    assert_eq!(log.minbp, left.min_bp_with_unreached(), "every note it never reached is charged");
+
+    let course = sent.recv_timeout(COURSE_SUBMIT_WAIT).expect("the course was sent as a course");
+    let unreached = left.total_notes - left.total_judged;
+    assert_eq!(course.clear, rbms_ir::ClearLamp::Failed);
+    assert_eq!(course.judge.pgreat, first.counts[0] + left.counts[0], "both stages are folded into the course");
+    assert_eq!(course.judge.poor, first.counts[4] + left.counts[4] + unreached, "the notes left are POORs of the course too");
+    assert!(shared.scoredb.as_ref().expect("the database").newest_course_id().expect("reads").is_some(), "the course is kept");
+}
+
+/// A course stage left with nothing more to hit is not abandoned: it ends as a stage played to its
+/// end does, which for the last stage is the course's result.
+#[test]
+fn leaving_a_course_stage_with_no_note_left_ends_it_as_played() {
+    let mut shared = signed_out("left-course-resolved");
+    let model = recorded_model();
+    shared.course_run = Some(one_stage_course(model.md5.clone()));
+    let session = run_until(model.clone(), SessionOptions::default(), &inputs_by_hand(&model, &HAND_OFFSETS_US, false), LEFT_RESOLVED_AT_US);
+    assert!(session.all_notes_resolved(), "every note of the stage has gone by");
+    let left = leave_by_escape(&mut shared, session);
+    assert!(matches!(left, Transition::To(Stage::CourseResult(_))), "the course ended on its result");
+    let (logs, _) = stored(&shared);
+    let [log] = logs.as_slice() else {
+        panic!("one stage was played and {} rows were stored", logs.len());
+    };
+    assert_ne!(log.clear, clear_type_id(ClearType::Failed), "the stage was judged as played, not left");
+}
+
+/// How far into the recorded chart a stage is left once every note has gone by: a second past its
+/// last note and short of the end of its playing time.
+const LEFT_RESOLVED_AT_US: i64 = 7_000_000;
+
+/// A course of the recorded chart twice over, which is what the course left part-way is.
+fn two_stage_course(md5: String) -> rbms_course::CourseRun {
+    let stage = rbms_course::CourseChart { md5, sha256: String::new(), title: "Recorded".to_owned() };
+    let course = rbms_course::Course { name: "RECORDED TWICE".to_owned(), charts: vec![stage.clone(), stage], ..rbms_course::Course::default() };
+    rbms_course::CourseRun::new(course, COURSE_OPENING_GAUGE)
 }
 
 /// A run that ends keeps the body it is sent with, under the account it was played under, so a
@@ -939,7 +1149,7 @@ fn a_finished_run_stores_its_submission_body() {
     let mut shared = signed_in("body", server);
     let (_, summary) = end_run(&mut shared, played_by_hand(&HAND_OFFSETS_US, false));
     let db = shared.scoredb.as_ref().expect("the database");
-    let candidates = db.sync_candidates("http://elsewhere.invalid", ACCOUNT_ID, None).expect("reads");
+    let candidates = db.sync_candidates(&walk("http://elsewhere.invalid")).expect("reads");
     let [candidate] = candidates.as_slice() else {
         panic!("one run was played and {} were candidates", candidates.len());
     };
@@ -950,7 +1160,7 @@ fn a_finished_run_stores_its_submission_body() {
 
     let mut guest = signed_out("body-guest");
     end_run(&mut guest, played_by_hand(&HAND_OFFSETS_US, false));
-    let candidates = guest.scoredb.as_ref().expect("the database").sync_candidates("http://elsewhere.invalid", ACCOUNT_ID, None).expect("reads");
+    let candidates = guest.scoredb.as_ref().expect("the database").sync_candidates(&walk("http://elsewhere.invalid")).expect("reads");
     assert_eq!(candidates[0].played_as, None, "a guest's run is kept for whoever signs in");
     assert!(candidates[0].body.is_some());
 }
@@ -976,5 +1186,214 @@ fn a_live_submission_writes_its_sync_state() {
     assert_eq!(row.replay_state, rbms_store::scoredb::ReplayState::Failed, "the upload this server did not take goes up on a later sync");
     assert_eq!(shared.record_sync_states.get(&logs[0].id).map(|row| row.state), Some(rbms_store::scoredb::SyncState::Accepted));
     let db = shared.scoredb.as_ref().expect("the database");
-    assert!(db.sync_candidates(&server_key, ACCOUNT_ID, None).expect("reads").is_empty(), "the next sync sends nothing");
+    assert!(db.sync_candidates(&walk(&server_key)).expect("reads").is_empty(), "the next sync sends nothing");
+}
+
+/// How long a test waits for what it sent to come back.
+const ANSWER_WAIT: Duration = Duration::from_secs(10);
+
+/// Poll the app as the frame loop does until `done` says so.
+fn poll_until(shared: &mut AppShared, stage: crate::stage::StageId, done: impl Fn(&AppShared) -> bool) {
+    let deadline = std::time::Instant::now() + ANSWER_WAIT;
+    while !done(shared) {
+        assert!(std::time::Instant::now() < deadline, "what was sent did not come back");
+        shared.poll_ir_jobs(stage);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+/// A sync that sends at once.
+fn unpaced() -> crate::record_sync::SyncPacing {
+    crate::record_sync::SyncPacing {
+        score_interval: Duration::ZERO,
+        replay_interval: Duration::ZERO,
+        rate_limit_wait: Duration::ZERO,
+        cancel_check: Duration::from_millis(1),
+    }
+}
+
+/// A replay whose folder cannot be written is not claimed: the row offers no replay, the player is
+/// told, and the run is still sent with the replay it played, which the result screen's submission
+/// carries from memory.
+#[test]
+fn a_replay_that_cannot_be_written_leaves_no_replay_on_the_row() {
+    let server = Arc::new(AcceptingServer::default());
+    let mut shared = signed_in("replay-unwritable", server);
+    shared.config.network.auto_upload_replay = true;
+    let in_the_way = shared.replay_dir.clone();
+    std::fs::create_dir_all(in_the_way.parent().expect("the replay folder has a parent")).expect("the test folder");
+    std::fs::write(&in_the_way, "a file where the replay folder should be").expect("written");
+    let notices = crate::notify::exclusive(|| {
+        end_run(&mut shared, played_by_hand(&HAND_OFFSETS_US, false));
+        let mut out = Vec::new();
+        crate::notify::drain(&mut out);
+        out
+    });
+    assert!(notices.iter().any(|(level, line)| *level == crate::notify::Level::Error && line.starts_with("replay not saved")), "{notices:?}");
+    let (logs, _) = stored(&shared);
+    assert_eq!(logs[0].replay_file, None, "the row offers no replay that is not there");
+    assert_eq!(shared.scores.for_md5(&recorded_model().md5)[0].replay_file, None);
+    poll_until(&mut shared, crate::stage::StageId::Result, |shared| shared.submit_rx.is_none());
+    let server_key = crate::record_sync::server_key("http://score-server.invalid");
+    let row = &shared.scoredb.as_ref().expect("the database").sync_states(&server_key).expect("reads")[&logs[0].id];
+    assert_eq!(row.replay_state, ReplayState::Failed, "the replay played was offered to the server from memory");
+}
+
+/// A replay whose write fails once it has been handed to the save thread -- the disk filled, the
+/// folder went -- is let go of once the thread says so: the row and the book stop offering it.
+#[test]
+fn a_replay_the_save_thread_could_not_write_is_let_go() {
+    let mut shared = signed_out("replay-write-failed");
+    let (gate, held) = std::sync::mpsc::channel();
+    shared.saves = crate::save_worker::SaveWorker::spawn_gated(held);
+    end_run(&mut shared, played_by_hand(&HAND_OFFSETS_US, false));
+    let (logs, _) = stored(&shared);
+    assert!(logs[0].replay_file.is_some(), "the replay is on its way");
+    std::fs::remove_dir_all(&shared.replay_dir).expect("the replay folder goes before the write lands");
+    drop(gate);
+    shared.saves.flush();
+    crate::notify::exclusive(|| shared.poll_saves());
+    let (logs, _) = stored(&shared);
+    assert_eq!(logs[0].replay_file, None);
+    assert_eq!(shared.scores.for_md5(&recorded_model().md5)[0].replay_file, None);
+}
+
+/// Neither the result screen's replay nor its settings are written on the frame thread: both are
+/// handed to the save thread, and land once it gets to them.
+#[test]
+fn entering_the_result_writes_no_file_on_the_frame_thread() {
+    let mut shared = signed_out("result-no-frame-write");
+    let (gate, held) = std::sync::mpsc::channel();
+    shared.saves = crate::save_worker::SaveWorker::spawn_gated(held);
+    let _ = std::fs::remove_file(&shared.settings_path);
+    end_run(&mut shared, played_by_hand(&HAND_OFFSETS_US, false));
+    let (logs, _) = stored(&shared);
+    let replay = shared.replay_dir.join(logs[0].replay_file.as_deref().expect("a replay is named"));
+    assert!(!replay.exists() && !shared.settings_path.exists(), "a file was written before the save thread got to it");
+    drop(gate);
+    shared.saves.flush();
+    assert!(replay.exists() && shared.settings_path.exists(), "the save thread wrote both");
+    Replay::load(&replay).expect("the replay reads back whole");
+}
+
+/// A run played while the score database cannot take it is kept on the side, its replay with it,
+/// and read in the next time the database opens; the player is told where it went.
+#[test]
+fn a_run_played_while_the_score_database_is_unavailable_is_kept_and_read_in_later() {
+    let mut shared = signed_out("database-closed");
+    shared.scoredb = None;
+    let notices = crate::notify::exclusive(|| {
+        end_run(&mut shared, played_by_hand(&HAND_OFFSETS_US, false));
+        let mut out = Vec::new();
+        crate::notify::drain(&mut out);
+        out
+    });
+    assert!(notices.iter().any(|(_, line)| line == crate::app_result::RUN_KEPT_ON_THE_SIDE), "{notices:?}");
+    let pending = crate::scoredb_store::pending_runs_dir(shared.settings_path.parent().expect("a folder"));
+    assert_eq!(std::fs::read_dir(&pending).expect("the run is kept on the side").count(), 1);
+    let replay = shared.scores.for_md5(&recorded_model().md5)[0].replay_file.clone().expect("the replay is named");
+    assert!(shared.replay_dir.join(&replay).exists(), "the replay is written, not left behind");
+
+    let settings_path = shared.settings_path.clone();
+    drop(shared);
+    let mut config = Config::default();
+    config.play.autoplay = false;
+    let reopened = crate::App::new(String::new(), config, LaunchOptions::default(), settings_path).shared;
+    let (logs, _) = stored(&reopened);
+    assert_eq!(logs.len(), 1, "the run kept on the side is in the database");
+    assert_eq!(logs[0].replay_file.as_deref(), Some(replay.as_str()));
+    assert_eq!(std::fs::read_dir(&pending).expect("the folder stays").count(), 0, "and its file is gone");
+    assert_eq!(reopened.scores.for_md5(&recorded_model().md5).len(), 1, "the book reads it too");
+}
+
+/// A run that failed and is started again at once with START or SELECT is kept first, as its result
+/// screen would have kept it, and sent.
+#[test]
+fn retrying_a_failed_run_keeps_the_failed_run() {
+    let server = Arc::new(AcceptingServer::default());
+    let mut shared = signed_in("retried", server.clone());
+    shared.record_sync_pacing = unpaced();
+    shared.config.play.gauge = rbms_judge::GaugeKind::ExHard;
+    let session = played_on(rbms_judge::GaugeKind::ExHard, &FAILING_OFFSETS_US, false);
+    let summary = session.summary();
+    assert!(!summary.clear_lamp.is_cleared());
+    shared.mode = session.model().mode;
+    shared.chart_path = RECORDED_CHART_NAME.to_owned();
+    let failed = PlayState::new(session, std::collections::HashMap::new(), 0, SCORE_LN_MODE_FROM_CHART.to_owned());
+    crate::app_result::record_retried_run(&failed, &mut shared);
+    let (logs, _) = stored(&shared);
+    let [log] = logs.as_slice() else {
+        panic!("one failed run was started again and {} rows were stored", logs.len());
+    };
+    assert_log_is_the_run(log, &summary, ClearType::Failed);
+    assert!(log.replay_file.is_some());
+    poll_until(&mut shared, crate::stage::StageId::Loading, |shared| shared.record_sync.is_none());
+    assert_eq!(server.sent_for.lock().expect("the submission log").as_slice(), [ACCOUNT_ID.to_owned()]);
+    assert_eq!(shared.record_sync_states[&log.id].state, SyncState::Accepted);
+
+    let mut autoplay = signed_out("retried-autoplay");
+    autoplay.config.play.autoplay = true;
+    let session = played_on(rbms_judge::GaugeKind::ExHard, &FAILING_OFFSETS_US, false);
+    let demo = PlayState::new(session, std::collections::HashMap::new(), 0, SCORE_LN_MODE_FROM_CHART.to_owned());
+    crate::app_result::record_retried_run(&demo, &mut autoplay);
+    assert_eq!(stored(&autoplay), (Vec::new(), None), "a run the engine played keeps nothing");
+}
+
+/// A course is kept in the score database when it ends, played signed out included, and a course
+/// the server did not take is sent by the next records sync until it is held.
+#[test]
+fn a_finished_course_is_kept_even_when_the_server_does_not_answer() {
+    let server = Arc::new(AcceptingServer::default());
+    let mut shared = signed_out("course-kept");
+    shared.course_run = Some(one_stage_course(recorded_model().md5));
+    shared.course_stage_reasons.clear();
+    let (entered, _) = end_run(&mut shared, played_by_hand(&HAND_OFFSETS_US, false));
+    assert!(matches!(entered, Transition::To(Stage::CourseResult(_))));
+    let server_key = crate::record_sync::server_key("http://score-server.invalid");
+    let db = shared.scoredb.as_ref().expect("the database");
+    let kept = db.course_candidates(&walk(&server_key)).expect("reads");
+    let [course] = kept.as_slice() else {
+        panic!("one course was finished and {} were kept", kept.len());
+    };
+    assert_eq!(course.played_as, None, "a course finished signed out is kept for whoever signs in");
+    let first_body = rbms_ir::CourseSubmission::from_json(&course.body).expect("the body reads back");
+
+    let (tx, rx) = channel();
+    *server.courses.lock().expect("the course log") = Some(tx);
+    let mut config = Config::default();
+    config.play.autoplay = false;
+    config.network.server_url = Some("http://score-server.invalid".to_owned());
+    let settings_path = shared.settings_path.clone();
+    drop(shared);
+    let mut signed = crate::App::new(String::new(), config, LaunchOptions::default(), settings_path).shared;
+    signed.server = server.clone();
+    signed.session = AccountSession::restored(Some(ACCOUNT_TOKEN.to_owned()), Some(ACCOUNT_ID.to_owned()));
+    signed.record_sync_pacing = unpaced();
+    assert!(signed.start_record_sync(crate::record_sync::SyncScope::All));
+    poll_until(&mut signed, crate::stage::StageId::Select, |shared| shared.record_sync.is_none());
+    let sent = rx.recv_timeout(ANSWER_WAIT).expect("the course was sent");
+    assert_eq!((sent.played_at, sent.course_hash.as_str(), sent.player.id.as_str()), (first_body.played_at, first_body.course_hash.as_str(), ACCOUNT_ID));
+    let states = signed.scoredb.as_ref().expect("the database").course_sync_states(&server_key).expect("reads");
+    assert_eq!(states[&course.id].state, SyncState::Accepted);
+    assert!(signed.scoredb.as_ref().expect("the database").course_candidates(&walk(&server_key)).expect("reads").is_empty(), "the server holds it now");
+}
+
+/// A course sent as it ends whose answer is a failure is written down to be sent again; the answer
+/// is not let go of.
+#[test]
+fn a_course_the_server_failed_to_take_is_written_down_to_send_again() {
+    let server = Arc::new(AcceptingServer::default());
+    let mut shared = signed_in("course-unanswered", server);
+    shared.course_run = Some(one_stage_course(recorded_model().md5));
+    shared.course_stage_reasons.clear();
+    end_run(&mut shared, played_by_hand(&HAND_OFFSETS_US, false));
+    assert_eq!(shared.course_submits.len(), 1, "the course is on its way");
+    poll_until(&mut shared, crate::stage::StageId::CourseResult, |shared| shared.course_submits.is_empty());
+    let server_key = crate::record_sync::server_key("http://score-server.invalid");
+    let db = shared.scoredb.as_ref().expect("the database");
+    let kept = db.course_candidates(&walk(&server_key)).expect("reads");
+    assert_eq!(kept.len(), 1, "a course the server has no endpoint for is sent again later");
+    let states = db.course_sync_states(&server_key).expect("reads");
+    assert_eq!(states[&kept[0].id].state, SyncState::Skipped);
+    assert_eq!(kept[0].played_as.as_deref(), Some(ACCOUNT_ID));
 }

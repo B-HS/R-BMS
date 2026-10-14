@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use rbms_store::write_atomic;
+use rbms_store::{restrict_to_owner, write_atomic_private};
 
 use crate::error::ConfigError;
 use crate::legacy::{LEGACY_FOLDERS_FILE, LEGACY_TABLES_FILE, LegacyV0, merge_legacy_lists};
@@ -39,6 +39,7 @@ pub struct LoadOutcome {
 /// [`ConfigError::Migrate`] and left untouched, so running an older build never destroys a
 /// configuration a newer one wrote.
 pub fn load(path: &Path) -> Result<LoadOutcome, ConfigError> {
+    close_to_other_users(path);
     let raw = match std::fs::read_to_string(path) {
         Ok(raw) => raw,
         Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(ConfigError::Read(e)),
@@ -62,6 +63,7 @@ pub fn load(path: &Path) -> Result<LoadOutcome, ConfigError> {
         Err(e) => {
             let backup = path.with_extension(BACKUP_EXTENSION);
             let _ = std::fs::rename(path, &backup);
+            close_to_other_users(&backup);
             eprintln!("settings parse failed ({e}); backed up to {} and using defaults", backup.display());
             let mut config = Config::default();
             merge_legacy_lists(&mut config, sibling(path, LEGACY_FOLDERS_FILE).as_deref(), sibling(path, LEGACY_TABLES_FILE).as_deref());
@@ -71,9 +73,12 @@ pub fn load(path: &Path) -> Result<LoadOutcome, ConfigError> {
 }
 
 /// Write the configuration to `path` atomically, always under the current schema version.
+///
+/// The file holds the bearer token of the signed-in account, so it is written readable by its owner
+/// alone ([`write_atomic_private`]); so are the copies kept of it.
 pub fn save(config: &Config, path: &Path) -> Result<(), ConfigError> {
     let text = ron::ser::to_string_pretty(config, ron::ser::PrettyConfig::default())?;
-    write_atomic(path, &text).map_err(ConfigError::Write)
+    write_atomic_private(path, &text).map_err(ConfigError::Write)
 }
 
 /// Parse one configuration document, migrating it forward if it predates the current schema, and
@@ -114,11 +119,28 @@ pub fn migrate(raw: &str) -> Result<(Config, Option<u32>), ConfigError> {
 /// copy is reported and the migration continues: the alternative is refusing to start.
 fn keep_migrated_original(path: &Path, raw: &str, from: u32) -> Option<PathBuf> {
     let backup = path.with_extension(migration_backup_extension(from));
-    match std::fs::write(&backup, raw) {
+    match write_atomic_private(&backup, raw) {
         Ok(()) => Some(backup),
         Err(e) => {
             eprintln!("settings backup failed ({}): {e}", backup.display());
             None
+        }
+    }
+}
+
+/// Close the configuration at `path`, and every copy this build keeps of it, to other users of the
+/// machine. An older build wrote them readable by everyone, with the bearer token inside, and the
+/// copies are never written again, so nothing but this would ever close them. A file that is not
+/// there is nothing to close; one that cannot be changed is reported and left.
+fn close_to_other_users(path: &Path) {
+    let copies = std::iter::once(path.to_path_buf())
+        .chain(std::iter::once(path.with_extension(BACKUP_EXTENSION)))
+        .chain((LEGACY_SCHEMA_VERSION..CURRENT_SCHEMA_VERSION).map(|from| path.with_extension(migration_backup_extension(from))));
+    for copy in copies {
+        match restrict_to_owner(&copy) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => eprintln!("settings permissions not tightened ({}): {e}", copy.display()),
         }
     }
 }

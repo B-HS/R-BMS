@@ -814,6 +814,103 @@ fn a_run_that_names_an_exported_default_pack_draws_the_offsets_it_was_exported_w
     assert!(reopened.pixels.rgba() == adjusted.pixels.rgba(), "a run that names the export is not drawn as the run that exported it was");
 }
 
+/// How long the machine is made to take inside each drawn frame of a run that is slowed down: longer
+/// than a frame of the field's quickest animation, so a frame that read the time off the machine
+/// rather than the harness would be drawn at another moment of the run.
+const MACHINE_STALL: Duration = Duration::from_millis(130);
+
+/// The frame `play` leaves drawn on a run entered as `setup` says, with every frame drawn from its
+/// entry on held up by `stall` between reading the time, its update and its draw.
+fn drawn_with_the_machine_held_up(setup: &FieldSetup<'_>, stall: Duration, play: impl Fn(&mut FieldRun) -> Result<(), String>) -> FieldRun {
+    let mut run = FieldRun::enter(setup).unwrap_or_else(|reason| panic!("{}: not entered: {reason}", setup.tag));
+    run.clocks.machine_stall = stall;
+    play(&mut run).unwrap_or_else(|reason| panic!("{}: not played: {reason}", setup.tag));
+    run
+}
+
+/// A frame of a run is drawn at the moment the run asked for and at no other, however long the
+/// machine takes over it: a run whose drawn frames are held up between reading the time, their
+/// update and their draw is drawn pixel for pixel as one that is not. The judgement, the light of the
+/// key and the bomb under it are on the frame compared.
+#[test]
+fn a_frame_of_a_run_is_drawn_alike_however_long_the_machine_takes_over_it() {
+    let pack = default_pack();
+    let drawn_by = |tag: &str, stall: Duration| {
+        let played = Played::ByHand { channel: FIRST_SIDE_KEY, strokes: 1 };
+        let setup = FieldSetup { tag, pack: &pack, mode: rbms_model::Mode::BEAT_7K, played, size: Some(HELD_SIZE), rows: &[], offsets: &[], carried: 0 };
+        drawn_with_the_machine_held_up(&setup, stall, |run| {
+            let down_ms = run.strike(0, GREAT_OFF_MS)?;
+            run.draw_at(down_ms + JUDGEMENT_LOOKED_AT_MS)
+        })
+    };
+    let quick = drawn_by("stalled-field-quick", Duration::ZERO);
+    let slow = drawn_by("stalled-field-slow", MACHINE_STALL);
+    assert!(slow.pixels.rgba() == quick.pixels.rgba(), "a frame the machine took {MACHINE_STALL:?} longer over is drawn at another moment of the run");
+}
+
+/// With every part of the field at no opacity but the notes, the frame of a key held down on a note
+/// shows the notes, and shows them where a machine that takes no time over the frame draws them: the
+/// song position a frame is drawn at is the one the harness counted, not the one the machine reached.
+#[test]
+fn the_notes_left_at_full_opacity_are_drawn_where_the_run_stands_however_long_the_machine_takes() {
+    /// The note the key is held down on, with the line of the next measure on the field with it.
+    const HELD_NOTE: usize = BEATS_A_MEASURE - 1;
+    /// The part left at full opacity.
+    const NOTES: &str = "Note Opacity";
+    let pack = default_pack();
+    let drawn_by = |tag: &str, stall: Duration| {
+        let played = Played::ByHand { channel: FIRST_SIDE_KEY, strokes: BEATS_A_MEASURE };
+        let setup = FieldSetup {
+            tag,
+            pack: &pack,
+            mode: rbms_model::Mode::BEAT_7K,
+            played,
+            size: Some(HELD_SIZE),
+            rows: &[HIDDEN_JUDGEMENT],
+            offsets: &[],
+            carried: 0,
+        };
+        drawn_with_the_machine_held_up(&setup, stall, |run| {
+            run.set_every_part(NO_OPACITY)?;
+            run.set(NOTES, opacity(FULL_OPACITY))?;
+            run.strike_up_to(0, HELD_NOTE)?;
+            run.press(HELD_NOTE, 0)?;
+            run.redraw()
+        })
+    };
+    let quick = drawn_by("stalled-notes-quick", Duration::ZERO);
+    let slow = drawn_by("stalled-notes-slow", MACHINE_STALL);
+    assert!(!slow.is_blank(), "nothing is drawn of the notes on a frame the machine took {MACHINE_STALL:?} longer over");
+    assert!(slow.pixels.rgba() == quick.pixels.rgba(), "the notes are drawn elsewhere on a frame the machine took {MACHINE_STALL:?} longer over");
+}
+
+/// The scripts of a captured frame are charged nothing for the time the machine takes inside them:
+/// the skin's frame clock is held with the run's own clocks, so a machine held up inside one of the
+/// pack's calls -- a runner paused, a loaded machine -- does not spend the frame's allowance and
+/// leave the calls after it answering an earlier frame's values. The frame looked at is one of a
+/// judgement drawn, which the pack's scripts are called for.
+#[test]
+fn the_scripts_of_a_captured_frame_are_charged_none_of_the_time_the_machine_takes_inside_them() {
+    let pack = default_pack();
+    let played = Played::ByHand { channel: FIRST_SIDE_KEY, strokes: 1 };
+    let setup = FieldSetup {
+        tag: "scripts-uncharged",
+        pack: &pack,
+        mode: rbms_model::Mode::BEAT_7K,
+        played,
+        size: Some(HELD_SIZE),
+        rows: &[],
+        offsets: &[],
+        carried: 0,
+    };
+    let mut run = FieldRun::enter(&setup).unwrap_or_else(|reason| panic!("not entered: {reason}"));
+    let down_ms = run.strike(0, GREAT_OFF_MS).unwrap_or_else(|reason| panic!("not played: {reason}"));
+    run.draw_at(down_ms + JUDGEMENT_LOOKED_AT_MS).unwrap_or_else(|reason| panic!("not drawn: {reason}"));
+    let cost = run.document().runtime().expect("the default pack draws with scripts").frame_cost();
+    assert!(cost.calls > 0, "the frame made no call of the pack's scripts");
+    assert_eq!(cost.spent, Duration::ZERO, "the machine's time inside {} calls was charged to the frame", cost.calls);
+}
+
 /// The lowercase name a capture of a part is saved under.
 fn file_name_of(part: &str) -> String {
     part.trim_end_matches(OPACITY_SUFFIX).replace(' ', "-").to_ascii_lowercase()

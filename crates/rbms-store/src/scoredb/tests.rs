@@ -576,7 +576,7 @@ fn the_retention_plan_keeps_the_recent_replays_and_the_best_one() {
     let mut db = fresh();
     let names = seed_replays(&mut db, &dir, "aa", 5, 10);
     let policy = ReplayPolicy { keep_best_per_chart: true, keep_recent_per_chart: 3, max_total_bytes: 0 };
-    let plan = db.replay_gc_plan(&dir, &policy).expect("planned");
+    let plan = db.replay_gc_plan(&dir, &policy, None).expect("planned");
     assert_eq!(plan.delete, vec![names[0].clone(), names[1].clone()], "the two oldest go, the three newest stay");
     assert_eq!(plan.kept, 3, "and the best is the newest, which was already kept");
     assert_eq!(plan.freed_bytes, 20);
@@ -596,12 +596,12 @@ fn the_retention_plan_spares_an_old_best_the_recent_window_would_have_dropped() 
     let best_file = db.best("aa", mode_id("BEAT_7K")).expect("queried").expect("exists").replay_file.expect("the best has a replay");
     assert_eq!(best_file, names[4], "the strongest run is still the fifth");
     let policy = ReplayPolicy { keep_best_per_chart: true, keep_recent_per_chart: 1, max_total_bytes: 0 };
-    let plan = db.replay_gc_plan(&dir, &policy).expect("planned");
+    let plan = db.replay_gc_plan(&dir, &policy, None).expect("planned");
     assert!(!plan.delete.contains(&best_file), "the best run's replay is kept however old it is");
     assert_eq!(plan.kept, 2, "the newest and the best");
 
     let unprotected = ReplayPolicy { keep_best_per_chart: false, keep_recent_per_chart: 1, max_total_bytes: 0 };
-    let plan = db.replay_gc_plan(&dir, &unprotected).expect("planned");
+    let plan = db.replay_gc_plan(&dir, &unprotected, None).expect("planned");
     assert!(plan.delete.contains(&best_file), "with the best unprotected only the newest survives");
     assert_eq!(plan.kept, 1);
     let _ = std::fs::remove_dir_all(&dir);
@@ -613,10 +613,116 @@ fn the_retention_plan_drops_the_oldest_kept_replays_once_the_directory_is_over_b
     let mut db = fresh();
     let names = seed_replays(&mut db, &dir, "aa", 4, 100);
     let policy = ReplayPolicy { keep_best_per_chart: false, keep_recent_per_chart: 4, max_total_bytes: 250 };
-    let plan = db.replay_gc_plan(&dir, &policy).expect("planned");
+    let plan = db.replay_gc_plan(&dir, &policy, None).expect("planned");
     assert_eq!(plan.kept, 2, "two hundred bytes fit under the ceiling, three hundred do not");
     assert_eq!(plan.delete, vec![names[0].clone(), names[1].clone()], "the oldest go first");
     assert_eq!(plan.freed_bytes, 200);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The server and account the hold fixtures sync to.
+const HOLD_SERVER: &str = "https://bms.example";
+const HOLD_ACCOUNT: &str = "dj";
+
+/// A replay that has not gone up to the server the player syncs to is kept until it has: the
+/// recent window would drop the two oldest of five, and the two whose plays the server has not
+/// taken, or whose replay is still to go up, stay. One that went up goes as it always did.
+#[test]
+fn replay_gc_keeps_a_replay_still_to_go_up() {
+    let dir = temp_dir("gc_hold");
+    let mut db = fresh();
+    let names = seed_replays(&mut db, &dir, "aa", 5, 10);
+    let ids: Vec<i64> = db.history("aa", 10).expect("reads").iter().rev().map(|log| log.id).collect();
+    for (id, replay_state) in
+        [(ids[1], ReplayState::Pending), (ids[2], ReplayState::Uploaded), (ids[3], ReplayState::Uploaded), (ids[4], ReplayState::Uploaded)]
+    {
+        let row = IrSyncRow { replay_state, ..IrSyncRow::new(id, HOLD_SERVER, HOLD_ACCOUNT, SyncState::Accepted) };
+        db.put_sync_state(&row).expect("written");
+    }
+    let policy = ReplayPolicy { keep_best_per_chart: false, keep_recent_per_chart: 3, max_total_bytes: 0 };
+    assert_eq!(db.replay_gc_plan(&dir, &policy, None).expect("planned").delete, [names[0].clone(), names[1].clone()], "nobody to upload to holds nothing");
+
+    let hold = UploadHold { server: HOLD_SERVER.into(), login_id: HOLD_ACCOUNT.into() };
+    let plan = db.replay_gc_plan(&dir, &policy, Some(&hold)).expect("planned");
+    assert!(plan.delete.is_empty(), "the unsent play's replay and the pending upload are both held: {:?}", plan.delete);
+
+    let other = UploadHold { server: HOLD_SERVER.into(), login_id: "someone-else".into() };
+    db.put_submission(ids[0], "{}", Some(HOLD_ACCOUNT)).expect("kept");
+    let plan = db.replay_gc_plan(&dir, &policy, Some(&other)).expect("planned");
+    assert_eq!(plan.delete, [names[0].clone()], "a play of another account is not held for this one");
+
+    let tight = ReplayPolicy { max_total_bytes: 30, ..policy };
+    let plan = db.replay_gc_plan(&dir, &tight, Some(&hold)).expect("planned");
+    assert_eq!(plan.delete, [names[0].clone(), names[1].clone()], "the byte ceiling still lets the oldest go");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A play kept on the side while the database could not take it is read in the next time it opens,
+/// with its body, and its file is removed; a file that cannot be read is left alone.
+#[test]
+fn plays_kept_on_the_side_are_read_in_and_their_files_removed() {
+    let dir = temp_dir("pending");
+    let mut db = fresh();
+    let run = PendingRun { log: play("aa", 10, 100), updates_best: true, body: Some("{\"kept\":1}".into()), played_as: Some(HOLD_ACCOUNT.into()) };
+    std::fs::write(dir.join(format!("10000-aa{PENDING_RUN_SUFFIX}")), run.to_ron().expect("serialises")).expect("written");
+    std::fs::write(dir.join(format!("20000-bad{PENDING_RUN_SUFFIX}")), "<<< not ron >>>").expect("written");
+    std::fs::write(dir.join("30000-aa.ron.1.2.tmp"), "a temp file").expect("written");
+    let report = db.import_pending_runs(&dir).expect("imported");
+    assert_eq!(report.imported, 1);
+    assert_eq!(report.unreadable, [dir.join(format!("20000-bad{PENDING_RUN_SUFFIX}"))]);
+    assert!(report.stuck.is_empty());
+    let history = db.history("aa", 10).expect("reads");
+    assert_eq!(history.len(), 1);
+    assert_eq!(PlayLog { id: 0, ..history[0].clone() }, run.log);
+    let walk = SyncWalk { server: HOLD_SERVER, login_id: HOLD_ACCOUNT, ..SyncWalk::default() };
+    assert_eq!(db.sync_candidates(&walk).expect("reads")[0].body.as_deref(), Some("{\"kept\":1}"));
+    assert!(!dir.join(format!("10000-aa{PENDING_RUN_SUFFIX}")).exists());
+    assert_eq!(db.import_pending_runs(&dir.join("absent")).expect("nothing").imported, 0);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A kept play the database refuses is reported and its file left, and the plays kept after it
+/// are still read in: one file that always fails does not hold back every later play.
+#[test]
+fn a_kept_play_the_database_refuses_does_not_hold_back_the_ones_after_it() {
+    let dir = temp_dir("pending_refused");
+    let mut db = fresh();
+    db.conn
+        .execute_batch("CREATE TEMP TRIGGER refuse_poison BEFORE INSERT ON scorelog WHEN NEW.chart_key = 'poison' BEGIN SELECT RAISE(ABORT, 'refused'); END")
+        .expect("the trigger is made");
+    let poison = dir.join(format!("10000-poison{PENDING_RUN_SUFFIX}"));
+    let later = dir.join(format!("20000-aa{PENDING_RUN_SUFFIX}"));
+    for (path, chart) in [(&poison, "poison"), (&later, "aa")] {
+        let run = PendingRun { log: play(chart, 10, 100), updates_best: true, body: None, played_as: None };
+        std::fs::write(path, run.to_ron().expect("serialises")).expect("written");
+    }
+    let report = db.import_pending_runs(&dir).expect("the import goes on past a refused play");
+    assert_eq!(report.imported, 1);
+    assert_eq!(report.refused.iter().map(|(path, _)| path.as_path()).collect::<Vec<_>>(), [poison.as_path()]);
+    assert_eq!(db.history("aa", 10).expect("reads").len(), 1, "the play kept after the refused one is in");
+    assert!(poison.exists(), "the refused play's file is left for the next start");
+    assert!(!later.exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A kept play read in once whose file could not be removed is not read in again the next time:
+/// the history does not hold it twice and the day's totals do not count it twice. Its file goes.
+#[test]
+fn a_kept_play_already_read_in_is_not_read_in_twice() {
+    let dir = temp_dir("pending_twice");
+    let mut db = fresh();
+    let file = dir.join(format!("10000-aa{PENDING_RUN_SUFFIX}"));
+    let run = PendingRun { log: play("aa", 10, 100), updates_best: true, body: None, played_as: None };
+    let text = run.to_ron().expect("serialises");
+    std::fs::write(&file, &text).expect("written");
+    assert_eq!(db.import_pending_runs(&dir).expect("imported").imported, 1);
+    let day = db.day_stats(i64::MIN, i64::MAX).expect("reads");
+    std::fs::write(&file, &text).expect("the same file again, as one that could not be removed");
+    let report = db.import_pending_runs(&dir).expect("imported");
+    assert_eq!(report.imported, 0, "the play was already in");
+    assert_eq!(db.history("aa", 10).expect("reads").len(), 1, "the history holds the play once");
+    assert_eq!(db.day_stats(i64::MIN, i64::MAX).expect("reads"), day, "the day's totals count it once");
+    assert!(!file.exists(), "its file is removed");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -627,7 +733,7 @@ fn each_chart_keeps_its_own_recent_window() {
     seed_replays(&mut db, &dir, "aa", 3, 10);
     seed_replays(&mut db, &dir, "bb", 3, 10);
     let policy = ReplayPolicy { keep_best_per_chart: false, keep_recent_per_chart: 2, max_total_bytes: 0 };
-    let plan = db.replay_gc_plan(&dir, &policy).expect("planned");
+    let plan = db.replay_gc_plan(&dir, &policy, None).expect("planned");
     assert_eq!(plan.kept, 4, "two per chart");
     assert_eq!(plan.delete, vec!["aa-0.ron".to_string(), "bb-0.ron".to_string()]);
     let _ = std::fs::remove_dir_all(&dir);
@@ -638,7 +744,7 @@ fn a_database_with_no_replays_plans_nothing() {
     let dir = temp_dir("gc_empty");
     let mut db = fresh();
     db.record_play(&play("aa", 10, 100), true).expect("a play with no replay");
-    let plan = db.replay_gc_plan(&dir, &ReplayPolicy::default()).expect("planned");
+    let plan = db.replay_gc_plan(&dir, &ReplayPolicy::default(), None).expect("planned");
     assert_eq!(plan, ReplayGcPlan::default());
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -694,4 +800,82 @@ fn the_chart_key_is_the_md5_and_falls_back_to_the_sha256() {
     assert_eq!(chart_key("AbCd", "ffff"), "abcd", "the md5 keys the record, lower-cased");
     assert_eq!(chart_key("", "FFFF"), "ffff", "a chart with no md5 is keyed by its sha256");
     assert_eq!(chart_key("", ""), "");
+}
+
+/// The rule generation before plays were recorded as the reference records them.
+const RULE_BEFORE_THE_REFERENCE_RECORD: u32 = REFERENCE_RECORD_RULE_VERSION - 1;
+
+/// The `avgjudge` an old play holds: the size of its hits' mean signed offset, which cancels early
+/// against late and so comes out near nothing for a run that was anything but accurate.
+const CANCELLED_OUT_AVGJUDGE: i64 = 29;
+
+/// A reference `avgjudge`: the mean distance of every note from its input.
+const REFERENCE_AVGJUDGE: i64 = 10_000;
+
+/// An old play's `avgjudge` measured something else, so it never stands as a chart's best against
+/// one of the reference's: the best is the reference value however much smaller the old one is.
+#[test]
+fn an_old_generation_avgjudge_does_not_beat_a_reference_one() {
+    let mut db = fresh();
+    let old = PlayLog { avgjudge: CANCELLED_OUT_AVGJUDGE, rule_version: RULE_BEFORE_THE_REFERENCE_RECORD, ..play("abcd", 1, 10) };
+    db.record_play(&old, true).expect("the old play writes");
+    let best = db.best("abcd", old.mode).expect("reads").expect("exists");
+    assert_eq!(best.avgjudge, UNSET_MINIMUM, "an old play alone leaves the chart with no avgjudge");
+
+    db.record_play(&PlayLog { avgjudge: REFERENCE_AVGJUDGE, ..play("abcd", 2, 10) }, true).expect("the new play writes");
+    let best = db.best("abcd", old.mode).expect("reads").expect("exists");
+    assert_eq!(best.avgjudge, REFERENCE_AVGJUDGE);
+}
+
+/// A build older than the reference record may write to the database after one of this rule has,
+/// folding an old `avgjudge` into the best; the next open of this build folds the best afresh from
+/// the plays.
+#[test]
+fn an_old_avgjudge_folded_in_by_an_older_build_is_taken_out_on_the_next_open() {
+    let mut db = fresh();
+    db.record_play(&PlayLog { avgjudge: REFERENCE_AVGJUDGE, ..play("abcd", 2, 10) }, true).expect("the new play writes");
+    db.record_play(&PlayLog { avgjudge: CANCELLED_OUT_AVGJUDGE, rule_version: RULE_BEFORE_THE_REFERENCE_RECORD, ..play("abcd", 3, 10) }, true)
+        .expect("the old build's play writes");
+    db.conn.execute("UPDATE score SET avgjudge = ?1", params![CANCELLED_OUT_AVGJUDGE]).expect("the older build folds its own value in");
+    db.migrate().expect("this build opens the database again");
+    let best = db.best("abcd", mode_id("BEAT_7K")).expect("reads").expect("exists");
+    assert_eq!(best.avgjudge, REFERENCE_AVGJUDGE);
+}
+
+/// Notes of the fixture chart an old failed play took before its gauge ran out.
+const OLD_FAILED_PLAY_TAKEN: u32 = 10;
+
+/// Notes of the fixture chart an old failed play never reached.
+const OLD_FAILED_PLAY_UNREACHED: u32 = 90;
+
+/// An old play the gauge ended counted only what it judged as its bad-poor count, which made dying
+/// at once the best MISS COUNT a chart could have. Wherever it is compared it is charged for the
+/// notes it never reached, as the reference records it (`BMSPlayer.java:909`): when it is folded in,
+/// and when the bests are folded afresh on open. A play of this rule already counts them.
+#[test]
+fn an_old_failed_play_is_charged_for_the_notes_it_never_reached() {
+    let notes = OLD_FAILED_PLAY_TAKEN + OLD_FAILED_PLAY_UNREACHED;
+    let old = PlayLog { clear: LAMP_FAILED, notes, rule_version: RULE_BEFORE_THE_REFERENCE_RECORD, ..play("abcd", 1, OLD_FAILED_PLAY_TAKEN) };
+    assert_eq!(charged_minbp(&old), i64::from(OLD_FAILED_PLAY_UNREACHED));
+    let new = PlayLog { clear: LAMP_FAILED, notes, minbp: OLD_FAILED_PLAY_UNREACHED, ..play("abcd", 2, OLD_FAILED_PLAY_TAKEN) };
+    assert_eq!(charged_minbp(&new), i64::from(OLD_FAILED_PLAY_UNREACHED), "a play of this rule is charged once");
+
+    let mut db = fresh();
+    db.record_play(&old, true).expect("the old play writes");
+    assert_eq!(db.best("abcd", old.mode).expect("reads").expect("exists").minbp, i64::from(OLD_FAILED_PLAY_UNREACHED));
+    db.conn.execute("UPDATE score SET minbp = 0", []).expect("an older build folded the uncharged count in");
+    db.migrate().expect("this build opens the database again");
+    assert_eq!(db.best("abcd", old.mode).expect("reads").expect("exists").minbp, i64::from(OLD_FAILED_PLAY_UNREACHED));
+}
+
+/// A pop'n BAD leaves its note to be judged again, so an old pop'n play that took every note is
+/// charged nothing for its BADs.
+#[test]
+fn an_old_popn_play_is_not_charged_for_its_bads() {
+    let mut finished = play("abcd", 1, 10);
+    finished.mode = mode_id("POPN_9K");
+    finished.rule_version = RULE_BEFORE_THE_REFERENCE_RECORD;
+    finished.judge = JudgeCounts::from_early_late([10, 0, 0, 2, 0, 0], [0; JUDGE_TIER_COUNT]);
+    finished.minbp = 2;
+    assert_eq!(charged_minbp(&finished), 2);
 }

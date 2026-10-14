@@ -222,7 +222,7 @@ fn paint_timeline(width: i32, height: i32, line_width: i32, timeline: &Painted, 
     if changes.len() < 2 || timeline.main_bpm <= 0.0 {
         return None;
     }
-    let mut pixmap = Pixmap::new(width.max(0) as usize, height.max(0) as usize);
+    let mut pixmap = Pixmap::upside_down(width.max(0) as usize, height.max(0) as usize);
     let last = changes[changes.len() - 1];
     let mut end = last.1 as i32;
     if let Some(length) = timeline.length_ms.filter(|length| *length < end) {

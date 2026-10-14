@@ -13,8 +13,9 @@
 //! behind the history graph, the daily statistics, the early/late split — is in the database and
 //! reachable through [`rbms_store::scoredb::ScoreDb`] directly.
 //!
-//! A database that will not open is reported and then ignored: the player runs without recording,
-//! which is what it did before there was a database, rather than refusing to start.
+//! A database that will not open is reported and the player runs on rather than refusing to start.
+//! Every run it finishes meanwhile is kept on the side ([`PENDING_RUNS_DIR`]) and read into the
+//! database the next time it opens ([`import_pending_runs`]), so no run is lost with the session.
 //!
 //! The application opens the database at startup and reads the book from it (`App::new`), and the
 //! result screen writes every finished run through [`record_finished_play`]
@@ -23,13 +24,14 @@
 use std::path::{Path, PathBuf};
 
 use rbms_chart::shuffle::NoteOption;
+use rbms_config::NetworkOptions;
 use rbms_config::gauge_token;
 use rbms_judge::{ClearType, GaugeKind, clear_type_id};
 use rbms_model::Mode;
 use rbms_play::PlaySummary;
 use rbms_store::scoredb::{
-    JUDGE_MISS, JUDGE_TIER_COUNT, JudgeCounts, MigrationReport, PLAY_STATE_LIVE, PlayLog, ReplayGcPlan, ReplayPolicy, ScoreDb, chart_key, gauge_id, mode_id,
-    mode_name, open_with_import, random_id, random_token,
+    JUDGE_MISS, JUDGE_TIER_COUNT, JudgeCounts, KeptSubmission, MigrationReport, PLAY_STATE_LIVE, PlayLog, ReplayGcPlan, ReplayPolicy, ScoreDb, UNSET_MINIMUM,
+    UploadHold, chart_key, gauge_id, mode_id, mode_name, open_with_import, random_id, random_token,
 };
 use rbms_store::{SCORE_RULE_VERSION, ScoreBook, ScoreRecord};
 
@@ -44,6 +46,46 @@ pub(crate) const SCORES_RON_FILE: &str = "scores.ron";
 
 /// Name of the directory saved replays live in, next to the two databases.
 pub(crate) const REPLAY_DIR: &str = "replays";
+
+/// Name of the directory a run is kept in while the score database cannot take it, next to the
+/// database ([`rbms_store::scoredb::PendingRun`]).
+pub(crate) const PENDING_RUNS_DIR: &str = "pending-runs";
+
+/// Where runs are kept on the side, given the directory the settings file is in.
+pub(crate) fn pending_runs_dir(config_dir: &Path) -> PathBuf {
+    config_dir.join(PENDING_RUNS_DIR)
+}
+
+/// Read the runs kept on the side while the database was closed into it, saying what came in and
+/// what could not.
+pub(crate) fn import_pending_runs(db: &mut ScoreDb, dir: &Path) {
+    match db.import_pending_runs(dir) {
+        Ok(report) => {
+            if report.imported > 0 {
+                notify(Level::Info, format!("{} runs kept while the score database was closed are in it now", report.imported));
+            }
+            for file in report.unreadable {
+                notify(Level::Warn, format!("kept run not read ({}): left where it is", file.display()));
+            }
+            for file in report.stuck {
+                notify(Level::Warn, format!("kept run read in but not removed ({}): remove it by hand", file.display()));
+            }
+            for (file, error) in report.refused {
+                notify(Level::Warn, format!("kept run not read in ({}): {error}; left where it is", file.display()));
+            }
+        }
+        Err(e) => notify(Level::Error, format!("kept runs not read in ({}): {e}", dir.display())),
+    }
+}
+
+/// The server and account whose replays the retention policy holds until they have gone up: the
+/// server set, an account signed in to it and AUTO UPLOAD REPLAY on. With any of them missing no
+/// sync uploads a replay, and holding one would only stop the policy from pruning.
+pub(crate) fn upload_hold(network: &NetworkOptions) -> Option<UploadHold> {
+    let server = network.server_url.as_deref().map(crate::record_sync::server_key).filter(|key| !key.is_empty())?;
+    let login_id = network.ir_login_id.as_deref().map(str::trim).filter(|login| !login.is_empty())?;
+    (network.auto_upload_replay && network.ir_token.is_some()).then(|| UploadHold { server, login_id: login_id.to_string() })
+}
 
 /// Milliseconds per second: the player stamps a play in milliseconds
 /// ([`ScoreRecord::played_at`]), the database stores seconds.
@@ -129,6 +171,10 @@ pub(crate) struct FinishedPlay<'a> {
     pub(crate) seed: u64,
     /// Assist level (`rbms_ir::mapping::assist_level`): zero for an unassisted run.
     pub(crate) assist: u8,
+    /// `ScoreData.avgjudge` of the run ([`rbms_play::PlayRecord::avg_duration_us`]):
+    /// [`rbms_play::AVG_DURATION_ABSENT_US`] for a chart with nothing to judge, which is stored as
+    /// no value at all.
+    pub(crate) avg_duration_us: i64,
     /// Epoch milliseconds the run ended at.
     pub(crate) played_at_ms: i64,
     /// How long the run took, milliseconds.
@@ -152,8 +198,8 @@ pub(crate) fn play_log(play: &FinishedPlay<'_>) -> PlayLog {
         judge: JudgeCounts::from_early_late(play.summary.early, play.summary.late),
         notes: play.summary.total_notes,
         combo: play.summary.max_combo,
-        minbp: play.summary.min_bp,
-        avgjudge: play.summary.avg_judge_us.abs(),
+        minbp: play.summary.min_bp_with_unreached(),
+        avgjudge: if play.avg_duration_us == rbms_play::AVG_DURATION_ABSENT_US { UNSET_MINIMUM } else { play.avg_duration_us },
         gauge: gauge_id(gauge_token(play.gauge)),
         gauge_value: play.summary.gauge_value,
         assist: i32::from(play.assist),
@@ -169,15 +215,16 @@ pub(crate) fn play_log(play: &FinishedPlay<'_>) -> PlayLog {
     }
 }
 
-/// Record a finished run, reporting rather than propagating a write failure: a score that cannot be
-/// stored must not cost the player the result screen. Returns the `scorelog` id the run was stored
-/// under, or `None` when it was not stored.
+/// Record a finished run with the submission it is to be sent as, in one transaction, reporting
+/// rather than propagating a write failure: a score that cannot be stored must not cost the player
+/// the result screen. Returns the `scorelog` id the run was stored under, or `None` when it was not
+/// stored.
 ///
 /// `updates_best` is decision 12's score flag — `crate::updates_score` — and is passed rather than
 /// re-derived. The book reads the same answer back off the row ([`rbms_store::sets_best`] of its
 /// assist level and rule version, in [`record_of`]), so the two cannot disagree about one run.
-pub(crate) fn record_finished_play(db: &mut ScoreDb, log: &PlayLog, updates_best: bool) -> Option<i64> {
-    match db.record_play(log, updates_best) {
+pub(crate) fn record_finished_play(db: &mut ScoreDb, log: &PlayLog, updates_best: bool, kept: Option<KeptSubmission<'_>>) -> Option<i64> {
+    match db.record_play_kept(log, updates_best, kept) {
         Ok(id) => Some(id),
         Err(e) => {
             notify(Level::Error, format!("score not recorded: {e}"));
@@ -247,8 +294,10 @@ pub(crate) fn book_from_db(db: &ScoreDb) -> ScoreBook {
 /// Deleting is done here rather than in the store crate so that a file that will not delete leaves
 /// its row alone — the history keeps offering a replay that is still there, and the next run tries
 /// again.
-pub(crate) fn run_replay_gc(db: &mut ScoreDb, dir: &Path, policy: &ReplayPolicy) -> Option<ReplayGcPlan> {
-    let plan = match db.replay_gc_plan(dir, policy) {
+///
+/// A replay still to go up to the server the player syncs to (`hold`) is kept until it has.
+pub(crate) fn run_replay_gc(db: &mut ScoreDb, dir: &Path, policy: &ReplayPolicy, hold: Option<&UploadHold>) -> Option<ReplayGcPlan> {
+    let plan = match db.replay_gc_plan(dir, policy, hold) {
         Ok(plan) => plan,
         Err(e) => {
             notify(Level::Warn, format!("replay retention not applied: {e}"));

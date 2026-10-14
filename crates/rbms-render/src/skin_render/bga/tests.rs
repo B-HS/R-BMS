@@ -300,6 +300,14 @@ fn only_a_picture_of_256_or_less_on_its_longer_side_goes_on_a_canvas() {
 struct Counting {
     canvas: CpuCanvas,
     registered: usize,
+    /// Where the pixels of each picture it was handed lay.
+    handed: Vec<usize>,
+}
+
+impl Counting {
+    fn new() -> Counting {
+        Counting { canvas: CpuCanvas::new(8, 8), registered: 0, handed: Vec::new() }
+    }
 }
 
 impl Renderer for Counting {
@@ -317,6 +325,7 @@ impl Renderer for Counting {
 
     fn register_texture(&mut self, key: &str, rgba: &[u8], width: u32, height: u32) -> TextureId {
         self.registered += 1;
+        self.handed.push(rgba.as_ptr() as usize);
         self.canvas.register_texture(key, rgba, width, height)
     }
 
@@ -343,7 +352,7 @@ impl Renderer for Counting {
 
 #[test]
 fn a_picture_shown_for_many_frames_is_uploaded_once() {
-    let mut target = Counting { canvas: CpuCanvas::new(8, 8), registered: 0 };
+    let mut target = Counting::new();
     let mut textures = BgaTextures::default();
     let (first, second) = (flat(300, 300, RED), flat(300, 300, GREEN));
     let pictures = [picture(&first, 300, 300, 1), picture(&second, 300, 300, 2)];
@@ -368,9 +377,49 @@ fn a_picture_shown_for_many_frames_is_uploaded_once() {
     assert!(matches!(after.show, super::BgaShow::Playing { base: Some(_), .. }));
 }
 
+/// A picture past 256 pixels shown as the chart's own picture is drawn as it is, so it goes to the
+/// renderer from the decode's own pixels rather than a copy of them.
+#[test]
+fn a_large_picture_is_handed_over_from_its_own_pixels() {
+    let mut target = Counting::new();
+    let mut textures = BgaTextures::default();
+    let large = flat(300, 300, RED);
+    textures.frame(&mut target, BgaPick::Playing { base: Some(0), layer: None }, BgaExpand::Full, |_| Some(picture(&large, 300, 300, 1)));
+    assert_eq!(target.handed, vec![large.as_ptr() as usize], "the picture's pixels were copied before they were uploaded");
+}
+
+/// A background that changes pictures many times a second paints each one into the canvas its role
+/// already has, whether it is put on a 256 x 256 canvas, keyed out as a layer, or both.
+#[test]
+fn a_picture_change_paints_into_the_canvas_the_role_already_has() {
+    let mut target = Counting::new();
+    let mut textures = BgaTextures::default();
+    let small = [flat(100, 50, RED), flat(200, 100, GREEN), flat(16, 16, BLUE)];
+    let large = flat(300, 300, BLACK);
+    let pictures = [picture(&small[0], 100, 50, 1), picture(&small[1], 200, 100, 2), picture(&small[2], 16, 16, 3), picture(&large, 300, 300, 4)];
+    let found = |number: i32| pictures.get(usize::try_from(number).ok()?).copied();
+    let mut show = |textures: &mut BgaTextures, base: i32, layer: i32| {
+        textures.frame(&mut target, BgaPick::Playing { base: Some(base), layer: Some(layer) }, BgaExpand::Full, found);
+    };
+
+    show(&mut textures, 0, 1);
+    let canvases = textures.canvases();
+    for (base, layer) in [(1, 2), (2, 0), (0, 1), (2, 2)] {
+        show(&mut textures, base, layer);
+        assert_eq!(textures.canvases(), canvases, "showing pictures {base} and {layer} made a canvas anew");
+    }
+
+    show(&mut textures, 0, 3);
+    let grown = textures.canvases();
+    show(&mut textures, 1, 3);
+    show(&mut textures, 2, 0);
+    show(&mut textures, 1, 3);
+    assert_eq!(textures.canvases(), grown, "a layer past 256 pixels grows its role's canvas once, and pictures after it reuse that");
+}
+
 #[test]
 fn a_number_the_chart_has_no_picture_for_shows_as_no_picture() {
-    let mut target = Counting { canvas: CpuCanvas::new(8, 8), registered: 0 };
+    let mut target = Counting::new();
     let mut textures = BgaTextures::default();
     let frame = textures.frame(&mut target, BgaPick::Playing { base: Some(9), layer: Some(9) }, BgaExpand::Full, |_| None);
     assert_eq!(frame.show, super::BgaShow::Playing { base: None, layer: None });

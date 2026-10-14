@@ -11,6 +11,8 @@
 //! * `play_submission` and `ir_sync` — the submission body each play was finished with, and where
 //!   it stands with each score server it was sent to ([`SyncState`]). A play with no `ir_sync` row
 //!   for a server has never been confirmed there.
+//! * `course_submission` and `course_sync` — the same for a finished course: the body it was sent
+//!   as, and what each server answered ([`KeptCourse`]).
 //!
 //! The merge rules are the reference implementation's, element for element (`ScoreData.java:541-585`
 //! `update`, `PlayDataAccessor.java:195-265` `writeScoreData`): a higher lamp always wins, and the
@@ -32,7 +34,9 @@
 //! (`PlayDataAccessor.java:200-205`); rbms already had a play mode under that name, so the axis
 //! keeps the name rbms gives it and joins the primary key beside the play mode.
 
+mod courses;
 mod migrate;
+mod pending;
 mod replay_gc;
 mod rows;
 mod schema;
@@ -45,14 +49,20 @@ mod tests;
 use std::collections::HashMap;
 use std::path::Path;
 
-use rusqlite::{Connection, OptionalExtension, Row, params, params_from_iter};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, Row, params, params_from_iter};
+use serde::{Deserialize, Serialize};
 
 use rows::{BEST_COLUMNS, JUDGE_COLUMNS, LOG_COLUMNS, accumulate_day, insert_log, log_from_row, read_best, write_best};
 
+pub use courses::{CourseSyncRow, KeptCourse};
 pub use migrate::{ASSIST_UNRECORDED, MigrationReport, SEED_UNRECORDED, migrate_score_book, open_with_import};
-pub use replay_gc::{DEFAULT_KEEP_RECENT_PER_CHART, DEFAULT_REPLAY_MAX_TOTAL_BYTES, ReplayGcPlan, ReplayPolicy};
+pub use pending::{PENDING_RUN_SUFFIX, PendingImport, PendingRun};
+pub use replay_gc::{DEFAULT_KEEP_RECENT_PER_CHART, DEFAULT_REPLAY_MAX_TOTAL_BYTES, ReplayGcPlan, ReplayPolicy, UploadHold};
+use schema::MODE_POPN_9K;
 pub use schema::{GAUGE_UNKNOWN, MODE_UNKNOWN, RANDOM_OFF, SCORE_DB_SCHEMA_VERSION, gauge_id, gauge_token, mode_id, mode_name, random_id, random_token};
-pub use sync::{IrSyncRow, ReplayState, SKIPPED_OLD_SCRATCH_AUTO_RULE, SyncCandidate, SyncState};
+
+use crate::REFERENCE_RECORD_RULE_VERSION;
+pub use sync::{IrSyncRow, KeptSubmission, ReplayAnswer, ReplayState, SKIPPED_OLD_SCRATCH_AUTO_RULE, SyncCandidate, SyncState, SyncWalk};
 
 /// Everything that can go wrong reading or writing the score database.
 #[derive(Debug, thiserror::Error)]
@@ -105,7 +115,7 @@ const SECONDS_PER_DAY: i64 = 86_400;
 /// Per-tier judgement counts of one run, split into the hits taken before the note (early) and
 /// after it (late) — the `e*`/`l*` column pairs the reference stores and the split
 /// `rbms_play::PlaySummary` already produces.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JudgeCounts {
     pub early: [u32; JUDGE_TIER_COUNT],
     pub late: [u32; JUDGE_TIER_COUNT],
@@ -169,7 +179,7 @@ impl JudgeCounts {
 /// Everything here is a value the result screen already holds; nothing is derived from the chart or
 /// the engine inside this crate, so a play recorded from a replay of an old record and one recorded
 /// live take the same path.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct PlayLog {
     /// The `scorelog` row id, read back with the row; 0 for a play that is not stored yet.
     /// [`ScoreDb::record_play`] ignores it and returns the id the row is given.
@@ -189,9 +199,14 @@ pub struct PlayLog {
     /// Judged objects in the chart, the EX denominator.
     pub notes: u32,
     pub combo: u32,
-    /// Bad + poor + miss.
+    /// Bad + poor + miss, and from [`REFERENCE_RECORD_RULE_VERSION`] on every note a run the gauge
+    /// ended never reached (`BMSPlayer.java:909`). An older play's is read through
+    /// [`charged_minbp`] wherever it is compared.
     pub minbp: u32,
-    /// Mean absolute timing error in microseconds (`BMSPlayer.java:922-930`).
+    /// From [`REFERENCE_RECORD_RULE_VERSION`] on, `ScoreData.avgjudge`: the mean distance of every
+    /// note from its input in microseconds, a note never hit counting a second
+    /// (`BMSPlayer.java:911-930`). An older play holds the size of its mean signed offset over the
+    /// hits alone, which is kept as history and never folded into a best.
     pub avgjudge: i64,
     /// Gauge id the run was played on, see [`gauge_id`].
     pub gauge: i32,
@@ -353,6 +368,15 @@ impl ScoreDb {
         Ok(ScoreDb { conn })
     }
 
+    /// A second connection to the database at `path` that only reads, for a worker thread that
+    /// picks what to send while the frame thread keeps writing through its own. Write-ahead logging
+    /// lets the two go on at once; the reader sees what was committed when each of its statements
+    /// began.
+    pub fn open_read_only(path: &Path) -> Result<ScoreDb, ScoreDbError> {
+        let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
+        Ok(ScoreDb { conn })
+    }
+
     /// A database that lives only as long as the value, for tests and for a run that must not
     /// persist anything.
     pub fn open_in_memory() -> Result<ScoreDb, ScoreDbError> {
@@ -375,8 +399,19 @@ impl ScoreDb {
     /// judgement counts, `notes`, `avgjudge`, `minbp` and `combo` exactly as they were
     /// (`ScoreData.java:541-585`).
     pub fn record_play(&mut self, log: &PlayLog, updates_best: bool) -> Result<i64, ScoreDbError> {
+        self.record_play_kept(log, updates_best, None)
+    }
+
+    /// [`ScoreDb::record_play`], keeping the submission body the play is to be sent as in the same
+    /// transaction: the play is in the history with its body, or not at all. A play kept without
+    /// its body would be sent as one rebuilt from its row, which has lost the fast/slow split, the
+    /// options and the build.
+    pub fn record_play_kept(&mut self, log: &PlayLog, updates_best: bool, kept: Option<KeptSubmission<'_>>) -> Result<i64, ScoreDbError> {
         let tx = self.conn.transaction()?;
         let id = insert_log(&tx, log)?;
+        if let Some(kept) = kept {
+            sync::insert_submission(&tx, id, kept)?;
+        }
         let existing = read_best(&tx, &log.chart_key, log.mode, &log.ln_mode)?;
         let merged = merge_best(existing.unwrap_or_else(|| BestScore::empty(&log.chart_key, log.mode, &log.ln_mode)), log, updates_best);
         write_best(&tx, &merged)?;
@@ -493,8 +528,11 @@ impl ScoreDb {
 
     /// Which saved replays the retention policy keeps and which it lets go, given the directory the
     /// replays live in. Deleting the files is the caller's, so a plan can be shown before it runs.
-    pub fn replay_gc_plan(&self, dir: &Path, policy: &ReplayPolicy) -> Result<ReplayGcPlan, ScoreDbError> {
-        replay_gc::plan(&self.conn, dir, policy)
+    ///
+    /// `hold` names the server and account the plays' replays are still to go up to: a replay that
+    /// has not gone up yet is kept as one of the recent ones are, within the byte ceiling.
+    pub fn replay_gc_plan(&self, dir: &Path, policy: &ReplayPolicy, hold: Option<&UploadHold>) -> Result<ReplayGcPlan, ScoreDbError> {
+        replay_gc::plan(&self.conn, dir, policy, hold)
     }
 
     /// Forget the named replays: every `score` and `scorelog` row that pointed at one is left
@@ -516,6 +554,12 @@ impl ScoreDb {
     /// How many plays the database holds.
     pub fn play_count(&self) -> Result<u32, ScoreDbError> {
         Ok(self.conn.query_row("SELECT COUNT(*) FROM scorelog", [], |row| row.get(0))?)
+    }
+
+    /// The id of the newest play stored, or `None` for an empty history. A walk started now reaches
+    /// no further than it ([`SyncWalk::up_to`]).
+    pub fn newest_play_id(&self) -> Result<Option<i64>, ScoreDbError> {
+        Ok(self.conn.query_row("SELECT MAX(id) FROM scorelog", [], |row| row.get(0))?)
     }
 
     /// Copy the whole database into a single file at `path`, WAL and all. `VACUUM INTO` is the only
@@ -570,13 +614,13 @@ fn merge_best(mut best: BestScore, log: &PlayLog, updates_best: bool) -> BestSco
             best.rule_version = log.rule_version;
             best.replay_file = log.replay_file.clone();
         }
-        if best.avgjudge > log.avgjudge {
+        if log.rule_version >= REFERENCE_RECORD_RULE_VERSION && best.avgjudge > log.avgjudge {
             best.avgjudge = log.avgjudge;
             best.option = log.option;
             best.seed = log.seed;
         }
-        if best.minbp > i64::from(log.minbp) {
-            best.minbp = i64::from(log.minbp);
+        if best.minbp > charged_minbp(log) {
+            best.minbp = charged_minbp(log);
             best.option = log.option;
             best.seed = log.seed;
         }
@@ -599,6 +643,51 @@ fn merge_best(mut best: BestScore, log: &PlayLog, updates_best: bool) -> BestSco
         best.sha256.clone_from(&log.sha256);
     }
     best
+}
+
+/// A play's `minbp` as the reference records it: with the notes a run the gauge ended never
+/// reached counted in (`BMSPlayer.java:909`).
+///
+/// A play of [`REFERENCE_RECORD_RULE_VERSION`] or later was recorded that way. An older one counted
+/// only what was judged, so the notes it never took are added back from its own counts: every note
+/// is taken by one PGREAT, GREAT, GOOD, BAD or POOR, but for a pop'n BAD, which leaves its note
+/// ([`MODE_POPN_9K`]). A finished run and a run left part-way took every note and are charged
+/// nothing more. [`refold_reference_bests`] reads the same sum.
+pub fn charged_minbp(log: &PlayLog) -> i64 {
+    if log.rule_version >= REFERENCE_RECORD_RULE_VERSION {
+        return i64::from(log.minbp);
+    }
+    let bad_took_a_note = if log.mode == MODE_POPN_9K { 0 } else { log.judge.tier(JUDGE_BAD) };
+    let taken = [JUDGE_PGREAT, JUDGE_GREAT, JUDGE_GOOD, JUDGE_POOR].iter().map(|tier| log.judge.tier(*tier)).sum::<u32>() + bad_took_a_note;
+    i64::from(log.minbp) + i64::from(log.notes.saturating_sub(taken))
+}
+
+/// Fold every chart's best `avgjudge` and `minbp` afresh from its plays, as this build compares
+/// them: `avgjudge` from plays of [`REFERENCE_RECORD_RULE_VERSION`] or later alone, and `minbp`
+/// as [`charged_minbp`] has it. Only the plays that may set bests count ([`crate::sets_best`]); a
+/// chart none of whose plays counts holds [`UNSET_MINIMUM`].
+///
+/// Run on every migration rather than once: a build older than the rule version may have written
+/// to the database since, folding a value of the old meaning into the bests, and this puts that
+/// right the next time a build of this one opens it. A row whose two values already stand is not
+/// written.
+pub(super) fn refold_reference_bests(conn: &Connection) -> Result<(), ScoreDbError> {
+    let sets_best = "(l.assist = 0 OR (l.assist = ?2 AND l.rule_version >= ?3))";
+    let taken = "l.epg + l.lpg + l.egr + l.lgr + l.egd + l.lgd + l.epr + l.lpr + CASE WHEN l.mode = ?4 THEN 0 ELSE l.ebd + l.lbd END";
+    let sql = format!(
+        "UPDATE score SET avgjudge = f.avgjudge, minbp = f.minbp \
+         FROM (SELECT l.chart_key, l.mode, l.ln_mode, \
+               COALESCE(MIN(CASE WHEN {sets_best} AND l.rule_version >= ?1 THEN l.avgjudge END), ?5) AS avgjudge, \
+               COALESCE(MIN(CASE WHEN {sets_best} THEN l.minbp + CASE WHEN l.rule_version >= ?1 THEN 0 ELSE MAX(0, l.notes - ({taken})) END END), ?5) AS minbp \
+               FROM scorelog l GROUP BY l.chart_key, l.mode, l.ln_mode) AS f \
+         WHERE score.chart_key = f.chart_key AND score.mode = f.mode AND score.ln_mode = f.ln_mode \
+           AND (score.avgjudge <> f.avgjudge OR score.minbp <> f.minbp)"
+    );
+    conn.execute(
+        &sql,
+        params![REFERENCE_RECORD_RULE_VERSION, crate::SCRATCH_AUTO_ASSIST, crate::SCRATCH_AUTO_LEAVES_THE_TURNTABLE_RULE_VERSION, MODE_POPN_9K, UNSET_MINIMUM],
+    )?;
+    Ok(())
 }
 
 /// The epoch second the UTC day containing `epoch_seconds` starts at. `rem_euclid` keeps a date

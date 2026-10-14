@@ -13,8 +13,10 @@ use std::borrow::Cow;
 
 use rbms_render::{BlendMode, Color, DistanceFieldParams, QuadParams, Rect, TextureFilter, TextureId};
 
-/// Bytes a texture upload's rows are padded to. `wgpu` requires this of a buffer-to-texture copy,
-/// and a padded upload is correct either way.
+/// Bytes the rows of a copy between a texture and a buffer are padded to, which `wgpu` requires of
+/// such a copy in either direction: the offscreen target's read back is one. A queue write, which is
+/// how a texture is uploaded, takes rows at any stride.
+#[cfg(test)]
 pub(crate) const COPY_BYTES_PER_ROW_ALIGNMENT: u32 = 256;
 
 /// Bytes per pixel in the RGBA8 textures the registry holds.
@@ -245,40 +247,30 @@ pub(crate) fn scissor_rect(clip: ClipState, viewport: (f32, f32, f32, f32), logi
 /// Bytes one row of a `width`-pixel RGBA8 image takes once padded out to
 /// [`COPY_BYTES_PER_ROW_ALIGNMENT`], which is the stride a copy between a texture and a buffer has
 /// to be given in either direction.
+#[cfg(test)]
 pub(crate) fn padded_row_bytes(width: u32) -> u32 {
     (width * BYTES_PER_PIXEL).div_ceil(COPY_BYTES_PER_ROW_ALIGNMENT) * COPY_BYTES_PER_ROW_ALIGNMENT
 }
 
-/// An RGBA8 image with each row padded out to [`COPY_BYTES_PER_ROW_ALIGNMENT`], and the padded row
-/// stride, ready to be handed to a texture upload.
+/// An RGBA8 image of `width` x `height` as exactly the bytes a texture of that size holds, rows
+/// packed tight, ready to be handed to a texture upload.
 ///
-/// A row already on the alignment is borrowed rather than copied, so the common power-of-two
-/// texture costs nothing at all -- which matters because a background frame comes back through here
-/// on the frames it has not changed on as well. Short input is zero filled rather than rejected, so
-/// a truncated frame draws dark instead of killing the process.
-pub(crate) fn pad_rows_to_alignment(rgba: &[u8], width: u32, height: u32) -> (Cow<'_, [u8]>, u32) {
-    let tight = width * BYTES_PER_PIXEL;
-    let padded = padded_row_bytes(width);
-    if padded == tight {
-        let needed = (tight * height) as usize;
-        if rgba.len() == needed {
-            return (Cow::Borrowed(rgba), tight);
+/// A queue write takes rows at any stride (it is only a copy between a buffer and a texture that
+/// wants them padded), so a buffer that is long enough is borrowed as it
+/// is and costs nothing -- which matters because a background frame comes back through here on the
+/// frames it has not changed on as well, and a graph column through here every time it moves. A
+/// longer buffer is cut, and only a short one is copied: it is zero filled, so a truncated frame
+/// draws dark instead of killing the process.
+pub(crate) fn whole_image(rgba: &[u8], width: u32, height: u32) -> Cow<'_, [u8]> {
+    let needed = (width * BYTES_PER_PIXEL) as usize * height as usize;
+    match rgba.get(..needed) {
+        Some(exact) => Cow::Borrowed(exact),
+        None => {
+            let mut padded = rgba.to_vec();
+            padded.resize(needed, 0);
+            Cow::Owned(padded)
         }
-        let mut exact = rgba.to_vec();
-        exact.resize(needed, 0);
-        return (Cow::Owned(exact), tight);
     }
-    let mut out = vec![0u8; (padded * height) as usize];
-    for row in 0..height as usize {
-        let from = row * tight as usize;
-        let available = rgba.len().saturating_sub(from).min(tight as usize);
-        if available == 0 {
-            break;
-        }
-        let to = row * padded as usize;
-        out[to..to + available].copy_from_slice(&rgba[from..from + available]);
-    }
-    (Cow::Owned(out), padded)
 }
 
 #[cfg(test)]
@@ -549,60 +541,33 @@ mod tests {
         assert_eq!(padded_row_bytes(1), COPY_BYTES_PER_ROW_ALIGNMENT);
     }
 
-    /// The alignment trap: 300 pixels is 1200 bytes a row, which is not a multiple of 256.
+    /// 300 pixels is 1200 bytes a row, which is not a multiple of 256: a queue write takes it as it
+    /// is, so nothing is padded or moved.
     #[test]
-    fn an_unaligned_row_is_padded_out_and_its_pixels_stay_put() {
-        let (width, height) = (300u32, 3u32);
-        let tight = width * BYTES_PER_PIXEL;
-        let source: Vec<u8> = (0..tight * height).map(|i| (i % 251) as u8).collect();
-        let (padded, stride) = pad_rows_to_alignment(&source, width, height);
-
-        assert_eq!(tight, 1200);
-        assert_eq!(stride, 1280, "1200 bytes rounds up to the next multiple of 256");
-        assert_eq!(stride % COPY_BYTES_PER_ROW_ALIGNMENT, 0);
-        assert_eq!(padded.len(), (stride * height) as usize);
-        for row in 0..height as usize {
-            let from = row * tight as usize;
-            let to = row * stride as usize;
-            assert_eq!(&padded[to..to + tight as usize], &source[from..from + tight as usize], "row {row} moved");
-            assert!(padded[to + tight as usize..to + stride as usize].iter().all(|b| *b == 0), "row {row} padding is not zeroed");
+    fn an_image_of_the_right_length_is_handed_on_as_it_is_whatever_its_row_length() {
+        for width in [300u32, 64, 63] {
+            let pixels: Vec<u8> = (0..width * BYTES_PER_PIXEL * 3).map(|i| (i % 251) as u8).collect();
+            let out = whole_image(&pixels, width, 3);
+            assert!(matches!(out, Cow::Borrowed(_)), "{width} pixels a row is borrowed rather than copied");
+            assert_eq!(out.as_ptr(), pixels.as_ptr(), "and it is the caller's own bytes");
+            assert_eq!(out.len(), pixels.len());
         }
     }
 
     #[test]
-    fn an_already_aligned_row_is_left_exactly_as_it_was() {
-        let (width, height) = (64u32, 2u32);
-        let source: Vec<u8> = (0..width * BYTES_PER_PIXEL * height).map(|i| i as u8).collect();
-        let (out, stride) = pad_rows_to_alignment(&source, width, height);
-        assert_eq!(stride, width * BYTES_PER_PIXEL);
-        assert_eq!(out, source);
+    fn a_long_buffer_is_cut_to_the_image() {
+        let pixels = vec![5u8; 64 * 3 * BYTES_PER_PIXEL as usize];
+        let out = whole_image(&pixels, 64, 2);
+        assert!(matches!(out, Cow::Borrowed(_)));
+        assert_eq!(out.len(), 64 * 2 * BYTES_PER_PIXEL as usize);
     }
 
     #[test]
     fn a_short_buffer_is_zero_filled_rather_than_read_past() {
-        let (out, stride) = pad_rows_to_alignment(&[1, 2, 3, 4], 300, 2);
-        assert_eq!(out.len(), (stride * 2) as usize);
+        let out = whole_image(&[1, 2, 3, 4], 300, 2);
+        assert_eq!(out.len(), (300 * BYTES_PER_PIXEL * 2) as usize);
         assert_eq!(&out[0..4], &[1, 2, 3, 4]);
         assert!(out[4..].iter().all(|b| *b == 0));
-
-        let (exact, stride) = pad_rows_to_alignment(&[9; 4], 64, 2);
-        assert_eq!(exact.len(), (stride * 2) as usize);
-        assert!(exact[4..].iter().all(|b| *b == 0));
-    }
-
-    /// A background image comes back through here on every frame, changed or not, and the common
-    /// power-of-two texture already has aligned rows: copying it into a fresh allocation each time
-    /// is megabytes a frame for nothing. An aligned, exactly sized buffer is handed straight on.
-    #[test]
-    fn an_aligned_buffer_of_the_right_length_is_not_copied() {
-        let pixels = vec![7u8; (64 * BYTES_PER_PIXEL * 32) as usize];
-        let (out, stride) = pad_rows_to_alignment(&pixels, 64, 32);
-        assert_eq!(stride, 64 * BYTES_PER_PIXEL, "sixty-four pixels a row is already on the alignment");
-        assert!(matches!(out, Cow::Borrowed(_)), "an aligned buffer of the right length is handed on rather than copied");
-        assert_eq!(out.as_ptr(), pixels.as_ptr(), "and it is the caller's own bytes");
-
-        let (unaligned, _) = pad_rows_to_alignment(&pixels, 63, 32);
-        assert!(matches!(unaligned, Cow::Owned(_)), "a row off the alignment still has to be padded");
     }
 
     #[test]

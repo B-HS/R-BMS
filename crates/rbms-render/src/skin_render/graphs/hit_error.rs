@@ -18,7 +18,7 @@ use super::super::draw::Placement;
 use super::super::object::Body;
 use super::pixmap::{Pixmap, Rgba};
 use super::{
-    Layer, RECENT_JUDGES, TIMING_JUDGE_AREAS, Upload, VISUALIZER_JUDGEMENTS, next_serial, paintable, signed_plot_of, visualizer_color, visualizer_line_width,
+    Layer, RECENT_JUDGES, TIMING_JUDGE_AREAS, VISUALIZER_JUDGEMENTS, next_serial, paintable, signed_plot_of, visualizer_color, visualizer_line_width,
     visualizer_palette, visualizer_rate,
 };
 use crate::Renderer;
@@ -257,7 +257,7 @@ pub(crate) fn draw_hit_error<R: Renderer>(
 
     let Drawn { layer, pixmap, .. } = &mut *drawn;
     let (width, height) = pixmap.size();
-    let Some(tex) = layer.texture_as(r, pixmap, Upload::FirstRowOnTop) else {
+    let Some(tex) = layer.texture(r, pixmap) else {
         return false;
     };
     place.texture(r, tex, (width as u32, height as u32), SkinRect::new(0.0, 0.0, width as f32, height as f32), rect)

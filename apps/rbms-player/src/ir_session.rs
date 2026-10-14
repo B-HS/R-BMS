@@ -74,6 +74,18 @@ impl AccountSession {
         self.login_id.as_deref()
     }
 
+    /// The account the held token belongs to, as the server named it (the login response, or
+    /// `whoami`). `None` when no token is held, and while a restored token has not been confirmed
+    /// yet.
+    ///
+    /// This is the one id a request made as the account may name: the server refuses any other with
+    /// 403. The PLAYER ID typed into the settings is what the next LOGIN or REGISTER is made with,
+    /// not the owner of the token in hand.
+    pub(crate) fn signed_in_as(&self) -> Option<&str> {
+        self.token.as_ref()?;
+        self.login_id.as_deref().map(str::trim).filter(|login_id| !login_id.is_empty())
+    }
+
     /// The raw state, for the tests that pin the state machine.
     #[cfg(test)]
     pub(crate) fn state(&self) -> &AccountState {
@@ -114,6 +126,9 @@ impl AccountSession {
 
     /// Fold a `whoami` probe back in: it confirms the restored identity, or reports that the stored
     /// token is no longer accepted. Returns `true` when the token was dropped.
+    ///
+    /// Only a 401 says the token is no longer accepted. A 403 is a firewall or a proxy refusing the
+    /// request, not the server refusing the token, and a token is not thrown away for it.
     pub(crate) fn finish_whoami(&mut self, result: Result<String, IrError>) -> bool {
         match result {
             Ok(id) => {
@@ -121,7 +136,7 @@ impl AccountSession {
                 self.state = AccountState::LoggedIn;
                 false
             }
-            Err(error) if error.is_auth_failure() => {
+            Err(error @ IrError::Unauthorized(_)) => {
                 self.token = None;
                 self.state = AccountState::Failed(format!("session expired: {}", short_error(&error)));
                 true
@@ -155,15 +170,12 @@ impl AccountSession {
 
 /// The id a score is submitted under.
 ///
-/// Only a signed-in client may submit under a real account id: without a bearer token the server
-/// answers 401 for anything but [`GUEST_PLAYER_ID`], and the score is lost. So a configured id is
-/// used only while a session holds a token, and every other run submits as a guest.
-pub(crate) fn submission_player_id(session: &AccountSession, configured: &str) -> String {
-    let configured = configured.trim();
-    if session.is_logged_in() && !configured.is_empty() {
-        return configured.to_string();
-    }
-    GUEST_PLAYER_ID.to_string()
+/// Only a signed-in client may submit under a real account id, and only under the id of the account
+/// its token belongs to ([`AccountSession::signed_in_as`]): without a bearer token the server
+/// answers 401 for anything but [`GUEST_PLAYER_ID`], and with one it answers 403 for any id but the
+/// token's owner. Every other run submits as a guest.
+pub(crate) fn submission_player_id(session: &AccountSession) -> String {
+    session.signed_in_as().unwrap_or(GUEST_PLAYER_ID).to_string()
 }
 
 /// Run one credential exchange. Blocking: call it from a worker thread.
@@ -171,6 +183,18 @@ pub(crate) fn run_auth(server: &dyn ScoreServer, action: AuthAction, request: &A
     match action {
         AuthAction::Login => server.login(request),
         AuthAction::Register => server.register(request),
+    }
+}
+
+/// Ask the server to refuse the token `server` carries from now on. Blocking: call it from a worker
+/// thread.
+///
+/// A token the server does not know, or has revoked already, is refused all the same, so a 401 is
+/// the job done and not a failure.
+pub(crate) fn run_revoke(server: &dyn ScoreServer) -> Result<(), IrError> {
+    match server.revoke_current_token() {
+        Err(IrError::Unauthorized(_)) => Ok(()),
+        other => other,
     }
 }
 
@@ -371,26 +395,61 @@ mod tests {
     #[test]
     fn a_signed_in_client_submits_under_its_account_id() {
         let session = AccountSession::restored(Some("tok".into()), Some("dj".into()));
-        assert_eq!(submission_player_id(&session, "dj"), "dj");
+        assert_eq!(submission_player_id(&session), "dj");
+        assert_eq!(session.signed_in_as(), Some("dj"));
     }
 
     #[test]
     fn a_client_that_logged_out_submits_as_a_guest_not_under_the_old_account_id() {
         let mut session = AccountSession::restored(Some("tok".into()), Some("dj".into()));
         assert!(session.logout());
-        assert_eq!(submission_player_id(&session, "dj"), GUEST_PLAYER_ID, "a tokenless submission under a real id is rejected 401 and the score is lost");
+        assert_eq!(submission_player_id(&session), GUEST_PLAYER_ID, "a tokenless submission under a real id is rejected 401 and the score is lost");
     }
 
     #[test]
     fn a_client_whose_token_was_revoked_submits_as_a_guest() {
         let mut session = AccountSession::restored(Some("tok".into()), Some("dj".into()));
         assert!(session.finish_whoami(Err(IrError::Unauthorized("expired".into()))));
-        assert_eq!(submission_player_id(&session, "dj"), GUEST_PLAYER_ID);
+        assert_eq!(session.login_id(), Some("dj"), "the id the dropped token had is still known");
+        assert_eq!(session.signed_in_as(), None, "an id without a token is nobody's session");
+        assert_eq!(submission_player_id(&session), GUEST_PLAYER_ID);
     }
 
     #[test]
-    fn a_blank_configured_id_falls_back_to_the_guest_id() {
+    fn a_token_whose_owner_the_server_has_not_named_yet_names_nobody() {
         let session = AccountSession::restored(Some("tok".into()), None);
-        assert_eq!(submission_player_id(&session, "   "), GUEST_PLAYER_ID);
+        assert_eq!(session.signed_in_as(), None);
+        assert_eq!(submission_player_id(&session), GUEST_PLAYER_ID);
+        let blank = AccountSession::restored(Some("tok".into()), Some("   ".into()));
+        assert_eq!(blank.signed_in_as(), None, "a blank id is no id");
+    }
+
+    #[test]
+    fn a_login_replaces_the_account_a_request_is_made_as() {
+        let server = double(ok_response, unauthorized);
+        let mut session = AccountSession::restored(Some("tok-old".into()), Some("someone-else".into()));
+        session.begin(AuthAction::Login);
+        let request = auth_request(AuthAction::Login, "dj", "hunter2", "");
+        session.finish(AuthAction::Login, run_auth(&server, AuthAction::Login, &request));
+        assert_eq!(session.signed_in_as(), Some("dj"));
+    }
+
+    #[test]
+    fn a_failed_login_leaves_requests_to_be_made_as_the_account_that_is_still_signed_in() {
+        let server = double(unauthorized, ok_response);
+        let mut session = AccountSession::restored(Some("old".into()), Some("dj".into()));
+        session.begin(AuthAction::Login);
+        let request = auth_request(AuthAction::Login, "dj2", "wrong", "");
+        session.finish(AuthAction::Login, run_auth(&server, AuthAction::Login, &request));
+        assert_eq!(session.signed_in_as(), Some("dj"), "the token in hand is dj's whatever was typed after it");
+        assert_eq!(submission_player_id(&session), "dj");
+    }
+
+    #[test]
+    fn whoami_keeps_a_token_a_firewall_refused() {
+        let mut session = AccountSession::restored(Some("tok".into()), Some("dj".into()));
+        assert!(!session.finish_whoami(Err(IrError::Forbidden("blocked by the proxy".into()))), "a 403 is not the server refusing the token");
+        assert_eq!(session.token(), Some("tok"));
+        assert_eq!(session.signed_in_as(), Some("dj"));
     }
 }

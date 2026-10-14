@@ -12,10 +12,10 @@
     "client_build_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     "client_platform": "macos-aarch64",
     "ex_score": 10,
-    "extra": {},
+    "extra": { "mean_offset_us": -14285, "rule_version": 4 },
     "gauge_value": 80.9375,
     "judge": {
-        "avgjudge": -14285,
+        "avgjudge": 787187,
         "bad": 0,
         "combobreak": 25,
         "ebd": 0,

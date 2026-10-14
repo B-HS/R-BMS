@@ -9,6 +9,11 @@
 //! * `ir_sync` — one row per play and score server ([`IrSyncRow`]). A play with no row for a server
 //!   has never been confirmed there, which is why the `scorelog.ir_submitted` flag of a play
 //!   written before these tables needs no migration: it said only that the play was handed over.
+//!
+//! A refusal is written down with the builds it was given under ([`IrSyncRow::refused_under`]): this
+//! client's and the server's. The same play sent again by the same client to the same server is
+//! refused again, so a walk that is not asked to send every refusal again leaves it out until one of
+//! the two builds changes ([`SyncWalk::refused_under`]).
 
 use std::collections::HashMap;
 
@@ -25,8 +30,8 @@ use crate::{SCRATCH_AUTO_ASSIST, SCRATCH_AUTO_LEAVES_THE_TURNTABLE_RULE_VERSION}
 pub enum SyncState {
     /// The server holds the play.
     Accepted,
-    /// The server refused the play; it is sent again on the next sync, since a change on the server
-    /// may let it through.
+    /// The server refused the play. It is sent again once the client or the server is another
+    /// build, or when the player asks for every play to be sent again.
     Rejected,
     /// The play was not answered (no connection, a failure of the server's own, a rate limit); it is
     /// sent again on the next sync.
@@ -140,6 +145,11 @@ pub struct IrSyncRow {
     pub replay_id: Option<String>,
     /// The last thing that went wrong with the replay.
     pub replay_error: Option<String>,
+    /// The builds a refusal of the score was given under ([`SyncWalk::refused_under`]); `None` for
+    /// a row that is no refusal, or one written before the builds were.
+    pub refused_under: Option<String>,
+    /// The same for a refusal of the replay.
+    pub replay_refused_under: Option<String>,
 }
 
 impl IrSyncRow {
@@ -160,6 +170,8 @@ impl IrSyncRow {
             replay_state: ReplayState::None,
             replay_id: None,
             replay_error: None,
+            refused_under: None,
+            replay_refused_under: None,
         }
     }
 
@@ -179,8 +191,44 @@ impl IrSyncRow {
             replay_state: ReplayState::from_token(&row.get::<_, String>("replay_state")?),
             replay_id: row.get("replay_id")?,
             replay_error: row.get("replay_error")?,
+            refused_under: row.get("refused_under")?,
+            replay_refused_under: row.get("replay_refused_under")?,
         })
     }
+}
+
+/// The submission body a play is to be sent as, and the account it was made under (`None` for a
+/// guest), kept beside the play ([`ScoreDb::record_play_kept`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct KeptSubmission<'a> {
+    pub body: &'a str,
+    pub played_as: Option<&'a str>,
+}
+
+/// Keep `kept` as the body the play `log_id` is sent as, replacing one it had.
+pub(super) fn insert_submission(conn: &rusqlite::Connection, log_id: i64, kept: KeptSubmission<'_>) -> Result<(), ScoreDbError> {
+    conn.execute("INSERT OR REPLACE INTO play_submission(log_id, body, played_as) VALUES(?1, ?2, ?3)", params![log_id, kept.body, kept.played_as])?;
+    Ok(())
+}
+
+/// What one walk of the history picks to send.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SyncWalk<'a> {
+    /// The score server, as [`IrSyncRow::server`] keys it.
+    pub server: &'a str,
+    /// The account the walk sends under.
+    pub login_id: &'a str,
+    /// The plays the walk is narrowed to; `None` walks every play.
+    pub only: Option<&'a [i64]>,
+    /// The newest play the walk reaches ([`ScoreDb::newest_play_id`] when it began); a play stored
+    /// after that is sent by whoever stored it. `None` reaches every play.
+    pub up_to: Option<i64>,
+    /// The newest course the walk reaches, as `up_to` is for plays.
+    pub courses_up_to: Option<i64>,
+    /// The builds the walk sends under, this client's and the server's: a play the server refused
+    /// under the same builds is left out, since it would be refused again. `None` sends every
+    /// refusal again, which is what the player asks for by hand.
+    pub refused_under: Option<&'a str>,
 }
 
 /// One play a sync has to send: the play, the body it was finished with when one was kept, the
@@ -220,53 +268,75 @@ pub const SKIPPED_OLD_SCRATCH_AUTO_RULE: &str = "OLD_SCRATCH_AUTO_RULE";
 impl ScoreDb {
     /// Keep the submission body a play was finished with, and the account it was made under.
     pub fn put_submission(&mut self, log_id: i64, body: &str, played_as: Option<&str>) -> Result<(), ScoreDbError> {
-        self.conn.execute("INSERT OR REPLACE INTO play_submission(log_id, body, played_as) VALUES(?1, ?2, ?3)", params![log_id, body, played_as])?;
-        Ok(())
+        insert_submission(&self.conn, log_id, KeptSubmission { body, played_as })
     }
 
-    /// Every play a sync to `server` under the account `login_id` has to send, oldest first: every
-    /// play the server does not hold yet, whatever it answered before. Left out are the plays made
-    /// under another account, and the SCRATCH AUTO plays of the rule before the turntable stopped
-    /// counting (an imported play assisted under that rule, with the assist not recorded, among
-    /// them). A guest's play, and one made before the account was kept, goes to whichever account
-    /// syncs first. `only` narrows the walk to the named plays.
-    pub fn sync_candidates(&self, server: &str, login_id: &str, only: Option<&[i64]>) -> Result<Vec<SyncCandidate>, ScoreDbError> {
+    /// Every play a walk has to send: every play the server does not hold yet, whatever it answered
+    /// before, but for one it refused under the builds the walk sends under. Left out are the plays
+    /// made under another account, and the SCRATCH AUTO plays of the rule before the turntable
+    /// stopped counting (an imported play assisted under that rule, with the assist not recorded,
+    /// among them). A guest's play, and one made before the account was kept, goes to whichever
+    /// account syncs first.
+    ///
+    /// Oldest first, but a play the server failed to answer goes behind the plays it has not been
+    /// asked about, and behind the plays it failed fewer times: a play that keeps failing on the
+    /// server's side does not hold back every play after it.
+    pub fn sync_candidates(&self, walk: &SyncWalk<'_>) -> Result<Vec<SyncCandidate>, ScoreDbError> {
         let mut bound: Vec<Value> = vec![
-            Value::from(server.to_string()),
-            Value::from(login_id.to_string()),
+            Value::from(walk.server.to_string()),
+            Value::from(walk.login_id.to_string()),
             Value::from(i64::from(SCRATCH_AUTO_ASSIST)),
             Value::from(i64::from(SCRATCH_AUTO_LEAVES_THE_TURNTABLE_RULE_VERSION)),
             Value::from(SyncState::Accepted.as_token().to_string()),
             Value::from(i64::from(ASSIST_UNRECORDED)),
+            Value::from(SyncState::Retry.as_token().to_string()),
         ];
-        let narrowed = match only {
-            Some(ids) => {
-                let first = bound.len() + 1;
-                bound.extend(ids.iter().map(|id| Value::from(*id)));
-                format!(" AND l.id IN ({})", placeholders_from(first, ids.len()))
-            }
-            None => String::new(),
-        };
+        let mut narrowed = String::new();
+        if let Some(ids) = walk.only {
+            let first = bound.len() + 1;
+            bound.extend(ids.iter().map(|id| Value::from(*id)));
+            narrowed.push_str(&format!(" AND l.id IN ({})", placeholders_from(first, ids.len())));
+        }
+        if let Some(up_to) = walk.up_to {
+            bound.push(Value::from(up_to));
+            narrowed.push_str(&format!(" AND l.id <= ?{}", bound.len()));
+        }
+        if let Some(key) = walk.refused_under {
+            bound.push(Value::from(SyncState::Rejected.as_token().to_string()));
+            bound.push(Value::from(key.to_string()));
+            narrowed.push_str(&format!(" AND NOT COALESCE(y.state = ?{} AND y.refused_under = ?{}, 0)", bound.len() - 1, bound.len()));
+        }
         let sql = format!(
             "{} WHERE (y.state IS NULL OR y.state <> ?5) AND (s.played_as IS NULL OR s.played_as = ?2) AND NOT ((l.assist = ?3 OR l.assist = ?6) AND l.rule_version < ?4){narrowed} \
-             ORDER BY l.date ASC, l.id ASC",
+             ORDER BY CASE WHEN y.state = ?7 THEN y.attempts ELSE 0 END ASC, l.date ASC, l.id ASC",
             candidate_select()
         );
         self.query_candidates(&sql, bound)
     }
 
-    /// The plays the server holds whose replay is still to go up to it: taken under the account
-    /// `login_id`, with a replay file kept, and an upload pending, failed or refused.
-    pub fn replay_candidates(&self, server: &str, login_id: &str) -> Result<Vec<SyncCandidate>, ScoreDbError> {
+    /// The plays the server holds whose replay is still to go up to it: taken under the walk's
+    /// account, with a replay file kept, and an upload pending, failed or refused — but for one the
+    /// server refused under the builds the walk sends under ([`SyncWalk::refused_under`]).
+    pub fn replay_candidates(&self, walk: &SyncWalk<'_>) -> Result<Vec<SyncCandidate>, ScoreDbError> {
         let still_to_send: Vec<&str> = ReplayState::ALL.into_iter().filter(|state| state.still_to_send()).map(ReplayState::as_token).collect();
         let mut bound: Vec<Value> =
-            vec![Value::from(server.to_string()), Value::from(SyncState::Accepted.as_token().to_string()), Value::from(login_id.to_string())];
-        let sql = format!(
-            "{} WHERE y.state = ?2 AND y.login_id = ?3 AND l.replay_file IS NOT NULL AND y.replay_state IN ({}) ORDER BY l.date ASC, l.id ASC",
-            candidate_select(),
-            placeholders_from(bound.len() + 1, still_to_send.len())
-        );
+            vec![Value::from(walk.server.to_string()), Value::from(SyncState::Accepted.as_token().to_string()), Value::from(walk.login_id.to_string())];
+        let states = placeholders_from(bound.len() + 1, still_to_send.len());
         bound.extend(still_to_send.into_iter().map(|token| Value::from(token.to_string())));
+        let mut narrowed = String::new();
+        if let Some(up_to) = walk.up_to {
+            bound.push(Value::from(up_to));
+            narrowed.push_str(&format!(" AND l.id <= ?{}", bound.len()));
+        }
+        if let Some(key) = walk.refused_under {
+            bound.push(Value::from(ReplayState::Rejected.as_token().to_string()));
+            bound.push(Value::from(key.to_string()));
+            narrowed.push_str(&format!(" AND NOT COALESCE(y.replay_state = ?{} AND y.replay_refused_under = ?{}, 0)", bound.len() - 1, bound.len()));
+        }
+        let sql = format!(
+            "{} WHERE y.state = ?2 AND y.login_id = ?3 AND l.replay_file IS NOT NULL AND y.replay_state IN ({states}){narrowed} ORDER BY l.date ASC, l.id ASC",
+            candidate_select(),
+        );
         self.query_candidates(&sql, bound)
     }
 
@@ -281,11 +351,13 @@ impl ScoreDb {
     pub fn put_sync_state(&mut self, row: &IrSyncRow) -> Result<(), ScoreDbError> {
         self.conn.execute(
             "INSERT INTO ir_sync(log_id, server, login_id, state, score_id, http_status, error_code, error_field, error_reason, attempts, \
-             last_attempt_at, replay_state, replay_id, replay_error) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1, ?10, ?11, ?12, ?13) \
+             last_attempt_at, replay_state, replay_id, replay_error, refused_under, replay_refused_under) \
+             VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1, ?10, ?11, ?12, ?13, ?14, ?15) \
              ON CONFLICT(log_id, server) DO UPDATE SET login_id = excluded.login_id, state = excluded.state, score_id = excluded.score_id, \
              http_status = excluded.http_status, error_code = excluded.error_code, error_field = excluded.error_field, \
              error_reason = excluded.error_reason, attempts = ir_sync.attempts + 1, last_attempt_at = excluded.last_attempt_at, \
-             replay_state = excluded.replay_state, replay_id = excluded.replay_id, replay_error = excluded.replay_error",
+             replay_state = excluded.replay_state, replay_id = excluded.replay_id, replay_error = excluded.replay_error, \
+             refused_under = excluded.refused_under, replay_refused_under = excluded.replay_refused_under",
             params![
                 row.log_id,
                 row.server,
@@ -300,29 +372,27 @@ impl ScoreDb {
                 row.replay_state.as_token(),
                 row.replay_id,
                 row.replay_error,
+                row.refused_under,
+                row.replay_refused_under,
             ],
         )?;
         Ok(())
     }
 
     /// Write what a server answered about a play's replay, leaving the score's columns as they are.
-    pub fn put_replay_state(
-        &mut self,
-        log_id: i64,
-        server: &str,
-        state: ReplayState,
-        replay_id: Option<&str>,
-        error: Option<&str>,
-    ) -> Result<(), ScoreDbError> {
+    /// `refused_under` is the builds a refusal of the replay was given under.
+    pub fn put_replay_state(&mut self, log_id: i64, server: &str, answer: &ReplayAnswer<'_>) -> Result<(), ScoreDbError> {
         self.conn.execute(
-            "UPDATE ir_sync SET replay_state = ?3, replay_id = ?4, replay_error = ?5 WHERE log_id = ?1 AND server = ?2",
-            params![log_id, server, state.as_token(), replay_id, error],
+            "UPDATE ir_sync SET replay_state = ?3, replay_id = ?4, replay_error = ?5, replay_refused_under = ?6 WHERE log_id = ?1 AND server = ?2",
+            params![log_id, server, answer.state.as_token(), answer.replay_id, answer.error, answer.refused_under],
         )?;
         Ok(())
     }
 
     /// Where every play stands with `server`, keyed by its `scorelog` id. A play with no row has
-    /// never been confirmed there.
+    /// never been confirmed there, but for one a sync never sends for its SCRATCH AUTO rule
+    /// ([`ScoreDb::sync_candidates`]): that one reads as [`SyncState::Skipped`] for
+    /// [`SKIPPED_OLD_SCRATCH_AUTO_RULE`], so a screen can say why without anything being written.
     pub fn sync_states(&self, server: &str) -> Result<HashMap<i64, IrSyncRow>, ScoreDbError> {
         let mut stmt = self.conn.prepare("SELECT * FROM ir_sync WHERE server = ?1")?;
         let rows = stmt.query_map(params![server], IrSyncRow::from_row)?;
@@ -331,26 +401,18 @@ impl ScoreDb {
             let row = row?;
             out.insert(row.log_id, row);
         }
+        let mut held_back = self.conn.prepare(
+            "SELECT l.id FROM scorelog l LEFT JOIN ir_sync y ON y.log_id = l.id AND y.server = ?1 \
+             WHERE y.log_id IS NULL AND (l.assist = ?2 OR l.assist = ?4) AND l.rule_version < ?3",
+        )?;
+        let ids = held_back
+            .query_map(params![server, SCRATCH_AUTO_ASSIST, SCRATCH_AUTO_LEAVES_THE_TURNTABLE_RULE_VERSION, ASSIST_UNRECORDED], |row| row.get::<_, i64>(0))?;
+        for id in ids {
+            let id = id?;
+            let row = IrSyncRow { error_code: Some(SKIPPED_OLD_SCRATCH_AUTO_RULE.to_string()), ..IrSyncRow::new(id, server, "", SyncState::Skipped) };
+            out.insert(id, row);
+        }
         Ok(out)
-    }
-
-    /// Mark every play [`ScoreDb::sync_candidates`] holds back for its SCRATCH AUTO rule as not sent
-    /// to `server` ([`SKIPPED_OLD_SCRATCH_AUTO_RULE`]), so a screen can say why, leaving a play that
-    /// already has a row as it is. Returns how many plays were marked.
-    pub fn mark_old_scratch_auto_skipped(&mut self, server: &str, now_ms: i64) -> Result<usize, ScoreDbError> {
-        Ok(self.conn.execute(
-            "INSERT OR IGNORE INTO ir_sync(log_id, server, state, error_code, last_attempt_at) \
-             SELECT id, ?1, ?2, ?3, ?4 FROM scorelog WHERE (assist = ?5 OR assist = ?7) AND rule_version < ?6",
-            params![
-                server,
-                SyncState::Skipped.as_token(),
-                SKIPPED_OLD_SCRATCH_AUTO_RULE,
-                now_ms,
-                SCRATCH_AUTO_ASSIST,
-                SCRATCH_AUTO_LEAVES_THE_TURNTABLE_RULE_VERSION,
-                ASSIST_UNRECORDED
-            ],
-        )?)
     }
 
     /// Fill in the SHA-256 of a play that was stored without one (a play carried over from
@@ -359,6 +421,16 @@ impl ScoreDb {
         self.conn.execute("UPDATE scorelog SET sha256 = ?2 WHERE id = ?1 AND sha256 = ''", params![log_id, sha256])?;
         Ok(())
     }
+}
+
+/// What a server answered about one play's replay ([`ScoreDb::put_replay_state`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReplayAnswer<'a> {
+    pub state: ReplayState,
+    pub replay_id: Option<&'a str>,
+    pub error: Option<&'a str>,
+    /// The builds a refusal was given under ([`IrSyncRow::replay_refused_under`]).
+    pub refused_under: Option<&'a str>,
 }
 
 /// The select every candidate query starts from: the play's own columns, its kept body, and its row

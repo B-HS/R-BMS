@@ -14,11 +14,15 @@ use rbms_config::{OFF_VALUE, ON_VALUE, SettingId};
 use rbms_ir::{IrError, NullScoreServer, PlayerId, ScoreServer, spawn_query};
 
 use crate::ir_panel::*;
-use crate::ir_session::{AuthAction, GUEST_PLAYER_ID, auth_request, run_auth};
+use crate::ir_session::{AuthAction, GUEST_PLAYER_ID, auth_request, run_auth, run_revoke};
 use crate::ir_sync::{
     SETTINGS_BLOB_NAME, SyncOutcome, SyncPayload, build_blob, merge_downloaded, parse_blob, sanitise_for_upload, sync_error_message, upload_outcome,
 };
+use crate::record_sync::ACCOUNT_NOT_CONFIRMED;
 use crate::*;
+
+/// What the status line says when a change of account or server let go of a request in flight.
+const ACCOUNT_REQUESTS_DROPPED: &str = "account or server changed: the request in flight was dropped";
 
 /// Gap between connection probes of the configured server.
 const HEALTH_POLL_INTERVAL: Duration = Duration::from_secs(5);
@@ -64,6 +68,21 @@ pub(crate) fn build_server(config: &Config, token: Option<String>) -> BuiltServe
     BuiltServer { server, connected, probe_stop }
 }
 
+/// What the message bus says when a logout could not tell the server to refuse the token. The token
+/// is gone from this machine either way; it stays valid on the server until it is deleted from the
+/// account page of the web site.
+const TOKEN_NOT_REVOKED: &str = "logged out, but the server did not revoke the token (delete it on the web site)";
+
+/// Tell the server to refuse the token `server` carries, on a thread of its own: a logout finishes
+/// on this machine whether or not the server can be reached, and nothing waits on the answer.
+fn revoke_token_in_background(server: Arc<dyn ScoreServer>) {
+    std::thread::spawn(move || {
+        if let Err(error) = run_revoke(server.as_ref()) {
+            notify(Level::Warn, format!("{TOKEN_NOT_REVOKED}: {}", crate::ir_outcome::short_error(&error)));
+        }
+    });
+}
+
 /// Wall-clock milliseconds since the epoch, the stamp the sync blob is versioned by.
 fn now_ms() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or_default()
@@ -76,8 +95,12 @@ impl AppShared {
     ///
     /// A records sync in flight is stopped, since what it sends would go to the server and account
     /// it started with, and the states the record screens read are read again for the server now set.
+    ///
+    /// Every request in flight that was made as an account is let go of: its answer is for the
+    /// server and the token it was made with, not for these.
     pub(crate) fn rebuild_server(&mut self) {
         self.cancel_record_sync();
+        self.drop_account_requests();
         self.server_probe_stop.store(true, Ordering::Relaxed);
         let built = build_server(&self.config, self.session.token().map(str::to_string));
         self.server = built.server;
@@ -88,6 +111,50 @@ impl AppShared {
         self.reset_ranking();
         self.reload_record_sync_states();
         crate::user_folders::follow_account(self);
+    }
+
+    /// Let go of every request in flight that was made as an account -- the identity probe, the
+    /// settings sync calls and the rival list -- so an answer that comes late is never applied to
+    /// the account that is signed in by then. The worker threads run to their end and their answers
+    /// are dropped with the receivers.
+    fn drop_account_requests(&mut self) {
+        let in_flight = [self.sync_upload_rx.is_some(), self.sync_base_rx.is_some(), self.sync_download_rx.is_some(), self.rivals_rx.is_some()];
+        self.whoami_rx = None;
+        self.rivals_rx = None;
+        self.sync_upload_rx = None;
+        self.sync_base_rx = None;
+        self.sync_download_rx = None;
+        if in_flight.contains(&true) {
+            self.net_status = ACCOUNT_REQUESTS_DROPPED.to_string();
+        }
+    }
+
+    /// Forget what this machine holds of the account that was signed in: its rival list, the lock
+    /// its settings were last synced under, and every request in flight as it. Called wherever the
+    /// account behind the session changes, so the next one starts from nothing of the last one's.
+    fn forget_account_data(&mut self) {
+        self.config.network.rivals.clear();
+        self.sync_lock.apply(SyncOutcome::SignedOut);
+        self.drop_account_requests();
+    }
+
+    /// The account requests are made as: the one the token in hand belongs to ([`AccountSession::signed_in_as`]),
+    /// never the PLAYER ID typed into the settings, which the server refuses with 403 when the two differ.
+    fn account_player(&self) -> Option<PlayerId> {
+        self.session.signed_in_as().map(|id| PlayerId { id: id.to_string() })
+    }
+
+    /// Make the PLAYER ID row name the account that is signed in, which is what the next LOGIN is
+    /// made as. Returns whether the row changed.
+    fn follow_session_player_id(&mut self) -> bool {
+        let Some(id) = self.session.signed_in_as() else {
+            return false;
+        };
+        if self.config.network.player_id == id {
+            return false;
+        }
+        self.config.network.player_id = id.to_string();
+        true
     }
 
     /// Label and value of a NETWORK row, or `None` when the row belongs to another tab.
@@ -121,16 +188,20 @@ impl AppShared {
         true
     }
 
-    /// Whether a request needs a signed-in account, reporting why it cannot run when it does not.
-    fn require_account(&mut self) -> bool {
+    /// The account a request needs to be made as, reporting why there is none when there is none.
+    fn require_account(&mut self) -> Option<PlayerId> {
         if !self.require_server() {
-            return false;
+            return None;
         }
         if !self.session.is_logged_in() {
             self.net_status = "log in first".to_string();
-            return false;
+            return None;
         }
-        true
+        let player = self.account_player();
+        if player.is_none() {
+            self.net_status = ACCOUNT_NOT_CONFIRMED.to_string();
+        }
+        player
     }
 
     /// Start a login or register on a worker thread, consuming the held password.
@@ -167,14 +238,18 @@ impl AppShared {
     /// them is deleted: nothing of an account that signed out is kept on the machine.
     ///
     /// A records sync in flight stops with the session: nothing more is sent for an account that
-    /// signed out.
+    /// signed out. The token is revoked on the server on a thread of its own, and the rival list and
+    /// the settings lock of the account are forgotten with it.
     pub(crate) fn finish_logout(&mut self) {
         self.cancel_record_sync();
         let folders_of = crate::user_folders::FolderAccount::of(self);
         let had_session = self.session.logout();
+        if had_session && self.config.network.server_url.is_some() {
+            revoke_token_in_background(self.server.clone());
+        }
         self.password.clear();
         self.config.network.player_id = GUEST_PLAYER_ID.to_string();
-        self.sync_lock.apply(SyncOutcome::SignedOut);
+        self.forget_account_data();
         if had_session {
             self.rebuild_server();
         }
@@ -188,9 +263,12 @@ impl AppShared {
     /// Push the local settings + key config to the account, guarded by the optimistic lock from the
     /// last download.
     pub(crate) fn start_settings_upload(&mut self) {
-        if self.sync_upload_rx.is_some() || self.sync_base_rx.is_some() || !self.require_account() {
+        if self.sync_upload_rx.is_some() || self.sync_base_rx.is_some() {
             return;
         }
+        let Some(player) = self.require_account() else {
+            return;
+        };
         let payload = SyncPayload { settings: sanitise_for_upload(&self.config), keyconfig: self.keyconfig.clone() };
         let updated_at = now_ms();
         let blob = match build_blob(&payload, updated_at, self.sync_lock.base()) {
@@ -200,7 +278,6 @@ impl AppShared {
                 return;
             }
         };
-        let player = PlayerId { id: self.config.network.player_id.clone() };
         self.net_status = "uploading settings...".to_string();
         self.sync_upload_rx = Some(spawn_query(self.server.clone(), move |server| server.put_settings(&player, &blob)));
     }
@@ -212,19 +289,23 @@ impl AppShared {
     /// this read-back the second save of a session would always lose the lock. A current server
     /// reports the stored stamp in the `PUT` body and the lock moves without a second round trip.
     fn refresh_sync_base(&mut self) {
-        if self.sync_base_rx.is_some() || !self.session.is_logged_in() || self.config.network.server_url.is_none() {
+        if self.sync_base_rx.is_some() || self.config.network.server_url.is_none() {
             return;
         }
-        let player = PlayerId { id: self.config.network.player_id.clone() };
+        let Some(player) = self.account_player() else {
+            return;
+        };
         self.sync_base_rx = Some(spawn_query(self.server.clone(), move |server| server.get_settings(&player, SETTINGS_BLOB_NAME)));
     }
 
     /// Fetch the account's settings blob and apply it to this machine.
     pub(crate) fn start_settings_download(&mut self) {
-        if self.sync_download_rx.is_some() || !self.require_account() {
+        if self.sync_download_rx.is_some() {
             return;
         }
-        let player = PlayerId { id: self.config.network.player_id.clone() };
+        let Some(player) = self.require_account() else {
+            return;
+        };
         self.net_status = "downloading settings...".to_string();
         self.sync_download_rx = Some(spawn_query(self.server.clone(), move |server| server.get_settings(&player, SETTINGS_BLOB_NAME)));
     }
@@ -255,10 +336,12 @@ impl AppShared {
     /// Send the current rival list to the server (and keep the local cache either way).
     pub(crate) fn push_rivals(&mut self) {
         self.save_settings();
-        if self.rivals_rx.is_some() || !self.session.is_logged_in() || self.config.network.server_url.is_none() {
+        if self.rivals_rx.is_some() || self.config.network.server_url.is_none() {
             return;
         }
-        let player = PlayerId { id: self.config.network.player_id.clone() };
+        let Some(player) = self.account_player() else {
+            return;
+        };
         let rivals = self.config.network.rivals.clone();
         self.net_status = "saving rivals...".to_string();
         self.rivals_rx = Some(spawn_query(self.server.clone(), move |server| server.put_rivals(&player, &rivals)));
@@ -266,10 +349,12 @@ impl AppShared {
 
     /// Pull the rival list the server holds, replacing the local cache.
     pub(crate) fn refresh_rivals(&mut self) {
-        if self.rivals_rx.is_some() || !self.session.is_logged_in() || self.config.network.server_url.is_none() {
+        if self.rivals_rx.is_some() || self.config.network.server_url.is_none() {
             return;
         }
-        let player = PlayerId { id: self.config.network.player_id.clone() };
+        let Some(player) = self.account_player() else {
+            return;
+        };
         self.rivals_rx = Some(spawn_query(self.server.clone(), move |server| server.rivals(&player)));
     }
 
@@ -300,11 +385,13 @@ impl AppShared {
         match rx.try_recv() {
             Ok(result) => {
                 let succeeded = result.is_ok();
+                let account_before = self.session.login_id().map(str::to_string);
                 let token_changed = self.session.finish(action, result);
                 if succeeded {
-                    if let Some(id) = self.session.login_id() {
-                        self.config.network.player_id = id.to_string();
+                    if account_before.is_some() && self.session.login_id() != account_before.as_deref() {
+                        self.forget_account_data();
                     }
+                    self.follow_session_player_id();
                     if token_changed {
                         self.rebuild_server();
                     }
@@ -332,9 +419,22 @@ impl AppShared {
         match rx.try_recv() {
             Ok(result) => {
                 let confirmed = result.is_ok();
+                let account_before = self.session.login_id().map(str::to_string);
                 let dropped = self.session.finish_whoami(result);
-                if dropped {
+                let account_named = self.session.login_id() != account_before.as_deref();
+                let other_account = account_named && account_before.is_some();
+                if other_account {
+                    self.forget_account_data();
+                }
+                let player_id_followed = self.follow_session_player_id();
+                if dropped || other_account {
                     self.rebuild_server();
+                }
+                if account_named {
+                    self.refresh_rivals();
+                    crate::user_folders::start_fetch(self, false);
+                }
+                if dropped || account_named || player_id_followed {
                     self.save_settings();
                 }
                 self.net_status = self.session.status_text();
@@ -402,3 +502,6 @@ impl AppShared {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -4,7 +4,8 @@ use rbms_ir::{
     ServerInfo, SubmitResponse,
 };
 
-use super::{CourseAssist, UNRELEASED_COURSE_REASON, build_course_submission, course_block_reason, course_updates_score, submit};
+use super::{CourseAssist, UNRELEASED_COURSE_REASON, build_course_submission, course_block_reason, course_updates_score};
+use crate::record_sync::{SKIPPED_NO_COURSE_ENDPOINT, ScoreOutcome, course_outcome};
 
 const TEST_PLAYER: &str = "gkn";
 const TEST_NOTES: u32 = 1_000;
@@ -162,29 +163,31 @@ fn a_course_is_submittable_only_when_every_stage_was() {
     );
 }
 
+/// What the main server answers a finished course decides whether it is sent again: an IR that
+/// predates courses neither refuses nor holds it, and a course is sent again until one holds it.
 #[test]
-fn a_server_without_a_course_endpoint_is_not_an_error() {
+fn a_server_without_a_course_endpoint_is_not_a_refusal() {
     let server = CourseOnlyServer { answer: || Err(IrError::Unsupported) };
     let sub = build_course_submission(&two_stage_run(vec![]), TEST_PLAYER, CourseAssist::NONE);
-    let response = submit(&server, &sub).expect("an IR that predates courses is not a failure");
-    assert!(!response.accepted, "nothing was stored, so nothing is claimed");
-    assert_eq!(response.rank, None);
+    let outcome = course_outcome(&server.submit_course(&sub));
+    assert_eq!(outcome, ScoreOutcome::Skipped { code: SKIPPED_NO_COURSE_ENDPOINT, reason: "server takes no courses" }, "nothing was stored or refused");
 }
 
 #[test]
-fn a_real_submission_failure_is_reported() {
+fn a_real_submission_failure_is_sent_again_later() {
     let server = CourseOnlyServer { answer: || Err(IrError::NotConfigured) };
     let sub = build_course_submission(&two_stage_run(vec![]), TEST_PLAYER, CourseAssist::NONE);
-    assert!(matches!(submit(&server, &sub), Err(IrError::NotConfigured)));
+    assert!(matches!(course_outcome(&server.submit_course(&sub)), ScoreOutcome::Retry { .. }));
+    let refused = CourseOnlyServer { answer: || Err(IrError::Forbidden("{}".into())) };
+    assert!(matches!(course_outcome(&refused.submit_course(&sub)), ScoreOutcome::Rejected(_)), "a refusal is the course's own");
 }
 
 #[test]
-fn an_accepted_submission_passes_the_response_through() {
-    let server = CourseOnlyServer { answer: || Ok(SubmitResponse { accepted: true, rank: Some(3), ..Default::default() }) };
+fn an_accepted_submission_is_held_by_the_server() {
+    let server = CourseOnlyServer { answer: || Ok(SubmitResponse { accepted: true, rank: Some(3), score_id: Some("cs_1".into()), ..Default::default() }) };
     let sub = build_course_submission(&two_stage_run(vec![]), TEST_PLAYER, CourseAssist::NONE);
-    let response = submit(&server, &sub).expect("the server accepted it");
-    assert!(response.accepted);
-    assert_eq!(response.rank, Some(3));
+    let outcome = course_outcome(&server.submit_course(&sub));
+    assert!(matches!(outcome, ScoreOutcome::Accepted { ref score_id, already: false, .. } if score_id.as_deref() == Some("cs_1")), "got {outcome:?}");
 }
 
 #[test]

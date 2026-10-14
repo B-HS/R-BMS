@@ -95,6 +95,16 @@ pub struct ScoreSubmission {
 /// Key of the `extra` entry [`ScoreSubmission::mark_reconstructed`] writes.
 pub const RECONSTRUCTED_EXTRA_KEY: &str = "reconstructed";
 
+/// Key of the `extra` entry [`ScoreSubmission::state_mean_offset`] writes: the mean signed offset of
+/// the run's hits in µs, positive when the player was early on average. It is how far the run
+/// leaned, which `avgjudge` (a mean distance) cannot say.
+pub const MEAN_OFFSET_EXTRA_KEY: &str = "mean_offset_us";
+
+/// Key of the `extra` entry [`ScoreSubmission::state_rule_version`] writes: the client's own
+/// judging-rule generation the run was recorded under, so a server can tell which meaning a figure
+/// of the body has where a generation changed it (`avgjudge` from generation 4 on).
+pub const RULE_VERSION_EXTRA_KEY: &str = "rule_version";
+
 /// Lowest `played_at` the server's schema accepts (`z.number().int().min(0)`); a clock that
 /// reports a pre-epoch instant is clamped to it instead of drawing a 400.
 pub const MIN_PLAYED_AT_MS: i64 = 0;
@@ -126,6 +136,27 @@ impl ScoreSubmission {
     /// Whether [`ScoreSubmission::mark_reconstructed`] marked this submission.
     pub fn is_reconstructed(&self) -> bool {
         self.extra.get(RECONSTRUCTED_EXTRA_KEY).and_then(serde_json::Value::as_bool).unwrap_or(false)
+    }
+
+    /// State in `extra` how far the run's hits leaned on average ([`MEAN_OFFSET_EXTRA_KEY`]).
+    pub fn state_mean_offset(&mut self, mean_offset_us: i64) {
+        self.extra.insert(MEAN_OFFSET_EXTRA_KEY.to_string(), serde_json::Value::from(mean_offset_us));
+    }
+
+    /// The mean offset [`ScoreSubmission::state_mean_offset`] stated, if it did.
+    pub fn mean_offset(&self) -> Option<i64> {
+        self.extra.get(MEAN_OFFSET_EXTRA_KEY).and_then(serde_json::Value::as_i64)
+    }
+
+    /// State in `extra` the judging-rule generation the run was recorded under
+    /// ([`RULE_VERSION_EXTRA_KEY`]).
+    pub fn state_rule_version(&mut self, rule_version: u32) {
+        self.extra.insert(RULE_VERSION_EXTRA_KEY.to_string(), serde_json::Value::from(rule_version));
+    }
+
+    /// The rule generation [`ScoreSubmission::state_rule_version`] stated, if it did.
+    pub fn rule_version(&self) -> Option<u32> {
+        self.extra.get(RULE_VERSION_EXTRA_KEY).and_then(serde_json::Value::as_u64).and_then(|v| u32::try_from(v).ok())
     }
 
     /// Bring the two fields whose server schema is narrower than the Rust type into range, so a
@@ -356,6 +387,17 @@ impl CourseSubmission {
         if !self.gauge_value.is_finite() {
             self.gauge_value = FALLBACK_GAUGE_VALUE;
         }
+    }
+
+    /// The submission as the JSON it is kept as until a server holds it, or `None` when it does not
+    /// serialise.
+    pub fn to_json(&self) -> Option<String> {
+        serde_json::to_string(self).ok()
+    }
+
+    /// A submission read back from [`CourseSubmission::to_json`], or `None` when the text is not one.
+    pub fn from_json(text: &str) -> Option<CourseSubmission> {
+        serde_json::from_str(text).ok()
     }
 }
 

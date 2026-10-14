@@ -130,7 +130,33 @@ CREATE TABLE IF NOT EXISTS ir_sync (
     replay_state    TEXT NOT NULL DEFAULT 'none',
     replay_id       TEXT,
     replay_error    TEXT,
+    refused_under   TEXT,
+    replay_refused_under TEXT,
     PRIMARY KEY (log_id, server)
 );
 
 CREATE INDEX IF NOT EXISTS idx_ir_sync_server_state ON ir_sync(server, state);
+
+CREATE TABLE IF NOT EXISTS course_submission (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    course_hash TEXT NOT NULL,
+    played_at   INTEGER NOT NULL,
+    body        TEXT NOT NULL,
+    played_as   TEXT
+);
+
+CREATE TABLE IF NOT EXISTS course_sync (
+    course_id       INTEGER NOT NULL,
+    server          TEXT NOT NULL,
+    login_id        TEXT NOT NULL DEFAULT '',
+    state           TEXT NOT NULL,
+    score_id        TEXT,
+    http_status     INTEGER,
+    error_code      TEXT,
+    error_field     TEXT,
+    error_reason    TEXT,
+    refused_under   TEXT,
+    attempts        INTEGER NOT NULL DEFAULT 0,
+    last_attempt_at INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (course_id, server)
+);

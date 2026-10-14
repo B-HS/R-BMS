@@ -16,6 +16,12 @@
 //! uploaded as a texture of its own and scaled onto the object's rectangle like any other image.
 //! That is what makes the chips as thick, as thin and as aliased on screen as the reference's are.
 //!
+//! A run in progress changes the chips and the cursor while it is played, so neither is uploaded
+//! whole again for it. The chips are kept in a texture whose columns are written again where the
+//! seconds that changed lie. Every row of the cursor's pixmap is the same row, so it is kept one row
+//! tall and drawn stretched to the texture's height, which samples the same pixels the reference's
+//! full height pixmap does and leaves a moving cursor a row to paint and upload.
+//!
 //! The graph counts three different things, chosen by the record's `type`, and the numbers come
 //! from the frame ([`NoteDistribution`]) rather than from the chart: a document names which of the
 //! three it wants, a screen supplies the ones it knows.
@@ -99,6 +105,9 @@ const CURSOR_REFRESH_MS: i64 = 50;
 
 /// How wide the cursor is, in pixels.
 const CURSOR_WIDTH: i32 = 3;
+
+/// How many rows the cursor's pixmap keeps: one, which stands for every row of the texture.
+const CURSOR_ROWS: usize = 1;
 
 /// Milliseconds a second is counted in, which is the unit the cursor's positions are given in.
 const MS_PER_SECOND: i32 = 1000;
@@ -392,7 +401,7 @@ fn paint_chips(chips: &mut Pixmap, data: &[u32], palette: &[Rgba], rows: usize, 
 }
 
 /// Paints the cursor: where a practice range starts and ends, and where the run is, each three pixels
-/// wide and as tall as the texture.
+/// wide and as tall as the pixmap, which is one row that is drawn as tall as the texture.
 ///
 /// The positions are scaled to the texture with the reference's own integer arithmetic.
 fn paint_cursor(cursor: &mut Pixmap, seconds: usize, marks: PlayCursor, played_ms: Option<i64>) {
@@ -445,9 +454,9 @@ impl Drawn {
             *rows = row_count(data, classes);
             *held = data.to_vec();
             let (width, height) = (seconds * PITCH, *rows * PITCH);
-            *ground_pixmap = Pixmap::new(width, height);
-            *chips_pixmap = Pixmap::new(width, height);
-            *cursor_pixmap = Pixmap::new(width, height);
+            *ground_pixmap = Pixmap::upside_down(width, height);
+            *chips_pixmap = Pixmap::upside_down(width, height);
+            *cursor_pixmap = Pixmap::new(width, CURSOR_ROWS);
             if !body.ground_off {
                 paint_ground(ground_pixmap, seconds, *rows);
             }
@@ -461,8 +470,8 @@ impl Drawn {
         if live && compared_at.is_none_or(|at| now_ms > at + CHIPS_REFRESH_MS) {
             if let Some(span) = changed_seconds(held, data, classes) {
                 held.copy_from_slice(data);
+                chips.mark_columns(span.start * PITCH..span.end * PITCH);
                 paint_chips(chips_pixmap, held, palette, *rows, body.style, span);
-                chips.mark_stale();
             }
             *compared_at = Some(now_ms);
         }
@@ -515,7 +524,8 @@ pub(crate) fn draw_judge_graph<R: Renderer>(
     if notes.playing.is_some()
         && let Some(tex) = cursor.texture(r, cursor_pixmap)
     {
-        reached |= draw_layer(r, place, tex, texels(cursor_pixmap), texels(cursor_pixmap).0, plot);
+        let size = (texels(cursor_pixmap).0, texels(chips_pixmap).1);
+        reached |= draw_layer(r, place, tex, size, size.0, plot);
     }
     reached
 }

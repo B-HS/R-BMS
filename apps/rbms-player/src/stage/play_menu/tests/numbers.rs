@@ -61,9 +61,9 @@ impl Menu {
         number_figure(row, &self.number(row))
     }
 
-    /// Whether the row is still saying that what was typed into it was not a number.
-    fn is_refused(&self, row: Row) -> bool {
-        self.state.numbers.is_refused(row, Instant::now())
+    /// Whether the row is still saying at `at` that what was typed into it was not a number.
+    fn is_refused(&self, row: Row, at: Instant) -> bool {
+        self.state.numbers.is_refused(row, at)
     }
 
     /// Move the previewed scene on to where its field stands drawn in full, without drawing the
@@ -297,18 +297,42 @@ fn what_is_typed_and_is_not_a_number_is_refused_and_said_on_the_row() {
         for text in typed {
             menu.typed(text);
         }
-        assert!(matches!(menu.key(KeyCode::Enter), Transition::Stay));
+        let refused_at = Instant::now();
+        assert!(matches!(menu.key_at(KeyCode::Enter, refused_at), Transition::Stay));
         assert_eq!(menu.app.shared.config, before, "{typed:?} was stored");
         assert_eq!(menu.state.numbers.editing(), None, "{typed:?} left the row open");
-        assert!(menu.is_refused(offset), "the row does not say that {typed:?} is not a number");
-        assert!(!menu.is_refused(Row::Setting(SettingId::HiSpeed)), "another row says so");
-        assert!(!menu.state.numbers.is_refused(offset, Instant::now() + REFUSAL_SHOWN_FOR), "the row goes on saying so");
+        assert!(menu.is_refused(offset, refused_at), "the row does not say that {typed:?} is not a number");
+        assert!(!menu.is_refused(Row::Setting(SettingId::HiSpeed), refused_at), "another row says so");
+        assert!(!menu.is_refused(offset, refused_at + REFUSAL_SHOWN_FOR), "the row goes on saying so");
     }
-    menu.key(KeyCode::Enter);
-    assert!(!menu.is_refused(offset), "a row opened again still says what was typed last was refused");
+    let opened_at = Instant::now();
+    menu.key_at(KeyCode::Enter, opened_at);
+    assert!(!menu.is_refused(offset, opened_at), "a row opened again still says what was typed last was refused");
     menu.typed("8");
     menu.key(KeyCode::Enter);
     assert_eq!(menu.app.shared.config.judge.offset_ms, 8);
+}
+
+/// A row that refused what was typed says so on the frame made at the moment it refused, however
+/// long ago the machine passed that moment, and stops saying so on the frame made once the refusal
+/// has been shown for as long as it is: what the frame shows is judged by the time it is made at,
+/// not by how long the machine took to make it.
+#[test]
+fn a_refusal_is_said_on_the_frame_of_its_moment_however_long_the_machine_took_to_draw_it() {
+    let mut menu = Menu::over(bare_app("number-refused-late"));
+    let offset = Row::Setting(SettingId::JudgeOffset);
+    let refused_at = Instant::now().checked_sub(REFUSAL_SHOWN_FOR * 2).expect("the machine has been up for longer than a refusal is shown twice");
+    menu.focus(offset);
+    menu.key_at(KeyCode::Enter, refused_at);
+    menu.key_at(KeyCode::Backspace, refused_at);
+    menu.typed("-");
+    menu.key_at(KeyCode::Enter, refused_at);
+    let said = menu.frame_at(refused_at).rgba().to_vec();
+    assert!(menu.is_refused(offset, refused_at), "the row does not say on its own moment that what was typed is not a number");
+    assert!(said == menu.frame_at(refused_at).rgba(), "a frame made again at the same moment is drawn otherwise");
+    let over = menu.frame_at(refused_at + REFUSAL_SHOWN_FOR).rgba().to_vec();
+    assert!(!menu.is_refused(offset, refused_at + REFUSAL_SHOWN_FOR), "the row goes on saying so");
+    assert!(said != over, "the frame made while the row refuses is drawn as the one made after it stopped");
 }
 
 /// Escape while a row is being typed into drops what was typed and stays on the menu; the Escape
@@ -331,10 +355,11 @@ fn escape_while_typing_drops_what_was_typed_and_does_not_leave_the_menu() {
     assert_eq!(menu.state.numbers.edit_of(offset).map(|edit| edit.text().to_string()), Some("420".to_string()), "a key did something other than type");
     assert_eq!(menu.app.shared.config, before, "a key reached the row while it was being typed into");
 
-    assert!(matches!(menu.key(KeyCode::Escape), Transition::Stay), "Escape left the menu with a row open");
+    let dropped_at = Instant::now();
+    assert!(matches!(menu.key_at(KeyCode::Escape, dropped_at), Transition::Stay), "Escape left the menu with a row open");
     assert_eq!((menu.state.numbers.editing(), menu.state.focused()), (None, Some(offset)));
     assert_eq!(menu.app.shared.config, before, "Escape stored what was typed");
-    assert!(!menu.is_refused(offset) && !settings.exists(), "a figure that was dropped was treated as one that was stored");
+    assert!(!menu.is_refused(offset, dropped_at) && !settings.exists(), "a figure that was dropped was treated as one that was stored");
     assert!(matches!(menu.key(KeyCode::Escape), Transition::Back), "the Escape after it did not leave");
 }
 
@@ -516,9 +541,10 @@ fn the_number_rows_of_the_play_menu_can_be_captured() {
         menu.key(KeyCode::Enter);
         menu.key(KeyCode::Backspace);
         menu.typed("-");
-        menu.key(KeyCode::Enter);
-        menu.frame();
-        assert!(menu.is_refused(offset));
+        let refused_at = Instant::now();
+        menu.key_at(KeyCode::Enter, refused_at);
+        menu.frame_at(refused_at);
+        assert!(menu.is_refused(offset, refused_at));
         menu.save("play-menu-number-offset-refused");
 
         menu.focus_setting(SettingId::KeepGreenNumber);

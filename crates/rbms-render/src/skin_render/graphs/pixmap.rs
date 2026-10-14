@@ -11,9 +11,12 @@
 //! translucent colours needs: that mixing is not the usual one, and a translucent colour painted
 //! over nothing comes out darker than it was written.
 //!
-//! Row 0 is the top row of the buffer, as it is in a pixmap, but the reference draws the texture
-//! with a negative height so that row 0 lands on the bottom of the graph's rectangle. [`Pixmap::bottom_up`]
-//! is that flip, done once per upload.
+//! Row 0 is the top row of the buffer, as it is in a pixmap, but the reference draws most of these
+//! textures with a negative height so that row 0 lands on the bottom of the graph's rectangle. A
+//! buffer made for that ([`Pixmap::upside_down`]) keeps its rows in that order from the start, last
+//! row first, so what it hands a renderer ([`Pixmap::texels`]) is always its own bytes: an upload
+//! copies nothing, and the columns a graph paints again can be written to the texture without the
+//! rest of it.
 
 use crate::BYTES_PER_PIXEL;
 
@@ -70,6 +73,9 @@ pub(super) fn blend_over(over: Rgba, under: Rgba) -> Rgba {
 pub(super) struct Pixmap {
     width: usize,
     height: usize,
+    /// Whether the rows are kept last first, the order a texture whose first row lands on the foot
+    /// of its rectangle is uploaded in.
+    upside_down: bool,
     rgba: Vec<u8>,
 }
 
@@ -80,9 +86,22 @@ impl std::fmt::Debug for Pixmap {
 }
 
 impl Pixmap {
-    /// A transparent buffer of `width` by `height` pixels.
+    /// A transparent buffer of `width` by `height` pixels, uploaded with its first row on top of the
+    /// rectangle it is drawn into.
     pub(super) fn new(width: usize, height: usize) -> Pixmap {
-        Pixmap { width, height, rgba: vec![0; width * height * BYTES_PER_PIXEL] }
+        Pixmap { width, height, upside_down: false, rgba: vec![0; width * height * BYTES_PER_PIXEL] }
+    }
+
+    /// The same, uploaded with its first row on the foot of the rectangle: the way the reference
+    /// draws a graph texture with a negative height.
+    pub(super) fn upside_down(width: usize, height: usize) -> Pixmap {
+        Pixmap { upside_down: true, ..Pixmap::new(width, height) }
+    }
+
+    /// Where row `y` starts among the bytes.
+    fn row_start(&self, y: usize) -> usize {
+        let stored = if self.upside_down { self.height - 1 - y } else { y };
+        stored * self.width * BYTES_PER_PIXEL
     }
 
     pub(super) fn size(&self) -> (usize, usize) {
@@ -113,8 +132,8 @@ impl Pixmap {
             return;
         }
         for row in top..bottom {
-            let start = (row as usize * self.width + left as usize) * BYTES_PER_PIXEL;
-            let end = (row as usize * self.width + right as usize) * BYTES_PER_PIXEL;
+            let start = self.row_start(row as usize) + left as usize * BYTES_PER_PIXEL;
+            let end = self.row_start(row as usize) + right as usize * BYTES_PER_PIXEL;
             for pixel in self.rgba[start..end].chunks_exact_mut(BYTES_PER_PIXEL) {
                 pixel.copy_from_slice(&color);
             }
@@ -146,8 +165,8 @@ impl Pixmap {
         let (near, far) = (x.max(0), far.min(columns - 1));
         let (left, right) = (near.min(far), near.max(far));
         for row in y.max(0)..=last.min(rows - 1) {
-            let start = (row as usize * self.width + left as usize) * BYTES_PER_PIXEL;
-            let end = (row as usize * self.width + right as usize + 1) * BYTES_PER_PIXEL;
+            let start = self.row_start(row as usize) + left as usize * BYTES_PER_PIXEL;
+            let end = self.row_start(row as usize) + (right as usize + 1) * BYTES_PER_PIXEL;
             for pixel in self.rgba[start..end].chunks_exact_mut(BYTES_PER_PIXEL) {
                 let mixed = blend_over(color, [pixel[0], pixel[1], pixel[2], pixel[3]]);
                 pixel.copy_from_slice(&mixed);
@@ -160,9 +179,9 @@ impl Pixmap {
         self.blend_rect(x, top, 1, bottom - top + 1, color);
     }
 
-    /// The pixels as they were painted, first row first, which is what a texture needs when the
-    /// buffer's first row is to land on the top of the rectangle it is drawn into.
-    pub(super) fn top_down(&self) -> &[u8] {
+    /// The pixels in the order a texture of this buffer is uploaded in: first row first, or last
+    /// row first for a buffer made [`Pixmap::upside_down`].
+    pub(super) fn texels(&self) -> &[u8] {
         &self.rgba
     }
 
@@ -172,18 +191,8 @@ impl Pixmap {
         if x >= self.width || y >= self.height {
             return [0; BYTES_PER_PIXEL];
         }
-        let at = (y * self.width + x) * BYTES_PER_PIXEL;
+        let at = self.row_start(y) + x * BYTES_PER_PIXEL;
         [self.rgba[at], self.rgba[at + 1], self.rgba[at + 2], self.rgba[at + 3]]
-    }
-
-    /// The pixels with their rows in reverse order, which is what a texture needs so that the
-    /// buffer's first row lands on the bottom of the rectangle it is drawn into.
-    pub(super) fn bottom_up(&self) -> Vec<u8> {
-        let stride = self.width * BYTES_PER_PIXEL;
-        if stride == 0 {
-            return Vec::new();
-        }
-        self.rgba.chunks_exact(stride).rev().flatten().copied().collect()
     }
 }
 
@@ -237,15 +246,16 @@ mod tests {
     }
 
     #[test]
-    fn a_texture_is_the_buffer_turned_upside_down() {
-        let mut pixmap = Pixmap::new(2, 2);
+    fn an_upside_down_buffer_is_painted_as_any_other_and_hands_over_its_last_row_first() {
+        let mut pixmap = Pixmap::upside_down(2, 2);
         pixmap.fill_rect(0, 0, 1, 1, RED);
-        pixmap.fill_rect(1, 1, 1, 1, BLUE);
-        let flipped = pixmap.bottom_up();
-        assert_eq!(&flipped[..4], &CLEAR, "the buffer's last row comes first");
-        assert_eq!(&flipped[4..8], &BLUE);
-        assert_eq!(&flipped[8..12], &RED, "and its first row comes last");
-        assert!(Pixmap::default().bottom_up().is_empty());
+        pixmap.blend_rect(1, 1, 1, 1, BLUE);
+        assert_eq!((pixmap.pixel(0, 0), pixmap.pixel(1, 1), pixmap.pixel(1, 0)), (RED, BLUE, CLEAR), "a pixel is where it was painted");
+        let texels = pixmap.texels();
+        assert_eq!(&texels[..4], &CLEAR, "the buffer's last row comes first");
+        assert_eq!(&texels[4..8], &BLUE);
+        assert_eq!(&texels[8..12], &RED, "and its first row comes last");
+        assert!(Pixmap::default().texels().is_empty());
     }
 
     #[test]
@@ -308,7 +318,7 @@ mod tests {
     fn the_painted_rows_are_handed_over_in_the_order_they_were_painted() {
         let mut pixmap = Pixmap::new(1, 2);
         pixmap.fill_rect(0, 0, 1, 1, RED);
-        assert_eq!(pixmap.top_down(), &[255, 0, 0, 255, 0, 0, 0, 0]);
+        assert_eq!(pixmap.texels(), &[255, 0, 0, 255, 0, 0, 0, 0]);
     }
 
     #[test]

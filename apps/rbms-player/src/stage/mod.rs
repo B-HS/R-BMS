@@ -326,6 +326,20 @@ impl Stage {
         self.handler().handle_key(ctx, key)
     }
 
+    /// Hand the screen that is up the key-up of every key the window reported as down, for a window
+    /// that has lost focus.
+    ///
+    /// A window that is not in front is not told about what is released while it is away, and on
+    /// macOS winit does not make up the key-ups it would on X11 and Windows (`KeyboardInput`'s
+    /// `is_synthetic`). A long note held when the focus left would stay held to its end, and the lane
+    /// would keep paying hell-charge gauge and taking mine damage. The reference gets these key-ups
+    /// from its window library; this is the same thing done here. Each one goes the way a real key-up
+    /// does, so a screen needs no focus case of its own, and a key already let go meets a screen
+    /// that has nothing to release.
+    pub(crate) fn release_keys_lost_with_focus(&mut self, ctx: &mut FrameCtx<'_>) -> Vec<Transition> {
+        ctx.shared.held_key_codes().into_iter().map(|code| self.handle_key(ctx, KeyInput { code, pressed: false, released: true, text: None })).collect()
+    }
+
     /// Route what the window's input method reports: to the editable text of a skin that is being
     /// typed into when there is one, and otherwise to the screen that is up.
     pub(crate) fn handle_ime(&mut self, ctx: &mut FrameCtx<'_>, ime: &winit::event::Ime) {
