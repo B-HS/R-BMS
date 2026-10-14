@@ -76,7 +76,7 @@ mod tests {
     fn submission() -> ScoreSubmission {
         ScoreSubmission {
             api_version: crate::API_VERSION,
-            chart: chart(),
+            chart: chart().into(),
             player: player(),
             mode: "BEAT_7K".into(),
             clear: ClearLamp::Normal,

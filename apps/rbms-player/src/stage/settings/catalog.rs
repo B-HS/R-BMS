@@ -130,7 +130,7 @@ macro_rules! judge_width_description {
             " window of the ",
             $lanes,
             " lanes, as a share of the width the chart asks for. 100% is the chart's own. ",
-            "Narrowing is free; over 100% makes a run a custom judge: no best score, nothing sent, ASSIST EASY at best; lamp and history are kept."
+            "Narrowing is free; over 100% makes a run a custom judge: no best score, ASSIST EASY at best; the run is still kept, with its replay, and sent."
         )
     };
 }
@@ -152,7 +152,7 @@ pub(crate) fn description(id: SettingId) -> &'static str {
         SettingId::JudgeWidthScratchGood => judge_width_description!("GOOD", "scratch"),
         SettingId::LongNoteMargin => {
             "Scales the window the end of a long note is released in, as a share of the mode's own. 100% is the mode's own. \
-             Over 100% makes a run a custom judge: no best score, nothing sent, ASSIST EASY at best; lamp and history are kept."
+             Over 100% makes a run a custom judge: no best score, ASSIST EASY at best; the run is still kept, with its replay, and sent."
         }
         SettingId::LnMode => {
             "What a long note is played as when its chart does not say: LN (long note), CN (charge note) or HCN (hell charge note). \

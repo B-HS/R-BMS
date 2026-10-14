@@ -100,9 +100,14 @@ pub const AUTO_SCRATCH_FLAG: &str = "AUTO_SCRATCH";
 pub const CUSTOM_JUDGE_FLAG: &str = "CUSTOM_JUDGE";
 
 /// How much assist a run used, on the reference implementation's own 0/1/2 scale
-/// (`BMSPlayer.java:200-252`). Every branch that raises it also clears the `score` flag, so any
-/// level above [`NO_ASSIST`] means the run neither scores nor submits; the level itself only
-/// decides which lamp the run is demoted to.
+/// (`BMSPlayer.java:200-252`). The level decides which lamp the run is demoted to, and the
+/// submission names the assists themselves ([`assist_flags`]).
+///
+/// What a level costs beyond the lamp is the client's rule, not this crate's. In rbms every run
+/// played by hand is kept and submitted whatever its level (the player's decision of 2026-10-14):
+/// a SCRATCH AUTO run, whose turntable notes are taken off the chart it is judged on, sets bests
+/// like any other, and only a [`CUSTOM_JUDGE_ASSIST`] run sets none, as the reference's cleared
+/// `score` flag has it.
 pub fn assist_level(scratch_auto: bool, custom_judge: bool) -> u8 {
     if custom_judge {
         return CUSTOM_JUDGE_ASSIST;
@@ -134,6 +139,13 @@ pub fn assist_flags(scratch_auto: bool, custom_judge: bool) -> Vec<String> {
 pub fn combo_breaks(mode: &Mode, counts: [u32; 6]) -> u32 {
     let combo = JudgeProperty::for_mode(mode).combo;
     counts.iter().zip(combo).filter(|(_, keeps)| !keeps).map(|(n, _)| *n).sum()
+}
+
+/// The chart a score of `model` is submitted for: its hashes, with the title, artist and level the
+/// chart itself writes, which is how the server can name a chart nobody has submitted before.
+pub fn submitted_chart(model: &rbms_model::Model) -> crate::SubmittedChart {
+    let id = crate::ChartId { md5: model.md5.clone(), sha256: model.sha256.clone() };
+    crate::SubmittedChart::described(id, &model.meta.title, &model.meta.artist, &model.meta.play_level)
 }
 
 /// Canonical gauge token for settings storage (matches `gauge_from_name`'s vocabulary, so it
@@ -342,6 +354,24 @@ mod tests {
     #[test]
     fn combo_breaks_is_zero_for_a_clean_run() {
         assert_eq!(combo_breaks(&Mode::BEAT_7K, [500, 40, 3, 0, 0, 0]), 0);
+    }
+
+    #[test]
+    fn a_submitted_chart_carries_what_the_chart_calls_itself() {
+        let meta = rbms_model::ModelMeta { title: "Born".into(), artist: "29".into(), play_level: "16".into(), ..Default::default() };
+        let model = rbms_model::Model {
+            mode: Mode::BEAT_7K,
+            meta,
+            wavmap: Vec::new(),
+            bgamap: Vec::new(),
+            init_bpm: 150.0,
+            timelines: Vec::new(),
+            md5: "0077fe17f69a9db8922c16ac00df960f".into(),
+            sha256: "ab".repeat(32),
+        };
+        let chart = submitted_chart(&model);
+        assert_eq!(chart.id, crate::ChartId { md5: model.md5.clone(), sha256: model.sha256.clone() });
+        assert_eq!((chart.title.as_deref(), chart.artist.as_deref(), chart.level), (Some("Born"), Some("29"), Some(16)));
     }
 
     #[test]

@@ -167,7 +167,7 @@ fn the_target_rows_can_be_captured() {
 }
 
 /// The panel under the preview says what a row costs or leaves unused beside what the row is for:
-/// SCRATCH AUTO sets no best score, TARGET RATE is not in use while no target is RATE CUSTOM, and
+/// SCRATCH AUTO counts no turntable note and lights an assisted lamp, TARGET RATE is not in use while no target is RATE CUSTOM, and
 /// IR BEST tries the player's own record before the fallback. Each is said whole on its one line.
 #[test]
 fn the_panel_says_what_scratch_auto_costs_and_when_the_target_rate_is_unused() {

@@ -5,8 +5,8 @@ use rbms_store::write_atomic;
 use crate::error::ConfigError;
 use crate::legacy::{LEGACY_FOLDERS_FILE, LEGACY_TABLES_FILE, LegacyV0, merge_legacy_lists};
 use crate::schema::{
-    BUNDLED_SKIN_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION, Config, INPUT_JUDGE_OFFSET_SCHEMA_VERSION, LEGACY_SCHEMA_VERSION, SINGLE_JUDGE_WIDTH_SCHEMA_VERSION,
-    UNCHOSEN_LETTERBOX_SCHEMA_VERSION,
+    BUNDLED_SKIN_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION, Config, INPUT_JUDGE_OFFSET_SCHEMA_VERSION, LEGACY_SCHEMA_VERSION, NO_DEFAULT_SERVER_SCHEMA_VERSION,
+    SINGLE_JUDGE_WIDTH_SCHEMA_VERSION, UNCHOSEN_LETTERBOX_SCHEMA_VERSION,
 };
 
 /// Extension a configuration file that could not be parsed is moved aside under, so the next save
@@ -31,8 +31,8 @@ pub struct LoadOutcome {
 /// Read the configuration at `path`, migrating a pre-version file (and folding in its `folders.ron`
 /// / `tables.ron` siblings) on the way.
 ///
-/// A missing file is not an error: the defaults are written out so the first run leaves a file to
-/// edit. A file that cannot be parsed is moved aside to `*.ron.bak` and the defaults are used
+/// A missing file is not an error: what a first run starts from ([`Config::first_run`]) is written
+/// out so the first run leaves a file to edit. A file that cannot be parsed is moved aside to `*.ron.bak` and the defaults are used
 /// without being written, exactly as the per-file loaders did before the unification.
 ///
 /// The one hard failure is a file that declares a newer schema: it is reported as
@@ -43,7 +43,7 @@ pub fn load(path: &Path) -> Result<LoadOutcome, ConfigError> {
         Ok(raw) => raw,
         Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(ConfigError::Read(e)),
         Err(_) => {
-            let mut config = Config::default();
+            let mut config = Config::first_run();
             merge_legacy_lists(&mut config, sibling(path, LEGACY_FOLDERS_FILE).as_deref(), sibling(path, LEGACY_TABLES_FILE).as_deref());
             if let Err(e) = save(&config, path) {
                 eprintln!("settings save failed ({}): {e}", path.display());
@@ -90,9 +90,11 @@ pub fn migrate(raw: &str) -> Result<(Config, Option<u32>), ConfigError> {
             config.judge.spread_uniform_judge_rate(ron::from_str::<SingleJudgeWidthProbe>(raw)?.judge.judge_rate);
             config
         }
-        BUNDLED_SKIN_SCHEMA_VERSION | UNCHOSEN_LETTERBOX_SCHEMA_VERSION | INPUT_JUDGE_OFFSET_SCHEMA_VERSION | CURRENT_SCHEMA_VERSION => {
-            ron::from_str::<Config>(raw)?
-        }
+        BUNDLED_SKIN_SCHEMA_VERSION
+        | UNCHOSEN_LETTERBOX_SCHEMA_VERSION
+        | INPUT_JUDGE_OFFSET_SCHEMA_VERSION
+        | NO_DEFAULT_SERVER_SCHEMA_VERSION
+        | CURRENT_SCHEMA_VERSION => ron::from_str::<Config>(raw)?,
         from => {
             return Err(ConfigError::Migrate { from, reason: format!("this build reads up to schema version {CURRENT_SCHEMA_VERSION}") });
         }
@@ -101,6 +103,7 @@ pub fn migrate(raw: &str) -> Result<(Config, Option<u32>), ConfigError> {
         config.retire_bundled_skin();
     }
     config.restore_unchosen_letterbox(probe.schema_version);
+    config.adopt_default_server(probe.schema_version);
     config.sanitise();
     let migrated_from = (probe.schema_version != CURRENT_SCHEMA_VERSION).then_some(probe.schema_version);
     Ok((config, migrated_from))

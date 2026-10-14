@@ -37,6 +37,9 @@ const AFRESH_INDEX: usize = 4;
 const GRAPH_INDEX: usize = 5;
 const AGAIN_INDEX: usize = 6;
 
+/// The blue keys of the seven-key layout: the second, fourth and sixth.
+const BLUE_INDICES: [usize; 3] = [1, 3, 5];
+
 /// The keys the shipped seven-key layout plays those indices on.
 const OK_KEY: KeyCode = KeyCode::KeyZ;
 const AFRESH_KEY: KeyCode = KeyCode::KeyC;
@@ -48,7 +51,7 @@ fn at_ms(millis: i64) -> i64 {
 }
 
 /// Nothing held, on a run that can be started again and followed on.
-const IDLE: SceneInput = SceneInput { held: [false; KEY_INDEX_COUNT], submitting: false, can_run_again: true, can_follow_on: true };
+const IDLE: SceneInput = SceneInput { held: [false; KEY_INDEX_COUNT], start: false, submitting: false, can_run_again: true, can_follow_on: true };
 
 /// The same with the key of one index down.
 fn holding(index: usize) -> SceneInput {
@@ -128,10 +131,18 @@ fn a_key_acts_only_once_the_scene_listens() {
 /// for longer than the skin's fade time.
 #[test]
 fn a_confirming_key_fades_the_scene_out_to_the_browser() {
-    for index in OK_INDICES {
+    for index in OK_INDICES.into_iter().filter(|index| !BLUE_INDICES.contains(index)) {
         let (mut scene, mut timers) = listening();
         assert_eq!(scene.step(&mut timers, at_ms(WHILE_LISTENING_MS), holding(index)), None);
         assert_eq!(timers.value_us(timer_id::FADEOUT), at_ms(WHILE_LISTENING_MS), "key index {index} did not start the fade");
+        assert_eq!(fade_out(&mut scene, &mut timers, IDLE), Some(Leave::Browser));
+    }
+    for index in OK_INDICES.into_iter().filter(|index| BLUE_INDICES.contains(index)) {
+        let (mut scene, mut timers) = listening();
+        assert_eq!(scene.step(&mut timers, at_ms(WHILE_LISTENING_MS), holding(index)), None);
+        assert!(!timers.is_on(timer_id::FADEOUT), "blue key index {index} confirmed before it was let go");
+        assert_eq!(scene.step(&mut timers, at_ms(WHILE_LISTENING_MS + 100), IDLE), None);
+        assert_eq!(timers.value_us(timer_id::FADEOUT), at_ms(WHILE_LISTENING_MS + 100), "blue key index {index} did not confirm when let go");
         assert_eq!(fade_out(&mut scene, &mut timers, IDLE), Some(Leave::Browser));
     }
     for code in [KeyCode::Enter, KeyCode::NumpadEnter, KeyCode::Escape] {
@@ -140,6 +151,74 @@ fn a_confirming_key_fades_the_scene_out_to_the_browser() {
         assert_eq!(scene.step(&mut timers, at_ms(WHILE_LISTENING_MS), IDLE), None);
         assert!(timers.is_on(timer_id::FADEOUT), "{code:?} did not start the fade");
         assert_eq!(fade_out(&mut scene, &mut timers, IDLE), Some(Leave::Browser));
+    }
+}
+
+/// The same with START down as well.
+fn with_start(input: SceneInput) -> SceneInput {
+    SceneInput { start: true, ..input }
+}
+
+/// START pressed while any blue key is held runs the chart again laid out as it was, and the blue
+/// key itself does not send the scene to the browser on the way.
+#[test]
+fn start_with_a_blue_key_held_runs_the_chart_again_laid_out_as_it_was() {
+    for index in BLUE_INDICES {
+        let (mut scene, mut timers) = listening();
+        scene.step(&mut timers, at_ms(WHILE_LISTENING_MS), holding(index));
+        assert_eq!(scene.step(&mut timers, at_ms(WHILE_LISTENING_MS + 100), with_start(holding(index))), None);
+        assert_eq!(timers.value_us(timer_id::FADEOUT), at_ms(WHILE_LISTENING_MS + 100), "START beside blue key {index} did not start the fade");
+        assert_eq!(scene.step(&mut timers, at_ms(WHILE_LISTENING_MS + 200), IDLE), None, "letting the keys go changes nothing");
+        assert_eq!(fade_out(&mut scene, &mut timers, IDLE), Some(Leave::RunSameLayout), "blue key {index}");
+    }
+}
+
+/// START alone does nothing on the result screen, START held from before the screen opened is not a
+/// press, and a run that cannot be started again leaves the combination with nothing to do.
+#[test]
+fn start_alone_or_held_over_or_with_nowhere_to_go_does_not_run_the_chart_again() {
+    let (mut scene, mut timers) = listening();
+    assert_eq!(scene.step(&mut timers, at_ms(WHILE_LISTENING_MS), with_start(IDLE)), None);
+    assert!(!timers.is_on(timer_id::FADEOUT), "START alone closed the screen");
+
+    let (mut scene, mut timers) = begun();
+    scene.hold_start_as_it_is(true);
+    scene.step(&mut timers, at_ms(LISTENING_MS), with_start(IDLE));
+    scene.step(&mut timers, at_ms(WHILE_LISTENING_MS), with_start(holding(BLUE_INDICES[0])));
+    assert!(!timers.is_on(timer_id::FADEOUT), "a START held since the run was read as a press");
+    scene.step(&mut timers, at_ms(WHILE_LISTENING_MS + 100), holding(BLUE_INDICES[0]));
+    scene.step(&mut timers, at_ms(WHILE_LISTENING_MS + 200), with_start(holding(BLUE_INDICES[0])));
+    assert_eq!(fade_out(&mut scene, &mut timers, IDLE), Some(Leave::RunSameLayout), "a fresh press of START did not count");
+
+    let (mut scene, mut timers) = listening();
+    let stuck = SceneInput { can_run_again: false, ..holding(BLUE_INDICES[0]) };
+    scene.step(&mut timers, at_ms(WHILE_LISTENING_MS), stuck);
+    scene.step(&mut timers, at_ms(WHILE_LISTENING_MS + 100), with_start(stuck));
+    assert!(!timers.is_on(timer_id::FADEOUT), "the combination acted on a run that cannot be started again");
+}
+
+/// The seventh key keeps the reference's own run-again, laid out as it was only for a run that set
+/// a best, beside the new combination.
+#[test]
+fn the_seventh_key_still_runs_the_chart_again_as_the_reference_does() {
+    let (mut scene, mut timers) = listening();
+    scene.step(&mut timers, at_ms(WHILE_LISTENING_MS), holding(AGAIN_INDEX));
+    assert_eq!(fade_out(&mut scene, &mut timers, holding(AGAIN_INDEX)), Some(Leave::RunAgain));
+}
+
+/// Which keys are blue in each layout: on both sides of a double-play layout, which reads its
+/// second side on the first side's indices.
+#[test]
+fn the_blue_keys_of_each_layout() {
+    assert_eq!(blue_keys(Mode::BEAT_7K), BLUE_INDICES);
+    assert_eq!(blue_keys(Mode::BEAT_14K), BLUE_INDICES);
+    assert_eq!(blue_keys(Mode::BEAT_5K), [1, 3]);
+    assert_eq!(blue_keys(Mode::BEAT_10K), [1, 3]);
+    assert_eq!(blue_keys(Mode::POPN_9K), [3, 5]);
+    assert!(blue_keys(Mode::KEYBOARD_24K).is_empty());
+    for (lane, blue) in [(1, true), (3, true), (5, true), (0, false), (6, false), (9, true), (13, true), (14, false)] {
+        let index = key_index_of(Mode::BEAT_14K, lane, ScratchDir::Forward).expect("a key lane has an index");
+        assert_eq!(blue_keys(Mode::BEAT_14K).contains(&index), blue, "lane {lane} of fourteen keys");
     }
 }
 
@@ -490,9 +569,17 @@ fn finished_session() -> PlaySession {
 
 /// The fixture run of the chart `chart` instead.
 fn finished_session_of(chart: &[u8]) -> PlaySession {
+    finished_session_with(chart, false)
+}
+
+/// The fixture run of the chart `chart`, with the turntable left to the chart when `scratch_auto`
+/// says so, as the play screen sets SCRATCH AUTO up.
+fn finished_session_with(chart: &[u8], scratch_auto: bool) -> PlaySession {
     let src = rbms_parser::parse_with(chart, Default::default());
     let model = rbms_chart::to_model(&src, rbms_chart::detect_mode(&src, "record.bms"));
-    let mut session = PlaySession::new(model, SessionOptions::default());
+    let mode = model.mode;
+    let auto_lanes = if scratch_auto { (0..mode.key).map(|lane| mode.is_scratch(lane)).collect() } else { Vec::new() };
+    let mut session = PlaySession::new(model, SessionOptions { auto_lanes, ..SessionOptions::default() });
     for frame in 0..=RECORD_RUN_US / RECORD_FRAME_US {
         session.tick(SessionClock::at(frame * RECORD_FRAME_US), &mut NullSink);
     }
@@ -858,11 +945,12 @@ const SECOND_LINE_AT: (u32, u32) = (CW - 30, 40);
 /// The moment of the default pack's result scene its settled layout is drawn at, in milliseconds.
 const SETTLED_MS: i64 = 3000;
 
-/// Only a run the player played with an assist on is told that it set no best score, and which
-/// setting it was: the stronger assist when both are on, and nothing for a run played without one,
-/// for a run the engine played and for a replay that was watched, none of which is a record at all.
+/// Only a run the player played with an assist on is told what the assist did to it: the stronger
+/// assist when both are on, and nothing for a run played without one, for a run the engine played
+/// and for a replay that was watched, none of which is a record at all. A SCRATCH AUTO run sets a
+/// best like any other; a widened one does not.
 #[test]
-fn only_a_run_played_with_an_assist_on_is_told_why_it_set_no_best() {
+fn only_a_run_played_with_an_assist_on_is_told_what_it_did() {
     assert_eq!(assist_note(false, false), None);
     assert_eq!(assist_note(false, true), Some(SCRATCH_AUTO_NOTE));
     assert_eq!(assist_note(true, false), Some(WIDENED_JUDGE_NOTE));
@@ -871,14 +959,14 @@ fn only_a_run_played_with_an_assist_on_is_told_why_it_set_no_best() {
         assert!(note.chars().count() <= crate::ir_outcome::IR_LINE_MAX_CHARS, "{note:?} is longer than a line of the built-in screen's column");
     }
 
-    let session = finished_session_of(TURNTABLE_CHART);
     let mut app = app_with_result_skin("assist-note", SKIN);
-    assert_eq!(ResultRun::of(&session, &app.shared, standing(false)).assist_note, None, "a run with no assist on");
+    assert_eq!(ResultRun::of(&finished_session_of(TURNTABLE_CHART), &app.shared, standing(false)).assist_note, None, "a run with no assist on");
     app.shared.config.play.scratch_auto = true;
+    let session = finished_session_with(TURNTABLE_CHART, true);
     let assisted = ResultRun::of(&session, &app.shared, standing(false));
-    assert_eq!((assisted.assist_note, assisted.updates_score), (Some(SCRATCH_AUTO_NOTE), false));
+    assert_eq!((assisted.assist_note, assisted.updates_score), (Some(SCRATCH_AUTO_NOTE), true));
 
-    let no_turntable = ResultRun::of(&finished_session(), &app.shared, standing(false));
+    let no_turntable = ResultRun::of(&finished_session_with(RECORD_CHART, true), &app.shared, standing(false));
     assert_eq!((no_turntable.assist_note, no_turntable.updates_score), (None, true), "SCRATCH AUTO had no turntable note to play");
 
     app.shared.config.play.autoplay = true;
@@ -892,7 +980,7 @@ fn only_a_run_played_with_an_assist_on_is_told_why_it_set_no_best() {
 /// the first line while no score server has anything to say, and on the second once one has.
 #[test]
 fn the_line_of_an_assisted_run_is_drawn_over_a_skin_under_the_submission_lines() {
-    let session = finished_session_of(TURNTABLE_CHART);
+    let session = finished_session_with(TURNTABLE_CHART, true);
     let mut app = app_with_result_skin("assist-line", SKIN);
     app.shared.config.play.scratch_auto = true;
     let run = ResultRun::of(&session, &app.shared, standing(false));
@@ -901,12 +989,14 @@ fn the_line_of_an_assisted_run_is_drawn_over_a_skin_under_the_submission_lines()
     run_until_begun(&mut app, &mut pixels);
     assert_eq!(app.shared.ir_status, IrStatus::Off);
     assert_eq!(result(&app).notices(&app.shared), [SCRATCH_AUTO_NOTE]);
-    assert_ne!(pixels.pixel_at(IR_LINE_AT.0, IR_LINE_AT.1), GROUND, "an assisted run does not say why it set no best");
+    assert_ne!(pixels.pixel_at(IR_LINE_AT.0, IR_LINE_AT.1), GROUND, "an assisted run does not say what the assist did");
     assert_eq!(pixels.pixel_at(SECOND_LINE_AT.0, SECOND_LINE_AT.1), GROUND, "a second line was drawn with one thing to say");
 
-    app.shared.ir_status = IrStatus::Skipped("scratch assist");
+    app.shared.ir_status = IrStatus::Sending;
     assert!(matches!(frame(&mut app, &mut pixels), Transition::Stay));
-    assert_eq!(result(&app).notices(&app.shared), ["IR: SKIPPED (scratch assist)", SCRATCH_AUTO_NOTE]);
+    let notices = result(&app).notices(&app.shared);
+    assert_eq!(notices.last().map(String::as_str), Some(SCRATCH_AUTO_NOTE), "{notices:?}");
+    assert_eq!(notices.len(), 2, "{notices:?}");
     assert_ne!(pixels.pixel_at(SECOND_LINE_AT.0, SECOND_LINE_AT.1), GROUND, "the line was not moved under the submission line");
 }
 
@@ -914,7 +1004,7 @@ fn the_line_of_an_assisted_run_is_drawn_over_a_skin_under_the_submission_lines()
 /// whether or not a score server is set up.
 #[test]
 fn the_built_in_screen_says_the_same_of_an_assisted_run() {
-    let session = finished_session_of(TURNTABLE_CHART);
+    let session = finished_session_with(TURNTABLE_CHART, true);
     let mut app = with_library(plain_app());
     app.shared.config.play.scratch_auto = true;
     let run = ResultRun::of(&session, &app.shared, standing(false));
@@ -928,12 +1018,11 @@ fn the_built_in_screen_says_the_same_of_an_assisted_run() {
 }
 
 /// The default pack's result of a run played by hand with SCRATCH AUTO on, as the application
-/// brings it up with nobody signed in: the pack says the score was not saved, the submission line
-/// says the run was not sent, and the screen's own line under it says which setting kept the run
-/// from setting a best score. Saved as `result-recorded-scratch-auto.png` when a capture folder is
-/// named.
+/// brings it up with nobody signed in: the score is saved like any other, and the screen's own
+/// line says the turntable was not counted and the lamp is a light assist. Saved as
+/// `result-recorded-scratch-auto.png` when a capture folder is named.
 #[test]
-fn the_default_packs_result_of_a_run_played_with_scratch_auto_says_why_it_set_no_best() {
+fn the_default_packs_result_of_a_run_played_with_scratch_auto_says_what_was_left_out() {
     let mut app = default_pack_app("result-recorded-scratch-auto");
     app.shared.config.play.scratch_auto = true;
     let (entered, summary) = end_run(&mut app.shared, played_by_hand(&HAND_OFFSETS_US, true));
@@ -949,8 +1038,8 @@ fn the_default_packs_result_of_a_run_played_with_scratch_auto_says_why_it_set_no
     }
     assert!(matches!(frame_after_ms(&mut app, &mut pixels, SETTLED_MS), Transition::Stay));
     save_frame("result-recorded-scratch-auto", &pixels);
-    assert_eq!(result(&app).notices(&app.shared), ["IR: SKIPPED (scratch assist)", SCRATCH_AUTO_NOTE]);
-    assert!(!reported(&app).updates_score, "the pack is told the score was saved");
+    assert_eq!(result(&app).notices(&app.shared), [SCRATCH_AUTO_NOTE]);
+    assert!(reported(&app).updates_score, "the pack is told the score was not saved");
 }
 
 /// Until the skin can be drawn the screen is black and takes no key but Escape, which leaves at

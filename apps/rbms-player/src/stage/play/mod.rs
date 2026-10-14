@@ -1017,7 +1017,7 @@ impl PlayState {
             hidden_cover: field.map(|field| field.hidden),
         });
         let model = self.session.model();
-        let shown_chart = self.field.as_ref().map_or(model.timelines.as_slice(), FieldChart::timelines);
+        let shown_chart = self.field.as_ref().map_or(self.session.field_timelines(), FieldChart::timelines);
         let opening_bpm = self.field.as_ref().and_then(FieldChart::tempo).map_or(model.init_bpm, |(bpm, _)| bpm);
         let notes = LaneNotes {
             hispeed: frame.hispeed as f32,
@@ -1027,6 +1027,7 @@ impl PlayState {
             ln_mode: self.session.ln_mode().resolve(),
             states: feed.trace(),
             longs: feed.longs(),
+            auto_lanes: self.session.auto_lanes(),
             ..LaneNotes::new(shown_chart, self.drawn_chart_us(shared), opening_bpm)
         };
         let overview = feed.overview();
@@ -1060,7 +1061,7 @@ impl PlayState {
         let (constant, legacy_note) = (shared.config.play.constant_speed, shared.config.play.legacy_note);
         let wanted = (constant || legacy_note).then_some((constant, legacy_note));
         if self.field.as_ref().map(FieldChart::settings) != wanted {
-            self.field = FieldChart::of(&self.session.model().timelines, constant, legacy_note);
+            self.field = FieldChart::of(self.session.field_timelines(), constant, legacy_note);
         }
     }
 
@@ -1508,13 +1509,14 @@ impl StageHandler for PlayState {
                 .map(|target| HudPace { name: &target.name, delta: j.ex_score as i64 - pace_ex_at(target.ex, j.total_judged(), j.total_notes()) }),
         };
         let playfield = PlayfieldView {
-            timelines: &self.session.model().timelines,
+            timelines: self.session.field_timelines(),
             microtime: field_us,
             hispeed,
             beam_on: self.session.beam_on(),
             beam_off: self.session.beam_off(),
             constant,
             legacy_note: ctx.shared.config.play.legacy_note,
+            auto_lanes: self.session.auto_lanes(),
         };
         let shade = LaneShade { cover, hidden: ctx.shared.effective_hidden() };
         render_playfield_view(canvas, &ctx.shared.skin, &playfield);

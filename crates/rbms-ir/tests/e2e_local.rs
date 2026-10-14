@@ -72,7 +72,7 @@ fn options() -> PlayOptions {
 fn submission(chart: &ChartId, player: &PlayerId, played_at: i64) -> ScoreSubmission {
     ScoreSubmission {
         api_version: API_VERSION,
-        chart: chart.clone(),
+        chart: chart.clone().into(),
         player: player.clone(),
         mode: "BEAT_7K".into(),
         clear: ClearLamp::Hard,

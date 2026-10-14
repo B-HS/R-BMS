@@ -106,9 +106,9 @@ fn run_submit(server: &dyn ScoreServer, job: SubmitJob) -> SubmitOutcome {
                 data.score_id = Some(score_id.clone());
             }
             if data.chart.is_none() {
-                data.chart = Some(submission.chart.clone());
+                data.chart = Some(submission.chart.id.clone());
             }
-            Some(server.upload_replay(&submission.chart, &data))
+            Some(server.upload_replay(&submission.chart.id, &data))
         }
         _ => None,
     };
@@ -182,7 +182,7 @@ mod tests {
     fn submission() -> ScoreSubmission {
         ScoreSubmission {
             api_version: crate::API_VERSION,
-            chart: chart(),
+            chart: chart().into(),
             player: PlayerId { id: "p".into() },
             mode: "BEAT_7K".into(),
             clear: ClearLamp::Hard,

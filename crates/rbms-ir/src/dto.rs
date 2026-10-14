@@ -2,6 +2,7 @@
 
 mod account;
 mod chart;
+mod folder;
 mod query;
 mod replay;
 mod score;
@@ -10,6 +11,7 @@ mod system;
 
 pub use account::*;
 pub use chart::*;
+pub use folder::*;
 pub use query::*;
 pub use replay::*;
 pub use score::*;

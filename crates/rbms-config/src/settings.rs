@@ -642,7 +642,13 @@ pub const SETTINGS: &[SettingDescriptor] = &[
         "The share of the chart's best possible score that RATE CUSTOM asks for, as a TARGET or as a TARGET FALLBACK",
     ),
     row(SettingId::Autoplay, SettingTab::PlayChart, "AUTOPLAY", SettingKind::Toggle, "Let the game play the chart itself"),
-    row(SettingId::ScratchAuto, SettingTab::PlayChart, "SCRATCH AUTO", SettingKind::Toggle, "Let the game play the scratch lane; an assist, so no best score"),
+    row(
+        SettingId::ScratchAuto,
+        SettingTab::PlayChart,
+        "SCRATCH AUTO",
+        SettingKind::Toggle,
+        "Let the game play the scratch lane, drawn green; its notes are not counted",
+    ),
     row(SettingId::AutoReplay, SettingTab::PlayChart, "AUTO REPLAY", SettingKind::Toggle, "Save a replay of every run"),
     row(
         SettingId::PlayEscapeMode,

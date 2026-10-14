@@ -1,3 +1,4 @@
+use std::io::Read;
 use std::time::Duration;
 
 use reqwest::blocking::{RequestBuilder, Response};
@@ -11,6 +12,16 @@ use crate::{IrError, ScoreServer};
 /// Wall-clock budget for a single IR request. Every call (health poll, submission, ranking
 /// fetch) shares it, so a stalled backend can never block a worker thread indefinitely.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Wall-clock budget for one request of a player's folders. A folder can be a few megabytes, which
+/// a slow line does not move inside [`REQUEST_TIMEOUT`]; nothing waits on these calls but the
+/// worker that makes them.
+pub const FOLDER_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// The largest answer read for a player's folders. The server holds a folder to 2,000 charts of a
+/// few hundred bytes each, so this is about twice the largest folder it can send; an answer past
+/// it is refused rather than read into memory without end.
+pub const MAX_FOLDER_RESPONSE_BYTES: u64 = 8 * 1024 * 1024;
 
 /// Reference HTTP client for an rbms IR-superset backend. REST + JSON; optional bearer
 /// token. The backend itself is not part of rbms — only this contract is.
@@ -116,6 +127,18 @@ impl HttpScoreServer {
     fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T, IrError> {
         let resp = self.send(self.client()?.get(self.url(path)))?;
         Self::decode(Self::succeeding(resp)?)
+    }
+
+    /// A `GET` whose answer may be large: given [`FOLDER_REQUEST_TIMEOUT`], and read no further than
+    /// [`MAX_FOLDER_RESPONSE_BYTES`].
+    fn get_bounded<T: DeserializeOwned>(&self, path: &str) -> Result<T, IrError> {
+        let resp = self.send(self.client()?.get(self.url(path)).timeout(FOLDER_REQUEST_TIMEOUT))?;
+        let mut bytes = Vec::new();
+        Self::succeeding(resp)?.take(MAX_FOLDER_RESPONSE_BYTES + 1).read_to_end(&mut bytes).map_err(|e| IrError::Network(e.to_string()))?;
+        if bytes.len() as u64 > MAX_FOLDER_RESPONSE_BYTES {
+            return Err(IrError::Decode(format!("answer larger than {MAX_FOLDER_RESPONSE_BYTES} bytes")));
+        }
+        serde_json::from_slice(&bytes).map_err(|e| IrError::Decode(e.to_string()))
     }
 
     fn post<B: Serialize, T: DeserializeOwned>(&self, path: &str, body: &B) -> Result<T, IrError> {
@@ -238,6 +261,19 @@ impl ScoreServer for HttpScoreServer {
     fn version(&self) -> Result<VersionInfo, IrError> {
         self.get("/version")
     }
+
+    fn user_folders(&self, player: &PlayerId) -> Result<UserFolderIndex, IrError> {
+        self.get_bounded(&format!("/players/{}/folders", player.id))
+    }
+
+    /// Refuses an id that is not safe in a path without asking the server: it would address
+    /// another resource than the folder.
+    fn user_folder(&self, player: &PlayerId, folder_id: &str) -> Result<UserFolder, IrError> {
+        if !is_path_safe_folder_id(folder_id) {
+            return Err(IrError::NotFound(format!("folder id not usable in a path: {folder_id:?}")));
+        }
+        self.get_bounded(&format!("/players/{}/folders/{folder_id}", player.id))
+    }
 }
 
 #[cfg(test)]
@@ -284,7 +320,7 @@ mod tests {
     fn submission() -> ScoreSubmission {
         ScoreSubmission {
             api_version: crate::API_VERSION,
-            chart: chart(),
+            chart: chart().into(),
             player: PlayerId { id: "p1".into() },
             mode: "BEAT_7K".into(),
             clear: ClearLamp::Hard,

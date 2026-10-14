@@ -132,6 +132,30 @@ const PLACEHOLDER_PROCESSED: Color = Color { r: 0, g: 255, b: 255, a: 255 };
 /// leaves an image exactly as it is.
 const BATCH_WHITE: Color = Color { r: u8::MAX, g: u8::MAX, b: u8::MAX, a: u8::MAX };
 
+/// The green a note of a lane the chart plays by itself (SCRATCH AUTO) is drawn in, head and end.
+///
+/// It is a flat colour over the rectangle the skin's own note fills rather than the skin's image
+/// with a green tint: a tint multiplies an image channel by channel, so the red turntable note
+/// most skins draw (the default pack's among them) would come out black, and the batch has no way
+/// to recolour an image through its alpha.
+pub const AUTO_LANE_NOTE: Color = Color { r: 0x30, g: 0xe0, b: 0x50, a: u8::MAX };
+
+/// The same green for the body of such a long note, let through a little so the body reads as one.
+pub const AUTO_LANE_LONG_BODY: Color = Color { r: 0x30, g: 0xe0, b: 0x50, a: 0xa0 };
+
+/// What a note of such a lane is drawn from.
+const AUTO_NOTE_IMAGE: NoteImage = NoteImage::Solid(AUTO_LANE_NOTE);
+
+/// What each part of a long note of such a lane is drawn from: its ends as a note, every body alike.
+const AUTO_LONG_IMAGES: [NoteImage; LONG_IMAGES] = {
+    let mut images = [NoteImage::Solid(AUTO_LANE_LONG_BODY); LONG_IMAGES];
+    images[LONG_END] = AUTO_NOTE_IMAGE;
+    images[LONG_START] = AUTO_NOTE_IMAGE;
+    images[HELL_END] = AUTO_NOTE_IMAGE;
+    images[HELL_START] = AUTO_NOTE_IMAGE;
+    images
+};
+
 /// The legacy text scale that comes to the eighteen pixels the reference sets its line labels in.
 const LABEL_SCALE: f32 = 2.1;
 
@@ -277,6 +301,11 @@ pub struct LaneNotes<'a> {
     /// The long note each lane has in hand, in lane order. A lane past the end has none.
     pub longs: &'a [LaneLong],
     pub show: NoteDisplay<'a>,
+    /// The lanes the chart plays by itself (SCRATCH AUTO), in lane order; a lane past the end is
+    /// the player's. Their notes are drawn in [`AUTO_LANE_NOTE`] whatever the skin draws notes
+    /// with, leave the field at the line whatever they were judged (nothing judges them), and are
+    /// never kept on the line, drawn as processed or dropped as missed.
+    pub auto_lanes: &'a [bool],
     /// Milliseconds since the last quarter note, on the scene clock
     /// (`now - getNowQuarterNoteTime()`). Only a document with an expansion rate reads it.
     pub quarter_note_ms: i64,
@@ -302,9 +331,15 @@ impl<'a> LaneNotes<'a> {
             states: &Unplayed,
             longs: &[],
             show: NoteDisplay::default(),
+            auto_lanes: &[],
             quarter_note_ms: i64::MAX,
             late_window_us: 0,
         }
+    }
+
+    /// Whether the chart plays `lane` by itself.
+    fn plays_itself(&self, lane: usize) -> bool {
+        self.auto_lanes.get(lane).copied().unwrap_or(false)
     }
 
     /// The tempo and the scroll in force at the play head (`LaneRenderer.getNowBPM` and the
@@ -802,7 +837,7 @@ fn still_drawn(notes: &LaneNotes<'_>, index: usize, lanes: usize) -> bool {
     (0..lanes).any(|lane| match note_in(timeline, lane).map(|note| &note.kind) {
         Some(NoteKind::LongStart { .. }) => long_end(notes.timelines, index, lane).is_some_and(|end| end.time_us >= notes.microtime),
         Some(NoteKind::LongEnd { .. }) => timeline.time_us >= notes.microtime,
-        Some(NoteKind::Normal) => notes.show.past_notes && notes.states.state(lane, timeline.time_us) == NOTE_UNJUDGED,
+        Some(NoteKind::Normal) => notes.show.past_notes && !notes.plays_itself(lane) && notes.states.state(lane, timeline.time_us) == NOTE_UNJUDGED,
         Some(NoteKind::Mine { .. }) | None => false,
     })
 }
@@ -958,6 +993,11 @@ impl Field<'_> {
                     let plain = (lane.region.x + self.nudge.x, y as f32 + self.nudge.y, lane.region.w + self.nudge.w, lane.scale + self.nudge.h);
                     let at = self.swollen(plain, lane);
                     match note.kind {
+                        NoteKind::Normal if notes.plays_itself(lane_index) => {
+                            if ahead {
+                                drawn |= self.put(r, &AUTO_NOTE_IMAGE, at, alpha);
+                            }
+                        }
                         NoteKind::Normal => {
                             let state = notes.states.state(lane_index, timeline.time_us);
                             let unjudged = state == NOTE_UNJUDGED;
@@ -1023,7 +1063,7 @@ impl Field<'_> {
         let foot = lane.region.y - grown;
         let height = (if y < foot { f64::from(y - foot) } else { span }) as f32;
         let end_y = (f64::from(y) + span) as f32;
-        let images = &lane.images.long;
+        let images = if self.notes.plays_itself(lane_index) { &AUTO_LONG_IMAGES } else { &lane.images.long };
         let held = lane.long.processing == Some(head_us);
         let body_at = (x, end_y - height + scale, w, height - scale);
         let end_at = (x, end_y, w, scale);
@@ -1100,7 +1140,7 @@ impl Field<'_> {
                 y -= fallen(timeline, timeline, microtime);
             }
             for (lane_index, lane) in self.lanes.iter().enumerate() {
-                if !matches!(note_in(timeline, lane_index).map(|note| &note.kind), Some(NoteKind::Normal)) {
+                if notes.plays_itself(lane_index) || !matches!(note_in(timeline, lane_index).map(|note| &note.kind), Some(NoteKind::Normal)) {
                     continue;
                 }
                 let state = notes.states.state(lane_index, timeline.time_us);

@@ -16,7 +16,7 @@ pub(super) fn player() -> PlayerId {
 pub(super) fn submission() -> ScoreSubmission {
     ScoreSubmission {
         api_version: API_VERSION,
-        chart: chart(),
+        chart: chart().into(),
         player: player(),
         mode: "BEAT_7K".into(),
         clear: ClearLamp::Hard,

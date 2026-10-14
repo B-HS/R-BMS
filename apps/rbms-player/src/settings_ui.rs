@@ -86,12 +86,6 @@ pub(crate) fn shipped_value(id: SettingId) -> String {
     display_value(&SHIPPED, id)
 }
 
-/// Whether the row belongs to the NETWORK tab, which `ir_panel` and `app_network` render because
-/// they are the only ones that can see the live account and the password held in memory.
-pub(crate) fn is_network_row(id: SettingId) -> bool {
-    descriptor(id).tab == SettingTab::Network
-}
-
 /// Step the AUDIO DEVICE row through the system default and the enumerated output devices, and
 /// report whether the row moved. A row that lands back on the device it already named leaves no
 /// pending reopen, so cycling a one-entry list does not restart the output stream for nothing.
@@ -494,13 +488,12 @@ mod tests {
     fn the_rows_the_panel_renders_are_exactly_the_descriptor_network_tab() {
         let listed = tab_rows(SettingTab::Network, &Config::default());
         for id in SettingId::ALL {
-            assert_eq!(is_network_row(id), listed.contains(&id), "{id:?}");
             assert_eq!(network_row_label(id), listed.contains(&id).then_some(descriptor(id).label), "{id:?} is labelled twice and differently");
         }
         for id in tab_rows(SettingTab::Audio, &Config::default()) {
-            assert!(!is_network_row(id), "{id:?} is on the AUDIO tab");
+            assert!(network_row_label(id).is_none(), "{id:?} is on the AUDIO tab");
         }
-        assert!(!is_network_row(SettingId::Autoplay));
+        assert!(network_row_label(SettingId::Autoplay).is_none());
     }
 
     #[test]

@@ -284,6 +284,10 @@ impl AppShared {
                     let name = self.table_names.get(ti).cloned().unwrap_or_else(|| "TABLE".into());
                     items.push(SelectItem::Folder { label: format!("{name} ({total})"), target: SelectView::TableLevels(ti) });
                 }
+                if !self.user_folders.shown.is_empty() {
+                    let total: usize = self.user_folders.shown.iter().map(|folder| self.shown_count(folder.charts.iter().copied(), filter)).sum();
+                    items.push(SelectItem::Folder { label: format!("{} ({total})", crate::user_folders::USER_FOLDERS_LABEL), target: SelectView::UserFolders });
+                }
                 items
             }
             SelectView::AllSongs => self.arrange_songs((0..songs.len()).collect(), filter).into_iter().map(SelectItem::Song).collect(),
@@ -306,6 +310,22 @@ impl AppShared {
                 .get(ti)
                 .and_then(|levels| levels.get(li))
                 .map(|(_, songs)| self.arrange_songs(songs.clone(), filter).into_iter().map(SelectItem::Song).collect())
+                .unwrap_or_default(),
+            SelectView::UserFolders => self
+                .user_folders
+                .shown
+                .iter()
+                .enumerate()
+                .map(|(at, folder)| SelectItem::Folder {
+                    label: folder.row_label(self.shown_count(folder.charts.iter().copied(), filter)),
+                    target: SelectView::UserFolder(at),
+                })
+                .collect(),
+            SelectView::UserFolder(at) => self
+                .user_folders
+                .shown
+                .get(at)
+                .map(|folder| self.arrange_songs(folder.charts.clone(), filter).into_iter().map(SelectItem::Song).collect())
                 .unwrap_or_default(),
         };
         if self.sel >= self.select_items.len() {
@@ -547,11 +567,13 @@ fn best_score(scores: &ScoreBook, md5: &str) -> Option<BarScore> {
 }
 
 /// Which of the reference's bars a row that opens `target` stands for: a folder of charts for the
-/// flat list, and a table for a difficulty table and for a level of one.
+/// flat list, and a table for a difficulty table and for a level of one. The player's own folders
+/// are charts picked by hash too, held by one row the way a table holds its levels, so they are the
+/// same two bars.
 fn folder_kind(target: SelectView) -> BarKind {
     match target {
         SelectView::Root | SelectView::AllSongs => BarKind::Folder,
-        SelectView::TableLevels(_) | SelectView::TableLevel(..) => BarKind::Table,
+        SelectView::TableLevels(_) | SelectView::TableLevel(..) | SelectView::UserFolders | SelectView::UserFolder(_) => BarKind::Table,
     }
 }
 
@@ -623,13 +645,18 @@ impl AppShared {
     /// The bar of a row that opens another list.
     ///
     /// The flat list of every chart stands for the reference's folder of charts (`FolderBar`), a
-    /// difficulty table for its `TableBar` and a level of one for the `HashBar` under it. The
-    /// reference counts the clears under the first and the last and not under a table itself, whose
-    /// bars are levels rather than charts.
+    /// difficulty table for its `TableBar` and a level of one for the `HashBar` under it, and the
+    /// player's own folders and each folder of them the same way. The reference counts the clears
+    /// under the first and the last and not under a table itself, whose bars are levels rather than
+    /// charts.
     fn folder_bar(&self, label: &str, target: SelectView, mode: Option<Mode>) -> SelectBar {
         let distribution = match target {
-            SelectView::Root | SelectView::TableLevels(_) => None,
+            SelectView::Root | SelectView::TableLevels(_) | SelectView::UserFolders => None,
             SelectView::AllSongs => Some(self.distribution(0..self.library.len(), mode)),
+            SelectView::UserFolder(at) => {
+                let charts = self.user_folders.shown.get(at).map_or(&[][..], |folder| folder.charts.as_slice());
+                Some(self.distribution(charts.iter().copied(), mode))
+            }
             SelectView::TableLevel(table, level) => {
                 let charts = self.table_levels.get(table).and_then(|levels| levels.get(level)).map_or(&[][..], |(_, charts)| charts.as_slice());
                 Some(self.distribution(charts.iter().copied(), mode))

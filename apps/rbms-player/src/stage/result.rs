@@ -17,6 +17,13 @@
 //! player's own: R is the seventh key's run-again and N starts the chart after this one, both
 //! decided when the key is pressed, behind the same input time and the same fade.
 //!
+//! So is START pressed while a blue key is held ([`blue_keys`]: the second, fourth and sixth key
+//! of seven, the second and fourth of five, the fourth and sixth of nine, on either side): it runs
+//! the chart again on the same seed and the same options, whatever the run was. A blue key that
+//! confirms in the reference's table therefore confirms when it is let go rather than when it goes
+//! down, so START can still be pressed beside it; on its own it leaves for the browser as before.
+//! The built-in screen reads the combination too.
+//!
 //! The skin's files are read off the frame loop, so the screen is up for a few frames before its
 //! skin can be drawn. Those frames are black and take no key but Escape, which leaves at once:
 //! there is no scene yet to fade out. A skin that turns out not to load hands the screen to the
@@ -136,6 +143,33 @@ const KEYBOARD_KEYS: [Option<ResultKey>; KEY_INDEX_COUNT] = [
     None,
 ];
 
+/// The key indices of the blue keys of the modes with seven keys a side: the second, fourth and
+/// sixth key, on either side of a double-play layout ([`crate::keyconfig::key_index_of`] gives the
+/// second side the first side's indices).
+const BEAT_BLUE_KEYS: &[usize] = &[1, 3, 5];
+
+/// The same for five keys a side: the second and the fourth.
+const FIVE_BLUE_KEYS: &[usize] = &[1, 3];
+
+/// The same for the nine buttons, whose blue ones are the fourth and the sixth (the pop'n cabinet
+/// and the reference's nine-button notes: white, yellow, green, blue, red, blue, green, yellow,
+/// white).
+const POPN_BLUE_KEYS: &[usize] = &[3, 5];
+
+/// The blue keys of `mode`, any of which held with START runs the chart again laid out as it was.
+/// The keyboard layout has none. This player's own: the reference has no such combination.
+pub(crate) fn blue_keys(mode: Mode) -> &'static [usize] {
+    if mode == Mode::POPN_9K {
+        POPN_BLUE_KEYS
+    } else if mode == Mode::KEYBOARD_24K {
+        &[]
+    } else if mode == Mode::BEAT_5K || mode == Mode::BEAT_10K {
+        FIVE_BLUE_KEYS
+    } else {
+        BEAT_BLUE_KEYS
+    }
+}
+
 /// What each key index does in `mode` (`ResultKeyProperty.get`).
 fn key_assignment(mode: Mode) -> [Option<ResultKey>; KEY_INDEX_COUNT] {
     if mode == Mode::POPN_9K {
@@ -184,6 +218,8 @@ pub(crate) enum Leave {
     RunAgain,
     /// The same chart again, laid out afresh.
     RunAfresh,
+    /// The same chart again, laid out as it was whatever the run was: START with a blue key held.
+    RunSameLayout,
     /// The chart after this one in the browser's list.
     FollowOn,
 }
@@ -193,6 +229,8 @@ pub(crate) enum Leave {
 pub(crate) struct SceneInput {
     /// Which key indices are down.
     pub(crate) held: [bool; KEY_INDEX_COUNT],
+    /// Whether START is down, on the keyboard or the controller.
+    pub(crate) start: bool,
     /// The score server has been sent the run and has not answered (`STATE_IR_PROCESSING`).
     pub(crate) submitting: bool,
     /// The run can be started again.
@@ -207,6 +245,7 @@ impl SceneInput {
     fn read(shared: &AppShared, ways: WaysOn) -> SceneInput {
         SceneInput {
             held: held_key_indices(shared),
+            start: shared.start_pressed(),
             submitting: matches!(shared.ir_status, IrStatus::Sending) && (shared.submit_rx.is_some() || shared.profile_submit_rx.is_some()),
             can_run_again: ways.run_again,
             can_follow_on: ways.follow_on,
@@ -273,6 +312,15 @@ pub(crate) struct Scene {
     run_again: bool,
     /// The same for this player's next-chart key, which ships on N.
     follow_on: bool,
+    /// The blue keys of the mode that was played ([`blue_keys`]).
+    blue: &'static [usize],
+    /// The blue keys that confirm, pressed and still held: they confirm when they are let go, so that
+    /// START can still be pressed beside one of them to run the chart again laid out as it was.
+    blue_held_back: [bool; KEY_INDEX_COUNT],
+    /// Whether START was down on the last frame, and whether it has gone down since a frame last
+    /// acted on it.
+    start_was_down: bool,
+    start_went_down: bool,
     /// The keys the two above are read from: the ones the key configuration holds for
     /// [`Shortcut::Retry`] and [`Shortcut::NextSong`], or none for one left without a key.
     run_again_key: Option<KeyCode>,
@@ -309,6 +357,10 @@ impl Scene {
             escape: false,
             run_again: false,
             follow_on: false,
+            blue: BEAT_BLUE_KEYS,
+            blue_held_back: [false; KEY_INDEX_COUNT],
+            start_was_down: false,
+            start_went_down: false,
             run_again_key: Some(Shortcut::Retry.default_key()),
             follow_on_key: Some(Shortcut::NextSong.default_key()),
             chosen: None,
@@ -344,7 +396,23 @@ impl Scene {
         self.begun = true;
         self.times = times;
         self.assign = key_assignment(mode);
+        self.blue = blue_keys(mode);
         true
+    }
+
+    /// Take START as it stands now as not pressed, so a START held since the run is not read as a
+    /// press when the screen opens.
+    pub(crate) fn hold_start_as_it_is(&mut self, down: bool) {
+        self.start_was_down = down;
+        self.start_went_down = false;
+    }
+
+    /// Note whether START is down, answering whether it went down just now.
+    pub(crate) fn note_start(&mut self, down: bool) -> bool {
+        let went_down = down && !self.start_was_down;
+        self.start_was_down = down;
+        self.start_went_down |= went_down;
+        went_down
     }
 
     /// Take one keyboard event.
@@ -364,7 +432,8 @@ impl Scene {
     }
 
     /// Note which key indices went down or came up since the last frame.
-    fn note_held(&mut self, held: [bool; KEY_INDEX_COUNT]) {
+    fn note_held(&mut self, held: [bool; KEY_INDEX_COUNT], start: bool) {
+        self.note_start(start);
         for (index, down) in held.into_iter().enumerate() {
             if down != self.was_down[index] {
                 self.was_down[index] = down;
@@ -377,7 +446,7 @@ impl Scene {
     /// and the keys after, in the order the reference runs `render` and `input`. Answers the way
     /// out once the scene is over, and nothing before it has begun.
     pub(crate) fn step(&mut self, timers: &mut TimerState, now_us: i64, input: SceneInput) -> Option<Leave> {
-        self.note_held(input.held);
+        self.note_held(input.held, input.start);
         if !self.begun {
             return None;
         }
@@ -398,7 +467,16 @@ impl Scene {
             }
             match role {
                 ResultKey::ChangeGraph => self.gauge_type = (self.next_gauge)(self.gauge_type),
+                ResultKey::Ok if self.blue.contains(&index) => self.blue_held_back[index] = true,
                 ResultKey::Ok | ResultKey::ReplayDifferent | ResultKey::ReplaySame => confirmed = true,
+            }
+        }
+        let blue_down = self.blue.iter().any(|index| input.held[*index]);
+        let same_layout = std::mem::take(&mut self.start_went_down) && blue_down && input.can_run_again;
+        for index in self.blue {
+            if self.blue_held_back[*index] && !input.held[*index] {
+                self.blue_held_back[*index] = false;
+                confirmed |= !same_layout;
             }
         }
         let enter = std::mem::take(&mut self.enter);
@@ -408,7 +486,10 @@ impl Scene {
         if input.submitting {
             return None;
         }
-        if run_again {
+        if same_layout {
+            self.blue_held_back = [false; KEY_INDEX_COUNT];
+            self.chosen = Some(Leave::RunSameLayout);
+        } else if run_again {
             self.chosen = Some(Leave::RunAgain);
         } else if follow_on {
             self.chosen = Some(Leave::FollowOn);
@@ -605,8 +686,8 @@ impl ResultRun {
         let setup = session.judge_setup();
         let stored = replay_saved || shared.replay.is_some() || shared.scores.for_md5(&chart.md5).iter().any(|past| past.replay_file.is_some());
         let custom_judge = is_custom_judge(&setup);
-        let scratch_auto = crate::app_result::scratch_auto_played(shared.config.play.scratch_auto, model);
-        let updates_score = updates_score(shared.run_plays_itself(), shared.replay.is_some(), custom_judge, scratch_auto, false);
+        let scratch_auto = crate::app_result::scratch_auto_played(session);
+        let updates_score = updates_score(shared.run_plays_itself(), shared.replay.is_some(), custom_judge, false);
         let snapshot = ResultSnapshot::of(ResultInput {
             previous,
             target,
@@ -736,16 +817,16 @@ struct SceneStage {
 }
 
 /// What the screen says of a run played with SCRATCH AUTO on, and of one judged by a width or a
-/// long-note margin widened past the chart's own.
+/// long-note margin widened past the chart's own, in a line no longer than a submission line is let
+/// be ([`crate::ir_outcome::IR_LINE_MAX_CHARS`]).
 ///
-/// Both are assists, and a run played with one sets no best score: its lamp, its play count and its
-/// row in the history are kept, and its EX, its judgements, its combo and its bad-poor count are
-/// held against no later run (`ScoreData.update(newscore, updateScore)`). A skin is told only that
-/// the score was not saved, and the submission line beside it names the score server, which reads
-/// as though signing in would have saved it. So the screen says which setting it was, in a line
-/// no longer than a submission line is let be ([`crate::ir_outcome::IR_LINE_MAX_CHARS`]).
-const SCRATCH_AUTO_NOTE: &str = "SCRATCH AUTO ON: NO BEST SCORE, LAMP AND HISTORY ONLY";
-const WIDENED_JUDGE_NOTE: &str = "WIDENED JUDGE: NO BEST SCORE, LAMP AND HISTORY ONLY";
+/// Both are assists, and both runs are kept, replayed and sent like any other. A SCRATCH AUTO run
+/// sets bests too, but its turntable notes counted for nothing and its lamp is LIGHT ASSIST CLEAR,
+/// which a skin's own numbers do not say. A widened run sets no best score: its EX, judgements,
+/// combo and bad-poor count are held against no later run (`ScoreData.update(newscore,
+/// updateScore)`), and a skin is told only that the score was not saved.
+const SCRATCH_AUTO_NOTE: &str = "SCRATCH AUTO: TURNTABLE NOT COUNTED, LIGHT ASSIST LAMP";
+const WIDENED_JUDGE_NOTE: &str = "WIDENED JUDGE: SENT AND KEPT, BUT NO BEST SCORE";
 
 /// Which of the two an assisted run is told, or `None` for a run with no assist on. With both on
 /// it is the stronger assist, which is the one the lamp is demoted by (`BMSPlayer.java:866`).
@@ -926,6 +1007,10 @@ impl ResultState {
         let moved = match leave {
             Leave::Browser => Transition::Stay,
             Leave::RunAfresh => retry(shared),
+            Leave::RunSameLayout => {
+                shared.retry_seed = self.run.as_ref().map(|run| run.seed);
+                retry(shared)
+            }
             Leave::RunAgain => {
                 shared.retry_seed = self.run.as_ref().filter(|run| run.updates_score).map(|run| run.seed);
                 retry(shared)
@@ -937,6 +1022,17 @@ impl ResultState {
             return shared.leave_play();
         }
         moved
+    }
+
+    /// One frame of the built-in screen, whose keys act at once: START pressed with a blue key held
+    /// runs the chart again laid out as it was, as it does on a skin's scene.
+    fn built_in_frame(&mut self, shared: &mut AppShared) -> Transition {
+        let went_down = self.stage.scene.note_start(shared.start_pressed());
+        let blue_down = blue_keys(shared.mode).iter().any(|index| shared.key_index_pressed(*index));
+        if went_down && blue_down && self.stage.ways.run_again {
+            return self.leave(shared, Leave::RunSameLayout);
+        }
+        Transition::Stay
     }
 
     /// The keys of the built-in screen: back to the browser, or straight into another run. The two
@@ -1040,7 +1136,7 @@ impl StageHandler for ResultState {
     fn update(&mut self, ctx: &mut FrameCtx<'_>) -> Transition {
         let shared = &mut *ctx.shared;
         if self.stage.skin == SkinStatus::Gone {
-            return Transition::Stay;
+            return self.built_in_frame(shared);
         }
         self.scroll_ranking(shared);
         self.carry_out_requests(shared);
@@ -1062,6 +1158,7 @@ impl StageHandler for ResultState {
         let now_us = shared.skin_now_us();
         switch_score_timers(&mut shared.skin_timers, now_us);
         self.stage.ways = WaysOn::of(shared);
+        self.stage.scene.hold_start_as_it_is(shared.start_pressed());
         self.stage.skin = if has_result_scene(shared, SKIN_TYPE_RESULT) { SkinStatus::Reading } else { SkinStatus::Gone };
         if self.stage.skin == SkinStatus::Gone {
             self.announce(shared);

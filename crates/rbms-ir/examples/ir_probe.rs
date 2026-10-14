@@ -13,7 +13,7 @@ fn main() {
 
     let sub = ScoreSubmission {
         api_version: API_VERSION,
-        chart: ChartId { md5: "6c4288d29b9870c88c744f7a95348819".into(), sha256: "980459...".into() },
+        chart: ChartId { md5: "6c4288d29b9870c88c744f7a95348819".into(), sha256: "980459...".into() }.into(),
         player: PlayerId { id: "guest".into() },
         mode: "BEAT_7K".into(),
         clear: ClearLamp::Hard,

@@ -398,6 +398,50 @@ fn a_note_nobody_hit_waits_on_the_line_only_when_past_notes_are_kept() {
     assert_eq!(note_span(&LaneNotes { show: kept, states: &missed, ..playing(&timelines, 1_500) }, 0), None, "one that has been judged does not");
 }
 
+/// A note of a lane the chart plays by itself is drawn in green where the skin's note would be,
+/// and nothing the run says of it keeps it past the line or marks it: nobody judges it.
+#[test]
+fn a_note_the_chart_plays_itself_is_drawn_green_and_leaves_at_the_line() {
+    let timelines = chart(vec![note_at(1_000, 0.5, 0), note_at(1_000, 0.5, 1)]);
+    let auto = [true, false];
+    let mut canvas = CpuCanvas::new(CANVAS.0, CANVAS.1);
+    let object = note_object(field(&mut canvas));
+    assert!(draw(&mut canvas, &object, &LaneNotes { auto_lanes: &auto, ..playing(&timelines, 500) }));
+    assert_eq!(span(&canvas, middle(0), super::AUTO_LANE_NOTE), Some((200, 210)), "the green note sits where the skin's note would");
+    assert_eq!(span(&canvas, middle(0), shade(NOTE_RED)), None, "and the skin's own image is not drawn");
+    assert_eq!(span(&canvas, middle(1), shade(NOTE_RED)), Some((200, 210)), "a lane of the player's is drawn as the skin draws it");
+
+    let kept = NoteDisplay { past_notes: true, mark_processed: true, ..NoteDisplay::default() };
+    let missed = Judged(&[(0, 1_000, 5)]);
+    let gone = LaneNotes { auto_lanes: &auto, show: kept, ..playing(&timelines, 1_500) };
+    assert_eq!(note_span(&gone, 0), None, "it is not kept on the line once its moment has passed");
+    let marked = LaneNotes { auto_lanes: &auto, show: kept, states: &missed, ..playing(&timelines, 500) };
+    let mut canvas = CpuCanvas::new(CANVAS.0, CANVAS.1);
+    let object = note_object(field(&mut canvas));
+    draw(&mut canvas, &object, &marked);
+    assert_eq!(span(&canvas, middle(0), super::AUTO_LANE_NOTE), Some((200, 210)), "nor drawn as processed, whatever the run reports");
+}
+
+/// A long note of such a lane keeps the skin's layout with its ends in green and its body in a
+/// green that lets a little through.
+#[test]
+fn a_long_note_the_chart_plays_itself_is_green_end_to_end() {
+    let timelines = long_chart(LnKind::Cn, 2_000, 1.0);
+    let auto = [true];
+    let notes = LaneNotes { ln_mode: LnKind::Cn, auto_lanes: &auto, ..playing(&timelines, 500) };
+    let mut canvas = CpuCanvas::new(CANVAS.0, CANVAS.1);
+    let object = note_object(field(&mut canvas));
+    draw(&mut canvas, &object, &notes);
+    assert_eq!(span(&canvas, middle(0), super::AUTO_LANE_NOTE), Some((200, 410)), "from the foot of the start to the top of the end");
+    assert_eq!(pixel(&canvas, middle(0), 205), super::AUTO_LANE_NOTE, "the start");
+    assert_eq!(pixel(&canvas, middle(0), 405), super::AUTO_LANE_NOTE, "the end");
+    let body = pixel(&canvas, middle(0), 300);
+    assert!(body.g > body.r && body.g > body.b && body != super::AUTO_LANE_NOTE, "the body is a lighter green: {body:?}");
+    for slot in 0..LONG_IMAGES {
+        assert_eq!(span(&canvas, middle(0), long_shade(slot)), None, "the skin's long-note image {slot} is not drawn");
+    }
+}
+
 /// A hidden note is drawn from the outlined placeholder on the lane's own rectangle, untouched by
 /// the note object's offsets, and only when the player asked for hidden notes.
 #[test]

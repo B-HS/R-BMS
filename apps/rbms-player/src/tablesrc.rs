@@ -33,6 +33,9 @@ use rbms_table::{DifficultyTable, Md5Index, SavedTable, TableError};
 
 use crate::{AppShared, SelectItem, SelectView};
 
+mod seed;
+pub(crate) use seed::seed_default_tables;
+
 /// One difficulty table matched against the library: `(level label, indices of the owned charts)`
 /// per level, in the table's own level order. A level none of whose charts are owned is there with
 /// no indices; a table that could not be loaded has no levels at all.
@@ -159,8 +162,8 @@ pub(crate) fn forget_table_status(location: &str) {
     }
 }
 
-/// Stable per-URL filename for the on-disk table copy.
-fn url_hash(s: &str) -> String {
+/// Stable per-URL filename for the on-disk table copy, and for the copy of a player's folders.
+pub(crate) fn url_hash(s: &str) -> String {
     let mut h: u64 = 5381;
     for b in s.bytes() {
         h = h.wrapping_mul(33) ^ b as u64;
@@ -295,6 +298,15 @@ impl TableStore {
             crate::notify::notify(crate::notify::Level::Warn, format!("table copy not saved ({location}): {reason}"));
         }
         written.is_ok()
+    }
+
+    /// Keep `table` as the copy of the table at `location` when there is no copy of it yet, as one
+    /// that does not say when it was fetched: the table the binary carries of a table every player
+    /// is given. A copy that is there already was fetched, and is newer than anything carried.
+    pub(crate) fn plant(&self, location: &str, table: &DifficultyTable) {
+        if self.copy_of(location).is_none() {
+            self.write(location, table, None);
+        }
     }
 
     /// Drop the copy of a table that has been removed from the list, wherever it is kept. A fetch
@@ -963,6 +975,15 @@ fn shown_level(shared: &AppShared) -> Option<(usize, String)> {
     Some((table, name.clone()))
 }
 
+/// The player's own folder the song list is looking into, by its id, or `None` while it is looking
+/// anywhere else.
+fn shown_user_folder(shared: &AppShared) -> Option<String> {
+    let SelectView::UserFolder(at) = shared.select_view else {
+        return None;
+    };
+    shared.user_folders.shown.get(at).map(|folder| folder.id.clone())
+}
+
 /// The folder the cursor of the song list is on, as something that can be found again in a list
 /// that has been rebuilt around it.
 #[derive(Clone, PartialEq)]
@@ -970,6 +991,9 @@ enum FocusedFolder {
     /// A level of a table, by the table's place and the level's name: a table that arrives again
     /// can have a level before this one that it did not have.
     Level(usize, String),
+    /// One of the player's own folders, by its id: a fetch can add a folder before it, and its name
+    /// can have been changed on the site.
+    UserFolder(String),
     /// Any other folder, by where it leads.
     Leading(SelectView),
 }
@@ -986,6 +1010,13 @@ impl FocusedFolder {
                     .and_then(|levels| levels.get(*level))
                     .map_or(FocusedFolder::Leading(SelectView::TableLevel(*table, *level)), |(name, _)| FocusedFolder::Level(*table, name.clone())),
             ),
+            SelectItem::Folder { target: SelectView::UserFolder(at), .. } => Some(
+                shared
+                    .user_folders
+                    .shown
+                    .get(*at)
+                    .map_or(FocusedFolder::Leading(SelectView::UserFolder(*at)), |folder| FocusedFolder::UserFolder(folder.id.clone())),
+            ),
             SelectItem::Folder { target, .. } => Some(FocusedFolder::Leading(*target)),
         }
     }
@@ -995,7 +1026,8 @@ impl FocusedFolder {
 /// something that can be found again after the tables under the list have changed.
 ///
 /// A level is kept by its name: a fetch can add a level before it or take one away, and the level
-/// at the same place in the table that arrived is then another level. A folder under the cursor is
+/// at the same place in the table that arrived is then another level. One of the player's own
+/// folders is kept by its id, for the same reason and because its name can change on the site. A folder under the cursor is
 /// kept as the folder it is: a table that arrives for the first time is a folder the list did not
 /// have, put among the folders in the order of the sources, and every folder after it is one place
 /// further down than it was. A chart under the cursor is kept by its place in the list: a table
@@ -1010,6 +1042,8 @@ pub(crate) struct ListPlace {
     view: SelectView,
     /// The level the list was looking into ([`shown_level`]).
     shown: Option<(usize, String)>,
+    /// The player's own folder the list was looking into ([`shown_user_folder`]).
+    shown_folder: Option<String>,
     /// The folder the cursor was on, or `None` when it was on a chart or over an empty list.
     focused: Option<FocusedFolder>,
     sel: usize,
@@ -1021,6 +1055,7 @@ impl ListPlace {
         ListPlace {
             view: shared.select_view,
             shown: shown_level(shared),
+            shown_folder: shown_user_folder(shared),
             focused: shared.select_items.get(shared.sel).and_then(|item| FocusedFolder::of(shared, item)),
             sel: shared.sel,
         }
@@ -1028,7 +1063,8 @@ impl ListPlace {
 
     /// What this place is looking into, as the tables stand now. A level the table no longer has is
     /// the table's levels, and a table that has no levels left is what is still there: the top of
-    /// the library.
+    /// the library. The player's own folders go the same way: a folder no longer there is the list of
+    /// them, and no folders at all is the top of the library.
     pub(crate) fn view(&self, shared: &AppShared) -> SelectView {
         let levels_of = |table: usize| shared.table_levels.get(table).map_or(0, Vec::len);
         let place_of = |table: usize| {
@@ -1038,6 +1074,12 @@ impl ListPlace {
         match self.view {
             SelectView::TableLevels(table) | SelectView::TableLevel(table, _) if levels_of(table) == 0 => SelectView::Root,
             SelectView::TableLevel(table, _) => place_of(table).map_or(SelectView::TableLevels(table), |level| SelectView::TableLevel(table, level)),
+            SelectView::UserFolders | SelectView::UserFolder(_) if shared.user_folders.shown.is_empty() => SelectView::Root,
+            SelectView::UserFolder(_) => self
+                .shown_folder
+                .as_ref()
+                .and_then(|id| shared.user_folders.shown.iter().position(|folder| &folder.id == id))
+                .map_or(SelectView::UserFolders, SelectView::UserFolder),
             view => view,
         }
     }
@@ -1054,7 +1096,7 @@ impl ListPlace {
 
 /// Rebuild the song list where it stood after a table under it changed, `place` being where it
 /// stood before the change: looking into the same level, with the cursor on the folder it was on.
-fn show_the_list_again(shared: &mut AppShared, place: &ListPlace) {
+pub(crate) fn show_the_list_again(shared: &mut AppShared, place: &ListPlace) {
     shared.select_view = place.view(shared);
     shared.rebuild_select_items();
     shared.sel = place.row(shared);

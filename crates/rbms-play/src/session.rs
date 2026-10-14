@@ -13,7 +13,7 @@ use rbms_judge::ln::LnMode;
 use rbms_judge::matcher::ScratchDir;
 use rbms_judge::windows::JudgeWindowRule;
 use rbms_judge::{ClearType, GaugeKind, Judge, JudgeEngine, JudgeResult};
-use rbms_model::Model;
+use rbms_model::{Model, TimeLine};
 use rbms_store::{Replay, ReplayEvent, ReplayOffsetStep};
 
 use crate::record::{GaugeLogRecorder, PlayRecord, ScoreProgress, play_time_ms};
@@ -165,7 +165,9 @@ pub struct SessionOptions {
     /// both key and scratch lanes. The per-tier form lives in [`JudgeSetup`], which
     /// [`PlaySession::set_judge_setup`] takes and which overrides this once given.
     pub judge_rate_percent: i32,
-    /// Lanes played from the chart even in an interactive run, empty when there are none.
+    /// Lanes the chart plays by itself (SCRATCH AUTO), empty when there are none. Their notes are
+    /// taken off the chart the run judges and counts, and only drawn and heard
+    /// ([`PlaySession::field_timelines`]); input on them is ignored.
     pub auto_lanes: Vec<bool>,
     /// The note-shuffle seed this run was laid out with, reported with the score.
     pub seed: u64,
@@ -680,7 +682,7 @@ impl PlaySession {
             return;
         }
         let target_us = target_us.max(0);
-        let mut player = build_player(self.player.model().clone(), &self.setup);
+        let mut player = build_player(self.player.field_model().clone(), &self.setup);
         let (events, steps, fallback_us) =
             self.replay.as_ref().map(|track| (track.events.clone(), track.offset_steps.clone(), track.judged_off_by_us)).unwrap_or_default();
         let mut cursor = 0;
@@ -839,9 +841,28 @@ impl PlaySession {
         self.player.failed()
     }
 
-    /// The chart being played, laid out as this run sees it.
+    /// The chart being played, laid out as this run judges it: without the notes of the lanes the
+    /// chart plays by itself, so every count read off it is the run's own.
     pub fn model(&self) -> &Model {
         self.player.model()
+    }
+
+    /// The timelines the note field is drawn from: [`PlaySession::model`]'s, with the notes of the
+    /// lanes the chart plays by itself put back.
+    pub fn field_timelines(&self) -> &[TimeLine] {
+        &self.player.field_model().timelines
+    }
+
+    /// Which lanes the chart plays by itself, in lane order. Their notes are drawn as the chart's
+    /// own rather than the player's.
+    pub fn auto_lanes(&self) -> &[bool] {
+        self.player.auto_lanes()
+    }
+
+    /// Whether any note of the chart was left to a lane that plays by itself, which makes the run an
+    /// assisted one.
+    pub fn has_auto_played_notes(&self) -> bool {
+        self.player.has_auto_played_notes()
     }
 
     /// Per-lane key-beam press timestamps.
@@ -1019,7 +1040,7 @@ fn is_backward(dir: ScratchDir) -> bool {
 /// A judge player set up the way this run was configured, used both to start the run and to rebuild
 /// it at a seek target.
 fn build_player(model: Model, setup: &Setup) -> Player {
-    let mut player = Player::new(model, setup.autoplay);
+    let mut player = Player::with_auto_lanes(model, setup.autoplay, &setup.auto_lanes);
     apply_setup(&mut player, setup);
     player
 }
@@ -1040,9 +1061,6 @@ fn apply_setup(player: &mut Player, setup: &Setup) {
     player.set_algorithm(setup.judge.algorithm);
     player.set_gauge_auto_shift(setup.judge.gauge_auto_shift);
     player.set_bottom_shiftable_gauge(setup.judge.bottom_shiftable_gauge);
-    if !setup.auto_lanes.is_empty() {
-        player.set_auto_lanes(setup.auto_lanes.clone());
-    }
     if let Some((index, gauge_value)) = setup.initial_gauge {
         player.set_initial_state(index, gauge_value, setup.initial_combo);
     }

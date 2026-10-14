@@ -131,6 +131,11 @@ impl AppShared {
                     .unwrap_or_default();
                 vec![table(index), level]
             }
+            SelectView::UserFolders => vec![crate::user_folders::USER_FOLDERS_LABEL.to_string()],
+            SelectView::UserFolder(at) => {
+                let name = self.user_folders.shown.get(at).map(|folder| folder.name.clone()).unwrap_or_default();
+                vec![crate::user_folders::USER_FOLDERS_LABEL.to_string(), name]
+            }
         }
     }
 }

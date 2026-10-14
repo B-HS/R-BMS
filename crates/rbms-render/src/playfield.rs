@@ -2,6 +2,7 @@ use rbms_chart::scroll::{constant_offsets, visible_offsets};
 use rbms_model::{NoteKind, TimeLine};
 
 use crate::skin::Skin;
+use crate::skin_render::frame::{AUTO_LANE_LONG_BODY, AUTO_LANE_NOTE};
 use crate::{Color, Rect, Renderer};
 
 /// Release-fade length of a key beam after a lane is let go (µs). Mirrors a skin's keyoff
@@ -25,6 +26,9 @@ pub struct PlayfieldView<'a> {
     /// Draw every long note as the plain note at its head — the LEGACY NOTE option. The chart is
     /// judged exactly as it was; only the body and the tail stop being drawn.
     pub legacy_note: bool,
+    /// The lanes the chart plays by itself (SCRATCH AUTO), in lane order. Their notes are drawn in
+    /// [`AUTO_LANE_NOTE`] and their long-note bodies in [`AUTO_LANE_LONG_BODY`], as on a skin's field.
+    pub auto_lanes: &'a [bool],
 }
 
 /// How much of a lane is hidden from the player, as fractions of the field height.
@@ -49,7 +53,8 @@ pub struct LaneShade {
 /// fewer than the skin draws — a five-key file reached with a seven-key skin still resolved — leaves
 /// the extra lanes empty rather than ending the frame.
 pub fn render_playfield_view<R: Renderer>(r: &mut R, skin: &Skin, view: &PlayfieldView<'_>) {
-    let PlayfieldView { timelines, microtime, hispeed, beam_on, beam_off, constant, legacy_note } = *view;
+    let PlayfieldView { timelines, microtime, hispeed, beam_on, beam_off, constant, legacy_note, auto_lanes } = *view;
+    let plays_itself = |lane: usize| auto_lanes.get(lane).copied().unwrap_or(false);
     r.clear(skin.bg);
 
     let n = skin.lane_count();
@@ -97,7 +102,7 @@ pub fn render_playfield_view<R: Renderer>(r: &mut R, skin: &Skin, view: &Playfie
                     let body_top = pos.get(&idx).map(|o| skin.judge_y - o).unwrap_or(skin.top_y).max(skin.top_y);
                     if body_bottom > body_top {
                         let c = skin.long_note_color(lane, ln);
-                        let body = Color { r: c.r, g: c.g, b: c.b, a: skin.long_note_alpha(ln) };
+                        let body = if plays_itself(lane) { AUTO_LANE_LONG_BODY } else { Color { r: c.r, g: c.g, b: c.b, a: skin.long_note_alpha(ln) } };
                         r.fill_rect(Rect::new(skin.x[lane], body_top, skin.w[lane], body_bottom - body_top), body);
                     }
                 }
@@ -119,6 +124,7 @@ pub fn render_playfield_view<R: Renderer>(r: &mut R, skin: &Skin, view: &Playfie
                 continue;
             }
             let color = match note.kind {
+                _ if plays_itself(lane) => AUTO_LANE_NOTE,
                 NoteKind::Mine { .. } => skin.mine_color,
                 NoteKind::LongStart { ln } if !legacy_note => skin.long_note_color(lane, ln),
                 _ => skin.note_color(lane),
@@ -281,7 +287,7 @@ mod tests {
 
     /// One frame's playfield inputs, so a test reads as a call rather than a struct literal.
     fn view<'a>(timelines: &'a [TimeLine], microtime: i64, hispeed: f64, beam_on: &'a [i64], beam_off: &'a [i64], constant: bool) -> PlayfieldView<'a> {
-        PlayfieldView { timelines, microtime, hispeed, beam_on, beam_off, constant, legacy_note: false }
+        PlayfieldView { timelines, microtime, hispeed, beam_on, beam_off, constant, legacy_note: false, auto_lanes: &[] }
     }
 
     /// The same frame with long notes drawn as the plain notes at their heads.
@@ -308,6 +314,22 @@ mod tests {
         let cy = (skin.judge_y - off - skin.note_height * 0.5) as u32;
         assert_eq!(canvas.pixel_at(cx, cy), Color::WHITE, "note should be white at lane 0");
         assert_ne!(canvas.pixel_at(skin.lane_center(3) as u32, cy), Color::WHITE, "lane 3 has no note here");
+    }
+
+    /// A lane the chart plays by itself draws its notes in the green a skin's field draws them in.
+    #[test]
+    fn a_note_the_chart_plays_itself_is_drawn_green() {
+        let timelines = tls(b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:01\r\n#00113:01\r\n");
+        let skin = skin();
+        let note_t = 2_000_000;
+        let micro = note_t - 300_000;
+        let auto = [true, false, false, false, false, false, false, false];
+        let mut canvas = CpuCanvas::new(1280, 720);
+        render_playfield_view(&mut canvas, &skin, &PlayfieldView { auto_lanes: &auto, ..view(&timelines, micro, 1.0, &[], &[], false) });
+        let off = closed_form_offset(note_t, micro, 120.0, 1.0, 1.0, skin.lane_height());
+        let cy = (skin.judge_y - off - skin.note_height * 0.5) as u32;
+        assert_eq!(canvas.pixel_at(skin.lane_center(0) as u32, cy), AUTO_LANE_NOTE, "the chart's own lane is green");
+        assert_eq!(canvas.pixel_at(skin.lane_center(2) as u32, cy), skin.note_color(2), "a lane of the player's keeps its colour");
     }
 
     #[test]
@@ -751,8 +773,16 @@ mod tests {
             render_playfield_view(&mut spread, &skin, &view(&timelines, micro, 1.25, &beam_on, &beam_off, constant));
 
             let mut view = CpuCanvas::new(1280, 720);
-            let field =
-                PlayfieldView { timelines: &timelines, microtime: micro, hispeed: 1.25, beam_on: &beam_on, beam_off: &beam_off, legacy_note: false, constant };
+            let field = PlayfieldView {
+                timelines: &timelines,
+                microtime: micro,
+                hispeed: 1.25,
+                beam_on: &beam_on,
+                beam_off: &beam_off,
+                legacy_note: false,
+                constant,
+                auto_lanes: &[],
+            };
             render_playfield_view(&mut view, &skin, &field);
 
             assert_eq!(spread.pixels(), view.pixels(), "the compatibility shim only spreads the view fields (constant={constant})");

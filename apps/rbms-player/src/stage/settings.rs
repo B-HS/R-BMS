@@ -16,9 +16,12 @@
 //! puts a group back and the two of the question it asks are not among the regions a frame registers
 //! ([`Hot`]): each is where the screen's layout says it is, and a press is tested against that.
 //!
-//! A row is set by what it holds. An arrow turns a switch over and steps a choice; a press on a
-//! switch turns it over, a press on a value of a choice takes that value, and a press on an arrow
-//! of a longer choice steps it. A row that holds a number -- a volume, a judge width, a fade -- is
+//! A row is set by what it holds. An arrow turns a switch over and steps a choice, and so does
+//! Enter, which takes a choice to its next value as the skin and play menus do; Escape is the key
+//! that saves and leaves. Enter on a row that opens something opens it: the folder of the system
+//! sounds and the font are picked, the key editor is opened. A press on a switch turns it over, a
+//! press on a value of a choice takes that value, and a press on an arrow of a longer choice steps
+//! it. A row that holds a number -- a volume, a judge width, a fade -- is
 //! set as such a row is on every built-in screen ([`crate::number_row`]): an arrow moves it one
 //! step of the smallest change it can hold, and ten with Shift held; its slider is dragged; and
 //! Enter, or a press on the number, opens it to be typed into. A drag writes the settings file
@@ -35,7 +38,7 @@ use crate::ir_panel::*;
 use crate::ir_session::{AuthAction, GUEST_PLAYER_ID};
 use crate::keyconfig::Shortcut;
 use crate::number_row::{EDIT_HINT, EditKey, NumberInput, NumberValue, hot_rect};
-use crate::settings_ui::{SettingRow, audio_status_text, is_network_row, is_resettable, shipped_value, step_audio_device};
+use crate::settings_ui::{SettingRow, audio_status_text, is_resettable, shipped_value, step_audio_device};
 use crate::settings_view::{
     CONFIRM_HINT, ConfirmScene, ControlPart, InfoScene, ListItem, RIVALS_HINT, RailGroup, RivalsScene, RowControl, SettingsLine, SettingsScene,
     confirm_yes_rect, control_part_at, key_config_link, list_rect, reset_group_rect, visible_rows,
@@ -955,11 +958,7 @@ impl SettingsState {
                     (_, Some((_, value))) => self.numbers.input.begin_edit(id, &value),
                     (SettingId::KeyConfig, None) => return Transition::Open(Stage::KeyConfig(KeyConfigState::new())),
                     (SettingId::Font, None) => return self.run_action(ctx, SettingId::Font, ROW_STEP_FORWARD),
-                    _ if is_network_row(id) => return self.step(ctx, row, ROW_STEP_FORWARD, false),
-                    _ => {
-                        ctx.shared.save_settings();
-                        return Transition::Back;
-                    }
+                    _ => return self.step(ctx, row, ROW_STEP_FORWARD, false),
                 }
             }
             KeyCode::ArrowUp => self.focus(self.sel.saturating_sub(1)),

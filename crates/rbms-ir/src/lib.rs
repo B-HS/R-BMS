@@ -18,7 +18,7 @@ pub use dto::{
     FALLBACK_GAUGE_VALUE, GaugeType, JudgeBreakdown, MAX_PLAYER_SCORES_LIMIT, MAX_RANKING_LIMIT, MAX_REPLAY_LIST_LIMIT, MIN_PLAYED_AT_MS, PlayOptions,
     PlayerId, PlayerProfile, PlayerScoresQuery, RandomOption, ReplayData, ReplayEvent, ReplayMeta, ReplayUploadResponse, RivalPutRequest, ScoreFlag,
     ScoreRecord, ScoreSubmission, ServerCapabilities, ServerInfo, SettingsBlob, SettingsConflict, SettingsPutRequest, SettingsPutResponse, SettingsPutResult,
-    SubmitResponse, VersionInfo,
+    SubmitResponse, SubmittedChart, UserFolder, UserFolderIndex, UserFolderItem, UserFolderSummary, VersionInfo, is_path_safe_folder_id,
 };
 pub use error::{ErrorBody, ErrorEnvelope, IrError};
 pub use http::HttpScoreServer;
@@ -109,6 +109,16 @@ pub trait ScoreServer: Send + Sync {
     fn version(&self) -> Result<VersionInfo, IrError> {
         Err(IrError::Unsupported)
     }
+    /// Every folder of the signed-in player's, without the charts in them. Only the player the
+    /// token belongs to may read their folders; a server that has no folders answers 404.
+    fn user_folders(&self, _player: &PlayerId) -> Result<UserFolderIndex, IrError> {
+        Err(IrError::Unsupported)
+    }
+    /// One folder of the signed-in player's with its charts. `folder_id` goes into the path as it
+    /// is, so it has to be one [`is_path_safe_folder_id`] allows.
+    fn user_folder(&self, _player: &PlayerId, _folder_id: &str) -> Result<UserFolder, IrError> {
+        Err(IrError::Unsupported)
+    }
 }
 
 #[cfg(test)]
@@ -119,7 +129,7 @@ mod tests {
     fn submission_round_trips_json() {
         let sub = ScoreSubmission {
             api_version: API_VERSION,
-            chart: ChartId { md5: "abc".into(), sha256: "def".into() },
+            chart: ChartId { md5: "abc".into(), sha256: "def".into() }.into(),
             player: PlayerId { id: "p1".into() },
             mode: "BEAT_7K".into(),
             clear: ClearLamp::Hard,
@@ -165,7 +175,7 @@ mod tests {
         };
         let json = serde_json::to_string(&sub).unwrap();
         let back: ScoreSubmission = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.chart.sha256, "def");
+        assert_eq!(back.chart.id.sha256, "def");
         assert_eq!(back.clear, ClearLamp::Hard);
         assert_eq!(back.judge.pgreat, 712);
         assert_eq!(back.judge.epg + back.judge.lpg, back.judge.pgreat, "early+late split sums to total");
@@ -228,7 +238,7 @@ mod tests {
     fn minimal_submission() -> ScoreSubmission {
         ScoreSubmission {
             api_version: API_VERSION,
-            chart: ChartId { md5: "m".into(), sha256: "s".into() },
+            chart: ChartId { md5: "m".into(), sha256: "s".into() }.into(),
             player: PlayerId { id: "p".into() },
             mode: "BEAT_7K".into(),
             clear: ClearLamp::Normal,

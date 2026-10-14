@@ -91,16 +91,12 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
     };
     let judge_setup = play.judge_setup();
     let custom_judge = is_custom_judge(&judge_setup);
-    let scratch_auto = scratch_auto_played(shared.config.play.scratch_auto, play.model());
+    let scratch_auto = scratch_auto_played(play);
     let assist = assist_level(scratch_auto, custom_judge);
     let practice = state.practice.is_some();
     let last_time_us = play.last_time_us();
-    let save_replay = !practice
-        && shared.config.play.auto_replay
-        && shared.replay.is_none()
-        && !shared.run_plays_itself()
-        && saves_replay(assist)
-        && !play.recorded_events().is_empty();
+    let save_replay =
+        !practice && shared.config.play.auto_replay && shared.replay.is_none() && !shared.run_plays_itself() && !play.recorded_events().is_empty();
     let recorded_events = save_replay.then(|| play.recorded_events().to_vec());
     let instrumentation = play.instrumentation();
     let record = play.record();
@@ -112,9 +108,9 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
         "RESULT [{label}]  EX {}/{}  combo {}/{}  gauge {:.1}%  PG/GR/GD/BD/POOR/MISS {:?}  empty-poor {}",
         summary.ex_score, summary.max_ex_score, summary.max_combo, summary.total_notes, summary.gauge_value, summary.counts, summary.empty_poor,
     );
-    let history = shared.scores.for_md5(&chart.md5);
-    let prev_ex = history.first().map(|r| r.ex_score);
-    let prev_best_ex = history.iter().map(|r| r.ex_score).max();
+    let scoring_history: Vec<_> = shared.scores.for_md5(&chart.md5).into_iter().filter(|record| !record.assisted).collect();
+    let prev_ex = scoring_history.first().map(|r| r.ex_score);
+    let prev_best_ex = scoring_history.iter().map(|r| r.ex_score).max();
     let previous = PreviousScore::of_book(&shared.scores, &chart.md5, &state.ln_mode_key);
     let standing_best_ex = shared.scores.best_ex_for_md5_in_ln_mode(&chart.md5, &state.ln_mode_key);
     let view = ResultView {
@@ -146,7 +142,7 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
     let played_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
     let sub = ScoreSubmission {
         api_version: API_VERSION,
-        chart: ChartId { md5: chart.md5.clone(), sha256: chart.sha256.clone() },
+        chart: ir_map::submitted_chart(play.model()),
         player: PlayerId { id: submission_player_id(&shared.session, &shared.config.network.player_id) },
         mode: shared.mode.name.to_string(),
         clear: ir_clear(lamp),
@@ -214,8 +210,8 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
         client_platform: Some(client_platform()),
         extra: Default::default(),
     };
-    let scores_count = updates_score(shared.run_plays_itself(), shared.replay.is_some(), custom_judge, scratch_auto, practice);
-    let block_reason = ir_submission_block_reason(shared.run_plays_itself(), shared.replay.is_some(), custom_judge, scratch_auto, practice);
+    let scores_count = updates_score(shared.run_plays_itself(), shared.replay.is_some(), custom_judge, practice);
+    let block_reason = ir_submission_block_reason(shared.run_plays_itself(), shared.replay.is_some(), practice);
 
     let played_ms = played_at;
     let mut replay_file: Option<String> = None;
@@ -266,7 +262,7 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
             assist,
             played_at_ms: played_ms,
             playtime_ms: crate::scoredb_store::playtime_ms(last_time_us),
-            ir_submitted: block_reason.is_none() && shared.has_primary_ir_server(),
+            ir_submitted: block_reason.is_none() && shared.sends_to_primary_ir_server(),
             replay_file: replay_file.clone(),
         };
         let log = crate::scoredb_store::play_log(&finished);
@@ -287,7 +283,7 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
             shared.ir_status = IrStatus::Off;
         }
         None => {
-            let chart = sub.chart.clone();
+            let chart = sub.chart.id.clone();
             let replay = recorded_replay.as_ref().and_then(|rp| shared.replay_upload_payload(rp, &chart, state.lntype));
             shared.spawn_profile_submits(&sub);
             if shared.multi_ir.legacy_index().is_some() {
@@ -305,7 +301,7 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
     }
     keep_run_record(shared, record);
     if shared.course_run.is_some() {
-        return advance_course(shared, &summary, standing_combo, block_reason, lamp);
+        return advance_course(shared, &summary, standing_combo, block_reason.or(course_assist_reason(scratch_auto, custom_judge)), lamp);
     }
     let paced_by = run_target(shared, &chart.md5, summary.total_notes, standing_best_ex);
     let target = TargetView { name: paced_by.name, ex: paced_by.ex };
@@ -315,13 +311,16 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
     Transition::To(Stage::Result(ResultState::new(view).paced_by(extras).cleared(lamp.is_cleared()).tempo(tempo).played(run)))
 }
 
-/// Whether SCRATCH AUTO played any of a run: it is on, and a lane it plays holds a note of `model`
-/// as the run had it. The reference raises the assist only where the modifier moved a note off a
-/// lane (`AutoplayModifier.modify`), so a chart with no turntable notes, and a mode with no
-/// turntable at all (9 keys), is played wholly by hand whatever the switch says, and such a run sets
-/// a best like any other.
-pub(crate) fn scratch_auto_played(scratch_auto: bool, model: &rbms_model::Model) -> bool {
-    scratch_auto && model.timelines.iter().any(|line| line.notes.iter().enumerate().any(|(lane, note)| note.is_some() && model.mode.is_scratch(lane)))
+/// Whether SCRATCH AUTO played any of a run: it took a note off a lane it plays, as the run had the
+/// chart laid out. The reference raises the assist only where the modifier moved a note off a lane
+/// (`AutoplayModifier.modify`), so a chart with no turntable notes, and a mode with no turntable at
+/// all (9 keys), is played wholly by hand whatever the switch says, and such a run is no assist.
+///
+/// A run it did play is recorded and sent like any other and sets bests like any other (the
+/// player's decision of 2026-10-14); the assist is what demotes its lamp to LIGHT ASSIST CLEAR, and
+/// what the history, the replay and the submission say of it.
+pub(crate) fn scratch_auto_played(session: &PlaySession) -> bool {
+    session.has_auto_played_notes()
 }
 
 /// Keep what the run that just ended left for a skin's result screen.
@@ -428,6 +427,21 @@ pub(crate) fn following_song(shared: &AppShared) -> Option<(usize, usize)> {
     })
 }
 
+/// Why a stage played with an assist keeps its course from the score server, or `None` for a stage
+/// played without one.
+///
+/// The stage itself is kept and sent like any chart ([`enter_result`]); the course is not, because
+/// a course submission states no assist (`rbms_ir::dto::CourseSubmission`), and a course with a
+/// SCRATCH AUTO stage, or one judged wider, would reach the course board as one played whole. It
+/// also sets no course best, the course result reading the same reasons, as before the player's
+/// decision of 2026-10-14, which named single charts.
+fn course_assist_reason(scratch_auto: bool, custom_judge: bool) -> Option<&'static str> {
+    if custom_judge {
+        return Some("judge window widened");
+    }
+    scratch_auto.then_some("scratch assist")
+}
+
 /// Fold the stage that just ended into the course and go wherever it says: the next stage, or the
 /// course result screen.
 fn advance_course(
@@ -473,7 +487,7 @@ fn finish_course(shared: &mut AppShared) -> Transition {
     }
     match crate::course_ir::course_block_reason(&reasons) {
         Some(reason) => println!("course not submitted: {reason}"),
-        None if shared.multi_ir.primary_server().is_none() => {}
+        None if !shared.sends_to_primary_ir_server() => {}
         None => {
             let sub = build_course_submission(run, &submission_player_id(&shared.session, &shared.config.network.player_id));
             let server = shared.course_ir_server();

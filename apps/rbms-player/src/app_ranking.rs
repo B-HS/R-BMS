@@ -11,9 +11,13 @@ use rbms_ir::{ChartId, PlayerId, ReplayData, ScoreSubmission, SubmitJob, spawn_q
 use crate::ir_ext::PrimaryProfileDirection;
 use crate::ir_outcome::{IrReport, IrStatus, format_submit_outcome, short_error};
 use crate::ir_ranking::{RankingFetch, RankingState, accept_fetch, fetch_board};
-use crate::ir_replay::{replay_download_is_applicable, to_ir_replay};
+use crate::ir_replay::{replay_download_is_applicable, to_ir_replay, wire_carries_judge};
 use crate::stage::StageId;
 use crate::*;
+
+/// Why a run was not sent to the main score server: nobody is signed in to it, and the server takes
+/// a score only from an account (a tokenless submission is refused 401). The run is kept locally.
+const NOT_SIGNED_IN: &str = "not logged in";
 
 impl AppShared {
     /// Chart id of the focused row, for the IR (only the md5 addresses a chart on the wire).
@@ -55,6 +59,17 @@ impl AppShared {
         self.multi_ir.primary_server().is_some()
     }
 
+    /// Whether a run or a course handed over now reaches the primary server. The legacy single
+    /// server takes nothing while nobody is signed in ([`AppShared::spawn_score_submit`]); an
+    /// `ir_profiles` entry carries its own token and is always sent to.
+    pub(crate) fn sends_to_primary_ir_server(&self) -> bool {
+        match self.multi_ir.primary_server() {
+            None => false,
+            Some(primary) if self.multi_ir.legacy_index() == Some(primary) => self.session.is_logged_in(),
+            Some(_) => true,
+        }
+    }
+
     pub(crate) fn primary_ir_profile(&self) -> Option<(String, usize, usize)> {
         self.multi_ir.primary_profile()
     }
@@ -85,7 +100,15 @@ impl AppShared {
 
     /// Hand a finished score submission to the IR worker, uploading the run's replay alongside it
     /// when AUTO UPLOAD REPLAY is on and the account can store one.
+    ///
+    /// Nothing is sent while nobody is signed in: the server would refuse it, and every run would end
+    /// on a failed submission. A player who has the server set and has not signed in -- which is
+    /// every new install, the server being set by default -- sees the run skipped for that reason.
     pub(crate) fn spawn_score_submit(&mut self, submission: ScoreSubmission, replay: Option<ReplayData>) {
+        if !self.session.is_logged_in() {
+            self.ir_status = IrStatus::Skipped(NOT_SIGNED_IN);
+            return;
+        }
         self.ir_status = IrStatus::Sending;
         self.submit_rx = Some(spawn_submit(self.server.clone(), SubmitJob { submission, replay }));
     }
@@ -101,9 +124,11 @@ impl AppShared {
     }
 
     /// The replay payload to upload with this run, or `None` when the setting is off, no replay was
-    /// recorded, or the client is a guest (the server rejects anonymous replay uploads).
+    /// recorded, the client is a guest (the server rejects anonymous replay uploads), or the run was
+    /// judged by widths the upload cannot state ([`wire_carries_judge`]), which would download as
+    /// another run.
     pub(crate) fn replay_upload_payload(&self, replay: &Replay, chart: &ChartId, lntype: i32) -> Option<ReplayData> {
-        if !self.config.network.auto_upload_replay || !self.session.is_logged_in() || replay.events.is_empty() {
+        if !self.config.network.auto_upload_replay || !self.session.is_logged_in() || replay.events.is_empty() || !wire_carries_judge(&replay.judge) {
             return None;
         }
         Some(to_ir_replay(replay, chart, self.config.play.constant_speed, lntype, self.build_sha256.clone()))
@@ -216,6 +241,22 @@ mod tests {
         let shared = shared(Config::default());
 
         assert!(!shared.has_primary_ir_server());
+    }
+
+    /// A player who has not signed in sends nothing to the main server, which would refuse it, and
+    /// the result says why rather than reporting a failure.
+    #[test]
+    fn a_guest_run_is_not_sent_to_the_main_server() {
+        let mut shared = shared(Config::default());
+        assert!(!shared.session.is_logged_in());
+        let submission = crate::ir_ext::tests::submission();
+        shared.spawn_score_submit(submission.clone(), None);
+        assert_eq!(shared.ir_status, IrStatus::Skipped(NOT_SIGNED_IN));
+        assert!(shared.submit_rx.is_none(), "a guest run was handed to the submit worker");
+
+        shared.session = crate::ir_session::AccountSession::restored(Some("token".into()), Some("dj".into()));
+        shared.spawn_score_submit(submission, None);
+        assert_eq!(shared.ir_status, IrStatus::Sending, "a signed-in run is sent");
     }
 
     #[test]

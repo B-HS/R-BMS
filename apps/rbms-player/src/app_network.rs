@@ -71,7 +71,8 @@ fn now_ms() -> i64 {
 
 impl AppShared {
     /// Swap in a server built from the current URL and the live session token, stopping the probe
-    /// thread of the previous one.
+    /// thread of the previous one. The song list shows the folders of whoever that server now knows
+    /// the player as ([`crate::user_folders::follow_account`]).
     pub(crate) fn rebuild_server(&mut self) {
         self.server_probe_stop.store(true, Ordering::Relaxed);
         let built = build_server(&self.config, self.session.token().map(str::to_string));
@@ -81,6 +82,7 @@ impl AppShared {
         self.multi_ir = MultiIr::from_network(&self.config.network);
         self.profile_servers = self.multi_ir.build_servers_reusing(Some(self.server.clone()));
         self.reset_ranking();
+        crate::user_folders::follow_account(self);
     }
 
     /// Label and value of a NETWORK row, or `None` when the row belongs to another tab.
@@ -155,14 +157,19 @@ impl AppShared {
     ///
     /// The player id goes back to [`GUEST_PLAYER_ID`] with it: a tokenless submission under the old
     /// account id is rejected 401 by the server, so leaving the id behind would silently drop every
-    /// score played after a logout.
+    /// score played after a logout. The account's own folders leave the song list, and the copy of
+    /// them is deleted: nothing of an account that signed out is kept on the machine.
     pub(crate) fn finish_logout(&mut self) {
+        let folders_of = crate::user_folders::FolderAccount::of(self);
         let had_session = self.session.logout();
         self.password.clear();
         self.config.network.player_id = GUEST_PLAYER_ID.to_string();
         self.sync_lock.apply(SyncOutcome::SignedOut);
         if had_session {
             self.rebuild_server();
+        }
+        if let Some(account) = folders_of {
+            crate::user_folders::forget_account(self, &account);
         }
         self.net_status = "logged out".to_string();
         self.save_settings();
@@ -257,12 +264,17 @@ impl AppShared {
     }
 
     /// Drain every background network reply. Called once per frame, before rendering.
+    ///
+    /// The first frame of a run signed in to a server confirms the session, and fetches the rivals
+    /// and the player's own folders, without saying anything of the folders unless they changed: a
+    /// server that does not answer is no news at the start of a run.
     pub(crate) fn poll_network(&mut self) {
         if self.startup_whoami {
             self.startup_whoami = false;
             if self.session.is_logged_in() && self.config.network.server_url.is_some() {
                 self.whoami_rx = Some(spawn_query(self.server.clone(), |server| server.whoami().map(|profile| profile.id)));
                 self.refresh_rivals();
+                crate::user_folders::start_fetch(self, false);
             }
         }
         self.poll_auth();
@@ -287,6 +299,7 @@ impl AppShared {
                         self.rebuild_server();
                     }
                     self.refresh_rivals();
+                    crate::user_folders::start_fetch(self, true);
                 }
                 self.net_status = self.session.status_text();
                 self.save_settings();

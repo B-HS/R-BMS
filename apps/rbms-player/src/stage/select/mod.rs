@@ -82,6 +82,8 @@ mod table_tests;
 mod target_tests;
 #[cfg(test)]
 pub(super) mod tests;
+#[cfg(test)]
+mod user_folder_tests;
 
 use filter::{FilterKey, FilterPanel, render_filter_panel};
 use guide::GUIDE_KEY;
@@ -873,13 +875,18 @@ impl SelectState {
         }
         match shared.select_view {
             SelectView::Root => return Transition::Quit,
-            SelectView::AllSongs | SelectView::TableLevels(_) => {
+            SelectView::AllSongs | SelectView::TableLevels(_) | SelectView::UserFolders => {
                 shared.select_view = SelectView::Root;
                 shared.sel = 0;
                 self.rebuild(shared);
             }
             SelectView::TableLevel(ti, _) => {
                 shared.select_view = SelectView::TableLevels(ti);
+                shared.sel = 0;
+                self.rebuild(shared);
+            }
+            SelectView::UserFolder(_) => {
+                shared.select_view = SelectView::UserFolders;
                 shared.sel = 0;
                 self.rebuild(shared);
             }
@@ -931,9 +938,10 @@ impl SelectState {
     /// so there is none for a skin's button to run. The option overlay's two keys and the key held
     /// for the detail panel are read where those are, not here.
     ///
-    /// The reload of the difficulty tables only starts here: the tables are fetched beside the
-    /// browser, which goes on being used, and what comes back is taken a frame at a time
-    /// ([`crate::tablesrc::apply_finished_fetches`]).
+    /// The reload of the difficulty tables only starts here, and with it a fetch of the player's
+    /// own folders when they are signed in: both are fetched beside the browser, which goes on being
+    /// used, and what comes back is taken a frame at a time ([`crate::tablesrc::apply_finished_fetches`],
+    /// [`crate::user_folders::apply_finished_fetch`]).
     fn run_shortcut(&mut self, shared: &mut AppShared, shortcut: Shortcut) -> Transition {
         let skinned = skin_status(shared) == SkinStatus::Ready;
         if shortcut.screen() != ShortcutScreen::Browser || (shortcut.group() == ShortcutGroup::SkinBrowser && !skinned) {
@@ -949,7 +957,10 @@ impl SelectState {
             Shortcut::Favourite | Shortcut::RefFavourite => shared.toggle_focused_favorite(),
             Shortcut::Records => self.open_record_modal(shared),
             Shortcut::Ranking => self.toggle_ranking_panel(shared),
-            Shortcut::ReloadTables => crate::tablesrc::reload_tables(shared, None),
+            Shortcut::ReloadTables => {
+                crate::tablesrc::reload_tables(shared, None);
+                crate::user_folders::start_fetch(shared, true);
+            }
             Shortcut::Settings if self.shift_held => {
                 self.tab = self.tab.next();
                 self.refresh_courses(shared);
@@ -1030,7 +1041,8 @@ impl StageHandler for SelectState {
     /// after the library has been read is where the tables that have no copy yet start being
     /// fetched ([`crate::tablesrc::start_first_fetches`]), and every frame takes what any fetch has
     /// come back with ([`crate::tablesrc::apply_finished_fetches`]): a table that arrives is a
-    /// folder from that frame, with the cursor left on the bar it was on.
+    /// folder from that frame, with the cursor left on the bar it was on. The player's own folders
+    /// land the same way ([`crate::user_folders::apply_finished_fetch`]).
     fn update(&mut self, ctx: &mut FrameCtx<'_>) -> Transition {
         let started = self.poll_replay_download(ctx.shared);
         if !matches!(started, Transition::Stay) {
@@ -1038,6 +1050,7 @@ impl StageHandler for SelectState {
         }
         crate::tablesrc::start_first_fetches(ctx.shared);
         crate::tablesrc::apply_finished_fetches(ctx.shared);
+        crate::user_folders::apply_finished_fetch(ctx.shared);
         let skin = skin_status(ctx.shared);
         if ctx.shared.skin_text_is_focused() {
             self.confirm_search(ctx.shared);

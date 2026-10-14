@@ -454,7 +454,9 @@ fn a_press_on_a_label_only_moves_the_cursor_and_the_right_button_steps_back() {
     screen.press(screen.on_the_label_of(SettingId::GuideSe), MouseButton::Right);
     assert_eq!(screen.app.shared.config.audio.guide_se, guide, "the right button did not turn the switch back");
     screen.focus(SettingId::GuideSe);
-    assert!(matches!(screen.key(KeyCode::Enter), Transition::Back), "Enter on a switch no longer goes back");
+    assert!(matches!(screen.key(KeyCode::Enter), Transition::Stay), "Enter on a switch left the screen");
+    assert_eq!(screen.app.shared.config.audio.guide_se, !guide, "Enter on a switch did not turn it over, as the skin and play menus do");
+    assert!(matches!(screen.key(KeyCode::Escape), Transition::Back), "Escape is the key that leaves");
 }
 
 /// The volumes of the AUDIO tab drawn for a person to look at, at the size the screen is laid out
@@ -582,6 +584,7 @@ fn the_hint_of_a_number_row_still_names_the_keys_to_the_other_screens() {
     }
     screen.focus(SettingId::GuideSe);
     let hint = screen.scene().hint;
-    assert!(hint.starts_with("LEFT RIGHT SWITCH   0 DEFAULT   ENTER SAVE AND CLOSE"), "the hint of a switch names other keys than it hears: {hint}");
+    assert!(hint.starts_with("LEFT RIGHT SWITCH   ENTER SWITCH   0 DEFAULT"), "the hint of a switch names other keys than it hears: {hint}");
+    assert!(hint.ends_with("ESC SAVE") && !hint.contains("SAVE AND CLOSE"), "the hint says Enter leaves: {hint}");
     assert!(!hint.contains("TYPE") && !hint.contains("DRAG"), "the hint of a switch names what sets a number: {hint}");
 }

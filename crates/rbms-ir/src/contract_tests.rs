@@ -4,6 +4,7 @@ use crate::mock_http::{TestServer, created, no_content, ok, response};
 use crate::{API_VERSION, IrError, ScoreServer};
 
 mod fixtures;
+mod folders;
 use fixtures::{chart, course_submission, player, submission};
 
 const TOKEN: &str = "tok-abc";

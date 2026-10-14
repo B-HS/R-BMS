@@ -161,6 +161,11 @@ impl SelectState {
                 let level = shared.table_levels.get(ti).and_then(|ls| ls.get(li)).map(|(l, _)| format!("LV {l}")).unwrap_or_default();
                 format!("{table} / {level}")
             }
+            SelectView::UserFolders => crate::user_folders::USER_FOLDERS_LABEL.to_string(),
+            SelectView::UserFolder(at) => {
+                let name = shared.user_folders.shown.get(at).map(|folder| folder.name.as_str()).unwrap_or_default();
+                format!("{} / {name}", crate::user_folders::USER_FOLDERS_LABEL)
+            }
         };
 
         let detail = match shared.select_items.get(shared.sel) {

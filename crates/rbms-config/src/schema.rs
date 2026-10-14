@@ -17,7 +17,18 @@ use crate::window::{WindowMode, WindowResolution};
 
 /// Schema version this build writes. A file without a `schema_version` field is
 /// [`LEGACY_SCHEMA_VERSION`] and is migrated on load.
-pub const CURRENT_SCHEMA_VERSION: u32 = 5;
+pub const CURRENT_SCHEMA_VERSION: u32 = 6;
+
+/// Last schema of a build that had no score server unless the player typed one in. Every build
+/// writes the whole configuration on each change, so a file of such a schema states
+/// `server_url: None` for every player who never touched the row: it says nothing about a choice.
+/// Reading such a file gives it [`DEFAULT_SERVER_URL`] once ([`Config::adopt_default_server`]);
+/// from the next schema on an empty row is the player's own choice to play offline, and is kept.
+pub const NO_DEFAULT_SERVER_SCHEMA_VERSION: u32 = 5;
+
+/// The score server a player is signed up to without typing an address: the R-BMS site, whose
+/// IR routes are under `/api`, which the client puts in front of every path.
+pub const DEFAULT_SERVER_URL: &str = "https://bms.hyuns.uk/api";
 
 /// Last schema whose JUDGE OFFSET was added to the instant an input was judged at: a positive
 /// offset judged every input that much later, for a player who presses early, and left the notes
@@ -406,6 +417,28 @@ pub struct Config {
     pub skin: SkinOptions,
 }
 
+impl Config {
+    /// What a player who has never run the player starts from: the shipped values, with the score
+    /// server set to [`DEFAULT_SERVER_URL`].
+    ///
+    /// [`Config::default`] has no server, because it is what every test, the blanking of an upload
+    /// and a file this build is too old to read start from, and none of those may reach the network.
+    pub fn first_run() -> Config {
+        let mut config = Config::default();
+        config.network.server_url = Some(DEFAULT_SERVER_URL.to_string());
+        config
+    }
+
+    /// Give a configuration read from a schema that had no server by default
+    /// ([`NO_DEFAULT_SERVER_SCHEMA_VERSION`]) the default one, when it names none. A server the file
+    /// names is kept, and a file of a later schema is left as it is.
+    pub fn adopt_default_server(&mut self, from_schema: u32) {
+        if from_schema <= NO_DEFAULT_SERVER_SCHEMA_VERSION && self.network.server_url.is_none() {
+            self.network.server_url = Some(DEFAULT_SERVER_URL.to_string());
+        }
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Config {
@@ -702,7 +735,8 @@ impl DisplayOptions {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct NetworkOptions {
-    /// IR score server base URL. `None` = offline.
+    /// IR score server base URL. `None` = offline, which from schema 6 on is a choice the player
+    /// made: a new install is given [`DEFAULT_SERVER_URL`] ([`Config::first_run`]).
     pub server_url: Option<String>,
     /// Player id submitted to the score server.
     pub player_id: String,
@@ -783,6 +817,9 @@ pub struct LibraryOptions {
     pub favorite_only: bool,
     /// User-added difficulty tables.
     pub tables: Vec<TableSource>,
+    /// The ids of the tables every player is given ([`crate::DEFAULT_TABLES`]) that this player
+    /// has been given already, whether or not they kept them: a table here is never given again.
+    pub seeded_default_tables: Vec<String>,
 }
 
 impl Default for LibraryOptions {
@@ -796,6 +833,7 @@ impl Default for LibraryOptions {
             sort: SortMode::default(),
             favorite_only: false,
             tables: Vec::new(),
+            seeded_default_tables: Vec::new(),
         }
     }
 }

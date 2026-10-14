@@ -96,10 +96,14 @@ fn holding_a_green_number() -> Config {
 }
 
 /// An app drawn by the default pack, on `config`.
-fn app_on_the_default_pack(tag: &str, mut config: Config) -> App {
+fn app_on_the_default_pack(tag: &str, config: Config) -> App {
+    app_on_the_pack(tag, config, &Path::new(env!("CARGO_MANIFEST_DIR")).join(DEFAULT_PACK_FOLDER))
+}
+
+/// An app drawn by the pack in `folder`, on `config`.
+fn app_on_the_pack(tag: &str, mut config: Config, folder: &Path) -> App {
     CLOCKS.set(Clocks::UNSTARTED);
     let settings = settings_of(&format!("play-{tag}"));
-    let folder = Path::new(env!("CARGO_MANIFEST_DIR")).join(DEFAULT_PACK_FOLDER);
     let pack = rbms_skin::resolve::plain_path(&folder.canonicalize().unwrap_or_else(|error| panic!("{} cannot be resolved: {error}", folder.display())));
     config.skin.pack = Some(pack.to_string_lossy().into_owned());
     let mut app = app_in(settings.clone(), config);
@@ -356,4 +360,65 @@ fn the_default_pack_names_the_target_a_run_is_really_paced_against() {
     assert_eq!((paced.used, paced.name.as_str()), (rbms_config::ScoreTarget::RateAaa, "RATE AAA"), "the fallback is the one the player did not choose");
     assert_eq!(paced.ex, crate::target::band_target_ex(total, 24));
     save("target-play-no-record", &pixels, size);
+}
+
+/// Names a skin pack the SCRATCH AUTO frame is also drawn by, as it does for the other screens.
+const SKIN_PACK_ENV: &str = "RBMS_SKIN_PACK";
+
+/// The scratch lane of seven keys.
+const TURNTABLE_LANE: usize = 7;
+
+/// [`stairs`] at `bpm` with the sixth and seventh keys, which make it a seven-key chart, notes on
+/// the turntable between the stairs and a long note on it every fourth measure.
+fn stairs_with_a_turntable(bpm: u32) -> String {
+    let mut chart = stairs(bpm).replace("#TITLE Held At", "#TITLE Scratch Auto At");
+    for measure in 1..=MEASURES {
+        let turntable = if measure % 4 == 0 { ("56", "0100000000000001") } else { ("16", "0000010000000100") };
+        chart.push_str(&format!("#{measure:03}{}:{}\n#{measure:03}18:0000000100000000\n#{measure:03}19:0000000000000001\n", turntable.0, turntable.1));
+    }
+    chart
+}
+
+/// The SCRATCH AUTO run of [`stairs_with_a_turntable`] at `bpm`, set up as the load path sets it up:
+/// the keys played by the game and the turntable left to the chart.
+fn scratch_auto_run(bpm: u32) -> PlayState {
+    let src = rbms_parser::parse_with(stairs_with_a_turntable(bpm).as_bytes(), Default::default());
+    let model = rbms_chart::to_model(&src, rbms_chart::detect_mode(&src, "turntable.bms"));
+    let mode = model.mode;
+    let auto_lanes = (0..mode.key).map(|lane| mode.is_scratch(lane)).collect();
+    let session = PlaySession::new(model, SessionOptions { autoplay: true, auto_lanes, ..SessionOptions::default() });
+    PlayState::new(session, std::collections::HashMap::new(), 0, SCORE_LN_MODE_FROM_CHART.to_string())
+}
+
+/// Whether a pixel is the green a note of a lane the chart plays by itself is drawn in.
+fn is_auto_lane_green(rgba: &[u8]) -> bool {
+    let green = rbms_render::skin_render::frame::AUTO_LANE_NOTE;
+    rgba[..3] == [green.r, green.g, green.b]
+}
+
+/// The turntable SCRATCH AUTO plays is drawn in green on the default pack, and on the pack
+/// [`SKIN_PACK_ENV`] names when it names one, while the run counts the key notes alone. Saved as
+/// `scratch-auto-play-<pack folder>.png`.
+#[test]
+fn the_turntable_scratch_auto_plays_is_drawn_green_and_counts_for_nothing() {
+    let mut config = holding_a_green_number();
+    config.play.scratch_auto = true;
+    let default_pack = Path::new(env!("CARGO_MANIFEST_DIR")).join(DEFAULT_PACK_FOLDER);
+    let mut packs = vec![default_pack];
+    packs.extend(std::env::var_os(SKIN_PACK_ENV).map(std::path::PathBuf::from));
+    for folder in packs {
+        let name = folder.file_name().map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+        let mut app = app_on_the_pack(&format!("scratch-auto-{name}"), config.clone(), &folder);
+        let size = frame_size(&app);
+        let mut pixels = HeadlessCanvas::new(size.0, size.1);
+        play_into(&mut app, &mut pixels, scratch_auto_run(SLOW_BPM));
+        let session = &play(&app).session;
+        assert!(session.has_auto_played_notes(), "{name}: the turntable was not left to the chart");
+        assert!(session.field_timelines().iter().any(|line| line.notes[TURNTABLE_LANE].is_some()), "{name}: the field lost the turntable");
+        assert!(session.model().timelines.iter().all(|line| line.notes[TURNTABLE_LANE].is_none()), "{name}: the run judges the turntable");
+        assert_eq!(session.judge().combo, session.judge().total_judged(), "{name}: the run played its key notes whole");
+        let green = pixels.rgba().chunks_exact(4).filter(|pixel| is_auto_lane_green(pixel)).count();
+        assert!(green > 0, "{name}: no turntable note was drawn green");
+        save(&format!("scratch-auto-play-{name}"), &pixels, size);
+    }
 }

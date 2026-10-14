@@ -238,3 +238,33 @@ fn an_answer_that_ends_in_time_is_read_whole_and_one_too_large_is_refused() {
         "an answer that never ends but arrives at once is refused for its size"
     );
 }
+
+/// The copy of the 発狂BMS難易度表 the R-BMS site serves, as it is served: the page is registered
+/// without a closing slash, and the address with one is redirected (308) to it. The page names its
+/// header from the root of the site, because a relative name would be read against two different
+/// folders depending on the slash; the header names its body by its whole address.
+#[test]
+fn the_sites_copy_of_the_insane_table_is_reached_from_either_address() {
+    const SITE_PAGE: &str = "https://bms.hyuns.uk/tables/insane1";
+    const SITE_PAGE_WITH_SLASH: &str = "https://bms.hyuns.uk/tables/insane1/";
+    const SITE_HEADER: &str = "https://bms.hyuns.uk/tables/insane1/header.json";
+    const SITE_BODY: &str = "https://bms.hyuns.uk/tables/insane1/data.json";
+    let snapshot_body = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../web/data/tables/insane1/data.json"));
+    let snapshot_header = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../web/data/tables/insane1/header.json"));
+    let served_header = snapshot_header.replace("\"data.json\"", &format!("\"{SITE_BODY}\""));
+    let page = PAGE.replace("content=\"header.json\"", "content=\"/tables/insane1/header.json\"");
+    let site = || Site::default().serving(SITE_PAGE, &page).serving(SITE_HEADER, &served_header).serving(SITE_BODY, snapshot_body);
+
+    for address in [SITE_PAGE, SITE_PAGE_WITH_SLASH] {
+        let mut served = site().redirecting(SITE_PAGE_WITH_SLASH, SITE_PAGE);
+        let table = served.fetch(address).unwrap_or_else(|error| panic!("{address} is the table: {error}"));
+        assert_eq!(table.entries.len(), 1_035);
+        assert_eq!(table.level_order.len(), 26);
+        assert_eq!(table.skipped, 0);
+        assert_eq!(served.asked, vec![address, SITE_HEADER, SITE_BODY], "the header is found from the root, whichever page answered");
+    }
+
+    let mut as_snapshot = Site::default().serving(SITE_PAGE, &page).serving(SITE_HEADER, snapshot_header).serving(SITE_BODY, snapshot_body);
+    assert_eq!(as_snapshot.fetch(SITE_PAGE).expect("the header's own relative body").entries.len(), 1_035);
+    assert_eq!(as_snapshot.asked, vec![SITE_PAGE, SITE_HEADER, SITE_BODY], "a relative body is read beside the header");
+}

@@ -1,9 +1,10 @@
 //! Course submissions to the score server: building the submission from a finished run and folding
 //! the per-stage block reasons into one course-level verdict.
 //!
-//! A course reaches the IR under the same rule a single chart does — only a real interactive play
-//! qualifies — except that the rule is applied to every stage at once: one assisted or autoplayed
-//! stage keeps the whole course out (`MusicResult.java:82`, applied per stage). A course whose file
+//! A course reaches the IR only when every stage was a real interactive play with no assist: one
+//! assisted or autoplayed stage keeps the whole course out (`MusicResult.java:82`, applied per
+//! stage). A stage played with an assist is still sent as a chart like any other; the course is
+//! not, because the course submission has no field to say a stage had one. A course whose file
 //! marks it as not for release is kept out as well (`CourseResult.java:96`).
 //!
 //! Nothing here implements a server trait: [`rbms_ir`] is the network branch's, and this module only

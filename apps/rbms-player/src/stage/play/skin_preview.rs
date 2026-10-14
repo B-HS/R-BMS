@@ -685,7 +685,7 @@ impl PlaySample {
         let (constant, legacy_note) = (config.play.constant_speed, config.play.legacy_note);
         let wanted = (constant || legacy_note).then_some((constant, legacy_note));
         if self.field.as_ref().map(FieldChart::settings) != wanted {
-            self.field = FieldChart::of(&self.session.model().timelines, constant, legacy_note);
+            self.field = FieldChart::of(self.session.field_timelines(), constant, legacy_note);
         }
     }
 
@@ -770,7 +770,7 @@ impl PlaySample {
             hidden_cover: field.map(|field| field.hidden),
         });
         let model = self.session.model();
-        let shown_chart = self.field.as_ref().map_or(model.timelines.as_slice(), FieldChart::timelines);
+        let shown_chart = self.field.as_ref().map_or(self.session.field_timelines(), FieldChart::timelines);
         let opening_bpm = self.field.as_ref().and_then(FieldChart::tempo).map_or(model.init_bpm, |(bpm, _)| bpm);
         let notes = LaneNotes {
             hispeed,
@@ -780,6 +780,7 @@ impl PlaySample {
             ln_mode: self.session.ln_mode().resolve(),
             states: self.feed.trace(),
             longs: self.feed.longs(),
+            auto_lanes: self.session.auto_lanes(),
             ..LaneNotes::new(shown_chart, chart_us, opening_bpm)
         };
         let overview = self.feed.overview();

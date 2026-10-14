@@ -297,4 +297,4 @@ fn first_problem(entry: &ProfileResult<SubmitResponse>) -> Option<(&str, String)
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

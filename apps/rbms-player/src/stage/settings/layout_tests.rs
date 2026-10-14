@@ -525,10 +525,14 @@ fn the_line_of_keys_says_what_the_row_under_the_cursor_hears() {
                 assert_eq!(enter, Some("CHOOSE A FILE"));
                 continue;
             }
+            if id == SettingId::SoundFolder {
+                assert!(keys.contains(&("ENTER RIGHT", "CHOOSE A FOLDER")), "{keys:?}");
+                continue;
+            }
             let before = value_of(&screen, id);
             let asked = screen.key(KeyCode::Enter);
             match enter {
-                Some("SAVE AND CLOSE") => assert!(matches!(asked, Transition::Back), "{id:?}"),
+                Some("NEXT") => assert!(matches!(asked, Transition::Stay) && (value_of(&screen, id) != before || id == SettingId::AudioDevice), "{id:?}"),
                 Some("TYPE") => assert!(matches!(asked, Transition::Stay) && screen.scene().typed.is_some(), "{id:?}"),
                 Some("EDIT") => assert!(matches!(asked, Transition::Stay) && screen.state.text_edit_row == Some(id), "{id:?}"),
                 Some("SWITCH") => assert!(matches!(asked, Transition::Stay) && value_of(&screen, id) != before, "{id:?}"),

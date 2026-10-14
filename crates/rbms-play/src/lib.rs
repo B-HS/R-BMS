@@ -62,10 +62,65 @@ pub const JUDGE_WIDTH_TIER_COUNT: usize = 3;
 /// JUDGE WIDTH rates leaving all three widenable tiers at their stock width.
 pub const UNMODIFIED_JUDGE_RATES: [i32; JUDGE_WIDTH_TIER_COUNT] = [UNMODIFIED_RATE_PERCENT; JUDGE_WIDTH_TIER_COUNT];
 
-fn collect_bg(model: &Model) -> Vec<(i64, i32)> {
-    let mut v: Vec<(i64, i32)> = model.timelines.iter().flat_map(|tl| tl.bgnotes.iter().map(|n| (n.time_us, n.wav))).collect();
+/// Every sound the chart plays by itself, time-sorted: its accompaniment on the BGM bus, and the
+/// keysound of each note head of an auto-played lane ([`AutoLanes`]) on the key bus, where a note
+/// the player hit would have sounded.
+fn collect_bg(model: &Model, auto_heads: &[(i64, i32)]) -> Vec<(i64, i32, PlaySource)> {
+    let accompaniment = model.timelines.iter().flat_map(|tl| tl.bgnotes.iter().map(|n| (n.time_us, n.wav, PlaySource::Bgm)));
+    let mut v: Vec<(i64, i32, PlaySource)> = accompaniment.chain(auto_heads.iter().map(|(at, wav)| (*at, *wav, PlaySource::Key))).collect();
     v.sort_by_key(|e| e.0);
     v
+}
+
+/// What a run keeps of the lanes it leaves to play themselves (SCRATCH AUTO).
+///
+/// Their notes are not part of the chart the run judges: no judgement, combo, gauge, score or note
+/// count ever sees them, as though the chart had none there. That is the reference's own treatment
+/// (`AutoplayModifier.modify` moves them to the background with `PatternModifier.moveToBackground`).
+/// Unlike the reference they are still drawn, from the chart kept here, and their keysounds are
+/// still heard when they come by, on the key bus where a hit note sounds. Their mines are dropped
+/// from both, as the reference drops them: nothing can step on them.
+struct AutoLanes {
+    /// The chart as the field draws it: every note of every lane, but the auto lanes' mines.
+    field: Model,
+    /// `(time, wav)` of each note head of the auto lanes, which sounds by itself.
+    heads: Vec<(i64, i32)>,
+}
+
+/// Take the notes of `lanes` off `model`, answering the chart left to judge and, when any note was
+/// taken, what is kept of them. A mask of the wrong length, or one that names no lane holding a
+/// note, takes nothing.
+fn take_auto_lanes(model: Model, lanes: &[bool]) -> (Model, Option<AutoLanes>) {
+    let auto = |lane: usize| lanes.get(lane).copied().unwrap_or(false);
+    let holds_a_note = model.timelines.iter().any(|tl| tl.notes.iter().enumerate().any(|(lane, note)| auto(lane) && note.is_some()));
+    if lanes.len() != model.mode.key || !holds_a_note {
+        return (model, None);
+    }
+    let heads = collect_actions(&model)
+        .into_iter()
+        .filter(|(_, lane, _)| auto(*lane))
+        .filter_map(|(at, _, action)| match action {
+            AutoAction::Press { wav, .. } => Some((at, wav)),
+            AutoAction::Release => None,
+        })
+        .collect();
+    let mut field = model;
+    for tl in &mut field.timelines {
+        for (lane, slot) in tl.notes.iter_mut().enumerate() {
+            if auto(lane) && slot.as_ref().is_some_and(|note| matches!(note.kind, NoteKind::Mine { .. })) {
+                *slot = None;
+            }
+        }
+    }
+    let mut judged = field.clone();
+    for tl in &mut judged.timelines {
+        for (lane, slot) in tl.notes.iter_mut().enumerate() {
+            if auto(lane) {
+                *slot = None;
+            }
+        }
+    }
+    (judged, Some(AutoLanes { field, heads }))
 }
 
 /// `(head_time, lane, wav)` for every judgeable note head (Normal + LN start). Used for
@@ -139,14 +194,18 @@ pub fn simulate_autoplay(model: &Model) -> JudgeEngine {
 pub struct Player {
     model: Model,
     judge: JudgeEngine,
-    bg: Vec<(i64, i32)>,
+    bg: Vec<(i64, i32, PlaySource)>,
     bg_cursor: usize,
     heads: Vec<(i64, usize, i32)>,
     actions: Vec<(i64, usize, AutoAction)>,
     action_cursor: usize,
     judge_cursor: usize,
     autoplay: bool,
+    /// The lanes the chart plays by itself, whose input is ignored. Empty of `true` when there are
+    /// none.
     auto_lanes: Vec<bool>,
+    /// What was taken off those lanes, when they held a note.
+    auto: Option<AutoLanes>,
     beam_on: Vec<i64>,
     beam_off: Vec<i64>,
     ln_active: Vec<bool>,
@@ -159,13 +218,22 @@ pub struct Player {
 
 impl Player {
     pub fn new(model: Model, autoplay: bool) -> Self {
+        Player::with_auto_lanes(model, autoplay, &[])
+    }
+
+    /// A player that leaves the lanes `auto_lanes` marks to the chart (SCRATCH AUTO): their notes
+    /// are taken off the chart it judges and kept only to be drawn and heard ([`AutoLanes`]), and
+    /// the player's input on them is ignored, so a press there is not even an empty POOR. A mask
+    /// whose length is not the mode's lane count leaves every lane to the player.
+    pub fn with_auto_lanes(model: Model, autoplay: bool, auto_lanes: &[bool]) -> Self {
+        let lanes = model.mode.key;
+        let auto_lanes = if auto_lanes.len() == lanes { auto_lanes.to_vec() } else { vec![false; lanes] };
+        let (model, auto) = take_auto_lanes(model, &auto_lanes);
         let mut judge = JudgeEngine::from_model_for_mode(&model);
         apply_window_set(&mut judge, &model, UNMODIFIED_JUDGE_RATES, UNMODIFIED_JUDGE_RATES);
-        let bg = collect_bg(&model);
+        let bg = collect_bg(&model, auto.as_ref().map_or(&[][..], |auto| auto.heads.as_slice()));
         let heads = collect_note_heads(&model);
         let actions = collect_actions(&model);
-        let lanes = model.mode.key;
-        let auto_lanes = vec![false; lanes];
         Player {
             model,
             judge,
@@ -177,6 +245,7 @@ impl Player {
             judge_cursor: 0,
             autoplay,
             auto_lanes,
+            auto,
             beam_on: vec![i64::MIN; lanes],
             beam_off: vec![i64::MIN; lanes],
             ln_active: vec![false; lanes],
@@ -293,16 +362,26 @@ impl Player {
         &self.bomb
     }
 
+    /// The chart as this run judges it: without the notes of the lanes it plays by itself.
     pub fn model(&self) -> &Model {
         &self.model
     }
 
-    /// Mark lanes (e.g. an auto-scratch lane) as auto-played: their notes are hit from
-    /// the chart even in interactive mode, and key input on them is ignored.
-    pub fn set_auto_lanes(&mut self, auto: Vec<bool>) {
-        if auto.len() == self.auto_lanes.len() {
-            self.auto_lanes = auto;
-        }
+    /// The chart as the field draws it: [`Player::model`] with the notes of the lanes the run plays
+    /// by itself put back.
+    pub fn field_model(&self) -> &Model {
+        self.auto.as_ref().map_or(&self.model, |auto| &auto.field)
+    }
+
+    /// Which lanes the chart plays by itself, in lane order.
+    pub fn auto_lanes(&self) -> &[bool] {
+        &self.auto_lanes
+    }
+
+    /// Whether any note was taken off the chart for a lane that plays by itself, which is what makes
+    /// the run an assisted one (`AutoplayModifier.modify` raises the assist only then).
+    pub fn has_auto_played_notes(&self) -> bool {
+        self.auto.is_some()
     }
 
     /// Select the gauge the player chose. It is also the ceiling the SELECT TO UNDER auto-shift
@@ -339,13 +418,13 @@ impl Player {
     /// bookkeeping and no miss sweep, so running it ahead of the judge axis cannot shift judgments.
     pub fn update_schedule<F: FnMut(PlayEvent)>(&mut self, sched_us: i64, mut play: F) {
         while self.bg_cursor < self.bg.len() && self.bg[self.bg_cursor].0 <= sched_us {
-            let (at, wav) = self.bg[self.bg_cursor];
-            play(PlayEvent { wav, at_us: at, source: PlaySource::Bgm });
+            let (at, wav, source) = self.bg[self.bg_cursor];
+            play(PlayEvent { wav, at_us: at, source });
             self.bg_cursor += 1;
         }
         while self.action_cursor < self.actions.len() && self.actions[self.action_cursor].0 <= sched_us {
-            let (at, lane, ref kind) = self.actions[self.action_cursor];
-            if (self.autoplay || self.auto_lanes.get(lane).copied().unwrap_or(false))
+            let (at, _, ref kind) = self.actions[self.action_cursor];
+            if self.autoplay
                 && let AutoAction::Press { wav, .. } = kind
             {
                 play(PlayEvent { wav: *wav, at_us: at, source: PlaySource::Key });
@@ -360,7 +439,7 @@ impl Player {
     pub fn update_judge(&mut self, audible_us: i64) {
         while self.judge_cursor < self.actions.len() && self.actions[self.judge_cursor].0 <= audible_us {
             let (at, lane, ref kind) = self.actions[self.judge_cursor];
-            if self.autoplay || self.auto_lanes.get(lane).copied().unwrap_or(false) {
+            if self.autoplay {
                 match kind {
                     AutoAction::Press { ln, .. } => {
                         if let Some(jr) = self.judge.press(lane, at)
@@ -389,8 +468,7 @@ impl Player {
             self.judge_cursor += 1;
         }
         for lane in 0..self.beam_on.len() {
-            let auto = self.autoplay || self.auto_lanes[lane];
-            if auto && self.beam_on[lane] != i64::MIN && !self.ln_active[lane] && audible_us - self.beam_on[lane] >= AUTO_BEAM_US {
+            if self.autoplay && self.beam_on[lane] != i64::MIN && !self.ln_active[lane] && audible_us - self.beam_on[lane] >= AUTO_BEAM_US {
                 self.beam_off[lane] = self.beam_on[lane] + AUTO_BEAM_US;
                 self.beam_on[lane] = i64::MIN;
             }
@@ -425,7 +503,9 @@ impl Player {
 
     /// Press a lane from one physical direction. On a scratch lane the two directions are two keys,
     /// and spinning the other way ends a charge note the lane is holding
-    /// (`JudgeManager.java:358-372`); a key lane only ever presses forwards.
+    /// (`JudgeManager.java:358-372`); a key lane only ever presses forwards. A press on a lane the
+    /// chart plays by itself is ignored: no beam, no keysound and no judgement, not even an empty
+    /// POOR.
     pub fn press_dir<F: FnMut(PlayEvent)>(&mut self, lane: usize, dir: ScratchDir, now_us: i64, mut play: F) -> Option<JudgeResult> {
         if self.auto_lanes.get(lane).copied().unwrap_or(false) {
             return None;
@@ -452,8 +532,8 @@ impl Player {
     }
 
     /// Release a lane from one physical direction. An auto-played lane drops the input exactly as
-    /// [`press_dir`](Self::press_dir) does: the chart is holding its long notes, and letting a stray
-    /// key-up through would break one the player never grabbed.
+    /// [`press_dir`](Self::press_dir) does: the lane is the chart's, and nothing the player does on
+    /// it is judged.
     pub fn release_dir(&mut self, lane: usize, dir: ScratchDir, now_us: i64) -> Option<JudgeResult> {
         if self.auto_lanes.get(lane).copied().unwrap_or(false) {
             return None;
@@ -529,15 +609,49 @@ mod tests {
         assert_eq!(p.judge().counts[0], n as u32);
     }
 
+    /// The turntable lane of a 7-key chart, as an auto-lane mask.
+    fn scratch_only() -> Vec<bool> {
+        (0..8).map(|l| l == 7).collect()
+    }
+
     #[test]
-    fn auto_lane_judged_without_input() {
-        let m = model(b"#BPM 120\r\n#WAV01 a.wav\r\n#00116:01\r\n");
-        let mut p = Player::new(m, false);
-        p.set_auto_lanes((0..8).map(|l| l == 7).collect());
-        let last = p.last_time_us();
-        p.update(last + 1_000_000, |_| {});
-        assert_eq!(p.judge().counts[0], 1, "scratch lane auto-judged as PGREAT");
-        assert!(p.press(7, last, |_| {}).is_none(), "input on auto lane is ignored");
+    fn an_auto_lane_is_neither_judged_nor_counted_but_still_sounds_on_time() {
+        let m = model(b"#BPM 120\r\n#WAV01 a.wav\r\n#WAV02 b.wav\r\n#00116:02\r\n");
+        let nt = m.timelines.iter().find_map(|t| t.notes[7].as_ref()).map(|n| n.time_us).unwrap();
+        let mut p = Player::with_auto_lanes(m, false, &scratch_only());
+        assert_eq!(p.judge().total_notes(), 0, "the turntable note is not in the chart the run judges");
+        let mut events = Vec::new();
+        p.update(nt + 1_000_000, |e| events.push(e));
+        assert_eq!(p.judge().counts, [0; 6], "nothing was judged, not even a miss");
+        assert_eq!(p.judge().total_judged(), 0);
+        assert_eq!(events, vec![PlayEvent { wav: 2, at_us: nt, source: PlaySource::Key }], "its keysound sounds by itself at its own time");
+        assert!(p.press(7, nt, |_| {}).is_none(), "input on auto lane is ignored");
+        assert_eq!(p.judge().empty_poor, 0, "and is not an empty POOR either");
+    }
+
+    /// The chart the run judges and the one the field draws differ by the auto lane's notes and
+    /// nothing else; its mines are in neither.
+    #[test]
+    fn the_field_keeps_the_auto_lanes_notes_and_drops_their_mines() {
+        let m = model(b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:01\r\n#00216:01\r\n#001D6:0001\r\n#00156:01000001\r\n");
+        let p = Player::with_auto_lanes(m, false, &scratch_only());
+        assert!(p.has_auto_played_notes());
+        let on_lane = |model: &Model, lane: usize| model.timelines.iter().filter_map(|t| t.notes[lane].as_ref()).map(|n| n.kind.clone()).collect::<Vec<_>>();
+        assert!(on_lane(p.model(), 7).is_empty(), "the judged chart holds nothing on the turntable");
+        let drawn = on_lane(p.field_model(), 7);
+        assert_eq!(drawn.len(), 3, "the field still draws the note and both ends of the long note: {drawn:?}");
+        assert!(!drawn.iter().any(|kind| matches!(kind, NoteKind::Mine { .. })), "the mine is dropped");
+        assert_eq!(on_lane(p.model(), 0), on_lane(p.field_model(), 0), "a key lane is the same in both");
+    }
+
+    #[test]
+    fn an_auto_lane_long_note_sounds_its_head_once_and_is_not_judged() {
+        let m = model(b"#BPM 120\r\n#WAV01 a.wav\r\n#00156:01000001\r\n");
+        let mut p = Player::with_auto_lanes(m, false, &scratch_only());
+        let mut events = Vec::new();
+        p.update(p.last_time_us() + 1_000_000, |e| events.push(e));
+        assert_eq!(events.len(), 1, "one head keysound, as an autoplayed long note gives");
+        assert_eq!(p.judge().total_judged(), 0);
     }
 
     #[test]
@@ -781,16 +895,16 @@ mod tests {
     }
 
     #[test]
-    fn auto_lane_ignores_input_on_that_lane_but_judges_from_chart() {
+    fn auto_lane_ignores_input_on_that_lane() {
         let m = model(b"#BPM 120\r\n#WAV01 a.wav\r\n#00116:01\r\n");
         let nt = m.timelines.iter().find_map(|t| t.notes[7].as_ref()).map(|n| n.time_us).unwrap();
-        let mut p = Player::new(m, false);
-        p.set_auto_lanes((0..8).map(|l| l == 7).collect());
-        assert!(p.press(7, nt, |_| {}).is_none(), "press on an auto lane returns None");
+        let mut p = Player::with_auto_lanes(m, false, &scratch_only());
+        let mut sounded = Vec::new();
+        assert!(p.press(7, nt, |e| sounded.push(e)).is_none(), "press on an auto lane returns None");
         assert!(p.release(7, nt).is_none(), "release on an auto lane returns None");
-        assert_eq!(p.judge().counts[0], 0, "input did not score it early");
+        assert!(sounded.is_empty(), "a press there sounds nothing: the note sounds by itself");
         p.update(nt + 1_000_000, |_| {});
-        assert_eq!(p.judge().counts[0], 1, "the chart auto-judged it as PGREAT");
+        assert_eq!(p.judge().counts, [0; 6], "and nothing is judged afterwards");
     }
 
     /// Resolving LN MODE in the model rather than in the engine is what keeps the chart's own note
@@ -820,65 +934,41 @@ mod tests {
     }
 
     #[test]
-    fn a_stray_release_on_an_auto_lane_cannot_break_the_long_note_it_is_holding() {
-        let chart = b"#BPM 120\r\n#WAV01 a.wav\r\n#00156:01000001\r\n";
-        let run = |stray_release: bool| {
-            let m = model(chart);
-            let times: Vec<i64> = m.timelines.iter().flat_map(|t| t.notes[7].as_ref()).map(|n| n.time_us).collect();
-            let (head, end) = (times[0], times[1]);
-            let mut p = Player::new(m, false);
-            p.set_auto_lanes((0..8).map(|l| l == 7).collect());
-            p.update(head, |_| {});
-            if stray_release {
-                p.release(7, (head + end) / 2);
-            }
-            p.update(end + 1_000_000, |_| {});
-            (p.judge().counts, p.judge().ex_score)
-        };
-        assert_eq!(run(true), run(false), "an auto-played lane holds its own long note, so a key-up on it is not the player's");
-        assert_eq!(run(false).0[0], 1, "the chart took the long note as a PGREAT");
-    }
-
-    #[test]
     fn auto_lane_press_does_not_light_beam() {
         let m = model(b"#BPM 120\r\n#WAV01 a.wav\r\n#00116:01\r\n");
-        let mut p = Player::new(m, false);
-        p.set_auto_lanes((0..8).map(|l| l == 7).collect());
+        let mut p = Player::with_auto_lanes(m, false, &scratch_only());
         p.press(7, 500_000, |_| {});
         assert_eq!(p.beam_on()[7], i64::MIN, "ignored auto-lane press leaves the beam off");
     }
 
     #[test]
-    fn non_auto_lane_in_interactive_is_not_auto_judged() {
+    fn a_key_lane_beside_an_auto_lane_is_still_the_players() {
         let m = model(b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:01\r\n#00116:01\r\n");
-        let mut p = Player::new(m, false);
-        p.set_auto_lanes((0..8).map(|l| l == 7).collect());
+        let mut p = Player::with_auto_lanes(m, false, &scratch_only());
+        assert_eq!(p.judge().total_notes(), 1, "only the key note is counted");
         let last = p.last_time_us();
         p.update(last + 1_000_000, |_| {});
-        assert_eq!(p.judge().counts[0], 1, "only the auto lane scored");
+        assert_eq!(p.judge().counts[0], 0, "nothing was played for the player");
         assert_eq!(p.judge.counts[4], 1, "the interactive lane's unpressed note became a 見逃し POOR");
     }
 
     #[test]
-    fn set_auto_lanes_wrong_length_is_a_noop() {
+    fn an_auto_lane_mask_of_the_wrong_length_leaves_every_lane_to_the_player() {
         let m = model(b"#BPM 120\r\n#WAV01 a.wav\r\n#00116:01\r\n");
         let nt = m.timelines.iter().find_map(|t| t.notes[7].as_ref()).map(|n| n.time_us).unwrap();
-        let mut p = Player::new(m, false);
-        p.set_auto_lanes(vec![true; 3]);
-        p.update(nt - 1_000, |_| {});
-        assert_eq!(p.judge().counts[0], 0, "no lane became auto, so nothing was auto-judged");
+        let mut p = Player::with_auto_lanes(m, false, &[true; 3]);
+        assert!(!p.has_auto_played_notes());
+        assert_eq!(p.judge().total_notes(), 1, "the turntable note is still judged");
         assert!(p.press(7, nt, |_| {}).is_some(), "lane 7 input is honored when the guard rejected the vector");
     }
 
     #[test]
-    fn set_auto_lanes_exact_length_is_applied() {
-        let m = model(b"#BPM 120\r\n#WAV01 a.wav\r\n#00116:01\r\n");
-        let mut p = Player::new(m, false);
-        p.set_auto_lanes(vec![false; 8]);
-        p.set_auto_lanes((0..8).map(|l| l == 7).collect());
-        let last = p.last_time_us();
-        p.update(last + 1_000_000, |_| {});
-        assert_eq!(p.judge().counts[0], 1, "exact-length auto vector took effect");
+    fn an_auto_lane_with_no_note_takes_nothing_off_but_still_ignores_input() {
+        let m = model(b"#BPM 120\r\n#WAV01 a.wav\r\n#00111:01\r\n");
+        let mut p = Player::with_auto_lanes(m, false, &scratch_only());
+        assert!(!p.has_auto_played_notes(), "a chart with no turntable note has nothing played for the player");
+        assert!(p.press(7, 500_000, |_| {}).is_none(), "the lane is still not the player's");
+        assert_eq!(p.judge().empty_poor, 0);
     }
 
     #[test]

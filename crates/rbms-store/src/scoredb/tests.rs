@@ -215,6 +215,50 @@ fn an_assisted_run_from_an_older_rule_generation_cannot_raise_the_lamp() {
     assert_eq!(best.playcount, 2, "the play still counted");
 }
 
+/// A SCRATCH AUTO run counts no turntable note, so its EX is out of fewer notes than a run of the
+/// whole chart: the best row keeps the note count of the run whose EX it keeps.
+#[test]
+fn the_best_note_count_goes_with_the_ex_it_keeps() {
+    let mut db = fresh();
+    let mut whole = play("aa", 10, 300);
+    whole.notes = 500;
+    db.record_play(&whole, true).expect("a run of the whole chart");
+    let mut fewer = play("aa", 20, 200);
+    fewer.notes = 450;
+    db.record_play(&fewer, true).expect("a worse SCRATCH AUTO run");
+    let best = db.best("aa", mode_id("BEAT_7K")).expect("queried").expect("exists");
+    assert_eq!((best.ex_score(), best.notes), (600, 500), "the worse run left the notes with the EX they belong to");
+    let mut better = play("aa", 30, 440);
+    better.notes = 450;
+    db.record_play(&better, true).expect("a better SCRATCH AUTO run");
+    let best = db.best("aa", mode_id("BEAT_7K")).expect("queried").expect("exists");
+    assert_eq!((best.ex_score(), best.notes), (880, 450), "the better run brought its own note count");
+}
+
+/// A row an assisted run left with a lamp and no score takes its notes from the first run that may
+/// set a best, whatever its EX.
+#[test]
+fn a_lamp_only_row_takes_the_notes_of_the_first_run_that_scores() {
+    let mut db = fresh();
+    db.record_play(&play("aa", 10, 300), false).expect("an assisted run");
+    assert_eq!(db.best("aa", mode_id("BEAT_7K")).expect("queried").expect("exists").notes, 0);
+    db.record_play(&play("aa", 20, 0), true).expect("a run that scores nothing");
+    assert_eq!(db.best("aa", mode_id("BEAT_7K")).expect("queried").expect("exists").notes, 0, "a run of no EX is out of its own notes");
+}
+
+#[test]
+fn which_runs_set_bests_by_assist_and_rule_generation() {
+    use crate::{SCORE_RULE_VERSION, SCRATCH_AUTO_ASSIST, is_stale_rule_version, sets_best};
+    let wave16 = 2;
+    assert!(sets_best(0, SCORE_RULE_VERSION) && sets_best(0, wave16) && sets_best(0, 0), "a run with no assist always does");
+    assert!(sets_best(SCRATCH_AUTO_ASSIST, SCORE_RULE_VERSION), "SCRATCH AUTO does now");
+    assert!(!sets_best(SCRATCH_AUTO_ASSIST, wave16), "a SCRATCH AUTO run that counted the turntable does not");
+    assert!(!sets_best(2, SCORE_RULE_VERSION), "a widened judge never does");
+    assert!(!sets_best(ASSIST_UNRECORDED, SCORE_RULE_VERSION), "an assist an imported record never named does not");
+    assert!(!is_stale_rule_version(wave16), "a record of the judge-parity pass is judged as this build judges it");
+    assert!(is_stale_rule_version(1));
+}
+
 #[test]
 fn the_day_bucket_accumulates_every_play_of_that_day_and_splits_on_the_next() {
     let mut db = fresh();

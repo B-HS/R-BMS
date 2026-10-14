@@ -6,17 +6,20 @@
 //! The question these answer is whether a player who never signed in keeps their records. They do:
 //! nothing on the way from a finished run to the database asks whether a score server is set up or
 //! an account is signed in, and the one column that differs is the one that says whether the run
-//! was sent. What does keep a run from setting a best is an assist -- SCRATCH AUTO, or a judge
-//! widened past the chart's own -- and that is the reference's rule
-//! (`ScoreData.update(newscore, updateScore)`): such a run keeps its row in the history, raises the
-//! lamp and the play count, and leaves the best score as it was.
+//! was sent.
+//!
+//! Every run the player played by hand is kept and sent (the player's decision of 2026-10-14). A
+//! SCRATCH AUTO run sets bests like any other, its turntable notes counting for nothing; a judge
+//! widened past the chart's own still sets none, which is the reference's rule
+//! (`ScoreData.update(newscore, updateScore)`): such a run keeps its row in the history and its
+//! replay, raises the lamp and the play count, and leaves the best score as it was.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use rbms_config::ScoreTarget;
 use rbms_ir::{CourseSubmission, IrError, PlayerProfile, ReplayData, ServerInfo, SubmitResponse};
-use rbms_store::scoredb::{BestScore, PlayLog, UNSET_MINIMUM, chart_key, mode_id};
+use rbms_store::scoredb::{BestScore, PlayLog, chart_key, mode_id};
 
 use super::*;
 use crate::app_play::OwnPlayOptions;
@@ -53,6 +56,9 @@ const RUN_MARGIN_US: i64 = 1_000_000;
 /// How many rows of a chart's history a test reads back, which is more than any of them writes.
 const HISTORY_ROWS: usize = 8;
 
+/// The gauge the course a test plays opens on.
+const COURSE_OPENING_GAUGE: f32 = 100.0;
+
 /// The account the signed-in runs are played under.
 const ACCOUNT_TOKEN: &str = "token-of-a-test";
 const ACCOUNT_ID: &str = "tester";
@@ -62,6 +68,8 @@ const ACCOUNT_ID: &str = "tester";
 #[derive(Default)]
 struct AcceptingServer {
     sent_for: Mutex<Vec<String>>,
+    /// What each submission said of the assists it was played with: SCRATCH AUTO, and the tags.
+    assists: Mutex<Vec<(bool, Vec<String>)>>,
 }
 
 impl ScoreServer for AcceptingServer {
@@ -70,6 +78,7 @@ impl ScoreServer for AcceptingServer {
     }
     fn submit_score(&self, sub: &ScoreSubmission) -> Result<SubmitResponse, IrError> {
         self.sent_for.lock().expect("the submission log").push(sub.player.id.clone());
+        self.assists.lock().expect("the assist log").push((sub.options.scratch_auto, sub.options.assist.clone()));
         Ok(SubmitResponse { accepted: true, ..Default::default() })
     }
     fn chart_ranking(&self, _chart: &ChartId, _limit: u32) -> Result<Vec<rbms_ir::ScoreRecord>, IrError> {
@@ -165,8 +174,13 @@ fn run_to_its_end(options: SessionOptions, inputs: &[Input]) -> PlaySession {
 /// Run `model` from its first moment to past its end under `options`, with `inputs` handed to the
 /// engine as their times come.
 fn run_model_to_its_end(model: rbms_model::Model, options: SessionOptions, inputs: &[Input]) -> PlaySession {
-    let run_us = rbms_play::play_time_ms(&model, options.autoplay) * rbms_skin::timer::MICROS_PER_MILLI + RUN_MARGIN_US;
-    let mut session = PlaySession::new(model, options);
+    replay_inputs(PlaySession::new(model, options), inputs)
+}
+
+/// Run `session` from its first moment to past its end, with `inputs` handed to the engine as their
+/// times come.
+fn replay_inputs(mut session: PlaySession, inputs: &[Input]) -> PlaySession {
+    let run_us = session.play_time_ms() * rbms_skin::timer::MICROS_PER_MILLI + RUN_MARGIN_US;
     let mut next = 0;
     for frame in 0..=run_us / RUN_FRAME_US {
         let now_us = frame * RUN_FRAME_US;
@@ -195,6 +209,16 @@ fn played_on(gauge: rbms_judge::GaugeKind, offsets_us: &[Option<i64>], scratch_a
 /// Play the recorded chart by hand on the gauge a fresh install plays on.
 pub(crate) fn played_by_hand(offsets_us: &[Option<i64>], scratch_auto: bool) -> PlaySession {
     played_on(Config::default().play.gauge, offsets_us, scratch_auto)
+}
+
+/// Play the recorded chart by hand judged wider than it asks (JUDGE WIDTH over 100%), which is the
+/// one run by hand that sets no best.
+pub(crate) fn played_widened(offsets_us: &[Option<i64>]) -> PlaySession {
+    let widened = rbms_play::JudgeSetup { judge_rate_key: [rbms_config::JUDGE_RATE_MAX_PERCENT, 100, 100], ..rbms_play::JudgeSetup::default() };
+    let model = recorded_model();
+    let mut session = PlaySession::new(model.clone(), SessionOptions::default());
+    session.set_judge_setup(widened);
+    replay_inputs(session, &inputs_by_hand(&model, offsets_us, false))
 }
 
 /// Hand `session` to the application as a run that has just ended on the play screen, and answer
@@ -344,48 +368,177 @@ fn a_weaker_run_joins_the_history_and_is_scored_against_the_best_that_stood() {
     assert_eq!(i64::from(best_summary.min_bp.min(weaker_summary.min_bp)), best.minbp, "the bad-poor count is the least of the two");
 }
 
-/// SCRATCH AUTO is an assist, and a run played with it on sets no best: its row is in the history
-/// with everything the run was and its replay is saved, the lamp is the one an assisted clear is
-/// demoted to, the play is counted, and the best holds no score for the browser to show or the next
-/// run to be paced against. Whether an account is signed in has no part in it.
-///
-/// This is the state a player is in who has played every run with SCRATCH AUTO on: lamps and play
-/// counts on the browser, and no EX beside them.
+/// SCRATCH AUTO leaves the turntable to the chart and the run is judged on the notes that are
+/// left: it is kept, replayed and sets the best like any other run, its lamp is the one an assisted
+/// clear is demoted to, and the next run is paced against it. Whether an account is signed in has no
+/// part in it.
 #[test]
-fn a_run_played_with_scratch_auto_keeps_its_history_and_its_lamp_and_sets_no_best() {
+fn a_run_played_with_scratch_auto_is_stored_whole_and_sets_the_best() {
     let mut shared = signed_out("scratch-auto");
     shared.config.play.scratch_auto = true;
     shared.config.judge.target = ScoreTarget::LocalBest;
     let (first, summary) = end_run(&mut shared, played_by_hand(&HAND_OFFSETS_US, true));
+    let by_hand = played_by_hand(&HAND_OFFSETS_US, false).summary();
     assert!(summary.ex_score > 0 && summary.clear_lamp.is_cleared(), "the fixture run scores and clears: {summary:?}");
-    assert_eq!(shared.ir_status, IrStatus::Skipped("scratch assist"));
+    assert_eq!(summary.total_notes + 1, by_hand.total_notes, "the turntable note is not counted");
+    assert_eq!(shared.ir_status, IrStatus::Off, "nothing holds the run back but that no server is set up");
     let notices = result_notices(&first, &shared);
-    assert!(notices.iter().any(|line| line.contains("SCRATCH AUTO") && line.contains("NO BEST SCORE")), "the screen does not say why: {notices:?}");
+    assert!(notices.iter().any(|line| line.contains("SCRATCH AUTO") && line.contains("NOT COUNTED")), "the screen does not say what was left out: {notices:?}");
 
     let (logs, best) = stored(&shared);
     let [log] = logs.as_slice() else {
         panic!("one run was played and {} rows were stored", logs.len());
     };
     assert_log_is_the_run(log, &summary, ClearType::LightAssistEasy);
-    assert_eq!(log.assist, i32::from(LIGHT_ASSIST));
-    assert!(log.replay_file.is_some(), "a run with SCRATCH AUTO on keeps its replay");
+    assert_eq!((log.assist, log.rule_version), (i32::from(LIGHT_ASSIST), rbms_store::SCORE_RULE_VERSION), "the history says the run was SCRATCH AUTO");
+    let replay = log.replay_file.as_deref().expect("a run with SCRATCH AUTO on keeps its replay");
+    assert!(Replay::load(&shared.replay_dir.join(replay)).expect("the replay reads back").scratch_auto, "and its replay says so too");
 
-    let best = best.expect("the chart has a row for its lamp");
+    let best = best.expect("the chart has a best");
     assert_eq!((best.clear, best.playcount, best.clearcount), (clear_type_id(ClearType::LightAssistEasy), 1, 1));
-    assert_eq!((best.ex_score(), best.combo, best.notes, best.minbp), (0, 0, 0, UNSET_MINIMUM), "an assisted run moved the best score");
+    assert_eq!((best.ex_score(), best.combo, best.notes, best.minbp), (summary.ex_score, summary.max_combo, summary.total_notes, i64::from(summary.min_bp)));
 
     let md5 = recorded_model().md5;
-    assert_eq!(shared.scores.best_ex_for_md5_in_ln_mode(&md5, SCORE_LN_MODE_FROM_CHART), None, "an assisted run is no local best");
+    assert_eq!(shared.scores.best_ex_for_md5_in_ln_mode(&md5, SCORE_LN_MODE_FROM_CHART), Some(summary.ex_score), "the run is the local best");
     assert_eq!(shared.scores.best_clear_for_md5(&md5), Some(clear_type_id(ClearType::LightAssistEasy)));
-    assert_eq!(shared.scores.for_md5(&md5).len(), 1, "the record list shows the run");
 
     let (second, _) = end_run(&mut shared, played_by_hand(&WEAKER_OFFSETS_US, true));
-    assert_ne!(result_target_ex(&second), Some(summary.ex_score), "the result screen took an assisted run for a local best");
-    assert_eq!(
-        result_target_ex(&second),
-        result_target_ex(&first),
-        "with no local best either time, both runs are scored against what the target falls back to"
-    );
+    assert_eq!(result_target_ex(&second), Some(summary.ex_score), "the next run is scored against it");
+}
+
+/// A run played with SCRATCH AUTO is sent like any other, and what it is sent with says so: the
+/// switch and the assist tag. What the server makes of it is the server's.
+#[test]
+fn a_run_played_with_scratch_auto_is_sent_saying_so() {
+    let server = Arc::new(AcceptingServer::default());
+    let mut shared = signed_in("scratch-auto-sent", server.clone());
+    shared.config.play.scratch_auto = true;
+    end_run(&mut shared, played_by_hand(&HAND_OFFSETS_US, true));
+    shared.submit_rx.take().expect("the run was handed to the score server").recv().expect("the submission came back");
+    assert_eq!(server.assists.lock().expect("the assist log").as_slice(), [(true, vec![rbms_ir::mapping::AUTO_SCRATCH_FLAG.to_owned()])]);
+    let (logs, _) = stored(&shared);
+    assert!(logs[0].ir_submitted, "the history says it was sent");
+}
+
+/// A player who has the score server set, as every install has by default, and has not signed in:
+/// the run is kept whole and is not sent, and its row says it was not, so nothing marks it sent
+/// that never left the computer.
+#[test]
+fn a_run_nobody_was_signed_in_to_send_is_kept_as_not_sent() {
+    let server = Arc::new(AcceptingServer::default());
+    let mut shared = signed_in("guest-of-the-server", server.clone());
+    shared.session = AccountSession::restored(None, None);
+    assert!(shared.has_primary_ir_server() && !shared.sends_to_primary_ir_server(), "the fixture has a server and nobody signed in to it");
+    let (_, summary) = end_run(&mut shared, played_by_hand(&HAND_OFFSETS_US, false));
+    assert!(shared.submit_rx.is_none() && matches!(shared.ir_status, IrStatus::Skipped(_)), "the run was handed over: {:?}", shared.ir_status);
+    assert!(server.sent_for.lock().expect("the submission log").is_empty(), "the run reached the server");
+    let (logs, best) = stored(&shared);
+    let [log] = logs.as_slice() else {
+        panic!("one run was played and {} rows were stored", logs.len());
+    };
+    assert_log_is_the_run(log, &summary, summary.clear_lamp);
+    assert!(!log.ir_submitted, "the row says a run that was never sent was sent");
+    assert_eq!(best.map(|best| best.ex_score()), Some(summary.ex_score));
+}
+
+/// A course stage played with SCRATCH AUTO is kept and sent as a chart like any other, and keeps
+/// its course from the course board, whose submission cannot say the stage had an assist. A stage
+/// played without one holds nothing back.
+#[test]
+fn a_course_stage_played_with_scratch_auto_keeps_the_course_from_the_board() {
+    let one_stage_course = |md5: String| {
+        let course = rbms_course::Course {
+            name: "RECORDED COURSE".to_owned(),
+            charts: vec![rbms_course::CourseChart { md5, sha256: String::new(), title: "Recorded".to_owned() }],
+            ..rbms_course::Course::default()
+        };
+        rbms_course::CourseRun::new(course, COURSE_OPENING_GAUGE)
+    };
+    for (scratch_auto, held_back) in [(false, false), (true, true)] {
+        let server = Arc::new(AcceptingServer::default());
+        let mut shared = signed_in(&format!("course-stage-{scratch_auto}"), server.clone());
+        shared.config.play.scratch_auto = scratch_auto;
+        shared.course_run = Some(one_stage_course(recorded_model().md5));
+        let (entered, _) = end_run(&mut shared, played_by_hand(&HAND_OFFSETS_US, scratch_auto));
+        assert!(matches!(entered, Transition::To(Stage::CourseResult(_))), "the one-stage course did not end on its result");
+        shared.submit_rx.take().expect("the stage was handed to the score server").recv().expect("the submission came back");
+        assert_eq!(server.sent_for.lock().expect("the submission log").len(), 1, "the stage was sent as a chart");
+        let reasons = &shared.course_stage_reasons;
+        assert_eq!(reasons.len(), 1);
+        assert_eq!(reasons[0].is_some(), held_back, "SCRATCH AUTO {scratch_auto}: {reasons:?}");
+    }
+}
+
+/// A run judged wider than the chart asks is kept whole and sent, and still sets no best: its row
+/// and its replay are kept, its lamp is the lower assisted one, and the best is left as it was.
+#[test]
+fn a_widened_judge_is_kept_and_sent_and_sets_no_best() {
+    let server = Arc::new(AcceptingServer::default());
+    let mut shared = signed_in("widened", server.clone());
+    let model = recorded_model();
+    let (entered, summary) = end_run(&mut shared, played_widened(&HAND_OFFSETS_US));
+    assert!(summary.ex_score > 0 && summary.clear_lamp.is_cleared(), "the fixture run scores and clears: {summary:?}");
+    shared.submit_rx.take().expect("the run was handed to the score server").recv().expect("the submission came back");
+    assert_eq!(server.assists.lock().expect("the assist log").as_slice(), [(false, vec![rbms_ir::mapping::CUSTOM_JUDGE_FLAG.to_owned()])]);
+    let notices = result_notices(&entered, &shared);
+    assert!(notices.iter().any(|line| line.contains("WIDENED JUDGE") && line.contains("NO BEST SCORE")), "{notices:?}");
+
+    let (logs, best) = stored(&shared);
+    let [log] = logs.as_slice() else {
+        panic!("one run was played and {} rows were stored", logs.len());
+    };
+    assert_log_is_the_run(log, &summary, ClearType::AssistEasy);
+    assert!(log.ir_submitted && log.replay_file.is_some(), "the run was sent and its replay kept");
+    let best = best.expect("the chart has a row for its lamp");
+    assert_eq!((best.clear, best.ex_score(), best.notes), (clear_type_id(ClearType::AssistEasy), 0, 0), "a widened run moved the best score");
+    assert_eq!(shared.scores.best_ex_for_md5_in_ln_mode(&model.md5, SCORE_LN_MODE_FROM_CHART), None, "a widened run is no local best");
+}
+
+/// The rows a SCRATCH AUTO run left before its turntable stopped counting -- the player's 37 of
+/// wave 16 -- counted the turntable as perfect greats played for the player. They stay in the
+/// history with their lamps, and no best, LOCAL BEST or score graph is read off them: the first run
+/// of the new rule is the chart's first best.
+#[test]
+fn a_scratch_auto_row_of_the_rule_before_sets_no_best_and_keeps_its_lamp() {
+    let mut shared = signed_out("old-rule");
+    shared.config.judge.target = ScoreTarget::LocalBest;
+    let model = recorded_model();
+    let old = PlayLog {
+        chart_key: chart_key(&model.md5, ""),
+        mode: mode_id(Mode::BEAT_7K.name),
+        ln_mode: SCORE_LN_MODE_FROM_CHART.to_owned(),
+        md5: model.md5.clone(),
+        clear: clear_type_id(ClearType::LightAssistEasy),
+        judge: rbms_store::scoredb::JudgeCounts::all_late([17, 0, 0, 0, 0, 0]),
+        notes: 17,
+        combo: 17,
+        assist: i32::from(LIGHT_ASSIST),
+        date: 1,
+        rule_version: rbms_store::SCORE_RULE_VERSION - 1,
+        ..PlayLog::default()
+    };
+    shared.scoredb.as_mut().expect("the score database").record_play(&old, false).expect("the old row writes");
+    let settings = shared.settings_path.clone();
+    drop(shared);
+
+    let mut relaunched = crate::App::new(String::new(), Config::default(), LaunchOptions::default(), settings).shared;
+    relaunched.config.play.autoplay = false;
+    relaunched.config.judge.target = ScoreTarget::LocalBest;
+    assert_eq!(relaunched.scores.for_md5(&model.md5).len(), 1, "the old row is in the history");
+    assert_eq!(relaunched.scores.best_ex_for_md5_in_ln_mode(&model.md5, SCORE_LN_MODE_FROM_CHART), None, "it is no local best");
+    assert_eq!(relaunched.scores.best_clear_for_md5(&model.md5), Some(clear_type_id(ClearType::LightAssistEasy)), "its lamp stands");
+
+    relaunched.config.play.scratch_auto = true;
+    let (entered, summary) = end_run(&mut relaunched, played_by_hand(&WEAKER_OFFSETS_US, true));
+    assert_ne!(result_target_ex(&entered), Some(34), "the old row's EX was taken for a local best");
+    let Transition::To(Stage::Result(result)) = &entered else {
+        panic!("the run did not reach the result screen");
+    };
+    assert_eq!((result.view().prev_ex, result.view().prev_best_ex), (None, None), "the built-in screen compares the run with the old row");
+    let (logs, best) = stored(&relaunched);
+    assert_eq!(logs.len(), 2);
+    let best = best.expect("the chart has a best");
+    assert_eq!((best.ex_score(), best.notes, best.playcount), (summary.ex_score, summary.total_notes, 2), "the new run is the first best");
 }
 
 /// A run nobody played by hand is no record at all: one the engine played for the player leaves
@@ -466,21 +619,23 @@ const NO_TURNTABLE_CHART: &[u8] =
 
 /// SCRATCH AUTO plays the turntable, and a chart with nothing on the turntable leaves it nothing to
 /// play: the run is the player's own, as the reference counts it (`AutoplayModifier` raises the
-/// assist only where it moved a note), so it is sent and sets a best. The same switch on a chart
-/// with a turntable note is still an assist.
+/// assist only where it moved a note), so its lamp is not demoted and nothing is said of an assist.
+/// The same switch on a chart with a turntable note is still an assist.
 #[test]
 fn scratch_auto_on_a_chart_with_nothing_on_the_turntable_is_no_assist() {
     let source = rbms_parser::parse_with(NO_TURNTABLE_CHART, Default::default());
     let model = rbms_chart::to_model(&source, Mode::BEAT_7K);
-    assert!(!crate::app_result::scratch_auto_played(true, &model), "the fixture has a turntable note");
-    assert!(crate::app_result::scratch_auto_played(true, &recorded_model()) && !crate::app_result::scratch_auto_played(false, &recorded_model()));
-
     let mut shared = signed_out("no-turntable");
     shared.config.play.scratch_auto = true;
     let mode = model.mode;
     let auto_lanes = (0..mode.key).map(|lane| mode.is_scratch(lane)).collect();
     let inputs = inputs_by_hand(&model, &HAND_OFFSETS_US, true);
     let session = run_model_to_its_end(model.clone(), SessionOptions { auto_lanes, ..SessionOptions::default() }, &inputs);
+    assert!(!crate::app_result::scratch_auto_played(&session), "the fixture has a turntable note");
+    assert!(
+        crate::app_result::scratch_auto_played(&played_by_hand(&HAND_OFFSETS_US, true))
+            && !crate::app_result::scratch_auto_played(&played_by_hand(&HAND_OFFSETS_US, false))
+    );
     let summary = session.summary();
     shared.mode = mode;
     shared.chart_path = "no-turntable.bms".to_owned();
@@ -494,4 +649,48 @@ fn scratch_auto_on_a_chart_with_nothing_on_the_turntable_is_no_assist() {
     let db = shared.scoredb.as_ref().expect("the score database opened in the test's folder");
     let best = db.best(&chart_key(&model.md5, ""), mode_id(Mode::BEAT_7K.name)).expect("the best reads").expect("the chart has a best");
     assert_eq!((best.ex_score(), best.clear), (summary.ex_score, clear_type_id(summary.clear_lamp)));
+}
+
+/// Names a copy of a player's own score database the test below reads. The copy is copied again
+/// into the test's own folder, so not even it is written.
+const SCOREDB_COPY_ENV: &str = "RBMS_SCOREDB_COPY";
+
+/// A player's own database, as this build reads it on its next launch: every SCRATCH AUTO row of the
+/// rule before is history with its lamp, none is a best, and the first run of the new rule on one of
+/// those charts is its best. Prints what it counted, for a person to read.
+///
+/// Run by hand with `--ignored` and the copy named in [`SCOREDB_COPY_ENV`]; a run without the copy
+/// fails rather than passing over it.
+#[test]
+#[ignore = "reads a copy of a player's own score database named by RBMS_SCOREDB_COPY"]
+fn a_players_own_database_reads_its_old_scratch_auto_rows_as_lamps_alone() {
+    let copy = std::env::var_os(SCOREDB_COPY_ENV).expect("RBMS_SCOREDB_COPY names a copy of a score database");
+    let settings = settings_in_own_folder("own-database");
+    let folder = settings.parent().expect("the settings file is in a folder").to_path_buf();
+    let (db_path, _, _) = crate::scoredb_store::score_paths(&folder);
+    std::fs::copy(&copy, &db_path).expect("the copy is copied into the test's folder");
+    let mut shared = crate::App::new(String::new(), Config::default(), LaunchOptions::default(), settings).shared;
+    let db = shared.scoredb.as_ref().expect("the copy opens");
+    let plays = db.all_plays().expect("the history reads");
+    let old_rule = plays.iter().filter(|log| log.assist == i32::from(LIGHT_ASSIST) && log.rule_version < rbms_store::SCORE_RULE_VERSION).count();
+    let charts: std::collections::BTreeSet<String> = plays.iter().map(|log| log.md5.clone()).collect();
+    let with_best = charts.iter().filter(|md5| shared.scores.best_ex_for_md5(md5).is_some()).count();
+    let with_lamp = charts.iter().filter(|md5| shared.scores.best_clear_for_md5(md5).is_some_and(|lamp| lamp > 0)).count();
+    let scored_rows = charts.iter().filter_map(|md5| db.chart_best(&chart_key(md5, "")).ok().flatten()).filter(|best| best.ex_score > 0).count();
+    println!("own database: {} plays, {old_rule} of them SCRATCH AUTO of the rule before, {} charts,", plays.len(), charts.len());
+    println!("  {with_best} with a local best, {with_lamp} with a lamp, {scored_rows} best rows with a score");
+    assert_eq!((with_best, scored_rows), (0, 0), "an old SCRATCH AUTO row was read as a score");
+    assert_eq!(with_lamp, charts.len(), "a lamp was lost");
+
+    let Some(first) = plays.iter().find(|log| log.assist == i32::from(LIGHT_ASSIST)).cloned() else {
+        return;
+    };
+    let lamp_before = shared.scores.best_clear_for_md5(&first.md5);
+    let new_run = PlayLog { date: first.date + 1, rule_version: rbms_store::SCORE_RULE_VERSION, replay_file: None, ..first.clone() };
+    crate::scoredb_store::record_finished_play(shared.scoredb.as_mut().expect("the copy"), &new_run, true);
+    shared.scores.push(crate::scoredb_store::record_of(&new_run));
+    let best = shared.scoredb.as_ref().and_then(|db| db.best_in_ln_mode(&first.chart_key, first.mode, &first.ln_mode).ok().flatten()).expect("a best");
+    println!("a new SCRATCH AUTO run on {}: best EX {} of {} notes, lamp {:?} -> {}", first.title, best.ex_score(), best.notes, lamp_before, best.clear);
+    assert_eq!((best.ex_score(), best.notes), (new_run.judge.ex_score(), new_run.notes), "the new run is the chart's first best");
+    assert_eq!(shared.scores.best_ex_for_md5(&first.md5), Some(new_run.judge.ex_score()));
 }

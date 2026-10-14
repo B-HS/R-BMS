@@ -220,8 +220,9 @@ fn rule_version_defaults_to_zero_for_a_pre_versioning_record() {
 
 #[test]
 fn current_rule_version_records_are_not_marked() {
-    assert_eq!(SCORE_RULE_VERSION, 2, "the current judging-rule generation");
+    assert_eq!(SCORE_RULE_VERSION, 3, "the current judging-rule generation");
     assert!(!is_stale_rule_version(SCORE_RULE_VERSION));
+    assert!(!is_stale_rule_version(SCORE_RULE_VERSION - 1), "version 3 changed SCRATCH AUTO alone, so a record by hand of version 2 is not old");
     assert!(!is_stale_rule_version(SCORE_RULE_VERSION + 1), "a newer record is not marked as old");
 }
 
@@ -473,7 +474,7 @@ fn an_assisted_record_from_an_older_rule_version_cannot_raise_the_clear_lamp() {
     let mut book = ScoreBook::default();
     let mut stale = rec("AA", 100, 10);
     stale.assisted = true;
-    stale.rule_version = SCORE_RULE_VERSION - 1;
+    stale.rule_version = 1;
     stale.clear = 8;
     book.push(stale);
     assert_eq!(book.best_clear_for_md5("AA"), None, "nothing demoted that lamp, so it is not an assisted clear this build would have written");
@@ -483,6 +484,14 @@ fn an_assisted_record_from_an_older_rule_version_cannot_raise_the_clear_lamp() {
     current.clear = 3;
     book.push(current);
     assert_eq!(book.best_clear_for_md5("AA"), Some(3), "a demoted lamp this build wrote still lights the LED");
+
+    let mut counted_the_turntable = rec("AA", 300, 10);
+    counted_the_turntable.assisted = true;
+    counted_the_turntable.rule_version = SCORE_RULE_VERSION - 1;
+    counted_the_turntable.clear = 4;
+    book.push(counted_the_turntable);
+    assert_eq!(book.best_clear_for_md5("AA"), Some(4), "a SCRATCH AUTO record of the rule before keeps its demoted lamp");
+    assert_eq!(book.best_ex_for_md5("AA"), None, "and still sets no score");
 }
 
 #[test]

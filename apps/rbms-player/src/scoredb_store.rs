@@ -172,7 +172,8 @@ pub(crate) fn play_log(play: &FinishedPlay<'_>) -> PlayLog {
 /// stored must not cost the player the result screen.
 ///
 /// `updates_best` is decision 12's score flag — `crate::updates_score` — and is passed rather than
-/// re-derived, so the database, the IR gate and the book can never disagree about one run.
+/// re-derived. The book reads the same answer back off the row ([`rbms_store::sets_best`] of its
+/// assist level and rule version, in [`record_of`]), so the two cannot disagree about one run.
 pub(crate) fn record_finished_play(db: &mut ScoreDb, log: &PlayLog, updates_best: bool) -> bool {
     match db.record_play(log, updates_best) {
         Ok(_) => true,
@@ -211,7 +212,7 @@ pub(crate) fn record_of(log: &PlayLog) -> ScoreRecord {
         replay_file: log.replay_file.clone(),
         rule_version: log.rule_version,
         ln_mode: log.ln_mode.clone(),
-        assisted: log.assist != 0,
+        assisted: !rbms_store::sets_best(log.assist, log.rule_version),
     }
 }
 

@@ -4,11 +4,52 @@ use serde::{Deserialize, Serialize};
 
 use crate::dto::{ChartId, ClearLamp, JudgeBreakdown, PlayOptions, PlayerId};
 
+/// The chart a score is submitted for: its two hashes, and what the chart says it is called and how
+/// hard it is.
+///
+/// The hashes are the key. The words travel with them because the server knows a chart only once
+/// somebody has played it, and fills the title, artist and level of a chart it has never seen from
+/// the first submission that names them (it never overwrites a value it already holds). Each word
+/// is left out of the body when the chart has none, so a server that predates them reads exactly
+/// the body it always read.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SubmittedChart {
+    #[serde(flatten)]
+    pub id: ChartId,
+    /// `#TITLE`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// `#ARTIST`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artist: Option<String>,
+    /// `#PLAYLEVEL`, when the chart writes it as a whole number.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub level: Option<u32>,
+}
+
+impl SubmittedChart {
+    /// The chart `id`, called `title` by `artist` at the level `play_level` as the chart writes it.
+    ///
+    /// A blank title or artist is no word at all, and a level that is not a whole number (`12+`, `?`,
+    /// empty) is no level: the server keeps only whole numbers, and leaving one out is what lets it
+    /// fill the level from a later submission that has one.
+    pub fn described(id: ChartId, title: &str, artist: &str, play_level: &str) -> SubmittedChart {
+        let word = |text: &str| Some(text.trim()).filter(|text| !text.is_empty()).map(str::to_string);
+        SubmittedChart { id, title: word(title), artist: word(artist), level: play_level.trim().parse().ok() }
+    }
+}
+
+impl From<ChartId> for SubmittedChart {
+    fn from(id: ChartId) -> SubmittedChart {
+        SubmittedChart { id, title: None, artist: None, level: None }
+    }
+}
+
 /// A score upload. `api_version` + `extra` keep this forward-compatible as the IR superset grows.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScoreSubmission {
     pub api_version: u32,
-    pub chart: ChartId,
+    pub chart: SubmittedChart,
     pub player: PlayerId,
     pub mode: String,
     pub clear: ClearLamp,

@@ -70,6 +70,7 @@ fn draw_field(canvas: &mut CpuCanvas, mode: Mode, five_key_layout: bool) {
         beam_off: &[],
         constant: false,
         legacy_note: false,
+        auto_lanes: &[],
     };
     render_playfield_view(canvas, &skin, &view);
 }

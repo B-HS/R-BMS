@@ -63,10 +63,11 @@ fn load_missing_file_writes_and_returns_defaults() {
     assert!(!path.exists());
     let outcome = load(&path).expect("a missing file is not an error");
     assert!(path.exists(), "load() of a missing settings file writes defaults out");
-    assert_eq!(outcome.config, Config::default());
+    assert_eq!(outcome.config, Config::first_run());
+    assert_eq!(outcome.config.network.server_url.as_deref(), Some(DEFAULT_SERVER_URL), "a first run is signed up to the R-BMS server");
     assert_eq!(outcome.migrated_from, None);
     let again = load(&path).expect("the freshly written file loads");
-    assert_eq!(again.config, Config::default(), "re-loading the freshly written file is stable");
+    assert_eq!(again.config, Config::first_run(), "re-loading the freshly written file is stable");
     assert_eq!(again.migrated_from, None, "the file it just wrote is already current");
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -230,4 +231,45 @@ fn a_file_written_before_the_steps_reads_on_them() {
         }
     }
     assert_eq!(read, before);
+}
+
+/// A file from before the server had a default names none for every player who never typed one in,
+/// so it is given the default once. A server it names is kept, and from the current schema on an
+/// empty row is the player's choice to play offline.
+#[test]
+fn an_older_file_without_a_server_is_given_the_default_once_and_a_later_choice_is_kept() {
+    let (older, from) = migrate(&format!("(schema_version: {NO_DEFAULT_SERVER_SCHEMA_VERSION})")).expect("a schema 5 file migrates");
+    assert_eq!(from, Some(NO_DEFAULT_SERVER_SCHEMA_VERSION));
+    assert_eq!(older.network.server_url.as_deref(), Some(DEFAULT_SERVER_URL));
+
+    let named = format!(r#"(schema_version: {NO_DEFAULT_SERVER_SCHEMA_VERSION}, network: (server_url: Some("https://ir.example/api")))"#);
+    assert_eq!(migrate(&named).expect("migrates").0.network.server_url.as_deref(), Some("https://ir.example/api"), "a server the file names stays");
+
+    let (flat, _) = migrate("(hispeed: 3.0)").expect("a flat file migrates");
+    assert_eq!(flat.network.server_url.as_deref(), Some(DEFAULT_SERVER_URL), "a file older still is given it too");
+
+    let mut offline = older;
+    offline.network.server_url = None;
+    let (kept, from) = migrate(&ron_of(&offline)).expect("a current file parses");
+    assert_eq!(from, None);
+    assert_eq!(kept.network.server_url, None, "the player's choice to play offline was undone");
+}
+
+/// The tables already given are remembered in the file; a file that predates the list has given
+/// none, and every other value of a schema 5 file reads as it always did.
+#[test]
+fn the_tables_already_given_are_kept_in_the_file() {
+    let mut config = Config::default();
+    config.library.seeded_default_tables = vec![INSANE_TABLE_ID.to_string()];
+    let back: Config = ron::from_str(&ron_of(&config)).expect("a config round-trips");
+    assert_eq!(back.library.seeded_default_tables, vec![INSANE_TABLE_ID.to_string()]);
+
+    let older = format!(
+        r#"(schema_version: {NO_DEFAULT_SERVER_SCHEMA_VERSION}, play: (hispeed: 2.5), library: (tables: [(name: "", location: "https://tables.test/t")]))"#
+    );
+    let (config, _) = migrate(&older).expect("a schema 5 file migrates");
+    assert!(config.library.seeded_default_tables.is_empty(), "a file that predates the list has given no table");
+    assert_eq!(config.library.tables.len(), 1);
+    assert!((config.play.hispeed - 2.5).abs() < 1e-9);
+    assert_eq!(config.schema_version, CURRENT_SCHEMA_VERSION);
 }

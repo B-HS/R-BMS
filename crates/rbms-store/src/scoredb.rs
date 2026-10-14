@@ -12,9 +12,10 @@
 //! The merge rules are the reference implementation's, element for element (`ScoreData.java:541-585`
 //! `update`, `PlayDataAccessor.java:195-265` `writeScoreData`): a higher lamp always wins, and the
 //! score columns (the twelve judgement counts, `avgjudge`, `minbp` and `combo`) only move when the
-//! run was allowed to set bests at all. Decision 12 is exactly that flag — an assisted or
-//! custom-judged run raises the lamp and the play count and touches nothing else — so it arrives
-//! here as `updates_best` and is not re-derived.
+//! run was allowed to set bests at all. Decision 12 is exactly that flag — a custom-judged run (and
+//! a SCRATCH AUTO run of a rule older than [`crate::SCRATCH_AUTO_LEAVES_THE_TURNTABLE_RULE_VERSION`])
+//! raises the lamp and the play count and touches nothing else — so it arrives here as
+//! `updates_best` and is not re-derived.
 //!
 //! `chart_key` is the chart's MD5, lowercased, and its SHA-256 only for a chart with no MD5. rbms
 //! has keyed play records, favourites and difficulty tables by MD5 since before it hashed charts
@@ -528,6 +529,11 @@ impl ScoreDb {
 /// comparisons of `ScoreData.update` (`ScoreData.java:541-585`), each of which also re-stamps the
 /// option and seed that produced the winning value.
 ///
+/// The note count goes with the judgements it was scored out of: it is set by the first run that may
+/// set bests and then only by the run whose EX is kept. A SCRATCH AUTO run counts no turntable note,
+/// so it scores out of fewer notes than the same chart played whole, and the best row's rate has to
+/// be the EX over the notes of the one run it came from.
+///
 /// The one addition is the rule generation: an assisted run recorded under a judging rule this
 /// build no longer produces cannot raise the lamp, because nothing demoted it the way this build
 /// demotes an assisted clear. [`ScoreBook::best_clear_for_md5`](crate::ScoreBook::best_clear_for_md5)
@@ -542,8 +548,11 @@ fn merge_best(mut best: BestScore, log: &PlayLog, updates_best: bool) -> BestSco
         best.assist = log.assist;
     }
     if updates_best {
-        best.notes = log.notes;
+        if best.notes == 0 {
+            best.notes = log.notes;
+        }
         if best.ex_score() < log.judge.ex_score() {
+            best.notes = log.notes;
             best.judge = log.judge;
             best.option = log.option;
             best.seed = log.seed;

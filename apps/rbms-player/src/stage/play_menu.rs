@@ -108,8 +108,9 @@ const LIMIT_NOTE: &str = "HI-SPEED IS AT THE END OF ITS RANGE: NO SPEED HOLDS TH
 /// What is said under the TARGET RATE row while neither target names the rate it holds.
 const TARGET_RATE_UNUSED_NOTE: &str = "NOT IN USE: NO TARGET IS RATE CUSTOM";
 
-/// What is said under the SCRATCH AUTO row: a run it plays a turntable note for is an assist.
-const SCRATCH_AUTO_NOTE: &str = "WHILE ON: NO BEST SCORE, LAMP AND HISTORY ONLY";
+/// What is said under the SCRATCH AUTO row: the turntable notes it plays count for nothing, and a
+/// run it plays one for is an assist, whose lamp is LIGHT ASSIST at best.
+const SCRATCH_AUTO_NOTE: &str = "WHILE ON: TURNTABLE NOT COUNTED, LIGHT ASSIST LAMP";
 
 /// The keys of the screen, written along its foot.
 const HINT: &str = "UP DOWN MOVE   LEFT RIGHT CHANGE   SHIFT x10   ENTER NEXT OR TYPE   0 DEFAULT   A ALL SCREENS   DRAG A SLIDER   TAB MODE   WHEEL SCROLL   RIGHT CLICK BACK   ESC SAVE";

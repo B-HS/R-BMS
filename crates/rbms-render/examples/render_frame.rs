@@ -32,7 +32,16 @@ fn main() {
             beam_on[lane] = microtime;
         }
     }
-    let field = PlayfieldView { timelines: &model.timelines, microtime, hispeed: 1.5, beam_on: &beam_on, beam_off: &[], constant: false, legacy_note: false };
+    let field = PlayfieldView {
+        timelines: &model.timelines,
+        microtime,
+        hispeed: 1.5,
+        beam_on: &beam_on,
+        beam_off: &[],
+        constant: false,
+        legacy_note: false,
+        auto_lanes: &[],
+    };
     render_playfield_view(&mut canvas, &skin, &field);
     let mut bomb = vec![(i64::MIN, 0u8); mode.key];
     for (k, lane) in [0usize, 2, mode.key.saturating_sub(1)].into_iter().enumerate() {

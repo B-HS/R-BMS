@@ -22,12 +22,41 @@ pub const SCORE_LN_MODE_FROM_CHART: &str = "CHART";
 /// `LightAssistEasy` lamp and the reference gauge-to-lamp mapping, charge-note deferral and the
 /// hell-charge gauge tick. A version 1 record was judged by rules this build no longer produces, so
 /// it keeps loading and reads as stale.
-pub const SCORE_RULE_VERSION: u32 = 2;
+///
+/// Version 3 changes SCRATCH AUTO alone ([`SCRATCH_AUTO_LEAVES_THE_TURNTABLE_RULE_VERSION`]): every
+/// other record of version 2 was judged as this build judges it.
+pub const SCORE_RULE_VERSION: u32 = 3;
 
-/// Whether a record was judged under a rule version this build no longer produces, so what is shown
-/// next to it is the presenting layer's decision rather than this crate's.
+/// The first rule version this build judges a run played by hand exactly as it did then: the
+/// judge-parity pass, whose assisted lamps are demoted as this build demotes them.
+const JUDGE_PARITY_RULE_VERSION: u32 = 2;
+
+/// The first rule version in which SCRATCH AUTO takes the turntable's notes off the chart a run is
+/// judged on, so that they count for nothing, and in which such a run sets bests like any other. A
+/// SCRATCH AUTO record of an earlier version counted the turntable as perfect greats played for the
+/// player and set no best; it is history and a lamp, and no score.
+pub const SCRATCH_AUTO_LEAVES_THE_TURNTABLE_RULE_VERSION: u32 = 3;
+
+/// The assist level of a run whose only assist is SCRATCH AUTO (`rbms_ir::mapping::LIGHT_ASSIST`).
+/// Every other non-zero level is a widened judge, or an assist an imported record did not name.
+pub const SCRATCH_AUTO_ASSIST: i32 = 1;
+
+/// Whether a record was judged under a rule version this build no longer produces for a run played
+/// by hand, so what is shown next to it is the presenting layer's decision rather than this
+/// crate's.
 pub fn is_stale_rule_version(rule_version: u32) -> bool {
-    rule_version < SCORE_RULE_VERSION
+    rule_version < JUDGE_PARITY_RULE_VERSION
+}
+
+/// Whether a run recorded at assist level `assist` under `rule_version` may set a chart's bests:
+/// one with no assist, and one played with SCRATCH AUTO since that stopped counting the turntable.
+/// A widened judge never does, and neither does a SCRATCH AUTO run of an older rule.
+pub fn sets_best(assist: i32, rule_version: u32) -> bool {
+    match assist {
+        0 => true,
+        SCRATCH_AUTO_ASSIST => rule_version >= SCRATCH_AUTO_LEAVES_THE_TURNTABLE_RULE_VERSION,
+        _ => false,
+    }
 }
 
 /// One persisted play result, kept locally so play history and replays survive without a score
@@ -61,10 +90,11 @@ pub struct ScoreRecord {
     /// EX ceiling of the same chart played as plain long notes.
     #[serde(default = "chart_ln_mode_key")]
     pub ln_mode: String,
-    /// The run used an assist (widened judge window or an auto-played lane), so it is kept as
-    /// history but excluded from the stored bests — the reference implementation clears the same `score` flag and
-    /// gates exscore/minbp/combo on it (`ScoreData.java:548,566,572,578`). Records written before
-    /// the field existed default to `false`.
+    /// The run may not set bests ([`sets_best`]): a widened judge window, or SCRATCH AUTO under a
+    /// rule older than [`SCRATCH_AUTO_LEAVES_THE_TURNTABLE_RULE_VERSION`]. It is kept as history but
+    /// excluded from the stored bests — the reference implementation clears the same `score` flag
+    /// and gates exscore/minbp/combo on it (`ScoreData.java:548,566,572,578`). Records written
+    /// before the field existed default to `false`.
     #[serde(default)]
     pub assisted: bool,
 }

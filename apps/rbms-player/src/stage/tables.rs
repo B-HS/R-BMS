@@ -17,6 +17,11 @@
 //! fetches a table again by itself: R does, for the table under the cursor, and A for every table.
 //! Those run beside the screen too, which goes on being used while the row says the table is on
 //! its way. A fetch goes on after the screen is left, and lands on the song list.
+//!
+//! The last row is the signed-in player's own folders ([`crate::user_folders`]), which come from
+//! their account rather than from an address typed here: it says what became of them, R fetches
+//! them again, A fetches them with every table, and it cannot be removed, the folders being edited
+//! on the web site.
 #![allow(clippy::wildcard_imports)]
 
 use crate::dialog::{DialogHandle, DialogState};
@@ -25,6 +30,7 @@ use crate::tablesrc::{
     COPY_OLD_AFTER_DAYS, TableOrigin, TableStatus, apply_finished_fetches, copy_age, copy_age_days, forget_table, is_address, register_table, reload_tables,
     table_is_fetching, table_status, unix_now,
 };
+use crate::user_folders::{FolderProblem, FolderStatus, USER_FOLDERS_LABEL};
 use crate::*;
 
 /// Width of the table list panel.
@@ -69,6 +75,18 @@ const SAVED_GAP: f32 = 18.0;
 
 /// The keys of the list, under the title.
 const LIST_KEYS: &str = "UP DOWN MOVE   ENTER SELECT   R RELOAD   A RELOAD ALL   D REMOVE   ESC BACK";
+
+/// What the row of the player's own folders says while nobody is signed in, and under the list.
+const FOLDERS_SIGNED_OUT: &str = "LOG IN TO LOAD YOUR FOLDERS";
+const FOLDERS_SIGNED_OUT_DETAIL: &str = "LOG IN ON THE NETWORK TAB OF THE SETTINGS - YOUR FOLDERS ARE MADE AND EDITED ON THE WEB SITE";
+
+/// What the row of the player's own folders says when the server has none to give.
+const FOLDERS_NONE: &str = "THE SERVER HAS NO FOLDERS";
+
+/// What is said under the list of the player's own folders when there is nothing wrong with them,
+/// and what D says of them: they are not this screen's to remove.
+const FOLDERS_DETAIL: &str = "YOUR FOLDERS ARE MADE AND EDITED ON THE WEB SITE - R FETCHES THEM AGAIN";
+const FOLDERS_NOT_REMOVED: &str = "your folders are edited on the web site and cannot be removed here";
 
 /// What the row of a table that is being fetched again says in place of its status, and what is
 /// said under the list of the table under the cursor while it is: whatever its last reload came
@@ -197,6 +215,39 @@ fn old_copy_note(status: &TableStatus, now: u64) -> Option<String> {
     (days > COPY_OLD_AFTER_DAYS).then(|| format!("THE SAVED COPY IS {days} DAYS OLD - R FETCHES THE TABLE AGAIN"))
 }
 
+/// The few words at the right edge of the row of the player's own folders, and whether they report
+/// a problem.
+fn folders_summary(status: &FolderStatus) -> (String, bool) {
+    match status {
+        FolderStatus::SignedOut => (FOLDERS_SIGNED_OUT.to_string(), false),
+        FolderStatus::Fetching => (FETCHING.to_string(), false),
+        FolderStatus::Shown { folders, listed, owned, problem: None, .. } => (format!("{owned} OF {listed} CHARTS OWNED  -  {folders} FOLDERS"), false),
+        FolderStatus::Shown { listed, owned, problem: Some(_), .. } => (format!("RELOAD FAILED  -  {owned} OF {listed} CHARTS OWNED"), true),
+        FolderStatus::NotFetched { problem: None } => (NOT_FETCHED.to_string(), false),
+        FolderStatus::NotFetched { problem: Some(FolderProblem::NoFolders) } => (FOLDERS_NONE.to_string(), false),
+        FolderStatus::NotFetched { problem: Some(FolderProblem::Failed(_)) } => ("LOAD FAILED".to_string(), true),
+    }
+}
+
+/// What is said under the list of the player's own folders, and whether it reports a problem.
+fn folders_detail(status: &FolderStatus) -> (String, bool) {
+    match status {
+        FolderStatus::SignedOut => (FOLDERS_SIGNED_OUT_DETAIL.to_string(), false),
+        FolderStatus::Shown { problem: Some(FolderProblem::Failed(reason)), .. } => (format!("RELOAD FAILED, THE FOLDERS ARE AS THEY WERE: {reason}"), true),
+        FolderStatus::NotFetched { problem: Some(FolderProblem::Failed(reason)) } => (format!("LOAD FAILED: {reason}"), true),
+        FolderStatus::Fetching | FolderStatus::Shown { .. } | FolderStatus::NotFetched { .. } => (FOLDERS_DETAIL.to_string(), false),
+    }
+}
+
+/// How long ago the player's own folders were fetched, as the end of their row says it.
+fn folders_saved_note(status: &FolderStatus, now: u64) -> Option<String> {
+    match status {
+        FolderStatus::Shown { fetched_at: Some(at), .. } => Some(format!("{SAVED_UNDATED} {}", copy_age(*at, now))),
+        FolderStatus::Shown { fetched_at: None, .. } => Some(SAVED_UNDATED.to_string()),
+        FolderStatus::SignedOut | FolderStatus::Fetching | FolderStatus::NotFetched { .. } => None,
+    }
+}
+
 /// The table manager's own state: which row is focused, the URL being typed when the "+ ADD TABLE
 /// (URL)" row has been entered, the file picker while it is up, and whether a paste modifier is
 /// held.
@@ -214,8 +265,13 @@ impl TablesState {
         TablesState::default()
     }
 
-    /// Rows in the table manager: each source, then the two add actions.
+    /// Rows in the table manager: each source, the two add actions, then the player's own folders.
     fn row_count(shared: &AppShared) -> usize {
+        shared.config.library.tables.len() + 3
+    }
+
+    /// The row of the player's own folders, the last one.
+    fn folders_row(shared: &AppShared) -> usize {
         shared.config.library.tables.len() + 2
     }
 
@@ -322,6 +378,7 @@ impl StageHandler for TablesState {
     /// added one actually land.
     fn update(&mut self, ctx: &mut FrameCtx<'_>) -> Transition {
         apply_finished_fetches(ctx.shared);
+        crate::user_folders::apply_finished_fetch(ctx.shared);
         let Some(picker) = self.picker.as_ref() else {
             return Transition::Stay;
         };
@@ -364,8 +421,15 @@ impl StageHandler for TablesState {
             KeyCode::ArrowUp => self.sel = self.sel.saturating_sub(1),
             KeyCode::ArrowDown => self.sel = (self.sel + 1).min(n.saturating_sub(1)),
             KeyCode::KeyD | KeyCode::Delete if self.sel < ctx.shared.config.library.tables.len() => self.remove_table_source(ctx.shared, self.sel),
+            KeyCode::KeyD | KeyCode::Delete if self.sel == TablesState::folders_row(ctx.shared) => notify(Level::Info, FOLDERS_NOT_REMOVED),
             KeyCode::KeyR if self.sel < ctx.shared.config.library.tables.len() => reload_tables(ctx.shared, Some(self.sel)),
-            KeyCode::KeyA => reload_tables(ctx.shared, None),
+            KeyCode::KeyR if self.sel == TablesState::folders_row(ctx.shared) => {
+                crate::user_folders::start_fetch(ctx.shared, true);
+            }
+            KeyCode::KeyA => {
+                reload_tables(ctx.shared, None);
+                crate::user_folders::start_fetch(ctx.shared, true);
+            }
             KeyCode::Enter | KeyCode::NumpadEnter => {
                 if self.sel == add_url {
                     self.text_input = Some(TextEdit::new());
@@ -397,7 +461,9 @@ impl StageHandler for TablesState {
         let shared = &*ctx.shared;
         let tables = &shared.config.library.tables;
         let add_url = tables.len();
-        let row_count = tables.len() + 2;
+        let folders_row = TablesState::folders_row(shared);
+        let folders = shared.user_folders.status();
+        let row_count = TablesState::row_count(shared);
         for i in 0..row_count {
             let y = ROW_TOP + i as f32 * ROW_PITCH;
             let on = i == self.sel;
@@ -405,10 +471,11 @@ impl StageHandler for TablesState {
             let label = match tables.get(i) {
                 Some(source) => source_label(source, status.as_ref()),
                 None if i == add_url => "+ ADD TABLE (URL)".to_string(),
+                None if i == folders_row => USER_FOLDERS_LABEL.to_string(),
                 None => "+ ADD TABLE (FILE)".to_string(),
             };
             canvas.fill_rect(Rect::new(x0, y, PANEL_W, ROW_H), if on { th.button } else { th.panel });
-            let col = if i >= tables.len() {
+            let col = if i >= tables.len() && i != folders_row {
                 th.accent
             } else if on {
                 th.text
@@ -416,6 +483,21 @@ impl StageHandler for TablesState {
                 th.text_dim
             };
             let mut status_right = x0 + PANEL_W - ROW_PAD_X;
+            if i == folders_row {
+                if let Some(saved) = folders_saved_note(&folders, now) {
+                    draw_text_right(canvas, status_right, y + STATUS_DY, STATUS_SCALE, if on { th.text } else { th.text_muted }, &saved);
+                    status_right -= text_width(&saved, STATUS_SCALE) + SAVED_GAP;
+                }
+                let (summary, is_problem) = folders_summary(&folders);
+                let status_col = match (folders == FolderStatus::Fetching, is_problem, on) {
+                    (true, ..) => th.accent,
+                    (false, true, _) => th.warn,
+                    (false, false, true) => th.text,
+                    (false, false, false) => th.text_muted,
+                };
+                draw_text_right(canvas, status_right, y + STATUS_DY, STATUS_SCALE, status_col, &summary);
+                status_right -= text_width(&summary, STATUS_SCALE) + STATUS_GAP;
+            }
             if let Some((saved, is_old)) = status.as_ref().and_then(|status| saved_note(status, now)) {
                 let saved_col = match (is_old, on) {
                     (true, _) => th.warn,
@@ -444,7 +526,8 @@ impl StageHandler for TablesState {
         let focused_arriving =
             tables.get(self.sel).filter(|source| table_is_fetching(shared, &source.location)).map(|source| on_its_way(source, focused.as_ref()).1);
         let mut line_top = ROW_TOP + row_count as f32 * ROW_PITCH + DETAIL_GAP;
-        if let Some((detail, is_problem)) = focused_detail(focused.as_ref(), focused_arriving) {
+        let detail = if self.sel == folders_row { Some(folders_detail(&folders)) } else { focused_detail(focused.as_ref(), focused_arriving) };
+        if let Some((detail, is_problem)) = detail {
             let detail: Vec<char> = detail.chars().collect();
             for chars in detail.chunks(DETAIL_LINE_CHARS).take(DETAIL_MAX_LINES) {
                 let text: String = chars.iter().collect();
@@ -1392,5 +1475,71 @@ mod tests {
         drop(open);
         addresses.wait_for_fetches(&mut app, &mut state);
         app.shared.config.library.tables.clear();
+    }
+}
+
+#[cfg(test)]
+mod folder_row_tests {
+    use super::*;
+    use crate::ir_session::AccountSession;
+    use crate::stage::render_tests::app;
+    use crate::user_folders::tests::{PLAYER, SERVER, TOKEN, two_folders};
+
+    fn press(code: KeyCode) -> KeyInput<'static> {
+        KeyInput { code, pressed: true, released: false, text: None }
+    }
+
+    fn ctx(app: &mut crate::App) -> FrameCtx<'_> {
+        FrameCtx { shared: &mut app.shared, now: std::time::Instant::now(), dt: 0.0 }
+    }
+
+    /// The row of the player's own folders says what became of them in each state they can be in.
+    #[test]
+    fn the_folders_row_says_what_became_of_the_folders() {
+        assert_eq!(folders_summary(&FolderStatus::SignedOut), (FOLDERS_SIGNED_OUT.to_string(), false));
+        assert_eq!(folders_summary(&FolderStatus::Fetching), (FETCHING.to_string(), false));
+        let shown = FolderStatus::Shown { folders: 5, listed: 120, owned: 87, fetched_at: Some(0), problem: None };
+        assert_eq!(folders_summary(&shown), ("87 OF 120 CHARTS OWNED  -  5 FOLDERS".to_string(), false));
+        assert_eq!(folders_saved_note(&shown, 3_600).as_deref(), Some("SAVED 1 HOUR AGO"));
+        let stale = FolderStatus::Shown { folders: 5, listed: 120, owned: 87, fetched_at: None, problem: Some(FolderProblem::Failed("timed out".into())) };
+        assert_eq!(folders_summary(&stale), ("RELOAD FAILED  -  87 OF 120 CHARTS OWNED".to_string(), true));
+        assert_eq!(folders_detail(&stale), ("RELOAD FAILED, THE FOLDERS ARE AS THEY WERE: timed out".to_string(), true));
+        assert_eq!(folders_summary(&FolderStatus::NotFetched { problem: None }), (NOT_FETCHED.to_string(), false));
+        assert_eq!(folders_summary(&FolderStatus::NotFetched { problem: Some(FolderProblem::NoFolders) }), (FOLDERS_NONE.to_string(), false));
+        let failed = FolderStatus::NotFetched { problem: Some(FolderProblem::Failed("refused".into())) };
+        assert_eq!(folders_summary(&failed), ("LOAD FAILED".to_string(), true));
+        assert_eq!(folders_detail(&failed), ("LOAD FAILED: refused".to_string(), true));
+    }
+
+    /// The row is the last one and cannot be removed; R fetches the folders again when someone is
+    /// signed in, and does nothing for nobody.
+    #[test]
+    fn the_folders_row_fetches_again_and_is_never_removed() {
+        let mut app = app();
+        let mut state = TablesState::new();
+        for _ in 0..TablesState::row_count(&app.shared) {
+            state.handle_key(&mut ctx(&mut app), press(KeyCode::ArrowDown));
+        }
+        assert_eq!(state.sel, TablesState::folders_row(&app.shared), "the folders are the last row");
+        state.handle_key(&mut ctx(&mut app), press(KeyCode::KeyR));
+        assert_eq!(app.shared.user_folders.status(), FolderStatus::SignedOut, "nobody is signed in, and nothing was fetched");
+
+        app.shared.config.network.server_url = Some(SERVER.into());
+        app.shared.server = two_folders();
+        app.shared.session = AccountSession::restored(Some(TOKEN.into()), Some(PLAYER.into()));
+        state.handle_key(&mut ctx(&mut app), press(KeyCode::KeyR));
+        assert_eq!(app.shared.user_folders.status(), FolderStatus::Fetching);
+        state.handle_key(&mut ctx(&mut app), press(KeyCode::KeyD));
+        assert_eq!(TablesState::row_count(&app.shared), 3, "the folders row was removed");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while app.shared.user_folders.is_fetching() {
+            state.update(&mut ctx(&mut app));
+            assert!(std::time::Instant::now() < deadline, "the folders never came back");
+            std::thread::yield_now();
+        }
+        assert!(matches!(app.shared.user_folders.status(), FolderStatus::Shown { folders: 2, listed: 4, .. }));
+        if let Some(folder) = app.shared.settings_path.parent() {
+            let _ = std::fs::remove_dir_all(folder.join("user-folders"));
+        }
     }
 }

@@ -10,7 +10,7 @@ use rbms_config::ScoreTarget;
 use super::keys::Panel;
 use super::recorded_tests::{browse_to_the_recorded_chart, browsing_app, frame_size, play_a_run, save_frame, shown};
 use super::*;
-use crate::app_result::record_tests::{HAND_OFFSETS_US, played_by_hand};
+use crate::app_result::record_tests::{HAND_OFFSETS_US, played_by_hand, played_widened};
 use crate::stage::HeadlessCanvas;
 use crate::stage::capture::scene_frame_at;
 
@@ -46,15 +46,14 @@ fn the_browser_names_the_local_best_on_a_chart_that_has_one() {
     save_frame("target-select-local-best", &pixels);
 }
 
-/// A chart played only with SCRATCH AUTO on has no local best, so the browser says what a run of it
-/// is paced against instead -- the fallback the player named -- and says it was LOCAL BEST that was
-/// chosen. Choosing another fallback changes the text with the next frame.
+/// A chart played only with the judge widened has no local best, so the browser says what a run of
+/// it is paced against instead -- the fallback the player named -- and says it was LOCAL BEST that
+/// was chosen. Choosing another fallback changes the text with the next frame.
 #[test]
 fn the_browser_names_the_fallback_on_a_chart_that_has_no_local_best() {
     let mut app = browsing_app("target-no-record");
     app.shared.config.judge.target = ScoreTarget::LocalBest;
-    app.shared.config.play.scratch_auto = true;
-    play_a_run(&mut app, played_by_hand(&HAND_OFFSETS_US, true));
+    play_a_run(&mut app, played_widened(&HAND_OFFSETS_US));
     let (width, height) = frame_size();
     let mut pixels = HeadlessCanvas::new(width, height);
     browse_to_the_recorded_chart(&mut app, &mut pixels);

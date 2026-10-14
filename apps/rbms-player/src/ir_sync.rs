@@ -35,6 +35,10 @@ pub(crate) struct SyncPayload {
 /// difficulty tables and everything the skin menu stores among them, since all of it is paths into
 /// this machine's disk.
 ///
+/// Which of the tables every player is given this machine has given already goes with its table
+/// list: taken from another machine, it would put back a table removed here or never give one this
+/// machine has not had.
+///
 /// The skin menu is local as a whole. The pack folder and the skin folder are paths, the document
 /// each screen is drawn with is an absolute path, and what was chosen inside a document is keyed by
 /// that same path: on another machine the keys name files that are not there, and a screen pointed
@@ -49,6 +53,7 @@ fn keep_local(local: &Config, mut incoming: Config) -> Config {
     incoming.library.songs_folder = local.library.songs_folder.clone();
     incoming.library.folders = local.library.folders.clone();
     incoming.library.tables = local.library.tables.clone();
+    incoming.library.seeded_default_tables = local.library.seeded_default_tables.clone();
     incoming.display.font_path = local.display.font_path.clone();
     incoming.skin = local.skin.clone();
     incoming
@@ -270,6 +275,7 @@ mod tests {
         c.library.songs_folder = Some("/local/songs".into());
         c.library.folders = vec!["/local/songs".into()];
         c.library.tables = vec![TableSource { name: "mine".into(), location: "/local/table.json".into() }];
+        c.library.seeded_default_tables = vec![rbms_config::INSANE_TABLE_ID.into()];
         c.display.font_path = Some("/local/font.ttf".into());
         c.skin.pack = Some("/local/skins/pack".into());
         c.skin.folder = Some(LOCAL_SKIN_FOLDER.into());
@@ -322,6 +328,7 @@ mod tests {
         assert_eq!(sanitised.library.songs_folder, None);
         assert!(sanitised.library.folders.is_empty(), "the song folders are this machine's paths");
         assert!(sanitised.library.tables.is_empty());
+        assert!(sanitised.library.seeded_default_tables.is_empty(), "the tables given on this machine go with its table list");
         assert_eq!(sanitised.display.font_path, None);
         assert_eq!(sanitised.skin.pack, None, "the skin pack is a folder on this machine's disk");
         assert_eq!(sanitised.skin.folder, None, "the skin folder is a folder on this machine's disk");
@@ -354,8 +361,12 @@ mod tests {
         remote.library.tables = vec![TableSource { name: "theirs".into(), location: "/their/table.json".into() }];
         remote.display.font_path = Some("/their/font.ttf".into());
         remote.skin = remote_skin_settings().skin;
+        remote.library.seeded_default_tables = vec!["given-elsewhere".into()];
+        let fresh_machine = merge_downloaded(&Config::default(), remote.clone());
+        assert!(fresh_machine.library.seeded_default_tables.is_empty(), "a machine that has given no table is still due it after a download");
 
         let merged = merge_downloaded(&local, remote);
+        assert_eq!(merged.library.seeded_default_tables, vec![rbms_config::INSANE_TABLE_ID.to_string()], "a download forgot the tables given here");
         assert!((merged.play.hispeed - 1.25).abs() < 1e-9, "preferences come from the server");
         assert_eq!(merged.play.gauge, GaugeKind::Easy);
         assert_eq!(merged.judge.judge_rate_key, Config::default().judge.judge_rate_key);

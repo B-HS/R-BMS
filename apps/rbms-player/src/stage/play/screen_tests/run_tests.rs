@@ -171,22 +171,24 @@ fn a_key_that_comes_up_while_the_run_is_closing_is_not_handed_to_the_run() {
     assert!(!app.shared.skin_timers.is_on(timer_id::KEYON_1P_KEY1), "the beam of a key that came up is still lit");
 }
 
-/// A lane the run plays for the player holds its long notes and keeps its beam lit as a key would,
-/// frame after frame, though the player holds nothing there.
+/// A lane the chart plays by itself (SCRATCH AUTO) is nobody's: its long note is not in the chart
+/// the run judges, so nothing holds it and no beam lights for it, though the field still draws it.
 #[test]
-fn a_lane_the_run_plays_for_the_player_keeps_its_beam_and_holds_its_long_note() {
+fn a_lane_the_chart_plays_by_itself_holds_nothing_and_lights_no_beam() {
     let mut app = app_with_play_skin("auto-lane");
     let mut pixels = canvas();
     let auto_lanes = (0..=SCRATCH_LANE).map(|lane| lane == SCRATCH_LANE).collect();
     started(&mut app, &mut pixels, run_of(TURNTABLE_CHART, SessionOptions { auto_lanes, ..SessionOptions::default() }));
     assert!(!PlayState::plays_back(&app.shared), "the run is played by hand");
+    let session = &play(&app).session;
+    assert_eq!(session.judge().total_notes(), 1, "only the key note is counted");
+    assert!(session.field_timelines().iter().any(|line| line.notes[SCRATCH_LANE].is_some()), "the field lost the turntable's long note");
 
     stay_after(&mut app, &mut pixels, TURNTABLE_HELD_MS);
-    assert!(play(&app).session.judge().long_note(SCRATCH_LANE).processing.is_some(), "the run is holding the turntable's long note");
+    assert!(play(&app).session.judge().long_note(SCRATCH_LANE).processing.is_none(), "the run took hold of a note nobody judges");
     for frame in 0..HELD_FRAMES {
         stay(&mut app, &mut pixels);
-        assert!(app.shared.skin_timers.is_on(timer_id::KEYON_1P_SCRATCH), "the turntable's beam went out on frame {frame} of a note the run is holding");
-        assert!(app.shared.skin_timers.is_on(timer_id::HOLD_1P_SCRATCH), "the turntable's hold timer is off on frame {frame}");
+        assert!(!app.shared.skin_timers.is_on(timer_id::KEYON_1P_SCRATCH), "the turntable's beam lit on frame {frame} for a note nobody plays");
     }
 }
 

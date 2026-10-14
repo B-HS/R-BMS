@@ -1,16 +1,17 @@
 //! Which score a run is paced against when the TARGET row names the local best, the account's best
 //! or a rival's, on charts that have that score and charts that have none.
 //!
-//! The question these answer is what a player sees who set LOCAL BEST and plays with SCRATCH AUTO
-//! on: no run of theirs is a local best (an assisted run sets no best score), so the target is not
-//! there, and what they are paced against is the fallback they named -- the same number on the play
-//! screen's score graph, on the figure over the judgement, and on the result screen.
+//! The question these answer is what a player sees who set LOCAL BEST on a chart they have no best
+//! on: one played only with the judge widened past the chart's own (such a run sets no best score),
+//! or only with SCRATCH AUTO under the rule before it stopped counting the turntable. The target is
+//! not there, and what they are paced against is the fallback they named -- the same number on the
+//! play screen's score graph, on the figure over the judgement, and on the result screen.
 
 use std::path::PathBuf;
 
 use rbms_config::{Config, ScoreTarget};
 
-use super::record_tests::{HAND_OFFSETS_US, end_run, played_by_hand, recorded_model};
+use super::record_tests::{HAND_OFFSETS_US, end_run, played_by_hand, played_widened, recorded_model};
 use super::*;
 use crate::ir_ranking::{RankingBoard, RankingRow};
 use crate::target::{band_target_ex, max_ex, target_ex};
@@ -28,11 +29,11 @@ fn app_in_own_folder(tag: &str) -> AppShared {
     crate::App::new(String::new(), config, LaunchOptions::default(), folder.join("settings.ron")).shared
 }
 
-/// Play the recorded chart to its end in `shared`, by hand, with SCRATCH AUTO as given, and answer
-/// what the engine said of the run and the screen it led to.
-fn play(shared: &mut AppShared, scratch_auto: bool) -> (Transition, rbms_play::PlaySummary) {
-    shared.config.play.scratch_auto = scratch_auto;
-    end_run(shared, played_by_hand(&HAND_OFFSETS_US, scratch_auto))
+/// Play the recorded chart to its end in `shared`, by hand, judged wider than the chart asks when
+/// `widened` says so, and answer what the engine said of the run and the screen it led to.
+fn play(shared: &mut AppShared, widened: bool) -> (Transition, rbms_play::PlaySummary) {
+    let session = if widened { played_widened(&HAND_OFFSETS_US) } else { played_by_hand(&HAND_OFFSETS_US, false) };
+    end_run(shared, session)
 }
 
 /// What the result screen `entered` leads to paced the run against.
@@ -82,17 +83,17 @@ fn a_chart_with_a_scoring_record_is_paced_against_that_record() {
     assert_eq!(result_target(&second), Some(("LOCAL BEST".to_string(), played.ex_score)), "the result screen scores the second run against the first");
 }
 
-/// The state of a player who plays every run with SCRATCH AUTO on: no run is a local best, so
+/// The state of a player who plays every run with the judge widened: no run is a local best, so
 /// LOCAL BEST has no score to name and the run is paced against the fallback -- which is the player's
 /// to choose, and which is the same on the play screen and the result screen.
 #[test]
 fn a_chart_with_no_scoring_record_is_paced_against_the_fallback_the_player_named() {
-    let mut shared = app_in_own_folder("assisted-only");
+    let mut shared = app_in_own_folder("widened-only");
     shared.config.judge.target = ScoreTarget::LocalBest;
     let (_, played) = play(&mut shared, true);
     assert!(played.ex_score > 0, "the fixture run scores");
     let md5 = recorded_model().md5;
-    assert_eq!(shared.scores.best_ex_for_md5_in_ln_mode(&md5, SCORE_LN_MODE_FROM_CHART), None, "an assisted run is no local best");
+    assert_eq!(shared.scores.best_ex_for_md5_in_ln_mode(&md5, SCORE_LN_MODE_FROM_CHART), None, "a widened run is no local best");
 
     for fallback in ScoreTarget::FALLBACKS {
         shared.config.judge.target_fallback = fallback;

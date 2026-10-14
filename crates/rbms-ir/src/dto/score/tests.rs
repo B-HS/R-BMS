@@ -360,7 +360,7 @@ fn course_submission_without_the_superset_fields_defaults_them() {
 fn submission_for_bounds() -> ScoreSubmission {
     ScoreSubmission {
         api_version: crate::API_VERSION,
-        chart: ChartId { md5: "m".into(), sha256: "s".into() },
+        chart: ChartId { md5: "m".into(), sha256: "s".into() }.into(),
         player: PlayerId { id: crate::GUEST_PLAYER_ID.into() },
         mode: "BEAT_7K".into(),
         clear: ClearLamp::Failed,

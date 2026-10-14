@@ -21,9 +21,11 @@ use rbms_config::{
     Config, HISPEED_MAX, HISPEED_MIN, LANE_SHADE_MAX, LANE_SHADE_MIN, LANE_SHADE_STEP, PLAY_ESCAPE_DOUBLE_MS, PLAY_ESCAPE_HOLD_MS, PlayEscape, SortMode,
     TableSource, algorithm_token, gauge_auto_shift_token, gauge_from_name, gauge_set_token, gauge_token, ln_mode_token,
 };
-use rbms_ir::mapping::{CUSTOM_JUDGE_ASSIST, LIGHT_ASSIST, NO_ASSIST, assist_flags, assist_level, combo_breaks, ir_clear, ir_gauge, ir_random};
+#[cfg(test)]
+use rbms_ir::ChartId;
+use rbms_ir::mapping::{LIGHT_ASSIST, NO_ASSIST, assist_flags, assist_level, combo_breaks, ir_clear, ir_gauge, ir_random};
 use rbms_ir::{
-    API_VERSION, AuthResponse, ChartId, IrError, JudgeBreakdown, PlayOptions, PlayerId, PlayerProfile, ReplayData, ScoreServer, ScoreSubmission, SettingsBlob,
+    API_VERSION, AuthResponse, IrError, JudgeBreakdown, PlayOptions, PlayerId, PlayerProfile, ReplayData, ScoreServer, ScoreSubmission, SettingsBlob,
     SettingsPutResult, SubmitOutcome,
 };
 use rbms_judge::gauge::{AssistLevel, assist_downgrade};
@@ -97,6 +99,7 @@ pub mod target;
 mod textedit;
 mod timing;
 mod toast;
+mod user_folders;
 mod window_mode;
 use app_network::build_server;
 use app_play::schedule_poll_interval_us;
@@ -285,45 +288,31 @@ fn end_course(shared: &mut AppShared) -> Transition {
     Transition::Back
 }
 
-/// Why this run's score must not be sent to the IR, or `None` when it may be submitted. Mirrors
-/// the reference implementation: only a real interactive PLAY reaches the IR (`MusicResult.java:82`), and any assist —
-/// a judge width or long-note margin widened past 100% (`BMSPlayer.java:208-214`) or an auto-played
-/// lane (`BMSPlayer.java:248-252`) — clears the score flag.
-fn ir_submission_block_reason(autoplay: bool, replay: bool, custom_judge: bool, scratch_auto: bool, practice: bool) -> Option<&'static str> {
+/// Why this run's score must not be sent to the IR, or `None` when it may be submitted: only a run
+/// the player did not play by hand -- an autoplay, a replay being watched or a practice slice -- is
+/// held back (`MusicResult.java:82` sends only a PLAY).
+///
+/// Every run the player played is sent, assisted or not (the player's decision of 2026-10-14: "no
+/// record goes unsaved"). The reference sends none that cleared its `score` flag; here the assist
+/// travels with the submission instead ([`assist_flags`], `options.scratch_auto`) and what the
+/// server makes of it is the server's.
+fn ir_submission_block_reason(autoplay: bool, replay: bool, practice: bool) -> Option<&'static str> {
     if autoplay {
         return Some("autoplay");
     }
     if replay {
         return Some("replay playback");
     }
-    if custom_judge {
-        return Some("judge window widened");
-    }
-    if scratch_auto {
-        return Some("scratch assist");
-    }
     crate::practice::practice_block_reason(practice)
 }
 
-/// Whether this run may update the stored bests (EX / lamp / BP), i.e. it was an unassisted
-/// interactive play. Same predicate as [`ir_submission_block_reason`], so the IR gate and the local
-/// score book never disagree — the reference implementation derives both from the one `score` flag
-/// (`BMSPlayer.java:203-252` clears it wherever it raises `assist`, `:363`
-/// `resource.setUpdateScore(score)`, `MusicResult.java:444-446` passes it to
-/// `PlayDataAccessor.writeScoreData`, and `ScoreData.java:548,566,572,578` gate
-/// exscore/avgjudge/minbp/combo on it).
-fn updates_score(autoplay: bool, replay: bool, custom_judge: bool, scratch_auto: bool, practice: bool) -> bool {
-    ir_submission_block_reason(autoplay, replay, custom_judge, scratch_auto, practice).is_none()
-}
-
-/// Whether a run at this assist level may still leave a replay behind. A custom judge is the level
-/// decision 12 blocks the recording at; an auto-played lane keeps its replay.
-///
-/// Keeping it is a deliberate divergence: the reference gates the save on the score flag
-/// (`MusicResult.java:317-321`), which every assist clears, so it saves no replay at
-/// [`LIGHT_ASSIST`] either. Recorded in `docs/acknowledge/reference-divergences.md`.
-fn saves_replay(assist: u8) -> bool {
-    assist < CUSTOM_JUDGE_ASSIST
+/// Whether this run may update the stored bests (EX / judgements / combo / BP): a run the player
+/// played by hand, unless its judge window or long-note margin was widened past the chart's
+/// (`BMSPlayer.java:208-214` clears the `score` flag for it, `ScoreData.java:548,566,572,578` gate
+/// the bests on that flag). A SCRATCH AUTO run sets bests like any other: its turntable notes are
+/// not in the chart it was judged on, so it is scored out of the notes it was played on.
+fn updates_score(autoplay: bool, replay: bool, custom_judge: bool, practice: bool) -> bool {
+    ir_submission_block_reason(autoplay, replay, practice).is_none() && !custom_judge
 }
 
 /// The lamp a run at this assist level is awarded: the reference demotes any assisted clear to
@@ -410,14 +399,18 @@ fn is_pad_row(row: &KcRow) -> bool {
 }
 
 /// Where the song-select browser currently is. Navigation is Root → (ALL SONGS | each table →
-/// per-level folder) → charts, modelling the reference implementation's table-as-custom-folder browsing. The
-/// indices select a table and a level within `AppShared::table_levels`.
+/// per-level folder | the player's own folders → one of them) → charts, modelling the reference
+/// implementation's table-as-custom-folder browsing. The indices select a table and a level within
+/// `AppShared::table_levels`, and a folder within `AppShared::user_folders`.
 #[derive(Clone, Copy, PartialEq)]
 enum SelectView {
     Root,
     AllSongs,
     TableLevels(usize),
     TableLevel(usize, usize),
+    /// The player's own folders, fetched from their account ([`user_folders`]).
+    UserFolders,
+    UserFolder(usize),
 }
 
 /// One row in the select list: either a folder to descend into, or a playable chart (index
@@ -637,6 +630,9 @@ struct AppShared {
     /// The difficulty tables being fetched beside the frame loop, which whichever screen is up
     /// takes as they land. A fetch outlives the screen that started it, so it is kept here.
     table_fetches: tablesrc::TableFetches,
+    /// The signed-in player's own folders of charts and the fetch of them, which like a table's
+    /// outlives the screen that started it.
+    user_folders: user_folders::UserFolders,
     select_view: SelectView,
     select_items: Vec<SelectItem>,
     /// Incremental song search: `searching` opens the box (`/`), `search` is the live query (filters
@@ -833,6 +829,12 @@ impl App {
     /// A replay launch forces autoplay off for the whole session, a folder launch joins the library
     /// list (and is persisted straight away, so the next launch finds it), and a `--table` source is
     /// added for this run only.
+    ///
+    /// A run that starts on the browser without scanning -- a first run with no song folder, or a
+    /// chart or replay named on the command line -- reads its difficulty tables from their copies
+    /// here, asking the network nothing, so a table every player is given is a folder from the first
+    /// frame; the ones that have no copy are fetched once the browser is up. The signed-in player's
+    /// own folders are shown from the copy kept of them ([`user_folders::follow_account`]).
     fn new(input: String, mut config: Config, launch: LaunchOptions, settings_path: PathBuf) -> Self {
         let replay = launch.replay_path.as_ref().and_then(|p| match Replay::load(Path::new(p)) {
             Ok(r) => {
@@ -891,8 +893,6 @@ impl App {
                 }
             }
         }
-        let table_names: Vec<String> = Vec::new();
-        let table_levels: Vec<TableLevels> = Vec::new();
         let (stage, chart_path, launch_chart) = if let Some(rp) = &replay {
             (Stage::Select(Box::new(SelectState::new())), rp.chart_path.clone(), true)
         } else if p.is_file() {
@@ -902,6 +902,14 @@ impl App {
         } else {
             let stage = Stage::Loading(LoadingState::scan(config.library.folders.clone(), config.library.tables.clone(), songdb_path.clone(), full_rescan));
             (stage, String::new(), false)
+        };
+        let mut table_fetches = tablesrc::TableFetches::default();
+        let (table_names, table_levels): (Vec<String>, Vec<TableLevels>) = if matches!(stage, Stage::Loading(_)) || config.library.tables.is_empty() {
+            (Vec::new(), Vec::new())
+        } else {
+            table_fetches.first_fetches_are_due();
+            let store = tablesrc::TableStore::beside(&settings_path);
+            tablesrc::read_and_match_all(&store, &config.library.tables, &library, &std::sync::atomic::AtomicUsize::new(0))
         };
 
         let session = AccountSession::restored(config.network.ir_token.clone(), config.network.ir_login_id.clone());
@@ -940,7 +948,8 @@ impl App {
                 pad,
                 table_names,
                 table_levels,
-                table_fetches: tablesrc::TableFetches::default(),
+                table_fetches,
+                user_folders: user_folders::UserFolders::default(),
                 select_view: SelectView::Root,
                 select_items: Vec::new(),
                 search: String::new(),
@@ -1034,6 +1043,7 @@ impl App {
                 build_sha256: build_hash(),
             },
         };
+        user_folders::follow_account(&mut app.shared);
         app.shared.rebuild_select_items();
         app.shared.reload_skin();
         app
@@ -1386,16 +1396,21 @@ fn config_dir_from(home: Option<std::ffi::OsString>, userprofile: Option<std::ff
 /// name included. A failure to start the event loop is reported to the user rather than panicking.
 ///
 /// A configuration written by a newer build is left untouched: this run falls back to the defaults
-/// rather than overwriting settings it cannot read.
+/// rather than overwriting settings it cannot read. A configuration that was read is given the
+/// difficulty tables every player is given and has not had yet ([`tablesrc::seed_default_tables`]).
 pub fn run(args: impl Iterator<Item = String>) -> ExitCode {
     let settings_path = config_dir().join("settings.ron");
     let mut config = match rbms_config::load(&settings_path) {
         Ok(outcome) => {
+            let mut config = outcome.config;
+            let given_tables = tablesrc::seed_default_tables(&mut config, &settings_path);
             if let Some(from) = outcome.migrated_from {
                 println!("settings migrated from schema version {from}");
-                save_config(&outcome.config, &settings_path);
             }
-            outcome.config
+            if outcome.migrated_from.is_some() || given_tables {
+                save_config(&config, &settings_path);
+            }
+            config
         }
         Err(e) => {
             notify(Level::Warn, format!("settings not loaded ({e}); running on defaults and leaving the file alone"));

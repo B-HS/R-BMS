@@ -107,10 +107,11 @@ fn multi(profiles: Vec<IrProfile>) -> MultiIr {
     MultiIr { profiles, primary: 0, has_legacy: false }
 }
 
-fn submission() -> ScoreSubmission {
+/// A submission with every field filled in, for the tests of anything that sends one.
+pub(crate) fn submission() -> ScoreSubmission {
     ScoreSubmission {
         api_version: rbms_ir::API_VERSION,
-        chart: ChartId { md5: "m".into(), sha256: "s".into() },
+        chart: ChartId { md5: "m".into(), sha256: "s".into() }.into(),
         player: PlayerId { id: "p".into() },
         mode: "BEAT_7K".into(),
         clear: ClearLamp::Normal,

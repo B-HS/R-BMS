@@ -39,7 +39,7 @@ fn a_default_flat_file_migrates_to_the_shipped_defaults() {
     let dir = staged("default", "settings-v0-default.ron", None, None);
     let outcome = load(&dir.join("settings.ron")).expect("the fixture loads");
     assert_eq!(outcome.migrated_from, Some(LEGACY_SCHEMA_VERSION));
-    assert_eq!(outcome.config, Config::default(), "a file written by an untouched install migrates to the shipped defaults");
+    assert_eq!(outcome.config, Config::first_run(), "a file written by an untouched install migrates to what a first run starts from");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

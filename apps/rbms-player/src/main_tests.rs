@@ -8,7 +8,7 @@ use super::judge_setup::{is_custom_judge, judge_setup_of};
 use super::{
     ROOT_ESC_CONFIRM, SortMode, assisted_lamp, build_hash, bundled_skin, clear_type_from_id, clear_type_id, client_platform, compute_build_hash,
     config_dir_from, default_total_for_mode, esc_confirms_quit, exit_code, fmt_datetime, green_number_for, ir_submission_block_reason, resumed_clock_us,
-    saves_replay, sound_folder_path, updates_score, write_atomic,
+    sound_folder_path, updates_score, write_atomic,
 };
 use rbms_chart::{default_total, default_total_keyboard};
 use rbms_config::{Config, JUDGE_RATE_MAX_PERCENT, LN_MARGIN_DEFAULT_PERCENT, LN_MARGIN_MAX_PERCENT, LN_MARGIN_MIN_PERCENT, UNMODIFIED_JUDGE_RATES};
@@ -239,34 +239,30 @@ fn green_number_floating_tracks_bpm_scroll_and_cover() {
     assert!((green_number_for(false, 120.0, 1.0, 1.0, 0.4) - 1200.0).abs() < 1e-3);
 }
 
+/// Every run the player played by hand is sent, assisted or not (the player's decision of
+/// 2026-10-14); only a run nobody played is held back.
 #[test]
-fn ir_submission_allowed_only_for_an_unassisted_interactive_play() {
-    assert_eq!(ir_submission_block_reason(false, false, false, false, false), None);
+fn ir_submission_is_held_back_only_for_a_run_nobody_played() {
+    assert_eq!(ir_submission_block_reason(false, false, false), None);
+    assert_eq!(ir_submission_block_reason(true, false, false), Some("autoplay"));
+    assert_eq!(ir_submission_block_reason(false, true, false), Some("replay playback"));
+    assert_eq!(ir_submission_block_reason(false, false, true), Some("practice"));
 }
 
+/// A run that sets bests is always one that is sent; a widened judge is sent and sets none, and
+/// SCRATCH AUTO is no part of either question any more.
 #[test]
-fn ir_submission_blocked_for_autoplay_replay_and_assists() {
-    assert_eq!(ir_submission_block_reason(true, false, false, false, false), Some("autoplay"));
-    assert_eq!(ir_submission_block_reason(false, true, false, false, false), Some("replay playback"));
-    assert_eq!(ir_submission_block_reason(false, false, true, false, false), Some("judge window widened"));
-    assert_eq!(ir_submission_block_reason(false, false, false, true, false), Some("scratch assist"));
-    assert_eq!(ir_submission_block_reason(false, false, false, false, true), Some("practice"));
-}
-
-#[test]
-fn updates_score_is_the_exact_complement_of_the_ir_block_reason() {
+fn updates_score_is_a_run_that_is_sent_and_not_judged_wider() {
     for &autoplay in &[false, true] {
         for &replay in &[false, true] {
             for &custom_judge in &[false, true] {
-                for &scratch_auto in &[false, true] {
-                    for &practice in &[false, true] {
-                        let blocked = ir_submission_block_reason(autoplay, replay, custom_judge, scratch_auto, practice).is_some();
-                        assert_eq!(
-                            updates_score(autoplay, replay, custom_judge, scratch_auto, practice),
-                            !blocked,
-                            "autoplay={autoplay} replay={replay} custom_judge={custom_judge} scratch_auto={scratch_auto} practice={practice}"
-                        );
-                    }
+                for &practice in &[false, true] {
+                    let sent = ir_submission_block_reason(autoplay, replay, practice).is_none();
+                    assert_eq!(
+                        updates_score(autoplay, replay, custom_judge, practice),
+                        sent && !custom_judge,
+                        "autoplay={autoplay} replay={replay} custom_judge={custom_judge} practice={practice}"
+                    );
                 }
             }
         }
@@ -274,13 +270,12 @@ fn updates_score_is_the_exact_complement_of_the_ir_block_reason() {
 }
 
 #[test]
-fn updates_score_only_for_an_unassisted_interactive_play() {
-    assert!(updates_score(false, false, false, false, false));
-    assert!(!updates_score(false, false, true, false, false), "a widened judge window does not");
-    assert!(!updates_score(false, false, false, true, false), "auto scratch does not");
-    assert!(!updates_score(true, false, false, false, false));
-    assert!(!updates_score(false, true, false, false, false));
-    assert!(!updates_score(false, false, false, false, true), "a practice slice does not");
+fn updates_score_for_every_run_by_hand_but_a_widened_judge() {
+    assert!(updates_score(false, false, false, false));
+    assert!(!updates_score(false, false, true, false), "a widened judge window does not");
+    assert!(!updates_score(true, false, false, false));
+    assert!(!updates_score(false, true, false, false));
+    assert!(!updates_score(false, false, false, true), "a practice slice does not");
 }
 
 /// The exact table decision 12 states, over every judge width and long-note margin the rows can
@@ -328,14 +323,6 @@ fn only_the_single_light_assist_keeps_the_higher_demoted_lamp() {
         clear_type_id(ClearType::AssistEasy) < clear_type_id(ClearType::LightAssistEasy),
         "the demotion really does order the two lamps, or this proves nothing"
     );
-}
-
-/// Decision 12's split: a custom judge blocks the replay, an auto-played lane does not.
-#[test]
-fn only_a_custom_judge_blocks_the_replay_recording() {
-    assert!(saves_replay(NO_ASSIST));
-    assert!(saves_replay(LIGHT_ASSIST), "an auto-played lane keeps its replay");
-    assert!(!saves_replay(CUSTOM_JUDGE_ASSIST));
 }
 
 /// Any assist puts the full-combo lamps out of reach and demotes the clear

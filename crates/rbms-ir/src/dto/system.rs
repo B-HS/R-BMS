@@ -13,6 +13,9 @@ pub struct ServerCapabilities {
     pub tables: bool,
     /// Account-side settings blob sync (`/players/{id}/settings/{name}`).
     pub settings_sync: bool,
+    /// The player's own folders of charts, read with `/players/{id}/folders`. Nothing waits on the
+    /// flag: a client asks for the folders all the same and takes a 404 as a server without them.
+    pub folders: bool,
     /// Account creation and login over the IR itself (`/auth/register`, `/auth/login`).
     pub accounts: bool,
     /// The server also speaks the legacy LR2IR wire format.
@@ -83,6 +86,9 @@ mod tests {
         });
         let c: ServerCapabilities = serde_json::from_value(j).unwrap();
         assert!(c.settings_sync && c.accounts && c.replays);
+        assert!(!c.folders, "a server that does not list the flag has no folders to the client");
+        let with_folders: ServerCapabilities = serde_json::from_value(json!({ "folders": true })).unwrap();
+        assert!(with_folders.folders);
         assert!(!c.lr2ir_compat);
     }
 

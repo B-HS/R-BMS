@@ -91,8 +91,9 @@ pub(crate) fn parse_entries(bytes: &[u8]) -> Result<(Vec<TableEntry>, usize), Ta
 }
 
 /// A header, which is a JSON object and nothing else: a list is a body, however few fields a
-/// header is required to have.
-pub(crate) fn parse_header(bytes: &[u8]) -> Result<TableHeader, TableError> {
+/// header is required to have. With [`DifficultyTable::parse_body`] this reads a table kept as its
+/// two files, the way a table's server serves it.
+pub fn parse_header(bytes: &[u8]) -> Result<TableHeader, TableError> {
     let object: serde_json::Map<String, serde_json::Value> = parse_json(bytes).map_err(TableError::HeaderParse)?;
     serde_json::from_value(serde_json::Value::Object(object)).map_err(TableError::HeaderParse)
 }
