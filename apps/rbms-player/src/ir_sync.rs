@@ -70,11 +70,16 @@ pub(crate) fn merge_downloaded(local: &Config, remote: Config) -> Config {
     keep_local(local, remote)
 }
 
+/// The line break of an uploaded blob: one byte on every platform, so the same settings leave
+/// Windows, macOS and Linux as the same text and a blob written on one reads unchanged on another.
+const BLOB_NEW_LINE: &str = "\n";
+
 /// Serialise the payload into a blob ready for `put_settings`. `base_updated_at` is the
 /// `updated_at` of the copy this edit was based on; `None` overwrites the server unconditionally,
 /// which is what a first upload does.
 pub(crate) fn build_blob(payload: &SyncPayload, updated_at: i64, base_updated_at: Option<i64>) -> Result<SettingsBlob, String> {
-    let content = ron::ser::to_string_pretty(payload, ron::ser::PrettyConfig::default()).map_err(|e| e.to_string())?;
+    let pretty = ron::ser::PrettyConfig::default().new_line(BLOB_NEW_LINE);
+    let content = ron::ser::to_string_pretty(payload, pretty).map_err(|e| e.to_string())?;
     Ok(SettingsBlob { name: SETTINGS_BLOB_NAME.to_string(), content, updated_at, format: SETTINGS_BLOB_FORMAT.to_string(), base_updated_at })
 }
 
@@ -428,6 +433,16 @@ mod tests {
         let blob = build_blob(&payload_of(Config::default()), 2_000, Some(1_900)).unwrap();
         assert_eq!(blob.base_updated_at, Some(1_900));
         assert_eq!(blob.updated_at, 2_000);
+    }
+
+    /// An upload is the same text on every platform: RON's own default breaks lines with CRLF on
+    /// Windows, which made the blob a Windows machine sent differ from the one macOS sent.
+    #[test]
+    fn an_uploaded_blob_breaks_its_lines_the_same_way_on_every_platform() {
+        let blob = build_blob(&payload_of(Config::default()), 2_000, None).unwrap();
+        assert!(blob.content.contains(BLOB_NEW_LINE), "the blob is written over several lines");
+        assert!(!blob.content.contains('\r'), "the blob carries a carriage return");
+        assert_eq!(parse_blob(&blob).expect("the blob parses back").settings, Config::default());
     }
 
     #[test]
