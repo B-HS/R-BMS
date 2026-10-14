@@ -1,0 +1,50 @@
+{
+    "api_version": 1,
+    "charts": [
+        {
+            "md5": "2a8b45171dd0ab9b14ef7c38b318371d",
+            "sha256": "723b9699c9a3d1b752128e6e52a35b6430eb8087975e0e7b8869f58c059eb5cb"
+        },
+        {
+            "md5": "88462a7b19d5bbbc6806eac0d0191fd8",
+            "sha256": "d4185e9eb362091f18d49fdb6bed9e5a6cd57945e33a9c02aa7dbb8f5760fc2c"
+        }
+    ],
+    "clear": "Normal",
+    "course_hash": "e42cd864171c99e986896ad8b9d71c501a9e5789346c4829cec6c801aa74e661",
+    "ex_score": 112,
+    "extra": {},
+    "gauge_value": 100.0,
+    "judge": {
+        "avgjudge": 0,
+        "bad": 0,
+        "combobreak": 0,
+        "ebd": 0,
+        "egd": 0,
+        "egr": 0,
+        "empty_poor": 0,
+        "ems": 0,
+        "epg": 0,
+        "epr": 0,
+        "fast": 56,
+        "good": 0,
+        "great": 0,
+        "lbd": 0,
+        "lgd": 0,
+        "lgr": 0,
+        "lms": 0,
+        "lpg": 0,
+        "lpr": 0,
+        "miss": 0,
+        "pgreat": 56,
+        "poor": 0,
+        "slow": 0
+    },
+    "lntype": 0,
+    "max_combo": 56,
+    "max_ex_score": 112,
+    "minbp": 0,
+    "played_at": 1791970074354,
+    "player": { "id": "tester" },
+    "trophy": "goldmedal"
+}
