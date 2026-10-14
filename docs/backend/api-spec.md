@@ -23,6 +23,14 @@
 ```
 > 네이티브 IR 경로는 `rbms-ir`가 파싱하는 **raw JSON**이고, FE 전용 경로(`/api/fe/*`)만 `{success,data,pagination?}` envelope를 반환합니다. `?envelope=1`과 Accept 협상은 구현하지 않았습니다.
 
+`details` 는 비프로덕션(`NODE_ENV !== 'production'`)에서만 통째로 실린다. 프로덕션에서는 **문자열인 `details.field`·`details.reason` 만** 남기고 나머지(Zod `issues`, 경로, 플레이어 id 등 입력이 섞일 수 있는 값)는 숨긴다. 필드 이름과 고정 이유 토큰은 비밀이 아니고, 클라이언트가 결과 화면에 `VALIDATION_ERROR: judge (judge count exceeds total_notes)` 처럼 거절 이유를 보여 주려면 필요하다(구현 `publicErrorDetails`, `web/src/server/lib/api-response.ts`). 둘 다 없으면 `details` 키 자체가 없다.
+```jsonc
+// 프로덕션의 400 예
+{ "success": false, "error": { "code": "VALIDATION_ERROR", "message": "요청 형식이 올바르지 않습니다.",
+  "details": { "field": "judge", "reason": "judge count exceeds total_notes" } } }
+```
+본문·쿼리의 스키마(Zod) 검증 실패는 `details = { field, reason, issues }` 이고, `field` 는 첫 이슈의 경로(`judge.poor`, 경로가 비면 `body`), `reason` 은 그 이슈의 메시지다(`web/src/server/lib/parse-request.ts`). 라우트가 직접 던지는 검증 오류는 `field` 만(`played_at`, `chart.sha256`, `client_build_sha256`) 또는 `field`+`reason`(`judge`)을 싣는다.
+
 ### 0.2 상태코드 / 에러코드
 | HTTP | 상황 | code(예) |
 |---|---|---|
@@ -195,7 +203,8 @@
 규칙:
 - **`chart.title`·`chart.artist`·`chart.level`**(모두 선택, 결정 M8): 서버가 만든 차트 행의 제목·아티스트·레벨이 비어 있을 때만 채운다. 값이 이상하면 제출을 막지 않고 버린다(문자열은 앞뒤 공백을 떼고 255자로 자름, `level` 은 0~1000 정수만). `GET /api/charts/{hash}` 등은 그 `md5` 가 번들 표에 있으면 읽을 때 표의 제목·아티스트로 빈 값을 채워 응답한다(DB 는 고치지 않음).
 - **`seed`**(최상위, 선택): 클라이언트는 `u64` 로 보내고 예전 빌드는 시계의 나노초(2^53 초과)를 보냈다. 서버는 `Number.isSafeInteger` 가 아닌 값을 거절하지 않고 **0 으로 저장**한다(`seedSchema`, `web/src/server/dto/common.ts`. 리플레이 업로드의 `seed` 도 같다). 시드는 참고용이라 순위·무결성 판정에 쓰지 않는다. 이 규칙이 없던 d733a8f 이전 서버는 큰 시드의 제출을 400 으로 거절했다(v0.1.2 점수 제출 400 사고. 근거 [../acknowledge/2026-10-14-adr-layout-seed-range.md](../acknowledge/2026-10-14-adr-layout-seed-range.md)).
-- **멱등**: 동일 `(player, sha256||md5, played_at)` 재전송은 기존 score_id 반환(중복 생성 X).
+- **멱등**: 같은 사용자·같은 차트(sha256)에서 `played_at` 이 **같은 초**(`floor(played_at / 1000)` 이 같음)인 재전송은 기존 score_id 를 돌려주고 새로 만들지 않는다. 응답은 200, `message: "duplicate submission ignored"`(상수 `DUPLICATE_SUBMISSION_MESSAGE`. 클라이언트가 이 문자열로 "이미 있음"을 센다), `is_new_best: false`, `previous_best: null`. 초 단위로 넓힌 이유: 로컬 기록(`scorelog.date`)의 시각은 초 단위라, 리플레이 파일이 없는 옛 판을 다시 보내면 `played_at` 이 원래 밀리초와 다르다. 한 판은 1초보다 길어서 같은 사용자·차트의 서로 다른 두 판이 같은 초에 끝날 수 없다. 조회는 `score_idempotent_uniq(user_id, chart_sha256, played_at)` 의 범위 탐색이라 새 색인이 없고, 유일 색인은 그대로라 정확히 같은 밀리초의 동시 삽입은 DB 가 막는다. guest 제출은 멱등 조회를 하지 않는다.
+- **판정 수 검사**: 노트를 소비한 판정 `pgreat + great + good + bad + poor` 가 `total_notes` 를 넘으면 400 `VALIDATION_ERROR`(`details: { field: "judge", reason: "judge count exceeds total_notes" }`)다. `miss`(rbms 의 空POOR, 노트를 소비하지 않음)와 `empty_poor` 는 세지 않는다. `mode` 가 `POPN_9K` 면 BAD 도 노트를 소비하지 않으므로 뺀다(레퍼런스 `JudgeProperty.PMS` 의 `judgeVanish = {true,true,true,false,true,false}` — BAD 와 空POOR 만 노트를 지우지 않는다. rbms 의 `rbms-judge` `PMS.judge_vanish` 도 같다). `mode` 는 대소문자와 `-`/`_` 차이를 무시한다(`BEAT-7K` = `BEAT_7K`). `total_notes` 가 0 인 구버전 제출은 검사하지 않는다. 옛 식 `pgreat+great+good+bad+max(poor-empty_poor,0)+miss` 는 `miss` 를 노트 소비로 세어, 空POOR 가 見逃し POOR 보다 많은 완주 판을 거절했다(이 수리 전의 서버. 사용자 판 #52: total 1835 = PG~BD 1815 + POOR 20, miss 43 → 옛 식 1858 로 400).
 - **best 갱신**: 램프(우선) → EX → BP 순 비교, 더 좋을 때만 best 갱신. 모든 제출은 history로 누적(랭킹은 best 기준). **ranked=false는 best/랭킹 비반영**(기록·리플레이는 보존).
 - **SCRATCH AUTO**(웨이브 20, 사용자 결정 2026-10-14): `options.scratch_auto=true` 이거나 `options.assist` 에 `AUTO_SCRATCH` 가 있는 판은 `SCRATCH_AUTO` 표지 flag 를 달고 **ranked** 다. best 는 `(chart, user, scratch_auto)` 로 나눠 두므로 일반 판 최고와 SCRATCH AUTO 판 최고가 따로 남는다. `previous_best`·`is_new_best` 는 그 판의 칸(일반/SCRATCH AUTO) 기준이고, `rank` 는 그 판이 속한 목록(일반 판은 기본 목록, SCRATCH AUTO 판은 `include_scratch_auto=true` 목록)에서 이 판보다 좋은 기록의 수 + 1 이다. 같은 사용자의 더 좋은 다른 칸 최고 기록(예: 일반 판 800 이 있는데 SCRATCH AUTO 700 을 낸 경우)도 센다. `message` 는 `saved (scratch auto)`. `AUTO_SCRATCH` 밖의 어시스트 태그(`CUSTOM_JUDGE` 등)는 여전히 `ASSIST` 로 unranked 이고, 그때 `message` 의 사유에는 `scratch_auto` 를 넣지 않는다(`recorded (unranked: assist,judge_width)`).
 - **`ranked=false` 판의 저장**: 클라이언트는 손으로 친 모든 판(SCRATCH AUTO 판 포함, 사용자 결정 2026-10-14)을 보내고, 서버는 `score` 행으로 보존하되 `chart_best`·순위에는 올리지 않는다. 넓힌 판정 판은 클라이언트가 `ranked` 를 막지 않고 보내도 서버가 `ASSIST` 로 unranked 처리한다(최고 기록·순위 제외는 메인이 정한 정책이며 사용자 미확인).
@@ -328,8 +337,10 @@ DB 의 IR 표(위)와 별개로, 저장소의 스냅샷(`web/data/tables/<id>/`)
   "event_count": 1624, "duration_us": 142000000,
   "size":10240, "extra":{} }
 // 201 → { "id":"rp_…", "url":"/api/replays/rp_…", "event_count":1624 }
+// 200 → 같은 모양. 본문 score_id 에 이미 리플레이가 연결돼 있으면 새로 저장하지 않고 그 리플레이를 돌려준다(멱등)
 // 413 IR_PAYLOAD_TOO_LARGE (상한: env REPLAY_MAX_BYTES, 예 4MB)
 ```
+> **멱등**: `score_id` 가 있고 그 점수(같은 사용자)에 이미 `replay_id` 로 연결된 리플레이가 있으면 `replay` 행을 만들지 않고 200 으로 기존 `{ id, url, event_count }` 를 돌려준다(캐시 무효화도 하지 않는다). 기록 동기화가 같은 판의 리플레이를 다시 올려도 행이 쌓이지 않게 하기 위함이다. 먼저 `score_id` 의 점수가 있어야 연결이 생기므로 점수 제출(§5)이 앞선다. `score_id` 가 없는 업로드는 지금처럼 올릴 때마다 새 행이다. rate-limit(10/min/token)은 200 응답에도 한 번 센다.
 ### `GET /api/replays/{id}` → `ReplayData`(events µs 포함) — 다운로드(고스트·관전·**핵분석**·검증)
 ### `GET /api/charts/{hash}/replays?player={id}&limit=` → `ReplayMeta[]`(events 제외 목록)
 > 현재 서버는 events JSON을 MySQL `replay.data`에 저장하고 메타를 같은 행에 인덱싱합니다. `REPLAY_STORAGE=db`만 지원하며, `blob`/Vercel Blob은 미구현입니다. 재시뮬 검증(FR-12)은 후속입니다.

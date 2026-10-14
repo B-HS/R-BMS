@@ -63,4 +63,19 @@ describe('parseLimitedJsonBody', () => {
         expect(error?.code).toBe('VALIDATION_ERROR')
         expect(error?.statusCode).toBe(400)
     })
+
+    test('스키마 검증 실패는 첫 이슈의 경로와 메시지를 field·reason 으로 싣는다', async () => {
+        const nested = z.object({ judge: z.object({ poor: z.number().int().min(0) }) })
+        const request = new Request('http://localhost:3000/api/scores', { method: 'POST', body: JSON.stringify({ judge: { poor: -1 } }) })
+        const error = await captureError(() => parseLimitedJsonBody(request, nested, MAX_BYTES))
+        expect(error?.details?.field).toBe('judge.poor')
+        expect(typeof error?.details?.reason).toBe('string')
+        expect(Array.isArray(error?.details?.issues)).toBe(true)
+    })
+
+    test('본문 전체가 틀리면 field 는 body 다', async () => {
+        const request = new Request('http://localhost:3000/api/scores', { method: 'POST', body: 'null' })
+        const error = await captureError(() => parseLimitedJsonBody(request, schema, MAX_BYTES))
+        expect(error?.details?.field).toBe('body')
+    })
 })

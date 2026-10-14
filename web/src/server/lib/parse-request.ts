@@ -2,6 +2,13 @@ import type { z } from 'zod'
 import { ERROR_CODE } from '@server/lib/error-code'
 import { createAppError } from '@server/lib/error'
 
+const ROOT_FIELD = 'body'
+
+const validationError = (issues: z.core.$ZodIssue[]) => {
+    const [first] = issues
+    return createAppError(ERROR_CODE.VALIDATION_ERROR, { field: first?.path.map(String).join('.') || ROOT_FIELD, reason: first?.message, issues })
+}
+
 const parseJsonText = (text: string): unknown => {
     try {
         return JSON.parse(text)
@@ -13,14 +20,14 @@ const parseJsonText = (text: string): unknown => {
 export const parseJsonBody = async <T>(request: Request, schema: z.ZodType<T>): Promise<T> => {
     const body = await request.json().catch(() => null)
     const parsed = schema.safeParse(body)
-    if (!parsed.success) throw createAppError(ERROR_CODE.VALIDATION_ERROR, { issues: parsed.error.issues })
+    if (!parsed.success) throw validationError(parsed.error.issues)
     return parsed.data
 }
 
 export const parseSearchParams = <T>(request: Request, schema: z.ZodType<T>): T => {
     const params = Object.fromEntries(new URL(request.url).searchParams.entries())
     const parsed = schema.safeParse(params)
-    if (!parsed.success) throw createAppError(ERROR_CODE.VALIDATION_ERROR, { issues: parsed.error.issues })
+    if (!parsed.success) throw validationError(parsed.error.issues)
     return parsed.data
 }
 
@@ -58,6 +65,6 @@ export const readLimitedText = async (request: Request, maxBytes: number) => {
 export const parseLimitedJsonBody = async <T>(request: Request, schema: z.ZodType<T>, maxBytes: number): Promise<T> => {
     const text = await readLimitedText(request, maxBytes)
     const parsed = schema.safeParse(parseJsonText(text))
-    if (!parsed.success) throw createAppError(ERROR_CODE.VALIDATION_ERROR, { issues: parsed.error.issues })
+    if (!parsed.success) throw validationError(parsed.error.issues)
     return parsed.data
 }

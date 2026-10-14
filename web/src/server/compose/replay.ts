@@ -79,6 +79,15 @@ export const composeReplay = (db: Database) => {
                     .limit(limit)
                 return rows.map((row) => toReplayRow(row, null))
             },
+            findLinkedReplay: async ({ scoreId, userId }) => {
+                const [row] = await db
+                    .select({ id: replay.id, eventCount: replay.eventCount })
+                    .from(score)
+                    .innerJoin(replay, eq(replay.id, score.replayId))
+                    .where(and(eq(score.id, scoreId), eq(score.userId, userId)))
+                    .limit(1)
+                return row ?? null
+            },
             linkScoreReplay: async ({ scoreId, userId, replayId }) => {
                 await db
                     .update(score)

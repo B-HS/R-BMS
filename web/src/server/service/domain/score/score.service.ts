@@ -7,6 +7,10 @@ export const GUEST_PLAYER_ID = 'guest'
 
 const PLAYED_AT_FUTURE_TOLERANCE_MS = 5 * 60 * 1000
 const USER_AGENT_MAX_LENGTH = 255
+const IDEMPOTENCY_WINDOW_MS = 1000
+const JUDGE_BAD_KEEPS_NOTE_MODES: ReadonlySet<string> = new Set(['POPN_9K'])
+
+export const DUPLICATE_SUBMISSION_MESSAGE = 'duplicate submission ignored'
 
 export type ScoreRankingRow = {
     scoreId: string
@@ -30,7 +34,7 @@ export type BestScope = { includeScratchAuto: boolean }
 export type ScoreInsertRow = ReturnType<typeof buildScoreRow>
 
 export type ScoreServiceDb = {
-    findScoreIdByIdempotency: (params: { userId: string; chartSha256: string; playedAt: number }) => Promise<string | null>
+    findScoreIdByIdempotency: (params: { userId: string; chartSha256: string; playedAtFrom: number; playedAtTo: number }) => Promise<string | null>
     insertScore: (row: ScoreInsertRow) => Promise<void>
     getChartBest: (params: {
         chartSha256: string
@@ -179,10 +183,17 @@ export const toScoreRecord = (row: ScoreRankingRow, rank: number | null): ScoreR
 
 export const isPlayedAtPlausible = (playedAt: number, now: number) => playedAt - now <= PLAYED_AT_FUTURE_TOLERANCE_MS
 
-export const judgedNoteCount = (judge: JudgeBreakdownInput) =>
-    judge.pgreat + judge.great + judge.good + judge.bad + Math.max(judge.poor - judge.empty_poor, 0) + judge.miss
+const normalizeMode = (mode: string) => mode.trim().toUpperCase().replaceAll('-', '_')
 
-export const isJudgeCountConsistent = (judge: JudgeBreakdownInput, totalNotes: number) => totalNotes === 0 || judgedNoteCount(judge) <= totalNotes
+/**
+ * Counts only the judgements that consume a note: PGREAT, GREAT, GOOD, BAD and POOR (a missed note).
+ * An empty POOR (`miss` on the wire) consumes nothing, and in POPN_9K a BAD does not consume the note either.
+ */
+export const judgedNoteCount = (judge: JudgeBreakdownInput, mode: string) =>
+    judge.pgreat + judge.great + judge.good + (JUDGE_BAD_KEEPS_NOTE_MODES.has(normalizeMode(mode)) ? 0 : judge.bad) + judge.poor
+
+export const isJudgeCountConsistent = (judge: JudgeBreakdownInput, totalNotes: number, mode: string) =>
+    totalNotes === 0 || judgedNoteCount(judge, mode) <= totalNotes
 
 const truncateUserAgent = (userAgent: string | null) => (userAgent === null ? null : userAgent.slice(0, USER_AGENT_MAX_LENGTH))
 
@@ -211,8 +222,14 @@ export const createScoreService = (deps: ScoreServiceDeps) => ({
         const countRank = async () =>
             (await deps.db.countBetterBests({ chartSha256: params.chartSha256, clear, exScore, includeScratchAuto: scratchAuto })) + 1
 
+        const playedAtFrom = Math.floor(input.played_at / IDEMPOTENCY_WINDOW_MS) * IDEMPOTENCY_WINDOW_MS
         const existingId = user
-            ? await deps.db.findScoreIdByIdempotency({ userId: user.id, chartSha256: params.chartSha256, playedAt: input.played_at })
+            ? await deps.db.findScoreIdByIdempotency({
+                  userId: user.id,
+                  chartSha256: params.chartSha256,
+                  playedAtFrom,
+                  playedAtTo: playedAtFrom + IDEMPOTENCY_WINDOW_MS - 1,
+              })
             : null
         if (existingId) {
             const rank = user && ranked ? await countRank() : null
@@ -220,7 +237,7 @@ export const createScoreService = (deps: ScoreServiceDeps) => ({
                 accepted: true,
                 rank,
                 previous_best: null,
-                message: 'duplicate submission ignored',
+                message: DUPLICATE_SUBMISSION_MESSAGE,
                 ranked,
                 flags,
                 is_new_best: false,

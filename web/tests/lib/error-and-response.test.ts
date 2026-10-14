@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { ERROR_CODE } from '@server/lib/error-code'
 import { createAppError, getStatusCode, isAppError } from '@server/lib/error'
-import { errorResponse, paginatedResponse, successResponse } from '@server/lib/api-response'
+import { errorResponse, paginatedResponse, publicErrorDetails, successResponse } from '@server/lib/api-response'
 import { consumeRateLimit, resetRateLimits } from '@server/lib/with-rate-limit'
 import { generateApiToken, hashApiToken, parseBearerToken, TOKEN_PREFIX } from '@server/lib/token'
 import { classifyChartHash } from '@server/service/domain/chart/chart.service'
@@ -51,6 +51,25 @@ describe('api-response 헬퍼', () => {
         const result = errorResponse(ERROR_CODE.UNAUTHORIZED, '인증이 필요합니다.')
         expect(result.success).toBe(false)
         expect(result.error.code).toBe('UNAUTHORIZED')
+    })
+
+    test('publicErrorDetails 는 프로덕션에서 문자열 field·reason 만 남긴다', () => {
+        expect(publicErrorDetails({ field: 'judge', reason: 'x', issues: [1], player: 'p' }, true)).toEqual({ field: 'judge', reason: 'x' })
+        expect(publicErrorDetails({ field: 'judge', reason: 3 }, true)).toEqual({ field: 'judge' })
+    })
+
+    test('프로덕션에서 field·reason 이 없으면 details 를 싣지 않는다', () => {
+        expect(publicErrorDetails({ player: 'p' }, true)).toBeUndefined()
+        expect(publicErrorDetails(undefined, true)).toBeUndefined()
+        expect(publicErrorDetails({ field: 3, reason: null }, true)).toBeUndefined()
+    })
+
+    test('비프로덕션에서는 details 를 그대로 둔다', () => {
+        const details = { issues: [1] }
+        expect(publicErrorDetails(details, false)).toBe(details)
+        expect(publicErrorDetails(undefined, false)).toBeUndefined()
+        expect(errorResponse(ERROR_CODE.VALIDATION_ERROR, 'x', details).error).toEqual({ code: 'VALIDATION_ERROR', message: 'x', details })
+        expect('details' in errorResponse(ERROR_CODE.VALIDATION_ERROR, 'x').error).toBe(false)
     })
 })
 

@@ -68,7 +68,7 @@ export const createSubmitScoreRoute = () =>
             await auditRejection('chart-hash')
             throw createAppError(ERROR_CODE.VALIDATION_ERROR, { field: 'chart.sha256' })
         }
-        if (!isJudgeCountConsistent(input.judge, input.total_notes)) {
+        if (!isJudgeCountConsistent(input.judge, input.total_notes, input.mode)) {
             await auditRejection('judge-total')
             throw createAppError(ERROR_CODE.VALIDATION_ERROR, { field: 'judge', reason: 'judge count exceeds total_notes' })
         }

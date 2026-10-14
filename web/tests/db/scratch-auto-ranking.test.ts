@@ -16,6 +16,7 @@ const CHART_SHA = 'e'.repeat(64)
 const CHART_MD5 = 'd'.repeat(32)
 const COURSE_HASH = 'wave20-course'
 const BASE_PLAYED_AT = 1_780_000_000_000
+const PLAY_SPACING_MS = 1_000
 const PLAYERS = ['alice', 'bob', 'carol', 'dave'] as const
 
 type PlayerLogin = (typeof PLAYERS)[number]
@@ -43,7 +44,7 @@ const chartPlay = (login: PlayerLogin, play: { clear: string; exScore: number; m
             assist: play.scratchAuto ? ['AUTO_SCRATCH'] : [],
             judge_rate: 100,
         },
-        played_at: BASE_PLAYED_AT + play.offset,
+        played_at: BASE_PLAYED_AT + play.offset * PLAY_SPACING_MS,
     })
 
 const coursePlay = (login: PlayerLogin, play: { clear: string; exScore: number; scratchAuto?: boolean; offset: number }) =>
@@ -54,7 +55,7 @@ const coursePlay = (login: PlayerLogin, play: { clear: string; exScore: number; 
         ex_score: play.exScore,
         minbp: 5,
         judge,
-        played_at: BASE_PLAYED_AT + play.offset,
+        played_at: BASE_PLAYED_AT + play.offset * PLAY_SPACING_MS,
         ...(play.scratchAuto === undefined ? {} : { scratch_auto: play.scratchAuto, assist: play.scratchAuto ? ['AUTO_SCRATCH'] : [] }),
     })
 

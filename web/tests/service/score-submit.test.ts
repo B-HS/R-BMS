@@ -4,6 +4,7 @@ import { scoreSubmissionSchema, submitResponseSchema, type ScoreSubmissionInput 
 import { BUILD_TRUST } from '@server/service/domain/score/ranked-policy'
 import {
     createScoreService,
+    DUPLICATE_SUBMISSION_MESSAGE,
     isJudgeCountConsistent,
     isPlayedAtPlausible,
     judgedNoteCount,
@@ -54,13 +55,24 @@ type Recorder = {
     audits: number
     auditUserAgents: (string | null)[]
     idempotencyLookups: number
+    idempotencyWindows: { playedAtFrom: number; playedAtTo: number }[]
 }
 
 const createStub = (options: { existingScoreId?: string | null; currentBest?: { clear: number; exScore: number; minbp: number } | null } = {}) => {
-    const recorder: Recorder = { inserted: [], bests: [], bestLookups: [], rankScopes: [], audits: 0, auditUserAgents: [], idempotencyLookups: 0 }
+    const recorder: Recorder = {
+        inserted: [],
+        bests: [],
+        bestLookups: [],
+        rankScopes: [],
+        audits: 0,
+        auditUserAgents: [],
+        idempotencyLookups: 0,
+        idempotencyWindows: [],
+    }
     const db: ScoreServiceDb = {
-        findScoreIdByIdempotency: async () => {
+        findScoreIdByIdempotency: async ({ playedAtFrom, playedAtTo }) => {
             recorder.idempotencyLookups += 1
+            recorder.idempotencyWindows.push({ playedAtFrom, playedAtTo })
             return options.existingScoreId ?? null
         },
         insertScore: async (row) => {
@@ -224,6 +236,29 @@ describe('scoreService.submit', () => {
         expect(result.response.message).toBe('duplicate submission ignored')
         expect(result.response.score_id).toBe('sc_existing')
         expect(result.response.is_new_best).toBe(false)
+    })
+
+    test('같은 초 안의 played_at 재전송은 기존 score_id 를 돌려준다', async () => {
+        const { recorder, service } = createStub({ existingScoreId: 'sc_old' })
+        const result = await service.submit({
+            input: submission({ played_at: PLAYED_AT + 456 }),
+            chartSha256: CHART_SHA,
+            chartMd5: null,
+            user: alice,
+            buildTrust: BUILD_TRUST.TRUSTED,
+            requireTrustedBuild: false,
+            ip: null,
+            userAgent: null,
+        })
+        expect(recorder.idempotencyWindows).toEqual([{ playedAtFrom: 1700000000000, playedAtTo: 1700000000999 }])
+        expect(result.duplicated).toBe(true)
+        expect(result.response.score_id).toBe('sc_old')
+        expect(result.response.message).toBe(DUPLICATE_SUBMISSION_MESSAGE)
+        expect(recorder.inserted).toHaveLength(0)
+    })
+
+    test('중복 응답 문구는 클라이언트 계약 문자열 그대로다', () => {
+        expect(DUPLICATE_SUBMISSION_MESSAGE).toBe('duplicate submission ignored')
     })
 
     test('기존 베스트보다 램프가 높으면 chart_best 를 갱신한다', async () => {
@@ -420,24 +455,61 @@ describe('judge 합계 일관성', () => {
         good: 20,
         bad: 8,
         poor: 12,
-        miss: 2,
+        miss: 4,
         fast: 0,
         slow: 0,
         combobreak: 0,
         empty_poor: 4,
     })
 
-    test('empty_poor 를 제외한 판정 합을 센다', () => {
-        expect(judgedNoteCount(judge)).toBe(798)
+    test('노트를 소비한 판정(PG·GR·GD·BD·POOR)만 센다', () => {
+        expect(judgedNoteCount(judge, 'BEAT_7K')).toBe(800)
     })
 
     test('판정 합이 total_notes 를 넘으면 거부한다', () => {
-        expect(isJudgeCountConsistent(judge, 812)).toBe(true)
-        expect(isJudgeCountConsistent(judge, 798)).toBe(true)
-        expect(isJudgeCountConsistent(judge, 500)).toBe(false)
+        expect(isJudgeCountConsistent(judge, 812, 'BEAT_7K')).toBe(true)
+        expect(isJudgeCountConsistent(judge, 800, 'BEAT_7K')).toBe(true)
+        expect(isJudgeCountConsistent(judge, 799, 'BEAT_7K')).toBe(false)
+    })
+
+    test('空POOR 가 見逃し POOR 보다 많은 완주 판을 받는다(사용자 판 #52)', () => {
+        const userRun = judgeBreakdownSchema.parse({
+            pgreat: 1500,
+            great: 250,
+            good: 50,
+            bad: 15,
+            poor: 20,
+            miss: 43,
+            empty_poor: 43,
+            fast: 0,
+            slow: 0,
+            combobreak: 0,
+        })
+        expect(judgedNoteCount(userRun, 'BEAT_7K')).toBe(1835)
+        expect(isJudgeCountConsistent(userRun, 1835, 'BEAT_7K')).toBe(true)
+    })
+
+    test('POPN_9K 는 노트를 소비하지 않는 BAD 를 세지 않는다', () => {
+        const popn = judgeBreakdownSchema.parse({
+            pgreat: 90,
+            great: 5,
+            good: 0,
+            bad: 8,
+            poor: 5,
+            miss: 0,
+            empty_poor: 0,
+            fast: 0,
+            slow: 0,
+            combobreak: 0,
+        })
+        expect(judgedNoteCount(popn, 'POPN_9K')).toBe(100)
+        expect(isJudgeCountConsistent(popn, 100, 'POPN_9K')).toBe(true)
+        expect(isJudgeCountConsistent(popn, 100, 'popn-9k')).toBe(true)
+        expect(isJudgeCountConsistent(popn, 100, 'BEAT_7K')).toBe(false)
+        expect(judgedNoteCount(popn, 'BEAT_7K')).toBe(108)
     })
 
     test('total_notes 가 0 인 구버전 제출은 검사를 건너뛴다', () => {
-        expect(isJudgeCountConsistent(judge, 0)).toBe(true)
+        expect(isJudgeCountConsistent(judge, 0, 'BEAT_7K')).toBe(true)
     })
 })

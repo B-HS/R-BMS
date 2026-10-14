@@ -15,6 +15,7 @@ import { getChartReplaysCached, getReplayCached, resolveChartSha256Cached, reval
 
 type HashContext = { params: Promise<{ hash: string }> }
 
+const OK_STATUS = 200
 const CREATED_STATUS = 201
 
 const resolveReplayChartSha256 = async (hash: string, input: ReplayUploadInput) => {
@@ -39,9 +40,9 @@ export const createReplayUploadRoute = () =>
             const { hash } = await authedContext.params
             const input = await parseLimitedJsonBody(authedRequest, replayUploadSchema, maxBytes)
             const chartSha256 = await resolveReplayChartSha256(hash, input)
-            const result = await replayService.upload({ input, chartSha256, userId: user.id })
-            revalidateOnReplayUpload({ chartSha256, loginId: user.loginId, scoreId: input.score_id ?? null })
-            return irRaw(result, CREATED_STATUS)
+            const { created, ...body } = await replayService.upload({ input, chartSha256, userId: user.id })
+            if (created) revalidateOnReplayUpload({ chartSha256, loginId: user.loginId, scoreId: input.score_id ?? null })
+            return irRaw(body, created ? CREATED_STATUS : OK_STATUS)
         })(request, context)
     })
 

@@ -38,6 +38,7 @@ export type ReplayServiceDb = {
     findReplayById: (id: string) => Promise<ReplayRow | null>
     listReplaysByChart: (params: { chartSha256: string; userId?: string; limit: number }) => Promise<ReplayRow[]>
     linkScoreReplay: (params: { scoreId: string; userId: string; replayId: string }) => Promise<void>
+    findLinkedReplay: (params: { scoreId: string; userId: string }) => Promise<{ id: string; eventCount: number } | null>
 }
 
 export type ReplayServiceDeps = {
@@ -110,6 +111,9 @@ const parseEvents = (content: string | null): ReplayEventInput[] => {
 export const createReplayService = (deps: ReplayServiceDeps) => ({
     upload: async (params: { input: ReplayUploadInput; chartSha256: string; userId: string }) => {
         const { input } = params
+        const linked = input.score_id ? await deps.db.findLinkedReplay({ scoreId: input.score_id, userId: params.userId }) : null
+        if (linked) return { id: linked.id, url: replayUrl(linked.id), event_count: linked.eventCount, created: false }
+
         const id = deps.newId('rp_')
         const content = JSON.stringify(input.events)
         const payload = await deps.storage.save({ id, content })
@@ -140,7 +144,7 @@ export const createReplayService = (deps: ReplayServiceDeps) => ({
         if (input.score_id) {
             await deps.db.linkScoreReplay({ scoreId: input.score_id, userId: params.userId, replayId: id })
         }
-        return { id, url: replayUrl(id), event_count: row.eventCount }
+        return { id, url: replayUrl(id), event_count: row.eventCount, created: true }
     },
 
     getById: async (id: string) => {

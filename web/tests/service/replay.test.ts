@@ -14,12 +14,14 @@ const MICROSECOND_EVENTS = [
     { t_us: 9_007_199_254_740, lane: 7, press: true },
 ]
 
-const createStubDb = () => {
+const createStubDb = (linkedReplay: { id: string; eventCount: number } | null = null) => {
     const stored: ReplayInsertRow[] = []
     const links: { scoreId: string; userId: string; replayId: string }[] = []
+    const linkedLookups: { scoreId: string; userId: string }[] = []
     return {
         stored,
         links,
+        linkedLookups,
         db: {
             insertReplay: async (row: ReplayInsertRow) => {
                 stored.push(row)
@@ -33,12 +35,16 @@ const createStubDb = () => {
             linkScoreReplay: async (params: { scoreId: string; userId: string; replayId: string }) => {
                 links.push(params)
             },
+            findLinkedReplay: async (params: { scoreId: string; userId: string }) => {
+                linkedLookups.push(params)
+                return linkedReplay
+            },
         },
     }
 }
 
-const createService = () => {
-    const stub = createStubDb()
+const createService = (linkedReplay: { id: string; eventCount: number } | null = null) => {
+    const stub = createStubDb(linkedReplay)
     let counter = 0
     const service = createReplayService({
         db: stub.db,
@@ -76,6 +82,33 @@ describe('replay 업로드/다운로드 왕복', () => {
         const input = replayUploadSchema.parse({ format: 'f', events: [], score_id: 'sc_9' })
         const uploaded = await service.upload({ input, chartSha256: CHART_SHA256, userId: USER_ID })
         expect(stub.links).toEqual([{ scoreId: 'sc_9', userId: USER_ID, replayId: uploaded.id }])
+    })
+
+    test('같은 score_id 에 이미 연결된 리플레이가 있으면 새로 저장하지 않고 그 리플레이를 돌려준다', async () => {
+        const { stub, service } = createService({ id: 'rp_old', eventCount: 7 })
+        const input = replayUploadSchema.parse({ format: 'f', events: MICROSECOND_EVENTS, score_id: 'sc_9' })
+        const uploaded = await service.upload({ input, chartSha256: CHART_SHA256, userId: USER_ID })
+        expect(uploaded).toEqual({ id: 'rp_old', url: '/api/replays/rp_old', event_count: 7, created: false })
+        expect(stub.linkedLookups).toEqual([{ scoreId: 'sc_9', userId: USER_ID }])
+        expect(stub.stored).toHaveLength(0)
+        expect(stub.links).toHaveLength(0)
+    })
+
+    test('score_id 가 없으면 이미 있는 리플레이를 찾지 않고 새로 저장한다', async () => {
+        const { stub, service } = createService({ id: 'rp_old', eventCount: 7 })
+        const input = replayUploadSchema.parse({ format: 'f', events: MICROSECOND_EVENTS })
+        const uploaded = await service.upload({ input, chartSha256: CHART_SHA256, userId: USER_ID })
+        expect(stub.linkedLookups).toHaveLength(0)
+        expect(uploaded.created).toBe(true)
+        expect(stub.stored).toHaveLength(1)
+    })
+
+    test('연결된 리플레이가 없는 score_id 는 새로 저장하고 연결한다', async () => {
+        const { stub, service } = createService()
+        const input = replayUploadSchema.parse({ format: 'f', events: MICROSECOND_EVENTS, score_id: 'sc_new' })
+        const uploaded = await service.upload({ input, chartSha256: CHART_SHA256, userId: USER_ID })
+        expect(uploaded.created).toBe(true)
+        expect(stub.links).toEqual([{ scoreId: 'sc_new', userId: USER_ID, replayId: uploaded.id }])
     })
 
     test('업로드한 ReplayData 의 모든 필드가 다운로드로 그대로 돌아온다', async () => {

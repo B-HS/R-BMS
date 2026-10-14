@@ -1,5 +1,5 @@
 import 'server-only'
-import { and, count, desc, eq, inArray, or, sql } from 'drizzle-orm'
+import { and, asc, between, count, desc, eq, inArray, or, sql } from 'drizzle-orm'
 import { getDb } from '@server/db'
 import { user } from '@server/db/auth-schema'
 import { apiToken, chart, chartBest, clientBuild, rival, score, submissionAudit } from '@server/db/schema'
@@ -218,11 +218,12 @@ const composeAll = () => {
         newId,
         now: () => Date.now(),
         db: {
-            findScoreIdByIdempotency: async ({ userId, chartSha256, playedAt }) => {
+            findScoreIdByIdempotency: async ({ userId, chartSha256, playedAtFrom, playedAtTo }) => {
                 const [row] = await db
                     .select({ id: score.id })
                     .from(score)
-                    .where(and(eq(score.userId, userId), eq(score.chartSha256, chartSha256), eq(score.playedAt, playedAt)))
+                    .where(and(eq(score.userId, userId), eq(score.chartSha256, chartSha256), between(score.playedAt, playedAtFrom, playedAtTo)))
+                    .orderBy(asc(score.playedAt))
                     .limit(1)
                 return row?.id ?? null
             },
