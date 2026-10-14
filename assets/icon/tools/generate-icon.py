@@ -13,6 +13,8 @@ sys.dont_write_bytecode = True
 from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).resolve().parent.parent
+REPOSITORY = ROOT.parent.parent
+WEB_APP = REPOSITORY / 'web' / 'src' / 'app'
 CHECK_FLAG = '--check'
 
 CANVAS = 1024
@@ -56,6 +58,9 @@ NOTES = (
 PNG_SIZES = (16, 32, 48, 64, 128, 256, 512, 1024)
 ICO_SIZES = (16, 24, 32, 48, 64, 128, 256)
 RUNTIME_SIZE = 256
+FAVICON_SIZES = (16, 32, 48)
+WEB_ICON_SIZE = 512
+APPLE_ICON_SIZE = 180
 
 
 def scaled(value: int) -> int:
@@ -80,12 +85,13 @@ def note_colour(lane: int) -> tuple[int, int, int, int]:
     return BLUE_NOTE if lane % 2 == 0 else WHITE_NOTE
 
 
-def master() -> Image.Image:
+def master(full_bleed: bool = False) -> Image.Image:
     size = scaled(CANVAS)
-    image = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+    image = Image.new('RGBA', (size, size), BACKGROUND if full_bleed else (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
-    body = (scaled(BODY_INSET), scaled(BODY_INSET), scaled(CANVAS - BODY_INSET), scaled(CANVAS - BODY_INSET))
-    draw.rounded_rectangle(body, radius=scaled(BODY_RADIUS), fill=BACKGROUND, outline=BORDER, width=scaled(BORDER_WIDTH))
+    if not full_bleed:
+        body = (scaled(BODY_INSET), scaled(BODY_INSET), scaled(CANVAS - BODY_INSET), scaled(CANVAS - BODY_INSET))
+        draw.rounded_rectangle(body, radius=scaled(BODY_RADIUS), fill=BACKGROUND, outline=BORDER, width=scaled(BORDER_WIDTH))
     draw.rectangle((scaled(FIELD_LEFT), scaled(FIELD_TOP), scaled(FIELD_RIGHT), scaled(FIELD_BOTTOM)), fill=FIELD)
     lanes = lane_bounds()
     for left, _ in lanes[1:]:
@@ -105,7 +111,7 @@ def png_bytes(image: Image.Image) -> bytes:
     return buffer.getvalue()
 
 
-def outputs() -> dict[str, bytes]:
+def outputs() -> dict[str | Path, bytes]:
     icon = master()
     sized = {size: icon if size == CANVAS else icon.resize((size, size), Image.Resampling.LANCZOS) for size in PNG_SIZES}
     files = {f'png/icon-{size}.png': png_bytes(image) for size, image in sized.items()}
@@ -115,6 +121,12 @@ def outputs() -> dict[str, bytes]:
     ico = io.BytesIO()
     sized[RUNTIME_SIZE].save(ico, format='ICO', sizes=[(size, size) for size in ICO_SIZES])
     files['rbms.ico'] = ico.getvalue()
+    favicon = io.BytesIO()
+    sized[RUNTIME_SIZE].save(favicon, format='ICO', sizes=[(size, size) for size in FAVICON_SIZES])
+    files[WEB_APP / 'favicon.ico'] = favicon.getvalue()
+    files[WEB_APP / 'icon.png'] = png_bytes(sized[WEB_ICON_SIZE])
+    apple = master(full_bleed=True).convert('RGB').resize((APPLE_ICON_SIZE, APPLE_ICON_SIZE), Image.Resampling.LANCZOS)
+    files[WEB_APP / 'apple-icon.png'] = png_bytes(apple)
     return files
 
 
@@ -125,11 +137,11 @@ def main() -> int:
         path = ROOT / name
         if check:
             if not path.exists() or path.read_bytes() != data:
-                stale.append(name)
+                stale.append(str(path.relative_to(REPOSITORY)))
             continue
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
-        print(f'wrote {name} ({len(data)} bytes)')
+        print(f'wrote {path.relative_to(REPOSITORY)} ({len(data)} bytes)')
     if stale:
         print('out of date: ' + ', '.join(stale) + ' (run uv run assets/icon/tools/generate-icon.py)', file=sys.stderr)
         return 1

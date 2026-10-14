@@ -173,7 +173,7 @@ web/
   src/
     app/                              ← FSD app 레이어 = Next App Router
       layout.tsx                      html/body, 프로바이더(next-themes 기본 다크), AppShell
-      error.tsx  global-error.tsx  not-found.tsx  robots.ts  sitemap.ts  icon.svg
+      error.tsx  global-error.tsx  not-found.tsx  robots.ts  sitemap.ts  favicon.ico  icon.png  apple-icon.png(assets/icon/tools/generate-icon.py 가 만든다)
       (public)/                       login/page.tsx  signup/page.tsx  guide/page.tsx
       (app)/                          (layout.tsx 없음)
         page.tsx  search/page.tsx
