@@ -1,0 +1,63 @@
+{
+  "schema": 1,
+  "origin": {
+    "page_url": "https://darksabun.club/table/archive/insane1/",
+    "bmstable_meta_content": "header.json",
+    "header_url": "https://darksabun.club/table/archive/insane1/header.json",
+    "data_urls": [
+      "https://darksabun.club/table/archive/insane1/data.json"
+    ]
+  },
+  "fetched_at": "2026-10-14T02:41:43.771Z",
+  "http": {
+    "page": {
+      "requested_url": "https://darksabun.club/table/archive/insane1/",
+      "final_url": "https://darksabun.club/table/archive/insane1/",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "last_modified": "Tue, 04 Aug 2026 13:11:48 GMT",
+      "etag": null,
+      "bytes": 4171,
+      "sha256_volatile": "4bb6bc9d585282f7e243777b8485a253a1888626e813e300685b9797226df336"
+    },
+    "header": {
+      "requested_url": "https://darksabun.club/table/archive/insane1/header.json",
+      "final_url": "https://darksabun.club/table/archive/insane1/header.json",
+      "status": 200,
+      "content_type": "application/json",
+      "last_modified": "Wed, 04 Mar 2026 10:52:44 GMT",
+      "etag": "W/\"69a80efc-1f4\"",
+      "bytes": 500,
+      "sha256": "ef94c77b2f8bb03574cbf242aa217697ced16d6cd3646eb3c778e67e2a78d561"
+    },
+    "data": [
+      {
+        "requested_url": "https://darksabun.club/table/archive/insane1/data.json",
+        "final_url": "https://darksabun.club/table/archive/insane1/data.json",
+        "status": 200,
+        "content_type": "application/json",
+        "last_modified": "Wed, 04 Mar 2026 10:52:44 GMT",
+        "etag": "W/\"69a80efc-73811\"",
+        "bytes": 473105,
+        "sha256": "5e9902fe59d9d9de9143ae9cc6fa47b8dc50b1937e90584d17984d64e72e7f6c",
+        "entries": 1035
+      }
+    ]
+  },
+  "snapshot": {
+    "header_file_sha256": "0b98f3ff52698a1bcff00705c953275bc64361ad94272327c318758e0a4dda8d",
+    "data_file_sha256": "7c606a33e254d62bdfb1ce861089d1328e7ae44267073f043dfefb8b77a5fc5e",
+    "entries": 1035,
+    "levels": 26,
+    "entries_with_valid_md5": 1035
+  },
+  "method": {
+    "command": "bun scripts/snapshot-table.ts https://darksabun.club/table/archive/insane1/ data/tables/insane1",
+    "normalization": [
+      "UTF-8 without BOM, LF line endings, a single trailing newline",
+      "header.json: JSON.stringify with 2-space indent, key order kept",
+      "data.json: one entry per line, entry order and key order kept, no value changed",
+      "the page html is not stored: Cloudflare injects a per-request script, so its hash changes on every request"
+    ]
+  }
+}
