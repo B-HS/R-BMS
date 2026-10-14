@@ -111,7 +111,7 @@ PACK FOLDER 행의 표시: 환경 변수가 있으면 `<경로> (RBMS_SKIN_PACK)
 | --- | --- |
 | 선곡에서 F12 | SKIN 메뉴를 연다(내장 선곡과 스킨 선곡 모두. 검색어를 치는 중에는 입력을 확정한 뒤) |
 | 스킨의 SKIN 버튼 | 스킨 선택 이벤트(beatoraja 의 id 14)를 부르는 버튼. 기본 스킨 사이드 메뉴의 SKIN 행, ModernChic 사이드 메뉴의 스킨 변경 버튼 |
-| SETTINGS 에서 F12 또는 탭 띠 오른쪽 끝의 `SKIN MENU >` 단추(그 앞은 PLAY 메뉴를 여는 `PLAY MENU >`) | SETTINGS 위에 연다. 글자를 치는 중이거나 RIVALS·IR PROFILES 목록이 열려 있으면 동작하지 않는다 |
+| SETTINGS 에서 F12 또는 왼쪽 레일 아래 OTHER SCREENS 의 `SKIN MENU` 단추(그 위는 PLAY 메뉴를 여는 `PLAY MENU`, 아래는 `KEY CONFIG`. 웨이브 16) | SETTINGS 위에 연다. 글자를 치는 중이거나 RIVALS·IR PROFILES 목록이 열려 있으면 동작하지 않는다 |
 | Esc | 설정을 저장하고 왔던 화면(선곡 또는 SETTINGS)으로 돌아간다 |
 
 | 입력 | 동작 |

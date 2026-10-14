@@ -1,6 +1,6 @@
 # 플레이 옵션
 
-> 최종 갱신 2026-10-12 · 웨이브 14(플레이 중 조작: START + 턴테이블의 1 단위 걸음과 리프트 조합, 판정 오프셋의 출하 키와 누름 반복, 스크래치 역방향 키의 출하: 2절의 "바꾸는 곳" 열, 5절. 작업 트리 기준, 커밋 전) 기준. 웨이브 13 은 판정 오프셋을 원본의 노트 표시 타이밍으로(1~3절, 7.4절), 기본 스킨의 판정선을 필드 맨 아래로(8절). 웨이브 12 는 연습 패널의 숫자 행(9절)
+> 최종 갱신 2026-10-14 · 웨이브 16(기록이 저장되는 조건과 SCRATCH AUTO: 10절, 목표 점수와 TARGET FALLBACK·TARGET RATE: 11절, 리플레이를 본 뒤 설정이 그대로 남는 것: 10.2절. 작업 트리 기준, 커밋 전). 웨이브 14(플레이 중 조작: START + 턴테이블의 1 단위 걸음과 리프트 조합, 판정 오프셋의 출하 키와 누름 반복, 스크래치 역방향 키의 출하: 2절의 "바꾸는 곳" 열, 5절. 작업 트리 기준, 커밋 전) 기준. 웨이브 13 은 판정 오프셋을 원본의 노트 표시 타이밍으로(1~3절, 7.4절), 기본 스킨의 판정선을 필드 맨 아래로(8절). 웨이브 12 는 연습 패널의 숫자 행(9절)
 > 대상: 플레이 중 스크롤·가림막·판정 타이밍을 정하는 옵션과 그 키, 그 옵션을 바꾸는 화면인 PLAY 메뉴(7절), 기본 스킨의 판정 표시(8절), 연습 패널(9절). 스킨이 그리는 옵션(Lane Width 등)과 부위별 불투명도는 [skin.md](./skin.md) 3.4절, 구현 위치는 [crates.md](./crates.md)를 본다. PLAY 메뉴의 설계는 [plan/2026-10-11-play-menu.md](./plan/2026-10-11-play-menu.md).
 > beatoraja 원본의 같은 기능이 기준이다. 다르게 한 곳은 "원본과 다른 점" 열에 이유를 적는다.
 
@@ -199,6 +199,7 @@ START + 턴테이블의 세부
 | IR 리플레이 변환 | `apps/rbms-player/src/ir_replay.rs`(`uploaded_time_us`) |
 | PLAY 메뉴(행 목록, 조작, 정보 패널) | `apps/rbms-player/src/stage/play_menu.rs`, `stage/play_menu/rows.rs`(숫자 행의 값과 목록 표시, 행의 종류, 표시 꼬리, 읽기 전용, 큰 단계, 기본값 복원). 숫자 행의 공통 부품은 `apps/rbms-player/src/number_row.rs`, 걸음 모델은 `crates/rbms-config/src/number.rs`·`settings.rs`(`number_spec`) |
 | PLAY 메뉴와 SKIN 메뉴가 같이 쓰는 그리기·스크롤 부품 | `apps/rbms-player/src/stage/preview_menu.rs` |
+| 목표 점수(TARGET, TARGET FALLBACK, TARGET RATE. 11절) | 목표와 물러나는 순서 `apps/rbms-player/src/target.rs`(`resolve`, `settle`, `target_ex`, `target_name`), 설정 필드와 어휘 `crates/rbms-config/src/judge.rs`(`ScoreTarget`, `FALLBACKS`, `label_then`)·`schema.rs`(`JudgeOptions.target_fallback`, `target_rate_percent`), 행 `settings.rs`(`SettingId::TargetFallback`, `TargetRate`), 판이 쓰는 곳 `app_result.rs`(`run_target`, `target_context`)와 `stage/play/mod.rs`(`ensure_pace_target`), 스킨에 넘기는 곳 `skin_host/options.rs`(`OptionsState::paced_by`, `SettingsView::target_text`)·`skin_screen.rs`(`PlayDraw::paced_by`)·`skin_host/select/bridge.rs`(`target_stand_in_on`) |
 | 미리보기의 대상과 계산 요약 | `apps/rbms-player/src/skin_preview/target.rs`(`PlayTarget`, `SpeedReadout`, `PlayTarget::readout`) |
 | 행이 속한 묶음 | `crates/rbms-config/src/settings.rs`(`SettingTab::PLAY_MENU` = `PlaySpeed`·`PlayLane`·`PlayJudge`·`PlayChart`, `SettingTab::SHOWN` = Settings 의 탭 6개) |
 | 화면을 지정하는 스킨 옵션 통로 | `apps/rbms-player/src/skin_select.rs`(`rows_for`, `line_for`, `step_for`, `reset_property_for`) |
@@ -213,7 +214,7 @@ START + 턴테이블의 세부
 | 길 | 동작 |
 | --- | --- |
 | 선곡에서 `F8` | PLAY 메뉴를 연다(내장 선곡과 스킨 선곡 모두. 검색어를 치는 중에는 입력을 확정한 뒤). 키 설정 화면에서 바꿀 수 있다(PLAY MENU, 설정 파일 키 `play_menu`) |
-| SETTINGS 에서 같은 키 또는 탭 띠의 `PLAY MENU >` 단추(`SKIN MENU >` 앞) | SETTINGS 위에 연다. 글자를 치는 중이거나 RIVALS·IR PROFILES 목록이 열려 있으면 동작하지 않는다. 제목 아래 안내 줄에 지금 묶인 키가 `F8 PLAY` 처럼 나온다 |
+| SETTINGS 에서 같은 키 또는 왼쪽 레일 아래 OTHER SCREENS 의 `PLAY MENU` 단추(`SKIN MENU` 위) | SETTINGS 위에 연다. 글자를 치는 중이거나 RIVALS·IR PROFILES 목록이 열려 있으면 동작하지 않는다. 단추 오른쪽과 바닥 안내 줄에 지금 묶인 키가 `F8 >`, `F8 PLAY` 처럼 나온다 |
 | 스킨의 버튼 | 없다. 원본(beatoraja)에 플레이 옵션 화면을 여는 이벤트가 없어(화면을 바꾸는 이벤트는 키 설정 13, 스킨 설정 14 뿐) 기본 스킨 사이드 메뉴에 행을 두지 않았다 |
 | `Esc` | 설정을 저장하고 왔던 화면(선곡 또는 SETTINGS)으로 돌아간다. 미리보기가 쓰던 텍스처와 Lua 상태는 이때 놓는다 |
 
@@ -236,7 +237,8 @@ START + 턴테이블의 세부
 | LANE | 그 문서가 선언한 위치·크기 오프셋(기본 스킨: `JUDGE POSITION Y`). 옵션 바로 뒤 | `+0` | 1 / 10(픽셀. 각도 축은 도). 범위 ±2000. 문서를 다시 읽지 않고 다음 프레임의 미리보기에 반영된다. SKIN 메뉴의 같은 행과 같은 값이다 |
 | JUDGE | JUDGE OFFSET | `+5 MS` | 1 ms / 10 ms. 범위 -200~+200 ms |
 | JUDGE | AUTO ADJUST | `ON` / `OFF` | 뒤집기 |
-| CHART | RANDOM, GAUGE, TARGET, ESCAPE | 항목 이름 | 한 항목 |
+| CHART | RANDOM, GAUGE, TARGET, TARGET FALLBACK, ESCAPE | 항목 이름. TARGET 은 점수를 이름으로 삼는 목표(LOCAL BEST·IR BEST·RIVAL)일 때 `LOCAL BEST > AAA` 처럼 점수가 없을 때 쓰는 것을 뒤에 붙인다(11절) | 한 항목 |
+| CHART | TARGET RATE | `85%` | 1% / 10%. 범위 1~100%. RATE CUSTOM 목표가 요구하는 몫(11절) |
 | CHART | LEGACY NOTE, AUTOPLAY, SCRATCH AUTO, AUTO REPLAY | `ON` / `OFF` | 뒤집기 |
 | SKIN | 접이 `OPACITY` | `HIDDEN (18)` / `SHOWN (18)`: 접힘 여부와 든 행 수 | Enter·← →·클릭으로 펴고 접는다. 펴면 그 문서의 불투명도 행이 바로 아래에 나온다(기본 스킨 7키 18행, 14키 17행. 웨이브 13 에서 Key Display Opacity 행이 없어져 하나씩 줄었다) |
 | SKIN | 불투명도 행(접이를 폈을 때. 기본 스킨: `LANE BACKGROUND OPACITY` 등) | `100%` | 1% / 10%. 슬라이더와 ← → 는 0~100%. 0% 면 그 부위가 사라진다. 0 키로 100%. 직접 입력만 200% 까지 받는다(알파 0 의 덮개를 밝히는 스킨용. `docs/skin.md` 2.2절의 불투명도 행 주의) |
@@ -311,7 +313,7 @@ START + 턴테이블의 세부
 | 스킨 오프셋(JUDGE POSITION Y 등)과 불투명도 | 문서를 다시 읽지 않는다. 값이 바뀐 다음 프레임부터 그 위치·그 진하기로 그린다 |
 | JUDGE OFFSET, AUTO ADJUST | 노트가 오프셋만큼 앞서(음수면 늦게) 그려진다. 예시 손이 치는 시각은 그대로라 +면 노트가 판정선에서 사라진 뒤에 폭발과 판정 글자가 뜨고, -면 폭발이 뜬 뒤에도 노트가 판정선까지 내려온다. 스킨의 TIMING 숫자와 `TIMING AUTO` 표지도 따른다. 예시 판정은 달라지지 않는다 |
 | GAUGE | 게이지의 종류와 색 |
-| TARGET | 점수 그래프의 타깃 막대와 `TARGET +n`. 기록·IR·라이벌 없이 예시 차트의 노트 수만으로 정한 타깃이다(MY BEST·IR·RIVAL 은 MAX 로 떨어진다) |
+| TARGET, TARGET FALLBACK, TARGET RATE | 점수 그래프의 타깃 막대와 `TARGET +n`, 그 막대의 이름표. 기록·IR·라이벌 없이 예시 차트의 노트 수만으로 정한 타깃이다. 그래서 LOCAL BEST·IR BEST·RIVAL 은 TARGET FALLBACK 으로 물러난 값이고, 이름표도 물러난 목표의 이름이다(웨이브 16 전에는 MAX 로 물러났다) |
 | AUTOPLAY | 스킨의 AUTOPLAY 표지. 예시 손(적어 둔 입력)은 그대로다 |
 | LEGACY NOTE | 롱노트가 일반 노트로 그려진다 |
 | RANDOM, HI-SPEED FIX, HI-SPEED STEP, COVER FINE STEP, SCRATCH AUTO, AUTO REPLAY, ESCAPE | 보이지 않는다. 예시 차트의 배치와 손은 바꾸지 않고(RANDOM), 예시 차트가 한 템포라 기준 BPM 이 어느 것이든 같으며(HI-SPEED FIX), 나머지는 화면에 그릴 것이 없는 값이다 |
@@ -342,7 +344,7 @@ SETTINGS 의 탭은 JUDGE, DISPLAY, INPUT, NETWORK, AUDIO, SELECT 여섯이다(P
 | 항목 | 동작 | 행 |
 | --- | --- | --- |
 | 정적 표시 | 판정 글자와 콤보는 판정이 난 프레임부터 0.5초 동안 같은 자리·크기·색으로 서 있다가 한 번에 사라진다. 튀어나오거나 커지거나 깜빡이거나 서서히 사라지지 않는다. 콤보가 올라가도 글자의 자리는 그대로이고 숫자만 바뀐다. 콤보는 글자 바로 뒤에 붙고(`GREAT 67`) 자릿수가 늘면 오른쪽으로만 자란다. 앞자리 0 은 없다 | 없음(항상) |
-| 위 줄 왼쪽: 점수 차 | 목표 대비 EX 점수 차를 부호와 네 자리로 쓴다(`+0003`, `-0125`). 스코어 그래프의 `TARGET` 숫자와 같은 값이고 CHART 묶음의 TARGET 이 목표를 정한다. PGREAT 에도 뜬다 | `SCORE DIFFERENCE`: TARGET(기본) / BEST(자기 최고 기록 대비) / OFF |
+| 위 줄 왼쪽: 점수 차 | 목표 대비 EX 점수 차를 부호와 네 자리로 쓴다(`+0003`, `-0125`). 스코어 그래프의 `TARGET` 숫자와 같은 값이고 CHART 묶음의 TARGET 이 목표를 정한다(목표의 점수가 없으면 TARGET FALLBACK. 11절). PGREAT 에도 뜬다 | `SCORE DIFFERENCE`: TARGET(기본) / BEST(자기 최고 기록 대비) / OFF |
 | 위 줄 오른쪽: FAST/SLOW | PGREAT 가 아닌 판정이 빨랐으면 FAST(파랑), 늦었으면 SLOW(빨강) | `JUDGE DETAIL`: FAST-SLOW(기본) / MILLISECONDS(어긋난 시간을 ms 로. 빠르면 `+`) / OFF |
 | 위치 | 판정 글자·콤보·위 줄을 함께 옮긴다. + 는 위, - 는 아래. 한 칸 1px, Shift 로 10px, 0 키로 제자리. 스킨 좌표(1920x1080 기준)다 | `JUDGE POSITION Y`: -2000 ~ +2000, 기본 +0 |
 | 숨김 | 판정 글자·콤보·위 줄을 그리지 않는다 | `JUDGE DISPLAY`: SHOW(기본) / HIDE |
@@ -408,3 +410,149 @@ SETTINGS 의 탭은 JUDGE, DISPLAY, INPUT, NETWORK, AUDIO, SELECT 여섯이다(P
 | 언제 쓰나 | 패널을 떠날 때 한 번(구간을 시작할 때와 Esc 로 나갈 때). 끌기나 입력 한 번마다 쓰지 않는다. 패널에 떠 있는 값은 그 방문의 상태다 |
 | 플레이에 반영 | 구간을 시작하는 순간의 값으로 구간을 자른다(`PracticePanel::start` → `PracticeSession`: 구간 시작·끝, 게이지와 시작량, 판정 폭, 재생 속도, TOTAL, 배치). 돌고 있는 구간에는 반영되지 않고 다음 시작부터다. 반영 경로는 전과 같다 |
 | 기록 | 연습은 기록·IR 전송을 하지 않는다(전과 같다) |
+
+## 10. 기록 저장(어떤 판이 무엇을 남기나)
+
+> 웨이브 16(2026-10-14) 추가. "로그인하지 않으면 기록이 저장되지 않고 램프만 남는 것 같다"는 보고를 점검한 결과다. 결론: 기록 저장은 점수 서버 설정·로그인과 무관하다. 램프만 남는 것은 SCRATCH AUTO(또는 넓힌 판정 폭)를 켠 판이고, 원본과 같은 규칙이다(결정 12, `docs/acknowledge/2026-09-09-enhancement-decisions.md`).
+
+### 10.1 저장되는 곳
+
+| 곳 | 내용 | 읽는 화면 |
+| --- | --- | --- |
+| `scoredb.sqlite` 의 `scorelog` | 판마다 한 행. 판정 12칸(빠름·늦음), 노트 수, 콤보, BP, 램프, 게이지, 어시스트 단계, 배치와 시드, 날짜, 리플레이 파일 이름, 점수 서버에 보냈는지(`ir_submitted`) | 선곡의 기록 목록(R), 리플레이 슬롯 |
+| `scoredb.sqlite` 의 `score` | 차트(와 모드, LN 종류)마다 한 행인 최고 기록. 램프, 최고 EX 를 낸 판의 판정 12칸, 최대 콤보, 최소 BP, 플레이 횟수, 클리어 횟수, 마지막 날짜 | 스킨이 그리는 선곡의 EX SCORE·RATE·RANK·MAX COMBO·MISS COUNT·판정 막대·PLAY COUNT·CLEAR COUNT |
+| `scoredb.sqlite` 의 `player_stat` | 날짜별 누적(플레이 횟수, 판정 수, 플레이 시간) | - |
+| `replays/<md5 앞 8자>-<시각>.ron` | 그 판의 입력 | 기록 목록의 리플레이, 결과 화면의 REPLAY |
+| 메모리의 기록 책(`ScoreBook`) | 시작할 때 `scorelog` 전체로 만들고 판이 끝날 때마다 한 행을 더한다 | 플레이 화면의 LOCAL BEST 목표와 스코어 그래프의 BEST, 결과 화면의 이전 최고, 내장 선곡 화면 |
+
+### 10.2 판의 종류별로 남는 것
+
+| 판 | 기록 목록의 행·날짜 통계 | 최고 기록(EX·판정·콤보·BP) | 램프·플레이 횟수 | 리플레이(AUTO REPLAY 켬) | 점수 서버 | 원본과 다른 점 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 손으로 친 판(로그인 여부와 무관) | 남는다 | 더 좋은 값이면 갱신 | 더 높은 램프면 갱신, 횟수 +1 | 저장 | 서버가 설정돼 있을 때만 전송. 설정이 없으면 `ir_submitted` 만 0 이고 나머지 행은 같다 | 없음 |
+| FAILED 로 끝난 판 | 남는다 | EX 가 더 높으면 갱신(램프와 무관, `ScoreData.java:549`) | FAILED, 횟수 +1(클리어 횟수는 그대로) | 저장 | 전송 | 원본은 PG~BD 가 하나도 없는 판을 저장하지 않는다(`BMSPlayer.java:858-861`). 여기서는 FAILED 로 남는다 |
+| SCRATCH AUTO 를 켠 판(어시스트 1). 그 판의 턴테이블 레인에 노트가 하나라도 있을 때만 | 남는다(EX·판정·콤보·BP 전부) | 바뀌지 않는다 | LIGHT ASSIST CLEAR 로 낮춘 램프, 횟수 +1 | 저장 | 보내지 않는다 | 리플레이 저장만 다르다(D-D6). 나머지는 `ScoreData.update(newscore, false)` 그대로 |
+| SCRATCH AUTO 를 켰지만 턴테이블 노트가 없는 차트, 턴테이블이 없는 모드(9키) | 손으로 친 판과 같다 | 손으로 친 판과 같다 | 손으로 친 판과 같다 | 저장 | 전송 | 없음. 원본은 자동으로 친 레인에서 노트를 옮겼을 때만 어시스트를 올린다(`AutoplayModifier.modify`). 웨이브 16 통합 전에는 스위치만 보고 어시스트로 셌다 |
+| JUDGE WIDTH 나 LN MARGIN 을 100% 넘게 넓힌 판(어시스트 2) | 남는다 | 바뀌지 않는다 | ASSIST CLEAR 로 낮춘 램프, 횟수 +1 | 저장하지 않는다 | 보내지 않는다 | 없음(`BMSPlayer.java:208-214`) |
+| 게이지 종류, GAUGE AUTO SHIFT | 위와 같다. 게이지는 램프만 정한다. 자동 전환된 판은 끝난 게이지로 적힌다 | - | - | - | - | 원본은 전환된 판의 게이지를 -1 로 적는다(`BMSPlayer.java:884`) |
+| 코스의 각 스테이지 | 그 차트의 판으로 위 규칙대로 남는다(`enter_result` 가 다음 스테이지로 넘어가기 전에 적는다) | 위와 같다 | 위와 같다 | 위와 같다 | 스테이지 점수는 위와 같고 코스 점수는 따로 | 스테이지 램프를 원본과 대조하는 일은 이 점검에서 하지 않았다(원본은 코스 중 스테이지 램프를 게이지로 정하지 않는다, `BMSPlayer.java:864-880`) |
+| AUTOPLAY | 남지 않는다 | - | - | - | 보내지 않는다 | 없음(`MusicResult.updateScoreDatabase` 가 PLAY 모드만 적는다) |
+| 리플레이 재생 | 남지 않는다 | - | - | - | 보내지 않는다 | 없음. 재생하는 동안 SCRATCH AUTO·GAUGE·RANDOM 은 리플레이에 적힌 값으로 돌지만 설정 파일에는 플레이어의 값이 적히고, 재생이 끝나면(선곡으로 돌아가거나 결정 화면에서 그만두면) 플레이어의 값으로 돌아온다. 웨이브 16 통합 전에는 리플레이 값이 그대로 남아 저장됐다: SCRATCH AUTO 로 친 리플레이를 한 번 보면 스위치가 켜진 채 남아 이후의 판이 최고 기록을 남기지 않았다 |
+| 연습 구간 | 남지 않는다 | - | - | - | 보내지 않는다 | 없음 |
+| 도중 포기(Esc) | 칠 노트가 남아 있으면 남지 않는다(선곡으로 돌아간다). 노트를 다 처리한 뒤의 Esc 는 결과 화면으로 가고 위 규칙대로 남는다 | - | - | - | - | 원본은 포기한 판도 친 노트가 있으면 FAILED 로 결과 화면에 가서 저장한다(`BMSPlayer.stopPlay`) |
+
+### 10.3 SCRATCH AUTO 로만 친 차트가 선곡에 보이는 모습
+
+1. 램프(LIGHT ASSIST CLEAR)와 PLAY COUNT·CLEAR COUNT 는 채워진다.
+2. 최고 기록 행에 점수가 없다(`score.notes = 0`, `minbp` 미설정). 스킨 호스트는 원본의 `ScoreDataProperty` 대로 EX 0, RATE 1.0(100.00%)을 넘긴다. 기본 스킨은 웨이브 16 통합부터 이 경우의 RANK·EX SCORE·RATE·MAX COMBO·MISS COUNT·판정 수를 한 번도 치지 않은 차트처럼 `-` 로 그린다(`lua/select/info.lua` 의 `holds_score`: 판정 비율 number 85 가 값을 가질 때만 점수가 있다고 본다). 다른 스킨 팩은 원본처럼 0 과 100.00% 를 그릴 수 있다.
+3. 기록 목록(R)에는 그 판들이 EX 와 함께 전부 있고 리플레이도 재생된다.
+4. LOCAL BEST 목표와 스코어 그래프의 BEST 는 없는 것으로 읽힌다(어시스트 판은 최고 기록이 아니다). 결과 화면의 TARGET 도 같은 값으로 정한다. PLAY 메뉴의 SCRATCH AUTO 행은 정보 패널에 `WHILE ON: NO BEST SCORE, LAMP AND HISTORY ONLY` 를 쓴다. 웨이브 16 전에는 결과 화면만 어시스트 판을 포함한 이력의 최고 EX 를 LOCAL BEST 로 삼아 플레이 화면과 달랐다.
+5. 결과 화면은 오른쪽 위의 전송 줄(`IR: SKIPPED (scratch assist)`) 아래에 `SCRATCH AUTO ON: NO BEST SCORE, LAMP AND HISTORY ONLY` 를 노란 글자로 쓴다(넓힌 판정은 `WIDENED JUDGE: NO BEST SCORE, LAMP AND HISTORY ONLY`). 기본 스킨의 `SCORE NOT SAVED` 만으로는 어느 설정 때문인지 알 수 없고, 전송 줄은 점수 서버 이야기로 읽히기 때문이다. AUTOPLAY·리플레이 재생에는 쓰지 않는다.
+
+### 10.4 구현 위치와 테스트
+
+| 내용 | 위치 |
+| --- | --- |
+| 판이 끝날 때의 저장·전송·리플레이 | `apps/rbms-player/src/app_result.rs`(`enter_result`), 행으로 바꾸기는 `apps/rbms-player/src/scoredb_store.rs`(`play_log`, `record_finished_play`) |
+| 최고 기록에 합치는 규칙 | `crates/rbms-store/src/scoredb.rs`(`ScoreDb::record_play`, `merge_best`) |
+| 최고 기록을 갱신해도 되는 판인지 | `apps/rbms-player/src/lib.rs`(`updates_score`, `ir_submission_block_reason`, `saves_replay`, `assisted_lamp`) |
+| 선곡이 최고 기록을 읽어 스킨에 넘기는 곳 | `apps/rbms-player/src/stage/select/lent.rs`(`refresh_focused_records`), `apps/rbms-player/src/skin_host/select/bridge.rs`(`chart_records_shown`), `skin_host/select/shown.rs`(`BarRecord::of_best`) |
+| 결과 화면의 어시스트 안내 줄 | `apps/rbms-player/src/stage/result.rs`(`assist_note`, `ResultState::notice_lines`) |
+| 손으로 친 판을 끝까지 돌려 DB 를 읽는 테스트 | `apps/rbms-player/src/app_result/record_tests.rs`(로그인 없음, 로그인 있음, 다음 실행, SCRATCH AUTO, 턴테이블 노트가 없는 차트의 SCRATCH AUTO, AUTOPLAY, FAILED, 리플레이를 본 뒤의 설정) |
+| SCRATCH AUTO 가 어시스트인지 | `apps/rbms-player/src/app_result.rs`(`scratch_auto_played`). 결과 화면 쪽은 `stage/result.rs`(`ResultRun::of`) |
+| 리플레이가 바꾼 플레이 옵션을 보관하고 되돌리기 | `apps/rbms-player/src/app_play.rs`(`OwnPlayOptions`, `play_as_recorded`, `end_replay`, `settings_to_save`), 설정 저장은 `app_input.rs`(`save_settings`) |
+| 그 판 뒤의 선곡과 결과 화면(기본 스킨) | `apps/rbms-player/src/stage/select/recorded_tests.rs`, `apps/rbms-player/src/stage/result/tests.rs`. `RBMS_SKIN_CAPTURE_DIR` 을 주면 `select-recorded.png`, `select-recorded-scratch-auto.png`, `result-recorded-scratch-auto.png` 를 쓴다 |
+
+## 11. 목표 점수(TARGET, TARGET FALLBACK, TARGET RATE)
+
+> 웨이브 16(2026-10-14) 추가. "TARGET 을 LOCAL BEST 로 두어도 AAA 를 목표로 점수가 계산된다"는 보고를 점검하고, 목표가 없을 때 무엇으로 물러날지를 고르게 한 것이다.
+
+### 11.1 목표 16종과 기준
+
+목표는 플레이 중 점수 그래프의 TARGET 막대, 판정 글자 위의 점수 차(`+0004`), 결과 화면의 TARGET 이 모두 같은 값으로 쓴다. 고르는 곳은 PLAY 메뉴 > CHART 의 TARGET 행, 선곡의 옵션 패널 1(타깃 키), 스킨의 TARGET 버튼이다. 모두 같은 값(`judge.target`)을 고친다.
+
+| 목표 | 기준 | 필요한 것 | 점수가 없을 수 있나 |
+| --- | --- | --- | --- |
+| MAX | 차트의 이론 최대 EX(노트 수 x 2) | 노트 수 | 아니오 |
+| RATE A- ~ RATE MAX-(10종) | 이론 최대의 17/27 ~ 26/27(원본 `RANK A-` ~ `RANK MAX-`). 정수로만 나눠 올림 | 노트 수 | 아니오 |
+| RANK NEXT | 내 최고 기록 바로 위의 등급 경계(없으면 처음부터) | 노트 수, 로컬 기록 | 아니오 |
+| RATE CUSTOM | 이론 최대의 TARGET RATE 몫(올림). 이름은 `SCORE RATE 85%` | 노트 수, TARGET RATE | 아니오 |
+| LOCAL BEST | 이 차트의 로컬 최고 EX(같은 LN 종류). 어시스트 판(SCRATCH AUTO, 넓힌 판정 폭)은 최고 기록이 아니라서 세지 않는다(10절) | 로컬 기록 | 예: 처음 치는 차트, 어시스트로만 친 차트 |
+| IR BEST | 점수 서버가 가진 내 최고 EX | 선곡 패널이 받아 둔 순위표 | 예: 서버 없음, 로그인 안 함, 아직 못 받음 |
+| RIVAL | 라이벌 가운데 가장 높은 점수. 이름은 `RIVAL <이름>` | 같은 순위표의 라이벌 줄 | 예: 라이벌이 그 차트를 안 쳤음 |
+
+### 11.2 물러나는 순서와 TARGET FALLBACK
+
+점수를 이름으로 삼는 목표에 그 점수가 없으면 추측하지 않고 물러난다. 화면은 실제로 쓰는 목표의 이름을 쓴다.
+
+| 고른 목표 | 첫 번째 | 두 번째 | 마지막 |
+| --- | --- | --- | --- |
+| LOCAL BEST | 로컬 최고 | TARGET FALLBACK | 이론 최대(안전망. 행이 내놓지 않는 값일 때만) |
+| IR BEST | 서버의 내 최고 | 로컬 최고(같은 사람의 최고라서 같은 종류의 숫자다) | TARGET FALLBACK |
+| RIVAL | 라이벌 점수 | TARGET FALLBACK(내 기록은 남의 점수의 대신이 아니다) | 이론 최대 |
+| 그 밖의 목표 | 자기 자신 | - | - |
+
+- TARGET FALLBACK 은 언제나 계산되는 목표만 고른다: MAX, RATE A- ~ RATE MAX-, RANK NEXT, RATE CUSTOM(13종). 기본값은 RATE AAA 다. 파일에 점수를 이름으로 삼는 목표가 적혀 있으면 기본값으로 읽는다.
+- **동작이 바뀐 곳**: 웨이브 16 전에는 물러나는 끝이 이론 최대(MAX)였다. 지금은 기본이 RATE AAA 다. LOCAL BEST 를 고르고 어시스트로만 치는 사람은 이전에는 MAX 를 따라 달렸고 지금은 RATE AAA 를 따라 달린다. 이전 동작이 필요하면 TARGET FALLBACK 을 MAX 로 둔다. 기존 설정 파일에는 `target_fallback` 이 없고 기본값(RATE AAA)으로 읽는다.
+- **원본과 다른 점**: 원본에는 LOCAL BEST 가 목표로 없다(자기 최고는 BEST 막대가 따로 그린다). 라이벌·IR 목표에 점수가 없으면 원본은 이름을 `NO DATA`/`NO RIVAL` 로 하고 목표를 0 으로 둔다(`TargetProperty.java:232-240`). 여기서는 0 을 쓰지 않고 물러난다. 물러나는 순서를 끄는 설정은 두지 않았다: IR BEST 가 로컬 최고를 거치는 것은 같은 종류의 숫자라서이고, RIVAL 이 거치지 않는 것은 남의 점수를 내 기록으로 바꾸면 비교가 아니기 때문이다.
+- 한 판의 목표는 시작할 때 한 번 정해지고 판이 끝날 때까지 그대로다. 결과 화면은 같은 규칙으로 같은 값을 쓴다. 손으로 친 판, AUTOPLAY, 리플레이 재생, 코스의 스테이지 모두 같은 규칙이다(코스의 스테이지는 차트마다 다시 정한다).
+
+### 11.3 화면이 말하는 것
+
+| 곳 | 보이는 것 |
+| --- | --- |
+| 기본 스킨 플레이 화면, 스코어 그래프의 범례 | 실제로 쓰는 목표의 이름(`LOCAL BEST`, `RATE AAA`, `SCORE RATE 70%`, `RIVAL friend`). 고른 목표에서 물러났으면 무엇이 없었는지를 붙인다(`RATE AAA (NO RECORD)`, `LOCAL BEST (NO IR SCORE)`, 웨이브 16 통합). 스킨 문자열 id 3(`STRING_TARGET_NAME`)이 플레이 중에는 이 글자다. 다른 스킨 팩도 같은 id 로 읽는다. 결과 화면의 TARGET 은 이름만 쓴다 |
+| 판정 글자 위의 점수 차, 그래프의 TARGET 숫자 | 그 목표 대비 EX 차이(11.1의 값) |
+| 결과 화면의 TARGET | 같은 목표의 이름과 EX |
+| 선곡의 옵션 패널 1 의 TARGET | 고른 목표. 커서가 있는 차트에 그 점수가 없으면 `LOCAL BEST (NO RECORD: AAA)`, `IR BEST (NO IR SCORE: LOCAL BEST)`, `RIVAL (NO RIVAL SCORE: AAA)` 처럼 대신 쓰는 것을 붙인다. 로컬 기록은 플레이가 셀 기록만 센다: 지금 LN MODE 로 친 기록과 차트가 LN 종류를 적은 기록(`CHART`)의 최고다(`local_best_before_reading`). 한 차트의 기록은 둘 중 한 꼴뿐이라 플레이가 세는 값과 같다. 웨이브 16 통합 전에는 LN 종류와 무관하게 세서, 다른 LN MODE 로만 친 차트에서 선곡은 기록이 있다고 말하고 플레이는 물러났다 |
+| PLAY 메뉴의 TARGET 행 | `LOCAL BEST > AAA` 꼴로 점수가 없을 때 쓰는 것을 붙이고(예시 차트에는 기록이 없으므로 미리보기가 그 값이다), 정보 패널이 `NO RECORD: PACED AGAINST RATE AAA INSTEAD` 를 한 줄 더 쓴다. IR BEST 는 실제 순서대로 `IR BEST > LOCAL > AAA` 와 `NO IR SCORE: YOUR LOCAL BEST, THEN RATE AAA` 다(웨이브 16 통합 전에는 로컬 기록 단계를 빠뜨렸다) |
+| PLAY 메뉴의 TARGET FALLBACK, TARGET RATE 행 | TARGET 바로 아래. 각 목표가 무엇을 기준으로 하는지와 물러나는 규칙은 행의 설명에 있다. 미리보기가 바뀐 값을 바로 따른다. TARGET 과 TARGET FALLBACK 이 모두 RATE CUSTOM 이 아니면 TARGET RATE 의 정보 패널이 `NOT IN USE: NO TARGET IS RATE CUSTOM` 을 쓴다 |
+
+TARGET 과 두 행은 같은 묶음 하나에만 둘 수 있어서(`SETTINGS` 표는 행마다 한 묶음) PLAY 메뉴 > CHART 에만 있다. SETTINGS(Tab)에서는 왼쪽 레일의 PLAY MENU 단추로 간다.
+
+### 11.4 점검 결과: LOCAL BEST 인데 AAA 로 보인다는 보고
+
+사용자의 기록 DB 복사본과 설정으로 재현한 값이다(`apps/rbms-player/src/app_result/target_tests.rs`).
+
+| 상황 | 이전의 목표 | 이름표 |
+| --- | --- | --- |
+| LOCAL BEST, 손으로 친 판이 있는 차트(EX 21) | LOCAL BEST = 21 | 이름표 없음(기본 스킨은 "TARGET" 고정) |
+| LOCAL BEST, 어시스트로만 친 차트(이 사용자: 23판 모두 SCRATCH AUTO) | MAX = 36(차트 이론 최대) | 이름표 없음 |
+
+- 원인: 이 사용자는 모든 판을 SCRATCH AUTO 로 쳐서 어느 차트에도 로컬 최고가 없다(어시스트 판은 최고 기록이 아니다. 10절). 그래서 LOCAL BEST 는 늘 물러나고, 기본 스킨은 "TARGET" 이라는 고정 글자만 그려 무엇으로 물러났는지 알 수 없었다.
+- **재현되지 않은 것**: 코드의 어느 길도 LOCAL BEST 를 RATE AAA 로 바꾸지 않는다. 보고의 "AAA" 는 코드로 설명되지 않는다. 가능한 근거는 두 가지이고 모두 고쳤다. (1) 파일의 목표 글자가 알 수 없는 꼴이면 기본값 RATE AAA 로 읽혔다: 이제 라벨(`LOCAL BEST`, `local_best`)도 같은 목표로 읽는다. (2) 물러나는 값이 이제 기본으로 RATE AAA 이므로 같은 상황에서 화면이 RATE AAA 를 따르고, 그 이름을 이름표가 말한다.
+- 결과 화면의 TARGET 은 웨이브 16 의 앞 단위에서 플레이 화면과 같은 값(어시스트 제외, 같은 LN 종류의 최고)으로 맞췄다(10.3).
+
+### 11.5 원본의 목표 목록과 빠진 것
+
+원본(`TargetProperty.java`)의 목표를 이 플레이어와 대조한 표다.
+
+| 원본 id | 원본 이름 | 필요한 것 | 이 플레이어 |
+| --- | --- | --- | --- |
+| `MAX`, `RATE_A-` ~ `RATE_MAX-` | `MAX`, `RANK A-` ~ `RANK MAX-` | 노트 수 | 있음(MAX, RATE A- ~ RATE MAX-) |
+| `RATE_<0~100 실수>` | `SCORE RATE n%` | 노트 수 | **웨이브 16 에서 더함**: RATE CUSTOM 과 TARGET RATE(정수 1~100%, 원본은 실수 0~100. `TargetProperty.java:142-146`) |
+| `RANK_NEXT` | `NEXT RANK` | 내 기록, 노트 수 | 있음(RANK NEXT) |
+| `RIVAL_n` | `RIVAL <이름>` | 라이벌 n 번째의 점수 | 가장 높은 라이벌 하나만(RIVAL). 순번은 없음. 필요한 것: 라이벌 목록의 순서를 고르는 설정 |
+| `RIVAL_RANK_n` | `RIVAL RANK n` | 라이벌들과 내 기록을 점수로 정렬 | 없음. 필요한 것: 라이벌 점수 전부(순위표 캐시의 라이벌 줄에 있다)와 내 로컬 기록, 순번을 고르는 행 |
+| `RIVAL_NEXT_n` | `RIVAL NEXT n` | 같음. 내 바로 위 n 번째 | 없음. 필요한 것은 위와 같음 |
+| `IR_NEXT_n` | `IR NEXT nRANK` | 서버 순위표 전체와 내 점수 | 없음. 필요한 것: 순위표 전체(지금 캐시는 상위 일부와 내 줄, 라이벌 줄) |
+| `IR_RANK_n` | `IR RANK n` | 서버 순위표의 n 위 | 없음. 필요한 것: 순위표 n 위까지 |
+| `IR_RANKRATE_n` | `IR RANK TOP n%` | 순위표와 총 인원 | 없음. 필요한 것: 총 인원과 순위표 |
+| (원본에 없음) | - | 로컬 기록 | LOCAL BEST. 원본은 자기 최고를 BEST 막대로 따로 그린다 |
+| (원본에 없음) | - | 서버의 내 최고 | IR BEST |
+
+서버 자료가 필요한 것은 이번에 서버를 고치지 않아 더하지 않았다. 순위표 전체를 받는 길이 생기면 `target::TargetContext` 에 순위표를 넓히고 `ScoreTarget` 에 순번을 가진 목표를 더한다.
+
+### 11.6 구현 위치와 테스트
+
+| 내용 | 위치 |
+| --- | --- |
+| 값 계산과 물러나는 순서 | `apps/rbms-player/src/target.rs`(`resolve`, `settle`, `target_ex`, `target_name`. 단위 테스트가 목표 16종 x 대신 13종을 훑는다) |
+| 설정 필드, 토큰, 라벨, 짧은 이름 | `crates/rbms-config/src/judge.rs`, `schema.rs`, `settings.rs`, 테스트 `tests.rs`(옛 파일과 라벨로 적힌 파일, 파일 왕복) |
+| 한 판의 목표(손으로 친 판·어시스트·순위표) | `apps/rbms-player/src/app_result/target_tests.rs` |
+| 플레이 화면의 목표(모든 숫자와 이름, 리플레이·AUTOPLAY·코스) | `apps/rbms-player/src/stage/play/target_tests.rs`, 기본 스킨 캡처 `stage/play/screen_tests/default_pack_tests.rs` |
+| 스킨 문자열 | `apps/rbms-player/src/skin_host/options/tests.rs` |
+| 선곡의 TARGET 문구와 옵션 패널 캡처 | `apps/rbms-player/src/stage/select/target_tests.rs` |
+| PLAY 메뉴의 두 행과 정보 패널의 덧말(IR BEST 순서, TARGET RATE 미사용, SCRATCH AUTO) | `apps/rbms-player/src/stage/play_menu/tests/target.rs` |
+| 선곡이 세는 로컬 기록(LN 종류) | `apps/rbms-player/src/app_result/target_tests.rs`(`the_local_best_the_browser_counts_is_the_one_a_run_would_count`) |
+| 캡처 | `RBMS_SKIN_CAPTURE_DIR` 을 주면 `target-play-local-best.png`, `target-play-no-record.png`, `target-select-local-best.png`, `target-select-no-record.png`, `target-play-menu-*.png`(웨이브 16 통합에서 `-ir-best-note`, `-rate-unused`, `-scratch-auto` 를 더함) 를 쓴다 |

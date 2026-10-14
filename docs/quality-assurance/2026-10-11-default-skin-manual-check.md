@@ -208,6 +208,19 @@
 - [ ] **O4 기존 설정 폴더의 `theme.ron`.** 방법: 이 빌드를 처음 실행하기 전에 설정 폴더(`~/.config/rbms`)의 `theme.ron` 을 다른 곳에 복사해 둔다. 실행한 뒤 터미널의 `theme:` 줄과 파일을 본다. 한 번 더 실행한다. 기대: 파일을 고친 적이 없으면 첫 실행의 줄 끝에 `(the template of an earlier version was replaced; the colours follow the defaults)` 가 붙고, 파일은 모든 색 줄이 `//` 로 시작하는 새 템플릿이 되며, 화면은 무채색이다. 두 번째 실행에서는 그 문구가 없고 파일이 바뀌지 않는다. 한 값이라도 고쳤던 파일이면 문구가 없고 파일이 그대로이며 화면은 그 파일의 색(전의 청색 계열)이다: 무채색으로 바꾸려면 파일을 지우거나 고치지 않은 줄을 지운다(`docs/theme.md`).
 - [ ] **O5 내장 플레이 화면의 레인.** 방법: 스킨 팩 없이 7K 곡을 플레이한다(NORMAL 과 WIDE). 기대: 노트·키 빔·폭발·판정선은 전과 같고, 점수 그래프의 눈금선, 게이지의 빈 칸, 레인 바탕, 필드 테두리, 레인 구분선이 모두 회색이다(번들 `normal.ron`·`wide.ron`·`default.ron` 의 세 값이 `SkinConfig::default` 와 같은 회색 22 / 96 / 60 이다). 파란 기가 보이면 기록한다.
 
+### 3.16 웨이브 16: 기록이 저장되는 조건, 목표 점수와 TARGET FALLBACK, 설정 화면
+
+배경: 사용자 요청 세 가지(로그인하지 않으면 기록이 저장되지 않는 것 같다, LOCAL BEST 로 두어도 AAA 를 목표로 계산된다, Tab 메뉴가 딱딱하고 불편하다). 헤드리스 테스트와 캡처로는 확인했다: 로그인 없이 손으로 친 판이 이력·최고 기록·리플레이·다음 판의 LOCAL BEST 로 전부 남음, SCRATCH AUTO 판은 이력·램프·횟수만 남음, 리플레이를 본 뒤 SCRATCH AUTO·GAUGE·RANDOM 과 설정 파일이 플레이어의 값 그대로임, 턴테이블 노트가 없는 차트의 SCRATCH AUTO 는 어시스트가 아님, 목표 해석 표, 설정 화면의 레이아웃과 입력 모드 중의 패널. 아래는 실제 창·실제 설정 폴더·실제 손에서만 드러나는 것이다. 값과 규칙은 `docs/play-options.md` 10·11절, 화면 설계는 `docs/plan/2026-10-14-settings-screen.md`.
+
+- [ ] **W1 내 설정에 SCRATCH AUTO 가 켜져 있는지.** 방법: 선곡에서 F8(PLAY 메뉴) → CHART 의 SCRATCH AUTO 행에 커서를 둔다. 기대: 정보 패널에 `WHILE ON: NO BEST SCORE, LAMP AND HISTORY ONLY` 가 나온다. 켜져 있었다면 끄고 Esc. 이번 점검에서 본 실제 설정은 켜져 있었다(웨이브 16 이전의 모든 판이 어시스트였던 이유).
+- [ ] **W2 리플레이를 본 뒤에도 설정이 그대로인가.** 방법: SCRATCH AUTO 를 끈 채, 예전에 SCRATCH AUTO 로 친 판의 리플레이를 기록 목록(R)이나 REPLAY 슬롯에서 끝까지 본다. 결과 화면에서 Esc 로 선곡에 돌아와 F8 을 열고, 앱을 껐다 켜서 다시 본다. 기대: 재생 중에는 턴테이블이 자동으로 쳐지고(리플레이 그대로), 돌아온 뒤 SCRATCH AUTO·GAUGE·RANDOM 이 재생 전 값이다. 재시작 뒤에도 같다.
+- [ ] **W3 로그인 없이 한 판을 친 뒤.** 방법: NETWORK 에서 LOGOUT 한 상태(또는 SERVER URL 이 빈 상태)로 SCRATCH AUTO 를 끄고 7K 곡을 손으로 끝까지 친다. 선곡으로 돌아와 같은 곡을 본다. 기대: 결과 화면에 `SCRATCH AUTO ON` 줄이 없다. 선곡의 RANK·EX SCORE·RATE·MAX COMBO·MISS COUNT·판정 막대가 채워지고 PLAY COUNT 가 1 늘었다. 앱을 껐다 켜도 같다.
+- [ ] **W4 어시스트로만 친 차트의 선곡.** 방법: SCRATCH AUTO 로만 쳤던 차트(이 사용자의 기존 기록 전부)에 커서를 둔다. 기대: CLEAR 가 LIGHT ASSIST CLEAR, PLAY COUNT·CLEAR COUNT 는 숫자, RANK·EX SCORE·RATE·MAX COMBO·MISS COUNT·판정 수는 `-` 다(전에는 EX 0, RATE 100.00%). 한 번도 치지 않은 차트도 전처럼 `-` 다.
+- [ ] **W5 다음 판의 LOCAL BEST 목표.** 방법: TARGET 을 LOCAL BEST 로 둔다(F8 → CHART 또는 선곡의 옵션 패널 1). W3 에서 친 곡을 다시 친다. 그다음 한 번도 손으로 치지 않은 곡을 친다. 기대: W3 의 곡에서는 점수 그래프 범례가 `LOCAL BEST` 이고 판정 글자 위의 숫자가 W3 의 EX 와의 차이다. 결과 화면 TARGET 도 `LOCAL BEST` 와 같은 EX. 치지 않은 곡에서는 범례가 `RATE AAA (NO RECORD)` 이고 선곡 옵션 패널 1 이 `LOCAL BEST (NO RECORD: AAA)` 다.
+- [ ] **W6 TARGET FALLBACK 과 TARGET RATE.** 방법: F8 → CHART 에서 TARGET FALLBACK 을 MAX, RATE A, RATE CUSTOM 으로 바꿔 가며 미리보기를 보고, RATE CUSTOM 일 때 TARGET RATE 를 70% 로 내린다. TARGET 을 IR BEST 로 바꿔 본다. TARGET 을 RATE AA 로, FALLBACK 을 RATE AAA 로 두고 TARGET RATE 에 커서를 둔다. 실제로 치지 않은 곡을 한 번 친다. 기대: TARGET 행이 `LOCAL BEST > MAX`, `> A`, `> 70%` 로 바뀌고 미리보기 범례가 그 목표를 따른다. IR BEST 는 `IR BEST > LOCAL > AAA` 와 `NO IR SCORE: YOUR LOCAL BEST, THEN RATE AAA`. 마지막 상태의 TARGET RATE 패널은 `NOT IN USE: NO TARGET IS RATE CUSTOM`. 실제 판의 범례·숫자·결과 화면 TARGET 이 고른 fallback 이다.
+- [ ] **W7 설정 화면(Tab)을 손으로.** 방법: Tab 으로 연다. Tab·Shift+Tab 으로 묶음을 돌고, PgUp/PgDn/Home/End, 휠, 라벨 클릭과 스위치·칸·화살표 클릭, 오른쪽 클릭을 써 본다. 숫자를 Enter 로 치는 중, EMAIL·PASSWORD 를 치는 중, RIVALS 목록을 연 중, Shift+0 으로 묶음 되돌리기를 묻는 중에 오른쪽 패널을 본다. 1280x720 창과 전체 화면에서 본다. 기대: 모든 묶음이 스크롤 없이 한 화면이고 잘린 글자가 없다. 각 모드 중에는 패널의 KEYS 가 그 모드의 키(`DIGITS TYPE A NUMBER`, `KEYS TYPE`, `D REMOVE`, `ENTER RESET THE GROUP`)이고 VALUE 가 치는 값이다(비밀번호는 가려짐). 바닥 안내와 패널이 같은 말을 한다. 불편하거나 읽기 어려운 곳(작은 글자 등)은 기록한다.
+- [ ] **W8 스위치에서 Enter.** 방법: 설정 화면의 스위치나 선택 행에서 Enter 를 누른다. 기대: 지금은 저장하고 닫는다(바닥 안내가 `ENTER SAVE AND CLOSE`). SKIN·PLAY 메뉴처럼 다음 값으로 바뀌어야 자연스럽다고 느끼면 기록한다: 사용자 결정으로 남은 항목이다.
+
 ## 4. 기록
 
 | 날짜 | 확인자 | 기기·OS | 결과 | 비고 |
