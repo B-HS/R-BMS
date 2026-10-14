@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { courseSubmissionSchema } from '@server/dto/course'
+import { COURSE_ASSIST_TAG_MAX_LENGTH, COURSE_ASSIST_TAGS_MAX, courseSubmissionSchema } from '@server/dto/course'
 import { createCourseService, toCourseMeta, type CourseScoreInsertRow } from '@server/service/domain/course/course.service'
 
 const COURSE_HASH = 'course-hash-1'
@@ -81,6 +81,56 @@ describe('courseService.submit', () => {
         const result = await service.submit({ input: submission(), user: USER })
         expect(inserted[0].ranked).toBe(true)
         expect(result.response.message).toBe('saved')
+    })
+
+    test('어시스트 필드가 없는 옛 클라이언트 제출은 어시스트 없는 코스로 받아 전과 같이 저장한다', async () => {
+        const input = submission()
+        expect(input.scratch_auto).toBe(false)
+        expect(input.assist).toEqual([])
+        const { service, inserted, bests } = createService()
+        const result = await service.submit({ input, user: USER })
+        expect(result.response.ranked).toBe(true)
+        expect(result.response.flags).toEqual([])
+        expect(inserted[0].extra).toEqual({})
+        expect(bests).toHaveLength(1)
+    })
+
+    test('SCRATCH AUTO 스테이지가 낀 코스는 단일 곡처럼 unranked 로 저장하고 베스트·순위에 넣지 않는다', async () => {
+        const { service, inserted, bests } = createService()
+        const result = await service.submit({
+            input: submission({ scratch_auto: true, assist: ['AUTO_SCRATCH'], extra: { note: 'kept' } }),
+            user: USER,
+        })
+        expect(result.duplicated).toBe(false)
+        expect(result.response.accepted).toBe(true)
+        expect(result.response.ranked).toBe(false)
+        expect(result.response.flags).toEqual(['SCRATCH_AUTO', 'ASSIST'])
+        expect(result.response.rank).toBeNull()
+        expect(result.response.is_new_best).toBe(false)
+        expect(result.response.message).toBe('recorded (unranked: scratch_auto,assist)')
+        expect(inserted[0].ranked).toBe(false)
+        expect(inserted[0].extra).toEqual({ note: 'kept', flags: ['SCRATCH_AUTO', 'ASSIST'], scratch_auto: true, assist: ['AUTO_SCRATCH'] })
+        expect(bests).toHaveLength(0)
+    })
+
+    test('넓힌 판정 스테이지가 낀 코스는 ASSIST 로 unranked 다', async () => {
+        const { service, inserted } = createService()
+        const result = await service.submit({ input: submission({ assist: ['CUSTOM_JUDGE'] }), user: USER })
+        expect(result.response.ranked).toBe(false)
+        expect(result.response.flags).toEqual(['ASSIST'])
+        expect(inserted[0].extra).toEqual({ flags: ['ASSIST'], scratch_auto: false, assist: ['CUSTOM_JUDGE'] })
+    })
+
+    test('어시스트 코스의 재전송도 unranked 와 flags 를 그대로 돌려준다', async () => {
+        const { service } = createService({ existingId: 'cs_existing' })
+        const result = await service.submit({ input: submission({ scratch_auto: true, assist: ['AUTO_SCRATCH'] }), user: USER })
+        expect(result.response.ranked).toBe(false)
+        expect(result.response.flags).toEqual(['SCRATCH_AUTO', 'ASSIST'])
+    })
+
+    test('어시스트 태그가 지나치게 많거나 길면 스키마가 거절한다', () => {
+        expect(() => submission({ assist: Array.from({ length: COURSE_ASSIST_TAGS_MAX + 1 }, () => 'AUTO_SCRATCH') })).toThrow()
+        expect(() => submission({ assist: ['X'.repeat(COURSE_ASSIST_TAG_MAX_LENGTH + 1)] })).toThrow()
     })
 
     test('played_at 이 음수면 스키마가 거절한다', () => {

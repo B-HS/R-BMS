@@ -61,7 +61,7 @@ export const GUIDE_SECTIONS: GuideSection[] = [
     {
         id: 'ranked',
         title: '3. 랭킹에 반영되는 플레이 (Playing ranked)',
-        body: '플레이가 끝나면 결과 화면 왼쪽에 IR 결과가 표시됩니다. 서버가 받아들이면 IR: RANK #<순위> 또는 IR: SENT 가, 개인 베스트를 갱신하면 NEW BEST 가 함께 나옵니다. 아래 조건에 해당하는 플레이는 제출 자체를 건너뛰거나 UNRANKED 로 기록되어 랭킹에서 빠집니다.',
+        body: '플레이가 끝나면 결과 화면 왼쪽에 IR 결과가 표시됩니다. 서버가 받아들이면 IR: RANK #<순위> 또는 IR: SENT 가, 개인 베스트를 갱신하면 NEW BEST 가 함께 나옵니다. 아래 조건에 해당하는 플레이는 제출 자체를 건너뛰거나 UNRANKED 로 기록되어 랭킹에서 빠집니다. 사람이 친 판은 어시스트가 있어도 서버에 기록이 남고, 코스도 같습니다.',
         rows: [
             {
                 label: 'autoplay · 리플레이 재생',
@@ -70,9 +70,14 @@ export const GUIDE_SECTIONS: GuideSection[] = [
             },
             {
                 label: '판정폭 확대',
-                description: 'JUDGE WIDTH 나 LN 마진을 100 보다 넓게 설정한 플레이는 제출하지 않습니다 (IR: SKIPPED (judge window widened)).',
+                description:
+                    'JUDGE WIDTH 나 LN 마진을 100 보다 넓게 설정한 플레이는 제출되어 기록이 남지만 랭킹과 서버 최고 기록에서 빠집니다 (UNRANKED: widened judge 또는 assist options). 이런 스테이지가 하나라도 낀 코스도 같습니다.',
             },
-            { label: '스크래치 어시스트', description: 'AUTO SCRATCH 는 어시스트로 취급되어 제출에서 제외됩니다 (IR: SKIPPED (scratch assist)).' },
+            {
+                label: '스크래치 어시스트',
+                description:
+                    'AUTO SCRATCH 로 친 플레이는 턴테이블 노트를 판정에서 빼고 제출되어 기록이 남지만 랭킹과 서버 최고 기록에서 빠집니다 (UNRANKED: auto scratch). 이런 스테이지가 하나라도 낀 코스도 같습니다.',
+            },
             {
                 label: '어시스트 옵션 · guest 제출',
                 description:

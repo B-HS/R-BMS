@@ -1,7 +1,7 @@
 import { clearLampFromId, clearLampToId, gaugeTypeToId, type JudgeBreakdownInput } from '@server/dto/common'
 import type { ScoreRecordOutput, ScoreSubmissionInput, SubmitResponseOutput } from '@server/dto/score'
 import { deriveExScore, deriveMinbp, isBetterBest } from '@server/service/domain/score/best-policy'
-import { BUILD_TRUST, rankedPolicy, type BuildTrust, type ScoreFlag } from '@server/service/domain/score/ranked-policy'
+import { BUILD_TRUST, rankedPolicy, submissionMessage, type BuildTrust, type ScoreFlag } from '@server/service/domain/score/ranked-policy'
 
 export const GUEST_PLAYER_ID = 'guest'
 
@@ -267,7 +267,7 @@ export const createScoreService = (deps: ScoreServiceDeps) => ({
             accepted: true,
             rank,
             previous_best: previous?.exScore ?? null,
-            message: ranked ? 'saved' : `recorded (unranked: ${flags.join(',').toLowerCase()})`,
+            message: submissionMessage(ranked, flags),
             ranked,
             flags,
             is_new_best: isNewBest,

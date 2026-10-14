@@ -22,6 +22,13 @@ export type BuildTrust = (typeof BUILD_TRUST)[keyof typeof BUILD_TRUST]
 
 const NEUTRAL_JUDGE_RATE = 100
 
+export const assistFlags = ({ scratch_auto, assist }: Pick<PlayOptionsInput, 'scratch_auto' | 'assist'>) => [
+    ...(scratch_auto ? [SCORE_FLAG.SCRATCH_AUTO] : []),
+    ...(assist.length > 0 ? [SCORE_FLAG.ASSIST] : []),
+]
+
+export const submissionMessage = (ranked: boolean, flags: ScoreFlag[]) => (ranked ? 'saved' : `recorded (unranked: ${flags.join(',').toLowerCase()})`)
+
 export type RankedPolicyInput = {
     options: PlayOptionsInput
     buildTrust: BuildTrust
@@ -32,8 +39,7 @@ export type RankedPolicyInput = {
 export const rankedPolicy = ({ options, buildTrust, isGuest, requireTrustedBuild }: RankedPolicyInput) => {
     const flags: ScoreFlag[] = []
     if (options.autoplay) flags.push(SCORE_FLAG.AUTOPLAY)
-    if (options.scratch_auto) flags.push(SCORE_FLAG.SCRATCH_AUTO)
-    if (options.assist.length > 0) flags.push(SCORE_FLAG.ASSIST)
+    flags.push(...assistFlags(options))
     if (options.judge_rate > NEUTRAL_JUDGE_RATE) flags.push(SCORE_FLAG.JUDGE_WIDTH)
     if (options.total_override > 0) flags.push(SCORE_FLAG.TOTAL_OVERRIDE)
     if (buildTrust !== BUILD_TRUST.TRUSTED) flags.push(SCORE_FLAG.UNKNOWN_BUILD)

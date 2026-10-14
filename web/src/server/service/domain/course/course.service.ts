@@ -2,9 +2,8 @@ import { clearLampToId } from '@server/dto/common'
 import type { CourseMetaInput, CourseSubmissionInput } from '@server/dto/course'
 import type { SubmitResponseOutput } from '@server/dto/score'
 import { deriveExScore, deriveMinbp, isBetterBest } from '@server/service/domain/score/best-policy'
+import { assistFlags, submissionMessage, type ScoreFlag } from '@server/service/domain/score/ranked-policy'
 import { toScoreRecord, type ScoreRankingRow } from '@server/service/domain/score/score.service'
-
-const RANKED_COURSE_SUBMISSION = true
 
 export type CourseChartRow = {
     position: number
@@ -100,6 +99,7 @@ export const buildCourseScoreRow = (params: {
     exScore: number
     minbp: number
     ranked: boolean
+    flags: ScoreFlag[]
 }): CourseScoreInsertRow => {
     const { input } = params
     return {
@@ -126,7 +126,8 @@ export const buildCourseScoreRow = (params: {
         trophy: input.trophy ?? null,
         ranked: params.ranked,
         playedAt: input.played_at,
-        extra: input.extra,
+        extra:
+            params.flags.length > 0 ? { ...input.extra, flags: params.flags, scratch_auto: input.scratch_auto, assist: input.assist } : input.extra,
     }
 }
 
@@ -160,6 +161,8 @@ export const createCourseService = (deps: CourseServiceDeps) => ({
         const exScore = input.ex_score > 0 ? input.ex_score : deriveExScore(input.judge)
         const minbp = input.minbp > 0 ? input.minbp : deriveMinbp(input.judge)
         const clear = clearLampToId(input.clear)
+        const flags = assistFlags(input)
+        const ranked = flags.length === 0
 
         const existingId = await deps.db.findCourseScoreIdByIdempotency({
             userId: user.id,
@@ -172,8 +175,8 @@ export const createCourseService = (deps: CourseServiceDeps) => ({
                 rank: null,
                 previous_best: null,
                 message: 'duplicate submission ignored',
-                ranked: RANKED_COURSE_SUBMISSION,
-                flags: [],
+                ranked,
+                flags,
                 is_new_best: false,
                 score_id: existingId,
             }
@@ -182,11 +185,9 @@ export const createCourseService = (deps: CourseServiceDeps) => ({
 
         const courseScoreId = deps.newId('cs_')
         const previous = await deps.db.getCourseBest({ courseHash: input.course_hash, userId: user.id })
-        await deps.db.insertCourseScore(
-            buildCourseScoreRow({ id: courseScoreId, userId: user.id, input, exScore, minbp, ranked: RANKED_COURSE_SUBMISSION }),
-        )
+        await deps.db.insertCourseScore(buildCourseScoreRow({ id: courseScoreId, userId: user.id, input, exScore, minbp, ranked, flags }))
 
-        const isNewBest = isBetterBest({ clear, exScore, minbp }, previous)
+        const isNewBest = ranked && isBetterBest({ clear, exScore, minbp }, previous)
         if (isNewBest) {
             await deps.db.upsertCourseBest({
                 courseHash: input.course_hash,
@@ -199,15 +200,15 @@ export const createCourseService = (deps: CourseServiceDeps) => ({
             })
         }
 
-        const rank = (await deps.db.countBetterCourseBests({ courseHash: input.course_hash, clear, exScore })) + 1
+        const rank = ranked ? (await deps.db.countBetterCourseBests({ courseHash: input.course_hash, clear, exScore })) + 1 : null
 
         const response: SubmitResponseOutput = {
             accepted: true,
             rank,
             previous_best: previous?.exScore ?? null,
-            message: 'saved',
-            ranked: RANKED_COURSE_SUBMISSION,
-            flags: [],
+            message: submissionMessage(ranked, flags),
+            ranked,
+            flags,
             is_new_best: isNewBest,
             score_id: courseScoreId,
         }

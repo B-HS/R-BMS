@@ -2,6 +2,8 @@ import { z } from 'zod'
 import { chartIdSchema, clearLampSchema, extraSchema, judgeBreakdownSchema, playerIdSchema } from '@server/dto/common'
 
 export const COURSE_HASH_MAX_LENGTH = 128
+export const COURSE_ASSIST_TAG_MAX_LENGTH = 32
+export const COURSE_ASSIST_TAGS_MAX = 16
 
 export const courseTrophySchema = z.object({
     name: z.string(),
@@ -38,6 +40,8 @@ export const courseSubmissionSchema = z.object({
     charts: z.array(chartIdSchema).default([]),
     trophy: z.string().max(32).nullish().default(null),
     played_at: z.number().int().min(0),
+    scratch_auto: z.boolean().default(false),
+    assist: z.array(z.string().max(COURSE_ASSIST_TAG_MAX_LENGTH)).max(COURSE_ASSIST_TAGS_MAX).default([]),
     extra: extraSchema,
 })
 

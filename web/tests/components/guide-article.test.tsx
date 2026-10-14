@@ -29,7 +29,14 @@ describe('연동 가이드 문서', () => {
 
     test('랭킹 제외 조건을 결정 12 기준으로 담는다', () => {
         const html = markup()
-        for (const reason of ['autoplay', 'replay playback', 'judge window widened', 'scratch assist', 'UNRANKED']) expect(html).toContain(reason)
+        for (const reason of ['autoplay', 'replay playback', 'widened judge', 'auto scratch', 'assist options', 'UNRANKED'])
+            expect(html).toContain(reason)
+    })
+
+    test('어시스트 플레이는 제출 생략이 아니라 랭킹 제외로 안내한다', () => {
+        const html = markup()
+        for (const staleSkip of ['SKIPPED (judge window widened)', 'SKIPPED (scratch assist)']) expect(html).not.toContain(staleSkip)
+        expect(html).toContain('코스')
     })
 
     test('랭킹 패널 · 리플레이 · 설정 동기화 · 라이벌 조작을 담는다', () => {
