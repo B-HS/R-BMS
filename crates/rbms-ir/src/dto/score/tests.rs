@@ -248,9 +248,10 @@ fn score_flag_rejects_an_unknown_wire_name() {
 }
 
 #[test]
-fn only_unknown_build_leaves_a_score_rankable() {
+fn only_unknown_build_and_scratch_auto_leave_a_score_rankable() {
     assert!(!ScoreFlag::UnknownBuild.blocks_ranking(), "the server blocks it only when it requires a trusted build");
-    for flag in ScoreFlag::ALL.into_iter().filter(|flag| *flag != ScoreFlag::UnknownBuild) {
+    assert!(!ScoreFlag::ScratchAuto.blocks_ranking(), "a SCRATCH AUTO run is ranked on the list that includes them");
+    for flag in ScoreFlag::ALL.into_iter().filter(|flag| !matches!(flag, ScoreFlag::UnknownBuild | ScoreFlag::ScratchAuto)) {
         assert!(flag.blocks_ranking(), "{flag} must block ranking");
     }
 }

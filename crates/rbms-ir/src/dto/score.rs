@@ -187,9 +187,11 @@ impl ScoreFlag {
     }
 
     /// Whether the flag alone keeps a score out of the ranking. `UnknownBuild` does not: the server
-    /// only blocks an unrecognised build when it is configured to require a trusted one.
+    /// only blocks an unrecognised build when it is configured to require a trusted one. Nor does
+    /// `ScratchAuto`: a SCRATCH AUTO run is ranked, on the list that includes SCRATCH AUTO runs, and
+    /// the flag only marks it as such.
     pub const fn blocks_ranking(self) -> bool {
-        !matches!(self, ScoreFlag::UnknownBuild)
+        !matches!(self, ScoreFlag::UnknownBuild | ScoreFlag::ScratchAuto)
     }
 
     /// Short player-facing reason, for the result screen.

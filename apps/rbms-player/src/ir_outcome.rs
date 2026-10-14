@@ -2,7 +2,7 @@
 //! Pure formatting over [`rbms_ir::SubmitOutcome`], so every branch is unit-testable without a
 //! server.
 
-use rbms_ir::{IrError, SubmitOutcome};
+use rbms_ir::{IrError, ScoreFlag, SubmitOutcome};
 use rbms_render::Color;
 
 /// Where the IR block sits on the result screen: the left column, below the EX-delta lines the
@@ -15,6 +15,10 @@ pub(crate) const IR_RESULT_SCALE: f32 = 1.8;
 /// Longest server/error text kept in a result line before it is cut with [`TRUNCATION_MARK`].
 /// Long enough for a sentence, short enough to stay inside the result panel column.
 pub(crate) const IR_LINE_MAX_CHARS: usize = 56;
+
+/// Appended to the placement of a SCRATCH AUTO run, whose rank is its place on the server's list
+/// that includes SCRATCH AUTO runs rather than on the default one.
+pub(crate) const SCRATCH_AUTO_RANK_MARK: &str = "(SCRATCH AUTO)";
 
 /// Appended when a message is cut to [`IR_LINE_MAX_CHARS`]. ASCII so it renders in every bundled
 /// font.
@@ -141,6 +145,7 @@ pub(crate) fn format_submit_outcome(outcome: &SubmitOutcome) -> IrReport {
             let line = match response.unranked_summary() {
                 Some(reasons) => format!("UNRANKED: {}", truncate(&reasons)),
                 None => match response.rank {
+                    Some(rank) if response.has_flag(ScoreFlag::ScratchAuto) => format!("IR: RANK #{rank} {SCRATCH_AUTO_RANK_MARK}"),
                     Some(rank) => format!("IR: RANK #{rank}"),
                     None => "IR: SENT".to_string(),
                 },
@@ -159,7 +164,7 @@ pub(crate) fn format_submit_outcome(outcome: &SubmitOutcome) -> IrReport {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rbms_ir::{ScoreFlag, SubmitResponse};
+    use rbms_ir::SubmitResponse;
 
     fn accepted(rank: Option<u32>) -> SubmitResponse {
         SubmitResponse { accepted: true, rank, ..Default::default() }
@@ -219,6 +224,32 @@ mod tests {
         assert!(report.score.contains(ScoreFlag::Guest.describe()));
         assert!(!report.failed, "an unranked score still reached the server");
         assert_eq!(IrStatus::Reported(report).lines()[0].1, IrLineKind::Warn);
+    }
+
+    #[test]
+    fn a_scratch_auto_run_keeps_its_placement_and_names_the_list() {
+        let response = SubmitResponse {
+            accepted: true,
+            rank: Some(2),
+            ranked: true,
+            flags: vec![ScoreFlag::ScratchAuto.as_wire().to_string()],
+            is_new_best: true,
+            ..Default::default()
+        };
+        let report = format_submit_outcome(&SubmitOutcome { submit: Ok(response), replay: None });
+        assert_eq!(report.score, "IR: RANK #2 (SCRATCH AUTO)");
+        assert!(report.new_best);
+    }
+
+    #[test]
+    fn a_scratch_auto_run_judged_wider_names_only_the_judge_as_the_reason() {
+        let response = SubmitResponse {
+            accepted: true,
+            flags: vec![ScoreFlag::ScratchAuto.as_wire().to_string(), ScoreFlag::Assist.as_wire().to_string(), ScoreFlag::JudgeWidth.as_wire().to_string()],
+            ..Default::default()
+        };
+        let lines = reported(SubmitOutcome { submit: Ok(response), replay: None });
+        assert_eq!(lines, vec!["UNRANKED: assist options, widened judge".to_string()]);
     }
 
     #[test]

@@ -84,6 +84,12 @@ pub(super) fn course_submission() -> CourseSubmission {
     }
 }
 
+/// [`course_submission`] as a course with a stage played on SCRATCH AUTO and none judged wider
+/// sends it: lamp demoted to LIGHT ASSIST, and only the scratch assist reported.
+pub(super) fn scratch_auto_course_submission() -> CourseSubmission {
+    CourseSubmission { clear: ClearLamp::LightAssistEasy, scratch_auto: true, assist: vec!["AUTO_SCRATCH".into()], ..course_submission() }
+}
+
 /// [`course_submission`] as a course with a stage played on SCRATCH AUTO and one judged wider sends
 /// it: lamp demoted, and the course-wide assist fields set.
 pub(super) fn assisted_course_submission() -> CourseSubmission {
