@@ -448,3 +448,11 @@ fn every_startup_failure_reads_as_a_sentence_rather_than_a_panic_payload() {
     assert!(!no_adapter.is_empty());
     assert!(!no_adapter.starts_with(char::is_uppercase), "messages are lower case like the rest of the app: {no_adapter}");
 }
+
+#[test]
+fn the_argument_finder_adds_when_it_opens_the_app_is_not_a_chart() {
+    assert!(super::is_system_launch_arg("-psn_0_1234567"));
+    assert!(!super::is_system_launch_arg("/songs"));
+    assert!(!super::is_system_launch_arg("--auto"));
+    assert!(!super::is_system_launch_arg("-psn"));
+}

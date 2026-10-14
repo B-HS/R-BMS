@@ -149,6 +149,15 @@ const MODE: Mode = Mode::BEAT_7K;
 /// so it is read off the config rather than fixed here.
 const PREVIEW_ID: u32 = IdNamespace::PREVIEW.base;
 const PREVIEW_DEBOUNCE: Duration = Duration::from_millis(333);
+
+/// The argument macOS can add when Finder opens the app bundle (`-psn_0_<number>`, the process
+/// serial number). It names no chart, so the launch reads it as nothing.
+const PROCESS_SERIAL_ARG_PREFIX: &str = "-psn_";
+
+/// Whether a launch argument is one the system added rather than one the player typed.
+fn is_system_launch_arg(arg: &str) -> bool {
+    arg.starts_with(PROCESS_SERIAL_ARG_PREFIX)
+}
 const PREVIEW_LOOP_TAIL_US: i64 = 2_000_000;
 
 /// Shortest loop period the file preview will re-trigger on, so a zero-length clip cannot spin.
@@ -1484,6 +1493,7 @@ pub fn run(args: impl Iterator<Item = String>) -> ExitCode {
                     }
                 }
             }
+            other if is_system_launch_arg(other) => {}
             other if chart.is_none() && !other.starts_with("--") => chart = Some(other.to_string()),
             _ => {}
         }
