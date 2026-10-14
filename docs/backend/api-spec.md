@@ -182,7 +182,8 @@
   "judge": {
      "epg":700,"lpg":12, "egr":50,"lgr":14, "egd":5,"lgd":16,
      "ebd":1,"lbd":7,   "epr":2,"lpr":3,   "ems":0,"lms":2,
-     "avgjudge":-1200,                       // µs, 평균 판정오차(레퍼런스 구현 avgjudge)
+     "avgjudge":11800,                       // µs, 레퍼런스 avgjudge: 노트마다 입력과의 거리(놓친 노트 1초)의 평균. 0 이상, 작을수록 정확
+                                             // extra.rule_version 이 없는 본문(옛 클라이언트)은 맞은 입력의 부호 있는 평균을 실었다
      "empty_poor":9,                         // rbms 空POOR(노트 미소실 빈 POOR)
      // 합계 미러(호환·검증용, 서버가 재계산 가능):
      "pgreat":712,"great":64,"good":21,"bad":8,"poor":5,"miss":2,
@@ -207,7 +208,8 @@
   "client_platform":"macos-universal",      // 빌드 타깃
   "replay_id":null,                         // 이미 업로드한 리플레이 연결(또는 제출 후 §8로 업로드)
   "played_at":1700000000000,                // unix ms
-  "extra":{} }
+  "extra":{ "mean_offset_us":-1200,         // 맞은 입력의 부호 있는 평균(빠르면 양수), 결과 화면이 만든 본문에만
+            "rule_version":4 } }            // 클라이언트 규칙 세대. 기록 동기화가 옛 행에서 다시 만든 본문은 그 행의 세대(4 미만이면 avgjudge 0)
 
 // 201 SubmitResponse (같은 판의 재전송은 200)
 { "accepted":true, "ranked":true, "rank":3, "previous_best":1400, "is_new_best":true,

@@ -60,4 +60,4 @@
 6. **검증:** 2026-06-03 당시 2-판정 픽스처 5종과 전체 887 통과를 기록했습니다. 현재 기준은 2026-09-16 Phase H `cargo test --workspace` exit 0, 등록 테스트 3,040개이며, deferral/re-grab, HCN tick, BSS/MSS까지 matcher 테스트가 포함됩니다.
 
 ## 남은 실제 제약
-- 레퍼런스 구현의 **노트 카운트 분모**(CN을 passnote 2로 세는지)는 BMS 모델이 **외부 라이브러리**(레퍼런스 구현 소스 트리 밖)라 원본 대조 불가. rbms는 `JudgeManager`의 **2× `updateMicro`(head+end) 증거**에 근거해 CN=2로 카운트하고, `count_playable_notes`↔judge `total_notes`↔gauge 분모를 **내부 일관**되게 맞췄다. 실제 CN/HCN 차트가 corpus에 거의 없어 today 영향은 미미. 실차트 확보 시 회귀 추가 권장.
+- 레퍼런스 구현의 **노트 카운트 분모**는 2026-10-15 에 대조를 마쳤다. BMS 모델은 외부 라이브러리(`jbms-parser`)라 소스가 없어 클래스 파일을 바이트코드까지 읽었고(`docs/utils/class-disassembler.py`), `TimeLine.getTotalNotes(lntype)` 가 일반 노트 1, LN 머리 1, 꼬리는 CN·HCN 일 때만(미정의 LN 은 LN MODE 가 LN 이 아닐 때) 센다는 것을 확인했다. rbms 의 `count_playable_notes`↔judge `total_notes`↔gauge 분모와 같은 정의다(`rbms_model::NoteKind::counts_as_playable_note`). `#LNMODE` 1·2·3 합성 차트에서 디코더와 판정 엔진의 노트 수가 같은지는 `crates/rbms-play/tests/note_count.rs` 가 고정한다.

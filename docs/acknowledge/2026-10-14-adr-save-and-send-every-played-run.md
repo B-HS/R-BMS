@@ -35,7 +35,7 @@
 - 클라이언트: `apps/rbms-player/src/lib.rs`(`ir_submission_block_reason`, `updates_score`, `assisted_lamp`), `apps/rbms-player/src/app_result.rs`, `crates/rbms-store/src/score.rs`, `crates/rbms-ir/src/mapping.rs`.
 - 서버: `web/src/server/service/domain/score/ranked-policy.ts`, `web/src/server/service/domain/score/score.service.ts`.
 - 커밋: `8b11a17`. 코스는 [2026-10-14-adr-assisted-course-submission.md](2026-10-14-adr-assisted-course-submission.md).
-- KNOWN ISSUE: `apps/rbms-player/src/app_result.rs` 245~246행이 `rp.save(...)`(실패해도 `eprintln!` 만 하는 `Replay::save`, `crates/rbms-store/src/replay.rs` 168행) 뒤에 저장 성공 여부와 상관없이 `replay_file = Some(name)` 을 둔다. 디스크 쓰기가 실패해도 로컬 기록이 없는 리플레이 파일을 가리키고 결과 화면이 리플레이 저장됨(`replay_saved`)으로 보인다. 고치는 방법: `try_save` 의 결과가 `Ok` 일 때만 `replay_file` 을 채우고, 실패하면 `notify(Level::Error, ..)` 로 알린다(업로드할 리플레이는 메모리의 것을 그대로 쓸 수 있다).
+- 해소(2026-10-15, S19 REC-2): 리플레이는 판이 끝나는 프레임에 임시 파일만 만들고(`rbms_store::StagedWrite`), 만들 수 없으면 행에 이름을 적지 않고 `replay not saved` 오류를 띄운다. 쓰기·fsync·이름 바꾸기는 저장 스레드가 하고, 거기서 실패하면 행과 기록 책에서 이름을 지운다(`AppShared::poll_saves`). 결과 화면의 전송은 메모리의 리플레이를 올린다. 점수 DB 를 쓸 수 없는 판은 `pending-runs/` 에 따로 남겨 다음 실행에 읽어 들이고, 실패 화면에서 START·SELECT 로 다시 한 판도 남긴다(`record_retried_run`). 아래는 그 전의 기록이다. 옛 KNOWN ISSUE: `apps/rbms-player/src/app_result.rs` 245~246행이 `rp.save(...)`(실패해도 `eprintln!` 만 하는 `Replay::save`, `crates/rbms-store/src/replay.rs` 168행) 뒤에 저장 성공 여부와 상관없이 `replay_file = Some(name)` 을 둔다. 디스크 쓰기가 실패해도 로컬 기록이 없는 리플레이 파일을 가리키고 결과 화면이 리플레이 저장됨(`replay_saved`)으로 보인다. 고치는 방법: `try_save` 의 결과가 `Ok` 일 때만 `replay_file` 을 채우고, 실패하면 `notify(Level::Error, ..)` 로 알린다(업로드할 리플레이는 메모리의 것을 그대로 쓸 수 있다).
 
 ## 날짜와 사용자 원문
 

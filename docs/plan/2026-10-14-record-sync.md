@@ -248,7 +248,7 @@ ORDER BY l.date ASC, l.id ASC
 
 `scorelog.state` 와 `ir_sync.state` 의 이름이 겹치므로 별칭을 반드시 쓴다. `LOG_COLUMNS` 는 접두 없는 문자열이라 이 쿼리용 접두 목록을 `rows.rs` 에 따로 둔다(한 목록에서 만들어 드리프트를 막는다).
 
-선정 규칙 요약: 이 서버에서 수락되지 않은 판 전부(거절·일시 실패·건너뜀·미확인 모두 다시 보낸다, 사용자 결정 (7)), 다른 계정으로 친 판 제외, 세대 2 이하 SCRATCH AUTO 판 제외(결정 (10). `?6 = ASSIST_UNRECORDED` 로 옮겨 온 어시스트 판도 같은 세대 조건이면 뺀다. `?5` 는 `'accepted'`). 게스트로 친 판과 이 변경 이전의 판(`played_as` NULL)은 처음 동기화하는 계정으로 간다(결정 (7) "로컬 이력 전체").
+선정 규칙 요약: 이 서버에서 수락되지 않은 판 전부(거절·일시 실패·건너뜀·미확인 모두 다시 보낸다, 사용자 결정 (7). S19(2026-10-15, REC-5)부터 저절로 시작한 동기화는 같은 클라이언트·서버 빌드 아래 거절된 판을 다시 보내지 않고, 빌드가 바뀌거나 SYNC RECORDS NOW 를 누를 때 다시 보낸다: `play-options.md` 10.9), 다른 계정으로 친 판 제외, 세대 2 이하 SCRATCH AUTO 판 제외(결정 (10). `?6 = ASSIST_UNRECORDED` 로 옮겨 온 어시스트 판도 같은 세대 조건이면 뺀다. `?5` 는 `'accepted'`). 게스트로 친 판과 이 변경 이전의 판(`played_as` NULL)은 처음 동기화하는 계정으로 간다(결정 (7) "로컬 이력 전체").
 
 ### 3.2 IR 크레이트 — `crates/rbms-ir/src/error.rs`, `crates/rbms-ir/src/dto/score.rs`, 새 `crates/rbms-ir/src/sync.rs`
 

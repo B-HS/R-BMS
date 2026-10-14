@@ -23,6 +23,7 @@
 | POST | `/auth/register` | — | `AuthRequest`(email 필수) | 201 `AuthResponse` | `register` |
 | POST | `/auth/login` | — | `AuthRequest` | 200 `AuthResponse` | `login` |
 | GET | `/auth/me` | Bearer | — | 200 `PlayerProfile` | `whoami` |
+| DELETE | `/auth/token/current` | Bearer(폐기할 토큰) | — | 204 (모르거나 이미 폐기된 토큰은 401) | `revoke_current_token` (로그아웃) |
 | POST | `/scores` | Bearer 또는 **guest 전용 id** | `ScoreSubmission` | 201 `SubmitResponse`(중복 제출은 200) | `submit_score` |
 | GET | `/charts/{md5}/ranking?limit=&page=&lnmode=&rival_of=` | — | — | 200 `[ScoreRecord]` | `chart_ranking`, `chart_ranking_page` |
 | GET | `/charts/{md5}/best?player={id}` | — | — | 200 `ScoreRecord` 또는 `null` | `player_best` |
@@ -61,6 +62,7 @@
 `POST /scores` 를 Bearer 없이 보낼 때 서버는 `player.id` 가 **문자열 `guest`(= `rbms_ir::GUEST_PLAYER_ID`)** 인 경우에만 받는다. 다른 id 는 **401 `UNAUTHORIZED`** 다 — 토큰이 만료된 것이 아니라 *id 가 틀린 것*이므로, 클라의 `is_auth_failure()` 가 true 여도 "다시 로그인" 안내로는 해결되지 않는다.
 
 - 클라이언트 규칙: 세션 토큰이 없으면 **항상** `GUEST_PLAYER_ID` 로 제출한다(`ir_session::submission_player_id`). 로그아웃은 저장된 PLAYER ID 도 `guest` 로 되돌린다 — 안 그러면 로그아웃 이후 모든 기록이 401 로 유실된다.
+- 반대쪽도 같다: 토큰이 있는데 `player.id` 가 토큰 주인이 아니면 **403 `FORBIDDEN`** 이다(점수·코스 제출, 설정, 라이벌, 폴더). 그래서 로그인 중인 클라이언트가 계정으로 내는 요청은 모두 **서버가 토큰의 주인으로 알려 준 login id**(로그인 응답, `whoami`. `AccountSession::signed_in_as`)만 쓴다. 설정의 PLAYER ID 는 다음 LOGIN·REGISTER 에 쓸 입력일 뿐 요청의 주인이 아니다. 토큰은 있는데 주인을 아직 모르면(저장된 login id 가 없는 오래된 설정을 막 연 때) 계정 요청은 만들지 않고 `account not confirmed yet` 을 띄운다.
 - 서버가 받아들인 guest 제출은 `GUEST` flag 가 붙어 랭킹에서 제외된다(`message` 예: `recorded (unranked: unknown_build,guest)`).
 - 서버 쪽 개선 여지: player id 오류는 401 보다 **400 `VALIDATION_ERROR`** 가 진실에 가깝다.
 
@@ -104,7 +106,7 @@
   "judge": { "pgreat":712,"great":64,"good":21,"bad":8,"poor":5,"miss":2,
              "fast":30,"slow":40,"combobreak":15,
              "epg":400,"lpg":312,"egr":0,"lgr":0,"egd":0,"lgd":0,"ebd":0,"lbd":0,
-             "epr":0,"lpr":0,"ems":0,"lms":0,"avgjudge":-1500,"empty_poor":3 },
+             "epr":0,"lpr":0,"ems":0,"lms":0,"avgjudge":11500,"empty_poor":3 },   // avgjudge: 레퍼런스 정의(평균 거리 µs, 규칙 세대 4 부터)
   "max_combo": 540, "total_notes": 812, "passnotes": 812, "minbp": 15, "gauge_value": 86.0,
   "options": { "gauge":"Hard", "random":"Random", "random_p2": null, "scratch_auto": false,
                "lntype": 1, "input_device": "keyboard", "assist": [],
@@ -250,10 +252,13 @@
   1. `/scores` 제출.
   2. 성공이고 랭킹을 막는 flag 가 없으면(`is_replay_upload_warranted`) `SubmitResponse.score_id` 를 `ReplayData.score_id` 에 넣고, 비어 있던 `ReplayData.chart` 를 제출 차트로 채운 뒤 `/charts/{md5}/replays` 로 업로드.
   3. `SubmitOutcome { submit, replay }` 를 채널로 전달 — 제출 결과와 업로드 결과를 각각 그대로 볼 수 있다(`replay_id()`, `is_accepted()`).
+- **로그아웃**은 로컬 토큰을 지우고, 서버가 설정돼 있으면 일꾼 스레드에서 `revoke_current_token`(`DELETE /auth/token/current`)을 보내 그 토큰을 서버에서도 폐기한다. 401(이미 모르는 토큰)은 목적을 이룬 것으로 보고, 네트워크 실패면 `logged out, but the server did not revoke the token (delete it on the web site)` 를 알림에 남긴다. 어느 쪽이든 로그아웃은 이 기기에서 끝난다. **로그인·가입**은 쓰던 토큰을 Bearer 로 싣고 가므로(`HttpScoreServer` 는 토큰이 있으면 모든 호출에 싣는다) 서버가 성공한 뒤 그 토큰을 폐기한다.
+- **계정이 바뀌면**(로그아웃, 다른 계정으로 로그인, `whoami` 가 저장된 것과 다른 주인을 알려 줌) 이 기기에 남은 이전 계정의 것을 한곳(`AppShared::forget_account_data`)에서 정리한다: 라이벌 목록, 설정 동기화의 잠금(`SyncLock`), 그 계정으로 보낸 채 돌아오지 않은 요청(`whoami`·라이벌·설정 업로드·읽기·다운로드). 서버나 토큰을 다시 만들 때(`rebuild_server`)도 그 요청들은 버린다: 답이 옛 서버·옛 토큰의 것이기 때문이다. 같은 계정으로 다시 로그인하면 라이벌과 잠금은 그대로다. `whoami` 는 401 일 때만 토큰을 버린다(방화벽·프록시의 403 으로는 로그아웃되지 않는다).
 - 설정 동기화 절차: `get_settings` → 편집 → `base_updated_at = 서버 updated_at` 으로 `put_settings`. 409 `SettingsConflict` 는 서버 사본을 함께 실어 오므로 재조회 없이 병합/덮어쓰기를 결정할 수 있다.
 - **성공한 PUT 은 저장한 `updated_at` 을 200 본문으로 돌려준다.** 서버는 클라가 보낸 `updated_at` 을 무시하고 자기 시각을 찍으므로, 새 잠금 값은 이 응답으로만 알 수 있다. `put_settings` 는 이를 `SettingsPutResult { updated_at, from_server: true }` 로 돌려주고 클라가 곧바로 잠금을 갱신한다 — 조건부 PUT 앞의 추가 GET 은 필요 없다.
 - **204 로 답하는 구버전 서버**는 `from_server: false` + 보낸 stamp 로 떨어진다. 이 stamp 는 추측이라 잠금에 넣지 않고(`ir_sync::upload_outcome` 이 `None`), 클라(`App::refresh_sync_base`)가 `get_settings` 를 한 번 더 돌려 진짜 값을 읽는다. 이 재조회가 없으면 그런 서버에서는 한 세션의 **두 번째 저장부터 항상 409** 다.
 - **409 는 잠금을 전진시키지 않는다.** 409 본문의 `server.updated_at` 을 그대로 다음 base 로 삼으면 바로 다음 업로드가 성공해 "먼저 다운로드하라"던 그 새 서버 사본을 덮어쓴다. 잠금 전이는 `ir_sync::SyncLock`/`SyncOutcome` 한 곳에 모여 있다: `Read(updated_at)` 와 `Uploaded(updated_at)`(= 서버가 알려준 stamp) 만 잠금을 설정하고, `Conflict` 는 그대로 두며, `SignedOut` 은 지운다.
+- **설정 blob 에 실리지 않는 것**(`ir_sync::keep_local`): 토큰·login id·이메일·PLAYER ID·서버 주소, 이 기기의 경로(곡 폴더·표·글꼴·스킨 메뉴), 그리고 **추가 IR 서버 목록 `ir_profiles` 전체**(서버마다 그 서버가 발급한 토큰이 들어 있다). 업로드는 이것들을 기본값으로 바꿔 보내고, 다운로드는 이 기기의 것을 그대로 둔다. S19 이전에 올라간 blob 에 프로필 토큰이 있었다면 그 계정의 다음 업로드가 blob 을 덮어쓸 때 사라진다(서버 쪽 일괄 정리는 없다).
 - 미설정 기본값 `NullScoreServer` 는 8개 필수 메서드에 `NotConfigured`, 슈퍼셋 확장 메서드에 `Unsupported` 를 돌려준다(플레이 무영향, 연결 표시 빨강).
 
 ---

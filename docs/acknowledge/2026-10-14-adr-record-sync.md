@@ -9,7 +9,7 @@
 ## 결정
 
 1. 로그인 상태에서 로컬 이력 전체를 보낸다. 서버가 이미 받은 판은 멱등 처리로 "이미 있음"이 되고, 수락으로 확인된 판은 다시 보내지 않는다(사용자 원문 7).
-2. 판마다 기본 서버의 답을 기록 DB 에 남긴다: 수락(`score_id`), 거절(코드·필드·이유·시각), 일시 실패(네트워크·5xx·429). 거절된 판도 다음 동기화에서 다시 보낸다(서버 수정으로 받아질 수 있다). 옛 `ir_submitted` 는 판단에 쓰지 않는다.
+2. 판마다 기본 서버의 답을 기록 DB 에 남긴다: 수락(`score_id`), 거절(코드·필드·이유·시각), 일시 실패(네트워크·5xx·429). 거절된 판도 다시 보낸다(서버 수정으로 받아질 수 있다). S19(2026-10-15) 개정: 거절을 받은 클라이언트·서버 빌드를 함께 적고, 저절로 시작한 동기화는 두 빌드가 그대로인 거절을 다시 보내지 않는다. 빌드가 바뀌거나 `SYNC RECORDS NOW` 를 누르면 다시 보낸다(같은 본문을 같은 서버에 보내면 같은 거절이 오고, 413 리플레이가 시작마다 업로드 몫을 쓰던 부채 3.14). 옛 `ir_submitted` 는 판단에 쓰지 않는다.
 3. 시점: 시작할 때(로그인 상태 확인 뒤), 로그인·가입 직후, 설정 NETWORK 의 `SYNC RECORDS NOW`. 게스트는 하지 않는다.
 4. 리플레이도 올린다(점수가 수락된 판, 리플레이 파일이 있는 판).
 5. 옛 규칙(세대 2 이하)의 SCRATCH AUTO 판과 SCRATCH AUTO 여부를 알 수 없는 옛 판은 보내지 않는다(`OLD_SCRATCH_AUTO_RULE`).
@@ -32,7 +32,7 @@
 
 - 서버: `web/src/server/service/domain/score/score.service.ts`(같은 초 멱등), `web/src/server/compose/index.ts`, `web/src/server/service/domain/replay/replay.service.ts`, `web/src/server/route/replay.ts`.
 - 클라이언트: `crates/rbms-store/src/scoredb/{schema.sql,sync.rs}`(`play_submission`, `ir_sync`), `crates/rbms-ir/src/sync.rs`, `apps/rbms-player/src/record_sync.rs`, 설정 `SettingId::SyncRecords`, 기록 상세의 `IR:` 줄.
-- 알려진 한계: 기록 DB 에서 다시 만든 본문은 `avgjudge` 의 부호를 잃는다(기록 DB 가 절댓값을 저장). 전체 동기화 대상 선정은 프레임 스레드에서 한다(2만 판 약 0.1초). 영구 거절(예: 413)도 매번 다시 보낸다. `docs/quality-assurance/2026-10-14-test-debt.md` 3.13·3.14.
+- 알려진 한계: 기록 DB 에서 다시 만든 본문은 `avgjudge` 의 부호를 잃는다(기록 DB 가 절댓값을 저장). 2026-10-15 해소: [avgjudge ADR](2026-10-15-adr-avgjudge-reference-definition.md). 전체 동기화 대상 선정이 프레임 스레드에서 돌던 것(3.13)과 영구 거절을 매번 다시 보내던 것(3.14)은 S19 에서 해소했다(`play-options.md` 10.9). 코스도 S19 부터 같은 방식으로 남기고 다시 보낸다(`course_submission`, `course_sync`).
 
 ## 날짜와 사용자 원문
 
