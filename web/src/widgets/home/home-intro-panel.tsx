@@ -25,7 +25,7 @@ export const HomeIntroPanel: FC = () => (
                 <Link href='/guide'>연결 방법 보기</Link>
             </Button>
             <Button asChild variant='outline' size='sm'>
-                <Link href='/tables'>난이도표 보기</Link>
+                <Link href='/tables/insane1'>発狂BMS難易度表 보기</Link>
             </Button>
             <Button asChild variant='outline' size='sm'>
                 <Link href='/search'>차트 검색</Link>

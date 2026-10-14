@@ -2,7 +2,6 @@
 
 import type { FC } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -29,7 +28,6 @@ const readRedirectTarget = () => {
 }
 
 export const LoginForm: FC = () => {
-    const router = useRouter()
     const login = useSessionLogin()
     const form = useForm<LoginValues>({ resolver: zodResolver(loginSchema), defaultValues: { id: '', password: '' } })
 
@@ -39,8 +37,7 @@ export const LoginForm: FC = () => {
         login.mutate(values, {
             onSuccess: (user) => {
                 toast.success(`${user.name} 님으로 로그인했습니다.`)
-                router.replace(readRedirectTarget())
-                router.refresh()
+                window.location.assign(readRedirectTarget())
             },
         }),
     )

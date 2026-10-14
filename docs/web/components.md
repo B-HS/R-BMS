@@ -221,3 +221,22 @@ design.md §7-4의 랜드마크·텍스트 이중 인코딩은 현재 컴포넌�
 | `buildPageMetadata` | `shared/lib/metadata.ts` | 페이지 metadata(`index: false` 로 noindex) |
 | `fetchQueryOrNotFound` | `shared/lib/fetch-query-or-not-found.ts` | 서버 프리페치 404 → `notFound()` |
 
+
+## 9. 발광 표·폴더 화면의 컴포넌트 (2026-10-14, 웨이브 17B-2)
+
+목록과 props 계약의 정본은 `docs/web/2026-10-14-foundation-contract.md` 13.2절이다. 여기에는 다른 화면이 다시 쓸 만한 것과 디자인 규칙만 적는다.
+
+| 이름 | 경로 | 용도 |
+|---|---|---|
+| `AddToFolderMenu` | `widgets/folder/add-to-folder-menu.tsx` | 곡 하나를 내 폴더에 넣고 빼는 메뉴(차트 머리, 표 상세). `level` 은 기호를 붙여(`★16`) 넘김 |
+| `TableProgressPanel` | `features/table/table-progress-panel.tsx` | 접히는 진행 요약(기본 접힘). 펼치면 `LampDistribution` + 레벨별 막대(링크 아님) |
+| `TableLevelSection` | `features/table/table-level-section.tsx` | `.rbms-level-header` 를 쓰는 접히는 묶음 |
+| `TableChartGrid` / `TableChartCard` | `features/table/*` | 1px 틈 격자, 5px 램프 띠 카드. 묶음 안에서는 레벨을 카드에 다시 쓰지 않음 |
+| `TableLevelJump` | `features/table/table-level-jump.tsx` | 레벨 칩 한 줄(모바일 가로 스크롤) |
+| `TableSourceNotice` | `features/table/table-source-notice.tsx` | 사본 표의 출처·삭제 요청 문안 |
+| `useIsHydrated` | `shared/hooks/use-is-hydrated.ts` | 서버 HTML 과 다른 값을 하이드레이션 뒤에만 쓰게 함(사이드바 슬롯, 세션) |
+| `useDialogFocusReturn` | `features/dialog/use-dialog-focus-return.ts` | 상태로 여는 대화상자의 포커스 복귀 |
+
+- 같은 정보를 한 화면에 두 번 두지 않는다(17B-2 리뷰: 발광 표의 "내 진행" `h2` 와 "표 주소 복사" 가 둘씩이었음). 데스크톱 사이드바는 출처와 복사, 본문은 진행, 모바일 머리의 복사는 `md:hidden`.
+- 라이트 테마의 작은 회색 글자는 `text-muted-foreground` 로 4.5:1 을 넘는다(토큰 `oklch(0.48 0 0)`). 새 회색 단계를 만들지 않는다.
+- 행 전체를 누르게 할 때는 제목 링크에 `after:absolute after:inset-0` 과 행의 `relative` 를 쓴다(`ScoreRow`, `FolderListItem`, `TableSnapshotCard`). 홈 "최근 활동" 행도 이미 이 방식이라 행 오른쪽 끝을 눌러도 링크가 받는다(17B-2 에서 `elementFromPoint` 로 확인).

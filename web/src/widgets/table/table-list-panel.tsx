@@ -2,7 +2,7 @@
 
 import type { FC } from 'react'
 import Link from 'next/link'
-import { EmptyState } from '@features/state/empty-state'
+import { DashboardPanelEmpty } from '@features/dashboard/dashboard-panel-empty'
 import { LoadErrorState } from '@features/state/load-error-state'
 import { RowListSkeleton } from '@features/state/row-list-skeleton'
 import { formatCount } from '@shared/lib/format'
@@ -17,10 +17,10 @@ export const TableListPanel: FC = () => {
 
     if (isLoading) return <RowListSkeleton label='난이도표 목록 불러오는 중' />
     if (isError) return <LoadErrorState title='표 목록을 불러오지 못했습니다' isRetrying={isFetching} onRetry={() => void refetch()} />
-    if (rows.length === 0) return <EmptyState title='등록된 표가 없습니다' description='서버가 제공하는 난이도표가 아직 없습니다.' />
+    if (rows.length === 0) return <DashboardPanelEmpty message='서버에 따로 등록된 IR 난이도표가 아직 없습니다.' />
 
     return (
-        <ul aria-label='난이도표 목록' className='bg-card flex flex-col'>
+        <ul aria-label='서버 표 목록' className='bg-card flex flex-col border-t'>
             {rows.map((table) => (
                 <li key={table.id} className='border-border hover:bg-muted/50 relative flex items-center gap-3 border-b px-3 py-2'>
                     <span aria-hidden className='bg-muted flex size-8 shrink-0 items-center justify-center text-sm font-semibold'>

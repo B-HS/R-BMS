@@ -237,3 +237,14 @@ cargo run -p rbms-player -- --server http://localhost:3000/api --player <id>
 - [x] Q2~Q6 의 답이 정해졌다(`docs/acknowledge/2026-10-14-web-decisions.md` 3절): 발광 표는 카드 격자, 폴더는 v1 비공개, 운영 DB 마이그레이션은 사용자가 로컬에서 실행
 - [x] 웹 로그인·가입은 세션 전용 `POST /api/fe/auth/login`·`/api/fe/auth/register`(API 토큰을 만들지 않음). 게임용 `/api/auth/login`·`/register` 는 토큰을 발급한 채로 둔다
 - [ ] 지속형 rate limit(Upstash 등), 운영 시험 데이터 정리(Q6 답 A: 사용자가 지움)
+
+## 웨이브 17B-2 — 발광 표 화면, 폴더 화면, 사이트 리뷰 (2026-10-14)
+
+근거: `docs/web/2026-10-14-foundation-contract.md`(13·14절이 이 웨이브의 화면·컴포넌트·검증), `docs/web/2026-10-14-design-direction.md` 3.3·4절, `docs/acknowledge/2026-10-14-web-decisions.md`(Q2=A 카드 격자, Q3=A 폴더 비공개, Q6=A 시험 데이터 정리).
+
+- [x] U3 발광 표: `/tables/insane1`(카드 격자·레벨 묶음·상세 대화상자·필터와 주소 반영·출처 세 곳·`bmstable` 메타·내 기록 서버 미리 채우기·늦게 그리기), `/tables` 의 번들 표 카드, 차트 페이지 배지
+- [x] U4 폴더: `/folders`, `/folders/[folderId]`(명시 저장·충돌 409·미저장 경고·표에서 가져오기·검색 패널), `AddToFolderMenu`, 로그인·가입·로그아웃의 사용자 묶음 캐시 정리, `FormDialog`·`ConfirmAction` 포커스 복귀
+- [x] 리뷰 major 3건 수정: `useSessionUser` 의 하이드레이션 게이트(#418), 로그인 뒤 전체 이동(`next=/folders` 머묾), `ShellPage` 본문 자식 `shrink-0`(플레이어 패널 눌림)
+- [x] 리뷰 minor 수정: 발광 표 "내 진행" 기본 접힘과 중복 제거(사이드바 진행·복사 버튼), 진행 패널의 레벨 링크 제거, 레벨 칩 한 줄, 카드의 레벨 반복 제거, 라이트 `--muted-foreground` 대비, 보호 경로 로그아웃의 콘솔 404, 쓰지 않는 export·쿼리 키 제거, `.rbms-level-header` 모바일 층
+- [x] 운영 시험 데이터 정리 SQL: `web/scripts/cleanup-test-accounts.count.sql`(세기만), `.delete.sql`(한 트랜잭션). 실행은 사용자
+- [ ] 2차: 계약 문서 10절의 표(한 곡 한 행 보기, 폴더 끌어 옮기기·내 램프, 큰 폴더 가상화, 저장 원자성, RSC 자료 줄이기 등)

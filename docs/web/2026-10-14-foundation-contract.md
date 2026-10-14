@@ -1,6 +1,6 @@
-# 웹 기반 계약 (웨이브 17B-1 통합)
+# 웹 기반 계약 (웨이브 17B-1 통합, 17B-2 반영)
 
-> 현재 상태: 토큰·골격·기존 화면(U1)과 서버·폴더·표 제공(U2)이 합쳐져 통합 검증을 통과했습니다. 이 문서는 다음 웨이브(발광 표 화면, 폴더 화면)의 작업자가 원본 코드를 다시 훑지 않고 시작하도록 쓴 계약입니다.
+> 현재 상태: 토큰·골격·기존 화면(17B-1 U1)과 서버·폴더·표 제공(17B-1 U2) 위에 17B-2 가 발광 표 화면(U3)과 폴더 화면(U4)을 올렸고, 리뷰 발견을 고친 뒤 게이트와 화면 확인을 다시 통과했습니다. 17B-2 에서 바뀐 계약은 해당 절을 고쳤고, 새 화면·컴포넌트·쿼리 키·검증은 13절과 14절에 모았습니다.
 > 작성일 2026-10-14. 근거는 실제 파일과 로컬 실행(포트 3103, 임시 MySQL 8.4)의 응답이며, 두 단위의 보고와 달랐던 곳은 11절에 적었습니다. 문서와 파일이 다르면 파일이 맞습니다.
 > 결정의 정본은 `docs/acknowledge/2026-10-14-web-decisions.md` 입니다. Q2 는 발광 표 기본 보기가 카드 격자(A), Q3 은 폴더 v1 전부 비공개(A)로 정해졌습니다.
 
@@ -8,7 +8,7 @@
 
 1. 모든 화면은 `AppShell`(루트 `layout.tsx`) 안에서 `ShellPage` 한 개를 반환합니다. 머리(`h1`)·스크롤·모바일 메뉴 버튼은 `ShellPage` 가 가집니다(3절).
 2. 새 보호 경로(`/folders/...`)는 `src/proxy.ts` 의 matcher 와 `PROTECTED_PATH_PREFIXES` 에 이미 들어 있습니다. 서버 확인은 해당 경로의 `layout.tsx` 에서 `SessionGate` 로 한 번 더 합니다(3.4절).
-3. 서버 API 는 모두 구현되어 있고(6절) 화면만 없습니다. `/folders` 는 메뉴와 계정 메뉴에 링크가 있으나 페이지가 없어 지금 404 입니다. `/tables/insane1` 도 같은 이유로 동적 `[tableId]` 페이지가 받아 404 를 냅니다(10절).
+3. 서버 API(6절)와 화면이 모두 있습니다. `/tables/insane1`(정적 페이지가 동적 `[tableId]` 보다 우선), `/folders`, `/folders/[folderId]` 의 구성은 13절입니다.
 4. 발광 표(`insane1`)는 DB 가 아니라 저장소의 스냅샷(`web/data/tables/insane1/`)에서 나옵니다. 화면은 DB 의 `/api/tables`(IR 표) 가 아니라 `/api/fe/tables`(스냅샷)를 읽어야 합니다. 두 갈래의 쿼리 키·타입이 따로 있어야 합니다(7절).
 5. 웹 로그인과 가입은 세션 전용 경로(6.1절)입니다. 게임용 `/api/auth/login`·`/register` 는 토큰을 발급하며 웹이 부르지 않습니다.
 
@@ -41,7 +41,8 @@
 | 층 | `--z-rail` `--z-raised` `--z-level-header` `--z-scroll-indicator` `--z-overlay` | `10` `20` `30` `40` `50` |
 
 - Tailwind 색 별칭은 `bg-lamp-noplay`, `text-judge-*`, `text-timing-*` 뿐입니다. 나머지 램프·난이도 색은 `style={{ background: 'var(--rbms-lamp-hard)' }}` 로 씁니다. 램프 이름에서 값으로 가는 표는 `LAMP_BACKGROUND`(`@shared/constants/clear-lamp`) 입니다.
-- 클래스: `.rbms-page`(페이지 틀), `.rbms-page-header`(48px 머리), `.rbms-level-header`(붙는 묶음 머리. 모바일 `top: var(--rail-chrome-height)`, `md` 이상 `top: 0`, z 30), `.rbms-list-scroll`(아래 9rem 여백), `.rbms-micro-label`(11px 대문자 라벨), `.rbms-empty`, `.rbms-lamp`(램프 띠 기본 배경). `html` 에 `scroll-padding-block-start: calc(var(--rail-chrome-height) * 2)`(96px, 붙는 머리 두 개) 가 있고 `--rail-chrome-height` 는 `3rem`, `--list-bottom-padding` 은 `9rem` 입니다.
+- 클래스: `.rbms-page`(페이지 틀), `.rbms-page-header`(48px 머리), `.rbms-level-header`(붙는 묶음 머리. 모바일은 `top: var(--rail-chrome-height)` 에 z 10(`--z-rail`)이라 밀려 올라갈 때 모바일 페이지 머리(z 20) 아래로 들어가고, `md` 이상은 `top: 0` 에 z 30. 발광 표의 `TableLevelSection` 이 씀), `.rbms-list-scroll`(아래 9rem 여백), `.rbms-micro-label`(11px 대문자 라벨), `.rbms-empty`, `.rbms-lamp`(램프 띠 기본 배경). `html` 에 `scroll-padding-block-start: calc(var(--rail-chrome-height) * 2)`(96px, 붙는 머리 두 개) 가 있고 `--rail-chrome-height` 는 `3rem`, `--list-bottom-padding` 은 `9rem` 입니다.
+- 라이트 `--muted-foreground` 는 `oklch(0.48 0 0)`(`--palette-neutral-480`)입니다. 17B-2 리뷰에서 전의 `0.556` 이 사이드바 위 11px 라벨 3.69:1, `bg-muted` 위 12px 숫자 4.35:1 로 4.5:1 에 못 미쳐 낮췄고, 고친 뒤 같은 두 곳이 5.13:1·6.04:1 입니다(다크는 그대로, 8.13:1·5.86:1).
 - 라이트 테마에서 `hard`·`max`·`easy` 램프는 흰 바탕 대비가 낮습니다. 색만으로 뜻을 전하지 말고 견본 옆에 이름을 함께 씁니다(`LampLabel` 이 그렇게 합니다). 견본은 40% 전경 테두리를 가집니다.
 - Normal 클리어의 표시 이름은 `CLEAR`(`CLEAR_LAMP_LABEL.Normal`)입니다. 값 이름(`'Normal'`)은 API·DB 와 같습니다.
 
@@ -73,7 +74,7 @@ export default FoldersPage
 - 제목이 데이터에 달린 화면(차트 상세)은 `ShellPage` 를 클라이언트 패널 안에서 데이터가 온 뒤에 그립니다(`widgets/chart/chart-leaderboard-panel.tsx`). 그 전에는 `ShellPageLoading` 을 `Suspense` 의 fallback 으로 씁니다.
 - Cache Components(`cacheComponents: true`) 규칙: 요청 값(`searchParams`, `cookies()`, `headers()`)을 읽는 서버 컴포넌트는 `Suspense` 안에 둡니다. 안 그러면 빌드가 실패합니다. 서버에서 데이터를 미리 채우는 `*-content.tsx` 는 `getQueryClient()` → `prefetchQuery` → `HydrationBoundary` 의 틀을 따릅니다(`widgets/leaderboard/player-leaderboard-content.tsx`).
 - 없는 대상은 서버에서 `fetchQueryOrNotFound(queryClient, options)`(`@shared/lib/fetch-query-or-not-found`)로 `notFound()` 를 냅니다. API 404 만 `notFound()` 가 되고 그 밖의 실패는 `null` 을 돌려 클라이언트가 재시도하게 둡니다. 동적 하위 경로의 not-found 는 스트리밍이라 HTTP 200 으로 나가고 `noindex` 가 붙습니다(문서에 적힌 동작).
-- 메인 영역 배치: `ShellPage` 의 본문은 `flex flex-col gap-px pb-12` 이고 패널은 `bg-card` 를 가져 1px 틈으로 갈라집니다. 본문 클래스를 바꾸려면 `contentClassName` 을 넘깁니다. 홈 같은 패널 격자는 부모에 `@container/dashboard` 를 달고 `DASHBOARD_GRID_CLASS_NAME` 을 씁니다.
+- 메인 영역 배치: `ShellPage` 의 본문은 `flex flex-col gap-px pb-12 *:shrink-0` 이고 패널은 `bg-card` 를 가져 1px 틈으로 갈라집니다. 본문이 스크롤하므로 직계 자식은 줄어들지 않고 제 높이로 흐릅니다(17B-2 리뷰: 데스크톱 `/players/<id>` 에서 `DashboardPanel` 이 눌려 범례와 기록이 잘리고 스크롤되지 않던 원인). 안쪽 스크롤 칸이 필요한 화면(폴더 편집)은 `ShellPage` 대신 `section.rbms-page` + `ShellPageHeader` 를 직접 씁니다. 본문 클래스를 바꾸려면 `contentClassName` 을 넘깁니다. 홈 같은 패널 격자는 부모에 `@container/dashboard` 를 달고 `DASHBOARD_GRID_CLASS_NAME` 을 씁니다.
 - 접힘·붙는 머리: 묶음 머리는 `className='rbms-level-header ...'` 를 달면 모바일은 문서 스크롤 위쪽 48px 아래에, 데스크톱은 안쪽 스크롤 맨 위에 붙습니다. 데스크톱의 안쪽 스크롤은 `ScrollContainer`(`ShellPage` 가 감쌈)입니다. 모바일은 문서가 스크롤합니다.
 
 ### 3.2 레이아웃과 메뉴
@@ -84,7 +85,7 @@ export default FoldersPage
 
 ### 3.3 사이드바 슬롯
 
-`ShellSidebarPortal` 안에 요소를 두면 메뉴 아래 슬롯으로 올라갑니다(발광 표의 레벨 이동·합계 패널용). 데스크톱에서만 사이드바에 보이고 모바일은 시트 안에 들어갑니다. 서버 렌더에서는 비어 있다가 하이드레이션 뒤에 채워집니다(`useSyncExternalStore`).
+`ShellSidebarPortal` 안에 요소를 두면 메뉴 아래 슬롯으로 올라갑니다(발광 표의 출처·표 주소 복사, 폴더의 "R-BMS 에서 보기"). 데스크톱에서만 사이드바에 보이고 모바일은 시트 안에 들어갑니다. 서버 렌더에서는 비어 있다가 하이드레이션 뒤에 채워집니다(`useIsHydrated`, `@shared/hooks/use-is-hydrated`).
 
 ```tsx
 <ShellSidebarPortal>
@@ -149,14 +150,14 @@ export const metadata = {
 |---|---|---|
 | `FilterBar` | `features/filter/filter-bar.tsx` | `{ label: string; summary?: ReactNode; className?; children }` (머리 아래 줄, `role='group'`) |
 | `FilterField` | `features/filter/filter-field.tsx` | `{ label; htmlFor?; children }` |
-| `FormDialog` | `features/dialog/form-dialog.tsx` | `{ open; onOpenChange; title; description?: ReactNode; submitLabel; submitDisabled?; onSubmit: () => void; size?: 'md' \| 'lg'('lg'); children }` |
-| `ConfirmAction` | `features/dialog/confirm-action.tsx` | `{ open; onOpenChange; title; description: ReactNode; confirmLabel; confirmDisabled?; onConfirm }` (파괴 동작용, 확인 버튼 destructive) |
+| `FormDialog` | `features/dialog/form-dialog.tsx` | `{ open; onOpenChange; title; description?: ReactNode; submitLabel; submitDisabled?; onSubmit: () => void; size?: 'md' \| 'lg'('lg'); returnFocusRef?; children }` |
+| `ConfirmAction` | `features/dialog/confirm-action.tsx` | `{ open; onOpenChange; title; description: ReactNode; confirmLabel; confirmDisabled?; cancelLabel?; returnFocusRef?; onConfirm }` (파괴 동작용, 확인 버튼 destructive) |
 | `CopyButton` | `shared/ui/copy-button.tsx` | Button 의 props(`onClick`·`children` 제외) + `{ value: string; label: string; copiedMessage?; showLabel? }` |
 | `SortSelect` | `features/table/sort-select.tsx` | `{ label; value; options: { value; label }[]; onValueChange }` |
 | `Pager` | `features/table/pager.tsx` | `{ page; totalPages; onPageChange }` (이전·다음 + "n / N") |
 | `DataTable` | `features/table/data-table.tsx` | `{ columns: DataTableColumn<T>[]; rows: T[]; rowKey; rowMuted?; caption? }`, 열은 `{ key; label; width?; align?; flex?; mono?; hideBelow?: 'sm' \| 'md' \| 'lg'; cell(row, index) }` |
 
-`FormDialog`·`ConfirmAction` 은 상태로 열립니다(트리거 없이 `open` 으로). 그래서 닫을 때 포커스가 열었던 버튼으로 돌아가지 않고 `body` 로 갑니다. 폴더 화면에서 대화상자를 열 때 열었던 버튼의 `ref` 를 `onCloseAutoFocus` 로 되돌리거나 `DialogTrigger` 를 쓰는 것이 알려진 숙제입니다(10절).
+`FormDialog`·`ConfirmAction` 은 상태로 열립니다(트리거 없이 `open` 으로). 닫을 때 `useDialogFocusReturn`(`features/dialog/use-dialog-focus-return.ts`)이 `returnFocusRef` 를 주면 그 요소로, 없으면 연 순간의 포커스 요소가 아직 DOM 에 있을 때 그 요소로 포커스를 돌려줍니다. 메뉴 항목처럼 닫히면 사라지는 요소에서 열면 메뉴 트리거의 ref 를 `returnFocusRef` 로 넘깁니다. 기존 호출부는 고치지 않아도 됩니다.
 
 ### 4.4 램프·점수
 
@@ -214,7 +215,9 @@ export const metadata = {
 
 - `/api/auth/[...all]` 은 `GET /get-session` 과 `POST /sign-out` 만 통과시키고 나머지(`/sign-in/email`, `/sign-up/email` 등)는 404 `NOT_FOUND` 입니다. 웹에서 `authClient.signIn` 을 부르면 안 됩니다.
 - 로그인·가입의 IP 당 한도는 5/분이고 로그인 두 경로가 한 통을, 가입 두 경로가 한 통을 나눠 씁니다(429 `RATE_LIMITED`). 인스턴스 로컬 메모리라 서버리스에서는 인스턴스마다 따로입니다.
-- 클라이언트 훅(`@entities/auth.query`): `useSessionLogin()`(변수 `{ id, password }`, 결과 `{ id, login_id, name, role }`, 401 은 "아이디 또는 비밀번호가 올바르지 않습니다."), `useRegister()`(변수 `{ id, password, email, name }`), `useSessionLogout()`, `useSessionUser()` → `{ user: SessionUser | null, isPending }`. 로그인·가입 성공 시 `authClient.$store.notify('$sessionSignal')` 로 계정 메뉴를 즉시 갱신합니다. 다른 경로로 세션을 바꾸는 코드를 쓰면 같은 신호를 보냅니다.
+- 클라이언트 훅(`@entities/auth.query`): `useSessionLogin()`(변수 `{ id, password }`, 결과 `{ id, login_id, name, role }`, 401 은 "아이디 또는 비밀번호가 올바르지 않습니다."), `useRegister()`(변수 `{ id, password, email, name }`), `useSessionLogout()`, `useSessionUser()` → `{ user: SessionUser | null, isPending }`. 로그인·가입 성공 시 `authClient.$store.notify('$sessionSignal')` 로 계정 메뉴를 즉시 갱신하고 `removeUserScopedQueries(queryClient)` 로 사용자 묶음 캐시(7절)를 지웁니다. 로그아웃 성공도 같은 캐시를 지웁니다. 다른 경로로 세션을 바꾸는 코드를 쓰면 같은 신호를 보냅니다.
+- `useSessionUser` 는 하이드레이션이 끝나기 전에는 항상 `{ user: null, isPending: true }` 를 돌려줍니다. better-auth 의 `useStore`(`node_modules/better-auth/dist/client/react/react-store.mjs`)가 `useSyncExternalStore(subscribe, get, get)` 으로 서버 스냅샷 자리에도 클라이언트의 현재 값을 넘기므로, 세션 조회가 하이드레이션보다 먼저 끝나면 서버가 그린 대기 상태와 다른 마크업이 그려져 React #418(하이드레이션 불일치)이 났습니다(17B-2 리뷰: 프로덕션 빌드의 `/tables/insane1`·차트 페이지에서 6/6, dev 서버에서는 재현되지 않음). 소비처마다 고치지 말고 이 훅을 씁니다. 회귀 테스트는 `tests/components/session-user.test.tsx` 입니다.
+- 로그인 성공 뒤 이동은 `window.location.assign(next)` 의 전체 이동입니다. 비로그인 때 사이드바의 "내 폴더" 링크가 `/folders` 를 prefetch 하면 proxy 의 307 결과(로그인 화면)가 라우터 캐시에 남아, 전의 `router.replace('/folders')` 가 그 캐시를 써서 로그인 화면에 머물렀습니다. 세션이 바뀌면 모든 서버 렌더가 달라지므로 라우터 캐시를 믿지 않습니다. 보호 경로에서 로그아웃할 때도 같은 이유로 `window.location.assign('/')` 를 쓰고(전에는 `router.refresh()` 가 방금 나온 보호 경로를 다시 요청해 콘솔 404 를 남김), 그 밖의 경로에서는 `router.refresh()` 만 합니다. 가입은 `/settings` 로 `router.replace` + `refresh` 그대로입니다(`/settings` 는 비로그인 때 prefetch 되는 링크가 없고 리뷰에서 정상 확인).
 
 ### 6.2 난이도표(번들된 스냅샷)
 
@@ -253,7 +256,7 @@ export const metadata = {
 
 ### 6.3 사용자 폴더
 
-한도(서버 상수 `FOLDER_LIMIT`, `src/server/dto/folder.ts`): 폴더 50개, 폴더당 2,000곡, 사용자 전체 20,000곡, 한 번에 넣기 500, 이름 64자, 설명 255자, 곡 메모 100자, 가져오기 레벨 100개. 화면은 이 값을 상수로 두고(예 `shared/constants/folder.ts`) 입력에서 막습니다. 서버가 다시 검사합니다.
+한도(서버 상수 `FOLDER_LIMIT`, `src/server/dto/folder.ts`): 폴더 50개, 폴더당 2,000곡, 사용자 전체 20,000곡, 한 번에 넣기 500, 이름 64자, 설명 255자, 곡 메모 100자, 가져오기 레벨 100개. 화면은 이 값을 `FOLDER_LIMIT`(`@entities/folder.type`, 서버 값과 같음을 테스트로 고정)로 두고 입력에서 막습니다. 서버가 다시 검사합니다.
 
 편집은 **세션만** 받습니다(Bearer 는 401). 쓰기 한도 60/분, 가져오기 10/분, 읽기 120/분(사용자별). 응답 `Cache-Control: private, no-store`. 폴더 id 는 `^uf_[0-9a-f]{30}$` 이고 모양이 틀리면 400, 없거나 남의 폴더면 404 `IR_FOLDER_NOT_FOUND`(남의 폴더인지 알려 주지 않음).
 
@@ -313,23 +316,22 @@ FolderDetail  = FolderSummary + { "items":[{ "md5":"0077…","sha256":"…03e9",
 
 ## 7. 쿼리 키 규칙
 
-기존 `QUERY_KEY`(`@shared/constants/query-key`)는 도메인 → 동작 → 파라미터 계층의 배열입니다. 파라미터 없는 키는 정적 배열, 있는 키는 함수입니다. 번들 표와 폴더 키는 아직 없고 아래 이름으로 더합니다. 기존 `TABLE`(`['table', ...]`)은 DB 의 IR 표(`/api/tables`)용이라 섞지 않습니다.
+`QUERY_KEY`(`@shared/constants/query-key`)는 도메인 → 동작 → 파라미터 계층의 배열입니다. 파라미터 없는 키는 정적 배열, 있는 키는 함수입니다. 기존 `TABLE`(`['table', ...]`)은 DB 의 IR 표(`/api/tables`)용이라 섞지 않습니다. 아래가 17B-2 에서 실제로 들어간 키입니다.
 
-| 키 | 값 | 훅·옵션 이름(제안) |
+| 키 | 값 | 훅·옵션 |
 |---|---|---|
-| `TABLE_SNAPSHOT.ALL` | `['table-snapshot']` | |
-| `TABLE_SNAPSHOT.LIST` | `['table-snapshot', 'list']` | `tableSnapshotListQueryOptions`, `useGetTableSnapshotList` |
-| `TABLE_SNAPSHOT.DETAIL(id)` | `['table-snapshot', 'detail', id]` | `tableSnapshotDetailQueryOptions(id)` |
-| `TABLE_SNAPSHOT.ENTRIES(id, params)` | `['table-snapshot', 'entries', id, params]` | 곡 검색 |
-| `TABLE_SNAPSHOT.RECORDS(id)` | `['table-snapshot', 'records', id]` | 로그인 필요 |
-| `FOLDER.ALL` | `['folder']` | |
-| `FOLDER.LIST` | `['folder', 'list']` | `folderListQueryOptions` |
-| `FOLDER.DETAIL(id)` | `['folder', 'detail', id]` | `folderDetailQueryOptions(id)` |
-| `FOLDER.CONTAINING(md5)` | `['folder', 'containing', md5]` | |
+| `TABLE_SNAPSHOT.RECORDS_ALL` | `['table-snapshot', 'records']` | 사용자 묶음 정리용 접두 |
+| `TABLE_SNAPSHOT.RECORDS(tableId, userId)` | `['table-snapshot', 'records', tableId, userId]` | `tableSnapshotRecordsQueryOptions(tableId, userId)`, `useGetTableSnapshotRecords(tableId, userId \| null)`(null 이면 꺼짐). `queryFn` 은 봉투를 벗긴 `records` 맵(md5 → 기록) |
+| `FOLDER.ALL` | `['folder']` | 곡이 들어가고 빠지는 변경의 무효화 |
+| `FOLDER.LIST` | `['folder', 'list']` | `folderListQueryOptions`, `useGetFolderList(enabled)` |
+| `FOLDER.DETAIL(id)` | `['folder', 'detail', id]` | `folderDetailQueryOptions(id)`, `useGetFolderDetail` |
+| `FOLDER.CONTAINING_ALL` | `['folder', 'containing']` | 폴더 삭제 때 무효화 |
+| `FOLDER.CONTAINING(md5)` | `['folder', 'containing', md5]` | `folderContainingQueryOptions`, `useGetFolderContaining(md5, enabled)` |
 
-- 위치는 `entities/table-snapshot.{type,query}.ts`, `entities/folder.{type,query}.ts` 입니다. 조회는 `queryOptions` 팩토리 + `useQuery`, 변경은 `useMutation` 이고 `onSuccess` 에서 `invalidateQueries` 를 부릅니다(query.md). 폴더 변경은 `FOLDER.LIST` 와 해당 `FOLDER.DETAIL(id)` 를 무효화하고, 곡이 들어가거나 빠지면 `FOLDER.CONTAINING` 도 무효화합니다. 폴더 편집 화면은 서버 응답을 캐시에서 직접 고치지 않고(`setQueryData` 금지) 로컬 편집 상태를 따로 두었다가 명시 저장 뒤 무효화합니다.
-- 내 기록(`RECORDS`)은 사용자에 묶입니다. 로그아웃(`useSessionLogout` 성공)과 로그인 사용자가 바뀔 때 `queryClient.removeQueries({ queryKey: QUERY_KEY.TABLE_SNAPSHOT.RECORDS(...) })` 와 `FOLDER.ALL` 을 지웁니다. 지금 로그아웃 훅은 `authClient.signOut()` 만 부르므로 이 정리를 훅에 더해야 합니다(10절).
-- 표 상세는 정적 자료입니다. `staleTime` 을 길게(예 1시간) 덮어씁니다.
+- 17B-1 의 제안과 다른 점: `RECORDS` 에 `userId` 를 넣어 계정이 바뀌어도 남의 기록이 한순간도 보이지 않게 했습니다. 표 목록·상세·곡 색인은 서버 컴포넌트가 8절의 함수로 직접 읽어 props 로 내리므로 `TABLE_SNAPSHOT.ALL`·`LIST`·`DETAIL`·`ENTRIES` 키와 쿼리는 두지 않았습니다(리뷰 뒤 쓰는 곳이 없던 `ALL`·`LIST` 를 지움). 클라이언트에서 표를 다시 받는 화면이 생기면 그때 더합니다.
+- 위치는 `entities/table-snapshot.{type,query}.ts`, `entities/folder.{type,query}.ts` 입니다. 조회는 `queryOptions` 팩토리 + `useQuery`, 변경은 `useMutation` 이고 `onSuccess` 에서 무효화합니다. 폴더 변경 훅: `useCreateFolder`, `useUpdateFolder`, `useDeleteFolder`(LIST·CONTAINING_ALL 무효화, DETAIL 제거), `useReorderFolders`, `useReplaceFolderItems`, `useAddFolderItems`, `useRemoveFolderItems`(FOLDER.ALL 무효화). 대부분 `meta: { suppressErrorToast: true }` 이고 사용자 문구는 `toFolderErrorMessage`(`@entities/folder.type`)로 고릅니다. 폴더 편집 화면은 캐시를 직접 고치지 않고(`setQueryData` 금지) 로컬 초안(`widgets/folder/folder-draft.ts`)을 두었다가 명시 저장 뒤 무효화합니다.
+- 사용자 묶음 캐시: `removeUserScopedQueries(queryClient)`(`@entities/auth.query`)가 `AUTH.ALL`, `FOLDER.ALL`, `TABLE_SNAPSHOT.RECORDS_ALL`, `TOKEN.ALL`, `SETTING.ALL` 을 지웁니다. 로그인·가입·로그아웃 성공에서 부릅니다. 공개 자료(예 `STATS.SUMMARY`)는 남깁니다(`tests/components/folder-contract.test.ts`).
+- 서버 미리 채우기: 발광 표는 `widgets/table/table-snapshot-session.tsx` 가 `connection()` 뒤 `readSessionUser` 로 사용자를 읽고, 로그인이면 `compose().tableSnapshotService.getRecords` 로 `RECORDS(tableId, userId)` 를 채워 `HydrationBoundary` 로 내립니다. 첫 HTML 부터 램프가 보입니다. 폴더 목록·편집도 `compose().folderService` 를 직접 불러 같은 키를 채웁니다.
 
 ## 8. 서버에서 표 자료를 읽는 함수
 
@@ -352,26 +354,29 @@ FolderDetail  = FolderSummary + { "items":[{ "md5":"0077…","sha256":"…03e9",
 - **자기 URL fetch**: 서버 컴포넌트의 프리페치(`fetchEnvelope` 등)는 `NEXT_PUBLIC_APP_URL` → `VERCEL_URL` 의 자기 공개 URL 로 HTTP 호출합니다. Preview 배포가 운영 자료를 읽을 수 있고 서버 렌더가 `/api/fe` 의 IP 한도(120/분)를 같이 쓸 수 있다는 위험이 `docs/web/architecture.md` 6-1 에 적혀 있습니다. 이번 웨이브의 새 화면(표·폴더)은 8절의 직접 호출을 씁니다. 기존 화면의 전환은 남아 있습니다.
 - **`NEXT_PUBLIC_APP_URL`**: 빌드 시점에 서버·클라이언트 번들에 박힙니다. 값이 바뀌면 다시 빌드합니다. 로컬 개발에서는 필요하지 않습니다(클라이언트는 상대 경로).
 - **CSP**: 프로덕션에서만 붙습니다(`next.config.ts`). `script-src`·`style-src` 에 `'unsafe-inline'` 이 있고 `connect-src 'self'`, `img-src 'self' data: blob:` 입니다. 외부 도메인의 이미지·글꼴·스크립트·API 호출을 새 화면에 넣으면 CSP 를 함께 고쳐야 합니다. 표의 `url`·`url_diff` 는 링크(`a`)로만 쓰고 `img`·`iframe` 으로 불러오지 않습니다.
-- **라우트 prefetch**: 링크가 아직 없는 `/folders` 를 메뉴가 가리켜, 지금은 prefetch 요청이 404 를 냅니다(페이지가 생기면 사라집니다).
+- **라우트 prefetch 와 세션**: 비로그인 때 메뉴의 보호 경로 링크(`/folders`)를 prefetch 하면 proxy 의 307 결과가 라우터 캐시에 남습니다. 세션이 바뀌는 동작(로그인, 보호 경로에서 로그아웃) 뒤에는 클라이언트 이동 대신 전체 이동을 씁니다(6.1절).
+- **dev 와 프로덕션의 차이**: 하이드레이션 불일치(#418)는 dev 서버에서 재현되지 않고 프로덕션 빌드(`next start`)에서만 났습니다. 세션·하이드레이션에 닿는 변경은 프로덕션 빌드로 확인합니다.
+- **rate limit 의 IP**: `getClientIp`(`src/server/lib/with-rate-limit.ts`)는 `X-Forwarded-For` 의 첫 값을 씁니다. Vercel 은 이 헤더를 덮어쓰고 바깥 IP 를 넘기지 않으므로(Vercel 문서 "Request headers" 의 `x-forwarded-for` 절: "we currently overwrite the X-Forwarded-For header and do not forward external IPs. This restriction is in place to prevent IP spoofing.") 운영에서는 우회되지 않습니다. 다른 호스팅이나 Vercel 앞에 다른 프록시를 두면 헤더를 바꿔 한도를 피할 수 있습니다(로컬 재현: 틀린 비밀번호 5회 뒤 헤더 값을 바꾸면 429 대신 401 이 계속 남). 지속형 한도로 바꿀 때 신뢰하는 헤더를 하나로 고정합니다.
 - **이전 경로의 잔상**: 통합 확인에서 클라이언트 이동 직후 이전 페이지의 `h1`(예: 로그인 → 설정 뒤의 `로그인`)이 DOM 에 함께 남아 있는 것을 보았습니다(전체 새로고침 뒤에는 한 개). Cache Components 가 이전 경로를 보존하는 동작으로 보이며 화면에는 나타나지 않았습니다. 화면 테스트에서 `h1` 개수를 세지 않습니다.
 
 ## 10. 아직 없는 것
 
 | 항목 | 상태 | 맡을 곳 |
 |---|---|---|
-| `/tables/insane1` 화면(카드 격자·레벨 묶음·상세 대화상자·필터·사이드바 패널·출처 표기·`bmstable` 메타) | 서버 API 완비, 화면 없음. 지금은 동적 `[tableId]` 가 IR 표로 읽어 404 | 다음 웨이브(발광 표) |
-| `/tables` 목록에 번들 표 포함 | 지금 `/tables` 는 DB 의 IR 표만 보여 비어 있음. `/api/fe/tables` 로 바꿔야 함 | 다음 웨이브(발광 표) |
-| `/folders`, `/folders/[folderId]` 화면 | 서버 API 완비, 화면 없음. proxy 가드는 이미 있음 | 다음 웨이브(폴더) |
-| `entities/table-snapshot.*`, `entities/folder.*`, 7절의 쿼리 키 | 없음 | 위 두 웨이브 |
 | 홈의 로그인 패널(내 정보·램프 현황·내 폴더)과 난이도표 패널 | 없음 | 2차 |
-| 로그아웃 시 사용자 묶음 캐시 제거 | `useSessionLogout` 은 쿠키만 지움 | 폴더 웨이브에서 훅에 추가 |
-| `FormDialog`·`ConfirmAction` 닫을 때 포커스 복귀 | 상태로 열려 `body` 로 돌아감 | 폴더 웨이브(트리거 연결 또는 `onCloseAutoFocus`) |
+| 발광 표: 한 곡 한 행 보기, 카드 높이 선택, 접힘 상태 기억, 모바일 레벨 칩 선택기 | 없음(모바일 시트의 레벨 선택은 26개 한 목록) | 2차 |
+| 발광 표: 늦게 그린 묶음의 브라우저 찾기(Ctrl+F) | 화면에 오기 전 묶음은 DOM 에 없어 찾지 못함. 페이지의 검색 상자로는 찾음 | 2차 |
+| 발광 표 RSC 자료 줄이기 | 항목의 `level`(묶음에 이미 있음)과 `url_diff == url` 중복이 약 458KB(gzip 114KB) 안에 있음 | 2차(서버 출력 정리) |
+| 키보드: 카드 목록으로 건너뛰기 | 진행 패널의 레벨 링크 26개는 없앴고(레벨 칩이 이동 담당), "본문으로 건너뛰기"는 본문 맨 위로 감 | 2차 |
+| 폴더: 끌어 옮기기, 항목별 내 램프, 복제, 사용자 전체 20,000곡 한도의 사전 안내 | 없음(한도는 서버 오류 문구로만 알림) | 2차 |
+| 폴더 편집의 큰 목록 | 2,000곡에서 이동·빼기 75ms, CPU 4배 감속 236~344ms. 행 가상화 없음 | 필요해지면 2차 |
+| 폴더 저장의 원자성 | 곡(PUT items)과 이름·설명(PATCH)이 두 요청. PATCH 실패 시 화면이 알림 | 2차(서버 한 요청으로) |
+| 브라우저 뒤로·앞으로의 미저장 경고 | 앱 안 링크와 탭 닫기만 막음 | 2차 |
 | 설정 탭의 주소 반영(`?tab=`) | 없음 | 2차 |
 | 사이드바 보조 링크(버전, 저장소) | 저장소 공개 여부 미확인으로 보류 | 사용자 확인 후 |
 | OG 이미지, JSON-LD | 없음(텍스트 OG 만) | 2차 |
-| 기존 서버 컴포넌트의 자기 URL fetch 를 서비스 직접 호출로 | 위험만 문서화(9절) | 별도 작업 |
-| 지속형 rate limit | 인스턴스 로컬(결정 M10) | 후속 |
-| 폴더 항목별 내 램프 | 없음. `records` 와 같은 쿼리로 확장 가능 | 2차 |
+| 기존 서버 컴포넌트의 자기 URL fetch 를 서비스 직접 호출로 | 새 화면(표·폴더)은 직접 호출. 기존 화면은 위험만 문서화(9절) | 별도 작업 |
+| 지속형 rate limit | 인스턴스 로컬(결정 M10). IP 헤더 전제는 9절 | 후속 |
 
 ## 11. 통합에서 바뀐 것(두 단위의 보고와 달랐던 곳)
 
@@ -384,7 +389,7 @@ FolderDetail  = FolderSummary + { "items":[{ "md5":"0077…","sha256":"…03e9",
 - `authClient` 에서 막힌 경로를 부르게 되는 `signIn`·`signUp` 내보내기를 지웠습니다.
 - 두 단위의 계약 중 틀린 것은 없었고 위 항목만 어긋나 있었습니다.
 
-## 12. 검증 기록
+## 12. 검증 기록(17B-1)
 
 `web/` 에서(환경 변수는 명령줄로만 줌, `.env` 는 읽지 않음):
 
@@ -395,3 +400,56 @@ FolderDetail  = FolderSummary + { "items":[{ "md5":"0077…","sha256":"…03e9",
 - 임시 MySQL(Docker `mysql:8`, 포트 33103, 끝난 뒤 삭제)에 `bun run db:migrate` 후 `bun run db:status` 가 `up to date`.
 - 포트 3103 개발 서버와 프로덕션 서버(`next start`, CSP 포함)에서 실제 흐름: 보호 경로 307 → 로그인 폼(틀린 비밀번호의 오류 문구, 맞는 비밀번호) → `next` 로 복귀 → 계정 메뉴 이름 → 홈 → 설정 → 순위 → 차트 → 로그아웃 → 다시 보호 경로 307. 가입 흐름과 계정 메뉴. 1440x900 과 390x844, 가로 넘침 0. 프로덕션 CSP 위반 0건.
 - 같은 서버에서 표 목록·상세·검색·내 기록, 표준 `header.json`/`data.json`, 폴더의 만들기·곡 넣기·표에서 가져오기·통째 바꾸기·충돌 409·순서·메모·포함 폴더·클라이언트 읽기(Bearer, 타인 403)·인증 오류를 확인했습니다.
+
+## 13. 웨이브 17B-2 의 화면과 컴포넌트
+
+### 13.1 화면
+
+| 경로 | 페이지 파일 | 내용 |
+|---|---|---|
+| `/tables` | `app/(app)/tables/page.tsx` → `widgets/table/table-catalog-content.tsx` | 번들 표 카드(`TableSnapshotCard`: 진행 막대, 표 주소 복사)를 위에, DB 의 IR 표(`TableListPanel`)를 아래에 |
+| `/tables/insane1` | `app/(app)/tables/insane1/page.tsx` → `widgets/table/table-snapshot-content.tsx` | 정적 metadata(`bmstable`, noindex). 머리(표 이름, 범위, 곡 수, 모바일만 표 주소 복사), 출처 요약 줄, 로그인하면 "내 진행"(기본 접힘: 요약 + 램프 막대, "레벨별 보기"로 분포·범례와 레벨 26줄), 비로그인 안내 줄, 필터 막대(검색 `/` 단축키, 레벨 범위, 램프, 정렬. 모바일은 아래 시트), 레벨 칩 한 줄, 접히는 레벨 묶음(붙는 머리, 램프 막대, 플레이 수), 카드 격자(2~6열), 상세 대화상자, 바닥 출처 문안. 사이드바 슬롯: 출처와 표 주소 복사 |
+| `/folders` | `app/(app)/folders/page.tsx` → `widgets/folder/folder-list-content.tsx` | 폴더 행(행 전체가 링크, 위·아래, 메뉴), 새 폴더 대화상자, 빈 상태. 사이드바 슬롯: "R-BMS 에서 보기" |
+| `/folders/[folderId]` | `app/(app)/folders/[folderId]/page.tsx` → `widgets/folder/folder-editor-content.tsx` | 명시 저장 편집: 곡 목록(순번, ★레벨, 위·아래, 메뉴, 빼기), xl 이상 오른쪽 검색 패널(아래는 시트), 표에서 가져오기, 409 충돌 안내, 미저장 경고(앱 안 링크·탭 닫기), Ctrl/Cmd+S |
+| `/charts/[hash]` | (기존) | 표에 있는 곡이면 "★16 発狂BMS難易度表" 배지(`/tables/insane1#lv-16`), 머리의 "내 폴더에 넣기" |
+
+- 보호: `/folders` 아래는 `folders/layout.tsx` 의 `SessionGate`(3.4절). 편집 화면은 세션이 없으면 `buildLoginHref('/folders/<id>')` 로 보내 깊은 경로를 지킵니다.
+- 표 필터 주소: `q`, `from`, `to`(레벨 값), `lamp`(`all|noplay|failed|unclear|easy|clear|hard|exhard|fullcombo`), `sort`(`table|title|lamp|rate`). 기본값은 주소에 쓰지 않고, `window.history.pushState/replaceState` 로 바꿔 서버 왕복이 없습니다. 레벨 앵커는 `levelAnchorId(level, index)`: `lv-12`, 영숫자가 아닌 레벨은 `lv-other-<순서>`(`???` → `lv-other-25`). 표는 마운트할 때 해시 위치로 스크롤합니다.
+- 렌더 비용: 화면에서 먼 레벨 묶음은 `TableDeferredMount`(IntersectionObserver)로 늦게 그리고 그동안 정확한 높이의 자리만 둡니다. 비로그인 HTML 668,814B(gzip 135,873B).
+
+### 13.2 컴포넌트
+
+| 이름 | 경로 | 계약 |
+|---|---|---|
+| `AddToFolderMenu` | `widgets/folder/add-to-folder-menu.tsx` | `{ md5; sha256?; title?; artist?; level? }`. md5 가 32자 16진수가 아니면 그리지 않음. `level` 은 받은 문자열 그대로 메뉴 머리에 보이므로 `★16` 처럼 기호를 붙여 넘김. 비로그인이면 로그인 링크, 로그인이면 체크 메뉴(즉시 반영), 새 폴더를 만들어 넣기, 내 폴더 관리. `sm` 미만은 아이콘만 + `aria-label` |
+| `TableProgressPanel` | `features/table/table-progress-panel.tsx` | `{ lamps; played; total; levels: { key; label; lamps; played; total }[] }`. 기본 접힘, 머리 배지에 "played / total · %", "레벨별 보기" 버튼이 `aria-expanded`·`aria-controls`. 레벨 줄은 링크가 아님(이동은 `TableLevelJump`) |
+| `TableLevelJump` | `features/table/table-level-jump.tsx` | `{ items: { anchorId; label; isAvailable }[]; onJump; className? }`. 조건에 맞는 곡이 없는 레벨은 점선 `aria-disabled` |
+| `TableLevelSection` | `features/table/table-level-section.tsx` | Collapsible 레벨 묶음. 머리는 `h2.rbms-level-header` 안의 트리거(Enter·Space 로 접기) |
+| `TableChartGrid` / `TableChartCard` | `features/table/table-chart-{grid,card}.tsx` | 1px 틈 격자와 빈칸 채움. 카드는 5px 램프 띠, 제목 2줄, 아티스트·EX·랭크 한 줄(레벨은 묶음 머리가 보이므로 카드에 쓰지 않고 `aria-label` 에만 넣음) |
+| `TableDeferredMount`, `TableLevelSkeleton` | `features/table/*` | 늦게 그리기, Suspense 대기 화면 |
+| `TableFilterFields` | `features/table/table-filter-fields.tsx` | `layout: 'inline' \| 'stacked'` 의 레벨·램프·정렬 필드 |
+| `TableSourceNotice` | `features/table/table-source-notice.tsx` | `variant: 'summary' \| 'full'` 의 출처 문안(보관본·원본·삭제 요청, 연락처 `https://github.com/B-HS/R-BMS/issues`) |
+| `TableExternalLink`, `formatUrlHost` | `features/table/*` | http(s) 만 링크, 새 탭, `noopener noreferrer` |
+| `TableSnapshotCard` | `features/table/table-snapshot-card.tsx` | `/tables` 의 번들 표 카드 |
+| `TableChartDialog` / `TableChartDetails` | `widgets/table/*` | 상세 대화상자(외부 링크, 코멘트, 내 기록, MD5 복사, `AddToFolderMenu`, 서버에 차트가 있을 때만 차트 순위 링크). 닫으면 포커스가 카드로 |
+| `TableSnapshotWorkspace` / `-Sidebar` / `-Session` / `-ListItem` | `widgets/table/*` | 표 화면의 조립, 사이드바 슬롯, 서버의 내 기록 미리 채우기, `/tables` 의 번들 표 행 |
+| `FolderListItem`, `FolderChartRow`, `ChartSearchResultRow`, `FolderMetaDialog`, `FolderNoteDialog`, `FolderTableImportDialog`, `FolderConflictNotice`, `FolderGuidePanel` | `features/folder/*` | 폴더 화면의 순수 조각 |
+| `FolderListContent` / `-Panel`, `FolderEditorContent` / `FolderEditor` / `-Workspace`, `FolderChartSearchPanel` | `widgets/folder/*` | 폴더 화면의 조립. 초안 계산은 `folder-draft.ts`, 이탈 막기는 `use-folder-leave-guard.ts`, 편집 화면용 표 색인은 `read-folder-table-index.ts`(서버, 약 110KB) |
+| `useIsHydrated` | `shared/hooks/use-is-hydrated.ts` | 하이드레이션 중 false, 뒤에 true |
+| `useDialogFocusReturn` | `features/dialog/use-dialog-focus-return.ts` | 4.3절 |
+
+### 13.3 entities
+
+- `@entities/table-snapshot.type`: 표 요약·상세·항목·기록 타입(`@server/dto/table-snapshot` 의 출력에서 유도).
+- `@entities/table-snapshot.query`: 7절.
+- `@entities/folder.type`: `FOLDER_LIMIT`(서버 값과 같음을 테스트로 고정), `isFolderId`, `isFolderMd5`, `toNewFolderItemInput`, `folderMetaFormSchema`, `toFolderErrorMessage`, 폴더 타입.
+- `@entities/folder.query`: 7절.
+
+## 14. 17B-2 검증 기록
+
+`web/` 에서, 환경 변수는 명령줄로만 줌(`.env` 는 읽지 않음).
+
+- 리뷰 발견의 재현과 수정 확인(프로덕션 빌드 `next start`, 임시 MySQL 8): `/guide` 를 연 뒤 이동하는 방식 6회씩, 하이드레이션 오류가 로그인 `/tables/insane1` 0/6, 차트 0/6, `/players/alice` 0/6, `/folders` 0/6, 비로그인 표·차트 0/6(리뷰 때 6/6). `next=/folders` 로그인이 501ms 에 `/folders` 로 이동(리뷰 때 12초 동안 머묾). `/settings` 에서 로그아웃 → `/`, 콘솔 오류·4xx 0. 1440x900 `/players/alice` 의 패널 높이 = 내용 높이(램프 분포 192/192, 최근 기록 979/979), 본문 스크롤 852/1405 에서 휠 뒤 scrollTop 553.
+- 발광 표(1440, 로그인): 첫 카드 y 541 → 289, 보이는 `h2` 의 "내 진행" 1개, 보이는 "표 주소 복사" 1개, 레벨 칩 1줄, 펼친 레벨 줄 26개에 링크 0개. 모바일 390 첫 카드 y 330. 라이트 대비 5.13:1(사이드바 라벨)·6.04:1(레벨 머리 숫자)·6.58:1(카드 아티스트).
+- 게이트: `bun install --frozen-lockfile` 변경 없음, `bun run verify` 395 pass / 2 skip / 0 fail, `bun run format:check` 통과, 환경 변수 없는 `bun run build` 오류·경고 0줄, `bunx drizzle-kit generate` "No schema changes", `package.json`·`bun.lock` 변경 없음.
+- 시험 데이터 정리 SQL(`web/scripts/cleanup-test-accounts.{count,delete}.sql`)을 임시 DB 에 같은 아이디 다섯 개(제출 10, 토큰 5, 세션 6, 폴더 1·곡 53)를 만들어 실행: 지운 뒤 모든 대상 0, 다른 계정 3개와 제출 460건·폴더 3개는 그대로.

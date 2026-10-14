@@ -46,7 +46,9 @@ design.md §1-2 는 두 Surface의 **시각 토큰을 분리**한다. 라우트 
 | `(app)` | `/charts/[hash]` | 차트 리더보드(랭킹·메타·내 기록) | A | 공개 읽기 |
 | `(app)` | `/players/[id]` | 플레이어 프로필(통계·최근 기록·라이벌) | A | 공개 읽기 |
 | `(app)` | `/leaderboards` | 종합 플레이어 랭킹 | A | 공개 읽기 |
-| `(app)` | `/tables` · `/tables/[id]` | IR 난이도표 | A | 공개 읽기 |
+| `(app)` | `/tables` · `/tables/[id]` | 번들 표 카드 + IR 난이도표 | A | 공개 읽기 |
+| `(app)` | `/tables/insane1` | 発狂BMS難易度表 사본(카드 격자, 내 램프, `bmstable` 메타, noindex). 2026-10-14 웨이브 17B-2 | A | 공개 읽기(로그인 시 내 기록) |
+| `(app)` | `/folders` · `/folders/[folderId]` | 내 폴더 목록과 명시 저장 편집. 2026-10-14 웨이브 17B-2 | A | **세션 필수**(proxy + `SessionGate`) |
 | `(app)` | `/courses/[hash]` | 코스 랭킹 | A | 공개 읽기 |
 | `(app)` | `/replays/[id]` | 리플레이 뷰어(µs 이벤트 타임라인) | A | 공개 읽기 |
 | `(app)` | `/settings` | 계정 설정(탭: 프로필 / API 토큰 / 동기화 blob / 라이벌) | A | **세션 필수** |
@@ -301,6 +303,7 @@ Route Handler (app/api/**/route.ts)
 | 표의 내 기록 조회 | 30/min/사용자 |
 
 - 구현: `withRateLimit(key, limit, windowMs)`. **v1 은 인스턴스 로컬 카운터(LRU)** — Vercel 멀티 인스턴스에서는 best-effort. 로그인/가입만 DB 카운터(`submission_audit` 와 별개의 경량 테이블 또는 better-auth 내장 rateLimit)로 보강한다. 전역 정확성이 필요해지면 Upstash Redis 도입(§7 오픈 질문).
+- IP 키(2026-10-14 웨이브 17B-2 리뷰): `getClientIp` 는 `X-Forwarded-For` 의 첫 값이다. Vercel 은 이 헤더를 덮어쓰고 바깥 IP 를 넘기지 않으므로(Vercel 문서 "Request headers", 스푸핑 방지) 운영에서는 클라이언트가 바꿀 수 없다. 다른 호스팅이나 Vercel 앞의 다른 프록시에서는 헤더를 바꿔 한도를 피할 수 있으므로(로컬에서 재현), 호스팅을 바꾸거나 지속형 한도로 옮길 때 신뢰하는 헤더를 하나로 고정한다.
 - 본문 크기: `POST /api/scores` 256KB(`content-length` 헤더 + 실제 스트림 바이트 수 둘 다 검사), 리플레이 `REPLAY_MAX_BYTES`(기본 4MB) 초과 시 `413 IR_PAYLOAD_TOO_LARGE`.
 
 ### 4-5. 보안 기본
@@ -461,7 +464,8 @@ if [ "$VERCEL_ENV" != "production" ]; then exit 0; fi; git diff --quiet "$VERCEL
 2. 운영 DB 에 대해 `DATABASE_URL=… bun scripts/db-migration-status.ts` 로 상태를 본다(3-2).
 3. 상태가 "기준선 필요" 면 `--baseline-sql` 의 SQL 을 한 번 적용한다.
 4. `DATABASE_URL=… bun run db:migrate` 로 `0001` 을 적용하고, 상태가 "최신" 인지 다시 본다.
-5. 그 다음 `dev` 에 푸시해 배포한다. `curl https://bms.hyuns.uk/api/version` 의 `commit` 과 `curl -I https://bms.hyuns.uk/tables/insane1/header.json` 으로 확인한다.
+5. 시험 데이터 정리(결정 Q6=A, 2026-10-14 웨이브 17B-2): `web/scripts/cleanup-test-accounts.count.sql` 을 먼저 실행해 대상(점검 문서 3-2 의 시험 계정 다섯 개와 그 제출·토큰·세션·폴더)을 세어 보고, 숫자가 맞을 때만 `cleanup-test-accounts.delete.sql`(한 트랜잭션)을 실행한 뒤 count 를 다시 실행해 0 을 본다. 0001 이 만든 `user_folder` 를 세므로 마이그레이션 뒤에 실행한다.
+6. 그 다음 `dev` 에 푸시해 배포한다. `curl https://bms.hyuns.uk/api/version` 의 `commit` 과 `curl -I https://bms.hyuns.uk/tables/insane1/header.json` 으로 확인한다.
 
 CI(`.github/workflows/web.yml`)는 `web/**` 이 바뀐 푸시·PR 에서 설치(`--frozen-lockfile`)·typecheck·lint·test·format:check·환경 변수 없는 build 를 돈다(`docs/ci-release.md` 6절).
 

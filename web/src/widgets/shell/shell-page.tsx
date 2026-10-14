@@ -13,6 +13,6 @@ type ShellPageProps = PropsWithChildren<{
 export const ShellPage: FC<ShellPageProps> = ({ title, description, actions, contentClassName, children }) => (
     <section className='rbms-page'>
         <ShellPageHeader title={title} description={description} actions={actions} />
-        <ScrollContainer className={cn('flex flex-col gap-px pb-12', contentClassName)}>{children}</ScrollContainer>
+        <ScrollContainer className={cn('flex flex-col gap-px pb-12 *:shrink-0', contentClassName)}>{children}</ScrollContainer>
     </section>
 )

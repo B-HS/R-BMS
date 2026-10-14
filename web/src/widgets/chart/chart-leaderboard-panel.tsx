@@ -11,12 +11,14 @@ import { LoadErrorState } from '@features/state/load-error-state'
 import { NotFoundNotice } from '@features/state/not-found-notice'
 import { ShellPage } from '@widgets/shell/shell-page'
 import { ShellPageLoading } from '@widgets/shell/shell-page-loading'
+import { AddToFolderMenu } from '@widgets/folder/add-to-folder-menu'
 import { useChartLeaderboard } from '@entities/chart.query'
 import type { ScoreRecord } from '@entities/score.type'
 import { CLEAR_LAMPS, CLEAR_LAMP_LABEL } from '@shared/constants/clear-lamp'
 import { cn } from '@shared/lib/cn'
 import { getDjRank, getDjRankClassName } from '@shared/lib/dj-rank'
 import { formatChartTitle, formatCount, formatDateTime, formatHash, getMaxExScore } from '@shared/lib/format'
+import { Badge } from '@shared/ui/badge'
 import { CopyButton } from '@shared/ui/copy-button'
 
 const PAGE_TITLE = '차트'
@@ -70,7 +72,20 @@ const COLUMNS: DataTableColumn<ScoreRecord>[] = [
     },
 ]
 
-export const ChartLeaderboardPanel: FC<{ hash: string }> = ({ hash }) => {
+type ChartTableMembership = {
+    tableId: string
+    name: string
+    symbol: string
+    level: string
+    href: string
+}
+
+type ChartLeaderboardPanelProps = {
+    hash: string
+    tableMemberships: ChartTableMembership[]
+}
+
+export const ChartLeaderboardPanel: FC<ChartLeaderboardPanelProps> = ({ hash, tableMemberships }) => {
     const { data, isLoading, isError, isFetching, refetch } = useChartLeaderboard(hash)
 
     if (isLoading) return <ShellPageLoading title={PAGE_TITLE} />
@@ -95,6 +110,9 @@ export const ChartLeaderboardPanel: FC<{ hash: string }> = ({ hash }) => {
         )
 
     const { chart, ranking } = data
+    const primaryMembership = tableMemberships.at(0)
+    const chartLevel = chart.level === null ? undefined : String(chart.level)
+    const folderLevel = primaryMembership ? `${primaryMembership.symbol}${primaryMembership.level}` : chartLevel
     const bestExScore = ranking.reduce((best, row) => Math.max(best, row.ex_score), 0)
     const bestClear = ranking.reduce<ScoreRecord['clear']>(
         (best, row) => (CLEAR_LAMPS.indexOf(row.clear) > CLEAR_LAMPS.indexOf(best) ? row.clear : best),
@@ -102,13 +120,35 @@ export const ChartLeaderboardPanel: FC<{ hash: string }> = ({ hash }) => {
     )
 
     return (
-        <ShellPage title={formatChartTitle(chart)} description={chart.artist || undefined}>
+        <ShellPage
+            title={formatChartTitle(chart)}
+            description={chart.artist || undefined}
+            actions={<AddToFolderMenu md5={chart.md5} sha256={chart.sha256} title={chart.title} artist={chart.artist} level={folderLevel} />}>
             <div className='bg-card flex flex-col gap-2 p-3'>
                 <p className={cn('text-lg leading-tight font-semibold tracking-tight wrap-anywhere', !chart.title.trim() && 'text-muted-foreground')}>
                     {formatChartTitle(chart)}
                 </p>
                 {(chart.subtitle || chart.artist) && (
                     <p className='text-muted-foreground text-xs'>{[chart.subtitle, chart.artist].filter(Boolean).join(' · ')}</p>
+                )}
+                {tableMemberships.length > 0 && (
+                    <ul aria-label='이 차트가 든 난이도표' className='flex flex-wrap gap-1'>
+                        {tableMemberships.map((membership) => (
+                            <li key={`${membership.tableId}-${membership.level}`}>
+                                <Badge asChild variant='outline' className='h-6 rounded-none text-xs'>
+                                    <Link
+                                        href={membership.href}
+                                        aria-label={`${membership.name} ${membership.symbol}${membership.level} 레벨로 이동`}>
+                                        <span className='font-semibold tabular-nums'>
+                                            {membership.symbol}
+                                            {membership.level}
+                                        </span>
+                                        <span className='text-muted-foreground'>{membership.name}</span>
+                                    </Link>
+                                </Badge>
+                            </li>
+                        ))}
+                    </ul>
                 )}
                 <dl className='flex flex-wrap gap-x-4 gap-y-1 text-xs'>
                     <div className='flex gap-1.5'>

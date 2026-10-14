@@ -16,6 +16,7 @@
     --palette-neutral-855: oklch(0.855 0 0);
     --palette-neutral-708: oklch(0.708 0 0);
     --palette-neutral-556: oklch(0.556 0 0);
+    --palette-neutral-480: oklch(0.48 0 0);
     --palette-neutral-420: oklch(0.42 0 0);
     --palette-neutral-269: oklch(0.269 0 0);
     --palette-neutral-232: oklch(0.232 0 0);
@@ -95,7 +96,7 @@
     --secondary: var(--palette-neutral-970);
     --secondary-foreground: var(--palette-neutral-205);
     --muted: var(--palette-neutral-970);
-    --muted-foreground: var(--palette-neutral-556);
+    --muted-foreground: var(--palette-neutral-480);
     --accent: var(--palette-neutral-970);
     --accent-foreground: var(--palette-neutral-205);
     --destructive: var(--palette-red-577);
@@ -329,7 +330,7 @@ body {
 }
 
 .rbms-level-header {
-    @apply sticky top-(--rail-chrome-height) z-(--z-level-header) md:top-0;
+    @apply sticky top-(--rail-chrome-height) z-(--z-rail) md:top-0 md:z-(--z-level-header);
 }
 
 .rbms-list-scroll {

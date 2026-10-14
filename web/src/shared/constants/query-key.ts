@@ -39,6 +39,17 @@ export const QUERY_KEY = {
         LIST: ['table', 'list'],
         DETAIL: (tableId: string) => ['table', 'detail', tableId],
     },
+    TABLE_SNAPSHOT: {
+        RECORDS_ALL: ['table-snapshot', 'records'],
+        RECORDS: (tableId: string, userId: string) => ['table-snapshot', 'records', tableId, userId],
+    },
+    FOLDER: {
+        ALL: ['folder'],
+        LIST: ['folder', 'list'],
+        DETAIL: (folderId: string) => ['folder', 'detail', folderId],
+        CONTAINING_ALL: ['folder', 'containing'],
+        CONTAINING: (md5: string) => ['folder', 'containing', md5],
+    },
     STATS: {
         ALL: ['stats'],
         SUMMARY: ['stats', 'summary'],

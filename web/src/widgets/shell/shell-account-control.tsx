@@ -37,8 +37,8 @@ export const ShellAccountControl: FC = () => {
         logout.mutate(undefined, {
             onSuccess: () => {
                 toast.success('로그아웃했습니다.')
-                if (PROTECTED_PATH_PREFIXES.some((prefix) => pathname.startsWith(prefix))) router.replace(DEFAULT_NEXT_PATH)
-                router.refresh()
+                if (PROTECTED_PATH_PREFIXES.some((prefix) => pathname.startsWith(prefix))) window.location.assign(DEFAULT_NEXT_PATH)
+                else router.refresh()
             },
         })
 

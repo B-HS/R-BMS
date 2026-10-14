@@ -1,8 +1,9 @@
 'use client'
 
-import type { FC, PropsWithChildren, ReactNode } from 'react'
+import { type FC, type PropsWithChildren, type ReactNode, type RefObject } from 'react'
 import { Button } from '@shared/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@shared/ui/dialog'
+import { useDialogFocusReturn } from '@features/dialog/use-dialog-focus-return'
 
 const SIZE_CLASS = { md: 'sm:max-w-md', lg: 'sm:max-w-2xl' }
 
@@ -15,6 +16,7 @@ type FormDialogProps = PropsWithChildren<{
     submitDisabled?: boolean
     onSubmit: () => void
     size?: keyof typeof SIZE_CLASS
+    returnFocusRef?: RefObject<HTMLElement | null>
 }>
 
 export const FormDialog: FC<FormDialogProps> = ({
@@ -26,31 +28,36 @@ export const FormDialog: FC<FormDialogProps> = ({
     submitDisabled,
     onSubmit,
     size = 'lg',
+    returnFocusRef,
     children,
-}) => (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className={SIZE_CLASS[size]}>
-            <DialogHeader>
-                <DialogTitle>{title}</DialogTitle>
-                {description && <DialogDescription>{description}</DialogDescription>}
-            </DialogHeader>
-            <form
-                className='flex flex-col gap-4'
-                noValidate
-                onSubmit={(event) => {
-                    event.preventDefault()
-                    onSubmit()
-                }}>
-                {children}
-                <DialogFooter>
-                    <Button type='button' variant='ghost' onClick={() => onOpenChange(false)}>
-                        취소
-                    </Button>
-                    <Button type='submit' disabled={submitDisabled}>
-                        {submitLabel}
-                    </Button>
-                </DialogFooter>
-            </form>
-        </DialogContent>
-    </Dialog>
-)
+}) => {
+    const focusReturn = useDialogFocusReturn(returnFocusRef)
+
+    return (
+        <Dialog open={open} onOpenChange={onOpenChange}>
+            <DialogContent className={SIZE_CLASS[size]} {...focusReturn}>
+                <DialogHeader>
+                    <DialogTitle>{title}</DialogTitle>
+                    {description && <DialogDescription>{description}</DialogDescription>}
+                </DialogHeader>
+                <form
+                    className='flex flex-col gap-4'
+                    noValidate
+                    onSubmit={(event) => {
+                        event.preventDefault()
+                        onSubmit()
+                    }}>
+                    {children}
+                    <DialogFooter>
+                        <Button type='button' variant='ghost' onClick={() => onOpenChange(false)}>
+                            취소
+                        </Button>
+                        <Button type='submit' disabled={submitDisabled}>
+                            {submitLabel}
+                        </Button>
+                    </DialogFooter>
+                </form>
+            </DialogContent>
+        </Dialog>
+    )
+}
