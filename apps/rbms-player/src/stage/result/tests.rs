@@ -12,12 +12,14 @@ use rbms_store::{Replay, SCORE_LN_MODE_FROM_CHART};
 
 use super::*;
 use crate::app_result::enter_result;
+use crate::app_result::record_tests::{HAND_OFFSETS_US, end_run, played_by_hand};
 use crate::ir_ext::MultiIr;
 use crate::ir_outcome::format_submit_outcome;
 use crate::ir_ranking::{RankingBoard, RankingRow};
 use crate::keyconfig::{SCRATCH_BACKWARD_INDEX, SCRATCH_FORWARD_INDEX, key_index_of};
 use crate::stage::capture::{app_in, settings_of};
 use crate::stage::render_tests::FRAME_DT;
+use crate::stage::select::recorded_tests::{PACK_LOAD_WAIT, default_pack_app, frame_size, save_frame};
 use crate::stage::select::tests::{press, release};
 use crate::stage::{HeadlessCanvas, PlayState, Stage, StageId};
 use crate::{App, CH, Config, LaunchOptions, SelectItem};
@@ -392,6 +394,10 @@ const AFTER_PATH: &str = "/songs/after.bms";
 /// Four notes on one key lane, which is all a run needs to leave a record behind.
 const RECORD_CHART: &[u8] = b"#PLAYER 1\n#TITLE Recorded\n#BPM 120\n#WAV01 a.wav\n#00111:01010101\n";
 
+/// The same with a note on the turntable as well, which is what SCRATCH AUTO plays for the player:
+/// a run of it with the switch on is an assisted run.
+const TURNTABLE_CHART: &[u8] = b"#PLAYER 1\n#TITLE Recorded\n#BPM 120\n#WAV01 a.wav\n#00111:01010101\n#00116:01\n";
+
 /// How far the fixture run is driven, and at what step: past the first two notes.
 const RECORD_RUN_US: i64 = 3_000_000;
 const RECORD_FRAME_US: i64 = 10_000;
@@ -479,7 +485,12 @@ fn state() -> ResultState {
 
 /// A run on [`RECORD_CHART`] that has been ticked from its start, so its gauges have a history.
 fn finished_session() -> PlaySession {
-    let src = rbms_parser::parse_with(RECORD_CHART, Default::default());
+    finished_session_of(RECORD_CHART)
+}
+
+/// The fixture run of the chart `chart` instead.
+fn finished_session_of(chart: &[u8]) -> PlaySession {
+    let src = rbms_parser::parse_with(chart, Default::default());
     let model = rbms_chart::to_model(&src, rbms_chart::detect_mode(&src, "record.bms"));
     let mut session = PlaySession::new(model, SessionOptions::default());
     for frame in 0..=RECORD_RUN_US / RECORD_FRAME_US {
@@ -839,6 +850,107 @@ fn the_submission_lines_are_drawn_over_a_skin_only_while_they_say_something() {
     assert!(matches!(frame(&mut app, &mut pixels), Transition::Stay));
     assert!(app.shared.skin_timers.is_on(timer_id::FADEOUT));
     assert_eq!(pixels.pixel_at(IR_LINE_AT.0, IR_LINE_AT.1), FADING_MARK, "a line is still drawn over the fading scene");
+}
+
+/// Where the second of the screen's own lines is drawn over a skin: a line below [`IR_LINE_AT`].
+const SECOND_LINE_AT: (u32, u32) = (CW - 30, 40);
+
+/// The moment of the default pack's result scene its settled layout is drawn at, in milliseconds.
+const SETTLED_MS: i64 = 3000;
+
+/// Only a run the player played with an assist on is told that it set no best score, and which
+/// setting it was: the stronger assist when both are on, and nothing for a run played without one,
+/// for a run the engine played and for a replay that was watched, none of which is a record at all.
+#[test]
+fn only_a_run_played_with_an_assist_on_is_told_why_it_set_no_best() {
+    assert_eq!(assist_note(false, false), None);
+    assert_eq!(assist_note(false, true), Some(SCRATCH_AUTO_NOTE));
+    assert_eq!(assist_note(true, false), Some(WIDENED_JUDGE_NOTE));
+    assert_eq!(assist_note(true, true), Some(WIDENED_JUDGE_NOTE));
+    for note in [SCRATCH_AUTO_NOTE, WIDENED_JUDGE_NOTE] {
+        assert!(note.chars().count() <= crate::ir_outcome::IR_LINE_MAX_CHARS, "{note:?} is longer than a line of the built-in screen's column");
+    }
+
+    let session = finished_session_of(TURNTABLE_CHART);
+    let mut app = app_with_result_skin("assist-note", SKIN);
+    assert_eq!(ResultRun::of(&session, &app.shared, standing(false)).assist_note, None, "a run with no assist on");
+    app.shared.config.play.scratch_auto = true;
+    let assisted = ResultRun::of(&session, &app.shared, standing(false));
+    assert_eq!((assisted.assist_note, assisted.updates_score), (Some(SCRATCH_AUTO_NOTE), false));
+
+    let no_turntable = ResultRun::of(&finished_session(), &app.shared, standing(false));
+    assert_eq!((no_turntable.assist_note, no_turntable.updates_score), (None, true), "SCRATCH AUTO had no turntable note to play");
+
+    app.shared.config.play.autoplay = true;
+    assert_eq!(ResultRun::of(&session, &app.shared, standing(false)).assist_note, None, "a run the engine played");
+    app.shared.config.play.autoplay = false;
+    app.shared.replay = Some(watched_replay());
+    assert_eq!(ResultRun::of(&session, &app.shared, standing(false)).assist_note, None, "a replay that was watched");
+}
+
+/// The line is the screen's own, drawn over a skin with the submission lines and under them: on
+/// the first line while no score server has anything to say, and on the second once one has.
+#[test]
+fn the_line_of_an_assisted_run_is_drawn_over_a_skin_under_the_submission_lines() {
+    let session = finished_session_of(TURNTABLE_CHART);
+    let mut app = app_with_result_skin("assist-line", SKIN);
+    app.shared.config.play.scratch_auto = true;
+    let run = ResultRun::of(&session, &app.shared, standing(false));
+    let mut pixels = HeadlessCanvas::new(CW, CH);
+    enter(&mut app, state().played(run));
+    run_until_begun(&mut app, &mut pixels);
+    assert_eq!(app.shared.ir_status, IrStatus::Off);
+    assert_eq!(result(&app).notices(&app.shared), [SCRATCH_AUTO_NOTE]);
+    assert_ne!(pixels.pixel_at(IR_LINE_AT.0, IR_LINE_AT.1), GROUND, "an assisted run does not say why it set no best");
+    assert_eq!(pixels.pixel_at(SECOND_LINE_AT.0, SECOND_LINE_AT.1), GROUND, "a second line was drawn with one thing to say");
+
+    app.shared.ir_status = IrStatus::Skipped("scratch assist");
+    assert!(matches!(frame(&mut app, &mut pixels), Transition::Stay));
+    assert_eq!(result(&app).notices(&app.shared), ["IR: SKIPPED (scratch assist)", SCRATCH_AUTO_NOTE]);
+    assert_ne!(pixels.pixel_at(SECOND_LINE_AT.0, SECOND_LINE_AT.1), GROUND, "the line was not moved under the submission line");
+}
+
+/// The built-in screen says the same under its own submission lines, which it has always drawn
+/// whether or not a score server is set up.
+#[test]
+fn the_built_in_screen_says_the_same_of_an_assisted_run() {
+    let session = finished_session_of(TURNTABLE_CHART);
+    let mut app = with_library(plain_app());
+    app.shared.config.play.scratch_auto = true;
+    let run = ResultRun::of(&session, &app.shared, standing(false));
+    let screen = state().played(run);
+    assert_eq!(screen.notice_lines(&app.shared, false), [("IR: OFF".to_owned(), IrLineKind::Info), (SCRATCH_AUTO_NOTE.to_owned(), IrLineKind::Warn)]);
+    assert_eq!(
+        state().notice_lines(&app.shared, false),
+        [("IR: OFF".to_owned(), IrLineKind::Info)],
+        "a screen built without a run says nothing more than it did"
+    );
+}
+
+/// The default pack's result of a run played by hand with SCRATCH AUTO on, as the application
+/// brings it up with nobody signed in: the pack says the score was not saved, the submission line
+/// says the run was not sent, and the screen's own line under it says which setting kept the run
+/// from setting a best score. Saved as `result-recorded-scratch-auto.png` when a capture folder is
+/// named.
+#[test]
+fn the_default_packs_result_of_a_run_played_with_scratch_auto_says_why_it_set_no_best() {
+    let mut app = default_pack_app("result-recorded-scratch-auto");
+    app.shared.config.play.scratch_auto = true;
+    let (entered, summary) = end_run(&mut app.shared, played_by_hand(&HAND_OFFSETS_US, true));
+    assert!(summary.ex_score > 0 && matches!(entered, Transition::To(Stage::Result(_))), "the run did not score and reach its result screen");
+    app.switch(entered);
+    let (width, height) = frame_size();
+    let mut pixels = HeadlessCanvas::new(width, height);
+    let deadline = Instant::now() + PACK_LOAD_WAIT;
+    while !result(&app).stage.scene.begun {
+        assert!(matches!(frame(&mut app, &mut pixels), Transition::Stay), "the screen left before its scene began");
+        assert_eq!(app.shared.skin_failure(SKIN_TYPE_RESULT), None, "the default pack's result failed to load");
+        assert!(Instant::now() < deadline, "the default pack's result never drew");
+    }
+    assert!(matches!(frame_after_ms(&mut app, &mut pixels, SETTLED_MS), Transition::Stay));
+    save_frame("result-recorded-scratch-auto", &pixels);
+    assert_eq!(result(&app).notices(&app.shared), ["IR: SKIPPED (scratch assist)", SCRATCH_AUTO_NOTE]);
+    assert!(!reported(&app).updates_score, "the pack is told the score was saved");
 }
 
 /// Until the skin can be drawn the screen is black and takes no key but Escape, which leaves at

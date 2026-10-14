@@ -529,7 +529,7 @@ impl AppShared {
     pub(crate) fn save_settings(&mut self) {
         self.config.network.ir_token = self.session.token().map(str::to_string);
         self.config.network.ir_login_id = self.session.login_id().map(str::to_string);
-        save_config(&self.config, &self.settings_path);
+        save_config(&self.settings_to_save(), &self.settings_path);
     }
 
     /// Load a chosen UI font (TTF/OTF/TTC) live as the preferred family, and persist the path so it

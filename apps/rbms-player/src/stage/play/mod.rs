@@ -51,6 +51,8 @@ mod screen_tests;
 mod skin;
 pub(crate) mod skin_preview;
 #[cfg(test)]
+mod target_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod timing_capture_tests;
@@ -1047,7 +1049,8 @@ impl PlayState {
             judge: feed.trace().regions(),
             ..FrameData::default()
         };
-        shared.draw_play_skin(canvas, skin_type, &PlayDraw { chart: &chart, shown: &shown, offsets: &offsets, data })
+        let paced_by = self.pace_target.as_ref().map(ResolvedTarget::legend).unwrap_or_default();
+        shared.draw_play_skin(canvas, skin_type, &PlayDraw { chart: &chart, shown: &shown, offsets: &offsets, paced_by: &paced_by, data })
     }
 
     /// Make sure the chart the note field is shown is the one CONSTANT and LEGACY NOTE ask for as

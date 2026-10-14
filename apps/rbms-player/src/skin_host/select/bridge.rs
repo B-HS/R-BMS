@@ -10,13 +10,16 @@
 //! which is not something to do on every frame, so the browser reads it when the cursor comes to
 //! rest on a chart and keeps it until the cursor or the records move.
 
+use rbms_config::ScoreTarget;
 use rbms_model::Mode;
 use rbms_render::SongBars;
 use rbms_render::skin_render::frame::BarKind;
 use rbms_store::scoredb::{BestScore, chart_key, mode_id};
 
 use super::shown::{ChartInputs, CourseShown, SelectInputs, SelectShown};
+use crate::app_result::{local_best_before_reading, target_context};
 use crate::skin_host::ir::IrBrowser;
+use crate::target;
 use crate::{AppShared, SelectView};
 
 /// What the reference writes for the folder that holds every chart, and for a level of a table.
@@ -76,7 +79,8 @@ impl AppShared {
         });
         let directory =
             if matches!(kind, Some(BarKind::Course { .. } | BarKind::RandomCourse { .. })) { vec![lent.courses.to_string()] } else { self.open_folders() };
-        SelectShown::of(SelectInputs {
+        let stand_in = entry.and_then(|entry| self.target_stand_in_on(&entry.md5));
+        let shown = SelectShown::of(SelectInputs {
             bars,
             cursor,
             chart,
@@ -88,7 +92,21 @@ impl AppShared {
             selected_replay: lent.selected_replay,
             config: &self.config,
             ir: IrBrowser::of_ranking(self.has_primary_ir_server(), entry.and_then(|entry| self.ranking_cache.peek(&entry.md5))),
-        })
+        });
+        SelectShown { settings: shown.settings.with_target_stand_in(stand_in), ..shown }
+    }
+
+    /// The target a run of the chart `md5` would be paced against in place of the one the TARGET
+    /// row names, or `None` when the chart holds the score that target names (or the target needs
+    /// none).
+    ///
+    /// The local record is the one the run itself would count ([`local_best_before_reading`]), so
+    /// the browser never says a chart holds a record the play screen then passes over.
+    fn target_stand_in_on(&self, md5: &str) -> Option<ScoreTarget> {
+        let context = target_context(self, md5, 0, local_best_before_reading(self, md5));
+        let asked = self.config.judge.target;
+        let (used, _) = target::settle(asked, self.config.judge.target_fallback, &context);
+        (used != asked).then_some(used)
     }
 
     /// The titles of the folders the browser has opened, outermost first (`BarManager.dir`).

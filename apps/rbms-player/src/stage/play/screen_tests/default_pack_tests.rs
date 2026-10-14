@@ -295,3 +295,65 @@ fn the_default_pack_is_drawn_for_a_judge_offset_that_adjusted_itself() {
     stay(&mut app, &mut pixels);
     save("adjusted-offset-forty-early", &pixels, size);
 }
+
+/// What the target stands in for the frames below: the share of the chart's EX ceiling the stored
+/// record holds, as a numerator over [`RECORD_SHARE_OF`].
+const RECORD_SHARE: u32 = 3;
+const RECORD_SHARE_OF: u32 = 5;
+
+/// A record of `ex` on the chart `md5`, as a run by hand leaves one.
+fn record_of(md5: &str, ex: u32, total_notes: u32) -> rbms_store::ScoreRecord {
+    rbms_store::ScoreRecord {
+        md5: md5.to_owned(),
+        title: "record".to_owned(),
+        mode: Mode::BEAT_7K.name.to_owned(),
+        clear: 3,
+        ex_score: ex,
+        max_ex: total_notes * 2,
+        counts: [0; 6],
+        empty_poor: 0,
+        max_combo: 0,
+        total_notes,
+        gauge: String::new(),
+        gauge_value: 0.0,
+        random: String::new(),
+        played_at: 0,
+        replay_file: None,
+        rule_version: rbms_store::SCORE_RULE_VERSION,
+        ln_mode: SCORE_LN_MODE_FROM_CHART.to_owned(),
+        assisted: false,
+    }
+}
+
+/// The score graph and the figure over the judgement of the default pack, for a player whose TARGET
+/// is LOCAL BEST: on a chart they have a record of, the graph's TARGET bar is that record and the
+/// legend reads LOCAL BEST; on a chart with none it is the fallback they named and the legend says
+/// so. Each frame is drawn once the chart has played [`INTO_THE_CHART_MS`] of itself.
+#[test]
+fn the_default_pack_names_the_target_a_run_is_really_paced_against() {
+    let mut config = holding_a_green_number();
+    config.judge.target = rbms_config::ScoreTarget::LocalBest;
+    config.play.keep_green_number = false;
+
+    let mut with_record = app_on_the_default_pack("target-record", config.clone());
+    let size = frame_size(&with_record);
+    let run = stair_run(SLOW_BPM);
+    let total = run.session.judge().total_notes();
+    let best = total * 2 * RECORD_SHARE / RECORD_SHARE_OF;
+    with_record.shared.scores.push(record_of(&run.session.model().md5, best, total));
+    let mut pixels = HeadlessCanvas::new(size.0, size.1);
+    play_into(&mut with_record, &mut pixels, run);
+    let paced = play(&with_record).pace_target.clone().expect("the run settled its target");
+    assert_eq!((paced.used, paced.name.as_str(), paced.ex), (rbms_config::ScoreTarget::LocalBest, "LOCAL BEST", best));
+    save("target-play-local-best", &pixels, size);
+
+    let mut without = app_on_the_default_pack("target-no-record", config);
+    let mut pixels = HeadlessCanvas::new(size.0, size.1);
+    let run = stair_run(SLOW_BPM);
+    let total = run.session.judge().total_notes();
+    play_into(&mut without, &mut pixels, run);
+    let paced = play(&without).pace_target.clone().expect("the run settled its target");
+    assert_eq!((paced.used, paced.name.as_str()), (rbms_config::ScoreTarget::RateAaa, "RATE AAA"), "the fallback is the one the player did not choose");
+    assert_eq!(paced.ex, crate::target::band_target_ex(total, 24));
+    save("target-play-no-record", &pixels, size);
+}

@@ -304,6 +304,9 @@ struct FrameInputs<'a> {
     /// The play screen's frame and the offsets the game itself sets on it, for the play screen. With
     /// them the host answers for the run in progress; without them the play clusters answer nothing.
     play: Option<(&'a PlayShown, &'a PlayOffsets)>,
+    /// The name of the target the run on the play screen is paced against, for the skin's text of
+    /// the target.
+    paced_by: Option<&'a str>,
     /// What each key is bound to, for the key configuration screen. Empty on every other screen,
     /// which leaves the key names unanswered.
     keyconfig: KeyConfigState<'a>,
@@ -325,6 +328,7 @@ impl<'a> FrameInputs<'a> {
             result: None,
             select: None,
             play: None,
+            paced_by: None,
             keyconfig: KeyConfigState::default(),
             settings: None,
         }
@@ -349,6 +353,9 @@ pub(crate) struct PlayDraw<'a> {
     pub(crate) shown: &'a PlayShown,
     /// The turntable angles, the lift and the two covers as the run has them this frame.
     pub(crate) offsets: &'a PlayOffsets,
+    /// The name of the target the run is paced against: the one that really stands, which is not
+    /// the one the player chose when that one had no score to name.
+    pub(crate) paced_by: &'a str,
     /// What no property id carries: the note field, the gauge, the judgement regions, the chart's
     /// background and the series its graphs plot.
     pub(crate) data: FrameData<'a>,
@@ -1373,6 +1380,7 @@ impl AppShared {
         if let Some((shown, offsets)) = inputs.play {
             host.show_play(shown);
             host.play_offsets = Some(offsets);
+            host.options.paced_by = inputs.paced_by;
         }
         if let Some((service_name, user_name)) = &ranking {
             host.ir.link = is_result_screen(screen).then(|| self.skin_ir_link());
@@ -1641,8 +1649,12 @@ impl AppShared {
     pub(crate) fn draw_play_skin(&self, canvas: &mut Canvas<'_>, screen: i32, scene: &PlayDraw<'_>) -> bool {
         let window = canvas.native().size();
         let offsets = self.skin_offsets(screen, window);
-        let inputs =
-            FrameInputs { chart: ChartState::Chart(scene.chart), play: Some((scene.shown, scene.offsets)), ..FrameInputs::new(&offsets, scene.data, window) };
+        let inputs = FrameInputs {
+            chart: ChartState::Chart(scene.chart),
+            play: Some((scene.shown, scene.offsets)),
+            paced_by: Some(scene.paced_by),
+            ..FrameInputs::new(&offsets, scene.data, window)
+        };
         self.with_skin_frame(screen, inputs, |document| document.draw_native(canvas)).is_some()
     }
 

@@ -53,6 +53,8 @@ fn default_values_are_sane() {
     assert_eq!(c.judge.gauge_auto_shift, GaugeAutoShift::None);
     assert_eq!(c.judge.bottom_shiftable_gauge, GaugeKind::AssistEasy);
     assert_eq!(c.judge.target, ScoreTarget::RateAaa);
+    assert_eq!(c.judge.target_fallback, ScoreTarget::RateAaa, "a fresh install paces against the shipped target when its own score is missing");
+    assert_eq!(c.judge.target_rate_percent, TARGET_RATE_DEFAULT_PERCENT);
     assert_eq!(c.judge.offset_ms, 0);
     assert!(c.library.preview);
     assert_eq!(c.library.songs_folder, None);
@@ -122,6 +124,100 @@ fn every_target_the_row_offers_survives_the_file_it_is_stored_in() {
     ids.dedup();
     assert_eq!(ids.len(), count, "two targets name the same rate");
     assert_eq!(TARGET_LABELS.len(), ScoreTarget::ALL.len(), "the row's names and its values are different lengths");
+}
+
+/// The fallback row offers exactly the targets that are worked out from the chart alone, each
+/// under its own name and its own token, and none that names somebody's score.
+#[test]
+fn the_fallback_row_offers_the_targets_that_are_always_known() {
+    assert_eq!(TARGET_FALLBACK_LABELS.len(), ScoreTarget::FALLBACKS.len(), "the row's names and its values are different lengths");
+    assert_eq!(ScoreTarget::FALLBACKS.len(), TARGET_FALLBACK_COUNT);
+    for (at, target) in ScoreTarget::FALLBACKS.into_iter().enumerate() {
+        assert!(target.is_always_known() && target.missing_score().is_none(), "{target:?} needs a score and cannot stand in for another");
+        assert_eq!(TARGET_FALLBACK_LABELS[at], target.label(), "the row names {target:?} differently from the target row");
+        assert_eq!(target_fallback_from_token(target.token()), target);
+    }
+    for target in [ScoreTarget::LocalBest, ScoreTarget::IrBest, ScoreTarget::Rival] {
+        assert!(!target.is_always_known() && target.missing_score().is_some(), "{target:?} is worked out from the chart alone");
+        assert_eq!(target_fallback_from_token(target.token()), ScoreTarget::default(), "{target:?} was taken for a fallback");
+    }
+    assert_eq!(ScoreTarget::ALL[..TARGET_FALLBACK_COUNT], ScoreTarget::FALLBACKS, "the fallbacks are the first targets of the row, in its order");
+}
+
+/// What a row says of a target whose score may not be there: the target's own name, then what is
+/// missing and what stands in.
+#[test]
+fn a_target_that_may_have_no_score_says_what_stands_in_for_it() {
+    assert_eq!(ScoreTarget::LocalBest.label_with_fallback(ScoreTarget::RateAaa, 85), "LOCAL BEST (NO RECORD: AAA)");
+    assert_eq!(ScoreTarget::IrBest.label_with_fallback(ScoreTarget::Max, 85), "IR BEST (NO IR SCORE: MAX)");
+    assert_eq!(ScoreTarget::Rival.label_with_fallback(ScoreTarget::RankNext, 85), "RIVAL (NO RIVAL SCORE: RANK NEXT)");
+    assert_eq!(ScoreTarget::LocalBest.label_then(ScoreTarget::RateAaa, 85), "LOCAL BEST > AAA");
+    assert_eq!(ScoreTarget::Rival.label_then(ScoreTarget::RankNext, 85), "RIVAL > RANK NEXT");
+    assert_eq!(ScoreTarget::RateA.label_then(ScoreTarget::Max, 85), "RATE A", "a target that is always known is its name alone");
+    assert_eq!(ScoreTarget::LocalBest.missing_note(ScoreTarget::RateAaa, 85).as_deref(), Some("NO RECORD: PACED AGAINST RATE AAA INSTEAD"));
+    assert_eq!(ScoreTarget::IrBest.missing_note(ScoreTarget::Max, 85).as_deref(), Some("NO IR SCORE: YOUR LOCAL BEST, THEN MAX"));
+    assert_eq!(ScoreTarget::IrBest.label_then(ScoreTarget::RateMaxMinus, 85), "IR BEST > LOCAL > MAX-", "the local record is tried before the fallback");
+    assert_eq!(ScoreTarget::RankNext.missing_note(ScoreTarget::Max, 85), None);
+    assert_eq!(ScoreTarget::RateAaaPlus.short_name_at(85), "AAA+");
+    assert_eq!(ScoreTarget::RateMaxMinus.short_name_at(85), "MAX-");
+    assert_eq!(ScoreTarget::LocalBest.short_name_at(85), "LOCAL BEST");
+    assert_eq!(ScoreTarget::RateCustom.short_name_at(72), "72%", "a typed share is written as the share");
+    assert_eq!(ScoreTarget::RateCustom.name_at(72), "SCORE RATE 72%");
+    assert_eq!(ScoreTarget::RateAa.name_at(72), "RATE AA");
+    assert_eq!(ScoreTarget::LocalBest.label_with_fallback(ScoreTarget::RateCustom, 72), "LOCAL BEST (NO RECORD: 72%)");
+    assert_eq!(ScoreTarget::LocalBest.label_then(ScoreTarget::RateCustom, 72), "LOCAL BEST > 72%");
+    assert_eq!(ScoreTarget::LocalBest.missing_note(ScoreTarget::RateCustom, 72).as_deref(), Some("NO RECORD: PACED AGAINST SCORE RATE 72% INSTEAD"));
+    for target in ScoreTarget::FALLBACKS {
+        assert_eq!(target.label_with_fallback(ScoreTarget::RateA, 85), target.label(), "{target:?} is always known and has nothing to fall back from");
+    }
+}
+
+/// A file stores a target by its token, and one that stored the label a row prints (written by
+/// hand, or by a build that stored it so) is still the target it names. Reading it as the shipped
+/// target would silently pace a LOCAL BEST player against RATE AAA.
+#[test]
+fn a_target_stored_by_its_printed_label_is_still_that_target() {
+    for target in ScoreTarget::ALL {
+        assert_eq!(target_from_token(target.label()), target, "{target:?} is lost when stored as `{}`", target.label());
+        assert_eq!(target_from_token(&target.label().to_ascii_lowercase().replace(' ', "_")), target, "{target:?} is lost when stored in snake case");
+    }
+    assert_eq!(target_from_token("  local best "), ScoreTarget::LocalBest);
+    assert_eq!(target_from_token("RATE AAA+"), ScoreTarget::RateAaaPlus);
+    assert_eq!(target_from_token("RATE AAA-"), ScoreTarget::RateAaaMinus);
+}
+
+/// A file from before the fallback existed reads with the shipped one, whatever target it holds; a
+/// file that states one reads it back; and one that states a target that needs a score to exist
+/// reads as the shipped one rather than a fallback that could itself be missing.
+#[test]
+fn the_fallback_target_reads_from_older_files_and_from_bad_ones() {
+    let older: Config = ron::from_str(r#"(schema_version: 5, judge: (target: "LOCALBEST"))"#).expect("a file with no fallback parses");
+    assert_eq!((older.judge.target, older.judge.target_fallback), (ScoreTarget::LocalBest, ScoreTarget::RateAaa));
+    let stated: Config =
+        ron::from_str(r#"(schema_version: 5, judge: (target: "LOCALBEST", target_fallback: "RATEAPLUS"))"#).expect("a file with a fallback parses");
+    assert_eq!((stated.judge.target, stated.judge.target_fallback), (ScoreTarget::LocalBest, ScoreTarget::RateAPlus));
+    assert_eq!(older.judge.target_rate_percent, TARGET_RATE_DEFAULT_PERCENT, "a file from before the custom rate reads with the shipped one");
+    let stated_rate: Config =
+        ron::from_str(r#"(schema_version: 5, judge: (target: "RATECUSTOM", target_fallback: "RATECUSTOM", target_rate_percent: 91))"#).expect("parses");
+    assert_eq!(
+        (stated_rate.judge.target, stated_rate.judge.target_fallback, stated_rate.judge.target_rate_percent),
+        (ScoreTarget::RateCustom, ScoreTarget::RateCustom, 91)
+    );
+    for (stated, read) in [(0, TARGET_RATE_MIN_PERCENT), (-5, TARGET_RATE_MIN_PERCENT), (101, TARGET_RATE_MAX_PERCENT), (50, 50)] {
+        let mut config = Config::default();
+        config.judge.target_rate_percent = stated;
+        config.sanitise();
+        assert_eq!(config.judge.target_rate_percent, read, "a stated rate of {stated}");
+    }
+    for bad in ["LOCALBEST", "IRBEST", "RIVAL", "nonsense", ""] {
+        let text = format!(r#"(schema_version: 5, judge: (target_fallback: "{bad}"))"#);
+        let read: Config = ron::from_str(&text).expect("a file with an unreadable fallback parses");
+        assert_eq!(read.judge.target_fallback, ScoreTarget::default(), "`{bad}` was taken for a fallback");
+    }
+    let mut set_by_hand = Config::default();
+    set_by_hand.judge.target_fallback = ScoreTarget::Rival;
+    set_by_hand.sanitise();
+    assert_eq!(set_by_hand.judge.target_fallback, ScoreTarget::default(), "sanitising left a fallback that needs a score");
 }
 
 #[test]
@@ -199,6 +295,8 @@ fn ron_round_trip_preserves_every_field() {
     c.judge.gauge_auto_shift = GaugeAutoShift::BestClear;
     c.judge.bottom_shiftable_gauge = GaugeKind::Normal;
     c.judge.target = ScoreTarget::IrBest;
+    c.judge.target_fallback = ScoreTarget::RateAaPlus;
+    c.judge.target_rate_percent = 72;
     c.display.bga = false;
     c.display.skin = "WIDE".into();
     c.display.debug = true;

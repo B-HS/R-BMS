@@ -114,7 +114,7 @@ local PACE = {
     bars = {
         { type = props.rate.SCORE_RATE, color = theme.color.accent },
         { type = props.rate.BESTSCORE_RATE_NOW, color = theme.color.sub, label = "BEST", diff = props.number.DIFF_HIGHSCORE },
-        { type = props.rate.TARGETSCORE_RATE_NOW, color = theme.tone.yellow, label = "TARGET", diff = props.number.DIFF_EXSCORE },
+        { type = props.rate.TARGETSCORE_RATE_NOW, color = theme.tone.yellow, label = "TARGET", name = props.text.TARGET_NAME, diff = props.number.DIFF_EXSCORE },
     },
 }
 
@@ -425,7 +425,12 @@ local function pace(s, view, main_state)
             local top = legend_top + PACE.rows[row]
             local size = theme.type.caption
             s:rect({ x = box.x, top = top, w = PACE.swatch, h = theme.cap_height(size) }, entry.color)
-            parts.caption(s, entry.label, { x = box.x + PACE.label_gap, top = top, w = box.w - PACE.label_gap })
+            local caption_box = { x = box.x + PACE.label_gap, top = top, w = box.w - PACE.label_gap }
+            if entry.name then
+                s:text({ ref = entry.name, size = size, overflow = props.text_overflow.SHRINK }, caption_box, { color = theme.color.muted })
+            else
+                parts.caption(s, entry.label, caption_box)
+            end
             local diff = { sprite = PACE.sprite, ref = entry.diff, digit = digits, fit = box.w }
             s:number(diff, { x = box.x, baseline = top + PACE.value_drop }, { color = theme.color.text })
         end

@@ -228,31 +228,49 @@ local function score_rate(main_state)
     end
 end
 
-local function record_cell(s, column, row, label)
+local function holds_score(main_state)
+    return function()
+        return ui.has_value(main_state.number(props.number.PERFECT_RATE))
+    end
+end
+
+local function holds_no_score(main_state)
+    return function()
+        return not ui.has_value(main_state.number(props.number.PERFECT_RATE))
+    end
+end
+
+local function score_shown(main_state)
+    return { shown = { op = { ON_CHART }, draw = holds_score(main_state) }, blank = { op = { ON_CHART }, draw = holds_no_score(main_state) } }
+end
+
+local COUNT_SHOWN = { shown = { op = { ON_CHART } }, blank = { op = { ON_CHART, UNPLAYED } } }
+
+local function record_cell(s, column, row, label, when)
     local top = RECORD.rows[row]
     parts.caption(s, label, { x = column.x, top = top, w = column.width }, { op = { ON_CHART } })
     local baseline = top + RECORD.drop
     local size = theme.type.heading
     local dash = { x = column.x, top = theme.text_top(baseline, size), w = column.width }
-    s:text({ text = NOTHING, size = size }, dash, { color = theme.color.muted, op = { ON_CHART, UNPLAYED } })
+    s:text({ text = NOTHING, size = size }, dash, ui.merge({ color = theme.color.muted }, when.blank))
     return baseline
 end
 
-local function record_number(s, column, row, label, ref)
-    local baseline = record_cell(s, column, row, label)
+local function record_number(s, column, row, label, ref, when)
+    local baseline = record_cell(s, column, row, label, when)
     local spec = { sprite = RECORD.sprite, ref = ref, digit = RECORD.digits, saturate = true }
-    s:number(spec, { x = column.x, baseline = baseline }, kit.arriving({ color = theme.color.text, op = { ON_CHART } }))
+    s:number(spec, { x = column.x, baseline = baseline }, kit.arriving(ui.merge({ color = theme.color.text }, when.shown)))
 end
 
-local function rank(s)
+local function rank(s, when)
     local cell = RECORD.rank
     parts.caption(s, "RANK", { x = cell.x, top = cell.caption_top, w = cell.width }, { op = { ON_CHART } })
     local box = { x = cell.x, top = cell.top, w = cell.width }
     for index, label in ipairs(theme.rank_name) do
         local op = { ON_CHART, -UNPLAYED, props.option.RANK_AAA + index - 1 }
-        s:text({ text = label, size = cell.size }, box, kit.arriving({ color = theme.color.text, op = op }))
+        s:text({ text = label, size = cell.size }, box, kit.arriving({ color = theme.color.text, op = op, draw = when.shown.draw }))
     end
-    s:text({ text = NOTHING, size = cell.size }, box, { color = theme.color.muted, op = { ON_CHART, UNPLAYED } })
+    s:text({ text = NOTHING, size = cell.size }, box, ui.merge({ color = theme.color.muted }, when.blank))
 end
 
 local function clear(s)
@@ -268,7 +286,7 @@ local function clear(s)
     end
 end
 
-local function judges(s)
+local function judges(s, when)
     for index, rate in ipairs(JUDGES.rates) do
         local row = parts.judges[index]
         local top = JUDGES.top + (index - 1) * JUDGES.pitch
@@ -276,9 +294,9 @@ local function judges(s)
         s:text({ text = row.name, size = size }, { x = JUDGES.x, top = top, w = JUDGES.width }, { color = row.color, op = { ON_CHART } })
         local spec = { sprite = JUDGES.sprite, ref = row.count[1], digit = JUDGES.digits, saturate = true, align = "right" }
         local baseline = top + theme.cap_height(size)
-        s:number(spec, { x = JUDGES.x, baseline = baseline, w = JUDGES.width }, kit.arriving({ color = theme.color.text, op = { ON_CHART, -UNPLAYED } }))
+        s:number(spec, { x = JUDGES.x, baseline = baseline, w = JUDGES.width }, kit.arriving(ui.merge({ color = theme.color.text }, when.shown)))
         local dash = { x = JUDGES.x, top = top, w = JUDGES.width }
-        s:text({ text = NOTHING, size = size, align = "right" }, dash, { color = theme.color.muted, op = { ON_CHART, UNPLAYED } })
+        s:text({ text = NOTHING, size = size, align = "right" }, dash, ui.merge({ color = theme.color.muted }, when.blank))
         local track = { x = JUDGES.x, top = top + JUDGES.bar_drop, w = JUDGES.width, h = JUDGES.bar_height }
         s:rect(track, theme.color.panel, { op = { ON_CHART } })
         local grown = motion.grow_right(0, JUDGES.grow, { color = row.color, op = { ON_CHART }, timer = props.timer.SONGBAR_CHANGE })
@@ -288,19 +306,20 @@ end
 
 local function record(s, main_state)
     s:rect({ x = REGION.x, top = RECORD.rule_top, w = REGION.width, h = theme.grid.rule }, theme.color.line, { op = { ON_CHART } })
-    rank(s)
+    local scored = score_shown(main_state)
+    rank(s, scored)
     clear(s)
-    record_number(s, RECORD.left, 1, "EX SCORE", props.number.SCORE)
-    record_number(s, RECORD.left, 2, "MAX COMBO", props.number.MAXCOMBO)
-    record_number(s, RECORD.left, 3, "PLAY COUNT", props.number.PLAYCOUNT)
-    local baseline = record_cell(s, RECORD.right, 1, "RATE")
+    record_number(s, RECORD.left, 1, "EX SCORE", props.number.SCORE, scored)
+    record_number(s, RECORD.left, 2, "MAX COMBO", props.number.MAXCOMBO, scored)
+    record_number(s, RECORD.left, 3, "PLAY COUNT", props.number.PLAYCOUNT, COUNT_SHOWN)
+    local baseline = record_cell(s, RECORD.right, 1, "RATE", scored)
     local size = theme.type.heading
     local rate = { x = RECORD.right.x, top = theme.text_top(baseline, size), w = RECORD.right.width }
     local spec = { value = score_rate(main_state), size = size, overflow = props.text_overflow.SHRINK }
-    s:text(spec, rate, kit.arriving({ color = theme.color.text, op = { ON_CHART } }))
-    record_number(s, RECORD.right, 2, "MISS COUNT", props.number.MISSCOUNT)
-    record_number(s, RECORD.right, 3, "CLEAR COUNT", props.number.CLEARCOUNT)
-    judges(s)
+    s:text(spec, rate, kit.arriving(ui.merge({ color = theme.color.text }, scored.shown)))
+    record_number(s, RECORD.right, 2, "MISS COUNT", props.number.MISSCOUNT, scored)
+    record_number(s, RECORD.right, 3, "CLEAR COUNT", props.number.CLEARCOUNT, COUNT_SHOWN)
+    judges(s, scored)
 end
 
 local function folder(s)

@@ -10,6 +10,81 @@ use crate::*;
 /// How much of the output device's name the debug overlay shows before it is cut.
 const DEVICE_NAME_OVERLAY_CHARS: usize = 20;
 
+/// The play options a replay is watched with in place of the player's: the SCRATCH AUTO, the gauge
+/// and the lane arrangement it was recorded under. The screens of the run read them from the
+/// settings, so the settings hold the replay's for as long as it plays, and the player's own are
+/// kept in one of these to be written to the settings file meanwhile and put back after.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct OwnPlayOptions {
+    pub(crate) scratch_auto: bool,
+    pub(crate) gauge: rbms_judge::GaugeKind,
+    pub(crate) random: NoteOption,
+}
+
+impl OwnPlayOptions {
+    /// The three options as `play` holds them.
+    pub(crate) fn of(play: &rbms_config::PlayOptions) -> OwnPlayOptions {
+        OwnPlayOptions { scratch_auto: play.scratch_auto, gauge: play.gauge, random: play.random }
+    }
+
+    /// The three options a replay was recorded under.
+    fn recorded_in(replay: &Replay) -> OwnPlayOptions {
+        OwnPlayOptions { scratch_auto: replay.scratch_auto, gauge: gauge_from_name(&replay.gauge), random: NoteOption::from_str(&replay.random) }
+    }
+
+    /// Write the three options into `play`.
+    pub(crate) fn put_into(self, play: &mut rbms_config::PlayOptions) {
+        play.scratch_auto = self.scratch_auto;
+        play.gauge = self.gauge;
+        play.random = self.random;
+    }
+}
+
+impl AppShared {
+    /// Have the settings hold the options the replay in hand was recorded under, keeping the
+    /// player's own to put back, and answer the arrangement and the seed it lays the lanes out
+    /// with. `None` when no replay is in hand.
+    ///
+    /// The player's options are kept once: a replay watched again before the first one ended keeps
+    /// the ones the player had, not the ones the first replay put in their place.
+    pub(crate) fn play_as_recorded(&mut self) -> Option<(NoteOption, u64)> {
+        let replay = self.replay.as_ref()?;
+        let recorded = OwnPlayOptions::recorded_in(replay);
+        let seed = replay.seed;
+        let own = OwnPlayOptions::of(&self.config.play);
+        self.own_play_options.get_or_insert(own);
+        recorded.put_into(&mut self.config.play);
+        Some((recorded.random, seed))
+    }
+
+    /// Put the player's own SCRATCH AUTO, gauge and arrangement back where a watched replay put its
+    /// own, if one did.
+    pub(crate) fn put_back_own_play_options(&mut self) {
+        if let Some(own) = self.own_play_options.take() {
+            own.put_into(&mut self.config.play);
+        }
+    }
+
+    /// Forget the replay in hand, and put back the options it was watched with.
+    pub(crate) fn end_replay(&mut self) {
+        self.replay = None;
+        self.put_back_own_play_options();
+    }
+
+    /// The settings as the settings file is to hold them: the ones in force, with the player's own
+    /// options in place of the ones a replay is being watched with.
+    pub(crate) fn settings_to_save(&self) -> std::borrow::Cow<'_, Config> {
+        match self.own_play_options {
+            Some(own) => {
+                let mut config = self.config.clone();
+                own.put_into(&mut config.play);
+                std::borrow::Cow::Owned(config)
+            }
+            None => std::borrow::Cow::Borrowed(&self.config),
+        }
+    }
+}
+
 /// A parsed chart, ready to play as soon as the files it names have been decoded.
 ///
 /// The background images are not part of it yet: they are decoded on the worker pool like the
@@ -304,18 +379,18 @@ impl AppShared {
             }
         };
         let mode = decoded.mode;
-        let (random, seed) = match &self.replay {
-            Some(rp) => {
-                if !rp.md5.is_empty() && rp.md5 != decoded.md5 {
-                    notify(Level::Warn, format!("warning: chart md5 mismatch (replay {} vs file {}); replay may desync", rp.md5, decoded.md5));
-                }
-                self.config.play.scratch_auto = rp.scratch_auto;
-                self.config.play.gauge = gauge_from_name(&rp.gauge);
-                let random = NoteOption::from_str(&rp.random);
-                self.config.play.random = random;
-                (random, rp.seed)
+        if let Some(rp) = &self.replay
+            && !rp.md5.is_empty()
+            && rp.md5 != decoded.md5
+        {
+            notify(Level::Warn, format!("warning: chart md5 mismatch (replay {} vs file {}); replay may desync", rp.md5, decoded.md5));
+        }
+        let (random, seed) = match self.play_as_recorded() {
+            Some(recorded) => recorded,
+            None => {
+                self.put_back_own_play_options();
+                (self.config.play.random, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1))
             }
-            None => (self.config.play.random, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1)),
         };
         let seed = carried_seed.filter(|_| self.replay.is_none()).unwrap_or(seed);
         let mut judge_setup = run_judge_setup(&self.config, self.replay.as_ref());
@@ -638,7 +713,7 @@ impl AppShared {
             return Transition::Quit;
         }
         self.release_play_audio();
-        self.replay = None;
+        self.end_replay();
         self.rebuild_select_items();
         self.print_selection();
         Transition::Back

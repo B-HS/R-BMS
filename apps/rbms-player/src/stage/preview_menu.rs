@@ -38,12 +38,12 @@ pub(crate) const COLUMN_GAP: f32 = 16.0;
 
 /// Where the title is written, and how large.
 pub(crate) const TITLE_Y: f32 = 16.0;
-const TITLE_SCALE: f32 = 2.4;
+pub(crate) const TITLE_SCALE: f32 = 2.4;
 
 /// Where what is written beside the title begins, and how large it is written.
 const SUBTITLE_X: f32 = 132.0;
-const SUBTITLE_Y: f32 = 26.0;
-const SUBTITLE_SCALE: f32 = 1.6;
+pub(crate) const SUBTITLE_Y: f32 = 26.0;
+pub(crate) const SUBTITLE_SCALE: f32 = 1.6;
 
 /// The top of the two columns, under the head.
 pub(crate) const COLUMNS_TOP: f32 = 84.0;
@@ -133,8 +133,8 @@ pub(crate) const UTF8_MAX_BYTES: usize = 4;
 
 /// The scroll bar along the list's right edge: how wide it is, how far inside the edge, and the
 /// shortest its thumb is drawn.
-const SCROLL_BAR_W: f32 = 5.0;
-const SCROLL_BAR_INSET: f32 = 3.0;
+pub(crate) const SCROLL_BAR_W: f32 = 5.0;
+pub(crate) const SCROLL_BAR_INSET: f32 = 3.0;
 const SCROLL_THUMB_MIN_H: f32 = 16.0;
 
 /// The room the scroll bar takes from the rows.
@@ -345,10 +345,16 @@ pub(crate) fn scroll_track() -> Rect {
 /// Where the scroll bar's thumb is for a list of `len` rows whose first row on show is `top`: as
 /// much of the bar as the rows on show are of the list, and as far down it as the list is scrolled.
 pub(crate) fn scroll_thumb(top: usize, len: usize) -> Rect {
-    let track = scroll_track();
+    scroll_thumb_in(scroll_track(), top, len, VISIBLE_ROWS)
+}
+
+/// Where the thumb of a scroll bar drawn along `track` is, for a list of `len` entries that shows
+/// `visible` of them at once and whose first entry on show is `top`: as much of the track as the
+/// entries on show are of the list, and as far down it as the list is scrolled.
+pub(crate) fn scroll_thumb_in(track: Rect, top: usize, len: usize, visible: usize) -> Rect {
     let rows = len.max(1) as f32;
-    let height = (track.h * VISIBLE_ROWS as f32 / rows).clamp(SCROLL_THUMB_MIN_H.min(track.h), track.h);
-    let travel = len.saturating_sub(VISIBLE_ROWS).max(1) as f32;
+    let height = (track.h * visible as f32 / rows).clamp(SCROLL_THUMB_MIN_H.min(track.h), track.h);
+    let travel = len.saturating_sub(visible).max(1) as f32;
     Rect::new(track.x, track.y + (track.h - height) * (top as f32 / travel).min(1.0), track.w, height)
 }
 
@@ -359,30 +365,45 @@ pub(crate) fn contains(rect: Rect, at: (f32, f32)) -> bool {
 
 /// The furthest a list of `len` rows can be scrolled: the last screenful.
 pub(crate) fn last_top(len: usize) -> usize {
-    len.saturating_sub(VISIBLE_ROWS)
+    last_top_of(len, VISIBLE_ROWS)
+}
+
+/// The furthest a list of `len` entries that shows `visible` of them at once can be scrolled.
+pub(crate) fn last_top_of(len: usize, visible: usize) -> usize {
+    len.saturating_sub(visible)
 }
 
 /// The first row on show once a list of `len` rows scrolled to `top` has been scrolled just far
 /// enough to have the row `sel` on show.
 pub(crate) fn revealed_top(sel: usize, top: usize, len: usize) -> usize {
+    revealed_top_of(sel, top, len, VISIBLE_ROWS)
+}
+
+/// [`revealed_top`] for a list that shows `visible` entries at once.
+pub(crate) fn revealed_top_of(sel: usize, top: usize, len: usize, visible: usize) -> usize {
     let top = if sel < top {
         sel
-    } else if sel >= top + VISIBLE_ROWS {
-        sel + 1 - VISIBLE_ROWS
+    } else if sel >= top + visible {
+        sel + 1 - visible
     } else {
         top
     };
-    top.min(last_top(len))
+    top.min(last_top_of(len, visible))
 }
 
 /// The first row on show once the wheel has turned by `lines` over a list of `len` rows scrolled to
 /// `top`. `carry` is the part of a line the wheel has turned that has not moved the list yet, which
 /// is kept from one turn to the next. A turn that is not a number is the caller's to leave out.
 pub(crate) fn wheel_scrolled(carry: &mut f32, top: usize, len: usize, lines: f32) -> usize {
+    wheel_scrolled_over(carry, top, len, lines, VISIBLE_ROWS)
+}
+
+/// [`wheel_scrolled`] for a list that shows `visible` entries at once.
+pub(crate) fn wheel_scrolled_over(carry: &mut f32, top: usize, len: usize, lines: f32, visible: usize) -> usize {
     *carry = (*carry + lines).clamp(-WHEEL_ROWS_MAX, WHEEL_ROWS_MAX);
     let whole = carry.trunc();
     *carry -= whole;
-    if whole < 0.0 { top.saturating_sub((-whole) as usize) } else { (top + whole as usize).min(last_top(len)) }
+    if whole < 0.0 { top.saturating_sub((-whole) as usize) } else { (top + whole as usize).min(last_top_of(len, visible)) }
 }
 
 /// Which way a press of a mouse button steps the row it lands on: forwards with the left button,

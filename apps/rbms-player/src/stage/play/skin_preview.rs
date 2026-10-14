@@ -535,13 +535,19 @@ impl PlaySample {
     /// the game plays itself, and TARGET is settled on the sample chart as a run of it would settle
     /// it, with no record and no rival to measure against. A run shown for its skin is one played
     /// by hand with nothing to pace against, whatever those rows hold.
-    fn told(&self, config: &Config) -> (PlayKind, u32) {
+    fn told(&self, config: &Config) -> (PlayKind, u32, String) {
         if self.ending == SampleEnding::Closes {
-            return (PlayKind::Play, 0);
+            return (PlayKind::Play, 0, String::new());
         }
         let kind = if config.play.autoplay { PlayKind::Autoplay } else { PlayKind::Play };
-        let context = TargetContext { total_notes: self.session.judge().total_notes(), ..TargetContext::default() };
-        (kind, target::resolve(config.judge.target, &context).ex)
+        let context = TargetContext {
+            total_notes: self.session.judge().total_notes(),
+            custom_rate_percent: config.judge.target_rate_percent,
+            ..TargetContext::default()
+        };
+        let settled = target::resolve(config.judge.target, config.judge.target_fallback, &context);
+        let legend = settled.legend();
+        (kind, settled.ex, legend)
     }
 
     /// The scores the run is held against at `now_us`, as the skin's timers read them: no best of
@@ -720,7 +726,7 @@ impl PlaySample {
         let (bpm, scroll) = self.tempo_at(chart_us);
         let travel = self.field.as_ref().and_then(FieldChart::tempo).unwrap_or((bpm, scroll));
         let hispeed = self.shown_hispeed(&shared.config) as f32;
-        let (kind, target_score) = self.told(&shared.config);
+        let (kind, target_score, paced_by) = self.told(&shared.config);
         let live = PlayLive {
             phase: self.scene.phase(),
             kind,
@@ -795,7 +801,7 @@ impl PlaySample {
             judge: self.feed.trace().regions(),
             ..FrameData::default()
         };
-        shared.draw_skin_preview(canvas, at, PreviewScene::Play(PlayDraw { chart: &chart, shown: &shown, offsets: &offsets, data }))
+        shared.draw_skin_preview(canvas, at, PreviewScene::Play(PlayDraw { chart: &chart, shown: &shown, offsets: &offsets, paced_by: &paced_by, data }))
     }
 
     /// Where the run stands, for the tests that check it moves: its state, where the chart is in

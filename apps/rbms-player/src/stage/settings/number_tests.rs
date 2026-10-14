@@ -1,8 +1,8 @@
 //! The rows of the settings screen that hold a number: a key moves one by the smallest change it
 //! can hold, its slider is dragged, and a figure is typed into it.
 //!
-//! With [`CAPTURE_DIR_ENV`] naming a folder, the AUDIO tab is also saved there as PNGs a person can
-//! open: its volumes with their sliders, one being dragged, and one being typed into.
+//! With [`CAPTURE_DIR_ENV`] naming a folder, the AUDIO group is also saved there as PNGs a person
+//! can open: its volumes with their sliders, one being dragged, and one being typed into.
 
 use std::time::Instant;
 
@@ -20,7 +20,7 @@ use crate::stage::{Canvas, HeadlessCanvas};
 const CAPTURE_DIR_ENV: &str = "RBMS_SKIN_CAPTURE_DIR";
 
 /// The two sizes the screen is drawn at: the one it is laid out for, and a full HD window.
-const DRAWN_SIZES: [(u32, u32); 2] = [(CW, CH), (1920, 1080)];
+pub(super) const DRAWN_SIZES: [(u32, u32); 2] = [(CW, CH), (1920, 1080)];
 
 /// Every row of the screen that holds a number, by the tab it is on.
 const NUMBER_ROWS: [(SettingTab, &[SettingId]); 4] = [
@@ -57,7 +57,7 @@ fn ctx(app: &mut App) -> FrameCtx<'_> {
 }
 
 /// An app whose settings live in a folder of this test's own, with no skin chosen.
-fn bare_app(tag: &str) -> App {
+pub(super) fn bare_app(tag: &str) -> App {
     let mut app = app();
     let root = std::env::temp_dir().join(format!("rbms-settings-numbers-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
@@ -69,19 +69,19 @@ fn bare_app(tag: &str) -> App {
 }
 
 /// The screen on one tab over an app, with the canvas its frames are drawn on.
-struct Screen {
-    app: App,
-    state: SettingsState,
-    pixels: HeadlessCanvas,
-    size: (u32, u32),
+pub(super) struct Screen {
+    pub(super) app: App,
+    pub(super) state: SettingsState,
+    pub(super) pixels: HeadlessCanvas,
+    pub(super) size: (u32, u32),
 }
 
 impl Screen {
-    fn on(tag: &str, tab: SettingTab) -> Screen {
+    pub(super) fn on(tag: &str, tab: SettingTab) -> Screen {
         Screen::sized(tag, tab, DRAWN_SIZES[0])
     }
 
-    fn sized(tag: &str, tab: SettingTab, size: (u32, u32)) -> Screen {
+    pub(super) fn sized(tag: &str, tab: SettingTab, size: (u32, u32)) -> Screen {
         let mut app = bare_app(tag);
         let mut state = SettingsState::on_tab(tab);
         state.on_enter(&mut ctx(&mut app));
@@ -91,39 +91,39 @@ impl Screen {
     }
 
     /// One frame: the regions of the last are forgotten and the screen is drawn.
-    fn frame(&mut self) {
+    pub(super) fn frame(&mut self) {
         self.app.shared.hot.clear();
         self.state.draw(&mut ctx(&mut self.app), &mut Canvas::Headless(&mut self.pixels));
     }
 
-    fn at(&self, id: SettingId) -> usize {
+    pub(super) fn at(&self, id: SettingId) -> usize {
         self.state.rows.iter().position(|row| *row == SettingRow::Fixed(id)).unwrap_or_else(|| panic!("{id:?} is not on the open tab"))
     }
 
     /// Put the cursor on one row and draw it there, so the row is on show.
-    fn focus(&mut self, id: SettingId) {
+    pub(super) fn focus(&mut self, id: SettingId) {
         self.state.sel = self.at(id);
         self.frame();
     }
 
-    fn key(&mut self, code: KeyCode) -> Transition {
+    pub(super) fn key(&mut self, code: KeyCode) -> Transition {
         self.state.handle_key(&mut ctx(&mut self.app), KeyInput { code, pressed: true, released: false, text: None })
     }
 
     /// A key pressed with Shift held, and Shift let go of after it.
-    fn shifted(&mut self, code: KeyCode) {
+    pub(super) fn shifted(&mut self, code: KeyCode) {
         self.key(KeyCode::ShiftLeft);
         self.key(code);
         self.state.handle_key(&mut ctx(&mut self.app), KeyInput { code: KeyCode::ShiftLeft, pressed: false, released: true, text: None });
     }
 
     /// One key pressed that types `text`.
-    fn typed(&mut self, text: &'static str) -> Transition {
+    pub(super) fn typed(&mut self, text: &'static str) -> Transition {
         self.state.handle_key(&mut ctx(&mut self.app), KeyInput { code: KeyCode::KeyA, pressed: true, released: false, text: Some(text) })
     }
 
     /// Open the row to be typed into with Enter, type `typed` into it key by key, and press Enter.
-    fn type_in(&mut self, id: SettingId, typed: &[&'static str]) {
+    pub(super) fn type_in(&mut self, id: SettingId, typed: &[&'static str]) {
         self.focus(id);
         self.key(KeyCode::Enter);
         for text in typed {
@@ -132,55 +132,55 @@ impl Screen {
         self.key(KeyCode::Enter);
     }
 
-    fn press(&mut self, at: (f32, f32), button: MouseButton) -> Transition {
+    pub(super) fn press(&mut self, at: (f32, f32), button: MouseButton) -> Transition {
         self.state.handle_mouse(&mut ctx(&mut self.app), at, button, true)
     }
 
-    fn drag(&mut self, at: (f32, f32)) {
+    pub(super) fn drag(&mut self, at: (f32, f32)) {
         self.state.handle_mouse_drag(&mut ctx(&mut self.app), at);
     }
 
-    fn let_go(&mut self, at: (f32, f32)) {
+    pub(super) fn let_go(&mut self, at: (f32, f32)) {
         self.state.handle_mouse(&mut ctx(&mut self.app), at, MouseButton::Left, false);
     }
 
     /// Where the frame drawn last drew one row.
-    fn row_of(&self, id: SettingId) -> Rect {
+    pub(super) fn row_of(&self, id: SettingId) -> Rect {
         crate::number_row::hot_rect(&self.app.shared, Hot::SettingRow(self.at(id))).unwrap_or_else(|| panic!("{id:?} is not on show"))
     }
 
-    fn slider_of(&self, id: SettingId) -> Rect {
+    pub(super) fn slider_of(&self, id: SettingId) -> Rect {
         row_slider(self.row_of(id))
     }
 
     /// A point on the label of one row: on the row, and on neither its slider nor its number.
-    fn on_the_label_of(&self, id: SettingId) -> (f32, f32) {
+    pub(super) fn on_the_label_of(&self, id: SettingId) -> (f32, f32) {
         let row = self.row_of(id);
         (row.x + INSIDE_THE_ROW, row.y + row.h * 0.5)
     }
 
-    fn on_the_number_of(&self, id: SettingId) -> (f32, f32) {
+    pub(super) fn on_the_number_of(&self, id: SettingId) -> (f32, f32) {
         middle(row_number(self.row_of(id)))
     }
 
     /// The step one row that holds a number stands on in the configuration.
-    fn steps_of(&self, id: SettingId) -> i64 {
+    pub(super) fn steps_of(&self, id: SettingId) -> i64 {
         number_steps(&self.app.shared.config, id).unwrap_or_else(|| panic!("{id:?} holds no number"))
     }
 
     /// What the row reads as the screen draws it.
-    fn reads(&mut self, id: SettingId) -> String {
+    pub(super) fn reads(&mut self, id: SettingId) -> String {
         self.state.ensure_rows(&self.app.shared);
         self.state.lines[self.at(id)].value.clone()
     }
 
-    fn scene(&mut self) -> SettingsScene {
+    pub(super) fn scene(&mut self) -> SettingsScene {
         self.state.ensure_rows(&self.app.shared);
         self.state.scene(&self.app.shared, Instant::now())
     }
 
     /// Save the frame drawn last as `<capture folder>/<name>-<size>.png`, when a folder was named.
-    fn save(&self, name: &str) {
+    pub(super) fn save(&self, name: &str) {
         let Some(folder) = std::env::var_os(CAPTURE_DIR_ENV) else {
             return;
         };
@@ -191,12 +191,12 @@ impl Screen {
     }
 }
 
-fn middle(rect: Rect) -> (f32, f32) {
+pub(super) fn middle(rect: Rect) -> (f32, f32) {
     (rect.x + rect.w * 0.5, rect.y + rect.h * 0.5)
 }
 
 /// The pointer's place over a slider at `fraction` of the way along it: the middle of the knob.
-fn along(slider: Rect, fraction: f32) -> (f32, f32) {
+pub(super) fn along(slider: Rect, fraction: f32) -> (f32, f32) {
     middle(knob_rect(slider, fraction))
 }
 
@@ -345,7 +345,7 @@ fn enter_opens_a_number_row_to_be_typed_into_and_stores_what_was_typed() {
     assert!(matches!(screen.key(KeyCode::Enter), Transition::Stay));
     assert_eq!((screen.steps_of(id), screen.reads(id).as_str()), (42, "42%"));
     assert!(screen.scene().typed.is_none());
-    assert_eq!(screen.scene().hint, crate::settings_view::number_row_hint("F8", "F12", "F5"), "the hint does not name what sets the row under the cursor");
+    assert!(screen.scene().hint.starts_with("LEFT RIGHT 1 STEP   SHIFT x10   ENTER TYPE"), "the hint does not name what sets the row under the cursor");
 
     screen.type_in(id, &["6", "5", "%"]);
     assert_eq!(screen.steps_of(id), 65, "a percent sign typed after the number was not read past");
@@ -416,38 +416,44 @@ fn escape_while_typing_drops_what_was_typed_and_a_key_that_moves_on_stores_it() 
     assert!(matches!(screen.key(KeyCode::Escape), Transition::Back));
 }
 
-/// A press of the left button on the label of a row that holds a number moves it one step
-/// forwards, and one of the right button, anywhere on the row, one step back. A row that holds no
-/// number is what it was: a press of the left button steps it, one of the right does nothing, and
-/// Enter on a switch goes back as it always did.
+/// A press of the left button on the label of a row moves the cursor there and changes nothing,
+/// whatever the row holds, and one of the right button, anywhere on a row that holds a value, takes
+/// it one step back. A switch is turned over by a press on the switch itself, and Enter on a switch
+/// goes back as it always did.
 #[test]
-fn a_press_steps_a_number_row_and_the_other_rows_are_what_they_were() {
+fn a_press_on_a_label_only_moves_the_cursor_and_the_right_button_steps_back() {
     let mut screen = Screen::on("number-clicks", SettingTab::Audio);
     let id = SettingId::SystemVolume;
     let shipped = screen.steps_of(id);
     rbms_config::set_number_steps(&mut screen.app.shared.config, id, 40);
-    screen.focus(id);
+    screen.focus(SettingId::MasterVolume);
     screen.press(screen.on_the_label_of(id), MouseButton::Left);
-    assert_eq!(screen.steps_of(id), 41);
+    assert_eq!((screen.steps_of(id), screen.state.sel), (40, screen.at(id)), "a press on the label moved the row, or left the cursor behind");
     let places = [screen.on_the_label_of(id), middle(screen.slider_of(id)), screen.on_the_number_of(id)];
     for at in places {
         screen.press(at, MouseButton::Right);
     }
-    assert_eq!(screen.steps_of(id), 38, "the right button does not step a row back wherever on it the press lands");
+    assert_eq!(screen.steps_of(id), 37, "the right button does not step a row back wherever on it the press lands");
     assert_eq!((screen.scene().dragged, screen.scene().typed.is_none()), (None, true), "the right button took hold of the slider or opened the number");
-    assert_ne!(shipped, 38);
+    assert_ne!(shipped, 37);
 
     let guide = screen.app.shared.config.audio.guide_se;
-    let on_guide = [screen.on_the_label_of(SettingId::GuideSe), middle(screen.slider_of(SettingId::GuideSe)), screen.on_the_number_of(SettingId::GuideSe)];
-    screen.press(on_guide[0], MouseButton::Right);
-    assert_eq!(screen.app.shared.config.audio.guide_se, guide, "the right button stepped a switch");
-    for (presses, at) in on_guide.into_iter().enumerate() {
-        screen.press(at, MouseButton::Left);
-        assert_eq!(screen.app.shared.config.audio.guide_se, guide ^ (presses % 2 == 0), "a press did not turn the switch over");
+    screen.press(screen.on_the_label_of(SettingId::GuideSe), MouseButton::Left);
+    assert_eq!(
+        (screen.app.shared.config.audio.guide_se, screen.state.sel),
+        (guide, screen.at(SettingId::GuideSe)),
+        "a press on the label turned the switch over"
+    );
+    let on_the_switch = middle(crate::settings_view::row_switch(screen.row_of(SettingId::GuideSe)));
+    for presses in 1..=3 {
+        screen.press(on_the_switch, MouseButton::Left);
+        assert_eq!(screen.app.shared.config.audio.guide_se, guide ^ (presses % 2 == 1), "a press on the switch did not turn it over");
+        assert_eq!(screen.app.shared.syssound.guide_enabled(), screen.app.shared.config.audio.guide_se, "the cues do not follow the switch at once");
         assert_eq!((screen.scene().dragged, screen.scene().typed.is_none()), (None, true), "a switch has a slider or a number");
     }
+    screen.press(screen.on_the_label_of(SettingId::GuideSe), MouseButton::Right);
+    assert_eq!(screen.app.shared.config.audio.guide_se, guide, "the right button did not turn the switch back");
     screen.focus(SettingId::GuideSe);
-    assert!(matches!(screen.key(KeyCode::Digit0), Transition::Stay));
     assert!(matches!(screen.key(KeyCode::Enter), Transition::Back), "Enter on a switch no longer goes back");
 }
 
@@ -575,5 +581,7 @@ fn the_hint_of_a_number_row_still_names_the_keys_to_the_other_screens() {
         assert!(hint.contains(part), "the hint of a number row does not say {part}: {hint}");
     }
     screen.focus(SettingId::GuideSe);
-    assert!(screen.scene().hint.contains("TAB SWITCH"), "the hint of a row that holds no number changed");
+    let hint = screen.scene().hint;
+    assert!(hint.starts_with("LEFT RIGHT SWITCH   0 DEFAULT   ENTER SAVE AND CLOSE"), "the hint of a switch names other keys than it hears: {hint}");
+    assert!(!hint.contains("TYPE") && !hint.contains("DRAG"), "the hint of a switch names what sets a number: {hint}");
 }

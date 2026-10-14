@@ -187,15 +187,16 @@ fn only_a_run_shown_for_the_play_options_follows_the_autoplay_and_target_rows() 
     let sample = || PlaySample::at_tempo(SKIN_TYPE_PLAY_7KEYS, &by_hand, SampleTempo::Steady(150)).expect("seven keys have a sample");
 
     let for_its_skin = sample();
-    assert!(matches!(for_its_skin.told(&by_hand), (PlayKind::Play, 0)));
-    assert!(matches!(for_its_skin.told(&moved), (PlayKind::Play, 0)), "a run shown for its skin followed a play option");
+    assert!(matches!(for_its_skin.told(&by_hand), (PlayKind::Play, 0, _)));
+    assert!(matches!(for_its_skin.told(&moved), (PlayKind::Play, 0, _)), "a run shown for its skin followed a play option");
 
     let for_the_options = sample().ending(SampleEnding::BeginsAgain);
     let ceiling = for_the_options.session.judge().total_notes() * 2;
-    assert!(matches!(for_the_options.told(&moved), (PlayKind::Autoplay, target) if target == ceiling), "the ceiling of the chart is not the target");
-    let (kind, target) =
+    assert!(matches!(for_the_options.told(&moved), (PlayKind::Autoplay, target, _) if target == ceiling), "the ceiling of the chart is not the target");
+    let (kind, target, name) =
         for_the_options.told(&Config { judge: rbms_config::JudgeOptions { target: ScoreTarget::RateAaa, ..by_hand.judge.clone() }, ..by_hand.clone() });
     assert!(matches!(kind, PlayKind::Play), "a run nobody asked the game to play is told as one it plays");
     assert!(target > 0 && target < ceiling, "a rate under the ceiling is paced at {target} of {ceiling}");
+    assert_eq!(name, ScoreTarget::RateAaa.label(), "the figures are named for the target they are of");
     assert_eq!(for_the_options.held_against(&moved, 0).target_score, ceiling, "the timers are told another target than the figures");
 }

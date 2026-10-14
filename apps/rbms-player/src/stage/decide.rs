@@ -282,7 +282,7 @@ impl DecideState {
             assets.stop();
         }
         shared.release_play_audio();
-        shared.replay = None;
+        shared.end_replay();
         shared.practice_requested = false;
         shared.release_practice_chart();
         if shared.course_run.is_some() {

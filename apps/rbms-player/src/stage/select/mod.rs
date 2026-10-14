@@ -65,6 +65,8 @@ mod panel;
 #[cfg(test)]
 mod panel_tests;
 mod preview;
+#[cfg(test)]
+pub(crate) mod recorded_tests;
 mod scene;
 mod search;
 #[cfg(test)]
@@ -76,6 +78,8 @@ mod skinned;
 mod skinned_tests;
 #[cfg(test)]
 mod table_tests;
+#[cfg(test)]
+mod target_tests;
 #[cfg(test)]
 pub(super) mod tests;
 

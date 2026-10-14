@@ -195,6 +195,16 @@ pub const LN_MARGIN_STEP_PERCENT: i32 = 5;
 /// Long-note margin that leaves the mode's own release window untouched.
 pub const LN_MARGIN_DEFAULT_PERCENT: i32 = 100;
 
+/// Lowest and highest share of the chart's ceiling the TARGET RATE row can ask for, in percent.
+pub const TARGET_RATE_MIN_PERCENT: i32 = 1;
+pub const TARGET_RATE_MAX_PERCENT: i32 = 100;
+
+/// One left/right step on the TARGET RATE row.
+pub const TARGET_RATE_STEP_PERCENT: i32 = 1;
+
+/// The share the RATE CUSTOM target asks for until the player chooses one: a little under RATE AAA.
+pub const TARGET_RATE_DEFAULT_PERCENT: i32 = 85;
+
 /// TOTAL value that means "use the chart's own", and the floor of the TOTAL row.
 pub const TOTAL_FROM_CHART: f64 = 0.0;
 
@@ -568,6 +578,13 @@ pub struct JudgeOptions {
     pub bottom_shiftable_gauge: GaugeKind,
     #[serde(with = "target_token")]
     pub target: ScoreTarget,
+    /// What the run is paced against when [`JudgeOptions::target`] names a score that is not there
+    /// (no record yet, no account score, no rival score). It is always a target that needs nothing
+    /// but the chart ([`ScoreTarget::FALLBACKS`]).
+    #[serde(with = "target_fallback_token")]
+    pub target_fallback: ScoreTarget,
+    /// The share of the chart's ceiling, in percent, that the RATE CUSTOM target asks for.
+    pub target_rate_percent: i32,
 }
 
 impl Default for JudgeOptions {
@@ -584,6 +601,8 @@ impl Default for JudgeOptions {
             gauge_auto_shift: GaugeAutoShift::default(),
             bottom_shiftable_gauge: GaugeKind::AssistEasy,
             target: ScoreTarget::default(),
+            target_fallback: ScoreTarget::default(),
+            target_rate_percent: TARGET_RATE_DEFAULT_PERCENT,
         }
     }
 }
@@ -604,6 +623,10 @@ impl JudgeOptions {
         }
         self.longnote_margin_rate = self.longnote_margin_rate.clamp(LN_MARGIN_MIN_PERCENT, LN_MARGIN_MAX_PERCENT);
         self.bottom_shiftable_gauge = clamp_bottom_shiftable(self.bottom_shiftable_gauge);
+        if !self.target_fallback.is_always_known() {
+            self.target_fallback = ScoreTarget::default();
+        }
+        self.target_rate_percent = self.target_rate_percent.clamp(TARGET_RATE_MIN_PERCENT, TARGET_RATE_MAX_PERCENT);
     }
 
     /// Spread the one JUDGE WIDTH percentage an older file held over every tier of both lane kinds,
@@ -866,6 +889,23 @@ mod gauge_auto_shift_token {
     pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<GaugeAutoShift, D::Error> {
         let token = String::deserialize(deserializer)?;
         Ok(crate::judge::gauge_auto_shift_from_token(&token))
+    }
+}
+
+/// Stores the fallback target the way the target is stored, and reads a target that is not always
+/// known as the shipped one.
+mod target_fallback_token {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    use crate::judge::ScoreTarget;
+
+    pub fn serialize<S: Serializer>(value: &ScoreTarget, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(value.token())
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<ScoreTarget, D::Error> {
+        let token = String::deserialize(deserializer)?;
+        Ok(crate::judge::target_fallback_from_token(&token))
     }
 }
 

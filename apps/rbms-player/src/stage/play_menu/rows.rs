@@ -267,8 +267,10 @@ pub(super) fn hispeed_figure(hispeed: f64) -> String {
 ///
 /// A speed is a multiple. The green number is written with the travel time it stands for, the lane
 /// cover with the white number it reads as, and the fine step of the covers with how much of a
-/// white number one press of it is. The two rows KEEP GREEN NUMBER switches between show what
-/// `readout` came to while they are the one worked out, and say that they are.
+/// white number one press of it is. A target that names a score is written with what stands in for
+/// it where the chart has none (`LOCAL BEST > AAA`), which is what the sample chart under the
+/// preview is. The two rows KEEP GREEN NUMBER switches between show what `readout` came
+/// to while they are the one worked out, and say that they are.
 pub(super) fn setting_value(shared: &AppShared, readout: &SpeedReadout, id: SettingId) -> String {
     let play = &shared.config.play;
     let stored = shared.setting_line(id).1;
@@ -279,6 +281,7 @@ pub(super) fn setting_value(shared: &AppShared, readout: &SpeedReadout, id: Sett
         SettingId::HiSpeed | SettingId::HiSpeedStep => format!("{stored}{HISPEED_UNIT}"),
         SettingId::GreenNumber if play.keep_green_number => format!("{stored} ({}{MILLISECOND_UNIT})", play.duration_ms),
         SettingId::GreenNumber => format!("{} ({}{MILLISECOND_UNIT}){WORKED_OUT_MARK}", readout.green_number, readout.duration_ms),
+        SettingId::Target => shared.config.judge.target.label_then(shared.config.judge.target_fallback, shared.config.judge.target_rate_percent),
         SettingId::LaneCover => format!("{stored} ({WHITE_NUMBER_NAME} {})", readout.white_number),
         SettingId::LaneCoverFineStep => {
             format!("{stored} ({WHITE_NUMBER_NAME} {:.*})", FINE_STEP_WHITE_DECIMALS, play.lanecover_step_fine * WHITE_NUMBER_PER_LANE)
@@ -382,6 +385,8 @@ pub(super) fn reset_setting(config: &mut Config, id: SettingId) -> bool {
         SettingId::Gauge => put(&mut config.play.gauge, shipped.play.gauge),
         SettingId::LegacyNote => put(&mut config.play.legacy_note, shipped.play.legacy_note),
         SettingId::Target => put(&mut config.judge.target, shipped.judge.target),
+        SettingId::TargetFallback => put(&mut config.judge.target_fallback, shipped.judge.target_fallback),
+        SettingId::TargetRate => put(&mut config.judge.target_rate_percent, shipped.judge.target_rate_percent),
         SettingId::Autoplay => put(&mut config.play.autoplay, shipped.play.autoplay),
         SettingId::ScratchAuto => put(&mut config.play.scratch_auto, shipped.play.scratch_auto),
         SettingId::AutoReplay => put(&mut config.play.auto_replay, shipped.play.auto_replay),

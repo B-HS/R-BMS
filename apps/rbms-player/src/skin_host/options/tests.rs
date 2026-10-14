@@ -265,7 +265,7 @@ fn the_target_and_the_ones_around_it_in_the_list_are_named_with_the_list_wrappin
 
     assert_eq!(name(&state, STRING_TARGET_NAME), Some("RATE AAA".to_string()));
     assert_eq!(name(&state, STRING_TARGET_NEXT_FIRST), Some("RATE AAA+".to_string()), "one on");
-    assert_eq!(name(&state, STRING_TARGET_NEXT_FIRST + 9), Some("RATE A+".to_string()), "ten on, past the end of the list");
+    assert_eq!(name(&state, STRING_TARGET_NEXT_FIRST + 9), Some("RATE A".to_string()), "ten on, past the end of the list");
     assert_eq!(name(&state, STRING_TARGET_PREVIOUS_FIRST + 9), Some("RATE AAA-".to_string()), "one back");
     assert_eq!(name(&state, STRING_TARGET_PREVIOUS_FIRST), Some("IR BEST".to_string()), "ten back, past the start of the list");
 
@@ -275,4 +275,47 @@ fn the_target_and_the_ones_around_it_in_the_list_are_named_with_the_list_wrappin
     assert_eq!(name(&first, STRING_TARGET_NEXT_FIRST), Some("RATE A-".to_string()));
     assert_eq!(first.text(STRING_TARGET_NEXT_FIRST + 10), None, "the run of names ends after ten");
     assert_eq!(first.text(STRING_TARGET_PREVIOUS_FIRST - 1), None);
+}
+
+/// The browser names the target the player chose; where the chart under the cursor holds no score
+/// for it, it says what stands in, so the TARGET text never reads as pacing against a score that is
+/// not there. A screen that looks at no chart names the target alone.
+#[test]
+fn the_browser_says_what_stands_in_for_a_target_the_chart_has_no_score_for() {
+    let name = |state: &OptionsState<'_>| state.text(STRING_TARGET_NAME).map(|text| text.into_owned());
+    let mut config = Config::default();
+    config.judge.target = ScoreTarget::LocalBest;
+    let view = SettingsView::of_config(&config);
+    assert_eq!(name(&OptionsState::of_settings(view)), Some("LOCAL BEST".to_string()), "a chart with a record, or none in view");
+    let unmet = view.with_target_stand_in(Some(ScoreTarget::RateAaa));
+    assert_eq!(name(&OptionsState::of_settings(unmet)), Some("LOCAL BEST (NO RECORD: AAA)".to_string()));
+    assert_eq!(name(&OptionsState::of_settings(unmet.without_chart())), Some("LOCAL BEST".to_string()), "a folder has no chart to have no record");
+
+    config.judge.target = ScoreTarget::IrBest;
+    let own_record = SettingsView::of_config(&config).with_target_stand_in(Some(ScoreTarget::LocalBest));
+    assert_eq!(name(&OptionsState::of_settings(own_record)), Some("IR BEST (NO IR SCORE: LOCAL BEST)".to_string()));
+    config.judge.target = ScoreTarget::Rival;
+    let rival = SettingsView::of_config(&config).with_target_stand_in(Some(ScoreTarget::RankNext));
+    assert_eq!(name(&OptionsState::of_settings(rival)), Some("RIVAL (NO RIVAL SCORE: RANK NEXT)".to_string()));
+
+    let around = OptionsState::of_settings(SettingsView::of_config(&config).with_target_stand_in(Some(ScoreTarget::Max)));
+    assert_eq!(around.text(STRING_TARGET_NEXT_FIRST).map(|text| text.into_owned()), Some("MAX".to_string()), "the names around the target are the list's own");
+}
+
+/// A run in progress names the target it really is paced against, which is the fallback when the
+/// chosen target had no score, and that name wins over the chosen target's own.
+#[test]
+fn a_run_in_progress_names_the_target_it_is_really_paced_against() {
+    let mut config = Config::default();
+    config.judge.target = ScoreTarget::LocalBest;
+    let mut state = OptionsState::of_settings(SettingsView::of_config(&config));
+    state.paced_by = Some("RATE AAA");
+    assert_eq!(state.text(STRING_TARGET_NAME).map(|text| text.into_owned()), Some("RATE AAA".to_string()));
+    let play_only = OptionsState { paced_by: Some("RIVAL friend"), ..OptionsState::default() };
+    assert_eq!(
+        play_only.text(STRING_TARGET_NAME).map(|text| text.into_owned()),
+        Some("RIVAL friend".to_string()),
+        "a screen with no settings of its own still names it"
+    );
+    assert_eq!(play_only.text(STRING_TARGET_NEXT_FIRST), None, "only the target's own text is the run's");
 }

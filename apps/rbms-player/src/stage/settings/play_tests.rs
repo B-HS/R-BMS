@@ -77,10 +77,10 @@ fn what_the_play_menu_changed_is_in_the_configuration_the_settings_screen_shares
     assert!(stored.play.keep_green_number, "leaving the play menu did not write what it changed");
 }
 
-/// The button on the tab strip opens the play menu the way the key does, and stands before the one
-/// to the skin menu without touching it.
+/// The button at the foot of the rail opens the play menu the way the key does, and stands over the
+/// one to the skin menu and under the last group without touching either.
 #[test]
-fn the_button_on_the_tab_strip_opens_the_play_menu() {
+fn the_button_on_the_rail_opens_the_play_menu() {
     let mut app = app_in("play-button");
     app.switch(Transition::Open(Stage::Settings(SettingsState::new())));
     draw(&mut app);
@@ -90,9 +90,9 @@ fn the_button_on_the_tab_strip_opens_the_play_menu() {
         found[0]
     };
     let (play, skin) = (rect_of(&app, Hot::PlayMenuLink), rect_of(&app, Hot::SkinMenuLink));
-    assert!(play.x + play.w < skin.x, "the two buttons meet: {play:?} and {skin:?}");
+    assert!(play.y + play.h < skin.y, "the two buttons meet: {play:?} and {skin:?}");
     let last_tab = rect_of(&app, Hot::SettingTab(SettingTab::SHOWN.len() - 1));
-    assert!(last_tab.x + last_tab.w < play.x, "the last tab runs under the button: {last_tab:?} and {play:?}");
+    assert!(last_tab.y + last_tab.h < play.y, "the last group runs under the button: {last_tab:?} and {play:?}");
 
     click(&mut app, Hot::PlayMenuLink);
     assert_eq!(app.stage.id(), StageId::PlayMenu, "the button did not open the play menu");

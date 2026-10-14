@@ -80,11 +80,13 @@ const LANE_ROWS: [SettingId; 7] = [
     SettingId::LaneCoverFineStep,
 ];
 const JUDGE_ROWS: [SettingId; 2] = [SettingId::JudgeOffset, SettingId::AutoCal];
-const CHART_ROWS: [SettingId; 8] = [
+const CHART_ROWS: [SettingId; 10] = [
     SettingId::Random,
     SettingId::Gauge,
     SettingId::LegacyNote,
     SettingId::Target,
+    SettingId::TargetFallback,
+    SettingId::TargetRate,
     SettingId::Autoplay,
     SettingId::ScratchAuto,
     SettingId::AutoReplay,
@@ -373,7 +375,10 @@ fn the_list_is_the_tempo_row_and_the_four_groups_under_their_names() {
     );
     assert_eq!(&labels[9..17], ["LANE", "LANE COVER ON", "LANE COVER", "LIFT ON", "LIFT", "HIDDEN+ ON", "HIDDEN+", "COVER FINE STEP"]);
     assert_eq!(&labels[17..20], ["JUDGE", "JUDGE OFFSET", "AUTO ADJUST"]);
-    assert_eq!(&labels[20..], ["CHART", "RANDOM", "GAUGE", "LEGACY NOTE", "TARGET", "AUTOPLAY", "SCRATCH AUTO", "AUTO REPLAY", "ESCAPE"]);
+    assert_eq!(
+        &labels[20..],
+        ["CHART", "RANDOM", "GAUGE", "LEGACY NOTE", "TARGET", "TARGET FALLBACK", "TARGET RATE", "AUTOPLAY", "SCRATCH AUTO", "AUTO REPLAY", "ESCAPE"]
+    );
     for row in &menu.state.rows {
         assert_eq!(menu.line(*row).look == RowLook::Heading, row.is_heading(), "{row:?}");
     }
@@ -859,7 +864,8 @@ fn shift_moves_a_number_ten_steps_at_a_time_and_nothing_else() {
             SettingId::Lift,
             SettingId::Hidden,
             SettingId::LaneCoverFineStep,
-            SettingId::JudgeOffset
+            SettingId::JudgeOffset,
+            SettingId::TargetRate
         ]
     );
 
@@ -892,6 +898,9 @@ fn shift_moves_a_number_ten_steps_at_a_time_and_nothing_else() {
     menu.focus_setting(SettingId::JudgeOffset);
     menu.shifted(KeyCode::ArrowRight);
     assert_eq!(menu.value(SettingId::JudgeOffset), "+10 MS");
+    menu.focus_setting(SettingId::TargetRate);
+    menu.shifted(KeyCode::ArrowRight);
+    assert_eq!(menu.value(SettingId::TargetRate), "95%");
 
     menu.focus_setting(SettingId::KeepGreenNumber);
     menu.shifted(KeyCode::ArrowRight);
@@ -1354,3 +1363,4 @@ fn the_menu_over_the_pack_the_environment_names_can_be_captured() {
 mod numbers;
 mod shared;
 mod skin_offsets;
+mod target;

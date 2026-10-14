@@ -463,7 +463,11 @@ fn play_frame(app: &mut crate::App, pixels: &mut crate::stage::HeadlessCanvas, s
     let chart = ChartMeta { title: TITLE, ..ChartMeta::default() };
     let mut canvas = Canvas::Headless(pixels);
     app.shared.prepare_skin(&mut canvas, SKIN_TYPE_PLAY_7KEYS);
-    app.shared.draw_play_skin(&mut canvas, SKIN_TYPE_PLAY_7KEYS, &PlayDraw { chart: &chart, shown, offsets: &offsets, data: FrameData::default() })
+    app.shared.draw_play_skin(
+        &mut canvas,
+        SKIN_TYPE_PLAY_7KEYS,
+        &PlayDraw { chart: &chart, shown, offsets: &offsets, paced_by: "", data: FrameData::default() },
+    )
 }
 
 /// Draws the play screen of the whole-offset skin after the player stepped the rows of its

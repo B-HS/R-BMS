@@ -43,6 +43,7 @@ use rbms_skin::timer::{MICROS_PER_MILLI, TimerState, timer_id};
 use winit::keyboard::KeyCode;
 
 use crate::app_result::{following_song, next_song, offers_retry, retry};
+use crate::ir_outcome::IrLineKind;
 use crate::ir_ranking::RankingState;
 use crate::keyconfig::{KEY_INDEX_COUNT, Shortcut, ShortcutScreen};
 use crate::skin_host::options::{PlayedOptions, random_option_index};
@@ -557,6 +558,8 @@ pub(crate) struct ResultRun {
     /// Whether the run counted towards the player's records, which is what lets a run-again keep
     /// its arrangement (`PlayerResource.isUpdateScore`).
     updates_score: bool,
+    /// What the screen says of a run the player played with an assist on, which set no best score.
+    assist_note: Option<&'static str>,
     /// What became of the run's own replay.
     replay: ReplaySlot,
     /// The window of each judgement in milliseconds, late bound then early, best first.
@@ -602,7 +605,8 @@ impl ResultRun {
         let setup = session.judge_setup();
         let stored = replay_saved || shared.replay.is_some() || shared.scores.for_md5(&chart.md5).iter().any(|past| past.replay_file.is_some());
         let custom_judge = is_custom_judge(&setup);
-        let updates_score = updates_score(shared.run_plays_itself(), shared.replay.is_some(), custom_judge, shared.config.play.scratch_auto, false);
+        let scratch_auto = crate::app_result::scratch_auto_played(shared.config.play.scratch_auto, model);
+        let updates_score = updates_score(shared.run_plays_itself(), shared.replay.is_some(), custom_judge, scratch_auto, false);
         let snapshot = ResultSnapshot::of(ResultInput {
             previous,
             target,
@@ -611,10 +615,12 @@ impl ResultRun {
             updates_score,
             ..ResultInput::from_record(record, shared.mode, lamp)
         });
+        let played_by_hand = !shared.run_plays_itself() && shared.replay.is_none();
         ResultRun {
             stagefile,
             seed: session.seed(),
             updates_score,
+            assist_note: assist_note(custom_judge, scratch_auto).filter(|_| played_by_hand),
             replay: match (replay_saved, stored) {
                 (true, _) => ReplaySlot::Saved,
                 (false, true) => ReplaySlot::Exists,
@@ -633,6 +639,7 @@ impl ResultRun {
             stagefile: None,
             seed: 0,
             updates_score: false,
+            assist_note: None,
             replay: ReplaySlot::Missing,
             judge_area: [[0; 2]; TIMING_JUDGE_AREAS],
             gauges: rbms_judge::gauge::GaugeIndex::ALL.map(|index| record.gauge_log.of(index).to_vec()).to_vec(),
@@ -726,6 +733,27 @@ struct SceneStage {
     ranking_offset: i32,
     /// Where the screen can lead besides the browser, as it stood when the screen was entered.
     ways: WaysOn,
+}
+
+/// What the screen says of a run played with SCRATCH AUTO on, and of one judged by a width or a
+/// long-note margin widened past the chart's own.
+///
+/// Both are assists, and a run played with one sets no best score: its lamp, its play count and its
+/// row in the history are kept, and its EX, its judgements, its combo and its bad-poor count are
+/// held against no later run (`ScoreData.update(newscore, updateScore)`). A skin is told only that
+/// the score was not saved, and the submission line beside it names the score server, which reads
+/// as though signing in would have saved it. So the screen says which setting it was, in a line
+/// no longer than a submission line is let be ([`crate::ir_outcome::IR_LINE_MAX_CHARS`]).
+const SCRATCH_AUTO_NOTE: &str = "SCRATCH AUTO ON: NO BEST SCORE, LAMP AND HISTORY ONLY";
+const WIDENED_JUDGE_NOTE: &str = "WIDENED JUDGE: NO BEST SCORE, LAMP AND HISTORY ONLY";
+
+/// Which of the two an assisted run is told, or `None` for a run with no assist on. With both on
+/// it is the stronger assist, which is the one the lamp is demoted by (`BMSPlayer.java:866`).
+fn assist_note(custom_judge: bool, scratch_auto: bool) -> Option<&'static str> {
+    if custom_judge {
+        return Some(WIDENED_JUDGE_NOTE);
+    }
+    scratch_auto.then_some(SCRATCH_AUTO_NOTE)
 }
 
 /// How the IR status lines are drawn over a skin: in the top right corner, right-aligned, on a dim
@@ -948,16 +976,29 @@ impl ResultState {
         shared.draw_result_skin(canvas, SKIN_TYPE_RESULT, &draw)
     }
 
-    /// The submission lines, drawn over a skin's frame where they cover the least of it.
+    /// What the screen says under the run in its own words: what the score server did with it, and
+    /// under that why it set no best score when an assist kept it from one.
     ///
-    /// They are this player's own word on what the score server said, which no property of a skin
-    /// carries. With no server set up there is nothing to say, and once the scene fades the skin has
-    /// the screen to itself, so neither draws them.
-    fn draw_ir_over_skin(shared: &AppShared, canvas: &mut Canvas<'_>) {
-        if shared.ir_status == IrStatus::Off || shared.skin_timers.is_on(timer_id::FADEOUT) {
+    /// `over_skin` leaves the submission line out while no server is set up, where there is nothing
+    /// to say of one; the built-in screen has always said that it is off.
+    fn notice_lines(&self, shared: &AppShared, over_skin: bool) -> Vec<(String, IrLineKind)> {
+        let mut lines = if over_skin && shared.ir_status == IrStatus::Off { Vec::new() } else { shared.ir_status.lines() };
+        if let Some(note) = self.run.as_ref().and_then(|run| run.assist_note) {
+            lines.push((note.to_owned(), IrLineKind::Warn));
+        }
+        lines
+    }
+
+    /// The screen's own lines, drawn over a skin's frame where they cover the least of it.
+    ///
+    /// They are this player's own word on what the score server said and on what was kept of the
+    /// run, which no property of a skin carries. Once the scene fades the skin has the screen to
+    /// itself, so they are not drawn then.
+    fn draw_notices_over_skin(&self, shared: &AppShared, canvas: &mut Canvas<'_>) {
+        if shared.skin_timers.is_on(timer_id::FADEOUT) {
             return;
         }
-        for (row, (text, kind)) in shared.ir_status.lines().iter().enumerate() {
+        for (row, (text, kind)) in self.notice_lines(shared, true).iter().enumerate() {
             let y = IR_OVER_SKIN_Y + row as f32 * IR_OVER_SKIN_LINE_H;
             let width = text_width(text, IR_OVER_SKIN_SCALE);
             let strip = Rect::new(IR_OVER_SKIN_RIGHT - width - IR_OVER_SKIN_PAD, y, width + IR_OVER_SKIN_PAD + IR_OVER_SKIN_PAD, IR_OVER_SKIN_LINE_H);
@@ -970,6 +1011,19 @@ impl ResultState {
     #[cfg(test)]
     pub(crate) fn view(&self) -> &ResultView {
         &self.view
+    }
+
+    /// The target this screen scores its run against, for the tests that check which best that was.
+    #[cfg(test)]
+    pub(crate) fn target(&self) -> Option<&TargetView> {
+        self.extras.target.as_ref()
+    }
+
+    /// What this screen says of the run in its own words, for the tests that check an assisted run
+    /// is told why it set no best.
+    #[cfg(test)]
+    pub(crate) fn notices(&self, shared: &AppShared) -> Vec<String> {
+        self.notice_lines(shared, true).into_iter().map(|(text, _)| text).collect()
     }
 
     /// Put a run's measurements on the view, for the snapshots that check they are drawn.
@@ -1080,7 +1134,7 @@ impl StageHandler for ResultState {
             self.announce(shared);
         }
         if self.draw_skin(shared, canvas) {
-            ResultState::draw_ir_over_skin(shared, canvas);
+            self.draw_notices_over_skin(shared, canvas);
             return;
         }
         if self.stage.skin == SkinStatus::Reading {
@@ -1088,7 +1142,7 @@ impl StageHandler for ResultState {
             return;
         }
         render_result_with_palette(canvas, &self.view, &shared.result_palette, &self.extras);
-        for (i, (text, kind)) in shared.ir_status.lines().iter().enumerate() {
+        for (i, (text, kind)) in self.notice_lines(shared, false).iter().enumerate() {
             draw_text(canvas, IR_RESULT_X, IR_RESULT_Y + i as f32 * IR_RESULT_LINE_H, IR_RESULT_SCALE, ir_line_color(*kind), text);
         }
     }

@@ -23,14 +23,14 @@ const CAPTURE_SUBFOLDER: &str = "settings";
 /// The skin pack this repository ships, relative to the player's manifest.
 const DEFAULT_PACK: &str = "../../assets/skins/rbms-default";
 
-/// Every row that carries a note while the shipped pack draws the screens, with the tab it is on and
-/// what is said beside it.
+/// Every row that carries a note while the shipped pack draws the screens, with the group it is in
+/// and what is said beside it, in the order the group lists them.
 const NOTED_ROWS: [(SettingTab, SettingId, &str); 6] = [
-    (SettingTab::Display, SettingId::Skin, BUILT_IN_ONLY_NOTE),
     (SettingTab::Display, SettingId::ResultGraphs, BUILT_IN_ONLY_NOTE),
+    (SettingTab::Display, SettingId::Skin, BUILT_IN_ONLY_NOTE),
+    (SettingTab::Display, SettingId::FiveKeyLayout, BUILT_IN_ONLY_NOTE),
     (SettingTab::Display, SettingId::WhiteNumber, BUILT_IN_ONLY_NOTE),
     (SettingTab::Display, SettingId::JudgeTextY, BUILT_IN_ONLY_NOTE),
-    (SettingTab::Display, SettingId::FiveKeyLayout, BUILT_IN_ONLY_NOTE),
     (SettingTab::Input, SettingId::ScratchSide, SKIN_OPTION_NOTE),
 ];
 

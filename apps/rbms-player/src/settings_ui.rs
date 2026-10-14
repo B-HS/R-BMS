@@ -10,17 +10,22 @@
 //! annotated. The device list the AUDIO DEVICE row cycles through comes from
 //! [`rbms_audio::output_device_names`], which owns the one thread the audio host may be questioned
 //! from.
+//!
+//! It also says how the settings screen draws a row and whether the row is what it ships as: what
+//! sets its value ([`crate::settings_view::RowControl`], from the kind the table gives the row),
+//! which rows the screen can put back ([`is_resettable`]), and what such a row reads in a
+//! configuration nothing was changed in ([`shipped_value`]).
 #![allow(clippy::wildcard_imports)]
 use rbms_audio::{AudioOpenReport, Bus};
 
 use rbms_config::{
-    AdjustOutcome, AudioOptions, CUSTOM_VALUE, SettingId, SettingTab, cycle_device, descriptor, display_value, number_spec, number_steps, set_number_steps,
-    shipped_number_steps, skinned_note, tab_rows,
+    AdjustOutcome, AudioOptions, CUSTOM_VALUE, NONE_VALUE, ON_VALUE, SettingId, SettingKind, SettingTab, UNSET_VALUE, cycle_device, descriptor, display_value,
+    number_spec, number_steps, set_number_steps, shipped_number_steps, skinned_note, tab_rows,
 };
 use rbms_skin::loader::is_supported_skin_type;
 
 use crate::number_row::NumberValue;
-use crate::settings_view::SettingsLine;
+use crate::settings_view::{RowControl, SettingsLine, segments_fit};
 use crate::skin_select::SkinRow;
 use crate::*;
 
@@ -63,6 +68,22 @@ pub(crate) fn audio_status_text(report: Option<&AudioOpenReport>, failed: bool) 
         return format!("{AUDIO_MATCHED_STATUS}: {opened}");
     }
     format!("{opened} ({})", report.notes.join("; "))
+}
+
+/// Whether the settings screen can put a row back to what it ships as, which is also whether the row
+/// is marked when it is not: a switch, a choice, a number, the font and the system sound folder, on
+/// one of the groups the screen shows. A line of text -- the address of the score server, the id
+/// scores are sent under -- is not something a key should wipe, and an action holds nothing.
+pub(crate) fn is_resettable(id: SettingId) -> bool {
+    let row = descriptor(id);
+    let held = matches!(row.kind, SettingKind::Toggle | SettingKind::Cycle { .. } | SettingKind::FilePick) || id == SettingId::SoundFolder;
+    SettingTab::SHOWN.contains(&row.tab) && (held || number_spec(id).is_some())
+}
+
+/// What one row of the settings table reads in a configuration nothing has been changed in.
+pub(crate) fn shipped_value(id: SettingId) -> String {
+    static SHIPPED: std::sync::LazyLock<Config> = std::sync::LazyLock::new(Config::default);
+    display_value(&SHIPPED, id)
 }
 
 /// Whether the row belongs to the NETWORK tab, which `ir_panel` and `app_network` render because
@@ -147,11 +168,67 @@ impl AppShared {
         }
     }
 
-    /// One row of the settings screen as it is drawn: its label, its value, and what is said
-    /// beside it.
+    /// One row of the settings screen as it is drawn: its label, its value, what is said beside
+    /// it, what sets it, and whether it is what it ships as.
+    ///
+    /// The FONT row reads the path of the file chosen for it, which the row cuts short from its
+    /// front; what the row holds is still said as it always was by [`AppShared::setting_line`].
     pub(crate) fn settings_scene_line(&self, row: SettingRow) -> SettingsLine {
         let (label, value) = self.settings_line(row);
-        SettingsLine { label, value, note: self.settings_note(row), number: self.row_number(row) }
+        let number = self.row_number(row);
+        let (control, changed) = match row {
+            SettingRow::Fixed(id) => (self.setting_control(id, &value, number.is_some()), self.setting_changed(id, &value, number.as_ref())),
+            SettingRow::Skin(_) => (RowControl::Stepper, false),
+        };
+        let value = match (row, self.config.display.font_path.as_ref()) {
+            (SettingRow::Fixed(SettingId::Font), Some(path)) => path.clone(),
+            _ => value,
+        };
+        SettingsLine { label, value, note: self.settings_note(row), number, control, changed }
+    }
+
+    /// What sets the value of one row of the settings table, which reads `value`: a slider for a
+    /// row that holds a number, and otherwise what the kind of the row asks for. A choice is drawn
+    /// with all its values on show when they are few and short enough to be written whole side by
+    /// side; the output device is a choice whose values only the running program knows, so it is
+    /// always stepped.
+    fn setting_control(&self, id: SettingId, value: &str, holds_number: bool) -> RowControl {
+        if holds_number {
+            return RowControl::Slider;
+        }
+        match descriptor(id).kind {
+            SettingKind::Toggle => RowControl::Switch { on: value == ON_VALUE },
+            SettingKind::Cycle { values } if id != SettingId::AudioDevice && segments_fit(values) => {
+                RowControl::Segments { values, chosen: values.iter().position(|entry| *entry == value) }
+            }
+            SettingKind::Cycle { .. } | SettingKind::IntRange { .. } | SettingKind::FloatRange { .. } | SettingKind::Percent { .. } => RowControl::Stepper,
+            SettingKind::Text { .. } => RowControl::Field { filled: value != NONE_VALUE && value != UNSET_VALUE },
+            SettingKind::FilePick => RowControl::Path { chosen: self.config.display.font_path.is_some() },
+            SettingKind::Action if id == SettingId::SoundFolder => RowControl::Path { chosen: self.config.audio.sound_folder.is_some() },
+            SettingKind::Action => RowControl::Action,
+            SettingKind::Info => RowControl::Info,
+        }
+    }
+
+    /// Whether one row of the settings screen is not what it ships as. A row the screen cannot put
+    /// back ([`is_resettable`]) is never said to be.
+    fn setting_changed(&self, id: SettingId, value: &str, number: Option<&NumberValue>) -> bool {
+        if !is_resettable(id) {
+            return false;
+        }
+        match number {
+            Some(number) => number.steps != number.shipped,
+            None => value != shipped_value(id),
+        }
+    }
+
+    /// How many rows of one group of the settings screen are not what they ship as.
+    pub(crate) fn changed_rows(&self, tab: SettingTab) -> usize {
+        let is_changed = |id: &SettingId| {
+            let value = self.setting_line(*id).1;
+            self.setting_changed(*id, &value, self.setting_number(*id).as_ref())
+        };
+        tab_rows(tab, &self.config).iter().filter(|id| is_changed(id)).count()
     }
 
     /// The number one row of the settings table holds, or `None` for a row that holds none: how it
@@ -333,6 +410,8 @@ mod tests {
         (SettingId::GaugeAutoShift, "GAUGE AUTO SHIFT", "NONE"),
         (SettingId::BottomShiftableGauge, "BOTTOM SHIFTABLE", "ASSIST EASY"),
         (SettingId::Target, "TARGET", "RATE AAA"),
+        (SettingId::TargetFallback, "TARGET FALLBACK", "RATE AAA"),
+        (SettingId::TargetRate, "TARGET RATE", "85%"),
         (SettingId::Total, "TOTAL", "AUTO"),
         (SettingId::Skin, "SKIN", "NORMAL"),
         (SettingId::SkinPack, "PACK FOLDER", "(none)"),

@@ -154,8 +154,14 @@ pub struct SettingsView {
     pub hidden: bool,
     /// Whether a cue sounds on every judgement (`PlayerConfig.isGuideSE`).
     pub guide_se: bool,
-    /// The target the play is paced against.
+    /// The target the player chose.
     pub target: ScoreTarget,
+    /// The share, in percent, that the RATE CUSTOM target asks for.
+    pub target_rate_percent: i32,
+    /// The target that stands in for [`SettingsView::target`] on the chart under the cursor, when
+    /// that chart holds no score for it to name: a run of it is paced against this one instead.
+    /// `None` while the target answers, and on a screen that does not look at one chart.
+    pub target_stand_in: Option<ScoreTarget>,
     /// The settings of the chart under the cursor, when it is a chart (or a course made of charts
     /// the library holds): a folder has no tempo to pin.
     pub chart: Option<ChartSettings>,
@@ -194,6 +200,8 @@ impl SettingsView {
             hidden: play.enable_hidden,
             guide_se: config.audio.guide_se,
             target: judge.target,
+            target_rate_percent: judge.target_rate_percent,
+            target_stand_in: None,
             chart: Some(ChartSettings {
                 fix_hispeed: FixHiSpeed::ALL.iter().position(|choice| *choice == play.fix_hispeed).map_or(IMAGE_INDEX_ABSENT, index_number),
                 hispeed: play.hispeed as f32,
@@ -204,7 +212,13 @@ impl SettingsView {
 
     /// These settings on a screen whose cursor is not on a chart.
     pub fn without_chart(self) -> SettingsView {
-        SettingsView { chart: None, ..self }
+        SettingsView { chart: None, target_stand_in: None, ..self }
+    }
+
+    /// These settings with `stand_in` paced against on the chart under the cursor in place of the
+    /// target, which the chart holds no score for.
+    pub fn with_target_stand_in(self, stand_in: Option<ScoreTarget>) -> SettingsView {
+        SettingsView { target_stand_in: stand_in, ..self }
     }
 
     /// The name of the target `steps` places on from the current one, the list wrapping round
@@ -238,17 +252,21 @@ pub struct OptionsState<'a> {
     pub result: Option<FinishedRun<'a>>,
     /// The player's settings, on a screen that shows them.
     pub settings: Option<SettingsView>,
+    /// The name of the target a run in progress is paced against, which is the one that really
+    /// stands, with what the chosen one was missing where it stood in for it (`RATE AAA (NO
+    /// RECORD)` for a LOCAL BEST with no record).
+    pub paced_by: Option<&'a str>,
 }
 
 impl<'a> OptionsState<'a> {
     /// The choices of the finished run on a result screen.
     pub fn of_result(finished: FinishedRun<'a>) -> OptionsState<'a> {
-        OptionsState { result: Some(finished), settings: None }
+        OptionsState { result: Some(finished), settings: None, paced_by: None }
     }
 
     /// The settings of the player, on the song browser.
     pub fn of_settings(settings: SettingsView) -> OptionsState<'a> {
-        OptionsState { result: None, settings: Some(settings) }
+        OptionsState { result: None, settings: Some(settings), paced_by: None }
     }
 }
 
@@ -313,15 +331,29 @@ impl SettingsView {
         })
     }
 
+    /// The target as the browser writes it: its name, and what stands in for it where the chart
+    /// under the cursor holds no score for it.
+    pub(crate) fn target_text(&self) -> Cow<'static, str> {
+        match self.target_stand_in {
+            Some(stand_in) => Cow::Owned(self.target.label_with_fallback(stand_in, self.target_rate_percent)),
+            None => Cow::Borrowed(self.target.label()),
+        }
+    }
+
     /// The text under `id`: the target and its neighbours in the list.
-    fn text(&self, id: i32) -> Option<&'static str> {
+    ///
+    /// The target is the one the player chose. Where the chart under the cursor holds no score for
+    /// it, it is written with what stands in for it (`LOCAL BEST (NO RECORD: AAA)`), so the
+    /// browser never reads as pacing a run against a score that is not there.
+    fn text(&self, id: i32) -> Option<Cow<'static, str>> {
         match id {
-            STRING_TARGET_NAME => Some(self.target.label()),
+            STRING_TARGET_NAME => Some(self.target_text()),
             _ => {
                 let run = |first: i32| id.checked_sub(first).filter(|place| (0..TARGET_NAMES_PER_RUN).contains(place));
                 run(STRING_TARGET_PREVIOUS_FIRST)
                     .map(|place| self.target_name(place - TARGET_NAMES_PER_RUN))
                     .or_else(|| run(STRING_TARGET_NEXT_FIRST).map(|place| self.target_name(place + 1)))
+                    .map(Cow::Borrowed)
             }
         }
     }
@@ -350,7 +382,12 @@ impl ClusterState for OptionsState<'_> {
     }
 
     fn text(&self, id: i32) -> Option<Cow<'_, str>> {
-        self.settings?.text(id).map(Cow::Borrowed)
+        if id == STRING_TARGET_NAME
+            && let Some(name) = self.paced_by
+        {
+            return Some(Cow::Borrowed(name));
+        }
+        self.settings?.text(id)
     }
 
     fn image_index(&self, id: i32) -> Option<i32> {

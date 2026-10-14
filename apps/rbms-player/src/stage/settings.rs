@@ -1,36 +1,53 @@
-//! The settings screen: the tabbed row list, the in-place text editor the NETWORK rows use, and
-//! the inline rival list. The rows themselves are described in `rbms_config::SETTINGS`; this file
-//! owns the screen's state and routes keys and clicks into them by name.
+//! The settings screen: the rail of groups, the rows of the open group under the headings of its
+//! sections, the panel that says what the row under the cursor is for, the in-place text editor the
+//! NETWORK rows use, and the inline rival list. The rows themselves are described in
+//! `rbms_config::SETTINGS`; this file owns the screen's state and routes keys and clicks into them
+//! by name. How the screen is drawn is [`crate::settings_view`]'s, what it says of its groups and
+//! rows is [`catalog`]'s, and what it says of the row under the cursor is [`info`]'s.
 //!
 //! The skin settings are not on this screen, and neither are the options of a sitting -- how fast the
 //! notes scroll, what the lane is covered with, when a press counts and how a chart is dealt out.
 //! They are the skin menu's ([`crate::stage::SkinMenuState`]) and the play menu's
 //! ([`crate::stage::PlayMenuState`]), each of which lists its rows beside a preview of what they do.
-//! This screen shows the tabs of [`SettingTab::SHOWN`] and a way to either menu: the key that opens it
-//! from the song browser ([`Shortcut::PlayMenu`], [`Shortcut::SkinMenu`]), and its button at the end
-//! of the tab strip. The key editor is reached the same two ways: the key that opens it from the
-//! browser ([`Shortcut::KeyConfig`]), and the button above the other two. That button is not one of
-//! the regions a frame registers ([`Hot`]): it is where the screen's layout says it is
-//! ([`key_config_link`]), and a press is tested against that.
+//! This screen shows the groups of [`SettingTab::SHOWN`] and a way to either menu: the key that opens
+//! it from the song browser ([`Shortcut::PlayMenu`], [`Shortcut::SkinMenu`]), and its button at the
+//! foot of the rail. The key editor is reached the same two ways: the key that opens it from the
+//! browser ([`Shortcut::KeyConfig`]), and the button under the other two. That button, the one that
+//! puts a group back and the two of the question it asks are not among the regions a frame registers
+//! ([`Hot`]): each is where the screen's layout says it is, and a press is tested against that.
 //!
-//! A row that holds a number -- a volume, a judge width, a fade -- is set as such a row is on every
-//! built-in screen ([`crate::number_row`]): an arrow moves it one step of the smallest change it
-//! can hold, and ten with Shift held; its slider is dragged; and Enter, or a press on the number,
-//! opens it to be typed into. A drag writes the settings file once, when the button comes back up.
+//! A row is set by what it holds. An arrow turns a switch over and steps a choice; a press on a
+//! switch turns it over, a press on a value of a choice takes that value, and a press on an arrow
+//! of a longer choice steps it. A row that holds a number -- a volume, a judge width, a fade -- is
+//! set as such a row is on every built-in screen ([`crate::number_row`]): an arrow moves it one
+//! step of the smallest change it can hold, and ten with Shift held; its slider is dragged; and
+//! Enter, or a press on the number, opens it to be typed into. A drag writes the settings file
+//! once, when the button comes back up. A press anywhere else on a row moves the cursor there and
+//! changes nothing, and a press of the right button steps a row back.
+//!
+//! The zero key puts the row under the cursor back to what it ships as, and with Shift held asks
+//! whether every row of the open group should be put back ([`Listing::confirming`]). Text --
+//! the address of the score server, the id scores are sent under -- is not put back by either.
 #![allow(clippy::wildcard_imports)]
 
 use crate::dialog::{DialogHandle, DialogState};
 use crate::ir_panel::*;
 use crate::ir_session::{AuthAction, GUEST_PLAYER_ID};
 use crate::keyconfig::Shortcut;
-use crate::number_row::{EDIT_HINT, EditKey, NumberInput, NumberValue, RowPart, hot_rect};
-use crate::settings_ui::{SettingRow, audio_status_text, is_network_row, step_audio_device};
-use crate::settings_view::{RivalsScene, SettingsLine, SettingsScene, key_config_link, number_part_at, number_row_hint, settings_hint};
-use crate::stage::preview_menu::shift_after;
+use crate::number_row::{EDIT_HINT, EditKey, NumberInput, NumberValue, hot_rect};
+use crate::settings_ui::{SettingRow, audio_status_text, is_network_row, is_resettable, shipped_value, step_audio_device};
+use crate::settings_view::{
+    CONFIRM_HINT, ConfirmScene, ControlPart, InfoScene, ListItem, RIVALS_HINT, RailGroup, RivalsScene, RowControl, SettingsLine, SettingsScene,
+    confirm_yes_rect, control_part_at, key_config_link, list_rect, reset_group_rect, visible_rows,
+};
+use crate::stage::preview_menu::{NEXT_TAB, PREVIOUS_TAB, contains, revealed_top_of, shift_after, stepped_tab, wheel_scrolled_over};
 use crate::stage::{Canvas, FrameCtx, KeyConfigState, KeyInput, PlayMenuState, SkinMenuState, Stage, StageHandler, Transition, is_left_press};
-use rbms_config::{AdjustOutcome, SettingId, SettingTab, adjust, step_skin};
+use rbms_config::{AdjustOutcome, SettingId, SettingTab, adjust, cycle_values, step_skin};
 
 use crate::*;
+
+pub(crate) mod catalog;
+mod info;
 
 /// One step to the right on a row, which is what the right arrow, Enter and a click all ask for.
 const ROW_STEP_FORWARD: i32 = 1;
@@ -38,15 +55,25 @@ const ROW_STEP_FORWARD: i32 = 1;
 /// One step to the left on a row.
 const ROW_STEP_BACK: i32 = -1;
 
-/// The settings screen's own state: the open tab and row, the rows it is showing, the in-place
+/// How many values a switch has, which is the most steps that bring one back to what it ships as.
+const SWITCH_VALUES: usize = 2;
+
+/// What the question about a group adds in a group that holds lines of text, which it does not
+/// put back.
+const KEPT_TEXT_NOTE: &str = " TEXT IS KEPT.";
+
+/// The settings screen's own state: the open group and row, the rows it is showing, the in-place
 /// editor, and the inline rival list.
 ///
-/// `lines` holds the labels and values of the open tab, with what is said beside each, and is
-/// rebuilt only when `dirty` says something moved, so a screen sitting still costs no formatting. `audio_devices` is the host's
-/// output device list, re-read on every entry so the AUDIO DEVICE row cycles through what is
-/// plugged in now without enumerating on every keystroke.
+/// `rows` is the rows of the open group in the order its sections list them, and `lines` holds their
+/// labels and values, with what is said beside each. Both, and how the group is listed
+/// ([`Listing`]), are rebuilt only when `dirty` says something moved, so a screen sitting still
+/// formats no row.
+/// `audio_devices` is the host's output device list, re-read on every entry so the AUDIO DEVICE row
+/// cycles through what is plugged in now without enumerating on every keystroke.
 pub(crate) struct SettingsState {
     tab: usize,
+    /// The row under the cursor, by its place in `rows`.
     sel: usize,
     text_input: Option<TextEdit>,
     /// Whether the in-place editor must hide what is being typed.
@@ -73,9 +100,28 @@ pub(crate) struct SettingsState {
     rows: Vec<SettingRow>,
     lines: Vec<SettingsLine>,
     dirty: bool,
+    /// How the open group is listed and what the rail says of every group. Kept behind a pointer,
+    /// because this state is moved with every screen change.
+    list: Box<Listing>,
     /// What the screen keeps about its rows that hold a number. Kept behind a pointer, because this
     /// state is moved with every screen change.
     numbers: Box<NumberRows>,
+}
+
+/// How the settings screen lists the open group, beyond the rows themselves.
+#[derive(Default)]
+struct Listing {
+    /// The rows of the open group with the heading of each section before its first.
+    entries: Vec<ListItem>,
+    /// What the rail says of every group.
+    groups: Vec<RailGroup>,
+    /// The first entry of the list on show: the cursor is brought back onto the screen by every key
+    /// that moves it, and the wheel moves the list alone.
+    top: usize,
+    /// The part of a line the wheel has turned that has not moved the list yet.
+    wheel_lines: f32,
+    /// Whether the screen is asking whether every row of the open group should be put back.
+    confirming: bool,
 }
 
 /// What the settings screen keeps about its rows that hold a number.
@@ -124,14 +170,16 @@ impl SettingsState {
             rows: Vec::new(),
             lines: Vec::new(),
             dirty: true,
+            list: Box::default(),
             numbers: Box::new(NumberRows { input: NumberInput::new(), carried: None, shift_held: false }),
         }
     }
 
-    /// Whether one of the lists drawn over the rows, or an in-place editor, has the screen: the
-    /// keys and the buttons that leave it for another screen stand down while one does.
+    /// Whether one of the lists drawn over the rows, an in-place editor or the question about a
+    /// group has the screen: the keys and the buttons that leave it for another screen stand down
+    /// while one does.
     fn is_busy(&self) -> bool {
-        self.rivals_open || self.profiles_open || self.text_input.is_some() || self.numbers.input.editing().is_some()
+        self.rivals_open || self.profiles_open || self.list.confirming || self.text_input.is_some() || self.numbers.input.editing().is_some()
     }
 
     /// The open tab.
@@ -139,12 +187,26 @@ impl SettingsState {
         SettingTab::SHOWN[self.tab.min(SettingTab::SHOWN.len() - 1)]
     }
 
-    /// Re-read the open tab's rows and their values.
+    /// Re-read the open group's rows and their values, and what the rail says of every group.
     ///
-    /// A row a drag is carrying without storing it yet reads as where the drag has it.
+    /// The rows are listed under the headings of the group's sections ([`catalog::arranged`]). A row
+    /// a drag is carrying without storing it yet reads as where the drag has it.
     fn refresh(&mut self, shared: &AppShared) {
-        self.rows = shared.settings_rows(self.current_tab());
+        let tab = self.current_tab();
+        self.rows.clear();
+        self.list.entries.clear();
+        for (heading, rows) in catalog::arranged(tab, &shared.settings_rows(tab)) {
+            self.list.entries.push(ListItem::Heading(heading));
+            for row in rows {
+                self.list.entries.push(ListItem::Row(self.rows.len()));
+                self.rows.push(row);
+            }
+        }
         self.lines = self.rows.iter().map(|&row| shared.settings_scene_line(row)).collect();
+        self.list.groups = SettingTab::SHOWN
+            .iter()
+            .map(|group| RailGroup { name: group.label(), rows: shared.settings_rows(*group).len(), changed: shared.changed_rows(*group) })
+            .collect();
         if let Some((id, steps)) = self.numbers.carried
             && let Some(line) = self.rows.iter().position(|row| *row == SettingRow::Fixed(id)).and_then(|at| self.lines.get_mut(at))
             && let Some(number) = line.number.as_mut()
@@ -153,7 +215,56 @@ impl SettingsState {
             line.value = number.spec.text(steps);
         }
         self.sel = self.sel.min(self.rows.len().saturating_sub(1));
+        self.list.top = self.list.top.min(self.list.entries.len().saturating_sub(visible_rows()));
         self.dirty = false;
+    }
+
+    /// Scroll the list just far enough to have the cursor's row on show, with the heading of its
+    /// section when the row is the first under it.
+    fn reveal_cursor(&mut self) {
+        let Some(at) = self.list.entries.iter().position(|entry| *entry == ListItem::Row(self.sel)) else {
+            return;
+        };
+        let above = at.saturating_sub(1);
+        let from = if matches!(self.list.entries.get(above), Some(ListItem::Heading(_))) { above } else { at };
+        self.list.top = revealed_top_of(from, self.list.top, self.list.entries.len(), visible_rows());
+        self.list.top = revealed_top_of(at, self.list.top, self.list.entries.len(), visible_rows());
+    }
+
+    /// Move the cursor to the row at `at` of the open group, held to its two ends, and bring it
+    /// onto the screen.
+    fn focus(&mut self, at: usize) {
+        self.sel = at.min(self.rows.len().saturating_sub(1));
+        self.reveal_cursor();
+    }
+
+    /// Move the cursor to the first row of the section before the one it is in, or after it: the
+    /// first row of its own section when it is further down that section and the way is back.
+    fn focus_section(&mut self, delta: i32) {
+        let entries = &self.list.entries;
+        let is_first = |pair: &[ListItem]| match pair {
+            [ListItem::Heading(_), ListItem::Row(row)] => Some(*row),
+            _ => None,
+        };
+        let firsts: Vec<usize> = entries.windows(2).filter_map(is_first).collect();
+        let target = if delta < 0 { firsts.iter().rev().find(|first| **first < self.sel) } else { firsts.iter().find(|first| **first > self.sel) };
+        if let Some(first) = target {
+            self.focus(*first);
+        }
+    }
+
+    /// Open the group one step along the rail from the open one, round its ends, with the cursor on
+    /// its first row.
+    fn step_group(&mut self, delta: i32) {
+        self.open_group(stepped_tab(Some(self.tab), SettingTab::SHOWN.len(), delta));
+    }
+
+    /// Open the group at one place of the rail, with the cursor on its first row.
+    fn open_group(&mut self, place: usize) {
+        self.tab = place.min(SettingTab::SHOWN.len() - 1);
+        self.sel = 0;
+        self.list.top = 0;
+        self.dirty = true;
     }
 
     /// Re-read the rows if anything has moved since they were last built.
@@ -254,30 +365,65 @@ impl SettingsState {
         ctx.shared.save_settings();
     }
 
-    /// A press of the left button at `at` on `row`, the row at `index` of the open tab. On a row
-    /// that holds a number, a press on the slider begins a drag -- the row is put where the press
-    /// landed, unless it landed on the knob, which is taken hold of where it stands -- and one on
-    /// the number opens the row to be typed into. Any other press steps the row once.
+    /// A press of the left button at `at` on `row`, the row at `index` of the open group, by the
+    /// part of the row it landed on ([`control_part_at`]). On a row that holds a number, a press on
+    /// the slider begins a drag -- the row is put where the press landed, unless it landed on the
+    /// knob, which is taken hold of where it stands -- and one on the number opens the row to be
+    /// typed into. A press on a switch turns it over, one on a value of a choice takes that value,
+    /// one on an arrow steps the choice, and one on a field, a path or an action opens or runs it.
+    /// A press anywhere else on the row has moved the cursor there and does nothing more.
     fn press_row(&mut self, ctx: &mut FrameCtx<'_>, row: SettingRow, index: usize, at: (f32, f32)) -> Transition {
         let SettingRow::Fixed(id) = row else {
             return Transition::Stay;
         };
-        let part = hot_rect(ctx.shared, Hot::SettingRow(index)).map_or(RowPart::Rest, |drawn| number_part_at(drawn, at));
-        match (self.number_of(ctx.shared, id), part) {
-            (Some(value), RowPart::Slider(area)) => {
+        let Some(control) = self.lines.get(index).map(|line| line.control) else {
+            return Transition::Stay;
+        };
+        let part = hot_rect(ctx.shared, Hot::SettingRow(index)).map_or(ControlPart::Label, |drawn| control_part_at(drawn, control, at));
+        match (part, self.number_of(ctx.shared, id)) {
+            (ControlPart::Slider(area), Some(value)) => {
                 if !self.numbers.input.begin_drag(id, area, &value, at.0) {
                     self.drag_to(ctx, at.0);
                 }
             }
-            (Some(value), RowPart::Number) => self.numbers.input.begin_edit(id, &value),
-            (Some(_), RowPart::Rest) | (None, _) => return self.step(ctx, row, ROW_STEP_FORWARD, false),
+            (ControlPart::Number, Some(value)) => self.numbers.input.begin_edit(id, &value),
+            (ControlPart::Segment(place), _) => self.choose(ctx, id, place),
+            (ControlPart::Back, _) => return self.step(ctx, row, ROW_STEP_BACK, false),
+            (ControlPart::Switch | ControlPart::Forward | ControlPart::Open, _) => return self.step(ctx, row, ROW_STEP_FORWARD, false),
+            (ControlPart::Slider(_) | ControlPart::Number | ControlPart::Label, _) => {}
         }
         Transition::Stay
     }
 
-    /// A press of the right button at `at`: a row that holds a number goes one step back, so a step
-    /// taken by mistake with the mouse can be taken back with it. Any other row, and every row under
-    /// a list or an editor, is left alone.
+    /// Put a choice drawn with all its values on show on the value at `place` of them.
+    ///
+    /// The layout of the built-in note field is stored by name and may be standing on a file the run
+    /// was started with, which is none of its values, so it is named outright; any other choice is
+    /// stepped forward to the value, round the end of its list.
+    fn choose(&mut self, ctx: &mut FrameCtx<'_>, id: SettingId, place: usize) {
+        let values = cycle_values(id);
+        let Some(wanted) = values.get(place) else {
+            return;
+        };
+        if id == SettingId::Skin {
+            ctx.shared.drop_launch_layout();
+            ctx.shared.config.display.skin = (*wanted).to_string();
+            self.dirty = true;
+            return;
+        }
+        let held = ctx.shared.setting_line(id).1;
+        let Some(standing) = values.iter().position(|value| *value == held) else {
+            return;
+        };
+        for _ in 0..(place + values.len() - standing) % values.len() {
+            self.step(ctx, SettingRow::Fixed(id), ROW_STEP_FORWARD, false);
+        }
+    }
+
+    /// A press of the right button at `at`: a row that holds a value goes one step back, so a step
+    /// taken by mistake with the mouse can be taken back with it, wherever on the row the press
+    /// lands. A row that is run or opened, a line of text and a path are left alone, and so is every
+    /// row under a list, an editor or the question about a group.
     fn step_back_under(&mut self, ctx: &mut FrameCtx<'_>, at: (f32, f32)) {
         if self.rivals_open || self.profiles_open || self.text_input.is_some() {
             return;
@@ -285,14 +431,89 @@ impl SettingsState {
         let Some(Hot::SettingRow(index)) = ctx.shared.hit_test(at) else {
             return;
         };
-        let Some(SettingRow::Fixed(id)) = self.rows.get(index).copied() else {
+        let Some(row) = self.rows.get(index).copied() else {
             return;
         };
         self.commit_number_edit(ctx);
-        if let Some(value) = self.number_of(ctx.shared, id) {
+        let steps_back = matches!(
+            self.lines.get(index).map(|line| line.control),
+            Some(RowControl::Slider | RowControl::Switch { .. } | RowControl::Segments { .. } | RowControl::Stepper)
+        );
+        if steps_back {
             self.sel = index;
-            self.set_number(ctx, id, value.stepped(ROW_STEP_BACK, false));
+            self.step(ctx, row, ROW_STEP_BACK, false);
         }
+    }
+
+    /// Put one row back to what it ships as, and report whether it moved. A row the screen does not
+    /// put back ([`is_resettable`]) and a row that is already what it ships as are left alone.
+    ///
+    /// A number is put on the step it ships on. The font, the folder of the system sounds, the
+    /// output device and the layout of the built-in note field are named outright, since each is
+    /// stepped by something only the running program can do. A switch and any other choice are
+    /// stepped forward until they read what a fresh configuration reads, which runs whatever a step
+    /// of that row runs.
+    fn reset_row(&mut self, ctx: &mut FrameCtx<'_>, id: SettingId) -> bool {
+        if !is_resettable(id) {
+            return false;
+        }
+        if let Some(value) = self.number_of(ctx.shared, id) {
+            if value.steps == value.shipped {
+                return false;
+            }
+            self.set_number(ctx, id, value.shipped);
+            return true;
+        }
+        let shipped = shipped_value(id);
+        if ctx.shared.setting_line(id).1 == shipped {
+            return false;
+        }
+        self.dirty = true;
+        match id {
+            SettingId::Font => ctx.shared.reset_font(),
+            SettingId::SoundFolder => {
+                ctx.shared.config.audio.sound_folder = None;
+                ctx.shared.reload_system_sounds();
+            }
+            SettingId::AudioDevice => {
+                ctx.shared.config.audio.device = None;
+                ctx.shared.config.audio.mark_reopen_pending();
+            }
+            SettingId::Skin => {
+                ctx.shared.drop_launch_layout();
+                ctx.shared.config.display.skin = shipped;
+            }
+            _ => {
+                for _ in 0..cycle_values(id).len().max(SWITCH_VALUES) {
+                    if ctx.shared.setting_line(id).1 == shipped {
+                        break;
+                    }
+                    self.step(ctx, SettingRow::Fixed(id), ROW_STEP_FORWARD, false);
+                }
+            }
+        }
+        true
+    }
+
+    /// Put every row of the open group back to what it ships as, and write the settings file.
+    fn reset_group(&mut self, ctx: &mut FrameCtx<'_>) {
+        for row in self.rows.clone() {
+            if let SettingRow::Fixed(id) = row {
+                self.reset_row(ctx, id);
+            }
+        }
+        ctx.shared.save_settings();
+        self.dirty = true;
+    }
+
+    /// How many rows of the open group are not what they ship as.
+    fn changed_here(&self) -> usize {
+        self.lines.iter().filter(|line| line.changed).count()
+    }
+
+    /// Ask whether every row of the open group should be put back, when any of them would move.
+    fn ask_to_reset_group(&mut self) {
+        self.list.confirming = self.changed_here() > 0;
     }
 
     /// Apply one left/right step to a row. A row that holds a number moves one step of the smallest
@@ -317,6 +538,7 @@ impl SettingsState {
         match id {
             SettingId::MasterVolume | SettingId::KeyVolume | SettingId::BgmVolume | SettingId::SystemVolume => ctx.shared.apply_audio_gains(),
             SettingId::SyncSettings | SettingId::AutoUploadReplay => ctx.shared.save_settings(),
+            SettingId::GuideSe => ctx.shared.syssound.set_guide_enabled(ctx.shared.config.audio.guide_se),
             _ => {}
         }
         Transition::Stay
@@ -355,9 +577,6 @@ impl SettingsState {
                 } else if self.sound_picker.is_none() {
                     self.sound_picker = Some(crate::dialog::pick_sound_folder());
                 }
-            }
-            SettingId::GuideSe => {
-                ctx.shared.syssound.set_guide_enabled(ctx.shared.config.audio.guide_se);
             }
             _ => {
                 if delta > 0 {
@@ -615,13 +834,13 @@ impl SettingsState {
         }
     }
 
-    /// Everything the settings screen draws this frame. The AUDIO tab owns the status line while it
-    /// is open: it is the only place the engine's open report, and a reopen held back by a running
+    /// Everything the settings screen draws this frame. The AUDIO group owns the status line while
+    /// it is open: it is the only place the engine's open report, and a reopen held back by a running
     /// chart, are visible. `now` is what a row that refused a typed figure stops saying so against.
     fn scene(&self, shared: &AppShared, now: Instant) -> SettingsScene {
         let list_open = self.rivals_open || self.profiles_open;
         let editor = match (&self.text_input, list_open) {
-            (Some(edit), false) => Some(editor_display(edit, self.text_secret)),
+            (Some(edit), false) => self.text_edit_row.and_then(|id| self.row_at(id)).map(|at| (at, editor_display(edit, self.text_secret))),
             _ => None,
         };
         let inline_editor = self.text_input.as_ref().map(|edit| editor_display(edit, false));
@@ -630,39 +849,89 @@ impl SettingsState {
         } else {
             self.rivals_open.then(|| RivalsScene { rows: rival_rows(&shared.config.network.rivals), sel: self.rivals_sel, editor: inline_editor })
         };
+        let tab = self.current_tab();
+        let sel = self.sel.min(self.lines.len().saturating_sub(1));
+        let confirm = self.list.confirming.then(|| {
+            let changed = self.changed_here();
+            let go = if changed == 1 { "ROW GOES" } else { "ROWS GO" };
+            let holds_text = self.lines.iter().any(|line| matches!(line.control, RowControl::Field { .. }));
+            let kept = if holds_text { KEPT_TEXT_NOTE } else { "" };
+            ConfirmScene { title: format!("RESET {}?", tab.label()), body: format!("{changed} CHANGED {go} BACK TO DEFAULT.{kept}") }
+        });
         SettingsScene {
-            tabs: SettingTab::SHOWN.iter().map(|tab| tab.label()).collect(),
-            tab: self.tab.min(SettingTab::SHOWN.len() - 1),
+            groups: self.list.groups.clone(),
+            group: self.tab.min(SettingTab::SHOWN.len() - 1),
+            summary: catalog::group_summary(tab).to_string(),
+            entries: self.list.entries.clone(),
             rows: self.lines.clone(),
-            sel: self.sel.min(self.lines.len().saturating_sub(1)),
+            sel,
+            top: self.list.top,
+            info: self.focused_fixed().zip(self.lines.get(sel)).map(|(id, line)| self.busy_info(info::info(id, line, &self.audio_devices))),
             hint: self.hint(shared),
+            link_keys: self.link_keys(shared),
             editor,
             status: self.audio_status_line(shared).unwrap_or_else(|| shared.net_status.clone()),
             rivals,
+            confirm,
             typed: self.numbers.input.editing().and_then(|id| Some((self.row_at(id)?, self.numbers.input.edit_of(id)?.clone()))),
             dragged: self.numbers.input.dragged().and_then(|(id, _)| self.row_at(id)),
             refused: self.rows.iter().position(|row| matches!(row, SettingRow::Fixed(id) if self.numbers.input.is_refused(*id, now))),
         }
     }
 
-    /// Where a row of the settings table is in the open tab.
+    /// The panel of the row under the cursor as the mode that has the keys leaves it, in the order
+    /// [`SettingsState::hint`] asks: the question about the group, a number being typed into the
+    /// row, a list drawn over the rows, a line of text being typed into the row. With none of them
+    /// up it is the row's own panel.
+    fn busy_info(&self, info: InfoScene) -> InfoScene {
+        let focused = self.focused_fixed();
+        if self.list.confirming {
+            return info::while_busy(info, &info::CONFIRM_KEYS, None);
+        }
+        if let Some(id) = self.numbers.input.editing() {
+            let typed = self.numbers.input.edit_of(id).filter(|_| Some(id) == focused).map(|edit| edit.text().to_string());
+            return info::while_busy(info, &info::NUMBER_EDIT_KEYS, typed);
+        }
+        if self.rivals_open || self.profiles_open {
+            return info::while_busy(info, &info::LIST_KEYS, None);
+        }
+        if let Some(edit) = &self.text_input {
+            let typed = self.text_edit_row.filter(|id| Some(*id) == focused).map(|_| editor_display(edit, self.text_secret));
+            return info::while_busy(info, &info::TEXT_EDIT_KEYS, typed);
+        }
+        info
+    }
+
+    /// Where a row of the settings table is in the open group.
     fn row_at(&self, id: SettingId) -> Option<usize> {
         self.rows.iter().position(|row| *row == SettingRow::Fixed(id))
     }
 
-    /// The keys of the screen as the hint under the title names them: what a number being typed
-    /// takes, or the keys of the row under the cursor -- what sets its number when it holds one,
-    /// and the keys of the screen when it does not -- and the three that open the other screens.
+    /// The keys that open the play menu, the skin menu and the key editor, as the key configuration
+    /// names them now.
+    fn link_keys(&self, shared: &AppShared) -> [String; 3] {
+        [Shortcut::PlayMenu, Shortcut::SkinMenu, Shortcut::KeyConfig].map(|shortcut| shared.shortcut_key(shortcut).map_or(NO_KEY, key_name).to_string())
+    }
+
+    /// The keys of the screen as the line at its foot names them: what the question about a group,
+    /// a number being typed, a line of text being typed or a list drawn over the rows takes while
+    /// one of them has the screen, and otherwise the keys the row under the cursor hears, followed by
+    /// the keys of the screen and the three that open the other screens.
     fn hint(&self, shared: &AppShared) -> String {
+        if self.list.confirming {
+            return CONFIRM_HINT.to_string();
+        }
         if self.numbers.input.editing().is_some() {
             return EDIT_HINT.to_string();
         }
-        let key_of = |shortcut| shared.shortcut_key(shortcut).map_or(NO_KEY, key_name);
-        let (play_menu, skin_menu, key_config) = (key_of(Shortcut::PlayMenu), key_of(Shortcut::SkinMenu), key_of(Shortcut::KeyConfig));
-        if !self.is_busy() && self.focused_number(shared).is_some() {
-            return number_row_hint(play_menu, skin_menu, key_config);
+        if self.rivals_open || self.profiles_open {
+            return RIVALS_HINT.to_string();
         }
-        settings_hint(play_menu, skin_menu, key_config)
+        if self.text_input.is_some() {
+            return info::TEXT_EDIT_HINT.to_string();
+        }
+        let row = self.focused_fixed().zip(self.lines.get(self.sel)).map_or_else(Vec::new, |(id, line)| info::row_keys(id, line.control));
+        info::hint(&row, &self.link_keys(shared))
     }
 
     /// Keys on the row list itself, once the editor and the rival list have had their turn.
@@ -674,11 +943,7 @@ impl SettingsState {
                 ctx.shared.save_settings();
                 return Transition::Back;
             }
-            KeyCode::Tab => {
-                self.tab = (self.tab + 1) % SettingTab::SHOWN.len();
-                self.sel = 0;
-                self.dirty = true;
-            }
+            KeyCode::Tab => self.step_group(if self.numbers.shift_held { PREVIOUS_TAB } else { NEXT_TAB }),
             KeyCode::Enter | KeyCode::NumpadEnter => {
                 let Some(row) = focused else {
                     return Transition::Stay;
@@ -697,8 +962,12 @@ impl SettingsState {
                     }
                 }
             }
-            KeyCode::ArrowUp => self.sel = self.sel.saturating_sub(1),
-            KeyCode::ArrowDown => self.sel = (self.sel + 1).min(self.rows.len().saturating_sub(1)),
+            KeyCode::ArrowUp => self.focus(self.sel.saturating_sub(1)),
+            KeyCode::ArrowDown => self.focus(self.sel + 1),
+            KeyCode::PageUp => self.focus_section(ROW_STEP_BACK),
+            KeyCode::PageDown => self.focus_section(ROW_STEP_FORWARD),
+            KeyCode::Home => self.focus(0),
+            KeyCode::End => self.focus(self.rows.len()),
             KeyCode::ArrowLeft => {
                 if let Some(row) = focused {
                     return self.step(ctx, row, ROW_STEP_BACK, self.numbers.shift_held);
@@ -709,9 +978,10 @@ impl SettingsState {
                     return self.step(ctx, row, ROW_STEP_FORWARD, self.numbers.shift_held);
                 }
             }
-            KeyCode::Digit0 | KeyCode::Numpad0 if number.is_some() => {
-                if let Some((id, value)) = number {
-                    self.set_number(ctx, id, value.shipped);
+            KeyCode::Digit0 | KeyCode::Numpad0 if self.numbers.shift_held => self.ask_to_reset_group(),
+            KeyCode::Digit0 | KeyCode::Numpad0 if self.focused_fixed().is_some_and(is_resettable) => {
+                if let Some(id) = self.focused_fixed() {
+                    self.reset_row(ctx, id);
                 }
             }
             code if ctx.shared.is_shortcut(Shortcut::PlayMenu, code) => return Transition::Open(PlayMenuState::stage()),
@@ -721,12 +991,27 @@ impl SettingsState {
         }
         Transition::Stay
     }
+
+    /// A key pressed while the screen asks whether a group should be put back: Enter puts it back,
+    /// Escape leaves it as it is, and either takes the question down. Every other key is the
+    /// question's and does nothing.
+    fn confirm_key(&mut self, ctx: &mut FrameCtx<'_>, code: KeyCode) {
+        match code {
+            KeyCode::Enter | KeyCode::NumpadEnter => {
+                self.list.confirming = false;
+                self.reset_group(ctx);
+            }
+            KeyCode::Escape => self.list.confirming = false,
+            _ => {}
+        }
+    }
 }
 
 impl StageHandler for SettingsState {
     /// Re-read the host's output device list on the way in, so the AUDIO DEVICE row cycles through
-    /// what is plugged in now, and build the rows the open tab shows. Coming back from the skin menu
-    /// or the play menu is an entry too, so what is said beside a row follows what was chosen there.
+    /// what is plugged in now, and build the rows the open group shows. Coming back from the skin
+    /// menu or the play menu is an entry too, so what is said beside a row follows what was chosen
+    /// there.
     fn on_enter(&mut self, ctx: &mut FrameCtx<'_>) {
         self.audio_devices = rbms_audio::output_device_names();
         self.refresh(ctx.shared);
@@ -735,7 +1020,7 @@ impl StageHandler for SettingsState {
     /// Keep the rival cursor inside the list, which a background refresh can shorten.
     ///
     /// The ACCOUNT row is the one value a worker thread can change while the screen sits still, so
-    /// the tab holding it rebuilds its rows every frame; every other tab keeps the rows it has
+    /// the group holding it rebuilds its rows every frame; every other group keeps the rows it has
     /// until a key or a click moves one.
     fn update(&mut self, ctx: &mut FrameCtx<'_>) -> Transition {
         self.poll_font_picker(ctx.shared);
@@ -765,6 +1050,10 @@ impl StageHandler for SettingsState {
         }
         self.ensure_rows(ctx.shared);
         self.end_drag(ctx);
+        if self.list.confirming {
+            self.confirm_key(ctx, key.code);
+            return Transition::Stay;
+        }
         if self.rivals_open {
             self.rivals_input(ctx.shared, &key);
             self.dirty = true;
@@ -797,9 +1086,12 @@ impl StageHandler for SettingsState {
     }
 
     /// A press of the left button acts on what it lands on, after storing a number that was being
-    /// typed. On a row that holds a number it takes hold of the slider, opens the number to be typed
-    /// into, or moves the row one step, by where on the row it lands; a press of the right button on
-    /// such a row moves it one step back. The left button coming back up ends a drag.
+    /// typed: a group of the rail opens, a button to another screen opens that screen, the button
+    /// under the groups asks whether the open group should be put back, and a row takes the cursor
+    /// and is set by the part of it the press landed on ([`SettingsState::press_row`]). A press of
+    /// the right button on a row that holds a value moves it one step back. The left button coming
+    /// back up ends a drag. While the question about a group is up, a press on its first button puts
+    /// the group back and any press takes the question down.
     fn handle_mouse(&mut self, ctx: &mut FrameCtx<'_>, at: (f32, f32), button: MouseButton, pressed: bool) -> Transition {
         if !pressed {
             if button == MouseButton::Left {
@@ -809,6 +1101,13 @@ impl StageHandler for SettingsState {
         }
         self.ensure_rows(ctx.shared);
         self.end_drag(ctx);
+        if self.list.confirming {
+            self.list.confirming = false;
+            if button == MouseButton::Left && contains(confirm_yes_rect(), at) {
+                self.reset_group(ctx);
+            }
+            return Transition::Stay;
+        }
         if button == MouseButton::Right {
             self.step_back_under(ctx, at);
             return Transition::Stay;
@@ -817,17 +1116,20 @@ impl StageHandler for SettingsState {
             return Transition::Stay;
         }
         self.commit_number_edit(ctx);
-        let link = key_config_link();
-        if link.x <= at.0 && at.0 < link.x + link.w && link.y <= at.1 && at.1 < link.y + link.h {
+        if contains(key_config_link(), at) {
             return if self.is_busy() { Transition::Stay } else { Transition::Open(Stage::KeyConfig(KeyConfigState::new())) };
+        }
+        if contains(reset_group_rect(SettingTab::SHOWN.len()), at) {
+            if !self.is_busy() {
+                self.ask_to_reset_group();
+            }
+            return Transition::Stay;
         }
         match ctx.shared.hit_test(at) {
             Some(Hot::SettingTab(_) | Hot::SettingRow(_) | Hot::PlayMenuLink | Hot::SkinMenuLink) if self.rivals_open || self.profiles_open => {}
-            Some(Hot::SettingTab(ti)) => {
+            Some(Hot::SettingTab(place)) => {
                 self.cancel_text_edit();
-                self.tab = ti.min(SettingTab::SHOWN.len() - 1);
-                self.sel = 0;
-                self.dirty = true;
+                self.open_group(place);
             }
             Some(Hot::PlayMenuLink | Hot::SkinMenuLink) if self.text_input.is_some() => {}
             Some(Hot::PlayMenuLink) => return Transition::Open(PlayMenuState::stage()),
@@ -853,6 +1155,19 @@ impl StageHandler for SettingsState {
         Transition::Stay
     }
 
+    /// The wheel scrolls the rows while the pointer is over them, and does nothing anywhere else --
+    /// over a slider too, which a turn of the wheel never moves -- or while a list, an editor or the
+    /// question about a group has the screen. The cursor stays on its row, which the next key that
+    /// moves it brings back onto the screen.
+    fn handle_scroll(&mut self, ctx: &mut FrameCtx<'_>, lines: f32) -> Transition {
+        if !lines.is_finite() || self.is_busy() || !contains(list_rect(), ctx.shared.cursor) {
+            return Transition::Stay;
+        }
+        self.ensure_rows(ctx.shared);
+        self.list.top = wheel_scrolled_over(&mut self.list.wheel_lines, self.list.top, self.list.entries.len(), lines, visible_rows());
+        Transition::Stay
+    }
+
     fn draw(&mut self, ctx: &mut FrameCtx<'_>, canvas: &mut Canvas<'_>) {
         self.ensure_rows(ctx.shared);
         let scene = self.scene(ctx.shared, ctx.now);
@@ -873,6 +1188,8 @@ impl StageHandler for SettingsState {
 }
 
 #[cfg(test)]
+mod layout_tests;
+#[cfg(test)]
 mod note_tests;
 #[cfg(test)]
 mod number_tests;
@@ -880,186 +1197,5 @@ mod number_tests;
 mod play_tests;
 #[cfg(test)]
 mod skin_tests;
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::stage::render_tests::app;
-
-    pub(super) fn press(code: KeyCode) -> KeyInput<'static> {
-        KeyInput { code, pressed: true, released: false, text: None }
-    }
-
-    fn typed(text: &str) -> KeyInput<'_> {
-        KeyInput { code: KeyCode::KeyA, pressed: true, released: false, text: Some(text) }
-    }
-
-    /// The in-place editor is the same editor the table manager's URL entry is, so a value typed
-    /// into a settings row can be corrected in the middle rather than only from the end.
-    #[test]
-    fn a_settings_row_can_be_edited_anywhere_in_the_line() {
-        let mut app = app();
-        let mut state = SettingsState::on_tab(SettingTab::Network);
-        state.text_input = Some(TextEdit::from_text("dj@exampletest"));
-
-        state.text_input_key(&mut app.shared, &press(KeyCode::Home));
-        for _ in 0..10 {
-            state.text_input_key(&mut app.shared, &press(KeyCode::ArrowRight));
-        }
-        state.text_input_key(&mut app.shared, &typed("."));
-        assert_eq!(state.text_input.as_ref().expect("the editor is still open").text(), "dj@example.test");
-
-        state.text_input_key(&mut app.shared, &press(KeyCode::End));
-        state.text_input_key(&mut app.shared, &press(KeyCode::Backspace));
-        assert_eq!(state.text_input.as_ref().expect("the editor is still open").text(), "dj@example.tes");
-    }
-
-    /// A password on screen carries neither the password nor, once it is long, its length.
-    #[test]
-    fn a_secret_row_shows_a_capped_mask_and_never_the_value() {
-        let secret = TextEdit::from_text("a-very-long-passphrase-indeed");
-        let shown = editor_display(&secret, true);
-        assert!(!shown.contains("passphrase"), "the value reached the screen");
-        assert!(shown.chars().filter(|c| *c == PASSWORD_MASK_CHAR).count() <= PASSWORD_MASK_MAX, "the mask reports the length");
-    }
-
-    /// A value too long for the column scrolls under the caret rather than showing only its start.
-    #[test]
-    fn a_long_value_shows_the_stretch_the_caret_is_in() {
-        let long = TextEdit::from_text("https://ir.example.test/a/very/long/endpoint/path/that/does/not/fit");
-        let at_end = editor_display(&long, false);
-        let mut at_start = long.clone();
-        at_start.home();
-        assert_ne!(at_end, editor_display(&at_start, false), "the window does not follow the caret");
-        assert!(at_end.ends_with('_'), "the caret is at the end of the line it is at the end of");
-    }
-
-    /// A native picker can sit in front of the user for as long as they like, so the font row opens
-    /// it beside the frame loop and collects the answer in `update` — the window keeps drawing while
-    /// it is up, and the font lands when they choose one.
-    #[test]
-    fn the_font_row_waits_for_its_picker_off_the_frame_loop() {
-        let mut app = app();
-        let mut state = SettingsState::on_tab(SettingTab::Display);
-        let (tx, handle) = crate::dialog::handle_for_tests();
-        state.font_picker = Some(handle);
-        state.update(&mut FrameCtx { shared: &mut app.shared, now: std::time::Instant::now(), dt: 0.0 });
-        assert!(state.font_picker.is_some(), "the screen gave up on a picker nobody has answered");
-
-        tx.send(None).expect("the handle is still held");
-        state.update(&mut FrameCtx { shared: &mut app.shared, now: std::time::Instant::now(), dt: 0.0 });
-        assert!(state.font_picker.is_none(), "the screen kept waiting after the picker was dismissed");
-        assert_eq!(app.shared.config.display.font_path, None, "a dismissed picker changed the font");
-    }
-
-    /// A font the user picked is loaded and written out, so it is the face the next launch starts
-    /// with. A file that is not a font is reported rather than stored.
-    #[test]
-    fn a_picked_font_that_cannot_be_read_is_not_stored() {
-        let mut app = app();
-        let mut state = SettingsState::on_tab(SettingTab::Display);
-        let (tx, handle) = crate::dialog::handle_for_tests();
-        state.font_picker = Some(handle);
-        tx.send(Some(std::path::PathBuf::from("/fonts/no-such-face.ttf"))).expect("the handle is still held");
-        state.update(&mut FrameCtx { shared: &mut app.shared, now: std::time::Instant::now(), dt: 0.0 });
-        assert!(state.font_picker.is_none());
-        assert_eq!(app.shared.config.display.font_path, None, "a font that could not be read was stored anyway");
-    }
-
-    /// Names the folder the frames of the settings screen are saved in. Nothing is saved without it.
-    const CAPTURE_DIR_ENV: &str = "RBMS_SKIN_CAPTURE_DIR";
-
-    /// The two sizes the screen is drawn at: the one it is laid out for, and a full HD window.
-    const DRAWN_SIZES: [(u32, u32); 2] = [(CW, CH), (1920, 1080)];
-
-    /// How far below the button a press is clear of it and of the tab strip under it, and how far
-    /// inside the button's corner a pixel is read, clear of its edge.
-    const BELOW_THE_BUTTON: f32 = 400.0;
-    const INSIDE_THE_BUTTON: f32 = 2.0;
-
-    fn ctx(app: &mut App) -> FrameCtx<'_> {
-        FrameCtx { shared: &mut app.shared, now: std::time::Instant::now(), dt: 0.0 }
-    }
-
-    /// The middle of the button to the key editor.
-    fn on_the_key_config_button() -> (f32, f32) {
-        let link = key_config_link();
-        (link.x + link.w * 0.5, link.y + link.h * 0.5)
-    }
-
-    /// The key editor opens from the button above the one to the skin menu and from the key that
-    /// opens it from the song browser, and from neither while a list or an editor has the screen.
-    #[test]
-    fn the_key_editor_opens_from_its_button_and_from_its_key() {
-        let mut app = app();
-        let mut state = SettingsState::new();
-        let at = on_the_key_config_button();
-        assert!(matches!(state.handle_mouse(&mut ctx(&mut app), at, MouseButton::Left, true), Transition::Open(Stage::KeyConfig(_))), "the button");
-        assert!(matches!(state.handle_mouse(&mut ctx(&mut app), at, MouseButton::Right, true), Transition::Stay), "another button of the mouse opened it");
-        assert!(
-            matches!(state.handle_mouse(&mut ctx(&mut app), (at.0, at.1 + BELOW_THE_BUTTON), MouseButton::Left, true), Transition::Stay),
-            "a press off the button"
-        );
-        assert!(matches!(state.handle_key(&mut ctx(&mut app), press(Shortcut::KeyConfig.default_key())), Transition::Open(Stage::KeyConfig(_))), "the key");
-
-        state.rivals_open = true;
-        assert!(matches!(state.handle_mouse(&mut ctx(&mut app), at, MouseButton::Left, true), Transition::Stay), "the button under the rival list");
-        assert!(matches!(state.handle_key(&mut ctx(&mut app), press(Shortcut::KeyConfig.default_key())), Transition::Stay), "the key under the rival list");
-        state.rivals_open = false;
-        state.text_input = Some(TextEdit::new());
-        assert!(matches!(state.handle_mouse(&mut ctx(&mut app), at, MouseButton::Left, true), Transition::Stay), "the button under an editor");
-    }
-
-    /// The keys that open the play menu, the skin menu and the key editor from this screen are the
-    /// ones the key configuration holds, and the hint under the title names them as they are now.
-    #[test]
-    fn the_keys_to_the_other_screens_are_read_from_the_key_configuration() {
-        use crate::keyconfig::Bindable;
-        let mut app = app();
-        let mut state = SettingsState::new();
-        let mode = app.shared.mode;
-        assert!(state.scene(&app.shared, Instant::now()).hint.contains("F8 PLAY   F12 SKINS   F5 KEYS"), "{}", state.scene(&app.shared, Instant::now()).hint);
-        assert!(matches!(state.handle_key(&mut ctx(&mut app), press(KeyCode::F8)), Transition::Open(Stage::PlayMenu(_))), "the key the play menu ships on");
-        app.shared.keyconfig.bind(mode, Bindable::Shortcut(Shortcut::KeyConfig), Some(KeyCode::F6));
-        app.shared.keyconfig.bind(mode, Bindable::Shortcut(Shortcut::SkinMenu), Some(KeyCode::F7));
-        app.shared.keyconfig.bind(mode, Bindable::Shortcut(Shortcut::PlayMenu), Some(KeyCode::F10));
-        assert!(matches!(state.handle_key(&mut ctx(&mut app), press(KeyCode::F5)), Transition::Stay), "the key the editor shipped on still opens it");
-        assert!(matches!(state.handle_key(&mut ctx(&mut app), press(KeyCode::F12)), Transition::Stay), "the key the menu shipped on still opens it");
-        assert!(matches!(state.handle_key(&mut ctx(&mut app), press(KeyCode::F8)), Transition::Stay), "the key the play menu shipped on still opens it");
-        assert!(matches!(state.handle_key(&mut ctx(&mut app), press(KeyCode::F6)), Transition::Open(Stage::KeyConfig(_))));
-        assert!(matches!(state.handle_key(&mut ctx(&mut app), press(KeyCode::F7)), Transition::Open(Stage::SkinMenu(_))));
-        assert!(matches!(state.handle_key(&mut ctx(&mut app), press(KeyCode::F10)), Transition::Open(Stage::PlayMenu(_))));
-        assert!(state.scene(&app.shared, Instant::now()).hint.contains("F10 PLAY   F7 SKINS   F6 KEYS"), "{}", state.scene(&app.shared, Instant::now()).hint);
-        app.shared.keyconfig.bind(mode, Bindable::Shortcut(Shortcut::PlayMenu), None);
-        assert!(
-            state.scene(&app.shared, Instant::now()).hint.contains("- PLAY"),
-            "a menu left without a key is not named as one: {}",
-            state.scene(&app.shared, Instant::now()).hint
-        );
-    }
-
-    /// The screen draws the button to the key editor where a press is tested for it, at the size the
-    /// screen is laid out for and at full HD.
-    #[test]
-    fn the_button_to_the_key_editor_is_drawn_where_it_is_pressed() {
-        use crate::stage::{Canvas, HeadlessCanvas};
-        use rbms_render::Renderer;
-        for size in DRAWN_SIZES {
-            let mut app = app();
-            let mut state = SettingsState::new();
-            let mut pixels = HeadlessCanvas::new(size.0, size.1);
-            state.draw(&mut ctx(&mut app), &mut Canvas::Headless(&mut pixels));
-            if let Some(folder) = std::env::var_os(CAPTURE_DIR_ENV) {
-                let folder = std::path::Path::new(&folder);
-                std::fs::create_dir_all(folder).expect("the capture folder can be created");
-                let file = folder.join(format!("settings-key-config-button-{}x{}.png", size.0, size.1));
-                image::save_buffer(file, pixels.rgba(), size.0, size.1, image::ExtendedColorType::Rgba8).expect("the capture is written");
-            }
-            let link = key_config_link();
-            let scale = size.0 as f32 / CW as f32;
-            let corner = pixels.pixel_at(((link.x + INSIDE_THE_BUTTON) * scale) as u32, ((link.y + INSIDE_THE_BUTTON) * scale) as u32);
-            assert_eq!(corner, rbms_render::theme().panel_hi, "the button is not drawn where a press is tested for it");
-            assert_eq!(pixels.size(), size);
-        }
-    }
-}
+mod tests;

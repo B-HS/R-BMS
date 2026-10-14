@@ -183,6 +183,7 @@ props.number = {
     TOTALNOTES = 74,
     MAXCOMBO = 75,
     MISSCOUNT = 76,
+    PERFECT_RATE = 85,
     PLAYCOUNT = 77,
     CLEARCOUNT = 78,
     FAILCOUNT = 79,

@@ -23,7 +23,8 @@ use crate::audio::{
     volume_percent,
 };
 use crate::judge::{
-    GAUGE_AUTO_SHIFT_LABELS, GAUGE_SET_CYCLE, GAUGE_SET_LABELS, JUDGE_ALGORITHM_LABELS, LN_MODE_LABELS, ScoreTarget, TARGET_LABELS, gauge_set_token,
+    GAUGE_AUTO_SHIFT_LABELS, GAUGE_SET_CYCLE, GAUGE_SET_LABELS, JUDGE_ALGORITHM_LABELS, LN_MODE_LABELS, ScoreTarget, TARGET_FALLBACK_LABELS, TARGET_LABELS,
+    gauge_set_token,
 };
 use crate::number::NumberSpec;
 use crate::options;
@@ -32,7 +33,8 @@ use crate::schema::{
     JUDGE_OFFSET_MIN_MS, JUDGE_OFFSET_STEP_MS, JUDGE_RATE_MAX_PERCENT, JUDGE_RATE_MIN_PERCENT, JUDGE_RATE_STEP_PERCENT, JUDGE_TEXT_Y_MAX, JUDGE_TEXT_Y_MIN,
     JUDGE_TEXT_Y_STEP, LANE_SHADE_FINE_STEP_MAX, LANE_SHADE_FINE_STEP_MIN, LANE_SHADE_FINE_STEP_STEP, LANE_SHADE_MAX, LANE_SHADE_MIN, LANE_SHADE_STEP,
     LN_MARGIN_MAX_PERCENT, LN_MARGIN_MIN_PERCENT, LN_MARGIN_STEP_PERCENT, PREVIEW_FADE_MAX_MS, PREVIEW_FADE_MIN_MS, PREVIEW_FADE_STEP_MS, PREVIEW_VOLUME_MAX,
-    PREVIEW_VOLUME_MIN, PREVIEW_VOLUME_STEP, SKIN_SCREEN_LABELS, TOTAL_FROM_CHART, TOTAL_STEP, skin_screen_label,
+    PREVIEW_VOLUME_MIN, PREVIEW_VOLUME_STEP, SKIN_SCREEN_LABELS, TARGET_RATE_MAX_PERCENT, TARGET_RATE_MIN_PERCENT, TARGET_RATE_STEP_PERCENT, TOTAL_FROM_CHART,
+    TOTAL_STEP, skin_screen_label,
 };
 use crate::sort::SortMode;
 use crate::speed::{GREEN_NUMBER_MAX, GREEN_NUMBER_MIN, duration_of_green, duration_stepped_by_green, green_of_duration};
@@ -198,6 +200,8 @@ pub enum SettingId {
     GaugeAutoShift,
     BottomShiftableGauge,
     Target,
+    TargetFallback,
+    TargetRate,
     Total,
     Skin,
     SkinPack,
@@ -257,7 +261,7 @@ pub enum SettingId {
 }
 
 /// Rows the settings screen has.
-pub const SETTING_COUNT: usize = 87;
+pub const SETTING_COUNT: usize = 89;
 
 impl SettingId {
     /// Every row, in declaration order.
@@ -293,6 +297,8 @@ impl SettingId {
         SettingId::GaugeAutoShift,
         SettingId::BottomShiftableGauge,
         SettingId::Target,
+        SettingId::TargetFallback,
+        SettingId::TargetRate,
         SettingId::Total,
         SettingId::Skin,
         SettingId::SkinPack,
@@ -614,9 +620,29 @@ pub const SETTINGS: &[SettingDescriptor] = &[
     ),
     row(SettingId::Gauge, SettingTab::PlayChart, "GAUGE", SettingKind::Cycle { values: GAUGE_LABELS }, "Which gauge the run is cleared on"),
     row(SettingId::LegacyNote, SettingTab::PlayChart, "LEGACY NOTE", SettingKind::Toggle, "Draw long notes as plain notes"),
-    row(SettingId::Target, SettingTab::PlayChart, "TARGET", SettingKind::Cycle { values: TARGET_LABELS }, "What the run is paced against"),
+    row(
+        SettingId::Target,
+        SettingTab::PlayChart,
+        "TARGET",
+        SettingKind::Cycle { values: TARGET_LABELS },
+        "What the run is paced against. LOCAL BEST, IR BEST and RIVAL need that score to exist; without it the run is paced against TARGET FALLBACK",
+    ),
+    row(
+        SettingId::TargetFallback,
+        SettingTab::PlayChart,
+        "TARGET FALLBACK",
+        SettingKind::Cycle { values: TARGET_FALLBACK_LABELS },
+        "What the run is paced against when TARGET names a score that is not there: no record on the chart yet, none on the score server, no rival score",
+    ),
+    row(
+        SettingId::TargetRate,
+        SettingTab::PlayChart,
+        "TARGET RATE",
+        SettingKind::IntRange { min: TARGET_RATE_MIN_PERCENT, max: TARGET_RATE_MAX_PERCENT, step: TARGET_RATE_STEP_PERCENT, unit: PERCENT_UNIT },
+        "The share of the chart's best possible score that RATE CUSTOM asks for, as a TARGET or as a TARGET FALLBACK",
+    ),
     row(SettingId::Autoplay, SettingTab::PlayChart, "AUTOPLAY", SettingKind::Toggle, "Let the game play the chart itself"),
-    row(SettingId::ScratchAuto, SettingTab::PlayChart, "SCRATCH AUTO", SettingKind::Toggle, "Let the game play the scratch lane"),
+    row(SettingId::ScratchAuto, SettingTab::PlayChart, "SCRATCH AUTO", SettingKind::Toggle, "Let the game play the scratch lane; an assist, so no best score"),
     row(SettingId::AutoReplay, SettingTab::PlayChart, "AUTO REPLAY", SettingKind::Toggle, "Save a replay of every run"),
     row(
         SettingId::PlayEscapeMode,
@@ -1016,6 +1042,8 @@ pub fn display_value(config: &Config, id: SettingId) -> String {
         SettingId::GaugeAutoShift => cycle_label(id, cycle_at(GaugeAutoShift::ALL, config.judge.gauge_auto_shift)),
         SettingId::BottomShiftableGauge => cycle_label(id, cycle_at(BOTTOM_SHIFTABLE_GAUGES, config.judge.bottom_shiftable_gauge)),
         SettingId::Target => config.judge.target.label().to_string(),
+        SettingId::TargetFallback => config.judge.target_fallback.label().to_string(),
+        SettingId::TargetRate => format!("{}{}", config.judge.target_rate_percent, unit_of(id)),
         SettingId::Total => {
             if config.play.total_override > TOTAL_FROM_CHART {
                 format!("{}", config.play.total_override.round() as i32)
@@ -1208,6 +1236,14 @@ pub fn adjust(config: &mut Config, id: SettingId, delta: i32) -> AdjustOutcome {
         SettingId::Target => {
             let at = stepped(cycle_at(ScoreTarget::ALL, config.judge.target), ScoreTarget::ALL.len(), delta);
             store(&mut config.judge.target, ScoreTarget::ALL[at])
+        }
+        SettingId::TargetFallback => {
+            let at = stepped(cycle_at(ScoreTarget::FALLBACKS, config.judge.target_fallback), ScoreTarget::FALLBACKS.len(), delta);
+            store(&mut config.judge.target_fallback, ScoreTarget::FALLBACKS[at])
+        }
+        SettingId::TargetRate => {
+            let next = (config.judge.target_rate_percent + delta * TARGET_RATE_STEP_PERCENT).clamp(TARGET_RATE_MIN_PERCENT, TARGET_RATE_MAX_PERCENT);
+            store(&mut config.judge.target_rate_percent, next)
         }
         SettingId::Total => {
             let next = (config.play.total_override + f64::from(delta) * TOTAL_STEP).clamp(TOTAL_FROM_CHART, TOTAL_MAX);
@@ -1420,6 +1456,7 @@ pub fn number_spec(id: SettingId) -> Option<NumberSpec> {
         | SettingId::JudgeWidthScratchGreat
         | SettingId::JudgeWidthScratchGood => NumberSpec::whole(i64::from(JUDGE_RATE_MIN_PERCENT), i64::from(JUDGE_RATE_MAX_PERCENT), PERCENT_UNIT),
         SettingId::LongNoteMargin => NumberSpec::whole(i64::from(LN_MARGIN_MIN_PERCENT), i64::from(LN_MARGIN_MAX_PERCENT), PERCENT_UNIT),
+        SettingId::TargetRate => NumberSpec::whole(i64::from(TARGET_RATE_MIN_PERCENT), i64::from(TARGET_RATE_MAX_PERCENT), PERCENT_UNIT),
         SettingId::Total => NumberSpec::whole(counted(TOTAL_FROM_CHART, 1), TOTAL_ROW_MAX, NO_UNIT),
         SettingId::JudgeTextY => NumberSpec::whole(
             counted(f64::from(JUDGE_TEXT_Y_MIN), PERCENT_STEPS_PER_ONE),
@@ -1458,6 +1495,7 @@ pub fn number_steps(config: &Config, id: SettingId) -> Option<i64> {
         SettingId::LaneCoverFineStep => counted(f64::from(config.play.lanecover_step_fine), SHADE_FINE_STEPS_PER_ONE),
         SettingId::JudgeOffset => i64::from(config.judge.offset_ms),
         SettingId::LongNoteMargin => i64::from(config.judge.longnote_margin_rate),
+        SettingId::TargetRate => i64::from(config.judge.target_rate_percent),
         SettingId::Total => counted(config.play.total_override, 1),
         SettingId::JudgeTextY => counted(f64::from(config.display.judge_text_y), PERCENT_STEPS_PER_ONE),
         SettingId::PreviewVolume => counted(f64::from(config.library.preview_volume), PERCENT_STEPS_PER_ONE),
@@ -1498,6 +1536,7 @@ pub fn set_number_steps(config: &mut Config, id: SettingId, steps: i64) -> Adjus
         SettingId::LaneCoverFineStep => store(&mut config.play.lanecover_step_fine, share_of(steps, SHADE_FINE_STEPS_PER_ONE)),
         SettingId::JudgeOffset => store(&mut config.judge.offset_ms, whole),
         SettingId::LongNoteMargin => store(&mut config.judge.longnote_margin_rate, whole),
+        SettingId::TargetRate => store(&mut config.judge.target_rate_percent, whole),
         SettingId::Total => store(&mut config.play.total_override, steps as f64),
         SettingId::JudgeTextY => store(&mut config.display.judge_text_y, share_of(steps, PERCENT_STEPS_PER_ONE)),
         SettingId::PreviewVolume => store(&mut config.library.preview_volume, share_of(steps, PERCENT_STEPS_PER_ONE)),
@@ -1747,6 +1786,7 @@ mod tests {
             SettingId::JudgeOffset => f64::from(config.judge.offset_ms),
             SettingId::GreenNumber => f64::from(green_of_duration(config.play.duration_ms)),
             SettingId::LongNoteMargin => f64::from(config.judge.longnote_margin_rate),
+            SettingId::TargetRate => f64::from(config.judge.target_rate_percent),
             _ if judge_width_slot(id).is_some() => f64::from(judge_width(config, id).unwrap_or_default()),
             SettingId::AudioPolyphony => config.audio.polyphony as f64,
             SettingId::Lift => f64::from(config.play.lift),
@@ -2036,6 +2076,8 @@ mod tests {
         assert_eq!(display_value(&config, SettingId::GaugeAutoShift), "NONE");
         assert_eq!(display_value(&config, SettingId::BottomShiftableGauge), "ASSIST EASY");
         assert_eq!(display_value(&config, SettingId::Target), "RATE AAA", "the shipped target is the rate the spec names");
+        assert_eq!(display_value(&config, SettingId::TargetFallback), "RATE AAA", "the shipped fallback is the shipped target");
+        assert_eq!(display_value(&config, SettingId::TargetRate), "85%");
         assert_eq!(display_value(&config, SettingId::Total), AUTO_VALUE);
         assert_eq!(display_value(&config, SettingId::Font), DEFAULT_VALUE);
         assert_eq!(display_value(&config, SettingId::KeyConfig), ACTION_VALUE);
@@ -2110,6 +2152,8 @@ mod tests {
                 SettingId::Gauge,
                 SettingId::LegacyNote,
                 SettingId::Target,
+                SettingId::TargetFallback,
+                SettingId::TargetRate,
                 SettingId::Autoplay,
                 SettingId::ScratchAuto,
                 SettingId::AutoReplay,
@@ -2198,7 +2242,7 @@ mod tests {
 
     /// Every row that holds a number, with the smallest change it can hold as it is shown and the
     /// two ends of the row as they are shown.
-    const NUMBER_ROWS: [(SettingId, &str, &str, &str); 23] = [
+    const NUMBER_ROWS: [(SettingId, &str, &str, &str); 24] = [
         (SettingId::GreenNumber, "1", "1", "6000"),
         (SettingId::HiSpeed, "0.01", "0.01", "20.00"),
         (SettingId::HiSpeedStep, "0.01", "0.01", "1.00"),
@@ -2214,6 +2258,7 @@ mod tests {
         (SettingId::JudgeWidthScratchGreat, "1%", "50%", "200%"),
         (SettingId::JudgeWidthScratchGood, "1%", "50%", "200%"),
         (SettingId::LongNoteMargin, "1%", "50%", "200%"),
+        (SettingId::TargetRate, "1%", "1%", "100%"),
         (SettingId::Total, "1", "0", "5000"),
         (SettingId::JudgeTextY, "1%", "0%", "100%"),
         (SettingId::PreviewVolume, "1%", "0%", "100%"),

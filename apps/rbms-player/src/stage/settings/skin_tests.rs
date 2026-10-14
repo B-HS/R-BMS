@@ -1,18 +1,18 @@
 //! What the settings screen still has to do with skins: nothing but the way to the skin menu.
 //!
-//! The skin settings were a tab of this screen and are now the skin menu's
+//! The skin settings were a group of this screen and are now the skin menu's
 //! ([`crate::stage::SkinMenuState`]), whose own tests hold what each of its rows does. What is held
-//! here is that the tab is gone from the strip, that the key and the button in its place open the
-//! menu over this screen, and that the menu comes back to it.
+//! here is that the group is gone from the rail, that the key and the button at the rail's foot open
+//! the menu over this screen, and that the menu comes back to it.
 //!
-//! With [`CAPTURE_DIR_ENV`] naming a folder, every tab is also saved there as `settings-<tab>.png`,
-//! which is how the strip with its button is looked at.
+//! With [`CAPTURE_DIR_ENV`] naming a folder, every group is also saved there as
+//! `settings-<group>.png`, which is how the rail with its buttons is looked at.
 
 use std::path::PathBuf;
 
 use super::tests::press;
 use super::*;
-use crate::settings_view::{settings_hint, visible_rows};
+use crate::settings_view::visible_rows;
 use crate::stage::render_tests::app;
 use crate::stage::select::SKIN_MENU_KEY;
 use crate::stage::{Canvas, HeadlessCanvas, StageId};
@@ -75,10 +75,11 @@ pub(super) fn open_tab(app: &App) -> SettingTab {
     }
 }
 
-/// The strip has a tab for every group of rows but the two menus', and Tab walks them all and comes
-/// back round without ever landing on one of those.
+/// The rail has an entry for every group of rows but the two menus', Tab walks them all and comes
+/// back round without ever landing on one of those, and Tab with Shift held walks them the other
+/// way.
 #[test]
-fn the_tab_strip_has_no_skin_tab_and_tab_walks_the_tabs_it_has() {
+fn the_rail_has_no_skin_group_and_tab_walks_the_groups_it_has() {
     let mut app = app_in("strip");
     app.switch(Transition::Open(Stage::Settings(SettingsState::new())));
     draw(&mut app);
@@ -94,6 +95,14 @@ fn the_tab_strip_has_no_skin_tab_and_tab_walks_the_tabs_it_has() {
     assert_eq!(walked, SettingTab::SHOWN.to_vec());
     key(&mut app, KeyCode::Tab);
     assert_eq!(open_tab(&app), SettingTab::SHOWN[0], "Tab does not come back round to the first tab");
+    let now = std::time::Instant::now();
+    let shift = |pressed: bool| KeyInput { code: KeyCode::ShiftLeft, pressed, released: !pressed, text: None };
+    app.stage.handle_key(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 }, shift(true));
+    key(&mut app, KeyCode::Tab);
+    assert_eq!(open_tab(&app), SettingTab::SHOWN[SettingTab::SHOWN.len() - 1], "Tab with Shift held does not go back round to the last group");
+    app.stage.handle_key(&mut FrameCtx { shared: &mut app.shared, now, dt: 0.0 }, shift(false));
+    key(&mut app, KeyCode::Tab);
+    assert_eq!(open_tab(&app), SettingTab::SHOWN[0], "Shift let go of still turns Tab round");
 
     for (place, tab) in SettingTab::SHOWN.iter().enumerate() {
         draw(&mut app);
@@ -144,9 +153,9 @@ fn the_key_opens_the_skin_menu_and_escape_comes_back_to_the_settings() {
     assert!(app.suspended.is_empty());
 }
 
-/// The button at the end of the tab strip opens the skin menu the way the key does.
+/// The button at the foot of the rail opens the skin menu the way the key does.
 #[test]
-fn the_button_on_the_tab_strip_opens_the_skin_menu() {
+fn the_button_on_the_rail_opens_the_skin_menu() {
     let mut app = app_in("button");
     app.switch(Transition::Open(Stage::Settings(SettingsState::new())));
     draw(&mut app);
@@ -157,10 +166,11 @@ fn the_button_on_the_tab_strip_opens_the_skin_menu() {
     assert_eq!(app.stage.id(), StageId::Settings);
 }
 
-/// How many buttons the tab strip ends with: one to the play menu and one to the skin menu.
+/// How many buttons at the foot of the rail lead to a menu: one to the play menu and one to the skin menu.
 const MENU_LINKS: usize = 2;
 
-/// Every drawn row, every tab and the two buttons are clickable, and nothing else is.
+/// Every row, every group of the rail and the two buttons to the menus are regions of the frame, and
+/// nothing else is: every group of the screen as it ships is short enough to be on show whole.
 #[test]
 fn every_row_every_tab_and_the_two_buttons_are_clickable() {
     let mut app = app_in("regions");
@@ -205,13 +215,16 @@ fn the_way_to_the_skin_menu_is_shut_while_an_editor_or_a_list_is_open() {
     }
 }
 
-/// The hint under the title names the key, and the key is the one that opens the menu from the song
-/// browser.
+/// The line of keys at the foot of the screen names the key, and the key is the one that opens the
+/// menu from the song browser.
 #[test]
 fn the_hint_names_the_key_that_opens_the_menu() {
     assert_eq!(SKIN_MENU_KEY, KeyCode::F12);
-    let hint = settings_hint("F8", crate::keyconfig::key_name(SKIN_MENU_KEY), "F5");
-    assert!(hint.contains("F12 SKINS"), "{hint}");
+    let mut app = app_in("hint");
+    let mut state = SettingsState::new();
+    state.on_enter(&mut ctx(&mut app));
+    let hint = state.scene(&app.shared, std::time::Instant::now()).hint;
+    assert!(hint.contains(&format!("{} SKINS", crate::keyconfig::key_name(SKIN_MENU_KEY))), "{hint}");
 }
 
 /// Every tab of the screen, drawn and saved for a person to look at when a capture folder was named.

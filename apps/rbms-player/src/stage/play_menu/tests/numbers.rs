@@ -14,7 +14,7 @@ use crate::pointer::{PointerInput, route_pointer};
 
 /// Every row of the settings table the menu lists that holds a number, with the smallest change it
 /// can hold and its two ends, as the list writes them.
-const NUMBER_ROWS: [(SettingId, &str, &str, &str); 8] = [
+const NUMBER_ROWS: [(SettingId, &str, &str, &str); 9] = [
     (SettingId::GreenNumber, "1", "1", "6000"),
     (SettingId::HiSpeed, "0.01x", "0.01x", "20.00x"),
     (SettingId::HiSpeedStep, "0.01x", "0.01x", "1.00x"),
@@ -23,6 +23,7 @@ const NUMBER_ROWS: [(SettingId, &str, &str, &str); 8] = [
     (SettingId::Hidden, "0.1%", "0.0%", "100.0%"),
     (SettingId::LaneCoverFineStep, "0.0001", "0.0001", "0.0100"),
     (SettingId::JudgeOffset, "+1 MS", "-200 MS", "+200 MS"),
+    (SettingId::TargetRate, "1%", "1%", "100%"),
 ];
 
 /// How far from an end of its range a row is put before it is stepped onto the end: nearer than a

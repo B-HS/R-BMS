@@ -673,6 +673,10 @@ struct AppShared {
     retry_seed: Option<u64>,
     /// The play settings as they stood before the course rewrote them, put back when it ends.
     course_settings_backup: Option<rbms_config::PlayOptions>,
+    /// The player's own SCRATCH AUTO, gauge and lane arrangement while a watched replay has the
+    /// settings hold the ones it was recorded with: written to the settings file in their place and
+    /// put back when the replay ends ([`AppShared::end_replay`]).
+    own_play_options: Option<app_play::OwnPlayOptions>,
     gpu: Option<Gpu>,
     /// The one output stream for the whole app lifetime. Opened lazily on the first frame (or the
     /// first chart/preview load) and kept across Play, Result and Select; stage changes clear the
@@ -952,6 +956,7 @@ impl App {
                 run_records: Vec::new(),
                 retry_seed: None,
                 course_settings_backup: None,
+                own_play_options: None,
                 kc_edit_mode: MODE,
                 gpu: None,
                 audio: None,

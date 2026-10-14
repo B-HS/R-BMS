@@ -38,9 +38,9 @@ pub use error::ConfigError;
 pub use gauge::{gauge_from_name, gauge_token};
 pub use io::{LoadOutcome, load, migrate, save};
 pub use judge::{
-    GAUGE_AUTO_SHIFT_LABELS, GAUGE_SET_CYCLE, GAUGE_SET_LABELS, JUDGE_ALGORITHM_LABELS, LN_MODE_LABELS, ScoreTarget, TARGET_LABELS, algorithm_from_token,
-    algorithm_token, gauge_auto_shift_from_token, gauge_auto_shift_token, gauge_set_from_token, gauge_set_token, ln_mode_from_token, ln_mode_token,
-    target_from_token,
+    GAUGE_AUTO_SHIFT_LABELS, GAUGE_SET_CYCLE, GAUGE_SET_LABELS, JUDGE_ALGORITHM_LABELS, LN_MODE_LABELS, ScoreTarget, TARGET_FALLBACK_COUNT,
+    TARGET_FALLBACK_LABELS, TARGET_LABELS, algorithm_from_token, algorithm_token, gauge_auto_shift_from_token, gauge_auto_shift_token, gauge_set_from_token,
+    gauge_set_token, ln_mode_from_token, ln_mode_token, target_fallback_from_token, target_from_token,
 };
 pub use legacy::{LEGACY_FOLDERS_FILE, LEGACY_TABLES_FILE, LegacyV0, merge_legacy_lists};
 pub use number::NumberSpec;
@@ -55,8 +55,9 @@ pub use schema::{
     JUDGE_WIDTH_TIER_COUNT, JudgeOptions, LANE_SHADE_FINE_STEP_MAX, LANE_SHADE_FINE_STEP_MIN, LANE_SHADE_FINE_STEP_STEP, LANE_SHADE_MAX, LANE_SHADE_MIN,
     LANE_SHADE_STEP, LEGACY_SCHEMA_VERSION, LN_MARGIN_DEFAULT_PERCENT, LN_MARGIN_MAX_PERCENT, LN_MARGIN_MIN_PERCENT, LN_MARGIN_STEP_PERCENT, LibraryOptions,
     NetworkOptions, PREVIEW_FADE_MAX_MS, PREVIEW_FADE_MIN_MS, PREVIEW_FADE_STEP_MS, PREVIEW_VOLUME_MAX, PREVIEW_VOLUME_MIN, PREVIEW_VOLUME_STEP, PlayOptions,
-    SINGLE_JUDGE_WIDTH_SCHEMA_VERSION, SKIN_SCREEN_LABELS, SkinCustomisation, SkinOptions, TOTAL_FROM_CHART, TOTAL_STEP, TableSource,
-    UNCHOSEN_LETTERBOX_SCHEMA_VERSION, UNMODIFIED_JUDGE_RATES, skin_screen_label, stepped_hispeed,
+    SINGLE_JUDGE_WIDTH_SCHEMA_VERSION, SKIN_SCREEN_LABELS, SkinCustomisation, SkinOptions, TARGET_RATE_DEFAULT_PERCENT, TARGET_RATE_MAX_PERCENT,
+    TARGET_RATE_MIN_PERCENT, TARGET_RATE_STEP_PERCENT, TOTAL_FROM_CHART, TOTAL_STEP, TableSource, UNCHOSEN_LETTERBOX_SCHEMA_VERSION, UNMODIFIED_JUDGE_RATES,
+    skin_screen_label, stepped_hispeed,
 };
 pub use settings::{
     ACTION_VALUE, AUDIO_VOLUME_STEP_GAIN, AUTO_VALUE, AdjustOutcome, BUILT_IN_ONLY_NOTE, CUSTOM_VALUE, DEFAULT_VALUE, EMAIL_MAX_LEN, GAUGE_CYCLE, GAUGE_LABELS,

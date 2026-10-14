@@ -40,7 +40,7 @@
 //! The screen is opened over the screen it was asked for from, which Escape goes back to after the
 //! settings have been written out.
 
-use rbms_config::skin_screen_label;
+use rbms_config::{ScoreTarget, SettingId, skin_screen_label};
 use rbms_render::{Color, Renderer, theme};
 use rbms_skin::loader::{SKIN_TYPE_PLAY_5KEYS, SKIN_TYPE_PLAY_7KEYS, SKIN_TYPE_PLAY_9KEYS, SKIN_TYPE_PLAY_10KEYS, SKIN_TYPE_PLAY_14KEYS};
 use winit::event::MouseButton;
@@ -104,6 +104,12 @@ const COVER_OFF_MARK: &str = "(COVER OFF)";
 
 /// What is said under the figures while the scroll speed stands at an end of its range.
 const LIMIT_NOTE: &str = "HI-SPEED IS AT THE END OF ITS RANGE: NO SPEED HOLDS THIS GREEN NUMBER AT THIS TEMPO";
+
+/// What is said under the TARGET RATE row while neither target names the rate it holds.
+const TARGET_RATE_UNUSED_NOTE: &str = "NOT IN USE: NO TARGET IS RATE CUSTOM";
+
+/// What is said under the SCRATCH AUTO row: a run it plays a turntable note for is an assist.
+const SCRATCH_AUTO_NOTE: &str = "WHILE ON: NO BEST SCORE, LAMP AND HISTORY ONLY";
 
 /// The keys of the screen, written along its foot.
 const HINT: &str = "UP DOWN MOVE   LEFT RIGHT CHANGE   SHIFT x10   ENTER NEXT OR TYPE   0 DEFAULT   A ALL SCREENS   DRAG A SLIDER   TAB MODE   WHEEL SCROLL   RIGHT CLICK BACK   ESC SAVE";
@@ -471,6 +477,31 @@ impl PlayMenuState {
         shared_row_note(shared.skins.peers_for(&shared.config, self.target().screen, row).len())
     }
 
+    /// What is said of the TARGET row beside what the settings table says of it: what is missing when
+    /// it names a score the chart may not have, and what the run is paced against then. `None` for
+    /// any other row and for a target that is always known.
+    fn target_note(&self, shared: &AppShared, row: Row) -> Option<String> {
+        let Row::Setting(SettingId::Target) = row else {
+            return None;
+        };
+        shared.config.judge.target.missing_note(shared.config.judge.target_fallback, shared.config.judge.target_rate_percent)
+    }
+
+    /// What is said of a row beside what the settings table says of it: what the TARGET row stands
+    /// on ([`PlayMenuState::target_note`]), that the TARGET RATE row is not in use while no target
+    /// is RATE CUSTOM, and what SCRATCH AUTO costs a run. `None` for every other row.
+    fn row_note(&self, shared: &AppShared, row: Row) -> Option<String> {
+        let judge = &shared.config.judge;
+        match row {
+            Row::Setting(SettingId::Target) => self.target_note(shared, row),
+            Row::Setting(SettingId::TargetRate) if ![judge.target, judge.target_fallback].contains(&ScoreTarget::RateCustom) => {
+                Some(TARGET_RATE_UNUSED_NOTE.to_string())
+            }
+            Row::Setting(SettingId::ScratchAuto) => Some(SCRATCH_AUTO_NOTE.to_string()),
+            _ => None,
+        }
+    }
+
     /// One entry of the list as it is written, in full.
     fn line(&self, shared: &AppShared, readout: &SpeedReadout, row: Row) -> Line {
         let look = if is_read_only(&shared.config.play, row) { RowLook::ReadOnly } else { RowLook::Plain };
@@ -566,7 +597,7 @@ impl PlayMenuState {
         draw_info_figures(canvas, &summary(readout, shared.config.play.constant_speed), summary_note(readout));
         if let Some(row) = self.focused() {
             let line = self.line(shared, readout, row);
-            let note = self.peers_note(shared, row);
+            let note = self.peers_note(shared, row).or_else(|| self.row_note(shared, row));
             draw_info_row_noted(canvas, INFO_ROW_UNDER_FIGURES_Y, &line.label, &line.value, self.help_of(shared, row), note.as_deref());
         }
     }

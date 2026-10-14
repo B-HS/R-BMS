@@ -6,7 +6,8 @@
 //!
 //! The targets that need something outside the chart — the local best, an account's own best, a
 //! rival's — are settled here too, against a [`TargetContext`] the caller fills in from whatever has
-//! arrived; anything still missing falls back rather than leaving the screen without a target.
+//! arrived. One that has not arrived is not guessed at: the run is paced against the player's
+//! TARGET FALLBACK instead, and the target that comes back says which one that is.
 
 use rbms_config::ScoreTarget;
 
@@ -105,6 +106,8 @@ pub fn next_rank_ex(now_ex: u32, total_notes: u32) -> u32 {
 pub struct TargetContext {
     /// Playable notes on the chart, which is what sets its ceiling.
     pub total_notes: u32,
+    /// The share of that ceiling, in percent, that the RATE CUSTOM target asks for.
+    pub custom_rate_percent: i32,
     /// The best EX stored locally for this chart, if it has been played before.
     pub local_best_ex: Option<u32>,
     /// The best EX the score server holds for this account on this chart.
@@ -113,11 +116,36 @@ pub struct TargetContext {
     pub rival: Option<(String, u32)>,
 }
 
-/// A target settled on one chart: what to call it, and the EX it asks for.
+/// A target settled on one chart: what to call it, the EX it asks for, which target the player
+/// asked for, and which one that EX is really of.
+///
+/// The two differ when the score the asked target names was not there: [`ResolvedTarget::used`] is
+/// then the one that stood in for it, and [`ResolvedTarget::name`] is its name, so a screen that
+/// prints the name never claims a target it could not work out.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedTarget {
     pub name: String,
     pub ex: u32,
+    pub asked: ScoreTarget,
+    pub used: ScoreTarget,
+}
+
+impl ResolvedTarget {
+    /// Whether the run is paced against something other than the target that was asked for.
+    pub fn stood_in_for(&self) -> bool {
+        self.asked != self.used
+    }
+
+    /// What a skin names the target with while the run is paced against it: its name, and where it
+    /// stands in for the target the player chose, what that one was missing -- `RATE AAA (NO
+    /// RECORD)` for a LOCAL BEST on a chart with no record -- so a pace that fell back is never
+    /// read as the one chosen.
+    pub fn legend(&self) -> String {
+        match self.asked.missing_score().filter(|_| self.stood_in_for()) {
+            Some(missing) => format!("{} ({missing})", self.name),
+            None => self.name.clone(),
+        }
+    }
 }
 
 /// The EX `target` asks for on this chart, or `None` when the score it needs has not arrived.
@@ -127,6 +155,7 @@ pub struct ResolvedTarget {
 pub fn target_ex(target: ScoreTarget, ctx: &TargetContext) -> Option<u32> {
     match target {
         ScoreTarget::RankNext => Some(next_rank_ex(ctx.local_best_ex.unwrap_or(0), ctx.total_notes)),
+        ScoreTarget::RateCustom => Some(rate_target_ex(ctx.total_notes, f64::from(ctx.custom_rate_percent))),
         ScoreTarget::LocalBest => ctx.local_best_ex,
         ScoreTarget::IrBest => ctx.ir_best_ex,
         ScoreTarget::Rival => ctx.rival.as_ref().map(|(_, ex)| *ex),
@@ -139,24 +168,38 @@ pub fn target_ex(target: ScoreTarget, ctx: &TargetContext) -> Option<u32> {
 pub fn target_name(target: ScoreTarget, ctx: &TargetContext) -> String {
     match (target, &ctx.rival) {
         (ScoreTarget::Rival, Some((who, _))) => format!("{} {who}", target.label()),
-        _ => target.label().to_string(),
+        _ => target.name_at(ctx.custom_rate_percent).into_owned(),
     }
+}
+
+/// The targets that may answer for `asked`, in the order they are tried.
+///
+/// A target that names a score is tried first. The account's best score is the player's own best
+/// as the server holds it, so when it is not there the local record is the same kind of number and
+/// is tried next. A rival's score is somebody else's: the player's own record is no stand-in for
+/// it, and the reference shows no pace for it either (`TargetProperty.java:230-235` names it
+/// "NO DATA" and leaves the target at nothing). After those comes `fallback`, which is a target
+/// that is always known.
+fn candidates(asked: ScoreTarget, fallback: ScoreTarget) -> impl Iterator<Item = ScoreTarget> {
+    [Some(asked), asked.own_record_first(), Some(fallback), Some(ScoreTarget::Max)].into_iter().flatten()
 }
 
 /// Settle the TARGET row on this chart.
 ///
-/// A target whose score has not arrived — no server, a rival who has not played the chart, a first
-/// play with no local record — falls back quietly rather than leaving the screen with nothing to
-/// pace against: first to the local best, and then to the chart's ceiling, which every chart has.
-/// The name that comes back is the target actually used, so the screen never claims to be showing
-/// one it could not resolve.
-pub fn resolve(target: ScoreTarget, ctx: &TargetContext) -> ResolvedTarget {
-    for candidate in [target, ScoreTarget::LocalBest, ScoreTarget::Max] {
-        if let Some(ex) = target_ex(candidate, ctx) {
-            return ResolvedTarget { name: target_name(candidate, ctx), ex };
-        }
-    }
-    ResolvedTarget { name: target_name(ScoreTarget::Max, ctx), ex: max_ex(ctx.total_notes) }
+/// A target whose score has not arrived — no record on a first play, no server, a rival who has not
+/// played the chart — is replaced by `fallback`, the player's TARGET FALLBACK row, rather than
+/// leaving the screen with nothing to pace against; the chart's own ceiling closes the chain for a
+/// `fallback` that is not always known, which the row never offers. The name that comes back is the
+/// target actually used, so the screen never claims to be showing one it could not resolve.
+pub fn resolve(asked: ScoreTarget, fallback: ScoreTarget, ctx: &TargetContext) -> ResolvedTarget {
+    let (used, ex) = settle(asked, fallback, ctx);
+    ResolvedTarget { name: target_name(used, ctx), ex, asked, used }
+}
+
+/// The target a run is paced against, and the EX it asks for: [`resolve`] without the name, for a
+/// caller that only needs to know which target stands.
+pub fn settle(asked: ScoreTarget, fallback: ScoreTarget, ctx: &TargetContext) -> (ScoreTarget, u32) {
+    candidates(asked, fallback).find_map(|used| target_ex(used, ctx).map(|ex| (used, ex))).unwrap_or((ScoreTarget::Max, max_ex(ctx.total_notes)))
 }
 
 #[cfg(test)]
@@ -308,8 +351,17 @@ mod tests {
     /// The chart the resolution tests are run on, and the local record standing on it.
     const RESOLVE_NOTES: u32 = 812;
 
+    /// The share the custom rate is asked for in the contexts below.
+    const CUSTOM_PERCENT: i32 = 85;
+
     fn played_context() -> TargetContext {
-        TargetContext { total_notes: RESOLVE_NOTES, local_best_ex: Some(1400), ir_best_ex: Some(1500), rival: Some(("friend".into(), 1550)) }
+        TargetContext {
+            total_notes: RESOLVE_NOTES,
+            custom_rate_percent: CUSTOM_PERCENT,
+            local_best_ex: Some(1400),
+            ir_best_ex: Some(1500),
+            rival: Some(("friend".into(), 1550)),
+        }
     }
 
     #[test]
@@ -361,34 +413,98 @@ mod tests {
         assert_eq!(target_ex(ScoreTarget::Rival, &alone), None);
     }
 
+    const SHIPPED: ScoreTarget = ScoreTarget::RateAaa;
+
+    /// The custom rate is the reference's `RATE_<number>` target: the ceiling of the chart times the
+    /// share, rounded up, and named for the share (`TargetProperty.java:136-146`).
+    #[test]
+    fn the_custom_rate_asks_for_its_share_of_the_chart_and_is_named_for_it() {
+        let ctx = played_context();
+        assert_eq!(target_ex(ScoreTarget::RateCustom, &ctx), Some(rate_target_ex(RESOLVE_NOTES, 85.0)));
+        assert_eq!(target_ex(ScoreTarget::RateCustom, &ctx), Some(1381), "85% of 1624 is 1380.4, which rounds up");
+        assert_eq!(target_name(ScoreTarget::RateCustom, &ctx), "SCORE RATE 85%");
+        let no_record = TargetContext { local_best_ex: None, ..played_context() };
+        let settled = resolve(ScoreTarget::LocalBest, ScoreTarget::RateCustom, &no_record);
+        assert_eq!(
+            (settled.used, settled.ex, settled.name.as_str()),
+            (ScoreTarget::RateCustom, 1381, "SCORE RATE 85%"),
+            "the custom rate stands in for a record that is not there"
+        );
+        let none = resolve(ScoreTarget::RateCustom, ScoreTarget::Max, &TargetContext { custom_rate_percent: 0, ..no_record });
+        assert_eq!((none.ex, none.name.as_str()), (0, "SCORE RATE 0%"), "a share of nothing is nothing");
+        assert_eq!(target_ex(ScoreTarget::RateCustom, &TargetContext::default()), Some(0), "a chart with no notes asks for nothing");
+    }
+
     #[test]
     fn a_resolved_target_is_named_for_the_row_that_asked_for_it() {
         let ctx = played_context();
-        assert_eq!(resolve(ScoreTarget::RateAaa, &ctx).name, ScoreTarget::RateAaa.label());
-        assert_eq!(resolve(ScoreTarget::Rival, &ctx).name, format!("{} friend", ScoreTarget::Rival.label()), "a rival target says which rival");
+        let settled = resolve(ScoreTarget::RateAaa, SHIPPED, &ctx);
+        assert_eq!(settled.name, ScoreTarget::RateAaa.label());
+        assert!(!settled.stood_in_for());
+        assert_eq!(resolve(ScoreTarget::Rival, SHIPPED, &ctx).name, format!("{} friend", ScoreTarget::Rival.label()), "a rival target says which rival");
     }
 
-    /// With no score server the account and rival targets have nothing to ask for; they must fall
-    /// back to the local record rather than leave the screen without a target — and say so.
+    /// A target that names a score the chart has is that score, and is named so.
     #[test]
-    fn a_target_with_no_answer_falls_back_to_the_local_record() {
-        let offline = TargetContext { total_notes: RESOLVE_NOTES, local_best_ex: Some(1400), ..Default::default() };
-        for asked in [ScoreTarget::IrBest, ScoreTarget::Rival] {
-            let settled = resolve(asked, &offline);
-            assert_eq!(settled.ex, 1400, "{asked:?} did not fall back to the local record");
-            assert_eq!(settled.name, ScoreTarget::LocalBest.label(), "{asked:?} still claims to be showing what it could not resolve");
+    fn a_target_whose_score_is_there_is_that_score() {
+        let ctx = played_context();
+        for (asked, ex) in [(ScoreTarget::LocalBest, 1400), (ScoreTarget::IrBest, 1500), (ScoreTarget::Rival, 1550)] {
+            let settled = resolve(asked, SHIPPED, &ctx);
+            assert_eq!((settled.ex, settled.used, settled.stood_in_for()), (ex, asked, false), "{asked:?}");
         }
     }
 
-    /// A first play on an offline client has neither a server answer nor a record; the chart's own
-    /// ceiling is the one target that always exists.
+    /// LOCAL BEST on a chart with no record is not the local best: it is the fallback the player
+    /// named, whatever that is, and the target says so. The fixed rate is worked out over the
+    /// chart's own notes.
     #[test]
-    fn a_target_with_no_answer_and_no_record_falls_back_to_the_whole_chart() {
+    fn a_local_best_with_no_record_is_the_fallback_the_player_named() {
+        let unplayed = TargetContext { total_notes: RESOLVE_NOTES, ..Default::default() };
+        for fallback in ScoreTarget::FALLBACKS {
+            let settled = resolve(ScoreTarget::LocalBest, fallback, &unplayed);
+            assert_eq!((settled.used, settled.asked), (fallback, ScoreTarget::LocalBest), "{fallback:?}");
+            assert_eq!(settled.name, target_name(fallback, &unplayed), "{fallback:?} still claims to be the local best");
+            assert_eq!(Some(settled.ex), target_ex(fallback, &unplayed), "{fallback:?}");
+            assert!(settled.stood_in_for());
+        }
+        let aaa = resolve(ScoreTarget::LocalBest, ScoreTarget::RateAaa, &unplayed);
+        assert_eq!(aaa.ex, band_target_ex(RESOLVE_NOTES, 24));
+        let max = resolve(ScoreTarget::LocalBest, ScoreTarget::Max, &unplayed);
+        assert_eq!(max.ex, max_ex(RESOLVE_NOTES));
+    }
+
+    /// An account's best that the server has not told of falls to the player's own record, which is
+    /// the same kind of number, and only then to the fallback. A rival's score is another player's,
+    /// so a rival who has none goes straight to the fallback however good the player's record is.
+    #[test]
+    fn the_order_a_missing_score_is_replaced_in_depends_on_whose_score_it_was() {
+        let offline = TargetContext { total_notes: RESOLVE_NOTES, local_best_ex: Some(1400), ..Default::default() };
+        let ir = resolve(ScoreTarget::IrBest, ScoreTarget::RateA, &offline);
+        assert_eq!((ir.used, ir.ex), (ScoreTarget::LocalBest, 1400), "the account's best falls to the local record");
+        let rival = resolve(ScoreTarget::Rival, ScoreTarget::RateA, &offline);
+        assert_eq!((rival.used, rival.ex), (ScoreTarget::RateA, band_target_ex(RESOLVE_NOTES, 18)), "a rival's missing score is not the player's record");
         let bare = TargetContext { total_notes: RESOLVE_NOTES, ..Default::default() };
-        for asked in [ScoreTarget::IrBest, ScoreTarget::Rival, ScoreTarget::LocalBest] {
-            let settled = resolve(asked, &bare);
-            assert_eq!(settled.ex, max_ex(RESOLVE_NOTES), "{asked:?} did not fall back to the ceiling");
-            assert_eq!(settled.name, ScoreTarget::Max.label());
+        let ir = resolve(ScoreTarget::IrBest, ScoreTarget::RateA, &bare);
+        assert_eq!((ir.used, ir.ex), (ScoreTarget::RateA, band_target_ex(RESOLVE_NOTES, 18)), "with no record either, the fallback");
+    }
+
+    /// The next rank is a fallback like any fixed rate: it is walked from the record the player has,
+    /// or from nothing.
+    #[test]
+    fn the_next_rank_can_be_the_fallback() {
+        let bare = TargetContext { total_notes: RESOLVE_NOTES, ..Default::default() };
+        let settled = resolve(ScoreTarget::LocalBest, ScoreTarget::RankNext, &bare);
+        assert_eq!((settled.used, settled.ex), (ScoreTarget::RankNext, next_rank_ex(0, RESOLVE_NOTES)));
+    }
+
+    /// A fallback that is itself a score that may be missing cannot leave a run without a target:
+    /// the chain ends at the chart's ceiling. The row never offers one, so this is the file.
+    #[test]
+    fn a_fallback_that_is_itself_missing_ends_at_the_whole_chart() {
+        let bare = TargetContext { total_notes: RESOLVE_NOTES, ..Default::default() };
+        for fallback in [ScoreTarget::LocalBest, ScoreTarget::IrBest, ScoreTarget::Rival] {
+            let settled = resolve(ScoreTarget::LocalBest, fallback, &bare);
+            assert_eq!((settled.used, settled.ex), (ScoreTarget::Max, max_ex(RESOLVE_NOTES)), "{fallback:?}");
         }
     }
 
@@ -398,19 +514,43 @@ mod tests {
         for total in [0u32, 1, 812] {
             let ctx = TargetContext { total_notes: total, ..Default::default() };
             assert_eq!(target_ex(ScoreTarget::Max, &ctx), Some(max_ex(total)));
-            assert_eq!(resolve(ScoreTarget::Max, &ctx).ex, max_ex(total));
+            assert_eq!(resolve(ScoreTarget::Max, SHIPPED, &ctx).ex, max_ex(total));
+            for fallback in ScoreTarget::FALLBACKS {
+                assert!(target_ex(fallback, &ctx).is_some(), "{fallback:?} has no answer on a chart of {total} notes");
+            }
         }
     }
 
-    /// Every target the TARGET row offers settles into something, whatever has and has not arrived.
+    /// Every target the TARGET row offers settles into something, whatever has and has not arrived
+    /// and whichever fallback is named.
     #[test]
     fn every_target_the_row_offers_settles_on_every_chart() {
         for ctx in [played_context(), TargetContext { total_notes: RESOLVE_NOTES, ..Default::default() }, TargetContext::default()] {
             for asked in ScoreTarget::ALL {
-                let settled = resolve(asked, &ctx);
-                assert!(settled.ex <= max_ex(ctx.total_notes.max(settled.ex)), "{asked:?} asked for more than a chart can hold");
-                assert!(!settled.name.is_empty(), "{asked:?} settled without a name");
+                for fallback in ScoreTarget::FALLBACKS {
+                    let settled = resolve(asked, fallback, &ctx);
+                    assert!(settled.ex <= max_ex(ctx.total_notes.max(settled.ex)), "{asked:?} asked for more than a chart can hold");
+                    assert!(!settled.name.is_empty(), "{asked:?} settled without a name");
+                    assert!(
+                        settled.used == asked || settled.used == fallback || settled.used == ScoreTarget::LocalBest,
+                        "{asked:?} settled on {:?}",
+                        settled.used
+                    );
+                }
             }
         }
+    }
+
+    /// A target that fell back says so where a skin names it, with what the chosen one was missing;
+    /// one that stood is its name alone.
+    #[test]
+    fn a_target_that_fell_back_names_what_was_missing() {
+        let none = TargetContext { total_notes: 812, custom_rate_percent: 85, ..TargetContext::default() };
+        let local = TargetContext { local_best_ex: Some(1400), ..none.clone() };
+        assert_eq!(resolve(ScoreTarget::LocalBest, ScoreTarget::RateAaa, &none).legend(), "RATE AAA (NO RECORD)");
+        assert_eq!(resolve(ScoreTarget::LocalBest, ScoreTarget::RateAaa, &local).legend(), "LOCAL BEST");
+        assert_eq!(resolve(ScoreTarget::IrBest, ScoreTarget::RateAaa, &local).legend(), "LOCAL BEST (NO IR SCORE)");
+        assert_eq!(resolve(ScoreTarget::Rival, ScoreTarget::RateCustom, &local).legend(), "SCORE RATE 85% (NO RIVAL SCORE)");
+        assert_eq!(resolve(ScoreTarget::RateA, ScoreTarget::Max, &none).legend(), "RATE A");
     }
 }

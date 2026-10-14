@@ -71,10 +71,12 @@ struct ChartRun {
 /// is the highest stored EX. The local record is written for every real interactive play, so
 /// history and replays survive without a score server; autoplay and replay runs are excluded.
 ///
-/// The TARGET the screen reports is settled against that same standing record rather than the run
-/// that has just ended, so the target a run was paced against is the one it is scored against. The
-/// best a skin's result screen compares the run with is read at the same point, before the run joins
-/// the book ([`PreviousScore::of_book`]).
+/// The TARGET the screen reports is settled against the best the play screen paced the run against:
+/// the best that stood before this run among the runs that may set one, in the long-note flavour
+/// this run was played in ([`ScoreBook::best_ex_for_md5_in_ln_mode`]). An assisted run in the
+/// history is no best, so it is no LOCAL BEST here either, and the target a run was paced against is
+/// the one it is scored against. The best a skin's result screen compares the run with is read at
+/// the same point, before the run joins the book ([`PreviousScore::of_book`]).
 pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Transition {
     let play = &state.session;
     let summary = play.summary();
@@ -89,7 +91,8 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
     };
     let judge_setup = play.judge_setup();
     let custom_judge = is_custom_judge(&judge_setup);
-    let assist = assist_level(shared.config.play.scratch_auto, custom_judge);
+    let scratch_auto = scratch_auto_played(shared.config.play.scratch_auto, play.model());
+    let assist = assist_level(scratch_auto, custom_judge);
     let practice = state.practice.is_some();
     let last_time_us = play.last_time_us();
     let save_replay = !practice
@@ -113,6 +116,7 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
     let prev_ex = history.first().map(|r| r.ex_score);
     let prev_best_ex = history.iter().map(|r| r.ex_score).max();
     let previous = PreviousScore::of_book(&shared.scores, &chart.md5, &state.ln_mode_key);
+    let standing_best_ex = shared.scores.best_ex_for_md5_in_ln_mode(&chart.md5, &state.ln_mode_key);
     let view = ResultView {
         title: chart.title.chars().take(RESULT_TITLE_CHARS).collect(),
         artist: chart.artist.clone(),
@@ -136,7 +140,7 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
         judge_dist: *instrumentation.judge_dist(),
     };
 
-    let assist_tags = assist_flags(shared.config.play.scratch_auto, custom_judge);
+    let assist_tags = assist_flags(scratch_auto, custom_judge);
     let finished_gauge = reported_gauge(&summary, shared.config.play.gauge);
     let c = summary.counts;
     let played_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
@@ -182,7 +186,7 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
             gauge: ir_gauge(finished_gauge),
             random: ir_random(shared.config.play.random),
             random_p2: None,
-            scratch_auto: shared.config.play.scratch_auto,
+            scratch_auto,
             lntype: state.lntype,
             input_device: "keyboard".into(),
             assist: assist_tags,
@@ -210,8 +214,8 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
         client_platform: Some(client_platform()),
         extra: Default::default(),
     };
-    let scores_count = updates_score(shared.run_plays_itself(), shared.replay.is_some(), custom_judge, shared.config.play.scratch_auto, practice);
-    let block_reason = ir_submission_block_reason(shared.run_plays_itself(), shared.replay.is_some(), custom_judge, shared.config.play.scratch_auto, practice);
+    let scores_count = updates_score(shared.run_plays_itself(), shared.replay.is_some(), custom_judge, scratch_auto, practice);
+    let block_reason = ir_submission_block_reason(shared.run_plays_itself(), shared.replay.is_some(), custom_judge, scratch_auto, practice);
 
     let played_ms = played_at;
     let mut replay_file: Option<String> = None;
@@ -303,12 +307,21 @@ pub(crate) fn enter_result(state: &mut PlayState, shared: &mut AppShared) -> Tra
     if shared.course_run.is_some() {
         return advance_course(shared, &summary, standing_combo, block_reason, lamp);
     }
-    let paced_by = run_target(shared, &chart.md5, summary.total_notes, prev_best_ex);
+    let paced_by = run_target(shared, &chart.md5, summary.total_notes, standing_best_ex);
     let target = TargetView { name: paced_by.name, ex: paced_by.ex };
     let standing = RunStanding { replay_saved: replay_file.is_some(), lamp, previous, target: Some(target.clone()) };
     let extras = ResultExtras { target: Some(target), run_again: offers_retry(shared) };
     let run = ResultRun::of(&state.session, shared, standing);
     Transition::To(Stage::Result(ResultState::new(view).paced_by(extras).cleared(lamp.is_cleared()).tempo(tempo).played(run)))
+}
+
+/// Whether SCRATCH AUTO played any of a run: it is on, and a lane it plays holds a note of `model`
+/// as the run had it. The reference raises the assist only where the modifier moved a note off a
+/// lane (`AutoplayModifier.modify`), so a chart with no turntable notes, and a mode with no
+/// turntable at all (9 keys), is played wholly by hand whatever the switch says, and such a run sets
+/// a best like any other.
+pub(crate) fn scratch_auto_played(scratch_auto: bool, model: &rbms_model::Model) -> bool {
+    scratch_auto && model.timelines.iter().any(|line| line.notes.iter().enumerate().any(|(lane, note)| note.is_some() && model.mode.is_scratch(lane)))
 }
 
 /// Keep what the run that just ended left for a skin's result screen.
@@ -354,8 +367,29 @@ pub(crate) fn tempo_points(timelines: &[TimeLine]) -> Vec<(f32, f64)> {
 /// The play HUD and the result screen ask the same question — the one while the run is going, the
 /// other once it has ended — so both settle it here rather than each building its own context.
 pub(crate) fn run_target(shared: &AppShared, md5: &str, total_notes: u32, local_best_ex: Option<u32>) -> target::ResolvedTarget {
+    target::resolve(shared.config.judge.target, shared.config.judge.target_fallback, &target_context(shared, md5, total_notes, local_best_ex))
+}
+
+/// What a target of the chart `md5` can be worked out from right now: the note count and the local
+/// best that are handed in, and the scores the ranking cache holds ([`ranking_targets`]).
+pub(crate) fn target_context(shared: &AppShared, md5: &str, total_notes: u32, local_best_ex: Option<u32>) -> TargetContext {
     let (ir_best_ex, rival) = ranking_targets(shared, md5);
-    target::resolve(shared.config.judge.target, &TargetContext { total_notes, local_best_ex, ir_best_ex, rival })
+    TargetContext { total_notes, custom_rate_percent: shared.config.judge.target_rate_percent, local_best_ex, ir_best_ex, rival }
+}
+
+/// The local best a run of the chart `md5` would be paced against, worked out before the chart is
+/// read: the best of the records made under the LN MODE now set and of those made as the chart
+/// states its long notes.
+///
+/// The run counts only the records of its own long-note kind ([`ScoreRecord::ln_mode`]), which is
+/// the LN MODE it is played under when the chart leaves its long notes unstated and the chart's own
+/// otherwise, and which of the two a chart is is known only once it is read. Every record of one
+/// chart is of the same one of the two, so the best of both is the best the run will count.
+///
+/// [`ScoreRecord::ln_mode`]: rbms_store::ScoreRecord
+pub(crate) fn local_best_before_reading(shared: &AppShared, md5: &str) -> Option<u32> {
+    let set = ln_mode_token(run_judge_setup(&shared.config, None).ln_mode);
+    [set, SCORE_LN_MODE_FROM_CHART].into_iter().filter_map(|ln_mode| shared.scores.best_ex_for_md5_in_ln_mode(md5, ln_mode)).max()
 }
 
 /// The best EX the score server holds for this account on this chart, and the strongest rival score
@@ -487,6 +521,11 @@ pub(crate) fn next_song(shared: &mut AppShared) -> Transition {
 pub(crate) fn offers_retry(shared: &AppShared) -> bool {
     !shared.run_plays_itself() && shared.replay.is_none() && played_song_index(shared).is_some()
 }
+
+#[cfg(test)]
+pub(crate) mod record_tests;
+#[cfg(test)]
+mod target_tests;
 
 #[cfg(test)]
 mod tests {
@@ -751,8 +790,8 @@ mod tests {
     fn the_target_row_settles_into_something_the_screen_can_show() {
         let mut shared = browsing(0);
         shared.config.judge.target = rbms_config::ScoreTarget::RateAaa;
-        let context = TargetContext { total_notes: 812, local_best_ex: Some(1400), ir_best_ex: None, rival: None };
-        let settled = target::resolve(shared.config.judge.target, &context);
+        let context = TargetContext { total_notes: 812, local_best_ex: Some(1400), ..TargetContext::default() };
+        let settled = target::resolve(shared.config.judge.target, shared.config.judge.target_fallback, &context);
         assert_eq!(settled.ex, target::band_target_ex(812, 24));
         assert_eq!(settled.name, rbms_config::ScoreTarget::RateAaa.label());
     }

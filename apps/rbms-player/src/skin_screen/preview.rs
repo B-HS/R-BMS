@@ -200,9 +200,12 @@ impl AppShared {
                 settings: Some(SettingsView::of_config(&self.config)),
                 ..FrameInputs::new(&offsets, decide.data, window)
             },
-            PreviewScene::Play(play) => {
-                FrameInputs { chart: ChartState::Chart(play.chart), play: Some((play.shown, play.offsets)), ..FrameInputs::new(&offsets, play.data, window) }
-            }
+            PreviewScene::Play(play) => FrameInputs {
+                chart: ChartState::Chart(play.chart),
+                play: Some((play.shown, play.offsets)),
+                paced_by: Some(play.paced_by),
+                ..FrameInputs::new(&offsets, play.data, window)
+            },
             PreviewScene::Result { draw, course: stage } => {
                 course = stage;
                 FrameInputs {
@@ -228,6 +231,7 @@ impl AppShared {
         }
         if let Some((shown, play_offsets)) = inputs.play {
             host.show_play(shown);
+            host.options.paced_by = inputs.paced_by;
             host.play_offsets = Some(play_offsets);
         }
         host.ir.link = is_result_screen(screen).then(|| IrLink::new(false, IrPhase::Offline));
